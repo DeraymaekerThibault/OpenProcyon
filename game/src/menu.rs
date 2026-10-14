@@ -828,7 +828,6 @@ fn save_actions(
                     }
                 }
             }
-            Action::MapInfo(open) => sk.map_info = open,
             Action::Remove => {
                 if let Some((s, false)) = ui.selected.and_then(|n| ui.list.get(n)) {
                     crate::campaign::delete_save(&s.name);
@@ -945,6 +944,7 @@ fn apply(sk: &mut Skirmish, lib: &Library, action: &Action) {
         }
         Action::OpenArms => sk.arms_open = sk.open() && sk.human().is_some_and(|h| !h.fleet.is_empty()),
         Action::PickShip(row) => sk.ship_pick = *row,
+        Action::MapInfo(open) => sk.map_info = *open,
         Action::PickFleet(row) => sk.fleet_pick = *row,
         Action::AddShip => {
             let (limit, pick) = (sk.fleet_size, sk.ship_pick);

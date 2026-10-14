@@ -711,7 +711,10 @@ fn players_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, _rect: [f32; 4], sk: &S
         });
         // Several live players on one team are told apart by a letter ('Pirates A', 'B', 'C'), as on original screenshots.
         let mates: Vec<usize> = sk.slots.iter().enumerate().filter(|(_, o)| o.kind != Kind::Closed && o.team == slot.team && slot.team >= 0).map(|(k, _)| k).collect();
-        let letter = (mates.len() > 1).then(|| mates.iter().position(|&k| k == i).map_or(String::new(), |n| format!(" {}", (b'A' + n as u8) as char))).unwrap_or_default();
+        let letter = match mates.iter().position(|&k| k == i) {
+            Some(n) if mates.len() > 1 => format!(" {}", (b'A' + n as u8) as char),
+            _ => String::new(),
+        };
         let team = match usize::try_from(slot.team).ok().and_then(|n| teams.get(n)) {
             Some(tm) => s(tm["name_id"].as_str().unwrap_or("")) + &letter,
             None if slot.team >= 0 => format!("{} {}", s("IDGS_TPFRONTENDTEXT02_TEAM"), slot.team + 1),
