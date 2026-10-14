@@ -245,6 +245,10 @@ SCREENS = [
     "InGameMenu_Default",
     "InGameMenu_Load_Campaign",
     "Tutorial Screen",
+    "Crew Select Screen",
+    "Arms Selection Screen",
+    "Multiplayer Stats Screen",
+    "Journal Screen",
 ]
 
 

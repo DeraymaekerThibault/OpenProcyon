@@ -179,13 +179,81 @@ pub enum Action {
     Post(i32),
     Page(i32),
     Recruit(String),
+    /// Select a fleet ship / a crew role or weapon bank directly (retail screens: clicking a slot, a post or a mount).
+    SelectShip(usize),
+    SelectPost(usize),
     Assign(String),
     Reserve(String),
     Upgrade(String),
 }
+/// What the retail Crew Select / Arms Selection screens show, filled by both the campaign and the skirmish builders.
+#[derive(Clone, Default, PartialEq, Debug)]
+pub struct FitView {
+    /// Arms tab (else Crew).
+    pub arms: bool,
+    /// Class of each fleet ship (the slot bar) and the one being outfitted.
+    pub fleet: Vec<usize>,
+    pub ship: usize,
+    pub ship_name: String,
+    pub race: String,
+    pub points: i64,
+    /// Crew posts by role (`ROLES` order): one entry per post, `Some((name, portrait))` for a named crew member, `None` for a hand.
+    pub posts: Vec<Vec<Option<(String, String)>>>,
+    /// Selected role (crew) or index into `banks` (arms).
+    pub post: usize,
+    /// Maneuverability, Speed, Repair Rate, Strength, 0..1.
+    pub bars: [f32; 4],
+    /// Selectable weapon banks: (bank number, equipped gun).
+    pub banks: Vec<(usize, String)>,
+    /// The right-hand list (crew names or weapons) and what clicking each does.
+    pub list: Vec<(String, Action)>,
+    pub info: Vec<String>,
+}
+
+/// Crew-post bars (PROVISIONAL: the original's formula is not recovered): the mean skill of the posts that drive each, named crew
+/// at their ability and generic hands at 0.2 — Helmsman navigation, Riggers rigging, Engineers engineering, Fighters combat.
+fn bars(posts: &[Vec<Option<String>>]) -> [f32; 4] {
+    let mean = |role: usize, skill: &str| {
+        let v: Vec<f32> = posts.get(role).into_iter().flatten().map(|p| p.as_deref().and_then(|id| ability(id, skill)).unwrap_or(0.2)).collect();
+        if v.is_empty() { 0.0 } else { v.iter().sum::<f32>() / v.len() as f32 }
+    };
+    [mean(3, "navigation"), mean(5, "rigging"), mean(4, "engineering"), mean(6, "combat")]
+}
+
+/// One ship's posts for the Crew screen: per role, its named crew (name, portrait) then generic hands up to the role's capacity.
+fn posts_view(class: &crate::data::Class, assigned: Option<&[Vec<String>; 8]>) -> (Vec<Vec<Option<(String, String)>>>, [f32; 4]) {
+    let caps = crate::boarding::counts(&class.name);
+    let ids: Vec<Vec<Option<String>>> = (0..8)
+        .map(|r| {
+            let named = assigned.map(|a| a[r].as_slice()).unwrap_or_default();
+            (0..caps[r] as usize).map(|i| named.get(i).cloned()).collect()
+        })
+        .collect();
+    let view = ids
+        .iter()
+        .map(|role| role.iter().map(|id| id.as_ref().map(|id| (name(id).to_string(), crew_data()[id]["portrait"].as_str().unwrap_or_default().to_string()))).collect())
+        .collect();
+    (view, bars(&ids))
+}
+
+/// A weapon's list label: its name without the 'Gun_' prefix.
+fn gun_label(gun: &str) -> String {
+    gun.trim_start_matches("Gun_").replace('_', " ")
+}
+
+/// The weapon banks the Arms screen shows: those whose mounts are selectable (the retail screen hides 'Non-Selectable' mounts).
+pub fn selectable_banks(lib: &Library, class: &crate::data::Class) -> Vec<(usize, usize)> {
+    crate::combat::banks(lib, class)
+        .into_iter()
+        .filter(|(_, first)| lib.guns.get(&class.mounts[*first].gun).and_then(|g| g.mount_type.as_deref()).is_none_or(|t| !t.contains("Non-Selectable")))
+        .collect()
+}
+
 #[derive(Resource, Default, Clone, PartialEq)]
 pub struct ScreenModel {
     pub open: bool,
+    /// The retail screens' view; `None` keeps the plain list presentation.
+    pub fit: Option<FitView>,
     pub title: String,
     pub detail: String,
     pub message: String,
@@ -283,13 +351,22 @@ fn screen(
                 Ok(())
             }
             Action::Post(d) => {
-                let len = fleet.get(choice.ship).map_or(0, |(_, s, _, _)| if choice.arms { crate::combat::banks(&lib, &lib.classes[s.class]).len() } else { ROLES.len() });
+                let len = fleet.get(choice.ship).map_or(0, |(_, s, _, _)| if choice.arms { selectable_banks(&lib, &lib.classes[s.class]).len() } else { ROLES.len() });
                 choice.post = cycle(choice.post, d, len);
                 choice.page = 0;
                 Ok(())
             }
             Action::Page(d) => {
                 choice.page = (choice.page as i64 + i64::from(d)).max(0) as usize;
+                Ok(())
+            }
+            Action::SelectShip(i) => {
+                choice.ship = i.min(fleet.len().saturating_sub(1));
+                (choice.post, choice.page) = (0, 0);
+                Ok(())
+            }
+            Action::SelectPost(i) => {
+                (choice.post, choice.page) = (i, 0);
                 Ok(())
             }
             action => {
@@ -305,7 +382,7 @@ fn screen(
                             }
                             Ok(())
                         }
-                        Action::Upgrade(gun) => crate::combat::banks(&lib, class)
+                        Action::Upgrade(gun) => selectable_banks(&lib, class)
                             .get(choice.post)
                             .ok_or("No weapon bank.".into())
                             .and_then(|(bank, _)| upgrade(&mut points, &lib, class, &key, *bank, &gun)),
@@ -345,7 +422,7 @@ fn screen(
         let fit = points.outfit.ships.get(&key);
         let mut rows = vec![];
         if choice.arms {
-            let banks = crate::combat::banks(&lib, class);
+            let banks = selectable_banks(&lib, class);
             choice.post = choice.post.min(banks.len().saturating_sub(1));
             if let Some((bank, first)) = banks.get(choice.post) {
                 let equipped = fit.and_then(|s| s.banks.get(bank)).unwrap_or(&class.mounts[*first].gun);
@@ -402,6 +479,31 @@ fn screen(
                 }
             }
         }
+        let (posts, bars) = posts_view(class, fit.map(|f| &f.crew));
+        let banks: Vec<(usize, String)> =
+            selectable_banks(&lib, class).into_iter().map(|(bank, first)| (bank, fit.and_then(|f| f.banks.get(&bank)).unwrap_or(&class.mounts[first].gun).clone())).collect();
+        let list = rows
+            .iter()
+            .filter_map(|(_, a)| match a {
+                Action::Assign(id) | Action::Recruit(id) => Some((name(id).to_string(), a.clone())),
+                Action::Upgrade(g) => Some((gun_label(g), a.clone())),
+                _ => None,
+            })
+            .collect();
+        next.fit = Some(FitView {
+            arms: choice.arms,
+            fleet: fleet.iter().map(|(_, s, _, _)| s.class).collect(),
+            ship: choice.ship,
+            ship_name: ms.name.clone(),
+            race: class.race.clone(),
+            points: i64::from(points.total),
+            posts,
+            post: choice.post,
+            bars,
+            info: if choice.arms { banks.get(choice.post).map(|(b, g)| vec![format!("Bank {b}"), gun_label(g)]).unwrap_or_default() } else { vec![] },
+            banks,
+            list,
+        });
         let pages = rows.len().div_ceil(PAGE).max(1);
         choice.page = choice.page.min(pages - 1);
         next.detail += &format!("\nPage {}/{}", choice.page + 1, pages);
@@ -474,6 +576,7 @@ fn skirmish_screen(
         *choice = Choice::default();
         return;
     }
+    let points = sk.points_left(&lib);
     let Some(slot) = sk.slots.iter_mut().find(|s| s.kind == crate::menu::Kind::Human) else { return };
     choice.ship = choice.ship.min(slot.fleet.len().saturating_sub(1));
     if let Some(action) = action {
@@ -484,15 +587,24 @@ fn skirmish_screen(
                 choice.page = 0;
             }
             Action::Post(d) => {
-                let len = slot.fleet.get(choice.ship).map_or(0, |n| crate::combat::banks(&lib, &lib.classes[lib.index(n)]).len());
+                let len = slot.fleet.get(choice.ship).map_or(0, |n| selectable_banks(&lib, &lib.classes[lib.index(n)]).len());
                 choice.post = cycle(choice.post, d, len);
                 choice.page = 0;
             }
             Action::Page(d) => choice.page = (choice.page as i64 + i64::from(d)).max(0) as usize,
+            Action::Tab => {
+                choice.arms = !choice.arms;
+                (choice.post, choice.page) = (0, 0);
+            }
+            Action::SelectShip(i) => {
+                choice.ship = i.min(slot.fleet.len().saturating_sub(1));
+                (choice.post, choice.page) = (0, 0);
+            }
+            Action::SelectPost(i) => (choice.post, choice.page) = (i, 0),
             Action::Upgrade(gun) => {
                 let result = slot.fleet.get(choice.ship).ok_or("Select a ship first.").and_then(|name| {
                     let class = &lib.classes[lib.index(name)];
-                    crate::combat::banks(&lib, class).get(choice.post).ok_or("No weapon bank.").and_then(|(bank, _)| {
+                    selectable_banks(&lib, class).get(choice.post).ok_or("No weapon bank.").and_then(|(bank, _)| {
                         if !bank_compatible(&lib, class, *bank, &gun) {
                             return Err("Incompatible weapon.");
                         }
@@ -523,7 +635,7 @@ fn skirmish_screen(
     };
     if let Some(name) = slot.fleet.get(choice.ship) {
         let class = &lib.classes[lib.index(name)];
-        let banks = crate::combat::banks(&lib, class);
+        let banks = selectable_banks(&lib, class);
         choice.post = choice.post.min(banks.len().saturating_sub(1));
         if let Some((bank, first)) = banks.get(choice.post) {
             let equipped = slot.weapons.get(choice.ship).and_then(|w| w.get(bank)).unwrap_or(&class.mounts[*first].gun);
@@ -545,6 +657,36 @@ fn skirmish_screen(
         }
     } else {
         next.detail = "Add a ship to the fleet first.".into();
+    }
+    if let Some(name) = slot.fleet.get(choice.ship) {
+        let ci = lib.index(name);
+        let class = &lib.classes[ci];
+        let banks: Vec<(usize, String)> = selectable_banks(&lib, class)
+            .into_iter()
+            .map(|(bank, first)| (bank, slot.weapons.get(choice.ship).and_then(|w| w.get(&bank)).unwrap_or(&class.mounts[first].gun).clone()))
+            .collect();
+        let (posts, bars) = posts_view(class, None);
+        let list = match banks.get(choice.post) {
+            Some((bank, equipped)) if choice.arms => weapon_rows(&lib, class, *bank, equipped, &[], false)
+                .into_iter()
+                .map(|(_, a)| (if let Action::Upgrade(g) = &a { gun_label(g) } else { String::new() }, a))
+                .collect(),
+            _ => vec![],
+        };
+        next.fit = Some(FitView {
+            arms: choice.arms,
+            fleet: slot.fleet.iter().map(|n| lib.index(n)).collect(),
+            ship: choice.ship,
+            ship_name: crate::menu::pretty(name),
+            race: class.race.clone(),
+            points,
+            posts,
+            post: choice.post,
+            bars,
+            info: banks.get(choice.post).filter(|_| choice.arms).map(|(b, g)| vec![format!("Bank {b}"), gun_label(g)]).unwrap_or_default(),
+            banks,
+            list,
+        });
     }
     sk.fleet_pick = choice.ship;
     if *model != next {

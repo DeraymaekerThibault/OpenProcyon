@@ -59,22 +59,22 @@ fn hover(
 struct Art(Vec<(Entity, String)>);
 
 /// Sprite rect of a hud.hdt component for a cursor state ("NoCursor", "CursorOver", "CursorDown").
-fn sprite(hud: &HudData, name: &str, state: &str) -> Option<(String, Rect)> {
+pub(super) fn sprite(hud: &HudData, name: &str, state: &str) -> Option<(String, Rect)> {
     let d = hud.comps.get(name)?.get(MENU_SKIN)?;
     let r = d[format!("TextureArea - {state}")].as_array()?;
     let n = |i: usize| r[i].as_f64().unwrap_or(0.0) as f32;
     Some((d[format!("TextureName - {state}")].as_str()?.to_lowercase(), Rect::new(n(0), n(1), n(2) + 1.0, n(3) + 1.0)))
 }
 
-struct Ctx<'a> {
-    assets: &'a AssetServer,
-    hud: &'a HudData,
-    fonts: &'a Fonts,
-    scale: f32,
+pub(super) struct Ctx<'a> {
+    pub(super) assets: &'a AssetServer,
+    pub(super) hud: &'a HudData,
+    pub(super) fonts: &'a Fonts,
+    pub(super) scale: f32,
 }
 
 impl Ctx<'_> {
-    fn node(&self, x: f32, y: f32, w: f32, h: f32) -> Node {
+    pub(super) fn node(&self, x: f32, y: f32, w: f32, h: f32) -> Node {
         Node {
             position_type: PositionType::Absolute,
             left: Val::Px(x * self.scale),
@@ -84,7 +84,7 @@ impl Ctx<'_> {
             ..default()
         }
     }
-    fn image(&self, c: &mut ChildSpawnerCommands, path: &str, rect: Option<Rect>, x: f32, y: f32, w: f32, h: f32, tint: Color) -> Entity {
+    pub(super) fn image(&self, c: &mut ChildSpawnerCommands, path: &str, rect: Option<Rect>, x: f32, y: f32, w: f32, h: f32, tint: Color) -> Entity {
         let mut img = ImageNode::new(self.assets.load(path.to_string()));
         img.rect = rect;
         img.color = tint;
@@ -96,7 +96,7 @@ impl Ctx<'_> {
         Some((self.image(c, &format!("hud/tex/{sheet}.png"), Some(inset(&sheet, r)), x, y, w, h, Color::WHITE), name.to_string()))
     }
     /// Retail bitmap text, horizontally centred in [x, x+w] (or left-aligned), vertically centred on `cy`.
-    fn text(&self, c: &mut ChildSpawnerCommands, font: &str, s: &str, x: f32, w: f32, cy: f32, centre: bool, tint: Color) {
+    pub(super) fn text(&self, c: &mut ChildSpawnerCommands, font: &str, s: &str, x: f32, w: f32, cy: f32, centre: bool, tint: Color) {
         let Some(f) = self.fonts.0.get(font).or_else(|| self.fonts.0.get("BlackChancery22")) else { return };
         let mut n = self.node(x, cy - f.height / 2.0, w, f.height);
         n.align_items = AlignItems::Center;
@@ -106,7 +106,7 @@ impl Ctx<'_> {
         });
     }
     /// Text button over the 3-piece FrontEnd_Texts_Over_Button art (44 px tall in the sheet, stretched to the rect).
-    fn text_button(&self, c: &mut ChildSpawnerCommands, rect: [f32; 4], label: &str, font: &str, action: Action) {
+    pub(super) fn text_button(&self, c: &mut ChildSpawnerCommands, rect: [f32; 4], label: &str, font: &str, action: Action) {
         let [l, t, r, b] = rect;
         let (w, h) = (r - l, b - t);
         let mut parts = vec![];
@@ -514,7 +514,7 @@ fn sound_display_page(ctx: &Ctx, c: &mut ChildSpawnerCommands, display: bool, in
     arrow(ctx, c, [cx - r, cy - r, cx + r, cy + r], "FrontEnd_Prev_Button", back);
 }
 
-fn disabled(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], label: &str, font: &str) {
+pub(super) fn disabled(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], label: &str, font: &str) {
     let (w, h) = (r - l, b - t);
     let cap = 50.0 * h / 44.0;
     c.spawn(ctx.node(l, t, w, h)).with_children(|c| {
@@ -570,7 +570,7 @@ fn arrow(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], name: 
 }
 
 /// Retail gold for highlighted labels (the `Center Justify Label` title colour).
-const GOLD: Color = Color::srgb(1.0, 0.796, 0.0);
+pub(super) const GOLD: Color = Color::srgb(1.0, 0.796, 0.0);
 
 /// Map list as measured on the original: a framed panel (x 280..712, y 120..318) with a lighter header bar holding 'Historical Maps' /
 /// 'Open Maps' and 'Players' in UniversBold14, Univers12 rows 19 apart from y 172 with the playable player count at x 578, a teal bar
@@ -596,7 +596,7 @@ fn map_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, sk: &Skirmish, strings: &Va
 }
 
 /// An explicit region of a HUD sheet stretched over a box (for art the sprite table has no entry for).
-fn sheet_piece(ctx: &Ctx, c: &mut ChildSpawnerCommands, sheet: &str, rect: Rect, [l, t, r, b]: [f32; 4]) {
+pub(super) fn sheet_piece(ctx: &Ctx, c: &mut ChildSpawnerCommands, sheet: &str, rect: Rect, [l, t, r, b]: [f32; 4]) {
     let mut img = ImageNode::new(ctx.assets.load(format!("hud/tex/{sheet}.png")));
     img.rect = Some(inset(sheet, rect));
     img.image_mode = NodeImageMode::Stretch;
@@ -604,7 +604,7 @@ fn sheet_piece(ctx: &Ctx, c: &mut ChildSpawnerCommands, sheet: &str, rect: Rect,
 }
 
 /// The current tab of a Ships / Crew / Arms row: the green `FrontEnd_Texts_Over_Button_Selected_*` button, not clickable.
-fn selected_tab(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], label: &str, font: &str) {
+pub(super) fn selected_tab(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], label: &str, font: &str) {
     let cap = 51.0 * (b - t) / 45.0;
     piece(ctx, c, "FrontEnd_Texts_Over_Button_Selected_Left", [l, t, l + cap, b], (false, false));
     piece(ctx, c, "FrontEnd_Texts_Over_Button_Selected_Center", [l + cap, t, r - cap, b], (false, false));
@@ -613,7 +613,7 @@ fn selected_tab(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4],
 }
 
 /// One retail sprite stretched over a box (reference units).
-fn piece(ctx: &Ctx, c: &mut ChildSpawnerCommands, name: &str, [l, t, r, b]: [f32; 4], flip: (bool, bool)) {
+pub(super) fn piece(ctx: &Ctx, c: &mut ChildSpawnerCommands, name: &str, [l, t, r, b]: [f32; 4], flip: (bool, bool)) {
     let Some((sheet, rect)) = sprite(ctx.hud, name, "NoCursor") else { return };
     let mut img = ImageNode::new(ctx.assets.load(format!("hud/tex/{sheet}.png")));
     img.rect = Some(inset(&sheet, rect));
@@ -623,7 +623,7 @@ fn piece(ctx: &Ctx, c: &mut ChildSpawnerCommands, name: &str, [l, t, r, b]: [f32
 }
 
 /// The retail framed panel: `FRONTEND_STRETCHEDWINDOW_*` gives one corner (mirrored to the other three), an edge column/row and a fill.
-fn stretched_window(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4]) {
+pub(super) fn stretched_window(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4]) {
     let k = 33.0; // corner tile size
     piece(ctx, c, "FRONTEND_STRETCHEDWINDOW_CENTERFILL_TILE", [l + k, t + k, r - k, b - k], (false, false));
     for (flip_x, x0, x1) in [(false, l, l + k), (true, r - k, r)] {
@@ -638,7 +638,7 @@ fn stretched_window(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32;
 }
 
 /// The retail vertical scrollbar: track (`..._SLIDER_BACKGROUND_TOP/STRETCHED_CENTER/BOTTOM`) and a slider over the visible part.
-fn scrollbar(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], start: f32, len: f32) {
+pub(super) fn scrollbar(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], start: f32, len: f32) {
     let cap = |name: &str| sprite(ctx.hud, name, "NoCursor").map_or(20.0, |(_, r)| r.height());
     let track = |c: &mut ChildSpawnerCommands, prefix: &str, t: f32, b: f32| {
         let (top, bottom) = (cap(&format!("{prefix}_TOP")), cap(&format!("{prefix}_BOTTOM")));
@@ -661,7 +661,7 @@ fn radio(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], label:
     });
 }
 
-fn wrapped(ctx: &Ctx, c: &mut ChildSpawnerCommands, font: &str, s: &str, [l, t, r, b]: [f32; 4]) {
+pub(super) fn wrapped(ctx: &Ctx, c: &mut ChildSpawnerCommands, font: &str, s: &str, [l, t, r, b]: [f32; 4]) {
     let Some(f) = ctx.fonts.0.get(font) else { return };
     let mut line = String::new();
     let mut y = t + f.height / 2.0;
@@ -855,7 +855,7 @@ fn fleet_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, _rect: [f32; 4], sk: &Ski
 }
 
 /// 'Current Victory Points : N' (UniversLightBold14, the number in gold), centred in its area.
-fn victory_points(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], label: &str, points: i64) {
+pub(super) fn victory_points(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], label: &str, points: i64) {
     let Some(f) = ctx.fonts.0.get("UniversLightBold14") else { return };
     let n = points.to_string();
     let x = (l + r - f.width(label) - f.width(&n)) / 2.0;
@@ -864,7 +864,7 @@ fn victory_points(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4
 }
 
 /// A class's displayable name ('Displayable Shipname String ID'), else its WOT name tidied up.
-fn class_name(lib: &Library, ci: usize, strings: &Value) -> String {
+pub(super) fn class_name(lib: &Library, ci: usize, strings: &Value) -> String {
     let cl = &lib.classes[ci];
     cl.display_name.as_deref().and_then(|id| strings[id].as_str()).map_or_else(|| pretty(&cl.name), String::from)
 }
