@@ -7,6 +7,7 @@ objects (islands, asteroids, bases) whose WOT names a Mesh Scene. Positions stay
 usage: python -m tools.export_maps <game_root> <assets_dir>
 """
 
+import functools
 import json
 import re
 import shutil
@@ -14,12 +15,14 @@ import sys
 from pathlib import Path
 import numpy as np
 from PIL import Image
-from tools.mdb import ci_file, ci_files
+from tools.gamefs import ci_file, ci_files
 from tools.mdb_to_glb import convert
 from tools.models import model_path
 from tools.msb import parse as parse_msb
 
-VEC = r"\(\s*([-\d.e]+),\s*([-\d.e]+),\s*([-\d.e]+)\s*\)"
+# One number, including a signed exponent in either case ("1.5E+03").
+NUM = r"[-+\d.eE]+"
+VEC = rf"\(\s*({NUM}),\s*({NUM}),\s*({NUM})\s*\)"
 
 
 def strings(root):
@@ -38,19 +41,18 @@ def strings(root):
     return out
 
 
-def mesh_scene(root, typ, cache={}):
-    if typ not in cache:
-        try:
-            m = re.search(
-                r"Mesh Scene Name String '([^']*)'",
-                ci_file(Path(root) / "WorldObjects", f"{typ}.wot").read_text(
-                    encoding="latin1"
-                ),
-            )
-            cache[typ] = m.group(1) if m and m.group(1) else None
-        except FileNotFoundError:
-            cache[typ] = None
-    return cache[typ]
+@functools.cache
+def mesh_scene(root, typ):
+    try:
+        m = re.search(
+            r"Mesh Scene Name String '([^']*)'",
+            ci_file(Path(root) / "WorldObjects", f"{typ}.wot").read_text(
+                encoding="latin1"
+            ),
+        )
+    except FileNotFoundError:
+        return None
+    return m.group(1) if m and m.group(1) else None
 
 
 def parse_twt(text):
@@ -200,7 +202,8 @@ def tiles(root, name):
 
 def fill_seams(im, xs, ys):
     """Retail tiles leave their last column/row transparent; pasted edge to edge that shows as a seam line inside the image.
-    A transparent seam texel between two visible neighbours takes the colour of the texel before it."""
+    A transparent seam texel between two visible neighbours takes the colour of the texel before it.
+    """
     a = np.array(im)
     for x in xs:
         gap = (a[:, x - 1, 3] == 0) & (a[:, x - 2, 3] > 0) & (a[:, x, 3] > 0)

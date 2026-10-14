@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 from tools.export_maps import strings
+from tools.gamefs import ci_files
 
 SKILLS = (
     "Leadership",
@@ -44,7 +45,7 @@ def main(root, out):
     names = strings(root)
     crew = {
         f.stem: parse(f.read_text(encoding="latin1"), names)
-        for f in sorted((Path(root) / "WorldObjects").glob("Crew_*.wot"))
+        for f in ci_files(Path(root) / "WorldObjects", "Crew_*.wot")
     }
     (Path(out) / "data").mkdir(parents=True, exist_ok=True)
     (Path(out) / "data/crew.json").write_text(json.dumps(crew, indent=1))

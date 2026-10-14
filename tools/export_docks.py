@@ -11,11 +11,12 @@ from pathlib import Path
 
 from tools.export_combat import associations, flat, load, scene_name
 from tools.mdb_to_glb import hardpoints
+from tools.gamefs import ci_files
 
 
 def export(root, out):
     docks = {}
-    for wot in sorted((Path(root) / "WorldObjects").glob("*.wot")):
+    for wot in ci_files(Path(root) / "WorldObjects", "*.wot"):
         name = wot.stem
         if not name.startswith(("Ship_", "Base_", "Island_")):
             continue

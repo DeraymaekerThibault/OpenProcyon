@@ -3,7 +3,7 @@
 # usage: tools/build_assets.sh [--game DIR] [--out DIR] [Ship_Name ...]   (default ships below; first is the default player ship)
 #   --game  the original install (default: PROCYON_GAME_ROOT from .env)
 #   --out   where the converted assets go (default: assets/ in this checkout; the game also finds them in
-#           ${XDG_DATA_HOME:-~/.local/share}/procyon/assets, see assets_dir() in game/src/lib.rs)
+#           ${XDG_DATA_HOME:-~/.local/share}/openprocyon/assets, see assets_dir() in game/src/lib.rs)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 [ -f .env ] && { set -a; . ./.env; set +a; }
@@ -26,7 +26,7 @@ mkdir -p "$OUT"/models/{ships,sky,scenery,ui}
 SHIPS=()
 for s in "${WANT[@]}"; do
   if err=$(python3 -m tools.export_combat "$PROCYON_GAME_ROOT" "$s" "$OUT/$s.json" 2>&1 >/dev/null); then
-    scene=$(python3 -c "import json,sys;print(json.load(open('$OUT/$s.json'))['scene'])")
+    scene=$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["scene"])' "$OUT/$s.json")
     [ -f "$OUT/models/ships/$scene.glb" ] || python3 -m tools.mdb_to_glb "$PROCYON_GAME_ROOT" "$scene" "$OUT/models/ships/$scene.glb" || { rm -f "$OUT/$s.json"; echo "skip $s (no mesh)"; continue; }
     SHIPS+=("$s")
   else
@@ -40,11 +40,11 @@ for part in COMPASS ARROW; do
   python3 -m tools.mdb_to_glb "$PROCYON_GAME_ROOT" "SELECTION_INDICATOR_${part}_SMALL" "$OUT/models/ui/SELECTION_INDICATOR_${part}_SMALL.glb"
 done
 python3 -m tools.export_hud "$PROCYON_GAME_ROOT" "$OUT"
-python3 tools/trim_hud_rects.py "$OUT"
+python3 -m tools.trim_hud_rects "$OUT"
 # Waypoint/course art lives in BD_Textures (DDS), not BD_GUITextures.
-python3 tools/export_waypoint_art.py "$PROCYON_GAME_ROOT" "$OUT"
-python3 tools/fix_alpha_bleed.py "$OUT/hud/tex"
-python3 tools/make_slices.py "$OUT"
+python3 -m tools.export_waypoint_art "$PROCYON_GAME_ROOT" "$OUT"
+python3 -m tools.fix_alpha_bleed "$OUT/hud/tex"
+python3 -m tools.make_slices "$OUT"
 # Sounds: original Ogg Vorbis, copied with lowercase names (WOT names differ in case from the files).
 # Music: one skirmish track (Red Rover's script plays BTL_NavyBig_Full02); the other maps use other tracks.
 mkdir -p "$OUT/sound"
@@ -76,7 +76,7 @@ python3 -m tools.export_voices copy "$PROCYON_GAME_ROOT" "$OUT"  # crew lines na
 mapfile -t SHIP_JSON < <(python3 -c 'import json, os; [print(os.path.join(os.environ["OUT"], s + ".json")) for s in json.load(open(os.path.join(os.environ["OUT"], "ships.json")))]')
 python3 -m tools.export_effects "$PROCYON_GAME_ROOT" "$OUT" "${SHIP_JSON[@]}"
 # Final step: split the raw per-ship exports into the editable data/ layout (docs/data-format.md).
-python3 tools/pack_data.py "$OUT"
+python3 -m tools.pack_data "$OUT"
 python3 -m tools.export_ship_names "$PROCYON_GAME_ROOT" "$OUT"
 python3 -m tools.export_collision "$PROCYON_GAME_ROOT" "$OUT"
 python3 -m tools.format_json "$OUT"

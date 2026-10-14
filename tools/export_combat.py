@@ -10,7 +10,8 @@ import sys
 from pathlib import Path
 
 from tools.export_ship import export as export_physics
-from tools.mdb import ci_file, ci_files, parse as parse_mdb
+from tools.gamefs import ci_file, ci_files
+from tools.mdb import parse as parse_mdb
 from tools.mdb_to_glb import convert
 from tools.mdb_to_glb import hardpoints
 from tools.models import model_path
@@ -210,7 +211,8 @@ def scene_name(nodes):
 def gun_visual(root, gun, outdir):
     """Base + barrel models (own GLBs in outdir), barrel pivot and muzzle points, from the gun's MSB scene.
     Base = the root node, barrel = its GunVerticalPivotPlacement child (optional), muzzles = GunMuzzlePlacement nodes
-    (positions relative to the barrel, or the base if there is no barrel). Node rotations other than yaw are ignored."""
+    (positions relative to the barrel, or the base if there is no barrel). Node rotations other than yaw are ignored.
+    """
     scene = scene_name(load(root, gun))
     nodes = {
         n.id: n
@@ -289,9 +291,9 @@ def export(root, ship, outdir):
                 pos=list(pos),
                 rot=list(node.rot),
                 yaw=node.rot[0],
-                parent_layer=parent.name
-                if parent and parent.kind == "DamageSection"
-                else None,
+                parent_layer=(
+                    parent.name if parent and parent.kind == "DamageSection" else None
+                ),
             )
         )
     for name in ALWAYS_BULLETS:
@@ -397,7 +399,8 @@ def base_safe_physics(root, ship):
 def lifeboat_fields(p, sections):
     """Lifeboat metadata (docs/re/lifeboats.md): the explicit class flag, how many boats a destroyed ship leaves, the collision response
     type and the bounding sphere the pickup test uses. Without an authored sphere it is derived (PROVISIONAL): the authored box
-    extents if any, else the union of the hit sections' boxes; a sphere around that box."""
+    extents if any, else the union of the hit sections' boxes; a sphere around that box.
+    """
 
     def vec(v):
         return list(v) if isinstance(v, (list, tuple)) else None

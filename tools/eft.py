@@ -80,7 +80,7 @@ def parse_eft(text, path="<eft>"):
 
 
 def load(root, name):
-    from tools.mdb import ci_file
+    from tools.gamefs import ci_file
 
     p = ci_file(Path(root) / "Effects", f"{name}.eft")
     return parse_eft(p.read_text(encoding="latin-1"), p.name)

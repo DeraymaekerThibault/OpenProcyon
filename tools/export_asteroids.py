@@ -9,7 +9,7 @@ from pathlib import Path
 
 from tools.export_maps import convert_scene
 from tools.models import model_path
-from tools.mdb import ci_file
+from tools.gamefs import ci_file, ci_files
 from tools.mdb_to_glb import convert
 from tools.pack_data import dump
 
@@ -56,7 +56,7 @@ def validate(defs):
 def export(root, assets):
     root, assets = Path(root), Path(assets)
     defs = {}
-    for path in sorted((root / "WorldObjects").glob("Asteroid*.wot")):
+    for path in ci_files(root / "WorldObjects", "Asteroid*.wot"):
         d = definition(path.read_text(encoding="latin1"))
         if d:
             defs[path.stem] = d

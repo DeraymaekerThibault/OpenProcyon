@@ -10,7 +10,7 @@ import struct
 import sys
 from pathlib import Path
 
-from tools.mdb import ci_file
+from tools.gamefs import ci_file
 from tools.models import model_path
 from tools.pack_data import rnd
 

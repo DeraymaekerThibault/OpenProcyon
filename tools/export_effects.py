@@ -11,7 +11,7 @@ from PIL import Image
 
 from tools.eft import load
 from tools.export_combat import fx_names
-from tools.mdb import ci_files, ci_file
+from tools.gamefs import ci_file, ci_files
 from tools.mdb_to_glb import convert
 from tools.models import model_path
 

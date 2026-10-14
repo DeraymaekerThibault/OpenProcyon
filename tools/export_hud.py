@@ -9,7 +9,7 @@ from pathlib import Path
 from PIL import Image
 from tools.hdt import parse
 from tools.fft import parse as parse_font
-from tools.export_effects import ci_files
+from tools.gamefs import ci_files
 
 
 def main(root, out):

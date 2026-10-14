@@ -20,7 +20,8 @@ from PIL import Image
 
 import math
 
-from tools.mdb import ci_file, ci_files, normal, parse
+from tools.gamefs import ci_file, ci_files
+from tools.mdb import normal, parse
 from tools.msb import parse as parse_msb
 
 
@@ -53,14 +54,23 @@ def hardpoints(root, scene):
 
 def scene_layers(root, scene):
     """Layer MDBs named by the scene's MSB nodes, for scenes whose meshes have another prefix
-    (vanilla PirateSilverShip uses JohnSilverShip_Layer*, ProcyonDMRefulingStationShip ProcyonDMRefulingbaseShip_Layer*)."""
+    (vanilla PirateSilverShip uses JohnSilverShip_Layer*, ProcyonDMRefulingStationShip ProcyonDMRefulingbaseShip_Layer*).
+    """
     try:
-        nodes = parse_msb(ci_file(Path(root) / "BD_MeshScenes", f"{scene}.msb").read_bytes())
+        nodes = parse_msb(
+            ci_file(Path(root) / "BD_MeshScenes", f"{scene}.msb").read_bytes()
+        )
     except FileNotFoundError:
         return []
-    names = dict.fromkeys(n.name for n in nodes if re.search(r"(?<!Damage)_Layer\d+$", n.name, re.I))
-    found = [f for name in names for f in ci_files(Path(root) / "BD_Meshes", name + ".mdb")]
-    return sorted(found, key=lambda p: int(re.search(r"Layer(\d+)", p.name, re.I).group(1)))
+    names = dict.fromkeys(
+        n.name for n in nodes if re.search(r"(?<!Damage)_Layer\d+$", n.name, re.I)
+    )
+    found = [
+        f for name in names for f in ci_files(Path(root) / "BD_Meshes", name + ".mdb")
+    ]
+    return sorted(
+        found, key=lambda p: int(re.search(r"Layer(\d+)", p.name, re.I).group(1))
+    )
 
 
 def pad4(b, fill=b"\0"):
@@ -240,9 +250,11 @@ def convert(root, scene, model=0, files=None):
     gltf = {
         "asset": {"version": "2.0", "generator": "tools.mdb_to_glb"},
         "scene": 0,
-        "extensionsUsed": ["KHR_materials_unlit"]
-        if scene.lower().startswith(("skybox", "selection_indicator"))
-        else [],
+        "extensionsUsed": (
+            ["KHR_materials_unlit"]
+            if scene.lower().startswith(("skybox", "selection_indicator"))
+            else []
+        ),
         "scenes": [{"nodes": list(range(first_hp)) + [len(nodes) - 1]}],
         "nodes": nodes,
         "meshes": meshes,
