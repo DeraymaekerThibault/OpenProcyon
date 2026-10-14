@@ -491,7 +491,8 @@ fn disabled(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], lab
 
 fn arrow(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], name: &str, action: Action) {
     let mut parts = vec![];
-    let mut root = c.spawn((Interaction::None, action, ctx.node(l, t, r - l, b - t)));
+    let forward = name.contains("Next");
+    let mut root = c.spawn((Interaction::None, action, crate::menu::ArrowButton { forward }, ctx.node(l, t, r - l, b - t)));
     root.with_children(|c| parts.extend(ctx.hud_piece(c, name, 0.0, 0.0, r - l, b - t)));
     root.insert(Art(parts));
 }

@@ -462,6 +462,56 @@ impl Skirmish {
     }
 }
 
+/// A back/forward arrow button (views mark them; the `Action` alone does not say which way it points).
+#[derive(Component)]
+pub struct ArrowButton {
+    pub forward: bool,
+}
+
+/// The retail front-end sound for pointing at (`select == false`) or pressing a widget, chosen by what it does; the names come
+/// from the retail `Sound/GUI` files.
+pub fn button_sound(action: &Action, arrow: Option<&ArrowButton>, select: bool) -> &'static str {
+    let list = matches!(action, Action::PickMap(_) | Action::PickShip(_) | Action::PickFleet(_) | Action::PickSave(_) | Action::Rebind(_));
+    if !select {
+        return if list { "FE_List_Rollover" } else { "FE_Button_Rollover" };
+    }
+    match (action, arrow) {
+        (_, Some(a)) => {
+            if a.forward {
+                "FE_Button_Forward_Select"
+            } else {
+                "FE_Button_Backward_Select"
+            }
+        }
+        _ if list => "FE_List_Select",
+        (Action::FleetSize | Action::Setting(_), _) => "SpinButton",
+        (Action::Launch | Action::Campaign | Action::Tutorial(_), _) => "StartButton",
+        (Action::AddShip, _) => "FE_Add",
+        (Action::DropShip | Action::Remove, _) => "FE_Drop",
+        _ => "FE_Button_Select",
+    }
+}
+
+/// Rollover when the pointer first reaches a widget, the select sound when it is pressed (not again when the press is released).
+fn button_sounds(
+    q: Query<(Entity, &Interaction, &Action, Option<&ArrowButton>), Changed<Interaction>>,
+    mut pointed: Local<std::collections::HashSet<Entity>>,
+    mut sfx: MessageWriter<crate::audio::Sfx>,
+) {
+    for (e, i, action, arrow) in &q {
+        if *i == Interaction::None {
+            pointed.remove(&e);
+            continue;
+        }
+        if pointed.insert(e) {
+            sfx.write(crate::audio::Sfx::ui(button_sound(action, arrow, false)));
+        }
+        if *i == Interaction::Pressed {
+            sfx.write(crate::audio::Sfx::ui(button_sound(action, arrow, true)));
+        }
+    }
+}
+
 pub fn plugin(app: &mut App) {
     // The skirmish list: every `maps/<id>/map.json` flagged `"skirmish": true` (campaign maps are not offered), sorted by id.
     let mut maps: Vec<(String, String, bool)> = std::fs::read_dir(assets_dir().join("maps"))
@@ -502,7 +552,10 @@ pub fn plugin(app: &mut App) {
         .insert_resource(Settings::load())
         .add_systems(Update, apply_settings)
         .configure_sets(Update, BuildMenu.after(capture_key).before(RunButtons).run_if(menu_active))
-        .add_systems(Update, (capture_key, buttons.in_set(RunButtons).run_if(menu_active), save_actions, save_text.run_if(menu_active)))
+        .add_systems(
+            Update,
+            (capture_key, buttons.in_set(RunButtons).run_if(menu_active), button_sounds.before(RunButtons).run_if(menu_active), save_actions, save_text.run_if(menu_active)),
+        )
         .add_systems(PostUpdate, esc_menu.run_if(in_state(Screen::Battle)))
         .add_systems(Update, autolaunch.run_if(in_state(Screen::Lobby)));
 }
@@ -960,6 +1013,35 @@ fn buttons(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn menu_widgets_play_rollover_once_and_their_own_select_sound() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins).add_message::<crate::audio::Sfx>().add_systems(Update, button_sounds);
+        let row = app.world_mut().spawn((Action::PickMap(0), Interaction::None)).id();
+        let next = app.world_mut().spawn((Action::Goto(Screen::Lobby), ArrowButton { forward: true }, Interaction::None)).id();
+        let heard = |app: &mut App, e: Entity, i: Interaction| -> Vec<String> {
+            *app.world_mut().get_mut::<Interaction>(e).unwrap() = i;
+            app.update();
+            app.world_mut().resource_mut::<Messages<crate::audio::Sfx>>().drain().map(|s| s.name).collect()
+        };
+        assert_eq!(heard(&mut app, row, Interaction::Hovered), ["FE_List_Rollover"]);
+        assert_eq!(heard(&mut app, row, Interaction::Pressed), ["FE_List_Select"]);
+        assert!(heard(&mut app, row, Interaction::Hovered).is_empty(), "releasing the press is silent");
+        assert_eq!(heard(&mut app, next, Interaction::Pressed), ["FE_Button_Rollover", "FE_Button_Forward_Select"]);
+    }
+
+    #[test]
+    fn every_menu_sound_is_a_retail_file() {
+        let back = ArrowButton { forward: false };
+        let actions = [Action::Quit, Action::PickMap(0), Action::FleetSize, Action::Launch, Action::AddShip, Action::DropShip];
+        for a in &actions {
+            for (arrow, select) in [(None, false), (None, true), (Some(&back), true)] {
+                let name = button_sound(a, arrow, select);
+                assert!(crate::assets_dir().join(crate::audio::sound(name)).is_file(), "{name}");
+            }
+        }
+    }
 
     fn map(id: &str) -> Value {
         serde_json::from_str(&std::fs::read_to_string(assets_dir().join(format!("maps/{id}/map.json"))).unwrap()).unwrap()
