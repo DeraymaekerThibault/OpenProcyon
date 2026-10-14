@@ -41,6 +41,7 @@ pub fn shoot(mut commands: Commands, lib: Res<Library>, fxl: Res<FxLib>, mut msg
                     payload: b.payload,
                     aim: None,
                     pd: false,
+                    hp: b.hitpoints,
                     harmless: false,
                 },
                 Transient,

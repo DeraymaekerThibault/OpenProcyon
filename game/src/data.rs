@@ -160,6 +160,8 @@ pub struct BulletDef {
     pub glb: Option<String>,
     pub physics: Option<Physics>,
     pub lifetime: f32,
+    /// WOT bullet HitPoints: how much the projectile absorbs before it is destroyed (torpedo 16, light Lancer bolt 1).
+    pub hitpoints: f32,
     pub impact_snd: HashMap<String, Vec<String>>, // material -> pool, one picked at random per hit
     pub impact_vol: f32,
     pub impact_max: f32,
@@ -324,6 +326,7 @@ pub fn bullet_def(b: &Value) -> BulletDef {
         physics,
         glb: b["glb"].as_str().map(String::from),
         lifetime: num(&b["lifetime"]),
+        hitpoints: b["hitpoints"].as_f64().unwrap_or(1.0) as f32,
         impact_vol: num(&b["impact_vol"]),
         impact_max: num(&b["impact_max"]),
         impact_snd: b["impact_snd"]

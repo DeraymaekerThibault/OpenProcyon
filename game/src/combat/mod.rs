@@ -98,6 +98,8 @@ pub struct Shell {
     aim: Option<Vec3>,
     /// Fired by a point-defence gun at a torpedo or mine.
     pd: bool,
+    /// Remaining projectile hitpoints (`BulletDef::hitpoints`); point-defence bolts wear torpedoes and mines down.
+    hp: f32,
     /// A warning shot ('Set Group/Unit Warning Shot Mode'): no damage.
     harmless: bool,
 }
@@ -772,6 +774,7 @@ fn launch_shell(
                 payload: b.payload,
                 aim: shot.aim,
                 pd: shot.pd,
+                hp: b.hitpoints,
                 harmless: shot.harmless,
             },
             Transient,
@@ -910,6 +913,12 @@ fn core_bleed(class: &Class, hp: &Health, roll: f32) -> f32 {
 
 /// Native launch coast (0.5 s), 20-degree rudder saturation and lead inside 100 units; native WOT physics.
 /// PROVISIONAL: uses the remake's planar integrator; the native invalidation timer and altitude tick scheduling remain approximate.
+/// One point-defence bolt against a torpedo or mine: it loses the bolt's hitpoints; true once it is destroyed.
+fn wear_down(threat_hp: &mut f32, bolt_hp: f32) -> bool {
+    *threat_hp -= bolt_hp;
+    *threat_hp <= 0.0
+}
+
 fn guide_torpedo(mut position: Vec3, velocity: &mut Vec3, spin: &mut f32, age: f32, target: Option<(Vec3, Vec3)>, physics: &crate::data::Physics, dt: f32) -> Vec3 {
     let steps = (dt * 60.0).ceil().max(1.0) as usize;
     let h = dt / steps as f32;
@@ -1005,6 +1014,7 @@ fn shells(
     // Torpedoes and mines in flight, for point-defence intercepts; each is shot down at most once.
     let threats: Vec<(Entity, Vec3, Side)> =
         q.iter().filter(|(_, s, _)| s.bullet.starts_with("Bullet_Torpedo") || matches!(s.payload, Payload::Mine { .. })).map(|(e, s, t)| (e, t.translation, s.side)).collect();
+    let mut threat_hp: std::collections::HashMap<Entity, f32> = q.iter().filter(|(e, ..)| threats.iter().any(|t| t.0 == *e)).map(|(e, s, _)| (e, s.hp)).collect();
     let mut downed: Vec<Entity> = vec![];
     for (e, mut s, mut tf) in &mut q {
         if downed.contains(&e) {
@@ -1058,16 +1068,21 @@ fn shells(
             p0 + s.vel * dt
         };
         s.age += dt;
-        // Point defence: the shell meets a hostile torpedo or mine on its way (both are destroyed).
+        // Point defence: the bolt meets a hostile torpedo or mine on its way and is spent; the threat loses the bolt's hitpoints and
+        // is destroyed at zero. PROVISIONAL: hitpoint-for-hitpoint exchange inferred from the WOT values, not verified in the original.
         if s.pd
             && let Some(&(te, tp, _)) = threats.iter().find(|t| t.2 != s.side && !downed.contains(&t.0) && segment_distance(t.1, p0, p1) < 2.5)
         {
-            downed.push(te);
-            commands.entity(te).despawn();
             commands.entity(e).despawn();
             let at = Transform::from_translation(tp);
-            fx::spawn(&mut commands, &fxl, "Explosion_Light", None, at, at, true);
-            sfx.write(Sfx { name: format!("Explosion_Med0{}", 1 + (rng.f() * 8.0) as u32 % 8), at: Some(tp), vol: 0.8, max: 600.0 });
+            if wear_down(threat_hp.entry(te).or_insert(1.0), s.hp) {
+                downed.push(te);
+                commands.entity(te).despawn();
+                fx::spawn(&mut commands, &fxl, "Explosion_Light", None, at, at, true);
+                sfx.write(Sfx { name: format!("Explosion_Med0{}", 1 + (rng.f() * 8.0) as u32 % 8), at: Some(tp), vol: 0.8, max: 600.0 });
+            } else if let Some(fx_name) = &bd.hit_fx {
+                fx::spawn(&mut commands, &fxl, fx_name, None, at, at, true);
+            }
             continue;
         }
         // Lob shells burst where they come down through the height they were aimed at.
@@ -1259,6 +1274,12 @@ fn shells(
         } else {
             tf.translation = p1;
             tf.look_to(s.vel, Vec3::Y);
+        }
+    }
+    // Torpedoes and mines keep the wear from point-defence bolts that did not finish them this frame.
+    for (e, mut s, _) in &mut q {
+        if let Some(&hp) = threat_hp.get(&e) {
+            s.hp = hp;
         }
     }
 }
@@ -1814,6 +1835,20 @@ mod tests {
         assert_eq!(intercept_time(d, Vec3::NEG_Z * 30.0, 22.0), None);
         assert_eq!(intercept_time(Vec3::ZERO, Vec3::ZERO, 22.0), Some(0.0));
     }
+    #[test]
+    fn point_defence_wears_a_torpedo_down_instead_of_one_shot_kills() {
+        let lib = Library::load(&crate::assets_dir());
+        let torpedo = lib.bullets["Bullet_Torpedo"].hitpoints;
+        let bolts = |gun: &str| {
+            let bolt = lib.bullets[&lib.guns[gun].bullet].hitpoints;
+            let mut hp = torpedo;
+            (1..).find(|_| wear_down(&mut hp, bolt)).unwrap()
+        };
+        assert_eq!(torpedo, 16.0);
+        assert_eq!(bolts("Gun_Lancer_PD_Light"), 16, "light PD bolts (1 HP) need sixteen hits");
+        assert_eq!(bolts("Gun_Lancer_PD_Med"), 8, "medium PD bolts (2 HP) need eight hits");
+    }
+
     #[test]
     fn torpedo_guidance_launch_coast_and_moving_target_intercept() {
         let lib = Library::load(&assets_dir());
