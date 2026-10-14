@@ -53,11 +53,11 @@ pub fn update(
         w.pts.retain(|p| p.1 < LIFE);
         let stern = tf.translation + tf.rotation * Vec3::Z * STERN;
         if w.pts.last().is_none_or(|p| p.0.distance(stern) > STEP) {
-            w.pts.push((stern, 0.0, (sh.speed / lib.classes[sh.class].phys.max_speed).clamp(0.0, 1.0)));
+            w.pts.push((stern, 0.0, (sh.speed / crate::ship::full_speed(&lib.classes[sh.class])).clamp(0.0, 1.0)));
         }
         let (mut pos, mut uv, mut col, mut idx) = (vec![], vec![], vec![], vec![]);
         let n = w.pts.len() + 1; // Draw a live head between distance-sampled points, so the trail does not jump every STEP.
-        let strength = (sh.speed / lib.classes[sh.class].phys.max_speed).clamp(0.0, 1.0);
+        let strength = (sh.speed / crate::ship::full_speed(&lib.classes[sh.class])).clamp(0.0, 1.0);
         let mut v = 0.0;
         for i in 0..n {
             let (p, age, k) = if i + 1 < n { w.pts[i] } else { (stern, 0.0, strength) };

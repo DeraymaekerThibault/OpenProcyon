@@ -14,27 +14,33 @@ Angular state: ω (rate), α (acceleration). Each frame, with speed v = |velocit
 2. Speed bands: v > 0.67·vmax → α × 1/3; v < 0.33·vmax → α × 5/3; otherwise × 1.
 3. Quadratic rotational drag: α −= sign(ω) · ω² · RotationalFriction.
 4. α clamped to ±60. Then ω += α·dt; heading += ω·dt.
-Consequence for the cutter (full rudder): top turn rate about 9°/s at full speed, about 12°/s mid-speed.
+Consequence for the cutter (full rudder) at the measured order speeds: about 12.8°/s at both Slow and Full; measured 13.6°/s (below).
 
-## Linear motion (structure verified, time scale not)
-- The drag is not quadratic: it is per-axis drag with coefficient `(MaxThrust/Mass)/MaxSpeed`.
-- Thrust: forward direction × `throttle · MaxThrust / (Mass + extra) · MaxThrust-side multipliers`, where four
-  "1 − x" factors (damage-like) and two more unidentified multipliers apply.
-- `SetThrottle` (slot) clamps the throttle to [0, 1]. "Current max speed" = MaxSpeed × four (1 − x) factors × two multipliers.
--  uses `ln`, i.e. exponential solutions: consistent with linear drag. Terminal speed = throttle × MaxSpeed (× multipliers).
-- Lateral/vertical velocity is damped by extra terms (constants 0.5 and 0.3).
-- NOT recovered: the engine-order → throttle mapping (SetShipSpeedCommand → AI → throttle), what the "Emergency" order changes
-  (probably one of the multipliers), and the exe's fixed time step, so the absolute acceleration time. The game scales
-  MaxThrust/Mass by a provisional 0.1 for running orders. Playtest feedback exposed that using this for All Stop
-  made Comet coast for nearly a minute. All Stop now uses the unscaled WOT drag coefficient, exact exponential damping,
-  and a 0.01 speed dead zone to reach true rest. This order-specific rate choice is **provisional**, not recovered
-  engine-order behavior. At Comet's full speed it leaves ~0.19 units/s after five seconds and reaches zero within ten;
-  original absolute stopping time still needs calibration. Running orders also use the exponential update rather
-  than Euler integration; their rate and terminal-speed mapping are otherwise unchanged.
+## Linear motion
+- Drag is linear (not quadratic) with rate `(MaxThrust/Mass)/MaxSpeed`; terminal speed = throttle × current max speed.
+- Lateral/vertical velocity is damped separately (constants 0.5 and 0.3).
 
-## Constants read from .rdata
-0.33 / 1.0 / 5/3 / 1/3 (speed bands), 60.0 (α clamp), 0.1 (rudder-speed constant), 0.5 and 0.3 (lateral terms),
-±0.01 (dead zone on |v|), 0.03 / 0.25 / 500 (bank/roll related, not understood).
+## Measured on the running original (Navy Cutter, skirmish, no crew)
+Sampled ~60 times a second from the running retail game (Steam/Proton) while issuing each order; the game itself updates
+about every 0.034 s. Values are the cutter's; other classes are assumed to scale the same way (PROVISIONAL).
+- **Order speeds:** All Stop 0, Ahead Slow 2.266, Ahead Full 4.531, Emergency Speed 9.062 units/s, i.e. ½ / 1 / 2 × Full,
+  and Full = 0.5625 × WOT MaxSpeed (Emergency = 1.125 × MaxSpeed). Emergency held its speed for the 15 s it was used.
+- **Crew raise top speed:** with auto-assigned crew the same class settled at 5.74 at Ahead Full (×1.27). Not modelled yet.
+- **Time scale:** every order change approaches the new speed exponentially with time constant 0.53 s, matching the unscaled
+  WOT rate above (0.537 s for the cutter). All Stop uses the same curve.
+- **Coming to rest:** when the braking speed would drop through 1.0 it becomes 0 in one tick (1.05 → 0). Full to rest takes
+  about 0.83 s. Whether a slow push (collision, tow) is also snapped is not observed; the remake snaps only braking.
+- **Turning:** full rudder gives a steady 13.6°/s at both Slow and Full (turning circle about 19 units across at Full, 9.5 at
+  Slow). The turn formula above predicts 12.8°/s; the measured rate needs its torque × 1.125 (PROVISIONAL: the same factor as
+  Emergency speed, source not identified). A click inside the turning circle makes the ship circle it, as in the remake.
+- **Banking:** the hull rolls into the turn (starboard up in a port turn) up to 0.25 rad (14.3°) at 0.06 rad/s (about 4 s to full
+  lean), holds it while the rudder is over and levels at the same rate. On a straight course the heading weaves ±2° and the roll
+  ±3.5° with a ~3.8 s period; at Emergency Speed there is no roll. Remake: roll target = 0.25 × rudder, rate-limited; the weave
+  and the Emergency exception are not modelled.
+
+## Other constants
+0.33 / 1.0 / 5/3 / 1/3 (speed bands), 60.0 (α clamp), 0.1 (rudder-speed constant), 0.5 and 0.3 (lateral terms); 0.25 is the
+measured bank limit above.
 
 ## Damage → movement (verified, ship update, counter)
 - Damage sections carry four flags at.. (vitalToShip, vitalToMaxVelocity, vitalToManeuverability, vitalToMission); HP int at.
