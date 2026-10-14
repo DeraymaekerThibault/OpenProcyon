@@ -52,7 +52,7 @@ fn spawn(
                 })
                 .collect(),
         ));
-        let mat = mats.add(StandardMaterial { base_color_texture: Some(assets.load(format!("flags/{tex}.png"))), unlit: true, cull_mode: None, double_sided: true, ..default() });
+        let mat = mats.add(cloth_material(assets.load(format!("flags/{tex}.png"))));
         commands.spawn((
             Scenario,
             Flag { top, bottom, phase: e.index().index() as f32 },
@@ -64,6 +64,12 @@ fn spawn(
             ChildOf(e),
         ));
     }
+}
+
+/// Unlit, double-sided cloth. The retail flag art cuts its outline with alpha (the pirate flag's tattered edge), so transparent
+/// texels are masked out; a cut-out avoids the sorting problems of blending a double-sided waving mesh.
+fn cloth_material(texture: Handle<Image>) -> StandardMaterial {
+    StandardMaterial { base_color_texture: Some(texture), unlit: true, cull_mode: None, double_sided: true, alpha_mode: AlphaMode::Mask(0.5), ..default() }
 }
 
 /// Per cloth row (hoist to free end), the (Flag_Top, Flag_Bottom) vertex UVs. The retail flag images lie on their side: the image
@@ -123,6 +129,11 @@ fn retexture(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn flag_cloth_masks_the_transparent_parts_of_the_art() {
+        assert_eq!(cloth_material(Handle::default()).alpha_mode, AlphaMode::Mask(0.5));
+    }
 
     #[test]
     fn image_top_is_the_hoist_and_image_left_the_top_edge() {
