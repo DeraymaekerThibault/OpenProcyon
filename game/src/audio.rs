@@ -166,9 +166,17 @@ pub fn sound(name: &str) -> String {
     index.get(&name).cloned().unwrap_or_else(|| format!("sound/{name}.ogg"))
 }
 
-// shortcut: linear falloff to the WOT max distance, no stereo panning; upgrade when the exe's attenuation is recovered.
+/// Within this distance of the camera a positional sound plays at full volume. PROVISIONAL: about two ship lengths.
+const FULL_VOLUME_DISTANCE: f32 = 25.0;
+
+/// Inverse-distance rolloff, the DirectSound 3D model the original used: full volume up to `FULL_VOLUME_DISTANCE`, halving with
+/// every doubling of distance, silent beyond the sound's max distance. PROVISIONAL: the original's min-distance and rolloff settings
+/// are not recovered; no stereo panning.
 fn gain(listener: Vec3, at: Option<Vec3>, max: f32) -> f32 {
-    at.map_or(1.0, |p| (1.0 - p.distance(listener) / max).clamp(0.0, 1.0))
+    at.map_or(1.0, |p| {
+        let d = p.distance(listener);
+        if d >= max { 0.0 } else { FULL_VOLUME_DISTANCE / d.max(FULL_VOLUME_DISTANCE) }
+    })
 }
 
 #[derive(Component)]
@@ -304,6 +312,16 @@ fn helmsman(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn positional_sounds_fade_with_camera_distance() {
+        let at = |d: f32| gain(Vec3::ZERO, Some(Vec3::X * d), 200.0);
+        assert_eq!(at(10.0), 1.0, "close to the camera: full volume");
+        assert!((at(50.0) - 0.5).abs() < 1e-6 && (at(100.0) - 0.25).abs() < 1e-6, "halves per doubling of distance");
+        assert!(at(60.0) < 0.5, "a collision at the usual camera distance is clearly quieter than full volume");
+        assert_eq!(at(200.0), 0.0, "silent beyond the max distance");
+        assert_eq!(gain(Vec3::ZERO, None, 200.0), 1.0, "interface sounds are not positional");
+    }
 
     #[test]
     fn menu_duelist_order_changes_are_silent_but_button_sounds_still_play() {
