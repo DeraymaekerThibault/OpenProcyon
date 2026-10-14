@@ -1,0 +1,1160 @@
+{
+ "HumanFemale": {
+  "all_sails_destroyed": [
+   "hfrigger05"
+  ],
+  "all_weapons_destroyed": [
+   "hfgunner06",
+   "hfgunner06b"
+  ],
+  "allied_base_boarded": [
+   "hffirstmate26",
+   "hffirstmate26b"
+  ],
+  "allied_base_conquered": [
+   "hffirstmate21"
+  ],
+  "ammo_empty": [
+   "hfgunner07"
+  ],
+  "ammo_hit": [
+   "hfengineer05"
+  ],
+  "asteroids": [
+   "hfspotter09"
+  ],
+  "at_will": [
+   "hfcaptain03"
+  ],
+  "black_hole": [
+   "hfspotter18"
+  ],
+  "boarding_party": [
+   "hffirstmate02",
+   "hffirstmate02b",
+   "hffirstmate17",
+   "hffirstmate17b"
+  ],
+  "boarding_repelled": [
+   "hffirstmate27",
+   "hffirstmate27b"
+  ],
+  "civilian_ship_destroyed": [
+   "hffirstmate11"
+  ],
+  "civilian_ship_spotted": [
+   "hfspotter03"
+  ],
+  "collision_alarm": [
+   "hffirstmate06",
+   "hffirstmate06b"
+  ],
+  "cruising_speed": [
+   "hfhelmsman06",
+   "hfhelmsman06b"
+  ],
+  "dock": [
+   "hffirstmate14",
+   "hffirstmate14b"
+  ],
+  "dragons": [
+   "hfspotter20"
+  ],
+  "emergency_speed": [
+   "hfhelmsman04"
+  ],
+  "enemy_base_conquered": [
+   "hffirstmate18"
+  ],
+  "enemy_base_spotted": [
+   "hfspotter13"
+  ],
+  "enemy_ship_conquered": [
+   "hffirstmate19"
+  ],
+  "enemy_ship_destroyed": [
+   "hffirstmate09"
+  ],
+  "enemy_ship_destroyed_civilian": [
+   "hffirstmate09"
+  ],
+  "enemy_ship_destroyed_navy": [
+   "hffirstmate10"
+  ],
+  "enemy_ship_destroyed_pirate": [
+   "hffirstmate09"
+  ],
+  "enemy_ship_destroyed_procyon": [
+   "hffirstmate09"
+  ],
+  "enemy_ship_spotted": [
+   "hfspotter06b"
+  ],
+  "enemy_ship_spotted_civilian": [
+   "hfspotter03"
+  ],
+  "enemy_ship_spotted_navy": [
+   "hfspotter04"
+  ],
+  "enemy_ship_spotted_pirate": [
+   "hfspotter02"
+  ],
+  "enemy_ship_spotted_procyon": [
+   "hfspotter01"
+  ],
+  "enemy_tender_spotted": [
+   "hfspotter17"
+  ],
+  "energy_net": [
+   "hfrigger06"
+  ],
+  "engine_destroyed": [
+   "hfengineer04"
+  ],
+  "engine_hit": [
+   "hfengineer07",
+   "hfengineer07b",
+   "hfengineer09"
+  ],
+  "engine_hit25": [
+   "hfengineer03",
+   "hfengineer03b"
+  ],
+  "engine_hit50": [
+   "hfengineer02",
+   "hfengineer02b"
+  ],
+  "engine_hit75": [
+   "hfengineer01",
+   "hfengineer01b"
+  ],
+  "ethereum_current": [
+   "hfspotter21"
+  ],
+  "fire_mortar": [
+   "hfgunner03"
+  ],
+  "fire_weapon": [
+   "hfgunner01"
+  ],
+  "formation": [
+   "hfcaptain04"
+  ],
+  "friendly_base_spotted": [
+   "hfspotter14"
+  ],
+  "friendly_ship_destroyed_civilian": [
+   "hffirstmate11"
+  ],
+  "friendly_tender_spotted": [
+   "hfspotter16"
+  ],
+  "full_ahead": [
+   "hfhelmsman05",
+   "hfhelmsman05b"
+  ],
+  "full_power": [
+   "hfhelmsman04b"
+  ],
+  "full_stop": [
+   "hfhelmsman03",
+   "hfhelmsman03b"
+  ],
+  "grapple_broken": [
+   "hffirstmate25",
+   "hffirstmate25b"
+  ],
+  "grappled": [
+   "hffirstmate24"
+  ],
+  "halt": [
+   "hfcaptain07"
+  ],
+  "hull_damage": [
+   "hffirstmate07",
+   "hffirstmate08"
+  ],
+  "ironclad_destroyed": [
+   "hffirstmate13"
+  ],
+  "ironclad_spotted": [
+   "hfspotter05"
+  ],
+  "landing_party": [
+   "hffirstmate16",
+   "hffirstmate16b"
+  ],
+  "lightning_hit": [
+   "hffirstmate05"
+  ],
+  "meteor_shower": [
+   "hfspotter10"
+  ],
+  "mines": [
+   "hfspotter22"
+  ],
+  "mission_failed": [
+   "hffirstmate03"
+  ],
+  "mission_won": [
+   "hffirstmate04",
+   "hffirstmate04b"
+  ],
+  "navy_ship_destroyed": [
+   "hffirstmate10"
+  ],
+  "navy_ship_spotted": [
+   "hfspotter04"
+  ],
+  "nebula": [
+   "hfspotter07"
+  ],
+  "on_my_target": [
+   "hfcaptain02"
+  ],
+  "open_fire": [
+   "hfcaptain09"
+  ],
+  "out_of_bounds": [
+   "hfhelmsman01",
+   "hfhelmsman01b"
+  ],
+  "out_of_range": [
+   "hffirstmate29"
+  ],
+  "own_ship_boarded": [
+   "hffirstmate23"
+  ],
+  "own_ship_conquered": [
+   "hffirstmate22"
+  ],
+  "pirate_ship_spotted": [
+   "hfspotter02"
+  ],
+  "procyon_ship_spotted": [
+   "hfspotter01"
+  ],
+  "protect_flagship": [
+   "hfcaptain01",
+   "hfcaptain05"
+  ],
+  "put_out_fire": [
+   "hffirstmate28",
+   "hffirstmate28b"
+  ],
+  "repell_boarders": [
+   "hffirstmate01",
+   "hffirstmate01b"
+  ],
+  "retreat": [
+   "hfcaptain10",
+   "hffirstmate20",
+   "hffirstmate20b"
+  ],
+  "rudder_destroyed": [
+   "hfengineer06",
+   "hfengineer06b",
+   "hfhelmsman02",
+   "hfhelmsman02b"
+  ],
+  "sails_damaged": [
+   "hfrigger03",
+   "hfrigger03b"
+  ],
+  "sails_deployed": [
+   "hfrigger01"
+  ],
+  "sails_destroyed": [
+   "hfrigger04",
+   "hfrigger04b"
+  ],
+  "sails_folded": [
+   "hfrigger02"
+  ],
+  "setting_course": [
+   "hfhelmsman08",
+   "hfhelmsman08b"
+  ],
+  "ship_lost": [
+   "hffirstmate12",
+   "hffirstmate12b"
+  ],
+  "slow_ahead": [
+   "hfhelmsman07",
+   "hfhelmsman07b"
+  ],
+  "solar_storm": [
+   "hfspotter08"
+  ],
+  "tender_spotted": [
+   "hfspotter15"
+  ],
+  "torpedoes_away": [
+   "hfgunner02"
+  ],
+  "town_spotted": [
+   "hfspotter12"
+  ],
+  "undock": [
+   "hffirstmate15",
+   "hffirstmate15b"
+  ],
+  "vessel_spotted": [
+   "hfspotter06"
+  ],
+  "vessel_spotted_civilian": [
+   "hfspotter03"
+  ],
+  "vessel_spotted_navy": [
+   "hfspotter04"
+  ],
+  "vessel_spotted_pirate": [
+   "hfspotter06"
+  ],
+  "vessel_spotted_procyon": [
+   "hfspotter01"
+  ],
+  "volcanoes": [
+   "hfspotter19"
+  ],
+  "weapons_destroyed": [
+   "hfengineer08",
+   "hfengineer08b",
+   "hfgunner04",
+   "hfgunner05"
+  ],
+  "whale_spotted": [
+   "hfspotter11"
+  ]
+ },
+ "HumanMale": {
+  "all_sails_destroyed": [
+   "hmrigger05"
+  ],
+  "all_weapons_destroyed": [
+   "hmgunner06",
+   "hmgunner06b"
+  ],
+  "allied_base_boarded": [
+   "hmfirstmate26",
+   "hmfirstmate26b"
+  ],
+  "allied_base_conquered": [
+   "hmfirstmate21"
+  ],
+  "ammo_empty": [
+   "hmgunner07"
+  ],
+  "ammo_hit": [
+   "hmengineer05"
+  ],
+  "asteroids": [
+   "hmspotter09"
+  ],
+  "at_will": [
+   "hmcaptain03"
+  ],
+  "black_hole": [
+   "hmspotter18"
+  ],
+  "boarding_party": [
+   "hmfirstmate02",
+   "hmfirstmate02b",
+   "hmfirstmate17"
+  ],
+  "boarding_repelled": [
+   "hmfirstmate27",
+   "hmfirstmate27b"
+  ],
+  "civilian_ship_destroyed": [
+   "hmfirstmate11"
+  ],
+  "civilian_ship_spotted": [
+   "hmspotter03"
+  ],
+  "collision_alarm": [
+   "hmfirstmate06",
+   "hmfirstmate06b"
+  ],
+  "cruising_speed": [
+   "hmhelmsman06",
+   "hmhelmsman06b"
+  ],
+  "dock": [
+   "hmfirstmate14",
+   "hmfirstmate14b"
+  ],
+  "dragons": [
+   "hmspotter20"
+  ],
+  "emergency_speed": [
+   "hmhelmsman04"
+  ],
+  "enemy_base_conquered": [
+   "hmfirstmate18"
+  ],
+  "enemy_base_spotted": [
+   "hmspotter13"
+  ],
+  "enemy_ship_conquered": [
+   "hmfirstmate19"
+  ],
+  "enemy_ship_destroyed": [
+   "hmfirstmate09"
+  ],
+  "enemy_ship_destroyed_civilian": [
+   "hmfirstmate09"
+  ],
+  "enemy_ship_destroyed_navy": [
+   "hmfirstmate09"
+  ],
+  "enemy_ship_destroyed_pirate": [
+   "hmfirstmate09"
+  ],
+  "enemy_ship_destroyed_procyon": [
+   "hmfirstmate09"
+  ],
+  "enemy_ship_spotted": [
+   "hmspotter06b"
+  ],
+  "enemy_ship_spotted_civilian": [
+   "hmspotter03"
+  ],
+  "enemy_ship_spotted_navy": [
+   "hmspotter04"
+  ],
+  "enemy_ship_spotted_pirate": [
+   "hmspotter02"
+  ],
+  "enemy_ship_spotted_procyon": [
+   "hmspotter01"
+  ],
+  "enemy_tender_spotted": [
+   "hmspotter17"
+  ],
+  "energy_net": [
+   "hmrigger06"
+  ],
+  "engine_destroyed": [
+   "hmengineer04"
+  ],
+  "engine_hit": [
+   "hmengineer07",
+   "hmengineer07b",
+   "hmengineer09"
+  ],
+  "engine_hit25": [
+   "hmengineer03",
+   "hmengineer03b"
+  ],
+  "engine_hit50": [
+   "hmengineer02",
+   "hmengineer02b"
+  ],
+  "engine_hit75": [
+   "hmengineer01",
+   "hmengineer01b"
+  ],
+  "ethereum_current": [
+   "hmspotter21"
+  ],
+  "fire_mortar": [
+   "hmgunner03"
+  ],
+  "fire_weapon": [
+   "hmgunner01"
+  ],
+  "formation": [
+   "hmcaptain04"
+  ],
+  "friendly_base_spotted": [
+   "hmspotter14"
+  ],
+  "friendly_ship_destroyed_civilian": [
+   "hmfirstmate11"
+  ],
+  "friendly_ship_destroyed_navy": [
+   "hmfirstmate10"
+  ],
+  "friendly_tender_spotted": [
+   "hmspotter16"
+  ],
+  "full_ahead": [
+   "hmhelmsman05",
+   "hmhelmsman05b"
+  ],
+  "full_power": [
+   "hmhelmsman04b"
+  ],
+  "full_stop": [
+   "hmhelmsman03",
+   "hmhelmsman03b"
+  ],
+  "grapple_broken": [
+   "hmfirstmate25",
+   "hmfirstmate25b"
+  ],
+  "grappled": [
+   "hmfirstmate24"
+  ],
+  "halt": [
+   "hmcaptain07"
+  ],
+  "hull_damage": [
+   "hmfirstmate07",
+   "hmfirstmate08"
+  ],
+  "ironclad_destroyed": [
+   "hmfirstmate13"
+  ],
+  "ironclad_spotted": [
+   "hmspotter05"
+  ],
+  "landing_party": [
+   "hmfirstmate16",
+   "hmfirstmate16b"
+  ],
+  "lightning_hit": [
+   "hmfirstmate05"
+  ],
+  "meteor_shower": [
+   "hmspotter10"
+  ],
+  "mines": [
+   "hmspotter22"
+  ],
+  "mission_failed": [
+   "hmfirstmate03"
+  ],
+  "mission_won": [
+   "hmfirstmate04",
+   "hmfirstmate04b"
+  ],
+  "navy_ship_destroyed": [
+   "hmfirstmate10"
+  ],
+  "navy_ship_spotted": [
+   "hmspotter04"
+  ],
+  "nebula": [
+   "hmspotter07"
+  ],
+  "on_my_target": [
+   "hmcaptain02"
+  ],
+  "open_fire": [
+   "hmcaptain09"
+  ],
+  "out_of_bounds": [
+   "hmhelmsman01",
+   "hmhelmsman01b"
+  ],
+  "out_of_range": [
+   "hmfirstmate29"
+  ],
+  "own_ship_boarded": [
+   "hmfirstmate23"
+  ],
+  "own_ship_conquered": [
+   "hmfirstmate22"
+  ],
+  "pirate_ship_spotted": [
+   "hmspotter02"
+  ],
+  "procyon_ship_spotted": [
+   "hmspotter01"
+  ],
+  "protect_flagship": [
+   "hmcaptain01",
+   "hmcaptain05"
+  ],
+  "put_out_fire": [
+   "hmfirstmate28",
+   "hmfirstmate28b"
+  ],
+  "repell_boarders": [
+   "hmfirstmate01",
+   "hmfirstmate01b"
+  ],
+  "retreat": [
+   "hmcaptain10",
+   "hmfirstmate20",
+   "hmfirstmate20b"
+  ],
+  "rudder_destroyed": [
+   "hmengineer06",
+   "hmengineer06b",
+   "hmhelmsman02",
+   "hmhelmsman02b"
+  ],
+  "sails_damaged": [
+   "hmrigger03",
+   "hmrigger03b"
+  ],
+  "sails_deployed": [
+   "hmrigger01"
+  ],
+  "sails_destroyed": [
+   "hmrigger04",
+   "hmrigger04b"
+  ],
+  "sails_folded": [
+   "hmrigger02"
+  ],
+  "setting_course": [
+   "hmhelmsman08",
+   "hmhelmsman08b"
+  ],
+  "ship_lost": [
+   "hmfirstmate12",
+   "hmfirstmate12b"
+  ],
+  "slow_ahead": [
+   "hmhelmsman07",
+   "hmhelmsman07b"
+  ],
+  "solar_storm": [
+   "hmspotter08"
+  ],
+  "tender_spotted": [
+   "hmspotter15"
+  ],
+  "torpedoes_away": [
+   "hmgunner02"
+  ],
+  "town_spotted": [
+   "hmspotter12"
+  ],
+  "undock": [
+   "hmfirstmate15",
+   "hmfirstmate15b"
+  ],
+  "vessel_spotted": [
+   "hmspotter06"
+  ],
+  "vessel_spotted_civilian": [
+   "hmspotter03"
+  ],
+  "vessel_spotted_navy": [
+   "hmspotter04"
+  ],
+  "vessel_spotted_pirate": [
+   "hmspotter02"
+  ],
+  "vessel_spotted_procyon": [
+   "hmspotter01"
+  ],
+  "volcanoes": [
+   "hmspotter19"
+  ],
+  "weapons_destroyed": [
+   "hmengineer08",
+   "hmengineer08b",
+   "hmgunner04",
+   "hmgunner05"
+  ],
+  "whale_spotted": [
+   "hmspotter11"
+  ]
+ },
+ "Procyon": {
+  "all_sails_destroyed": [
+   "prrigger05"
+  ],
+  "all_weapons_destroyed": [
+   "prgunner06",
+   "prgunner06b"
+  ],
+  "allied_base_boarded": [
+   "prfirstmate26",
+   "prfirstmate26b"
+  ],
+  "allied_base_conquered": [
+   "prfirstmate21"
+  ],
+  "ammo_empty": [
+   "prgunner07"
+  ],
+  "ammo_hit": [
+   "prengineer05"
+  ],
+  "asteroids": [
+   "prspotter09"
+  ],
+  "at_will": [
+   "prcaptain03"
+  ],
+  "black_hole": [
+   "prspotter18"
+  ],
+  "boarding_party": [
+   "prfirstmate02",
+   "prfirstmate02b",
+   "prfirstmate17"
+  ],
+  "boarding_repelled": [
+   "prfirstmate27",
+   "prfirstmate27b"
+  ],
+  "civilian_ship_destroyed": [
+   "prfirstmate11"
+  ],
+  "civilian_ship_spotted": [
+   "prspotter03"
+  ],
+  "collision_alarm": [
+   "prfirstmate06",
+   "prfirstmate06b"
+  ],
+  "cruising_speed": [
+   "prhelmsman06",
+   "prhelmsman06b"
+  ],
+  "dock": [
+   "prfirstmate14",
+   "prfirstmate14b"
+  ],
+  "dragons": [
+   "prspotter20"
+  ],
+  "emergency_speed": [
+   "prhelmsman04"
+  ],
+  "enemy_base_conquered": [
+   "prfirstmate18"
+  ],
+  "enemy_base_spotted": [
+   "prspotter13"
+  ],
+  "enemy_ship_conquered": [
+   "prfirstmate19"
+  ],
+  "enemy_ship_destroyed": [
+   "prfirstmate09"
+  ],
+  "enemy_ship_destroyed_civilian": [
+   "prfirstmate11"
+  ],
+  "enemy_ship_destroyed_navy": [
+   "prfirstmate10"
+  ],
+  "enemy_ship_destroyed_pirate": [
+   "prfirstmate09"
+  ],
+  "enemy_ship_destroyed_procyon": [
+   "prfirstmate09"
+  ],
+  "enemy_ship_spotted": [
+   "prspotter06b"
+  ],
+  "enemy_ship_spotted_civilian": [
+   "prspotter03"
+  ],
+  "enemy_ship_spotted_navy": [
+   "prspotter04"
+  ],
+  "enemy_ship_spotted_pirate": [
+   "prspotter02"
+  ],
+  "enemy_ship_spotted_procyon": [
+   "prspotter01"
+  ],
+  "enemy_tender_spotted": [
+   "prspotter17"
+  ],
+  "energy_net": [
+   "prrigger06"
+  ],
+  "engine_destroyed": [
+   "prengineer04"
+  ],
+  "engine_hit": [
+   "prengineer07",
+   "prengineer07b",
+   "prengineer09"
+  ],
+  "engine_hit25": [
+   "prengineer03",
+   "prengineer03b"
+  ],
+  "engine_hit50": [
+   "prengineer02",
+   "prengineer02b"
+  ],
+  "engine_hit75": [
+   "prengineer01",
+   "prengineer01b"
+  ],
+  "ethereum_current": [
+   "prspotter21"
+  ],
+  "fire_mortar": [
+   "prgunner03"
+  ],
+  "fire_weapon": [
+   "prgunner01"
+  ],
+  "formation": [
+   "prcaptain04"
+  ],
+  "friendly_base_spotted": [
+   "prspotter14"
+  ],
+  "friendly_tender_spotted": [
+   "prspotter16"
+  ],
+  "full_ahead": [
+   "prhelmsman05",
+   "prhelmsman05b"
+  ],
+  "full_power": [
+   "prhelmsman04b"
+  ],
+  "full_stop": [
+   "prhelmsman03",
+   "prhelmsman03b"
+  ],
+  "grapple_broken": [
+   "prfirstmate25",
+   "prfirstmate25b"
+  ],
+  "grappled": [
+   "prfirstmate24"
+  ],
+  "halt": [
+   "prcaptain07"
+  ],
+  "hull_damage": [
+   "prfirstmate07",
+   "prfirstmate08"
+  ],
+  "ironclad_destroyed": [
+   "prfirstmate13"
+  ],
+  "ironclad_spotted": [
+   "prspotter05"
+  ],
+  "landing_party": [
+   "prfirstmate16",
+   "prfirstmate16b"
+  ],
+  "lightning_hit": [
+   "prfirstmate05"
+  ],
+  "meteor_shower": [
+   "prspotter10"
+  ],
+  "mines": [
+   "prspotter22"
+  ],
+  "mission_failed": [
+   "prfirstmate03"
+  ],
+  "mission_won": [
+   "prfirstmate04",
+   "prfirstmate04b"
+  ],
+  "navy_ship_destroyed": [
+   "prfirstmate10"
+  ],
+  "navy_ship_spotted": [
+   "prspotter04"
+  ],
+  "nebula": [
+   "prspotter07"
+  ],
+  "on_my_target": [
+   "prcaptain02"
+  ],
+  "open_fire": [
+   "prcaptain09"
+  ],
+  "out_of_bounds": [
+   "prhelmsman01",
+   "prhelmsman01b"
+  ],
+  "out_of_range": [
+   "prfirstmate29"
+  ],
+  "own_ship_boarded": [
+   "prfirstmate23"
+  ],
+  "own_ship_conquered": [
+   "prfirstmate22"
+  ],
+  "pirate_ship_spotted": [
+   "prspotter02"
+  ],
+  "procyon_ship_spotted": [
+   "prspotter01"
+  ],
+  "protect_flagship": [
+   "prcaptain01",
+   "prcaptain05"
+  ],
+  "put_out_fire": [
+   "prfirstmate28",
+   "prfirstmate28b"
+  ],
+  "repell_boarders": [
+   "prfirstmate01",
+   "prfirstmate01b"
+  ],
+  "retreat": [
+   "prcaptain10",
+   "prfirstmate20",
+   "prfirstmate20b"
+  ],
+  "rudder_destroyed": [
+   "prengineer06",
+   "prengineer06b",
+   "prhelmsman02",
+   "prhelmsman02b"
+  ],
+  "sails_damaged": [
+   "prrigger03",
+   "prrigger03b"
+  ],
+  "sails_deployed": [
+   "prrigger01"
+  ],
+  "sails_destroyed": [
+   "prrigger04",
+   "prrigger04b"
+  ],
+  "sails_folded": [
+   "prrigger02"
+  ],
+  "setting_course": [
+   "prhelmsman08",
+   "prhelmsman08b"
+  ],
+  "ship_lost": [
+   "prfirstmate12",
+   "prfirstmate12b"
+  ],
+  "slow_ahead": [
+   "prhelmsman07",
+   "prhelmsman07b"
+  ],
+  "solar_storm": [
+   "prspotter08"
+  ],
+  "tender_spotted": [
+   "prspotter15"
+  ],
+  "torpedoes_away": [
+   "prgunner02"
+  ],
+  "town_spotted": [
+   "prspotter12"
+  ],
+  "undock": [
+   "prfirstmate15",
+   "prfirstmate15b"
+  ],
+  "vessel_spotted": [
+   "prspotter06"
+  ],
+  "vessel_spotted_civilian": [
+   "prspotter03"
+  ],
+  "vessel_spotted_navy": [
+   "prspotter04"
+  ],
+  "vessel_spotted_pirate": [
+   "prspotter02"
+  ],
+  "vessel_spotted_procyon": [
+   "prspotter01"
+  ],
+  "volcanoes": [
+   "prspotter19"
+  ],
+  "weapons_destroyed": [
+   "prengineer08",
+   "prengineer08b",
+   "prgunner04",
+   "prgunner05"
+  ],
+  "whale_spotted": [
+   "prspotter11"
+  ]
+ },
+ "Robot": {
+  "all_weapons_destroyed": [
+   "rogunner06",
+   "rogunner06b"
+  ],
+  "ammo_empty": [
+   "rogunner07"
+  ],
+  "ammo_hit": [
+   "roengineer05"
+  ],
+  "asteroids": [
+   "rospotter09"
+  ],
+  "black_hole": [
+   "rospotter18"
+  ],
+  "civilian_ship_spotted": [
+   "rospotter03"
+  ],
+  "cruising_speed": [
+   "rohelmsman06",
+   "rohelmsman06b"
+  ],
+  "dragons": [
+   "rospotter20"
+  ],
+  "emergency_speed": [
+   "rohelmsman04"
+  ],
+  "enemy_base_spotted": [
+   "rospotter13"
+  ],
+  "enemy_ship_spotted": [
+   "rospotter06b"
+  ],
+  "enemy_ship_spotted_civilian": [
+   "rospotter03"
+  ],
+  "enemy_ship_spotted_navy": [
+   "rospotter04"
+  ],
+  "enemy_ship_spotted_pirate": [
+   "rospotter02"
+  ],
+  "enemy_ship_spotted_procyon": [
+   "rospotter01"
+  ],
+  "enemy_tender_spotted": [
+   "rospotter17"
+  ],
+  "engine_destroyed": [
+   "roengineer04"
+  ],
+  "engine_hit": [
+   "roengineer07",
+   "roengineer07b",
+   "roengineer09"
+  ],
+  "engine_hit25": [
+   "roengineer03",
+   "roengineer03b"
+  ],
+  "engine_hit50": [
+   "roengineer02",
+   "roengineer02b"
+  ],
+  "engine_hit75": [
+   "roengineer01",
+   "roengineer01b"
+  ],
+  "ethereum_current": [
+   "rospotter21"
+  ],
+  "fire_mortar": [
+   "rogunner03"
+  ],
+  "fire_weapon": [
+   "rogunner01"
+  ],
+  "friendly_base_spotted": [
+   "rospotter14"
+  ],
+  "friendly_tender_spotted": [
+   "rospotter16"
+  ],
+  "full_ahead": [
+   "rohelmsman05",
+   "rohelmsman05b"
+  ],
+  "full_power": [
+   "rohelmsman04b"
+  ],
+  "full_stop": [
+   "rohelmsman03",
+   "rohelmsman03b"
+  ],
+  "ironclad_spotted": [
+   "rospotter05"
+  ],
+  "meteor_shower": [
+   "rospotter10"
+  ],
+  "mines": [
+   "rospotter22"
+  ],
+  "navy_ship_spotted": [
+   "rospotter04"
+  ],
+  "nebula": [
+   "rospotter07"
+  ],
+  "out_of_bounds": [
+   "rohelmsman01",
+   "rohelmsman01b"
+  ],
+  "pirate_ship_spotted": [
+   "rospotter02"
+  ],
+  "procyon_ship_spotted": [
+   "rospotter01"
+  ],
+  "rudder_destroyed": [
+   "roengineer06",
+   "roengineer06b",
+   "rohelmsman02",
+   "rohelmsman02b"
+  ],
+  "setting_course": [
+   "rohelmsman08",
+   "rohelmsman08b"
+  ],
+  "slow_ahead": [
+   "rohelmsman07",
+   "rohelmsman07b"
+  ],
+  "solar_storm": [
+   "rospotter08"
+  ],
+  "tender_spotted": [
+   "rospotter15"
+  ],
+  "torpedoes_away": [
+   "rogunner02"
+  ],
+  "town_spotted": [
+   "rospotter12"
+  ],
+  "vessel_spotted": [
+   "rospotter06"
+  ],
+  "vessel_spotted_civilian": [
+   "rospotter03"
+  ],
+  "vessel_spotted_navy": [
+   "rospotter04"
+  ],
+  "vessel_spotted_pirate": [
+   "rospotter02"
+  ],
+  "vessel_spotted_procyon": [
+   "rospotter01"
+  ],
+  "volcanoes": [
+   "rospotter19"
+  ],
+  "weapons_destroyed": [
+   "roengineer08",
+   "roengineer08b",
+   "rogunner04",
+   "rogunner05"
+  ],
+  "whale_spotted": [
+   "rospotter11"
+  ]
+ }
+}

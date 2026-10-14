@@ -1,0 +1,4 @@
+Synthetic text fixture; not original game content or a WOT grammar.
+
+  label = café
+label = repeated

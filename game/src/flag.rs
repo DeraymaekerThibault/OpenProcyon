@@ -1,0 +1,118 @@
+//! Ship flags: a waving cloth strip hung between the hull's Flag_Top / Flag_Bottom attachment points (streaming astern).
+use bevy::asset::RenderAssetUsages;
+use bevy::camera::visibility::NoFrustumCulling;
+use bevy::mesh::{Indices, PrimitiveTopology};
+use bevy::prelude::*;
+
+use crate::combat::Library;
+use crate::{Scenario, Ship, campaign::MissionShip};
+
+const SEG: usize = 10;
+#[derive(Component)]
+struct Flag {
+    top: Vec3,
+    bottom: Vec3,
+    phase: f32,
+}
+#[derive(Component)]
+struct Flagged;
+
+pub fn plugin(app: &mut App) {
+    app.add_systems(Update, (spawn, wave, retexture));
+}
+
+fn spawn(
+    mut commands: Commands,
+    assets: Res<AssetServer>,
+    lib: Res<Library>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut mats: ResMut<Assets<StandardMaterial>>,
+    ships: Query<(Entity, &Ship), Without<Flagged>>,
+) {
+    for (e, ship) in &ships {
+        commands.entity(e).insert(Flagged);
+        let class = &lib.classes[ship.class];
+        let Some((top, bottom)) = class.flag else { continue };
+        // shortcut: first flag of the faction, not the per-ship or per-mission flag choice.
+        let tex = if class.name.contains("Pirate") {
+            "flag_pirate00"
+        } else if class.name.contains("Procyon") {
+            "flag_procyon_00"
+        } else {
+            "flag_navy00"
+        };
+        let mut m = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
+        m.insert_attribute(Mesh::ATTRIBUTE_POSITION, vec![[0.0f32; 3]; (SEG + 1) * 2]);
+        m.insert_attribute(
+            Mesh::ATTRIBUTE_UV_0,
+            (0..=SEG)
+                .flat_map(|i| {
+                    let u = i as f32 / SEG as f32;
+                    [[1.0, 1.0 - u], [0.0, 1.0 - u]] // texture v runs along the cloth; retail has its bottom at the hoist
+                })
+                .collect::<Vec<_>>(),
+        );
+        m.insert_indices(Indices::U32(
+            (0..SEG as u32)
+                .flat_map(|i| {
+                    let a = i * 2;
+                    [a, a + 1, a + 2, a + 1, a + 3, a + 2]
+                })
+                .collect(),
+        ));
+        let mat = mats.add(StandardMaterial { base_color_texture: Some(assets.load(format!("flags/{tex}.png"))), unlit: true, cull_mode: None, double_sided: true, ..default() });
+        commands.spawn((
+            Scenario,
+            Flag { top, bottom, phase: e.index().index() as f32 },
+            Mesh3d(meshes.add(m)),
+            MeshMaterial3d(mat),
+            Transform::default(),
+            Visibility::default(),
+            NoFrustumCulling,
+            ChildOf(e),
+        ));
+    }
+}
+
+fn wave(time: Res<Time>, settings: Option<Res<crate::menu::Settings>>, mut meshes: ResMut<Assets<Mesh>>, q: Query<(&Flag, &Mesh3d)>) {
+    // Display Options 'Flag Waving' off: the cloth holds its last shape.
+    if settings.is_some_and(|s| !s.flags) {
+        return;
+    }
+    let t = time.elapsed_secs();
+    for (f, mesh) in &q {
+        let Some(mut m) = meshes.get_mut(&mesh.0) else { continue };
+        let len = 1.6 * f.top.distance(f.bottom);
+        let pos: Vec<[f32; 3]> = (0..=SEG)
+            .flat_map(|i| {
+                let u = i as f32 / SEG as f32;
+                // Streams toward the stern (+Z in the Bevy ship frame, bow is -Z), rippling sideways more toward the free end.
+                let side = Vec3::X * (0.25 * len * u * (4.0 * t - 7.0 * u + f.phase).sin());
+                let drop = Vec3::NEG_Y * 0.08 * len * u * u;
+                [f.top, f.bottom].map(|p| (p + Vec3::Z * len * u + side + drop).to_array())
+            })
+            .collect();
+        m.insert_attribute(Mesh::ATTRIBUTE_POSITION, pos);
+    }
+}
+
+/// Mission rules 'Set Ships Flag Texture': swap the cloth texture when the unit's flag name changes.
+fn retexture(
+    assets: Res<AssetServer>,
+    mut mats: ResMut<Assets<StandardMaterial>>,
+    flags: Query<(&ChildOf, &MeshMaterial3d<StandardMaterial>), With<Flag>>,
+    ships: Query<&MissionShip, Changed<MissionShip>>,
+) {
+    for (parent, mat) in &flags {
+        let Ok(ms) = ships.get(parent.parent()) else { continue };
+        if ms.flag.is_empty() {
+            continue;
+        }
+        let tex = assets.load(format!("flags/{}.png", ms.flag.trim_end_matches(".tga").to_lowercase()));
+        if let Some(mut m) = mats.get_mut(&mat.0)
+            && m.base_color_texture.as_ref() != Some(&tex)
+        {
+            m.base_color_texture = Some(tex);
+        }
+    }
+}

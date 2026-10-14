@@ -1,0 +1,30 @@
+.DEFAULT_GOAL := help
+.PHONY: help run check fmt test-python shot assets
+
+help:
+	@printf '%s\n' \
+	  'make run [ARGS="--mission 1"]     Run the game from the repository root' \
+	  'make check                        Format check, strict Clippy, Rust + Python tests' \
+	  'make fmt                          Format Rust source' \
+	  'make test-python                  Fast parser/exporter tests (no Rust build)' \
+	  'make shot OUT=local/ui.png [ARGS="--shot-frame 80 --late-frame 0"]' \
+	  'make assets ARGS="--game <install dir>"  Import your copy of the game (once; again after exporter changes)'
+
+run:
+	cargo run --release --manifest-path game/Cargo.toml -- $(ARGS)
+
+check:
+	tools/check.sh
+
+fmt:
+	cargo fmt --manifest-path game/Cargo.toml
+
+test-python:
+	python3 -m unittest discover -s tests
+
+shot:
+	@test -n "$(OUT)" || { echo 'Use make shot OUT=local/ui.png [ARGS="..."]' >&2; exit 1; }
+	tools/shot.sh "$(OUT)" $(ARGS)
+
+assets:
+	tools/build_assets.sh $(ARGS)

@@ -1,0 +1,3 @@
+# Parsers/exporters and Python tests. Install inside .venv, not globally.
+Pillow>=10
+numpy>=1.24
