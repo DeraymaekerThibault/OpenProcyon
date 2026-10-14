@@ -209,6 +209,11 @@ fn build(
                 let font = e["font"].as_str().unwrap_or("BlackChancery22");
                 let label = e["text"].as_str().map(|t| text_of(&strings, t)).unwrap_or_default();
                 let label = if impl_ == "Load or Save Campaign Button" && ig.page() == Some(Page::Save) { text_of(&strings, "IDGS_TPFRONTENDTEXT_SCREENS_SAVE") } else { label };
+                // Element colour (`Color Colour(r,g,b,a)`): titles are a black shadow label plus the coloured one.
+                let tint = e["color"].as_array().filter(|c| c.len() == 4).map_or(Color::WHITE, |c| {
+                    let k = |i: usize| c[i].as_f64().unwrap_or(1.0) as f32;
+                    Color::srgba(k(0), k(1), k(2), k(3))
+                });
                 let action = match (state.get(), impl_) {
                     (Screen::SinglePlayer, "Open Load Campaign Screen Button") => Some(Action::OpenLoad),
                     (Screen::Load, "Open Prev Arrow Button") => {
@@ -260,7 +265,7 @@ fn build(
                         None
                     }
                     (_, "Center Justify Label") => {
-                        ctx.text(c, font, &label, r[0], r[2] - r[0], (r[1] + r[3]) / 2.0, true, Color::WHITE);
+                        ctx.text(c, font, &label, r[0], r[2] - r[0], (r[1] + r[3]) / 2.0, true, tint);
                         None
                     }
                     (Screen::Main, "Open Single Player Menu Button") => Some(Action::Goto(Screen::SinglePlayer)),
@@ -276,19 +281,26 @@ fn build(
                         None
                     }
                     (Screen::CreateSkirmish, "List World Files") => {
-                        map_list(&ctx, c, rect, &sk);
+                        map_list(&ctx, c, &sk, &strings);
                         None
                     }
                     (Screen::CreateSkirmish, "Map Information Button") => {
-                        wrapped(&ctx, c, "Univers12", sk.map_json["description"].as_str().unwrap_or_default(), rect);
+                        // Measured: framed panel at the element's area; gold 'Map Description:' then Univers10 lines 16 apart.
+                        stretched_window(&ctx, c, [r[0], r[1] - 3.0, r[2], r[3] + 2.0]);
+                        ctx.text(c, "Univers10", &format!("{}:", text_of(&strings, "IDGS_TPFRONTENDTEXT02_MAP_DESCRIPTION")), r[0] + 5.0, 200.0, r[1] + 9.0, false, GOLD);
+                        wrapped(&ctx, c, "Univers10", sk.map_json["description"].as_str().unwrap_or_default(), [r[0] + 5.0, r[1] + 25.0, r[2] - 12.0, r[3]]);
                         None
                     }
                     (Screen::CreateSkirmish, "Radio Historical Map Button") => {
-                        ctx.text_button(c, rect, &text_of(&strings, "IDGS_TPFRONTENDTEXT01_HISTORICAL"), "Univers12", Action::Historical(true));
+                        radio(&ctx, c, rect, &text_of(&strings, "IDGS_TPFRONTENDTEXT01_VIEW_PRESET_MAPS"), sk.historical, Action::Historical(true));
                         None
                     }
                     (Screen::CreateSkirmish, "Radio Open Map Button") => {
-                        ctx.text_button(c, rect, &text_of(&strings, "IDGS_TPFRONTENDTEXT01_OPEN"), "Univers12", Action::Historical(false));
+                        radio(&ctx, c, rect, &text_of(&strings, "IDGS_TPFRONTENDTEXT01_VIEW_OPEN_MAPS"), !sk.historical, Action::Historical(false));
+                        None
+                    }
+                    // Fleet size (and the victory limit) only apply to open maps; historical maps bring their own fleets.
+                    (Screen::CreateSkirmish, "Fleet Size Label" | "Fleet Size Scrollbar Button" | "Victory Limit Label" | "Victory Points Scrollbar Button") if sk.historical => {
                         None
                     }
                     (Screen::CreateSkirmish, "Fleet Size Label") => {
@@ -510,6 +522,7 @@ fn frontend_backdrop(ctx: &Ctx, c: &mut ChildSpawnerCommands, scene: usize) {
             for (y, flip) in [(113.0 - h, false), (507.0, true)] {
                 let mut img = ImageNode::new(ctx.assets.load(format!("hud/tex/{sheet}.png")));
                 img.rect = Some(rect);
+                img.image_mode = NodeImageMode::Stretch;
                 img.flip_y = flip;
                 c.spawn((img, ctx.node(x, y, w, h)));
             }
@@ -531,19 +544,79 @@ fn arrow(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], name: 
     root.insert(Art(parts));
 }
 
-/// Map list: FrontEnd_SortList slots (20 px rows), filtered by the Historical / Open radio.
-fn map_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, _]: [f32; 4], sk: &Skirmish) {
-    for (row, (i, m)) in sk.maps.iter().enumerate().filter(|(_, m)| m.2 != sk.historical).enumerate() {
-        let y = t + row as f32 * 21.0;
-        let mut parts = vec![];
-        let name = if i == sk.selected { "FrontEnd_SortList_SlotBackground_Selected" } else { "FrontEnd_SortList_SlotBackground" };
-        let mut b = c.spawn((Interaction::None, Action::PickMap(i), ctx.node(l, y, r - l, 20.0)));
+/// Retail gold for highlighted labels (the `Center Justify Label` title colour).
+const GOLD: Color = Color::srgb(1.0, 0.796, 0.0);
+
+/// Map list as measured on the original: a framed panel (x 280..712, y 120..318) with a lighter header bar holding 'Historical Maps' /
+/// 'Open Maps' and 'Players' in UniversBold14, Univers12 rows 19 apart from y 172 with the playable player count at x 578, a teal bar
+/// behind the selected map, and the retail scrollbar at x 727..752. PROVISIONAL: header bar and selection colours are matched by eye.
+fn map_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, sk: &Skirmish, strings: &Value) {
+    let (l, r) = (280.0, 712.0);
+    stretched_window(ctx, c, [l, 120.0, r, 318.0]);
+    c.spawn((ctx.node(l + 4.0, 122.0, r - l - 8.0, 30.0), BackgroundColor(Color::srgba(0.25, 0.75, 0.85, 0.22))));
+    let heading = if sk.historical { "IDGS_TPFRONTENDTEXT01_VIEW_PRESET_MAPS" } else { "IDGS_TPFRONTENDTEXT01_VIEW_OPEN_MAPS" };
+    ctx.text(c, "UniversBold14", &text_of(strings, heading), 298.0, 240.0, 136.0, false, Color::WHITE);
+    ctx.text(c, "UniversBold14", &text_of(strings, "IDGS_TPFRONTENDTEXT01_PLAYERS"), 540.0, 80.0, 136.0, true, Color::WHITE);
+    let rows: Vec<_> = sk.maps.iter().enumerate().filter(|(_, m)| m.2 != sk.historical).collect();
+    for (row, (i, m)) in rows.iter().enumerate() {
+        let cy = 172.0 + row as f32 * 19.0;
+        let mut b = c.spawn((Interaction::None, Action::PickMap(*i), ctx.node(l + 4.0, cy - 9.5, r - l - 8.0, 19.0)));
+        b.insert(BackgroundColor(if *i == sk.selected { Color::srgba(0.2, 0.7, 0.8, 0.45) } else { Color::NONE }));
         b.with_children(|c| {
-            parts.extend(ctx.hud_piece(c, name, 0.0, 0.0, r - l, 20.0));
-            ctx.text(c, "Univers12", &m.1, 8.0, r - l, 10.0, false, if i == sk.selected { Color::srgb(1.0, 0.9, 0.4) } else { Color::WHITE });
+            ctx.text(c, "Univers12", &m.1, 14.0, 240.0, 9.5, false, Color::WHITE);
+            ctx.text(c, "Univers12", &m.3.to_string(), 278.0, 40.0, 9.5, true, Color::WHITE);
         });
-        b.insert(Art(parts));
     }
+    scrollbar(ctx, c, [727.0, 155.0, 752.0, 322.0], 0.0, 1.0);
+}
+
+/// One retail sprite stretched over a box (reference units).
+fn piece(ctx: &Ctx, c: &mut ChildSpawnerCommands, name: &str, [l, t, r, b]: [f32; 4], flip: (bool, bool)) {
+    let Some((sheet, rect)) = sprite(ctx.hud, name, "NoCursor") else { return };
+    let mut img = ImageNode::new(ctx.assets.load(format!("hud/tex/{sheet}.png")));
+    img.rect = Some(inset(&sheet, rect));
+    img.image_mode = NodeImageMode::Stretch;
+    (img.flip_x, img.flip_y) = flip;
+    c.spawn((img, ctx.node(l, t, r - l, b - t)));
+}
+
+/// The retail framed panel: `FRONTEND_STRETCHEDWINDOW_*` gives one corner (mirrored to the other three), an edge column/row and a fill.
+fn stretched_window(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4]) {
+    let k = 33.0; // corner tile size
+    piece(ctx, c, "FRONTEND_STRETCHEDWINDOW_CENTERFILL_TILE", [l + k, t + k, r - k, b - k], (false, false));
+    for (flip_x, x0, x1) in [(false, l, l + k), (true, r - k, r)] {
+        for (flip_y, y0, y1) in [(false, t, t + k), (true, b - k, b)] {
+            piece(ctx, c, "FRONTEND_STRETCHEDWINDOW_TOPLEFT_CORNERTILE", [x0, y0, x1, y1], (flip_x, flip_y));
+        }
+        piece(ctx, c, "FRONTEND_STRETCHEDWINDOW_LEFTCENTER_TILE", [x0, t + k, x1, b - k], (flip_x, false));
+    }
+    for (flip_y, y0, y1) in [(false, t, t + k), (true, b - k, b)] {
+        piece(ctx, c, "FRONTEND_STRETCHEDWINDOW_TOPCENTER_TILE", [l + k, y0, r - k, y1], (false, flip_y));
+    }
+}
+
+/// The retail vertical scrollbar: track (`..._SLIDER_BACKGROUND_TOP/STRETCHED_CENTER/BOTTOM`) and a slider over the visible part.
+fn scrollbar(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], start: f32, len: f32) {
+    let cap = |name: &str| sprite(ctx.hud, name, "NoCursor").map_or(20.0, |(_, r)| r.height());
+    let track = |c: &mut ChildSpawnerCommands, prefix: &str, t: f32, b: f32| {
+        let (top, bottom) = (cap(&format!("{prefix}_TOP")), cap(&format!("{prefix}_BOTTOM")));
+        piece(ctx, c, &format!("{prefix}_TOP"), [l, t, r, t + top], (false, false));
+        piece(ctx, c, &format!("{prefix}_STRETCHED_CENTER"), [l, t + top, r, b - bottom], (false, false));
+        piece(ctx, c, &format!("{prefix}_BOTTOM"), [l, b - bottom, r, b], (false, false));
+    };
+    track(c, "FRONTEND_SCROLLBAR_SLIDER_BACKGROUND", t, b);
+    let h = b - t;
+    track(c, "FRONTEND_SCROLLBAR_SLIDER", t + h * start, t + h * (start + len).min(1.0));
+}
+
+/// A retail radio choice: check box (`FrontEnd_Check_Box_Ready` ticked / `_NotReady`) and its Univers12 label.
+fn radio(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], label: &str, on: bool, action: Action) {
+    let cy = (t + b) / 2.0 - 3.0; // measured: the original row sits 3 units above the element's centre
+    let mut root = c.spawn((Interaction::None, action, ctx.node(l, t, r - l, b - t)));
+    root.with_children(|c| {
+        piece(ctx, c, if on { "FrontEnd_Check_Box_Ready" } else { "FrontEnd_Check_Box_NotReady" }, [0.0, (b - t) / 2.0 - 10.0, 18.0, (b - t) / 2.0 + 10.0], (false, false));
+        ctx.text(c, "Univers12", label, 24.0, r - l - 24.0, cy - t, false, Color::WHITE);
+    });
 }
 
 fn wrapped(ctx: &Ctx, c: &mut ChildSpawnerCommands, font: &str, s: &str, [l, t, r, b]: [f32; 4]) {

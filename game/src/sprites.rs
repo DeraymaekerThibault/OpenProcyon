@@ -202,6 +202,7 @@ impl Font {
                     if let Some(sheet) = self.sheets.get(g.tex) {
                         let mut img = ImageNode::new(sheet.clone()).with_color(color);
                         img.rect = Some(Rect::new(g.x, g.row * self.height, g.x + g.w, (g.row + 1.0) * self.height));
+                        img.image_mode = NodeImageMode::Stretch;
                         c.spawn((img, Node { position_type: PositionType::Absolute, left: px(pen), top: px(0.0), width: px(g.w), height: px(self.height), ..default() }));
                     }
                     pen += g.next;

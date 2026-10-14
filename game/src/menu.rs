@@ -55,7 +55,7 @@ pub struct Slot {
 pub struct Skirmish {
     pub map: Option<String>,
     pub slots: Vec<Slot>,
-    pub maps: Vec<(String, String, bool)>, // id, name, open (MustAssembleFleet)
+    pub maps: Vec<(String, String, bool, usize)>, // id, name, open (MustAssembleFleet), playable players
     pub selected: usize,
     pub historical: bool,
     pub fleet_size: usize,
@@ -462,6 +462,23 @@ impl Skirmish {
     }
 }
 
+/// The skirmish list: every `maps/<id>/map.json` flagged `"skirmish": true` (campaign maps are not offered), sorted by id, with
+/// whether it is open (fleets assembled) and its playable player count (the original's 'Players' column; ports and towns excluded).
+pub fn skirmish_maps() -> Vec<(String, String, bool, usize)> {
+    let mut maps: Vec<(String, String, bool, usize)> = std::fs::read_dir(assets_dir().join("maps"))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|e| {
+            let m: Value = serde_json::from_str(&std::fs::read_to_string(e.path().join("map.json")).ok()?).ok()?;
+            let players = m["players"].as_array().map_or(0, |p| p.iter().filter(|p| p["playable"].as_bool().unwrap_or(false)).count());
+            m["skirmish"].as_bool()?.then(|| (e.file_name().to_string_lossy().into(), m["name"].as_str().unwrap_or("").into(), m["assemble"].as_bool().unwrap_or(false), players))
+        })
+        .collect();
+    maps.sort();
+    maps
+}
+
 /// A back/forward arrow button (views mark them; the `Action` alone does not say which way it points).
 #[derive(Component)]
 pub struct ArrowButton {
@@ -513,27 +530,19 @@ fn button_sounds(
 }
 
 pub fn plugin(app: &mut App) {
-    // The skirmish list: every `maps/<id>/map.json` flagged `"skirmish": true` (campaign maps are not offered), sorted by id.
-    let mut maps: Vec<(String, String, bool)> = std::fs::read_dir(assets_dir().join("maps"))
-        .into_iter()
-        .flatten()
-        .flatten()
-        .filter_map(|e| {
-            let m: Value = serde_json::from_str(&std::fs::read_to_string(e.path().join("map.json")).ok()?).ok()?;
-            m["skirmish"].as_bool()?.then(|| (e.file_name().to_string_lossy().into(), m["name"].as_str().unwrap_or("").into(), m["assemble"].as_bool().unwrap_or(false)))
-        })
-        .collect();
-    maps.sort();
+    let maps = skirmish_maps();
     // `--menu lobby --map <id>` opens the lobby for that map.
     let args: Vec<String> = std::env::args().collect();
     let asked = args.windows(2).find(|w| w[0] == "--map").and_then(|w| maps.iter().position(|m| m.0 == w[1]));
-    let selected = asked.or_else(|| maps.iter().position(|m| m.2)).unwrap_or(0);
+    // The original opens on the historical maps (the 'Historical Maps' box ticked).
+    let selected = asked.or_else(|| maps.iter().position(|m| !m.2)).unwrap_or(0);
+    let historical = !maps.get(selected).is_some_and(|m| m.2);
     let mut sk = Skirmish {
         map: None,
         slots: vec![],
         maps,
         selected,
-        historical: false,
+        historical,
         fleet_size: 2,
         map_json: Value::Null,
         error: None,
@@ -1015,6 +1024,16 @@ mod tests {
     use super::*;
 
     #[test]
+    fn skirmish_list_counts_playable_players_like_the_original() {
+        let maps = skirmish_maps();
+        let get = |id: &str| maps.iter().find(|m| m.0 == id).unwrap_or_else(|| panic!("{id}"));
+        // Original 'Historical Maps' list: The Ambush 4, Bayle's Stand 2, Iron War 3, Locusts 4, Storm Front 2, The Maw 3.
+        for (id, n) in [("ambush", 4), ("bayles_stand", 2), ("iron_war", 3), ("locusts", 4), ("storm_front", 2), ("the_maw", 3)] {
+            assert_eq!((get(id).2, get(id).3), (false, n), "{id}");
+        }
+    }
+
+    #[test]
     fn menu_widgets_play_rollover_once_and_their_own_select_sound() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins).add_message::<crate::audio::Sfx>().add_systems(Update, button_sounds);
@@ -1050,7 +1069,7 @@ mod tests {
         let mut sk = Skirmish {
             map: None,
             slots: vec![],
-            maps: vec![(id.into(), id.into(), false)],
+            maps: vec![(id.into(), id.into(), false, 0)],
             selected: 0,
             historical: false,
             fleet_size: 2,
