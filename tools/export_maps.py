@@ -314,6 +314,10 @@ def main(root, out):
     (out / "maps" / "index.json").write_text(json.dumps(index))
     for n in [
         "FrontEndScreen0",
+        "FrontEndScreen1",
+        "FrontEndScreen2",
+        "FrontEndScreen3",
+        "FrontEndScreen4",
         "FrontEndMap",
         "FrontEndDialogScreen",
         "GameLobby",

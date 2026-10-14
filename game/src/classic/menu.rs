@@ -95,14 +95,14 @@ impl Ctx<'_> {
         let (sheet, r) = sprite(self.hud, name, "NoCursor")?;
         Some((self.image(c, &format!("hud/tex/{sheet}.png"), Some(inset(&sheet, r)), x, y, w, h, Color::WHITE), name.to_string()))
     }
-    /// Vector text, horizontally centred in [x, x+w] (or left-aligned), vertically centred on `cy`.
+    /// Retail bitmap text, horizontally centred in [x, x+w] (or left-aligned), vertically centred on `cy`.
     fn text(&self, c: &mut ChildSpawnerCommands, font: &str, s: &str, x: f32, w: f32, cy: f32, centre: bool, tint: Color) {
         let Some(f) = self.fonts.0.get(font).or_else(|| self.fonts.0.get("BlackChancery22")) else { return };
         let mut n = self.node(x, cy - f.height / 2.0, w, f.height);
         n.align_items = AlignItems::Center;
         n.justify_content = if centre { JustifyContent::Center } else { JustifyContent::FlexStart };
         c.spawn(n).with_children(|c| {
-            c.spawn((f.text(s, self.scale, tint), TextLayout::no_wrap()));
+            f.glyphs(c, s, self.scale, tint);
         });
     }
     /// Text button over the 3-piece FrontEnd_Texts_Over_Button art (44 px tall in the sheet, stretched to the rect).
@@ -256,8 +256,7 @@ fn build(
                         None
                     }
                     (_, "Front End Screen Backdrop") => {
-                        // FrontEndScreen0 is 800x512 with the picture in its top 394 rows; the element is 800x394.
-                        ctx.image(c, "menu/frontendscreen0.png", Some(Rect::new(0.0, 0.0, 800.0, 394.0)), r[0], r[1], r[2] - r[0], r[3] - r[1], Color::WHITE);
+                        frontend_backdrop(&ctx, c, if *state.get() == Screen::CreateSkirmish { 2 } else { 0 });
                         None
                     }
                     (_, "Center Justify Label") => {
@@ -382,9 +381,10 @@ fn options_page(ctx: &Ctx, c: &mut ChildSpawnerCommands, controls: bool, ingame:
     if ingame {
         ctx.image(c, "menu/fe_ingame_window.png", Some(Rect::new(10.0, 38.0, 682.0, 484.0)), 140.0, 132.0, 520.0, 343.0, Color::WHITE);
     } else {
-        ctx.image(c, "menu/frontendscreen0.png", Some(Rect::new(0.0, 0.0, 800.0, 394.0)), 0.0, 113.0, 800.0, 394.0, Color::WHITE);
+        frontend_backdrop(ctx, c, 1);
     }
-    let (arrow_c, arrow_r) = if ingame { ((400.0, 410.0), 30.0) } else { ((400.0, 495.0), 30.0) };
+    // Retail 'Open Prev Arrow Button' areas: [357,397,447,487] in game, [351,500,453,602] in the front end.
+    let (arrow_c, arrow_r) = if ingame { ((402.0, 442.0), 45.0) } else { ((402.0, 551.0), 51.0) };
     let target = match (controls, ingame) {
         (true, _) => back(Page::Options, Screen::Options),
         (false, _) => back(Page::Menu, Screen::Main),
@@ -425,8 +425,8 @@ fn options_page(ctx: &Ctx, c: &mut ChildSpawnerCommands, controls: bool, ingame:
         ctx.text(c, "BlackChancery22", &s(id), x - 100.0, 200.0, *y, true, gold);
     }
     c.spawn((ctx.node(l, t, r - l, 26.0), BackgroundColor(Color::srgba(0.1, 0.4, 0.6, 0.8))));
-    ctx.text(c, "Univers12", &s("IDGS_TPFRONTENDTEXT_SCREENS_CONTROL"), l + 12.0, 150.0, t + 13.0, false, Color::WHITE);
-    ctx.text(c, "Univers12", &s("IDGS_TPFRONTENDTEXT01_SELECT_KEY"), l + (r - l) * 0.6, 100.0, t + 13.0, false, Color::WHITE);
+    ctx.text(c, "UniversBold14", &s("IDGS_TPFRONTENDTEXT_SCREENS_CONTROL"), l + 12.0, 150.0, t + 13.0, false, Color::WHITE);
+    ctx.text(c, "UniversBold14", &s("IDGS_TPFRONTENDTEXT01_SELECT_KEY"), l + (r - l) * 0.6, 100.0, t + 13.0, false, Color::WHITE);
     c.spawn((ctx.node(l, t + 26.0, r - l, b - t - 26.0), BackgroundColor(Color::srgba(0.0, 0.1, 0.3, 0.6))));
     let row_h = (b - t - 30.0) / rows as f32;
     for (n, (_, label, key)) in binds.rows.iter().enumerate().skip(cui.scroll).take(rows) {
@@ -434,8 +434,9 @@ fn options_page(ctx: &Ctx, c: &mut ChildSpawnerCommands, controls: bool, ingame:
         let key = if cui.capture == Some(n) { s("IDGS_TPFRONTENDTEXT_SCREENS_PRESS_A_KEY") } else { crate::bindings::key_name(*key).to_string() };
         let mut row = c.spawn((ctx.node(l, y, r - l, row_h), Interaction::None, Action::Rebind(n), BackgroundColor(Color::NONE), Rest(Color::NONE)));
         row.with_children(|c| {
-            ctx.text(c, "Univers12", label, 12.0, 200.0, row_h / 2.0, false, Color::WHITE);
-            ctx.text(c, "Univers12", &key, (r - l) * 0.6, 100.0, row_h / 2.0, false, if cui.capture == Some(n) { gold } else { Color::WHITE });
+            // Measured on the original: rows in Univers10, the header in UniversBold14 (the widget declares Univers12).
+            ctx.text(c, "Univers10", label, 12.0, 200.0, row_h / 2.0, false, Color::WHITE);
+            ctx.text(c, "Univers10", &key, (r - l) * 0.6, 100.0, row_h / 2.0, false, if cui.capture == Some(n) { gold } else { Color::WHITE });
         });
     }
     // Scroll thumb (the mouse wheel scrolls).
@@ -457,14 +458,14 @@ fn sound_display_page(ctx: &Ctx, c: &mut ChildSpawnerCommands, display: bool, in
     if ingame {
         ctx.image(c, "menu/fe_ingame_window.png", Some(Rect::new(10.0, 38.0, 682.0, 484.0)), 140.0, 132.0, 520.0, 343.0, Color::WHITE);
     } else {
-        ctx.image(c, "menu/frontendscreen0.png", Some(Rect::new(0.0, 0.0, 800.0, 394.0)), 0.0, 113.0, 800.0, 394.0, Color::WHITE);
+        frontend_backdrop(ctx, c, 1);
     }
     let title = if display { "IDGS_TPFRONTENDTEXT_SCREENS_DISPLAY_OPTIONS" } else { "IDGS_TPFRONTENDTEXT_SCREENS_SOUND_OPTIONS" };
     ctx.text(c, "BlackChancery22", &s(title), 250.0, 300.0, if ingame { 190.0 } else { 160.0 }, true, gold);
     let (top, step, l, r) = if ingame { (215.0, 38.0, 170.0, 630.0) } else { (205.0, 50.0, 60.0, 700.0) };
     for (i, (setting, label, value)) in settings.rows(display).into_iter().enumerate() {
         let y = top + step * i as f32;
-        ctx.text(c, "Univers12", label, l, 220.0, y + 16.0, false, Color::WHITE);
+        ctx.text(c, if display { "UniversLightBold14" } else { "UniversBold14" }, label, l, 220.0, y + 16.0, false, Color::WHITE);
         ctx.text_button(c, [l + (r - l) * 0.5, y, r, y + 32.0], &value, "BlackChancery16", Action::Setting(setting));
     }
     if display {
@@ -478,8 +479,8 @@ fn sound_display_page(ctx: &Ctx, c: &mut ChildSpawnerCommands, display: bool, in
         );
     }
     let back = Action::Goto(if ingame { Screen::Battle } else { Screen::Options }).with_page(ingame.then_some(Page::Options));
-    let (cx, cy) = if ingame { (400.0, 410.0) } else { (400.0, 495.0) };
-    arrow(ctx, c, [cx - 30.0, cy - 30.0, cx + 30.0, cy + 30.0], "FrontEnd_Prev_Button", back);
+    let ([cx, cy], r) = if ingame { ([402.0, 442.0], 45.0) } else { ([402.0, 551.0], 51.0) };
+    arrow(ctx, c, [cx - r, cy - r, cx + r, cy + r], "FrontEnd_Prev_Button", back);
 }
 
 fn disabled(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], label: &str, font: &str) {
@@ -495,6 +496,32 @@ fn disabled(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], lab
 
 /// In-game menu frame (`frontenddialogscreen.png`) as the original draws it: left, top, width, height in 800x600 units.
 const DIALOG_FRAME: [f32; 4] = [74.0, 185.0, 653.0, 256.0];
+
+/// The front-end frame around a "Front End Screen Backdrop" panel (y 113..507), as on original screenshots: grid letterbox strips above
+/// and below (`FrontEnd_Letterbox_Tile`, mirrored below), one of the `FrontEndScreen0..4` scenes cropped to its 394 picture rows,
+/// the faint `FrontEndMap` contour overlay and the `FrontEnd_TP_Logo` centred at the top. The engine draws these, not the screen files.
+/// PROVISIONAL: which scene a screen shows is taken from screenshots (Skirmish 2, Options pages 1), 0 elsewhere.
+fn frontend_backdrop(ctx: &Ctx, c: &mut ChildSpawnerCommands, scene: usize) {
+    if let Some((sheet, r)) = sprite(ctx.hud, "FrontEnd_Letterbox_Tile", "NoCursor") {
+        let rect = inset(&sheet, r);
+        let (w, h) = (r.width(), r.height());
+        let mut x = 0.0;
+        while x < 800.0 {
+            for (y, flip) in [(113.0 - h, false), (507.0, true)] {
+                let mut img = ImageNode::new(ctx.assets.load(format!("hud/tex/{sheet}.png")));
+                img.rect = Some(rect);
+                img.flip_y = flip;
+                c.spawn((img, ctx.node(x, y, w, h)));
+            }
+            x += w;
+        }
+    }
+    ctx.image(c, &format!("menu/frontendscreen{scene}.png"), Some(Rect::new(0.0, 0.0, 800.0, 394.0)), 0.0, 113.0, 800.0, 394.0, Color::WHITE);
+    ctx.image(c, "menu/frontendmap.png", None, 0.0, 113.0 + (394.0 - 375.0) / 2.0, 800.0, 375.0, Color::WHITE);
+    if let Some((sheet, r)) = sprite(ctx.hud, "FrontEnd_TP_Logo", "NoCursor") {
+        ctx.image(c, &format!("hud/tex/{sheet}.png"), Some(inset(&sheet, r)), 400.0 - r.width() / 2.0, 0.0, r.width(), r.height(), Color::WHITE);
+    }
+}
 
 fn arrow(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], name: &str, action: Action) {
     let mut parts = vec![];
