@@ -137,6 +137,7 @@ fn build(
     window: Single<&Window, With<PrimaryWindow>>,
     roots: Query<Entity, With<MenuRoot>>,
     mut last: Local<Option<MenuKey>>,
+    preview: Option<Res<super::ship_preview::ShipPreview>>,
 ) {
     let (Some(hud), Some(fonts)) = (hud, fonts) else { return };
     if fonts.0.is_empty() {
@@ -360,9 +361,12 @@ fn build(
                         None
                     }
                     (Screen::Fleet, "Ship ViewPort Button") => {
-                        // The globe grid behind the 3D preview (the rotating hull itself is not drawn yet).
+                        // The globe grid with the 3D preview (classic/ship_preview.rs) on top.
                         // The 512x288 texture holds the grid in its top-left 393x285, the viewport's size: drawn 1:1.
                         ctx.image(c, "menu/fe_shipscreen_bg.png", Some(Rect::new(0.0, 0.0, r[2] - r[0], r[3] - r[1])), r[0], r[1], r[2] - r[0], r[3] - r[1], Color::WHITE);
+                        if let Some(p) = &preview {
+                            c.spawn((ImageNode::new(p.image.clone()), ctx.node(r[0], r[1], r[2] - r[0], r[3] - r[1])));
+                        }
                         None
                     }
                     (Screen::Fleet, "AutoAssign Button") => Some(Action::AutoAssign),
