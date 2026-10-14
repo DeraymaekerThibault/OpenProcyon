@@ -277,3 +277,20 @@ Do not invent a coverage percentage from name matches; define explicit evidence-
 For each work session, pick an ID, state the acceptance scenario, inspect its owning code/callers, investigate only unresolved original behaviour,
 and update this ledger plus the relevant `docs/re/` note. Run `tools/check.sh` for implementation changes and runtime smoke for ECS/UI changes.
 Documentation-only inventory work needs link/diff checks, not a game build.
+
+## Front end and HUD against original screenshots (2026-10-14)
+
+Reference: owner screenshots of the original at 1920x1200 (the 800x600 screen is drawn 2x, centred, x 160..1760), kept locally in
+`local/reference/` (never committed). Compared side by side in 800x600 units. Done: in-game menu frame placement, tile seams.
+
+| ID | Screen | Original | Ours / gap |
+|---|---|---|---|
+| UIR-01 | All | Retail bitmap fonts: upright BlackChancery for buttons/titles, bold Univers for lists/labels | Done: menu text draws from the retail glyph sheets; fonts per element measured on screenshots. World labels and the star map still use the vector stand-ins. |
+| UIR-02 | Front-end frame | Logo header, teal glow bars, grid strips above and below the panel; Options/Controls use the blue map-lines backdrop in a narrower panel (x 88..712) | Done: letterbox grid, logo, FrontEndScreen0..4 scenes (Skirmish 2, Options 1, others 0: PROVISIONAL), FrontEndMap overlay. |
+| UIR-03 | Skirmish | "Historical Maps / Players" list header with player counts, scrollbar, Historical/Open check boxes, framed Map Description panel | Done: matches the original screenshot; Victory Limit steps PROVISIONAL. |
+| UIR-04 | Game Lobby | Map name under the title; Flag / Player / Fleet / Team table with flag icons and drop-downs | Done: matches the original screenshot plus the Map Info dialog; flag icon choice and closing slots via the flag PROVISIONAL; no player profiles ("Player"). |
+| UIR-05 | Ships | 3D ship on a grid with ship-name drop-down; stats panel (class icon, Point Cost, hit points, speed, turning, crew, gun counts); "Available Ships" header and scrollbar; fleet slot bar 1-5 with arrows; Current Victory Points | Done: stats match the original Frigate panel; victory point budget; cost-sorted list; 3D preview (framing PROVISIONAL); Auto Assign rule and turning grades PROVISIONAL. Missing: ship-name drop-down, Load/Save Fleet, slot-bar scrolling. |
+| UIR-06 | Crew, Arms | `Crew Select Screen.tst` / `Arms Selection Screen.tst`: ship diagram with crew posts or gun mounts, stat bars, sort list, help text | Done: retail layout for both screens (posts, gunner ring and mounts at the weapon-panel offsets, stat bars, lists). Missing: skirmish crew roster, drag and drop, Load/Save, Auto Assign; stat-bar formula PROVISIONAL. |
+| UIR-07 | In-game menu | Summary enabled | Open: Summary needs the Game Summary page. |
+| UIR-08 | Game Summary | `Multiplayer Stats Screen.tst` (kills by object type) | Open: layout imported (`menu/multiplayer_stats_screen.json`); needs a screenshot of the kills-by-object-type table. |
+| UIR-09 | Battle HUD | Player list top right, speech text box above the command bar, talking-head portrait | Check against `battle_hud.png` |

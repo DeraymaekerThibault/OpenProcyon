@@ -360,6 +360,15 @@ def export(root, ship, outdir):
         sight=float(p.get("Default SightRange", 400.0)),
         repair_fx=p.get("Repair Effect Name"),
         cloakable=p.get("Is Cloakable", False) is True,
+        # Fleet-screen facts: point cost, crew posts ('Max number of <role>s'), display name string and ship-bar icon.
+        points=int(p.get("Victory Point Cost", 0)),
+        crew_posts={
+            k[len("Max number of ") :]: int(v)
+            for k, v in p.items()
+            if k.startswith("Max number of ") and isinstance(v, int)
+        },
+        display_name=p.get("Displayable Shipname String ID"),
+        icon=p.get("ShipBar Icon Texture"),
         engine_snd=[
             p.get(f"EngineSoundName {k}") for k in ("Half", "Full", "Emergency")
         ],

@@ -105,12 +105,39 @@ pub fn plugin(app: &mut App) {
 
 // ---- bitmap fonts (Fonts/*.fft) --------------------------------------------------------------------------------
 
-/// A retail font slot (name and line height from Fonts/*.fft) drawn with a scalable vector face instead of the bitmap sheet.
+/// A retail font (Fonts/*.fft): glyph sheets in `hud/tex/` with per-character rows and advances, drawn as the original does.
+/// The vector face remains for plain Bevy `Text` (world labels, star map) and for characters a sheet lacks.
 pub struct Font {
     pub face: Handle<bevy::text::Font>,
     metrics: std::sync::Arc<ab_glyph::FontVec>,
     pub size: f32,
     pub height: f32,
+    glyphs: HashMap<char, Glyph>,
+    sheets: Vec<Handle<Image>>,
+}
+
+/// One character on a glyph sheet: `row` (of `height` px) and `x`/`w` on sheet `tex`; `next` is the pen advance.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Glyph {
+    tex: usize,
+    row: f32,
+    x: f32,
+    w: f32,
+    next: f32,
+}
+
+/// The retail glyph table: single-character keys plus `QUOTE` for '"'; `row < 0` marks a character the font does not draw.
+fn glyph_table(v: &Value) -> HashMap<char, Glyph> {
+    let num = |g: &Value, k: &str| g[k].as_f64().unwrap_or(0.0) as f32;
+    v["chars"]
+        .as_object()
+        .into_iter()
+        .flatten()
+        .filter_map(|(k, g)| {
+            let c = if k == "QUOTE" { '"' } else { k.chars().next().filter(|_| k.chars().count() == 1)? };
+            (num(g, "row") >= 0.0).then(|| (c, Glyph { tex: g["tex"].as_u64().unwrap_or(0) as usize, row: num(g, "row"), x: num(g, "x"), w: num(g, "w"), next: num(g, "next") }))
+        })
+        .collect()
 }
 #[derive(Resource, Default)]
 pub struct Fonts(pub HashMap<String, Font>);
@@ -145,17 +172,43 @@ fn load_fonts(mut commands: Commands, assets: Res<AssetServer>, mut faces_assets
                 (assets.load(format!("fonts/{file}.otf")), std::sync::Arc::new(ab_glyph::FontVec::try_from_vec(bytes).expect("UI font parse")))
             })
             .clone();
-        fonts.0.insert(name, Font { face, metrics, size, height: v["height"].as_f64().unwrap_or(0.0) as f32 });
+        let sheets = v["textures"].as_array().into_iter().flatten().filter_map(|t| t.as_str()).map(|t| assets.load(format!("hud/tex/{}.png", t.to_lowercase()))).collect();
+        fonts.0.insert(name, Font { face, metrics, size, height: v["height"].as_f64().unwrap_or(0.0) as f32, glyphs: glyph_table(&v), sheets });
     }
     commands.insert_resource(fonts);
 }
 
 impl Font {
-    /// Text width in reference px.
+    /// The sheet glyph for `c`; fonts without lower case (Univers26) draw its capital.
+    fn glyph(&self, c: char) -> Option<&Glyph> {
+        self.glyphs.get(&c).or_else(|| self.glyphs.get(&c.to_ascii_uppercase()))
+    }
+    /// Text width in reference px (retail advances; the vector face only for characters the sheet lacks).
     pub fn width(&self, text: &str) -> f32 {
         use ab_glyph::{Font as _, ScaleFont};
         let f = self.metrics.as_scaled(ab_glyph::PxScale::from(self.size));
-        text.chars().map(|c| f.h_advance(f.glyph_id(c))).sum()
+        text.chars().map(|c| self.glyph(c).map_or_else(|| f.h_advance(f.glyph_id(c)), |g| g.next)).sum()
+    }
+    /// Draws `s` from the glyph sheets as one line node, `height` reference px tall and as wide as the text, at `scale` (reference
+    /// to screen px), tinted with `color` (the sheets are white). Characters missing from the sheet are skipped.
+    pub fn glyphs(&self, c: &mut ChildSpawnerCommands, s: &str, scale: f32, color: Color) -> Entity {
+        let px = |v: f32| Val::Px(v * scale);
+        let node = Node { width: px(self.width(s)), height: px(self.height), flex_shrink: 0.0, ..default() };
+        c.spawn(node)
+            .with_children(|c| {
+                let mut pen = 0.0;
+                for ch in s.chars() {
+                    let Some(g) = self.glyph(ch).copied() else { continue };
+                    if let Some(sheet) = self.sheets.get(g.tex) {
+                        let mut img = ImageNode::new(sheet.clone()).with_color(color);
+                        img.rect = Some(Rect::new(g.x, g.row * self.height, g.x + g.w, (g.row + 1.0) * self.height));
+                        img.image_mode = NodeImageMode::Stretch;
+                        c.spawn((img, Node { position_type: PositionType::Absolute, left: px(pen), top: px(0.0), width: px(g.w), height: px(self.height), ..default() }));
+                    }
+                    pen += g.next;
+                }
+            })
+            .id()
     }
     /// Text components at `scale` (reference px to screen px).
     pub fn text(&self, s: &str, scale: f32, color: Color) -> impl Bundle {
@@ -166,6 +219,23 @@ impl Font {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn retail_glyph_table_and_advances() {
+        let v = serde_json::json!({"chars": {
+            "A": {"row": 1, "x": 54, "w": 23, "tex": 0, "next": 19},
+            "QUOTE": {"row": 0, "x": 11, "w": 8, "tex": 0, "next": 8},
+            "a": {"row": -1, "x": 0, "w": 0, "tex": 0, "next": 0}
+        }});
+        let t = glyph_table(&v);
+        assert_eq!(t[&'A'], Glyph { tex: 0, row: 1.0, x: 54.0, w: 23.0, next: 19.0 });
+        assert!(t.contains_key(&'"'), "QUOTE is the double quote");
+        assert!(!t.contains_key(&'a'), "row -1: the font does not draw it");
+        // Measured on an original screenshot: the Controls header "Control" is 80 units wide in UniversBold14 (advance 77).
+        let f: Value = serde_json::from_str(&std::fs::read_to_string(assets_dir().join("hud/fonts/UniversBold14.json")).unwrap()).unwrap();
+        let t = glyph_table(&f);
+        assert_eq!("Control".chars().map(|c| t[&c].next).sum::<f32>(), 77.0);
+    }
+
     #[test]
     fn skin_follows_ship_race() {
         assert_eq!([skin_of("Navy"), skin_of("Pirate"), skin_of("Procyon"), skin_of("Civilian")], ["Navy", "Pirate", "Procyon", "Navy"]);

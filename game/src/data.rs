@@ -228,6 +228,12 @@ pub struct Class {
     pub repair_fx: Option<String>,
     /// WOT 'Is Cloakable' (only the Procyon submersible).
     pub cloakable: bool,
+    /// Fleet-screen facts from the WOT: 'Victory Point Cost', total crew posts ('Max number of ...'), display-name string id and
+    /// ship-bar icon sprite.
+    pub points: u32,
+    pub crew_posts: u32,
+    pub display_name: Option<String>,
+    pub icon: Option<String>,
     /// Bow-to-stern length of the WOT collision box (MaxExtents.y - MinExtents.y); the dock routine sizes its approach legs with it.
     pub length: f32,
     /// Authored collision box in Bevy's local frame; inherited ship mods retain/override these physics fields.
@@ -483,6 +489,10 @@ pub fn load_class(root: &std::path::Path, name: &str, guns: &HashMap<String, Gun
         repair_fx: j["repair_fx"].as_str().map(String::from),
         // Older exports lack the flag; the submersible is the only cloakable hull in the retail data.
         cloakable: j["cloakable"].as_bool().unwrap_or_else(|| name.contains("Submersible")),
+        points: j["points"].as_u64().unwrap_or(0) as u32,
+        crew_posts: j["crew_posts"].as_object().map_or(0, |m| m.values().filter_map(|v| v.as_u64()).sum::<u64>() as u32),
+        display_name: j["display_name"].as_str().map(String::from),
+        icon: j["icon"].as_str().map(String::from),
         length: ph["MaxExtents"][1].as_f64().zip(ph["MinExtents"][1].as_f64()).map_or((amx - amn).z, |(a, b)| (a - b) as f32),
         collision_bounds: bounds,
         mass_centre: crate::game_to_bevy(&ph["CenterOfMass"]),

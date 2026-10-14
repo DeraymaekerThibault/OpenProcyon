@@ -12,6 +12,7 @@ import re
 import shutil
 import sys
 from pathlib import Path
+import numpy as np
 from PIL import Image
 from tools.mdb import ci_file, ci_files
 from tools.mdb_to_glb import convert
@@ -185,13 +186,29 @@ def tiles(root, name):
     w = sum(t[(c, 0)].size[0] for c in range(cols))
     h = sum(t[(0, r)].size[1] for r in range(rows))
     im, x = Image.new("RGBA", (w, h)), 0
+    xs, ys = [], []
     for c in range(cols):
         y = 0
         for r in range(rows):
             im.paste(t[(c, r)], (x, y))
             y += t[(c, r)].size[1]
+            ys.append(y)
         x += t[(c, 0)].size[0]
-    return im
+        xs.append(x)
+    return fill_seams(im, xs[:-1], ys[: rows - 1])
+
+
+def fill_seams(im, xs, ys):
+    """Retail tiles leave their last column/row transparent; pasted edge to edge that shows as a seam line inside the image.
+    A transparent seam texel between two visible neighbours takes the colour of the texel before it."""
+    a = np.array(im)
+    for x in xs:
+        gap = (a[:, x - 1, 3] == 0) & (a[:, x - 2, 3] > 0) & (a[:, x, 3] > 0)
+        a[gap, x - 1] = a[gap, x - 2]
+    for y in ys:
+        gap = (a[y - 1, :, 3] == 0) & (a[y - 2, :, 3] > 0) & (a[y, :, 3] > 0)
+        a[y - 1, gap] = a[y - 2, gap]
+    return Image.fromarray(a)
 
 
 def parse_tst(text):
@@ -228,6 +245,10 @@ SCREENS = [
     "InGameMenu_Default",
     "InGameMenu_Load_Campaign",
     "Tutorial Screen",
+    "Crew Select Screen",
+    "Arms Selection Screen",
+    "Multiplayer Stats Screen",
+    "Journal Screen",
 ]
 
 
@@ -297,6 +318,10 @@ def main(root, out):
     (out / "maps" / "index.json").write_text(json.dumps(index))
     for n in [
         "FrontEndScreen0",
+        "FrontEndScreen1",
+        "FrontEndScreen2",
+        "FrontEndScreen3",
+        "FrontEndScreen4",
         "FrontEndMap",
         "FrontEndDialogScreen",
         "GameLobby",
@@ -320,7 +345,12 @@ def main(root, out):
         k: v
         for k, v in text.items()
         if k.startswith(
-            ("IDGS_TPFRONTENDTEXT", "IDGS_TPWORLDNAMES_", "IDGS_TPTEAMNAMES_")
+            (
+                "IDGS_TPFRONTENDTEXT",
+                "IDGS_TPWORLDNAMES_",
+                "IDGS_TPTEAMNAMES_",
+                "IDGS_TPDISPLAYABLESHIPTYPENAME_",
+            )
         )
     }
     (out / "menu" / "strings.json").write_text(json.dumps(keep))

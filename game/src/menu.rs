@@ -55,15 +55,19 @@ pub struct Slot {
 pub struct Skirmish {
     pub map: Option<String>,
     pub slots: Vec<Slot>,
-    pub maps: Vec<(String, String, bool)>, // id, name, open (MustAssembleFleet)
+    pub maps: Vec<(String, String, bool, usize)>, // id, name, open (MustAssembleFleet), playable players
     pub selected: usize,
     pub historical: bool,
     pub fleet_size: usize,
+    /// Victory points a fleet may cost (the setup's Victory Limit; ships spend their 'Victory Point Cost').
+    pub victory_limit: u32,
     pub map_json: Value,
     pub error: Option<&'static str>, // string id (or plain text) shown under the player list
     pub ship_pick: usize,
     pub fleet_pick: usize,
     pub arms_open: bool,
+    /// The lobby's Map Description dialog ('Map Info') is open.
+    pub map_info: bool,
     /// First row of the classic fixed-height ship list.
     pub scroll: usize,
 }
@@ -83,6 +87,8 @@ pub enum Action {
     PickMap(usize),
     Historical(bool),
     FleetSize,
+    /// Step the victory point limit (open maps).
+    VictoryLimit,
     Claim(usize),
     ToggleClosed(usize),
     CycleRace(usize),
@@ -90,6 +96,8 @@ pub enum Action {
     PickShip(usize),
     PickFleet(usize),
     AddShip,
+    /// Fill the fleet within the victory points.
+    AutoAssign,
     DropShip,
     OpenArms,
     Launch,
@@ -102,6 +110,8 @@ pub enum Action {
     DoLoad,
     DoSave,
     Remove,
+    /// Open or close the lobby's Map Description dialog.
+    MapInfo(bool),
     QuitToMenu,
     QuickSave,
     QuickLoad,
@@ -319,7 +329,8 @@ pub const RACES: [(u8, &str, &str); 3] =
     [(0, "Navy", "IDGS_TPFRONTENDTEXT03_FLEET_NAVY"), (2, "Pirate", "IDGS_TPFRONTENDTEXT03_FLEET_PIRATE"), (3, "Procyon", "IDGS_TPFRONTENDTEXT03_FLEET_PROCYON")];
 /// Hulls the retail fleet screen is not expected to offer: story/NIS/tutorial variants, lifeboats, wrecks, targets.
 /// PROVISIONAL: the exe lists every ship type of the chosen race; this name filter stands in for whatever hides these.
-const NOT_OFFERED: [&str; 12] = ["NIS", "Tutorial", "Feather", "Jim", "Amelia", "Wrecked", "Lifeboat", "Target", "Legacy", "StarHammer", "FastTurn", "WeaponBarge"];
+/// The original's Navy list includes the StarHammer and the Heavy Scout (Legacy hull), so those are not filtered.
+const NOT_OFFERED: [&str; 10] = ["NIS", "Tutorial", "Feather", "Jim", "Amelia", "Wrecked", "Lifeboat", "Target", "FastTurn", "WeaponBarge"];
 
 fn next_race(r: u8) -> u8 {
     match r {
@@ -332,7 +343,11 @@ fn next_race(r: u8) -> u8 {
 /// Ship classes the fleet screen offers for a race (mods can opt hulls in with `"skirmish": true`).
 pub fn offered(lib: &Library, race: u8) -> Vec<usize> {
     let Some((_, name, _)) = RACES.iter().find(|r| r.0 == race) else { return vec![] };
-    (0..lib.classes.len()).filter(|&i| lib.classes[i].race == *name && (lib.classes[i].skirmish || !NOT_OFFERED.iter().any(|n| lib.classes[i].name.contains(n)))).collect()
+    let mut list: Vec<usize> =
+        (0..lib.classes.len()).filter(|&i| lib.classes[i].race == *name && (lib.classes[i].skirmish || !NOT_OFFERED.iter().any(|n| lib.classes[i].name.contains(n)))).collect();
+    // As the original's 'Available Ships': most expensive first (StarHammer, Man-O-War, Frigate, ...).
+    list.sort_by(|&a, &b| lib.classes[b].points.cmp(&lib.classes[a].points).then_with(|| lib.classes[a].name.cmp(&lib.classes[b].name)));
+    list
 }
 
 /// Computer fleet: `n` armed hulls of the race, spread over the offered list. PROVISIONAL (the exe's AI fleet choice and victory-point budget are not decoded).
@@ -412,6 +427,11 @@ impl Skirmish {
         self.slots.iter().find(|s| s.kind == Kind::Human)
     }
     /// Why the game cannot launch yet (a string id, or plain text), if so.
+    /// Victory points the human player has left to spend on ships ('Current Victory Points').
+    pub fn points_left(&self, lib: &Library) -> i64 {
+        let spent: i64 = self.human().map_or(0, |h| h.fleet.iter().map(|n| lib.classes.iter().find(|c| &c.name == n).map_or(0, |c| i64::from(c.points))).sum());
+        i64::from(self.victory_limit) - spent
+    }
     pub fn launch_error(&self) -> Option<&'static str> {
         let h = self.human()?;
         if self.open() {
@@ -462,35 +482,137 @@ impl Skirmish {
     }
 }
 
-pub fn plugin(app: &mut App) {
-    // The skirmish list: every `maps/<id>/map.json` flagged `"skirmish": true` (campaign maps are not offered), sorted by id.
-    let mut maps: Vec<(String, String, bool)> = std::fs::read_dir(assets_dir().join("maps"))
+/// The skirmish list: every `maps/<id>/map.json` flagged `"skirmish": true` (campaign maps are not offered), sorted by id, with
+/// whether it is open (fleets assembled) and its playable player count (the original's 'Players' column; ports and towns excluded).
+pub fn skirmish_maps() -> Vec<(String, String, bool, usize)> {
+    let mut maps: Vec<(String, String, bool, usize)> = std::fs::read_dir(assets_dir().join("maps"))
         .into_iter()
         .flatten()
         .flatten()
         .filter_map(|e| {
             let m: Value = serde_json::from_str(&std::fs::read_to_string(e.path().join("map.json")).ok()?).ok()?;
-            m["skirmish"].as_bool()?.then(|| (e.file_name().to_string_lossy().into(), m["name"].as_str().unwrap_or("").into(), m["assemble"].as_bool().unwrap_or(false)))
+            let players = m["players"].as_array().map_or(0, |p| p.iter().filter(|p| p["playable"].as_bool().unwrap_or(false)).count());
+            m["skirmish"].as_bool()?.then(|| (e.file_name().to_string_lossy().into(), m["name"].as_str().unwrap_or("").into(), m["assemble"].as_bool().unwrap_or(false), players))
         })
         .collect();
     maps.sort();
+    maps
+}
+
+/// The fleet screen's ship information, as the original lists it.
+#[derive(Debug, PartialEq)]
+pub struct ShipStats {
+    pub hit_points: u32,
+    pub max_speed_kmh: u32,
+    /// String id of the turning grade ('IDGS_TPFRONTENDTEXT_TURNINGRATE_*').
+    pub turning: &'static str,
+    pub crew: u32,
+    pub heavy: usize,
+    pub medium: usize,
+    pub light: usize,
+    pub points: u32,
+}
+
+/// Stats for one class: hit points = core plus every damage section, speed = WOT MaxSpeed (m/s) in km/h, crew = all crew posts,
+/// guns counted by the mount type's size word (dual and non-selectable mounts included), point cost = 'Victory Point Cost'.
+/// Matches the original's Navy Frigate panel (3150, 21 km/h, Average, 23, 6/6/9, 131). PROVISIONAL: the turning grade bands on
+/// MaxAngularAcceleration are anchored on that one panel (frigate 0.609 = Average).
+pub fn ship_stats(lib: &Library, ci: usize) -> ShipStats {
+    let c = &lib.classes[ci];
+    let size = |word: &str| c.mounts.iter().filter(|m| lib.guns.get(&m.gun).and_then(|g| g.mount_type.as_deref()).is_some_and(|t| t.contains(word))).count();
+    let a = c.phys.max_ang_acc;
+    let turning = match a {
+        _ if a < 0.35 => "IDGS_TPFRONTENDTEXT_TURNINGRATE_VERYPOOR",
+        _ if a < 0.55 => "IDGS_TPFRONTENDTEXT_TURNINGRATE_POOR",
+        _ if a < 1.5 => "IDGS_TPFRONTENDTEXT_TURNINGRATE_AVERAGE",
+        _ if a < 4.0 => "IDGS_TPFRONTENDTEXT_TURNINGRATE_GOOD",
+        _ => "IDGS_TPFRONTENDTEXT_TURNINGRATE_VERYGOOD",
+    };
+    ShipStats {
+        hit_points: (c.core_hp + c.sections.iter().map(|s| s.hp).sum::<f32>()).round() as u32,
+        max_speed_kmh: (c.phys.max_speed * 3.6).round() as u32,
+        turning,
+        crew: c.crew_posts,
+        heavy: size("Heavy"),
+        medium: size("Medium"),
+        light: size("Light"),
+        points: c.points,
+    }
+}
+
+/// A back/forward arrow button (views mark them; the `Action` alone does not say which way it points).
+#[derive(Component)]
+pub struct ArrowButton {
+    pub forward: bool,
+}
+
+/// The retail front-end sound for pointing at (`select == false`) or pressing a widget, chosen by what it does; the names come
+/// from the retail `Sound/GUI` files.
+pub fn button_sound(action: &Action, arrow: Option<&ArrowButton>, select: bool) -> &'static str {
+    let list = matches!(action, Action::PickMap(_) | Action::PickShip(_) | Action::PickFleet(_) | Action::PickSave(_) | Action::Rebind(_));
+    if !select {
+        return if list { "FE_List_Rollover" } else { "FE_Button_Rollover" };
+    }
+    match (action, arrow) {
+        (_, Some(a)) => {
+            if a.forward {
+                "FE_Button_Forward_Select"
+            } else {
+                "FE_Button_Backward_Select"
+            }
+        }
+        _ if list => "FE_List_Select",
+        (Action::FleetSize | Action::Setting(_), _) => "SpinButton",
+        (Action::Launch | Action::Campaign | Action::Tutorial(_), _) => "StartButton",
+        (Action::AddShip, _) => "FE_Add",
+        (Action::DropShip | Action::Remove, _) => "FE_Drop",
+        _ => "FE_Button_Select",
+    }
+}
+
+/// Rollover when the pointer first reaches a widget, the select sound when it is pressed (not again when the press is released).
+fn button_sounds(
+    q: Query<(Entity, &Interaction, &Action, Option<&ArrowButton>), Changed<Interaction>>,
+    mut pointed: Local<std::collections::HashSet<Entity>>,
+    mut sfx: MessageWriter<crate::audio::Sfx>,
+) {
+    for (e, i, action, arrow) in &q {
+        if *i == Interaction::None {
+            pointed.remove(&e);
+            continue;
+        }
+        if pointed.insert(e) {
+            sfx.write(crate::audio::Sfx::ui(button_sound(action, arrow, false)));
+        }
+        if *i == Interaction::Pressed {
+            sfx.write(crate::audio::Sfx::ui(button_sound(action, arrow, true)));
+        }
+    }
+}
+
+pub fn plugin(app: &mut App) {
+    let maps = skirmish_maps();
     // `--menu lobby --map <id>` opens the lobby for that map.
     let args: Vec<String> = std::env::args().collect();
     let asked = args.windows(2).find(|w| w[0] == "--map").and_then(|w| maps.iter().position(|m| m.0 == w[1]));
-    let selected = asked.or_else(|| maps.iter().position(|m| m.2)).unwrap_or(0);
+    // The original opens on the historical maps (the 'Historical Maps' box ticked).
+    let selected = asked.or_else(|| maps.iter().position(|m| !m.2)).unwrap_or(0);
+    let historical = !maps.get(selected).is_some_and(|m| m.2);
     let mut sk = Skirmish {
         map: None,
         slots: vec![],
         maps,
         selected,
-        historical: false,
+        historical,
         fleet_size: 2,
+        victory_limit: 300,
         map_json: Value::Null,
         error: None,
         ship_pick: 0,
         fleet_pick: 0,
         scroll: 0,
         arms_open: false,
+        map_info: false,
     };
     sk.load_map();
     app.insert_resource(sk)
@@ -502,9 +624,13 @@ pub fn plugin(app: &mut App) {
         .insert_resource(Settings::load())
         .add_systems(Update, apply_settings)
         .configure_sets(Update, BuildMenu.after(capture_key).before(RunButtons).run_if(menu_active))
-        .add_systems(Update, (capture_key, buttons.in_set(RunButtons).run_if(menu_active), save_actions, save_text.run_if(menu_active)))
+        .add_systems(
+            Update,
+            (capture_key, buttons.in_set(RunButtons).run_if(menu_active), button_sounds.before(RunButtons).run_if(menu_active), save_actions, save_text.run_if(menu_active)),
+        )
         .add_systems(PostUpdate, esc_menu.run_if(in_state(Screen::Battle)))
-        .add_systems(Update, autolaunch.run_if(in_state(Screen::Lobby)));
+        .add_systems(Update, autolaunch.run_if(in_state(Screen::Lobby)))
+        .add_systems(Update, fleet_hook.run_if(in_state(Screen::Fleet)));
 }
 
 #[derive(Component)]
@@ -587,7 +713,26 @@ impl MenuModel<'_> {
 }
 
 /// Dev/smoke hook (`--menu lobby --autolaunch`): fills the human fleet like the fleet screen would and launches.
+/// Screenshot hook (`--menu fleet --script fleet-crew|fleet-arms`): an auto-assigned Navy fleet with the Crew / Arms screen open.
+fn fleet_hook(mut sk: ResMut<Skirmish>, lib: Res<Library>, mut done: Local<bool>) {
+    let args: Vec<String> = std::env::args().collect();
+    if *done || !args.windows(2).any(|w| w[0] == "--script" && w[1].starts_with("fleet-")) {
+        return;
+    }
+    *done = true;
+    if let Some(i) = sk.slots.iter().position(|s| s.kind == Kind::Human) {
+        sk.slots[i].race = 0;
+    }
+    sk.fleet_size = 5;
+    apply(&mut sk, &lib, &Action::AutoAssign);
+    sk.arms_open = true;
+}
+
 fn autolaunch(mut sk: ResMut<Skirmish>, lib: Res<Library>, mut next: ResMut<NextState<Screen>>) {
+    // Screenshot hook (`--menu lobby --script map-info`): open the Map Description dialog.
+    if !sk.map_info && std::env::args().collect::<Vec<_>>().windows(2).any(|w| w[0] == "--script" && w[1] == "map-info") {
+        sk.map_info = true;
+    }
     if !std::env::args().any(|a| a == "--autolaunch") {
         return;
     }
@@ -822,6 +967,12 @@ fn apply(sk: &mut Skirmish, lib: &Library, action: &Action) {
                 sk.load_map();
             }
         }
+        // PROVISIONAL steps: the original's scrollbar values are not recovered; 300 is the default seen on screenshots.
+        Action::VictoryLimit => {
+            const STEPS: [u32; 7] = [200, 300, 400, 500, 750, 1000, 1500];
+            let next = STEPS.iter().position(|&v| v == sk.victory_limit).map_or(1, |i| (i + 1) % STEPS.len());
+            sk.victory_limit = STEPS[next];
+        }
         Action::FleetSize => {
             sk.fleet_size = sk.fleet_size % 8 + 1;
             let n = sk.fleet_size;
@@ -873,11 +1024,13 @@ fn apply(sk: &mut Skirmish, lib: &Library, action: &Action) {
         }
         Action::OpenArms => sk.arms_open = sk.open() && sk.human().is_some_and(|h| !h.fleet.is_empty()),
         Action::PickShip(row) => sk.ship_pick = *row,
+        Action::MapInfo(open) => sk.map_info = *open,
         Action::PickFleet(row) => sk.fleet_pick = *row,
         Action::AddShip => {
-            let (limit, pick) = (sk.fleet_size, sk.ship_pick);
+            let (limit, pick, left) = (sk.fleet_size, sk.ship_pick, sk.points_left(lib));
             if let Some(h) = sk.slots.iter_mut().find(|s| s.kind == Kind::Human).filter(|h| h.fleet.len() < limit)
                 && let Some(&ci) = offered(lib, h.race).get(pick)
+                && i64::from(lib.classes[ci].points) <= left
             {
                 h.weapons.resize_with(h.fleet.len(), std::collections::BTreeMap::new);
                 h.fleet.push(lib.classes[ci].name.clone());
@@ -885,6 +1038,16 @@ fn apply(sk: &mut Skirmish, lib: &Library, action: &Action) {
                 sk.fleet_pick = h.fleet.len() - 1;
             }
             sk.error = None;
+        }
+        // PROVISIONAL: the original's auto-assign rule is not recovered; this adds the most expensive ship that still fits until the
+        // fleet is full or nothing fits.
+        Action::AutoAssign => {
+            while let Some(h) = sk.human().filter(|h| h.fleet.len() < sk.fleet_size) {
+                let left = sk.points_left(lib);
+                let Some(pick) = offered(lib, h.race).iter().position(|&c| i64::from(lib.classes[c].points) <= left) else { break };
+                sk.ship_pick = pick;
+                apply(sk, lib, &Action::AddShip);
+            }
         }
         Action::DropShip => {
             let pick = sk.fleet_pick;
@@ -961,6 +1124,91 @@ fn buttons(
 mod tests {
     use super::*;
 
+    #[test]
+    fn auto_assign_fills_the_fleet_within_the_points() {
+        let lib = Library::load(&assets_dir());
+        let mut sk = skirmish("red_rover");
+        sk.slots[0].race = 0;
+        sk.fleet_size = 5;
+        apply(&mut sk, &lib, &Action::AutoAssign);
+        let fleet = &sk.human().unwrap().fleet;
+        assert!(!fleet.is_empty() && fleet.len() <= 5);
+        assert!(sk.points_left(&lib) >= 0, "never overspends");
+        let navy = offered(&lib, 0);
+        assert_eq!(lib.classes[navy[0]].name, "Ship_Navy_StarHammer", "the original lists the StarHammer first");
+    }
+
+    #[test]
+    fn frigate_stats_match_the_original_fleet_screen() {
+        let lib = Library::load(&assets_dir());
+        let st = ship_stats(&lib, lib.index("Ship_Navy_Frigate"));
+        assert_eq!(st, ShipStats { hit_points: 3150, max_speed_kmh: 21, turning: "IDGS_TPFRONTENDTEXT_TURNINGRATE_AVERAGE", crew: 23, heavy: 6, medium: 6, light: 9, points: 131 });
+    }
+
+    #[test]
+    fn fleet_spends_victory_points() {
+        let lib = Library::load(&assets_dir());
+        let mut sk = skirmish("red_rover");
+        sk.slots[0].race = 0;
+        sk.ship_pick = offered(&lib, 0).iter().position(|&c| lib.classes[c].name == "Ship_Navy_Frigate").unwrap();
+        sk.fleet_size = 5;
+        assert_eq!(sk.points_left(&lib), 300);
+        apply(&mut sk, &lib, &Action::AddShip);
+        assert_eq!(sk.points_left(&lib), 169, "the original shows 169 after adding a frigate");
+        apply(&mut sk, &lib, &Action::AddShip);
+        apply(&mut sk, &lib, &Action::AddShip);
+        assert_eq!(sk.human().unwrap().fleet.len(), 2, "a third frigate would overspend 300 points");
+    }
+
+    #[test]
+    fn map_info_opens_and_closes_the_lobby_dialog() {
+        let lib = Library::load(&assets_dir());
+        let mut sk = skirmish("ambush");
+        apply(&mut sk, &lib, &Action::MapInfo(true));
+        assert!(sk.map_info);
+        apply(&mut sk, &lib, &Action::MapInfo(false));
+        assert!(!sk.map_info);
+    }
+
+    #[test]
+    fn skirmish_list_counts_playable_players_like_the_original() {
+        let maps = skirmish_maps();
+        let get = |id: &str| maps.iter().find(|m| m.0 == id).unwrap_or_else(|| panic!("{id}"));
+        // Original 'Historical Maps' list: The Ambush 4, Bayle's Stand 2, Iron War 3, Locusts 4, Storm Front 2, The Maw 3.
+        for (id, n) in [("ambush", 4), ("bayles_stand", 2), ("iron_war", 3), ("locusts", 4), ("storm_front", 2), ("the_maw", 3)] {
+            assert_eq!((get(id).2, get(id).3), (false, n), "{id}");
+        }
+    }
+
+    #[test]
+    fn menu_widgets_play_rollover_once_and_their_own_select_sound() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins).add_message::<crate::audio::Sfx>().add_systems(Update, button_sounds);
+        let row = app.world_mut().spawn((Action::PickMap(0), Interaction::None)).id();
+        let next = app.world_mut().spawn((Action::Goto(Screen::Lobby), ArrowButton { forward: true }, Interaction::None)).id();
+        let heard = |app: &mut App, e: Entity, i: Interaction| -> Vec<String> {
+            *app.world_mut().get_mut::<Interaction>(e).unwrap() = i;
+            app.update();
+            app.world_mut().resource_mut::<Messages<crate::audio::Sfx>>().drain().map(|s| s.name).collect()
+        };
+        assert_eq!(heard(&mut app, row, Interaction::Hovered), ["FE_List_Rollover"]);
+        assert_eq!(heard(&mut app, row, Interaction::Pressed), ["FE_List_Select"]);
+        assert!(heard(&mut app, row, Interaction::Hovered).is_empty(), "releasing the press is silent");
+        assert_eq!(heard(&mut app, next, Interaction::Pressed), ["FE_Button_Rollover", "FE_Button_Forward_Select"]);
+    }
+
+    #[test]
+    fn every_menu_sound_is_a_retail_file() {
+        let back = ArrowButton { forward: false };
+        let actions = [Action::Quit, Action::PickMap(0), Action::FleetSize, Action::Launch, Action::AddShip, Action::DropShip];
+        for a in &actions {
+            for (arrow, select) in [(None, false), (None, true), (Some(&back), true)] {
+                let name = button_sound(a, arrow, select);
+                assert!(crate::assets_dir().join(crate::audio::sound(name)).is_file(), "{name}");
+            }
+        }
+    }
+
     fn map(id: &str) -> Value {
         serde_json::from_str(&std::fs::read_to_string(assets_dir().join(format!("maps/{id}/map.json"))).unwrap()).unwrap()
     }
@@ -968,16 +1216,18 @@ mod tests {
         let mut sk = Skirmish {
             map: None,
             slots: vec![],
-            maps: vec![(id.into(), id.into(), false)],
+            maps: vec![(id.into(), id.into(), false, 0)],
             selected: 0,
             historical: false,
             fleet_size: 2,
+            victory_limit: 300,
             map_json: Value::Null,
             error: None,
             ship_pick: 0,
             fleet_pick: 0,
             scroll: 0,
             arms_open: false,
+            map_info: false,
         };
         sk.load_map();
         sk
@@ -1055,7 +1305,8 @@ mod tests {
         let mut sk = skirmish("diablo_straight"); // free-for-all, fleet size 2
         apply(&mut sk, &lib, &Action::CycleRace(0)); // none -> Navy
         assert_eq!(sk.slots[0].race, 0);
-        apply(&mut sk, &lib, &Action::PickShip(1));
+        let cheapest = offered(&lib, 0).len() - 1; // the list is most expensive first; points never limit cheap ships here
+        apply(&mut sk, &lib, &Action::PickShip(cheapest));
         for _ in 0..3 {
             apply(&mut sk, &lib, &Action::AddShip);
         }

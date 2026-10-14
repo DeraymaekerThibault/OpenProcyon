@@ -98,6 +98,10 @@ def pack(assets):
             "sight",
             "repair_fx",
             "cloakable",
+            "points",
+            "crew_posts",
+            "display_name",
+            "icon",
         ):
             if k in j:
                 ship[k] = j[k]

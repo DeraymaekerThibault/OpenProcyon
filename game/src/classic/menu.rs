@@ -59,22 +59,22 @@ fn hover(
 struct Art(Vec<(Entity, String)>);
 
 /// Sprite rect of a hud.hdt component for a cursor state ("NoCursor", "CursorOver", "CursorDown").
-fn sprite(hud: &HudData, name: &str, state: &str) -> Option<(String, Rect)> {
+pub(super) fn sprite(hud: &HudData, name: &str, state: &str) -> Option<(String, Rect)> {
     let d = hud.comps.get(name)?.get(MENU_SKIN)?;
     let r = d[format!("TextureArea - {state}")].as_array()?;
     let n = |i: usize| r[i].as_f64().unwrap_or(0.0) as f32;
     Some((d[format!("TextureName - {state}")].as_str()?.to_lowercase(), Rect::new(n(0), n(1), n(2) + 1.0, n(3) + 1.0)))
 }
 
-struct Ctx<'a> {
-    assets: &'a AssetServer,
-    hud: &'a HudData,
-    fonts: &'a Fonts,
-    scale: f32,
+pub(super) struct Ctx<'a> {
+    pub(super) assets: &'a AssetServer,
+    pub(super) hud: &'a HudData,
+    pub(super) fonts: &'a Fonts,
+    pub(super) scale: f32,
 }
 
 impl Ctx<'_> {
-    fn node(&self, x: f32, y: f32, w: f32, h: f32) -> Node {
+    pub(super) fn node(&self, x: f32, y: f32, w: f32, h: f32) -> Node {
         Node {
             position_type: PositionType::Absolute,
             left: Val::Px(x * self.scale),
@@ -84,7 +84,7 @@ impl Ctx<'_> {
             ..default()
         }
     }
-    fn image(&self, c: &mut ChildSpawnerCommands, path: &str, rect: Option<Rect>, x: f32, y: f32, w: f32, h: f32, tint: Color) -> Entity {
+    pub(super) fn image(&self, c: &mut ChildSpawnerCommands, path: &str, rect: Option<Rect>, x: f32, y: f32, w: f32, h: f32, tint: Color) -> Entity {
         let mut img = ImageNode::new(self.assets.load(path.to_string()));
         img.rect = rect;
         img.color = tint;
@@ -95,18 +95,18 @@ impl Ctx<'_> {
         let (sheet, r) = sprite(self.hud, name, "NoCursor")?;
         Some((self.image(c, &format!("hud/tex/{sheet}.png"), Some(inset(&sheet, r)), x, y, w, h, Color::WHITE), name.to_string()))
     }
-    /// Vector text, horizontally centred in [x, x+w] (or left-aligned), vertically centred on `cy`.
-    fn text(&self, c: &mut ChildSpawnerCommands, font: &str, s: &str, x: f32, w: f32, cy: f32, centre: bool, tint: Color) {
+    /// Retail bitmap text, horizontally centred in [x, x+w] (or left-aligned), vertically centred on `cy`.
+    pub(super) fn text(&self, c: &mut ChildSpawnerCommands, font: &str, s: &str, x: f32, w: f32, cy: f32, centre: bool, tint: Color) {
         let Some(f) = self.fonts.0.get(font).or_else(|| self.fonts.0.get("BlackChancery22")) else { return };
         let mut n = self.node(x, cy - f.height / 2.0, w, f.height);
         n.align_items = AlignItems::Center;
         n.justify_content = if centre { JustifyContent::Center } else { JustifyContent::FlexStart };
         c.spawn(n).with_children(|c| {
-            c.spawn((f.text(s, self.scale, tint), TextLayout::no_wrap()));
+            f.glyphs(c, s, self.scale, tint);
         });
     }
     /// Text button over the 3-piece FrontEnd_Texts_Over_Button art (44 px tall in the sheet, stretched to the rect).
-    fn text_button(&self, c: &mut ChildSpawnerCommands, rect: [f32; 4], label: &str, font: &str, action: Action) {
+    pub(super) fn text_button(&self, c: &mut ChildSpawnerCommands, rect: [f32; 4], label: &str, font: &str, action: Action) {
         let [l, t, r, b] = rect;
         let (w, h) = (r - l, b - t);
         let mut parts = vec![];
@@ -137,6 +137,7 @@ fn build(
     window: Single<&Window, With<PrimaryWindow>>,
     roots: Query<Entity, With<MenuRoot>>,
     mut last: Local<Option<MenuKey>>,
+    preview: Option<Res<super::ship_preview::ShipPreview>>,
 ) {
     let (Some(hud), Some(fonts)) = (hud, fonts) else { return };
     if fonts.0.is_empty() {
@@ -209,6 +210,11 @@ fn build(
                 let font = e["font"].as_str().unwrap_or("BlackChancery22");
                 let label = e["text"].as_str().map(|t| text_of(&strings, t)).unwrap_or_default();
                 let label = if impl_ == "Load or Save Campaign Button" && ig.page() == Some(Page::Save) { text_of(&strings, "IDGS_TPFRONTENDTEXT_SCREENS_SAVE") } else { label };
+                // Element colour (`Color Colour(r,g,b,a)`): titles are a black shadow label plus the coloured one.
+                let tint = e["color"].as_array().filter(|c| c.len() == 4).map_or(Color::WHITE, |c| {
+                    let k = |i: usize| c[i].as_f64().unwrap_or(1.0) as f32;
+                    Color::srgba(k(0), k(1), k(2), k(3))
+                });
                 let action = match (state.get(), impl_) {
                     (Screen::SinglePlayer, "Open Load Campaign Screen Button") => Some(Action::OpenLoad),
                     (Screen::Load, "Open Prev Arrow Button") => {
@@ -216,7 +222,9 @@ fn build(
                         None
                     }
                     (Screen::Battle, "Front End Dialog Screen Backdrop") => {
-                        ctx.image(c, "menu/frontenddialogscreen.png", None, r[0], r[1], r[2] - r[0], r[3] - r[1], Color::WHITE);
+                        // The retail frame does not fill this ReferenceArea (its buttons reach past the area's right edge).
+                        let [x, y, w, h] = dialog_frame(rect);
+                        ctx.image(c, "menu/frontenddialogscreen.png", None, x, y, w, h, Color::WHITE);
                         None
                     }
                     (Screen::Battle, "In Game Backdrop") => {
@@ -252,12 +260,11 @@ fn build(
                         None
                     }
                     (_, "Front End Screen Backdrop") => {
-                        // FrontEndScreen0 is 800x512 with the picture in its top 394 rows; the element is 800x394.
-                        ctx.image(c, "menu/frontendscreen0.png", Some(Rect::new(0.0, 0.0, 800.0, 394.0)), r[0], r[1], r[2] - r[0], r[3] - r[1], Color::WHITE);
+                        frontend_backdrop(&ctx, c, if *state.get() == Screen::CreateSkirmish { 2 } else { 0 });
                         None
                     }
                     (_, "Center Justify Label") => {
-                        ctx.text(c, font, &label, r[0], r[2] - r[0], (r[1] + r[3]) / 2.0, true, Color::WHITE);
+                        ctx.text(c, font, &label, r[0], r[2] - r[0], (r[1] + r[3]) / 2.0, true, tint);
                         None
                     }
                     (Screen::Main, "Open Single Player Menu Button") => Some(Action::Goto(Screen::SinglePlayer)),
@@ -273,19 +280,26 @@ fn build(
                         None
                     }
                     (Screen::CreateSkirmish, "List World Files") => {
-                        map_list(&ctx, c, rect, &sk);
+                        map_list(&ctx, c, &sk, &strings);
                         None
                     }
                     (Screen::CreateSkirmish, "Map Information Button") => {
-                        wrapped(&ctx, c, "Univers12", sk.map_json["description"].as_str().unwrap_or_default(), rect);
+                        // Measured: framed panel at the element's area; gold 'Map Description:' then Univers10 lines 16 apart.
+                        stretched_window(&ctx, c, [r[0], r[1] - 3.0, r[2], r[3] + 2.0]);
+                        ctx.text(c, "Univers10", &format!("{}:", text_of(&strings, "IDGS_TPFRONTENDTEXT02_MAP_DESCRIPTION")), r[0] + 5.0, 200.0, r[1] + 9.0, false, GOLD);
+                        wrapped(&ctx, c, "Univers10", sk.map_json["description"].as_str().unwrap_or_default(), [r[0] + 5.0, r[1] + 25.0, r[2] - 12.0, r[3]]);
                         None
                     }
                     (Screen::CreateSkirmish, "Radio Historical Map Button") => {
-                        ctx.text_button(c, rect, &text_of(&strings, "IDGS_TPFRONTENDTEXT01_HISTORICAL"), "Univers12", Action::Historical(true));
+                        radio(&ctx, c, rect, &text_of(&strings, "IDGS_TPFRONTENDTEXT01_VIEW_PRESET_MAPS"), sk.historical, Action::Historical(true));
                         None
                     }
                     (Screen::CreateSkirmish, "Radio Open Map Button") => {
-                        ctx.text_button(c, rect, &text_of(&strings, "IDGS_TPFRONTENDTEXT01_OPEN"), "Univers12", Action::Historical(false));
+                        radio(&ctx, c, rect, &text_of(&strings, "IDGS_TPFRONTENDTEXT01_VIEW_OPEN_MAPS"), !sk.historical, Action::Historical(false));
+                        None
+                    }
+                    // Fleet size (and the victory limit) only apply to open maps; historical maps bring their own fleets.
+                    (Screen::CreateSkirmish, "Fleet Size Label" | "Fleet Size Scrollbar Button" | "Victory Limit Label" | "Victory Points Scrollbar Button") if sk.historical => {
                         None
                     }
                     (Screen::CreateSkirmish, "Fleet Size Label") => {
@@ -297,6 +311,7 @@ fn build(
                         None
                     }
                     (Screen::Lobby, "Open Next Screen Button") => Some(Action::Launch),
+                    (Screen::Lobby, "Open Map Description Dialog Button") => Some(Action::MapInfo(true)),
                     (Screen::Lobby, "Open Previous Screen Button") => Some(Action::Goto(Screen::CreateSkirmish)),
                     (Screen::Lobby, "Open Ship Selection Screen") if sk.open() => Some(Action::Goto(Screen::Fleet)),
                     (Screen::Lobby, "Game Lobby Backdrop") => {
@@ -304,9 +319,9 @@ fn build(
                         None
                     }
                     (Screen::Lobby, "Lobby Information Button") => {
-                        if let Some(id) = sk.map.as_deref().filter(|_| sk.map_json["backdrop"].is_string()) {
-                            ctx.image(c, &format!("maps/{id}/backdrop.png"), None, r[0] + 10.0, r[1], r[3] - r[1], r[3] - r[1], Color::WHITE);
-                        }
+                        // Measured: a gold Univers10 'Map' label and the map name in Univers12 under the title.
+                        ctx.text(c, "Univers10", &text_of(&strings, "IDGS_TPFRONTENDTEXT01_SERVER_MAPNAME"), r[0], r[2] - r[0], 84.0, true, GOLD);
+                        ctx.text(c, "Univers12", sk.map_json["name"].as_str().unwrap_or_default(), r[0], r[2] - r[0], 101.0, true, Color::WHITE);
                         None
                     }
                     (Screen::Lobby, "Lobby Player List Button") => {
@@ -318,11 +333,11 @@ fn build(
                         None
                     }
                     (Screen::Fleet, "Ship Types Available") => {
-                        ship_list(&ctx, c, rect, &sk, &lib);
+                        ship_list(&ctx, c, rect, &sk, &lib, &strings);
                         None
                     }
                     (Screen::Fleet, "Fleet Select Button") => {
-                        fleet_list(&ctx, c, rect, &sk);
+                        fleet_list(&ctx, c, rect, &sk, &lib);
                         None
                     }
                     (Screen::Fleet, "Ship Information") => {
@@ -330,19 +345,39 @@ fn build(
                         None
                     }
                     (Screen::Fleet, "Ship Victory Points") => {
-                        let text = format!("{}: {}/{}", text_of(&strings, "IDGS_TPFRONTENDTEXT01_FLEET_SIZE_LIMIT"), sk.human().map_or(0, |h| h.fleet.len()), sk.fleet_size);
-                        ctx.text(c, font, &text, r[0], r[2] - r[0], (r[1] + r[3]) / 2.0, true, Color::WHITE);
+                        victory_points(&ctx, c, rect, &format!("{} : ", text_of(&strings, "IDGS_TPFRONTENDTEXT01_CURRENT_VICTORY_POINTS")), sk.points_left(&lib));
                         None
                     }
-                    (Screen::Fleet, "Open Arms Selection Screen") => Some(Action::OpenArms),
+                    (Screen::Fleet, "Open Ship Selection Screen") => {
+                        selected_tab(&ctx, c, rect, &label, font);
+                        None
+                    }
+                    // PROVISIONAL: Crew and Arms both open the shared crew & arms editor until their retail screens are rebuilt.
+                    (Screen::Fleet, "Open Arms Selection Screen" | "Open Crew Selection Screen") => Some(Action::OpenArms),
                     (Screen::Fleet, "Add Ship To Fleet Button") => Some(Action::AddShip),
                     (Screen::Fleet, "Drop Ship From Fleet Button") => Some(Action::DropShip),
                     (Screen::Fleet, "Open Next Arrow Button") => {
                         arrow(&ctx, c, rect, "FrontEnd_Next_Button", Action::Goto(Screen::Lobby));
                         None
                     }
-                    (Screen::Fleet, "Ship ViewPort Button") => None, // retail: rotating 3D preview of the selected hull (not done)
-                    (_, "Victory Points Scrollbar Button") | (_, "Victory Limit Label") => None, // victory points: not done
+                    (Screen::Fleet, "Ship ViewPort Button") => {
+                        // The globe grid with the 3D preview (classic/ship_preview.rs) on top.
+                        // The 512x288 texture holds the grid in its top-left 393x285, the viewport's size: drawn 1:1.
+                        ctx.image(c, "menu/fe_shipscreen_bg.png", Some(Rect::new(0.0, 0.0, r[2] - r[0], r[3] - r[1])), r[0], r[1], r[2] - r[0], r[3] - r[1], Color::WHITE);
+                        if let Some(p) = &preview {
+                            c.spawn((ImageNode::new(p.image.clone()), ctx.node(r[0], r[1], r[2] - r[0], r[3] - r[1])));
+                        }
+                        None
+                    }
+                    (Screen::Fleet, "AutoAssign Button") => Some(Action::AutoAssign),
+                    (Screen::CreateSkirmish, "Victory Limit Label") => {
+                        ctx.text(c, "Univers12", &text_of(&strings, "IDGS_TPFRONTENDTEXT_VICTORY_POINTS"), r[0], r[2] - r[0], (r[1] + r[3]) / 2.0, true, Color::WHITE);
+                        None
+                    }
+                    (Screen::CreateSkirmish, "Victory Points Scrollbar Button") => {
+                        ctx.text_button(c, rect, &sk.victory_limit.to_string(), "BlackChancery22", Action::VictoryLimit);
+                        None
+                    }
                     // Other retail buttons (multiplayer, options, profiles, campaign...) are shown but not implemented.
                     (_, n) if !label.is_empty() && (n.starts_with("Open") || n.contains("Button")) && !n.contains("Arrow") => {
                         disabled(&ctx, c, rect, &label, font);
@@ -353,6 +388,9 @@ fn build(
                 if let Some(a) = action {
                     ctx.text_button(c, rect, &label, font, a);
                 }
+            }
+            if *state.get() == Screen::Lobby && sk.map_info {
+                map_info_dialog(&ctx, c, &sk, &strings);
             }
         });
     });
@@ -378,9 +416,10 @@ fn options_page(ctx: &Ctx, c: &mut ChildSpawnerCommands, controls: bool, ingame:
     if ingame {
         ctx.image(c, "menu/fe_ingame_window.png", Some(Rect::new(10.0, 38.0, 682.0, 484.0)), 140.0, 132.0, 520.0, 343.0, Color::WHITE);
     } else {
-        ctx.image(c, "menu/frontendscreen0.png", Some(Rect::new(0.0, 0.0, 800.0, 394.0)), 0.0, 113.0, 800.0, 394.0, Color::WHITE);
+        frontend_backdrop(ctx, c, 1);
     }
-    let (arrow_c, arrow_r) = if ingame { ((400.0, 410.0), 30.0) } else { ((400.0, 495.0), 30.0) };
+    // Retail 'Open Prev Arrow Button' areas: [357,397,447,487] in game, [351,500,453,602] in the front end.
+    let (arrow_c, arrow_r) = if ingame { ((402.0, 442.0), 45.0) } else { ((402.0, 551.0), 51.0) };
     let target = match (controls, ingame) {
         (true, _) => back(Page::Options, Screen::Options),
         (false, _) => back(Page::Menu, Screen::Main),
@@ -421,8 +460,8 @@ fn options_page(ctx: &Ctx, c: &mut ChildSpawnerCommands, controls: bool, ingame:
         ctx.text(c, "BlackChancery22", &s(id), x - 100.0, 200.0, *y, true, gold);
     }
     c.spawn((ctx.node(l, t, r - l, 26.0), BackgroundColor(Color::srgba(0.1, 0.4, 0.6, 0.8))));
-    ctx.text(c, "Univers12", &s("IDGS_TPFRONTENDTEXT_SCREENS_CONTROL"), l + 12.0, 150.0, t + 13.0, false, Color::WHITE);
-    ctx.text(c, "Univers12", &s("IDGS_TPFRONTENDTEXT01_SELECT_KEY"), l + (r - l) * 0.6, 100.0, t + 13.0, false, Color::WHITE);
+    ctx.text(c, "UniversBold14", &s("IDGS_TPFRONTENDTEXT_SCREENS_CONTROL"), l + 12.0, 150.0, t + 13.0, false, Color::WHITE);
+    ctx.text(c, "UniversBold14", &s("IDGS_TPFRONTENDTEXT01_SELECT_KEY"), l + (r - l) * 0.6, 100.0, t + 13.0, false, Color::WHITE);
     c.spawn((ctx.node(l, t + 26.0, r - l, b - t - 26.0), BackgroundColor(Color::srgba(0.0, 0.1, 0.3, 0.6))));
     let row_h = (b - t - 30.0) / rows as f32;
     for (n, (_, label, key)) in binds.rows.iter().enumerate().skip(cui.scroll).take(rows) {
@@ -430,8 +469,9 @@ fn options_page(ctx: &Ctx, c: &mut ChildSpawnerCommands, controls: bool, ingame:
         let key = if cui.capture == Some(n) { s("IDGS_TPFRONTENDTEXT_SCREENS_PRESS_A_KEY") } else { crate::bindings::key_name(*key).to_string() };
         let mut row = c.spawn((ctx.node(l, y, r - l, row_h), Interaction::None, Action::Rebind(n), BackgroundColor(Color::NONE), Rest(Color::NONE)));
         row.with_children(|c| {
-            ctx.text(c, "Univers12", label, 12.0, 200.0, row_h / 2.0, false, Color::WHITE);
-            ctx.text(c, "Univers12", &key, (r - l) * 0.6, 100.0, row_h / 2.0, false, if cui.capture == Some(n) { gold } else { Color::WHITE });
+            // Measured on the original: rows in Univers10, the header in UniversBold14 (the widget declares Univers12).
+            ctx.text(c, "Univers10", label, 12.0, 200.0, row_h / 2.0, false, Color::WHITE);
+            ctx.text(c, "Univers10", &key, (r - l) * 0.6, 100.0, row_h / 2.0, false, if cui.capture == Some(n) { gold } else { Color::WHITE });
         });
     }
     // Scroll thumb (the mouse wheel scrolls).
@@ -453,14 +493,14 @@ fn sound_display_page(ctx: &Ctx, c: &mut ChildSpawnerCommands, display: bool, in
     if ingame {
         ctx.image(c, "menu/fe_ingame_window.png", Some(Rect::new(10.0, 38.0, 682.0, 484.0)), 140.0, 132.0, 520.0, 343.0, Color::WHITE);
     } else {
-        ctx.image(c, "menu/frontendscreen0.png", Some(Rect::new(0.0, 0.0, 800.0, 394.0)), 0.0, 113.0, 800.0, 394.0, Color::WHITE);
+        frontend_backdrop(ctx, c, 1);
     }
     let title = if display { "IDGS_TPFRONTENDTEXT_SCREENS_DISPLAY_OPTIONS" } else { "IDGS_TPFRONTENDTEXT_SCREENS_SOUND_OPTIONS" };
     ctx.text(c, "BlackChancery22", &s(title), 250.0, 300.0, if ingame { 190.0 } else { 160.0 }, true, gold);
     let (top, step, l, r) = if ingame { (215.0, 38.0, 170.0, 630.0) } else { (205.0, 50.0, 60.0, 700.0) };
     for (i, (setting, label, value)) in settings.rows(display).into_iter().enumerate() {
         let y = top + step * i as f32;
-        ctx.text(c, "Univers12", label, l, 220.0, y + 16.0, false, Color::WHITE);
+        ctx.text(c, if display { "UniversLightBold14" } else { "UniversBold14" }, label, l, 220.0, y + 16.0, false, Color::WHITE);
         ctx.text_button(c, [l + (r - l) * 0.5, y, r, y + 32.0], &value, "BlackChancery16", Action::Setting(setting));
     }
     if display {
@@ -474,11 +514,11 @@ fn sound_display_page(ctx: &Ctx, c: &mut ChildSpawnerCommands, display: bool, in
         );
     }
     let back = Action::Goto(if ingame { Screen::Battle } else { Screen::Options }).with_page(ingame.then_some(Page::Options));
-    let (cx, cy) = if ingame { (400.0, 410.0) } else { (400.0, 495.0) };
-    arrow(ctx, c, [cx - 30.0, cy - 30.0, cx + 30.0, cy + 30.0], "FrontEnd_Prev_Button", back);
+    let ([cx, cy], r) = if ingame { ([402.0, 442.0], 45.0) } else { ([402.0, 551.0], 51.0) };
+    arrow(ctx, c, [cx - r, cy - r, cx + r, cy + r], "FrontEnd_Prev_Button", back);
 }
 
-fn disabled(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], label: &str, font: &str) {
+pub(super) fn disabled(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], label: &str, font: &str) {
     let (w, h) = (r - l, b - t);
     let cap = 50.0 * h / 44.0;
     c.spawn(ctx.node(l, t, w, h)).with_children(|c| {
@@ -489,29 +529,143 @@ fn disabled(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], lab
     });
 }
 
+/// Where a 'Front End Dialog Screen Backdrop' frame (`frontenddialogscreen.png`) is drawn for its ReferenceArea `[l, t, r, b]`:
+/// centred on the screen, top at the area's top, scaled by 653/485 x 256/242. Fitted on the in-game menu (area [101,185,586,427]
+/// measured at x 74..727, y 185..441); it puts the frame's inner area around the dialog's content (in-game menu buttons x 174..629,
+/// map description text x 146..641). PROVISIONAL: one measured dialog.
+fn dialog_frame([l, t, r, b]: [f32; 4]) -> [f32; 4] {
+    let (w, h) = ((r - l) * 653.0 / 485.0, (b - t) * 256.0 / 242.0);
+    [400.0 - w / 2.0, t, w, h]
+}
+
+/// The front-end frame around a "Front End Screen Backdrop" panel (y 113..507), as on original screenshots: grid letterbox strips above
+/// and below (`FrontEnd_Letterbox_Tile`, mirrored below), one of the `FrontEndScreen0..4` scenes cropped to its 394 picture rows,
+/// the faint `FrontEndMap` contour overlay and the `FrontEnd_TP_Logo` centred at the top. The engine draws these, not the screen files.
+/// PROVISIONAL: which scene a screen shows is taken from screenshots (Skirmish 2, Options pages 1), 0 elsewhere.
+fn frontend_backdrop(ctx: &Ctx, c: &mut ChildSpawnerCommands, scene: usize) {
+    if let Some((sheet, r)) = sprite(ctx.hud, "FrontEnd_Letterbox_Tile", "NoCursor") {
+        let rect = inset(&sheet, r);
+        let (w, h) = (r.width(), r.height());
+        let mut x = 0.0;
+        while x < 800.0 {
+            for (y, flip) in [(113.0 - h, false), (507.0, true)] {
+                let mut img = ImageNode::new(ctx.assets.load(format!("hud/tex/{sheet}.png")));
+                img.rect = Some(rect);
+                img.image_mode = NodeImageMode::Stretch;
+                img.flip_y = flip;
+                c.spawn((img, ctx.node(x, y, w, h)));
+            }
+            x += w;
+        }
+    }
+    ctx.image(c, &format!("menu/frontendscreen{scene}.png"), Some(Rect::new(0.0, 0.0, 800.0, 394.0)), 0.0, 113.0, 800.0, 394.0, Color::WHITE);
+    ctx.image(c, "menu/frontendmap.png", None, 0.0, 113.0 + (394.0 - 375.0) / 2.0, 800.0, 375.0, Color::WHITE);
+    if let Some((sheet, r)) = sprite(ctx.hud, "FrontEnd_TP_Logo", "NoCursor") {
+        ctx.image(c, &format!("hud/tex/{sheet}.png"), Some(inset(&sheet, r)), 400.0 - r.width() / 2.0, 0.0, r.width(), r.height(), Color::WHITE);
+    }
+}
+
 fn arrow(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], name: &str, action: Action) {
     let mut parts = vec![];
-    let mut root = c.spawn((Interaction::None, action, ctx.node(l, t, r - l, b - t)));
+    let forward = name.contains("Next");
+    let mut root = c.spawn((Interaction::None, action, crate::menu::ArrowButton { forward }, ctx.node(l, t, r - l, b - t)));
     root.with_children(|c| parts.extend(ctx.hud_piece(c, name, 0.0, 0.0, r - l, b - t)));
     root.insert(Art(parts));
 }
 
-/// Map list: FrontEnd_SortList slots (20 px rows), filtered by the Historical / Open radio.
-fn map_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, _]: [f32; 4], sk: &Skirmish) {
-    for (row, (i, m)) in sk.maps.iter().enumerate().filter(|(_, m)| m.2 != sk.historical).enumerate() {
-        let y = t + row as f32 * 21.0;
-        let mut parts = vec![];
-        let name = if i == sk.selected { "FrontEnd_SortList_SlotBackground_Selected" } else { "FrontEnd_SortList_SlotBackground" };
-        let mut b = c.spawn((Interaction::None, Action::PickMap(i), ctx.node(l, y, r - l, 20.0)));
+/// Retail gold for highlighted labels (the `Center Justify Label` title colour).
+pub(super) const GOLD: Color = Color::srgb(1.0, 0.796, 0.0);
+
+/// Map list as measured on the original: a framed panel (x 280..712, y 120..318) with a lighter header bar holding 'Historical Maps' /
+/// 'Open Maps' and 'Players' in UniversBold14, Univers12 rows 19 apart from y 172 with the playable player count at x 578, a teal bar
+/// behind the selected map, and the retail scrollbar at x 727..752. PROVISIONAL: header bar and selection colours are matched by eye.
+fn map_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, sk: &Skirmish, strings: &Value) {
+    let (l, r) = (280.0, 712.0);
+    stretched_window(ctx, c, [l, 120.0, r, 318.0]);
+    c.spawn((ctx.node(l + 4.0, 122.0, r - l - 8.0, 30.0), BackgroundColor(Color::srgba(0.25, 0.75, 0.85, 0.22))));
+    let heading = if sk.historical { "IDGS_TPFRONTENDTEXT01_VIEW_PRESET_MAPS" } else { "IDGS_TPFRONTENDTEXT01_VIEW_OPEN_MAPS" };
+    ctx.text(c, "UniversBold14", &text_of(strings, heading), 298.0, 240.0, 136.0, false, Color::WHITE);
+    ctx.text(c, "UniversBold14", &text_of(strings, "IDGS_TPFRONTENDTEXT01_PLAYERS"), 540.0, 80.0, 136.0, true, Color::WHITE);
+    let rows: Vec<_> = sk.maps.iter().enumerate().filter(|(_, m)| m.2 != sk.historical).collect();
+    for (row, (i, m)) in rows.iter().enumerate() {
+        let cy = 172.0 + row as f32 * 19.0;
+        let mut b = c.spawn((Interaction::None, Action::PickMap(*i), ctx.node(l + 4.0, cy - 9.5, r - l - 8.0, 19.0)));
+        b.insert(BackgroundColor(if *i == sk.selected { Color::srgba(0.2, 0.7, 0.8, 0.45) } else { Color::NONE }));
         b.with_children(|c| {
-            parts.extend(ctx.hud_piece(c, name, 0.0, 0.0, r - l, 20.0));
-            ctx.text(c, "Univers12", &m.1, 8.0, r - l, 10.0, false, if i == sk.selected { Color::srgb(1.0, 0.9, 0.4) } else { Color::WHITE });
+            ctx.text(c, "Univers12", &m.1, 14.0, 240.0, 9.5, false, Color::WHITE);
+            ctx.text(c, "Univers12", &m.3.to_string(), 278.0, 40.0, 9.5, true, Color::WHITE);
         });
-        b.insert(Art(parts));
+    }
+    scrollbar(ctx, c, [727.0, 155.0, 752.0, 322.0], 0.0, 1.0);
+}
+
+/// An explicit region of a HUD sheet stretched over a box (for art the sprite table has no entry for).
+pub(super) fn sheet_piece(ctx: &Ctx, c: &mut ChildSpawnerCommands, sheet: &str, rect: Rect, [l, t, r, b]: [f32; 4]) {
+    let mut img = ImageNode::new(ctx.assets.load(format!("hud/tex/{sheet}.png")));
+    img.rect = Some(inset(sheet, rect));
+    img.image_mode = NodeImageMode::Stretch;
+    c.spawn((img, ctx.node(l, t, r - l, b - t)));
+}
+
+/// The current tab of a Ships / Crew / Arms row: the green `FrontEnd_Texts_Over_Button_Selected_*` button, not clickable.
+pub(super) fn selected_tab(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], label: &str, font: &str) {
+    let cap = 51.0 * (b - t) / 45.0;
+    piece(ctx, c, "FrontEnd_Texts_Over_Button_Selected_Left", [l, t, l + cap, b], (false, false));
+    piece(ctx, c, "FrontEnd_Texts_Over_Button_Selected_Center", [l + cap, t, r - cap, b], (false, false));
+    piece(ctx, c, "FrontEnd_Texts_Over_Button_Selected_Right", [r - cap, t, r, b], (false, false));
+    ctx.text(c, font, label, l, r - l, (t + b) / 2.0, true, Color::WHITE);
+}
+
+/// One retail sprite stretched over a box (reference units).
+pub(super) fn piece(ctx: &Ctx, c: &mut ChildSpawnerCommands, name: &str, [l, t, r, b]: [f32; 4], flip: (bool, bool)) {
+    let Some((sheet, rect)) = sprite(ctx.hud, name, "NoCursor") else { return };
+    let mut img = ImageNode::new(ctx.assets.load(format!("hud/tex/{sheet}.png")));
+    img.rect = Some(inset(&sheet, rect));
+    img.image_mode = NodeImageMode::Stretch;
+    (img.flip_x, img.flip_y) = flip;
+    c.spawn((img, ctx.node(l, t, r - l, b - t)));
+}
+
+/// The retail framed panel: `FRONTEND_STRETCHEDWINDOW_*` gives one corner (mirrored to the other three), an edge column/row and a fill.
+pub(super) fn stretched_window(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4]) {
+    let k = 33.0; // corner tile size
+    piece(ctx, c, "FRONTEND_STRETCHEDWINDOW_CENTERFILL_TILE", [l + k, t + k, r - k, b - k], (false, false));
+    for (flip_x, x0, x1) in [(false, l, l + k), (true, r - k, r)] {
+        for (flip_y, y0, y1) in [(false, t, t + k), (true, b - k, b)] {
+            piece(ctx, c, "FRONTEND_STRETCHEDWINDOW_TOPLEFT_CORNERTILE", [x0, y0, x1, y1], (flip_x, flip_y));
+        }
+        piece(ctx, c, "FRONTEND_STRETCHEDWINDOW_LEFTCENTER_TILE", [x0, t + k, x1, b - k], (flip_x, false));
+    }
+    for (flip_y, y0, y1) in [(false, t, t + k), (true, b - k, b)] {
+        piece(ctx, c, "FRONTEND_STRETCHEDWINDOW_TOPCENTER_TILE", [l + k, y0, r - k, y1], (false, flip_y));
     }
 }
 
-fn wrapped(ctx: &Ctx, c: &mut ChildSpawnerCommands, font: &str, s: &str, [l, t, r, b]: [f32; 4]) {
+/// The retail vertical scrollbar: track (`..._SLIDER_BACKGROUND_TOP/STRETCHED_CENTER/BOTTOM`) and a slider over the visible part.
+pub(super) fn scrollbar(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], start: f32, len: f32) {
+    let cap = |name: &str| sprite(ctx.hud, name, "NoCursor").map_or(20.0, |(_, r)| r.height());
+    let track = |c: &mut ChildSpawnerCommands, prefix: &str, t: f32, b: f32| {
+        let (top, bottom) = (cap(&format!("{prefix}_TOP")), cap(&format!("{prefix}_BOTTOM")));
+        piece(ctx, c, &format!("{prefix}_TOP"), [l, t, r, t + top], (false, false));
+        piece(ctx, c, &format!("{prefix}_STRETCHED_CENTER"), [l, t + top, r, b - bottom], (false, false));
+        piece(ctx, c, &format!("{prefix}_BOTTOM"), [l, b - bottom, r, b], (false, false));
+    };
+    track(c, "FRONTEND_SCROLLBAR_SLIDER_BACKGROUND", t, b);
+    let h = b - t;
+    track(c, "FRONTEND_SCROLLBAR_SLIDER", t + h * start, t + h * (start + len).min(1.0));
+}
+
+/// A retail radio choice: check box (`FrontEnd_Check_Box_Ready` ticked / `_NotReady`) and its Univers12 label.
+fn radio(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], label: &str, on: bool, action: Action) {
+    let cy = (t + b) / 2.0 - 3.0; // measured: the original row sits 3 units above the element's centre
+    let mut root = c.spawn((Interaction::None, action, ctx.node(l, t, r - l, b - t)));
+    root.with_children(|c| {
+        piece(ctx, c, if on { "FrontEnd_Check_Box_Ready" } else { "FrontEnd_Check_Box_NotReady" }, [0.0, (b - t) / 2.0 - 10.0, 18.0, (b - t) / 2.0 + 10.0], (false, false));
+        ctx.text(c, "Univers12", label, 24.0, r - l - 24.0, cy - t, false, Color::WHITE);
+    });
+}
+
+pub(super) fn wrapped(ctx: &Ctx, c: &mut ChildSpawnerCommands, font: &str, s: &str, [l, t, r, b]: [f32; 4]) {
     let Some(f) = ctx.fonts.0.get(font) else { return };
     let mut line = String::new();
     let mut y = t + f.height / 2.0;
@@ -555,22 +709,52 @@ fn cell(ctx: &Ctx, c: &mut ChildSpawnerCommands, [x, y, w, h]: [f32; 4], label: 
 #[derive(Component)]
 struct Rest(Color);
 
-/// Lobby player list, one row per playable player: name (click to take that slot), type, fleet type, team.
-/// Historical maps only let you pick the side; open maps let you open/close slots, pick fleet types and teams unless the map locks them.
-fn players_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, _]: [f32; 4], sk: &Skirmish, strings: &Value) {
+/// Lobby player table as measured on the original: a framed panel (x 222..782, y 122..448) with a 'Flag / Player / Fleet / Team' header
+/// in UniversBold14 and one row per playable player, 32 apart from y 184: the small flag icon, then Univers10 text in retail pull-down
+/// boxes (Player x 287..460, Fleet 470..561, Team 571..779 with its drop-down arrow). Clicking a player's box takes that slot, the
+/// fleet box cycles the fleet type and the team box the team (open maps). PROVISIONAL: the human row shows "Player" (no profiles),
+/// the flag icon is the race's icon block plus the slot number, and closing a slot on an open map is a click on its flag.
+fn players_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, _rect: [f32; 4], sk: &Skirmish, strings: &Value) {
     let s = |id: &str| strings[id].as_str().unwrap_or(id).to_string();
-    let (open, w) = (sk.open(), r - l);
-    let cols = [(10.0, 150.0), (170.0, 100.0), (280.0, 150.0), (440.0, w - 450.0)];
-    let head = [s("IDGS_TPFRONTENDTEXT01_PLAYERS"), String::new(), s("IDGS_TPFRONTENDTEXT02_RACE"), s("IDGS_TPFRONTENDTEXT02_TEAM")];
-    for (h, (x, cw)) in head.iter().zip(cols) {
-        ctx.text(c, "BlackChancery16", h, l + x, cw, t + 14.0, false, Color::srgb(1.0, 0.9, 0.4));
+    let open = sk.open();
+    stretched_window(ctx, c, [222.0, 122.0, 782.0, 448.0]);
+    c.spawn((ctx.node(226.0, 124.0, 552.0, 30.0), BackgroundColor(Color::srgba(0.25, 0.75, 0.85, 0.22))));
+    for (id, x0, x1) in [
+        ("IDGS_TPFRONTENDTEXT03_FLAG", 236.0, 292.0),
+        ("IDGS_TPFRONTENDTEXT_SCREENS_PLAYER", 287.0, 460.0),
+        ("IDGS_TPFRONTENDTEXT03_FLEET", 470.0, 561.0),
+        ("IDGS_TPFRONTENDTEXT02_TEAM", 571.0, 779.0),
+    ] {
+        ctx.text(c, "UniversBold14", &s(id), x0, x1 - x0, 138.0, true, Color::WHITE);
     }
     let teams = sk.map_json["teams"].as_array().cloned().unwrap_or_default();
     let team_locked = open && !teams.is_empty();
     for (i, slot) in sk.slots.iter().enumerate() {
-        let y = t + 32.0 + i as f32 * 28.0;
+        let cy = 184.0 + i as f32 * 32.0;
+        let me = slot.kind == Kind::Human;
+        let live = slot.kind != Kind::Closed;
+        let base = match slot.race {
+            2 => 10,
+            3 => 20,
+            _ => 0,
+        };
+        let flag = c.spawn((ctx.node(250.0, cy - 12.5, 28.0, 25.0), Interaction::None)).id();
+        if open && !me {
+            c.commands().entity(flag).insert(Action::ToggleClosed(i));
+        }
+        c.commands().entity(flag).with_children(|c| {
+            if live {
+                piece(ctx, c, &format!("FrontEnd_Flag_Small_Icon_{:02}", base + i % 10), [0.0, 0.0, 28.0, 25.0], (false, false));
+            }
+        });
+        // Several live players on one team are told apart by a letter ('Pirates A', 'B', 'C'), as on original screenshots.
+        let mates: Vec<usize> = sk.slots.iter().enumerate().filter(|(_, o)| o.kind != Kind::Closed && o.team == slot.team && slot.team >= 0).map(|(k, _)| k).collect();
+        let letter = match mates.iter().position(|&k| k == i) {
+            Some(n) if mates.len() > 1 => format!(" {}", (b'A' + n as u8) as char),
+            _ => String::new(),
+        };
         let team = match usize::try_from(slot.team).ok().and_then(|n| teams.get(n)) {
-            Some(tm) => s(tm["name_id"].as_str().unwrap_or("")),
+            Some(tm) => s(tm["name_id"].as_str().unwrap_or("")) + &letter,
             None if slot.team >= 0 => format!("{} {}", s("IDGS_TPFRONTENDTEXT02_TEAM"), slot.team + 1),
             None => "-".into(),
         };
@@ -580,53 +764,145 @@ fn players_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, _]: [f32; 4],
             Kind::Computer => s("IDGS_TPFRONTENDTEXT01_COMPUTER"),
             Kind::Closed => s("IDGS_TPFRONTENDTEXT01_CLOSED"),
         };
-        let live = slot.kind != Kind::Closed;
-        let me = slot.kind == Kind::Human;
-        let rows = [
-            (slot.name.clone(), live.then_some(Action::Claim(i))),
-            (kind, (open && !me).then_some(Action::ToggleClosed(i))),
-            (race, (open && live && !team_locked).then_some(Action::CycleRace(i))),
-            (team, (open && live).then_some(Action::CycleTeam(i))),
+        let cells = [
+            (287.0, 460.0, kind, (live && !me).then_some(Action::Claim(i)), false),
+            (470.0, 561.0, race, (open && live && !team_locked).then_some(Action::CycleRace(i)), false),
+            (571.0, 779.0, team, (open && live).then_some(Action::CycleTeam(i)), true),
         ];
-        for ((label, action), (x, cw)) in rows.into_iter().zip(cols) {
-            cell(ctx, c, [l + x, y, cw, 24.0], &label, me, action);
+        for (x0, x1, label, action, drop) in cells {
+            pulldown_cell(ctx, c, [x0, cy - 14.5, x1, cy + 14.5], &label, false, action, drop);
         }
     }
     if let Some(e) = sk.error {
-        ctx.text(c, "Univers12", &s(e), l, w, t + 32.0 + 9.0 * 28.0 + 8.0, false, Color::srgb(1.0, 0.4, 0.3));
+        ctx.text(c, "Univers12", &s(e), 236.0, 540.0, 184.0 + 8.0 * 32.0, false, Color::srgb(1.0, 0.4, 0.3));
     }
 }
 
-const SHIP_ROWS: usize = 9;
+/// The lobby's Map Description dialog (`Map Description Dialog Screen.tst`): the dialog frame, the map description in Univers10 inside
+/// 'Map Information Button' [146,207,641,330] and a 'Back' button [324,339,457,383]. A full-screen blocker keeps the lobby beneath
+/// from reacting. The frame follows `dialog_frame` for the screen's backdrop area [61,165,603,436].
+fn map_info_dialog(ctx: &Ctx, c: &mut ChildSpawnerCommands, sk: &Skirmish, strings: &Value) {
+    c.spawn((ctx.node(0.0, 0.0, 800.0, 600.0), Interaction::None, BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.35))));
+    let [x, y, w, h] = dialog_frame([61.0, 165.0, 603.0, 436.0]);
+    ctx.image(c, "menu/frontenddialogscreen.png", None, x, y, w, h, Color::WHITE);
+    wrapped(ctx, c, "Univers10", sk.map_json["description"].as_str().unwrap_or_default(), [146.0, 207.0, 641.0, 330.0]);
+    ctx.text_button(c, [324.0, 339.0, 457.0, 383.0], &text_of(strings, "IDGS_TPFRONTENDTEXT01_BACK"), "BlackChancery16", Action::MapInfo(false));
+}
+
+/// A retail pull-down box (`FrontEnd_Left/Center/Right_PullDown_Background`, `_Selected` for the local player) with centred Univers10
+/// text and, for drop-downs, the `FrontEnd_PullDown_Arrow` at its right end.
+pub(super) fn pulldown_cell(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], label: &str, selected: bool, action: Option<Action>, arrow: bool) {
+    let sel = if selected { "_Selected" } else { "" };
+    let mut root = c.spawn((ctx.node(l, t, r - l, b - t), Interaction::None));
+    if let Some(a) = action {
+        root.insert(a);
+    }
+    root.with_children(|c| {
+        let (w, h) = (r - l, b - t);
+        piece(ctx, c, &format!("FrontEnd_Left_PullDown_Background{sel}"), [0.0, 0.0, 12.0, h], (false, false));
+        piece(ctx, c, &format!("FrontEnd_Center_PullDown_Background{sel}"), [12.0, 0.0, w - 12.0, h], (false, false));
+        piece(ctx, c, &format!("FrontEnd_Right_PullDown_Background{sel}"), [w - 12.0, 0.0, w, h], (false, false));
+        let text_w = if arrow { w - 24.0 } else { w };
+        ctx.text(c, "Univers10", label, 0.0, text_w, h / 2.0, true, Color::WHITE);
+        if arrow {
+            piece(ctx, c, "FrontEnd_PullDown_Arrow", [w - 20.0, h / 2.0 - 8.5, w, h / 2.0 + 8.5], (false, false));
+        }
+    });
+}
+
+const SHIP_ROWS: usize = 8;
 
 /// Ship Types Available: the offered hulls of the human slot's fleet type (mouse wheel scrolls), the selected one highlighted.
-fn ship_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, _]: [f32; 4], sk: &Skirmish, lib: &Library) {
+/// 'Available Ships' as measured on the original: UniversBold14 header centred at y 311, Univers12 rows from x 525, 19 apart from
+/// y 347.5, a teal selection bar (x 505..720) and the retail scrollbar at x 742..767; the box itself is part of the backdrop.
+fn ship_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, _rect: [f32; 4], sk: &Skirmish, lib: &Library, strings: &Value) {
+    ctx.text(c, "UniversBold14", &text_of(strings, "IDGS_TPFRONTENDTEXT01_AVAILABLE_SHIPS"), 505.0, 215.0, 311.0, true, Color::WHITE);
     let list = sk.human().map(|h| offered(lib, h.race)).unwrap_or_default();
     for (row, &ci) in list.iter().enumerate().skip(sk.scroll).take(SHIP_ROWS) {
-        cell(ctx, c, [l, t + (row - sk.scroll) as f32 * 19.0, r - l, 18.0], &pretty(&lib.classes[ci].name), row == sk.ship_pick, Some(Action::PickShip(row)));
+        let cy = 347.5 + (row - sk.scroll) as f32 * 19.0;
+        let mut b = c.spawn((Interaction::None, Action::PickShip(row), ctx.node(505.0, cy - 9.5, 215.0, 19.0)));
+        b.insert(BackgroundColor(if row == sk.ship_pick { Color::srgba(0.2, 0.7, 0.8, 0.45) } else { Color::NONE }));
+        b.with_children(|c| ctx.text(c, "Univers12", &class_name(lib, ci, strings), 20.0, 195.0, 9.5, false, Color::WHITE));
     }
+    let n = list.len().max(1) as f32;
+    scrollbar(ctx, c, [742.0, 330.0, 767.0, 505.0], sk.scroll as f32 / n, (SHIP_ROWS as f32 / n).min(1.0));
 }
 
 /// Fleet Select: the assembled fleet, two columns of four; the picked entry is the one Drop removes.
-fn fleet_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, _]: [f32; 4], sk: &Skirmish) {
-    let w = (r - l) / 2.0 - 4.0;
-    for (i, name) in sk.human().map(|h| h.fleet.as_slice()).unwrap_or_default().iter().enumerate() {
-        cell(ctx, c, [l + (i / 4) as f32 * (w + 8.0), t + (i % 4) as f32 * 19.0, w, 18.0], &pretty(name), i == sk.fleet_pick, Some(Action::PickFleet(i)));
+/// The fleet bar ('Fleet Select Button' [27,479,459,559]) as measured: scroll arrows at both ends and five framed slots 65 apart from
+/// x 75 (60x62); a filled slot shows its ship-bar icon, an empty one its number. PROVISIONAL: the arrows do not scroll yet (fleets
+/// of more than five ships show their first five).
+fn fleet_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, _rect: [f32; 4], sk: &Skirmish, lib: &Library) {
+    let fleet = sk.human().map(|h| h.fleet.as_slice()).unwrap_or_default();
+    // The bar's arrows are the round end buttons of the horizontal scrollbar art (the FrontEnd_Scroll_*_Button entries point at
+    // an unrelated sheet region): the first 33 px of FrontEnd_Horizontal_Scrollbar_Background_Left, the last 33 of _Right.
+    sheet_piece(ctx, c, "fe_04", Rect::new(0.0, 66.0, 33.0, 99.0), [36.0, 507.0, 58.0, 529.0]);
+    sheet_piece(ctx, c, "fe_04", Rect::new(111.0, 165.0, 144.0, 198.0), [402.0, 507.0, 424.0, 529.0]);
+    for i in 0..5 {
+        let x = 75.0 + i as f32 * 65.0;
+        let mut b = c.spawn((Interaction::None, ctx.node(x, 488.0, 60.0, 62.0)));
+        if i < fleet.len() {
+            b.insert(Action::PickFleet(i));
+        }
+        b.with_children(|c| {
+            piece(ctx, c, "FrontEnd_Flag_Icon_Background", [0.0, 0.0, 60.0, 62.0], (false, false));
+            match fleet.get(i).and_then(|n| lib.classes.iter().find(|cl| &cl.name == n)) {
+                Some(cl) => {
+                    if let Some(icon) = &cl.icon {
+                        piece(ctx, c, icon, [8.0, 9.0, 52.0, 53.0], (false, false));
+                    }
+                }
+                None => ctx.text(c, "UniversBold14", &(i + 1).to_string(), 0.0, 60.0, 31.0, true, Color::WHITE),
+            }
+        });
     }
 }
 
-/// Ship Information for the picked hull. PROVISIONAL: retail shows more (guns by class, crew, victory points).
-fn ship_info(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, _]: [f32; 4], sk: &Skirmish, lib: &Library, strings: &Value) {
-    let Some(ci) = sk.human().map(|h| offered(lib, h.race)).and_then(|l| l.get(sk.ship_pick).copied()) else { return };
+/// 'Current Victory Points : N' (UniversLightBold14, the number in gold), centred in its area.
+pub(super) fn victory_points(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], label: &str, points: i64) {
+    let Some(f) = ctx.fonts.0.get("UniversLightBold14") else { return };
+    let n = points.to_string();
+    let x = (l + r - f.width(label) - f.width(&n)) / 2.0;
+    ctx.text(c, "UniversLightBold14", label, x, f.width(label), (t + b) / 2.0, false, Color::WHITE);
+    ctx.text(c, "UniversLightBold14", &n, x + f.width(label), f.width(&n) + 2.0, (t + b) / 2.0, false, GOLD);
+}
+
+/// A class's displayable name ('Displayable Shipname String ID'), else its WOT name tidied up.
+pub(super) fn class_name(lib: &Library, ci: usize, strings: &Value) -> String {
     let cl = &lib.classes[ci];
-    let lines = [
-        pretty(&cl.name),
-        format!("{}: {:.0}", strings["IDGS_TPFRONTENDTEXT_SHIP_HITPOINTS"].as_str().unwrap_or("Hit Points"), cl.core_hp),
-        format!("Guns: {}", cl.mounts.len()),
-        format!("Max speed: {:.1}", cl.phys.max_speed),
+    cl.display_name.as_deref().and_then(|id| strings[id].as_str()).map_or_else(|| pretty(&cl.name), String::from)
+}
+
+/// Ship Information for the picked hull. PROVISIONAL: retail shows more (guns by class, crew, victory points).
+/// 'Ship Information' as measured on the original Navy Frigate panel: the Univers12 ship name at (510, 130); the framed ship-bar icon
+/// at (510, 151) 58x59; 'Point' / 'Cost' in Univers10 and the cost in gold Univers26 under it; seven Univers10 stat lines from y 161.5,
+/// 16 apart, labels at x 580, the colon at 676 and gold values at 686.
+fn ship_info(ctx: &Ctx, c: &mut ChildSpawnerCommands, _rect: [f32; 4], sk: &Skirmish, lib: &Library, strings: &Value) {
+    let Some(ci) = sk.human().map(|h| offered(lib, h.race)).and_then(|l| l.get(sk.ship_pick).copied()) else { return };
+    let s = |id: &str| text_of(strings, id);
+    let st = crate::menu::ship_stats(lib, ci);
+    ctx.text(c, "Univers12", &class_name(lib, ci, strings), 510.0, 240.0, 130.0, false, Color::WHITE);
+    piece(ctx, c, "FrontEnd_Flag_Icon_Background", [510.0, 151.0, 568.0, 210.0], (false, false));
+    if let Some(icon) = &lib.classes[ci].icon {
+        piece(ctx, c, icon, [517.0, 158.0, 561.0, 203.0], (false, false));
+    }
+    ctx.text(c, "Univers10", &s("IDGS_TPFRONTENDTEXT02_POINT_COST01"), 509.0, 60.0, 220.0, true, Color::WHITE);
+    ctx.text(c, "Univers10", &s("IDGS_TPFRONTENDTEXT02_POINT_COST02"), 509.0, 60.0, 236.0, true, Color::WHITE);
+    ctx.text(c, "Univers26", &st.points.to_string(), 499.0, 80.0, 256.0, true, GOLD);
+    let rows = [
+        (s("IDGS_TPFRONTENDTEXT_SHIP_HITPOINTS"), st.hit_points.to_string()),
+        (s("IDGS_TPFRONTENDTEXT_MAX_SPEED"), format!("{} km/h", st.max_speed_kmh)),
+        (s("IDGS_TPFRONTENDTEXT_MANEUVERABILITY"), s(st.turning)),
+        (s("IDGS_TPFRONTENDTEXT_CREW"), st.crew.to_string()),
+        (s("IDGS_TPFRONTENDTEXT_SHIP_MOUNTS_HEAVY"), st.heavy.to_string()),
+        (s("IDGS_TPFRONTENDTEXT_SHIP_MOUNTS_MEDIUM"), st.medium.to_string()),
+        (s("IDGS_TPFRONTENDTEXT_SHIP_MOUNTS_LIGHT"), st.light.to_string()),
     ];
-    for (i, line) in lines.iter().enumerate() {
-        ctx.text(c, "Univers12", line, l + 8.0, r - l, t + 14.0 + i as f32 * 18.0, false, Color::WHITE);
+    for (k, (label, value)) in rows.iter().enumerate() {
+        let cy = 161.5 + k as f32 * 16.0;
+        ctx.text(c, "Univers10", label, 580.0, 95.0, cy, false, Color::WHITE);
+        ctx.text(c, "Univers10", ":", 676.0, 8.0, cy, false, Color::WHITE);
+        ctx.text(c, "Univers10", value, 686.0, 80.0, cy, false, GOLD);
     }
 }
 
@@ -655,5 +931,16 @@ fn scroll_saves(mut wheel: MessageReader<bevy::input::mouse::MouseWheel>, state:
     if dy != 0.0 && (*state.get() == Screen::Load || matches!(ig.page(), Some(Page::Load | Page::Save))) {
         let max = ui.list.len().saturating_sub(10);
         ui.scroll = if dy > 0.0 { ui.scroll.saturating_sub(1) } else { (ui.scroll + 1).min(max) };
+    }
+}
+
+#[cfg(test)]
+mod frame_tests {
+    use super::dialog_frame;
+
+    #[test]
+    fn dialog_frame_matches_the_measured_in_game_menu() {
+        let [x, y, w, h] = dialog_frame([101.0, 185.0, 586.0, 427.0]);
+        assert!((x - 73.5).abs() < 0.5 && y == 185.0 && (w - 653.0).abs() < 0.5 && (h - 256.0).abs() < 0.5);
     }
 }
