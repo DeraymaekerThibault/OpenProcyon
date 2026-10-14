@@ -277,3 +277,20 @@ Do not invent a coverage percentage from name matches; define explicit evidence-
 For each work session, pick an ID, state the acceptance scenario, inspect its owning code/callers, investigate only unresolved original behaviour,
 and update this ledger plus the relevant `docs/re/` note. Run `tools/check.sh` for implementation changes and runtime smoke for ECS/UI changes.
 Documentation-only inventory work needs link/diff checks, not a game build.
+
+## Front end and HUD against original screenshots (2026-10-14)
+
+Reference: owner screenshots of the original at 1920x1200 (the 800x600 screen is drawn 2x, centred, x 160..1760), kept locally in
+`local/reference/` (never committed). Compared side by side in 800x600 units. Done: in-game menu frame placement, tile seams.
+
+| ID | Screen | Original | Ours / gap |
+|---|---|---|---|
+| UIR-01 | All | Retail bitmap fonts: upright BlackChancery for buttons/titles, bold Univers for lists/labels | Vector stand-ins (URW Z003 is italic, Nimbus Sans thin and small); the largest visual difference on every screen. The import already has the retail font sheets (`hud/fonts/`) |
+| UIR-02 | Front-end frame | Logo header, teal glow bars, grid strips above and below the panel; Options/Controls use the blue map-lines backdrop in a narrower panel (x 88..712) | No logo or grid; town backdrop full width on every screen |
+| UIR-03 | Skirmish | "Historical Maps / Players" list header with player counts, scrollbar, Historical/Open check boxes, framed Map Description panel | All maps in one list, two buttons, unframed description, an extra Fleet Size Limit control |
+| UIR-04 | Game Lobby | Map name under the title; Flag / Player / Fleet / Team table with flag icons and drop-downs | Players / Race / Team columns, eight rows, no flags or map name |
+| UIR-05 | Ships | 3D ship on a grid with ship-name drop-down; stats panel (class icon, Point Cost, hit points, speed, turning, crew, gun counts); "Available Ships" header and scrollbar; fleet slot bar 1-5 with arrows; Current Victory Points | Empty viewer, plain stats text, Fleet Size Limit, no slot bar |
+| UIR-06 | Crew, Arms | `Crew Select Screen.tst` / `Arms Selection Screen.tst`: ship diagram with crew posts or gun mounts, stat bars, sort list, help text | Generic screen; layouts not imported yet |
+| UIR-07 | In-game menu | Summary enabled | Summary disabled (no Game Summary page wired) |
+| UIR-08 | Game Summary | `Multiplayer Stats Screen.tst` (kills by object type) | Generic end screen; no reference screenshot yet |
+| UIR-09 | Battle HUD | Player list top right, speech text box above the command bar, talking-head portrait | Check against `battle_hud.png` |
