@@ -216,7 +216,11 @@ fn build(
                         None
                     }
                     (Screen::Battle, "Front End Dialog Screen Backdrop") => {
-                        ctx.image(c, "menu/frontenddialogscreen.png", None, r[0], r[1], r[2] - r[0], r[3] - r[1], Color::WHITE);
+                        // The retail frame does not fill this ReferenceArea (its buttons reach past the area's right edge): measured on
+                        // an original screenshot, the 576x256 texture spans x 74..727 (centred on the screen) from the area's top at its
+                        // native height. PROVISIONAL: measured, not derived from the screen definition.
+                        let _ = r;
+                        ctx.image(c, "menu/frontenddialogscreen.png", None, DIALOG_FRAME[0], DIALOG_FRAME[1], DIALOG_FRAME[2], DIALOG_FRAME[3], Color::WHITE);
                         None
                     }
                     (Screen::Battle, "In Game Backdrop") => {
@@ -488,6 +492,9 @@ fn disabled(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], lab
         ctx.text(c, font, label, 0.0, w, h / 2.0, true, Color::srgb(0.55, 0.55, 0.55));
     });
 }
+
+/// In-game menu frame (`frontenddialogscreen.png`) as the original draws it: left, top, width, height in 800x600 units.
+const DIALOG_FRAME: [f32; 4] = [74.0, 185.0, 653.0, 256.0];
 
 fn arrow(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], name: &str, action: Action) {
     let mut parts = vec![];
