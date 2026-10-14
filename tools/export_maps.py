@@ -341,7 +341,12 @@ def main(root, out):
         k: v
         for k, v in text.items()
         if k.startswith(
-            ("IDGS_TPFRONTENDTEXT", "IDGS_TPWORLDNAMES_", "IDGS_TPTEAMNAMES_")
+            (
+                "IDGS_TPFRONTENDTEXT",
+                "IDGS_TPWORLDNAMES_",
+                "IDGS_TPTEAMNAMES_",
+                "IDGS_TPDISPLAYABLESHIPTYPENAME_",
+            )
         )
     }
     (out / "menu" / "strings.json").write_text(json.dumps(keep))

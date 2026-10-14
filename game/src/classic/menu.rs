@@ -332,11 +332,11 @@ fn build(
                         None
                     }
                     (Screen::Fleet, "Ship Types Available") => {
-                        ship_list(&ctx, c, rect, &sk, &lib);
+                        ship_list(&ctx, c, rect, &sk, &lib, &strings);
                         None
                     }
                     (Screen::Fleet, "Fleet Select Button") => {
-                        fleet_list(&ctx, c, rect, &sk);
+                        fleet_list(&ctx, c, rect, &sk, &lib);
                         None
                     }
                     (Screen::Fleet, "Ship Information") => {
@@ -344,19 +344,36 @@ fn build(
                         None
                     }
                     (Screen::Fleet, "Ship Victory Points") => {
-                        let text = format!("{}: {}/{}", text_of(&strings, "IDGS_TPFRONTENDTEXT01_FLEET_SIZE_LIMIT"), sk.human().map_or(0, |h| h.fleet.len()), sk.fleet_size);
-                        ctx.text(c, font, &text, r[0], r[2] - r[0], (r[1] + r[3]) / 2.0, true, Color::WHITE);
+                        victory_points(&ctx, c, rect, &format!("{} : ", text_of(&strings, "IDGS_TPFRONTENDTEXT01_CURRENT_VICTORY_POINTS")), sk.points_left(&lib));
                         None
                     }
-                    (Screen::Fleet, "Open Arms Selection Screen") => Some(Action::OpenArms),
+                    (Screen::Fleet, "Open Ship Selection Screen") => {
+                        selected_tab(&ctx, c, rect, &label, font);
+                        None
+                    }
+                    // PROVISIONAL: Crew and Arms both open the shared crew & arms editor until their retail screens are rebuilt.
+                    (Screen::Fleet, "Open Arms Selection Screen" | "Open Crew Selection Screen") => Some(Action::OpenArms),
                     (Screen::Fleet, "Add Ship To Fleet Button") => Some(Action::AddShip),
                     (Screen::Fleet, "Drop Ship From Fleet Button") => Some(Action::DropShip),
                     (Screen::Fleet, "Open Next Arrow Button") => {
                         arrow(&ctx, c, rect, "FrontEnd_Next_Button", Action::Goto(Screen::Lobby));
                         None
                     }
-                    (Screen::Fleet, "Ship ViewPort Button") => None, // retail: rotating 3D preview of the selected hull (not done)
-                    (_, "Victory Points Scrollbar Button") | (_, "Victory Limit Label") => None, // victory points: not done
+                    (Screen::Fleet, "Ship ViewPort Button") => {
+                        // The globe grid behind the 3D preview (the rotating hull itself is not drawn yet).
+                        // The 512x288 texture holds the grid in its top-left 393x285, the viewport's size: drawn 1:1.
+                        ctx.image(c, "menu/fe_shipscreen_bg.png", Some(Rect::new(0.0, 0.0, r[2] - r[0], r[3] - r[1])), r[0], r[1], r[2] - r[0], r[3] - r[1], Color::WHITE);
+                        None
+                    }
+                    (Screen::Fleet, "AutoAssign Button") => Some(Action::AutoAssign),
+                    (Screen::CreateSkirmish, "Victory Limit Label") => {
+                        ctx.text(c, "Univers12", &text_of(&strings, "IDGS_TPFRONTENDTEXT_VICTORY_POINTS"), r[0], r[2] - r[0], (r[1] + r[3]) / 2.0, true, Color::WHITE);
+                        None
+                    }
+                    (Screen::CreateSkirmish, "Victory Points Scrollbar Button") => {
+                        ctx.text_button(c, rect, &sk.victory_limit.to_string(), "BlackChancery22", Action::VictoryLimit);
+                        None
+                    }
                     // Other retail buttons (multiplayer, options, profiles, campaign...) are shown but not implemented.
                     (_, n) if !label.is_empty() && (n.starts_with("Open") || n.contains("Button")) && !n.contains("Arrow") => {
                         disabled(&ctx, c, rect, &label, font);
@@ -578,6 +595,23 @@ fn map_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, sk: &Skirmish, strings: &Va
     scrollbar(ctx, c, [727.0, 155.0, 752.0, 322.0], 0.0, 1.0);
 }
 
+/// An explicit region of a HUD sheet stretched over a box (for art the sprite table has no entry for).
+fn sheet_piece(ctx: &Ctx, c: &mut ChildSpawnerCommands, sheet: &str, rect: Rect, [l, t, r, b]: [f32; 4]) {
+    let mut img = ImageNode::new(ctx.assets.load(format!("hud/tex/{sheet}.png")));
+    img.rect = Some(inset(sheet, rect));
+    img.image_mode = NodeImageMode::Stretch;
+    c.spawn((img, ctx.node(l, t, r - l, b - t)));
+}
+
+/// The current tab of a Ships / Crew / Arms row: the green `FrontEnd_Texts_Over_Button_Selected_*` button, not clickable.
+fn selected_tab(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], label: &str, font: &str) {
+    let cap = 51.0 * (b - t) / 45.0;
+    piece(ctx, c, "FrontEnd_Texts_Over_Button_Selected_Left", [l, t, l + cap, b], (false, false));
+    piece(ctx, c, "FrontEnd_Texts_Over_Button_Selected_Center", [l + cap, t, r - cap, b], (false, false));
+    piece(ctx, c, "FrontEnd_Texts_Over_Button_Selected_Right", [r - cap, t, r, b], (false, false));
+    ctx.text(c, font, label, l, r - l, (t + b) / 2.0, true, Color::WHITE);
+}
+
 /// One retail sprite stretched over a box (reference units).
 fn piece(ctx: &Ctx, c: &mut ChildSpawnerCommands, name: &str, [l, t, r, b]: [f32; 4], flip: (bool, bool)) {
     let Some((sheet, rect)) = sprite(ctx.hud, name, "NoCursor") else { return };
@@ -772,36 +806,99 @@ fn pulldown_cell(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4]
     });
 }
 
-const SHIP_ROWS: usize = 9;
+const SHIP_ROWS: usize = 8;
 
 /// Ship Types Available: the offered hulls of the human slot's fleet type (mouse wheel scrolls), the selected one highlighted.
-fn ship_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, _]: [f32; 4], sk: &Skirmish, lib: &Library) {
+/// 'Available Ships' as measured on the original: UniversBold14 header centred at y 311, Univers12 rows from x 525, 19 apart from
+/// y 347.5, a teal selection bar (x 505..720) and the retail scrollbar at x 742..767; the box itself is part of the backdrop.
+fn ship_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, _rect: [f32; 4], sk: &Skirmish, lib: &Library, strings: &Value) {
+    ctx.text(c, "UniversBold14", &text_of(strings, "IDGS_TPFRONTENDTEXT01_AVAILABLE_SHIPS"), 505.0, 215.0, 311.0, true, Color::WHITE);
     let list = sk.human().map(|h| offered(lib, h.race)).unwrap_or_default();
     for (row, &ci) in list.iter().enumerate().skip(sk.scroll).take(SHIP_ROWS) {
-        cell(ctx, c, [l, t + (row - sk.scroll) as f32 * 19.0, r - l, 18.0], &pretty(&lib.classes[ci].name), row == sk.ship_pick, Some(Action::PickShip(row)));
+        let cy = 347.5 + (row - sk.scroll) as f32 * 19.0;
+        let mut b = c.spawn((Interaction::None, Action::PickShip(row), ctx.node(505.0, cy - 9.5, 215.0, 19.0)));
+        b.insert(BackgroundColor(if row == sk.ship_pick { Color::srgba(0.2, 0.7, 0.8, 0.45) } else { Color::NONE }));
+        b.with_children(|c| ctx.text(c, "Univers12", &class_name(lib, ci, strings), 20.0, 195.0, 9.5, false, Color::WHITE));
     }
+    let n = list.len().max(1) as f32;
+    scrollbar(ctx, c, [742.0, 330.0, 767.0, 505.0], sk.scroll as f32 / n, (SHIP_ROWS as f32 / n).min(1.0));
 }
 
 /// Fleet Select: the assembled fleet, two columns of four; the picked entry is the one Drop removes.
-fn fleet_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, _]: [f32; 4], sk: &Skirmish) {
-    let w = (r - l) / 2.0 - 4.0;
-    for (i, name) in sk.human().map(|h| h.fleet.as_slice()).unwrap_or_default().iter().enumerate() {
-        cell(ctx, c, [l + (i / 4) as f32 * (w + 8.0), t + (i % 4) as f32 * 19.0, w, 18.0], &pretty(name), i == sk.fleet_pick, Some(Action::PickFleet(i)));
+/// The fleet bar ('Fleet Select Button' [27,479,459,559]) as measured: scroll arrows at both ends and five framed slots 65 apart from
+/// x 75 (60x62); a filled slot shows its ship-bar icon, an empty one its number. PROVISIONAL: the arrows do not scroll yet (fleets
+/// of more than five ships show their first five).
+fn fleet_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, _rect: [f32; 4], sk: &Skirmish, lib: &Library) {
+    let fleet = sk.human().map(|h| h.fleet.as_slice()).unwrap_or_default();
+    // The bar's arrows are the round end buttons of the horizontal scrollbar art (the FrontEnd_Scroll_*_Button entries point at
+    // an unrelated sheet region): the first 33 px of FrontEnd_Horizontal_Scrollbar_Background_Left, the last 33 of _Right.
+    sheet_piece(ctx, c, "fe_04", Rect::new(0.0, 66.0, 33.0, 99.0), [36.0, 507.0, 58.0, 529.0]);
+    sheet_piece(ctx, c, "fe_04", Rect::new(111.0, 165.0, 144.0, 198.0), [402.0, 507.0, 424.0, 529.0]);
+    for i in 0..5 {
+        let x = 75.0 + i as f32 * 65.0;
+        let mut b = c.spawn((Interaction::None, ctx.node(x, 488.0, 60.0, 62.0)));
+        if i < fleet.len() {
+            b.insert(Action::PickFleet(i));
+        }
+        b.with_children(|c| {
+            piece(ctx, c, "FrontEnd_Flag_Icon_Background", [0.0, 0.0, 60.0, 62.0], (false, false));
+            match fleet.get(i).and_then(|n| lib.classes.iter().find(|cl| &cl.name == n)) {
+                Some(cl) => {
+                    if let Some(icon) = &cl.icon {
+                        piece(ctx, c, icon, [8.0, 9.0, 52.0, 53.0], (false, false));
+                    }
+                }
+                None => ctx.text(c, "UniversBold14", &(i + 1).to_string(), 0.0, 60.0, 31.0, true, Color::WHITE),
+            }
+        });
     }
 }
 
-/// Ship Information for the picked hull. PROVISIONAL: retail shows more (guns by class, crew, victory points).
-fn ship_info(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, _]: [f32; 4], sk: &Skirmish, lib: &Library, strings: &Value) {
-    let Some(ci) = sk.human().map(|h| offered(lib, h.race)).and_then(|l| l.get(sk.ship_pick).copied()) else { return };
+/// 'Current Victory Points : N' (UniversLightBold14, the number in gold), centred in its area.
+fn victory_points(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], label: &str, points: i64) {
+    let Some(f) = ctx.fonts.0.get("UniversLightBold14") else { return };
+    let n = points.to_string();
+    let x = (l + r - f.width(label) - f.width(&n)) / 2.0;
+    ctx.text(c, "UniversLightBold14", label, x, f.width(label), (t + b) / 2.0, false, Color::WHITE);
+    ctx.text(c, "UniversLightBold14", &n, x + f.width(label), f.width(&n) + 2.0, (t + b) / 2.0, false, GOLD);
+}
+
+/// A class's displayable name ('Displayable Shipname String ID'), else its WOT name tidied up.
+fn class_name(lib: &Library, ci: usize, strings: &Value) -> String {
     let cl = &lib.classes[ci];
-    let lines = [
-        pretty(&cl.name),
-        format!("{}: {:.0}", strings["IDGS_TPFRONTENDTEXT_SHIP_HITPOINTS"].as_str().unwrap_or("Hit Points"), cl.core_hp),
-        format!("Guns: {}", cl.mounts.len()),
-        format!("Max speed: {:.1}", cl.phys.max_speed),
+    cl.display_name.as_deref().and_then(|id| strings[id].as_str()).map_or_else(|| pretty(&cl.name), String::from)
+}
+
+/// Ship Information for the picked hull. PROVISIONAL: retail shows more (guns by class, crew, victory points).
+/// 'Ship Information' as measured on the original Navy Frigate panel: the Univers12 ship name at (510, 130); the framed ship-bar icon
+/// at (510, 151) 58x59; 'Point' / 'Cost' in Univers10 and the cost in gold Univers26 under it; seven Univers10 stat lines from y 161.5,
+/// 16 apart, labels at x 580, the colon at 676 and gold values at 686.
+fn ship_info(ctx: &Ctx, c: &mut ChildSpawnerCommands, _rect: [f32; 4], sk: &Skirmish, lib: &Library, strings: &Value) {
+    let Some(ci) = sk.human().map(|h| offered(lib, h.race)).and_then(|l| l.get(sk.ship_pick).copied()) else { return };
+    let s = |id: &str| text_of(strings, id);
+    let st = crate::menu::ship_stats(lib, ci);
+    ctx.text(c, "Univers12", &class_name(lib, ci, strings), 510.0, 240.0, 130.0, false, Color::WHITE);
+    piece(ctx, c, "FrontEnd_Flag_Icon_Background", [510.0, 151.0, 568.0, 210.0], (false, false));
+    if let Some(icon) = &lib.classes[ci].icon {
+        piece(ctx, c, icon, [517.0, 158.0, 561.0, 203.0], (false, false));
+    }
+    ctx.text(c, "Univers10", &s("IDGS_TPFRONTENDTEXT02_POINT_COST01"), 509.0, 60.0, 220.0, true, Color::WHITE);
+    ctx.text(c, "Univers10", &s("IDGS_TPFRONTENDTEXT02_POINT_COST02"), 509.0, 60.0, 236.0, true, Color::WHITE);
+    ctx.text(c, "Univers26", &st.points.to_string(), 499.0, 80.0, 256.0, true, GOLD);
+    let rows = [
+        (s("IDGS_TPFRONTENDTEXT_SHIP_HITPOINTS"), st.hit_points.to_string()),
+        (s("IDGS_TPFRONTENDTEXT_MAX_SPEED"), format!("{} km/h", st.max_speed_kmh)),
+        (s("IDGS_TPFRONTENDTEXT_MANEUVERABILITY"), s(st.turning)),
+        (s("IDGS_TPFRONTENDTEXT_CREW"), st.crew.to_string()),
+        (s("IDGS_TPFRONTENDTEXT_SHIP_MOUNTS_HEAVY"), st.heavy.to_string()),
+        (s("IDGS_TPFRONTENDTEXT_SHIP_MOUNTS_MEDIUM"), st.medium.to_string()),
+        (s("IDGS_TPFRONTENDTEXT_SHIP_MOUNTS_LIGHT"), st.light.to_string()),
     ];
-    for (i, line) in lines.iter().enumerate() {
-        ctx.text(c, "Univers12", line, l + 8.0, r - l, t + 14.0 + i as f32 * 18.0, false, Color::WHITE);
+    for (k, (label, value)) in rows.iter().enumerate() {
+        let cy = 161.5 + k as f32 * 16.0;
+        ctx.text(c, "Univers10", label, 580.0, 95.0, cy, false, Color::WHITE);
+        ctx.text(c, "Univers10", ":", 676.0, 8.0, cy, false, Color::WHITE);
+        ctx.text(c, "Univers10", value, 686.0, 80.0, cy, false, GOLD);
     }
 }
 
