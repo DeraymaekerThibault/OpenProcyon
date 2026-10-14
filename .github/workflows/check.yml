@@ -1,6 +1,9 @@
 # Runs the validation gate without game assets: format, clippy, compiling the Rust tests, Python tests and the hygiene rules.
 name: check
 on: [push, pull_request]
+concurrency: # a newer push to the same branch cancels the outdated run
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   check:
     runs-on: ubuntu-24.04
