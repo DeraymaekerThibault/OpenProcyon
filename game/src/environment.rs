@@ -324,9 +324,9 @@ pub struct Current {
 pub const CURRENT_FORCE: f32 = 25000.0;
 pub const CURRENT_RADIUS: f32 = 60.0;
 impl Current {
-    pub fn new(mut path: Vec<Vec3>) -> Self {
-        // PROVISIONAL: Mission 3 playtesting establishes flow toward the first authored point.
-        path.reverse();
+    /// Flows from the first authored point toward the last: in Mission 4 Nelson's fleet leaves "to the frontier" along the current
+    /// on 'Nelson exit route', which runs the same way as 'Mucullough path'.
+    pub fn new(path: Vec<Vec3>) -> Self {
         Current { path }
     }
     pub fn force(&self, p: Vec3) -> Vec3 {
@@ -616,26 +616,26 @@ mod tests {
             assert!(((a + b) / 2.0).distance(*p) < 0.001);
             assert!((a.distance(b) - 2.0 * CURRENT_RADIUS).abs() < 0.001);
         }
-        assert_eq!(current.force(Vec3::new(0.0, 0.0, -100.0)), Vec3::Z * CURRENT_FORCE);
+        assert_eq!(current.force(Vec3::new(0.0, 0.0, -100.0)), Vec3::NEG_Z * CURRENT_FORCE);
         assert_eq!(current.force(Vec3::new(CURRENT_RADIUS + 1.0, 0.0, -100.0)), Vec3::ZERO);
         assert_eq!(Current::new(vec![]).force(Vec3::ZERO), Vec3::ZERO);
         assert_eq!(current_mesh(&[]).count_vertices(), 0);
     }
     #[test]
-    fn mission3_current_push_and_ribbon_flow_toward_the_first_authored_point() {
+    fn mission4_current_pushes_the_way_nelsons_fleet_sails_out() {
         use bevy::mesh::VertexAttributeValues;
-        let mission = crate::campaign::load_id("mission03");
-        let path: Vec<_> = mission.data["paths"]["Etherium Current"].as_array().unwrap().iter().map(game_to_bevy).collect();
-        let upstream = path[1];
-        let downstream = path[0];
-        let current = Current::new(path);
-        let force = current.force(upstream.midpoint(downstream));
-        assert!(force.x < 0.0 && force.z < 0.0, "Mission 3 flows west and north, not east and south");
-        assert!(force.dot(downstream - upstream) > 0.0);
-        assert_eq!(current.path.last(), Some(&downstream));
+        let mission = crate::campaign::load_id("mission04");
+        let path = |name: &str| -> Vec<Vec3> { mission.data["paths"][name].as_array().unwrap().iter().map(game_to_bevy).collect() };
+        let current = Current::new(path("Mucullough path"));
+        let route = path("Nelson exit route");
+        let inside: Vec<_> = route.windows(2).filter(|w| current.force(w[0]) != Vec3::ZERO).collect();
+        assert!(inside.len() >= 3, "the exit route runs inside the current");
+        for w in inside {
+            assert!(current.force(w[0]).dot(w[1] - w[0]) > 0.0, "the current carries the fleet toward the frontier");
+        }
         let mesh = current_mesh(&current.path);
         let Some(VertexAttributeValues::Float32x2(uv)) = mesh.attribute(Mesh::ATTRIBUTE_UV_0) else { panic!("ribbon UVs") };
-        assert!(uv.last().unwrap()[1] > uv[0][1], "negative UV scrolling moves the texture downstream");
+        assert!(uv.last().unwrap()[1] > uv[0][1], "negative UV scrolling moves the texture downstream, toward the last point");
     }
 
     #[test]

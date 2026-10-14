@@ -114,9 +114,9 @@ force law/falloff remain provisional. The visual was incorrectly treated as part
 `EtheriumRiver.eft` has two `River` primitives accepting `SET_POINTS` and `SET_WIDTH`, with the retail `Current` texture.
 Community-exe RiverPrimitive at consumes path points; builds lateral pairs around that path using the supplied width;
  advances varying texture offsets. The remake now draws two continuous additive textured strips on the path in `environment.rs`,
-with repeating UVs scrolling toward the first authored path point. Mission 3 playtesting found both the push and animation reversed;
-`Current::new` now reverses the authored points once for both physics and rendering. Applying this convention to missions 4 and 10 remains
-provisional pending playtesting/native direction recovery. Width = twice the force radius and the UV repeat/speeds remain provisional;
+with repeating UVs scrolling downstream. Currents flow from the first authored path point toward the last: in Mission 4, Nelson's fleet
+leaves "to the frontier" on 'Nelson exit route', which runs inside 'Mucullough path' in the same order (an earlier reversal based on a
+Mission 3 playtest was wrong). Missions 3 and 10 follow the same convention. Width = twice the force radius and the UV repeat/speeds remain provisional;
 exact native spline sampling, oscillation and blending are not recovered. No particle emitter is spawned per path point.
 The `current-m3` smoke confirms both mesh layers and changing UV offsets; `local/mission03-current.png` is the Classic visual check.
 One mission 10 setup references absent path `ebend`; it remains empty rather than inventing a route.
