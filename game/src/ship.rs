@@ -5,7 +5,7 @@ use crate::*;
 pub const ORDERS: [(&str, f32); 4] = [("All Stop", 0.0), ("Ahead Slow", 0.5), ("Ahead Full", 1.0), ("Emergency Speed", 2.0)];
 
 /// Ahead Full without crew settles at this fraction of WOT MaxSpeed (so Emergency is 1.125 x MaxSpeed). Measured on one class;
-/// PROVISIONAL for the others, and crew raise it (not modelled yet).
+/// PROVISIONAL for the others; the engineers raise it (`Ship::crew_speed`).
 pub const FULL_SPEED: f32 = 0.5625;
 
 /// Full-rudder torque relative to the decoded turn formula; the measured turn rate needs it at both Slow and Full.
@@ -38,6 +38,8 @@ pub struct Ship {
     pub cap: f32,              // script 'Max Throttle Percent': fraction of the ordered speed the ship may use
     pub throttle: Option<f32>, // continuous command/captain speed fraction, independent of script cap
     pub sail_energy: f32,      // nebula drain, separate from permanent sail damage
+    pub crew_speed: f32,       // engineers' factor on top speed (crew_arms::skill_factor)
+    pub crew_turn: f32,        // helmsman's factor on rudder torque
 }
 
 #[derive(Component)]
@@ -119,7 +121,7 @@ pub fn ai(
 }
 
 fn max_speed(ship: &Ship, class: &combat::Class, health: &Health) -> f32 {
-    full_speed(class) * combat::speed_factor(class, health) * ship.cap * ship.sail_energy
+    full_speed(class) * combat::speed_factor(class, health) * ship.cap * ship.sail_energy * ship.crew_speed
 }
 
 /// Undamaged Ahead Full speed.
@@ -156,7 +158,7 @@ pub fn step(ship: &mut Ship, tf: &mut Transform, class: &combat::Class, health: 
         // Turning follows ShipPhysics::Update in the original exe (docs/re/movement.md). Assumed mapping (not verified):
         // rudder in [-1,1] is `steer`, and the torque scale is WOT MaxAngularAcceleration.
         let v = ship.speed.abs();
-        let mut a = steer * TURN_SCALE * ph.max_ang_acc * (1.0 - 1.0 / (0.1 * v + 1.0)) * combat::turn_factor(class, health);
+        let mut a = steer * TURN_SCALE * ship.crew_turn * ph.max_ang_acc * (1.0 - 1.0 / (0.1 * v + 1.0)) * combat::turn_factor(class, health);
         if v > 0.67 * ph.max_speed {
             a /= 3.0
         } else if v < 0.33 * ph.max_speed {
@@ -597,6 +599,8 @@ pub mod movement_tests {
                     cap: 1.0,
                     throttle: None,
                     sail_energy: 1.0,
+                    crew_speed: 1.0,
+                    crew_turn: 1.0,
                 },
                 Health::new(class),
                 Transform::from_xyz(i as f32 * 50.0, 0.0, 0.0),
@@ -907,6 +911,8 @@ pub mod movement_tests {
             cap: 1.0,
             throttle: None,
             sail_energy: 1.0,
+            crew_speed: 1.0,
+            crew_turn: 1.0,
         };
         let mut tf = Transform::default();
         let h = Health { sections: vec![1.0; class.sections.len()], core: 1.0, destroyed: false };
@@ -929,8 +935,21 @@ pub mod movement_tests {
                 step(ship, tf, class, &h, dt);
             }
         };
-        let mut ship =
-            Ship { class: ci, side: Side::Player, heading: 0.0, speed: 0.0, ang_vel: 0.0, order: 1, waypoints: vec![], goal: None, cap: 1.0, throttle: None, sail_energy: 1.0 };
+        let mut ship = Ship {
+            class: ci,
+            side: Side::Player,
+            heading: 0.0,
+            speed: 0.0,
+            ang_vel: 0.0,
+            order: 1,
+            waypoints: vec![],
+            goal: None,
+            cap: 1.0,
+            throttle: None,
+            sail_energy: 1.0,
+            crew_speed: 1.0,
+            crew_turn: 1.0,
+        };
         let mut tf = Transform::default();
         run(&mut ship, &mut tf, 1.0);
         assert!((ship.speed - 1.95).abs() < 0.1, "Slow from rest after 1 s: {}", ship.speed); // 0.53 s time constant
@@ -960,6 +979,44 @@ pub mod movement_tests {
             assert!((tf.rotation * Vec3::NEG_Z).y.abs() < 1e-4, "roll never pitches the bow");
             ship.goal = None;
             ship.ang_vel = 0.0;
+        }
+    }
+
+    /// Retail Navy Cutters with engineer and helmsman both at skill 5 and 9 (docs/re/crew.md): Ahead Full and full-rudder turn.
+    #[test]
+    fn crewed_cutter_matches_measured_retail_speed_and_turn() {
+        let lib = combat::Library::load(&crate::assets_dir());
+        let ci = lib.index("Ship_Navy_Cutter");
+        let class = &lib.classes[ci];
+        let h = Health { sections: vec![1.0; class.sections.len()], core: 1.0, destroyed: false };
+        assert_eq!(crate::crew_arms::skill_factor(0.1), 1.0, "default hands change nothing");
+        for (skill, full, turn) in [(0.5, 5.336, 15.61), (0.9, 6.041, 9.99)] {
+            let f = crate::crew_arms::skill_factor(skill);
+            let mut ship = Ship {
+                class: ci,
+                side: Side::Player,
+                heading: 0.0,
+                speed: 0.0,
+                ang_vel: 0.0,
+                order: 2,
+                waypoints: vec![],
+                goal: None,
+                cap: 1.0,
+                throttle: None,
+                sail_energy: 1.0,
+                crew_speed: f,
+                crew_turn: f,
+            };
+            let mut tf = Transform::default();
+            for _ in 0..300 {
+                step(&mut ship, &mut tf, class, &h, 0.0344);
+            }
+            assert!((ship.speed - full).abs() < 0.01, "skill {skill}: Full {} vs {full}", ship.speed);
+            ship.goal = Some(ship.heading + 3.0);
+            for _ in 0..90 {
+                step(&mut ship, &mut tf, class, &h, 0.0344);
+            }
+            assert!((ship.ang_vel.to_degrees() - turn).abs() < 0.4, "skill {skill}: turn {} vs {turn}", ship.ang_vel.to_degrees());
         }
     }
 

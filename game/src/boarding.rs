@@ -949,7 +949,21 @@ mod tests {
         let ci = app.world().resource::<Library>().index(class);
         let c = &app.world().resource::<Library>().classes[ci];
         let health = Health { sections: c.sections.iter().map(|s| s.hp).collect(), core: c.core_hp, destroyed: false };
-        let ship = Ship { class: ci, side, heading: 0.0, speed: 0.0, ang_vel: 0.0, order: 0, waypoints: vec![], goal: None, cap: 1.0, throttle: None, sail_energy: 1.0 };
+        let ship = Ship {
+            class: ci,
+            side,
+            heading: 0.0,
+            speed: 0.0,
+            ang_vel: 0.0,
+            order: 0,
+            waypoints: vec![],
+            goal: None,
+            cap: 1.0,
+            throttle: None,
+            sail_energy: 1.0,
+            crew_speed: 1.0,
+            crew_turn: 1.0,
+        };
         app.world_mut().spawn((Transform::from_translation(at), ship, health, Drift::default(), Boardable::ship(class, skill, true))).id()
     }
 
@@ -1029,8 +1043,21 @@ mod tests {
     fn base_boarding_needs_a_boarding_point_in_reach_and_a_slow_boarder() {
         let lib = Library::load(&assets_dir());
         let ci = lib.index("Ship_Navy_Cutter");
-        let ship =
-            Ship { class: ci, side: Side::Enemy, heading: 0.0, speed: 0.0, ang_vel: 0.0, order: 0, waypoints: vec![], goal: None, cap: 1.0, throttle: None, sail_energy: 1.0 };
+        let ship = Ship {
+            class: ci,
+            side: Side::Enemy,
+            heading: 0.0,
+            speed: 0.0,
+            ang_vel: 0.0,
+            order: 0,
+            waypoints: vec![],
+            goal: None,
+            cap: 1.0,
+            throttle: None,
+            sail_energy: 1.0,
+            crew_speed: 1.0,
+            crew_turn: 1.0,
+        };
         let base_tf = Transform::from_xyz(100.0, 0.0, 0.0);
         let point = Vec3::new(-10.0, 0.0, 0.0); // world (90, 0, 0)
         let at = |x: f32| Transform::from_xyz(x, 0.0, 0.0);

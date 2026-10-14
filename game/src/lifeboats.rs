@@ -275,6 +275,8 @@ fn lifeboats(
                     cap: 1.0,
                     throttle: Some(throttle),
                     sail_energy: 1.0,
+                    crew_speed: 1.0,
+                    crew_turn: 1.0,
                 },
             ));
             present.push((None, ms.owner.clone()));
@@ -327,7 +329,21 @@ mod tests {
         let lib = app.world().resource::<Library>();
         let ci = lib.index(class);
         let health = Health::new(&lib.classes[ci]);
-        let s = Ship { class: ci, side: Side::Player, heading: 0.0, speed: 0.0, ang_vel: 0.0, order: 0, waypoints: vec![], goal: None, cap: 1.0, throttle: None, sail_energy: 1.0 };
+        let s = Ship {
+            class: ci,
+            side: Side::Player,
+            heading: 0.0,
+            speed: 0.0,
+            ang_vel: 0.0,
+            order: 0,
+            waypoints: vec![],
+            goal: None,
+            cap: 1.0,
+            throttle: None,
+            sail_energy: 1.0,
+            crew_speed: 1.0,
+            crew_turn: 1.0,
+        };
         let ms = MissionShip {
             id: -1,
             name: class.into(),
@@ -415,8 +431,21 @@ mod tests {
         // a ship on top of a boat is not pushed (Ship_vs_Lifeboat has no response), whichever way round
         let lib = app.world().resource::<Library>();
         let (cutter, boat) = (lib.index("Ship_Navy_Cutter"), lib.index("Ship_Navy_Lifeboat"));
-        let mk =
-            |class| Ship { class, side: Side::Player, heading: 0.0, speed: 0.0, ang_vel: 0.0, order: 0, waypoints: vec![], goal: None, cap: 1.0, throttle: None, sail_energy: 1.0 };
+        let mk = |class| Ship {
+            class,
+            side: Side::Player,
+            heading: 0.0,
+            speed: 0.0,
+            ang_vel: 0.0,
+            order: 0,
+            waypoints: vec![],
+            goal: None,
+            cap: 1.0,
+            throttle: None,
+            sail_energy: 1.0,
+            crew_speed: 1.0,
+            crew_turn: 1.0,
+        };
         let mut time = Time::<()>::default();
         time.advance_by(std::time::Duration::from_secs_f32(0.1));
         let mut w = App::new();
