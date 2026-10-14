@@ -1,12 +1,23 @@
 //! Shared ship state, movement integration and skirmish AI.
 use crate::*;
 
-/// All Stop, Ahead Slow, Ahead Full, Emergency Speed. PROVISIONAL fractions of MaxSpeed; real mapping unknown.
-pub const ORDERS: [(&str, f32); 4] = [("All Stop", 0.0), ("Ahead Slow", 0.5), ("Ahead Full", 1.0), ("Emergency Speed", 1.25)];
+/// All Stop, Ahead Slow, Ahead Full, Emergency Speed as fractions of Ahead Full speed (measured on the retail cutter, docs/re/movement.md).
+pub const ORDERS: [(&str, f32); 4] = [("All Stop", 0.0), ("Ahead Slow", 0.5), ("Ahead Full", 1.0), ("Emergency Speed", 2.0)];
 
-/// Linear drag with rate (MaxThrust/Mass)/MaxSpeed (structure from the exe, docs/re/movement.md).
-/// PROVISIONAL: the exe's time scale is not recovered; this scales MaxThrust/Mass.
-pub const THRUST_SCALE: f32 = 0.1;
+/// Ahead Full without crew settles at this fraction of WOT MaxSpeed (so Emergency is 1.125 x MaxSpeed). Measured on one class;
+/// PROVISIONAL for the others, and crew raise it (not modelled yet).
+pub const FULL_SPEED: f32 = 0.5625;
+
+/// Full-rudder torque relative to the decoded turn formula; the measured turn rate needs it at both Slow and Full.
+/// PROVISIONAL: the same 1.125 as Emergency speed, source not identified.
+pub const TURN_SCALE: f32 = 1.125;
+
+/// A braking ship comes to rest when it would drop through this speed (retail: 1.05 -> 0 in one tick).
+pub const STOP_SNAP: f32 = 1.0;
+
+/// Ships lean into the rudder (positive roll = starboard up = into a port turn): measured limit and rate.
+pub const MAX_ROLL: f32 = 0.25;
+pub const ROLL_RATE: f32 = 0.06;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Side {
@@ -108,14 +119,19 @@ pub fn ai(
 }
 
 fn max_speed(ship: &Ship, class: &combat::Class, health: &Health) -> f32 {
-    class.phys.max_speed * combat::speed_factor(class, health) * ship.cap * ship.sail_energy
+    full_speed(class) * combat::speed_factor(class, health) * ship.cap * ship.sail_energy
+}
+
+/// Undamaged Ahead Full speed.
+pub fn full_speed(class: &combat::Class) -> f32 {
+    class.phys.max_speed * FULL_SPEED
 }
 
 /// One movement step for a ship; also used to predict the player's course.
 pub fn step(ship: &mut Ship, tf: &mut Transform, class: &combat::Class, health: &Health, dt: f32) {
     {
         let ph = &class.phys;
-        let drag = THRUST_SCALE * ph.thrust / ph.mass / ph.max_speed; // 1/s
+        let drag = ph.thrust / ph.mass / ph.max_speed; // 1/s; retail settles with this rate for every order change
         let fraction = if ship.order == 0 { 0.0 } else { ship.throttle.unwrap_or(ORDERS[ship.order].1) };
         let target = fraction * max_speed(ship, class, health);
         let mut steer = 0.0;
@@ -140,7 +156,7 @@ pub fn step(ship: &mut Ship, tf: &mut Transform, class: &combat::Class, health: 
         // Turning follows ShipPhysics::Update in the original exe (docs/re/movement.md). Assumed mapping (not verified):
         // rudder in [-1,1] is `steer`, and the torque scale is WOT MaxAngularAcceleration.
         let v = ship.speed.abs();
-        let mut a = steer * ph.max_ang_acc * (1.0 - 1.0 / (0.1 * v + 1.0)) * combat::turn_factor(class, health);
+        let mut a = steer * TURN_SCALE * ph.max_ang_acc * (1.0 - 1.0 / (0.1 * v + 1.0)) * combat::turn_factor(class, health);
         if v > 0.67 * ph.max_speed {
             a /= 3.0
         } else if v < 0.33 * ph.max_speed {
@@ -150,18 +166,21 @@ pub fn step(ship: &mut Ship, tf: &mut Transform, class: &combat::Class, health: 
         a = a.clamp(-60.0, 60.0);
         ship.ang_vel += a * dt;
         ship.heading += ship.ang_vel * dt;
-        // PROVISIONAL: stop uses the unscaled retail drag; the old acceleration fudge made braking ten times too slow.
-        let rate = if ship.order == 0 { ph.thrust / ph.mass / ph.max_speed } else { drag };
-        ship.speed = approach_speed(ship.speed, target, rate, dt);
+        ship.speed = approach_speed(ship.speed, target, drag, dt);
         let fwd = Vec3::new(-ship.heading.sin(), 0.0, -ship.heading.cos());
         tf.translation += fwd * ship.speed * dt;
-        tf.rotation = Quat::from_rotation_y(ship.heading);
+        // Roll about the bow axis toward the rudder, rate-limited. PROVISIONAL: target proportional to rudder; retail also
+        // weaves slightly on a straight course and does not lean at Emergency Speed (not modelled).
+        let roll = tf.rotation.to_euler(EulerRot::YXZ).2;
+        let roll = roll + (steer * MAX_ROLL - roll).clamp(-ROLL_RATE * dt, ROLL_RATE * dt);
+        tf.rotation = Quat::from_rotation_y(ship.heading) * Quat::from_rotation_z(roll);
     }
 }
 
 pub fn approach_speed(speed: f32, target: f32, rate: f32, dt: f32) -> f32 {
     let next = target + (speed - target) * (-rate * dt).exp();
-    if target == 0.0 && next.abs() < 0.01 { 0.0 } else { next }
+    // The snap is the engine braking through STOP_SNAP; a slow push (collision, tow) still settles gradually.
+    if target == 0.0 && (next.abs() < 0.01 || speed.abs() >= STOP_SNAP && next.abs() < STOP_SNAP) { 0.0 } else { next }
 }
 
 /// Fleet identity is not allegiance: allied skirmish players have different owners.
@@ -632,7 +651,7 @@ pub mod movement_tests {
         let (mut w, ids) = fleet_world();
         assert!(!promote(&mut w, ids[4], false));
         assert!(!promote(&mut w, ids[5], false));
-        let max = w.resource::<Library>().classes[w.get::<Ship>(ids[2]).unwrap().class].phys.max_speed;
+        let max = full_speed(&w.resource::<Library>().classes[w.get::<Ship>(ids[2]).unwrap().class]);
         w.get_mut::<Ship>(ids[2]).unwrap().speed = max * 0.6;
         w.get_mut::<Ship>(ids[2]).unwrap().cap = 0.75;
         w.resource_mut::<Orbit>().focus = Some(ids[5]);
@@ -897,6 +916,53 @@ pub mod movement_tests {
         assert!(ship.waypoints.is_empty());
         assert!(ship.order == 3 && ship.speed > 1.0, "speed {}", ship.speed);
     }
+    /// Retail Navy Cutter without crew, sampled from the running original (docs/re/movement.md, "Measured").
+    #[test]
+    fn cutter_matches_measured_retail_movement() {
+        let lib = combat::Library::load(&crate::assets_dir());
+        let ci = lib.index("Ship_Navy_Cutter");
+        let class = &lib.classes[ci];
+        let h = Health { sections: vec![1.0; class.sections.len()], core: 1.0, destroyed: false };
+        let dt = 0.0344; // retail update interval
+        let run = |ship: &mut Ship, tf: &mut Transform, secs: f32| {
+            for _ in 0..(secs / dt) as usize {
+                step(ship, tf, class, &h, dt);
+            }
+        };
+        let mut ship =
+            Ship { class: ci, side: Side::Player, heading: 0.0, speed: 0.0, ang_vel: 0.0, order: 1, waypoints: vec![], goal: None, cap: 1.0, throttle: None, sail_energy: 1.0 };
+        let mut tf = Transform::default();
+        run(&mut ship, &mut tf, 1.0);
+        assert!((ship.speed - 1.95).abs() < 0.1, "Slow from rest after 1 s: {}", ship.speed); // 0.53 s time constant
+        for (order, measured) in [(1, 2.2655), (2, 4.531), (3, 9.0623)] {
+            ship.order = order;
+            run(&mut ship, &mut tf, 8.0);
+            assert!((ship.speed - measured).abs() < 0.01, "order {order}: {} vs {measured}", ship.speed);
+        }
+        ship.order = 2;
+        run(&mut ship, &mut tf, 8.0);
+        ship.order = 0;
+        run(&mut ship, &mut tf, 0.75); // retail: 23 ticks of decay to 1.05, then rest on the 24th (0.83 s)
+        assert!(ship.speed > 1.0, "still slowing after 0.75 s: {}", ship.speed);
+        run(&mut ship, &mut tf, 0.15);
+        assert_eq!(ship.speed, 0.0, "All Stop from Full is at rest after about 0.83 s");
+        for order in [1, 2] {
+            ship.order = order;
+            run(&mut ship, &mut tf, 8.0);
+            ship.goal = Some(ship.heading + 3.0); // hard to port
+            run(&mut ship, &mut tf, 3.0);
+            let roll = tf.rotation.to_euler(EulerRot::YXZ).2;
+            assert!(roll > 0.1 && roll < MAX_ROLL, "leaning into the turn, not yet at the limit: {roll}");
+            assert!((ship.ang_vel.to_degrees() - 13.6).abs() < 0.4, "order {order} turn rate {}", ship.ang_vel.to_degrees());
+            ship.goal = Some(ship.heading + 3.0);
+            run(&mut ship, &mut tf, 2.0);
+            assert!((tf.rotation.to_euler(EulerRot::YXZ).2 - MAX_ROLL).abs() < 1e-3, "full lean after about 4 s");
+            assert!((tf.rotation * Vec3::NEG_Z).y.abs() < 1e-4, "roll never pitches the bow");
+            ship.goal = None;
+            ship.ang_vel = 0.0;
+        }
+    }
+
     #[test]
     fn stop_is_frame_rate_independent_and_reaches_rest() {
         let rate = 18000.0 / 2000.0 / 11.111111; // retail Comet
