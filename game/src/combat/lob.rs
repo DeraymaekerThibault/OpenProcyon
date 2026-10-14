@@ -274,8 +274,21 @@ mod tests {
         let hp = Health::new(&lib.classes[class]);
         let before = hp.sections[k];
         let core = hp.core;
-        let ship =
-            Ship { class, side: crate::Side::Player, heading: 0.0, speed: 0.0, ang_vel: 0.0, order: 0, waypoints: vec![], goal: None, cap: 1.0, throttle: None, sail_energy: 1.0 };
+        let ship = Ship {
+            class,
+            side: crate::Side::Player,
+            heading: 0.0,
+            speed: 0.0,
+            ang_vel: 0.0,
+            order: 0,
+            waypoints: vec![],
+            goal: None,
+            cap: 1.0,
+            throttle: None,
+            sail_energy: 1.0,
+            crew_speed: 1.0,
+            crew_turn: 1.0,
+        };
         let tables: std::collections::HashMap<String, std::collections::HashMap<String, [f32; 5]>> =
             serde_json::from_value(crate::data::read_json(&crate::assets_dir().join("data/nebula.json"))).unwrap();
         assert_eq!(&tables["wind"]["Cloth"][..2], &[5.0, 7.0]);

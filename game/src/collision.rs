@@ -754,6 +754,8 @@ mod tests {
             cap: 1.0,
             throttle: None,
             sail_energy: 1.0,
+            crew_speed: 1.0,
+            crew_turn: 1.0,
         };
         let mut mission = crate::campaign::load_id("mission03");
         mission.script.nis = true;
@@ -814,6 +816,8 @@ mod tests {
             cap: 1.0,
             throttle: None,
             sail_energy: 1.0,
+            crew_speed: 1.0,
+            crew_turn: 1.0,
         };
         let health = || crate::Health::new(&app.world().resource::<crate::Library>().classes[class]);
         let h1 = health();
@@ -860,6 +864,8 @@ mod tests {
             cap: 1.0,
             throttle: None,
             sail_energy: 1.0,
+            crew_speed: 1.0,
+            crew_turn: 1.0,
         };
         let e = app.world_mut().spawn((ship, health, Transform::default(), Drift::default())).id();
         let mut best = f32::INFINITY;
@@ -905,6 +911,8 @@ mod tests {
             cap: 1.0,
             throttle: None,
             sail_energy: 1.0,
+            crew_speed: 1.0,
+            crew_turn: 1.0,
         };
         let e = app.world_mut().spawn((ship, health, Transform::from_xyz(0.0, 0.0, 80.0), Drift::default())).id();
         for _ in 0..100 {
@@ -973,6 +981,8 @@ mod tests {
             cap: 1.0,
             throttle: None,
             sail_energy: 1.0,
+            crew_speed: 1.0,
+            crew_turn: 1.0,
         };
         let a = app.world_mut().spawn((ship, health, Transform::from_xyz(0.0, 0.0, 1.5), Drift::default())).id();
         let body = box_body([Vec3::splat(-1.0), Vec3::splat(1.0)], &Transform::default());
@@ -1033,6 +1043,8 @@ mod tests {
                 cap: 1.0,
                 throttle: None,
                 sail_energy: 1.0,
+                crew_speed: 1.0,
+                crew_turn: 1.0,
             };
             let ea = app.world_mut().spawn((ship.clone(), ha, Transform::from_xyz(0.0, 0.0, 1.5), Drift::default())).id();
             let eb = app.world_mut().spawn((crate::Ship { class: b, speed: 0.0, ..ship }, hb, Transform::default(), Drift::default())).id();
@@ -1083,6 +1095,8 @@ mod tests {
             cap: 1.0,
             throttle: None,
             sail_energy: 1.0,
+            crew_speed: 1.0,
+            crew_turn: 1.0,
         };
         let mut app = App::new();
         let a = app.world_mut().spawn((hull.clone(), health(), Transform::default(), Drift::default())).id();

@@ -25,7 +25,7 @@ Sampled ~60 times a second from the running retail game (Steam/Proton) while iss
 about every 0.034 s. Values are the cutter's; other classes are assumed to scale the same way (PROVISIONAL).
 - **Order speeds:** All Stop 0, Ahead Slow 2.266, Ahead Full 4.531, Emergency Speed 9.062 units/s, i.e. ½ / 1 / 2 × Full,
   and Full = 0.5625 × WOT MaxSpeed (Emergency = 1.125 × MaxSpeed). Emergency held its speed for the 15 s it was used.
-- **Crew raise top speed:** with auto-assigned crew the same class settled at 5.74 at Ahead Full (×1.27). Not modelled yet.
+- **Crew raise top speed and turning:** engineers scale Full, the helmsman scales rudder torque; see [crew.md](crew.md).
 - **Time scale:** every order change approaches the new speed exponentially with time constant 0.53 s, matching the unscaled
   WOT rate above (0.537 s for the cutter). All Stop uses the same curve.
 - **Coming to rest:** when the braking speed would drop through 1.0 it becomes 0 in one tick (1.05 → 0). Full to rest takes

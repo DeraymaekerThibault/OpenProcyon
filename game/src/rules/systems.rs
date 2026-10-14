@@ -1239,7 +1239,21 @@ mod ai_tests {
             })
             .insert_resource(mission)
             .add_systems(Update, update);
-        let ship = Ship { class, side: Side::Player, heading: 0.0, speed: 0.0, ang_vel: 0.0, order: 0, waypoints: vec![], goal: None, cap: 1.0, throttle: None, sail_energy: 1.0 };
+        let ship = Ship {
+            class,
+            side: Side::Player,
+            heading: 0.0,
+            speed: 0.0,
+            ang_vel: 0.0,
+            order: 0,
+            waypoints: vec![],
+            goal: None,
+            cap: 1.0,
+            throttle: None,
+            sail_energy: 1.0,
+            crew_speed: 1.0,
+            crew_turn: 1.0,
+        };
         let player = app
             .world_mut()
             .spawn((
@@ -1272,8 +1286,21 @@ mod ai_tests {
             .init_resource::<crate::environment::Sensors>()
             .add_systems(PreUpdate, crate::environment::refresh_sensors)
             .add_systems(Update, mission_ai);
-        let ship =
-            Ship { class: 0, side: Side::Player, heading: 0.0, speed: 5.0, ang_vel: 0.0, order: 2, waypoints: vec![], goal: None, cap: 1.0, throttle: None, sail_energy: 1.0 };
+        let ship = Ship {
+            class: 0,
+            side: Side::Player,
+            heading: 0.0,
+            speed: 5.0,
+            ang_vel: 0.0,
+            order: 2,
+            waypoints: vec![],
+            goal: None,
+            cap: 1.0,
+            throttle: None,
+            sail_energy: 1.0,
+            crew_speed: 1.0,
+            crew_turn: 1.0,
+        };
         let n = lib.classes[0].sections.len();
         let health = || Health { sections: vec![1.0; n], core: 1.0, destroyed: false };
         app.insert_resource(lib);

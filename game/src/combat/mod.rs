@@ -1662,8 +1662,21 @@ mod tests {
         let hostile = spawn_base(&mut app, "SmugglerCampEnemy", 0.0);
         spawn_base(&mut app, "NO PLAYER", 40.0);
         let c = lib.index("Ship_Navy_Torpedo");
-        let ship =
-            Ship { class: c, side: Side::Player, heading: 0.0, speed: 0.0, ang_vel: 0.0, order: 0, waypoints: vec![], goal: None, cap: 1.0, throttle: None, sail_energy: 1.0 };
+        let ship = Ship {
+            class: c,
+            side: Side::Player,
+            heading: 0.0,
+            speed: 0.0,
+            ang_vel: 0.0,
+            order: 0,
+            waypoints: vec![],
+            goal: None,
+            cap: 1.0,
+            throttle: None,
+            sail_energy: 1.0,
+            crew_speed: 1.0,
+            crew_turn: 1.0,
+        };
         let ms = crate::campaign::MissionShip {
             id: 1,
             name: "p".into(),

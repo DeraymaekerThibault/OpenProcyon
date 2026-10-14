@@ -573,8 +573,21 @@ mod tests {
         let sphere = lib.classes[class].sphere;
         app.insert_resource(lib).init_resource::<Sensors>().add_systems(Update, refresh_sensors);
         let tf = Transform::from_xyz(10.0, 20.0, 30.0).with_rotation(Quat::from_rotation_y(0.8));
-        let ship =
-            Ship { class, side: crate::Side::Player, heading: 0.8, speed: 0.0, ang_vel: 0.0, order: 0, waypoints: vec![], goal: None, cap: 1.0, throttle: None, sail_energy: 1.0 };
+        let ship = Ship {
+            class,
+            side: crate::Side::Player,
+            heading: 0.8,
+            speed: 0.0,
+            ang_vel: 0.0,
+            order: 0,
+            waypoints: vec![],
+            goal: None,
+            cap: 1.0,
+            throttle: None,
+            sail_energy: 1.0,
+            crew_speed: 1.0,
+            crew_turn: 1.0,
+        };
         let e = app
             .world_mut()
             .spawn((ship, tf, health, crate::PlayerShip, crate::ship::FleetMember("Player".into(), 0), crate::campaign::MissionShip { visible: true, ..default() }))

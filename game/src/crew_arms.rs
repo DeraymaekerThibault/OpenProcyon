@@ -96,9 +96,26 @@ impl CrewPosts {
         let values: Vec<_> = self.0[role].iter().filter_map(|id| ability(id, skill)).collect();
         (!values.is_empty()).then(|| values.iter().sum::<f32>() / values.len() as f32)
     }
+    /// The post's skill over every slot (capacity `slots`), generic hands counting as 0.1 (default crew are rated 1 of 10).
+    /// PROVISIONAL: the mean with several members per post; measured only on single-slot posts.
+    pub fn post_skill(&self, role: usize, skill: &str, slots: u32) -> f32 {
+        let named: Vec<f32> = self.0[role].iter().map(|id| ability(id, skill).unwrap_or(0.1)).collect();
+        let slots = slots.max(named.len() as u32).max(1);
+        (named.iter().sum::<f32>() + 0.1 * (slots as usize - named.len()) as f32) / slots as f32
+    }
+    /// (top-speed, rudder-torque) factors: engineers' engineering and the helmsman's navigation (docs/re/crew.md).
+    pub fn handling(&self, caps: &[u32; 8]) -> (f32, f32) {
+        (skill_factor(self.post_skill(4, "engineering", caps[4])), skill_factor(self.post_skill(3, "navigation", caps[3])))
+    }
     pub fn combat(&self, role: usize, generic: f32) -> Vec<f32> {
         self.0[role].iter().map(|c| ability(c, "combat").unwrap_or(generic)).collect()
     }
+}
+
+/// Measured on the retail Navy Cutter (docs/re/crew.md): skill 1, 5, 9 of 10 scale top speed and rudder torque by 1, 1.178, 1.334,
+/// i.e. the factor squared grows linearly with skill. PROVISIONAL outside that range and for other classes.
+pub fn skill_factor(skill: f32) -> f32 {
+    (1.0 + 0.972 * (skill - 0.1)).max(0.0).sqrt()
 }
 
 fn spend(points: &mut CampaignPoints, cost: u32) -> Result<(), String> {
@@ -210,14 +227,12 @@ pub struct FitView {
     pub info: Vec<String>,
 }
 
-/// Crew-post bars (PROVISIONAL: the original's formula is not recovered): the mean skill of the posts that drive each, named crew
-/// at their ability and generic hands at 0.2 — Helmsman navigation, Riggers rigging, Engineers engineering, Fighters combat.
+/// Crew-post bars, mapped from the retail screen (docs/re/crew.md): Helmsman navigation, Engineers engineering, Engineers' engineering
+/// with Riggers' rigging, Fighters combat; generic hands count as 0.1. PROVISIONAL: bar scale and the hull's base part are not drawn.
 fn bars(posts: &[Vec<Option<String>>]) -> [f32; 4] {
-    let mean = |role: usize, skill: &str| {
-        let v: Vec<f32> = posts.get(role).into_iter().flatten().map(|p| p.as_deref().and_then(|id| ability(id, skill)).unwrap_or(0.2)).collect();
-        if v.is_empty() { 0.0 } else { v.iter().sum::<f32>() / v.len() as f32 }
-    };
-    [mean(3, "navigation"), mean(5, "rigging"), mean(4, "engineering"), mean(6, "combat")]
+    let skills = |role: usize, skill: &str| -> Vec<f32> { posts.get(role).into_iter().flatten().map(|p| p.as_deref().and_then(|id| ability(id, skill)).unwrap_or(0.1)).collect() };
+    let mean = |v: Vec<f32>| if v.is_empty() { 0.0 } else { v.iter().sum::<f32>() / v.len() as f32 };
+    [mean(skills(3, "navigation")), mean(skills(4, "engineering")), mean([skills(4, "engineering"), skills(5, "rigging")].concat()), mean(skills(6, "combat"))]
 }
 
 /// One ship's posts for the Crew screen: per role, its named crew (name, portrait) then generic hands up to the role's capacity.
@@ -724,7 +739,7 @@ fn apply_outfit(
     mission: Option<Res<crate::campaign::Mission>>,
     mut ships: Query<(
         Entity,
-        &crate::Ship,
+        &mut crate::Ship,
         &crate::combat::Health,
         &crate::campaign::MissionShip,
         &mut crate::combat::GunStates,
@@ -733,7 +748,7 @@ fn apply_outfit(
     )>,
 ) {
     let Some(mission) = mission else { return };
-    for (e, ship, health, ms, mut guns, mut boarding, posts) in &mut ships {
+    for (e, mut ship, health, ms, mut guns, mut boarding, posts) in &mut ships {
         if health.destroyed {
             continue;
         }
@@ -753,6 +768,7 @@ fn apply_outfit(
             CrewPosts(crew)
         });
         if posts != wanted.as_ref() {
+            (ship.crew_speed, ship.crew_turn) = wanted.as_ref().map_or((1.0, 1.0), |p| p.handling(&crate::boarding::counts(&class.name)));
             if let Some(posts) = &wanted {
                 boarding.apply_posts(posts);
                 commands.entity(e).insert(posts.clone());
@@ -847,6 +863,8 @@ mod tests {
                     cap: 1.0,
                     throttle: None,
                     sail_energy: 1.0,
+                    crew_speed: 1.0,
+                    crew_turn: 1.0,
                 },
                 crate::combat::Health::new(&lib.classes[class]),
                 ms,

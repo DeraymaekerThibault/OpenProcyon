@@ -850,7 +850,21 @@ mod tests {
         let class = lib.index(name);
         let c = &lib.classes[class];
         (
-            Ship { class, side, heading: 0.0, speed: 3.0, ang_vel: 0.0, order: 2, waypoints: vec![], goal: None, cap: 1.0, throttle: None, sail_energy: 1.0 },
+            Ship {
+                class,
+                side,
+                heading: 0.0,
+                speed: 3.0,
+                ang_vel: 0.0,
+                order: 2,
+                waypoints: vec![],
+                goal: None,
+                cap: 1.0,
+                throttle: None,
+                sail_energy: 1.0,
+                crew_speed: 1.0,
+                crew_turn: 1.0,
+            },
             Health { sections: c.sections.iter().map(|s| s.hp).collect(), core: c.core_hp, destroyed: false },
         )
     }

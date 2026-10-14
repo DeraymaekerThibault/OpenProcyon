@@ -608,7 +608,21 @@ pub fn input_app() -> (App, Entity) {
         .add_systems(Update, hud_input);
     app.world_mut().spawn((
         PlayerShip,
-        Ship { class: 0, side: crate::Side::Player, heading: 0.0, speed: 0.0, ang_vel: 0.0, order: 0, waypoints: vec![], goal: None, cap: 1.0, throttle: None, sail_energy: 1.0 },
+        Ship {
+            class: 0,
+            side: crate::Side::Player,
+            heading: 0.0,
+            speed: 0.0,
+            ang_vel: 0.0,
+            order: 0,
+            waypoints: vec![],
+            goal: None,
+            cap: 1.0,
+            throttle: None,
+            sail_energy: 1.0,
+            crew_speed: 1.0,
+            crew_turn: 1.0,
+        },
     ));
     let root = app.world_mut().spawn((HudRoot, Visibility::Inherited)).id();
     (app, root)

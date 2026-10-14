@@ -349,6 +349,8 @@ mod tests {
                     cap: 1.0,
                     throttle: None,
                     sail_energy: 1.0,
+                    crew_speed: 1.0,
+                    crew_turn: 1.0,
                 },
             ))
             .id();
