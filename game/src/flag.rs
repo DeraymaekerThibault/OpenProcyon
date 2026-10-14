@@ -66,13 +66,13 @@ fn spawn(
     }
 }
 
-/// Per cloth row (hoist to free end), the (Flag_Top, Flag_Bottom) vertex UVs. Texture v runs along the cloth: the image top is at
-/// the hoist and its bottom at the free end, where the retail art puts the tattered edge (pirate) and the pennant point (Procyon).
+/// Per cloth row (hoist to free end), the (Flag_Top, Flag_Bottom) vertex UVs. The retail flag images lie on their side: the image
+/// top is the hoist (pole side), its bottom the free end (tattered edge, pennant point), its left edge the flag's top edge.
 fn cloth_uvs() -> Vec<[f32; 2]> {
     (0..=SEG)
         .flat_map(|i| {
             let u = i as f32 / SEG as f32;
-            [[1.0, u], [0.0, u]]
+            [[0.0, u], [1.0, u]]
         })
         .collect()
 }
@@ -125,9 +125,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn image_top_is_at_the_hoist_and_bottom_at_the_free_end() {
+    fn image_top_is_the_hoist_and_image_left_the_top_edge() {
         let uv = cloth_uvs();
         assert_eq!((uv[0][1], uv[1][1]), (0.0, 0.0), "hoist row samples the image top");
         assert_eq!((uv[2 * SEG][1], uv[2 * SEG + 1][1]), (1.0, 1.0), "free end samples the image bottom");
+        assert_eq!((uv[0][0], uv[1][0]), (0.0, 1.0), "Flag_Top edge samples the image's left side, Flag_Bottom its right");
     }
 }
