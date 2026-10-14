@@ -787,7 +787,7 @@ fn map_info_dialog(ctx: &Ctx, c: &mut ChildSpawnerCommands, sk: &Skirmish, strin
 
 /// A retail pull-down box (`FrontEnd_Left/Center/Right_PullDown_Background`, `_Selected` for the local player) with centred Univers10
 /// text and, for drop-downs, the `FrontEnd_PullDown_Arrow` at its right end.
-fn pulldown_cell(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], label: &str, selected: bool, action: Option<Action>, arrow: bool) {
+pub(super) fn pulldown_cell(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], label: &str, selected: bool, action: Option<Action>, arrow: bool) {
     let sel = if selected { "_Selected" } else { "" };
     let mut root = c.spawn((ctx.node(l, t, r - l, b - t), Interaction::None));
     if let Some(a) = action {

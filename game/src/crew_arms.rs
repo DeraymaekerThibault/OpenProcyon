@@ -559,6 +559,8 @@ fn skirmish_screen(
     }
     if !model.open {
         choice.ship = sk.fleet_pick;
+        // Screenshot hook (`--script fleet-arms`, see menu.rs `fleet_hook`): open on the Arms tab.
+        choice.arms = std::env::args().any(|a| a == "fleet-arms");
     }
     let action = if keys.just_pressed(KeyCode::Enter) || keys.just_pressed(KeyCode::Escape) {
         Some(Action::Close)

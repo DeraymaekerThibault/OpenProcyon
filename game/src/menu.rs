@@ -629,7 +629,8 @@ pub fn plugin(app: &mut App) {
             (capture_key, buttons.in_set(RunButtons).run_if(menu_active), button_sounds.before(RunButtons).run_if(menu_active), save_actions, save_text.run_if(menu_active)),
         )
         .add_systems(PostUpdate, esc_menu.run_if(in_state(Screen::Battle)))
-        .add_systems(Update, autolaunch.run_if(in_state(Screen::Lobby)));
+        .add_systems(Update, autolaunch.run_if(in_state(Screen::Lobby)))
+        .add_systems(Update, fleet_hook.run_if(in_state(Screen::Fleet)));
 }
 
 #[derive(Component)]
@@ -712,6 +713,21 @@ impl MenuModel<'_> {
 }
 
 /// Dev/smoke hook (`--menu lobby --autolaunch`): fills the human fleet like the fleet screen would and launches.
+/// Screenshot hook (`--menu fleet --script fleet-crew|fleet-arms`): an auto-assigned Navy fleet with the Crew / Arms screen open.
+fn fleet_hook(mut sk: ResMut<Skirmish>, lib: Res<Library>, mut done: Local<bool>) {
+    let args: Vec<String> = std::env::args().collect();
+    if *done || !args.windows(2).any(|w| w[0] == "--script" && w[1].starts_with("fleet-")) {
+        return;
+    }
+    *done = true;
+    if let Some(i) = sk.slots.iter().position(|s| s.kind == Kind::Human) {
+        sk.slots[i].race = 0;
+    }
+    sk.fleet_size = 5;
+    apply(&mut sk, &lib, &Action::AutoAssign);
+    sk.arms_open = true;
+}
+
 fn autolaunch(mut sk: ResMut<Skirmish>, lib: Res<Library>, mut next: ResMut<NextState<Screen>>) {
     // Screenshot hook (`--menu lobby --script map-info`): open the Map Description dialog.
     if !sk.map_info && std::env::args().collect::<Vec<_>>().windows(2).any(|w| w[0] == "--script" && w[1] == "map-info") {
