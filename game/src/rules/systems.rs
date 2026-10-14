@@ -660,8 +660,7 @@ fn update(
             }
             Fx::DarkMatter(volume) => {
                 // The blast starts at the volume's centre (game x, y) at the ships' height.
-                if let Some(pts) = mission.script.volume(&volume).as_array().filter(|p| !p.is_empty()) {
-                    let c = pts.iter().fold(Vec2::ZERO, |a, p| a + Vec2::new(p[0].as_f64().unwrap_or(0.0) as f32, p[1].as_f64().unwrap_or(0.0) as f32)) / pts.len() as f32;
+                if let Some(c) = mission.script.volume(&volume).centroid() {
                     extra.detonate.write(crate::combat::Detonate { bullet: "Bullet_DarkMatterExplosion".into(), at: Vec3::new(c.x, 0.0, -c.y), shooter: None });
                 }
             }
@@ -953,14 +952,11 @@ fn mission_ai(
 /// Where a unit outside its border zone `zone` should head: its return point, else the zone's centre. None while inside
 /// (or when the zone is unknown).
 pub fn leash(sc: &Script, zone: &str, home: Option<Vec3>, pos: Vec3) -> Option<Vec3> {
-    let vol = sc.volume(zone).as_array().filter(|v| v.len() >= 3)?;
-    if in_volume(&sc.volume(zone).clone(), pos) {
+    let vol = sc.volume(zone);
+    if vol.len() < 3 || in_volume(vol, pos) {
         return None;
     }
-    home.or_else(|| {
-        let c = vol.iter().fold(Vec2::ZERO, |a, p| a + Vec2::new(p[0].as_f64().unwrap_or(0.0) as f32, p[1].as_f64().unwrap_or(0.0) as f32)) / vol.len() as f32;
-        Some(Vec3::new(c.x, pos.y, -c.y))
-    })
+    home.or_else(|| vol.centroid().map(|c| Vec3::new(c.x, pos.y, -c.y)))
 }
 
 /// The human's command ship on a border zone (missions 3, 9): steered back inside with the helmsman's off-course line.

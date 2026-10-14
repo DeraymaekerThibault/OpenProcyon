@@ -457,23 +457,18 @@ fn spawn_one(commands: &mut Commands, assets: &AssetServer, effect: &str, mesh_n
 
 /// Nebula volumes of a mission (game x, y polygons): each 'Setup Nebula' names its polygon in the mission's volumes.
 /// PROVISIONAL: every setup counts for 'Unit is Within any Nebula', whatever its cloud or storm effect.
-pub fn polygons(mission: &Value, shift: &StormShift) -> Vec<Value> {
+pub fn polygons(mission: &Value, shift: &StormShift) -> Vec<crate::rules::Region> {
     mission["environment"]["nebulae"]
         .as_array()
         .into_iter()
         .flatten()
+        .filter(|n| mission["volumes"][n["Polygon Name"].as_str().unwrap_or("")].is_array())
         .map(|n| {
-            let mut polygon = mission["volumes"][n["Polygon Name"].as_str().unwrap_or("")].clone();
+            let mut polygon = crate::rules::Region::from_json(&mission["volumes"][n["Polygon Name"].as_str().unwrap_or("")]);
             let offset = shift.0.get(n["New Nebula Name"].as_str().unwrap_or("")).map_or(Vec3::ZERO, |s| s.0);
-            for p in polygon.as_array_mut().into_iter().flatten() {
-                if let (Some(x), Some(y)) = (p[0].as_f64(), p[1].as_f64()) {
-                    p[0] = Value::from(x + offset.x as f64);
-                    p[1] = Value::from(y - offset.z as f64);
-                }
-            }
+            polygon.0.iter_mut().for_each(|p| *p += Vec2::new(offset.x, -offset.z));
             polygon
         })
-        .filter(|p| p.is_array())
         .collect()
 }
 

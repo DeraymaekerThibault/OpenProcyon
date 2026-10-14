@@ -393,8 +393,8 @@ pub fn fleet_smoke(world: &mut World, mut previous: Local<Option<Entity>>) {
             }
         }
         if frame == 120 {
-            let vertices = world.resource::<campaign::Mission>().data["volumes"]["Player Triggers Chase Group"].as_array().unwrap();
-            let center = vertices.iter().map(|v| Vec3::new(v[0].as_f64().unwrap() as f32, 0.0, -v[1].as_f64().unwrap() as f32)).sum::<Vec3>() / vertices.len() as f32;
+            let c = rules::Region::from_json(&world.resource::<campaign::Mission>().data["volumes"]["Player Triggers Chase Group"]).centroid().unwrap();
+            let center = Vec3::new(c.x, 0.0, -c.y);
             world.get_mut::<Transform>(primary).unwrap().translation = center;
         }
         if frame == 130 {

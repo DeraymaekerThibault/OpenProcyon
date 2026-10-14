@@ -206,8 +206,8 @@ pub struct Script {
     pub(super) media: Value,
     pub(super) paths: Value,
     pub(super) points: Value,
-    pub(super) volumes: Value,
-    pub(super) nebulae: Vec<Value>,
+    pub(super) volumes: HashMap<String, Region>,
+    pub(super) nebulae: Vec<Region>,
     pub(super) hits: HashMap<Entity, u32>,
     pub(super) hits_by: HashMap<(String, Entity), u32>,
     pub(super) fired_at: HashMap<Entity, (f32, Entity)>,
@@ -311,20 +311,42 @@ pub(super) fn alias_player(v: Value, player: &str) -> Value {
     }
 }
 
-pub(super) fn inside(p: Vec2, polygon: &Value) -> bool {
-    let vertices = polygon.as_array().map(Vec::as_slice).unwrap_or(&[]);
-    let mut inside = false;
-    for i in 0..vertices.len() {
-        let v = |j: usize| Vec2::new(vertices[j][0].as_f64().unwrap() as f32, vertices[j][1].as_f64().unwrap() as f32);
-        let (a, bb) = (v(i), v((i + 1) % vertices.len()));
-        if (a.y > p.y) != (bb.y > p.y) && p.x < (bb.x - a.x) * (p.y - a.y) / (bb.y - a.y) + a.x {
-            inside = !inside;
-        }
+/// A mission volume: a closed polygon in game axes (x, y), read once from the exported `[[x, y], ...]` list.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Region(pub Vec<Vec2>);
+/// What an unknown volume name reads as: contains nothing.
+static NO_VOLUME: Region = Region(Vec::new());
+impl Region {
+    /// Vertices that are not two numbers are skipped, so a malformed mod volume never panics mid-battle.
+    pub fn from_json(v: &Value) -> Self {
+        Region(v.as_array().into_iter().flatten().filter_map(|p| Some(Vec2::new(p[0].as_f64()? as f32, p[1].as_f64()? as f32))).collect())
     }
-    inside
+    /// Even-odd rule; an empty polygon contains nothing.
+    pub fn contains(&self, p: Vec2) -> bool {
+        let v = &self.0;
+        let mut inside = false;
+        for i in 0..v.len() {
+            let (a, b) = (v[i], v[(i + 1) % v.len()]);
+            if (a.y > p.y) != (b.y > p.y) && p.x < (b.x - a.x) * (p.y - a.y) / (b.y - a.y) + a.x {
+                inside = !inside;
+            }
+        }
+        inside
+    }
+    /// Mean of the vertices (game axes); None for an empty polygon.
+    pub fn centroid(&self) -> Option<Vec2> {
+        (!self.0.is_empty()).then(|| self.0.iter().sum::<Vec2>() / self.0.len() as f32)
+    }
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
 }
-pub(super) fn in_volume(vol: &Value, pos: Vec3) -> bool {
-    inside(Vec2::new(pos.x, -pos.z), vol)
+/// Whether a Bevy-space position lies inside a volume (game y is Bevy -z).
+pub(super) fn in_volume(vol: &Region, pos: Vec3) -> bool {
+    vol.contains(Vec2::new(pos.x, -pos.z))
 }
 /// Victory line of 'Goto Next Level'. Its World is the mission being started ("Mission02.twt" after mission 1), so the line
 /// names the one just won (the ending overlay reads "Mission 1 complete", docs/re/campaign.md).
@@ -337,7 +359,7 @@ pub(super) fn victory_text(next_world: &str) -> String {
 }
 /// Same test for game-axes (x, y) coordinates.
 pub fn in_game_volume(vol: &Value, x: f32, y: f32) -> bool {
-    inside(Vec2::new(x, y), vol)
+    Region::from_json(vol).contains(Vec2::new(x, y))
 }
 
 impl Script {
@@ -414,7 +436,7 @@ impl Script {
             media,
             paths: data["paths"].clone(),
             points: data["points"].clone(),
-            volumes: data["volumes"].clone(),
+            volumes: data["volumes"].as_object().into_iter().flatten().map(|(name, v)| (name.clone(), Region::from_json(v))).collect(),
             nebulae: crate::nebula::polygons(data, &crate::nebula::StormShift::default()),
             hits: HashMap::new(),
             hits_by: HashMap::new(),
@@ -587,8 +609,8 @@ impl Script {
             warn!("mission rules: unsupported {what} (ignored)");
         }
     }
-    pub(super) fn volume(&self, name: &str) -> &Value {
-        &self.volumes[name]
+    pub(super) fn volume(&self, name: &str) -> &Region {
+        self.volumes.get(name).unwrap_or(&NO_VOLUME)
     }
     pub(super) fn timer(&self, name: &str) -> Option<f32> {
         self.timers.get(name).copied()
