@@ -43,15 +43,7 @@ fn spawn(
         };
         let mut m = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
         m.insert_attribute(Mesh::ATTRIBUTE_POSITION, vec![[0.0f32; 3]; (SEG + 1) * 2]);
-        m.insert_attribute(
-            Mesh::ATTRIBUTE_UV_0,
-            (0..=SEG)
-                .flat_map(|i| {
-                    let u = i as f32 / SEG as f32;
-                    [[1.0, 1.0 - u], [0.0, 1.0 - u]] // texture v runs along the cloth; retail has its bottom at the hoist
-                })
-                .collect::<Vec<_>>(),
-        );
+        m.insert_attribute(Mesh::ATTRIBUTE_UV_0, cloth_uvs());
         m.insert_indices(Indices::U32(
             (0..SEG as u32)
                 .flat_map(|i| {
@@ -72,6 +64,17 @@ fn spawn(
             ChildOf(e),
         ));
     }
+}
+
+/// Per cloth row (hoist to free end), the (Flag_Top, Flag_Bottom) vertex UVs. Texture v runs along the cloth: the image top is at
+/// the hoist and its bottom at the free end, where the retail art puts the tattered edge (pirate) and the pennant point (Procyon).
+fn cloth_uvs() -> Vec<[f32; 2]> {
+    (0..=SEG)
+        .flat_map(|i| {
+            let u = i as f32 / SEG as f32;
+            [[1.0, u], [0.0, u]]
+        })
+        .collect()
 }
 
 fn wave(time: Res<Time>, settings: Option<Res<crate::menu::Settings>>, mut meshes: ResMut<Assets<Mesh>>, q: Query<(&Flag, &Mesh3d)>) {
@@ -114,5 +117,17 @@ fn retexture(
         {
             m.base_color_texture = Some(tex);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn image_top_is_at_the_hoist_and_bottom_at_the_free_end() {
+        let uv = cloth_uvs();
+        assert_eq!((uv[0][1], uv[1][1]), (0.0, 0.0), "hoist row samples the image top");
+        assert_eq!((uv[2 * SEG][1], uv[2 * SEG + 1][1]), (1.0, 1.0), "free end samples the image bottom");
     }
 }
