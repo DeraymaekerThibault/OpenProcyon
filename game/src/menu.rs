@@ -64,6 +64,8 @@ pub struct Skirmish {
     pub ship_pick: usize,
     pub fleet_pick: usize,
     pub arms_open: bool,
+    /// The lobby's Map Description dialog ('Map Info') is open.
+    pub map_info: bool,
     /// First row of the classic fixed-height ship list.
     pub scroll: usize,
 }
@@ -102,6 +104,8 @@ pub enum Action {
     DoLoad,
     DoSave,
     Remove,
+    /// Open or close the lobby's Map Description dialog.
+    MapInfo(bool),
     QuitToMenu,
     QuickSave,
     QuickLoad,
@@ -550,6 +554,7 @@ pub fn plugin(app: &mut App) {
         fleet_pick: 0,
         scroll: 0,
         arms_open: false,
+        map_info: false,
     };
     sk.load_map();
     app.insert_resource(sk)
@@ -650,6 +655,10 @@ impl MenuModel<'_> {
 
 /// Dev/smoke hook (`--menu lobby --autolaunch`): fills the human fleet like the fleet screen would and launches.
 fn autolaunch(mut sk: ResMut<Skirmish>, lib: Res<Library>, mut next: ResMut<NextState<Screen>>) {
+    // Screenshot hook (`--menu lobby --script map-info`): open the Map Description dialog.
+    if !sk.map_info && std::env::args().collect::<Vec<_>>().windows(2).any(|w| w[0] == "--script" && w[1] == "map-info") {
+        sk.map_info = true;
+    }
     if !std::env::args().any(|a| a == "--autolaunch") {
         return;
     }
@@ -819,6 +828,7 @@ fn save_actions(
                     }
                 }
             }
+            Action::MapInfo(open) => sk.map_info = open,
             Action::Remove => {
                 if let Some((s, false)) = ui.selected.and_then(|n| ui.list.get(n)) {
                     crate::campaign::delete_save(&s.name);
@@ -1024,6 +1034,16 @@ mod tests {
     use super::*;
 
     #[test]
+    fn map_info_opens_and_closes_the_lobby_dialog() {
+        let lib = Library::load(&assets_dir());
+        let mut sk = skirmish("ambush");
+        apply(&mut sk, &lib, &Action::MapInfo(true));
+        assert!(sk.map_info);
+        apply(&mut sk, &lib, &Action::MapInfo(false));
+        assert!(!sk.map_info);
+    }
+
+    #[test]
     fn skirmish_list_counts_playable_players_like_the_original() {
         let maps = skirmish_maps();
         let get = |id: &str| maps.iter().find(|m| m.0 == id).unwrap_or_else(|| panic!("{id}"));
@@ -1079,6 +1099,7 @@ mod tests {
             fleet_pick: 0,
             scroll: 0,
             arms_open: false,
+            map_info: false,
         };
         sk.load_map();
         sk

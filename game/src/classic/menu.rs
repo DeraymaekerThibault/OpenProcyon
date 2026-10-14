@@ -221,11 +221,9 @@ fn build(
                         None
                     }
                     (Screen::Battle, "Front End Dialog Screen Backdrop") => {
-                        // The retail frame does not fill this ReferenceArea (its buttons reach past the area's right edge): measured on
-                        // an original screenshot, the 576x256 texture spans x 74..727 (centred on the screen) from the area's top at its
-                        // native height. PROVISIONAL: measured, not derived from the screen definition.
-                        let _ = r;
-                        ctx.image(c, "menu/frontenddialogscreen.png", None, DIALOG_FRAME[0], DIALOG_FRAME[1], DIALOG_FRAME[2], DIALOG_FRAME[3], Color::WHITE);
+                        // The retail frame does not fill this ReferenceArea (its buttons reach past the area's right edge).
+                        let [x, y, w, h] = dialog_frame(rect);
+                        ctx.image(c, "menu/frontenddialogscreen.png", None, x, y, w, h, Color::WHITE);
                         None
                     }
                     (Screen::Battle, "In Game Backdrop") => {
@@ -312,6 +310,7 @@ fn build(
                         None
                     }
                     (Screen::Lobby, "Open Next Screen Button") => Some(Action::Launch),
+                    (Screen::Lobby, "Open Map Description Dialog Button") => Some(Action::MapInfo(true)),
                     (Screen::Lobby, "Open Previous Screen Button") => Some(Action::Goto(Screen::CreateSkirmish)),
                     (Screen::Lobby, "Open Ship Selection Screen") if sk.open() => Some(Action::Goto(Screen::Fleet)),
                     (Screen::Lobby, "Game Lobby Backdrop") => {
@@ -319,9 +318,9 @@ fn build(
                         None
                     }
                     (Screen::Lobby, "Lobby Information Button") => {
-                        if let Some(id) = sk.map.as_deref().filter(|_| sk.map_json["backdrop"].is_string()) {
-                            ctx.image(c, &format!("maps/{id}/backdrop.png"), None, r[0] + 10.0, r[1], r[3] - r[1], r[3] - r[1], Color::WHITE);
-                        }
+                        // Measured: a gold Univers10 'Map' label and the map name in Univers12 under the title.
+                        ctx.text(c, "Univers10", &text_of(&strings, "IDGS_TPFRONTENDTEXT01_SERVER_MAPNAME"), r[0], r[2] - r[0], 84.0, true, GOLD);
+                        ctx.text(c, "Univers12", sk.map_json["name"].as_str().unwrap_or_default(), r[0], r[2] - r[0], 101.0, true, Color::WHITE);
                         None
                     }
                     (Screen::Lobby, "Lobby Player List Button") => {
@@ -368,6 +367,9 @@ fn build(
                 if let Some(a) = action {
                     ctx.text_button(c, rect, &label, font, a);
                 }
+            }
+            if *state.get() == Screen::Lobby && sk.map_info {
+                map_info_dialog(&ctx, c, &sk, &strings);
             }
         });
     });
@@ -506,8 +508,14 @@ fn disabled(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], lab
     });
 }
 
-/// In-game menu frame (`frontenddialogscreen.png`) as the original draws it: left, top, width, height in 800x600 units.
-const DIALOG_FRAME: [f32; 4] = [74.0, 185.0, 653.0, 256.0];
+/// Where a 'Front End Dialog Screen Backdrop' frame (`frontenddialogscreen.png`) is drawn for its ReferenceArea `[l, t, r, b]`:
+/// centred on the screen, top at the area's top, scaled by 653/485 x 256/242. Fitted on the in-game menu (area [101,185,586,427]
+/// measured at x 74..727, y 185..441); it puts the frame's inner area around the dialog's content (in-game menu buttons x 174..629,
+/// map description text x 146..641). PROVISIONAL: one measured dialog.
+fn dialog_frame([l, t, r, b]: [f32; 4]) -> [f32; 4] {
+    let (w, h) = ((r - l) * 653.0 / 485.0, (b - t) * 256.0 / 242.0);
+    [400.0 - w / 2.0, t, w, h]
+}
 
 /// The front-end frame around a "Front End Screen Backdrop" panel (y 113..507), as on original screenshots: grid letterbox strips above
 /// and below (`FrontEnd_Letterbox_Tile`, mirrored below), one of the `FrontEndScreen0..4` scenes cropped to its 394 picture rows,
@@ -663,22 +671,49 @@ fn cell(ctx: &Ctx, c: &mut ChildSpawnerCommands, [x, y, w, h]: [f32; 4], label: 
 #[derive(Component)]
 struct Rest(Color);
 
-/// Lobby player list, one row per playable player: name (click to take that slot), type, fleet type, team.
-/// Historical maps only let you pick the side; open maps let you open/close slots, pick fleet types and teams unless the map locks them.
-fn players_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, _]: [f32; 4], sk: &Skirmish, strings: &Value) {
+/// Lobby player table as measured on the original: a framed panel (x 222..782, y 122..448) with a 'Flag / Player / Fleet / Team' header
+/// in UniversBold14 and one row per playable player, 32 apart from y 184: the small flag icon, then Univers10 text in retail pull-down
+/// boxes (Player x 287..460, Fleet 470..561, Team 571..779 with its drop-down arrow). Clicking a player's box takes that slot, the
+/// fleet box cycles the fleet type and the team box the team (open maps). PROVISIONAL: the human row shows "Player" (no profiles),
+/// the flag icon is the race's icon block plus the slot number, and closing a slot on an open map is a click on its flag.
+fn players_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, _rect: [f32; 4], sk: &Skirmish, strings: &Value) {
     let s = |id: &str| strings[id].as_str().unwrap_or(id).to_string();
-    let (open, w) = (sk.open(), r - l);
-    let cols = [(10.0, 150.0), (170.0, 100.0), (280.0, 150.0), (440.0, w - 450.0)];
-    let head = [s("IDGS_TPFRONTENDTEXT01_PLAYERS"), String::new(), s("IDGS_TPFRONTENDTEXT02_RACE"), s("IDGS_TPFRONTENDTEXT02_TEAM")];
-    for (h, (x, cw)) in head.iter().zip(cols) {
-        ctx.text(c, "BlackChancery16", h, l + x, cw, t + 14.0, false, Color::srgb(1.0, 0.9, 0.4));
+    let open = sk.open();
+    stretched_window(ctx, c, [222.0, 122.0, 782.0, 448.0]);
+    c.spawn((ctx.node(226.0, 124.0, 552.0, 30.0), BackgroundColor(Color::srgba(0.25, 0.75, 0.85, 0.22))));
+    for (id, x0, x1) in [
+        ("IDGS_TPFRONTENDTEXT03_FLAG", 236.0, 292.0),
+        ("IDGS_TPFRONTENDTEXT_SCREENS_PLAYER", 287.0, 460.0),
+        ("IDGS_TPFRONTENDTEXT03_FLEET", 470.0, 561.0),
+        ("IDGS_TPFRONTENDTEXT02_TEAM", 571.0, 779.0),
+    ] {
+        ctx.text(c, "UniversBold14", &s(id), x0, x1 - x0, 138.0, true, Color::WHITE);
     }
     let teams = sk.map_json["teams"].as_array().cloned().unwrap_or_default();
     let team_locked = open && !teams.is_empty();
     for (i, slot) in sk.slots.iter().enumerate() {
-        let y = t + 32.0 + i as f32 * 28.0;
+        let cy = 184.0 + i as f32 * 32.0;
+        let me = slot.kind == Kind::Human;
+        let live = slot.kind != Kind::Closed;
+        let base = match slot.race {
+            2 => 10,
+            3 => 20,
+            _ => 0,
+        };
+        let flag = c.spawn((ctx.node(250.0, cy - 12.5, 28.0, 25.0), Interaction::None)).id();
+        if open && !me {
+            c.commands().entity(flag).insert(Action::ToggleClosed(i));
+        }
+        c.commands().entity(flag).with_children(|c| {
+            if live {
+                piece(ctx, c, &format!("FrontEnd_Flag_Small_Icon_{:02}", base + i % 10), [0.0, 0.0, 28.0, 25.0], (false, false));
+            }
+        });
+        // Several live players on one team are told apart by a letter ('Pirates A', 'B', 'C'), as on original screenshots.
+        let mates: Vec<usize> = sk.slots.iter().enumerate().filter(|(_, o)| o.kind != Kind::Closed && o.team == slot.team && slot.team >= 0).map(|(k, _)| k).collect();
+        let letter = (mates.len() > 1).then(|| mates.iter().position(|&k| k == i).map_or(String::new(), |n| format!(" {}", (b'A' + n as u8) as char))).unwrap_or_default();
         let team = match usize::try_from(slot.team).ok().and_then(|n| teams.get(n)) {
-            Some(tm) => s(tm["name_id"].as_str().unwrap_or("")),
+            Some(tm) => s(tm["name_id"].as_str().unwrap_or("")) + &letter,
             None if slot.team >= 0 => format!("{} {}", s("IDGS_TPFRONTENDTEXT02_TEAM"), slot.team + 1),
             None => "-".into(),
         };
@@ -688,21 +723,50 @@ fn players_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, _]: [f32; 4],
             Kind::Computer => s("IDGS_TPFRONTENDTEXT01_COMPUTER"),
             Kind::Closed => s("IDGS_TPFRONTENDTEXT01_CLOSED"),
         };
-        let live = slot.kind != Kind::Closed;
-        let me = slot.kind == Kind::Human;
-        let rows = [
-            (slot.name.clone(), live.then_some(Action::Claim(i))),
-            (kind, (open && !me).then_some(Action::ToggleClosed(i))),
-            (race, (open && live && !team_locked).then_some(Action::CycleRace(i))),
-            (team, (open && live).then_some(Action::CycleTeam(i))),
+        let cells = [
+            (287.0, 460.0, kind, (live && !me).then_some(Action::Claim(i)), false),
+            (470.0, 561.0, race, (open && live && !team_locked).then_some(Action::CycleRace(i)), false),
+            (571.0, 779.0, team, (open && live).then_some(Action::CycleTeam(i)), true),
         ];
-        for ((label, action), (x, cw)) in rows.into_iter().zip(cols) {
-            cell(ctx, c, [l + x, y, cw, 24.0], &label, me, action);
+        for (x0, x1, label, action, drop) in cells {
+            pulldown_cell(ctx, c, [x0, cy - 14.5, x1, cy + 14.5], &label, false, action, drop);
         }
     }
     if let Some(e) = sk.error {
-        ctx.text(c, "Univers12", &s(e), l, w, t + 32.0 + 9.0 * 28.0 + 8.0, false, Color::srgb(1.0, 0.4, 0.3));
+        ctx.text(c, "Univers12", &s(e), 236.0, 540.0, 184.0 + 8.0 * 32.0, false, Color::srgb(1.0, 0.4, 0.3));
     }
+}
+
+/// The lobby's Map Description dialog (`Map Description Dialog Screen.tst`): the dialog frame, the map description in Univers10 inside
+/// 'Map Information Button' [146,207,641,330] and a 'Back' button [324,339,457,383]. A full-screen blocker keeps the lobby beneath
+/// from reacting. The frame follows `dialog_frame` for the screen's backdrop area [61,165,603,436].
+fn map_info_dialog(ctx: &Ctx, c: &mut ChildSpawnerCommands, sk: &Skirmish, strings: &Value) {
+    c.spawn((ctx.node(0.0, 0.0, 800.0, 600.0), Interaction::None, BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.35))));
+    let [x, y, w, h] = dialog_frame([61.0, 165.0, 603.0, 436.0]);
+    ctx.image(c, "menu/frontenddialogscreen.png", None, x, y, w, h, Color::WHITE);
+    wrapped(ctx, c, "Univers10", sk.map_json["description"].as_str().unwrap_or_default(), [146.0, 207.0, 641.0, 330.0]);
+    ctx.text_button(c, [324.0, 339.0, 457.0, 383.0], &text_of(strings, "IDGS_TPFRONTENDTEXT01_BACK"), "BlackChancery16", Action::MapInfo(false));
+}
+
+/// A retail pull-down box (`FrontEnd_Left/Center/Right_PullDown_Background`, `_Selected` for the local player) with centred Univers10
+/// text and, for drop-downs, the `FrontEnd_PullDown_Arrow` at its right end.
+fn pulldown_cell(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], label: &str, selected: bool, action: Option<Action>, arrow: bool) {
+    let sel = if selected { "_Selected" } else { "" };
+    let mut root = c.spawn((ctx.node(l, t, r - l, b - t), Interaction::None));
+    if let Some(a) = action {
+        root.insert(a);
+    }
+    root.with_children(|c| {
+        let (w, h) = (r - l, b - t);
+        piece(ctx, c, &format!("FrontEnd_Left_PullDown_Background{sel}"), [0.0, 0.0, 12.0, h], (false, false));
+        piece(ctx, c, &format!("FrontEnd_Center_PullDown_Background{sel}"), [12.0, 0.0, w - 12.0, h], (false, false));
+        piece(ctx, c, &format!("FrontEnd_Right_PullDown_Background{sel}"), [w - 12.0, 0.0, w, h], (false, false));
+        let text_w = if arrow { w - 24.0 } else { w };
+        ctx.text(c, "Univers10", label, 0.0, text_w, h / 2.0, true, Color::WHITE);
+        if arrow {
+            piece(ctx, c, "FrontEnd_PullDown_Arrow", [w - 20.0, h / 2.0 - 8.5, w, h / 2.0 + 8.5], (false, false));
+        }
+    });
 }
 
 const SHIP_ROWS: usize = 9;
@@ -763,5 +827,16 @@ fn scroll_saves(mut wheel: MessageReader<bevy::input::mouse::MouseWheel>, state:
     if dy != 0.0 && (*state.get() == Screen::Load || matches!(ig.page(), Some(Page::Load | Page::Save))) {
         let max = ui.list.len().saturating_sub(10);
         ui.scroll = if dy > 0.0 { ui.scroll.saturating_sub(1) } else { (ui.scroll + 1).min(max) };
+    }
+}
+
+#[cfg(test)]
+mod frame_tests {
+    use super::dialog_frame;
+
+    #[test]
+    fn dialog_frame_matches_the_measured_in_game_menu() {
+        let [x, y, w, h] = dialog_frame([101.0, 185.0, 586.0, 427.0]);
+        assert!((x - 73.5).abs() < 0.5 && y == 185.0 && (w - 653.0).abs() < 0.5 && (h - 256.0).abs() < 0.5);
     }
 }
