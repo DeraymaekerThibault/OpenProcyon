@@ -177,6 +177,6 @@ is not done: no mission in the exported data uses that rule action and the doc h
 
 ## Original plan
 1. Exporter: dock-point node positions per ship/base (MSB/WOT `DockPoint` attributes) and `Repair Effect Name`, into the ship/map JSON.
-2. `combat.rs`/new `docking.rs`: relation list + dock routine states above; rule conditions `Group/Unit Is Docked`, actions `Dock Ships`, `Set Dock Time`, `Toggle Island Repair When Docked`; replace the mission-1 `D`-key dock.
+2. `combat/`/new `docking.rs`: relation list + dock routine states above; rule conditions `Group/Unit Is Docked`, actions `Dock Ships`, `Set Dock Time`, `Toggle Island Repair When Docked`; replace the mission-1 `D`-key dock.
 3. `options_menu.rs` (+ `classic/options_menu.rs` art): right-click options menu (three variants, icons from `OPTIONS_MENU_*`), dock cursor/left-click dock; hover cursor set.
 4. Tests: pure routine/state tests, rule tests, plus a runtime smoke test.

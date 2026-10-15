@@ -424,14 +424,6 @@ def lifeboat_fields(p, sections):
     )
 
 
-def sound_names(j):
-    """Every sound name a ship export refers to."""
-    names = set(j["engine_snd"]) | {g.get("SoundName") for g in j["gun_defs"].values()}
-    for b in j["bullets"].values():
-        names |= {s for v in b["impact_snd"].values() for s in v}
-    return {n for n in names if n}
-
-
 def fx_names(j):
     """Every effect name a ship export refers to."""
     names = {j.get("explosion_fx")}

@@ -29,7 +29,7 @@ Bullet lifetime 10 s, effects `ArcturianFire_Heavy_Bullet(_Impact)`, "Damage Hit
 Wood 0.14/0.99/4/30-40; Reinforced 0/0.8/3/20-35; Iron 0/0.1/1/5-10; Cloth (sails) 0.5/1.0/5/40-50; Stone 1/1/1/10-15; Dragon 0.5/0.5/0.5/10-15.
 Impact sound `Animal_SpaceDragon_Impact`.
 
-## Rules (all in `rules.rs` currently warned/ignored)
+## Rules (all in `rules/` currently warned/ignored)
 Actions: `Dragon - Set AI Stance` (group/unit, stance string), `Dragon - Set Damage Threshold` (group, float 0..1), plus generic ones that dragons rely on:
 `Set Group/Unit Border Zone` (polygon), `Set Group/Unit Border Zone Return Point` (point set), `Set Group/Unit Owner`, `Set Group/Unit Visibility`, `SetCollidable`,
 `Teleport Group/Unit`, `Group to follow path`, `Set Group/Unit Hold Position`, `GroupA to attack GroupB`, `Set alliance between PlayerA and PlayerB`.

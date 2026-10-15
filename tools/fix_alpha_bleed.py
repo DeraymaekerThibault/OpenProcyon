@@ -27,7 +27,7 @@ def fix(path):
         for dy, dx in ((1, 0), (-1, 0), (0, 1), (0, -1)):
             src_k = np.roll(known, (dy, dx), (0, 1))
             src_c = np.roll(rgb, (dy, dx), (0, 1))
-            take = todo & src_k & ~(known & False)
+            take = todo & src_k
             take &= new
             rgb[take] = src_c[take]
             new &= ~take
