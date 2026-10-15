@@ -254,6 +254,16 @@ crew/arms spending, difficulty, native NIS splines, retail calibration of every 
 6. Then retail comparison/calibration passes (movement, AI, weapons), which cannot be proven from static analysis alone.
 
 
+## Next retail measurement session
+
+Ranked for Mission 1/tutorial impact. Each needs evidence -> spec -> implementation -> test as above.
+1. Damage per hit: hull drops look like about half the bullet table (medium cannon on wood 14-36 vs table 30-40), gattling 2-3 vs 4-7.
+   Attribute each section-HP drop to the shell that caused it (record shells and HP together from before contact, 1-vs-1).
+2. Crew-skill scaling of damage control and of rate of fire (Green/Average/Elite crews; SIM-01/06).
+3. Black hole pull vs distance (SIM-09): zero at 2.6 radii; measure 1-2 radii with an empty map (no computer fleet in reach).
+4. Star mortar blast ring timing/push and lob elevation scatter (SIM-07).
+5. Victory screen and kills-by-object-type summary screenshots (UIR-08); ram/collision damage (SIM-03).
+
 ## Open probes
 
 | Area | What is established / next question |
@@ -291,6 +301,7 @@ Reference: owner screenshots of the original at 1920x1200 (the 800x600 screen is
 | UIR-04 | Game Lobby | Map name under the title; Flag / Player / Fleet / Team table with flag icons and drop-downs | Done: matches the original screenshot plus the Map Info dialog; flag icon choice and closing slots via the flag PROVISIONAL; no player profiles ("Player"). |
 | UIR-05 | Ships | 3D ship on a grid with ship-name drop-down; stats panel (class icon, Point Cost, hit points, speed, turning, crew, gun counts); "Available Ships" header and scrollbar; fleet slot bar 1-5 with arrows; Current Victory Points | Done: stats match the original Frigate panel; victory point budget; cost-sorted list; 3D preview (framing PROVISIONAL); Auto Assign rule and turning grades PROVISIONAL. Missing: ship-name drop-down, Load/Save Fleet, slot-bar scrolling. |
 | UIR-06 | Crew, Arms | `Crew Select Screen.tst` / `Arms Selection Screen.tst`: ship diagram with crew posts or gun mounts, stat bars, sort list, help text | Done: retail layout for both screens (posts, gunner ring and mounts at the weapon-panel offsets, stat bars, lists). Missing: skirmish crew roster, drag and drop, Load/Save, Auto Assign; stat-bar post mapping from retail ([crew.md](re/crew.md)), scale PROVISIONAL. |
-| UIR-07 | In-game menu | Summary enabled | Open: Summary needs the Game Summary page. |
-| UIR-08 | Game Summary | `Multiplayer Stats Screen.tst` (kills by object type) | Open: layout imported (`menu/multiplayer_stats_screen.json`); needs a screenshot of the kills-by-object-type table. |
-| UIR-09 | Battle HUD | Player list top right, speech text box above the command bar, talking-head portrait | Check against `battle_hud.png` |
+| UIR-07 | In-game menu | Summary enabled | Open: Summary needs the Game Summary page. Retail references now in `local/reference/session-2026-10-15/` (`ingame_menu.png`, `quit_confirm.png`). |
+| UIR-08 | Game Summary | `Multiplayer Stats Screen.tst` (kills by object type) | Open: layout imported (`menu/multiplayer_stats_screen.json`). Retail skirmish end screenshots now exist (`local/reference/session-2026-10-15/game_summary_defeat_*.png`): title "Game Summary", "DEFEAT!" line, one row per player (flag, name) with framed Ships Sunk / Ships Left ("2/3") / Damage Inflicted / Damage Taken cells (winner's cells green), single next arrow at the bottom, lobby backdrop. Compare with `stats.rs` + classic view; still need a VICTORY! example and the kills-by-object-type table. |
+| UIR-10 | Ship selection / lobby | Retail references (`ship_select_*.png`, `fleet_points_dialog.png`, `lobby_computer_slot.png`, `skirmish_open_maps.png`): ship-name drop-down over the 3D view, stats panel (Man-O-War 4940 HP / 15 km/h / 35 crew / 9-10-9 guns, Cutter 960 / 29 km/h / 12 / 1-6-3), "You have N victory points remaining" dialog with Auto Assign / Cancel / Continue | Open: compare with UIR-05 and add the remaining-points dialog if missing. |
+| UIR-09 | Battle HUD | Player list top right (defeated player struck through), speech text box above the command bar, talking-head portrait | Check against `battle_hud.png`; new references in `local/reference/session-2026-10-15/`: weapon bar open on a Man-O-War, red "Critical Systems Hit" crew line in the text box, far camera zoom. |

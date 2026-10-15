@@ -227,6 +227,9 @@ core: run by fx.rs) plus a `Vortex` primitive, implemented in `game/src/blackhol
   tick for 60 ticks, then falls 1/240 per tick. A trail is drawn only with more than two segments.
 * Pull: the WOT CUSTOMINFO `Magnitude` is 9000 / 15000 / 25000 for Small / Med / Big (radius 145 / 260 / 625). The exe's pull law is
   not decoded; the remake applies PROVISIONAL inverse-square pull on free ships, softened at the radius, gain 25 (`blackhole.rs`).
+  One retail data point (2026-10, Zemyatin Anomaly skirmish): a Navy Cutter at rest 372 units from the Small hole (2.6 × its radius)
+  did not move at all for 22 s, while the remake's law gives 1.6 units/s² there. So the retail pull is zero (or tiny) that far out;
+  the range and law closer in remain to be measured.
   Damage from the hole is not modelled.
 * Not decoded: strip UV mapping/blend (ours: additive, v = 0.5 per segment), the funnel mesh
   (not drawn: the reference video shows only the glow, beams and ribbons).
