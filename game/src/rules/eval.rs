@@ -273,7 +273,7 @@ pub(super) fn f(v: &Value, k: &str) -> f32 {
     v[k].as_f64().unwrap_or(0.0) as f32
 }
 pub(super) fn b(v: &Value, k: &str) -> bool {
-    v[k].as_str().is_some_and(|x| x.eq_ignore_ascii_case("TRUE"))
+    crate::data::wot_flag(&v[k])
 }
 pub(super) fn cmp(eq: &str, a: f32, bb: f32) -> bool {
     match eq {

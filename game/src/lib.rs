@@ -110,7 +110,7 @@ pub fn run(view: fn(&mut App)) {
     let shot = arg("--shot");
     let cfg = Config {
         groups: vec![],
-        player: arg("--ship").unwrap_or("Ship_Navy_Cutter".into()),
+        player: arg("--ship").unwrap_or(ship::DEFAULT_SHIP.into()),
         allies: arg("--allies").map(|v| v.split(',').map(String::from).collect()).unwrap_or_default(),
         map: arg("--mission").map(|id| format!("mission{:02}", id.parse::<u32>().expect("--mission takes a number"))).or_else(|| arg("--map")),
         enemies: arg("--enemies").unwrap_or("Ship_Pirate_Schooner,Ship_Pirate_Sloop".into()).split(',').filter(|n| *n != "none").map(String::from).collect(),

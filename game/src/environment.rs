@@ -435,7 +435,7 @@ fn update(
     let dt = time.delta_secs().min(0.1);
     for (mut ship, tf) in &mut ships {
         let inside = mission.data["environment"]["nebulae"].as_array().into_iter().flatten().any(|n| {
-            n["Nebula Cloud Energy Drain On/Off"] == "TRUE"
+            crate::data::wot_flag(&n["Nebula Cloud Energy Drain On/Off"])
                 && crate::rules::in_game_volume(&mission.data["volumes"][n["Polygon Name"].as_str().unwrap_or("")], tf.translation.x, -tf.translation.z)
         });
         ship.sail_energy = energy_step(ship.sail_energy, inside, dt);
@@ -474,7 +474,8 @@ fn update(
 pub fn can_see(mission: Option<&Mission>, from: Vec3, to: Vec3) -> bool {
     let Some(mission) = mission else { return true };
     !mission.data["environment"]["nebulae"].as_array().into_iter().flatten().any(|n| {
-        n["Nebula Occlusion On/Off"] == "TRUE" && crosses(&mission.data["volumes"][n["Polygon Name"].as_str().unwrap_or("")], Vec2::new(from.x, -from.z), Vec2::new(to.x, -to.z))
+        crate::data::wot_flag(&n["Nebula Occlusion On/Off"])
+            && crosses(&mission.data["volumes"][n["Polygon Name"].as_str().unwrap_or("")], Vec2::new(from.x, -from.z), Vec2::new(to.x, -to.z))
     })
 }
 fn crosses(polygon: &Value, a: Vec2, b: Vec2) -> bool {

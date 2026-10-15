@@ -227,7 +227,7 @@ pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Libra
         if cfg.script.as_deref() == Some("fleet")
             && let Some(player) = (0..players.len()).find(|i| !groups.iter().any(|g| g.player == *i))
         {
-            groups.push(Group { player, side: Side::Player, human: false, ships: vec![("Ship_Navy_Cutter".into(), None, Some("Allied captain".into()))], weapons: vec![] });
+            groups.push(Group { player, side: Side::Player, human: false, ships: vec![(ship::DEFAULT_SHIP.into(), None, Some("Allied captain".into()))], weapons: vec![] });
         }
         let mut namer = Namer::new();
         for g in &groups {

@@ -276,7 +276,7 @@ fn redraw(
     {
         icon(&mut commands, &format!("MapBackdrop_Icon_ObjectivePoint_Frame{frame}"), p, 0.0);
     }
-    let Some(font) = fonts.as_ref().and_then(|f| f.0.get("Univers12")) else { return };
+    let Some(font) = fonts.as_ref().and_then(|f| f.0.get(crate::sprites::BODY_FONT)) else { return };
     for t in m.data["map_text"].as_array().into_iter().flatten() {
         let name = t["name"].as_str().unwrap_or_default();
         if !m.script.map_text.get(name).copied().unwrap_or(t["visible"].as_bool().unwrap_or(false)) {

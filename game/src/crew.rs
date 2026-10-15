@@ -198,7 +198,7 @@ fn callouts(
         hazards.push("meteor_shower");
     }
     for f in world.fired.read().filter(|f| f.shooter == me) {
-        if f.bullet.starts_with("Bullet_Torpedo") {
+        if f.bullet.starts_with(crate::data::TORPEDO_BULLET) {
             reports.push("torpedoes_away");
         } else if f.bullet.contains("Mortar") {
             reports.push("fire_mortar");

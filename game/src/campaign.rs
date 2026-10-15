@@ -336,7 +336,7 @@ pub fn spawn(commands: &mut Commands, assets: &AssetServer, lib: &Library, fxl: 
     if primary_id.is_none() {
         warn!("mission has no player ship; spawning a stand-in Ship_Navy_Cutter at the start point");
         let st = &mission.data["player_start"];
-        ships.push(serde_json::json!({"id": -1, "type": "Ship_Navy_Cutter", "pos": st["start"], "rot": [st["forward"][1], -st["forward"][0].as_f64().unwrap_or(0.0), 0.0, st["forward"][0], st["forward"][1], 0.0, 0.0, 0.0, 1.0], "name": "RLS Stand-in", "group": player_group}));
+        ships.push(serde_json::json!({"id": -1, "type": crate::ship::DEFAULT_SHIP, "pos": st["start"], "rot": [st["forward"][1], -st["forward"][0].as_f64().unwrap_or(0.0), 0.0, st["forward"][0], st["forward"][1], 0.0, 0.0, 0.0, 1.0], "name": "RLS Stand-in", "group": player_group}));
     }
     let local_owner = player_group.as_str().unwrap_or_default().to_string();
     commands.queue(move |w: &mut World| {
@@ -379,7 +379,7 @@ pub fn spawn(commands: &mut Commands, assets: &AssetServer, lib: &Library, fxl: 
         // Setup Ship: 'Crew Skill Level' and 'Boardable' (ships without one cannot be boarded).
         let setup = setups("*State Init* Setup Ship").find(|a| a["World Object ID"].as_i64() == Some(id));
         let skill = crate::boarding::Skill::parse(setup.and_then(|a| a["Crew Skill Level"].as_str()).unwrap_or_default());
-        let boardable = setup.is_some_and(|a| a["Boardable"].as_str().is_some_and(|b| b.eq_ignore_ascii_case("TRUE")));
+        let boardable = setup.is_some_and(|a| crate::data::wot_flag(&a["Boardable"]));
         commands.entity(e).insert(crate::boarding::Boardable::ship(s["type"].as_str().unwrap_or_default(), skill, boardable));
         if !primary {
             commands.entity(e).remove::<PlayerShip>();

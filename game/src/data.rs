@@ -119,6 +119,9 @@ impl FromWorld for AsteroidDefs {
     }
 }
 
+/// The retail torpedo bullet (WOT `BulletTypeName_Primary`); aiming, launch and crew calls treat it specially.
+pub const TORPEDO_BULLET: &str = "Bullet_Torpedo";
+
 pub struct GunDef {
     pub mount_type: Option<String>,
     pub points: Option<u32>,
@@ -310,7 +313,7 @@ pub fn gun_def(g: &Value) -> GunDef {
         lob: (g["Is Lobbing Gun"] == true).then(|| g["LobAngle"].as_f64().unwrap_or(0.785) as f32),
         cloak_fire: g["Can Be Fired While Cloaked"].as_bool().unwrap_or_else(|| {
             let b = g["BulletTypeName_Primary"].as_str().unwrap_or_default();
-            b.starts_with("Bullet_Torpedo") || b == "Bullet_Gattling"
+            b.starts_with(TORPEDO_BULLET) || b == "Bullet_Gattling"
         }),
     }
 }
@@ -370,6 +373,10 @@ pub fn bullet_def(b: &Value) -> BulletDef {
     }
 }
 
+/// A retail boolean field: the exporters keep WOT's "TRUE"/"FALSE" strings (any case); anything else is false.
+pub fn wot_flag(v: &Value) -> bool {
+    v.as_str().is_some_and(|x| x.eq_ignore_ascii_case("TRUE"))
+}
 /// A JSON file the game cannot run without: panics with the import hint when it is missing or invalid.
 pub fn read_json(path: &std::path::Path) -> Value {
     serde_json::from_str(&std::fs::read_to_string(path).unwrap_or_else(|_| panic!("missing {path:?}; run tools/build_assets.sh"))).unwrap_or_else(|e| panic!("{path:?}: {e}"))
@@ -608,6 +615,15 @@ mod tests {
         assert!(glb_json(&wrong_magic).is_none());
         assert!(glb_json(&ok[..ok.len() - 1]).is_none(), "truncated chunk");
         assert!(glb_json(b"glTF").is_none());
+    }
+
+    #[test]
+    fn wot_flags_accept_any_case_and_nothing_else() {
+        for (v, want) in
+            [(serde_json::json!("TRUE"), true), (serde_json::json!("True"), true), (serde_json::json!("FALSE"), false), (serde_json::json!(true), false), (Value::Null, false)]
+        {
+            assert_eq!(wot_flag(&v), want, "{v}");
+        }
     }
 
     #[test]

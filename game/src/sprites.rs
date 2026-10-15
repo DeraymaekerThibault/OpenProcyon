@@ -1,4 +1,4 @@
-//! Retail sprite and font access (tools/export_hud.py, tools/export_fonts.py): `HudData` (hud.hdt components per faction art set),
+//! Retail sprite and font access (tools/export_hud.py writes both): `HudData` (hud.hdt components per faction art set),
 //! sprite rects and offsets in 640x480 reference pixels, HD sheet scales, 9-slice strips and the `Fonts` stand-ins. Shared helpers:
 //! any view may use retail art through these.
 use bevy::prelude::*;
@@ -32,6 +32,11 @@ pub fn choose_skin(mut hud: ResMut<HudData>, lib: Res<Library>, player: Single<&
     }
 }
 
+/// The idle cursor state of a hud.hdt component ("CursorOver" / "CursorDown" are the hover and press states).
+pub const IDLE: &str = "NoCursor";
+/// The retail body text font (menus, lists, star map labels).
+pub const BODY_FONT: &str = "Univers12";
+
 pub fn sprite_of(h: &HudData, name: &str) -> Option<(String, Rect)> {
     sprite_area(h, name, "TextureArea - NoCursor")
 }
@@ -43,7 +48,7 @@ pub fn sprite_area(h: &HudData, name: &str, key: &str) -> Option<(String, Rect)>
     let d = h.comps.get(name)?.get(h.skin)?;
     let r = d[key].as_array()?;
     let n = |i: usize| r[i].as_f64().unwrap_or(0.0) as f32;
-    let state = key.rsplit(" - ").next().unwrap_or("NoCursor"); // the sheet of the same cursor state
+    let state = key.rsplit(" - ").next().unwrap_or(IDLE); // the sheet of the same cursor state
     let sheet = d[format!("TextureName - {state}")].as_str().filter(|s| !s.is_empty())?; // a skin without this part leaves the name empty
     Some((sheet.to_lowercase(), Rect::new(n(0), n(1), n(2) + 1.0, n(3) + 1.0)))
 }

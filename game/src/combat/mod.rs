@@ -503,7 +503,7 @@ fn fire(
     // Point-defence targets: torpedoes and mines in flight, with their side.
     let incoming: Vec<(Entity, Vec3, Vec3, Side)> = threats
         .iter()
-        .filter(|(_, _, s)| s.bullet.starts_with("Bullet_Torpedo") || matches!(s.payload, Payload::Mine { .. }))
+        .filter(|(_, _, s)| s.bullet.starts_with(TORPEDO_BULLET) || matches!(s.payload, Payload::Mine { .. }))
         .map(|(e, t, s)| (e, t.translation, s.vel, s.side))
         .collect();
     // 'NIS Toggle NIS mode Gun Accuracy': scripted broadsides fly true.
@@ -585,7 +585,7 @@ fn fire(
                 _ => None,
             };
             // PROVISIONAL (owner retail recollection): torpedoes cannot target base towers.
-            let tp = tp.filter(|t| g.bullet != "Bullet_Torpedo" || !objects.get(t.2).is_ok_and(|o| o.3.is_some()));
+            let tp = tp.filter(|t| g.bullet != TORPEDO_BULLET || !objects.get(t.2).is_ok_and(|o| o.3.is_some()));
             st.cooldown -= dt;
             st.burst_timer -= dt;
             let mount_rot = tf.rotation * m.rot;
@@ -606,7 +606,7 @@ fn fire(
                 // Lead like the exe: aim point += target velocity * (distance / muzzle speed), one step, no gravity term.
                 // PROVISIONAL: ordinary shells inherit shooter velocity; torpedoes use their own forward speed.
                 // Torpedo lead remains straight interception, not the native homing controller.
-                let d = aim_offset(tp - origin, tv, fwd * ship.speed, g.muzzle, g.bullet == "Bullet_Torpedo");
+                let d = aim_offset(tp - origin, tv, fwd * ship.speed, g.muzzle, g.bullet == TORPEDO_BULLET);
                 let dir = match g.lob.and_then(|a| lob_velocity(d, a)) {
                     Some(v) => v.normalize(),
                     None => aim(d, g.muzzle, g.gravity),
@@ -760,7 +760,7 @@ fn launch_shell(
         sfx.write(Sfx { name: n.clone(), at: Some(from), vol: *vol, max: *max });
     }
     let mat = if side == Side::Player { look.shell.clone() } else { look.enemy_shell.clone() };
-    let vel = shot.vel.unwrap_or_else(|| launch_velocity(dir, g.muzzle, shooter_velocity, g.bullet == "Bullet_Torpedo"));
+    let vel = shot.vel.unwrap_or_else(|| launch_velocity(dir, g.muzzle, shooter_velocity, g.bullet == TORPEDO_BULLET));
     let stf = Transform::from_translation(from).looking_to(vel, Vec3::Y);
     let shell = commands
         .spawn((
@@ -842,7 +842,7 @@ fn base_fire(
             // Mortar towers lob at the ship (PROVISIONAL: mines/grav charges on bases are not seen in the data and stay idle).
             let usable = !is_indirect(&m.gun) || g.lob.is_some();
             if let (false, false, true, Some((p, v, _, _))) = (dead, g.point_defense || m.gun.contains("Harpoon"), usable, tp) {
-                let d = aim_offset(p - origin, v, Vec3::ZERO, g.muzzle, g.bullet == "Bullet_Torpedo");
+                let d = aim_offset(p - origin, v, Vec3::ZERO, g.muzzle, g.bullet == TORPEDO_BULLET);
                 let dir = match g.lob.and_then(|a| lob_velocity(d, a)) {
                     Some(v) => v.normalize(),
                     None => aim(d, g.muzzle, g.gravity),
@@ -1016,7 +1016,7 @@ fn shells(
     let now = time.elapsed_secs();
     // Torpedoes and mines in flight, for point-defence intercepts; each is shot down at most once.
     let threats: Vec<(Entity, Vec3, Side)> =
-        q.iter().filter(|(_, s, _)| s.bullet.starts_with("Bullet_Torpedo") || matches!(s.payload, Payload::Mine { .. })).map(|(e, s, t)| (e, t.translation, s.side)).collect();
+        q.iter().filter(|(_, s, _)| s.bullet.starts_with(TORPEDO_BULLET) || matches!(s.payload, Payload::Mine { .. })).map(|(e, s, t)| (e, t.translation, s.side)).collect();
     let mut threat_hp: std::collections::HashMap<Entity, f32> = q.iter().filter(|(e, ..)| threats.iter().any(|t| t.0 == *e)).map(|(e, s, _)| (e, s.hp)).collect();
     let mut downed: Vec<Entity> = vec![];
     for (e, mut s, mut tf) in &mut q {
@@ -1225,7 +1225,7 @@ fn shells(
             hits.write(Hit { shooter: s.shooter, victim: se });
             // Script vulnerability: 'Invulnerable Percent' 1.0 takes no damage and no fire; partial values scale the damage.
             let invuln = mission.map_or(0.0, |m| m.invuln);
-            if s.bullet == "Bullet_Torpedo" {
+            if s.bullet == TORPEDO_BULLET {
                 info!("Torpedo hit {} ({}){}", class.name, sec.label, if invuln >= 1.0 { " [training: invulnerable]" } else { "" });
             }
             let fire_free = !fires.list.iter().any(|f| f.sec == k && f.state == 0);
