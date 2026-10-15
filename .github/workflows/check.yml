@@ -26,5 +26,5 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: game
-      - run: pip install -r requirements.txt
+      - run: pip install -r requirements-dev.txt
       - run: tools/check.sh

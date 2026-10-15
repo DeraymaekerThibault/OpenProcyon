@@ -1,8 +1,12 @@
 #!/bin/sh
 # The validation gate: format, lint, repository hygiene and tests. usage: tools/check.sh
+# Needs ruff (pip install -r requirements-dev.txt).
 # Rust tests load the converted game assets; without an import (tools/build_assets.sh) they are compiled but not run.
 set -e
 cd "$(dirname "$0")/.."
+command -v ruff >/dev/null || { echo "ruff not found: pip install -r requirements-dev.txt" >&2; exit 1; }
+ruff format --check .
+ruff check .
 imported=$(python3 -c 'import sys; sys.path.insert(0, "tests"); from imported import ASSETS; print(int((ASSETS / "ships").is_dir()))')
 cd game
 cargo fmt --check

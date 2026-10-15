@@ -23,9 +23,9 @@ tools/shot.sh local/paused.png --map red_rover --script pause --shot-frame 50 --
 tools/shot.sh local/pause-restart.png --map red_rover --script pause-restart --shot-frame 90 --late-frame 0
 ```
 
-`make check` calls `tools/check.sh`: rustfmt check → strict Clippy → Rust release tests → Python tests. Rust tests that need converted
+`make check` calls `tools/check.sh`: ruff format check and lint (Python, rules in `ruff.toml`) → rustfmt check → strict Clippy → Rust release tests → Python tests. Rust tests that need converted
 assets only run when an import exists (otherwise the tests are compiled but not run); Python tests that need the install or assets skip.
-`make fmt` formats Rust; it does not rewrite generated JSON. `python3 -m tools.format_json assets` formats asset JSON when needed.
+`make fmt` formats Rust and Python (`ruff format`, `ruff check --fix`); it does not rewrite generated JSON. `python3 -m tools.format_json assets` formats asset JSON when needed.
 Shared sight smoke: `WAYLAND_DISPLAY= tools/shot.sh local/sight.png --script sight --allies Ship_Navy_Cutter --enemies Ship_Pirate_Schooner --shot-frame 135 --late-frame 0`; it freezes three ships and asserts group/range/cloak transitions against real radar widgets. This is wiring validation, not a campaign playthrough.
 
 Screenshot tests need a display, or Xvfb + Mesa for the headless helper. Outputs belong in ignored `local/`.
@@ -130,7 +130,7 @@ compares two imports by meaning (JSON by value, images by pixels) to check expor
 The build pipeline is defined once in `tools/build_assets.sh`: export raw ships → HUD/art/media/maps/campaigns/crew/effects → pack ship/weapon data → format JSON.
 Raw per-ship exports are temporary inputs to later exporters and removed by packing; do not commit them.
 HUD trimming/crops run before alpha-bleed cleanup. Importing needs a read-only retail install (`--game <dir>` or `PROCYON_GAME_ROOT` in `.env`); the install is never modified.
-Python dependencies are in `requirements.txt`; Rust dependencies and resolved versions are in `game/Cargo.toml` and `game/Cargo.lock`.
+Python dependencies are in `requirements.txt` (the checks add ruff via `requirements-dev.txt`); Rust dependencies and resolved versions are in `game/Cargo.toml` and `game/Cargo.lock`.
 
 ## Implementation order
 

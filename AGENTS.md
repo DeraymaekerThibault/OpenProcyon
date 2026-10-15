@@ -53,7 +53,7 @@ files to `content/`, or anything that publishes (pushing tags, releases).
 
 ## Setup and running
 
-- Rust >= 1.97.1; Python 3 with `requirements.txt` (Pillow, NumPy) in a `.venv`. Linux needs the usual Bevy packages
+- Rust >= 1.97.1; Python 3 with `requirements-dev.txt` (Pillow, NumPy, and ruff for the checks) in a `.venv`. Linux needs the usual Bevy packages
   (ALSA, udev, Wayland/X11, Vulkan).
 - Import once: `make assets ARGS='--game "/path/to/Treasure Planet Battle at Procyon"'` (or put `PROCYON_GAME_ROOT` in `.env`).
   Re-import after changing an exporter. Installs with community mods import too; vanilla must always work.
@@ -64,8 +64,8 @@ files to `content/`, or anything that publishes (pushing tags, releases).
 
 ## Workflow
 
-- `tools/check.sh` (`make check`) is the single validation gate: rustfmt, clippy `-D warnings`, Rust tests (only when assets are
-  imported; otherwise they are compiled), Python tests including the hygiene rules. Run it before every commit; do not add
+- `tools/check.sh` (`make check`) is the single validation gate: ruff format/lint (`ruff.toml`), rustfmt, clippy `-D warnings`, Rust tests
+  (only when assets are imported; otherwise they are compiled), Python tests including the hygiene rules. `make fmt` formats both languages. Run it before every commit; do not add
   parallel wrappers.
 - Non-trivial changes need a regression test; ECS/UI changes also need a runtime smoke test (a `--script` or screenshot run).
 - Add behaviour to the module that owns it (`docs/development.md`), not a parallel implementation. Keep asset paths and JSON
