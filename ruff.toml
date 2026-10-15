@@ -18,7 +18,6 @@ select = [
 ignore = [
     "E501",  # long lines: the formatter wraps code; long strings and comments stay readable
     "C408",  # dict(key=value) is the house style for exported records
-    "B905",  # zip(strict=True) would turn silent truncation into exporter errors; decide per call with a retail import
 ]
 
 [lint.per-file-ignores]

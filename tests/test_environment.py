@@ -29,7 +29,9 @@ class EnvironmentExportTests(unittest.TestCase):
             for material in ("Wood", "Reinforced", "Iron", "Cloth", "Stone", "Dragon"):
                 lines.extend(
                     f"  {key}: {material} Float {value}"
-                    for key, value in zip(fields, (lo, lo + 2, 0.2, 0.1, 3))
+                    for key, value in zip(
+                        fields, (lo, lo + 2, 0.2, 0.1, 3), strict=True
+                    )
                 )
             lines.append("}")
             blocks.extend(lines)

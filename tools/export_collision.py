@@ -5,7 +5,6 @@ Mesh model/LOD 0 is provisional; retail selects its collision LOD separately.
 """
 
 import json
-import re
 import struct
 import sys
 from pathlib import Path
@@ -13,31 +12,39 @@ from pathlib import Path
 from tools.gamefs import ci_file
 from tools.models import model_path
 from tools.pack_data import rnd
+from tools.wot import fields, parse_text, properties, records
 
 
 def definition(text):
-    block = re.search(
-        r"Definition String 'COLLISIONDEFINITION'(.*?)(?=Definition String|\Z)",
-        text,
-        re.DOTALL,
-    )
-    if not block:
-        return None
-    text = block[1]
+    nodes, _ = parse_text(text)
 
-    def field(key):
-        return re.search(re.escape(key) + r" String '([^']*)'", text)
-
-    detection, response = field("DetectionType"), field("ResponseType")
-    if not detection or detection[1] == "Null" or not response or response[1] == "Null":
+    def find(children):
+        for record in records(children, "Definition"):
+            f = fields(properties(record))
+            if f["Definition"] == "COLLISIONDEFINITION":
+                return f
+        for node in children:
+            if node["kind"] == "block":
+                found = find(node["children"])
+                if found is not None:
+                    return found
         return None
-    out = dict(detection=detection[1], response=response[1])
+
+    f = find(nodes)
+    if (
+        not f
+        or f.get("DetectionType", "Null") == "Null"
+        or f.get("ResponseType", "Null") == "Null"
+    ):
+        return None
+    out = dict(detection=f["DetectionType"], response=f["ResponseType"])
     for key, dest in [("MinExtents", "min"), ("MaxExtents", "max")]:
-        m = re.search(key + r" Vector3\(([^)]*)\)", text)
-        if m:
-            x, y, z = map(float, m[1].split(","))
+        if key in f:
+            x, y, z = f[key]
             out[dest] = [x, z, -y]
-    if "min" in out:
+    if "min" in out or "max" in out:
+        if "min" not in out or "max" not in out:
+            raise ValueError("Incomplete collision box")
         out["min"][2], out["max"][2] = out["max"][2], out["min"][2]
     return out
 

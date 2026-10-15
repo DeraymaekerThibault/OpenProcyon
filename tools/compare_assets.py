@@ -31,7 +31,7 @@ def json_diff(a, b, path="", tol=1e-4):
     if isinstance(a, list) and isinstance(b, list):
         if len(a) != len(b):
             return f"{path} length {len(a)} != {len(b)}"
-        for i, (x, y) in enumerate(zip(a, b)):
+        for i, (x, y) in enumerate(zip(a, b, strict=True)):
             d = json_diff(x, y, f"{path}[{i}]", tol)
             if d:
                 return d

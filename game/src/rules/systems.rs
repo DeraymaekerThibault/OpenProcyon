@@ -226,28 +226,7 @@ fn update(
     }
     let opening = mission.opening.is_some();
     let dt = time.delta_secs();
-    // Dev hook `--script dock|dock-click|dock-menu`: jump to the tender (Script::skip_to_tender) and put the player (half damaged, to
-    // see the repair) and the small ships inside the tender volume. `dock` then docks like the D key; the others click (options_menu.rs).
-    if cfg.script.as_deref().is_some_and(|s| s.starts_with("dock")) && !opening && !extra.dev.skipped {
-        extra.dev.skipped = true;
-        mission.script.skip_to_tender();
-        let tender = ships.iter().find(|s| s.mission.name == "RLS Bounty").map(|s| s.transform.translation).expect("mission 1 tender");
-        let mut k = 0.0;
-        for RuleShipItem { ship: mut sh, transform: mut tf, health: mut h, mission: ms, primary, .. } in &mut ships {
-            if primary {
-                tf.translation = tender + Vec3::new(-100.0, 0.0, 0.0);
-                h.scale(0.5);
-            } else if ms.owner == "Small Ships (Red Team)" {
-                k += 1.0;
-                tf.translation = tender + Vec3::new(-170.0, 0.0, 45.0 * k - 110.0);
-            } else {
-                continue;
-            }
-            sh.waypoints.clear();
-            sh.order = 0;
-            sh.speed = 0.0;
-        }
-    }
+    crate::smoke::dock(&cfg, mission, &mut extra.dev.skipped, &mut ships);
     let mut w = units(&ships, &lib);
     w.extend(animals.iter().map(|(e, a, tf, _)| a.unit(e, tf)));
     w.extend(extra.bases.iter_mut().map(|(e, b, tf, armed)| b.unit(e, tf, armed.map_or(0.0, |(a, h)| crate::combat::base_mission_damage(&lib.classes[a.class], h)))));

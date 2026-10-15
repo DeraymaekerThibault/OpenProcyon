@@ -316,7 +316,7 @@ def export(root, ship, outdir):
         m = parse_mdb(
             ci_file(Path(root) / "BD_Meshes", f"{mesh}.mdb").read_bytes()
         ).models[0]
-        xs = list(zip(*[v.pos for v in m.vertices]))
+        xs = list(zip(*[v.pos for v in m.vertices], strict=True))
         sections.append(
             dict(
                 layer=mesh,
@@ -412,8 +412,8 @@ def lifeboat_fields(p, sections):
                 [max(s["aabb"][1][i] for s in sections) for i in range(3)],
             )
         sphere = dict(
-            center=[(a + b) / 2 for a, b in zip(lo, hi)],
-            radius=sum((b - a) ** 2 for a, b in zip(lo, hi)) ** 0.5 / 2,
+            center=[(a + b) / 2 for a, b in zip(lo, hi, strict=True)],
+            radius=sum((b - a) ** 2 for a, b in zip(lo, hi, strict=True)) ** 0.5 / 2,
             authored=False,
         )
     return dict(

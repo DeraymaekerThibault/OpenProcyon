@@ -40,12 +40,12 @@ def hardpoints(root, scene):
         if n.parent not in nodes or depth > 16:
             return n.pos
         w = world(nodes[n.parent], depth + 1)
-        return tuple(a + b for a, b in zip(w, n.pos))
+        return tuple(a + b for a, b in zip(w, n.pos, strict=True))
 
     layer = [world(n) for n in nodes.values() if n.kind == "DamageSection"]
     off = layer[0] if layer else (0, 0, 0)
     return [
-        (n, tuple(a - b for a, b in zip(world(n), off)))
+        (n, tuple(a - b for a, b in zip(world(n), off, strict=True)))
         for n in nodes.values()
         if n.kind != "DamageSection"
     ]
@@ -177,7 +177,7 @@ def convert(root, scene, model=0, files=None):
             )
             for v in m.vertices
         )
-        xs = list(zip(*[to_gltf(v.pos) for v in m.vertices]))
+        xs = list(zip(*[to_gltf(v.pos) for v in m.vertices], strict=True))
         accessors.append(
             {
                 "bufferView": add_view(pos, 34962),

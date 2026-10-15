@@ -21,10 +21,7 @@ from tools.gamefs import ci_file, ci_files
 from tools.mdb_to_glb import convert
 from tools.models import model_path
 from tools.msb import parse as parse_msb
-
-# One number, including a signed exponent in either case ("1.5E+03").
-NUM = r"[-+\d.eE]+"
-VEC = rf"\(\s*({NUM}),\s*({NUM}),\s*({NUM})\s*\)"
+from tools.wot import blocks, fields, objects, parse_text, properties, records
 
 
 def strings(root):
@@ -46,105 +43,87 @@ def strings(root):
 @functools.cache
 def mesh_scene(root, typ):
     try:
-        m = re.search(
-            r"Mesh Scene Name String '([^']*)'",
+        nodes, _ = parse_text(
             ci_file(Path(root) / "WorldObjects", f"{typ}.wot").read_text(
                 encoding="latin1"
-            ),
+            )
+        )
+        scene = next(
+            (n["value"] for n in properties(nodes) if n["name"] == "Mesh Scene Name"),
+            None,
         )
     except FileNotFoundError:
         return None
-    return m.group(1) if m and m.group(1) else None
+    return scene or None
 
 
 def parse_twt(text):
-    """Pulls the fields the remake uses out of a .twt; tolerant line scanner (the format is the WOT text format)."""
+    """Read map fields through the shared WOT tree, tolerating unsupported properties."""
+    nodes, _ = parse_text(text)
+    # Keep the first occurrence, matching the old scanner for world-level metadata.
+    metadata = {}
+    for n in properties(nodes):
+        metadata.setdefault(n["name"], n["value"])
+    actions = []
 
-    def g(pat):
-        return (re.search(pat, text) or [None, None])[1]
+    def visit(children):
+        actions.extend(fields(r) for r in records(children, "Type"))
+        for n in children:
+            if n["kind"] == "block":
+                if n["name"] == "Action List":
+                    actions.append(fields(n["children"]))
+                else:
+                    visit(n["children"])
 
-    m = {
-        "name_id": g(r"WorldNameID String '([^']*)'"),
-        "desc_id": g(r"World Description String '([^']*)'"),
-        "assemble": g(r"MustAssembleFleet Bool (\w+)") == "True",
-        "sky": g(r"Skybox mesh name String '([^']*)'"),
-        "music": g(r"'Play Music Track'\s*\n\s*File Name String '([^']*)'"),
-        "backdrop": g(r"Backdrop Texture Name String '([^']*)'"),
-        "players": [],
-        "objects": [],
-        "teams": [],
-    }
-    # The star map shows the playable square: world size minus the border buffer.
-    size, buf = (
-        g(r"World Size - Max Vector3\( ([-\d.]+)"),
-        g(r"World Buffer Size Float ([\d.]+)"),
+    visit(nodes)
+    m = dict(
+        name_id=metadata.get("WorldNameID"),
+        desc_id=metadata.get("World Description"),
+        assemble=metadata.get("MustAssembleFleet", False),
+        sky=metadata.get("Skybox mesh name"),
+        music=next(
+            (
+                a.get("File Name")
+                for a in actions
+                if a.get("Type") == "Play Music Track"
+            ),
+            None,
+        ),
+        backdrop=metadata.get("Backdrop Texture Name"),
+        players=[],
+        objects=list(objects(nodes)),
+        teams=[],
+        ship_names={},
     )
-    m["world_half"] = float(size) - float(buf) if size and buf else None
-    # WorldInfo team list: the fleet type (Race: 0 Navy, 2 Pirate, 3 Procyon) of each team and whether the lobby may change it.
-    n_teams = int(g(r"Team List - Size Int (\d+)") or 0)
-    for t in list(
-        re.finditer(
-            r"Team List - Element\s*\{\s*Team Name ID String '([^']*)'\s*Race Int (-?\d+)\s*Race Lock Bool (\w+)",
-            text,
-        )
-    )[:n_teams]:
+    size, buf = metadata.get("World Size - Max"), metadata.get("World Buffer Size")
+    m["world_half"] = size[0] - buf if size is not None and buf is not None else None
+    for b in list(blocks(nodes, "Team List - Element"))[
+        : metadata.get("Team List - Size", 0)
+    ]:
+        f = fields(b["children"])
         m["teams"].append(
-            {
-                "name_id": t.group(1),
-                "race": int(t.group(2)),
-                "lock": t.group(3) == "True",
-            }
+            dict(name_id=f["Team Name ID"], race=f["Race"], lock=f["Race Lock"])
         )
-    for b in re.finditer(
-        r"\d+ Player\s*\{\s*Name String '([^']*)'(.*?)FlagIndex", text, re.DOTALL
-    ):
-        body = b.group(2)
-        s, f = (
-            re.search(r"StartPoint Vector3" + VEC, body),
-            re.search(r"StartPointForwardVector Vector3" + VEC, body),
-        )
-        team, form = (
-            re.search(r"TeamIndex Int (-?\d+)", body),
-            re.search(r"FormationType Int (-?\d+)", body),
-        )
-        race = re.search(r"\bRace Int (-?\d+)", body)
-        if s and f:
+    for b in blocks(nodes, "Player"):
+        f = fields(b["children"])
+        if "StartPoint" in f and "StartPointForwardVector" in f:
             m["players"].append(
-                {
-                    "name": b.group(1),
-                    "team": int(team.group(1)) if team else -1,
-                    "start": [float(x) for x in s.groups()],
-                    "forward": [float(x) for x in f.groups()],
-                    "formation": int(form.group(1)) if form else 0,
-                    "playable": "IsPlayable Bool True" in body,
-                    "race": int(race.group(1)) if race else 4,
-                }
+                dict(
+                    name=f["Name"],
+                    team=f.get("TeamIndex", -1),
+                    start=f["StartPoint"],
+                    forward=f["StartPointForwardVector"],
+                    formation=f.get("FormationType", 0),
+                    playable=f.get("IsPlayable", False),
+                    race=f.get("Race", 4),
+                )
             )
-    # Top-level objects: an optional "ID Int", a tab-indented "Type String" and its State block.
-    for o in re.finditer(
-        r"(?:\n\tID Int (\d+)\s*)?\n\tType String '([^']+)'\s*\n\t\d+ State\s*\{\s*HasState Bool \w+\s*Position Vector3"
-        + VEC
-        + r"\s*Orientation Matrix33\(([^)]*)\)(?:\s*PlayerIndex Int (-?\d+))?",
-        text,
-    ):
-        m["objects"].append(
-            {
-                "type": o.group(2),
-                "pos": [float(x) for x in o.groups()[2:5]],
-                "rot": [float(x) for x in o.group(6).split(",")],
-                "player": int(o.group(7)) if o.group(7) else None,
-                "id": int(o.group(1)) if o.group(1) else None,
-            }
-        )
-    # Historical maps name their ships in the world rules: "Setup Ship" actions carry the object id and the localized name id.
-    m["ship_names"] = {}
-    for a in re.finditer(
-        r"Type String '\*State Init\* Setup Ship'\s*World Object ID Int (\d+)\s*Ship Name String '([^']*)'(.*?)\}",
-        text,
-        re.DOTALL,
-    ):
-        loc = re.search(r"Localized Ship Name String '([^']*)'", a.group(3))
-        m["ship_names"][int(a.group(1))] = (loc.group(1) if loc else "", a.group(2))
+    for a in actions:
+        if a.get("Type") == "*State Init* Setup Ship":
+            m["ship_names"][a["World Object ID"]] = (
+                a.get("Localized Ship Name", ""),
+                a.get("Ship Name", ""),
+            )
     return m
 
 

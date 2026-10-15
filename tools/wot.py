@@ -6,7 +6,7 @@ import re
 from tools.source_text import SourceLine
 
 HEADER = re.compile(r"([0-9]{8})\s+(.+)")
-TYPE_TOKEN = re.compile(r"\s+(String|Int|Float|Bool|Vector3)\b")
+TYPE_TOKEN = re.compile(r"\s+(String|Int|Float|Bool|Vector3|Matrix33|Coord)\b")
 NUMBER = re.compile(r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?")
 FACTORIES = {
     "ShipCustomInfoFactory": "ship",
@@ -24,7 +24,12 @@ def issue(diagnostics, source, code, message, severity="error"):
 
 
 def decode_value(type_name, raw):
-    if type_name == "String" and re.fullmatch(r"'[^']*'", raw):
+    if (
+        type_name == "String"
+        and raw.startswith("'")
+        and raw.endswith("'")
+        and len(raw) >= 2
+    ):
         return raw[
             1:-1
         ]  # No escape syntax has been established; keep backslashes literal.
@@ -36,9 +41,13 @@ def decode_value(type_name, raw):
         value = float(raw)
         if math.isfinite(value):
             return value
-    if type_name == "Vector3" and raw.startswith("(") and raw.endswith(")"):
+    if (
+        type_name in ("Vector3", "Matrix33", "Coord")
+        and raw.startswith("(")
+        and raw.endswith(")")
+    ):
         parts = raw[1:-1].split(",")
-        if len(parts) == 3:
+        if len(parts) == {"Vector3": 3, "Matrix33": 9, "Coord": 2}[type_name]:
             return [decode_value("Float", part.strip()) for part in parts]
     raise ValueError("Unsupported or invalid typed value")
 
@@ -135,6 +144,60 @@ def parse_lines(lines: list[SourceLine]):
             diagnostics, block["source"], "unclosed_block", "Block has no closing brace"
         )
     return nodes, diagnostics
+
+
+def parse_text(text, source="<text>"):
+    return parse_lines(
+        [SourceLine(source, i, line) for i, line in enumerate(text.splitlines(), 1)]
+    )
+
+
+def fields(nodes):
+    return {n["name"]: n["value"] for n in nodes if n["kind"] == "property"}
+
+
+def blocks(nodes, name):
+    for n in nodes:
+        if n["kind"] == "block":
+            if n["name"] == name:
+                yield n
+            yield from blocks(n["children"], name)
+
+
+def records(nodes, key):
+    """Split sibling properties/blocks at a repeated record-start property."""
+    record = []
+    for node in nodes:
+        if node["kind"] == "property" and node["name"] == key:
+            if record:
+                yield record
+            record = [node]
+        elif record:
+            record.append(node)
+    if record:
+        yield record
+
+
+def objects(nodes):
+    """A world placement is a sibling Type property followed by its State block."""
+    pending = {}
+    for node in nodes:
+        if node["kind"] == "property":
+            pending[node["name"]] = node["value"]
+        elif node["kind"] == "block":
+            if node["name"] == "State" and "Type" in pending:
+                state = fields(node["children"])
+                if "Position" in state and "Orientation" in state:
+                    yield dict(
+                        type=pending["Type"],
+                        id=pending.get("ID"),
+                        pos=state["Position"],
+                        rot=state["Orientation"],
+                        player=state.get("PlayerIndex"),
+                    )
+                pending = {}
+            else:
+                yield from objects(node["children"])
 
 
 def properties(nodes):

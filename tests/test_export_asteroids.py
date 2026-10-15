@@ -24,6 +24,7 @@ ExplosionEffect String 'ShipExplosion_Medium'
         self.assertEqual((d["hp"], d["mass"], d["radius"]), (50, 40000, 15))
         self.assertEqual(d["children"][2], "Asteroid_Med")
         self.assertEqual(d["children"][:2], ["", ""])
+        self.assertEqual(definition("FactoryType String 'OtherFactory'\n" + text), d)
         self.assertIsNone(
             definition(
                 text.replace("AsteroidCustomInfoFactory", "ShipCustomInfoFactory")

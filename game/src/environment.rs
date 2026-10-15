@@ -283,7 +283,7 @@ pub fn plugin(app: &mut App) {
     app.init_resource::<Sensors>()
         .add_systems(
             PreUpdate,
-            (sensor_smoke, refresh_sensors).chain().after(crate::scenario::fleet_smoke).before(crate::panels::hud_input).run_if(in_state(crate::menu::Screen::Battle)),
+            (sensor_smoke, refresh_sensors).chain().after(crate::smoke::fleet_smoke).before(crate::panels::hud_input).run_if(in_state(crate::menu::Screen::Battle)),
         )
         .add_systems(Update, (update, current_fx, flow_currents).after(crate::input).before(crate::sail).run_if(in_state(crate::menu::Screen::Battle)));
 }

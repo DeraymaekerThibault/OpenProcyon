@@ -1,12 +1,11 @@
-"""Case-insensitive install lookup (tools/gamefs.py) and the vector pattern shared by the map/campaign exporters."""
+"""Case-insensitive install lookup and shared WOT vector parsing."""
 
-import re
 import tempfile
 import unittest
 from pathlib import Path
 
-from tools.export_maps import VEC
 from tools.gamefs import ci_file, ci_files
+from tools.wot import fields, parse_text
 
 
 class GameFs(unittest.TestCase):
@@ -33,10 +32,9 @@ class GameFs(unittest.TestCase):
 
 class Vector(unittest.TestCase):
     def test_reads_signed_and_exponent_components(self):
-        m = re.search(
-            r"Position Vector3" + VEC, "Position Vector3( -12.5, 1.5E+03, 1e-05 )"
-        )
-        self.assertEqual([float(v) for v in m.groups()], [-12.5, 1500.0, 1e-05])
+        nodes, errors = parse_text("Position Vector3( -12.5, 1.5E+03, 1e-05 )")
+        self.assertFalse(errors)
+        self.assertEqual(fields(nodes)["Position"], [-12.5, 1500.0, 1e-05])
 
 
 if __name__ == "__main__":

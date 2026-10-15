@@ -53,7 +53,7 @@ class CampaignTests(unittest.TestCase):
             [(s["id"], s["name"], s["type"]) for s in primary],
             [(231, "RLS Comet", "Ship_Navy_Torpedo")],
         )
-        self.assertEqual(len(mission["rules"]), 135)
+        self.assertEqual(len(mission["rules"]), 136)
         registry = {f.parent.name for f in ASSETS.glob("ships/*/ship.json")}
         guns = json.loads((ASSETS / "data/weapons/guns.json").read_text())
         for ship in mission["ships"]:

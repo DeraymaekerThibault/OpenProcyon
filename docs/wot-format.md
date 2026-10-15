@@ -12,8 +12,11 @@ establishes executable behavior or units.
 - One property per physical line: a name (possibly containing spaces/type words),
   a type token, and a literal. Supported primitives: single-quoted `String`, signed
   decimal `Int`, finite decimal/exponent `Float`, `Bool` (`True`/`False`), and
-  `Vector3(x, y, z)`. Strings may be empty. Backslashes are literal; embedded quote
-  escapes/multiline strings have not been established and are unsupported.
+  `Vector3(x, y, z)`, `Coord(x, y)`, and nine-component `Matrix33(...)`.
+  Strings may be empty and run from the first to the last quote on the line;
+  retail `World/*.twt` ship-name fields contain literal apostrophes.
+  Backslashes are literal; quote escapes/multiline strings have not been established
+  and are unsupported.
 - Eight decimal digits followed by a block name, then a standalone `{`, nested
   contents, and a standalone `}`. The digit token is retained **without assigning
   or validating its meaning**. Comments begin with `#` on their own lines.
@@ -75,4 +78,5 @@ read the selected files, check typed values and source lines, account for every
 nonblank line, and compare file hashes before/after. Passing syntax checks does
 not validate movement, combat, AI, count-token semantics, or the game's use of data.
 
-No TWT parser, mesh reader, engine integration, or simulation is included.
+The map/campaign, asteroid, collision and crew exporters reuse this syntax tree.
+The catalog itself does not interpret TWT gameplay, meshes, or simulation.

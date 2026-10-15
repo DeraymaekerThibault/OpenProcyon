@@ -21,7 +21,7 @@ def _curve(children):
     ]
     if len(ts) != len(vs):
         raise ValueError("curve with unequal t/value counts")
-    out = {"curve": [[t, v] for t, v in zip(ts, vs)]}
+    out = {"curve": [[t, v] for t, v in zip(ts, vs, strict=True)]}
     for n in children:
         if n["kind"] == "block" and n["name"] == "LoopInfo":
             loop = _block(n["children"])
