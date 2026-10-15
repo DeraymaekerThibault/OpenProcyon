@@ -172,7 +172,6 @@ fn background(kind: Kind) -> [&'static str; 4] {
     }
 }
 
-#[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn menu(
     (mouse, mut keys, mission, boarders, mut board, fleets, mut bar, status, ui, flags, sensors): (
         Res<ButtonInput<MouseButton>>,
@@ -412,7 +411,6 @@ pub struct OptionsMenuArt {
 }
 
 /// Spawns the menu root around `cursor` with its `OptionsMenuArt`; hit rects are the retail icons at the retail slot offsets.
-#[allow(clippy::too_many_arguments)]
 fn spawn_menu(
     commands: &mut Commands,
     assets: &AssetServer,
@@ -457,7 +455,6 @@ fn menu_centre(window: &Window, cursor: Vec2) -> Vec2 {
 /// Dev hook: `--script dock-click|dock-menu` (rules.rs puts the player next to mission 1's tender) docks with RLS Bounty through
 /// synthetic mouse input once the dock test passes: focus the camera on it, then a left click on it, or a right click on it and a left
 /// click on the menu's Dock slot. One step per frame so the real `menu` / `input` systems see ordinary presses and releases.
-#[allow(clippy::too_many_arguments)]
 fn dev_click(
     cfg: Res<crate::Config>,
     mut window: Single<&mut Window, With<PrimaryWindow>>,
@@ -532,7 +529,6 @@ fn dev_menu(cfg: Res<crate::Config>, window: Single<&Window, With<PrimaryWindow>
 }
 
 /// The context cursor sprite (hud.hdt `Cursor_*` with its `Offset_Cursor_*` hot spot) while hovering a ship or base; the system pointer is hidden then.
-#[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn context_cursor(
     window: Single<&Window, With<PrimaryWindow>>,
     mut pointer: Single<&mut CursorOptions, With<PrimaryWindow>>,

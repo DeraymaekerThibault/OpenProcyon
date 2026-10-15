@@ -2,7 +2,9 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+
 from PIL import Image
+
 from tools.trim_hud_rects import main, trimmed_rect
 
 

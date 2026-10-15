@@ -15,7 +15,7 @@ use crate::panels::{
     Contact, DockingStatus, Gauge, GunButton, HeadState, HudRoot, HudSet, MAX_CONTACTS, PanicButton, PauseButton, REF_H, Radar, RadarButton, ShipIconButton, Solid, ToggleButton,
     WeaponPanel, gauge_value, px,
 };
-use crate::sprites::{HudData, inset, offset, sheet_scale, sprite_area, sprite_of, sprite_trimmed, src};
+use crate::sprites::{HudData, IDLE, inset, offset, sheet_scale, sprite_area, sprite_of, sprite_trimmed, src};
 use crate::{Library, PlayerShip, Ship};
 
 /// Ordered bar parts and optional decorative backdrops, editable through the asset overlay.
@@ -291,7 +291,7 @@ fn build(
         .id();
     let (bg, bg_pos) = (c.size_of("Compass_Background"), offset(&hud, "COMPASS_WINDOW_BACKGROUND"));
     if let Some((img, sz)) = c.sprite("Compass_Background", false) {
-        let face = ["NoCursor", "CursorOver", "CursorDown"].map(|k| {
+        let face = [IDLE, "CursorOver", "CursorDown"].map(|k| {
             let (sheet, r) = sprite_area(&hud, "Compass_Background", &format!("TextureArea - {k}")).expect("Compass_Background art");
             (assets.load::<Image>(format!("hud/tex/{sheet}.png")), inset(&sheet, r))
         });
@@ -618,7 +618,6 @@ struct FleetHealth(usize);
 #[derive(Component)]
 struct FleetLabel(usize);
 
-#[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn fleet_art(
     mut commands: Commands,
     assets: Res<AssetServer>,

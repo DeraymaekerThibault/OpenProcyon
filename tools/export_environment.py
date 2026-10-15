@@ -1,13 +1,14 @@
 """Convert mission environment art and animal settings (not combat ship definitions)."""
 
-from pathlib import Path
 import re
 import shutil
+from pathlib import Path
 
-from tools.export_combat import flat, load as load_wot
-from tools.wot import properties
+from tools.export_combat import flat
+from tools.export_combat import load as load_wot
 from tools.mdb_to_glb import convert
 from tools.models import model_path
+from tools.wot import properties
 
 
 def export_environment(root, out, mission):

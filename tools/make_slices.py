@@ -5,10 +5,12 @@ usage: python3 tools/make_slices.py <assets dir>"""
 
 import json
 import sys
+
 from PIL import Image
 
 out = sys.argv[1]
-hud = json.load(open(f"{out}/hud/hud.json"))
+with open(f"{out}/hud/hud.json") as f:
+    hud = json.load(f)
 GROUPS = {  # group: (left, centre, right component names)
     "button": [f"FrontEnd_Texts_Over_Button_{p}" for p in ("Left", "Center", "Right")],
     "ribbon": [

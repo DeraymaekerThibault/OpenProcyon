@@ -10,8 +10,8 @@ Semantics (what a curve drives) are the consumer's business; this only restructu
 
 from pathlib import Path
 
-from tools.wot import parse_lines
 from tools.source_text import SourceLine
+from tools.wot import parse_lines
 
 
 def _curve(children):
@@ -21,7 +21,7 @@ def _curve(children):
     ]
     if len(ts) != len(vs):
         raise ValueError("curve with unequal t/value counts")
-    out = {"curve": [[t, v] for t, v in zip(ts, vs)]}
+    out = {"curve": [[t, v] for t, v in zip(ts, vs, strict=True)]}
     for n in children:
         if n["kind"] == "block" and n["name"] == "LoopInfo":
             loop = _block(n["children"])
@@ -80,7 +80,7 @@ def parse_eft(text, path="<eft>"):
 
 
 def load(root, name):
-    from tools.mdb import ci_file
+    from tools.gamefs import ci_file
 
     p = ci_file(Path(root) / "Effects", f"{name}.eft")
     return parse_eft(p.read_text(encoding="latin-1"), p.name)

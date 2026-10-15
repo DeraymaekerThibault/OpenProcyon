@@ -1,12 +1,12 @@
 """Run as: python -m tools.extract_wot --game-root ROOT --output /outside/catalog.json"""
 
 import argparse
-from collections import Counter, defaultdict
 import hashlib
 import json
 import os
-from pathlib import Path
 import sys
+from collections import Counter, defaultdict
+from pathlib import Path
 
 from tools.source_text import read_source_lines
 from tools.wot import analyze, issue, parse_lines, properties

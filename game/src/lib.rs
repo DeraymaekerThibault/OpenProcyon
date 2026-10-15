@@ -1,5 +1,3 @@
-// Bevy systems take many parameters and nested query types by design.
-#![allow(clippy::too_many_arguments, clippy::type_complexity)]
 //! Shared game library: simulation, rules, data and input. Skirmish slice: your ship vs enemy ships, original models/data, AI that fights back, damage effects, win/lose, restart.
 //! Everything marked PROVISIONAL is a stand-in, not measured original behaviour (see docs/faithful-remake.md).
 
@@ -31,6 +29,7 @@ pub mod panels;
 pub mod rules;
 pub mod scenario;
 pub mod ship;
+pub mod smoke;
 pub mod sprites;
 pub mod starmap;
 pub mod stats;
@@ -61,7 +60,7 @@ pub struct Config {
     frame: u32,
     speed: f32,
     ended: Option<u32>,
-    script: Option<String>,
+    script: Option<smoke::Script>,
     shot_frame: u32,
     late_frame: u32,
 }
@@ -96,6 +95,12 @@ pub fn assets_dir() -> PathBuf {
 /// Runs the game with one presentation (a view plugin such as the binary's `classic::plugin`).
 pub fn run(view: fn(&mut App)) {
     let args: Vec<String> = std::env::args().collect();
+    let script = args.iter().position(|a| a == "--script").map(|i| {
+        args.get(i + 1).ok_or_else(|| "--script requires a name".to_owned()).and_then(|name| smoke::Script::parse(name)).unwrap_or_else(|err| {
+            eprintln!("{err}");
+            std::process::exit(2);
+        })
+    });
     let mods: Vec<PathBuf> = args.windows(2).filter(|w| w[0] == "--mod").map(|w| PathBuf::from(&w[1])).collect();
     let base = base_assets();
     if !base.join("ships").is_dir() {
@@ -112,7 +117,7 @@ pub fn run(view: fn(&mut App)) {
     let shot = arg("--shot");
     let cfg = Config {
         groups: vec![],
-        player: arg("--ship").unwrap_or("Ship_Navy_Cutter".into()),
+        player: arg("--ship").unwrap_or(ship::DEFAULT_SHIP.into()),
         allies: arg("--allies").map(|v| v.split(',').map(String::from).collect()).unwrap_or_default(),
         map: arg("--mission").map(|id| format!("mission{:02}", id.parse::<u32>().expect("--mission takes a number"))).or_else(|| arg("--map")),
         enemies: arg("--enemies").unwrap_or("Ship_Pirate_Schooner,Ship_Pirate_Sloop".into()).split(',').filter(|n| *n != "none").map(String::from).collect(),
@@ -120,7 +125,7 @@ pub fn run(view: fn(&mut App)) {
         frame: 0,
         speed: arg("--speed").and_then(|v| v.parse().ok()).unwrap_or(1.0),
         ended: None,
-        script: arg("--script"),
+        script,
         shot_frame: arg("--shot-frame").and_then(|v| v.parse().ok()).unwrap_or(500),
         late_frame: arg("--late-frame").and_then(|v| v.parse().ok()).unwrap_or(9000), // 0: no _late shot (slow software rendering)
     };
@@ -189,7 +194,7 @@ pub fn run(view: fn(&mut App)) {
         .init_resource::<ship::Fleets>()
         .init_resource::<course::Plot>()
         .add_systems(Startup, setup)
-        .add_systems(PreUpdate, scenario::fleet_smoke.after(bevy::ui::UiSystems::Focus).before(panels::hud_input))
+        .add_plugins(smoke::plugin)
         .add_systems(OnEnter(menu::Screen::Battle), enter_battle)
         .add_systems(OnExit(menu::Screen::Battle), scenario::reset_fleets)
         .add_systems(

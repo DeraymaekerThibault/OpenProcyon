@@ -1,30 +1,11 @@
 """Reader for BD_Meshes/*.mdb (layout per public TPForm source; unknown fields are kept raw)."""
 
 import struct
-from pathlib import Path
 from dataclasses import dataclass, field
 
 
 class MdbError(ValueError):
     pass
-
-
-def ci_files(directory, pattern):
-    """Case-insensitive glob: the original game ran on Windows, so WOT names do not match file case."""
-    import fnmatch
-
-    return sorted(
-        p
-        for p in Path(directory).iterdir()
-        if fnmatch.fnmatch(p.name.lower(), pattern.lower())
-    )
-
-
-def ci_file(directory, name):
-    found = ci_files(directory, name)
-    if not found:
-        raise FileNotFoundError(f"{name} not found in {directory}")
-    return found[0]
 
 
 @dataclass

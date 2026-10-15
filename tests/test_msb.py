@@ -48,10 +48,18 @@ class NestedChild(unittest.TestCase):
     def test_child_nested_in_the_kind_block_is_its_own_node(self):
         # Vanilla AsteroidXlarge: the root's 0a/0b block holds the layer node instead of a kind string.
         child = node(2, 1, "ASTEROIDS_XLarge_Layer1", [0] * 6)
-        block = struct.pack("<II", 10, 5) + struct.pack("<I", 11) + s(child.decode("latin-1")) + struct.pack("<I", 12) + s("")
+        block = (
+            struct.pack("<II", 10, 5)
+            + struct.pack("<I", 11)
+            + s(child.decode("latin-1"))
+            + struct.pack("<I", 12)
+            + s("")
+        )
         root = node(1, -1, "XLargeAsteroid_NULL", [0] * 6) + block
         names = [(n.name, n.kind) for n in parse(root)]
-        self.assertEqual(names, [("XLargeAsteroid_NULL", ""), ("ASTEROIDS_XLarge_Layer1", "")])
+        self.assertEqual(
+            names, [("XLargeAsteroid_NULL", ""), ("ASTEROIDS_XLarge_Layer1", "")]
+        )
 
 
 class SceneLayers(unittest.TestCase):
@@ -63,19 +71,32 @@ class SceneLayers(unittest.TestCase):
             root = Path(d)
             (root / "BD_MeshScenes").mkdir()
             (root / "BD_Meshes").mkdir()
-            names = ["JohnSilverShip_Layer10", "JohnSilverShip_Layer2", "JohnSilverShipDamage_Layer2", "JohnSilverShip_Layer2", "Gun_Null"]
+            names = [
+                "JohnSilverShip_Layer10",
+                "JohnSilverShip_Layer2",
+                "JohnSilverShipDamage_Layer2",
+                "JohnSilverShip_Layer2",
+                "Gun_Null",
+            ]
             msb = b"".join(node(i + 1, -1, n, [0] * 6) for i, n in enumerate(names))
             (root / "BD_MeshScenes/PirateSilverShip.msb").write_bytes(msb)
-            for n in ("JohnSilverShip_Layer2", "JohnSilverShip_Layer10", "JohnSilverShipDamage_Layer2"):
+            for n in (
+                "JohnSilverShip_Layer2",
+                "JohnSilverShip_Layer10",
+                "JohnSilverShipDamage_Layer2",
+            ):
                 (root / "BD_Meshes" / f"{n}.mdb").write_bytes(b"")
             got = [p.name for p in scene_layers(root, "PirateSilverShip")]
-        self.assertEqual(got, ["JohnSilverShip_Layer2.mdb", "JohnSilverShip_Layer10.mdb"])
+        self.assertEqual(
+            got, ["JohnSilverShip_Layer2.mdb", "JohnSilverShip_Layer10.mdb"]
+        )
 
 
 @unittest.skipUnless(os.environ.get("PROCYON_GAME_ROOT"), "needs PROCYON_GAME_ROOT")
 class LocalMsbTests(unittest.TestCase):
     def test_cutter_hardpoints(self):
         from pathlib import Path
+
         from tools.mdb_to_glb import hardpoints
 
         hp = hardpoints(os.environ["PROCYON_GAME_ROOT"], "NavyCutterShip")
@@ -92,7 +113,7 @@ class LocalMsbTests(unittest.TestCase):
         ]
         self.assertEqual(ids, list(range(26)))
         self.assertEqual(sum(n.kind == "GunPlacement" for n, _ in hp), 10)
-        mid = [p for n, p in hp if n.label == "Port_Medmount1"][0]
+        mid = next(p for n, p in hp if n.label == "Port_Medmount1")
         self.assertLess(mid[0], 0)  # port is -x
 
 

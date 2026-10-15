@@ -29,7 +29,7 @@ class LocalCombatExportTests(unittest.TestCase):
         self.assertEqual(j["scene"], "NavyCutterShip")
         self.assertEqual(j["physics"]["MaxSpeed"]["value"], 8.055555)
         # mounts on a hull layer record which section carries them; the rear mount sits on the stern
-        rear = [g for g in j["guns"] if g["label"] == "Rear_LightMount"][0]
+        rear = next(g for g in j["guns"] if g["label"] == "Rear_LightMount")
         self.assertEqual(rear["parent_layer"], "NavyCutterShip_Layer2")
         self.assertEqual({g["gun"] for g in j["guns"]}, set(j["gun_defs"]))
         for s in j["sections"]:
@@ -38,7 +38,7 @@ class LocalCombatExportTests(unittest.TestCase):
         for b in j[
             "bullets"
         ].values():  # per-material damage must satisfy lower <= upper
-            for lo, hi, crit, fire, strength in b["damage"].values():
+            for lo, hi, crit, _fire, _strength in b["damage"].values():
                 self.assertLessEqual(lo, hi)
                 self.assertTrue(0 <= crit <= 1)
         # sounds: engine loops per order, gun fire, per-material impact pools (empty WOT slots dropped)

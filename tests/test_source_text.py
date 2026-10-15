@@ -1,6 +1,6 @@
-from pathlib import Path
 import tempfile
 import unittest
+from pathlib import Path
 
 from tools.source_text import SourceLine, read_source_lines
 
@@ -108,9 +108,11 @@ class SourceTextTests(unittest.TestCase):
         link = self.root / "link.txt"
         link.symlink_to(outside)
         for relative in (Path("../outside.txt"), Path("link.txt")):
-            with self.subTest(relative=relative):
-                with self.assertRaisesRegex(ValueError, "outside"):
-                    read_source_lines(self.root, relative, encoding="utf-8")
+            with (
+                self.subTest(relative=relative),
+                self.assertRaisesRegex(ValueError, "outside"),
+            ):
+                read_source_lines(self.root, relative, encoding="utf-8")
 
     def test_internal_symlink_reports_actual_source_path(self):
         source = self.root / "synthetic.txt"

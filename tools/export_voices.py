@@ -35,13 +35,21 @@ def table(root, voicelines, races, dst=EVENTS):
 def copy(root, out, events=EVENTS):
     """Copies every file the table names; returns the names this install lacks (a mod may rename dialogue)."""
     root, out = Path(root), Path(out)
-    names = {n for race in json.loads(Path(events).read_text()).values() for files in race.values() for n in files}
+    names = {
+        n
+        for race in json.loads(Path(events).read_text()).values()
+        for files in race.values()
+        for n in files
+    }
     src = {p.stem.lower(): p for p in (root / "Sound/Dialogue").glob("*.ogg")}
     (out / "voice").mkdir(parents=True, exist_ok=True)
     for n in names & src.keys():
         shutil.copyfile(src[n], out / "voice" / (n + ".ogg"))
     missing = sorted(names - src.keys())
-    print(len(names & src.keys()), "voice files" + (f", missing from this install: {missing}" if missing else ""))
+    print(
+        len(names & src.keys()),
+        "voice files" + (f", missing from this install: {missing}" if missing else ""),
+    )
     return missing
 
 

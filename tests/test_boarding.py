@@ -1,6 +1,5 @@
 import json
 import unittest
-from pathlib import Path
 
 from imported import ASSETS, needs_assets
 

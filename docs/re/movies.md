@@ -26,7 +26,7 @@ in asteroid fields, a destroyed ship, the golden planet). All content is **lette
 
 **Local tooling**: system `ffmpeg`/`ffprobe` decode Bink natively (decoders `binkvideo`, `binkaudio_dct`, `binkaudio_rdft`, demuxer `bink`) and
 encode Theora (`libtheora`), VP8/VP9, H.264, MJPEG, Vorbis, Opus. Python tools already shell out to `ffprobe`
-(`tools/export_campaign_media.py`). `ffmpeg` is **not** yet a documented dependency of `tools/remote_setup.sh` / cloud runs.
+(`tools/export_campaign_media.py`). `ffmpeg` is **not** yet a documented dependency (setup in `AGENTS.md`, CI in `.github/workflows/check.yml`).
 
 ## 2. How the exe plays them
 
@@ -60,7 +60,7 @@ Options:
 1. **Pre-convert at asset-build time, decode with `ffmpeg` at run time** (recommended): `tools/export_movies.py` writes `assets/movies/<name>.ogv`
    (Theora/Vorbis) plus `<name>.ogg` (audio only, for Bevy's Vorbis decoder) and a tiny `movies.json` (name, width, height, fps, frame count,
    crop). The game spawns `ffmpeg -i <ogv> -f rawvideo -pix_fmt rgba -` as a child process and streams frames into one `Image` (640x352).
-   Drawback: requires `ffmpeg` at run time (add to `tools/remote_setup.sh` and `docs/development.md`; fall back to "skip movie" if missing, like
+   Drawback: requires `ffmpeg` at run time (add to the setup in `AGENTS.md` and `docs/development.md`; fall back to "skip movie" if missing, like
    retail's `Skip Movies`).
 2. Frame sequence: pre-extract JPEG/WebP frames and play them from disk. No run-time dependency, but 3880+1260+2x230 frames at about 25 KB is ~130 MB of
    tracked assets. Rejected unless the frame rate is halved.
@@ -80,7 +80,7 @@ letterbox with black; keep the picture at the original 16:11 active area).
    entity), `play(name)` API, skip on Esc/Space/click (reuse the "skip" behaviour of `briefing.rs`), a full-screen black `Node` with the image,
    `MovieFinished` message. A unit test for the raw-frame reader (feed a synthetic byte stream), plus a runtime smoke test (`--script movie` screenshot at frame N).
 3. Hook points: front end start (`menu.rs`): Disney logo, Barking Dog logo (skippable), once per app start; "Start New Campaign" plays
-   `SinglePlayer_NIS` before `campaign::load_id("mission01")` (the Mission 1 opening NIS stays in `briefing.rs`); `rules.rs`/`campaign.rs`: after the last
+   `SinglePlayer_NIS` before `campaign::load_id("mission01")` (the Mission 1 opening NIS stays in `briefing.rs`); `rules/`/`campaign.rs`: after the last
    campaign mission win (the `PlayEndMovie` flag; export it into `assets/maps/missionNN/mission.json` in `tools/export_campaign.py`) play `TP_endNIS`, then return to the menu.
    Honour a `--no-movies` flag and the retail `Skip Movies` setting.
 4. Docs: after the code lands, update `docs/reference-video.md` ("Next implementation batch" item 1) and `docs/re/campaign.md` ("Remaining fidelity gaps").

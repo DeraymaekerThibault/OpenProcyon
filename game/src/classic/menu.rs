@@ -15,7 +15,7 @@ use crate::combat::Library;
 use crate::menu::{
     Action, BuildMenu, CtrlUi, InGame, Kind, MenuKey, MenuModel, MenuRoot, Page, RACES, RunButtons, SaveUi, Screen, Skirmish, menu_active, offered, pretty, strings, text_of,
 };
-use crate::sprites::{Fonts, HudData, MENU_SKIN, inset, sliced};
+use crate::sprites::{BODY_FONT, Fonts, HudData, IDLE, MENU_SKIN, inset, sliced};
 
 pub fn plugin(app: &mut App) {
     app.add_systems(Update, ((scroll_controls, scroll_saves).before(BuildMenu), build.in_set(BuildMenu), (hover, wheel).after(RunButtons)).run_if(menu_active));
@@ -37,7 +37,7 @@ fn hover(
         let state = match i {
             Interaction::Pressed => "CursorDown",
             Interaction::Hovered => "CursorOver",
-            Interaction::None => "NoCursor",
+            Interaction::None => IDLE,
         };
         for (e, name) in art.map(|a| a.0.as_slice()).unwrap_or(&[]) {
             if let Some(group) = name.strip_prefix("slice:") {
@@ -58,7 +58,7 @@ fn hover(
 #[derive(Component)]
 struct Art(Vec<(Entity, String)>);
 
-/// Sprite rect of a hud.hdt component for a cursor state ("NoCursor", "CursorOver", "CursorDown").
+/// Sprite rect of a hud.hdt component for a cursor state (`IDLE` = "NoCursor", "CursorOver", "CursorDown").
 pub(super) fn sprite(hud: &HudData, name: &str, state: &str) -> Option<(String, Rect)> {
     let d = hud.comps.get(name)?.get(MENU_SKIN)?;
     let r = d[format!("TextureArea - {state}")].as_array()?;
@@ -92,7 +92,7 @@ impl Ctx<'_> {
         c.spawn((img, self.node(x, y, w, h))).id()
     }
     fn hud_piece(&self, c: &mut ChildSpawnerCommands, name: &str, x: f32, y: f32, w: f32, h: f32) -> Option<(Entity, String)> {
-        let (sheet, r) = sprite(self.hud, name, "NoCursor")?;
+        let (sheet, r) = sprite(self.hud, name, IDLE)?;
         Some((self.image(c, &format!("hud/tex/{sheet}.png"), Some(inset(&sheet, r)), x, y, w, h, Color::WHITE), name.to_string()))
     }
     /// Retail bitmap text, horizontally centred in [x, x+w] (or left-aligned), vertically centred on `cy`.
@@ -111,7 +111,7 @@ impl Ctx<'_> {
         let (w, h) = (r - l, b - t);
         let mut parts = vec![];
         let mut root = c.spawn((Interaction::None, action, self.node(l, t, w, h)));
-        let cap = |name| sprite(self.hud, name, "NoCursor").map_or(50.0, |(_, r)| r.width());
+        let cap = |name| sprite(self.hud, name, IDLE).map_or(50.0, |(_, r)| r.width());
         root.with_children(|c| {
             let sub = self;
             let e = c
@@ -180,7 +180,7 @@ fn build(
         Screen::Fleet => "ship_selection_screen",
         Screen::Battle => return,
     };
-    let els: Vec<Value> = std::fs::read_to_string(assets_dir().join(format!("menu/{file}.json"))).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
+    let els: Vec<Value> = crate::data::try_json(&assets_dir().join(format!("menu/{file}.json"))).and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default();
     let scale = (ww / 800.0).min(wh / 600.0);
     let ctx = Ctx { assets: &assets, hud: &hud, fonts: &fonts, scale };
     let canvas = Node {
@@ -256,7 +256,7 @@ fn build(
                         None
                     }
                     (Screen::Battle, "Right Justify Label") if ig.page() == Some(Page::Save) && r[0] as i32 == 272 => {
-                        ctx.text(c, "Univers12", &text_of(&strings, "IDGS_TPFRONTENDTEXT_SCREENS_FILENAME"), r[0], r[2] - r[0], (r[1] + r[3]) / 2.0, true, Color::WHITE);
+                        ctx.text(c, BODY_FONT, &text_of(&strings, "IDGS_TPFRONTENDTEXT_SCREENS_FILENAME"), r[0], r[2] - r[0], (r[1] + r[3]) / 2.0, true, Color::WHITE);
                         None
                     }
                     (_, "Front End Screen Backdrop") => {
@@ -303,7 +303,7 @@ fn build(
                         None
                     }
                     (Screen::CreateSkirmish, "Fleet Size Label") => {
-                        ctx.text(c, "Univers12", &text_of(&strings, "IDGS_TPFRONTENDTEXT01_FLEET_SIZE_LIMIT"), r[0], r[2] - r[0], (r[1] + r[3]) / 2.0, true, Color::WHITE);
+                        ctx.text(c, BODY_FONT, &text_of(&strings, "IDGS_TPFRONTENDTEXT01_FLEET_SIZE_LIMIT"), r[0], r[2] - r[0], (r[1] + r[3]) / 2.0, true, Color::WHITE);
                         None
                     }
                     (Screen::CreateSkirmish, "Fleet Size Scrollbar Button") => {
@@ -321,7 +321,7 @@ fn build(
                     (Screen::Lobby, "Lobby Information Button") => {
                         // Measured: a gold Univers10 'Map' label and the map name in Univers12 under the title.
                         ctx.text(c, "Univers10", &text_of(&strings, "IDGS_TPFRONTENDTEXT01_SERVER_MAPNAME"), r[0], r[2] - r[0], 84.0, true, GOLD);
-                        ctx.text(c, "Univers12", sk.map_json["name"].as_str().unwrap_or_default(), r[0], r[2] - r[0], 101.0, true, Color::WHITE);
+                        ctx.text(c, BODY_FONT, sk.map_json["name"].as_str().unwrap_or_default(), r[0], r[2] - r[0], 101.0, true, Color::WHITE);
                         None
                     }
                     (Screen::Lobby, "Lobby Player List Button") => {
@@ -371,7 +371,7 @@ fn build(
                     }
                     (Screen::Fleet, "AutoAssign Button") => Some(Action::AutoAssign),
                     (Screen::CreateSkirmish, "Victory Limit Label") => {
-                        ctx.text(c, "Univers12", &text_of(&strings, "IDGS_TPFRONTENDTEXT_VICTORY_POINTS"), r[0], r[2] - r[0], (r[1] + r[3]) / 2.0, true, Color::WHITE);
+                        ctx.text(c, BODY_FONT, &text_of(&strings, "IDGS_TPFRONTENDTEXT_VICTORY_POINTS"), r[0], r[2] - r[0], (r[1] + r[3]) / 2.0, true, Color::WHITE);
                         None
                     }
                     (Screen::CreateSkirmish, "Victory Points Scrollbar Button") => {
@@ -403,7 +403,7 @@ fn save_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], ui
         cell(ctx, c, [l, t + (i - ui.scroll) as f32 * 19.0, r - l, 18.0], &format!("{}  -  {} pts", s.name, s.points), ui.selected == Some(i), Some(Action::PickSave(i)));
     }
     if let Some(m) = ui.status {
-        ctx.text(c, "Univers12", strings[m].as_str().unwrap_or(m), l, r - l, t - 10.0, false, Color::srgb(1.0, 0.9, 0.4));
+        ctx.text(c, BODY_FONT, strings[m].as_str().unwrap_or(m), l, r - l, t - 10.0, false, Color::srgb(1.0, 0.9, 0.4));
     }
 }
 
@@ -543,7 +543,7 @@ fn dialog_frame([l, t, r, b]: [f32; 4]) -> [f32; 4] {
 /// the faint `FrontEndMap` contour overlay and the `FrontEnd_TP_Logo` centred at the top. The engine draws these, not the screen files.
 /// PROVISIONAL: which scene a screen shows is taken from screenshots (Skirmish 2, Options pages 1), 0 elsewhere.
 fn frontend_backdrop(ctx: &Ctx, c: &mut ChildSpawnerCommands, scene: usize) {
-    if let Some((sheet, r)) = sprite(ctx.hud, "FrontEnd_Letterbox_Tile", "NoCursor") {
+    if let Some((sheet, r)) = sprite(ctx.hud, "FrontEnd_Letterbox_Tile", IDLE) {
         let rect = inset(&sheet, r);
         let (w, h) = (r.width(), r.height());
         let mut x = 0.0;
@@ -560,7 +560,7 @@ fn frontend_backdrop(ctx: &Ctx, c: &mut ChildSpawnerCommands, scene: usize) {
     }
     ctx.image(c, &format!("menu/frontendscreen{scene}.png"), Some(Rect::new(0.0, 0.0, 800.0, 394.0)), 0.0, 113.0, 800.0, 394.0, Color::WHITE);
     ctx.image(c, "menu/frontendmap.png", None, 0.0, 113.0 + (394.0 - 375.0) / 2.0, 800.0, 375.0, Color::WHITE);
-    if let Some((sheet, r)) = sprite(ctx.hud, "FrontEnd_TP_Logo", "NoCursor") {
+    if let Some((sheet, r)) = sprite(ctx.hud, "FrontEnd_TP_Logo", IDLE) {
         ctx.image(c, &format!("hud/tex/{sheet}.png"), Some(inset(&sheet, r)), 400.0 - r.width() / 2.0, 0.0, r.width(), r.height(), Color::WHITE);
     }
 }
@@ -592,8 +592,8 @@ fn map_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, sk: &Skirmish, strings: &Va
         let mut b = c.spawn((Interaction::None, Action::PickMap(*i), ctx.node(l + 4.0, cy - 9.5, r - l - 8.0, 19.0)));
         b.insert(BackgroundColor(if *i == sk.selected { Color::srgba(0.2, 0.7, 0.8, 0.45) } else { Color::NONE }));
         b.with_children(|c| {
-            ctx.text(c, "Univers12", &m.1, 14.0, 240.0, 9.5, false, Color::WHITE);
-            ctx.text(c, "Univers12", &m.3.to_string(), 278.0, 40.0, 9.5, true, Color::WHITE);
+            ctx.text(c, BODY_FONT, &m.1, 14.0, 240.0, 9.5, false, Color::WHITE);
+            ctx.text(c, BODY_FONT, &m.3.to_string(), 278.0, 40.0, 9.5, true, Color::WHITE);
         });
     }
     scrollbar(ctx, c, [727.0, 155.0, 752.0, 322.0], 0.0, 1.0);
@@ -618,7 +618,7 @@ pub(super) fn selected_tab(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]
 
 /// One retail sprite stretched over a box (reference units).
 pub(super) fn piece(ctx: &Ctx, c: &mut ChildSpawnerCommands, name: &str, [l, t, r, b]: [f32; 4], flip: (bool, bool)) {
-    let Some((sheet, rect)) = sprite(ctx.hud, name, "NoCursor") else { return };
+    let Some((sheet, rect)) = sprite(ctx.hud, name, IDLE) else { return };
     let mut img = ImageNode::new(ctx.assets.load(format!("hud/tex/{sheet}.png")));
     img.rect = Some(inset(&sheet, rect));
     img.image_mode = NodeImageMode::Stretch;
@@ -643,7 +643,7 @@ pub(super) fn stretched_window(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r
 
 /// The retail vertical scrollbar: track (`..._SLIDER_BACKGROUND_TOP/STRETCHED_CENTER/BOTTOM`) and a slider over the visible part.
 pub(super) fn scrollbar(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], start: f32, len: f32) {
-    let cap = |name: &str| sprite(ctx.hud, name, "NoCursor").map_or(20.0, |(_, r)| r.height());
+    let cap = |name: &str| sprite(ctx.hud, name, IDLE).map_or(20.0, |(_, r)| r.height());
     let track = |c: &mut ChildSpawnerCommands, prefix: &str, t: f32, b: f32| {
         let (top, bottom) = (cap(&format!("{prefix}_TOP")), cap(&format!("{prefix}_BOTTOM")));
         piece(ctx, c, &format!("{prefix}_TOP"), [l, t, r, t + top], (false, false));
@@ -661,7 +661,7 @@ fn radio(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], label:
     let mut root = c.spawn((Interaction::None, action, ctx.node(l, t, r - l, b - t)));
     root.with_children(|c| {
         piece(ctx, c, if on { "FrontEnd_Check_Box_Ready" } else { "FrontEnd_Check_Box_NotReady" }, [0.0, (b - t) / 2.0 - 10.0, 18.0, (b - t) / 2.0 + 10.0], (false, false));
-        ctx.text(c, "Univers12", label, 24.0, r - l - 24.0, cy - t, false, Color::WHITE);
+        ctx.text(c, BODY_FONT, label, 24.0, r - l - 24.0, cy - t, false, Color::WHITE);
     });
 }
 
@@ -703,7 +703,7 @@ fn cell(ctx: &Ctx, c: &mut ChildSpawnerCommands, [x, y, w, h]: [f32; 4], label: 
     if let Some(a) = action {
         b.insert((Interaction::None, a, Rest(if on { CELL_ON } else { CELL })));
     }
-    b.with_children(|c| ctx.text(c, "Univers12", label, 8.0, w - 8.0, h / 2.0, false, tint));
+    b.with_children(|c| ctx.text(c, BODY_FONT, label, 8.0, w - 8.0, h / 2.0, false, tint));
 }
 /// The fill a cell returns to when the cursor leaves it.
 #[derive(Component)]
@@ -774,7 +774,7 @@ fn players_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, _rect: [f32; 4], sk: &S
         }
     }
     if let Some(e) = sk.error {
-        ctx.text(c, "Univers12", &s(e), 236.0, 540.0, 184.0 + 8.0 * 32.0, false, Color::srgb(1.0, 0.4, 0.3));
+        ctx.text(c, BODY_FONT, &s(e), 236.0, 540.0, 184.0 + 8.0 * 32.0, false, Color::srgb(1.0, 0.4, 0.3));
     }
 }
 
@@ -822,7 +822,7 @@ fn ship_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, _rect: [f32; 4], sk: &Skir
         let cy = 347.5 + (row - sk.scroll) as f32 * 19.0;
         let mut b = c.spawn((Interaction::None, Action::PickShip(row), ctx.node(505.0, cy - 9.5, 215.0, 19.0)));
         b.insert(BackgroundColor(if row == sk.ship_pick { Color::srgba(0.2, 0.7, 0.8, 0.45) } else { Color::NONE }));
-        b.with_children(|c| ctx.text(c, "Univers12", &class_name(lib, ci, strings), 20.0, 195.0, 9.5, false, Color::WHITE));
+        b.with_children(|c| ctx.text(c, BODY_FONT, &class_name(lib, ci, strings), 20.0, 195.0, 9.5, false, Color::WHITE));
     }
     let n = list.len().max(1) as f32;
     scrollbar(ctx, c, [742.0, 330.0, 767.0, 505.0], sk.scroll as f32 / n, (SHIP_ROWS as f32 / n).min(1.0));
@@ -881,7 +881,7 @@ fn ship_info(ctx: &Ctx, c: &mut ChildSpawnerCommands, _rect: [f32; 4], sk: &Skir
     let Some(ci) = sk.human().map(|h| offered(lib, h.race)).and_then(|l| l.get(sk.ship_pick).copied()) else { return };
     let s = |id: &str| text_of(strings, id);
     let st = crate::menu::ship_stats(lib, ci);
-    ctx.text(c, "Univers12", &class_name(lib, ci, strings), 510.0, 240.0, 130.0, false, Color::WHITE);
+    ctx.text(c, BODY_FONT, &class_name(lib, ci, strings), 510.0, 240.0, 130.0, false, Color::WHITE);
     piece(ctx, c, "FrontEnd_Flag_Icon_Background", [510.0, 151.0, 568.0, 210.0], (false, false));
     if let Some(icon) = &lib.classes[ci].icon {
         piece(ctx, c, icon, [517.0, 158.0, 561.0, 203.0], (false, false));

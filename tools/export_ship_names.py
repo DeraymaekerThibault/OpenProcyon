@@ -7,8 +7,9 @@ import json
 import re
 import sys
 from pathlib import Path
+
 from tools.export_maps import strings
-from tools.mdb import ci_files
+from tools.gamefs import ci_files
 
 
 def pools(root, entities):

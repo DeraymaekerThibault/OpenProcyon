@@ -11,19 +11,28 @@ class ExportVoices(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             root, out = Path(d, "game"), Path(d, "out")
             (root / "Sound/Dialogue").mkdir(parents=True)
-            (root / "Sound/Dialogue/HMCaptain01.ogg").write_bytes(b"a")  # retail case differs from the table
-            (root / "Sound/Dialogue/HMCaptain99.ogg").write_bytes(b"b")  # not in the table: not copied
+            # Retail case differs from the table; HMCaptain99 is not in it, so it is not copied.
+            (root / "Sound/Dialogue/HMCaptain01.ogg").write_bytes(b"a")
+            (root / "Sound/Dialogue/HMCaptain99.ogg").write_bytes(b"b")
             events = Path(d, "events.json")
-            events.write_text(json.dumps({"HumanMale": {"full_ahead": ["hmcaptain01", "hmcaptain02"]}}))
+            events.write_text(
+                json.dumps(
+                    {"HumanMale": {"full_ahead": ["hmcaptain01", "hmcaptain02"]}}
+                )
+            )
             missing = copy(root, out, events)
-            self.assertEqual(sorted(p.name for p in (out / "voice").iterdir()), ["hmcaptain01.ogg"])
+            self.assertEqual(
+                sorted(p.name for p in (out / "voice").iterdir()), ["hmcaptain01.ogg"]
+            )
             self.assertEqual(missing, ["hmcaptain02"])
 
     def test_shipped_table_names_only_files(self):
         table = json.loads(EVENTS.read_text())
         for race, events in table.items():
             for files in events.values():
-                self.assertTrue(files and all(f.isascii() and "/" not in f for f in files), race)
+                self.assertTrue(
+                    files and all(f.isascii() and "/" not in f for f in files), race
+                )
 
 
 if __name__ == "__main__":

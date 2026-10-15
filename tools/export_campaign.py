@@ -4,43 +4,27 @@ usage: python -m tools.export_campaign <game_root> <assets_dir>
 """
 
 import json
-import re
-import shutil
-import sys
-import subprocess
 import math
+import shutil
+import subprocess
+import sys
 from pathlib import Path
 
 from tools.export_campaign_media import PLAYABLE
-from tools.export_maps import VEC, convert_scene, mesh_scene, parse_twt, strings, tiles
 from tools.export_combat import export as export_ship
 from tools.export_environment import export_environment
+from tools.export_maps import convert_scene, mesh_scene, parse_twt, strings, tiles
 from tools.mdb_to_glb import convert
 from tools.models import model_path
-from tools.source_text import SourceLine
-from tools.wot import parse_lines
+from tools.wot import blocks, fields, objects, parse_text
 
 # Scenes whose BD_Meshes layers carry another name than the scene.
 SOURCE = "World/SinglePlayer/Mission01.twt"  # set per mission by main()
 
 
-def fields(nodes):
-    return {n["name"]: n["value"] for n in nodes if n["kind"] == "property"}
-
-
-def blocks(nodes, name):
-    for n in nodes:
-        if n["kind"] == "block":
-            if n["name"] == name:
-                yield n
-            yield from blocks(n["children"], name)
-
-
 def parse_mission(text):
-    nodes, diagnostics = parse_lines(
-        [SourceLine(SOURCE, i, line) for i, line in enumerate(text.splitlines(), 1)]
-    )
-    # Matrix33/Colour/Coord are outside the WOT parser's subset; structural errors are not.
+    nodes, diagnostics = parse_text(text, SOURCE)
+    # Unsupported property types are tolerated; structural errors are not.
     errors = [
         d
         for d in diagnostics
@@ -76,28 +60,22 @@ def parse_mission(text):
         for a in r["actions"]
         if a.get("Type") == "*State Init* Setup Ship"
     }
+    placements = list(objects(nodes))
     ships = []
-    for m in re.finditer(
-        r"\n\tID Int (\d+)\s*\n\tType String '(Ship_[^']+)'\s*\n\t\d+ State\s*\{(.*?)\n\t\}",
-        text,
-        re.S,
-    ):
-        ident, typ, body = m.groups()
-        pos = re.search(r"Position Vector3" + VEC, body)
-        rot = re.search(r"Orientation Matrix33\(([^)]*)\)", body)
-        setup = setups.get(
-            int(ident), {}
-        )  # ships no rule sets up keep their placement only
+    for o in placements:
+        if not o["type"].startswith("Ship_") or o["id"] is None:
+            continue
+        setup = setups.get(o["id"], {})
         ships.append(
-            {
-                "id": int(ident),
-                "type": typ,
-                "pos": list(map(float, pos.groups())),
-                "rot": list(map(float, rot[1].split(","))),
-                "name": setup.get("Ship Name", typ),
-                "group": setup.get("Player/Owner"),
-                "primary": setup.get("Primary Ship") == "TRUE",
-            }
+            dict(
+                id=o["id"],
+                type=o["type"],
+                pos=o["pos"],
+                rot=o["rot"],
+                name=setup.get("Ship Name", o["type"]),
+                group=setup.get("Player/Owner"),
+                primary=setup.get("Primary Ship") == "TRUE",
+            )
         )
     paths = {}
     for b in blocks(nodes, "Waypoint Path Info Vector - Element"):
@@ -120,13 +98,13 @@ def parse_mission(text):
         fields(b["children"]) for b in blocks(nodes, "Objective Task Array - Element")
     ]
     volumes = {}
-    for b in re.finditer(
-        r"\d+ World Polygons Vectors - Element\s*\{(.*?)\}", text, re.S
-    ):
-        name = re.search(r"Name String '([^']+)'", b[1])[1]
-        volumes[name] = [
-            list(map(float, p))
-            for p in re.findall(r"Points Coord\(\s*([-\d.]+),\s*([-\d.]+)\s*\)", b[1])
+    for b in blocks(nodes, "World Polygons Vectors - Element"):
+        volumes[fields(b["children"])["Name"]] = [
+            n["value"]
+            for n in b["children"]
+            if n.get("kind") == "property"
+            and n["name"] == "Points"
+            and n["type"] == "Coord"
         ]
     groups, named_groups = {}, {}
     for group in blocks(nodes, "Group"):
@@ -138,42 +116,22 @@ def parse_mission(text):
         ]
         for i in named_groups[name]:
             groups[i] = name
-    animals = []
-    for m in re.finditer(
-        r"\n\tID Int (\d+)\s*\n\tType String '(Animal_SpaceWhale)'\s*\n\t\d+ State\s*\{(.*?)\n\t\}",
-        text,
-        re.S,
-    ):
-        ident, typ, body = m.groups()
-        pos = re.search(r"Position Vector3" + VEC, body)
-        rot = re.search(r"Orientation Matrix33\(([^)]*)\)", body)
-        animals.append(
+
+    def animals_of(prefix, default_group):
+        return [
             dict(
-                id=int(ident),
-                type=typ,
-                pos=list(map(float, pos.groups())),
-                rot=list(map(float, rot[1].split(","))),
-                group=groups.get(int(ident), "Whales"),
+                id=o["id"],
+                type=o["type"],
+                pos=o["pos"],
+                rot=o["rot"],
+                group=groups.get(o["id"], default_group),
             )
-        )
-    dragons = []
-    for m in re.finditer(
-        r"\n\tID Int (\d+)\s*\n\tType String '(Animal_SpaceDragon\w*)'\s*\n\t\d+ State\s*\{(.*?)\n\t\}",
-        text,
-        re.S,
-    ):
-        ident, typ, body = m.groups()
-        pos = re.search(r"Position Vector3" + VEC, body)
-        rot = re.search(r"Orientation Matrix33\(([^)]*)\)", body)
-        dragons.append(
-            dict(
-                id=int(ident),
-                type=typ,
-                pos=list(map(float, pos.groups())),
-                rot=list(map(float, rot[1].split(","))),
-                group=groups.get(int(ident), "Dragons"),
-            )
-        )
+            for o in placements
+            if o["type"].startswith(prefix) and o["id"] is not None
+        ]
+
+    animals = animals_of("Animal_SpaceWhale", "Whales")
+    dragons = animals_of("Animal_SpaceDragon", "Dragons")
     point_sets = {}
     for point_set in blocks(nodes, "World Point Sets Vector - Element"):
         points_in_set = []
@@ -196,11 +154,9 @@ def parse_mission(text):
     names = [p["name"] for p in players]
     # PlayerAllianceInfoVector: allied player-index pairs; every other pair of players starts hostile.
     alliances = [
-        [names[int(a)], names[int(b)]]
-        for a, b in re.findall(
-            r"PlayerAllianceInfoVector - Element\s*\{\s*Player0 Int (\d+)\s*Player1 Int (\d+)",
-            text,
-        )
+        [names[f["Player0"]], names[f["Player1"]]]
+        for b in blocks(nodes, "PlayerAllianceInfoVector - Element")
+        for f in [fields(b["children"])]
     ]
     return dict(
         source=SOURCE,
@@ -225,9 +181,7 @@ def parse_mission(text):
 
 def speech_events(text):
     """The TWT 'Speech Event List': rule-facing event name -> sound file, subtitle string id and talking-head sprite."""
-    nodes, _ = parse_lines(
-        [SourceLine(SOURCE, i, line) for i, line in enumerate(text.splitlines(), 1)]
-    )
+    nodes, _ = parse_text(text, SOURCE)
     out = {}
     for b in blocks(nodes, "Speech Event List - Element"):
         f = fields(b["children"])
@@ -351,9 +305,8 @@ def export_mission(root, out, twt):
                 )
                 scene = mesh_scene(root, typ)
                 if not model_path(out, scene).exists():
-                    model_path(out, scene, mkdir=True).write_bytes(
-                        convert(root, scene)  # layer names come from the MSB (mdb_to_glb.scene_layers)
-                    )
+                    # Layer names come from the MSB (mdb_to_glb.scene_layers).
+                    model_path(out, scene, mkdir=True).write_bytes(convert(root, scene))
                 registry.append(typ)
             except (KeyError, ValueError, FileNotFoundError):
                 mission["unresolved_ships"].append(

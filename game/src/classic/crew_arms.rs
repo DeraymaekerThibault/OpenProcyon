@@ -6,7 +6,7 @@ use super::menu::{Ctx, GOLD, disabled, piece, pulldown_cell, scrollbar, selected
 use crate::combat::Library;
 use crate::crew_arms::{Action, CrewSet, FitView, ScreenModel};
 use crate::menu::{strings, text_of};
-use crate::sprites::{Fonts, HudData, offset};
+use crate::sprites::{BODY_FONT, Fonts, HudData, IDLE, offset};
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use serde_json::Value;
@@ -142,7 +142,7 @@ fn face(ctx: &Ctx, c: &mut ChildSpawnerCommands, centre: Vec2, slot: &Option<(St
     let mut b = c.spawn((Interaction::None, Action::SelectPost(role), ctx.node(centre.x - FACE / 2.0, centre.y - FACE / 2.0, FACE, FACE)));
     b.with_children(|c| {
         let generic = format!("CrewFace_{race}_0");
-        let name = slot.as_ref().map(|(_, p)| p.as_str()).filter(|p| sprite(ctx.hud, p, "NoCursor").is_some()).unwrap_or(&generic);
+        let name = slot.as_ref().map(|(_, p)| p.as_str()).filter(|p| sprite(ctx.hud, p, IDLE).is_some()).unwrap_or(&generic);
         piece(ctx, c, name, [0.0, 0.0, FACE, FACE], (false, false));
     });
 }
@@ -198,7 +198,7 @@ fn crew(ctx: &Ctx, c: &mut ChildSpawnerCommands, fit: &FitView, lib: &Library, s
 fn outline(ctx: &Ctx, c: &mut ChildSpawnerCommands, fit: &FitView, lib: &Library) {
     let Some(&ci) = fit.fleet.get(fit.ship) else { return };
     let name = format!("WeaponBar_ShipIcon_{}", lib.classes[ci].name.trim_start_matches("Ship_"));
-    if let Some((_, r)) = sprite(ctx.hud, &name, "NoCursor") {
+    if let Some((_, r)) = sprite(ctx.hud, &name, IDLE) {
         let at = PANEL + offset(ctx.hud, "WEAPONBAR_SHIPICON_OFFSET_FROM_TOPLEFT");
         piece(ctx, c, &name, [at.x, at.y, at.x + r.width(), at.y + r.height()], (false, false));
     }
@@ -213,7 +213,7 @@ fn slot_centre(ctx: &Ctx, bank: usize) -> Vec2 {
 /// clicking a mount selects it (gold frame) and the list on the right then offers the compatible weapons.
 fn arms(ctx: &Ctx, c: &mut ChildSpawnerCommands, fit: &FitView, lib: &Library, strings: &Value) {
     stretched_window(ctx, c, [52.0, 150.0, 253.0, 307.0]);
-    wrapped(ctx, c, "Univers12", &text_of(strings, "IDGS_TPFRONTENDTEXT02_WEAPON_UPGRADE_INFO"), [63.0, 165.0, 245.0, 300.0]);
+    wrapped(ctx, c, BODY_FONT, &text_of(strings, "IDGS_TPFRONTENDTEXT02_WEAPON_UPGRADE_INFO"), [63.0, 165.0, 245.0, 300.0]);
     outline(ctx, c, fit, lib);
     for (i, (bank, gun)) in fit.banks.iter().enumerate() {
         let at = slot_centre(ctx, *bank) - Vec2::splat(15.5);
@@ -245,7 +245,7 @@ fn list(ctx: &Ctx, c: &mut ChildSpawnerCommands, fit: &FitView, strings: &Value)
     for (row, (label, action)) in fit.list.iter().take(ROWS).enumerate() {
         let cy = 346.0 + row as f32 * 19.5;
         let mut b = c.spawn((Interaction::None, action.clone(), ctx.node(505.0, cy - 9.75, 215.0, 19.5)));
-        b.with_children(|c| ctx.text(c, "Univers12", label, 20.0, 195.0, 9.75, false, Color::WHITE));
+        b.with_children(|c| ctx.text(c, BODY_FONT, label, 20.0, 195.0, 9.75, false, Color::WHITE));
     }
     let n = fit.list.len().max(1) as f32;
     scrollbar(ctx, c, [742.0, 330.0, 767.0, 505.0], 0.0, (ROWS as f32 / n).min(1.0));

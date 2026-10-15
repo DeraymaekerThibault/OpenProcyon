@@ -117,7 +117,7 @@ pub struct CrewVoice;
 
 fn events() -> &'static Value {
     static EVENTS: std::sync::OnceLock<Value> = std::sync::OnceLock::new();
-    EVENTS.get_or_init(|| std::fs::read_to_string(crate::assets_dir().join("voice/events.json")).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(Value::Null))
+    EVENTS.get_or_init(|| crate::data::try_json(&crate::assets_dir().join("voice/events.json")).unwrap_or(Value::Null))
 }
 
 /// A voice file for `event`, rotating through its variants with `n`.
@@ -146,7 +146,6 @@ struct Surroundings<'w, 's> {
     guns: Query<'w, 's, &'static crate::combat::GunStates, With<PlayerShip>>,
 }
 
-#[allow(clippy::too_many_arguments)]
 fn callouts(
     mut commands: Commands,
     assets: Res<AssetServer>,
@@ -199,7 +198,7 @@ fn callouts(
         hazards.push("meteor_shower");
     }
     for f in world.fired.read().filter(|f| f.shooter == me) {
-        if f.bullet.starts_with("Bullet_Torpedo") {
+        if f.bullet.starts_with(crate::data::TORPEDO_BULLET) {
             reports.push("torpedoes_away");
         } else if f.bullet.contains("Mortar") {
             reports.push("fire_mortar");

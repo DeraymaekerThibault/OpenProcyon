@@ -1,12 +1,14 @@
 """Armed bases: assets/ships/<Base_*>/{ship.json,geometry.json} for every Base_* world object that places guns (island gun towers).
 Same layout as a ship (pack_data/pack_layout) so the game loads it as a class; no model.glb: the base's visual is its map scenery GLB (models/bases).
-New gun/bullet definitions are merged into data/weapons. usage: python3 -m tools.export_bases <game_root> <assets_dir>"""
+New gun/bullet definitions are merged into data/weapons. usage: python3 -m tools.export_bases <game_root> <assets_dir>
+"""
 
 import json
 import sys
 from pathlib import Path
 
 from tools.export_combat import associations, export, load
+from tools.gamefs import ci_files
 from tools.pack_data import dump, rnd
 
 
@@ -17,7 +19,7 @@ def export_bases(root, assets):
         json.loads((wdir / "guns.json").read_text()),
         json.loads((wdir / "bullets.json").read_text()),
     )
-    for wot in sorted((Path(root) / "WorldObjects").glob("Base_*.wot")):
+    for wot in ci_files(Path(root) / "WorldObjects", "Base_*.wot"):
         name = wot.stem
         try:
             if not any(associations(load(root, name), "GunPlacement")):

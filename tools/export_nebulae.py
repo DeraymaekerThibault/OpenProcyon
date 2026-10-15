@@ -10,12 +10,12 @@ import shutil
 import sys
 from pathlib import Path
 
-from tools.export_campaign import parse_mission
 import tools.export_campaign as campaign
-from tools.mdb import ci_files
+from tools.export_campaign import parse_mission
+from tools.export_combat import flat, load
+from tools.gamefs import ci_files
 from tools.mdb_to_glb import convert
 from tools.models import model_path
-from tools.export_combat import load, flat
 
 SOUNDS = [
     "Ambience_SolarStorm_Loop",
@@ -33,7 +33,7 @@ def nebulae(text, source):
     out = []
     for n in env["nebulae"]:
 
-        def points(key):
+        def points(key, n=n):
             name = n.get(key)
             return [] if name in NONE else env["point_sets"].get(name, [])
 
@@ -74,13 +74,31 @@ def weather_damage(nodes):
     for n in nodes:
         if n["kind"] != "block":
             continue
-        if n["name"] in ("Lightning Damage Potential", "Wind Damage Potential", "Meteor Damage Potential"):
+        if n["name"] in (
+            "Lightning Damage Potential",
+            "Wind Damage Potential",
+            "Meteor Damage Potential",
+        ):
             p = flat(n["children"])
             out[n["name"].split()[0].lower()] = {
-                material: [p[f"{key}: {material}"] for key in (
-                    "Damage Lower Bound", "Damage Upper Bound", "Chance of Critical Damage", "Chance of Fire", "Initial Fire Strength"
-                )]
-                for material in ("Wood", "Reinforced", "Iron", "Cloth", "Stone", "Dragon")
+                material: [
+                    p[f"{key}: {material}"]
+                    for key in (
+                        "Damage Lower Bound",
+                        "Damage Upper Bound",
+                        "Chance of Critical Damage",
+                        "Chance of Fire",
+                        "Initial Fire Strength",
+                    )
+                ]
+                for material in (
+                    "Wood",
+                    "Reinforced",
+                    "Iron",
+                    "Cloth",
+                    "Stone",
+                    "Dragon",
+                )
             }
         else:
             out.update(weather_damage(n["children"]))
@@ -106,7 +124,11 @@ def main(root, out):
             m["nebulae"] = nebulae(
                 twt.read_text(encoding="latin1"), str(twt.relative_to(root))
             )
-        except (ValueError, KeyError, IndexError) as e:  # installs vary (mods); one broken map must not stop the import
+        except (
+            ValueError,
+            KeyError,
+            IndexError,
+        ) as e:  # installs vary (mods); one broken map must not stop the import
             print(f"skip {mid} nebulae: {e}")
             continue
         f.write_text(json.dumps(m))

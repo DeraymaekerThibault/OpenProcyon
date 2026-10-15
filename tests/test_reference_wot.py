@@ -1,11 +1,11 @@
 """Opt-in checks against a caller-selected local reference; no game values embedded."""
 
-from decimal import Decimal
 import hashlib
 import os
-from pathlib import Path
 import re
 import unittest
+from decimal import Decimal
+from pathlib import Path
 
 from tools.extract_wot import extract
 

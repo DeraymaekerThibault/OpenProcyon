@@ -3,9 +3,9 @@
 Glyph pixel rect on the texture: x = Start Pixel On Row, y = Row Number * Height In Pixels, size = (Width, Height).
 """
 
+import json
 import re
 import sys
-import json
 
 
 def parse(text):
@@ -41,4 +41,5 @@ def parse(text):
 
 
 if __name__ == "__main__":
-    print(json.dumps(parse(open(sys.argv[1], encoding="latin1").read())))
+    with open(sys.argv[1], encoding="latin1") as f:
+        print(json.dumps(parse(f.read())))

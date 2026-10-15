@@ -206,6 +206,11 @@ impl Health {
     pub fn new(c: &Class) -> Self {
         Health { sections: c.sections.iter().map(|s| s.hp).collect(), core: c.core_hp, destroyed: false }
     }
+    /// Multiplies every section and the core by `f` (1 keeps them, 0.5 halves them).
+    pub fn scale(&mut self, f: f32) {
+        self.sections.iter_mut().for_each(|x| *x *= f);
+        self.core *= f;
+    }
 }
 /// Spawns the visual hierarchy of every mount as children of `ship` and returns the gun state (PROVISIONAL: guns start loaded).
 pub fn spawn_guns(commands: &mut Commands, assets: &AssetServer, lib: &Library, ship: Entity, class: usize) -> GunStates {
@@ -498,7 +503,7 @@ fn fire(
     // Point-defence targets: torpedoes and mines in flight, with their side.
     let incoming: Vec<(Entity, Vec3, Vec3, Side)> = threats
         .iter()
-        .filter(|(_, _, s)| s.bullet.starts_with("Bullet_Torpedo") || matches!(s.payload, Payload::Mine { .. }))
+        .filter(|(_, _, s)| s.bullet.starts_with(TORPEDO_BULLET) || matches!(s.payload, Payload::Mine { .. }))
         .map(|(e, t, s)| (e, t.translation, s.vel, s.side))
         .collect();
     // 'NIS Toggle NIS mode Gun Accuracy': scripted broadsides fly true.
@@ -580,7 +585,7 @@ fn fire(
                 _ => None,
             };
             // PROVISIONAL (owner retail recollection): torpedoes cannot target base towers.
-            let tp = tp.filter(|t| g.bullet != "Bullet_Torpedo" || !objects.get(t.2).is_ok_and(|o| o.3.is_some()));
+            let tp = tp.filter(|t| g.bullet != TORPEDO_BULLET || !objects.get(t.2).is_ok_and(|o| o.3.is_some()));
             st.cooldown -= dt;
             st.burst_timer -= dt;
             let mount_rot = tf.rotation * m.rot;
@@ -601,7 +606,7 @@ fn fire(
                 // Lead like the exe: aim point += target velocity * (distance / muzzle speed), one step, no gravity term.
                 // PROVISIONAL: ordinary shells inherit shooter velocity; torpedoes use their own forward speed.
                 // Torpedo lead remains straight interception, not the native homing controller.
-                let d = aim_offset(tp - origin, tv, fwd * ship.speed, g.muzzle, g.bullet == "Bullet_Torpedo");
+                let d = aim_offset(tp - origin, tv, fwd * ship.speed, g.muzzle, g.bullet == TORPEDO_BULLET);
                 let dir = match g.lob.and_then(|a| lob_velocity(d, a)) {
                     Some(v) => v.normalize(),
                     None => aim(d, g.muzzle, g.gravity),
@@ -730,7 +735,6 @@ struct Launch {
 }
 
 /// Spawns one shell of gun `g` from muzzle `mz` (its fire sound, muzzle flash and bullet effect included).
-#[allow(clippy::too_many_arguments)]
 fn launch_shell(
     commands: &mut Commands,
     assets: &AssetServer,
@@ -756,7 +760,7 @@ fn launch_shell(
         sfx.write(Sfx { name: n.clone(), at: Some(from), vol: *vol, max: *max });
     }
     let mat = if side == Side::Player { look.shell.clone() } else { look.enemy_shell.clone() };
-    let vel = shot.vel.unwrap_or_else(|| launch_velocity(dir, g.muzzle, shooter_velocity, g.bullet == "Bullet_Torpedo"));
+    let vel = shot.vel.unwrap_or_else(|| launch_velocity(dir, g.muzzle, shooter_velocity, g.bullet == TORPEDO_BULLET));
     let stf = Transform::from_translation(from).looking_to(vel, Vec3::Y);
     let shell = commands
         .spawn((
@@ -800,7 +804,6 @@ fn launch_shell(
 
 /// Island gun towers: every mount of an armed base shoots the nearest visible ship its owner is hostile to, within the gun's range
 /// (turret model as in `fire`). PROVISIONAL: the base's AI stance and 'attack' orders are not consulted; hostility alone arms it.
-#[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn base_fire(
     mut commands: Commands,
     time: Res<Time>,
@@ -839,7 +842,7 @@ fn base_fire(
             // Mortar towers lob at the ship (PROVISIONAL: mines/grav charges on bases are not seen in the data and stay idle).
             let usable = !is_indirect(&m.gun) || g.lob.is_some();
             if let (false, false, true, Some((p, v, _, _))) = (dead, g.point_defense || m.gun.contains("Harpoon"), usable, tp) {
-                let d = aim_offset(p - origin, v, Vec3::ZERO, g.muzzle, g.bullet == "Bullet_Torpedo");
+                let d = aim_offset(p - origin, v, Vec3::ZERO, g.muzzle, g.bullet == TORPEDO_BULLET);
                 let dir = match g.lob.and_then(|a| lob_velocity(d, a)) {
                     Some(v) => v.normalize(),
                     None => aim(d, g.muzzle, g.gravity),
@@ -1013,7 +1016,7 @@ fn shells(
     let now = time.elapsed_secs();
     // Torpedoes and mines in flight, for point-defence intercepts; each is shot down at most once.
     let threats: Vec<(Entity, Vec3, Side)> =
-        q.iter().filter(|(_, s, _)| s.bullet.starts_with("Bullet_Torpedo") || matches!(s.payload, Payload::Mine { .. })).map(|(e, s, t)| (e, t.translation, s.side)).collect();
+        q.iter().filter(|(_, s, _)| s.bullet.starts_with(TORPEDO_BULLET) || matches!(s.payload, Payload::Mine { .. })).map(|(e, s, t)| (e, t.translation, s.side)).collect();
     let mut threat_hp: std::collections::HashMap<Entity, f32> = q.iter().filter(|(e, ..)| threats.iter().any(|t| t.0 == *e)).map(|(e, s, _)| (e, s.hp)).collect();
     let mut downed: Vec<Entity> = vec![];
     for (e, mut s, mut tf) in &mut q {
@@ -1222,7 +1225,7 @@ fn shells(
             hits.write(Hit { shooter: s.shooter, victim: se });
             // Script vulnerability: 'Invulnerable Percent' 1.0 takes no damage and no fire; partial values scale the damage.
             let invuln = mission.map_or(0.0, |m| m.invuln);
-            if s.bullet == "Bullet_Torpedo" {
+            if s.bullet == TORPEDO_BULLET {
                 info!("Torpedo hit {} ({}){}", class.name, sec.label, if invuln >= 1.0 { " [training: invulnerable]" } else { "" });
             }
             let fire_free = !fires.list.iter().any(|f| f.sec == k && f.state == 0);
@@ -1394,6 +1397,13 @@ fn draw(mut g: Gizmos, lib: Res<Library>, target: Res<Target>, ships: Query<(Ent
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn health_scale_applies_to_core_and_every_section() {
+        let mut h = Health { sections: vec![10.0, 4.0], core: 8.0, destroyed: false };
+        h.scale(0.5);
+        assert_eq!((h.sections.as_slice(), h.core), (&[5.0, 2.0][..], 4.0));
+    }
 
     #[test]
     fn destroyed_sail_does_not_absorb_shots_but_destroyed_vital_sections_do() {

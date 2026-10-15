@@ -1,30 +1,43 @@
 import json
-import unittest
 import tempfile
+import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from imported import ASSETS, needs_assets
+
 from tools.export_campaign import parse_mission
-from tools.models import model_path
 from tools.export_environment import export_environment
 from tools.export_nebulae import weather_damage
-from tools.wot import parse_lines
+from tools.models import model_path
 from tools.source_text import SourceLine
-
-from imported import ASSETS, needs_assets
+from tools.wot import parse_lines
 
 
 class EnvironmentExportTests(unittest.TestCase):
     def test_weather_damage_keeps_each_hazards_own_material_table(self):
-        fields = ("Damage Lower Bound", "Damage Upper Bound", "Chance of Critical Damage", "Chance of Fire", "Initial Fire Strength")
+        fields = (
+            "Damage Lower Bound",
+            "Damage Upper Bound",
+            "Chance of Critical Damage",
+            "Chance of Fire",
+            "Initial Fire Strength",
+        )
         blocks = []
         for hazard, lo in (("Lightning", 20), ("Wind", 5), ("Meteor", 10)):
             lines = [f"00000048 {hazard} Damage Potential", "{"]
             for material in ("Wood", "Reinforced", "Iron", "Cloth", "Stone", "Dragon"):
-                lines.extend(f"  {key}: {material} Float {value}" for key, value in zip(fields, (lo, lo + 2, 0.2, 0.1, 3)))
+                lines.extend(
+                    f"  {key}: {material} Float {value}"
+                    for key, value in zip(
+                        fields, (lo, lo + 2, 0.2, 0.1, 3), strict=True
+                    )
+                )
             lines.append("}")
             blocks.extend(lines)
-        nodes, problems = parse_lines([SourceLine("synthetic.wot", i, line) for i, line in enumerate(blocks, 1)])
+        nodes, problems = parse_lines(
+            [SourceLine("synthetic.wot", i, line) for i, line in enumerate(blocks, 1)]
+        )
         self.assertFalse(problems)
         tables = weather_damage(nodes)
         self.assertEqual(tables["wind"]["Cloth"], [5, 7, 0.2, 0.1, 3])
@@ -106,7 +119,6 @@ class EnvironmentExportTests(unittest.TestCase):
         )
 
     @needs_assets
-
     def test_mission01_environment_assets_and_retail_groups_exist(self):
         mission = json.loads((ASSETS / "maps/mission01/mission.json").read_text())
         env = mission["environment"]

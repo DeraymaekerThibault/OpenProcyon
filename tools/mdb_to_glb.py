@@ -11,6 +11,7 @@ Hardpoints from BD_MeshScenes/<Scene>.msb become empty nodes under "hardpoints" 
 
 import io
 import json
+import math
 import re
 import struct
 import sys
@@ -18,9 +19,8 @@ from pathlib import Path
 
 from PIL import Image
 
-import math
-
-from tools.mdb import ci_file, ci_files, normal, parse
+from tools.gamefs import ci_file, ci_files
+from tools.mdb import normal, parse
 from tools.msb import parse as parse_msb
 
 
@@ -40,12 +40,12 @@ def hardpoints(root, scene):
         if n.parent not in nodes or depth > 16:
             return n.pos
         w = world(nodes[n.parent], depth + 1)
-        return tuple(a + b for a, b in zip(w, n.pos))
+        return tuple(a + b for a, b in zip(w, n.pos, strict=True))
 
     layer = [world(n) for n in nodes.values() if n.kind == "DamageSection"]
     off = layer[0] if layer else (0, 0, 0)
     return [
-        (n, tuple(a - b for a, b in zip(world(n), off)))
+        (n, tuple(a - b for a, b in zip(world(n), off, strict=True)))
         for n in nodes.values()
         if n.kind != "DamageSection"
     ]
@@ -53,14 +53,26 @@ def hardpoints(root, scene):
 
 def scene_layers(root, scene):
     """Layer MDBs named by the scene's MSB nodes, for scenes whose meshes have another prefix
-    (vanilla PirateSilverShip uses JohnSilverShip_Layer*, ProcyonDMRefulingStationShip ProcyonDMRefulingbaseShip_Layer*)."""
+    (vanilla PirateSilverShip uses JohnSilverShip_Layer*, ProcyonDMRefulingStationShip ProcyonDMRefulingbaseShip_Layer*).
+    """
     try:
-        nodes = parse_msb(ci_file(Path(root) / "BD_MeshScenes", f"{scene}.msb").read_bytes())
+        nodes = parse_msb(
+            ci_file(Path(root) / "BD_MeshScenes", f"{scene}.msb").read_bytes()
+        )
     except FileNotFoundError:
         return []
-    names = dict.fromkeys(n.name for n in nodes if re.search(r"(?<!Damage)_Layer\d+$", n.name, re.I))
-    found = [f for name in names for f in ci_files(Path(root) / "BD_Meshes", name + ".mdb")]
-    return sorted(found, key=lambda p: int(re.search(r"Layer(\d+)", p.name, re.I).group(1)))
+    names = dict.fromkeys(
+        n.name
+        for n in nodes
+        if re.search(r"(?<!Damage)_Layer\d+$", n.name, re.IGNORECASE)
+    )
+    found = [
+        f for name in names for f in ci_files(Path(root) / "BD_Meshes", name + ".mdb")
+    ]
+    return sorted(
+        found,
+        key=lambda p: int(re.search(r"Layer(\d+)", p.name, re.IGNORECASE).group(1)),
+    )
 
 
 def pad4(b, fill=b"\0"):
@@ -76,7 +88,7 @@ def convert(root, scene, model=0, files=None):
         if explicit
         else sorted(
             ci_files(root / "BD_Meshes", f"{scene}_Layer*.mdb"),
-            key=lambda p: int(re.search(r"Layer(\d+)", p.name, re.I).group(1)),
+            key=lambda p: int(re.search(r"Layer(\d+)", p.name, re.IGNORECASE).group(1)),
         )
     )
     if not files and not explicit:
@@ -165,7 +177,7 @@ def convert(root, scene, model=0, files=None):
             )
             for v in m.vertices
         )
-        xs = list(zip(*[to_gltf(v.pos) for v in m.vertices]))
+        xs = list(zip(*[to_gltf(v.pos) for v in m.vertices], strict=True))
         accessors.append(
             {
                 "bufferView": add_view(pos, 34962),
@@ -240,10 +252,12 @@ def convert(root, scene, model=0, files=None):
     gltf = {
         "asset": {"version": "2.0", "generator": "tools.mdb_to_glb"},
         "scene": 0,
-        "extensionsUsed": ["KHR_materials_unlit"]
-        if scene.lower().startswith(("skybox", "selection_indicator"))
-        else [],
-        "scenes": [{"nodes": list(range(first_hp)) + [len(nodes) - 1]}],
+        "extensionsUsed": (
+            ["KHR_materials_unlit"]
+            if scene.lower().startswith(("skybox", "selection_indicator"))
+            else []
+        ),
+        "scenes": [{"nodes": [*range(first_hp), len(nodes) - 1]}],
         "nodes": nodes,
         "meshes": meshes,
         "materials": materials,

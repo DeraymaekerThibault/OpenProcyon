@@ -10,9 +10,9 @@ import sys
 from pathlib import Path
 
 from tools.export_ship import export as export_physics
-from tools.mdb import ci_file, ci_files, parse as parse_mdb
-from tools.mdb_to_glb import convert
-from tools.mdb_to_glb import hardpoints
+from tools.gamefs import ci_file, ci_files
+from tools.mdb import parse as parse_mdb
+from tools.mdb_to_glb import convert, hardpoints
 from tools.models import model_path
 from tools.msb import parse as parse_msb
 from tools.source_text import read_source_lines
@@ -210,7 +210,8 @@ def scene_name(nodes):
 def gun_visual(root, gun, outdir):
     """Base + barrel models (own GLBs in outdir), barrel pivot and muzzle points, from the gun's MSB scene.
     Base = the root node, barrel = its GunVerticalPivotPlacement child (optional), muzzles = GunMuzzlePlacement nodes
-    (positions relative to the barrel, or the base if there is no barrel). Node rotations other than yaw are ignored."""
+    (positions relative to the barrel, or the base if there is no barrel). Node rotations other than yaw are ignored.
+    """
     scene = scene_name(load(root, gun))
     nodes = {
         n.id: n
@@ -289,9 +290,9 @@ def export(root, ship, outdir):
                 pos=list(pos),
                 rot=list(node.rot),
                 yaw=node.rot[0],
-                parent_layer=parent.name
-                if parent and parent.kind == "DamageSection"
-                else None,
+                parent_layer=(
+                    parent.name if parent and parent.kind == "DamageSection" else None
+                ),
             )
         )
     for name in ALWAYS_BULLETS:
@@ -315,7 +316,7 @@ def export(root, ship, outdir):
         m = parse_mdb(
             ci_file(Path(root) / "BD_Meshes", f"{mesh}.mdb").read_bytes()
         ).models[0]
-        xs = list(zip(*[v.pos for v in m.vertices]))
+        xs = list(zip(*[v.pos for v in m.vertices], strict=True))
         sections.append(
             dict(
                 layer=mesh,
@@ -383,21 +384,17 @@ def base_safe_physics(root, ship):
         if not ship.startswith("Base_"):
             raise
         zero = {"value": 0.0}
-        return {
-            k: zero
-            for k in (
-                "MaxThrust",
-                "MaxSpeed",
-                "RotationalFriction",
-                "MaxAngularAcceleration",
-            )
-        } | {"Mass": {"value": 1.0}, "CenterOfMass": {"value": [0.0, 0.0, 0.0]}}
+        return dict.fromkeys(
+            ("MaxThrust", "MaxSpeed", "RotationalFriction", "MaxAngularAcceleration"),
+            zero,
+        ) | {"Mass": {"value": 1.0}, "CenterOfMass": {"value": [0.0, 0.0, 0.0]}}
 
 
 def lifeboat_fields(p, sections):
     """Lifeboat metadata (docs/re/lifeboats.md): the explicit class flag, how many boats a destroyed ship leaves, the collision response
     type and the bounding sphere the pickup test uses. Without an authored sphere it is derived (PROVISIONAL): the authored box
-    extents if any, else the union of the hit sections' boxes; a sphere around that box."""
+    extents if any, else the union of the hit sections' boxes; a sphere around that box.
+    """
 
     def vec(v):
         return list(v) if isinstance(v, (list, tuple)) else None
@@ -415,8 +412,8 @@ def lifeboat_fields(p, sections):
                 [max(s["aabb"][1][i] for s in sections) for i in range(3)],
             )
         sphere = dict(
-            center=[(a + b) / 2 for a, b in zip(lo, hi)],
-            radius=sum((b - a) ** 2 for a, b in zip(lo, hi)) ** 0.5 / 2,
+            center=[(a + b) / 2 for a, b in zip(lo, hi, strict=True)],
+            radius=sum((b - a) ** 2 for a, b in zip(lo, hi, strict=True)) ** 0.5 / 2,
             authored=False,
         )
     return dict(
@@ -425,14 +422,6 @@ def lifeboat_fields(p, sections):
         response=p.get("ResponseType", "Ship"),
         sphere=sphere,
     )
-
-
-def sound_names(j):
-    """Every sound name a ship export refers to."""
-    names = set(j["engine_snd"]) | {g.get("SoundName") for g in j["gun_defs"].values()}
-    for b in j["bullets"].values():
-        names |= {s for v in b["impact_snd"].values() for s in v}
-    return {n for n in names if n}
 
 
 def fx_names(j):

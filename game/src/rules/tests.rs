@@ -1,6 +1,7 @@
 use super::*;
 use bevy::prelude::*;
 use serde_json::Value;
+use std::collections::HashMap;
 fn unit(name: &str, owner: &str, pos: Vec3) -> Unit {
     Unit {
         e: Entity::PLACEHOLDER,
@@ -111,8 +112,8 @@ fn mission_three_hidden_sloop_does_not_start_the_hunt_at_initialization() {
     sc.fired = vec![false; sc.rules.len()];
     sc.flags.insert("Player Obeying Mission Flow".into(), true);
     let trigger = &sc.volumes["Player Triggers Chase Group"];
-    let vertices = trigger.as_array().unwrap();
-    let center = vertices.iter().map(|v| Vec3::new(v[0].as_f64().unwrap() as f32, 0.0, -v[1].as_f64().unwrap() as f32)).sum::<Vec3>() / vertices.len() as f32;
+    let c = trigger.centroid().unwrap();
+    let center = Vec3::new(c.x, 0.0, -c.y);
     assert!(in_volume(trigger, center));
     w.iter_mut().find(|u| u.primary).unwrap().pos = center;
     let (fx, _) = sc.step(&w, 0.1, false);
@@ -304,9 +305,7 @@ fn top_speed_percentage_caps_the_named_ships_throttle() {
 fn unit_within_any_nebula_uses_the_setup_polygons() {
     // Mission 1's only nebula is the 'Clarke' polygon (game x, y); its vertex average lies inside it.
     let m = crate::campaign::load();
-    let poly = &m.data["volumes"]["Clarke"];
-    let n = poly.as_array().unwrap().len() as f32;
-    let (x, y) = poly.as_array().unwrap().iter().fold((0.0, 0.0), |a, v| (a.0 + v[0].as_f64().unwrap() as f32 / n, a.1 + v[1].as_f64().unwrap() as f32 / n));
+    let Vec2 { x, y } = Region::from_json(&m.data["volumes"]["Clarke"]).centroid().unwrap();
     let mut world = World::new();
     let mut ship = unit("RLS Comet", PLAYER, Vec3::new(x, 0.0, -y));
     ship.e = world.spawn_empty().id();
@@ -543,7 +542,7 @@ fn destroyed_exit_and_stopped_timer_rules() {
 fn volumes_timers_and_speech_conditions() {
     let mut s = script();
     let vol = s.volumes["Meet @ Clarke"].clone();
-    let pts: Vec<(f32, f32)> = vol.as_array().unwrap().iter().map(|v| (v[0].as_f64().unwrap() as f32, v[1].as_f64().unwrap() as f32)).collect();
+    let pts: Vec<(f32, f32)> = vol.0.iter().map(|v| (v.x, v.y)).collect();
     let (x0, x1) = (pts.iter().map(|p| p.0).fold(f32::MAX, f32::min), pts.iter().map(|p| p.0).fold(f32::MIN, f32::max));
     let (y0, y1) = (pts.iter().map(|p| p.1).fold(f32::MAX, f32::min), pts.iter().map(|p| p.1).fold(f32::MIN, f32::max));
     let inner = (0..20)
@@ -620,7 +619,7 @@ fn twt_groups_alliances_and_setup_stances_drive_later_missions() {
 #[test]
 fn all_units_entered_once_remembers_members_that_left_again() {
     let mut sc = script();
-    sc.volumes = serde_json::json!({"V": [[0, 0], [10, 0], [10, 10], [0, 10]]});
+    sc.volumes = HashMap::from([("V".to_string(), Region::from_json(&serde_json::json!([[0, 0], [10, 0], [10, 10], [0, 10]])))]);
     let mut world = World::new();
     let mut w = vec![unit("a", "G", Vec3::new(5.0, 0.0, -5.0)), unit("b", "G", Vec3::new(50.0, 0.0, -5.0))];
     w[0].e = world.spawn_empty().id();
@@ -670,4 +669,18 @@ fn event_effects_and_special_effects_are_forwarded() {
     assert!(crate::assets_dir().join("hud/overlay/credit01.png").is_file());
     s.act(&serde_json::json!({"Type": "Close HUD Texture Overlay"}), &w, &mut out, "");
     assert_eq!(s.overlay, None);
+}
+
+#[test]
+fn polygons_skip_malformed_vertices_and_unknown_volumes_contain_nothing() {
+    let square = Region::from_json(&serde_json::json!([[0, 0], [10, 0], "junk", [10, 10], [0], [0, 10]]));
+    assert_eq!(square.len(), 4);
+    assert!(square.contains(Vec2::new(5.0, 5.0)) && !square.contains(Vec2::new(15.0, 5.0)));
+    assert_eq!(square.centroid(), Some(Vec2::new(5.0, 5.0)));
+    assert!(Region::from_json(&Value::Null).centroid().is_none());
+    let sc = bare_script(serde_json::json!({"Zone": [[0, 0], [10, 0], [10, 10], [0, 10], [null, 3]]}), Value::Null);
+    assert!(sc.volume("No Such Volume").is_empty());
+    assert!(leash(&sc, "No Such Volume", None, Vec3::new(1e6, 0.0, 0.0)).is_none());
+    assert!(leash(&sc, "Zone", None, Vec3::new(5.0, 2.0, -5.0)).is_none(), "inside its zone");
+    assert_eq!(leash(&sc, "Zone", None, Vec3::new(50.0, 2.0, -5.0)), Some(Vec3::new(5.0, 2.0, -5.0)), "outside: back to the centre");
 }

@@ -1,17 +1,18 @@
 """Export one mission-start campaign save per mission (assets/saves/missionNN.json) from the retail SavedGames/Mission NN.twt
 snapshots: only the campaign counters carried into the mission (points, unlocked crew/arms). Mission 01 starts empty; mission 13
-has no retail snapshot and reuses mission 12's counters (PROVISIONAL). See docs/re/scoring-saves.md."""
+has no retail snapshot and reuses mission 12's counters (PROVISIONAL). See docs/re/scoring-saves.md.
+"""
 
 import json
 import re
 import sys
 from pathlib import Path
 
-from tools.mdb import ci_files
+from tools.gamefs import ci_files
 
 
 def counters(text):
-    pts = re.search(r"^\s*SinglePlayerVictoryPoints Int (\d+)", text, re.M)
+    pts = re.search(r"^\s*SinglePlayerVictoryPoints Int (\d+)", text, re.MULTILINE)
 
     def lst(k):
         return re.findall(rf"{k}List - Element String '([^']*)'", text)

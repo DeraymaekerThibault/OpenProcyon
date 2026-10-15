@@ -3,9 +3,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from tools.eft import parse_eft
 from tools.export_effects import export_morph_meshes
 from tools.models import model_path
-from tools.eft import parse_eft
 
 
 class MorphMeshes(unittest.TestCase):

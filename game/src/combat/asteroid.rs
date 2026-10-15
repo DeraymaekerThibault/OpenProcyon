@@ -191,7 +191,6 @@ pub fn follow_path(pos: &mut Vec3, path: &[Vec3], next: &mut usize, forward: &mu
     (velocity, false)
 }
 
-#[allow(clippy::too_many_arguments)]
 pub fn asteroid_deaths(
     mut commands: Commands,
     mut killed: MessageReader<Destroyed>,

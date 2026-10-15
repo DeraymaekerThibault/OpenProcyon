@@ -5,7 +5,7 @@ from pathlib import Path
 
 def category(name):
     n = name.removesuffix(".glb")
-    if n.startswith("gun_") or n.startswith("LaserTorpedo"):
+    if n.startswith(("gun_", "LaserTorpedo")):
         return "weapons"
     if n.startswith("skybox_"):
         return "sky"

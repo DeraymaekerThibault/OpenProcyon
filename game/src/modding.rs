@@ -38,7 +38,7 @@ pub fn merge(base: &mut Value, over: &Value) {
 const MERGED: &[&str] = &["hud/scales.json", "data/weapons/guns.json", "data/weapons/bullets.json"];
 
 fn read(p: &Path) -> Option<Value> {
-    serde_json::from_str(&std::fs::read_to_string(p).ok()?).ok()
+    crate::data::try_json(p)
 }
 
 /// Builds the overlay and returns its root; with no mods returns `base` unchanged.

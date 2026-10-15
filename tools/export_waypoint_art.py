@@ -4,6 +4,7 @@ usage: python3 tools/export_waypoint_art.py <game root> <assets dir>"""
 
 import glob
 import sys
+
 import numpy as np
 from PIL import Image
 

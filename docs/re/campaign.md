@@ -40,7 +40,7 @@ command has been implemented. Their strings describe designer intent; exact
 native condition timing, group matching, damage fractions and NIS/speech queues
 still require executable investigation.
 
-## Implemented: rule interpreter (`game/src/rules.rs`)
+## Implemented: rule interpreter (`game/src/rules/`)
 
 Run `cd game && cargo run --release -- --mission 1`, or Single Player → Start New Campaign. `R` restarts, `F10` returns to the menu.
 The old hard-coded stage machine is gone: all mission flow comes from the 135 exported rules, evaluated every frame

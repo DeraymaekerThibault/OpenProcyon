@@ -5,7 +5,7 @@ help:
 	@printf '%s\n' \
 	  'make run [ARGS="--mission 1"]     Run the game from the repository root' \
 	  'make check                        Format check, strict Clippy, Rust + Python tests' \
-	  'make fmt                          Format Rust source' \
+	  'make fmt                          Format Rust and Python source' \
 	  'make test-python                  Fast parser/exporter tests (no Rust build)' \
 	  'make shot OUT=local/ui.png [ARGS="--shot-frame 80 --late-frame 0"]' \
 	  'make assets ARGS="--game <install dir>"  Import your copy of the game (once; again after exporter changes)'
@@ -18,6 +18,8 @@ check:
 
 fmt:
 	cargo fmt --manifest-path game/Cargo.toml
+	ruff format .
+	ruff check --fix .
 
 test-python:
 	python3 -m unittest discover -s tests

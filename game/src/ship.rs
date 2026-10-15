@@ -25,6 +25,9 @@ pub enum Side {
     Enemy,
 }
 
+/// The player's ship when nothing else is chosen (`--ship`, campaign start, synthetic allies): the first retail skirmish ship.
+pub const DEFAULT_SHIP: &str = "Ship_Navy_Cutter";
+
 #[derive(Component, Clone, PartialEq)]
 pub struct Ship {
     pub class: usize,

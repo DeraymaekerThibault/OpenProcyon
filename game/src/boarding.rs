@@ -142,7 +142,7 @@ pub fn interval(boarder: &Strength, target: &Strength, r: f32) -> f32 {
 
 static DATA: OnceLock<Value> = OnceLock::new();
 fn data() -> &'static Value {
-    DATA.get_or_init(|| std::fs::read_to_string(assets_dir().join("data/boarding.json")).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(Value::Null))
+    DATA.get_or_init(|| crate::data::try_json(&assets_dir().join("data/boarding.json")).unwrap_or(Value::Null))
 }
 pub fn counts(entity: &str) -> [u32; 8] {
     let mut out = [0; 8];
@@ -411,7 +411,6 @@ fn end_fight(commands: &mut Commands, e: Entity, fx: &[Entity]) {
     commands.entity(e).remove::<Boarding>();
 }
 
-#[allow(clippy::too_many_arguments)]
 fn handle_messages(
     mut msgs: MessageReader<BoardMsg>,
     mut commands: Commands,
@@ -496,7 +495,6 @@ fn set_flags(mut msgs: MessageReader<BoardMsg>, mut flags: Query<&mut Boardable>
 }
 
 /// The Grapple order: close to harpoon range, stop, fire; the hook bites after its flight.
-#[allow(clippy::too_many_arguments)]
 fn grapple_orders(
     mut commands: Commands,
     time: Res<Time>,
@@ -592,7 +590,6 @@ fn ai_boarding(
 }
 
 /// Runs the casualties of every fight and ends those whose conditions lapsed.
-#[allow(clippy::too_many_arguments)]
 fn fights(
     mut commands: Commands,
     time: Res<Time>,
@@ -648,7 +645,6 @@ fn fights(
 
 /// The consequences of a finished fight: a won fight captures the target (new owner, stopped, crewed afresh by the captor's skill, a base
 /// back at full strength; the grapple is released), the rules get a capture, and the player's crew speaks.
-#[allow(clippy::too_many_arguments)]
 fn settled(
     mut msgs: MessageReader<Settled>,
     mut commands: Commands,

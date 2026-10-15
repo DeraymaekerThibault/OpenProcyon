@@ -1,11 +1,10 @@
 import json
 import unittest
-from pathlib import Path
+
+from imported import ASSETS, needs_assets
 
 from tools.export_campaign import parse_mission
 from tools.models import model_path
-
-from imported import ASSETS, needs_assets
 
 
 class CampaignTests(unittest.TestCase):
@@ -46,7 +45,6 @@ class CampaignTests(unittest.TestCase):
             parse_mission("00000001 World Rules\n{\n")
 
     @needs_assets
-
     def test_committed_mission_dependencies(self):
         mission = json.loads((ASSETS / "maps/mission01/mission.json").read_text())
         self.assertEqual(len(mission["ships"]), 11)
@@ -55,7 +53,7 @@ class CampaignTests(unittest.TestCase):
             [(s["id"], s["name"], s["type"]) for s in primary],
             [(231, "RLS Comet", "Ship_Navy_Torpedo")],
         )
-        self.assertEqual(len(mission["rules"]), 135)
+        self.assertEqual(len(mission["rules"]), 136)
         registry = {f.parent.name for f in ASSETS.glob("ships/*/ship.json")}
         guns = json.loads((ASSETS / "data/weapons/guns.json").read_text())
         for ship in mission["ships"]:

@@ -3,30 +3,37 @@ usage: python3 -m tools.export_asteroids <game_root> <assets_dir>
 """
 
 import math
-import re
 import sys
 from pathlib import Path
 
 from tools.export_maps import convert_scene
-from tools.models import model_path
-from tools.mdb import ci_file
+from tools.gamefs import ci_file, ci_files
 from tools.mdb_to_glb import convert
+from tools.models import model_path
 from tools.pack_data import dump
+from tools.wot import parse_text, properties
 
 
 def definition(text):
-    if "FactoryType String 'AsteroidCustomInfoFactory'" not in text:
+    nodes, _ = parse_text(text)
+    values = {}
+    for n in properties(nodes):
+        values.setdefault(n["name"], n)
+    if not any(
+        n["name"] == "FactoryType" and n["value"] == "AsteroidCustomInfoFactory"
+        for n in properties(nodes)
+    ):
         return None
 
     def string(key):
-        m = re.search(re.escape(key) + r" String '([^']*)'", text)
-        if not m:
+        field = values.get(key, {})
+        if field.get("type") != "String":
             raise ValueError(f"Missing asteroid field: {key}")
-        return m[1]
+        return field["value"]
 
     def number(key, kind):
-        m = re.search(re.escape(key) + rf" {kind} ([\d.eE+-]+)", text)
-        value = float(m[1]) if m else float("nan")
+        field = values.get(key, {})
+        value = float(field["value"]) if field.get("type") == kind else float("nan")
         if not math.isfinite(value) or value <= 0:
             raise ValueError(f"Invalid asteroid field: {key}")
         return value
@@ -56,7 +63,7 @@ def validate(defs):
 def export(root, assets):
     root, assets = Path(root), Path(assets)
     defs = {}
-    for path in sorted((root / "WorldObjects").glob("Asteroid*.wot")):
+    for path in ci_files(root / "WorldObjects", "Asteroid*.wot"):
         d = definition(path.read_text(encoding="latin1"))
         if d:
             defs[path.stem] = d

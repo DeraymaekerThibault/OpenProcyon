@@ -288,7 +288,6 @@ fn lightning_point(poly: &Value, offset: Vec3, ships: &[Vec3], rnd: &mut impl Fn
 /// Lightning is one storm-wide random segment, not a guaranteed strike per ship. Meteors roll diameter / 80 and pick a section.
 /// PROVISIONAL: retain conservative 3 s lightning / 2 s meteor recharge floors until full retail timing is validated.
 /// Wind force remains a tangential push of 3% of its magnitude per second; damage excludes the inner 5% of the storm radius.
-#[allow(clippy::too_many_arguments)]
 fn storms(
     time: Res<Time>,
     lib: Res<crate::combat::Library>,
@@ -415,9 +414,6 @@ pub struct Cloud {
     origin: Vec3,
 }
 
-fn curve(v: &Value) -> Vec<(f32, f32)> {
-    v["curve"].as_array().map(|a| a.iter().map(|k| (k[0].as_f64().unwrap_or(0.0) as f32, k[1].as_f64().unwrap_or(0.0) as f32)).collect()).unwrap_or_default()
-}
 /// Linear over the keys, repeating with the last key's time (the effect's colour loops start 0, end = last key).
 fn looped(c: &[(f32, f32)], t: f32) -> f32 {
     let Some(&(end, _)) = c.last() else { return 1.0 };
@@ -425,10 +421,8 @@ fn looped(c: &[(f32, f32)], t: f32) -> f32 {
     c.windows(2).find(|w| t <= w[1].0).map_or(c[0].1, |w| w[0].1 + (w[1].1 - w[0].1) * (t - w[0].0) / (w[1].0 - w[0].0).max(1e-6))
 }
 
-#[allow(clippy::too_many_arguments)]
 fn spawn_one(commands: &mut Commands, assets: &AssetServer, effect: &str, mesh_name: &str, pos: Vec3, radius: f32, sound: &str, sound_distance: f32, seed: u32, group: &str) {
-    let Ok(text) = std::fs::read_to_string(assets_dir().join(format!("fx/{effect}.json"))) else { return };
-    let Ok(j) = serde_json::from_str::<Value>(&text) else { return };
+    let Some(j) = crate::data::try_json(&assets_dir().join(format!("fx/{effect}.json"))) else { return };
     let chunk = &j["Primitive"][0]["CommonPropertiesChunk"];
     let Some((base, uv, idx)) = crate::data::mesh_geometry(&assets_dir(), mesh_name) else { return };
     let rgb = &chunk["ColorFaderChunk"]["ColorInterpolator3Chunk"];
@@ -439,7 +433,7 @@ fn spawn_one(commands: &mut Commands, assets: &AssetServer, effect: &str, mesh_n
             radius,
             age: 0.0,
             acc: 0.0,
-            colours: ["Value1Interpolator", "Value2Interpolator", "Value3Interpolator"].map(|k| curve(&rgb[k])),
+            colours: ["Value1Interpolator", "Value2Interpolator", "Value3Interpolator"].map(|k| crate::fx::curve_keys(&rgb[k])),
             uv,
             idx,
             sound_distance,
@@ -457,23 +451,18 @@ fn spawn_one(commands: &mut Commands, assets: &AssetServer, effect: &str, mesh_n
 
 /// Nebula volumes of a mission (game x, y polygons): each 'Setup Nebula' names its polygon in the mission's volumes.
 /// PROVISIONAL: every setup counts for 'Unit is Within any Nebula', whatever its cloud or storm effect.
-pub fn polygons(mission: &Value, shift: &StormShift) -> Vec<Value> {
+pub fn polygons(mission: &Value, shift: &StormShift) -> Vec<crate::rules::Region> {
     mission["environment"]["nebulae"]
         .as_array()
         .into_iter()
         .flatten()
+        .filter(|n| mission["volumes"][n["Polygon Name"].as_str().unwrap_or("")].is_array())
         .map(|n| {
-            let mut polygon = mission["volumes"][n["Polygon Name"].as_str().unwrap_or("")].clone();
+            let mut polygon = crate::rules::Region::from_json(&mission["volumes"][n["Polygon Name"].as_str().unwrap_or("")]);
             let offset = shift.0.get(n["New Nebula Name"].as_str().unwrap_or("")).map_or(Vec3::ZERO, |s| s.0);
-            for p in polygon.as_array_mut().into_iter().flatten() {
-                if let (Some(x), Some(y)) = (p[0].as_f64(), p[1].as_f64()) {
-                    p[0] = Value::from(x + offset.x as f64);
-                    p[1] = Value::from(y - offset.z as f64);
-                }
-            }
+            polygon.0.iter_mut().for_each(|p| *p += Vec2::new(offset.x, -offset.z));
             polygon
         })
-        .filter(|p| p.is_array())
         .collect()
 }
 

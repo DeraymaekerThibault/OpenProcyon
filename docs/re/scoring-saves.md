@@ -129,7 +129,7 @@ Ships Left = Ending Size; Ships Sunk presumably = kills from `PlayerKillInfo` (P
   shipped mission-start saves (retail counters) plus the player's saves. No delete/overwrite confirmation, no Options/Summary pages yet.
 - Mid-mission snapshots (ship state, rule timers) are not implemented; retail saves them (section 4).
 
-## 5b. What the remake did before saves (`game/src/rules.rs`, `campaign.rs`)
+## 5b. What the remake did before saves (`game/src/rules/`, `campaign.rs`)
 
 - `Add Victory Points` adds to `Script.score` (per mission, reset on load). End overlay shows "Mission complete."/failure text plus
   "Victory points: N", with `N` next mission / `R` restart. No stats table, no persistent total, no arms/crew spending, no saves.
@@ -139,16 +139,16 @@ Ships Left = Ending Size; Ships Sunk presumably = kills from `PlayerKillInfo` (P
 
 1. **Campaign state resource** (`game/src/campaign.rs`): `CampaignState { total_points, arms: Vec<String>, crew: Vec<String>, difficulty,
    next_mission }`, persisted as pretty JSON in a user save directory (not `assets/`; use a `saves/` folder next to the working dir or an XDG
-   path; document in `docs/data-format.md`). `rules.rs` `Add Victory Points` adds to both the mission earned counter and the campaign total.
+   path; document in `docs/data-format.md`). `rules/` `Add Victory Points` adds to both the mission earned counter and the campaign total.
    Regression test: points accumulate across `load_id` of two missions and survive JSON round trip.
-2. **Mission stats collector** (`combat.rs` messages already exist: `Hit`, destruction): record per-player kills by object type, damage
+2. **Mission stats collector** (`combat/` messages already exist: `Hit`, destruction): record per-player kills by object type, damage
    inflicted/received, dock count, lifeboats saved, starting/ending fleet size into a `GameStats` resource (same field names as retail
    `GameStats`). Add unit tests with synthetic message streams.
 3. **Stats screen** (new `game/src/stats.rs`, owned by `docs/development.md`'s table; spawned when `Script.ended` with `Show Stats Screen`
    true, and from the in-game menu): headline `VICTORY!`/`DEFEAT!`, the ships left/sunk/damage rows per player as bars (colour `0.207,0.566,0.265`),
    a points panel (`Victory Points Earned` = mission earned, `Total Victory Points`), the kill-by-type table, `Exit Stats Screen`. Use the
    `hud.hdt` STATSSCREEN offsets (export them in `tools/export_hud.py` so mods can change them). Mark the column set PROVISIONAL.
-   Replaces the plain `Ui::End` text in `rules.rs`. Runtime smoke test via `--script victory` screenshot.
+   Replaces the plain `Ui::End` text in `rules/`. Runtime smoke test via `--script victory` screenshot.
 4. **Between missions**: honour `Open Crew and Arms Screens` by showing a placeholder list now; full spending UI later
    (`SinglePlayerArmsList` / `CrewList`, gun `Victory Point Cost`). Needs a new exporter field for each gun's cost
    (`tools/export_combat.py` reading `Victory Point Cost Int`).

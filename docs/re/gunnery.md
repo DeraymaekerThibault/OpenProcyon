@@ -22,7 +22,7 @@ crewed/player ships) the lead is only applied while the target is turning and ad
 Per muzzle the angle is applied twice to the muzzle orientation, about two axes, each with a random sign
 (so yaw and pitch error have the same magnitude). Speed is MuzzleSpeed.
 
-## In the remake (`combat.rs`)
+## In the remake (`combat/`)
 Lead and deviation follow the above. PROVISIONAL: factor 0.5 for every ship (no crews); the two rotation axes
 taken as world up and the muzzle's right. Ordinary shells inherit the shooter's velocity, so their lead uses
 target minus shooter velocity (native ordinary-shell inheritance remains unverified). Torpedoes do not inherit it; see below.

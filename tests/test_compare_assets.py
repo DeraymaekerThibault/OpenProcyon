@@ -15,7 +15,9 @@ class CompareAssets(unittest.TestCase):
             for root in (exp, act):
                 root.mkdir()
             # Same JSON value, different formatting and float noise: equal.
-            (exp / "same.json").write_text(json.dumps({"a": 1.0, "b": [1, 2]}, indent=2))
+            (exp / "same.json").write_text(
+                json.dumps({"a": 1.0, "b": [1, 2]}, indent=2)
+            )
             (act / "same.json").write_text(json.dumps({"b": [1, 2], "a": 1.00000001}))
             # A real value change: reported with its path.
             (exp / "value.json").write_text('{"ship": {"hp": 100}}')

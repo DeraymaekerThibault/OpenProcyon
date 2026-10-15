@@ -23,9 +23,9 @@ tools/shot.sh local/paused.png --map red_rover --script pause --shot-frame 50 --
 tools/shot.sh local/pause-restart.png --map red_rover --script pause-restart --shot-frame 90 --late-frame 0
 ```
 
-`make check` calls `tools/check.sh`: rustfmt check → strict Clippy → Rust release tests → Python tests. Rust tests that need converted
+`make check` calls `tools/check.sh`: ruff format check and lint (Python, rules in `ruff.toml`) → rustfmt check → strict Clippy → Rust release tests → Python tests. Rust tests that need converted
 assets only run when an import exists (otherwise the tests are compiled but not run); Python tests that need the install or assets skip.
-`make fmt` formats Rust; it does not rewrite generated JSON. `python3 -m tools.format_json assets` formats asset JSON when needed.
+`make fmt` formats Rust and Python (`ruff format`, `ruff check --fix`); it does not rewrite generated JSON. `python3 -m tools.format_json assets` formats asset JSON when needed.
 Shared sight smoke: `WAYLAND_DISPLAY= tools/shot.sh local/sight.png --script sight --allies Ship_Navy_Cutter --enemies Ship_Pirate_Schooner --shot-frame 135 --late-frame 0`; it freezes three ships and asserts group/range/cloak transitions against real radar widgets. This is wiring validation, not a campaign playthrough.
 
 Screenshot tests need a display, or Xvfb + Mesa for the headless helper. Outputs belong in ignored `local/`.
@@ -82,7 +82,8 @@ Keep the existing module boundaries. New files should own a real feature, not ju
 | `docking.rs` | Dock points and their marker effects, dock routine (wait / approach / docked / return), repair while docked, dock rule hooks, click-to-dock picking | Changing docking/repair or the `Group/Unit Is Docked`-style rules |
 | `boarding.rs` | Crew strengths, grapple order/hook/winch, boarding fight and capture, the status bar, AI boarding of bases; `BoardMsg` / `Captured` messages | Changing boarding/grappling or the capture rules (`docs/re/boarding.md`) |
 | `crew_arms.rs` | Campaign outfitting model, recruitment, post/bank transactions, live crew/equipment application; `classic/crew_arms.rs` draws it | Changing crew/arms purchases, assignment and their gameplay consumers (`docs/re/scoring-saves.md` §7, `docs/re/crew.md`) |
-| `lifeboats.rs` | Lifeboats: `Lifeboat` marker, `ShipLost` message, boat spawn when a flagged ship is destroyed, drift, nearest-ship sphere pickup, pickup sound/points/table, rule-visible owner list, `--script lifeboat-*` ECS smoke | Changing lifeboat creation/pickup (`docs/re/lifeboats.md`); the creation flag lives on `MissionShip`, the saved table in `rules::Script` |
+| `lifeboats.rs` | Lifeboats: `Lifeboat` marker, `ShipLost` message, boat spawn when a flagged ship is destroyed, drift, nearest-ship sphere pickup, pickup sound/points/table, rule-visible owner list | Changing lifeboat creation/pickup (`docs/re/lifeboats.md`); the creation flag lives on `MissionShip`, the saved table in `rules::Script` |
+| `smoke/` | Validated `--script` names, fleet/campaign and lifeboat smoke drivers, tender setup hook | Adding a script name or changing scripted checks; keep production simulation in its owning module and preserve system ordering |
 | `classic/` | Retail-art views (default): `menu.rs` front-end screens and their hover art and list scrolling, `panels.rs` HUD sprites (bar, compass, dial, talking head, weapon panel), `options_menu.rs` right-click menu art | Changing how the retail look is drawn; behaviour goes in the shared module |
 | `options_menu.rs` | Right-click menu: opening, items, hit rects, actions and sounds (`OptionsMenuArt` for the views), context cursors (dock / can't / attack) | Adding menu items (Hold and Cloak are implemented; Board and Grapple live in `boarding.rs`) |
 | `briefing.rs` | Opening NIS, subtitles and skip behaviour | Changing intro timing, camera handoff or skip placement |
@@ -130,7 +131,7 @@ compares two imports by meaning (JSON by value, images by pixels) to check expor
 The build pipeline is defined once in `tools/build_assets.sh`: export raw ships → HUD/art/media/maps/campaigns/crew/effects → pack ship/weapon data → format JSON.
 Raw per-ship exports are temporary inputs to later exporters and removed by packing; do not commit them.
 HUD trimming/crops run before alpha-bleed cleanup. Importing needs a read-only retail install (`--game <dir>` or `PROCYON_GAME_ROOT` in `.env`); the install is never modified.
-Python dependencies are in `requirements.txt`; Rust dependencies and resolved versions are in `game/Cargo.toml` and `game/Cargo.lock`.
+Python dependencies are in `requirements.txt` (the checks add ruff via `requirements-dev.txt`); Rust dependencies and resolved versions are in `game/Cargo.toml` and `game/Cargo.lock`.
 
 ## Implementation order
 
