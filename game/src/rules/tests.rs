@@ -635,8 +635,8 @@ fn all_units_entered_once_remembers_members_that_left_again() {
 #[test]
 fn later_missions_only_warn_about_known_missing_features() {
     let mut warned = std::collections::BTreeSet::new();
-    for n in 2..=13 {
-        let m = crate::campaign::load_id(&format!("mission{n:02}"));
+    for id in (2..=13).map(|n| format!("mission{n:02}")).chain(["tutorial".into(), "basic_tutorial".into()]) {
+        let m = crate::campaign::load_id(&id);
         let mut s = m.script;
         let w = vec![unit("x", PLAYER, Vec3::ZERO)];
         for r in m.data["rules"].as_array().unwrap() {
