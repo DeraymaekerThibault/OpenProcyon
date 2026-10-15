@@ -8,9 +8,9 @@ import sys
 from pathlib import Path
 
 from tools.export_maps import convert_scene
-from tools.models import model_path
 from tools.gamefs import ci_file, ci_files
 from tools.mdb_to_glb import convert
+from tools.models import model_path
 from tools.pack_data import dump
 
 

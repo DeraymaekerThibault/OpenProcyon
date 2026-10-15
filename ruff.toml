@@ -1,0 +1,25 @@
+# Lint and format rules for the Python tools and tests (tools/check.sh runs both).
+# The rule set is explicit so a new ruff release does not change what passes.
+line-length = 88
+
+[lint]
+select = [
+    "E", "W",  # pycodestyle
+    "F",       # pyflakes
+    "I",       # import order
+    "B",       # bugbear
+    "C4",      # comprehensions
+    "SIM",     # simplifications
+    "PIE",
+    "RUF",
+    "FURB",
+    "EXE",     # shebangs
+]
+ignore = [
+    "E501",  # long lines: the formatter wraps code; long strings and comments stay readable
+    "C408",  # dict(key=value) is the house style for exported records
+    "B905",  # zip(strict=True) would turn silent truncation into exporter errors; decide per call with a retail import
+]
+
+[lint.per-file-ignores]
+"tests/test_maps.py" = ["W291"]  # the TWT fixture keeps the retail files' trailing spaces

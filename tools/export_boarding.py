@@ -8,9 +8,9 @@ import sys
 from pathlib import Path
 
 from tools.export_combat import flat, load, scene_name
+from tools.gamefs import ci_files
 from tools.mdb_to_glb import hardpoints
 from tools.pack_data import dump
-from tools.gamefs import ci_files
 
 ROLES = (
     "Gunners",

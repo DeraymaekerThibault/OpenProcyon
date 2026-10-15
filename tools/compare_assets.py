@@ -36,8 +36,17 @@ def json_diff(a, b, path="", tol=1e-4):
             if d:
                 return d
         return None
-    if isinstance(a, (int, float)) and isinstance(b, (int, float)) and not isinstance(a, bool) and not isinstance(b, bool):
-        return None if math.isclose(a, b, rel_tol=tol, abs_tol=tol) else f"{path} {a} != {b}"
+    if (
+        isinstance(a, (int, float))
+        and isinstance(b, (int, float))
+        and not isinstance(a, bool)
+        and not isinstance(b, bool)
+    ):
+        return (
+            None
+            if math.isclose(a, b, rel_tol=tol, abs_tol=tol)
+            else f"{path} {a} != {b}"
+        )
     return None if a == b else f"{path} {str(a)[:60]!r} != {str(b)[:60]!r}"
 
 
@@ -65,7 +74,11 @@ def compare(expected, actual):
         why = differs(expected / rel, actual / rel)
         if why:
             differ[rel] = why
-    return {"only_expected": sorted(e - a), "only_actual": sorted(a - e), "differ": differ}
+    return {
+        "only_expected": sorted(e - a),
+        "only_actual": sorted(a - e),
+        "differ": differ,
+    }
 
 
 def folder(path):
@@ -74,14 +87,21 @@ def folder(path):
 
 def main(expected, actual, detail=5):
     r = compare(Path(expected), Path(actual))
-    for key, label in (("only_expected", f"only in {expected}"), ("only_actual", f"only in {actual}"), ("differ", "differ")):
+    for key, label in (
+        ("only_expected", f"only in {expected}"),
+        ("only_actual", f"only in {actual}"),
+        ("differ", "differ"),
+    ):
         items = list(r[key])
         print(f"== {label}: {len(items)}")
         for g, n in Counter(map(folder, items)).most_common():
             examples = [p for p in items if folder(p) == g][:detail]
             print(f"  {n:5} {g}")
             for p in examples:
-                print(f"          {p}" + (f": {r['differ'][p]}" if key == "differ" else ""))
+                print(
+                    f"          {p}"
+                    + (f": {r['differ'][p]}" if key == "differ" else "")
+                )
     return 1 if any(r.values()) else 0
 
 

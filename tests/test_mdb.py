@@ -46,8 +46,9 @@ class MdbTests(unittest.TestCase):
             parse(synthetic()[:-5])
 
     def test_packed_normal(self):
-        from tools.mdb import Vertex, normal
         import math
+
+        from tools.mdb import Vertex, normal
 
         def n(az, el):
             return [

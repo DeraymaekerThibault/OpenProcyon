@@ -12,8 +12,7 @@ from pathlib import Path
 from tools.export_ship import export as export_physics
 from tools.gamefs import ci_file, ci_files
 from tools.mdb import parse as parse_mdb
-from tools.mdb_to_glb import convert
-from tools.mdb_to_glb import hardpoints
+from tools.mdb_to_glb import convert, hardpoints
 from tools.models import model_path
 from tools.msb import parse as parse_msb
 from tools.source_text import read_source_lines
@@ -385,15 +384,10 @@ def base_safe_physics(root, ship):
         if not ship.startswith("Base_"):
             raise
         zero = {"value": 0.0}
-        return {
-            k: zero
-            for k in (
-                "MaxThrust",
-                "MaxSpeed",
-                "RotationalFriction",
-                "MaxAngularAcceleration",
-            )
-        } | {"Mass": {"value": 1.0}, "CenterOfMass": {"value": [0.0, 0.0, 0.0]}}
+        return dict.fromkeys(
+            ("MaxThrust", "MaxSpeed", "RotationalFriction", "MaxAngularAcceleration"),
+            zero,
+        ) | {"Mass": {"value": 1.0}, "CenterOfMass": {"value": [0.0, 0.0, 0.0]}}
 
 
 def lifeboat_fields(p, sections):

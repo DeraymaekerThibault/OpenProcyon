@@ -16,7 +16,14 @@ def main(root, out):
     root, out = Path(root), Path(out)
     names = set()
     # Missions sit in campaign/ during an import and in maps/<id>/ after pack_layout.
-    missions = [*(out / "maps").glob("*/mission.json"), *(f for f in (out / "campaign").glob("*.json") if not f.stem.endswith("_media"))]
+    missions = [
+        *(out / "maps").glob("*/mission.json"),
+        *(
+            f
+            for f in (out / "campaign").glob("*.json")
+            if not f.stem.endswith("_media")
+        ),
+    ]
     for f in missions:
         for r in json.loads(f.read_text()).get("rules", []):
             names |= {
@@ -41,7 +48,9 @@ def main(root, out):
         img = Image.new("RGBA", (256 * w, 256 * h))
         for (x, y), t in tiles.items():
             img.alpha_composite(t, (256 * x, 256 * y))
-        img = fill_seams(img, [256 * x for x in range(1, w)], [256 * y for y in range(1, h)])
+        img = fill_seams(
+            img, [256 * x for x in range(1, w)], [256 * y for y in range(1, h)]
+        )
         img.save(dest / f"{n.lower()}.png")
     print(len(names), "overlays")
 

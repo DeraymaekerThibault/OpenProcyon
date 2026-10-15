@@ -1,5 +1,6 @@
 import unittest
-from tools.export_maps import parse_twt, parse_tst, ship_name
+
+from tools.export_maps import parse_tst, parse_twt, ship_name
 
 TWT = """\tWorldNameID String 'IDGS_X'
 \tMustAssembleFleet Bool True
@@ -78,12 +79,17 @@ class TileSeams(unittest.TestCase):
     def test_transparent_tile_border_inside_an_image_is_filled(self):
         import numpy as np
         from PIL import Image
+
         from tools.export_maps import fill_seams
 
         a = np.zeros((4, 8, 4), np.uint8)
         a[..., :] = (10, 20, 30, 255)
-        a[:, 3, 3] = 0  # left tile's last column (tile width 4) is transparent, as in the retail tiles
-        a[0, :, 3] = 0  # a genuinely transparent row along the image edge stays transparent
+        a[:, 3, 3] = (
+            0  # left tile's last column (tile width 4) is transparent, as in the retail tiles
+        )
+        a[0, :, 3] = (
+            0  # a genuinely transparent row along the image edge stays transparent
+        )
         out = np.array(fill_seams(Image.fromarray(a), [4], []))
         self.assertTrue((out[1:, 3] == (10, 20, 30, 255)).all())
         self.assertTrue((out[0, :, 3] == 0).all())

@@ -3,9 +3,9 @@
 import json
 import unittest
 
-from tools.export_combat import lifeboat_fields
-
 from imported import ASSETS, needs_assets
+
+from tools.export_combat import lifeboat_fields
 
 SHIPS = ASSETS / "ships"
 

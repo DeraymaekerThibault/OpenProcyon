@@ -8,8 +8,8 @@ import sys
 from pathlib import Path
 
 from tools.export_combat import associations, export, load
-from tools.pack_data import dump, rnd
 from tools.gamefs import ci_files
+from tools.pack_data import dump, rnd
 
 
 def export_bases(root, assets):

@@ -10,8 +10,8 @@ import sys
 from pathlib import Path
 
 from tools.export_combat import associations, flat, load, scene_name
-from tools.mdb_to_glb import hardpoints
 from tools.gamefs import ci_files
+from tools.mdb_to_glb import hardpoints
 
 
 def export(root, out):

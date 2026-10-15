@@ -1,9 +1,8 @@
 import unittest
-from pathlib import Path
-
-from tools.models import category, model_path
 
 from imported import ASSETS, needs_assets
+
+from tools.models import category, model_path
 
 
 class ModelLayout(unittest.TestCase):
@@ -15,7 +14,6 @@ class ModelLayout(unittest.TestCase):
         )
 
     @needs_assets
-
     def test_committed_models_sit_in_their_category_and_names_are_unique(self):
         files = list((ASSETS / "models").rglob("*.glb"))
         self.assertGreater(len(files), 100)

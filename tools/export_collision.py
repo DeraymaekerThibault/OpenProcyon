@@ -19,7 +19,7 @@ def definition(text):
     block = re.search(
         r"Definition String 'COLLISIONDEFINITION'(.*?)(?=Definition String|\Z)",
         text,
-        re.S,
+        re.DOTALL,
     )
     if not block:
         return None

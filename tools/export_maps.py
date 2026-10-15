@@ -13,8 +13,10 @@ import re
 import shutil
 import sys
 from pathlib import Path
+
 import numpy as np
 from PIL import Image
+
 from tools.gamefs import ci_file, ci_files
 from tools.mdb_to_glb import convert
 from tools.models import model_path
@@ -94,7 +96,7 @@ def parse_twt(text):
             }
         )
     for b in re.finditer(
-        r"\d+ Player\s*\{\s*Name String '([^']*)'(.*?)FlagIndex", text, re.S
+        r"\d+ Player\s*\{\s*Name String '([^']*)'(.*?)FlagIndex", text, re.DOTALL
     ):
         body = b.group(2)
         s, f = (
@@ -139,7 +141,7 @@ def parse_twt(text):
     for a in re.finditer(
         r"Type String '\*State Init\* Setup Ship'\s*World Object ID Int (\d+)\s*Ship Name String '([^']*)'(.*?)\}",
         text,
-        re.S,
+        re.DOTALL,
     ):
         loc = re.search(r"Localized Ship Name String '([^']*)'", a.group(3))
         m["ship_names"][int(a.group(1))] = (loc.group(1) if loc else "", a.group(2))
@@ -172,7 +174,7 @@ def convert_scene(root, scene):
                 Path(root) / "BD_Meshes", f"Blackhole_{scene[9:]}_Layer*.mdb"
             )
         if not files:
-            raise FileNotFoundError(f"no layer meshes in MSB for {scene}")
+            raise FileNotFoundError(f"no layer meshes in MSB for {scene}") from None
         return convert(root, scene, files=files)
 
 

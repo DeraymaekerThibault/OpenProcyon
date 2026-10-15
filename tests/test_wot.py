@@ -1,11 +1,11 @@
 """All inputs in this module are authored synthetic text, not copied game data."""
 
-from contextlib import redirect_stderr, redirect_stdout
 import io
 import json
-from pathlib import Path
 import tempfile
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
+from pathlib import Path
 
 from tools.extract_wot import extract, main
 from tools.source_text import SourceLine

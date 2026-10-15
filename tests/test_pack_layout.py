@@ -3,9 +3,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from tools.pack_layout import pack
-
 from imported import ASSETS, needs_assets
+
+from tools.pack_layout import pack
 
 
 def put(p, v=None, raw=None):
@@ -70,7 +70,10 @@ class PackLayoutTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as t:
             a = Path(t)
             put(a / "maps/mission04.json", {})
-            put(a / "campaign/mission04_media.json", {"speech": ["M04JIM01", "NIS_SolarStorm"]})
+            put(
+                a / "campaign/mission04_media.json",
+                {"speech": ["M04JIM01", "NIS_SolarStorm"]},
+            )
             for n in (
                 "weapon_x.ogg",
                 "engine_navy_med.ogg",
@@ -105,7 +108,6 @@ class PackLayoutTests(unittest.TestCase):
             self.assertTrue((a / "maps/mission04/speech/nis_solarstorm.ogg").is_file())
 
     @needs_assets
-
     def test_committed_folders_are_complete(self):
         ships = list(ASSETS.glob("ships/*/ship.json"))
         self.assertGreater(len(ships), 60)

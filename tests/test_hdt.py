@@ -1,4 +1,5 @@
 import unittest
+
 from tools.hdt import parse
 
 SAMPLE = """Specific Resolution ChunkArray - Element

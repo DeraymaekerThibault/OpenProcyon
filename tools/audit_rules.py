@@ -2,15 +2,15 @@
 """Rule-vocabulary coverage: every condition/action Type used by shipped maps/missions vs what rules/eval.rs interprets.
 Classes: UNHANDLED (warns), NO-OP (accepted, does nothing), OK (has logic). Also lists exe rule names no shipped map uses (informational)."""
 
-import json
-import re
-import pathlib
 import collections
+import json
+import pathlib
+import re
 
 root = pathlib.Path(__file__).resolve().parents[1]
 src = (root / "game/src/rules/eval.rs").read_text()
 lits = set(re.findall(r'"([^"\n]+)"', src))
-m = re.search(r"// Setup actions the remake does not need.*?=> \{\}", src, re.S)
+m = re.search(r"// Setup actions the remake does not need.*?=> \{\}", src, re.DOTALL)
 noop = set(re.findall(r'"([^"\n]+)"', m.group(0))) if m else set()
 noop.add("*State Init* Setup Nebula")  # empty arm, handled in environment.rs
 use = collections.defaultdict(lambda: collections.defaultdict(int))
@@ -42,7 +42,7 @@ exe = (
         re.findall(
             r"^(?:Mission \d+ - .*|Dragon - .*)$",
             (root / "local/audit/exe_strings.txt").read_text(),
-            re.M,
+            re.MULTILINE,
         )
     )
     if (root / "local/audit/exe_strings.txt").exists()

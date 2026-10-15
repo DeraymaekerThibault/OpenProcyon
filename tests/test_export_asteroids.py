@@ -1,12 +1,11 @@
 import json
 import unittest
-from pathlib import Path
+
+from imported import ASSETS, needs_assets
 
 from tools.export_asteroids import definition, validate
 from tools.export_campaign import parse_mission
 from tools.models import model_path
-
-from imported import ASSETS, needs_assets
 
 
 class AsteroidExportTests(unittest.TestCase):
@@ -37,7 +36,6 @@ ExplosionEffect String 'ShipExplosion_Medium'
                 validate(defs)
 
     @needs_assets
-
     def test_named_group_ids_are_exported(self):
         parsed = parse_mission("""00000000 World Rules
 {
@@ -58,7 +56,6 @@ ExplosionEffect String 'ShipExplosion_Medium'
         )
 
     @needs_assets
-
     def test_committed_breakup_models_and_effects(self):
         defs = json.loads((ASSETS / "data/asteroids.json").read_text())
         validate(defs)

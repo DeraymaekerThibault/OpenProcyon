@@ -12,7 +12,7 @@ from tools.gamefs import ci_files
 
 
 def counters(text):
-    pts = re.search(r"^\s*SinglePlayerVictoryPoints Int (\d+)", text, re.M)
+    pts = re.search(r"^\s*SinglePlayerVictoryPoints Int (\d+)", text, re.MULTILINE)
 
     def lst(k):
         return re.findall(rf"{k}List - Element String '([^']*)'", text)

@@ -10,12 +10,12 @@ import shutil
 import sys
 from pathlib import Path
 
-from tools.export_campaign import parse_mission
 import tools.export_campaign as campaign
+from tools.export_campaign import parse_mission
+from tools.export_combat import flat, load
 from tools.gamefs import ci_files
 from tools.mdb_to_glb import convert
 from tools.models import model_path
-from tools.export_combat import load, flat
 
 SOUNDS = [
     "Ambience_SolarStorm_Loop",
@@ -33,7 +33,7 @@ def nebulae(text, source):
     out = []
     for n in env["nebulae"]:
 
-        def points(key):
+        def points(key, n=n):
             name = n.get(key)
             return [] if name in NONE else env["point_sets"].get(name, [])
 

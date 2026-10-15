@@ -5,9 +5,9 @@ Components are `<hex> Name { ... }` blocks. Per-skin keys look like
 `TopLeft X ( Navy ) Int 5`. Anything else is kept under skin "_" as raw `key -> value`.
 """
 
+import json
 import re
 import sys
-import json
 
 SKIN = re.compile(r"^(?P<key>.+?)\s*\(\s*(?P<skin>\w+)\s*\)\s*(?P<rest>.*)$")
 
@@ -59,4 +59,5 @@ def parse(text):
 
 
 if __name__ == "__main__":
-    print(json.dumps(parse(open(sys.argv[1], encoding="latin1").read()), indent=1))
+    with open(sys.argv[1], encoding="latin1") as f:
+        print(json.dumps(parse(f.read()), indent=1))

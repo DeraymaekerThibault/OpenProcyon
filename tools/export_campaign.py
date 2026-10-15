@@ -4,17 +4,17 @@ usage: python -m tools.export_campaign <game_root> <assets_dir>
 """
 
 import json
+import math
 import re
 import shutil
-import sys
 import subprocess
-import math
+import sys
 from pathlib import Path
 
 from tools.export_campaign_media import PLAYABLE
-from tools.export_maps import VEC, convert_scene, mesh_scene, parse_twt, strings, tiles
 from tools.export_combat import export as export_ship
 from tools.export_environment import export_environment
+from tools.export_maps import VEC, convert_scene, mesh_scene, parse_twt, strings, tiles
 from tools.mdb_to_glb import convert
 from tools.models import model_path
 from tools.source_text import SourceLine
@@ -80,7 +80,7 @@ def parse_mission(text):
     for m in re.finditer(
         r"\n\tID Int (\d+)\s*\n\tType String '(Ship_[^']+)'\s*\n\t\d+ State\s*\{(.*?)\n\t\}",
         text,
-        re.S,
+        re.DOTALL,
     ):
         ident, typ, body = m.groups()
         pos = re.search(r"Position Vector3" + VEC, body)
@@ -121,7 +121,7 @@ def parse_mission(text):
     ]
     volumes = {}
     for b in re.finditer(
-        r"\d+ World Polygons Vectors - Element\s*\{(.*?)\}", text, re.S
+        r"\d+ World Polygons Vectors - Element\s*\{(.*?)\}", text, re.DOTALL
     ):
         name = re.search(r"Name String '([^']+)'", b[1])[1]
         volumes[name] = [
@@ -142,7 +142,7 @@ def parse_mission(text):
     for m in re.finditer(
         r"\n\tID Int (\d+)\s*\n\tType String '(Animal_SpaceWhale)'\s*\n\t\d+ State\s*\{(.*?)\n\t\}",
         text,
-        re.S,
+        re.DOTALL,
     ):
         ident, typ, body = m.groups()
         pos = re.search(r"Position Vector3" + VEC, body)
@@ -160,7 +160,7 @@ def parse_mission(text):
     for m in re.finditer(
         r"\n\tID Int (\d+)\s*\n\tType String '(Animal_SpaceDragon\w*)'\s*\n\t\d+ State\s*\{(.*?)\n\t\}",
         text,
-        re.S,
+        re.DOTALL,
     ):
         ident, typ, body = m.groups()
         pos = re.search(r"Position Vector3" + VEC, body)
@@ -351,9 +351,8 @@ def export_mission(root, out, twt):
                 )
                 scene = mesh_scene(root, typ)
                 if not model_path(out, scene).exists():
-                    model_path(out, scene, mkdir=True).write_bytes(
-                        convert(root, scene)  # layer names come from the MSB (mdb_to_glb.scene_layers)
-                    )
+                    # Layer names come from the MSB (mdb_to_glb.scene_layers).
+                    model_path(out, scene, mkdir=True).write_bytes(convert(root, scene))
                 registry.append(typ)
             except (KeyError, ValueError, FileNotFoundError):
                 mission["unresolved_ships"].append(

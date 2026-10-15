@@ -10,8 +10,8 @@ Semantics (what a curve drives) are the consumer's business; this only restructu
 
 from pathlib import Path
 
-from tools.wot import parse_lines
 from tools.source_text import SourceLine
+from tools.wot import parse_lines
 
 
 def _curve(children):

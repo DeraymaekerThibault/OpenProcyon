@@ -4,8 +4,9 @@ The retail sheets keep white (or black) RGB under alpha 0; bilinear sampling at 
 pulls that colour into sprite edges (light hairlines, dark fringes). Run on UI sheets after export; idempotent.
 usage: python3 tools/fix_alpha_bleed.py assets/hud/tex assets/menu ..."""
 
-import sys
 import pathlib
+import sys
+
 import numpy as np
 from PIL import Image
 

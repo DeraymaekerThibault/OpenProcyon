@@ -11,14 +11,13 @@ Hardpoints from BD_MeshScenes/<Scene>.msb become empty nodes under "hardpoints" 
 
 import io
 import json
+import math
 import re
 import struct
 import sys
 from pathlib import Path
 
 from PIL import Image
-
-import math
 
 from tools.gamefs import ci_file, ci_files
 from tools.mdb import normal, parse
@@ -63,13 +62,16 @@ def scene_layers(root, scene):
     except FileNotFoundError:
         return []
     names = dict.fromkeys(
-        n.name for n in nodes if re.search(r"(?<!Damage)_Layer\d+$", n.name, re.I)
+        n.name
+        for n in nodes
+        if re.search(r"(?<!Damage)_Layer\d+$", n.name, re.IGNORECASE)
     )
     found = [
         f for name in names for f in ci_files(Path(root) / "BD_Meshes", name + ".mdb")
     ]
     return sorted(
-        found, key=lambda p: int(re.search(r"Layer(\d+)", p.name, re.I).group(1))
+        found,
+        key=lambda p: int(re.search(r"Layer(\d+)", p.name, re.IGNORECASE).group(1)),
     )
 
 
@@ -86,7 +88,7 @@ def convert(root, scene, model=0, files=None):
         if explicit
         else sorted(
             ci_files(root / "BD_Meshes", f"{scene}_Layer*.mdb"),
-            key=lambda p: int(re.search(r"Layer(\d+)", p.name, re.I).group(1)),
+            key=lambda p: int(re.search(r"Layer(\d+)", p.name, re.IGNORECASE).group(1)),
         )
     )
     if not files and not explicit:
@@ -255,7 +257,7 @@ def convert(root, scene, model=0, files=None):
             if scene.lower().startswith(("skybox", "selection_indicator"))
             else []
         ),
-        "scenes": [{"nodes": list(range(first_hp)) + [len(nodes) - 1]}],
+        "scenes": [{"nodes": [*range(first_hp), len(nodes) - 1]}],
         "nodes": nodes,
         "meshes": meshes,
         "materials": materials,

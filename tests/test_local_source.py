@@ -2,8 +2,8 @@
 
 import hashlib
 import os
-from pathlib import Path
 import unittest
+from pathlib import Path
 
 from tools.source_text import read_source_lines
 

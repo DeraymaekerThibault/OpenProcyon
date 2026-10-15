@@ -3,17 +3,10 @@
 Heuristic: stem (case-insensitive) must appear in game/src or any assets/**/*.json outside the file itself.
 Directory-scanned assets and prefix-built names give false positives; review by group."""
 
-import pathlib
 import collections
+import pathlib
 
 root = pathlib.Path(__file__).resolve().parents[1]
-text = ""
-for p in (
-    list((root / "game/src").rglob("*.rs"))
-    + [q for q in (root / "assets").rglob("*.json")]
-    + list((root / "tools").glob("*.py"))
-):
-    pass
 corpus = []
 for p in list((root / "game/src").rglob("*.rs")) + list(
     (root / "assets").rglob("*.json")

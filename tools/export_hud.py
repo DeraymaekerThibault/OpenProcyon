@@ -6,10 +6,12 @@ usage: python -m tools.export_hud <game_root> <outdir>
 import json
 import sys
 from pathlib import Path
+
 from PIL import Image
-from tools.hdt import parse
+
 from tools.fft import parse as parse_font
 from tools.gamefs import ci_files
+from tools.hdt import parse
 
 
 def main(root, out):

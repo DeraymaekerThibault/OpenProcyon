@@ -28,10 +28,7 @@ def main(assets, bar=BAR):
     path = assets / "hud/hud.json"
     hud = json.loads(path.read_text())
     sheets = {}
-    bar_names = {
-        part["sprite"]
-        for part in json.loads(Path(bar).read_text())
-    }
+    bar_names = {part["sprite"] for part in json.loads(Path(bar).read_text())}
     for name, comp in hud.items():
         if not isinstance(comp, dict):
             continue
