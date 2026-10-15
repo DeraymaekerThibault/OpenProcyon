@@ -1,5 +1,6 @@
 //! ECS side of the rule interpreter: dispatch of `Script` effects, mission AI, mission UI, music and NIS camera.
 use bevy::audio::Volume;
+use bevy::ecs::query::QueryData;
 use bevy::prelude::*;
 use serde_json::Value;
 
@@ -159,10 +160,24 @@ pub fn plugin(app: &mut App) {
     );
 }
 
-fn units(ships: &Query<(Entity, &mut Ship, &mut Transform, &mut Health, &mut MissionShip, &mut Visibility, Has<PlayerShip>)>, lib: &Library) -> Vec<Unit> {
+/// A mission ship as the rule dispatcher reads and changes it; named fields instead of tuple positions.
+#[derive(QueryData)]
+#[query_data(mutable)]
+pub struct RuleShip {
+    pub entity: Entity,
+    pub ship: &'static mut Ship,
+    pub transform: &'static mut Transform,
+    pub health: &'static mut Health,
+    pub mission: &'static mut MissionShip,
+    pub visibility: &'static mut Visibility,
+    /// The human's own ship.
+    pub primary: Has<PlayerShip>,
+}
+
+fn units(ships: &Query<RuleShip>, lib: &Library) -> Vec<Unit> {
     ships
         .iter()
-        .map(|(e, ship, tf, h, m, _, primary)| {
+        .map(|RuleShipReadOnlyItem { entity: e, ship, transform: tf, health: h, mission: m, primary, .. }| {
             let class = &lib.classes[ship.class];
             let secs =
                 if h.sections.is_empty() { 0.0 } else { h.sections.iter().zip(&class.sections).map(|(x, c)| 1.0 - x / c.hp.max(1.0)).sum::<f32>() / h.sections.len() as f32 };
@@ -200,7 +215,7 @@ fn update(
     mut animals: Query<(Entity, &mut crate::environment::SpaceAnimal, &mut Transform, &mut Visibility), Without<Ship>>,
     mut commands: Commands,
     assets: Res<AssetServer>,
-    mut ships: Query<(Entity, &mut Ship, &mut Transform, &mut Health, &mut MissionShip, &mut Visibility, Has<PlayerShip>)>,
+    mut ships: Query<RuleShip>,
     mut extra: Extra,
 ) {
     let Some(mut mission) = mission else { return };
@@ -216,9 +231,9 @@ fn update(
     if cfg.script.as_deref().is_some_and(|s| s.starts_with("dock")) && !opening && !extra.dev.skipped {
         extra.dev.skipped = true;
         mission.script.skip_to_tender();
-        let tender = ships.iter().find(|s| s.4.name == "RLS Bounty").map(|s| s.2.translation).expect("mission 1 tender");
+        let tender = ships.iter().find(|s| s.mission.name == "RLS Bounty").map(|s| s.transform.translation).expect("mission 1 tender");
         let mut k = 0.0;
-        for (_, mut sh, mut tf, mut h, ms, _, primary) in &mut ships {
+        for RuleShipItem { ship: mut sh, transform: mut tf, health: mut h, mission: ms, primary, .. } in &mut ships {
             if primary {
                 tf.translation = tender + Vec3::new(-100.0, 0.0, 0.0);
                 h.scale(0.5);
@@ -297,7 +312,7 @@ fn update(
                         animal.follow(&pts, tf.translation, closest, looping);
                         continue;
                     }
-                    let Ok((_, mut sh, tf, _, mut ms, _, _)) = ships.get_mut(*e) else { continue };
+                    let Ok(RuleShipItem { ship: mut sh, transform: tf, mission: mut ms, .. }) = ships.get_mut(*e) else { continue };
                     let full = pts.clone(); // Continuous fleet followers supply leader-relative slots, not cloned path offsets.
                     let from =
                         if closest { (0..full.len()).min_by(|a, bb| full[*a].distance(tf.translation).total_cmp(&full[*bb].distance(tf.translation))).unwrap_or(0) } else { 0 };
@@ -352,14 +367,14 @@ fn update(
             }
             Fx::Throttle(u, v) => {
                 for e in u {
-                    if let Ok((_, mut sh, ..)) = ships.get_mut(e) {
+                    if let Ok(RuleShipItem { ship: mut sh, .. }) = ships.get_mut(e) {
                         sh.cap = v;
                     }
                 }
             }
             Fx::Speed(u, v) => {
                 for e in u {
-                    if let Ok((_, mut sh, .., primary)) = ships.get_mut(e) {
+                    if let Ok(RuleShipItem { ship: mut sh, primary, .. }) = ships.get_mut(e) {
                         if primary {
                             if v <= 0.0 {
                                 sh.order = 0;
@@ -373,7 +388,7 @@ fn update(
             }
             Fx::Destroy(u) => {
                 for e in u {
-                    if let Ok((_, _, _, mut h, _, mut vis, _)) = ships.get_mut(e) {
+                    if let Ok(RuleShipItem { health: mut h, visibility: mut vis, .. }) = ships.get_mut(e) {
                         h.core = 0.0;
                         h.destroyed = true;
                         *vis = Visibility::Hidden;
@@ -382,7 +397,7 @@ fn update(
             }
             Fx::Teleport(u, p) => {
                 for e in u {
-                    if let Ok((_, mut sh, mut tf, ..)) = ships.get_mut(e) {
+                    if let Ok(RuleShipItem { ship: mut sh, transform: mut tf, .. }) = ships.get_mut(e) {
                         tf.translation = p;
                         sh.waypoints.clear();
                     } else if let Ok((_, mut animal, mut tf, _)) = animals.get_mut(e) {
@@ -406,7 +421,7 @@ fn update(
             Fx::Dock(dockers, dockees) => {
                 for d in dockers {
                     // docking.rs steers and stops the docker itself
-                    if let Ok((.., mut ms, _, _)) = ships.get_mut(d) {
+                    if let Ok(RuleShipItem { mission: mut ms, .. }) = ships.get_mut(d) {
                         ms.stop_at_end = false;
                     }
                     if let Some(t) = dockees.first() {
@@ -427,7 +442,7 @@ fn update(
             Fx::Lifeboats(u, on) => {
                 for e in u {
                     if let Ok(mut ship) = ships.get_mut(e) {
-                        ship.4.create_lifeboats = on; // ships only: bases, rocks and animals have no flag
+                        ship.mission.create_lifeboats = on; // ships only: bases, rocks and animals have no flag
                     }
                 }
             }
@@ -443,7 +458,7 @@ fn update(
             }
             Fx::Stance(u, st) => {
                 for e in u {
-                    if let Ok((.., mut ms, _, _)) = ships.get_mut(e) {
+                    if let Ok(RuleShipItem { mission: mut ms, .. }) = ships.get_mut(e) {
                         ms.stance = st;
                     }
                     if let Ok(mut d) = extra.dragons.get_mut(e) {
@@ -459,7 +474,7 @@ fn update(
                     if let Ok((_, mut animal, ..)) = animals.get_mut(e) {
                         animal.owner = o.clone();
                     }
-                    if let Ok((.., mut ms, _, _)) = ships.get_mut(e) {
+                    if let Ok(RuleShipItem { mission: mut ms, .. }) = ships.get_mut(e) {
                         ms.owner = o.clone();
                     }
                 }
@@ -470,7 +485,7 @@ fn update(
                         animal.visible = v;
                         *vis = if v { Visibility::Inherited } else { Visibility::Hidden };
                     }
-                    if let Ok((.., mut ms, mut vis, _)) = ships.get_mut(e) {
+                    if let Ok(RuleShipItem { mission: mut ms, visibility: mut vis, .. }) = ships.get_mut(e) {
                         ms.visible = v;
                         *vis = if v { Visibility::Inherited } else { Visibility::Hidden };
                     }
@@ -478,14 +493,14 @@ fn update(
             }
             Fx::Invuln(u, v) => {
                 for e in u {
-                    if let Ok((.., mut ms, _, _)) = ships.get_mut(e) {
+                    if let Ok(RuleShipItem { mission: mut ms, .. }) = ships.get_mut(e) {
                         ms.invuln = v;
                     }
                 }
             }
             Fx::Flag(u, tex) => {
                 for e in u {
-                    if let Ok((.., mut ms, _, _)) = ships.get_mut(e) {
+                    if let Ok(RuleShipItem { mission: mut ms, .. }) = ships.get_mut(e) {
                         ms.flag = tex.clone();
                     }
                 }
@@ -497,14 +512,14 @@ fn update(
             }
             Fx::Banner(u, bn) => {
                 for e in u {
-                    if let Ok((.., mut ms, _, _)) = ships.get_mut(e) {
+                    if let Ok(RuleShipItem { mission: mut ms, .. }) = ships.get_mut(e) {
                         ms.banner = bn.clone();
                     }
                 }
             }
             Fx::Ram(u, g) => {
                 for e in u {
-                    if let Ok((.., mut ms, _, _)) = ships.get_mut(e) {
+                    if let Ok(RuleShipItem { mission: mut ms, .. }) = ships.get_mut(e) {
                         ms.ram = true;
                         if !ms.attack.contains(&g) {
                             ms.attack.push(g.clone());
@@ -521,7 +536,7 @@ fn update(
                     }
                 }
                 for e in u {
-                    if let Ok((.., mut ms, _, _)) = ships.get_mut(e)
+                    if let Ok(RuleShipItem { mission: mut ms, .. }) = ships.get_mut(e)
                         && !ms.attack.contains(&g)
                     {
                         ms.attack.push(g.clone());
@@ -537,7 +552,7 @@ fn update(
                     }
                 }
                 for e in u {
-                    if let Ok((_, mut sh, .., mut ms, _, primary)) = ships.get_mut(e) {
+                    if let Ok(RuleShipItem { ship: mut sh, mission: mut ms, primary, .. }) = ships.get_mut(e) {
                         ms.attack.clear();
                         ms.ram = false;
                         ms.looping = None;
@@ -551,7 +566,7 @@ fn update(
             }
             Fx::Damage(u, p) => {
                 for e in u {
-                    if let Ok((_, _, _, mut h, ..)) = ships.get_mut(e) {
+                    if let Ok(RuleShipItem { health: mut h, .. }) = ships.get_mut(e) {
                         h.scale(1.0 - p);
                     }
                 }
@@ -563,7 +578,7 @@ fn update(
                     }
                 }
                 for e in u.into_iter().filter(|_| on) {
-                    if let Ok((_, mut sh, ..)) = ships.get_mut(e) {
+                    if let Ok(RuleShipItem { ship: mut sh, .. }) = ships.get_mut(e) {
                         sh.waypoints.clear();
                         sh.order = 0;
                     }
@@ -577,7 +592,7 @@ fn update(
             }
             Fx::Border(u, zone) => {
                 for e in u {
-                    if let Ok((.., mut ms, _, _)) = ships.get_mut(e) {
+                    if let Ok(RuleShipItem { mission: mut ms, .. }) = ships.get_mut(e) {
                         ms.border = zone.clone();
                     }
                     if let Ok(mut d) = extra.dragons.get_mut(e) {
@@ -587,7 +602,7 @@ fn update(
             }
             Fx::ReturnPoint(u, p) => {
                 for e in u {
-                    if let Ok((.., mut ms, _, _)) = ships.get_mut(e) {
+                    if let Ok(RuleShipItem { mission: mut ms, .. }) = ships.get_mut(e) {
                         ms.return_point = Some(p);
                     }
                     if let Ok(mut d) = extra.dragons.get_mut(e) {
@@ -624,7 +639,7 @@ fn update(
             }
             Fx::Captain(u, human) => {
                 for e in u {
-                    if let Ok((.., mut ms, _, _)) = ships.get_mut(e) {
+                    if let Ok(RuleShipItem { mission: mut ms, .. }) = ships.get_mut(e) {
                         ms.human = human;
                     }
                 }
@@ -646,7 +661,7 @@ fn update(
             }
             Fx::WarningShots(u, on) => {
                 for e in u {
-                    if let Ok((.., mut ms, _, _)) = ships.get_mut(e) {
+                    if let Ok(RuleShipItem { mission: mut ms, .. }) = ships.get_mut(e) {
                         ms.warning_shots = on;
                     }
                 }
@@ -662,10 +677,10 @@ fn update(
             }
             Fx::Longboat(u) => {
                 // Launched from the human's command ship: alongside it, same heading.
-                let from = ships.iter().find(|s| s.6).map(|s| (s.2.translation, s.1.heading, lib.classes[s.1.class].radius));
+                let from = ships.iter().find(|s| s.primary).map(|s| (s.transform.translation, s.ship.heading, lib.classes[s.ship.class].radius));
                 if let Some((p, heading, r)) = from {
                     for (k, e) in u.into_iter().enumerate() {
-                        if let Ok((_, mut sh, mut tf, ..)) = ships.get_mut(e) {
+                        if let Ok(RuleShipItem { ship: mut sh, transform: mut tf, .. }) = ships.get_mut(e) {
                             let side = Vec3::new(heading.cos(), 0.0, -heading.sin());
                             tf.translation = p + side * (r + 8.0 + 6.0 * k as f32);
                             sh.heading = heading;
@@ -692,7 +707,7 @@ fn update(
             Fx::Orbit { unit, dist, angle } => {
                 orbit.focus = unit;
                 orbit.dist = dist;
-                let heading = unit.and_then(|e| ships.get(e).ok()).or_else(|| ships.iter().find(|s| s.6)).map_or(0.0, |s| s.1.heading);
+                let heading = unit.and_then(|e| ships.get(e).ok()).or_else(|| ships.iter().find(|s| s.primary)).map_or(0.0, |s| s.ship.heading);
                 orbit.yaw = heading + angle.to_radians();
             }
         }
@@ -748,7 +763,7 @@ fn autopilot(
     w: &[Unit],
     data: &Value,
     rocks: &Query<(Entity, &Transform, &Asteroid), (Without<Ship>, Without<crate::environment::SpaceAnimal>)>,
-    ships: &mut Query<(Entity, &mut Ship, &mut Transform, &mut Health, &mut MissionShip, &mut Visibility, Has<PlayerShip>)>,
+    ships: &mut Query<RuleShip>,
     target: &mut Target,
 ) {
     if sc.nis || sc.ended.is_some() {
@@ -779,18 +794,18 @@ fn autopilot(
             w.iter().find(|u| u.name == "Warrior" && u.alive && u.visible && u.pos.distance(p.pos) < 250.0 && sc.hits_by.get(&(PLAYER.to_string(), u.e)).is_some_and(|n| *n >= 3))
         && let Ok(mut x) = ships.get_mut(wr.e)
     {
-        x.3.core = 0.0;
+        x.health.core = 0.0;
     }
-    if let Some(mut s) = ships.iter_mut().find(|s| s.6)
+    if let Some(mut s) = ships.iter_mut().find(|s| s.primary)
         && let Some(g) = goal
     {
         if g.distance(p.pos) > 60.0 || foe.is_none() {
-            s.1.waypoints = vec![g];
-            s.1.order = 2;
-            s.1.goal = None;
+            s.ship.waypoints = vec![g];
+            s.ship.order = 2;
+            s.ship.goal = None;
         } else {
-            s.1.waypoints.clear();
-            s.1.order = 1;
+            s.ship.waypoints.clear();
+            s.ship.order = 1;
         }
     }
 }
