@@ -19,12 +19,7 @@ pub fn model(file: &str) -> String {
 /// Converted single-material mesh geometry; malformed or unsupported GLBs fail without indexing outside buffers.
 pub fn mesh_geometry(root: &std::path::Path, name: &str) -> Option<(Vec<Vec3>, Vec<[f32; 2]>, Vec<u32>)> {
     let bytes = std::fs::read(root.join(model(&format!("{name}.glb")))).ok()?;
-    if bytes.get(0..4)? != b"glTF" || bytes.get(4..8)? != 2u32.to_le_bytes() || bytes.get(16..20)? != b"JSON" {
-        return None;
-    }
-    let size = u32::from_le_bytes(bytes.get(12..16)?.try_into().ok()?) as usize;
-    let end = 20usize.checked_add(size)?;
-    let doc: Value = serde_json::from_slice(bytes.get(20..end)?).ok()?;
+    let (doc, end) = glb_json(&bytes)?;
     let start = end.checked_add(8)?;
     let length = u32::from_le_bytes(bytes.get(end..end.checked_add(4)?)?.try_into().ok()?) as usize;
     if bytes.get(end.checked_add(4)?..start)? != b"BIN\0" {
@@ -67,6 +62,16 @@ pub fn mesh_geometry(root: &std::path::Path, name: &str) -> Option<(Vec<Vec3>, V
         .collect();
     (pos.len() == uv.len() && pos.iter().all(|p| p.is_finite()) && uv.iter().flatten().all(|v| v.is_finite()) && idx.iter().all(|i| (*i as usize) < pos.len()))
         .then_some((pos, uv, idx))
+}
+
+/// The JSON chunk of a binary glTF 2.0 file and the offset where it ends (the BIN chunk header follows); None unless the header is valid.
+fn glb_json(bytes: &[u8]) -> Option<(Value, usize)> {
+    if bytes.get(0..4)? != b"glTF" || bytes.get(4..8)? != 2u32.to_le_bytes() || bytes.get(16..20)? != b"JSON" {
+        return None;
+    }
+    let size = u32::from_le_bytes(bytes.get(12..16)?.try_into().ok()?) as usize;
+    let end = 20usize.checked_add(size)?;
+    Some((serde_json::from_slice(bytes.get(20..end)?).ok()?, end))
 }
 
 pub struct AsteroidDef {
@@ -365,8 +370,17 @@ pub fn bullet_def(b: &Value) -> BulletDef {
     }
 }
 
+/// A JSON file the game cannot run without: panics with the import hint when it is missing or invalid.
 pub fn read_json(path: &std::path::Path) -> Value {
     serde_json::from_str(&std::fs::read_to_string(path).unwrap_or_else(|_| panic!("missing {path:?}; run tools/build_assets.sh"))).unwrap_or_else(|e| panic!("{path:?}: {e}"))
+}
+/// An optional JSON file (settings, per-ship extras, data a feature can live without): `None` when missing or invalid.
+pub fn try_json(path: &std::path::Path) -> Option<Value> {
+    serde_json::from_str(&std::fs::read_to_string(path).ok()?).ok()
+}
+/// A map's `maps/<id>/map.json`, if that map was imported.
+pub fn map_json(id: &str) -> Option<Value> {
+    try_json(&crate::assets_dir().join(format!("maps/{id}/map.json")))
 }
 
 /// Every gun and bullet definition (`data/weapons/*.json`), shared by all ships.
@@ -443,10 +457,7 @@ pub fn load_class(root: &std::path::Path, name: &str, guns: &HashMap<String, Gun
     };
     let glb = format!("ships/{}/model.glb", j["model"].as_str().unwrap_or(name));
     let model_bytes = std::fs::read(root.join(&glb)).unwrap_or_default();
-    let nodes: Option<Value> = model_bytes.get(12..16).and_then(|b| {
-        let end = 20usize.checked_add(u32::from_le_bytes(b.try_into().ok()?) as usize)?;
-        serde_json::from_slice(model_bytes.get(20..end)?).ok()
-    });
+    let nodes = glb_json(&model_bytes).map(|(doc, _)| doc);
     let point = |kind: &str| {
         nodes.as_ref()?["nodes"]
             .as_array()?
@@ -569,5 +580,40 @@ mod lifeboat_tests {
         let old = load_class(&root, "Ship_Navy_Cutter", &lib.guns);
         assert_eq!((old.lifeboats, old.is_lifeboat, old.sphere), (0, false, (old.centre, old.radius)));
         std::fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn glb(json: &[u8]) -> Vec<u8> {
+        let mut b = b"glTF".to_vec();
+        b.extend(2u32.to_le_bytes());
+        b.extend(0u32.to_le_bytes()); // total length: not checked
+        b.extend((json.len() as u32).to_le_bytes());
+        b.extend(b"JSON");
+        b.extend(json);
+        b
+    }
+
+    #[test]
+    fn glb_json_reads_the_json_chunk_and_rejects_bad_headers() {
+        let ok = glb(br#"{"nodes":[]}"#);
+        let (doc, end) = glb_json(&ok).unwrap();
+        assert!(doc["nodes"].is_array());
+        assert_eq!(end, ok.len());
+        let mut wrong_magic = ok.clone();
+        wrong_magic[0] = b'X';
+        assert!(glb_json(&wrong_magic).is_none());
+        assert!(glb_json(&ok[..ok.len() - 1]).is_none(), "truncated chunk");
+        assert!(glb_json(b"glTF").is_none());
+    }
+
+    #[test]
+    fn game_axes_map_to_bevy_like_the_glb_export() {
+        assert_eq!(conv(1.0, 2.0, 3.0), Vec3::new(1.0, 3.0, -2.0));
+        assert_eq!(crate::game_to_bevy(&serde_json::json!([1.0, 2.0, 3.0])), conv(1.0, 2.0, 3.0));
+        assert_eq!(crate::game_to_bevy(&serde_json::json!([1.0])), Vec3::new(1.0, 0.0, 0.0), "missing components read as 0");
     }
 }

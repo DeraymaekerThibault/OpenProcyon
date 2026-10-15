@@ -219,12 +219,8 @@ impl CampaignSave {
 /// (`<data dir>/openprocyon/saves`). The flag is true for shipped ones.
 pub fn list_saves() -> Vec<(CampaignSave, bool)> {
     let read = |dir: std::path::PathBuf, shipped| {
-        let mut v: Vec<_> = std::fs::read_dir(dir)
-            .into_iter()
-            .flatten()
-            .flatten()
-            .filter_map(|e| Some((CampaignSave::from_json(&serde_json::from_str(&std::fs::read_to_string(e.path()).ok()?).ok()?)?, shipped)))
-            .collect();
+        let mut v: Vec<_> =
+            std::fs::read_dir(dir).into_iter().flatten().flatten().filter_map(|e| Some((CampaignSave::from_json(&crate::data::try_json(&e.path())?)?, shipped))).collect();
         v.sort_by(|a, b| a.0.name.cmp(&b.0.name));
         v
     };

@@ -35,7 +35,7 @@ struct DecalLib {
 struct Scars(Vec<Entity>);
 
 pub fn plugin(app: &mut App) {
-    let doc: serde_json::Value = std::fs::read_to_string(crate::assets_dir().join("data/decals.json")).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
+    let doc = crate::data::try_json(&crate::assets_dir().join("data/decals.json")).unwrap_or_default();
     let mut pool: HashMap<(String, u8), Vec<String>> = HashMap::new();
     for (name, d) in doc.as_object().into_iter().flatten() {
         let size = d["size"].as_u64().unwrap_or(1) as u8;

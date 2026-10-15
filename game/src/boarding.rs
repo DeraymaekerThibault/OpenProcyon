@@ -142,7 +142,7 @@ pub fn interval(boarder: &Strength, target: &Strength, r: f32) -> f32 {
 
 static DATA: OnceLock<Value> = OnceLock::new();
 fn data() -> &'static Value {
-    DATA.get_or_init(|| std::fs::read_to_string(assets_dir().join("data/boarding.json")).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(Value::Null))
+    DATA.get_or_init(|| crate::data::try_json(&assets_dir().join("data/boarding.json")).unwrap_or(Value::Null))
 }
 pub fn counts(entity: &str) -> [u32; 8] {
     let mut out = [0; 8];

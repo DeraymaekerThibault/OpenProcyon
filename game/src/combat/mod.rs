@@ -206,6 +206,11 @@ impl Health {
     pub fn new(c: &Class) -> Self {
         Health { sections: c.sections.iter().map(|s| s.hp).collect(), core: c.core_hp, destroyed: false }
     }
+    /// Multiplies every section and the core by `f` (1 keeps them, 0.5 halves them).
+    pub fn scale(&mut self, f: f32) {
+        self.sections.iter_mut().for_each(|x| *x *= f);
+        self.core *= f;
+    }
 }
 /// Spawns the visual hierarchy of every mount as children of `ship` and returns the gun state (PROVISIONAL: guns start loaded).
 pub fn spawn_guns(commands: &mut Commands, assets: &AssetServer, lib: &Library, ship: Entity, class: usize) -> GunStates {
@@ -1394,6 +1399,13 @@ fn draw(mut g: Gizmos, lib: Res<Library>, target: Res<Target>, ships: Query<(Ent
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn health_scale_applies_to_core_and_every_section() {
+        let mut h = Health { sections: vec![10.0, 4.0], core: 8.0, destroyed: false };
+        h.scale(0.5);
+        assert_eq!((h.sections.as_slice(), h.core), (&[5.0, 2.0][..], 4.0));
+    }
 
     #[test]
     fn destroyed_sail_does_not_absorb_shots_but_destroyed_vital_sections_do() {

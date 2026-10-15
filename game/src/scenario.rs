@@ -128,9 +128,10 @@ pub fn spawn_ship(commands: &mut Commands, assets: &AssetServer, lib: &Library, 
 }
 
 /// Game axes (x starboard, y forward, z up) to Bevy (x, z, -y), as in the GLB export.
+/// Missing components read as 0 (`data::conv_v` is the strict form for ship data).
 pub fn game_to_bevy(v: &serde_json::Value) -> Vec3 {
     let f = |i: usize| v[i].as_f64().unwrap_or(0.0) as f32;
-    Vec3::new(f(0), f(2), -f(1))
+    data::conv(f(0), f(1), f(2))
 }
 
 /// A fresh scenario must not inherit pause from the battle it replaces; keep the chosen game speed.
@@ -161,8 +162,7 @@ pub fn resume_scenario(world: &mut World) {
 /// start vectors. Without a map: the test arena (player at the origin, enemies on a ring).
 pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Library, fxl: &fx::FxLib, shapes: &collision::Shapes, asteroids: &data::AsteroidDefs, cfg: &Config) {
     commands.queue(resume_scenario);
-    let map: Option<serde_json::Value> =
-        cfg.map.as_ref().and_then(|id| std::fs::read_to_string(assets_dir().join(format!("maps/{id}/map.json"))).ok()).and_then(|t| serde_json::from_str(&t).ok());
+    let map = cfg.map.as_deref().and_then(data::map_json);
     let sky = map.as_ref().and_then(|m| m["sky"].as_str()).map(|s| s.rsplit_once("_Layer").map_or(s, |x| x.0).to_string()).unwrap_or("skybox_07".into());
     commands.spawn((
         Scenario,

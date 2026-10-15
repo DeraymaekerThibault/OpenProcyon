@@ -221,8 +221,7 @@ fn update(
         for (_, mut sh, mut tf, mut h, ms, _, primary) in &mut ships {
             if primary {
                 tf.translation = tender + Vec3::new(-100.0, 0.0, 0.0);
-                h.core *= 0.5;
-                h.sections.iter_mut().for_each(|x| *x *= 0.5);
+                h.scale(0.5);
             } else if ms.owner == "Small Ships (Red Team)" {
                 k += 1.0;
                 tf.translation = tender + Vec3::new(-170.0, 0.0, 45.0 * k - 110.0);
@@ -553,10 +552,7 @@ fn update(
             Fx::Damage(u, p) => {
                 for e in u {
                     if let Ok((_, _, _, mut h, ..)) = ships.get_mut(e) {
-                        for x in h.sections.iter_mut() {
-                            *x *= 1.0 - p;
-                        }
-                        h.core *= 1.0 - p;
+                        h.scale(1.0 - p);
                     }
                 }
             }

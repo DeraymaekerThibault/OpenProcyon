@@ -13,7 +13,7 @@ const PAGE: usize = 6;
 
 fn crew_data() -> &'static Value {
     static DATA: std::sync::OnceLock<Value> = std::sync::OnceLock::new();
-    DATA.get_or_init(|| std::fs::read_to_string(crate::assets_dir().join("data/crew.json")).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default())
+    DATA.get_or_init(|| crate::data::try_json(&crate::assets_dir().join("data/crew.json")).unwrap_or_default())
 }
 fn ability(id: &str, skill: &str) -> Option<f32> {
     crew_data()[id]["skills"][skill].as_f64().map(|v| (v as f32 / 10.0).clamp(0.0, 1.0))

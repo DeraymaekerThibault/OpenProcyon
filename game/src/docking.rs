@@ -95,7 +95,7 @@ fn repair_secs(class: Option<&str>) -> (f32, f32) {
 /// Dock points by entity: `data/docks.json` (bases, islands) plus each ship's own `ships/<id>/docks.json`.
 pub fn load_docks() -> Value {
     let root = assets_dir();
-    let read = |p: std::path::PathBuf| std::fs::read_to_string(p).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok());
+    let read = |p: std::path::PathBuf| crate::data::try_json(&p);
     let mut docks = read(root.join("data/docks.json")).unwrap_or_else(|| Value::Object(Default::default()));
     for id in crate::data::ship_ids(&root) {
         if let Some(d) = read(root.join(format!("ships/{id}/docks.json"))) {

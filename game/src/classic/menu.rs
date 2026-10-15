@@ -180,7 +180,7 @@ fn build(
         Screen::Fleet => "ship_selection_screen",
         Screen::Battle => return,
     };
-    let els: Vec<Value> = std::fs::read_to_string(assets_dir().join(format!("menu/{file}.json"))).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
+    let els: Vec<Value> = crate::data::try_json(&assets_dir().join(format!("menu/{file}.json"))).and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default();
     let scale = (ww / 800.0).min(wh / 600.0);
     let ctx = Ctx { assets: &assets, hud: &hud, fonts: &fonts, scale };
     let canvas = Node {

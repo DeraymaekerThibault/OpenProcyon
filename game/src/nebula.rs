@@ -415,9 +415,6 @@ pub struct Cloud {
     origin: Vec3,
 }
 
-fn curve(v: &Value) -> Vec<(f32, f32)> {
-    v["curve"].as_array().map(|a| a.iter().map(|k| (k[0].as_f64().unwrap_or(0.0) as f32, k[1].as_f64().unwrap_or(0.0) as f32)).collect()).unwrap_or_default()
-}
 /// Linear over the keys, repeating with the last key's time (the effect's colour loops start 0, end = last key).
 fn looped(c: &[(f32, f32)], t: f32) -> f32 {
     let Some(&(end, _)) = c.last() else { return 1.0 };
@@ -427,8 +424,7 @@ fn looped(c: &[(f32, f32)], t: f32) -> f32 {
 
 #[allow(clippy::too_many_arguments)]
 fn spawn_one(commands: &mut Commands, assets: &AssetServer, effect: &str, mesh_name: &str, pos: Vec3, radius: f32, sound: &str, sound_distance: f32, seed: u32, group: &str) {
-    let Ok(text) = std::fs::read_to_string(assets_dir().join(format!("fx/{effect}.json"))) else { return };
-    let Ok(j) = serde_json::from_str::<Value>(&text) else { return };
+    let Some(j) = crate::data::try_json(&assets_dir().join(format!("fx/{effect}.json"))) else { return };
     let chunk = &j["Primitive"][0]["CommonPropertiesChunk"];
     let Some((base, uv, idx)) = crate::data::mesh_geometry(&assets_dir(), mesh_name) else { return };
     let rgb = &chunk["ColorFaderChunk"]["ColorInterpolator3Chunk"];
@@ -439,7 +435,7 @@ fn spawn_one(commands: &mut Commands, assets: &AssetServer, effect: &str, mesh_n
             radius,
             age: 0.0,
             acc: 0.0,
-            colours: ["Value1Interpolator", "Value2Interpolator", "Value3Interpolator"].map(|k| curve(&rgb[k])),
+            colours: ["Value1Interpolator", "Value2Interpolator", "Value3Interpolator"].map(|k| crate::fx::curve_keys(&rgb[k])),
             uv,
             idx,
             sound_distance,

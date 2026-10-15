@@ -41,11 +41,16 @@ pub fn additive_material(texture: Handle<Image>) -> EffectMaterial {
     }
 }
 
+/// The `curve` key list (time, value) of an exported interpolator; missing numbers read as 0.
+pub fn curve_keys(v: &Value) -> Vec<(f32, f32)> {
+    v["curve"].as_array().map(|a| a.iter().map(|k| (k[0].as_f64().unwrap_or(0.0) as f32, k[1].as_f64().unwrap_or(0.0) as f32)).collect()).unwrap_or_default()
+}
+
 #[derive(Clone, Default)]
 struct Curve(Vec<(f32, f32)>, Option<(f32, f32, u32)>);
 impl Curve {
     fn from(v: Option<&Value>) -> Curve {
-        let keys = v.and_then(|v| v["curve"].as_array()).map(|a| a.iter().map(|k| (k[0].as_f64().unwrap_or(0.0) as f32, k[1].as_f64().unwrap_or(0.0) as f32)).collect());
+        let keys = v.map(curve_keys);
         let looping = v.and_then(|v| v.get("loop")).and_then(|l| {
             let (start, end, count) = (l["StartLoopingT"].as_f64()? as f32, l["EndLoopingT"].as_f64()? as f32, l["NumberLoops"].as_u64()?);
             (start.is_finite() && end.is_finite() && end > start && count > 0).then_some((start, end, count.min(u32::MAX as u64) as u32))
@@ -212,7 +217,7 @@ impl Fx {
 
 /// Game frame (x right, y bow, z up) -> Bevy (x, z, -y).
 fn conv(v: Vec3) -> Vec3 {
-    Vec3::new(v.x, v.z, -v.y)
+    crate::data::conv(v.x, v.y, v.z)
 }
 
 fn first(v: Option<&Value>) -> Option<&Value> {

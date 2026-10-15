@@ -110,12 +110,7 @@ fn toggle(
     if !(first || (click && hovered) || binds.just_pressed(&keys, crate::bindings::Act::StarMap)) || hud.is_none() {
         return;
     }
-    let map: serde_json::Value = cfg
-        .map
-        .as_ref()
-        .and_then(|id| std::fs::read_to_string(crate::assets_dir().join(format!("maps/{id}/map.json"))).ok())
-        .and_then(|t| serde_json::from_str(&t).ok())
-        .unwrap_or_default();
+    let map: serde_json::Value = cfg.map.as_ref().and_then(|id| crate::data::map_json(id)).unwrap_or_default();
     let half = map["world_half"].as_f64().unwrap_or(1000.0) as f32;
     let side = window.height() * 0.92;
     let (w, h) = (window.width(), window.height());

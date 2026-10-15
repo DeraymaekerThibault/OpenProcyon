@@ -219,7 +219,7 @@ impl Settings {
         Some(crate::campaign::user_dir()?.join("settings.json"))
     }
     pub fn load() -> Self {
-        let v: Value = Self::path().and_then(|p| std::fs::read_to_string(p).ok()).and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
+        let v = Self::path().and_then(|p| crate::data::try_json(&p)).unwrap_or_default();
         let d = Self::default();
         let n = |k: &str, def: u8, max: u8| v[k].as_u64().map_or(def, |x| (x as u8).min(max));
         let b = |k: &str, def: bool| v[k].as_bool().unwrap_or(def);
@@ -409,12 +409,7 @@ fn new_slots(map: &Value) -> Vec<Slot> {
 
 impl Skirmish {
     fn load_map(&mut self) {
-        self.map_json = self
-            .maps
-            .get(self.selected)
-            .and_then(|m| std::fs::read_to_string(assets_dir().join(format!("maps/{}/map.json", m.0))).ok())
-            .and_then(|t| serde_json::from_str(&t).ok())
-            .unwrap_or(Value::Null);
+        self.map_json = self.maps.get(self.selected).and_then(|m| crate::data::map_json(&m.0)).unwrap_or(Value::Null);
         self.slots = new_slots(&self.map_json);
         self.error = None;
         (self.ship_pick, self.fleet_pick, self.scroll) = (0, 0, 0);
@@ -490,7 +485,7 @@ pub fn skirmish_maps() -> Vec<(String, String, bool, usize)> {
         .flatten()
         .flatten()
         .filter_map(|e| {
-            let m: Value = serde_json::from_str(&std::fs::read_to_string(e.path().join("map.json")).ok()?).ok()?;
+            let m = crate::data::try_json(&e.path().join("map.json"))?;
             let players = m["players"].as_array().map_or(0, |p| p.iter().filter(|p| p["playable"].as_bool().unwrap_or(false)).count());
             m["skirmish"].as_bool()?.then(|| (e.file_name().to_string_lossy().into(), m["name"].as_str().unwrap_or("").into(), m["assemble"].as_bool().unwrap_or(false), players))
         })
@@ -663,7 +658,7 @@ pub fn text_of(strings: &Value, id: &str) -> String {
 
 /// The retail string table (`menu/strings.json`).
 pub fn strings() -> Value {
-    std::fs::read_to_string(assets_dir().join("menu/strings.json")).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(Value::Null)
+    crate::data::try_json(&assets_dir().join("menu/strings.json")).unwrap_or(Value::Null)
 }
 
 /// Everything a front-end screen is drawn from.
