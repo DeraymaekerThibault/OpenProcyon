@@ -18,9 +18,6 @@ pub use damage::*;
 pub use lob::{Detonate, Shoot, Strike};
 pub use status::*;
 
-/// Gravity on shells (units/s^2), measured on retail star mortar shells ([gunnery.md](../../../docs/re/gunnery.md#lob-shells)).
-/// PROVISIONAL for direct-fire guns flagged BulletAffectedByGravity: assumed to share it, not measured.
-const G: f32 = 1.263;
 /// Order matters: "Reinforced Wood" must match Reinforced before Wood.
 pub const MATERIALS: [&str; 6] = ["Reinforced", "Wood", "Iron", "Cloth", "Stone", "Dragon"];
 
@@ -88,7 +85,8 @@ pub struct Shell {
     vel: Vec3,
     age: f32,
     lifetime: f32,
-    gravity: bool,
+    /// Downward acceleration (units/s^2): the firing gun's `GunDef::shell_gravity`, 0 for straight-flying shells.
+    gravity: f32,
     bullet: String,
     side: Side,
     shooter: Entity,
@@ -397,33 +395,32 @@ fn intercept_time(d: Vec3, relative_velocity: Vec3, speed: f32) -> Option<f32> {
     [(-b - discriminant.sqrt()) / (2.0 * a), (-b + discriminant.sqrt()) / (2.0 * a)].into_iter().filter(|t| t.is_finite() && *t >= 0.0).reduce(f32::min)
 }
 
-fn aim_offset(d: Vec3, target_velocity: Vec3, shooter_velocity: Vec3, speed: f32, torpedo: bool) -> Vec3 {
+/// Aim point with lead. Shells and torpedoes leave the gun at their own speed in the world frame (retail: launch speed equals
+/// MuzzleSpeed whatever the firing ship's motion), so the lead uses the target's velocity only.
+fn aim_offset(d: Vec3, target_velocity: Vec3, speed: f32, torpedo: bool) -> Vec3 {
     if torpedo {
         let d = d.with_y(0.0);
         let velocity = target_velocity.with_y(0.0);
         // No reachable straight intercept: aim at the target, not an arbitrarily distant extrapolation.
         return intercept_time(d, velocity, speed).map_or(d, |t| d + velocity * t);
     }
-    d + (target_velocity - shooter_velocity) * (d.length() / speed)
+    d + target_velocity * (d.length() / speed)
 }
 
-fn launch_velocity(dir: Vec3, speed: f32, shooter_velocity: Vec3, torpedo: bool) -> Vec3 {
-    if torpedo {
-        // Native torpedo initialization sets forward speed; it does not add the firing ship's velocity.
-        dir.with_y(0.0).normalize_or_zero() * speed
-    } else {
-        dir * speed + shooter_velocity
-    }
+/// Launch velocity: MuzzleSpeed along `dir` in the world frame; the firing ship's velocity is not added (measured on retail
+/// cannon, carronade and gattling shells). Torpedoes launch level.
+fn launch_velocity(dir: Vec3, speed: f32, torpedo: bool) -> Vec3 {
+    if torpedo { dir.with_y(0.0).normalize_or_zero() * speed } else { dir * speed }
 }
 
-/// Launch direction for speed `s` to reach offset `d`; low arc if gravity applies, else straight.
-fn aim(d: Vec3, s: f32, gravity: bool) -> Vec3 {
-    if !gravity {
+/// Launch direction for speed `s` to reach offset `d` under gravity `g`: the low arc, or straight when `g` is 0.
+fn aim(d: Vec3, s: f32, g: f32) -> Vec3 {
+    if g <= 0.0 {
         return d.normalize();
     }
     let (r, h) = (Vec2::new(d.x, d.z).length(), d.y);
-    let disc = s.powi(4) - G * (G * r * r + 2.0 * h * s * s);
-    let theta = if disc < 0.0 { std::f32::consts::FRAC_PI_4 } else { ((s * s - disc.sqrt()) / (G * r)).atan() };
+    let disc = s.powi(4) - g * (g * r * r + 2.0 * h * s * s);
+    let theta = if disc < 0.0 { std::f32::consts::FRAC_PI_4 } else { ((s * s - disc.sqrt()) / (g * r)).atan() };
     let flat = Vec3::new(d.x, 0.0, d.z).normalize_or_zero();
     flat * theta.cos() + Vec3::Y * theta.sin()
 }
@@ -431,13 +428,13 @@ fn aim(d: Vec3, s: f32, gravity: bool) -> Vec3 {
 /// Launch velocity of a lobbing gun (fixed `angle` above the horizon) that lands on offset `d`: the speed is solved for the
 /// angle, as measured on retail star mortar shells (speed ~ sqrt(g * range) at ~45 degrees). None when the point is above
 /// the arc. PROVISIONAL: retail elevations scattered 44-50 degrees; whether MuzzleSpeed caps the speed is not observed.
-fn lob_velocity(d: Vec3, angle: f32) -> Option<Vec3> {
+fn lob_velocity(d: Vec3, angle: f32, g: f32) -> Option<Vec3> {
     let r = Vec2::new(d.x, d.z).length();
     let rise = r * angle.tan() - d.y;
     if r < 0.5 || rise <= 0.1 {
         return None;
     }
-    let speed = (G * r * r / (2.0 * angle.cos().powi(2) * rise)).sqrt();
+    let speed = (g * r * r / (2.0 * angle.cos().powi(2) * rise)).sqrt();
     let flat = Vec3::new(d.x, 0.0, d.z) / r;
     Some((flat * angle.cos() + Vec3::Y * angle.sin()) * speed)
 }
@@ -566,7 +563,6 @@ fn fire(
             .map(|s| (s.2, s.5, s.0))
         };
         let tp = tp.filter(|(_, _, e)| sensors.in_sight(me, *e, campaign.as_deref()));
-        let fwd = tf.rotation * Vec3::NEG_Z;
         let pending = if primary { target.2.shot } else { None };
         let (mut shot_fired, mut shot_engaged) = (false, false);
         for (m, st) in class.mounts.iter().zip(states.0.iter_mut()) {
@@ -605,12 +601,11 @@ fn fire(
             // grapples, fired by the Grapple order (boarding.rs) and never at will. PROVISIONAL: the exe's grapple-gun exclusion is not decoded.
             if let (false, false, Some((tp, tv, _))) = (dead, st.gun.contains("Harpoon"), tp) {
                 // Lead like the exe: aim point += target velocity * (distance / muzzle speed), one step, no gravity term.
-                // PROVISIONAL: ordinary shells inherit shooter velocity; torpedoes use their own forward speed.
                 // Torpedo lead remains straight interception, not the native homing controller.
-                let d = aim_offset(tp - origin, tv, fwd * ship.speed, g.muzzle, g.bullet == TORPEDO_BULLET);
-                let dir = match g.lob.and_then(|a| lob_velocity(d, a)) {
+                let d = aim_offset(tp - origin, tv, g.muzzle, g.bullet == TORPEDO_BULLET);
+                let dir = match g.lob.and_then(|a| lob_velocity(d, a, g.shell_gravity())) {
                     Some(v) => v.normalize(),
-                    None => aim(d, g.muzzle, g.gravity),
+                    None => aim(d, g.muzzle, g.shell_gravity()),
                 };
                 let l = mount_rot.inverse() * dir;
                 let yaw = (-l.x).atan2(-l.z);
@@ -666,7 +661,7 @@ fn fire(
                     let t = tp.map(|t| t.2).filter(|t| *t != Entity::PLACEHOLDER);
                     fired.write(Fired { shooter: me, target: t, bullet: g.bullet.clone() });
                 }
-                st.cooldown = g.reload;
+                st.cooldown = g.burst_cycle();
                 st.burst_timer = 0.0;
                 // exe: band deviation * 0.5, uniform in +-that, times an accuracy factor. 0.5 is the plain-AI factor;
                 // crewed ships use 1 - 0.8 * gunnery skill (the campaign roster's best gunner for the human fleet).
@@ -694,29 +689,12 @@ fn fire(
                 let side = ship.side;
                 let goal = tp.map(|t| t.0);
                 let shot = Launch {
-                    vel: g.lob.and_then(|a| lob_velocity(goal? - origin, a)).map(|v| turn * v),
+                    vel: g.lob.and_then(|a| lob_velocity(goal? - origin, a, g.shell_gravity())).map(|v| turn * v),
                     aim: goal.filter(|_| is_indirect(&st.gun)),
                     pd: g.point_defense,
                     harmless: mission.is_some_and(|m| m.warning_shots),
                 };
-                launch_shell(
-                    &mut commands,
-                    &assets,
-                    &lib,
-                    &fxl,
-                    &look,
-                    &mut sfx,
-                    g,
-                    mz,
-                    globals.get(mz).ok().copied(),
-                    origin,
-                    dir,
-                    fwd * ship.speed,
-                    side,
-                    me,
-                    tp.map(|t| t.2),
-                    shot,
-                );
+                launch_shell(&mut commands, &assets, &lib, &fxl, &look, &mut sfx, g, mz, globals.get(mz).ok().copied(), origin, dir, side, me, tp.map(|t| t.2), shot);
             }
         }
         // One click, one shot: drop the point once fired, or when the bank cannot reach it.
@@ -748,7 +726,6 @@ fn launch_shell(
     mgt: Option<GlobalTransform>,
     origin: Vec3,
     dir: Vec3,
-    shooter_velocity: Vec3,
     side: Side,
     shooter: Entity,
     target: Option<Entity>,
@@ -761,7 +738,7 @@ fn launch_shell(
         sfx.write(Sfx { name: n.clone(), at: Some(from), vol: *vol, max: *max });
     }
     let mat = if side == Side::Player { look.shell.clone() } else { look.enemy_shell.clone() };
-    let vel = shot.vel.unwrap_or_else(|| launch_velocity(dir, g.muzzle, shooter_velocity, g.bullet == TORPEDO_BULLET));
+    let vel = shot.vel.unwrap_or_else(|| launch_velocity(dir, g.muzzle, g.bullet == TORPEDO_BULLET));
     let stf = Transform::from_translation(from).looking_to(vel, Vec3::Y);
     let shell = commands
         .spawn((
@@ -769,8 +746,8 @@ fn launch_shell(
                 vel,
                 age: 0.0,
                 lifetime: b.lifetime,
-                // Lob shells fall whatever the gun's gravity flag; mines drift.
-                gravity: (g.gravity || shot.vel.is_some()) && !matches!(b.payload, Payload::Mine { .. }),
+                // Mines drift.
+                gravity: if matches!(b.payload, Payload::Mine { .. }) { 0.0 } else { g.shell_gravity() },
                 bullet: g.bullet.clone(),
                 side,
                 shooter,
@@ -843,10 +820,10 @@ fn base_fire(
             // Mortar towers lob at the ship (PROVISIONAL: mines/grav charges on bases are not seen in the data and stay idle).
             let usable = !is_indirect(&m.gun) || g.lob.is_some();
             if let (false, false, true, Some((p, v, _, _))) = (dead, g.point_defense || m.gun.contains("Harpoon"), usable, tp) {
-                let d = aim_offset(p - origin, v, Vec3::ZERO, g.muzzle, g.bullet == TORPEDO_BULLET);
-                let dir = match g.lob.and_then(|a| lob_velocity(d, a)) {
+                let d = aim_offset(p - origin, v, g.muzzle, g.bullet == TORPEDO_BULLET);
+                let dir = match g.lob.and_then(|a| lob_velocity(d, a, g.shell_gravity())) {
                     Some(v) => v.normalize(),
-                    None => aim(d, g.muzzle, g.gravity),
+                    None => aim(d, g.muzzle, g.shell_gravity()),
                 };
                 let l = mount_rot.inverse() * dir;
                 let yaw = (-l.x).atan2(-l.z);
@@ -879,7 +856,7 @@ fn base_fire(
             if st.burst_left == 0 && st.cooldown <= 0.0 && st.aligned {
                 st.burst_left = g.burst;
                 fired.write(Fired { shooter: me, target: Some(target), bullet: g.bullet.clone() });
-                st.cooldown = g.reload;
+                st.cooldown = g.burst_cycle();
                 st.burst_timer = 0.0;
                 let band = if dist <= g.range[0] {
                     g.dev[0]
@@ -902,8 +879,12 @@ fn base_fire(
                 // The shell must hit ships of the target's side; the shooter's own side is the other one.
                 let side = if tside == Side::Player { Side::Enemy } else { Side::Player };
                 let goal = tp.map(|t| t.0);
-                let shot = Launch { vel: g.lob.and_then(|a| lob_velocity(goal? - origin, a)).map(|v| turn * v), aim: goal.filter(|_| is_indirect(&m.gun)), ..default() };
-                launch_shell(&mut commands, &assets, &lib, &fxl, &look, &mut sfx, g, mz, globals.get(mz).ok().copied(), origin, dir, Vec3::ZERO, side, me, Some(target), shot);
+                let shot = Launch {
+                    vel: g.lob.and_then(|a| lob_velocity(goal? - origin, a, g.shell_gravity())).map(|v| turn * v),
+                    aim: goal.filter(|_| is_indirect(&m.gun)),
+                    ..default()
+                };
+                launch_shell(&mut commands, &assets, &lib, &fxl, &look, &mut sfx, g, mz, globals.get(mz).ok().copied(), origin, dir, side, me, Some(target), shot);
             }
         }
     }
@@ -1026,9 +1007,7 @@ fn shells(
         }
         let p0 = tf.translation;
         let bd = &lib.bullets[&s.bullet];
-        if s.gravity {
-            s.vel.y -= G * dt;
-        }
+        s.vel.y -= s.gravity * dt;
         // Mines (MineAI sight, MinePhysics max speed): home on the nearest hostile ship in sight, else coast to rest at the drop point.
         // PROVISIONAL: the exe's mine steering/drag is not decoded.
         if let Payload::Mine { sight, speed } = s.payload {
@@ -1916,20 +1895,51 @@ mod tests {
     fn torpedo_aim_and_launch_do_not_inherit_shooter_motion() {
         let offset = Vec3::new(15.0, 3.0, -80.0);
         let target_velocity = Vec3::X * 5.0;
-        let stationary = aim_offset(offset, target_velocity, Vec3::ZERO, 22.0, true);
-        for shooter_velocity in [Vec3::X * 30.0, Vec3::Z * 30.0, Vec3::NEG_Z * 30.0] {
-            let aimed = aim_offset(offset, target_velocity, shooter_velocity, 22.0, true);
-            assert_eq!(aimed, stationary);
-            let velocity = launch_velocity(aimed.normalize(), 22.0, shooter_velocity, true);
-            assert!((velocity.length() - 22.0).abs() < 1e-5);
-            assert_eq!(velocity.y, 0.0);
-            let time = intercept_time(offset.with_y(0.0), target_velocity, 22.0).unwrap();
-            assert!((velocity * time - (offset.with_y(0.0) + target_velocity * time)).length() < 1e-4);
-        }
-        let unreachable = aim_offset(offset, Vec3::NEG_Z * 30.0, Vec3::ZERO, 22.0, true);
+        let aimed = aim_offset(offset, target_velocity, 22.0, true);
+        let velocity = launch_velocity(aimed.normalize(), 22.0, true);
+        assert!((velocity.length() - 22.0).abs() < 1e-5);
+        assert_eq!(velocity.y, 0.0);
+        let time = intercept_time(offset.with_y(0.0), target_velocity, 22.0).unwrap();
+        assert!((velocity * time - (offset.with_y(0.0) + target_velocity * time)).length() < 1e-4);
+        let unreachable = aim_offset(offset, Vec3::NEG_Z * 30.0, 22.0, true);
         assert_eq!(unreachable, offset.with_y(0.0), "unreachable targets do not produce runaway lead");
-        let ordinary = launch_velocity(Vec3::NEG_Z, 100.0, Vec3::X * 10.0, false);
-        assert_eq!(ordinary, Vec3::new(10.0, 0.0, -100.0), "ordinary shell behaviour is unchanged");
+    }
+
+    /// Retail shells (docs/re/gunnery.md#shell-gravity): gravity MuzzleSpeed^2 / (sqrt(2) * MaximumRange) per gun, launch speed
+    /// MuzzleSpeed in the world frame whatever the shooter's motion, lead from the target's velocity alone.
+    #[test]
+    fn shells_match_measured_retail_ballistics() {
+        let (guns, _) = load_weapons(&assets_dir());
+        // gun, measured gravity (median of repeated retail shells)
+        for (gun, measured) in [
+            ("Gun_StarMortar", 1.263),
+            ("Gun_CannonBall_Heavy", 3.231),
+            ("Gun_CannonBall_Med", 4.184),
+            ("Gun_Carronade_Med", 4.908),
+            ("Gun_CannonBall_Light", 6.269),
+            ("Gun_Carronade_Light", 6.355),
+            ("Gun_Gattling_Light", 28.5),
+        ] {
+            let g = guns[gun].shell_gravity();
+            assert!((g / measured - 1.0).abs() < 0.015, "{gun}: {g} vs measured {measured}");
+        }
+        assert_eq!(guns["Gun_Lancer_PD_Light"].shell_gravity(), 0.0, "lancers fly straight");
+        // Burst cycle (start to start): gattling 3 s + 7 x 0.15 s, measured 3.98-4.17 s; medium cannon 9.0 s, measured 8.96-8.99 s.
+        assert!((guns["Gun_Gattling_Light"].burst_cycle() - 4.05).abs() < 1e-4);
+        assert_eq!(guns["Gun_CannonBall_Med"].burst_cycle(), 9.0);
+        let v = launch_velocity(Vec3::NEG_Z, 40.0, false);
+        assert_eq!(v, Vec3::NEG_Z * 40.0, "no shooter velocity added");
+        let d = Vec3::new(0.0, 0.0, -100.0);
+        assert_eq!(aim_offset(d, Vec3::X * 5.0, 40.0, false), d + Vec3::X * 12.5);
+        // A medium cannon aimed by `aim` lands on a point 200 units off at the measured gravity.
+        let g = guns["Gun_CannonBall_Med"].shell_gravity();
+        let target = Vec3::new(120.0, -3.0, -160.0);
+        let (mut p, mut vel, dt) = (Vec3::ZERO, aim(target, 40.0, g) * 40.0, 0.0005);
+        while Vec2::new(p.x, p.z).length() < Vec2::new(target.x, target.z).length() {
+            vel.y -= g * dt;
+            p += vel * dt;
+        }
+        assert!(p.distance(target) < 0.3, "landed {p} for {target}");
     }
 
     #[test]

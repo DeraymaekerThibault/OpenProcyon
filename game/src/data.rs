@@ -149,6 +149,20 @@ pub struct GunDef {
     /// WOT 'Can Be Fired While Cloaked' (torpedoes and gatlings).
     pub cloak_fire: bool,
 }
+impl GunDef {
+    /// Gravity on this gun's shells (units/s^2): MuzzleSpeed^2 / (sqrt(2) * MaximumRange), so a shell fired at 45 degrees
+    /// would carry sqrt(2) times the maximum range. Measured on retail shells of seven guns (docs/re/gunnery.md#shell-gravity);
+    /// 0 for guns not flagged BulletAffectedByGravity.
+    /// Time from the first shot of a burst to the next burst: TimeBetweenBursts (seconds) runs from the burst's last shot.
+    /// Measured on retail gattling bursts (8 shots 0.15 s apart, a new burst every ~4.1 s) and medium cannons (9.0 s).
+    pub fn burst_cycle(&self) -> f32 {
+        self.reload + self.burst.saturating_sub(1) as f32 * self.burst_reload
+    }
+
+    pub fn shell_gravity(&self) -> f32 {
+        if self.gravity && self.range[2] > 0.0 { self.muzzle * self.muzzle / (std::f32::consts::SQRT_2 * self.range[2]) } else { 0.0 }
+    }
+}
 /// What a bullet does besides hitting a hull: its WOT custom-info factory (`kind`) and the fields that go with it.
 #[derive(Clone, Copy, PartialEq, Debug, Default)]
 pub enum Payload {

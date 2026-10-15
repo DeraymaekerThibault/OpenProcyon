@@ -20,6 +20,8 @@ pub struct Shoot {
     pub side: Side,
     pub shooter: Entity,
     pub target: Option<Entity>,
+    /// Downward acceleration on the shell (units/s^2).
+    pub gravity: f32,
 }
 
 pub fn shoot(mut commands: Commands, lib: Res<Library>, fxl: Res<FxLib>, mut msgs: MessageReader<Shoot>) {
@@ -32,7 +34,7 @@ pub fn shoot(mut commands: Commands, lib: Res<Library>, fxl: Res<FxLib>, mut msg
                     vel: m.vel,
                     age: 0.0,
                     lifetime: b.lifetime.min(30.0),
-                    gravity: true,
+                    gravity: m.gravity,
                     bullet: m.bullet.clone(),
                     side: m.side,
                     shooter: m.shooter,
@@ -313,7 +315,8 @@ mod tests {
     #[test]
     fn lob_arc_lands_on_the_aim_point() {
         let d = Vec3::new(300.0, -2.0, -150.0);
-        let v = super::super::lob_velocity(d, std::f32::consts::FRAC_PI_4).unwrap();
+        const G: f32 = 1.263; // retail star mortar
+        let v = super::super::lob_velocity(d, std::f32::consts::FRAC_PI_4, G).unwrap();
         // Fly the ballistic arc and find where it comes back down to the target height.
         let (mut p, mut vel, dt) = (Vec3::ZERO, v, 0.001);
         while !(vel.y < 0.0 && p.y <= d.y) {
@@ -321,6 +324,6 @@ mod tests {
             p += vel * dt;
         }
         assert!(p.distance(d) < 1.5, "landed {p} for {d}");
-        assert!(super::super::lob_velocity(Vec3::new(10.0, 50.0, 0.0), 0.3).is_none(), "point above the arc");
+        assert!(super::super::lob_velocity(Vec3::new(10.0, 50.0, 0.0), 0.3, G).is_none(), "point above the arc");
     }
 }

@@ -24,9 +24,39 @@ Per muzzle the angle is applied twice to the muzzle orientation, about two axes,
 
 ## In the remake (`combat/`)
 Lead and deviation follow the above. PROVISIONAL: factor 0.5 for every ship (no crews); the two rotation axes
-taken as world up and the muzzle's right. Ordinary shells inherit the shooter's velocity, so their lead uses
-target minus shooter velocity (native ordinary-shell inheritance remains unverified). Torpedoes do not inherit it; see below.
+taken as world up and the muzzle's right. No shell inherits the shooter's velocity (measured, see below), so the lead uses
+the target's velocity alone.
 Measured in an earlier scripted skirmish: hit rate 4% before, 60% after (not remeasured after the changes below).
+
+## Shell gravity
+Measured on the running original game (2026-10): two skirmishes on The Diablo Strait (a Navy Man-O-War and Cutter against
+pirate fleets), every shell within 250 units of the Man-O-War sampled about 30 times a second, each track fitted as a
+ballistic arc and attributed to the ship it started from.
+
+- **Each gun has its own shell gravity: g = MuzzleSpeed² / (√2 · MaximumRange).** Put differently, a shell fired at 45° would
+  carry √2 times the gun's maximum range. It holds for every gun seen (median of repeated shells):
+
+| Gun | MuzzleSpeed / MaximumRange | Predicted g | Measured g | Shells |
+|---|---|---|---|---|
+| Star mortar | 25 / 350 | 1.263 | 1.263 | 2 |
+| Heavy cannon | 40 / 350 | 3.232 | 3.231 | 14 |
+| Medium cannon | 40 / 270 | 4.190 | 4.184 | 25 |
+| Medium carronade | 30 / 130 | 4.895 | 4.908 | 12 |
+| Light cannon | 40 / 180 | 6.285 | 6.269 | 51 |
+| Light carronade | 30 / 100 | 6.364 | 6.355 | 15 |
+| Gattling | 70 / 120 | 28.87 | 28.5 | 547 |
+
+- Guns not flagged BulletAffectedByGravity (lancers) fly straight. Gravity charge and nova mortar shells follow the same
+  formula in the remake but were not measured (PROVISIONAL).
+- **No velocity inheritance:** the launch speed equals MuzzleSpeed in the world frame (40.0-40.4 for cannons fired from ships
+  moving 7-11 units/s, 70.2 for gattlings, 30.3-30.5 for carronades). No drag: horizontal speed stays constant.
+- Shells that hit nothing keep falling below the flight plane until their lifetime ends (only lob shells burst there).
+
+## Burst timing
+- TimeBetweenBursts is in seconds and runs from the **last** shot of a burst: a medium cannon fired 8.96-8.99 s apart
+  (TimeBetweenBursts 9), a light carronade 4.6-5.0 s (5); gattling bursts (8 shots, DuringBurstReloadTime 0.15) began every
+  3.98-4.17 s = 3 + 7 × 0.15 s plus aiming. So one gun's burst-to-burst cycle is TimeBetweenBursts + (BulletsPerBurst - 1) ×
+  DuringBurstReloadTime.
 
 ## Lob shells
 Measured on the running original game (2026-10): a Navy Man-O-War's bow Star Mortar fired at open etherium in a
@@ -37,17 +67,16 @@ skirmish, the shell position sampled about 30 times a second.
 | stopped | 126.9 | 15.75 s | 12.6 | 50° |
 | moving 2.4 u/s | 47.9 | 8.9 s | 7.5 | 44° |
 
-- **Gravity 1.263 units/s²** on the shell (both shots agree within 0.1%); no drag (horizontal speed constant).
+- **Gravity 1.263 units/s²** on the shell (both shots agree within 0.1%), as the per-gun rule above gives; no drag.
 - The launch speed is solved so the shell comes down on the aim point at about the gun's LobAngle (45°): speed ≈ √(g·range).
-  MuzzleSpeed is not the launch speed. With this gravity, MuzzleSpeed 25 at 45° would carry 25²/1.263 ≈ 495 units, about
-  the authored maximum ranges (350 star, 500 nova). Whether it caps the speed is not observed. The measured elevations
+  MuzzleSpeed is not the launch speed (at 45° it would carry √2 × 350 = 495 units). Whether it caps the speed is not
+  observed. The measured elevations
   (44-50°) scatter around LobAngle; the cause is unknown (PROVISIONAL: the remake fires at exactly LobAngle).
 - The gun fires as soon as it is aimed (0.08 s after the click when already pointing that way, 0.65 s after a turn).
 - A shell that hits nothing bursts where it reaches the flight plane.
 - Look: in flight a small pink-white spark with a short trail. On impact a white flash with long rays, then about a second
   later a wide flat pink-orange ring spreading over the flight plane (blast MaxRadius 60 over Duration 3 in the bullet
   data); a ring from a shell ~50 units ahead reached the firing ship. Ring growth timing not measured.
-- PROVISIONAL: direct-fire shells flagged BulletAffectedByGravity are assumed to fall under the same gravity (not measured).
 
 ## Playtest fixes: arcs and torpedoes
 
@@ -58,7 +87,8 @@ skirmish, the shell position sampled about 30 times a second.
   retaining the existing retail trail and impact effects. The scene and MDB layer have different names.
 - Torpedo launch no longer adds the firing ship's velocity. Aim and launch now consistently use target world velocity and
   the torpedo's own forward speed. The flat launch direction is normalized after deviation, keeping launch speed at 22 units/s.
-  This removes artificial sideways drift/speed changes caused by the firing ship's motion. Ordinary-shell behaviour is unchanged.
+  This removes artificial sideways drift/speed changes caused by the firing ship's motion. Ordinary shells were later measured to
+  behave the same way (see Shell gravity).
 - Launch aim still uses a horizontal intercept, falling back to current target position if unreachable. Flight now has guidance:
   0.5-second launch coast, authored ship homing point (other targets use position), speed-based lead inside 100 units, native
   20-degree rudder saturation and bounded altitude adjustment. Exported bullet physics drives thrust/speed and angular response.
@@ -69,7 +99,7 @@ skirmish, the shell position sampled about 30 times a second.
   actual torpedo hit on its stern. Moving-target hit rate and original torpedo behavior are not yet measured.
 - Training fleets remain invulnerable: impact effects do not imply hull damage during mission one's first drill.
 - Follow-up regression tests cover crossing targets with moving shooters, unreachable-target fallback, constant horizontal
-  torpedo launch speed and unchanged ordinary-shell inheritance. Two stationary-target GPU arena runs logged torpedo impacts.
+  torpedo launch speed. Two stationary-target GPU arena runs logged torpedo impacts.
   `local/torpedo-polish-oblique.png` shows the flame meeting the projectile at an oblique camera angle; this is not a moving-target
   Mission 1 validation.
 
@@ -77,7 +107,7 @@ skirmish, the shell position sampled about 30 times a second.
 
 `TorpedoPhysics` exposes the muzzle-speed setter at; its initialization at sets local forward velocity from
 that speed using the common physics time scale. The launch/custom-info path does not add
-firing-ship velocity. This is distinct from the remake's still-provisional ordinary-shell inheritance.
+firing-ship velocity. Ordinary shells do not add it either (measured, see Shell gravity).
 
 The torpedo custom-info update is not a straight projectile: it has a 0.5-second initial phase, then a homing phase,
 then clears its steering command when tracking ends or the target is absent. Ships supply their `TorpedoHomingPoint`; other
