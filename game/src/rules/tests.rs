@@ -635,8 +635,8 @@ fn all_units_entered_once_remembers_members_that_left_again() {
 #[test]
 fn later_missions_only_warn_about_known_missing_features() {
     let mut warned = std::collections::BTreeSet::new();
-    for n in 2..=13 {
-        let m = crate::campaign::load_id(&format!("mission{n:02}"));
+    for id in (2..=13).map(|n| format!("mission{n:02}")).chain(["tutorial".into(), "basic_tutorial".into()]) {
+        let m = crate::campaign::load_id(&id);
         let mut s = m.script;
         let w = vec![unit("x", PLAYER, Vec3::ZERO)];
         for r in m.data["rules"].as_array().unwrap() {
@@ -683,4 +683,30 @@ fn polygons_skip_malformed_vertices_and_unknown_volumes_contain_nothing() {
     assert!(leash(&sc, "No Such Volume", None, Vec3::new(1e6, 0.0, 0.0)).is_none());
     assert!(leash(&sc, "Zone", None, Vec3::new(5.0, 2.0, -5.0)).is_none(), "inside its zone");
     assert_eq!(leash(&sc, "Zone", None, Vec3::new(50.0, 2.0, -5.0)), Some(Vec3::new(5.0, 2.0, -5.0)), "outside: back to the centre");
+}
+#[test]
+fn full_tutorial_camera_objective_clears_by_timer_or_by_leaving_the_start_area() {
+    // No rule watches the camera: 'Try Out Camera' ends 30 s after line 03D, or when the ship leaves 'Player Wander @ Start'.
+    for leave in [false, true] {
+        let mut sc = crate::campaign::load_id("tutorial").script;
+        let mut p = unit("RLS Intrepid", sc.player(), Vec3::new(-1316.7, 0.0, 1407.8)); // the start, in Bevy axes
+        p.groups = vec![sc.player().to_string()];
+        p.primary = true;
+        let mut units = [p];
+        let active = |sc: &Script| sc.tasks.iter().any(|t| t.active && t.name == "Try Out Camera");
+        let mut seen = false;
+        for i in 0..1000 {
+            if leave && seen {
+                units[0].pos.x = -1200.0;
+            }
+            sc.step(&units, 0.25, false);
+            seen |= active(&sc);
+            if seen && sc.played.contains("MTUTAMELIA04") {
+                assert!(!active(&sc));
+                assert_eq!(sc.played.contains("MTUTAMELIA03E"), leave, "leave={leave} at t={}", i as f32 * 0.25);
+                break;
+            }
+            assert!(i < 999, "tutorial stuck (leave={leave})");
+        }
+    }
 }

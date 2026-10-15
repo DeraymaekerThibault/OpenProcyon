@@ -18,8 +18,9 @@ pub use damage::*;
 pub use lob::{Detonate, Shoot, Strike};
 pub use status::*;
 
-/// PROVISIONAL: gravity for shells flagged BulletAffectedByGravity (units/s^2).
-const G: f32 = 9.8;
+/// Gravity on shells (units/s^2), measured on retail star mortar shells ([gunnery.md](../../../docs/re/gunnery.md#lob-shells)).
+/// PROVISIONAL for direct-fire guns flagged BulletAffectedByGravity: assumed to share it, not measured.
+const G: f32 = 1.263;
 /// Order matters: "Reinforced Wood" must match Reinforced before Wood.
 pub const MATERIALS: [&str; 6] = ["Reinforced", "Wood", "Iron", "Cloth", "Stone", "Dragon"];
 
@@ -428,8 +429,8 @@ fn aim(d: Vec3, s: f32, gravity: bool) -> Vec3 {
 }
 
 /// Launch velocity of a lobbing gun (fixed `angle` above the horizon) that lands on offset `d`: the speed is solved for the
-/// angle. PROVISIONAL: the exe's lob solution is not decoded; WOT MuzzleSpeed (25) at 45 degrees would only carry ~64 units
-/// under the remake's gravity, far short of the authored 350-500 unit ranges. None when the point is above the arc.
+/// angle, as measured on retail star mortar shells (speed ~ sqrt(g * range) at ~45 degrees). None when the point is above
+/// the arc. PROVISIONAL: retail elevations scattered 44-50 degrees; whether MuzzleSpeed caps the speed is not observed.
 fn lob_velocity(d: Vec3, angle: f32) -> Option<Vec3> {
     let r = Vec2::new(d.x, d.z).length();
     let rise = r * angle.tan() - d.y;

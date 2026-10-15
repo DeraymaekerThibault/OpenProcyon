@@ -28,6 +28,27 @@ taken as world up and the muzzle's right. Ordinary shells inherit the shooter's 
 target minus shooter velocity (native ordinary-shell inheritance remains unverified). Torpedoes do not inherit it; see below.
 Measured in an earlier scripted skirmish: hit rate 4% before, 60% after (not remeasured after the changes below).
 
+## Lob shells
+Measured on the running original game (2026-10): a Navy Man-O-War's bow Star Mortar fired at open etherium in a
+skirmish, the shell position sampled about 30 times a second.
+
+| Ship | Range | Flight | Launch speed | Elevation |
+|---|---|---|---|---|
+| stopped | 126.9 | 15.75 s | 12.6 | 50° |
+| moving 2.4 u/s | 47.9 | 8.9 s | 7.5 | 44° |
+
+- **Gravity 1.263 units/s²** on the shell (both shots agree within 0.1%); no drag (horizontal speed constant).
+- The launch speed is solved so the shell comes down on the aim point at about the gun's LobAngle (45°): speed ≈ √(g·range).
+  MuzzleSpeed is not the launch speed. With this gravity, MuzzleSpeed 25 at 45° would carry 25²/1.263 ≈ 495 units, about
+  the authored maximum ranges (350 star, 500 nova). Whether it caps the speed is not observed. The measured elevations
+  (44-50°) scatter around LobAngle; the cause is unknown (PROVISIONAL: the remake fires at exactly LobAngle).
+- The gun fires as soon as it is aimed (0.08 s after the click when already pointing that way, 0.65 s after a turn).
+- A shell that hits nothing bursts where it reaches the flight plane.
+- Look: in flight a small pink-white spark with a short trail. On impact a white flash with long rays, then about a second
+  later a wide flat pink-orange ring spreading over the flight plane (blast MaxRadius 60 over Duration 3 in the bullet
+  data); a ring from a shell ~50 units ahead reached the firing ship. Ring growth timing not measured.
+- PROVISIONAL: direct-fire shells flagged BulletAffectedByGravity are assumed to fall under the same gravity (not measured).
+
 ## Playtest fixes: arcs and torpedoes
 
 - Fixed a runtime units bug: mount arcs were converted from degrees to radians in the loader, then converted again

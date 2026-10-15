@@ -12,8 +12,8 @@ from pathlib import Path
 
 from tools.export_maps import strings
 
-# Missions whose audio is copied into assets/sound (the JSON lists every cue regardless). All 13 campaign missions load now.
-PLAYABLE = {f"mission{n:02d}" for n in range(1, 14)}
+# Maps whose audio is copied into assets/sound (the JSON lists every cue regardless): the 13 campaign missions and both tutorials.
+PLAYABLE = {f"mission{n:02d}" for n in range(1, 14)} | {"tutorial", "basic_tutorial"}
 
 
 def main(root, out):
