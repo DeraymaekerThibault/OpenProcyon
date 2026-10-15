@@ -73,7 +73,6 @@ pub fn block_world(open: Query<(), With<Starmap>>, mut ui: ResMut<UiClick>) {
     ui.0 |= !open.is_empty();
 }
 
-#[allow(clippy::too_many_arguments)]
 fn toggle(
     mut commands: Commands,
     assets: Res<AssetServer>,
@@ -216,7 +215,6 @@ fn animate(
 }
 
 /// Icons and labels for the current world state.
-#[allow(clippy::too_many_arguments)]
 fn redraw(
     mut commands: Commands,
     assets: Res<AssetServer>,

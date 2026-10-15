@@ -10,6 +10,11 @@ bevy = { version = "0.20", default-features = false, features = ["default_app", 
 wayland-sys = { version = "0.31", features = ["dlopen"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 
+# Bevy systems take many parameters and nested query types by design.
+[lints.clippy]
+too_many_arguments = "allow"
+type_complexity = "allow"
+
 [profile.dev]
 opt-level = 1
 

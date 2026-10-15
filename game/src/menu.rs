@@ -800,7 +800,6 @@ const QUICK: &str = "QuickSave";
 /// Load / Save / Remove / Quit buttons of the Load Campaign screen and the in-game menu.
 /// PROVISIONAL: a save is a mission-start checkpoint plus the campaign counters; loading restarts that mission. No delete or overwrite
 /// confirmation dialogs (the retail screens have them).
-#[allow(clippy::too_many_arguments)]
 fn save_actions(
     q: Query<(&Interaction, &Action), Changed<Interaction>>,
     mut commands: Commands,

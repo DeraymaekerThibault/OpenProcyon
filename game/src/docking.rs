@@ -376,7 +376,6 @@ fn approach_point(point: Vec3, fwd: Vec3, ship: Vec3, leg: f32) -> Vec3 {
     (point + dir * leg).with_y(ship.y)
 }
 
-#[allow(clippy::type_complexity, clippy::too_many_arguments)]
 fn routine(
     time: Res<Time>,
     lib: Res<Library>,

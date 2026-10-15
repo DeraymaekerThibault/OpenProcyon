@@ -618,7 +618,6 @@ struct FleetHealth(usize);
 #[derive(Component)]
 struct FleetLabel(usize);
 
-#[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn fleet_art(
     mut commands: Commands,
     assets: Res<AssetServer>,

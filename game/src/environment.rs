@@ -58,7 +58,6 @@ impl Sensors {
     }
 }
 
-#[allow(clippy::type_complexity)]
 pub fn refresh_sensors(
     mut sensors: ResMut<Sensors>,
     lib: Res<crate::combat::Library>,

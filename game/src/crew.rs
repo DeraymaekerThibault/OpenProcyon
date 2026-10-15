@@ -146,7 +146,6 @@ struct Surroundings<'w, 's> {
     guns: Query<'w, 's, &'static crate::combat::GunStates, With<PlayerShip>>,
 }
 
-#[allow(clippy::too_many_arguments)]
 fn callouts(
     mut commands: Commands,
     assets: Res<AssetServer>,

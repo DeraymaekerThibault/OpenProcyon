@@ -288,7 +288,6 @@ fn lightning_point(poly: &Value, offset: Vec3, ships: &[Vec3], rnd: &mut impl Fn
 /// Lightning is one storm-wide random segment, not a guaranteed strike per ship. Meteors roll diameter / 80 and pick a section.
 /// PROVISIONAL: retain conservative 3 s lightning / 2 s meteor recharge floors until full retail timing is validated.
 /// Wind force remains a tangential push of 3% of its magnitude per second; damage excludes the inner 5% of the storm radius.
-#[allow(clippy::too_many_arguments)]
 fn storms(
     time: Res<Time>,
     lib: Res<crate::combat::Library>,
@@ -422,7 +421,6 @@ fn looped(c: &[(f32, f32)], t: f32) -> f32 {
     c.windows(2).find(|w| t <= w[1].0).map_or(c[0].1, |w| w[0].1 + (w[1].1 - w[0].1) * (t - w[0].0) / (w[1].0 - w[0].0).max(1e-6))
 }
 
-#[allow(clippy::too_many_arguments)]
 fn spawn_one(commands: &mut Commands, assets: &AssetServer, effect: &str, mesh_name: &str, pos: Vec3, radius: f32, sound: &str, sound_distance: f32, seed: u32, group: &str) {
     let Some(j) = crate::data::try_json(&assets_dir().join(format!("fx/{effect}.json"))) else { return };
     let chunk = &j["Primitive"][0]["CommonPropertiesChunk"];

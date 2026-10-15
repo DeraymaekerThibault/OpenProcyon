@@ -1,5 +1,3 @@
-// Bevy systems take many parameters and nested query types by design.
-#![allow(clippy::too_many_arguments, clippy::type_complexity)]
 //! Shared game library: simulation, rules, data and input. Skirmish slice: your ship vs enemy ships, original models/data, AI that fights back, damage effects, win/lose, restart.
 //! Everything marked PROVISIONAL is a stand-in, not measured original behaviour (see docs/faithful-remake.md).
 

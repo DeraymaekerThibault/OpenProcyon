@@ -1,6 +1,5 @@
 //! Binary: runs the shared game library (`lib.rs`) with the classic (retail) presentation.
 //! Other presentations can live in their own crates and call `openprocyon::run` with their own view plugin (docs/development.md "Layers").
-#![allow(clippy::too_many_arguments, clippy::type_complexity)]
 
 mod classic;
 

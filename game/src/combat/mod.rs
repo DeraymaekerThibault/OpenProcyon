@@ -735,7 +735,6 @@ struct Launch {
 }
 
 /// Spawns one shell of gun `g` from muzzle `mz` (its fire sound, muzzle flash and bullet effect included).
-#[allow(clippy::too_many_arguments)]
 fn launch_shell(
     commands: &mut Commands,
     assets: &AssetServer,
@@ -805,7 +804,6 @@ fn launch_shell(
 
 /// Island gun towers: every mount of an armed base shoots the nearest visible ship its owner is hostile to, within the gun's range
 /// (turret model as in `fire`). PROVISIONAL: the base's AI stance and 'attack' orders are not consulted; hostility alone arms it.
-#[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn base_fire(
     mut commands: Commands,
     time: Res<Time>,
