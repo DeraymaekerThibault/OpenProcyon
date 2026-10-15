@@ -1905,6 +1905,25 @@ mod tests {
         assert_eq!(unreachable, offset.with_y(0.0), "unreachable targets do not produce runaway lead");
     }
 
+    /// Retail damage control (refit-resupply.md#crew-damage-control-measured): one damaged living sail gets +3 (or +6) per tick,
+    /// capped at its maximum; hull sections are left alone.
+    #[test]
+    fn crew_damage_control_mends_one_sail_by_three() {
+        let lib = Library::load(&assets_dir());
+        let class = &lib.classes[lib.index("Ship_Navy_ManOWar")];
+        let mut hp: Vec<f32> = class.sections.iter().map(|s| s.hp).collect();
+        let sails: Vec<usize> = (0..hp.len()).filter(|&i| class.sections[i].material.contains("Cloth")).collect();
+        let hull = (0..hp.len()).find(|i| !sails.contains(i)).unwrap();
+        hp[hull] *= 0.5;
+        assert_eq!(repair_tick(class, &hp, 0.5, 0.9), None, "only sails are mended");
+        hp[sails[1]] -= 10.0;
+        hp[sails[2]] = 0.0; // destroyed sails stay down
+        assert_eq!(repair_tick(class, &hp, 0.99, 0.9), Some((sails[1], class.sections[sails[1]].hp - 7.0)));
+        assert_eq!(repair_tick(class, &hp, 0.0, 0.1), Some((sails[1], class.sections[sails[1]].hp - 4.0)));
+        hp[sails[1]] = class.sections[sails[1]].hp - 2.0;
+        assert_eq!(repair_tick(class, &hp, 0.0, 0.1), Some((sails[1], class.sections[sails[1]].hp)), "capped at the maximum");
+    }
+
     /// Retail shells (docs/re/gunnery.md#shell-gravity): gravity MuzzleSpeed^2 / (sqrt(2) * MaximumRange) per gun, launch speed
     /// MuzzleSpeed in the world frame whatever the shooter's motion, lead from the target's velocity alone.
     #[test]

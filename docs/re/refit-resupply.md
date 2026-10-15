@@ -54,7 +54,17 @@ Research only; nothing here is implemented. Source: observed behaviour of the or
 Hull sections carry a `criticals=` list of system tags (`Cargo Hold`, `Spotter Equitment`, `Power Transformer Engines/Guns`, `Engines`, `MaxVelocity`, `Rudder Linkage`, `Lower Deck Guns`, `Munnitions`, `Cloaking Generator`; names, section parser). A section stores a per-system hit counter (10 ints) and the HUD shows "Critical Systems Hit: … Ammunition". What a Munnitions hit *does* was not found; nothing links it to an ammo count. [?] (Do not infer ammo from the label.)
 
 ### 3.4 Passive crew repair (not a tender service)
-A crew repair step runs from the ship info update every 12 s, picks damaged sections, scales a chance by the crew engineering skill and adds hit points (clamped to max; cancels the damage effect at full). This is the only non-dock repair found. Amount per tick is unresolved [?]; it is the "damage control" a faithful remake may add later.
+A crew repair step runs from the ship info update every 12 s, picks damaged sections, scales a chance by the crew engineering skill and adds hit points (clamped to max; cancels the damage effect at full). This is the only non-dock repair found.
+
+#### Crew damage control (measured)
+Measured on the running original game (2026-10): section hit points of a skirmish Navy Man-O-War (default crew) logged
+about 20 times a second through two battles, about nine minutes in all.
+- Ticks fall exactly 12.0 s apart. On almost every tick while a sail is damaged (15 of 16), **one damaged sail section gains
+  3 hit points, sometimes 6** (about one tick in three), never above its maximum. The sail is not the most damaged one; the
+  pick looks random.
+- Hull, bow, stern and rudder sections are effectively not repaired: two +1 events in nine minutes while all of them were damaged.
+- Destroyed sections (0 HP) stay destroyed.
+- PROVISIONAL: one ship class and one crew; how crew skill (riggers, engineers) changes the chance or the amount is not measured.
 
 ### 3.5 Arms and crew
 - Rule action `Open Crew and Arms Screens` (`TP::Open_CrewArms_Screens`, execute): if the HUD event queue accepts event `0x14` it calls the big GUI event handler; no state is changed by the rule itself. [C] Used in missions 3 (END NIS1), 5 (Player Undocks @ Grant), 7 (Docking), 9 (End NIS1), 11 (END NIS0); **not in mission 1 or 2**.
@@ -88,7 +98,7 @@ A crew repair step runs from the ship info update every 12 s, picks damaged sect
 | Core hp | restored with sections | unresolved [?] (not in the traced heal) |
 | `IsCampaign` | not represented | selects the heal mode |
 | Scaffold effect | one effect at ship centre | per-section jobs unless (campaign ship / base) → one effect |
-| Crew passive repair | none | every 12 s, skill-scaled [?] |
+| Crew passive repair | none | every 12 s: one damaged sail +3 (sometimes +6); hulls not repaired (measured) |
 | Arms/Crew screens | `Open Crew and Arms Screens` ignored (`rules/eval.rs`) | opens screens in missions 3, 5, 7, 9, 11 |
 
 ## 6. Ordered minimal implementation checklist
@@ -120,7 +130,7 @@ A crew repair step runs from the ship info update every 12 s, picks damaged sect
 3. The exact HUD consumers of the weapon-bank state sprites and the meaning of the HUD bytes cleared on heal.
 4. The application of an arms profile (`GunBank %02i`) to ships at mission/battle start, the points spending rules, and how the screens pause the game.
 5. Whether the stored gun-mount name used by the rebuild is the arms-profile gun (assumed) and whether the rebuilt guns keep AI/target state.
-6. Magnitude of the 12 s crew repair tick.
+6. Crew skill scaling of the 12 s repair tick (amount measured for a default crew, see 3.4).
 7. Flag bit 1 on islands/bases as *docker* (bases do not dock, so probably irrelevant).
 
 ## 9. Evidence index
