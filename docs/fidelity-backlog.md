@@ -257,8 +257,8 @@ crew/arms spending, difficulty, native NIS splines, retail calibration of every 
 ## Next retail measurement session
 
 Ranked for Mission 1/tutorial impact. Each needs evidence -> spec -> implementation -> test as above.
-1. Damage per hit: hull drops look like about half the bullet table (medium cannon on wood 14-36 vs table 30-40), gattling 2-3 vs 4-7.
-   Attribute each section-HP drop to the shell that caused it (record shells and HP together from before contact, 1-vs-1).
+1. Done (movement.md): x 0.5 on the player, x 2 on the computer. Next: does difficulty change it (Easy/Hard profile), and
+   why the computer's reinforced hulls are mended but the player's wood hull is not.
 2. Crew-skill scaling of damage control and of rate of fire (Green/Average/Elite crews; SIM-01/06).
 3. Black hole pull vs distance (SIM-09): zero at 2.6 radii; measure 1-2 radii with an empty map (no computer fleet in reach).
 4. Star mortar blast ring timing/push and lob elevation scatter (SIM-07).

@@ -956,6 +956,17 @@ struct ShipHit {
 
 /// Damage rules of one shell hit on section `k` (`damage` = [lower, upper, crit, fire chance, fire strength]).
 /// Criticals are not modelled: in the exe they only feed a tally and crew speech (docs/re/movement.md).
+/// Measured on retail (headless 1-vs-1 skirmishes, profile difficulty 1): shells from the player's side do twice the bullet
+/// table's damage to computer ships, and computer shells do half to the player's. PROVISIONAL: whether difficulty sets these
+/// factors, and what computer-vs-computer and allied hits get, is not measured (1.0 here).
+fn side_damage_scale(shooter: Side, victim: Side) -> f32 {
+    match (shooter, victim) {
+        (Side::Player, Side::Enemy) => 2.0,
+        (Side::Enemy, Side::Player) => 0.5,
+        _ => 1.0,
+    }
+}
+
 fn apply_ship_hit(class: &Class, hp: &mut Health, k: usize, damage: [f32; 5], invuln: f32, fire_free: bool, rng: &mut Rng) -> ShipHit {
     let [lo, hi, _crit, fire_p, fire_str] = damage;
     let protected = invuln >= 1.0;
@@ -1201,7 +1212,10 @@ fn shells(
             let sec = &class.sections[k];
             let key = MATERIALS.iter().find(|m| sec.material.contains(**m)).copied().unwrap_or("Wood");
             // Criticals are not modelled: in the exe they only feed a tally and crew speech (docs/re/movement.md).
-            let damage = bd.damage[key];
+            let mut damage = bd.damage[key];
+            let scale = side_damage_scale(s.side, ship.side);
+            damage[0] *= scale;
+            damage[1] *= scale;
             hits.write(Hit { shooter: s.shooter, victim: se });
             // Script vulnerability: 'Invulnerable Percent' 1.0 takes no damage and no fire; partial values scale the damage.
             let invuln = mission.map_or(0.0, |m| m.invuln);
@@ -1377,6 +1391,13 @@ fn draw(mut g: Gizmos, lib: Res<Library>, target: Res<Target>, ships: Query<(Ent
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn player_shells_hit_twice_as_hard_and_take_half() {
+        assert_eq!(side_damage_scale(Side::Player, Side::Enemy), 2.0);
+        assert_eq!(side_damage_scale(Side::Enemy, Side::Player), 0.5);
+        assert_eq!(side_damage_scale(Side::Enemy, Side::Enemy), 1.0);
+    }
 
     #[test]
     fn health_scale_applies_to_core_and_every_section() {

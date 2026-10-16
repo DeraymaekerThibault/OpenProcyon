@@ -56,6 +56,19 @@ measured bank limit above.
 - Section damage roll = round(uniform(lo, hi)). Damage-smoke level from remaining HP fraction: >75% none,
   50-75 Light, 25-50 Medium, 0-25 Heavy, 0 Destroyed: identical to the remake's thresholds.
 
+## Player vs computer damage factor (measured, retail headless skirmishes 2026-10-16)
+- Two 1-vs-1 skirmishes on The Diablo Strait (Navy Man-O-War vs a computer Pirate Barque, then a Carrack; profile difficulty
+  level 1), section HP logged at 20 Hz on both ships. Every drop matches the bullet table scaled by side:
+  - computer shells on the player's ship: x 0.5. Gattling on wood (table 4-7) drops 2 or 3 (about 1:2, i.e. round(0.5 x roll));
+    medium/heavy cannon on wood (30-40 / 40-60) drop 15-29.
+  - player shells on the computer ship: x 2. Medium cannon on cloth (14-15) drops 28-29 (five times); gattling on cloth (5-7)
+    drops 10-13; medium cannon on reinforced wood (20-30) 41-58; heavy cannon on reinforced wood (35-45) 72-89.
+- PROVISIONAL: whether the factors come from the difficulty level, and what computer-vs-computer or allied hits get, is not
+  measured (the engine uses 1.0 there). Whether the core bleed roll is scaled too is not measured (the engine scales it).
+- Volcano meteors (The Diablo Strait) hit every section of a ship at once for 10-20 each; they are not shells.
+- Damage control also mended the computer ships' reinforced-wood hulls (+5 per 12 s tick) and iron (+2), while the player's
+  plain-wood hull was never mended (see refit-resupply.md 3.4). Cause (material, side or crew) not yet measured.
+
 ### Provisional destroyed-section collision fix
 
 Iron War's Navy torpedo boats have only 50 core HP, but their non-vital sail could continue intercepting shells after reaching zero HP: projectile collision used the original triangles regardless of section damage. The remake now skips destroyed non-vital sections for ship projectile collision, while retaining destroyed vital hull sections for the verified core-damage rule above. A clicked aim point inside a destroyed non-vital section's bounds falls back to the hull centre unless it also lies in vital-section bounds. Neither HP nor weapon damage was changed.
