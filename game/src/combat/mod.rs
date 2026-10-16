@@ -1929,23 +1929,38 @@ mod tests {
         assert_eq!(unreachable, offset.with_y(0.0), "unreachable targets do not produce runaway lead");
     }
 
-    /// Retail damage control (refit-resupply.md#crew-damage-control-measured): one damaged living sail gets +3 (or +6) per tick,
-    /// capped at its maximum; hull sections are left alone.
+    /// Retail damage control (refit-resupply.md#crew-damage-control): riggers mend the most damaged sail +3 per successful
+    /// roll; engineers mend the most damaged hull by floor(10 x mean engineering x material factor).
     #[test]
-    fn crew_damage_control_mends_one_sail_by_three() {
+    fn crew_damage_control_follows_riggers_and_engineers() {
         let lib = Library::load(&assets_dir());
         let class = &lib.classes[lib.index("Ship_Navy_ManOWar")];
-        let mut hp: Vec<f32> = class.sections.iter().map(|s| s.hp).collect();
-        let sails: Vec<usize> = (0..hp.len()).filter(|&i| class.sections[i].material.contains("Cloth")).collect();
-        let hull = (0..hp.len()).find(|i| !sails.contains(i)).unwrap();
-        hp[hull] *= 0.5;
-        assert_eq!(repair_tick(class, &hp, 0.5, 0.9), None, "only sails are mended");
-        hp[sails[1]] -= 10.0;
+        let full: Vec<f32> = class.sections.iter().map(|s| s.hp).collect();
+        let sails: Vec<usize> = (0..full.len()).filter(|&i| class.sections[i].material.contains("Cloth")).collect();
+        let hulls: Vec<usize> = (0..full.len()).filter(|i| !sails.contains(i)).collect();
+        let mut hp = full.clone();
+        hp[sails[0]] -= 30.0;
+        hp[sails[1]] *= 0.5; // most damaged sail
         hp[sails[2]] = 0.0; // destroyed sails stay down
-        assert_eq!(repair_tick(class, &hp, 0.99, 0.9), Some((sails[1], class.sections[sails[1]].hp - 7.0)));
-        assert_eq!(repair_tick(class, &hp, 0.0, 0.1), Some((sails[1], class.sections[sails[1]].hp - 4.0)));
-        hp[sails[1]] = class.sections[sails[1]].hp - 2.0;
-        assert_eq!(repair_tick(class, &hp, 0.0, 0.1), Some((sails[1], class.sections[sails[1]].hp)), "capped at the maximum");
+        hp[hulls[1]] -= 50.0;
+        hp[hulls[2]] *= 0.5; // most damaged hull
+        let mut always = || 0.0;
+        // Run 10: eight riggers averaging 8.25 of 10, seven successes -> +21 on one sail.
+        damage_control(class, &mut hp, &[], &[0.9, 0.9, 0.8, 0.8, 0.8, 0.8, 0.8, 0.0], &mut always);
+        assert_eq!(hp[sails[1]], full[sails[1]] * 0.5 + 21.0);
+        assert_eq!((hp[sails[0]], hp[sails[2]]), (full[sails[0]] - 30.0, 0.0));
+        // Run 9: engineers 9, 7, 7 -> c = 0.767 -> +7 on the most damaged wood section.
+        damage_control(class, &mut hp, &[0.9, 0.7, 0.7], &[], &mut always);
+        assert_eq!(hp[hulls[2]], full[hulls[2]] * 0.5 + 7.0);
+        assert_eq!(hp[hulls[1]], full[hulls[1]] - 50.0);
+        // A failed roll mends nothing; repairs stop at the maximum.
+        let before = hp.clone();
+        damage_control(class, &mut hp, &[0.5], &[0.5], &mut || 0.99);
+        assert_eq!(hp, before);
+        let mut nearly = full.clone();
+        nearly[sails[3]] -= 1.0;
+        damage_control(class, &mut nearly, &[], &[1.0; 8], &mut always);
+        assert_eq!(nearly, full);
     }
 
     /// Retail shells (docs/re/gunnery.md#shell-gravity): gravity MuzzleSpeed^2 / (sqrt(2) * MaximumRange) per gun, launch speed

@@ -54,17 +54,26 @@ Research only; nothing here is implemented. Source: observed behaviour of the or
 Hull sections carry a `criticals=` list of system tags (`Cargo Hold`, `Spotter Equitment`, `Power Transformer Engines/Guns`, `Engines`, `MaxVelocity`, `Rudder Linkage`, `Lower Deck Guns`, `Munnitions`, `Cloaking Generator`; names, section parser). A section stores a per-system hit counter (10 ints) and the HUD shows "Critical Systems Hit: … Ammunition". What a Munnitions hit *does* was not found; nothing links it to an ammo count. [?] (Do not infer ammo from the label.)
 
 ### 3.4 Passive crew repair (not a tender service)
-A crew repair step runs from the ship info update every 12 s, picks damaged sections, scales a chance by the crew engineering skill and adds hit points (clamped to max; cancels the damage effect at full). This is the only non-dock repair found.
+Every 12 s each ship's crew does one round of damage control. This is the only non-dock repair. Skills below are the
+crew data's 1-10 values divided by 10.
 
-#### Crew damage control (measured)
-Measured on the running original game (2026-10): section hit points of a skirmish Navy Man-O-War (default crew) logged
-about 20 times a second through two battles, about nine minutes in all.
-- Ticks fall exactly 12.0 s apart. On almost every tick while a sail is damaged (15 of 16), **one damaged sail section gains
-  3 hit points, sometimes 6** (about one tick in three), never above its maximum. The sail is not the most damaged one; the
-  pick looks random.
-- Hull, bow, stern and rudder sections are effectively not repaired: two +1 events in nine minutes while all of them were damaged.
-- Destroyed sections (0 HP) stay destroyed.
-- PROVISIONAL: one ship class and one crew; how crew skill (riggers, engineers) changes the chance or the amount is not measured.
+#### Crew damage control
+- **Which sections:** the most damaged sail (lowest current/max among damaged cloth sections still above 0 HP), and the most
+  damaged non-sail section (hull, bow, stern, rudder, ...). Sections at 0 HP are never mended. Hit points never go above
+  the maximum, and the damage effect stops once a section is full.
+- **Sails (riggers):** one roll per rigger slot. Chance = that rigger's Rigging (plus +0.1 when the captain's Leadership and
+  +0.05 when the first mate's Leadership exceed a per-ship threshold, clamped to 0..1). **Each success adds 3 HP.**
+- **Hull (engineers):** one roll. c = mean over the engineer slots of each one's Engineering (with the same captain/first
+  mate bonuses, clamped to 0..1). Chance c; on success the section gains **floor(10 x c x material factor)** HP, with
+  factor Wood 1.0, Reinforced Wood 0.67, Iron 0.33 (Stone and the others 0).
+- Measured on the original (headless 1-vs-1 skirmishes, Navy Man-O-War, section HP at 20 Hz): default crew, sails +3 or
+  +6 on 15 of 16 ticks and the hull nearly never (two +1s in nine minutes); three engineers of Engineering 9/7/7: the hull
+  +7 (sometimes +8) on almost every tick; eight riggers averaging Rigging 8.25: the sail +21 (seven successes) per tick.
+  Every one of 49 logged repairs went to the most damaged section of its group. Computer ships mended reinforced wood +5
+  and iron +2 per tick, one crew value c = 0.75 fitting both.
+- PROVISIONAL in the engine: the leadership bonus thresholds are not known (bonuses not modelled); computer crews use 0.75
+  for every slot; the player's empty slots count as generic hands (0.1); the order of materials past Iron in the factor
+  table is assumed.
 
 ### 3.5 Arms and crew
 - Rule action `Open Crew and Arms Screens` (`TP::Open_CrewArms_Screens`, execute): if the HUD event queue accepts event `0x14` it calls the big GUI event handler; no state is changed by the rule itself. [C] Used in missions 3 (END NIS1), 5 (Player Undocks @ Grant), 7 (Docking), 9 (End NIS1), 11 (END NIS0); **not in mission 1 or 2**.

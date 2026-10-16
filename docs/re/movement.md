@@ -70,8 +70,7 @@ measured bank limit above.
 - PROVISIONAL: Easy x 4 rests on two hits. Computer-vs-computer and allied hits are not measured (the engine uses 1.0).
   Whether the core bleed roll is scaled too is not measured (the engine scales it).
 - Volcano meteors (The Diablo Strait) hit every section of a ship at once for 10-20 each; they are not shells.
-- Damage control also mended the computer ships' reinforced-wood hulls (+5 per 12 s tick) and iron (+2), while the player's
-  plain-wood hull was never mended (see refit-resupply.md 3.4). Cause (material, side or crew) not yet measured.
+- Damage control mends hulls only through engineers and sails through riggers (refit-resupply.md 3.4).
 
 ### Provisional destroyed-section collision fix
 
