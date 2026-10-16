@@ -127,6 +127,10 @@ panel → regression gate, both-view smoke and Mission 1 / synthetic Mission 5/9
 | PT-05 | Partial | Engine trails draw behind other transparent geometry: they vanish when a sail (e.g. a bottom sail) is behind them. Fix draw order/depth for trails. | `fx.rs`, `ship.rs` |
 | PT-06 | Provisional | Wake effect and the dotted course line need another visual pass against the original. | `fx.rs`, `course.rs`; reference footage |
 | PT-07 | Missing | Lob weapons have no targeting cursor effect while aiming (ground target marker, firing-solution feedback). | `view.rs`, `world_hud.rs`; AUD-03f |
+| PT-08 | Partial | The player's own ship auto-engages enemies; in the original it should not fire on its own (unlike AI captains). Check against retail and stop it. | `combat/mod.rs`, `ship.rs`; [retail firing controls](re/gunnery.md) |
+| PT-09 | Provisional | AI behaviour pass: bring captain/enemy movement, target choice and engagement closer to the original. | `ship.rs`, `scenario.rs`, `combat/`; reference footage |
+| PT-10 | Partial | Some maps that should have ports allowing docking/repair do not offer it. Find which docks the data enables and why ours are refused. | `docking.rs`, `assets/data/docks.json` |
+| PT-11 | Missing | Docking places are missing their indicator light effect. | `docking.rs`, `fx.rs` |
 
 Multiplayer/network/chat parity is **deferred outside the current single-player target**, not implemented or silently counted as complete.
 
