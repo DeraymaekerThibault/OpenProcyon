@@ -44,5 +44,5 @@ human-male table, then has it spoken by the first named crew member at that post
 ship's faction crew (Navy human male, Procyon PR). PROVISIONAL: that the numbering means the same line across species, the
 pirates' generic crew voice (human male until checked; possibly an alien set), and AI-captain (`<xx>AICAPTAIN`) lines unused.
 The import copies every species' post lines. The talking head shows the speaker: the named crew member's portrait, else
-the faction's generic face (PROVISIONAL: first mate for humans, the first Procyon face).
+the faction's default crew face, the same one the Crew screen shows for an unnamed hand (owner observation).
 Regenerate the table: `python3 -m tools.export_voices table "$PROCYON_GAME_ROOT" <CL_Data/Voicelines/English> Procyon HumanMale HumanFemale Robot`.
