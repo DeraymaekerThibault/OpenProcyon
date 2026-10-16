@@ -231,7 +231,9 @@ Bar parts share their top row (gauge offsets are "from MainBar TopLeft" and ever
 differ only in bottom rows), docked with the shortest part's bottom on the screen edge. The weapon and ship-bar toggles stand on their
 `*_ToggleDetail` arms: arm bottom `Move_Toggle*_Detail_Down` px behind the compass / talking head, button at
 `Toggle*_Button_Offset_From_Detail_TopLeft` (checked against a retail 1:1 screenshot). HUD ship icons use the class's WOT icon name.
-Not done: cursors, ship-name labels, tooltips.
+A selected secondary ship shows its name on the `ShipName_HUDComponent_Backdrop_*` plate at the top (PROVISIONAL placement). The
+game-speed control (not retail, a testing aid) is a tooltip-backdrop plate beside the bar's right end with halve / double buttons (1x-16x).
+Not done: cursors, tooltips.
 
 ## Sound
 `game/src/audio.rs` plays the original Ogg files: gun fire, per-material bullet impacts, section loss and ship explosion

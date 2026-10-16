@@ -110,7 +110,7 @@ pub fn plugin(app: &mut App) {
         Update,
         (
             build.before(HudSet).after(crate::sprites::choose_skin).run_if(in_state(crate::menu::Screen::Battle)),
-            (overlay, update_dial, update_sweep, radar_face, button_states, update_gauges, update_guns, head_art, pause_art, fleet_art).after(HudSet),
+            (overlay, update_dial, update_sweep, radar_face, button_states, update_gauges, update_guns, head_art, pause_art, fleet_art, name_plate).after(HudSet),
         ),
     );
 }
@@ -224,6 +224,7 @@ fn build(
     bar: Res<BarParts>,
     lib: Res<Library>,
     window: Single<&Window, With<bevy::window::PrimaryWindow>>,
+    fonts: Option<Res<crate::sprites::Fonts>>,
     player: Single<(&Ship, &GunStates), With<PlayerShip>>,
     old: Query<Entity, With<HudRoot>>,
     mut last: Local<Option<(usize, &'static str, u32, Vec<String>)>>,
@@ -268,6 +269,7 @@ fn build(
     };
     let bar_w = items.iter().map(width).sum::<f32>() - overlap * (items.len() as f32 - 1.0);
     commands_window(&mut commands, &c, root, window.width() / s, bar_w, floor);
+    speed_plate(&mut commands, &c, fonts.as_deref(), root, (window.width() / s + bar_w) / 2.0);
     {
         let dock = commands
             .spawn((
@@ -670,6 +672,9 @@ struct FleetIcon(usize);
 struct FleetHealth(usize);
 #[derive(Component)]
 struct FleetStatus(usize);
+/// The selected secondary ship's name on its plate.
+#[derive(Component)]
+struct PlateText;
 /// A Fleet Commands button whose art follows the fleet state (active formation, hold fire).
 #[derive(Component)]
 struct CommandArt([States; 2]);
@@ -714,6 +719,87 @@ fn commands_window(commands: &mut Commands, c: &Ctx, root: Entity, screen_w: f32
     }
 }
 
+/// Game-speed control (testing aid, not retail): a tooltip-backdrop plate beside the main bar's right end between round slower /
+/// faster buttons (the front-end Prev / Next art at 30 px, which only the Navy set has).
+fn speed_plate(commands: &mut Commands, c: &Ctx, fonts: Option<&crate::sprites::Fonts>, root: Entity, bar_right: f32) {
+    use crate::panels::{SpeedButton, SpeedLabel};
+    let (l, r, h) = (c.size_of("ToolTipBackdrop_Left").x, c.size_of("ToolTipBackdrop_Right").x, c.size_of("ToolTipBackdrop_Center").y);
+    let (w, b) = (110.0, 30.0);
+    let plate = commands.spawn((Node { top: Val::Auto, bottom: px(6.0, c.s), ..c.abs(bar_right + 6.0, 0.0, Vec2::new(w, h)) }, ChildOf(root))).id();
+    let (x0, x1) = (b / 2.0, w - b / 2.0);
+    for (name, x, pw) in [("ToolTipBackdrop_Center", x0 + l, x1 - x0 - l - r), ("ToolTipBackdrop_Left", x0, l), ("ToolTipBackdrop_Right", x1 - r, r)] {
+        if let Some((mut img, _)) = c.sprite(name, false) {
+            img.image_mode = NodeImageMode::Stretch;
+            commands.spawn((img, c.abs(x, 0.0, Vec2::new(pw, h)), ChildOf(plate), Solid, Interaction::None, FocusPolicy::Block));
+        }
+    }
+    let menu = HudData { comps: c.hud.comps.clone(), skin: crate::sprites::MENU_SKIN };
+    let arrows = Ctx { hud: &menu, ..*c };
+    for (button, name, x) in [(SpeedButton::Slower, "FrontEnd_Prev_Button", 0.0), (SpeedButton::Faster, "FrontEnd_Next_Button", w - b)] {
+        if let (Some((mut img, _)), Some(states)) = (arrows.sprite(name, false), arrows.states(name)) {
+            img.image_mode = NodeImageMode::Stretch;
+            commands.spawn((button, img, states, c.abs(x, (h - b) / 2.0, Vec2::splat(b)), ChildOf(plate), Solid, Interaction::None, FocusPolicy::Block));
+        }
+    }
+    let Some(font) = fonts.and_then(|f| f.0.get("UniversBold14")) else { return };
+    let label = Node { justify_content: JustifyContent::Center, align_items: AlignItems::Center, ..c.abs(b, 0.0, Vec2::new(w - 2.0 * b, h)) };
+    commands.spawn((label, ChildOf(plate))).with_children(|p| {
+        p.spawn((SpeedLabel, font.text("", c.s, Color::srgb(0.25, 0.12, 0.03))));
+    });
+}
+
+/// Name plate of a selected secondary ship (the HUD then hides the controls that only work on the command ship).
+fn name_plate(
+    mut commands: Commands,
+    assets: Res<AssetServer>,
+    hud: Res<HudData>,
+    fonts: Option<Res<crate::sprites::Fonts>>,
+    model: Res<crate::panels::FleetHud>,
+    window: Single<&Window, With<bevy::window::PrimaryWindow>>,
+    roots: Query<Entity, With<HudRoot>>,
+    mut plate: Query<(&mut Visibility, &ChildOf), With<crate::panels::SelectedName>>,
+    mut plate_text: Query<&mut Text, With<PlateText>>,
+) {
+    let Some(root) = roots.iter().next() else { return };
+    let s = window.height() / REF_H;
+    let c = Ctx { assets: &assets, hud: &hud, s, trim: false };
+    let plate_live = plate.iter().any(|(_, p)| p.parent() == root);
+    if !plate_live {
+        // Name plate of a selected secondary ship (the HUD then hides the controls that only work on the command ship).
+        // `ShipName_HUDComponent_Backdrop_*` of the player's art set, text `ShipName_HUDComponent_Text_Offset_From_Backdrop_TopLeft`
+        // below its top. PROVISIONAL: top-centre placement, the art set (player's, not the selected ship's) and the font.
+        let skin = match hud.skin {
+            "Pirate" | "Procyon" => hud.skin,
+            _ => "Navy",
+        };
+        let part = |p: &str| format!("ShipName_HUDComponent_Backdrop_{p}_{skin}");
+        let row = Node { position_type: PositionType::Absolute, top: px(4.0, s), left: Val::Px(0.0), right: Val::Px(0.0), justify_content: JustifyContent::Center, ..default() };
+        let row = commands.spawn((crate::panels::SelectedName, row, Visibility::Hidden, ChildOf(root))).id();
+        let text_y = offset(&hud, "ShipName_HUDComponent_Text_Offset_From_Backdrop_TopLeft").y;
+        for side in ["Left", "Center", "Right"] {
+            let Some((mut img, sz)) = c.sprite(&part(side), false) else { continue };
+            img.image_mode = NodeImageMode::Stretch;
+            let mut node = Node { width: px(sz.x, s), height: px(sz.y, s), ..default() };
+            if side == "Center" {
+                (node.width, node.min_width) = (Val::Auto, px(sz.x, s));
+                node.justify_content = JustifyContent::Center;
+            }
+            let piece = commands.spawn((img, node, ChildOf(row))).id();
+            if let Some(font) = fonts.as_deref().and_then(|f| f.0.get("UniversBold14")).filter(|_| side == "Center") {
+                // The offset goes on the text: padding would also move the plate art (images fill the content box).
+                let dark = Color::srgb(0.25, 0.12, 0.03);
+                commands.spawn((PlateText, font.text("", s, dark), Node { margin: UiRect::top(px(text_y, s)), ..default() }, ChildOf(piece)));
+            }
+        }
+    }
+    for mut text in &mut plate_text {
+        text.set_if_neq(Text::new(model.name.clone()));
+    }
+    for (mut v, _) in &mut plate {
+        v.set_if_neq(if model.shown && !model.direct && !model.name.is_empty() { Visibility::Inherited } else { Visibility::Hidden });
+    }
+}
+
 fn button_states(mut q: Query<(&States, &Interaction, &mut ImageNode), Or<(Changed<Interaction>, Added<States>)>>) {
     for (states, i, mut img) in &mut q {
         let (h, r) = &states.0[state_index(i)];
@@ -745,17 +831,13 @@ fn fleet_art(
     roots: Query<Entity, With<HudRoot>>,
     mut built: Local<Option<(Entity, usize)>>,
     old: Query<(Entity, &crate::panels::FleetWindow)>,
-    mut windows: Query<(&crate::panels::FleetWindow, &mut Visibility), (Without<crate::panels::FleetButton>, Without<crate::panels::SelectedName>, Without<FleetStatus>)>,
+    mut windows: Query<(&crate::panels::FleetWindow, &mut Visibility), (Without<crate::panels::FleetButton>, Without<FleetStatus>, Without<crate::panels::SelectedName>)>,
     mut buttons: Query<(&crate::panels::FleetButton, &Interaction, &mut ImageNode, Option<&CommandArt>), Without<FleetIcon>>,
     mut icons: Query<(&FleetIcon, &mut ImageNode), Without<crate::panels::FleetButton>>,
     mut health: Query<(&FleetHealth, &mut Node, &mut ImageNode), (Without<crate::panels::FleetButton>, Without<FleetIcon>)>,
     mut status: Query<(&FleetStatus, &mut ImageNode, &mut Visibility), (Without<crate::panels::FleetButton>, Without<FleetIcon>, Without<FleetHealth>)>,
-    mut name: Query<
-        (&mut Text, &mut Visibility),
-        (With<crate::panels::SelectedName>, Without<crate::panels::FleetWindow>, Without<crate::panels::FleetButton>, Without<FleetStatus>),
-    >,
 ) {
-    use crate::panels::{FleetButton as B, FleetWindow, SelectedName};
+    use crate::panels::{FleetButton as B, FleetWindow};
     let (Some(root), Some(anchor)) = (roots.iter().next(), anchor) else { return };
     let s = window.height() / REF_H;
     let c = Ctx { assets: &assets, hud: &hud, s, trim: false };
@@ -799,15 +881,6 @@ fn fleet_art(
                 commands.spawn((FleetStatus(i), img, c.abs(at.x, at.y, sz), Visibility::Hidden, ChildOf(cell)));
             }
         }
-    }
-    if name.is_empty() {
-        commands.spawn((
-            SelectedName,
-            Text::new(""),
-            TextFont { font_size: FontSize::Px(18.0 * s), ..default() },
-            Node { position_type: PositionType::Absolute, top: px(40.0, s), left: Val::Percent(40.0), ..default() },
-            ChildOf(root),
-        ));
     }
     for (w, mut v) in &mut windows {
         v.set_if_neq(if if w.0 { model.ships } else { model.commands } { Visibility::Inherited } else { Visibility::Hidden });
@@ -854,10 +927,6 @@ fn fleet_art(
             img.image = h;
             img.rect = Some(r);
         }
-    }
-    for (mut text, mut v) in &mut name {
-        text.set_if_neq(Text::new(model.name.clone()));
-        v.set_if_neq(if model.shown { Visibility::Inherited } else { Visibility::Hidden });
     }
 }
 
