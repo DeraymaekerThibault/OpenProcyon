@@ -94,6 +94,7 @@ def parse_twt(text):
         objects=list(objects(nodes)),
         teams=[],
         ship_names={},
+        primaries=set(),
     )
     size, buf = metadata.get("World Size - Max"), metadata.get("World Buffer Size")
     m["world_half"] = size[0] - buf if size is not None and buf is not None else None
@@ -124,6 +125,8 @@ def parse_twt(text):
                 a.get("Localized Ship Name", ""),
                 a.get("Ship Name", ""),
             )
+            if str(a.get("Primary Ship", "")).upper() == "TRUE":
+                m["primaries"].add(a["World Object ID"])
     return m
 
 
@@ -257,13 +260,15 @@ def main(root, out):
                 "pos": o["pos"],
                 "player": o["player"],
                 "name": ship_name(text, m["ship_names"].get(o["id"])),
+                # The map's Setup Ship rule picks each player's command ship.
+                **({"primary": True} if o["id"] in m["primaries"] else {}),
             }
             for o in m["objects"]
             if o["type"].startswith("Ship_")
             and o["player"] is not None
             and o["player"] >= 0
         ]
-        del m["ship_names"]
+        del m["ship_names"], m["primaries"]
         for o in m["objects"]:
             o["scene"] = mesh_scene(root, o["type"])
         # Scenery only (incl. black holes): ships, bullets (mines), animals and nebulae are not static meshes.
