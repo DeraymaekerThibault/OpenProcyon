@@ -94,7 +94,7 @@ def parse_twt(text):
         objects=list(objects(nodes)),
         teams=[],
         ship_names={},
-        primaries=set(),
+        primaries=[],  # lists, not sets: export_campaign writes this dict as JSON
     )
     size, buf = metadata.get("World Size - Max"), metadata.get("World Buffer Size")
     m["world_half"] = size[0] - buf if size is not None and buf is not None else None
@@ -126,7 +126,7 @@ def parse_twt(text):
                 a.get("Ship Name", ""),
             )
             if str(a.get("Primary Ship", "")).upper() == "TRUE":
-                m["primaries"].add(a["World Object ID"])
+                m["primaries"].append(a["World Object ID"])
     return m
 
 

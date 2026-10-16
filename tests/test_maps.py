@@ -1,3 +1,4 @@
+import json
 import unittest
 
 from tools.export_maps import parse_tst, parse_twt, ship_name
@@ -55,11 +56,13 @@ class MapTests(unittest.TestCase):
 
     def test_setup_ship_names(self):
         twt = "\n\tID Int 7\n\tType String 'Ship_Navy_Frigate'\n\t00000014 State\n\t{\n\t\tHasState Bool False\n\t\tPosition Vector3( 1, 2, 3 )\n\t\tOrientation Matrix33( 1, 0, 0, 0, 1, 0, 0, 0, 1 )\n\t\tPlayerIndex Int 0\n\t}\n"
-        twt += "Type String '*State Init* Setup Ship'\nWorld Object ID Int 7\nShip Name String 'RLS X'\nLocalized Ship Name String 'IDGS_X'\n}"
+        twt += "Type String '*State Init* Setup Ship'\nWorld Object ID Int 7\nShip Name String 'RLS X'\nLocalized Ship Name String 'IDGS_X'\nPrimary Ship Bool True\n}"
         m = parse_twt(twt)
         self.assertEqual(
             (m["objects"][0]["id"], m["ship_names"]), (7, {7: ("IDGS_X", "RLS X")})
         )
+        self.assertEqual(m["primaries"], [7])
+        json.dumps(m)  # export_campaign writes the parse result as is
 
     def test_tst(self):
         els = parse_tst(
