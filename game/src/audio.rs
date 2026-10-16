@@ -1,6 +1,6 @@
 //! Sound: original Ogg files from assets/sound (tools/build_assets.sh). Names, volumes and max distances come from the WOTs
-//! (gun SoundName/SoundVolume/SoundMaxDistance, bullet impact pools, ship EngineSoundName Half/Full/Emergency) and the exe's
-//! built-in pools (docs/re/sound.md). PROVISIONAL: the distance falloff curve, engine/music levels, and which event uses which exe pool.
+//! (gun SoundName/SoundVolume/SoundMaxDistance, bullet impact pools, ship EngineSoundName Half/Full/Emergency) and the original's
+//! built-in pools (docs/re/sound.md). PROVISIONAL: the distance falloff curve, engine/music levels, and which event uses which built-in pool.
 
 use bevy::audio::Volume;
 use bevy::prelude::*;
@@ -79,7 +79,7 @@ fn travel(
 
 /// Looping environment beds by camera distance: black holes (`Ambience_Black_Hole`), meteor storms (inside/outside variants by
 /// the emitter's distance) and mission 7's Calyan Abyss ('Set Is In Calyan Abyss', played on the black-hole bed).
-/// PROVISIONAL: the distances and which bed the abyss uses are not recovered from the exe.
+/// PROVISIONAL: the distances and which bed the abyss uses are not recovered from the original.
 #[derive(Component)]
 struct Ambient(Entity);
 

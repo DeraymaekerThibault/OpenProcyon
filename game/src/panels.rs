@@ -428,7 +428,7 @@ pub fn gauge_value(gauge: Gauge, lib: &Library, ship: &Ship, health: &Health, cr
     let class = &lib.classes[ship.class];
     match gauge {
         Gauge::Health => health.core / class.core_hp,
-        // 'Primary Ship Combat Strength' (tooltip) is the exe's Combat Strength: the crew's defending strength left (docs/re/boarding.md).
+        // 'Primary Ship Combat Strength' (tooltip) is the original's Combat Strength: the crew's defending strength left (docs/re/boarding.md).
         // PROVISIONAL [?]: the retail gauge's source is inferred from the name, not traced.
         Gauge::Combat => crew.strength.defend as f32 / crew.strength.full.max(1) as f32,
         Gauge::Sail => combat::speed_factor(class, health) * ship.sail_energy,

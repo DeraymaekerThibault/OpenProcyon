@@ -2,7 +2,7 @@
 use crate::*;
 
 /// Names ships that no script names: a random not-yet-used entry of the ship type's pool, as open maps do (WOT 'Available Unique
-/// Ship Name'); a used-up pool repeats names. PROVISIONAL: the exe's selection (and its uniqueness scope) is not decoded.
+/// Ship Name'); a used-up pool repeats names. PROVISIONAL: the original's selection (and its uniqueness scope) is unknown.
 pub struct Namer {
     pub used: std::collections::HashSet<String>,
     pub seed: u64,

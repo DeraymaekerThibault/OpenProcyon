@@ -59,7 +59,7 @@ enum Head {
     Light,
     Voice,
 }
-/// PROVISIONAL: the exe cycles the voice box through its Start..Stop frames while speaking; the cadence was not recovered.
+/// PROVISIONAL: the original cycles the voice box through its Start..Stop frames while speaking; the cadence was not recovered.
 const VOICE_FPS: f32 = 8.0;
 #[derive(Resource)]
 struct HeadFrames {
@@ -464,7 +464,7 @@ fn build(
                 commands.spawn((GunSlot { bank: *bank, icon: true }, GunButton(*bank), img, c.abs(icon_at.x, icon_at.y, sz), ChildOf(weapon), solid()));
             }
             // Recharge bar beside the icon: the empty bar (WeaponBar_SlotBackground) with the yellow WeaponBar_RechargeStatus growing from the bottom.
-            // PROVISIONAL: drawing order/fill direction are read from the artwork; the exe's drawing code was not found.
+            // PROVISIONAL: drawing order/fill direction are read from the artwork; the original's drawing code was not found.
             if let (Some((outline, osz)), Some((img, fsz))) = (c.sprite("WeaponBar_SlotBackground", false), c.sprite("WeaponBar_RechargeStatus", false)) {
                 let at = pos + offset(&hud, "Offset_WeaponBar_Recharge");
                 commands.spawn((outline, c.abs(at.x, at.y, osz), ChildOf(weapon)));

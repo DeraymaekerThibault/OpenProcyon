@@ -13,7 +13,7 @@ Implemented in `game/src/lifeboats.rs` (status in §9); this file stays the evid
 
 ## 2. Confirmed findings
 
-### 2.1 Rule action `Set Lifeboat Creation State` — class `TP::SetLifeboatsOn`
+### 2.1 Rule action `Set Lifeboat Creation State`
 - Fields `Group Name`, `Boolean`, editor text "Set Group/Unit %s Lifeboat creation State = %s". [C]
 - Execute resolves the name list with the shared group/unit resolver, then for each resolved entity that is a ship writes the `Boolean` into that ship's **Create Lifeboats** flag. Non-ship entities are skipped. It affects ships that exist when the rule runs, once; it is not a group property. [C] (Resolver identity with other group actions is [I].)
 - Meaning: "this ship will leave lifeboats when destroyed". `TRUE` sets, `FALSE` clears.
@@ -33,7 +33,7 @@ Implemented in `game/src/lifeboats.rs` (status in §9); this file stays the evid
 - Two uniform random numbers in [-100, 100) (world LCG, multiplier `0x19660D`, increment `0x3C6EF35F`, float from the low 23 bits) give a direction; the lifeboat is given a **one-waypoint path at ship position + 10000 × that offset** (so effectively "sail straight that way forever"), and its ordered throttle is a further uniform draw mapped to **0.2 + 0.8·u**, clamped to [0, 1]. Path-active flag set on its AI entity. [C for constants; "faces and sails along the same direction" is I]
 - Class speeds (WOT `MaxSpeed`, same units as `ship.json`): Navy 0.556, Civilian 1.056, Pirate 0.839, Procyon 0.5 (Cutter is 8.06). So drift is 0.1–1.1 units/s: lifeboats stay near the wreck for a long time. Hull section hp is 999, not vital. [C, from WOTs]
 - **No lifetime timer, off-map cull or fade** was found in creation, the pickup tick or the (few) other lifeboat-flag readers. They persist until collected, destroyed, or the mission ends. [I: absence of evidence; a generic world-bounds rule was not ruled out]
-- Lifeboat AI: the ship AI entity update (`TP::ShipAIEntity`) runs the pickup test first every tick, then the normal AI update only for ships whose owner is unset or flagged as AI-controlled. Whether human-owned lifeboats get steering is [?].
+- Lifeboat AI: the ship AI update runs the pickup test first every tick, then the normal AI update only for ships whose owner is unset or flagged as AI-controlled. Whether human-owned lifeboats get steering is [?].
 
 ### 2.4 Collision, targeting, rosters
 - Lifeboat WOTs use `ResponseType = Lifeboat` (not `Ship`), bounding-box detection; the Civilian/Navy lifeboats have an authored sphere (radius 2.0 at local (0,0,1)), Pirate/Procyon use a mesh-derived sphere. `Distance to Start Sphere Picking = 18`, icon `ShipBar_ShipIcon_Navy_LifeBoat`. [C]
@@ -48,7 +48,7 @@ Implemented in `game/src/lifeboats.rs` (status in §9); this file stays the evid
 2. Candidates = the world's category-0 entity list (all ships in practice [I]), then three filters: drop the entity itself, drop every lifeboat, keep only entities with entity-flag bit 0 whose damage-sections state field is 0 (alive/not destroyed [I]). So **any alive non-lifeboat ship qualifies: human or AI, own, allied, neutral or enemy**. [C]
 3. Take the candidate with the smallest **surface distance** (mode 1 = centre distance between the two bounding spheres' world centres minus the sum of their radii; spheres from the collision entity). [C]
 4. The pick happens when that nearest distance is within the AI entity's range field **and** the second test, surface distance ≤ 0 (spheres overlap), passes. With a non-negative range the second test is the effective rule: **contact of bounding spheres**. [C for the tests; value of the range field is [?], see §4]
-5. On success, in this order: (a) lifeboat queued for removal from the world; (b) increments the **lifeboats-saved record (collector owner, lifeboat owner)** unless a session flag is set; (c) a UI sound `HUD_Lifeboat_Pickup` is started through the audio object, unconditionally of who collected; (d) **only if the collector's owner is the local player** **and** the alliance matrix does not report the two owners as mutually allied (value 3): live points +2 and the stats counter `SinglePlayer Points` +2. The same arithmetic is the rule action `Add Victory Points for SinglePlayer` (`TP::AddVictoryPoints` execute: live counter + stats counter, both only when the session flag is clear). [C]
+5. On success, in this order: (a) lifeboat queued for removal from the world; (b) increments the **lifeboats-saved record (collector owner, lifeboat owner)** unless a session flag is set; (c) a UI sound `HUD_Lifeboat_Pickup` is started through the audio object, unconditionally of who collected; (d) **only if the collector's owner is the local player** **and** the alliance matrix does not report the two owners as mutually allied (value 3): live points +2 and the stats counter `SinglePlayer Points` +2. The same arithmetic is the rule action `Add Victory Points for SinglePlayer` (live counter + stats counter, both only when the session flag is clear). [C]
 6. No crew, ship repair, banner, speech or objective call is in the handler. **Pickup does not change the collector's crew**; "Grange and his men" is flavour. [C by absence]
 - Only the nearest candidate is tested each tick (a farther touching ship does not collect). One collector per lifeboat; the lifeboat is gone next frame. [C]
 
@@ -58,9 +58,9 @@ Implemented in `game/src/lifeboats.rs` (status in §9); this file stays the evid
 - So the stats screen's "lifeboats saved" and the PvP capture count are the same data, keyed by collector and lifeboat owner, no ally sharing.
 
 ### 2.7 Conditions
-- **`Player Vs Player capture count`** = `TP::PlayerVsPlayerLifeboatCaptureCount` (text "Player %s has captured %s %d from Player %s"). Fields `Player Name A`, `Player Name B`, `Equivalence` (`Greater Than` / `Less Than` / `Equal To`), `Number Of Captures`. Resolves both names (index in the world's player-name list, last match, -1 if absent); if either is unknown the condition is **false**; otherwise compares the stored count for (A as collector, B as lifeboat owner), 0 if no record, with the number. An unrecognised equivalence string is false. [C]
-- **`Player has no lifeboats`** = `TP::PlayerHasNoLifeboats`. Field `Player Name`. Unknown player name → **true**. Otherwise it scans the ship list and returns **false iff some entity whose owner index equals that player has `Is Lifeboat`**. No liveness test; an entity queued for removal still counts until the world flushes it. It does not look at groups, only the owner. [C]
-- `Team has captured a ship from Group/Unit` is a different class (`TP::TeamHasCapturedAShip`, boarding `ShipCapturedMsg` receiver) and does not use this table. [C]
+- **`Player Vs Player capture count`** (text "Player %s has captured %s %d from Player %s"). Fields `Player Name A`, `Player Name B`, `Equivalence` (`Greater Than` / `Less Than` / `Equal To`), `Number Of Captures`. Resolves both names (index in the world's player-name list, last match, -1 if absent); if either is unknown the condition is **false**; otherwise compares the stored count for (A as collector, B as lifeboat owner), 0 if no record, with the number. An unrecognised equivalence string is false. [C]
+- **`Player has no lifeboats`**. Field `Player Name`. Unknown player name → **true**. Otherwise it scans the ship list and returns **false iff some entity whose owner index equals that player has `Is Lifeboat`**. No liveness test; an entity queued for removal still counts until the world flushes it. It does not look at groups, only the owner. [C]
+- `Team has captured a ship from Group/Unit` is a different condition (it counts boarding captures) and does not use this table. [C]
 
 ## 3. Mission usage (exported rules, all 13 missions)
 

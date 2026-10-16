@@ -8,17 +8,17 @@ Camera visibility, gun range, script visibility, sight range and nebula occlusio
 
 Source: observed behaviour of the original game and its retail data files, described in our own words. Related: [docking-and-orders.md](docking-and-orders.md), [nebula-landmark.md](nebula-landmark.md), [starmap.md](starmap.md), [cloaking.md](cloaking.md).
 
-## 1. Confirmed native sight helper
+## 1. Sight test
 
-**0x0055ecf0** supplies the Dock/Focus sight test and is also called by the native UI-visible-list path **0x0055e870**.
+The Dock/Focus "in sight" test and the list of objects the player's UI may show use one sight test.
 
 For the current ship, then each ship in its group:
 
 1. Read the observer's AI `Default SightRange` (→ AI).
-2. Compute distance with **0x00453df0**. Its surface-distance mode uses the two collision bounding-sphere centres and subtracts both radii; it also has a centre-distance mode. The docking investigation identifies surface mode for this use.
+2. Measure **surface distance**: the distance between the two collision bounding-sphere centres minus both radii.
 3. Require distance **strictly less than** that observer's range.
-4. Require occlusion helper **0x0055ec00** to report no blocker.
-5. Succeed if any observer qualifies. With no current ship, the native helper returns true.
+4. Require that no occluder (§2) blocks the line between them.
+5. Succeed if any observer qualifies. With no current ship, the test passes.
 
 Thus a large object's centre can lie beyond the sight range while its surface remains in range. This is 3D distance, so altitude matters. Sharing is established for the current group, **not an all-allied-fleets intelligence network**. Last-known-contact positions are not established.
 
@@ -26,17 +26,17 @@ Retail ranges vary: the inspected ship catalogue includes 300, 400, 450, 500, 60
 
 ### Separate scenery policy
 
-**0x0055e870** checks render-entity state and UI/debug/NIS-style flags and distinguishes object flag **0x8000**. Island construction **0x005d7310** sets that flag. The island branch has a separate distance/occlusion path rather than simply using the ship sight helper; its exact constants/flags remain undecoded.
+Islands are treated separately by the UI list: they carry their own distance/occlusion rule rather than the ship sight test, and its constants are unknown.
 
-The remake therefore retains scenery as known UI objects with nebula gating, rather than applying an unverified ship-range disappearance rule. Dock/Focus actions still require the ship group's sight. Native context selection **0x0056fdc0** and cursor logic **0x005621a0** also use the sight helper.
+The remake therefore retains scenery as known UI objects with nebula gating, rather than applying an unverified ship-range disappearance rule. Dock/Focus actions still require the ship group's sight. Context selection and the context cursor also use the sight test.
 
 ## 2. Occlusion: authored polygons, not island triangle raycasts
 
-**0x0055ec00** iterates two world occluder lists (and), calling virtual clear-line tests. The second list is skipped when either endpoint has flag 0x8000. RTTI/debug traversal **0x00539b70** identifies these as `TP::ILineOfSightOccluder`. Island and nebula custom-info entities implement it.
+Occluders are islands and nebulae; each tests whether a line between two points is clear. Islands are skipped for lines that start or end at scenery.
 
 ### Shipped island polygons are disabled
 
-Island clear-line method **0x005d8000** tests horizontal game X/Y endpoints against its configured polygon through **0x005dc8a0**; no polygon means clear. Debug drawing **0x005d8070** transforms local polygon points by object orientation and position. This is authored polygon geometry, **not the rendered mesh**.
+An island tests the horizontal game X/Y line against its authored occlusion polygon (WOT `Occlusion Polygon Point Count` and points, placed by the object's orientation and position); no polygon means clear. This is authored polygon geometry, **not the rendered mesh**.
 
 - All **77 map-referenced scenery WOTs carrying `Occlusion Polygon Point Count`** have count **0**.
 - The wider installed WOT catalogue scan also found no positive count among files carrying that field.
@@ -46,7 +46,7 @@ No island mesh-based sensor blocking has been added. Physical collision/projecti
 
 ### Nebula gate
 
-Nebula clear-line method **0x005cd5e0** checks enable state, compares endpoint containing-nebula identity and tests a polygon segment. Different inside/outside membership can immediately reject visibility. The exact accessor/boundary/overlapping-cloud semantics still need instruction-level confirmation.
+A nebula blocks when occlusion is enabled and the two endpoints are not both inside (or both outside) the same cloud, or the line crosses its boundary polygon. Boundary and overlapping-cloud details are unverified.
 
 The shared nebula gate now:
 
@@ -59,15 +59,13 @@ Moving storms' sensor polygons still use the authored mission volumes rather tha
 
 ## 3. Human-player visibility spheres
 
-`TP::IUserInterface::HumanPlayerVisibilitySphere` constructor **0x0055f440** stores centre/radius and prepares a spatial query. UI update **0x0055cee0** builds candidate bounds, then filters candidates through **0x0055e870**; it handles the second occluder list separately.
-
-A group candidate bound reads each member's AI sight, multiplies it by **0x005d5e30(2,0)** and adds member distance from a group centre. The helper aggregates custom-info values; its semantic label is not decoded. It may be a crew/equipment modifier, but that is **not yet a specification**. Candidate bounds and final detection are distinct; the remake does not invent a final range multiplier from this trace.
+The UI first gathers candidate objects inside per-group visibility spheres, then applies the sight test (§1) to them. A group's sphere grows from each member's AI sight times a modifier whose meaning is unknown (possibly crew or equipment; **not yet a specification**) plus the member's distance from the group centre. Candidate bounds and final detection are distinct; the remake does not invent a final range multiplier.
 
 ## 4. Shared runtime implementation
 
 `environment.rs::Sensors` is a **PreUpdate frame-boundary snapshot**, refreshed after scripted fleet-smoke positioning and before HUD input. It collects ship and gameplay-object positions, collision spheres, class sight, group membership, script/life state and cloak state. It avoids reading mutable ship queries from AI/input systems and keeps view-specific code out of the sensing rules. Scenario reset clears it; each refresh discards despawned contacts.
 
-- `in_sight(observer, target, mission)` uses native strict surface distance and live/script-visible observers in the same shared fleet group (mission owner fallback for units without fleet membership), plus the target's script/life state, cloak gate and nebula clear-line test.
+- `in_sight(observer, target, mission)` uses the original's strict surface distance and live/script-visible observers in the same shared fleet group (mission owner fallback for units without fleet membership), plus the target's script/life state, cloak gate and nebula clear-line test.
 - Ships use `Class::sphere`, including its local centre transformed into world space. Some class spheres are exporter-derived fallbacks rather than authored spheres. Unarmed scenery without an exported sphere uses its world collision bounds (provisional), **not offshore dock-point distance**. Collider-free mod docks retain the previous dock-point-bound fallback so they remain usable; all shipped dockable scenery has a collider.
 - `player_sees` uses the primary ship's group. Its own group remains known, script-hidden/dead targets do not qualify, and scenery retains its separate policy. Missing-primary and cinematic reveal exceptions are explicit. Blanket cinematic reveal of scripted-visible units remains provisional pending native NIS/debug flag decoding.
 - Radar and star map contacts, names, reticles, left/right picking and context cursors use the same result. Stale ship menus close after contact loss; Focus/Dock are checked again when clicked. Focus is greyed without group sight, and the camera falls back from an unseen ship/animal focus rather than tracking its hidden coordinates. Projectile debug focus still works.

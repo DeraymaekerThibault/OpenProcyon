@@ -86,7 +86,7 @@ pub struct AsteroidSetup {
     pub mode: PathMode,
 }
 
-/// Rule 'Follow Mode' (exe enum: to end 0, end to end 1, loop 2, teleport loop 3).
+/// Rule 'Follow Mode' (values: to end 0, end to end 1, loop 2, teleport loop 3).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub enum PathMode {
     #[default]

@@ -14,7 +14,7 @@ pub struct Lifeboat {
 }
 
 /// A ship was destroyed in combat (core hit points gone, or the dev kill keys). Scripted `Destroy Group/Unit` is not reported:
-/// whether it starts the exe's lifeboat-spawning explosion state is unverified (docs/re/lifeboats.md §4.3).
+/// whether it starts the original's lifeboat-spawning explosion state is unverified (docs/re/lifeboats.md §4.3).
 #[derive(Message)]
 pub struct ShipLost(pub Entity);
 
@@ -22,12 +22,12 @@ pub const PICKUP_SOUND: &str = "HUD_Lifeboat_Pickup";
 /// Victory points for the local player collecting a lifeboat of a player it is not allied with.
 pub const PICKUP_POINTS: u32 = 2;
 
-/// The lifeboat class a ship of `race` leaves; unknown races leave Civilian boats, as the exe's jump table does.
+/// The lifeboat class a ship of `race` leaves; unknown races leave Civilian boats, as in the original.
 pub fn class_for(race: &str) -> String {
     format!("Ship_{}_Lifeboat", if matches!(race, "Navy" | "Civilian" | "Pirate" | "Procyon") { race } else { "Civilian" })
 }
 
-/// One boat's random drift: the exe draws two uniform values in [-100, 100) as an offset (the path goal is 10000x that far away, i.e.
+/// One boat's random drift: the original draws two uniform values in [-100, 100) as an offset (the path goal is 10000x that far away, i.e.
 /// "sail that way forever") and a throttle `0.2 + 0.8u`. Returns the game-axes offset (x starboard, y forward) and the throttle.
 pub fn drift(rng: &mut crate::combat::Rng) -> (Vec2, f32) {
     let mut u = || rng.f() * 200.0 - 100.0;
@@ -87,7 +87,7 @@ fn lifeboats(
                 Lifeboat { owner: ms.owner.clone() },
                 Ship {
                     class: lib.index(&boat.name),
-                    side: Side::Player, // never an enemy: the exe's relation filter treats lifeboats as friendly to everyone
+                    side: Side::Player, // never an enemy: the original treats lifeboats as friendly to everyone
                     heading,
                     speed: 0.0,
                     ang_vel: 0.0,
@@ -250,7 +250,7 @@ mod tests {
             let to = s.waypoints[0].normalize();
             assert!((Vec3::new(-s.heading.sin(), 0.0, -s.heading.cos()) - to).length() < 1e-3, "heading faces its goal");
         }
-        // a ship on top of a boat is not pushed (Ship_vs_Lifeboat has no response), whichever way round
+        // a ship on top of a boat is not pushed (a ship-lifeboat contact has no response), whichever way round
         let lib = app.world().resource::<Library>();
         let (cutter, boat) = (lib.index("Ship_Navy_Cutter"), lib.index("Ship_Navy_Lifeboat"));
         let mk = |class| Ship {

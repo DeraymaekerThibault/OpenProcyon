@@ -5,9 +5,8 @@ Source: observed behaviour of the original game and its retail data files, descr
 (`tools/export_boarding.py`). The menu side (items, enable tests) is in [docking-and-orders.md](docking-and-orders.md) §2.
 
 ## 1. What a boarding is
-Boarding is a *relation* kept by the `BoardingActionsKeeper` (RTTI `TP::BoardingActionsKeeper`, owned by the player-relations object, ctor):
-a list of 0x60-byte entries, one per fight, each naming a **boarder** (first side) and a **target** (second side). The keeper's per-frame update
- runs every fight; the fight itself is a plain stochastic attrition (§4), not a physical simulation. Nothing is boarded without a
+Boarding is a *relation* between players: a list with one entry per fight, each naming a **boarder** (first side) and a **target**
+(second side). Every fight is updated each frame; the fight itself is a plain stochastic attrition (§4), not a physical simulation. Nothing is boarded without a
 **command** (§5): the exe has no AI path that starts a fight by itself.
 
 Boardable-ness is two things: an object flag ( bit 3, true for every ship; bases only via their custom info) and the runtime

@@ -1,6 +1,6 @@
 //! Damage decals (AUD-03a, docs/fidelity-backlog.md): a shell that strikes a hull leaves a scar texture from `BD_DecalTextures`
 //! (assets/decals, data/decals.json from tools/export_decals.py): the bucket for the struck section's material, the size class of
-//! the bullet's 'Decal Damage Size'. PROVISIONAL: the exe's trigger, projection and per-ship cap are not decoded; here every hit that
+//! the bullet's 'Decal Damage Size'. PROVISIONAL: the original's trigger, projection and per-ship cap are unknown; here every hit that
 //! damages a section leaves a camera-lit quad facing back along the shell's path, up to `CAP` per ship (oldest first out), and a
 //! dock repair that brings every section back to full clears them.
 use bevy::prelude::*;

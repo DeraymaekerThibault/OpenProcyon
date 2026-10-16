@@ -778,7 +778,7 @@ fn mission_ai(
             continue; // Movement/turning come from the shared tow constraint, not a rigid teleport.
         }
         // Border zone: a ship outside its leash volume drops what it was doing and heads back (to its return point, else the
-        // zone's centre). PROVISIONAL: the exe's border AI is not decoded; this re-enters and resumes on the next frame inside.
+        // zone's centre). PROVISIONAL: the original's border AI is unknown; this re-enters and resumes on the next frame inside.
         if !primary
             && !h.destroyed
             && !busy.contains(e)
@@ -860,7 +860,7 @@ fn mission_ai(
             ms.stop_at_end = true;
         } else if ms.stop_at_end && ms.looping.is_none() && ship.waypoints.len() <= 1 {
             // Retail takes the last point of a 'to end' path within 2 x the ship's radius, then cuts throttle to 0.
-            // PROVISIONAL: `class.radius` stands in for the exe's radius field. A finished chase (remake AI) likewise waits for orders.
+            // PROVISIONAL: `class.radius` stands in for the original's radius field. A finished chase (remake AI) likewise waits for orders.
             if ship.waypoints.first().is_some_and(|p| p.distance(tf.translation) >= 2.0 * lib.classes[ship.class].radius) {
                 continue;
             }

@@ -342,7 +342,7 @@ impl SaveUi {
 pub const RACES: [(u8, &str, &str); 3] =
     [(0, "Navy", "IDGS_TPFRONTENDTEXT03_FLEET_NAVY"), (2, "Pirate", "IDGS_TPFRONTENDTEXT03_FLEET_PIRATE"), (3, "Procyon", "IDGS_TPFRONTENDTEXT03_FLEET_PROCYON")];
 /// Hulls the retail fleet screen is not expected to offer: story/NIS/tutorial variants, lifeboats, wrecks, targets.
-/// PROVISIONAL: the exe lists every ship type of the chosen race; this name filter stands in for whatever hides these.
+/// PROVISIONAL: the original lists every ship type of the chosen race; this name filter stands in for whatever hides these.
 /// The original's Navy list includes the StarHammer and the Heavy Scout (Legacy hull), so those are not filtered.
 const NOT_OFFERED: [&str; 10] = ["NIS", "Tutorial", "Feather", "Jim", "Amelia", "Wrecked", "Lifeboat", "Target", "FastTurn", "WeaponBarge"];
 
@@ -364,7 +364,7 @@ pub fn offered(lib: &Library, race: u8) -> Vec<usize> {
     list
 }
 
-/// Computer fleet: `n` armed hulls of the race, spread over the offered list. PROVISIONAL (the exe's AI fleet choice and victory-point budget are not decoded).
+/// Computer fleet: `n` armed hulls of the race, spread over the offered list. PROVISIONAL (the original's AI fleet choice and victory-point budget are unknown).
 fn auto_fleet(lib: &Library, race: u8, n: usize, salt: usize) -> Vec<String> {
     let pool: Vec<usize> = offered(lib, race).into_iter().filter(|&i| !lib.classes[i].mounts.is_empty()).collect();
     if pool.is_empty() {
@@ -645,7 +645,7 @@ pub fn plugin(app: &mut App) {
 #[derive(Component)]
 struct MenuMusic;
 
-/// Retail front-end track (the exe loads "FrontEndMusic"); plays from the main menu until a battle starts.
+/// Retail front-end track (the original loads "FrontEndMusic"); plays from the main menu until a battle starts.
 fn start_music(mut commands: Commands, assets: Res<AssetServer>, playing: Query<(), With<MenuMusic>>) {
     if playing.is_empty() {
         let e = crate::audio::music(&mut commands, &assets, "FrontEndMusic");

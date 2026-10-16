@@ -76,7 +76,7 @@ crew data's 1-10 values divided by 10.
   table is assumed.
 
 ### 3.5 Arms and crew
-- Rule action `Open Crew and Arms Screens` (`TP::Open_CrewArms_Screens`, execute): if the HUD event queue accepts event `0x14` it calls the big GUI event handler; no state is changed by the rule itself. [C] Used in missions 3 (END NIS1), 5 (Player Undocks @ Grant), 7 (Docking), 9 (End NIS1), 11 (END NIS0); **not in mission 1 or 2**.
+- Rule action `Open Crew and Arms Screens` opens the Crew and Arms screens through the HUD; no state is changed by the rule itself. [C] Used in missions 3 (END NIS1), 5 (Player Undocks @ Grant), 7 (Docking), 9 (End NIS1), 11 (END NIS0); **not in mission 1 or 2**.
 - State: `SinglePlayerVictoryPoints`, `SinglePlayerCrewList`, `SinglePlayerArmsList`, `World Arms List` (the guns allowed by the world), arms profile files (`.ap`, `ARMS PROFILE DIRECTORY`, `Number Of Gunbanks`, `GunBank %02i`), `Victory Point Cost` per gun/ship/crew, `Arms Types Available`. Mission-start saves already carry them (`assets/saves/missionNN.json` `points/crew/arms`). The screens (`Arms Selection Screen`, `Arms Information`, `Modify Arms Position`, load/save profile) pick which gun sits in which bank. [C for names and the lists; the exact application of a profile to ships and the points spending [?]]
 - This is the "weapon change" path; tenders and bases never open it.
 

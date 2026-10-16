@@ -2,7 +2,7 @@
 Dock points are the MSB nodes of kind 'DockPoint' of Ship_*/Base_*/Island_* world objects that declare 'DockPoint' mesh attributes
 (positions in the object's local game frame, x starboard / y forward / z up; `yaw` = the node's rotation about z, radians). Matching by
 node kind rather than by the attribute's DescriptorName: several WOTs name every dock point 'default'. `tender` is the ship's 'Is Tender':
-the exe makes only tenders (and every base/island) dockable and repairing by default (docs/re/docking-and-orders.md).
+the original makes only tenders (and every base/island) dockable and repairing by default (docs/re/docking-and-orders.md).
 usage: python -m tools.export_docks <game_root> <assets_dir>"""
 
 import json

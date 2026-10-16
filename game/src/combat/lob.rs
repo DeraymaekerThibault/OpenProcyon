@@ -76,7 +76,7 @@ pub struct GravWell {
 }
 
 /// The Nova mortar bursts into secondary star-mortar blasts. PROVISIONAL layout: one at the landing point and four around it at
-/// half the secondary's radius; the exe spawns the secondaries itself and their count/placement is not decoded.
+/// half the secondary's radius; the original spawns the secondaries itself and their count/placement is unknown.
 const NOVA_SECONDARY: &str = "Bullet_NovaMortar_Secondary";
 
 pub fn detonate(
@@ -186,7 +186,7 @@ pub fn blasts(
     }
 }
 
-/// Ships inside a gravity well lose their way and are drawn to its centre. PROVISIONAL rates (the exe's well force is not decoded).
+/// Ships inside a gravity well lose their way and are drawn to its centre. PROVISIONAL rates (the original's well force is unknown).
 pub fn grav_wells(
     mut commands: Commands,
     time: Res<Time>,

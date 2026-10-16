@@ -1,8 +1,8 @@
-//! Docking (docs/re/docking-and-orders.md): dock points, the exe's `ShipDockRoutine` (wait for a point, approach leg, final approach,
+//! Docking (docs/re/docking-and-orders.md): dock points, the original's `ShipDockRoutine` (wait for a point, approach leg, final approach,
 //! docked, then for AI ships move away / turn / return), repair while docked, dock-point marker effects and the rule hooks
 //! (`Dock Ships`, `Set Group/Unit Dockable`, `Set Dock Time`, `Toggle Island Repair When Docked`, `Group/Unit Is Docked`).
 //! Clicks and the right-click menu issue `DockMsg`s; rules.rs reads `Script::docked`, which this module keeps up to date.
-//! PROVISIONAL: straight-line legs (the exe plans paths around obstacles), the far-side detour point, dock-point yaw sign, which
+//! PROVISIONAL: straight-line legs (the original plans paths around obstacles), the far-side detour point, dock-point yaw sign, which
 //! dockers hear the docked sound, and the repair effect placement (one at the ship centre).
 //! Tows (menu Tow start / stop): the tower steers for the towee and the link is registered inside 50 units of surface distance; the
 //! rigid tow itself lives in rules.rs. The docking status icon lives on the primary ship's bottom-bar portrait in panels.rs.
@@ -18,32 +18,32 @@ use crate::combat::{Health, Library, ray_hit, seg_sphere};
 use crate::fx::FxLib;
 use crate::{PlayerShip, Ship, Side, assets_dir, game_to_bevy};
 
-/// Docked once this close to the dock point (exe 10.0, also the approach-leg arrival tolerance here).
+/// Docked once this close to the dock point (retail 10.0, also the approach-leg arrival tolerance here).
 const ARRIVE: f32 = 10.0;
-/// With every point taken, a waiting ship holds this far from the nearest one (exe 80.0).
+/// With every point taken, a waiting ship holds this far from the nearest one (retail 80.0).
 const WAIT_DIST: f32 = 80.0;
-/// Exe default dock duration; the actual one is the larger of this ('Set Dock Time' overrides it) and the repair time.
+/// Retail default dock duration; the actual one is the larger of this ('Set Dock Time' overrides it) and the repair time.
 const MIN_DOCK_SECS: f32 = 5.0;
-/// Approach accepted when the ship and the approach point are within this angle seen from the dockee (exe π·0.6); bases always pass.
+/// Approach accepted when the ship and the approach point are within this angle seen from the dockee (retail π·0.6); bases always pass.
 const APPROACH_ARC: f32 = PI * 0.6;
-/// Leaving a ship dockee: distance ⅔·(both lengths) along the dock axis, done within 5 units or after 10 s (exe constants).
+/// Leaving a ship dockee: distance ⅔·(both lengths) along the dock axis, done within 5 units or after 10 s (retail constant).
 const AWAY_FRAC: f32 = 2.0 / 3.0;
 const AWAY_DONE: f32 = 5.0;
 const LEG_SECS: f32 = 10.0;
 /// Turning back toward the start point ends within 0.1 rad (or after 10 s); the return trip's first leg is 100 units.
 const TURN_DONE: f32 = 0.1;
 const RETURN_LEG: f32 = 100.0;
-/// A tow link is registered when the hulls are this close (surface distance, exe 50).
+/// A tow link is registered when the hulls are this close (surface distance, retail 50).
 const TOW_RANGE: f32 = 50.0;
 
-/// One dock point in the owner's local Bevy frame; `fwd` is the node's own forward axis (the exe lines dockers up along it).
+/// One dock point in the owner's local Bevy frame; `fwd` is the node's own forward axis (the original lines dockers up along it).
 #[derive(Clone, Copy, Debug)]
 pub struct DockPoint {
     pub pos: Vec3,
     pub fwd: Vec3,
 }
 
-/// Something ships can dock with: a ship or a base (exe `DockPointKeeper`).
+/// Something ships can dock with: a ship or a base.
 #[derive(Component)]
 pub struct Dockable {
     pub points: Vec<DockPoint>,
@@ -150,7 +150,7 @@ pub fn tow_in_range(here: Vec3, there: Vec3, r_tower: f32, r_towee: f32) -> bool
     (here - there).with_y(0.0).length() - r_tower - r_towee < TOW_RANGE
 }
 
-/// Exe DOCKSTATE_*: WAITING_TO_DOCK, DOCK_APPROACH (+PREDOCKED), DOCKED, MOVINGAWAYFROMDOCK, TURNINGTORETURN, RETURNING.
+/// The retail dock phases: waiting to dock, approach (+ pre-docked), docked, moving away, turning to return, returning.
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum Phase {
     Wait,
@@ -162,7 +162,7 @@ enum Phase {
     Turn,
     Return,
 }
-/// The dock routine of one ship (exe `ShipDockRoutine`).
+/// The dock routine of one ship.
 #[derive(Component)]
 pub struct Docker {
     dockee: Entity,
@@ -245,7 +245,7 @@ fn handle_messages(
                     od.release(docker);
                 }
                 info!("docking: {docker} ordered to dock with {dockee}");
-                // Exe state 0: remember the start (the return point), then wait for / approach a point.
+                // First step: remember the start (the return point), then wait for / approach a point.
                 commands.entity(docker).insert(Docker {
                     dockee,
                     point: None,
@@ -411,7 +411,7 @@ fn routine(
         let base = dship.is_none();
         let dockee_len = dship.map_or(0.0, |s| lib.classes[s.class].length);
         let here = tf.translation;
-        // Exe: a reserved point that is no longer the nearest gives way to the nearest one when that is free.
+        // Retail: a reserved point that is no longer the nearest gives way to the nearest one when that is free.
         if let (Some(i), Phase::Approach) = (d.point, d.phase)
             && let Some(n) = dk.nearest(dtf, here)
             && n != i
@@ -435,7 +435,7 @@ fn routine(
                 }
                 let Some(i) = dk.nearest(dtf, here) else { continue };
                 let (p, _) = dk.world(dtf, i);
-                // Every point taken: take this one over if we would get there sooner than its holder (exe compares distance ÷ own
+                // Every point taken: take this one over if we would get there sooner than its holder (the original compares distance ÷ own
                 // speed, so a stopped ship never does), else hold short of it.
                 let holder = dk.taken[i].and_then(pos_of);
                 if ship.speed.abs() > 0.01 && holder.is_some_and(|h| here.distance(p) < h.distance(p)) {
@@ -478,7 +478,7 @@ fn routine(
                     if let Some(m) = mission.as_mut() {
                         m.script.set_docked(e, d.dockee, true);
                     }
-                    // Exe: the dock routine plays HUD_Options_Dock on docking and the repair setup starts the ship's repair effect.
+                    // Retail: the dock routine plays HUD_Options_Dock on docking and the repair setup starts the ship's repair effect.
                     if human || ship.side == Side::Player {
                         sfx.write(Sfx::ui("HUD_Options_Dock"));
                     }
@@ -510,7 +510,7 @@ fn routine(
                     continue;
                 }
                 // The leg is done near the approach point, or once the ship is already lined up between it and the dock point.
-                // PROVISIONAL: the exe's path-follower tolerance is not decoded; 10 units alone makes a cutter circle the point.
+                // PROVISIONAL: the original's path-follower tolerance is unknown; 10 units alone makes a cutter circle the point.
                 let rel = (here - p).with_y(0.0);
                 let along = (ap - p).with_y(0.0).normalize_or_zero();
                 let lined_up = rel.dot(along) < leg && (rel - along * rel.dot(along)).length() < me.length;
@@ -524,7 +524,7 @@ fn routine(
                 } else if base {
                     ship.order = 2;
                 } else {
-                    // Exe: a ship on the far side of a ship dockee (angle at its centre > 0.6π) re-plans around it; with straight legs
+                    // Retail: a ship on the far side of a ship dockee (angle at its centre > 0.6π) re-plans around it; with straight legs
                     // here that is a detour point out beside the dock point first.
                     let c = dtf.translation;
                     let far = !base && (here - c).with_y(0.0).angle_between((ap - c).with_y(0.0)) > APPROACH_ARC;
@@ -535,7 +535,7 @@ fn routine(
             }
             Phase::Docked => {
                 d.timer += dt;
-                // PROVISIONAL: the exe's arrival steering (not decoded) carries the ship the last few units; here it settles onto the
+                // PROVISIONAL: the original's arrival steering (not decoded) carries the ship the last few units; here it settles onto the
                 // point, parallel to the point's axis, instead of stopping up to 10 units short.
                 let k = 1.0 - (-2.0 * dt).exp();
                 if let Some(i) = d.point {
@@ -616,7 +616,7 @@ fn routine(
             }
         }
     }
-    // A ship whose point was taken over goes back to waiting (exe: its routine state is reset to 1).
+    // A ship whose point was taken over goes back to waiting (retail: its routine state is reset to 1).
     for b in bumped {
         if let Ok((.., mut d, _, _)) = dockers.get_mut(b) {
             d.point = None;
@@ -625,7 +625,7 @@ fn routine(
     }
 }
 
-/// Exe `DockPointEffectKeeper`: every dock point of a dockable object shows the 'Docking_Point' effect while the object can be
+/// Every dock point of a dockable object shows the 'Docking_Point' effect while the object can be
 /// docked with; the effects go away when it cannot (disabled or destroyed).
 fn markers(mut commands: Commands, fxl: Option<Res<FxLib>>, mut q: Query<(Entity, &Transform, &mut Dockable, Option<&Health>)>) {
     let Some(fxl) = fxl else { return };

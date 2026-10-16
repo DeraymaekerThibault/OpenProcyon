@@ -248,7 +248,7 @@ pub struct Class {
     pub engines: Vec<(Vec3, Quat, String)>, // exhaust effect placements
     pub explosion_fx: Option<String>,
     pub engine_snd: [Option<String>; 3], // loops for Half, Full, Emergency
-    /// AI 'Default SightRange'; the exe's dock/focus "in range" test is this sight test (docs/re/docking-and-orders.md §1).
+    /// AI 'Default SightRange'; the original's dock/focus "in range" test is this sight test (docs/re/docking-and-orders.md §1).
     pub sight: f32,
     /// 'Repair Effect Name': picks the repair time class and the effect played while docked.
     pub repair_fx: Option<String>,

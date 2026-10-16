@@ -1,6 +1,6 @@
 //! Nebula clouds and solar storms: the Nebula / SolarStorm effects are one mesh particle each (OvalNebula / GeoSolar) whose
-//! vertices shift and breathe every 30 Hz tick. The shifting rules follow the exe's MeshRenderInfo update, its
-//! parameters are the effect's MeshChunk (scaled by 0.001 on load like the exe does). Meteor showers reuse the MeteorStorm particle
+//! vertices shift and breathe every 30 Hz tick. The shifting rules follow the original's mesh-particle update, its
+//! parameters are the effect's MeshChunk (scaled by 0.001 on load, as the original does). Meteor showers reuse the MeteorStorm particle
 //! effect. PROVISIONAL: the cloud radius (= point magnitude), FADE_EDGES (alpha by view angle), the texture-spin axis (U),
 //! lightning, wind and meteor hazards (partly provisional; docs/re/nebula-landmark.md). Each meteor emitter belongs to the group named after its
 //! nebula and follows that group's `Group to follow path` / `Set Group Space Objects velocity` rules along the shared waypoint
@@ -20,7 +20,7 @@ const TICK: f32 = 1.0 / 30.0;
 const SIZE: f32 = 1.0; // mesh units -> world units per unit of magnitude
 const MAX_NEIGHBOURS: usize = 5;
 
-/// MeshChunk parameters after the exe's load-time scaling.
+/// MeshChunk parameters after the load-time scaling (x 0.001).
 #[derive(Clone, Default, Debug)]
 struct Shift {
     noise: f32,
@@ -136,7 +136,7 @@ impl Sim {
 
 fn shift_params(chunk: &Value) -> Shift {
     let g = |k: &str| chunk[k].as_f64().unwrap_or(0.0) as f32;
-    let m = 0.001; // the exe scales these on load
+    let m = 0.001; // the original scales these on load
     Shift {
         noise: g("CHUNK_DATA_SHIFT_NOISE") * m,
         noise_normal: g("CHUNK_DATA_SHIFT_NOISE_NORMAL") * m,

@@ -327,7 +327,7 @@ pub fn route_clear(bounds: [Vec3; 2], start: Vec3, goal: Vec3, scenery: &[&Obsta
 }
 
 /// Seconds of travel probed ahead for steer-away, and the minimum probe length in world units.
-/// PROVISIONAL: tuned by eye, not recovered from the exe's AI.
+/// PROVISIONAL: tuned by eye, not recovered from the original's AI.
 const STEER_TIME: f32 = 6.0;
 const STEER_MIN: f32 = 25.0;
 /// Heading offsets (radians) tried when `want` is blocked, smallest first, up to beam-on and a little back (a ship pressed
@@ -401,7 +401,7 @@ fn fixed_body() -> ContactBody {
 }
 
 /// A hard contact (impulse above `RAM_IMPULSE`, mass x speed units) between ships `a` and `b`, or ship `a` and scenery (`a == b`):
-/// combat.rs turns it into hull damage. PROVISIONAL: the exe's collision damage is not decoded (docs/re/collision.md).
+/// combat.rs turns it into hull damage. PROVISIONAL: the original's collision damage is unknown (docs/re/collision.md).
 #[derive(Message)]
 pub struct Ram {
     pub a: Entity,
@@ -523,7 +523,7 @@ pub fn sail(
             for c in &currents {
                 drift.0 += c.force(tf.translation) / class.phys.mass * h;
             }
-            // PROVISIONAL lateral damping; the exe has lateral drag but its full mapping is not recovered.
+            // PROVISIONAL lateral damping; the original has lateral drag but its full mapping is not recovered.
             drift.0 *= (-2.0 * h).exp();
             tf.translation += drift.0 * h;
             if ghost(e) {
@@ -607,7 +607,7 @@ pub fn sail(
         for _ in 0..2 {
             let mut pairs = ships.iter_combinations_mut();
             while let Some([(ea, mut a, mut ta, ha, mut da, docka), (eb, mut b, mut tb, hb, mut db, dockb)]) = pairs.fetch_next() {
-                // The exe's Ship_vs_Lifeboat response does nothing: lifeboats pass through ships and each other (they still touch for pickup).
+                // In the original a ship hitting a lifeboat has no response: lifeboats pass through ships and each other (they still touch for pickup).
                 if ha.destroyed
                     || hb.destroyed
                     || ghost(ea)

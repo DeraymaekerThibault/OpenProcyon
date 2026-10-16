@@ -28,11 +28,10 @@ in asteroid fields, a destroyed ship, the golden planet). All content is **lette
 encode Theora (`libtheora`), VP8/VP9, H.264, MJPEG, Vorbis, Opus. Python tools already shell out to `ffprobe`
 (`tools/export_campaign_media.py`). `ffmpeg` is **not** yet a documented dependency (setup in `AGENTS.md`, CI in `.github/workflows/check.yml`).
 
-## 2. How the exe plays them
+## 2. How the original plays them
 
 - A front-end screen `MoviePlayer Screen` (`Movie_Player.tst`: a full-screen `Movie Player Screen Backdrop` and a full-screen
-  `Movie Player Skip Button`, both 800x600 reference area) owns playback (`TP::MovieScreen`, `Render::MoviePlayer`: log strings
-  "MoviePlayer - Create/Start/Pause/Stop/SetState"). A click or key on the skip button ends it; which input exactly is PROVISIONAL.
+  `Movie Player Skip Button`, both 800x600 reference area) owns playback. A click or key on the skip button ends it; which input exactly is PROVISIONAL.
 - Display: render option `Movie Fullscreen DisplayInfo` = 640x480x32 and `Scale Movies Bool False`: movies are shown at native size (the
   display switches to 640x480) rather than stretched. `AppSettings.ini` has `Skip Movies: 0` (developer switch to skip them all).
 - File selection: the exe holds all eight names as constants. The front-end state machine (~70 states) chooses the hi-res or the

@@ -1,8 +1,8 @@
-//! Cloaking (docs/re/cloaking.md): the Procyon submersible's cloak, ordered from the right-click menu (CLOAK_START/STOP,
-//! CloakShipCommand 0x1D) or by the rules ('Set Group/Unit Cloak State', mission 12). Data: WOT 'Is Cloakable' on the hull and
+//! Cloaking (docs/re/cloaking.md): the Procyon submersible's cloak, ordered from the right-click menu (CLOAK_START/STOP)
+//! or by the rules ('Set Group/Unit Cloak State', mission 12). Data: WOT 'Is Cloakable' on the hull and
 //! 'Can Be Fired While Cloaked' per gun (torpedoes, gatlings); effects Cloaking / DeCloaking / FullyCloaked and the IC_Sub_*
-//! sounds. PROVISIONAL: the fade time, the 40-unit "seen anyway" distance and AI override behaviour are the remake's; the exe's
-//! CloakKeeper_TP timing is not decoded.
+//! sounds. PROVISIONAL: the fade time, the 40-unit "seen anyway" distance and AI override behaviour are the remake's; the original's
+//! cloak timing is unknown.
 use bevy::prelude::*;
 
 use crate::audio::Sfx;

@@ -52,7 +52,7 @@ struct GunState {
     pitch: f32,
     aligned: bool,
     in_range: bool, // a target is within range and the mount's arc (weapon bar: green outline)
-    dev: f32,       // this burst's deviation angle, drawn once when the burst starts (exe: once per burst)
+    dev: f32,       // this burst's deviation angle, drawn once when the burst starts (retail: once per burst)
 }
 /// Marks the entities of a gun's visual hierarchy (root, base, barrel, muzzle points).
 #[derive(Component)]
@@ -276,7 +276,7 @@ fn engine_rate(ships: Query<(&Ship, &Health)>, mut q: Query<(&mut fx::Fx, &Child
 pub struct GroundFire {
     pub armed: Option<usize>,
     pub shot: Option<(usize, Vec3)>,
-    /// Panic button: every gun picks its own nearest enemy it can engage (exe: PanicFireCommand) until the player retargets.
+    /// Panic button: every gun picks its own nearest enemy it can engage (as in the original) until the player retargets.
     pub panic: bool,
 }
 
@@ -442,8 +442,8 @@ fn lob_velocity(d: Vec3, angle: f32, g: f32) -> Option<Vec3> {
 }
 
 /// Panic fire: the nearest visible enemy ship within this gun's maximum range and mount arc.
-/// Exe: each gun finds its own target and fires when possible. PROVISIONAL: nearest-first choice, no gun-class
-/// category filter (exe skips guns by three class flags, not decoded), ships only.
+/// Retail: each gun finds its own target and fires when possible. PROVISIONAL: nearest-first choice, no gun-class
+/// category filter (the original skips some gun classes; which is unknown), ships only.
 fn panic_target(snap: &[(Entity, Side, Vec3, bool, bool, Vec3)], tf: &Transform, m: &crate::data::Mount, g: &crate::data::GunDef) -> Option<(Vec3, Vec3, Entity)> {
     let origin = tf.transform_point(m.pos);
     let inv = (tf.rotation * m.rot).inverse();
@@ -574,7 +574,7 @@ fn fire(
             let on_shot = pending.is_some_and(|s| s.0 == m.bank);
             let g = &lib.guns[&st.gun];
             let tp = match (primary && is_indirect(&st.gun), pending) {
-                // Point defence: the nearest hostile torpedo or mine within its maximum range (exe: PD guns never fire at ships).
+                // Point defence: the nearest hostile torpedo or mine within its maximum range (retail: PD guns never fire at ships).
                 _ if g.point_defense => incoming
                     .iter()
                     .filter(|t| t.3 != ship.side && t.1.distance(tf.transform_point(m.pos)) <= g.range[2])
@@ -592,19 +592,19 @@ fn fire(
             let mount_rot = tf.rotation * m.rot;
             let origin = tf.transform_point(m.pos);
             let dead = m.parent.is_some_and(|p| health.sections[p] <= 0.0);
-            // Turret AI after the exe (docs/re/gunnery.md): the base always turns toward
+            // Turret AI after the original (docs/re/gunnery.md): the base always turns toward
             // the target at HorizontalRotationSpeed, clamped to the mount's half-arc, whatever the range; the barrel only elevates
             // once the base is within 1 degree and the target is within range; it may fire when the target is in range and arc.
-            // PROVISIONAL: with no target (or a dead mount section) the gun returns to rest; the exe's idle behaviour is not decoded.
+            // PROVISIONAL: with no target (or a dead mount section) the gun returns to rest; the original's idle behaviour is unknown.
             const TOL: f32 = std::f32::consts::PI / 180.0;
             let half = m.arc / 2.0; // already converted to radians when loading the mount
             let mut want_yaw = 0.0f32;
             let mut want_pitch = Some(0.0f32);
             let mut engaged = None;
             // Point-defense guns only engage incoming torpedoes/mines (not in the sim yet), so they stay idle against ships; harpoons are
-            // grapples, fired by the Grapple order (boarding.rs) and never at will. PROVISIONAL: the exe's grapple-gun exclusion is not decoded.
+            // grapples, fired by the Grapple order (boarding.rs) and never at will. PROVISIONAL: the original's grapple-gun exclusion is unknown.
             if let (false, false, Some((tp, tv, _))) = (dead, st.gun.contains("Harpoon"), tp) {
-                // Lead like the exe: aim point += target velocity * (distance / muzzle speed), one step, no gravity term.
+                // Lead as the original does: aim point += target velocity * (distance / muzzle speed), one step, no gravity term.
                 // Torpedo lead remains straight interception, not the native homing controller.
                 let d = aim_offset(tp - origin, tv, g.muzzle, g.bullet == TORPEDO_BULLET);
                 let dir = match g.lob.and_then(|a| lob_velocity(d, a, g.shell_gravity())) {
@@ -667,7 +667,7 @@ fn fire(
                 }
                 st.cooldown = g.burst_cycle_cut(reload_cut);
                 st.burst_timer = 0.0;
-                // exe: band deviation * 0.5, uniform in +-that, times an accuracy factor. 0.5 is the plain-AI factor;
+                // retail: band deviation * 0.5, uniform in +-that, times an accuracy factor. 0.5 is the plain-AI factor;
                 // crewed ships use 1 - 0.8 * gunnery skill (the campaign roster's best gunner for the human fleet).
                 let band = if dist <= g.range[0] {
                     g.dev[0]
@@ -683,7 +683,7 @@ fn fire(
             if st.burst_left > 0 && st.burst_timer <= 0.0 {
                 st.burst_left -= 1;
                 st.burst_timer = g.burst_reload;
-                // exe: the burst's angle applied about two muzzle axes, each with a random sign.
+                // retail: the burst's angle applied about two muzzle axes, each with a random sign.
                 let sign = |r: f32| if r < 0.5 { -1.0 } else { 1.0 };
                 let right = dir0.cross(Vec3::Y).normalize_or(Vec3::X);
                 let turn = Quat::from_axis_angle(Vec3::Y, sign(rng.f()) * st.dev) * Quat::from_axis_angle(right, sign(rng.f()) * st.dev);
@@ -959,7 +959,7 @@ struct ShipHit {
 }
 
 /// Damage rules of one shell hit on section `k` (`damage` = [lower, upper, crit, fire chance, fire strength]).
-/// Criticals are not modelled: in the exe they only feed a tally and crew speech (docs/re/movement.md).
+/// Criticals are not modelled: in the original they only feed a tally and crew speech (docs/re/movement.md).
 /// Seconds the gunners take off TimeBetweenBursts: 10 x gunnery (0..1), for the player's crewed ships only; computer
 /// ships fire every TimeBetweenBursts (measured). Measured on retail: gunners of gunnery 7-9 brought one gun's hits down to
 /// every 3.5-3.9 s (heavy cannon, 12 s). PROVISIONAL: each retail gun reads its own gunner slot (mapping unknown); here the
@@ -992,10 +992,10 @@ fn apply_ship_hit(class: &Class, hp: &mut Health, k: usize, damage: [f32; 5], in
     let protected = invuln >= 1.0;
     let was = hp.sections[k];
     hp.sections[k] = (was - (1.0 - invuln) * (lo + rng.f() * (hi - lo))).max(0.0);
-    // Exe ignition roll per hit: chance > 0 and roll <= chance starts a fire of the bullet's initial strength.
-    // PROVISIONAL: one fire per section (the exe's extra gate is not decoded).
+    // Retail ignition roll per hit: chance > 0 and roll <= chance starts a fire of the bullet's initial strength.
+    // PROVISIONAL: one fire per section (the original's extra gate is unknown).
     let fire = (!protected && fire_p > 0.0 && rng.f() <= fire_p && hp.sections[k] > 0.0 && fire_free).then_some(fire_str);
-    // Exe: every hit that leaves a vital section at 0 HP (the killing hit and later ones) takes
+    // Retail: every hit that leaves a vital section at 0 HP (the killing hit and later ones) takes
     // a fresh damage roll x the summed core% of all destroyed vital sections / 100 off the core (rounding provisional).
     if !protected && class.sections[k].vital && hp.sections[k] == 0.0 {
         hp.core -= core_bleed(class, hp, (1.0 - invuln) * (lo + rng.f() * (hi - lo)));
@@ -1017,7 +1017,7 @@ fn shells(
     mut bases: Query<(Entity, &Transform, &ArmedBase, &mut Health, &crate::campaign::MissionBase), (Without<Shell>, Without<Ship>)>,
     campaign: Option<Res<crate::campaign::Mission>>,
     mut q: Query<(Entity, &mut Shell, &mut Transform), Without<Ship>>,
-    // Shells pass through lifeboats (no weapon-vs-lifeboat response is registered in the exe; PROVISIONAL, docs/re/lifeboats.md §2.4).
+    // Shells pass through lifeboats (no weapon-vs-lifeboat response is registered in the original; PROVISIONAL, docs/re/lifeboats.md §2.4).
     mut ships: Query<
         (Entity, &Transform, &Ship, &mut Health, &mut Fires, Option<&crate::campaign::MissionShip>, Option<&crate::collision::Drift>),
         Without<crate::lifeboats::Lifeboat>,
@@ -1040,7 +1040,7 @@ fn shells(
         let bd = &lib.bullets[&s.bullet];
         s.vel.y -= s.gravity * dt;
         // Mines (MineAI sight, MinePhysics max speed): home on the nearest hostile ship in sight, else coast to rest at the drop point.
-        // PROVISIONAL: the exe's mine steering/drag is not decoded.
+        // PROVISIONAL: the original's mine steering/drag is unknown.
         if let Payload::Mine { sight, speed } = s.payload {
             let prey = ships
                 .iter()
@@ -1231,7 +1231,7 @@ fn shells(
             let class = &lib.classes[ship.class];
             let sec = &class.sections[k];
             let key = MATERIALS.iter().find(|m| sec.material.contains(**m)).copied().unwrap_or("Wood");
-            // Criticals are not modelled: in the exe they only feed a tally and crew speech (docs/re/movement.md).
+            // Criticals are not modelled: in the original they only feed a tally and crew speech (docs/re/movement.md).
             let mut damage = bd.damage[key];
             let scale = side_damage_scale(s.side, ship.side, crate::menu::difficulty());
             damage[0] *= scale;
@@ -1268,7 +1268,7 @@ fn shells(
                 sfx.write(Sfx { name: pool[(rng.f() * pool.len() as f32) as usize % pool.len()].clone(), at: Some(at), vol: bd.impact_vol, max: bd.impact_max });
             }
             if outcome.lost {
-                // Exe pool per section material (Damage_<Wood|Metal|Sail|Stone>01-05, 600 units). PROVISIONAL: played on section loss.
+                // Retail pool per section material (Damage_<Wood|Metal|Sail|Stone>01-05, 600 units). PROVISIONAL: played on section loss.
                 let pool = match key {
                     "Wood" | "Reinforced" => Some("Wood"),
                     "Iron" => Some("Metal"),
@@ -1365,7 +1365,7 @@ fn deaths(
         }
         *tf = sinking.start;
         commands.entity(e).remove::<Sinking>();
-        // Exe pool Explosion_Heavy01-08 (8000 units). PROVISIONAL: played on ship destruction.
+        // Retail pool Explosion_Heavy01-08 (8000 units). PROVISIONAL: played on ship destruction.
         sfx.write(Sfx { name: format!("Explosion_Heavy0{}", 1 + (rng.f() * 8.0) as u32 % 8), at: Some(at), vol: 1.0, max: 8000.0 });
         if let Some(n) = &class.explosion_fx {
             let t = Transform::from_translation(at);

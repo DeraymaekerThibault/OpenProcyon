@@ -1,7 +1,7 @@
 //! Read-only ship status derived from guns and sections (HUD banks, icons, damage speed/turn penalties).
 use super::*;
 
-/// Exe (Ship update): loss = destroyed / total sections carrying the flag, capped at 0.9; ShipPhysics multiplies
+/// Retail: loss = destroyed / total sections carrying the flag, capped at 0.9; the ship's physics multiplies
 /// max speed and thrust by (1 - loss) for vitalToMaxVelocity and the rudder torque by (1 - loss) for vitalToManeuverability.
 pub fn loss(c: &Class, h: &Health, flag: fn(&Section) -> bool) -> f32 {
     let total = c.sections.iter().filter(|s| flag(s)).count();
