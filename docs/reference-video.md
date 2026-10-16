@@ -5,7 +5,7 @@
 Observed in the original game (used as a visual target; the clip itself is not stored in the repo):
 
 * **Ship name labels**: thin ribbon banners above each ship (`ShipNameBackdrop_*_WhiteBanner`, tinted: red for the player's
-  side, blue for the other side), small white text. Implemented in `game/src/world_hud.rs`.
+  side, blue for the other side), small white text. Implemented in `game/src/classic/world_hud.rs`.
 * **Bottom bar**: compact strip; besides the gold ship-status centre it has buttons: pause hourglass, fleet formations,
   movement type, chat, waypoint tool, red panic button. Not yet built (sprites exist: `MAINBAR_IS_*PAUSED_BUTTON`,
   `MainBar_FleetFormationsButton`, `MainBar_ChatButton`, `Main Bar_*MovementTypeButton`, stretched details).

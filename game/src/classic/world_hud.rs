@@ -1,5 +1,5 @@
 //! World-anchored HUD: ship-name banners and the target chevrons (retail hud.hdt art projected over the 3D view), and the objective
-//! navigation indicator under the player's ship. `N` toggles the banners.
+//! navigation indicator under the player's ship. `N` (`panels::Toggles::names`) toggles the banners.
 use bevy::prelude::*;
 
 use crate::combat::{Health, Target};
@@ -8,15 +8,17 @@ use crate::sprites::{Fonts, HudData, inset, sliced, sprite_of};
 use crate::{Library, PlayerShip, Ship};
 
 pub fn plugin(app: &mut App) {
-    app.add_systems(PostStartup, spawn_reticle.run_if(resource_exists::<HudData>)).add_systems(PreUpdate, name_toggle).add_systems(
-        Update,
-        (place_ref_rects, scale_label_text, spawn_labels, place_labels)
-            .chain()
-            .after(crate::sprites::choose_skin)
-            .run_if(in_state(crate::menu::Screen::Battle))
-            .run_if(resource_exists::<HudData>)
-            .run_if(resource_exists::<Fonts>),
-    );
+    app.add_systems(PostStartup, spawn_reticle.run_if(resource_exists::<HudData>))
+        .add_systems(Update, navigation.after(crate::camera).before(crate::sky).run_if(in_state(crate::menu::Screen::Battle)).run_if(crate::menu::overlay_closed))
+        .add_systems(
+            Update,
+            (place_ref_rects, scale_label_text, spawn_labels, place_labels)
+                .chain()
+                .after(crate::sprites::choose_skin)
+                .run_if(in_state(crate::menu::Screen::Battle))
+                .run_if(resource_exists::<HudData>)
+                .run_if(resource_exists::<Fonts>),
+        );
 }
 
 /// A label child placed in reference pixels relative to its label root (scaled to the window by `place_ref_rects`).
@@ -36,19 +38,12 @@ fn place_ref_rects(window: Single<&Window, With<bevy::window::PrimaryWindow>>, m
     }
 }
 
-/// `N` toggles the ship-name banners.
-fn name_toggle(keys: Res<ButtonInput<KeyCode>>, mut t: ResMut<Toggles>) {
-    if keys.just_pressed(KeyCode::KeyN) {
-        t.names = !t.names;
-    }
-}
-
 #[derive(Component)]
-pub struct Navigation {
+struct Navigation {
     arrow: bool,
 }
 
-pub fn navigation(
+fn navigation(
     mut commands: Commands,
     assets: Res<AssetServer>,
     lib: Res<Library>,

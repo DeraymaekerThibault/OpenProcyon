@@ -258,16 +258,9 @@ pub struct Mission {
     pub opening: Option<crate::briefing::Opening>,
     pub script: rules::Script,
 }
+/// Text widget a view spawns for the rules' current objectives (`rules::Ui` holds the other mission widgets).
 #[derive(Component)]
 pub struct ObjectiveText;
-/// Gameplay speech subtitle (a view may restyle it).
-#[derive(Component)]
-pub struct Subtitle;
-/// Mission on-screen hint and end-of-mission text (a view may restyle them).
-#[derive(Component)]
-pub struct HintText;
-#[derive(Component)]
-pub struct EndText;
 
 /// True when `map` names a scripted world (a campaign mission "mission01"... or a tutorial), as opposed to a skirmish map.
 pub fn is_mission(map: Option<&str>) -> bool {
@@ -378,15 +371,6 @@ pub fn spawn(commands: &mut Commands, assets: &AssetServer, lib: &Library, fxl: 
             commands.entity(e).remove::<PlayerShip>();
         }
     }
-    commands.spawn((
-        crate::Scenario,
-        ObjectiveText,
-        Text::new(""),
-        TextFont { font_size: FontSize::Px(18.0), ..default() },
-        TextColor(Color::srgb(1.0, 0.9, 0.5)),
-        Node { position_type: PositionType::Absolute, top: Val::Px(12.0), left: Val::Px(180.0), right: Val::Px(180.0), ..default() },
-    ));
-    rules::spawn_ui(commands);
     crate::environment::spawn(commands, assets, &mission.data);
     commands.insert_resource(mission);
 }
