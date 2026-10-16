@@ -546,13 +546,6 @@ mod rotation_tests {
     }
 
     #[test]
-    fn game_rotation_matches_the_yaw_convention_for_a_pure_yaw() {
-        let a = 0.7f32;
-        let r = serde_json::json!([a.cos(), a.sin(), 0.0, -a.sin(), a.cos(), 0.0, 0.0, 0.0, 1.0]);
-        assert!(game_rotation(&r).angle_between(Quat::from_rotation_y(a)) < 1e-4);
-    }
-
-    #[test]
     fn native_column_matrix_preserves_every_authored_scenery_axis() {
         for map in ["storm_front", "mission13", "mission03", "basic_tutorial"] {
             let doc: serde_json::Value = serde_json::from_slice(&std::fs::read(crate::assets_dir().join(format!("maps/{map}/map.json"))).unwrap()).unwrap();

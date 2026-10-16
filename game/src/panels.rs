@@ -850,9 +850,11 @@ pub mod tests {
     }
 
     #[test]
-    fn pause_button_toggles_virtual_time() {
+    fn pause_button_toggles_virtual_time_and_keeps_speed() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins).init_resource::<ButtonInput<MouseButton>>().insert_resource(Time::<Virtual>::default()).add_systems(Update, pause_button);
+        let mut time = Time::<Virtual>::default();
+        time.set_relative_speed(4.0);
+        app.add_plugins(MinimalPlugins).init_resource::<ButtonInput<MouseButton>>().insert_resource(time).add_systems(Update, pause_button);
         app.world_mut().spawn((Interaction::Pressed, PauseButton));
         let mut seen = vec![];
         for _ in 0..3 {
@@ -863,5 +865,6 @@ pub mod tests {
             seen.push(app.world().resource::<Time<Virtual>>().is_paused());
         }
         assert_eq!(seen, [true, false, true], "each click toggles the pause");
+        assert_eq!(app.world().resource::<Time<Virtual>>().relative_speed(), 4.0, "pausing and resuming keep the speed setting");
     }
 }

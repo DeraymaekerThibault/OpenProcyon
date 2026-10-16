@@ -844,17 +844,6 @@ pub mod movement_tests {
     }
 
     #[test]
-    fn pause_toggle_freezes_virtual_time_and_keeps_speed() {
-        let mut vtime = Time::<Virtual>::default();
-        vtime.set_relative_speed(4.0);
-        toggle_pause(&mut vtime);
-        assert!(vtime.is_paused());
-        assert_eq!(vtime.relative_speed(), 4.0, "pausing keeps the speed setting");
-        toggle_pause(&mut vtime);
-        assert!(!vtime.is_paused());
-        assert_eq!(vtime.relative_speed(), 4.0, "resuming keeps the speed setting");
-    }
-    #[test]
     fn fresh_scenario_resumes_paused_time_without_changing_speed() {
         let mut world = World::new();
         let mut time = Time::<Virtual>::default();

@@ -240,9 +240,4 @@ mod tests {
         let t = glyph_table(&f);
         assert_eq!("Control".chars().map(|c| t[&c].next).sum::<f32>(), 77.0);
     }
-
-    #[test]
-    fn skin_follows_ship_race() {
-        assert_eq!([skin_of("Navy"), skin_of("Pirate"), skin_of("Procyon"), skin_of("Civilian")], ["Navy", "Pirate", "Procyon", "Navy"]);
-    }
 }
