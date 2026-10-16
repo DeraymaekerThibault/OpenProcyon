@@ -215,45 +215,72 @@ pub fn swap_meshes(lib: Res<Library>, ships: Query<(Entity, &Ship, &Health)>, ch
     }
 }
 
-/// Crew damage control (every 12 s, docs/re/refit-resupply.md §3.4), as measured on a retail skirmish Man-O-War
-/// (docs/re/refit-resupply.md#crew-damage-control-measured): each tick mends one damaged, living **sail** section, chosen at
-/// random (not the most damaged), by 3 hit points, sometimes 6 (about one tick in three), never above its maximum.
-/// Hull, bow and rudder sections are not mended (two +1 events in nine minutes, ignored here).
-/// PROVISIONAL: one ship and one crew measured; the tick chance (15 of 16 ticks) and the crew-skill scaling are not decoded.
+/// Crew damage control (every 12 s, docs/re/refit-resupply.md#crew-damage-control): each tick the most damaged living sail
+/// gets one roll per rigger slot (chance = that rigger's rigging, 0..1), +3 hit points per success; the most damaged
+/// living non-sail section gets one roll with chance c = the engineers' mean engineering and, on success,
+/// floor(10 x c x material factor) hit points. Never above the maximum; destroyed (0 HP) sections stay down.
 pub const CREW_REPAIR_TICK: f32 = 12.0;
 
-/// One damage-control tick: the section to mend and its new hit points, from two uniform rolls in [0, 1).
-pub fn repair_tick(class: &Class, sections: &[f32], pick: f32, amount: f32) -> Option<(usize, f32)> {
-    let sails: Vec<usize> = (0..sections.len()).filter(|&i| class.sections[i].material.contains("Cloth") && sections[i] > 0.0 && sections[i] < class.sections[i].hp).collect();
-    let i = *sails.get(((pick * sails.len() as f32) as usize).min(sails.len().saturating_sub(1)))?;
-    let add = if amount < 1.0 / 3.0 { 6.0 } else { 3.0 };
-    Some((i, (sections[i] + add).min(class.sections[i].hp)))
+/// Hull repair factor per section material (the retail per-material table; Stone and others mend nothing). PROVISIONAL:
+/// Wood, Reinforced and Iron are confirmed by measurement, the material order of the rest of the table is assumed.
+fn repair_factor(material: &str) -> f32 {
+    if material.contains("ReInforced") || material.contains("Reinforced") {
+        0.67
+    } else if material.contains("Iron") {
+        0.33
+    } else if material.contains("Wood") {
+        1.0
+    } else {
+        0.0
+    }
 }
 
-pub fn crew_repair(
-    time: Res<Time>,
-    lib: Res<Library>,
-    mut rng: ResMut<Rng>,
-    points: Option<Res<crate::campaign::CampaignPoints>>,
-    mut ships: Query<(&Ship, &mut Health, Option<&crate::crew_arms::CrewPosts>)>,
-    mut acc: Local<f32>,
-) {
-    // Retail skirmish crew: 15 of 16 ticks mended a sail. The human fleet's odds follow the roster's best engineer (0.5 .. 1.0).
-    const ODDS: f32 = 0.94;
-    let engineer = points.as_deref().and_then(|p| crate::crew_arms::best(p, "engineering")).map(|e| 0.5 + 0.5 * e);
+/// One damage-control tick on `sections`. `engineers` / `riggers`: the 0..1 skill of each slot of those posts; `roll`
+/// yields uniform numbers in [0, 1).
+pub fn damage_control(class: &Class, sections: &mut [f32], engineers: &[f32], riggers: &[f32], roll: &mut dyn FnMut() -> f32) {
+    let most_damaged = |sections: &[f32], sail: bool| {
+        (0..sections.len())
+            .filter(|&i| class.sections[i].material.contains("Cloth") == sail && sections[i] > 0.0 && sections[i] < class.sections[i].hp)
+            .min_by(|&a, &b| (sections[a] / class.sections[a].hp).total_cmp(&(sections[b] / class.sections[b].hp)))
+    };
+    if let Some(i) = most_damaged(sections, true) {
+        for &p in riggers {
+            if roll() < p.clamp(0.0, 1.0) {
+                sections[i] = (sections[i] + 3.0).min(class.sections[i].hp);
+            }
+        }
+    }
+    let c = if engineers.is_empty() { 0.0 } else { engineers.iter().map(|e| e.clamp(0.0, 1.0)).sum::<f32>() / engineers.len() as f32 };
+    if let Some(i) = most_damaged(sections, false)
+        && roll() < c
+    {
+        sections[i] = (sections[i] + (10.0 * c * repair_factor(&class.sections[i].material)).floor()).min(class.sections[i].hp);
+    }
+}
+
+pub fn crew_repair(time: Res<Time>, lib: Res<Library>, mut rng: ResMut<Rng>, mut ships: Query<(&Ship, &mut Health, Option<&crate::crew_arms::CrewPosts>)>, mut acc: Local<f32>) {
+    // PROVISIONAL: computer crews are rated 0.75 (fits the measured computer hull repair, reinforced +5 and iron +2 per tick);
+    // the player's empty slots are generic hands (0.1). The captain/first-mate leadership bonuses (+0.1 / +0.05 above a
+    // threshold) are not modelled: their thresholds are not known.
+    const COMPUTER: f32 = 0.75;
+    const GENERIC: f32 = 0.1;
     *acc += time.delta_secs();
     if *acc < CREW_REPAIR_TICK {
         return;
     }
     *acc -= CREW_REPAIR_TICK;
     for (ship, mut h, posts) in &mut ships {
-        let odds = if ship.side == crate::Side::Player { posts.map_or(engineer.unwrap_or(ODDS), |p| p.skill(4, "engineering").map_or(ODDS, |e| 0.5 + 0.5 * e)) } else { ODDS };
-        if h.destroyed || rng.f() > odds {
+        if h.destroyed {
             continue;
         }
-        let (pick, amount) = (rng.f(), rng.f());
-        if let Some((i, hp)) = repair_tick(&lib.classes[ship.class], &h.sections, pick, amount) {
-            h.sections[i] = hp;
-        }
+        let class = &lib.classes[ship.class];
+        let caps = crate::boarding::counts(&class.name);
+        let slots = |role: usize, skill: &str| -> Vec<f32> {
+            let named: Vec<f32> = posts.map(|p| p.0[role].iter().map(|id| crate::crew_arms::ability(id, skill).unwrap_or(GENERIC)).collect()).unwrap_or_default();
+            let fill = if ship.side == crate::Side::Player { GENERIC } else { COMPUTER };
+            named.iter().copied().chain(std::iter::repeat(fill)).take((caps[role] as usize).max(named.len())).collect()
+        };
+        let (engineers, riggers) = (slots(4, "engineering"), slots(5, "rigging"));
+        damage_control(class, &mut h.sections, &engineers, &riggers, &mut || rng.f());
     }
 }

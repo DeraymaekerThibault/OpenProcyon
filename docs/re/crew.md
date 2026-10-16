@@ -52,4 +52,4 @@ riggers' Rigging; Strength = Combat. Leadership and Gunnery show on no bar.
 ## Open
 - Whether placed ships' generic crews (Green/Average/Elite, skill 3/6/8) get the same factor; the remake applies none yet.
 - Leadership (manual: "improves the effectiveness of your entire crew"): no bar shows it; not measured.
-- Repair Rate in battle (only the bar mapping is known), rate of fire, Spotting range.
+- Rate of fire, Spotting range. (Repair Rate in battle: refit-resupply.md 3.4.)
