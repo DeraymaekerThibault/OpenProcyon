@@ -341,17 +341,17 @@ pub fn steer_clear(bounds: [Vec3; 2], tf: &Transform, speed: f32, want: f32, sce
     let reach = (speed.abs() * STEER_TIME).max(STEER_MIN);
     // Probe boxes at most one hull length apart, so a thin coast cannot fall between two samples.
     let n = (reach / (bounds[1].z - bounds[0].z).max(2.0)).ceil().max(2.0) as usize;
-    let clear = |h: f32| {
-        let fwd = Vec3::new(-h.sin(), 0.0, -h.cos());
+    let clear = |heading: f32| {
+        let fwd = Vec3::new(-heading.sin(), 0.0, -heading.cos());
         (1..=n).all(|i| {
-            let probe = Transform::from_translation(tf.translation + fwd * reach * i as f32 / n as f32).with_rotation(Quat::from_rotation_y(h));
+            let probe = Transform::from_translation(tf.translation + fwd * reach * i as f32 / n as f32).with_rotation(Quat::from_rotation_y(heading));
             !touches(bounds, &probe, scenery)
         })
     };
     if clear(want) {
         return want;
     }
-    STEER_OFFSETS.iter().map(|o| want + o).find(|h| clear(*h)).unwrap_or(want)
+    STEER_OFFSETS.iter().map(|o| want + o).find(|heading| clear(*heading)).unwrap_or(want)
 }
 
 fn forward(ship: &crate::Ship) -> Vec3 {
@@ -485,10 +485,10 @@ pub fn sail(
             if let Some(&wp) = s.waypoints.first().filter(|_| !human.contains(e)) {
                 let d = wp - tf.translation;
                 let want = (-d.x).atan2(-d.z);
-                let h = steer_clear(bounds, &tf, s.speed, want, &all);
+                let heading = steer_clear(bounds, &tf, s.speed, want, &all);
                 let reach = (s.speed.abs() * STEER_TIME).max(STEER_MIN);
-                if h != want && d.with_y(0.0).length() > reach {
-                    s.waypoints.insert(0, tf.translation + Vec3::new(-h.sin(), 0.0, -h.cos()) * reach);
+                if heading != want && d.with_y(0.0).length() > reach {
+                    s.waypoints.insert(0, tf.translation + Vec3::new(-heading.sin(), 0.0, -heading.cos()) * reach);
                 }
             } else if let Some(g) = s.goal {
                 s.goal = Some(steer_clear(bounds, &tf, s.speed, g, &all));
@@ -498,13 +498,13 @@ pub fn sail(
     // shortcut: small adaptive steps instead of continuous OBB sweeps; upgrade if speeds exceed retail orders.
     let fastest = ships.iter().map(|(_, s, _, _, d, _)| s.speed.abs() + d.0.length() + 5.0).chain(rocks.iter().map(|(_, _, _, d, _)| d.0.length())).fold(0.0, f32::max);
     let steps = (fastest * dt / 0.5).max(dt * 60.0).ceil().clamp(1.0, 32.0) as usize; // cap: a runaway drift must not freeze the frame
-    let h = dt / steps as f32;
+    let substep = dt / steps as f32;
     for _ in 0..steps {
         for (rock, mut tf, mut obstacle, drift, visible) in &mut rocks {
             if rock.hp <= 0.0 || visible == Some(&Visibility::Hidden) || drift.0 == Vec3::ZERO {
                 continue;
             }
-            let delta = drift.0 * h;
+            let delta = drift.0 * substep;
             tf.translation += delta;
             obstacle.translate(delta);
         }
@@ -518,14 +518,14 @@ pub fn sail(
                 continue;
             }
             let class = &lib.classes[s.class];
-            crate::step(&mut s, &mut tf, class, health, h);
+            crate::step(&mut s, &mut tf, class, health, substep);
             // Etherium currents push along their path (environment.rs); force / mass, as for thrust.
             for c in &currents {
-                drift.0 += c.force(tf.translation) / class.phys.mass * h;
+                drift.0 += c.force(tf.translation) / class.phys.mass * substep;
             }
             // PROVISIONAL lateral damping; the original has lateral drag but its full mapping is not recovered.
-            drift.0 *= (-2.0 * h).exp();
-            tf.translation += drift.0 * h;
+            drift.0 *= (-2.0 * substep).exp();
+            tf.translation += drift.0 * substep;
             if ghost(e) {
                 continue;
             }

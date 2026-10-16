@@ -86,3 +86,49 @@ pub(crate) fn dock(cfg: &Config, mission: &mut Mission, skipped: &mut bool, ship
         s.ship.speed = 0.0;
     }
 }
+
+/// State of the PROCYON_*_SHOT hooks.
+#[derive(Default)]
+pub struct ShotHooks {
+    nis_age: f32,
+    nis_shot: bool,
+    end_age: f32,
+    end_shot: bool,
+}
+
+/// PROCYON_END_SHOT=<png> saves a screenshot 3 s after the mission ends and quits; PROCYON_NIS_SHOT=<png> saves one 4 s into the
+/// third script NIS (rule time > 400 s) and quits shortly after.
+pub fn screenshot_hooks(mut commands: Commands, time: Res<Time>, mission: Res<Mission>, mut hooks: Local<ShotHooks>) {
+    static ENV: std::sync::OnceLock<(Option<std::ffi::OsString>, Option<std::ffi::OsString>)> = std::sync::OnceLock::new();
+    let (end_path, nis_path) = ENV.get_or_init(|| (std::env::var_os("PROCYON_END_SHOT"), std::env::var_os("PROCYON_NIS_SHOT")));
+    let dt = time.delta_secs();
+    let shoot = |commands: &mut Commands, path: &std::ffi::OsString| {
+        use bevy::render::view::screenshot::{Screenshot, save_to_disk};
+        commands.spawn(Screenshot::primary_window()).observe(save_to_disk(std::path::PathBuf::from(path)));
+    };
+    if let (Some(path), Some(_)) = (end_path, mission.script.ended.as_ref()) {
+        hooks.end_age += dt;
+        if hooks.end_age > 3.0 && !hooks.end_shot {
+            hooks.end_shot = true;
+            shoot(&mut commands, path);
+        } else if hooks.end_age > 8.0 {
+            std::process::exit(0);
+        }
+    }
+    if let Some(path) = nis_path {
+        if mission.script.nis && mission.opening.is_none() {
+            hooks.nis_age += dt;
+        } else {
+            hooks.nis_age = 0.0;
+        }
+        if hooks.nis_age > 4.0 && !hooks.nis_shot && mission.script.time > 400.0 {
+            hooks.nis_shot = true;
+            shoot(&mut commands, path);
+        } else if hooks.nis_shot {
+            hooks.nis_age += dt;
+            if hooks.nis_age > 12.0 {
+                std::process::exit(0);
+            }
+        }
+    }
+}

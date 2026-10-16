@@ -131,19 +131,22 @@ pub struct GunDef {
     pub reload: f32,
     pub burst: u32,
     pub burst_reload: f32,
-    pub range: [f32; 3], // effective, long, maximum
-    pub dev: [f32; 3],   // accuracy deviation (rad); PROVISIONAL: used as max cone half-angle
+    pub range: [f32; 3],     // effective, long, maximum
+    pub deviation: [f32; 3], // per range band (effective, long, maximum): accuracy deviation (rad); PROVISIONAL: used as max cone half-angle
     pub gravity: bool,
     pub bullet: String,
     pub base: Option<String>,   // glb of the turning base
     pub barrel: Option<String>, // glb of the pitching barrel
     pub pivot: Vec3,            // barrel pivot in the base frame
     pub muzzles: Vec<Vec3>,     // muzzle points in the base frame, like the barrel mesh (see `combat::spawn_gun`)
-    pub hspeed: f32,
-    pub vspeed: f32,
-    pub vlim: [f32; 2],
+    /// Turret base turn rate (rad/s, WOT HorizontalRotationSpeed).
+    pub yaw_speed: f32,
+    /// Barrel elevation rate (rad/s, WOT VerticalRotationSpeed).
+    pub pitch_speed: f32,
+    /// Barrel elevation limits (rad, WOT VerticalMin/MaxAngle).
+    pub pitch_limits: [f32; 2],
     pub muzzle_fx: Option<String>,
-    pub snd: Option<(String, f32, f32)>, // fire sound: name, volume, max distance
+    pub sound: Option<(String, f32, f32)>, // fire sound: name, volume, max distance
     /// WOT 'Is Lobbing Gun' with its 'LobAngle' (rad): mortars and gravity charges fire on this fixed high arc.
     pub lob: Option<f32>,
     /// WOT 'Can Be Fired While Cloaked' (torpedoes and gatlings).
@@ -321,18 +324,18 @@ pub fn gun_def(g: &Value) -> GunDef {
         burst: g["BulletsPerBurst"].as_u64().unwrap() as u32,
         burst_reload: num(&g["DuringBurstReloadTime"]),
         range: [num(&g["EffectiveRange_Range"]), num(&g["LongRange_Range"]), num(&g["MaximumRange_Range"])],
-        dev: [num(&g["EffectiveRange_AccuracyDeviation"]), num(&g["LongRange_AccuracyDeviation"]), num(&g["MaximumRange_AccuracyDeviation"])],
+        deviation: [num(&g["EffectiveRange_AccuracyDeviation"]), num(&g["LongRange_AccuracyDeviation"]), num(&g["MaximumRange_AccuracyDeviation"])],
         gravity: g["BulletAffectedByGravity"].as_bool().unwrap(),
         bullet: g["BulletTypeName_Primary"].as_str().unwrap().into(),
         base: g["visual"]["base"].as_str().map(String::from),
         barrel: g["visual"]["barrel"].as_str().map(String::from),
         pivot: conv_v(&g["visual"]["pivot"]),
         muzzles: g["visual"]["muzzles"].as_array().unwrap().iter().map(conv_v).collect(),
-        hspeed: num(&g["HorizontalRotationSpeed"]),
-        vspeed: num(&g["VerticalRotationSpeed"]),
-        vlim: [num(&g["VerticalMinAngle"]), num(&g["VerticalMaxAngle"])],
+        yaw_speed: num(&g["HorizontalRotationSpeed"]),
+        pitch_speed: num(&g["VerticalRotationSpeed"]),
+        pitch_limits: [num(&g["VerticalMinAngle"]), num(&g["VerticalMaxAngle"])],
         muzzle_fx: g["MuzzleFlashEffect"].as_str().map(String::from),
-        snd: g["SoundName"]
+        sound: g["SoundName"]
             .as_str()
             .filter(|s| !s.is_empty())
             .map(|s| (s.into(), g["SoundVolume"].as_f64().unwrap_or(1.0) as f32, g["SoundMaxDistance"].as_f64().unwrap_or(600.0) as f32)),
