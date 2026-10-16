@@ -545,7 +545,8 @@ fn fire(
         let snap = &snap[..];
         let cloaked_now = cloak.as_ref().is_some_and(|c| c.level > 0.0);
         let class = &lib.classes[ship.class];
-        // Player: the clicked target if still alive, else the nearest living enemy. Enemies: the player ship.
+        // Player's command ship: only the clicked target (retail: direct-fire guns need an enemy click or panic fire). Its other
+        // ships: the nearest living enemy. Enemies: the player ship.
         // Mission ships other than the player's fire at the target the rules' AI chose (rules::mission_ai).
         let tp = if pilot.is_some_and(|p| p.hold_fire) || mission.is_some_and(|m| m.hold_fire) {
             None
@@ -560,7 +561,7 @@ fn fire(
                 Side::Player => snap
                     .iter()
                     .find(|s| primary && Some(s.0) == target.0 && s.1 == Side::Enemy && s.3)
-                    .or_else(|| snap.iter().filter(|s| s.1 == Side::Enemy && s.3).min_by(|a, b| a.2.distance(tf.translation).total_cmp(&b.2.distance(tf.translation)))),
+                    .or_else(|| snap.iter().filter(|s| !primary && s.1 == Side::Enemy && s.3).min_by(|a, b| a.2.distance(tf.translation).total_cmp(&b.2.distance(tf.translation)))),
                 Side::Enemy => snap.iter().find(|s| s.4 && s.3),
             }
             .map(|s| (s.2, s.5, s.0))
@@ -1805,6 +1806,67 @@ mod tests {
         }
         assert!(lancer_fired, "the front Lancer must engage the selected towers");
         assert_eq!(base_mission_damage(&lib.classes[class], app.world().get::<Health>(hostile).unwrap()), 1.0);
+    }
+
+    #[test]
+    fn the_command_ship_holds_fire_until_an_enemy_is_clicked() {
+        let mut app = App::new();
+        app.add_plugins((TaskPoolPlugin::default(), AssetPlugin::default(), TransformPlugin))
+            .init_asset::<bevy::world_serialization::WorldAsset>()
+            .init_asset::<bevy::prelude::Image>()
+            .add_message::<Sfx>()
+            .add_message::<Fired>()
+            .add_message::<Hit>()
+            .add_message::<Destroyed>()
+            .add_message::<Detonate>()
+            .add_message::<crate::decals::Scar>()
+            .init_resource::<Time>()
+            .init_resource::<FxLib>()
+            .insert_resource(Library::load(&assets_dir()))
+            .insert_resource(Rng::new(7))
+            .insert_resource(Look { mesh: default(), shell: default(), enemy_shell: default(), flash: default() })
+            .insert_resource(Target::default())
+            .init_resource::<crate::environment::Sensors>()
+            .add_systems(PreUpdate, crate::environment::refresh_sensors)
+            .add_systems(Update, (fire, shells.after(fire)));
+        let assets = app.world().resource::<AssetServer>().clone();
+        let lib = Library::load(&assets_dir());
+        let c = lib.index("Ship_Navy_Frigate");
+        let ship = |side| Ship {
+            class: c,
+            side,
+            heading: 0.0,
+            speed: 0.0,
+            ang_vel: 0.0,
+            order: 0,
+            waypoints: vec![],
+            goal: None,
+            cap: 1.0,
+            throttle: None,
+            sail_energy: 1.0,
+            crew_speed: 1.0,
+            crew_turn: 1.0,
+        };
+        let spawn = |app: &mut App, side, x: f32| {
+            let e = app.world_mut().spawn((Transform::from_xyz(x, 0.0, 0.0), ship(side), Health::new(&lib.classes[c]), Fires::default())).id();
+            let states = spawn_guns(&mut app.world_mut().commands(), &assets, &lib, e, c);
+            app.world_mut().entity_mut(e).insert(states);
+            app.world_mut().flush();
+            e
+        };
+        let me = spawn(&mut app, Side::Player, 0.0);
+        app.world_mut().entity_mut(me).insert(PlayerShip);
+        let enemy = spawn(&mut app, Side::Enemy, 60.0);
+        let run = |app: &mut App| {
+            for _ in 0..200 {
+                app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs_f32(0.05));
+                app.update();
+            }
+            app.world_mut().query::<&Shell>().iter(app.world()).any(|s| s.shooter == me)
+        };
+        assert!(!run(&mut app), "no auto-engage: an enemy in range is not a target until clicked");
+        *app.world_mut().resource_mut::<Target>() = Target(Some(enemy), None, default());
+        assert!(run(&mut app), "the clicked enemy is engaged");
     }
 
     #[test]

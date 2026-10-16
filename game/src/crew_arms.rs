@@ -18,6 +18,9 @@ fn crew_data() -> &'static Value {
 pub fn ability(id: &str, skill: &str) -> Option<f32> {
     crew_data()[id]["skills"][skill].as_f64().map(|v| (v as f32 / 10.0).clamp(0.0, 1.0))
 }
+pub fn species(id: &str) -> Option<&str> {
+    crew_data()[id]["species"].as_str()
+}
 fn name(id: &str) -> &str {
     crew_data()[id]["name"].as_str().unwrap_or(id)
 }

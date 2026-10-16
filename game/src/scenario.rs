@@ -283,7 +283,7 @@ pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Libra
 }
 
 /// Dev cheats: K destroys all enemies, J destroys the player. `--script victory|defeat` presses one at frame 300 (demo).
-/// Scripted runs (`--script target`): pick the first enemy so the target reticle can be screenshotted.
+/// Scripted runs (`--script target`): pick the first enemy so the target reticle can be screenshotted (`fxtest`: so it fires).
 pub fn shot_target(
     cfg: Res<Config>,
     mut target: ResMut<Target>,
@@ -332,9 +332,12 @@ pub fn shot_target(
             }
         }
     }
-    if cfg.script.as_deref() == Some("target") && cfg.frame >= 5 && target.0.is_none() {
+    // fxtest clicks the enemy too: the command ship only fires at a clicked target.
+    if matches!(cfg.script.as_deref(), Some("target") | Some("fxtest")) && cfg.frame >= 5 && target.0.is_none() {
         target.0 = ships.iter().find(|(_, s)| s.side == Side::Enemy).map(|(e, _)| e);
-        orbit.focus = target.0; // screenshots look at the target
+        if cfg.script.as_deref() == Some("target") {
+            orbit.focus = target.0; // screenshots look at the target
+        }
     }
 }
 

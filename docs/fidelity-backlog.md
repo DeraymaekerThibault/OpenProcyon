@@ -121,13 +121,13 @@ panel → regression gate, both-view smoke and Mission 1 / synthetic Mission 5/9
 | ID | Status | Gap / acceptance target | Runtime owner and evidence |
 |---|---|---|---|
 | PT-01 | Missing | Crew speech events show the portrait of the crew member speaking (spotter, gunner, engineer, ...), not a fixed head. | `audio.rs`, `briefing.rs`, `classic/`; UIR-09 |
-| PT-02 | Partial | Fire/warning and other crew voice lines all use the Navy set; pick the set from the speaking ship's crew/faction (Procyon, pirate, ...). | `audio.rs`, `content/voice/events.json`; AUD-03b |
+| PT-02 | Provisional | Crew lines are spoken by the named crew member at the line's post (their species' set), else the ship's faction crew (Navy human male, Procyon); see [sound.md](re/sound.md). Open: pirates' generic crew voice, retail check. Re-import needed for the species files. | `audio.rs`, `content/voice/events.json`; AUD-03b |
 | PT-03 | Partial | Procyon submersible does not have its retail effect yet (dive/surface look). Find which effects/rules the hull uses and implement. | `fx.rs`, `cloak.rs`? |
 | PT-04 | Unknown | Playing as Procyon on an open skirmish map spawned the player at the Navy base. Check in the original whether start position follows faction or slot, then match it. | `scenario.rs`, `menu.rs`; retail skirmish run |
 | PT-05 | Partial | Engine trails draw behind other transparent geometry: they vanish when a sail (e.g. a bottom sail) is behind them. Fix draw order/depth for trails. | `fx.rs`, `ship.rs` |
 | PT-06 | Provisional | Wake effect and the dotted course line need another visual pass against the original. | `fx.rs`, `course.rs`; reference footage |
 | PT-07 | Missing | Lob weapons have no targeting cursor effect while aiming (ground target marker, firing-solution feedback). | `view.rs`, `world_hud.rs`; AUD-03f |
-| PT-08 | Partial | The player's own ship auto-engages enemies; in the original it should not fire on its own (unlike AI captains). Check against retail and stop it. | `combat/mod.rs`, `ship.rs`; [retail firing controls](re/gunnery.md) |
+| PT-08 | Unvalidated | The command ship's direct-fire guns only engage a clicked target (or panic fire); its other ships still pick the nearest enemy. Owner recollection of retail; `combat::tests::the_command_ship_holds_fire_until_an_enemy_is_clicked`. | `combat/mod.rs`, `ship.rs`; [retail firing controls](re/gunnery.md) |
 | PT-09 | Provisional | AI behaviour pass: bring captain/enemy movement, target choice and engagement closer to the original. | `ship.rs`, `scenario.rs`, `combat/`; reference footage |
 | PT-10 | Partial | Some maps that should have ports allowing docking/repair do not offer it. Find which docks the data enables and why ours are refused. | `docking.rs`, `assets/data/docks.json` |
 | PT-11 | Missing | Docking places are missing their indicator light effect. | `docking.rs`, `fx.rs` |
