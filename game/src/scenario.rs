@@ -120,6 +120,11 @@ pub fn spawn_ship(commands: &mut Commands, assets: &AssetServer, lib: &Library, 
     if let Some(label) = label {
         e.insert(ShipName(label));
     }
+    // Tenders carry dock points on every map type (skirmish, historical, campaign).
+    let docks = serde_json::json!({ name: data::try_json(&assets_dir().join(format!("ships/{name}/docks.json"))) });
+    if let Some(d) = crate::docking::dockable_for(&docks, name) {
+        e.insert(d);
+    }
     let id = e.id();
     let guns = combat::spawn_guns(commands, assets, lib, id, ci);
     commands.entity(id).insert(guns);
@@ -188,6 +193,10 @@ pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Libra
             let e = commands.spawn((Scenario, WorldAssetRoot(assets.load(GltfAssetLabel::Scene(0).from_asset(data::model(&glb)))), tf)).id();
             if let Some(body) = shapes.obstacle(o["type"].as_str().unwrap_or_default(), &tf) {
                 commands.entity(e).insert(body);
+            }
+            // Every base/island with dock points is dockable on every map type, not only campaign bases a rule sets up.
+            if let Some(d) = o["type"].as_str().and_then(|t| crate::docking::dockable_for(&docks, t)) {
+                commands.entity(e).insert(d);
             }
             if let Some(t) = o["type"].as_str().filter(|t| t.starts_with("Terrain_BlackHole")) {
                 // The funnel mesh is not drawn: the reference video shows only the effect's glow, beam and ribbons.
@@ -490,6 +499,50 @@ mod rotation_tests {
             }
         }
         assert!(checked.len() >= 20, "must cover the base catalogue, not only Mission 2");
+    }
+
+    #[test]
+    fn skirmish_bases_and_tenders_are_dockable() {
+        use bevy::ecs::system::RunSystemOnce;
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, AssetPlugin::default()))
+            .init_asset::<bevy::world_serialization::WorldAsset>()
+            .init_asset::<Mesh>()
+            .init_asset::<Image>()
+            .init_asset::<StandardMaterial>()
+            .init_asset::<AudioSource>()
+            .init_asset::<crate::fx::EffectMaterial>()
+            .insert_resource(Library::load(&crate::assets_dir()))
+            .init_resource::<fx::FxLib>()
+            .init_resource::<collision::Shapes>()
+            .init_resource::<data::AsteroidDefs>()
+            .init_resource::<ship::Fleets>()
+            .init_resource::<Target>()
+            .insert_resource(Orbit { yaw: 0.0, pitch: 0.0, dist: 60.0, focus: None })
+            .insert_resource(Config {
+                groups: vec![],
+                player: "Ship_Navy_Tender".into(),
+                allies: vec![],
+                enemies: vec!["Ship_Navy_Cutter".into()],
+                map: Some("red_rover".into()),
+                shot: None,
+                frame: 0,
+                speed: 1.0,
+                ended: None,
+                script: None,
+                shot_frame: 0,
+                late_frame: 0,
+            });
+        app.world_mut()
+            .run_system_once(|mut c: Commands, a: Res<AssetServer>, l: Res<Library>, f: Res<fx::FxLib>, s: Res<collision::Shapes>, r: Res<data::AsteroidDefs>, cfg: Res<Config>| {
+                spawn_scenario(&mut c, &a, &l, &f, &s, &r, &cfg)
+            })
+            .unwrap();
+        let w = app.world_mut();
+        let ships = w.query_filtered::<&crate::docking::Dockable, With<Ship>>().iter(w).filter(|d| d.enabled).count();
+        let scenery = w.query_filtered::<&crate::docking::Dockable, Without<Ship>>().iter(w).filter(|d| d.enabled).count();
+        assert_eq!(ships, 1, "the player's tender");
+        assert_eq!(scenery, 2, "red_rover's Montgomery and pirate bases");
     }
 
     #[test]

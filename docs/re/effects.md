@@ -68,9 +68,10 @@ The shared converted-mesh reader moved to `data.rs`, with checked buffer/chunk b
 
 Bevy's `AlphaMode::Add` multiplies RGB by texture/vertex alpha in `pbr_functions.wesl::premultiply_alpha`. The EFT additive mode is
 ONE/ONE; the new shared material keeps unpremultiplied RGB and specializes the actual blend state to ONE/ONE. Nebula edge fade now
-modulates RGB instead of relying on alpha; its authored tint is unchanged. Particle engines/trails use that material. Flare textures
-retain their prior masked rendering: applying ONE/ONE globally exposed excessive accumulation/overbrightness in the still-provisional
-Docking_Point flare. Native flare pooling/geometry scaling must be decoded before enabling it there.
+modulates RGB instead of relying on alpha; its authored tint is unchanged. Every ONE/ONE primitive uses that material, flares
+included. The converted `flare` (and `cannonballpseudo00`) textures have an all-zero alpha channel; ONE/ONE ignores it, but
+Bevy's premultiplying `AlphaMode::Add` drew them black, which hid the dock lights, repair sparkles, SOS beacon flare and debris
+flares (PT-11). With the bounded flare lifetime above, the Docking_Point markers no longer overbrighten.
 
 Wakes share the corrected material, bake their existing age/speed fade into RGB, drop the guessed 0.7 brightness multiplier, and
 render a live stern endpoint between distance-sampled points to avoid trailing-end jumps. Width/lifetime remain provisional.
