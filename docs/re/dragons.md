@@ -1,4 +1,4 @@
-# Dragons (Animal_SpaceDragon, `Dragon - *` rules)  -- DRAFT 1 (data-derived; exe pass pending)
+# Dragons (Animal_SpaceDragon, `Dragon - *` rules)  -- DRAFT 1 (data-derived; original pass pending)
 
 Sources: retail `WorldObjects/Animal_SpaceDragon.wot`, `Gun_DragonBreath.wot`, `Bullet_DragonBreath.wot`, mission TWT files, rule JSON in
 `assets/maps/mission0{6,7,8}/mission.json`. Mission 13 only has *Island_Dragon_01* scenery (no dragon creatures); its `BTL_Dragon02_FullFast` is just music.

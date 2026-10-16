@@ -151,7 +151,7 @@ Never publish, upload or attach converted retail content anywhere (issues, CI ar
 - [data-format.md](data-format.md): editable schema and export limits.
 - [modding.md](modding.md): overlays, inheritance and HD art.
 - [re/campaign.md](re/campaign.md), [re/movement.md](re/movement.md), [re/gunnery.md](re/gunnery.md), [re/effects.md](re/effects.md), [re/sound.md](re/sound.md): evidence behind implementation.
-- [re/scenery-placement.md](re/scenery-placement.md): island/base height, authored tilt and unresolved native scene/matrix conventions.
-- [re/visibility.md](re/visibility.md): sight range/group spotting, native occlusion, current consumer gaps and acceptance cases.
+- [re/scenery-placement.md](re/scenery-placement.md): island/base height, authored tilt and unresolved retail scene/matrix conventions.
+- [re/visibility.md](re/visibility.md): sight range/group spotting, retail occlusion, current consumer gaps and acceptance cases.
 - [reference-video.md](reference-video.md): visual comparison notes.
 - [wot-format.md](wot-format.md): WOT file format notes.

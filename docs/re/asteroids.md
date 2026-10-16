@@ -19,7 +19,7 @@ The random stream is the engine's shared LCG (multiplier 1664525, increment 1013
 
 ## Path follow modes (all missions)
 
-`Setup Asteroid Belt` carries a rule `Follow Mode`; the exe enum is 0 `to end`, 1 `end to end`, 2 `loop`, 3 `teleport loop`.
+`Setup Asteroid Belt` carries a rule `Follow Mode`; the original enum is 0 `to end`, 1 `end to end`, 2 `loop`, 3 `teleport loop`.
 The path is handed to each rock's AI controller; its update at the path end either stops (mode 0), wraps (2) or,
 for mode 3, moves the object to the first path point and restarts. Retail data: missions 3, 5, 7, 8, 9 use `teleport loop` on open
 conveyor-style paths (speeds 2-20 m/s), mission 4 uses `loop`, all others `to end`/no path. `Find Closest Point` picks each rock's
@@ -69,7 +69,7 @@ Known so far:
 
 All three use additive ONE/ONE blending. Sparks use the velocity-oriented pseudo-billboard chunk. The smoke expands and fades; the flash rapidly expands then fades. These are authored effect timings, not asteroid lifetimes. `Explosion_Huge.eft` also has smoke/flash/sparks, with initial counts 5/1/20. Despite its name, its base sprite-size curves are smaller than `ShipExplosion_Medium`; caller scaling must be understood rather than guessed from the name.
 
-Both effects are now exported into `assets/fx` and spawned through the existing `fx::spawn` path. Native effect scaling and the exact destruction sound-pool selection remain unresolved; the runtime currently uses unit scale and the existing medium-explosion sound.
+Both effects are now exported into `assets/fx` and spawned through the existing `fx::spawn` path. Retail effect scaling and the exact destruction sound-pool selection remain unresolved; the runtime currently uses unit scale and the existing medium-explosion sound.
 
 ## Runtime implementation and checks
 
@@ -77,8 +77,8 @@ Both effects are now exported into `assets/fx` and spawned through the existing 
 
 `data.rs` loads/validates the definitions. `lib.rs` tags ordinary asteroids on every map; armed asteroids are excluded. `rules/` dispatches `Setup Asteroid Belt` by actual group, supplying translation/tumble intervals and path settings. `combat/asteroid.rs` owns motion, shooting, death and fragment creation. Death is emitted only on the positive-to-zero HP transition; already dead rocks are excluded from subsequent shell hits, so deferred despawning cannot repeat breakup/kill credit. Destroying a target clears it, and child rocks retain the named group provisionally so the belt attack order can select them.
 
-`collision.rs` rebuilds changed asteroid obstacles before ship movement. Tumbling box obstacles use transformed 3D faces, and broad-phase bounds include all eight transformed corners. Child rocks gain collision at spawn and lose it on despawn. Ship contacts now use finite rock mass and relative velocity, with a separate required `collision::Drift` component for collision motion; substeps translate the collider along with the rock. Explicit rule setup clears contact drift, but path ticks preserve it, and breakup includes it in the provisional parent-velocity inheritance. The planar inelastic contact response is shared with ships, not a recovered native asteroid formula; collision damage, torque and rock/rock or rock/static response remain unimplemented. See [collision.md](collision.md).
+`collision.rs` rebuilds changed asteroid obstacles before ship movement. Tumbling box obstacles use transformed 3D faces, and broad-phase bounds include all eight transformed corners. Child rocks gain collision at spawn and lose it on despawn. Ship contacts now use finite rock mass and relative velocity, with a separate required `collision::Drift` component for collision motion; substeps translate the collider along with the rock. Explicit rule setup clears contact drift, but path ticks preserve it, and breakup includes it in the provisional parent-velocity inheritance. The planar inelastic contact response is shared with ships, not a recovered retail asteroid formula; collision damage, torque and rock/rock or rock/static response remain unimplemented. See [collision.md](collision.md).
 
 Regression tests cover retail HP and asset dependencies, invalid/cyclic definitions, group membership/setup, tumble intervals without centre drift, path velocity/stopping, one-shot death, recursive 2-medium → 6-small breakup/termination, target cleanup, effects, child colliders and rotated/translated collision bounds. `--script asteroid` skips the opening, frames a large belt rock at frame 90 and destroys it at frame 180. Runtime screenshot: `local/asteroid-breakup.png` (frame 195) shows the two children and flash/sparks; no ECS query conflict occurred.
 
-Explicitly provisional: moving-parent fragment velocity, the collision-size field interpreted as spawn-offset radius, initial child orientation, inherited named group membership, effect scale/sound pool, native rotation multiplication order, waypoint path controller and exact engine PRNG sequencing (the runtime reuses combat's random stream). Full Mission 1 progression with the native lower HP and new collisions remains unverified; missions 2–13 remain first-pass, not validated gameplay.
+Explicitly provisional: moving-parent fragment velocity, the collision-size field interpreted as spawn-offset radius, initial child orientation, inherited named group membership, effect scale/sound pool, retail rotation multiplication order, waypoint path controller and exact engine PRNG sequencing (the runtime reuses combat's random stream). Full Mission 1 progression with the original lower HP and new collisions remains unverified; missions 2–13 remain first-pass, not validated gameplay.

@@ -79,7 +79,7 @@ newly authored camera sequence. Converted playback is not implemented yet.
   targets, not measured emission rates, weapon physics or collision rules.
 - White uploader captions (for example the large text over the 3:25 frame and
   '*BUMP*') are **not game UI**. A caption/overlap frame alone does not establish
-  the native collision response.
+  the original collision response.
 
 ### Next implementation batch
 
@@ -92,6 +92,6 @@ newly authored camera sequence. Converted playback is not implemented yet.
 4. Compass disc, course tiles, campaign flag selection and dialogue HUD; compare
    against fixed timestamps and matched camera views before adjusting physics.
 
-Unverified: spoken audio, frame-exact cue timings, native NIS interpolation and
+Unverified: spoken audio, frame-exact cue timings, retail NIS interpolation and
 ship motion/firing/formation equations. This clip cannot validate later rescue
 behavior or full mission completion.

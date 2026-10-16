@@ -1,4 +1,4 @@
-# Effects runtime: what the exe does
+# Effects runtime: what the original does
 
 Source: observed behaviour of the original game and its retail effect files (EFT), described in our own words.
 
@@ -34,8 +34,8 @@ added about 240 permanent particles per simulated second, even when out of sight
 The fallback now uses the primitive's authored `Duration` (20 s for that flare) only when it emits continuously and has neither
 explicit expiry nor time-varying visual curves. Explicit expiration remains authoritative; start-only permanent particles,
 including the invisible damage-smoke source pools, remain permanent. No global particle cap, engine brightness adjustment or
-reduction of authored emission rates was introduced. **PROVISIONAL:** the native no-expiration lifetime is not fully decoded;
-this is a bounded, data-derived fallback, not a claim of exact retail lifetime semantics. Native initialization
+reduction of authored emission rates was introduced. **PROVISIONAL:** the original no-expiration lifetime is not fully known;
+this is a bounded, data-derived fallback, not a claim of exact retail lifetime semantics. Retail initialization
 clears the dead flag and timestamps a particle; explicit expiration marks it dead. Neither establishes the missing-expiry default.
 
 Same-machine GPU runs (AMD Radeon 780M, vsync, Mission 1 autopilot, `--speed 16`, camera distance 60/pitch 0.5) near mission time
@@ -144,7 +144,7 @@ speeds and 1.5-second lifetimes left the two streak layers ending at widely diff
 falling particle at `surface - vertical_velocity * lifetime`; splash particles start exactly at the storm's flight plane.
 Horizontal spread, velocity, lifetime, flat orientation and fade curves stay authored. Drawing skips particles already expired
 in the interpolated frame, preventing a last frame below the endpoint. This is provisional alignment from owner feedback, not
-recovered native meteor behavior; rings remain independently emitted, not one ring per falling particle.
+recovered retail meteor behavior; rings remain independently emitted, not one ring per falling particle.
 Regression samples all four primitives at two surface heights and proves streaks reach the plane at expiry and splashes start
 there. Gate passed (188 Rust / 74 Python, seven skips); Classic isolated smoke `local/meteor-flight-plane.png` shows the shower
 above the ship's plane. Other effects retain their existing emitters and positions.
@@ -202,10 +202,10 @@ No drift or section debris added. The transform regression was added but not run
 kill a moving/smoking ship, observe the bow dropping before the explosion, then wait to confirm no persistent smoke/wake;
 check lifeboat creation, mission kill progression and restart during sinking. Compare duration/depth against retail.
 
-## Fire (FireKeeper, ignite, update, fire-fighting)
+## Fire (ignite, update, fire-fighting)
 - Ignite on a hit: if the bullet's Chance of Fire for the section material is > 0 and a uniform roll is <= it (and an
-  extra check passes, not decoded), a fire starts on the section with the bullet's Initial Fire Strength.
-- Every 6 s: the ship's fire-fighting capacity (IFlammable, crew driven, not decoded) is spent on the strongest burning
+  extra check passes, unknown), a fire starts on the section with the bullet's Initial Fire Strength.
+- Every 6 s: the ship's fire-fighting capacity (crew driven, formula unknown) is spent on the strongest burning
   fires first, subtracting from their intensity; a fire at 0 goes out. Each burning fire then damages its section by its
   intensity (a damage potential with lower = upper = intensity, no criticals). Fires on a destroyed section die.
   A dead fire stops emitting after 3 s and is removed after 5 more. Burning fires then double in intensity.
@@ -226,11 +226,11 @@ core: run by fx.rs) plus a `Vortex` primitive, implemented in `game/src/blackhol
 * Trail segment every 15 ticks, life 300 ticks. Edges start at pos +- right*OutDrift*InitialWidth, then each tick move
   +-right*OutDrift and both +forward*BackDrift, plus per-edge random jitter (+-0.07, +-0.07, +-0.02). Alpha rises 1/60 per
   tick for 60 ticks, then falls 1/240 per tick. A trail is drawn only with more than two segments.
-* Pull: the WOT CUSTOMINFO `Magnitude` is 9000 / 15000 / 25000 for Small / Med / Big (radius 145 / 260 / 625). The exe's pull law is
-  not decoded; the remake applies PROVISIONAL inverse-square pull on free ships, softened at the radius, gain 25 (`blackhole.rs`).
+* Pull: the WOT CUSTOMINFO `Magnitude` is 9000 / 15000 / 25000 for Small / Med / Big (radius 145 / 260 / 625). The original's pull law is
+  unknown; the remake applies PROVISIONAL inverse-square pull on free ships, softened at the radius, gain 25 (`blackhole.rs`).
   One retail data point (2026-10, Zemyatin Anomaly skirmish): a Navy Cutter at rest 372 units from the Small hole (2.6 × its radius)
   did not move at all for 22 s, while the remake's law gives 1.6 units/s² there. So the retail pull is zero (or tiny) that far out;
   the range and law closer in remain to be measured.
   Damage from the hole is not modelled.
-* Not decoded: strip UV mapping/blend (ours: additive, v = 0.5 per segment), the funnel mesh
+* Unknown: strip UV mapping/blend (ours: additive, v = 0.5 per segment), the funnel mesh
   (not drawn: the reference video shows only the glow, beams and ribbons).
