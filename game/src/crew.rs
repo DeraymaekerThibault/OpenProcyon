@@ -139,11 +139,15 @@ const SPECIES_VOICE: [(&str, &str); 16] = [
 /// Dialogue post name -> `crew_arms::ROLES` index.
 const POSTS: [(&str, usize); 7] = [("gunner", 0), ("captain", 1), ("firstmate", 2), ("helmsman", 3), ("engineer", 4), ("rigger", 5), ("spotter", 7)];
 
-/// The faction's generic crew (voice prefix, talking-head face) when no named crew member holds the post. PROVISIONAL: pirates'
-/// generic crew voice is not established (owner recollection: possibly an alien set), human male until checked; the generic faces
-/// (first mate for humans, the first Procyon face) are not checked against the original either.
+/// The faction's generic crew (voice prefix, face) when no named crew member holds the post. The face is the Crew screen's default
+/// for the faction (`CrewFace_<race>_0`, owner observation). PROVISIONAL: pirates' generic crew voice is not established (owner
+/// recollection: possibly an alien set), human male until checked.
 fn faction_crew(race: &str) -> (&'static str, &'static str) {
-    if race.contains("Procyon") { ("pr", "TalkingHead_Character_Procyon_0") } else { ("hm", "TalkingHead_Character_1stMate") }
+    match race {
+        r if r.contains("Procyon") => ("pr", "CrewFace_Procyon_0"),
+        r if r.contains("Pirate") => ("hm", "CrewFace_Pirate_0"),
+        _ => ("hm", "CrewFace_Navy_0"),
+    }
 }
 
 /// A voice file for `event` and the speaker's talking-head face, rotating through the event's variants with `n`: spoken by the
@@ -385,9 +389,9 @@ mod tests {
         assert_eq!(face, "TalkingHead_Character_Aquanogs_0", "and shows his portrait");
         let (hull, face) = voice_line("hull_damage", 0, "Procyon", Some(&posts), all).unwrap();
         assert!(hull.starts_with("pr"), "{hull}: other posts fall back to the faction crew");
-        assert_eq!(face, "TalkingHead_Character_Procyon_0");
+        assert_eq!(face, "CrewFace_Procyon_0", "the Crew screen's default face");
         let only_hm = |f: &str| f.starts_with("hm");
         let (file, face) = voice_line("enemy_ship_spotted", 0, "Navy", Some(&posts), only_hm).unwrap();
-        assert!(file.starts_with("hm") && face == "TalkingHead_Character_1stMate", "unimported sets fall back to the faction crew");
+        assert!(file.starts_with("hm") && face == "CrewFace_Navy_0", "unimported sets fall back to the faction crew");
     }
 }
