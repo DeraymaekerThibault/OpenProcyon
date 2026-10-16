@@ -273,14 +273,15 @@ fn hud_sounds(
 }
 
 /// Crew line (content/voice/events.json, grouping from the community remake; tools/export_voices.py) when the player's engine order changes.
-/// PROVISIONAL: always the Navy human-male crew; order->event mapping (3 -> emergency_speed vs full_power) is a guess.
+/// Spoken by the helmsman's voice (`crew::voice_line`). PROVISIONAL: order->event mapping (3 -> emergency_speed vs full_power) is a guess.
 fn helm_acknowledges(last: &mut Option<usize>, order: usize, docking: bool) -> bool {
     // Track automatic orders too, so leaving the dock does not announce a stale change.
     last.replace(order).is_some_and(|prev| prev != order) && !docking
 }
 
 fn helmsman(
-    player: Option<Single<(&Ship, Has<crate::docking::Docker>), With<PlayerShip>>>,
+    player: Option<Single<(&Ship, Has<crate::docking::Docker>, Option<&crate::crew_arms::CrewPosts>), With<PlayerShip>>>,
+    lib: Res<Library>,
     mission: Option<Res<crate::campaign::Mission>>,
     mut last: Local<Option<usize>>,
     mut n: Local<usize>,
@@ -288,24 +289,20 @@ fn helmsman(
     assets: Res<AssetServer>,
 ) {
     let Some(player) = player else { return };
-    let (p, docking) = *player;
+    let (p, docking, posts) = *player;
     // Scripted orders during the opening briefing are not the player's.
     let scripted = docking || mission.is_some_and(|m| m.opening.is_some());
     if !helm_acknowledges(&mut last, p.order, scripted) {
         return;
     }
-    let (ev, files): (&str, &[&str]) = match p.order {
-        0 => ("full_stop", &["hmhelmsman03", "hmhelmsman03b"]),
-        1 => ("slow_ahead", &["hmhelmsman07", "hmhelmsman07b"]),
-        2 => ("full_ahead", &["hmhelmsman05", "hmhelmsman05b"]),
-        _ => ("emergency_speed", &["hmhelmsman04", "hmhelmsman04b"]),
-    };
+    let ev = ["full_stop", "slow_ahead", "full_ahead"].get(p.order).copied().unwrap_or("emergency_speed");
     *n += 1;
     debug!("voice {ev}");
+    let Some((file, face)) = crate::crew::voice_line(ev, *n, &lib.classes[p.class].race, posts, crate::crew::voice_exists) else { return };
     commands.spawn((
-        AudioPlayer::new(assets.load(format!("voice/{}.ogg", files[*n % files.len()]))),
+        AudioPlayer::new(assets.load(format!("voice/{file}.ogg"))),
         PlaybackSettings::DESPAWN.with_volume(bevy::audio::Volume::Linear(crate::menu::volume(crate::menu::Setting::Dialogue))),
-        crate::panels::Helmsman,
+        crate::panels::CrewSpeech(face),
     ));
 }
 

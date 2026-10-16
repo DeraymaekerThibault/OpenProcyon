@@ -6,10 +6,14 @@ usage: python3 -m tools.export_voices copy <game_root> <out_assets>             
        python3 -m tools.export_voices table <game_root> <CL_Data/Voicelines/English> [Race ...]  (regenerate the table)"""
 
 import json
+import re
 import shutil
 import sys
 from pathlib import Path
 
+CREW_LINE = re.compile(
+    r"[a-z]{2}(gunner|captain|firstmate|helmsman|engineer|rigger|spotter)\d"
+)
 EVENTS = Path(__file__).resolve().parents[1] / "content/voice/events.json"
 
 
@@ -43,7 +47,8 @@ def copy(root, out, events=EVENTS):
     }
     src = {p.stem.lower(): p for p in (root / "Sound/Dialogue").glob("*.ogg")}
     (out / "voice").mkdir(parents=True, exist_ok=True)
-    for n in names & src.keys():
+    # Every species' crew-post lines too: the game swaps the table's two-letter prefix for the speaker's (game/src/crew.rs).
+    for n in {n for n in src if CREW_LINE.match(n)} | (names & src.keys()):
         shutil.copyfile(src[n], out / "voice" / (n + ".ogg"))
     missing = sorted(names - src.keys())
     print(

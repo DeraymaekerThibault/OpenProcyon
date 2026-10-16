@@ -7,13 +7,14 @@ from tools.export_voices import EVENTS, copy
 
 
 class ExportVoices(unittest.TestCase):
-    def test_copy_takes_named_retail_files_and_reports_missing(self):
+    def test_copy_takes_named_and_crew_post_files_and_reports_missing(self):
         with tempfile.TemporaryDirectory() as d:
             root, out = Path(d, "game"), Path(d, "out")
             (root / "Sound/Dialogue").mkdir(parents=True)
-            # Retail case differs from the table; HMCaptain99 is not in it, so it is not copied.
-            (root / "Sound/Dialogue/HMCaptain01.ogg").write_bytes(b"a")
-            (root / "Sound/Dialogue/HMCaptain99.ogg").write_bytes(b"b")
+            # Retail case differs from the table. Every species' crew-post line is copied (the game swaps the prefix);
+            # other dialogue (mission lines, AI captains) only when the table names it.
+            for n in ["HMCaptain01", "AQSpotter03", "M01Mission01", "HMAICaptain01"]:
+                (root / f"Sound/Dialogue/{n}.ogg").write_bytes(b"a")
             events = Path(d, "events.json")
             events.write_text(
                 json.dumps(
@@ -22,7 +23,8 @@ class ExportVoices(unittest.TestCase):
             )
             missing = copy(root, out, events)
             self.assertEqual(
-                sorted(p.name for p in (out / "voice").iterdir()), ["hmcaptain01.ogg"]
+                sorted(p.name for p in (out / "voice").iterdir()),
+                ["aqspotter03.ogg", "hmcaptain01.ogg"],
             )
             self.assertEqual(missing, ["hmcaptain02"])
 

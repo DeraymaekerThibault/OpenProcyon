@@ -262,10 +262,11 @@ pub enum Gauge {
 /// Face sprite (`TalkingHead_Character_*`) of the campaign line being spoken outside cutscenes; written by `rules/systems.rs::ui`.
 #[derive(Resource, Default)]
 pub struct Talk(pub Option<String>);
-/// Marks the helmsman's voice-line audio entity: the talking head shows the first mate while it plays.
+/// A crew voice line's audio entity (helm acknowledgement or callout) with its speaker's face (`crew::voice_line`): the talking
+/// head shows it while the line plays.
 #[derive(Component)]
-pub struct Helmsman;
-/// Bottom-right talking-head device (retail `TalkingHead_*`): it opens while a campaign voice line or the helmsman speaks.
+pub struct CrewSpeech(pub String);
+/// Bottom-right talking-head device (retail `TalkingHead_*`): it opens while a campaign voice line or a crew line is spoken.
 #[derive(Resource, Default)]
 pub struct HeadState {
     /// Open progress 0..=1.
@@ -351,19 +352,19 @@ fn update_docking_status(
     }
 }
 
-/// Opens the talking head on a campaign voice line (outside cutscenes) or a helmsman line and closes it when the speech ends.
+/// Opens the talking head on a campaign voice line (outside cutscenes) or a crew line and closes it when the speech ends.
 fn talking_head(
     time: Res<Time>,
     talk: Res<Talk>,
-    helm: Query<(), With<Helmsman>>,
+    crew: Query<&CrewSpeech>,
     mission: Option<Res<crate::campaign::Mission>>,
     cfg: Res<crate::Config>,
     mut sfx: MessageWriter<crate::audio::Sfx>,
     mut head: ResMut<HeadState>,
 ) {
     let line = talk.0.clone().filter(|_| mission.is_some());
-    let helm_speaks = !helm.is_empty() || cfg.script.as_deref() == Some("talk");
-    let speaker = line.or(helm_speaks.then(|| "TalkingHead_Character_1stMate".to_string()));
+    let talk_smoke = (cfg.script.as_deref() == Some("talk")).then(|| "TalkingHead_Character_1stMate".to_string());
+    let speaker = line.or_else(|| crew.iter().next().map(|c| c.0.clone())).or(talk_smoke);
     let speaking = speaker.is_some();
     if speaker.is_some() {
         head.speaker = speaker;
@@ -625,6 +626,33 @@ pub fn input_app() -> (App, Entity) {
 #[cfg(test)]
 pub mod tests {
     use super::*;
+
+    #[test]
+    fn a_crew_line_opens_the_talking_head_on_its_speaker() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins).init_resource::<Talk>().init_resource::<HeadState>().add_message::<crate::audio::Sfx>().add_systems(Update, talking_head);
+        app.insert_resource(crate::Config {
+            groups: vec![],
+            player: String::new(),
+            allies: vec![],
+            enemies: vec![],
+            map: None,
+            shot: None,
+            frame: 0,
+            speed: 1.0,
+            ended: None,
+            script: None,
+            shot_frame: 0,
+            late_frame: 0,
+        });
+        let line = app.world_mut().spawn(CrewSpeech("TalkingHead_Character_Aquanogs_0".into())).id();
+        app.update();
+        let head = app.world().resource::<HeadState>();
+        assert!(head.speaking && head.speaker.as_deref() == Some("TalkingHead_Character_Aquanogs_0"));
+        app.world_mut().despawn(line);
+        app.update();
+        assert!(!app.world().resource::<HeadState>().speaking, "closes when the line ends");
+    }
 
     #[test]
     fn ship_bar_release_latch_hidden_gate_and_context_menu_do_not_promote() {

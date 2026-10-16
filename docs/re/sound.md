@@ -35,4 +35,14 @@ The float is read as the pool's max distance (same field order as the WOT pools)
 `sails_damaged`, `rudder_destroyed`, `fire_weapon`, `enemy_ship_spotted_<faction>`, `hull_damage`, `retreat`, `mission_won`) -> file lists are exported by
 `tools/export_voices.py` to `content/voice/events.json`, which ships with the code (event and file names only; Procyon, HumanMale, HumanFemale, Robot). The import copies the named retail Ogg files, so neither players nor contributors need the CL ModPack. The grouping is the community's
 interpretation, not exe-derived: PROVISIONAL. Wired so far: helmsman line on player engine-order change (`audio.rs::helmsman`).
+**Who speaks.** The retail dialogue folder holds one line set per species and post: the two-letter prefix is the species
+(HM human male, HF human female, PR Procyon, RO war bot, AQ Aquanog, AR Arcturian, CA Canid, CR Cragorian, DE Densadron,
+FE Felinid, GE Geeorie, MC Macriki, MN Mantavor, OP Optoc, TU Tuskrus, ZI Zirrelian), the rest the post (gunner, captain,
+firstmate, helmsman, engineer, rigger, spotter) and line number; every species that voices a post has the same line count
+for it, and not every species voices every post (Aquanogs: engineer, rigger, spotter). The remake picks a line from the
+human-male table, then has it spoken by the first named crew member at that post whose species voices it, else by the
+ship's faction crew (Navy human male, Procyon PR). PROVISIONAL: that the numbering means the same line across species, the
+pirates' generic crew voice (human male until checked; possibly an alien set), and AI-captain (`<xx>AICAPTAIN`) lines unused.
+The import copies every species' post lines. The talking head shows the speaker: the named crew member's portrait, else
+the faction's generic face (PROVISIONAL: first mate for humans, the first Procyon face).
 Regenerate the table: `python3 -m tools.export_voices table "$PROCYON_GAME_ROOT" <CL_Data/Voicelines/English> Procyon HumanMale HumanFemale Robot`.
