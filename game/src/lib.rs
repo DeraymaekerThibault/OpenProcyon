@@ -1,5 +1,5 @@
 //! Shared game library: simulation, rules, data and input. Skirmish slice: your ship vs enemy ships, original models/data, AI that fights back, damage effects, win/lose, restart.
-//! Everything marked PROVISIONAL is a stand-in, not measured original behaviour (see docs/faithful-remake.md).
+//! Everything marked PROVISIONAL is a stand-in, not measured original behaviour (see AGENTS.md, rule 5).
 
 pub mod audio;
 pub mod bindings;

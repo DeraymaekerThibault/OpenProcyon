@@ -147,11 +147,9 @@ Never publish, upload or attach converted retail content anywhere (issues, CI ar
 ## Documentation map
 
 - [fidelity-backlog.md](fidelity-backlog.md): current consolidated fidelity gaps and acceptance criteria.
-- [faithful-remake.md](faithful-remake.md): original direction, evidence and historical implementation milestones; use the backlog for current gap status.
 - [data-format.md](data-format.md): editable schema and export limits.
 - [modding.md](modding.md): overlays, inheritance and HD art.
-- [re/campaign.md](re/campaign.md), [re/movement.md](re/movement.md), [re/gunnery.md](re/gunnery.md), [re/effects.md](re/effects.md), [re/sound.md](re/sound.md): evidence behind implementation.
+- [re/hud.md](re/hud.md), [re/campaign.md](re/campaign.md), [re/movement.md](re/movement.md), [re/gunnery.md](re/gunnery.md), [re/effects.md](re/effects.md), [re/sound.md](re/sound.md): evidence behind implementation.
 - [re/scenery-placement.md](re/scenery-placement.md): island/base height, authored tilt and unresolved retail scene/matrix conventions.
 - [re/visibility.md](re/visibility.md): sight range/group spotting, retail occlusion, current consumer gaps and acceptance cases.
-- [reference-video.md](reference-video.md): visual comparison notes.
 - [wot-format.md](wot-format.md): WOT file format notes.
