@@ -227,7 +227,13 @@ Compass/radar: brass frame (`COMPASS_OVERLAY`, 128x123) over the radar disk (off
 frame, offset 17,13); enemy contacts use `HUDRADAR_ICON_ENEMYSHIP_*`, placed ship-relative with forward = up.
 Screen placement of both windows and the radar range (300 units) are PROVISIONAL (Compass slot 2 at anchors to a
 view rectangle; not decoded). Contacts for friendly/other types and the animated icon frames are not done.
-Not done: formation/weapon/ship bars, secondary-ship slots, cursors, ship-name labels, tooltips.
+Bar parts share their top row (gauge offsets are "from MainBar TopLeft" and every part's frame art starts on the same row; rect heights
+differ only in bottom rows), docked with the shortest part's bottom on the screen edge. The weapon and ship-bar toggles stand on their
+`*_ToggleDetail` arms: arm bottom `Move_Toggle*_Detail_Down` px behind the compass / talking head, button at
+`Toggle*_Button_Offset_From_Detail_TopLeft` (checked against a retail 1:1 screenshot). HUD ship icons use the class's WOT icon name.
+A selected secondary ship shows its name on the `ShipName_HUDComponent_Backdrop_*` plate at the top (PROVISIONAL placement). The
+game-speed control (not retail, a testing aid) is a tooltip-backdrop plate beside the bar's right end with halve / double buttons (1x-16x).
+Not done: cursors, tooltips.
 
 ## Sound
 `game/src/audio.rs` plays the original Ogg files: gun fire, per-material bullet impacts, section loss and ship explosion
@@ -283,7 +289,7 @@ Geometry selection is retail-derived, but response is **PROVISIONAL**: inelastic
 
 ## HUD factions
 The in-game HUD uses the art set of the player's ship race (`Navy`, `Pirate`, `Procyon`; civilians use Navy): sprites, main-bar part sizes, status gauge offsets and
-the radar disk come from the matching entry of `hud/hud.json`. `game/src/classic/panels.rs` builds the main bar as a bottom-docked flex row and the radar, speed dial and weapon panel as anchored child trees. Gauges and gun slots update within their owning panels (behaviour and values: shared `panels.rs`); world labels, reticles and navigation are in `world_hud.rs`.
+the radar disk come from the matching entry of `hud/hud.json`. `game/src/classic/panels.rs` builds the main bar as a bottom-docked, top-aligned flex row, the toggles, ship bar and Fleet Commands window, and the radar, speed dial and weapon panel as anchored child trees. Gauges and gun slots update within their owning panels (behaviour and values: shared `panels.rs`); world labels, reticles and navigation are in `world_hud.rs`.
 `content/data/hud/bar.json` defines bar part order and optional decorative backdrops; missing faction sprites/backdrops are skipped. Mods can replace that file without changing Rust layout code. New part names still need a behavior handler to become functional controls.
 `tools/trim_hud_rects.py` preserves original atlas rectangles and generates isolated `hud/tex/bar_<skin>_<sprite>.png` art for bar parts. This avoids neighbouring atlas pixels showing as vertical lines at fractional UI scales. Navy keeps its shared-edge rectangles; Pirate/Procyon drop trailing transparent columns. HD atlas overlays fall back to scaled atlas rectangles when their sheet scale is not 1; generated bar PNGs can also be replaced directly.
 Panels rebuild after faction selection on ship/faction/height changes, are removed with the battle scenario, and rebuild when re-entering the same scenario. Speed-dial clicks and weapon toggle use UI hit testing and block world commands; briefing-hidden panels ignore input.

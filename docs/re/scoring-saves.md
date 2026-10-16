@@ -74,10 +74,17 @@ Strings (English): `VICTORY!` / `DEFEAT!` (the "victory status" label), `Ships L
 Layout/colour constants from `hud.hdt` (800x600 reference, same for Navy/Pirate skins): victory-status label at (230,120) from the window
 top-left, stats border backdrop at (35,160), column width 130, gap between columns 10, player-name width 110, row height 30; fonts
 `UniversLightBold14` (victory label) and `Univers10` (column headings); colours: bar `(0.207,0.566,0.265)`, everything else white.
+Measured on two retail 2-player defeats (window drawn 1:1 at 800x600): status label centred at y 132; the framed table from (35,160) to
+x 767 with a 30 px heading band (column titles centred at y 175); one player per 60 px from y 210 (flag 28x25 at x 37, name from x 77,
+four 128x24 gold-rimmed boxes at x 197 + 140 * column); columns in order Ships Sunk, Ships Left (`left/start`), Damage Inflicted, Damage
+Taken; the panel ends 20 px below the last box centre. Each column's best value (most sunk / left / inflicted, least taken; ties all
+count) is a green box, the others plain. Seen screens are 2-player only; the next arrow's target is not observed.
 So: one row per player (name, then columns of counts as horizontal bars), the kill-count-by-object-type table, a points panel for
 campaign games. The exact column order, which object types are listed and how bars scale are not recovered. PROVISIONAL.
 
-Implemented so far: only the lifeboat table (`rules::Script::lifeboats_saved`, `PlayerLifeBoatSavedInfo`: collector, lifeboat owner, count) and the live
+Implemented: `GameStats` (`stats.rs`) and the Game Summary page of the classic in-game overlay (`Page::Summary`, opened when a
+skirmish is decided and by the in-game menu's Summary button), drawn from `Multiplayer Stats Screen.tst` with the measurements above;
+no kill-by-object-type table or points panel; missions still end through their rules' text. Earlier notes: only the lifeboat table (`rules::Script::lifeboats_saved`, `PlayerLifeBoatSavedInfo`: collector, lifeboat owner, count) and the live
 `score` that lifeboat pickups add to; no `GameStats` resource, stats screen or save serialisation yet (mission-start saves restart the mission, so a
 mission's table is not persisted).
 

@@ -2,10 +2,9 @@
 //!
 //! A view builds its widgets under one `HudRoot` and tags them with the markers below (`PanicButton`, `GunButton`, `Contact`, ...);
 //! this module gives them their behaviour: clicks, what the gauges read (`gauge_value`), radar contact placement (`Radar`), the
-//! docking/boarding status icon, the talking-head state (`HeadState`), pause and the game-speed button. Views only draw.
+//! docking/boarding status icon, the talking-head state (`HeadState`), pause and the game-speed buttons. Views only draw.
 #![allow(deprecated)] // shortcut: bevy 0.20 Interaction (deprecated for picking Hovered/Pressed); port with menu.rs when it is removed
 use bevy::prelude::*;
-use bevy::ui::FocusPolicy;
 
 use crate::bindings::Act;
 use crate::combat::{self, GunStates, Health};
@@ -47,9 +46,15 @@ pub struct HudRoot;
 /// Every node that takes the mouse: clicks on it must not reach the world.
 #[derive(Component)]
 pub struct Solid;
-/// Testing aid (not retail): click cycles the game speed 1x, 2x, 4x .. 16x, then back to 1x.
+/// Testing aid (not retail): game-speed buttons; each click halves / doubles the speed between 1x and `MAX_GAME_SPEED`.
+#[derive(Component, Clone, Copy, PartialEq, Debug)]
+pub enum SpeedButton {
+    Slower,
+    Faster,
+}
+/// Text that shows the game speed ("2x", or "Paused").
 #[derive(Component)]
-pub struct SpeedButton;
+pub struct SpeedLabel;
 /// Presentations tag either a normalized retail dial or discrete engine-order tabs.
 #[derive(Component)]
 pub struct EngineDial;
@@ -83,6 +88,7 @@ pub enum FleetButton {
 }
 #[derive(Component)]
 pub struct FleetWindow(pub bool); // true: ship bar, false: commands
+/// Name plate of the selected ship, shown while it is a secondary (not the command ship).
 #[derive(Component)]
 pub struct SelectedName;
 #[derive(Clone, Default)]
@@ -126,7 +132,7 @@ fn fleet_model(
         let total = c.core_hp + c.sections.iter().map(|s| s.hp).sum::<f32>();
         FleetRow {
             entity: Some(e),
-            icon: format!("ShipBar_ShipIcon_{}", c.name.trim_start_matches("Ship_")),
+            icon: c.icon("ShipBar"),
             name: name.map(|n| n.0.clone()).or_else(|| ms.map(|m| m.name.clone())).unwrap_or_else(|| c.name.clone()),
             health: ((h.core.max(0.0) + h.sections.iter().map(|hp| hp.max(0.0)).sum::<f32>()) / total.max(1.0)).clamp(0.0, 1.0),
             status: if dock.is_some() {
@@ -297,7 +303,7 @@ pub fn frame(assets: &AssetServer, hud: &HudData, name: &str) -> Option<(Handle<
 }
 
 fn update_visibility(
-    mut root: Query<&mut Visibility, (Or<(With<HudRoot>, With<SpeedButton>)>, Without<WeaponPanel>)>,
+    mut root: Query<&mut Visibility, (With<HudRoot>, Without<WeaponPanel>)>,
     mut weapons: Query<&mut Visibility, With<WeaponPanel>>,
     toggles: Res<Toggles>,
     mission: Option<Res<crate::campaign::Mission>>,
@@ -557,37 +563,25 @@ fn pause_button(mouse: Res<ButtonInput<MouseButton>>, mut vtime: ResMut<Time<Vir
     }
 }
 
-/// Spawns the testing speed button, cycles speed on click and keeps its label in sync with `--speed`.
+/// Speed buttons step the game speed; labels follow it (and `--speed`).
 fn speed_button(
-    mut commands: Commands,
     mouse: Res<ButtonInput<MouseButton>>,
     mut vtime: ResMut<Time<Virtual>>,
     mut window: Single<&mut Window, With<bevy::window::PrimaryWindow>>,
-    mut q: Query<(&Interaction, &mut Text), With<SpeedButton>>,
+    buttons: Query<(&SpeedButton, &Interaction)>,
+    mut labels: Query<&mut Text, With<SpeedLabel>>,
     mission: Option<Res<crate::campaign::Mission>>,
 ) {
-    let Ok((interaction, mut text)) = q.single_mut() else {
-        commands.spawn((
-            crate::Scenario,
-            SpeedButton,
-            Solid,
-            Interaction::None,
-            FocusPolicy::Block,
-            Text::new(""),
-            TextFont { font_size: FontSize::Px(16.0), ..default() },
-            Node { position_type: PositionType::Absolute, top: Val::Px(8.0), left: Val::Percent(50.0), padding: UiRect::axes(Val::Px(10.0), Val::Px(4.0)), ..default() },
-            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.6)),
-            GlobalZIndex(20),
-        ));
-        return;
-    };
-    if !cinematic(mission.as_deref()) && mouse.just_pressed(MouseButton::Left) && *interaction != Interaction::None {
-        let speed = vtime.relative_speed() * 2.0;
-        crate::set_game_speed(&mut vtime, &mut window, if speed > crate::MAX_GAME_SPEED { 1.0 } else { speed });
+    let clicked = buttons.iter().find(|(_, i)| **i != Interaction::None).map(|(b, _)| *b);
+    if let Some(b) = clicked.filter(|_| !cinematic(mission.as_deref()) && mouse.just_pressed(MouseButton::Left)) {
+        let speed = vtime.relative_speed() * if b == SpeedButton::Faster { 2.0 } else { 0.5 };
+        crate::set_game_speed(&mut vtime, &mut window, speed.clamp(1.0, crate::MAX_GAME_SPEED));
     }
-    let label = if vtime.is_paused() { "Paused".to_string() } else { format!("Speed {}x", vtime.relative_speed()) };
-    if text.0 != label {
-        text.0 = label;
+    let label = if vtime.is_paused() { "Paused".to_string() } else { format!("{}x", vtime.relative_speed()) };
+    for mut text in &mut labels {
+        if text.0 != label {
+            text.0 = label.clone();
+        }
     }
 }
 
@@ -730,29 +724,22 @@ pub mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins).insert_resource(Toggles { weapons: false, names: true }).add_systems(Update, update_visibility);
         let root = app.world_mut().spawn((HudRoot, Visibility::Inherited)).id();
-        let speed = app.world_mut().spawn((SpeedButton, Visibility::Inherited)).id();
         let weapons = app.world_mut().spawn((WeaponPanel, Visibility::Inherited)).id();
         app.update();
         assert_eq!(*app.world().get::<Visibility>(root).unwrap(), Visibility::Inherited);
         app.insert_resource(crate::campaign::load());
         app.update();
-        for entity in [root, speed] {
-            assert_eq!(*app.world().get::<Visibility>(entity).unwrap(), Visibility::Hidden, "opening briefing");
-        }
+        assert_eq!(*app.world().get::<Visibility>(root).unwrap(), Visibility::Hidden, "opening briefing");
         {
             let mut mission = app.world_mut().resource_mut::<crate::campaign::Mission>();
             mission.opening = None;
             mission.script.nis = true;
         }
         app.update();
-        for entity in [root, speed] {
-            assert_eq!(*app.world().get::<Visibility>(entity).unwrap(), Visibility::Hidden, "in-game cutscene");
-        }
+        assert_eq!(*app.world().get::<Visibility>(root).unwrap(), Visibility::Hidden, "in-game cutscene");
         app.world_mut().resource_mut::<crate::campaign::Mission>().script.nis = false;
         app.update();
-        for entity in [root, speed] {
-            assert_eq!(*app.world().get::<Visibility>(entity).unwrap(), Visibility::Inherited, "gameplay restored");
-        }
+        assert_eq!(*app.world().get::<Visibility>(root).unwrap(), Visibility::Inherited, "gameplay restored");
         assert_eq!(*app.world().get::<Visibility>(weapons).unwrap(), Visibility::Hidden, "player toggle preserved");
     }
 
@@ -805,23 +792,25 @@ pub mod tests {
     }
 
     #[test]
-    fn speed_button_cycles_game_speed_and_wraps() {
+    fn speed_buttons_step_and_clamp_the_game_speed() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins).init_resource::<ButtonInput<MouseButton>>().add_systems(Update, speed_button);
         app.world_mut().spawn((Window::default(), bevy::window::PrimaryWindow));
-        app.update(); // spawns the button
-        let button = app.world_mut().query_filtered::<Entity, With<SpeedButton>>().single(app.world()).unwrap();
-        app.world_mut().entity_mut(button).insert(Interaction::Pressed);
+        let faster = app.world_mut().spawn((SpeedButton::Faster, Interaction::None)).id();
+        let slower = app.world_mut().spawn((SpeedButton::Slower, Interaction::None)).id();
+        let label = app.world_mut().spawn((SpeedLabel, Text::new(""))).id();
         let mut seen = vec![];
-        for _ in 0..5 {
+        for (button, other) in [(faster, slower); 5].into_iter().chain([(slower, faster); 6]) {
+            app.world_mut().entity_mut(button).insert(Interaction::Pressed);
+            app.world_mut().entity_mut(other).insert(Interaction::None);
             app.world_mut().resource_mut::<ButtonInput<MouseButton>>().press(MouseButton::Left);
             app.update();
             app.world_mut().resource_mut::<ButtonInput<MouseButton>>().clear();
             app.world_mut().resource_mut::<ButtonInput<MouseButton>>().release(MouseButton::Left);
             seen.push(app.world().resource::<Time<Virtual>>().relative_speed());
         }
-        assert_eq!(seen, [2.0, 4.0, 8.0, 16.0, 1.0]);
-        assert_eq!(app.world().get::<Text>(button).unwrap().0, "Speed 1x");
+        assert_eq!(seen, [2.0, 4.0, 8.0, 16.0, 16.0, 8.0, 4.0, 2.0, 1.0, 1.0, 1.0]);
+        assert_eq!(app.world().get::<Text>(label).unwrap().0, "1x");
     }
 
     #[test]

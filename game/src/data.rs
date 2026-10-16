@@ -274,6 +274,14 @@ pub struct Class {
     pub tow_points: [Vec3; 2], // TowerPoint (stern), ToweePoint (bow)
     pub homing_point: Vec3,
 }
+impl Class {
+    /// The class's HUD icon of a bar ("ShipBar", "WeaponBar"): the WOT icon name (several classes share art, and names differ from
+    /// class names, e.g. Ship_Navy_ManOWar -> Navy_Man_O_War), falling back to the class name.
+    pub fn icon(&self, bar: &str) -> String {
+        let art = self.icon.as_deref().and_then(|i| i.strip_prefix("ShipBar_ShipIcon_")).unwrap_or_else(|| self.name.trim_start_matches("Ship_"));
+        format!("{bar}_ShipIcon_{art}")
+    }
+}
 
 #[derive(Resource)]
 pub struct Library {
