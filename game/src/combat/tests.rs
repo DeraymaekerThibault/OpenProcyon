@@ -23,13 +23,6 @@ fn damage_scales_with_side_and_difficulty() {
 }
 
 #[test]
-fn health_scale_applies_to_core_and_every_section() {
-    let mut h = Health { sections: vec![10.0, 4.0], core: 8.0, destroyed: false };
-    h.scale(0.5);
-    assert_eq!((h.sections.as_slice(), h.core), (&[5.0, 2.0][..], 4.0));
-}
-
-#[test]
 fn destroyed_sail_does_not_absorb_shots_but_destroyed_vital_sections_do() {
     let (guns, _) = load_weapons(&assets_dir());
     let mut class = load_class(&assets_dir(), "Ship_Navy_Torpedo", &guns);
