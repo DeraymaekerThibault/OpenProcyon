@@ -210,7 +210,8 @@ def scene_name(nodes):
 def gun_visual(root, gun, outdir):
     """Base + barrel models (own GLBs in outdir), barrel pivot and muzzle points, from the gun's MSB scene.
     Base = the root node, barrel = its GunVerticalPivotPlacement child (optional), muzzles = GunMuzzlePlacement nodes
-    (positions relative to the barrel, or the base if there is no barrel). Node rotations other than yaw are ignored.
+    (positions in the base's frame, like the barrel mesh: the game draws both at minus the pivot inside the pitching barrel).
+    Node rotations other than yaw are ignored.
     """
     scene = scene_name(load(root, gun))
     nodes = {

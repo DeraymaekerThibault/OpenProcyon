@@ -138,7 +138,7 @@ pub struct GunDef {
     pub base: Option<String>,   // glb of the turning base
     pub barrel: Option<String>, // glb of the pitching barrel
     pub pivot: Vec3,            // barrel pivot in the base frame
-    pub muzzles: Vec<Vec3>,     // muzzle points in the barrel frame
+    pub muzzles: Vec<Vec3>,     // muzzle points in the base frame, like the barrel mesh (see `combat::spawn_gun`)
     pub hspeed: f32,
     pub vspeed: f32,
     pub vlim: [f32; 2],

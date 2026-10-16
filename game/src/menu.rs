@@ -467,11 +467,11 @@ impl Skirmish {
             .filter(|s| s.kind != Kind::Closed)
             .map(|s| {
                 let ships = if !open {
-                    self.map_json["ships"]
-                        .as_array()
+                    // The first ship becomes the command ship: the one the map flags as primary (its Setup Ship rule), else map order.
+                    let mut placed: Vec<&Value> = self.map_json["ships"].as_array().into_iter().flatten().filter(|o| o["player"].as_u64() == Some(s.player as u64)).collect();
+                    placed.sort_by_key(|o| o["primary"].as_bool() != Some(true));
+                    placed
                         .into_iter()
-                        .flatten()
-                        .filter(|o| o["player"].as_u64() == Some(s.player as u64))
                         .filter_map(|o| {
                             Some((o["type"].as_str()?.to_string(), Some([0, 1, 2].map(|i| o["pos"][i].as_f64().unwrap_or(0.0) as f32)), o["name"].as_str().map(String::from)))
                         })
@@ -1277,6 +1277,15 @@ mod tests {
         apply(&mut sk, &lib, &Action::CycleRace(human));
         assert!(sk.slots[human].fleet.is_empty());
         assert!(sk.slots[human].weapons.is_empty());
+    }
+
+    #[test]
+    fn historical_map_commands_the_ship_its_rules_mark_primary() {
+        // Iron War lists Navy 1's two torpedo boats first, but its Setup Ship rule makes the fast frigate the primary.
+        let lib = Library::load(&assets_dir());
+        let navy = &skirmish("iron_war").plan(&lib)[0].ships;
+        assert_eq!((navy[0].0.as_str(), navy[0].2.as_deref()), ("Ship_Navy_FastFrigate", Some("RLS Star Finder")));
+        assert_eq!(navy.len(), 3);
     }
 
     #[test]

@@ -224,11 +224,13 @@ fn spawn_gun(commands: &mut Commands, assets: &AssetServer, lib: &Library, ship:
     if let Some(b) = &g.base {
         commands.entity(base).insert(scene(b));
     }
+    // The barrel pitches about its pivot, but its mesh and the muzzle points are authored in the base's frame (on 24 of 26 barrels
+    // with a pivot the muzzles sit on the mesh only that way): inside the pivot node they are drawn at minus the pivot.
     let barrel = commands.spawn((GunPart, Transform::from_translation(g.pivot), Visibility::default(), ChildOf(base))).id();
     if let Some(b) = &g.barrel {
-        commands.entity(barrel).insert(scene(b));
+        commands.spawn((GunPart, scene(b), Transform::from_translation(-g.pivot), Visibility::default(), ChildOf(barrel)));
     }
-    let muzzles = g.muzzles.iter().map(|p| commands.spawn((GunPart, Transform::from_translation(*p), Visibility::default(), ChildOf(barrel))).id()).collect();
+    let muzzles = g.muzzles.iter().map(|p| commands.spawn((GunPart, Transform::from_translation(*p - g.pivot), Visibility::default(), ChildOf(barrel))).id()).collect();
     GunState {
         gun: gun.into(),
         root,
@@ -1636,6 +1638,30 @@ mod tests {
         assert_eq!(base_mission_damage(class, &hp), 1.0);
         assert!(base_aim_point(class, &hp, Some(point)).is_none());
         assert!(base_ray_hit(class, &hp, &Transform::default(), ray).is_none(), "destroyed towers are no longer attack targets");
+    }
+
+    #[test]
+    fn resting_muzzles_sit_at_their_authored_points() {
+        // Barrel meshes and muzzles are authored in the base frame; the pivot only moves the pitch axis (Dreadnought hull guns
+        // were drawn 0.9 too high and 1.2 too far forward when the pivot was added on top).
+        let mut app = App::new();
+        app.add_plugins((TaskPoolPlugin::default(), AssetPlugin::default(), TransformPlugin)).init_asset::<bevy::world_serialization::WorldAsset>();
+        let assets = app.world().resource::<AssetServer>().clone();
+        let lib = Library::load(&assets_dir());
+        let class = lib.index("Ship_Procyon_Dreadnought");
+        let ship = app.world_mut().spawn(Transform::default()).id();
+        let states = spawn_guns(&mut app.world_mut().commands(), &assets, &lib, ship, class);
+        app.update();
+        let mut checked = 0;
+        for (m, st) in lib.classes[class].mounts.iter().zip(&states.0) {
+            let g = &lib.guns[&m.gun];
+            for (p, e) in g.muzzles.iter().zip(&st.muzzles) {
+                let at = app.world().get::<GlobalTransform>(*e).unwrap().translation();
+                assert!(at.distance(m.pos + m.rot * *p) < 1e-4, "{}: muzzle at {at}, authored {}", m.gun, m.pos + m.rot * *p);
+                checked += (g.pivot != Vec3::ZERO) as usize;
+            }
+        }
+        assert!(checked > 0, "the Dreadnought has pivoted barrels");
     }
 
     #[test]
