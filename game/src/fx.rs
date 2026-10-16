@@ -731,24 +731,20 @@ fn render_fx(
     for (key, b) in bufs {
         let entry = groups.0.entry(key).or_insert_with(|| {
             let mesh = meshes.add(Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default()));
-            let material = StandardMaterial {
-                base_color_texture: Some(tex.0[key.0].clone()),
-                unlit: true,
-                cull_mode: None,
-                double_sided: true,
-                alpha_mode: match key.1 {
-                    Blend::Add => AlphaMode::Add,
-                    Blend::Alpha => AlphaMode::Blend,
-                    Blend::Multiply => AlphaMode::Multiply,
-                },
-                ..default()
-            };
             let mut entity = commands.spawn((Mesh3d(mesh.clone()), Transform::default(), NoFrustumCulling, Visibility::default()));
-            // shortcut: flare pooling/scaling is unresolved; keep its mask until native docking-flare lifetime is decoded.
-            if key.1 == Blend::Add && lib.tex_names[key.0] != "flare" {
+            // Every ONE/ONE texture, flares included: several (flare, cannon-ball pseudo) have an all-zero alpha channel, which
+            // Bevy's premultiplying AlphaMode::Add turned black, hiding dock lights, repair sparkles and the SOS beacon (PT-11).
+            if key.1 == Blend::Add {
                 entity.insert(MeshMaterial3d(additive.add(additive_material(tex.0[key.0].clone()))));
             } else {
-                entity.insert(MeshMaterial3d(mats.add(material)));
+                entity.insert(MeshMaterial3d(mats.add(StandardMaterial {
+                    base_color_texture: Some(tex.0[key.0].clone()),
+                    unlit: true,
+                    cull_mode: None,
+                    double_sided: true,
+                    alpha_mode: if key.1 == Blend::Multiply { AlphaMode::Multiply } else { AlphaMode::Blend },
+                    ..default()
+                })));
             }
             let e = entity.id();
             (e, mesh)
@@ -996,6 +992,34 @@ mod tests {
                 assert!(fx.particle_count() <= 4000, "docking marker grew to {} particles after {} ticks", fx.particle_count(), i + 1);
             }
         }
+    }
+
+    #[test]
+    fn dock_light_flares_draw_with_the_unpremultiplied_additive_material() {
+        let mut app = App::new();
+        app.init_resource::<Time>()
+            .init_resource::<FxLib>()
+            .insert_resource(FxRng(123))
+            .init_resource::<Groups>()
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<StandardMaterial>>()
+            .init_resource::<Assets<EffectMaterial>>()
+            .add_systems(Update, (update_fx, render_fx).chain());
+        let n = app.world().resource::<FxLib>().tex_names.len();
+        app.insert_resource(FxTextures(vec![Handle::default(); n]));
+        app.world_mut().spawn((Camera3d::default(), GlobalTransform::default()));
+        app.world_mut()
+            .resource_scope(|world, lib: Mut<FxLib>| spawn(&mut world.commands(), &lib, "Docking_Point", None, Transform::default(), Transform::default(), false).unwrap());
+        app.world_mut().flush();
+        for _ in 0..10 {
+            app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs_f32(TICK));
+            app.update();
+        }
+        let flare = app.world().resource::<FxLib>().tex_names.iter().position(|t| t == "flare").unwrap();
+        let &(group, _) = app.world().resource::<Groups>().0.get(&(flare, Blend::Add)).expect("dock-light flares drawn");
+        // The flare's alpha channel is all zero: a premultiplying material would draw it black (PT-11).
+        assert!(app.world().get::<MeshMaterial3d<EffectMaterial>>(group).is_some());
+        assert!(app.world().get::<MeshMaterial3d<StandardMaterial>>(group).is_none());
     }
 
     #[test]
