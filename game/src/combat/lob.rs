@@ -186,12 +186,13 @@ pub fn blasts(
     }
 }
 
-/// Ships inside a gravity well lose their way and are drawn to its centre. PROVISIONAL rates (the original's well force is unknown).
+/// Ships inside a gravity well lose their way. PROVISIONAL rate (the original's well force is unknown); the data only says the
+/// well holds ships, so there is no pull towards its centre (an earlier guessed 4 units/s^2 pull dragged ships across it).
 pub fn grav_wells(
     mut commands: Commands,
     time: Res<Time>,
     mut wells: Query<(Entity, &mut GravWell, &Transform), Without<Ship>>,
-    mut ships: Query<(&Transform, &mut Ship, &mut crate::collision::Drift, &Health)>,
+    mut ships: Query<(&Transform, &mut Ship, &Health)>,
 ) {
     let dt = time.delta_secs();
     for (e, mut w, tf) in &mut wells {
@@ -200,13 +201,10 @@ pub fn grav_wells(
             commands.entity(e).despawn();
             continue;
         }
-        for (stf, mut ship, mut drift, h) in &mut ships {
-            let d = (tf.translation - stf.translation).with_y(0.0);
-            if h.destroyed || d.length() > w.radius {
-                continue;
+        for (stf, mut ship, h) in &mut ships {
+            if !h.destroyed && (tf.translation - stf.translation).with_y(0.0).length() <= w.radius {
+                ship.speed *= (-1.5 * dt).exp();
             }
-            ship.speed *= (-1.5 * dt).exp();
-            drift.0 += d.normalize_or_zero() * 4.0 * dt;
         }
     }
 }
