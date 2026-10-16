@@ -271,6 +271,11 @@ fn build(
                     (Screen::Main, "Open Next Screen Button") => Some(Action::Quit),
                     (Screen::SinglePlayer, "Open Next Screen Button") => Some(Action::Campaign),
                     (Screen::SinglePlayer, "Open Create Skirmish Game Screen") => Some(Action::Goto(Screen::CreateSkirmish)),
+                    (Screen::SinglePlayer, "Toggle Difficulty Button") => {
+                        let level = ["IDGS_TPFRONTENDTEXT03_EASY", "IDGS_TPFRONTENDTEXT03_NORMAL", "IDGS_TPFRONTENDTEXT03_HARD"][settings.difficulty.min(2) as usize];
+                        ctx.text_button(c, rect, &text_of(&strings, level), font, Action::Setting(crate::menu::Setting::Difficulty));
+                        None
+                    }
                     (Screen::SinglePlayer, "Open Prev Arrow Button") | (Screen::CreateSkirmish, "Open Prev Arrow Button") => {
                         arrow(&ctx, c, rect, "FrontEnd_Prev_Button", Action::Goto(if *state.get() == Screen::SinglePlayer { Screen::Main } else { Screen::SinglePlayer }));
                         None

@@ -176,6 +176,8 @@ pub enum Setting {
     Background,
     Flags,
     RestoreDisplay,
+    /// Single Player menu toggle: Normal -> Hard -> Easy.
+    Difficulty,
 }
 
 /// Sound and display options, saved as `settings.json` in the user folder. PROVISIONAL: the retail sound channel/detail options
@@ -190,15 +192,22 @@ pub struct Settings {
     pub detail: u8,
     pub background: bool,
     pub flags: bool,
+    /// 0 Easy, 1 Normal (retail default), 2 Hard: scales shell damage between the player's and computer ships.
+    pub difficulty: u8,
 }
 impl Default for Settings {
     fn default() -> Self {
-        Settings { master: 10, music: 10, effects: 10, dialogue: 10, fullscreen: false, detail: 2, background: true, flags: true }
+        Settings { master: 10, music: 10, effects: 10, dialogue: 10, fullscreen: false, detail: 2, background: true, flags: true, difficulty: 1 }
     }
 }
 static CHANNELS: [std::sync::atomic::AtomicU8; 4] =
     [std::sync::atomic::AtomicU8::new(10), std::sync::atomic::AtomicU8::new(10), std::sync::atomic::AtomicU8::new(10), std::sync::atomic::AtomicU8::new(10)];
 static DETAIL: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(2);
+static DIFFICULTY: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(1);
+/// The difficulty option: 0 Easy, 1 Normal, 2 Hard.
+pub fn difficulty() -> u8 {
+    DIFFICULTY.load(std::sync::atomic::Ordering::Relaxed)
+}
 /// Volume factor 0..1 of a channel (`Setting::Music`, `Effects` or `Dialogue`), for code that spawns sounds; the master volume is
 /// Bevy's global volume.
 pub fn volume(c: Setting) -> f32 {
@@ -232,13 +241,14 @@ impl Settings {
             detail: n("detail", d.detail, 2),
             background: b("background", d.background),
             flags: b("flags", d.flags),
+            difficulty: n("difficulty", d.difficulty, 2),
         }
     }
     fn save(&self) {
         let Some(p) = Self::path() else { return };
         let _ = p.parent().map(std::fs::create_dir_all);
         let v = serde_json::json!({"master": self.master, "music": self.music, "effects": self.effects, "dialogue": self.dialogue,
-            "fullscreen": self.fullscreen, "detail": self.detail, "background": self.background, "flags": self.flags});
+            "fullscreen": self.fullscreen, "detail": self.detail, "background": self.background, "flags": self.flags, "difficulty": self.difficulty});
         if let Err(e) = std::fs::write(p, serde_json::to_string_pretty(&v).unwrap_or_default()) {
             warn!("could not save settings: {e}");
         }
@@ -255,6 +265,7 @@ impl Settings {
             Setting::Detail => self.detail = (self.detail + 1) % 3,
             Setting::Background => self.background = !self.background,
             Setting::Flags => self.flags = !self.flags,
+            Setting::Difficulty => self.difficulty = (self.difficulty + 1) % 3,
             Setting::RestoreDisplay => {
                 let d = Self::default();
                 (self.fullscreen, self.detail, self.background, self.flags) = (d.fullscreen, d.detail, d.background, d.flags);
@@ -293,6 +304,7 @@ fn apply_settings(settings: Res<Settings>, mut global: ResMut<GlobalVolume>, mut
         CHANNELS[i].store(v, std::sync::atomic::Ordering::Relaxed);
     }
     DETAIL.store(settings.detail, std::sync::atomic::Ordering::Relaxed);
+    DIFFICULTY.store(settings.difficulty, std::sync::atomic::Ordering::Relaxed);
     let mode = if settings.fullscreen { bevy::window::WindowMode::BorderlessFullscreen(bevy::window::MonitorSelection::Current) } else { bevy::window::WindowMode::Windowed };
     for mut w in &mut window {
         if w.mode != mode {
@@ -1117,6 +1129,17 @@ fn buttons(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn difficulty_toggle_cycles_normal_hard_easy() {
+        let mut s = Settings::default();
+        let mut seen = vec![s.difficulty];
+        for _ in 0..3 {
+            s.step(Setting::Difficulty);
+            seen.push(s.difficulty);
+        }
+        assert_eq!(seen, [1, 2, 0, 1]);
+    }
 
     #[test]
     fn auto_assign_fills_the_fleet_within_the_points() {
