@@ -299,7 +299,6 @@ pub fn load_id(id: &str) -> Mission {
 /// `bases`: the map's scenery entities with their exported object records (id, type); those that a rule sets up become `MissionBase`s.
 pub fn spawn(commands: &mut Commands, assets: &AssetServer, lib: &Library, fxl: &crate::fx::FxLib, id: &str, bases: &[(Entity, Value)]) {
     let mission = load_id(id);
-    let docks = crate::docking::load_docks();
     let setups =
         |kind: &'static str| mission.data["rules"].as_array().into_iter().flatten().flat_map(|r| r["actions"].as_array().into_iter().flatten()).filter(move |a| a["Type"] == kind);
     let islands: Vec<(i64, String, i32)> = setups("*State Init* Setup Island")
@@ -319,9 +318,6 @@ pub fn spawn(commands: &mut Commands, assets: &AssetServer, lib: &Library, fxl: 
         if let Some(class) = lib.classes.iter().position(|c| Some(c.name.as_str()) == o["type"].as_str()) {
             let states = crate::combat::spawn_guns(commands, assets, lib, *e, class);
             commands.entity(*e).insert((crate::combat::ArmedBase { class }, crate::combat::Health::new(&lib.classes[class]), states));
-        }
-        if let Some(d) = o["type"].as_str().and_then(|t| crate::docking::dockable_for(&docks, t)) {
-            commands.entity(*e).insert(d);
         }
     }
     let mut ships: Vec<Value> = mission.data["ships"].as_array().expect("mission ships").clone();
@@ -372,9 +368,6 @@ pub fn spawn(commands: &mut Commands, assets: &AssetServer, lib: &Library, fxl: 
         // A pre-placed lifeboat (mission 4) is a real one, found by the class flag; it is not part of any fleet roster.
         if lib.classes.iter().any(|c| c.is_lifeboat && Some(c.name.as_str()) == s["type"].as_str()) {
             commands.entity(e).insert(crate::lifeboats::Lifeboat { owner: s["group"].as_str().unwrap_or("").into() }).remove::<crate::ship::FleetMember>();
-        }
-        if let Some(d) = s["type"].as_str().and_then(|t| crate::docking::dockable_for(&docks, t)) {
-            commands.entity(e).insert(d);
         }
         // Setup Ship: 'Crew Skill Level' and 'Boardable' (ships without one cannot be boarded).
         let setup = setups("*State Init* Setup Ship").find(|a| a["World Object ID"].as_i64() == Some(id));

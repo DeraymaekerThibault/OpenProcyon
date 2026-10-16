@@ -124,6 +124,9 @@ is **[? not confirmed]**; the rule action `Toggle Island Repair When Docked` fli
 object on its node; when it stops being dockable they are removed. The effect is taken to be `Effects/Docking_Point.eft` (its name
 is registered next to the keeper's effect table) [? name lookup not traced].
 
+In the remake every map object and ship type with exported dock points gets them when it spawns, on every map type
+(skirmish, historical and campaign). Bases no rule assigns an owner to (all skirmish bases) are dockable by every side **[PROVISIONAL]**.
+
 ## 5. Not reversed yet
 Boarding fight / grapple mechanics (reversed, see [boarding.md](boarding.md)), the path planner and the arrival
 controller used by the dock legs, where `ShipStatus_Icon_Docking_*` (animated docking status icon) is drawn, cloak effect,

@@ -30,13 +30,29 @@ impl MaterialExtension for RetailAdd {
                 target.blend = Some(BlendState { color: component, alpha: component });
             }
         }
+        // `depth_bias` is only a sort key here (see `additive_material`); keep the GPU depth test unbiased.
+        if let Some(depth) = descriptor.depth_stencil.as_mut() {
+            depth.bias.constant = 0;
+        }
         Ok(())
     }
 }
 pub type EffectMaterial = ExtendedMaterial<StandardMaterial, RetailAdd>;
+/// Transparent sort bias for additive effects. Their pooled meshes span the whole map, so Bevy's centre-distance sort could draw
+/// them before a nearer sail, which then painted over them (PT-05). PROVISIONAL: drawn after every alpha-blended mesh, so a trail
+/// behind a translucent sail shows at full strength instead of dimmed; per-emitter sorting would fix that.
+pub const ADDITIVE_SORT_BIAS: f32 = 10_000.0;
 pub fn additive_material(texture: Handle<Image>) -> EffectMaterial {
     EffectMaterial {
-        base: StandardMaterial { base_color_texture: Some(texture), unlit: true, cull_mode: None, double_sided: true, alpha_mode: AlphaMode::Blend, ..default() },
+        base: StandardMaterial {
+            base_color_texture: Some(texture),
+            unlit: true,
+            cull_mode: None,
+            double_sided: true,
+            alpha_mode: AlphaMode::Blend,
+            depth_bias: ADDITIVE_SORT_BIAS,
+            ..default()
+        },
         extension: RetailAdd {},
     }
 }
@@ -855,6 +871,7 @@ mod tests {
         }
         let material = additive_material(Handle::default());
         assert_eq!(material.base.alpha_mode, AlphaMode::Blend, "shader must leave source RGB unpremultiplied for ONE/ONE");
+        assert!(material.base.depth_bias >= ADDITIVE_SORT_BIAS, "additive effects sort after alpha-blended sails (PT-05)");
     }
 
     #[test]
