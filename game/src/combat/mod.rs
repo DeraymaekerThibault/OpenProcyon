@@ -956,13 +956,14 @@ struct ShipHit {
 
 /// Damage rules of one shell hit on section `k` (`damage` = [lower, upper, crit, fire chance, fire strength]).
 /// Criticals are not modelled: in the exe they only feed a tally and crew speech (docs/re/movement.md).
-/// Measured on retail (headless 1-vs-1 skirmishes, profile difficulty 1): shells from the player's side do twice the bullet
-/// table's damage to computer ships, and computer shells do half to the player's. PROVISIONAL: whether difficulty sets these
-/// factors, and what computer-vs-computer and allied hits get, is not measured (1.0 here).
-fn side_damage_scale(shooter: Side, victim: Side) -> f32 {
+/// Measured on retail (headless 1-vs-1 skirmishes per difficulty): the bullet table's damage is scaled by side and difficulty.
+/// Player shells on computer ships: Easy x4, Normal x2, Hard x1; computer shells on the player's: x0.25, x0.5, x1.
+/// PROVISIONAL: Easy x4 rests on two hits; computer-vs-computer and allied hits are not measured (1.0 here).
+fn side_damage_scale(shooter: Side, victim: Side, difficulty: u8) -> f32 {
+    let k = [4.0, 2.0, 1.0][difficulty.min(2) as usize];
     match (shooter, victim) {
-        (Side::Player, Side::Enemy) => 2.0,
-        (Side::Enemy, Side::Player) => 0.5,
+        (Side::Player, Side::Enemy) => k,
+        (Side::Enemy, Side::Player) => 1.0 / k,
         _ => 1.0,
     }
 }
@@ -1213,7 +1214,7 @@ fn shells(
             let key = MATERIALS.iter().find(|m| sec.material.contains(**m)).copied().unwrap_or("Wood");
             // Criticals are not modelled: in the exe they only feed a tally and crew speech (docs/re/movement.md).
             let mut damage = bd.damage[key];
-            let scale = side_damage_scale(s.side, ship.side);
+            let scale = side_damage_scale(s.side, ship.side, crate::menu::difficulty());
             damage[0] *= scale;
             damage[1] *= scale;
             hits.write(Hit { shooter: s.shooter, victim: se });
@@ -1393,10 +1394,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn player_shells_hit_twice_as_hard_and_take_half() {
-        assert_eq!(side_damage_scale(Side::Player, Side::Enemy), 2.0);
-        assert_eq!(side_damage_scale(Side::Enemy, Side::Player), 0.5);
-        assert_eq!(side_damage_scale(Side::Enemy, Side::Enemy), 1.0);
+    fn damage_scales_with_side_and_difficulty() {
+        assert_eq!(side_damage_scale(Side::Player, Side::Enemy, 1), 2.0);
+        assert_eq!(side_damage_scale(Side::Enemy, Side::Player, 1), 0.5);
+        assert_eq!(side_damage_scale(Side::Enemy, Side::Player, 0), 0.25);
+        assert_eq!(side_damage_scale(Side::Player, Side::Enemy, 2), 1.0);
+        assert_eq!(side_damage_scale(Side::Enemy, Side::Enemy, 0), 1.0);
     }
 
     #[test]

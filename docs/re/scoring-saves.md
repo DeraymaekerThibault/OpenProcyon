@@ -37,7 +37,8 @@ Anything not marked otherwise is read directly from those files. Uncertain parts
 - The retail rules also contain `Open Crew and Arms Screens` (a mission action, now handled by `crew_arms.rs`; see §7). Skirmish
   victory points (fleet budget, `Victory Limit`, `Ship Victory Points` buttons) are a separate feature of the lobby screens.
 - Difficulty: the player profile stores `Difficulty Level Int` (retail strings Easy / Normal / Hard; the campaign menu has a
-  "Toggle Difficulty Button"). What difficulty changes in the simulation is not recovered. PROVISIONAL / not done.
+  "Toggle Difficulty Button", cycling Normal -> Hard -> Easy). Difficulty scales shell damage between the player's and
+  computer ships (movement.md, measured); other effects (AI, campaign) are not recovered. The engine keeps it in `settings.json`.
 
 ## 2. End-of-game flow
 

@@ -57,14 +57,18 @@ measured bank limit above.
   50-75 Light, 25-50 Medium, 0-25 Heavy, 0 Destroyed: identical to the remake's thresholds.
 
 ## Player vs computer damage factor (measured, retail headless skirmishes 2026-10-16)
-- Two 1-vs-1 skirmishes on The Diablo Strait (Navy Man-O-War vs a computer Pirate Barque, then a Carrack; profile difficulty
-  level 1), section HP logged at 20 Hz on both ships. Every drop matches the bullet table scaled by side:
-  - computer shells on the player's ship: x 0.5. Gattling on wood (table 4-7) drops 2 or 3 (about 1:2, i.e. round(0.5 x roll));
-    medium/heavy cannon on wood (30-40 / 40-60) drop 15-29.
-  - player shells on the computer ship: x 2. Medium cannon on cloth (14-15) drops 28-29 (five times); gattling on cloth (5-7)
-    drops 10-13; medium cannon on reinforced wood (20-30) 41-58; heavy cannon on reinforced wood (35-45) 72-89.
-- PROVISIONAL: whether the factors come from the difficulty level, and what computer-vs-computer or allied hits get, is not
-  measured (the engine uses 1.0 there). Whether the core bleed roll is scaled too is not measured (the engine scales it).
+- 1-vs-1 skirmishes on The Diablo Strait (Navy Man-O-War vs one computer Pirate Barque or Carrack), one per difficulty
+  level, section HP logged at 20 Hz on both ships. Drops match the bullet table scaled by side and the Single Player
+  Difficulty Level (the retail default is Normal):
+
+  | Difficulty | player shells on computer ships | computer shells on the player's |
+  |---|---|---|
+  | Easy | x 4 (two hits only: heavy cannon on reinforced wood, table 35-45, dropped 155 and 156) | x 0.25 (wood 3-13) |
+  | Normal | x 2 (medium cannon on cloth, table 14-15, dropped 28-29 five times; heavy on reinforced 72-89) | x 0.5 (gattling on wood, table 4-7, dropped 2 or 3) |
+  | Hard | x 1 (cloth 5-7 / 14-19, reinforced 28, 43) | x 1 (cannon on wood 30-48, cloth 15) |
+- The scaling applies before rounding (Normal gattling drops of 2 and 3 come about 1:2, as round(0.5 x roll) gives).
+- PROVISIONAL: Easy x 4 rests on two hits. Computer-vs-computer and allied hits are not measured (the engine uses 1.0).
+  Whether the core bleed roll is scaled too is not measured (the engine scales it).
 - Volcano meteors (The Diablo Strait) hit every section of a ship at once for 10-20 each; they are not shells.
 - Damage control also mended the computer ships' reinforced-wood hulls (+5 per 12 s tick) and iron (+2), while the player's
   plain-wood hull was never mended (see refit-resupply.md 3.4). Cause (material, side or crew) not yet measured.
