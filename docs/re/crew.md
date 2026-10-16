@@ -46,10 +46,10 @@ riggers' Rigging; Strength = Combat. Leadership and Gunnery show on no bar.
 ## Remake
 - `Ship::crew_speed` / `crew_turn` = c(mean skill of the post's slots, generic hands 0.1) for ships with campaign posts.
   PROVISIONAL: averaging several engineers is not measured (the Cutter has one of each).
-- Gunners: accuracy `1 - 0.8 x gunnery` as before ([gunnery.md](gunnery.md)); the manual also promises a faster rate of fire,
-  not measured.
+- Gunners: accuracy `1 - 0.8 x gunnery` as before, and reload shortened by 10 x gunnery seconds on the player's ships
+  ([gunnery.md](gunnery.md#gunners), measured).
 
 ## Open
 - Whether placed ships' generic crews (Green/Average/Elite, skill 3/6/8) get the same factor; the remake applies none yet.
 - Leadership (manual: "improves the effectiveness of your entire crew"): no bar shows it; not measured.
-- Rate of fire, Spotting range. (Repair Rate in battle: refit-resupply.md 3.4.)
+- Spotting range. (Repair Rate: refit-resupply.md 3.4; rate of fire: gunnery.md#gunners.)
