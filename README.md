@@ -10,7 +10,7 @@ Disney or the original developers.
 ## Status
 
 Early development. Skirmish battles on the retail maps work; all 13 campaign missions load, Mission 1 is the current focus and
-missions 2-13 are first-pass. See `docs/faithful-remake.md` and `docs/fidelity-backlog.md`.
+missions 2-13 are first-pass. See `docs/fidelity-backlog.md`.
 
 ## Getting started
 

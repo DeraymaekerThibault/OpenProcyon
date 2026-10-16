@@ -1,6 +1,6 @@
 //! Particle effects from the original .eft files (exported to JSON by tools/export_effects.py).
 //! CPU particles, drawn as camera-facing quads in one dynamic mesh per (texture, blend). The meaning of the emitter
-//! parameters is inferred from the data, not measured from the original renderer (see docs/faithful-remake.md).
+//! parameters is inferred from the data, not measured from the original renderer (see AGENTS.md, rule 5).
 
 use bevy::asset::RenderAssetUsages;
 use bevy::camera::visibility::NoFrustumCulling;

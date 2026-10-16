@@ -20,7 +20,7 @@ shipped in the install (API names in the original: `BinkOpen`, `BinkOpenDirectSo
 
 Content (frame sampling): `SinglePlayer_NIS` is the campaign intro cinematic ("Disney Interactive and Barking Dog Studios present", the
 Procyon ships, the "Treasure Planet: Battle at Procyon" title card, then Jim's cutter in the orange cloud sky that Mission 1 starts in; its
-2:26 frame matches the settlement frame in `docs/reference-video.md`). `TP_endNIS` is the campaign finale (a flagship firing, pirates
+2:26 frame matches the settlement frame of the Mission 1 reference footage). `TP_endNIS` is the campaign finale (a flagship firing, pirates
 in asteroid fields, a destroyed ship, the golden planet). All content is **letterboxed**: the active picture is 640x352 inside the 640x480 frame
 (`cropdetect` gives `crop=640:352:0:64`, identical for both long movies); the 64-pixel bars top and bottom are black.
 
@@ -80,5 +80,5 @@ letterbox with black; keep the picture at the original 16:11 active area).
    `SinglePlayer_NIS` before `campaign::load_id("mission01")` (the Mission 1 opening NIS stays in `briefing.rs`); `rules/`/`campaign.rs`: after the last
    campaign mission win (the `PlayEndMovie` flag; export it into `assets/maps/missionNN/mission.json` in `tools/export_campaign.py`) play `TP_endNIS`, then return to the menu.
    Honour a `--no-movies` flag and the retail `Skip Movies` setting.
-4. Docs: after the code lands, update `docs/reference-video.md` ("Next implementation batch" item 1) and `docs/re/campaign.md` ("Remaining fidelity gaps").
+4. Docs: after the code lands, update `docs/fidelity-backlog.md` (AV-01) and `docs/re/campaign.md` ("Remaining fidelity gaps").
 5. Open RE questions: exact skip inputs, whether the end movie plays before or after the stats screen, what the logo-state probe tests (LoRez choice).

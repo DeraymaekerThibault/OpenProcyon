@@ -113,7 +113,6 @@ See “Next” below for the latest Mission 1 remediation and what has actually 
 - Owner manual playtest: Mission 1 completed end-to-end and reported to work nicely. This validates the normal mission path,
   not all defeat/restart/menu transitions. Fidelity/performance observations and follow-up priorities are below.
 - Dev hooks: `PROCYON_NIS_SHOT=<png>` (screenshot in the third script NIS), `PROCYON_END_SHOT=<png>` (screenshot after the mission ends).
-- Earlier checks (opening briefing, speed dial, reference-video comparison) are described in docs/reference-video.md.
 
 ## Next
 

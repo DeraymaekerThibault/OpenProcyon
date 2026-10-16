@@ -1058,7 +1058,7 @@ impl Script {
             "Crew Speech - Helm Off Course" => self.helm_off_course = true,
             "Open Crew and Arms Screens" => self.crew_screen = true,
             "Set Is In Calyan Abyss" => self.abyss = b(a, "Boolean Value"),
-            // Only Captain_Human is used by the shipped maps (docs/fidelity-backlog.md AUD-03c); the other captains keep the stance AI.
+            // Only Captain_Human is used by the shipped maps; the other captains keep the stance AI.
             "Set Group/Unit AI Captain" => {
                 let units = g("Group/Unit Name");
                 let human = s(a, "AI Stance") == "Captain_Human";

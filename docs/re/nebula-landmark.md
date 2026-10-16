@@ -99,12 +99,12 @@ This is an isolated, deterministic wiring check, not a normal-play or retail sid
 ## 4. Status in the remake / discrepancies found
 
 - Clarke is already drawn: `game/src/nebula.rs` (`spawn` per map `nebulae`, additive unlit mesh with the vertex-shifting sim). `docs/re/campaign.md`
-  ("Clarke and space whales") still describes the older static `environment.rs` rendering, and `docs/reference-video.md` still lists the cloud as
-  missing; both are stale.
+  ("Clarke and space whales") still describes the older static `environment.rs` rendering; it is
+  stale.
 - **Bug**: `game/src/main.rs` lines 408-409 call `nebula::spawn(...)` twice in a row, so every cloud is drawn twice (doubled additive brightness,
   double simulation). Remove one call.
 - Cloud size/placement is data-driven and correct for Clarke; the look (brightness, fade) still needs a side-by-side with the reference video frame
-  at 8:25-9:23 (docs/reference-video.md). Radius = magnitude and FADE_EDGES are PROVISIONAL.
+  at 8:25-9:23 (Mission 1 reference footage). Radius = magnitude and FADE_EDGES are PROVISIONAL.
 
 ## Etherium currents
 
@@ -135,4 +135,4 @@ One mission 10 setup references absent path `ebend`; it remains empty rather tha
    system once a reference frame is available. No exporter change is needed (all data is already exported).
 4. Later: lightning/meteors/winds for missions 2, 3, 7, 8 using `Terrain_Nebula.wot` damage tables (needs `tools/export_nebulae.py` to export those
    tables), AI path avoidance (`TYPEAVOID Nebula`).
-5. Docs: update `docs/re/campaign.md` Clarke section and `docs/reference-video.md` to point here after the code lands.
+5. Docs: update `docs/re/campaign.md` Clarke section to point here after the code lands.
