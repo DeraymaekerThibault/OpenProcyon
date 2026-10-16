@@ -43,10 +43,10 @@ files to `content/`, or anything that publishes (pushing tags, releases).
 - `game/` Rust + Bevy 0.20. `lib.rs` is the `openprocyon` library: wiring and `run(view)`. `main.rs` runs it with the classic view.
   Shared modules own state, input, rules and simulation: `ship.rs`/`scenario.rs`/`view.rs` (ships + AI, battle lifecycle,
   camera/input), `data.rs` (JSON loading), `combat/`, `fx.rs`, `docking.rs`, `options_menu.rs`, `boarding.rs`, `sprites.rs`,
-  `world_hud.rs`, `panels.rs` (HUD contract/input), `menu.rs` (front-end model), `campaign.rs` + `rules/` (data-driven mission rule
+  `panels.rs` (HUD contract/input), `menu.rs` (front-end model), `campaign.rs` + `rules/` (data-driven mission rule
   interpreter), `briefing.rs`, `audio.rs`, ... Module ownership and implementation order: `docs/development.md`.
 - `game/src/classic/` the retail presentation. Views only draw; state, input and rules stay in shared modules. Shared code never
-  imports a view (`tests/test_layers.py`; the compiler enforces it too, since views live in the binary). Other presentations
+  imports a view or builds UI widgets (`tests/test_layers.py`; the compiler enforces the first too, since views live in the binary). Other presentations
   belong in their own crates that depend on the `openprocyon` library.
 - `mods/` mod folders (`--mod <dir>`, `docs/modding.md`). `docs/data-format.md` describes the asset layout.
 - Game axes: x = starboard, y = forward, z = up; GLB uses (x, z, -y) with winding (a, c, b).

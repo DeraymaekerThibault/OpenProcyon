@@ -94,11 +94,13 @@ enum Tow {
 }
 #[derive(Component)]
 struct MenuUi;
-#[derive(Component)]
-struct ContextCursor;
+/// The context cursor to draw instead of the system pointer: its hud.hdt `Cursor_*` sprite and the pointer position (window px).
+/// None shows the system pointer.
+#[derive(Resource, Default)]
+pub struct HoverCursor(pub Option<(&'static str, Vec2)>);
 
 pub fn plugin(app: &mut App) {
-    app.init_resource::<OptionsMenu>().init_resource::<BarMenuRequest>().add_systems(
+    app.init_resource::<OptionsMenu>().init_resource::<BarMenuRequest>().init_resource::<HoverCursor>().add_systems(
         Update,
         (
             (dev_click, menu, context_cursor, dev_menu).chain().before(crate::input).run_if(in_state(crate::menu::Screen::Battle)).run_if(crate::menu::overlay_closed),
@@ -108,12 +110,12 @@ pub fn plugin(app: &mut App) {
 }
 
 /// `context_cursor` hides the system pointer over ships; it stops running once a menu opens, so show the pointer again here.
-fn restore_pointer(mut pointer: Single<&mut CursorOptions, With<PrimaryWindow>>, mut shown: Query<&mut Visibility, With<ContextCursor>>) {
+fn restore_pointer(mut pointer: Single<&mut CursorOptions, With<PrimaryWindow>>, mut hover: ResMut<HoverCursor>) {
     if !pointer.visible {
         pointer.visible = true;
     }
-    for mut v in &mut shown {
-        v.set_if_neq(Visibility::Hidden);
+    if hover.0.is_some() {
+        hover.0 = None;
     }
 }
 
@@ -402,10 +404,11 @@ fn menu(
     state.open.store(true, Ordering::Relaxed);
 }
 
-/// What a view draws for an open menu (on its root, a zero-size node at the menu centre): the variant's four background corners and
-/// each slot as (sprite, enabled, offset from the centre in reference px).
+/// What a view draws for an open menu (on its root): the menu centre in window px, the variant's four background corners and each
+/// slot as (sprite, enabled, offset from the centre in reference px).
 #[derive(Component)]
 pub struct OptionsMenuArt {
+    pub centre: Vec2,
     pub background: [&'static str; 4],
     pub slots: Vec<(&'static str, bool, Vec2)>,
 }
@@ -435,15 +438,7 @@ fn spawn_menu(
         rects.push((act, Rect::from_corners(min, min + size * s), on));
         slots.push((sprite, on, at));
     }
-    let root = commands
-        .spawn((
-            MenuUi,
-            crate::Scenario,
-            OptionsMenuArt { background: background(kind), slots },
-            GlobalZIndex(170),
-            Node { position_type: PositionType::Absolute, left: Val::Px(centre.x), top: Val::Px(centre.y), ..default() },
-        ))
-        .id();
+    let root = commands.spawn((MenuUi, crate::Scenario, OptionsMenuArt { centre, background: background(kind), slots })).id();
     (root, rects)
 }
 
@@ -528,13 +523,12 @@ fn dev_menu(cfg: Res<crate::Config>, window: Single<&Window, With<PrimaryWindow>
     }
 }
 
-/// The context cursor sprite (hud.hdt `Cursor_*` with its `Offset_Cursor_*` hot spot) while hovering a ship or base; the system pointer is hidden then.
+/// Picks the context cursor (`HoverCursor`) while hovering a ship or base; the system pointer is hidden then.
 fn context_cursor(
     window: Single<&Window, With<PrimaryWindow>>,
     mut pointer: Single<&mut CursorOptions, With<PrimaryWindow>>,
     cam: Single<(&Camera, &GlobalTransform)>,
     hud: Option<Res<HudData>>,
-    assets: Res<AssetServer>,
     lib: Res<Library>,
     menu: Res<OptionsMenu>,
     ui: Res<crate::panels::UiClick>,
@@ -543,12 +537,10 @@ fn context_cursor(
     sensors: Res<crate::environment::Sensors>,
     fleets: Res<crate::ship::Fleets>,
     docks: Dockees,
-    mut commands: Commands,
-    mut shown: Query<(Entity, &mut Node, &mut ImageNode, &mut Visibility), With<ContextCursor>>,
-    mut current: Local<&'static str>,
+    mut hover: ResMut<HoverCursor>,
 ) {
     let want = (|| {
-        let hud = hud.as_ref()?;
+        hud.as_ref()?;
         if crate::panels::cinematic(mission.as_deref()) || menu.open.load(Ordering::Relaxed) || ui.0 {
             return None;
         }
@@ -585,40 +577,11 @@ fn context_cursor(
         } else {
             return None;
         };
-        Some((hud, cursor, name))
+        Some((name, cursor))
     })();
-    let Some((hud, cursor, name)) = want else {
-        pointer.visible = true;
-        for (_, _, _, mut v) in &mut shown {
-            *v = Visibility::Hidden;
-        }
-        return;
-    };
-    pointer.visible = false;
-    let s = window.height() / REF_H;
-    let Some((img, size)) = image(&assets, hud, name) else { return };
-    let hot = offset(hud, &format!("Offset_{name}"));
-    let node = Node {
-        position_type: PositionType::Absolute,
-        left: Val::Px(cursor.x + hot.x * s),
-        top: Val::Px(cursor.y + hot.y * s),
-        width: Val::Px(size.x * s),
-        height: Val::Px(size.y * s),
-        ..default()
-    };
-    match shown.single_mut() {
-        Ok((_, mut n, mut i, mut v)) => {
-            *n = node;
-            if *current != name {
-                *i = img;
-                *current = name;
-            }
-            *v = Visibility::Inherited;
-        }
-        Err(_) => {
-            *current = "";
-            commands.spawn((ContextCursor, crate::Scenario, GlobalZIndex(180), img, node));
-        }
+    pointer.visible = want.is_none();
+    if hover.0 != want {
+        hover.0 = want;
     }
 }
 

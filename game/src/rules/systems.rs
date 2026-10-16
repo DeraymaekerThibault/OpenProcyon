@@ -12,6 +12,7 @@ use crate::{Config, Orbit, PlayerShip, Scenario, Ship, Side, game_to_bevy};
 
 // ---------------------------------------------------------------------------------------------------------------- ECS side
 
+/// Mission UI widgets a view spawns (`classic/mission_ui.rs`); `ui` sets their text, visibility and portrait art.
 #[derive(Component)]
 pub enum Ui {
     Speech,
@@ -74,74 +75,6 @@ struct MusicFade {
     to: f32,
     rate: f32,
     kill: bool,
-}
-
-pub fn spawn_ui(commands: &mut Commands) {
-    let text = |size: f32| (Text::new(""), TextFont { font_size: FontSize::Px(size), ..default() }, Visibility::Hidden);
-    // Cutscene speech banner as in the opening briefing: black strip at the top with the speaker's portrait and the line.
-    commands.spawn((
-        Scenario,
-        Ui::SpeechPanel,
-        Visibility::Hidden,
-        BackgroundColor(Color::BLACK),
-        GlobalZIndex(150),
-        Node { position_type: PositionType::Absolute, top: Val::Px(0.0), width: Val::Percent(100.0), height: Val::Percent(14.0), ..default() },
-    ));
-    for (kind, left, top, size, z) in [(Ui::SpeechFrame, 6.0, 1.0, 104.0, 155), (Ui::SpeechHead, 26.0, 21.0, 64.0, 156)] {
-        commands.spawn((
-            Scenario,
-            kind,
-            ImageNode::default(),
-            Visibility::Hidden,
-            GlobalZIndex(z),
-            Node { position_type: PositionType::Absolute, left: Val::Px(left), top: Val::Px(top), width: Val::Px(size), height: Val::Px(size), ..default() },
-        ));
-    }
-    commands.spawn((
-        Scenario,
-        Ui::SpeechTop,
-        text(20.0),
-        TextColor(Color::srgb(1.0, 0.65, 0.1)),
-        GlobalZIndex(160),
-        Node { position_type: PositionType::Absolute, top: Val::Px(12.0), left: Val::Px(120.0), right: Val::Px(30.0), ..default() },
-    ));
-    // Gameplay speech subtitle sits just above the main bar (bar is ~7.7% of the window height; PROVISIONAL margin).
-    commands.spawn((
-        Scenario,
-        Ui::Speech,
-        crate::campaign::Subtitle,
-        text(20.0),
-        TextColor(Color::srgb(1.0, 0.75, 0.2)),
-        GlobalZIndex(160),
-        Node { position_type: PositionType::Absolute, bottom: Val::Percent(9.5), left: Val::Percent(20.0), right: Val::Percent(20.0), ..default() },
-    ));
-    commands.spawn((
-        Scenario,
-        Ui::Hint,
-        crate::campaign::HintText,
-        text(18.0),
-        TextColor(Color::srgb(0.7, 0.9, 1.0)),
-        GlobalZIndex(160),
-        Node { position_type: PositionType::Absolute, top: Val::Percent(30.0), left: Val::Percent(30.0), right: Val::Percent(30.0), ..default() },
-    ));
-    commands.spawn((
-        Scenario,
-        Ui::End,
-        crate::campaign::EndText,
-        text(34.0),
-        TextColor(Color::WHITE),
-        GlobalZIndex(170),
-        Node { position_type: PositionType::Absolute, top: Val::Percent(35.0), left: Val::Percent(15.0), right: Val::Percent(15.0), ..default() },
-    ));
-    for (bar, top) in [(Ui::BarTop, true), (Ui::BarBottom, false)] {
-        let mut node = Node { position_type: PositionType::Absolute, width: Val::Percent(100.0), height: Val::Percent(12.0), ..default() };
-        if top {
-            node.top = Val::Px(0.0)
-        } else {
-            node.bottom = Val::Px(0.0)
-        }
-        commands.spawn((Scenario, bar, node, BackgroundColor(Color::BLACK), Visibility::Hidden, GlobalZIndex(140)));
-    }
 }
 
 pub fn plugin(app: &mut App) {

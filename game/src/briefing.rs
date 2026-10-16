@@ -1,9 +1,8 @@
-//! Mission one's in-engine opening; retail paths/voices, provisional camera interpolation and portrait expression.
+//! Mission one's in-engine opening; retail paths/voices and provisional camera interpolation. `classic/mission_ui.rs` draws it.
 use crate::{
     Scenario,
     campaign::{Mission, MissionShip, ObjectiveText},
     game_to_bevy,
-    sprites::{HudData, inset, sprite_of},
 };
 use bevy::prelude::*;
 use serde_json::Value;
@@ -17,10 +16,13 @@ impl Default for Opening {
         Self { elapsed: 0.0, speech: None }
     }
 }
+/// The briefing's widgets, spawned by a view while `Mission::opening` runs and despawned here when it ends.
 #[derive(Component)]
 pub struct BriefingUi;
+/// Text: the current speech line.
 #[derive(Component)]
 pub struct Subtitle;
+/// Shown while a line plays.
 #[derive(Component)]
 pub struct Portrait;
 #[derive(Component)]
@@ -75,7 +77,6 @@ pub fn update(
     time: Res<Time<Real>>,
     keys: Res<ButtonInput<KeyCode>>,
     assets: Res<AssetServer>,
-    hud: Res<HudData>,
     cfg: Res<crate::Config>,
     mut camera: Single<&mut Transform, With<Camera3d>>,
     mut ships: Query<(&mut Transform, &MissionShip, &mut crate::Ship, Has<crate::PlayerShip>), Without<Camera3d>>,
@@ -126,54 +127,6 @@ pub fn update(
         if primary && sh.waypoints.is_empty() {
             sh.order = 0;
         }
-    }
-    if ui.is_empty() {
-        // Layout measured from the reference video, not decoded native NIS window placement.
-        commands
-            .spawn((
-                Scenario,
-                BriefingUi,
-                GlobalZIndex(150),
-                Node { position_type: PositionType::Absolute, width: Val::Percent(100.0), height: Val::Percent(14.0), ..default() },
-                BackgroundColor(Color::BLACK),
-            ))
-            .with_children(|parent| {
-                for (name, pos, size) in
-                    [("TalkingHead_Character_Amelia_Happy", Vec2::new(26.0, 21.0), Vec2::splat(64.0)), ("TalkingHead_FloatingPortal_Open", Vec2::new(6.0, 1.0), Vec2::splat(104.0))]
-                {
-                    let (sheet, rect) = sprite_of(&hud, name).expect("briefing portrait sprite");
-                    let mut image = ImageNode::new(assets.load(format!("hud/tex/{sheet}.png")));
-                    image.rect = Some(inset(&sheet, rect));
-                    parent.spawn((
-                        Portrait,
-                        image,
-                        Visibility::Hidden,
-                        Node { position_type: PositionType::Absolute, left: Val::Px(pos.x), top: Val::Px(pos.y), width: Val::Px(size.x), height: Val::Px(size.y), ..default() },
-                    ));
-                }
-                parent.spawn((
-                    Subtitle,
-                    Text::new(""),
-                    TextFont { font_size: FontSize::Px(20.0), ..default() },
-                    TextColor(Color::srgb(1.0, 0.65, 0.1)),
-                    Node { position_type: PositionType::Absolute, left: Val::Px(120.0), right: Val::Px(30.0), top: Val::Px(12.0), ..default() },
-                ));
-            });
-        commands
-            .spawn((
-                Scenario,
-                BriefingUi,
-                GlobalZIndex(150),
-                Node { position_type: PositionType::Absolute, bottom: Val::Px(0.0), width: Val::Percent(100.0), height: Val::Percent(14.0), ..default() },
-                BackgroundColor(Color::BLACK),
-            ))
-            .with_children(|parent| {
-                parent.spawn((
-                    Text::new("Space: next line"),
-                    TextFont { font_size: FontSize::Px(16.0), ..default() },
-                    Node { position_type: PositionType::Absolute, right: Val::Px(20.0), bottom: Val::Px(12.0), ..default() },
-                ));
-            });
     }
     let cue = cue_at(opening.elapsed, cues);
     let index = cue.map(|c| c.0);

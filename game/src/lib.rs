@@ -35,7 +35,6 @@ pub mod starmap;
 pub mod stats;
 pub mod view;
 pub mod wake;
-pub mod world_hud;
 
 pub use scenario::*;
 pub use ship::*;
@@ -135,7 +134,6 @@ pub fn run(view: fn(&mut App)) {
             fx::plugin,
             combat::plugin,
             sprites::plugin,
-            world_hud::plugin,
             panels::plugin,
             environment::plugin,
             nebula::plugin,
@@ -212,7 +210,6 @@ pub fn run(view: fn(&mut App)) {
                     sail,
                     toggle_debug,
                     camera,
-                    world_hud::navigation,
                     sky,
                     wake::update,
                     blackhole::update,

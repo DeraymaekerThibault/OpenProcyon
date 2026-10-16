@@ -291,7 +291,15 @@ pub fn plugin(app: &mut App) {
                 .run_if(in_state(crate::menu::Screen::Battle))
                 .run_if(crate::menu::overlay_closed),
         )
+        .add_systems(PreUpdate, name_toggle)
         .add_systems(Update, (fleet_model, update_visibility, update_contacts, update_docking_status, talking_head, pause_button, speed_button).chain().in_set(HudSet));
+}
+
+/// `N` toggles the ship-name banners.
+fn name_toggle(keys: Res<ButtonInput<KeyCode>>, mut toggles: ResMut<Toggles>) {
+    if keys.just_pressed(KeyCode::KeyN) {
+        toggles.names = !toggles.names;
+    }
 }
 
 pub fn px(v: f32, s: f32) -> Val {

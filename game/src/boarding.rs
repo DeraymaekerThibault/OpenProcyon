@@ -213,6 +213,18 @@ impl Boarding {
     pub fn target(&self) -> Entity {
         self.target
     }
+    /// The hulls are in range and the crews are fighting.
+    pub fn live(&self) -> bool {
+        self.live
+    }
+}
+
+/// What a boarding status bar shows: the friendly side's share of the two strengths still standing (the boarder's attack, the
+/// target's defend).
+pub fn friendly_share(boarder: &Strength, target: &Strength, target_friendly: bool) -> f32 {
+    let (a, d) = (boarder.attack.max(0) as f32, target.defend.max(0) as f32);
+    let (mine, theirs) = if target_friendly { (d, a) } else { (a, d) };
+    if mine + theirs > 0.0 { mine / (mine + theirs) } else { 0.5 }
 }
 /// A harpoon on its way (`flight` > 0) or the grapple it became: this ship holds `target`.
 #[derive(Component)]
@@ -287,7 +299,7 @@ fn status(boarders: Boarders, mut st: ResMut<BoardStatus>, ships: Query<Entity, 
 pub fn plugin(app: &mut App) {
     app.add_message::<BoardMsg>().add_message::<Captured>().add_message::<Settled>().init_resource::<BoardStatus>().add_systems(
         Update,
-        (dev_board, handle_messages, set_flags, grapple_orders, winch, ai_boarding, fights, settled, status, board_bars)
+        (dev_board, handle_messages, set_flags, grapple_orders, winch, ai_boarding, fights, settled, status)
             .chain()
             .before(crate::input)
             .run_if(in_state(crate::menu::Screen::Battle))
@@ -708,112 +720,6 @@ fn settled(
             _ => {}
         }
     }
-}
-
-/// The boarding status bar over a live fight (hud.hdt BOARDINGSTATUS_*): a gold barbell with the two sides' colour discs, a sword on the
-/// attacker's and a shield on the defender's, and between them the relative strength (the friendly side's share). The exe shows it only
-/// within 'Max Boarding Info Visible World Distance' of the camera. PROVISIONAL: its screen position (above the target) and the colours.
-const BAR_VISIBLE: f32 = 250.0;
-const BAR_SIZE: Vec2 = Vec2::new(171.0, 40.0);
-const BAR_INNER: (Vec2, Vec2) = (Vec2::new(40.0, 13.0), Vec2::new(130.0, 29.0));
-#[derive(Component)]
-struct BoardBar {
-    boarder: Entity,
-}
-#[derive(Component)]
-enum BarFill {
-    Friendly,
-    Foe,
-}
-fn board_bars(
-    mut commands: Commands,
-    hud: Option<Res<crate::sprites::HudData>>,
-    assets: Res<AssetServer>,
-    window: Single<&Window, With<bevy::window::PrimaryWindow>>,
-    cam: Single<(&Camera, &GlobalTransform)>,
-    mission: Option<Res<Mission>>,
-    fights: Query<(Entity, &Boarding)>,
-    things: Query<(&Transform, &Boardable, Option<&Ship>)>,
-    mut bars: Query<(Entity, &BoardBar, &mut Node, &mut Visibility, &Children)>,
-    mut fills: Query<(&BarFill, &mut Node), Without<BoardBar>>,
-) {
-    let Some(hud) = hud else { return };
-    for (e, bar, ..) in &bars {
-        if !fights.get(bar.boarder).is_ok_and(|f| f.1.live) {
-            commands.entity(e).despawn();
-        }
-    }
-    let s = window.height() / crate::panels::REF_H;
-    let (camera, gt) = *cam;
-    let friendly = |e: Entity| things.get(e).ok().and_then(|t| t.2).is_some_and(|s| s.side == Side::Player);
-    for (b, f) in fights.iter().filter(|f| f.1.live) {
-        let Ok([(_, bs, _), (ttf, ts, _)]) = things.get_many([b, f.target]) else { continue };
-        let at = camera
-            .world_to_viewport(gt, ttf.translation)
-            .ok()
-            .filter(|_| !crate::panels::cinematic(mission.as_deref()) && gt.translation().distance(ttf.translation) <= BAR_VISIBLE);
-        let Some((_, _, mut node, mut vis, children)) = bars.iter_mut().find(|x| x.1.boarder == b) else {
-            if at.is_some() {
-                spawn_bar(&mut commands, &assets, &hud, b, s, !friendly(f.target));
-            }
-            continue;
-        };
-        let Some(at) = at else {
-            *vis = Visibility::Hidden;
-            continue;
-        };
-        *vis = Visibility::Inherited;
-        node.left = Val::Px(at.x - BAR_SIZE.x * 0.5 * s);
-        node.top = Val::Px(at.y - BAR_SIZE.y * 1.6 * s);
-        // The friendly side's share of the two strengths still standing (the boarder's attack, the target's defend).
-        let (a, d) = (bs.strength.attack.max(0) as f32, ts.strength.defend.max(0) as f32);
-        let (mine, theirs) = if friendly(f.target) { (d, a) } else { (a, d) };
-        let share = if mine + theirs > 0.0 { mine / (mine + theirs) } else { 0.5 };
-        let width = (BAR_INNER.1.x - BAR_INNER.0.x) * s;
-        for c in children.iter() {
-            if let Ok((part, mut n)) = fills.get_mut(c) {
-                let (left, w) = match part {
-                    BarFill::Friendly => (BAR_INNER.0.x * s, width * share),
-                    BarFill::Foe => (BAR_INNER.0.x * s + width * share, width * (1.0 - share)),
-                };
-                n.left = Val::Px(left);
-                n.width = Val::Px(w);
-            }
-        }
-    }
-}
-/// `boarder_left`: the boarder's disc is the left one (the friendly side sits on the left); the sword goes on the boarder, the shield on the target.
-fn spawn_bar(commands: &mut Commands, assets: &AssetServer, hud: &crate::sprites::HudData, boarder: Entity, s: f32, boarder_left: bool) {
-    use crate::sprites::image;
-    let absolute = |at: Vec2, size: Vec2| Node {
-        position_type: PositionType::Absolute,
-        left: Val::Px(at.x * s),
-        top: Val::Px(at.y * s),
-        width: Val::Px(size.x * s),
-        height: Val::Px(size.y * s),
-        ..default()
-    };
-    let o = |name: &str| crate::sprites::offset(hud, name);
-    let (left, right) = (o("Player_Color_Icon_Offset_From_BoardingHealthBar_TopLeft"), o("Enemy_Color_Icon_Offset_From_BoardingHealthBar_TopLeft"));
-    let (friendly, foe) = (Color::srgb(0.25, 0.55, 1.0), Color::srgb(0.9, 0.25, 0.2));
-    let (sword, shield) = if boarder_left { (left, right) } else { (right, left) };
-    commands.spawn((BoardBar { boarder }, crate::Scenario, GlobalZIndex(120), Node { position_type: PositionType::Absolute, ..default() })).with_children(|p| {
-        for (fill, colour) in [(BarFill::Friendly, friendly), (BarFill::Foe, foe)] {
-            p.spawn((fill, absolute(BAR_INNER.0, BAR_INNER.1 - BAR_INNER.0), BackgroundColor(colour)));
-        }
-        for (name, at, tint) in [
-            ("BOARDINGSTATUS_HEALTHBAR", Vec2::ZERO, Color::WHITE),
-            ("BOARDINGSTATUS_PLAYERCOLORICON", left, friendly),
-            ("BOARDINGSTATUS_PLAYERCOLORICON", right, foe),
-            ("BOARDINGSTATUS_ATTACKERICON", sword, Color::WHITE),
-            ("BOARDINGSTATUS_DEFENDERICON", shield, Color::WHITE),
-        ] {
-            if let Some((mut img, size)) = image(assets, hud, name) {
-                img.color = tint;
-                p.spawn((img, absolute(at, size)));
-            }
-        }
-    });
 }
 
 /// Dev hook `--script board`: the player grapples the nearest enemy and boards it as soon as the menu would allow (smoke test, screenshots).
