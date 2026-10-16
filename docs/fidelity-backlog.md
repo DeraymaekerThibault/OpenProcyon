@@ -116,6 +116,22 @@ panel → regression gate, both-view smoke and Mission 1 / synthetic Mission 5/9
 | AV-05 | Provisional | Ship destruction now marks gameplay death immediately, keeps the damaged hull visible for a nose-first descent, then plays the hull's final explosion and removes its child presentation (including damage smoke/engine effects). Dead ships no longer create wakes. Owner reported this sequence from retail; 4 s duration, 65° pitch and radius-scaled descent are provisional. Scripted Destroy retains immediate hiding; its damage smoke is cleaned up. Regression added, not run; runtime/retail acceptance left to owner. | `combat/mod.rs`, `combat/damage.rs`, `wake.rs`; [effects.md — Ship sinking](re/effects.md#ship-sinking-and-final-destruction) |
 | INV-01 | Unknown | Tutorial/content entry paths (tutorials now reachable), all ship/weapon variants, scenery gameplay and alternate campaign branches need a complete manual/data/export/runtime inventory. An asset existing does not establish runtime support. | manual, TST/TWT/WOT, exporters, `scenario.rs`, `menu.rs` |
 
+### Owner playtest notes (2026-10-16)
+
+| ID | Status | Gap / acceptance target | Runtime owner and evidence |
+|---|---|---|---|
+| PT-01 | Missing | Crew speech events show the portrait of the crew member speaking (spotter, gunner, engineer, ...), not a fixed head. | `audio.rs`, `briefing.rs`, `classic/`; UIR-09 |
+| PT-02 | Partial | Fire/warning and other crew voice lines all use the Navy set; pick the set from the speaking ship's crew/faction (Procyon, pirate, ...). | `audio.rs`, `content/voice/events.json`; AUD-03b |
+| PT-03 | Partial | Procyon submersible does not have its retail effect yet (dive/surface look). Find which effects/rules the hull uses and implement. | `fx.rs`, `cloak.rs`? |
+| PT-04 | Unknown | Playing as Procyon on an open skirmish map spawned the player at the Navy base. Check in the original whether start position follows faction or slot, then match it. | `scenario.rs`, `menu.rs`; retail skirmish run |
+| PT-05 | Partial | Engine trails draw behind other transparent geometry: they vanish when a sail (e.g. a bottom sail) is behind them. Fix draw order/depth for trails. | `fx.rs`, `ship.rs` |
+| PT-06 | Provisional | Wake effect and the dotted course line need another visual pass against the original. | `fx.rs`, `course.rs`; reference footage |
+| PT-07 | Missing | Lob weapons have no targeting cursor effect while aiming (ground target marker, firing-solution feedback). | `view.rs`, `world_hud.rs`; AUD-03f |
+| PT-08 | Partial | The player's own ship auto-engages enemies; in the original it should not fire on its own (unlike AI captains). Check against retail and stop it. | `combat/mod.rs`, `ship.rs`; [retail firing controls](re/gunnery.md) |
+| PT-09 | Provisional | AI behaviour pass: bring captain/enemy movement, target choice and engagement closer to the original. | `ship.rs`, `scenario.rs`, `combat/`; reference footage |
+| PT-10 | Partial | Some maps that should have ports allowing docking/repair do not offer it. Find which docks the data enables and why ours are refused. | `docking.rs`, `assets/data/docks.json` |
+| PT-11 | Missing | Docking places are missing their indicator light effect. | `docking.rs`, `fx.rs` |
+
 Multiplayer/network/chat parity is **deferred outside the current single-player target**, not implemented or silently counted as complete.
 
 ## Rule omissions that warning-only coverage misses
