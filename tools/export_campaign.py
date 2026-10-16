@@ -250,6 +250,9 @@ def export_mission(root, out, twt):
             dict(name=name, text=subtitle, duration=duration)
         )
     m = parse_twt(text)
+    del m[
+        "primaries"
+    ]  # skirmish lobby data; missions pick the command ship by their rules
     m.update(
         id=mid,
         name=names.get(m["name_id"], twt.stem),
