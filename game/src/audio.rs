@@ -298,11 +298,11 @@ fn helmsman(
     let ev = ["full_stop", "slow_ahead", "full_ahead"].get(p.order).copied().unwrap_or("emergency_speed");
     *n += 1;
     debug!("voice {ev}");
-    let Some(file) = crate::crew::voice_line(ev, *n, &lib.classes[p.class].race, posts, crate::crew::voice_exists) else { return };
+    let Some((file, face)) = crate::crew::voice_line(ev, *n, &lib.classes[p.class].race, posts, crate::crew::voice_exists) else { return };
     commands.spawn((
         AudioPlayer::new(assets.load(format!("voice/{file}.ogg"))),
         PlaybackSettings::DESPAWN.with_volume(bevy::audio::Volume::Linear(crate::menu::volume(crate::menu::Setting::Dialogue))),
-        crate::panels::Helmsman,
+        crate::panels::CrewSpeech(face),
     ));
 }
 

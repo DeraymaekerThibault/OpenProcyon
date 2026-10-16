@@ -120,7 +120,7 @@ panel → regression gate, both-view smoke and Mission 1 / synthetic Mission 5/9
 
 | ID | Status | Gap / acceptance target | Runtime owner and evidence |
 |---|---|---|---|
-| PT-01 | Missing | Crew speech events show the portrait of the crew member speaking (spotter, gunner, engineer, ...), not a fixed head. | `audio.rs`, `briefing.rs`, `classic/`; UIR-09 |
+| PT-01 | Provisional | Every crew line (callouts and helm acknowledgements) opens the talking head with its speaker's portrait: the named crew member at the line's post, else the faction's generic face (first mate for humans, `Procyon_0`; PROVISIONAL). `panels::tests::a_crew_line_opens_the_talking_head_on_its_speaker`. Open: retail check of the generic faces and whether every callout opens the head. | `audio.rs`, `briefing.rs`, `classic/`; UIR-09 |
 | PT-02 | Provisional | Crew lines are spoken by the named crew member at the line's post (their species' set), else the ship's faction crew (Navy human male, Procyon); see [sound.md](re/sound.md). Open: pirates' generic crew voice, retail check. Re-import needed for the species files. | `audio.rs`, `content/voice/events.json`; AUD-03b |
 | PT-03 | Partial | Procyon submersible does not have its retail effect yet (dive/surface look). Find which effects/rules the hull uses and implement. | `fx.rs`, `cloak.rs`? |
 | PT-04 | Unknown | Playing as Procyon on an open skirmish map spawned the player at the Navy base. Check in the original whether start position follows faction or slot, then match it. | `scenario.rs`, `menu.rs`; retail skirmish run |

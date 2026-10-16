@@ -111,9 +111,6 @@ impl Tracker {
     }
 }
 
-#[derive(Component)]
-pub struct CrewVoice;
-
 fn events() -> &'static Value {
     static EVENTS: std::sync::OnceLock<Value> = std::sync::OnceLock::new();
     EVENTS.get_or_init(|| crate::data::try_json(&crate::assets_dir().join("voice/events.json")).unwrap_or(Value::Null))
@@ -142,23 +139,29 @@ const SPECIES_VOICE: [(&str, &str); 16] = [
 /// Dialogue post name -> `crew_arms::ROLES` index.
 const POSTS: [(&str, usize); 7] = [("gunner", 0), ("captain", 1), ("firstmate", 2), ("helmsman", 3), ("engineer", 4), ("rigger", 5), ("spotter", 7)];
 
-/// The faction's generic crew voice when no named crew member holds the post. PROVISIONAL: pirates' generic crew voice is not
-/// established (owner recollection: possibly an alien set); human male until checked.
-fn faction_voice(race: &str) -> &'static str {
-    if race.contains("Procyon") { "pr" } else { "hm" }
+/// The faction's generic crew (voice prefix, talking-head face) when no named crew member holds the post. PROVISIONAL: pirates'
+/// generic crew voice is not established (owner recollection: possibly an alien set), human male until checked; the generic faces
+/// (first mate for humans, the first Procyon face) are not checked against the original either.
+fn faction_crew(race: &str) -> (&'static str, &'static str) {
+    if race.contains("Procyon") { ("pr", "TalkingHead_Character_Procyon_0") } else { ("hm", "TalkingHead_Character_1stMate") }
 }
 
-/// A voice file for `event`, rotating through its variants with `n`: spoken by the first named crew member at the line's post
-/// whose species voices it, else by the ship's faction crew (`race` = the hull's race), else the human-male table entry.
-/// `exists` says whether a dialogue file was imported.
-pub fn voice_line(event: &str, n: usize, race: &str, posts: Option<&crate::crew_arms::CrewPosts>, exists: impl Fn(&str) -> bool) -> Option<String> {
+/// A voice file for `event` and the speaker's talking-head face, rotating through the event's variants with `n`: spoken by the
+/// first named crew member at the line's post whose species voices it, else by the ship's faction crew (`race` = the hull's
+/// race), else the human-male table entry. `exists` says whether a dialogue file was imported.
+pub fn voice_line(event: &str, n: usize, race: &str, posts: Option<&crate::crew_arms::CrewPosts>, exists: impl Fn(&str) -> bool) -> Option<(String, String)> {
     let files = events()["HumanMale"][event].as_array().filter(|a| !a.is_empty())?;
     let base = files[n % files.len()].as_str()?;
     let rest = base.strip_prefix("hm")?;
     let role = POSTS.iter().find(|(p, _)| rest.starts_with(p)).map(|(_, r)| *r);
     let named = role.and_then(|r| posts.map(|p| &p.0[r])).into_iter().flatten();
-    let voices = named.filter_map(|id| crate::crew_arms::species(id)).filter_map(|s| SPECIES_VOICE.iter().find(|v| v.0 == s).map(|v| v.1));
-    voices.chain([faction_voice(race)]).map(|v| format!("{v}{rest}")).find(|f| exists(f)).or_else(|| Some(base.to_string()))
+    let (faction, face) = faction_crew(race);
+    let voices = named.filter_map(|id| {
+        let prefix = SPECIES_VOICE.iter().find(|v| Some(v.0) == crate::crew_arms::species(id))?.1;
+        Some((prefix, crate::crew_arms::portrait(id).unwrap_or(face)))
+    });
+    let (file, face) = voices.chain([(faction, face)]).map(|(v, f)| (format!("{v}{rest}"), f)).find(|(f, _)| exists(f)).unwrap_or((base.to_string(), face));
+    Some((file, face.to_string()))
 }
 
 pub fn voice_exists(file: &str) -> bool {
@@ -195,7 +198,7 @@ fn callouts(
         Single<(Entity, &Transform, &Ship, &Health, Has<crate::docking::Docker>, Has<crate::boarding::Boarding>, Option<&crate::crew_arms::CrewPosts>), With<PlayerShip>>,
     >,
     ships: Query<(Entity, &Transform, &Ship, &Health), Without<PlayerShip>>,
-    busy: Query<(), Or<(With<CrewVoice>, With<crate::panels::Helmsman>)>>,
+    busy: Query<(), With<crate::panels::CrewSpeech>>,
     mut world: Surroundings,
     mut tracker: Local<Tracker>,
     mut queue: Local<VecDeque<&'static str>>,
@@ -297,10 +300,10 @@ fn callouts(
         && let Some(ev) = queue.pop_front()
     {
         *n += 1;
-        if let Some(f) = voice_line(ev, *n, &lib.classes[ship.class].race, posts, voice_exists) {
+        if let Some((f, face)) = voice_line(ev, *n, &lib.classes[ship.class].race, posts, voice_exists) {
             debug!("crew {ev}");
             commands.spawn((
-                CrewVoice,
+                crate::panels::CrewSpeech(face),
                 AudioPlayer::new(assets.load(format!("voice/{f}.ogg"))),
                 PlaybackSettings::DESPAWN.with_volume(bevy::audio::Volume::Linear(crate::menu::volume(crate::menu::Setting::Dialogue))),
             ));
@@ -367,7 +370,7 @@ mod tests {
             "enemy_ship_spotted_pirate",
             "enemy_ship_spotted_procyon",
         ] {
-            let f = voice_line(ev, 0, "Navy", None, |_| false).unwrap_or_else(|| panic!("{ev}"));
+            let (f, _) = voice_line(ev, 0, "Navy", None, |_| false).unwrap_or_else(|| panic!("{ev}"));
             assert!(crate::assets_dir().join(format!("voice/{f}.ogg")).is_file(), "{f}");
         }
     }
@@ -377,11 +380,14 @@ mod tests {
         let all = |_: &str| true;
         let mut posts = crate::crew_arms::CrewPosts(Default::default());
         posts.0[7].push("Crew_Aqua_Pirate_BigD".into());
-        let spot = voice_line("enemy_ship_spotted", 0, "Pirate", Some(&posts), all).unwrap();
+        let (spot, face) = voice_line("enemy_ship_spotted", 0, "Pirate", Some(&posts), all).unwrap();
         assert!(spot.starts_with("aqspotter"), "{spot}: the named lookout speaks spotter lines");
-        let hull = voice_line("hull_damage", 0, "Procyon", Some(&posts), all).unwrap();
+        assert_eq!(face, "TalkingHead_Character_Aquanogs_0", "and shows his portrait");
+        let (hull, face) = voice_line("hull_damage", 0, "Procyon", Some(&posts), all).unwrap();
         assert!(hull.starts_with("pr"), "{hull}: other posts fall back to the faction crew");
+        assert_eq!(face, "TalkingHead_Character_Procyon_0");
         let only_hm = |f: &str| f.starts_with("hm");
-        assert!(voice_line("enemy_ship_spotted", 0, "Procyon", Some(&posts), only_hm).unwrap().starts_with("hm"), "unimported sets fall back");
+        let (file, face) = voice_line("enemy_ship_spotted", 0, "Navy", Some(&posts), only_hm).unwrap();
+        assert!(file.starts_with("hm") && face == "TalkingHead_Character_1stMate", "unimported sets fall back to the faction crew");
     }
 }
