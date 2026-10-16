@@ -197,7 +197,7 @@ fn crew(ctx: &Ctx, c: &mut ChildSpawnerCommands, fit: &FitView, lib: &Library, s
 /// The ship's weapon-bar outline at the panel origin.
 fn outline(ctx: &Ctx, c: &mut ChildSpawnerCommands, fit: &FitView, lib: &Library) {
     let Some(&ci) = fit.fleet.get(fit.ship) else { return };
-    let name = format!("WeaponBar_ShipIcon_{}", lib.classes[ci].name.trim_start_matches("Ship_"));
+    let name = lib.classes[ci].icon("WeaponBar");
     if let Some((_, r)) = sprite(ctx.hud, &name, IDLE) {
         let at = PANEL + offset(ctx.hud, "WEAPONBAR_SHIPICON_OFFSET_FROM_TOPLEFT");
         piece(ctx, c, &name, [at.x, at.y, at.x + r.width(), at.y + r.height()], (false, false));

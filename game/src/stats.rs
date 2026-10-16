@@ -1,13 +1,12 @@
 //! Battle statistics (retail `GameStats`, docs/re/scoring-saves.md §3): per player the starting and ending fleet size, ships sunk,
-//! damage inflicted and received. The rules' end text (missions) and the skirmish summary show them as the "Game Summary".
+//! damage inflicted and received. The rules' end text (missions) and the skirmish Game Summary page (classic view) show them.
 //! PROVISIONAL: damage is hit points lost by hulls (sections + core) credited to the last shooter of that hull; the retail column set,
 //! bar art and kill-by-object-type table are not reproduced (only ships are counted).
 use bevy::prelude::*;
 use std::collections::{BTreeMap, HashMap};
 
 use crate::combat::{Health, Hit};
-use crate::scenario::Outcome;
-use crate::{Scenario, Ship, Side};
+use crate::{Ship, Side};
 
 #[derive(Default, Clone, Debug, PartialEq)]
 pub struct Line {
@@ -16,6 +15,14 @@ pub struct Line {
     pub sunk: u32,
     pub inflicted: f32,
     pub taken: f32,
+    /// Race of the player's first ship (picks the flag on the summary).
+    pub race: String,
+}
+impl Line {
+    /// The summary columns in retail order: Ships Sunk, Ships Left, Damage Inflicted, Damage Taken.
+    pub fn cells(&self) -> [String; 4] {
+        [self.sunk.to_string(), format!("{}/{}", self.end, self.start), format!("{:.0}", self.inflicted), format!("{:.0}", self.taken)]
+    }
 }
 
 #[derive(Resource, Default)]
@@ -33,31 +40,23 @@ impl GameStats {
         }
         s
     }
+    /// Per player and column: whether that cell shows the green bar. Observed on two retail summaries: the best value of each column
+    /// is green, ties included (most sunk / left / inflicted, least taken); the rest are plain boxes. PROVISIONAL: only 2-player games seen.
+    pub fn best(&self) -> Vec<[bool; 4]> {
+        let key = |l: &Line| [l.sunk as f32, l.end as f32 / l.start.max(1) as f32, l.inflicted.round(), -l.taken.round()];
+        let top = self.players.values().map(key).fold([f32::MIN; 4], |a, k| std::array::from_fn(|i| a[i].max(k[i])));
+        self.players.values().map(|l| std::array::from_fn(|i| key(l)[i] >= top[i])).collect()
+    }
 }
-
-/// Text node for the skirmish end summary (missions append the table to their own end text).
-#[derive(Component)]
-pub struct Summary;
 
 pub fn plugin(app: &mut App) {
     app.init_resource::<GameStats>()
         .add_systems(OnEnter(crate::menu::Screen::Battle), reset)
-        .add_systems(Update, (collect.after(crate::sail), show).run_if(in_state(crate::menu::Screen::Battle)));
+        .add_systems(Update, collect.after(crate::sail).run_if(in_state(crate::menu::Screen::Battle)));
 }
 
 fn reset(mut commands: Commands) {
     commands.insert_resource(GameStats::default());
-    commands.spawn((
-        Scenario,
-        Summary,
-        Text::new(""),
-        TextFont { font_size: FontSize::Px(18.0), ..default() },
-        TextColor(Color::srgb(1.0, 0.95, 0.8)),
-        BackgroundColor(Color::srgba(0.0, 0.02, 0.08, 0.8)),
-        Visibility::Hidden,
-        GlobalZIndex(175),
-        Node { position_type: PositionType::Absolute, top: Val::Percent(25.0), left: Val::Percent(25.0), padding: UiRect::all(Val::Px(16.0)), ..default() },
-    ));
 }
 
 fn owner(ship: &Ship, m: Option<&crate::campaign::MissionShip>) -> String {
@@ -87,6 +86,9 @@ fn collect(
         let Some(entry) = stats.hulls.get_mut(&e) else {
             stats.hulls.insert(e, (me.clone(), hp, h.destroyed, None));
             let l = stats.players.entry(me).or_default();
+            if l.race.is_empty() {
+                l.race = class.race.clone();
+            }
             l.start += 1;
             l.end += !h.destroyed as u32;
             continue;
@@ -117,28 +119,26 @@ fn collect(
     }
 }
 
-/// Skirmish: the summary under the VICTORY / DEFEAT line once the battle is decided.
-fn show(stats: Res<GameStats>, out: Res<Outcome>, mission: Option<Res<crate::campaign::Mission>>, mut q: Query<(&mut Text, &mut Visibility), With<Summary>>) {
-    let shown = mission.is_none() && *out != Outcome::Playing;
-    for (mut t, mut v) in &mut q {
-        v.set_if_neq(if shown { Visibility::Inherited } else { Visibility::Hidden });
-        if shown {
-            let text = format!("{}\n\nGame Summary\n{}\nR restart   F10 menu", if *out == Outcome::Victory { "VICTORY!" } else { "DEFEAT!" }, stats.table());
-            if **t != text {
-                **t = text;
-            }
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     #[test]
     fn table_lists_every_player() {
         let mut s = GameStats::default();
-        s.players.insert("Navy".into(), Line { start: 3, end: 2, sunk: 4, inflicted: 512.0, taken: 300.0 });
+        s.players.insert("Navy".into(), Line { start: 3, end: 2, sunk: 4, inflicted: 512.0, taken: 300.0, ..default() });
         let t = s.table();
         assert!(t.contains("Navy") && t.contains("2/3") && t.contains("512"));
+    }
+    #[test]
+    fn best_cells_match_the_retail_summaries() {
+        // The two retail defeats: Computer 0 sunk 2/2 1201 65 vs player 0 sunk 0/1 0 1469; Computer 2 2/3 2340 1253 vs 1 0/2 1253 6566.
+        let mut s = GameStats::default();
+        s.players.insert("A".into(), Line { start: 2, end: 2, sunk: 0, inflicted: 1201.0, taken: 65.0, ..default() });
+        s.players.insert("B".into(), Line { start: 1, end: 0, sunk: 0, inflicted: 0.0, taken: 1469.0, ..default() });
+        assert_eq!(s.best(), vec![[true; 4], [true, false, false, false]]);
+        s.players.insert("A".into(), Line { start: 3, end: 2, sunk: 2, inflicted: 2340.0, taken: 1253.0, ..default() });
+        s.players.insert("B".into(), Line { start: 2, end: 0, sunk: 1, inflicted: 1253.0, taken: 6566.0, ..default() });
+        assert_eq!(s.best(), vec![[true; 4], [false; 4]]);
+        assert_eq!(s.players["A"].cells(), ["2", "2/3", "2340", "1253"].map(String::from));
     }
 }

@@ -151,7 +151,7 @@ fn build(
     for e in &roots {
         commands.entity(e).despawn();
     }
-    let MenuModel { sk, ig, saves: ui, binds, ctrl: cui, lib, state, settings } = model;
+    let MenuModel { sk, ig, saves: ui, binds, ctrl: cui, lib, state, settings, stats, outcome } = model;
     let (ww, wh) = (window.width(), window.height());
     let strings = strings();
     let ingame = *state.get() == Screen::Battle;
@@ -169,6 +169,7 @@ fn build(
     let file = match state.get() {
         _ if page.is_some() || settings_page.is_some() => "",
         Screen::Battle if ig.page() == Some(Page::Menu) => "ingamemenu_default",
+        Screen::Battle if ig.page() == Some(Page::Summary) => "multiplayer_stats_screen",
         Screen::Battle if ig.page().is_some() => "ingamemenu_load_campaign",
         Screen::Load => "load_campaign_screen",
         Screen::Tutorial => "tutorial_screen",
@@ -192,213 +193,278 @@ fn build(
         ..default()
     };
     let full = Node { position_type: PositionType::Absolute, width: Val::Percent(100.0), height: Val::Percent(100.0), ..default() };
-    commands.spawn((MenuRoot, full, BackgroundColor(if ingame { Color::srgba(0.0, 0.0, 0.0, 0.5) } else { Color::BLACK }), GlobalZIndex(100))).with_children(|root| {
-        root.spawn(canvas).with_children(|c| {
-            if let Some(controls) = page {
-                options_page(&ctx, c, controls, ingame, &strings, &binds, &cui);
-            }
-            if let Some(display) = settings_page {
-                sound_display_page(&ctx, c, display, ingame, &strings, &settings);
-            }
-            for e in &els {
-                let impl_ = e["impl"].as_str().unwrap_or("");
-                let r: Vec<f32> = e["rect"].as_array().map(|a| a.iter().map(|v| v.as_f64().unwrap_or(0.0) as f32).collect()).unwrap_or_default();
-                if r.len() != 4 || e["enabled"] == Value::Bool(false) {
-                    continue;
+    commands
+        .spawn((MenuRoot, full, BackgroundColor(if ingame && ig.page() != Some(Page::Summary) { Color::srgba(0.0, 0.0, 0.0, 0.5) } else { Color::BLACK }), GlobalZIndex(100)))
+        .with_children(|root| {
+            root.spawn(canvas).with_children(|c| {
+                if let Some(controls) = page {
+                    options_page(&ctx, c, controls, ingame, &strings, &binds, &cui);
                 }
-                let rect = [r[0], r[1], r[2], r[3]];
-                let font = e["font"].as_str().unwrap_or("BlackChancery22");
-                let label = e["text"].as_str().map(|t| text_of(&strings, t)).unwrap_or_default();
-                let label = if impl_ == "Load or Save Campaign Button" && ig.page() == Some(Page::Save) { text_of(&strings, "IDGS_TPFRONTENDTEXT_SCREENS_SAVE") } else { label };
-                // Element colour (`Color Colour(r,g,b,a)`): titles are a black shadow label plus the coloured one.
-                let tint = e["color"].as_array().filter(|c| c.len() == 4).map_or(Color::WHITE, |c| {
-                    let k = |i: usize| c[i].as_f64().unwrap_or(1.0) as f32;
-                    Color::srgba(k(0), k(1), k(2), k(3))
-                });
-                let action = match (state.get(), impl_) {
-                    (Screen::SinglePlayer, "Open Load Campaign Screen Button") => Some(Action::OpenLoad),
-                    (Screen::Load, "Open Prev Arrow Button") => {
-                        arrow(&ctx, c, rect, "FrontEnd_Prev_Button", Action::Goto(Screen::SinglePlayer));
-                        None
+                if let Some(display) = settings_page {
+                    sound_display_page(&ctx, c, display, ingame, &strings, &settings);
+                }
+                for e in &els {
+                    let impl_ = e["impl"].as_str().unwrap_or("");
+                    let r: Vec<f32> = e["rect"].as_array().map(|a| a.iter().map(|v| v.as_f64().unwrap_or(0.0) as f32).collect()).unwrap_or_default();
+                    if r.len() != 4 || e["enabled"] == Value::Bool(false) {
+                        continue;
                     }
-                    (Screen::Battle, "Front End Dialog Screen Backdrop") => {
-                        // The retail frame does not fill this ReferenceArea (its buttons reach past the area's right edge).
-                        let [x, y, w, h] = dialog_frame(rect);
-                        ctx.image(c, "menu/frontenddialogscreen.png", None, x, y, w, h, Color::WHITE);
-                        None
-                    }
-                    (Screen::Battle, "In Game Backdrop") => {
-                        // The window frame occupies the top-left of the 768x512 sheet.
-                        ctx.image(c, "menu/fe_ingame_window.png", Some(Rect::new(10.0, 38.0, 682.0, 484.0)), r[0], r[1], r[2] - r[0], r[3] - r[1], Color::WHITE);
-                        None
-                    }
-                    (Screen::Battle, "Open Next Screen Button") => Some(Action::Ingame(Some(Page::Options))),
-                    (Screen::Main, "Open Option Screen") => Some(Action::Goto(Screen::Options)),
-                    (Screen::Main, "Open Tutorial Button") => Some(Action::Goto(Screen::Tutorial)),
-                    (Screen::Tutorial, "Start Basic Training Tutorial Button") => Some(Action::Tutorial("basic_tutorial")),
-                    (Screen::Tutorial, "Start Full Training Tutorial Button") => Some(Action::Tutorial("tutorial")),
-                    (Screen::Tutorial, "Open Prev Arrow Button") => {
-                        arrow(&ctx, c, rect, "FrontEnd_Prev_Button", Action::Goto(Screen::Main));
-                        None
-                    }
-                    (Screen::Battle, "Open Saved Campaign Screen Button") => Some(Action::Ingame(Some(Page::Save))),
-                    (Screen::Battle, "Open Load Campaign Screen Button") => Some(Action::Ingame(Some(Page::Load))),
-                    (Screen::Battle, "InGameMenu QuitGame Button") => Some(Action::QuitToMenu),
-                    (Screen::Battle, "Open Previous Screen Button") => Some(Action::Ingame(if ig.page() == Some(Page::Menu) { None } else { Some(Page::Menu) })),
-                    (Screen::Load | Screen::Battle, "Saved Campaign Scrollable List") => {
-                        save_list(&ctx, c, rect, &ui, &strings);
-                        None
-                    }
-                    (Screen::Load | Screen::Battle, "Load or Save Campaign Button") => Some(if ig.page() == Some(Page::Save) { Action::DoSave } else { Action::DoLoad }),
-                    (Screen::Load | Screen::Battle, "Open Confirm Saved Game Delete Dialog Button") => Some(Action::Remove),
-                    (Screen::Battle, "Campaign Text Entry") if ig.page() == Some(Page::Save) => {
-                        cell(&ctx, c, [r[0], r[1], r[2] - r[0], r[3] - r[1]], &format!("{}_", ui.name), false, None);
-                        None
-                    }
-                    (Screen::Battle, "Right Justify Label") if ig.page() == Some(Page::Save) && r[0] as i32 == 272 => {
-                        ctx.text(c, BODY_FONT, &text_of(&strings, "IDGS_TPFRONTENDTEXT_SCREENS_FILENAME"), r[0], r[2] - r[0], (r[1] + r[3]) / 2.0, true, Color::WHITE);
-                        None
-                    }
-                    (_, "Front End Screen Backdrop") => {
-                        frontend_backdrop(&ctx, c, if *state.get() == Screen::CreateSkirmish { 2 } else { 0 });
-                        None
-                    }
-                    (_, "Center Justify Label") => {
-                        ctx.text(c, font, &label, r[0], r[2] - r[0], (r[1] + r[3]) / 2.0, true, tint);
-                        None
-                    }
-                    (Screen::Main, "Open Single Player Menu Button") => Some(Action::Goto(Screen::SinglePlayer)),
-                    (Screen::Main, "Open Next Screen Button") => Some(Action::Quit),
-                    (Screen::SinglePlayer, "Open Next Screen Button") => Some(Action::Campaign),
-                    (Screen::SinglePlayer, "Open Create Skirmish Game Screen") => Some(Action::Goto(Screen::CreateSkirmish)),
-                    (Screen::SinglePlayer, "Toggle Difficulty Button") => {
-                        let level = ["IDGS_TPFRONTENDTEXT03_EASY", "IDGS_TPFRONTENDTEXT03_NORMAL", "IDGS_TPFRONTENDTEXT03_HARD"][settings.difficulty.min(2) as usize];
-                        ctx.text_button(c, rect, &text_of(&strings, level), font, Action::Setting(crate::menu::Setting::Difficulty));
-                        None
-                    }
-                    (Screen::SinglePlayer, "Open Prev Arrow Button") | (Screen::CreateSkirmish, "Open Prev Arrow Button") => {
-                        arrow(&ctx, c, rect, "FrontEnd_Prev_Button", Action::Goto(if *state.get() == Screen::SinglePlayer { Screen::Main } else { Screen::SinglePlayer }));
-                        None
-                    }
-                    (Screen::CreateSkirmish, "Open Next Arrow Button") => {
-                        arrow(&ctx, c, rect, "FrontEnd_Next_Button", Action::Goto(Screen::Lobby));
-                        None
-                    }
-                    (Screen::CreateSkirmish, "List World Files") => {
-                        map_list(&ctx, c, &sk, &strings);
-                        None
-                    }
-                    (Screen::CreateSkirmish, "Map Information Button") => {
-                        // Measured: framed panel at the element's area; gold 'Map Description:' then Univers10 lines 16 apart.
-                        stretched_window(&ctx, c, [r[0], r[1] - 3.0, r[2], r[3] + 2.0]);
-                        ctx.text(c, "Univers10", &format!("{}:", text_of(&strings, "IDGS_TPFRONTENDTEXT02_MAP_DESCRIPTION")), r[0] + 5.0, 200.0, r[1] + 9.0, false, GOLD);
-                        wrapped(&ctx, c, "Univers10", sk.map_json["description"].as_str().unwrap_or_default(), [r[0] + 5.0, r[1] + 25.0, r[2] - 12.0, r[3]]);
-                        None
-                    }
-                    (Screen::CreateSkirmish, "Radio Historical Map Button") => {
-                        radio(&ctx, c, rect, &text_of(&strings, "IDGS_TPFRONTENDTEXT01_VIEW_PRESET_MAPS"), sk.historical, Action::Historical(true));
-                        None
-                    }
-                    (Screen::CreateSkirmish, "Radio Open Map Button") => {
-                        radio(&ctx, c, rect, &text_of(&strings, "IDGS_TPFRONTENDTEXT01_VIEW_OPEN_MAPS"), !sk.historical, Action::Historical(false));
-                        None
-                    }
-                    // Fleet size (and the victory limit) only apply to open maps; historical maps bring their own fleets.
-                    (Screen::CreateSkirmish, "Fleet Size Label" | "Fleet Size Scrollbar Button" | "Victory Limit Label" | "Victory Points Scrollbar Button") if sk.historical => {
-                        None
-                    }
-                    (Screen::CreateSkirmish, "Fleet Size Label") => {
-                        ctx.text(c, BODY_FONT, &text_of(&strings, "IDGS_TPFRONTENDTEXT01_FLEET_SIZE_LIMIT"), r[0], r[2] - r[0], (r[1] + r[3]) / 2.0, true, Color::WHITE);
-                        None
-                    }
-                    (Screen::CreateSkirmish, "Fleet Size Scrollbar Button") => {
-                        ctx.text_button(c, rect, &sk.fleet_size.to_string(), "BlackChancery22", Action::FleetSize);
-                        None
-                    }
-                    (Screen::Lobby, "Open Next Screen Button") => Some(Action::Launch),
-                    (Screen::Lobby, "Open Map Description Dialog Button") => Some(Action::MapInfo(true)),
-                    (Screen::Lobby, "Open Previous Screen Button") => Some(Action::Goto(Screen::CreateSkirmish)),
-                    (Screen::Lobby, "Open Ship Selection Screen") if sk.open() => Some(Action::Goto(Screen::Fleet)),
-                    (Screen::Lobby, "Game Lobby Backdrop") => {
-                        ctx.image(c, "menu/gamelobby.png", Some(Rect::new(0.0, 0.0, 800.0, 600.0)), 0.0, 0.0, 800.0, 600.0, Color::WHITE);
-                        None
-                    }
-                    (Screen::Lobby, "Lobby Information Button") => {
-                        // Measured: a gold Univers10 'Map' label and the map name in Univers12 under the title.
-                        ctx.text(c, "Univers10", &text_of(&strings, "IDGS_TPFRONTENDTEXT01_SERVER_MAPNAME"), r[0], r[2] - r[0], 84.0, true, GOLD);
-                        ctx.text(c, BODY_FONT, sk.map_json["name"].as_str().unwrap_or_default(), r[0], r[2] - r[0], 101.0, true, Color::WHITE);
-                        None
-                    }
-                    (Screen::Lobby, "Lobby Player List Button") => {
-                        players_list(&ctx, c, rect, &sk, &strings);
-                        None
-                    }
-                    (Screen::Fleet, "Assemble Fleet Backdrop") => {
-                        ctx.image(c, "menu/shipscreen.png", Some(Rect::new(0.0, 0.0, 800.0, 600.0)), 0.0, 0.0, 800.0, 600.0, Color::WHITE);
-                        None
-                    }
-                    (Screen::Fleet, "Ship Types Available") => {
-                        ship_list(&ctx, c, rect, &sk, &lib, &strings);
-                        None
-                    }
-                    (Screen::Fleet, "Fleet Select Button") => {
-                        fleet_list(&ctx, c, rect, &sk, &lib);
-                        None
-                    }
-                    (Screen::Fleet, "Ship Information") => {
-                        ship_info(&ctx, c, rect, &sk, &lib, &strings);
-                        None
-                    }
-                    (Screen::Fleet, "Ship Victory Points") => {
-                        victory_points(&ctx, c, rect, &format!("{} : ", text_of(&strings, "IDGS_TPFRONTENDTEXT01_CURRENT_VICTORY_POINTS")), sk.points_left(&lib));
-                        None
-                    }
-                    (Screen::Fleet, "Open Ship Selection Screen") => {
-                        selected_tab(&ctx, c, rect, &label, font);
-                        None
-                    }
-                    // PROVISIONAL: Crew and Arms both open the shared crew & arms editor until their retail screens are rebuilt.
-                    (Screen::Fleet, "Open Arms Selection Screen" | "Open Crew Selection Screen") => Some(Action::OpenArms),
-                    (Screen::Fleet, "Add Ship To Fleet Button") => Some(Action::AddShip),
-                    (Screen::Fleet, "Drop Ship From Fleet Button") => Some(Action::DropShip),
-                    (Screen::Fleet, "Open Next Arrow Button") => {
-                        arrow(&ctx, c, rect, "FrontEnd_Next_Button", Action::Goto(Screen::Lobby));
-                        None
-                    }
-                    (Screen::Fleet, "Ship ViewPort Button") => {
-                        // The globe grid with the 3D preview (classic/ship_preview.rs) on top.
-                        // The 512x288 texture holds the grid in its top-left 393x285, the viewport's size: drawn 1:1.
-                        ctx.image(c, "menu/fe_shipscreen_bg.png", Some(Rect::new(0.0, 0.0, r[2] - r[0], r[3] - r[1])), r[0], r[1], r[2] - r[0], r[3] - r[1], Color::WHITE);
-                        if let Some(p) = &preview {
-                            c.spawn((ImageNode::new(p.image.clone()), ctx.node(r[0], r[1], r[2] - r[0], r[3] - r[1])));
+                    let rect = [r[0], r[1], r[2], r[3]];
+                    let font = e["font"].as_str().unwrap_or("BlackChancery22");
+                    let label = e["text"].as_str().map(|t| text_of(&strings, t)).unwrap_or_default();
+                    let label =
+                        if impl_ == "Load or Save Campaign Button" && ig.page() == Some(Page::Save) { text_of(&strings, "IDGS_TPFRONTENDTEXT_SCREENS_SAVE") } else { label };
+                    // Element colour (`Color Colour(r,g,b,a)`): titles are a black shadow label plus the coloured one.
+                    let tint = e["color"].as_array().filter(|c| c.len() == 4).map_or(Color::WHITE, |c| {
+                        let k = |i: usize| c[i].as_f64().unwrap_or(1.0) as f32;
+                        Color::srgba(k(0), k(1), k(2), k(3))
+                    });
+                    let action = match (state.get(), impl_) {
+                        (Screen::SinglePlayer, "Open Load Campaign Screen Button") => Some(Action::OpenLoad),
+                        (Screen::Load, "Open Prev Arrow Button") => {
+                            arrow(&ctx, c, rect, "FrontEnd_Prev_Button", Action::Goto(Screen::SinglePlayer));
+                            None
                         }
-                        None
+                        (Screen::Battle, "Front End Dialog Screen Backdrop") => {
+                            // The retail frame does not fill this ReferenceArea (its buttons reach past the area's right edge).
+                            let [x, y, w, h] = dialog_frame(rect);
+                            ctx.image(c, "menu/frontenddialogscreen.png", None, x, y, w, h, Color::WHITE);
+                            None
+                        }
+                        (Screen::Battle, "In Game Backdrop") => {
+                            // The window frame occupies the top-left of the 768x512 sheet.
+                            ctx.image(c, "menu/fe_ingame_window.png", Some(Rect::new(10.0, 38.0, 682.0, 484.0)), r[0], r[1], r[2] - r[0], r[3] - r[1], Color::WHITE);
+                            None
+                        }
+                        (Screen::Battle, "Open Next Screen Button") => Some(Action::Ingame(Some(Page::Options))),
+                        (Screen::Battle, "In Game Menu Stats Screen Button") => Some(Action::Ingame(Some(Page::Summary))),
+                        (Screen::Battle, "Game Lobby Backdrop") => {
+                            ctx.image(c, "menu/gamelobby.png", Some(Rect::new(0.0, 0.0, 800.0, 600.0)), 0.0, 0.0, 800.0, 600.0, Color::WHITE);
+                            None
+                        }
+                        (Screen::Battle, "Game Stats - Player Kills by Object Type") => {
+                            summary(&ctx, c, &stats, *outcome, &strings);
+                            None
+                        }
+                        // A decided battle continues to the main menu; opened from the in-game menu it goes back there. PROVISIONAL.
+                        (Screen::Battle, "Open Next Arrow Button") => {
+                            let next = if *outcome == crate::scenario::Outcome::Playing { Action::Ingame(Some(Page::Menu)) } else { Action::QuitToMenu };
+                            arrow(&ctx, c, rect, "FrontEnd_Next_Button", next);
+                            None
+                        }
+                        (Screen::Main, "Open Option Screen") => Some(Action::Goto(Screen::Options)),
+                        (Screen::Main, "Open Tutorial Button") => Some(Action::Goto(Screen::Tutorial)),
+                        (Screen::Tutorial, "Start Basic Training Tutorial Button") => Some(Action::Tutorial("basic_tutorial")),
+                        (Screen::Tutorial, "Start Full Training Tutorial Button") => Some(Action::Tutorial("tutorial")),
+                        (Screen::Tutorial, "Open Prev Arrow Button") => {
+                            arrow(&ctx, c, rect, "FrontEnd_Prev_Button", Action::Goto(Screen::Main));
+                            None
+                        }
+                        (Screen::Battle, "Open Saved Campaign Screen Button") => Some(Action::Ingame(Some(Page::Save))),
+                        (Screen::Battle, "Open Load Campaign Screen Button") => Some(Action::Ingame(Some(Page::Load))),
+                        (Screen::Battle, "InGameMenu QuitGame Button") => Some(Action::QuitToMenu),
+                        (Screen::Battle, "Open Previous Screen Button") => Some(Action::Ingame(if ig.page() == Some(Page::Menu) { None } else { Some(Page::Menu) })),
+                        (Screen::Load | Screen::Battle, "Saved Campaign Scrollable List") => {
+                            save_list(&ctx, c, rect, &ui, &strings);
+                            None
+                        }
+                        (Screen::Load | Screen::Battle, "Load or Save Campaign Button") => Some(if ig.page() == Some(Page::Save) { Action::DoSave } else { Action::DoLoad }),
+                        (Screen::Load | Screen::Battle, "Open Confirm Saved Game Delete Dialog Button") => Some(Action::Remove),
+                        (Screen::Battle, "Campaign Text Entry") if ig.page() == Some(Page::Save) => {
+                            cell(&ctx, c, [r[0], r[1], r[2] - r[0], r[3] - r[1]], &format!("{}_", ui.name), false, None);
+                            None
+                        }
+                        (Screen::Battle, "Right Justify Label") if ig.page() == Some(Page::Save) && r[0] as i32 == 272 => {
+                            ctx.text(c, BODY_FONT, &text_of(&strings, "IDGS_TPFRONTENDTEXT_SCREENS_FILENAME"), r[0], r[2] - r[0], (r[1] + r[3]) / 2.0, true, Color::WHITE);
+                            None
+                        }
+                        (_, "Front End Screen Backdrop") => {
+                            frontend_backdrop(&ctx, c, if *state.get() == Screen::CreateSkirmish { 2 } else { 0 });
+                            None
+                        }
+                        (_, "Center Justify Label") => {
+                            ctx.text(c, font, &label, r[0], r[2] - r[0], (r[1] + r[3]) / 2.0, true, tint);
+                            None
+                        }
+                        (Screen::Main, "Open Single Player Menu Button") => Some(Action::Goto(Screen::SinglePlayer)),
+                        (Screen::Main, "Open Next Screen Button") => Some(Action::Quit),
+                        (Screen::SinglePlayer, "Open Next Screen Button") => Some(Action::Campaign),
+                        (Screen::SinglePlayer, "Open Create Skirmish Game Screen") => Some(Action::Goto(Screen::CreateSkirmish)),
+                        (Screen::SinglePlayer, "Toggle Difficulty Button") => {
+                            let level = ["IDGS_TPFRONTENDTEXT03_EASY", "IDGS_TPFRONTENDTEXT03_NORMAL", "IDGS_TPFRONTENDTEXT03_HARD"][settings.difficulty.min(2) as usize];
+                            ctx.text_button(c, rect, &text_of(&strings, level), font, Action::Setting(crate::menu::Setting::Difficulty));
+                            None
+                        }
+                        (Screen::SinglePlayer, "Open Prev Arrow Button") | (Screen::CreateSkirmish, "Open Prev Arrow Button") => {
+                            arrow(&ctx, c, rect, "FrontEnd_Prev_Button", Action::Goto(if *state.get() == Screen::SinglePlayer { Screen::Main } else { Screen::SinglePlayer }));
+                            None
+                        }
+                        (Screen::CreateSkirmish, "Open Next Arrow Button") => {
+                            arrow(&ctx, c, rect, "FrontEnd_Next_Button", Action::Goto(Screen::Lobby));
+                            None
+                        }
+                        (Screen::CreateSkirmish, "List World Files") => {
+                            map_list(&ctx, c, &sk, &strings);
+                            None
+                        }
+                        (Screen::CreateSkirmish, "Map Information Button") => {
+                            // Measured: framed panel at the element's area; gold 'Map Description:' then Univers10 lines 16 apart.
+                            stretched_window(&ctx, c, [r[0], r[1] - 3.0, r[2], r[3] + 2.0]);
+                            ctx.text(c, "Univers10", &format!("{}:", text_of(&strings, "IDGS_TPFRONTENDTEXT02_MAP_DESCRIPTION")), r[0] + 5.0, 200.0, r[1] + 9.0, false, GOLD);
+                            wrapped(&ctx, c, "Univers10", sk.map_json["description"].as_str().unwrap_or_default(), [r[0] + 5.0, r[1] + 25.0, r[2] - 12.0, r[3]]);
+                            None
+                        }
+                        (Screen::CreateSkirmish, "Radio Historical Map Button") => {
+                            radio(&ctx, c, rect, &text_of(&strings, "IDGS_TPFRONTENDTEXT01_VIEW_PRESET_MAPS"), sk.historical, Action::Historical(true));
+                            None
+                        }
+                        (Screen::CreateSkirmish, "Radio Open Map Button") => {
+                            radio(&ctx, c, rect, &text_of(&strings, "IDGS_TPFRONTENDTEXT01_VIEW_OPEN_MAPS"), !sk.historical, Action::Historical(false));
+                            None
+                        }
+                        // Fleet size (and the victory limit) only apply to open maps; historical maps bring their own fleets.
+                        (Screen::CreateSkirmish, "Fleet Size Label" | "Fleet Size Scrollbar Button" | "Victory Limit Label" | "Victory Points Scrollbar Button")
+                            if sk.historical =>
+                        {
+                            None
+                        }
+                        (Screen::CreateSkirmish, "Fleet Size Label") => {
+                            ctx.text(c, BODY_FONT, &text_of(&strings, "IDGS_TPFRONTENDTEXT01_FLEET_SIZE_LIMIT"), r[0], r[2] - r[0], (r[1] + r[3]) / 2.0, true, Color::WHITE);
+                            None
+                        }
+                        (Screen::CreateSkirmish, "Fleet Size Scrollbar Button") => {
+                            ctx.text_button(c, rect, &sk.fleet_size.to_string(), "BlackChancery22", Action::FleetSize);
+                            None
+                        }
+                        (Screen::Lobby, "Open Next Screen Button") => Some(Action::Launch),
+                        (Screen::Lobby, "Open Map Description Dialog Button") => Some(Action::MapInfo(true)),
+                        (Screen::Lobby, "Open Previous Screen Button") => Some(Action::Goto(Screen::CreateSkirmish)),
+                        (Screen::Lobby, "Open Ship Selection Screen") if sk.open() => Some(Action::Goto(Screen::Fleet)),
+                        (Screen::Lobby, "Game Lobby Backdrop") => {
+                            ctx.image(c, "menu/gamelobby.png", Some(Rect::new(0.0, 0.0, 800.0, 600.0)), 0.0, 0.0, 800.0, 600.0, Color::WHITE);
+                            None
+                        }
+                        (Screen::Lobby, "Lobby Information Button") => {
+                            // Measured: a gold Univers10 'Map' label and the map name in Univers12 under the title.
+                            ctx.text(c, "Univers10", &text_of(&strings, "IDGS_TPFRONTENDTEXT01_SERVER_MAPNAME"), r[0], r[2] - r[0], 84.0, true, GOLD);
+                            ctx.text(c, BODY_FONT, sk.map_json["name"].as_str().unwrap_or_default(), r[0], r[2] - r[0], 101.0, true, Color::WHITE);
+                            None
+                        }
+                        (Screen::Lobby, "Lobby Player List Button") => {
+                            players_list(&ctx, c, rect, &sk, &strings);
+                            None
+                        }
+                        (Screen::Fleet, "Assemble Fleet Backdrop") => {
+                            ctx.image(c, "menu/shipscreen.png", Some(Rect::new(0.0, 0.0, 800.0, 600.0)), 0.0, 0.0, 800.0, 600.0, Color::WHITE);
+                            None
+                        }
+                        (Screen::Fleet, "Ship Types Available") => {
+                            ship_list(&ctx, c, rect, &sk, &lib, &strings);
+                            None
+                        }
+                        (Screen::Fleet, "Fleet Select Button") => {
+                            fleet_list(&ctx, c, rect, &sk, &lib);
+                            None
+                        }
+                        (Screen::Fleet, "Ship Information") => {
+                            ship_info(&ctx, c, rect, &sk, &lib, &strings);
+                            None
+                        }
+                        (Screen::Fleet, "Ship Victory Points") => {
+                            victory_points(&ctx, c, rect, &format!("{} : ", text_of(&strings, "IDGS_TPFRONTENDTEXT01_CURRENT_VICTORY_POINTS")), sk.points_left(&lib));
+                            None
+                        }
+                        (Screen::Fleet, "Open Ship Selection Screen") => {
+                            selected_tab(&ctx, c, rect, &label, font);
+                            None
+                        }
+                        // PROVISIONAL: Crew and Arms both open the shared crew & arms editor until their retail screens are rebuilt.
+                        (Screen::Fleet, "Open Arms Selection Screen" | "Open Crew Selection Screen") => Some(Action::OpenArms),
+                        (Screen::Fleet, "Add Ship To Fleet Button") => Some(Action::AddShip),
+                        (Screen::Fleet, "Drop Ship From Fleet Button") => Some(Action::DropShip),
+                        (Screen::Fleet, "Open Next Arrow Button") => {
+                            arrow(&ctx, c, rect, "FrontEnd_Next_Button", Action::Goto(Screen::Lobby));
+                            None
+                        }
+                        (Screen::Fleet, "Ship ViewPort Button") => {
+                            // The globe grid with the 3D preview (classic/ship_preview.rs) on top.
+                            // The 512x288 texture holds the grid in its top-left 393x285, the viewport's size: drawn 1:1.
+                            ctx.image(c, "menu/fe_shipscreen_bg.png", Some(Rect::new(0.0, 0.0, r[2] - r[0], r[3] - r[1])), r[0], r[1], r[2] - r[0], r[3] - r[1], Color::WHITE);
+                            if let Some(p) = &preview {
+                                c.spawn((ImageNode::new(p.image.clone()), ctx.node(r[0], r[1], r[2] - r[0], r[3] - r[1])));
+                            }
+                            None
+                        }
+                        (Screen::Fleet, "AutoAssign Button") => Some(Action::AutoAssign),
+                        (Screen::CreateSkirmish, "Victory Limit Label") => {
+                            ctx.text(c, BODY_FONT, &text_of(&strings, "IDGS_TPFRONTENDTEXT_VICTORY_POINTS"), r[0], r[2] - r[0], (r[1] + r[3]) / 2.0, true, Color::WHITE);
+                            None
+                        }
+                        (Screen::CreateSkirmish, "Victory Points Scrollbar Button") => {
+                            ctx.text_button(c, rect, &sk.victory_limit.to_string(), "BlackChancery22", Action::VictoryLimit);
+                            None
+                        }
+                        // Other retail buttons (multiplayer, options, profiles, campaign...) are shown but not implemented.
+                        (_, n) if !label.is_empty() && (n.starts_with("Open") || n.contains("Button")) && !n.contains("Arrow") => {
+                            disabled(&ctx, c, rect, &label, font);
+                            None
+                        }
+                        _ => None,
+                    };
+                    if let Some(a) = action {
+                        ctx.text_button(c, rect, &label, font, a);
                     }
-                    (Screen::Fleet, "AutoAssign Button") => Some(Action::AutoAssign),
-                    (Screen::CreateSkirmish, "Victory Limit Label") => {
-                        ctx.text(c, BODY_FONT, &text_of(&strings, "IDGS_TPFRONTENDTEXT_VICTORY_POINTS"), r[0], r[2] - r[0], (r[1] + r[3]) / 2.0, true, Color::WHITE);
-                        None
-                    }
-                    (Screen::CreateSkirmish, "Victory Points Scrollbar Button") => {
-                        ctx.text_button(c, rect, &sk.victory_limit.to_string(), "BlackChancery22", Action::VictoryLimit);
-                        None
-                    }
-                    // Other retail buttons (multiplayer, options, profiles, campaign...) are shown but not implemented.
-                    (_, n) if !label.is_empty() && (n.starts_with("Open") || n.contains("Button")) && !n.contains("Arrow") => {
-                        disabled(&ctx, c, rect, &label, font);
-                        None
-                    }
-                    _ => None,
-                };
-                if let Some(a) = action {
-                    ctx.text_button(c, rect, &label, font, a);
                 }
-            }
-            if *state.get() == Screen::Lobby && sk.map_info {
-                map_info_dialog(&ctx, c, &sk, &strings);
-            }
+                if *state.get() == Screen::Lobby && sk.map_info {
+                    map_info_dialog(&ctx, c, &sk, &strings);
+                }
+            });
         });
-    });
+}
+
+/// The Game Summary table, measured on two retail summaries (800x600 window): the VICTORY!/DEFEAT! label (UniversLightBold14)
+/// centred at y 132, a framed panel from (35,160) to x 767 with a 30 px heading band (Univers10 column titles), and per player a
+/// row 60 apart from y 210: the small flag at x 37, the name (Univers12) from x 77 and four 128x24 boxes at x 197 + 140 * column
+/// (hud.hdt: name width 110, column width 130, gap 10, row height 30). A column's best value gets the green bar (`GameStats::best`).
+/// PROVISIONAL: the panel art (a stretched window stands in), flag choice, player order and the kill-by-type table (not shown).
+fn summary(ctx: &Ctx, c: &mut ChildSpawnerCommands, stats: &crate::stats::GameStats, outcome: crate::scenario::Outcome, strings: &Value) {
+    let s = |id: &str| text_of(strings, id);
+    let won = outcome == crate::scenario::Outcome::Victory;
+    let status = if won { "IDGS_TPFRONTENDTEXT02_STATS_SCREEN_GAMEWON" } else { "IDGS_TPFRONTENDTEXT02_STATS_SCREEN_GAMELOST" };
+    if outcome != crate::scenario::Outcome::Playing {
+        ctx.text(c, "UniversLightBold14", &s(status), 230.0, 340.0, 132.0, true, Color::WHITE);
+    }
+    let rows = stats.players.len().max(1) as f32;
+    stretched_window(ctx, c, [35.0, 160.0, 767.0, 190.0 + rows * 60.0 - 20.0]);
+    c.spawn((ctx.node(39.0, 162.0, 724.0, 28.0), BackgroundColor(Color::srgba(0.25, 0.75, 0.85, 0.22))));
+    let columns = ["SHIPSSUNK", "SHIPSLEFT", "DAMAGEINFLICTED", "DAMAGETAKEN"].map(|k| s(&format!("IDGS_TPFRONTENDTEXT02_STATS_SCREEN_{k}")));
+    for (i, title) in columns.iter().enumerate() {
+        ctx.text(c, "Univers10", title, 195.0 + i as f32 * 140.0, 130.0, 175.0, true, Color::WHITE);
+    }
+    for (row, ((name, line), best)) in stats.players.iter().zip(stats.best()).enumerate() {
+        let cy = 210.0 + row as f32 * 60.0;
+        let base = match line.race.as_str() {
+            "Pirate" => 10,
+            "Procyon" => 20,
+            _ => 0,
+        };
+        piece(ctx, c, &format!("FrontEnd_Flag_Small_Icon_{:02}", base + row % 10), [37.0, cy - 12.5, 65.0, cy + 12.5], (false, false));
+        ctx.text(c, BODY_FONT, name, 77.0, 110.0, cy, false, Color::WHITE);
+        for (i, (cell, green)) in line.cells().iter().zip(best).enumerate() {
+            let x = 197.0 + i as f32 * 140.0;
+            // The gold-rimmed pill of the retail text buttons, with the retail bar colour (hud.hdt 0.207, 0.566, 0.265) inside.
+            let cap = |name| sprite(ctx.hud, name, IDLE).map_or(50.0, |(_, r)| r.width());
+            c.spawn((
+                sliced(ctx.assets, "button", MENU_SKIN, "nocursor", cap("FrontEnd_Texts_Over_Button_Left"), cap("FrontEnd_Texts_Over_Button_Right")),
+                ctx.node(x, cy - 12.0, 128.0, 24.0),
+            ));
+            if green {
+                let fill = Node { border_radius: BorderRadius::all(Val::Px(7.0 * ctx.scale)), ..ctx.node(x + 4.0, cy - 8.0, 120.0, 16.0) };
+                c.spawn((fill, BackgroundColor(Color::srgb(0.207, 0.566, 0.265))));
+            }
+            ctx.text(c, "Univers10", cell, x, 128.0, cy, true, Color::WHITE);
+        }
+    }
 }
 
 /// Rows of a save list (19 px each, mouse wheel scrolls): "name - N pts".

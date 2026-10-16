@@ -126,7 +126,7 @@ fn fleet_model(
         let total = c.core_hp + c.sections.iter().map(|s| s.hp).sum::<f32>();
         FleetRow {
             entity: Some(e),
-            icon: format!("ShipBar_ShipIcon_{}", c.name.trim_start_matches("Ship_")),
+            icon: c.icon("ShipBar"),
             name: name.map(|n| n.0.clone()).or_else(|| ms.map(|m| m.name.clone())).unwrap_or_else(|| c.name.clone()),
             health: ((h.core.max(0.0) + h.sections.iter().map(|hp| hp.max(0.0)).sum::<f32>()) / total.max(1.0)).clamp(0.0, 1.0),
             status: if dock.is_some() {

@@ -141,6 +141,8 @@ pub enum Page {
     Controls,
     Audio,
     Display,
+    /// Game Summary (`Multiplayer Stats Screen.tst`): opened by the in-game menu's Summary button and when a skirmish is decided.
+    Summary,
 }
 /// The in-game menu is an overlay on the running battle (not a `Screen`), so the battle stays loaded; it pauses the simulation.
 #[derive(Resource, Default)]
@@ -635,7 +637,7 @@ pub fn plugin(app: &mut App) {
             Update,
             (capture_key, buttons.in_set(RunButtons).run_if(menu_active), button_sounds.before(RunButtons).run_if(menu_active), save_actions, save_text.run_if(menu_active)),
         )
-        .add_systems(PostUpdate, esc_menu.run_if(in_state(Screen::Battle)))
+        .add_systems(PostUpdate, (summary_on_end, esc_menu).chain().run_if(in_state(Screen::Battle)))
         .add_systems(Update, autolaunch.run_if(in_state(Screen::Lobby)))
         .add_systems(Update, fleet_hook.run_if(in_state(Screen::Fleet)));
 }
@@ -684,6 +686,8 @@ pub struct MenuModel<'w> {
     pub lib: Res<'w, Library>,
     pub state: Res<'w, State<Screen>>,
     pub settings: Res<'w, Settings>,
+    pub stats: Res<'w, crate::stats::GameStats>,
+    pub outcome: Res<'w, crate::scenario::Outcome>,
 }
 /// Changes whenever the drawn screen would: views rebuild when it differs from the last one they drew.
 pub type MenuKey = (Screen, usize, bool, usize, Vec<Slot>, Option<&'static str>, [usize; 3], u32, u32, String);
@@ -714,7 +718,7 @@ impl MenuModel<'_> {
                 cui.scroll,
                 (cui.capture, &self.binds.rows),
                 self.settings
-            ),
+            ) + &if self.ig.page == Some(Page::Summary) { self.stats.table() } else { String::new() },
         )
     }
 }
@@ -794,6 +798,14 @@ fn esc_menu(
         if ig.page.is_some() {
             vtime.pause();
         }
+    }
+}
+
+/// A decided skirmish shows the Game Summary (missions end through their own rules). PROVISIONAL: retail delay before it opens unknown.
+fn summary_on_end(mission: Option<Res<crate::campaign::Mission>>, out: Res<crate::scenario::Outcome>, mut ig: ResMut<InGame>, mut vtime: ResMut<Time<Virtual>>) {
+    if out.is_changed() && *out != crate::scenario::Outcome::Playing && mission.is_none() {
+        (ig.paused_by_us, ig.page) = (!vtime.is_paused(), Some(Page::Summary));
+        vtime.pause();
     }
 }
 
