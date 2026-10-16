@@ -158,6 +158,10 @@ impl GunDef {
     pub fn burst_cycle(&self) -> f32 {
         self.reload + self.burst.saturating_sub(1) as f32 * self.burst_reload
     }
+    /// The burst cycle with `cut` seconds taken off TimeBetweenBursts by the gunners (never below 0).
+    pub fn burst_cycle_cut(&self, cut: f32) -> f32 {
+        (self.reload - cut).max(0.0) + self.burst.saturating_sub(1) as f32 * self.burst_reload
+    }
 
     pub fn shell_gravity(&self) -> f32 {
         if self.gravity && self.range[2] > 0.0 { self.muzzle * self.muzzle / (std::f32::consts::SQRT_2 * self.range[2]) } else { 0.0 }

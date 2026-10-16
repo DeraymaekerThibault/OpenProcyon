@@ -538,6 +538,7 @@ fn fire(
         if health.destroyed {
             continue;
         }
+        let reload_cut = gunner_reload_cut(ship, posts, points.as_deref(), &lib);
         let snap: Vec<_> = snap.iter().map(|s| (s.0, s.1, s.2, s.3 && sensors.in_sight(me, s.0, campaign.as_deref()), s.4, s.5)).collect();
         let snap = &snap[..];
         let cloaked_now = cloak.as_ref().is_some_and(|c| c.level > 0.0);
@@ -661,7 +662,7 @@ fn fire(
                     let t = tp.map(|t| t.2).filter(|t| *t != Entity::PLACEHOLDER);
                     fired.write(Fired { shooter: me, target: t, bullet: g.bullet.clone() });
                 }
-                st.cooldown = g.burst_cycle();
+                st.cooldown = g.burst_cycle_cut(reload_cut);
                 st.burst_timer = 0.0;
                 // exe: band deviation * 0.5, uniform in +-that, times an accuracy factor. 0.5 is the plain-AI factor;
                 // crewed ships use 1 - 0.8 * gunnery skill (the campaign roster's best gunner for the human fleet).
@@ -956,6 +957,21 @@ struct ShipHit {
 
 /// Damage rules of one shell hit on section `k` (`damage` = [lower, upper, crit, fire chance, fire strength]).
 /// Criticals are not modelled: in the exe they only feed a tally and crew speech (docs/re/movement.md).
+/// Seconds the gunners take off TimeBetweenBursts: 10 x gunnery (0..1), for the player's crewed ships only; computer
+/// ships fire every TimeBetweenBursts (measured). Measured on retail: gunners of gunnery 7-9 brought one gun's hits down to
+/// every 3.5-3.9 s (heavy cannon, 12 s). PROVISIONAL: each retail gun reads its own gunner slot (mapping unknown); here the
+/// mean over the gunner slots (generic hands 0.1), or the campaign roster's best gunner without posts.
+fn gunner_reload_cut(ship: &Ship, posts: Option<&crate::crew_arms::CrewPosts>, points: Option<&crate::campaign::CampaignPoints>, lib: &Library) -> f32 {
+    if ship.side != Side::Player {
+        return 0.0;
+    }
+    let gunnery = match posts {
+        Some(p) => p.post_skill(0, "gunnery", crate::boarding::counts(&lib.classes[ship.class].name)[0]),
+        None => points.and_then(|p| crate::crew_arms::best(p, "gunnery")).unwrap_or(0.1),
+    };
+    10.0 * gunnery
+}
+
 /// Measured on retail (headless 1-vs-1 skirmishes per difficulty): the bullet table's damage is scaled by side and difficulty.
 /// Player shells on computer ships: Easy x4, Normal x2, Hard x1; computer shells on the player's: x0.25, x0.5, x1.
 /// PROVISIONAL: Easy x4 rests on two hits; computer-vs-computer and allied hits are not measured (1.0 here).
@@ -1392,6 +1408,19 @@ fn draw(mut g: Gizmos, lib: Res<Library>, target: Res<Target>, ships: Query<(Ent
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Gunners take 10 x gunnery seconds off TimeBetweenBursts (docs/re/gunnery.md#gunners): a gunnery-8.5 crew fires the
+    /// 12 s heavy cannon every 3.5 s; the cut never goes below zero and leaves in-burst spacing alone.
+    #[test]
+    fn gunners_shorten_reload() {
+        let (guns, _) = load_weapons(&assets_dir());
+        let heavy = &guns["Gun_CannonBall_Heavy"];
+        assert!((heavy.burst_cycle_cut(8.5) - 3.5).abs() < 1e-5);
+        assert_eq!(heavy.burst_cycle_cut(0.0), heavy.burst_cycle());
+        assert_eq!(guns["Gun_CannonBall_Med_2Deck"].burst_cycle_cut(9.5), 0.0);
+        let gat = &guns["Gun_Gattling_Light"];
+        assert!((gat.burst_cycle_cut(9.0) - 7.0 * 0.15).abs() < 1e-5);
+    }
 
     #[test]
     fn damage_scales_with_side_and_difficulty() {
