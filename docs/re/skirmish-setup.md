@@ -1,10 +1,10 @@
-# Skirmish setup: lobby, fleet types, fleet assembly (exe + data findings)
+# Skirmish setup: lobby, fleet types, fleet assembly (original + data findings)
 
 Sources: `World/*.twt` WorldInfo and player lists, `Screens/*.tst`, WOT ship properties and observed behaviour of the original game,
 described in our own words.
 
 ## Map data (TWT)
-- `MustAssembleFleet`: false = **historical** map, true = **open** map (the exe also stores it with the lobby state).
+- `MustAssembleFleet`: false = **historical** map, true = **open** map (the original also stores it with the lobby state).
 - `Team List`: per team a name id, a **Race** and a **Race Lock** flag. Race values: 0 Navy, 2 Pirate, 3 Procyon, 4 none/other.
   Open team maps (Red Rover, Border Dispute, Convoy Raid, Mousetrap) have locked races; open free-for-all maps (Diablo Strait,
   Dragon's Nest, Shadow Dance, Zemyatin) have no team list and every player is race 4: the player must choose a fleet type.
@@ -16,7 +16,7 @@ described in our own words.
 ## Screens
 - Skirmish Game Lobby (`Skirmish Game Lobby.tst`): Assemble Fleet, I'm Ready, Launch Game, Abort, Map Information, chat, a player
   list area (233,155)-(795,445) drawn by `LobbyPlayersList_Button` (draw), backdrop texture `GameLobby`.
-- The player list draws one 0x50-byte row per player with four cells: name, state (open/closed/computer/human), fleet type (string
+- The player list draws one row per player with four cells: name, state (open/closed/computer/human), fleet type (string
   ids FLEET_NAVY/PIRATE/PROCYON, "Please Select A Fleet Type" when none) and team; the editable cells depend on the lobby mode and on
   host/ready flags. Column titles use the Players / Race / Team strings.
 - Ship Selection Screen (`Ship Selection Screen.tst`, backdrop `ShipScreen`): tabs Ships/Crew/Arms, a ship viewport, Ship
@@ -34,14 +34,14 @@ described in our own words.
 - Arms: the fleet screen's Arms button opens the same shared weapon editor as campaign . Each fleet entry has its own bank fittings, including duplicate hulls; launch/restart carries these into turret models, firing and HUD state. Dropping/truncating a fleet or changing race removes the corresponding fittings. Campaign funds are untouched. Historical fleets remain fixed.
 - Mount compatibility: exported gun `Mount Type` (whitespace-normalised) and `Exclusion Race` drive both editors; selectable same-size mounts permit cross-family weapons. `Non-Selectable` mounts and point defence are protected. Inferring a bank's type from its original guns is still provisional; mods missing metadata retain the older family fallback.
 - Not done / PROVISIONAL: victory points and Auto Assign; crew/load/save; the 3D ship preview; ready/chat/network;
-  Race Lock on historical maps (we never change a historical fleet type); name filter that hides story/NIS/tutorial hulls (the exe lists
+  Race Lock on historical maps (we never change a historical fleet type); name filter that hides story/NIS/tutorial hulls (the original lists
   all ship types of the race); computer fleet choice; the lobby cell layout and states; hostile players do not fight each other (battle sides are only ours/enemy).
 
 ## Ship names
 - Historical maps: the world rules' `*State Init* Setup Ship` action gives each pre-placed ship (by world object id) a script name and a
   localized name id; the exporter stores the English text as `ships[].name` in the map JSON. The banner shows it.
 - Open maps: each ship type's WOT lists 12 `Available Unique Ship Name ID NN` strings (`data/ship_names.json`, `tools/export_ship_names.py`).
-  Remake: a random unused name of the type's pool per ship (repeats only once the pool is used up). PROVISIONAL: the exe's pick and uniqueness scope.
+  Remake: a random unused name of the type's pool per ship (repeats only once the pool is used up). PROVISIONAL: the original's pick and uniqueness scope.
 - Campaign ships keep their rule-set names (`MissionShip`).
 
 ## Arms acceptance (owner-run)
@@ -54,5 +54,5 @@ Skirmish fittings currently have no budget charge or disk fleet-profile persiste
 ## Weapon bank recharge bar
 hud.hdt has `WeaponBar_SlotBackground` (an empty vertical bar), `WeaponBar_RechargeStatus` (the same bar filled yellow), offsets
 `Offset_WeaponBar_Recharge` (0,0) and `Offset_WeaponBar_GunIcon` (6,0). The remake draws the bar beside each bank icon with the fill growing
-with the slowest live gun's reload progress, and dims the icon while the bank reloads. PROVISIONAL: the exe's drawing code was not found
+with the slowest live gun's reload progress, and dims the icon while the bank reloads. PROVISIONAL: the original's drawing code was not found
 (the sprite names are only referenced from static initialisers); fill direction and bank aggregation are read from the artwork.

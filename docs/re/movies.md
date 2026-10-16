@@ -7,7 +7,7 @@ World TWT headers, and observed behaviour of the original game, described in our
 
 Eight files, hi-res/low-res pairs of four movies. Container and codec: **RAD Bink 1** (`BIKi` magic, `.bik`), video codec `binkvideo`, audio
 `binkaudio_rdft` (the two logos) or `binkaudio_dct` (the long movies), 44.1 kHz stereo. The game itself uses the RAD runtime `binkw32.dll`
-shipped in the install (API names in the exe: `BinkOpen`, `BinkOpenDirectSound`, `BinkSetSoundSystem`, `BinkDoFrame`, `BinkCopyToBuffer`,
+shipped in the install (API names in the original: `BinkOpen`, `BinkOpenDirectSound`, `BinkSetSoundSystem`, `BinkDoFrame`, `BinkCopyToBuffer`,
 `BinkNextFrame`, `BinkWait`, `BinkGoto`, `BinkSetVolume`, `BinkGetSummary`, `BinkDX8SurfaceType`). The remake must not run it.
 
 | file | size | video | fps | length | audio |
@@ -34,16 +34,14 @@ encode Theora (`libtheora`), VP8/VP9, H.264, MJPEG, Vorbis, Opus. Python tools a
   `Movie Player Skip Button`, both 800x600 reference area) owns playback. A click or key on the skip button ends it; which input exactly is PROVISIONAL.
 - Display: render option `Movie Fullscreen DisplayInfo` = 640x480x32 and `Scale Movies Bool False`: movies are shown at native size (the
   display switches to 640x480) rather than stretched. `AppSettings.ini` has `Skip Movies: 0` (developer switch to skip them all).
-- File selection: the exe holds all eight names as constants. The front-end state machine (~70 states) chooses the hi-res or the
-  LoRez name from a flag in the app-settings object (offset 0x64; set when a hardware probe at the first logo state fails: PROVISIONAL meaning).
-  Mapping state -> movie, from the code that references each name: state 0x1a = `Disney_Logo`, state 4 = `BD_Logo` (startup order Disney then
-  Barking Dog, because only the Disney state computes the LoRez flag), state 0x42 = `SinglePlayer_NIS`, state 0x43 = `TP_endNIS`.
-  The state 0x43 handler also resets the campaign mode fields and the world UI state (it ends the game session before the movie).
-- Triggers (PROVISIONAL, not traced to the caller): logos at application start; `SinglePlayer_NIS` when a **new campaign is started** from the
+- File selection: the game picks the hi-res or the LoRez file of each movie; LoRez is chosen when a hardware check at the first logo
+  fails (PROVISIONAL meaning). Startup plays `Disney_Logo` then `BD_Logo`; `SinglePlayer_NIS` and `TP_endNIS` are the campaign movies.
+  Ending the campaign ends the game session before `TP_endNIS` plays.
+- Triggers (PROVISIONAL): logos at application start; `SinglePlayer_NIS` when a **new campaign is started** from the
   SinglePlayer menu, before Mission 1 loads (consistent with the reference video: title card at 2:43, then the mission's own NIS);
   `TP_endNIS` when the campaign ends. The World header flag `PlayEndMovie Bool` is `True` only in `Mission12.twt` (all other 28 worlds, including
   Mission 1 and the demo-ending Mission 13, are `False`), so the end movie plays after Mission 12's victory.
-- The exe can also record gameplay to AVI/TGA (`MovieCapture`); irrelevant to the remake.
+- The original can also record gameplay to AVI/TGA (`MovieCapture`); irrelevant to the remake.
 
 ## 3. Conversion and playback options
 

@@ -37,7 +37,7 @@ in the skirmish index.
 
 The converted rule records are **evidence**, not a claim that every condition and
 command has been implemented. Their strings describe designer intent; exact
-native condition timing, group matching, damage fractions and NIS/speech queues
+retail condition timing, group matching, damage fractions and NIS/speech queues
 still require executable investigation.
 
 ## Implemented: rule interpreter (`game/src/rules/`)
@@ -77,7 +77,7 @@ Mission 1 now exports `environment` alongside its ships/rules: animal IDs, their
 and plays the retail `Ambience_Nebula` loop with provisional distance gain. Lightning, meteors and rotational winds are off in this mission and are not added.
 Nebula energy drain is separate from permanent sail damage: PROVISIONAL 0.12/s down to 25% sail energy, recovering 0.08/s outside the polygon.
 Movement and the sail-power gauge use that value. PROVISIONAL sensor occlusion blocks lines crossing Clarke's polygon, except within 40 units;
-selection, ship targeting/AI, radar contacts, labels and reticles share this check. The cloud currently has no native mesh shifting/edge-fade shader.
+selection, ship targeting/AI, radar contacts, labels and reticles share this check. The cloud currently has no retail mesh shifting/edge-fade shader.
 
 The four whales (205–207 in `Whales`, 217 in `Whales 2`) use the retail `SpaceWhale_Layer1` mesh and placements. Their groups stay separate even after both
 receive the `Whales` owner. The existing rule list controls hiding/reveal, the looping `Space Whale Path` and velocity 12.
@@ -98,7 +98,7 @@ boarding/capture, talking-head portraits, checkpoint saves, independent towing, 
 
 Lifeboat creation, drift and pickup now exist (`docs/re/lifeboats.md`, `lifeboats.rs`). Still incomplete: border zones, player boarding of bases, tender refit/torpedo resupply,
 mid-mission snapshots, stats/crew/arms flow, pre-rendered movies and Mission 2–13 gameplay validation.
-Nebula/whale behaviour, native tow/collision/path planning, NIS camera, AI stance/captain semantics and condition timing remain partial/provisional.
+Nebula/whale behaviour, retail tow/collision/path planning, NIS camera, AI stance/captain semantics and condition timing remain partial/provisional.
 See “Next” below for the latest Mission 1 remediation and what has actually been revalidated.
 
 ## Checks performed
@@ -124,24 +124,24 @@ Prioritise the owner-observed Mission 1 polish issues before new mission support
    CPU time. A provisional authored-duration fallback now keeps the equivalent scene near ~8k particles, ~16.7 ms frames and
    ~0.42 ms FX CPU time on the same machine. The earlier corrected autopilot run reached the ending; it used autokill, not normal combat.
    The earlier aggregate particle test was too permissive and has been tightened, alongside a five-minute marker regression.
-   See `effects.md`, "Mission 1 particle-growth profiling". Confirm in owner play; native missing-expiry semantics remain unresolved.
-2. **Torpedoes moving away from targets — guidance implemented:** after the native 0.5-second launch coast, torpedoes steer
+   See `effects.md`, "Mission 1 particle-growth profiling". Confirm in owner play; retail missing-expiry semantics remain unresolved.
+2. **Torpedoes moving away from targets — guidance implemented:** after the original 0.5-second launch coast, torpedoes steer
    toward the authored homing point, lead inside 100 units, and adjust altitude. Authored bullet physics drives propulsion/turning;
    missing/destroyed targets stop tracking. A crossing-target test intersects the actual schooner hull, and the GPU Mission 1
-   run logs moving training-fleet torpedo impacts. Launch/flame alignment fixes are retained. Exact native integrator, tracking
+   run logs moving training-fleet torpedo impacts. Launch/flame alignment fixes are retained. Exact retail integrator, tracking
    invalidation timer, arming and point defence remain provisional/unimplemented (`gunnery.md`).
 3. **Repair scaffold animation — implemented:** six converted mesh endpoints feed the EFT deploy/hold/retract curves, including
    ironclad variants. GPU docking smoke visibly deploys the scaffold (`local/feedback-scaffold.png`). Geometry/curve regressions
-   cover all five available morph effects; one effect at ship centre remains an approximation of per-section native repair jobs.
+   cover all five available morph effects; one effect at ship centre remains an approximation of per-section retail repair jobs.
 4. **Towing — independent physics implemented:** rigid teleport/heading copying removed. Tower stern and towee bow nodes attach
    a mass-weighted slack cable in movement substeps, transferring linear force and off-axis torque to both ships. Tow approach
    uses the nodes; script/menu break-tow relationships are preserved. Tests cover pulling, independent turning and release.
-   Cable length is the registration distance and the constraint is inelastic, not recovered native spring physics.
-5. **Dim world nebula — blend corrected:** native ONE/ONE blending no longer multiplies the cloud RGB by texture/common alpha;
-   edge fading is applied to RGB. Star-map art is unchanged. Exact edge fade and native cloud morphing still require comparison.
+   Cable length is the registration distance and the constraint is inelastic, not recovered retail spring physics.
+5. **Dim world nebula — blend corrected:** retail ONE/ONE blending no longer multiplies the cloud RGB by texture/common alpha;
+   edge fading is applied to RGB. Star-map art is unchanged. Exact edge fade and retail cloud morphing still require comparison.
 6. **Dim low-angle engine trail — blend/motion corrected:** additive particle RGB no longer gets Bevy's additional texture-alpha
    multiplication. Wakes draw a live head between distance samples and no longer apply a guessed 0.7 brightness factor.
-   Existing world-axis flame alignment is retained. Flare textures keep the prior mask pending native docking-flare pooling/scaling;
+   Existing world-axis flame alignment is retained. Flare textures keep the prior mask pending retail docking-flare pooling/scaling;
    a global blend switch produced an unacceptable overbright docking marker during smoke testing and was narrowed accordingly.
 7. **Collision weight — angular response implemented:** finite-mass asteroid and unequal-mass ship response now include
    contact-point velocity, lever-arm torque and angular effective mass; centred hits retain the existing mass-ratio regressions.
@@ -163,7 +163,7 @@ propagated transforms; catch-up emission is spread over the emitter's motion. Th
 replay; smoothness across all camera angles/effects remains unverified. See [effects.md](effects.md) and [docking-and-orders.md](docking-and-orders.md).
 
 After these: nebula/whale fidelity, tender refit/torpedo resupply, remaining asteroid fragment/collision
-fidelity, native NIS camera and AI stance behaviour, then validate Mission 2. Missions 2–13 already export/load but remain untested in play.
+fidelity, retail NIS camera and AI stance behaviour, then validate Mission 2. Missions 2–13 already export/load but remain untested in play.
 
 ## Mission 2 owner-playtest fixes: islands and gun towers
 
@@ -175,7 +175,7 @@ Discovery alone does not start combat: the ship must also enter the attack volum
 Fixed from owner feedback:
 - Base docking no longer disables island contact for the whole approach. It plans and keeps a scenery-clear detour to a fixed
   approach point; only the final short docking leg allows contact with the dockee. The planner uses conservative swept hull
-  boxes and scenery-bound corners, not recovered native navigation. No route means stop, not pass through land.
+  boxes and scenery-bound corners, not recovered retail navigation. No route means stop, not pass through land.
 - `Set Group/Unit Owner` now updates `MissionBase` as well as ships/animals. The previous ship-only dispatcher left the camp
   neutral, so it never fired and the subsequent first-shot dialogue condition never became true.
 - Base gun-node positions are already in the MDB mesh frame. `export_combat.py` now uses those positions instead of adding
@@ -190,7 +190,7 @@ actual attack-volume owner dispatch and first-shot timers, mount placement withi
 player return fire. Classic GPU smoke, using an ignored scratch mod to put the player inside the attack volume, logged discovery,
 attack and first-shot rules. `local/m2-towers-final.png` shows the discovery NIS; `local/m2-tower-placement.png` shows guns on both
 towers (a second isolated view with NIS rules removed). These focused runs were stopped after screenshot capture, not played to victory.
-Full Mission 2 completion, all approach directions, other bases' visuals and native path-planner parity remain unvalidated.
+Full Mission 2 completion, all approach directions, other bases' visuals and retail path-planner parity remain unvalidated.
 
 Follow-up owner feedback: island heights and ineffective return fire. The first fix subtracted two primary `_Layer1` pivots
 (AbandonedCamp Z=-17.2, SmugglersCamp Z=27). That matched those scenes' dock heights but was not a general assembly rule.
@@ -204,7 +204,7 @@ the previous two island corrections remain +17.2 / -27. The two-scene whitelist/
 regression were removed. No converted models, dock data, authored placements or installation/mod combat values were regenerated.
 Explicit `scene_origin` remains an optional mod override, taking precedence over the automatic dock datum.
 
-This is still **PROVISIONAL**, not executable-confirmed native assembly: aligning the functional dock plane fixes the reported
+This is still **PROVISIONAL**, not executable-confirmed retail assembly: aligning the functional dock plane fixes the reported
 placement fault but does not establish every scene's retail assembly, hierarchy or animated-prop placement. The catalogue test
 checks the shared placement invariant, not the correctness of existing converted dock coordinates; those still include the
 provisional parent-chain/common-offset interpretation and must be checked against their local meshes when playtesting. Do not flatten all
@@ -328,10 +328,10 @@ Findings (original game behaviour + `hud.json`):
   the side; offsets `Left_/Right_TalkingHead_Character_/PortalOverlay_From_TopLeft` place portrait and iris (Navy right: 7,11).
 - Layers: character sprite `TalkingHead_Character_<name>` behind, iris overlay (`Portal_Closed`, `ClosedToOpen0..9`, `Portal_Open`), housing on
   top, `Portal_Light_On` over the lamp, `Portal_VoiceBox_*` (55x9) in the name plate (Off when silent, Start..Stop frames cycled while speaking;
-  the exe returns `Off` unless its speaking flag is set). `Animation Speed TalkingHeadWindow` = 2.0.
+  the original returns `Off` unless its speaking flag is set). `Animation Speed TalkingHeadWindow` = 2.0.
 - Sounds on open/close: `HUD_TalkingHead_Iris_Open/Close` (docked), `HUD_TalkingHead_Floating_Open/Close` (floating).
 - Helmsman uses `TalkingHead_Character_1stMate`; campaign lines use the speech event's `face`.
-- Sprite ids are indices into the exe's name table (8-byte stride); the animators are (first, last, current) triples.
+- Sprite ids are indices into the original's name table (8-byte stride); the animators are (first, last, current) triples.
 PROVISIONAL: bottom-right corner placement and always-visible closed housing; open/close rate (2.0/s), voice-box cadence (8 fps),
 light and voice-box positions (measured on the art), which side the real game defaults to. Not done: the floating variant, the
 `TalkingHeadLocation` option, per-line portrait expression beyond the data's `face`, moving the gameplay subtitle onto the speech-event bar.

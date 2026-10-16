@@ -8,12 +8,12 @@ Anything not marked otherwise is read directly from those files. Uncertain parts
 ## 1. Victory points (the campaign "score")
 
 - The rule action `Add Victory Points for SinglePlayer` (field `Victory points to be added`, an Int) adds to a single
-  campaign-wide counter, `SinglePlayerVictoryPoints`. The exe's log text for it is "Add %i victory points to SinglePlayer's total",
+  campaign-wide counter, `SinglePlayerVictoryPoints`. The original's log text for it is "Add %i victory points to SinglePlayer's total",
   so the total changes at the moment the rule fires, not at the end of the mission.
 - Values per mission are plain constants in the rules (exported in `assets/maps/missionNN/mission.json`). Examples: mission 1 awards
   1, 2, 3, 1, 2 over its stages; mission 2 awards 4, 4, 4, 5; mission 10 awards 30/60/90 and 30; mission 6 up to 50 per event.
 - The counter is a *currency*, not just a score. It is spent between missions on gun upgrades and crew: every gun WOT has
-  `Victory Point Cost Int` (e.g. 3, 19) and the exe has the error text "You do not have enough victory points to upgrade all the guns
+  `Victory Point Cost Int` (e.g. 3, 19) and the original has the error text "You do not have enough victory points to upgrade all the guns
   in that bank". Evidence from the retail mission-start saves (frame 1 of each mission):
 
   | save (start of) | total points | crew list | arms list |
@@ -42,13 +42,13 @@ Anything not marked otherwise is read directly from those files. Uncertain parts
 
 ## 2. End-of-game flow
 
-World/game fields serialized by the exe (in the `GameImpl` chunk, see section 4): `Game Complete` (bool) + `Game Complete Timer`,
+World/game fields serialized by the original (in the `GameImpl` chunk, see section 4): `Game Complete` (bool) + `Game Complete Timer`,
 `Custom Game Complete` + `Custom Game Complete String`, `Game Winner Players` (list), `Show Stats Screen`, `Goto Next Level Enabled`,
 `Next Level World Name`, `Next Level Display Timer`, `Is Campaign Game`, `User Interface Disabled`.
 
 Rule actions:
 - `End Game` (fields `Use Custom Message`, `Winner - Custom Message String ID`, `Loser - Custom Message String ID`, `Show Stats Screen`).
-  The exe's log line shows all four. Every mission's defeat path uses it with `Show Stats Screen = TRUE` (missions 1-12);
+  The original's log line shows all four. Every mission's defeat path uses it with `Show Stats Screen = TRUE` (missions 1-12);
   mission 13 uses `IDGS_TPINGAMEMESSAGE_DEMO_COMPLETE` with stats FALSE. Winner/loser strings are ids in the game strings
   (already resolved by `tools/export_campaign_media.py` into `*_media.json` `messages`).
 - `Goto Next Level` (`World`: next TWT such as `Mission02.twt`; `Display Loading String`), present in every mission 1-12.
@@ -60,7 +60,7 @@ Rule actions:
 - Mission 1's failure message is `IDGS_TPINGAMEMESSAGE_GAME_M01_FAILED_GRAD_EXERCISES`; missions 2/4/5/6/7/10/11 reuse the generic
   `..._GAME_LOST`; 8 has `..._M08_IC_DEFEAT`; 12 has `..._M12_FAILED_QUEEN`.
 
-## 3. The stats screen (what the exe shows)
+## 3. The stats screen (what the original shows)
 
 The screen is the in-game-menu style screen `Multiplayer Stats Screen.tst` (screen name "InGameMenu Screen", backdrop "Game Lobby
 Backdrop", an "Open Next Arrow Button" at 350,500-450,600 in the 800x600 reference space, a centred "Game Summary" title label at
@@ -113,7 +113,7 @@ Ships Left = Ending Size; Ships Sunk presumably = kills from `PlayerKillInfo` (P
      `HUD` (NIS bars open, speech queue/timers), the end-of-game fields from section 2, `Already Created Game`.
 - The retail files here were produced at frame 1 of a mission (`Game Tick 1`) by the community/owner, so they double as "mission start"
   states carrying the campaign counters (points, unlocked arms/crew) into that mission. In-mission saves hold the same structure at a later
-  tick. Which options the exe offers during the Mission 1 NIS or after the end is not recovered.
+  tick. Which options the original offers during the Mission 1 NIS or after the end is not recovered.
 - `UserProfiles/<code>.pft` is **not** a campaign save. It holds `Player Profile` (name, a player code, buddy list, `Difficulty Level`,
   `Display Banners`), `Sound Options`, `Render Options` and the input mappings. No campaign progress is stored in it; progress lives only in
   the saved game files. `GameFleetProfiles/M01JimTBoat.ckb` is the mission-1 crew preset for Jim's boat (`Crew Initialized`, gunners, captain,
@@ -203,12 +203,12 @@ Explicit fallbacks / remaining probes:
 - Bank changes initially used name-derived weapon families; the shared skirmish batch replaced that fallback with exported `Mount Type`.
   Same-size selectable mounts allow cross-family weapons, with race exclusions; fixed/point-defence mounts remain protected. Missing
   metadata in legacy/mod definitions retains the old family fallback. The destination's full price per mount is charged, no trade-in.
-  Native allowed-upgrade sets, mixed/two-deck banks and cost differences/refunds need investigation. AI engagement distance remains
+  Retail allowed-upgrade sets, mixed/two-deck banks and cost differences/refunds need investigation. AI engagement distance remains
   the authored class distance, not recalculated for upgraded guns.
 - Outfits are keyed by hull class + script name (world object ID if unnamed). They survive restart/save and same-identity progression;
   a replacement hull/name needs reassignment. Purchased reserve crew remain available, but automatic transfer on promotion/hull change
-  is unresolved. This is not a claim of faithful native crew-keeper serialisation.
-- The functional layout is not the native ship-selection screen. Skirmish weapon fitting now shares the editor (see skirmish-setup.md),
+  is unresolved. This is not a claim of faithful retail crew-keeper serialisation.
+- The functional layout is not the original ship-selection screen. Skirmish weapon fitting now shares the editor (see skirmish-setup.md),
   but skirmish crew assignment/budgets, difficulty and fleet profile files remain open.
 
 Compile-only check (`cargo check --tests`) passed. Regression cases added for spending/duplicates/capacity/transfers, outfit round trip,

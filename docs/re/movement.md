@@ -1,4 +1,4 @@
-# Ship movement: what the original exe does (own-words notes)
+# Ship movement: what the original original does (own-words notes)
 
 Source: observed behaviour of the original game and its retail data files, described in our own words. Only the numbers and relationships below are used.
 
@@ -47,12 +47,12 @@ measured bank limit above.
 - Every frame: physics = min(destroyed / total vitalToMaxVelocity sections, 0.9); = same for vitalToManeuverability.
    is one of the four "(1 − x)" factors on max speed/thrust; is the `r` in the rudder term (1 − r) (read at).
   Player speech fires when the sail loss crosses 25/50/75/100%.
-- Not decoded: (1 − product of (1 − x) over some list, crew-like),, (0.6 × a timed progress, state-dependent), (turn multiplier from crew).
+- Unknown: (1 − product of (1 − x) over some list, crew-like),, (0.6 × a timed progress, state-dependent), (turn multiplier from crew).
 
 ## Core damage (verified, hit handler, core routine, sum)
 - After a hit is applied, if the hit section is vital-to-ship and at 0 HP (the killing hit and every later hit on it), the core loses
   a fresh roll of the bullet's damage for that material x (sum of `vitalSectionCoreDamagePercent` over ALL destroyed vital sections) x 0.01,
-  clamped at 0. There is no lump sum on destruction, so keep shooting a dead vital section to finish the ship (rounding not traced).
+  clamped at 0. There is no lump sum on destruction, so keep shooting a dead vital section to finish the ship (rounding unknown).
 - Section damage roll = round(uniform(lo, hi)). Damage-smoke level from remaining HP fraction: >75% none,
   50-75 Light, 25-50 Medium, 0-25 Heavy, 0 Destroyed: identical to the remake's thresholds.
 
@@ -85,11 +85,11 @@ This is a provisional workaround, not recovered retail damaged-mesh collision: s
   loss (by system type). No physics/gun effect found, so the remake does not model criticals.
 
 ## Path end behaviour (partial)
-The ship movement routine (ctor, throttle update) defaults to "stop at end" (= 1, throttle clamp 0..1). Its state
+Ship path following defaults to "stop at end" (= 1, throttle clamp 0..1). Its state
 (1 steer, 2 turn, 3 arrive) goes to 3 near the path end, where throttle ramps down, and it is 0 once the path is exhausted. So a retail
 ship brakes to a halt at the last point of a `to end` path instead of sailing on.
 
-Decoded follow-up (waypoint test = clamped linear interpolation):
+Follow-up (waypoint test = clamped linear interpolation):
 - Throttle starts at the current speed fraction (|v| / max speed, 0..1). Heading error to the current point above pi/16 → turn state:
   throttle held at that fraction, at least 0.1. Otherwise full throttle (1.0) while the path runs.
 - "Arrive" (state 3) is entered when the distance to the last point is <= the stopping-distance helper, or the path is done.

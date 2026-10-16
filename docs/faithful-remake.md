@@ -53,7 +53,7 @@ For **one Navy Cutter**, the following were confirmed locally:
 - `WorldObjects/Ship_Navy_Cutter.wot` references scene `NavyCutterShip`.
 - `BD_MeshScenes/NavyCutterShip.msb` exists (12,197 bytes). Embedded identifiers
   include `NAVYCUTTERMASTERNULL`, named mounts and `GunPlacement` descriptors.
-  This confirms relevant names, **not** decoded scene transforms/hierarchy.
+  This confirms relevant names, **not** known scene transforms/hierarchy.
 - `BD_Meshes/NavyCutterShip_Layer1.mdb` through `Layer6.mdb` exist.
 - `BD_Textures` contains 800 DDS files, including the material textures needed by
   the probed cutter meshes. DDS is a standard format; the proprietary mesh/scene
@@ -88,7 +88,7 @@ scene assembly, hardpoint transforms and appearance are not yet validated. This 
 
 Update: the two "unknown" vertex floats are a packed smooth normal (azimuth, elevation in radians);
 outward normal in game axes = (-cos(el)·sin(az), cos(el)·cos(az), sin(el)). The axis/sign convention was
-fitted against face normals of retail meshes (mean dot ~0.93), not read from the exe. `tools/mdb_to_glb.py`
+fitted against face normals of retail meshes (mean dot ~0.93), not read from the original. `tools/mdb_to_glb.py`
 writes them as glTF NORMAL. Without them Bevy used flat per-face normals, so everything looked faceted.
 
 ### Useful public tool lead, not a ready importer
@@ -156,9 +156,9 @@ Interactive input was not exercised in that run, only the scripted path.
 
 **Provisional (not measured original behaviour):**
 - Engine order speed fractions 0 / 0.5 / 1.0 / 1.25 of WOT `MaxSpeed` (8.06). Real mapping unknown.
-- Linear motion has the exe's structure (throttle in [0,1], linear drag rate (MaxThrust/Mass)/MaxSpeed, terminal speed = throttle×MaxSpeed)
+- Linear motion has the original's structure (throttle in [0,1], linear drag rate (MaxThrust/Mass)/MaxSpeed, terminal speed = throttle×MaxSpeed)
   but the time scale is a provisional ×0.1 on MaxThrust/Mass, and the order→throttle mapping is unknown (see re/movement.md).
-- Turning now follows the exe's ShipPhysics update (speed-dependent torque, speed bands, quadratic rotational drag; see
+- Turning now follows the original's ship physics (speed-dependent torque, speed bands, quadratic rotational drag; see
   re/movement.md) but the rudder input is still my proportional heading controller, not the original curved-course planner,
   and the meaning of some torque fields is assumed. Damage effects on turning are not modelled.
 - Waypoints: click replaces, Shift appends; no accept/cancel step; no dotted predicted-course curve.
@@ -175,9 +175,9 @@ hit the first section triangle they cross, and apply per-material damage in [low
 Verified by a scripted run: shells in flight, hits on the stern/starboard hull, stern destroyed, core 200 to 110.
 
 **Provisional here:** gravity 9.8; the number after the gun name in the WOT read as total horizontal arc in degrees;
-guns start loaded; (aim lead and deviation now exe-derived, see `re/gunnery.md`);
+guns start loaded; (aim lead and deviation now original-derived, see `re/gunnery.md`);
 destroying a vital section removes its `vitalSectionCoreDamagePercent` of core HP (4 sections sum to 95%, so the exact rule
-is unclear); criticals are not modelled (exe: tally + crew speech only, see re/movement.md); bank grouping is ignored (all guns fire at the target);
+is unclear); criticals are not modelled (original: tally + crew speech only, see re/movement.md); bank grouping is ignored (all guns fire at the target);
 the enemy does not move or shoot; no debris/effects/sound; damage does not yet slow the ship or break sails.
 
 ## Status: skirmish slice (playable)
@@ -193,7 +193,7 @@ Verified by scripted runs: both sides' shells in flight and hits on both sides, 
 10 to 9), victory and defeat messages, restart resetting the scenario. A full fight is not verified to resolve on its own: ships
 tend to circle and trade fire for several simulated minutes; use K/J or `--script` to test the end states.
 
-Speed and turning loss from destroyed sections are exe-derived (re/movement.md): lost fraction of vitalToMaxVelocity /
+Speed and turning loss from destroyed sections are original-derived (re/movement.md): lost fraction of vitalToMaxVelocity /
 vitalToManeuverability sections, capped at 90%.
 
 **Provisional:** everything in the earlier lists, plus: the AI's
@@ -216,17 +216,17 @@ yaw limits beyond the provisional arc.
 `hud.hdt` sprite rects: left cap, panic button, ship-icon frame with the class icon, health/combat/sail gauges
 (fills crop from the bottom), right cap, scaled from 640x480 to the window height and centred at the bottom.
 Sprite rects, icon offsets and gauge-fill offsets are retail data. The left-to-right order and the widths between parts
-are inferred from the sheet (MainBar::slot 2 at centres the bar and sums slot widths; not fully decoded).
+are inferred from the sheet (the bar is centred and its width is the sum of its parts; not fully confirmed).
 Gauges: health = core/max core; combat = guns ready/total (assumed); sail = speed factor (assumed).
-Speed dial: `SpeedControl_CurrActiveN_NextActiveN` sprites (4 lever positions); the exe picks the sprite name from a
+Speed dial: `SpeedControl_CurrActiveN_NextActiveN` sprites (4 lever positions); the original picks the sprite name from a
 0..3 state (SpeedControlWindow slot 4). Corrected visual mapping: 0 Stop (red), 1 Slow (yellow),
 2 Full (light green), 3 Emergency (dark green). The old mapping was reversed. Clicks now select the nearest coloured
 segment in the curved sprite, not a vertical row. HUD builds when the player exists (including menu launch) and rebuilds
-for class changes. All four lever positions were checked in GPU screenshots; exact native dial hit regions are unverified.
+for class changes. All four lever positions were checked in GPU screenshots; exact retail dial hit regions are unverified.
 Compass/radar: brass frame (`COMPASS_OVERLAY`, 128x123) over the radar disk (offset 18,12) and 10-frame sweep (0.1 s per
 frame, offset 17,13); enemy contacts use `HUDRADAR_ICON_ENEMYSHIP_*`, placed ship-relative with forward = up.
 Screen placement of both windows and the radar range (300 units) are PROVISIONAL (Compass slot 2 at anchors to a
-view rectangle; not decoded). Contacts for friendly/other types and the animated icon frames are not done.
+view rectangle; unknown). Contacts for friendly/other types and the animated icon frames are not done.
 Bar parts share their top row (gauge offsets are "from MainBar TopLeft" and every part's frame art starts on the same row; rect heights
 differ only in bottom rows), docked with the shortest part's bottom on the screen edge. The weapon and ship-bar toggles stand on their
 `*_ToggleDetail` arms: arm bottom `Move_Toggle*_Detail_Down` px behind the compass / talking head, button at
@@ -237,8 +237,8 @@ Not done: cursors, tooltips.
 
 ## Sound
 `game/src/audio.rs` plays the original Ogg files: gun fire, per-material bullet impacts, section loss and ship explosion
-pools from the exe, engine loops per engine order, speed-control/weapon-bar clicks and one skirmish music track. Names,
-volumes and max distances come from the WOTs and exe tables; event mapping, falloff curve and levels are PROVISIONAL.
+pools from the original, engine loops per engine order, speed-control/weapon-bar clicks and one skirmish music track. Names,
+volumes and max distances come from the WOTs and original tables; event mapping, falloff curve and levels are PROVISIONAL.
 See re/sound.md. Not done: ricochets, collisions, travel loops, crew speech, per-map music, stereo panning.
 
 ## Front end and skirmish maps
@@ -251,7 +251,7 @@ Flow: Main Menu -> Single Player -> Start Skirmish (map list, Historical/Open ra
 (player list with fleet type/team, Launch) -> on open maps Assemble Fleet = the retail Ship Selection screen (see re/skirmish-setup.md).
 Historical maps use their pre-placed fleets and only let you pick a side. F10 in battle returns to the main menu. `--map <id>` / `--menu [single|skirmish|lobby]` for scripted runs.
 Battle on a map: scenery, skybox and music from the map; our fleet at the first player's start point, the enemy at the
-first player of another team, both facing their start vectors, in the exe's LineAbreast layout (member i one
+first player of another team, both facing their start vectors, in the original's LineAbreast layout (member i one
 spacing beside member max(i-2,0), odd to port; spacing = largest ship size + 30).
 PROVISIONAL: every FormationType uses LineAbreast; ship size is our section-box radius; scenery yaw sign; which player slot
 is ours; historical maps ignore their pre-placed ships; the lobby cell layout and the Ship Selection list/info (no 3D preview, victory points, crew, arms, load/save); map picture placed in the Lobby Information area. Menu music: FrontEndMusic loops from the main menu.
@@ -266,7 +266,7 @@ Docking/refitting and asteroid destruction have explicit Enter-to-continue pause
 “playable slice complete” message, **not** campaign victory: towing, rescue failure, lifeboats and ending are absent.
 The opening in-engine briefing now plays Amelia's four retail clips/subtitles with portrait and letterboxing,
 retail camera paths/focus changes, locked battle controls and Enter/Esc skip. Completion restores the HUD/player camera,
-starts the navigation stage and switches to the retail handoff music. Native camera interpolation, speech pauses,
+starts the navigation stage and switches to the retail handoff music. Retail camera interpolation, speech pauses,
 portrait-expression selection and intro fleet animation remain provisional. The pre-rendered campaign movie,
 second mock engagement, later speech/NIS, nebula, scoring and saves are missing. The 135 explicit retail rules are
 exported as evidence, not executed as a complete rule system. See [re/campaign.md](re/campaign.md) for confirmed data,
@@ -279,7 +279,7 @@ a full interactive playthrough is not yet verified.
   45-degree cross, each turned 90 degrees so the tips point at the ship (original: `ObjectIndicatorInfo` Target Icon 20x20 units, radius offset 0.8,
   z-plane offset -2; ours is screen-space with PROVISIONAL size/offset). The old single large chevron is gone.
 - Aim point: a click on a ship stores the clicked spot in ship-local space (`Target.1`); the guns aim at that spot (moves with the ship), not the hull centre.
-  Port/starboard sections are on their own sides (unit test), so shots placed on the left damage the left section; the exe-derived burst deviation still applies.
+  Port/starboard sections are on their own sides (unit test), so shots placed on the left damage the left section; the original-derived burst deviation still applies.
 
 ## Physical collisions
 

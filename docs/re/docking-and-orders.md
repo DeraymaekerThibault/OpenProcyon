@@ -14,83 +14,78 @@ Enum order: 0 DoNothing, 1 MOVEMENT_OUT_OF_BOUNDS, 2 PrimaryShip_Select, 3 Prima
 Each has an `Offset_Cursor_*` hot-spot in hud.hdt. Further HUD sprites registered next to them: `Primary/Secondary_ShipSelected_Icon(+_West/East/North/South)`,
 `ShipTargeted_Icon_Enemy/Friendly`, `ShipNameBackdrop_*`.
 
-### Hover decision — one intent code per frame from the object under the cursor
-Intent codes (not the cursor enum): 0 none, 0xE nothing possible, 0xF attack with primary, 0x10 attack with the selected secondary,
-0x11 focus camera on the already selected ship, 0x12 select the primary, 0x13 select another own ship, 0x14 **dock**.
-Order of tests, with the cursor object `o`:
-1. no object → 0. A HUD mode flag (settings, probably the lob-target mode) → 0x11.
-2. `o` is **hostile to the selection** (relation test) → attack: 0xF when the selected ship is the primary, 0x10 when it is a
-   secondary; for a base/island (bit 15) with no attackable part under the cursor → 0xE.
-3. otherwise: `o` is the **selected ship** → 0x11; `o` is the **primary ship** (while another ship is selected) → 0x12; `o` is another own selectable ship → 0x13;
-   **if the selected ship can dock with `o` and is in range → 0x14**; else 0xE.
-Dock-ability test: relation between the two players is **allied (value 3 of the 2-bit matrix)**, `o` has the
-*dockable* object flag (bit 2; the ship and island custom-info constructors set it on every ship and island),
-and the target's dock-point keeper is enabled ("Can Be Docked With"), has at least one dock point, its owner is not
-destroyed and the keeper is not disabled. For a base (bit 15) the cursor must also be on the part that carries a dock point.
-**Keeper defaults**: a ship's keeper is dockable *and* repairs ("Repair When
+### Hover decision — one intent per frame from the object `o` under the cursor
+Tests in order:
+1. no object → nothing. In lob-target mode (probably) → focus.
+2. `o` is **hostile to the selection** → attack: with the primary when the primary is selected, with the selected secondary otherwise;
+   a base/island with no attackable part under the cursor → "can't do anything".
+3. otherwise: `o` is the **selected ship** → focus the camera on it; `o` is the **primary ship** (while another ship is selected) → select
+   the primary; `o` is another own selectable ship → select it; **if the selected ship can dock with `o` and is in range → dock**; else
+   "can't do anything".
+Dock-ability test: the two players are **allied**, `o` is dockable (every ship and island can be), its dock points are enabled
+("Can Be Docked With") and it has at least one, and its owner is not destroyed. For a base the cursor must also be on the part that
+carries a dock point.
+**Defaults**: a ship is dockable *and* repairs ("Repair When
 Docked With") only when its WOT `Is Tender` is true; islands/bases always. "Set Group/Unit Dockable" writes only the dockable flag.
 **There is no dock range.** The range check is a *sight* test (also used to enable the menu's Focus item): the AI entity's `Default SightRange` (400-600
 for most ships; crew multiplier applied elsewhere). It passes when the surface distance (centre distance minus both
 collision radii) from the selected ship, or any ship of its group, is below that ship's sight range and the object is not hidden.
 
-### Click handler
-Event kind 0 (**left**): intent 0xF/0x10 → attack command (command id 0x10); 0x11 → camera focus;
-0x12/0x13 → select ship; **0x14 → `DockCommand` mode 2 with (selected ship, object)**. So docking is a plain left click on the ally.
+### Clicks
+**Left click** on an object: an enemy → attack order; camera-focus click → focus; an own ship → select it; a dockable ally →
+**dock order for (selected ship, object)**. So docking is a plain left click on the ally.
 The [fleet-control notes](fleet-controls.md) distinguish the selected ship from the primary.
 Do not substitute primary ownership for the selected actor in world-click commands.
-Event kind 1 (**right**): open the options menu for the object under the cursor. Camera drag with the right button is separate
+**Right click**: open the options menu for the object under the cursor. Camera drag with the right button is separate
 [? click vs drag threshold not checked; the repo already rotates on right-drag per the manual].
 
 ## 2. Options menu (builders, layout)
-A small panel at the cursor drawn from four corner sprites plus icon buttons; the HUD sprite order gives the item ↔ icon mapping
-(item kind → hud component 0x38..0x44):
+A small panel at the cursor drawn from four corner sprites plus icon buttons (hud.hdt `OPTIONS_MENU_*`):
 
-| kind | HUD component | command created on click |
+| item | HUD sprite | order given on click |
 |---|---|---|
-| 7 | `OPTIONS_MENU_BUTTON_DOCK` | `DockCommand` mode 2 |
-| 5 / 6 | `…TOW_START` / `…TOW_STOP` | `DockCommand` mode 0 / 1 (same class, mode = tow / break tow / dock) |
-| 3 / 4 | `…GRAPPLE_START` / `…GRAPPLE_STOP` | `GrappleShipCommand` (id 0x1C) mode 0 / 1 |
-| 8 / 9 | `…BOARD_START` / `…BOARD_STOP` | `BoardShipCommand` (id 0x1B) mode 0 / 1 |
-| 1 | `…FOCUS` | camera focus |
-| 0 | `…AI_LOCK_POSITION` / `…AI_NOT_LOCK_POSITION` (chosen by the ship's current hold state) | `ChangeHold` command (id 0x14, bool) |
-| 2 | `…STOP` | cancel-ship-actions command (id 0x12) |
-| 10 / 11 | `…CLOAK_START` / `…CLOAK_STOP` | `CloakShipCommand` (id 0x1D) mode 0 / 1 |
+| Dock | `OPTIONS_MENU_BUTTON_DOCK` | dock with the object |
+| Tow start / stop | `…TOW_START` / `…TOW_STOP` | tow it / break the tow (the same order as docking, in another mode) |
+| Grapple start / stop | `…GRAPPLE_START` / `…GRAPPLE_STOP` | grapple / release |
+| Board start / stop | `…BOARD_START` / `…BOARD_STOP` | board / call off the boarding |
+| Focus | `…FOCUS` | camera focus |
+| Hold position | `…AI_LOCK_POSITION` / `…AI_NOT_LOCK_POSITION` (chosen by the ship's current hold state) | set / clear hold position |
+| Stop | `…STOP` | cancel the ship's current actions |
+| Cloak start / stop | `…CLOAK_START` / `…CLOAK_STOP` | cloak / decloak |
 
 Three variants, chosen when the menu opens (background corner sprites in brackets):
-- **Enemy ship** (says hostile, HUD flag 0x95D clear) [`OPTIONS_MENU_ENEMY_SHIP_BACKGROUND_*`]: Focus (always), Board start/stop, Grapple start/stop.
-  - Board shows *stop* (kind 9) when a boarding relation (docker/dockee/type 1) exists, otherwise *start* (kind 8), enabled by:
-    not allied, no fight yet, both objects carry the boardable flag (bit 3), the *target's* Can Be Boarded flag is on, the boarder is not a base, and a grapple
+- **Enemy ship** (hostile) [`OPTIONS_MENU_ENEMY_SHIP_BACKGROUND_*`]: Focus (always), Board start/stop, Grapple start/stop.
+  - Board shows *stop* when a boarding is under way between them, otherwise *start*, enabled by:
+    not allied, no fight yet, both objects can take part in boarding, the *target's* Can Be Boarded flag is on, the boarder is not a base, and a grapple
     holds (ship target) / the boarder is in range of a boarding point (base target); see [boarding.md](boarding.md) §3.
-  - Grapple shows *stop* (kind 4) when a grapple relation exists, otherwise *start* (kind 3), enabled when the primary has a grapple gun whose
+  - Grapple shows *stop* when a grapple holds them, otherwise *start*, enabled when the primary has a grapple gun whose
     live grapples are fewer than its limit.
 - **Own primary ship** [`…SELECTED_SHIP_BACKGROUND_*`]: Focus, Stop, Hold-position toggle (enabled for ships whose AI can hold), Cloak start/stop
   (cloak items only when the ship's cloak state allows it).
 - **Any other ship/base** (friendly or neutral) [`…FRIENDLY_SHIP_BACKGROUND_*`]: Focus, Tow start/stop (stop when a tow link between them exists;
-  start enabled when the target is towable (flag bit 8 and a towable flag) and no link exists), **Dock** (enabled by the dock test above).
+  start enabled when the target is towable and no link exists), **Dock** (enabled by the dock test above).
 Strings for these items are icons only (no text). Selecting an item closes the menu; clicking elsewhere closes it.
 Sounds: `HUD_Options_Open` when the menu opens; the click handler plays
 `HUD_Options_Focus` / `_Stop` / `_Dock` / `_TowStart` / `_TowStop` / `_GrappleStart|Stop` / `_BoardStart|Stop` / `_CloakStart|Stop` for the item
-and `HUD_Options_NoSelection` when no item is under the cursor (case -1); `HUD_Options_MouseOver` is played from the generic button code
-[? exactly when]. `HUD_Options_Dock` is also played by the dock routine when a ship docks.
+and `HUD_Options_NoSelection` when no item is under the cursor; `HUD_Options_MouseOver` plays on hovering a button [? exactly when]. `HUD_Options_Dock` is also played by the dock routine when a ship docks.
 
-## 3. Commands and ship AI tasks
-`DockCommand` fields: docker WO id, dockee WO id, mode. Executing it first sets the ship's movement-AI
-state to 4, then pushes an AI task: **mode 0 → task 8 (tow)**, **mode 2 → task 6 (dock)**, mode 1 breaks the tow link and (if the tow routine was running) pushes task 0.
-Grapple pushes task 5, Board pushes task 7, Stop pushes task 0xB. All tasks are routines owned by one ship-AI object:
-`ShipDockRoutine`, `ShipDockForRepairsRoutine`, `ShipTowRoutine`, `ShipBoardRoutine`, `ShipGrappleAndBoardRoutine`.
-Rule actions `Dock Ships`, `Tow Ships`, `Board Ships`, `Break Tow`, `Set Dock Time` (class `DockTime`) and conditions `Group/Unit Is Docked`, `Group/Unit Has Docked`,
-`Is Ship In Tow` use the same relation list (entries: type, docker id, dockee id; type 0 = tow, 1 = grapple, others = dock/board).
+## 3. Orders and ship activities
+A dock order names the docker, the dockee and a mode: **tow**, **break tow** or **dock**. Giving it puts the ship under explicit
+orders and starts the matching activity: towing, or docking; break tow drops the tow link (and ends the towing activity if it was
+running). Grapple, Board and Stop likewise start grappling-then-boarding, boarding, or an idle activity. A ship runs one activity at a
+time: dock, dock-for-repairs, tow, board, grapple-and-board.
+Rule actions `Dock Ships`, `Tow Ships`, `Board Ships`, `Break Tow`, `Set Dock Time` and conditions `Group/Unit Is Docked`, `Group/Unit Has Docked`,
+`Is Ship In Tow` use one shared list of links between two objects (kind, docker, dockee; kinds: tow, grapple, dock/board).
 
-## 4. Dock routine state machine (`ShipDockRoutine`)
-State names are the exe's own (`DOCKSTATE_*`): NONE → WAITING_TO_DOCK → DOCK_APPROACH → PREDOCKED → DOCKED →
-MOVINGAWAYFROMDOCK → TURNINGTORETURN → RETURNING. Observed behaviour:
+## 4. Dock routine phases
+None → waiting to dock → approach → pre-docked → docked → moving away from the dock → turning to return → returning. Behaviour:
 - **0 NONE**: remember the ship's current position (the return point), go to 1.
 - every tick (states 1-5): if the reserved point is not the nearest point (free or not) and the nearest is free, the reservation is
   dropped and the routine goes back to 1.
 - **1 waiting / approach**: with a reservation or a free point: reserve the nearest *free* point; within **10 units** →
   state 3 directly, else plan the approach (below) and go to 2. With every point taken: compare own distance to the nearest point with its
   holder's distance (both divided by the *docker's own* speed, 999 when it is ~0, so a stopped ship never wins); if nearer, take the point
-  over and reset the holder's routine to 1; otherwise hold (path cleared) inside **80 units** of the point, or path toward it.
+  over and send the holder back to waiting (1); otherwise hold (path cleared) inside **80 units** of the point, or path toward it.
 - **Approach point**: on the dock-point node's own forward axis, on the side the docker is on (axis flipped when the docker is
   ≥ 90° off it), **1.5 × dockee length** out for a ship dockee, **1 × docker length** for a base (lengths = collision-box y extents).
 - **2 dock approach**: within **10 units** → 3. While the path runs, the movement controller's target is the dock point itself; each tick
@@ -106,23 +101,22 @@ MOVINGAWAYFROMDOCK → TURNINGTORETURN → RETURNING. Observed behaviour:
 - **6 turning to return**: controller turn-to mode toward the start; done within 0.1 rad or after 10 s, then path via a point 100 units
   toward the start. **7 returning**: follow the path until it ends → 0.
 Tow: the tower paths to the towee's back/front tow nodes; **inside 50 units of surface distance the tow link is registered**
-(`ToweePoint = front_tow`, `TowerPoint = back_tow` mesh nodes). The remake now uses these nodes for approach and a shared mass-weighted cable constraint; native spring/damping remain PROVISIONAL.
+(`ToweePoint = front_tow`, `TowerPoint = back_tow` mesh nodes). The remake now uses these nodes for approach and a shared mass-weighted cable constraint; retail spring/damping remain PROVISIONAL.
 
 ### Repair on docking
 Per-ship WOT field **`Repair Effect Name`** picks the size class: `Repair_Small` → small; `Repair_Medium`, `Repair_IC_Small` →
 medium; `Repair_Large`, `Repair_IC_Medium` → large; `Repair_IC_Large` → large ironclad; `Repair_Tender` sets nothing. `hud.hdt`
 "Repair Speed Info" gives times (seconds, repair / effect): small solarsail 4 / 7, medium 10 / 15, large 20 / 25, large ironclad 30 / 35;
 effect fade-out distance 600. The effect objects are attached to the docker (one per repair job for ship dockees, one for bases);
-the effect file is presumably the ship's `Repair Effect Name` (`Effects/Repair_*.eft` exist with matching lengths) [? name not traced]. creates one repair job per damaged section (jobs 0x54 bytes each) and starts the repair sound.
+the effect file is presumably the ship's `Repair Effect Name` (`Effects/Repair_*.eft` exist with matching lengths) [? not confirmed]. Docking creates one repair job per damaged section and starts the repair sound.
 The base dock time is the larger of 5 s and that repair time. Whether every section ends at full health and what torpedoes/ammo get refilled
 is **[? not confirmed]**; the rule action `Toggle Island Repair When Docked` flips a per-dockee flag, so islands/bases repair only when enabled
-(ships whose dockee flag bit 8 repair unless the player settings byte is on [?]). Mesh nodes on dockees: `Port_DockPoint` / `Star_DockPoint`
+(ships that are tenders repair [? player-setting exception unverified]). Mesh nodes on dockees: `Port_DockPoint` / `Star_DockPoint`
 (ships), `DockPoint1/2` or `Dock_Point` with an association name such as `CRANES` (bases/islands), described by WOT `MeshAttributes` entries with `AttributeName 'DockPoint'`.
 
 ### Dock-point markers
-`DockPointEffectKeeper` (sync): while the keeper is dockable every dock point carries an effect
-object on its node; when it stops being dockable they are removed. The effect is taken to be `Effects/Docking_Point.eft` (its name
-is registered next to the keeper's effect table) [? name lookup not traced].
+While an object is dockable every dock point carries an effect on its node; when it stops being dockable they are removed. The
+effect is taken to be `Effects/Docking_Point.eft` [? not confirmed].
 
 In the remake every map object and ship type with exported dock points gets them when it spawns, on every map type
 (skirmish, historical and campaign). Bases no rule assigns an owner to (all skirmish bases) are dockable by every side **[PROVISIONAL]**.
@@ -151,20 +145,20 @@ rules `Dock Ships`, `Set Dock Time`, `Set Group/Unit Dockable`, `Toggle Island R
 addressed by rules (`MissionBase`); left-click / menu dock gated by the sight test (no range constant); `options_menu.rs` with the three
 variants (any friendly ship gets the friendly menu), retail icons/backgrounds/slot offsets and menu sounds, Focus / Stop / Dock live and the
 rest greyed; context cursors. Camera: right-drag still rotates, a short right click opens the menu.
-PROVISIONAL in the remake: scenery-clear corner routing for bases and simple detour legs for ship dockees instead of the native path planner, approach-leg
-tolerance (docker length or lined up), the docked ship settling onto the point parallel to its axis (the exe's arrival controller is not
-decoded), dock-point yaw sign, the docked sound only for player-side dockers, one repair effect at the ship centre, sight test by centre
+PROVISIONAL in the remake: scenery-clear corner routing for bases and simple detour legs for ship dockees instead of the original path planner, approach-leg
+tolerance (docker length or lined up), the docked ship settling onto the point parallel to its axis (the original's arrival steering is
+unknown), dock-point yaw sign, the docked sound only for player-side dockers, one repair effect at the ship centre, sight test by centre
 distance minus our hull radii and the player's ship only (no group), the relation is also registered for base dockees.
 Verified in Mission 1 (`--mission 1 --script dock|dock-click|dock-menu`: `Script::skip_to_tender` jumps to Objective 4 and puts the player,
 half damaged, next to RLS Bounty; `dock` sends the order like the D key, `dock-click` / `dock-menu` drive the real left click / right-click
 menu with synthetic mouse input): order accepted, approach ends on a dock point, Docked, repair to full, "Jim Has Docked With Tender" →
 M01AMELIA12 → Objective 6 and the small ships leave for the asteroids, the player is released. On Wayland the synthetic cursor warp logs a
 harmless winit error (the in-app cursor position is still set).
-Tow (added): the Friendly menu's Tow start / stop (`DockCommand` mode 0 / 1 semantics) makes the player's ship steer for the towee and
+Tow (added): the Friendly menu's Tow start / stop (the tow / break-tow modes of the dock order) makes the player's ship steer for the towee and
 registers the rules' tow link inside 50 units of surface distance; Tow stop breaks the links of the player's ship. Approach aligns the
 tower stern node with the cargo bow node. `collision.rs` replaces rigid following with a mass/torque-aware slack cable between those
-points, preserving independent hull motion. PROVISIONAL: registration-distance cable length and inelastic tension instead of decoded
-native springs; every friendly ship counts as towable (no flag decoded); campaign-only links live in the rules' `Script`.
+points, preserving independent hull motion. PROVISIONAL: registration-distance cable length and inelastic tension instead of the
+retail springs; every friendly ship counts as towable (the towable flag is not modelled); campaign-only links live in the rules' `Script`.
 Docking status: the primary ship's looping `ShipStatus_Icon_Docking_Frame0..5` sits on its bottom-bar portrait, using
 `PRIMARY_SHIP_STATUS_ICON_OFFSET_FROM_PRIMARYSHIPICON_TOPLEFT`. Placement follows a retail playtest observation;
 8 fps remains PROVISIONAL and the `_Start` / `_Stop` icons are unused. It shows while waiting, approaching and docked, inherits

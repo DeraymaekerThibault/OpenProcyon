@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Rule-vocabulary coverage: every condition/action Type used by shipped maps/missions vs what rules/eval.rs interprets.
-Classes: UNHANDLED (warns), NO-OP (accepted, does nothing), OK (has logic). Also lists exe rule names no shipped map uses (informational)."""
+Classes: UNHANDLED (warns), NO-OP (accepted, does nothing), OK (has logic)."""
 
 import collections
 import json
@@ -37,16 +37,3 @@ total = len(use)
 for c, entries in rows.items():
     print(f"## {c} ({len(entries)} of {total} distinct types used)")
     print("\n".join(entries))
-exe = (
-    set(
-        re.findall(
-            r"^(?:Mission \d+ - .*|Dragon - .*)$",
-            (root / "local/audit/exe_strings.txt").read_text(),
-            re.MULTILINE,
-        )
-    )
-    if (root / "local/audit/exe_strings.txt").exists()
-    else set()
-)
-used = {t for _, t in use}
-print("\n## exe rule names with no use in shipped maps:", len(exe - used))

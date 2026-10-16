@@ -47,7 +47,9 @@ DECOMPILER = re.compile(
     r"\b(?:param_\d+|[iuf]Var\d+|local_[0-9a-f]{2,}|undefined[248]?)\b"
 )
 TOOLING = re.compile(
-    r"ghidra|\bIDA Pro\b|steamstub|unpacked (?:community )?exe|community exe|decompil|disassembl|tp_win32",
+    r"ghidra|\bIDA Pro\b|steamstub|unpacked (?:community )?exe|community exe|decompil|disassembl|tp_win32"
+    # Describe the original's behaviour, not its executable: no "the exe" wording, no internal routine/functor class names.
+    r"|\bexe\b(?!\")|(?-i:\b[A-Z]\w*(?:Routine|Functor)\b)|exe_strings",
     re.IGNORECASE,
 )
 # Files that state the rules may name what they forbid.

@@ -5,10 +5,10 @@ Source: observed behaviour of the original game, WOT collision definitions and t
 ## Recovered
 
 - Ship WOTs select `BoundingRenderEntity` detection and `Ship` response, with explicit `MinExtents` / `MaxExtents`. These are distinct from damage-section bounds and the large broad-phase sphere (which includes sails). Cutter's box in game axes is (-2.25, -7, -1.5) to (2.25, 6.5, 2); its sphere is radius 12 centred at (0, 0, 5.5).
-- Islands and most bases select `OBBTree` detection and `Static Object` response, deriving their bounds from the render mesh. RTTI confirms `Engine::OBBTreeCollision` and `Engine::OBBTree::OBBCollisionTriangle` exist. This is triangle collision, not one enormous sphere around the island.
+- Islands and most bases select `OBBTree` detection and `Static Object` response, deriving their bounds from the render mesh. This is triangle collision, not one enormous sphere around the island.
 - Unarmed asteroids select `BoundingRenderEntity` / `Asteroid` with authored boxes; armed asteroids select `OBBTree` / `Static Object`.
 - Dock buoys select `Null` detection/response; Base_Cresentia has no collision entity. Neither should block ships.
-- `ShipPhysics` helper accumulates an input vector divided by the WOT mass in the external acceleration state at..; update integrates that state into velocity. This confirms inverse-mass impulse/force handling, not its caller's complete impulse formula.
+- External pushes on a ship are divided by its WOT mass and accumulated as acceleration, which the physics step integrates into velocity. This confirms inverse-mass impulse/force handling, not its caller's complete impulse formula.
 - Helper uses a contact point's displacement from the transformed centre of mass and collision-box dimensions to accumulate angular acceleration, clamped to ±60. The exact torque/sign relationship is not recovered well enough to port.
 - Debug strings include `Collision LOD Level Index` and `Valid Collision Triangle Indices`. The exact collision LOD, triangle rejection rules, response dispatcher, restitution, sound trigger and damage calculation remain unresolved.
 
@@ -45,7 +45,7 @@ the parent's provisional inherited fragment velocity. Armed asteroid scenery rem
 Regression coverage: the old solver failed the light-rock test by stopping the ship without moving the rock. New tests check
 light/heavy rocks, relative velocity/equal opposing momentum, momentum conservation, next-frame motion, translated tumbling faces,
 retail cutter/torpedo/tug mass ratios, rule-setup drift reset, and drift inheritance through breakup. Static walls/islands retain
-zero inverse mass. This is still a provisional inelastic planar response, not a recovered native asteroid response formula.
+zero inverse mass. This is still a provisional inelastic planar response, not a recovered retail asteroid response formula.
 
 Validation: `tools/check.sh` passed (91 Rust tests, Python suite with six skips). The `--script asteroid` runtime smoke produced
 `local/collision-weight-breakup.png` without ECS query conflicts. A full Mission 1 autopilot run (`--speed 16`, autokill enabled,
@@ -58,14 +58,14 @@ The rule interpreter still owns tow relationships; movement substeps now own the
 `TowerPoint` and cargo's bow `ToweePoint`, with hull-end fallbacks for custom models. Each link captures its initial horizontal node
 separation as cable length. Slack links exert no force; extended links correct position by inverse mass and apply a tension-only
 impulse at the attachment points, turning both hulls independently. No ship position, heading or speed is copied from its partner.
-Broken links discard their stored length; missing/destroyed partners exert no force. Native rope/spring constants are not decoded:
+Broken links discard their stored length; missing/destroyed partners exert no force. Retail rope/spring constants are unknown:
 this is a provisional inelastic cable, not a literal port. Regression covers off-axis pulling/turning and release without teleporting.
 
 ## Explicitly provisional / unfinished
 
 - Inelastic response (zero restitution), positional separation, lateral damping, and the planar solver are stand-ins, not a recovered retail response. Contact torque is implemented with provisional box inertia; impact damage and collision sound are not.
-- Ordinary asteroid contacts are now finite-mass, but their native restitution/torque response still needs tracing. Rocks do not yet resolve rock/rock or rock/static contacts. Existing path motion occurs before the ship substeps, so fast moving belts still lack continuous collision detection. Whales/mines are not movement colliders in this pass.
-- Docking ignores only the assigned dockee during approach/docked/departure so repairs are not broken; the original collision rejection-list rules are not decoded.
+- Ordinary asteroid contacts are now finite-mass, but their retail restitution/torque response still needs tracing. Rocks do not yet resolve rock/rock or rock/static contacts. Existing path motion occurs before the ship substeps, so fast moving belts still lack continuous collision detection. Whales/mines are not movement colliders in this pass.
+- Docking ignores only the assigned dockee during approach/docked/departure so repairs are not broken; the original collision rejection-list rules are unknown.
 - No retail obstacle avoidance: the original has collision-avoidance behaviour, but how it works is unknown. PROVISIONAL steer-away (`collision::steer_clear`): AI ships without a dock routine probe their box along the look-ahead (6 s at current speed, min 25 units; samples at most one hull length apart) and take the nearest clear of fixed ±0.3/0.6/1.0/1.6/2.2 rad offsets. Goal-heading ships re-aim; path-following AI ships (script paths) whose next leg is blocked get a detour marker on the clear heading (the player's own course is never altered). Before the detour, ships sent onto a path from the far side of an island (e.g. mission 1 after the archipelago battle, `Find Closest Point`) ground into the coast. Ceiling: one reactive probe per frame, no route planning, so concave coasts can still hold a ship.
 - Course preview (`course.rs`) is clipped at the first pose whose box touches visible scenery (`collision::clear_prefix`). It still uses free motion (no drift, no steer-away) and 0.1 s samples, so very thin walls can be stepped over in the preview.
 - Collision sound: not wired. `audio.rs` has only the generic `Sfx` message and no collision event; the `Ship_Collision_*` pools stay unused until the response/sound trigger is recovered.

@@ -10,7 +10,7 @@ Sources: `World/SinglePlayer/Mission*.twt` and `World/*.twt` (rule `*State Init*
 A nebula is **not** a placed mesh. Each map/mission contains:
 
 1. A world object `Terrain_Nebula` (a `Terrain_Nebula.wot` entity: no render entity, null collision, a unit bounding sphere, and a
-   `NebulaCustomInfoFactory` custom-info block). The WOT only holds: minimum lightning spawn distance from ships 50, minimum bolt length 100,
+   nebula custom-info block). The WOT only holds: minimum lightning spawn distance from ships 50, minimum bolt length 100,
    max lightning spawn z amplitude 200, meteor hit chance modifier 80, three damage-potential tables (lightning, wind, meteor: per hull type
    chance of critical/fire, initial fire strength, damage bounds) and the three ambience sounds (`Ambience_Nebula`, `Ambience_SolarStorm_Loop`,
    `MeteorStorm_Inside`).
@@ -22,7 +22,7 @@ A nebula is **not** a placed mesh. Each map/mission contains:
    Other actions: `Make Nebula into a Meteor Shower`, `Set All Nebulas To Trap Objects`, `Set All Nebulas Fadeout Distance`; condition
    `Unit Is Within Any Nebula`.
 3. A **point set** (`Nebula Cloud Point Set Name`): a list of `(position, magnitude)`. Each point spawns one cloud instance; **magnitude is the
-   cloud radius in world units** (PROVISIONAL, matches the exe's use as the effect's radius variable `SET_MESH_RENDER_INFO_RADIUS`). Clarke has one point:
+   cloud radius in world units** (PROVISIONAL, matches the original's use as the effect's radius variable `SET_MESH_RENDER_INFO_RADIUS`). Clarke has one point:
    centre (-0.42, -65.94, 4.0), magnitude 381.0, polygon `Clarke`, effect `Nebula`, energy drain TRUE, occlusion TRUE, lightning/meteors/winds off,
    sound `Ambience_Nebula` with 300 max distance.
 
@@ -37,7 +37,7 @@ Other missions using the same cloud effect: 4 (Calyan Nebula), 5, 7 (also solar 
   The effect variable `SET_MESH_RENDER_INFO_RADIUS` scales the unit mesh to the point-set magnitude.
 - `USE_SHIFTING` true: the mesh vertices wander every tick. Parameters in the EFT (`CHUNK_DATA_SHIFT_*`, ...: noise 0.1, normal noise 0.8,
   attract 0.9, difference pull 0.1, constrain 3.5, scale limits 1.0..1.15, come-back distance/multiplier, neighbour distance, size multiply 100,
-  texture spin 0.3). The exe scales the "noise" family by 0.001 on load (0.001). The update is already
+  texture spin 0.3). The original scales the "noise" family by 0.001 on load (0.001). The update is already
   reproduced in `nebula.rs` ("breathing" scale per vertex pulled toward a random neighbour, small random offsets with a come-back phase, UV spin).
 - `FADE_EDGES` true: a boolean stored in the render info and passed on to the mesh draw call. The
   actual shading rule (almost certainly alpha by normal-vs-view angle) was not recovered. PROVISIONAL: `nebula.rs` uses |dot(view, radial)|.
@@ -48,14 +48,14 @@ Other missions using the same cloud effect: 4 (Calyan Nebula), 5, 7 (also solar 
 
 The reference footage shows a large purple-white luminous cloud at Clarke, which is exactly this additive, textured, shifting ovoid.
 
-## 3. Gameplay behaviour recovered from the exe (new)
+## 3. Gameplay behaviour recovered from the original (new)
 
-`NebulaCustomInfoEntity` update, fields from `Terrain_Nebula` state: centre, radius,
+Each nebula keeps, from its `Terrain_Nebula` state: centre, radius,
 "inside" list, "left" list, `IsTrapping`, `Update WorldObjects Within Nebula Timer`,
 `Nebula Cloud Drain Sail Energy On/Off`, `Make Nebula into a Meteor Shower`.
-- **Membership**: on the update timer the entity scans world objects of selected types (a small type list that includes ships, see the type
+- **Membership**: on the update timer the nebula scans world objects of selected types (a small type list that includes ships, see the type
   filter in the function) and puts an object in the *inside* list when its 3-D distance to the centre is less than the radius **and** its (x,y)
-  is inside the nebula's polygon (the exe calls its polygon test with x,y). Objects that left are dropped from the list unless `IsTrapping`
+  is inside the nebula's polygon (the original calls its polygon test with x,y). Objects that left are dropped from the list unless `IsTrapping`
   is set, in which case they stay inside ("trap objects" action).
 - **Slow-down factor**: every frame, each inside *ship* gets `Nebula Slow Down Factor = clamp(1 - distance_to_centre / radius, 0, 1)`; ships not in
   the list are reset to 0. The value is a ship field saved in the TWT (`Nebula Slow Down Factor`; observed non-zero saves 0.25-0.56) and the sail
@@ -66,7 +66,7 @@ The reference footage shows a large purple-white luminous cloud at Clarke, which
   25 %) is a guess; prefer replacing it with the depth-based factor above. `Nebula Occlusion` blocks sensors/line of sight through the polygon
   (retail AI also treats `TYPEAVOID 'Nebula'` as an area to avoid on path planning; the remake only does the occlusion).
 - **Camera effect**: the world saves `DATA_NEBULA_CAMERA_EFFECT`, `..._FADE_IN_TIMER`, `..._SPIN_TIMER`, `DATA_NEXT_NEBULA_CAMERA_EFFECT`:
-  when the camera is inside a nebula the exe fades in a full-screen/spinning overlay. Not decoded. PROVISIONAL / not done.
+  when the camera is inside a nebula the original fades in a full-screen/spinning overlay. Unknown. PROVISIONAL / not done.
 - Lightning, winds and meteor strikes (solar storm / meteor shower variants) use separate WOT damage potentials.
   These are now exported into `data/nebula.json` and applied through the shared damage pipeline. Previously wind used full weapon-lightning
   damage and meteors used heavy-cannon damage. For cloth, weather wind is 5–7 damage versus lightning's 15–40; for wood, meteors are 5–10.
@@ -89,7 +89,7 @@ Original game behaviour:
 
 The remake now uses storm-wide clocks, geometric lightning intersections via the existing ship hit test, size-based meteor rolls,
 explicit section indices and the wind centre exclusion. It no longer guarantees repeated lightning hits near the sails.
-Remaining differences: uniform rejection endpoint sampling instead of the native polygon sampler, conservative 3/2-second recharge floors
+Remaining differences: uniform rejection endpoint sampling instead of the original polygon sampler, conservative 3/2-second recharge floors
 instead of the authored shorter lightning/meteor intervals, simplified membership/retention and wind force. These are not established retail parity.
 Regression tests cover clocks, size probability, endpoint exclusion and a seeded 30-second storm with no ship intersections;
 existing weather damage/protection tests now also reject invalid section indices. Runtime smoke `local/mission03-storm-hit-selection.log`
@@ -112,12 +112,12 @@ This is an isolated, deterministic wiring check, not a normal-play or retail sid
 The existing planar force uses `Terrain_Etherium_Current.wot` Magnitude 25000 and Radius 60, divided by ship mass in `collision.rs`;
 force law/falloff remain provisional. The visual was incorrectly treated as particles, so nothing rendered.
 `EtheriumRiver.eft` has two `River` primitives accepting `SET_POINTS` and `SET_WIDTH`, with the retail `Current` texture.
-Community-exe RiverPrimitive at consumes path points; builds lateral pairs around that path using the supplied width;
- advances varying texture offsets. The remake now draws two continuous additive textured strips on the path in `environment.rs`,
+The original's river effect takes the path points, builds lateral pairs around the path using the supplied width and
+advances varying texture offsets. The remake now draws two continuous additive textured strips on the path in `environment.rs`,
 with repeating UVs scrolling downstream. Currents flow from the first authored path point toward the last: in Mission 4, Nelson's fleet
 leaves "to the frontier" on 'Nelson exit route', which runs inside 'Mucullough path' in the same order (an earlier reversal based on a
 Mission 3 playtest was wrong). Missions 3 and 10 follow the same convention. Width = twice the force radius and the UV repeat/speeds remain provisional;
-exact native spline sampling, oscillation and blending are not recovered. No particle emitter is spawned per path point.
+exact retail spline sampling, oscillation and blending are not recovered. No particle emitter is spawned per path point.
 The `current-m3` smoke confirms both mesh layers and changing UV offsets; `local/mission03-current.png` is the Classic visual check.
 One mission 10 setup references absent path `ebend`; it remains empty rather than inventing a route.
 

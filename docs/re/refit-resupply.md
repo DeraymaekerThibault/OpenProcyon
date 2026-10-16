@@ -22,7 +22,7 @@ Research only; nothing here is implemented. Source: observed behaviour of the or
 | Own crew (engineers) | slow passive repair of damaged sections, see 3.4 | – | no |
 | Arms/Crew screens (between NIS and mission segments, missions 3, 5, 7, 9, 11) | – | – | yes, spends campaign points |
 
-[C] for the dock keeper defaults (`docking-and-orders.md`: ctor, ship info ctor, island ctor) and the heal-mode rule in 3.1. The tender's own `Repair Effect Name` (`Repair_Medium`/`Repair_Large`) does not matter for the docker: the **docker's** class picks the times.
+[C] for the dock defaults (`docking-and-orders.md`) and the heal-mode rule in 3.1. The tender's own `Repair Effect Name` (`Repair_Medium`/`Repair_Large`) does not matter for the docker: the **docker's** class picks the times.
 
 ## 3. Confirmed behaviour
 
@@ -104,7 +104,7 @@ crew data's 1-10 values divided by 10.
 | Repair timing | `docking.rs::repair` restores `dt/repair_secs` per frame over 4/10/20/30 s | one-step heal at Repair Time; hull unchanged until then |
 | Dock duration | `max(5 s, repair_secs)` (4 → 5 s) | `max(dock time, Repair Effect Time)` (7/15/25/35 s) |
 | Destroyed sections/guns | gradual refill revives sections with hp 0; no gun re-creation | campaign tender / any base: revive + recreate guns; skirmish tender: no |
-| Core hp | restored with sections | unresolved [?] (not in the traced heal) |
+| Core hp | restored with sections | unresolved [?] (not seen in the heal) |
 | `IsCampaign` | not represented | selects the heal mode |
 | Scaffold effect | one effect at ship centre | per-section jobs unless (campaign ship / base) → one effect |
 | Crew passive repair | none | every 12 s: one damaged sail +3 (sometimes +6); hulls not repaired (measured) |

@@ -48,7 +48,7 @@ These signatures cover this snapshot, not every possible game/mod version.
 
 - In a block with `AttributeName = GunPlacement`, `AssociationName`'s first
   comma-separated component is recorded as a mounted-gun target. Remaining text is
-  kept as `arguments_raw`; its numeric/bank semantics are deliberately not decoded.
+  kept as `arguments_raw`; its numeric/bank semantics are deliberately unknown.
   Attribute, association and descriptor locations are retained. Links are extracted
   from non-ship objects too (for example armed scenery), not just ships.
 - For gun-classified documents, `BulletTypeName_Primary` and

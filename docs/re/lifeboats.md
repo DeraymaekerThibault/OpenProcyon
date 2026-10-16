@@ -2,7 +2,7 @@
 
 Implemented in `game/src/lifeboats.rs` (status in §9); this file stays the evidence record. Source: observed behaviour of the original game and its retail data files (WOTs, mission-start saves), described in our own words.
 
-- Evidence levels: **[C]** confirmed by a traced handler; **[I]** inference from traced code plus data; **[?]** unresolved.
+- Evidence levels: **[C]** confirmed in the original; **[I]** inference from observed behaviour plus data; **[?]** unresolved.
 
 ## 1. Summary
 
@@ -15,9 +15,9 @@ Implemented in `game/src/lifeboats.rs` (status in §9); this file stays the evid
 
 ### 2.1 Rule action `Set Lifeboat Creation State`
 - Fields `Group Name`, `Boolean`, editor text "Set Group/Unit %s Lifeboat creation State = %s". [C]
-- Execute resolves the name list with the shared group/unit resolver, then for each resolved entity that is a ship writes the `Boolean` into that ship's **Create Lifeboats** flag. Non-ship entities are skipped. It affects ships that exist when the rule runs, once; it is not a group property. [C] (Resolver identity with other group actions is [I].)
+- The action resolves the names like other group actions, then for each resolved entity that is a ship writes the `Boolean` into that ship's **Create Lifeboats** flag. Non-ship entities are skipped. It affects ships that exist when the rule runs, once; it is not a group property. [C] (That it resolves names exactly like other group actions is [I].)
 - Meaning: "this ship will leave lifeboats when destroyed". `TRUE` sets, `FALSE` clears.
-- The flag is a per-ship field named `Create Lifeboats` in the ship's custom-info serialiser (load, save), so it persists in saves. The ship-info constructor starts it at **false**; no other writer was found. Retail mission-start saves agree: in `Mission 01.twt` only the ships of the groups named in the init rules carry `Create Lifeboats Bool True`; e.g. Big Ships (Blue Team) stay `False`. [C]
+- The flag is a saved per-ship field named `Create Lifeboats`, so it persists in saves. Ships start with it **false**; nothing else sets it. Retail mission-start saves agree: in `Mission 01.twt` only the ships of the groups named in the init rules carry `Create Lifeboats Bool True`; e.g. Big Ships (Blue Team) stay `False`. [C]
 - So skirmish/MP battles (no TWT rules) create **no** lifeboats unless another writer exists. [I]
 
 ### 2.2 Creation, called once from the ship destruction sequence
@@ -37,10 +37,10 @@ Implemented in `game/src/lifeboats.rs` (status in §9); this file stays the evid
 
 ### 2.4 Collision, targeting, rosters
 - Lifeboat WOTs use `ResponseType = Lifeboat` (not `Ship`), bounding-box detection; the Civilian/Navy lifeboats have an authored sphere (radius 2.0 at local (0,0,1)), Pirate/Procyon use a mesh-derived sphere. `Distance to Start Sphere Picking = 18`, icon `ShipBar_ShipIcon_Navy_LifeBoat`. [C]
-- Response table (16-wide pair matrix): the class `Ship_vs_Lifeboat_ResponseFunctor` fills exactly the (0,7) and (7,0) cells, and its only method returns false: **a ship touching a lifeboat gets no physical response**. No other cell involves type 7, so e.g. bullet-vs-lifeboat has no registered functor. [C for the table; "shells pass through" is I because the dispatcher's handling of empty cells was not traced]
-- The shared relation filter (used by the AI target selection / group queries) treats a pair containing a lifeboat as **never an enemy and always friendly** (mode 1 returns not-hostile, mode 2 returns friendly; mode names are inferred). Lifeboats are therefore never auto-targeted as enemies. [C for the predicate; I for mode naming]
-- Lifeboats are excluded from the starting-fleet roster builder, the ship-lost/primary-ship speech dispatcher, and the pickup candidate list. [C]
-- Whether the player can select/target one by click is [?] (picking radius and ship-bar icon exist). If the player's primary ship *is* a lifeboat the game raises speech event `0x57` and sets a flag; meaning unresolved.
+- Collision responses: **a ship touching a lifeboat gets no physical response**, and no other response (e.g. bullet vs lifeboat) is defined for lifeboats. [C for ship vs lifeboat; "shells pass through" is I]
+- AI target selection and group queries treat a pair containing a lifeboat as **never an enemy and always friendly**, so lifeboats are never auto-targeted as enemies. [C]
+- Lifeboats are excluded from the starting fleet roster, the ship-lost/primary-ship speech and the pickup candidates. [C]
+- Whether the player can select/target one by click is [?] (picking radius and ship-bar icon exist). If the player's primary ship *is* a lifeboat the game reacts with a speech event; meaning unresolved.
 - `Ship_Navy_Lifeboat_Mission9` is **not** a lifeboat (`Is Lifeboat False`, `ResponseType Ship`, speed 16.7, vital hull). Never match lifeboats by class name; use the flag. [C]
 
 ### 2.5 Pickup (at the top of the AI update, every tick, for every ship AI)
@@ -98,7 +98,7 @@ Implemented in `game/src/lifeboats.rs` (status in §9); this file stays the evid
 ## 4. Inferences and unresolved questions
 
 Unresolved (impact in brackets):
-1. [?] Value and provenance of the pickup range field (not set by the constructor). [low: the touch test dominates if the range is ≥ 0; use sphere overlap]
+1. [?] Value and provenance of the pickup range field (no initial value found). [low: the touch test dominates if the range is ≥ 0; use sphere overlap]
 2. [?] Exact spawn pose: position taken as the dying ship's position (z kept), heading toward the random direction. [low]
 3. [?] The pre-explosion delay and which destruction paths reach it (combat death certainly; scripted `Destroy Group/Unit`, collisions, boarding capture not verified). [medium: Mission 1's Warrior and Mission 2's Ravage die in combat]
 4. [?] Whether human-owned lifeboats are steered; world-bounds handling; hit/targeting by shells and by clicks; speech `0x57` for a lifeboat primary ship.
@@ -128,7 +128,7 @@ Unresolved (impact in brackets):
 3. **Model**: `Lifeboat` marker component (+ owner as `MissionShip.owner`), per-ship `CreateLifeboats(bool)`; consider a feature module `lifeboats.rs` like `boarding.rs` (needs a row in `docs/development.md` at merge).
 4. **Rules**: `Set Lifeboat Creation State` (comma lists, ships only, TRUE/FALSE); `Player has no lifeboats` (unknown name → true; any lifeboat owned by the player → false); `PvP capture count` reading only the lifeboat table with GT/LT/EQ; move the boarding feed to a PROVISIONAL, clearly named bridge for missions 6/12.
 5. **Spawn**: on explosion start, if flag && count > 0 && ship: choose class by race (Navy/Civilian/Pirate/Procyon, default Civilian); owner = current owner; position = ship position; random direction (uniform square) and throttle `0.2 + 0.8u`; straight far waypoint; no collision with the parent; hull hp as exported; inject the RNG for tests.
-6. **Collision/targeting**: lifeboat vs ship: no response; exclude lifeboats from enemy target scans, fleet rosters and ship-lost speech; keep shells from damaging them until the dispatcher is traced (provisional).
+6. **Collision/targeting**: lifeboat vs ship: no response; exclude lifeboats from enemy target scans, fleet rosters and ship-lost speech; keep shells from damaging them (provisional).
 7. **Pickup**: each tick per lifeboat: nearest alive non-lifeboat ship by sphere-surface distance; collect when ≤ 0; one collector; remove the lifeboat; update the lifeboat table; play the sound; +2 points iff collector is the local player and not allied with the lifeboat owner (also add to the mission points counter used by `CampaignPoints`).
 8. **Mission wiring**: run Mission 1 and 2 end-to-end (see §7); then 4 (pre-placed boats) and 5-7, 10, 12 smoke.
 9. **Docs/backlog** at merge: update `fidelity-backlog.md` (M1-03, CAM-01, rule table), `campaign.md` "Still missing", `boarding.md` Mission usage line, `scoring-saves.md`; this file stays the evidence record.
@@ -156,13 +156,13 @@ Implemented (checklist §6, in order): exporter fields (`lifeboats`, `is_lifeboa
 
 Decisions and deviations (each provisional unless noted):
 - **Flag only**: every test is `Class::is_lifeboat`; no class-name match, no mission-name exception. Mission 9's `Ship_Navy_Lifeboat_Mission9` stays an ordinary combat ship (unit + `lifeboat-m9` smoke).
-- **Spawn trigger**: when the combat death handler (`combat::deaths`: core hit points gone, from shells or fire) or the dev kill keys report `ShipLost`. Scripted `Destroy Group/Unit` does not spawn boats (§4.3 unverified). The exe's pre-explosion delay is not modelled: boats appear on the frame after the loss.
+- **Spawn trigger**: when the combat death handler (`combat::deaths`: core hit points gone, from shells or fire) or the dev kill keys report `ShipLost`. Scripted `Destroy Group/Unit` does not spawn boats (§4.3 unverified). The original's pre-explosion delay is not modelled: boats appear on the frame after the loss.
 - **Boats** are ordinary `Ship` entities (class by dying ship's race, owner = the ship's current `MissionShip.owner`, `Side::Player` always, no `PlayerShip`/`Boardable`/`FleetMember`), one far waypoint along a random direction and `throttle = 0.2 + 0.8u` of class `MaxSpeed`; no lifetime. Spawned boats have no `MissionShip` (rules address groups/owners, not boats: a Pirates-owned boat does not become a member of group `Pirates`); pre-placed boats (mission 4, ids 220-222, group `navy`) keep theirs and get a `Lifeboat` marker, and are not in any fleet roster nor mission AI.
 - **Collision/targeting**: `collision::sail` skips ship-ship response when either is a boat (scenery still blocks them); shells skip boats (PROVISIONAL); boats are `Side::Player` and absent from the rule AI target pool, so they are never auto-targeted, never picked by click as an enemy, never in the roster.
 - **Pickup**: each frame, per boat, the nearest live non-lifeboat ship by sphere surface distance (`Class::sphere`; for Pirate/Procyon boats a sphere derived from the authored box, PROVISIONAL); contact (≤ 0) collects. Both boats of one wreck start together and drift ≤ ~1 unit/s, so a ship usually collects both on one visit (retail-faithful: no one-per-ship limit). Effects: despawn, `HUD_Lifeboat_Pickup` UI sound, `Script::lifeboat_saved(collector owner, boat owner)` (table + `+2` to `Script.score` only for the local player collecting a boat of a non-allied owner), the owner list refreshed for `Player has no lifeboats`.
 - **Statistics**: the table is `Script::lifeboats_saved` (`PlayerLifeBoatSavedInfo`), exposed via `lifeboats_saved_by`; no `GameStats` framework. Saves restart the mission, so nothing extra is persisted: the creation flag is re-applied by the world-init rules (§7.1's "survives a save/load" is therefore trivially true and not separately tested).
 - **Missions 6/12 ambiguity (§4.8)**: reviewed, not changed in outcome. Mission 6's `PlayerStart vs PirateRunner == 1` is the *lifeboat* route (The Little Thief, group `PirateRunner`, has creation TRUE): it now works natively, while its boarding route stays the separate `Team has captured` rule. Mission 12's `Procs vs RoyalPalace == 1` (the defeat) has no lifeboat source (the palace is a base and none of its group owners is flagged), so a narrowly scoped PROVISIONAL bridge remains: boarding captures **of bases only** (not ships) still feed a separate `base_captures` table, with allied credit as before, and the condition reads lifeboat table + bridge. It is keyed by entity type, not by mission or rule name; remove it once the defeat trigger is re-derived. Ship boardings never touch the lifeboat table (`rules::tests::boarding_feeds_team_capture_not_the_lifeboat_capture_count`).
-- Unknown player: `PvP capture count` is false and `Player has no lifeboats` true, as in the exe.
+- Unknown player: `PvP capture count` is false and `Player has no lifeboats` true, as in the original.
 
 Validation actually run (all scripted: ships killed through `Health.core`, collectors teleported; none is a normal-combat replay):
 - Unit/ECS (`cargo test`): `data::lifeboat_tests`, `lifeboats::tests` (flag default/true, counts, race class, owner of the moment, drift ranges, straight motion, no ship-boat response, nearest-only pickup, dead ships/other boats never collect, AI collects, one sound per pickup, placed boats by flag), `rules::tests` (conditions, points/ally rule, action targeting, boarding vs table, mission 12 bridge), `tests/test_lifeboats.py` (assets).

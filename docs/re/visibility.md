@@ -2,7 +2,7 @@
 
 ## Status
 
-**Implemented, with explicit fidelity limits:** shared range/group/contact checks now drive radar, star map, world labels/reticles, world picking, context menus, Focus, docking and ship/base target acquisition. Ship meshes are **not newly hidden by sight range**: native mesh disappearance versus UI contact loss still needs a render-consumer trace. Existing script visibility and cloak rendering remain separate.
+**Implemented, with explicit fidelity limits:** shared range/group/contact checks now drive radar, star map, world labels/reticles, world picking, context menus, Focus, docking and ship/base target acquisition. Ship meshes are **not newly hidden by sight range**: retail mesh disappearance versus UI contact loss still needs comparison with the original. Existing script visibility and cloak rendering remain separate.
 
 Camera visibility, gun range, script visibility, sight range and nebula occlusion are different things. Detection is not a camera-distance or radar-disk test.
 
@@ -67,13 +67,13 @@ The UI first gathers candidate objects inside per-group visibility spheres, then
 
 - `in_sight(observer, target, mission)` uses the original's strict surface distance and live/script-visible observers in the same shared fleet group (mission owner fallback for units without fleet membership), plus the target's script/life state, cloak gate and nebula clear-line test.
 - Ships use `Class::sphere`, including its local centre transformed into world space. Some class spheres are exporter-derived fallbacks rather than authored spheres. Unarmed scenery without an exported sphere uses its world collision bounds (provisional), **not offshore dock-point distance**. Collider-free mod docks retain the previous dock-point-bound fallback so they remain usable; all shipped dockable scenery has a collider.
-- `player_sees` uses the primary ship's group. Its own group remains known, script-hidden/dead targets do not qualify, and scenery retains its separate policy. Missing-primary and cinematic reveal exceptions are explicit. Blanket cinematic reveal of scripted-visible units remains provisional pending native NIS/debug flag decoding.
+- `player_sees` uses the primary ship's group. Its own group remains known, script-hidden/dead targets do not qualify, and scenery retains its separate policy. Missing-primary and cinematic reveal exceptions are explicit. Blanket cinematic reveal of scripted-visible units remains provisional pending comparison with the original.
 - Radar and star map contacts, names, reticles, left/right picking and context cursors use the same result. Stale ship menus close after contact loss; Focus/Dock are checked again when clicked. Focus is greyed without group sight, and the camera falls back from an unseen ship/animal focus rather than tracking its hidden coordinates. Projectile debug focus still works.
 - Automatic skirmish/mission ship acquisition and ship/base gun target selection use sensing separately from gun range/arc. Explicit fleet/script attack orders may retain a destination outside sight so units can approach it; firing still needs detection. AI stance/path/contact-loss fidelity remains provisional, as before.
 - Crew enemy-spotted speech now consumes shared detection, rather than an independent centre-distance heuristic. Its destruction callout requires a previously detected enemy. Dragon brains and homing/point-defence projectiles retain their specialized existing acquisition rules.
 - Rules' actual unit/script visibility is **not overwritten by player detection**. Mission conditions must still know about distant units.
 
-Snapshot changes become visible next frame; exact native update cadence is not recovered. No last-known-position/contact-memory system was invented. No new mesh range-culling or cloak timing/AI-override rules were added. Camera fallback on contact loss and the application of the recovered UI gate to automatic ship/base acquisition are coherent remake policies, not proof of every native consumer's exact behaviour.
+Snapshot changes become visible next frame; exact retail update cadence is not recovered. No last-known-position/contact-memory system was invented. No new mesh range-culling or cloak timing/AI-override rules were added. Camera fallback on contact loss and the application of the recovered UI gate to automatic ship/base acquisition are coherent remake policies, not proof of every retail consumer's exact behaviour.
 
 ## Validation and remaining acceptance
 
@@ -88,4 +88,4 @@ WAYLAND_DISPLAY= tools/shot.sh local/sight-classic.png --script sight \
 
 The script freezes three ships, disables their gun states and asserts detection and actual radar widget visibility through out-of-range → group-spotted → unrelated ally → cloaked → revealed states. It is a wiring check, not a combat or full campaign replay. Screenshots/logs: `local/sight-classic.*`. A separate Mission 2 launch reached initialization/NIS without an ECS error but timed out before capture; it is **not** counted as a completed mission runtime smoke.
 
-**Remaining:** native mesh/render consumers, lost-contact memory/timing, precise NIS/cloak/crew-modifier semantics, scenery UI distance policy, live moving-storm/overlap geometry, and normal Mission 1/2 playthroughs after the matrix/detection corrections. Validate against original footage/screenshots before claiming full sensor parity.
+**Remaining:** retail mesh/render consumers, lost-contact memory/timing, precise NIS/cloak/crew-modifier semantics, scenery UI distance policy, live moving-storm/overlap geometry, and normal Mission 1/2 playthroughs after the matrix/detection corrections. Validate against original footage/screenshots before claiming full sensor parity.

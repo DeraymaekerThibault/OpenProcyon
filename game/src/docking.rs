@@ -1,4 +1,4 @@
-//! Docking (docs/re/docking-and-orders.md): dock points, the original's `ShipDockRoutine` (wait for a point, approach leg, final approach,
+//! Docking (docs/re/docking-and-orders.md): dock points, the original's dock routine (wait for a point, approach leg, final approach,
 //! docked, then for AI ships move away / turn / return), repair while docked, dock-point marker effects and the rule hooks
 //! (`Dock Ships`, `Set Group/Unit Dockable`, `Set Dock Time`, `Toggle Island Repair When Docked`, `Group/Unit Is Docked`).
 //! Clicks and the right-click menu issue `DockMsg`s; rules.rs reads `Script::docked`, which this module keeps up to date.
