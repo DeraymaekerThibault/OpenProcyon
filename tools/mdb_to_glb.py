@@ -96,7 +96,7 @@ def convert(root, scene, model=0, files=None):
     if not files:
         raise FileNotFoundError(f"no {scene}_Layer*.mdb under {root / 'BD_Meshes'}")
     if not explicit:
-        # Exe (section setup): a swappable section's mesh "<A>_<B>" swaps to "<A>Damage_<B>" when destroyed.
+        # Retail: a swappable section's mesh "<A>_<B>" swaps to "<A>Damage_<B>" when destroyed.
         # Nodes named *Damage_Layer* are hidden by the game until then.
         for f in list(files):
             a, b = f.stem.split("_", 1)

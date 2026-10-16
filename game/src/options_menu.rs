@@ -2,8 +2,8 @@
 //! ship or base opens an icon menu around the cursor; three variants (enemy / own primary / other) with the retail icons, backgrounds and
 //! slot offsets from hud.hdt. Implemented items: Focus, Stop, Dock, Tow start / stop (campaign missions only, the rules keep the link),
 //! and the enemy menu's Board and Grapple start / stop (boarding.rs); Hold position and Cloak are drawn greyed out.
-//! Sounds as in the exe: HUD_Options_Open on opening, _Focus / _Stop / _Dock for the item clicked, _NoSelection for a click on no
-//! (enabled) item; HUD_Options_MouseOver when the cursor enters an enabled slot (PROVISIONAL: the exe plays it from its generic button code).
+//! Sounds as in the original: HUD_Options_Open on opening, _Focus / _Stop / _Dock for the item clicked, _NoSelection for a click on no
+//! (enabled) item; HUD_Options_MouseOver when the cursor enters an enabled slot (PROVISIONAL: the original may play it for any button).
 //! The context cursor (dock / can't / attack) follows the mouse while it hovers a ship or base.
 use bevy::input::mouse::AccumulatedMouseMotion;
 use bevy::prelude::*;
@@ -119,7 +119,7 @@ fn restore_pointer(mut pointer: Single<&mut CursorOptions, With<PrimaryWindow>>,
     }
 }
 
-/// (action, hud sprite, enabled) per slot, in the exe's builder order. `can_dock`: the dock test passed.
+/// (action, hud sprite, enabled) per slot, in the original's slot order. `can_dock`: the dock test passed.
 fn items(kind: Kind, can_dock: bool, tow: Tow, hooks: Hooks) -> Vec<(Act, &'static str, bool)> {
     use Act::*;
     match kind {
@@ -568,7 +568,7 @@ fn context_cursor(
         } else if let Some((_, _, sh, _)) =
             ships.iter().find(|(e, tf, sh, h)| !h.destroyed && sensors.player_sees(*e, mission.as_deref()) && ray_hit(&lib.classes[sh.class], tf, ray).is_some())
         {
-            // Exe hover: attack an enemy; any other friendly ship that is not dockable is "can't do anything".
+            // Retail hover: attack an enemy; any other friendly ship that is not dockable is "can't do anything".
             if sh.side == Side::Enemy {
                 if fleets.direct() { "Cursor_PrimaryShip_AttackShip" } else { "Cursor_SecondaryShip_AttackShip" }
             } else {

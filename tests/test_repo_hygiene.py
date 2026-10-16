@@ -41,7 +41,7 @@ TEXT_SUFFIXES = {
 }
 
 ADDRESS = re.compile(
-    r"\b0x0?(?!7fffff)[4-7][0-9a-fA-F]{5}(?![0-9a-fA-F])|\b(?:FUN|DAT|LAB|PTR)_[0-9a-fA-F]{6,8}\b"
+    r"\b0x0{0,2}(?!7fffff)[4-7][0-9a-fA-F]{5}(?![0-9a-fA-F])|\b(?:FUN|DAT|LAB|PTR)_[0-9a-fA-F]{6,8}\b|\bTP::\w+"
 )
 DECOMPILER = re.compile(
     r"\b(?:param_\d+|[iuf]Var\d+|local_[0-9a-f]{2,}|undefined[248]?)\b"
@@ -111,6 +111,8 @@ class RepoHygiene(unittest.TestCase):
             "`FUN_005621a0`",
             "iVar3 = param_1;",
             "DAT_0074d8e0",
+            "**0x0055ecf0**",
+            "`TP::ILineOfSightOccluder`",
         ):
             self.assertTrue(ADDRESS.search(hit) or DECOMPILER.search(hit), hit)
         for ok in ("0x46546C67", "rng & 0x7fffff", "command id 0x10", "0x3C6EF35F"):

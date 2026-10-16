@@ -2,7 +2,7 @@
 //! animals (so the rules' paths, owners, visibility and volumes work on them) plus a `Dragon` brain: stance, attack orders,
 //! damage threshold (past it the dragon breaks off to its border-zone return point), border zone, fire breath and roars.
 //! Data: `environment.dragon` (Animal_SpaceDragon.wot and Gun_DragonBreath.wot via tools/export_environment.py).
-//! PROVISIONAL: the exe's DragonAI state machine is not decoded; the chase/stand-off/flee behaviour below is the remake's.
+//! PROVISIONAL: the original's dragon behaviour is unknown; the chase/stand-off/flee behaviour below is the remake's.
 use bevy::prelude::*;
 use serde_json::Value;
 

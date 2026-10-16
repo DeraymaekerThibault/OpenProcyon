@@ -71,7 +71,7 @@ class LocalMdbTests(unittest.TestCase):
         g = json.loads(glb[20 : 20 + n])
         self.assertEqual(
             len(g["meshes"]), 12
-        )  # 6 layers + their exe-named Damage_ swap meshes
+        )  # 6 layers + their retail-named Damage_ swap meshes
         self.assertEqual(len(g["images"]), 31)
         self.assertTrue(
             all(

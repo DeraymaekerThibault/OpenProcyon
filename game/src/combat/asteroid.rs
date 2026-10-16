@@ -86,7 +86,7 @@ pub struct AsteroidSetup {
     pub mode: PathMode,
 }
 
-/// Rule 'Follow Mode' (exe enum: to end 0, end to end 1, loop 2, teleport loop 3).
+/// Rule 'Follow Mode' (values: to end 0, end to end 1, loop 2, teleport loop 3).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub enum PathMode {
     #[default]
@@ -267,5 +267,160 @@ pub fn asteroid_demo(
         && rock.damage(f32::MAX)
     {
         killed.write(Destroyed { by: *player, victim: e });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn asteroid_tumble_obeys_group_ranges_without_drift() {
+        let mut app = App::new();
+        app.init_resource::<Time>().init_resource::<AsteroidDefs>().insert_resource(Rng(123)).add_message::<AsteroidSetup>().add_systems(Update, asteroid_motion);
+        let defs = app.world().resource::<AsteroidDefs>();
+        let a = Asteroid::new("Asteroid_Large", "Asteroid Belt", defs).unwrap();
+        let b = Asteroid::new("Asteroid_Med", "Montressor Asteroids", defs).unwrap();
+        let a = app.world_mut().spawn((a, Transform::from_xyz(20.0, 0.0, 0.0))).id();
+        let b = app.world_mut().spawn((b, Transform::default())).id();
+        for (entity, upper) in [(a, 0.9), (b, 0.75)] {
+            app.world_mut().write_message(AsteroidSetup { units: vec![entity], speed: [0.0, 0.0], tumble: [0.5, upper], path: vec![], closest: false, mode: PathMode::ToEnd });
+        }
+        app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs_f32(0.1));
+        app.update();
+        for (entity, upper) in [(a, 0.9), (b, 0.75)] {
+            let rock = app.world().get::<Asteroid>(entity).unwrap();
+            assert!((0.5..=upper).contains(&rock.tumble));
+            assert!((rock.axis.length() - 1.0).abs() < 1e-5);
+            let tf = app.world().get::<Transform>(entity).unwrap();
+            assert!((tf.rotation.angle_between(Quat::IDENTITY) - rock.tumble * 0.1).abs() < 1e-4);
+            assert_eq!(tf.translation, if entity == a { Vec3::new(20.0, 0.0, 0.0) } else { Vec3::ZERO });
+        }
+    }
+
+    #[test]
+    fn asteroid_path_tracks_velocity_and_stops_at_end() {
+        let mut app = App::new();
+        app.init_resource::<Time>().init_resource::<AsteroidDefs>().insert_resource(Rng(123)).add_message::<AsteroidSetup>().add_systems(Update, asteroid_motion);
+        let rock = Asteroid::new("Asteroid_Med", "rocks", app.world().resource::<AsteroidDefs>()).unwrap();
+        let e = app.world_mut().spawn((rock, Transform::default())).id();
+        app.world_mut().write_message(AsteroidSetup { units: vec![e], speed: [2.0, 2.0], tumble: [0.0, 0.0], path: vec![Vec3::X], closest: true, mode: PathMode::ToEnd });
+        app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs_f32(0.1));
+        app.update();
+        assert_eq!(app.world().get::<Asteroid>(e).unwrap().velocity, Vec3::X * 2.0);
+        for _ in 0..10 {
+            app.update();
+        }
+        assert_eq!(app.world().get::<Transform>(e).unwrap().translation, Vec3::X);
+        assert_eq!(app.world().get::<Asteroid>(e).unwrap().velocity, Vec3::ZERO);
+    }
+
+    #[test]
+    fn asteroid_path_modes_teleport_loop_and_ping_pong() {
+        let run = |mode| {
+            let mut app = App::new();
+            app.init_resource::<Time>().init_resource::<AsteroidDefs>().insert_resource(Rng(1)).add_message::<AsteroidSetup>().add_systems(Update, asteroid_motion);
+            let rock = Asteroid::new("Asteroid_Med", "rocks", app.world().resource::<AsteroidDefs>()).unwrap();
+            let e = app.world_mut().spawn((rock, Transform::default())).id();
+            let path = vec![Vec3::ZERO, Vec3::X * 10.0, Vec3::X * 20.0];
+            app.world_mut().write_message(AsteroidSetup { units: vec![e], speed: [10.0, 10.0], tumble: [0.0, 0.0], path, closest: true, mode });
+            let mut xs = vec![];
+            for _ in 0..40 {
+                app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs_f32(0.1));
+                app.update();
+                xs.push(app.world().get::<Transform>(e).unwrap().translation.x);
+            }
+            xs
+        };
+        let tele = run(PathMode::Teleport);
+        assert!(tele.windows(2).any(|w| w[1] < w[0] - 15.0), "jumps back to the first point");
+        assert!(tele.iter().all(|x| *x <= 20.001));
+        let pong = run(PathMode::EndToEnd);
+        assert!(pong.iter().any(|x| *x > 19.0) && pong.windows(2).any(|w| w[1] < w[0]) && pong.windows(2).all(|w| w[0] - w[1] < 1.5), "reverses smoothly");
+        assert!(run(PathMode::ToEnd).iter().all(|x| *x <= 20.001));
+    }
+
+    #[test]
+    fn asteroid_setup_replaces_contact_drift_without_erasing_it_each_tick() {
+        let mut app = App::new();
+        app.init_resource::<Time>().init_resource::<AsteroidDefs>().insert_resource(Rng(123)).add_message::<AsteroidSetup>().add_systems(Update, asteroid_motion);
+        let rock = Asteroid::new("Asteroid_Small", "rocks", app.world().resource::<AsteroidDefs>()).unwrap();
+        let e = app.world_mut().spawn((rock, Transform::default())).id();
+        app.world_mut().get_mut::<crate::collision::Drift>(e).unwrap().0 = Vec3::X * 6.0;
+        app.update();
+        assert_eq!(app.world().get::<crate::collision::Drift>(e).unwrap().0, Vec3::X * 6.0);
+        app.world_mut().write_message(AsteroidSetup { units: vec![e], speed: [0.0, 0.0], tumble: [0.0, 0.0], path: vec![], closest: false, mode: PathMode::ToEnd });
+        app.update();
+        assert_eq!(app.world().get::<crate::collision::Drift>(e).unwrap().0, Vec3::ZERO);
+    }
+
+    #[test]
+    fn asteroid_breakup_is_once_only_recursive_and_cleans_target() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, AssetPlugin::default()))
+            .init_asset::<WorldAsset>()
+            .init_resource::<AsteroidDefs>()
+            .init_resource::<crate::collision::Shapes>()
+            .init_resource::<FxLib>()
+            .init_resource::<Target>()
+            .insert_resource(Rng(123))
+            .add_message::<Destroyed>()
+            .add_message::<Detonate>()
+            .add_message::<Shoot>()
+            .add_message::<Strike>()
+            .add_message::<Sfx>()
+            .add_systems(Update, asteroid_deaths);
+        let shooter = app.world_mut().spawn_empty().id();
+        let rock = Asteroid::new("Asteroid_Large", "Asteroid Belt", app.world().resource::<AsteroidDefs>()).unwrap();
+        let parent = app.world_mut().spawn((rock, Transform::default())).id();
+        app.world_mut().get_mut::<crate::collision::Drift>(parent).unwrap().0 = Vec3::X * 6.0;
+        app.world_mut().resource_mut::<Target>().0 = Some(parent);
+        let mut rock = app.world_mut().get_mut::<Asteroid>(parent).unwrap();
+        assert!(!rock.damage(49.0));
+        assert!(rock.damage(1.0));
+        assert!(!rock.damage(1000.0), "multiple shells must not repeat death");
+        app.world_mut().write_message(Destroyed { by: shooter, victim: parent });
+        app.update();
+        assert!(app.world().get_entity(parent).is_err());
+        assert_eq!(app.world().resource::<Target>().0, None);
+        let children: Vec<_> = app
+            .world_mut()
+            .query::<(Entity, &Asteroid, &Transform)>()
+            .iter(app.world())
+            .map(|(e, a, t)| {
+                assert_eq!((a.kind.as_str(), a.group.as_str(), a.hp), ("Asteroid_Med", "Asteroid Belt", 30.0));
+                assert!((0.8..=0.8 + 2.2 / 3.0).contains(&(a.velocity - Vec3::X * 6.0).length()), "fragments inherit the parent's contact velocity");
+                assert!((0.0..=std::f32::consts::FRAC_PI_2).contains(&a.tumble));
+                assert!((t.translation.length() - 6.6).abs() < 1e-4);
+                assert!(app.world().get::<crate::collision::Obstacle>(e).is_some());
+                e
+            })
+            .collect();
+        assert_eq!(children.len(), 2);
+        assert_eq!(app.world_mut().query::<&fx::Fx>().iter(app.world()).count(), 1);
+        app.update();
+        assert_eq!(app.world_mut().query::<&Asteroid>().iter(app.world()).count(), 2);
+        for child in children {
+            assert!(app.world_mut().get_mut::<Asteroid>(child).unwrap().damage(30.0));
+            app.world_mut().write_message(Destroyed { by: shooter, victim: child });
+        }
+        app.update();
+        let small: Vec<_> = app
+            .world_mut()
+            .query::<(Entity, &Asteroid)>()
+            .iter(app.world())
+            .map(|(e, a)| {
+                assert_eq!(a.hp, 10.0);
+                e
+            })
+            .collect();
+        assert_eq!(small.len(), 6);
+        for child in small {
+            assert!(app.world_mut().get_mut::<Asteroid>(child).unwrap().damage(10.0));
+            app.world_mut().write_message(Destroyed { by: shooter, victim: child });
+        }
+        app.update();
+        assert_eq!(app.world_mut().query::<&Asteroid>().iter(app.world()).count(), 0);
+        assert_eq!(app.world_mut().query::<&crate::collision::Obstacle>().iter(app.world()).count(), 0);
     }
 }

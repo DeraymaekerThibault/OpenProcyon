@@ -219,12 +219,12 @@ pub struct Script {
     /// TWT named groups by world object id (a unit also answers to its current owner, `matches`).
     pub(super) groups: HashMap<i64, Vec<String>>,
     group_names: HashSet<String>,
-    /// Lifeboats saved, `PlayerLifeBoatSavedInfo` in the exe: (collecting player, lifeboat owner, count). The only source of the rules'
+    /// Lifeboats saved as the original tallies them: (collecting player, lifeboat owner, count). The only source of the rules'
     /// capture counts apart from `base_captures`; boarding a ship never touches it.
     pub(super) lifeboats_saved: Vec<(String, String, u32)>,
     /// Owner of every lifeboat in the world, refreshed by lifeboats.rs each frame (`Player has no lifeboats`).
     pub(super) lifeboat_owners: Vec<String>,
-    /// PROVISIONAL bridge, bases only: boardings of a base by (capturing player, base's previous player). The exe's capture count has no
+    /// PROVISIONAL bridge, bases only: boardings of a base by (capturing player, base's previous player). The original's capture count has no
     /// writer but lifeboat pickup, yet mission 12's defeat reads 'Procs vs RoyalPalace' (the palace is a boardable base), so it is kept alive.
     /// Ship boardings are not counted here: mission 6's 'PlayerStart vs PirateRunner' is the lifeboat route, its boarding route is 'Team has captured'.
     pub(super) base_captures: HashMap<(String, String), u32>,
@@ -581,7 +581,7 @@ impl Script {
         a == b || (self.players.iter().any(|p| p == a) && self.players.iter().any(|p| p == b) && !self.hostile(a, b))
     }
     /// A ship of `collector` picked up a lifeboat of `owner` (lifeboats.rs). Counts it, and the local player collecting a boat of a
-    /// player it is not allied with scores victory points, as the exe does (the same counter as 'Add Victory Points').
+    /// player it is not allied with scores victory points, as the original does (the same counter as 'Add Victory Points').
     pub fn lifeboat_saved(&mut self, collector: &str, owner: &str) {
         match self.lifeboats_saved.iter_mut().find(|r| r.0 == collector && r.1 == owner) {
             Some(r) => r.2 += 1,
@@ -786,7 +786,7 @@ impl Script {
                 seen.extend(m.iter().filter(|u| in_volume(&vol, u.pos)).map(|u| u.e));
                 !m.is_empty() && m.iter().all(|u| seen.contains(&u.e))
             }
-            // The exe's count is the lifeboat table; an unknown player makes the condition false.
+            // The original's count is the lifeboat table; an unknown player makes the condition false.
             "Player Vs Player capture count" => {
                 let (a, bb) = (base(s(c, "Player Name A")), base(s(c, "Player Name B")));
                 let known = |p: &str| self.players.iter().any(|x| x == p);

@@ -1,5 +1,5 @@
 //! The boarding status bar over a live fight (hud.hdt BOARDINGSTATUS_*): a gold barbell with the two sides' colour discs, a sword on the
-//! attacker's and a shield on the defender's, and between them the relative strength (`boarding::friendly_share`). The exe shows it
+//! attacker's and a shield on the defender's, and between them the relative strength (`boarding::friendly_share`). The original shows it
 //! only within 'Max Boarding Info Visible World Distance' of the camera. PROVISIONAL: its screen position (above the target) and the colours.
 use bevy::prelude::*;
 

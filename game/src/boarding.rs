@@ -1,10 +1,10 @@
 //! Boarding and grappling (docs/re/boarding.md): crew strengths, the grapple link, the boarding fight and capture.
 //! A ship boards a hostile ship only while grappled to it (harpoon), a base only while beside one of its boarding points and slow;
-//! the fight then runs as the exe's `BoardingActionsKeeper`: one casualty per interval, a coin flip for who takes it, until a side's
+//! the fight then runs as in the original: one casualty per interval, a coin flip for who takes it, until a side's
 //! strength is gone. The winner captures: the loser's owner changes (mission rules count it) and the grapple is released.
 //! PROVISIONAL: crew skill (generic crew combat ability, no leader bonus, no per-man crews), the harpoon flight (no projectile; the hook
 //! lands after distance / muzzle speed), the winch that pulls grappled hulls together, one grapple per ship, AI boarding of boardable
-//! bases (the exe has no AI path to the command), first-mate lines picked by meaning, and the boarding status bar placement.
+//! bases (the original has no AI path to the command), first-mate lines picked by meaning, and the boarding status bar placement.
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use serde_json::Value;
@@ -61,7 +61,7 @@ impl Skill {
     }
 }
 
-/// One object's boarding numbers, named as in the exe: `fighters` (Fighter Combat Strength) and `crew` (Crew Combat Strength) are the
+/// One object's boarding numbers, named as in the original: `fighters` (Fighter Combat Strength) and `crew` (Crew Combat Strength) are the
 /// casualty pools; `attack` (Cached Attacking = crew/2 + fighters) is what it boards with, `defend` (Cached Defending = crew + fighters)
 /// what it holds with; `full` is the Initial Defending. A base has only `defend` (its 'Combat Strength').
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -83,7 +83,7 @@ impl Strength {
     pub fn base(combat: i32) -> Self {
         Self { fighters: 0, crew: 0, attack: 0, defend: combat, full: combat, base: true }
     }
-    /// Exe slot 0x1C after a fight: casualties come out of the fighters first, then the crew; the totals are derived again.
+    /// After a fight: casualties come out of the fighters first, then the crew; the totals are derived again.
     fn normalise(&mut self) {
         if self.base {
             return;
@@ -157,7 +157,7 @@ fn points(entity: &str) -> Vec<Vec3> {
     data()[entity]["points"].as_array().into_iter().flatten().map(|p| conv(f(p, 0), f(p, 1), f(p, 2))).collect()
 }
 
-/// A ship or base that can be boarded. `on` is the target's Boardable flag (WOT 'Boardable' / 'Set Group/Unit Boardable', exe +0x144).
+/// A ship or base that can be boarded. `on` is the target's Boardable flag (WOT 'Boardable' / 'Set Group/Unit Boardable').
 #[derive(Component, Clone, Debug)]
 pub struct Boardable {
     pub on: bool,
@@ -345,7 +345,7 @@ fn owner_of<'a>(ms: Option<&'a MissionShip>, mb: Option<&'a MissionBase>) -> Opt
     ms.map(|m| m.owner.as_str()).or_else(|| mb.map(|m| m.owner.as_str()))
 }
 
-/// What the menu and the AI need to know about boarding; the exe's boarding tests in one place.
+/// What the menu and the AI need to know about boarding; the original's boarding tests in one place.
 #[derive(SystemParam)]
 pub struct Boarders<'w, 's> {
     bodies: Query<'w, 's, (Body<'static>, &'static Boardable)>,
@@ -404,7 +404,7 @@ const CREW_LINES: [(&str, &[&str]); 11] = [
     ("retreat", &["hmfirstmate20", "hmfirstmate20b"]),
     ("grappled", &["hmfirstmate24"]),
 ];
-/// PROVISIONAL: the Navy human-male first mate speaks (as the helmsman does), the event picked by meaning rather than the exe's id;
+/// PROVISIONAL: the Navy human-male first mate speaks (as the helmsman does), the event picked by meaning rather than the original's id;
 /// `r` (0..1) picks between a line's variants.
 fn say(commands: &mut Commands, assets: Option<&AssetServer>, event: &str, r: f32) {
     let (Some(assets), Some((_, files))) = (assets, CREW_LINES.iter().find(|l| l.0 == event)) else { return };

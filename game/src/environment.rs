@@ -315,7 +315,7 @@ pub fn spawn(commands: &mut Commands, assets: &AssetServer, data: &Value) {
 
 /// '*State Init* Setup Etherium Current': a stream along a mission path. Constants from `Terrain_Etherium_Current.wot`
 /// (custom info Magnitude 25000, Radius 60). PROVISIONAL: the force is the magnitude along the path's direction within the radius
-/// of the path (planar), applied as force / ship mass; the exe's falloff and its use of the magnitude are not decoded.
+/// of the path (planar), applied as force / ship mass; the original's falloff and its use of the magnitude are unknown.
 #[derive(Component)]
 pub struct Current {
     path: Vec<Vec3>,
@@ -419,7 +419,7 @@ fn flow_currents(time: Res<Time>, mut materials: ResMut<Assets<crate::fx::Effect
     }
 }
 
-/// PROVISIONAL: clouds drain sail energy toward 25%; outside the nebula it recharges. Rates are not yet recovered from the exe.
+/// PROVISIONAL: clouds drain sail energy toward 25%; outside the nebula it recharges. Rates are not yet recovered from the original.
 fn energy_step(energy: f32, inside: bool, dt: f32) -> f32 {
     (energy + if inside { -0.12 * dt } else { 0.08 * dt }).clamp(0.25, 1.0)
 }

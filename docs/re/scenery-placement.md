@@ -15,12 +15,12 @@ The map exporter preserves all nine `Orientation Matrix33` values and all positi
 
 ### Native convention is now established
 
-The original matrix-vector helper **0x0040bfb0** computes output X from stored elements 0, 3, 6; Y from 1, 4, 7; Z from 2, 5, 8. Native island occlusion debug drawing **0x005d8070** uses that orientation and adds object position.
+The original multiplies a vector by a stored matrix taking output X from stored elements 0, 3, 6; Y from 1, 4, 7; Z from 2, 5, 8. Island occlusion polygons are placed with that orientation plus the object position.
 
-The follow-up serialization trace resolves the previous uncertainty:
+Serialization resolves the previous uncertainty:
 
 - The Matrix33 text reader takes nine sequential floats and stores them **without transposition**.
-- Writer **0x004ab910** emits stored elements 0 through 8 in that same order.
+- The writer emits stored elements 0 through 8 in that same order.
 
 Thus TWT contains **native matrix columns**, not rows. `scenario::game_rotation` now constructs those columns and converts axes with `C M Cᵀ`, where `C(x,y,z) = (x,z,-y)`. All scenery uses the full rotation, shared by mesh roots, guns/docks and collision construction. Campaign ship, whale and dragon yaw is derived from the correctly transformed forward axis; living units retain their existing planar motion model. The campaign stand-in ship's synthesized matrix was updated too.
 
@@ -68,7 +68,7 @@ These are exported coordinates/corrections, **not measured original height error
 - `hardpoints` accumulates parent translations, subtracts the first DamageSection's accumulated offset, and ignores parent rotations. Meshes and attachment points do not come from a fully decoded native scene transform.
 - `tools/export_collision.py::triangles` explicitly ignores GLB node transforms.
 - Retail Layer1 pivots are Z=-17.2 for AbandonedCamp and Z=27 for SmugglersCamp, matching their docks. Safetytown's Layer1 Z=39 does **not** match its docks' Z=9. Its WindMill child also has yaw approximately -0.568977 and a nonzero position.
-- Follow-up native node assembly **0x004850d0** links parents and applies pose data. Node pose application **0x00485790** subtracts a **rotated pivot** from the pose translation; hierarchy composition **0x00479d80** applies parent orientation and translation. This is not simply “add every MSB position”. The parser's node fields still need to be mapped to native pivot versus pose data.
+- Node assembly links parents and applies pose data: a node's pose subtracts a **rotated pivot** from the pose translation, and the hierarchy applies parent orientation and translation. This is not simply “add every MSB position”. The parser's node fields still need to be mapped to native pivot versus pose data.
 
 Applying raw MSB translations to already-baked MDB positions risks double-counting pivots. Replacing the current height rule without that trace would exchange a known workaround for another guess.
 

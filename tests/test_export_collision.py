@@ -37,7 +37,9 @@ MinExtents Vector3( 999, 999, 999 )
         j += b" " * (-len(j) % 4)
         glb = struct.pack("<III", 0x46546C67, 2, 28 + len(j) + len(binary))
         glb += struct.pack("<II", len(j), 0x4E4F534A) + j
-        glb += struct.pack("<II", len(binary), 0x004E4942) + binary
+        glb += (
+            struct.pack("<II", len(binary), int.from_bytes(b"BIN\0", "little")) + binary
+        )
         self.assertEqual(triangles(glb), [[[0, 0, 0], [0, 3, 0], [2, 0, 0]]])
 
 

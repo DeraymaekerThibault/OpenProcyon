@@ -1,7 +1,7 @@
 """Boarding data: assets/data/boarding.json = {entity: {points: [[x, y, z]], crew: [8 counts]}}.
 `points` are the MSB nodes of kind 'BoardingEffectPoint' (object-local game frame) of every Ship_/Base_/Island_ that has them: where the
 boarding fight effect plays and, for bases, what the boarder must be near. `crew` (ships only) are the WOT 'Max number of ...' crew counts
-in the exe's role order Gunners, Captains, First Mates, Navigators, Engineers, Riggers, Fighters, Lookouts (docs/re/boarding.md).
+in the original's role order Gunners, Captains, First Mates, Navigators, Engineers, Riggers, Fighters, Lookouts (docs/re/boarding.md).
 usage: python -m tools.export_boarding <game_root> <assets_dir>"""
 
 import sys

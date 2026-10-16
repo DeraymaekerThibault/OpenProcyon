@@ -1,6 +1,6 @@
 """Damage decals (BD_DecalTextures/*.tga) -> assets/decals/<name>.png plus data/decals.json {name: {size, materials}}.
 
-The exe hard-codes this list and files each texture under size class 0/1/2 from its _Small/_Medium/_Large suffix
+The original hard-codes this list and files each texture under size class 0/1/2 from its _Small/_Medium/_Large suffix
 and under material buckets by five flag bits (wood, reinforced, iron, sail, stone) that are not decoded yet.
 PROVISIONAL: the material buckets below are read from the file names.
 usage: python3 -m tools.export_decals <game_root> <assets_dir>

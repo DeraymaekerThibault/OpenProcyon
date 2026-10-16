@@ -1,6 +1,6 @@
-//! Star map: clicking the radar disk (or `M`) opens the retail world map, a full-screen overlay (exe class `MapBackdrop`).
+//! Star map: clicking the radar disk (or `M`) opens the retail world map, a full-screen overlay.
 //!
-//! From the exe: the map is the mission's `Backdrop Texture Name` (`maps/<id>/backdrop.png`) stretched over the playable square
+//! From the original: the map is the mission's `Backdrop Texture Name` (`maps/<id>/backdrop.png`) stretched over the playable square
 //! (world size minus the border buffer, `world_half` in the map JSON). It opens over `Animation Speed MapBackdrop` (1 s):
 //! blue background and world lines fade in over 0..1, ten "alien text" strips drawn from `MapBackdrop_RandomText0` scroll
 //! across it (10..100 px/s, fading in at 0.8..1) and wrap at the right edge. Icons are drawn per world object at its world
@@ -10,7 +10,7 @@
 //! `HUD_Map_BackgroundLoop` runs while open and `HUD_Map_MouseOver` plays when the cursor enters the radar.
 //! This module owns opening/closing, the sounds and what the map shows (`StarmapContents`); `classic/starmap.rs` draws it.
 //! PROVISIONAL: the window layout (centred square, flipped quadrants of the world-line corner texture), close controls
-//! (click, Esc, M), label colour and icon orientation sign are not decoded; the exe's pause-when-open gate is a tutorial rule
+//! (click, Esc, M), label colour and icon orientation sign are unknown; the original's pause-when-open gate is a tutorial rule
 //! (`Pause when starmap opens`) the remake does not model, so the battle keeps running behind the map.
 #![allow(deprecated)] // shortcut: bevy 0.20 Interaction, same as panels.rs
 use bevy::audio::{AudioPlayer, PlaybackSettings};

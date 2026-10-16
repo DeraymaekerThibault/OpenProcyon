@@ -1,8 +1,8 @@
-//! Docking (docs/re/docking-and-orders.md): dock points, the exe's `ShipDockRoutine` (wait for a point, approach leg, final approach,
+//! Docking (docs/re/docking-and-orders.md): dock points, the original's `ShipDockRoutine` (wait for a point, approach leg, final approach,
 //! docked, then for AI ships move away / turn / return), repair while docked, dock-point marker effects and the rule hooks
 //! (`Dock Ships`, `Set Group/Unit Dockable`, `Set Dock Time`, `Toggle Island Repair When Docked`, `Group/Unit Is Docked`).
 //! Clicks and the right-click menu issue `DockMsg`s; rules.rs reads `Script::docked`, which this module keeps up to date.
-//! PROVISIONAL: straight-line legs (the exe plans paths around obstacles), the far-side detour point, dock-point yaw sign, which
+//! PROVISIONAL: straight-line legs (the original plans paths around obstacles), the far-side detour point, dock-point yaw sign, which
 //! dockers hear the docked sound, and the repair effect placement (one at the ship centre).
 //! Tows (menu Tow start / stop): the tower steers for the towee and the link is registered inside 50 units of surface distance; the
 //! rigid tow itself lives in rules.rs. The docking status icon lives on the primary ship's bottom-bar portrait in panels.rs.
@@ -18,32 +18,32 @@ use crate::combat::{Health, Library, ray_hit, seg_sphere};
 use crate::fx::FxLib;
 use crate::{PlayerShip, Ship, Side, assets_dir, game_to_bevy};
 
-/// Docked once this close to the dock point (exe 10.0, also the approach-leg arrival tolerance here).
+/// Docked once this close to the dock point (retail 10.0, also the approach-leg arrival tolerance here).
 const ARRIVE: f32 = 10.0;
-/// With every point taken, a waiting ship holds this far from the nearest one (exe 80.0).
+/// With every point taken, a waiting ship holds this far from the nearest one (retail 80.0).
 const WAIT_DIST: f32 = 80.0;
-/// Exe default dock duration; the actual one is the larger of this ('Set Dock Time' overrides it) and the repair time.
+/// Retail default dock duration; the actual one is the larger of this ('Set Dock Time' overrides it) and the repair time.
 const MIN_DOCK_SECS: f32 = 5.0;
-/// Approach accepted when the ship and the approach point are within this angle seen from the dockee (exe π·0.6); bases always pass.
+/// Approach accepted when the ship and the approach point are within this angle seen from the dockee (retail π·0.6); bases always pass.
 const APPROACH_ARC: f32 = PI * 0.6;
-/// Leaving a ship dockee: distance ⅔·(both lengths) along the dock axis, done within 5 units or after 10 s (exe constants).
+/// Leaving a ship dockee: distance ⅔·(both lengths) along the dock axis, done within 5 units or after 10 s (retail constant).
 const AWAY_FRAC: f32 = 2.0 / 3.0;
 const AWAY_DONE: f32 = 5.0;
 const LEG_SECS: f32 = 10.0;
 /// Turning back toward the start point ends within 0.1 rad (or after 10 s); the return trip's first leg is 100 units.
 const TURN_DONE: f32 = 0.1;
 const RETURN_LEG: f32 = 100.0;
-/// A tow link is registered when the hulls are this close (surface distance, exe 50).
+/// A tow link is registered when the hulls are this close (surface distance, retail 50).
 const TOW_RANGE: f32 = 50.0;
 
-/// One dock point in the owner's local Bevy frame; `fwd` is the node's own forward axis (the exe lines dockers up along it).
+/// One dock point in the owner's local Bevy frame; `fwd` is the node's own forward axis (the original lines dockers up along it).
 #[derive(Clone, Copy, Debug)]
 pub struct DockPoint {
     pub pos: Vec3,
     pub fwd: Vec3,
 }
 
-/// Something ships can dock with: a ship or a base (exe `DockPointKeeper`).
+/// Something ships can dock with: a ship or a base.
 #[derive(Component)]
 pub struct Dockable {
     pub points: Vec<DockPoint>,
@@ -150,7 +150,7 @@ pub fn tow_in_range(here: Vec3, there: Vec3, r_tower: f32, r_towee: f32) -> bool
     (here - there).with_y(0.0).length() - r_tower - r_towee < TOW_RANGE
 }
 
-/// Exe DOCKSTATE_*: WAITING_TO_DOCK, DOCK_APPROACH (+PREDOCKED), DOCKED, MOVINGAWAYFROMDOCK, TURNINGTORETURN, RETURNING.
+/// The retail dock phases: waiting to dock, approach (+ pre-docked), docked, moving away, turning to return, returning.
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum Phase {
     Wait,
@@ -162,7 +162,7 @@ enum Phase {
     Turn,
     Return,
 }
-/// The dock routine of one ship (exe `ShipDockRoutine`).
+/// The dock routine of one ship.
 #[derive(Component)]
 pub struct Docker {
     dockee: Entity,
@@ -245,7 +245,7 @@ fn handle_messages(
                     od.release(docker);
                 }
                 info!("docking: {docker} ordered to dock with {dockee}");
-                // Exe state 0: remember the start (the return point), then wait for / approach a point.
+                // First step: remember the start (the return point), then wait for / approach a point.
                 commands.entity(docker).insert(Docker {
                     dockee,
                     point: None,
@@ -388,63 +388,63 @@ fn routine(
     obstacles: Query<(&crate::collision::Obstacle, Option<&Visibility>), (Without<Ship>, Without<crate::collision::Ghost>)>,
 ) {
     let dt = time.delta_secs();
-    let where_: Vec<(Entity, Vec3)> = dockers.iter().map(|(e, tf, ..)| (e, tf.translation)).collect();
-    let pos_of = |e: Entity| where_.iter().find(|w| w.0 == e).map(|w| w.1);
+    let positions: Vec<(Entity, Vec3)> = dockers.iter().map(|(e, tf, ..)| (e, tf.translation)).collect();
+    let pos_of = |e: Entity| positions.iter().find(|w| w.0 == e).map(|w| w.1);
     let mut bumped = vec![];
-    for (e, mut tf, mut ship, mut h, mut d, human, mut guns) in &mut dockers {
-        let gone = |m: &mut Option<ResMut<Mission>>, dk: &mut Dockable, d: &Docker| {
-            dk.release(e);
+    for (e, mut tf, mut ship, mut health, mut docker, human, mut guns) in &mut dockers {
+        let gone = |m: &mut Option<ResMut<Mission>>, dockable: &mut Dockable, docker: &Docker| {
+            dockable.release(e);
             if let Some(m) = m.as_mut() {
-                m.script.set_docked(e, d.dockee, false);
+                m.script.set_docked(e, docker.dockee, false);
             }
         };
-        let Ok((dtf, mut dk, dship, dhealth)) = dockees.get_mut(d.dockee) else {
+        let Ok((dockee_tf, mut dockable, dockee_ship, dockee_health)) = dockees.get_mut(docker.dockee) else {
             commands.entity(e).remove::<Docker>();
             continue;
         };
-        if h.destroyed || dhealth.is_some_and(|h| h.destroyed) || (!dk.enabled && matches!(d.phase, Phase::Wait | Phase::Approach)) {
-            gone(&mut mission, &mut dk, &d);
+        if health.destroyed || dockee_health.is_some_and(|h| h.destroyed) || (!dockable.enabled && matches!(docker.phase, Phase::Wait | Phase::Approach)) {
+            gone(&mut mission, &mut dockable, &docker);
             commands.entity(e).remove::<Docker>();
             continue;
         }
-        let me = &lib.classes[ship.class];
-        let base = dship.is_none();
-        let dockee_len = dship.map_or(0.0, |s| lib.classes[s.class].length);
+        let class = &lib.classes[ship.class];
+        let base = dockee_ship.is_none();
+        let dockee_len = dockee_ship.map_or(0.0, |s| lib.classes[s.class].length);
         let here = tf.translation;
-        // Exe: a reserved point that is no longer the nearest gives way to the nearest one when that is free.
-        if let (Some(i), Phase::Approach) = (d.point, d.phase)
-            && let Some(n) = dk.nearest(dtf, here)
+        // Retail: a reserved point that is no longer the nearest gives way to the nearest one when that is free.
+        if let (Some(i), Phase::Approach) = (docker.point, docker.phase)
+            && let Some(n) = dockable.nearest(dockee_tf, here)
             && n != i
-            && dk.taken[n].is_none()
+            && dockable.taken[n].is_none()
         {
-            dk.release(e);
-            dk.taken[n] = Some(e);
-            d.point = Some(n);
-            d.final_leg = false;
-            d.base_approach = None;
+            dockable.release(e);
+            dockable.taken[n] = Some(e);
+            docker.point = Some(n);
+            docker.final_leg = false;
+            docker.base_approach = None;
         }
-        match d.phase {
+        match docker.phase {
             Phase::Wait => {
-                if let Some(i) = dk.nearest_free(dtf, here) {
-                    dk.taken[i] = Some(e);
-                    d.point = Some(i);
-                    d.phase = Phase::Approach;
-                    d.final_leg = false;
-                    d.base_approach = None;
+                if let Some(i) = dockable.nearest_free(dockee_tf, here) {
+                    dockable.taken[i] = Some(e);
+                    docker.point = Some(i);
+                    docker.phase = Phase::Approach;
+                    docker.final_leg = false;
+                    docker.base_approach = None;
                     continue;
                 }
-                let Some(i) = dk.nearest(dtf, here) else { continue };
-                let (p, _) = dk.world(dtf, i);
-                // Every point taken: take this one over if we would get there sooner than its holder (exe compares distance ÷ own
+                let Some(i) = dockable.nearest(dockee_tf, here) else { continue };
+                let (p, _) = dockable.world(dockee_tf, i);
+                // Every point taken: take this one over if we would get there sooner than its holder (the original compares distance ÷ own
                 // speed, so a stopped ship never does), else hold short of it.
-                let holder = dk.taken[i].and_then(pos_of);
+                let holder = dockable.taken[i].and_then(pos_of);
                 if ship.speed.abs() > 0.01 && holder.is_some_and(|h| here.distance(p) < h.distance(p)) {
-                    bumped.extend(dk.taken[i]);
-                    dk.taken[i] = Some(e);
-                    d.point = Some(i);
-                    d.phase = Phase::Approach;
-                    d.final_leg = false;
-                    d.base_approach = None;
+                    bumped.extend(dockable.taken[i]);
+                    dockable.taken[i] = Some(e);
+                    docker.point = Some(i);
+                    docker.phase = Phase::Approach;
+                    docker.final_leg = false;
+                    docker.base_approach = None;
                 } else if here.distance(p) < WAIT_DIST {
                     ship.waypoints.clear();
                     ship.order = 0;
@@ -455,160 +455,160 @@ fn routine(
                 }
             }
             Phase::Approach => {
-                let Some(i) = d.point else {
-                    d.phase = Phase::Wait;
+                let Some(i) = docker.point else {
+                    docker.phase = Phase::Wait;
                     continue;
                 };
-                let (p, fwd) = dk.world(dtf, i);
+                let (p, fwd) = dockable.world(dockee_tf, i);
                 if flat(p, here) < ARRIVE {
-                    d.phase = Phase::Docked;
-                    d.timer = 0.0;
-                    let (heal_at, effect) = if dk.repairs { repair_secs(me.repair_fx.as_deref()) } else { (0.0, 0.0) };
-                    d.repair_secs = heal_at;
-                    d.healed = false;
+                    docker.phase = Phase::Docked;
+                    docker.timer = 0.0;
+                    let (heal_at, effect) = if dockable.repairs { repair_secs(class.repair_fx.as_deref()) } else { (0.0, 0.0) };
+                    docker.repair_secs = heal_at;
+                    docker.healed = false;
                     // Campaign worlds (IsCampaign) and every base give the full refit; a skirmish tender only tops up.
-                    d.full = base || mission.is_some();
-                    d.duration = mission.as_ref().and_then(|m| m.script.dock_time(e)).unwrap_or(MIN_DOCK_SECS).max(effect);
-                    d.offset = dtf.compute_affine().inverse().transform_point3(here);
-                    info!("docking: {e} docked with {} for {:.1} s (repair {:.1} s)", d.dockee, d.duration, d.repair_secs);
+                    docker.full = base || mission.is_some();
+                    docker.duration = mission.as_ref().and_then(|m| m.script.dock_time(e)).unwrap_or(MIN_DOCK_SECS).max(effect);
+                    docker.offset = dockee_tf.compute_affine().inverse().transform_point3(here);
+                    info!("docking: {e} docked with {} for {:.1} s (repair {:.1} s)", docker.dockee, docker.duration, docker.repair_secs);
                     ship.order = 0;
                     ship.speed = 0.0;
                     ship.waypoints.clear();
                     ship.goal = None;
                     if let Some(m) = mission.as_mut() {
-                        m.script.set_docked(e, d.dockee, true);
+                        m.script.set_docked(e, docker.dockee, true);
                     }
-                    // Exe: the dock routine plays HUD_Options_Dock on docking and the repair setup starts the ship's repair effect.
+                    // Retail: the dock routine plays HUD_Options_Dock on docking and the repair setup starts the ship's repair effect.
                     if human || ship.side == Side::Player {
                         sfx.write(Sfx::ui("HUD_Options_Dock"));
                     }
-                    if d.repair_secs > 0.0
-                        && let (Some(fxl), Some(name)) = (fxl.as_deref(), me.repair_fx.as_deref())
+                    if docker.repair_secs > 0.0
+                        && let (Some(fxl), Some(name)) = (fxl.as_deref(), class.repair_fx.as_deref())
                     {
-                        let local = Transform::from_translation(me.centre);
+                        let local = Transform::from_translation(class.centre);
                         crate::fx::spawn(&mut commands, fxl, name, Some(e), local, *tf * local, true);
                     }
                     continue;
                 }
-                let leg = if base { me.length } else { 1.5 * dockee_len };
-                let ap = d.base_approach.unwrap_or_else(|| approach_point(p, fwd, here, leg));
-                if base && d.base_approach.is_none() {
-                    d.base_approach = Some(ap);
+                let leg = if base { class.length } else { 1.5 * dockee_len };
+                let ap = docker.base_approach.unwrap_or_else(|| approach_point(p, fwd, here, leg));
+                if base && docker.base_approach.is_none() {
+                    docker.base_approach = Some(ap);
                     let scenery = crate::collision::scenery(obstacles.iter());
-                    let Some(mut route) = crate::collision::route_clear(me.collision_bounds, here, ap, &scenery) else {
+                    let Some(mut route) = crate::collision::route_clear(class.collision_bounds, here, ap, &scenery) else {
                         ship.waypoints.clear();
                         ship.goal = None;
                         ship.order = 0;
-                        warn!("docking: no clear base approach for {e} to {}", d.dockee);
+                        warn!("docking: no clear base approach for {e} to {}", docker.dockee);
                         continue;
                     };
                     route.push(p.with_y(here.y));
                     ship.waypoints = route;
                 }
-                if base && !d.final_leg && ship.waypoints.is_empty() {
+                if base && !docker.final_leg && ship.waypoints.is_empty() {
                     ship.order = 0;
                     continue;
                 }
                 // The leg is done near the approach point, or once the ship is already lined up between it and the dock point.
-                // PROVISIONAL: the exe's path-follower tolerance is not decoded; 10 units alone makes a cutter circle the point.
+                // PROVISIONAL: the original's path-follower tolerance is unknown; 10 units alone makes a cutter circle the point.
                 let rel = (here - p).with_y(0.0);
                 let along = (ap - p).with_y(0.0).normalize_or_zero();
-                let lined_up = rel.dot(along) < leg && (rel - along * rel.dot(along)).length() < me.length;
-                if !d.final_leg && (!base || ship.waypoints.len() <= 2) && (flat(ap, here) < ARRIVE.max(me.length) || lined_up) {
-                    d.final_leg = true;
+                let lined_up = rel.dot(along) < leg && (rel - along * rel.dot(along)).length() < class.length;
+                if !docker.final_leg && (!base || ship.waypoints.len() <= 2) && (flat(ap, here) < ARRIVE.max(class.length) || lined_up) {
+                    docker.final_leg = true;
                 }
                 ship.goal = None;
-                if d.final_leg {
+                if docker.final_leg {
                     ship.waypoints = vec![p.with_y(here.y)];
                     ship.order = 1;
                 } else if base {
                     ship.order = 2;
                 } else {
-                    // Exe: a ship on the far side of a ship dockee (angle at its centre > 0.6π) re-plans around it; with straight legs
+                    // Retail: a ship on the far side of a ship dockee (angle at its centre > 0.6π) re-plans around it; with straight legs
                     // here that is a detour point out beside the dock point first.
-                    let c = dtf.translation;
+                    let c = dockee_tf.translation;
                     let far = !base && (here - c).with_y(0.0).angle_between((ap - c).with_y(0.0)) > APPROACH_ARC;
-                    let side = (p + (p - c).with_y(0.0).normalize_or_zero() * (me.length + dockee_len)).with_y(here.y);
+                    let side = (p + (p - c).with_y(0.0).normalize_or_zero() * (class.length + dockee_len)).with_y(here.y);
                     ship.waypoints = if far { vec![side, ap, p.with_y(here.y)] } else { vec![ap, p.with_y(here.y)] };
                     ship.order = 2;
                 }
             }
             Phase::Docked => {
-                d.timer += dt;
-                // PROVISIONAL: the exe's arrival steering (not decoded) carries the ship the last few units; here it settles onto the
+                docker.timer += dt;
+                // PROVISIONAL: the original's arrival steering (not decoded) carries the ship the last few units; here it settles onto the
                 // point, parallel to the point's axis, instead of stopping up to 10 units short.
                 let k = 1.0 - (-2.0 * dt).exp();
-                if let Some(i) = d.point {
-                    let pl = dk.points[i].pos.with_y(d.offset.y);
-                    d.offset = d.offset.lerp(pl, k);
-                    let (_, fwd) = dk.world(dtf, i);
+                if let Some(i) = docker.point {
+                    let pl = dockable.points[i].pos.with_y(docker.offset.y);
+                    docker.offset = docker.offset.lerp(pl, k);
+                    let (_, fwd) = dockable.world(dockee_tf, i);
                     let along = bearing(Vec3::ZERO, fwd);
                     let want = if angdiff(along, ship.heading).abs() <= PI / 2.0 { along } else { along + PI };
                     ship.heading += angdiff(want, ship.heading) * k;
                     ship.ang_vel = 0.0;
                 }
-                tf.translation = dtf.transform_point(d.offset);
+                tf.translation = dockee_tf.transform_point(docker.offset);
                 ship.order = 0;
                 ship.speed = 0.0;
-                if d.repair_secs > 0.0 && !d.healed && d.timer >= d.repair_secs {
-                    d.healed = true;
-                    repair(&lib, &ship, &mut h, d.full);
-                    if d.full
+                if docker.repair_secs > 0.0 && !docker.healed && docker.timer >= docker.repair_secs {
+                    docker.healed = true;
+                    repair(&lib, &ship, &mut health, docker.full);
+                    if docker.full
                         && let Some(g) = guns.as_mut()
                     {
                         g.rearm();
                     }
-                    info!("docking: {e} repaired ({})", if d.full { "full refit" } else { "damaged sections" });
+                    info!("docking: {e} repaired ({})", if docker.full { "full refit" } else { "damaged sections" });
                 }
-                if d.timer >= d.duration {
-                    info!("docking: {e} released by {} (core {:.0}/{:.0})", d.dockee, h.core, me.core_hp);
-                    gone(&mut mission, &mut dk, &d);
+                if docker.timer >= docker.duration {
+                    info!("docking: {e} released by {} (core {:.0}/{:.0})", docker.dockee, health.core, class.core_hp);
+                    gone(&mut mission, &mut dockable, &docker);
                     // The human ship just stays where it is; AI ships leave along the dock axis (ship dockees) and sail back.
                     if human {
-                        d.phase = Phase::Clear;
-                        d.timer = 0.0;
+                        docker.phase = Phase::Clear;
+                        docker.timer = 0.0;
                     } else {
-                        d.phase = if base { Phase::Turn } else { Phase::Away };
-                        d.timer = 0.0;
+                        docker.phase = if base { Phase::Turn } else { Phase::Away };
+                        docker.timer = 0.0;
                     }
                 }
             }
             Phase::Clear => {
-                d.timer += dt;
-                let out = d.point.is_none_or(|i| flat(dk.world(dtf, i).0, here) > me.length);
-                if out || d.timer >= LEG_SECS {
+                docker.timer += dt;
+                let out = docker.point.is_none_or(|i| flat(dockable.world(dockee_tf, i).0, here) > class.length);
+                if out || docker.timer >= LEG_SECS {
                     commands.entity(e).remove::<Docker>();
                 }
             }
             Phase::Away => {
-                d.timer += dt;
-                let (p, fwd) = d.point.map_or((dtf.translation, Vec3::NEG_Z), |i| dk.world(dtf, i));
+                docker.timer += dt;
+                let (p, fwd) = docker.point.map_or((dockee_tf.translation, Vec3::NEG_Z), |i| dockable.world(dockee_tf, i));
                 let heading = Vec3::new(-ship.heading.sin(), 0.0, -ship.heading.cos());
                 let dir = if heading.dot(fwd) >= 0.0 { fwd } else { -fwd };
-                let to = (p + dir * AWAY_FRAC * (dockee_len + me.length)).with_y(here.y);
+                let to = (p + dir * AWAY_FRAC * (dockee_len + class.length)).with_y(here.y);
                 ship.waypoints = vec![to];
                 ship.order = 1;
-                if flat(to, here) < AWAY_DONE || d.timer >= LEG_SECS {
-                    d.phase = Phase::Turn;
-                    d.timer = 0.0;
+                if flat(to, here) < AWAY_DONE || docker.timer >= LEG_SECS {
+                    docker.phase = Phase::Turn;
+                    docker.timer = 0.0;
                 }
             }
             Phase::Turn => {
-                d.timer += dt;
-                let want = bearing(here, d.start);
+                docker.timer += dt;
+                let want = bearing(here, docker.start);
                 ship.waypoints.clear();
                 ship.goal = Some(want);
                 ship.order = 1;
-                if angdiff(want, ship.heading).abs() < TURN_DONE || d.timer >= LEG_SECS {
-                    let dir = (d.start - here).with_y(0.0).normalize_or_zero();
+                if angdiff(want, ship.heading).abs() < TURN_DONE || docker.timer >= LEG_SECS {
+                    let dir = (docker.start - here).with_y(0.0).normalize_or_zero();
                     ship.goal = None;
-                    ship.waypoints = if flat(d.start, here) > RETURN_LEG { vec![here + dir * RETURN_LEG, d.start] } else { vec![d.start] };
+                    ship.waypoints = if flat(docker.start, here) > RETURN_LEG { vec![here + dir * RETURN_LEG, docker.start] } else { vec![docker.start] };
                     ship.order = 2;
-                    d.phase = Phase::Return;
+                    docker.phase = Phase::Return;
                 }
             }
             Phase::Return => {
-                if ship.waypoints.is_empty() || flat(d.start, here) < ARRIVE {
+                if ship.waypoints.is_empty() || flat(docker.start, here) < ARRIVE {
                     ship.waypoints.clear();
                     ship.order = 0;
                     commands.entity(e).remove::<Docker>();
@@ -616,16 +616,16 @@ fn routine(
             }
         }
     }
-    // A ship whose point was taken over goes back to waiting (exe: its routine state is reset to 1).
-    for b in bumped {
-        if let Ok((.., mut d, _, _)) = dockers.get_mut(b) {
-            d.point = None;
-            d.phase = Phase::Wait;
+    // A ship whose point was taken over goes back to waiting.
+    for bumped_ship in bumped {
+        if let Ok((.., mut docker, _, _)) = dockers.get_mut(bumped_ship) {
+            docker.point = None;
+            docker.phase = Phase::Wait;
         }
     }
 }
 
-/// Exe `DockPointEffectKeeper`: every dock point of a dockable object shows the 'Docking_Point' effect while the object can be
+/// Every dock point of a dockable object shows the 'Docking_Point' effect while the object can be
 /// docked with; the effects go away when it cannot (disabled or destroyed).
 fn markers(mut commands: Commands, fxl: Option<Res<FxLib>>, mut q: Query<(Entity, &Transform, &mut Dockable, Option<&Health>)>) {
     let Some(fxl) = fxl else { return };

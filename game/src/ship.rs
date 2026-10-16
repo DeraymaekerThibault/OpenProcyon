@@ -48,7 +48,7 @@ pub struct Ship {
 #[derive(Component)]
 pub struct PlayerShip;
 
-/// 'AI_LOCK_POSITION' (right-click menu, ChangeHold command 0x14): the ship's captain keeps it where it is; it still fires.
+/// 'AI_LOCK_POSITION' (right-click menu Hold): the ship's captain keeps it where it is; it still fires.
 #[derive(Component)]
 pub struct HoldPosition;
 
@@ -158,7 +158,7 @@ pub fn step(ship: &mut Ship, tf: &mut Transform, class: &combat::Class, health: 
         if let Some(w) = want {
             steer = (angdiff(w, ship.heading) * 2.0).clamp(-1.0, 1.0);
         }
-        // Turning follows ShipPhysics::Update in the original exe (docs/re/movement.md). Assumed mapping (not verified):
+        // Turning follows the original's ship physics (docs/re/movement.md). Assumed mapping (not verified):
         // rudder in [-1,1] is `steer`, and the torque scale is WOT MaxAngularAcceleration.
         let v = ship.speed.abs();
         let mut a = steer * TURN_SCALE * ship.crew_turn * ph.max_ang_acc * (1.0 - 1.0 / (0.1 * v + 1.0)) * combat::turn_factor(class, health);

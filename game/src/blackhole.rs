@@ -1,8 +1,8 @@
 //! Black holes (Terrain_BlackHole_*): the funnel mesh, the BlackHoleRibbons effect's particle systems (via fx.rs) and its
-//! `Vortex` primitive, which fx.rs cannot run. Behaviour from the exe (VortexPrimitive spawn, point
-//! update; TrailPrimitive segment update, segment init; see docs/re/effects.md "Vortex").
+//! `Vortex` primitive, which fx.rs cannot run. Behaviour as specified in docs/re/effects.md "Vortex"
+//! (point spawn and update, trail segment init and update).
 //! Everything ticks at the engine's 30 Hz. PROVISIONAL: ribbon texture mapping/blend and the point-effect orientation's
-//! normalisation (an exe helper, not decoded). Pull (`Magnitude`): see `pull` below; the force law is PROVISIONAL.
+//! normalisation (unknown). Pull (`Magnitude`): see `pull` below; the force law is PROVISIONAL.
 use bevy::asset::RenderAssetUsages;
 use bevy::camera::visibility::NoFrustumCulling;
 use bevy::mesh::{Indices, PrimitiveTopology};
@@ -16,7 +16,7 @@ use crate::{Health, Scenario, Ship, assets_dir, fx};
 const TICK: f32 = 1.0 / 30.0;
 const SEG_LIFE: i32 = 300; // trail segment lifetime in ticks
 const SEG_EVERY: i32 = 15; // ticks between trail segments
-/// PROVISIONAL pull gain: acceleration at the hole's radius = PULL_GAIN * Magnitude / radius^2 (the exe's law is not decoded).
+/// PROVISIONAL pull gain: acceleration at the hole's radius = PULL_GAIN * Magnitude / radius^2 (the original's law is unknown).
 const PULL_GAIN: f32 = 25.0;
 
 /// A hole's CUSTOMINFO `Magnitude` and `Radius` (Terrain_BlackHole_*.wot; retail values 9000/145, 15000/260, 25000/625).
@@ -153,7 +153,7 @@ impl BlackHole {
             }
             pt.segs.retain(|s| s.life > 0);
         }
-        // A dead point takes its trail with it (the exe frees the point's effect).
+        // A dead point takes its trail with it (the original frees the point's effect).
         pts.retain(|pt| !pt.dead);
         self.pts = pts;
     }
@@ -174,7 +174,7 @@ fn load(kind: &str) -> Option<Params> {
         ang0: t("ANGLE_DELTA_START"),
         ang_add: t("ANGLE_DELTA_CHANGE"),
         z_off: t("CENTER_Z_OFFSET"),
-        z_add: t("Z_DELTA_DELTA_ADD") * 0.001, // the exe scales this value by 0.001 on load
+        z_add: t("Z_DELTA_DELTA_ADD") * 0.001, // the original scales this value by 0.001 on load
         up: t("UP_CHANGE"),
         high: t("HIGHT_POINT"),
         back: w("BackDrift"),
@@ -251,7 +251,7 @@ pub fn update(
         let (mut pos, mut uv, mut col, mut idx) = (vec![], vec![], vec![], vec![]);
         for pt in &h.pts {
             if pt.segs.len() < 3 {
-                continue; // the exe draws a trail only once it has more than two segments
+                continue; // the original draws a trail only once it has more than two segments
             }
             let base = pos.len() as u32;
             for (i, s) in pt.segs.iter().enumerate() {

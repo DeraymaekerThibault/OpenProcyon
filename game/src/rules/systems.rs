@@ -25,11 +25,6 @@ pub enum Ui {
     BarTop,
     BarBottom,
 }
-/// PROCYON_END_SHOT and PROCYON_NIS_SHOT, read once instead of every frame.
-fn dev_env() -> &'static (Option<std::ffi::OsString>, Option<std::ffi::OsString>) {
-    static ENV: std::sync::OnceLock<(Option<std::ffi::OsString>, Option<std::ffi::OsString>)> = std::sync::OnceLock::new();
-    ENV.get_or_init(|| (std::env::var_os("PROCYON_END_SHOT"), std::env::var_os("PROCYON_NIS_SHOT")))
-}
 /// A looping effect created by 'Create/Release Event Effect', keyed by point set + effect name.
 #[derive(Component)]
 struct EventFx(String);
@@ -58,16 +53,8 @@ struct Extra<'w, 's> {
     toggles: Option<ResMut<'w, crate::panels::Toggles>>,
     detonate: MessageWriter<'w, crate::combat::Detonate>,
     dragons: Query<'w, 's, &'static mut crate::dragons::Dragon>,
-    dev: Local<'s, Dev>,
-}
-/// State of the PROCYON_*_SHOT dev hooks.
-#[derive(Default)]
-struct Dev {
-    nis_age: f32,
-    shot_taken: bool,
-    end_age: f32,
-    end_shot: bool,
-    skipped: bool,
+    /// `--script dock` skipped the briefing already.
+    dock_smoke_skipped: Local<'s, bool>,
 }
 #[derive(Component)]
 struct MusicFade {
@@ -83,6 +70,7 @@ pub fn plugin(app: &mut App) {
         Update,
         (
             update.after(crate::briefing::update).before(crate::input),
+            crate::smoke::screenshot_hooks.after(update),
             mission_ai.after(update).before(crate::ship::fleet_follow),
             leash_player.after(update).before(crate::sail),
             presentation.after(nis_camera),
@@ -159,13 +147,13 @@ fn update(
     }
     let opening = mission.opening.is_some();
     let dt = time.delta_secs();
-    crate::smoke::dock(&cfg, mission, &mut extra.dev.skipped, &mut ships);
-    let mut w = units(&ships, &lib);
-    w.extend(animals.iter().map(|(e, a, tf, _)| a.unit(e, tf)));
-    w.extend(extra.bases.iter_mut().map(|(e, b, tf, armed)| b.unit(e, tf, armed.map_or(0.0, |(a, h)| crate::combat::base_mission_damage(&lib.classes[a.class], h)))));
-    w.extend(rocks.iter().map(|(e, tf, a)| a.unit(e, tf)));
-    mission.script.tag(&mut w);
-    let owner_of = |e: Entity| w.iter().find(|u| u.e == e).map(|u| u.owner.clone());
+    crate::smoke::dock(&cfg, mission, &mut extra.dock_smoke_skipped, &mut ships);
+    let mut world = units(&ships, &lib);
+    world.extend(animals.iter().map(|(e, a, tf, _)| a.unit(e, tf)));
+    world.extend(extra.bases.iter_mut().map(|(e, b, tf, armed)| b.unit(e, tf, armed.map_or(0.0, |(a, h)| crate::combat::base_mission_damage(&lib.classes[a.class], h)))));
+    world.extend(rocks.iter().map(|(e, tf, a)| a.unit(e, tf)));
+    mission.script.tag(&mut world);
+    let owner_of = |e: Entity| world.iter().find(|u| u.e == e).map(|u| u.owner.clone());
     for h in hits.read() {
         mission.script.record_hit(owner_of(h.shooter).as_deref(), h.victim);
     }
@@ -175,23 +163,23 @@ fn update(
     for c in extra.captured.read() {
         mission.script.record_capture(&c.by, &c.victim, c.unit, extra.bases.contains(c.unit));
     }
-    let sc = &mut mission.script;
-    for u in w.iter().filter(|u| rocks.contains(u.e)) {
-        sc.belt.entry(u.e).or_insert_with(|| std::iter::once(u.owner.clone()).chain(u.groups.iter().cloned()).collect());
+    let script = &mut mission.script;
+    for u in world.iter().filter(|u| rocks.contains(u.e)) {
+        script.belt.entry(u.e).or_insert_with(|| std::iter::once(u.owner.clone()).chain(u.groups.iter().cloned()).collect());
     }
     for d in killed.read() {
         if let Some(o) = owner_of(d.by) {
-            *sc.kills.entry(o).or_default() += 1;
+            *script.kills.entry(o).or_default() += 1;
         }
     }
     // Space (Skip Speech Event) ends the current line in every cutscene/gameplay speech, as in the opening NIS.
-    if !opening && extra.binds.just_pressed(&keys, crate::bindings::Act::SkipSpeech) && sc.skip_speech() {
+    if !opening && extra.binds.just_pressed(&keys, crate::bindings::Act::SkipSpeech) && script.skip_speech() {
         for e in &extra.voices {
             commands.entity(e).despawn();
         }
     }
-    sc.nebulae = crate::nebula::polygons(&mission.data, &extra.storm_shift);
-    let (fxs, voice) = sc.step(&w, dt, opening);
+    script.nebulae = crate::nebula::polygons(&mission.data, &extra.storm_shift);
+    let (fxs, voice) = script.step(&world, dt, opening);
     if let Some(file) = voice {
         commands.spawn((
             Scenario,
@@ -625,9 +613,9 @@ fn update(
         }
     }
     // Mission 1's refit task: a hint while the weapons tender is in range (docking itself is docking.rs; D is a keyboard shortcut).
-    // `w` is last frame-start's snapshot: good enough for a hint and the dev autopilot.
+    // `world` is last frame-start's snapshot: good enough for a hint and the dev autopilot.
     mission.script.hint.clear();
-    if let (Some(p), Some(t)) = (w.iter().find(|u| u.primary && u.alive), w.iter().find(|u| u.name == "RLS Bounty")) {
+    if let (Some(p), Some(t)) = (world.iter().find(|u| u.primary && u.alive), world.iter().find(|u| u.name == "RLS Bounty")) {
         let wants = mission.script.task_active("Dock With Tender");
         let near = extra.sensors.in_sight(p.e, t.e, Some(mission)) && !mission.script.docked.contains(&(p.e, t.e));
         if wants && near {
@@ -637,35 +625,8 @@ fn update(
             extra.dock.write(DockMsg::Dock { docker: None, dockee: t.e });
         }
     }
-    // Dev hook: PROCYON_END_SHOT=<png> saves a screenshot 3 s after the mission ends and quits.
-    if let (Some(path), Some(_)) = (dev_env().0.clone(), mission.script.ended.as_ref()) {
-        extra.dev.end_age += dt;
-        if extra.dev.end_age > 3.0 && !extra.dev.end_shot {
-            extra.dev.end_shot = true;
-            commands.spawn(bevy::render::view::screenshot::Screenshot::primary_window()).observe(bevy::render::view::screenshot::save_to_disk(std::path::PathBuf::from(path)));
-        } else if extra.dev.end_age > 8.0 {
-            std::process::exit(0);
-        }
-    }
-    // Dev hook: PROCYON_NIS_SHOT=<png> saves a screenshot 4 s into the third script NIS (rule starts) and quits shortly after.
-    if let Some(path) = dev_env().1.clone() {
-        if mission.script.nis && !mission.opening.is_some() {
-            extra.dev.nis_age += dt;
-        } else {
-            extra.dev.nis_age = 0.0;
-        }
-        if extra.dev.nis_age > 4.0 && !extra.dev.shot_taken && mission.script.time > 400.0 {
-            extra.dev.shot_taken = true;
-            commands.spawn(bevy::render::view::screenshot::Screenshot::primary_window()).observe(bevy::render::view::screenshot::save_to_disk(std::path::PathBuf::from(path)));
-        } else if extra.dev.shot_taken {
-            extra.dev.nis_age += dt;
-            if extra.dev.nis_age > 12.0 {
-                std::process::exit(0);
-            }
-        }
-    }
     if cfg.script.as_deref() == Some("mission") {
-        autopilot(&mission.script, &w, &mission.data, &rocks, &mut ships, &mut target);
+        autopilot(&mission.script, &world, &mission.data, &rocks, &mut ships, &mut target);
     }
 }
 
@@ -778,7 +739,7 @@ fn mission_ai(
             continue; // Movement/turning come from the shared tow constraint, not a rigid teleport.
         }
         // Border zone: a ship outside its leash volume drops what it was doing and heads back (to its return point, else the
-        // zone's centre). PROVISIONAL: the exe's border AI is not decoded; this re-enters and resumes on the next frame inside.
+        // zone's centre). PROVISIONAL: the original's border AI is unknown; this re-enters and resumes on the next frame inside.
         if !primary
             && !h.destroyed
             && !busy.contains(e)
@@ -860,7 +821,7 @@ fn mission_ai(
             ms.stop_at_end = true;
         } else if ms.stop_at_end && ms.looping.is_none() && ship.waypoints.len() <= 1 {
             // Retail takes the last point of a 'to end' path within 2 x the ship's radius, then cuts throttle to 0.
-            // PROVISIONAL: `class.radius` stands in for the exe's radius field. A finished chase (remake AI) likewise waits for orders.
+            // PROVISIONAL: `class.radius` stands in for the original's radius field. A finished chase (remake AI) likewise waits for orders.
             if ship.waypoints.first().is_some_and(|p| p.distance(tf.translation) >= 2.0 * lib.classes[ship.class].radius) {
                 continue;
             }

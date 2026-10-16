@@ -260,7 +260,7 @@ fn parse_prim(p: &Value, tex_names: &mut Vec<String>) -> Prim {
     let ve = p.get("VelocityEmitter");
     let pa = p.get("CHUNKDATA_POSITION_ANGLE_EMITTER");
     let va = p.get("CHUNKDATA_VELOCITY_ANGLE_EMITTER");
-    // Per-spawn chunks (colour fader, size, rectangle, rotation) override the common ones; the exe creates them per spawned
+    // Per-spawn chunks (colour fader, size, rectangle, rotation) override the common ones; the original creates them per spawned
     // batch, so their curves run over the particle's own age (e.g. the engine's orange fade lives only here).
     let mut merged = p["CommonPropertiesChunk"].clone();
     if let (Some(m), Some(sp)) = (merged.as_object_mut(), p["SpawnedEachTimePropertiesChunk"].as_object()) {
@@ -438,14 +438,14 @@ pub fn spawn(commands: &mut Commands, lib: &FxLib, name: &str, parent: Option<En
     Some(e.id())
 }
 
-/// Engine tick (exe constant 0.033): particles spawn and advance once per tick; velocities are stored per second.
+/// Engine tick (retail constant 0.033): particles spawn and advance once per tick; velocities are stored per second.
 const TICK: f32 = 1.0 / 30.0;
-/// Movement infos (attractor etc.) only run once at least this much time has passed (exe constant 0.1).
+/// Movement infos (attractor etc.) only run once at least this much time has passed (retail constant 0.1).
 const MOVE_STEP: f32 = 0.1;
 
-/// Exe: effect detail D falls linearly from 1 at the camera to 0 at EffectsLowestDetailDistance (350, retail
+/// Retail: effect detail D falls linearly from 1 at the camera to 0 at EffectsLowestDetailDistance (350, retail
 /// default profile; max detail 1.0); spawn count = rate x (D - D*L + L), L = the primitive's LowDetailParticleRateMultiply.
-/// shortcut: the exe's extra off-screen test (D = 0) is not modelled; no camera = full detail.
+/// shortcut: the original's extra off-screen test (D = 0) is not modelled; no camera = full detail.
 fn detail_factor(low: f32, dist: f32) -> f32 {
     let d = (1.0 - dist / LOWEST_DETAIL_DISTANCE).clamp(0.0, 1.0);
     d - d * low + low
@@ -513,7 +513,7 @@ fn update_fx(
                         n += prim.start;
                     }
                     if live {
-                        // Exe: rate is particles per tick; a fractional rate spawns one with that probability.
+                        // Retail: rate is particles per tick; a fractional rate spawns one with that probability.
                         let r = prim.rate.at(t, 0.0) * scale * detail_factor(prim.low_rate, cam_pos.map_or(0.0, |c| c.distance(gt.translation())));
                         n += if r >= 1.0 {
                             r as u32
@@ -594,9 +594,9 @@ fn particle_axes(prim: &Prim, gt: &GlobalTransform, vel: Vec3, camera_axes: [Vec
 
 fn spawn_particle(p: &Prim, t: f32, gt: &GlobalTransform, rng: &mut FxRng) -> P {
     let at = |c: &[Curve; 3]| Vec3::new(c[0].at(t, 0.0), c[1].at(t, 0.0), c[2].at(t, 0.0));
-    // Exe: the error is one-sided, uniform between 0 and err.
+    // Retail: the error is one-sided, uniform between 0 and err.
     let jitter = |len: f32, err: f32, rng: &mut FxRng| len + err * rng.f();
-    // Exe: enabled target and angle emitters add independent position/velocity contributions.
+    // Retail: enabled target and angle emitters add independent position/velocity contributions.
     let emit = |tg: Vec3, r: f32, l: f32, le: f32, rng: &mut FxRng| (tg - rng.sphere().normalize_or_zero() * r).normalize_or_zero() * jitter(l, le, rng);
     let angle = |dir: &[Curve; 3], min: &Curve, max: &Curve, len: &Curve, err: &Curve, rng: &mut FxRng| {
         let dir = at(dir).normalize_or_zero();

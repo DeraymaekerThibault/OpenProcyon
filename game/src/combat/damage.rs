@@ -11,7 +11,7 @@ impl DamageFx {
     }
 }
 
-/// Fires burning on a ship (exe FireKeeper; see docs/re/effects.md).
+/// Fires burning on a ship (docs/re/effects.md).
 #[derive(Component, Default)]
 pub struct Fires {
     pub list: Vec<Fire>,
@@ -35,7 +35,7 @@ pub const FIRE_FULL: f32 = 20.0;
 
 pub const FIRE_FADE: [f32; 2] = [3.0, 5.0];
 
-/// PROVISIONAL: intensity the crew puts out per tick. The exe asks the ship's IFlammable interface (crew-skill driven; not decoded).
+/// PROVISIONAL: intensity the crew puts out per tick. The original's rate is crew-skill driven; the formula is unknown.
 pub const FIRE_FIGHTING: f32 = 0.5;
 
 pub fn fire_scale(i: f32) -> f32 {
@@ -97,7 +97,7 @@ pub fn damage_fx(mut commands: Commands, lib: Res<Library>, fxl: Res<FxLib>, mut
     }
 }
 
-/// Fire update every FIRE_TICK s, in the exe's order: crew puts out the strongest fires first, burning fires damage
+/// Fire update every FIRE_TICK s, in the original's order: crew puts out the strongest fires first, burning fires damage
 /// their section by their intensity, fires on destroyed sections die, dead fires fade out (3 s) then go (5 s), burning
 /// fires double. Effect size follows intensity (full at 20, floor 10%).
 pub fn fires(
@@ -194,7 +194,7 @@ pub fn fires(
     }
 }
 
-/// Exe: a destroyed swappable section swaps its mesh "<A>_<B>" for "<A>Damage_<B>".
+/// Retail: a destroyed swappable section swaps its mesh "<A>_<B>" for "<A>Damage_<B>".
 /// The GLB carries both; show whichever matches the section state. Runs every frame so freshly loaded scenes are covered.
 pub fn swap_meshes(lib: Res<Library>, ships: Query<(Entity, &Ship, &Health)>, children: Query<&Children>, mut nodes: Query<(&Name, &mut Visibility)>) {
     for (e, ship, h) in &ships {

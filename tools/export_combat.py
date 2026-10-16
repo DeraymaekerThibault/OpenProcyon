@@ -103,7 +103,7 @@ def impact_sounds(nodes):
     return out
 
 
-# Bullets the exe spawns itself (hard-coded, not named by any gun): the Nova Mortar's burst; and bullets of non-ship shooters
+# Bullets the original spawns itself (hard-coded, not named by any gun): the Nova Mortar's burst; and bullets of non-ship shooters
 # (mission 9's dark-matter blast, the dragons' breath, a mod's storm lightning) that every export carries when the install has them.
 EXTRA_BULLETS = {"Bullet_NovaMortar": ("Bullet_NovaMortar_Secondary",)}
 ALWAYS_BULLETS = (
