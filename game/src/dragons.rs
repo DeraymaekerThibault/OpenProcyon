@@ -84,8 +84,11 @@ pub fn spawn(commands: &mut Commands, assets: &AssetServer, data: &Value) {
 }
 
 /// Gravity-affected breath: the launch direction for muzzle speed `s` to reach offset `d` (low arc), or straight if out of reach.
+/// PROVISIONAL gravity on dragon breath (dragons have no gun data to derive it from).
+const BREATH_G: f32 = 9.8;
+
 fn breath_dir(d: Vec3, s: f32) -> Vec3 {
-    const G: f32 = 9.8;
+    const G: f32 = BREATH_G;
     let (r, h) = (Vec2::new(d.x, d.z).length(), d.y);
     let disc = s.powi(4) - G * (G * r * r + 2.0 * h * s * s);
     if disc < 0.0 || r < 0.01 {
@@ -215,7 +218,15 @@ fn think(
             if tf.forward().dot(aim.with_y(0.0).normalize_or_zero()) > 0.5 {
                 d.cooldown = reload;
                 let side = if t.2.side == Side::Player { Side::Enemy } else { Side::Player };
-                shoot.write(crate::combat::Shoot { bullet: bullet.clone(), from: mouth, vel: breath_dir(aim, muzzle) * muzzle, side, shooter: e, target: Some(t.0) });
+                shoot.write(crate::combat::Shoot {
+                    bullet: bullet.clone(),
+                    from: mouth,
+                    vel: breath_dir(aim, muzzle) * muzzle,
+                    side,
+                    shooter: e,
+                    target: Some(t.0),
+                    gravity: BREATH_G,
+                });
                 if let Some(name) = gun["sound"].as_str() {
                     sfx.write(crate::audio::Sfx { name: name.into(), at: Some(mouth), vol: 1.0, max: 700.0 });
                 }

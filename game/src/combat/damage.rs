@@ -215,10 +215,20 @@ pub fn swap_meshes(lib: Res<Library>, ships: Query<(Entity, &Ship, &Health)>, ch
     }
 }
 
-/// Crew damage control (every 12 s, docs/re/refit-resupply.md §3.4): damaged (not destroyed) sections slowly mend.
-/// PROVISIONAL amount and odds: the exe scales a chance by the crew's engineering skill and adds an amount not yet decoded; here
-/// each tick has a 75% chance to restore 5% of the most damaged living section's hit points.
+/// Crew damage control (every 12 s, docs/re/refit-resupply.md §3.4), as measured on a retail skirmish Man-O-War
+/// (docs/re/refit-resupply.md#crew-damage-control-measured): each tick mends one damaged, living **sail** section, chosen at
+/// random (not the most damaged), by 3 hit points, sometimes 6 (about one tick in three), never above its maximum.
+/// Hull, bow and rudder sections are not mended (two +1 events in nine minutes, ignored here).
+/// PROVISIONAL: one ship and one crew measured; the tick chance (15 of 16 ticks) and the crew-skill scaling are not decoded.
 pub const CREW_REPAIR_TICK: f32 = 12.0;
+
+/// One damage-control tick: the section to mend and its new hit points, from two uniform rolls in [0, 1).
+pub fn repair_tick(class: &Class, sections: &[f32], pick: f32, amount: f32) -> Option<(usize, f32)> {
+    let sails: Vec<usize> = (0..sections.len()).filter(|&i| class.sections[i].material.contains("Cloth") && sections[i] > 0.0 && sections[i] < class.sections[i].hp).collect();
+    let i = *sails.get(((pick * sails.len() as f32) as usize).min(sails.len().saturating_sub(1)))?;
+    let add = if amount < 1.0 / 3.0 { 6.0 } else { 3.0 };
+    Some((i, (sections[i] + add).min(class.sections[i].hp)))
+}
 
 pub fn crew_repair(
     time: Res<Time>,
@@ -228,7 +238,8 @@ pub fn crew_repair(
     mut ships: Query<(&Ship, &mut Health, Option<&crate::crew_arms::CrewPosts>)>,
     mut acc: Local<f32>,
 ) {
-    // The human fleet's odds follow the roster's best engineer (0.5 .. 1.0); others keep 75%.
+    // Retail skirmish crew: 15 of 16 ticks mended a sail. The human fleet's odds follow the roster's best engineer (0.5 .. 1.0).
+    const ODDS: f32 = 0.94;
     let engineer = points.as_deref().and_then(|p| crate::crew_arms::best(p, "engineering")).map(|e| 0.5 + 0.5 * e);
     *acc += time.delta_secs();
     if *acc < CREW_REPAIR_TICK {
@@ -236,21 +247,13 @@ pub fn crew_repair(
     }
     *acc -= CREW_REPAIR_TICK;
     for (ship, mut h, posts) in &mut ships {
-        let odds = if ship.side == crate::Side::Player { posts.map_or(engineer.unwrap_or(0.75), |p| p.skill(4, "engineering").map_or(0.75, |e| 0.5 + 0.5 * e)) } else { 0.75 };
+        let odds = if ship.side == crate::Side::Player { posts.map_or(engineer.unwrap_or(ODDS), |p| p.skill(4, "engineering").map_or(ODDS, |e| 0.5 + 0.5 * e)) } else { ODDS };
         if h.destroyed || rng.f() > odds {
             continue;
         }
-        let class = &lib.classes[ship.class];
-        let worst = h
-            .sections
-            .iter()
-            .zip(&class.sections)
-            .enumerate()
-            .filter(|(_, (hp, s))| **hp > 0.0 && **hp < s.hp)
-            .min_by(|a, b| (a.1.0 / a.1.1.hp).total_cmp(&(b.1.0 / b.1.1.hp)))
-            .map(|(i, _)| i);
-        if let Some(i) = worst {
-            h.sections[i] = (h.sections[i] + class.sections[i].hp * 0.05).min(class.sections[i].hp);
+        let (pick, amount) = (rng.f(), rng.f());
+        if let Some((i, hp)) = repair_tick(&lib.classes[ship.class], &h.sections, pick, amount) {
+            h.sections[i] = hp;
         }
     }
 }
