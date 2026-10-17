@@ -23,7 +23,7 @@ pub fn fleet_smoke(world: &mut World, mut previous: Local<Option<Entity>>) {
             let path = world.resource::<campaign::Mission>().data["paths"]["Etherium Current"].as_array().unwrap();
             let (a, b) = (game_to_bevy(&path[0]), game_to_bevy(&path[1]));
             let force = world.get::<crate::environment::Current>(currents[0]).unwrap().force(a.midpoint(b));
-            assert!(force.dot(a - b) > 0.0, "Mission 3 current pushes toward the first path point");
+            assert!(force.dot(b - a) > 0.0, "Mission 3 current flows from the first path point toward the last");
             let children = world.get::<Children>(currents[0]).unwrap();
             assert_eq!(children.len(), 2);
             for child in children.iter() {

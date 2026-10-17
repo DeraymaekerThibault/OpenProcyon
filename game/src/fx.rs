@@ -165,6 +165,7 @@ struct Prim {
     attract: Option<([Curve; 3], [Curve; 3])>,
     fallback_life: f32,
     low_rate: f32,      // LowDetailParticleRateMultiply
+    budget: f32,        // emission scale keeping the steady live count under MAX_LIVE
     src: Option<usize>, // spawn at the positions of this primitive's particles (invisible "source" emitters)
 }
 struct Effect {
@@ -316,6 +317,8 @@ fn parse_prim(p: &Value, tex_names: &mut Vec<String>) -> Prim {
     } else {
         f32::INFINITY
     };
+    let live = rate.0.iter().map(|(_, r)| *r).fold(0.0, f32::max) / TICK * if flag("Everlasting") { fallback_life } else { fallback_life.min(num("Duration")) };
+    let budget = if live.is_finite() && live > MAX_LIVE { MAX_LIVE / live } else { 1.0 };
     let src = p
         .get("CHUNKDATA_SOURCE_EMITTER")
         .filter(|s| s["CHUNKDATA_PARTICLE_SYSTEM_SOURCE_EMITTER_ENABLED"].as_bool() == Some(true))
@@ -375,6 +378,7 @@ fn parse_prim(p: &Value, tex_names: &mut Vec<String>) -> Prim {
         attract,
         fallback_life,
         low_rate: p["LowDetailParticleRateMultiply"].as_f64().unwrap_or(1.0) as f32,
+        budget,
         src,
     }
 }
@@ -451,6 +455,10 @@ fn detail_factor(low: f32, dist: f32) -> f32 {
     d - d * low + low
 }
 const LOWEST_DETAIL_DISTANCE: f32 = 350.0;
+/// PROVISIONAL steady live-particle budget per primitive. Every retail effect stays under ~3000 at its per-tick rate
+/// except GravCharge_Medium_Impact (180 per tick for 18 s, ~97000 additive quads): it saturates to a white blob and stalls the
+/// frame. Over-budget primitives emit proportionally fewer particles, keeping their shape. The original's own pool limit is unknown.
+const MAX_LIVE: f32 = 4000.0;
 
 fn update_fx(
     mut commands: Commands,
@@ -514,7 +522,7 @@ fn update_fx(
                     }
                     if live {
                         // Retail: rate is particles per tick; a fractional rate spawns one with that probability.
-                        let r = prim.rate.at(t, 0.0) * scale * detail_factor(prim.low_rate, cam_pos.map_or(0.0, |c| c.distance(gt.translation())));
+                        let r = prim.rate.at(t, 0.0) * prim.budget * scale * detail_factor(prim.low_rate, cam_pos.map_or(0.0, |c| c.distance(gt.translation())));
                         n += if r >= 1.0 {
                             r as u32
                         } else if r > 0.0 && rng.f() < r {
@@ -938,6 +946,15 @@ mod tests {
         assert!(source.fallback_life.is_infinite(), "start-only source particles remain available");
         let engine = &lib.list[lib.effects["NavyEngine_Light"]].prims[0];
         assert_eq!(engine.life.as_ref().unwrap().at(0.0, 0.0), 1.0, "explicit expiration is unchanged");
+    }
+
+    #[test]
+    fn only_the_gravity_well_is_thinned_to_the_particle_budget() {
+        let lib = FxLib::from_world(&mut World::new());
+        let well = &lib.list[lib.effects["GravCharge_Medium_Impact"]].prims[0];
+        assert!(well.rate.at(0.0, 0.0) * well.budget / TICK * well.fallback_life <= MAX_LIVE + 1.0);
+        let thinned: Vec<_> = lib.effects.iter().filter(|&(_, &i)| lib.list[i].prims.iter().any(|p| p.budget < 1.0)).map(|(n, _)| n.as_str()).collect();
+        assert_eq!(thinned, ["GravCharge_Medium_Impact"], "other effects keep their authored rates");
     }
 
     #[test]

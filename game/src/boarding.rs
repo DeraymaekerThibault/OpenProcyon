@@ -347,12 +347,25 @@ fn in_range(lib: &Library, boarder: &Body, target: &Body, target_points: &[Vec3]
         target_points.iter().any(|p| boarder.0.translation.distance(target.0.transform_point(*p)) - rb < BASE_RANGE) && vb.length() < BASE_SPEED
     }
 }
-fn has_harpoon(lib: &Library, ship: &Ship, health: &Health, guns: Option<&crate::combat::GunStates>) -> bool {
+/// The ship's live harpoon mounts (a gun whose section still stands) with the gun fitted there.
+fn harpoons<'a>(lib: &'a Library, ship: &Ship, health: &'a Health, guns: Option<&'a crate::combat::GunStates>) -> impl Iterator<Item = (&'a crate::data::Mount, &'a str)> {
     lib.classes[ship.class]
         .mounts
         .iter()
         .enumerate()
-        .any(|(i, m)| guns.map_or(m.gun.as_str(), |g| g.gun(i)).contains("Harpoon") && m.parent.is_none_or(|p| health.sections[p] > 0.0))
+        .map(move |(i, m)| (m, guns.map_or(m.gun.as_str(), |g| g.gun(i))))
+        .filter(|(m, gun)| gun.contains("Harpoon") && m.parent.is_none_or(|p| health.sections[p] > 0.0))
+}
+fn has_harpoon(lib: &Library, ship: &Ship, health: &Health, guns: Option<&crate::combat::GunStates>) -> bool {
+    harpoons(lib, ship, health, guns).next().is_some()
+}
+/// A live harpoon mount whose horizontal arc covers `at` (world point) within the gun's LongRange from the ship's centre.
+/// PROVISIONAL range rule, chosen to match the retail runs (docs/re/boarding.md §5).
+fn harpoon_bears(lib: &Library, ship: &Ship, health: &Health, guns: Option<&crate::combat::GunStates>, tf: &Transform, at: Vec3) -> bool {
+    harpoons(lib, ship, health, guns).any(|(m, gun)| {
+        let local = (tf.rotation * m.rot).inverse() * (at - tf.transform_point(m.pos));
+        (-local.x).atan2(-local.z).abs() <= m.arc / 2.0 && tf.translation.distance(at) <= lib.guns[gun].range[1]
+    })
 }
 
 /// Whether two objects are hostile: by the mission's alliance table (owners), else by skirmish side.
@@ -606,16 +619,66 @@ fn winch(mut commands: Commands, time: Res<Time>, lib: Res<Library>, hooks: Quer
     }
 }
 
-/// PROVISIONAL: a hostile AI ship (mission, not holding fire) that finds a boardable hostile base in reach boards it.
+/// Chance per retail AI tick (1/30 s) that a computer captain fires its harpoons at its target, and that a grappled one sends its
+/// boarders; boarding also needs an attacking strength above `AI_MIN_ATTACK` (docs/re/boarding.md §5).
+const AI_HARPOON_CHANCE: f32 = 0.05;
+const AI_BOARD_CHANCE: f32 = 0.2;
+const AI_MIN_ATTACK: i32 = 10;
+/// A chance per 1/30 s tick turned into one for a frame of `dt` seconds.
+fn per_tick(chance: f32, dt: f32) -> f32 {
+    1.0 - (1.0 - chance).powf(dt * 30.0)
+}
+
+/// The original's grapple-and-board routine, run by every AI-steered ship (not the player's command ship) against its current
+/// target: with a free harpoon whose arc covers the target in harpoon range it fires at a 5 % chance per tick; once the grapple holds (or, at a
+/// base, a boarding point is in reach) it boards at 20 % per tick if its boarding party is strong enough. PROVISIONAL: the
+/// original also skips the harpoon while a friendly ship or scenery is in the line of fire; and only a ship its target has fired
+/// at grapples (a retail Barque left an idle target alone and grappled ~17 s after being attacked).
+#[allow(clippy::type_complexity)]
 fn ai_boarding(
+    time: Res<Time>,
+    lib: Res<Library>,
+    mut rng: ResMut<Rng>,
+    mut commands: Commands,
+    mut sfx: MessageWriter<Sfx>,
     boarders: Boarders,
     mut msg: MessageWriter<BoardMsg>,
-    ships: Query<(Entity, &MissionShip), (With<Ship>, Without<PlayerShip>)>,
+    ships: Query<(Entity, &Ship, &Transform, &Health, Option<&crate::combat::GunStates>, &Boardable, Option<&MissionShip>, Option<&crate::ship::FleetPilot>), Without<PlayerShip>>,
     bases: Query<Entity, With<MissionBase>>,
+    targets: Query<(&Transform, &Ship)>,
+    (mut fired, mut attacked, captains): (MessageReader<crate::combat::Fired>, Local<std::collections::HashSet<(Entity, Entity)>>, Option<Res<crate::ship::CaptainTargets>>),
 ) {
-    for (e, ms) in &ships {
-        if ms.stance != crate::rules::Stance::Dummy
+    attacked.extend(fired.read().filter_map(|f| f.target.map(|t| (f.shooter, t))));
+    let dt = time.delta_secs();
+    let me = boarders.me();
+    for (e, ship, tf, health, guns, own, ms, pilot) in &ships {
+        if ms.is_some_and(|m| m.stance == crate::rules::Stance::Dummy || m.hold_fire) || pilot.is_some_and(|p| p.hold_fire) {
+            continue;
+        }
+        // Mission ships: the rules' target. Others: an explicit fleet order, else their captain's target (ship::CaptainTargets),
+        // else (skirmish enemies) the player's ship.
+        let target = match ms {
+            Some(m) => m.target,
+            None => pilot.and_then(|p| p.target).or_else(|| captains.as_deref().and_then(|c| c.of(e))).or_else(|| me.filter(|_| ship.side == Side::Enemy)),
+        };
+        let strong = own.strength.attack > AI_MIN_ATTACK;
+        if let Some(t) = target.filter(|t| boarders.hostile(e, *t))
+            && let Ok((ttf, tship)) = targets.get(t)
+        {
+            let surface = tf.translation.distance(ttf.translation) - lib.classes[ship.class].radius - lib.classes[tship.class].radius;
+            if attacked.contains(&(t, e)) && boarders.can_grapple(e) && harpoon_bears(&lib, ship, health, guns, tf, ttf.translation) && rng.f() < per_tick(AI_HARPOON_CHANCE, dt) {
+                commands.entity(e).insert(Grapple { target: t, flight: (surface.max(0.0) / HARPOON_SPEED).max(0.1) });
+                sfx.write(Sfx { name: "Weapon_GrapHarpoon_Fire".into(), at: Some(tf.translation), vol: 0.7, max: 600.0 });
+            }
+            if strong && boarders.can_board(e, t) && rng.f() < per_tick(AI_BOARD_CHANCE, dt) {
+                msg.write(BoardMsg::Board { boarder: Some(e), target: t });
+            }
+        }
+        // PROVISIONAL: mission ships also board a boardable hostile base in reach without targeting it.
+        if ms.is_some()
+            && strong
             && let Some(t) = bases.iter().find(|t| boarders.can_board(e, *t))
+            && rng.f() < per_tick(AI_BOARD_CHANCE, dt)
         {
             msg.write(BoardMsg::Board { boarder: Some(e), target: t });
         }
@@ -849,6 +912,35 @@ mod tests {
             tf.translation += v * time.delta_secs();
         }
     }
+    /// A computer Barque with the player's ship on its beam inside harpoon reach, once fired at, grapples it on its own, winches in and boards
+    /// (Elite crew); with a boarding strength of 10 it grapples but never sends boarders.
+    #[test]
+    fn computer_captain_grapples_and_boards_its_target() {
+        for (attack, boards) in [(None, true), (Some(AI_MIN_ATTACK), false)] {
+            let mut app = app();
+            app.add_message::<crate::combat::Fired>().add_systems(Update, ai_boarding.after(winch).before(fights));
+            let me = spawn(&mut app, "Ship_Navy_Cutter", Side::Player, Vec3::ZERO, Skill::Elite);
+            app.world_mut().entity_mut(me).insert(PlayerShip);
+            let foe = spawn(&mut app, "Ship_Pirate_Barque", Side::Enemy, Vec3::new(40.0, 0.0, 0.0), Skill::Elite);
+            app.world_mut().entity_mut(foe).insert(crate::ship::FleetPilot::default()); // skirmish fleets give every ship a pilot
+            if let Some(a) = attack {
+                app.world_mut().get_mut::<Boardable>(foe).unwrap().strength.attack = a;
+            }
+            for _ in 0..50 {
+                tick(&mut app, 0.1);
+            }
+            assert!(app.world().get::<Grapple>(foe).is_none(), "an untouched computer ship leaves its target alone");
+            app.world_mut().write_message(crate::combat::Fired { shooter: me, target: Some(foe), bullet: String::new() });
+            let (mut grappled, mut boarded) = (false, false);
+            for _ in 0..600 {
+                tick(&mut app, 0.1);
+                grappled |= app.world().get::<Grapple>(foe).is_some_and(|g| g.target == me);
+                boarded |= app.world().get::<Boarding>(foe).is_some_and(|f| f.target() == me);
+            }
+            assert!(grappled, "the Barque harpooned its target");
+            assert_eq!(boarded, boards, "attack {attack:?}: boarding needs an attacking strength above {AI_MIN_ATTACK}");
+        }
+    }
     fn app() -> App {
         let mut app = App::new();
         app.add_message::<BoardMsg>()
@@ -971,6 +1063,37 @@ mod tests {
         app.world_mut().entity_mut(me).insert(Grapple { target: foe, flight: 0.0 });
         tick(&mut app, 0.1);
         assert!(!app.world().resource::<BoardStatus>().board(foe).1, "a ship that is not Boardable cannot be boarded");
+    }
+
+    /// The computer's harpoon test against the retail runs (docs/re/boarding.md §5): a Barque's beam harpoons reach a ship on its
+    /// beam inside 45 units but not at the 55.7-unit circle it held round an idle Cutter; a Carrack's bow-facing harpoons never
+    /// bear on a ship it circles on its beam.
+    #[test]
+    fn ai_harpoons_bear_by_arc_and_long_range() {
+        let lib = Library::load(&assets_dir());
+        let bears = |class: &str, at: Vec3| {
+            let ci = lib.index(class);
+            let ship = Ship {
+                class: ci,
+                side: Side::Enemy,
+                heading: 0.0,
+                speed: 0.0,
+                ang_vel: 0.0,
+                order: 0,
+                waypoints: vec![],
+                goal: None,
+                cap: 1.0,
+                throttle: None,
+                sail_energy: 1.0,
+                crew_speed: 1.0,
+                crew_turn: 1.0,
+            };
+            harpoon_bears(&lib, &ship, &Health::new(&lib.classes[ci]), None, &Transform::IDENTITY, at)
+        };
+        assert!(bears("Ship_Pirate_Barque", Vec3::X * 40.0) && bears("Ship_Pirate_Barque", Vec3::NEG_X * 40.0));
+        assert!(!bears("Ship_Pirate_Barque", Vec3::X * 55.7) && !bears("Ship_Pirate_Barque", Vec3::NEG_Z * 40.0));
+        assert!(!bears("Ship_Pirate_Carrack", Vec3::X * 30.0) && bears("Ship_Pirate_Carrack", Vec3::NEG_Z * 30.0));
+        assert!((per_tick(AI_BOARD_CHANCE, 1.0 / 30.0) - 0.2).abs() < 1e-5 && (per_tick(AI_BOARD_CHANCE, 2.0 / 30.0) - 0.36).abs() < 1e-5);
     }
 
     #[test]

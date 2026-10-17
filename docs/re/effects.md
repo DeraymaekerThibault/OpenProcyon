@@ -85,6 +85,10 @@ regressions are included in `tools/check.sh` (98 Rust tests, 61 Python tests, si
 * So **the rate is particles per tick, not per second** (x30 per second). If the rate is below 1, one particle
   spawns with probability = rate (LCG random in [0,1) < p).
 * `NumberParticlesAtStart` is added on the first tick.
+* **PROVISIONAL particle budget (ours, not retail):** a primitive whose steady live count (peak rate x 30 x lifetime) would
+  exceed 4000 emits proportionally fewer particles. Only `GravCharge_Medium_Impact` trips it (180 per tick for 18 s, about
+  97000 additive particles, more than 30x any other effect): it rendered as a saturated blob and stalled the frame. The
+  original's pool limit, if any, is unknown.
 
 ## Distance detail (per effect, spawn count)
 * Each effect gets detail D = (1 - distance to camera / EffectsLowestDetailDistance) clamped to 0..1, times EffectsMaximumDetailPercentage
