@@ -1,7 +1,7 @@
 # Contributing
 
 Thanks for helping. OpenProcyon only stays shareable if every contribution respects the hard rules in [AGENTS.md](AGENTS.md):
-no game content, no decompiled or disassembled code, no executable addresses or analysis instructions, and behaviour written
+no game content, nothing taken from the game's executable (code, addresses, or how to analyse it), and behaviour written
 in your own words. A pull request that breaks them is closed, however good the rest is.
 
 ## Ways to help
