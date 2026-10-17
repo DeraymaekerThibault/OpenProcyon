@@ -161,7 +161,10 @@ Headless retail skirmishes, one computer ship against our idle or fleeing Navy C
 - **Target choice:** a computer ship takes the nearest hostile object within its scan range as its target, and chooses again
   every 6 s (keeping a farther target until then) or at once when the target is gone. It circles and fires at that target, so
   in a fleet battle each computer ship goes for whichever of our ships is nearest. PROVISIONAL: the remake counts only ships as
-  candidates (the original also filters some object kinds; which non-ship hostiles qualify is not checked). Remake:
+  candidates (the original also filters some object kinds; which non-ship hostiles qualify is not checked; bases do, see below).
+  Checked in a fleet battle (Zemyatin, our Man-O-War + Cutter vs a computer Assault Cutter + Barque, six saves over 28 s): both
+  computer ships took our Cutter, the nearer of our two ships by 45 units, from 2.8 s on and kept it; no spreading over targets.
+  Remake:
   `ship::CaptainTargets` (steering and fire).
 - **Nothing in sight: map exploration.** Retail saves give every computer ship an explore-map routine with a quadrant index 0-3
   (random per ship). Observed: a Carrack on the Diablo Strait (half-size 1625) ran from (322, -1127) on course (0.27, 0.96) for
