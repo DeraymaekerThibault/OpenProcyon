@@ -114,6 +114,14 @@ is **[? not confirmed]**; the rule action `Toggle Island Repair When Docked` fli
 (ships that are tenders repair [? player-setting exception unverified]). Mesh nodes on dockees: `Port_DockPoint` / `Star_DockPoint`
 (ships), `DockPoint1/2` or `Dock_Point` with an association name such as `CRANES` (bases/islands), described by WOT `MeshAttributes` entries with `AttributeName 'DockPoint'`.
 
+### Computer ships docking for repair
+Computer players' ships (not the human's, not ones under explicit orders) decide on their own to dock for repair: once **at
+least two of their damage sections are at or below half their hit points** (destroyed sections do not count), they pick the
+nearest dockable object of their own or an allied player and run the dock routine above on it (AI ships then leave and sail
+back to where they started). Overall hull share is not the test, which is why a skirmish computer ship at 80 % hull with its damage
+spread thin never docked ([movement.md](movement.md#computer-captains-measured-2026-10)). PROVISIONAL: no distance limit, and
+the choice among friendly docks taken as the nearest; not yet seen in play. Remake: `docking::ai_repair_dock`.
+
 ### Dock-point markers
 While an object is dockable every dock point carries an effect on its node; when it stops being dockable they are removed. The
 effect is taken to be `Effects/Docking_Point.eft` [? not confirmed].

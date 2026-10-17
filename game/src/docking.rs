@@ -199,7 +199,11 @@ impl Docker {
 pub fn plugin(app: &mut App) {
     app.add_message::<DockMsg>().add_systems(
         Update,
-        (handle_messages, routine, tow_routine, markers).chain().before(crate::input).run_if(in_state(crate::menu::Screen::Battle)).run_if(crate::menu::overlay_closed),
+        (ai_repair_dock, handle_messages, routine, tow_routine, markers)
+            .chain()
+            .before(crate::input)
+            .run_if(in_state(crate::menu::Screen::Battle))
+            .run_if(crate::menu::overlay_closed),
     );
 }
 
@@ -652,6 +656,46 @@ fn markers(mut commands: Commands, fxl: Option<Res<FxLib>>, mut q: Query<(Entity
 /// 'Set Group/Unit Towable' FALSE: no tow can be started on this ship.
 #[derive(Component)]
 pub struct NoTow;
+/// The original's repair decision for computer ships: at least two sections hurt to half their hit points or less (destroyed ones
+/// do not count).
+pub fn needs_repair(lib: &Library, ship: &Ship, h: &Health) -> bool {
+    lib.classes[ship.class].sections.iter().zip(&h.sections).filter(|(s, hp)| **hp > 0.0 && **hp <= 0.5 * s.hp).count() >= 2
+}
+
+/// Computer ships that need repair sail for the nearest friendly dock that repairs (docs/re/docking-and-orders.md, AI repair).
+/// PROVISIONAL: no distance limit, and the original's choice among friendly docks is taken to be the nearest.
+#[allow(clippy::type_complexity)]
+fn ai_repair_dock(
+    lib: Res<Library>,
+    mission: Option<Res<Mission>>,
+    mut msg: MessageWriter<DockMsg>,
+    ships: Query<(Entity, &Ship, &Health, &Transform, Option<&crate::campaign::MissionShip>), (Without<PlayerShip>, Without<Docker>)>,
+    docks: Query<(Entity, &Transform, &Dockable, Option<&Ship>, Option<&crate::campaign::MissionShip>, Option<&MissionBase>)>,
+) {
+    let script = mission.as_deref().map(|m| &m.script);
+    for (e, ship, h, tf, ms) in &ships {
+        // Computer players only: skirmish enemies, and mission ships the human does not own; scripted dummies never decide.
+        let computer = match (ms, script) {
+            (Some(m), Some(sc)) => m.owner != sc.player() && m.stance != crate::rules::Stance::Dummy,
+            _ => ship.side == Side::Enemy,
+        };
+        if h.destroyed || !computer || !needs_repair(&lib, ship, h) {
+            continue;
+        }
+        let friendly = |dship: Option<&Ship>, downer: Option<&str>| match (ms, script, downer) {
+            (Some(m), Some(sc), Some(o)) => !sc.hostile(&m.owner, o),
+            _ => dship.is_none_or(|d| d.side == ship.side),
+        };
+        let nearest = docks
+            .iter()
+            .filter(|(d, _, dk, dship, dms, base)| *d != e && dk.enabled && dk.repairs && friendly(*dship, dms.map(|m| m.owner.as_str()).or(base.map(|b| b.owner.as_str()))))
+            .min_by(|a, b| a.1.translation.distance(tf.translation).total_cmp(&b.1.translation.distance(tf.translation)));
+        if let Some((dockee, ..)) = nearest {
+            info!("docking: {e} needs repair, sails for {dockee}");
+            msg.write(DockMsg::Dock { docker: Some(e), dockee });
+        }
+    }
+}
 
 /// Click picking shared by the left-click dock and the right-click menu: what is under the cursor and whether the player can dock there.
 #[derive(SystemParam)]
@@ -828,6 +872,36 @@ mod tests {
         crate::ship::fleet_follow(&mut w);
         assert!(!w.get::<crate::ship::FleetPilot>(ids[1]).unwrap().hold);
         assert!(w.get::<crate::ship::FleetPilot>(ids[2]).unwrap().hold);
+    }
+
+    /// A computer ship docks for repair once two sections are down to half or less (a destroyed one does not count), at the
+    /// nearest friendly dock; the human's ships and healthy ships do not.
+    #[test]
+    fn computer_ship_with_two_half_sections_sails_for_the_nearest_dock() {
+        let (mut app, lib) = app();
+        app.add_systems(Update, ai_repair_dock.before(handle_messages));
+        let docks = load_docks();
+        let base = |app: &mut App, x: f32| app.world_mut().spawn((Transform::from_xyz(x, 0.0, 0.0), dockable_for(&docks, "Base_Safetytown").unwrap())).id();
+        base(&mut app, 900.0);
+        let near = base(&mut app, -300.0);
+        let hurt = |app: &mut App, side: Side, halves: &[usize], dead: &[usize]| {
+            let (s, mut h) = ship(&lib, "Ship_Pirate_Barque", side);
+            for &i in halves {
+                h.sections[i] *= 0.5;
+            }
+            for &i in dead {
+                h.sections[i] = 0.0;
+            }
+            app.world_mut().spawn((Transform::default(), s, h, crate::collision::Drift::default())).id()
+        };
+        let two = hurt(&mut app, Side::Enemy, &[0, 1], &[]);
+        let one = hurt(&mut app, Side::Enemy, &[0], &[1]);
+        let ours = hurt(&mut app, Side::Player, &[0, 1], &[]);
+        tick(&mut app, 0.1);
+        tick(&mut app, 0.1);
+        assert_eq!(app.world().get::<Docker>(two).map(|d| d.dockee), Some(near));
+        assert!(app.world().get::<Docker>(one).is_none() && app.world().get::<Docker>(ours).is_none());
+        assert!(!needs_repair(&lib, &ship(&lib, "Ship_Pirate_Barque", Side::Enemy).0, &ship(&lib, "Ship_Pirate_Barque", Side::Enemy).1));
     }
 
     fn app() -> (App, Library) {
