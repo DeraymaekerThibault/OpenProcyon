@@ -144,6 +144,9 @@ particles and the authored EFT brightness/size/rectangle curves are unchanged. T
   barrel at VerticalRotationSpeed toward the ballistic (or lob) elevation, clamped to the vertical limits; 1 degree tolerance.
 - Engage test: horizontal distance <= range and the target bearing within the half-arc.
 - Unknown: what a gun does with no target (the remake returns it to rest).
+- Measured (2026-10, two skirmishes, Normal): an idle command ship with no clicked target and panic fire off never fires, even
+  with an enemy Carrack 40 units away for over a minute; the Game Summary shows 0 Damage Inflicted for us both times. So the
+  command ship's direct-fire guns need a clicked target or panic fire (point defence not checked).
 
 ## Panic button
 - The hotkey/HUD button works only while the player ship is not disabled. It is sent like any order (so it works in multiplayer).
