@@ -139,5 +139,8 @@ Headless retail skirmishes, one computer ship against our idle or fleeing Navy C
   15 units outside black holes and damaging nebulae (solar storm / meteors, as circles: `nebula::storm_circles`); computer skirmish ships get crew factor 1.267 on speed and rudder; skirmish enemies with nothing in
   sight explore (`ship::Explore`: quadrant centre, then its x-neighbour, switching 220 units short). PROVISIONAL: the radius rule,
   the throttle, the start quadrant and visiting order, and the ships that head straight for the enemy instead.
-  Our turn model (rudder torque / 3 above 0.67 × MaxSpeed) only reaches ~7°/s on a crewed Barque at 7.8 units/s where retail held
-  8.1°/s at 8.2, so the remake's circle is wider (~60-85 units): the high-speed turn band needs a retail measurement.
+  Computer skirmish ships use rudder factor 1.75 (below); the remake's circle settles at 59-68 units (retail 51-58).
+- **Turning at speed (measured, Navy Cutter, no crew):** full rudder 13.6°/s at Ahead Full (4.53) and 9.70°/s at Emergency
+  (9.06); speed does not drop in the turn. Our turn formula with its torque / 3 band above 0.67 × MaxSpeed predicts 9.70°/s, so
+  the band holds. The computer's circling turn rates then need rudder torque × 1.72 (Barque) and × 1.87 (Carrack): the square of
+  their saved navigator factors (1.31, 1.37), i.e. turn rate grows linearly with that factor. Remake: `ship::COMPUTER_TURN` = 1.75.

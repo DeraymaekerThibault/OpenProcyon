@@ -258,7 +258,7 @@ pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Libra
                 let e = spawn_ship(commands, assets, lib, fxl, name, g.side, pos, heading, label.clone().or_else(|| namer.pick(lib, name)));
                 commands.entity(e).insert(ship::FleetMember(owner.clone(), i));
                 if !g.human {
-                    commands.entity(e).entry::<Ship>().and_modify(|mut s| (s.crew_speed, s.crew_turn) = (ship::COMPUTER_CREW, ship::COMPUTER_CREW));
+                    commands.entity(e).entry::<Ship>().and_modify(|mut s| (s.crew_speed, s.crew_turn) = (ship::COMPUTER_CREW, ship::COMPUTER_TURN));
                     // PROVISIONAL: the crew factor matching the measured speed (Average-to-Elite, retail save scale)
                     commands.entity(e).insert(crate::environment::ScanFactor(1.35));
                 }

@@ -71,9 +71,13 @@ const ORBIT_BAND: f32 = 25.0;
 /// Throttle (fraction of Ahead Full) while circling: retail circles at 0.66 (Carrack) and 0.74 (Barque) of the crewed Emergency
 /// speed it ran in at. PROVISIONAL: whether the captain throttles back or the turn bleeds speed is unknown.
 pub const ORBIT_THROTTLE: f32 = 1.4;
-/// Crew factor (`Ship::crew_speed`, `crew_turn`) of computer skirmish ships: retail Carrack and Barque ran in at exactly 1.267 x
-/// their Emergency Speed (crew.md's engineer factor for skill ~7). PROVISIONAL: the helmsman's factor is assumed the same.
+/// Speed factor (`Ship::crew_speed`) of computer skirmish ships: retail Carrack and Barque ran in at exactly 1.267 x their
+/// Emergency Speed (crew.md's engineer factor for skill ~7).
 pub const COMPUTER_CREW: f32 = 1.267;
+/// Rudder-torque factor (`Ship::crew_turn`) of computer skirmish ships. Retail turn rates while circling (Barque 8.1°/s at 8.2
+/// units/s, Carrack 8.6°/s at 5.74) need torque x 1.72 and x 1.87 under our turn model, which a full-rudder Cutter run confirmed at
+/// Emergency (9.70°/s measured and predicted); that is the ships' saved navigator factor (1.31, 1.37) squared. PROVISIONAL.
+pub const COMPUTER_TURN: f32 = 1.75;
 /// Computer captains keep this far outside a black hole's radius (retail: a Carrack rode 157-165 units from a 145-radius hole).
 pub const HOLE_MARGIN: f32 = 15.0;
 /// Exploring ships switch quadrant this close to the current quadrant's centre (retail: an Assault Cutter turned ~220 units short
@@ -1018,9 +1022,8 @@ pub mod movement_tests {
         let (goal, _, _) = captain_steer(0.0, Vec3::new(0.0, 0.0, 150.0), foe, &[(Vec3::new(0.0, 0.0, 300.0), 145.0)]);
         assert!(angdiff(goal, 0.0).abs() < 1e-5, "bow toward -z, away from the hole: {goal}");
 
-        // A crewed Barque run in from 400 units settles onto a circle with the foe abeam, using the real movement step. Retail held
-        // 51-58 units turning 8.1°/s at 8.2 units/s; our turn model (torque / 3 above 0.67 x MaxSpeed) allows ~7°/s there, so the
-        // remake's circle is wider (about 60-85). PROVISIONAL until retail turning at speed is measured (SIM-01).
+        // A crewed Barque run in from 400 units settles onto a circle with the foe abeam, using the real movement step
+        // (retail held 51-58 units, turning 8.1°/s at 8.2 units/s).
         let lib = combat::Library::load(&crate::assets_dir());
         let ci = lib.index("Ship_Pirate_Barque");
         let class = &lib.classes[ci];
@@ -1038,7 +1041,7 @@ pub mod movement_tests {
             throttle: None,
             sail_energy: 1.0,
             crew_speed: COMPUTER_CREW,
-            crew_turn: COMPUTER_CREW,
+            crew_turn: COMPUTER_TURN,
         };
         let mut tf = Transform::from_xyz(30.0, 0.0, 400.0);
         let dt = 1.0 / 30.0;
@@ -1054,7 +1057,8 @@ pub mod movement_tests {
             }
         }
         let (lo, hi) = dists.iter().fold((f32::MAX, 0.0f32), |(a, b), d| (a.min(*d), b.max(*d)));
-        assert!(lo > 0.9 * ORBIT && hi < 1.6 * ORBIT, "circle {lo}..{hi}");
+        // ponytail: the remake circles ~8 units wide of retail (59-68); a narrower blend band oscillates instead
+        assert!(lo > 0.9 * ORBIT && hi < 1.3 * ORBIT, "circle {lo}..{hi}");
         assert!(beams.iter().all(|b| (b - PI / 2.0).abs() < 0.5), "foe kept abeam");
     }
 
