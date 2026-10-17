@@ -52,6 +52,17 @@ impl Skill {
             _ => Self::Average,
         }
     }
+    /// Engineer/helmsman factor (`Ship::crew_speed`, `crew_turn`) of a generic crew: crew.md's measured curve at the crew's
+    /// skill (Green 3, Average 6, Elite 8 of 10). Retail saves show such ships with crew factors (1.15 / 1.30-1.37 / 1.40-1.47 on
+    /// the save's own scale); 'Players' ships take theirs from their posts instead. PROVISIONAL: the save scale's link to speed.
+    pub fn handling(self) -> f32 {
+        match self {
+            Self::Green => crate::crew_arms::skill_factor(0.3),
+            Self::Average => crate::crew_arms::skill_factor(0.6),
+            Self::Elite => crate::crew_arms::skill_factor(0.8),
+            Self::Players => 1.0,
+        }
+    }
     fn member(self) -> f32 {
         match self {
             Self::Green => 0.1,
@@ -867,6 +878,15 @@ mod tests {
             crew_turn: 1.0,
         };
         app.world_mut().spawn((Transform::from_translation(at), ship, health, Drift::default(), Boardable::ship(class, skill, true))).id()
+    }
+
+    #[test]
+    fn generic_crews_speed_ships_up_by_level() {
+        let f: Vec<f32> = [Skill::Green, Skill::Average, Skill::Elite].map(Skill::handling).to_vec();
+        assert!(f[0] > 1.05 && f[0] < f[1] && f[1] < f[2] && f[2] < 1.35, "{f:?}");
+        // the skirmish computer's measured run-in factor (1.267) lies between Average and Elite
+        assert!(f[1] < 1.267 && 1.267 < f[2]);
+        assert_eq!(Skill::Players.handling(), 1.0);
     }
 
     #[test]
