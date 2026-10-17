@@ -426,7 +426,8 @@ fn build(
 /// centred at y 132, a framed panel from (35,160) to x 767 with a 30 px heading band (Univers10 column titles), and per player a
 /// row 60 apart from y 210: the small flag at x 37, the name (Univers12) from x 77 and four 128x24 boxes at x 197 + 140 * column
 /// (hud.hdt: name width 110, column width 130, gap 10, row height 30). A column's best value gets the green bar (`GameStats::best`).
-/// PROVISIONAL: the panel art (a stretched window stands in), flag choice, player order and the kill-by-type table (not shown).
+/// The skirmish summary is this one page (retail: Next goes to the main menu; no kill-by-type table seen in skirmish).
+/// PROVISIONAL: the panel art (a stretched window stands in), flag choice.
 fn summary(ctx: &Ctx, c: &mut ChildSpawnerCommands, stats: &crate::stats::GameStats, outcome: crate::scenario::Outcome, strings: &Value) {
     let s = |id: &str| text_of(strings, id);
     let won = outcome == crate::scenario::Outcome::Victory;
@@ -441,7 +442,11 @@ fn summary(ctx: &Ctx, c: &mut ChildSpawnerCommands, stats: &crate::stats::GameSt
     for (i, title) in columns.iter().enumerate() {
         ctx.text(c, "Univers10", title, 195.0 + i as f32 * 140.0, 130.0, 175.0, true, Color::WHITE);
     }
-    for (row, ((name, line), best)) in stats.players.iter().zip(stats.best()).enumerate() {
+    // Retail lists the winner first (one victory and three defeats, two players each): rows by ships left, most first.
+    // PROVISIONAL with more players or ties.
+    let mut rows: Vec<_> = stats.players.iter().zip(stats.best()).collect();
+    rows.sort_by_key(|((_, line), _)| std::cmp::Reverse(line.end));
+    for (row, ((name, line), best)) in rows.into_iter().enumerate() {
         let cy = 210.0 + row as f32 * 60.0;
         let base = match line.race.as_str() {
             "Pirate" => 10,

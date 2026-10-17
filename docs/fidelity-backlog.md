@@ -73,7 +73,7 @@ Reference screenshots are local only (`local/reference/`, never committed).
 | UIR-01 | Partial | World labels and star map still use vector fonts, not the retail glyph sheets. |
 | UIR-05 | Partial | Ships screen: ship-name drop-down, Load/Save Fleet, slot-bar scrolling. |
 | UIR-06 | Partial | Crew/Arms: skirmish crew roster, drag and drop, Load/Save, Auto Assign, stat-bar post mapping ([crew.md](re/crew.md)). |
-| UIR-08 | Partial | Game Summary: compare with a VICTORY! example; kills-by-object-type table. |
+| UIR-08 | Partial | Game Summary: retail VICTORY! matches the layout (one page, green bar per column's best, winner's row first; rows now ordered by ships left). Open: panel art, flag choice, whether campaign summaries add a kills-by-type table. |
 | UIR-09 | Unvalidated | Battle HUD vs `battle_hud.png` and the 2026-10-15 references (player list, speech box, talking head, weapon bar). |
 | UIR-10 | Partial | Ship selection: "N victory points remaining" dialog (Auto Assign / Cancel / Continue). |
 
