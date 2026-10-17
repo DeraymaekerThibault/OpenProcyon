@@ -22,8 +22,8 @@ Consequence for the cutter (full rudder) at the measured order speeds: about 12.
 
 ## Measured on the running original (Navy Cutter, skirmish, no crew)
 Sampled ~60 times a second from the running retail game (Steam/Proton) while issuing each order; the game itself updates
-about every 0.034 s. Values are the cutter's; other classes are assumed to scale the same way (PROVISIONAL). A Man-O-War run
-(2026-10) agrees: its approach after a click and "+" fits 4.687 = 1.125 x MaxSpeed (Emergency) with time constant 5.54 s
+about every 0.034 s. Values are the cutter's; a Man-O-War checks them on a second class (below), the other classes are
+assumed to scale the same way (PROVISIONAL). A Man-O-War run (2026-10) agrees: its approach after a click and "+" fits 4.687 = 1.125 x MaxSpeed (Emergency) with time constant 5.54 s
 (WOT MaxSpeed x Mass / MaxThrust = 5.556), and All Stop snaps to 0 the tick its speed would fall below 1.0, as on the cutter.
 A move click from All Stop with no key pressed runs the cutter at its Ahead Full (4.531).
 - **Order speeds:** All Stop 0, Ahead Slow 2.266, Ahead Full 4.531, Emergency Speed 9.062 units/s, i.e. ½ / 1 / 2 × Full,
@@ -34,11 +34,25 @@ A move click from All Stop with no key pressed runs the cutter at its Ahead Full
 - **Coming to rest:** when the braking speed would drop through 1.0 it becomes 0 in one tick (1.05 → 0). Full to rest takes
   about 0.83 s. Whether a slow push (collision, tow) is also snapped is not observed; the remake snaps only braking.
 - **Turning:** full rudder gives a steady 13.6°/s at both Slow and Full (turning circle about 19 units across at Full, 9.5 at
-  Slow). The turn formula above predicts 12.8°/s; the measured rate needs its torque × 1.125 (PROVISIONAL: the same factor as
-  Emergency speed, source not identified). A click inside the turning circle makes the ship circle it, as in the remake.
+  Slow). The turn formula above predicts 12.8°/s; the measured rate needs its torque × 1.125 (the same factor as Emergency
+  speed; its source is not identified, but it holds on two classes and three speeds, see the table). A click inside the
+  turning circle makes the ship circle it, as in the remake.
+- **Full-rudder turn rate, formula with torque × 1.125 vs measured** (Diablo Strait skirmish, no crew, steady state):
+
+  | Ship | Order | Speed | Predicted | Measured |
+  |---|---|---|---|---|
+  | Cutter | Ahead Full | 4.525 | 13.62°/s | 13.62°/s |
+  | Cutter | Emergency | 9.056 | 9.71°/s | 9.71°/s |
+  | Man-O-War | Ahead Full | 2.341 | 4.16°/s | 4.16°/s |
+  | Man-O-War | Emergency | 4.684 | 3.11°/s | 3.11°/s |
+
+  Emergency turns slower because its speed falls in the top band (α × 1/3). The Man-O-War's Ahead Full is 2.341 (0.5625 ×
+  MaxSpeed = 2.344), Emergency 4.684 (1.125 × MaxSpeed = 4.687).
 - **Banking:** the hull rolls into the turn (starboard up in a port turn) up to 0.25 rad (14.3°) at 0.06 rad/s (about 4 s to full
-  lean), holds it while the rudder is over and levels at the same rate. On a straight course the heading weaves ±2° and the roll
-  ±3.5° with a ~3.8 s period; at Emergency Speed there is no roll. Remake: roll target = 0.25 × rudder, rate-limited; the weave
+  lean), holds it while the rudder is over and levels at the same rate. While a ship steers for a clicked point straight ahead
+  its heading weaves: cutter ±2.2° (roll ±3.5°) with a 3.8 s period, Man-O-War ±0.45° with an 11.6 s period. Once it has
+  passed its point and holds a course, the heading is dead steady on both (no weave in 30+ s). PROVISIONAL reading: the weave
+  is the course controller hunting for the point, not a straight-course wobble. At Emergency Speed there is no roll. Remake: roll target = 0.25 × rudder, rate-limited; the weave
   and the Emergency exception are not modelled.
 
 ## Other constants

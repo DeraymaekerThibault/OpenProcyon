@@ -4,12 +4,12 @@ use crate::*;
 /// All Stop, Ahead Slow, Ahead Full, Emergency Speed as fractions of Ahead Full speed (measured on the retail cutter, docs/re/movement.md).
 pub const ORDERS: [(&str, f32); 4] = [("All Stop", 0.0), ("Ahead Slow", 0.5), ("Ahead Full", 1.0), ("Emergency Speed", 2.0)];
 
-/// Ahead Full without crew settles at this fraction of WOT MaxSpeed (so Emergency is 1.125 x MaxSpeed). Measured on one class;
-/// PROVISIONAL for the others; the engineers raise it (`Ship::crew_speed`).
+/// Ahead Full without crew settles at this fraction of WOT MaxSpeed (so Emergency is 1.125 x MaxSpeed). Measured on the cutter
+/// and the Man-O-War; PROVISIONAL for the others; the engineers raise it (`Ship::crew_speed`).
 pub const FULL_SPEED: f32 = 0.5625;
 
-/// Full-rudder torque relative to the decoded turn formula; the measured turn rate needs it at both Slow and Full.
-/// PROVISIONAL: the same 1.125 as Emergency speed, source not identified.
+/// Full-rudder torque relative to the decoded turn formula. Measured: cutter at Slow, Full and Emergency, Man-O-War at Full
+/// and Emergency all fit it exactly (docs/re/movement.md); the same 1.125 as Emergency speed, source not identified.
 pub const TURN_SCALE: f32 = 1.125;
 
 /// A braking ship comes to rest when it would drop through this speed (retail: 1.05 -> 0 in one tick).
@@ -299,7 +299,7 @@ pub fn step(ship: &mut Ship, tf: &mut Transform, class: &combat::Class, health: 
         let fwd = Vec3::new(-ship.heading.sin(), 0.0, -ship.heading.cos());
         tf.translation += fwd * ship.speed * dt;
         // Roll about the bow axis toward the rudder, rate-limited. PROVISIONAL: target proportional to rudder; retail also
-        // weaves slightly on a straight course and does not lean at Emergency Speed (not modelled).
+        // weaves slightly while steering for a point and does not lean at Emergency Speed (not modelled).
         let roll = tf.rotation.to_euler(EulerRot::YXZ).2;
         let roll = roll + (steer * MAX_ROLL - roll).clamp(-ROLL_RATE * dt, ROLL_RATE * dt);
         tf.rotation = Quat::from_rotation_y(ship.heading) * Quat::from_rotation_z(roll);
@@ -1214,6 +1214,42 @@ pub mod movement_tests {
                 step(&mut ship, &mut tf, class, &h, 0.0344);
             }
             assert!((ship.ang_vel.to_degrees() - turn).abs() < 0.4, "skill {skill}: turn {} vs {turn}", ship.ang_vel.to_degrees());
+        }
+    }
+
+    /// Retail full-rudder turns without crew on two classes (docs/re/movement.md table): speed and steady turn rate.
+    #[test]
+    fn uncrewed_turns_match_measured_retail() {
+        let lib = combat::Library::load(&crate::assets_dir());
+        for (name, order, speed, turn) in [("Ship_Navy_Cutter", 3, 9.056, 9.71), ("Ship_Navy_ManOWar", 2, 2.341, 4.16), ("Ship_Navy_ManOWar", 3, 4.684, 3.11)] {
+            let ci = lib.index(name);
+            let class = &lib.classes[ci];
+            let h = Health { sections: vec![1.0; class.sections.len()], core: 1.0, destroyed: false };
+            let mut ship = Ship {
+                class: ci,
+                side: Side::Player,
+                heading: 0.0,
+                speed: 0.0,
+                ang_vel: 0.0,
+                order,
+                waypoints: vec![],
+                goal: None,
+                cap: 1.0,
+                throttle: None,
+                sail_energy: 1.0,
+                crew_speed: 1.0,
+                crew_turn: 1.0,
+            };
+            let mut tf = Transform::default();
+            for _ in 0..1500 {
+                step(&mut ship, &mut tf, class, &h, 0.0344);
+            }
+            assert!((ship.speed - speed).abs() < 0.01, "{name} order {order}: speed {} vs {speed}", ship.speed);
+            ship.goal = Some(ship.heading + 3.0);
+            for _ in 0..300 {
+                step(&mut ship, &mut tf, class, &h, 0.0344);
+            }
+            assert!((ship.ang_vel.to_degrees() - turn).abs() < 0.05, "{name} order {order}: turn {} vs {turn}", ship.ang_vel.to_degrees());
         }
     }
 
