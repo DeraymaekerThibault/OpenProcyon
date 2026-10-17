@@ -60,6 +60,33 @@ SURFACES = {
 }
 
 
+def debris_record(root, scene, outdir):
+    """A section's `debrisMeshScene`: the piece that breaks off when the section is destroyed. Its mesh scene holds one
+    `...Damage_LayerN` node in the hull's model space; that node's position is the piece's pivot. Writes
+    models/debris/<scene>.glb and returns {model, pivot}, or None when the scene or its mesh is missing."""
+    if not scene:
+        return None
+    try:
+        nodes = parse_msb(
+            ci_file(Path(root) / "BD_MeshScenes", f"{scene}.msb").read_bytes()
+        )
+    except FileNotFoundError:
+        return None
+    layer = next((n for n in nodes if "_layer" in n.name.lower()), None)
+    if layer is None:
+        return None
+    try:
+        mdb = ci_file(Path(root) / "BD_Meshes", f"{layer.name}.mdb")
+    except FileNotFoundError:
+        return None
+    glb = f"{scene}.glb"
+    if not model_path(outdir, glb).exists():
+        model_path(outdir, glb, mkdir=True).write_bytes(
+            convert(root, scene, files=[mdb])
+        )
+    return dict(model=glb, pivot=list(layer.pos))
+
+
 def destruct_record(text):
     """A section's `destructFx` ("{ Final_Ship_Chunk 2.4 2.5 ( -1.8 10.2 5.6 ) }": effect or none, start and end seconds,
     ship-axes velocity of the flying chunk) as {fx, start, end, vel}; None when absent or malformed."""
@@ -356,6 +383,7 @@ def export(root, ship, outdir):
                     a.get("destructFx", "").replace("{", "").split() or [None]
                 )[0],
                 destruct=destruct_record(a.get("destructFx")),
+                debris=debris_record(root, a.get("debrisMeshScene"), outdir),
                 aabb=[[min(c) for c in xs], [max(c) for c in xs]],
                 tris=[
                     round(c, 3)

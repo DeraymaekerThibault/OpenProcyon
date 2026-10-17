@@ -70,6 +70,38 @@ fn breakup_chunks_fly_then_burst_inside_their_window() {
 }
 
 #[test]
+fn cutter_masts_break_off_as_debris_pieces() {
+    let lib = Library::load(&assets_dir());
+    let class = &lib.classes[lib.index("Ship_Navy_Cutter")];
+    let by = |label: &str| class.sections.iter().find(|s| s.label == label).unwrap();
+    let (model, pivot) = by("Mast_2_cloth").debris.clone().expect("imported debrisMeshScene");
+    assert!(model.ends_with(".glb") && crate::data::model(&model).starts_with("models/debris/"), "{model}");
+    assert!(pivot.y > 10.0, "the fore-mast piece pivots high up the mast (bevy y up)");
+    assert_eq!(by("Mast_2_cloth").debris_fx.as_deref(), Some("Falling_Debris"));
+    assert!(by("Port_Mid_Hull_wood").debris.is_none());
+}
+
+#[test]
+fn debris_drifts_with_its_ship_sinks_tumbles_and_goes() {
+    let mut app = App::new();
+    app.init_resource::<Time>().add_systems(Update, debris);
+    let start = Transform::from_xyz(0.0, 10.0, 0.0);
+    let e = app.world_mut().spawn((Debris { vel: Vec3::new(0.0, 0.0, -4.0), axis: Vec3::X, spin: DEBRIS_SPIN, age: 0.0 }, start)).id();
+    for _ in 0..20 {
+        app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_millis(50));
+        app.update();
+    }
+    let tf = *app.world().get::<Transform>(e).unwrap();
+    assert!((tf.translation.z + 4.0).abs() < 0.3, "keeps the ship's velocity: {tf:?}");
+    assert!(tf.translation.y < 10.0 - DEBRIS_FALL * 0.8, "and sinks");
+    assert!(tf.rotation.angle_between(start.rotation) > 0.3, "and tumbles");
+    app.world_mut().get_mut::<Debris>(e).unwrap().age = DEBRIS_LIFE;
+    app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_millis(50));
+    app.update();
+    assert!(app.world().get_entity(e).is_err(), "gone after its life");
+}
+
+#[test]
 fn cutter_breakup_uses_the_retail_section_data() {
     let lib = Library::load(&assets_dir());
     let class = &lib.classes[lib.index("Ship_Navy_Cutter")];

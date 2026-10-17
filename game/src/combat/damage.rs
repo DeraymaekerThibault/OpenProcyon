@@ -42,8 +42,59 @@ pub fn fire_scale(i: f32) -> f32 {
     if i > FIRE_FULL { 1.0 } else { (i / FIRE_FULL).max(0.1) }
 }
 
+/// A piece broken off a destroyed section (WOT `debrisMeshScene`), tumbling away trailing its `debrisFx` (docs/re/effects.md
+/// "Section debris"). The entity sits at the piece's pivot; its model child is offset back into hull space.
+#[derive(Component)]
+pub struct Debris {
+    pub vel: Vec3,
+    pub axis: Vec3,
+    pub spin: f32,
+    pub age: f32,
+}
+
+/// PROVISIONAL (retail frames only: a torn-off mast still drifting and turning 6+ s later): sink rate, tumble rate and life.
+pub const DEBRIS_FALL: f32 = 1.5;
+pub const DEBRIS_SPIN: f32 = 0.5;
+pub const DEBRIS_LIFE: f32 = 10.0;
+
+/// Spawns section `sec`'s debris piece off a ship at `tf` moving at `ship_vel`; `roll` gives 0..1 numbers for the tumble.
+pub fn spawn_debris(commands: &mut Commands, assets: &AssetServer, fxl: &FxLib, sec: &Section, tf: &Transform, ship_vel: Vec3, mut roll: impl FnMut() -> f32) {
+    let Some((model, pivot)) = &sec.debris else { return };
+    let at = Transform::from_translation(tf.transform_point(*pivot)).with_rotation(tf.rotation).with_scale(tf.scale);
+    let axis = Vec3::new(roll() - 0.5, 0.0, roll() - 0.5).normalize_or(Vec3::X);
+    let e = commands
+        .spawn((Debris { vel: ship_vel, axis, spin: DEBRIS_SPIN * (0.5 + roll()), age: 0.0 }, Transient, at, Visibility::default()))
+        .with_child((WorldAssetRoot(assets.load(GltfAssetLabel::Scene(0).from_asset(crate::data::model(model)))), Transform::from_translation(-*pivot)))
+        .id();
+    if let Some(name) = &sec.debris_fx {
+        fx::spawn(commands, fxl, name, Some(e), Transform::IDENTITY, at, false);
+    }
+}
+
+/// Debris pieces drift on with their ship's velocity, sink and tumble, then go.
+pub fn debris(mut commands: Commands, time: Res<Time>, mut q: Query<(Entity, &mut Transform, &mut Debris)>) {
+    let dt = time.delta_secs().min(crate::MAX_SIM_STEP);
+    for (e, mut tf, mut d) in &mut q {
+        d.age += dt;
+        if d.age > DEBRIS_LIFE {
+            commands.entity(e).despawn();
+            continue;
+        }
+        tf.translation += (d.vel + Vec3::NEG_Y * DEBRIS_FALL) * dt;
+        tf.rotate(Quat::from_axis_angle(d.axis, d.spin * dt));
+    }
+}
+
 /// PROVISIONAL thresholds: lost HP fraction under 25% none, then Light, Medium, Heavy at 25/50/75%, Destroyed at 0 HP.
-pub fn damage_fx(mut commands: Commands, lib: Res<Library>, fxl: Res<FxLib>, mut ships: Query<(Entity, &Transform, &Ship, &Health, &mut DamageFx, Option<&Sinking>)>) {
+#[allow(clippy::too_many_arguments)]
+pub fn damage_fx(
+    mut commands: Commands,
+    lib: Res<Library>,
+    fxl: Res<FxLib>,
+    assets: Res<AssetServer>,
+    mut rng: ResMut<Rng>,
+    mut ships: Query<(Entity, &Transform, &Ship, &Health, &mut DamageFx, Option<&Sinking>)>,
+) {
     const NAMES: [&str; 5] = ["", "Damaged Section_Light", "Damaged Section_Medium", "Damaged Section_Heavy", "Damaged Section_Destroyed"];
     for (e, tf, ship, h, mut d, sinking) in &mut ships {
         if h.destroyed {
@@ -73,6 +124,10 @@ pub fn damage_fx(mut commands: Commands, lib: Res<Library>, fxl: Res<FxLib>, mut
             let (cur, ent) = d.0[i];
             if level == cur {
                 continue;
+            }
+            if level == 4 && cur < 4 {
+                let vel = tf.rotation * Vec3::NEG_Z * ship.speed;
+                spawn_debris(&mut commands, &assets, &fxl, sec, tf, vel, || rng.f());
             }
             if let Some(old) = ent
                 && let Ok(mut c) = commands.get_entity(old)

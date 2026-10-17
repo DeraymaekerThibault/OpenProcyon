@@ -9,6 +9,7 @@ class ModelLayout(unittest.TestCase):
     def test_category_rules(self):
         self.assertEqual(category("NavyCutterShip"), "ships")
         self.assertEqual(category("gun_Enet_Layer1.glb"), "weapons")
+        self.assertEqual(category("NavyCutterBrokenFwdMast"), "debris")
         self.assertEqual(
             model_path("a", "skybox_07").as_posix(), "a/models/sky/skybox_07.glb"
         )
