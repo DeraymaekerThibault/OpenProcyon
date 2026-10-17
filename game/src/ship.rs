@@ -154,7 +154,28 @@ pub fn hole_list(
     out
 }
 
-/// Skirmish captains: hunt the nearest enemy in sight with `captain_steer`; with nothing in sight an enemy ship explores the map
+/// Seconds a computer captain keeps its target before choosing again (the original's target-selection timer).
+pub const RESELECT_SECS: f32 = 6.0;
+/// Each skirmish captain's current target and how long it has held it: the original's target selection takes the nearest hostile
+/// ship in sight, again every `RESELECT_SECS` or as soon as the old one is gone or out of sight (docs/re/movement.md). Steering,
+/// fire (`combat::gunnery`) and boarding (`boarding::ai_boarding`) all follow it.
+#[derive(Resource, Default)]
+pub struct CaptainTargets(pub std::collections::HashMap<Entity, (Entity, f32)>);
+impl CaptainTargets {
+    pub fn of(&self, e: Entity) -> Option<Entity> {
+        self.0.get(&e).map(|t| t.0)
+    }
+}
+
+/// One target-selection step: keep the `held` target (with its age) while it is younger than `RESELECT_SECS` and still a
+/// candidate, else take the nearest candidate (entity, distance). Returns the target and whether it was kept.
+fn choose_target(held: Option<(Entity, f32)>, candidates: &[(Entity, f32)]) -> Option<(Entity, bool)> {
+    held.filter(|h| h.1 < RESELECT_SECS && candidates.iter().any(|c| c.0 == h.0))
+        .map(|h| (h.0, true))
+        .or_else(|| candidates.iter().min_by(|a, b| a.1.total_cmp(&b.1)).map(|c| (c.0, false)))
+}
+
+/// Skirmish captains: hunt their target (`CaptainTargets`) with `captain_steer`; with nothing in sight an enemy ship explores the map
 /// at Emergency Speed (`Explore`). The player ship only uses this in demo (--shot) mode as an autopilot.
 pub fn ai(
     cfg: Res<Config>,
@@ -166,10 +187,12 @@ pub fn ai(
     holes: Query<(&Transform, &crate::blackhole::Pull), Without<Ship>>,
     storms: (Option<Res<crate::nebula::Storms>>, Option<Res<crate::nebula::StormShift>>),
     mut explore: Local<Explore>,
+    (time, mut targets): (Res<Time>, ResMut<CaptainTargets>),
 ) {
     if mission.is_some() {
         return;
     }
+    let dt = time.delta_secs();
     let holes = hole_list(&holes, storms.0.as_deref(), storms.1.as_deref());
     let snap: Vec<(Entity, Vec3, Side, bool)> = ships.iter().map(|(e, t, s, h, _, _)| (e, t.translation, s.side, !h.destroyed)).collect();
     for (e, tf, mut s, h, me, pilot) in &mut ships {
@@ -192,10 +215,18 @@ pub fn ai(
         }
         s.throttle = None;
         let explicit = pilot.and_then(|p| p.target);
-        let foe = snap
+        let candidates: Vec<(Entity, f32)> = snap
             .iter()
             .filter(|f| f.2 != s.side && f.3 && (explicit == Some(f.0) || sensors.in_sight(e, f.0, None)) && explicit.is_none_or(|e| e == f.0))
-            .min_by(|a, b| a.1.distance(tf.translation).total_cmp(&b.1.distance(tf.translation)));
+            .map(|f| (f.0, f.1.distance(tf.translation)))
+            .collect();
+        let chosen = choose_target(targets.0.get(&e).copied(), &candidates);
+        match chosen {
+            Some((t, true)) => targets.0.entry(e).or_insert((t, 0.0)).1 += dt,
+            Some((t, false)) => _ = targets.0.insert(e, (t, 0.0)),
+            None => _ = targets.0.remove(&e),
+        }
+        let foe = chosen.and_then(|(t, _)| snap.iter().find(|f| f.0 == t));
         let Some(foe) = foe else {
             s.goal = None;
             if s.side != Side::Enemy || explicit.is_some() {
@@ -1022,6 +1053,16 @@ pub mod movement_tests {
         let d = (Vec2::new(c.x, -c.z) - Vec2::new(322.0, -1127.0)).normalize();
         assert!((d.x - 0.245).abs() < 0.01 && (d.y - 0.97).abs() < 0.01, "{d}");
         assert_eq!(Explore::centre(0, 1000.0), Vec3::new(-500.0, 0.0, 500.0));
+    }
+
+    #[test]
+    fn captain_keeps_its_target_six_seconds_then_takes_the_nearest() {
+        let (a, b) = (Entity::from_raw_u32(1).unwrap(), Entity::from_raw_u32(2).unwrap());
+        assert_eq!(choose_target(None, &[(a, 90.0), (b, 40.0)]), Some((b, false)), "no target: the nearest");
+        assert_eq!(choose_target(Some((a, 5.9)), &[(a, 90.0), (b, 40.0)]), Some((a, true)), "kept inside 6 s though farther");
+        assert_eq!(choose_target(Some((a, 6.0)), &[(a, 90.0), (b, 40.0)]), Some((b, false)), "re-chosen after 6 s");
+        assert_eq!(choose_target(Some((a, 1.0)), &[(b, 40.0)]), Some((b, false)), "a lost target is replaced at once");
+        assert_eq!(choose_target(Some((a, 1.0)), &[]), None);
     }
 
     #[test]
