@@ -29,9 +29,15 @@ The import goes to `assets/` in this checkout. Pass `--out <dir>` to put it else
 `~/.local/share/openprocyon/assets` (Windows: `%APPDATA%\openprocyon\assets`) or `PROCYON_ASSETS`.
 Installs with community mods can be imported too.
 
+## How to help
+
+You don't need to write code. Playing the original and reporting exact behaviour (speeds, ranges, timings, what the computer
+captains do) settles the guesses still marked `PROVISIONAL`, and missions 2-13 need play-testing. See
+[CONTRIBUTING.md](CONTRIBUTING.md) for what to report and how.
+
 ## Contributing
 
-Read [AGENTS.md](AGENTS.md) first: it is the guide for human contributors and AI coding assistants alike, and its hard rules
+Read [CONTRIBUTING.md](CONTRIBUTING.md) and [AGENTS.md](AGENTS.md) first: it is the guide for human contributors and AI coding assistants alike, and its hard rules
 (no game content, no decompiled code or executable addresses, behaviour described in your own words) are not negotiable.
 `tools/check.sh` must pass before every commit. Architecture and module ownership: [docs/development.md](docs/development.md).
 Modding: [docs/modding.md](docs/modding.md).
