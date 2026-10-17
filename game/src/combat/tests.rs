@@ -595,3 +595,21 @@ fn retail_torpedo_arc_body_and_hull_collision() {
     let start = target.centre + Vec3::Z * 100.0;
     assert!(target.sections.iter().any(|s| seg_mesh(start, target.centre, s).is_some()));
 }
+
+/// The lay-mines routine (docs/re/gunnery.md#mine-laying): 10 s spells, 20 s apart while moving, back to back with an enemy
+/// within 50 units, never without a hostile ship.
+#[test]
+fn mine_laying_spells() {
+    let run = |hostile: bool, speed: f32, nearest: f32, secs: f32| {
+        let mut m = MineLaying::default();
+        (0..(secs * 10.0) as usize).map(|_| m.step(0.1, hostile, speed, nearest)).collect::<Vec<_>>()
+    };
+    let at = |v: &[bool], s: f32| v[(s * 10.0) as usize - 1];
+    let moving = run(true, 5.0, f32::MAX, 70.0);
+    assert!(!at(&moving, 19.8) && at(&moving, 20.3) && at(&moving, 29.8) && !at(&moving, 30.5));
+    assert!(!at(&moving, 49.8) && at(&moving, 50.3) && !at(&moving, 61.0));
+    assert!(run(true, 0.5, f32::MAX, 70.0).iter().all(|on| !on), "a still ship with no enemy close lays nothing");
+    let close = run(true, 0.0, 30.0, 25.0);
+    assert!(at(&close, 0.1) && at(&close, 10.0) && at(&close, 10.3) && at(&close, 25.0));
+    assert!(run(false, 5.0, 30.0, 70.0).iter().all(|on| !on));
+}

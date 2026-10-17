@@ -220,11 +220,12 @@ pub(super) fn fire(
     )>,
     others: Query<(Entity, &Transform, &Ship, &Health, Has<PlayerShip>, Option<&crate::campaign::MissionShip>, Option<&crate::cloak::Cloak>)>,
     mut parts: Query<&mut Transform, (With<GunPart>, Without<Ship>)>,
-    (globals, threats, points, sensors): (
+    (globals, threats, points, sensors, mut mine_laying): (
         Query<&GlobalTransform, With<GunPart>>,
         Query<(Entity, &Transform, &Shell), (Without<GunPart>, Without<Ship>)>,
         Option<Res<crate::campaign::CampaignPoints>>,
         Res<crate::environment::Sensors>,
+        Local<bevy::platform::collections::HashMap<Entity, MineLaying>>,
     ),
 ) {
     // The human fleet's gunners in a campaign: the roster's best gunner (crew_arms.rs); everyone else the plain-AI factor.
@@ -295,6 +296,12 @@ pub(super) fn fire(
             .map(Contact::aim)
         };
         let ship_target = ship_target.filter(|t| sensors.in_sight(me, t.entity, campaign.as_deref()));
+        let is_mine = |gun: &str| matches!(lib.bullets[&lib.guns[gun].bullet].payload, Payload::Mine { .. });
+        let laying = states.0.iter().any(|s| is_mine(&s.gun)) && {
+            let hostile = contacts.iter().any(|c| c.side != ship.side && c.visible);
+            let nearest = seen.iter().filter(|c| c.side != ship.side && c.visible).map(|c| c.aim_point.distance(tf.translation)).fold(f32::MAX, f32::min);
+            mine_laying.entry(me).or_default().step(dt, hostile, ship.speed.abs(), nearest)
+        };
         let pending = if primary { target.2.shot } else { None };
         let (mut shot_fired, mut shot_engaged) = (false, false);
         for (mount, state) in class.mounts.iter().zip(states.0.iter_mut()) {
@@ -302,6 +309,12 @@ pub(super) fn fire(
             let on_shot = pending.is_some_and(|s| s.0 == mount.bank);
             let gun = &lib.guns[&state.gun];
             let gun_target = match (primary && is_indirect(&state.gun), pending) {
+                // Mine guns never aim: while the ship lays mines they drop them along the mount's rest direction.
+                _ if is_mine(&state.gun) => laying.then(|| AimTarget {
+                    entity: Entity::PLACEHOLDER,
+                    position: tf.transform_point(mount.pos) + tf.rotation * mount.rot * Vec3::NEG_Z * gun.range[2] / 2.0,
+                    velocity: Vec3::ZERO,
+                }),
                 // Point defence: the nearest hostile torpedo or mine within its maximum range (retail: PD guns never fire at ships).
                 _ if gun.point_defense => incoming
                     .iter()
@@ -394,6 +407,27 @@ pub(super) fn fire(
         if pending.is_some() && (shot_fired || !shot_engaged) {
             target.2.shot = None;
         }
+    }
+}
+
+/// The retail lay-mines routine of every ship with mine guns (docs/re/gunnery.md#mine-laying): while a hostile ship exists it
+/// lays for 10 s, then waits; a new spell starts once the ship moves faster than 1 unit/s and 20 s have passed since the last
+/// change, or at once when the nearest enemy in sight is within 50 units.
+#[derive(Default, Clone, Copy)]
+pub(super) struct MineLaying {
+    on: bool,
+    since: f32,
+}
+impl MineLaying {
+    pub(super) fn step(&mut self, dt: f32, hostile: bool, speed: f32, nearest: f32) -> bool {
+        self.since += dt;
+        if hostile {
+            let start = !self.on && ((speed > 1.0 && self.since > 20.0) || nearest < 50.0);
+            if start || (self.on && self.since > 10.0) {
+                (self.on, self.since) = (start, 0.0);
+            }
+        }
+        self.on
     }
 }
 

@@ -154,3 +154,15 @@ particles and the authored EFT brightness/size/rectangle curves are unchanged. T
   gun picks its own target, the best candidate within its own range (nearest-style).
 - Remake: `GroundFire::panic` set by the bar button; each non-indirect player gun fires at the nearest enemy ship in its
   range and arc (fallback: the normal target). Cleared on any retarget (click or C). PROVISIONAL: persistence, selection score, flag filter.
+
+## Mine laying
+Mine guns (the star-mine dropper on the Navy and Procyon Minelayers and the weapon barge) sit on non-selectable mounts: neither
+the player nor the gun's own aim decides when they fire. Every ship's saved AI block holds a lay-mines routine with a laying
+time of 10 s and a no-laying time of 20 s (retail saves: `LAYMINESMAXTIME` 10, `DONOTLAYMINESMAXTIME` 20, `LAYINGMINES`).
+- The routine only runs for a ship that carries a mine gun, and only while at least one hostile ship exists.
+- A laying spell lasts 10 s. During it every mine gun fires whenever it has reloaded (Gun_StarMine_Med: one mine per 10 s), the
+  mine leaving along the mount's rest direction at MuzzleSpeed and drifting.
+- A new spell starts when the ship moves faster than 1 unit/s and 20 s have passed since the last spell ended (or since the
+  ship appeared), or at once whenever the nearest enemy in sight is closer than 50 units. PROVISIONAL: the 1 unit/s and
+  50-unit thresholds, and that the human player's minelayers run it too, are not yet observed in play.
+- Remake: `combat::gunnery::MineLaying`; mine guns never aim at a target.
