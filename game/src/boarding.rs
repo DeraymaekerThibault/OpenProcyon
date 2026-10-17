@@ -655,11 +655,11 @@ fn ai_boarding(
         if ms.is_some_and(|m| m.stance == crate::rules::Stance::Dummy || m.hold_fire) || pilot.is_some_and(|p| p.hold_fire) {
             continue;
         }
-        let target = match (ms, pilot) {
-            (Some(m), _) => m.target,
-            (None, Some(p)) => p.target,
-            // Skirmish enemies: their captain's target (ship::CaptainTargets); without one, the player's ship.
-            (None, None) => captains.as_deref().and_then(|c| c.of(e)).or(me).filter(|_| ship.side == Side::Enemy),
+        // Mission ships: the rules' target. Others: an explicit fleet order, else their captain's target (ship::CaptainTargets),
+        // else (skirmish enemies) the player's ship.
+        let target = match ms {
+            Some(m) => m.target,
+            None => pilot.and_then(|p| p.target).or_else(|| captains.as_deref().and_then(|c| c.of(e))).or_else(|| me.filter(|_| ship.side == Side::Enemy)),
         };
         let strong = own.strength.attack > AI_MIN_ATTACK;
         if let Some(t) = target.filter(|t| boarders.hostile(e, *t))
@@ -922,6 +922,7 @@ mod tests {
             let me = spawn(&mut app, "Ship_Navy_Cutter", Side::Player, Vec3::ZERO, Skill::Elite);
             app.world_mut().entity_mut(me).insert(PlayerShip);
             let foe = spawn(&mut app, "Ship_Pirate_Barque", Side::Enemy, Vec3::new(40.0, 0.0, 0.0), Skill::Elite);
+            app.world_mut().entity_mut(foe).insert(crate::ship::FleetPilot::default()); // skirmish fleets give every ship a pilot
             if let Some(a) = attack {
                 app.world_mut().get_mut::<Boardable>(foe).unwrap().strength.attack = a;
             }
