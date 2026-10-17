@@ -125,8 +125,9 @@ Headless retail skirmishes, one computer ship against our idle or fleeing Navy C
 - **Boarding:** Barques (Red Rover, two runs) boarded and captured a Man-O-War that was manoeuvring and being fired at (though rarely
   hit): after circling at ~60 units they dropped to ~3.5 units/s and made grapple passes to 12-18 units, broke away at speed to 40-110
   units, and came back; on the third pass in one run they held 12 units for ~12 s (grappled, winched) and the ship was taken within
-  ~3 minutes. A Barque circling an idle Cutter for 200 s and Carracks circling an idle Man-O-War for 2 minutes made no passes. What
-  starts a boarding attempt is unknown.
+  ~3 minutes. A Barque circling an idle Cutter for 200 s and Carracks circling an idle Man-O-War for 2 minutes made no passes.
+  The rule (harpoons fired at random once the target is in a harpoon's arc and reach, boarding at random once grappled):
+  [boarding.md](boarding.md) §5.
 - **Target choice:** a computer ship takes the nearest hostile object within its scan range as its target, and chooses again
   every 6 s (keeping a farther target until then) or at once when the target is gone. It circles and fires at that target, so
   in a fleet battle each computer ship goes for whichever of our ships is nearest. PROVISIONAL: the remake counts only ships as
