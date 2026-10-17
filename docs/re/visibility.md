@@ -59,7 +59,7 @@ Moving storms' sensor polygons still use the authored mission volumes rather tha
 
 ## 3. Human-player visibility spheres
 
-The UI first gathers candidate objects inside per-group visibility spheres, then applies the sight test (§1) to them. A group's sphere grows from each member's AI sight times a modifier whose meaning is unknown (possibly crew or equipment; **not yet a specification**) plus the member's distance from the group centre. Candidate bounds and final detection are distinct; the remake does not invent a final range multiplier.
+The UI first gathers candidate objects inside per-group visibility spheres, then applies the sight test (§1) to them. A group's sphere grows from each member's AI sight times a modifier plus the member's distance from the group centre. Retail saves store each computer ship's **scan range = WOT sight × its crew factor** (a Barque's 500 as 575 / 687.5 / 737.5 with Green / Average / Elite generic crews; the factors equal the ships' engineer/navigator factors), so the modifier is the crew's. Remake: `environment::ScanFactor` multiplies the sight used by the sight test (mission ships by crew level 1.15 / 1.30 / 1.40, computer skirmish ships 1.35; PROVISIONAL band values; player ships unchanged). Candidate bounds and final detection are distinct; the remake does not invent a final range multiplier.
 
 ## 4. Shared runtime implementation
 

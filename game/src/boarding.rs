@@ -63,6 +63,16 @@ impl Skill {
             Self::Players => 1.0,
         }
     }
+    /// Crew factor on sight range (`environment::ScanFactor`): retail saves' values for generic crews (Green 1.15, Average
+    /// 1.30-1.37, Elite 1.40-1.47); 'Players' ships keep their plain sight. PROVISIONAL: the lower value of each band.
+    pub fn scan(self) -> f32 {
+        match self {
+            Self::Green => 1.15,
+            Self::Average => 1.30,
+            Self::Elite => 1.40,
+            Self::Players => 1.0,
+        }
+    }
     fn member(self) -> f32 {
         match self {
             Self::Green => 0.1,
@@ -887,6 +897,8 @@ mod tests {
         // the skirmish computer's measured run-in factor (1.267) lies between Average and Elite
         assert!(f[1] < 1.267 && 1.267 < f[2]);
         assert_eq!(Skill::Players.handling(), 1.0);
+        // a Green Barque (sight 500) scans 575, as in the retail save
+        assert!((500.0 * Skill::Green.scan() - 575.0).abs() < 1e-3);
     }
 
     #[test]

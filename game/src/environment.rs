@@ -58,6 +58,11 @@ impl Sensors {
     }
 }
 
+/// A ship's crew factor on its sight range. Retail saves store each computer ship's scan range as its WOT sight times its crew
+/// factor (a Barque's 500 as 575 / 687.5 / 737.5 with Green / Average / Elite crews); ships without one use the plain sight.
+#[derive(Component, Clone, Copy, Debug, PartialEq)]
+pub struct ScanFactor(pub f32);
+
 pub fn refresh_sensors(
     mut sensors: ResMut<Sensors>,
     lib: Res<crate::combat::Library>,
@@ -70,6 +75,7 @@ pub fn refresh_sensors(
         Option<&crate::ship::FleetMember>,
         Option<&crate::cloak::Cloak>,
         Has<crate::PlayerShip>,
+        Option<&ScanFactor>,
     )>,
     objects: Query<
         (
@@ -88,7 +94,7 @@ pub fn refresh_sensors(
 ) {
     sensors.objects.clear();
     sensors.primary = None;
-    for (e, tf, ship, health, ms, fleet, cloak, primary) in &ships {
+    for (e, tf, ship, health, ms, fleet, cloak, primary, scan) in &ships {
         let class = &lib.classes[ship.class];
         let (centre, radius) = class.sphere;
         sensors.objects.insert(
@@ -96,7 +102,7 @@ pub fn refresh_sensors(
             SensorObject {
                 at: tf.translation,
                 sphere: (tf.transform_point(centre), radius * tf.scale.abs().max_element()),
-                sight: (!class.is_lifeboat).then_some(class.sight),
+                sight: (!class.is_lifeboat).then_some(class.sight * scan.map_or(1.0, |f| f.0)),
                 group: fleet.map(|f| f.0.as_str()).or_else(|| ms.map(|m| m.owner.as_str())).unwrap_or("").into(),
                 shown: !health.destroyed && ms.is_none_or(|m| m.visible),
                 cloaked: cloak.is_some_and(|c| c.hidden()),
