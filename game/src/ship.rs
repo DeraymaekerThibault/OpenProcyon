@@ -62,20 +62,115 @@ pub fn angdiff(a: f32, b: f32) -> f32 {
 
 pub type CaptainBusy = Or<(With<docking::Docker>, With<docking::Tower>, With<boarding::GrappleOrder>, With<boarding::Grapple>, With<boarding::Boarding>)>;
 
-/// PROVISIONAL AI (mine): close to about the guns' range, then keep a broadside toward the foe and hold at slow speed.
-/// Enemies hunt the nearest player-side ship; the player ship only uses it in demo (--shot) mode as an autopilot.
+/// Radius range of the circle a computer captain flies around its target. Retail circles: Carrack 54, Barque 56, Assault Cutter ~95,
+/// Minelayer 110 units (docs/re/movement.md "Computer captains"); retail saves give every computer ship a random attack distance of
+/// about 100-250, so half of it is taken as the radius, fixed per ship. PROVISIONAL: that link and the uniform spread.
+pub const ORBIT_MIN: f32 = 50.0;
+pub const ORBIT_MAX: f32 = 125.0;
+
+/// The circle radius of ship `e`: fixed per ship, spread over ORBIT_MIN..ORBIT_MAX.
+pub fn orbit_radius(e: Entity) -> f32 {
+    let h = e.index_u32().wrapping_mul(2_654_435_761) >> 16; // ponytail: entity-index hash, so it changes between battles
+    ORBIT_MIN + (h % 1024) as f32 / 1023.0 * (ORBIT_MAX - ORBIT_MIN)
+}
+/// Distance off the circle at which the captain steers straight at (or away from) the foe; nearer, it blends toward the tangent.
+/// Remake tuning so the hull holds the measured circle, not a retail value.
+const ORBIT_BAND: f32 = 25.0;
+/// Throttle (fraction of Ahead Full) while circling: retail circles at 0.66 (Carrack) and 0.74 (Barque) of the crewed Emergency
+/// speed it ran in at. PROVISIONAL: whether the captain throttles back or the turn bleeds speed is unknown.
+pub const ORBIT_THROTTLE: f32 = 1.4;
+/// Speed factor (`Ship::crew_speed`) of computer skirmish ships: retail Carrack and Barque ran in at exactly 1.267 x their
+/// Emergency Speed (crew.md's engineer factor for skill ~7).
+pub const COMPUTER_CREW: f32 = 1.267;
+/// Rudder-torque factor (`Ship::crew_turn`) of computer skirmish ships. Retail turn rates while circling (Barque 8.1°/s at 8.2
+/// units/s, Carrack 8.6°/s at 5.74) need torque x 1.72 and x 1.87 under our turn model, which a full-rudder Cutter run confirmed at
+/// Emergency (9.70°/s measured and predicted); that is the ships' saved navigator factor (1.31, 1.37) squared. PROVISIONAL.
+pub const COMPUTER_TURN: f32 = 1.75;
+/// Computer captains keep this far outside a black hole's radius (retail: a Carrack rode 157-165 units from a 145-radius hole).
+pub const HOLE_MARGIN: f32 = 15.0;
+/// Exploring ships switch quadrant this close to the current quadrant's centre (retail: an Assault Cutter turned ~220 units short
+/// of the centres (±625, 625) of a 1250-half map). PROVISIONAL.
+pub const EXPLORE_REACH: f32 = 220.0;
+
+/// Map exploration of skirmish captains with nothing in sight (retail saves: every computer ship carries an explore-map routine
+/// with a quadrant index 0-3). Each ship sails for the centre of its quadrant, then for the neighbouring one across the map's
+/// x axis, back and forth (as the retail Assault Cutter did). PROVISIONAL: the start quadrant (here from the entity) and the order.
+#[derive(Default)]
+pub struct Explore {
+    map: Option<Option<String>>,
+    half: f32,
+    quadrant: std::collections::HashMap<Entity, usize>,
+}
+impl Explore {
+    /// Centre (bevy coordinates) of quadrant `q` of a map `half` units across from the centre: bit 0 = +x, bit 1 = +y (game).
+    pub fn centre(q: usize, half: f32) -> Vec3 {
+        let (x, y) = (if q & 1 == 1 { half / 2.0 } else { -half / 2.0 }, if q & 2 == 2 { half / 2.0 } else { -half / 2.0 });
+        Vec3::new(x, 0.0, -y)
+    }
+    fn goal(&mut self, cfg: &Config, e: Entity, here: Vec3) -> Vec3 {
+        if self.map.as_ref() != Some(&cfg.map) {
+            let map = cfg.map.as_ref().and_then(|id| crate::data::map_json(id)).unwrap_or_default();
+            self.half = map["world_half"].as_f64().unwrap_or(1000.0) as f32;
+            self.map = Some(cfg.map.clone());
+            self.quadrant.clear();
+        }
+        let half = self.half;
+        let q = self.quadrant.entry(e).or_insert(e.index_u32() as usize % 4);
+        if Vec2::new(here.x, here.z).distance(Explore::centre(*q, half).xz()) < EXPLORE_REACH {
+            *q ^= 1;
+        }
+        Explore::centre(*q, half)
+    }
+}
+
+/// Retail-observed captain steering against one foe at `foe`, shared by the skirmish and mission AIs: run in at Emergency Speed,
+/// then circle the foe `orbit` units out with it abeam (on whichever side it already lies) at ORBIT_THROTTLE. The
+/// heading blends from straight at the foe (ORBIT_BAND or more outside the circle) through the tangent (on it) to straight out.
+/// Near a black hole or damaging nebula (`holes`: centre, radius) it turns straight away first. Returns (goal heading, engine order, throttle).
+pub fn captain_steer(heading: f32, pos: Vec3, foe: Vec3, orbit: f32, holes: &[(Vec3, f32)]) -> (f32, usize, Option<f32>) {
+    let toward = |d: Vec3| (-d.x).atan2(-d.z); // heading that points the bow along d
+    if let Some((c, _)) = holes.iter().find(|(c, r)| Vec2::new(pos.x - c.x, pos.z - c.z).length() < r + HOLE_MARGIN) {
+        return (toward(pos - *c), 3, None);
+    }
+    let d = foe - pos;
+    let dist = Vec2::new(d.x, d.z).length();
+    let bearing = toward(d);
+    // Keep the foe on the beam it is already on (+1: the foe lies at bearing - heading = +90°), so the choice never flips.
+    let beam = if angdiff(bearing, heading) >= 0.0 { 1.0 } else { -1.0 };
+    let goal = bearing - beam * (PI / 2.0) * (1.0 - ((dist - orbit) / ORBIT_BAND).clamp(-1.0, 1.0));
+    (goal, 3, (dist < 2.0 * orbit).then_some(ORBIT_THROTTLE))
+}
+
+/// Areas captains keep out of, as (centre, radius) for `captain_steer`: black holes and damaging nebulae.
+pub fn hole_list(
+    holes: &Query<(&Transform, &crate::blackhole::Pull), Without<Ship>>,
+    storms: Option<&crate::nebula::Storms>,
+    shift: Option<&crate::nebula::StormShift>,
+) -> Vec<(Vec3, f32)> {
+    let mut out: Vec<(Vec3, f32)> = holes.iter().map(|(t, p)| (t.translation, p.radius)).collect();
+    if let (Some(storms), Some(shift)) = (storms, shift) {
+        out.extend(crate::nebula::storm_circles(storms, shift));
+    }
+    out
+}
+
+/// Skirmish captains: hunt the nearest enemy in sight with `captain_steer`; with nothing in sight an enemy ship explores the map
+/// at Emergency Speed (`Explore`). The player ship only uses this in demo (--shot) mode as an autopilot.
 pub fn ai(
-    lib: Res<Library>,
     cfg: Res<Config>,
     mission: Option<Res<campaign::Mission>>,
     mut ships: Query<(Entity, &Transform, &mut Ship, &Health, Has<PlayerShip>, Option<&FleetPilot>)>,
     busy: Query<(), CaptainBusy>,
     sensors: Res<crate::environment::Sensors>,
     held: Query<(), With<HoldPosition>>,
+    holes: Query<(&Transform, &crate::blackhole::Pull), Without<Ship>>,
+    storms: (Option<Res<crate::nebula::Storms>>, Option<Res<crate::nebula::StormShift>>),
+    mut explore: Local<Explore>,
 ) {
     if mission.is_some() {
         return;
     }
+    let holes = hole_list(&holes, storms.0.as_deref(), storms.1.as_deref());
     let snap: Vec<(Entity, Vec3, Side, bool)> = ships.iter().map(|(e, t, s, h, _, _)| (e, t.translation, s.side, !h.destroyed)).collect();
     for (e, tf, mut s, h, me, pilot) in &mut ships {
         if busy.contains(e) {
@@ -102,24 +197,22 @@ pub fn ai(
             .filter(|f| f.2 != s.side && f.3 && (explicit == Some(f.0) || sensors.in_sight(e, f.0, None)) && explicit.is_none_or(|e| e == f.0))
             .min_by(|a, b| a.1.distance(tf.translation).total_cmp(&b.1.distance(tf.translation)));
         let Some(foe) = foe else {
-            s.order = 0;
             s.goal = None;
+            if s.side != Side::Enemy || explicit.is_some() {
+                s.order = 0;
+                continue;
+            }
+            s.waypoints = vec![explore.goal(&cfg, e, tf.translation)];
+            s.order = 3;
             continue;
         };
-        let d = foe.1 - tf.translation;
-        let dist = Vec2::new(d.x, d.z).length();
-        let bearing = (-d.x).atan2(-d.z); // heading that points the bow at the foe
-        let engage = lib.classes[s.class].engage;
-        let side = [bearing + PI / 2.0, bearing - PI / 2.0].into_iter().min_by(|a, b| angdiff(*a, s.heading).abs().total_cmp(&angdiff(*b, s.heading).abs())).unwrap();
-        let (goal, order) = if dist > engage * 1.1 {
-            (bearing, 2)
-        } else if dist < engage * 0.5 {
-            (side - 0.5 * angdiff(bearing, side).signum(), 1)
-        } else {
-            (side, 1)
-        };
+        if explore.quadrant.contains_key(&e) {
+            s.waypoints.clear(); // contact: drop the exploring course (the quadrant is kept for later)
+        }
+        let (goal, order, throttle) = captain_steer(s.heading, tf.translation, foe.1, orbit_radius(e), &holes);
         s.goal = Some(goal);
         s.order = order;
+        s.throttle = throttle;
     }
 }
 
@@ -914,6 +1007,77 @@ pub mod movement_tests {
         assert!(ship.waypoints.is_empty());
         assert!(ship.order == 3 && ship.speed > 1.0, "speed {}", ship.speed);
     }
+    #[test]
+    fn circle_radii_spread_over_the_retail_range() {
+        let r: Vec<f32> = (0..200).map(|i| orbit_radius(Entity::from_raw_u32(i).unwrap())).collect();
+        assert!(r.iter().all(|x| (ORBIT_MIN..=ORBIT_MAX).contains(x)));
+        assert!(r.iter().any(|x| *x < 60.0) && r.iter().any(|x| *x > 105.0), "both ends used");
+    }
+
+    #[test]
+    fn exploring_heads_for_quadrant_centres() {
+        // retail Carrack, Diablo Strait (half 1625), from (322, -1127): its course (0.27, 0.96) points at quadrant (+x, +y)
+        let c = Explore::centre(3, 1625.0);
+        assert_eq!((c.x, -c.z), (812.5, 812.5));
+        let d = (Vec2::new(c.x, -c.z) - Vec2::new(322.0, -1127.0)).normalize();
+        assert!((d.x - 0.245).abs() < 0.01 && (d.y - 0.97).abs() < 0.01, "{d}");
+        assert_eq!(Explore::centre(0, 1000.0), Vec3::new(-500.0, 0.0, 500.0));
+    }
+
+    #[test]
+    fn captain_runs_in_then_circles_with_the_foe_abeam() {
+        const ORBIT: f32 = 55.0; // the retail Barque's circle
+        let foe = Vec3::ZERO;
+        // far: straight at the foe at Emergency, no throttle cap
+        let (goal, order, throttle) = captain_steer(0.0, Vec3::new(0.0, 0.0, 400.0), foe, ORBIT, &[]);
+        assert!(angdiff(goal, 0.0).abs() < 1e-5 && order == 3 && throttle.is_none(), "{goal} {order} {throttle:?}");
+        // on the circle: tangent (foe abeam), about MaxSpeed
+        let (goal, _, throttle) = captain_steer(0.3, Vec3::new(0.0, 0.0, ORBIT), foe, ORBIT, &[]);
+        assert!((angdiff(goal, 0.0).abs() - PI / 2.0).abs() < 1e-5 && throttle == Some(ORBIT_THROTTLE));
+        // near a black hole: straight away from it, whatever the foe
+        let (goal, _, _) = captain_steer(0.0, Vec3::new(0.0, 0.0, 150.0), foe, ORBIT, &[(Vec3::new(0.0, 0.0, 300.0), 145.0)]);
+        assert!(angdiff(goal, 0.0).abs() < 1e-5, "bow toward -z, away from the hole: {goal}");
+
+        // A crewed Barque run in from 400 units settles onto a circle with the foe abeam, using the real movement step
+        // (retail held 51-58 units, turning 8.1°/s at 8.2 units/s).
+        let lib = combat::Library::load(&crate::assets_dir());
+        let ci = lib.index("Ship_Pirate_Barque");
+        let class = &lib.classes[ci];
+        let h = Health { sections: vec![1.0; class.sections.len()], core: 1.0, destroyed: false };
+        let mut ship = Ship {
+            class: ci,
+            side: Side::Enemy,
+            heading: 0.0,
+            speed: 0.0,
+            ang_vel: 0.0,
+            order: 0,
+            waypoints: vec![],
+            goal: None,
+            cap: 1.0,
+            throttle: None,
+            sail_energy: 1.0,
+            crew_speed: COMPUTER_CREW,
+            crew_turn: COMPUTER_TURN,
+        };
+        let mut tf = Transform::from_xyz(30.0, 0.0, 400.0);
+        let dt = 1.0 / 30.0;
+        let (mut dists, mut beams) = (vec![], vec![]);
+        for i in 0..(150.0 / dt) as usize {
+            let (goal, order, throttle) = captain_steer(ship.heading, tf.translation, foe, ORBIT, &[]);
+            (ship.goal, ship.order, ship.throttle) = (Some(goal), order, throttle);
+            step(&mut ship, &mut tf, class, &h, dt);
+            if i as f32 * dt > 90.0 {
+                let d = foe - tf.translation;
+                dists.push(Vec2::new(d.x, d.z).length());
+                beams.push(angdiff((-d.x).atan2(-d.z), ship.heading).abs());
+            }
+        }
+        let (lo, hi) = dists.iter().fold((f32::MAX, 0.0f32), |(a, b), d| (a.min(*d), b.max(*d)));
+        // ponytail: the remake circles ~8 units wide of retail (59-68); a narrower blend band oscillates instead
+        assert!(lo > 0.9 * ORBIT && hi < 1.3 * ORBIT, "circle {lo}..{hi}");
+        assert!(beams.iter().all(|b| (b - PI / 2.0).abs() < 0.5), "foe kept abeam");
+    }
+
     /// Retail Navy Cutter without crew, sampled from the running original (docs/re/movement.md, "Measured").
     #[test]
     fn cutter_matches_measured_retail_movement() {

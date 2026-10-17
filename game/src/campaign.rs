@@ -367,6 +367,9 @@ pub fn spawn(commands: &mut Commands, assets: &AssetServer, lib: &Library, fxl: 
         let skill = crate::boarding::Skill::parse(setup.and_then(|a| a["Crew Skill Level"].as_str()).unwrap_or_default());
         let boardable = setup.is_some_and(|a| crate::data::wot_flag(&a["Boardable"]));
         commands.entity(e).insert(crate::boarding::Boardable::ship(s["type"].as_str().unwrap_or_default(), skill, boardable));
+        let f = skill.handling();
+        commands.entity(e).entry::<crate::Ship>().and_modify(move |mut ship| (ship.crew_speed, ship.crew_turn) = (f, f));
+        commands.entity(e).insert(crate::environment::ScanFactor(skill.scan()));
         if !primary {
             commands.entity(e).remove::<PlayerShip>();
         }

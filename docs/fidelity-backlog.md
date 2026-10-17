@@ -38,7 +38,7 @@ behaviour not from original evidence) · Unvalidated (implemented, not compared 
 |---|---|---|---|
 | SIM-01 | Partial | Cutter movement and crew scaling measured on retail. Open: Green/Average/Elite crews, straight-course weave, no lean at Emergency, other classes, retail course/rudder controller. | `ship.rs`, `course.rs`; [movement.md](re/movement.md) |
 | SIM-02 | Provisional | Obstacle avoidance/path planning, stance and captain behaviour, target choice, border-zone AI. Steer-away fails on concave coasts. | `ship.rs`, `collision.rs`; [movement.md](re/movement.md) |
-| PT-09 | Provisional | AI behaviour pass: captain/enemy movement, target choice, engagement (with SIM-02). | `ship.rs`, `combat/` |
+| PT-09 | Provisional | AI: retail run-in, circling (per-ship radius), hazard keep-out (black holes, storms), crew speed/rudder/scan factors and map exploration measured and implemented ([movement.md](re/movement.md#computer-captains-measured-2026-10)). Open: what starts AI boarding (Barques board and capture), the docking/repair decision (not seen above 80 % hull), target choice in fleets, mine laying (10 s on / 20 s off in saves), ships that head straight for the enemy instead of exploring. |
 | SIM-03 | Partial | Ram damage constants; restitution, inertia, damping and docking exemptions guessed; rock/rock, rock/static, whale/mine contacts absent; no continuous contact for fast belts. | `collision.rs`, `combat/asteroid.rs`; [collision.md](re/collision.md) |
 | SIM-04 | Provisional | Retail dock arrival/path planner, per-section repair jobs, tow approach and cable spring/damping. | `docking.rs`; [docking-and-orders.md](re/docking-and-orders.md) |
 | SIM-05 | Partial | Boarding leadership/per-person crews, harpoon flight, winch tension/break, player boarding of bases. | `boarding.rs`; [boarding.md](re/boarding.md) |
@@ -98,6 +98,7 @@ Reference screenshots are local only (`local/reference/`, never committed).
 3. Star mortar ring timing/push, lob elevation scatter (SIM-07).
 4. Victory screen and kills-by-object-type summary (UIR-08); ram/collision damage (SIM-03).
 5. More Easy-difficulty hits on the computer.
+6. AI: boarding trigger (Barque vs idle Cutter: none; vs Man-O-War: three grapple passes and capture), docking decision at low hull, target choice with two of our ships (PT-09).
 
 ## Done
 

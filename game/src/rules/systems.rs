@@ -693,8 +693,11 @@ fn mission_ai(
     boats: Query<(), With<crate::lifeboats::Lifeboat>>,
     sensors: Res<crate::environment::Sensors>,
     held: Query<(), With<crate::ship::HoldPosition>>,
+    holes: Query<(&Transform, &crate::blackhole::Pull), Without<Ship>>,
+    storms: (Option<Res<crate::nebula::Storms>>, Option<Res<crate::nebula::StormShift>>),
 ) {
     let Some(mission) = mission else { return };
+    let holes = crate::ship::hole_list(&holes, storms.0.as_deref(), storms.1.as_deref());
     let sc = &mission.script;
     // Targets for orders and hostility: ships, then rocks (rocks only answer attack orders, never hostility); tagged with TWT groups.
     let unit = |e, id, name: &str, owner: &str, pos, alive| Unit {
@@ -787,7 +790,7 @@ fn mission_ai(
         if ms.target != want {
             ms.target = want;
         }
-        // Movement: an attack order or an aggressive stance closes on the foe (same broadside logic as the skirmish AI).
+        // Movement: an attack order or an aggressive stance closes on the foe (`ship::captain_steer`, shared with the skirmish AI).
         // A human-captained ship (Captain_Human) only fires: it moves on the human fleet's orders (ship.rs fleet_follow).
         let chase = if ms.human || (ms.stance == Stance::Persistent && !ship.waypoints.is_empty()) {
             None // Persistent scripted routes take precedence over combat steering (Mission 3's swoop/retreat).
@@ -798,26 +801,16 @@ fn mission_ai(
             continue;
         }
         if let (Some((_, fp)), false) = (chase, ms.stance == Stance::Dummy) {
-            let d = fp - tf.translation;
-            let dist = Vec2::new(d.x, d.z).length();
-            let bearing = (-d.x).atan2(-d.z);
-            let engage = lib.classes[ship.class].engage;
-            let side = [bearing + std::f32::consts::FRAC_PI_2, bearing - std::f32::consts::FRAC_PI_2]
-                .into_iter()
-                .min_by(|a, b| crate::angdiff(*a, ship.heading).abs().total_cmp(&crate::angdiff(*b, ship.heading).abs()))
-                .unwrap();
-            let (goal, order) = if ms.ram && ordered.is_some() {
-                (bearing, 3)
-            } else if dist > engage * 1.1 {
-                (bearing, 2)
-            } else if dist < engage * 0.5 {
-                (side - 0.5 * crate::angdiff(bearing, side).signum(), 1)
+            let (goal, order, throttle) = if ms.ram && ordered.is_some() {
+                let d = fp - tf.translation;
+                ((-d.x).atan2(-d.z), 3, None)
             } else {
-                (side, 1)
+                crate::ship::captain_steer(ship.heading, tf.translation, fp, crate::ship::orbit_radius(e), &holes)
             };
             ship.waypoints.clear();
             ship.goal = Some(goal);
             ship.order = order;
+            ship.throttle = throttle;
             ms.stop_at_end = true;
         } else if ms.stop_at_end && ms.looping.is_none() && ship.waypoints.len() <= 1 {
             // Retail takes the last point of a 'to end' path within 2 x the ship's radius, then cuts throttle to 0.

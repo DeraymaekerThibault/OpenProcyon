@@ -50,6 +50,12 @@ riggers' Rigging; Strength = Combat. Leadership and Gunnery show on no bar.
   ([gunnery.md](gunnery.md#gunners), measured).
 
 ## Open
-- Whether placed ships' generic crews (Green/Average/Elite, skill 3/6/8) get the same factor; the remake applies none yet.
+- Placed and computer ships' generic crews do get crew factors. Retail saves (missions 3 and 11) store per ship an engineer and a
+  navigator factor: Green crews 1.15, Average 1.30-1.37, Elite 1.40-1.47, default (rating-1) hands 1.05-1.10, i.e. about
+  1 + 0.05 × skill plus a small extra. That scale is not speed itself (crew.md's measured speed factors are lower, e.g. 1.178 at
+  skill 5); computer skirmish ships ran in at 1.267 × Emergency, between this curve's Average (1.219) and Elite (1.296).
+  Remake: mission ships take `skill_factor` at their crew level's skill (Green 3, Average 6, Elite 8) for speed and rudder
+  (`boarding::Skill::handling`); computer skirmish ships use the measured 1.267. PROVISIONAL: the link between the save scale and
+  speed, and the navigator's (rudder) share.
 - Leadership (manual: "improves the effectiveness of your entire crew"): no bar shows it; not measured.
 - Spotting range. (Repair Rate: refit-resupply.md 3.4; rate of fire: gunnery.md#gunners.)

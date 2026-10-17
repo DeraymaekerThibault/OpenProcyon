@@ -103,3 +103,50 @@ Follow-up (waypoint test = clamped linear interpolation):
 - Remake: `rules::mission_ai` drops the last point inside 2 × `class.radius` (PROVISIONAL stand-in for R) and sets All Stop; the existing
   drag then brakes the ship. The turn-state throttle hold is not modelled. A finished remake chase stops the same way (not retail-derived).
   The human's own move orders still coast on (`ship.rs`); the command ship is halted during the opening briefing (`briefing.rs`).
+
+## Computer captains (measured, 2026-10)
+Headless retail skirmishes, one computer ship against our idle or fleeing Navy Cutter / Man-O-War, every ship logged at ~30 Hz.
+- **Crew:** computer skirmish ships run in at exactly 1.267 × Emergency Speed (Carrack 8.71, Barque 11.08 units/s), the engineer
+  factor of [crew.md](crew.md) for a skill of about 7. A patrolling Assault Cutter sailed at 8.56 (0.98 × Emergency).
+- **Approach:** at that crewed Emergency Speed, aiming off the bow toward a tangent of the circle it will fly (we sat 17° off its
+  bow at 330 units, 48° at 100, 66° at 60).
+- **Circling:** from ~60-75 units it turns onto a circle around the target and holds it, the target on one beam (±90°, the side it
+  approached on: port in two runs, starboard in one). Carrack 54 units (Man-O-War target; 36-70 spread while the target moved),
+  Barque 55.7 (51-58) around an idle Cutter, turning a steady 8°/s; an Assault Cutter ~95 (60-120, with a Barque); a Procyon
+  Minelayer a perfect 109-113 for 10 minutes; a Procyon Frigate kept us on its beam (55-125°) on a fixed 6°/s turn while we moved,
+  so its distance swung 43-131. Radii do not follow a gun range (Barque and Minelayer both carry the 110-range medium cannon). Speed while circling: 0.66 (Carrack 5.74) and 0.74 (Barque
+  8.2) of the run-in speed. Both carry the medium cannon (effective range 110), so the radius may be half of it; the gun ranges
+  otherwise differ (Carrack heavy cannon 150, Barque Arcturian fire 75).
+- **Hazards:** with our ship inside a black hole's radius, a Carrack circled at a steady 157-165 units from the hole's centre
+  (radius 145) for 13 minutes instead of closing.
+- **Storms:** on Red Rover (solar-storm nebulae) idle ships of ours lost 5,400-6,300 hull points that no player was credited with, and a
+  circling Carrack broke off at Emergency Speed shortly before; the save's avoid list names nebulae. PROVISIONAL reading: the
+  storm drifted over the idle ship and the computer captain kept out of it.
+- **Boarding:** Barques (Red Rover, two runs) boarded and captured a Man-O-War that was manoeuvring and being fired at (though rarely
+  hit): after circling at ~60 units they dropped to ~3.5 units/s and made grapple passes to 12-18 units, broke away at speed to 40-110
+  units, and came back; on the third pass in one run they held 12 units for ~12 s (grappled, winched) and the ship was taken within
+  ~3 minutes. A Barque circling an idle Cutter for 200 s and Carracks circling an idle Man-O-War for 2 minutes made no passes. What
+  starts a boarding attempt is unknown.
+- **Nothing in sight: map exploration.** Retail saves give every computer ship an explore-map routine with a quadrant index 0-3
+  (random per ship). Observed: a Carrack on the Diablo Strait (half-size 1625) ran from (322, -1127) on course (0.27, 0.96) for
+  200 s, straight at the (+x, +y) quadrant centre (812, 812) (bearing (0.245, 0.97)); an Assault Cutter on the Zemyatin Anomaly
+  (half-size 1250, sight 400) shuttled at Emergency between the two upper quadrant centres (±625, 625), turning ~220 units short of
+  each. Other ships came straight at us from 740-1900 units (a Barque, a Procyon Minelayer), so some captains know where the enemy is
+  or head for it; what decides that is unknown.
+- **Other routines in the save** (per computer ship): target selection with an attack timer; a simple attack routine with a random
+  attack distance (about 100-250 units) and attack side; broadside / frontal (with a move-away vector and timer) / rear attack
+  routines; dock (5 s dock time), board (with a grapple flag), tow, lay-mines (lay 10 s, pause 20 s) and fire-on-asteroids routines;
+  collision avoidance against ships, asteroids, black holes, torpedoes, mines, dragons, islands and nebulae; waypoint following with
+  a random minimum throttle 0.65-0.75; a scan range = WOT sight × the crew factor.
+- **Fire:** see [gunnery.md](gunnery.md) (computer guns fire without clicks; the human command ship's do not).
+- Remake (`ship::captain_steer`, shared by the skirmish AI and mission attack orders): Emergency run-in, then a circle of
+  `ship::orbit_radius` (50-125 units, fixed per ship: half the saves' random attack distance, PROVISIONAL)
+  (heading blended from the tangent toward / away from the foe within 25 units of it) at throttle 1.4 (≈0.7 × Emergency), keeping
+  15 units outside black holes and damaging nebulae (solar storm / meteors, as circles: `nebula::storm_circles`); computer skirmish ships get crew factor 1.267 on speed and rudder; skirmish enemies with nothing in
+  sight explore (`ship::Explore`: quadrant centre, then its x-neighbour, switching 220 units short). PROVISIONAL: the radius rule,
+  the throttle, the start quadrant and visiting order, and the ships that head straight for the enemy instead.
+  Computer skirmish ships use rudder factor 1.75 (below); the remake's circle settles at 59-68 units (retail 51-58).
+- **Turning at speed (measured, Navy Cutter, no crew):** full rudder 13.6°/s at Ahead Full (4.53) and 9.70°/s at Emergency
+  (9.06); speed does not drop in the turn. Our turn formula with its torque / 3 band above 0.67 × MaxSpeed predicts 9.70°/s, so
+  the band holds. The computer's circling turn rates then need rudder torque × 1.72 (Barque) and × 1.87 (Carrack): the square of
+  their saved navigator factors (1.31, 1.37), i.e. turn rate grows linearly with that factor. Remake: `ship::COMPUTER_TURN` = 1.75.

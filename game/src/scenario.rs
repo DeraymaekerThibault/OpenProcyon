@@ -257,6 +257,11 @@ pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Libra
                 let pos = at.map_or(slot, |a| game_to_bevy(&serde_json::json!(a)));
                 let e = spawn_ship(commands, assets, lib, fxl, name, g.side, pos, heading, label.clone().or_else(|| namer.pick(lib, name)));
                 commands.entity(e).insert(ship::FleetMember(owner.clone(), i));
+                if !g.human {
+                    commands.entity(e).entry::<Ship>().and_modify(|mut s| (s.crew_speed, s.crew_turn) = (ship::COMPUTER_CREW, ship::COMPUTER_TURN));
+                    // PROVISIONAL: the crew factor matching the measured speed (Average-to-Elite, retail save scale)
+                    commands.entity(e).insert(crate::environment::ScanFactor(1.35));
+                }
                 if let Some(fit) = g.weapons.get(i).filter(|fit| !fit.is_empty()) {
                     commands.entity(e).insert(crate::crew_arms::WeaponFit(fit.clone()));
                 }
