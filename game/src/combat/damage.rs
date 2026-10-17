@@ -196,7 +196,8 @@ pub fn fires(
 
 /// Retail: a destroyed swappable section swaps its mesh "<A>_<B>" for "<A>Damage_<B>".
 /// The GLB carries both; show whichever matches the section state. Runs every frame so freshly loaded scenes are covered.
-pub fn swap_meshes(lib: Res<Library>, ships: Query<(Entity, &Ship, &Health)>, children: Query<&Children>, mut nodes: Query<(&Name, &mut Visibility)>) {
+pub fn swap_meshes(lib: Res<Library>, ships: Query<(Entity, &Ship, &Health), Without<super::Sinking>>, children: Query<&Children>, mut nodes: Query<(&Name, &mut Visibility)>) {
+    // A breaking-up ship's section nodes belong to `deaths` until it is gone.
     for (e, ship, h) in &ships {
         let class = &lib.classes[ship.class];
         for d in children.iter_descendants(e) {

@@ -60,6 +60,28 @@ SURFACES = {
 }
 
 
+def destruct_record(text):
+    """A section's `destructFx` ("{ Final_Ship_Chunk 2.4 2.5 ( -1.8 10.2 5.6 ) }": effect or none, start and end seconds,
+    ship-axes velocity of the flying chunk) as {fx, start, end, vel}; None when absent or malformed."""
+    w = (
+        (text or "")
+        .replace("{", " ")
+        .replace("}", " ")
+        .replace("(", " ")
+        .replace(")", " ")
+        .split()
+    )
+    if len(w) != 6:
+        return None
+    try:
+        start, end, *vel = (float(v) for v in w[1:])
+    except ValueError:
+        return None
+    return dict(
+        fx=None if w[0].lower() == "none" else w[0], start=start, end=end, vel=vel
+    )
+
+
 def load(root, name):
     nodes, problems = parse_lines(
         read_source_lines(
@@ -333,6 +355,7 @@ def export(root, ship, outdir):
                 destruct_fx=(
                     a.get("destructFx", "").replace("{", "").split() or [None]
                 )[0],
+                destruct=destruct_record(a.get("destructFx")),
                 aabb=[[min(c) for c in xs], [max(c) for c in xs]],
                 tris=[
                     round(c, 3)
