@@ -152,7 +152,10 @@ fn sensor_smoke(world: &mut World) {
     let primary = world.query_filtered::<Entity, With<crate::PlayerShip>>().single(world).expect("sight smoke primary");
     let ally =
         world.query::<(Entity, &Ship)>().iter(world).find(|(e, s)| *e != primary && s.side == crate::Side::Player).expect("sight smoke requires --allies Ship_Navy_Cutter").0;
-    let enemy = world.query::<(Entity, &Ship)>().iter(world).find(|(_, s)| s.side == crate::Side::Enemy).expect("sight smoke requires an enemy").0;
+    // Sorted: query order changes when the smoke adds components (the cloak), and `enemy` must stay the same ship.
+    let mut enemies: Vec<Entity> = world.query::<(Entity, &Ship)>().iter(world).filter(|(_, s)| s.side == crate::Side::Enemy).map(|(e, _)| e).collect();
+    enemies.sort();
+    let enemy = *enemies.first().expect("sight smoke requires an enemy");
     let group = world.get::<crate::ship::FleetMember>(primary).unwrap().0.clone();
     if frame != 30 {
         let seen = world.resource::<Sensors>().player_sees(enemy, None);
@@ -163,7 +166,9 @@ fn sensor_smoke(world: &mut World) {
     }
     match frame {
         30 => {
-            for (e, x) in [(primary, 0.0), (ally, 1000.0), (enemy, 2000.0)] {
+            // Extra enemies (the default --enemies has two) go far out of every sight range, so only `enemy` is ever a contact.
+            let parked = enemies.iter().skip(1).enumerate().map(|(i, e)| (*e, 10_000.0 + 1000.0 * i as f32));
+            for (e, x) in [(primary, 0.0), (ally, 1000.0), (enemy, 2000.0)].into_iter().chain(parked) {
                 world.get_mut::<Transform>(e).unwrap().translation = Vec3::X * x;
                 let mut ship = world.get_mut::<Ship>(e).unwrap();
                 ship.speed = 0.0;
