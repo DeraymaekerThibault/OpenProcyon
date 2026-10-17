@@ -35,8 +35,10 @@ pub const FIRE_FULL: f32 = 20.0;
 
 pub const FIRE_FADE: [f32; 2] = [3.0, 5.0];
 
-/// PROVISIONAL: intensity the crew puts out per tick. The original's rate is crew-skill driven; the formula is unknown.
-pub const FIRE_FIGHTING: f32 = 0.5;
+/// Intensity the crew puts out per tick, spent on the strongest fire first. Fitted on a retail save pair (uncrewed Navy Cutter,
+/// Easy): a fire went 11.2 -> 273.8 over five ticks, i.e. 2 x (i - c) with c = 1.36; another fell 8 -> 6.9 in one tick.
+/// PROVISIONAL: the crew-skill/size dependence is unknown (docs/re/effects.md).
+pub const FIRE_FIGHTING: f32 = 1.36;
 
 pub fn fire_scale(i: f32) -> f32 {
     if i > FIRE_FULL { 1.0 } else { (i / FIRE_FULL).max(0.1) }
