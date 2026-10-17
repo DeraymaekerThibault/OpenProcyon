@@ -109,7 +109,9 @@ Headless retail skirmishes, one computer ship against our idle or fleeing Navy C
   bow at 330 units, 48° at 100, 66° at 60).
 - **Circling:** from ~60-75 units it turns onto a circle around the target and holds it, the target on one beam (±90°, the side it
   approached on: port in two runs, starboard in one). Carrack 54 units (Man-O-War target; 36-70 spread while the target moved),
-  Barque 55.7 (51-58) around an idle Cutter, turning a steady 8°/s. Speed while circling: 0.66 (Carrack 5.74) and 0.74 (Barque
+  Barque 55.7 (51-58) around an idle Cutter, turning a steady 8°/s; an Assault Cutter ~95 (60-120, with a Barque); a Procyon
+  Minelayer a perfect 109-113 for 10 minutes; a Procyon Frigate kept us on its beam (55-125°) on a fixed 6°/s turn while we moved,
+  so its distance swung 43-131. Radii do not follow a gun range (Barque and Minelayer both carry the 110-range medium cannon). Speed while circling: 0.66 (Carrack 5.74) and 0.74 (Barque
   8.2) of the run-in speed. Both carry the medium cannon (effective range 110), so the radius may be half of it; the gun ranges
   otherwise differ (Carrack heavy cannon 150, Barque Arcturian fire 75).
 - **Hazards:** with our ship inside a black hole's radius, a Carrack circled at a steady 157-165 units from the hole's centre
@@ -134,7 +136,8 @@ Headless retail skirmishes, one computer ship against our idle or fleeing Navy C
   collision avoidance against ships, asteroids, black holes, torpedoes, mines, dragons, islands and nebulae; waypoint following with
   a random minimum throttle 0.65-0.75; a scan range = WOT sight × the crew factor.
 - **Fire:** see [gunnery.md](gunnery.md) (computer guns fire without clicks; the human command ship's do not).
-- Remake (`ship::captain_steer`, shared by the skirmish AI and mission attack orders): Emergency run-in, then a 55-unit circle
+- Remake (`ship::captain_steer`, shared by the skirmish AI and mission attack orders): Emergency run-in, then a circle of
+  `ship::orbit_radius` (50-125 units, fixed per ship: half the saves' random attack distance, PROVISIONAL)
   (heading blended from the tangent toward / away from the foe within 25 units of it) at throttle 1.4 (≈0.7 × Emergency), keeping
   15 units outside black holes and damaging nebulae (solar storm / meteors, as circles: `nebula::storm_circles`); computer skirmish ships get crew factor 1.267 on speed and rudder; skirmish enemies with nothing in
   sight explore (`ship::Explore`: quadrant centre, then its x-neighbour, switching 220 units short). PROVISIONAL: the radius rule,

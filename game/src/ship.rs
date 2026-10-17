@@ -62,9 +62,17 @@ pub fn angdiff(a: f32, b: f32) -> f32 {
 
 pub type CaptainBusy = Or<(With<docking::Docker>, With<docking::Tower>, With<boarding::GrappleOrder>, With<boarding::Grapple>, With<boarding::Boarding>)>;
 
-/// Radius of the circle a computer captain flies around its target (retail: Carrack 54, Barque 56 units, both around a resting
-/// ship; docs/re/movement.md "Computer captains"). PROVISIONAL: two classes; it may follow a gun range (half the medium cannon's).
-pub const ORBIT: f32 = 55.0;
+/// Radius range of the circle a computer captain flies around its target. Retail circles: Carrack 54, Barque 56, Assault Cutter ~95,
+/// Minelayer 110 units (docs/re/movement.md "Computer captains"); retail saves give every computer ship a random attack distance of
+/// about 100-250, so half of it is taken as the radius, fixed per ship. PROVISIONAL: that link and the uniform spread.
+pub const ORBIT_MIN: f32 = 50.0;
+pub const ORBIT_MAX: f32 = 125.0;
+
+/// The circle radius of ship `e`: fixed per ship, spread over ORBIT_MIN..ORBIT_MAX.
+pub fn orbit_radius(e: Entity) -> f32 {
+    let h = e.index_u32().wrapping_mul(2_654_435_761) >> 16; // ponytail: entity-index hash, so it changes between battles
+    ORBIT_MIN + (h % 1024) as f32 / 1023.0 * (ORBIT_MAX - ORBIT_MIN)
+}
 /// Distance off the circle at which the captain steers straight at (or away from) the foe; nearer, it blends toward the tangent.
 /// Remake tuning so the hull holds the measured circle, not a retail value.
 const ORBIT_BAND: f32 = 25.0;
@@ -116,10 +124,10 @@ impl Explore {
 }
 
 /// Retail-observed captain steering against one foe at `foe`, shared by the skirmish and mission AIs: run in at Emergency Speed,
-/// then circle the foe ORBIT units out with it abeam (on whichever side it already lies) at ORBIT_THROTTLE. The
+/// then circle the foe `orbit` units out with it abeam (on whichever side it already lies) at ORBIT_THROTTLE. The
 /// heading blends from straight at the foe (ORBIT_BAND or more outside the circle) through the tangent (on it) to straight out.
 /// Near a black hole or damaging nebula (`holes`: centre, radius) it turns straight away first. Returns (goal heading, engine order, throttle).
-pub fn captain_steer(heading: f32, pos: Vec3, foe: Vec3, holes: &[(Vec3, f32)]) -> (f32, usize, Option<f32>) {
+pub fn captain_steer(heading: f32, pos: Vec3, foe: Vec3, orbit: f32, holes: &[(Vec3, f32)]) -> (f32, usize, Option<f32>) {
     let toward = |d: Vec3| (-d.x).atan2(-d.z); // heading that points the bow along d
     if let Some((c, _)) = holes.iter().find(|(c, r)| Vec2::new(pos.x - c.x, pos.z - c.z).length() < r + HOLE_MARGIN) {
         return (toward(pos - *c), 3, None);
@@ -129,8 +137,8 @@ pub fn captain_steer(heading: f32, pos: Vec3, foe: Vec3, holes: &[(Vec3, f32)]) 
     let bearing = toward(d);
     // Keep the foe on the beam it is already on (+1: the foe lies at bearing - heading = +90°), so the choice never flips.
     let beam = if angdiff(bearing, heading) >= 0.0 { 1.0 } else { -1.0 };
-    let goal = bearing - beam * (PI / 2.0) * (1.0 - ((dist - ORBIT) / ORBIT_BAND).clamp(-1.0, 1.0));
-    (goal, 3, (dist < 2.0 * ORBIT).then_some(ORBIT_THROTTLE))
+    let goal = bearing - beam * (PI / 2.0) * (1.0 - ((dist - orbit) / ORBIT_BAND).clamp(-1.0, 1.0));
+    (goal, 3, (dist < 2.0 * orbit).then_some(ORBIT_THROTTLE))
 }
 
 /// Areas captains keep out of, as (centre, radius) for `captain_steer`: black holes and damaging nebulae.
@@ -201,7 +209,7 @@ pub fn ai(
         if explore.quadrant.contains_key(&e) {
             s.waypoints.clear(); // contact: drop the exploring course (the quadrant is kept for later)
         }
-        let (goal, order, throttle) = captain_steer(s.heading, tf.translation, foe.1, &holes);
+        let (goal, order, throttle) = captain_steer(s.heading, tf.translation, foe.1, orbit_radius(e), &holes);
         s.goal = Some(goal);
         s.order = order;
         s.throttle = throttle;
@@ -1000,6 +1008,13 @@ pub mod movement_tests {
         assert!(ship.order == 3 && ship.speed > 1.0, "speed {}", ship.speed);
     }
     #[test]
+    fn circle_radii_spread_over_the_retail_range() {
+        let r: Vec<f32> = (0..200).map(|i| orbit_radius(Entity::from_raw_u32(i).unwrap())).collect();
+        assert!(r.iter().all(|x| (ORBIT_MIN..=ORBIT_MAX).contains(x)));
+        assert!(r.iter().any(|x| *x < 60.0) && r.iter().any(|x| *x > 105.0), "both ends used");
+    }
+
+    #[test]
     fn exploring_heads_for_quadrant_centres() {
         // retail Carrack, Diablo Strait (half 1625), from (322, -1127): its course (0.27, 0.96) points at quadrant (+x, +y)
         let c = Explore::centre(3, 1625.0);
@@ -1011,15 +1026,16 @@ pub mod movement_tests {
 
     #[test]
     fn captain_runs_in_then_circles_with_the_foe_abeam() {
+        const ORBIT: f32 = 55.0; // the retail Barque's circle
         let foe = Vec3::ZERO;
         // far: straight at the foe at Emergency, no throttle cap
-        let (goal, order, throttle) = captain_steer(0.0, Vec3::new(0.0, 0.0, 400.0), foe, &[]);
+        let (goal, order, throttle) = captain_steer(0.0, Vec3::new(0.0, 0.0, 400.0), foe, ORBIT, &[]);
         assert!(angdiff(goal, 0.0).abs() < 1e-5 && order == 3 && throttle.is_none(), "{goal} {order} {throttle:?}");
         // on the circle: tangent (foe abeam), about MaxSpeed
-        let (goal, _, throttle) = captain_steer(0.3, Vec3::new(0.0, 0.0, ORBIT), foe, &[]);
+        let (goal, _, throttle) = captain_steer(0.3, Vec3::new(0.0, 0.0, ORBIT), foe, ORBIT, &[]);
         assert!((angdiff(goal, 0.0).abs() - PI / 2.0).abs() < 1e-5 && throttle == Some(ORBIT_THROTTLE));
         // near a black hole: straight away from it, whatever the foe
-        let (goal, _, _) = captain_steer(0.0, Vec3::new(0.0, 0.0, 150.0), foe, &[(Vec3::new(0.0, 0.0, 300.0), 145.0)]);
+        let (goal, _, _) = captain_steer(0.0, Vec3::new(0.0, 0.0, 150.0), foe, ORBIT, &[(Vec3::new(0.0, 0.0, 300.0), 145.0)]);
         assert!(angdiff(goal, 0.0).abs() < 1e-5, "bow toward -z, away from the hole: {goal}");
 
         // A crewed Barque run in from 400 units settles onto a circle with the foe abeam, using the real movement step
@@ -1047,7 +1063,7 @@ pub mod movement_tests {
         let dt = 1.0 / 30.0;
         let (mut dists, mut beams) = (vec![], vec![]);
         for i in 0..(150.0 / dt) as usize {
-            let (goal, order, throttle) = captain_steer(ship.heading, tf.translation, foe, &[]);
+            let (goal, order, throttle) = captain_steer(ship.heading, tf.translation, foe, ORBIT, &[]);
             (ship.goal, ship.order, ship.throttle) = (Some(goal), order, throttle);
             step(&mut ship, &mut tf, class, &h, dt);
             if i as f32 * dt > 90.0 {

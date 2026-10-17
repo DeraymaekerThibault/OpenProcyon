@@ -805,7 +805,7 @@ fn mission_ai(
                 let d = fp - tf.translation;
                 ((-d.x).atan2(-d.z), 3, None)
             } else {
-                crate::ship::captain_steer(ship.heading, tf.translation, fp, &holes)
+                crate::ship::captain_steer(ship.heading, tf.translation, fp, crate::ship::orbit_radius(e), &holes)
             };
             ship.waypoints.clear();
             ship.goal = Some(goal);
