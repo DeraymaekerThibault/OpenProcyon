@@ -45,6 +45,12 @@ class LocalCombatExportTests(unittest.TestCase):
         self.assertTrue(
             any(c["fx"] for c in chunks) and any(not c["fx"] for c in chunks)
         )
+        debris = {s["label"]: s["debris"] for s in j["sections"]}
+        self.assertIsNone(debris["Port_Mid_Hull_wood"], "mid hulls break off nothing")
+        self.assertTrue(debris["Mast_2_cloth"]["model"].endswith(".glb"))
+        self.assertGreater(
+            debris["Mast_2_cloth"]["pivot"][2], 10.0, "the mast piece pivots high"
+        )
         self.assertEqual(j["physics"]["MaxSpeed"]["value"], 8.055555)
         # mounts on a hull layer record which section carries them; the rear mount sits on the stern
         rear = next(g for g in j["guns"] if g["label"] == "Rear_LightMount")

@@ -13,6 +13,8 @@ def category(name):
         return "bases"
     if n.startswith("SELECTION_INDICATOR"):
         return "ui"
+    if "Broken" in n:
+        return "debris"  # pieces that break off destroyed ship sections (WOT debrisMeshScene)
     if n.endswith(("Ship", "ShipWrecked")):
         return "ships"
     return "scenery"  # islands, asteroids, volcanoes, buoy, nebula, whale

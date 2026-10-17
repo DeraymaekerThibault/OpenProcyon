@@ -196,8 +196,8 @@ The timeline is data: every damage section's WOT association carries `destructFx
 Cutter's bow `Final_Ship_Chunk 2.9 3.0 ( 8.8 4.1 11.1 )`, stern `Final_Ship_Chunk_large 1.9 2.0`, upper mast `0.9 1.0`, mid hulls
 `none 0 2 ( ±4 ... )`. Reading (matches the frames): the section's mesh flies at the velocity (ship axes, units/s) from the moment of
 death and bursts with the effect at a time inside [start, end]; `none` sections just drift and are gone at `end`. The stern piece
-vanished ~2 s in, as its 1.9-2.0 window says. A mast that broke off earlier in the fight (section destroyed before death:
-`debrisMeshScene` + `debrisFx Falling_Debris`) keeps tumbling away for 6+ s; that debris is not modelled yet.
+vanished ~2 s in, as its 1.9-2.0 window says. A mast that broke off earlier in the fight (section destroyed before death) keeps tumbling away for
+6+ s: see "Section debris" below.
 
 Implementation (`combat/mod.rs`): death marks Health destroyed and reports ShipLost at once, plays the class explosion and the
 death sound, then moves each section's mesh nodes (normal and damaged variants) along its `destruct.vel`, bursts its effect at a
@@ -205,6 +205,15 @@ random moment of its window and hides it; after the last burst the presentation 
 references). The exporter writes `sections[].destruct` = {fx, start, end, vel}. Dev kills (K/J, `--script victory|defeat`) zero the
 core and go through the same path. PROVISIONAL: no tumbling of the pieces, linear flight (no gravity or drag), the burst moment
 picked uniformly, sections without data hold 1 s.
+
+### Section debris
+A section destroyed mid-fight swaps to its damaged mesh and, when its WOT association names a `debrisMeshScene`, drops that piece
+(a torn-off mast, the bow, the engine block): the scene holds one `...Damage_LayerN` mesh in the hull's own model space, its node
+position being the piece's pivot; `debrisFx` (Falling_Debris: three everlasting smoke systems) trails it. Retail frames show a
+torn-off Cutter mast still drifting and turning 6+ s later. Remake (`combat::damage::spawn_debris`, `debris`): the piece starts in
+place, keeps the ship's velocity at the moment it broke, sinks at 1.5 units/s, tumbles at 0.25-0.75 rad/s about a random
+horizontal axis through its pivot, and is removed after 10 s (all PROVISIONAL: no retail numbers). The exporter writes the meshes
+to `models/debris/` and `sections[].debris` = {model, pivot}.
 
 ## Fire (ignite, update, fire-fighting)
 - Ignite on a hit: if the bullet's Chance of Fire for the section material is > 0 and a uniform roll is <= it (and an

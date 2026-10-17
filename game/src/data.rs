@@ -227,6 +227,11 @@ pub struct Section {
     pub tris: Vec<[Vec3; 3]>,
     /// How the section breaks away when the ship is destroyed (WOT `destructFx`); None for imports that predate it.
     pub destruct: Option<Destruct>,
+    /// The piece that breaks off when the section is destroyed mid-fight (WOT `debrisMeshScene`): its GLB file name (found with
+    /// `model`, in the hull's model space) and its pivot (bevy axes). None for sections without one and for older imports.
+    pub debris: Option<(String, Vec3)>,
+    /// Effect trailing that piece (WOT `debrisFx`, e.g. Falling_Debris).
+    pub debris_fx: Option<String>,
 }
 /// A section's part of a ship's final breakup (docs/re/effects.md "Ship destruction"): its mesh flies at `vel` (ship-local, bevy
 /// axes, units/s) from the moment of death, bursts with effect `fx` (if any) at `start` seconds and is gone at `end`.
@@ -466,6 +471,8 @@ pub fn load_class(root: &std::path::Path, name: &str, guns: &HashMap<String, Gun
                     end: num(&s["destruct"]["end"]),
                     vel: conv(num(&s["destruct"]["vel"][0]), num(&s["destruct"]["vel"][1]), num(&s["destruct"]["vel"][2])),
                 }),
+                debris: s["debris"]["model"].as_str().map(|m| (m.to_string(), conv_v(&s["debris"]["pivot"]))),
+                debris_fx: s["debris_fx"].as_str().map(String::from),
                 tris: t
                     .chunks(9)
                     .map(|c| {

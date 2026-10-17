@@ -116,7 +116,7 @@ pub fn plugin(app: &mut App) {
             Update,
             (
                 (fire, base_fire, lob::shoot, shells, lob::detonate, lob::blasts, lob::grav_wells, lob::ram_damage, lob::strikes).chain(),
-                (asteroid_deaths, fires, crew_repair, deaths, draw, engine_rate, damage_fx, swap_meshes).chain(),
+                (asteroid_deaths, fires, crew_repair, deaths, draw, engine_rate, damage_fx, debris, swap_meshes).chain(),
             )
                 .chain()
                 .after(crate::sail),
