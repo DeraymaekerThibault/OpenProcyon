@@ -212,6 +212,28 @@ fn route_meteors(mut routes: MessageReader<MeteorRoute>, mut plans: ResMut<Meteo
 #[derive(Resource)]
 pub struct Storms(pub Value);
 
+/// Damaging nebulae (a solar storm or meteors) as moving circles (bevy centre, mean vertex distance) for captains to keep out of
+/// (retail captains avoid nebulae, `ship::captain_steer`). PROVISIONAL: plain clouds are not avoided; the circle is a stand-in.
+pub fn storm_circles(storms: &Storms, shift: &StormShift) -> Vec<(Vec3, f32)> {
+    storms
+        .0
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|n| n["storm"]["effect"].as_str().is_some_and(|e| e != "EFFECT") || n["meteors"]["on"] == true)
+        .filter_map(|n| {
+            let pts: Vec<Vec2> = n["polygon"].as_array()?.iter().filter_map(|p| Some(Vec2::new(p[0].as_f64()? as f32, p[1].as_f64()? as f32))).collect();
+            if pts.is_empty() {
+                return None;
+            }
+            let c = pts.iter().sum::<Vec2>() / pts.len() as f32;
+            let r = pts.iter().map(|p| p.distance(c)).sum::<f32>() / pts.len() as f32;
+            let offset = shift.0.get(n["name"].as_str().unwrap_or_default()).map_or(Vec3::ZERO, |s| s.0);
+            Some((Vec3::new(c.x, 0.0, -c.y) + offset, r))
+        })
+        .collect()
+}
+
 /// Retail Terrain_Nebula damage potentials, independent of weapon bullets.
 #[derive(Resource)]
 struct WeatherDamage(HashMap<String, HashMap<String, [f32; 5]>>);
@@ -591,6 +613,22 @@ mod tests {
         let at = lightning_point(&poly, Vec3::X * 500.0, &[], &mut || 0.5).unwrap();
         assert_eq!(at, Vec3::X * 500.0);
         assert!(lightning_point(&serde_json::json!([]), Vec3::ZERO, &[], &mut || 0.5).is_none());
+    }
+
+    #[test]
+    fn captains_avoid_storms_but_not_plain_clouds() {
+        let square = serde_json::json!([[100.0, 100.0], [300.0, 100.0], [300.0, 300.0], [100.0, 300.0]]);
+        let storms = Storms(serde_json::json!([
+            {"name": "s", "polygon": square, "storm": {"effect": "SolarStorm"}, "meteors": {"on": false}},
+            {"name": "c", "polygon": square, "storm": {"effect": "EFFECT"}, "meteors": {"on": false}},
+        ]));
+        let mut shift = StormShift::default();
+        shift.0.insert("s".into(), (Vec3::new(10.0, 0.0, 0.0), Vec3::ZERO));
+        let circles = storm_circles(&storms, &shift);
+        assert_eq!(circles.len(), 1, "the plain cloud is not a hazard");
+        let (c, r) = circles[0];
+        assert_eq!(c, Vec3::new(210.0, 0.0, -200.0), "centroid in bevy axes, moved with the storm");
+        assert!((r - 100.0 * 2f32.sqrt()).abs() < 1e-3);
     }
 
     #[test]

@@ -694,9 +694,10 @@ fn mission_ai(
     sensors: Res<crate::environment::Sensors>,
     held: Query<(), With<crate::ship::HoldPosition>>,
     holes: Query<(&Transform, &crate::blackhole::Pull), Without<Ship>>,
+    storms: (Option<Res<crate::nebula::Storms>>, Option<Res<crate::nebula::StormShift>>),
 ) {
     let Some(mission) = mission else { return };
-    let holes = crate::ship::hole_list(&holes);
+    let holes = crate::ship::hole_list(&holes, storms.0.as_deref(), storms.1.as_deref());
     let sc = &mission.script;
     // Targets for orders and hostility: ships, then rocks (rocks only answer attack orders, never hostility); tagged with TWT groups.
     let unit = |e, id, name: &str, owner: &str, pos, alive| Unit {

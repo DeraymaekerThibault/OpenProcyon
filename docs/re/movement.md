@@ -114,6 +114,14 @@ Headless retail skirmishes, one computer ship against our idle or fleeing Navy C
   otherwise differ (Carrack heavy cannon 150, Barque Arcturian fire 75).
 - **Hazards:** with our ship inside a black hole's radius, a Carrack circled at a steady 157-165 units from the hole's centre
   (radius 145) for 13 minutes instead of closing.
+- **Storms:** on Red Rover (solar-storm nebulae) idle ships of ours lost 5,400-6,300 hull points that no player was credited with, and a
+  circling Carrack broke off at Emergency Speed shortly before; the save's avoid list names nebulae. PROVISIONAL reading: the
+  storm drifted over the idle ship and the computer captain kept out of it.
+- **Boarding:** Barques (Red Rover, two runs) boarded and captured a Man-O-War that was manoeuvring and being fired at (though rarely
+  hit): after circling at ~60 units they dropped to ~3.5 units/s and made grapple passes to 12-18 units, broke away at speed to 40-110
+  units, and came back; on the third pass in one run they held 12 units for ~12 s (grappled, winched) and the ship was taken within
+  ~3 minutes. A Barque circling an idle Cutter for 200 s and Carracks circling an idle Man-O-War for 2 minutes made no passes. What
+  starts a boarding attempt is unknown.
 - **Nothing in sight: map exploration.** Retail saves give every computer ship an explore-map routine with a quadrant index 0-3
   (random per ship). Observed: a Carrack on the Diablo Strait (half-size 1625) ran from (322, -1127) on course (0.27, 0.96) for
   200 s, straight at the (+x, +y) quadrant centre (812, 812) (bearing (0.245, 0.97)); an Assault Cutter on the Zemyatin Anomaly
@@ -128,7 +136,7 @@ Headless retail skirmishes, one computer ship against our idle or fleeing Navy C
 - **Fire:** see [gunnery.md](gunnery.md) (computer guns fire without clicks; the human command ship's do not).
 - Remake (`ship::captain_steer`, shared by the skirmish AI and mission attack orders): Emergency run-in, then a 55-unit circle
   (heading blended from the tangent toward / away from the foe within 25 units of it) at throttle 1.4 (≈0.7 × Emergency), keeping
-  15 units outside black holes; computer skirmish ships get crew factor 1.267 on speed and rudder; skirmish enemies with nothing in
+  15 units outside black holes and damaging nebulae (solar storm / meteors, as circles: `nebula::storm_circles`); computer skirmish ships get crew factor 1.267 on speed and rudder; skirmish enemies with nothing in
   sight explore (`ship::Explore`: quadrant centre, then its x-neighbour, switching 220 units short). PROVISIONAL: the radius rule,
   the throttle, the start quadrant and visiting order, and the ships that head straight for the enemy instead.
   Our turn model (rudder torque / 3 above 0.67 × MaxSpeed) only reaches ~7°/s on a crewed Barque at 7.8 units/s where retail held

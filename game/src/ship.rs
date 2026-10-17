@@ -114,7 +114,7 @@ impl Explore {
 /// Retail-observed captain steering against one foe at `foe`, shared by the skirmish and mission AIs: run in at Emergency Speed,
 /// then circle the foe ORBIT units out with it abeam (on whichever side it already lies) at ORBIT_THROTTLE. The
 /// heading blends from straight at the foe (ORBIT_BAND or more outside the circle) through the tangent (on it) to straight out.
-/// Near a black hole (`holes`: centre, radius) it turns straight away first. Returns (goal heading, engine order, throttle).
+/// Near a black hole or damaging nebula (`holes`: centre, radius) it turns straight away first. Returns (goal heading, engine order, throttle).
 pub fn captain_steer(heading: f32, pos: Vec3, foe: Vec3, holes: &[(Vec3, f32)]) -> (f32, usize, Option<f32>) {
     let toward = |d: Vec3| (-d.x).atan2(-d.z); // heading that points the bow along d
     if let Some((c, _)) = holes.iter().find(|(c, r)| Vec2::new(pos.x - c.x, pos.z - c.z).length() < r + HOLE_MARGIN) {
@@ -129,9 +129,17 @@ pub fn captain_steer(heading: f32, pos: Vec3, foe: Vec3, holes: &[(Vec3, f32)]) 
     (goal, 3, (dist < 2.0 * ORBIT).then_some(ORBIT_THROTTLE))
 }
 
-/// Black holes as (centre, radius) for `captain_steer`.
-pub fn hole_list(holes: &Query<(&Transform, &crate::blackhole::Pull), Without<Ship>>) -> Vec<(Vec3, f32)> {
-    holes.iter().map(|(t, p)| (t.translation, p.radius)).collect()
+/// Areas captains keep out of, as (centre, radius) for `captain_steer`: black holes and damaging nebulae.
+pub fn hole_list(
+    holes: &Query<(&Transform, &crate::blackhole::Pull), Without<Ship>>,
+    storms: Option<&crate::nebula::Storms>,
+    shift: Option<&crate::nebula::StormShift>,
+) -> Vec<(Vec3, f32)> {
+    let mut out: Vec<(Vec3, f32)> = holes.iter().map(|(t, p)| (t.translation, p.radius)).collect();
+    if let (Some(storms), Some(shift)) = (storms, shift) {
+        out.extend(crate::nebula::storm_circles(storms, shift));
+    }
+    out
 }
 
 /// Skirmish captains: hunt the nearest enemy in sight with `captain_steer`; with nothing in sight an enemy ship explores the map
@@ -144,12 +152,13 @@ pub fn ai(
     sensors: Res<crate::environment::Sensors>,
     held: Query<(), With<HoldPosition>>,
     holes: Query<(&Transform, &crate::blackhole::Pull), Without<Ship>>,
+    storms: (Option<Res<crate::nebula::Storms>>, Option<Res<crate::nebula::StormShift>>),
     mut explore: Local<Explore>,
 ) {
     if mission.is_some() {
         return;
     }
-    let holes = hole_list(&holes);
+    let holes = hole_list(&holes, storms.0.as_deref(), storms.1.as_deref());
     let snap: Vec<(Entity, Vec3, Side, bool)> = ships.iter().map(|(e, t, s, h, _, _)| (e, t.translation, s.side, !h.destroyed)).collect();
     for (e, tf, mut s, h, me, pilot) in &mut ships {
         if busy.contains(e) {
