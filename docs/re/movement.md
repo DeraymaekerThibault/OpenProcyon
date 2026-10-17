@@ -100,3 +100,26 @@ Follow-up (waypoint test = clamped linear interpolation):
 - Remake: `rules::mission_ai` drops the last point inside 2 × `class.radius` (PROVISIONAL stand-in for R) and sets All Stop; the existing
   drag then brakes the ship. The turn-state throttle hold is not modelled. A finished remake chase stops the same way (not retail-derived).
   The human's own move orders still coast on (`ship.rs`); the command ship is halted during the opening briefing (`briefing.rs`).
+
+## Computer captains (measured, 2026-10)
+Headless retail skirmishes, one computer ship against our idle or fleeing Navy Cutter / Man-O-War, every ship logged at ~30 Hz.
+- **Crew:** computer skirmish ships run in at exactly 1.267 × Emergency Speed (Carrack 8.71, Barque 11.08 units/s), the engineer
+  factor of [crew.md](crew.md) for a skill of about 7. A patrolling Assault Cutter sailed at 8.56 (0.98 × Emergency).
+- **Approach:** at that crewed Emergency Speed, aiming off the bow toward a tangent of the circle it will fly (we sat 17° off its
+  bow at 330 units, 48° at 100, 66° at 60).
+- **Circling:** from ~60-75 units it turns onto a circle around the target and holds it, the target on one beam (±90°, the side it
+  approached on: port in two runs, starboard in one). Carrack 54 units (Man-O-War target; 36-70 spread while the target moved),
+  Barque 55.7 (51-58) around an idle Cutter, turning a steady 8°/s. Speed while circling: 0.66 (Carrack 5.74) and 0.74 (Barque
+  8.2) of the run-in speed. Both carry the medium cannon (effective range 110), so the radius may be half of it; the gun ranges
+  otherwise differ (Carrack heavy cannon 150, Barque Arcturian fire 75).
+- **Hazards:** with our ship inside a black hole's radius, a Carrack circled at a steady 157-165 units from the hole's centre
+  (radius 145) for 13 minutes instead of closing.
+- **Nothing in sight:** ships do not head for the enemy. A Carrack ran straight off at Emergency for 200 s (Diablo Strait); an
+  Assault Cutter (sight 400) swept a ~800-unit line back and forth at Emergency. The leg direction is not explained.
+- **Fire:** see [gunnery.md](gunnery.md) (computer guns fire without clicks; the human command ship's do not).
+- Remake (`ship::captain_steer`, shared by the skirmish AI and mission attack orders): Emergency run-in, then a 55-unit circle
+  (heading blended from the tangent toward / away from the foe within 25 units of it) at throttle 1.4 (≈0.7 × Emergency), keeping
+  15 units outside black holes; computer skirmish ships get crew factor 1.267 on speed and rudder; skirmish enemies with nothing in
+  sight patrol 800-unit legs toward the map centre and back. PROVISIONAL: the radius rule, the throttle, the patrol direction.
+  Our turn model (rudder torque / 3 above 0.67 × MaxSpeed) only reaches ~7°/s on a crewed Barque at 7.8 units/s where retail held
+  8.1°/s at 8.2, so the remake's circle is wider (~60-85 units): the high-speed turn band needs a retail measurement.
