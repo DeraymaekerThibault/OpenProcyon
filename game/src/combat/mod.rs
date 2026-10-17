@@ -65,8 +65,6 @@ pub struct Fired {
     /// The burst's bullet type (crew callouts: torpedoes away, mortar fired).
     pub bullet: String,
 }
-#[derive(Component)]
-struct Flash(f32);
 /// Exhaust effect on a ship; its rate follows the ship's speed (PROVISIONAL: 30% idle up to 100% at top speed).
 #[derive(Component)]
 pub struct Engine;
@@ -83,7 +81,6 @@ struct Look {
     mesh: Handle<Mesh>,
     shell: Handle<StandardMaterial>,
     enemy_shell: Handle<StandardMaterial>,
-    flash: Handle<StandardMaterial>,
 }
 
 impl Rng {
@@ -119,7 +116,7 @@ pub fn plugin(app: &mut App) {
             Update,
             (
                 (fire, base_fire, lob::shoot, shells, lob::detonate, lob::blasts, lob::grav_wells, lob::ram_damage, lob::strikes).chain(),
-                (asteroid_deaths, fires, crew_repair, deaths, flashes, draw, engine_rate, damage_fx, swap_meshes).chain(),
+                (asteroid_deaths, fires, crew_repair, deaths, draw, engine_rate, damage_fx, swap_meshes).chain(),
             )
                 .chain()
                 .after(crate::sail),
@@ -177,42 +174,52 @@ fn setup(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut mats: Res
         mesh: meshes.add(Sphere::new(0.35)),
         shell: lit(Color::srgb(1.0, 0.8, 0.3), &mut mats),
         enemy_shell: lit(Color::srgb(1.0, 0.25, 0.25), &mut mats),
-        flash: lit(Color::srgb(1.0, 0.45, 0.1), &mut mats),
     });
 }
 
-/// PROVISIONAL: owner-observed nose-first sinking, not yet calibrated against retail timing.
+/// A destroyed ship breaking up (docs/re/effects.md "Ship destruction"): the class explosion plays at once, then every section's
+/// mesh flies off at its WOT `destructFx` velocity and bursts with its effect somewhere in its [start, end] window, as retail does.
 #[derive(Component)]
 pub struct Sinking {
     start: Transform,
     elapsed: f32,
+    /// Section mesh nodes: (node, section, rest translation, burst time); filled on the first breakup frame.
+    nodes: Option<Vec<(Entity, usize, Vec3, f32)>>,
 }
 
-const SINK_TIME: f32 = 4.0;
+/// Breakup length when a class has no destruct data (older imports). PROVISIONAL.
+const BREAKUP_FALLBACK: f32 = 1.0;
 
 impl Sinking {
-    fn transform(&self, radius: f32) -> Transform {
-        let t = (self.elapsed / SINK_TIME).clamp(0.0, 1.0);
-        let mut tf = self.start;
-        // The bow is local -Z; negative X pitch points it down.
-        tf.rotation *= Quat::from_rotation_x(-65.0_f32.to_radians() * t);
-        tf.translation.y -= radius * 0.8 * t * t;
-        tf
+    fn new(start: Transform) -> Self {
+        Sinking { start, elapsed: 0.0, nodes: None }
     }
 }
 
-/// Gameplay death is immediate; the hull sinks before its final explosion.
+/// When a section's chunk is gone: at its burst (a point in [start, end] picked by `roll` in 0..1) when it has an effect, else
+/// at `end` (retail's mid hulls just drift apart and vanish).
+fn burst_time(d: &crate::data::Destruct, roll: f32) -> f32 {
+    if d.fx.is_some() { d.start + (d.end - d.start) * roll } else { d.end }
+}
+
+/// The section's offset from its place on the hull at `t` seconds (ship-local), or None once its chunk is gone.
+fn chunk_offset(d: &crate::data::Destruct, burst: f32, t: f32) -> Option<Vec3> {
+    (t < burst).then(|| d.vel * t)
+}
+
+/// Gameplay death is immediate; the presentation breaks the hull up for a few seconds, then removes it.
+#[allow(clippy::too_many_arguments)]
 fn deaths(
     mut commands: Commands,
     lib: Res<Library>,
     fxl: Res<FxLib>,
-    look: Res<Look>,
     mut rng: ResMut<Rng>,
     mut sfx: MessageWriter<Sfx>,
     mut lost: MessageWriter<crate::lifeboats::ShipLost>,
     time: Res<Time>,
     children: Query<&Children>,
     mut ships: Query<(Entity, &mut Transform, &mut Ship, &mut Health, &mut Visibility, Option<&mut Sinking>)>,
+    mut nodes: Query<(&Name, &mut Transform, &mut Visibility), Without<Ship>>,
 ) {
     for (e, mut tf, mut ship, mut hp, mut vis, sinking) in &mut ships {
         let class = &lib.classes[ship.class];
@@ -224,18 +231,61 @@ fn deaths(
             ship.speed = 0.0;
             ship.ang_vel = 0.0;
             lost.write(crate::lifeboats::ShipLost(e));
-            commands.entity(e).insert(Sinking { start: *tf, elapsed: 0.0 });
+            commands.entity(e).insert(Sinking::new(*tf));
             info!("{} destroyed", class.name);
+            // Retail: the class explosion at the moment of death, before the pieces part. Pool Explosion_Heavy01-08 (8000 units),
+            // PROVISIONAL as the death sound.
+            let at = tf.translation;
+            sfx.write(Sfx { name: format!("Explosion_Heavy0{}", 1 + (rng.f() * 8.0) as u32 % 8), at: Some(at), vol: 1.0, max: 8000.0 });
+            if let Some(n) = &class.explosion_fx {
+                let t = Transform::from_translation(at);
+                fx::spawn(&mut commands, &fxl, n, None, t, t, true);
+            }
             continue;
         }
         // Scripted Destroy remains an immediate, silent removal without lifeboats.
         let Some(mut sinking) = sinking else { continue };
+        let before = sinking.elapsed;
         sinking.elapsed += time.delta_secs();
-        *tf = sinking.transform(class.radius);
-        if sinking.elapsed < SINK_TIME {
+        let t = sinking.elapsed;
+        *tf = sinking.start;
+        if sinking.nodes.is_none() {
+            let mut found = vec![];
+            for d in children.iter_descendants(e) {
+                let Ok((name, ntf, _)) = nodes.get(d) else { continue };
+                let base = name.as_str().replacen("Damage_", "_", 1);
+                if let Some(i) = class.sections.iter().position(|s| s.layer.eq_ignore_ascii_case(&base)) {
+                    let burst = class.sections[i].destruct.as_ref().map_or(BREAKUP_FALLBACK, |d| burst_time(d, rng.f()));
+                    found.push((d, i, ntf.translation, burst));
+                }
+            }
+            sinking.nodes = Some(found);
+        }
+        let mut last = BREAKUP_FALLBACK;
+        for &(node, i, rest, burst) in sinking.nodes.as_deref().unwrap_or_default() {
+            let section = &class.sections[i];
+            let Some(d) = &section.destruct else { continue };
+            last = last.max(burst);
+            let Ok((name, mut ntf, mut nvis)) = nodes.get_mut(node) else { continue };
+            match chunk_offset(d, burst, t) {
+                Some(off) => ntf.translation = rest + off,
+                None if *nvis != Visibility::Hidden => *nvis = Visibility::Hidden,
+                None => {}
+            }
+            // One burst per section, from its visible (undamaged or damaged) mesh.
+            if before < burst
+                && t >= burst
+                && !name.as_str().contains("Damage_")
+                && let Some(fx_name) = &d.fx
+            {
+                let centre = (section.min + section.max) / 2.0 + d.vel * burst;
+                let at = Transform::from_translation(tf.transform_point(centre));
+                fx::spawn(&mut commands, &fxl, fx_name, None, at, at, true);
+            }
+        }
+        if t < last {
             continue;
         }
-        let at = tf.translation;
         *vis = Visibility::Hidden;
         // Keep the logical ship for mission rules, but remove its entire presentation (including looping smoke).
         if let Ok(children) = children.get(e) {
@@ -243,24 +293,7 @@ fn deaths(
                 commands.entity(child).try_despawn();
             }
         }
-        *tf = sinking.start;
         commands.entity(e).remove::<Sinking>();
-        // Retail pool Explosion_Heavy01-08 (8000 units). PROVISIONAL: played on ship destruction.
-        sfx.write(Sfx { name: format!("Explosion_Heavy0{}", 1 + (rng.f() * 8.0) as u32 % 8), at: Some(at), vol: 1.0, max: 8000.0 });
-        if let Some(n) = &class.explosion_fx {
-            let t = Transform::from_translation(at);
-            fx::spawn(&mut commands, &fxl, n, None, t, t, true);
-        }
-        commands.spawn((Flash(1.5), Transient, Mesh3d(look.mesh.clone()), MeshMaterial3d(look.flash.clone()), Transform::from_translation(at).with_scale(Vec3::splat(10.0))));
-    }
-}
-
-fn flashes(mut commands: Commands, time: Res<Time>, mut q: Query<(Entity, &mut Flash)>) {
-    for (e, mut f) in &mut q {
-        f.0 -= time.delta_secs();
-        if f.0 <= 0.0 {
-            commands.entity(e).despawn();
-        }
     }
 }
 

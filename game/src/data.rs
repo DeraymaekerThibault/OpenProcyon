@@ -225,6 +225,17 @@ pub struct Section {
     pub turn: bool,    // vitalToManeuverability
     pub mission: bool, // vitalToMission (bases: what the mission's 'Vital Section damage' rules watch)
     pub tris: Vec<[Vec3; 3]>,
+    /// How the section breaks away when the ship is destroyed (WOT `destructFx`); None for imports that predate it.
+    pub destruct: Option<Destruct>,
+}
+/// A section's part of a ship's final breakup (docs/re/effects.md "Ship destruction"): its mesh flies at `vel` (ship-local, bevy
+/// axes, units/s) from the moment of death, bursts with effect `fx` (if any) at `start` seconds and is gone at `end`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Destruct {
+    pub fx: Option<String>,
+    pub start: f32,
+    pub end: f32,
+    pub vel: Vec3,
 }
 pub struct Physics {
     pub mass: f32,
@@ -449,6 +460,12 @@ pub fn load_class(root: &std::path::Path, name: &str, guns: &HashMap<String, Gun
                 speed: s["vital_speed"].as_bool().unwrap(),
                 turn: s["vital_turn"].as_bool().unwrap(),
                 mission: s["vital_mission"].as_bool().unwrap_or(false),
+                destruct: s["destruct"].is_object().then(|| Destruct {
+                    fx: s["destruct"]["fx"].as_str().map(String::from),
+                    start: num(&s["destruct"]["start"]),
+                    end: num(&s["destruct"]["end"]),
+                    vel: conv(num(&s["destruct"]["vel"][0]), num(&s["destruct"]["vel"][1]), num(&s["destruct"]["vel"][2])),
+                }),
                 tris: t
                     .chunks(9)
                     .map(|c| {

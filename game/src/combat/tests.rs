@@ -57,21 +57,28 @@ fn destroyed_torpedo_boat_sail_redirects_aim_to_hull() {
 }
 
 #[test]
-fn sinking_lowers_the_bow_and_preserves_heading_and_scale() {
-    let start = Transform::from_xyz(10.0, 20.0, 30.0).with_rotation(Quat::from_rotation_y(1.2)).with_scale(Vec3::splat(2.0));
-    let mut sinking = Sinking { start, elapsed: 0.0 };
-    assert_eq!(sinking.transform(10.0), start);
-    sinking.elapsed = SINK_TIME / 2.0;
-    let midway = sinking.transform(10.0);
-    assert!(midway.rotation.mul_vec3(Vec3::NEG_Z).y < 0.0, "bow must pitch down");
-    assert_eq!(midway.translation, Vec3::new(10.0, 18.0, 30.0));
-    assert_eq!(midway.scale, start.scale);
-    sinking.elapsed = SINK_TIME;
-    let end = sinking.transform(10.0);
-    assert_eq!(end.translation, Vec3::new(10.0, 12.0, 30.0));
-    assert!(end.rotation.mul_vec3(Vec3::NEG_Z).y < midway.rotation.mul_vec3(Vec3::NEG_Z).y);
-    sinking.elapsed *= 2.0;
-    assert_eq!(sinking.transform(10.0), end);
+fn breakup_chunks_fly_then_burst_inside_their_window() {
+    let chunk = crate::data::Destruct { fx: Some("Final_Ship_Chunk".into()), start: 2.4, end: 2.5, vel: Vec3::new(-1.8, 5.6, -10.2) };
+    let burst = burst_time(&chunk, 0.5);
+    assert!((burst - 2.45).abs() < 1e-5, "the burst falls inside the window");
+    assert_eq!(chunk_offset(&chunk, burst, 0.0), Some(Vec3::ZERO), "every piece starts on the hull");
+    assert_eq!(chunk_offset(&chunk, burst, 1.0), Some(chunk.vel), "then flies at its velocity");
+    assert_eq!(chunk_offset(&chunk, burst, 2.46), None, "and is gone after its burst");
+    // a section without an effect (retail mid hulls) drifts until its window closes
+    let drift = crate::data::Destruct { fx: None, start: 0.0, end: 2.0, vel: Vec3::X * 4.0 };
+    assert_eq!(burst_time(&drift, 0.0), 2.0);
+}
+
+#[test]
+fn cutter_breakup_uses_the_retail_section_data() {
+    let lib = Library::load(&assets_dir());
+    let class = &lib.classes[lib.index("Ship_Navy_Cutter")];
+    let d: Vec<_> = class.sections.iter().map(|s| s.destruct.clone().expect("imported destructFx")).collect();
+    // bow: Final_Ship_Chunk at 2.9-3.0 s, flying forward and up (game y forward = bevy -z, game z up = bevy +y)
+    let bow = &d[0];
+    assert_eq!((bow.fx.as_deref(), bow.start, bow.end), (Some("Final_Ship_Chunk"), 2.9, 3.0));
+    assert!(bow.vel.y > 0.0 && bow.vel.z < 0.0);
+    assert!(d.iter().all(|c| c.end <= 3.0), "the whole breakup is over within 3 s");
 }
 
 #[test]
@@ -141,7 +148,7 @@ fn hostile_island_towers_shoot_the_player_and_neutral_ones_do_not() {
         .init_resource::<FxLib>()
         .insert_resource(Library::load(&assets_dir()))
         .insert_resource(Rng::new(7))
-        .insert_resource(Look { mesh: default(), shell: default(), enemy_shell: default(), flash: default() })
+        .insert_resource(Look { mesh: default(), shell: default(), enemy_shell: default() })
         .init_resource::<crate::environment::Sensors>()
         .add_systems(PreUpdate, crate::environment::refresh_sensors)
         .add_systems(Update, base_fire);
@@ -250,7 +257,7 @@ fn the_command_ship_holds_fire_until_an_enemy_is_clicked() {
         .init_resource::<FxLib>()
         .insert_resource(Library::load(&assets_dir()))
         .insert_resource(Rng::new(7))
-        .insert_resource(Look { mesh: default(), shell: default(), enemy_shell: default(), flash: default() })
+        .insert_resource(Look { mesh: default(), shell: default(), enemy_shell: default() })
         .insert_resource(Target::default())
         .init_resource::<crate::environment::Sensors>()
         .add_systems(PreUpdate, crate::environment::refresh_sensors)

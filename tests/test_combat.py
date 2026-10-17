@@ -3,6 +3,19 @@ import tempfile
 import unittest
 
 
+class DestructRecordTests(unittest.TestCase):
+    def test_parses_effect_times_and_velocity(self):
+        from tools.export_combat import destruct_record
+
+        self.assertEqual(
+            destruct_record("{ Some_Chunk 1.5 1.6 ( 1.0 -2.0 3.0 ) }"),
+            dict(fx="Some_Chunk", start=1.5, end=1.6, vel=[1.0, -2.0, 3.0]),
+        )
+        self.assertIsNone(destruct_record("{ none 0 2 ( 1 2 3 ) }")["fx"])
+        self.assertIsNone(destruct_record(None))
+        self.assertIsNone(destruct_record("{ broken }"))
+
+
 @unittest.skipUnless(os.environ.get("PROCYON_GAME_ROOT"), "needs PROCYON_GAME_ROOT")
 class LocalCombatExportTests(unittest.TestCase):
     def test_base_mounts_stay_on_their_own_towers(self):
@@ -27,6 +40,11 @@ class LocalCombatExportTests(unittest.TestCase):
         self.assertEqual(len(j["sections"]), 6)
         self.assertEqual(j["core_hp"], 200.0)
         self.assertEqual(j["scene"], "NavyCutterShip")
+        chunks = [s["destruct"] for s in j["sections"]]
+        self.assertTrue(all(c and c["end"] >= c["start"] for c in chunks))
+        self.assertTrue(
+            any(c["fx"] for c in chunks) and any(not c["fx"] for c in chunks)
+        )
         self.assertEqual(j["physics"]["MaxSpeed"]["value"], 8.055555)
         # mounts on a hull layer record which section carries them; the rear mount sits on the stern
         rear = next(g for g in j["guns"] if g["label"] == "Rear_LightMount")

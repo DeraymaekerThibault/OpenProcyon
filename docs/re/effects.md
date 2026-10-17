@@ -187,20 +187,24 @@ cutter has Damage_Layer7-10) are not referenced by this rule. Destruction also s
 
 ## Ship sinking and final destruction
 
-Owner's retail observation: a destroyed hull drops nose-first for a short time, then explodes and disappears;
-its damage smoke must not remain indefinitely at the death location. This is observation, not an executable-derived timing spec.
+Retail (headless run, our Navy Cutter sunk by a computer Sloop, frames every ~0.18 s): there is no sinking dive. The hull blows
+apart where it is: the class `Explosion Effect Name` (fireballs, white flash, smoke) plays at once, the sections fly off as separate
+pieces (planks, the stern with its wings, the masts), each piece bursts in its own fireball within the next ~3 s, then only smoke
+remains. The ship's physics object does not move at all through this; it is purely presentation.
 
-Shared implementation (`combat/mod.rs`): core death immediately marks Health destroyed and reports ShipLost (so lifeboats,
-mission conditions and targeting do not wait for presentation). The existing damaged hull remains visible, pitches bow-down
-and descends before the class explosion effect/sound and flash play. All child presentation entities are removed at the final
-explosion, including attached smoke and engines; wake entities are removed on death. The invisible logical ship stays for
-mission entity references, with its original transform restored after the animation. Scripted Destroy remains immediate/silent
-without lifeboats, but `damage_fx` now removes its damage emitters instead of leaving them looping.
+The timeline is data: every damage section's WOT association carries `destructFx = { effect start end ( vx vy vz ) }`, e.g. the
+Cutter's bow `Final_Ship_Chunk 2.9 3.0 ( 8.8 4.1 11.1 )`, stern `Final_Ship_Chunk_large 1.9 2.0`, upper mast `0.9 1.0`, mid hulls
+`none 0 2 ( ±4 ... )`. Reading (matches the frames): the section's mesh flies at the velocity (ship axes, units/s) from the moment of
+death and bursts with the effect at a time inside [start, end]; `none` sections just drift and are gone at `end`. The stern piece
+vanished ~2 s in, as its 1.9-2.0 window says. A mast that broke off earlier in the fight (section destroyed before death:
+`debrisMeshScene` + `debrisFx Falling_Debris`) keeps tumbling away for 6+ s; that debris is not modelled yet.
 
-**Provisional:** 4 s descent, 65° final pitch, vertical distance 0.8 times class radius, quadratic descent with linear pitch.
-No drift or section debris added. The transform regression was added but not run; runtime checks are still to do:
-kill a moving/smoking ship, observe the bow dropping before the explosion, then wait to confirm no persistent smoke/wake;
-check lifeboat creation, mission kill progression and restart during sinking. Compare duration/depth against retail.
+Implementation (`combat/mod.rs`): death marks Health destroyed and reports ShipLost at once, plays the class explosion and the
+death sound, then moves each section's mesh nodes (normal and damaged variants) along its `destruct.vel`, bursts its effect at a
+random moment of its window and hides it; after the last burst the presentation is removed (the logical ship stays for mission
+references). The exporter writes `sections[].destruct` = {fx, start, end, vel}. Dev kills (K/J, `--script victory|defeat`) zero the
+core and go through the same path. PROVISIONAL: no tumbling of the pieces, linear flight (no gravity or drag), the burst moment
+picked uniformly, sections without data hold 1 s.
 
 ## Fire (ignite, update, fire-fighting)
 - Ignite on a hit: if the bullet's Chance of Fire for the section material is > 0 and a uniform roll is <= it (and an

@@ -355,12 +355,7 @@ pub fn shot_target(
     }
 }
 
-pub fn debug_kill(
-    keys: Res<ButtonInput<KeyCode>>,
-    cfg: Res<Config>,
-    mut lost: MessageWriter<lifeboats::ShipLost>,
-    mut ships: Query<(Entity, &Ship, &mut Health, &mut Visibility), Without<lifeboats::Lifeboat>>,
-) {
+pub fn debug_kill(keys: Res<ButtonInput<KeyCode>>, cfg: Res<Config>, mut ships: Query<(&Ship, &mut Health), Without<lifeboats::Lifeboat>>) {
     // Cheat keys only in debug builds or scripted runs, so a stray H/J/K never ends a real game.
     let keys_on = cfg!(debug_assertions) || cfg.script.is_some();
     let pressed = |k| keys_on && keys.just_pressed(k);
@@ -368,7 +363,7 @@ pub fn debug_kill(
     let s = cfg.script.as_deref();
     let at = cfg.shot.is_some() && cfg.frame == 300;
     let (kill_enemies, kill_player) = (pressed(KeyCode::KeyK) || (at && matches!(s, Some("victory") | Some("restart"))), pressed(KeyCode::KeyJ) || (at && s == Some("defeat")));
-    for (e, ship, mut h, mut vis) in &mut ships {
+    for (ship, mut h) in &mut ships {
         if hurt && ship.side == Side::Player {
             for hp in h.sections.iter_mut() {
                 *hp *= 0.35;
@@ -376,12 +371,7 @@ pub fn debug_kill(
             h.sections[1] = 0.0; // stern destroyed: shows the Damage_ swap mesh
         }
         if (ship.side == Side::Enemy && kill_enemies) || (ship.side == Side::Player && kill_player) {
-            if !h.destroyed {
-                lost.write(lifeboats::ShipLost(e)); // a dev kill stands in for a combat death
-            }
-            h.core = 0.0;
-            h.destroyed = true;
-            *vis = Visibility::Hidden;
+            h.core = 0.0; // a dev kill stands in for a combat death: combat::deaths reports it and breaks the hull up
         }
     }
 }
