@@ -646,8 +646,7 @@ fn ai_boarding(
     ships: Query<(Entity, &Ship, &Transform, &Health, Option<&crate::combat::GunStates>, &Boardable, Option<&MissionShip>, Option<&crate::ship::FleetPilot>), Without<PlayerShip>>,
     bases: Query<Entity, With<MissionBase>>,
     targets: Query<(&Transform, &Ship)>,
-    mut fired: MessageReader<crate::combat::Fired>,
-    mut attacked: Local<std::collections::HashSet<(Entity, Entity)>>,
+    (mut fired, mut attacked, captains): (MessageReader<crate::combat::Fired>, Local<std::collections::HashSet<(Entity, Entity)>>, Option<Res<crate::ship::CaptainTargets>>),
 ) {
     attacked.extend(fired.read().filter_map(|f| f.target.map(|t| (f.shooter, t))));
     let dt = time.delta_secs();
@@ -659,7 +658,8 @@ fn ai_boarding(
         let target = match (ms, pilot) {
             (Some(m), _) => m.target,
             (None, Some(p)) => p.target,
-            (None, None) => me.filter(|_| ship.side == Side::Enemy),
+            // Skirmish enemies: their captain's target (ship::CaptainTargets); without one, the player's ship.
+            (None, None) => captains.as_deref().and_then(|c| c.of(e)).or(me).filter(|_| ship.side == Side::Enemy),
         };
         let strong = own.strength.attack > AI_MIN_ATTACK;
         if let Some(t) = target.filter(|t| boarders.hostile(e, *t))

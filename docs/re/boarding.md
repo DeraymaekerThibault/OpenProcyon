@@ -92,7 +92,7 @@ human's command ship) runs it every tick against its current target, without any
   without firing, and only started its grapple passes ~17 s after our first attack click on it (it was first hit 40 s later).
   PROVISIONAL, chosen to fit those runs: the harpoon's reach is its LongRange (45) from the ship's centre, and a computer ship
   only grapples a target that has fired at it. Neither is observed directly.
-- Remake: `boarding::ai_boarding` (skirmish enemies target the player's command ship, mission ships the rules' target, the
+- Remake: `boarding::ai_boarding` (skirmish enemies their captain's target, `ship::CaptainTargets`; mission ships the rules' target, the
   player's other ships their pilot's target); the line-of-fire skip is not modelled.
 Grapples are weapon hits: the harpoon guns (`Gun_Harpoon_Light`, bullet `Bullet_Harpoon`/GrapplingHarpoon, sound `Weapon_GrapHarpoon_*`) of the Navy
 cutter, frigate, man-o-war, sloop, tug and most pirate hulls; the link ("Grapple Type": front / right side) holds the two ships together.

@@ -128,6 +128,11 @@ Headless retail skirmishes, one computer ship against our idle or fleeing Navy C
   ~3 minutes. A Barque circling an idle Cutter for 200 s and Carracks circling an idle Man-O-War for 2 minutes made no passes.
   The rule (harpoons fired at random once the target is in a harpoon's arc and reach, boarding at random once grappled):
   [boarding.md](boarding.md) §5.
+- **Target choice:** a computer ship takes the nearest hostile object within its scan range as its target, and chooses again
+  every 6 s (keeping a farther target until then) or at once when the target is gone. It circles and fires at that target, so
+  in a fleet battle each computer ship goes for whichever of our ships is nearest. PROVISIONAL: the remake counts only ships as
+  candidates (the original also filters some object kinds; which non-ship hostiles qualify is not checked). Remake:
+  `ship::CaptainTargets` (steering and fire).
 - **Nothing in sight: map exploration.** Retail saves give every computer ship an explore-map routine with a quadrant index 0-3
   (random per ship). Observed: a Carrack on the Diablo Strait (half-size 1625) ran from (322, -1127) on course (0.27, 0.96) for
   200 s, straight at the (+x, +y) quadrant centre (812, 812) (bearing (0.245, 0.97)); an Assault Cutter on the Zemyatin Anomaly
