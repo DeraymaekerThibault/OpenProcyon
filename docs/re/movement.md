@@ -141,7 +141,7 @@ Headless retail skirmishes, one computer ship against our idle or fleeing Navy C
   or head for it; what decides that is unknown.
 - **Other routines in the save** (per computer ship): target selection with an attack timer; a simple attack routine with a random
   attack distance (about 100-250 units) and attack side; broadside / frontal (with a move-away vector and timer) / rear attack
-  routines; dock (5 s dock time), board (with a grapple flag), tow, lay-mines (lay 10 s, pause 20 s) and fire-on-asteroids routines;
+  routines; dock (5 s dock time), board (with a grapple flag), tow, lay-mines (lay 10 s, pause 20 s; [gunnery.md](gunnery.md#mine-laying)) and fire-on-asteroids routines;
   collision avoidance against ships, asteroids, black holes, torpedoes, mines, dragons, islands and nebulae; waypoint following with
   a random minimum throttle 0.65-0.75; a scan range = WOT sight × the crew factor.
 - **Fire:** see [gunnery.md](gunnery.md) (computer guns fire without clicks; the human command ship's do not).
