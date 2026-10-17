@@ -8,7 +8,7 @@ Work from the repository root with the Python virtual environment active. Use `m
 2. Put editable gameplay changes in `mods/`; change exporters only when the retail conversion is wrong.
 3. Add a small regression test for new logic. Prefer synthetic parser tests and pure mission-rule tests over long simulations.
 4. Run the relevant tests while iterating, then `make check` before committing.
-5. For ECS wiring or UI changes, also run a screenshot smoke test. Unit tests do not detect every Bevy query conflict or layout problem.
+5. For ECS wiring or UI changes, also run a screenshot smoke test. Unit tests do not detect every Bevy query conflict or layout problem. `make smokes` runs every documented smoke with its arguments (`tools/smokes.sh`; add new smokes to its list).
 6. Review `git diff --check` and `git diff --stat`. Never commit converted assets (`assets/` is git-ignored).
 
 ```sh
