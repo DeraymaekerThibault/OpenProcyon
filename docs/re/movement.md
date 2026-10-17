@@ -22,7 +22,10 @@ Consequence for the cutter (full rudder) at the measured order speeds: about 12.
 
 ## Measured on the running original (Navy Cutter, skirmish, no crew)
 Sampled ~60 times a second from the running retail game (Steam/Proton) while issuing each order; the game itself updates
-about every 0.034 s. Values are the cutter's; other classes are assumed to scale the same way (PROVISIONAL).
+about every 0.034 s. Values are the cutter's; other classes are assumed to scale the same way (PROVISIONAL). A Man-O-War run
+(2026-10) agrees: its approach after a click and "+" fits 4.687 = 1.125 x MaxSpeed (Emergency) with time constant 5.54 s
+(WOT MaxSpeed x Mass / MaxThrust = 5.556), and All Stop snaps to 0 the tick its speed would fall below 1.0, as on the cutter.
+A move click from All Stop with no key pressed runs the cutter at its Ahead Full (4.531).
 - **Order speeds:** All Stop 0, Ahead Slow 2.266, Ahead Full 4.531, Emergency Speed 9.062 units/s, i.e. ½ / 1 / 2 × Full,
   and Full = 0.5625 × WOT MaxSpeed (Emergency = 1.125 × MaxSpeed). Emergency held its speed for the 15 s it was used.
 - **Crew raise top speed and turning:** engineers scale Full, the helmsman scales rudder torque; see [crew.md](crew.md).

@@ -30,7 +30,6 @@ behaviour not from original evidence) · Unvalidated (implemented, not compared 
 | UI-07 | Provisional | Retail comparison of gauge meanings, radar range/contact animation, faction placement, cursors, tooltips, target/nav marker geometry. | `panels.rs`, `classic/world_hud.rs`; [hud.md](re/hud.md), [starmap.md](re/starmap.md) |
 | PT-06 | Provisional | Wake and dotted course line need a visual pass against the original (retail: chunky dashed yellow tiles). | `wake.rs`, `course.rs` |
 | PT-07 | Missing | Lob aiming cursor: ground target marker, firing-solution feedback, lob accept/cancel/reject sounds (art and sounds exported, unused). | `view.rs`, `classic/world_hud.rs` |
-| PT-08 | Unvalidated | Command ship's direct-fire guns engage only a clicked target (or panic fire), from owner recollection. Check on retail. | `combat/mod.rs`; [gunnery.md](re/gunnery.md) |
 | HUD-01 | Missing | Selection indicator arrow/compass models (exported, unused). | `classic/world_hud.rs` |
 
 ## 3. Simulation
@@ -46,7 +45,7 @@ behaviour not from original evidence) · Unvalidated (implemented, not compared 
 | SIM-06 | Partial | Crew & Arms functional. Open: captain/leadership bonuses, riggers' repair share, generic crews, retail unlock/upgrade rules, transfer to replacement hulls, retail layout; owner acceptance. | `crew_arms.rs`, `campaign.rs`; [crew.md](re/crew.md), [scoring-saves.md](re/scoring-saves.md) |
 | SIM-07 | Provisional | Lob guns, mines, point defence and shell gravity done. Open: star mortar blast look, lob elevation scatter (44-50° measured), torpedo arming, lob/well/mine constants, ricochet formula. | `combat/`; [gunnery.md](re/gunnery.md) |
 | SIM-08 | Provisional | Fire-fighting, critical-hit feedback, section destruction/movement loss; replay Iron War as Procyon for the destroyed-section aim fix; damaged-mesh collision and pick silhouettes. | `combat/damage.rs`; [effects.md](re/effects.md) |
-| SIM-09 | Provisional | Storms, currents, meteor showers implemented. Open: inside-cloud overlay, exact rates, black-hole force law (pull too strong) and look, lightning endpoint sampling/forces. | `environment.rs`, `nebula.rs`, `blackhole.rs`; [nebula-landmark.md](re/nebula-landmark.md), [effects.md](re/effects.md) |
+| SIM-09 | Provisional | Storms, currents, meteor showers implemented. Open: black hole per retail measurements (no pull outside the radius, slow constant drift inside, Cutter plunge, destruction at the centre with no kill credit; remake still pulls at 10.7 u/s² at the radius), its look; inside-cloud overlay, exact rates, lightning endpoint sampling/forces. | `environment.rs`, `nebula.rs`, `blackhole.rs`; [nebula-landmark.md](re/nebula-landmark.md), [effects.md](re/effects.md) |
 | SIM-10 | Partial | Whale and dragon skeletal animation, whale damage, asteroid fragment/contact fidelity. | `dragons.rs`, `environment.rs`; [dragons.md](re/dragons.md), [asteroids.md](re/asteroids.md) |
 | SIM-11 | Partial | Sensing implemented. Open: retail mesh hiding/contact memory, cloak/NIS/range-modifier semantics, scenery UI distance, moving storms/overlapping clouds, dragon/projectile acquisition. | `environment.rs`, `panels.rs`; [visibility.md](re/visibility.md) |
 | SIM-12 | Partial | Scenery height uses a first-dock datum workaround until MDB/MSB pivot/pose semantics are known; visual comparison and mission/NIS replay after the orientation fix. | `scenario.rs`, `tools/mdb_to_glb.py`; [scenery-placement.md](re/scenery-placement.md) |
@@ -95,7 +94,7 @@ Reference screenshots are local only (`local/reference/`, never committed).
 ## Next retail measurements
 
 1. Which gun reads which gunner slot; Green/Average/Elite crews (SIM-01/06).
-2. Black hole pull at 1-2 radii (zero at 2.6) on an empty map (SIM-09).
+2. Black hole: drift vs class (a third class), what starts the Cutter's plunge, destroy radius per class (SIM-09).
 3. Star mortar ring timing/push, lob elevation scatter (SIM-07).
 4. Victory screen and kills-by-object-type summary (UIR-08); ram/collision damage (SIM-03).
 5. More Easy-difficulty hits on the computer.
@@ -106,6 +105,7 @@ Closed rows, kept for their IDs. Each still carries PROVISIONAL constants noted 
 
 | ID | What landed | Check |
 |---|---|---|
+| PT-08 | Command ship's direct-fire guns engage only a clicked target or panic fire: confirmed on retail (idle ship, enemy at 40 u, 0 damage inflicted). | [gunnery.md](re/gunnery.md) measurement |
 | PT-10 | Every map object/ship with dock points is dockable (skirmish bases by every side, PROVISIONAL). | `scenario::rotation_tests::skirmish_bases_and_tenders_are_dockable` |
 | UIR-02/03/04 | Front-end frame, Skirmish and Game Lobby screens match retail screenshots. | side-by-side screenshots |
 | UIR-07 | In-game menu Summary opens the Game Summary page. | runtime |
