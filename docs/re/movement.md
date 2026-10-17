@@ -114,12 +114,22 @@ Headless retail skirmishes, one computer ship against our idle or fleeing Navy C
   otherwise differ (Carrack heavy cannon 150, Barque Arcturian fire 75).
 - **Hazards:** with our ship inside a black hole's radius, a Carrack circled at a steady 157-165 units from the hole's centre
   (radius 145) for 13 minutes instead of closing.
-- **Nothing in sight:** ships do not head for the enemy. A Carrack ran straight off at Emergency for 200 s (Diablo Strait); an
-  Assault Cutter (sight 400) swept a ~800-unit line back and forth at Emergency. The leg direction is not explained.
+- **Nothing in sight: map exploration.** Retail saves give every computer ship an explore-map routine with a quadrant index 0-3
+  (random per ship). Observed: a Carrack on the Diablo Strait (half-size 1625) ran from (322, -1127) on course (0.27, 0.96) for
+  200 s, straight at the (+x, +y) quadrant centre (812, 812) (bearing (0.245, 0.97)); an Assault Cutter on the Zemyatin Anomaly
+  (half-size 1250, sight 400) shuttled at Emergency between the two upper quadrant centres (±625, 625), turning ~220 units short of
+  each. Other ships came straight at us from 740-1900 units (a Barque, a Procyon Minelayer), so some captains know where the enemy is
+  or head for it; what decides that is unknown.
+- **Other routines in the save** (per computer ship): target selection with an attack timer; a simple attack routine with a random
+  attack distance (about 100-250 units) and attack side; broadside / frontal (with a move-away vector and timer) / rear attack
+  routines; dock (5 s dock time), board (with a grapple flag), tow, lay-mines (lay 10 s, pause 20 s) and fire-on-asteroids routines;
+  collision avoidance against ships, asteroids, black holes, torpedoes, mines, dragons, islands and nebulae; waypoint following with
+  a random minimum throttle 0.65-0.75; a scan range = WOT sight × the crew factor.
 - **Fire:** see [gunnery.md](gunnery.md) (computer guns fire without clicks; the human command ship's do not).
 - Remake (`ship::captain_steer`, shared by the skirmish AI and mission attack orders): Emergency run-in, then a 55-unit circle
   (heading blended from the tangent toward / away from the foe within 25 units of it) at throttle 1.4 (≈0.7 × Emergency), keeping
   15 units outside black holes; computer skirmish ships get crew factor 1.267 on speed and rudder; skirmish enemies with nothing in
-  sight patrol 800-unit legs toward the map centre and back. PROVISIONAL: the radius rule, the throttle, the patrol direction.
+  sight explore (`ship::Explore`: quadrant centre, then its x-neighbour, switching 220 units short). PROVISIONAL: the radius rule,
+  the throttle, the start quadrant and visiting order, and the ships that head straight for the enemy instead.
   Our turn model (rudder torque / 3 above 0.67 × MaxSpeed) only reaches ~7°/s on a crewed Barque at 7.8 units/s where retail held
   8.1°/s at 8.2, so the remake's circle is wider (~60-85 units): the high-speed turn band needs a retail measurement.

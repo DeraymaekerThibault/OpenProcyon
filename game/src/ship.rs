@@ -76,8 +76,40 @@ pub const ORBIT_THROTTLE: f32 = 1.4;
 pub const COMPUTER_CREW: f32 = 1.267;
 /// Computer captains keep this far outside a black hole's radius (retail: a Carrack rode 157-165 units from a 145-radius hole).
 pub const HOLE_MARGIN: f32 = 15.0;
-/// Length of a patrol leg when no enemy is in sight (retail: an Assault Cutter swept ~800 units back and forth). PROVISIONAL.
-pub const PATROL_LEG: f32 = 800.0;
+/// Exploring ships switch quadrant this close to the current quadrant's centre (retail: an Assault Cutter turned ~220 units short
+/// of the centres (±625, 625) of a 1250-half map). PROVISIONAL.
+pub const EXPLORE_REACH: f32 = 220.0;
+
+/// Map exploration of skirmish captains with nothing in sight (retail saves: every computer ship carries an explore-map routine
+/// with a quadrant index 0-3). Each ship sails for the centre of its quadrant, then for the neighbouring one across the map's
+/// x axis, back and forth (as the retail Assault Cutter did). PROVISIONAL: the start quadrant (here from the entity) and the order.
+#[derive(Default)]
+pub struct Explore {
+    map: Option<Option<String>>,
+    half: f32,
+    quadrant: std::collections::HashMap<Entity, usize>,
+}
+impl Explore {
+    /// Centre (bevy coordinates) of quadrant `q` of a map `half` units across from the centre: bit 0 = +x, bit 1 = +y (game).
+    pub fn centre(q: usize, half: f32) -> Vec3 {
+        let (x, y) = (if q & 1 == 1 { half / 2.0 } else { -half / 2.0 }, if q & 2 == 2 { half / 2.0 } else { -half / 2.0 });
+        Vec3::new(x, 0.0, -y)
+    }
+    fn goal(&mut self, cfg: &Config, e: Entity, here: Vec3) -> Vec3 {
+        if self.map.as_ref() != Some(&cfg.map) {
+            let map = cfg.map.as_ref().and_then(|id| crate::data::map_json(id)).unwrap_or_default();
+            self.half = map["world_half"].as_f64().unwrap_or(1000.0) as f32;
+            self.map = Some(cfg.map.clone());
+            self.quadrant.clear();
+        }
+        let half = self.half;
+        let q = self.quadrant.entry(e).or_insert(e.index_u32() as usize % 4);
+        if Vec2::new(here.x, here.z).distance(Explore::centre(*q, half).xz()) < EXPLORE_REACH {
+            *q ^= 1;
+        }
+        Explore::centre(*q, half)
+    }
+}
 
 /// Retail-observed captain steering against one foe at `foe`, shared by the skirmish and mission AIs: run in at Emergency Speed,
 /// then circle the foe ORBIT units out with it abeam (on whichever side it already lies) at ORBIT_THROTTLE. The
@@ -102,9 +134,8 @@ pub fn hole_list(holes: &Query<(&Transform, &crate::blackhole::Pull), Without<Sh
     holes.iter().map(|(t, p)| (t.translation, p.radius)).collect()
 }
 
-/// Skirmish captains: hunt the nearest enemy in sight with `captain_steer`; with nothing in sight an enemy ship patrols a leg from
-/// where it first had nothing to do toward the map centre and back (PROVISIONAL direction; retail ships sweep long legs at
-/// Emergency Speed rather than wait). The player ship only uses this in demo (--shot) mode as an autopilot.
+/// Skirmish captains: hunt the nearest enemy in sight with `captain_steer`; with nothing in sight an enemy ship explores the map
+/// at Emergency Speed (`Explore`). The player ship only uses this in demo (--shot) mode as an autopilot.
 pub fn ai(
     cfg: Res<Config>,
     mission: Option<Res<campaign::Mission>>,
@@ -113,7 +144,7 @@ pub fn ai(
     sensors: Res<crate::environment::Sensors>,
     held: Query<(), With<HoldPosition>>,
     holes: Query<(&Transform, &crate::blackhole::Pull), Without<Ship>>,
-    mut patrols: Local<std::collections::HashMap<Entity, (Vec3, Vec3)>>,
+    mut explore: Local<Explore>,
 ) {
     if mission.is_some() {
         return;
@@ -150,21 +181,12 @@ pub fn ai(
                 s.order = 0;
                 continue;
             }
-            // Patrol: out along the leg, then back; a new leg starts from wherever the ship is when it has no leg yet.
-            let here = tf.translation;
-            let leg = patrols.entry(e).or_insert_with(|| {
-                let to_centre = Vec3::new(-here.x, 0.0, -here.z).normalize_or(Vec3::NEG_Z);
-                (here, here + to_centre * PATROL_LEG)
-            });
-            if s.waypoints.is_empty() {
-                let end = if leg.1.distance(here) > leg.0.distance(here) { leg.1 } else { leg.0 };
-                s.waypoints = vec![end];
-            }
+            s.waypoints = vec![explore.goal(&cfg, e, tf.translation)];
             s.order = 3;
             continue;
         };
-        if patrols.remove(&e).is_some() {
-            s.waypoints.clear();
+        if explore.quadrant.contains_key(&e) {
+            s.waypoints.clear(); // contact: drop the exploring course (the quadrant is kept for later)
         }
         let (goal, order, throttle) = captain_steer(s.heading, tf.translation, foe.1, &holes);
         s.goal = Some(goal);
@@ -964,6 +986,16 @@ pub mod movement_tests {
         assert!(ship.waypoints.is_empty());
         assert!(ship.order == 3 && ship.speed > 1.0, "speed {}", ship.speed);
     }
+    #[test]
+    fn exploring_heads_for_quadrant_centres() {
+        // retail Carrack, Diablo Strait (half 1625), from (322, -1127): its course (0.27, 0.96) points at quadrant (+x, +y)
+        let c = Explore::centre(3, 1625.0);
+        assert_eq!((c.x, -c.z), (812.5, 812.5));
+        let d = (Vec2::new(c.x, -c.z) - Vec2::new(322.0, -1127.0)).normalize();
+        assert!((d.x - 0.245).abs() < 0.01 && (d.y - 0.97).abs() < 0.01, "{d}");
+        assert_eq!(Explore::centre(0, 1000.0), Vec3::new(-500.0, 0.0, 500.0));
+    }
+
     #[test]
     fn captain_runs_in_then_circles_with_the_foe_abeam() {
         let foe = Vec3::ZERO;
