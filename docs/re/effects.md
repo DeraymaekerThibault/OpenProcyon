@@ -257,6 +257,19 @@ core: run by fx.rs) plus a `Vortex` primitive, implemented in `game/src/blackhol
     driven to the centre it was destroyed somewhere inside 17 units.
   - Destruction by the hole credits no kill: the Game Summary showed the computer with 0 Ships Sunk, and our Damage Taken only
     counted the earlier gunfire (2139 of the Man-O-War's 4940 hull and core HP).
+  - Navy Frigate (mass 20000, half the Man-O-War's; Easy, 2026-10-17): rest drift 0.0046 units/s at 140.8 units (0.97 radii),
+    0.0342 at 113.5 (0.78), 0.0396 at 53.9 (0.37), sideways part 0.27 of the inward one. Near the edge the drift grows with the
+    depth inside the radius (0.0046 × 31.5 / 4.2 = 0.0345, as measured at 113.5), deeper it levels off: the Frigate creeps about
+    as fast as the Man-O-War, not the √2 faster a 1/√mass law gives.
+  - **The pull is an acceleration, hidden by the rest snap.** A save taken while the Frigate "rested" holds a physics velocity of
+    1.26 units/s, mostly tangential (the logged speed field, which the earlier notes read as "velocity 0", is a different
+    value). Once the ship moved faster than the snap's 1 unit/s it fell freely: from 67 units it spiralled in at up to 5 units/s
+    (inward ≈ 1.1-1.4 units/s² between 66 and 40 units after the hull's own drag rate 0.214/s is added back, tangential ≈ 0.3),
+    turning 75° around the centre, slowing again inside ~35 units, and was destroyed at about 21 units. Reading (PROVISIONAL):
+    at All Stop each tick's pull is mostly cancelled by the snap, so the creep is roughly one tick's worth of acceleration
+    (1.2 units/s² × 0.034 s ≈ 0.04 units/s), and anything that lifts the speed above 1 unit/s (a ram, a push, the hole's own
+    swirl) starts a free fall: this is likely the Cutter's "plunge".
+  - Destroy distance: Cutter 33.6, Frigate ~21, Man-O-War < 17 units (larger hull → closer?). PROVISIONAL.
   So the hole is a trap at its centre, not a long-range pull. Unknown (PROVISIONAL): the drift's dependence on class (mass,
   thrust or size), what starts the cutter's plunge (time inside, distance, class), the destroy radius per class, and whether a
   moving ship feels any extra pull (a Man-O-War crossing the radius at Emergency showed none clearly).

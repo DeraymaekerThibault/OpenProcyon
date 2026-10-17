@@ -12,6 +12,22 @@ Source: observed behaviour of the original game, WOT collision definitions and t
 - Helper uses a contact point's displacement from the transformed centre of mass and collision-box dimensions to accumulate angular acceleration, clamped to ±60. The exact torque/sign relationship is not recovered well enough to port.
 - Debug strings include `Collision LOD Level Index` and `Valid Collision Triangle Indices`. The exact collision LOD, triangle rejection rules, response dispatcher, restitution, sound trigger and damage calculation remain unresolved.
 
+## Measured on retail (2026-10, one glancing ram)
+
+Headless Diablo Strait skirmish on Easy, our Navy Cutter driven past our own idle Man-O-War; both ships logged at 30 Hz and saved
+before and after (section HP from the saves).
+- **Contact size:** the Cutter (9.07 units/s, Emergency) slid along the Man-O-War's port side held at a steady 12.7-12.9 units
+  from its centre line for ~4 s, where the physics boxes (half-beams 3 and 2.25) leave about 7.5 units of clearance. The
+  Man-O-War's model is 9.76 units half-beam (yards and sails), so the original's ship contact is wider than the physics extents:
+  plausibly the rendered model's bounds. PROVISIONAL: one sample.
+- **Response:** the idle Man-O-War did not move or turn at all (position, heading and velocity unchanged). The Cutter lost speed
+  smoothly over ~1.2 s (9.07 → 6.2 units/s, then ~5.8) and was deflected by ~30° of heading while it kept steering inward; no
+  bounce.
+- **Damage:** both ships lost hit points on *every* section, not only near the contact: Cutter −75 (−11 to −15 on each of its 6
+  sections), Man-O-War −86 (−1 to −18 on each of 9). Whether difficulty scales it (Easy) is not known; the remake damages the
+  nearest section only (`combat::lob::ram_damage`).
+- A head-on Emergency ram missed (passed 24 units off) and did nothing.
+
 ## Implementation
 
 `tools/export_collision.py` exports `assets/data/collision.json` keyed by retail entity type. Scenery/asteroid boxes come directly from the collision definition, mapped to Bevy axes. Ship boxes reuse the existing `data/ships/<id>.json` physics `MinExtents` / `MaxExtents`, so inherited mods keep their collision shape; custom ships without those fields provisionally use section bounds. Static objects use indexed triangles extracted from the already converted GLB, **provisionally model/LOD 0**. No raw WOT/MDB or executable is committed. Regenerate after mesh/exporter changes:

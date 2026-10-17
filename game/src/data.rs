@@ -262,7 +262,9 @@ pub struct Class {
     pub radius: f32,
     /// Farthest corner of any section box from the ship origin: a shell farther than this from the hull cannot hit.
     pub hull_bound: f32,
-    pub engage: f32,                        // mean effective range of its guns; AI keeps about this distance
+    pub engage: f32, // mean effective range of its guns; AI keeps about this distance
+    /// Mean LongRange over its gun banks (one gun per bank): the broadside aim distance of computer captains (`ship::captain_steer`).
+    pub reach: f32,
     pub flag: Option<(Vec3, Vec3)>,         // pole attachment points: top, bottom (Bevy ship frame)
     pub engines: Vec<(Vec3, Quat, String)>, // exhaust effect placements
     pub explosion_fx: Option<String>,
@@ -508,6 +510,10 @@ pub fn load_class(root: &std::path::Path, name: &str, guns: &HashMap<String, Gun
     let ph = &j["physics"];
     let p = |k: &str| num(&ph[k]);
     let engage = if mounts.is_empty() { 60.0 } else { mounts.iter().map(|m| guns[&m.gun].range[0]).sum::<f32>() / mounts.len() as f32 };
+    let mut banks: Vec<(usize, f32)> = mounts.iter().map(|m| (m.bank, guns[&m.gun].range[1])).collect();
+    banks.sort_by_key(|b| b.0);
+    banks.dedup_by_key(|b| b.0);
+    let reach = if banks.is_empty() { 125.0 } else { banks.iter().map(|b| b.1).sum::<f32>() / banks.len() as f32 };
     let bounds = if ph["MinExtents"].is_array() && ph["MaxExtents"].is_array() {
         let a = crate::game_to_bevy(&ph["MinExtents"]);
         let b = crate::game_to_bevy(&ph["MaxExtents"]);
@@ -556,6 +562,7 @@ pub fn load_class(root: &std::path::Path, name: &str, guns: &HashMap<String, Gun
         radius,
         hull_bound,
         engage,
+        reach,
         sight: j["sight"].as_f64().unwrap_or(400.0) as f32,
         repair_fx: j["repair_fx"].as_str().map(String::from),
         // Older exports lack the flag; the submersible is the only cloakable hull in the retail data.

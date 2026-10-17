@@ -112,17 +112,25 @@ impl CrewPosts {
     }
     /// (top-speed, rudder-torque) factors: engineers' engineering and the helmsman's navigation (docs/re/crew.md).
     pub fn handling(&self, caps: &[u32; 8]) -> (f32, f32) {
-        (skill_factor(self.post_skill(4, "engineering", caps[4])), skill_factor(self.post_skill(3, "navigation", caps[3])))
+        (self.post_factor(4, "engineering", caps[4]), self.post_factor(3, "navigation", caps[3]))
+    }
+    /// Mean of every slot's `skill_factor` (capacity `slots`; empty slots hold a rating-1 hand), as in retail saves: three
+    /// engineers rated 9, 9, 8 give (1.5 + 1.5 + 1.475) / 3 / 1.125.
+    pub fn post_factor(&self, role: usize, skill: &str, slots: u32) -> f32 {
+        let named: Vec<f32> = self.0[role].iter().map(|id| skill_factor(ability(id, skill).unwrap_or(0.1))).collect();
+        let slots = slots.max(named.len() as u32).max(1);
+        (named.iter().sum::<f32>() + (slots as usize - named.len()) as f32) / slots as f32
     }
     pub fn combat(&self, role: usize, generic: f32) -> Vec<f32> {
         self.0[role].iter().map(|c| ability(c, "combat").unwrap_or(generic)).collect()
     }
 }
 
-/// Measured on the retail Navy Cutter (docs/re/crew.md): skill 1, 5, 9 of 10 scale top speed and rudder torque by 1, 1.178, 1.334,
-/// i.e. the factor squared grows linearly with skill. PROVISIONAL outside that range and for other classes.
+/// One crewman's factor on top speed (engineering) or rudder torque (navigation), relative to a rating-1 hand: retail saves
+/// store min(1.075 + 0.05 x rating, 1.5) per post (rating 1 -> 1.125, 9 -> 1.5), and speed and turn follow it exactly
+/// (docs/re/crew.md "Saved crew factors"). `skill` is rating / 10.
 pub fn skill_factor(skill: f32) -> f32 {
-    (1.0 + 0.972 * (skill - 0.1)).max(0.0).sqrt()
+    (1.075 + 0.5 * skill).min(1.5) / 1.125
 }
 
 fn spend(points: &mut CampaignPoints, cost: u32) -> Result<(), String> {
@@ -796,6 +804,18 @@ fn apply_outfit(
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// Retail Man-O-War saves (docs/re/crew.md): helmsman Navigation 9 -> navigator factor 1.5, engineers 9/9/8 -> 1.491667,
+    /// empty posts -> 1.125 (relative to an uncrewed ship: / 1.125).
+    #[test]
+    fn post_factors_match_retail_saves() {
+        let mut posts = CrewPosts(Default::default());
+        posts.0[3] = vec!["Crew_Canid_Navy_EngelbertF".into()];
+        posts.0[4] = ["Crew_Navy_Gerspach", "Crew_Arc_Navy_JWhorfin", "Crew_Opto_Navy_Bretina"].map(String::from).to_vec();
+        assert!((posts.post_factor(3, "navigation", 1) * 1.125 - 1.5).abs() < 1e-5);
+        assert!((posts.post_factor(4, "engineering", 3) * 1.125 - 1.491667).abs() < 1e-5);
+        assert!((CrewPosts(Default::default()).post_factor(4, "engineering", 3) - 1.0).abs() < 1e-6);
+        assert!((skill_factor(0.7) * 1.125 - 1.425).abs() < 1e-5, "skill 7: the computer Carrack's saved factor");
+    }
     #[test]
     fn recruitment_spends_once_and_assignment_moves_without_duplication() {
         let mut p = CampaignPoints::default();
