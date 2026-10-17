@@ -63,20 +63,20 @@ fn owner(ship: &Ship, m: Option<&crate::campaign::MissionShip>) -> String {
     m.map(|m| m.owner.clone()).unwrap_or_else(|| if ship.side == Side::Player { "Your fleet".into() } else { "Enemy fleet".into() })
 }
 
-fn collect(
+pub(crate) fn collect(
     mut stats: ResMut<GameStats>,
     lib: Res<crate::combat::Library>,
     mut hits: MessageReader<Hit>,
-    ships: Query<(Entity, &Ship, &Health, Option<&crate::campaign::MissionShip>), Without<crate::lifeboats::Lifeboat>>,
+    ships: Query<(Entity, &Ship, &Health, Option<&crate::campaign::MissionShip>, Has<crate::blackhole::Swallowed>), Without<crate::lifeboats::Lifeboat>>,
 ) {
-    let owners: HashMap<Entity, String> = ships.iter().map(|(e, s, _, m)| (e, owner(s, m))).collect();
+    let owners: HashMap<Entity, String> = ships.iter().map(|(e, s, _, m, _)| (e, owner(s, m))).collect();
     for h in hits.read() {
         if let (Some(by), Some(entry)) = (owners.get(&h.shooter).cloned(), stats.hulls.get_mut(&h.victim)) {
             entry.3 = Some(by);
         }
     }
     let stats = &mut *stats;
-    for (e, s, h, _) in &ships {
+    for (e, s, h, _, swallowed) in &ships {
         let class = &lib.classes[s.class];
         if class.phys.max_speed <= 0.0 {
             continue; // bases and scenery hulls are not fleet ships
@@ -100,7 +100,8 @@ fn collect(
             stats.players.entry(me.clone()).or_default().end += !h.destroyed as u32;
             entry.0 = me.clone();
         }
-        let lost = (entry.1 - hp).max(0.0);
+        // A black hole's kill zeroes the core but counts as nobody's damage or kill (retail summary).
+        let lost = if swallowed { 0.0 } else { (entry.1 - hp).max(0.0) };
         if lost > 0.0 {
             stats.players.entry(me.clone()).or_default().taken += lost;
             if let Some(by) = entry.3.clone() {
@@ -110,7 +111,7 @@ fn collect(
         if h.destroyed && !entry.2 {
             let l = stats.players.entry(me.clone()).or_default();
             l.end = l.end.saturating_sub(1);
-            if let Some(by) = entry.3.clone().filter(|b| *b != me) {
+            if let Some(by) = entry.3.clone().filter(|b| *b != me && !swallowed) {
                 stats.players.entry(by).or_default().sunk += 1;
             }
         }

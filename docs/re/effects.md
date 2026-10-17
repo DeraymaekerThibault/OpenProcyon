@@ -243,6 +243,10 @@ core: run by fx.rs) plus a `Vortex` primitive, implemented in `game/src/blackhol
   So the hole is a trap at its centre, not a long-range pull. Unknown (PROVISIONAL): the drift's dependence on class (mass,
   thrust or size), what starts the cutter's plunge (time inside, distance, class), the destroy radius per class, and whether a
   moving ship feels any extra pull (a Man-O-War crossing the radius at Emergency showed none clearly).
-  The remake still uses its old inverse-square law and no core destruction (`blackhole.rs`).
+  Remake (`blackhole.rs`): no pull outside the radius; inside, every free ship's position moves toward the centre at
+  6.2 × (Magnitude / 9000) / √Mass units/s turned 14° clockwise (fits both measured classes within 6 %; the mass law and the
+  Magnitude scaling are PROVISIONAL), and a ship closer than the vortex's KILL_RADIUS (10 / 100 / 290 for Small / Med / Big;
+  PROVISIONAL as the destroy distance) loses its core and sinks, credited to nobody in the Game Summary. The Cutter's plunge is
+  not modelled.
 * Unknown: strip UV mapping/blend (ours: additive, v = 0.5 per segment), the funnel mesh
   (not drawn: the reference video shows only the glow, beams and ribbons).
