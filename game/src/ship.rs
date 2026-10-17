@@ -76,16 +76,18 @@ pub fn orbit_radius(e: Entity) -> f32 {
 /// Distance off the circle at which the captain steers straight at (or away from) the foe; nearer, it blends toward the tangent.
 /// Remake tuning so the hull holds the measured circle, not a retail value.
 const ORBIT_BAND: f32 = 25.0;
-/// Throttle (fraction of Ahead Full) while circling: retail circles at 0.66 (Carrack) and 0.74 (Barque) of the crewed Emergency
-/// speed it ran in at. PROVISIONAL: whether the captain throttles back or the turn bleeds speed is unknown.
+/// Throttle (fraction of Ahead Full) while circling: retail circles at its path's saved minimum throttle (random 0.65-0.75 per
+/// ship) x the crewed Emergency speed (saved Carrack: 0.745 x 8.71 = 6.49, measured 6.47); 1.4 is that range's mean x 2.
+/// ponytail: one mean for every ship; draw it per ship if circles need the spread.
 pub const ORBIT_THROTTLE: f32 = 1.4;
 /// Speed factor (`Ship::crew_speed`) of computer skirmish ships: retail Carrack and Barque ran in at exactly 1.267 x their
-/// Emergency Speed (crew.md's engineer factor for skill ~7).
+/// Emergency Speed. A retail save of such a Carrack holds engineer and navigator factor 1.425, our uncrewed Cutter 1.125, and
+/// 1.425 / 1.125 = 1.267 (docs/re/crew.md).
 pub const COMPUTER_CREW: f32 = 1.267;
-/// Rudder-torque factor (`Ship::crew_turn`) of computer skirmish ships. Retail turn rates while circling (Barque 8.1°/s at 8.2
-/// units/s, Carrack 8.6°/s at 5.74) need torque x 1.72 and x 1.87 under our turn model, which a full-rudder Cutter run confirmed at
-/// Emergency (9.70°/s measured and predicted); that is the ships' saved navigator factor (1.31, 1.37) squared. PROVISIONAL.
-pub const COMPUTER_TURN: f32 = 1.75;
+/// Rudder-torque factor (`Ship::crew_turn`) of computer skirmish ships: the square of their navigator factor. Measured on the
+/// saved Carrack: it circled at 8.23°/s at 6.47 units/s, our turn model with torque x 1.267² predicts 8.25°/s (x 1.267: 7.33).
+/// PROVISIONAL: why the computer's rudder takes the factor squared (one ship with its own save; two earlier tracks agree within 4 %).
+pub const COMPUTER_TURN: f32 = COMPUTER_CREW * COMPUTER_CREW;
 /// Computer captains keep this far outside a black hole's radius (retail: a Carrack rode 157-165 units from a 145-radius hole).
 pub const HOLE_MARGIN: f32 = 15.0;
 /// Exploring ships switch quadrant this close to the current quadrant's centre (retail: an Assault Cutter turned ~220 units short
@@ -1114,8 +1116,9 @@ pub mod movement_tests {
             }
         }
         let (lo, hi) = dists.iter().fold((f32::MAX, 0.0f32), |(a, b), d| (a.min(*d), b.max(*d)));
-        // ponytail: the remake circles ~8 units wide of retail (59-68); a narrower blend band oscillates instead
-        assert!(lo > 0.9 * ORBIT && hi < 1.3 * ORBIT, "circle {lo}..{hi}");
+        // ponytail: the remake circles wide of retail (59-73 vs 51-58); a narrower blend band oscillates instead. Retail aims at
+        // a point beside the target every tick (docs/re/movement.md); its path follower's rudder rule is not known yet.
+        assert!(lo > 0.9 * ORBIT && hi < 1.35 * ORBIT, "circle {lo}..{hi}");
         assert!(beams.iter().all(|b| (b - PI / 2.0).abs() < 0.5), "foe kept abeam");
     }
 

@@ -49,13 +49,24 @@ riggers' Rigging; Strength = Combat. Leadership and Gunnery show on no bar.
 - Gunners: accuracy `1 - 0.8 x gunnery` as before, and reload shortened by 10 x gunnery seconds on the player's ships
   ([gunnery.md](gunnery.md#gunners), measured).
 
+## Saved crew factors
+A save made mid-battle (Zemyatin skirmish, our uncrewed Navy Cutter against a computer Carrack) stores per ship an engineer and a
+navigator factor: our Cutter 1.125 / 1.125, the Carrack 1.425 / 1.425.
+- **Speed:** Ahead Full = 0.5 × WOT MaxSpeed × engineer factor. Uncrewed: 0.5 × 1.125 = 0.5625 × MaxSpeed, as measured on the
+  Cutter and the Man-O-War ([movement.md](movement.md)); the Carrack: Emergency 2 × 0.5 × 6.111 × 1.425 = 8.71, as measured. So
+  the remake's relative factors are the saved factor / 1.125 (computer skirmish ships 1.267).
+- **Rudder:** the uncrewed turn needs torque × 1.125 (= the navigator factor) on the decoded formula. The computer Carrack's
+  circling needs (1.425 / 1.125)² on top of that ([movement.md](movement.md#computer-captains-measured-2026-10)).
+- PROVISIONAL: the skill → factor curve for player crews in absolute terms (c(5) = 1.178 relative would be 1.325 saved).
+
 ## Open
 - Placed and computer ships' generic crews do get crew factors. Retail saves (missions 3 and 11) store per ship an engineer and a
   navigator factor: Green crews 1.15, Average 1.30-1.37, Elite 1.40-1.47, default (rating-1) hands 1.05-1.10, i.e. about
-  1 + 0.05 × skill plus a small extra. That scale is not speed itself (crew.md's measured speed factors are lower, e.g. 1.178 at
-  skill 5); computer skirmish ships ran in at 1.267 × Emergency, between this curve's Average (1.219) and Elite (1.296).
+  1 + 0.05 × skill plus a small extra. Measured speed factors are relative to the uncrewed ship (c(1) = 1), whose saved factor
+  is 1.125, so speed follows the saved factor itself (see "Saved crew factors" above).
+  Computer skirmish ships ran in at 1.267 × Emergency, between this curve's Average (1.219) and Elite (1.296).
   Remake: mission ships take `skill_factor` at their crew level's skill (Green 3, Average 6, Elite 8) for speed and rudder
-  (`boarding::Skill::handling`); computer skirmish ships use the measured 1.267. PROVISIONAL: the link between the save scale and
-  speed, and the navigator's (rudder) share.
+  (`boarding::Skill::handling`); computer skirmish ships use the measured 1.267. PROVISIONAL: the navigator's (rudder) share
+  for crewed player ships.
 - Leadership (manual: "improves the effectiveness of your entire crew"): no bar shows it; not measured.
 - Spotting range. (Repair Rate: refit-resupply.md 3.4; rate of fire: gunnery.md#gunners.)
