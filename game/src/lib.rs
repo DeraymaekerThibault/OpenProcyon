@@ -190,6 +190,7 @@ pub fn run(view: fn(&mut App)) {
         .init_resource::<collision::Shapes>()
         .add_message::<collision::Ram>()
         .init_resource::<ship::Fleets>()
+        .init_resource::<ship::CaptainTargets>()
         .init_resource::<course::Plot>()
         .add_systems(Startup, setup)
         .add_plugins(smoke::plugin)

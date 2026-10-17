@@ -78,6 +78,22 @@ once it passes. Board stop removes the fight. Grapple starts a grapple-and-board
 boarder has a free grapple gun it closes to the gun's range and fires (a 5 % chance per tick to actually fire once aimed [?]), cleans up grapple relations
 with ships that stopped being hostile, and once a grapple holds and the start test passes (and a strength check [?] and a 20 % roll) it registers the fight.
 The rule actions `Board Ships` / `Grapple Ship` exist but **no mission uses them**; fights only start from the player's orders and these activities.
+
+**Computer captains** run the grapple-and-board activity on their own: every ship the AI steers (all computer ships; not the
+human's command ship) runs it every tick against its current target, without any order:
+- If the target is a hostile ship, the ship has a harpoon gun with a free grapple, and no friendly ship or scenery lies in the
+  line of fire, it fires its harpoons at a 5 % chance per tick (otherwise the harpoons hold fire). The harpoon is an ordinary
+  gun, so it also has to be able to aim: the target must be inside a harpoon mount's arc and range.
+- Once the boarding start test passes (§3 and §4 step 1: grapple holding and hulls within 10 / slower than 4.5 for a ship; a boarding point in
+  reach for a base), it starts the fight at a 20 % chance per tick, but only if its **attacking strength is above 10**.
+- Skirmish runs ([movement.md](movement.md#computer-captains-measured-2026-10)): a Carrack's harpoons face forward (±60°), so
+  circling with its target on the beam it never fires; a Barque's sit on both beams (±30° around 90°). A Barque circling an idle
+  Cutter at 55.7 units for 200 s never grappled; one circling our Man-O-War came within ~47 units with us on its beam twice
+  without firing, and only started its grapple passes ~17 s after our first attack click on it (it was first hit 40 s later).
+  PROVISIONAL, chosen to fit those runs: the harpoon's reach is its LongRange (45) from the ship's centre, and a computer ship
+  only grapples a target that has fired at it. Neither is observed directly.
+- Remake: `boarding::ai_boarding` (skirmish enemies their captain's target, `ship::CaptainTargets`; mission ships the rules' target, the
+  player's other ships their pilot's target); the line-of-fire skip is not modelled.
 Grapples are weapon hits: the harpoon guns (`Gun_Harpoon_Light`, bullet `Bullet_Harpoon`/GrapplingHarpoon, sound `Weapon_GrapHarpoon_*`) of the Navy
 cutter, frigate, man-o-war, sloop, tug and most pirate hulls; the link ("Grapple Type": front / right side) holds the two ships together.
 
@@ -102,5 +118,5 @@ Island `Combat Strength`; fight effect on the target's boarding nodes, fight sou
 PROVISIONAL: no leadership bonus and no per-man crews (generic crew values); `Players` = Average; the harpoon is not a projectile (the order closes to
 100 units, stops and the hook bites after distance / 45 s) and harpoon guns no longer fire at will; one grapple per ship; the winch (drags grappled
 hulls together at ≤ 5 u/s and evens out their velocities); a Board order on a grappled ship waits for the hulls to close instead of failing at once;
-bases are boarded only by AI ships (a hostile non-Dummy mission ship in reach of a base whose rules made it Boardable), not from the menu; status bar
+computer ships grapple and board their target on their own (§5, `ai_boarding`; reach and attacked-first gate PROVISIONAL); bases are boarded only by AI ships (a hostile non-Dummy mission ship in reach of a base whose rules made it Boardable), not from the menu; status bar
 placement and colours; effect placement (the original's extra main effect is not created); no grapple-break on tension.
