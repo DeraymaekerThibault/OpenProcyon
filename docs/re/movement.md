@@ -169,6 +169,15 @@ Headless retail skirmishes, one computer ship against our idle or fleeing Navy C
   (half-size 1250, sight 400) shuttled at Emergency between the two upper quadrant centres (±625, 625), turning ~220 units short of
   each. Other ships came straight at us from 740-1900 units (a Barque, a Procyon Minelayer), so some captains know where the enemy is
   or head for it; what decides that is unknown.
+- **Why some ships head straight for us (save, 2026-10-17):** on Border Dispute a computer Procyon Minelayer's saved target is
+  the Navy base (Base_Grant, ~2000 units away, far beyond its 562.5 scan range) from the first second of the battle and still
+  60 s later. So with a hostile base on the map the computer goes for the base (which sits near our start) instead of
+  exploring; on maps without bases it explores. Whether that is "nearest hostile base regardless of range" or a map/player
+  setting is not checked (one map). The skirmish map's bases belong to non-playable players named "navybase" / "procbase";
+  the Navy base fired on the Procyon ship (r5) and not on our idle Cutter. Remake: skirmish bases have no side and do not fire;
+  computer ships explore instead (PROVISIONAL gap).
+- **Scan range = WOT sight × the lookout post's factor:** the Minelayer (sight 500, empty lookout) saves 562.5 = 500 × 1.125; the
+  Carrack (lookout rated 7) 712.5 = 500 × 1.425 (crew factors: [crew.md](crew.md#saved-crew-factors)).
 - **Other routines in the save** (per computer ship): target selection with an attack timer; a simple attack routine with a random
   attack distance (about 100-250 units) and attack side; broadside / frontal (with a move-away vector and timer) / rear attack
   routines; dock (5 s dock time), board (with a grapple flag), tow, lay-mines (lay 10 s, pause 20 s; [gunnery.md](gunnery.md#mine-laying)) and fire-on-asteroids routines;
