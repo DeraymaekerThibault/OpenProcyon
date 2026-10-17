@@ -175,13 +175,17 @@ Headless retail skirmishes, one computer ship against our idle or fleeing Navy C
   collision avoidance against ships, asteroids, black holes, torpedoes, mines, dragons, islands and nebulae; waypoint following with
   a random minimum throttle 0.65-0.75; a scan range = WOT sight × the crew factor.
 - **Fire:** see [gunnery.md](gunnery.md) (computer guns fire without clicks; the human command ship's do not).
-- Remake (`ship::captain_steer`, shared by the skirmish AI and mission attack orders): Emergency run-in, then a circle of
-  `ship::orbit_radius` (50-125 units, fixed per ship: half the saves' random attack distance, PROVISIONAL)
-  (heading blended from the tangent toward / away from the foe within 25 units of it) at throttle 1.4 (≈0.7 × Emergency), keeping
-  15 units outside black holes and damaging nebulae (solar storm / meteors, as circles: `nebula::storm_circles`); computer skirmish ships get crew factor 1.267 on speed and rudder; skirmish enemies with nothing in
-  sight explore (`ship::Explore`: quadrant centre, then its x-neighbour, switching 220 units short). PROVISIONAL: the radius rule,
-  the throttle, the start quadrant and visiting order, and the ships that head straight for the enemy instead.
-  Computer skirmish ships use rudder factor 1.267² (above); the remake's circle settles at 59-73 units (retail 51-58).
+- Remake (`ship::captain_steer`, shared by the skirmish AI and mission attack orders): the broadside aim point above, with R =
+  `Class::reach` (mean LongRange over the gun banks: Carrack 150, Barque 128.6; which of the gun's range values the original
+  averages is not confirmed, PROVISIONAL), Emergency run-in, throttle 1.4 (≈0.7 × Emergency) inside 0.6 × R (PROVISIONAL: the
+  original's switch is not decoded; retail slowed 60-75 units out), keeping 15 units outside black holes and damaging nebulae
+  (solar storm / meteors, as circles: `nebula::storm_circles`); computer skirmish ships get crew factor 1.267 on speed and
+  1.267² on rudder. Simulated circles: Carrack 47.7 units (retail 45-50), Barque 55-66 (retail 51-58). Skirmish enemies with
+  nothing in sight explore (`ship::Explore`: quadrant centre, then its x-neighbour, switching 220 units short). PROVISIONAL: the
+  start quadrant and visiting order, and the ships that head straight for the enemy instead.
+- **Helm (decoded):** the waypoint steering puts the rudder hard over when the heading error to the current point exceeds 20°
+  and proportionally (error / 20°) inside it; a path point counts as reached within 2 × the ship's radius. Remake: `ship::HELM_FULL`
+  for every ship.
 - **Turning at speed (measured, Navy Cutter, no crew):** full rudder 13.6°/s at Ahead Full (4.53) and 9.70°/s at Emergency
   (9.06); speed does not drop in the turn. Our turn formula with its torque / 3 band above 0.67 × MaxSpeed predicts 9.70°/s, so
   the band holds. The computer's circling turn rates then need rudder torque × 1.72 (Barque) and × 1.87 (Carrack) under campaign-save

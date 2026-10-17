@@ -12,6 +12,10 @@ pub const FULL_SPEED: f32 = 0.5625;
 /// and Emergency all fit it exactly (docs/re/movement.md); the same 1.125 as Emergency speed, source not identified.
 pub const TURN_SCALE: f32 = 1.125;
 
+/// The helm puts the rudder hard over beyond this heading error and proportionally inside it (the original's waypoint steering:
+/// rudder = error / 20°).
+pub const HELM_FULL: f32 = 20.0 * PI / 180.0;
+
 /// A braking ship comes to rest when it would drop through this speed (retail: 1.05 -> 0 in one tick).
 pub const STOP_SNAP: f32 = 1.0;
 
@@ -62,20 +66,9 @@ pub fn angdiff(a: f32, b: f32) -> f32 {
 
 pub type CaptainBusy = Or<(With<docking::Docker>, With<docking::Tower>, With<boarding::GrappleOrder>, With<boarding::Grapple>, With<boarding::Boarding>)>;
 
-/// Radius range of the circle a computer captain flies around its target. Retail circles: Carrack 54, Barque 56, Assault Cutter ~95,
-/// Minelayer 110 units (docs/re/movement.md "Computer captains"); retail saves give every computer ship a random attack distance of
-/// about 100-250, so half of it is taken as the radius, fixed per ship. PROVISIONAL: that link and the uniform spread.
-pub const ORBIT_MIN: f32 = 50.0;
-pub const ORBIT_MAX: f32 = 125.0;
-
-/// The circle radius of ship `e`: fixed per ship, spread over ORBIT_MIN..ORBIT_MAX.
-pub fn orbit_radius(e: Entity) -> f32 {
-    let h = e.index_u32().wrapping_mul(2_654_435_761) >> 16; // ponytail: entity-index hash, so it changes between battles
-    ORBIT_MIN + (h % 1024) as f32 / 1023.0 * (ORBIT_MAX - ORBIT_MIN)
-}
-/// Distance off the circle at which the captain steers straight at (or away from) the foe; nearer, it blends toward the tangent.
-/// Remake tuning so the hull holds the measured circle, not a retail value.
-const ORBIT_BAND: f32 = 25.0;
+/// Computer captains slow to `ORBIT_THROTTLE` inside this fraction of their aim distance (`Class::reach`). Retail ships slowed
+/// 60-75 units from their target (Carrack, reach 150); PROVISIONAL: the original's switch is not decoded.
+pub const ORBIT_SLOW: f32 = 0.6;
 /// Throttle (fraction of Ahead Full) while circling: retail circles at its path's saved minimum throttle (random 0.65-0.75 per
 /// ship) x the crewed Emergency speed (saved Carrack: 0.745 x 8.71 = 6.49, measured 6.47); 1.4 is that range's mean x 2.
 /// ponytail: one mean for every ship; draw it per ship if circles need the spread.
@@ -125,11 +118,12 @@ impl Explore {
     }
 }
 
-/// Retail-observed captain steering against one foe at `foe`, shared by the skirmish and mission AIs: run in at Emergency Speed,
-/// then circle the foe `orbit` units out with it abeam (on whichever side it already lies) at ORBIT_THROTTLE. The
-/// heading blends from straight at the foe (ORBIT_BAND or more outside the circle) through the tangent (on it) to straight out.
-/// Near a black hole or damaging nebula (`holes`: centre, radius) it turns straight away first. Returns (goal heading, engine order, throttle).
-pub fn captain_steer(heading: f32, pos: Vec3, foe: Vec3, orbit: f32, holes: &[(Vec3, f32)]) -> (f32, usize, Option<f32>) {
+/// The original's broadside attack, shared by the skirmish and mission AIs: every tick the captain steers for a point `reach`
+/// units beside the foe (the line of sight turned 90° toward the beam the foe already lies on), so it runs in at Emergency Speed
+/// and ends on its tightest turn around the foe, which stays abeam (docs/re/movement.md "What makes the circle"). It slows to
+/// ORBIT_THROTTLE inside ORBIT_SLOW x `reach`. Near a black hole or damaging nebula (`holes`: centre, radius) it turns straight
+/// away first. Returns (goal heading, engine order, throttle).
+pub fn captain_steer(heading: f32, pos: Vec3, foe: Vec3, reach: f32, holes: &[(Vec3, f32)]) -> (f32, usize, Option<f32>) {
     let toward = |d: Vec3| (-d.x).atan2(-d.z); // heading that points the bow along d
     if let Some((c, _)) = holes.iter().find(|(c, r)| Vec2::new(pos.x - c.x, pos.z - c.z).length() < r + HOLE_MARGIN) {
         return (toward(pos - *c), 3, None);
@@ -139,8 +133,8 @@ pub fn captain_steer(heading: f32, pos: Vec3, foe: Vec3, orbit: f32, holes: &[(V
     let bearing = toward(d);
     // Keep the foe on the beam it is already on (+1: the foe lies at bearing - heading = +90°), so the choice never flips.
     let beam = if angdiff(bearing, heading) >= 0.0 { 1.0 } else { -1.0 };
-    let goal = bearing - beam * (PI / 2.0) * (1.0 - ((dist - orbit) / ORBIT_BAND).clamp(-1.0, 1.0));
-    (goal, 3, (dist < 2.0 * orbit).then_some(ORBIT_THROTTLE))
+    let side = Vec3::new(d.z, 0.0, -d.x) / dist.max(1e-3) * beam; // the line of sight turned 90° away from the foe's beam
+    (toward(foe - side * reach - pos), 3, (dist < ORBIT_SLOW * reach).then_some(ORBIT_THROTTLE))
 }
 
 /// Areas captains keep out of, as (centre, radius) for `captain_steer`: black holes and damaging nebulae.
@@ -190,6 +184,7 @@ pub fn ai(
     storms: (Option<Res<crate::nebula::Storms>>, Option<Res<crate::nebula::StormShift>>),
     mut explore: Local<Explore>,
     (time, mut targets): (Res<Time>, ResMut<CaptainTargets>),
+    lib: Res<combat::Library>,
 ) {
     if mission.is_some() {
         return;
@@ -242,7 +237,7 @@ pub fn ai(
         if explore.quadrant.contains_key(&e) {
             s.waypoints.clear(); // contact: drop the exploring course (the quadrant is kept for later)
         }
-        let (goal, order, throttle) = captain_steer(s.heading, tf.translation, foe.1, orbit_radius(e), &holes);
+        let (goal, order, throttle) = captain_steer(s.heading, tf.translation, foe.1, lib.classes[s.class].reach, &holes);
         s.goal = Some(goal);
         s.order = order;
         s.throttle = throttle;
@@ -282,7 +277,7 @@ pub fn step(ship: &mut Ship, tf: &mut Transform, class: &combat::Class, health: 
             want = Some(g);
         }
         if let Some(w) = want {
-            steer = (angdiff(w, ship.heading) * 2.0).clamp(-1.0, 1.0);
+            steer = (angdiff(w, ship.heading) / HELM_FULL).clamp(-1.0, 1.0);
         }
         // Turning follows the original's ship physics (docs/re/movement.md). Assumed mapping (not verified):
         // rudder in [-1,1] is `steer`, and the torque scale is WOT MaxAngularAcceleration.
@@ -1041,13 +1036,6 @@ pub mod movement_tests {
         assert!(ship.order == 3 && ship.speed > 1.0, "speed {}", ship.speed);
     }
     #[test]
-    fn circle_radii_spread_over_the_retail_range() {
-        let r: Vec<f32> = (0..200).map(|i| orbit_radius(Entity::from_raw_u32(i).unwrap())).collect();
-        assert!(r.iter().all(|x| (ORBIT_MIN..=ORBIT_MAX).contains(x)));
-        assert!(r.iter().any(|x| *x < 60.0) && r.iter().any(|x| *x > 105.0), "both ends used");
-    }
-
-    #[test]
     fn exploring_heads_for_quadrant_centres() {
         // retail Carrack, Diablo Strait (half 1625), from (322, -1127): its course (0.27, 0.96) points at quadrant (+x, +y)
         let c = Explore::centre(3, 1625.0);
@@ -1069,57 +1057,58 @@ pub mod movement_tests {
 
     #[test]
     fn captain_runs_in_then_circles_with_the_foe_abeam() {
-        const ORBIT: f32 = 55.0; // the retail Barque's circle
+        const REACH: f32 = 150.0;
         let foe = Vec3::ZERO;
-        // far: straight at the foe at Emergency, no throttle cap
-        let (goal, order, throttle) = captain_steer(0.0, Vec3::new(0.0, 0.0, 400.0), foe, ORBIT, &[]);
-        assert!(angdiff(goal, 0.0).abs() < 1e-5 && order == 3 && throttle.is_none(), "{goal} {order} {throttle:?}");
-        // on the circle: tangent (foe abeam), about MaxSpeed
-        let (goal, _, throttle) = captain_steer(0.3, Vec3::new(0.0, 0.0, ORBIT), foe, ORBIT, &[]);
-        assert!((angdiff(goal, 0.0).abs() - PI / 2.0).abs() < 1e-5 && throttle == Some(ORBIT_THROTTLE));
+        // far: toward a point REACH beside the foe (off the bow by atan(REACH / distance)), Emergency, no throttle cap
+        let (goal, order, throttle) = captain_steer(0.1, Vec3::new(0.0, 0.0, 400.0), foe, REACH, &[]);
+        assert!((angdiff(goal, 0.0).abs() - (REACH / 400.0).atan()).abs() < 1e-4 && order == 3 && throttle.is_none(), "{goal} {throttle:?}");
+        // inside ORBIT_SLOW x REACH: circling throttle
+        let (_, _, throttle) = captain_steer(0.3, Vec3::new(0.0, 0.0, 60.0), foe, REACH, &[]);
+        assert_eq!(throttle, Some(ORBIT_THROTTLE));
         // near a black hole: straight away from it, whatever the foe
-        let (goal, _, _) = captain_steer(0.0, Vec3::new(0.0, 0.0, 150.0), foe, ORBIT, &[(Vec3::new(0.0, 0.0, 300.0), 145.0)]);
+        let (goal, _, _) = captain_steer(0.0, Vec3::new(0.0, 0.0, 150.0), foe, REACH, &[(Vec3::new(0.0, 0.0, 300.0), 145.0)]);
         assert!(angdiff(goal, 0.0).abs() < 1e-5, "bow toward -z, away from the hole: {goal}");
 
-        // A crewed Barque run in from 400 units settles onto a circle with the foe abeam, using the real movement step
-        // (retail held 51-58 units, turning 8.1°/s at 8.2 units/s).
+        // Crewed computer ships run in from 400 units and settle on their tightest circle with the foe abeam, using the real
+        // movement step and their own reach. Retail: Carrack 45-50 units around an idle Cutter, Barque 51-58.
         let lib = combat::Library::load(&crate::assets_dir());
-        let ci = lib.index("Ship_Pirate_Barque");
-        let class = &lib.classes[ci];
-        let h = Health { sections: vec![1.0; class.sections.len()], core: 1.0, destroyed: false };
-        let mut ship = Ship {
-            class: ci,
-            side: Side::Enemy,
-            heading: 0.0,
-            speed: 0.0,
-            ang_vel: 0.0,
-            order: 0,
-            waypoints: vec![],
-            goal: None,
-            cap: 1.0,
-            throttle: None,
-            sail_energy: 1.0,
-            crew_speed: COMPUTER_CREW,
-            crew_turn: COMPUTER_TURN,
-        };
-        let mut tf = Transform::from_xyz(30.0, 0.0, 400.0);
-        let dt = 1.0 / 30.0;
-        let (mut dists, mut beams) = (vec![], vec![]);
-        for i in 0..(150.0 / dt) as usize {
-            let (goal, order, throttle) = captain_steer(ship.heading, tf.translation, foe, ORBIT, &[]);
-            (ship.goal, ship.order, ship.throttle) = (Some(goal), order, throttle);
-            step(&mut ship, &mut tf, class, &h, dt);
-            if i as f32 * dt > 90.0 {
-                let d = foe - tf.translation;
-                dists.push(Vec2::new(d.x, d.z).length());
-                beams.push(angdiff((-d.x).atan2(-d.z), ship.heading).abs());
+        for (name, lo_ok, hi_ok) in [("Ship_Pirate_Carrack", 43.0, 55.0), ("Ship_Pirate_Barque", 48.0, 68.0)] {
+            let ci = lib.index(name);
+            let class = &lib.classes[ci];
+            let h = Health { sections: vec![1.0; class.sections.len()], core: 1.0, destroyed: false };
+            let mut ship = Ship {
+                class: ci,
+                side: Side::Enemy,
+                heading: 0.0,
+                speed: 0.0,
+                ang_vel: 0.0,
+                order: 0,
+                waypoints: vec![],
+                goal: None,
+                cap: 1.0,
+                throttle: None,
+                sail_energy: 1.0,
+                crew_speed: COMPUTER_CREW,
+                crew_turn: COMPUTER_TURN,
+            };
+            let mut tf = Transform::from_xyz(30.0, 0.0, 400.0);
+            let dt = 1.0 / 30.0;
+            let (mut dists, mut beams) = (vec![], vec![]);
+            for i in 0..(200.0 / dt) as usize {
+                let (goal, order, throttle) = captain_steer(ship.heading, tf.translation, foe, class.reach, &[]);
+                (ship.goal, ship.order, ship.throttle) = (Some(goal), order, throttle);
+                step(&mut ship, &mut tf, class, &h, dt);
+                if i as f32 * dt > 120.0 {
+                    let d = foe - tf.translation;
+                    dists.push(Vec2::new(d.x, d.z).length());
+                    beams.push(angdiff((-d.x).atan2(-d.z), ship.heading).abs());
+                }
             }
+            let (lo, hi) = dists.iter().fold((f32::MAX, 0.0f32), |(a, b), d| (a.min(*d), b.max(*d)));
+            // ponytail: the Barque's circle breathes 55-66 (retail 51-58); the throttle switch is a stand-in (ORBIT_SLOW)
+            assert!(lo > lo_ok && hi < hi_ok, "{name}: circle {lo}..{hi}");
+            assert!(beams.iter().all(|b| (b - PI / 2.0).abs() < 0.5), "{name}: foe kept abeam");
         }
-        let (lo, hi) = dists.iter().fold((f32::MAX, 0.0f32), |(a, b), d| (a.min(*d), b.max(*d)));
-        // ponytail: the remake circles wide of retail (59-73 vs 51-58); a narrower blend band oscillates instead. Retail aims at
-        // a point beside the target every tick (docs/re/movement.md); its path follower's rudder rule is not known yet.
-        assert!(lo > 0.9 * ORBIT && hi < 1.35 * ORBIT, "circle {lo}..{hi}");
-        assert!(beams.iter().all(|b| (b - PI / 2.0).abs() < 0.5), "foe kept abeam");
     }
 
     /// Retail Navy Cutter without crew, sampled from the running original (docs/re/movement.md, "Measured").
