@@ -406,9 +406,11 @@ pub fn restart(
 
 pub fn outcome(mut out: ResMut<Outcome>, mut cfg: ResMut<Config>, player: Query<&Health, With<PlayerShip>>, ships: Query<(&Health, &Ship), Without<PlayerShip>>) {
     let enemies = || ships.iter().filter(|(_, s)| s.side == Side::Enemy).map(|(h, _)| h);
-    if campaign::is_mission(cfg.map.as_deref()) {
+    // missions end through their own rules; a decided battle stays decided (the end flow despawns ships, which must not turn a
+    // victory into a defeat)
+    if campaign::is_mission(cfg.map.as_deref()) || *out != Outcome::Playing {
         return;
-    } // missions end through their own rules
+    }
     let new = if player.single().is_err() || player.single().is_ok_and(|h| h.destroyed) {
         Outcome::Defeat
     } else if enemies().count() > 0 && enemies().all(|h| h.destroyed) {
@@ -553,5 +555,28 @@ mod rotation_tests {
                 }
             }
         }
+    }
+
+    /// A won skirmish stays won when the end flow removes the player's ship (it used to flip to DEFEAT two seconds later).
+    #[test]
+    fn decided_outcome_is_final() {
+        use bevy::ecs::system::RunSystemOnce;
+        let mut app = App::new();
+        app.insert_resource(Outcome::Victory).insert_resource(Config {
+            groups: vec![],
+            player: "Ship_Navy_Cutter".into(),
+            allies: vec![],
+            enemies: vec![],
+            map: Some("red_rover".into()),
+            shot: None,
+            frame: 0,
+            speed: 1.0,
+            ended: None,
+            script: None,
+            shot_frame: 0,
+            late_frame: 0,
+        });
+        app.world_mut().run_system_once(outcome).unwrap(); // no PlayerShip left
+        assert!(*app.world().resource::<Outcome>() == Outcome::Victory);
     }
 }

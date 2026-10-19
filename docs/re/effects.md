@@ -227,7 +227,12 @@ to `models/debris/` and `sections[].debris` = {model, pivot}.
   intensity (a damage potential with lower = upper = intensity, no criticals). Fires on a destroyed section die.
   A dead fire stops emitting after 3 s and is removed after 5 more. Burning fires then double in intensity.
 - Effect FireOnShip, its rate/length multipliers = intensity / 20 clamped to [0.1, 1].
-- Remake: PROVISIONAL fire-fighting 0.5 per tick, at most one fire per section.
+- Measured (retail saves of our uncrewed Navy Cutter under fire, Easy, 2026-10): fires start at powers of two (1-64 seen) and
+  untouched ones double exactly every tick (4 -> 64 in four ticks); the strongest fire grew 11.2 -> 273.8 over five ticks, which
+  fits 2 x (intensity - c) with a fire-fighting capacity c = 1.36 per tick (another fire lost 1.1 in one tick). Fires kill:
+  that Cutter burnt to 0 HP on every section. A section can carry several fires at once (five on one section in one save).
+- Remake: fire-fighting 1.36 per tick (PROVISIONAL: crew dependence unknown), at most one fire per section (PROVISIONAL: retail
+  allows several).
 
 ## Black holes (Vortex primitive, spawn, point update; Trail)
 Terrain_BlackHole_* WOTs name a render mesh, a radius, `Magnitude` (pull, not implemented), an ambient sound and a
