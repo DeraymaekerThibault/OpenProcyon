@@ -178,7 +178,7 @@ pub(super) fn panic_target(contacts: &[Contact], tf: &Transform, mount: &crate::
     let to_mount = (tf.rotation * mount.rot).inverse();
     contacts
         .iter()
-        .filter(|c| c.side == Side::Enemy && c.visible)
+        .filter(|c| c.side != Side::Player && c.visible)
         .filter(|c| {
             let offset = c.aim_point - origin;
             let local = to_mount * offset;
@@ -287,13 +287,13 @@ pub(super) fn fire(
             Some(*r) // selected space object (asteroid or whale)
         } else {
             match ship.side {
-                Side::Player => seen.iter().find(|c| primary && Some(c.entity) == target.0 && c.side == Side::Enemy && c.visible).or_else(|| {
+                Side::Player => seen.iter().find(|c| primary && Some(c.entity) == target.0 && c.side != Side::Player && c.visible).or_else(|| {
                     seen.iter()
-                        .filter(|c| !primary && c.side == Side::Enemy && c.visible)
+                        .filter(|c| !primary && c.side != Side::Player && c.visible)
                         .min_by(|a, b| a.aim_point.distance(tf.translation).total_cmp(&b.aim_point.distance(tf.translation)))
                 }),
                 // Skirmish computer ships fire at their captain's target (ship::CaptainTargets); without one, the player ship.
-                Side::Enemy => match captains.as_deref().and_then(|c| c.of(me)) {
+                _ => match captains.as_deref().and_then(|c| c.of(me)) {
                     Some(t) => seen.iter().find(|c| c.entity == t && c.visible),
                     None => seen.iter().find(|c| c.is_player && c.visible),
                 },

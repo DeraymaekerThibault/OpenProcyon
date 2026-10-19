@@ -364,7 +364,7 @@ fn menu(
         .min_by(|a, b| a.1.total_cmp(&b.1));
     let enemy = ships
         .iter()
-        .filter(|(e, _, sh, h)| sh.side == Side::Enemy && !h.destroyed && sensors.player_sees(*e, mission.as_deref()))
+        .filter(|(e, _, sh, h)| sh.side != Side::Player && !h.destroyed && sensors.player_sees(*e, mission.as_deref()))
         .filter_map(|(e, tf, sh, _)| ray_hit(&lib.classes[sh.class], tf, ray).map(|t| (e, t)))
         .min_by(|a, b| a.1.total_cmp(&b.1));
     let own = ray_hit(&lib.classes[player.1.class], player.2, ray);
@@ -569,7 +569,7 @@ fn context_cursor(
             ships.iter().find(|(e, tf, sh, h)| !h.destroyed && sensors.player_sees(*e, mission.as_deref()) && ray_hit(&lib.classes[sh.class], tf, ray).is_some())
         {
             // Retail hover: attack an enemy; any other friendly ship that is not dockable is "can't do anything".
-            if sh.side == Side::Enemy {
+            if sh.side != Side::Player {
                 if fleets.direct() { "Cursor_PrimaryShip_AttackShip" } else { "Cursor_SecondaryShip_AttackShip" }
             } else {
                 "Cursor_Cant_Do_Anything_To_WorldObject_Under_Cursor"

@@ -23,10 +23,15 @@ pub const STOP_SNAP: f32 = 1.0;
 pub const MAX_ROLL: f32 = 0.25;
 pub const ROLL_RATE: f32 = 0.06;
 
-#[derive(Clone, Copy, PartialEq, Debug)]
-pub enum Side {
-    Player,
-    Enemy,
+/// The ship's team: 0 = the human's team, others are computer teams hostile to it and to each other (skirmish maps with three
+/// teams, free-for-all). Ships of different sides fight; `Side::Enemy` is the first (and outside skirmish the only) hostile team.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Side(pub u8);
+
+#[allow(non_upper_case_globals)]
+impl Side {
+    pub const Player: Side = Side(0);
+    pub const Enemy: Side = Side(1);
 }
 
 /// The player's ship when nothing else is chosen (`--ship`, campaign start, synthetic allies): the first retail skirmish ship.
@@ -226,7 +231,7 @@ pub fn ai(
         let foe = chosen.and_then(|(t, _)| snap.iter().find(|f| f.0 == t));
         let Some(foe) = foe else {
             s.goal = None;
-            if s.side != Side::Enemy || explicit.is_some() {
+            if s.side == Side::Player || explicit.is_some() {
                 s.order = 0;
                 continue;
             }

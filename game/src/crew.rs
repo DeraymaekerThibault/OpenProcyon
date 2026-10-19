@@ -268,12 +268,12 @@ fn callouts(
     let mut races = vec![];
     for (e, _, s, h) in &ships {
         match s.side {
-            Side::Enemy => {
+            _ if s.side != Side::Player => {
                 enemies.push((e.to_bits(), world.sensors.player_sees(e, world.mission.as_deref()), h.destroyed));
                 let race = lib.classes[s.class].race.to_lowercase();
                 races.push((e.to_bits(), ["pirate", "navy", "procyon", "civilian"].into_iter().find(|r| race.contains(r)).unwrap_or("")));
             }
-            Side::Player => allies_lost += h.destroyed as usize,
+            _ => allies_lost += h.destroyed as usize,
         }
     }
     let now = time.elapsed_secs();

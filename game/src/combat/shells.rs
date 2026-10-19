@@ -86,8 +86,8 @@ pub(super) struct ShipHit {
 pub(super) fn side_damage_scale(shooter: Side, victim: Side, difficulty: u8) -> f32 {
     let k = [4.0, 2.0, 1.0][difficulty.min(2) as usize];
     match (shooter, victim) {
-        (Side::Player, Side::Enemy) => k,
-        (Side::Enemy, Side::Player) => 1.0 / k,
+        (Side::Player, v) if v != Side::Player => k,
+        (s, Side::Player) if s != Side::Player => 1.0 / k,
         _ => 1.0,
     }
 }

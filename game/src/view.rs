@@ -221,7 +221,7 @@ pub fn input(
             }
             let hit = others
                 .iter()
-                .filter(|(e, _, s, h, m)| s.side == Side::Enemy && !*h && *m && sensors.player_sees(*e, mission.as_deref()))
+                .filter(|(e, _, s, h, m)| s.side != Side::Player && !*h && *m && sensors.player_sees(*e, mission.as_deref()))
                 .filter_map(|(e, tf, s, _, _)| combat::ray_hit(&lib.classes[s.class], tf, ray).map(|t| (*e, t)))
                 .min_by(|a, b| a.1.total_cmp(&b.1));
             let object = objects

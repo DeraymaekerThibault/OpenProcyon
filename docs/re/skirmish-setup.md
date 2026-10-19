@@ -27,7 +27,8 @@ described in our own words.
 
 ## Remake (`menu.rs`: `Slot`, `new_slots`, `offered`, `Skirmish::plan`; `main.rs`: `Group`)
 - Historical map: rows = playable players with their fixed fleet type/team and pre-placed fleets (exported to `ships` in the map
-  JSON); you only choose which player you command (click the name). Players on your team are allies, all others hostile.
+  JSON); you only choose which player you command (click the name). Players on your team are allies, all others hostile;
+  different computer teams also fight each other (The Maw has three teams: Navy, Procyon and Pirates, a three-way battle).
   Assemble Fleet is unavailable.
 - Open map: you, one opponent, the other slots closed. Per slot: take it, open/close it, change fleet type (free-for-all maps)
   or team; on team maps the fleet type follows the team. Fleet size limit 1-8. Your fleet comes from the fleet screen; computer fleets are auto-built.

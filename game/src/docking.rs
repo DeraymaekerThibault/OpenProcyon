@@ -677,7 +677,7 @@ fn ai_repair_dock(
         // Computer players only: skirmish enemies, and mission ships the human does not own; scripted dummies never decide.
         let computer = match (ms, script) {
             (Some(m), Some(sc)) => m.owner != sc.player() && m.stance != crate::rules::Stance::Dummy,
-            _ => ship.side == Side::Enemy,
+            _ => ship.side != Side::Player,
         };
         if h.destroyed || !computer || !needs_repair(&lib, ship, h) {
             continue;
