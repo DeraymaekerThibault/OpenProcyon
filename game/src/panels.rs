@@ -403,7 +403,7 @@ fn update_contacts(
     let contacts: Vec<Vec2> = others
         .iter()
         .filter(|_| on)
-        .filter(|(e, sh, h, _, ms)| sh.side == crate::Side::Enemy && !h.destroyed && ms.is_none_or(|m| m.visible) && sensors.player_sees(*e, mission.as_deref()))
+        .filter(|(e, sh, h, _, ms)| sh.side != crate::Side::Player && !h.destroyed && ms.is_none_or(|m| m.visible) && sensors.player_sees(*e, mission.as_deref()))
         .map(|(_, _, _, tf, _)| {
             let l = inv * (tf.translation - player.translation);
             let v = Vec2::new(l.x, -l.z) / RADAR_RANGE;

@@ -165,11 +165,14 @@ impl Skirmish {
     pub(super) fn hostile(&self, a: &Slot, b: &Slot) -> bool {
         b.kind != Kind::Closed && !(a.team >= 0 && a.team == b.team) && a.player != b.player
     }
-    /// The battle: one group per open slot. Allies (same team as you) fight on our side; everyone else is hostile.
+    /// The battle: one group per open slot. Allies (same team as you) fight on our side; every other team (or teamless slot) is
+    /// its own side, hostile to us and to the others (The Maw: Navy, Procyon and Pirates all fight each other).
     /// Historical maps use their pre-placed ships and positions; open maps use the assembled (or auto-built computer) fleets.
     pub fn plan(&self, lib: &Library) -> Vec<crate::Group> {
         let Some(h) = self.human() else { return vec![] };
         let open = self.open();
+        // Hostile sides in slot order: Enemy for the first hostile team, then Side(2), Side(3), ...
+        let mut foes: Vec<(i32, usize)> = vec![];
         self.slots
             .iter()
             .filter(|s| s.kind != Kind::Closed)
@@ -190,7 +193,16 @@ impl Skirmish {
                 } else {
                     s.fleet.iter().map(|n| (n.clone(), None, None)).collect()
                 };
-                let side = if s.kind == Kind::Human || !self.hostile(h, s) { crate::Side::Player } else { crate::Side::Enemy };
+                let side = if s.kind == Kind::Human || !self.hostile(h, s) {
+                    crate::Side::Player
+                } else {
+                    let key = if s.team >= 0 { (s.team, 0) } else { (-1, s.player) };
+                    let i = foes.iter().position(|k| *k == key).unwrap_or_else(|| {
+                        foes.push(key);
+                        foes.len() - 1
+                    });
+                    crate::Side(1 + i as u8)
+                };
                 crate::Group { player: s.player, side, human: s.kind == Kind::Human, ships, weapons: if open { s.weapons.clone() } else { vec![] } }
             })
             .collect()

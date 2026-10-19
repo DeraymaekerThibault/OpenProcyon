@@ -370,7 +370,7 @@ pub fn debug_kill(keys: Res<ButtonInput<KeyCode>>, cfg: Res<Config>, mut ships: 
             }
             h.sections[1] = 0.0; // stern destroyed: shows the Damage_ swap mesh
         }
-        if (ship.side == Side::Enemy && kill_enemies) || (ship.side == Side::Player && kill_player) {
+        if (ship.side != Side::Player && kill_enemies) || (ship.side == Side::Player && kill_player) {
             h.core = 0.0; // a dev kill stands in for a combat death: combat::deaths reports it and breaks the hull up
         }
     }
@@ -405,7 +405,7 @@ pub fn restart(
 }
 
 pub fn outcome(mut out: ResMut<Outcome>, mut cfg: ResMut<Config>, player: Query<&Health, With<PlayerShip>>, ships: Query<(&Health, &Ship), Without<PlayerShip>>) {
-    let enemies = || ships.iter().filter(|(_, s)| s.side == Side::Enemy).map(|(h, _)| h);
+    let enemies = || ships.iter().filter(|(_, s)| s.side != Side::Player).map(|(h, _)| h);
     // missions end through their own rules; a decided battle stays decided (the end flow despawns ships, which must not turn a
     // victory into a defeat)
     if campaign::is_mission(cfg.map.as_deref()) || *out != Outcome::Playing {

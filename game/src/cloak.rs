@@ -90,7 +90,7 @@ fn fade(
         }
         // A cloaked enemy disappears from the player's view; the player's own cloaked ships stay drawn (with the shimmer).
         let script_visible = ms.is_none_or(|m| m.visible);
-        let want = if !script_visible || (ship.side == Side::Enemy && c.hidden()) { Visibility::Hidden } else { Visibility::Inherited };
+        let want = if !script_visible || (ship.side != Side::Player && c.hidden()) { Visibility::Hidden } else { Visibility::Inherited };
         vis.set_if_neq(want);
     }
 }

@@ -772,6 +772,13 @@ mod tests {
         );
     }
     #[test]
+    fn three_team_historical_map_is_a_three_way_battle() {
+        // The Maw: Navy, Procyon and Pirates are three teams; the two computer fleets are hostile to each other as well.
+        let lib = Library::load(&assets_dir());
+        let sides: Vec<_> = skirmish("the_maw").plan(&lib).iter().map(|g| g.side).collect();
+        assert_eq!(sides, [crate::Side::Player, crate::Side::Enemy, crate::Side(2)]);
+    }
+    #[test]
     fn open_map_locks_fleet_type_to_team_and_needs_a_fleet() {
         let mut sk = skirmish("red_rover");
         assert_eq!((sk.slots[0].race, sk.slots[1].race), (0, 2));
