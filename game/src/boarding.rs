@@ -27,12 +27,16 @@ const BASE_SPEED: f32 = 2.0;
 /// Casualty interval: (9 + 1.5·r) / (2·weaker strength) seconds.
 const TICK_BASE: f32 = 9.0;
 const TICK_SPREAD: f32 = 1.5;
-/// The harpoon's longest reach and speed (Gun_Harpoon_Light), and the winch that closes the hulls (PROVISIONAL numbers).
+/// The harpoon's longest reach and speed (Gun_Harpoon_Light; PROVISIONAL numbers).
 const HARPOON_RANGE: f32 = 100.0;
 const HARPOON_SPEED: f32 = 45.0;
-const WINCH_GAP: f32 = 2.0;
-const WINCH_SPEED: f32 = 5.0;
-const WINCH_RATE: f32 = 2.0;
+/// A grapple snaps when the ships' centres get this much further apart than when the hook bit.
+const GRAPPLE_SLACK: f32 = 2.0;
+/// While a boarding is registered on the grapple the line is reeled in at this speed, down to this centre distance.
+const REEL_SPEED: f32 = 3.0;
+const REEL_MIN: f32 = 12.0;
+/// PROVISIONAL: how quickly the reel brings the ships' closing speed to `REEL_SPEED` (1/s); the original's rope physics is not ported.
+const REEL_RATE: f32 = 2.0;
 
 /// WOT 'Crew Skill Level'. The per-man combat ability is the generic crew's (Crew_General_*: 1, 3, 4 of 10).
 /// PROVISIONAL: 'Players' (the campaign roster) uses Average, and the captains' leadership bonus is not applied.
@@ -252,6 +256,21 @@ pub fn friendly_share(boarder: &Strength, target: &Strength, target_friendly: bo
 pub struct Grapple {
     target: Entity,
     flight: f32,
+    /// Centre distance when the hook bit (0 until then).
+    span: f32,
+    /// Per end (grappler, target): the hull axis the other ship lay along when the hook bit, pointing toward it.
+    sides: [Vec3; 2],
+}
+impl Grapple {
+    fn new(target: Entity, flight: f32) -> Self {
+        Grapple { target, flight, span: 0.0, sides: [Vec3::ZERO; 2] }
+    }
+}
+
+/// The hull axis (local bow-stern or beam, signed) closest to the direction toward `other`: "grappled on the front" or "on the side".
+fn side_of(tf: &Transform, other: Vec3) -> Vec3 {
+    let d = tf.rotation.inverse() * (other - tf.translation);
+    if d.z.abs() >= d.x.abs() { Vec3::Z * d.z.signum() } else { Vec3::X * d.x.signum() }
 }
 /// The Grapple order: steer for `target` until it is inside harpoon range, then fire.
 #[derive(Component)]
@@ -318,14 +337,46 @@ fn status(boarders: Boarders, mut st: ResMut<BoardStatus>, ships: Query<Entity, 
 }
 
 pub fn plugin(app: &mut App) {
-    app.add_message::<BoardMsg>().add_message::<Captured>().add_message::<Settled>().init_resource::<BoardStatus>().add_systems(
+    app.add_message::<BoardMsg>().add_message::<Captured>().add_message::<Settled>().init_resource::<BoardStatus>().init_resource::<Ropes>().add_systems(
         Update,
-        (dev_board, handle_messages, set_flags, grapple_orders, winch, ai_boarding, fights, settled, status)
+        (dev_board, handle_messages, set_flags, grapple_orders, winch, ai_boarding, fights, settled, status, ropes)
             .chain()
             .before(crate::input)
             .run_if(in_state(crate::menu::Screen::Battle))
             .run_if(crate::menu::overlay_closed),
     );
+}
+
+/// The lines between ships, for views to draw (the original's Rope effect): world end points and how much longer than the gap the
+/// line is (its slack).
+#[derive(Resource, Default)]
+pub struct Ropes(pub Vec<(Vec3, Vec3, f32)>);
+
+/// Bitten grapples run from the grappler's harpoon mount to the target's nearest boarding point (the hull centre without one), slack
+/// by how much the centres closed since the hook bit; tows run taut from the tower's stern tow point to the towee's bow.
+/// PROVISIONAL: the original's attachment points on the target are not decoded.
+fn ropes(
+    mut out: ResMut<Ropes>,
+    lib: Res<Library>,
+    mission: Option<Res<Mission>>,
+    hooks: Query<(Entity, &Grapple)>,
+    ships: Query<(&Ship, &Transform, &Health, Option<&crate::combat::GunStates>, Option<&Boardable>)>,
+) {
+    out.0.clear();
+    for (e, g) in &hooks {
+        let (Ok((ship, tf, health, guns, _)), Ok((_, ttf, _, _, tb))) = (ships.get(e), ships.get(g.target)) else { continue };
+        if g.flight > 0.0 {
+            continue;
+        }
+        let from = harpoons(&lib, ship, health, guns).next().map_or(tf.translation, |(m, _)| tf.transform_point(m.pos));
+        let to = tb.into_iter().flat_map(|b| &b.points).map(|p| ttf.transform_point(*p)).min_by(|a, b| a.distance(from).total_cmp(&b.distance(from))).unwrap_or(ttf.translation);
+        out.0.push((from, to, (g.span - tf.translation.distance(ttf.translation)).max(0.0)));
+    }
+    for &(tower, towee) in mission.as_deref().map_or(&[][..], |m| m.script.tows()) {
+        if let (Ok((a, ta, ..)), Ok((b, tb, ..))) = (ships.get(tower), ships.get(towee)) {
+            out.0.push((ta.transform_point(lib.classes[a.class].tow_points[0]), tb.transform_point(lib.classes[b.class].tow_points[1]), 0.0));
+        }
+    }
 }
 
 type Body<'a> = (&'a Transform, Option<&'a Ship>, Option<&'a Drift>);
@@ -457,15 +508,7 @@ fn end_fight(commands: &mut Commands, e: Entity, fx: &[Entity]) {
     commands.entity(e).remove::<Boarding>();
 }
 
-fn handle_messages(
-    mut msgs: MessageReader<BoardMsg>,
-    mut commands: Commands,
-    assets: Option<Res<AssetServer>>,
-    fxl: Option<Res<FxLib>>,
-    mut rng: ResMut<Rng>,
-    mut sfx: MessageWriter<Sfx>,
-    boarders: Boarders,
-) {
+fn handle_messages(mut msgs: MessageReader<BoardMsg>, mut commands: Commands, assets: Option<Res<AssetServer>>, mut rng: ResMut<Rng>, boarders: Boarders) {
     let me = boarders.me();
     for m in msgs.read() {
         match *m {
@@ -474,33 +517,10 @@ fn handle_messages(
                 if !boarders.can_board(b, target) {
                     continue;
                 }
-                let (Ok((bb, bt)), Ok((tb, tt))) = (boarders.bodies.get(b), boarders.bodies.get(target)) else { continue };
+                let (Ok((_, bt)), Ok((_, tt))) = (boarders.bodies.get(b), boarders.bodies.get(target)) else { continue };
                 let tick = interval(&bt.strength, &tt.strength, rng.f());
-                // The fight effect plays on every boarding point of the target.
-                let fx = fxl.as_ref().map_or(vec![], |fxl| {
-                    tt.points
-                        .iter()
-                        .filter_map(|p| {
-                            let local = Transform::from_translation(*p);
-                            crate::fx::spawn(&mut commands, fxl, "Boarding_Fight", Some(target), local, *tb.0 * local, false)
-                        })
-                        .collect()
-                });
                 info!("boarding: {b} boards {target} (attack {} against defend {}, a casualty every {tick:.2}s)", bt.strength.attack, tt.strength.defend);
-                sfx.write(Sfx { name: "Ship_Boarding_Party".into(), at: Some(bb.0.translation), vol: 1.0, max: 600.0 });
-                commands.entity(b).insert(Boarding { target, interval: tick, since: 0.0, live: false, fx });
-                let line = if Some(b) == me {
-                    Some(if tb.1.is_some() { "boarding_party" } else { "landing_party" })
-                } else if Some(target) == me {
-                    Some("repell_boarders")
-                } else if tb.1.is_some_and(|s| s.side == Side::Player) {
-                    Some("own_ship_boarded")
-                } else {
-                    None
-                };
-                if let Some(line) = line {
-                    say(&mut commands, assets.as_deref(), line, rng.f());
-                }
+                commands.entity(b).insert(Boarding { target, interval: tick, since: 0.0, live: false, fx: vec![] });
             }
             BoardMsg::Unboard { boarder } => {
                 let Some(b) = boarder.or(me) else { continue };
@@ -568,7 +588,7 @@ fn grapple_orders(
             ship.waypoints.clear();
             ship.order = 0;
             ship.goal = None;
-            commands.entity(e).remove::<GrappleOrder>().insert(Grapple { target: order.0, flight: (surface / HARPOON_SPEED).max(0.1) });
+            commands.entity(e).remove::<GrappleOrder>().insert(Grapple::new(order.0, (surface / HARPOON_SPEED).max(0.1)));
             sfx.write(Sfx { name: "Weapon_GrapHarpoon_Fire".into(), at: Some(tf.translation), vol: 0.7, max: 600.0 });
         } else {
             ship.waypoints = vec![ttf.translation];
@@ -591,11 +611,22 @@ fn grapple_orders(
     }
 }
 
-/// The winch: a bitten grapple drags the two hulls together and evens out their velocities (momentum kept), until their surfaces are a
-/// couple of units apart. A grapple on a destroyed or vanished ship is let go.
-fn winch(mut commands: Commands, time: Res<Time>, lib: Res<Library>, hooks: Query<(Entity, &Grapple)>, mut ships: Query<(&mut Ship, &Transform, &mut Drift, &Health)>) {
+/// A bitten grapple does not tow: the ships sail freely and the line snaps when their centres get `GRAPPLE_SLACK` further apart than
+/// when the hook bit. Only while a boarding is registered on the pair is the line reeled in (`REEL_SPEED`, down to `REEL_MIN`), so a
+/// ship that pulls away hard enough still breaks free. A grapple on a destroyed or vanished ship is let go.
+/// It also snaps when either ship's partner crosses to the other side of the hull it was grappled on.
+/// PROVISIONAL: the original also lets go when the ships become allied.
+fn winch(
+    mut commands: Commands,
+    time: Res<Time>,
+    lib: Res<Library>,
+    mut sfx: MessageWriter<Sfx>,
+    mut hooks: Query<(Entity, &mut Grapple)>,
+    fighters: Query<(Entity, &Boarding)>,
+    mut ships: Query<(&mut Ship, &Transform, &mut Drift, &Health)>,
+) {
     let dt = time.delta_secs().min(crate::MAX_SIM_STEP);
-    for (e, g) in &hooks {
+    for (e, mut g) in &mut hooks {
         if g.flight > 0.0 {
             continue;
         }
@@ -607,12 +638,33 @@ fn winch(mut commands: Commands, time: Res<Time>, lib: Res<Library>, hooks: Quer
             commands.entity(e).remove::<Grapple>();
             continue;
         }
-        let (ca, cb) = (&lib.classes[a.class], &lib.classes[b.class]);
         let axis = (btf.translation - atf.translation).with_y(0.0);
-        let n = axis.normalize_or_zero();
+        let distance = axis.length();
+        if g.span <= 0.0 {
+            g.span = distance;
+            g.sides = [side_of(atf, btf.translation), side_of(btf, atf.translation)];
+        }
+        // PROVISIONAL: the axis is the nearer of bow-stern and beam; the original picks it from the hull's proportions.
+        let crossed = |tf: &Transform, other: Vec3, side: Vec3| (tf.rotation * side).dot(other - tf.translation) <= 0.0;
+        if distance > g.span + GRAPPLE_SLACK || crossed(atf, btf.translation, g.sides[0]) || crossed(btf, atf.translation, g.sides[1]) {
+            info!("grapple: {e} loses {} (centres {distance:.1} apart, bit at {:.1})", g.target, g.span);
+            sfx.write(Sfx { name: "rope_break_placeholder".into(), at: Some(atf.translation.lerp(btf.translation, 0.5)), vol: 1.0, max: 600.0 });
+            commands.entity(e).remove::<Grapple>();
+            continue;
+        }
+        let boarding = fighters.iter().any(|(f, fight)| (f == e && fight.target == g.target) || (f == g.target && fight.target == e));
+        if !boarding || distance <= REEL_MIN {
+            continue;
+        }
+        // Bring the closing speed along the line up to the reel's, mass-weighted (momentum kept).
+        let (ca, cb) = (&lib.classes[a.class], &lib.classes[b.class]);
+        let n = axis / distance.max(1e-3);
         let (va, vb) = (atf.rotation * Vec3::NEG_Z * a.speed + da.0, btf.rotation * Vec3::NEG_Z * b.speed + db.0);
-        let closing = ((axis.length() - ca.radius - cb.radius - WINCH_GAP) * 0.5).clamp(0.0, WINCH_SPEED);
-        let dv = (-n * closing - (vb - va)) * (1.0 - (-WINCH_RATE * dt).exp());
+        let opening = (vb - va).dot(n);
+        if opening <= -REEL_SPEED {
+            continue;
+        }
+        let dv = n * (-REEL_SPEED - opening) * (1.0 - (-REEL_RATE * dt).exp());
         let (ia, ib) = (1.0 / ca.phys.mass, 1.0 / cb.phys.mass);
         crate::collision::set_velocity(&mut a, &mut da, va - dv * (ia / (ia + ib)));
         crate::collision::set_velocity(&mut b, &mut db, vb + dv * (ib / (ia + ib)));
@@ -667,7 +719,7 @@ fn ai_boarding(
         {
             let surface = tf.translation.distance(ttf.translation) - lib.classes[ship.class].radius - lib.classes[tship.class].radius;
             if attacked.contains(&(t, e)) && boarders.can_grapple(e) && harpoon_bears(&lib, ship, health, guns, tf, ttf.translation) && rng.f() < per_tick(AI_HARPOON_CHANCE, dt) {
-                commands.entity(e).insert(Grapple { target: t, flight: (surface.max(0.0) / HARPOON_SPEED).max(0.1) });
+                commands.entity(e).insert(Grapple::new(t, (surface.max(0.0) / HARPOON_SPEED).max(0.1)));
                 sfx.write(Sfx { name: "Weapon_GrapHarpoon_Fire".into(), at: Some(tf.translation), vol: 0.7, max: 600.0 });
             }
             if strong && boarders.can_board(e, t) && rng.f() < per_tick(AI_BOARD_CHANCE, dt) {
@@ -692,6 +744,8 @@ fn fights(
     lib: Res<Library>,
     mut rng: ResMut<Rng>,
     assets: Option<Res<AssetServer>>,
+    fxl: Option<Res<FxLib>>,
+    mut sfx: MessageWriter<Sfx>,
     mission: Option<Res<Mission>>,
     mut settled: MessageWriter<Settled>,
     mut fighters: Query<(Entity, &mut Boarding)>,
@@ -724,7 +778,32 @@ fn fights(
         if !near {
             continue;
         }
-        f.live = true;
+        if !f.live {
+            // The crews meet: the fight effect plays on every boarding point of the target, and the first mates speak.
+            f.live = true;
+            f.fx = fxl.as_ref().map_or(vec![], |fxl| {
+                ti.3.points
+                    .iter()
+                    .filter_map(|p| {
+                        let local = Transform::from_translation(*p);
+                        crate::fx::spawn(&mut commands, fxl, "Boarding_Fight", Some(t), local, *ti.0 * local, false)
+                    })
+                    .collect()
+            });
+            sfx.write(Sfx { name: "Ship_Boarding_Party".into(), at: Some(bi.0.translation), vol: 1.0, max: 600.0 });
+            let line = if Some(b) == me {
+                Some(if ti.1.is_some() { "boarding_party" } else { "landing_party" })
+            } else if Some(t) == me {
+                Some("repell_boarders")
+            } else if ti.1.is_some_and(|s| s.side == Side::Player) {
+                Some("own_ship_boarded")
+            } else {
+                None
+            };
+            if let Some(line) = line {
+                say(&mut commands, assets.as_deref(), line, rng.f());
+            }
+        }
         f.since += dt;
         if f.since < f.interval {
             continue;
@@ -1013,18 +1092,26 @@ mod tests {
             let r = |e: Entity| lib.classes[app.world().get::<Ship>(e).unwrap().class].radius;
             app.world().get::<Transform>(me).unwrap().translation.distance(app.world().get::<Transform>(foe).unwrap().translation) - r(me) - r(foe)
         };
+        while app.world().get::<Grapple>(me).is_some_and(|g| g.flight > 0.0) {
+            tick(&mut app, 0.1);
+        }
+        let bit = surface(&app);
+        for _ in 0..20 {
+            tick(&mut app, 0.1);
+        }
+        assert!((surface(&app) - bit).abs() < 0.5, "a grapple alone does not reel the ships together");
+        assert!(app.world().resource::<BoardStatus>().board(foe).1, "grappled: Board enabled");
+        app.world_mut().write_message(BoardMsg::Board { boarder: None, target: foe });
+        tick(&mut app, 0.1);
+        assert!(app.world().get::<Boarding>(me).is_some_and(|f| f.target() == foe && !f.live()), "fight registered, crews not yet across");
+        assert_eq!(app.world().resource::<BoardStatus>().board(foe), (true, true), "Board shows Stop");
         for _ in 0..600 {
             tick(&mut app, 0.1);
-            if surface(&app) < SHIP_RANGE * 0.8 {
+            if app.world().get::<Boarding>(me).is_some_and(|f| f.live()) {
                 break;
             }
         }
-        assert!(surface(&app) < SHIP_RANGE, "the winch closed the hulls (surface {})", surface(&app));
-        assert!(app.world().resource::<BoardStatus>().board(foe).1, "grappled and winched together: Board enabled");
-        app.world_mut().write_message(BoardMsg::Board { boarder: None, target: foe });
-        tick(&mut app, 0.1);
-        assert!(app.world().get::<Boarding>(me).is_some_and(|f| f.target() == foe), "fight started");
-        assert_eq!(app.world().resource::<BoardStatus>().board(foe), (true, true), "Board shows Stop");
+        assert!(surface(&app) < SHIP_RANGE, "the registered boarding reeled the hulls together (surface {})", surface(&app));
         for _ in 0..200 {
             tick(&mut app, 0.1);
         }
@@ -1049,7 +1136,7 @@ mod tests {
         let foe = spawn(&mut app, "Ship_Pirate_Schooner", Side::Enemy, Vec3::new(0.0, 0.0, -14.0), Skill::Average);
         tick(&mut app, 0.1);
         assert!(!app.world().resource::<BoardStatus>().board(foe).1, "close, but not grappled");
-        app.world_mut().entity_mut(me).insert(Grapple { target: foe, flight: 0.0 });
+        app.world_mut().entity_mut(me).insert(Grapple::new(foe, 0.0));
         tick(&mut app, 0.1);
         assert!(app.world().resource::<BoardStatus>().board(foe).1);
         app.world_mut().write_message(BoardMsg::Board { boarder: None, target: foe });
@@ -1060,9 +1147,37 @@ mod tests {
         tick(&mut app, 0.1);
         assert!(app.world().get::<Boarding>(me).is_none(), "no grapple, no fight");
         app.world_mut().get_mut::<Boardable>(foe).unwrap().on = false;
-        app.world_mut().entity_mut(me).insert(Grapple { target: foe, flight: 0.0 });
+        app.world_mut().entity_mut(me).insert(Grapple::new(foe, 0.0));
         tick(&mut app, 0.1);
         assert!(!app.world().resource::<BoardStatus>().board(foe).1, "a ship that is not Boardable cannot be boarded");
+    }
+
+    #[test]
+    fn a_grapple_does_not_hold_the_ships_and_snaps_when_they_pull_apart() {
+        let mut app = app();
+        let me = spawn(&mut app, "Ship_Navy_Cutter", Side::Player, Vec3::ZERO, Skill::Average);
+        app.world_mut().entity_mut(me).insert(PlayerShip);
+        let foe = spawn(&mut app, "Ship_Pirate_Schooner", Side::Enemy, Vec3::new(0.0, 0.0, -40.0), Skill::Average);
+        app.world_mut().entity_mut(foe).insert(Grapple::new(me, 0.0));
+        tick(&mut app, 0.1);
+        app.world_mut().get_mut::<Ship>(me).unwrap().speed = 4.0; // we sail on, bow (-Z) toward the schooner's side
+        tick(&mut app, 0.1);
+        assert!(app.world().get::<Ship>(me).unwrap().speed > 3.9, "the grapple neither stops nor drags us");
+        app.world_mut().get_mut::<Ship>(me).unwrap().speed = -4.0; // and away again
+        for _ in 0..20 {
+            tick(&mut app, 0.1);
+        }
+        assert!(app.world().get::<Grapple>(foe).is_none(), "pulled more than 2 units past its length: the line snapped");
+        // Grappled on our bow, the schooner circles round to our stern: the line snaps.
+        app.world_mut().get_mut::<Ship>(me).unwrap().speed = 0.0;
+        app.world_mut().get_mut::<Transform>(me).unwrap().translation = Vec3::ZERO;
+        app.world_mut().get_mut::<Transform>(foe).unwrap().translation = Vec3::new(0.0, 0.0, -30.0);
+        app.world_mut().entity_mut(foe).insert(Grapple::new(me, 0.0));
+        tick(&mut app, 0.1);
+        assert!(app.world().get::<Grapple>(foe).is_some());
+        app.world_mut().get_mut::<Transform>(foe).unwrap().translation = Vec3::new(5.0, 0.0, 25.0);
+        tick(&mut app, 0.1);
+        assert!(app.world().get::<Grapple>(foe).is_none(), "crossed to the other side of our hull: the line snapped");
     }
 
     /// The computer's harpoon test against the retail runs (docs/re/boarding.md §5): a Barque's beam harpoons reach a ship on its
