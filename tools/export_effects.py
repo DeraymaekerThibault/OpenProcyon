@@ -48,6 +48,7 @@ EXTRAS = [
     "Repair_Tender",
     "Boarding_Fight",
     "GrapplingHarpoon_Light_Trail",
+    "Rope",  # grapple and tow lines
     # Mission rule effects (Create/Release Event Effect).
     "MoonFish",
     "BottleRocket_Light_Impact",

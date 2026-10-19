@@ -121,7 +121,7 @@ fn fleet_model(
     mut model: ResMut<FleetHud>,
     lib: Res<Library>,
     mission: Option<Res<crate::campaign::Mission>>,
-    ships: Query<(&Ship, &combat::Health, Option<&crate::ShipName>, Option<&crate::campaign::MissionShip>, Option<&crate::docking::Docker>, Has<crate::boarding::Boarding>)>,
+    ships: Query<(&Ship, &combat::Health, Option<&crate::ShipName>, Option<&crate::campaign::MissionShip>, Option<&crate::docking::Docker>, Option<&crate::boarding::Boarding>)>,
     pilots: Query<&crate::ship::FleetPilot>,
     maps: Query<(), With<crate::starmap::Starmap>>,
     fights: Query<&crate::boarding::Boarding>,
@@ -137,7 +137,7 @@ fn fleet_model(
             health: ((h.core.max(0.0) + h.sections.iter().map(|hp| hp.max(0.0)).sum::<f32>()) / total.max(1.0)).clamp(0.0, 1.0),
             status: if dock.is_some() {
                 "Docking"
-            } else if board || fights.iter().any(|f| f.target() == e) {
+            } else if board.is_some_and(|f| f.live()) || fights.iter().any(|f| f.live() && f.target() == e) {
                 "Boarding"
             } else {
                 ""
@@ -332,7 +332,7 @@ fn update_docking_status(
     time: Res<Time>,
     hud: Res<HudData>,
     assets: Res<AssetServer>,
-    player: Query<(Entity, Option<&crate::docking::Docker>, Has<crate::boarding::Boarding>), With<PlayerShip>>,
+    player: Query<(Entity, Option<&crate::docking::Docker>, Option<&crate::boarding::Boarding>), With<PlayerShip>>,
     fights: Query<&crate::boarding::Boarding>,
     mut frames: Local<Option<(&'static str, [Vec<(Handle<Image>, Rect)>; 2])>>,
     mut icons: Query<(&mut ImageNode, &mut Visibility), With<DockingStatus>>,
@@ -346,7 +346,7 @@ fn update_docking_status(
         return;
     }
     let docking = player.iter().any(|p| p.1.is_some_and(|d| d.shows_status()));
-    let boarding = player.iter().any(|p| p.2 || fights.iter().any(|f| f.target() == p.0));
+    let boarding = player.iter().any(|p| p.2.is_some_and(|f| f.live()) || fights.iter().any(|f| f.live() && f.target() == p.0));
     let set = if docking || boarding_art.is_empty() || !boarding { docking_art } else { boarding_art };
     let (image, rect) = &set[(time.elapsed_secs() * DOCKING_FPS) as usize % set.len()];
     for (mut img, mut vis) in &mut icons {

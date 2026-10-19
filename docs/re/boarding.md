@@ -94,6 +94,20 @@ human's command ship) runs it every tick against its current target, without any
   only grapples a target that has fired at it. Neither is observed directly.
 - Remake: `boarding::ai_boarding` (skirmish enemies their captain's target, `ship::CaptainTargets`; mission ships the rules' target, the
   player's other ships their pilot's target); the line-of-fire skip is not modelled.
+**The grapple line.** A harpoon hit links the two ships; the link remembers the centre distance at that moment. The link itself
+does not tow or slow either ship. Each frame it is let go (rope-break sound `rope_break_placeholder` at the midpoint) when:
+- the ships' centres are more than **2** units further apart than when the hook bit;
+- the two players become allied;
+- the partner crosses to the other side of the hull: at the hit each end records whether the other ship lay mostly ahead/astern
+  or abeam, and on which side, and the link breaks when that side changes.
+Once a boarding fight is registered on the pair (the grapple's "boarding" mark, §3), the line is **reeled in**: each AI tick
+(1/30 s) its length becomes the current centre distance minus 0.1 (**3 units/s**), while it is longer than **12**. A computer
+captain's fight registered out of range is dropped by the range test but its mark keeps reeling **[?]**, which would explain how
+grapple passes end with the hulls together (retail run: a Barque closed to 12-18 units on its passes before capturing us).
+The line is drawn with the `Rope` effect: a 40-segment chain (each point mass 1, segment rest length = the gap at the hit / 40) whose
+two end points are pinned to the ships every frame and that carries a constant force; texture `rope.tga`, segment width 0.1,
+texture repeat every 2 units, alpha blended. Tow links use the same effect between the tow points.
+
 Grapples are weapon hits: the harpoon guns (`Gun_Harpoon_Light`, bullet `Bullet_Harpoon`/GrapplingHarpoon, sound `Weapon_GrapHarpoon_*`) of the Navy
 cutter, frigate, man-o-war, sloop, tug and most pirate hulls; the link ("Grapple Type": front / right side) holds the two ships together.
 
@@ -116,7 +130,10 @@ the menu slots (Board / Grapple start and stop); range test; capture (new owner 
 `Player Vs Player capture count` / `Team has captured a ship from Group/Unit` / `Set Group/Unit Boardable`; Setup Ship `Boardable` + `Crew Skill Level`, Setup
 Island `Combat Strength`; fight effect on the target's boarding nodes, fight sound, first-mate lines, the status bar and the status icon.
 PROVISIONAL: no leadership bonus and no per-man crews (generic crew values); `Players` = Average; the harpoon is not a projectile (the order closes to
-100 units, stops and the hook bites after distance / 45 s) and harpoon guns no longer fire at will; one grapple per ship; the winch (drags grappled
-hulls together at ≤ 5 u/s and evens out their velocities); a Board order on a grappled ship waits for the hulls to close instead of failing at once;
+100 units, stops and the hook bites after distance / 45 s) and harpoon guns no longer fire at will; one grapple per ship; the grapple line as
+above (no tow, snaps 2 units past its bite distance, reels in at 3 u/s to 12 while a fight is registered; the reel acts on the ships'
+velocities at a rate of our choosing, the allied break is not modelled and the side test takes the nearer of the bow-stern and beam axes); a Board order on a grappled ship waits for
+the hulls to close instead of failing at once, and the fight effect, crew lines and HUD status start only when the crews meet; the rope is a
+sagging ribbon, not a simulated chain (`classic/ropes.rs`);
 computer ships grapple and board their target on their own (§5, `ai_boarding`; reach and attacked-first gate PROVISIONAL); bases are boarded only by AI ships (a hostile non-Dummy mission ship in reach of a base whose rules made it Boardable), not from the menu; status bar
 placement and colours; effect placement (the original's extra main effect is not created); no grapple-break on tension.

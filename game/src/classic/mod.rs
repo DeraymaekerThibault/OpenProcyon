@@ -8,6 +8,7 @@ pub mod menu;
 mod mission_ui;
 pub mod options_menu;
 pub mod panels;
+mod ropes;
 mod ship_preview;
 mod starmap;
 mod world_hud;
@@ -23,5 +24,6 @@ pub fn plugin(app: &mut App) {
         starmap::plugin,
         world_hud::plugin,
         mission_ui::plugin,
+        ropes::plugin,
     ));
 }
