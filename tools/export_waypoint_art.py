@@ -3,6 +3,7 @@
 usage: python3 tools/export_waypoint_art.py <game root> <assets dir>"""
 
 import glob
+import os
 import sys
 
 import numpy as np
@@ -10,7 +11,7 @@ from PIL import Image
 
 root, out = sys.argv[1:3]
 for f in glob.glob(root + "/BD_Textures/HUD_Waypoint*.dds"):
-    name = f.split("/")[-1][:-4].lower()
+    name = os.path.basename(f)[:-4].lower()
     im = Image.open(f).convert("RGBA")
     if name != "hud_waypointline2":
         a = np.array(im).astype(np.float32)

@@ -26,7 +26,7 @@ mkdir -p "$OUT"/models/{ships,sky,scenery,ui}
 SHIPS=()
 for s in "${WANT[@]}"; do
   if err=$(python3 -m tools.export_combat "$PROCYON_GAME_ROOT" "$s" "$OUT/$s.json" 2>&1 >/dev/null); then
-    scene=$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["scene"])' "$OUT/$s.json")
+    scene=$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["scene"])' "$OUT/$s.json" | tr -d '\r')
     [ -f "$OUT/models/ships/$scene.glb" ] || python3 -m tools.mdb_to_glb "$PROCYON_GAME_ROOT" "$scene" "$OUT/models/ships/$scene.glb" || { rm -f "$OUT/$s.json"; echo "skip $s (no mesh)"; continue; }
     SHIPS+=("$s")
   else
@@ -73,7 +73,7 @@ python3 -m tools.export_campaign_media "$PROCYON_GAME_ROOT" "$OUT"
 python3 -m tools.export_crew "$PROCYON_GAME_ROOT" "$OUT"
 python3 -m tools.export_voices copy "$PROCYON_GAME_ROOT" "$OUT"  # crew lines named by content/voice/events.json
 # Campaign may append classes when a custom ship list was supplied.
-mapfile -t SHIP_JSON < <(python3 -c 'import json, os; [print(os.path.join(os.environ["OUT"], s + ".json")) for s in json.load(open(os.path.join(os.environ["OUT"], "ships.json")))]')
+mapfile -t SHIP_JSON < <(python3 -c 'import json, os; [print(os.path.join(os.environ["OUT"], s + ".json")) for s in json.load(open(os.path.join(os.environ["OUT"], "ships.json")))]' | tr -d '\r')  # Windows Python prints CRLF
 python3 -m tools.export_effects "$PROCYON_GAME_ROOT" "$OUT" "${SHIP_JSON[@]}"
 # Final step: split the raw per-ship exports into the editable data/ layout (docs/data-format.md).
 python3 -m tools.pack_data "$OUT"
