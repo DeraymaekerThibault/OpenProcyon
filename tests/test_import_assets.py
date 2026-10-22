@@ -36,9 +36,13 @@ class ImportAssets(unittest.TestCase):
             def fail():
                 raise import_assets.StepFailed("tools.export_hud")
 
-            def fake_steps(root, out, want):
+            def fake_steps(root, out, want, part):
                 ran.append(want)
-                return [("one", lambda: None), ("two", fail), ("three", ran.clear)]
+                return [
+                    ("one", lambda: part(0, 2)),
+                    ("two", fail),
+                    ("three", ran.clear),
+                ]
 
             printed = io.StringIO()
             with (
@@ -50,11 +54,31 @@ class ImportAssets(unittest.TestCase):
                     ["--game", str(Path(d, "game")), "--out", str(Path(d, "out"))]
                 )
             self.assertEqual(
-                printed.getvalue().splitlines(), ["[1/3] one", "[2/3] two"]
+                printed.getvalue().splitlines(),
+                ["[1/3] one (0%)", "[1/3] one: 1/2 (0%)", "[2/3] two (33%)"],
             )
             self.assertIn("'two'", str(e.exception.code))
             # The curated skirmish ships come first, then every other hull in the install.
             self.assertEqual(ran, [[*import_assets.FIRST, "Ship_Extra"]])
+
+    def test_percent_follows_step_weights_and_parts(self):
+        progress = import_assets.Progress()
+        progress.names = ["ships", "hud", "maps"]  # weights 31, 1, 10 of 42
+        printed = io.StringIO()
+        with contextlib.redirect_stdout(printed):
+            progress.step(1)
+            progress.part(35, 71)
+            progress.step(2)
+            progress.step(3)
+        self.assertEqual(
+            printed.getvalue().splitlines(),
+            [
+                "[1/3] ships (0%)",
+                "[1/3] ships: 36/71 (36%)",
+                "[2/3] hud (73%)",
+                "[3/3] maps (76%)",
+            ],
+        )
 
     def test_steps_run_in_process_with_their_own_argv(self):
         # The frozen importer has no Python to start, so tool() runs `python -m <module>` in this process.

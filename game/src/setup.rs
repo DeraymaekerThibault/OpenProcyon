@@ -24,8 +24,9 @@ const LOG_LINES: usize = 200;
 pub enum Phase {
     /// Picking the install folder.
     Choose,
-    /// The importer runs; `step` of `total` (0 before its first line) is `name`.
-    Importing { step: u32, total: u32, name: String },
+    /// The importer runs; `step` of `total` (0 before its first line) is `name`; `percent` of the whole import is done when the
+    /// importer says (older importers do not).
+    Importing { step: u32, total: u32, name: String, percent: Option<u32> },
     /// The importer failed (or could not start): the failing step when it said which, and why.
     Failed { step: Option<String>, reason: String },
     /// Import done: the game starts again with the assets.
@@ -98,7 +99,7 @@ impl Setup {
             Ok((label, child)) => {
                 self.importer = label;
                 self.child = Some(child);
-                self.phase = Phase::Importing { step: 0, total: 0, name: "starting the importer".into() };
+                self.phase = Phase::Importing { step: 0, total: 0, name: "starting the importer".into(), percent: None };
             }
             Err(reason) => self.phase = Phase::Failed { step: None, reason },
         }
@@ -116,8 +117,8 @@ impl Setup {
                     }
                 }
                 Msg::Line(line) => {
-                    if let (Some((step, total, name)), Phase::Importing { .. }) = (parse_progress(&line), &self.phase) {
-                        self.phase = Phase::Importing { step, total, name: name.to_owned() };
+                    if let (Some((step, total, name, percent)), Phase::Importing { .. }) = (parse_progress(&line), &self.phase) {
+                        self.phase = Phase::Importing { step, total, name: name.to_owned(), percent };
                     }
                     self.log.push(line);
                     if self.log.len() > LOG_LINES {
@@ -153,12 +154,15 @@ impl Drop for Setup {
     }
 }
 
-/// `[n/total] step` from the importer.
-pub fn parse_progress(line: &str) -> Option<(u32, u32, &str)> {
+/// `[n/total] step` from the importer, optionally `[n/total] step: i/k (p%)` (a part of the step; p is the whole import).
+pub fn parse_progress(line: &str) -> Option<(u32, u32, &str, Option<u32>)> {
     let (count, name) = line.trim().strip_prefix('[')?.split_once("] ")?;
     let (n, total) = count.split_once('/')?;
     let (n, total) = (n.parse().ok()?, total.parse().ok()?);
-    (n >= 1 && n <= total).then_some((n, total, name.trim()))
+    let name = name.trim();
+    let percent = name.strip_suffix("%)").and_then(|s| s.rsplit_once(" (")).and_then(|(rest, p)| Some((rest.trim_end(), p.parse::<u32>().ok()?.min(100))));
+    let (name, percent) = percent.map_or((name, None), |(rest, p)| (rest, Some(p)));
+    (n >= 1 && n <= total).then_some((n, total, name, percent))
 }
 
 /// The step name of the importer's `import failed at step 'name': ...` line.
@@ -719,8 +723,11 @@ mod tests {
 
     #[test]
     fn progress_lines() {
-        assert_eq!(parse_progress("[3/27] hud"), Some((3, 27, "hud")));
-        assert_eq!(parse_progress("[12/27] waypoint art\r"), Some((12, 27, "waypoint art")));
+        assert_eq!(parse_progress("[3/27] hud"), Some((3, 27, "hud", None)));
+        assert_eq!(parse_progress("[1/28] ships: 36/71 (36%)\r"), Some((1, 28, "ships: 36/71", Some(36))));
+        assert_eq!(parse_progress("[2/28] models (74%)"), Some((2, 28, "models", Some(74))));
+        assert_eq!(parse_progress("[2/28] odd (name%)"), Some((2, 28, "odd (name%)", None)));
+        assert_eq!(parse_progress("[12/27] waypoint art\r"), Some((12, 27, "waypoint art", None)));
         assert_eq!(parse_progress("skip Ship_Wreck: no mesh"), None);
         assert_eq!(parse_progress("[0/27] hud"), None);
         assert_eq!(parse_progress("[x/27] hud"), None);
@@ -738,23 +745,23 @@ mod tests {
     fn importer_output_drives_the_phase() {
         let dir = std::env::temp_dir().join(format!("procyon-setup-poll-{}", std::process::id()));
         let mut setup = Setup::new(dir.clone(), Some(String::new()));
-        setup.phase = Phase::Importing { step: 0, total: 0, name: String::new() };
-        for line in ["[1/3] ships", "skip Ship_Wreck", "[2/3] models", "import failed at step 'models': tools.mdb_to_glb"] {
+        setup.phase = Phase::Importing { step: 0, total: 0, name: String::new(), percent: None };
+        for line in ["[1/3] ships (0%)", "skip Ship_Wreck", "[2/3] models (40%)", "import failed at step 'models': tools.mdb_to_glb"] {
             setup.tx.send(Msg::Line(line.into())).unwrap();
         }
         assert!(setup.poll());
-        assert_eq!(setup.phase, Phase::Importing { step: 2, total: 3, name: "models".into() });
+        assert_eq!(setup.phase, Phase::Importing { step: 2, total: 3, name: "models".into(), percent: Some(40) });
         setup.tx.send(Msg::Exit(Err("exit 1".into()))).unwrap();
         setup.poll();
         assert_eq!(setup.phase, Phase::Failed { step: Some("models".into()), reason: "exit 1".into() });
         assert_eq!(setup.log.len(), 4);
         // A clean exit without ships/ is still a failure; with it the game starts.
-        setup.phase = Phase::Importing { step: 3, total: 3, name: "bases".into() };
+        setup.phase = Phase::Importing { step: 3, total: 3, name: "bases".into(), percent: None };
         setup.tx.send(Msg::Exit(Ok(()))).unwrap();
         setup.poll();
         assert!(matches!(setup.phase, Phase::Failed { .. }));
         std::fs::create_dir_all(dir.join("ships")).unwrap();
-        setup.phase = Phase::Importing { step: 3, total: 3, name: "bases".into() };
+        setup.phase = Phase::Importing { step: 3, total: 3, name: "bases".into(), percent: None };
         setup.tx.send(Msg::Exit(Ok(()))).unwrap();
         setup.poll();
         assert_eq!(setup.phase, Phase::Starting);
