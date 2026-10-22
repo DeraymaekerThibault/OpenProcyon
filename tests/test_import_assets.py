@@ -56,6 +56,38 @@ class ImportAssets(unittest.TestCase):
             # The curated skirmish ships come first, then every other hull in the install.
             self.assertEqual(ran, [[*import_assets.FIRST, "Ship_Extra"]])
 
+    def test_steps_run_in_process_with_their_own_argv(self):
+        # The frozen importer has no Python to start, so tool() runs `python -m <module>` in this process.
+        with tempfile.TemporaryDirectory() as d:
+            f = Path(d, "a.json")
+            f.write_text('{"b":1}')
+            argv = list(import_assets.sys.argv)
+            self.assertEqual(import_assets.tool("tools.format_json", d), (True, ""))
+            self.assertEqual(import_assets.sys.argv, argv)
+            # A failing step stops the import, or with quiet reports its last error line.
+            with (
+                contextlib.redirect_stderr(io.StringIO()),
+                self.assertRaises(import_assets.StepFailed),
+            ):
+                import_assets.tool("tools.format_json")
+            ok, err = import_assets.tool("tools.format_json", quiet=True)
+            self.assertFalse(ok)
+            self.assertIn("IndexError", err)
+            self.assertEqual(import_assets.sys.argv, argv)
+
+    def test_frozen_default_out_is_the_folder_the_game_reads(self):
+        env = {"XDG_DATA_HOME": "", "HOME": "", "APPDATA": "C:/Users/me/AppData"}
+        with mock.patch.dict(import_assets.os.environ, env):
+            self.assertEqual(
+                import_assets.user_assets(),
+                Path("C:/Users/me/AppData/openprocyon/assets"),
+            )
+        with mock.patch.dict(import_assets.os.environ, {**env, "HOME": "/home/me"}):
+            self.assertEqual(
+                import_assets.user_assets(),
+                Path("/home/me/.local/share/openprocyon/assets"),
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

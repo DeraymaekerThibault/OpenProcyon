@@ -1,0 +1,50 @@
+# Builds the player downloads (game binary, content/, frozen importer; no game content) and uploads them as workflow artifacts.
+# Runs by hand (Actions > release > Run workflow) or for a pushed v* tag. It publishes nothing: no GitHub release is created.
+name: release
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  CARGO_INCREMENTAL: 0
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2022
+            platform: windows-x86_64
+            # The artifact itself is the zip players unpack.
+            upload: dist/openprocyon-windows-x86_64/
+          - os: ubuntu-22.04 # the oldest supported runner: the binaries then run on older glibc too
+            platform: linux-x86_64
+            # A tarball inside the artifact zip: artifacts drop the executable bits.
+            upload: dist/openprocyon-linux-x86_64.tar.gz
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends pkg-config libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev libx11-dev
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: game
+          key: release
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements-release.txt
+      - run: cargo build --release --locked
+        working-directory: game
+      - run: python -m tools.package_release openprocyon-${{ matrix.platform }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: openprocyon-${{ matrix.platform }}
+          path: ${{ matrix.upload }}
+          if-no-files-found: error
+          retention-days: 30

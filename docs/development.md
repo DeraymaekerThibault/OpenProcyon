@@ -126,13 +126,15 @@ compares two imports by meaning (JSON by value, images by pixels) to check expor
 | Mesh conversion | `mdb_to_glb.py`, `preview.py` |
 | Content export | `export_ship.py`, `export_combat.py`, `export_maps.py`, `export_campaign.py`, `export_campaign_media.py`, `export_environment.py`, `export_crew.py`, `export_effects.py`, `export_hud.py`, `export_voices.py`, `export_waypoint_art.py`, `export_collision.py`, `export_asteroids.py`, `ogg.py` |
 | Asset preparation | `pack_data.py`, `format_json.py`, `fix_alpha_bleed.py`, `make_slices.py`, `trim_hud_rects.py` |
-| Workflow | `import_assets.py` (the importer; `build_assets.sh` wraps it), `check.sh`, `shot.sh`, `compare_assets.py` |
+| Workflow | `import_assets.py` (the importer; `build_assets.sh` wraps it), `check.sh`, `shot.sh`, `compare_assets.py`, `package_release.py` (player download) |
 | Research | `extract_wot.py` (catalog of WOT properties) |
 
 The build pipeline is defined once in `tools/import_assets.py`: export raw ships → HUD/art/media/maps/campaigns/crew/effects → pack ship/weapon data → format JSON.
+The steps run in one process (`tool()` runs each module as `python -m` would), so the importer also works frozen: the `release`
+workflow (`.github/workflows/release.yml`, `tools/package_release.py`) ships it as `openprocyon-import` next to the release game binary and `content/`.
 Raw per-ship exports are temporary inputs to later exporters and removed by packing; do not commit them.
 HUD trimming/crops run before alpha-bleed cleanup. Importing needs a read-only retail install (`--game <dir>` or `PROCYON_GAME_ROOT` in `.env`); the install is never modified.
-Python dependencies are in `requirements.txt` (the checks add ruff via `requirements-dev.txt`); Rust dependencies and resolved versions are in `game/Cargo.toml` and `game/Cargo.lock`.
+Python dependencies are in `requirements.txt` (the checks add ruff via `requirements-dev.txt`, release packaging PyInstaller via `requirements-release.txt`); Rust dependencies and resolved versions are in `game/Cargo.toml` and `game/Cargo.lock`.
 
 ## Implementation order
 

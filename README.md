@@ -12,7 +12,25 @@ Disney or the original developers.
 Early development. Skirmish battles on the retail maps work; all 13 campaign missions load, Mission 1 is the current focus and
 missions 2-13 are first-pass. See `docs/fidelity-backlog.md`.
 
-## Getting started
+## Download and play
+
+No Rust or Python needed. Download the build for your system (Windows or Linux x86_64) from the repository's Actions page
+(the `release` workflow, artifacts `openprocyon-windows-x86_64` / `openprocyon-linux-x86_64`), unpack it into an empty folder,
+then from a terminal in that folder:
+
+```sh
+# 1. Convert your copy of the game once (read-only; takes a minute or two) into %APPDATA%\openprocyon\assets
+#    (Linux: ~/.local/share/openprocyon/assets).
+./openprocyon-import --game "/path/to/Treasure Planet Battle at Procyon"
+# 2. Play (Windows: openprocyon.exe, or double-click it)
+./openprocyon
+./openprocyon --mission 1     # straight into Mission 1
+```
+
+The download holds the engine, the files in `content/` (licences in `content/README.md`) and the importer; no game content.
+`PLAY.txt` in the download repeats these steps.
+
+## Getting started (from source)
 
 Requirements: Rust 1.97.1 or newer, Python 3 with `pip install -r requirements.txt` (Pillow, NumPy), and on Linux the usual
 Bevy system packages (ALSA, udev, Wayland/X11, Vulkan).
