@@ -168,7 +168,7 @@ pub fn failed_step(line: &str) -> Option<String> {
     Some(rest[1..].split(quote).next()?.to_owned())
 }
 
-/// The game folder in a typed/pasted/dropped path: the folder with `WorldObjects/`. A dropped file (the game's .exe) means its
+/// The game folder in a typed/pasted/dropped path: the folder with `WorldObjects/`. A dropped file (the game's program) means its
 /// folder; a Steam library or its `steamapps/common` finds the game inside.
 pub fn check_install(input: &str) -> Result<PathBuf, String> {
     let text = input.trim().trim_matches('"').trim();
@@ -190,7 +190,7 @@ pub fn check_install(input: &str) -> Result<PathBuf, String> {
             return Ok(candidate);
         }
     }
-    Err(format!("{} is not the game folder: it has no WorldObjects folder. Pick the folder that holds the game's WorldObjects and .exe.", path.display()))
+    Err(format!("{} is not the game folder: it has no WorldObjects folder. Pick the folder that holds the game's WorldObjects folder and program.", path.display()))
 }
 
 pub fn is_install(dir: &Path) -> bool {
@@ -244,7 +244,7 @@ fn steam_roots() -> Vec<PathBuf> {
     let mut roots = vec![];
     #[cfg(windows)]
     {
-        // `reg.exe` ships with Windows; reading the key needs no extra crate.
+        // `reg` ships with Windows; reading the key needs no extra crate.
         let mut reg = Command::new("reg");
         reg.args(["query", r"HKCU\Software\Valve\Steam", "/v", "SteamPath"]);
         if let Ok(out) = no_window(&mut reg).output() {
@@ -293,8 +293,8 @@ fn importers(game: &Path, out: &Path) -> Vec<(String, Command)> {
         cmd.arg("--game").arg(game).arg("--out").arg(out);
     };
     let mut list = vec![];
-    let exe = if cfg!(windows) { "openprocyon-import.exe" } else { "openprocyon-import" };
-    if let Some(frozen) = std::env::current_exe().ok().and_then(|p| Some(p.parent()?.join(exe))).filter(|p| p.is_file()) {
+    let name = if cfg!(windows) { "openprocyon-import.exe" } else { "openprocyon-import" };
+    if let Some(frozen) = std::env::current_exe().ok().and_then(|p| Some(p.parent()?.join(name))).filter(|p| p.is_file()) {
         let mut cmd = Command::new(&frozen);
         args(&mut cmd);
         list.push((frozen.display().to_string(), cmd));
@@ -453,7 +453,7 @@ fn keys(mut input: MessageReader<KeyboardInput>, held: Res<ButtonInput<KeyCode>>
     }
 }
 
-/// Dropping the game folder (or its .exe) on the window fills the field.
+/// Dropping the game folder (or its program) on the window fills the field.
 fn dropped(mut drops: MessageReader<FileDragAndDrop>, mut setup: ResMut<Setup>) {
     for drop in drops.read() {
         if let FileDragAndDrop::DroppedFile { path_buf, .. } = drop
@@ -477,7 +477,7 @@ fn relaunch(setup: Res<Setup>, mut exit: MessageWriter<AppExit>, mut done: Local
     }
     *done = true;
     let args = game_args(std::env::args().skip(1));
-    match std::env::current_exe().and_then(|exe| Command::new(exe).args(args).spawn()) {
+    match std::env::current_exe().and_then(|binary| Command::new(binary).args(args).spawn()) {
         Ok(_) => info!("assets imported into {}; starting the game", setup.out.display()),
         Err(err) => error!("assets imported into {}, but the game did not start again ({err}): start it again by hand", setup.out.display()),
     }
