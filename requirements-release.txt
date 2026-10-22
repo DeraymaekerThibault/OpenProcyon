@@ -1,0 +1,3 @@
+# Release packaging (tools/package_release.py, .github/workflows/release.yml): freezes the importer into one executable.
+-r requirements.txt
+pyinstaller==6.22.3

@@ -1,18 +1,26 @@
 """Import: convert the original install into the game's asset folder. Nothing from the install is modified.
 usage: python -m tools.import_assets [--game DIR] [--out DIR] [Ship_Name ...]   (default ships below; first is the default player ship)
+       openprocyon-import [--game DIR] [--out DIR] [Ship_Name ...]   (the same, frozen into the release download)
   --game  the original install (default: PROCYON_GAME_ROOT from the environment or .env)
-  --out   where the converted assets go (default: assets/ in this checkout; the game also finds them in
-          ${XDG_DATA_HOME:-~/.local/share}/openprocyon/assets or %APPDATA%\\openprocyon\\assets, see assets_dir() in game/src/lib.rs)
+  --out   where the converted assets go (default: assets/ in this checkout, or for the frozen importer the per-user folder
+          ${XDG_DATA_HOME:-~/.local/share}/openprocyon/assets or %APPDATA%\\openprocyon\\assets; the game finds all of these,
+          see base_assets() in game/src/lib.rs)
 Each step prints `[n/total] name` first, so a front end can show progress. Exits non-zero on the first failing step."""
 
+import contextlib
+import io
 import json
 import os
+import runpy
 import shutil
-import subprocess
 import sys
+import traceback
+import warnings
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
+# The release download runs this module frozen by PyInstaller (no checkout, no Python install).
+FROZEN = getattr(sys, "frozen", False)
 # Every Ship_*.wot is exported; the curated retail skirmish ships come first (first = default player ship). Hulls that are not combat
 # ships (wrecks, debris) fail the exporter and are skipped.
 FIRST = [
@@ -33,17 +41,50 @@ class StepFailed(Exception):
     pass
 
 
-def tool(*args, quiet=False):
-    """Run `python -m tools.<args>` from the checkout; with quiet, return (ok, last stderr line) instead of failing."""
-    cmd = [sys.executable, "-m", *map(str, args)]
-    if not quiet:
-        if subprocess.run(cmd, cwd=REPO).returncode:
-            raise StepFailed(" ".join(map(str, args[:2])))
-        return True, ""
-    r = subprocess.run(
-        cmd, cwd=REPO, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True
-    )
-    return r.returncode == 0, (r.stderr.strip().splitlines() or [""])[-1]
+def tool(module, *args, quiet=False):
+    """Run `python -m <module> <args>` in this process (the steps also run from the frozen importer, which has no Python to
+    start); with quiet, return (ok, last error line) instead of failing."""
+    argv, sys.argv = sys.argv, [module, *map(str, args)]
+    err = io.StringIO()
+    try:
+        with contextlib.ExitStack() as stack:
+            if quiet:
+                stack.enter_context(contextlib.redirect_stdout(io.StringIO()))
+                stack.enter_context(contextlib.redirect_stderr(err))
+            with warnings.catch_warnings():
+                # The step modules are also imported as libraries by each other; re-running one as __main__ is intended.
+                warnings.filterwarnings(
+                    "ignore", "found in sys.modules", RuntimeWarning
+                )
+                try:
+                    runpy.run_module(module, run_name="__main__", alter_sys=True)
+                except SystemExit as e:
+                    if e.code not in (None, 0):
+                        print(
+                            e.code if isinstance(e.code, str) else f"exit {e.code}",
+                            file=sys.stderr,
+                        )
+                        raise StepFailed(module) from None
+                except StepFailed:
+                    raise
+                except Exception:
+                    traceback.print_exc()
+                    raise StepFailed(module) from None
+    except StepFailed:
+        if not quiet:
+            raise
+        return False, (err.getvalue().strip().splitlines() or [""])[-1]
+    finally:
+        sys.argv = argv
+    return True, ""
+
+
+def user_assets():
+    """The per-user asset folder, looked up in the same order as campaign::user_dir() in the game."""
+    for var, sub in (("XDG_DATA_HOME", ""), ("HOME", ".local/share"), ("APPDATA", "")):
+        if os.environ.get(var):
+            return Path(os.environ[var], sub, "openprocyon/assets")
+    sys.exit("no XDG_DATA_HOME, HOME or APPDATA to put the assets in: pass --out")
 
 
 def read_env(path):
@@ -177,12 +218,13 @@ def main(argv):
     game = (
         game
         or os.environ.get("PROCYON_GAME_ROOT")
-        or read_env(REPO / ".env").get("PROCYON_GAME_ROOT")
+        or (not FROZEN and read_env(REPO / ".env").get("PROCYON_GAME_ROOT"))
     )
     if not game:
         sys.exit("pass --game <install dir> or set PROCYON_GAME_ROOT")
-    # Absolute paths: the tools run from the checkout.
-    root, out = Path(game).resolve(), Path(out).resolve() if out else REPO / "assets"
+    root = Path(game).resolve()
+    out = Path(out) if out else user_assets() if FROZEN else REPO / "assets"
+    out = out.resolve()
     if not (root / "WorldObjects").is_dir():
         sys.exit(f"not a game install (no WorldObjects/): {root}")
     if not want:

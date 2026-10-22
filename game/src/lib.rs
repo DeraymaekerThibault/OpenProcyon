@@ -66,7 +66,7 @@ pub struct Config {
 
 static ASSETS: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
 /// Converted assets: `PROCYON_ASSETS`, else `assets/` in the source checkout, else the per-user folder the importer
-/// (`tools/build_assets.sh --out`) fills. Nothing from the original game ships with the code.
+/// (`python -m tools.import_assets`, or the release download's `openprocyon-import`) fills. Nothing from the original game ships with the code.
 fn base_assets() -> PathBuf {
     if let Some(dir) = std::env::var_os("PROCYON_ASSETS") {
         return PathBuf::from(dir);
@@ -82,9 +82,14 @@ fn base_assets() -> PathBuf {
 fn user_assets() -> Option<PathBuf> {
     Some(campaign::user_dir()?.join("assets"))
 }
-/// Files that ship with the code (fonts, hand-written data): `content/` in the checkout, layered over the imported assets.
+/// Files that ship with the code (fonts, hand-written data), layered over the imported assets: `content/` next to the
+/// executable (the release download), else `content/` in the checkout.
 fn content_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../content")
+    let exe_dir = std::env::current_exe().ok().and_then(|path| path.parent().map(|dir| dir.join("content")));
+    content_dir_from(exe_dir, PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../content"))
+}
+fn content_dir_from(next_to_exe: Option<PathBuf>, checkout: PathBuf) -> PathBuf {
+    next_to_exe.filter(|dir| dir.join("fonts").is_dir()).unwrap_or(checkout)
 }
 /// The asset root: the imported assets with `content/` and any `--mod` folders overlaid on top (see modding.rs).
 pub fn assets_dir() -> PathBuf {
@@ -320,5 +325,19 @@ fn screenshot(mut commands: Commands, mut cfg: ResMut<Config>) {
     }
     if cfg.ended.is_some_and(|e| cfg.frame >= e + 150) || cfg.frame >= cfg.late_frame.max(cfg.shot_frame) + 100 || (cfg.script.as_deref() == Some("restart") && cfg.frame >= 560) {
         std::process::exit(0);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn content_next_to_the_executable_wins_over_the_checkout() {
+        let dir = std::env::temp_dir().join(format!("procyon-content-test-{}", std::process::id()));
+        let (unpacked, checkout) = (dir.join("download/content"), dir.join("checkout/content"));
+        assert_eq!(content_dir_from(Some(unpacked.clone()), checkout.clone()), checkout, "no content/ next to a cargo-built binary");
+        std::fs::create_dir_all(unpacked.join("fonts")).unwrap();
+        assert_eq!(content_dir_from(Some(unpacked.clone()), checkout.clone()), unpacked);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }
