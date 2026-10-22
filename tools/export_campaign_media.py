@@ -6,10 +6,10 @@ usage: python -m tools.export_campaign_media <game_root> <assets_dir>"""
 
 import json
 import shutil
-import subprocess
 import sys
 from pathlib import Path
 
+from tools import ogg
 from tools.export_maps import strings
 
 # Maps whose audio is copied into assets/sound (the JSON lists every cue regardless): the 13 campaign missions and both tutorials.
@@ -48,21 +48,7 @@ def export(root, out, mid):
             text = next((names[k] for k in keys if k in names), "")
             dur = None
             if src.exists():
-                dur = float(
-                    subprocess.check_output(
-                        [
-                            "ffprobe",
-                            "-v",
-                            "error",
-                            "-show_entries",
-                            "format=duration",
-                            "-of",
-                            "csv=p=0",
-                            str(src),
-                        ],
-                        text=True,
-                    )
-                )
+                dur = ogg.duration(src)
                 if mid in PLAYABLE:
                     shutil.copyfile(src, out / "sound" / (file.lower() + ".ogg"))
             speech[n] = dict(text=text, duration=dur, file=file, face=ev.get("face"))

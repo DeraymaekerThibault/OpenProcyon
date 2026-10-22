@@ -35,7 +35,7 @@ files to `content/`, or anything that publishes (pushing tags, releases).
 ## How it works
 
 - `tools/` Python parsers/exporters for the retail formats (WOT, MDB, MSB, EFT, HDT, FFT, TWT, TST) and the importer
-  `tools/build_assets.sh --game <install> [--out <dir>]`, which writes JSON/GLB/PNG/OGG assets. Default output: `assets/` in the
+  `python3 -m tools.import_assets --game <install> [--out <dir>]` (`tools/build_assets.sh` wraps it), which writes JSON/GLB/PNG/OGG assets. Default output: `assets/` in the
   checkout; the game also finds `$XDG_DATA_HOME/openprocyon/assets` (Windows `%APPDATA%\openprocyon\assets`) or `PROCYON_ASSETS`.
   `tools/compare_assets.py A B` compares two imports by meaning (JSON values, image pixels).
 - `content/` files that ship with the code: fonts (URW base35), hand-written data (`data/hud/bar.json`), the crew voice event

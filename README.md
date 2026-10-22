@@ -18,8 +18,8 @@ Requirements: Rust 1.97.1 or newer, Python 3 with `pip install -r requirements.t
 Bevy system packages (ALSA, udev, Wayland/X11, Vulkan).
 
 ```sh
-# 1. Convert your copy of the game (read-only; takes a minute or two)
-tools/build_assets.sh --game "/path/to/Treasure Planet Battle at Procyon"
+# 1. Convert your copy of the game (read-only; takes a minute or two). Works without bash, e.g. from PowerShell.
+python3 -m tools.import_assets --game "/path/to/Treasure Planet Battle at Procyon"
 # 2. Play
 make run                      # main menu
 make run ARGS='--mission 1'   # straight into Mission 1

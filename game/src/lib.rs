@@ -104,7 +104,7 @@ pub fn run(view: fn(&mut App)) {
     let base = base_assets();
     if !base.join("ships").is_dir() {
         eprintln!(
-            "No converted game assets in {}.\nThis remake needs your own copy of the original game. Import it once with:\n  tools/build_assets.sh --game <install dir> --out {}",
+            "No converted game assets in {}.\nThis remake needs your own copy of the original game. Import it once from the source checkout with:\n  python3 -m tools.import_assets --game <install dir> --out {}",
             base.display(),
             user_assets().unwrap_or(base.clone()).display()
         );
