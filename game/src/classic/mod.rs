@@ -9,6 +9,7 @@ mod mission_ui;
 pub mod options_menu;
 pub mod panels;
 mod ropes;
+pub mod setup;
 mod ship_preview;
 mod starmap;
 mod world_hud;

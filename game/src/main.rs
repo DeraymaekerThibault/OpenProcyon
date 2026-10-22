@@ -7,5 +7,5 @@ mod classic;
 pub use openprocyon::*;
 
 fn main() {
-    openprocyon::run(classic::plugin);
+    openprocyon::run(classic::plugin, classic::setup::plugin);
 }
