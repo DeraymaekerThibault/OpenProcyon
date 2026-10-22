@@ -89,7 +89,7 @@ class RepoHygiene(unittest.TestCase):
     def test_no_executable_addresses_decompiler_output_or_re_tooling(self):
         problems = []
         for p in self.files:
-            rel = str(p.relative_to(ROOT))
+            rel = p.relative_to(ROOT).as_posix()
             if rel == "tests/test_repo_hygiene.py":
                 continue
             if p.suffix not in TEXT_SUFFIXES and p.name not in TEXT_SUFFIXES:

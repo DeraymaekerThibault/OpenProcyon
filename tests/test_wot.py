@@ -7,6 +7,8 @@ import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
+from links import symlink_or_skip
+
 from tools.extract_wot import extract, main
 from tools.source_text import SourceLine
 from tools.wot import analyze, parse_lines, properties
@@ -260,7 +262,7 @@ class CatalogTests(unittest.TestCase):
     def test_symlink_escape_is_reported_without_reading_target(self):
         outside = self.parent / "outside.txt"
         outside.write_text("not an allowed input", encoding="utf-8")
-        (self.objects / "escape.wot").symlink_to(outside)
+        symlink_or_skip(self, self.objects / "escape.wot", outside)
         catalog = extract(self.root)
         self.assertEqual(catalog["summary"]["errors"], 1)
         self.assertEqual(catalog["documents"][0]["nodes"], [])
