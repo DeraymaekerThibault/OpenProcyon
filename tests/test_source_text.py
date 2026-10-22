@@ -2,6 +2,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from links import symlink_or_skip
+
 from tools.source_text import SourceLine, read_source_lines
 
 
@@ -106,7 +108,7 @@ class SourceTextTests(unittest.TestCase):
         outside = self.parent / "outside.txt"
         outside.write_text("synthetic", encoding="utf-8")
         link = self.root / "link.txt"
-        link.symlink_to(outside)
+        symlink_or_skip(self, link, outside)
         for relative in (Path("../outside.txt"), Path("link.txt")):
             with (
                 self.subTest(relative=relative),
@@ -117,7 +119,7 @@ class SourceTextTests(unittest.TestCase):
     def test_internal_symlink_reports_actual_source_path(self):
         source = self.root / "synthetic.txt"
         source.write_text("synthetic", encoding="utf-8")
-        (self.root / "alias.txt").symlink_to(source)
+        symlink_or_skip(self, self.root / "alias.txt", source)
         self.assertEqual(
             read_source_lines(self.root, Path("alias.txt"), encoding="utf-8"),
             [SourceLine("synthetic.txt", 1, "synthetic")],
