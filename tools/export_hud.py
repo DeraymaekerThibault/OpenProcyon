@@ -33,7 +33,9 @@ def main(root, out):
         src = ci_files(Path(root) / "BD_GUITextures", s + ".tga")
         if not src:
             missing.append(s)
-        elif not dst.exists():
+        else:
+            # Always rewritten: later steps (trim_hud_rects, fix_alpha_bleed) change the sheets in place, so a reimport into a
+            # filled folder must start again from the retail art to give the same result as a fresh one.
             Image.open(src[0]).convert("RGBA").save(dst)
     (out / "hud.json").write_text(json.dumps(comps))
     (out / "fonts").mkdir(exist_ok=True)
@@ -43,7 +45,7 @@ def main(root, out):
         for t in font["textures"]:
             dst = out / "tex" / f"{t.lower()}.png"
             src = ci_files(Path(root) / "BD_GUITextures", t + ".tga")
-            if src and not dst.exists():
+            if src:
                 Image.open(src[0]).convert("RGBA").save(dst)
     print(
         f"exported {len(comps)} HUD components, {len(sheets) - len(missing)} sheets; missing: {missing}"
