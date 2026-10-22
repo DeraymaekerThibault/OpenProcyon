@@ -96,7 +96,7 @@ fn build(mut commands: Commands, setup: Res<Setup>, assets: Res<AssetServer>, ro
             ));
             match &setup.phase {
                 Phase::Choose => choose(p, &fonts, &setup),
-                Phase::Importing { step, total, name } => importing(p, &fonts, &setup, *step, *total, name),
+                Phase::Importing { step, total, name, percent } => importing(p, &fonts, &setup, *step, *total, name, *percent),
                 Phase::Failed { step, reason } => failed(p, &fonts, &setup, step.as_deref(), reason),
                 Phase::Starting => {
                     p.spawn(label(&fonts, "Import complete. Starting the game...", 20.0, GOOD, true));
@@ -164,11 +164,17 @@ fn tail(lines: &[String], n: usize) -> &[String] {
     &lines[lines.len().saturating_sub(n)..]
 }
 
-fn importing(p: &mut ChildSpawnerCommands, fonts: &Fonts, setup: &Setup, step: u32, total: u32, name: &str) {
+fn importing(p: &mut ChildSpawnerCommands, fonts: &Fonts, setup: &Setup, step: u32, total: u32, name: &str, percent: Option<u32>) {
     let heading = if total > 0 { format!("Importing: step {step} of {total}, {name}") } else { format!("Importing: {name}") };
     p.spawn(label(fonts, heading, 20.0, INK, true));
-    // A step's line comes before it runs, so step n of t means n - 1 are done.
-    bar(p, if total > 0 { (step.saturating_sub(1)) as f32 / total as f32 } else { 0.0 }, GOLD);
+    // The importer's own percentage (weighted by step time, moving inside long steps); else steps done: a step's line comes
+    // before it runs, so step n of t means n - 1 are done.
+    let fraction = match percent {
+        Some(p) => p as f32 / 100.0,
+        None if total > 0 => step.saturating_sub(1) as f32 / total as f32,
+        None => 0.0,
+    };
+    bar(p, fraction, GOLD);
     p.spawn(label(fonts, format!("from {}", setup.check.as_ref().map_or(String::new(), |d| d.display().to_string())), 13.0, DIM, false));
     log(p, fonts, tail(&setup.log, 6), DIM);
     p.spawn(Node { justify_content: JustifyContent::FlexStart, ..row(10.0) }).with_children(|r| button(r, fonts, "Cancel and quit", SetupAction::Quit, true));

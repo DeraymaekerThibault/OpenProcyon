@@ -110,9 +110,42 @@ def read_env(path):
     return env
 
 
-def export_ships(root, out, want):
+# Rough share of a full import's time per step (seconds on a desktop; the rest take about one), so the overall percentage moves
+# with time rather than with the step count. Only for the progress display.
+WEIGHTS = {"ships": 31, "maps": 10, "campaign": 9, "collision": 8, "alpha bleed": 6}
+
+
+class Progress:
+    """Prints `[n/total] name (p%)` before each step and `[n/total] name: i/k (p%)` inside steps that report parts; p is the
+    whole import's progress, weighted by WEIGHTS."""
+
+    def __init__(self):
+        self.names, self.n = [], 0
+
+    def percent(self, fraction=0.0):
+        w = [WEIGHTS.get(name, 1) for name in self.names]
+        done = sum(w[: self.n - 1]) + w[self.n - 1] * fraction
+        return int(100 * done / sum(w))
+
+    def step(self, n):
+        self.n = n
+        print(
+            f"[{n}/{len(self.names)}] {self.names[n - 1]} ({self.percent()}%)",
+            flush=True,
+        )
+
+    def part(self, i, k):
+        name = self.names[self.n - 1]
+        print(
+            f"[{self.n}/{len(self.names)}] {name}: {i + 1}/{k} ({self.percent(i / k)}%)",
+            flush=True,
+        )
+
+
+def export_ships(root, out, want, part=lambda i, k: None):
     ships = []
-    for s in want:
+    for i, s in enumerate(want):
+        part(i, len(want))
         ok, err = tool("tools.export_combat", root, s, out / f"{s}.json", quiet=True)
         if not ok:
             (out / f"{s}.json").unlink(missing_ok=True)
@@ -168,12 +201,12 @@ def flags(root, out):
         Image.open(f).convert("RGBA").save(out / "flags" / (f.stem.lower() + ".png"))
 
 
-def steps(root, out, want):
+def steps(root, out, want, part=lambda i, k: None):
     def ship_files():
         return [out / f"{s}.json" for s in json.loads((out / "ships.json").read_text())]
 
     return [
-        ("ships", lambda: export_ships(root, out, want)),
+        ("ships", lambda: export_ships(root, out, want, part)),
         ("models", lambda: models(root, out)),
         ("hud", lambda: tool("tools.export_hud", root, out)),
         ("hud rects", lambda: tool("tools.trim_hud_rects", out)),
@@ -244,9 +277,11 @@ def main(argv):
         want = FIRST + [n for n in names if n not in FIRST]
     for kind in ("ships", "sky", "scenery", "ui"):
         (out / "models" / kind).mkdir(parents=True, exist_ok=True)
-    todo = steps(root, out, want)
+    progress = Progress()
+    todo = steps(root, out, want, progress.part)
+    progress.names = [name for name, _ in todo]
     for n, (name, run) in enumerate(todo, 1):
-        print(f"[{n}/{len(todo)}] {name}", flush=True)
+        progress.step(n)
         try:
             run()
         except StepFailed as e:
