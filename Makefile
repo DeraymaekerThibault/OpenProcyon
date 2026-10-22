@@ -33,4 +33,4 @@ smokes:
 	tools/smokes.sh $(ARGS)
 
 assets:
-	tools/build_assets.sh $(ARGS)
+	python3 -m tools.import_assets $(ARGS)

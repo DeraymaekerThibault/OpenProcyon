@@ -13,7 +13,7 @@ Work from the repository root with the Python virtual environment active. Use `m
 
 ```sh
 # No Make dependency required: these are the authoritative underlying commands.
-tools/build_assets.sh --game <install dir>   # once: convert your own copy of the game into assets/
+python3 -m tools.import_assets --game <install dir>   # once: convert your own copy of the game into assets/
 tools/check.sh
 cargo run --release --manifest-path game/Cargo.toml -- --mission 1
 python3 -m unittest discover -s tests -p 'test_trim_hud_rects.py'
@@ -124,12 +124,12 @@ compares two imports by meaning (JSON by value, images by pixels) to check expor
 |---|---|
 | Retail format readers | `source_text.py`, `wot.py`, `mdb.py`, `msb.py`, `hdt.py`, `fft.py`, `eft.py` |
 | Mesh conversion | `mdb_to_glb.py`, `preview.py` |
-| Content export | `export_ship.py`, `export_combat.py`, `export_maps.py`, `export_campaign.py`, `export_campaign_media.py`, `export_environment.py`, `export_crew.py`, `export_effects.py`, `export_hud.py`, `export_voices.py`, `export_waypoint_art.py`, `export_collision.py`, `export_asteroids.py` |
+| Content export | `export_ship.py`, `export_combat.py`, `export_maps.py`, `export_campaign.py`, `export_campaign_media.py`, `export_environment.py`, `export_crew.py`, `export_effects.py`, `export_hud.py`, `export_voices.py`, `export_waypoint_art.py`, `export_collision.py`, `export_asteroids.py`, `ogg.py` |
 | Asset preparation | `pack_data.py`, `format_json.py`, `fix_alpha_bleed.py`, `make_slices.py`, `trim_hud_rects.py` |
-| Workflow | `build_assets.sh` (the importer), `check.sh`, `shot.sh`, `compare_assets.py` |
+| Workflow | `import_assets.py` (the importer; `build_assets.sh` wraps it), `check.sh`, `shot.sh`, `compare_assets.py` |
 | Research | `extract_wot.py` (catalog of WOT properties) |
 
-The build pipeline is defined once in `tools/build_assets.sh`: export raw ships → HUD/art/media/maps/campaigns/crew/effects → pack ship/weapon data → format JSON.
+The build pipeline is defined once in `tools/import_assets.py`: export raw ships → HUD/art/media/maps/campaigns/crew/effects → pack ship/weapon data → format JSON.
 Raw per-ship exports are temporary inputs to later exporters and removed by packing; do not commit them.
 HUD trimming/crops run before alpha-bleed cleanup. Importing needs a read-only retail install (`--game <dir>` or `PROCYON_GAME_ROOT` in `.env`); the install is never modified.
 Python dependencies are in `requirements.txt` (the checks add ruff via `requirements-dev.txt`); Rust dependencies and resolved versions are in `game/Cargo.toml` and `game/Cargo.lock`.

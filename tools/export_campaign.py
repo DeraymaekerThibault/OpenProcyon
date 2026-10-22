@@ -6,10 +6,10 @@ usage: python -m tools.export_campaign <game_root> <assets_dir>
 import json
 import math
 import shutil
-import subprocess
 import sys
 from pathlib import Path
 
+from tools import ogg
 from tools.export_campaign_media import PLAYABLE
 from tools.export_combat import export as export_ship
 from tools.export_environment import export_environment
@@ -226,21 +226,7 @@ def export_mission(root, out, twt):
             continue
         name = action["Speech Event Name"]
         src = root / "Sound/Dialogue" / (name + ".ogg")
-        duration = float(
-            subprocess.check_output(
-                [
-                    "ffprobe",
-                    "-v",
-                    "error",
-                    "-show_entries",
-                    "format=duration",
-                    "-of",
-                    "csv=p=0",
-                    str(src),
-                ],
-                text=True,
-            )
-        )
+        duration = ogg.duration(src)
         if not math.isfinite(duration) or duration <= 0:
             raise ValueError(f"Invalid speech duration: {name}")
         subtitle = names["IDGS_TPSPEECHEVENTS000_" + name]
