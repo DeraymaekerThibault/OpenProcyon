@@ -165,11 +165,31 @@ impl CampaignPoints {
 /// Per-user data (imported assets, saves, settings): `$XDG_DATA_HOME/openprocyon` (Linux default `~/.local/share`),
 /// `%APPDATA%\openprocyon` on Windows.
 pub fn user_dir() -> Option<std::path::PathBuf> {
-    let base = std::env::var_os("XDG_DATA_HOME")
-        .map(std::path::PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|home| std::path::PathBuf::from(home).join(".local/share")))
-        .or_else(|| std::env::var_os("APPDATA").map(std::path::PathBuf::from))?;
-    Some(base.join("openprocyon"))
+    let var = |name| std::env::var_os(name).map(std::path::PathBuf::from);
+    user_dir_from(var("XDG_DATA_HOME"), var("HOME"), var("APPDATA"), cfg!(windows), |p| p.is_dir())
+}
+
+/// `user_dir` from its environment. On Windows `%APPDATA%` comes before `HOME`, which shells such as Git Bash set; a
+/// `~/.local/share/openprocyon` made that way stays in use while no `%APPDATA%\openprocyon` exists (assets and saves kept).
+fn user_dir_from(
+    xdg: Option<std::path::PathBuf>,
+    home: Option<std::path::PathBuf>,
+    appdata: Option<std::path::PathBuf>,
+    windows: bool,
+    exists: impl Fn(&std::path::Path) -> bool,
+) -> Option<std::path::PathBuf> {
+    let home = home.map(|h| h.join(".local/share").join("openprocyon"));
+    let appdata = appdata.map(|a| a.join("openprocyon"));
+    if let Some(xdg) = xdg {
+        return Some(xdg.join("openprocyon"));
+    }
+    if !windows {
+        return home.or(appdata);
+    }
+    match (appdata, home) {
+        (Some(a), Some(h)) if !exists(&a) && exists(&h) => Some(h),
+        (a, h) => a.or(h),
+    }
 }
 
 fn campaign_points_path() -> Option<std::path::PathBuf> {
@@ -432,6 +452,22 @@ mod tests {
         assert_eq!(CampaignSave::from_json(&snap.to_json()), Some(snap));
         assert_eq!(save_path("../a/b"), user_dir().map(|d| d.join("saves/ab.json")));
         assert_eq!(save_path("//"), None);
+    }
+
+    #[test]
+    fn user_dir_prefers_appdata_on_windows_but_keeps_an_existing_home_folder() {
+        let p = |s: &str| Some(std::path::PathBuf::from(s));
+        let (home, appdata) = (p("/h"), p("/a"));
+        let old = std::path::PathBuf::from("/h/.local/share/openprocyon");
+        let new = std::path::PathBuf::from("/a/openprocyon");
+        let none = |_: &std::path::Path| false;
+        assert_eq!(user_dir_from(p("/x"), home.clone(), appdata.clone(), true, none), p("/x/openprocyon"));
+        assert_eq!(user_dir_from(None, home.clone(), appdata.clone(), true, none), Some(new.clone()));
+        assert_eq!(user_dir_from(None, home.clone(), appdata.clone(), true, |d| d == old), Some(old.clone()));
+        assert_eq!(user_dir_from(None, home.clone(), appdata.clone(), true, |_| true), Some(new.clone()), "both exist: APPDATA");
+        assert_eq!(user_dir_from(None, home.clone(), None, true, none), Some(old.clone()));
+        assert_eq!(user_dir_from(None, home.clone(), appdata.clone(), false, none), Some(old), "Linux/macOS: HOME first as before");
+        assert_eq!(user_dir_from(None, None, None, true, none), None);
     }
 
     #[test]

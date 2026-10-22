@@ -79,12 +79,24 @@ def tool(module, *args, quiet=False):
     return True, ""
 
 
+def user_dir(env=os.environ, windows=sys.platform == "win32"):
+    """The per-user folder, chosen like campaign::user_dir() in the game: XDG_DATA_HOME, then HOME/.local/share and
+    APPDATA; on Windows APPDATA first (shells such as Git Bash set HOME), unless only a HOME one exists already."""
+    if env.get("XDG_DATA_HOME"):
+        return Path(env["XDG_DATA_HOME"], "openprocyon")
+    home = env.get("HOME") and Path(env["HOME"], ".local/share/openprocyon")
+    appdata = env.get("APPDATA") and Path(env["APPDATA"], "openprocyon")
+    if windows and appdata and not (home and home.is_dir() and not appdata.is_dir()):
+        return appdata
+    return home or appdata or None
+
+
 def user_assets():
-    """The per-user asset folder, looked up in the same order as campaign::user_dir() in the game."""
-    for var, sub in (("XDG_DATA_HOME", ""), ("HOME", ".local/share"), ("APPDATA", "")):
-        if os.environ.get(var):
-            return Path(os.environ[var], sub, "openprocyon/assets")
-    sys.exit("no XDG_DATA_HOME, HOME or APPDATA to put the assets in: pass --out")
+    """The per-user asset folder the game reads."""
+    d = user_dir()
+    if not d:
+        sys.exit("no XDG_DATA_HOME, HOME or APPDATA to put the assets in: pass --out")
+    return d / "assets"
 
 
 def read_env(path):

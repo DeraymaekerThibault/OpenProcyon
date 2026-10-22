@@ -5,6 +5,8 @@ import os
 import unittest
 from pathlib import Path
 
+from tools.import_assets import user_dir
+
 
 def _find():
     if os.environ.get("PROCYON_ASSETS"):
@@ -12,12 +14,8 @@ def _find():
     checkout = Path(__file__).resolve().parents[1] / "assets"
     if (checkout / "ships").is_dir():
         return checkout
-    data = (
-        os.environ.get("XDG_DATA_HOME")
-        or (os.environ.get("HOME") and str(Path(os.environ["HOME"]) / ".local/share"))
-        or os.environ.get("APPDATA")
-    )
-    return Path(data) / "openprocyon/assets" if data else checkout
+    data = user_dir()
+    return data / "assets" if data else checkout
 
 
 ASSETS = _find()

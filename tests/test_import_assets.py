@@ -76,17 +76,26 @@ class ImportAssets(unittest.TestCase):
             self.assertEqual(import_assets.sys.argv, argv)
 
     def test_frozen_default_out_is_the_folder_the_game_reads(self):
-        env = {"XDG_DATA_HOME": "", "HOME": "", "APPDATA": "C:/Users/me/AppData"}
-        with mock.patch.dict(import_assets.os.environ, env):
-            self.assertEqual(
-                import_assets.user_assets(),
-                Path("C:/Users/me/AppData/openprocyon/assets"),
+        # Same order as campaign::user_dir() in the game (its test covers the same cases).
+        user_dir = import_assets.user_dir
+        with tempfile.TemporaryDirectory() as d:
+            env = {"HOME": str(Path(d, "h")), "APPDATA": str(Path(d, "a"))}
+            home, appdata = (
+                Path(d, "h/.local/share/openprocyon"),
+                Path(d, "a/openprocyon"),
             )
-        with mock.patch.dict(import_assets.os.environ, {**env, "HOME": "/home/me"}):
             self.assertEqual(
-                import_assets.user_assets(),
-                Path("/home/me/.local/share/openprocyon/assets"),
+                user_dir({**env, "XDG_DATA_HOME": "/x"}, True), Path("/x/openprocyon")
             )
+            self.assertEqual(user_dir(env, windows=False), home)
+            self.assertEqual(user_dir(env, windows=True), appdata)
+            # A HOME folder made earlier (Git Bash sets HOME) stays in use until an APPDATA one exists.
+            home.mkdir(parents=True)
+            self.assertEqual(user_dir(env, windows=True), home)
+            appdata.mkdir(parents=True)
+            self.assertEqual(user_dir(env, windows=True), appdata)
+            self.assertEqual(user_dir({"HOME": env["HOME"]}, windows=True), home)
+            self.assertIsNone(user_dir({}, windows=True))
 
 
 if __name__ == "__main__":
