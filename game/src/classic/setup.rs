@@ -108,7 +108,7 @@ fn build(mut commands: Commands, setup: Res<Setup>, assets: Res<AssetServer>, ro
 
 fn choose(p: &mut ChildSpawnerCommands, fonts: &Fonts, setup: &Setup) {
     if setup.found.is_empty() {
-        p.spawn(label(fonts, "No Steam install found on this computer. Type or paste the game folder below, or drop it on this window.", 15.0, DIM, false));
+        p.spawn(label(fonts, "No install found on this computer (Steam or disc). Type or paste the game folder below, or drop it on this window.", 15.0, DIM, false));
     } else {
         p.spawn(label(fonts, "Found on this computer:", 15.0, DIM, false));
         for (n, dir) in setup.found.iter().enumerate() {
