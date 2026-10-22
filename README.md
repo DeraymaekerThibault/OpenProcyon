@@ -14,8 +14,8 @@ missions 2-13 are first-pass. See `docs/fidelity-backlog.md`.
 
 ## Download and play
 
-No Rust or Python needed. Download the build for your system (Windows or Linux x86_64) from the repository's Actions page
-(the `release` workflow, artifacts `openprocyon-windows-x86_64` / `openprocyon-linux-x86_64`), unpack it into an empty folder
+No Rust or Python needed. Download the build for your system (Windows or Linux x86_64) from the
+[Releases page](https://github.com/DeraymaekerThibault/OpenProcyon/releases), unpack it into an empty folder
 and double-click `openprocyon` (`openprocyon.exe` on Windows). The first time, it shows an "Import your game" screen: it finds
 a Steam or disc install by itself (or type, paste or drop the game folder on the window), converts your copy once (read-only; a minute
 or two) into `%APPDATA%\openprocyon\assets` (Linux: `~/.local/share/openprocyon/assets`), then the game starts.
