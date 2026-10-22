@@ -17,8 +17,8 @@ IMPORTER_DATA = ["content/voice/events.json", "content/data/hud/bar.json"]
 PLAY = """OpenProcyon: an unofficial, open-source engine for Treasure Planet: Battle at Procyon (2002).
 This download contains no game content: you need your own copy of the original game.
 
-1. Start {game} (double-click it). The first time, it finds your install (Steam libraries, or type, paste or drop the
-   game folder) and converts it once (read-only, a minute or two) into {assets}, then the game starts.
+1. Start {game} (double-click it). The first time, it finds your install (Steam or disc install, or type, paste or drop
+   the game folder) and converts it once (read-only, a minute or two) into {assets}, then the game starts.
 2. Or convert from a terminal in this folder:
      {importer} --game "<path to Treasure Planet Battle at Procyon>"
    pass --out <dir> to put the assets elsewhere and set PROCYON_ASSETS to that folder.
