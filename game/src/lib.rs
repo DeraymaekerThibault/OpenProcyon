@@ -28,6 +28,7 @@ pub mod options_menu;
 pub mod panels;
 pub mod rules;
 pub mod scenario;
+pub mod setup;
 pub mod ship;
 pub mod smoke;
 pub mod sprites;
@@ -96,8 +97,9 @@ pub fn assets_dir() -> PathBuf {
     ASSETS.get_or_init(|| modding::overlay(&base_assets(), &[content_dir()])).clone()
 }
 
-/// Runs the game with one presentation (a view plugin such as the binary's `classic::plugin`).
-pub fn run(view: fn(&mut App)) {
+/// Runs the game with one presentation (a view plugin such as the binary's `classic::plugin`); without imported assets it opens
+/// the first-run import screen instead (`setup.rs`, drawn by `setup_view`), which starts the game again once the import is done.
+pub fn run(view: fn(&mut App), setup_view: fn(&mut App)) {
     let args: Vec<String> = std::env::args().collect();
     let script = args.iter().position(|a| a == "--script").map(|i| {
         args.get(i + 1).ok_or_else(|| "--script requires a name".to_owned()).and_then(|name| smoke::Script::parse(name)).unwrap_or_else(|err| {
@@ -108,12 +110,8 @@ pub fn run(view: fn(&mut App)) {
     let mods: Vec<PathBuf> = args.windows(2).filter(|w| w[0] == "--mod").map(|w| PathBuf::from(&w[1])).collect();
     let base = base_assets();
     if !base.join("ships").is_dir() {
-        eprintln!(
-            "No converted game assets in {}.\nThis remake needs your own copy of the original game. Import it once from the source checkout with:\n  python3 -m tools.import_assets --game <install dir> --out {}",
-            base.display(),
-            user_assets().unwrap_or(base.clone()).display()
-        );
-        std::process::exit(1);
+        eprintln!("No converted game assets in {}: opening the import screen.", base.display());
+        return setup::run(base, content_dir(), setup_view);
     }
     let layers: Vec<PathBuf> = std::iter::once(content_dir()).chain(mods).collect();
     let _ = ASSETS.set(modding::overlay(&base, &layers));

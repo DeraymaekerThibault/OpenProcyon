@@ -15,14 +15,15 @@ missions 2-13 are first-pass. See `docs/fidelity-backlog.md`.
 ## Download and play
 
 No Rust or Python needed. Download the build for your system (Windows or Linux x86_64) from the repository's Actions page
-(the `release` workflow, artifacts `openprocyon-windows-x86_64` / `openprocyon-linux-x86_64`), unpack it into an empty folder,
-then from a terminal in that folder:
+(the `release` workflow, artifacts `openprocyon-windows-x86_64` / `openprocyon-linux-x86_64`), unpack it into an empty folder
+and double-click `openprocyon` (`openprocyon.exe` on Windows). The first time, it shows an "Import your game" screen: it finds
+a Steam install by itself (or type, paste or drop the game folder on the window), converts your copy once (read-only; a minute
+or two) into `%APPDATA%\openprocyon\assets` (Linux: `~/.local/share/openprocyon/assets`), then the game starts.
+
+From a terminal the same steps are:
 
 ```sh
-# 1. Convert your copy of the game once (read-only; takes a minute or two) into %APPDATA%\openprocyon\assets
-#    (Linux: ~/.local/share/openprocyon/assets).
-./openprocyon-import --game "/path/to/Treasure Planet Battle at Procyon"
-# 2. Play (Windows: openprocyon.exe, or double-click it)
+./openprocyon-import --game "/path/to/Treasure Planet Battle at Procyon"   # convert once
 ./openprocyon
 ./openprocyon --mission 1     # straight into Mission 1
 ```
