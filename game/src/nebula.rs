@@ -588,7 +588,7 @@ fn update(
         }
         if let Some(mut sink) = sink {
             let distance = (cam.distance(centre) - c.radius).max(0.0);
-            sink.set_volume(Volume::Linear(0.25 * (1.0 - distance / c.sound_distance).clamp(0.0, 1.0)));
+            sink.set_volume(Volume::Linear(0.25 * (1.0 - distance / c.sound_distance).clamp(0.0, 1.0) * crate::menu::volume(crate::menu::Setting::Effects)));
         }
     }
 }

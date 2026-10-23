@@ -109,7 +109,11 @@ fn toggle(
     let half = map["world_half"].as_f64().unwrap_or(1000.0) as f32;
     let backdrop = cfg.map.clone().filter(|_| map["backdrop"].is_string());
     let root = commands.spawn((Starmap { opened: time.elapsed_secs(), half, backdrop }, crate::Scenario)).id();
-    commands.spawn((AudioPlayer::new(assets.load(crate::audio::sound("hud_map_backgroundloop"))), PlaybackSettings::LOOP, ChildOf(root)));
+    commands.spawn((
+        AudioPlayer::new(assets.load(crate::audio::sound("hud_map_backgroundloop"))),
+        PlaybackSettings::LOOP.with_volume(bevy::audio::Volume::Linear(crate::menu::volume(crate::menu::Setting::Effects))),
+        ChildOf(root),
+    ));
     sfx.write(Sfx::ui("HUD_Map_Open"));
 }
 

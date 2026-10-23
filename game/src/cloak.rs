@@ -74,7 +74,7 @@ fn fade(
                         .spawn((
                             ChildOf(e),
                             AudioPlayer::new(assets.load(crate::audio::sound("IC_Sub_CloakingLoop"))),
-                            PlaybackSettings::LOOP.with_volume(bevy::audio::Volume::Linear(0.3)),
+                            PlaybackSettings::LOOP.with_volume(bevy::audio::Volume::Linear(0.3 * crate::menu::volume(crate::menu::Setting::Effects))),
                         ))
                         .id(),
                 );

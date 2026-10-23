@@ -47,8 +47,8 @@ pub(super) static DIFFICULTY: std::sync::atomic::AtomicU8 = std::sync::atomic::A
 pub fn difficulty() -> u8 {
     DIFFICULTY.load(std::sync::atomic::Ordering::Relaxed)
 }
-/// Volume factor 0..1 of a channel (`Setting::Music`, `Effects` or `Dialogue`), for code that spawns sounds; the master volume is
-/// Bevy's global volume.
+/// Volume factor 0..1 of a channel (`Setting::Music`, `Effects` or `Dialogue`) times the master volume, for code that spawns
+/// sounds or sets a playing sound's volume. Not Bevy's global volume: that only reaches sounds when they start.
 pub fn volume(c: Setting) -> f32 {
     let i = match c {
         Setting::Music => 1,
@@ -56,7 +56,12 @@ pub fn volume(c: Setting) -> f32 {
         Setting::Dialogue => 3,
         _ => 0,
     };
-    CHANNELS[i].load(std::sync::atomic::Ordering::Relaxed) as f32 / 10.0
+    let level = |i: usize| CHANNELS[i].load(std::sync::atomic::Ordering::Relaxed);
+    mix(level(0), (i > 0).then(|| level(i)))
+}
+/// Master level times a channel level (0..10 each; no channel: the master alone), as a 0..1 factor.
+fn mix(master: u8, channel: Option<u8>) -> f32 {
+    master as f32 / 10.0 * channel.map_or(1.0, |c| c as f32 / 10.0)
 }
 /// Particle emission factor of the effect detail option.
 pub fn detail_scale() -> f32 {
@@ -133,12 +138,11 @@ impl Settings {
     }
 }
 
-/// Pushes the options into the running app: global volume, channel factors, window mode, detail.
-pub(super) fn apply_settings(settings: Res<Settings>, mut global: ResMut<GlobalVolume>, mut window: Query<&mut Window, With<bevy::window::PrimaryWindow>>) {
+/// Pushes the options into the running app: volume levels, window mode, detail.
+pub(super) fn apply_settings(settings: Res<Settings>, mut window: Query<&mut Window, With<bevy::window::PrimaryWindow>>) {
     if !settings.is_changed() {
         return;
     }
-    global.volume = bevy::audio::Volume::Linear(settings.master as f32 / 10.0);
     for (i, v) in [settings.master, settings.music, settings.effects, settings.dialogue].into_iter().enumerate() {
         CHANNELS[i].store(v, std::sync::atomic::Ordering::Relaxed);
     }
@@ -150,4 +154,13 @@ pub(super) fn apply_settings(settings: Res<Settings>, mut global: ResMut<GlobalV
             w.mode = mode;
         }
     }
+}
+
+#[cfg(test)]
+#[test]
+fn master_volume_scales_every_channel_and_zero_mutes() {
+    assert_eq!(mix(10, Some(10)), 1.0);
+    assert_eq!(mix(5, Some(4)), 0.2);
+    assert_eq!(mix(0, Some(10)), 0.0);
+    assert_eq!(mix(7, None), 0.7);
 }

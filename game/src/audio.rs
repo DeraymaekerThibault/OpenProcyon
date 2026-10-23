@@ -121,8 +121,15 @@ fn ambience(
     let want = mission.is_some_and(|m| m.script.abyss);
     match (*abyss, want) {
         (None, true) => {
-            *abyss =
-                Some(commands.spawn((crate::Scenario, AudioPlayer::new(assets.load(sound("Ambience_Black_Hole"))), PlaybackSettings::LOOP.with_volume(Volume::Linear(0.5)))).id());
+            *abyss = Some(
+                commands
+                    .spawn((
+                        crate::Scenario,
+                        AudioPlayer::new(assets.load(sound("Ambience_Black_Hole"))),
+                        PlaybackSettings::LOOP.with_volume(Volume::Linear(0.5 * crate::menu::volume(crate::menu::Setting::Effects))),
+                    ))
+                    .id(),
+            );
         }
         (Some(e), false) => {
             commands.entity(e).try_despawn();
