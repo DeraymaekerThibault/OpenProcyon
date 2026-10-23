@@ -287,9 +287,10 @@ pub fn uninstall_dirs(output: &str) -> Vec<PathBuf> {
         for value in ["DisplayIcon", "UninstallString"].into_iter().filter_map(get) {
             let quoted: Vec<&str> = value.split('"').skip(1).step_by(2).collect();
             let paths = if quoted.is_empty() { vec![value.split(',').next().unwrap_or("").trim()] } else { quoted };
-            for path in paths.into_iter().filter(|p| !p.is_empty()).map(PathBuf::from) {
-                out.extend(path.parent().map(Path::to_path_buf));
-                out.push(path);
+            for path in paths.into_iter().filter(|p| !p.is_empty()) {
+                // Registry paths use '\'; split by hand so the parent is also found when this runs (or is tested) off Windows.
+                out.extend(path.rsplit_once(['\\', '/']).map(|(dir, _)| PathBuf::from(dir)));
+                out.push(PathBuf::from(path));
             }
         }
     }
