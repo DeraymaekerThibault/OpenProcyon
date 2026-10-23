@@ -24,6 +24,8 @@ This download contains no game content: you need your own copy of the original g
    pass --out <dir> to put the assets elsewhere and set PROCYON_ASSETS to that folder.
    Then run {game} (add --mission 1 to go straight into Mission 1).
 
+OpenProcyon is free software under the GNU GPL v3.0 or later (LICENSE); source code:
+https://github.com/DeraymaekerThibault/OpenProcyon
 content/README.md lists the licences of the files in content/ (fonts, hand-written data).
 Not affiliated with or endorsed by Disney or the original developers.
 """
@@ -70,6 +72,7 @@ def main(argv):
     importer = freeze_importer(dist / "pyinstaller")
     shutil.copy2(game, out)
     shutil.copy2(importer, out)
+    shutil.copy2(REPO / "LICENSE", out)
     # content/ ships with the code; its README records each file's licence and travels with it.
     shutil.copytree(REPO / "content", out / "content")
     windows = sys.platform == "win32"

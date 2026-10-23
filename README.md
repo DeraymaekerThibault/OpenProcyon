@@ -68,4 +68,6 @@ Fonts: URW base35 (Z003, Nimbus Sans), AGPL with font exception.
 
 ## License
 
-To be decided before the repository is made public.
+OpenProcyon's code and own files are licensed under the GNU General Public License v3.0 or later ([LICENSE](LICENSE)).
+Third-party files in `content/` keep their own licences, listed in `content/README.md`. The licence covers this project's
+work only, never the original game or anything imported from it.
