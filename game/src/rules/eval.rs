@@ -173,6 +173,8 @@ pub enum Fx {
 pub struct Script {
     pub(super) rules: Vec<Rule>,
     pub(super) fired: Vec<bool>,
+    /// Rules that fired at least once, repeating ones included (the autoplay report lists the others).
+    pub(super) ran: Vec<bool>,
     pub(super) init_done: bool,
     pub time: f32,
     pub(super) flags: HashMap<String, bool>,
@@ -405,6 +407,7 @@ impl Script {
         Script {
             rules,
             fired: vec![false; n],
+            ran: vec![false; n],
             init_done: false,
             time: 0.0,
             flags: HashMap::new(),
@@ -631,6 +634,10 @@ impl Script {
     #[cfg(test)]
     pub fn queue_speech(&mut self, name: &str) {
         self.queue.push_back(name.into());
+    }
+    /// Names of the rules that have not fired yet, in script order. The opening NIS rules are left out: briefing.rs plays them.
+    pub fn never_fired(&self) -> Vec<&str> {
+        self.rules.iter().zip(&self.ran).filter(|(r, ran)| !**ran && !opening_rule(&r.name)).map(|(r, _)| r.name.trim()).collect()
     }
     pub fn tasks_text(&self) -> String {
         self.tasks
@@ -1108,7 +1115,7 @@ impl Script {
         let rules = std::mem::take(&mut self.rules);
         for (i, r) in rules.iter().enumerate() {
             // The opening NIS camera/speech rules are replaced by briefing.rs (which marks its speech as played).
-            if self.fired[i] || r.name.starts_with("Opening NIS") || r.name.starts_with("START Opening NIS") {
+            if self.fired[i] || opening_rule(&r.name) {
                 continue;
             }
             let mut ok = true;
@@ -1123,6 +1130,7 @@ impl Script {
             if r.once {
                 self.fired[i] = true;
             }
+            self.ran[i] = true;
             info!("t={:.1} rule #{i} fired: {}", self.time, r.name.trim());
             for a in &r.acts {
                 let from = out.len();
@@ -1153,6 +1161,10 @@ impl Script {
         }
         (out, voice)
     }
+}
+
+fn opening_rule(name: &str) -> bool {
+    name.starts_with("Opening NIS") || name.starts_with("START Opening NIS")
 }
 
 pub fn locked(m: Option<&Mission>) -> bool {

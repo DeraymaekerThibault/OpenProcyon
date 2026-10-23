@@ -710,3 +710,17 @@ fn full_tutorial_camera_objective_clears_by_timer_or_by_leaving_the_start_area()
         }
     }
 }
+
+#[test]
+fn never_fired_lists_rules_that_did_not_fire_once_repeating_ones_included() {
+    let timer = serde_json::json!({"Type": "Timer Condition", "Timer Name": "never started", "Equivalence": ">", "Time in seconds": 1});
+    let data = serde_json::json!({"rules": [
+        {"name": "Every frame", "Run Once": false, "conditions": [], "actions": []},
+        {"name": "Waits ", "conditions": [timer], "actions": []},
+        {"name": "Opening NIS 1", "conditions": [timer], "actions": []},
+    ], "ships": [], "volumes": null, "environment": {}});
+    let mut sc = Script::new(&data, Value::Null);
+    assert_eq!(sc.never_fired(), ["Every frame", "Waits"]);
+    sc.step(&[], 0.1, false);
+    assert_eq!(sc.never_fired(), ["Waits"]);
+}

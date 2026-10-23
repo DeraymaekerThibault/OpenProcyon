@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help run check fmt test-python shot smokes assets
+.PHONY: help run check fmt test-python shot smokes autoplay assets
 
 help:
 	@printf '%s\n' \
@@ -9,6 +9,7 @@ help:
 	  'make test-python                  Fast parser/exporter tests (no Rust build)' \
 	  'make shot OUT=local/ui.png [ARGS="--shot-frame 80 --late-frame 0"]' \
 	  'make smokes [ARGS=fleet]          Run the documented --script smokes (needs a display or Xvfb; ~20 s each)' \
+	  'make autoplay [ARGS=1]            Play campaign missions unattended and summarise what broke (long: ~mission length each)' \
 	  'make assets ARGS="--game <install dir>"  Import your copy of the game (once; again after exporter changes)'
 
 run:
@@ -31,6 +32,9 @@ shot:
 
 smokes:
 	tools/smokes.sh $(ARGS)
+
+autoplay:
+	python3 -m tools.autoplay $(ARGS)
 
 assets:
 	python3 -m tools.import_assets $(ARGS)

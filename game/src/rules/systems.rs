@@ -71,6 +71,7 @@ pub fn plugin(app: &mut App) {
         (
             update.after(crate::briefing::update).before(crate::input),
             crate::smoke::screenshot_hooks.after(update),
+            crate::smoke::autoplay_end.after(update),
             mission_ai.after(update).before(crate::ship::fleet_follow),
             leash_player.after(update).before(crate::sail),
             presentation.after(nis_camera),

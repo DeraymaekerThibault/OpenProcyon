@@ -9,6 +9,9 @@ Work from the repository root with the Python virtual environment active. Use `m
 3. Add a small regression test for new logic. Prefer synthetic parser tests and pure mission-rule tests over long simulations.
 4. Run the relevant tests while iterating, then `make check` before committing.
 5. For ECS wiring or UI changes, also run a screenshot smoke test. Unit tests do not detect every Bevy query conflict or layout problem. `make smokes` runs every documented smoke with its arguments (`tools/smokes.sh`; add new smokes to its list).
+   `make autoplay [ARGS="1 2"]` (`tools/autoplay.py`) plays campaign missions with the `--script mission` autopilot and prints a
+   table per mission: outcome (won, lost, time limit, stuck in NIS, panic), peak entities/particles, slowest frame and how many
+   mission rules never fired (named in the log). It finds crashes and soft-locks, not fidelity problems.
 6. Review `git diff --check` and `git diff --stat`. Never commit converted assets (`assets/` is git-ignored).
 
 ```sh

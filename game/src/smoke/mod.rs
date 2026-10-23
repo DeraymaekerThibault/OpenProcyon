@@ -132,3 +132,27 @@ pub fn screenshot_hooks(mut commands: Commands, time: Res<Time>, mission: Res<Mi
         }
     }
 }
+
+/// Game seconds a single NIS may run before autoplay calls it stuck.
+const STUCK_NIS: f32 = 300.0;
+
+/// PROCYON_AUTOPLAY=<game seconds> (with `--script mission`, see tools/autoplay.py): when the mission ends, an NIS runs past
+/// `STUCK_NIS` or the time limit passes, log one `autoplay end` line (outcome and the rules that never fired) and quit.
+pub fn autoplay_end(time: Res<Time>, mission: Res<Mission>, mut nis: Local<f32>, mut since_end: Local<f32>) {
+    static LIMIT: std::sync::OnceLock<Option<f32>> = std::sync::OnceLock::new();
+    let Some(limit) = *LIMIT.get_or_init(|| std::env::var("PROCYON_AUTOPLAY").ok().and_then(|v| v.parse().ok())) else { return };
+    let sc = &mission.script;
+    *nis = if sc.nis && mission.opening.is_none() { *nis + time.delta_secs() } else { 0.0 };
+    if sc.ended.is_some() {
+        *since_end += time.delta_secs(); // let the end rules (score, speech) run before reporting
+    }
+    let outcome = match &sc.ended {
+        Some((_, true)) if *since_end > 3.0 => "won",
+        Some((_, false)) if *since_end > 3.0 => "lost",
+        _ if *nis > STUCK_NIS => "stuck in NIS",
+        _ if sc.time > limit => "time limit",
+        _ => return,
+    };
+    info!("autoplay end outcome={outcome:?} time={:.0} never_fired={:?}", sc.time, sc.never_fired());
+    std::process::exit(0);
+}

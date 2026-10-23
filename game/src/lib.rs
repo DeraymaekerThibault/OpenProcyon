@@ -233,8 +233,9 @@ pub fn run(view: fn(&mut App), setup_view: fn(&mut App)) {
         .run();
 }
 
-fn setup(mut commands: Commands, cfg: Res<Config>, mut vtime: ResMut<Time<Virtual>>) {
-    set_time_scale(&mut vtime, cfg.speed); // --speed N runs the simulation faster for testing
+fn setup(mut commands: Commands, cfg: Res<Config>, mut vtime: ResMut<Time<Virtual>>, mut window: Single<&mut Window, With<bevy::window::PrimaryWindow>>) {
+    // --speed N runs the simulation faster for testing; without vsync, so a hidden window is not held to the compositor's pace.
+    set_game_speed(&mut vtime, &mut window, cfg.speed);
     commands.spawn((Camera3d::default(), Projection::Perspective(PerspectiveProjection { far: 20000.0, ..default() })));
     commands.spawn((DirectionalLight { illuminance: 9000.0, shadow_maps_enabled: false, ..default() }, Transform::from_xyz(30.0, 60.0, 20.0).looking_at(Vec3::ZERO, Vec3::Y)));
     commands.insert_resource(GlobalAmbientLight { color: Color::WHITE, brightness: 450.0, ..default() });
