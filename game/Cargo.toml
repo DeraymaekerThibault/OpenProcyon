@@ -23,3 +23,8 @@ opt-level = 1
 
 [profile.dev.package."*"]
 opt-level = 3
+
+# Player downloads: no debug symbols, thin LTO (#70).
+[profile.release]
+strip = true
+lto = "thin"

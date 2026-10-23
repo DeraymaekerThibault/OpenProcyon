@@ -1,0 +1,27 @@
+name: Observation from the original game
+description: A rule or number you measured in the original game (speed, range, timing, what the computer captains do).
+labels: [needs retail measurement]
+body:
+  - type: textarea
+    id: observation
+    attributes:
+      label: What you observed
+      description: Rules and numbers, in your own words.
+      placeholder: A Barque at Emergency Speed turns a full circle in about 40 s.
+    validations:
+      required: true
+  - type: textarea
+    id: source
+    attributes:
+      label: How to repeat it
+      description: Mission or skirmish map, difficulty, ships and crews, and what you did, so someone else can check it.
+    validations:
+      required: true
+  - type: input
+    id: settles
+    attributes:
+      label: Issue or PROVISIONAL value it settles
+      placeholder: "#39, or docs/re/movement.md: weave period"
+  - type: markdown
+    attributes:
+      value: Keep your videos and screenshots of the original to yourself. Describe what they show (see CONTRIBUTING.md).
