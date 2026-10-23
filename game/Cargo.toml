@@ -24,7 +24,6 @@ opt-level = 1
 [profile.dev.package."*"]
 opt-level = 3
 
-# Player downloads: no debug symbols, thin LTO (#70).
+# Player downloads: no debug symbols (#70). Thin LTO made both binaries larger (Linux 106 -> 109 MB, Windows 90 -> 96 MB).
 [profile.release]
 strip = true
-lto = "thin"
