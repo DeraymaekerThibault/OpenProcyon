@@ -2,6 +2,7 @@
 name = "openprocyon"
 version = "0.1.0"
 edition = "2024"
+license = "GPL-3.0-or-later"
 rust-version = "1.97.1" # Bevy 0.20
 
 [dependencies]
