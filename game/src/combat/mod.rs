@@ -150,8 +150,9 @@ fn engine_rate(ships: Query<(&Ship, &Health)>, mut q: Query<(&mut fx::Fx, &Child
     for (mut f, parent) in &mut q {
         if let Ok((ship, h)) = ships.get(parent.parent()) {
             // Thrust follows the engine order: dark at All Stop, brighter with each step up (PROVISIONAL curve).
+            // A ship held still (NIS freeze, docked) keeps its order but shows no thrust.
             let throttle = crate::ORDERS[ship.order].1;
-            f.emitting = !h.destroyed && throttle > 0.0;
+            f.emitting = !h.destroyed && throttle > 0.0 && ship.speed.abs() > 0.01;
             f.size_scale = 2.6; // PROVISIONAL: data size 1.6 gives a thread; the reference jet is about hull-wide
             f.rate_scale = 0.75 * (0.25 + 0.75 * throttle.min(1.25));
         }

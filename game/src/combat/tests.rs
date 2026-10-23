@@ -615,3 +615,38 @@ fn mine_laying_spells() {
     assert!(at(&close, 0.1) && at(&close, 10.0) && at(&close, 10.3) && at(&close, 25.0));
     assert!(run(false, 5.0, 30.0, 70.0).iter().all(|on| !on));
 }
+
+/// A ship frozen by an NIS (speed 0) keeps its engine order but shows no exhaust; it shows once the ship moves.
+#[test]
+fn engine_exhaust_needs_motion_not_just_an_order() {
+    let mut app = App::new();
+    app.init_resource::<FxLib>().insert_resource(Library::load(&assets_dir())).add_systems(Update, engine_rate);
+    let lib = Library::load(&assets_dir());
+    let c = lib.index("Ship_Navy_Torpedo");
+    let ship = Ship {
+        class: c,
+        side: Side::Player,
+        heading: 0.0,
+        speed: 0.0,
+        ang_vel: 0.0,
+        order: 2,
+        waypoints: vec![],
+        goal: None,
+        cap: 1.0,
+        throttle: None,
+        sail_energy: 1.0,
+        crew_speed: 1.0,
+        crew_turn: 1.0,
+    };
+    let s = app.world_mut().spawn((Transform::default(), ship, Health::new(&lib.classes[c]))).id();
+    let fx = app.world_mut().resource_scope(|world, fxl: Mut<FxLib>| {
+        spawn_engines(&mut world.commands(), &fxl, &lib, s, c, Transform::default());
+        world.flush();
+        world.query_filtered::<Entity, With<Engine>>().iter(world).next().expect("engine effect")
+    });
+    app.update();
+    assert!(!app.world().get::<fx::Fx>(fx).unwrap().emitting, "stopped ship with an engine order");
+    app.world_mut().get_mut::<Ship>(s).unwrap().speed = 5.0;
+    app.update();
+    assert!(app.world().get::<fx::Fx>(fx).unwrap().emitting);
+}
