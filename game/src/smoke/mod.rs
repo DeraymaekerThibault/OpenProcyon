@@ -133,16 +133,31 @@ pub fn screenshot_hooks(mut commands: Commands, time: Res<Time>, mission: Res<Mi
     }
 }
 
-/// Game seconds a single NIS may run before autoplay calls it stuck.
+/// Game seconds a single NIS may run, or the player's ship stay within `STUCK_RANGE` units of one spot, before autoplay calls it stuck.
 const STUCK_NIS: f32 = 300.0;
+const STUCK_RANGE: f32 = 50.0;
 
 /// PROCYON_AUTOPLAY=<game seconds> (with `--script mission`, see tools/autoplay.py): when the mission ends, an NIS runs past
-/// `STUCK_NIS` or the time limit passes, log one `autoplay end` line (outcome and the rules that never fired) and quit.
-pub fn autoplay_end(time: Res<Time>, mission: Res<Mission>, mut nis: Local<f32>, mut since_end: Local<f32>) {
+/// `STUCK_NIS`, the player's ship stops getting anywhere or the time limit passes, log one `autoplay end` line (outcome and the rules that never fired) and quit.
+pub fn autoplay_end(
+    time: Res<Time>,
+    mission: Res<Mission>,
+    player: Query<&Transform, With<crate::PlayerShip>>,
+    mut nis: Local<f32>,
+    mut since_end: Local<f32>,
+    mut still: Local<(Vec3, f32)>,
+) {
     static LIMIT: std::sync::OnceLock<Option<f32>> = std::sync::OnceLock::new();
     let Some(limit) = *LIMIT.get_or_init(|| std::env::var("PROCYON_AUTOPLAY").ok().and_then(|v| v.parse().ok())) else { return };
     let sc = &mission.script;
     *nis = if sc.nis && mission.opening.is_none() { *nis + time.delta_secs() } else { 0.0 };
+    // The autopilot has no path planning: a ship pinned on a coast stays within `STUCK_RANGE` of one spot.
+    if let Ok(tf) = player.single() {
+        if tf.translation.distance(still.0) > STUCK_RANGE || sc.nis {
+            *still = (tf.translation, 0.0);
+        }
+        still.1 += time.delta_secs();
+    }
     if sc.ended.is_some() {
         *since_end += time.delta_secs(); // let the end rules (score, speech) run before reporting
     }
@@ -150,6 +165,7 @@ pub fn autoplay_end(time: Res<Time>, mission: Res<Mission>, mut nis: Local<f32>,
         Some((_, true)) if *since_end > 3.0 => "won",
         Some((_, false)) if *since_end > 3.0 => "lost",
         _ if *nis > STUCK_NIS => "stuck in NIS",
+        _ if still.1 > STUCK_NIS => "player stuck",
         _ if sc.time > limit => "time limit",
         _ => return,
     };

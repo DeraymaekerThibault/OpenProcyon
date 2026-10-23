@@ -627,6 +627,7 @@ fn update(
         }
     }
     if cfg.script.as_deref() == Some("mission") {
+        mission.script.crew_screen = false; // keep the default crew and arms (missions 3+ open the screen after their first NIS)
         autopilot(&mission.script, &world, &mission.data, &rocks, &mut ships, &mut target);
     }
 }
