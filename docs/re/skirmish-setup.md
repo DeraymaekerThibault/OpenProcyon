@@ -82,10 +82,10 @@ skill can read N/A). Dragging one onto a post spends its cost (a 9-point captain
   replaces its last named crew member (PROVISIONAL). Drop returns the selected post's last named crew member. Weapon placement
   follows the measured rules and uses the original's messages (wrong mount, not enough points, Total Cost).
 - In battle the human fleet's named crew become `CrewPosts` (speed and rudder factors, boarding crews) through `SkirmishCrew`.
-  PROVISIONAL: skirmish gunnery accuracy ignores named gunners (only the campaign's best-gunner rule exists).
+  Named gunners (posts) already drive the human ships' accuracy and gun reload (`combat/gunnery.rs`, docs/re/gunnery.md).
 - Slot bar: five slots at a time with scroll arrows (`Skirmish::slot_scroll`), following the picked slot.
-- Not done: Load/Save Fleet/Crew/Arms, moving a posted
-  crew member by dragging its face, the ship-name drop-down, Launch/Ready greying, generic ("N/A") crews.
+- Posted crew move by dragging their face onto another post (the points come back and are re-spent; a failed drop puts them back).
+- Not done: Load/Save Fleet/Crew/Arms, the ship-name drop-down, Launch/Ready greying, generic ("N/A") crews.
 
 ## Remake notes before the 2026-10 measurements (partly superseded above)
 - Historical map: rows = playable players with their fixed fleet type/team and pre-placed fleets (exported to `ships` in the map

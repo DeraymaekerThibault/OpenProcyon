@@ -137,8 +137,9 @@ fn slot_bar(ctx: &Ctx, c: &mut ChildSpawnerCommands, fit: &FitView, lib: &Librar
 }
 
 /// A crew portrait: the named crew member's portrait, else the race's generic crew face; clicking selects the post's role.
-fn face(ctx: &Ctx, c: &mut ChildSpawnerCommands, centre: Vec2, slot: &Option<(String, String)>, race: &str, role: usize) {
-    let mut b = c.spawn((Interaction::None, Action::SelectPost(role), ctx.node(centre.x - FACE / 2.0, centre.y - FACE / 2.0, FACE, FACE)));
+fn face(ctx: &Ctx, c: &mut ChildSpawnerCommands, centre: Vec2, slot: &Option<(String, String)>, race: &str, (role, idx): (usize, usize)) {
+    let action = if slot.is_some() { Action::PostFace(role, idx) } else { Action::SelectPost(role) };
+    let mut b = c.spawn((Interaction::None, action, ctx.node(centre.x - FACE / 2.0, centre.y - FACE / 2.0, FACE, FACE)));
     b.with_children(|c| {
         let generic = format!("CrewFace_{race}_0");
         let name = slot.as_ref().map(|(_, p)| p.as_str()).filter(|p| sprite(ctx.hud, p, IDLE).is_some()).unwrap_or(&generic);
@@ -162,7 +163,7 @@ fn crew(ctx: &Ctx, c: &mut ChildSpawnerCommands, fit: &FitView, lib: &Library, s
     ] {
         if has(role) {
             ctx.text(c, "Univers10", &s(id), lx, 90.0, y - 3.0, false, tint(role));
-            face(ctx, c, Vec2::new(px, y), &post(role), &fit.race, role);
+            face(ctx, c, Vec2::new(px, y), &post(role), &fit.race, (role, 0));
         }
     }
     for (role, id, label_y) in [(4, "IDGS_TPFRONTENDTEXT03_ENGINEERS", 167.0), (5, "IDGS_TPFRONTENDTEXT03_RIGGERS", 228.0), (6, "IDGS_TPFRONTENDTEXT03_FIGHTERS", 288.0)] {
@@ -171,15 +172,15 @@ fn crew(ctx: &Ctx, c: &mut ChildSpawnerCommands, fit: &FitView, lib: &Library, s
         }
         ctx.text(c, "Univers10", &s(id), 45.0, 120.0, label_y, false, tint(role));
         for (i, slot) in fit.posts[role].iter().enumerate() {
-            face(ctx, c, Vec2::new(61.0 + i as f32 * 31.0, label_y + 29.5), slot, &fit.race, role);
+            face(ctx, c, Vec2::new(61.0 + i as f32 * 31.0, label_y + 29.5), slot, &fit.race, (role, i));
         }
     }
     // Gunners: the ship outline with a portrait at each gun bank's slot.
     ctx.text(c, "Univers10", &s("IDGS_TPFRONTENDTEXT03_GUNNERS"), 320.0, 80.0, 112.0, true, tint(0));
     outline(ctx, c, fit, lib);
     let gunners = fit.posts.first().map(Vec::as_slice).unwrap_or_default();
-    for ((bank, _), slot) in fit.banks.iter().zip(gunners) {
-        face(ctx, c, slot_centre(ctx, *bank), slot, &fit.race, 0);
+    for (k, ((bank, _), slot)) in fit.banks.iter().zip(gunners).enumerate() {
+        face(ctx, c, slot_centre(ctx, *bank), slot, &fit.race, (0, k));
     }
     // Stat bars: label at y 387, the retail bar below, filled red to green with the value.
     for (k, id) in ["MANEUVERABILITY", "SPEED", "REPAIR_RATE", "STRENGTH"].iter().enumerate() {

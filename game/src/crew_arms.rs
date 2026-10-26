@@ -237,6 +237,8 @@ pub enum Action {
     /// Scroll the slot bar by this many slots.
     Slots(i32),
     SelectPost(usize),
+    /// A face with a named crew member on it (role, index in the post): picks them up to move them; as a drop target it acts like its post.
+    PostFace(usize, usize),
     Assign(String),
     Reserve(String),
     Upgrade(String),
@@ -520,7 +522,7 @@ fn screen(
                 (choice.post, choice.page) = (0, 0);
                 Ok(())
             }
-            Action::SelectPost(i) => {
+            Action::SelectPost(i) | Action::PostFace(i, _) => {
                 (choice.post, choice.page) = (i, 0);
                 Ok(())
             }
@@ -712,6 +714,7 @@ fn skirmish_screen(
     mut carry: Local<Option<Carry>>,
     mut sort: Local<usize>,
     mut sort_open: Local<bool>,
+    mut origin: Local<Option<(usize, usize)>>,
 ) {
     use crate::menu::Screen;
     if *state.get() == Screen::Battle {
@@ -732,10 +735,16 @@ fn skirmish_screen(
         // Screenshot hook (`--script fleet-arms`, see menu.rs `fleet_hook`): open on the Arms tab.
         choice.arms = sk.arms_tab || std::env::args().any(|a| a == "fleet-arms");
     }
-    let pressed = if mouse.just_pressed(MouseButton::Left) { buttons.iter().find(|(_, i)| **i == Interaction::Pressed).map(|(a, _)| a.clone()) } else { None };
+    // A face is a drop target like its post while something is carried.
+    let as_target = |a: &Action, carrying: bool| match a {
+        Action::PostFace(r, _) if carrying => Action::SelectPost(*r),
+        a => a.clone(),
+    };
+    let carrying = carry.is_some();
+    let pressed = if mouse.just_pressed(MouseButton::Left) { buttons.iter().find(|(_, i)| **i == Interaction::Pressed).map(|(a, _)| as_target(a, carrying)) } else { None };
     // Released over a post or mount while carrying: the drop of a drag.
     let released_on = if mouse.just_released(MouseButton::Left) && carry.is_some() {
-        all.iter().find(|(a, i)| matches!(a, Action::SelectPost(_)) && **i != Interaction::None).map(|(a, _)| a.clone())
+        all.iter().find(|(a, i)| matches!(a, Action::SelectPost(_) | Action::PostFace(..)) && **i != Interaction::None).map(|(a, _)| as_target(a, true))
     } else {
         None
     };
@@ -766,7 +775,7 @@ fn skirmish_screen(
     if let Some(action) = action {
         // Anything but picking a row or placing what is carried drops the carried item.
         let placing = matches!(action, Action::SelectPost(_));
-        let picks = matches!(action, Action::PickCrew(_) | Action::PickWeapon(_));
+        let picks = matches!(action, Action::PickCrew(_) | Action::PickWeapon(_) | Action::PostFace(..));
         let held = if picks { None } else { carry.take().filter(|_| placing) };
         match action {
             Action::Ship(d) => {
@@ -792,7 +801,17 @@ fn skirmish_screen(
             Action::Slots(d) => sk_slots = Some(d),
             Action::Sort => *sort_open = !*sort_open,
             Action::SortBy(i) => (*sort, *sort_open) = (i.min(SORTS.len() - 1), false),
-            Action::PickCrew(id) => *carry = Some(Carry::Crew(id)),
+            Action::PickCrew(id) => {
+                *carry = Some(Carry::Crew(id));
+                *origin = None;
+            }
+            Action::PostFace(r, k) => {
+                choice.post = r;
+                if let Some(id) = slot.crew.get(choice.ship).and_then(|c| c[r.min(7)].get(k)).cloned() {
+                    *carry = Some(Carry::Crew(id));
+                    *origin = Some((r, k));
+                }
+            }
             Action::PickWeapon(gun) => *carry = Some(Carry::Gun(gun)),
             Action::Drop => {
                 if let Some(last) = slot.crew.get_mut(choice.ship).and_then(|c| c.get_mut(choice.post)).and_then(Vec::pop) {
@@ -808,18 +827,30 @@ fn skirmish_screen(
                         choice.post = i;
                         let cap = crate::boarding::counts(&class.name)[i.min(7)] as usize;
                         let crew = slot.crew_mut(choice.ship);
+                        // Moving a posted crew member lifts them off their post first (their points come back).
+                        let moved = origin.take();
+                        if let Some((r, _)) = moved {
+                            crew[r].retain(|c| c != &id);
+                        }
+                        let back = if moved.is_some() { i64::from(crew_points(&id)) } else { 0 };
                         let refund = if crew[i].len() >= cap { crew[i].last().map_or(0, |l| i64::from(crew_points(l))) } else { 0 };
                         choice.message = if cap == 0 {
                             "This ship has no such post.".into()
-                        } else if i64::from(crew_points(&id)) > points + refund {
+                        } else if i64::from(crew_points(&id)) > points + refund + back {
                             "You do not have enough victory points.".into()
                         } else {
                             if crew[i].len() >= cap {
                                 crew[i].pop();
                             }
-                            crew[i].push(id);
+                            crew[i].push(id.clone());
                             String::new()
                         };
+                        if !choice.message.is_empty()
+                            && let Some((r, k)) = moved
+                        {
+                            let at = k.min(crew[r].len());
+                            crew[r].insert(at, id);
+                        }
                     }
                     // Fitting a weapon on a mount of the Arms tab.
                     Some(Carry::Gun(gun)) if choice.arms => {
@@ -857,6 +888,9 @@ fn skirmish_screen(
         sk.scroll_slots(d);
     }
     let Some(slot) = sk.slots.iter().find(|s| s.kind == crate::menu::Kind::Human) else { return };
+    if carry.is_none() {
+        *origin = None;
+    }
     let points = {
         // The budget after this frame's changes.
         let spent: i64 = slot
