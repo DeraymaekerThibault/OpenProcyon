@@ -485,14 +485,41 @@ pub fn capture_key(mut keys: ResMut<ButtonInput<KeyCode>>, mut cui: ResMut<CtrlU
 }
 
 /// The lobby / fleet-screen choices (everything that only edits the `Skirmish`).
-/// Auto Assign: adds the most expensive hull that still fits until the fleet is full or nothing fits.
-/// PROVISIONAL: the original's rule is not recovered (it mixed classes and spent every point, also on the Crew tab).
+/// Auto Assign. Measured on the original (docs/re/skirmish-setup.md): it fills the fleet with hulls that fit the points still left,
+/// mixing classes (300 points / 5 ships gave a Heavy Scout, a Heavy Escort and three Warsloops; 50 points two Torpedo Boats), then spends
+/// what remains on named crew until the counter reads 0. The choice among affordable hulls looked random: PROVISIONAL, here a fixed
+/// pseudo-random pick so the result repeats; crew go to the posts in order, best skill first.
 pub fn auto_assign(sk: &mut Skirmish, lib: &Library) {
+    let mut seed = u64::from(sk.victory_limit) * 31 + sk.fleet_size as u64 * 7 + 1;
     while let Some(h) = sk.human().filter(|h| h.fleet.len() < sk.fleet_size) {
         let left = sk.points_left(lib);
-        let Some(pick) = offered(lib, h.race).iter().position(|&c| i64::from(lib.classes[c].points) <= left) else { break };
-        sk.ship_pick = pick;
+        let fits: Vec<usize> = offered(lib, h.race).iter().enumerate().filter(|&(_, &c)| i64::from(lib.classes[c].points) <= left).map(|(row, _)| row).collect();
+        if fits.is_empty() {
+            break;
+        }
+        seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        sk.ship_pick = fits[(seed >> 33) as usize % fits.len()];
         apply(sk, lib, &Action::AddShip);
+    }
+    let Some(slot) = sk.slots.iter().position(|s| s.kind == Kind::Human) else { return };
+    let race = sk.slots[slot].race;
+    let name = RACES.iter().find(|r| r.0 == race).map_or("Navy", |r| r.1);
+    for ship in 0..sk.slots[slot].fleet.len() {
+        let class = &lib.classes[lib.index(&sk.slots[slot].fleet[ship])];
+        let caps = crate::boarding::counts(&class.name);
+        for role in 0..8 {
+            while sk.slots[slot].crew_mut(ship)[role].len() < caps[role] as usize {
+                let left = sk.points_left(lib);
+                let used: Vec<String> = sk.slots[slot].crew.iter().flatten().flatten().cloned().collect();
+                let skill = crate::crew_arms::post_skill_name(role);
+                let best = crate::crew_arms::roster(name, 0)
+                    .into_iter()
+                    .filter(|id| !used.contains(id) && i64::from(crate::crew_arms::crew_points(id)) <= left)
+                    .max_by(|a, b| crate::crew_arms::ability(a, skill).unwrap_or(0.0).total_cmp(&crate::crew_arms::ability(b, skill).unwrap_or(0.0)).then_with(|| b.cmp(a)));
+                let Some(id) = best else { break };
+                sk.slots[slot].crew_mut(ship)[role].push(id);
+            }
+        }
     }
 }
 
@@ -893,6 +920,23 @@ mod tests {
         apply(&mut sk, &lib, &Action::DropShip);
         assert!(sk.slots[0].crew_at(&id).is_none(), "dropping a ship returns its crew");
         assert_eq!(sk.points_left(&lib), 300);
+    }
+    #[test]
+    fn auto_assign_mixes_hulls_that_fit_and_spends_the_rest_on_crew() {
+        let lib = Library::load(&assets_dir());
+        let mut sk = skirmish("diablo_straight");
+        auto_assign(&mut sk, &lib);
+        let h = &sk.slots[0];
+        assert_eq!(h.fleet.len(), 5, "a 300-point budget fills five slots");
+        assert!(h.fleet.iter().any(|n| n != &h.fleet[0]), "classes are mixed");
+        assert!(h.crew.iter().flatten().flatten().count() > 0, "leftover points buy named crew");
+        let left = sk.points_left(&lib);
+        assert!((0..30).contains(&left), "nearly everything is spent: {left}");
+        // A tiny budget buys the few cheap hulls that fit.
+        let mut sk = skirmish("diablo_straight");
+        sk.victory_limit = 50;
+        auto_assign(&mut sk, &lib);
+        assert!(sk.slots[0].fleet.len() >= 1 && sk.points_left(&lib) >= 0);
     }
     #[test]
     fn slot_bar_shows_five_slots_and_follows_the_picked_one() {

@@ -49,9 +49,13 @@ the 3D preview and enables *Add*. Adding puts it in the next free fleet slot, se
 ship, the list highlight stays) and enables Drop, Crew and Arms. The slot bar shows five slots at a time with scroll arrows even when the
 limit is higher. "Current Victory Points" falls by the ship's cost on Add. Leaving with points unspent asks "You have N victory points
 remaining. Would you like to continue?" with Auto Assign / Cancel / Continue.
-- *Auto Assign* on the Crew tab filled the whole fleet: it kept the one ship, added more hulls (mixed classes, not simply the most
-  expensive) up to the fleet limit and spent every point (it ended at 0), crewing them with generic crew. The exact choice rule is not
-  recovered (PROVISIONAL).
+- *Auto Assign* (the same button on the Ships, Crew and Arms tabs) on an empty Navy fleet: 300 points / 5 ships gave a Heavy Scout (90),
+  a Heavy Escort (62) and three Warsloops (40), the counter ending at 0 although the hulls cost 272; 50 points / 5 ships gave two Torpedo
+  Boats (19 each), counter 0; 100 points / 1 ship a Cutter (58), counter 0; 1000 points / 10 ships began Fast Frigate 100, three
+  Assault Cutters 70, Frigate 131 and left 1 point. So it fills the fleet limit with hulls that fit what is left, mixing classes
+  (later picks get cheaper as the budget drains), then spends the remainder on named crew (the posts showed distinct portraits). The
+  pick among affordable hulls looked random: PROVISIONAL. The remake uses a fixed pseudo-random pick and gives the leftover to the best
+  affordable crew per post.
 
 **Arms tab.** A top-down ship outline with one icon per selectable weapon bank (a mount of several guns is one bank). Clicking a bank
 shows a tooltip "Heavy Mount / 4 Guns" and the list *Available Weapons* for that mount type, the fitted gun highlighted, with its name,
@@ -80,7 +84,7 @@ skill can read N/A). Dragging one onto a post spends its cost (a 9-point captain
 - In battle the human fleet's named crew become `CrewPosts` (speed and rudder factors, boarding crews) through `SkirmishCrew`.
   PROVISIONAL: skirmish gunnery accuracy ignores named gunners (only the campaign's best-gunner rule exists).
 - Slot bar: five slots at a time with scroll arrows (`Skirmish::slot_scroll`), following the picked slot.
-- Not done: Load/Save Fleet/Crew/Arms, Auto Assign's real rule (also on these tabs), moving a posted
+- Not done: Load/Save Fleet/Crew/Arms, moving a posted
   crew member by dragging its face, the ship-name drop-down, Launch/Ready greying, generic ("N/A") crews.
 
 ## Remake notes before the 2026-10 measurements (partly superseded above)

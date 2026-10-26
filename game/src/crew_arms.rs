@@ -133,6 +133,11 @@ pub fn skill_factor(skill: f32) -> f32 {
     (1.075 + 0.5 * skill).min(1.5) / 1.125
 }
 
+/// The skill a post is rated on (`ROLES` order).
+pub fn post_skill_name(role: usize) -> &'static str {
+    SKILLS[role.min(SKILLS.len() - 1)]
+}
+
 /// What a crew member costs in victory points (0 when unknown).
 pub fn crew_points(id: &str) -> u32 {
     crew_data()[id]["points"].as_u64().and_then(|v| u32::try_from(v).ok()).unwrap_or(0)
