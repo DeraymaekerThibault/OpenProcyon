@@ -13,8 +13,8 @@ use crate::assets_dir;
 use crate::bindings::Bindings;
 use crate::combat::Library;
 use crate::menu::{
-    Action, BuildMenu, Cell, Choice, CtrlUi, FLEET_SIZE, InGame, Kind, MenuKey, MenuModel, MenuRoot, Page, RACES, RunButtons, SaveUi, Screen, Skirmish, VICTORY_LIMIT, menu_active,
-    offered, pretty, strings, text_of,
+    Action, BuildMenu, Cell, Choice, CtrlUi, FLEET_SIZE, InGame, Kind, MenuKey, MenuModel, MenuRoot, Page, RACES, RunButtons, SLIDER_KNOB, SLOT_BAR, SaveUi, Screen, ScrollKind,
+    ScrollTrack, Skirmish, SliderTrack, VICTORY_LIMIT, menu_active, offered, pretty, strings, text_of,
 };
 use crate::sprites::{BODY_FONT, Fonts, HudData, IDLE, MENU_SKIN, inset, sliced};
 
@@ -47,9 +47,14 @@ fn hover(
                 }
                 continue;
             }
+            // `crop:<left|right>:<w>:<sprite>`: only that part of the sprite (the slider's end caps).
+            let (name, cropped) = match name.strip_prefix("crop:").map(|c| c.splitn(3, ':').collect::<Vec<_>>()) {
+                Some(p) if p.len() == 3 => (p[2], Some((p[0] == "left", p[1].parse::<f32>().unwrap_or(0.0)))),
+                _ => (name.as_str(), None),
+            };
             if let (Ok(mut img), Some((sheet, r))) = (imgs.get_mut(*e), sprite(&hud, name, state)) {
                 img.image = assets.load(format!("hud/tex/{sheet}.png"));
-                img.rect = Some(inset(&sheet, r));
+                img.rect = Some(inset(&sheet, cropped.map_or(r, |(left, w)| crop(r, left, w))));
             }
         }
     }
@@ -92,7 +97,7 @@ impl Ctx<'_> {
         img.image_mode = NodeImageMode::Stretch;
         c.spawn((img, self.node(x, y, w, h))).id()
     }
-    fn hud_piece(&self, c: &mut ChildSpawnerCommands, name: &str, x: f32, y: f32, w: f32, h: f32) -> Option<(Entity, String)> {
+    pub(super) fn hud_piece(&self, c: &mut ChildSpawnerCommands, name: &str, x: f32, y: f32, w: f32, h: f32) -> Option<(Entity, String)> {
         let (sheet, r) = sprite(self.hud, name, IDLE)?;
         Some((self.image(c, &format!("hud/tex/{sheet}.png"), Some(inset(&sheet, r)), x, y, w, h, Color::WHITE), name.to_string()))
     }
@@ -343,7 +348,12 @@ fn build(
                             None
                         }
                         (Screen::CreateSkirmish, "Fleet Size Scrollbar Button") => {
-                            slider(&ctx, c, rect, FLEET_SIZE.fraction(sk.fleet_size as u32), Action::FleetSize(-1), Action::FleetSize(1));
+                            slider(&ctx, c, rect, FLEET_SIZE.fraction(sk.fleet_size as u32), Action::FleetSize(-1), Action::FleetSize(1), SliderTrack::Fleet);
+                            None
+                        }
+                        // Retail greys Launch Game until a computer opponent is in and (open maps) a fleet is assembled.
+                        (Screen::Lobby, "Open Next Screen Button") if sk.launch_error().is_some() => {
+                            disabled(&ctx, c, rect, &label, font);
                             None
                         }
                         (Screen::Lobby, "Open Next Screen Button") => Some(Action::Launch),
@@ -388,12 +398,12 @@ fn build(
                             selected_tab(&ctx, c, rect, &label, font);
                             None
                         }
-                        // PROVISIONAL: Crew and Arms both open the shared crew & arms editor until their retail screens are rebuilt.
                         (Screen::Fleet, "Open Arms Selection Screen" | "Open Crew Selection Screen" | "Drop Ship From Fleet Button" | "Add Ship To Fleet Button") => {
                             // Retail greys these out: Crew, Arms and Drop until the picked fleet slot holds a ship, Add until a hull type is clicked.
                             let (on, action) = match impl_ {
                                 "Add Ship To Fleet Button" => (sk.ship_chosen, Action::AddShip),
                                 "Drop Ship From Fleet Button" => (sk.slot_filled(), Action::DropShip),
+                                "Open Crew Selection Screen" => (sk.slot_filled(), Action::OpenCrew),
                                 _ => (sk.slot_filled(), Action::OpenArms),
                             };
                             if on {
@@ -431,7 +441,7 @@ fn build(
                             None
                         }
                         (Screen::CreateSkirmish, "Victory Points Scrollbar Button") => {
-                            slider(&ctx, c, rect, VICTORY_LIMIT.fraction(sk.victory_limit), Action::VictoryLimit(-1), Action::VictoryLimit(1));
+                            slider(&ctx, c, rect, VICTORY_LIMIT.fraction(sk.victory_limit), Action::VictoryLimit(-1), Action::VictoryLimit(1), SliderTrack::Victory);
                             None
                         }
                         // Other retail buttons (multiplayer, options, profiles, campaign...) are shown but not implemented.
@@ -685,6 +695,9 @@ pub(super) const GOLD: Color = Color::srgb(1.0, 0.796, 0.0);
 /// Map list as measured on the original: a framed panel (x 280..712, y 120..318) with a lighter header bar holding 'Historical Maps' /
 /// 'Open Maps' and 'Players' in UniversBold14, Univers12 rows 19 apart from y 172 with the playable player count at x 578, a teal bar
 /// behind the selected map, and the retail scrollbar at x 727..752. PROVISIONAL: header bar and selection colours are matched by eye.
+/// Rows of the Create Skirmish map list (the original's eight open maps fill it exactly).
+const MAP_ROWS: usize = 8;
+
 fn map_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, sk: &Skirmish, strings: &Value) {
     let (l, r) = (280.0, 712.0);
     stretched_window(ctx, c, [l, 120.0, r, 318.0]);
@@ -693,8 +706,8 @@ fn map_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, sk: &Skirmish, strings: &Va
     ctx.text(c, "UniversBold14", &text_of(strings, heading), 298.0, 240.0, 136.0, false, Color::WHITE);
     ctx.text(c, "UniversBold14", &text_of(strings, "IDGS_TPFRONTENDTEXT01_PLAYERS"), 540.0, 80.0, 136.0, true, Color::WHITE);
     let rows: Vec<_> = sk.maps.iter().enumerate().filter(|(_, m)| m.2 != sk.historical).collect();
-    for (row, (i, m)) in rows.iter().enumerate() {
-        let cy = 172.0 + row as f32 * 19.0;
+    for (row, (i, m)) in rows.iter().enumerate().skip(sk.map_scroll).take(MAP_ROWS) {
+        let cy = 172.0 + (row - sk.map_scroll) as f32 * 19.0;
         let mut b = c.spawn((Interaction::None, Action::PickMap(*i), ctx.node(l + 4.0, cy - 9.5, r - l - 8.0, 19.0)));
         b.insert(BackgroundColor(if *i == sk.selected { Color::srgba(0.2, 0.7, 0.8, 0.45) } else { Color::NONE }));
         b.with_children(|c| {
@@ -702,15 +715,7 @@ fn map_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, sk: &Skirmish, strings: &Va
             ctx.text(c, BODY_FONT, &m.3.to_string(), 278.0, 40.0, 9.5, true, Color::WHITE);
         });
     }
-    scrollbar(ctx, c, [727.0, 155.0, 752.0, 322.0], 0.0, 1.0);
-}
-
-/// An explicit region of a HUD sheet stretched over a box (for art the sprite table has no entry for).
-pub(super) fn sheet_piece(ctx: &Ctx, c: &mut ChildSpawnerCommands, sheet: &str, rect: Rect, [l, t, r, b]: [f32; 4]) {
-    let mut img = ImageNode::new(ctx.assets.load(format!("hud/tex/{sheet}.png")));
-    img.rect = Some(inset(sheet, rect));
-    img.image_mode = NodeImageMode::Stretch;
-    c.spawn((img, ctx.node(l, t, r - l, b - t)));
+    scrollbar(ctx, c, [727.0, 155.0, 752.0, 322.0], ScrollKind::Maps, rows.len(), MAP_ROWS, sk.map_scroll);
 }
 
 /// The current tab of a Ships / Crew / Arms row: the green `FrontEnd_Texts_Over_Button_Selected_*` button, not clickable.
@@ -748,7 +753,9 @@ pub(super) fn stretched_window(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r
 }
 
 /// The retail vertical scrollbar: track (`..._SLIDER_BACKGROUND_TOP/STRETCHED_CENTER/BOTTOM`) and a slider over the visible part.
-pub(super) fn scrollbar(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], start: f32, len: f32) {
+/// The retail scrollbar for a list of `total` rows of which `visible` show from row `first`: the thumb never gets shorter than its two
+/// end caps and stays inside the track, and pressing and dragging the track moves it (`menu::scroll_drag`, the same everywhere).
+pub(super) fn scrollbar(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], kind: ScrollKind, total: usize, visible: usize, first: usize) {
     let cap = |name: &str| sprite(ctx.hud, name, IDLE).map_or(20.0, |(_, r)| r.height());
     let track = |c: &mut ChildSpawnerCommands, prefix: &str, t: f32, b: f32| {
         let (top, bottom) = (cap(&format!("{prefix}_TOP")), cap(&format!("{prefix}_BOTTOM")));
@@ -758,21 +765,68 @@ pub(super) fn scrollbar(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [
     };
     track(c, "FRONTEND_SCROLLBAR_SLIDER_BACKGROUND", t, b);
     let h = b - t;
-    track(c, "FRONTEND_SCROLLBAR_SLIDER", t + h * start, t + h * (start + len).min(1.0));
+    let min = cap("FRONTEND_SCROLLBAR_SLIDER_TOP") + cap("FRONTEND_SCROLLBAR_SLIDER_BOTTOM");
+    let share = if total == 0 { 1.0 } else { (visible as f32 / total as f32).min(1.0) };
+    let len = (share * h).max(min).min(h);
+    let pos = first as f32 / total.saturating_sub(visible).max(1) as f32;
+    let top = t + pos.clamp(0.0, 1.0) * (h - len);
+    track(c, "FRONTEND_SCROLLBAR_SLIDER", top, top + len);
+    c.spawn((Interaction::None, ScrollTrack { kind, total, visible, thumb: len / h }, bevy::ui::RelativeCursorPosition::default(), ctx.node(l, t, r - l, h)));
 }
 
-/// The Create Skirmish slider: round arrow buttons around a 130 px track with a knob (measured on a retail screenshot: arrows 34 px,
-/// the track between them, the knob 22 px travelling the track minus its own width). The arrows step the value.
-fn slider(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], fraction: f32, dec: Action, inc: Action) {
-    let cy = (t + b) / 2.0;
-    let (track_l, track_r) = (l + 34.0, r - 34.0);
-    let mid = (track_l + track_r) / 2.0;
-    sheet_piece(ctx, c, "fe_04", Rect::new(0.0, 66.0, 144.0, 99.0), [track_l, cy - 16.5, mid, cy + 16.5]);
-    sheet_piece(ctx, c, "fe_04", Rect::new(0.0, 165.0, 144.0, 198.0), [mid, cy - 16.5, track_r, cy + 16.5]);
-    let knob = track_l + 11.0 + fraction * (track_r - track_l - 22.0);
-    piece(ctx, c, "FrontEnd_Horizontal_Scrollbar_Slider", [knob - 11.0, cy - 11.0, knob + 11.0, cy + 11.0], (false, false));
-    arrow(ctx, c, [l, cy - 17.0, l + 34.0, cy + 17.0], "FrontEnd_Options_Menu_Select_Left_Button", dec);
-    arrow(ctx, c, [r - 34.0, cy - 17.0, r, cy + 17.0], "FrontEnd_Options_Menu_Select_Right_Button", inc);
+/// A cropped part of a button sprite: the left or right `w` px of `name` (all of its states share the crop). Returns its `Art` entry.
+fn crop_piece(ctx: &Ctx, c: &mut ChildSpawnerCommands, name: &str, left: bool, w: f32, [x, y, bw, bh]: [f32; 4]) -> Option<(Entity, String)> {
+    let (sheet, r) = sprite(ctx.hud, name, IDLE)?;
+    let e = ctx.image(c, &format!("hud/tex/{sheet}.png"), Some(inset(&sheet, crop(r, left, w))), x, y, bw, bh, Color::WHITE);
+    Some((e, format!("crop:{}:{w}:{name}", if left { "left" } else { "right" })))
+}
+fn crop(r: Rect, left: bool, w: f32) -> Rect {
+    if left { Rect::new(r.min.x, r.min.y, r.min.x + w, r.max.y) } else { Rect::new(r.max.x - w, r.min.y, r.max.x, r.max.y) }
+}
+
+/// The Create Skirmish slider: the scrollbar art whose rounded 33 px ends are the step buttons, a 134 px track between them and a
+/// knob that follows `fraction` (dragging the track moves it, see `menu::slider_drag`).
+fn slider(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], fraction: f32, dec: Action, inc: Action, kind: SliderTrack) {
+    const CAP: f32 = 33.0;
+    let (cy, half) = ((t + b) / 2.0, (r - l) / 2.0);
+    let top = cy - 16.5;
+    // The body: left half of the left piece, right half of the right piece, both idle.
+    for (name, left, x) in [("FrontEnd_Horizontal_Scrollbar_Background_Left", true, l), ("FrontEnd_Horizontal_Scrollbar_Background_Right", false, l + half)] {
+        if let Some((sheet, rect)) = sprite(ctx.hud, name, IDLE) {
+            ctx.image(c, &format!("hud/tex/{sheet}.png"), Some(inset(&sheet, crop(rect, left, half))), x, top, half, 33.0, Color::WHITE);
+        }
+    }
+    for (name, left, x, action) in [("FrontEnd_Horizontal_Scrollbar_Background_Left", true, l, dec), ("FrontEnd_Horizontal_Scrollbar_Background_Right", false, r - CAP, inc)] {
+        let mut parts = vec![];
+        let mut root = c.spawn((Interaction::None, action, crate::menu::ArrowButton { forward: !left }, ctx.node(x, top, CAP, 33.0)));
+        root.with_children(|c| parts.extend(crop_piece(ctx, c, name, left, CAP, [0.0, 0.0, CAP, 33.0])));
+        root.insert(Art(parts));
+    }
+    let track_w = r - l - 2.0 * CAP;
+    let mut parts = vec![];
+    let mut track = c.spawn((Interaction::None, kind, bevy::ui::RelativeCursorPosition::default(), ctx.node(l + CAP, top, track_w, 33.0)));
+    track.with_children(|c| {
+        let x = fraction * (track_w - SLIDER_KNOB);
+        parts.extend(ctx.hud_piece(c, "FrontEnd_Horizontal_Scrollbar_Slider", x, 5.5, SLIDER_KNOB, SLIDER_KNOB));
+    });
+    track.insert(Art(parts));
+}
+
+/// Behind an open pull-down's entries: the pull-down art is translucent, so the list needs a solid backing to read over what it covers.
+pub(super) const LIST_BACKING: Color = Color::srgb(0.03, 0.12, 0.3);
+
+/// The slot bar's end arrows (round scrollbar caps, 22 px): live while there are slots out of view on that side.
+pub(super) fn slot_arrows<A: Bundle>(ctx: &Ctx, c: &mut ChildSpawnerCommands, scroll: usize, limit: usize, action: impl Fn(i32) -> A) {
+    for (left, x, live) in [(true, 36.0, scroll > 0), (false, 402.0, scroll + SLOT_BAR < limit)] {
+        let name = if left { "FrontEnd_Horizontal_Scrollbar_Background_Left" } else { "FrontEnd_Horizontal_Scrollbar_Background_Right" };
+        let mut parts = vec![];
+        let mut root = c.spawn((Interaction::None, ctx.node(x, 507.0, 22.0, 22.0)));
+        if live {
+            root.insert(action(if left { -1 } else { 1 }));
+        }
+        root.with_children(|c| parts.extend(crop_piece(ctx, c, name, left, 33.0, [0.0, 0.0, 22.0, 22.0])));
+        root.insert(Art(parts));
+    }
 }
 
 /// A retail radio choice: check box (`FrontEnd_Check_Box_Ready` ticked / `_NotReady`) and its Univers12 label.
@@ -856,21 +910,25 @@ fn players_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, _rect: [f32; 4], sk: &S
     for (i, slot) in sk.slots.iter().enumerate() {
         let cy = 184.0 + i as f32 * 32.0;
         let me = slot.kind == Kind::Human;
-        let live = slot.kind != Kind::Closed;
+        let live = slot.kind.live();
         let base = match slot.race {
             2 => 10,
             3 => 20,
             _ => 0,
         };
         if live {
-            c.spawn(ctx.node(250.0, cy - 12.5, 28.0, 25.0)).with_children(|c| {
-                piece(ctx, c, &format!("FrontEnd_Flag_Small_Icon_{:02}", base + i % 10), [0.0, 0.0, 28.0, 25.0], (false, false));
+            let mut flag = c.spawn((ctx.node(250.0, cy - 12.5, 28.0, 25.0), Interaction::None));
+            if me {
+                flag.insert(Action::FlagPicker(true));
+            }
+            flag.with_children(|c| {
+                piece(ctx, c, &format!("FrontEnd_Flag_Small_Icon_{:02}", base + usize::from(slot.flag)), [0.0, 0.0, 28.0, 25.0], (false, false));
             });
         }
-        // Several live players on one team are told apart by a letter ('Pirates A', 'B', 'C'), as on original screenshots.
+        // Historical maps tell several live players of one team apart by a letter (Pirates A, B, C); open maps show the plain team name (measured on Border Dispute).
         let mates: Vec<usize> = sk.slots.iter().enumerate().filter(|(_, o)| o.kind.live() && o.team == slot.team && slot.team >= 0).map(|(k, _)| k).collect();
         let letter = match mates.iter().position(|&k| k == i) {
-            Some(n) if mates.len() > 1 && !sk.free_teams() => format!(" {}", (b'A' + n as u8) as char),
+            Some(n) if mates.len() > 1 && !open => format!(" {}", (b'A' + n as u8) as char),
             _ => String::new(),
         };
         let team = match usize::try_from(slot.team).ok().and_then(|n| teams.get(n)) {
@@ -897,9 +955,36 @@ fn players_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, _rect: [f32; 4], sk: &S
             pulldown_cell(ctx, c, [x0, cy - 14.5, x1, cy + 14.5], &label, false, action, drop);
         }
     }
+    if sk.flag_picker {
+        // Retail: a modal gold frame over the lobby with the fleet type's ten flags, two rows of five 75 apart; only a pick closes it.
+        let base = match sk.human().map_or(0, |h| h.race) {
+            2 => 10,
+            3 => 20,
+            _ => 0,
+        };
+        c.spawn((Interaction::None, bevy::ui::FocusPolicy::Block, Action::FlagPicker(true), ctx.node(0.0, 0.0, 800.0, 600.0), ZIndex(1)));
+        c.spawn((ctx.node(150.0, 175.0, 475.0, 245.0), ZIndex(2))).with_children(|c| {
+            ctx.image(c, "menu/frontenddialogscreen.png", None, 0.0, 0.0, 475.0, 245.0, Color::WHITE);
+            for k in 0..10usize {
+                let (x, y) = (87.0 + (k % 5) as f32 * 75.0 - 33.5, 76.0 + (k / 5) as f32 * 75.0 - 33.5);
+                // A flag another fleet of this type already flies is shown dimmed and cannot be taken.
+                let taken = sk.human().is_some_and(|h| sk.flag_taken(sk.slots.iter().position(|s| s.kind == Kind::Human).unwrap_or(0), h.race, k as u8));
+                let mut b = c.spawn((ctx.node(x, y, 67.0, 67.0), Interaction::None, bevy::ui::FocusPolicy::Block));
+                if !taken {
+                    b.insert(Action::PickFlag(k as u8));
+                }
+                b.with_children(|c| {
+                    piece(ctx, c, &format!("FrontEnd_Flag_Icon_{:02}", base + k), [0.0, 0.0, 67.0, 67.0], (false, false));
+                    if taken {
+                        c.spawn((ctx.node(0.0, 0.0, 67.0, 67.0), BackgroundColor(Color::srgba(0.0, 0.05, 0.15, 0.65))));
+                    }
+                });
+            }
+        });
+    }
     if let Some(cell) = sk.dropdown {
         // The open list sits on its cell: the current value first, the other entries 28 apart below (retail). A click elsewhere closes it.
-        let mut blocker = c.spawn((Interaction::None, Action::Dropdown(None), ctx.node(0.0, 0.0, 800.0, 600.0)));
+        let mut blocker = c.spawn((Interaction::None, bevy::ui::FocusPolicy::Block, Action::Dropdown(None), ctx.node(0.0, 0.0, 800.0, 600.0)));
         blocker.insert(ZIndex(1));
         let (x0, x1, row) = match cell {
             Cell::Player(i) => (287.0, 460.0, i),
@@ -916,7 +1001,7 @@ fn players_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, _rect: [f32; 4], sk: &S
                 Choice::Team(t) => team_label(&s, t),
             };
             let y = top + k as f32 * 28.0;
-            c.spawn((ctx.node(x0, y, x1 - x0, 28.0), ZIndex(2))).with_children(|c| {
+            c.spawn((ctx.node(x0, y, x1 - x0, 28.0), ZIndex(2), BackgroundColor(LIST_BACKING))).with_children(|c| {
                 pulldown_cell(ctx, c, [0.0, 0.0, x1 - x0, 28.0], &label, k == 0, Some(Action::Choose(cell, choice)), false);
             });
         }
@@ -939,7 +1024,7 @@ fn map_info_dialog(ctx: &Ctx, c: &mut ChildSpawnerCommands, sk: &Skirmish, strin
 
 /// A retail pull-down box (`FrontEnd_Left/Center/Right_PullDown_Background`, `_Selected` for the local player) with centred Univers10
 /// text and, for drop-downs, the `FrontEnd_PullDown_Arrow` at its right end.
-pub(super) fn pulldown_cell(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], label: &str, selected: bool, action: Option<Action>, arrow: bool) {
+pub(super) fn pulldown_cell(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], label: &str, selected: bool, action: Option<impl Bundle>, arrow: bool) {
     let sel = if selected { "_Selected" } else { "" };
     let mut root = c.spawn((ctx.node(l, t, r - l, b - t), Interaction::None));
     if let Some(a) = action {
@@ -972,8 +1057,7 @@ fn ship_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, _rect: [f32; 4], sk: &Skir
         b.insert(BackgroundColor(if sk.ship_chosen && row == sk.ship_pick { Color::srgba(0.2, 0.7, 0.8, 0.45) } else { Color::NONE }));
         b.with_children(|c| ctx.text(c, BODY_FONT, &class_name(lib, ci, strings), 20.0, 195.0, 9.5, false, Color::WHITE));
     }
-    let n = list.len().max(1) as f32;
-    scrollbar(ctx, c, [742.0, 330.0, 767.0, 505.0], sk.scroll as f32 / n, (SHIP_ROWS as f32 / n).min(1.0));
+    scrollbar(ctx, c, [742.0, 330.0, 767.0, 505.0], ScrollKind::Ships, list.len(), SHIP_ROWS, sk.scroll);
 }
 
 /// Fleet Select: the assembled fleet, two columns of four; the picked entry is the one Drop removes.
@@ -984,10 +1068,9 @@ fn fleet_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, _rect: [f32; 4], sk: &Ski
     let fleet = sk.human().map(|h| h.fleet.as_slice()).unwrap_or_default();
     // The bar's arrows are the round end buttons of the horizontal scrollbar art (the FrontEnd_Scroll_*_Button entries point at
     // an unrelated sheet region): the first 33 px of FrontEnd_Horizontal_Scrollbar_Background_Left, the last 33 of _Right.
-    sheet_piece(ctx, c, "fe_04", Rect::new(0.0, 66.0, 33.0, 99.0), [36.0, 507.0, 58.0, 529.0]);
-    sheet_piece(ctx, c, "fe_04", Rect::new(111.0, 165.0, 144.0, 198.0), [402.0, 507.0, 424.0, 529.0]);
-    for i in 0..5 {
-        let x = 75.0 + i as f32 * 65.0;
+    slot_arrows(ctx, c, sk.slot_scroll, sk.fleet_size, Action::SlotScroll);
+    for k in 0..SLOT_BAR {
+        let (i, x) = (sk.slot_scroll + k, 75.0 + k as f32 * 65.0);
         let mut b = c.spawn((Interaction::None, ctx.node(x, 488.0, 60.0, 62.0)));
         if i < fleet.len() {
             b.insert(Action::PickFleet(i));
@@ -1057,7 +1140,16 @@ fn ship_info(ctx: &Ctx, c: &mut ChildSpawnerCommands, _rect: [f32; 4], sk: &Skir
 /// Mouse wheel scrolls the Ship Types Available list.
 fn wheel(mut wheel: MessageReader<bevy::input::mouse::MouseWheel>, state: Res<State<Screen>>, mut sk: ResMut<Skirmish>, lib: Res<Library>) {
     let dy: f32 = wheel.read().map(|e| e.y).sum();
-    if *state.get() != Screen::Fleet || dy == 0.0 {
+    if dy == 0.0 {
+        return;
+    }
+    if *state.get() == Screen::CreateSkirmish {
+        let n = sk.maps.iter().filter(|m| m.2 != sk.historical).count();
+        let max = n.saturating_sub(MAP_ROWS);
+        sk.map_scroll = if dy > 0.0 { sk.map_scroll.saturating_sub(1) } else { (sk.map_scroll + 1).min(max) };
+        return;
+    }
+    if *state.get() != Screen::Fleet {
         return;
     }
     let n = sk.human().map_or(0, |h| offered(&lib, h.race).len());

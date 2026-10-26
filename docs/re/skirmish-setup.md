@@ -32,13 +32,18 @@ described in our own words.
 Limit : N". The lobby repeats both numbers (left panel) and the Fleet screen's "Current Victory Points" starts at the limit. The budget
 is the same for every side (the computer builds its fleet inside it, so a lower limit picks cheaper classes: issue #80).
 
+**Team column on open team maps.** With two fleets per side (Border Dispute: Navy, Procyon, Navy, Procyon) the original shows the plain team
+name on every row ("Navy", "Procyon"), no A / B letters, and gives each fleet its own flag. Slot order alternates the sides. Historical maps
+keep the letters.
+
 **Lobby on an open map.** You alone; the other seven slots start *Open*. Each slot's player cell is a pull-down: a Computer slot lists
 Computer / Open / Close, an Open slot Open / Close / Computer (the current value first). A slot turned back to Open or Closed shows no
 fleet or team. *Launch Game* and *I'm Ready* are greyed until the setup is valid (a computer opponent and an assembled fleet; the
 exact trigger of each is PROVISIONAL).
 - Free-for-all maps (Diablo Strait ...): your fleet type starts as Navy, team 1. The fleet cell is a pull-down (Navy / Pirate /
-  Procyon) and the team cell a pull-down of Team 1 to Team 8, for you and for computers alike. A newly added computer was seen as
-  Pirate, Team 2 beside a Navy, Team 1 player (the rule for later ones is PROVISIONAL). Changing a fleet type or team empties that
+  Procyon) and the team cell a pull-down of Team 1 to Team 8, for you and for computers alike. A newly added computer takes the fleet type of its slot: slot 1 Pirate, 2 Procyon, 3 Navy and so on round (the player is
+  slot 0, Navy), and the lowest free team number (owner observation; the first computer was seen as Pirate, Team 2).
+  Fleets of one type cannot share a flag: a new fleet takes the lowest free flag of its type, a taken flag is dimmed in the picker. Changing a fleet type or team empties that
   player's fleet (the game's own text: the host changed your team, resetting your fleet).
 - Team maps (Border Dispute ...): fleet and team cells have no pull-down for anyone; the team column shows the map's team name
   (Navy, Procyon ...) and the fleet type is the team's race.
@@ -49,9 +54,15 @@ the 3D preview and enables *Add*. Adding puts it in the next free fleet slot, se
 ship, the list highlight stays) and enables Drop, Crew and Arms. The slot bar shows five slots at a time with scroll arrows even when the
 limit is higher. "Current Victory Points" falls by the ship's cost on Add. Leaving with points unspent asks "You have N victory points
 remaining. Would you like to continue?" with Auto Assign / Cancel / Continue.
-- *Auto Assign* on the Crew tab filled the whole fleet: it kept the one ship, added more hulls (mixed classes, not simply the most
-  expensive) up to the fleet limit and spent every point (it ended at 0), crewing them with generic crew. The exact choice rule is not
-  recovered (PROVISIONAL).
+- *Auto Assign* (the same button on the Ships, Crew and Arms tabs) on an empty Navy fleet: 300 points / 5 ships gave a Heavy Scout (90),
+  a Heavy Escort (62) and three Warsloops (40), the counter ending at 0 although the hulls cost 272; 50 points / 5 ships gave two Torpedo
+  Boats (19 each), counter 0; 100 points / 1 ship a Cutter (58), counter 0; 1000 points / 10 ships began Fast Frigate 100, three
+  Assault Cutters 70, Frigate 131 and left 1 point. So it fills the fleet limit with hulls that fit what is left, mixing classes
+  (later picks get cheaper as the budget drains), then spends the remainder on named crew (the posts showed distinct portraits). The
+  Weapons: from an empty fleet the added hulls came out with non-stock guns on several banks (Man-O-War, Minelayer, StarHammer
+  samples), while Auto Assign on a hand-added StarHammer (any tab) only filled the crew and left every gun stock, with 507 of 1000 points
+  unspent, so the leftover is not always spent (it was 0 only on small budgets). The pick among affordable hulls looked random: PROVISIONAL. The remake uses a fixed pseudo-random pick, a coin flip per weapon bank on the hulls it adds, and gives the leftover to the best
+  affordable crew per post.
 
 **Arms tab.** A top-down ship outline with one icon per selectable weapon bank (a mount of several guns is one bank). Clicking a bank
 shows a tooltip "Heavy Mount / 4 Guns" and the list *Available Weapons* for that mount type, the fitted gun highlighted, with its name,
@@ -69,9 +80,30 @@ skill can read N/A). Dragging one onto a post spends its cost (a 9-point captain
 - Lobby: open maps start as above (`Kind::Open`), pull-downs through `Skirmish::dropdown` / `choices` / `choose`.
 - Fleet screen: blank start, greyed Crew / Arms / Drop / Add (`shown_class`, `slot_filled`, `ship_chosen`). Crew and Arms still open
   the shared editor.
-- Arms in skirmish charge or refund `fitting_delta` against the budget (`points_left`).
-- Not done: skirmish crew roster and its costs, the retail Crew / Arms screen art and drag and drop, Load/Save Fleet/Crew/Arms, the
-  slot bar scrolling, the ship-name drop-down, Auto Assign's real rule, Launch/Ready greying.
+- Arms and Crew in skirmish charge or refund against the budget: `fitting_delta` for weapons, `crew_points` for named crew
+  (`Slot::crew`, one post list per fleet entry; dropping a ship or changing fleet type returns its crew).
+- Crew / Arms screens (`crew_arms.rs` `skirmish_screen`, drawn by `classic/crew_arms.rs` over the fleet screen): the Crew button opens
+  the Crew tab, Arms the Arms tab; the roster is the race's named crew (`roster`) sorted by the Sort By pull-down (nine entries, `SORTS`; the list
+  hangs under the box 25 units apart, the look is PROVISIONAL), minus anyone already posted; clicking a row (or pressing it) picks it and shows its info
+  panel (portrait, cost, seven skills, N/A where none); a release over, or a later click on, a face / mount places it. A full post
+  replaces its last named crew member (PROVISIONAL). Drop returns the selected post's last named crew member. Weapon placement
+  follows the measured rules and uses the original's messages (wrong mount, not enough points, Total Cost).
+- In battle the human fleet's named crew become `CrewPosts` (speed and rudder factors, boarding crews) through `SkirmishCrew`.
+  Named gunners (posts) already drive the human ships' accuracy and gun reload (`combat/gunnery.rs`, docs/re/gunnery.md).
+- Slot bar: five slots at a time with scroll arrows (`Skirmish::slot_scroll`), following the picked slot.
+- Posted crew move by dragging their face onto another post (the points come back and are re-spent; a failed drop puts them back).
+- Flag column: only your own flag is clickable; it opens a modal gold frame with your fleet type's ten flags (two rows of five); a pick sets
+  the flag and closes it, a click outside does nothing (measured). Computers' flags cannot be changed. The remake draws the same
+  (`Skirmish::flag_picker`, `Slot::flag`); the frame art is the generic dialog frame stretched (PROVISIONAL).
+- Lobby pull-downs stay open only while the button is held on the original: press the cell, drag to an entry, release. The remake
+  also takes that (release over an entry other than the first picks it) next to the click, click path.
+- Computers build their fleets with the same routine as Auto Assign (`auto_build`, armed hulls only, same victory limit, weapon swaps but no named crew:
+  they keep the measured computer crew factor). PROVISIONAL: the original's computer fleet was not read out of a battle.
+- Launch Game is greyed until a computer opponent is in and (open maps) a fleet is assembled; I'm Ready is always greyed in single player
+  (measured: fresh lobby, lobby with a computer and no fleet, and with a fleet).
+- Every scrollbar (maps, ships, crew / weapons) shares one drag rule (`menu::scroll_drag`): press the track or thumb and drag. What a drag
+  carries (crew portrait or gun icon) is drawn under the cursor.
+- Not done: Load/Save Fleet/Crew/Arms, the ship-name drop-down, generic ("N/A") crews.
 
 ## Remake notes before the 2026-10 measurements (partly superseded above)
 - Historical map: rows = playable players with their fixed fleet type/team and pre-placed fleets (exported to `ships` in the map

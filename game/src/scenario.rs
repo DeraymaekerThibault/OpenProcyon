@@ -41,6 +41,8 @@ pub struct Group {
     pub human: bool,
     pub ships: Vec<(String, Option<[f32; 3]>, Option<String>)>, // class, start position, scripted name
     pub weapons: Vec<std::collections::BTreeMap<usize, String>>,
+    /// Named crew per ship and post (skirmish fleets assembled in the front end).
+    pub crew: Vec<[Vec<String>; 8]>,
 }
 
 #[derive(Resource, PartialEq, Clone, Copy)]
@@ -227,16 +229,23 @@ pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Libra
             let them = players.iter().position(|p| p["team"] != us["team"]).unwrap_or(players.len().min(2) - 1);
             let fleet = |f: &[String]| f.iter().map(|n| (n.clone(), None, None)).collect();
             vec![
-                Group { player: 0, side: Side::Player, human: true, ships: fleet(&ours), weapons: vec![] },
-                Group { player: them, side: Side::Enemy, human: false, ships: fleet(&cfg.enemies), weapons: vec![] },
+                Group { player: 0, side: Side::Player, human: true, ships: fleet(&ours), weapons: vec![], crew: vec![] },
+                Group { player: them, side: Side::Enemy, human: false, ships: fleet(&cfg.enemies), weapons: vec![], crew: vec![] },
             ]
         } else {
-            cfg.groups.iter().map(|g| Group { player: g.player, side: g.side, human: g.human, ships: g.ships.clone(), weapons: g.weapons.clone() }).collect()
+            cfg.groups.iter().map(|g| Group { player: g.player, side: g.side, human: g.human, ships: g.ships.clone(), weapons: g.weapons.clone(), crew: g.crew.clone() }).collect()
         };
         if cfg.script.as_deref() == Some("fleet")
             && let Some(player) = (0..players.len()).find(|i| !groups.iter().any(|g| g.player == *i))
         {
-            groups.push(Group { player, side: Side::Player, human: false, ships: vec![(ship::DEFAULT_SHIP.into(), None, Some("Allied captain".into()))], weapons: vec![] });
+            groups.push(Group {
+                player,
+                side: Side::Player,
+                human: false,
+                ships: vec![(ship::DEFAULT_SHIP.into(), None, Some("Allied captain".into()))],
+                weapons: vec![],
+                crew: vec![],
+            });
         }
         let mut namer = Namer::new();
         for g in &groups {
@@ -264,6 +273,9 @@ pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Libra
                 }
                 if let Some(fit) = g.weapons.get(i).filter(|fit| !fit.is_empty()) {
                     commands.entity(e).insert(crate::crew_arms::WeaponFit(fit.clone()));
+                }
+                if let Some(crew) = g.crew.get(i).filter(|c| c.iter().any(|r| !r.is_empty())) {
+                    commands.entity(e).insert(crate::crew_arms::SkirmishCrew(crew.clone()));
                 }
                 if g.side == Side::Player && !(g.human && i == 0) {
                     commands.entity(e).remove::<PlayerShip>();
