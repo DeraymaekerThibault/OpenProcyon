@@ -121,6 +121,8 @@ pub struct Skirmish {
     pub fleet_pick: usize,
     /// First fleet slot shown in the bar of five.
     pub slot_scroll: usize,
+    /// First row of the Create Skirmish map list.
+    pub map_scroll: usize,
     pub arms_open: bool,
     /// The crew & arms screen opens on the Arms tab (else Crew).
     pub arms_tab: bool,

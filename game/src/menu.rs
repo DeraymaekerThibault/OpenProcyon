@@ -218,6 +218,7 @@ pub fn plugin(app: &mut App) {
         view_slot: false,
         fleet_pick: 0,
         slot_scroll: 0,
+        map_scroll: 0,
         scroll: 0,
         arms_open: false,
         arms_tab: false,
@@ -503,6 +504,7 @@ fn apply(sk: &mut Skirmish, lib: &Library, action: &Action) {
         }
         Action::Historical(h) => {
             sk.historical = *h;
+            sk.map_scroll = 0;
             if let Some(p) = sk.maps.iter().position(|m| m.2 != *h) {
                 sk.selected = p;
                 sk.load_map();
@@ -749,6 +751,7 @@ mod tests {
             view_slot: false,
             fleet_pick: 0,
             slot_scroll: 0,
+            map_scroll: 0,
             scroll: 0,
             arms_open: false,
             arms_tab: false,

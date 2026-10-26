@@ -690,6 +690,9 @@ pub(super) const GOLD: Color = Color::srgb(1.0, 0.796, 0.0);
 /// Map list as measured on the original: a framed panel (x 280..712, y 120..318) with a lighter header bar holding 'Historical Maps' /
 /// 'Open Maps' and 'Players' in UniversBold14, Univers12 rows 19 apart from y 172 with the playable player count at x 578, a teal bar
 /// behind the selected map, and the retail scrollbar at x 727..752. PROVISIONAL: header bar and selection colours are matched by eye.
+/// Rows of the Create Skirmish map list (the original's eight open maps fill it exactly).
+const MAP_ROWS: usize = 8;
+
 fn map_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, sk: &Skirmish, strings: &Value) {
     let (l, r) = (280.0, 712.0);
     stretched_window(ctx, c, [l, 120.0, r, 318.0]);
@@ -698,8 +701,8 @@ fn map_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, sk: &Skirmish, strings: &Va
     ctx.text(c, "UniversBold14", &text_of(strings, heading), 298.0, 240.0, 136.0, false, Color::WHITE);
     ctx.text(c, "UniversBold14", &text_of(strings, "IDGS_TPFRONTENDTEXT01_PLAYERS"), 540.0, 80.0, 136.0, true, Color::WHITE);
     let rows: Vec<_> = sk.maps.iter().enumerate().filter(|(_, m)| m.2 != sk.historical).collect();
-    for (row, (i, m)) in rows.iter().enumerate() {
-        let cy = 172.0 + row as f32 * 19.0;
+    for (row, (i, m)) in rows.iter().enumerate().skip(sk.map_scroll).take(MAP_ROWS) {
+        let cy = 172.0 + (row - sk.map_scroll) as f32 * 19.0;
         let mut b = c.spawn((Interaction::None, Action::PickMap(*i), ctx.node(l + 4.0, cy - 9.5, r - l - 8.0, 19.0)));
         b.insert(BackgroundColor(if *i == sk.selected { Color::srgba(0.2, 0.7, 0.8, 0.45) } else { Color::NONE }));
         b.with_children(|c| {
@@ -707,7 +710,8 @@ fn map_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, sk: &Skirmish, strings: &Va
             ctx.text(c, BODY_FONT, &m.3.to_string(), 278.0, 40.0, 9.5, true, Color::WHITE);
         });
     }
-    scrollbar(ctx, c, [727.0, 155.0, 752.0, 322.0], 0.0, 1.0);
+    let n = rows.len().max(1) as f32;
+    scrollbar(ctx, c, [727.0, 155.0, 752.0, 322.0], sk.map_scroll as f32 / (n - MAP_ROWS as f32).max(1.0), (MAP_ROWS as f32 / n).min(1.0));
 }
 
 /// The current tab of a Ships / Crew / Arms row: the green `FrontEnd_Texts_Over_Button_Selected_*` button, not clickable.
@@ -800,6 +804,9 @@ fn slider(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], fract
     });
     track.insert(Art(parts));
 }
+
+/// Behind an open pull-down's entries: the pull-down art is translucent, so the list needs a solid backing to read over what it covers.
+pub(super) const LIST_BACKING: Color = Color::srgb(0.03, 0.12, 0.3);
 
 /// The slot bar's end arrows (round scrollbar caps, 22 px): live while there are slots out of view on that side.
 pub(super) fn slot_arrows<A: Bundle>(ctx: &Ctx, c: &mut ChildSpawnerCommands, scroll: usize, limit: usize, action: impl Fn(i32) -> A) {
@@ -896,7 +903,7 @@ fn players_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, _rect: [f32; 4], sk: &S
     for (i, slot) in sk.slots.iter().enumerate() {
         let cy = 184.0 + i as f32 * 32.0;
         let me = slot.kind == Kind::Human;
-        let live = slot.kind != Kind::Closed;
+        let live = slot.kind.live();
         let base = match slot.race {
             2 => 10,
             3 => 20,
@@ -956,7 +963,7 @@ fn players_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, _rect: [f32; 4], sk: &S
                 Choice::Team(t) => team_label(&s, t),
             };
             let y = top + k as f32 * 28.0;
-            c.spawn((ctx.node(x0, y, x1 - x0, 28.0), ZIndex(2))).with_children(|c| {
+            c.spawn((ctx.node(x0, y, x1 - x0, 28.0), ZIndex(2), BackgroundColor(LIST_BACKING))).with_children(|c| {
                 pulldown_cell(ctx, c, [0.0, 0.0, x1 - x0, 28.0], &label, k == 0, Some(Action::Choose(cell, choice)), false);
             });
         }
@@ -1096,7 +1103,16 @@ fn ship_info(ctx: &Ctx, c: &mut ChildSpawnerCommands, _rect: [f32; 4], sk: &Skir
 /// Mouse wheel scrolls the Ship Types Available list.
 fn wheel(mut wheel: MessageReader<bevy::input::mouse::MouseWheel>, state: Res<State<Screen>>, mut sk: ResMut<Skirmish>, lib: Res<Library>) {
     let dy: f32 = wheel.read().map(|e| e.y).sum();
-    if *state.get() != Screen::Fleet || dy == 0.0 {
+    if dy == 0.0 {
+        return;
+    }
+    if *state.get() == Screen::CreateSkirmish {
+        let n = sk.maps.iter().filter(|m| m.2 != sk.historical).count();
+        let max = n.saturating_sub(MAP_ROWS);
+        sk.map_scroll = if dy > 0.0 { sk.map_scroll.saturating_sub(1) } else { (sk.map_scroll + 1).min(max) };
+        return;
+    }
+    if *state.get() != Screen::Fleet {
         return;
     }
     let n = sk.human().map_or(0, |h| offered(&lib, h.race).len());

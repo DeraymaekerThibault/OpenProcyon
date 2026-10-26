@@ -277,9 +277,10 @@ fn list(ctx: &Ctx, c: &mut ChildSpawnerCommands, fit: &FitView, strings: &Value)
         c.spawn((Interaction::None, bevy::ui::FocusPolicy::Block, Action::Sort, ctx.node(0.0, 0.0, 800.0, 600.0), ZIndex(1)));
         for (k, field) in SORTS.iter().enumerate() {
             let y = 339.0 - 12.5 + k as f32 * 25.0;
-            c.spawn((ctx.node(520.0, y, 190.0, 25.0), ZIndex(2), Interaction::None, bevy::ui::FocusPolicy::Block, Action::SortBy(k))).with_children(|c| {
-                pulldown_cell(ctx, c, [0.0, 0.0, 190.0, 25.0], field, fit.sort == *field, None::<Action>, false);
-            });
+            c.spawn((ctx.node(520.0, y, 190.0, 25.0), ZIndex(2), BackgroundColor(super::menu::LIST_BACKING), Interaction::None, bevy::ui::FocusPolicy::Block, Action::SortBy(k)))
+                .with_children(|c| {
+                    pulldown_cell(ctx, c, [0.0, 0.0, 190.0, 25.0], field, fit.sort == *field, None::<Action>, false);
+                });
         }
     }
 }
