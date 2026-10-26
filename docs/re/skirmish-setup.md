@@ -37,8 +37,9 @@ Computer / Open / Close, an Open slot Open / Close / Computer (the current value
 fleet or team. *Launch Game* and *I'm Ready* are greyed until the setup is valid (a computer opponent and an assembled fleet; the
 exact trigger of each is PROVISIONAL).
 - Free-for-all maps (Diablo Strait ...): your fleet type starts as Navy, team 1. The fleet cell is a pull-down (Navy / Pirate /
-  Procyon) and the team cell a pull-down of Team 1 to Team 8, for you and for computers alike. A newly added computer was seen as
-  Pirate, Team 2 beside a Navy, Team 1 player (the rule for later ones is PROVISIONAL). Changing a fleet type or team empties that
+  Procyon) and the team cell a pull-down of Team 1 to Team 8, for you and for computers alike. A newly added computer takes the fleet type of its slot: slot 1 Pirate, 2 Procyon, 3 Navy and so on round (the player is
+  slot 0, Navy), and the lowest free team number (owner observation; the first computer was seen as Pirate, Team 2).
+  Fleets of one type cannot share a flag: a new fleet takes the lowest free flag of its type, a taken flag is dimmed in the picker. Changing a fleet type or team empties that
   player's fleet (the game's own text: the host changed your team, resetting your fleet).
 - Team maps (Border Dispute ...): fleet and team cells have no pull-down for anyone; the team column shows the map's team name
   (Navy, Procyon ...) and the fleet type is the team's race.

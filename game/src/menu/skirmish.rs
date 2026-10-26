@@ -291,13 +291,31 @@ impl Skirmish {
             _ => vec![],
         }
     }
+    /// The lowest of the ten flags of slot `i`'s fleet type that no other live slot of that type flies (retail: fleets cannot share a flag).
+    pub fn free_flag(&self, i: usize) -> u8 {
+        let Some(me) = self.slots.get(i) else { return 0 };
+        (0..10).find(|&f| !self.flag_taken(i, me.race, f)).unwrap_or(0)
+    }
+    /// Another live slot of `race` flies flag `f`.
+    pub fn flag_taken(&self, i: usize, race: u8, f: u8) -> bool {
+        self.slots.iter().enumerate().any(|(j, s)| j != i && s.kind.live() && s.race == race && s.flag == f)
+    }
     pub fn choose(&mut self, cell: Cell, choice: Choice) {
+        self.choose_inner(cell, choice);
+        // A slot that came alive or changed fleet type keeps its flag only while no other fleet of that type flies it.
+        if let Cell::Player(i) | Cell::Fleet(i) = cell
+            && let Some(s) = self.slots.get(i).filter(|s| s.kind.live())
+            && self.flag_taken(i, s.race, s.flag)
+        {
+            self.slots[i].flag = self.free_flag(i);
+        }
+    }
+    fn choose_inner(&mut self, cell: Cell, choice: Choice) {
         self.dropdown = None;
         self.error = None;
         let free = self.free_teams();
         match (cell, choice) {
             (Cell::Player(i), Choice::Computer | Choice::Open | Choice::Close) => {
-                let human_race = self.human().map_or(0, |h| h.race);
                 let used: Vec<i32> = self.slots.iter().filter(|s| s.kind.live()).map(|s| s.team).collect();
                 let Some(s) = self.slots.get_mut(i).filter(|s| s.kind != Kind::Human) else { return };
                 match choice {
@@ -306,7 +324,8 @@ impl Skirmish {
                         if free && s.team < 0 {
                             // PROVISIONAL: the original gave the first computer on a free-for-all map Pirate, Team 2 beside a Navy, Team 1 player.
                             s.team = (0..TEAMS).find(|t| !used.contains(t)).unwrap_or(0);
-                            s.race = [2u8, 3, 0].into_iter().find(|&r| r != human_race).unwrap_or(2);
+                            // Navy, Pirate, Procyon by slot, round again (the player is slot 0, Navy).
+                            s.race = [0u8, 2, 3][i % 3];
                         }
                     }
                     _ => {

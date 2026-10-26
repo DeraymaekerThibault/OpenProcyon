@@ -638,10 +638,13 @@ fn apply(sk: &mut Skirmish, lib: &Library, action: &Action) {
         }
         Action::FlagPicker(open) => sk.flag_picker = *open,
         Action::PickFlag(n) => {
-            if let Some(h) = sk.slots.iter_mut().find(|s| s.kind == Kind::Human) {
-                h.flag = (*n).min(9);
+            let n = (*n).min(9);
+            if let Some(i) = sk.slots.iter().position(|s| s.kind == Kind::Human)
+                && !sk.flag_taken(i, sk.slots[i].race, n)
+            {
+                sk.slots[i].flag = n;
+                sk.flag_picker = false;
             }
-            sk.flag_picker = false;
         }
         Action::SlotScroll(d) => sk.scroll_slots(*d),
         Action::Dropdown(cell) => sk.dropdown = *cell,
@@ -1021,6 +1024,25 @@ mod tests {
         sk.victory_limit = 50;
         auto_assign(&mut sk, &lib);
         assert!(!sk.slots[0].fleet.is_empty() && sk.points_left(&lib) >= 0);
+    }
+    #[test]
+    fn computers_cycle_fleet_types_by_slot_and_fleets_never_share_a_flag() {
+        let mut sk = skirmish("diablo_straight");
+        for i in 1..=4 {
+            sk.choose(Cell::Player(i), Choice::Computer);
+        }
+        assert_eq!(sk.slots.iter().take(5).map(|s| s.race).collect::<Vec<_>>(), [0, 2, 3, 0, 2], "Navy, Pirate, Procyon, then round again");
+        // Two Navy fleets: the second gets the next flag, and the first cannot take it.
+        assert_eq!((sk.slots[0].flag, sk.slots[3].flag), (0, 1));
+        assert!(sk.flag_taken(0, 0, 1));
+        let lib = Library::load(&assets_dir());
+        apply(&mut sk, &lib, &Action::PickFlag(1));
+        assert_eq!(sk.slots[0].flag, 0, "a taken flag is refused");
+        apply(&mut sk, &lib, &Action::PickFlag(5));
+        assert_eq!(sk.slots[0].flag, 5);
+        // Changing a fleet type moves it off a flag the new type's fleets already fly.
+        sk.choose(Cell::Fleet(3), Choice::Fleet(2));
+        assert_ne!(sk.slots[3].flag, sk.slots[4].flag);
     }
     #[test]
     fn slot_bar_shows_five_slots_and_follows_the_picked_one() {

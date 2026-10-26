@@ -967,8 +967,17 @@ fn players_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, _rect: [f32; 4], sk: &S
             ctx.image(c, "menu/frontenddialogscreen.png", None, 0.0, 0.0, 475.0, 245.0, Color::WHITE);
             for k in 0..10usize {
                 let (x, y) = (87.0 + (k % 5) as f32 * 75.0 - 33.5, 76.0 + (k / 5) as f32 * 75.0 - 33.5);
-                c.spawn((ctx.node(x, y, 67.0, 67.0), Interaction::None, bevy::ui::FocusPolicy::Block, Action::PickFlag(k as u8))).with_children(|c| {
+                // A flag another fleet of this type already flies is shown dimmed and cannot be taken.
+                let taken = sk.human().is_some_and(|h| sk.flag_taken(sk.slots.iter().position(|s| s.kind == Kind::Human).unwrap_or(0), h.race, k as u8));
+                let mut b = c.spawn((ctx.node(x, y, 67.0, 67.0), Interaction::None, bevy::ui::FocusPolicy::Block));
+                if !taken {
+                    b.insert(Action::PickFlag(k as u8));
+                }
+                b.with_children(|c| {
                     piece(ctx, c, &format!("FrontEnd_Flag_Icon_{:02}", base + k), [0.0, 0.0, 67.0, 67.0], (false, false));
+                    if taken {
+                        c.spawn((ctx.node(0.0, 0.0, 67.0, 67.0), BackgroundColor(Color::srgba(0.0, 0.05, 0.15, 0.65))));
+                    }
                 });
             }
         });
