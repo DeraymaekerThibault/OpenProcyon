@@ -52,13 +52,15 @@ pub enum Action {
     Quit,
     PickMap(usize),
     Historical(bool),
-    FleetSize,
-    /// Step the victory point limit (open maps).
-    VictoryLimit,
+    /// Step the fleet size limit by this many ships (open maps; the slider's arrows).
+    FleetSize(i32),
+    /// Step the victory point limit by this many 10-point steps (open maps; the slider's arrows).
+    VictoryLimit(i32),
     Claim(usize),
-    ToggleClosed(usize),
-    CycleRace(usize),
-    CycleTeam(usize),
+    /// Open or close a lobby pull-down (`None` closes).
+    Dropdown(Option<Cell>),
+    /// Pick an entry of the open pull-down.
+    Choose(Cell, Choice),
     PickShip(usize),
     PickFleet(usize),
     AddShip,
@@ -160,7 +162,7 @@ pub fn button_sound(action: &Action, arrow: Option<&ArrowButton>, select: bool) 
             }
         }
         _ if list => "FE_List_Select",
-        (Action::FleetSize | Action::Setting(_), _) => "SpinButton",
+        (Action::FleetSize(_) | Action::VictoryLimit(_) | Action::Setting(_), _) => "SpinButton",
         (Action::Launch | Action::Campaign | Action::Tutorial(_), _) => "StartButton",
         (Action::AddShip, _) => "FE_Add",
         (Action::DropShip | Action::Remove, _) => "FE_Drop",
@@ -202,11 +204,14 @@ pub fn plugin(app: &mut App) {
         maps,
         selected,
         historical,
-        fleet_size: 2,
-        victory_limit: 300,
+        fleet_size: FLEET_SIZE.default as usize,
+        victory_limit: VICTORY_LIMIT.default,
         map_json: Value::Null,
         error: None,
+        dropdown: None,
         ship_pick: 0,
+        ship_chosen: false,
+        view_slot: false,
         fleet_pick: 0,
         scroll: 0,
         arms_open: false,
@@ -279,7 +284,7 @@ pub struct MenuModel<'w> {
     pub outcome: Res<'w, crate::scenario::Outcome>,
 }
 /// Changes whenever the drawn screen would: views rebuild when it differs from the last one they drew.
-pub type MenuKey = (Screen, usize, bool, usize, Vec<Slot>, Option<&'static str>, [usize; 3], u32, u32, String);
+pub type MenuKey = (Screen, usize, bool, usize, Vec<Slot>, Option<&'static str>, [usize; 6], u32, u32, String);
 impl MenuModel<'_> {
     pub fn screen(&self) -> Screen {
         *self.state.get()
@@ -293,7 +298,7 @@ impl MenuModel<'_> {
             sk.fleet_size,
             sk.slots.clone(),
             sk.error,
-            [sk.ship_pick, sk.fleet_pick, sk.scroll],
+            [sk.ship_pick, sk.fleet_pick, sk.scroll, usize::from(sk.ship_chosen), usize::from(sk.view_slot), sk.victory_limit as usize],
             window.width() as u32,
             window.height() as u32,
             format!(
@@ -337,9 +342,7 @@ fn autolaunch(mut sk: ResMut<Skirmish>, lib: Res<Library>, mut next: ResMut<Next
         return;
     }
     if sk.open() {
-        if sk.slots[0].race == 4 {
-            apply(&mut sk, &lib, &Action::CycleRace(0));
-        }
+        sk.choose(Cell::Player(1), Choice::Computer);
         for _ in 0..sk.fleet_size {
             apply(&mut sk, &lib, &Action::AddShip);
         }
@@ -437,14 +440,9 @@ fn apply(sk: &mut Skirmish, lib: &Library, action: &Action) {
                 sk.load_map();
             }
         }
-        // PROVISIONAL steps: the original's scrollbar values are not recovered; 300 is the default seen on screenshots.
-        Action::VictoryLimit => {
-            const STEPS: [u32; 7] = [200, 300, 400, 500, 750, 1000, 1500];
-            let next = STEPS.iter().position(|&v| v == sk.victory_limit).map_or(1, |i| (i + 1) % STEPS.len());
-            sk.victory_limit = STEPS[next];
-        }
-        Action::FleetSize => {
-            sk.fleet_size = sk.fleet_size % 8 + 1;
+        Action::VictoryLimit(d) => sk.victory_limit = VICTORY_LIMIT.step_value(sk.victory_limit, *d),
+        Action::FleetSize(d) => {
+            sk.fleet_size = FLEET_SIZE.step_value(sk.fleet_size as u32, *d) as usize;
             let n = sk.fleet_size;
             for s in &mut sk.slots {
                 s.fleet.truncate(n);
@@ -461,41 +459,15 @@ fn apply(sk: &mut Skirmish, lib: &Library, action: &Action) {
                 sk.slots[*i].kind = Kind::Human;
                 sk.error = None;
                 (sk.ship_pick, sk.fleet_pick, sk.scroll) = (0, 0, 0);
+                (sk.ship_chosen, sk.view_slot) = (false, false);
             }
         }
-        Action::ToggleClosed(i) => {
-            let s = &mut sk.slots[*i];
-            s.kind = if s.kind == Kind::Closed { Kind::Computer } else { Kind::Closed };
-            sk.error = None;
-        }
-        Action::CycleRace(i) => {
-            let s = &mut sk.slots[*i];
-            s.race = next_race(s.race);
-            s.fleet.clear(); // a fleet only holds hulls of its fleet type
-            s.weapons.clear();
-            sk.error = None;
-        }
-        Action::CycleTeam(i) => {
-            // Team maps: step through the map's teams (the fleet type follows, as the lobby locks it); maps without teams: on its own, then team 1..4.
-            let teams = sk.map_json["teams"].as_array().cloned().unwrap_or_default();
-            let s = &mut sk.slots[*i];
-            if teams.is_empty() {
-                s.team = if s.team >= 3 { -1 } else { s.team + 1 };
-            } else {
-                s.team = (s.team + 1).rem_euclid(teams.len() as i32);
-                let race = teams[s.team as usize]["race"].as_u64().unwrap_or(4) as u8;
-                if s.race != race {
-                    s.race = race;
-                    s.fleet.clear();
-                    s.weapons.clear();
-                }
-            }
-            sk.error = None;
-        }
+        Action::Dropdown(cell) => sk.dropdown = *cell,
+        Action::Choose(cell, choice) => sk.choose(*cell, *choice),
         Action::OpenArms => sk.arms_open = sk.open() && sk.human().is_some_and(|h| !h.fleet.is_empty()),
-        Action::PickShip(row) => sk.ship_pick = *row,
+        Action::PickShip(row) => (sk.ship_pick, sk.ship_chosen, sk.view_slot) = (*row, true, false),
         Action::MapInfo(open) => sk.map_info = *open,
-        Action::PickFleet(row) => sk.fleet_pick = *row,
+        Action::PickFleet(row) => (sk.fleet_pick, sk.view_slot) = (*row, true),
         Action::AddShip => {
             let (limit, pick, left) = (sk.fleet_size, sk.ship_pick, sk.points_left(lib));
             if let Some(h) = sk.slots.iter_mut().find(|s| s.kind == Kind::Human).filter(|h| h.fleet.len() < limit)
@@ -506,6 +478,7 @@ fn apply(sk: &mut Skirmish, lib: &Library, action: &Action) {
                 h.fleet.push(lib.classes[ci].name.clone());
                 h.weapons.push(default());
                 sk.fleet_pick = h.fleet.len() - 1;
+                sk.view_slot = true;
             }
             sk.error = None;
         }
@@ -527,6 +500,7 @@ fn apply(sk: &mut Skirmish, lib: &Library, action: &Action) {
                     h.weapons.remove(pick);
                 }
                 sk.fleet_pick = pick.saturating_sub(1);
+                sk.view_slot = !h.fleet.is_empty();
             }
         }
         _ => {}
@@ -681,7 +655,7 @@ mod tests {
     #[test]
     fn every_menu_sound_is_a_retail_file() {
         let back = ArrowButton { forward: false };
-        let actions = [Action::Quit, Action::PickMap(0), Action::FleetSize, Action::Launch, Action::AddShip, Action::DropShip];
+        let actions = [Action::Quit, Action::PickMap(0), Action::FleetSize(1), Action::Launch, Action::AddShip, Action::DropShip];
         for a in &actions {
             for (arrow, select) in [(None, false), (None, true), (Some(&back), true)] {
                 let name = button_sound(a, arrow, select);
@@ -700,11 +674,14 @@ mod tests {
             maps: vec![(id.into(), id.into(), false, 0)],
             selected: 0,
             historical: false,
-            fleet_size: 2,
+            fleet_size: 5,
             victory_limit: 300,
             map_json: Value::Null,
             error: None,
+            dropdown: None,
             ship_pick: 0,
+            ship_chosen: false,
+            view_slot: false,
             fleet_pick: 0,
             scroll: 0,
             arms_open: false,
@@ -716,16 +693,20 @@ mod tests {
     #[test]
     fn skirmish_weapon_choices_follow_fleet_entries_and_survive_launch_planning() {
         let lib = Library::load(&assets_dir());
-        let mut sk = skirmish("red_rover");
+        let mut sk = skirmish("diablo_straight");
         sk.fleet_size = 3;
+        sk.choose(Cell::Player(1), Choice::Computer);
         let human = sk.slots.iter().position(|s| s.kind == Kind::Human).unwrap();
-        sk.slots[human].race = 0;
         sk.ship_pick = offered(&lib, 0).iter().position(|&i| lib.classes[i].name == "Ship_Navy_Cutter").unwrap();
         apply(&mut sk, &lib, &Action::AddShip);
         apply(&mut sk, &lib, &Action::AddShip);
         let class = &lib.classes[lib.index("Ship_Navy_Cutter")];
         let bank = class.mounts.iter().find(|m| m.gun == "Gun_CannonBall_Med").unwrap().bank;
+        let before = sk.points_left(&lib);
         sk.slots[human].weapons[0].insert(bank, "Gun_Carronade_Med".into());
+        let mounts = class.mounts.iter().filter(|m| m.bank == bank).count() as i64;
+        let price = |g: &str| i64::from(lib.guns[g].points.unwrap());
+        assert_eq!(before - sk.points_left(&lib), (price("Gun_Carronade_Med") - price("Gun_CannonBall_Med")) * mounts, "a refit costs the price difference per gun");
         let plan = sk.plan(&lib);
         let group = plan.iter().find(|g| g.human).unwrap();
         assert_eq!(group.ships[0].0, group.ships[1].0);
@@ -738,7 +719,7 @@ mod tests {
         assert_eq!(sk.slots[human].weapons.len(), 1);
         assert!(sk.slots[human].weapons[0].is_empty(), "dropping a ship also drops its fitting");
         sk.slots[human].weapons[0].insert(bank, "Gun_GravCharge_Med".into());
-        apply(&mut sk, &lib, &Action::CycleRace(human));
+        sk.choose(Cell::Fleet(human), Choice::Fleet(2));
         assert!(sk.slots[human].fleet.is_empty());
         assert!(sk.slots[human].weapons.is_empty());
     }
@@ -782,8 +763,11 @@ mod tests {
     fn open_map_locks_fleet_type_to_team_and_needs_a_fleet() {
         let mut sk = skirmish("red_rover");
         assert_eq!((sk.slots[0].race, sk.slots[1].race), (0, 2));
-        assert!(sk.slots.iter().skip(2).all(|s| s.kind == Kind::Closed));
+        assert!(sk.slots.iter().skip(1).all(|s| s.kind == Kind::Open), "retail: you alone, every other slot Open");
+        assert_eq!(sk.launch_error(), Some("No opponent: open another slot on a different team."));
+        sk.choose(Cell::Player(1), Choice::Computer);
         assert_eq!(sk.launch_error(), Some("IDGS_TPFRONTENDTEXT_SCREENS_ERROR_FLEET"));
+        assert!(sk.choices(Cell::Fleet(1)).is_empty() && sk.choices(Cell::Team(0)).is_empty(), "team maps lock fleet type and team");
         sk.slots[0].fleet.push("Ship_Navy_Cutter".into());
         assert_eq!(sk.launch_error(), None);
         let lib = Library::load(&assets_dir());
@@ -792,15 +776,20 @@ mod tests {
         assert_eq!(plan[1].side, crate::Side::Enemy);
         assert!(plan[1].ships.len() == sk.fleet_size && plan[1].ships.iter().all(|s| s.0.contains("Pirate")), "computer fleet is built from its fleet type");
         // Free-for-all map: you choose the fleet type yourself.
-        let sk = skirmish("diablo_straight");
-        assert_eq!((sk.slots[0].race, sk.slots[1].race), (4, 2));
-        assert_eq!(sk.launch_error(), Some("IDGS_TPFRONTENDTEXT01_PLEASE_SELECT_A_RACE"));
+        let mut sk = skirmish("diablo_straight");
+        assert_eq!((sk.slots[0].race, sk.slots[0].team, sk.slots[1].kind), (0, 0, Kind::Open), "retail: you are Navy, Team 1");
+        sk.choose(Cell::Player(1), Choice::Computer);
+        assert_eq!((sk.slots[1].race, sk.slots[1].team), (2, 1), "a new computer: Pirate, Team 2");
+        assert_eq!(sk.choices(Cell::Team(1))[..2], [Choice::Team(1), Choice::Team(0)], "current team first");
+        assert_eq!(sk.choices(Cell::Fleet(0)), [Choice::Fleet(0), Choice::Fleet(2), Choice::Fleet(3)]);
+        sk.choose(Cell::Player(1), Choice::Close);
+        assert_eq!((sk.slots[1].kind, sk.slots[1].race, sk.slots[1].team), (Kind::Closed, 4, -1));
     }
     #[test]
     fn lobby_actions_edit_slots_and_fleet() {
         let lib = Library::load(&assets_dir());
-        let mut sk = skirmish("diablo_straight"); // free-for-all, fleet size 2
-        apply(&mut sk, &lib, &Action::CycleRace(0)); // none -> Navy
+        let mut sk = skirmish("diablo_straight"); // free-for-all
+        sk.fleet_size = 2;
         assert_eq!(sk.slots[0].race, 0);
         let cheapest = offered(&lib, 0).len() - 1; // the list is most expensive first; points never limit cheap ships here
         apply(&mut sk, &lib, &Action::PickShip(cheapest));
@@ -810,18 +799,42 @@ mod tests {
         assert_eq!(sk.slots[0].fleet.len(), 2, "fleet size limit");
         apply(&mut sk, &lib, &Action::DropShip);
         assert_eq!(sk.slots[0].fleet.len(), 1);
-        apply(&mut sk, &lib, &Action::CycleRace(0));
+        sk.choose(Cell::Fleet(0), Choice::Fleet(2));
         assert!(sk.slots[0].fleet.is_empty() && sk.slots[0].race == 2, "a new fleet type clears the fleet");
-        apply(&mut sk, &lib, &Action::Claim(1));
-        assert_eq!((sk.slots[0].kind, sk.slots[1].kind), (Kind::Computer, Kind::Human));
-        apply(&mut sk, &lib, &Action::ToggleClosed(2));
-        assert_eq!(sk.slots[2].kind, Kind::Computer);
-        // Team maps: changing team moves the locked fleet type with it.
-        let mut sk = skirmish("red_rover");
         apply(&mut sk, &lib, &Action::PickShip(0));
         apply(&mut sk, &lib, &Action::AddShip);
-        apply(&mut sk, &lib, &Action::CycleTeam(0));
-        assert_eq!((sk.slots[0].team, sk.slots[0].race, sk.slots[0].fleet.len()), (1, 2, 0));
+        sk.choose(Cell::Team(0), Choice::Team(4));
+        assert!(sk.slots[0].fleet.is_empty() && sk.slots[0].team == 4, "the original resets the fleet when the team changes");
+        sk.choose(Cell::Player(2), Choice::Computer);
+        assert_eq!(sk.slots[2].kind, Kind::Computer);
+    }
+    #[test]
+    fn create_skirmish_sliders_use_the_retail_ranges() {
+        let lib = Library::load(&assets_dir());
+        let mut sk = skirmish("diablo_straight");
+        assert_eq!((sk.victory_limit, sk.fleet_size), (300, 5));
+        apply(&mut sk, &lib, &Action::VictoryLimit(-100));
+        assert_eq!(sk.victory_limit, 50);
+        apply(&mut sk, &lib, &Action::VictoryLimit(1));
+        assert_eq!(sk.victory_limit, 60);
+        apply(&mut sk, &lib, &Action::VictoryLimit(500));
+        assert_eq!(sk.victory_limit, 1000);
+        apply(&mut sk, &lib, &Action::FleetSize(-20));
+        assert_eq!(sk.fleet_size, 1);
+        apply(&mut sk, &lib, &Action::FleetSize(20));
+        assert_eq!(sk.fleet_size, 10);
+    }
+    #[test]
+    fn fleet_screen_starts_blank_and_greys_crew_arms_drop() {
+        let lib = Library::load(&assets_dir());
+        let mut sk = skirmish("diablo_straight");
+        assert!(sk.shown_class(&lib).is_none() && !sk.slot_filled() && !sk.ship_chosen);
+        apply(&mut sk, &lib, &Action::PickShip(1));
+        assert!(sk.shown_class(&lib).is_some() && !sk.slot_filled(), "a picked hull shows, Crew/Arms/Drop stay greyed");
+        apply(&mut sk, &lib, &Action::AddShip);
+        assert!(sk.slot_filled());
+        apply(&mut sk, &lib, &Action::DropShip);
+        assert!(!sk.slot_filled());
     }
     #[test]
     fn fleet_screen_offers_every_fleet_type_without_story_hulls() {
