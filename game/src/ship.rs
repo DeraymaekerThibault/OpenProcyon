@@ -190,6 +190,7 @@ pub fn ai(
     mut explore: Local<Explore>,
     (time, mut targets): (Res<Time>, ResMut<CaptainTargets>),
     lib: Res<combat::Library>,
+    bases: Query<(Entity, &Transform, &combat::BaseSide, &Health), With<combat::ArmedBase>>,
 ) {
     if mission.is_some() {
         return;
@@ -222,13 +223,24 @@ pub fn ai(
             .filter(|f| f.2 != s.side && f.3 && (explicit == Some(f.0) || sensors.in_sight(e, f.0, None)) && explicit.is_none_or(|e| e == f.0))
             .map(|f| (f.0, f.1.distance(tf.translation)))
             .collect();
-        let chosen = choose_target(targets.0.get(&e).copied(), &candidates);
+        let mut chosen = choose_target(targets.0.get(&e).copied(), &candidates);
+        // Nothing in sight: a computer ship goes for the nearest living hostile base, however far (retail: a Procyon ship held the
+        // Navy base ~2000 units away as its target from the first second). PROVISIONAL: nearest, and ships in sight come first.
+        let base = if chosen.is_none() && s.side != Side::Player && explicit.is_none() {
+            bases.iter().filter(|b| b.2.0 != s.side && !b.3.destroyed).min_by(|a, b| a.1.translation.distance(tf.translation).total_cmp(&b.1.translation.distance(tf.translation)))
+        } else {
+            None
+        };
+        if let Some(b) = base {
+            chosen = Some((b.0, false));
+        }
         match chosen {
             Some((t, true)) => targets.0.entry(e).or_insert((t, 0.0)).1 += dt,
             Some((t, false)) => _ = targets.0.insert(e, (t, 0.0)),
             None => _ = targets.0.remove(&e),
         }
-        let foe = chosen.and_then(|(t, _)| snap.iter().find(|f| f.0 == t));
+        let base_pos = base.map(|b| (b.0, b.1.translation));
+        let foe = chosen.and_then(|(t, _)| snap.iter().find(|f| f.0 == t).map(|f| (f.0, f.1)).or(base_pos.filter(|b| b.0 == t)));
         let Some(foe) = foe else {
             s.goal = None;
             if s.side == Side::Player || explicit.is_some() {

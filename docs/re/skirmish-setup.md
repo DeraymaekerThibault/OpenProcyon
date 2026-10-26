@@ -136,3 +136,13 @@ hud.hdt has `WeaponBar_SlotBackground` (an empty vertical bar), `WeaponBar_Recha
 `Offset_WeaponBar_Recharge` (0,0) and `Offset_WeaponBar_GunIcon` (6,0). The remake draws the bar beside each bank icon with the fill growing
 with the slowest live gun's reload progress, and dims the icon while the bank reloads. PROVISIONAL: the original's drawing code was not found
 (the sprite names are only referenced from static initialisers); fill direction and bank aggregation are read from the artwork.
+
+## Bases
+
+Maps with bases list them as scenery owned by non-playable players ("navybase", "procbase", "Piratebase", "navy port"...); the map
+data carries no side for them. Remake (PROVISIONAL): the owner's name (else the base's type: Grant, Montgomery and the shipyards and
+ports are Navy, `Base_Pirate*` Pirate, `Base_Procyon*` Procyon) gives a fleet type, and the base fights for the first fleet of that
+type in the battle, with that fleet's teammates. A base no fleet claims stays neutral and silent. A base fires on every ship of
+another side it can see, can be shot by them (its sections have hit points), and computer ships with nothing in sight go for the
+nearest hostile base (`ship::ai`). Not done: what destroying a base means for victory, base repair/docking by side, and bases
+as part of the lobby (fleet type per base).

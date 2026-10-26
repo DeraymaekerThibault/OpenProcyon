@@ -39,10 +39,28 @@ pub struct Group {
     pub player: usize,
     pub side: Side,
     pub human: bool,
+    /// Fleet type as in the TWT (0 Navy, 2 Pirate, 3 Procyon, 4 unknown): which base the fleet defends.
+    pub race: u8,
     pub ships: Vec<(String, Option<[f32; 3]>, Option<String>)>, // class, start position, scripted name
     pub weapons: Vec<std::collections::BTreeMap<usize, String>>,
     /// Named crew per ship and post (skirmish fleets assembled in the front end).
     pub crew: Vec<[Vec<String>; 8]>,
+}
+
+/// The fleet type (TWT race: 0 Navy, 2 Pirate, 3 Procyon) a base or player name stands for: "navybase", "proc base", "Piratebase",
+/// `Base_Grant`... PROVISIONAL: read from the retail names, the TWT carries no explicit owner side.
+pub fn faction(name: &str) -> Option<u8> {
+    let n = name.to_lowercase();
+    let has = |words: &[&str]| words.iter().any(|w| n.contains(w));
+    if has(&["pirate", "privateer"]) {
+        Some(2)
+    } else if has(&["proc"]) {
+        Some(3)
+    } else if has(&["navy", "grant", "montgomery", "shipyard", "port", "regina"]) {
+        Some(0)
+    } else {
+        None
+    }
 }
 
 #[derive(Resource, PartialEq, Clone, Copy)]
@@ -229,11 +247,22 @@ pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Libra
             let them = players.iter().position(|p| p["team"] != us["team"]).unwrap_or(players.len().min(2) - 1);
             let fleet = |f: &[String]| f.iter().map(|n| (n.clone(), None, None)).collect();
             vec![
-                Group { player: 0, side: Side::Player, human: true, ships: fleet(&ours), weapons: vec![], crew: vec![] },
-                Group { player: them, side: Side::Enemy, human: false, ships: fleet(&cfg.enemies), weapons: vec![], crew: vec![] },
+                Group { player: 0, side: Side::Player, human: true, race: players[0]["race"].as_u64().unwrap_or(4) as u8, ships: fleet(&ours), weapons: vec![], crew: vec![] },
+                Group {
+                    player: them,
+                    side: Side::Enemy,
+                    human: false,
+                    race: players[them]["race"].as_u64().unwrap_or(4) as u8,
+                    ships: fleet(&cfg.enemies),
+                    weapons: vec![],
+                    crew: vec![],
+                },
             ]
         } else {
-            cfg.groups.iter().map(|g| Group { player: g.player, side: g.side, human: g.human, ships: g.ships.clone(), weapons: g.weapons.clone(), crew: g.crew.clone() }).collect()
+            cfg.groups
+                .iter()
+                .map(|g| Group { player: g.player, side: g.side, human: g.human, race: g.race, ships: g.ships.clone(), weapons: g.weapons.clone(), crew: g.crew.clone() })
+                .collect()
         };
         if cfg.script.as_deref() == Some("fleet")
             && let Some(player) = (0..players.len()).find(|i| !groups.iter().any(|g| g.player == *i))
@@ -242,6 +271,7 @@ pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Libra
                 player,
                 side: Side::Player,
                 human: false,
+                race: 4,
                 ships: vec![(ship::DEFAULT_SHIP.into(), None, Some("Allied captain".into()))],
                 weapons: vec![],
                 crew: vec![],
@@ -283,6 +313,21 @@ pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Libra
             }
             let owner = owner.clone();
             commands.queue(move |w: &mut World| ship::set_formation(w, &owner, Some(kind), kind != ship::Formation::None));
+        }
+        // Bases fight for the side whose fleet type is theirs; a base no fleet claims stays neutral (and silent).
+        for (e, o) in &bases {
+            let Some(class) = o["type"].as_str().filter(|t| t.starts_with("Base_")).and_then(|t| lib.classes.iter().position(|c| c.name == t)) else { continue };
+            let owner = o["player"].as_u64().and_then(|i| players.get(i as usize)).and_then(|p| p["name"].as_str()).and_then(faction);
+            let Some(side) = owner.or_else(|| o["type"].as_str().and_then(faction)).and_then(|f| groups.iter().find(|g| g.race == f)).map(|g| g.side) else { continue };
+            let id = o["id"].as_i64().unwrap_or(-1);
+            let states = combat::spawn_guns(commands, assets, lib, *e, class);
+            commands.entity(*e).insert((
+                campaign::MissionBase { id, owner: format!("base{id}") },
+                combat::ArmedBase { class },
+                combat::BaseSide(side),
+                combat::Health::new(&lib.classes[class]),
+                states,
+            ));
         }
     } else {
         commands.queue(|w: &mut World| {
@@ -460,6 +505,15 @@ pub fn game_rotation(r: &serde_json::Value) -> Quat {
 
 #[cfg(test)]
 mod rotation_tests {
+    #[test]
+    fn base_owners_are_read_from_their_names() {
+        for (name, race) in
+            [("navybase", 0), ("Piratebase", 2), ("proc base", 3), ("pirate base", 2), ("navy port", 0), ("Base_Grant", 0), ("Base_Procyon2", 3), ("Base_PirateMP_3", 2)]
+        {
+            assert_eq!(super::faction(name), Some(race), "{name}");
+        }
+        assert_eq!(super::faction("asteroids"), None);
+    }
     use super::*;
     #[test]
     fn all_mission_two_base_docks_meet_the_authored_flight_plane() {
