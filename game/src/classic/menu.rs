@@ -13,8 +13,8 @@ use crate::assets_dir;
 use crate::bindings::Bindings;
 use crate::combat::Library;
 use crate::menu::{
-    Action, BuildMenu, Cell, Choice, CtrlUi, FLEET_SIZE, InGame, Kind, MenuKey, MenuModel, MenuRoot, Page, RACES, RunButtons, SLIDER_KNOB, SaveUi, Screen, Skirmish, SliderTrack,
-    VICTORY_LIMIT, menu_active, offered, pretty, strings, text_of,
+    Action, BuildMenu, Cell, Choice, CtrlUi, FLEET_SIZE, InGame, Kind, MenuKey, MenuModel, MenuRoot, Page, RACES, RunButtons, SLIDER_KNOB, SLOT_BAR, SaveUi, Screen, Skirmish,
+    SliderTrack, VICTORY_LIMIT, menu_active, offered, pretty, strings, text_of,
 };
 use crate::sprites::{BODY_FONT, Fonts, HudData, IDLE, MENU_SKIN, inset, sliced};
 
@@ -710,14 +710,6 @@ fn map_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, sk: &Skirmish, strings: &Va
     scrollbar(ctx, c, [727.0, 155.0, 752.0, 322.0], 0.0, 1.0);
 }
 
-/// An explicit region of a HUD sheet stretched over a box (for art the sprite table has no entry for).
-pub(super) fn sheet_piece(ctx: &Ctx, c: &mut ChildSpawnerCommands, sheet: &str, rect: Rect, [l, t, r, b]: [f32; 4]) {
-    let mut img = ImageNode::new(ctx.assets.load(format!("hud/tex/{sheet}.png")));
-    img.rect = Some(inset(sheet, rect));
-    img.image_mode = NodeImageMode::Stretch;
-    c.spawn((img, ctx.node(l, t, r - l, b - t)));
-}
-
 /// The current tab of a Ships / Crew / Arms row: the green `FrontEnd_Texts_Over_Button_Selected_*` button, not clickable.
 pub(super) fn selected_tab(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], label: &str, font: &str) {
     let cap = 51.0 * (b - t) / 45.0;
@@ -807,6 +799,20 @@ fn slider(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], fract
         parts.extend(ctx.hud_piece(c, "FrontEnd_Horizontal_Scrollbar_Slider", x, 5.5, SLIDER_KNOB, SLIDER_KNOB));
     });
     track.insert(Art(parts));
+}
+
+/// The slot bar's end arrows (round scrollbar caps, 22 px): live while there are slots out of view on that side.
+pub(super) fn slot_arrows<A: Bundle>(ctx: &Ctx, c: &mut ChildSpawnerCommands, scroll: usize, limit: usize, action: impl Fn(i32) -> A) {
+    for (left, x, live) in [(true, 36.0, scroll > 0), (false, 402.0, scroll + SLOT_BAR < limit)] {
+        let name = if left { "FrontEnd_Horizontal_Scrollbar_Background_Left" } else { "FrontEnd_Horizontal_Scrollbar_Background_Right" };
+        let mut parts = vec![];
+        let mut root = c.spawn((Interaction::None, ctx.node(x, 507.0, 22.0, 22.0)));
+        if live {
+            root.insert(action(if left { -1 } else { 1 }));
+        }
+        root.with_children(|c| parts.extend(crop_piece(ctx, c, name, left, 33.0, [0.0, 0.0, 22.0, 22.0])));
+        root.insert(Art(parts));
+    }
 }
 
 /// A retail radio choice: check box (`FrontEnd_Check_Box_Ready` ticked / `_NotReady`) and its Univers12 label.
@@ -1018,10 +1024,9 @@ fn fleet_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, _rect: [f32; 4], sk: &Ski
     let fleet = sk.human().map(|h| h.fleet.as_slice()).unwrap_or_default();
     // The bar's arrows are the round end buttons of the horizontal scrollbar art (the FrontEnd_Scroll_*_Button entries point at
     // an unrelated sheet region): the first 33 px of FrontEnd_Horizontal_Scrollbar_Background_Left, the last 33 of _Right.
-    sheet_piece(ctx, c, "fe_04", Rect::new(0.0, 66.0, 33.0, 99.0), [36.0, 507.0, 58.0, 529.0]);
-    sheet_piece(ctx, c, "fe_04", Rect::new(111.0, 165.0, 144.0, 198.0), [402.0, 507.0, 424.0, 529.0]);
-    for i in 0..5 {
-        let x = 75.0 + i as f32 * 65.0;
+    slot_arrows(ctx, c, sk.slot_scroll, sk.fleet_size, Action::SlotScroll);
+    for k in 0..SLOT_BAR {
+        let (i, x) = (sk.slot_scroll + k, 75.0 + k as f32 * 65.0);
         let mut b = c.spawn((Interaction::None, ctx.node(x, 488.0, 60.0, 62.0)));
         if i < fleet.len() {
             b.insert(Action::PickFleet(i));

@@ -41,6 +41,8 @@ pub enum Choice {
 
 /// The original's lobby has eight teams to pick from on free-for-all maps.
 pub const TEAMS: i32 = 8;
+/// Fleet slots the Ships / Crew / Arms screens show at once.
+pub const SLOT_BAR: usize = 5;
 
 /// One lobby row = one playable player of the map (docs/re/skirmish-setup.md).
 #[derive(Clone, PartialEq, Debug)]
@@ -117,6 +119,8 @@ pub struct Skirmish {
     /// The info panel and preview show the fleet slot `fleet_pick` rather than the clicked hull type.
     pub view_slot: bool,
     pub fleet_pick: usize,
+    /// First fleet slot shown in the bar of five.
+    pub slot_scroll: usize,
     pub arms_open: bool,
     /// The crew & arms screen opens on the Arms tab (else Crew).
     pub arms_tab: bool,
@@ -235,6 +239,7 @@ impl Skirmish {
         (self.ship_pick, self.fleet_pick, self.scroll) = (0, 0, 0);
         (self.ship_chosen, self.view_slot) = (false, false);
         self.dropdown = None;
+        self.slot_scroll = 0;
         self.arms_open = false;
     }
     /// The hull the Ship Information panel and the preview show: the picked fleet slot after clicking it (or adding a ship), else the
@@ -320,6 +325,19 @@ impl Skirmish {
                 }
             }
             _ => {}
+        }
+    }
+    /// Scroll the slot bar by `d` slots, within the fleet size limit (retail shows five at a time).
+    pub fn scroll_slots(&mut self, d: i32) {
+        let max = self.fleet_size.saturating_sub(SLOT_BAR);
+        self.slot_scroll = (self.slot_scroll as i64 + i64::from(d)).clamp(0, max as i64) as usize;
+    }
+    /// Keep the picked fleet slot inside the slot bar.
+    pub fn show_picked_slot(&mut self) {
+        if self.fleet_pick < self.slot_scroll {
+            self.slot_scroll = self.fleet_pick;
+        } else if self.fleet_pick >= self.slot_scroll + SLOT_BAR {
+            self.slot_scroll = self.fleet_pick + 1 - SLOT_BAR;
         }
     }
     pub fn open(&self) -> bool {

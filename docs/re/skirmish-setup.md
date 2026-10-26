@@ -79,8 +79,9 @@ skill can read N/A). Dragging one onto a post spends its cost (a 9-point captain
   follows the measured rules and uses the original's messages (wrong mount, not enough points, Total Cost).
 - In battle the human fleet's named crew become `CrewPosts` (speed and rudder factors, boarding crews) through `SkirmishCrew`.
   PROVISIONAL: skirmish gunnery accuracy ignores named gunners (only the campaign's best-gunner rule exists).
+- Slot bar: five slots at a time with scroll arrows (`Skirmish::slot_scroll`), following the picked slot.
 - Not done: the retail Sort By pull-down, Load/Save Fleet/Crew/Arms, Auto Assign's real rule (also on these tabs), moving a posted
-  crew member by dragging its face, the slot bar scrolling, the ship-name drop-down, Launch/Ready greying, generic ("N/A") crews.
+  crew member by dragging its face, the ship-name drop-down, Launch/Ready greying, generic ("N/A") crews.
 
 ## Remake notes before the 2026-10 measurements (partly superseded above)
 - Historical map: rows = playable players with their fixed fleet type/team and pre-placed fleets (exported to `ships` in the map

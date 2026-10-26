@@ -2,7 +2,7 @@
 //! original screenshots: the fleet-assembly backdrop, Ships / Crew / Arms tabs, the slot bar, crew posts around the ship outline or
 //! the weapon mounts on it, stat bars, and the crew or weapon list. Falls back to a plain list when the model has no `fit`.
 #![allow(deprecated)]
-use super::menu::{Ctx, GOLD, disabled, piece, pulldown_cell, scrollbar, selected_tab, sheet_piece, sprite, stretched_window, victory_points, wrapped};
+use super::menu::{Ctx, GOLD, disabled, piece, pulldown_cell, scrollbar, selected_tab, sprite, stretched_window, victory_points, wrapped};
 use crate::combat::Library;
 use crate::crew_arms::{Action, CrewSet, FitView, ScreenModel};
 use crate::menu::{strings, text_of};
@@ -114,10 +114,9 @@ fn button(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], label
 /// The fleet slot bar as on the Ships screen: five framed slots with the ships' bar icons; clicking one outfits that ship.
 /// PROVISIONAL: the ship being outfitted is marked by a gold tint over its slot.
 fn slot_bar(ctx: &Ctx, c: &mut ChildSpawnerCommands, fit: &FitView, lib: &Library) {
-    sheet_piece(ctx, c, "fe_04", Rect::new(0.0, 66.0, 33.0, 99.0), [36.0, 507.0, 58.0, 529.0]);
-    sheet_piece(ctx, c, "fe_04", Rect::new(111.0, 165.0, 144.0, 198.0), [402.0, 507.0, 424.0, 529.0]);
-    for i in 0..5 {
-        let x = 75.0 + i as f32 * 65.0;
+    super::menu::slot_arrows(ctx, c, fit.slot_scroll, fit.limit, Action::Slots);
+    for k in 0..crate::menu::SLOT_BAR {
+        let (i, x) = (fit.slot_scroll + k, 75.0 + k as f32 * 65.0);
         let mut b = c.spawn((Interaction::None, ctx.node(x, 488.0, 60.0, 62.0)));
         if i < fit.fleet.len() {
             b.insert(Action::SelectShip(i));

@@ -229,6 +229,8 @@ pub enum Action {
     Recruit(String),
     /// Select a fleet ship / a crew role or weapon bank directly (retail screens: clicking a slot, a post or a mount).
     SelectShip(usize),
+    /// Scroll the slot bar by this many slots.
+    Slots(i32),
     SelectPost(usize),
     Assign(String),
     Reserve(String),
@@ -273,6 +275,9 @@ pub struct FitView {
     pub sort: &'static str,
     /// First visible row of `list`.
     pub scroll: usize,
+    /// First fleet slot in the slot bar and the number of slots the fleet may have.
+    pub slot_scroll: usize,
+    pub limit: usize,
 }
 
 /// The info panel of the Crew and Arms screens: a name, an icon, an optional point cost and label / value lines.
@@ -745,6 +750,7 @@ fn skirmish_screen(
     let points = sk.points_left(&lib);
     let Some(slot) = sk.slots.iter_mut().find(|s| s.kind == crate::menu::Kind::Human) else { return };
     choice.ship = choice.ship.min(slot.fleet.len().saturating_sub(1));
+    let mut sk_slots = None;
     if let Some(action) = action {
         // Anything but picking a row or placing what is carried drops the carried item.
         let placing = matches!(action, Action::SelectPost(_));
@@ -771,6 +777,7 @@ fn skirmish_screen(
                 (choice.post, choice.page) = (0, 0);
                 choice.message.clear();
             }
+            Action::Slots(d) => sk_slots = Some(d),
             Action::Sort => *sort = (*sort + 1) % SORTS.len(),
             Action::PickCrew(id) => *carry = Some(Carry::Crew(id)),
             Action::PickWeapon(gun) => *carry = Some(Carry::Gun(gun)),
@@ -833,6 +840,10 @@ fn skirmish_screen(
             _ => {}
         }
     }
+    if let Some(d) = sk_slots {
+        sk.scroll_slots(d);
+    }
+    let Some(slot) = sk.slots.iter().find(|s| s.kind == crate::menu::Kind::Human) else { return };
     let points = {
         // The budget after this frame's changes.
         let spent: i64 = slot
@@ -908,11 +919,14 @@ fn skirmish_screen(
             picked,
             sort: SORTS[*sort],
             scroll: choice.page,
+            slot_scroll: sk.slot_scroll,
+            limit: sk.fleet_size,
         });
     } else {
         next.detail = "Add a ship to the fleet first.".into();
     }
     sk.fleet_pick = choice.ship;
+    sk.show_picked_slot();
     if *model != next {
         *model = next;
     }

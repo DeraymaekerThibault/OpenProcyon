@@ -59,6 +59,8 @@ pub enum Action {
     Claim(usize),
     /// Open or close a lobby pull-down (`None` closes).
     Dropdown(Option<Cell>),
+    /// Scroll the fleet slot bar.
+    SlotScroll(i32),
     /// The fleet screen's Crew button (opens the crew tab).
     OpenCrew,
     /// Pick an entry of the open pull-down.
@@ -215,6 +217,7 @@ pub fn plugin(app: &mut App) {
         ship_chosen: false,
         view_slot: false,
         fleet_pick: 0,
+        slot_scroll: 0,
         scroll: 0,
         arms_open: false,
         arms_tab: false,
@@ -512,6 +515,8 @@ fn apply(sk: &mut Skirmish, lib: &Library, action: &Action) {
             for s in &mut sk.slots {
                 s.truncate_fleet(n);
             }
+            sk.fleet_pick = sk.fleet_pick.min(n - 1);
+            sk.scroll_slots(0);
         }
         Action::Claim(i) => {
             if sk.slots[*i].kind != Kind::Human {
@@ -526,6 +531,7 @@ fn apply(sk: &mut Skirmish, lib: &Library, action: &Action) {
                 (sk.ship_chosen, sk.view_slot) = (false, false);
             }
         }
+        Action::SlotScroll(d) => sk.scroll_slots(*d),
         Action::Dropdown(cell) => sk.dropdown = *cell,
         Action::Choose(cell, choice) => sk.choose(*cell, *choice),
         Action::OpenArms | Action::OpenCrew => {
@@ -534,7 +540,10 @@ fn apply(sk: &mut Skirmish, lib: &Library, action: &Action) {
         }
         Action::PickShip(row) => (sk.ship_pick, sk.ship_chosen, sk.view_slot) = (*row, true, false),
         Action::MapInfo(open) => sk.map_info = *open,
-        Action::PickFleet(row) => (sk.fleet_pick, sk.view_slot) = (*row, true),
+        Action::PickFleet(row) => {
+            (sk.fleet_pick, sk.view_slot) = (*row, true);
+            sk.show_picked_slot();
+        }
         Action::AddShip => {
             let (limit, pick, left) = (sk.fleet_size, sk.ship_pick, sk.points_left(lib));
             if let Some(h) = sk.slots.iter_mut().find(|s| s.kind == Kind::Human).filter(|h| h.fleet.len() < limit)
@@ -546,6 +555,7 @@ fn apply(sk: &mut Skirmish, lib: &Library, action: &Action) {
                 sk.view_slot = true;
             }
             sk.error = None;
+            sk.show_picked_slot();
         }
         // PROVISIONAL: the original's auto-assign rule is not recovered; this adds the most expensive ship that still fits until the
         // fleet is full or nothing fits.
@@ -738,6 +748,7 @@ mod tests {
             ship_chosen: false,
             view_slot: false,
             fleet_pick: 0,
+            slot_scroll: 0,
             scroll: 0,
             arms_open: false,
             arms_tab: false,
@@ -879,6 +890,23 @@ mod tests {
         apply(&mut sk, &lib, &Action::DropShip);
         assert!(sk.slots[0].crew_at(&id).is_none(), "dropping a ship returns its crew");
         assert_eq!(sk.points_left(&lib), 300);
+    }
+    #[test]
+    fn slot_bar_shows_five_slots_and_follows_the_picked_one() {
+        let lib = Library::load(&assets_dir());
+        let mut sk = skirmish("diablo_straight");
+        sk.fleet_size = 8;
+        sk.scroll_slots(10);
+        assert_eq!(sk.slot_scroll, 3, "eight slots: the last window starts at slot 4");
+        sk.scroll_slots(-10);
+        assert_eq!(sk.slot_scroll, 0);
+        apply(&mut sk, &lib, &Action::PickShip(offered(&lib, 0).len() - 1));
+        for _ in 0..7 {
+            apply(&mut sk, &lib, &Action::AddShip);
+        }
+        assert_eq!((sk.fleet_pick, sk.slot_scroll), (6, 2), "adding the seventh ship scrolls it into view");
+        apply(&mut sk, &lib, &Action::PickFleet(0));
+        assert_eq!(sk.slot_scroll, 0);
     }
     #[test]
     fn create_skirmish_sliders_use_the_retail_ranges() {
