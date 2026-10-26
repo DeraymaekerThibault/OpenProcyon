@@ -238,7 +238,10 @@ pub enum Action {
     /// Skirmish screens: pick a roster entry or a weapon (then drag or click it onto a post or mount), cycle the sort, drop the selected post's last crew member.
     PickCrew(String),
     PickWeapon(String),
+    /// Open or close the Sort By pull-down.
     Sort,
+    /// Sort the roster by `SORTS[i]` and close the pull-down.
+    SortBy(usize),
     Drop,
     AutoAssign,
 }
@@ -273,6 +276,8 @@ pub struct FitView {
     pub picked: Option<usize>,
     /// The crew list's sort field (the Sort By box).
     pub sort: &'static str,
+    /// The Sort By pull-down is open (its entries are `SORTS`).
+    pub sort_open: bool,
     /// First visible row of `list`.
     pub scroll: usize,
     /// First fleet slot in the slot bar and the number of slots the fleet may have.
@@ -701,6 +706,7 @@ fn skirmish_screen(
     mut choice: Local<Choice>,
     mut carry: Local<Option<Carry>>,
     mut sort: Local<usize>,
+    mut sort_open: Local<bool>,
 ) {
     use crate::menu::Screen;
     if *state.get() == Screen::Battle {
@@ -713,6 +719,7 @@ fn skirmish_screen(
         sk.arms_open = false;
         *choice = Choice::default();
         *carry = None;
+        *sort_open = false;
         return;
     }
     if !model.open {
@@ -778,7 +785,8 @@ fn skirmish_screen(
                 choice.message.clear();
             }
             Action::Slots(d) => sk_slots = Some(d),
-            Action::Sort => *sort = (*sort + 1) % SORTS.len(),
+            Action::Sort => *sort_open = !*sort_open,
+            Action::SortBy(i) => (*sort, *sort_open) = (i.min(SORTS.len() - 1), false),
             Action::PickCrew(id) => *carry = Some(Carry::Crew(id)),
             Action::PickWeapon(gun) => *carry = Some(Carry::Gun(gun)),
             Action::Drop => {
@@ -918,6 +926,7 @@ fn skirmish_screen(
             can_drop,
             picked,
             sort: SORTS[*sort],
+            sort_open: *sort_open && !choice.arms,
             scroll: choice.page,
             slot_scroll: sk.slot_scroll,
             limit: sk.fleet_size,

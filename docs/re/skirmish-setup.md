@@ -72,15 +72,15 @@ skill can read N/A). Dragging one onto a post spends its cost (a 9-point captain
 - Arms and Crew in skirmish charge or refund against the budget: `fitting_delta` for weapons, `crew_points` for named crew
   (`Slot::crew`, one post list per fleet entry; dropping a ship or changing fleet type returns its crew).
 - Crew / Arms screens (`crew_arms.rs` `skirmish_screen`, drawn by `classic/crew_arms.rs` over the fleet screen): the Crew button opens
-  the Crew tab, Arms the Arms tab; the roster is the race's named crew (`roster`) sorted by the Sort By field (click to cycle:
-  PROVISIONAL, retail has a pull-down), minus anyone already posted; clicking a row (or pressing it) picks it and shows its info
+  the Crew tab, Arms the Arms tab; the roster is the race's named crew (`roster`) sorted by the Sort By pull-down (nine entries, `SORTS`; the list
+  hangs under the box 25 units apart, the look is PROVISIONAL), minus anyone already posted; clicking a row (or pressing it) picks it and shows its info
   panel (portrait, cost, seven skills, N/A where none); a release over, or a later click on, a face / mount places it. A full post
   replaces its last named crew member (PROVISIONAL). Drop returns the selected post's last named crew member. Weapon placement
   follows the measured rules and uses the original's messages (wrong mount, not enough points, Total Cost).
 - In battle the human fleet's named crew become `CrewPosts` (speed and rudder factors, boarding crews) through `SkirmishCrew`.
   PROVISIONAL: skirmish gunnery accuracy ignores named gunners (only the campaign's best-gunner rule exists).
 - Slot bar: five slots at a time with scroll arrows (`Skirmish::slot_scroll`), following the picked slot.
-- Not done: the retail Sort By pull-down, Load/Save Fleet/Crew/Arms, Auto Assign's real rule (also on these tabs), moving a posted
+- Not done: Load/Save Fleet/Crew/Arms, Auto Assign's real rule (also on these tabs), moving a posted
   crew member by dragging its face, the ship-name drop-down, Launch/Ready greying, generic ("N/A") crews.
 
 ## Remake notes before the 2026-10 measurements (partly superseded above)

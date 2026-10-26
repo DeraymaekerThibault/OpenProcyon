@@ -939,7 +939,7 @@ fn players_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, _rect: [f32; 4], sk: &S
     }
     if let Some(cell) = sk.dropdown {
         // The open list sits on its cell: the current value first, the other entries 28 apart below (retail). A click elsewhere closes it.
-        let mut blocker = c.spawn((Interaction::None, Action::Dropdown(None), ctx.node(0.0, 0.0, 800.0, 600.0)));
+        let mut blocker = c.spawn((Interaction::None, bevy::ui::FocusPolicy::Block, Action::Dropdown(None), ctx.node(0.0, 0.0, 800.0, 600.0)));
         blocker.insert(ZIndex(1));
         let (x0, x1, row) = match cell {
             Cell::Player(i) => (287.0, 460.0, i),

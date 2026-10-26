@@ -4,7 +4,7 @@
 #![allow(deprecated)]
 use super::menu::{Ctx, GOLD, disabled, piece, pulldown_cell, scrollbar, selected_tab, sprite, stretched_window, victory_points, wrapped};
 use crate::combat::Library;
-use crate::crew_arms::{Action, CrewSet, FitView, ScreenModel};
+use crate::crew_arms::{Action, CrewSet, FitView, SORTS, ScreenModel};
 use crate::menu::{strings, text_of};
 use crate::sprites::{BODY_FONT, Fonts, HudData, IDLE, offset};
 use bevy::prelude::*;
@@ -259,7 +259,7 @@ fn list(ctx: &Ctx, c: &mut ChildSpawnerCommands, fit: &FitView, strings: &Value)
         ctx.text(c, "UniversBold14", &text_of(strings, "IDGS_TPFRONTENDTEXT01_AVAILABLE_WEAPONS"), 505.0, 215.0, 311.0, true, Color::WHITE);
     } else {
         let sort = format!("{} {}", text_of(strings, "IDGS_TPFRONTENDTEXT01_SORT_BY"), fit.sort);
-        pulldown_cell(ctx, c, [520.0, 297.0, 710.0, 326.0], &sort, false, Some(Action::Sort), true);
+        pulldown_cell(ctx, c, [520.0, 297.0, 710.0, 326.0], &sort, fit.sort_open, Some(Action::Sort), true);
     }
     const ROWS: usize = 8;
     for (row, (label, action)) in fit.list.iter().enumerate().skip(fit.scroll).take(ROWS) {
@@ -272,6 +272,16 @@ fn list(ctx: &Ctx, c: &mut ChildSpawnerCommands, fit: &FitView, strings: &Value)
     }
     let n = fit.list.len().max(1) as f32;
     scrollbar(ctx, c, [742.0, 330.0, 767.0, 505.0], fit.scroll as f32 / (n - ROWS as f32).max(1.0), (ROWS as f32 / n).min(1.0));
+    if fit.sort_open {
+        // The open Sort By list: a click anywhere else closes it; the entries hang under the box 25 apart (measured with the retail driver).
+        c.spawn((Interaction::None, bevy::ui::FocusPolicy::Block, Action::Sort, ctx.node(0.0, 0.0, 800.0, 600.0), ZIndex(1)));
+        for (k, field) in SORTS.iter().enumerate() {
+            let y = 339.0 - 12.5 + k as f32 * 25.0;
+            c.spawn((ctx.node(520.0, y, 190.0, 25.0), ZIndex(2), Interaction::None, bevy::ui::FocusPolicy::Block, Action::SortBy(k))).with_children(|c| {
+                pulldown_cell(ctx, c, [0.0, 0.0, 190.0, 25.0], field, fit.sort == *field, None::<Action>, false);
+            });
+        }
+    }
 }
 
 /// The plain presentation (no retail view data): title, details, navigation and rows as text buttons.
