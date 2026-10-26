@@ -110,7 +110,7 @@ fn build(
         if let Some(icon) = &fit.carrying
             && let Some((e, _)) = ctx.hud_piece(root, icon, 0.0, 0.0, FACE, FACE)
         {
-            root.commands().entity(e).insert((Ghost, GlobalZIndex(1)));
+            root.commands().entity(e).insert((Ghost, GlobalZIndex(181)));
         }
     });
 }
