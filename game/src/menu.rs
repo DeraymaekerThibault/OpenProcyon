@@ -561,71 +561,17 @@ pub fn capture_key(mut keys: ResMut<ButtonInput<KeyCode>>, mut cui: ResMut<CtrlU
 }
 
 /// The lobby / fleet-screen choices (everything that only edits the `Skirmish`).
-/// Auto Assign. Measured on the original (docs/re/skirmish-setup.md): it fills the fleet with hulls that fit the points still left,
-/// mixing classes (300 points / 5 ships gave a Heavy Scout, a Heavy Escort and three Warsloops; 50 points two Torpedo Boats), then spends
-/// what remains on named crew until the counter reads 0. The choice among affordable hulls looked random: PROVISIONAL, here a fixed
-/// pseudo-random pick so the result repeats; crew go to the posts in order, best skill first. Hulls it adds also get random weapon swaps.
+/// Auto Assign for the human fleet (see `auto_build`).
 pub fn auto_assign(sk: &mut Skirmish, lib: &Library) {
-    let mut seed = u64::from(sk.victory_limit) * 31 + sk.fleet_size as u64 * 7 + 1;
-    let first_new = sk.human().map_or(0, |h| h.fleet.len());
-    while let Some(h) = sk.human().filter(|h| h.fleet.len() < sk.fleet_size) {
-        let left = sk.points_left(lib);
-        let fits: Vec<usize> = offered(lib, h.race).iter().enumerate().filter(|&(_, &c)| i64::from(lib.classes[c].points) <= left).map(|(row, _)| row).collect();
-        if fits.is_empty() {
-            break;
-        }
-        seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
-        sk.ship_pick = fits[(seed >> 33) as usize % fits.len()];
-        apply(sk, lib, &Action::AddShip);
-    }
-    let Some(slot) = sk.slots.iter().position(|s| s.kind == Kind::Human) else { return };
-    // Hulls it added itself also get some random weapon swaps that fit the points (measured: from an empty fleet the guns differed
-    // from stock, while Auto Assign on a hand-added ship only crewed it). PROVISIONAL: a coin flip per bank.
-    for ship in first_new..sk.slots[slot].fleet.len() {
-        let class = &lib.classes[lib.index(&sk.slots[slot].fleet[ship])];
-        for (bank, first) in crate::crew_arms::selectable_banks(lib, class) {
-            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
-            if (seed >> 40) & 1 == 0 {
-                continue;
-            }
-            let stock = &class.mounts[first].gun;
-            let left = sk.points_left(lib);
-            let stock_cost = i64::from(crate::crew_arms::bank_cost(lib, class, bank, stock).unwrap_or(0));
-            let mut guns: Vec<&String> = lib
-                .guns
-                .keys()
-                .filter(|g| *g != stock && i64::from(crate::crew_arms::bank_cost(lib, class, bank, g).unwrap_or(i32::MAX as u32)) - stock_cost <= left)
-                .filter(|g| crate::crew_arms::bank_compatible(lib, class, bank, g))
-                .collect();
-            guns.sort();
-            if guns.is_empty() {
-                continue;
-            }
-            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
-            let gun = guns[(seed >> 33) as usize % guns.len()].clone();
-            let h = &mut sk.slots[slot];
-            h.weapons.resize_with(h.fleet.len(), Default::default);
-            h.weapons[ship].insert(bank, gun);
-        }
-    }
-    let race = sk.slots[slot].race;
-    let name = RACES.iter().find(|r| r.0 == race).map_or("Navy", |r| r.1);
-    for ship in 0..sk.slots[slot].fleet.len() {
-        let class = &lib.classes[lib.index(&sk.slots[slot].fleet[ship])];
-        let caps = crate::boarding::counts(&class.name);
-        for (role, &cap) in caps.iter().enumerate() {
-            while sk.slots[slot].crew_mut(ship)[role].len() < cap as usize {
-                let left = sk.points_left(lib);
-                let used: Vec<String> = sk.slots[slot].crew.iter().flatten().flatten().cloned().collect();
-                let skill = crate::crew_arms::post_skill_name(role);
-                let best = crate::crew_arms::roster(name, 0)
-                    .into_iter()
-                    .filter(|id| !used.contains(id) && i64::from(crate::crew_arms::crew_points(id)) <= left)
-                    .max_by(|a, b| crate::crew_arms::ability(a, skill).unwrap_or(0.0).total_cmp(&crate::crew_arms::ability(b, skill).unwrap_or(0.0)).then_with(|| b.cmp(a)));
-                let Some(id) = best else { break };
-                sk.slots[slot].crew_mut(ship)[role].push(id);
-            }
-        }
+    let Some(i) = sk.slots.iter().position(|s| s.kind == Kind::Human) else { return };
+    let mut slot = sk.slots[i].clone();
+    auto_build(&mut slot, sk.victory_limit, sk.fleet_size, lib, 0, false);
+    sk.slots[i] = slot;
+    sk.error = None;
+    if let Some(h) = sk.human().filter(|h| !h.fleet.is_empty()) {
+        sk.fleet_pick = h.fleet.len() - 1;
+        sk.view_slot = true;
+        sk.show_picked_slot();
     }
 }
 
@@ -1074,6 +1020,24 @@ mod tests {
         // Changing a fleet type moves it off a flag the new type's fleets already fly.
         sk.choose(Cell::Fleet(3), Choice::Fleet(2));
         assert_ne!(sk.slots[3].flag, sk.slots[4].flag);
+    }
+    #[test]
+    fn computer_fleets_use_auto_assign_inside_the_victory_limit() {
+        let lib = Library::load(&assets_dir());
+        let mut sk = skirmish("diablo_straight");
+        sk.choose(Cell::Player(1), Choice::Computer);
+        sk.slots[0].push_ship("Ship_Navy_Cutter");
+        let cost = |sk: &Skirmish| -> (usize, i64) {
+            let g = &sk.plan(&lib)[1];
+            let ships: i64 = g.ships.iter().map(|(n, ..)| i64::from(lib.classes[lib.index(n)].points)).sum();
+            (g.ships.len(), ships)
+        };
+        let (n, points) = cost(&sk);
+        assert!(n > 0 && points <= 300, "{n} ships cost {points}");
+        sk.victory_limit = 60;
+        let (n, points) = cost(&sk);
+        assert!(n > 0 && points <= 60, "a small limit buys cheap hulls: {n} ships cost {points}");
+        assert!(sk.plan(&lib)[1].crew.is_empty(), "computer ships keep the measured computer crew factor");
     }
     #[test]
     fn slot_bar_shows_five_slots_and_follows_the_picked_one() {

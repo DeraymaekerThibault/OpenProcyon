@@ -97,6 +97,8 @@ skill can read N/A). Dragging one onto a post spends its cost (a 9-point captain
   (`Skirmish::flag_picker`, `Slot::flag`); the frame art is the generic dialog frame stretched (PROVISIONAL).
 - Lobby pull-downs stay open only while the button is held on the original: press the cell, drag to an entry, release. The remake
   also takes that (release over an entry other than the first picks it) next to the click, click path.
+- Computers build their fleets with the same routine as Auto Assign (`auto_build`, armed hulls only, same victory limit, weapon swaps but no named crew:
+  they keep the measured computer crew factor). PROVISIONAL: the original's computer fleet was not read out of a battle.
 - Launch Game is greyed until a computer opponent is in and (open maps) a fleet is assembled; I'm Ready is always greyed in single player
   (measured: fresh lobby, lobby with a computer and no fleet, and with a fleet).
 - Every scrollbar (maps, ships, crew / weapons) shares one drag rule (`menu::scroll_drag`): press the track or thumb and drag. What a drag

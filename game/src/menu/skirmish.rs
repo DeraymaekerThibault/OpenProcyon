@@ -94,6 +94,18 @@ impl Slot {
         }
         &mut self.crew[i]
     }
+    /// Victory points the fleet costs: hulls, weapon swaps and named crew.
+    pub fn spent(&self, lib: &Library) -> i64 {
+        self.fleet
+            .iter()
+            .enumerate()
+            .filter_map(|(i, n)| {
+                let class = lib.classes.iter().find(|c| &c.name == n)?;
+                Some(i64::from(class.points) + self.weapons.get(i).map_or(0, |fit| crate::crew_arms::fitting_delta(lib, class, fit)))
+            })
+            .sum::<i64>()
+            + self.crew.iter().flatten().flatten().map(|id| i64::from(crate::crew_arms::crew_points(id))).sum::<i64>()
+    }
     /// Where a named crew member is posted in this fleet: (fleet entry, post).
     pub fn crew_at(&self, id: &str) -> Option<(usize, usize)> {
         self.crew.iter().enumerate().find_map(|(i, c)| c.iter().position(|r| r.iter().any(|x| x == id)).map(|r| (i, r)))
@@ -179,13 +191,72 @@ pub fn offered(lib: &Library, race: u8) -> Vec<usize> {
     list
 }
 
-/// Computer fleet: `n` armed hulls of the race, spread over the offered list. PROVISIONAL (the original's AI fleet choice and victory-point budget are unknown).
-pub(super) fn auto_fleet(lib: &Library, race: u8, n: usize, salt: usize) -> Vec<String> {
-    let pool: Vec<usize> = offered(lib, race).into_iter().filter(|&i| !lib.classes[i].mounts.is_empty()).collect();
-    if pool.is_empty() {
-        return vec![];
+/// Auto Assign. Measured on the original (docs/re/skirmish-setup.md): it fills the fleet with hulls that fit the points still left,
+/// mixing classes (300 points / 5 ships gave a Heavy Scout, a Heavy Escort and three Warsloops; 50 points two Torpedo Boats). Hulls it
+/// adds itself also get weapon swaps (a hand-added ship only gets crew), and the points that remain buy named crew. The choice among
+/// affordable hulls and weapons looked random: PROVISIONAL, here a fixed pseudo-random pick (a coin flip per bank) so the result
+/// repeats; crew go to the posts in order, best skill first. Computers use it too (PROVISIONAL: the original's computer fleet was
+/// not read out of a battle; the budget is the same victory limit, and `armed_only` keeps tenders and tugs out of its fleets).
+pub fn auto_build(slot: &mut Slot, limit: u32, fleet_size: usize, lib: &Library, salt: u64, armed_only: bool) {
+    let next = |seed: &mut u64| {
+        *seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        *seed >> 33
+    };
+    let mut seed = u64::from(limit) * 31 + fleet_size as u64 * 7 + 1 + salt * 977;
+    let left = |slot: &Slot| i64::from(limit) - slot.spent(lib);
+    let first_new = slot.fleet.len();
+    while slot.fleet.len() < fleet_size {
+        let budget = left(slot);
+        let fits: Vec<usize> =
+            offered(lib, slot.race).into_iter().filter(|&c| i64::from(lib.classes[c].points) <= budget && (!armed_only || !lib.classes[c].mounts.is_empty())).collect();
+        if fits.is_empty() {
+            break;
+        }
+        let pick = fits[next(&mut seed) as usize % fits.len()];
+        slot.push_ship(&lib.classes[pick].name);
     }
-    (0..n).map(|k| lib.classes[pool[(k * 5 + salt) % pool.len()]].name.clone()).collect()
+    for ship in first_new..slot.fleet.len() {
+        let class = &lib.classes[lib.index(&slot.fleet[ship])];
+        for (bank, first) in crate::crew_arms::selectable_banks(lib, class) {
+            if next(&mut seed) & 1 == 0 {
+                continue;
+            }
+            let stock = &class.mounts[first].gun;
+            let budget = left(slot);
+            let stock_cost = i64::from(crate::crew_arms::bank_cost(lib, class, bank, stock).unwrap_or(0));
+            let mut guns: Vec<&String> = lib
+                .guns
+                .keys()
+                .filter(|g| *g != stock && crate::crew_arms::bank_compatible(lib, class, bank, g))
+                .filter(|g| crate::crew_arms::bank_cost(lib, class, bank, g).is_some_and(|c| i64::from(c) - stock_cost <= budget))
+                .collect();
+            guns.sort();
+            if guns.is_empty() {
+                continue;
+            }
+            let gun = guns[next(&mut seed) as usize % guns.len()].clone();
+            slot.weapons.resize_with(slot.fleet.len(), Default::default);
+            slot.weapons[ship].insert(bank, gun);
+        }
+    }
+    let name = RACES.iter().find(|r| r.0 == slot.race).map_or("Navy", |r| r.1);
+    for ship in 0..slot.fleet.len() {
+        let class = &lib.classes[lib.index(&slot.fleet[ship])];
+        let caps = crate::boarding::counts(&class.name);
+        for (role, &cap) in caps.iter().enumerate() {
+            while slot.crew_mut(ship)[role].len() < cap as usize {
+                let budget = left(slot);
+                let used: Vec<String> = slot.crew.iter().flatten().flatten().cloned().collect();
+                let skill = crate::crew_arms::post_skill_name(role);
+                let best = crate::crew_arms::roster(name, 0)
+                    .into_iter()
+                    .filter(|id| !used.contains(id) && i64::from(crate::crew_arms::crew_points(id)) <= budget)
+                    .max_by(|a, b| crate::crew_arms::ability(a, skill).unwrap_or(0.0).total_cmp(&crate::crew_arms::ability(b, skill).unwrap_or(0.0)).then_with(|| b.cmp(a)));
+                let Some(id) = best else { break };
+                slot.crew_mut(ship)[role].push(id);
+            }
+        }
+    }
 }
 
 pub fn pretty(name: &str) -> String {
@@ -375,18 +446,7 @@ impl Skirmish {
     /// Why the game cannot launch yet (a string id, or plain text), if so.
     /// Victory points the human player has left to spend on ships ('Current Victory Points').
     pub fn points_left(&self, lib: &Library) -> i64 {
-        let spent: i64 = self.human().map_or(0, |h| {
-            h.fleet
-                .iter()
-                .enumerate()
-                .filter_map(|(i, n)| {
-                    let class = lib.classes.iter().find(|c| &c.name == n)?;
-                    Some(i64::from(class.points) + h.weapons.get(i).map_or(0, |fit| crate::crew_arms::fitting_delta(lib, class, fit)))
-                })
-                .sum::<i64>()
-                + h.crew.iter().flatten().flatten().map(|id| i64::from(crate::crew_arms::crew_points(id))).sum::<i64>()
-        });
-        i64::from(self.victory_limit) - spent
+        i64::from(self.victory_limit) - self.human().map_or(0, |h| h.spent(lib))
     }
     pub fn launch_error(&self) -> Option<&'static str> {
         let h = self.human()?;
@@ -418,6 +478,7 @@ impl Skirmish {
             .iter()
             .filter(|s| s.kind.live())
             .map(|s| {
+                let mut computer_build = None;
                 let ships = if !open {
                     // The first ship becomes the command ship: the one the map flags as primary (its Setup Ship rule), else map order.
                     let mut placed: Vec<&Value> = self.map_json["ships"].as_array().into_iter().flatten().filter(|o| o["player"].as_u64() == Some(s.player as u64)).collect();
@@ -430,7 +491,11 @@ impl Skirmish {
                         .filter(|(n, ..)| lib.classes.iter().any(|c| c.name == *n))
                         .collect()
                 } else if s.fleet.is_empty() {
-                    auto_fleet(lib, s.race, self.fleet_size, s.player).into_iter().map(|n| (n, None, None)).collect()
+                    // A computer builds its fleet with the same routine as Auto Assign, inside the same budget.
+                    let mut c = s.clone();
+                    auto_build(&mut c, self.victory_limit, self.fleet_size, lib, s.player as u64 + 1, true);
+                    computer_build = Some((c.weapons.clone(), c.crew.clone()));
+                    c.fleet.iter().map(|n| (n.clone(), None, None)).collect()
                 } else {
                     s.fleet.iter().map(|n| (n.clone(), None, None)).collect()
                 };
@@ -449,8 +514,13 @@ impl Skirmish {
                     side,
                     human: s.kind == Kind::Human,
                     ships,
-                    weapons: if open { s.weapons.clone() } else { vec![] },
-                    crew: if open { s.crew.clone() } else { vec![] },
+                    // A built computer fleet keeps its weapons but not its named crew: computer ships run at the measured computer crew factor.
+                    weapons: match &computer_build {
+                        Some((weapons, _)) => weapons.clone(),
+                        None if open => s.weapons.clone(),
+                        None => vec![],
+                    },
+                    crew: if open && computer_build.is_none() { s.crew.clone() } else { vec![] },
                 }
             })
             .collect()
