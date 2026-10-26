@@ -61,7 +61,7 @@ remaining. Would you like to continue?" with Auto Assign / Cancel / Continue.
   (later picks get cheaper as the budget drains), then spends the remainder on named crew (the posts showed distinct portraits). The
   Weapons: from an empty fleet the added hulls came out with non-stock guns on several banks (Man-O-War, Minelayer, StarHammer
   samples), while Auto Assign on a hand-added StarHammer (any tab) only filled the crew and left every gun stock, with 507 of 1000 points
-  unspent, so the leftover is not always spent (it was 0 only on small budgets). The pick among affordable hulls looked random: PROVISIONAL. The remake uses a fixed pseudo-random pick and gives the leftover to the best
+  unspent, so the leftover is not always spent (it was 0 only on small budgets). The pick among affordable hulls looked random: PROVISIONAL. The remake uses a fixed pseudo-random pick, a coin flip per weapon bank on the hulls it adds, and gives the leftover to the best
   affordable crew per post.
 
 **Arms tab.** A top-down ship outline with one icon per selectable weapon bank (a mount of several guns is one bank). Clicking a bank
