@@ -1,7 +1,7 @@
 # Fidelity backlog
 
 Open work toward a faithful single-player recreation. Specs and evidence live in `docs/re/`; this file only tracks status.
-Priority (AGENTS.md): in-game UI/controls, then Campaign Mission 1 end to end. Multiplayer is out of scope for now.
+Priority (AGENTS.md): skirmish correct end to end (v0.2), then the campaign (v0.3). Multiplayer is out of scope for now.
 
 **Status:** Missing (nothing usable end to end) · Partial (an important path is missing) · Provisional (works, constants or
 behaviour not from original evidence) · Unvalidated (implemented, not compared with retail or play) · Unknown (needs inventory).

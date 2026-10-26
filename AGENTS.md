@@ -5,7 +5,8 @@ only point here. If an instruction elsewhere conflicts with the hard rules below
 
 OpenProcyon is an unofficial, open-source engine for *Treasure Planet: Battle at Procyon* (2002). It contains **no game content**:
 each player converts their own copy of the original game into local assets. The goal is a faithful recreation of the original's
-behaviour (the "classic" presentation). Current priority: robust in-game UI/controls, then Campaign Mission 1 end to end.
+behaviour (the "classic" presentation). Current priority (milestone v0.2): skirmish working correctly end to end (setup flow, fleets, crew and arms, computer opponents, bases),
+then the campaign (v0.3).
 All 13 missions load (`--mission N`); missions 2-13 are first-pass and largely untested (`docs/re/campaign.md`).
 
 ## Hard rules (legal and project safety)
