@@ -85,6 +85,11 @@ skill can read N/A). Dragging one onto a post spends its cost (a 9-point captain
   Named gunners (posts) already drive the human ships' accuracy and gun reload (`combat/gunnery.rs`, docs/re/gunnery.md).
 - Slot bar: five slots at a time with scroll arrows (`Skirmish::slot_scroll`), following the picked slot.
 - Posted crew move by dragging their face onto another post (the points come back and are re-spent; a failed drop puts them back).
+- Flag column: only your own flag is clickable; it opens a modal gold frame with your fleet type's ten flags (two rows of five); a pick sets
+  the flag and closes it, a click outside does nothing (measured). Computers' flags cannot be changed. The remake draws the same
+  (`Skirmish::flag_picker`, `Slot::flag`); the frame art is the generic dialog frame stretched (PROVISIONAL).
+- Lobby pull-downs stay open only while the button is held on the original: press the cell, drag to an entry, release. The remake
+  also takes that (release over an entry other than the first picks it) next to the click, click path.
 - Launch Game is greyed until a computer opponent is in and (open maps) a fleet is assembled; I'm Ready is always greyed in single player
   (measured: fresh lobby, lobby with a computer and no fleet, and with a fleet).
 - Every scrollbar (maps, ships, crew / weapons) shares one drag rule (`menu::scroll_drag`): press the track or thumb and drag. What a drag

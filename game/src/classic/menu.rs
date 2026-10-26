@@ -917,8 +917,12 @@ fn players_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, _rect: [f32; 4], sk: &S
             _ => 0,
         };
         if live {
-            c.spawn(ctx.node(250.0, cy - 12.5, 28.0, 25.0)).with_children(|c| {
-                piece(ctx, c, &format!("FrontEnd_Flag_Small_Icon_{:02}", base + i % 10), [0.0, 0.0, 28.0, 25.0], (false, false));
+            let mut flag = c.spawn((ctx.node(250.0, cy - 12.5, 28.0, 25.0), Interaction::None));
+            if me {
+                flag.insert(Action::FlagPicker(true));
+            }
+            flag.with_children(|c| {
+                piece(ctx, c, &format!("FrontEnd_Flag_Small_Icon_{:02}", base + usize::from(slot.flag)), [0.0, 0.0, 28.0, 25.0], (false, false));
             });
         }
         // Several live players on one team are told apart by a letter ('Pirates A', 'B', 'C'), as on original screenshots.
@@ -950,6 +954,24 @@ fn players_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, _rect: [f32; 4], sk: &S
         for (x0, x1, label, action, drop) in cells {
             pulldown_cell(ctx, c, [x0, cy - 14.5, x1, cy + 14.5], &label, false, action, drop);
         }
+    }
+    if sk.flag_picker {
+        // Retail: a modal gold frame over the lobby with the fleet type's ten flags, two rows of five 75 apart; only a pick closes it.
+        let base = match sk.human().map_or(0, |h| h.race) {
+            2 => 10,
+            3 => 20,
+            _ => 0,
+        };
+        c.spawn((Interaction::None, bevy::ui::FocusPolicy::Block, Action::FlagPicker(true), ctx.node(0.0, 0.0, 800.0, 600.0), ZIndex(1)));
+        c.spawn((ctx.node(150.0, 175.0, 475.0, 245.0), ZIndex(2))).with_children(|c| {
+            ctx.image(c, "menu/frontenddialogscreen.png", None, 0.0, 0.0, 475.0, 245.0, Color::WHITE);
+            for k in 0..10usize {
+                let (x, y) = (87.0 + (k % 5) as f32 * 75.0 - 33.5, 76.0 + (k / 5) as f32 * 75.0 - 33.5);
+                c.spawn((ctx.node(x, y, 67.0, 67.0), Interaction::None, bevy::ui::FocusPolicy::Block, Action::PickFlag(k as u8))).with_children(|c| {
+                    piece(ctx, c, &format!("FrontEnd_Flag_Icon_{:02}", base + k), [0.0, 0.0, 67.0, 67.0], (false, false));
+                });
+            }
+        });
     }
     if let Some(cell) = sk.dropdown {
         // The open list sits on its cell: the current value first, the other entries 28 apart below (retail). A click elsewhere closes it.

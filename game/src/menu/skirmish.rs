@@ -52,6 +52,8 @@ pub struct Slot {
     pub kind: Kind,
     pub race: u8,  // fleet type as in the TWT: 0 Navy, 2 Pirate, 3 Procyon, 4 none chosen yet
     pub team: i32, // -1: on its own
+    /// Which of the fleet type's ten flags the player flies (0-9); only the human slot's can be changed.
+    pub flag: u8,
     pub fleet: Vec<String>,
     pub weapons: Vec<std::collections::BTreeMap<usize, String>>,
     /// Named crew per fleet entry and post (`crew_arms::ROLES` order); posts left empty are filled by generic crew.
@@ -113,6 +115,8 @@ pub struct Skirmish {
     pub error: Option<&'static str>, // string id (or plain text) shown under the player list
     /// The open lobby pull-down, if any (its list is drawn under the cell; a click elsewhere closes it).
     pub dropdown: Option<Cell>,
+    /// The lobby's flag picker is open (retail: a modal gold frame with the fleet type's ten flags).
+    pub flag_picker: bool,
     pub ship_pick: usize,
     /// A hull type has been clicked in Available Ships (retail starts with none: no preview, Add greyed).
     pub ship_chosen: bool,
@@ -212,7 +216,7 @@ pub(super) fn new_slots(map: &Value) -> Vec<Slot> {
                 p["race"].as_u64().unwrap_or(4) as u8
             };
             let fleet = if open { vec![] } else { ships_of(map, i) };
-            Slot { player: i, name: p["name"].as_str().unwrap_or("").trim().into(), kind: Kind::Computer, race, team, fleet, weapons: vec![], crew: vec![] }
+            Slot { player: i, name: p["name"].as_str().unwrap_or("").trim().into(), kind: Kind::Computer, race, team, flag: 0, fleet, weapons: vec![], crew: vec![] }
         })
         .collect();
     if let Some(h) = slots.first_mut() {
@@ -241,6 +245,7 @@ impl Skirmish {
         (self.ship_pick, self.fleet_pick, self.scroll) = (0, 0, 0);
         (self.ship_chosen, self.view_slot) = (false, false);
         self.dropdown = None;
+        self.flag_picker = false;
         self.slot_scroll = 0;
         self.arms_open = false;
     }

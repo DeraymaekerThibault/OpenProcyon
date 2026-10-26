@@ -59,6 +59,10 @@ pub enum Action {
     Claim(usize),
     /// Open or close a lobby pull-down (`None` closes).
     Dropdown(Option<Cell>),
+    /// Open or close the lobby's flag picker.
+    FlagPicker(bool),
+    /// Fly the human slot's flag number `n` (0-9) and close the picker.
+    PickFlag(u8),
     /// Scroll the fleet slot bar.
     SlotScroll(i32),
     /// The fleet screen's Crew button (opens the crew tab).
@@ -213,6 +217,7 @@ pub fn plugin(app: &mut App) {
         map_json: Value::Null,
         error: None,
         dropdown: None,
+        flag_picker: false,
         ship_pick: 0,
         ship_chosen: false,
         view_slot: false,
@@ -241,6 +246,7 @@ pub fn plugin(app: &mut App) {
                 capture_key,
                 slider_drag.run_if(in_state(Screen::CreateSkirmish)),
                 scroll_drag,
+                dropdown_release.run_if(in_state(Screen::Lobby)),
                 buttons.in_set(RunButtons).run_if(menu_active),
                 button_sounds.before(RunButtons).run_if(menu_active),
                 save_actions,
@@ -299,6 +305,23 @@ pub struct MenuModel<'w> {
     pub stats: Res<'w, crate::stats::GameStats>,
     pub outcome: Res<'w, crate::scenario::Outcome>,
 }
+/// Retail pull-downs stay open while the button is held: press the cell, drag to an entry, release to pick it. A release over the
+/// first entry (the cell itself, i.e. a plain click) keeps the list open for a second click.
+fn dropdown_release(mouse: Res<ButtonInput<MouseButton>>, entries: Query<(&Action, &Interaction)>, mut sk: ResMut<Skirmish>) {
+    let Some(cell) = sk.dropdown else { return };
+    if !mouse.just_released(MouseButton::Left) {
+        return;
+    }
+    let first = sk.choices(cell).first().copied();
+    let picked = entries.iter().find_map(|(a, i)| match a {
+        Action::Choose(c, choice) if *c == cell && *i != Interaction::None && Some(*choice) != first => Some(*choice),
+        _ => None,
+    });
+    if let Some(choice) = picked {
+        sk.choose(cell, choice);
+    }
+}
+
 /// Which list a draggable scrollbar scrolls (retail scrollbars all work the same: press the track or thumb and drag).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ScrollKind {
@@ -609,6 +632,13 @@ fn apply(sk: &mut Skirmish, lib: &Library, action: &Action) {
                 (sk.ship_chosen, sk.view_slot) = (false, false);
             }
         }
+        Action::FlagPicker(open) => sk.flag_picker = *open,
+        Action::PickFlag(n) => {
+            if let Some(h) = sk.slots.iter_mut().find(|s| s.kind == Kind::Human) {
+                h.flag = (*n).min(9);
+            }
+            sk.flag_picker = false;
+        }
         Action::SlotScroll(d) => sk.scroll_slots(*d),
         Action::Dropdown(cell) => sk.dropdown = *cell,
         Action::Choose(cell, choice) => sk.choose(*cell, *choice),
@@ -822,6 +852,7 @@ mod tests {
             map_json: Value::Null,
             error: None,
             dropdown: None,
+            flag_picker: false,
             ship_pick: 0,
             ship_chosen: false,
             view_slot: false,
