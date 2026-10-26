@@ -52,6 +52,48 @@ pub struct Slot {
     pub team: i32, // -1: on its own
     pub fleet: Vec<String>,
     pub weapons: Vec<std::collections::BTreeMap<usize, String>>,
+    /// Named crew per fleet entry and post (`crew_arms::ROLES` order); posts left empty are filled by generic crew.
+    pub crew: Vec<[Vec<String>; 8]>,
+}
+
+impl Slot {
+    pub fn clear_fleet(&mut self) {
+        self.fleet.clear();
+        self.weapons.clear();
+        self.crew.clear();
+    }
+    pub fn truncate_fleet(&mut self, n: usize) {
+        self.fleet.truncate(n);
+        self.weapons.truncate(n);
+        self.crew.truncate(n);
+    }
+    pub fn push_ship(&mut self, class: &str) {
+        self.weapons.resize_with(self.fleet.len(), Default::default);
+        self.crew.resize_with(self.fleet.len(), Default::default);
+        self.fleet.push(class.into());
+        self.weapons.push(Default::default());
+        self.crew.push(Default::default());
+    }
+    pub fn remove_ship(&mut self, i: usize) {
+        self.fleet.remove(i);
+        if i < self.weapons.len() {
+            self.weapons.remove(i);
+        }
+        if i < self.crew.len() {
+            self.crew.remove(i);
+        }
+    }
+    /// The fitting of fleet entry `i`, created on demand.
+    pub fn crew_mut(&mut self, i: usize) -> &mut [Vec<String>; 8] {
+        if self.crew.len() <= i {
+            self.crew.resize_with(i + 1, Default::default);
+        }
+        &mut self.crew[i]
+    }
+    /// Where a named crew member is posted in this fleet: (fleet entry, post).
+    pub fn crew_at(&self, id: &str) -> Option<(usize, usize)> {
+        self.crew.iter().enumerate().find_map(|(i, c)| c.iter().position(|r| r.iter().any(|x| x == id)).map(|r| (i, r)))
+    }
 }
 
 /// What the front end has chosen; read by the battle setup.
@@ -76,6 +118,8 @@ pub struct Skirmish {
     pub view_slot: bool,
     pub fleet_pick: usize,
     pub arms_open: bool,
+    /// The crew & arms screen opens on the Arms tab (else Crew).
+    pub arms_tab: bool,
     /// The lobby's Map Description dialog ('Map Info') is open.
     pub map_info: bool,
     /// First row of the classic fixed-height ship list.
@@ -157,7 +201,7 @@ pub(super) fn new_slots(map: &Value) -> Vec<Slot> {
                 p["race"].as_u64().unwrap_or(4) as u8
             };
             let fleet = if open { vec![] } else { ships_of(map, i) };
-            Slot { player: i, name: p["name"].as_str().unwrap_or("").trim().into(), kind: Kind::Computer, race, team, fleet, weapons: vec![] }
+            Slot { player: i, name: p["name"].as_str().unwrap_or("").trim().into(), kind: Kind::Computer, race, team, fleet, weapons: vec![], crew: vec![] }
         })
         .collect();
     if let Some(h) = slots.first_mut() {
@@ -250,8 +294,7 @@ impl Skirmish {
                     }
                     _ => {
                         s.kind = if choice == Choice::Open { Kind::Open } else { Kind::Closed };
-                        s.fleet.clear();
-                        s.weapons.clear();
+                        s.clear_fleet();
                         if free {
                             (s.race, s.team) = (4, -1);
                         }
@@ -261,16 +304,14 @@ impl Skirmish {
             (Cell::Fleet(i), Choice::Fleet(race)) if free => {
                 if let Some(s) = self.slots.get_mut(i).filter(|s| s.race != race) {
                     s.race = race;
-                    s.fleet.clear(); // a fleet only holds hulls of its fleet type
-                    s.weapons.clear();
+                    s.clear_fleet(); // a fleet only holds hulls of its fleet type
                 }
             }
             (Cell::Team(i), Choice::Team(team)) if free => {
                 if let Some(s) = self.slots.get_mut(i).filter(|s| s.team != team) {
                     s.team = team;
                     // The original: "The host has changed your team, resetting your fleet."
-                    s.fleet.clear();
-                    s.weapons.clear();
+                    s.clear_fleet();
                 }
             }
             _ => {}
@@ -293,7 +334,8 @@ impl Skirmish {
                     let class = lib.classes.iter().find(|c| &c.name == n)?;
                     Some(i64::from(class.points) + h.weapons.get(i).map_or(0, |fit| crate::crew_arms::fitting_delta(lib, class, fit)))
                 })
-                .sum()
+                .sum::<i64>()
+                + h.crew.iter().flatten().flatten().map(|id| i64::from(crate::crew_arms::crew_points(id))).sum::<i64>()
         });
         i64::from(self.victory_limit) - spent
     }
@@ -353,7 +395,14 @@ impl Skirmish {
                     });
                     crate::Side(1 + i as u8)
                 };
-                crate::Group { player: s.player, side, human: s.kind == Kind::Human, ships, weapons: if open { s.weapons.clone() } else { vec![] } }
+                crate::Group {
+                    player: s.player,
+                    side,
+                    human: s.kind == Kind::Human,
+                    ships,
+                    weapons: if open { s.weapons.clone() } else { vec![] },
+                    crew: if open { s.crew.clone() } else { vec![] },
+                }
             })
             .collect()
     }

@@ -133,6 +133,11 @@ pub fn skill_factor(skill: f32) -> f32 {
     (1.075 + 0.5 * skill).min(1.5) / 1.125
 }
 
+/// What a crew member costs in victory points (0 when unknown).
+pub fn crew_points(id: &str) -> u32 {
+    crew_data()[id]["points"].as_u64().and_then(|v| u32::try_from(v).ok()).unwrap_or(0)
+}
+
 fn spend(points: &mut CampaignPoints, cost: u32) -> Result<(), String> {
     points.total = points.total.checked_sub(cost).ok_or("Not enough victory points.")?;
     Ok(())
@@ -228,6 +233,12 @@ pub enum Action {
     Assign(String),
     Reserve(String),
     Upgrade(String),
+    /// Skirmish screens: pick a roster entry or a weapon (then drag or click it onto a post or mount), cycle the sort, drop the selected post's last crew member.
+    PickCrew(String),
+    PickWeapon(String),
+    Sort,
+    Drop,
+    AutoAssign,
 }
 /// What the retail Crew Select / Arms Selection screens show, filled by both the campaign and the skirmish builders.
 #[derive(Clone, Default, PartialEq, Debug)]
@@ -250,7 +261,95 @@ pub struct FitView {
     pub banks: Vec<(usize, String)>,
     /// The right-hand list (crew names or weapons) and what clicking each does.
     pub list: Vec<(String, Action)>,
-    pub info: Vec<String>,
+    /// The info panel (top right): the picked crew member or weapon.
+    pub detail: Option<Detail>,
+    /// The left box on the Arms screen: retail shows the help text until an upgrade reports its cost or why it failed.
+    pub message: String,
+    /// The Drop button is live (a named crew member stands on the selected post).
+    pub can_drop: bool,
+    /// The list row of the carried (picked) crew member or weapon, highlighted.
+    pub picked: Option<usize>,
+    /// The crew list's sort field (the Sort By box).
+    pub sort: &'static str,
+    /// First visible row of `list`.
+    pub scroll: usize,
+}
+
+/// The info panel of the Crew and Arms screens: a name, an icon, an optional point cost and label / value lines.
+#[derive(Clone, Default, PartialEq, Debug)]
+pub struct Detail {
+    pub title: String,
+    pub icon: String,
+    pub cost: Option<u32>,
+    pub lines: Vec<(String, String)>,
+}
+
+/// Crew list sort fields, as the original's Sort By list offers them.
+pub const SORTS: [&str; 9] = ["Name", "Victory Points", "Leadership", "Gunnery", "Navigation", "Rigging", "Engineering", "Combat", "Spotting"];
+
+/// Named crew a race can field in skirmish (their cost is in victory points), in the given sort order (skills high to low).
+pub fn roster(race: &str, sort: usize) -> Vec<String> {
+    let mut ids: Vec<String> =
+        crew_data().as_object().into_iter().flatten().filter(|(_, d)| d["race"].as_str() == Some(race) && d["points"].is_u64()).map(|(id, _)| id.clone()).collect();
+    let key = |id: &String| -> i64 {
+        match SORTS[sort.min(SORTS.len() - 1)] {
+            "Name" => 0,
+            "Victory Points" => -i64::from(crew_points(id)),
+            skill => -(ability(id, &skill.to_lowercase()).unwrap_or(0.0) * 100.0) as i64,
+        }
+    };
+    ids.sort_by(|a, b| key(a).cmp(&key(b)).then_with(|| name(a).cmp(name(b))));
+    ids
+}
+
+/// The crew member's info panel: portrait, cost and the seven skills (N/A where the character has none).
+pub fn crew_detail(id: &str) -> Detail {
+    let strings = crate::menu::strings();
+    let s = |k: &str| crate::menu::text_of(&strings, k);
+    let skills = [
+        ("GUNNERY", "gunnery"),
+        ("LEADERSHIP", "leadership"),
+        ("NAVIGATION", "navigation"),
+        ("ENGINEERING", "engineering"),
+        ("RIGGING", "rigging"),
+        ("SPOTTING", "spotting"),
+        ("COMBAT", "combat"),
+    ];
+    Detail {
+        title: name(id).to_string(),
+        icon: crew_data()[id]["portrait"].as_str().unwrap_or_default().to_string(),
+        cost: Some(crew_points(id)),
+        lines: skills
+            .iter()
+            .map(|(label, skill)| {
+                (s(&format!("IDGS_TPFRONTENDTEXT_CREWSKILL_{label}")), ability(id, skill).map_or_else(|| s("IDGS_TPFRONTENDTEXT01_NA_STRING"), |v| format!("{:.0}", v * 10.0)))
+            })
+            .collect(),
+    }
+}
+
+/// The weapon's info panel: ranges, damage (PROVISIONAL: lowest to highest hit over the hull materials) and the point cost of one gun.
+pub fn weapon_detail(lib: &Library, gun: &str) -> Option<Detail> {
+    let g = lib.guns.get(gun)?;
+    let strings = crate::menu::strings();
+    let s = |k: &str| crate::menu::text_of(&strings, k);
+    let unit = s("IDGS_TPFRONTENDTEXT01_METERS");
+    let damage = lib.bullets.get(&g.bullet).map(|b| {
+        let (lo, hi) = b.damage.values().fold((f32::MAX, 0.0f32), |(lo, hi), d| (lo.min(d[0]), hi.max(d[1])));
+        format!("{lo:.0} - {hi:.0}")
+    });
+    Some(Detail {
+        title: gun_label(gun),
+        icon: crate::combat::gun_icon(gun),
+        cost: g.points,
+        lines: [
+            (s("IDGS_TPFRONTENDTEXT01_GUN_MAXIMUM_RANGE"), format!("{:.0} {unit}", g.range[2])),
+            (s("IDGS_TPFRONTENDTEXT01_GUN_EFFECTIVE_RANGE"), format!("{:.0} {unit}", g.range[0])),
+        ]
+        .into_iter()
+        .chain(damage.map(|d| (s("IDGS_TPFRONTENDTEXT01_GUN_DAMAGE"), d)))
+        .collect(),
+    })
 }
 
 /// Crew-post bars, mapped from the retail screen (docs/re/crew.md): Helmsman navigation, Engineers engineering, Engineers' engineering
@@ -319,7 +418,7 @@ fn cycle(value: usize, delta: i32, len: usize) -> usize {
 pub fn plugin(app: &mut App) {
     app.init_resource::<ScreenModel>()
         .add_systems(Update, (screen, skirmish_screen).chain().in_set(CrewSet).after(crate::menu::RunButtons).before(crate::input))
-        .add_systems(Update, (apply_outfit, apply_skirmish_weapons).chain().after(CrewSet).before(crate::sail));
+        .add_systems(Update, (apply_outfit, apply_skirmish_weapons, apply_skirmish_crew).chain().after(CrewSet).before(crate::sail));
 }
 
 fn screen(
@@ -541,9 +640,10 @@ fn screen(
             posts,
             post: choice.post,
             bars,
-            info: if choice.arms { banks.get(choice.post).map(|(b, g)| vec![format!("Bank {b}"), gun_label(g)]).unwrap_or_default() } else { vec![] },
+            detail: if choice.arms { banks.get(choice.post).and_then(|(_, g)| weapon_detail(&lib, g)) } else { None },
             banks,
             list,
+            ..default()
         });
         let pages = rows.len().div_ceil(PAGE).max(1);
         choice.page = choice.page.min(pages - 1);
@@ -576,6 +676,13 @@ fn weapon_rows(lib: &Library, class: &crate::data::Class, bank: usize, equipped:
 #[derive(Component)]
 pub struct WeaponFit(pub BTreeMap<usize, String>);
 
+/// What the cursor carries between a list row and a post or mount: a click on a row picks it, a release or a click on a post places it.
+#[derive(Clone, PartialEq)]
+enum Carry {
+    Crew(String),
+    Gun(String),
+}
+
 fn skirmish_screen(
     state: Res<State<crate::menu::Screen>>,
     mut sk: ResMut<crate::menu::Skirmish>,
@@ -583,8 +690,12 @@ fn skirmish_screen(
     mut model: ResMut<ScreenModel>,
     mut keys: ResMut<ButtonInput<KeyCode>>,
     mut mouse: ResMut<ButtonInput<MouseButton>>,
+    mut wheel: MessageReader<bevy::input::mouse::MouseWheel>,
     buttons: Query<(&Action, &Interaction), Changed<Interaction>>,
+    all: Query<(&Action, &Interaction)>,
     mut choice: Local<Choice>,
+    mut carry: Local<Option<Carry>>,
+    mut sort: Local<usize>,
 ) {
     use crate::menu::Screen;
     if *state.get() == Screen::Battle {
@@ -596,20 +707,22 @@ fn skirmish_screen(
         }
         sk.arms_open = false;
         *choice = Choice::default();
+        *carry = None;
         return;
     }
     if !model.open {
         choice.ship = sk.fleet_pick;
         // Screenshot hook (`--script fleet-arms`, see menu.rs `fleet_hook`): open on the Arms tab.
-        choice.arms = std::env::args().any(|a| a == "fleet-arms");
+        choice.arms = sk.arms_tab || std::env::args().any(|a| a == "fleet-arms");
     }
-    let action = if keys.just_pressed(KeyCode::Enter) || keys.just_pressed(KeyCode::Escape) {
-        Some(Action::Close)
-    } else if mouse.just_pressed(MouseButton::Left) {
-        buttons.iter().find(|(_, i)| **i == Interaction::Pressed).map(|(a, _)| a.clone())
+    let pressed = if mouse.just_pressed(MouseButton::Left) { buttons.iter().find(|(_, i)| **i == Interaction::Pressed).map(|(a, _)| a.clone()) } else { None };
+    // Released over a post or mount while carrying: the drop of a drag.
+    let released_on = if mouse.just_released(MouseButton::Left) && carry.is_some() {
+        all.iter().find(|(a, i)| matches!(a, Action::SelectPost(_)) && **i != Interaction::None).map(|(a, _)| a.clone())
     } else {
         None
     };
+    let action = if keys.just_pressed(KeyCode::Enter) || keys.just_pressed(KeyCode::Escape) { Some(Action::Close) } else { pressed.or(released_on) };
     if action == Some(Action::Close) {
         keys.clear_just_pressed(KeyCode::Enter);
         keys.clear_just_pressed(KeyCode::Escape);
@@ -617,17 +730,30 @@ fn skirmish_screen(
         sk.arms_open = false;
         *model = ScreenModel::default();
         *choice = Choice::default();
+        *carry = None;
         return;
     }
+    let scroll: f32 = wheel.read().map(|w| w.y).sum();
+    if scroll != 0.0 {
+        choice.page = (choice.page as i64 - scroll.signum() as i64).max(0) as usize;
+    }
+    if action == Some(Action::AutoAssign) {
+        crate::menu::auto_assign(&mut sk, &lib);
+    }
+    let strings = crate::menu::strings();
+    let said = |id: &str| crate::menu::text_of(&strings, id);
     let points = sk.points_left(&lib);
     let Some(slot) = sk.slots.iter_mut().find(|s| s.kind == crate::menu::Kind::Human) else { return };
     choice.ship = choice.ship.min(slot.fleet.len().saturating_sub(1));
     if let Some(action) = action {
+        // Anything but picking a row or placing what is carried drops the carried item.
+        let placing = matches!(action, Action::SelectPost(_));
+        let picks = matches!(action, Action::PickCrew(_) | Action::PickWeapon(_));
+        let held = if picks { None } else { carry.take().filter(|_| placing) };
         match action {
             Action::Ship(d) => {
                 choice.ship = cycle(choice.ship, d, slot.fleet.len());
-                choice.post = 0;
-                choice.page = 0;
+                (choice.post, choice.page) = (0, 0);
             }
             Action::Post(d) => {
                 let len = slot.fleet.get(choice.ship).map_or(0, |n| selectable_banks(&lib, &lib.classes[lib.index(n)]).len());
@@ -638,111 +764,180 @@ fn skirmish_screen(
             Action::Tab => {
                 choice.arms = !choice.arms;
                 (choice.post, choice.page) = (0, 0);
+                choice.message.clear();
             }
             Action::SelectShip(i) => {
                 choice.ship = i.min(slot.fleet.len().saturating_sub(1));
                 (choice.post, choice.page) = (0, 0);
+                choice.message.clear();
             }
-            Action::SelectPost(i) => (choice.post, choice.page) = (i, 0),
-            Action::Upgrade(gun) => {
-                let mut total = None;
-                let result = slot.fleet.get(choice.ship).ok_or("Select a ship first.").and_then(|name| {
-                    let class = &lib.classes[lib.index(name)];
-                    selectable_banks(&lib, class).get(choice.post).ok_or("No weapon bank.").and_then(|(bank, _)| {
-                        if !bank_compatible(&lib, class, *bank, &gun) {
-                            return Err("Incompatible weapon.");
-                        }
-                        slot.weapons.resize_with(slot.fleet.len(), BTreeMap::new);
-                        let stock = &class.mounts.iter().find(|m| m.bank == *bank).map(|m| m.gun.clone()).unwrap_or_default();
-                        let old = slot.weapons[choice.ship].get(bank).unwrap_or(stock).clone();
-                        let (new_cost, old_cost) = (bank_cost(&lib, class, *bank, &gun), bank_cost(&lib, class, *bank, &old).or(Some(0)));
-                        let delta = i64::from(new_cost.ok_or("Gun has no price.")?) - i64::from(old_cost.unwrap_or(0));
-                        if delta > points {
-                            return Err("Not enough victory points.");
-                        }
-                        slot.weapons[choice.ship].insert(*bank, gun);
-                        total = Some(delta);
-                        Ok(())
-                    })
-                });
-                // Retail's message block: 'Total Cost: <change>' and 'Weapon Upgrade Successful'.
-                choice.message = result.map_or_else(String::from, |()| format!("Total Cost: {}\nWeapon Upgrade Successful", total.unwrap_or(0)));
+            Action::Sort => *sort = (*sort + 1) % SORTS.len(),
+            Action::PickCrew(id) => *carry = Some(Carry::Crew(id)),
+            Action::PickWeapon(gun) => *carry = Some(Carry::Gun(gun)),
+            Action::Drop => {
+                if let Some(last) = slot.crew.get_mut(choice.ship).and_then(|c| c.get_mut(choice.post)).and_then(Vec::pop) {
+                    choice.message = format!("{} returned to the roster.", name(&last));
+                }
+            }
+            Action::SelectPost(i) => {
+                let Some(class_name) = slot.fleet.get(choice.ship).cloned() else { return };
+                let class = &lib.classes[lib.index(&class_name)];
+                match held {
+                    // Placing a crew member on a post of the Crew tab.
+                    Some(Carry::Crew(id)) if !choice.arms => {
+                        choice.post = i;
+                        let cap = crate::boarding::counts(&class.name)[i.min(7)] as usize;
+                        let crew = slot.crew_mut(choice.ship);
+                        let refund = if crew[i].len() >= cap { crew[i].last().map_or(0, |l| i64::from(crew_points(l))) } else { 0 };
+                        choice.message = if cap == 0 {
+                            "This ship has no such post.".into()
+                        } else if i64::from(crew_points(&id)) > points + refund {
+                            "You do not have enough victory points.".into()
+                        } else {
+                            if crew[i].len() >= cap {
+                                crew[i].pop();
+                            }
+                            crew[i].push(id);
+                            String::new()
+                        };
+                    }
+                    // Fitting a weapon on a mount of the Arms tab.
+                    Some(Carry::Gun(gun)) if choice.arms => {
+                        choice.post = i;
+                        choice.message = match selectable_banks(&lib, class).get(i) {
+                            None => said("IDGS_TPFRONTENDTEXT02_WEAPON_WRONG_MOUNT"),
+                            Some((bank, first)) if !bank_compatible(&lib, class, *bank, &gun) => {
+                                let _ = first;
+                                said("IDGS_TPFRONTENDTEXT02_WEAPON_WRONG_MOUNT")
+                            }
+                            Some((bank, first)) => {
+                                slot.weapons.resize_with(slot.fleet.len(), BTreeMap::new);
+                                let old = slot.weapons[choice.ship].get(bank).unwrap_or(&class.mounts[*first].gun).clone();
+                                let delta = i64::from(bank_cost(&lib, class, *bank, &gun).unwrap_or(0)) - i64::from(bank_cost(&lib, class, *bank, &old).unwrap_or(0));
+                                if delta > points {
+                                    said("IDGS_TPFRONTENDTEXT02_WEAPON_NOT_ENOUGH_VICTORY_POINTS")
+                                } else {
+                                    slot.weapons[choice.ship].insert(*bank, gun);
+                                    // Retail's message block: 'Total Cost: <change>' and 'Weapon Upgrade Successful'.
+                                    format!("{} {}\n{}", said("IDGS_TPFRONTENDTEXT02_TOTAL_COST"), delta, said("IDGS_TPFRONTENDTEXT02_WEAPON_UPGRADE_SUCCESSFUL"))
+                                }
+                            }
+                        };
+                    }
+                    _ => {
+                        (choice.post, choice.page) = (i, 0);
+                        choice.message.clear();
+                    }
+                }
             }
             _ => {}
         }
     }
+    let points = {
+        // The budget after this frame's changes.
+        let spent: i64 = slot
+            .fleet
+            .iter()
+            .enumerate()
+            .map(|(k, n)| {
+                let class = &lib.classes[lib.index(n)];
+                i64::from(class.points)
+                    + slot.weapons.get(k).map_or(0, |fit| fitting_delta(&lib, class, fit))
+                    + slot.crew.get(k).map_or(0, |c| c.iter().flatten().map(|id| i64::from(crew_points(id))).sum())
+            })
+            .sum();
+        i64::from(sk_limit(&sk)) - spent
+    };
+    let Some(slot) = sk.slots.iter().find(|s| s.kind == crate::menu::Kind::Human) else { return };
     let mut next = ScreenModel {
         open: true,
-        title: "SKIRMISH — ARMS".into(),
+        title: "SKIRMISH — CREW & ARMS".into(),
         message: choice.message.clone(),
-        navigation: vec![
-            ("Previous ship".into(), Action::Ship(-1)),
-            ("Next ship".into(), Action::Ship(1)),
-            ("Previous bank".into(), Action::Post(-1)),
-            ("Next bank".into(), Action::Post(1)),
-            ("Previous page".into(), Action::Page(-1)),
-            ("Next page".into(), Action::Page(1)),
-            ("Back to fleet (Enter/Esc)".into(), Action::Close),
-        ],
+        navigation: vec![("Previous ship".into(), Action::Ship(-1)), ("Next ship".into(), Action::Ship(1)), ("Back to fleet (Enter/Esc)".into(), Action::Close)],
         ..default()
     };
-    if let Some(name) = slot.fleet.get(choice.ship) {
-        let class = &lib.classes[lib.index(name)];
-        let banks = selectable_banks(&lib, class);
-        choice.post = choice.post.min(banks.len().saturating_sub(1));
-        if let Some((bank, first)) = banks.get(choice.post) {
-            let equipped = slot.weapons.get(choice.ship).and_then(|w| w.get(bank)).unwrap_or(&class.mounts[*first].gun);
-            let rows = weapon_rows(&lib, class, *bank, equipped, &[], true);
-            let pages = rows.len().div_ceil(PAGE).max(1);
-            choice.page = choice.page.min(pages - 1);
-            next.detail = format!(
-                "Ship {}: {} — Bank {}\nEquipped: {}\nPage {}/{}",
-                choice.ship + 1,
-                crate::menu::pretty(name),
-                bank,
-                equipped.trim_start_matches("Gun_").replace('_', " "),
-                choice.page + 1,
-                pages
-            );
-            next.rows = rows.into_iter().skip(choice.page * PAGE).take(PAGE).collect();
-        } else {
-            next.detail = "This hull has no weapon banks.".into();
-        }
-    } else {
-        next.detail = "Add a ship to the fleet first.".into();
-    }
-    if let Some(name) = slot.fleet.get(choice.ship) {
-        let ci = lib.index(name);
+    if let Some(ship_name) = slot.fleet.get(choice.ship) {
+        let ci = lib.index(ship_name);
         let class = &lib.classes[ci];
         let banks: Vec<(usize, String)> = selectable_banks(&lib, class)
             .into_iter()
             .map(|(bank, first)| (bank, slot.weapons.get(choice.ship).and_then(|w| w.get(&bank)).unwrap_or(&class.mounts[first].gun).clone()))
             .collect();
-        let (posts, bars) = posts_view(class, None);
-        let list = match banks.get(choice.post) {
-            Some((bank, equipped)) if choice.arms => {
-                weapon_rows(&lib, class, *bank, equipped, &[], true).into_iter().map(|(_, a)| (if let Action::Upgrade(g) = &a { gun_label(g) } else { String::new() }, a)).collect()
+        let assigned = slot.crew.get(choice.ship);
+        let (posts, bars) = posts_view(class, assigned);
+        let (mut list, mut picked, mut detail) = (vec![], None, None);
+        if choice.arms {
+            choice.post = choice.post.min(banks.len().saturating_sub(1));
+            if let Some((bank, equipped)) = banks.get(choice.post) {
+                let mut guns: Vec<&String> = lib.guns.keys().filter(|g| bank_compatible(&lib, class, *bank, g)).collect();
+                guns.sort_by_key(|g| gun_label(g));
+                let want = match &*carry {
+                    Some(Carry::Gun(g)) => g,
+                    _ => equipped,
+                };
+                picked = guns.iter().position(|g| *g == want);
+                detail = weapon_detail(&lib, want);
+                list = guns.into_iter().map(|g| (gun_label(g), Action::PickWeapon(g.clone()))).collect();
             }
-            _ => vec![],
-        };
+        } else {
+            let used: Vec<&String> = slot.crew.iter().flatten().flatten().collect();
+            let ids: Vec<String> = roster(&class.race, *sort).into_iter().filter(|id| !used.contains(&id)).collect();
+            if let Some(Carry::Crew(id)) = &*carry {
+                picked = ids.iter().position(|x| x == id);
+                detail = Some(crew_detail(id));
+            }
+            list = ids.into_iter().map(|id| (name(&id).to_string(), Action::PickCrew(id))).collect();
+        }
+        choice.page = choice.page.min(list.len().saturating_sub(8));
+        let can_drop = !choice.arms && assigned.is_some_and(|c| c.get(choice.post).is_some_and(|r| !r.is_empty()));
         next.fit = Some(FitView {
             arms: choice.arms,
             fleet: slot.fleet.iter().map(|n| lib.index(n)).collect(),
             ship: choice.ship,
-            ship_name: crate::menu::pretty(name),
+            ship_name: crate::menu::pretty(ship_name),
             race: class.race.clone(),
             points,
             posts,
             post: choice.post,
             bars,
-            info: banks.get(choice.post).filter(|_| choice.arms).map(|(b, g)| vec![format!("Bank {b}"), gun_label(g)]).unwrap_or_default(),
             banks,
             list,
+            detail,
+            message: choice.message.clone(),
+            can_drop,
+            picked,
+            sort: SORTS[*sort],
+            scroll: choice.page,
         });
+    } else {
+        next.detail = "Add a ship to the fleet first.".into();
     }
     sk.fleet_pick = choice.ship;
     if *model != next {
         *model = next;
+    }
+}
+
+/// The victory limit of the lobby (the budget `points_left` subtracts from).
+fn sk_limit(sk: &crate::menu::Skirmish) -> u32 {
+    sk.victory_limit
+}
+
+/// The named crew a skirmish ship was assembled with; `apply_skirmish_crew` turns it into posts, handling and boarding crews.
+#[derive(Component, Clone)]
+pub struct SkirmishCrew(pub [Vec<String>; 8]);
+
+fn apply_skirmish_crew(
+    mut commands: Commands,
+    lib: Res<Library>,
+    mut ships: Query<(Entity, &mut crate::Ship, &SkirmishCrew, &mut crate::boarding::Boardable), Added<SkirmishCrew>>,
+) {
+    for (e, mut ship, crew, mut boarding) in &mut ships {
+        let caps = crate::boarding::counts(&lib.classes[ship.class].name);
+        let posts = CrewPosts(std::array::from_fn(|r| crew.0[r].iter().take(caps[r] as usize).cloned().collect()));
+        (ship.crew_speed, ship.crew_turn) = posts.handling(&caps);
+        boarding.apply_posts(&posts);
+        commands.entity(e).insert(posts);
     }
 }
 
@@ -884,7 +1079,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((TaskPoolPlugin::default(), AssetPlugin::default()))
             .init_asset::<bevy::world_serialization::WorldAsset>()
-            .add_systems(Update, (apply_outfit, apply_skirmish_weapons).chain());
+            .add_systems(Update, (apply_outfit, apply_skirmish_weapons, apply_skirmish_crew).chain());
         let assets = app.world().resource::<AssetServer>().clone();
         let lib = Library::load(&crate::assets_dir());
         let class = lib.index("Ship_Navy_Cutter");
@@ -943,6 +1138,24 @@ mod tests {
         app.update();
         assert_eq!(app.world().get::<crate::combat::GunStates>(ship).unwrap().gun(index), "Gun_GravCharge_Med");
         assert_eq!(app.world().resource::<CampaignPoints>().total, balance);
+        // Skirmish crews assembled in the front end become the ship's posts and handling.
+        let mut crew: [Vec<String>; 8] = default();
+        crew[4].push("Crew_Navy_BenH".into());
+        app.world_mut().entity_mut(ship).remove::<CrewPosts>().insert(SkirmishCrew(crew));
+        app.update();
+        assert_eq!(app.world().get::<CrewPosts>(ship).unwrap().skill(4, "engineering"), Some(0.5));
+        assert!(app.world().get::<crate::Ship>(ship).unwrap().crew_speed > 1.0 || ability("Crew_Navy_BenH", "engineering").unwrap() <= 0.1);
+    }
+    #[test]
+    fn roster_lists_the_races_crew_with_costs_and_sorts() {
+        let navy = roster("Navy", 0);
+        assert!(navy.len() > 10 && navy.iter().all(|id| crew_data()[id]["race"] == "Navy"));
+        assert!(navy.windows(2).all(|w| name(&w[0]) <= name(&w[1])), "sorted by name");
+        let dear = roster("Navy", 1);
+        assert!(dear.windows(2).all(|w| crew_points(&w[0]) >= crew_points(&w[1])), "Victory Points sort: dearest first");
+        let gunners = roster("Navy", 3);
+        assert!(gunners.windows(2).all(|w| ability(&w[0], "gunnery").unwrap_or(0.0) >= ability(&w[1], "gunnery").unwrap_or(0.0)));
+        assert_eq!(crew_detail(&navy[0]).lines.len(), 7);
     }
 
     #[test]

@@ -59,6 +59,8 @@ pub enum Action {
     Claim(usize),
     /// Open or close a lobby pull-down (`None` closes).
     Dropdown(Option<Cell>),
+    /// The fleet screen's Crew button (opens the crew tab).
+    OpenCrew,
     /// Pick an entry of the open pull-down.
     Choose(Cell, Choice),
     PickShip(usize),
@@ -215,6 +217,7 @@ pub fn plugin(app: &mut App) {
         fleet_pick: 0,
         scroll: 0,
         arms_open: false,
+        arms_tab: false,
         map_info: false,
     };
     sk.load_map();
@@ -427,6 +430,17 @@ pub fn capture_key(mut keys: ResMut<ButtonInput<KeyCode>>, mut cui: ResMut<CtrlU
 }
 
 /// The lobby / fleet-screen choices (everything that only edits the `Skirmish`).
+/// Auto Assign: adds the most expensive hull that still fits until the fleet is full or nothing fits.
+/// PROVISIONAL: the original's rule is not recovered (it mixed classes and spent every point, also on the Crew tab).
+pub fn auto_assign(sk: &mut Skirmish, lib: &Library) {
+    while let Some(h) = sk.human().filter(|h| h.fleet.len() < sk.fleet_size) {
+        let left = sk.points_left(lib);
+        let Some(pick) = offered(lib, h.race).iter().position(|&c| i64::from(lib.classes[c].points) <= left) else { break };
+        sk.ship_pick = pick;
+        apply(sk, lib, &Action::AddShip);
+    }
+}
+
 fn apply(sk: &mut Skirmish, lib: &Library, action: &Action) {
     match action {
         Action::PickMap(m) => {
@@ -445,8 +459,7 @@ fn apply(sk: &mut Skirmish, lib: &Library, action: &Action) {
             sk.fleet_size = FLEET_SIZE.step_value(sk.fleet_size as u32, *d) as usize;
             let n = sk.fleet_size;
             for s in &mut sk.slots {
-                s.fleet.truncate(n);
-                s.weapons.truncate(n);
+                s.truncate_fleet(n);
             }
         }
         Action::Claim(i) => {
@@ -464,7 +477,10 @@ fn apply(sk: &mut Skirmish, lib: &Library, action: &Action) {
         }
         Action::Dropdown(cell) => sk.dropdown = *cell,
         Action::Choose(cell, choice) => sk.choose(*cell, *choice),
-        Action::OpenArms => sk.arms_open = sk.open() && sk.human().is_some_and(|h| !h.fleet.is_empty()),
+        Action::OpenArms | Action::OpenCrew => {
+            sk.arms_open = sk.open() && sk.slot_filled();
+            sk.arms_tab = matches!(action, Action::OpenArms);
+        }
         Action::PickShip(row) => (sk.ship_pick, sk.ship_chosen, sk.view_slot) = (*row, true, false),
         Action::MapInfo(open) => sk.map_info = *open,
         Action::PickFleet(row) => (sk.fleet_pick, sk.view_slot) = (*row, true),
@@ -474,9 +490,7 @@ fn apply(sk: &mut Skirmish, lib: &Library, action: &Action) {
                 && let Some(&ci) = offered(lib, h.race).get(pick)
                 && i64::from(lib.classes[ci].points) <= left
             {
-                h.weapons.resize_with(h.fleet.len(), std::collections::BTreeMap::new);
-                h.fleet.push(lib.classes[ci].name.clone());
-                h.weapons.push(default());
+                h.push_ship(&lib.classes[ci].name);
                 sk.fleet_pick = h.fleet.len() - 1;
                 sk.view_slot = true;
             }
@@ -484,21 +498,11 @@ fn apply(sk: &mut Skirmish, lib: &Library, action: &Action) {
         }
         // PROVISIONAL: the original's auto-assign rule is not recovered; this adds the most expensive ship that still fits until the
         // fleet is full or nothing fits.
-        Action::AutoAssign => {
-            while let Some(h) = sk.human().filter(|h| h.fleet.len() < sk.fleet_size) {
-                let left = sk.points_left(lib);
-                let Some(pick) = offered(lib, h.race).iter().position(|&c| i64::from(lib.classes[c].points) <= left) else { break };
-                sk.ship_pick = pick;
-                apply(sk, lib, &Action::AddShip);
-            }
-        }
+        Action::AutoAssign => auto_assign(sk, lib),
         Action::DropShip => {
             let pick = sk.fleet_pick;
             if let Some(h) = sk.slots.iter_mut().find(|s| s.kind == Kind::Human).filter(|h| pick < h.fleet.len()) {
-                h.fleet.remove(pick);
-                if pick < h.weapons.len() {
-                    h.weapons.remove(pick);
-                }
+                h.remove_ship(pick);
                 sk.fleet_pick = pick.saturating_sub(1);
                 sk.view_slot = !h.fleet.is_empty();
             }
@@ -685,6 +689,7 @@ mod tests {
             fleet_pick: 0,
             scroll: 0,
             arms_open: false,
+            arms_tab: false,
             map_info: false,
         };
         sk.load_map();
@@ -807,6 +812,22 @@ mod tests {
         assert!(sk.slots[0].fleet.is_empty() && sk.slots[0].team == 4, "the original resets the fleet when the team changes");
         sk.choose(Cell::Player(2), Choice::Computer);
         assert_eq!(sk.slots[2].kind, Kind::Computer);
+    }
+    #[test]
+    fn named_crew_cost_victory_points_and_leave_with_their_ship() {
+        let lib = Library::load(&assets_dir());
+        let mut sk = skirmish("diablo_straight");
+        apply(&mut sk, &lib, &Action::PickShip(1));
+        apply(&mut sk, &lib, &Action::AddShip);
+        let before = sk.points_left(&lib);
+        let id = crate::crew_arms::roster("Navy", 0)[0].clone();
+        let cost = i64::from(crate::crew_arms::crew_points(&id));
+        sk.slots[0].crew_mut(0)[1].push(id.clone());
+        assert_eq!(before - sk.points_left(&lib), cost);
+        assert_eq!(sk.slots[0].crew_at(&id), Some((0, 1)));
+        apply(&mut sk, &lib, &Action::DropShip);
+        assert!(sk.slots[0].crew_at(&id).is_none(), "dropping a ship returns its crew");
+        assert_eq!(sk.points_left(&lib), 300);
     }
     #[test]
     fn create_skirmish_sliders_use_the_retail_ranges() {

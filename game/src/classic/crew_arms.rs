@@ -89,7 +89,7 @@ fn build(
             } else {
                 crew(&ctx, c, fit, &lib, &strings);
             }
-            disabled(&ctx, c, [168.0, 427.0, 320.0, 465.0], &s("IDGS_TPFRONTENDTEXT_SCREENS_AUTO_ASSIGN"), "BlackChancery16");
+            button(&ctx, c, [168.0, 427.0, 320.0, 465.0], &s("IDGS_TPFRONTENDTEXT_SCREENS_AUTO_ASSIGN"), Action::AutoAssign);
             list(&ctx, c, fit, &strings);
             // Next arrow: back to the ships.
             let mut next = c.spawn((Interaction::None, Action::Close, ctx.node(590.0, 510.0, 80.0, 80.0)));
@@ -191,7 +191,12 @@ fn crew(ctx: &Ctx, c: &mut ChildSpawnerCommands, fit: &FitView, lib: &Library, s
         c.spawn((ctx.node(l + 4.0, 404.0, (r - l - 8.0) * v, 11.0), BackgroundColor(Color::srgb(1.0 - v, 0.3 + 0.6 * v, 0.1))));
         piece(ctx, c, "FrontEnd_StatBar_Border", [l, 401.0, r, 418.0], (false, false));
     }
-    disabled(ctx, c, [60.0, 427.0, 158.0, 465.0], &s("IDGS_TPFRONTENDTEXT_SCREENS_DROP"), "BlackChancery16");
+    // Drop sends the selected post's last named crew member back to the roster.
+    if fit.can_drop {
+        button(ctx, c, [60.0, 427.0, 158.0, 465.0], &s("IDGS_TPFRONTENDTEXT_SCREENS_DROP"), Action::Drop);
+    } else {
+        disabled(ctx, c, [60.0, 427.0, 158.0, 465.0], &s("IDGS_TPFRONTENDTEXT_SCREENS_DROP"), "BlackChancery16");
+    }
 }
 
 /// The ship's weapon-bar outline at the panel origin.
@@ -213,7 +218,8 @@ fn slot_centre(ctx: &Ctx, bank: usize) -> Vec2 {
 /// clicking a mount selects it (gold frame) and the list on the right then offers the compatible weapons.
 fn arms(ctx: &Ctx, c: &mut ChildSpawnerCommands, fit: &FitView, lib: &Library, strings: &Value) {
     stretched_window(ctx, c, [52.0, 150.0, 253.0, 307.0]);
-    wrapped(ctx, c, BODY_FONT, &text_of(strings, "IDGS_TPFRONTENDTEXT02_WEAPON_UPGRADE_INFO"), [63.0, 165.0, 245.0, 300.0]);
+    let text = if fit.message.is_empty() { text_of(strings, "IDGS_TPFRONTENDTEXT02_WEAPON_UPGRADE_INFO") } else { fit.message.clone() };
+    wrapped(ctx, c, BODY_FONT, &text, [63.0, 165.0, 245.0, 300.0]);
     outline(ctx, c, fit, lib);
     for (i, (bank, gun)) in fit.banks.iter().enumerate() {
         let at = slot_centre(ctx, *bank) - Vec2::splat(15.5);
@@ -233,22 +239,40 @@ fn arms(ctx: &Ctx, c: &mut ChildSpawnerCommands, fit: &FitView, lib: &Library, s
 /// The right-hand panel: info lines in the box at the top, then 'Sort By:' (crew) or 'Available Weapons' (arms) over Univers12
 /// rows 19.5 apart from y 346 and the retail scrollbar; clicking a row assigns that crew member or equips that weapon.
 fn list(ctx: &Ctx, c: &mut ChildSpawnerCommands, fit: &FitView, strings: &Value) {
-    for (i, line) in fit.info.iter().enumerate() {
-        ctx.text(c, "Univers10", line, 530.0, 230.0, 135.0 + i as f32 * 16.0, false, if i == 0 { GOLD } else { Color::WHITE });
+    if let Some(d) = &fit.detail {
+        // As the Ships screen's info panel: the name, the framed icon, 'Point Cost' and the label / value lines.
+        ctx.text(c, BODY_FONT, &d.title, 510.0, 240.0, 130.0, false, Color::WHITE);
+        piece(ctx, c, "FrontEnd_Flag_Icon_Background", [510.0, 151.0, 568.0, 210.0], (false, false));
+        piece(ctx, c, &d.icon, [517.0, 158.0, 561.0, 203.0], (false, false));
+        if let Some(cost) = d.cost {
+            ctx.text(c, "Univers10", &text_of(strings, "IDGS_TPFRONTENDTEXT02_POINT_COST01"), 509.0, 60.0, 220.0, true, Color::WHITE);
+            ctx.text(c, "Univers10", &text_of(strings, "IDGS_TPFRONTENDTEXT02_POINT_COST02"), 509.0, 60.0, 236.0, true, Color::WHITE);
+            ctx.text(c, "Univers26", &cost.to_string(), 499.0, 80.0, 256.0, true, GOLD);
+        }
+        for (k, (label, value)) in d.lines.iter().enumerate() {
+            let cy = 161.5 + k as f32 * 16.0;
+            ctx.text(c, "Univers10", label, 580.0, 95.0, cy, false, Color::WHITE);
+            ctx.text(c, "Univers10", ":", 676.0, 8.0, cy, false, Color::WHITE);
+            ctx.text(c, "Univers10", value, 686.0, 80.0, cy, false, GOLD);
+        }
     }
     if fit.arms {
         ctx.text(c, "UniversBold14", &text_of(strings, "IDGS_TPFRONTENDTEXT01_AVAILABLE_WEAPONS"), 505.0, 215.0, 311.0, true, Color::WHITE);
     } else {
-        pulldown_cell(ctx, c, [520.0, 297.0, 710.0, 326.0], &text_of(strings, "IDGS_TPFRONTENDTEXT01_SORT_BY"), false, None, true);
+        let sort = format!("{} {}", text_of(strings, "IDGS_TPFRONTENDTEXT01_SORT_BY"), fit.sort);
+        pulldown_cell(ctx, c, [520.0, 297.0, 710.0, 326.0], &sort, false, Some(Action::Sort), true);
     }
     const ROWS: usize = 8;
-    for (row, (label, action)) in fit.list.iter().take(ROWS).enumerate() {
-        let cy = 346.0 + row as f32 * 19.5;
+    for (row, (label, action)) in fit.list.iter().enumerate().skip(fit.scroll).take(ROWS) {
+        let cy = 346.0 + (row - fit.scroll) as f32 * 19.5;
         let mut b = c.spawn((Interaction::None, action.clone(), ctx.node(505.0, cy - 9.75, 215.0, 19.5)));
+        if fit.picked == Some(row) {
+            b.insert(BackgroundColor(Color::srgba(0.2, 0.7, 0.8, 0.45)));
+        }
         b.with_children(|c| ctx.text(c, BODY_FONT, label, 20.0, 195.0, 9.75, false, Color::WHITE));
     }
     let n = fit.list.len().max(1) as f32;
-    scrollbar(ctx, c, [742.0, 330.0, 767.0, 505.0], 0.0, (ROWS as f32 / n).min(1.0));
+    scrollbar(ctx, c, [742.0, 330.0, 767.0, 505.0], fit.scroll as f32 / n, (ROWS as f32 / n).min(1.0));
 }
 
 /// The plain presentation (no retail view data): title, details, navigation and rows as text buttons.
