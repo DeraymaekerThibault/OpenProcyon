@@ -1,0 +1,13 @@
+[
+  {"sprite": "MainBar_LeftDetail"},
+  {"sprite": "MAINBAR_IS_NOT_PAUSED_BUTTON", "backdrop": "MainBar_LeftStretchedDetail"},
+  {"sprite": "MainBar_FleetFormationsButton", "backdrop": "MainBar_LeftStretchedDetail"},
+  {"sprite": "MainBar_PanicButton"},
+  {"sprite": "MainBar_ShipIcon"},
+  {"sprite": "MAINBAR_PRIMARY_SHIP_HEALTH_BAR_BACKGROUND"},
+  {"sprite": "MAINBAR_PRIMARY_SHIP_COMBAT_BAR_BACKGROUND"},
+  {"sprite": "MAINBAR_PRIMARY_SHIP_SAILPOWER_BAR_BACKGROUND"},
+  {"sprite": "MainBar_ChatButton", "backdrop": "MainBar_RightStretchedDetail"},
+  {"sprite": "MainBar_BeginnerMovementTypeButton", "backdrop": "MainBar_RightStretchedDetail"},
+  {"sprite": "MainBar_RightDetail"}
+]

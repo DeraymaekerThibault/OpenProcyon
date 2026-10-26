@@ -1,0 +1,29 @@
+# OpenProcyon ships no game content. Converted assets come from each player's own copy (tools/build_assets.sh) and never enter Git.
+/assets/
+/local/
+
+# Local configuration: never store installation paths in tracked files.
+.env
+.env.*
+!.env.example
+
+# Original game files (also guarded by tests/test_repo_hygiene.py).
+*.[wW][oO][tT]
+*.[tT][wW][tT]
+*.[mM][dD][bB]
+*.[mM][sS][bB]
+*.[eE][fF][tT]
+*.[hH][dD][tT]
+*.[tT][sS][tT]
+*.[tT][gG][aA]
+*.[dD][dD][sS]
+*.[bB][iI][kK]
+*.[eE][xX][eE]
+*.[dD][lL][lL]
+
+# Tool caches and build outputs.
+__pycache__/
+*.py[cod]
+.venv/
+/game/target/
+/dist/

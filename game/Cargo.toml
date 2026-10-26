@@ -1,0 +1,29 @@
+[package]
+name = "openprocyon"
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+rust-version = "1.97.1" # Bevy 0.20
+
+[dependencies]
+ab_glyph = "0.2.32"
+bevy = { version = "0.20", default-features = false, features = ["default_app", "3d_bevy_render", "ui_bevy_render", "scene", "std", "bevy_winit", "default_font", "multi_threaded", "x11", "wayland", "bevy_audio", "vorbis"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+
+[target.'cfg(unix)'.dependencies]
+wayland-sys = { version = "0.31", features = ["dlopen"] }
+
+# Bevy systems take many parameters and nested query types by design.
+[lints.clippy]
+too_many_arguments = "allow"
+type_complexity = "allow"
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
+
+# Player downloads: no debug symbols (#70). Thin LTO made both binaries larger (Linux 106 -> 109 MB, Windows 90 -> 96 MB).
+[profile.release]
+strip = true

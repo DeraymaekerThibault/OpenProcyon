@@ -1,0 +1,30 @@
+# Runs the validation gate without game assets: format, clippy, compiling the Rust tests, Python tests and the hygiene rules.
+name: check
+# Branches are checked through their pull request; pushing a work branch alone does not spend CI time.
+on:
+  push:
+    branches: [main]
+  pull_request:
+concurrency: # a newer push to the same branch cancels the outdated run
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
+# CI compiles and runs no game (no assets), so the release profile's optimisation only costs time on the small runner.
+env:
+  CARGO_PROFILE_RELEASE_OPT_LEVEL: 0
+  CARGO_PROFILE_RELEASE_DEBUG: false
+  CARGO_INCREMENTAL: 0
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends pkg-config libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev libx11-dev
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: game
+      - run: pip install -r requirements-dev.txt
+      - run: tools/check.sh
