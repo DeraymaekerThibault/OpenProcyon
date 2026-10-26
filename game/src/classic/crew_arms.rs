@@ -5,7 +5,7 @@
 use super::menu::{Ctx, GOLD, disabled, piece, pulldown_cell, scrollbar, selected_tab, sprite, stretched_window, victory_points, wrapped};
 use crate::combat::Library;
 use crate::crew_arms::{Action, CrewSet, FitView, SORTS, ScreenModel};
-use crate::menu::{strings, text_of};
+use crate::menu::{ScrollKind, strings, text_of};
 use crate::sprites::{BODY_FONT, Fonts, HudData, IDLE, offset};
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
@@ -15,7 +15,19 @@ use serde_json::Value;
 struct Root;
 
 pub fn plugin(app: &mut App) {
-    app.add_systems(Update, build.after(CrewSet));
+    app.add_systems(Update, (build.after(CrewSet), follow_cursor.after(build)));
+}
+
+/// What a drag carries, drawn under the cursor (portrait of the crew member or icon of the weapon).
+#[derive(Component)]
+struct Ghost;
+
+fn follow_cursor(window: Single<&Window, With<PrimaryWindow>>, mut ghosts: Query<&mut Node, With<Ghost>>) {
+    let Some(at) = window.cursor_position() else { return };
+    for mut node in &mut ghosts {
+        let half = FACE * 0.5 * (window.width() / 800.0).min(window.height() / 600.0);
+        (node.left, node.top) = (Val::Px(at.x - half), Val::Px(at.y - half));
+    }
 }
 
 /// Origin of the weapon-panel layout on this screen: every mount measured on the original sits at
@@ -95,6 +107,11 @@ fn build(
             let mut next = c.spawn((Interaction::None, Action::Close, ctx.node(590.0, 510.0, 80.0, 80.0)));
             next.with_children(|c| piece(&ctx, c, "FrontEnd_Next_Button", [0.0, 0.0, 80.0, 80.0], (false, false)));
         });
+        if let Some(icon) = &fit.carrying
+            && let Some((e, _)) = ctx.hud_piece(root, icon, 0.0, 0.0, FACE, FACE)
+        {
+            root.commands().entity(e).insert((Ghost, GlobalZIndex(1)));
+        }
     });
 }
 
@@ -271,8 +288,7 @@ fn list(ctx: &Ctx, c: &mut ChildSpawnerCommands, fit: &FitView, strings: &Value)
         }
         b.with_children(|c| ctx.text(c, BODY_FONT, label, 20.0, 195.0, 9.75, false, Color::WHITE));
     }
-    let n = fit.list.len().max(1) as f32;
-    scrollbar(ctx, c, [742.0, 330.0, 767.0, 505.0], fit.scroll as f32 / (n - ROWS as f32).max(1.0), (ROWS as f32 / n).min(1.0));
+    scrollbar(ctx, c, [742.0, 330.0, 767.0, 505.0], ScrollKind::Crew, fit.list.len(), ROWS, fit.scroll);
     if fit.sort_open {
         // The open Sort By list: a click anywhere else closes it; the entries hang under the box 25 apart (measured with the retail driver).
         c.spawn((Interaction::None, bevy::ui::FocusPolicy::Block, Action::Sort, ctx.node(0.0, 0.0, 800.0, 600.0), ZIndex(1)));

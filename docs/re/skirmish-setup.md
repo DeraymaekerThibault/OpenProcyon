@@ -85,7 +85,11 @@ skill can read N/A). Dragging one onto a post spends its cost (a 9-point captain
   Named gunners (posts) already drive the human ships' accuracy and gun reload (`combat/gunnery.rs`, docs/re/gunnery.md).
 - Slot bar: five slots at a time with scroll arrows (`Skirmish::slot_scroll`), following the picked slot.
 - Posted crew move by dragging their face onto another post (the points come back and are re-spent; a failed drop puts them back).
-- Not done: Load/Save Fleet/Crew/Arms, the ship-name drop-down, Launch/Ready greying, generic ("N/A") crews.
+- Launch Game is greyed until a computer opponent is in and (open maps) a fleet is assembled; I'm Ready is always greyed in single player
+  (measured: fresh lobby, lobby with a computer and no fleet, and with a fleet).
+- Every scrollbar (maps, ships, crew / weapons) shares one drag rule (`menu::scroll_drag`): press the track or thumb and drag. What a drag
+  carries (crew portrait or gun icon) is drawn under the cursor.
+- Not done: Load/Save Fleet/Crew/Arms, the ship-name drop-down, generic ("N/A") crews.
 
 ## Remake notes before the 2026-10 measurements (partly superseded above)
 - Historical map: rows = playable players with their fixed fleet type/team and pre-placed fleets (exported to `ships` in the map

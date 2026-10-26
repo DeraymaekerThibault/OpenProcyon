@@ -230,6 +230,7 @@ pub fn plugin(app: &mut App) {
         .add_systems(OnEnter(Screen::Main), start_music)
         .insert_resource(SaveUi { list: crate::campaign::list_saves(), ..default() })
         .init_resource::<InGame>()
+        .init_resource::<ScrollTo>()
         .init_resource::<CtrlUi>()
         .insert_resource(Settings::load())
         .add_systems(Update, apply_settings)
@@ -239,6 +240,7 @@ pub fn plugin(app: &mut App) {
             (
                 capture_key,
                 slider_drag.run_if(in_state(Screen::CreateSkirmish)),
+                scroll_drag,
                 buttons.in_set(RunButtons).run_if(menu_active),
                 button_sounds.before(RunButtons).run_if(menu_active),
                 save_actions,
@@ -297,6 +299,53 @@ pub struct MenuModel<'w> {
     pub stats: Res<'w, crate::stats::GameStats>,
     pub outcome: Res<'w, crate::scenario::Outcome>,
 }
+/// Which list a draggable scrollbar scrolls (retail scrollbars all work the same: press the track or thumb and drag).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ScrollKind {
+    Maps,
+    Ships,
+    /// The crew / weapon list of the Crew and Arms screens (owned by `crew_arms`, which reads `ScrollTo`).
+    Crew,
+}
+/// A scrollbar's track (views attach it, with a `RelativeCursorPosition`): the list's row counts and the thumb's share of the track.
+#[derive(Component, Clone, Copy, Debug)]
+pub struct ScrollTrack {
+    pub kind: ScrollKind,
+    pub total: usize,
+    pub visible: usize,
+    pub thumb: f32,
+}
+/// The first row a dragged scrollbar asks for; the owner of a list not held by `Skirmish` takes it.
+#[derive(Resource, Default)]
+pub struct ScrollTo(pub Option<(ScrollKind, usize)>);
+
+/// Dragging any scrollbar. The menu is rebuilt after every change, so the drag is remembered here rather than in the node.
+fn scroll_drag(
+    tracks: Query<(&ScrollTrack, &Interaction, &bevy::ui::RelativeCursorPosition)>,
+    mouse: Res<ButtonInput<MouseButton>>,
+    mut sk: ResMut<Skirmish>,
+    mut to: ResMut<ScrollTo>,
+    mut dragging: Local<Option<ScrollKind>>,
+) {
+    if !mouse.pressed(MouseButton::Left) {
+        *dragging = None;
+        return;
+    }
+    if dragging.is_none() {
+        *dragging = tracks.iter().find(|(_, i, _)| **i == Interaction::Pressed).map(|(t, ..)| t.kind);
+    }
+    let Some(kind) = *dragging else { return };
+    let Some((t, y)) = tracks.iter().find(|(t, ..)| t.kind == kind).and_then(|(t, _, rel)| rel.normalized.map(|p| (*t, p.y + 0.5))) else { return };
+    // The thumb's centre follows the cursor along the room its length leaves.
+    let pos = ((y - t.thumb / 2.0) / (1.0 - t.thumb).max(0.01)).clamp(0.0, 1.0);
+    let row = (pos * t.total.saturating_sub(t.visible) as f32).round() as usize;
+    match kind {
+        ScrollKind::Maps => sk.map_scroll = row,
+        ScrollKind::Ships => sk.scroll = row,
+        ScrollKind::Crew => to.0 = Some((kind, row)),
+    }
+}
+
 /// A Create Skirmish slider's track (views attach it, with a `RelativeCursorPosition`, to the node between the end caps): holding the
 /// mouse on it drags the knob. Measured on a retail screenshot: a 134 px track and a 22 px knob.
 #[derive(Component, Clone, Copy, PartialEq, Eq, Debug)]

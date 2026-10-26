@@ -13,8 +13,8 @@ use crate::assets_dir;
 use crate::bindings::Bindings;
 use crate::combat::Library;
 use crate::menu::{
-    Action, BuildMenu, Cell, Choice, CtrlUi, FLEET_SIZE, InGame, Kind, MenuKey, MenuModel, MenuRoot, Page, RACES, RunButtons, SLIDER_KNOB, SLOT_BAR, SaveUi, Screen, Skirmish,
-    SliderTrack, VICTORY_LIMIT, menu_active, offered, pretty, strings, text_of,
+    Action, BuildMenu, Cell, Choice, CtrlUi, FLEET_SIZE, InGame, Kind, MenuKey, MenuModel, MenuRoot, Page, RACES, RunButtons, SLIDER_KNOB, SLOT_BAR, SaveUi, Screen, ScrollKind,
+    ScrollTrack, Skirmish, SliderTrack, VICTORY_LIMIT, menu_active, offered, pretty, strings, text_of,
 };
 use crate::sprites::{BODY_FONT, Fonts, HudData, IDLE, MENU_SKIN, inset, sliced};
 
@@ -97,7 +97,7 @@ impl Ctx<'_> {
         img.image_mode = NodeImageMode::Stretch;
         c.spawn((img, self.node(x, y, w, h))).id()
     }
-    fn hud_piece(&self, c: &mut ChildSpawnerCommands, name: &str, x: f32, y: f32, w: f32, h: f32) -> Option<(Entity, String)> {
+    pub(super) fn hud_piece(&self, c: &mut ChildSpawnerCommands, name: &str, x: f32, y: f32, w: f32, h: f32) -> Option<(Entity, String)> {
         let (sheet, r) = sprite(self.hud, name, IDLE)?;
         Some((self.image(c, &format!("hud/tex/{sheet}.png"), Some(inset(&sheet, r)), x, y, w, h, Color::WHITE), name.to_string()))
     }
@@ -349,6 +349,11 @@ fn build(
                         }
                         (Screen::CreateSkirmish, "Fleet Size Scrollbar Button") => {
                             slider(&ctx, c, rect, FLEET_SIZE.fraction(sk.fleet_size as u32), Action::FleetSize(-1), Action::FleetSize(1), SliderTrack::Fleet);
+                            None
+                        }
+                        // Retail greys Launch Game until a computer opponent is in and (open maps) a fleet is assembled.
+                        (Screen::Lobby, "Open Next Screen Button") if sk.launch_error().is_some() => {
+                            disabled(&ctx, c, rect, &label, font);
                             None
                         }
                         (Screen::Lobby, "Open Next Screen Button") => Some(Action::Launch),
@@ -710,8 +715,7 @@ fn map_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, sk: &Skirmish, strings: &Va
             ctx.text(c, BODY_FONT, &m.3.to_string(), 278.0, 40.0, 9.5, true, Color::WHITE);
         });
     }
-    let n = rows.len().max(1) as f32;
-    scrollbar(ctx, c, [727.0, 155.0, 752.0, 322.0], sk.map_scroll as f32 / (n - MAP_ROWS as f32).max(1.0), (MAP_ROWS as f32 / n).min(1.0));
+    scrollbar(ctx, c, [727.0, 155.0, 752.0, 322.0], ScrollKind::Maps, rows.len(), MAP_ROWS, sk.map_scroll);
 }
 
 /// The current tab of a Ships / Crew / Arms row: the green `FrontEnd_Texts_Over_Button_Selected_*` button, not clickable.
@@ -749,9 +753,9 @@ pub(super) fn stretched_window(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r
 }
 
 /// The retail vertical scrollbar: track (`..._SLIDER_BACKGROUND_TOP/STRETCHED_CENTER/BOTTOM`) and a slider over the visible part.
-/// The retail scrollbar: `pos` (0 to 1) is how far the list is scrolled, `visible` the share of the list on screen. The thumb never
-/// gets shorter than its two end caps and stays inside the track.
-pub(super) fn scrollbar(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], pos: f32, visible: f32) {
+/// The retail scrollbar for a list of `total` rows of which `visible` show from row `first`: the thumb never gets shorter than its two
+/// end caps and stays inside the track, and pressing and dragging the track moves it (`menu::scroll_drag`, the same everywhere).
+pub(super) fn scrollbar(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], kind: ScrollKind, total: usize, visible: usize, first: usize) {
     let cap = |name: &str| sprite(ctx.hud, name, IDLE).map_or(20.0, |(_, r)| r.height());
     let track = |c: &mut ChildSpawnerCommands, prefix: &str, t: f32, b: f32| {
         let (top, bottom) = (cap(&format!("{prefix}_TOP")), cap(&format!("{prefix}_BOTTOM")));
@@ -762,9 +766,12 @@ pub(super) fn scrollbar(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [
     track(c, "FRONTEND_SCROLLBAR_SLIDER_BACKGROUND", t, b);
     let h = b - t;
     let min = cap("FRONTEND_SCROLLBAR_SLIDER_TOP") + cap("FRONTEND_SCROLLBAR_SLIDER_BOTTOM");
-    let len = (visible.clamp(0.0, 1.0) * h).max(min).min(h);
+    let share = if total == 0 { 1.0 } else { (visible as f32 / total as f32).min(1.0) };
+    let len = (share * h).max(min).min(h);
+    let pos = first as f32 / total.saturating_sub(visible).max(1) as f32;
     let top = t + pos.clamp(0.0, 1.0) * (h - len);
     track(c, "FRONTEND_SCROLLBAR_SLIDER", top, top + len);
+    c.spawn((Interaction::None, ScrollTrack { kind, total, visible, thumb: len / h }, bevy::ui::RelativeCursorPosition::default(), ctx.node(l, t, r - l, h)));
 }
 
 /// A cropped part of a button sprite: the left or right `w` px of `name` (all of its states share the crop). Returns its `Art` entry.
@@ -1019,8 +1026,7 @@ fn ship_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, _rect: [f32; 4], sk: &Skir
         b.insert(BackgroundColor(if sk.ship_chosen && row == sk.ship_pick { Color::srgba(0.2, 0.7, 0.8, 0.45) } else { Color::NONE }));
         b.with_children(|c| ctx.text(c, BODY_FONT, &class_name(lib, ci, strings), 20.0, 195.0, 9.5, false, Color::WHITE));
     }
-    let n = list.len().max(1) as f32;
-    scrollbar(ctx, c, [742.0, 330.0, 767.0, 505.0], sk.scroll as f32 / (n - SHIP_ROWS as f32).max(1.0), (SHIP_ROWS as f32 / n).min(1.0));
+    scrollbar(ctx, c, [742.0, 330.0, 767.0, 505.0], ScrollKind::Ships, list.len(), SHIP_ROWS, sk.scroll);
 }
 
 /// Fleet Select: the assembled fleet, two columns of four; the picked entry is the one Drop removes.

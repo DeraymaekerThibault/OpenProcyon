@@ -285,6 +285,8 @@ pub struct FitView {
     pub sort: &'static str,
     /// The Sort By pull-down is open (its entries are `SORTS`).
     pub sort_open: bool,
+    /// The sprite of what the cursor carries (a crew portrait or a gun icon), drawn under the cursor.
+    pub carrying: Option<String>,
     /// First visible row of `list`.
     pub scroll: usize,
     /// First fleet slot in the slot bar and the number of slots the fleet may have.
@@ -715,6 +717,7 @@ fn skirmish_screen(
     mut sort: Local<usize>,
     mut sort_open: Local<bool>,
     mut origin: Local<Option<(usize, usize)>>,
+    mut scroll_to: ResMut<crate::menu::ScrollTo>,
 ) {
     use crate::menu::Screen;
     if *state.get() == Screen::Battle {
@@ -758,6 +761,9 @@ fn skirmish_screen(
         *choice = Choice::default();
         *carry = None;
         return;
+    }
+    if let Some((_, row)) = scroll_to.0.take() {
+        choice.page = row;
     }
     let scroll: f32 = wheel.read().map(|w| w.y).sum();
     if scroll != 0.0 {
@@ -966,6 +972,10 @@ fn skirmish_screen(
             picked,
             sort: SORTS[*sort],
             sort_open: *sort_open && !choice.arms,
+            carrying: carry.as_ref().map(|c| match c {
+                Carry::Crew(id) => crew_data()[id]["portrait"].as_str().unwrap_or_default().to_string(),
+                Carry::Gun(g) => crate::combat::gun_icon(g),
+            }),
             scroll: choice.page,
             slot_scroll: sk.slot_scroll,
             limit: sk.fleet_size,
