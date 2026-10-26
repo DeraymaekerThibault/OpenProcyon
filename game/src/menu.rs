@@ -232,7 +232,14 @@ pub fn plugin(app: &mut App) {
         .configure_sets(Update, BuildMenu.after(capture_key).before(RunButtons).run_if(menu_active))
         .add_systems(
             Update,
-            (capture_key, buttons.in_set(RunButtons).run_if(menu_active), button_sounds.before(RunButtons).run_if(menu_active), save_actions, save_text.run_if(menu_active)),
+            (
+                capture_key,
+                slider_drag.run_if(in_state(Screen::CreateSkirmish)),
+                buttons.in_set(RunButtons).run_if(menu_active),
+                button_sounds.before(RunButtons).run_if(menu_active),
+                save_actions,
+                save_text.run_if(menu_active),
+            ),
         )
         .add_systems(PostUpdate, (summary_on_end, esc_menu).chain().run_if(in_state(Screen::Battle)))
         .add_systems(Update, autolaunch.run_if(in_state(Screen::Lobby)))
@@ -286,6 +293,50 @@ pub struct MenuModel<'w> {
     pub stats: Res<'w, crate::stats::GameStats>,
     pub outcome: Res<'w, crate::scenario::Outcome>,
 }
+/// A Create Skirmish slider's track (views attach it, with a `RelativeCursorPosition`, to the node between the end caps): holding the
+/// mouse on it drags the knob. Measured on a retail screenshot: a 134 px track and a 22 px knob.
+#[derive(Component, Clone, Copy, PartialEq, Eq, Debug)]
+pub enum SliderTrack {
+    Victory,
+    Fleet,
+}
+pub const SLIDER_TRACK: f32 = 134.0;
+pub const SLIDER_KNOB: f32 = 22.0;
+
+/// Dragging a slider's knob. The menu is rebuilt after every change, so the drag is remembered here rather than in the node.
+fn slider_drag(
+    tracks: Query<(&SliderTrack, &Interaction, &bevy::ui::RelativeCursorPosition)>,
+    mouse: Res<ButtonInput<MouseButton>>,
+    mut sk: ResMut<Skirmish>,
+    lib: Res<Library>,
+    mut dragging: Local<Option<SliderTrack>>,
+) {
+    if !mouse.pressed(MouseButton::Left) {
+        *dragging = None;
+        return;
+    }
+    if dragging.is_none() {
+        *dragging = tracks.iter().find(|(_, i, _)| **i == Interaction::Pressed).map(|(t, ..)| *t);
+    }
+    let Some(kind) = *dragging else { return };
+    let Some(x) = tracks.iter().find(|(t, ..)| **t == kind).and_then(|(.., rel)| rel.normalized).map(|p| p.x + 0.5) else { return };
+    let fraction = (x * SLIDER_TRACK - SLIDER_KNOB / 2.0) / (SLIDER_TRACK - SLIDER_KNOB);
+    match kind {
+        SliderTrack::Victory => {
+            let v = VICTORY_LIMIT.at(fraction);
+            if v != sk.victory_limit {
+                sk.victory_limit = v;
+            }
+        }
+        SliderTrack::Fleet => {
+            let v = FLEET_SIZE.at(fraction) as i32 - sk.fleet_size as i32;
+            if v != 0 {
+                apply(&mut sk, &lib, &Action::FleetSize(v));
+            }
+        }
+    }
+}
+
 /// Changes whenever the drawn screen would: views rebuild when it differs from the last one they drew.
 pub type MenuKey = (Screen, usize, bool, usize, Vec<Slot>, Option<&'static str>, [usize; 6], u32, u32, String);
 impl MenuModel<'_> {
@@ -844,6 +895,9 @@ mod tests {
         assert_eq!(sk.fleet_size, 1);
         apply(&mut sk, &lib, &Action::FleetSize(20));
         assert_eq!(sk.fleet_size, 10);
+        // Dragging the knob: the end stops and the step rounding.
+        assert_eq!((VICTORY_LIMIT.at(0.0), VICTORY_LIMIT.at(1.0), VICTORY_LIMIT.at(0.5)), (50, 1000, 530));
+        assert_eq!((FLEET_SIZE.at(-3.0), FLEET_SIZE.at(0.5), FLEET_SIZE.at(9.0)), (1, 6, 10));
     }
     #[test]
     fn fleet_screen_starts_blank_and_greys_crew_arms_drop() {

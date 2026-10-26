@@ -138,6 +138,11 @@ impl SliderRange {
     pub fn step_value(&self, value: u32, steps: i32) -> u32 {
         (i64::from(value) + i64::from(steps) * i64::from(self.step)).clamp(i64::from(self.min), i64::from(self.max)) as u32
     }
+    /// The value a knob at `fraction` (0 to 1) stands for, rounded to a step.
+    pub fn at(&self, fraction: f32) -> u32 {
+        let steps = ((self.max - self.min) / self.step) as f32;
+        self.min + (fraction.clamp(0.0, 1.0) * steps).round() as u32 * self.step
+    }
     /// Knob position, 0 (min) to 1 (max).
     pub fn fraction(&self, value: u32) -> f32 {
         (value.saturating_sub(self.min)) as f32 / (self.max - self.min) as f32

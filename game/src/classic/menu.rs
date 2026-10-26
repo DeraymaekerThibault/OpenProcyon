@@ -13,8 +13,8 @@ use crate::assets_dir;
 use crate::bindings::Bindings;
 use crate::combat::Library;
 use crate::menu::{
-    Action, BuildMenu, Cell, Choice, CtrlUi, FLEET_SIZE, InGame, Kind, MenuKey, MenuModel, MenuRoot, Page, RACES, RunButtons, SaveUi, Screen, Skirmish, VICTORY_LIMIT, menu_active,
-    offered, pretty, strings, text_of,
+    Action, BuildMenu, Cell, Choice, CtrlUi, FLEET_SIZE, InGame, Kind, MenuKey, MenuModel, MenuRoot, Page, RACES, RunButtons, SLIDER_KNOB, SaveUi, Screen, Skirmish, SliderTrack,
+    VICTORY_LIMIT, menu_active, offered, pretty, strings, text_of,
 };
 use crate::sprites::{BODY_FONT, Fonts, HudData, IDLE, MENU_SKIN, inset, sliced};
 
@@ -47,9 +47,14 @@ fn hover(
                 }
                 continue;
             }
+            // `crop:<left|right>:<w>:<sprite>`: only that part of the sprite (the slider's end caps).
+            let (name, cropped) = match name.strip_prefix("crop:").map(|c| c.splitn(3, ':').collect::<Vec<_>>()) {
+                Some(p) if p.len() == 3 => (p[2], Some((p[0] == "left", p[1].parse::<f32>().unwrap_or(0.0)))),
+                _ => (name.as_str(), None),
+            };
             if let (Ok(mut img), Some((sheet, r))) = (imgs.get_mut(*e), sprite(&hud, name, state)) {
                 img.image = assets.load(format!("hud/tex/{sheet}.png"));
-                img.rect = Some(inset(&sheet, r));
+                img.rect = Some(inset(&sheet, cropped.map_or(r, |(left, w)| crop(r, left, w))));
             }
         }
     }
@@ -343,7 +348,7 @@ fn build(
                             None
                         }
                         (Screen::CreateSkirmish, "Fleet Size Scrollbar Button") => {
-                            slider(&ctx, c, rect, FLEET_SIZE.fraction(sk.fleet_size as u32), Action::FleetSize(-1), Action::FleetSize(1));
+                            slider(&ctx, c, rect, FLEET_SIZE.fraction(sk.fleet_size as u32), Action::FleetSize(-1), Action::FleetSize(1), SliderTrack::Fleet);
                             None
                         }
                         (Screen::Lobby, "Open Next Screen Button") => Some(Action::Launch),
@@ -431,7 +436,7 @@ fn build(
                             None
                         }
                         (Screen::CreateSkirmish, "Victory Points Scrollbar Button") => {
-                            slider(&ctx, c, rect, VICTORY_LIMIT.fraction(sk.victory_limit), Action::VictoryLimit(-1), Action::VictoryLimit(1));
+                            slider(&ctx, c, rect, VICTORY_LIMIT.fraction(sk.victory_limit), Action::VictoryLimit(-1), Action::VictoryLimit(1), SliderTrack::Victory);
                             None
                         }
                         // Other retail buttons (multiplayer, options, profiles, campaign...) are shown but not implemented.
@@ -748,7 +753,9 @@ pub(super) fn stretched_window(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r
 }
 
 /// The retail vertical scrollbar: track (`..._SLIDER_BACKGROUND_TOP/STRETCHED_CENTER/BOTTOM`) and a slider over the visible part.
-pub(super) fn scrollbar(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], start: f32, len: f32) {
+/// The retail scrollbar: `pos` (0 to 1) is how far the list is scrolled, `visible` the share of the list on screen. The thumb never
+/// gets shorter than its two end caps and stays inside the track.
+pub(super) fn scrollbar(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], pos: f32, visible: f32) {
     let cap = |name: &str| sprite(ctx.hud, name, IDLE).map_or(20.0, |(_, r)| r.height());
     let track = |c: &mut ChildSpawnerCommands, prefix: &str, t: f32, b: f32| {
         let (top, bottom) = (cap(&format!("{prefix}_TOP")), cap(&format!("{prefix}_BOTTOM")));
@@ -758,21 +765,48 @@ pub(super) fn scrollbar(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [
     };
     track(c, "FRONTEND_SCROLLBAR_SLIDER_BACKGROUND", t, b);
     let h = b - t;
-    track(c, "FRONTEND_SCROLLBAR_SLIDER", t + h * start, t + h * (start + len).min(1.0));
+    let min = cap("FRONTEND_SCROLLBAR_SLIDER_TOP") + cap("FRONTEND_SCROLLBAR_SLIDER_BOTTOM");
+    let len = (visible.clamp(0.0, 1.0) * h).max(min).min(h);
+    let top = t + pos.clamp(0.0, 1.0) * (h - len);
+    track(c, "FRONTEND_SCROLLBAR_SLIDER", top, top + len);
 }
 
-/// The Create Skirmish slider: round arrow buttons around a 130 px track with a knob (measured on a retail screenshot: arrows 34 px,
-/// the track between them, the knob 22 px travelling the track minus its own width). The arrows step the value.
-fn slider(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], fraction: f32, dec: Action, inc: Action) {
-    let cy = (t + b) / 2.0;
-    let (track_l, track_r) = (l + 34.0, r - 34.0);
-    let mid = (track_l + track_r) / 2.0;
-    sheet_piece(ctx, c, "fe_04", Rect::new(0.0, 66.0, 144.0, 99.0), [track_l, cy - 16.5, mid, cy + 16.5]);
-    sheet_piece(ctx, c, "fe_04", Rect::new(0.0, 165.0, 144.0, 198.0), [mid, cy - 16.5, track_r, cy + 16.5]);
-    let knob = track_l + 11.0 + fraction * (track_r - track_l - 22.0);
-    piece(ctx, c, "FrontEnd_Horizontal_Scrollbar_Slider", [knob - 11.0, cy - 11.0, knob + 11.0, cy + 11.0], (false, false));
-    arrow(ctx, c, [l, cy - 17.0, l + 34.0, cy + 17.0], "FrontEnd_Options_Menu_Select_Left_Button", dec);
-    arrow(ctx, c, [r - 34.0, cy - 17.0, r, cy + 17.0], "FrontEnd_Options_Menu_Select_Right_Button", inc);
+/// A cropped part of a button sprite: the left or right `w` px of `name` (all of its states share the crop). Returns its `Art` entry.
+fn crop_piece(ctx: &Ctx, c: &mut ChildSpawnerCommands, name: &str, left: bool, w: f32, [x, y, bw, bh]: [f32; 4]) -> Option<(Entity, String)> {
+    let (sheet, r) = sprite(ctx.hud, name, IDLE)?;
+    let e = ctx.image(c, &format!("hud/tex/{sheet}.png"), Some(inset(&sheet, crop(r, left, w))), x, y, bw, bh, Color::WHITE);
+    Some((e, format!("crop:{}:{w}:{name}", if left { "left" } else { "right" })))
+}
+fn crop(r: Rect, left: bool, w: f32) -> Rect {
+    if left { Rect::new(r.min.x, r.min.y, r.min.x + w, r.max.y) } else { Rect::new(r.max.x - w, r.min.y, r.max.x, r.max.y) }
+}
+
+/// The Create Skirmish slider: the scrollbar art whose rounded 33 px ends are the step buttons, a 134 px track between them and a
+/// knob that follows `fraction` (dragging the track moves it, see `menu::slider_drag`).
+fn slider(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], fraction: f32, dec: Action, inc: Action, kind: SliderTrack) {
+    const CAP: f32 = 33.0;
+    let (cy, half) = ((t + b) / 2.0, (r - l) / 2.0);
+    let top = cy - 16.5;
+    // The body: left half of the left piece, right half of the right piece, both idle.
+    for (name, left, x) in [("FrontEnd_Horizontal_Scrollbar_Background_Left", true, l), ("FrontEnd_Horizontal_Scrollbar_Background_Right", false, l + half)] {
+        if let Some((sheet, rect)) = sprite(ctx.hud, name, IDLE) {
+            ctx.image(c, &format!("hud/tex/{sheet}.png"), Some(inset(&sheet, crop(rect, left, half))), x, top, half, 33.0, Color::WHITE);
+        }
+    }
+    for (name, left, x, action) in [("FrontEnd_Horizontal_Scrollbar_Background_Left", true, l, dec), ("FrontEnd_Horizontal_Scrollbar_Background_Right", false, r - CAP, inc)] {
+        let mut parts = vec![];
+        let mut root = c.spawn((Interaction::None, action, crate::menu::ArrowButton { forward: !left }, ctx.node(x, top, CAP, 33.0)));
+        root.with_children(|c| parts.extend(crop_piece(ctx, c, name, left, CAP, [0.0, 0.0, CAP, 33.0])));
+        root.insert(Art(parts));
+    }
+    let track_w = r - l - 2.0 * CAP;
+    let mut parts = vec![];
+    let mut track = c.spawn((Interaction::None, kind, bevy::ui::RelativeCursorPosition::default(), ctx.node(l + CAP, top, track_w, 33.0)));
+    track.with_children(|c| {
+        let x = fraction * (track_w - SLIDER_KNOB);
+        parts.extend(ctx.hud_piece(c, "FrontEnd_Horizontal_Scrollbar_Slider", x, 5.5, SLIDER_KNOB, SLIDER_KNOB));
+    });
+    track.insert(Art(parts));
 }
 
 /// A retail radio choice: check box (`FrontEnd_Check_Box_Ready` ticked / `_NotReady`) and its Univers12 label.
@@ -973,7 +1007,7 @@ fn ship_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, _rect: [f32; 4], sk: &Skir
         b.with_children(|c| ctx.text(c, BODY_FONT, &class_name(lib, ci, strings), 20.0, 195.0, 9.5, false, Color::WHITE));
     }
     let n = list.len().max(1) as f32;
-    scrollbar(ctx, c, [742.0, 330.0, 767.0, 505.0], sk.scroll as f32 / n, (SHIP_ROWS as f32 / n).min(1.0));
+    scrollbar(ctx, c, [742.0, 330.0, 767.0, 505.0], sk.scroll as f32 / (n - SHIP_ROWS as f32).max(1.0), (SHIP_ROWS as f32 / n).min(1.0));
 }
 
 /// Fleet Select: the assembled fleet, two columns of four; the picked entry is the one Drop removes.

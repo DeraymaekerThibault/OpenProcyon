@@ -272,7 +272,7 @@ fn list(ctx: &Ctx, c: &mut ChildSpawnerCommands, fit: &FitView, strings: &Value)
         b.with_children(|c| ctx.text(c, BODY_FONT, label, 20.0, 195.0, 9.75, false, Color::WHITE));
     }
     let n = fit.list.len().max(1) as f32;
-    scrollbar(ctx, c, [742.0, 330.0, 767.0, 505.0], fit.scroll as f32 / n, (ROWS as f32 / n).min(1.0));
+    scrollbar(ctx, c, [742.0, 330.0, 767.0, 505.0], fit.scroll as f32 / (n - ROWS as f32).max(1.0), (ROWS as f32 / n).min(1.0));
 }
 
 /// The plain presentation (no retail view data): title, details, navigation and rows as text buttons.
