@@ -925,10 +925,10 @@ fn players_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, _rect: [f32; 4], sk: &S
                 piece(ctx, c, &format!("FrontEnd_Flag_Small_Icon_{:02}", base + usize::from(slot.flag)), [0.0, 0.0, 28.0, 25.0], (false, false));
             });
         }
-        // Several live players on one team are told apart by a letter ('Pirates A', 'B', 'C'), as on original screenshots.
+        // Historical maps tell several live players of one team apart by a letter (Pirates A, B, C); open maps show the plain team name (measured on Border Dispute).
         let mates: Vec<usize> = sk.slots.iter().enumerate().filter(|(_, o)| o.kind.live() && o.team == slot.team && slot.team >= 0).map(|(k, _)| k).collect();
         let letter = match mates.iter().position(|&k| k == i) {
-            Some(n) if mates.len() > 1 && !sk.free_teams() => format!(" {}", (b'A' + n as u8) as char),
+            Some(n) if mates.len() > 1 && !open => format!(" {}", (b'A' + n as u8) as char),
             _ => String::new(),
         };
         let team = match usize::try_from(slot.team).ok().and_then(|n| teams.get(n)) {

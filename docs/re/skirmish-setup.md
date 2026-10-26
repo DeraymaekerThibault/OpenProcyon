@@ -32,6 +32,10 @@ described in our own words.
 Limit : N". The lobby repeats both numbers (left panel) and the Fleet screen's "Current Victory Points" starts at the limit. The budget
 is the same for every side (the computer builds its fleet inside it, so a lower limit picks cheaper classes: issue #80).
 
+**Team column on open team maps.** With two fleets per side (Border Dispute: Navy, Procyon, Navy, Procyon) the original shows the plain team
+name on every row ("Navy", "Procyon"), no A / B letters, and gives each fleet its own flag. Slot order alternates the sides. Historical maps
+keep the letters.
+
 **Lobby on an open map.** You alone; the other seven slots start *Open*. Each slot's player cell is a pull-down: a Computer slot lists
 Computer / Open / Close, an Open slot Open / Close / Computer (the current value first). A slot turned back to Open or Closed shows no
 fleet or team. *Launch Game* and *I'm Ready* are greyed until the setup is valid (a computer opponent and an assembled fleet; the
@@ -55,7 +59,9 @@ remaining. Would you like to continue?" with Auto Assign / Cancel / Continue.
   Boats (19 each), counter 0; 100 points / 1 ship a Cutter (58), counter 0; 1000 points / 10 ships began Fast Frigate 100, three
   Assault Cutters 70, Frigate 131 and left 1 point. So it fills the fleet limit with hulls that fit what is left, mixing classes
   (later picks get cheaper as the budget drains), then spends the remainder on named crew (the posts showed distinct portraits). The
-  pick among affordable hulls looked random: PROVISIONAL. The remake uses a fixed pseudo-random pick and gives the leftover to the best
+  Weapons: from an empty fleet the added hulls came out with non-stock guns on several banks (Man-O-War, Minelayer, StarHammer
+  samples), while Auto Assign on a hand-added StarHammer (any tab) only filled the crew and left every gun stock, with 507 of 1000 points
+  unspent, so the leftover is not always spent (it was 0 only on small budgets). The pick among affordable hulls looked random: PROVISIONAL. The remake uses a fixed pseudo-random pick and gives the leftover to the best
   affordable crew per post.
 
 **Arms tab.** A top-down ship outline with one icon per selectable weapon bank (a mount of several guns is one bank). Clicking a bank

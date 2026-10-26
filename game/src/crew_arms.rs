@@ -189,7 +189,7 @@ pub fn bank_compatible(lib: &Library, class: &crate::data::Class, bank: usize, g
         })
 }
 
-fn bank_cost(lib: &Library, class: &crate::data::Class, bank: usize, gun: &str) -> Option<u32> {
+pub fn bank_cost(lib: &Library, class: &crate::data::Class, bank: usize, gun: &str) -> Option<u32> {
     let g = lib.guns.get(gun)?;
     if !bank_compatible(lib, class, bank, gun) {
         return None;
