@@ -25,16 +25,63 @@ described in our own words.
 - Ship Types Available (`ShipSelectionScrollableTextList`, populate): walks every registered entity type and lists the ship
   types whose `Ship Race` equals the player's fleet type. No other filter was found there.
 
-## Remake (`menu.rs`: `Slot`, `new_slots`, `offered`, `Skirmish::plan`; `main.rs`: `Group`)
+## Measured on the original (2026-10, headless retail runs)
+
+**Create Skirmish screen.** Victory Points slider: 50 to 1000 in steps of 10, default 300. Fleet Size Limit slider: 1 to 10, default
+5. Each is a round arrow button either side of a short track with a knob; the label above reads "Victory Points : N" / "Fleet Size
+Limit : N". The lobby repeats both numbers (left panel) and the Fleet screen's "Current Victory Points" starts at the limit. The budget
+is the same for every side (the computer builds its fleet inside it, so a lower limit picks cheaper classes: issue #80).
+
+**Lobby on an open map.** You alone; the other seven slots start *Open*. Each slot's player cell is a pull-down: a Computer slot lists
+Computer / Open / Close, an Open slot Open / Close / Computer (the current value first). A slot turned back to Open or Closed shows no
+fleet or team. *Launch Game* and *I'm Ready* are greyed until the setup is valid (a computer opponent and an assembled fleet; the
+exact trigger of each is PROVISIONAL).
+- Free-for-all maps (Diablo Strait ...): your fleet type starts as Navy, team 1. The fleet cell is a pull-down (Navy / Pirate /
+  Procyon) and the team cell a pull-down of Team 1 to Team 8, for you and for computers alike. A newly added computer was seen as
+  Pirate, Team 2 beside a Navy, Team 1 player (the rule for later ones is PROVISIONAL). Changing a fleet type or team empties that
+  player's fleet (the game's own text: the host changed your team, resetting your fleet).
+- Team maps (Border Dispute ...): fleet and team cells have no pull-down for anyone; the team column shows the map's team name
+  (Navy, Procyon ...) and the fleet type is the team's race.
+
+**Fleet screen (Ship Selection Screen).** It opens blank: no ship info, no preview, *Add*, *Drop*, *Crew* and *Arms* greyed;
+*Auto Assign*, *Load Fleet*, *Save Fleet* and the next arrow are live. Clicking a hull type in Available Ships shows its info and
+the 3D preview and enables *Add*. Adding puts it in the next free fleet slot, selects that slot (info and preview now show the fleet
+ship, the list highlight stays) and enables Drop, Crew and Arms. The slot bar shows five slots at a time with scroll arrows even when the
+limit is higher. "Current Victory Points" falls by the ship's cost on Add. Leaving with points unspent asks "You have N victory points
+remaining. Would you like to continue?" with Auto Assign / Cancel / Continue.
+- *Auto Assign* on the Crew tab filled the whole fleet: it kept the one ship, added more hulls (mixed classes, not simply the most
+  expensive) up to the fleet limit and spent every point (it ended at 0), crewing them with generic crew. The exact choice rule is not
+  recovered (PROVISIONAL).
+
+**Arms tab.** A top-down ship outline with one icon per selectable weapon bank (a mount of several guns is one bank). Clicking a bank
+shows a tooltip "Heavy Mount / 4 Guns" and the list *Available Weapons* for that mount type, the fitted gun highlighted, with its name,
+max range, best range, damage range and Point Cost. Dragging a weapon from the list onto the bank swaps it; the left panel then says
+"Total Cost: N / Weapon Upgrade Successful". The change is the price difference times the number of guns in the bank: four heavy guns
+from a 10-point to an 8-point weapon read -8 and the budget rose by 8. Load Arms / Save Arms and Auto Assign sit beside it.
+
+**Crew tab.** A roster list (Sort By: name, victory points, leadership, gunnery, navigation, rigging, engineering, combat, spotting)
+of named crew, each with a Point Cost and seven skills (Gunnery, Leadership, Navigation, Engineering, Rigging, Spotting, Combat; a
+skill can read N/A). Dragging one onto a post spends its cost (a 9-point captain took the budget from 748 to 739). Empty posts are filled by *Generic Crew Member*: cost 0, every skill 1. The bottom bars
+(Maneuverability, Speed, Repair Rate, Strength) summarise the posts. Load Crew / Save Crew exist.
+
+## Remake (`menu.rs`: `Slot`, `new_slots`, `Skirmish::choices/choose/plan`; `main.rs`: `Group`)
+- Create Skirmish: the retail sliders (`SliderRange`: `VICTORY_LIMIT`, `FLEET_SIZE`).
+- Lobby: open maps start as above (`Kind::Open`), pull-downs through `Skirmish::dropdown` / `choices` / `choose`.
+- Fleet screen: blank start, greyed Crew / Arms / Drop / Add (`shown_class`, `slot_filled`, `ship_chosen`). Crew and Arms still open
+  the shared editor.
+- Arms in skirmish charge or refund `fitting_delta` against the budget (`points_left`).
+- Not done: skirmish crew roster and its costs, the retail Crew / Arms screen art and drag and drop, Load/Save Fleet/Crew/Arms, the
+  slot bar scrolling, the ship-name drop-down, Auto Assign's real rule, Launch/Ready greying.
+
+## Remake notes before the 2026-10 measurements (partly superseded above)
 - Historical map: rows = playable players with their fixed fleet type/team and pre-placed fleets (exported to `ships` in the map
   JSON); you only choose which player you command (click the name). Players on your team are allies, all others hostile;
   different computer teams also fight each other (The Maw has three teams: Navy, Procyon and Pirates, a three-way battle).
   Assemble Fleet is unavailable.
-- Open map: you, one opponent, the other slots closed. Per slot: take it, open/close it, change fleet type (free-for-all maps)
-  or team; on team maps the fleet type follows the team. Fleet size limit 1-8. Your fleet comes from the fleet screen; computer fleets are auto-built.
+- Open map: see the measured section; computer fleets are auto-built (issue #80).
 - Arms: the fleet screen's Arms button opens the same shared weapon editor as campaign . Each fleet entry has its own bank fittings, including duplicate hulls; launch/restart carries these into turret models, firing and HUD state. Dropping/truncating a fleet or changing race removes the corresponding fittings. Campaign funds are untouched. Historical fleets remain fixed.
 - Mount compatibility: exported gun `Mount Type` (whitespace-normalised) and `Exclusion Race` drive both editors; selectable same-size mounts permit cross-family weapons. `Non-Selectable` mounts and point defence are protected. Inferring a bank's type from its original guns is still provisional; mods missing metadata retain the older family fallback.
-- Not done / PROVISIONAL: victory points and Auto Assign; crew/load/save; the 3D ship preview; ready/chat/network;
+- Not done / PROVISIONAL: Auto Assign's rule; crew/load/save; the 3D ship preview; ready/chat/network;
   Race Lock on historical maps (we never change a historical fleet type); name filter that hides story/NIS/tutorial hulls (the original lists
   all ship types of the race); computer fleet choice; the lobby cell layout and states; hostile players do not fight each other (battle sides are only ours/enemy).
 

@@ -8,7 +8,7 @@ use bevy::prelude::*;
 use bevy::render::render_resource::TextureFormat;
 
 use crate::combat::Library;
-use crate::menu::{Screen, Skirmish, offered};
+use crate::menu::{Screen, Skirmish};
 
 /// The image the preview renders into; the menu draws it in the viewport.
 #[derive(Resource)]
@@ -71,7 +71,7 @@ fn despawn(mut commands: Commands, parts: Query<Entity, Or<(With<PreviewPart>, W
 /// The selected class (the human player's offered list at `ship_pick`), reloaded when the selection changes; the camera is placed
 /// to frame its hull from the bow quarter, slightly above.
 fn show_hull(mut commands: Commands, assets: Res<AssetServer>, sk: Res<Skirmish>, lib: Res<Library>, hulls: Query<(Entity, &PreviewHull)>) {
-    let want = sk.human().map(|h| offered(&lib, h.race)).and_then(|l| l.get(sk.ship_pick).copied());
+    let want = sk.shown_class(&lib);
     if hulls.iter().any(|(_, h)| Some(h.0) == want) {
         return;
     }

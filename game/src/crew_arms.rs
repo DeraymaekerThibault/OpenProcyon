@@ -187,6 +187,17 @@ fn bank_cost(lib: &Library, class: &crate::data::Class, bank: usize, gun: &str) 
     let mounts: Vec<_> = class.mounts.iter().filter(|m| m.bank == bank).collect();
     g.points?.checked_mul(u32::try_from(mounts.len()).ok()?)
 }
+/// Victory points a skirmish ship's fitting costs beyond its stock guns: per bank, the price of the fitted guns minus the stock ones
+/// (negative when cheaper). Measured on the original: swapping a four-gun heavy bank from a 10-point gun to an 8-point gun showed
+/// 'Total Cost: -8' and returned 8 points.
+pub fn fitting_delta(lib: &Library, class: &crate::data::Class, fit: &BTreeMap<usize, String>) -> i64 {
+    fit.iter()
+        .map(|(&bank, gun)| {
+            let stock = class.mounts.iter().find(|m| m.bank == bank).and_then(|m| bank_cost(lib, class, bank, &m.gun)).unwrap_or(0);
+            i64::from(bank_cost(lib, class, bank, gun).unwrap_or(stock)) - i64::from(stock)
+        })
+        .sum()
+}
 fn upgrade(points: &mut CampaignPoints, lib: &Library, class: &crate::data::Class, key: &str, bank: usize, gun: &str) -> Result<(), String> {
     if !points.arms.is_empty() && !points.arms.iter().any(|g| g == gun) {
         return Err("This gun is not unlocked.".into());
@@ -634,6 +645,7 @@ fn skirmish_screen(
             }
             Action::SelectPost(i) => (choice.post, choice.page) = (i, 0),
             Action::Upgrade(gun) => {
+                let mut total = None;
                 let result = slot.fleet.get(choice.ship).ok_or("Select a ship first.").and_then(|name| {
                     let class = &lib.classes[lib.index(name)];
                     selectable_banks(&lib, class).get(choice.post).ok_or("No weapon bank.").and_then(|(bank, _)| {
@@ -641,11 +653,20 @@ fn skirmish_screen(
                             return Err("Incompatible weapon.");
                         }
                         slot.weapons.resize_with(slot.fleet.len(), BTreeMap::new);
+                        let stock = &class.mounts.iter().find(|m| m.bank == *bank).map(|m| m.gun.clone()).unwrap_or_default();
+                        let old = slot.weapons[choice.ship].get(bank).unwrap_or(stock).clone();
+                        let (new_cost, old_cost) = (bank_cost(&lib, class, *bank, &gun), bank_cost(&lib, class, *bank, &old).or(Some(0)));
+                        let delta = i64::from(new_cost.ok_or("Gun has no price.")?) - i64::from(old_cost.unwrap_or(0));
+                        if delta > points {
+                            return Err("Not enough victory points.");
+                        }
                         slot.weapons[choice.ship].insert(*bank, gun);
+                        total = Some(delta);
                         Ok(())
                     })
                 });
-                choice.message = result.map_or_else(String::from, |()| "Equipped for this ship.".into());
+                // Retail's message block: 'Total Cost: <change>' and 'Weapon Upgrade Successful'.
+                choice.message = result.map_or_else(String::from, |()| format!("Total Cost: {}\nWeapon Upgrade Successful", total.unwrap_or(0)));
             }
             _ => {}
         }
@@ -671,11 +692,11 @@ fn skirmish_screen(
         choice.post = choice.post.min(banks.len().saturating_sub(1));
         if let Some((bank, first)) = banks.get(choice.post) {
             let equipped = slot.weapons.get(choice.ship).and_then(|w| w.get(bank)).unwrap_or(&class.mounts[*first].gun);
-            let rows = weapon_rows(&lib, class, *bank, equipped, &[], false);
+            let rows = weapon_rows(&lib, class, *bank, equipped, &[], true);
             let pages = rows.len().div_ceil(PAGE).max(1);
             choice.page = choice.page.min(pages - 1);
             next.detail = format!(
-                "Ship {}: {} — Bank {}\nEquipped: {}\nSkirmish budget is not implemented; fittings do not spend campaign points.\nPage {}/{}",
+                "Ship {}: {} — Bank {}\nEquipped: {}\nPage {}/{}",
                 choice.ship + 1,
                 crate::menu::pretty(name),
                 bank,
@@ -699,10 +720,9 @@ fn skirmish_screen(
             .collect();
         let (posts, bars) = posts_view(class, None);
         let list = match banks.get(choice.post) {
-            Some((bank, equipped)) if choice.arms => weapon_rows(&lib, class, *bank, equipped, &[], false)
-                .into_iter()
-                .map(|(_, a)| (if let Action::Upgrade(g) = &a { gun_label(g) } else { String::new() }, a))
-                .collect(),
+            Some((bank, equipped)) if choice.arms => {
+                weapon_rows(&lib, class, *bank, equipped, &[], true).into_iter().map(|(_, a)| (if let Action::Upgrade(g) = &a { gun_label(g) } else { String::new() }, a)).collect()
+            }
             _ => vec![],
         };
         next.fit = Some(FitView {

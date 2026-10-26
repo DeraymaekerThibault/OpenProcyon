@@ -13,7 +13,8 @@ use crate::assets_dir;
 use crate::bindings::Bindings;
 use crate::combat::Library;
 use crate::menu::{
-    Action, BuildMenu, CtrlUi, InGame, Kind, MenuKey, MenuModel, MenuRoot, Page, RACES, RunButtons, SaveUi, Screen, Skirmish, menu_active, offered, pretty, strings, text_of,
+    Action, BuildMenu, Cell, Choice, CtrlUi, FLEET_SIZE, InGame, Kind, MenuKey, MenuModel, MenuRoot, Page, RACES, RunButtons, SaveUi, Screen, Skirmish, VICTORY_LIMIT, menu_active,
+    offered, pretty, strings, text_of,
 };
 use crate::sprites::{BODY_FONT, Fonts, HudData, IDLE, MENU_SKIN, inset, sliced};
 
@@ -329,11 +330,20 @@ fn build(
                             None
                         }
                         (Screen::CreateSkirmish, "Fleet Size Label") => {
-                            ctx.text(c, BODY_FONT, &text_of(&strings, "IDGS_TPFRONTENDTEXT01_FLEET_SIZE_LIMIT"), r[0], r[2] - r[0], (r[1] + r[3]) / 2.0, true, Color::WHITE);
+                            ctx.text(
+                                c,
+                                BODY_FONT,
+                                &format!("{} : {}", text_of(&strings, "IDGS_TPFRONTENDTEXT01_FLEET_SIZE_LIMIT"), sk.fleet_size),
+                                r[0],
+                                r[2] - r[0],
+                                (r[1] + r[3]) / 2.0,
+                                true,
+                                Color::WHITE,
+                            );
                             None
                         }
                         (Screen::CreateSkirmish, "Fleet Size Scrollbar Button") => {
-                            ctx.text_button(c, rect, &sk.fleet_size.to_string(), "BlackChancery22", Action::FleetSize);
+                            slider(&ctx, c, rect, FLEET_SIZE.fraction(sk.fleet_size as u32), Action::FleetSize(-1), Action::FleetSize(1));
                             None
                         }
                         (Screen::Lobby, "Open Next Screen Button") => Some(Action::Launch),
@@ -379,9 +389,20 @@ fn build(
                             None
                         }
                         // PROVISIONAL: Crew and Arms both open the shared crew & arms editor until their retail screens are rebuilt.
-                        (Screen::Fleet, "Open Arms Selection Screen" | "Open Crew Selection Screen") => Some(Action::OpenArms),
-                        (Screen::Fleet, "Add Ship To Fleet Button") => Some(Action::AddShip),
-                        (Screen::Fleet, "Drop Ship From Fleet Button") => Some(Action::DropShip),
+                        (Screen::Fleet, "Open Arms Selection Screen" | "Open Crew Selection Screen" | "Drop Ship From Fleet Button" | "Add Ship To Fleet Button") => {
+                            // Retail greys these out: Crew, Arms and Drop until the picked fleet slot holds a ship, Add until a hull type is clicked.
+                            let (on, action) = match impl_ {
+                                "Add Ship To Fleet Button" => (sk.ship_chosen, Action::AddShip),
+                                "Drop Ship From Fleet Button" => (sk.slot_filled(), Action::DropShip),
+                                _ => (sk.slot_filled(), Action::OpenArms),
+                            };
+                            if on {
+                                Some(action)
+                            } else {
+                                disabled(&ctx, c, rect, &label, font);
+                                None
+                            }
+                        }
                         (Screen::Fleet, "Open Next Arrow Button") => {
                             arrow(&ctx, c, rect, "FrontEnd_Next_Button", Action::Goto(Screen::Lobby));
                             None
@@ -397,11 +418,20 @@ fn build(
                         }
                         (Screen::Fleet, "AutoAssign Button") => Some(Action::AutoAssign),
                         (Screen::CreateSkirmish, "Victory Limit Label") => {
-                            ctx.text(c, BODY_FONT, &text_of(&strings, "IDGS_TPFRONTENDTEXT_VICTORY_POINTS"), r[0], r[2] - r[0], (r[1] + r[3]) / 2.0, true, Color::WHITE);
+                            ctx.text(
+                                c,
+                                BODY_FONT,
+                                &format!("{} : {}", text_of(&strings, "IDGS_TPFRONTENDTEXT_VICTORY_POINTS"), sk.victory_limit),
+                                r[0],
+                                r[2] - r[0],
+                                (r[1] + r[3]) / 2.0,
+                                true,
+                                Color::WHITE,
+                            );
                             None
                         }
                         (Screen::CreateSkirmish, "Victory Points Scrollbar Button") => {
-                            ctx.text_button(c, rect, &sk.victory_limit.to_string(), "BlackChancery22", Action::VictoryLimit);
+                            slider(&ctx, c, rect, VICTORY_LIMIT.fraction(sk.victory_limit), Action::VictoryLimit(-1), Action::VictoryLimit(1));
                             None
                         }
                         // Other retail buttons (multiplayer, options, profiles, campaign...) are shown but not implemented.
@@ -643,7 +673,7 @@ fn frontend_backdrop(ctx: &Ctx, c: &mut ChildSpawnerCommands, scene: usize) {
 
 fn arrow(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], name: &str, action: Action) {
     let mut parts = vec![];
-    let forward = name.contains("Next");
+    let forward = name.contains("Next") || name.contains("Right");
     let mut root = c.spawn((Interaction::None, action, crate::menu::ArrowButton { forward }, ctx.node(l, t, r - l, b - t)));
     root.with_children(|c| parts.extend(ctx.hud_piece(c, name, 0.0, 0.0, r - l, b - t)));
     root.insert(Art(parts));
@@ -731,6 +761,20 @@ pub(super) fn scrollbar(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [
     track(c, "FRONTEND_SCROLLBAR_SLIDER", t + h * start, t + h * (start + len).min(1.0));
 }
 
+/// The Create Skirmish slider: round arrow buttons around a 130 px track with a knob (measured on a retail screenshot: arrows 34 px,
+/// the track between them, the knob 22 px travelling the track minus its own width). The arrows step the value.
+fn slider(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], fraction: f32, dec: Action, inc: Action) {
+    let cy = (t + b) / 2.0;
+    let (track_l, track_r) = (l + 34.0, r - 34.0);
+    let mid = (track_l + track_r) / 2.0;
+    sheet_piece(ctx, c, "fe_04", Rect::new(0.0, 66.0, 144.0, 99.0), [track_l, cy - 16.5, mid, cy + 16.5]);
+    sheet_piece(ctx, c, "fe_04", Rect::new(0.0, 165.0, 144.0, 198.0), [mid, cy - 16.5, track_r, cy + 16.5]);
+    let knob = track_l + 11.0 + fraction * (track_r - track_l - 22.0);
+    piece(ctx, c, "FrontEnd_Horizontal_Scrollbar_Slider", [knob - 11.0, cy - 11.0, knob + 11.0, cy + 11.0], (false, false));
+    arrow(ctx, c, [l, cy - 17.0, l + 34.0, cy + 17.0], "FrontEnd_Options_Menu_Select_Left_Button", dec);
+    arrow(ctx, c, [r - 34.0, cy - 17.0, r, cy + 17.0], "FrontEnd_Options_Menu_Select_Right_Button", inc);
+}
+
 /// A retail radio choice: check box (`FrontEnd_Check_Box_Ready` ticked / `_NotReady`) and its Univers12 label.
 fn radio(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], label: &str, on: bool, action: Action) {
     let cy = (t + b) / 2.0 - 3.0; // measured: the original row sits 3 units above the element's centre
@@ -790,6 +834,11 @@ struct Rest(Color);
 /// boxes (Player x 287..460, Fleet 470..561, Team 571..779 with its drop-down arrow). Clicking a player's box takes that slot, the
 /// fleet box cycles the fleet type and the team box the team (open maps). PROVISIONAL: the human row shows "Player" (no profiles),
 /// the flag icon is the race's icon block plus the slot number, and closing a slot on an open map is a click on its flag.
+/// 'Team N' on free-for-all maps (the original's TEAM_1 .. TEAM_8 strings).
+fn team_label(s: &dyn Fn(&str) -> String, team: i32) -> String {
+    s(&format!("IDGS_TPTEAMNAMES_TEAM_{}", team + 1))
+}
+
 fn players_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, _rect: [f32; 4], sk: &Skirmish, strings: &Value) {
     let s = |id: &str| strings[id].as_str().unwrap_or(id).to_string();
     let open = sk.open();
@@ -804,7 +853,6 @@ fn players_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, _rect: [f32; 4], sk: &S
         ctx.text(c, "UniversBold14", &s(id), x0, x1 - x0, 138.0, true, Color::WHITE);
     }
     let teams = sk.map_json["teams"].as_array().cloned().unwrap_or_default();
-    let team_locked = open && !teams.is_empty();
     for (i, slot) in sk.slots.iter().enumerate() {
         let cy = 184.0 + i as f32 * 32.0;
         let me = slot.kind == Kind::Human;
@@ -814,39 +862,63 @@ fn players_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, _rect: [f32; 4], sk: &S
             3 => 20,
             _ => 0,
         };
-        let flag = c.spawn((ctx.node(250.0, cy - 12.5, 28.0, 25.0), Interaction::None)).id();
-        if open && !me {
-            c.commands().entity(flag).insert(Action::ToggleClosed(i));
-        }
-        c.commands().entity(flag).with_children(|c| {
-            if live {
+        if live {
+            c.spawn(ctx.node(250.0, cy - 12.5, 28.0, 25.0)).with_children(|c| {
                 piece(ctx, c, &format!("FrontEnd_Flag_Small_Icon_{:02}", base + i % 10), [0.0, 0.0, 28.0, 25.0], (false, false));
-            }
-        });
+            });
+        }
         // Several live players on one team are told apart by a letter ('Pirates A', 'B', 'C'), as on original screenshots.
-        let mates: Vec<usize> = sk.slots.iter().enumerate().filter(|(_, o)| o.kind != Kind::Closed && o.team == slot.team && slot.team >= 0).map(|(k, _)| k).collect();
+        let mates: Vec<usize> = sk.slots.iter().enumerate().filter(|(_, o)| o.kind.live() && o.team == slot.team && slot.team >= 0).map(|(k, _)| k).collect();
         let letter = match mates.iter().position(|&k| k == i) {
-            Some(n) if mates.len() > 1 => format!(" {}", (b'A' + n as u8) as char),
+            Some(n) if mates.len() > 1 && !sk.free_teams() => format!(" {}", (b'A' + n as u8) as char),
             _ => String::new(),
         };
         let team = match usize::try_from(slot.team).ok().and_then(|n| teams.get(n)) {
             Some(tm) => s(tm["name_id"].as_str().unwrap_or("")) + &letter,
-            None if slot.team >= 0 => format!("{} {}", s("IDGS_TPFRONTENDTEXT02_TEAM"), slot.team + 1),
+            None if slot.team >= 0 => team_label(&s, slot.team),
             None => "-".into(),
         };
         let race = RACES.iter().find(|r| r.0 == slot.race).map_or_else(|| s("IDGS_TPFRONTENDTEXT01_PLEASE_SELECT_A_RACE"), |r| s(r.2));
         let kind = match slot.kind {
             Kind::Human => s("IDGS_TPFRONTENDTEXT_SCREENS_PLAYER"),
             Kind::Computer => s("IDGS_TPFRONTENDTEXT01_COMPUTER"),
+            Kind::Open => s("IDGS_TPFRONTENDTEXT01_OPEN"),
             Kind::Closed => s("IDGS_TPFRONTENDTEXT01_CLOSED"),
         };
-        let cells = [
-            (287.0, 460.0, kind, (live && !me).then_some(Action::Claim(i)), false),
-            (470.0, 561.0, race, (open && live && !team_locked).then_some(Action::CycleRace(i)), false),
-            (571.0, 779.0, team, (open && live).then_some(Action::CycleTeam(i)), true),
-        ];
+        let pull = |cell: Cell| (!sk.choices(cell).is_empty()).then_some(Action::Dropdown(Some(cell)));
+        // Historical maps: clicking a name takes that side (no pull-down there).
+        let player = pull(Cell::Player(i)).or((!open && live && !me).then_some(Action::Claim(i)));
+        let mut cells = vec![(287.0, 460.0, kind, player.clone(), player.is_some() && open)];
+        if live {
+            cells.push((470.0, 561.0, race, pull(Cell::Fleet(i)), sk.free_teams()));
+            cells.push((571.0, 779.0, team, pull(Cell::Team(i)), sk.free_teams()));
+        }
         for (x0, x1, label, action, drop) in cells {
             pulldown_cell(ctx, c, [x0, cy - 14.5, x1, cy + 14.5], &label, false, action, drop);
+        }
+    }
+    if let Some(cell) = sk.dropdown {
+        // The open list sits on its cell: the current value first, the other entries 28 apart below (retail). A click elsewhere closes it.
+        let mut blocker = c.spawn((Interaction::None, Action::Dropdown(None), ctx.node(0.0, 0.0, 800.0, 600.0)));
+        blocker.insert(ZIndex(1));
+        let (x0, x1, row) = match cell {
+            Cell::Player(i) => (287.0, 460.0, i),
+            Cell::Fleet(i) => (470.0, 561.0, i),
+            Cell::Team(i) => (571.0, 779.0, i),
+        };
+        let top = 184.0 + row as f32 * 32.0 - 14.5;
+        for (k, choice) in sk.choices(cell).into_iter().enumerate() {
+            let label = match choice {
+                Choice::Computer => s("IDGS_TPFRONTENDTEXT01_COMPUTER"),
+                Choice::Open => s("IDGS_TPFRONTENDTEXT01_OPEN"),
+                Choice::Close => s("IDGS_TPFRONTENDTEXT_SCREENS_CLOSE"),
+                Choice::Fleet(r) => RACES.iter().find(|x| x.0 == r).map_or_else(String::new, |x| s(x.2)),
+                Choice::Team(t) => team_label(&s, t),
+            };
+            let y = top + k as f32 * 28.0;
+            c.spawn((ctx.node(x0, y, x1 - x0, 28.0), ZIndex(2))).with_children(|c| {
+                pulldown_cell(ctx, c, [0.0, 0.0, x1 - x0, 28.0], &label, k == 0, Some(Action::Choose(cell, choice)), false);
+            });
         }
     }
     if let Some(e) = sk.error {
@@ -897,7 +969,7 @@ fn ship_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, _rect: [f32; 4], sk: &Skir
     for (row, &ci) in list.iter().enumerate().skip(sk.scroll).take(SHIP_ROWS) {
         let cy = 347.5 + (row - sk.scroll) as f32 * 19.0;
         let mut b = c.spawn((Interaction::None, Action::PickShip(row), ctx.node(505.0, cy - 9.5, 215.0, 19.0)));
-        b.insert(BackgroundColor(if row == sk.ship_pick { Color::srgba(0.2, 0.7, 0.8, 0.45) } else { Color::NONE }));
+        b.insert(BackgroundColor(if sk.ship_chosen && row == sk.ship_pick { Color::srgba(0.2, 0.7, 0.8, 0.45) } else { Color::NONE }));
         b.with_children(|c| ctx.text(c, BODY_FONT, &class_name(lib, ci, strings), 20.0, 195.0, 9.5, false, Color::WHITE));
     }
     let n = list.len().max(1) as f32;
@@ -954,7 +1026,7 @@ pub(super) fn class_name(lib: &Library, ci: usize, strings: &Value) -> String {
 /// at (510, 151) 58x59; 'Point' / 'Cost' in Univers10 and the cost in gold Univers26 under it; seven Univers10 stat lines from y 161.5,
 /// 16 apart, labels at x 580, the colon at 676 and gold values at 686.
 fn ship_info(ctx: &Ctx, c: &mut ChildSpawnerCommands, _rect: [f32; 4], sk: &Skirmish, lib: &Library, strings: &Value) {
-    let Some(ci) = sk.human().map(|h| offered(lib, h.race)).and_then(|l| l.get(sk.ship_pick).copied()) else { return };
+    let Some(ci) = sk.shown_class(lib) else { return };
     let s = |id: &str| text_of(strings, id);
     let st = crate::menu::ship_stats(lib, ci);
     ctx.text(c, BODY_FONT, &class_name(lib, ci, strings), 510.0, 240.0, 130.0, false, Color::WHITE);
