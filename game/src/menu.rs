@@ -507,8 +507,8 @@ pub fn auto_assign(sk: &mut Skirmish, lib: &Library) {
     for ship in 0..sk.slots[slot].fleet.len() {
         let class = &lib.classes[lib.index(&sk.slots[slot].fleet[ship])];
         let caps = crate::boarding::counts(&class.name);
-        for role in 0..8 {
-            while sk.slots[slot].crew_mut(ship)[role].len() < caps[role] as usize {
+        for (role, &cap) in caps.iter().enumerate() {
+            while sk.slots[slot].crew_mut(ship)[role].len() < cap as usize {
                 let left = sk.points_left(lib);
                 let used: Vec<String> = sk.slots[slot].crew.iter().flatten().flatten().cloned().collect();
                 let skill = crate::crew_arms::post_skill_name(role);
@@ -936,7 +936,7 @@ mod tests {
         let mut sk = skirmish("diablo_straight");
         sk.victory_limit = 50;
         auto_assign(&mut sk, &lib);
-        assert!(sk.slots[0].fleet.len() >= 1 && sk.points_left(&lib) >= 0);
+        assert!(!sk.slots[0].fleet.is_empty() && sk.points_left(&lib) >= 0);
     }
     #[test]
     fn slot_bar_shows_five_slots_and_follows_the_picked_one() {
