@@ -432,7 +432,7 @@ impl MenuModel<'_> {
             window.width() as u32,
             window.height() as u32,
             format!(
-                "{:?}|{:?}|{}|{:?}|{}|{}|{}|{:?}|{:?}",
+                "{:?}|{:?}|{}|{:?}|{}|{}|{}|{:?}|{:?}|{:?}|{}|{}|{}",
                 self.ig.page,
                 ui.selected,
                 ui.name,
@@ -441,7 +441,11 @@ impl MenuModel<'_> {
                 ui.list.len(),
                 cui.scroll,
                 (cui.capture, &self.binds.rows),
-                self.settings
+                self.settings,
+                sk.dropdown,
+                sk.flag_picker,
+                sk.map_scroll,
+                sk.slot_scroll
             ) + &if self.ig.page == Some(Page::Summary) { self.stats.table() } else { String::new() },
         )
     }
