@@ -703,6 +703,7 @@ pub struct Dockees<'w, 's> {
     q: Query<'w, 's, (Entity, &'static Transform, &'static Dockable, Option<&'static Ship>, Option<&'static MissionBase>)>,
     hulls: Query<'w, 's, &'static crate::collision::Obstacle>,
     armed: Query<'w, 's, (&'static crate::combat::ArmedBase, &'static Health)>,
+    sides: Query<'w, 's, &'static crate::combat::BaseSide>,
     untowable: Query<'w, 's, (), With<NoTow>>,
     lib: Res<'w, Library>,
     sensors: Res<'w, crate::environment::Sensors>,
@@ -743,8 +744,13 @@ impl Dockees<'_, '_> {
             .iter()
             .filter_map(|(e, tf, _, _, base)| {
                 let base = base?;
-                let mission = self.mission.as_deref()?;
-                if !mission.script.hostile(mission.script.player(), &base.owner) || !crate::environment::can_see(Some(mission), at, tf.translation) {
+                let mission = self.mission.as_deref();
+                // A skirmish base has no mission rules: it is hostile when its side is not the player's.
+                let hostile = match mission {
+                    Some(m) => m.script.hostile(m.script.player(), &base.owner),
+                    None => self.sides.get(e).is_ok_and(|s| s.0 != Side::Player),
+                };
+                if !hostile || !crate::environment::can_see(mission, at, tf.translation) {
                     return None;
                 }
                 let (armed, hp) = self.armed.get(e).ok()?;
