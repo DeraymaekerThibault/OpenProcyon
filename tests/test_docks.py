@@ -1,7 +1,26 @@
 import json
+import struct
 import unittest
 
+import numpy as np
 from imported import ASSETS, needs_assets
+
+
+def glb_xz(path):
+    """Vertices of a GLB in the game's (x, y) plane: bevy x and -z."""
+    b = path.read_bytes()
+    n = struct.unpack("<I", b[12:16])[0]
+    g = json.loads(b[20 : 20 + n])
+    start = 20 + n + 8
+    pts = []
+    for m in g["meshes"]:
+        for pr in m["primitives"]:
+            a = g["accessors"][pr["attributes"]["POSITION"]]
+            v = g["bufferViews"][a["bufferView"]]
+            off = start + v.get("byteOffset", 0) + a.get("byteOffset", 0)
+            pts.append(np.frombuffer(b, "<f4", a["count"] * 3, off).reshape(-1, 3))
+    xyz = np.concatenate(pts)
+    return np.stack([xyz[:, 0], -xyz[:, 2]], axis=1)
 
 
 class DockExportTests(unittest.TestCase):
@@ -39,6 +58,24 @@ class DockExportTests(unittest.TestCase):
             for p in v["points"]:
                 self.assertEqual(len(p["pos"]), 3)
                 self.assertIsInstance(p["yaw"], float)
+
+    @needs_assets
+    def test_base_dock_points_lie_beside_the_model(self):
+        # The node's own position is in the model's frame; adding the parent layer's offset (as gun mounts need) threw
+        # Montgomery's docks ~100 units off its piers.
+        d = {
+            f.parent.name: json.loads(f.read_text())
+            for f in ASSETS.glob("ships/Base_*/docks.json")
+        }
+        for name, scene in [
+            ("Base_Montgomery", "BaseMontgomery"),
+            ("Base_Grant", "BaseGrant"),
+            ("Base_Procyon1", "BaseProcyons"),
+        ]:
+            xy = glb_xz(next((ASSETS / "models").rglob(f"{scene}.glb")))
+            for p in d[name]["points"]:
+                gap = np.hypot(*(xy - np.array(p["pos"][:2])).T).min()
+                self.assertLess(gap, 35, f"{name} {p['label']}")
 
 
 if __name__ == "__main__":
