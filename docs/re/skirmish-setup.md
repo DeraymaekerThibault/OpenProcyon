@@ -146,3 +146,24 @@ type in the battle, with that fleet's teammates. A base no fleet claims stays ne
 another side it can see, can be shot by them (its sections have hit points), and computer ships with nothing in sight go for the
 nearest hostile base (`ship::ai`). Not done: what destroying a base means for victory, base repair/docking by side, and bases
 as part of the lobby (fleet type per base).
+
+## Victory conditions (measured from the maps' own rules)
+
+Every skirmish map ships its own rules that end the game; the engine has no built-in "destroy all enemies" outcome. Read from the
+retail map files (2026-10-27), not from a played battle:
+
+- **Maps with bases (Border Dispute, Red Rover, Bayles Stand, Mousetrap):** a team wins when the opposing base's mission-critical
+  sections are all destroyed (the "vital to mission" damage of the base reaches 100%), or when it captures a ship from that base. The
+  objective text is "Destroy enemy base" and the map's objective marker sits on the enemy base. Killing every enemy ship does not end
+  Border Dispute by itself. Border Dispute and Mousetrap also end the game as lost for everyone when no human-controlled ship is left;
+  Border Dispute also when no team has any ship (a draw). Mousetrap and Convoy Raid additionally give the other side the win when a
+  team has no ships left.
+- **Maps without bases (Diablo Strait, Dragon's Nest, Shadow Dance, The Maw, Zemyatin Anomaly, Iron War, Storm Front):** one rule ends
+  the game on the engine conditions "Skirmish Game Complete" or "Team Game Complete" (the engine logs "Team Game Completed - 1 team
+  remains"). PROVISIONAL meaning: the game ends when only one team still has ships; the exact skirmish variant is not decoded.
+- **Historical maps** use their own goals: Ambush (reach the volume with the Mercy / capture it / destroy the three pirate groups),
+  Convoy Raid (a team reaches 350 / 400 points, or the pirates have no ships), Locusts (the command fleet reaches the safety volume,
+  or the privateers capture it, or lose all ships), Bayles Stand (destroy the Procyon group, or the Procyons wreck/capture the base).
+
+Remake status: only "no enemy ships left" is implemented, so on base maps the game currently ends at the wrong moment (and a lost
+base does nothing). Next: export each skirmish map's rules and run them through the rules interpreter (issue #73).
