@@ -53,7 +53,5 @@ gold arrow on it appears only when the map has a base to destroy. On Border Disp
 follows waypoints, and what it shows on maps with a group objective (convoy, capture), is not measured: PROVISIONAL. The remake points
 at the living hostile base named by a rule the human wins by (`Victory::objective_bases`) and hides the arrow otherwise.
 
-What marks a targeted base is not known. The gold circle with a cross, and a gold ring round a blue lens, seen over a tower in the first
-footage were most likely the Star Mortar's lob-target icons (clicks on the base had no cannon target: the footage shows 0 damage dealt),
-not a base marker (PROVISIONAL). A lone Man-O-War cannot beat a Procyon base on Easy (26 guns, sunk three times at 137-266 units): the
-destruction of a part has not been filmed yet (issue #97).
+What marks a targeted base is not known. A lone Man-O-War cannot beat a Procyon base on Easy (26 guns; it was sunk four times at 137-266 units, and its clicks on the base never
+made it fire at the base): the destruction of a base part has not been filmed yet (issue #97).
