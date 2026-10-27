@@ -33,6 +33,7 @@ class PackLayoutTests(unittest.TestCase):
             put(a / "maps/mission01.json", {"backdrop": "Map_Duel"})
             put(a / "campaign/mission01.json", {"rules": []})
             put(a / "campaign/mission01_media.json", {})
+            put(a / "campaign/duel_script.json", {"rules": []})
             put(a / "menu/map_duel.png", raw="png")
             pack(a)
             pack(a)  # idempotent
@@ -61,6 +62,9 @@ class PackLayoutTests(unittest.TestCase):
                 (a / "maps/mission01/mission.json").is_file()
                 and (a / "maps/mission01/media.json").is_file()
             )
+            # a skirmish map's own script sits beside it without making it a mission
+            self.assertTrue((a / "maps/duel/script.json").is_file())
+            self.assertFalse((a / "maps/duel/mission.json").exists())
             self.assertTrue(
                 (a / "maps/duel/backdrop.png").is_file()
                 and (a / "maps/mission01/backdrop.png").is_file()

@@ -8,6 +8,7 @@
   maps/<id>/map.json        scenery, start points, nebulae; "skirmish": true when the skirmish menu lists it
   maps/<id>/mission.json    campaign rules, ships, paths (campaign maps only)
   maps/<id>/media.json      mission speech/messages (campaign maps only)
+  maps/<id>/script.json     the map's own rule script, mission format (skirmish maps only)
   maps/<id>/backdrop.png    star-map / lobby picture (copy of menu/<backdrop>.png)
   maps/<id>/speech/*.ogg    dialogue only that mission uses (dialogue shared by several maps: sound/speech/)
   sound/<kind>/*.ogg        weapons, impacts, ships (engines...), ambience, music, ui, speech; the game finds files by name
@@ -85,6 +86,7 @@ def pack_maps(assets):
         for src, dst in (
             (assets / "campaign" / f"{f.stem}.json", "mission.json"),
             (assets / "campaign" / f"{f.stem}_media.json", "media.json"),
+            (assets / "campaign" / f"{f.stem}_script.json", "script.json"),
         ):
             if src.exists():
                 shutil.move(src, d / dst)

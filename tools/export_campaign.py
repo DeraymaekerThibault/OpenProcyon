@@ -5,6 +5,7 @@ usage: python -m tools.export_campaign <game_root> <assets_dir>
 
 import json
 import math
+import re
 import shutil
 import sys
 from pathlib import Path
@@ -197,6 +198,20 @@ def main(root, out):
     root, out = Path(root), Path(out)
     for twt in sorted((root / "World/SinglePlayer").glob("*.twt")):
         export_mission(root, out, twt)
+    for twt in sorted((root / "World").glob("*.twt")):
+        export_skirmish_script(out, twt)
+
+
+def export_skirmish_script(out, twt):
+    """A skirmish map's own rule script (convoys, timers, points, ...) in the mission format -> campaign/<id>_script.json;
+    pack_layout moves it to maps/<id>/script.json. The map stays a skirmish map (only mission.json makes a mission)."""
+    global SOURCE
+    SOURCE = f"World/{twt.name}"
+    mid = re.sub(r"\W+", "_", twt.stem).lower()  # the map id export_maps gives it
+    script = parse_mission(twt.read_text(encoding="latin1"))
+    script.pop("object_groups")
+    (out / "campaign").mkdir(exist_ok=True)
+    (out / f"campaign/{mid}_script.json").write_text(json.dumps(script, indent=2))
 
 
 def export_mission(root, out, twt):

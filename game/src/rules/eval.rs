@@ -230,8 +230,19 @@ pub struct Script {
     /// writer but lifeboat pickup, yet mission 12's defeat reads 'Procs vs RoyalPalace' (the palace is a boardable base), so it is kept alive.
     /// Ship boardings are not counted here: mission 6's 'PlayerStart vs PirateRunner' is the lifeboat route, its boarding route is 'Team has captured'.
     pub(super) base_captures: HashMap<(String, String), u32>,
-    /// Units captured by boarding (boarding.rs), for 'Team has captured a ship'.
-    pub(super) captured: Vec<Entity>,
+    /// Units captured by boarding (boarding.rs) and the capturing player, for 'Team has captured a ship'.
+    pub(super) captured: Vec<(String, Entity)>,
+    /// Ships destroyed and the player who destroyed them, for 'Team has destroyed a ship'.
+    pub(super) destroyed: Vec<(String, Entity)>,
+    /// Skirmish teams: team name id -> its players (`set_teams`). Empty in the campaign, where a team condition counts anyone.
+    pub(super) teams: HashMap<String, Vec<String>>,
+    /// 'Grant Team X Points' totals per team name id ('Team has X points').
+    pub team_points: HashMap<String, i32>,
+    /// Event conditions (kills, captures, per-unit volume entries): events seen and events already reported, per condition key.
+    /// PROVISIONAL: a rule that fires reports one pending event, so a repeating rule fires once per event.
+    pub(super) events: HashMap<String, (u32, u32)>,
+    /// Event keys the rule being evaluated would report if all its conditions hold.
+    pub(super) consume: Vec<String>,
     /// The TWT's players (the capture conditions credit a captor's allies too).
     pub(super) players: Vec<String>,
     /// 'Set Current Objective Point On Ship': the objective marker follows this unit (`point_pos`).
@@ -452,6 +463,11 @@ impl Script {
             lifeboat_owners: vec![],
             base_captures: HashMap::new(),
             captured: vec![],
+            destroyed: vec![],
+            teams: HashMap::new(),
+            team_points: HashMap::new(),
+            events: HashMap::new(),
+            consume: vec![],
             players: players.iter().map(|p| p.to_string()).collect(),
             group_names: data["groups"].as_object().into_iter().flat_map(|g| g.keys().cloned()).collect(),
             point_on: None,
@@ -577,7 +593,30 @@ impl Script {
                 *self.base_captures.entry((p, victim.into())).or_default() += 1;
             }
         }
-        self.captured.push(unit);
+        self.captured.push((by.into(), unit));
+    }
+    /// A ship was destroyed by player `by` (skirmish kills, 'Team has destroyed a ship').
+    pub fn record_destroyed(&mut self, by: &str, unit: Entity) {
+        self.destroyed.push((by.into(), unit));
+    }
+    /// Skirmish teams: (team name id, its players).
+    pub fn set_teams(&mut self, teams: Vec<(String, Vec<String>)>) {
+        self.teams = teams.into_iter().collect();
+    }
+    /// Whether `player` plays for `team`; true for any player when the team is unknown or not given (campaign rules).
+    pub(super) fn in_team(&self, team: &str, player: &str) -> bool {
+        team.is_empty() || self.teams.get(team).is_none_or(|p| p.iter().any(|x| x == player))
+    }
+    /// An event condition: `seen` events so far under `key`; true while some are unreported (more than `quota`), queuing one
+    /// to be reported if the rule fires.
+    pub(super) fn event(&mut self, key: String, seen: u32, quota: f32) -> bool {
+        let e = self.events.entry(key.clone()).or_default();
+        e.0 = e.0.max(seen);
+        let pending = (e.0 - e.1) as f32 > quota;
+        if pending {
+            self.consume.push(key);
+        }
+        pending
     }
     /// Whether two players are allied (a player is allied with itself; names that are no player, e.g. 'NO PLAYER', are not).
     pub fn allied(&self, a: &str, b: &str) -> bool {
@@ -800,11 +839,31 @@ impl Script {
                 let n = self.lifeboats_saved_by(a, bb) + self.base_captures.get(&(a.into(), bb.into())).copied().unwrap_or(0);
                 known(a) && known(bb) && cmp(s(c, "Equivalence"), n as f32, f(c, "Number Of Captures"))
             }
-            // PROVISIONAL: teams are not modelled, so a capture by anyone of a unit of the group counts.
+            // Campaign maps have no teams: a capture by anyone of a unit of the group counts there.
             "Team has captured a ship from Group/Unit" => {
-                let taken = members(w, s(c, "Group/Unit")).iter().filter(|u| self.captured.contains(&u.e)).count();
-                taken as f32 > f(c, "Number Of Captures")
+                let (team, group) = (s(c, "Team Name"), s(c, "Group/Unit"));
+                let ids = ids(w, group);
+                let n = self.captured.iter().filter(|(by, e)| ids.contains(e) && self.in_team(team, by)).count() as u32;
+                self.event(format!("captured|{team}|{group}"), n, f(c, "Number Of Captures"))
             }
+            "Team has destroyed a ship from Group/Unit" => {
+                let (team, group) = (s(c, "Team Name"), s(c, "Group/Unit"));
+                let ids = ids(w, group);
+                let n = self.destroyed.iter().filter(|(by, e)| ids.contains(e) && self.in_team(team, by)).count() as u32;
+                self.event(format!("destroyed|{team}|{group}"), n, f(c, "Number Of Ships Destroyed"))
+            }
+            // Each unit of the group counts once, the first time it is inside. PROVISIONAL: 'Team Name' is read as the team the rule
+            // credits, not a filter on the units (Convoy Raid: the convoys entering the pirates' theft area score for the pirates).
+            "Unit from Group enters trigger volume ( Once per Unit )" => {
+                let key = format!("once|{}|{}", s(c, "Group Name"), s(c, "Volume Name"));
+                let vol = self.volume(s(c, "Volume Name")).clone();
+                let inside: Vec<Entity> = members(w, s(c, "Group Name")).iter().filter(|u| u.alive && in_volume(&vol, u.pos)).map(|u| u.e).collect();
+                let seen = self.entered.entry(key.clone()).or_default();
+                seen.extend(inside);
+                let n = seen.len() as u32;
+                self.event(key, n, 0.0)
+            }
+            "Team has X points" => self.team_points.get(s(c, "Team Name")).copied().unwrap_or(0) as f32 >= f(c, "Points"),
             // True for an unknown player; otherwise no lifeboat is owned by the player (a boat counts until it is removed).
             "Player has no lifeboats" => {
                 let p = base(s(c, "Player Name"));
@@ -1091,6 +1150,9 @@ impl Script {
             "Mission 9 - Teleport Longboat" => out.push(Fx::Longboat(g("Longboat Group Name"))),
             "Dragon - Set AI Stance" => out.push(Fx::DragonStance(g("Group/Unit Name"), Stance::parse(s(a, "AI Stance")))),
             "Dragon - Set Damage Threshold" => out.push(Fx::DragonThreshold(g("Group Name"), f(a, "Damage Threshold"))),
+            "Grant Team X Points" => *self.team_points.entry(s(a, "Team Name").into()).or_default() += f(a, "Points") as i32,
+            // Skirmish only: the winner is decided by victory.rs from the map's end rules; objective markers are not shown yet.
+            "Team X Wins" | "Remaining Team Wins" | "Setup Team Objective" => {}
             "Reset Shots Fired Count" => {
                 for e in g("Group/Unit Name") {
                     self.shots.remove(&e);
@@ -1119,6 +1181,7 @@ impl Script {
                 continue;
             }
             let mut ok = true;
+            self.consume.clear();
             for c in &r.conds {
                 if !self.cond(c, &w, !r.once) {
                     ok = false;
@@ -1126,6 +1189,9 @@ impl Script {
             } // evaluate all: Enter Volume edge state must advance
             if !ok {
                 continue;
+            }
+            for key in std::mem::take(&mut self.consume) {
+                self.events.entry(key).or_default().1 += 1;
             }
             if r.once {
                 self.fired[i] = true;
@@ -1161,6 +1227,16 @@ impl Script {
         }
         (out, voice)
     }
+}
+
+/// A skirmish map's script without its end rules (those that name a winner or end the game): victory.rs decides how a
+/// skirmish ends, from the same rules (`map.json` `victory`).
+pub fn without_end_rules(data: &Value) -> Value {
+    let mut data = data.clone();
+    if let Some(rules) = data["rules"].as_array_mut() {
+        rules.retain(|r| !r["actions"].as_array().into_iter().flatten().any(|a| matches!(s(a, "Type"), "End Game" | "Team X Wins" | "Remaining Team Wins")));
+    }
+    data
 }
 
 fn opening_rule(name: &str) -> bool {
