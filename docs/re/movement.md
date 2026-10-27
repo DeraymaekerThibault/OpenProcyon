@@ -204,3 +204,13 @@ Headless retail skirmishes, one computer ship against our idle or fleeing Navy C
   (9.06); speed does not drop in the turn. Our turn formula with its torque / 3 band above 0.67 × MaxSpeed predicts 9.70°/s, so
   the band holds. The computer's circling turn rates then need rudder torque × 1.72 (Barque) and × 1.87 (Carrack) under campaign-save
   navigator factors (1.31, 1.37) squared; the same-ship save above gives 1.605 = 1.267². Remake: `ship::COMPUTER_TURN` = 1.267².
+
+## Computer ships and a hostile base: they hold off (Border Dispute, 2026-10-27)
+
+Footage and position logs of a 27-minute Border Dispute battle (us plus three Navy computer fleets against one Procyon computer fleet,
+12 ships, Easy): all nine Navy computer ships (Frigate, Fast Frigates, Torpedo boats) sailed straight at the Procyon base from the first
+second and then stayed between 325 and 460 units from it for the rest of the battle: the Frigate parked at 325, one Torpedo boat parked at
+462 and another at 392, the others patrolled back and forth at 350-400 at full speed. None came inside gun range of the base and the base
+was never damaged by them. The Procyon ships went to the middle of the map and to the front of their own base, not at our base.
+The remake sends computer ships to a hostile base and holds them at 390 units (`BASE_STANDOFF`), PROVISIONAL: one number for all classes,
+and patrolling is not modelled. Taking the base is left to the human.
