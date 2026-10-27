@@ -712,17 +712,23 @@ pub struct Dockees<'w, 's> {
     menu: Res<'w, crate::options_menu::OptionsMenu>,
 }
 impl Dockees<'_, '_> {
+    /// A base is hostile by mission rules, or in a skirmish (no mission rules) when its side is not the player's.
+    fn base_hostile(&self, e: Entity, base: Option<&MissionBase>) -> bool {
+        let Some(base) = base else { return false };
+        match self.mission.as_deref() {
+            Some(m) => m.script.hostile(m.script.player(), &base.owner),
+            None => self.sides.get(e).is_ok_and(|s| s.0 != Side::Player),
+        }
+    }
     pub fn can_dock(&self, actor: Entity, dockee: Entity) -> bool {
         let Ok((_, _, d, ship, base)) = self.q.get(dockee) else { return false };
-        let hostile = base.is_some_and(|b| self.mission.as_deref().is_some_and(|m| m.script.hostile(m.script.player(), &b.owner)));
-        d.enabled && !hostile && ship.is_none_or(|s| s.side == Side::Player) && self.sensors.in_sight(actor, dockee, self.mission.as_deref())
+        d.enabled && !self.base_hostile(dockee, base) && ship.is_none_or(|s| s.side == Side::Player) && self.sensors.in_sight(actor, dockee, self.mission.as_deref())
     }
     /// Dockable ally under the ray, with whether the selected ship's group has sight (no separate dock range).
     pub fn under(&self, ray: Ray3d, actor: Entity) -> Option<(Entity, bool)> {
-        let hostile = |m: Option<&MissionBase>| m.is_some_and(|m| self.mission.as_deref().is_some_and(|ms| ms.script.hostile(ms.script.player(), &m.owner)));
         self.q
             .iter()
-            .filter(|(e, _, _, ship, base)| ship.is_none_or(|s| s.side == Side::Player) && !hostile(*base) && self.sensors.player_sees(*e, self.mission.as_deref()))
+            .filter(|(e, _, _, ship, base)| ship.is_none_or(|s| s.side == Side::Player) && !self.base_hostile(*e, *base) && self.sensors.player_sees(*e, self.mission.as_deref()))
             .filter_map(|(e, tf, d, ship, _)| {
                 // Islands hover on their collision hull: dock points sit far offshore, so a dock-point sphere swallowed nearby waypoint clicks.
                 let t = match (ship, self.hulls.get(e)) {
@@ -745,12 +751,7 @@ impl Dockees<'_, '_> {
             .filter_map(|(e, tf, _, _, base)| {
                 let base = base?;
                 let mission = self.mission.as_deref();
-                // A skirmish base has no mission rules: it is hostile when its side is not the player's.
-                let hostile = match mission {
-                    Some(m) => m.script.hostile(m.script.player(), &base.owner),
-                    None => self.sides.get(e).is_ok_and(|s| s.0 != Side::Player),
-                };
-                if !hostile || !crate::environment::can_see(mission, at, tf.translation) {
+                if !self.base_hostile(e, Some(base)) || !crate::environment::can_see(mission, at, tf.translation) {
                     return None;
                 }
                 let (armed, hp) = self.armed.get(e).ok()?;
