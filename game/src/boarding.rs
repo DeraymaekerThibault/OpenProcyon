@@ -435,6 +435,7 @@ fn owner_of<'a>(ms: Option<&'a MissionShip>, mb: Option<&'a MissionBase>) -> Opt
 pub struct Boarders<'w, 's> {
     bodies: Query<'w, 's, (Body<'static>, &'static Boardable)>,
     owners: Query<'w, 's, (Option<&'static MissionShip>, Option<&'static MissionBase>)>,
+    base_sides: Query<'w, 's, &'static crate::combat::BaseSide>,
     fighters: Query<'w, 's, (Entity, &'static Boarding)>,
     grapples: Query<'w, 's, (Entity, &'static Grapple)>,
     ships: Query<'w, 's, (&'static Ship, &'static Health, Option<&'static crate::combat::GunStates>)>,
@@ -444,7 +445,9 @@ pub struct Boarders<'w, 's> {
 }
 impl Boarders<'_, '_> {
     pub fn hostile(&self, a: Entity, b: Entity) -> bool {
-        let who = |e: Entity| (self.owners.get(e).ok().and_then(|(ms, mb)| owner_of(ms, mb)), self.ships.get(e).ok().map(|s| s.0.side));
+        let who = |e: Entity| {
+            (self.owners.get(e).ok().and_then(|(ms, mb)| owner_of(ms, mb)), self.ships.get(e).ok().map(|s| s.0.side).or_else(|| self.base_sides.get(e).ok().map(|b| b.0)))
+        };
         hostile_pair(self.mission.as_deref(), who(a), who(b))
     }
     pub fn grappled(&self, a: Entity, b: Entity) -> bool {
@@ -751,7 +754,7 @@ fn fights(
     mut fighters: Query<(Entity, &mut Boarding)>,
     grapples: Query<(Entity, &Grapple)>,
     player: Query<Entity, With<PlayerShip>>,
-    mut things: Query<(&Transform, Option<&Ship>, Option<&Drift>, &mut Boardable, Option<&Health>, Option<&MissionShip>, Option<&MissionBase>)>,
+    mut things: Query<(&Transform, Option<&Ship>, Option<&Drift>, &mut Boardable, Option<&Health>, Option<&MissionShip>, Option<&MissionBase>, Option<&crate::combat::BaseSide>)>,
 ) {
     let (dt, me) = (time.delta_secs(), player.single().ok());
     for (b, mut f) in &mut fighters {
@@ -761,7 +764,11 @@ fn fights(
             continue;
         };
         let alive = |h: Option<&Health>| h.is_none_or(|h| !h.destroyed);
-        let hostile = hostile_pair(mission.as_deref(), (owner_of(bi.5, bi.6), bi.1.map(|s| s.side)), (owner_of(ti.5, ti.6), ti.1.map(|s| s.side)));
+        let hostile = hostile_pair(
+            mission.as_deref(),
+            (owner_of(bi.5, bi.6), bi.1.map(|s| s.side).or(bi.7.map(|b| b.0))),
+            (owner_of(ti.5, ti.6), ti.1.map(|s| s.side).or(ti.7.map(|b| b.0))),
+        );
         let joined = ti.1.is_none() || grapples.iter().any(|(e, g)| g.flight <= 0.0 && ((e == b && g.target == t) || (e == t && g.target == b)));
         let near = in_range(&lib, &(bi.0, bi.1, bi.2), &(ti.0, ti.1, ti.2), &ti.3.points);
         if !alive(bi.4) || !alive(ti.4) || !hostile || !joined || (f.live && !near) {
@@ -827,11 +834,11 @@ fn settled(
     mut rng: ResMut<Rng>,
     mut sfx: MessageWriter<Sfx>,
     mut captured: MessageWriter<Captured>,
-    mut things: Query<(Option<&mut Ship>, Option<&mut MissionShip>, Option<&mut MissionBase>, &mut Boardable)>,
+    mut things: Query<(Option<&mut Ship>, Option<&mut MissionShip>, Option<&mut MissionBase>, &mut Boardable, Option<&mut crate::combat::BaseSide>)>,
     members: Query<&crate::ship::FleetMember>,
 ) {
     for s in msgs.read() {
-        let Ok([(bship, bms, _, bflag), (tship, tms, tbase, mut tflag)]) = things.get_many_mut([s.boarder, s.target]) else { continue };
+        let Ok([(bship, bms, _, bflag, _), (tship, tms, tbase, mut tflag, tside)]) = things.get_many_mut([s.boarder, s.target]) else { continue };
         let side_of = |ship: &Option<Mut<Ship>>| ship.as_ref().map(|x| x.side);
         let (ours, theirs, is_ship) =
             (side_of(&bship) == Some(Side::Player), side_of(&tship) == Some(Side::Player) || (tship.is_none() && side_of(&bship) == Some(Side::Enemy)), tship.is_some());
@@ -855,7 +862,11 @@ fn settled(
                 if let Some(mut b) = tbase {
                     b.owner = by;
                 }
-                if let Ok(member) = members.get(s.boarder) {
+                // A skirmish base changes sides with its guns and its place in the end rules.
+                if let (Some(mut bs), Some(side)) = (tside, side_of(&bship)) {
+                    bs.0 = side;
+                }
+                if let (Ok(member), true) = (members.get(s.boarder), is_ship) {
                     let mut member = member.clone();
                     member.1 = s.target.to_bits() as usize;
                     commands.entity(s.target).insert((member, crate::ship::FleetPilot::default()));
@@ -1059,6 +1070,34 @@ mod tests {
             crew_turn: 1.0,
         };
         app.world_mut().spawn((Transform::from_translation(at), ship, health, Drift::default(), Boardable::ship(class, skill, true))).id()
+    }
+
+    #[test]
+    fn boarding_a_hostile_skirmish_base_changes_its_side() {
+        use crate::combat::{BaseOrigin, BaseSide};
+        let mut app = app();
+        let pts = points("Base_Procyon1");
+        assert!(!pts.is_empty(), "the Procyon base exports boarding points");
+        let base = app
+            .world_mut()
+            .spawn((
+                Transform::default(),
+                MissionBase { id: 225, owner: "base225".into() },
+                BaseSide(Side::Enemy),
+                BaseOrigin(Side::Enemy),
+                Boardable::base("Base_Procyon1", 2, true),
+            ))
+            .id();
+        let me = spawn(&mut app, "Ship_Navy_Cutter", Side::Player, pts[0], Skill::Elite);
+        app.world_mut().entity_mut(me).insert((PlayerShip, crate::ship::FleetMember("Player".into(), 0)));
+        tick(&mut app, 0.1);
+        app.world_mut().write_message(BoardMsg::Board { boarder: None, target: base });
+        for _ in 0..600 {
+            tick(&mut app, 0.1);
+        }
+        assert_eq!(app.world().get::<BaseSide>(base).unwrap().0, Side::Player, "captured: the base fights for the captor now");
+        assert_eq!(app.world().get::<BaseOrigin>(base).unwrap().0, Side::Enemy);
+        assert!(app.world().get::<crate::ship::FleetMember>(base).is_none(), "a base does not join the captor's fleet roster");
     }
 
     #[test]

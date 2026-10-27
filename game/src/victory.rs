@@ -85,6 +85,8 @@ pub struct ShipState {
 pub struct Snapshot<'a> {
     pub ships: &'a [ShipState],
     pub bases: &'a [(i64, f32)],
+    /// Ids of the bases a boarding party took.
+    pub captured: &'a [i64],
     pub points: &'a [(String, i32)],
 }
 
@@ -162,7 +164,7 @@ impl Victory {
                     !group.is_empty() && group.iter().any(|s| s.alive) == *exists
                 }
                 Cond::InVolume { objects, polygon } => of(objects).iter().any(|s| s.alive && polygon.contains(s.at)),
-                Cond::Captured(objects) => of(objects).iter().any(|s| s.alive && s.side != s.start),
+                Cond::Captured(objects) => of(objects).iter().any(|s| s.alive && s.side != s.start) || snap.captured.iter().any(|b| objects.contains(b)),
                 Cond::DestroyedFrom(objects) => of(objects).iter().any(|s| !s.alive),
                 Cond::TeamPoints(team, points) => snap.points.iter().any(|(t, p)| t == team && p >= points),
             });
@@ -197,7 +199,7 @@ fn condition(c: &Value) -> Option<Cond> {
         "No Human Controlled Ships Remain" => Cond::NoHumanShips,
         "Team X has no ships" => Cond::TeamHasNoShips(c["Team Name"].as_str()?.to_string()),
         "Skirmish Game Complete" | "Team Game Complete" => Cond::GameComplete,
-        // a base's "capture" has no ship to find here: its object ids match no ship, so it never fires (boarding bases is unfinished)
+        // a base's capture comes from the snapshot's captured bases
         "Team has captured a ship from Group/Unit" => Cond::Captured(objects()?),
         "Group Destroyed" => Cond::GroupDestroyed(objects()?),
         "Does Group Contain Unit Name" => {
@@ -228,7 +230,7 @@ mod tests {
         vec![(NAVY.into(), vec![Side::Player]), (PROC.into(), vec![Side(1)])]
     }
     fn state(ships: &[ShipState], bases: &[(i64, f32)]) -> Snapshot<'static> {
-        Snapshot { ships: Box::leak(ships.to_vec().into_boxed_slice()), bases: Box::leak(bases.to_vec().into_boxed_slice()), points: &[] }
+        Snapshot { ships: Box::leak(ships.to_vec().into_boxed_slice()), bases: Box::leak(bases.to_vec().into_boxed_slice()), captured: &[], points: &[] }
     }
 
     fn border_dispute() -> Victory {
@@ -259,6 +261,15 @@ mod tests {
     #[test]
     fn the_compass_objective_is_the_base_the_human_must_destroy() {
         assert_eq!(border_dispute().objective_bases(), vec![225]);
+    }
+
+    #[test]
+    fn capturing_the_enemy_base_wins() {
+        let v = border_dispute();
+        let fleets = [ship(Side::Player, true), ship(Side(1), false)];
+        let snap = |captured: &'static [i64]| Snapshot { captured, ..state(&fleets, &[(4, 0.0), (225, 0.0)]) };
+        assert_eq!(v.decide(&snap(&[])), None);
+        assert_eq!(v.decide(&snap(&[225])), Some(Outcome::Victory));
     }
 
     #[test]
@@ -352,7 +363,7 @@ mod tests {
         let (navy, pirates) = ("IDGS_TPTEAMNAMES_NAVY", "IDGS_TPTEAMNAMES_PIRATES");
         let real = vec![(navy.to_string(), vec![Side::Player]), (pirates.to_string(), vec![Side(1)])];
         let convoy = Victory::from_map(&crate::data::map_json("convoy_raid").unwrap(), real).unwrap();
-        let at = |points: &[(String, i32)]| convoy.decide(&Snapshot { ships: &fleets, bases: &[], points: Box::leak(points.to_vec().into_boxed_slice()) });
+        let at = |points: &[(String, i32)]| convoy.decide(&Snapshot { ships: &fleets, bases: &[], captured: &[], points: Box::leak(points.to_vec().into_boxed_slice()) });
         assert_eq!(at(&[(navy.into(), 340), (pirates.into(), 390)]), None);
         assert_eq!(at(&[(navy.into(), 350)]), Some(Outcome::Victory));
         assert_eq!(at(&[(pirates.into(), 400)]), Some(Outcome::Defeat));
