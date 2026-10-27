@@ -157,7 +157,7 @@ fn build(
     for e in &roots {
         commands.entity(e).despawn();
     }
-    let MenuModel { sk, ig, saves: ui, binds, ctrl: cui, lib, state, settings, stats, outcome } = model;
+    let MenuModel { sk, ig, saves: ui, binds, ctrl: cui, lib, state, settings, stats, outcome, end_message } = model;
     let (ww, wh) = (window.width(), window.height());
     let strings = strings();
     let ingame = *state.get() == Screen::Battle;
@@ -249,7 +249,7 @@ fn build(
                             None
                         }
                         (Screen::Battle, "Game Stats - Player Kills by Object Type") => {
-                            summary(&ctx, c, &stats, *outcome, &strings);
+                            summary(&ctx, c, &stats, *outcome, end_message.0.as_deref(), &strings);
                             None
                         }
                         // A decided battle continues to the main menu; opened from the in-game menu it goes back there. PROVISIONAL.
@@ -468,12 +468,16 @@ fn build(
 /// (hud.hdt: name width 110, column width 130, gap 10, row height 30). A column's best value gets the green bar (`GameStats::best`).
 /// The skirmish summary is this one page (retail: Next goes to the main menu; no kill-by-type table seen in skirmish).
 /// PROVISIONAL: the panel art (a stretched window stands in), flag choice.
-fn summary(ctx: &Ctx, c: &mut ChildSpawnerCommands, stats: &crate::stats::GameStats, outcome: crate::scenario::Outcome, strings: &Value) {
+fn summary(ctx: &Ctx, c: &mut ChildSpawnerCommands, stats: &crate::stats::GameStats, outcome: crate::scenario::Outcome, message: Option<&str>, strings: &Value) {
     let s = |id: &str| text_of(strings, id);
     let won = outcome == crate::scenario::Outcome::Victory;
     let status = if won { "IDGS_TPFRONTENDTEXT02_STATS_SCREEN_GAMEWON" } else { "IDGS_TPFRONTENDTEXT02_STATS_SCREEN_GAMELOST" };
     if outcome != crate::scenario::Outcome::Playing {
         ctx.text(c, "UniversLightBold14", &s(status), 230.0, 340.0, 132.0, true, Color::WHITE);
+        // The map's own end message under the label. PROVISIONAL: retail position (and whether it shows here at all) not measured.
+        if let Some(text) = message.map(s).filter(|t| !t.is_empty()) {
+            ctx.text(c, "Univers10", &text, 35.0, 732.0, 150.0, true, Color::WHITE);
+        }
     }
     let rows = stats.players.len().max(1) as f32;
     stretched_window(ctx, c, [35.0, 160.0, 767.0, 190.0 + rows * 60.0 - 20.0]);

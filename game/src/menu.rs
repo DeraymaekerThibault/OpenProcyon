@@ -304,6 +304,7 @@ pub struct MenuModel<'w> {
     pub settings: Res<'w, Settings>,
     pub stats: Res<'w, crate::stats::GameStats>,
     pub outcome: Res<'w, crate::scenario::Outcome>,
+    pub end_message: Res<'w, crate::scenario::EndMessage>,
 }
 /// Retail pull-downs stay open while the button is held: press the cell, drag to an entry, release to pick it. A release over the
 /// first entry (the cell itself, i.e. a plain click) keeps the list open for a second click.
