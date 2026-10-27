@@ -53,7 +53,7 @@ fn navigation(
     fleets: Res<crate::ship::Fleets>,
     mission: Option<Res<crate::campaign::Mission>>,
     victory: Option<Res<crate::victory::Victory>>,
-    bases: Query<(&Transform, &crate::campaign::MissionBase, &crate::combat::Health), (With<crate::combat::ArmedBase>, Without<Ship>)>,
+    bases: Query<(&Transform, &crate::campaign::MissionBase, &crate::combat::Health), (With<crate::combat::ArmedBase>, Without<Ship>, Without<Navigation>)>,
     mut indicators: Query<(&Navigation, &mut Transform, &mut Visibility), Without<Ship>>,
 ) {
     if indicators.is_empty() {
