@@ -1,7 +1,8 @@
 import json
 import unittest
 
-from tools.export_maps import parse_tst, parse_twt, ship_name
+from tools.export_maps import parse_tst, parse_twt, ship_name, victory_rules
+from tools.wot import parse_text
 
 TWT = """\tWorldNameID String 'IDGS_X'
 \tMustAssembleFleet Bool True
@@ -33,7 +34,64 @@ TWT = """\tWorldNameID String 'IDGS_X'
 """
 
 
+RULES = """\t00000010 World Rules
+\t{
+\t\tRule Name String 'navywin'
+\t\t00000001 Condition List
+\t\t{
+\t\t\tType String 'Group/Unit Vital Section has >,<,= X damage'
+\t\t\tGroup/Unit Name String 'Base B'
+\t\t\tDamage Percent Float 1.000000
+\t\t}
+\t\t00000002 Action List
+\t\t{
+\t\t\tType String 'Team X Wins'
+\t\t\tTeam Name String 'IDGS_TPTEAMNAMES_NAVY'
+\t\t}
+\t\t00000002 Action List
+\t\t{
+\t\t\tType String 'End Game'
+\t\t\tWinner - Custom Message String ID String 'WON'
+\t\t}
+\t\tRule Name String 'setup'
+\t\t00000002 Action List
+\t\t{
+\t\t\tType String 'Play Music Track'
+\t\t}
+\t}
+\t00000003 Group
+\t{
+\t\tName String 'Base B'
+\t\tWorld Object IDs - Element Int 225
+\t}
+"""
+
+
 class MapTests(unittest.TestCase):
+    def test_victory_rules_keep_only_end_rules_and_resolve_groups(self):
+        v = victory_rules(parse_text(RULES)[0])
+        self.assertEqual([r["name"] for r in v], ["navywin"])
+        self.assertEqual(v[0]["winner"], "IDGS_TPTEAMNAMES_NAVY")
+        self.assertEqual(v[0]["end"]["winner"], "WON")
+        self.assertEqual(v[0]["if"][0]["objects"], [225])
+
+    def test_victory_rules_find_one_unit_and_a_volume(self):
+        text = (
+            "\t00000010 World Rules\n\t{\n\t\tRule Name String 'r'\n"
+            "\t\t00000001 Condition List\n\t\t{\n\t\t\tType String 'Enter Volume'\n"
+            "\t\t\tGroup Name String 'Navy,RLS Mercy'\n\t\t\tVolume Name String 'safe'\n\t\t}\n"
+            "\t\t00000002 Action List\n\t\t{\n\t\t\tType String 'End Game'\n\t\t}\n\t}\n"
+            "\t00000003 Group\n\t{\n\t\tName String 'Navy'\n"
+            "\t\tWorld Object IDs - Element Int 128\n\t\tWorld Object IDs - Element Int 129\n\t}\n"
+            "\t00000002 World Polygons Vectors - Element\n\t{\n\t\tName String 'safe'\n"
+            "\t\tPoints Coord ( 0.0, 0.0 )\n\t\tPoints Coord ( 10.0, 0.0 )\n\t\tPoints Coord ( 10.0, 10.0 )\n\t}\n"
+        )
+        c = victory_rules(parse_text(text)[0], {128: "RLS Imperial", 129: "RLS Mercy"})[
+            0
+        ]["if"][0]
+        self.assertEqual(c["objects"], [129])
+        self.assertEqual(len(c["polygon"]), 3)
+
     def test_twt(self):
         m = parse_twt(TWT)
         self.assertTrue(m["assemble"])

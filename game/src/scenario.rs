@@ -41,10 +41,21 @@ pub struct Group {
     pub human: bool,
     /// Fleet type as in the TWT (0 Navy, 2 Pirate, 3 Procyon, 4 unknown): which base the fleet defends.
     pub race: u8,
+    /// Index in the map's team list (or the lobby team on free-for-all maps), -1: on its own.
+    pub team: i32,
+    /// The map's world-object id of each ship that the map placed (historical maps), else none.
+    pub ids: Vec<Option<i64>>,
     pub ships: Vec<(String, Option<[f32; 3]>, Option<String>)>, // class, start position, scripted name
     pub weapons: Vec<std::collections::BTreeMap<usize, String>>,
     /// Named crew per ship and post (skirmish fleets assembled in the front end).
     pub crew: Vec<[Vec<String>; 8]>,
+}
+
+/// A skirmish ship's map identity for the end rules: the world-object id the map gave it (historical maps) and the side it started on.
+#[derive(Component, Clone, Copy)]
+pub struct MapObject {
+    pub id: Option<i64>,
+    pub start: Side,
 }
 
 /// The fleet type (TWT race: 0 Navy, 2 Pirate, 3 Procyon) a base or player name stands for: "navybase", "proc base", "Piratebase",
@@ -63,7 +74,7 @@ pub fn faction(name: &str) -> Option<u8> {
     }
 }
 
-#[derive(Resource, PartialEq, Clone, Copy)]
+#[derive(Resource, PartialEq, Clone, Copy, Debug)]
 pub enum Outcome {
     Playing,
     Victory,
@@ -247,12 +258,24 @@ pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Libra
             let them = players.iter().position(|p| p["team"] != us["team"]).unwrap_or(players.len().min(2) - 1);
             let fleet = |f: &[String]| f.iter().map(|n| (n.clone(), None, None)).collect();
             vec![
-                Group { player: 0, side: Side::Player, human: true, race: players[0]["race"].as_u64().unwrap_or(4) as u8, ships: fleet(&ours), weapons: vec![], crew: vec![] },
+                Group {
+                    player: 0,
+                    side: Side::Player,
+                    human: true,
+                    race: players[0]["race"].as_u64().unwrap_or(4) as u8,
+                    team: players[0]["team"].as_i64().unwrap_or(-1) as i32,
+                    ids: vec![],
+                    ships: fleet(&ours),
+                    weapons: vec![],
+                    crew: vec![],
+                },
                 Group {
                     player: them,
                     side: Side::Enemy,
                     human: false,
                     race: players[them]["race"].as_u64().unwrap_or(4) as u8,
+                    team: players[them]["team"].as_i64().unwrap_or(-1) as i32,
+                    ids: vec![],
                     ships: fleet(&cfg.enemies),
                     weapons: vec![],
                     crew: vec![],
@@ -261,7 +284,17 @@ pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Libra
         } else {
             cfg.groups
                 .iter()
-                .map(|g| Group { player: g.player, side: g.side, human: g.human, race: g.race, ships: g.ships.clone(), weapons: g.weapons.clone(), crew: g.crew.clone() })
+                .map(|g| Group {
+                    player: g.player,
+                    side: g.side,
+                    human: g.human,
+                    race: g.race,
+                    team: g.team,
+                    ids: g.ids.clone(),
+                    ships: g.ships.clone(),
+                    weapons: g.weapons.clone(),
+                    crew: g.crew.clone(),
+                })
                 .collect()
         };
         if cfg.script.as_deref() == Some("fleet")
@@ -272,6 +305,8 @@ pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Libra
                 side: Side::Player,
                 human: false,
                 race: 4,
+                team: -1,
+                ids: vec![],
                 ships: vec![(ship::DEFAULT_SHIP.into(), None, Some("Allied captain".into()))],
                 weapons: vec![],
                 crew: vec![],
@@ -295,7 +330,7 @@ pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Libra
             for (i, ((name, at, label), slot)) in g.ships.iter().zip(slots).enumerate() {
                 let pos = at.map_or(slot, |a| game_to_bevy(&serde_json::json!(a)));
                 let e = spawn_ship(commands, assets, lib, fxl, name, g.side, pos, heading, label.clone().or_else(|| namer.pick(lib, name)));
-                commands.entity(e).insert(ship::FleetMember(owner.clone(), i));
+                commands.entity(e).insert((ship::FleetMember(owner.clone(), i), MapObject { id: g.ids.get(i).copied().flatten(), start: g.side }));
                 if !g.human {
                     commands.entity(e).entry::<Ship>().and_modify(|mut s| (s.crew_speed, s.crew_turn) = (ship::COMPUTER_CREW, ship::COMPUTER_TURN));
                     // PROVISIONAL: the crew factor matching the measured speed (Average-to-Elite, retail save scale)
@@ -313,6 +348,24 @@ pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Libra
             }
             let owner = owner.clone();
             commands.queue(move |w: &mut World| ship::set_formation(w, &owner, Some(kind), kind != ship::Formation::None));
+        }
+        // The map's own end rules, when we model all of them (else the plain "no enemy ships left" outcome stays).
+        let map_teams = map["teams"].as_array().cloned().unwrap_or_default();
+        let teams: Vec<(String, Vec<Side>)> = if map_teams.is_empty() {
+            let mut sides: Vec<Side> = groups.iter().map(|g| g.side).collect();
+            sides.sort_by_key(|s| s.0);
+            sides.dedup();
+            sides.into_iter().map(|s| (format!("side{}", s.0), vec![s])).collect()
+        } else {
+            map_teams
+                .iter()
+                .enumerate()
+                .map(|(i, t)| (t["name_id"].as_str().unwrap_or_default().to_string(), groups.iter().filter(|g| g.team == i as i32).map(|g| g.side).collect()))
+                .collect()
+        };
+        match victory::Victory::from_map(map, teams) {
+            Some(v) => commands.insert_resource(v),
+            None => commands.remove_resource::<victory::Victory>(),
         }
         // Bases fight for the side whose fleet type is theirs; a base no fleet claims stays neutral (and silent).
         for (e, o) in &bases {
@@ -461,14 +514,38 @@ pub fn restart(
     spawn_scenario(&mut commands, &assets, &lib, &fxl, &shapes, &asteroids, &cfg);
 }
 
-pub fn outcome(mut out: ResMut<Outcome>, mut cfg: ResMut<Config>, player: Query<&Health, With<PlayerShip>>, ships: Query<(&Health, &Ship), Without<PlayerShip>>) {
+pub fn outcome(
+    mut out: ResMut<Outcome>,
+    mut cfg: ResMut<Config>,
+    player: Query<&Health, With<PlayerShip>>,
+    ships: Query<(&Health, &Ship), Without<PlayerShip>>,
+    rules: (Option<Res<victory::Victory>>, Option<Res<combat::Library>>, Option<Res<ship::Fleets>>),
+    all: Query<(&Health, &Ship, &Transform, Option<&ship::FleetMember>, Option<&MapObject>)>,
+    bases: Query<(&campaign::MissionBase, &combat::ArmedBase, &Health)>,
+) {
     let enemies = || ships.iter().filter(|(_, s)| s.side != Side::Player).map(|(h, _)| h);
     // missions end through their own rules; a decided battle stays decided (the end flow despawns ships, which must not turn a
     // victory into a defeat)
     if campaign::is_mission(cfg.map.as_deref()) || *out != Outcome::Playing {
         return;
     }
-    let new = if player.single().is_err() || player.single().is_ok_and(|h| h.destroyed) {
+    let new = if let (Some(victory), Some(lib)) = (&rules.0, &rules.1) {
+        // The map's own rules decide: a base falling, the human fleet or every ship lost.
+        let local = rules.2.as_ref().map(|f| f.local.as_str());
+        let states: Vec<victory::ShipState> = all
+            .iter()
+            .map(|(h, s, tf, m, o)| victory::ShipState {
+                side: s.side,
+                start: o.map_or(s.side, |o| o.start),
+                alive: !h.destroyed,
+                human: m.is_some_and(|m| Some(m.0.as_str()) == local),
+                id: o.and_then(|o| o.id),
+                at: Vec2::new(tf.translation.x, -tf.translation.z),
+            })
+            .collect();
+        let damage: Vec<(i64, f32)> = bases.iter().map(|(b, a, h)| (b.id, combat::base_mission_damage(&lib.classes[a.class], h))).collect();
+        victory.decide(&victory::Snapshot { ships: &states, bases: &damage }).unwrap_or(Outcome::Playing)
+    } else if player.single().is_err() || player.single().is_ok_and(|h| h.destroyed) {
         Outcome::Defeat
     } else if enemies().count() > 0 && enemies().all(|h| h.destroyed) {
         Outcome::Victory

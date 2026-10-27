@@ -130,6 +130,85 @@ def parse_twt(text):
     return m
 
 
+def victory_rules(nodes, unit_names=None):
+    """The map's own end-game rules: [{name, if: [condition fields], winner: team name id | None, end: {winner, loser} | None}].
+    A rule counts when one of its actions ends the game or names a winning team; its conditions all have to hold. Conditions that
+    name a Group/Unit also carry the ids of the world objects in that group (`objects`; "Group,Unit" picks the one unit by its
+    ship name, `unit_names`: id -> script name) and, for a named volume, its polygon (`polygon`, game x/y points).
+    """
+    volumes = {}
+    for b in blocks(nodes, "World Polygons Vectors - Element"):
+        volumes[fields(b["children"]).get("Name")] = [
+            n["value"]
+            for n in b["children"]
+            if n.get("kind") == "property"
+            and n["name"] == "Points"
+            and n["type"] == "Coord"
+        ]
+    groups = {}
+    for g in blocks(nodes, "Group"):
+        name = fields(g["children"]).get("Name")
+        groups[name] = [
+            n["value"]
+            for n in g["children"]
+            if n.get("name") == "World Object IDs - Element"
+        ]
+    rules = []
+    for n in next(blocks(nodes, "World Rules"), {"children": []})["children"]:
+        if n["kind"] == "property" and n["name"] == "Rule Name":
+            rules.append(dict(name=n["value"], conditions=[], actions=[]))
+        elif (
+            rules
+            and n["kind"] == "block"
+            and n["name"] in ("Condition List", "Action List")
+        ):
+            key = "conditions" if n["name"] == "Condition List" else "actions"
+            rules[-1][key].append(fields(n["children"]))
+    out = []
+    for r in rules:
+        wins = [a for a in r["actions"] if a.get("Type") == "Team X Wins"]
+        end = [a for a in r["actions"] if a.get("Type") == "End Game"]
+        if not (wins or end):
+            continue
+        conds = []
+        for c in r["conditions"]:
+            c = dict(c)
+            ref = (
+                c.get("Group/Unit Name")
+                or c.get("Group/Unit")
+                or c.get("Group Name")
+                or c.get("Unit Name")
+            )
+            if ref in groups:
+                c["objects"] = groups[ref]
+            elif isinstance(ref, str) and "," in ref:
+                group, unit = ref.split(",", 1)
+                c["objects"] = [
+                    i
+                    for i in groups.get(group, [])
+                    if ((unit_names or {}).get(i) or "").lower() == unit.strip().lower()
+                ]
+            if c.get("Volume Name") in volumes:
+                c["polygon"] = volumes[c["Volume Name"]]
+            conds.append(c)
+        out.append(
+            dict(
+                name=r["name"],
+                **{"if": conds},
+                winner=wins[0].get("Team Name") if wins else None,
+                end=(
+                    dict(
+                        winner=end[0].get("Winner - Custom Message String ID"),
+                        loser=end[0].get("Loser - Custom Message String ID"),
+                    )
+                    if end
+                    else None
+                ),
+            )
+        )
+    return out
+
+
 def ship_name(text, names):
     """(localized id, script name) -> the English name the game shows (localized when it exists, else the script's)."""
     loc, plain = names or ("", "")
@@ -247,6 +326,10 @@ def main(root, out):
     index = []
     for f in sorted(ci_files(root / "World", "*.twt")):
         m = parse_twt(f.read_text(encoding="latin1"))
+        m["victory"] = victory_rules(
+            parse_text(f.read_text(encoding="latin1"))[0],
+            {i: ship_name(text, n) for i, n in m["ship_names"].items()},
+        )
         mid = re.sub(r"\W+", "_", f.stem).lower()
         m.update(
             id=mid,
@@ -256,6 +339,7 @@ def main(root, out):
         # Historical maps pre-place each player's fleet (PlayerIndex = index in the player list).
         m["ships"] = [
             {
+                "id": o["id"],
                 "type": o["type"],
                 "pos": o["pos"],
                 "player": o["player"],

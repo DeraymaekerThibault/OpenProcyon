@@ -165,5 +165,11 @@ retail map files (2026-10-27), not from a played battle:
   Convoy Raid (a team reaches 350 / 400 points, or the pirates have no ships), Locusts (the command fleet reaches the safety volume,
   or the privateers capture it, or lose all ships), Bayles Stand (destroy the Procyon group, or the Procyons wreck/capture the base).
 
-Remake status: only "no enemy ships left" is implemented, so on base maps the game currently ends at the wrong moment (and a lost
-base does nothing). Next: export each skirmish map's rules and run them through the rules interpreter (issue #73).
+Remake status: the importer exports each map's end rules as `victory` in `map.json` (with the world-object ids of the groups they name,
+unit lookups by ship name, and volume polygons), the historical maps' ships carry their object `id`, and `victory.rs` plays the rules
+for every map whose conditions it models: base damage, no ships, no human ships, team has no ships, game complete, group destroyed, unit
+still present, group inside a volume, ship captured (a living ship of the group now sails for another side; the capturing team is not
+checked, PROVISIONAL), ship destroyed from a group (the killer is not checked, PROVISIONAL). Capturing a base never fires yet (boarding
+bases is unfinished). Ambush, Bayles Stand, Locusts, Mousetrap and the open maps use these. Convoy Raid needs scoring points through
+its convoy scripts (not modelled): it, and any map without exported rules, keeps the plain "no enemy ships left" outcome. The custom
+winner/loser messages (`IDGS_TPINGAMEMESSAGE_*`) are exported but not shown yet.
