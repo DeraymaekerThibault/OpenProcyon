@@ -171,5 +171,6 @@ for every map whose conditions it models: base damage, no ships, no human ships,
 still present, group inside a volume, ship captured (a living ship of the group now sails for another side; the capturing team is not
 checked, PROVISIONAL), ship destroyed from a group (the killer is not checked, PROVISIONAL). Capturing a base never fires yet (boarding
 bases is unfinished). Ambush, Bayles Stand, Locusts, Mousetrap and the open maps use these. Convoy Raid needs scoring points through
-its convoy scripts (not modelled): it, and any map without exported rules, keeps the plain "no enemy ships left" outcome. The custom
-winner/loser messages (`IDGS_TPINGAMEMESSAGE_*`) are exported but not shown yet.
+its convoy scripts (not modelled): it, and any map without exported rules, keeps the plain "no enemy ships left" outcome. The map rule's
+winner/loser message (`IDGS_TPINGAMEMESSAGE_*`, the human's side) is shown under the VICTORY!/DEFEAT! label of the Game Summary
+(PROVISIONAL: retail position and timing unmeasured; "GAME STRING" means no custom message).
