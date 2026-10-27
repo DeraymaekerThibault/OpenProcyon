@@ -34,6 +34,7 @@ pub mod smoke;
 pub mod sprites;
 pub mod starmap;
 pub mod stats;
+pub mod victory;
 pub mod view;
 pub mod wake;
 

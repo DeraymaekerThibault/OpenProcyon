@@ -514,6 +514,7 @@ impl Skirmish {
                     side,
                     human: s.kind == Kind::Human,
                     race: if s.race == 4 { crate::scenario::faction(&s.name).unwrap_or(4) } else { s.race },
+                    team: s.team,
                     ships,
                     // A built computer fleet keeps its weapons but not its named crew: computer ships run at the measured computer crew factor.
                     weapons: match &computer_build {
