@@ -155,6 +155,13 @@ pub fn hole_list(
     out
 }
 
+/// How far from a hostile base a computer ship stops (units). Retail, Border Dispute: every Navy computer ship (Frigate, Fast Frigate,
+/// Torpedo boats) sailed straight at the Procyon base and then stayed 325-460 units from it, outside the base's guns, for the rest of the
+/// 27-minute battle; none attacked it (docs/re/movement.md). PROVISIONAL: one number for all classes.
+pub const BASE_STANDOFF: f32 = 390.0;
+fn at_base_standoff(ship: Vec3, base: Vec3) -> bool {
+    Vec2::new(base.x - ship.x, base.z - ship.z).length() <= BASE_STANDOFF
+}
 /// Seconds a computer captain keeps its target before choosing again (the original's target-selection timer).
 pub const RESELECT_SECS: f32 = 6.0;
 /// Each skirmish captain's current target and how long it has held it: the original's target selection takes the nearest hostile
@@ -257,6 +264,11 @@ pub fn ai(
         };
         if explore.quadrant.contains_key(&e) {
             s.waypoints.clear(); // contact: drop the exploring course (the quadrant is kept for later)
+        }
+        if base.is_some() && at_base_standoff(tf.translation, foe.1) {
+            s.goal = None;
+            s.order = 0; // arrived: hold off the base
+            continue;
         }
         let (goal, order, throttle) = captain_steer(s.heading, tf.translation, foe.1, lib.classes[s.class].reach, &holes);
         s.goal = Some(goal);
@@ -1130,6 +1142,41 @@ pub mod movement_tests {
             assert!(lo > lo_ok && hi < hi_ok, "{name}: circle {lo}..{hi}");
             assert!(beams.iter().all(|b| (b - PI / 2.0).abs() < 0.5), "{name}: foe kept abeam");
         }
+    }
+
+    #[test]
+    fn computer_ships_stop_390_units_off_a_hostile_base() {
+        let lib = combat::Library::load(&crate::assets_dir());
+        let ci = lib.index("Ship_Navy_Frigate");
+        let class = &lib.classes[ci];
+        let h = Health { sections: vec![1.0; class.sections.len()], core: 1.0, destroyed: false };
+        let mut ship = Ship {
+            class: ci,
+            side: Side::Player,
+            heading: 0.0,
+            speed: 0.0,
+            ang_vel: 0.0,
+            order: 0,
+            waypoints: vec![],
+            goal: None,
+            cap: 1.0,
+            throttle: None,
+            sail_energy: 1.0,
+            crew_speed: COMPUTER_CREW,
+            crew_turn: COMPUTER_TURN,
+        };
+        let (base, mut tf, dt) = (Vec3::ZERO, Transform::from_xyz(0.0, 0.0, 1500.0), 1.0 / 30.0);
+        for _ in 0..(300.0 / dt) as usize {
+            if at_base_standoff(tf.translation, base) {
+                (ship.goal, ship.order) = (None, 0);
+            } else {
+                let (goal, order, throttle) = captain_steer(ship.heading, tf.translation, base, class.reach, &[]);
+                (ship.goal, ship.order, ship.throttle) = (Some(goal), order, throttle);
+            }
+            step(&mut ship, &mut tf, class, &h, dt);
+        }
+        let d = Vec2::new(tf.translation.x, tf.translation.z).length();
+        assert!((d - BASE_STANDOFF).abs() < 40.0 && ship.speed.abs() < 0.5, "stopped {d} units from the base at speed {}", ship.speed);
     }
 
     /// Retail Navy Cutter without crew, sampled from the running original (docs/re/movement.md, "Measured").
