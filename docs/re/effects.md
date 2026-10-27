@@ -222,17 +222,23 @@ to `models/debris/` and `sections[].debris` = {model, pivot}.
 ## Fire (ignite, update, fire-fighting)
 - Ignite on a hit: if the bullet's Chance of Fire for the section material is > 0 and a uniform roll is <= it (and an
   extra check passes, unknown), a fire starts on the section with the bullet's Initial Fire Strength.
-- Every 6 s: the ship's fire-fighting capacity (crew driven, formula unknown) is spent on the strongest burning
-  fires first, subtracting from their intensity; a fire at 0 goes out. Each burning fire then damages its section by its
+- Every 6 s: the ship's fire-fighting capacity is spent on the strongest burning fires first, subtracting from their
+  intensity; a fire at 0 goes out, and what is left of the capacity moves on to the next strongest.
+- Fire-fighting capacity = the sum, over the eight crew posts, of every member's Leadership (rating / 10). Members outside
+  the captain and first-mate posts get the same captain/first-mate leadership bonuses as damage control (+0.1 / +0.05
+  above a per-ship threshold), each member clamped to 0..1. A gunner, engineer or rigger post with nobody in it counts
+  the first-mate post's members instead; other empty posts add nothing. A default Cutter (12 hands rated 1) gets 1.2. Each burning fire then damages its section by its
   intensity (a damage potential with lower = upper = intensity, no criticals). Fires on a destroyed section die.
   A dead fire stops emitting after 3 s and is removed after 5 more. Burning fires then double in intensity.
 - Effect FireOnShip, its rate/length multipliers = intensity / 20 clamped to [0.1, 1].
-- Measured (retail saves of our uncrewed Navy Cutter under fire, Easy, 2026-10): fires start at powers of two (1-64 seen) and
-  untouched ones double exactly every tick (4 -> 64 in four ticks); the strongest fire grew 11.2 -> 273.8 over five ticks, which
-  fits 2 x (intensity - c) with a fire-fighting capacity c = 1.36 per tick (another fire lost 1.1 in one tick). Fires kill:
-  that Cutter burnt to 0 HP on every section. A section can carry several fires at once (five on one section in one save).
-- Remake: fire-fighting 1.36 per tick (PROVISIONAL: crew dependence unknown), at most one fire per section (PROVISIONAL: retail
-  allows several).
+- Measured (retail saves of our default-crewed Navy Cutter under fire, Easy, 2026-10): fires start at powers of two (1-64
+  seen) and untouched ones double exactly every tick (4 -> 64 in four ticks); the strongest fire grew 11.2 -> 273.8 over five
+  ticks, which fits 2 x (intensity - c) with c = 1.36 per tick (another fire lost 1.1 in one tick), against 1.2 from the
+  crew rule above. Fires kill: that Cutter burnt to 0 HP on every section. A section can carry several fires at once
+  (five on one section in one save).
+- Remake (`combat::damage::fire_fighting`): the crew rule above, with the same crew slots as damage control (computer
+  crews 0.75 per slot, the player's empty slots generic hands at 0.1). PROVISIONAL: the leadership bonuses are not
+  modelled (thresholds unknown, as for damage control); at most one fire per section (retail allows several).
 
 ## Black holes (Vortex primitive, spawn, point update; Trail)
 Terrain_BlackHole_* WOTs name a render mesh, a radius, `Magnitude` (pull, not implemented), an ambient sound and a

@@ -35,10 +35,26 @@ pub const FIRE_FULL: f32 = 20.0;
 
 pub const FIRE_FADE: [f32; 2] = [3.0, 5.0];
 
-/// Intensity the crew puts out per tick, spent on the strongest fire first. Fitted on a retail save pair (uncrewed Navy Cutter,
-/// Easy): a fire went 11.2 -> 273.8 over five ticks, i.e. 2 x (i - c) with c = 1.36; another fell 8 -> 6.9 in one tick.
-/// PROVISIONAL: the crew-skill/size dependence is unknown (docs/re/effects.md).
-pub const FIRE_FIGHTING: f32 = 1.36;
+/// Intensity the crew puts out per tick, spent on the strongest fire first (docs/re/effects.md): every crew member of every
+/// post adds their leadership (0..1). An unmanned gunner, engineer or rigger post counts the first mates instead.
+/// Retail saves of a default-crewed Cutter (12 hands rated 1) fit 1.1-1.36 per tick against the 1.2 this gives.
+/// `posts`: the 0..1 leadership of each manned slot, `ROLES` order.
+pub fn fire_fighting(posts: &[Vec<f32>; 8]) -> f32 {
+    (0..8).map(|p| if posts[p].is_empty() && matches!(p, 0 | 4 | 5) { 2 } else { p }).map(|p| posts[p].iter().map(|v| v.clamp(0.0, 1.0)).sum::<f32>()).sum()
+}
+
+/// The 0..1 `skill` of every slot of post `role`: named crew first, then generic hands up to the class capacity.
+/// PROVISIONAL: computer crews are rated 0.75 (fits the measured computer hull repair, reinforced +5 and iron +2 per tick);
+/// the player's empty slots are generic hands (0.1). The captain/first-mate leadership bonuses (+0.1 / +0.05 above a
+/// threshold) are not modelled: their thresholds are not known.
+pub fn crew_slots(ship: &Ship, class: &Class, posts: Option<&crate::crew_arms::CrewPosts>, role: usize, skill: &str) -> Vec<f32> {
+    const COMPUTER: f32 = 0.75;
+    const GENERIC: f32 = 0.1;
+    let cap = crate::boarding::counts(&class.name)[role] as usize;
+    let named: Vec<f32> = posts.map(|p| p.0[role].iter().map(|id| crate::crew_arms::ability(id, skill).unwrap_or(GENERIC)).collect()).unwrap_or_default();
+    let fill = if ship.side == crate::Side::Player { GENERIC } else { COMPUTER };
+    named.iter().copied().chain(std::iter::repeat(fill)).take(cap.max(named.len())).collect()
+}
 
 pub fn fire_scale(i: f32) -> f32 {
     if i > FIRE_FULL { 1.0 } else { (i / FIRE_FULL).max(0.1) }
@@ -163,11 +179,11 @@ pub fn fires(
     lib: Res<Library>,
     mut rng: ResMut<Rng>,
     mut sfx: MessageWriter<Sfx>,
-    mut ships: Query<(&Transform, &Ship, &mut Health, &mut Fires)>,
+    mut ships: Query<(&Transform, &Ship, &mut Health, &mut Fires, Option<&crate::crew_arms::CrewPosts>)>,
     mut fxq: Query<&mut fx::Fx>,
 ) {
     let dt = time.delta_secs();
-    for (tf, ship, mut hp, mut fires) in &mut ships {
+    for (tf, ship, mut hp, mut fires, posts) in &mut ships {
         let fires = &mut *fires;
         if hp.destroyed {
             for f in fires.list.drain(..) {
@@ -186,7 +202,8 @@ pub fn fires(
         let tick = fires.tick >= FIRE_TICK && !fires.list.is_empty();
         if tick {
             fires.tick = 0.0;
-            let mut crew = FIRE_FIGHTING;
+            let class = &lib.classes[ship.class];
+            let mut crew = fire_fighting(&std::array::from_fn(|role| crew_slots(ship, class, posts, role, "leadership")));
             while crew > 0.0 {
                 let Some(f) = fires.list.iter_mut().filter(|f| f.state == 0).max_by(|a, b| a.intensity.total_cmp(&b.intensity)) else { break };
                 let used = crew.min(f.intensity);
@@ -197,7 +214,6 @@ pub fn fires(
                     f.t = 0.0;
                 }
             }
-            let class = &lib.classes[ship.class];
             for f in fires.list.iter().filter(|f| f.state == 0) {
                 let was = hp.sections[f.sec];
                 hp.sections[f.sec] = (was - f.intensity).max(0.0);
@@ -317,11 +333,6 @@ pub fn damage_control(class: &Class, sections: &mut [f32], engineers: &[f32], ri
 }
 
 pub fn crew_repair(time: Res<Time>, lib: Res<Library>, mut rng: ResMut<Rng>, mut ships: Query<(&Ship, &mut Health, Option<&crate::crew_arms::CrewPosts>)>, mut acc: Local<f32>) {
-    // PROVISIONAL: computer crews are rated 0.75 (fits the measured computer hull repair, reinforced +5 and iron +2 per tick);
-    // the player's empty slots are generic hands (0.1). The captain/first-mate leadership bonuses (+0.1 / +0.05 above a
-    // threshold) are not modelled: their thresholds are not known.
-    const COMPUTER: f32 = 0.75;
-    const GENERIC: f32 = 0.1;
     *acc += time.delta_secs();
     if *acc < CREW_REPAIR_TICK {
         return;
@@ -332,13 +343,7 @@ pub fn crew_repair(time: Res<Time>, lib: Res<Library>, mut rng: ResMut<Rng>, mut
             continue;
         }
         let class = &lib.classes[ship.class];
-        let caps = crate::boarding::counts(&class.name);
-        let slots = |role: usize, skill: &str| -> Vec<f32> {
-            let named: Vec<f32> = posts.map(|p| p.0[role].iter().map(|id| crate::crew_arms::ability(id, skill).unwrap_or(GENERIC)).collect()).unwrap_or_default();
-            let fill = if ship.side == crate::Side::Player { GENERIC } else { COMPUTER };
-            named.iter().copied().chain(std::iter::repeat(fill)).take((caps[role] as usize).max(named.len())).collect()
-        };
-        let (engineers, riggers) = (slots(4, "engineering"), slots(5, "rigging"));
+        let (engineers, riggers) = (crew_slots(ship, class, posts, 4, "engineering"), crew_slots(ship, class, posts, 5, "rigging"));
         damage_control(class, &mut h.sections, &engineers, &riggers, &mut || rng.f());
     }
 }
