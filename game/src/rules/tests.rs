@@ -257,6 +257,81 @@ fn all_rule_condition_and_action_types_are_handled() {
     }
     assert!(s.warned.iter().all(|x| x.starts_with("formations")), "unhandled: {:?}", s.warned);
 }
+/// Convoy Raid's own script (maps/convoy_raid/script.json): points by team for convoy kills (credited to the killer's team),
+/// per-unit arrivals in the safety area, and each event scored once by its repeating rule.
+#[test]
+fn convoy_raid_scores_team_points_once_per_event() {
+    let Some(data) = crate::data::try_json(&crate::assets_dir().join("maps/convoy_raid/script.json")) else { return };
+    let mut s = Script::new(&data, Value::Null);
+    let (navy, pirates) = ("IDGS_TPTEAMNAMES_NAVY", "IDGS_TPTEAMNAMES_PIRATES");
+    s.set_teams(vec![(navy.into(), vec!["Navy1".into(), "convoys".into()]), (pirates.into(), vec!["pirate1".into()])]);
+    let mut world = World::new();
+    let safety = s.volume("convoy safety area").centroid().unwrap();
+    let ship = |world: &mut World, id: i64, name: &str| Unit { e: world.spawn_empty().id(), id, ..unit(name, "convoys", Vec3::new(5000.0, 0.0, 5000.0)) };
+    // convoy 1: SS Labrador 127 .. SS Nova Scotia 130
+    let mut w: Vec<Unit> = (127..=130).map(|id| ship(&mut world, id, "convoy ship")).collect();
+    s.tag(&mut w);
+    let pts = |s: &Script, t: &str| s.team_points.get(t).copied().unwrap_or(0);
+    s.step(&w, 0.1, false);
+    assert_eq!((pts(&s, navy), pts(&s, pirates)), (0, 0));
+    // two convoy ships reach safety: +100 each, one per rule firing, never again for the same ship
+    for u in &mut w[..2] {
+        u.pos = Vec3::new(safety.x, 0.0, -safety.y);
+    }
+    for _ in 0..4 {
+        s.step(&w, 0.1, false);
+    }
+    assert_eq!(pts(&s, navy), 200);
+    // a pirate sinks one (+50 to the pirates); the Navy sinking another is a screw-up (+70 to the pirates)
+    w[2].alive = false;
+    s.record_destroyed("pirate1", w[2].e);
+    w[3].alive = false;
+    s.record_destroyed("Navy1", w[3].e);
+    for _ in 0..3 {
+        s.step(&w, 0.1, false);
+    }
+    assert_eq!((pts(&s, navy), pts(&s, pirates)), (200, 120));
+    assert!(s.cond(&serde_json::json!({"Type": "Team has X points", "Team Name": pirates, "Points": 120}), &w, false));
+    assert!(!s.cond(&serde_json::json!({"Type": "Team has X points", "Team Name": pirates, "Points": 400}), &w, false));
+}
+
+/// Every condition and action the skirmish maps' own scripts use is handled (end rules belong to victory.rs).
+#[test]
+fn skirmish_script_rule_types_are_handled() {
+    let w = vec![unit("RLS Comet", PLAYER, Vec3::ZERO)];
+    for map in [
+        "ambush",
+        "bayles_stand",
+        "border_dispute",
+        "convoy_raid",
+        "diablo_straight",
+        "dragons_nest",
+        "iron_war",
+        "locusts",
+        "mousetrap",
+        "red_rover",
+        "shadow_dance",
+        "storm_front",
+        "the_maw",
+        "zemyatin",
+    ] {
+        let Some(data) = crate::data::try_json(&crate::assets_dir().join(format!("maps/{map}/script.json"))) else { return };
+        let data = without_end_rules(&data);
+        let mut s = Script::new(&data, Value::Null);
+        let mut out = vec![];
+        for r in data["rules"].as_array().unwrap() {
+            for c in r["conditions"].as_array().unwrap() {
+                s.cond(c, &w, false);
+            }
+            for a in r["actions"].as_array().unwrap() {
+                s.act(a, &w, &mut out, "test");
+            }
+        }
+        // PROVISIONAL gaps, one map each: Locusts' 'Team Member Enters Volume'.
+        assert!(s.warned.iter().all(|x| x.contains("Team Member Enters Volume")), "{map}: unhandled {:?}", s.warned);
+    }
+}
+
 /// A script with no rules of its own, for evaluating single rule records against the given media.
 fn bare_script(data: Value, media: Value) -> Script {
     let data = serde_json::json!({"rules": [], "ships": [], "volumes": data, "environment": {}});

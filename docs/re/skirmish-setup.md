@@ -164,13 +164,26 @@ retail map files (2026-10-27), not from a played battle:
 - **Historical maps** use their own goals: Ambush (reach the volume with the Mercy / capture it / destroy the three pirate groups),
   Convoy Raid (a team reaches 350 / 400 points, or the pirates have no ships), Locusts (the command fleet reaches the safety volume,
   or the privateers capture it, or lose all ships), Bayles Stand (destroy the Procyon group, or the Procyons wreck/capture the base).
+- **Convoy Raid scoring (its map script).** Three civilian convoys of the non-playable `convoys` player (on the Navy team) sail set
+  routes: convoy 1 (4 ships) at the start, convoy 2 (5) after 8 minutes, convoy 3 (5) after 12. Points per event:
+  | Event | Convoy 1 | Convoy 2 | Convoy 3 | Team scoring |
+  |---|---|---|---|---|
+  | a convoy ship reaches the safety area (each ship) | 100 | 50 | 70 (once) | Navy |
+  | the pirates destroy a convoy ship | 50 | 20 | 50 | Pirates |
+  | the pirates capture a convoy ship | 40 | 30 | 40 | Pirates |
+  | a convoy ship reaches the theft area (each ship; it then joins the pirate base) | 80 | 40 | 50 | Pirates |
+  | the Navy destroys a convoy ship (once per convoy) | 70 | 50 | 70 | Pirates |
+
+  Repeating rules score each event once. PROVISIONAL: how a repeating rule consumes its events is not decoded (the remake reports
+  one event per firing), and a rule's 'Team Name' on the volume events is read as the team credited.
 
 Remake status: the importer exports each map's end rules as `victory` in `map.json` (with the world-object ids of the groups they name,
 unit lookups by ship name, and volume polygons), the historical maps' ships carry their object `id`, and `victory.rs` plays the rules
 for every map whose conditions it models: base damage, no ships, no human ships, team has no ships, game complete, group destroyed, unit
 still present, group inside a volume, ship captured (a living ship of the group now sails for another side; the capturing team is not
 checked, PROVISIONAL), ship destroyed from a group (the killer is not checked, PROVISIONAL). Capturing a base never fires yet (boarding
-bases is unfinished). Ambush, Bayles Stand, Locusts, Mousetrap and the open maps use these. Convoy Raid needs scoring points through
-its convoy scripts (not modelled): it, and any map without exported rules, keeps the plain "no enemy ships left" outcome. The map rule's
+bases is unfinished). Ambush, Bayles Stand, Locusts, Mousetrap and the open maps use these. Each skirmish map's whole script is also
+exported (`maps/<id>/script.json`) and the rules interpreter scores Convoy Raid's points, but skirmish does not run the scripts yet
+(the convoys are not spawned): Convoy Raid, and any map without exported rules, keeps the plain "no enemy ships left" outcome. The map rule's
 winner/loser message (`IDGS_TPINGAMEMESSAGE_*`, the human's side) is shown under the VICTORY!/DEFEAT! label of the Game Summary
 (PROVISIONAL: retail position and timing unmeasured; "GAME STRING" means no custom message).

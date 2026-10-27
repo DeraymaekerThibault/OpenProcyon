@@ -170,7 +170,8 @@ fn update(
     }
     for d in killed.read() {
         if let Some(o) = owner_of(d.by) {
-            *script.kills.entry(o).or_default() += 1;
+            *script.kills.entry(o.clone()).or_default() += 1;
+            script.record_destroyed(&o, d.victim);
         }
     }
     // Space (Skip Speech Event) ends the current line in every cutscene/gameplay speech, as in the opening NIS.
