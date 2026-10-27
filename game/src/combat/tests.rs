@@ -779,3 +779,19 @@ fn engine_exhaust_needs_motion_not_just_an_order() {
     app.update();
     assert!(app.world().get::<fx::Fx>(fx).unwrap().emitting);
 }
+
+/// Side-facing point-defence lancers face away from the keel: they hang upside down (rolled about the bow axis) and used to
+/// face inward.
+#[test]
+fn side_point_defence_faces_outward() {
+    let (guns, _) = load_weapons(&assets_dir());
+    for ship in ["Ship_Navy_ManOWar", "Ship_Navy_Cutter", "Ship_Navy_Heavy_Escort", "Ship_Pirate_Galleon"] {
+        let class = load_class(&assets_dir(), ship, &guns);
+        let mut side_lancers = 0;
+        for m in class.mounts.iter().filter(|m| m.gun.contains("PD") && m.pos.x.abs() > 0.2 && (m.rot * Vec3::NEG_Z).x.abs() > 0.5) {
+            side_lancers += 1;
+            assert!((m.rot * Vec3::NEG_Z).x * m.pos.x > 0.0, "{ship}: {} at x {} faces {:?}", m.gun, m.pos.x, m.rot * Vec3::NEG_Z);
+        }
+        assert!(side_lancers >= 2, "{ship}");
+    }
+}
