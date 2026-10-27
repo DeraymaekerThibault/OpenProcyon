@@ -379,8 +379,8 @@ fn menu(
         (e, Kind::Friendly, ok)
     } else if let Some((e, _)) = ally {
         (e, Kind::Friendly, false) // any other friendly ship: Focus, Tow and a greyed Dock
-    } else if let Some((e, _)) = enemy {
-        (e, Kind::Enemy, false)
+    } else if let Some((e, _)) = [enemy, docks.hostile_base_hit(ray, player.2.translation).map(|(e, t, _)| (e, t))].into_iter().flatten().min_by(|a, b| a.1.total_cmp(&b.1)) {
+        (e, Kind::Enemy, false) // an enemy ship or a hostile base: same menu
     } else {
         return;
     };
@@ -388,7 +388,11 @@ fn menu(
     let tow = if docks.towee_of(player.0) == Some(target) { Tow::Stop } else { Tow::Start(docks.can_tow() && docks.towable(target) && ships.get(target).is_ok()) };
     let (held, cloak) = flags.get(actor).map(|(h, c)| (h, c.map(|c| c.on))).unwrap_or_default();
     let cloak = cloak.or_else(|| lib.classes[player.1.class].cloakable.then_some(false));
-    let mut hooks = if Some(actor) == fleets.primary() {
+    let mut hooks = if ships.get(target).is_err() {
+        // A base: boarding goes by range, there is nothing to grapple.
+        let boarding = boarders.boarding(actor, target);
+        Hooks { board: (boarding, boarding || boarders.can_board(actor, target)), ..default() }
+    } else if Some(actor) == fleets.primary() {
         Hooks { board: status.board(target), grapple: status.grapple(target), ..default() }
     } else {
         let boarding = boarders.boarding(actor, target);
