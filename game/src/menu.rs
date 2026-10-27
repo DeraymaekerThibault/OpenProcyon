@@ -852,6 +852,57 @@ mod tests {
         sk
     }
     #[test]
+    fn border_dispute_keeps_the_humans_command_ship() {
+        use crate::*;
+        use bevy::ecs::system::RunSystemOnce;
+        let lib = Library::load(&assets_dir());
+        let mut sk = skirmish("border_dispute");
+        let other = sk.slots.iter().position(|s| s.kind != Kind::Human).unwrap();
+        sk.choose(Cell::Player(other), Choice::Computer);
+        if sk.open() {
+            sk.ship_pick = 0;
+            apply(&mut sk, &lib, &Action::AddShip);
+        }
+        let plan = sk.plan(&lib);
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, AssetPlugin::default()))
+            .init_asset::<bevy::world_serialization::WorldAsset>()
+            .init_asset::<Mesh>()
+            .init_asset::<Image>()
+            .init_asset::<StandardMaterial>()
+            .init_asset::<AudioSource>()
+            .init_asset::<crate::fx::EffectMaterial>()
+            .insert_resource(Library::load(&crate::assets_dir()))
+            .init_resource::<fx::FxLib>()
+            .init_resource::<collision::Shapes>()
+            .init_resource::<data::AsteroidDefs>()
+            .init_resource::<ship::Fleets>()
+            .init_resource::<Target>()
+            .insert_resource(Orbit { yaw: 0.0, pitch: 0.0, dist: 60.0, focus: None })
+            .insert_resource(Config {
+                groups: plan,
+                player: String::new(),
+                allies: vec![],
+                enemies: vec![],
+                map: Some("border_dispute".into()),
+                shot: None,
+                frame: 0,
+                speed: 1.0,
+                ended: None,
+                script: None,
+                shot_frame: 0,
+                late_frame: 0,
+            });
+        app.world_mut()
+            .run_system_once(|mut c: Commands, a: Res<AssetServer>, l: Res<Library>, f: Res<fx::FxLib>, s: Res<collision::Shapes>, r: Res<data::AsteroidDefs>, cfg: Res<Config>| {
+                crate::scenario::spawn_scenario(&mut c, &a, &l, &f, &s, &r, &cfg)
+            })
+            .unwrap();
+        let w = app.world_mut();
+        let n = w.query_filtered::<&Ship, With<PlayerShip>>().iter(w).count();
+        assert_eq!(n, 1, "the human's command ship must stay the player's ship once the scenario has been reconciled");
+    }
+    #[test]
     fn skirmish_weapon_choices_follow_fleet_entries_and_survive_launch_planning() {
         let lib = Library::load(&assets_dir());
         let mut sk = skirmish("diablo_straight");
