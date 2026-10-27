@@ -492,8 +492,9 @@ pub fn load_class(root: &std::path::Path, name: &str, guns: &HashMap<String, Gun
         .map(|g| {
             let r = &g["rot"];
             let p = &g["pos"];
-            // Game rotation (yaw about up, then angle about the bow axis for inverted mounts, then pitch) -> Bevy axes.
-            let rot = Quat::from_rotation_y(num(&r[0])) * Quat::from_rotation_z(-num(&r[1])) * Quat::from_rotation_x(num(&r[2]));
+            // Game rotation -> Bevy axes: the roll about the bow axis (about pi for inverted mounts) is outermost and the yaw is turned
+            // in the rolled frame, so an inverted port mount's yaw of -90 degrees still faces port (every ship's inverted lancers).
+            let rot = Quat::from_rotation_z(-num(&r[1])) * Quat::from_rotation_y(num(&r[0])) * Quat::from_rotation_x(num(&r[2]));
             Mount {
                 pos: conv(num(&p[0]), num(&p[1]), num(&p[2])),
                 rot,
