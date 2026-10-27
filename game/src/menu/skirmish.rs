@@ -56,6 +56,8 @@ pub struct Slot {
     pub flag: u8,
     pub fleet: Vec<String>,
     pub weapons: Vec<std::collections::BTreeMap<usize, String>>,
+    /// The name picked from the ship-name drop-down per fleet entry (`None`: the default, see `ship_names`).
+    pub names: Vec<Option<String>>,
     /// Named crew per fleet entry and post (`crew_arms::ROLES` order); posts left empty are filled by generic crew.
     pub crew: Vec<[Vec<String>; 8]>,
 }
@@ -64,18 +66,22 @@ impl Slot {
     pub fn clear_fleet(&mut self) {
         self.fleet.clear();
         self.weapons.clear();
+        self.names.clear();
         self.crew.clear();
     }
     pub fn truncate_fleet(&mut self, n: usize) {
         self.fleet.truncate(n);
         self.weapons.truncate(n);
+        self.names.truncate(n);
         self.crew.truncate(n);
     }
     pub fn push_ship(&mut self, class: &str) {
         self.weapons.resize_with(self.fleet.len(), Default::default);
+        self.names.resize_with(self.fleet.len(), Default::default);
         self.crew.resize_with(self.fleet.len(), Default::default);
         self.fleet.push(class.into());
         self.weapons.push(Default::default());
+        self.names.push(None);
         self.crew.push(Default::default());
     }
     pub fn remove_ship(&mut self, i: usize) {
@@ -83,8 +89,35 @@ impl Slot {
         if i < self.weapons.len() {
             self.weapons.remove(i);
         }
+        if i < self.names.len() {
+            self.names.remove(i);
+        }
         if i < self.crew.len() {
             self.crew.remove(i);
+        }
+    }
+    /// The name of every fleet ship: the picked one, else the first name of the hull's pool that no other ship of the fleet bears.
+    /// PROVISIONAL: the original's default looked random (two adds of the same hull gave different names).
+    pub fn ship_names(&self, lib: &Library) -> Vec<Option<String>> {
+        let mut taken: std::collections::HashSet<&str> = self.names.iter().flatten().map(String::as_str).collect();
+        let mut out: Vec<Option<String>> = (0..self.fleet.len()).map(|i| self.names.get(i).cloned().flatten()).collect();
+        for (i, n) in out.iter_mut().enumerate().filter(|(_, n)| n.is_none()) {
+            *n = lib.names.get(&self.fleet[i]).and_then(|pool| pool.iter().find(|p| !taken.contains(p.as_str())).cloned());
+            if let Some(n) = n {
+                taken.insert(n);
+            }
+        }
+        out
+    }
+    /// The pull-down's entries for fleet ship `i`: its hull's pool in order, without the name it bears.
+    pub fn name_choices(&self, lib: &Library, i: usize) -> Vec<String> {
+        let own = self.ship_names(lib).get(i).cloned().flatten();
+        self.fleet.get(i).and_then(|c| lib.names.get(c)).map_or_else(Vec::new, |pool| pool.iter().filter(|n| Some(*n) != own.as_ref()).cloned().collect())
+    }
+    pub fn set_name(&mut self, i: usize, name: &str) {
+        self.names.resize_with(self.fleet.len(), Default::default);
+        if let Some(n) = self.names.get_mut(i) {
+            *n = Some(name.into());
         }
     }
     /// The fitting of fleet entry `i`, created on demand.
@@ -127,6 +160,8 @@ pub struct Skirmish {
     pub error: Option<&'static str>, // string id (or plain text) shown under the player list
     /// The open lobby pull-down, if any (its list is drawn under the cell; a click elsewhere closes it).
     pub dropdown: Option<Cell>,
+    /// The fleet screen's ship-name pull-down is open.
+    pub name_open: bool,
     /// The lobby's flag picker is open (retail: a modal gold frame with the fleet type's ten flags).
     pub flag_picker: bool,
     pub ship_pick: usize,
@@ -285,7 +320,7 @@ pub(super) fn new_slots(map: &Value) -> Vec<Slot> {
             // Historical maps name each player's race, or leave it open (4) and the team's race stands.
             let race = if open { team_race } else { Some(p["race"].as_u64().unwrap_or(4) as u8).filter(|r| *r != 4).unwrap_or(team_race) };
             let fleet = if open { vec![] } else { ships_of(map, i) };
-            Slot { player: i, name: p["name"].as_str().unwrap_or("").trim().into(), kind: Kind::Computer, race, team, flag: 0, fleet, weapons: vec![], crew: vec![] }
+            Slot { player: i, name: p["name"].as_str().unwrap_or("").trim().into(), kind: Kind::Computer, race, team, flag: 0, fleet, weapons: vec![], names: vec![], crew: vec![] }
         })
         .collect();
     if let Some(h) = slots.first_mut() {
@@ -332,6 +367,14 @@ impl Skirmish {
     /// Crew, Arms and Drop are greyed until the picked fleet slot holds a ship (retail, empty fleet).
     pub fn slot_filled(&self) -> bool {
         self.human().is_some_and(|h| self.fleet_pick < h.fleet.len())
+    }
+    /// Names the shown fleet ship (the human's) and closes the ship-name pull-down.
+    pub fn pick_name(&mut self, name: &str) {
+        let pick = self.fleet_pick;
+        if let Some(h) = self.slots.iter_mut().find(|s| s.kind == Kind::Human) {
+            h.set_name(pick, name);
+        }
+        self.name_open = false;
     }
     /// Whether fleet types and teams are chosen by the players (free-for-all open maps); team maps lock both to the map's team list.
     pub fn free_teams(&self) -> bool {
@@ -498,7 +541,8 @@ impl Skirmish {
                     computer_build = Some((c.weapons.clone(), c.crew.clone()));
                     (c.fleet.iter().map(|n| (n.clone(), None, None)).collect(), vec![])
                 } else {
-                    (s.fleet.iter().map(|n| (n.clone(), None, None)).collect(), vec![])
+                    let names = s.ship_names(lib);
+                    (s.fleet.iter().zip(names).map(|(n, label)| (n.clone(), None, label)).collect(), vec![])
                 };
                 let side = if s.kind == Kind::Human || !self.hostile(h, s) {
                     crate::Side::Player

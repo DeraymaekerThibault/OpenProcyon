@@ -59,6 +59,10 @@ pub enum Action {
     Claim(usize),
     /// Open or close a lobby pull-down (`None` closes).
     Dropdown(Option<Cell>),
+    /// Open or close the fleet screen's ship-name pull-down.
+    NameList(bool),
+    /// Give the shown fleet ship the name `.0` and close the pull-down.
+    PickName(String),
     /// Open or close the lobby's flag picker.
     FlagPicker(bool),
     /// Fly the human slot's flag number `n` (0-9) and close the picker.
@@ -217,6 +221,7 @@ pub fn plugin(app: &mut App) {
         map_json: Value::Null,
         error: None,
         dropdown: None,
+        name_open: false,
         flag_picker: false,
         ship_pick: 0,
         ship_chosen: false,
@@ -247,6 +252,7 @@ pub fn plugin(app: &mut App) {
                 slider_drag.run_if(in_state(Screen::CreateSkirmish)),
                 scroll_drag,
                 dropdown_release.run_if(in_state(Screen::Lobby)),
+                name_release.run_if(in_state(Screen::Fleet)),
                 buttons.in_set(RunButtons).run_if(menu_active),
                 button_sounds.before(RunButtons).run_if(menu_active),
                 save_actions,
@@ -320,6 +326,20 @@ fn dropdown_release(mouse: Res<ButtonInput<MouseButton>>, entries: Query<(&Actio
     });
     if let Some(choice) = picked {
         sk.choose(cell, choice);
+    }
+}
+
+/// The ship-name pull-down opens on a press and picks on the release over an entry (retail holds it open only while the button is down).
+fn name_release(mouse: Res<ButtonInput<MouseButton>>, entries: Query<(&Action, &Interaction)>, mut sk: ResMut<Skirmish>) {
+    if !sk.name_open || !mouse.just_released(MouseButton::Left) {
+        return;
+    }
+    let picked = entries.iter().find_map(|(a, i)| match a {
+        Action::PickName(n) if *i != Interaction::None => Some(n.clone()),
+        _ => None,
+    });
+    if let Some(n) = picked {
+        sk.pick_name(&n);
     }
 }
 
@@ -625,18 +645,21 @@ fn apply(sk: &mut Skirmish, lib: &Library, action: &Action) {
         }
         Action::SlotScroll(d) => sk.scroll_slots(*d),
         Action::Dropdown(cell) => sk.dropdown = *cell,
+        Action::NameList(open) => sk.name_open = *open && sk.view_slot && sk.slot_filled(),
+        Action::PickName(name) => sk.pick_name(name),
         Action::Choose(cell, choice) => sk.choose(*cell, *choice),
         Action::OpenArms | Action::OpenCrew => {
             sk.arms_open = sk.open() && sk.slot_filled();
             sk.arms_tab = matches!(action, Action::OpenArms);
         }
-        Action::PickShip(row) => (sk.ship_pick, sk.ship_chosen, sk.view_slot) = (*row, true, false),
+        Action::PickShip(row) => (sk.ship_pick, sk.ship_chosen, sk.view_slot, sk.name_open) = (*row, true, false, false),
         Action::MapInfo(open) => sk.map_info = *open,
         Action::PickFleet(row) => {
-            (sk.fleet_pick, sk.view_slot) = (*row, true);
+            (sk.fleet_pick, sk.view_slot, sk.name_open) = (*row, true, false);
             sk.show_picked_slot();
         }
         Action::AddShip => {
+            sk.name_open = false;
             let (limit, pick, left) = (sk.fleet_size, sk.ship_pick, sk.points_left(lib));
             if let Some(h) = sk.slots.iter_mut().find(|s| s.kind == Kind::Human).filter(|h| h.fleet.len() < limit)
                 && let Some(&ci) = offered(lib, h.race).get(pick)
@@ -653,6 +676,7 @@ fn apply(sk: &mut Skirmish, lib: &Library, action: &Action) {
         // fleet is full or nothing fits.
         Action::AutoAssign => auto_assign(sk, lib),
         Action::DropShip => {
+            sk.name_open = false;
             let pick = sk.fleet_pick;
             if let Some(h) = sk.slots.iter_mut().find(|s| s.kind == Kind::Human).filter(|h| pick < h.fleet.len()) {
                 h.remove_ship(pick);
@@ -836,6 +860,7 @@ mod tests {
             map_json: Value::Null,
             error: None,
             dropdown: None,
+            name_open: false,
             flag_picker: false,
             ship_pick: 0,
             ship_chosen: false,
@@ -850,6 +875,83 @@ mod tests {
         };
         sk.load_map();
         sk
+    }
+    #[test]
+    fn skirmish_ship_names_default_to_the_pool_and_follow_the_pull_down() {
+        let lib = Library::load(&assets_dir());
+        let mut sk = skirmish("diablo_straight");
+        sk.fleet_size = 2;
+        sk.choose(Cell::Player(1), Choice::Computer);
+        let human = sk.slots.iter().position(|s| s.kind == Kind::Human).unwrap();
+        sk.ship_pick = offered(&lib, 0).iter().position(|&i| lib.classes[i].name == "Ship_Navy_Cutter").unwrap();
+        apply(&mut sk, &lib, &Action::AddShip);
+        apply(&mut sk, &lib, &Action::AddShip);
+        let pool = lib.names["Ship_Navy_Cutter"].clone();
+        let names = |sk: &Skirmish| sk.slots[human].ship_names(&lib);
+        assert_eq!(names(&sk), vec![Some(pool[0].clone()), Some(pool[1].clone())], "same-hull ships get different default names");
+        assert!(!sk.slots[human].name_choices(&lib, 0).contains(&pool[0]), "the pull-down omits the name the ship bears");
+        sk.fleet_pick = 1;
+        apply(&mut sk, &lib, &Action::NameList(true));
+        assert!(sk.name_open);
+        apply(&mut sk, &lib, &Action::PickName(pool[5].clone()));
+        assert!(!sk.name_open);
+        assert_eq!(names(&sk), vec![Some(pool[0].clone()), Some(pool[5].clone())]);
+        let plan = sk.plan(&lib);
+        let human_group = plan.iter().find(|g| g.human).unwrap();
+        assert_eq!(human_group.ships[1].2.as_deref(), Some(pool[5].as_str()), "the chosen name reaches the battle");
+        apply(&mut sk, &lib, &Action::DropShip);
+        assert_eq!(sk.slots[human].names.len(), 1, "dropping a ship drops its name");
+    }
+    #[test]
+    fn border_dispute_keeps_the_humans_command_ship() {
+        use crate::*;
+        use bevy::ecs::system::RunSystemOnce;
+        let lib = Library::load(&assets_dir());
+        let mut sk = skirmish("border_dispute");
+        let other = sk.slots.iter().position(|s| s.kind != Kind::Human).unwrap();
+        sk.choose(Cell::Player(other), Choice::Computer);
+        if sk.open() {
+            sk.ship_pick = 0;
+            apply(&mut sk, &lib, &Action::AddShip);
+        }
+        let plan = sk.plan(&lib);
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, AssetPlugin::default()))
+            .init_asset::<bevy::world_serialization::WorldAsset>()
+            .init_asset::<Mesh>()
+            .init_asset::<Image>()
+            .init_asset::<StandardMaterial>()
+            .init_asset::<AudioSource>()
+            .init_asset::<crate::fx::EffectMaterial>()
+            .insert_resource(Library::load(&crate::assets_dir()))
+            .init_resource::<fx::FxLib>()
+            .init_resource::<collision::Shapes>()
+            .init_resource::<data::AsteroidDefs>()
+            .init_resource::<ship::Fleets>()
+            .init_resource::<Target>()
+            .insert_resource(Orbit { yaw: 0.0, pitch: 0.0, dist: 60.0, focus: None })
+            .insert_resource(Config {
+                groups: plan,
+                player: String::new(),
+                allies: vec![],
+                enemies: vec![],
+                map: Some("border_dispute".into()),
+                shot: None,
+                frame: 0,
+                speed: 1.0,
+                ended: None,
+                script: None,
+                shot_frame: 0,
+                late_frame: 0,
+            });
+        app.world_mut()
+            .run_system_once(|mut c: Commands, a: Res<AssetServer>, l: Res<Library>, f: Res<fx::FxLib>, s: Res<collision::Shapes>, r: Res<data::AsteroidDefs>, cfg: Res<Config>| {
+                crate::scenario::spawn_scenario(&mut c, &a, &l, &f, &s, &r, &cfg)
+            })
+            .unwrap();
+        let w = app.world_mut();
+        let n = w.query_filtered::<&Ship, With<PlayerShip>>().iter(w).count();
+        assert_eq!(n, 1, "the human's command ship must stay the player's ship once the scenario has been reconciled");
     }
     #[test]
     fn skirmish_weapon_choices_follow_fleet_entries_and_survive_launch_planning() {
