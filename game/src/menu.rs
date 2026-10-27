@@ -251,8 +251,7 @@ pub fn plugin(app: &mut App) {
                 capture_key,
                 slider_drag.run_if(in_state(Screen::CreateSkirmish)),
                 scroll_drag,
-                dropdown_release.run_if(in_state(Screen::Lobby)),
-                name_release.run_if(in_state(Screen::Fleet)),
+                dropdown_release,
                 buttons.in_set(RunButtons).run_if(menu_active),
                 button_sounds.before(RunButtons).run_if(menu_active),
                 save_actions,
@@ -312,34 +311,18 @@ pub struct MenuModel<'w> {
     pub outcome: Res<'w, crate::scenario::Outcome>,
     pub end_message: Res<'w, crate::scenario::EndMessage>,
 }
-/// Retail pull-downs stay open while the button is held: press the cell, drag to an entry, release to pick it. A release over the
-/// first entry (the cell itself, i.e. a plain click) keeps the list open for a second click.
-fn dropdown_release(mouse: Res<ButtonInput<MouseButton>>, entries: Query<(&Action, &Interaction)>, mut sk: ResMut<Skirmish>) {
-    let Some(cell) = sk.dropdown else { return };
+/// An entry of an open pull-down list (see `classic::menu::dropdown`); `.0` is whether it also picks on release.
+#[derive(Component)]
+pub struct ListEntry(pub bool);
+
+/// Retail pull-downs stay open while the button is held: press the cell, drag to an entry, release to pick it. The lobby's current
+/// value (a plain click) does not pick on release, so that click keeps the list open.
+fn dropdown_release(mouse: Res<ButtonInput<MouseButton>>, entries: Query<(&Action, &Interaction, &ListEntry)>, mut sk: ResMut<Skirmish>, lib: Res<Library>) {
     if !mouse.just_released(MouseButton::Left) {
         return;
     }
-    let first = sk.choices(cell).first().copied();
-    let picked = entries.iter().find_map(|(a, i)| match a {
-        Action::Choose(c, choice) if *c == cell && *i != Interaction::None && Some(*choice) != first => Some(*choice),
-        _ => None,
-    });
-    if let Some(choice) = picked {
-        sk.choose(cell, choice);
-    }
-}
-
-/// The ship-name pull-down opens on a press and picks on the release over an entry (retail holds it open only while the button is down).
-fn name_release(mouse: Res<ButtonInput<MouseButton>>, entries: Query<(&Action, &Interaction)>, mut sk: ResMut<Skirmish>) {
-    if !sk.name_open || !mouse.just_released(MouseButton::Left) {
-        return;
-    }
-    let picked = entries.iter().find_map(|(a, i)| match a {
-        Action::PickName(n) if *i != Interaction::None => Some(n.clone()),
-        _ => None,
-    });
-    if let Some(n) = picked {
-        sk.pick_name(&n);
+    if let Some((action, ..)) = entries.iter().find(|(_, i, e)| e.0 && **i != Interaction::None) {
+        apply(&mut sk, &lib, action);
     }
 }
 
@@ -463,7 +446,7 @@ impl MenuModel<'_> {
                 cui.scroll,
                 (cui.capture, &self.binds.rows),
                 self.settings,
-                sk.dropdown,
+                (sk.dropdown, sk.name_open),
                 sk.flag_picker,
                 sk.map_scroll,
                 sk.slot_scroll

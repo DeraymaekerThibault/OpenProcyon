@@ -2,7 +2,7 @@
 //! original screenshots: the fleet-assembly backdrop, Ships / Crew / Arms tabs, the slot bar, crew posts around the ship outline or
 //! the weapon mounts on it, stat bars, and the crew or weapon list. Falls back to a plain list when the model has no `fit`.
 #![allow(deprecated)]
-use super::menu::{Ctx, GOLD, disabled, piece, pulldown_cell, scrollbar, selected_tab, sprite, stretched_window, victory_points, wrapped};
+use super::menu::{Ctx, GOLD, disabled, dropdown, piece, pulldown_cell, scrollbar, selected_tab, sprite, stretched_window, victory_points, wrapped};
 use crate::combat::Library;
 use crate::crew_arms::{Action, CrewSet, FitView, SORTS, ScreenModel};
 use crate::menu::{ScrollKind, strings, text_of};
@@ -290,15 +290,9 @@ fn list(ctx: &Ctx, c: &mut ChildSpawnerCommands, fit: &FitView, strings: &Value)
     }
     scrollbar(ctx, c, [742.0, 330.0, 767.0, 505.0], ScrollKind::Crew, fit.list.len(), ROWS, fit.scroll);
     if fit.sort_open {
-        // The open Sort By list: a click anywhere else closes it; the entries hang under the box 25 apart (measured with the retail driver).
-        c.spawn((Interaction::None, bevy::ui::FocusPolicy::Block, Action::Sort, ctx.node(0.0, 0.0, 800.0, 600.0), ZIndex(1)));
-        for (k, field) in SORTS.iter().enumerate() {
-            let y = 339.0 - 12.5 + k as f32 * 25.0;
-            c.spawn((ctx.node(520.0, y, 190.0, 25.0), ZIndex(2), BackgroundColor(super::menu::LIST_BACKING), Interaction::None, bevy::ui::FocusPolicy::Block, Action::SortBy(k)))
-                .with_children(|c| {
-                    pulldown_cell(ctx, c, [0.0, 0.0, 190.0, 25.0], field, fit.sort == *field, None::<Action>, false);
-                });
-        }
+        // The entries hang under the box 25 apart (measured with the retail driver).
+        let entries = SORTS.iter().enumerate().map(|(k, f)| (f.to_string(), Action::SortBy(k))).collect();
+        dropdown(ctx, c, Action::Sort, [520.0, 339.0 - 12.5, 190.0, 25.0], entries, None);
     }
 }
 

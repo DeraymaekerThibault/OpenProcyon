@@ -988,16 +988,13 @@ fn players_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, _rect: [f32; 4], sk: &S
         });
     }
     if let Some(cell) = sk.dropdown {
-        // The open list sits on its cell: the current value first, the other entries 28 apart below (retail). A click elsewhere closes it.
-        let mut blocker = c.spawn((Interaction::None, bevy::ui::FocusPolicy::Block, Action::Dropdown(None), ctx.node(0.0, 0.0, 800.0, 600.0)));
-        blocker.insert(ZIndex(1));
+        // The open list sits on its cell: the current value first, the other entries 28 apart below (retail).
         let (x0, x1, row) = match cell {
             Cell::Player(i) => (287.0, 460.0, i),
             Cell::Fleet(i) => (470.0, 561.0, i),
             Cell::Team(i) => (571.0, 779.0, i),
         };
-        let top = 184.0 + row as f32 * 32.0 - 14.5;
-        for (k, choice) in sk.choices(cell).into_iter().enumerate() {
+        let entries = sk.choices(cell).into_iter().map(|choice| {
             let label = match choice {
                 Choice::Computer => s("IDGS_TPFRONTENDTEXT01_COMPUTER"),
                 Choice::Open => s("IDGS_TPFRONTENDTEXT01_OPEN"),
@@ -1005,11 +1002,9 @@ fn players_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, _rect: [f32; 4], sk: &S
                 Choice::Fleet(r) => RACES.iter().find(|x| x.0 == r).map_or_else(String::new, |x| s(x.2)),
                 Choice::Team(t) => team_label(&s, t),
             };
-            let y = top + k as f32 * 28.0;
-            c.spawn((ctx.node(x0, y, x1 - x0, 28.0), ZIndex(2), BackgroundColor(LIST_BACKING))).with_children(|c| {
-                pulldown_cell(ctx, c, [0.0, 0.0, x1 - x0, 28.0], &label, k == 0, Some(Action::Choose(cell, choice)), false);
-            });
-        }
+            (label, Action::Choose(cell, choice))
+        });
+        dropdown(ctx, c, Action::Dropdown(None), [x0, 184.0 + row as f32 * 32.0 - 14.5, x1 - x0, 28.0], entries.collect(), Some(0));
     }
     if let Some(e) = sk.error {
         ctx.text(c, BODY_FONT, &s(e), 236.0, 540.0, 184.0 + 8.0 * 32.0, false, Color::srgb(1.0, 0.4, 0.3));
@@ -1059,14 +1054,21 @@ fn ship_name_field(ctx: &Ctx, c: &mut ChildSpawnerCommands, sk: &Skirmish, lib: 
     let w = ctx.fonts.0.get("Univers10").map_or(120.0, |f| f.width(&name)) + 44.0;
     pulldown_cell(ctx, c, [55.0, 94.0, 55.0 + w, 116.0], &name, false, Some(Action::NameList(!sk.name_open)), true);
     if sk.name_open {
-        // A click anywhere else closes the list.
-        c.spawn((Interaction::None, bevy::ui::FocusPolicy::Block, Action::NameList(false), ctx.node(0.0, 0.0, 800.0, 600.0), ZIndex(1)));
-        for (k, n) in sk.slots.iter().find(|s| s.kind == Kind::Human).map_or_else(Vec::new, |h| h.name_choices(lib, sk.fleet_pick)).into_iter().enumerate() {
-            let y = 118.5 + k as f32 * 19.0;
-            c.spawn((ctx.node(55.0, y, 140.0, 19.0), ZIndex(2), BackgroundColor(LIST_BACKING))).with_children(|c| {
-                pulldown_cell(ctx, c, [0.0, 0.0, 140.0, 19.0], &n, false, Some(Action::PickName(n.clone())), false);
-            });
-        }
+        let names = sk.slots.iter().find(|s| s.kind == Kind::Human).map_or_else(Vec::new, |h| h.name_choices(lib, sk.fleet_pick));
+        let entries = names.into_iter().map(|n| (n.clone(), Action::PickName(n))).collect();
+        dropdown(ctx, c, Action::NameList(false), [55.0, 118.5, 140.0, 19.0], entries, None);
+    }
+}
+
+/// An open pull-down list, shared by every screen: a full-screen blocker (a click elsewhere runs `close`) and one backed entry per
+/// `(label, action)` stacked `h` apart from `[x, y, w, h]`. Entries also pick on the release of a held press (`menu::dropdown_release`),
+/// except the `keep` one, drawn highlighted (a plain click on the lobby's current value keeps the list open).
+pub(super) fn dropdown<A: Component>(ctx: &Ctx, c: &mut ChildSpawnerCommands, close: A, [x, y, w, h]: [f32; 4], entries: Vec<(String, A)>, keep: Option<usize>) {
+    c.spawn((Interaction::None, bevy::ui::FocusPolicy::Block, close, ctx.node(0.0, 0.0, 800.0, 600.0), ZIndex(1)));
+    for (k, (label, action)) in entries.into_iter().enumerate() {
+        c.spawn((ctx.node(x, y + k as f32 * h, w, h), ZIndex(2), BackgroundColor(LIST_BACKING))).with_children(|c| {
+            pulldown_cell(ctx, c, [0.0, 0.0, w, h], &label, keep == Some(k), Some((action, crate::menu::ListEntry(keep != Some(k)))), false);
+        });
     }
 }
 
