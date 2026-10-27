@@ -137,3 +137,10 @@ the hulls to close instead of failing at once, and the fight effect, crew lines 
 sagging ribbon, not a simulated chain (`classic/ropes.rs`);
 computer ships grapple and board their target on their own (§5, `ai_boarding`; reach and attacked-first gate PROVISIONAL); bases are boarded only by AI ships (a hostile non-Dummy mission ship in reach of a base whose rules made it Boardable), not from the menu; status bar
 placement and colours; effect placement (the original's extra main effect is not created); no grapple-break on tension.
+
+## Skirmish bases (remake, 2026-10-27)
+Border Dispute's end rules award the game for 'capturing a ship from' the other side's base (a boarding party taking the base), so skirmish
+bases are boardable: a boarding point within 15 units and a speed under 2, like campaign bases (§4). On a won fight the base changes
+sides: its guns fight for the captor and the end rules count it as captured (the side the map gave it is remembered). PROVISIONAL: the
+retail skirmish base's boarding strength is not measured (the remake uses 50, campaign islands use 50-100); computer ships do not board
+skirmish bases (no AI path in the original, §5); whether the capturing team matters to the rule is not checked.

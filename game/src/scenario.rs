@@ -463,6 +463,8 @@ pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Libra
                 campaign::MissionBase { id, owner: format!("base{id}") },
                 combat::ArmedBase { class },
                 combat::BaseSide(side),
+                combat::BaseOrigin(side),
+                boarding::Boardable::base(&lib.classes[class].name, SKIRMISH_BASE_STRENGTH, true),
                 combat::Health::new(&lib.classes[class]),
                 states,
             ));
@@ -599,6 +601,9 @@ pub fn restart(
     spawn_scenario(&mut commands, &assets, &lib, &fxl, &shapes, &asteroids, &cfg);
 }
 
+/// Boarding strength of a skirmish base (the retail value is not measured; campaign islands use 50-100). PROVISIONAL.
+const SKIRMISH_BASE_STRENGTH: i32 = 50;
+
 pub fn outcome(
     mut out: ResMut<Outcome>,
     mut message: ResMut<EndMessage>,
@@ -607,7 +612,7 @@ pub fn outcome(
     ships: Query<(&Health, &Ship), Without<PlayerShip>>,
     rules: (Option<Res<victory::Victory>>, Option<Res<combat::Library>>, Option<Res<ship::Fleets>>, Option<Res<crate::rules::skirmish::SkirmishScript>>),
     all: Query<(&Health, &Ship, &Transform, Option<&ship::FleetMember>, Option<&MapObject>)>,
-    bases: Query<(&campaign::MissionBase, &combat::ArmedBase, &Health)>,
+    bases: Query<(&campaign::MissionBase, &combat::ArmedBase, &Health, Option<(&combat::BaseSide, &combat::BaseOrigin)>)>,
 ) {
     let enemies = || ships.iter().filter(|(_, s)| s.side != Side::Player).map(|(h, _)| h);
     // missions end through their own rules; a decided battle stays decided (the end flow despawns ships, which must not turn a
@@ -630,9 +635,10 @@ pub fn outcome(
                 at: Vec2::new(tf.translation.x, -tf.translation.z),
             })
             .collect();
-        let damage: Vec<(i64, f32)> = bases.iter().map(|(b, a, h)| (b.id, combat::base_mission_damage(&lib.classes[a.class], h))).collect();
+        let damage: Vec<(i64, f32)> = bases.iter().map(|(b, a, h, _)| (b.id, combat::base_mission_damage(&lib.classes[a.class], h))).collect();
+        let captured: Vec<i64> = bases.iter().filter(|b| b.3.is_some_and(|(side, origin)| side.0 != origin.0)).map(|b| b.0.id).collect();
         let points = rules.3.as_ref().map(|s| s.points()).unwrap_or_default();
-        let decided = victory.decide_with_message(&victory::Snapshot { ships: &states, bases: &damage, points: &points });
+        let decided = victory.decide_with_message(&victory::Snapshot { ships: &states, bases: &damage, captured: &captured, points: &points });
         end_message = decided.as_ref().and_then(|d| d.1.clone());
         decided.map_or(Outcome::Playing, |d| d.0)
     } else if player.single().is_err() || player.single().is_ok_and(|h| h.destroyed) {
