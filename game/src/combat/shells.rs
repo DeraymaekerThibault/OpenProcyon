@@ -289,11 +289,18 @@ pub(super) fn shells(
                         }),
                     }
             })
-            .filter_map(|(be, btf, ab, ..)| {
+            .filter_map(|(be, btf, ab, bhp, ..)| {
                 let class = &lib.classes[ab.class];
                 let inv = btf.to_matrix().inverse();
                 let (a, b) = (inv.transform_point3(p0), inv.transform_point3(p1));
-                class.sections.iter().enumerate().filter_map(|(k, sec)| seg_mesh(a, b, sec).map(|t| (t, k, be))).min_by(|x, y| x.0.total_cmp(&y.0))
+                // A destroyed mission part (building, ring) no longer stops shells.
+                class
+                    .sections
+                    .iter()
+                    .enumerate()
+                    .filter(|(k, sec)| !sec.mission || bhp.sections[*k] > 0.0)
+                    .filter_map(|(k, sec)| seg_mesh(a, b, sec).map(|t| (t, k, be)))
+                    .min_by(|x, y| x.0.total_cmp(&y.0))
             })
             .min_by(|x, y| x.0.total_cmp(&y.0));
         if let Some((t, k, be)) = base_hit.filter(|b| best.as_ref().is_none_or(|x| b.0 < x.0))

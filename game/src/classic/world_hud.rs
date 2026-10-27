@@ -52,6 +52,8 @@ fn navigation(
     ships: Query<(Entity, &Transform, &Ship, Has<PlayerShip>)>,
     fleets: Res<crate::ship::Fleets>,
     mission: Option<Res<crate::campaign::Mission>>,
+    victory: Option<Res<crate::victory::Victory>>,
+    bases: Query<(&Transform, &crate::campaign::MissionBase, &crate::combat::Health), (With<crate::combat::ArmedBase>, Without<Ship>)>,
     mut indicators: Query<(&Navigation, &mut Transform, &mut Visibility), Without<Ship>>,
 ) {
     if indicators.is_empty() {
@@ -89,7 +91,15 @@ fn navigation(
     let primary_tf = tf;
     let goal = match mission.as_deref() {
         Some(m) => crate::campaign::objective_point(m),
-        None => ship.waypoints.first().copied(),
+        // Skirmish: the arrow points at the base the map's end rule says to destroy; with no such objective it is not shown.
+        None => victory.as_deref().and_then(|v| {
+            let ids = v.objective_bases();
+            bases
+                .iter()
+                .filter(|(_, b, h)| ids.contains(&b.id) && !h.destroyed)
+                .map(|(t, ..)| t.translation)
+                .min_by(|a, b| a.distance(primary_tf.translation).total_cmp(&b.distance(primary_tf.translation)))
+        }),
     };
     for (indicator, mut transform, mut vis) in &mut indicators {
         let selected = fleets.selected.and_then(|e| ships.get(e).ok());
