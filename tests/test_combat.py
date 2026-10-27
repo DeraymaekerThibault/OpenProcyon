@@ -71,6 +71,9 @@ class LocalCombatExportTests(unittest.TestCase):
             ["Engine_NAVY_MED", "Engine_NAVY_FULL", "Engine_NAVY_EMERGFULL"],
         )
         self.assertEqual(
+            j["ring"], 0.65
+        )  # Navy Cutter: selection ring = 65 % of the ship's radius
+        self.assertEqual(
             j["gun_defs"]["Gun_CannonBall_Med"]["SoundName"], "Weapon_Cannon_FireMed"
         )
         med = j["bullets"]["Bullet_CannonBall_Med"]
