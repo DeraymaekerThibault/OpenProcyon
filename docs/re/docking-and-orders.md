@@ -126,6 +126,11 @@ the choice among friendly docks taken as the nearest; not yet seen in play. Rema
 While an object is dockable every dock point carries an effect on its node; when it stops being dockable they are removed. The
 effect is taken to be `Effects/Docking_Point.eft` [? not confirmed].
 
+A dock point's position is the node's own position, which is already in the model's frame. Unlike gun mounts, the parent layer's
+offset must not be added: doing so put the lights tens to hundreds of units from the piers on almost every base (checked against the
+model geometry: every base's dock points now lie within about 25 units of the model; Dolinor's were 200-300 off). Re-import after
+updating.
+
 In the remake every map object and ship type with exported dock points gets them when it spawns, on every map type
 (skirmish, historical and campaign). Bases no rule assigns an owner to (all skirmish bases) are dockable by every side **[PROVISIONAL]**.
 
