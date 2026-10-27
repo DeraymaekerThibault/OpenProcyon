@@ -44,3 +44,14 @@ friendly/other contact types and animated icon frames not done.
 Four `ShipTargeted_Icon_Enemy` corner pointers on the diagonals around the target, each turned so its tip points at the ship. Retail
 indicator data: 20x20 units, radius offset 0.8, z-plane offset -2; ours is screen-space with PROVISIONAL size/offset. A click stores the
 clicked spot in ship-local space and guns aim there.
+
+## Navigation arrow in a skirmish
+
+Retail footage (headless runs, Border Dispute and The Diablo Strait): the compass disc under the selected ship is always drawn. The
+gold arrow on it appears only when the map has a base to destroy. On Border Dispute it points at the enemy base from the first frame
+(no waypoint set) and keeps pointing there; on The Diablo Strait (end rule: last ships standing) there is no arrow. Whether it also
+follows waypoints, and what it shows on maps with a group objective (convoy, capture), is not measured: PROVISIONAL. The remake points
+at the living hostile base named by a rule the human wins by (`Victory::objective_bases`) and hides the arrow otherwise.
+
+What marks a targeted base is not known. A lone Man-O-War cannot beat a Procyon base on Easy (26 guns; it was sunk four times at 137-266 units, and its clicks on the base never
+made it fire at the base): the destruction of a base part has not been filmed yet (issue #97).
