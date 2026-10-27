@@ -630,11 +630,17 @@ fn routine(
 }
 
 /// Every dock point of a dockable object shows the 'Docking_Point' effect while the object can be
-/// docked with; the effects go away when it cannot (disabled or destroyed).
-fn markers(mut commands: Commands, fxl: Option<Res<FxLib>>, mut q: Query<(Entity, &Transform, &mut Dockable, Option<&Health>)>) {
+/// docked with; the effects go away when it cannot (disabled, destroyed or a hostile base).
+#[allow(clippy::type_complexity)]
+fn markers(
+    mut commands: Commands,
+    fxl: Option<Res<FxLib>>,
+    mission: Option<Res<Mission>>,
+    mut q: Query<(Entity, &Transform, &mut Dockable, Option<&Health>, Option<&MissionBase>, Option<&crate::combat::BaseSide>)>,
+) {
     let Some(fxl) = fxl else { return };
-    for (e, tf, mut dk, h) in &mut q {
-        let on = dk.enabled && !h.is_some_and(|h| h.destroyed);
+    for (e, tf, mut dk, h, base, side) in &mut q {
+        let on = dk.enabled && !h.is_some_and(|h| h.destroyed) && !hostile_base(mission.as_deref(), base, side);
         if on && dk.markers.is_empty() {
             dk.markers = (0..dk.points.len())
                 .filter_map(|i| {
@@ -711,14 +717,17 @@ pub struct Dockees<'w, 's> {
     msg: MessageWriter<'w, DockMsg>,
     menu: Res<'w, crate::options_menu::OptionsMenu>,
 }
+/// A base is hostile by mission rules, or in a skirmish (no mission rules) when its side is not the player's.
+fn hostile_base(mission: Option<&Mission>, base: Option<&MissionBase>, side: Option<&crate::combat::BaseSide>) -> bool {
+    let Some(base) = base else { return false };
+    match mission {
+        Some(m) => m.script.hostile(m.script.player(), &base.owner),
+        None => side.is_some_and(|s| s.0 != Side::Player),
+    }
+}
 impl Dockees<'_, '_> {
-    /// A base is hostile by mission rules, or in a skirmish (no mission rules) when its side is not the player's.
     fn base_hostile(&self, e: Entity, base: Option<&MissionBase>) -> bool {
-        let Some(base) = base else { return false };
-        match self.mission.as_deref() {
-            Some(m) => m.script.hostile(m.script.player(), &base.owner),
-            None => self.sides.get(e).is_ok_and(|s| s.0 != Side::Player),
-        }
+        hostile_base(self.mission.as_deref(), base, self.sides.get(e).ok())
     }
     pub fn can_dock(&self, actor: Entity, dockee: Entity) -> bool {
         let Ok((_, _, d, ship, base)) = self.q.get(dockee) else { return false };
@@ -793,6 +802,21 @@ impl Dockees<'_, '_> {
 mod tests {
     use super::*;
     use std::time::Duration;
+
+    #[test]
+    fn skirmish_dock_lights_show_on_friendly_bases_only() {
+        let mut app = App::new();
+        app.init_resource::<FxLib>().add_systems(Update, markers);
+        let point = DockPoint { pos: Vec3::Z * 3.0, fwd: Vec3::NEG_Z };
+        let mut base = |side| {
+            let base = MissionBase { id: 1, owner: "b".into() };
+            app.world_mut().spawn((Transform::default(), Dockable::new(vec![point], true), base, crate::combat::BaseSide(side))).id()
+        };
+        let (own, enemy) = (base(Side::Player), base(Side::Enemy));
+        app.update();
+        assert!(!app.world().get::<Dockable>(own).unwrap().markers.is_empty(), "our base shows its dock lights");
+        assert!(app.world().get::<Dockable>(enemy).unwrap().markers.is_empty(), "the enemy base shows none");
+    }
 
     #[test]
     fn mission_two_base_docking_plans_around_the_island_before_allowing_contact() {
