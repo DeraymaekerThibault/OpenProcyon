@@ -85,6 +85,14 @@ pub enum Outcome {
 #[derive(Resource, Default)]
 pub struct EndMessage(pub Option<String>);
 
+/// The string id of the line the battlefield shows while a decided skirmish winds down (retail: "Game Lost!  Exiting..." under the
+/// camera's centre for about 13 s, then the Game Summary opens; measured on Border Dispute when the last human ship sank).
+#[derive(Resource, Default)]
+pub struct EndLine(pub Option<String>);
+
+/// Seconds the end line shows before the Game Summary opens (retail, one observation at 1 frame/s: 13 s).
+pub const END_LINE_SECS: f32 = 13.0;
+
 /// Battle start: the front end's choice (map, fleets) if any, else the command line.
 pub fn enter_battle(
     mut commands: Commands,
@@ -604,9 +612,17 @@ pub fn restart(
 /// Boarding strength of a skirmish base (the retail value is not measured; campaign islands use 50-100). PROVISIONAL.
 const SKIRMISH_BASE_STRENGTH: i32 = 50;
 
+/// The battlefield's game-over line. The map rule's own message, else the default. PROVISIONAL: only "Game Lost" is measured (the human's
+/// ships all gone, whatever the summary header says); "Game Won" and a map message on the field are inferred from the string table.
+fn end_line_id(outcome: Outcome, human_lost: bool, message: Option<&str>) -> Option<String> {
+    (outcome != Outcome::Playing)
+        .then(|| message.map_or_else(|| format!("IDGS_TPINGAMEMESSAGE_GAME_{}", if outcome == Outcome::Victory && !human_lost { "WON" } else { "LOST" }), str::to_string))
+}
+
 pub fn outcome(
     mut out: ResMut<Outcome>,
     mut message: ResMut<EndMessage>,
+    mut line: ResMut<EndLine>,
     mut cfg: ResMut<Config>,
     player: Query<&Health, With<PlayerShip>>,
     ships: Query<(&Health, &Ship), Without<PlayerShip>>,
@@ -621,6 +637,7 @@ pub fn outcome(
         return;
     }
     let mut end_message = None;
+    let mut human_lost = true;
     let new = if let (Some(victory), Some(lib)) = (&rules.0, &rules.1) {
         // The map's own rules decide: a base falling, the human fleet or every ship lost.
         let local = rules.2.as_ref().map(|f| f.local.as_str());
@@ -638,12 +655,14 @@ pub fn outcome(
         let damage: Vec<(i64, f32)> = bases.iter().map(|(b, a, h, _)| (b.id, combat::base_mission_damage(&lib.classes[a.class], h))).collect();
         let captured: Vec<i64> = bases.iter().filter(|b| b.3.is_some_and(|(side, origin)| side.0 != origin.0)).map(|b| b.0.id).collect();
         let points = rules.3.as_ref().map(|s| s.points()).unwrap_or_default();
+        human_lost = !states.iter().any(|s| s.human && s.alive);
         let decided = victory.decide_with_message(&victory::Snapshot { ships: &states, bases: &damage, captured: &captured, points: &points });
         end_message = decided.as_ref().and_then(|d| d.1.clone());
         decided.map_or(Outcome::Playing, |d| d.0)
     } else if player.single().is_err() || player.single().is_ok_and(|h| h.destroyed) {
         Outcome::Defeat
     } else if enemies().count() > 0 && enemies().all(|h| h.destroyed) {
+        human_lost = false;
         Outcome::Victory
     } else {
         Outcome::Playing
@@ -653,6 +672,7 @@ pub fn outcome(
         cfg.ended = Some(cfg.frame);
     }
     *out = new;
+    line.0 = end_line_id(new, human_lost, end_message.as_deref());
     message.0 = end_message;
 }
 
@@ -675,6 +695,21 @@ pub fn game_rotation(r: &serde_json::Value) -> Quat {
     let game = Mat3::from_cols(Vec3::new(m(0), m(1), m(2)), Vec3::new(m(3), m(4), m(5)), Vec3::new(m(6), m(7), m(8)));
     let c = Mat3::from_cols(Vec3::X, Vec3::NEG_Z, Vec3::Y);
     Quat::from_mat3(&(c * game * c.transpose())).normalize()
+}
+
+#[cfg(test)]
+mod end_line_tests {
+    use super::*;
+    #[test]
+    fn game_lost_whenever_the_human_fleet_is_gone() {
+        let id = |o, lost, m| end_line_id(o, lost, m);
+        assert_eq!(id(Outcome::Playing, true, None), None);
+        // retail: allies won (summary VICTORY!) but the field still read "Game Lost"
+        assert_eq!(id(Outcome::Victory, true, None).as_deref(), Some("IDGS_TPINGAMEMESSAGE_GAME_LOST"));
+        assert_eq!(id(Outcome::Victory, false, None).as_deref(), Some("IDGS_TPINGAMEMESSAGE_GAME_WON"));
+        assert_eq!(id(Outcome::Defeat, false, None).as_deref(), Some("IDGS_TPINGAMEMESSAGE_GAME_LOST"));
+        assert_eq!(id(Outcome::Defeat, true, Some("IDGS_X")).as_deref(), Some("IDGS_X"));
+    }
 }
 
 #[cfg(test)]
@@ -802,7 +837,7 @@ mod rotation_tests {
     fn decided_outcome_is_final() {
         use bevy::ecs::system::RunSystemOnce;
         let mut app = App::new();
-        app.insert_resource(Outcome::Victory).init_resource::<EndMessage>().insert_resource(Config {
+        app.insert_resource(Outcome::Victory).init_resource::<EndMessage>().init_resource::<EndLine>().insert_resource(Config {
             groups: vec![],
             player: "Ship_Navy_Cutter".into(),
             allies: vec![],
