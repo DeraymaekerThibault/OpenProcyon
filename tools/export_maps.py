@@ -130,10 +130,21 @@ def parse_twt(text):
     return m
 
 
-def victory_rules(nodes):
+def victory_rules(nodes, unit_names=None):
     """The map's own end-game rules: [{name, if: [condition fields], winner: team name id | None, end: {winner, loser} | None}].
     A rule counts when one of its actions ends the game or names a winning team; its conditions all have to hold. Conditions that
-    name a Group/Unit also carry the ids of the world objects in that group (`objects`)."""
+    name a Group/Unit also carry the ids of the world objects in that group (`objects`; "Group,Unit" picks the one unit by its
+    ship name, `unit_names`: id -> script name) and, for a named volume, its polygon (`polygon`, game x/y points).
+    """
+    volumes = {}
+    for b in blocks(nodes, "World Polygons Vectors - Element"):
+        volumes[fields(b["children"]).get("Name")] = [
+            n["value"]
+            for n in b["children"]
+            if n.get("kind") == "property"
+            and n["name"] == "Points"
+            and n["type"] == "Coord"
+        ]
     groups = {}
     for g in blocks(nodes, "Group"):
         name = fields(g["children"]).get("Name")
@@ -162,9 +173,23 @@ def victory_rules(nodes):
         conds = []
         for c in r["conditions"]:
             c = dict(c)
-            ref = c.get("Group/Unit Name") or c.get("Group/Unit") or c.get("Group Name")
+            ref = (
+                c.get("Group/Unit Name")
+                or c.get("Group/Unit")
+                or c.get("Group Name")
+                or c.get("Unit Name")
+            )
             if ref in groups:
                 c["objects"] = groups[ref]
+            elif isinstance(ref, str) and "," in ref:
+                group, unit = ref.split(",", 1)
+                c["objects"] = [
+                    i
+                    for i in groups.get(group, [])
+                    if ((unit_names or {}).get(i) or "").lower() == unit.strip().lower()
+                ]
+            if c.get("Volume Name") in volumes:
+                c["polygon"] = volumes[c["Volume Name"]]
             conds.append(c)
         out.append(
             dict(
@@ -301,7 +326,10 @@ def main(root, out):
     index = []
     for f in sorted(ci_files(root / "World", "*.twt")):
         m = parse_twt(f.read_text(encoding="latin1"))
-        m["victory"] = victory_rules(parse_text(f.read_text(encoding="latin1"))[0])
+        m["victory"] = victory_rules(
+            parse_text(f.read_text(encoding="latin1"))[0],
+            {i: ship_name(text, n) for i, n in m["ship_names"].items()},
+        )
         mid = re.sub(r"\W+", "_", f.stem).lower()
         m.update(
             id=mid,
@@ -311,6 +339,7 @@ def main(root, out):
         # Historical maps pre-place each player's fleet (PlayerIndex = index in the player list).
         m["ships"] = [
             {
+                "id": o["id"],
                 "type": o["type"],
                 "pos": o["pos"],
                 "player": o["player"],

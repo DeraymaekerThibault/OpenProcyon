@@ -75,6 +75,21 @@ class MapTests(unittest.TestCase):
         self.assertEqual(v[0]["end"]["winner"], "WON")
         self.assertEqual(v[0]["if"][0]["objects"], [225])
 
+    def test_victory_rules_find_one_unit_and_a_volume(self):
+        text = (
+            "\t00000010 World Rules\n\t{\n\t\tRule Name String 'r'\n"
+            "\t\t00000001 Condition List\n\t\t{\n\t\t\tType String 'Enter Volume'\n"
+            "\t\t\tGroup Name String 'Navy,RLS Mercy'\n\t\t\tVolume Name String 'safe'\n\t\t}\n"
+            "\t\t00000002 Action List\n\t\t{\n\t\t\tType String 'End Game'\n\t\t}\n\t}\n"
+            "\t00000003 Group\n\t{\n\t\tName String 'Navy'\n"
+            "\t\tWorld Object IDs - Element Int 128\n\t\tWorld Object IDs - Element Int 129\n\t}\n"
+            "\t00000002 World Polygons Vectors - Element\n\t{\n\t\tName String 'safe'\n"
+            "\t\tPoints Coord ( 0.0, 0.0 )\n\t\tPoints Coord ( 10.0, 0.0 )\n\t\tPoints Coord ( 10.0, 10.0 )\n\t}\n"
+        )
+        c = victory_rules(parse_text(text)[0], {128: "RLS Imperial", 129: "RLS Mercy"})[0]["if"][0]
+        self.assertEqual(c["objects"], [129])
+        self.assertEqual(len(c["polygon"]), 3)
+
     def test_twt(self):
         m = parse_twt(TWT)
         self.assertTrue(m["assemble"])

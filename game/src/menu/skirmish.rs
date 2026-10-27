@@ -281,11 +281,9 @@ pub(super) fn new_slots(map: &Value) -> Vec<Slot> {
         .filter(|(_, p)| p["playable"].as_bool().unwrap_or(false))
         .map(|(i, p)| {
             let team = p["team"].as_i64().unwrap_or(-1) as i32;
-            let race = if open {
-                usize::try_from(team).ok().and_then(|t| teams.get(t)).map_or(4, |t| t["race"].as_u64().unwrap_or(4) as u8)
-            } else {
-                p["race"].as_u64().unwrap_or(4) as u8
-            };
+            let team_race = usize::try_from(team).ok().and_then(|t| teams.get(t)).map_or(4, |t| t["race"].as_u64().unwrap_or(4) as u8);
+            // Historical maps name each player's race, or leave it open (4) and the team's race stands.
+            let race = if open { team_race } else { Some(p["race"].as_u64().unwrap_or(4) as u8).filter(|r| *r != 4).unwrap_or(team_race) };
             let fleet = if open { vec![] } else { ships_of(map, i) };
             Slot { player: i, name: p["name"].as_str().unwrap_or("").trim().into(), kind: Kind::Computer, race, team, flag: 0, fleet, weapons: vec![], crew: vec![] }
         })
@@ -479,25 +477,28 @@ impl Skirmish {
             .filter(|s| s.kind.live())
             .map(|s| {
                 let mut computer_build = None;
-                let ships = if !open {
+                let (ships, ids): (Vec<_>, Vec<Option<i64>>) = if !open {
                     // The first ship becomes the command ship: the one the map flags as primary (its Setup Ship rule), else map order.
                     let mut placed: Vec<&Value> = self.map_json["ships"].as_array().into_iter().flatten().filter(|o| o["player"].as_u64() == Some(s.player as u64)).collect();
                     placed.sort_by_key(|o| o["primary"].as_bool() != Some(true));
                     placed
                         .into_iter()
                         .filter_map(|o| {
-                            Some((o["type"].as_str()?.to_string(), Some([0, 1, 2].map(|i| o["pos"][i].as_f64().unwrap_or(0.0) as f32)), o["name"].as_str().map(String::from)))
+                            Some((
+                                (o["type"].as_str()?.to_string(), Some([0, 1, 2].map(|i| o["pos"][i].as_f64().unwrap_or(0.0) as f32)), o["name"].as_str().map(String::from)),
+                                o["id"].as_i64(),
+                            ))
                         })
-                        .filter(|(n, ..)| lib.classes.iter().any(|c| c.name == *n))
-                        .collect()
+                        .filter(|(t, _)| lib.classes.iter().any(|c| c.name == t.0))
+                        .unzip()
                 } else if s.fleet.is_empty() {
                     // A computer builds its fleet with the same routine as Auto Assign, inside the same budget.
                     let mut c = s.clone();
                     auto_build(&mut c, self.victory_limit, self.fleet_size, lib, s.player as u64 + 1, true);
                     computer_build = Some((c.weapons.clone(), c.crew.clone()));
-                    c.fleet.iter().map(|n| (n.clone(), None, None)).collect()
+                    (c.fleet.iter().map(|n| (n.clone(), None, None)).collect(), vec![])
                 } else {
-                    s.fleet.iter().map(|n| (n.clone(), None, None)).collect()
+                    (s.fleet.iter().map(|n| (n.clone(), None, None)).collect(), vec![])
                 };
                 let side = if s.kind == Kind::Human || !self.hostile(h, s) {
                     crate::Side::Player
@@ -515,6 +516,7 @@ impl Skirmish {
                     human: s.kind == Kind::Human,
                     race: if s.race == 4 { crate::scenario::faction(&s.name).unwrap_or(4) } else { s.race },
                     team: s.team,
+                    ids,
                     ships,
                     // A built computer fleet keeps its weapons but not its named crew: computer ships run at the measured computer crew factor.
                     weapons: match &computer_build {
