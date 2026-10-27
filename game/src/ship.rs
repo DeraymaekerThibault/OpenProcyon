@@ -191,15 +191,19 @@ pub fn ai(
     (time, mut targets): (Res<Time>, ResMut<CaptainTargets>),
     lib: Res<combat::Library>,
     bases: Query<(Entity, &Transform, &combat::BaseSide, &Health), With<combat::ArmedBase>>,
+    scripted: Query<&campaign::MissionShip>,
 ) {
     if mission.is_some() {
         return;
     }
+    // A skirmish map's script steers its own ships (Convoy Raid's convoys keep to their routes, a stolen convoy idles); hidden ones
+    // wait for the script to reveal them. PROVISIONAL: the stance is all the captain looks at.
+    let left_to_script = |e: Entity| scripted.get(e).is_ok_and(|m| !m.visible || matches!(m.stance, crate::rules::Stance::Persistent | crate::rules::Stance::Dummy));
     let dt = time.delta_secs();
     let holes = hole_list(&holes, storms.0.as_deref(), storms.1.as_deref());
     let snap: Vec<(Entity, Vec3, Side, bool)> = ships.iter().map(|(e, t, s, h, _, _)| (e, t.translation, s.side, !h.destroyed)).collect();
     for (e, tf, mut s, h, me, pilot) in &mut ships {
-        if busy.contains(e) {
+        if busy.contains(e) || left_to_script(e) {
             continue;
         }
         if pilot.is_some_and(|p| p.hold || p.destination.is_some()) {

@@ -183,6 +183,11 @@ for every map whose conditions it models: base damage, no ships, no human ships,
 still present, group inside a volume, ship captured (a living ship of the group now sails for another side; the capturing team is not
 checked, PROVISIONAL), ship destroyed from a group (the killer is not checked, PROVISIONAL). Capturing a base never fires yet (boarding
 bases is unfinished). Ambush, Bayles Stand, Locusts, Mousetrap and the open maps use these. Each skirmish map's whole script is also
-exported (`maps/<id>/script.json`) and the rules interpreter scores Convoy Raid's points, but skirmish does not run the scripts yet
-(the convoys are not spawned): Convoy Raid, and any map without exported rules, keeps the plain "no enemy ships left" outcome. The custom
+exported (`maps/<id>/script.json`) and runs during the battle (`rules::skirmish`, the campaign interpreter without the end rules):
+the ships of non-playable map players (Convoy Raid's convoys) join on their team's side, every ship answers to its map player and
+'Setup Ship' name, and the script's routes, owner changes, visibility, hold, throttle caps, stances and damage apply. Its team points
+end Convoy Raid ('Team has X points'). PROVISIONAL: ships with a Persistent or Dummy stance, and hidden ones, are left to the script by
+the computer captains; other scripted routes (Ambush's Mercy) are still overridden by the captain AI; a Navy player who loses every
+ship on Convoy Raid has no rule ending the game (the original's behaviour there is unknown). A map without exported rules keeps the
+plain "no enemy ships left" outcome. The custom
 winner/loser messages (`IDGS_TPINGAMEMESSAGE_*`) are exported but not shown yet.
