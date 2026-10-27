@@ -199,3 +199,9 @@ ship on Convoy Raid has no rule ending the game (the original's behaviour there 
 plain "no enemy ships left" outcome. The map rule's
 winner/loser message (`IDGS_TPINGAMEMESSAGE_*`, the human's side) is shown under the VICTORY!/DEFEAT! label of the Game Summary
 (PROVISIONAL: retail position and timing unmeasured; "GAME STRING" means no custom message).
+
+## Result when the human's ships are all lost (retail, Border Dispute, 2026-10-27)
+When every human ship sinks, the battlefield shows "Game Lost! Exiting..." and the game ends, but the Game Summary header depends on the
+teams: with Navy computer allies alive and the whole Procyon fleet sunk (both bases standing) it read VICTORY!, twice; with the lone Procyon
+Frigate still alive and no allies it read DEFEAT! The remake reads this as: victory when the human's team still has ships and no other team
+has any (PROVISIONAL: two observations, rule inferred).
