@@ -4,6 +4,7 @@
 //! PROVISIONAL: Enter Volume is level-triggered for run-once rules, formations/borders are approximated or ignored,
 //! docking is docking.rs and camera moves are smoothed guesses. Environment presentation lives in environment.rs.
 mod eval;
+pub mod skirmish;
 mod systems;
 #[cfg(test)]
 mod tests;

@@ -113,6 +113,7 @@ pub fn leave_battle(keys: Res<ButtonInput<KeyCode>>, mut commands: Commands, old
         commands.entity(e).despawn();
     }
     commands.remove_resource::<campaign::Mission>();
+    commands.remove_resource::<crate::rules::skirmish::SkirmishScript>();
     commands.insert_resource(ship::Fleets::default());
     commands.queue(|world: &mut World| {
         world.resource_mut::<Orbit>().focus = None;
@@ -202,6 +203,7 @@ pub fn resume_scenario(world: &mut World) {
 /// start vectors. Without a map: the test arena (player at the origin, enemies on a ring).
 pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Library, fxl: &fx::FxLib, shapes: &collision::Shapes, asteroids: &data::AsteroidDefs, cfg: &Config) {
     commands.queue(resume_scenario);
+    commands.remove_resource::<crate::rules::skirmish::SkirmishScript>();
     let map = cfg.map.as_deref().and_then(data::map_json);
     let sky = map.as_ref().and_then(|m| m["sky"].as_str()).map(|s| s.rsplit_once("_Layer").map_or(s, |x| x.0).to_string()).unwrap_or("skybox_07".into());
     commands.spawn((
@@ -316,6 +318,48 @@ pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Libra
                 crew: vec![],
             });
         }
+        // A map with its own script (Convoy Raid's convoys, ...): the ships of its non-playable players join the battle on their
+        // team's side, and every ship carries its map player and rule name for the script (rules::skirmish).
+        let map_id = cfg.map.clone().unwrap_or_default();
+        let script_names = crate::rules::skirmish::SkirmishScript::ship_names(&map_id);
+        if script_names.is_some() {
+            for (p, pl) in players.iter().enumerate() {
+                if pl["playable"] == true || groups.iter().any(|g| g.player == p) {
+                    continue;
+                }
+                let placed: Vec<&serde_json::Value> = map["ships"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter(|o| o["player"].as_u64() == Some(p as u64) && o["type"].as_str().is_some_and(|t| lib.classes.iter().any(|c| c.name == t)))
+                    .collect();
+                if placed.is_empty() {
+                    continue;
+                }
+                let team = pl["team"].as_i64().unwrap_or(-1) as i32;
+                let side = groups.iter().find(|g| team >= 0 && g.team == team).map(|g| g.side).unwrap_or(Side(groups.iter().map(|g| g.side.0).max().unwrap_or(0) + 1));
+                groups.push(Group {
+                    player: p,
+                    side,
+                    human: false,
+                    race: 4,
+                    team,
+                    ids: placed.iter().map(|o| o["id"].as_i64()).collect(),
+                    ships: placed
+                        .iter()
+                        .map(|o| {
+                            (
+                                o["type"].as_str().unwrap_or_default().into(),
+                                Some([0, 1, 2].map(|i| o["pos"][i].as_f64().unwrap_or(0.0) as f32)),
+                                o["name"].as_str().map(String::from),
+                            )
+                        })
+                        .collect(),
+                    weapons: vec![],
+                    crew: vec![],
+                });
+            }
+        }
         let mut namer = Namer::new();
         for g in &groups {
             let Some(p) = players.get(g.player) else { continue };
@@ -334,7 +378,17 @@ pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Libra
             for (i, ((name, at, label), slot)) in g.ships.iter().zip(slots).enumerate() {
                 let pos = at.map_or(slot, |a| game_to_bevy(&serde_json::json!(a)));
                 let e = spawn_ship(commands, assets, lib, fxl, name, g.side, pos, heading, label.clone().or_else(|| namer.pick(lib, name)));
-                commands.entity(e).insert((ship::FleetMember(owner.clone(), i), MapObject { id: g.ids.get(i).copied().flatten(), start: g.side }));
+                let id = g.ids.get(i).copied().flatten();
+                commands.entity(e).insert((ship::FleetMember(owner.clone(), i), MapObject { id, start: g.side }));
+                if let Some(names) = &script_names {
+                    commands.entity(e).insert(campaign::MissionShip {
+                        id: id.unwrap_or(-1),
+                        name: id.and_then(|id| names.get(&id).cloned()).unwrap_or_default(),
+                        owner: p["name"].as_str().unwrap_or_default().into(),
+                        visible: true,
+                        ..default()
+                    });
+                }
                 if !g.human {
                     commands.entity(e).entry::<Ship>().and_modify(|mut s| (s.crew_speed, s.crew_turn) = (ship::COMPUTER_CREW, ship::COMPUTER_TURN));
                     // PROVISIONAL: the crew factor matching the measured speed (Average-to-Elite, retail save scale)
@@ -370,6 +424,31 @@ pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Libra
         match victory::Victory::from_map(map, teams) {
             Some(v) => commands.insert_resource(v),
             None => commands.remove_resource::<victory::Victory>(),
+        }
+        // The map player -> side table and team rosters the script needs (a base player such as 'pirate base' fights for the fleet of
+        // its type, as the bases below do).
+        let sides: std::collections::HashMap<String, Side> = players
+            .iter()
+            .enumerate()
+            .filter_map(|(i, p)| {
+                let team = p["team"].as_i64().unwrap_or(-1) as i32;
+                let name = p["name"].as_str()?;
+                let side = groups.iter().find(|g| g.player == i).or_else(|| groups.iter().find(|g| team >= 0 && g.team == team)).map(|g| g.side);
+                let side = side.or_else(|| faction(name).and_then(|f| groups.iter().find(|g| g.race == f)).map(|g| g.side))?;
+                Some((name.to_string(), side))
+            })
+            .collect();
+        let rosters = map_teams
+            .iter()
+            .enumerate()
+            .map(|(i, t)| {
+                let names = players.iter().filter(|p| p["team"].as_i64() == Some(i as i64)).filter_map(|p| p["name"].as_str().map(String::from)).collect();
+                (t["name_id"].as_str().unwrap_or_default().to_string(), names)
+            })
+            .collect();
+        match crate::rules::skirmish::SkirmishScript::load(&map_id, rosters, sides) {
+            Some(s) => commands.insert_resource(s),
+            None => commands.remove_resource::<crate::rules::skirmish::SkirmishScript>(),
         }
         // Bases fight for the side whose fleet type is theirs; a base no fleet claims stays neutral (and silent).
         for (e, o) in &bases {
@@ -524,7 +603,7 @@ pub fn outcome(
     mut cfg: ResMut<Config>,
     player: Query<&Health, With<PlayerShip>>,
     ships: Query<(&Health, &Ship), Without<PlayerShip>>,
-    rules: (Option<Res<victory::Victory>>, Option<Res<combat::Library>>, Option<Res<ship::Fleets>>),
+    rules: (Option<Res<victory::Victory>>, Option<Res<combat::Library>>, Option<Res<ship::Fleets>>, Option<Res<crate::rules::skirmish::SkirmishScript>>),
     all: Query<(&Health, &Ship, &Transform, Option<&ship::FleetMember>, Option<&MapObject>)>,
     bases: Query<(&campaign::MissionBase, &combat::ArmedBase, &Health)>,
 ) {
@@ -550,7 +629,8 @@ pub fn outcome(
             })
             .collect();
         let damage: Vec<(i64, f32)> = bases.iter().map(|(b, a, h)| (b.id, combat::base_mission_damage(&lib.classes[a.class], h))).collect();
-        let decided = victory.decide_with_message(&victory::Snapshot { ships: &states, bases: &damage });
+        let points = rules.3.as_ref().map(|s| s.points()).unwrap_or_default();
+        let decided = victory.decide_with_message(&victory::Snapshot { ships: &states, bases: &damage, points: &points });
         end_message = decided.as_ref().and_then(|d| d.1.clone());
         decided.map_or(Outcome::Playing, |d| d.0)
     } else if player.single().is_err() || player.single().is_ok_and(|h| h.destroyed) {

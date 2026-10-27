@@ -1,7 +1,7 @@
 //! How a skirmish ends. Every retail skirmish map carries its own end-game rules (exported as `victory` in `map.json`,
 //! `docs/re/skirmish-setup.md` "Victory conditions"): base destroyed, no ships left, ... This module reads the ones we model and
 //! decides the human's outcome from a snapshot of the battle; `scenario::outcome` builds the snapshot. A map with a condition
-//! we do not model yet (volumes, points, group kills) keeps the plain "no enemy ships left" rule.
+//! we do not model yet keeps the plain "no enemy ships left" rule. Team points come from the map's own script (rules::skirmish).
 
 use crate::rules::Region;
 use crate::scenario::Outcome;
@@ -38,6 +38,8 @@ enum Cond {
     Captured(Vec<i64>),
     /// A ship of the group was destroyed. PROVISIONAL: who destroyed it is not checked.
     DestroyedFrom(Vec<i64>),
+    /// The team has scored at least this many points through the map's script (rules::skirmish).
+    TeamPoints(String, i32),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -79,10 +81,11 @@ pub struct ShipState {
     pub at: Vec2,
 }
 
-/// What `decide` looks at: every ship (also the destroyed ones) and each base's mission damage by object id.
+/// What `decide` looks at: every ship (also the destroyed ones), each base's mission damage by object id and the teams' points.
 pub struct Snapshot<'a> {
     pub ships: &'a [ShipState],
     pub bases: &'a [(i64, f32)],
+    pub points: &'a [(String, i32)],
 }
 
 impl Victory {
@@ -149,6 +152,7 @@ impl Victory {
                 Cond::InVolume { objects, polygon } => of(objects).iter().any(|s| s.alive && polygon.contains(s.at)),
                 Cond::Captured(objects) => of(objects).iter().any(|s| s.alive && s.side != s.start),
                 Cond::DestroyedFrom(objects) => of(objects).iter().any(|s| !s.alive),
+                Cond::TeamPoints(team, points) => snap.points.iter().any(|(t, p)| t == team && p >= points),
             });
             if !hit {
                 continue;
@@ -189,6 +193,7 @@ fn condition(c: &Value) -> Option<Cond> {
         }
         "Enter Volume" => Cond::InVolume { objects: objects()?, polygon: Region::from_json(c.get("polygon").filter(|p| p.as_array().is_some_and(|a| a.len() > 2))?) },
         "Team has destroyed a ship from Group/Unit" => Cond::DestroyedFrom(objects()?),
+        "Team has X points" => Cond::TeamPoints(c["Team Name"].as_str()?.to_string(), c["Points"].as_i64()? as i32),
         _ => return None,
     })
 }
@@ -211,7 +216,7 @@ mod tests {
         vec![(NAVY.into(), vec![Side::Player]), (PROC.into(), vec![Side(1)])]
     }
     fn state(ships: &[ShipState], bases: &[(i64, f32)]) -> Snapshot<'static> {
-        Snapshot { ships: Box::leak(ships.to_vec().into_boxed_slice()), bases: Box::leak(bases.to_vec().into_boxed_slice()) }
+        Snapshot { ships: Box::leak(ships.to_vec().into_boxed_slice()), bases: Box::leak(bases.to_vec().into_boxed_slice()), points: &[] }
     }
 
     fn border_dispute() -> Victory {
@@ -310,13 +315,13 @@ mod tests {
 
     #[test]
     fn a_map_with_a_condition_we_do_not_model_keeps_the_plain_rule() {
-        let map = json!({"victory": [{"name": "x", "winner": NAVY, "if": [{"Type": "Team has X points", "Points": 350}]}]});
+        let map = json!({"victory": [{"name": "x", "winner": NAVY, "if": [{"Type": "Team Member Enters Volume"}]}]});
         assert!(Victory::from_map(&map, vec![]).is_none());
         assert!(Victory::from_map(&json!({}), vec![]).is_none());
     }
 
-    /// The exported rules of the real maps: base maps keep playing after the fleet dies and end on a base; Convoy Raid (points) is not
-    /// modelled yet.
+    /// The exported rules of the real maps: base maps keep playing after the fleet dies and end on a base; Convoy Raid ends on its
+    /// script's team points.
     #[test]
     fn the_retail_maps_load() {
         let map = crate::data::map_json("border_dispute").unwrap();
@@ -324,9 +329,15 @@ mod tests {
         let v = Victory::from_map(&map, real).expect("Border Dispute's rules are all modelled");
         let fleets = [ship(Side::Player, true), ship(Side(1), false)];
         assert_eq!(v.decide(&state(&fleets, &[(4, 0.0), (225, 1.0)])), Some(Outcome::Victory));
-        for id in ["zemyatin", "diablo_straight", "red_rover", "ambush", "bayles_stand", "locusts", "mousetrap"] {
+        for id in ["zemyatin", "diablo_straight", "red_rover", "ambush", "bayles_stand", "locusts", "mousetrap", "convoy_raid"] {
             assert!(Victory::from_map(&crate::data::map_json(id).unwrap(), vec![]).is_some(), "{id}");
         }
-        assert!(Victory::from_map(&crate::data::map_json("convoy_raid").unwrap(), vec![]).is_none(), "points rules are not modelled");
+        let (navy, pirates) = ("IDGS_TPTEAMNAMES_NAVY", "IDGS_TPTEAMNAMES_PIRATES");
+        let real = vec![(navy.to_string(), vec![Side::Player]), (pirates.to_string(), vec![Side(1)])];
+        let convoy = Victory::from_map(&crate::data::map_json("convoy_raid").unwrap(), real).unwrap();
+        let at = |points: &[(String, i32)]| convoy.decide(&Snapshot { ships: &fleets, bases: &[], points: Box::leak(points.to_vec().into_boxed_slice()) });
+        assert_eq!(at(&[(navy.into(), 340), (pirates.into(), 390)]), None);
+        assert_eq!(at(&[(navy.into(), 350)]), Some(Outcome::Victory));
+        assert_eq!(at(&[(pirates.into(), 400)]), Some(Outcome::Defeat));
     }
 }
