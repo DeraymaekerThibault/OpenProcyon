@@ -424,6 +424,7 @@ fn build(
                             if let Some(p) = &preview {
                                 c.spawn((ImageNode::new(p.image.clone()), ctx.node(r[0], r[1], r[2] - r[0], r[3] - r[1])));
                             }
+                            ship_name_field(&ctx, c, &sk, &lib);
                             None
                         }
                         (Screen::Fleet, "AutoAssign Button") => Some(Action::AutoAssign),
@@ -1048,6 +1049,26 @@ pub(super) fn pulldown_cell(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b
 }
 
 const SHIP_ROWS: usize = 8;
+
+/// The ship-name pull-down at the top left of the preview, shown while a fleet ship is displayed: the name and the pull-down arrow;
+/// holding it lists the hull's other names 19 apart under it (measured with the retail driver). PROVISIONAL: the box is the lobby's
+/// pull-down art, retail draws a plainer outlined box that grows with the name.
+fn ship_name_field(ctx: &Ctx, c: &mut ChildSpawnerCommands, sk: &Skirmish, lib: &Library) {
+    let Some(h) = sk.human().filter(|_| sk.view_slot && sk.slot_filled()) else { return };
+    let Some(name) = h.ship_names(lib).get(sk.fleet_pick).cloned().flatten() else { return };
+    let w = ctx.fonts.0.get("Univers10").map_or(120.0, |f| f.width(&name)) + 44.0;
+    pulldown_cell(ctx, c, [55.0, 94.0, 55.0 + w, 116.0], &name, false, Some(Action::NameList(!sk.name_open)), true);
+    if sk.name_open {
+        // A click anywhere else closes the list.
+        c.spawn((Interaction::None, bevy::ui::FocusPolicy::Block, Action::NameList(false), ctx.node(0.0, 0.0, 800.0, 600.0), ZIndex(1)));
+        for (k, n) in sk.slots.iter().find(|s| s.kind == Kind::Human).map_or_else(Vec::new, |h| h.name_choices(lib, sk.fleet_pick)).into_iter().enumerate() {
+            let y = 118.5 + k as f32 * 19.0;
+            c.spawn((ctx.node(55.0, y, 140.0, 19.0), ZIndex(2), BackgroundColor(LIST_BACKING))).with_children(|c| {
+                pulldown_cell(ctx, c, [0.0, 0.0, 140.0, 19.0], &n, false, Some(Action::PickName(n.clone())), false);
+            });
+        }
+    }
+}
 
 /// Ship Types Available: the offered hulls of the human slot's fleet type (mouse wheel scrolls), the selected one highlighted.
 /// 'Available Ships' as measured on the original: UniversBold14 header centred at y 311, Univers12 rows from x 525, 19 apart from
