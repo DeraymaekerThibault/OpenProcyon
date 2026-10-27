@@ -325,7 +325,7 @@ def export(root, ship, outdir):
                 label = close[0] if close else label
             node, pos = hp[label]
             # Base gun nodes already use MDB coordinates; their distinct tower origins must not be added again.
-            if ship.startswith("Base_"):
+            if ship.startswith(("Base_", "Island_")):
                 pos = node.pos
         except (KeyError, FileNotFoundError, ValueError) as e:
             skipped.append(f"{label}:{gun}:{e}")
@@ -433,7 +433,7 @@ def base_safe_physics(root, ship):
     try:
         return export_physics(root, ship)["properties"]
     except ValueError:
-        if not ship.startswith("Base_"):
+        if not ship.startswith(("Base_", "Island_")):
             raise
         zero = {"value": 0.0}
         return dict.fromkeys(

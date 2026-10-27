@@ -51,7 +51,15 @@ def export(root, out, mid):
                 dur = ogg.duration(src)
                 if mid in PLAYABLE:
                     shutil.copyfile(src, out / "sound" / (file.lower() + ".ogg"))
-            speech[n] = dict(text=text, duration=dur, file=file, face=ev.get("face"))
+            speech[n] = dict(
+                text=text,
+                duration=dur,
+                file=file,
+                face=ev.get("face"),
+                color=ev.get("color"),
+                head=ev.get("head"),
+                speaker=ev.get("speaker"),
+            )
         elif a["Type"] == "Play Special Effect":
             # A dialogue-folder sound (cue or line) played by name; no subtitle/talking head.
             src = root / "Sound/Dialogue" / (a["File Name"] + ".ogg")

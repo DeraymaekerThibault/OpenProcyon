@@ -17,7 +17,7 @@ from tools.export_environment import export_environment
 from tools.export_maps import convert_scene, mesh_scene, parse_twt, strings, tiles
 from tools.mdb_to_glb import convert
 from tools.models import model_path
-from tools.wot import blocks, fields, objects, parse_text
+from tools.wot import blocks, fields, objects, parse_text, properties
 
 # Scenes whose BD_Meshes layers carry another name than the scene.
 SOURCE = "World/SinglePlayer/Mission01.twt"  # set per mission by main()
@@ -159,8 +159,20 @@ def parse_mission(text):
         for b in blocks(nodes, "PlayerAllianceInfoVector - Element")
         for f in [fields(b["children"])]
     ]
+    meta = {}
+    for n in properties(nodes):
+        meta.setdefault(n["name"], n["value"])
+
+    def pool(name):
+        return [n["value"] for n in properties(nodes) if n["name"] == name]
+
     return dict(
         source=SOURCE,
+        # The crew and arms the mission offers (the Crew/Arms Select screens): authored lists, not a save artefact.
+        crew_pool=pool("World Crew List - Element"),
+        arms_pool=pool("World Arms List - Element"),
+        play_end_movie=meta.get("PlayEndMovie", False),
+        journal_music=meta.get("Journal Music Name"),
         ships=ships,
         paths=paths,
         points=points,
@@ -190,6 +202,9 @@ def speech_events(text):
             file=f.get("Sound FileName"),
             text_id=f.get("TextStringID"),
             face=f.get("FaceTexture"),
+            color=f.get("Text Color"),
+            head=f.get("TalkingHeadLocation"),
+            speaker=f.get("SpeakerID"),
         )
     return out
 

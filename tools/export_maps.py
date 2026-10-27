@@ -90,6 +90,15 @@ def parse_twt(text):
             None,
         ),
         backdrop=metadata.get("Backdrop Texture Name"),
+        # Lighting the map authors (RGBA colours, roof light direction); the retail lighting model itself is not recovered.
+        lighting=dict(
+            ambient=metadata.get("Ambient Light"),
+            roof_direction=metadata.get("Vector for roof light orientation"),
+            floor=metadata.get("Hemispherical floor light color"),
+            roof=metadata.get("Hemispherical roof light color"),
+        ),
+        alliance_change=metadata.get("Is Alliance Change Allowed", False),
+        islands_make_sounds=metadata.get("Islands Make Sounds", True),
         players=[],
         objects=list(objects(nodes)),
         teams=[],
@@ -117,6 +126,7 @@ def parse_twt(text):
                     formation=f.get("FormationType", 0),
                     playable=f.get("IsPlayable", False),
                     race=f.get("Race", 4),
+                    color=f.get("Color"),
                 )
             )
     for a in actions:
