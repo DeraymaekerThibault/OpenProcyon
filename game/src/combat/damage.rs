@@ -269,10 +269,16 @@ pub fn fires(
 
 /// Retail: a destroyed swappable section swaps its mesh "<A>_<B>" for "<A>Damage_<B>".
 /// The GLB carries both; show whichever matches the section state. Runs every frame so freshly loaded scenes are covered.
-pub fn swap_meshes(lib: Res<Library>, ships: Query<(Entity, &Ship, &Health), Without<super::Sinking>>, children: Query<&Children>, mut nodes: Query<(&Name, &mut Visibility)>) {
-    // A breaking-up ship's section nodes belong to `deaths` until it is gone.
-    for (e, ship, h) in &ships {
-        let class = &lib.classes[ship.class];
+pub fn swap_meshes(
+    lib: Res<Library>,
+    ships: Query<(Entity, &Ship, &Health), Without<super::Sinking>>,
+    bases: Query<(Entity, &super::ArmedBase, &Health), Without<Ship>>,
+    children: Query<&Children>,
+    mut nodes: Query<(&Name, &mut Visibility)>,
+) {
+    // A breaking-up ship's section nodes belong to `deaths` until it is gone. Armed bases swap their destroyed parts the same way.
+    for (e, class, h) in ships.iter().map(|(e, s, h)| (e, s.class, h)).chain(bases.iter().map(|(e, b, h)| (e, b.class, h))) {
+        let class = &lib.classes[class];
         for d in children.iter_descendants(e) {
             let Ok((name, mut vis)) = nodes.get_mut(d) else { continue };
             let n = name.as_str();
@@ -280,8 +286,12 @@ pub fn swap_meshes(lib: Res<Library>, ships: Query<(Entity, &Ship, &Health), Wit
                 Some((a, b)) => (format!("{a}_{b}"), true),
                 None => (n.to_string(), false),
             };
-            let Some(i) = class.sections.iter().position(|s| s.layer.eq_ignore_ascii_case(&base)) else { continue };
-            let want = if (h.sections[i] <= 0.0) == damaged { Visibility::Inherited } else { Visibility::Hidden };
+            // A damaged mesh of a layer that is no section can never be shown (it would sit on top of the intact one).
+            let want = match class.sections.iter().position(|s| s.layer.eq_ignore_ascii_case(&base)) {
+                Some(i) if (h.sections[i] <= 0.0) == damaged => Visibility::Inherited,
+                None if !damaged => continue,
+                _ => Visibility::Hidden,
+            };
             if *vis != want {
                 *vis = want;
             }
@@ -345,5 +355,31 @@ pub fn crew_repair(time: Res<Time>, lib: Res<Library>, mut rng: ResMut<Rng>, mut
         let class = &lib.classes[ship.class];
         let (engineers, riggers) = (crew_slots(ship, class, posts, 4, "engineering"), crew_slots(ship, class, posts, 5, "rigging"));
         damage_control(class, &mut h.sections, &engineers, &riggers, &mut || rng.f());
+    }
+}
+
+#[cfg(test)]
+mod swap_tests {
+    use super::*;
+    use crate::combat::{ArmedBase, Health};
+
+    #[test]
+    fn a_destroyed_base_part_shows_its_damaged_mesh() {
+        let lib = Library::load(&crate::assets_dir());
+        let class = lib.index("Base_Procyon1");
+        let mut app = App::new();
+        app.insert_resource(Library::load(&crate::assets_dir())).add_systems(Update, swap_meshes);
+        let mut hp = Health::new(&lib.classes[class]);
+        hp.sections[0] = 0.0; // BaseProcyons_Layer2
+        let node = |app: &mut App, parent, name: &str| app.world_mut().spawn((Name::new(name.to_string()), Visibility::default(), ChildOf(parent))).id();
+        let base = app.world_mut().spawn((ArmedBase { class }, hp)).id();
+        let [whole, hurt, other, other_hurt] =
+            ["BaseProcyons_Layer2", "BaseProcyonsDamage_Layer2", "BaseProcyons_Layer3", "BaseProcyonsDamage_Layer3"].map(|n| node(&mut app, base, n));
+        let stray = node(&mut app, base, "BaseProcyonsDamage_Layer1");
+        app.update();
+        let vis = |app: &App, e| *app.world().get::<Visibility>(e).unwrap();
+        assert_eq!([vis(&app, whole), vis(&app, hurt)], [Visibility::Hidden, Visibility::Inherited]);
+        assert_eq!([vis(&app, other), vis(&app, other_hurt)], [Visibility::Inherited, Visibility::Hidden]);
+        assert_eq!(vis(&app, stray), Visibility::Hidden);
     }
 }
