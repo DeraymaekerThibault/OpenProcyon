@@ -176,6 +176,7 @@ pub fn run(view: fn(&mut App), setup_view: fn(&mut App)) {
         })
         .insert_resource(cfg)
         .insert_resource(Outcome::Playing)
+        .init_resource::<scenario::EndMessage>()
         .insert_resource(bindings::Bindings::load())
         .insert_resource({
             let c: Vec<f32> = arg("--cam").map(|v| v.split(',').filter_map(|x| x.parse().ok()).collect()).unwrap_or_default();

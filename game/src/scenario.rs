@@ -81,6 +81,10 @@ pub enum Outcome {
     Defeat,
 }
 
+/// The end message (string id) of the map rule that decided the battle, for the Game Summary; none: the default VICTORY/DEFEAT.
+#[derive(Resource, Default)]
+pub struct EndMessage(pub Option<String>);
+
 /// Battle start: the front end's choice (map, fleets) if any, else the command line.
 pub fn enter_battle(
     mut commands: Commands,
@@ -595,6 +599,7 @@ pub fn restart(
 
 pub fn outcome(
     mut out: ResMut<Outcome>,
+    mut message: ResMut<EndMessage>,
     mut cfg: ResMut<Config>,
     player: Query<&Health, With<PlayerShip>>,
     ships: Query<(&Health, &Ship), Without<PlayerShip>>,
@@ -608,6 +613,7 @@ pub fn outcome(
     if campaign::is_mission(cfg.map.as_deref()) || *out != Outcome::Playing {
         return;
     }
+    let mut end_message = None;
     let new = if let (Some(victory), Some(lib)) = (&rules.0, &rules.1) {
         // The map's own rules decide: a base falling, the human fleet or every ship lost.
         let local = rules.2.as_ref().map(|f| f.local.as_str());
@@ -624,7 +630,9 @@ pub fn outcome(
             .collect();
         let damage: Vec<(i64, f32)> = bases.iter().map(|(b, a, h)| (b.id, combat::base_mission_damage(&lib.classes[a.class], h))).collect();
         let points = rules.3.as_ref().map(|s| s.points()).unwrap_or_default();
-        victory.decide(&victory::Snapshot { ships: &states, bases: &damage, points: &points }).unwrap_or(Outcome::Playing)
+        let decided = victory.decide_with_message(&victory::Snapshot { ships: &states, bases: &damage, points: &points });
+        end_message = decided.as_ref().and_then(|d| d.1.clone());
+        decided.map_or(Outcome::Playing, |d| d.0)
     } else if player.single().is_err() || player.single().is_ok_and(|h| h.destroyed) {
         Outcome::Defeat
     } else if enemies().count() > 0 && enemies().all(|h| h.destroyed) {
@@ -637,6 +645,7 @@ pub fn outcome(
         cfg.ended = Some(cfg.frame);
     }
     *out = new;
+    message.0 = end_message;
 }
 
 /// Keep meshes, gun mounts, dock points and collision in the same placed scene frame.
@@ -785,7 +794,7 @@ mod rotation_tests {
     fn decided_outcome_is_final() {
         use bevy::ecs::system::RunSystemOnce;
         let mut app = App::new();
-        app.insert_resource(Outcome::Victory).insert_resource(Config {
+        app.insert_resource(Outcome::Victory).init_resource::<EndMessage>().insert_resource(Config {
             groups: vec![],
             player: "Ship_Navy_Cutter".into(),
             allies: vec![],

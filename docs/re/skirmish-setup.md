@@ -189,5 +189,6 @@ the ships of non-playable map players (Convoy Raid's convoys) join on their team
 end Convoy Raid ('Team has X points'). PROVISIONAL: ships with a Persistent or Dummy stance, and hidden ones, are left to the script by
 the computer captains; other scripted routes (Ambush's Mercy) are still overridden by the captain AI; a Navy player who loses every
 ship on Convoy Raid has no rule ending the game (the original's behaviour there is unknown). A map without exported rules keeps the
-plain "no enemy ships left" outcome. The custom
-winner/loser messages (`IDGS_TPINGAMEMESSAGE_*`) are exported but not shown yet.
+plain "no enemy ships left" outcome. The map rule's
+winner/loser message (`IDGS_TPINGAMEMESSAGE_*`, the human's side) is shown under the VICTORY!/DEFEAT! label of the Game Summary
+(PROVISIONAL: retail position and timing unmeasured; "GAME STRING" means no custom message).
