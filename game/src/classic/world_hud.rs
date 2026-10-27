@@ -183,7 +183,11 @@ fn spawn_labels(
         let tint = banner_tint(ship.side, mission);
         let part = |side: &str| sprite_of(&hud, &format!("ShipNameBackdrop_{side}_WhiteBanner"));
         let (Some(l), Some(c), Some(r)) = (part("Left"), part("Center"), part("Right")) else { continue };
-        let text = mission.map(|m| m.name.clone()).or(named.map(|n| n.0.clone())).unwrap_or_else(|| lib.classes[ship.class].name.trim_start_matches("Ship_").replace('_', " "));
+        let text = mission
+            .map(|m| m.name.clone())
+            .filter(|n| !n.is_empty())
+            .or(named.map(|n| n.0.clone()))
+            .unwrap_or_else(|| lib.classes[ship.class].name.trim_start_matches("Ship_").replace('_', " "));
         // PROVISIONAL font scale; the ribbon's opaque strip is only 21 px, not its 33 px atlas height.
         let font_scale = 1.05;
         let tw = font.width(&text) * font_scale;
