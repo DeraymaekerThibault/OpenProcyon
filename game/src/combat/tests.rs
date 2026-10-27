@@ -276,6 +276,59 @@ fn hostile_island_towers_shoot_the_player_and_neutral_ones_do_not() {
 }
 
 #[test]
+fn skirmish_bases_shoot_ships_of_other_sides_only() {
+    let mut app = App::new();
+    app.add_plugins((TaskPoolPlugin::default(), AssetPlugin::default(), TransformPlugin))
+        .init_asset::<bevy::world_serialization::WorldAsset>()
+        .init_asset::<bevy::prelude::Image>()
+        .add_message::<Sfx>()
+        .add_message::<Fired>()
+        .init_resource::<Time>()
+        .init_resource::<FxLib>()
+        .insert_resource(Library::load(&assets_dir()))
+        .insert_resource(Rng::new(7))
+        .insert_resource(Look { mesh: default(), shell: default(), enemy_shell: default() })
+        .init_resource::<crate::environment::Sensors>()
+        .add_systems(PreUpdate, crate::environment::refresh_sensors)
+        .add_systems(Update, base_fire);
+    let assets = app.world().resource::<AssetServer>().clone();
+    let lib = Library::load(&assets_dir());
+    let class = lib.index("Base_SmugglersCamp");
+    let spawn_base = |app: &mut App, side: Side, x: f32| {
+        let id = app.world_mut().spawn((Transform::from_xyz(x, -27.0, 0.0), crate::campaign::MissionBase { id: 1, owner: format!("base{x}") }, BaseSide(side))).id();
+        let states = spawn_guns(&mut app.world_mut().commands(), &assets, &lib, id, class);
+        app.world_mut().entity_mut(id).insert((ArmedBase { class }, Health::new(&lib.classes[class]), states));
+        app.world_mut().flush();
+        id
+    };
+    let hostile = spawn_base(&mut app, Side::Enemy, 0.0);
+    spawn_base(&mut app, Side::Player, 40.0);
+    let c = lib.index("Ship_Navy_Torpedo");
+    let ship = Ship {
+        class: c,
+        side: Side::Player,
+        heading: 0.0,
+        speed: 0.0,
+        ang_vel: 0.0,
+        order: 0,
+        waypoints: vec![],
+        goal: None,
+        cap: 1.0,
+        throttle: None,
+        sail_energy: 1.0,
+        crew_speed: 1.0,
+        crew_turn: 1.0,
+    };
+    app.world_mut().spawn((Transform::from_xyz(0.0, 0.0, -120.0), ship, Health::new(&lib.classes[c]), Fires::default(), PlayerShip));
+    for _ in 0..300 {
+        app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs_f32(0.05));
+        app.update();
+    }
+    let shooters: Vec<Entity> = app.world_mut().query::<&Shell>().iter(app.world()).map(|s| s.shooter).collect();
+    assert!(!shooters.is_empty() && shooters.iter().all(|s| *s == hostile), "only the base of the other side opened fire");
+}
+
+#[test]
 fn the_command_ship_holds_fire_until_an_enemy_is_clicked() {
     let mut app = App::new();
     app.add_plugins((TaskPoolPlugin::default(), AssetPlugin::default(), TransformPlugin))

@@ -119,7 +119,7 @@ pub(super) fn shells(
     mut destroyed: MessageWriter<Destroyed>,
     mut rocks: Query<(Entity, &Transform, &mut Asteroid, &crate::collision::Drift), Without<Shell>>,
     animals: Query<(Entity, &Transform, &crate::environment::SpaceAnimal), Without<Shell>>,
-    mut bases: Query<(Entity, &Transform, &ArmedBase, &mut Health, &crate::campaign::MissionBase), (Without<Shell>, Without<Ship>)>,
+    mut bases: Query<(Entity, &Transform, &ArmedBase, &mut Health, &crate::campaign::MissionBase, Option<&BaseSide>), (Without<Shell>, Without<Ship>)>,
     campaign: Option<Res<crate::campaign::Mission>>,
     mut q: Query<(Entity, &mut Shell, &mut Transform), Without<Ship>>,
     // Shells pass through lifeboats (no weapon-vs-lifeboat response is registered in the original; PROVISIONAL, docs/re/lifeboats.md §2.4).
@@ -279,12 +279,15 @@ pub(super) fn shells(
         // Island gun towers: hit only by the side the base's owner is hostile to (neutral islands let shells pass).
         let base_hit = bases
             .iter()
-            .filter(|(.., hp, mb)| {
+            .filter(|(.., hp, mb, side)| {
                 !hp.destroyed
-                    && campaign.as_deref().is_some_and(|c| {
-                        let enemy = c.script.hostile(c.script.player(), &mb.owner);
-                        (if enemy { Side::Enemy } else { Side::Player }) != s.side
-                    })
+                    && match side {
+                        Some(side) => side.0 != s.side,
+                        None => campaign.as_deref().is_some_and(|c| {
+                            let enemy = c.script.hostile(c.script.player(), &mb.owner);
+                            (if enemy { Side::Enemy } else { Side::Player }) != s.side
+                        }),
+                    }
             })
             .filter_map(|(be, btf, ab, ..)| {
                 let class = &lib.classes[ab.class];
@@ -294,7 +297,7 @@ pub(super) fn shells(
             })
             .min_by(|x, y| x.0.total_cmp(&y.0));
         if let Some((t, k, be)) = base_hit.filter(|b| best.as_ref().is_none_or(|x| b.0 < x.0))
-            && let Ok((_, _, ab, mut hp, _)) = bases.get_mut(be)
+            && let Ok((_, _, ab, mut hp, ..)) = bases.get_mut(be)
         {
             let sec = &lib.classes[ab.class].sections[k];
             let key = MATERIALS.iter().find(|m| sec.material.contains(**m)).copied().unwrap_or("Wood");

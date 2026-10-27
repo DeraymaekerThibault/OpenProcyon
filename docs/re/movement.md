@@ -177,8 +177,10 @@ Headless retail skirmishes, one computer ship against our idle or fleeing Navy C
   60 s later. So with a hostile base on the map the computer goes for the base (which sits near our start) instead of
   exploring; on maps without bases it explores. Whether that is "nearest hostile base regardless of range" or a map/player
   setting is not checked (one map). The skirmish map's bases belong to non-playable players named "navybase" / "procbase";
-  the Navy base fired on the Procyon ship (r5) and not on our idle Cutter. Remake: skirmish bases have no side and do not fire;
-  computer ships explore instead (PROVISIONAL gap).
+  the Navy base fired on the Procyon ship (r5) and not on our idle Cutter. Remake: a skirmish base fights for the side whose fleet
+  type is its own, fires on ships of other sides and is a target for them; a computer ship with nothing in sight heads for the
+  nearest living hostile base, however far, and only then explores (PROVISIONAL: nearest base, ships in sight first;
+  [skirmish-setup.md](skirmish-setup.md#bases)).
 - **Scan range = WOT sight × the lookout post's factor:** the Minelayer (sight 500, empty lookout) saves 562.5 = 500 × 1.125; the
   Carrack (lookout rated 7) 712.5 = 500 × 1.425 (crew factors: [crew.md](crew.md#saved-crew-factors)).
 - **Other routines in the save** (per computer ship): target selection with an attack timer; a simple attack routine with a random

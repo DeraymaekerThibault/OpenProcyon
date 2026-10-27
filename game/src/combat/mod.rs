@@ -40,6 +40,10 @@ pub struct Health {
 pub struct ArmedBase {
     pub class: usize,
 }
+/// The side a skirmish base fights for (a mission's bases take their allegiance from the rules instead). A base fires on ships of
+/// any other side and is a target for them. PROVISIONAL: which side a map's base belongs to (`scenario::faction`).
+#[derive(Component, Clone, Copy)]
+pub struct BaseSide(pub crate::ship::Side);
 /// What the rules' 'Vital Section has X damage' reads for a base (PROVISIONAL: mean damage of its vitalToMission sections).
 pub fn base_mission_damage(class: &Class, hp: &Health) -> f32 {
     let v: Vec<f32> = class.sections.iter().zip(&hp.sections).filter(|(c, _)| c.mission).map(|(c, h)| 1.0 - h / c.hp.max(1.0)).collect();
