@@ -173,6 +173,12 @@ impl Victory {
             }
             let human_wins = match &rule.winner {
                 Some(team) => self.teams.iter().any(|(n, sides)| n == team && sides.contains(&Side::Player)),
+                None if rule.conditions.contains(&Cond::NoHumanShips) => {
+                    // Retail: with every human ship lost the result still reads VICTORY when the human's team has ships left and no
+                    // other team has (Border Dispute, our Man-O-War sunk after the Navy computers cleared the Procyon fleet).
+                    let ours = self.teams.iter().find(|(_, sides)| sides.contains(&Side::Player)).map(|t| t.0.as_str());
+                    ours.is_some_and(|ours| team_has_ships(ours) && self.teams.iter().all(|(n, _)| n == ours || !team_has_ships(n)))
+                }
                 None => rule.conditions.contains(&Cond::GameComplete) && alive_sides == [Side::Player.0],
             };
             let (win, lose) = &rule.messages;
@@ -270,6 +276,20 @@ mod tests {
         let snap = |captured: &'static [i64]| Snapshot { captured, ..state(&fleets, &[(4, 0.0), (225, 0.0)]) };
         assert_eq!(v.decide(&snap(&[])), None);
         assert_eq!(v.decide(&snap(&[225])), Some(Outcome::Victory));
+    }
+
+    #[test]
+    fn losing_the_human_ship_is_still_a_win_when_allies_cleared_the_enemy() {
+        let v = border_dispute();
+        let bases = [(4, 0.0), (225, 0.0)];
+        let mut dead = ship(Side::Player, true);
+        dead.alive = false;
+        let ally = ship(Side::Player, false);
+        assert_eq!(v.decide(&state(&[dead.clone(), ally, ship(Side(1), false)], &bases)), Some(Outcome::Defeat), "the Procyon fleet still stands");
+        let mut gone = ship(Side(1), false);
+        gone.alive = false;
+        assert_eq!(v.decide(&state(&[dead.clone(), ship(Side::Player, false), gone.clone()], &bases)), Some(Outcome::Victory));
+        assert_eq!(v.decide(&state(&[dead, gone], &bases)), Some(Outcome::Defeat), "no ship of ours left");
     }
 
     #[test]
