@@ -223,6 +223,7 @@ pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Libra
     let ours: Vec<String> = std::iter::once(cfg.player.clone()).chain(cfg.allies.iter().cloned()).collect();
     if let Some(map) = &map {
         let docks = crate::docking::load_docks();
+        let island_sounds = data::try_json(&crate::assets_dir().join("data/island_sounds.json")).unwrap_or_default();
         for o in map["objects"].as_array().into_iter().flatten() {
             let glb = format!("{}.glb", o["scene"].as_str().unwrap_or_default());
             let rotation = game_rotation(&o["rot"]);
@@ -234,6 +235,9 @@ pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Libra
             // Every base/island with dock points is dockable on every map type, not only campaign bases a rule sets up.
             if let Some(d) = o["type"].as_str().and_then(|t| crate::docking::dockable_for(&docks, t)) {
                 commands.entity(e).insert(d);
+            }
+            if let Some(i) = o["type"].as_str().and_then(|t| island_sounds.get(t)) {
+                commands.entity(e).insert(crate::audio::IslandLoop { sound: i["sound"].as_str().unwrap_or_default().into(), max: i["distance"].as_f64().unwrap_or(200.0) as f32 });
             }
             if let Some(t) = o["type"].as_str().filter(|t| t.starts_with("Terrain_BlackHole")) {
                 // The funnel mesh is not drawn: the reference video shows only the effect's glow, beam and ribbons.
