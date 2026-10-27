@@ -52,6 +52,8 @@ struct Rule {
     conditions: Vec<Cond>,
     /// Team name id the rule declares the winner; none for draws and for the game-complete rules (the last side wins).
     winner: Option<String>,
+    /// String ids of the message shown to the winners and to the losers (`end` in `map.json`); none for the default "GAME STRING".
+    messages: (Option<String>, Option<String>),
 }
 
 /// The end rules of the running skirmish and the sides of each map team (a lobby team can hold several sides).
@@ -94,7 +96,8 @@ impl Victory {
             for c in r["if"].as_array()? {
                 conditions.push(condition(c)?);
             }
-            out.push(Rule { conditions, winner: r["winner"].as_str().map(String::from) });
+            let message = |who: &str| r["end"][who].as_str().filter(|m| m.starts_with("IDGS_")).map(String::from);
+            out.push(Rule { conditions, winner: r["winner"].as_str().map(String::from), messages: (message("winner"), message("loser")) });
         }
         let mut sides: Vec<Side> = teams.iter().flat_map(|t| t.1.iter().copied()).collect();
         sides.sort_by_key(|s| s.0);
@@ -104,6 +107,11 @@ impl Victory {
 
     /// The human's outcome once a rule fires (the first in map order), or none while the battle goes on.
     pub fn decide(&self, snap: &Snapshot) -> Option<Outcome> {
+        self.decide_with_message(snap).map(|d| d.0)
+    }
+
+    /// `decide`, plus the string id of the message the firing rule gives the human's side (none: the default VICTORY/DEFEAT).
+    pub fn decide_with_message(&self, snap: &Snapshot) -> Option<(Outcome, Option<String>)> {
         if snap.ships.is_empty() && snap.bases.is_empty() {
             return None; // nothing spawned yet
         }
@@ -149,7 +157,8 @@ impl Victory {
                 Some(team) => self.teams.iter().any(|(n, sides)| n == team && sides.contains(&Side::Player)),
                 None => rule.conditions.contains(&Cond::GameComplete) && alive_sides == [Side::Player.0],
             };
-            return Some(if human_wins { Outcome::Victory } else { Outcome::Defeat });
+            let (win, lose) = &rule.messages;
+            return Some(if human_wins { (Outcome::Victory, win.clone()) } else { (Outcome::Defeat, lose.clone()) });
         }
         None
     }
@@ -242,6 +251,19 @@ mod tests {
         let bases = [(4, 0.0), (225, 0.0)];
         assert_eq!(v.decide(&state(&[ship(Side(1), false)], &bases)), Some(Outcome::Defeat));
         assert_eq!(v.decide(&state(&[], &bases)), Some(Outcome::Defeat));
+    }
+
+    #[test]
+    fn the_firing_rule_gives_the_humans_message() {
+        let map = json!({"victory": [{"name": "w", "winner": NAVY, "end": {"winner": "IDGS_TPINGAMEMESSAGE_A", "loser": "GAME STRING"},
+            "if": [{"Type": "Group/Unit Vital Section has >,<,= X damage", "Equivalence": "Equal To", "Damage Percent": 1.0, "objects": [4]}]}]});
+        let v = Victory::from_map(&map, teams()).unwrap();
+        let fleets = [ship(Side::Player, true), ship(Side(1), false)];
+        assert_eq!(v.decide_with_message(&state(&fleets, &[(4, 1.0)])), Some((Outcome::Victory, Some("IDGS_TPINGAMEMESSAGE_A".into()))));
+        let map = json!({"victory": [{"name": "l", "winner": PROC, "end": {"winner": "GAME STRING", "loser": "IDGS_TPINGAMEMESSAGE_B"},
+            "if": [{"Type": "No Team Has Ships"}]}]});
+        let v = Victory::from_map(&map, teams()).unwrap();
+        assert_eq!(v.decide_with_message(&state(&[], &[(4, 0.0)])), Some((Outcome::Defeat, Some("IDGS_TPINGAMEMESSAGE_B".into()))));
     }
 
     #[test]

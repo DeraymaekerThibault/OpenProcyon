@@ -184,5 +184,6 @@ still present, group inside a volume, ship captured (a living ship of the group 
 checked, PROVISIONAL), ship destroyed from a group (the killer is not checked, PROVISIONAL). Capturing a base never fires yet (boarding
 bases is unfinished). Ambush, Bayles Stand, Locusts, Mousetrap and the open maps use these. Each skirmish map's whole script is also
 exported (`maps/<id>/script.json`) and the rules interpreter scores Convoy Raid's points, but skirmish does not run the scripts yet
-(the convoys are not spawned): Convoy Raid, and any map without exported rules, keeps the plain "no enemy ships left" outcome. The custom
-winner/loser messages (`IDGS_TPINGAMEMESSAGE_*`) are exported but not shown yet.
+(the convoys are not spawned): Convoy Raid, and any map without exported rules, keeps the plain "no enemy ships left" outcome. The map rule's
+winner/loser message (`IDGS_TPINGAMEMESSAGE_*`, the human's side) is shown under the VICTORY!/DEFEAT! label of the Game Summary
+(PROVISIONAL: retail position and timing unmeasured; "GAME STRING" means no custom message).

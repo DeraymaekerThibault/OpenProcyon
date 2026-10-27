@@ -600,6 +600,20 @@ fn crew_damage_control_follows_riggers_and_engineers() {
     assert_eq!(nearly, full);
 }
 
+/// Retail fire-fighting (docs/re/effects.md#fire): each tick the crew puts out the sum of every member's leadership; an
+/// unmanned gunner, engineer or rigger post counts the first mates again; other empty posts add nothing.
+#[test]
+fn fire_fighting_sums_crew_leadership() {
+    let hands = |n: usize| vec![0.1; n];
+    // Default Cutter (5 gunners, captain, first mate, navigator, engineer, 2 riggers, fighter, no lookout): 12 x 0.1.
+    let cutter = [hands(5), hands(1), hands(1), hands(1), hands(1), hands(2), hands(1), vec![]];
+    assert!((fire_fighting(&cutter) - 1.2).abs() < 1e-5);
+    // Empty gunner, engineer and rigger posts count the first mate (0.9) again; empty navigator/fighter/lookout posts add nothing.
+    let short = [vec![], vec![0.5], vec![0.9], vec![], vec![], vec![], vec![], vec![]];
+    assert!((fire_fighting(&short) - (0.5 + 0.9 * 4.0)).abs() < 1e-5);
+    assert_eq!(fire_fighting(&[vec![1.5], vec![], vec![], vec![], vec![], vec![], vec![], vec![]]), 1.0);
+}
+
 /// Retail shells (docs/re/gunnery.md#shell-gravity): gravity MuzzleSpeed^2 / (sqrt(2) * MaximumRange) per gun, launch speed
 /// MuzzleSpeed in the world frame whatever the shooter's motion, lead from the target's velocity alone.
 #[test]

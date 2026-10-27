@@ -422,6 +422,7 @@ def main(root, out):
                 "IDGS_TPFRONTENDTEXT",
                 "IDGS_TPWORLDNAMES_",
                 "IDGS_TPTEAMNAMES_",
+                "IDGS_TPINGAMEMESSAGE_",
                 "IDGS_TPDISPLAYABLESHIPTYPENAME_",
             )
         )
