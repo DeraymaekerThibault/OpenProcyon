@@ -390,6 +390,68 @@ fn the_command_ship_holds_fire_until_an_enemy_is_clicked() {
 }
 
 #[test]
+fn the_command_ship_damages_a_clicked_hostile_skirmish_base() {
+    let mut app = App::new();
+    app.add_plugins((TaskPoolPlugin::default(), AssetPlugin::default(), TransformPlugin))
+        .init_asset::<bevy::world_serialization::WorldAsset>()
+        .init_asset::<bevy::prelude::Image>()
+        .add_message::<Sfx>()
+        .add_message::<Fired>()
+        .add_message::<Hit>()
+        .add_message::<Destroyed>()
+        .add_message::<Detonate>()
+        .add_message::<crate::decals::Scar>()
+        .init_resource::<Time>()
+        .init_resource::<FxLib>()
+        .insert_resource(Library::load(&assets_dir()))
+        .insert_resource(Rng::new(7))
+        .insert_resource(Look { mesh: default(), shell: default(), enemy_shell: default() })
+        .insert_resource(Target::default())
+        .init_resource::<crate::environment::Sensors>()
+        .add_systems(PreUpdate, crate::environment::refresh_sensors)
+        .add_systems(Update, (fire, shells.after(fire)));
+    let assets = app.world().resource::<AssetServer>().clone();
+    let lib = Library::load(&assets_dir());
+    let c = lib.index("Ship_Navy_Frigate");
+    let ship = |side| Ship {
+        class: c,
+        side,
+        heading: 0.0,
+        speed: 0.0,
+        ang_vel: 0.0,
+        order: 0,
+        waypoints: vec![],
+        goal: None,
+        cap: 1.0,
+        throttle: None,
+        sail_energy: 1.0,
+        crew_speed: 1.0,
+        crew_turn: 1.0,
+    };
+    let spawn = |app: &mut App, side, x: f32| {
+        let e = app.world_mut().spawn((Transform::from_xyz(x, 0.0, 0.0), ship(side), Health::new(&lib.classes[c]), Fires::default())).id();
+        let states = spawn_guns(&mut app.world_mut().commands(), &assets, &lib, e, c);
+        app.world_mut().entity_mut(e).insert(states);
+        app.world_mut().flush();
+        e
+    };
+    let me = spawn(&mut app, Side::Player, 0.0);
+    app.world_mut().entity_mut(me).insert(PlayerShip);
+    let class = lib.index("Base_PirateMP");
+    let base = app.world_mut().spawn((Transform::from_xyz(120.0, -27.0, 0.0), crate::campaign::MissionBase { id: 1, owner: "base1".into() }, BaseSide(Side::Enemy))).id();
+    let states = spawn_guns(&mut app.world_mut().commands(), &assets, &lib, base, class);
+    app.world_mut().entity_mut(base).insert((ArmedBase { class }, Health::new(&lib.classes[class]), states));
+    app.world_mut().flush();
+    *app.world_mut().resource_mut::<Target>() = Target(Some(base), None, default());
+    for _ in 0..600 {
+        app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs_f32(0.05));
+        app.update();
+    }
+    let hp = app.world().get::<Health>(base).unwrap();
+    assert!(base_mission_damage(&lib.classes[class], hp) > 0.0, "shells at the clicked base must damage it");
+}
+
+#[test]
 fn ship_hit_rules() {
     let lib = Library::load(&assets_dir());
     let class = &lib.classes[lib.index("Ship_Navy_Cutter")];

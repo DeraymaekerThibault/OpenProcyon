@@ -108,6 +108,18 @@ impl Victory {
         Some(Victory { rules: out, teams, sides: sides.len() })
     }
 
+    /// Object ids of the bases whose destruction wins the game for the human (the compass points at them).
+    pub fn objective_bases(&self) -> Vec<i64> {
+        let human = |r: &&Rule| r.winner.as_ref().is_some_and(|w| self.teams.iter().any(|(n, sides)| n == w && sides.contains(&Side::Player)));
+        let wins = self.rules.iter().filter(human).flat_map(|r| &r.conditions);
+        wins.filter_map(|c| match c {
+            Cond::BaseDamage { objects, test: Test::Equal | Test::Greater, .. } => Some(objects.clone()),
+            _ => None,
+        })
+        .flatten()
+        .collect()
+    }
+
     /// The human's outcome once a rule fires (the first in map order), or none while the battle goes on.
     pub fn decide(&self, snap: &Snapshot) -> Option<Outcome> {
         self.decide_with_message(snap).map(|d| d.0)
@@ -242,6 +254,11 @@ mod tests {
         assert_eq!(at(0.0, 0.5), None);
         assert_eq!(at(0.0, 1.0), Some(Outcome::Victory));
         assert_eq!(at(1.0, 0.0), Some(Outcome::Defeat));
+    }
+
+    #[test]
+    fn the_compass_objective_is_the_base_the_human_must_destroy() {
+        assert_eq!(border_dispute().objective_bases(), vec![225]);
     }
 
     #[test]
