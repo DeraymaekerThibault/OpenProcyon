@@ -538,6 +538,10 @@ pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Libra
             Some(s) => commands.insert_resource(s),
             None => commands.remove_resource::<crate::rules::skirmish::SkirmishScript>(),
         }
+        // The map's space whales and dragons (named in its script's environment).
+        if let Some(script) = data::try_json(&crate::assets_dir().join(format!("maps/{map_id}/script.json"))) {
+            crate::environment::spawn(commands, assets, &script, true);
+        }
         // Bases fight for the side whose fleet type is theirs; a base no fleet claims stays neutral (and silent). Armed islands (the
         // volcanoes) belong to nobody: they fire on every ship and cannot be boarded.
         for (e, o) in &bases {

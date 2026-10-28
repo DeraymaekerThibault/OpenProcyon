@@ -409,7 +409,7 @@ pub fn spawn(commands: &mut Commands, assets: &AssetServer, lib: &Library, fxl: 
             commands.entity(e).remove::<PlayerShip>();
         }
     }
-    crate::environment::spawn(commands, assets, &mission.data);
+    crate::environment::spawn(commands, assets, &mission.data, false);
     commands.insert_resource(mission);
 }
 
