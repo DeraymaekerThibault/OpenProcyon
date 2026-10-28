@@ -205,3 +205,8 @@ When every human ship sinks, the battlefield shows "Game Lost! Exiting..." and t
 teams: with Navy computer allies alive and the whole Procyon fleet sunk (both bases standing) it read VICTORY!, twice; with the lone Procyon
 Frigate still alive and no allies it read DEFEAT! The remake reads this as: victory when the human's team still has ships and no other team
 has any (PROVISIONAL: two observations, rule inferred).
+
+The line is white, centred on the window at about mid-height, and stayed up for 13 s (1 frame/s footage) before the Game Summary opened; the
+battle keeps running under it. The remake shows "Game Lost!  Exiting..." whenever the human's ships are all gone, and "Game Won!  Exiting..."
+for a victory with a surviving human ship (PROVISIONAL: only the lost line is observed; the won string exists in the string table). A map
+rule's own end message replaces the default on the field (PROVISIONAL, inferred). The delay from the last ship sinking to the line is not measured.

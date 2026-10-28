@@ -269,6 +269,8 @@ pub struct Class {
     pub engines: Vec<(Vec3, Quat, String)>, // exhaust effect placements
     pub explosion_fx: Option<String>,
     pub engine_snd: [Option<String>; 3], // loops for Half, Full, Emergency
+    /// WOT 'Selected Indicator Percentage Of Radius': the selection ring's radius as a fraction of `radius`.
+    pub ring: f32,
     /// AI 'Default SightRange'; the original's dock/focus "in range" test is this sight test (docs/re/docking-and-orders.md §1).
     pub sight: f32,
     /// 'Repair Effect Name': picks the repair time class and the effect played while docked.
@@ -559,6 +561,8 @@ pub fn load_class(root: &std::path::Path, name: &str, guns: &HashMap<String, Gun
             .collect(),
         explosion_fx: j["explosion_fx"].as_str().map(String::from),
         engine_snd: std::array::from_fn(|i| j["engine_snd"][i].as_str().map(String::from)),
+        // PROVISIONAL fallback 0.65 (the most common retail value) for imports and mods without the field.
+        ring: j["ring"].as_f64().unwrap_or(0.65) as f32,
         centre,
         radius,
         hull_bound,

@@ -531,9 +531,22 @@ fn esc_menu(
     }
 }
 
-/// A decided skirmish shows the Game Summary (missions end through their own rules). PROVISIONAL: retail delay before it opens unknown.
-fn summary_on_end(mission: Option<Res<crate::campaign::Mission>>, out: Res<crate::scenario::Outcome>, mut ig: ResMut<InGame>, mut vtime: ResMut<Time<Virtual>>) {
-    if out.is_changed() && *out != crate::scenario::Outcome::Playing && mission.is_none() {
+/// A decided skirmish plays on under the end line (`scenario::EndLine`) for `END_LINE_SECS`, then shows the Game Summary (missions end
+/// through their own rules).
+fn summary_on_end(
+    mission: Option<Res<crate::campaign::Mission>>,
+    out: Res<crate::scenario::Outcome>,
+    mut ig: ResMut<InGame>,
+    mut vtime: ResMut<Time<Virtual>>,
+    mut waited: Local<f32>,
+) {
+    if *out == crate::scenario::Outcome::Playing || mission.is_some() {
+        *waited = 0.0;
+        return;
+    }
+    let before = *waited;
+    *waited += vtime.delta_secs();
+    if before < crate::scenario::END_LINE_SECS && *waited >= crate::scenario::END_LINE_SECS {
         (ig.paused_by_us, ig.page) = (!vtime.is_paused(), Some(Page::Summary));
         vtime.pause();
     }
