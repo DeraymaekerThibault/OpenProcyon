@@ -793,6 +793,7 @@ mod rotation_tests {
     }
     use super::*;
     #[test]
+    #[ignore = "needs imported assets"]
     fn all_mission_two_base_docks_meet_the_authored_flight_plane() {
         let map: serde_json::Value = serde_json::from_slice(&std::fs::read(crate::assets_dir().join("maps/mission02/map.json")).unwrap()).unwrap();
         let docks = crate::docking::load_docks();
@@ -824,6 +825,7 @@ mod rotation_tests {
     }
 
     #[test]
+    #[ignore = "needs imported assets"]
     fn every_shipped_dockable_scenery_uses_its_first_dock_as_height_datum() {
         let docks = crate::docking::load_docks();
         let mut checked = std::collections::HashSet::new();
@@ -842,6 +844,7 @@ mod rotation_tests {
     }
 
     #[test]
+    #[ignore = "needs imported assets"]
     fn skirmish_bases_and_tenders_are_dockable() {
         use bevy::ecs::system::RunSystemOnce;
         let mut app = App::new();
@@ -887,6 +890,7 @@ mod rotation_tests {
     }
 
     #[test]
+    #[ignore = "needs imported assets"]
     fn native_column_matrix_preserves_every_authored_scenery_axis() {
         for map in ["storm_front", "mission13", "mission03", "basic_tutorial"] {
             let doc: serde_json::Value = serde_json::from_slice(&std::fs::read(crate::assets_dir().join(format!("maps/{map}/map.json"))).unwrap()).unwrap();

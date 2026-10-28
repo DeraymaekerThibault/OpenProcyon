@@ -371,6 +371,7 @@ mod tests {
     /// The exported rules of the real maps: base maps keep playing after the fleet dies and end on a base; Convoy Raid ends on its
     /// script's team points.
     #[test]
+    #[ignore = "needs imported assets"]
     fn the_retail_maps_load() {
         let map = crate::data::map_json("border_dispute").unwrap();
         let real = vec![("IDGS_TPTEAMNAMES_NAVY".to_string(), vec![Side::Player]), ("IDGS_TPTEAMNAMES_PROCYON".to_string(), vec![Side(1)])];

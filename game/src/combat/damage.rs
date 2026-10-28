@@ -364,6 +364,7 @@ mod swap_tests {
     use crate::combat::{ArmedBase, Health};
 
     #[test]
+    #[ignore = "needs imported assets"]
     fn a_destroyed_base_part_shows_its_damaged_mesh() {
         let lib = Library::load(crate::assets_dir());
         let class = lib.index("Base_Procyon1");

@@ -429,6 +429,7 @@ mod camera_tests {
     use std::time::Duration;
 
     #[test]
+    #[ignore = "needs imported assets"]
     fn focus_does_not_track_a_ship_outside_group_sight_but_allows_projectile_debug_focus() {
         let (mut world, ids) = ship::movement_tests::fleet_world();
         world.init_resource::<environment::Sensors>();
@@ -449,6 +450,7 @@ mod camera_tests {
     }
 
     #[test]
+    #[ignore = "needs imported assets"]
     fn keyboard_camera_rotation_and_zoom_stay_at_one_x_at_every_simulation_speed() {
         let (mut world, ids) = ship::movement_tests::fleet_world();
         for e in ids {

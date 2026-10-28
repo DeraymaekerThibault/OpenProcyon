@@ -985,6 +985,7 @@ fn nis_camera(
 mod ai_tests {
     use super::*;
     #[test]
+    #[ignore = "needs imported assets"]
     fn mission_two_attack_volume_changes_base_owner_and_gunfire_advances_the_story() {
         let mut mission = crate::campaign::load_id("mission02");
         let mut data = mission.data.clone();
@@ -1072,6 +1073,7 @@ mod ai_tests {
     }
 
     #[test]
+    #[ignore = "needs imported assets"]
     fn mission_ships_halt_when_their_script_route_runs_out() {
         let lib = Library::load(crate::assets_dir());
         let mut app = App::new();

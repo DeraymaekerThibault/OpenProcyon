@@ -634,6 +634,7 @@ mod lifeboat_tests {
     use super::*;
 
     #[test]
+    #[ignore = "needs imported assets"]
     fn lifeboat_class_fields_load_and_default_for_mods_that_omit_them() {
         let lib = Library::load(crate::assets_dir());
         let c = |n: &str| &lib.classes[lib.index(n)];

@@ -208,6 +208,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs imported assets"]
     fn creation_follows_flag_count_race_and_current_owner() {
         let mut app = app("mission02");
         let at = Vec3::new(10.0, 0.0, 20.0);
@@ -239,6 +240,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs imported assets"]
     fn boats_sail_straight_at_a_fraction_of_class_speed_and_never_collide_with_ships() {
         let mut app = app("mission02");
         let parent = ship(&mut app, "Ship_Pirate_Schooner", "Pirates", Vec3::ZERO, true);
@@ -284,6 +286,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs imported assets"]
     fn pickup_by_nearest_live_non_lifeboat_ship_in_sphere_contact() {
         let mut app = app("mission02");
         let boat = |app: &mut App, at| {
@@ -314,6 +317,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs imported assets"]
     fn preplaced_mission4_boats_are_lifeboats_by_flag_and_mission9_longboat_is_not() {
         let lib = Library::load(crate::assets_dir());
         let flagged = |mission: &str, id: i64| {

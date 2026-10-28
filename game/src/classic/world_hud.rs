@@ -345,6 +345,7 @@ mod tests {
     use super::*;
     use crate::assets_dir;
     #[test]
+    #[ignore = "needs imported assets"]
     fn banners_clear_the_sails_of_large_and_small_ships() {
         let lib = Library::load(assets_dir());
         for name in ["Ship_Navy_Cutter", "Ship_Navy_ManOWar", "Ship_Pirate_Barque"] {

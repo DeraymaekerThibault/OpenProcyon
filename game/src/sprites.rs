@@ -228,6 +228,7 @@ impl Font {
 mod tests {
     use super::*;
     #[test]
+    #[ignore = "needs imported assets"]
     fn retail_glyph_table_and_advances() {
         let v = serde_json::json!({"chars": {
             "A": {"row": 1, "x": 54, "w": 23, "tex": 0, "next": 19},

@@ -632,6 +632,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs imported assets"]
     fn thirty_seconds_in_a_storm_does_not_guarantee_lightning_damage() {
         let lib = crate::combat::Library::load(assets_dir());
         let class = lib.index("Ship_Navy_Sloop");
@@ -681,6 +682,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs imported assets"]
     fn shifting_stays_within_the_exe_limits() {
         let mut s = sim();
         assert!(s.v.iter().any(|v| v.near.len() == MAX_NEIGHBOURS) && s.v.iter().all(|v| v.near.len() <= MAX_NEIGHBOURS));

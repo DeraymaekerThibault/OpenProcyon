@@ -1,7 +1,7 @@
 #!/bin/sh
 # The validation gate: format, lint, repository hygiene and tests. usage: tools/check.sh
 # Needs ruff (pip install -r requirements-dev.txt).
-# Rust tests and the startup smoke need the converted game assets; without an import (tools/build_assets.sh) tests are only compiled.
+# Asset-free Rust tests always run; ignored asset tests and the startup smoke also run when an import exists.
 set -e
 cd "$(dirname "$0")/.."
 command -v ruff >/dev/null || { echo "ruff not found: pip install -r requirements-dev.txt" >&2; exit 1; }
@@ -12,7 +12,7 @@ cd game
 cargo fmt --check
 cargo clippy --release --all-targets -- -D warnings
 if [ "$imported" = 1 ]; then
-  cargo test --release
+  cargo test --release -- --include-ignored
   # Startup smoke: the unit tests run single systems, so only a real start finds conflicts between systems (Bevy B0001) and
   # startup panics. Runs the menu and a skirmish battle for 10 s each; needs a display or Xvfb (like tools/shot.sh).
   cargo build --release
@@ -26,8 +26,8 @@ if [ "$imported" = 1 ]; then
     fi
   done
 else
-  cargo test --release --no-run
-  echo "NOTE: Rust tests compiled but not run: no imported game assets (run tools/build_assets.sh --game <install>)." >&2
+  cargo test --release
+  echo "NOTE: Asset-dependent Rust tests and startup smoke skipped: no imported game assets (run tools/build_assets.sh --game <install>)." >&2
 fi
 cd ..
 python3 -m unittest discover -s tests
