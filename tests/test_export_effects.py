@@ -4,8 +4,23 @@ from pathlib import Path
 from unittest.mock import patch
 
 from tools.eft import parse_eft
-from tools.export_effects import export_morph_meshes
+from tools.export_effects import EXTRAS, export_morph_meshes
 from tools.models import model_path
+
+
+class AmbientEffects(unittest.TestCase):
+    def test_mesh_scene_effects_are_exported(self):
+        for name in (
+            "FireStack",
+            "Crater_Smoke",
+            "Island_Smoke",
+            "SmokeStack_Smoke",
+            "Lighthouse",
+            "bouy",
+            "VolcanoSmoke",
+            "volcanoSparks",
+        ):
+            self.assertIn(name, EXTRAS)
 
 
 class MorphMeshes(unittest.TestCase):

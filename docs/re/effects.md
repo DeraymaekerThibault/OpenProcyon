@@ -210,6 +210,19 @@ references). The exporter writes `sections[].destruct` = {fx, start, end, vel}. 
 core and go through the same path. PROVISIONAL: no tumbling of the pieces, linear flight (no gravity or drag), the burst moment
 picked uniformly, sections without data hold 1 s.
 
+### Break-apart animation clips (mesh scene animations)
+Every ship's mesh scene carries one clip (`ANIMATION00`, 2-20 s; exported in `data/animations.json`). Decoded on the Navy Cutter (3.0 s,
+eight motions, two linear keys each): it is the one-shot break-apart motion, not an idle loop. No ship clip returns to its start (0 of
+41), translations reach 3.8-16.8 units and rotations 0.7-8.5 rad. The end times per piece match the `destructFx` windows above: bow 3.0 s,
+stern layers 2.0 s, masts 1.0 s, and layer 6 at 2.5 s. The displacements do not match the WOT velocities (bow clip totals 5.9 / 6.6 /
+7.4 units against velocities 8.8 / 4.1 / 11.1 per second), so whether retail uses the clip, the velocities or both is open. The clip
+supplies the rotation (the tumble) that the implementation above lacks. Open: whether values are offsets from the rest pose or absolute
+poses (layer values start at 0, which suggests offsets, but the constants on helper nodes look absolute); the meaning of the keyframe
+smoothing value (0, 1 or 2; 2 on almost all keys; tangents are per segment, linear for two-key segments).
+Other scenes: the animals' swim cycles are rotations of their bones (whale up to 0.6 rad, manta 1.0, dragon 1.4 plus up to one unit of
+translation); base windmills turn one full yaw (-2 pi) over 10-16.7 s and loop; base cranes run 10 s and mostly return to start; one base
+(the iron-clad mines) has a 43 s clip with up to 67 keys.
+
 ### Section debris
 A section destroyed mid-fight swaps to its damaged mesh and, when its WOT association names a `debrisMeshScene`, drops that piece
 (a torn-off mast, the bow, the engine block): the scene holds one `...Damage_LayerN` mesh in the hull's own model space, its node

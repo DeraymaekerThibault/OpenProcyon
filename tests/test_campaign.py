@@ -67,6 +67,35 @@ class CampaignTests(unittest.TestCase):
         self.assertEqual((ev["color"], ev["head"]), ([1.0, 0.5, 0.0, 1.0], 1))
         self.assertEqual(ev["speaker"], "IDGS_TPSPEAKERNAMES_JIM")
 
+    def test_journal_entry_pages(self):
+        m = parse_mission("""\t00000001 World Rules
+\t{
+\t}
+\t00000038 Journal Entry
+\t{
+\t\tPage Info - Size Int 2
+\t\t00000003 Page Info - Element
+\t\t{
+\t\t\tTextStringID String 'IDGS_J1'
+\t\t\tSpeechEventFileName String 'J01A'
+\t\t\tPictureTexture String 'Journal_Mission1_Shot1'
+\t\t}
+\t\t00000003 Page Info - Element
+\t\t{
+\t\t\tTextStringID String 'IDGS_J2'
+\t\t\tSpeechEventFileName String 'J01B'
+\t\t\tPictureTexture String 'Journal_Mission1_Shot2'
+\t\t}
+\t\tTitle StringID String 'IDGS_TITLE'
+\t}
+""")
+        self.assertEqual(m["journal"]["title_id"], "IDGS_TITLE")
+        self.assertEqual([p["speech"] for p in m["journal"]["pages"]], ["J01A", "J01B"])
+        self.assertEqual(m["journal"]["pages"][1]["picture"], "Journal_Mission1_Shot2")
+        self.assertIsNone(
+            parse_mission("\t00000001 World Rules\n\t{\n\t}\n")["journal"]
+        )
+
     def test_unclosed_script_rejected(self):
         with self.assertRaises(ValueError):
             parse_mission("00000001 World Rules\n{\n")

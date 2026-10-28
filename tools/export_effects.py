@@ -64,6 +64,19 @@ EXTRAS = [
     "Explosion_Light",
     "SuperGravCharge",
     "SuperGravCharge_Bullet",
+    # Ambient mesh-scene effects (PlayEffect / VolcanoSmoke attributes, data/mesh_effects.json): fire stacks on bases, smoke, the
+    # lighthouse and buoy lights, the volcanoes. Not every descriptor names a file (Volcano_Effect1-4, lighthouse_light2/3).
+    "FireStack",
+    "Crater_Smoke",
+    "Island_Smoke",
+    "SmokeStack_Smoke",
+    "Lighthouse",
+    "bouy",
+    "VolcanoSmoke",
+    "volcanoSparks",
+    "volcanoMuzzleFlash",
+    "volcano_Bullet",
+    "volcano_Impact",
 ]
 
 

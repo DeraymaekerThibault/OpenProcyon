@@ -159,6 +159,21 @@ def parse_mission(text):
         for b in blocks(nodes, "PlayerAllianceInfoVector - Element")
         for f in [fields(b["children"])]
     ]
+    # The journal screen's entry: one page per picture, each with a spoken line and its text.
+    journal = None
+    for entry in blocks(nodes, "Journal Entry"):
+        journal = dict(
+            title_id=fields(entry["children"]).get("Title StringID"),
+            pages=[
+                dict(
+                    text_id=f.get("TextStringID"),
+                    speech=f.get("SpeechEventFileName"),
+                    picture=f.get("PictureTexture"),
+                )
+                for page in blocks(entry["children"], "Page Info - Element")
+                for f in [fields(page["children"])]
+            ],
+        )
     meta = {}
     for n in properties(nodes):
         meta.setdefault(n["name"], n["value"])
@@ -173,6 +188,7 @@ def parse_mission(text):
         arms_pool=pool("World Arms List - Element"),
         play_end_movie=meta.get("PlayEndMovie", False),
         journal_music=meta.get("Journal Music Name"),
+        journal=journal,
         ships=ships,
         paths=paths,
         points=points,
