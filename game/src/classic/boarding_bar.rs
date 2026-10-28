@@ -61,10 +61,10 @@ fn board_bars(
             continue;
         };
         let Some(screen) = screen else {
-            *visibility = Visibility::Hidden;
+            visibility.set_if_neq(Visibility::Hidden);
             continue;
         };
-        *visibility = Visibility::Inherited;
+        visibility.set_if_neq(Visibility::Inherited);
         node.left = Val::Px(screen.x - BAR_SIZE.x * 0.5 * scale);
         node.top = Val::Px(screen.y - BAR_SIZE.y * 1.6 * scale);
         let share = friendly_share(&boarder_crew.strength, &target_crew.strength, friendly(target));

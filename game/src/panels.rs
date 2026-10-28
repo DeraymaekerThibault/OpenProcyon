@@ -412,10 +412,10 @@ fn update_contacts(
         .collect();
     for (Contact(i), mut node, mut vis) in &mut q {
         let Some(v) = contacts.get(*i) else {
-            *vis = Visibility::Hidden;
+            vis.set_if_neq(Visibility::Hidden);
             continue;
         };
-        *vis = Visibility::Inherited;
+        vis.set_if_neq(Visibility::Inherited);
         let size = radar.contact_size;
         let p = radar.centre + Vec2::new(v.x, -v.y) * radar.radius - size / 2.0;
         node.left = px(p.x, s);

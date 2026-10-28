@@ -148,11 +148,14 @@ pub fn update(
         }
         opening.speech = index;
     }
+    let line = cue.map_or("", |(i, _)| cues[i]["text"].as_str().unwrap());
     for mut text in &mut subtitles {
-        **text = cue.map_or("", |(i, _)| cues[i]["text"].as_str().unwrap()).into();
+        if text.0 != line {
+            text.0 = line.into();
+        }
     }
     for mut vis in &mut portraits {
-        *vis = if cue.is_some() { Visibility::Inherited } else { Visibility::Hidden };
+        vis.set_if_neq(if cue.is_some() { Visibility::Inherited } else { Visibility::Hidden });
     }
     let ship_pos = |id| ships.iter().find(|(_, s, ..)| s.id == id).expect("briefing ship").0.translation + Vec3::Y * 4.0;
     let (path, distance, focus) = match cue {

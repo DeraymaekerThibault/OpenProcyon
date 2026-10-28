@@ -134,7 +134,7 @@ fn navigation(
     for (indicator, mut transform, mut vis) in &mut indicators {
         let selected = fleets.selected.and_then(|e| ships.get(e).ok());
         let (tf, ship) = if !indicator.arrow { selected.map_or((primary_tf, ship), |(_, t, s, _)| (t, s)) } else { (primary_tf, ship) };
-        *vis = if cinematic(mission.as_deref()) || (indicator.arrow && goal.is_none()) { Visibility::Hidden } else { Visibility::Inherited };
+        vis.set_if_neq(if cinematic(mission.as_deref()) || (indicator.arrow && goal.is_none()) { Visibility::Hidden } else { Visibility::Inherited });
         transform.translation = tf.translation;
         // The ring's radius is the ship's radius times its WOT fraction. PROVISIONAL: the small indicator's own radius (the compass mesh
         // measures 5.9) is taken as the ring's.
@@ -299,9 +299,11 @@ fn place_labels(
                 // Backdrop sits 50 reference px above the anchor point (Offset_ShipName_Background).
                 node.left = Val::Px(p.x - label.width * s / 2.0);
                 node.top = Val::Px(p.y - 50.0 * s);
-                *vis = Visibility::Inherited;
+                vis.set_if_neq(Visibility::Inherited);
             }
-            _ => *vis = Visibility::Hidden,
+            _ => {
+                vis.set_if_neq(Visibility::Hidden);
+            }
         }
     }
     let shown = (|| {
@@ -328,7 +330,7 @@ fn place_labels(
         Some((p, edge))
     })();
     for (Reticle(i), mut node, mut vis) in &mut reticle {
-        *vis = Visibility::Hidden;
+        vis.set_if_neq(Visibility::Hidden);
         let Some((p, edge)) = shown else { continue };
         let size = (edge * 0.3).clamp(16.0 * s, 40.0 * s);
         let corner = [Vec2::new(-1.0, 1.0), Vec2::new(-1.0, -1.0), Vec2::new(1.0, -1.0), Vec2::new(1.0, 1.0)][*i];
@@ -338,7 +340,7 @@ fn place_labels(
         // Size comes from layout_and_fill (Sprite); set it here after that system ran.
         node.width = Val::Px(size);
         node.height = Val::Px(size);
-        *vis = Visibility::Inherited;
+        vis.set_if_neq(Visibility::Inherited);
     }
 }
 

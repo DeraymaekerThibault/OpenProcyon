@@ -246,6 +246,50 @@ pub fn resume_scenario(world: &mut World) {
     world.resource_mut::<Time<Virtual>>().unpause();
 }
 
+/// The map's scenery (`objects`): models with their collision bodies, dock points, island sounds, black holes and asteroids.
+/// Returns the objects with an id (candidates for rule-addressable bases).
+fn spawn_map_objects(
+    commands: &mut Commands,
+    assets: &AssetServer,
+    fxl: &fx::FxLib,
+    shapes: &collision::Shapes,
+    asteroids: &data::AsteroidDefs,
+    map: &serde_json::Value,
+) -> Vec<(Entity, serde_json::Value)> {
+    let mut bases = vec![];
+    let docks = crate::docking::load_docks();
+    let island_sounds = data::try_json(&crate::assets_dir().join("data/island_sounds.json")).unwrap_or_default();
+    for o in map["objects"].as_array().into_iter().flatten() {
+        let ty = o["type"].as_str().unwrap_or_default();
+        let glb = format!("{}.glb", o["scene"].as_str().unwrap_or_default());
+        let tf = scenery_transform(o, game_rotation(&o["rot"]), &docks);
+        let e = commands.spawn((Scenario, WorldAssetRoot(assets.load(GltfAssetLabel::Scene(0).from_asset(data::model(&glb)))), tf)).id();
+        if let Some(body) = shapes.obstacle(ty, &tf) {
+            commands.entity(e).insert(body);
+        }
+        // Every base/island with dock points is dockable on every map type, not only campaign bases a rule sets up.
+        if let Some(d) = crate::docking::dockable_for(&docks, ty) {
+            commands.entity(e).insert(d);
+        }
+        if let Some(i) = island_sounds.get(ty) {
+            commands.entity(e).insert(crate::audio::IslandLoop { sound: i["sound"].as_str().unwrap_or_default().into(), max: i["distance"].as_f64().unwrap_or(200.0) as f32 });
+        }
+        if ty.starts_with("Terrain_BlackHole") {
+            // The funnel mesh is not drawn: the reference video shows only the effect's glow, beam and ribbons.
+            commands.entity(e).insert(Visibility::Hidden);
+            blackhole::spawn(commands, fxl, ty, game_to_bevy(&o["pos"]));
+        }
+        if let Some(mut rock) = combat::Asteroid::new(ty, o["group"].as_str().unwrap_or(""), asteroids) {
+            rock.id = o["id"].as_i64().unwrap_or(-1);
+            commands.entity(e).insert(rock);
+        }
+        if o["id"].is_i64() {
+            bases.push((e, o.clone()));
+        }
+    }
+    bases
+}
+
 /// Skirmish on a retail map (assets/maps/<id>.json from World/*.twt): scenery, skybox and music from the map; our fleet at
 /// the first player's start point, the enemy fleet at the first player of another team, both in formation facing their
 /// start vectors. Without a map: the test arena (player at the origin, enemies on a ring).
@@ -268,39 +312,9 @@ pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Libra
         let m = audio::music(commands, assets, track);
         commands.entity(m).insert(Scenario);
     }
-    let mut bases: Vec<(Entity, serde_json::Value)> = vec![]; // scenery with an object id: candidates for rule-addressable bases
     let ours: Vec<String> = std::iter::once(cfg.player.clone()).chain(cfg.allies.iter().cloned()).collect();
     if let Some(map) = &map {
-        let docks = crate::docking::load_docks();
-        let island_sounds = data::try_json(&crate::assets_dir().join("data/island_sounds.json")).unwrap_or_default();
-        for o in map["objects"].as_array().into_iter().flatten() {
-            let glb = format!("{}.glb", o["scene"].as_str().unwrap_or_default());
-            let rotation = game_rotation(&o["rot"]);
-            let tf = scenery_transform(o, rotation, &docks);
-            let e = commands.spawn((Scenario, WorldAssetRoot(assets.load(GltfAssetLabel::Scene(0).from_asset(data::model(&glb)))), tf)).id();
-            if let Some(body) = shapes.obstacle(o["type"].as_str().unwrap_or_default(), &tf) {
-                commands.entity(e).insert(body);
-            }
-            // Every base/island with dock points is dockable on every map type, not only campaign bases a rule sets up.
-            if let Some(d) = o["type"].as_str().and_then(|t| crate::docking::dockable_for(&docks, t)) {
-                commands.entity(e).insert(d);
-            }
-            if let Some(i) = o["type"].as_str().and_then(|t| island_sounds.get(t)) {
-                commands.entity(e).insert(crate::audio::IslandLoop { sound: i["sound"].as_str().unwrap_or_default().into(), max: i["distance"].as_f64().unwrap_or(200.0) as f32 });
-            }
-            if let Some(t) = o["type"].as_str().filter(|t| t.starts_with("Terrain_BlackHole")) {
-                // The funnel mesh is not drawn: the reference video shows only the effect's glow, beam and ribbons.
-                commands.entity(e).insert(Visibility::Hidden);
-                blackhole::spawn(commands, fxl, t, game_to_bevy(&o["pos"]));
-            }
-            if let Some(mut rock) = combat::Asteroid::new(o["type"].as_str().unwrap_or(""), o["group"].as_str().unwrap_or(""), asteroids) {
-                rock.id = o["id"].as_i64().unwrap_or(-1);
-                commands.entity(e).insert(rock);
-            }
-            if o["id"].is_i64() {
-                bases.push((e, o.clone()));
-            }
-        }
+        let bases = spawn_map_objects(commands, assets, fxl, shapes, asteroids, map);
         nebula::spawn(commands, assets, fxl, map);
         if campaign::is_mission(cfg.map.as_deref()) {
             campaign::spawn(commands, assets, lib, fxl, cfg.map.as_deref().unwrap(), &bases);

@@ -206,11 +206,11 @@ fn update(
                 }
             }
             Fx::Asteroids { units, path, closest, mode, speed, tumble } => {
-                let path = paths[path.as_str()].as_array().map(|a| a.iter().map(game_to_bevy).collect()).unwrap_or_default();
+                let path = path_points(paths, &path);
                 extra.asteroids.write(crate::combat::AsteroidSetup { units, path, closest, mode, speed, tumble });
             }
             Fx::Path { units, path, closest, looping } => {
-                let pts: Vec<Vec3> = paths[path.as_str()].as_array().map(|a| a.iter().map(game_to_bevy).collect()).unwrap_or_default();
+                let pts = path_points(paths, &path);
                 for e in &units {
                     if let Ok((_, mut animal, tf, _)) = animals.get_mut(*e) {
                         animal.follow(&pts, tf.translation, closest, looping);
@@ -230,7 +230,7 @@ fn update(
                 }
             }
             Fx::MeteorPath { group, path, closest, mode } => {
-                let path = paths[path.as_str()].as_array().map(|a| a.iter().map(game_to_bevy).collect()).unwrap_or_default();
+                let path = path_points(paths, &path);
                 extra.meteors.write(crate::nebula::MeteorRoute::Path { group, path, closest, mode });
             }
             Fx::MeteorSpeed(group, speed) => {
@@ -269,36 +269,20 @@ fn update(
                     sfx.write(crate::audio::Sfx::ui(&name));
                 }
             }
-            Fx::Throttle(u, v) => {
-                for e in u {
-                    if let Ok(RuleShipItem { ship: mut sh, .. }) = ships.get_mut(e) {
-                        sh.cap = v;
-                    }
+            Fx::Throttle(u, v) => each_ship(&mut ships, u, |s| s.ship.cap = v),
+            Fx::Speed(u, v) => each_ship(&mut ships, u, |s| {
+                if !s.primary {
+                    s.ship.cap = v;
+                } else if v <= 0.0 {
+                    s.ship.order = 0;
+                    s.ship.waypoints.clear();
                 }
-            }
-            Fx::Speed(u, v) => {
-                for e in u {
-                    if let Ok(RuleShipItem { ship: mut sh, primary, .. }) = ships.get_mut(e) {
-                        if primary {
-                            if v <= 0.0 {
-                                sh.order = 0;
-                                sh.waypoints.clear();
-                            }
-                        } else {
-                            sh.cap = v;
-                        }
-                    }
-                }
-            }
-            Fx::Destroy(u) => {
-                for e in u {
-                    if let Ok(RuleShipItem { health: mut h, visibility: mut vis, .. }) = ships.get_mut(e) {
-                        h.core = 0.0;
-                        h.destroyed = true;
-                        *vis = Visibility::Hidden;
-                    }
-                }
-            }
+            }),
+            Fx::Destroy(u) => each_ship(&mut ships, u, |s| {
+                s.health.core = 0.0;
+                s.health.destroyed = true;
+                *s.visibility = Visibility::Hidden;
+            }),
             Fx::Teleport(u, p) => {
                 for e in u {
                     if let Ok(RuleShipItem { ship: mut sh, transform: mut tf, .. }) = ships.get_mut(e) {
@@ -343,13 +327,8 @@ fn update(
                     extra.board.write(crate::boarding::BoardMsg::Boardable(e, on));
                 }
             }
-            Fx::Lifeboats(u, on) => {
-                for e in u {
-                    if let Ok(mut ship) = ships.get_mut(e) {
-                        ship.mission.create_lifeboats = on; // ships only: bases, rocks and animals have no flag
-                    }
-                }
-            }
+            // Ships only: bases, rocks and animals have no flag.
+            Fx::Lifeboats(u, on) => each_ship(&mut ships, u, |s| s.mission.create_lifeboats = on),
             Fx::IslandRepair(u, on) => {
                 for e in u {
                     extra.dock.write(DockMsg::Repairs(e, on));
@@ -361,14 +340,8 @@ fn update(
                 }
             }
             Fx::Stance(u, st) => {
-                for e in u {
-                    if let Ok(RuleShipItem { mission: mut ms, .. }) = ships.get_mut(e) {
-                        ms.stance = st;
-                    }
-                    if let Ok(mut d) = extra.dragons.get_mut(e) {
-                        d.stance = st;
-                    }
-                }
+                each_dragon(&mut extra.dragons, &u, |d| d.stance = st);
+                each_ship(&mut ships, u, |s| s.mission.stance = st);
             }
             Fx::Owner(u, o) => {
                 for e in u {
@@ -395,97 +368,47 @@ fn update(
                     }
                 }
             }
-            Fx::Invuln(u, v) => {
-                for e in u {
-                    if let Ok(RuleShipItem { mission: mut ms, .. }) = ships.get_mut(e) {
-                        ms.invuln = v;
-                    }
-                }
-            }
-            Fx::Flag(u, tex) => {
-                for e in u {
-                    if let Ok(RuleShipItem { mission: mut ms, .. }) = ships.get_mut(e) {
-                        ms.flag = tex.clone();
-                    }
-                }
-            }
+            Fx::Invuln(u, v) => each_ship(&mut ships, u, |s| s.mission.invuln = v),
+            Fx::Flag(u, tex) => each_ship(&mut ships, u, |s| s.mission.flag.clone_from(&tex)),
             Fx::Label(u, text) => {
                 for e in u {
                     commands.entity(e).insert(crate::ShipName(text.clone()));
                 }
             }
-            Fx::Banner(u, bn) => {
-                for e in u {
-                    if let Ok(RuleShipItem { mission: mut ms, .. }) = ships.get_mut(e) {
-                        ms.banner = bn.clone();
-                    }
-                }
-            }
-            Fx::Ram(u, g) => {
-                for e in u {
-                    if let Ok(RuleShipItem { mission: mut ms, .. }) = ships.get_mut(e) {
-                        ms.ram = true;
-                        if !ms.attack.contains(&g) {
-                            ms.attack.push(g.clone());
-                        }
-                    }
-                }
-            }
+            Fx::Banner(u, bn) => each_ship(&mut ships, u, |s| s.mission.banner.clone_from(&bn)),
+            Fx::Ram(u, g) => each_ship(&mut ships, u, |s| {
+                s.mission.ram = true;
+                add_once(&mut s.mission.attack, &g);
+            }),
             Fx::Attack(u, g) => {
-                for e in u.iter().copied() {
-                    if let Ok(mut d) = extra.dragons.get_mut(e)
-                        && !d.attack.contains(&g)
-                    {
-                        d.attack.push(g.clone());
-                    }
-                }
-                for e in u {
-                    if let Ok(RuleShipItem { mission: mut ms, .. }) = ships.get_mut(e)
-                        && !ms.attack.contains(&g)
-                    {
-                        ms.attack.push(g.clone());
-                    }
-                }
+                each_dragon(&mut extra.dragons, &u, |d| add_once(&mut d.attack, &g));
+                each_ship(&mut ships, u, |s| add_once(&mut s.mission.attack, &g));
             }
             // Only script-given orders are cleared: the human's own course and throttle stay.
             Fx::Clear(u) => {
-                for e in u.iter().copied() {
-                    if let Ok(mut d) = extra.dragons.get_mut(e) {
-                        d.attack.clear();
-                        d.hold = false;
+                each_dragon(&mut extra.dragons, &u, |d| {
+                    d.attack.clear();
+                    d.hold = false;
+                });
+                each_ship(&mut ships, u, |s| {
+                    s.mission.attack.clear();
+                    s.mission.ram = false;
+                    s.mission.looping = None;
+                    if !s.primary {
+                        s.ship.waypoints.clear();
+                        s.ship.order = 0;
+                        s.ship.goal = None;
                     }
-                }
-                for e in u {
-                    if let Ok(RuleShipItem { ship: mut sh, mission: mut ms, primary, .. }) = ships.get_mut(e) {
-                        ms.attack.clear();
-                        ms.ram = false;
-                        ms.looping = None;
-                        if !primary {
-                            sh.waypoints.clear();
-                            sh.order = 0;
-                            sh.goal = None;
-                        }
-                    }
-                }
+                });
             }
-            Fx::Damage(u, p) => {
-                for e in u {
-                    if let Ok(RuleShipItem { health: mut h, .. }) = ships.get_mut(e) {
-                        h.scale(1.0 - p);
-                    }
-                }
-            }
+            Fx::Damage(u, p) => each_ship(&mut ships, u, |s| s.health.scale(1.0 - p)),
             Fx::Hold(u, on) => {
-                for e in u.iter().copied() {
-                    if let Ok(mut d) = extra.dragons.get_mut(e) {
-                        d.hold = on;
-                    }
-                }
-                for e in u.into_iter().filter(|_| on) {
-                    if let Ok(RuleShipItem { ship: mut sh, .. }) = ships.get_mut(e) {
-                        sh.waypoints.clear();
-                        sh.order = 0;
-                    }
+                each_dragon(&mut extra.dragons, &u, |d| d.hold = on);
+                if on {
+                    each_ship(&mut ships, u, |s| {
+                        s.ship.waypoints.clear();
+                        s.ship.order = 0;
+                    });
                 }
             }
             Fx::ResetHits(u) => {
@@ -495,59 +418,17 @@ fn update(
                 }
             }
             Fx::Border(u, zone) => {
-                for e in u {
-                    if let Ok(RuleShipItem { mission: mut ms, .. }) = ships.get_mut(e) {
-                        ms.border = zone.clone();
-                    }
-                    if let Ok(mut d) = extra.dragons.get_mut(e) {
-                        d.border = zone.clone();
-                    }
-                }
+                each_dragon(&mut extra.dragons, &u, |d| d.border.clone_from(&zone));
+                each_ship(&mut ships, u, |s| s.mission.border.clone_from(&zone));
             }
             Fx::ReturnPoint(u, p) => {
-                for e in u {
-                    if let Ok(RuleShipItem { mission: mut ms, .. }) = ships.get_mut(e) {
-                        ms.return_point = Some(p);
-                    }
-                    if let Ok(mut d) = extra.dragons.get_mut(e) {
-                        d.home = Some(p);
-                    }
-                }
+                each_dragon(&mut extra.dragons, &u, |d| d.home = Some(p));
+                each_ship(&mut ships, u, |s| s.mission.return_point = Some(p));
             }
-            Fx::Towable(u, on) => {
-                for e in u {
-                    if on {
-                        commands.entity(e).remove::<crate::docking::NoTow>();
-                    } else {
-                        commands.entity(e).insert(crate::docking::NoTow);
-                    }
-                }
-            }
-            Fx::Movable(u, on) => {
-                for e in u {
-                    if on {
-                        commands.entity(e).remove::<crate::collision::Pinned>();
-                    } else {
-                        commands.entity(e).insert(crate::collision::Pinned);
-                    }
-                }
-            }
-            Fx::Collidable(u, on) => {
-                for e in u {
-                    if on {
-                        commands.entity(e).remove::<crate::collision::Ghost>();
-                    } else {
-                        commands.entity(e).insert(crate::collision::Ghost);
-                    }
-                }
-            }
-            Fx::Captain(u, human) => {
-                for e in u {
-                    if let Ok(RuleShipItem { mission: mut ms, .. }) = ships.get_mut(e) {
-                        ms.human = human;
-                    }
-                }
-            }
+            Fx::Towable(u, on) => marker(&mut commands, u, !on, crate::docking::NoTow),
+            Fx::Movable(u, on) => marker(&mut commands, u, !on, crate::collision::Pinned),
+            Fx::Collidable(u, on) => marker(&mut commands, u, !on, crate::collision::Ghost),
+            Fx::Captain(u, human) => each_ship(&mut ships, u, |s| s.mission.human = human),
             Fx::Cloak(u, on, ai_override) => {
                 for e in u {
                     if ships.contains(e) {
@@ -563,13 +444,7 @@ fn update(
                     }
                 }
             }
-            Fx::WarningShots(u, on) => {
-                for e in u {
-                    if let Ok(RuleShipItem { mission: mut ms, .. }) = ships.get_mut(e) {
-                        ms.warning_shots = on;
-                    }
-                }
-            }
+            Fx::WarningShots(u, on) => each_ship(&mut ships, u, |s| s.mission.warning_shots = on),
             Fx::Current(path) => {
                 commands.spawn((Scenario, crate::environment::Current::new(path)));
             }
@@ -594,20 +469,8 @@ fn update(
                     }
                 }
             }
-            Fx::DragonStance(u, st) => {
-                for e in u {
-                    if let Ok(mut d) = extra.dragons.get_mut(e) {
-                        d.stance = st;
-                    }
-                }
-            }
-            Fx::DragonThreshold(u, t) => {
-                for e in u {
-                    if let Ok(mut d) = extra.dragons.get_mut(e) {
-                        d.threshold = t;
-                    }
-                }
-            }
+            Fx::DragonStance(u, st) => each_dragon(&mut extra.dragons, &u, |d| d.stance = st),
+            Fx::DragonThreshold(u, t) => each_dragon(&mut extra.dragons, &u, |d| d.threshold = t),
             Fx::Orbit { unit, dist, angle } => {
                 orbit.focus = unit;
                 orbit.dist = dist;
@@ -632,6 +495,46 @@ fn update(
     if cfg.script.as_deref() == Some("mission") {
         mission.script.crew_screen = false; // keep the default crew and arms (missions 3+ open the screen after their first NIS)
         autopilot(&mission.script, &world, &mission.data, &rocks, &mut ships, &mut target);
+    }
+}
+
+/// The points of a mission path (`paths.<name>`), empty when the mission has no such path.
+fn path_points(paths: &Value, name: &str) -> Vec<Vec3> {
+    paths[name].as_array().map(|a| a.iter().map(game_to_bevy).collect()).unwrap_or_default()
+}
+
+/// Runs `f` on each of `units` that is a mission ship (bases, rocks and animals are skipped).
+fn each_ship(ships: &mut Query<RuleShip>, units: Vec<Entity>, mut f: impl FnMut(&mut RuleShipItem)) {
+    for e in units {
+        if let Ok(mut s) = ships.get_mut(e) {
+            f(&mut s);
+        }
+    }
+}
+
+/// Runs `f` on each of `units` that is a dragon.
+fn each_dragon(dragons: &mut Query<&mut crate::dragons::Dragon>, units: &[Entity], mut f: impl FnMut(&mut crate::dragons::Dragon)) {
+    for &e in units {
+        if let Ok(mut d) = dragons.get_mut(e) {
+            f(&mut d);
+        }
+    }
+}
+
+/// Adds or removes a marker component on each of `units`.
+fn marker<C: Component + Clone>(commands: &mut Commands, units: Vec<Entity>, on: bool, c: C) {
+    for e in units {
+        if on {
+            commands.entity(e).insert(c.clone());
+        } else {
+            commands.entity(e).remove::<C>();
+        }
+    }
+}
+
+fn add_once(list: &mut Vec<String>, g: &str) {
+    if !list.iter().any(|x| x == g) {
+        list.push(g.to_string());
     }
 }
 
@@ -895,9 +798,11 @@ fn ui(
             Ui::SpeechFrame => Some("TalkingHead_FloatingPortal_Open".to_string()),
             _ => continue,
         };
-        if let Some((sheet, rect)) = name.and_then(|n| crate::sprites::sprite_of(&hud, &n)) {
-            image.image = assets.load(format!("hud/tex/{sheet}.png"));
-            image.rect = Some(crate::sprites::inset(&sheet, rect));
+        // Only on a change: writing the node every frame would re-render it every frame.
+        if let Some((img, _)) = name.and_then(|n| crate::sprites::image(&assets, &hud, &n))
+            && (image.image != img.image || image.rect != img.rect)
+        {
+            (image.image, image.rect) = (img.image, img.rect);
         }
     }
     for (kind, mut vis, text) in &mut q {
@@ -925,15 +830,18 @@ fn ui(
             ),
             Ui::BarTop | Ui::BarBottom => (sc.nis && !opening, String::new()),
         };
-        *vis = if show { Visibility::Inherited } else { Visibility::Hidden };
+        vis.set_if_neq(if show { Visibility::Inherited } else { Visibility::Hidden });
         if let Some(mut t) = text
             && **t != content
         {
             **t = content;
         }
     }
+    let tasks = if crate::panels::cinematic(Some(&mission)) { String::new() } else { sc.tasks_text() };
     for mut t in &mut objective {
-        **t = if crate::panels::cinematic(Some(&mission)) { String::new() } else { sc.tasks_text() };
+        if **t != tasks {
+            **t = tasks.clone();
+        }
     }
 }
 
@@ -1043,7 +951,7 @@ fn nis_camera(
         let pos = match &c.path {
             Some((name, _, vel)) => {
                 *travelled += vel * dt;
-                let pts: Vec<Vec3> = sc.paths[name.as_str()].as_array().map(|a| a.iter().map(game_to_bevy).collect()).unwrap_or_default();
+                let pts = path_points(&sc.paths, name);
                 let mut left = *travelled;
                 let mut at = pts.first().copied().unwrap_or(cam.translation);
                 for pair in pts.windows(2) {

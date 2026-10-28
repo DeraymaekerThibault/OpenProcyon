@@ -660,7 +660,7 @@ fn markers(
 }
 
 /// 'Set Group/Unit Towable' FALSE: no tow can be started on this ship.
-#[derive(Component)]
+#[derive(Component, Clone)]
 pub struct NoTow;
 /// The original's repair decision for computer ships: at least two sections hurt to half their hit points or less (destroyed ones
 /// do not count).

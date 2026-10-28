@@ -150,10 +150,10 @@ pub fn update_asteroids(shapes: Res<Shapes>, mut rocks: Query<(&crate::combat::A
 }
 
 /// 'Set Group/Unit Movable' FALSE: the ship holds its place and is an immovable body in contacts.
-#[derive(Component)]
+#[derive(Component, Clone)]
 pub struct Pinned;
 /// 'SetCollidable' FALSE: the ship passes through everything.
-#[derive(Component)]
+#[derive(Component, Clone)]
 pub struct Ghost;
 
 /// Extra velocity from contact, separate from the existing forward engine-speed model.

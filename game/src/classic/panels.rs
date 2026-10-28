@@ -531,8 +531,15 @@ fn update_dial(player: Single<&Ship, With<PlayerShip>>, frames: Option<Res<Frame
     // Retail frames 0..3 match Stop / Slow / Full / Emergency (red through dark green).
     let Some((h, r)) = frames.dial.get(player.order.min(3)) else { return };
     for mut img in &mut q {
+        show(&mut img, h, *r);
+    }
+}
+
+/// Shows sprite `(h, r)` on an image node, touching the node (and so re-rendering it) only when it changes.
+fn show(img: &mut Mut<ImageNode>, h: &Handle<Image>, r: Rect) {
+    if img.image != *h || img.rect != Some(r) {
         img.image = h.clone();
-        img.rect = Some(*r);
+        img.rect = Some(r);
     }
 }
 
@@ -549,21 +556,19 @@ fn head_art(
     let (open, speaking) = (head.open, head.speaking);
     let cycle = (time.elapsed_secs() * VOICE_FPS) as usize % 4;
     for (kind, mut img, mut vis) in &mut parts {
-        let set = |img: &mut ImageNode, (h, r): &(Handle<Image>, Rect)| {
-            img.image = h.clone();
-            img.rect = Some(*r);
-        };
+        let set = |img: &mut Mut<ImageNode>, (h, r): &(Handle<Image>, Rect)| show(img, h, *r);
         match kind {
             Head::Iris => set(&mut img, &frames.iris[iris_frame(open, frames.iris.len())]),
             Head::Voice => set(&mut img, &frames.voice[if speaking && open >= 1.0 { cycle } else { 4 }]),
             Head::Face => {
                 if let Some((sheet, r)) = head.speaker.as_deref().and_then(|n| sprite_of(&hud, n)) {
-                    img.image = assets.load(format!("hud/tex/{sheet}.png"));
-                    img.rect = Some(inset(&sheet, r));
+                    show(&mut img, &assets.load(format!("hud/tex/{sheet}.png")), inset(&sheet, r));
                 }
-                *vis = if open > 0.0 { Visibility::Inherited } else { Visibility::Hidden };
+                vis.set_if_neq(if open > 0.0 { Visibility::Inherited } else { Visibility::Hidden });
             }
-            Head::Light => *vis = if speaking && open >= 1.0 { Visibility::Inherited } else { Visibility::Hidden },
+            Head::Light => {
+                vis.set_if_neq(if speaking && open >= 1.0 { Visibility::Inherited } else { Visibility::Hidden });
+            }
         }
     }
 }
@@ -575,8 +580,7 @@ fn update_sweep(time: Res<Time>, frames: Option<Res<Frames>>, mut q: Query<&mut 
     }
     let (h, r) = &frames.sweep[(time.elapsed_secs() / 0.1) as usize % frames.sweep.len()];
     for mut img in &mut q {
-        img.image = h.clone();
-        img.rect = Some(*r);
+        show(&mut img, h, *r);
     }
 }
 
@@ -588,10 +592,7 @@ fn radar_face(button: Query<&Interaction, With<RadarButton>>, mut q: Query<(&Rad
     });
     for (f, mut img) in &mut q {
         let (h, r) = &f.0[i];
-        if img.image != *h || img.rect != Some(*r) {
-            img.image = h.clone();
-            img.rect = Some(*r);
-        }
+        show(&mut img, h, *r);
     }
 }
 
@@ -608,10 +609,20 @@ fn update_gauges(
         let v = gauge_value(f.gauge, &lib, ship, health, crew, &guns).clamp(0.0, 1.0);
         // Gauges fill from the bottom: keep the bottom of the sprite, crop the top.
         let h = (f.full * v).round();
-        node.top = px(f.top + f.full - h, s);
-        node.height = px(h, s);
-        let mut r = f.base;
-        r.min.y = r.max.y - h * f.k;
+        clip(&mut node, &mut img, f.top + f.full - h, h, s, f.base, f.k);
+    }
+}
+
+/// A bar that empties from the top: `h` reference px of sprite rect `base` (sheet pixels `k` per reference px) shown from `top`,
+/// written only on a change.
+fn clip(node: &mut Mut<Node>, img: &mut Mut<ImageNode>, top: f32, h: f32, s: f32, base: Rect, k: f32) {
+    let (top, height) = (px(top, s), px(h, s));
+    if node.top != top || node.height != height {
+        (node.top, node.height) = (top, height);
+    }
+    let mut r = base;
+    r.min.y = r.max.y - h * k;
+    if img.rect != Some(r) {
         img.rect = Some(r);
     }
 }
@@ -632,19 +643,18 @@ fn update_guns(
         if slot.icon {
             let Some(first) = class.mounts.iter().position(|m| m.bank == slot.bank) else { continue };
             if let Some((h, r)) = frames.icons.get(&combat::gun_icon(guns.gun(first))) {
-                img.image = h.clone();
-                img.rect = Some(*r);
+                show(&mut img, h, *r);
             }
             // Dimmed while the bank reloads (the bar beside it shows how far along it is).
-            img.color = match st {
+            let tint = match st {
                 2 => Color::srgba(1.0, 1.0, 1.0, 0.25),
                 1 => Color::srgb(0.55, 0.55, 0.55),
                 _ => Color::WHITE,
             };
+            img.map_unchanged(|i| &mut i.color).set_if_neq(tint);
         } else if let Some((h, r)) = frames.gun.get(st) {
-            img.image = h.clone();
-            img.rect = Some(*r);
-            img.color = if armed { Color::srgb(1.0, 0.9, 0.3) } else { Color::WHITE };
+            show(&mut img, h, *r);
+            img.map_unchanged(|i| &mut i.color).set_if_neq(if armed { Color::srgb(1.0, 0.9, 0.3) } else { Color::WHITE });
         }
     }
 }
@@ -895,16 +905,13 @@ fn fleet_art(
             B::CeaseFire => art.map(|a| a.0[model.cease_fire as usize].0[state_index(interaction)].clone()),
             _ => None,
         };
-        if let Some((h, r)) = pick
-            && (img.image != h || img.rect != Some(r))
-        {
-            img.image = h;
-            img.rect = Some(r);
+        if let Some((h, r)) = pick {
+            show(&mut img, &h, r);
         }
     }
     for (FleetIcon(i), mut img) in &mut icons {
         if let Some((art, _)) = model.rows.get(*i).and_then(|row| c.sprite(&row.icon, false)) {
-            *img = art;
+            show(&mut img, &art.image, art.rect.unwrap_or_default());
         }
     }
     let full = c.size_of("ShipBar_Health").y;
@@ -912,11 +919,8 @@ fn fleet_art(
         let (Some(row), Some((base, _))) = (model.rows.get(*i), c.sprite("ShipBar_Health", false)) else { continue };
         // Clipped from the top: the strip shrinks towards the bottom as the ship loses health.
         let h = (full * row.health).round();
-        node.top = px(full - h, s);
-        node.height = px(h, s);
-        let mut r = base.rect.unwrap();
-        r.min.y = r.max.y - h * sprite_of(&hud, "ShipBar_Health").map_or(1.0, |(sheet, _)| sheet_scale(&sheet));
-        img.rect = Some(r);
+        let k = sprite_of(&hud, "ShipBar_Health").map_or(1.0, |(sheet, _)| sheet_scale(&sheet));
+        clip(&mut node, &mut img, full - h, h, s, base.rect.unwrap_or_default(), k);
     }
     for (FleetStatus(i), mut img, mut v) in &mut status {
         let kind = model.rows.get(*i).map_or("", |r| r.status);
@@ -924,8 +928,7 @@ fn fleet_art(
         // PROVISIONAL: the status icons cycle Frame0..5 at the speed-dial voice rate; retail cadence not recovered.
         let frame = (time.elapsed_secs() * VOICE_FPS) as usize % 6;
         if let Some((h, r)) = (!kind.is_empty()).then(|| c.frame(&format!("ShipStatus_Icon_{kind}_Frame{frame}"))).flatten() {
-            img.image = h;
-            img.rect = Some(r);
+            show(&mut img, &h, r);
         }
     }
 }
