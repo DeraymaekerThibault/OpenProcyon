@@ -384,97 +384,98 @@ fn build(
         }
     }
 
-    // ---- talking head (bottom-right corner): wooden housing with the portrait seen through its ring ---------------------------
-    let housing = c.size_of("TalkingHead_Solid_Background");
-    if housing.x > 0.0 {
-        let names = || {
-            ["TalkingHead_Portal_Closed"]
-                .into_iter()
-                .map(String::from)
-                .chain((0..10).map(|i| format!("TalkingHead_Portal_ClosedToOpen{i}")))
-                .chain(["TalkingHead_Portal_Open".into()])
-        };
-        let voice = ["Start", "Frame0", "Frame1", "Stop", "Off"].map(|n| format!("TalkingHead_Portal_VoiceBox_{n}"));
-        commands.insert_resource(HeadFrames { iris: names().filter_map(|n| c.frame(&n)).collect(), voice: voice.iter().filter_map(|n| c.frame(n)).collect() });
-        let head = commands
-            .spawn((
-                Node { position_type: PositionType::Absolute, right: Val::Px(0.0), bottom: Val::Px(0.0), width: px(housing.x, s), height: px(housing.y, s), ..default() },
-                ChildOf(root),
-            ))
-            .id();
-        let (face_at, iris_at) = (offset(&hud, "Right_TalkingHead_Character_From_TopLeft"), offset(&hud, "Right_TalkingHead_PortalOverlay_From_TopLeft"));
-        let portal = Vec2::splat(80.0);
-        let layer = |commands: &mut Commands, kind: Head, art: Option<(ImageNode, Vec2)>, at: Vec2, hidden: bool| {
-            let Some((img, sz)) = art else { return };
-            let vis = if hidden { Visibility::Hidden } else { Visibility::Inherited };
-            commands.spawn((kind, img, c.abs(at.x, at.y, sz), vis, ChildOf(head)));
-        };
-        {
-            // Draw order: portrait, iris, housing (its ring is transparent), then the light and voice box on the wood.
-            layer(&mut commands, Head::Face, Some((ImageNode::default(), portal)), face_at, true);
-            layer(&mut commands, Head::Iris, c.sprite("TalkingHead_Portal_Closed", false), iris_at, false);
-            if let Some((img, sz)) = c.sprite("TalkingHead_Solid_Background", false) {
-                commands.spawn((img, c.abs(0.0, 0.0, sz), ChildOf(head), solid()));
-            }
-            // PROVISIONAL placement, measured on the housing art: the light sits over its green lamp, the voice box in the name plate.
-            layer(&mut commands, Head::Light, c.sprite("TalkingHead_Portal_Light_On", false), Vec2::new(75.0, 2.0), true);
-            layer(&mut commands, Head::Voice, c.sprite("TalkingHead_Portal_VoiceBox_Off", false), Vec2::new(20.0, 103.0), false);
-        }
-        // The ship-bar toggle's arm stands on the housing's top-right corner, like the weapon toggle on the compass.
-        let detail = c.size_of("ShipBar_ToggleDetail");
-        let at = Vec2::new(housing.x - detail.x, offset(&hud, "Move_ToggleShipBar_Detail_Down").y - detail.y);
-        let button = offset(&hud, "ToggleShipBar_Button_Offset_From_Detail_TopLeft");
-        c.toggle(&mut commands, head, "ShipBar_ToggleDetail", at, "ShipBar_ToggleButton", button, crate::panels::FleetButton::Ships);
-        // The ship bar opens `SHIPBAR_OFFSET_Y_FROM_TOGGLESHIPBAR_BUTTON` above the toggle button.
-        let top = housing.y - at.y - button.y + offset(&hud, "SHIPBAR_OFFSET_Y_FROM_TOGGLESHIPBAR_BUTTON").y;
-        commands.insert_resource(ShipBarAnchor(top));
-    }
-
-    {
-        // ---- weapon panel (left edge, vertically centred) -----------------------------------------------------------------
-        let wbg = c.size_of("WeaponBar_ShipIcon_Background");
-        let weapon = commands
-            .spawn((
-                WeaponPanel,
-                Node {
-                    position_type: PositionType::Absolute,
-                    left: Val::Px(0.0),
-                    top: Val::Px((window.height() - 255.0 * s) / 2.0),
-                    width: px(wbg.x, s),
-                    height: px(255.0, s),
-                    ..default()
-                },
-                ChildOf(root),
-            ))
-            .id();
-        if let Some((img, sz)) = c.sprite("WeaponBar_ShipIcon_Background", false) {
-            commands.spawn((img, c.abs(0.0, 0.0, sz), ChildOf(weapon), solid()));
-        }
-        if let Some((img, sz)) = c.sprite(&class.icon("WeaponBar"), false) {
-            let o = offset(&hud, "WEAPONBAR_SHIPICON_OFFSET_FROM_TOPLEFT");
-            commands.spawn((img, c.abs(o.x, o.y, sz), ChildOf(weapon)));
-        }
-        for (bank, first) in &banks {
-            let pos = offset(&hud, &format!("WeaponBar_SlotOffset_From_TopLeft_{bank:02}"));
-            let icon_at = pos + offset(&hud, "Offset_WeaponBar_GunIcon");
-            if let Some((img, sz)) = c.sprite("WeaponBar_GunBankCanHitTarget", false) {
-                commands.spawn((GunSlot { bank: *bank, icon: false }, img, c.abs(icon_at.x, icon_at.y, sz), ChildOf(weapon)));
-            }
-            if let Some((img, sz)) = c.sprite(&combat::gun_icon(guns.gun(*first)), false) {
-                commands.spawn((GunSlot { bank: *bank, icon: true }, GunButton(*bank), img, c.abs(icon_at.x, icon_at.y, sz), ChildOf(weapon), solid()));
-            }
-            // Recharge bar beside the icon: the empty bar (WeaponBar_SlotBackground) with the yellow WeaponBar_RechargeStatus growing from the bottom.
-            // PROVISIONAL: drawing order/fill direction are read from the artwork; the original's drawing code was not found.
-            if let (Some((outline, osz)), Some((img, fsz))) = (c.sprite("WeaponBar_SlotBackground", false), c.sprite("WeaponBar_RechargeStatus", false)) {
-                let at = pos + offset(&hud, "Offset_WeaponBar_Recharge");
-                commands.spawn((outline, c.abs(at.x, at.y, osz), ChildOf(weapon)));
-                let base = img.rect.unwrap();
-                let k = sprite_of(&hud, "WeaponBar_RechargeStatus").map_or(1.0, |(sheet, _)| sheet_scale(&sheet));
-                commands.spawn((Fill { gauge: Gauge::Recharge(*bank), full: fsz.y, top: at.y, base, k }, img, c.abs(at.x, at.y, fsz), ChildOf(weapon)));
-            }
-        }
-    }
+    talking_head(&mut commands, &c, root);
+    weapon_panel(&mut commands, &c, root, class, &banks, guns, window.height());
     commands.insert_resource(frames);
+}
+
+/// The talking head (bottom-right corner): wooden housing with the portrait seen through its ring, the iris, light and voice box,
+/// and the ship-bar toggle on its corner.
+fn talking_head(commands: &mut Commands, c: &Ctx, root: Entity) {
+    let (hud, s) = (c.hud, c.s);
+    let solid = || (Interaction::None, FocusPolicy::Block, Solid);
+    let housing = c.size_of("TalkingHead_Solid_Background");
+    if housing.x <= 0.0 {
+        return;
+    }
+    let names = || {
+        ["TalkingHead_Portal_Closed"].into_iter().map(String::from).chain((0..10).map(|i| format!("TalkingHead_Portal_ClosedToOpen{i}"))).chain(["TalkingHead_Portal_Open".into()])
+    };
+    let voice = ["Start", "Frame0", "Frame1", "Stop", "Off"].map(|n| format!("TalkingHead_Portal_VoiceBox_{n}"));
+    commands.insert_resource(HeadFrames { iris: names().filter_map(|n| c.frame(&n)).collect(), voice: voice.iter().filter_map(|n| c.frame(n)).collect() });
+    let head = commands
+        .spawn((
+            Node { position_type: PositionType::Absolute, right: Val::Px(0.0), bottom: Val::Px(0.0), width: px(housing.x, s), height: px(housing.y, s), ..default() },
+            ChildOf(root),
+        ))
+        .id();
+    let (face_at, iris_at) = (offset(hud, "Right_TalkingHead_Character_From_TopLeft"), offset(hud, "Right_TalkingHead_PortalOverlay_From_TopLeft"));
+    let portal = Vec2::splat(80.0);
+    let layer = |commands: &mut Commands, kind: Head, art: Option<(ImageNode, Vec2)>, at: Vec2, hidden: bool| {
+        let Some((img, sz)) = art else { return };
+        let vis = if hidden { Visibility::Hidden } else { Visibility::Inherited };
+        commands.spawn((kind, img, c.abs(at.x, at.y, sz), vis, ChildOf(head)));
+    };
+    {
+        // Draw order: portrait, iris, housing (its ring is transparent), then the light and voice box on the wood.
+        layer(commands, Head::Face, Some((ImageNode::default(), portal)), face_at, true);
+        layer(commands, Head::Iris, c.sprite("TalkingHead_Portal_Closed", false), iris_at, false);
+        if let Some((img, sz)) = c.sprite("TalkingHead_Solid_Background", false) {
+            commands.spawn((img, c.abs(0.0, 0.0, sz), ChildOf(head), solid()));
+        }
+        // PROVISIONAL placement, measured on the housing art: the light sits over its green lamp, the voice box in the name plate.
+        layer(commands, Head::Light, c.sprite("TalkingHead_Portal_Light_On", false), Vec2::new(75.0, 2.0), true);
+        layer(commands, Head::Voice, c.sprite("TalkingHead_Portal_VoiceBox_Off", false), Vec2::new(20.0, 103.0), false);
+    }
+    // The ship-bar toggle's arm stands on the housing's top-right corner, like the weapon toggle on the compass.
+    let detail = c.size_of("ShipBar_ToggleDetail");
+    let at = Vec2::new(housing.x - detail.x, offset(hud, "Move_ToggleShipBar_Detail_Down").y - detail.y);
+    let button = offset(hud, "ToggleShipBar_Button_Offset_From_Detail_TopLeft");
+    c.toggle(commands, head, "ShipBar_ToggleDetail", at, "ShipBar_ToggleButton", button, crate::panels::FleetButton::Ships);
+    // The ship bar opens `SHIPBAR_OFFSET_Y_FROM_TOGGLESHIPBAR_BUTTON` above the toggle button.
+    let top = housing.y - at.y - button.y + offset(hud, "SHIPBAR_OFFSET_Y_FROM_TOGGLESHIPBAR_BUTTON").y;
+    commands.insert_resource(ShipBarAnchor(top));
+}
+
+/// The weapon panel (left edge, vertically centred): the ship outline, and per selectable gun bank its status frame, gun icon and
+/// recharge bar.
+fn weapon_panel(commands: &mut Commands, c: &Ctx, root: Entity, class: &combat::Class, banks: &[(usize, usize)], guns: &GunStates, window_h: f32) {
+    let (hud, s) = (c.hud, c.s);
+    let solid = || (Interaction::None, FocusPolicy::Block, Solid);
+    let wbg = c.size_of("WeaponBar_ShipIcon_Background");
+    let weapon = commands
+        .spawn((
+            WeaponPanel,
+            Node { position_type: PositionType::Absolute, left: Val::Px(0.0), top: Val::Px((window_h - 255.0 * s) / 2.0), width: px(wbg.x, s), height: px(255.0, s), ..default() },
+            ChildOf(root),
+        ))
+        .id();
+    if let Some((img, sz)) = c.sprite("WeaponBar_ShipIcon_Background", false) {
+        commands.spawn((img, c.abs(0.0, 0.0, sz), ChildOf(weapon), solid()));
+    }
+    if let Some((img, sz)) = c.sprite(&class.icon("WeaponBar"), false) {
+        let o = offset(hud, "WEAPONBAR_SHIPICON_OFFSET_FROM_TOPLEFT");
+        commands.spawn((img, c.abs(o.x, o.y, sz), ChildOf(weapon)));
+    }
+    for (bank, first) in banks {
+        let pos = offset(hud, &format!("WeaponBar_SlotOffset_From_TopLeft_{bank:02}"));
+        let icon_at = pos + offset(hud, "Offset_WeaponBar_GunIcon");
+        if let Some((img, sz)) = c.sprite("WeaponBar_GunBankCanHitTarget", false) {
+            commands.spawn((GunSlot { bank: *bank, icon: false }, img, c.abs(icon_at.x, icon_at.y, sz), ChildOf(weapon)));
+        }
+        if let Some((img, sz)) = c.sprite(&combat::gun_icon(guns.gun(*first)), false) {
+            commands.spawn((GunSlot { bank: *bank, icon: true }, GunButton(*bank), img, c.abs(icon_at.x, icon_at.y, sz), ChildOf(weapon), solid()));
+        }
+        // Recharge bar beside the icon: the empty bar (WeaponBar_SlotBackground) with the yellow WeaponBar_RechargeStatus growing from the bottom.
+        // PROVISIONAL: drawing order/fill direction are read from the artwork; the original's drawing code was not found.
+        if let (Some((outline, osz)), Some((img, fsz))) = (c.sprite("WeaponBar_SlotBackground", false), c.sprite("WeaponBar_RechargeStatus", false)) {
+            let at = pos + offset(hud, "Offset_WeaponBar_Recharge");
+            commands.spawn((outline, c.abs(at.x, at.y, osz), ChildOf(weapon)));
+            let base = img.rect.unwrap();
+            let k = sprite_of(hud, "WeaponBar_RechargeStatus").map_or(1.0, |(sheet, _)| sheet_scale(&sheet));
+            commands.spawn((Fill { gauge: Gauge::Recharge(*bank), full: fsz.y, top: at.y, base, k }, img, c.abs(at.x, at.y, fsz), ChildOf(weapon)));
+        }
+    }
 }
 
 /// One bar part plus whatever sits on it: the ship icon on the ship frame, a fill on each status gauge.
