@@ -166,3 +166,7 @@ time of 10 s and a no-laying time of 20 s (retail saves: `LAYMINESMAXTIME` 10, `
   ship appeared), or at once whenever the nearest enemy in sight is closer than 50 units. PROVISIONAL: the 1 unit/s and
   50-unit thresholds, and that the human player's minelayers run it too, are not yet observed in play.
 - Remake: `combat::gunnery::MineLaying`; mine guns never aim at a target.
+
+## Destroyed base part (PROVISIONAL)
+
+When a mission-vital part of an armed base (building, defence ring) drops to 0 hit points, the remake plays that part's own destruct effect (from the retail section data) at the centre of the part, plus a ship-explosion sound. The part then swaps to its damaged mesh and stops blocking shells. Retail's actual effect and sound for a destroyed base part have not been measured; every headless attempt lost to the base's guns first (#97).
