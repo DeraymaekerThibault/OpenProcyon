@@ -228,6 +228,7 @@ def steps(root, out, want, part=lambda i, k: None):
         # Mission-start saves (counters from retail SavedGames).
         ("saves", lambda: tool("tools.export_saves", root, out)),
         ("docks", lambda: tool("tools.export_docks", root, out)),
+        ("island sounds", lambda: tool("tools.export_island_sounds", root, out)),
         ("boarding", lambda: tool("tools.export_boarding", root, out)),
         ("asteroids", lambda: tool("tools.export_asteroids", root, out)),
         ("campaign media", lambda: tool("tools.export_campaign_media", root, out)),

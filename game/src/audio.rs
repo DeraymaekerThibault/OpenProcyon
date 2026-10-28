@@ -83,6 +83,13 @@ fn travel(
 #[derive(Component)]
 struct Ambient(Entity);
 
+/// An island that hums on its own (the volcanoes): the loop's name and the distance it carries (`data/island_sounds.json`).
+#[derive(Component)]
+pub struct IslandLoop {
+    pub sound: String,
+    pub max: f32,
+}
+
 fn ambience(
     mut commands: Commands,
     assets: Res<AssetServer>,
@@ -90,13 +97,18 @@ fn ambience(
     cam: Single<&GlobalTransform, With<Camera3d>>,
     holes: Query<(Entity, &GlobalTransform), With<crate::blackhole::BlackHole>>,
     meteors: Query<(Entity, &GlobalTransform), With<crate::nebula::MeteorEmitter>>,
+    islands: Query<(Entity, &GlobalTransform, &IslandLoop)>,
     mut beds: Query<(Entity, &Ambient, &mut AudioSink)>,
     mut abyss: Local<Option<Entity>>,
 ) {
     let c = cam.translation();
     let mut has = vec![];
     for (e, a, mut sink) in &mut beds {
-        let source = holes.get(a.0).map(|h| (h.1.translation(), 1500.0)).or_else(|_| meteors.get(a.0).map(|m| (m.1.translation(), 400.0)));
+        let source = holes
+            .get(a.0)
+            .map(|h| (h.1.translation(), 1500.0))
+            .or_else(|_| meteors.get(a.0).map(|m| (m.1.translation(), 400.0)))
+            .or_else(|_| islands.get(a.0).map(|i| (i.1.translation(), i.2.max)));
         match source {
             Ok((at, max)) => {
                 has.push(a.0);
@@ -116,6 +128,11 @@ fn ambience(
             let inside = tf.translation().distance(c) < 150.0;
             let name = if inside { "MeteorStorm_Inside" } else { "MeteorStorm_Outside" };
             commands.spawn((crate::Scenario, Ambient(e), AudioPlayer::new(assets.load(sound(name))), PlaybackSettings::LOOP.with_volume(Volume::Linear(0.0))));
+        }
+    }
+    for (e, _, island) in &islands {
+        if !has.contains(&e) {
+            commands.spawn((crate::Scenario, Ambient(e), AudioPlayer::new(assets.load(sound(&island.sound))), PlaybackSettings::LOOP.with_volume(Volume::Linear(0.0))));
         }
     }
     let want = mission.is_some_and(|m| m.script.abyss);
