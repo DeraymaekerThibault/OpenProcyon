@@ -1,5 +1,6 @@
 //! Camera, world mouse/keyboard input and the F1 debug text.
 
+use crate::Nearest;
 use crate::bindings::Act;
 use crate::*;
 
@@ -320,7 +321,7 @@ pub fn focus_projectile(
         return;
     }
     let Some(from) = fleets.selected.and_then(|e| ships.get(e).ok()).map(|t| t.translation) else { return };
-    if let Some((e, _)) = shells.iter().min_by(|a, b| a.1.translation.distance(from).total_cmp(&b.1.translation.distance(from))) {
+    if let Some((e, _)) = shells.iter().nearest_to(from, |a| a.1.translation) {
         orbit.focus = Some(e);
     }
 }

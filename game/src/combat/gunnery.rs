@@ -1,5 +1,6 @@
 //! Guns: mount hierarchy, turret aim and lead, burst/reload timing, ship and base fire, shell launch (docs/re/gunnery.md).
 use super::*;
+use crate::Nearest;
 
 #[derive(Clone)]
 pub(super) struct GunState {
@@ -561,7 +562,7 @@ pub(super) fn base_fire(
                 (AimTarget { entity, position, velocity: transform.rotation * Vec3::NEG_Z * ship.speed }, ship.side)
             })
             .filter(|(t, _)| sensors.in_sight(me, t.entity, campaign.as_deref()))
-            .min_by(|a, b| a.0.position.distance(tf.translation).total_cmp(&b.0.position.distance(tf.translation)));
+            .nearest_to(tf.translation, |a| a.0.position);
         for (mount, state) in class.mounts.iter().zip(states.0.iter_mut()) {
             state.cooldown -= dt;
             state.burst_timer -= dt;

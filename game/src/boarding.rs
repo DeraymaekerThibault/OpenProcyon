@@ -5,6 +5,7 @@
 //! PROVISIONAL: crew skill (generic crew combat ability, no leader bonus, no per-man crews), the harpoon flight (no projectile; the hook
 //! lands after distance / muzzle speed), the winch that pulls grappled hulls together, one grapple per ship, AI boarding of boardable
 //! bases (the original has no AI path to the command), first-mate lines picked by meaning, and the boarding status bar placement.
+use crate::Nearest;
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use serde_json::Value;
@@ -369,7 +370,7 @@ fn ropes(
             continue;
         }
         let from = harpoons(&lib, ship, health, guns).next().map_or(tf.translation, |(m, _)| tf.transform_point(m.pos));
-        let to = tb.into_iter().flat_map(|b| &b.points).map(|p| ttf.transform_point(*p)).min_by(|a, b| a.distance(from).total_cmp(&b.distance(from))).unwrap_or(ttf.translation);
+        let to = tb.into_iter().flat_map(|b| &b.points).map(|p| ttf.transform_point(*p)).nearest_to(from, |a| *a).unwrap_or(ttf.translation);
         out.0.push((from, to, (g.span - tf.translation.distance(ttf.translation)).max(0.0)));
     }
     for &(tower, towee) in mission.as_deref().map_or(&[][..], |m| m.script.tows()) {
@@ -905,9 +906,7 @@ fn dev_board(
         return;
     }
     let Ok(me) = me.single() else { return };
-    let Some((foe, ..)) =
-        foes.iter().filter(|f| f.2.side == Side::Enemy).min_by(|a, b| a.1.translation.distance(me.translation).total_cmp(&b.1.translation.distance(me.translation)))
-    else {
+    let Some((foe, ..)) = foes.iter().filter(|f| f.2.side == Side::Enemy).nearest_to(me.translation, |a| a.1.translation) else {
         return;
     };
     match *step {

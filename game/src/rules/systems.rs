@@ -1,4 +1,5 @@
 //! ECS side of the rule interpreter: dispatch of `Script` effects, mission AI, mission UI, music and NIS camera.
+use crate::Nearest;
 use bevy::audio::Volume;
 use bevy::ecs::query::QueryData;
 use bevy::prelude::*;
@@ -218,8 +219,7 @@ fn update(
                     }
                     let Ok(RuleShipItem { ship: mut sh, transform: tf, mission: mut ms, .. }) = ships.get_mut(*e) else { continue };
                     let full = pts.clone(); // Continuous fleet followers supply leader-relative slots, not cloned path offsets.
-                    let from =
-                        if closest { (0..full.len()).min_by(|a, bb| full[*a].distance(tf.translation).total_cmp(&full[*bb].distance(tf.translation))).unwrap_or(0) } else { 0 };
+                    let from = if closest { (0..full.len()).nearest_to(tf.translation, |a| full[*a]).unwrap_or(0) } else { 0 };
                     sh.throttle = None;
                     sh.waypoints = full[from..].to_vec();
                     sh.order = 2;
@@ -552,12 +552,10 @@ fn autopilot(
     }
     let Some(p) = w.iter().find(|u| u.primary && u.alive) else { return };
     // Ships only: whales count as hostile until the reprimand rule (PROVISIONAL default), and chasing them stalled the run after Objective 3.
-    let foe =
-        w.iter().filter(|u| u.alive && u.visible && sc.hostile(&u.owner, &p.owner) && ships.contains(u.e)).min_by(|a, bb| a.pos.distance(p.pos).total_cmp(&bb.pos.distance(p.pos)));
+    let foe = w.iter().filter(|u| u.alive && u.visible && sc.hostile(&u.owner, &p.owner) && ships.contains(u.e)).nearest_to(p.pos, |a| a.pos);
     let dock = sc.task_active("Dock With Tender");
     let shoot_rocks = sc.task_active("Destroy Asteroids");
-    let rock =
-        rocks.iter().filter(|(_, _, a)| a.group == "Asteroid Belt" && a.hp > 0.0).min_by(|a, bb| a.1.translation.distance(p.pos).total_cmp(&bb.1.translation.distance(p.pos)));
+    let rock = rocks.iter().filter(|(_, _, a)| a.group == "Asteroid Belt" && a.hp > 0.0).nearest_to(p.pos, |a| a.1.translation);
     let goal = if let (true, Some((e, tf, _))) = (shoot_rocks, rock.filter(|r| r.1.translation.distance(p.pos) < 400.0)) {
         target.0 = Some(e);
         Some(tf.translation)
@@ -679,7 +677,7 @@ fn mission_ai(
         let near = |pool: &[Unit], pred: &dyn Fn(&Unit) -> bool, acquire: bool| {
             pool.iter()
                 .filter(|s| s.e != e && s.alive && pred(s) && !partner(s.e) && (!acquire || sensors.in_sight(e, s.e, Some(&mission))))
-                .min_by(|a, b| a.pos.distance(tf.translation).total_cmp(&b.pos.distance(tf.translation)))
+                .nearest_to(tf.translation, |a| a.pos)
                 .map(|s| (s.e, s.pos))
         };
         // 'GroupA to attack GroupB': the nearest ship of the target, else the nearest of its rocks ('attack Asteroid Belt').

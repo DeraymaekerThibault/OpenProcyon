@@ -7,6 +7,7 @@
 //! Tows (menu Tow start / stop): the tower steers for the towee and the link is registered inside 50 units of surface distance; the
 //! rigid tow itself lives in rules.rs. The docking status icon lives on the primary ship's bottom-bar portrait in panels.rs.
 //! PROVISIONAL: the tow approach point (the towee's centre, not its tow node).
+use crate::Nearest;
 use bevy::ecs::system::{ParamSet, SystemParam};
 use bevy::prelude::*;
 use serde_json::Value;
@@ -65,11 +66,11 @@ impl Dockable {
     }
     /// The point nearest `from` (world), free or not.
     fn nearest(&self, tf: &Transform, from: Vec3) -> Option<usize> {
-        (0..self.points.len()).min_by(|a, b| self.world(tf, *a).0.distance(from).total_cmp(&self.world(tf, *b).0.distance(from)))
+        (0..self.points.len()).nearest_to(from, |a| self.world(tf, *a).0)
     }
     /// The free point nearest `from`.
     pub fn nearest_free(&self, tf: &Transform, from: Vec3) -> Option<usize> {
-        (0..self.points.len()).filter(|i| self.taken[*i].is_none()).min_by(|a, b| self.world(tf, *a).0.distance(from).total_cmp(&self.world(tf, *b).0.distance(from)))
+        (0..self.points.len()).filter(|i| self.taken[*i].is_none()).nearest_to(from, |a| self.world(tf, *a).0)
     }
     fn release(&mut self, docker: Entity) {
         for t in &mut self.taken {

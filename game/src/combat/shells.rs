@@ -1,5 +1,6 @@
 //! Shells in flight: motion, torpedo guidance, point defence, hits on ships, bases, scenery and asteroids, and their damage.
 use super::*;
+use crate::Nearest;
 
 #[derive(Component)]
 pub struct Shell {
@@ -96,14 +97,14 @@ pub(super) fn apply_ship_hit(class: &Class, hp: &mut Health, k: usize, damage: [
     let [lo, hi, _crit, fire_p, fire_str] = damage;
     let protected = invuln >= 1.0;
     let was = hp.sections[k];
-    hp.sections[k] = (was - (1.0 - invuln) * (rng.range(lo, hi))).max(0.0);
+    hp.sections[k] = (was - (1.0 - invuln) * rng.range(lo, hi)).max(0.0);
     // Retail ignition roll per hit: chance > 0 and roll <= chance starts a fire of the bullet's initial strength.
     // PROVISIONAL: one fire per section (the original's extra gate is unknown).
     let fire = (!protected && fire_p > 0.0 && rng.f() <= fire_p && hp.sections[k] > 0.0 && fire_free).then_some(fire_str);
     // Retail: every hit that leaves a vital section at 0 HP (the killing hit and later ones) takes
     // a fresh damage roll x the summed core% of all destroyed vital sections / 100 off the core (rounding provisional).
     if !protected && class.sections[k].vital && hp.sections[k] == 0.0 {
-        hp.core -= core_bleed(class, hp, (1.0 - invuln) * (rng.range(lo, hi)));
+        hp.core -= core_bleed(class, hp, (1.0 - invuln) * rng.range(lo, hi));
     }
     ShipHit { fire, lost: was > 0.0 && hp.sections[k] == 0.0 }
 }
@@ -161,7 +162,7 @@ pub(super) fn shells(
                     !h.destroyed && sh.side != s.side && m.is_none_or(|m| m.visible) && t.translation.distance(p0) < sight + lib.classes[sh.class].radius
                 })
                 .map(|(_, t, ..)| t.translation)
-                .min_by(|a, b| a.distance(p0).total_cmp(&b.distance(p0)));
+                .nearest_to(p0, |a| *a);
             s.vel = match prey {
                 Some(p) => s.vel.lerp((p - p0).normalize_or_zero() * speed, (3.0 * dt).min(1.0)),
                 None if s.aim.is_none_or(|a| a.distance(p0) < 2.0) || s.age > 3.0 => s.vel * (-1.5 * dt).exp(),
@@ -313,10 +314,8 @@ pub(super) fn shells(
             let [lo, hi, ..] = bd.damage[key];
             let at = p0 + (p1 - p0) * t;
             hits.write(Hit { shooter: s.shooter, victim: be });
-            hp.sections[k] = (hp.sections[k] - (rng.range(lo, hi))).max(0.0);
-            if let Some(pool) = bd.impact_snd.get(key).filter(|p| !p.is_empty()) {
-                sfx.write(Sfx { name: rng.pick(pool).clone(), at: Some(at), vol: bd.impact_vol, max: bd.impact_max });
-            }
+            hp.sections[k] = (hp.sections[k] - rng.range(lo, hi)).max(0.0);
+            sfx.write_batch(bd.impact_sound(key, at, &mut rng));
             hit_fx(&mut commands, &fxl, bd, at, s.vel);
             commands.entity(e).despawn();
             continue;
@@ -375,9 +374,7 @@ pub(super) fn shells(
                 info!("fire on {} of {}", sec.label, class.name);
                 fires.list.push(Fire { sec: k, intensity: fire_str, state: 0, t: 0.0, fx });
             }
-            if let Some(pool) = bd.impact_snd.get(key).filter(|p| !p.is_empty()) {
-                sfx.write(Sfx { name: rng.pick(pool).clone(), at: Some(at), vol: bd.impact_vol, max: bd.impact_max });
-            }
+            sfx.write_batch(bd.impact_sound(key, at, &mut rng));
             if outcome.lost {
                 // Retail pool per section material (Damage_<Wood|Metal|Sail|Stone>01-05, 600 units). PROVISIONAL: played on section loss.
                 let pool = match key {

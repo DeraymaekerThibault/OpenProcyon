@@ -337,6 +337,14 @@ fn screenshot(mut commands: Commands, mut cfg: ResMut<Config>) {
 }
 
 /// The item whose position is closest to `to`.
+/// `iter.nearest_to(point, pos)`: the item whose `pos` is closest to `point` (see `nearest`).
+pub trait Nearest: Iterator + Sized {
+    fn nearest_to(self, to: Vec3, pos: impl Fn(&Self::Item) -> Vec3) -> Option<Self::Item> {
+        nearest(self, to, pos)
+    }
+}
+impl<I: Iterator> Nearest for I {}
+
 pub fn nearest<T>(items: impl IntoIterator<Item = T>, to: Vec3, pos: impl Fn(&T) -> Vec3) -> Option<T> {
     items.into_iter().min_by(|a, b| pos(a).distance_squared(to).total_cmp(&pos(b).distance_squared(to)))
 }

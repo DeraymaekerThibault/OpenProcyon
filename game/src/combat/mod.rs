@@ -118,6 +118,14 @@ impl Rng {
     }
 }
 
+impl crate::data::BulletDef {
+    /// A random impact sound of this bullet on `material` at `at`, if it has any.
+    pub fn impact_sound(&self, material: &str, at: Vec3, rng: &mut Rng) -> Option<crate::audio::Sfx> {
+        let pool = self.impact_snd.get(material).filter(|p| !p.is_empty())?;
+        Some(crate::audio::Sfx { name: rng.pick(pool).clone(), at: Some(at), vol: self.impact_vol, max: self.impact_max })
+    }
+}
+
 /// The damage-table material (`MATERIALS`) a section's material string names; wood when none matches.
 pub fn material_key(material: &str) -> &'static str {
     MATERIALS.iter().find(|m| material.contains(**m)).copied().unwrap_or("Wood")

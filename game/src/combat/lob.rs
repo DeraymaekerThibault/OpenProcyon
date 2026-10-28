@@ -94,9 +94,7 @@ pub fn detonate(
         if let Some(m) = mission.as_mut() {
             m.script.mortar_bursts.push(d.at);
         }
-        if let Some(pool) = b.impact_snd.get("Wood").filter(|p| !p.is_empty()) {
-            sfx.write(Sfx { name: rng.pick(pool).clone(), at: Some(d.at), vol: b.impact_vol, max: b.impact_max });
-        }
+        sfx.write_batch(b.impact_sound("Wood", d.at, &mut rng));
         let effect = |commands: &mut Commands, name: &Option<String>, at: Vec3| {
             if let Some(n) = name {
                 let t = Transform::from_translation(at);
