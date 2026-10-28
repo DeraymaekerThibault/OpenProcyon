@@ -380,6 +380,15 @@ fn approach_point(point: Vec3, fwd: Vec3, ship: Vec3, leg: f32) -> Vec3 {
     (point + dir * leg).with_y(ship.y)
 }
 
+/// `e` reserves dock point `i` and (re)starts its approach to it.
+fn claim(dockable: &mut Dockable, docker: &mut Docker, e: Entity, i: usize) {
+    dockable.taken[i] = Some(e);
+    docker.point = Some(i);
+    docker.phase = Phase::Approach;
+    docker.final_leg = false;
+    docker.base_approach = None;
+}
+
 fn routine(
     time: Res<Time>,
     lib: Res<Library>,
@@ -422,19 +431,12 @@ fn routine(
             && dockable.taken[n].is_none()
         {
             dockable.release(e);
-            dockable.taken[n] = Some(e);
-            docker.point = Some(n);
-            docker.final_leg = false;
-            docker.base_approach = None;
+            claim(&mut dockable, &mut docker, e, n);
         }
         match docker.phase {
             Phase::Wait => {
                 if let Some(i) = dockable.nearest_free(dockee_tf, here) {
-                    dockable.taken[i] = Some(e);
-                    docker.point = Some(i);
-                    docker.phase = Phase::Approach;
-                    docker.final_leg = false;
-                    docker.base_approach = None;
+                    claim(&mut dockable, &mut docker, e, i);
                     continue;
                 }
                 let Some(i) = dockable.nearest(dockee_tf, here) else { continue };
@@ -444,11 +446,7 @@ fn routine(
                 let holder = dockable.taken[i].and_then(pos_of);
                 if ship.speed.abs() > 0.01 && holder.is_some_and(|h| here.distance(p) < h.distance(p)) {
                     bumped.extend(dockable.taken[i]);
-                    dockable.taken[i] = Some(e);
-                    docker.point = Some(i);
-                    docker.phase = Phase::Approach;
-                    docker.final_leg = false;
-                    docker.base_approach = None;
+                    claim(&mut dockable, &mut docker, e, i);
                 } else if here.distance(p) < WAIT_DIST {
                     ship.waypoints.clear();
                     ship.order = 0;

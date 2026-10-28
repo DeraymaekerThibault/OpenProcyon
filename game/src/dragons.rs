@@ -76,7 +76,7 @@ pub fn spawn(commands: &mut Commands, assets: &AssetServer, data: &Value) {
                 roars: id.max(0) as usize,
                 flap: id as f32,
             },
-            WorldAssetRoot(assets.load(GltfAssetLabel::Scene(0).from_asset(crate::data::model(&format!("{scene}.glb"))))),
+            crate::data::scene(assets, &format!("{scene}.glb")),
             Transform::from_translation(pos).with_rotation(Quat::from_rotation_y(heading)),
             Visibility::Inherited,
         ));

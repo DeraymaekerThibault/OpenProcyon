@@ -222,12 +222,7 @@ pub fn asteroid_deaths(
             child.speed = child.velocity.length();
             child.axis = rng.direction();
             child.tumble = rng.f() * std::f32::consts::FRAC_PI_2;
-            let mut entity = commands.spawn((
-                crate::Scenario,
-                child,
-                child_tf,
-                WorldAssetRoot(assets.load(GltfAssetLabel::Scene(0).from_asset(crate::data::model(&format!("{}.glb", d.scene))))),
-            ));
+            let mut entity = commands.spawn((crate::Scenario, child, child_tf, crate::data::scene(&assets, &format!("{}.glb", d.scene))));
             if let Some(body) = shapes.obstacle(kind, &child_tf) {
                 entity.insert(body);
             }

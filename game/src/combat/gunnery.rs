@@ -50,7 +50,7 @@ pub fn spawn_guns(commands: &mut Commands, assets: &AssetServer, lib: &Library, 
 }
 
 pub(super) fn spawn_gun(commands: &mut Commands, assets: &AssetServer, lib: &Library, ship: Entity, m: &crate::data::Mount, gun: &str) -> GunState {
-    let scene = |glb: &str| WorldAssetRoot(assets.load(GltfAssetLabel::Scene(0).from_asset(crate::data::model(glb))));
+    let scene = |glb: &str| crate::data::scene(assets, glb);
     let g = &lib.guns[gun];
     let root = commands.spawn((GunPart, Transform { translation: m.pos, rotation: m.rot, ..default() }, Visibility::default(), ChildOf(ship))).id();
     let base = commands.spawn((GunPart, Transform::default(), Visibility::default(), ChildOf(root))).id();
@@ -518,7 +518,7 @@ pub(super) fn launch_shell(
         commands.entity(shell).insert(crate::audio::Travel { name: name.clone(), vol: *vol, max: *max });
     }
     if let Some(glb) = &b.glb {
-        commands.entity(shell).insert(WorldAssetRoot(assets.load(GltfAssetLabel::Scene(0).from_asset(crate::data::model(glb)))));
+        commands.entity(shell).insert(crate::data::scene(assets, glb));
     } else if b.bullet_fx.is_none() {
         // fx-only shells (Lancer sprite) get no placeholder mesh
         commands.entity(shell).insert((Mesh3d(look.mesh.clone()), MeshMaterial3d(mat)));

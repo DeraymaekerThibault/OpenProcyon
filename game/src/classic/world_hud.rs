@@ -93,7 +93,7 @@ fn navigation(
                 Navigation { arrow },
                 Visibility::Hidden,
                 Transform::default(),
-                WorldAssetRoot(assets.load(GltfAssetLabel::Scene(0).from_asset(crate::data::model(&format!("SELECTION_INDICATOR_{part}_SMALL.glb"))))),
+                crate::data::scene(&assets, &format!("SELECTION_INDICATOR_{part}_SMALL.glb")),
             ));
             if !arrow {
                 // PROVISIONAL backing fill: the native indicator render state is not decoded.

@@ -82,7 +82,7 @@ pub fn spawn_debris(commands: &mut Commands, assets: &AssetServer, fxl: &FxLib, 
     let axis = Vec3::new(roll() - 0.5, 0.0, roll() - 0.5).normalize_or(Vec3::X);
     let e = commands
         .spawn((Debris { vel: ship_vel, axis, spin: DEBRIS_SPIN * (0.5 + roll()), age: 0.0 }, Transient, at, Visibility::default()))
-        .with_child((WorldAssetRoot(assets.load(GltfAssetLabel::Scene(0).from_asset(crate::data::model(model)))), Transform::from_translation(-*pivot)))
+        .with_child((crate::data::scene(assets, model), Transform::from_translation(-*pivot)))
         .id();
     if let Some(name) = &sec.debris_fx {
         fx::spawn(commands, fxl, name, Some(e), Transform::IDENTITY, at, false);

@@ -263,7 +263,7 @@ fn spawn_map_objects(
         let ty = o["type"].as_str().unwrap_or_default();
         let glb = format!("{}.glb", o["scene"].as_str().unwrap_or_default());
         let tf = scenery_transform(o, game_rotation(&o["rot"]), &docks);
-        let e = commands.spawn((Scenario, WorldAssetRoot(assets.load(GltfAssetLabel::Scene(0).from_asset(data::model(&glb)))), tf)).id();
+        let e = commands.spawn((Scenario, crate::data::scene(assets, &glb), tf)).id();
         if let Some(body) = shapes.obstacle(ty, &tf) {
             commands.entity(e).insert(body);
         }
@@ -299,13 +299,7 @@ pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Libra
     let map = cfg.map.as_deref().and_then(data::map_json);
     commands.insert_resource(MapLighting(map.as_ref().and_then(lighting_of)));
     let sky = map.as_ref().and_then(|m| m["sky"].as_str()).map(|s| s.rsplit_once("_Layer").map_or(s, |x| x.0).to_string()).unwrap_or("skybox_07".into());
-    commands.spawn((
-        Scenario,
-        Sky,
-        WorldAssetRoot(assets.load(GltfAssetLabel::Scene(0).from_asset(data::model(&format!("{sky}.glb"))))),
-        Transform::from_scale(Vec3::splat(8000.0)),
-        Visibility::default(),
-    ));
+    commands.spawn((Scenario, Sky, crate::data::scene(assets, &format!("{sky}.glb")), Transform::from_scale(Vec3::splat(8000.0)), Visibility::default()));
     let track = map.as_ref().and_then(|m| m["music"].as_str()).unwrap_or("BTL_NavyBig_Full02");
     if !campaign::is_mission(cfg.map.as_deref()) {
         // the mission's rules choose its music

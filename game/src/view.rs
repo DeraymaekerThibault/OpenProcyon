@@ -1,73 +1,5 @@
 //! Camera, world mouse/keyboard input and the F1 debug text.
 
-#[cfg(test)]
-mod camera_tests {
-    use super::*;
-    use bevy::ecs::system::RunSystemOnce;
-    use std::time::Duration;
-
-    #[test]
-    fn focus_does_not_track_a_ship_outside_group_sight_but_allows_projectile_debug_focus() {
-        let (mut world, ids) = ship::movement_tests::fleet_world();
-        world.init_resource::<environment::Sensors>();
-        let cam = world.spawn((Camera3d::default(), Transform::default())).id();
-        world.resource_mut::<Orbit>().focus = Some(ids[5]);
-        world.get_mut::<Transform>(ids[5]).unwrap().translation = Vec3::X * 3000.0;
-        world.run_system_once(environment::refresh_sensors).unwrap();
-        world.run_system_once(camera).unwrap();
-        assert_eq!(world.get::<Transform>(cam).unwrap().translation, Vec3::new(0.0, 3.0, 60.0));
-        world.get_mut::<Transform>(ids[5]).unwrap().translation = Vec3::X * 120.0;
-        world.run_system_once(environment::refresh_sensors).unwrap();
-        world.run_system_once(camera).unwrap();
-        assert_eq!(world.get::<Transform>(cam).unwrap().translation, Vec3::new(120.0, 3.0, 60.0));
-        let shell = world.spawn(Transform::from_xyz(600.0, 0.0, 0.0)).id();
-        world.resource_mut::<Orbit>().focus = Some(shell);
-        world.run_system_once(camera).unwrap();
-        assert_eq!(world.get::<Transform>(cam).unwrap().translation, Vec3::new(600.0, 3.0, 60.0));
-    }
-
-    #[test]
-    fn keyboard_camera_rotation_and_zoom_stay_at_one_x_at_every_simulation_speed() {
-        let (mut world, ids) = ship::movement_tests::fleet_world();
-        for e in ids {
-            world.entity_mut(e).insert(GlobalTransform::default());
-        }
-        world.resource_mut::<ship::Fleets>().selected = Some(ids[0]);
-        world.spawn((Window::default(), PrimaryWindow));
-        world.spawn((Camera::default(), GlobalTransform::default()));
-        world.init_resource::<ButtonInput<MouseButton>>();
-        world.init_resource::<ButtonInput<KeyCode>>();
-        world.init_resource::<AccumulatedMouseMotion>();
-        world.init_resource::<AccumulatedMouseScroll>();
-        world.init_resource::<crate::bindings::Bindings>();
-        world.init_resource::<course::Plot>();
-        world.init_resource::<panels::UiClick>();
-        world.init_resource::<options_menu::OptionsMenu>();
-        world.init_resource::<environment::Sensors>();
-        world.init_resource::<Messages<docking::DockMsg>>();
-        world.resource_mut::<ButtonInput<KeyCode>>().press(KeyCode::ArrowLeft);
-        world.resource_mut::<ButtonInput<KeyCode>>().press(KeyCode::ArrowUp);
-        let mut real = Time::<Real>::default();
-        real.advance_by(Duration::from_secs_f32(0.1));
-        world.insert_resource(real);
-        for speed in [0.0, 1.0, 2.0, 4.0, 8.0, 16.0] {
-            let mut virtual_time = Time::<Virtual>::default();
-            if speed == 0.0 {
-                virtual_time.pause();
-            } else {
-                virtual_time.set_relative_speed(speed);
-            }
-            virtual_time.advance_by(Duration::from_secs_f32(0.1 * speed));
-            world.insert_resource(virtual_time.as_generic());
-            world.insert_resource(virtual_time);
-            world.insert_resource(Orbit { yaw: 0.0, pitch: 0.5, dist: 100.0, focus: Some(ids[0]) });
-            world.run_system_once(input).unwrap();
-            let orbit = world.resource::<Orbit>();
-            assert!((orbit.yaw - 0.15).abs() < 0.00001, "rotation at {speed}x: {}", orbit.yaw);
-            assert!((orbit.dist - 94.0).abs() < 0.00001, "zoom at {speed}x: {}", orbit.dist);
-        }
-    }
-}
 use crate::bindings::Act;
 use crate::*;
 
@@ -483,6 +415,75 @@ pub fn hud(
         };
         if **t != text {
             **t = text.into(); // only on change: an assignment re-lays the text out
+        }
+    }
+}
+
+#[cfg(test)]
+mod camera_tests {
+    use super::*;
+    use bevy::ecs::system::RunSystemOnce;
+    use std::time::Duration;
+
+    #[test]
+    fn focus_does_not_track_a_ship_outside_group_sight_but_allows_projectile_debug_focus() {
+        let (mut world, ids) = ship::movement_tests::fleet_world();
+        world.init_resource::<environment::Sensors>();
+        let cam = world.spawn((Camera3d::default(), Transform::default())).id();
+        world.resource_mut::<Orbit>().focus = Some(ids[5]);
+        world.get_mut::<Transform>(ids[5]).unwrap().translation = Vec3::X * 3000.0;
+        world.run_system_once(environment::refresh_sensors).unwrap();
+        world.run_system_once(camera).unwrap();
+        assert_eq!(world.get::<Transform>(cam).unwrap().translation, Vec3::new(0.0, 3.0, 60.0));
+        world.get_mut::<Transform>(ids[5]).unwrap().translation = Vec3::X * 120.0;
+        world.run_system_once(environment::refresh_sensors).unwrap();
+        world.run_system_once(camera).unwrap();
+        assert_eq!(world.get::<Transform>(cam).unwrap().translation, Vec3::new(120.0, 3.0, 60.0));
+        let shell = world.spawn(Transform::from_xyz(600.0, 0.0, 0.0)).id();
+        world.resource_mut::<Orbit>().focus = Some(shell);
+        world.run_system_once(camera).unwrap();
+        assert_eq!(world.get::<Transform>(cam).unwrap().translation, Vec3::new(600.0, 3.0, 60.0));
+    }
+
+    #[test]
+    fn keyboard_camera_rotation_and_zoom_stay_at_one_x_at_every_simulation_speed() {
+        let (mut world, ids) = ship::movement_tests::fleet_world();
+        for e in ids {
+            world.entity_mut(e).insert(GlobalTransform::default());
+        }
+        world.resource_mut::<ship::Fleets>().selected = Some(ids[0]);
+        world.spawn((Window::default(), PrimaryWindow));
+        world.spawn((Camera::default(), GlobalTransform::default()));
+        world.init_resource::<ButtonInput<MouseButton>>();
+        world.init_resource::<ButtonInput<KeyCode>>();
+        world.init_resource::<AccumulatedMouseMotion>();
+        world.init_resource::<AccumulatedMouseScroll>();
+        world.init_resource::<crate::bindings::Bindings>();
+        world.init_resource::<course::Plot>();
+        world.init_resource::<panels::UiClick>();
+        world.init_resource::<options_menu::OptionsMenu>();
+        world.init_resource::<environment::Sensors>();
+        world.init_resource::<Messages<docking::DockMsg>>();
+        world.resource_mut::<ButtonInput<KeyCode>>().press(KeyCode::ArrowLeft);
+        world.resource_mut::<ButtonInput<KeyCode>>().press(KeyCode::ArrowUp);
+        let mut real = Time::<Real>::default();
+        real.advance_by(Duration::from_secs_f32(0.1));
+        world.insert_resource(real);
+        for speed in [0.0, 1.0, 2.0, 4.0, 8.0, 16.0] {
+            let mut virtual_time = Time::<Virtual>::default();
+            if speed == 0.0 {
+                virtual_time.pause();
+            } else {
+                virtual_time.set_relative_speed(speed);
+            }
+            virtual_time.advance_by(Duration::from_secs_f32(0.1 * speed));
+            world.insert_resource(virtual_time.as_generic());
+            world.insert_resource(virtual_time);
+            world.insert_resource(Orbit { yaw: 0.0, pitch: 0.5, dist: 100.0, focus: Some(ids[0]) });
+            world.run_system_once(input).unwrap();
+            let orbit = world.resource::<Orbit>();
+            assert!((orbit.yaw - 0.15).abs() < 0.00001, "rotation at {speed}x: {}", orbit.yaw);
+            assert!((orbit.dist - 94.0).abs() < 0.00001, "zoom at {speed}x: {}", orbit.dist);
         }
     }
 }

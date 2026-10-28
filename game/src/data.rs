@@ -16,6 +16,11 @@ pub fn model(file: &str) -> String {
     index.get(file).cloned().unwrap_or_else(|| file.to_string())
 }
 
+/// The scene of a converted model (`model(file)`), ready to spawn.
+pub fn scene(assets: &AssetServer, file: &str) -> WorldAssetRoot {
+    WorldAssetRoot(assets.load(GltfAssetLabel::Scene(0).from_asset(model(file))))
+}
+
 /// Converted single-material mesh geometry; malformed or unsupported GLBs fail without indexing outside buffers.
 pub fn mesh_geometry(root: &std::path::Path, name: &str) -> Option<(Vec<Vec3>, Vec<[f32; 2]>, Vec<u32>)> {
     let bytes = std::fs::read(root.join(model(&format!("{name}.glb")))).ok()?;
