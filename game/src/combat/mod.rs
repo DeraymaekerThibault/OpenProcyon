@@ -35,6 +35,14 @@ pub struct Health {
     pub core: f32,
     pub destroyed: bool,
 }
+/// How a mission's 'Setup Island' makes the island's guns shoot: `accuracy` scales the plain AI's burst spread, a silent island
+/// (Dummy or Neutral stance) never opens fire. PROVISIONAL: what Neutral does in the original is not verified.
+#[derive(Component, Clone, Copy)]
+pub struct IslandGunnery {
+    pub accuracy: f32,
+    pub silent: bool,
+}
+
 /// A base with gun towers (island): `class` is its `Base_*` entry in the library (mounts and sections); `Health` holds the section HP.
 #[derive(Component)]
 pub struct ArmedBase {

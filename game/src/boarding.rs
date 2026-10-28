@@ -78,6 +78,11 @@ impl Skill {
             Self::Players => 1.0,
         }
     }
+    /// Gunnery accuracy factor relative to an Average crew (1 - 0.8 x ability, as for crewed ships in gunnery.rs); below 1 is better.
+    /// PROVISIONAL: carries the generic crews' per-man ability over to island gunners.
+    pub fn gunnery_vs_average(self) -> f32 {
+        (1.0 - 0.8 * self.member()) / (1.0 - 0.8 * Self::Average.member())
+    }
     fn member(self) -> f32 {
         match self {
             Self::Green => 0.1,

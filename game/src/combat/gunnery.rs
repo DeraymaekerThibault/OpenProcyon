@@ -540,13 +540,13 @@ pub(super) fn base_fire(
     mut sfx: MessageWriter<Sfx>,
     mut fired: MessageWriter<Fired>,
     campaign: Option<Res<crate::campaign::Mission>>,
-    mut bases: Query<(Entity, &Transform, &crate::campaign::MissionBase, &ArmedBase, &Health, &mut GunStates, Option<&BaseSide>), Without<GunPart>>,
+    mut bases: Query<(Entity, &Transform, &crate::campaign::MissionBase, &ArmedBase, &Health, &mut GunStates, Option<&BaseSide>, Option<&IslandGunnery>), Without<GunPart>>,
     ships: Query<(&Transform, &Ship, &Health, Option<&crate::campaign::MissionShip>, Entity)>,
     mut parts: Query<&mut Transform, (With<GunPart>, Without<Ship>)>,
     (globals, sensors): (Query<&GlobalTransform, With<GunPart>>, Res<crate::environment::Sensors>),
 ) {
     let dt = time.delta_secs();
-    for (me, tf, base, armed, health, mut states, skirmish_side) in &mut bases {
+    for (me, tf, base, armed, health, mut states, skirmish_side, island) in &mut bases {
         let class = &lib.classes[armed.class];
         let volcano = class.name.starts_with("Island_Volcano");
         // The nearest visible hostile ship in sight, with its side.
@@ -554,6 +554,7 @@ pub(super) fn base_fire(
             .iter()
             .filter(|(_, ship, h, m, _)| {
                 !h.destroyed
+                    && !island.is_some_and(|i| i.silent)
                     && match (&campaign, skirmish_side) {
                         // Volcanoes belong to nobody and fire on every visible ship.
                         (Some(_), _) if volcano => m.is_some_and(|m| m.visible),
@@ -590,7 +591,7 @@ pub(super) fn base_fire(
                 state.cooldown = gun.burst_cycle();
                 state.burst_timer = 0.0;
                 volcano_cycle = volcano.then_some(state.cooldown);
-                state.dev = burst_deviation(gun, distance, 0.5, &mut rng);
+                state.dev = burst_deviation(gun, distance, 0.5 * island.map_or(1.0, |i| i.accuracy), &mut rng);
             }
             if state.burst_left > 0 && state.burst_timer <= 0.0 {
                 state.burst_left -= 1;
