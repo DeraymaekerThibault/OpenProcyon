@@ -459,9 +459,8 @@ impl MenuModel<'_> {
 
 /// Dev/smoke hook (`--menu lobby --autolaunch`): fills the human fleet like the fleet screen would and launches.
 /// Screenshot hook (`--menu fleet --script fleet-crew|fleet-arms`): an auto-assigned Navy fleet with the Crew / Arms screen open.
-fn fleet_hook(mut sk: ResMut<Skirmish>, lib: Res<Library>, mut done: Local<bool>) {
-    let args: Vec<String> = std::env::args().collect();
-    if *done || !args.windows(2).any(|w| w[0] == "--script" && w[1].starts_with("fleet-")) {
+fn fleet_hook(mut sk: ResMut<Skirmish>, lib: Res<Library>, cfg: Res<crate::Config>, mut done: Local<bool>) {
+    if *done || !matches!(cfg.script, Some(crate::smoke::Script::FleetCrew | crate::smoke::Script::FleetArms)) {
         return;
     }
     *done = true;
@@ -471,14 +470,15 @@ fn fleet_hook(mut sk: ResMut<Skirmish>, lib: Res<Library>, mut done: Local<bool>
     sk.fleet_size = 5;
     apply(&mut sk, &lib, &Action::AutoAssign);
     sk.arms_open = true;
+    sk.arms_tab = cfg.script == Some(crate::smoke::Script::FleetArms);
 }
 
-fn autolaunch(mut sk: ResMut<Skirmish>, lib: Res<Library>, mut next: ResMut<NextState<Screen>>) {
+fn autolaunch(mut sk: ResMut<Skirmish>, lib: Res<Library>, cfg: Res<crate::Config>, mut next: ResMut<NextState<Screen>>) {
     // Screenshot hook (`--menu lobby --script map-info`): open the Map Description dialog.
-    if !sk.map_info && std::env::args().collect::<Vec<_>>().windows(2).any(|w| w[0] == "--script" && w[1] == "map-info") {
+    if !sk.map_info && cfg.script == Some(crate::smoke::Script::MapInfo) {
         sk.map_info = true;
     }
-    if !std::env::args().any(|a| a == "--autolaunch") {
+    if !cfg.autolaunch {
         return;
     }
     if sk.open() {
@@ -939,6 +939,7 @@ mod tests {
                 speed: 1.0,
                 ended: None,
                 script: None,
+                autolaunch: false,
                 shot_frame: 0,
                 late_frame: 0,
             });

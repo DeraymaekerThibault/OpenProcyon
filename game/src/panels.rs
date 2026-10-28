@@ -650,6 +650,7 @@ pub mod tests {
             speed: 1.0,
             ended: None,
             script: None,
+            autolaunch: false,
             shot_frame: 0,
             late_frame: 0,
         });

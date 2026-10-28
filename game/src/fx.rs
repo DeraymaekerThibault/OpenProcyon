@@ -735,7 +735,14 @@ fn render_fx(
             }
         }
     }
-    let used: std::collections::HashSet<(usize, Blend)> = bufs.keys().copied().collect();
+    // Groups with nothing to draw this frame hide (they keep their mesh and material for later).
+    for (key, (e, _)) in &groups.0 {
+        if !bufs.contains_key(key)
+            && let Ok(mut v) = vis.get_mut(*e)
+        {
+            v.set_if_neq(Visibility::Hidden);
+        }
+    }
     for (key, b) in bufs {
         let entry = groups.0.entry(key).or_insert_with(|| {
             let mesh = meshes.add(Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default()));
@@ -764,14 +771,7 @@ fn render_fx(
             m.insert_indices(Indices::U32(b.idx));
         }
         if let Ok(mut v) = vis.get_mut(entry.0) {
-            *v = Visibility::Inherited;
-        }
-    }
-    for (key, (e, _)) in &groups.0 {
-        if !used.contains(key)
-            && let Ok(mut v) = vis.get_mut(*e)
-        {
-            *v = Visibility::Hidden;
+            v.set_if_neq(Visibility::Inherited);
         }
     }
 }

@@ -870,6 +870,7 @@ mod rotation_tests {
                 speed: 1.0,
                 ended: None,
                 script: None,
+                autolaunch: false,
                 shot_frame: 0,
                 late_frame: 0,
             });
@@ -916,6 +917,7 @@ mod rotation_tests {
             speed: 1.0,
             ended: None,
             script: None,
+            autolaunch: false,
             shot_frame: 0,
             late_frame: 0,
         });

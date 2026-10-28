@@ -739,8 +739,7 @@ fn skirmish_screen(
     }
     if !model.open {
         choice.ship = sk.fleet_pick;
-        // Screenshot hook (`--script fleet-arms`, see menu.rs `fleet_hook`): open on the Arms tab.
-        choice.arms = sk.arms_tab || std::env::args().any(|a| a == "fleet-arms");
+        choice.arms = sk.arms_tab;
     }
     // A face is a drop target like its post while something is carried.
     let as_target = |a: &Action, carrying: bool| match a {

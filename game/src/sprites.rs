@@ -9,7 +9,8 @@ use crate::{Library, PlayerShip, Ship, assets_dir};
 
 #[derive(Resource)]
 pub struct HudData {
-    pub comps: Value,
+    /// Shared so a view can look sprites up in another skin without copying the table.
+    pub comps: std::sync::Arc<Value>,
     /// Art set of the player's faction ("Navy", "Pirate" or "Procyon"): the in-game HUD changes layout and sprites with it.
     pub skin: &'static str,
 }
@@ -105,7 +106,9 @@ pub fn plugin(app: &mut App) {
         return;
     };
     let comps: Value = serde_json::from_str(&text).expect("hud.json");
-    app.insert_resource(HudData { comps, skin: "Navy" }).add_systems(PostStartup, load_fonts).add_systems(Update, choose_skin.run_if(in_state(crate::menu::Screen::Battle)));
+    app.insert_resource(HudData { comps: comps.into(), skin: "Navy" })
+        .add_systems(PostStartup, load_fonts)
+        .add_systems(Update, choose_skin.run_if(in_state(crate::menu::Screen::Battle)));
 }
 
 // ---- bitmap fonts (Fonts/*.fft) --------------------------------------------------------------------------------

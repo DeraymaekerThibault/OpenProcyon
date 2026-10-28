@@ -62,6 +62,8 @@ pub struct Config {
     speed: f32,
     ended: Option<u32>,
     script: Option<smoke::Script>,
+    /// `--autolaunch`: the lobby fills the fleet and starts the battle (dev/smoke hook).
+    autolaunch: bool,
     shot_frame: u32,
     late_frame: u32,
 }
@@ -129,6 +131,7 @@ pub fn run(view: fn(&mut App), setup_view: fn(&mut App)) {
         speed: arg("--speed").and_then(|v| v.parse().ok()).unwrap_or(1.0),
         ended: None,
         script,
+        autolaunch: args.iter().any(|a| a == "--autolaunch"),
         shot_frame: arg("--shot-frame").and_then(|v| v.parse().ok()).unwrap_or(500),
         late_frame: arg("--late-frame").and_then(|v| v.parse().ok()).unwrap_or(9000), // 0: no _late shot (slow software rendering)
     };
