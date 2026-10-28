@@ -35,7 +35,7 @@ pub fn merge(base: &mut Value, over: &Value) {
 }
 
 /// Object files that mods add keys to instead of replacing.
-const MERGED: &[&str] = &["hud/scales.json", "data/weapons/guns.json", "data/weapons/bullets.json"];
+const MERGED: &[&str] = &["hud/scales.json", "data/weapons/guns.json", "data/weapons/bullets.json", "data/ai/weapons.json"];
 
 fn read(p: &Path) -> Option<Value> {
     crate::data::try_json(p)
