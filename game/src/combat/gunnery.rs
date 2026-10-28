@@ -552,12 +552,15 @@ pub(super) fn base_fire(
     let dt = time.delta_secs();
     for (me, tf, base, armed, health, mut states, skirmish_side) in &mut bases {
         let class = &lib.classes[armed.class];
+        let volcano = class.name.starts_with("Island_Volcano");
         // The nearest visible hostile ship in sight, with its side.
         let target = ships
             .iter()
             .filter(|(_, ship, h, m, _)| {
                 !h.destroyed
                     && match (&campaign, skirmish_side) {
+                        // Volcanoes belong to nobody and fire on every visible ship.
+                        (Some(_), _) if volcano => m.is_some_and(|m| m.visible),
                         (Some(mission), _) => m.is_some_and(|m| m.visible && mission.script.hostile(&base.owner, &m.owner)),
                         (None, Some(side)) => ship.side != side.0,
                         (None, None) => false,
