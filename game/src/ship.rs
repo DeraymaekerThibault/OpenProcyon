@@ -151,6 +151,11 @@ pub fn captain_steer(heading: f32, pos: Vec3, foe: Vec3, reach: f32, holes: &[(V
     (toward(foe - side * reach - pos), 3, (dist < ORBIT_SLOW * reach).then_some(ORBIT_THROTTLE))
 }
 
+/// Whether `pos` is inside a keep-out area of `hole_list` (where `captain_steer` flees).
+pub fn in_hole(holes: &[(Vec3, f32)], pos: Vec3) -> bool {
+    holes.iter().any(|(c, r)| Vec2::new(pos.x - c.x, pos.z - c.z).length() < r + HOLE_MARGIN)
+}
+
 /// Areas captains keep out of, as (centre, radius) for `captain_steer`: black holes and damaging nebulae.
 pub fn hole_list(
     holes: &Query<(&Transform, &crate::blackhole::Pull), Without<Ship>>,
@@ -203,11 +208,12 @@ pub fn ai(
     held: Query<(), With<HoldPosition>>,
     holes: Query<(&Transform, &crate::blackhole::Pull), Without<Ship>>,
     storms: (Option<Res<crate::nebula::Storms>>, Option<Res<crate::nebula::StormShift>>),
-    mut explore: Local<Explore>,
+    (mut explore, mut detours): (Local<Explore>, Local<crate::collision::Detours>),
     (time, mut targets): (Res<Time>, ResMut<CaptainTargets>),
     lib: Res<combat::Library>,
-    bases: Query<(Entity, &Transform, &combat::BaseSide, &Health), With<combat::ArmedBase>>,
+    bases: Query<(Entity, &Transform, &combat::BaseSide, &Health, &combat::ArmedBase)>,
     scripted: Query<&campaign::MissionShip>,
+    obstacles: Query<(&crate::collision::Obstacle, Option<&Visibility>), (Without<Ship>, Without<combat::Asteroid>)>,
 ) {
     if mission.is_some() {
         return;
@@ -218,6 +224,7 @@ pub fn ai(
     let dt = time.delta_secs();
     let holes = hole_list(&holes, storms.0.as_deref(), storms.1.as_deref());
     let snap: Vec<(Entity, Vec3, Side, bool)> = ships.iter().map(|(e, t, s, h, _, _)| (e, t.translation, s.side, !h.destroyed)).collect();
+    let scenery = crate::collision::scenery(obstacles.iter());
     for (e, tf, mut s, h, me, pilot) in &mut ships {
         if busy.contains(e) || left_to_script(e) {
             continue;
@@ -246,8 +253,10 @@ pub fn ai(
         let mut chosen = choose_target(targets.0.get(&e).copied(), &candidates);
         // Nothing in sight: a computer ship goes for the nearest living hostile base, however far (retail: a Procyon ship held the
         // Navy base ~2000 units away as its target from the first second). PROVISIONAL: nearest, and ships in sight come first.
+        // Armed volcano islands fire on everyone but are no base to go for (retail Diablo Strait: the computer came for our ships).
         let base = if chosen.is_none() && s.side != Side::Player && explicit.is_none() {
-            crate::nearest(bases.iter().filter(|b| b.2.0 != s.side && !b.3.destroyed), tf.translation, |b| b.1.translation)
+            let island = |b: &combat::ArmedBase| lib.classes[b.class].name.starts_with("Island_");
+            crate::nearest(bases.iter().filter(|b| b.2.0 != s.side && !b.3.destroyed && !island(b.4)), tf.translation, |b| b.1.translation)
         } else {
             None
         };
@@ -267,7 +276,10 @@ pub fn ai(
                 s.order = 0;
                 continue;
             }
-            s.waypoints = vec![explore.goal(&cfg, e, tf.translation)];
+            let (goal, bounds) = (explore.goal(&cfg, e, tf.translation), lib.classes[s.class].collision_bounds);
+            if !detours.route(e, &mut s, bounds, tf.translation, goal, &scenery, dt) {
+                s.waypoints = vec![goal];
+            }
             s.order = 3;
             continue;
         };
@@ -280,6 +292,12 @@ pub fn ai(
             continue;
         }
         let (goal, order, throttle) = captain_steer(s.heading, tf.translation, foe.1, lib.classes[s.class].reach, &holes);
+        // Land between the captain and its foe: sail around it first (black holes and storms still come first).
+        let bounds = lib.classes[s.class].collision_bounds;
+        if !in_hole(&holes, tf.translation) && detours.route(e, &mut s, bounds, tf.translation, foe.1, &scenery, dt) {
+            s.order = order;
+            continue;
+        }
         s.goal = Some(goal);
         s.order = order;
         s.throttle = throttle;

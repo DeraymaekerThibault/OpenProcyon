@@ -278,13 +278,8 @@ pub fn clear_prefix(bounds: [Vec3; 2], path: &[Transform], scenery: &[&Obstacle]
 /// PROVISIONAL docking planner: shortest clear route via padded scenery-bound corners, not the native path planner.
 /// Swept boxes conservatively cover the hull through turns; unreachable approaches return None instead of crossing land.
 pub fn route_clear(bounds: [Vec3; 2], start: Vec3, goal: Vec3, scenery: &[&Obstacle]) -> Option<Vec<Vec3>> {
-    let radius = bounds.iter().map(|p| Vec2::new(p.x, p.z).length()).fold(0.0, f32::max) + 2.0;
-    let clear = |a: Vec3, b: Vec3| {
-        let d = (b - a).with_y(0.0);
-        let tf = Transform::from_translation(a).with_rotation(Quat::from_rotation_y((-d.x).atan2(-d.z)));
-        let swept = [Vec3::new(-radius, bounds[0].y, -d.length() - radius), Vec3::new(radius, bounds[1].y, radius)];
-        !touches(swept, &tf, scenery)
-    };
+    let radius = sweep_radius(bounds);
+    let clear = |a: Vec3, b: Vec3| path_clear(bounds, a, b, scenery);
     if clear(start, goal) {
         return Some(vec![goal]);
     }
@@ -321,6 +316,63 @@ pub fn route_clear(bounds: [Vec3; 2], start: Vec3, goal: Vec3, scenery: &[&Obsta
             if !visited[i] && distance < cost[i] && clear(points[next], points[i]) {
                 cost[i] = distance;
                 previous[i] = next;
+            }
+        }
+    }
+}
+
+fn sweep_radius(bounds: [Vec3; 2]) -> f32 {
+    bounds.iter().map(|p| Vec2::new(p.x, p.z).length()).fold(0.0, f32::max) + 2.0
+}
+
+/// Whether the hull, swept from `a` to `b` (a box as wide as the hull's farthest corner, so turns stay covered), misses all scenery.
+pub fn path_clear(bounds: [Vec3; 2], a: Vec3, b: Vec3, scenery: &[&Obstacle]) -> bool {
+    let radius = sweep_radius(bounds);
+    let d = (b - a).with_y(0.0);
+    let tf = Transform::from_translation(a).with_rotation(Quat::from_rotation_y((-d.x).atan2(-d.z)));
+    let swept = [Vec3::new(-radius, bounds[0].y, -d.length() - radius), Vec3::new(radius, bounds[1].y, radius)];
+    !touches(swept, &tf, scenery)
+}
+
+/// A captain's goal moves less than this (units) before its detour is planned again, and a detour is replanned at least this often (s).
+/// PROVISIONAL: tuned by eye, not the original's planner.
+const REPLAN_MOVE: f32 = 40.0;
+const REPLAN_SECS: f32 = 4.0;
+
+/// AI detours around scenery: when land blocks the straight line to a captain's destination, the ship sails a `route_clear` route
+/// (as waypoints) instead of steering straight at it; once the line is clear it steers normally again. Keyed by ship.
+/// PROVISIONAL: the padded-corner planner, not the original's path planner (`steer_clear` still handles what it misses).
+/// ponytail: a plan costs ~25 ms on The Diablo Strait (17 islands, release build); cache a visibility graph per map if that hitches.
+#[derive(Default)]
+pub struct Detours(HashMap<Entity, (Vec3, f32)>);
+impl Detours {
+    /// Sets `ship`'s waypoints to a route to `dest` and returns true when scenery blocks the straight line and a route exists;
+    /// otherwise drops any earlier detour and returns false, leaving the caller to steer.
+    pub fn route(&mut self, e: Entity, ship: &mut crate::Ship, bounds: [Vec3; 2], pos: Vec3, dest: Vec3, scenery: &[&Obstacle], dt: f32) -> bool {
+        let dest = dest.with_y(pos.y);
+        let planned = (!path_clear(bounds, pos, dest, scenery))
+            .then(|| match self.0.get_mut(&e) {
+                Some((at, age)) if at.distance(dest) < REPLAN_MOVE && *age < REPLAN_SECS && !ship.waypoints.is_empty() => {
+                    *age += dt;
+                    Some(None) // keep the route being sailed (its reached corners are already popped)
+                }
+                _ => route_clear(bounds, pos, dest, scenery).map(Some),
+            })
+            .flatten();
+        match planned {
+            Some(route) => {
+                if let Some(route) = route {
+                    ship.waypoints = route;
+                    self.0.insert(e, (dest, 0.0));
+                }
+                ship.goal = None;
+                true
+            }
+            None => {
+                if self.0.remove(&e).is_some() {
+                    ship.waypoints.clear();
+                }
+                false
             }
         }
     }
