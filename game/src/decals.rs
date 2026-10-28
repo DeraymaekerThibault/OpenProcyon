@@ -2,7 +2,8 @@
 //! (assets/decals, data/decals.json from tools/export_decals.py): the bucket for the struck section's material, the size class of
 //! the bullet's 'Decal Damage Size'. PROVISIONAL: the original's trigger, projection and per-ship cap are unknown; here every hit that
 //! damages a section leaves a camera-lit quad facing back along the shell's path, up to `CAP` per ship (oldest first out), and a
-//! dock repair that brings every section back to full clears them.
+//! dock repair that brings every section back to full clears them. A destroyed section's scars go with it (its mesh is swapped
+//! for the broken one), and a destroyed ship loses them all before it breaks up (owner's call: they looked wrong on the pieces).
 use bevy::prelude::*;
 use std::collections::HashMap;
 
@@ -12,10 +13,11 @@ const CAP: usize = 24;
 /// Quad edge per size class (world units).
 const SIZE: [f32; 3] = [1.2, 2.0, 3.0];
 
-/// A section of `ship` was struck at `local` (ship frame) by a shell travelling along `dir` (ship frame).
+/// Section `section` of `ship` was struck at `local` (ship frame) by a shell travelling along `dir` (ship frame).
 #[derive(Message)]
 pub struct Scar {
     pub ship: Entity,
+    pub section: usize,
     pub local: Vec3,
     pub dir: Vec3,
     pub material: &'static str,
@@ -31,8 +33,9 @@ struct DecalLib {
     n: usize,
 }
 
+/// A ship's scars with the section each one is on.
 #[derive(Component, Default)]
-struct Scars(Vec<Entity>);
+struct Scars(Vec<(Entity, usize)>);
 
 pub fn plugin(app: &mut App) {
     let doc = crate::data::try_json(&crate::assets_dir().join("data/decals.json")).unwrap_or_default();
@@ -89,27 +92,74 @@ fn place(
         let e = commands.spawn((Mesh3d(quad), MeshMaterial3d(mat), tf, ChildOf(s.ship))).id();
         match scars {
             Some(mut list) => {
-                list.0.push(e);
+                list.0.push((e, s.section));
                 if list.0.len() > CAP {
-                    let old = list.0.remove(0);
+                    let (old, _) = list.0.remove(0);
                     commands.entity(old).try_despawn();
                 }
             }
             None => {
-                commands.entity(s.ship).insert(Scars(vec![e]));
+                commands.entity(s.ship).insert(Scars(vec![(e, s.section)]));
             }
         }
     }
 }
 
-/// A ship whose every section is back at full (a dock refit) loses its scars.
+/// Scars go when their section is destroyed, all of them when the ship is destroyed, and all of them when every section is
+/// back at full (a dock refit).
 fn mend(mut commands: Commands, lib: Res<Library>, mut ships: Query<(&crate::Ship, &Health, &mut Scars)>) {
     for (ship, h, mut scars) in &mut ships {
         let class = &lib.classes[ship.class];
-        if !scars.0.is_empty() && h.sections.iter().zip(&class.sections).all(|(hp, s)| *hp >= s.hp) {
-            for e in scars.0.drain(..) {
+        let mended = h.sections.iter().zip(&class.sections).all(|(hp, s)| *hp >= s.hp);
+        scars.0.retain(|&(e, section)| {
+            let keep = !h.destroyed && !mended && h.sections.get(section).is_some_and(|hp| *hp > 0.0);
+            if !keep {
                 commands.entity(e).try_despawn();
             }
-        }
+            keep
+        });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    #[ignore = "needs imported assets"]
+    fn scars_go_with_their_destroyed_section_and_with_a_destroyed_ship() {
+        let lib = Library::load(crate::assets_dir());
+        let class = lib.index("Ship_Navy_Cutter");
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins).add_systems(Update, mend);
+        let mut health = Health::new(&lib.classes[class]);
+        health.sections[0] -= 1.0; // damaged, so no "mended" clear-out
+        app.insert_resource(lib);
+        let (a, b) = (app.world_mut().spawn_empty().id(), app.world_mut().spawn_empty().id());
+        let ship = crate::Ship {
+            class,
+            side: crate::Side::Enemy,
+            heading: 0.0,
+            speed: 0.0,
+            ang_vel: 0.0,
+            order: 0,
+            waypoints: vec![],
+            goal: None,
+            cap: 1.0,
+            throttle: None,
+            sail_energy: 1.0,
+            crew_speed: 1.0,
+            crew_turn: 1.0,
+        };
+        let e = app.world_mut().spawn((ship, health, Scars(vec![(a, 0), (b, 1)]))).id();
+        app.update();
+        assert!(app.world().get_entity(a).is_ok() && app.world().get_entity(b).is_ok(), "scars on living sections stay");
+        app.world_mut().get_mut::<Health>(e).unwrap().sections[1] = 0.0;
+        app.update();
+        assert!(app.world().get_entity(b).is_err(), "the destroyed section's scar is gone");
+        assert!(app.world().get_entity(a).is_ok());
+        app.world_mut().get_mut::<Health>(e).unwrap().destroyed = true;
+        app.update();
+        assert!(app.world().get_entity(a).is_err(), "a destroyed ship keeps no scars for its breakup");
     }
 }
