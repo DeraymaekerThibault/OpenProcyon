@@ -12,6 +12,11 @@ Work from the repository root with the Python virtual environment active. Use `m
    `make autoplay [ARGS="1 2"]` (`tools/autoplay.py`) plays campaign missions with the `--script mission` autopilot and prints a
    table per mission: outcome (won, lost, time limit, stuck in NIS, panic), peak entities/particles, slowest frame and how many
    mission rules never fired (named in the log). It finds crashes and soft-locks, not fidelity problems.
+   `make battles [ARGS=ambush]` (`tools/battle_check.py`, part of `make check` when assets are imported) plays short skirmishes with
+   fixed fleets at 16x and fails when one stops behaving like a battle: a side never fires or hits, a computer ship parks, a ship
+   grinds on scenery, or the game panics. The game writes one `battle report {json}` line (`PROCYON_REPORT=<game s>`,
+   `smoke/report.rs`); read it before adding print statements. When a change touches targeting, steering or what counts as a
+   base/ship, add or tighten a scenario there rather than relying on a long manual run.
 6. Review `git diff --check` and `git diff --stat`. Never commit converted assets (`assets/` is git-ignored).
 
 ```sh

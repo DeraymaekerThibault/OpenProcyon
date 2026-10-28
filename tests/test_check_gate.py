@@ -64,7 +64,11 @@ esac
                     ],
                 )
                 smokes = [line for line in calls if line.startswith("timeout ")]
-                self.assertEqual(len(smokes), 2 if imported else 0)
+                self.assertEqual(len(smokes), 1 if imported else 0)
+                battles = [
+                    line for line in calls if line == "python3 -m tools.battle_check"
+                ]
+                self.assertEqual(len(battles), 1 if imported else 0)
                 self.assertIn("python3 -m unittest discover -s tests", calls)
 
     def test_rust_test_failure_stops_the_gate_in_both_modes(self):
