@@ -1020,19 +1020,21 @@ fn apply_outfit(
         Entity,
         &mut crate::Ship,
         &crate::combat::Health,
-        &crate::campaign::MissionShip,
+        Ref<crate::campaign::MissionShip>,
         &mut crate::combat::GunStates,
         &mut crate::boarding::Boardable,
         Option<&CrewPosts>,
     )>,
 ) {
     let Some(mission) = mission else { return };
+    // The outfit only changes with the saved points or the mission; otherwise only ships that just spawned need fitting.
+    let dirty = points.is_changed() || mission.is_changed();
     for (e, mut ship, health, ms, mut guns, mut boarding, posts) in &mut ships {
-        if health.destroyed {
+        if health.destroyed || !(dirty || ms.is_added()) {
             continue;
         }
         let class = &lib.classes[ship.class];
-        let fit = (ms.owner == mission.script.player()).then(|| points.outfit.ships.get(&ship_key(class, ms))).flatten();
+        let fit = (ms.owner == mission.script.player()).then(|| points.outfit.ships.get(&ship_key(class, &ms))).flatten();
         let wanted = fit.map(|fit| {
             let mut crew: [Vec<String>; 8] = default();
             let mut used = std::collections::HashSet::new();

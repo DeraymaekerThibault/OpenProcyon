@@ -425,6 +425,10 @@ impl MenuModel<'_> {
     pub fn screen(&self) -> Screen {
         *self.state.get()
     }
+    /// Whether anything `key` reads was touched this frame; when not, the key (a large formatted string) cannot have changed.
+    pub fn changed(&self) -> bool {
+        self.sk.is_changed() || self.ig.is_changed() || self.saves.is_changed() || self.binds.is_changed() || self.ctrl.is_changed() || self.state.is_changed() || self.settings.is_changed() || self.stats.is_changed()
+    }
     pub fn key(&self, window: &Window) -> MenuKey {
         let (sk, ui, cui) = (&self.sk, &self.saves, &self.ctrl);
         (

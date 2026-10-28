@@ -34,13 +34,16 @@ fn build(
     hud: Option<Res<HudData>>,
     fonts: Option<Res<Fonts>>,
     model: MenuModel,
-    window: Single<&Window, With<PrimaryWindow>>,
+    window: Single<Ref<Window>, With<PrimaryWindow>>,
     roots: Query<Entity, With<MenuRoot>>,
     mut last: Local<Option<MenuKey>>,
     preview: Option<Res<super::ship_preview::ShipPreview>>,
 ) {
     let (Some(hud), Some(fonts)) = (hud, fonts) else { return };
     if fonts.0.is_empty() {
+        return;
+    }
+    if last.is_some() && !roots.is_empty() && !model.changed() && !window.is_changed() {
         return;
     }
     let key = model.key(&window);
