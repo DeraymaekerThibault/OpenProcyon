@@ -314,8 +314,15 @@ pub fn spawn(commands: &mut Commands, assets: &AssetServer, lib: &Library, fxl: 
     let mission = load_id(id);
     let setups =
         |kind: &'static str| mission.data["rules"].as_array().into_iter().flatten().flat_map(|r| r["actions"].as_array().into_iter().flatten()).filter(move |a| a["Type"] == kind);
-    let islands: Vec<(i64, String, i32)> = setups("*State Init* Setup Island")
-        .filter_map(|a| Some((a["World Object ID"].as_i64()?, a["Player/Owner"].as_str()?.to_string(), a["Combat Strength"].as_i64().unwrap_or(0) as i32)))
+    let islands: Vec<(i64, String, i32, crate::combat::IslandGunnery)> = setups("*State Init* Setup Island")
+        .filter_map(|a| {
+            let stance = a["AI Stance"].as_str().unwrap_or_default().to_lowercase();
+            let gunnery = crate::combat::IslandGunnery {
+                accuracy: crate::boarding::Skill::parse(a["Gunnery Level"].as_str().unwrap_or_default()).gunnery_vs_average(),
+                silent: stance.contains("dummy") || stance.contains("neutral"),
+            };
+            Some((a["World Object ID"].as_i64()?, a["Player/Owner"].as_str()?.to_string(), a["Combat Strength"].as_i64().unwrap_or(0) as i32, gunnery))
+        })
         .collect();
     for (e, o) in bases {
         // Wrecked hulls are scenery the rules address by their TWT group (mission 6 teleports them and turns their collision off).
@@ -323,7 +330,7 @@ pub fn spawn(commands: &mut Commands, assets: &AssetServer, lib: &Library, fxl: 
             commands.entity(*e).insert(MissionBase { id: o["id"].as_i64().unwrap_or(-1), owner: String::new() });
             continue;
         }
-        let Some((_, owner, combat)) = islands.iter().find(|(i, ..)| Some(*i) == o["id"].as_i64()) else {
+        let Some((_, owner, combat, gunnery)) = islands.iter().find(|(i, ..)| Some(*i) == o["id"].as_i64()) else {
             // Most volcanoes have no setup rule; they still fire (docs/re/volcanoes.md).
             if let Some(class) = o["type"].as_str().filter(|t| t.starts_with("Island_Volcano")).and_then(|t| lib.classes.iter().position(|c| c.name == t)) {
                 commands.entity(*e).insert(MissionBase { id: o["id"].as_i64().unwrap_or(-1), owner: String::new() });
@@ -338,7 +345,7 @@ pub fn spawn(commands: &mut Commands, assets: &AssetServer, lib: &Library, fxl: 
         // Island gun towers: a `Base_*` class with mounts makes the base a shooter and a target (combat::base_fire).
         if let Some(class) = lib.classes.iter().position(|c| Some(c.name.as_str()) == o["type"].as_str()) {
             let states = crate::combat::spawn_guns(commands, assets, lib, *e, class);
-            commands.entity(*e).insert((crate::combat::ArmedBase { class }, crate::combat::Health::new(&lib.classes[class]), states));
+            commands.entity(*e).insert((crate::combat::ArmedBase { class }, crate::combat::Health::new(&lib.classes[class]), states, *gunnery));
         }
     }
     let mut ships: Vec<Value> = mission.data["ships"].as_array().expect("mission ships").clone();
