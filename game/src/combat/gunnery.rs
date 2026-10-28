@@ -286,12 +286,13 @@ pub(super) fn fire(
         let class = &lib.classes[ship.class];
         // Player's command ship: only the clicked target (retail: direct-fire guns need an enemy click or panic fire). Its other
         // ships: the nearest living enemy. Enemies: their captain's target.
-        // Mission ships other than the player's fire at the target the rules' AI chose (rules::mission_ai).
+        // Mission ships other than the player's fire at the target the rules' AI chose (rules::mission_ai). Skirmish ships carry
+        // MissionShip too (map scripts), but no rules AI aims them: unless their script set a target, their captain's applies.
         let ship_target = if pilot.is_some_and(|p| p.hold_fire) || mission.is_some_and(|m| m.hold_fire) {
             None
         } else if let Some(t) = pilot.filter(|_| !primary).and_then(|p| p.target) {
             seen.iter().find(|c| c.entity == t && c.side != ship.side && c.visible).map(Contact::aim).or_else(|| rocks.iter().find(|r| r.entity == t).copied())
-        } else if let (Some(m), false) = (mission, primary) {
+        } else if let (Some(m), false) = (mission.filter(|m| campaign.is_some() || m.target.is_some()), primary) {
             m.target.and_then(|t| seen.iter().find(|c| c.entity == t && c.visible).map(Contact::aim).or_else(|| rocks.iter().find(|r| r.entity == t).copied()))
         } else if let (Side::Player, Some(r)) = (ship.side, target.0.filter(|_| primary).and_then(|t| rocks.iter().find(|r| r.entity == t))) {
             Some(*r) // selected space object (asteroid or whale)

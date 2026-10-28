@@ -626,9 +626,12 @@ fn mission_ai(
     held: Query<(), With<crate::ship::HoldPosition>>,
     holes: Query<(&Transform, &crate::blackhole::Pull), Without<Ship>>,
     storms: (Option<Res<crate::nebula::Storms>>, Option<Res<crate::nebula::StormShift>>),
+    obstacles: Query<(&crate::collision::Obstacle, Option<&Visibility>), (Without<Ship>, Without<Asteroid>)>,
+    (time, mut detours): (Res<Time>, Local<crate::collision::Detours>),
 ) {
     let Some(mission) = mission else { return };
     let holes = crate::ship::hole_list(&holes, storms.0.as_deref(), storms.1.as_deref());
+    let scenery = crate::collision::scenery(obstacles.iter());
     let sc = &mission.script;
     // Targets for orders and hostility: ships, then rocks (rocks only answer attack orders, never hostility); tagged with TWT groups.
     let unit = |e, id, name: &str, owner: &str, pos, alive| Unit {
@@ -738,11 +741,18 @@ fn mission_ai(
             } else {
                 crate::ship::captain_steer(ship.heading, tf.translation, fp, lib.classes[ship.class].reach, &holes)
             };
+            ms.stop_at_end = true;
+            // Land between the ship and its foe: sail around it first (a ram goes straight; black holes and storms come first).
+            let bounds = lib.classes[ship.class].collision_bounds;
+            let flee = crate::ship::in_hole(&holes, tf.translation);
+            if !ms.ram && !flee && detours.route(e, &mut ship, bounds, tf.translation, fp, &scenery, time.delta_secs()) {
+                ship.order = order;
+                continue;
+            }
             ship.waypoints.clear();
             ship.goal = Some(goal);
             ship.order = order;
             ship.throttle = throttle;
-            ms.stop_at_end = true;
         } else if ms.stop_at_end && ms.looping.is_none() && ship.waypoints.len() <= 1 {
             // Retail takes the last point of a 'to end' path within 2 x the ship's radius, then cuts throttle to 0.
             // PROVISIONAL: `class.radius` stands in for the original's radius field. A finished chase (remake AI) likewise waits for orders.
@@ -1122,6 +1132,7 @@ mod ai_tests {
         let lib = Library::load(crate::assets_dir());
         let mut app = App::new();
         app.insert_resource(crate::campaign::load())
+            .init_resource::<Time>()
             .init_resource::<crate::environment::Sensors>()
             .add_systems(PreUpdate, crate::environment::refresh_sensors)
             .add_systems(Update, mission_ai);
