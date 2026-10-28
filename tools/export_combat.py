@@ -425,6 +425,8 @@ def export(root, ship, outdir):
         engine_snd=[
             p.get(f"EngineSoundName {k}") for k in ("Half", "Full", "Emergency")
         ],
+        # Selection ring radius as a fraction of the ship's radius (0.45-1.1 across the retail ships).
+        ring=p.get("Selected Indicator Percentage Of Radius"),
     )
 
 
