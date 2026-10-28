@@ -315,15 +315,25 @@ pub(super) fn shells(
             })
             .min_by(|x, y| x.0.total_cmp(&y.0));
         if let Some((t, k, be)) = base_hit.filter(|b| best.as_ref().is_none_or(|x| b.0 < x.0))
-            && let Ok((_, _, ab, mut hp, ..)) = bases.get_mut(be)
+            && let Ok((_, btf, ab, mut hp, ..)) = bases.get_mut(be)
         {
             let sec = &lib.classes[ab.class].sections[k];
             let key = material_key(&sec.material);
             let [lo, hi, ..] = bd.damage[key];
             let at = p0 + (p1 - p0) * t;
             hits.write(Hit { shooter: s.shooter, victim: be });
+            let was_up = hp.sections[k] > 0.0;
             hp.sections[k] = (hp.sections[k] - rng.range(lo, hi)).max(0.0);
             sfx.write_batch(bd.impact_sound(key, at, &mut rng));
+            // A base part going down bursts with its destruct effect and a blast. PROVISIONAL: retail's effect for a destroyed
+            // base part is not measured; the part's WOT destruct effect and the ship-explosion sound stand in.
+            if was_up && hp.sections[k] <= 0.0 && sec.mission {
+                let centre = Transform::from_translation(btf.transform_point((sec.min + sec.max) / 2.0));
+                if let Some(name) = sec.destruct.as_ref().and_then(|d| d.fx.as_deref()) {
+                    fx::spawn(&mut commands, &fxl, name, None, centre, centre, true);
+                }
+                sfx.write(Sfx { name: format!("Explosion_Med0{}", rng.variant(8)), at: Some(centre.translation), vol: 1.0, max: 900.0 });
+            }
             hit_fx(&mut commands, &fxl, bd, at, s.vel);
             commands.entity(e).despawn();
             continue;
