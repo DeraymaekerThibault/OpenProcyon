@@ -1,4 +1,5 @@
-"""Armed bases: assets/ships/<Base_*>/{ship.json,geometry.json} for every Base_* world object that places guns (island gun towers).
+"""Armed bases and islands: assets/ships/<Base_*|Island_*>/{ship.json,geometry.json} for every Base_*/Island_* world object that places guns
+(island gun towers, the volcanoes).
 Same layout as a ship (pack_data/pack_layout) so the game loads it as a class; no model.glb: the base's visual is its map scenery GLB (models/bases).
 New gun/bullet definitions are merged into data/weapons. usage: python3 -m tools.export_bases <game_root> <assets_dir>
 """
@@ -19,7 +20,12 @@ def export_bases(root, assets):
         json.loads((wdir / "guns.json").read_text()),
         json.loads((wdir / "bullets.json").read_text()),
     )
-    for wot in ci_files(Path(root) / "WorldObjects", "Base_*.wot"):
+    wots = [
+        w
+        for pattern in ("Base_*.wot", "Island_*.wot")
+        for w in ci_files(Path(root) / "WorldObjects", pattern)
+    ]
+    for wot in wots:
         name = wot.stem
         try:
             if not any(associations(load(root, name), "GunPlacement")):
@@ -58,8 +64,15 @@ def export_bases(root, assets):
             }
             for s in j["sections"]
         }
+        # The volcanoes name every mount 'default'; the bank (unique per mount) then tells them apart.
+        labels = [g["label"] for g in j["guns"]]
         ship["guns"] = {
-            g["label"]: {k: v for k, v in g.items() if k != "label"} for g in j["guns"]
+            (
+                g["label"]
+                if labels.count(g["label"]) == 1
+                else f"{g['label']}_{g['bank']}"
+            ): {k: v for k, v in g.items() if k != "label"}
+            for g in j["guns"]
         }
         for k in (
             "engines",

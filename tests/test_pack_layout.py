@@ -121,8 +121,8 @@ class PackLayoutTests(unittest.TestCase):
                 (ASSETS / "ships" / j["geometry"] / "geometry.json").is_file(), f
             )
             if not f.parent.name.startswith(
-                "Base_"
-            ):  # armed bases draw their scenery GLB (models/bases)
+                ("Base_", "Island_")
+            ):  # armed bases and islands draw their scenery GLB (models/bases, models/scenery)
                 self.assertTrue(
                     (ASSETS / "ships" / j["model"] / "model.glb").is_file(), f
                 )

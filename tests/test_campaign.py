@@ -3,7 +3,7 @@ import unittest
 
 from imported import ASSETS, needs_assets
 
-from tools.export_campaign import parse_mission
+from tools.export_campaign import parse_mission, speech_events
 from tools.models import model_path
 
 
@@ -39,6 +39,33 @@ class CampaignTests(unittest.TestCase):
             [a["Flag Name"] for a in parsed["rules"][0]["actions"]], ["one", "two"]
         )
         self.assertEqual(parsed["rules"][0]["line"], 3)
+
+    def test_crew_and_arms_pools_and_speech_presentation(self):
+        text = """\tWorld Crew List - Size Int 2
+\tWorld Crew List - Element String 'Crew_A'
+\tWorld Crew List - Element String 'Crew_B'
+\tWorld Arms List - Size Int 1
+\tWorld Arms List - Element String 'Gun_X'
+\tPlayEndMovie Bool True
+\t00000001 World Rules
+\t{
+\t}
+\t00000002 Speech Event List - Element
+\t{
+\t\tName String 'Hello'
+\t\tSound FileName String 'M01X'
+\t\tText Color Colour( 1.0, 0.5, 0.0, 1.0 )
+\t\tTalkingHeadLocation Int 1
+\t\tSpeakerID String 'IDGS_TPSPEAKERNAMES_JIM'
+\t}
+"""
+        m = parse_mission(text)
+        self.assertEqual(m["crew_pool"], ["Crew_A", "Crew_B"])
+        self.assertEqual(m["arms_pool"], ["Gun_X"])
+        self.assertTrue(m["play_end_movie"])
+        ev = speech_events(text)["Hello"]
+        self.assertEqual((ev["color"], ev["head"]), ([1.0, 0.5, 0.0, 1.0], 1))
+        self.assertEqual(ev["speaker"], "IDGS_TPSPEAKERNAMES_JIM")
 
     def test_unclosed_script_rejected(self):
         with self.assertRaises(ValueError):

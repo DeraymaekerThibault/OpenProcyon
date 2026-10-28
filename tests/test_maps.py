@@ -22,8 +22,15 @@ TWT = """\tWorldNameID String 'IDGS_X'
 \t\tTeamIndex Int 0
 \t\tFormationType Int 2
 \t\tFlagIndex Int 0
+\t\tColor Colour( 0.0, 0.0, 1.0, 1.000000 )
 \t}
 \tSkybox mesh name String 'skybox_09_Layer1'
+\tAmbient Light Colour( 0.1, 0.2, 0.3, 1.000000 )
+\tVector for roof light orientation Vector3( 0.5, 0.5, -0.7 )
+\tHemispherical floor light color Colour( 0.4, 0.4, 0.8, 1.000000 )
+\tHemispherical roof light color Colour( 1.0, 1.0, 1.0, 1.000000 )
+\tIs Alliance Change Allowed Bool True
+\tIslands Make Sounds Bool False
 \tType String 'Island08'
 \t00000014 State
 \t{
@@ -91,6 +98,15 @@ class MapTests(unittest.TestCase):
         ]["if"][0]
         self.assertEqual(c["objects"], [129])
         self.assertEqual(len(c["polygon"]), 3)
+
+    def test_twt_lighting_flags_and_player_colour(self):
+        m = parse_twt(TWT)
+        self.assertEqual(m["lighting"]["ambient"], [0.1, 0.2, 0.3, 1.0])
+        self.assertEqual(m["lighting"]["roof_direction"], [0.5, 0.5, -0.7])
+        self.assertEqual(m["lighting"]["floor"], [0.4, 0.4, 0.8, 1.0])
+        self.assertTrue(m["alliance_change"])
+        self.assertFalse(m["islands_make_sounds"])
+        self.assertEqual(m["players"][0]["color"], [0.0, 0.0, 1.0, 1.0])
 
     def test_twt(self):
         m = parse_twt(TWT)

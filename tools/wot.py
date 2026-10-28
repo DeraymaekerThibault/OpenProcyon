@@ -6,7 +6,7 @@ import re
 from tools.source_text import SourceLine
 
 HEADER = re.compile(r"([0-9]{8})\s+(.+)")
-TYPE_TOKEN = re.compile(r"\s+(String|Int|Float|Bool|Vector3|Matrix33|Coord)\b")
+TYPE_TOKEN = re.compile(r"\s+(String|Int|Float|Bool|Vector3|Matrix33|Coord|Colour)\b")
 NUMBER = re.compile(r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?")
 FACTORIES = {
     "ShipCustomInfoFactory": "ship",
@@ -42,12 +42,15 @@ def decode_value(type_name, raw):
         if math.isfinite(value):
             return value
     if (
-        type_name in ("Vector3", "Matrix33", "Coord")
+        type_name in ("Vector3", "Matrix33", "Coord", "Colour")
         and raw.startswith("(")
         and raw.endswith(")")
     ):
         parts = raw[1:-1].split(",")
-        if len(parts) == {"Vector3": 3, "Matrix33": 9, "Coord": 2}[type_name]:
+        if (
+            len(parts)
+            == {"Vector3": 3, "Matrix33": 9, "Coord": 2, "Colour": 4}[type_name]
+        ):
             return [decode_value("Float", part.strip()) for part in parts]
     raise ValueError("Unsupported or invalid typed value")
 
