@@ -94,8 +94,8 @@ fn content_dir_from(next_to_exe: Option<PathBuf>, checkout: PathBuf) -> PathBuf 
     next_to_exe.filter(|dir| dir.join("fonts").is_dir()).unwrap_or(checkout)
 }
 /// The asset root: the imported assets with `content/` and any `--mod` folders overlaid on top (see modding.rs).
-pub fn assets_dir() -> PathBuf {
-    ASSETS.get_or_init(|| modding::overlay(&base_assets(), &[content_dir()])).clone()
+pub fn assets_dir() -> &'static std::path::Path {
+    ASSETS.get_or_init(|| modding::overlay(&base_assets(), &[content_dir()]))
 }
 
 /// Runs the game with one presentation (a view plugin such as the binary's `classic::plugin`); without imported assets it opens

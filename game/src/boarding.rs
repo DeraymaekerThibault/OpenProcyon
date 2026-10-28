@@ -1041,7 +1041,7 @@ mod tests {
             .init_resource::<ButtonInput<KeyCode>>()
             .init_resource::<BoardStatus>()
             .init_resource::<Got>()
-            .insert_resource(Library::load(&assets_dir()))
+            .insert_resource(Library::load(assets_dir()))
             .insert_resource(Rng::new(7))
             .add_systems(Update, (handle_messages, set_flags, grapple_orders, winch, drive, fights, settled, status, collect).chain());
         app
@@ -1053,7 +1053,7 @@ mod tests {
     fn spawn(app: &mut App, class: &str, side: Side, at: Vec3, skill: Skill) -> Entity {
         let ci = app.world().resource::<Library>().index(class);
         let c = &app.world().resource::<Library>().classes[ci];
-        let health = Health { sections: c.sections.iter().map(|s| s.hp).collect(), core: c.core_hp, destroyed: false };
+        let health = Health::new(c);
         let ship = Ship {
             class: ci,
             side,
@@ -1224,7 +1224,7 @@ mod tests {
     /// bear on a ship it circles on its beam.
     #[test]
     fn ai_harpoons_bear_by_arc_and_long_range() {
-        let lib = Library::load(&assets_dir());
+        let lib = Library::load(assets_dir());
         let bears = |class: &str, at: Vec3| {
             let ci = lib.index(class);
             let ship = Ship {
@@ -1252,7 +1252,7 @@ mod tests {
 
     #[test]
     fn base_boarding_needs_a_boarding_point_in_reach_and_a_slow_boarder() {
-        let lib = Library::load(&assets_dir());
+        let lib = Library::load(assets_dir());
         let ci = lib.index("Ship_Navy_Cutter");
         let ship = Ship {
             class: ci,

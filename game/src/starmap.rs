@@ -163,7 +163,7 @@ fn describe(
 mod tests {
     #[test]
     fn exported_maps_carry_backdrop_and_world_size() {
-        let m: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(crate::assets_dir().join("maps/mission01/map.json")).unwrap()).unwrap();
+        let m: serde_json::Value = crate::data::read_json(&crate::assets_dir().join("maps/mission01/map.json"));
         assert_eq!(m["world_half"], 1500.0);
         assert!(crate::assets_dir().join("maps/mission01/backdrop.png").exists());
     }

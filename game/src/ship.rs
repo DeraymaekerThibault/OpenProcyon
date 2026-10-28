@@ -739,7 +739,7 @@ pub mod movement_tests {
     use super::*;
     pub fn fleet_world() -> (World, [Entity; 6]) {
         let mut w = World::new();
-        let lib = Library::load(&assets_dir());
+        let lib = Library::load(assets_dir());
         let ci = lib.index("Ship_Navy_Cutter");
         let class = &lib.classes[ci];
         let ids = std::array::from_fn(|i| {
@@ -1013,7 +1013,7 @@ pub mod movement_tests {
     }
     #[test]
     fn open_map_ships_get_distinct_names_from_their_type_pool() {
-        let lib = combat::Library::load(&crate::assets_dir());
+        let lib = combat::Library::load(crate::assets_dir());
         let mut namer = Namer::new();
         let pool = &lib.names["Ship_Pirate_Sloop"];
         let picked: std::collections::HashSet<String> = (0..pool.len()).map(|_| namer.pick(&lib, "Ship_Pirate_Sloop").unwrap()).collect();
@@ -1041,7 +1041,7 @@ pub mod movement_tests {
 
     #[test]
     fn ship_keeps_speed_and_heading_past_last_waypoint() {
-        let lib = combat::Library::load(&crate::assets_dir());
+        let lib = combat::Library::load(crate::assets_dir());
         // Not class 0: the sorted ship folders now start with the (immobile) armed bases.
         let ci = lib.index("Ship_Navy_Cutter");
         let class = &lib.classes[ci];
@@ -1104,7 +1104,7 @@ pub mod movement_tests {
 
         // Crewed computer ships run in from 400 units and settle on their tightest circle with the foe abeam, using the real
         // movement step and their own reach. Retail: Carrack 45-50 units around an idle Cutter, Barque 51-58.
-        let lib = combat::Library::load(&crate::assets_dir());
+        let lib = combat::Library::load(crate::assets_dir());
         for (name, lo_ok, hi_ok) in [("Ship_Pirate_Carrack", 43.0, 55.0), ("Ship_Pirate_Barque", 48.0, 68.0)] {
             let ci = lib.index(name);
             let class = &lib.classes[ci];
@@ -1146,7 +1146,7 @@ pub mod movement_tests {
 
     #[test]
     fn computer_ships_stop_390_units_off_a_hostile_base() {
-        let lib = combat::Library::load(&crate::assets_dir());
+        let lib = combat::Library::load(crate::assets_dir());
         let ci = lib.index("Ship_Navy_Frigate");
         let class = &lib.classes[ci];
         let h = Health { sections: vec![1.0; class.sections.len()], core: 1.0, destroyed: false };
@@ -1182,7 +1182,7 @@ pub mod movement_tests {
     /// Retail Navy Cutter without crew, sampled from the running original (docs/re/movement.md, "Measured").
     #[test]
     fn cutter_matches_measured_retail_movement() {
-        let lib = combat::Library::load(&crate::assets_dir());
+        let lib = combat::Library::load(crate::assets_dir());
         let ci = lib.index("Ship_Navy_Cutter");
         let class = &lib.classes[ci];
         let h = Health { sections: vec![1.0; class.sections.len()], core: 1.0, destroyed: false };
@@ -1242,7 +1242,7 @@ pub mod movement_tests {
     /// Retail Navy Cutters with engineer and helmsman both at skill 5 and 9 (docs/re/crew.md): Ahead Full and full-rudder turn.
     #[test]
     fn crewed_cutter_matches_measured_retail_speed_and_turn() {
-        let lib = combat::Library::load(&crate::assets_dir());
+        let lib = combat::Library::load(crate::assets_dir());
         let ci = lib.index("Ship_Navy_Cutter");
         let class = &lib.classes[ci];
         let h = Health { sections: vec![1.0; class.sections.len()], core: 1.0, destroyed: false };
@@ -1280,7 +1280,7 @@ pub mod movement_tests {
     /// Retail full-rudder turns without crew on two classes (docs/re/movement.md table): speed and steady turn rate.
     #[test]
     fn uncrewed_turns_match_measured_retail() {
-        let lib = combat::Library::load(&crate::assets_dir());
+        let lib = combat::Library::load(crate::assets_dir());
         for (name, order, speed, turn) in [("Ship_Navy_Cutter", 3, 9.056, 9.71), ("Ship_Navy_ManOWar", 2, 2.341, 4.16), ("Ship_Navy_ManOWar", 3, 4.684, 3.11)] {
             let ci = lib.index(name);
             let class = &lib.classes[ci];

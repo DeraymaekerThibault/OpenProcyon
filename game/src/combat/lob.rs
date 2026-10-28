@@ -268,7 +268,7 @@ mod tests {
 
     #[test]
     fn storm_wind_uses_weather_damage_and_respects_mission_protection() {
-        let lib = Library::load(&crate::assets_dir());
+        let lib = Library::load(crate::assets_dir());
         let class = lib.index("Ship_Navy_Sloop");
         let k = lib.classes[class].sections.iter().position(|s| s.material.contains("Cloth")).unwrap();
         let hp = Health::new(&lib.classes[class]);

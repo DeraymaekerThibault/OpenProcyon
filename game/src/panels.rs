@@ -605,7 +605,7 @@ pub fn input_app() -> (App, Entity) {
         .init_resource::<UiClick>()
         .init_resource::<crate::bindings::Bindings>()
         .init_resource::<combat::Target>()
-        .insert_resource(Library::load(&crate::assets_dir()))
+        .insert_resource(Library::load(crate::assets_dir()))
         .insert_resource(Toggles { weapons: true, names: true })
         .insert_resource(crate::Orbit { yaw: 0.0, pitch: 0.5, dist: 50.0, focus: Some(Entity::PLACEHOLDER) })
         .add_systems(Update, hud_input);

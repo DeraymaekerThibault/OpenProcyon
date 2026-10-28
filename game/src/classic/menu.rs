@@ -93,16 +93,16 @@ fn build(
         .with_children(|root| {
             root.spawn(canvas).with_children(|c| {
                 if let Some(controls) = page {
-                    options_page(&ctx, c, controls, ingame, &strings, binds, cui);
+                    options_page(&ctx, c, controls, ingame, strings, binds, cui);
                 }
                 if let Some(display) = settings_page {
-                    sound_display_page(&ctx, c, display, ingame, &strings, settings);
+                    sound_display_page(&ctx, c, display, ingame, strings, settings);
                 }
                 for e in &els {
-                    element(&ctx, c, &model, e, &strings, preview.as_deref());
+                    element(&ctx, c, &model, e, strings, preview.as_deref());
                 }
                 if *state.get() == Screen::Lobby && sk.map_info {
-                    map_info_dialog(&ctx, c, sk, &strings);
+                    map_info_dialog(&ctx, c, sk, strings);
                 }
             });
         });

@@ -446,7 +446,7 @@ fn looped(c: &[(f32, f32)], t: f32) -> f32 {
 fn spawn_one(commands: &mut Commands, assets: &AssetServer, effect: &str, mesh_name: &str, pos: Vec3, radius: f32, sound: &str, sound_distance: f32, seed: u32, group: &str) {
     let Some(j) = crate::data::try_json(&assets_dir().join(format!("fx/{effect}.json"))) else { return };
     let chunk = &j["Primitive"][0]["CommonPropertiesChunk"];
-    let Some((base, uv, idx)) = crate::data::mesh_geometry(&assets_dir(), mesh_name) else { return };
+    let Some((base, uv, idx)) = crate::data::mesh_geometry(assets_dir(), mesh_name) else { return };
     let rgb = &chunk["ColorFaderChunk"]["ColorInterpolator3Chunk"];
     commands.spawn((
         Scenario,
@@ -633,7 +633,7 @@ mod tests {
 
     #[test]
     fn thirty_seconds_in_a_storm_does_not_guarantee_lightning_damage() {
-        let lib = crate::combat::Library::load(&assets_dir());
+        let lib = crate::combat::Library::load(assets_dir());
         let class = lib.index("Ship_Navy_Sloop");
         let hp = crate::combat::Health::new(&lib.classes[class]);
         let ship = crate::Ship {
@@ -675,8 +675,8 @@ mod tests {
     }
 
     fn sim() -> Sim {
-        let (base, ..) = crate::data::mesh_geometry(&assets_dir(), "OvalNebula").expect("mesh");
-        let j: Value = serde_json::from_str(&std::fs::read_to_string(assets_dir().join("fx/Nebula.json")).unwrap()).unwrap();
+        let (base, ..) = crate::data::mesh_geometry(assets_dir(), "OvalNebula").expect("mesh");
+        let j: Value = crate::data::read_json(&assets_dir().join("fx/Nebula.json"));
         Sim::new(&base, shift_params(&j["Primitive"][0]["CommonPropertiesChunk"]["MeshChunk"]), 5)
     }
 

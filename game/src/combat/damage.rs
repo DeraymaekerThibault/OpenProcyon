@@ -365,10 +365,10 @@ mod swap_tests {
 
     #[test]
     fn a_destroyed_base_part_shows_its_damaged_mesh() {
-        let lib = Library::load(&crate::assets_dir());
+        let lib = Library::load(crate::assets_dir());
         let class = lib.index("Base_Procyon1");
         let mut app = App::new();
-        app.insert_resource(Library::load(&crate::assets_dir())).add_systems(Update, swap_meshes);
+        app.insert_resource(Library::load(crate::assets_dir())).add_systems(Update, swap_meshes);
         let mut hp = Health::new(&lib.classes[class]);
         hp.sections[0] = 0.0; // BaseProcyons_Layer2
         let node = |app: &mut App, parent, name: &str| app.world_mut().spawn((Name::new(name.to_string()), Visibility::default(), ChildOf(parent))).id();

@@ -578,7 +578,7 @@ mod tests {
     fn sensor_snapshot_tracks_ship_spheres_script_changes_and_cleanup() {
         use crate::combat::{Health, Library};
         let mut app = App::new();
-        let lib = Library::load(&crate::assets_dir());
+        let lib = Library::load(crate::assets_dir());
         let class = lib.index("Ship_Navy_Cutter");
         let health = Health::new(&lib.classes[class]);
         let sphere = lib.classes[class].sphere;

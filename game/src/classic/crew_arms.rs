@@ -64,7 +64,7 @@ fn build(
     let (canvas, scale) = canvas(&window);
     let ctx = Ctx { assets: &assets, hud: &hud, fonts: &fonts, scale };
     let strings = strings();
-    let s = |id: &str| text_of(&strings, id);
+    let s = |id: &str| text_of(strings, id);
     commands.spawn((Root, crate::Scenario, Interaction::None, crate::panels::Solid, full_screen(), BackgroundColor(Color::BLACK), GlobalZIndex(180))).with_children(|root| {
         root.spawn(canvas).with_children(|c| {
             ctx.backdrop(c, "menu/shipscreen.png");
@@ -89,12 +89,12 @@ fn build(
             victory_points(&ctx, c, [488.0, 79.0, 772.0, 109.0], &format!("{} : ", s("IDGS_TPFRONTENDTEXT01_CURRENT_VICTORY_POINTS")), fit.points);
             slot_bar(&ctx, c, fit, &lib);
             if fit.arms {
-                arms(&ctx, c, fit, &lib, &strings);
+                arms(&ctx, c, fit, &lib, strings);
             } else {
-                crew(&ctx, c, fit, &lib, &strings);
+                crew(&ctx, c, fit, &lib, strings);
             }
             ctx.text_button(c, [168.0, 427.0, 320.0, 465.0], &s("IDGS_TPFRONTENDTEXT_SCREENS_AUTO_ASSIGN"), "BlackChancery16", Action::AutoAssign);
-            list(&ctx, c, fit, &strings);
+            list(&ctx, c, fit, strings);
             // Next arrow: back to the ships.
             let mut next = c.spawn((Interaction::None, Action::Close, ctx.node(590.0, 510.0, 80.0, 80.0)));
             next.with_children(|c| _ = piece(&ctx, c, "FrontEnd_Next_Button", [0.0, 0.0, 80.0, 80.0]));

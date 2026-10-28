@@ -985,7 +985,7 @@ mod ai_tests {
         data["rules"].as_array_mut().unwrap().retain(|r| matches!(r["name"].as_str(), Some("SmugglerCampFound2" | "SmugglersCampFound2c")));
         mission.script = Script::new(&data, serde_json::json!({}));
         let player_owner = mission.script.player().to_string();
-        let lib = Library::load(&crate::assets_dir());
+        let lib = Library::load(crate::assets_dir());
         let class = lib.index("Ship_Navy_Torpedo");
         let mut app = App::new();
         app.add_plugins((TaskPoolPlugin::default(), AssetPlugin::default()))
@@ -1066,7 +1066,7 @@ mod ai_tests {
 
     #[test]
     fn mission_ships_halt_when_their_script_route_runs_out() {
-        let lib = Library::load(&crate::assets_dir());
+        let lib = Library::load(crate::assets_dir());
         let mut app = App::new();
         app.insert_resource(crate::campaign::load())
             .init_resource::<crate::environment::Sensors>()

@@ -97,7 +97,7 @@ pub fn load_docks() -> Value {
     let root = assets_dir();
     let read = |p: std::path::PathBuf| crate::data::try_json(&p);
     let mut docks = read(root.join("data/docks.json")).unwrap_or_else(|| Value::Object(Default::default()));
-    for id in crate::data::ship_ids(&root) {
+    for id in crate::data::ship_ids(root) {
         if let Some(d) = read(root.join(format!("ships/{id}/docks.json"))) {
             docks[id] = d;
         }
@@ -936,13 +936,13 @@ mod tests {
     }
 
     fn app() -> (App, Library) {
-        let lib = Library::load(&assets_dir());
+        let lib = Library::load(assets_dir());
         let mut app = App::new();
         app.add_message::<DockMsg>()
             .add_message::<Sfx>()
             .insert_resource(Time::<()>::default())
             .init_resource::<ButtonInput<KeyCode>>()
-            .insert_resource(Library::load(&assets_dir()))
+            .insert_resource(Library::load(assets_dir()))
             .add_systems(Update, (handle_messages, routine).chain());
         (app, lib)
     }
@@ -969,7 +969,7 @@ mod tests {
                 crew_speed: 1.0,
                 crew_turn: 1.0,
             },
-            Health { sections: c.sections.iter().map(|s| s.hp).collect(), core: c.core_hp, destroyed: false },
+            Health::new(c),
         )
     }
     fn point(x: f32) -> DockPoint {

@@ -26,7 +26,7 @@ struct BarParts(Vec<(String, Option<String>)>);
 impl BarParts {
     fn load() -> Self {
         let path = crate::assets_dir().join("data/hud/bar.json");
-        let value: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&path).expect("HUD bar layout")).expect("invalid HUD bar JSON");
+        let value = crate::data::read_json(&path);
         let parts = value
             .as_array()
             .expect("HUD bar must be an array")
@@ -949,7 +949,7 @@ mod tests {
             assert_eq!(crate::panels::speed_order_at(centre), order);
             assert_eq!(crate::panels::speed_order_at(centre + Vec2::splat(1.0)), order);
         }
-        let data = HudData { comps: serde_json::from_str(&std::fs::read_to_string(assets_dir().join("hud/hud.json")).unwrap()).unwrap(), skin: "Navy" };
+        let data = HudData { comps: crate::data::read_json(&assets_dir().join("hud/hud.json")), skin: "Navy" };
         let frames: Vec<_> = (0..4).map(|i| sprite_of(&data, &format!("SpeedControl_CurrActive{i}_NextActive{i}")).unwrap()).collect();
         for frame in &frames {
             assert_eq!(frame.1.size(), Vec2::new(86.0, 101.0));
@@ -996,8 +996,8 @@ mod tests {
     #[test]
     fn every_class_has_its_hud_icons() {
         // Class names differ from the icon art (Ship_Navy_ManOWar -> Navy_Man_O_War); the WOT icon name resolves them all.
-        let comps: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(assets_dir().join("hud/hud.json")).unwrap()).unwrap();
-        let lib = crate::Library::load(&assets_dir());
+        let comps: serde_json::Value = crate::data::read_json(&assets_dir().join("hud/hud.json"));
+        let lib = crate::Library::load(assets_dir());
         for class in lib.classes.iter().filter(|c| c.name.starts_with("Ship_")) {
             let data = HudData { comps: comps.clone(), skin: crate::sprites::skin_of(&class.race) };
             for bar in ["ShipBar", "WeaponBar"] {
@@ -1008,7 +1008,7 @@ mod tests {
 
     #[test]
     fn every_faction_has_the_bar_parts_it_needs() {
-        let comps: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(assets_dir().join("hud/hud.json")).unwrap()).unwrap();
+        let comps: serde_json::Value = crate::data::read_json(&assets_dir().join("hud/hud.json"));
         for skin in ["Navy", "Pirate", "Procyon"] {
             let data = HudData { comps: comps.clone(), skin };
             for (part, _) in BarParts::load().0 {

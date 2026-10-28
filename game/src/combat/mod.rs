@@ -124,7 +124,7 @@ pub fn material_key(material: &str) -> &'static str {
 }
 
 pub fn plugin(app: &mut App) {
-    app.insert_resource(Library::load(&assets_dir()))
+    app.insert_resource(Library::load(assets_dir()))
         .init_resource::<Target>()
         .add_message::<Hit>()
         .add_message::<Fired>()

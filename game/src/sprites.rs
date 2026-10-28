@@ -56,7 +56,7 @@ pub fn sprite_area(h: &HudData, name: &str, key: &str) -> Option<(String, Rect)>
 /// (`{"sheet_name": 2}`); layout always stays in reference pixels, only the source rectangle scales.
 pub fn sheet_scale(sheet: &str) -> f32 {
     static S: std::sync::OnceLock<HashMap<String, f32>> = std::sync::OnceLock::new();
-    S.get_or_init(|| std::fs::read_to_string(crate::assets_dir().join("hud/scales.json")).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default())
+    S.get_or_init(|| crate::data::try_json(&crate::assets_dir().join("hud/scales.json")).and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default())
         .get(sheet)
         .copied()
         .unwrap_or(1.0)
@@ -236,7 +236,7 @@ mod tests {
         assert!(t.contains_key(&'"'), "QUOTE is the double quote");
         assert!(!t.contains_key(&'a'), "row -1: the font does not draw it");
         // Measured on an original screenshot: the Controls header "Control" is 80 units wide in UniversBold14 (advance 77).
-        let f: Value = serde_json::from_str(&std::fs::read_to_string(assets_dir().join("hud/fonts/UniversBold14.json")).unwrap()).unwrap();
+        let f: Value = crate::data::read_json(&assets_dir().join("hud/fonts/UniversBold14.json"));
         let t = glyph_table(&f);
         assert_eq!("Control".chars().map(|c| t[&c].next).sum::<f32>(), 77.0);
     }

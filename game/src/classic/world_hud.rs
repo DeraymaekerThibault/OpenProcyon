@@ -45,7 +45,7 @@ fn end_line(
         f.font_size = FontSize::Px(size);
     } else if let Some(font) = fonts.0.get("Immi14") {
         // the string table is read once, when the line appears
-        let text = crate::menu::text_of(&crate::menu::strings(), id);
+        let text = crate::menu::text_of(crate::menu::strings(), id);
         let node = Node { position_type: PositionType::Absolute, top: Val::Percent(49.0), left: Val::Px(0.0), width: Val::Percent(100.0), ..default() };
         commands.spawn((crate::Scenario, EndLineText, font.text(&text, size / font.size, Color::WHITE), TextLayout::justify(Justify::Center), node, GlobalZIndex(170)));
     }
@@ -350,7 +350,7 @@ mod tests {
     use crate::assets_dir;
     #[test]
     fn banners_clear_the_sails_of_large_and_small_ships() {
-        let lib = Library::load(&assets_dir());
+        let lib = Library::load(assets_dir());
         for name in ["Ship_Navy_Cutter", "Ship_Navy_ManOWar", "Ship_Pirate_Barque"] {
             let class = &lib.classes[lib.index(name)];
             assert!(class.sections.iter().all(|s| banner_height(class) >= s.max.y + 2.0));

@@ -324,7 +324,7 @@ pub fn roster(race: &str, sort: usize) -> Vec<String> {
 /// The crew member's info panel: portrait, cost and the seven skills (N/A where the character has none).
 pub fn crew_detail(id: &str) -> Detail {
     let strings = crate::menu::strings();
-    let s = |k: &str| crate::menu::text_of(&strings, k);
+    let s = |k: &str| crate::menu::text_of(strings, k);
     let skills = [
         ("GUNNERY", "gunnery"),
         ("LEADERSHIP", "leadership"),
@@ -351,7 +351,7 @@ pub fn crew_detail(id: &str) -> Detail {
 pub fn weapon_detail(lib: &Library, gun: &str) -> Option<Detail> {
     let g = lib.guns.get(gun)?;
     let strings = crate::menu::strings();
-    let s = |k: &str| crate::menu::text_of(&strings, k);
+    let s = |k: &str| crate::menu::text_of(strings, k);
     let unit = s("IDGS_TPFRONTENDTEXT01_METERS");
     let damage = lib.bullets.get(&g.bullet).map(|b| {
         let (lo, hi) = b.damage.values().fold((f32::MAX, 0.0f32), |(lo, hi), d| (lo.min(d[0]), hi.max(d[1])));
@@ -777,7 +777,7 @@ fn skirmish_screen(
         crate::menu::auto_assign(&mut sk, &lib);
     }
     let strings = crate::menu::strings();
-    let said = |id: &str| crate::menu::text_of(&strings, id);
+    let said = |id: &str| crate::menu::text_of(strings, id);
     let points = sk.points_left(&lib);
     let Some(slot) = sk.slots.iter_mut().find(|s| s.kind == crate::menu::Kind::Human) else { return };
     choice.ship = choice.ship.min(slot.fleet.len().saturating_sub(1));
@@ -1100,7 +1100,7 @@ mod tests {
     }
     #[test]
     fn bank_purchase_is_atomic_and_matches_mount_types_not_weapon_families() {
-        let lib = Library::load(&crate::assets_dir());
+        let lib = Library::load(crate::assets_dir());
         let class = &lib.classes[lib.index("Ship_Navy_Cutter")];
         let mount = class.mounts.iter().find(|m| family(&m.gun) == "Gun_CannonBall").unwrap();
         let gun = "Gun_Carronade_Med";
@@ -1131,7 +1131,7 @@ mod tests {
             .init_asset::<bevy::world_serialization::WorldAsset>()
             .add_systems(Update, (apply_outfit, apply_skirmish_weapons, apply_skirmish_crew).chain());
         let assets = app.world().resource::<AssetServer>().clone();
-        let lib = Library::load(&crate::assets_dir());
+        let lib = Library::load(crate::assets_dir());
         let class = lib.index("Ship_Navy_Cutter");
         let mission = crate::campaign::load_id("mission03");
         let ms = crate::campaign::MissionShip { id: 77, name: "test".into(), owner: mission.script.player().into(), ..default() };

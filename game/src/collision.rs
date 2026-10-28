@@ -739,7 +739,7 @@ mod tests {
     }
     #[test]
     fn nis_stops_helm_and_combat_motion_but_keeps_scripted_routes_and_resumes() {
-        let lib = crate::Library::load(&crate::assets_dir());
+        let lib = crate::Library::load(crate::assets_dir());
         let class = lib.index("Ship_Navy_Cutter");
         let [primary_health, combat_health, route_health, ally_health] = [0; 4].map(|_| crate::Health::new(&lib.classes[class]));
         let ship = crate::Ship {
@@ -796,7 +796,7 @@ mod tests {
 
     #[test]
     fn ecs_ship_contact_and_static_wall_do_not_pass_through() {
-        let mut lib = crate::Library::load(&crate::assets_dir());
+        let mut lib = crate::Library::load(crate::assets_dir());
         let class = lib.index("Ship_Navy_Cutter");
         assert_eq!(lib.classes[class].collision_bounds, [Vec3::new(-2.25, -1.5, -6.5), Vec3::new(2.25, 2.0, 7.0)]);
         lib.classes[class].collision_bounds = [Vec3::new(-1.0, -1.0, -3.0), Vec3::new(1.0, 1.0, 3.0)];
@@ -839,7 +839,7 @@ mod tests {
     }
     #[test]
     fn ai_ship_on_a_path_detours_round_a_wall_instead_of_grinding_into_it() {
-        let mut lib = crate::Library::load(&crate::assets_dir());
+        let mut lib = crate::Library::load(crate::assets_dir());
         let class = lib.index("Ship_Navy_Cutter");
         lib.classes[class].collision_bounds = [Vec3::new(-1.0, -1.0, -3.0), Vec3::new(1.0, 1.0, 3.0)];
         let health = crate::Health::new(&lib.classes[class]);
@@ -888,7 +888,7 @@ mod tests {
 
     #[test]
     fn retail_island_mesh_blocks_a_ship_driven_through_its_centre() {
-        let lib = crate::Library::load(&crate::assets_dir());
+        let lib = crate::Library::load(crate::assets_dir());
         let class = lib.index("Ship_Navy_Cutter");
         let health = crate::Health::new(&lib.classes[class]);
         let shapes = Shapes::from_world(&mut World::new());
@@ -956,7 +956,7 @@ mod tests {
         assert_eq!(steer_clear(bounds, &far, 10.0, 0.0, &scenery), 0.0);
     }
     fn ship_rock_contact(mass: f32, rock_velocity: Vec3) -> (Vec3, Vec3, Vec3) {
-        let mut lib = crate::Library::load(&crate::assets_dir());
+        let mut lib = crate::Library::load(crate::assets_dir());
         let class = lib.index("Ship_Navy_Cutter");
         lib.classes[class].phys.thrust = 0.0; // Isolate collision from engine acceleration/braking.
         lib.classes[class].collision_bounds = [Vec3::splat(-1.0), Vec3::splat(1.0)];
@@ -1017,7 +1017,7 @@ mod tests {
     #[test]
     fn ecs_ship_contact_preserves_light_and_heavy_ship_mass_ratios() {
         for other in ["Ship_Navy_Torpedo", "Ship_Navy_Tug"] {
-            let mut lib = crate::Library::load(&crate::assets_dir());
+            let mut lib = crate::Library::load(crate::assets_dir());
             let a = lib.index("Ship_Navy_Cutter");
             let b = lib.index(other);
             let expected = 10.0 * lib.classes[a].phys.mass / (lib.classes[a].phys.mass + lib.classes[b].phys.mass);
@@ -1080,7 +1080,7 @@ mod tests {
 
     #[test]
     fn tow_uses_mass_and_independent_hardpoints_and_breaks_without_teleporting() {
-        let lib = crate::Library::load(&crate::assets_dir());
+        let lib = crate::Library::load(crate::assets_dir());
         let class = lib.index("Ship_Navy_Cutter");
         let health = || crate::Health::new(&lib.classes[class]);
         let hull = crate::Ship {

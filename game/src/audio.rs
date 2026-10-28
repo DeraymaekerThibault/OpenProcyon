@@ -350,7 +350,7 @@ mod tests {
         app.add_plugins((MinimalPlugins, bevy::asset::AssetPlugin::default(), bevy::state::app::StatesPlugin))
             .init_asset::<AudioSource>()
             .init_state::<Screen>()
-            .insert_resource(Library::load(&crate::assets_dir()))
+            .insert_resource(Library::load(crate::assets_dir()))
             .insert_resource(crate::panels::Toggles { weapons: false, names: false })
             .add_plugins(plugin);
         app.world_mut().spawn((Camera3d::default(), GlobalTransform::default()));
