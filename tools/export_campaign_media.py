@@ -76,6 +76,26 @@ def export(root, out, mid):
             ):
                 if a.get(k) in names:
                     messages[a[k]] = names[a[k]]
+    # The journal: page texts and spoken lines (pictures are the hud textures Journal_Mission<N>_Shot<K>), and its music.
+    journal = {}
+    if mission.get("journal"):
+        pages = []
+        for page in mission["journal"]["pages"]:
+            src = root / "Sound/Dialogue" / (str(page["speech"]) + ".ogg")
+            dur = ogg.duration(src) if src.exists() else None
+            if dur is not None and mid in PLAYABLE:
+                shutil.copyfile(src, out / "sound" / (page["speech"].lower() + ".ogg"))
+            pages.append(
+                dict(
+                    text=names.get(page["text_id"], ""),
+                    speech=page["speech"],
+                    duration=dur,
+                    picture=page["picture"],
+                )
+            )
+        journal = dict(title=names.get(mission["journal"]["title_id"], ""), pages=pages)
+    if mission.get("journal_music") and mission["journal_music"] != "None":
+        music.add(mission["journal_music"])
     for t in sorted(music):
         if mid in PLAYABLE and (root / "Sound/Music" / (t + ".ogg")).exists():
             shutil.copyfile(
@@ -84,7 +104,10 @@ def export(root, out, mid):
             )
     (out / f"campaign/{mid}_media.json").write_text(
         json.dumps(
-            dict(speech=speech, messages=messages, ship_names=ship_names), indent=1
+            dict(
+                speech=speech, messages=messages, ship_names=ship_names, journal=journal
+            ),
+            indent=1,
         )
     )
     print(mid, len(speech), "speech events,", len(music), "music tracks")

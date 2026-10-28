@@ -3,41 +3,45 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from test_msb import node
+from test_msb_scene import scene
 
+from tools.export_animations import export as export_animations
 from tools.export_mesh_effects import export
 
 
-class MeshEffects(unittest.TestCase):
-    def test_only_effect_nodes_are_listed_with_their_descriptor_and_position(self):
-        data = (
-            node(1, -1, "root", [0] * 6)
-            + node(2, 1, "Smoke1", [1, 2, 3, 0, 0, 0], "PlayEffect", "default")
-            + node(3, 1, "Gun", [0] * 6, "GunPlacement", "Port_X")
-            + node(4, 1, "SmokeNode4", [4, 5, 6, 0, 0, 0], "VolcanoSmoke", "SmokeNode4")
-        )
+class MeshSceneExports(unittest.TestCase):
+    def run_export(self, fn):
         with tempfile.TemporaryDirectory() as d:
             root, out = Path(d, "game"), Path(d, "out")
             (root / "BD_MeshScenes").mkdir(parents=True)
             out.mkdir()
-            (root / "BD_MeshScenes/Fire.msb").write_bytes(data)
-            export(root, out)
-            got = json.loads((out / "data/mesh_effects.json").read_text())
+            (root / "BD_MeshScenes/Fire.msb").write_bytes(scene())
+            fn(root, out)
+            return {
+                p.name: json.loads(p.read_text()) for p in (out / "data").glob("*.json")
+            }
+
+    def test_every_attribute_of_a_node_is_an_effect_point(self):
+        got = self.run_export(export)["mesh_effects.json"]
+        pos = [1.0, 2.0, 3.0]
         self.assertEqual(
             got["Fire"],
             [
-                dict(
-                    kind="PlayEffect",
-                    name="Smoke1",
-                    descriptor="default",
-                    pos=[1, 2, 3],
-                ),
-                dict(
-                    kind="VolcanoSmoke",
-                    name="SmokeNode4",
-                    descriptor="SmokeNode4",
-                    pos=[4, 5, 6],
-                ),
+                dict(kind="PlayEffect", name="Smoke1", descriptor="default", pos=pos),
+                dict(kind="VolcanoSmoke", name="Smoke1", descriptor="Smoke1", pos=pos),
+            ],
+        )
+
+    def test_clips_keep_their_keyframes_and_name_their_target(self):
+        (clip,) = self.run_export(export_animations)["animations.json"]["Fire"]
+        self.assertEqual((clip["name"], clip["duration"]), ("ANIMATION00", 2.0))
+        (motion,) = clip["motions"]
+        self.assertEqual((motion["node"], motion["target"]), (0, "Smoke1"))
+        self.assertEqual(
+            motion["channels"][0],
+            [
+                [0.0, 0.0, 2, 0.0, 0.0, 0.0, 0.0, 0.0],
+                [2.0, 5.0, 2, 0.0, 0.0, 0.0, 0.0, 5.0],
             ],
         )
 
