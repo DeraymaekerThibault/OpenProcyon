@@ -232,11 +232,22 @@ pub fn offered(lib: &Library, race: u8) -> Vec<usize> {
 /// affordable hulls and weapons looked random: PROVISIONAL, here a fixed pseudo-random pick (a coin flip per bank) so the result
 /// repeats; crew go to the posts in order, best skill first. Computers use it too (PROVISIONAL: the original's computer fleet was
 /// not read out of a battle; the budget is the same victory limit, and `armed_only` keeps tenders and tugs out of its fleets).
+/// The guns computer captains may fit (`data/ai/weapons.json`, `{gun: true|false}`, merged key by key across mods). No file: every gun the
+/// arms editor allows (the original's own list is not read out; PROVISIONAL).
+fn computer_guns() -> Option<std::collections::HashSet<String>> {
+    allowed_guns(&crate::data::try_json(&crate::assets_dir().join("data/ai/weapons.json"))?)
+}
+
+fn allowed_guns(list: &Value) -> Option<std::collections::HashSet<String>> {
+    Some(list.as_object()?.iter().filter(|(_, on)| on.as_bool() == Some(true)).map(|(g, _)| g.clone()).collect())
+}
+
 pub fn auto_build(slot: &mut Slot, limit: u32, fleet_size: usize, lib: &Library, salt: u64, armed_only: bool) {
     let next = |seed: &mut u64| {
         *seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
         *seed >> 33
     };
+    let allowed = if armed_only { computer_guns() } else { None };
     let mut seed = u64::from(limit) * 31 + fleet_size as u64 * 7 + 1 + salt * 977;
     let left = |slot: &Slot| i64::from(limit) - slot.spent(lib);
     let first_new = slot.fleet.len();
@@ -262,6 +273,7 @@ pub fn auto_build(slot: &mut Slot, limit: u32, fleet_size: usize, lib: &Library,
             let mut guns: Vec<&String> = lib
                 .guns
                 .keys()
+                .filter(|g| allowed.as_ref().is_none_or(|a| a.contains(*g)))
                 .filter(|g| *g != stock && crate::crew_arms::bank_compatible(lib, class, bank, g))
                 .filter(|g| crate::crew_arms::bank_cost(lib, class, bank, g).is_some_and(|c| i64::from(c) - stock_cost <= budget))
                 .collect();
@@ -630,5 +642,16 @@ pub fn ship_stats(lib: &Library, ci: usize) -> ShipStats {
         medium: size("Medium"),
         light: size("Light"),
         points: c.points,
+    }
+}
+
+#[cfg(test)]
+mod ai_weapon_tests {
+    use super::allowed_guns;
+    #[test]
+    fn only_guns_switched_on_are_allowed() {
+        let list = serde_json::json!({"Gun_A": true, "Gun_B": false});
+        assert_eq!(allowed_guns(&list), Some(["Gun_A".to_string()].into()));
+        assert_eq!(allowed_guns(&serde_json::Value::Null), None);
     }
 }
