@@ -1,6 +1,7 @@
 //! Scripted wiring checks; these are not substitutes for manual gameplay validation.
 mod fleet;
 mod lifeboats;
+mod report;
 pub use fleet::fleet_smoke;
 
 use crate::{Config, campaign::Mission, rules::RuleShip};
@@ -58,6 +59,7 @@ scripts! {
 }
 
 pub fn plugin(app: &mut App) {
+    report::plugin(app);
     app.add_systems(PreUpdate, fleet::fleet_smoke.after(bevy::ui::UiSystems::Focus).before(crate::panels::hud_input))
         .add_systems(PreUpdate, lifeboats::smoke.after(bevy::ui::UiSystems::Focus));
 }
