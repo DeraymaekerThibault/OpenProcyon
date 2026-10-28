@@ -299,11 +299,14 @@ pub fn plugin(app: &mut App) {
         .add_systems(Update, (current_fx, flow_currents).run_if(in_state(crate::menu::Screen::Battle)));
 }
 
-pub fn spawn(commands: &mut Commands, assets: &AssetServer, data: &Value) {
+/// `whales_shown`: campaign missions start their whales hidden (the rules show them); skirmish maps' scripts never do.
+pub fn spawn(commands: &mut Commands, assets: &AssetServer, data: &Value, whales_shown: bool) {
     crate::dragons::spawn(commands, assets, data);
     let env = &data["environment"];
     let whale = &env["whale"];
     let animals = env["animals"].as_array().cloned().unwrap_or_default();
+    // An import from before skirmish maps exported their whale has none: no whales rather than a panic.
+    let animals = if whale["scene"].is_string() { animals } else { vec![] };
     for a in &animals {
         let home = a["group"].as_str().expect("animal group");
         let pos = game_to_bevy(&a["pos"]);
@@ -316,10 +319,10 @@ pub fn spawn(commands: &mut Commands, assets: &AssetServer, data: &Value) {
         let max = game_to_bevy(&whale["max"]);
         commands.spawn((
             Scenario,
-            SpaceAnimal::new(home, (max - min).length() / 2.0, pos - centre, id, false),
+            SpaceAnimal::new(home, (max - min).length() / 2.0, pos - centre, id, whales_shown),
             WorldAssetRoot(assets.load(GltfAssetLabel::Scene(0).from_asset(crate::data::model(&format!("{}.glb", whale["scene"].as_str().expect("whale scene")))))),
             Transform::from_translation(pos).with_rotation(Quat::from_rotation_y(heading)),
-            Visibility::Hidden,
+            if whales_shown { Visibility::Inherited } else { Visibility::Hidden },
         ));
     }
 }

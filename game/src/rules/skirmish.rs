@@ -1,6 +1,6 @@
 //! A skirmish map's own script (`maps/<id>/script.json`): the same interpreter as the campaign, driving the map's convoys, timers and
 //! team points. The end rules stay with victory.rs; only the effects the skirmish maps use are applied here (paths, owners,
-//! visibility, hold, throttle caps, stances, damage).
+//! visibility, hold, throttle caps, stances, damage, space animals' paths and speed, storm routes).
 use crate::Nearest;
 use bevy::prelude::*;
 use serde_json::Value;
@@ -17,6 +17,8 @@ pub struct SkirmishScript {
     /// The side each map player fights for (an owner change moves a ship to the new owner's side).
     pub sides: HashMap<String, Side>,
     paths: Value,
+    /// The script's environment block (space animal and dragon definitions).
+    pub environment: Value,
 }
 
 impl SkirmishScript {
@@ -25,7 +27,7 @@ impl SkirmishScript {
         let data = crate::data::try_json(&crate::assets_dir().join(format!("maps/{map}/script.json")))?;
         let mut script = Script::new(&without_end_rules(&data), Value::Null);
         script.set_teams(teams);
-        Some(SkirmishScript { script, sides, paths: data["paths"].clone() })
+        Some(SkirmishScript { script, sides, paths: data["paths"].clone(), environment: data["environment"].clone() })
     }
     /// The rules' names of the map-placed ships ('Setup Ship' names) by world-object id; none when the map has no script.
     pub fn ship_names(map: &str) -> Option<HashMap<i64, String>> {
@@ -48,6 +50,9 @@ fn run(
     mut killed: MessageReader<Destroyed>,
     mut captured: MessageReader<crate::boarding::Captured>,
     mut ships: Query<(Entity, &mut Ship, &Transform, &mut Health, &mut MissionShip, &mut Visibility, Has<PlayerShip>)>,
+    mut animals: Query<(Entity, &mut crate::environment::SpaceAnimal, &Transform, &mut Visibility), Without<Ship>>,
+    mut meteors: MessageWriter<crate::nebula::MeteorRoute>,
+    mut dragons: Query<&mut crate::dragons::Dragon>,
 ) {
     let sk = &mut *sk;
     let mut world: Vec<Unit> = ships
@@ -68,6 +73,7 @@ fn run(
             attack: vec![],
         })
         .collect();
+    world.extend(animals.iter().map(|(e, a, tf, _)| a.unit(e, tf)));
     sk.script.tag(&mut world);
     for d in killed.read() {
         if let Some(by) = world.iter().find(|u| u.e == d.by) {
@@ -81,9 +87,13 @@ fn run(
     for fx in fxs {
         match fx {
             Fx::Path { units, path, closest, looping } => {
-                info!("map script: {} ship(s) take route '{path}'", units.len());
+                info!("map script: {} unit(s) take route '{path}'", units.len());
                 let pts: Vec<Vec3> = sk.paths[path.as_str()].as_array().map(|a| a.iter().map(game_to_bevy).collect()).unwrap_or_default();
                 for e in &units {
+                    if let Ok((_, mut animal, tf, _)) = animals.get_mut(*e) {
+                        animal.follow(&pts, tf.translation, closest, looping);
+                        continue;
+                    }
                     let Ok((_, mut sh, tf, _, mut ms, ..)) = ships.get_mut(*e) else { continue };
                     let from = if closest { (0..pts.len()).nearest_to(tf.translation, |a| pts[*a]).unwrap_or(0) } else { 0 };
                     sh.throttle = None;
@@ -97,6 +107,9 @@ fn run(
             Fx::Owner(units, owner) => {
                 info!("map script: {} ship(s) now belong to '{owner}'", units.len());
                 for e in &units {
+                    if let Ok((_, mut animal, ..)) = animals.get_mut(*e) {
+                        animal.owner.clone_from(&owner);
+                    }
                     let Ok((_, mut sh, _, _, mut ms, ..)) = ships.get_mut(*e) else { continue };
                     if let Some(side) = sk.sides.get(&owner) {
                         sh.side = *side;
@@ -106,6 +119,10 @@ fn run(
             }
             Fx::Visible(units, on) => {
                 for e in &units {
+                    if let Ok((_, mut animal, _, mut vis)) = animals.get_mut(*e) {
+                        animal.visible = on;
+                        *vis = if on { Visibility::Inherited } else { Visibility::Hidden };
+                    }
                     let Ok((.., mut ms, mut vis, _)) = ships.get_mut(*e) else { continue };
                     ms.visible = on;
                     *vis = if on { Visibility::Inherited } else { Visibility::Hidden };
@@ -122,6 +139,34 @@ fn run(
                 for e in &units {
                     let Ok((_, mut sh, ..)) = ships.get_mut(*e) else { continue };
                     sh.cap = cap;
+                }
+            }
+            Fx::Velocity(units, speed) => {
+                for e in units {
+                    if let Ok((_, mut animal, ..)) = animals.get_mut(e) {
+                        animal.speed = speed;
+                    }
+                }
+            }
+            Fx::MeteorPath { group, path, closest, mode } => {
+                let path = sk.paths[path.as_str()].as_array().map(|a| a.iter().map(game_to_bevy).collect()).unwrap_or_default();
+                meteors.write(crate::nebula::MeteorRoute::Path { group, path, closest, mode });
+            }
+            Fx::MeteorSpeed(group, speed) => {
+                meteors.write(crate::nebula::MeteorRoute::Speed { group, speed });
+            }
+            Fx::DragonStance(units, stance) => {
+                for e in units {
+                    if let Ok(mut d) = dragons.get_mut(e) {
+                        d.stance = stance;
+                    }
+                }
+            }
+            Fx::DragonThreshold(units, threshold) => {
+                for e in units {
+                    if let Ok(mut d) = dragons.get_mut(e) {
+                        d.threshold = threshold;
+                    }
                 }
             }
             Fx::Stance(units, stance) => {

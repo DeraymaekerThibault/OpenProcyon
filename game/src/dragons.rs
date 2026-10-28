@@ -101,6 +101,7 @@ fn breath_dir(d: Vec3, s: f32) -> Vec3 {
 fn think(
     time: Res<Time>,
     mission: Option<Res<Mission>>,
+    skirmish: Option<Res<crate::rules::skirmish::SkirmishScript>>,
     fxl: Option<Res<crate::fx::FxLib>>,
     mut commands: Commands,
     mut dragons: Query<(Entity, &mut Dragon, &mut SpaceAnimal, &mut Transform, &mut Visibility), Without<Ship>>,
@@ -108,9 +109,11 @@ fn think(
     mut sfx: MessageWriter<crate::audio::Sfx>,
     mut shoot: MessageWriter<crate::combat::Shoot>,
 ) {
-    let Some(mission) = mission else { return };
-    let sc = &mission.script;
-    let def = &mission.data["environment"]["dragon"];
+    let (sc, def) = match (&mission, &skirmish) {
+        (Some(m), _) => (&m.script, &m.data["environment"]["dragon"]),
+        (_, Some(s)) => (&s.script, &s.environment["dragon"]),
+        _ => return,
+    };
     let dt = time.delta_secs();
     let now = time.elapsed_secs();
     let max_speed = def["physics"]["MaxSpeed"].as_f64().unwrap_or(12.0) as f32;

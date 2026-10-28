@@ -230,10 +230,10 @@ def main(root, out):
     for twt in sorted((root / "World/SinglePlayer").glob("*.twt")):
         export_mission(root, out, twt)
     for twt in sorted((root / "World").glob("*.twt")):
-        export_skirmish_script(out, twt)
+        export_skirmish_script(root, out, twt)
 
 
-def export_skirmish_script(out, twt):
+def export_skirmish_script(root, out, twt):
     """A skirmish map's own rule script (convoys, timers, points, ...) in the mission format -> campaign/<id>_script.json;
     pack_layout moves it to maps/<id>/script.json. The map stays a skirmish map (only mission.json makes a mission)."""
     global SOURCE
@@ -241,6 +241,9 @@ def export_skirmish_script(out, twt):
     mid = re.sub(r"\W+", "_", twt.stem).lower()  # the map id export_maps gives it
     script = parse_mission(twt.read_text(encoding="latin1"))
     script.pop("object_groups")
+    export_environment(
+        root, out, script
+    )  # whale/dragon definitions and models for maps with animals
     (out / "campaign").mkdir(exist_ok=True)
     (out / f"campaign/{mid}_script.json").write_text(json.dumps(script, indent=2))
 
