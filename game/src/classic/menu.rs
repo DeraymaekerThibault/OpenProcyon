@@ -13,124 +13,18 @@ use crate::assets_dir;
 use crate::bindings::Bindings;
 use crate::combat::Library;
 use crate::menu::{
-    Action, BuildMenu, Cell, Choice, CtrlUi, FLEET_SIZE, InGame, Kind, MenuKey, MenuModel, MenuRoot, Page, RACES, RunButtons, SLIDER_KNOB, SLOT_BAR, SaveUi, Screen, ScrollKind,
-    ScrollTrack, Skirmish, SliderTrack, VICTORY_LIMIT, menu_active, offered, pretty, strings, text_of,
+    Action, BuildMenu, Cell, Choice, CtrlUi, FLEET_SIZE, InGame, Kind, MenuKey, MenuModel, MenuRoot, Page, RACES, RunButtons, SaveUi, Screen, ScrollKind, Skirmish, SliderTrack,
+    VICTORY_LIMIT, menu_active, offered, pretty, strings, text_of,
 };
-use crate::sprites::{BODY_FONT, Fonts, HudData, IDLE, MENU_SKIN, inset, sliced};
+use crate::sprites::{BODY_FONT, Fonts, HudData, IDLE};
+
+use super::widgets::{
+    Ctx, GOLD, HEADING, PICKED, Rest, arrow, canvas, cell, disabled, dropdown, fleet_bar, full_screen, info_panel, list_row, piece, piece_flipped, pulldown_cell, radio, scrollbar,
+    selected_tab, slider, sprite, stretched_window, victory_points, wheel_step, wrapped,
+};
 
 pub fn plugin(app: &mut App) {
-    app.add_systems(Update, ((scroll_controls, scroll_saves).before(BuildMenu), build.in_set(BuildMenu), (hover, wheel).after(RunButtons)).run_if(menu_active));
-}
-
-/// Hover/press art of the retail buttons and list cells.
-fn hover(
-    q: Query<(Entity, &Interaction, Option<&Art>, Option<&Rest>), Changed<Interaction>>,
-    mut fills: Query<&mut BackgroundColor>,
-    hud: Option<Res<HudData>>,
-    assets: Res<AssetServer>,
-    mut imgs: Query<&mut ImageNode>,
-) {
-    let Some(hud) = hud else { return };
-    for (e, i, art, rest) in &q {
-        if let (Some(rest), Ok(mut bg)) = (rest, fills.get_mut(e)) {
-            bg.0 = if *i == Interaction::None { rest.0 } else { CELL_HOVER };
-        }
-        let state = match i {
-            Interaction::Pressed => "CursorDown",
-            Interaction::Hovered => "CursorOver",
-            Interaction::None => IDLE,
-        };
-        for (e, name) in art.map(|a| a.0.as_slice()).unwrap_or(&[]) {
-            if let Some(group) = name.strip_prefix("slice:") {
-                if let Ok(mut img) = imgs.get_mut(*e) {
-                    img.image = assets.load(format!("hud/tex/slice_{group}_{}_{}.png", MENU_SKIN.to_lowercase(), state.to_lowercase()));
-                }
-                continue;
-            }
-            // `crop:<left|right>:<w>:<sprite>`: only that part of the sprite (the slider's end caps).
-            let (name, cropped) = match name.strip_prefix("crop:").map(|c| c.splitn(3, ':').collect::<Vec<_>>()) {
-                Some(p) if p.len() == 3 => (p[2], Some((p[0] == "left", p[1].parse::<f32>().unwrap_or(0.0)))),
-                _ => (name.as_str(), None),
-            };
-            if let (Ok(mut img), Some((sheet, r))) = (imgs.get_mut(*e), sprite(&hud, name, state)) {
-                img.image = assets.load(format!("hud/tex/{sheet}.png"));
-                img.rect = Some(inset(&sheet, cropped.map_or(r, |(left, w)| crop(r, left, w))));
-            }
-        }
-    }
-}
-
-/// Hover/press art: the sprite names of a button's pieces, swapped between NoCursor / CursorOver / CursorDown.
-#[derive(Component)]
-struct Art(Vec<(Entity, String)>);
-
-/// Sprite rect of a hud.hdt component for a cursor state (`IDLE` = "NoCursor", "CursorOver", "CursorDown").
-pub(super) fn sprite(hud: &HudData, name: &str, state: &str) -> Option<(String, Rect)> {
-    let d = hud.comps.get(name)?.get(MENU_SKIN)?;
-    let r = d[format!("TextureArea - {state}")].as_array()?;
-    let n = |i: usize| r[i].as_f64().unwrap_or(0.0) as f32;
-    Some((d[format!("TextureName - {state}")].as_str()?.to_lowercase(), Rect::new(n(0), n(1), n(2) + 1.0, n(3) + 1.0)))
-}
-
-pub(super) struct Ctx<'a> {
-    pub(super) assets: &'a AssetServer,
-    pub(super) hud: &'a HudData,
-    pub(super) fonts: &'a Fonts,
-    pub(super) scale: f32,
-}
-
-impl Ctx<'_> {
-    pub(super) fn node(&self, x: f32, y: f32, w: f32, h: f32) -> Node {
-        Node {
-            position_type: PositionType::Absolute,
-            left: Val::Px(x * self.scale),
-            top: Val::Px(y * self.scale),
-            width: Val::Px(w * self.scale),
-            height: Val::Px(h * self.scale),
-            ..default()
-        }
-    }
-    pub(super) fn image(&self, c: &mut ChildSpawnerCommands, path: &str, rect: Option<Rect>, x: f32, y: f32, w: f32, h: f32, tint: Color) -> Entity {
-        let mut img = ImageNode::new(self.assets.load(path.to_string()));
-        img.rect = rect;
-        img.color = tint;
-        img.image_mode = NodeImageMode::Stretch;
-        c.spawn((img, self.node(x, y, w, h))).id()
-    }
-    pub(super) fn hud_piece(&self, c: &mut ChildSpawnerCommands, name: &str, x: f32, y: f32, w: f32, h: f32) -> Option<(Entity, String)> {
-        let (sheet, r) = sprite(self.hud, name, IDLE)?;
-        Some((self.image(c, &format!("hud/tex/{sheet}.png"), Some(inset(&sheet, r)), x, y, w, h, Color::WHITE), name.to_string()))
-    }
-    /// Retail bitmap text, horizontally centred in [x, x+w] (or left-aligned), vertically centred on `cy`.
-    pub(super) fn text(&self, c: &mut ChildSpawnerCommands, font: &str, s: &str, x: f32, w: f32, cy: f32, centre: bool, tint: Color) {
-        let Some(f) = self.fonts.0.get(font).or_else(|| self.fonts.0.get("BlackChancery22")) else { return };
-        let mut n = self.node(x, cy - f.height / 2.0, w, f.height);
-        n.align_items = AlignItems::Center;
-        n.justify_content = if centre { JustifyContent::Center } else { JustifyContent::FlexStart };
-        c.spawn(n).with_children(|c| {
-            f.glyphs(c, s, self.scale, tint);
-        });
-    }
-    /// Text button over the 3-piece FrontEnd_Texts_Over_Button art (44 px tall in the sheet, stretched to the rect).
-    pub(super) fn text_button(&self, c: &mut ChildSpawnerCommands, rect: [f32; 4], label: &str, font: &str, action: Action) {
-        let [l, t, r, b] = rect;
-        let (w, h) = (r - l, b - t);
-        let mut parts = vec![];
-        let mut root = c.spawn((Interaction::None, action, self.node(l, t, w, h)));
-        let cap = |name| sprite(self.hud, name, IDLE).map_or(50.0, |(_, r)| r.width());
-        root.with_children(|c| {
-            let sub = self;
-            let e = c
-                .spawn((
-                    sliced(sub.assets, "button", MENU_SKIN, "nocursor", cap("FrontEnd_Texts_Over_Button_Left"), cap("FrontEnd_Texts_Over_Button_Right")),
-                    sub.node(0.0, 0.0, w, h),
-                ))
-                .id();
-            parts.push((e, "slice:button".to_string()));
-            sub.text(c, font, label, 0.0, w, h / 2.0, true, Color::WHITE);
-        });
-        root.insert(Art(parts));
-    }
+    app.add_systems(Update, ((scroll_controls, scroll_saves).before(BuildMenu), build.in_set(BuildMenu), wheel.after(RunButtons)).run_if(menu_active));
 }
 
 /// Rebuilds the current screen when the state, the selection or the window size changes.
@@ -158,7 +52,6 @@ fn build(
         commands.entity(e).despawn();
     }
     let MenuModel { sk, ig, saves: ui, binds, ctrl: cui, lib, state, settings, stats, outcome, end_message } = model;
-    let (ww, wh) = (window.width(), window.height());
     let strings = strings();
     let ingame = *state.get() == Screen::Battle;
     // Options / Control Options: no retail .tst is exported, so they are laid out below from the retail screenshots.
@@ -188,19 +81,15 @@ fn build(
         Screen::Battle => return,
     };
     let els: Vec<Value> = crate::data::try_json(&assets_dir().join(format!("menu/{file}.json"))).and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default();
-    let scale = (ww / 800.0).min(wh / 600.0);
+    let (canvas, scale) = canvas(&window);
     let ctx = Ctx { assets: &assets, hud: &hud, fonts: &fonts, scale };
-    let canvas = Node {
-        position_type: PositionType::Absolute,
-        left: Val::Px((ww - 800.0 * scale) / 2.0),
-        top: Val::Px((wh - 600.0 * scale) / 2.0),
-        width: Val::Px(800.0 * scale),
-        height: Val::Px(600.0 * scale),
-        ..default()
-    };
-    let full = Node { position_type: PositionType::Absolute, width: Val::Percent(100.0), height: Val::Percent(100.0), ..default() };
     commands
-        .spawn((MenuRoot, full, BackgroundColor(if ingame && ig.page() != Some(Page::Summary) { Color::srgba(0.0, 0.0, 0.0, 0.5) } else { Color::BLACK }), GlobalZIndex(100)))
+        .spawn((
+            MenuRoot,
+            full_screen(),
+            BackgroundColor(if ingame && ig.page() != Some(Page::Summary) { Color::srgba(0.0, 0.0, 0.0, 0.5) } else { Color::BLACK }),
+            GlobalZIndex(100),
+        ))
         .with_children(|root| {
             root.spawn(canvas).with_children(|c| {
                 if let Some(controls) = page {
@@ -239,13 +128,13 @@ fn build(
                         }
                         (Screen::Battle, "In Game Backdrop") => {
                             // The window frame occupies the top-left of the 768x512 sheet.
-                            ctx.image(c, "menu/fe_ingame_window.png", Some(Rect::new(10.0, 38.0, 682.0, 484.0)), r[0], r[1], r[2] - r[0], r[3] - r[1], Color::WHITE);
+                            ingame_window(&ctx, c, rect);
                             None
                         }
                         (Screen::Battle, "Open Next Screen Button") => Some(Action::Ingame(Some(Page::Options))),
                         (Screen::Battle, "In Game Menu Stats Screen Button") => Some(Action::Ingame(Some(Page::Summary))),
                         (Screen::Battle, "Game Lobby Backdrop") => {
-                            ctx.image(c, "menu/gamelobby.png", Some(Rect::new(0.0, 0.0, 800.0, 600.0)), 0.0, 0.0, 800.0, 600.0, Color::WHITE);
+                            ctx.backdrop(c, "menu/gamelobby.png");
                             None
                         }
                         (Screen::Battle, "Game Stats - Player Kills by Object Type") => {
@@ -277,7 +166,7 @@ fn build(
                         (Screen::Load | Screen::Battle, "Load or Save Campaign Button") => Some(if ig.page() == Some(Page::Save) { Action::DoSave } else { Action::DoLoad }),
                         (Screen::Load | Screen::Battle, "Open Confirm Saved Game Delete Dialog Button") => Some(Action::Remove),
                         (Screen::Battle, "Campaign Text Entry") if ig.page() == Some(Page::Save) => {
-                            cell(&ctx, c, [r[0], r[1], r[2] - r[0], r[3] - r[1]], &format!("{}_", ui.name), false, None);
+                            cell(&ctx, c, [r[0], r[1], r[2] - r[0], r[3] - r[1]], &format!("{}_", ui.name), false, None::<Action>);
                             None
                         }
                         (Screen::Battle, "Right Justify Label") if ig.page() == Some(Page::Save) && r[0] as i32 == 272 => {
@@ -361,7 +250,7 @@ fn build(
                         (Screen::Lobby, "Open Previous Screen Button") => Some(Action::Goto(Screen::CreateSkirmish)),
                         (Screen::Lobby, "Open Ship Selection Screen") if sk.open() => Some(Action::Goto(Screen::Fleet)),
                         (Screen::Lobby, "Game Lobby Backdrop") => {
-                            ctx.image(c, "menu/gamelobby.png", Some(Rect::new(0.0, 0.0, 800.0, 600.0)), 0.0, 0.0, 800.0, 600.0, Color::WHITE);
+                            ctx.backdrop(c, "menu/gamelobby.png");
                             None
                         }
                         (Screen::Lobby, "Lobby Information Button") => {
@@ -375,7 +264,7 @@ fn build(
                             None
                         }
                         (Screen::Fleet, "Assemble Fleet Backdrop") => {
-                            ctx.image(c, "menu/shipscreen.png", Some(Rect::new(0.0, 0.0, 800.0, 600.0)), 0.0, 0.0, 800.0, 600.0, Color::WHITE);
+                            ctx.backdrop(c, "menu/shipscreen.png");
                             None
                         }
                         (Screen::Fleet, "Ship Types Available") => {
@@ -383,7 +272,7 @@ fn build(
                             None
                         }
                         (Screen::Fleet, "Fleet Select Button") => {
-                            fleet_list(&ctx, c, rect, &sk, &lib);
+                            fleet_list(&ctx, c, &sk, &lib);
                             None
                         }
                         (Screen::Fleet, "Ship Information") => {
@@ -482,7 +371,7 @@ fn summary(ctx: &Ctx, c: &mut ChildSpawnerCommands, stats: &crate::stats::GameSt
     }
     let rows = stats.players.len().max(1) as f32;
     stretched_window(ctx, c, [35.0, 160.0, 767.0, 190.0 + rows * 60.0 - 20.0]);
-    c.spawn((ctx.node(39.0, 162.0, 724.0, 28.0), BackgroundColor(Color::srgba(0.25, 0.75, 0.85, 0.22))));
+    c.spawn((ctx.node(39.0, 162.0, 724.0, 28.0), BackgroundColor(HEADING)));
     let columns = ["SHIPSSUNK", "SHIPSLEFT", "DAMAGEINFLICTED", "DAMAGETAKEN"].map(|k| s(&format!("IDGS_TPFRONTENDTEXT02_STATS_SCREEN_{k}")));
     for (i, title) in columns.iter().enumerate() {
         ctx.text(c, "Univers10", title, 195.0 + i as f32 * 140.0, 130.0, 175.0, true, Color::WHITE);
@@ -493,21 +382,13 @@ fn summary(ctx: &Ctx, c: &mut ChildSpawnerCommands, stats: &crate::stats::GameSt
     rows.sort_by_key(|((_, line), _)| std::cmp::Reverse(line.end));
     for (row, ((name, line), best)) in rows.into_iter().enumerate() {
         let cy = 210.0 + row as f32 * 60.0;
-        let base = match line.race.as_str() {
-            "Pirate" => 10,
-            "Procyon" => 20,
-            _ => 0,
-        };
-        piece(ctx, c, &format!("FrontEnd_Flag_Small_Icon_{:02}", base + row % 10), [37.0, cy - 12.5, 65.0, cy + 12.5], (false, false));
+        let race = RACES.iter().find(|r| r.1 == line.race).map_or(0, |r| r.0);
+        piece(ctx, c, &format!("FrontEnd_Flag_Small_Icon_{:02}", flag_base(race) + row % 10), [37.0, cy - 12.5, 65.0, cy + 12.5]);
         ctx.text(c, BODY_FONT, name, 77.0, 110.0, cy, false, Color::WHITE);
         for (i, (cell, green)) in line.cells().iter().zip(best).enumerate() {
             let x = 197.0 + i as f32 * 140.0;
             // The gold-rimmed pill of the retail text buttons, with the retail bar colour (hud.hdt 0.207, 0.566, 0.265) inside.
-            let cap = |name| sprite(ctx.hud, name, IDLE).map_or(50.0, |(_, r)| r.width());
-            c.spawn((
-                sliced(ctx.assets, "button", MENU_SKIN, "nocursor", cap("FrontEnd_Texts_Over_Button_Left"), cap("FrontEnd_Texts_Over_Button_Right")),
-                ctx.node(x, cy - 12.0, 128.0, 24.0),
-            ));
+            ctx.button_art(c, [x, cy - 12.0, 128.0, 24.0]);
             if green {
                 let fill = Node { border_radius: BorderRadius::all(Val::Px(7.0 * ctx.scale)), ..ctx.node(x + 4.0, cy - 8.0, 120.0, 16.0) };
                 c.spawn((fill, BackgroundColor(Color::srgb(0.207, 0.566, 0.265))));
@@ -532,20 +413,9 @@ fn save_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], ui
 /// coordinates measured from the retail screenshots (PROVISIONAL: no .tst exported).
 fn options_page(ctx: &Ctx, c: &mut ChildSpawnerCommands, controls: bool, ingame: bool, strings: &Value, binds: &Bindings, cui: &CtrlUi) {
     let s = |id: &str| text_of(strings, id);
-    let gold = Color::srgb(1.0, 0.85, 0.2);
-    let back = |p: Page, f: Screen| Action::Goto(if ingame { Screen::Battle } else { f }).with_page(ingame.then_some(p));
-    if ingame {
-        ctx.image(c, "menu/fe_ingame_window.png", Some(Rect::new(10.0, 38.0, 682.0, 484.0)), 140.0, 132.0, 520.0, 343.0, Color::WHITE);
-    } else {
-        frontend_backdrop(ctx, c, 1);
-    }
-    // Retail 'Open Prev Arrow Button' areas: [357,397,447,487] in game, [351,500,453,602] in the front end.
-    let (arrow_c, arrow_r) = if ingame { ((402.0, 442.0), 45.0) } else { ((402.0, 551.0), 51.0) };
-    let target = match (controls, ingame) {
-        (true, _) => back(Page::Options, Screen::Options),
-        (false, _) => back(Page::Menu, Screen::Main),
-    };
-    arrow(ctx, c, [arrow_c.0 - arrow_r, arrow_c.1 - arrow_r, arrow_c.0 + arrow_r, arrow_c.1 + arrow_r], "FrontEnd_Prev_Button", target);
+    let gold = SETTINGS_GOLD;
+    let back = if controls { (Page::Options, Screen::Options) } else { (Page::Menu, Screen::Main) };
+    settings_frame(ctx, c, ingame, back);
     if !controls {
         ctx.text(c, "BlackChancery22", &s("IDGS_TPFRONTENDTEXT_SCREENS_OPTIONS"), 250.0, 300.0, if ingame { 190.0 } else { 195.0 }, true, gold);
         let to = |p: Page, s: Screen| Action::Goto(s).with_page(ingame.then_some(p));
@@ -610,14 +480,9 @@ fn options_page(ctx: &Ctx, c: &mut ChildSpawnerCommands, controls: bool, ingame:
 /// stepping buttons, and only the options with a remake equivalent are listed.
 fn sound_display_page(ctx: &Ctx, c: &mut ChildSpawnerCommands, display: bool, ingame: bool, strings: &Value, settings: &crate::menu::Settings) {
     let s = |id: &str| text_of(strings, id);
-    let gold = Color::srgb(1.0, 0.85, 0.2);
-    if ingame {
-        ctx.image(c, "menu/fe_ingame_window.png", Some(Rect::new(10.0, 38.0, 682.0, 484.0)), 140.0, 132.0, 520.0, 343.0, Color::WHITE);
-    } else {
-        frontend_backdrop(ctx, c, 1);
-    }
+    settings_frame(ctx, c, ingame, (Page::Options, Screen::Options));
     let title = if display { "IDGS_TPFRONTENDTEXT_SCREENS_DISPLAY_OPTIONS" } else { "IDGS_TPFRONTENDTEXT_SCREENS_SOUND_OPTIONS" };
-    ctx.text(c, "BlackChancery22", &s(title), 250.0, 300.0, if ingame { 190.0 } else { 160.0 }, true, gold);
+    ctx.text(c, "BlackChancery22", &s(title), 250.0, 300.0, if ingame { 190.0 } else { 160.0 }, true, SETTINGS_GOLD);
     let (top, step, l, r) = if ingame { (215.0, 38.0, 170.0, 630.0) } else { (205.0, 50.0, 60.0, 700.0) };
     for (i, (setting, label, value)) in settings.rows(display).into_iter().enumerate() {
         let y = top + step * i as f32;
@@ -634,20 +499,36 @@ fn sound_display_page(ctx: &Ctx, c: &mut ChildSpawnerCommands, display: bool, in
             Action::Setting(crate::menu::Setting::RestoreDisplay),
         );
     }
-    let back = Action::Goto(if ingame { Screen::Battle } else { Screen::Options }).with_page(ingame.then_some(Page::Options));
+}
+
+/// Title gold of the Options pages.
+const SETTINGS_GOLD: Color = Color::srgb(1.0, 0.85, 0.2);
+
+/// The frame of the Options pages: the in-game window or the front-end backdrop, and the Prev arrow back to `back` (the in-game page or
+/// the front-end screen). Retail 'Open Prev Arrow Button' areas: [357,397,447,487] in game, [351,500,453,602] in the front end.
+fn settings_frame(ctx: &Ctx, c: &mut ChildSpawnerCommands, ingame: bool, (page, screen): (Page, Screen)) {
+    if ingame {
+        ingame_window(ctx, c, [140.0, 132.0, 660.0, 475.0]);
+    } else {
+        frontend_backdrop(ctx, c, 1);
+    }
+    let back = Action::Goto(if ingame { Screen::Battle } else { screen }).with_page(ingame.then_some(page));
     let ([cx, cy], r) = if ingame { ([402.0, 442.0], 45.0) } else { ([402.0, 551.0], 51.0) };
     arrow(ctx, c, [cx - r, cy - r, cx + r, cy + r], "FrontEnd_Prev_Button", back);
 }
 
-pub(super) fn disabled(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], label: &str, font: &str) {
-    let (w, h) = (r - l, b - t);
-    let cap = 50.0 * h / 44.0;
-    c.spawn(ctx.node(l, t, w, h)).with_children(|c| {
-        ctx.hud_piece(c, "FrontEnd_Texts_Over_Button_Disabled_Left", 0.0, 0.0, cap, h);
-        ctx.hud_piece(c, "FrontEnd_Texts_Over_Button_Disabled_Center", cap, 0.0, (w - 2.0 * cap).max(0.0), h);
-        ctx.hud_piece(c, "FrontEnd_Texts_Over_Button_Disabled_Right", w - cap, 0.0, cap, h);
-        ctx.text(c, font, label, 0.0, w, h / 2.0, true, Color::srgb(0.55, 0.55, 0.55));
-    });
+/// The in-game window frame (top-left 672x446 of the 768x512 `fe_ingame_window` sheet) stretched over `[l, t, r, b]`.
+fn ingame_window(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4]) {
+    ctx.image(c, "menu/fe_ingame_window.png", Some(Rect::new(10.0, 38.0, 682.0, 484.0)), l, t, r - l, b - t, Color::WHITE);
+}
+
+/// First flag icon of a fleet type's block of ten (`FrontEnd_Flag_*Icon_NN`): Navy 0, Pirate 10, Procyon 20.
+fn flag_base(race: u8) -> usize {
+    match race {
+        2 => 10,
+        3 => 20,
+        _ => 0,
+    }
 }
 
 /// Where a 'Front End Dialog Screen Backdrop' frame (`frontenddialogscreen.png`) is drawn for its ReferenceArea `[l, t, r, b]`:
@@ -664,38 +545,22 @@ fn dialog_frame([l, t, r, b]: [f32; 4]) -> [f32; 4] {
 /// the faint `FrontEndMap` contour overlay and the `FrontEnd_TP_Logo` centred at the top. The engine draws these, not the screen files.
 /// PROVISIONAL: which scene a screen shows is taken from screenshots (Skirmish 2, Options pages 1), 0 elsewhere.
 fn frontend_backdrop(ctx: &Ctx, c: &mut ChildSpawnerCommands, scene: usize) {
-    if let Some((sheet, r)) = sprite(ctx.hud, "FrontEnd_Letterbox_Tile", IDLE) {
-        let rect = inset(&sheet, r);
+    if let Some((_, r)) = sprite(ctx.hud, "FrontEnd_Letterbox_Tile", IDLE) {
         let (w, h) = (r.width(), r.height());
         let mut x = 0.0;
         while x < 800.0 {
             for (y, flip) in [(113.0 - h, false), (507.0, true)] {
-                let mut img = ImageNode::new(ctx.assets.load(format!("hud/tex/{sheet}.png")));
-                img.rect = Some(rect);
-                img.image_mode = NodeImageMode::Stretch;
-                img.flip_y = flip;
-                c.spawn((img, ctx.node(x, y, w, h)));
+                piece_flipped(ctx, c, "FrontEnd_Letterbox_Tile", [x, y, x + w, y + h], (false, flip));
             }
             x += w;
         }
     }
     ctx.image(c, &format!("menu/frontendscreen{scene}.png"), Some(Rect::new(0.0, 0.0, 800.0, 394.0)), 0.0, 113.0, 800.0, 394.0, Color::WHITE);
     ctx.image(c, "menu/frontendmap.png", None, 0.0, 113.0 + (394.0 - 375.0) / 2.0, 800.0, 375.0, Color::WHITE);
-    if let Some((sheet, r)) = sprite(ctx.hud, "FrontEnd_TP_Logo", IDLE) {
-        ctx.image(c, &format!("hud/tex/{sheet}.png"), Some(inset(&sheet, r)), 400.0 - r.width() / 2.0, 0.0, r.width(), r.height(), Color::WHITE);
+    if let Some((_, r)) = sprite(ctx.hud, "FrontEnd_TP_Logo", IDLE) {
+        piece(ctx, c, "FrontEnd_TP_Logo", [400.0 - r.width() / 2.0, 0.0, 400.0 + r.width() / 2.0, r.height()]);
     }
 }
-
-fn arrow(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], name: &str, action: Action) {
-    let mut parts = vec![];
-    let forward = name.contains("Next") || name.contains("Right");
-    let mut root = c.spawn((Interaction::None, action, crate::menu::ArrowButton { forward }, ctx.node(l, t, r - l, b - t)));
-    root.with_children(|c| parts.extend(ctx.hud_piece(c, name, 0.0, 0.0, r - l, b - t)));
-    root.insert(Art(parts));
-}
-
-/// Retail gold for highlighted labels (the `Center Justify Label` title colour).
-pub(super) const GOLD: Color = Color::srgb(1.0, 0.796, 0.0);
 
 /// Map list as measured on the original: a framed panel (x 280..712, y 120..318) with a lighter header bar holding 'Historical Maps' /
 /// 'Open Maps' and 'Players' in UniversBold14, Univers12 rows 19 apart from y 172 with the playable player count at x 578, a teal bar
@@ -706,7 +571,7 @@ const MAP_ROWS: usize = 8;
 fn map_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, sk: &Skirmish, strings: &Value) {
     let (l, r) = (280.0, 712.0);
     stretched_window(ctx, c, [l, 120.0, r, 318.0]);
-    c.spawn((ctx.node(l + 4.0, 122.0, r - l - 8.0, 30.0), BackgroundColor(Color::srgba(0.25, 0.75, 0.85, 0.22))));
+    c.spawn((ctx.node(l + 4.0, 122.0, r - l - 8.0, 30.0), BackgroundColor(HEADING)));
     let heading = if sk.historical { "IDGS_TPFRONTENDTEXT01_VIEW_PRESET_MAPS" } else { "IDGS_TPFRONTENDTEXT01_VIEW_OPEN_MAPS" };
     ctx.text(c, "UniversBold14", &text_of(strings, heading), 298.0, 240.0, 136.0, false, Color::WHITE);
     ctx.text(c, "UniversBold14", &text_of(strings, "IDGS_TPFRONTENDTEXT01_PLAYERS"), 540.0, 80.0, 136.0, true, Color::WHITE);
@@ -714,7 +579,7 @@ fn map_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, sk: &Skirmish, strings: &Va
     for (row, (i, m)) in rows.iter().enumerate().skip(sk.map_scroll).take(MAP_ROWS) {
         let cy = 172.0 + (row - sk.map_scroll) as f32 * 19.0;
         let mut b = c.spawn((Interaction::None, Action::PickMap(*i), ctx.node(l + 4.0, cy - 9.5, r - l - 8.0, 19.0)));
-        b.insert(BackgroundColor(if *i == sk.selected { Color::srgba(0.2, 0.7, 0.8, 0.45) } else { Color::NONE }));
+        b.insert(BackgroundColor(if *i == sk.selected { PICKED } else { Color::NONE }));
         b.with_children(|c| {
             ctx.text(c, BODY_FONT, &m.1, 14.0, 240.0, 9.5, false, Color::WHITE);
             ctx.text(c, BODY_FONT, &m.3.to_string(), 278.0, 40.0, 9.5, true, Color::WHITE);
@@ -722,171 +587,6 @@ fn map_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, sk: &Skirmish, strings: &Va
     }
     scrollbar(ctx, c, [727.0, 155.0, 752.0, 322.0], ScrollKind::Maps, rows.len(), MAP_ROWS, sk.map_scroll);
 }
-
-/// The current tab of a Ships / Crew / Arms row: the green `FrontEnd_Texts_Over_Button_Selected_*` button, not clickable.
-pub(super) fn selected_tab(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], label: &str, font: &str) {
-    let cap = 51.0 * (b - t) / 45.0;
-    piece(ctx, c, "FrontEnd_Texts_Over_Button_Selected_Left", [l, t, l + cap, b], (false, false));
-    piece(ctx, c, "FrontEnd_Texts_Over_Button_Selected_Center", [l + cap, t, r - cap, b], (false, false));
-    piece(ctx, c, "FrontEnd_Texts_Over_Button_Selected_Right", [r - cap, t, r, b], (false, false));
-    ctx.text(c, font, label, l, r - l, (t + b) / 2.0, true, Color::WHITE);
-}
-
-/// One retail sprite stretched over a box (reference units).
-pub(super) fn piece(ctx: &Ctx, c: &mut ChildSpawnerCommands, name: &str, [l, t, r, b]: [f32; 4], flip: (bool, bool)) {
-    let Some((sheet, rect)) = sprite(ctx.hud, name, IDLE) else { return };
-    let mut img = ImageNode::new(ctx.assets.load(format!("hud/tex/{sheet}.png")));
-    img.rect = Some(inset(&sheet, rect));
-    img.image_mode = NodeImageMode::Stretch;
-    (img.flip_x, img.flip_y) = flip;
-    c.spawn((img, ctx.node(l, t, r - l, b - t)));
-}
-
-/// The retail framed panel: `FRONTEND_STRETCHEDWINDOW_*` gives one corner (mirrored to the other three), an edge column/row and a fill.
-pub(super) fn stretched_window(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4]) {
-    let k = 33.0; // corner tile size
-    piece(ctx, c, "FRONTEND_STRETCHEDWINDOW_CENTERFILL_TILE", [l + k, t + k, r - k, b - k], (false, false));
-    for (flip_x, x0, x1) in [(false, l, l + k), (true, r - k, r)] {
-        for (flip_y, y0, y1) in [(false, t, t + k), (true, b - k, b)] {
-            piece(ctx, c, "FRONTEND_STRETCHEDWINDOW_TOPLEFT_CORNERTILE", [x0, y0, x1, y1], (flip_x, flip_y));
-        }
-        piece(ctx, c, "FRONTEND_STRETCHEDWINDOW_LEFTCENTER_TILE", [x0, t + k, x1, b - k], (flip_x, false));
-    }
-    for (flip_y, y0, y1) in [(false, t, t + k), (true, b - k, b)] {
-        piece(ctx, c, "FRONTEND_STRETCHEDWINDOW_TOPCENTER_TILE", [l + k, y0, r - k, y1], (false, flip_y));
-    }
-}
-
-/// The retail vertical scrollbar: track (`..._SLIDER_BACKGROUND_TOP/STRETCHED_CENTER/BOTTOM`) and a slider over the visible part.
-/// The retail scrollbar for a list of `total` rows of which `visible` show from row `first`: the thumb never gets shorter than its two
-/// end caps and stays inside the track, and pressing and dragging the track moves it (`menu::scroll_drag`, the same everywhere).
-pub(super) fn scrollbar(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], kind: ScrollKind, total: usize, visible: usize, first: usize) {
-    let cap = |name: &str| sprite(ctx.hud, name, IDLE).map_or(20.0, |(_, r)| r.height());
-    let track = |c: &mut ChildSpawnerCommands, prefix: &str, t: f32, b: f32| {
-        let (top, bottom) = (cap(&format!("{prefix}_TOP")), cap(&format!("{prefix}_BOTTOM")));
-        piece(ctx, c, &format!("{prefix}_TOP"), [l, t, r, t + top], (false, false));
-        piece(ctx, c, &format!("{prefix}_STRETCHED_CENTER"), [l, t + top, r, b - bottom], (false, false));
-        piece(ctx, c, &format!("{prefix}_BOTTOM"), [l, b - bottom, r, b], (false, false));
-    };
-    track(c, "FRONTEND_SCROLLBAR_SLIDER_BACKGROUND", t, b);
-    let h = b - t;
-    let min = cap("FRONTEND_SCROLLBAR_SLIDER_TOP") + cap("FRONTEND_SCROLLBAR_SLIDER_BOTTOM");
-    let share = if total == 0 { 1.0 } else { (visible as f32 / total as f32).min(1.0) };
-    let len = (share * h).max(min).min(h);
-    let pos = first as f32 / total.saturating_sub(visible).max(1) as f32;
-    let top = t + pos.clamp(0.0, 1.0) * (h - len);
-    track(c, "FRONTEND_SCROLLBAR_SLIDER", top, top + len);
-    c.spawn((Interaction::None, ScrollTrack { kind, total, visible, thumb: len / h }, bevy::ui::RelativeCursorPosition::default(), ctx.node(l, t, r - l, h)));
-}
-
-/// A cropped part of a button sprite: the left or right `w` px of `name` (all of its states share the crop). Returns its `Art` entry.
-fn crop_piece(ctx: &Ctx, c: &mut ChildSpawnerCommands, name: &str, left: bool, w: f32, [x, y, bw, bh]: [f32; 4]) -> Option<(Entity, String)> {
-    let (sheet, r) = sprite(ctx.hud, name, IDLE)?;
-    let e = ctx.image(c, &format!("hud/tex/{sheet}.png"), Some(inset(&sheet, crop(r, left, w))), x, y, bw, bh, Color::WHITE);
-    Some((e, format!("crop:{}:{w}:{name}", if left { "left" } else { "right" })))
-}
-fn crop(r: Rect, left: bool, w: f32) -> Rect {
-    if left { Rect::new(r.min.x, r.min.y, r.min.x + w, r.max.y) } else { Rect::new(r.max.x - w, r.min.y, r.max.x, r.max.y) }
-}
-
-/// The Create Skirmish slider: the scrollbar art whose rounded 33 px ends are the step buttons, a 134 px track between them and a
-/// knob that follows `fraction` (dragging the track moves it, see `menu::slider_drag`).
-fn slider(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], fraction: f32, dec: Action, inc: Action, kind: SliderTrack) {
-    const CAP: f32 = 33.0;
-    let (cy, half) = ((t + b) / 2.0, (r - l) / 2.0);
-    let top = cy - 16.5;
-    // The body: left half of the left piece, right half of the right piece, both idle.
-    for (name, left, x) in [("FrontEnd_Horizontal_Scrollbar_Background_Left", true, l), ("FrontEnd_Horizontal_Scrollbar_Background_Right", false, l + half)] {
-        if let Some((sheet, rect)) = sprite(ctx.hud, name, IDLE) {
-            ctx.image(c, &format!("hud/tex/{sheet}.png"), Some(inset(&sheet, crop(rect, left, half))), x, top, half, 33.0, Color::WHITE);
-        }
-    }
-    for (name, left, x, action) in [("FrontEnd_Horizontal_Scrollbar_Background_Left", true, l, dec), ("FrontEnd_Horizontal_Scrollbar_Background_Right", false, r - CAP, inc)] {
-        let mut parts = vec![];
-        let mut root = c.spawn((Interaction::None, action, crate::menu::ArrowButton { forward: !left }, ctx.node(x, top, CAP, 33.0)));
-        root.with_children(|c| parts.extend(crop_piece(ctx, c, name, left, CAP, [0.0, 0.0, CAP, 33.0])));
-        root.insert(Art(parts));
-    }
-    let track_w = r - l - 2.0 * CAP;
-    let mut parts = vec![];
-    let mut track = c.spawn((Interaction::None, kind, bevy::ui::RelativeCursorPosition::default(), ctx.node(l + CAP, top, track_w, 33.0)));
-    track.with_children(|c| {
-        let x = fraction * (track_w - SLIDER_KNOB);
-        parts.extend(ctx.hud_piece(c, "FrontEnd_Horizontal_Scrollbar_Slider", x, 5.5, SLIDER_KNOB, SLIDER_KNOB));
-    });
-    track.insert(Art(parts));
-}
-
-/// Behind an open pull-down's entries: the pull-down art is translucent, so the list needs a solid backing to read over what it covers.
-pub(super) const LIST_BACKING: Color = Color::srgb(0.03, 0.12, 0.3);
-
-/// The slot bar's end arrows (round scrollbar caps, 22 px): live while there are slots out of view on that side.
-pub(super) fn slot_arrows<A: Bundle>(ctx: &Ctx, c: &mut ChildSpawnerCommands, scroll: usize, limit: usize, action: impl Fn(i32) -> A) {
-    for (left, x, live) in [(true, 36.0, scroll > 0), (false, 402.0, scroll + SLOT_BAR < limit)] {
-        let name = if left { "FrontEnd_Horizontal_Scrollbar_Background_Left" } else { "FrontEnd_Horizontal_Scrollbar_Background_Right" };
-        let mut parts = vec![];
-        let mut root = c.spawn((Interaction::None, ctx.node(x, 507.0, 22.0, 22.0)));
-        if live {
-            root.insert(action(if left { -1 } else { 1 }));
-        }
-        root.with_children(|c| parts.extend(crop_piece(ctx, c, name, left, 33.0, [0.0, 0.0, 22.0, 22.0])));
-        root.insert(Art(parts));
-    }
-}
-
-/// A retail radio choice: check box (`FrontEnd_Check_Box_Ready` ticked / `_NotReady`) and its Univers12 label.
-fn radio(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], label: &str, on: bool, action: Action) {
-    let cy = (t + b) / 2.0 - 3.0; // measured: the original row sits 3 units above the element's centre
-    let mut root = c.spawn((Interaction::None, action, ctx.node(l, t, r - l, b - t)));
-    root.with_children(|c| {
-        piece(ctx, c, if on { "FrontEnd_Check_Box_Ready" } else { "FrontEnd_Check_Box_NotReady" }, [0.0, (b - t) / 2.0 - 10.0, 18.0, (b - t) / 2.0 + 10.0], (false, false));
-        ctx.text(c, BODY_FONT, label, 24.0, r - l - 24.0, cy - t, false, Color::WHITE);
-    });
-}
-
-pub(super) fn wrapped(ctx: &Ctx, c: &mut ChildSpawnerCommands, font: &str, s: &str, [l, t, r, b]: [f32; 4]) {
-    let Some(f) = ctx.fonts.0.get(font) else { return };
-    let mut line = String::new();
-    let mut y = t + f.height / 2.0;
-    for word in s.split_whitespace() {
-        let next = if line.is_empty() { word.to_string() } else { format!("{line} {word}") };
-        if f.width(&next) > r - l && !line.is_empty() {
-            ctx.text(c, font, &line, l, r - l, y, false, Color::WHITE);
-            y += f.height;
-            line = word.to_string();
-            if y > b {
-                return;
-            }
-        } else {
-            line = next;
-        }
-    }
-    ctx.text(c, font, &line, l, r - l, y, false, Color::WHITE);
-}
-
-/// Resting / hover fill of a list cell (the retail SortList slot art carries decoration that only fits full-width rows).
-const CELL: Color = Color::srgba(0.0, 0.05, 0.2, 0.7);
-const CELL_ON: Color = Color::srgba(0.35, 0.28, 0.05, 0.75);
-const CELL_HOVER: Color = Color::srgba(0.1, 0.25, 0.55, 0.85);
-
-/// A list cell with left-aligned text, highlighted when `on`; clickable when it has an action.
-fn cell(ctx: &Ctx, c: &mut ChildSpawnerCommands, [x, y, w, h]: [f32; 4], label: &str, on: bool, action: Option<Action>) {
-    let tint = if on {
-        Color::srgb(1.0, 0.9, 0.4)
-    } else if action.is_some() {
-        Color::WHITE
-    } else {
-        Color::srgb(0.75, 0.75, 0.75)
-    };
-    let mut b = c.spawn((ctx.node(x, y, w, h), BackgroundColor(if on { CELL_ON } else { CELL })));
-    if let Some(a) = action {
-        b.insert((Interaction::None, a, Rest(if on { CELL_ON } else { CELL })));
-    }
-    b.with_children(|c| ctx.text(c, BODY_FONT, label, 8.0, w - 8.0, h / 2.0, false, tint));
-}
-/// The fill a cell returns to when the cursor leaves it.
-#[derive(Component)]
-struct Rest(Color);
 
 /// Lobby player table as measured on the original: a framed panel (x 222..782, y 122..448) with a 'Flag / Player / Fleet / Team' header
 /// in UniversBold14 and one row per playable player, 32 apart from y 184: the small flag icon, then Univers10 text in retail pull-down
@@ -902,7 +602,7 @@ fn players_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, _rect: [f32; 4], sk: &S
     let s = |id: &str| strings[id].as_str().unwrap_or(id).to_string();
     let open = sk.open();
     stretched_window(ctx, c, [222.0, 122.0, 782.0, 448.0]);
-    c.spawn((ctx.node(226.0, 124.0, 552.0, 30.0), BackgroundColor(Color::srgba(0.25, 0.75, 0.85, 0.22))));
+    c.spawn((ctx.node(226.0, 124.0, 552.0, 30.0), BackgroundColor(HEADING)));
     for (id, x0, x1) in [
         ("IDGS_TPFRONTENDTEXT03_FLAG", 236.0, 292.0),
         ("IDGS_TPFRONTENDTEXT_SCREENS_PLAYER", 287.0, 460.0),
@@ -916,18 +616,14 @@ fn players_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, _rect: [f32; 4], sk: &S
         let cy = 184.0 + i as f32 * 32.0;
         let me = slot.kind == Kind::Human;
         let live = slot.kind.live();
-        let base = match slot.race {
-            2 => 10,
-            3 => 20,
-            _ => 0,
-        };
+        let base = flag_base(slot.race);
         if live {
             let mut flag = c.spawn((ctx.node(250.0, cy - 12.5, 28.0, 25.0), Interaction::None));
             if me {
                 flag.insert(Action::FlagPicker(true));
             }
             flag.with_children(|c| {
-                piece(ctx, c, &format!("FrontEnd_Flag_Small_Icon_{:02}", base + usize::from(slot.flag)), [0.0, 0.0, 28.0, 25.0], (false, false));
+                piece(ctx, c, &format!("FrontEnd_Flag_Small_Icon_{:02}", base + usize::from(slot.flag)), [0.0, 0.0, 28.0, 25.0]);
             });
         }
         // Historical maps tell several live players of one team apart by a letter (Pirates A, B, C); open maps show the plain team name (measured on Border Dispute).
@@ -962,11 +658,7 @@ fn players_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, _rect: [f32; 4], sk: &S
     }
     if sk.flag_picker {
         // Retail: a modal gold frame over the lobby with the fleet type's ten flags, two rows of five 75 apart; only a pick closes it.
-        let base = match sk.human().map_or(0, |h| h.race) {
-            2 => 10,
-            3 => 20,
-            _ => 0,
-        };
+        let base = flag_base(sk.human().map_or(0, |h| h.race));
         c.spawn((Interaction::None, bevy::ui::FocusPolicy::Block, Action::FlagPicker(true), ctx.node(0.0, 0.0, 800.0, 600.0), ZIndex(1)));
         c.spawn((ctx.node(150.0, 175.0, 475.0, 245.0), ZIndex(2))).with_children(|c| {
             ctx.image(c, "menu/frontenddialogscreen.png", None, 0.0, 0.0, 475.0, 245.0, Color::WHITE);
@@ -979,7 +671,7 @@ fn players_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, _rect: [f32; 4], sk: &S
                     b.insert(Action::PickFlag(k as u8));
                 }
                 b.with_children(|c| {
-                    piece(ctx, c, &format!("FrontEnd_Flag_Icon_{:02}", base + k), [0.0, 0.0, 67.0, 67.0], (false, false));
+                    piece(ctx, c, &format!("FrontEnd_Flag_Icon_{:02}", base + k), [0.0, 0.0, 67.0, 67.0]);
                     if taken {
                         c.spawn((ctx.node(0.0, 0.0, 67.0, 67.0), BackgroundColor(Color::srgba(0.0, 0.05, 0.15, 0.65))));
                     }
@@ -1022,27 +714,6 @@ fn map_info_dialog(ctx: &Ctx, c: &mut ChildSpawnerCommands, sk: &Skirmish, strin
     ctx.text_button(c, [324.0, 339.0, 457.0, 383.0], &text_of(strings, "IDGS_TPFRONTENDTEXT01_BACK"), "BlackChancery16", Action::MapInfo(false));
 }
 
-/// A retail pull-down box (`FrontEnd_Left/Center/Right_PullDown_Background`, `_Selected` for the local player) with centred Univers10
-/// text and, for drop-downs, the `FrontEnd_PullDown_Arrow` at its right end.
-pub(super) fn pulldown_cell(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], label: &str, selected: bool, action: Option<impl Bundle>, arrow: bool) {
-    let sel = if selected { "_Selected" } else { "" };
-    let mut root = c.spawn((ctx.node(l, t, r - l, b - t), Interaction::None));
-    if let Some(a) = action {
-        root.insert(a);
-    }
-    root.with_children(|c| {
-        let (w, h) = (r - l, b - t);
-        piece(ctx, c, &format!("FrontEnd_Left_PullDown_Background{sel}"), [0.0, 0.0, 12.0, h], (false, false));
-        piece(ctx, c, &format!("FrontEnd_Center_PullDown_Background{sel}"), [12.0, 0.0, w - 12.0, h], (false, false));
-        piece(ctx, c, &format!("FrontEnd_Right_PullDown_Background{sel}"), [w - 12.0, 0.0, w, h], (false, false));
-        let text_w = if arrow { w - 24.0 } else { w };
-        ctx.text(c, "Univers10", label, 0.0, text_w, h / 2.0, true, Color::WHITE);
-        if arrow {
-            piece(ctx, c, "FrontEnd_PullDown_Arrow", [w - 20.0, h / 2.0 - 8.5, w, h / 2.0 + 8.5], (false, false));
-        }
-    });
-}
-
 const SHIP_ROWS: usize = 8;
 
 /// The ship-name pull-down at the top left of the preview, shown while a fleet ship is displayed: the name and the pull-down arrow;
@@ -1060,18 +731,6 @@ fn ship_name_field(ctx: &Ctx, c: &mut ChildSpawnerCommands, sk: &Skirmish, lib: 
     }
 }
 
-/// An open pull-down list, shared by every screen: a full-screen blocker (a click elsewhere runs `close`) and one backed entry per
-/// `(label, action)` stacked `h` apart from `[x, y, w, h]`. Entries also pick on the release of a held press (`menu::dropdown_release`),
-/// except the `keep` one, drawn highlighted (a plain click on the lobby's current value keeps the list open).
-pub(super) fn dropdown<A: Component>(ctx: &Ctx, c: &mut ChildSpawnerCommands, close: A, [x, y, w, h]: [f32; 4], entries: Vec<(String, A)>, keep: Option<usize>) {
-    c.spawn((Interaction::None, bevy::ui::FocusPolicy::Block, close, ctx.node(0.0, 0.0, 800.0, 600.0), ZIndex(1)));
-    for (k, (label, action)) in entries.into_iter().enumerate() {
-        c.spawn((ctx.node(x, y + k as f32 * h, w, h), ZIndex(2), BackgroundColor(LIST_BACKING))).with_children(|c| {
-            pulldown_cell(ctx, c, [0.0, 0.0, w, h], &label, keep == Some(k), Some((action, crate::menu::ListEntry(keep != Some(k)))), false);
-        });
-    }
-}
-
 /// Ship Types Available: the offered hulls of the human slot's fleet type (mouse wheel scrolls), the selected one highlighted.
 /// 'Available Ships' as measured on the original: UniversBold14 header centred at y 311, Univers12 rows from x 525, 19 apart from
 /// y 347.5, a teal selection bar (x 505..720) and the retail scrollbar at x 742..767; the box itself is part of the backdrop.
@@ -1079,50 +738,17 @@ fn ship_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, _rect: [f32; 4], sk: &Skir
     ctx.text(c, "UniversBold14", &text_of(strings, "IDGS_TPFRONTENDTEXT01_AVAILABLE_SHIPS"), 505.0, 215.0, 311.0, true, Color::WHITE);
     let list = sk.human().map(|h| offered(lib, h.race)).unwrap_or_default();
     for (row, &ci) in list.iter().enumerate().skip(sk.scroll).take(SHIP_ROWS) {
-        let cy = 347.5 + (row - sk.scroll) as f32 * 19.0;
-        let mut b = c.spawn((Interaction::None, Action::PickShip(row), ctx.node(505.0, cy - 9.5, 215.0, 19.0)));
-        b.insert(BackgroundColor(if sk.ship_chosen && row == sk.ship_pick { Color::srgba(0.2, 0.7, 0.8, 0.45) } else { Color::NONE }));
-        b.with_children(|c| ctx.text(c, BODY_FONT, &class_name(lib, ci, strings), 20.0, 195.0, 9.5, false, Color::WHITE));
+        let y = 338.0 + (row - sk.scroll) as f32 * 19.0;
+        list_row(ctx, c, [505.0, y, 215.0, 19.0], &class_name(lib, ci, strings), sk.ship_chosen && row == sk.ship_pick, Action::PickShip(row));
     }
     scrollbar(ctx, c, [742.0, 330.0, 767.0, 505.0], ScrollKind::Ships, list.len(), SHIP_ROWS, sk.scroll);
 }
 
-/// Fleet Select: the assembled fleet, two columns of four; the picked entry is the one Drop removes.
-/// The fleet bar ('Fleet Select Button' [27,479,459,559]) as measured: scroll arrows at both ends and five framed slots 65 apart from
-/// x 75 (60x62); a filled slot shows its ship-bar icon, an empty one its number. PROVISIONAL: the arrows do not scroll yet (fleets
-/// of more than five ships show their first five).
-fn fleet_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, _rect: [f32; 4], sk: &Skirmish, lib: &Library) {
+/// Fleet Select: the assembled fleet on the slot bar (`fleet_bar`); the picked entry is the one Drop removes.
+fn fleet_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, sk: &Skirmish, lib: &Library) {
     let fleet = sk.human().map(|h| h.fleet.as_slice()).unwrap_or_default();
-    // The bar's arrows are the round end buttons of the horizontal scrollbar art (the FrontEnd_Scroll_*_Button entries point at
-    // an unrelated sheet region): the first 33 px of FrontEnd_Horizontal_Scrollbar_Background_Left, the last 33 of _Right.
-    slot_arrows(ctx, c, sk.slot_scroll, sk.fleet_size, Action::SlotScroll);
-    for k in 0..SLOT_BAR {
-        let (i, x) = (sk.slot_scroll + k, 75.0 + k as f32 * 65.0);
-        let mut b = c.spawn((Interaction::None, ctx.node(x, 488.0, 60.0, 62.0)));
-        if i < fleet.len() {
-            b.insert(Action::PickFleet(i));
-        }
-        b.with_children(|c| {
-            piece(ctx, c, "FrontEnd_Flag_Icon_Background", [0.0, 0.0, 60.0, 62.0], (false, false));
-            match fleet.get(i).and_then(|n| lib.classes.iter().find(|cl| &cl.name == n)) {
-                Some(cl) => {
-                    if let Some(icon) = &cl.icon {
-                        piece(ctx, c, icon, [8.0, 9.0, 52.0, 53.0], (false, false));
-                    }
-                }
-                None => ctx.text(c, "UniversBold14", &(i + 1).to_string(), 0.0, 60.0, 31.0, true, Color::WHITE),
-            }
-        });
-    }
-}
-
-/// 'Current Victory Points : N' (UniversLightBold14, the number in gold), centred in its area.
-pub(super) fn victory_points(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], label: &str, points: i64) {
-    let Some(f) = ctx.fonts.0.get("UniversLightBold14") else { return };
-    let n = points.to_string();
-    let x = (l + r - f.width(label) - f.width(&n)) / 2.0;
-    ctx.text(c, "UniversLightBold14", label, x, f.width(label), (t + b) / 2.0, false, Color::WHITE);
-    ctx.text(c, "UniversLightBold14", &n, x + f.width(label), f.width(&n) + 2.0, (t + b) / 2.0, false, GOLD);
+    let icons: Vec<_> = fleet.iter().map(|n| lib.classes.iter().find(|cl| &cl.name == n).and_then(|cl| cl.icon.as_deref())).collect();
+    fleet_bar(ctx, c, (sk.slot_scroll, sk.fleet_size), &icons, None, Action::SlotScroll, Action::PickFleet);
 }
 
 /// A class's displayable name ('Displayable Shipname String ID'), else its WOT name tidied up.
@@ -1131,22 +757,11 @@ pub(super) fn class_name(lib: &Library, ci: usize, strings: &Value) -> String {
     cl.display_name.as_deref().and_then(|id| strings[id].as_str()).map_or_else(|| pretty(&cl.name), String::from)
 }
 
-/// Ship Information for the picked hull. PROVISIONAL: retail shows more (guns by class, crew, victory points).
-/// 'Ship Information' as measured on the original Navy Frigate panel: the Univers12 ship name at (510, 130); the framed ship-bar icon
-/// at (510, 151) 58x59; 'Point' / 'Cost' in Univers10 and the cost in gold Univers26 under it; seven Univers10 stat lines from y 161.5,
-/// 16 apart, labels at x 580, the colon at 676 and gold values at 686.
+/// Ship Information for the picked hull (`info_panel`): seven stat lines. PROVISIONAL: retail shows more (guns by class, crew, victory points).
 fn ship_info(ctx: &Ctx, c: &mut ChildSpawnerCommands, _rect: [f32; 4], sk: &Skirmish, lib: &Library, strings: &Value) {
     let Some(ci) = sk.shown_class(lib) else { return };
     let s = |id: &str| text_of(strings, id);
     let st = crate::menu::ship_stats(lib, ci);
-    ctx.text(c, BODY_FONT, &class_name(lib, ci, strings), 510.0, 240.0, 130.0, false, Color::WHITE);
-    piece(ctx, c, "FrontEnd_Flag_Icon_Background", [510.0, 151.0, 568.0, 210.0], (false, false));
-    if let Some(icon) = &lib.classes[ci].icon {
-        piece(ctx, c, icon, [517.0, 158.0, 561.0, 203.0], (false, false));
-    }
-    ctx.text(c, "Univers10", &s("IDGS_TPFRONTENDTEXT02_POINT_COST01"), 509.0, 60.0, 220.0, true, Color::WHITE);
-    ctx.text(c, "Univers10", &s("IDGS_TPFRONTENDTEXT02_POINT_COST02"), 509.0, 60.0, 236.0, true, Color::WHITE);
-    ctx.text(c, "Univers26", &st.points.to_string(), 499.0, 80.0, 256.0, true, GOLD);
     let rows = [
         (s("IDGS_TPFRONTENDTEXT_SHIP_HITPOINTS"), st.hit_points.to_string()),
         (s("IDGS_TPFRONTENDTEXT_MAX_SPEED"), format!("{} km/h", st.max_speed_kmh)),
@@ -1156,12 +771,8 @@ fn ship_info(ctx: &Ctx, c: &mut ChildSpawnerCommands, _rect: [f32; 4], sk: &Skir
         (s("IDGS_TPFRONTENDTEXT_SHIP_MOUNTS_MEDIUM"), st.medium.to_string()),
         (s("IDGS_TPFRONTENDTEXT_SHIP_MOUNTS_LIGHT"), st.light.to_string()),
     ];
-    for (k, (label, value)) in rows.iter().enumerate() {
-        let cy = 161.5 + k as f32 * 16.0;
-        ctx.text(c, "Univers10", label, 580.0, 95.0, cy, false, Color::WHITE);
-        ctx.text(c, "Univers10", ":", 676.0, 8.0, cy, false, Color::WHITE);
-        ctx.text(c, "Univers10", value, 686.0, 80.0, cy, false, GOLD);
-    }
+    let cost = [s("IDGS_TPFRONTENDTEXT02_POINT_COST01"), s("IDGS_TPFRONTENDTEXT02_POINT_COST02")];
+    info_panel(ctx, c, &class_name(lib, ci, strings), lib.classes[ci].icon.as_deref(), Some(st.points), &rows, cost.each_ref().map(String::as_str));
 }
 
 /// Mouse wheel scrolls the Ship Types Available list.
@@ -1173,7 +784,7 @@ fn wheel(mut wheel: MessageReader<bevy::input::mouse::MouseWheel>, state: Res<St
     if *state.get() == Screen::CreateSkirmish {
         let n = sk.maps.iter().filter(|m| m.2 != sk.historical).count();
         let max = n.saturating_sub(MAP_ROWS);
-        sk.map_scroll = if dy > 0.0 { sk.map_scroll.saturating_sub(1) } else { (sk.map_scroll + 1).min(max) };
+        sk.map_scroll = wheel_step(sk.map_scroll, dy, max);
         return;
     }
     if *state.get() != Screen::Fleet {
@@ -1181,14 +792,14 @@ fn wheel(mut wheel: MessageReader<bevy::input::mouse::MouseWheel>, state: Res<St
     }
     let n = sk.human().map_or(0, |h| offered(&lib, h.race).len());
     let max = n.saturating_sub(SHIP_ROWS);
-    sk.scroll = if dy > 0.0 { sk.scroll.saturating_sub(1) } else { (sk.scroll + 1).min(max) };
+    sk.scroll = wheel_step(sk.scroll, dy, max);
 }
 
 fn scroll_controls(mut wheel: MessageReader<bevy::input::mouse::MouseWheel>, state: Res<State<Screen>>, ig: Res<InGame>, mut cui: ResMut<CtrlUi>, binds: Res<Bindings>) {
     let dy: f32 = wheel.read().map(|e| e.y).sum();
     if dy != 0.0 && (*state.get() == Screen::Controls || ig.page() == Some(Page::Controls)) {
         let max = binds.rows.len().saturating_sub(if ig.page().is_some() { 8 } else { 17 });
-        cui.scroll = if dy > 0.0 { cui.scroll.saturating_sub(1) } else { (cui.scroll + 1).min(max) };
+        cui.scroll = wheel_step(cui.scroll, dy, max);
     }
 }
 
@@ -1197,7 +808,7 @@ fn scroll_saves(mut wheel: MessageReader<bevy::input::mouse::MouseWheel>, state:
     let dy: f32 = wheel.read().map(|e| e.y).sum();
     if dy != 0.0 && (*state.get() == Screen::Load || matches!(ig.page(), Some(Page::Load | Page::Save))) {
         let max = ui.list.len().saturating_sub(10);
-        ui.scroll = if dy > 0.0 { ui.scroll.saturating_sub(1) } else { (ui.scroll + 1).min(max) };
+        ui.scroll = wheel_step(ui.scroll, dy, max);
     }
 }
 

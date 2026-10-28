@@ -4,7 +4,7 @@ use bevy::prelude::*;
 
 use crate::combat::{Health, Target};
 use crate::panels::{REF_H, Toggles, cinematic};
-use crate::sprites::{Fonts, HudData, inset, sliced, sprite_of};
+use crate::sprites::{Fonts, HudData, image, sliced, sprite_of};
 use crate::{Library, PlayerShip, Ship};
 
 pub fn plugin(app: &mut App) {
@@ -167,9 +167,7 @@ struct Labeled;
 struct Reticle(usize);
 
 fn spawn_reticle(mut commands: Commands, assets: Res<AssetServer>, hud: Res<HudData>) {
-    let Some((sheet, rect)) = sprite_of(&hud, "ShipTargeted_Icon_Enemy") else { return };
-    let mut img = ImageNode::new(assets.load(format!("hud/tex/{sheet}.png")));
-    img.rect = Some(inset(&sheet, rect));
+    let Some((img, _)) = image(&assets, &hud, "ShipTargeted_Icon_Enemy") else { return };
     // The sprite's tip points up-right, i.e. it belongs at the bottom-left corner; the others are the same sprite turned by 90 degrees.
     for i in 0..4 {
         commands.spawn((
