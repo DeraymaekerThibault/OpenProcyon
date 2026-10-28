@@ -39,7 +39,7 @@ impl SkirmishScript {
 }
 
 pub fn plugin(app: &mut App) {
-    app.add_systems(Update, run.run_if(in_state(crate::menu::Screen::Battle)).run_if(resource_exists::<SkirmishScript>));
+    app.add_systems(FixedUpdate, run.in_set(crate::BattleSet::Rules).run_if(in_state(crate::menu::Screen::Battle)).run_if(resource_exists::<SkirmishScript>));
 }
 
 fn run(

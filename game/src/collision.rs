@@ -443,7 +443,7 @@ pub fn sail(
     }
     let pinned = |e: Entity| stopped.contains(&e) || flags.get(e).is_ok_and(|f| f.0);
     let ghost = |e: Entity| flags.get(e).is_ok_and(|f| f.1);
-    let dt = time.delta_secs().min(crate::MAX_SIM_STEP);
+    let dt = time.delta_secs();
     *quiet -= dt;
     let mut bump = |class: &crate::data::Class, at: Vec3, j: Vec3| {
         // Contacts resolve every frame while overlapping: one sound per half second, none for grazing touches.

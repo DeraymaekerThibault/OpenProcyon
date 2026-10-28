@@ -221,7 +221,7 @@ pub fn pull(
     holes: Query<(&Transform, &Pull), Without<Ship>>,
     mut ships: Query<(Entity, &Ship, &mut Transform, &mut Health, Option<&Docker>)>,
 ) {
-    let dt = time.delta_secs().min(crate::MAX_SIM_STEP);
+    let dt = time.delta_secs();
     for (e, ship, mut tf, mut health, docker) in &mut ships {
         if health.destroyed || docker.is_some_and(Docker::is_docked) {
             continue;

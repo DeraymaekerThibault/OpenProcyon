@@ -441,7 +441,7 @@ fn cycle(value: usize, delta: i32, len: usize) -> usize {
 pub fn plugin(app: &mut App) {
     app.init_resource::<ScreenModel>()
         .add_systems(Update, (screen, skirmish_screen).chain().in_set(CrewSet).after(crate::menu::RunButtons).before(crate::input))
-        .add_systems(Update, (apply_outfit, apply_skirmish_weapons, apply_skirmish_crew).chain().after(CrewSet).before(crate::sail));
+        .add_systems(FixedUpdate, (apply_outfit, apply_skirmish_weapons, apply_skirmish_crew).chain().in_set(crate::BattleSet::Commands));
 }
 
 fn screen(

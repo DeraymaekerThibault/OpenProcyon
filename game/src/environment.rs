@@ -294,7 +294,9 @@ pub fn plugin(app: &mut App) {
             PreUpdate,
             (sensor_smoke, refresh_sensors).chain().after(crate::smoke::fleet_smoke).before(crate::panels::hud_input).run_if(in_state(crate::menu::Screen::Battle)),
         )
-        .add_systems(Update, (update, current_fx, flow_currents).after(crate::input).before(crate::sail).run_if(in_state(crate::menu::Screen::Battle)));
+        .add_systems(FixedUpdate, refresh_sensors.in_set(crate::BattleSet::Sense).run_if(in_state(crate::menu::Screen::Battle)))
+        .add_systems(FixedUpdate, update.in_set(crate::BattleSet::Forces).run_if(in_state(crate::menu::Screen::Battle)))
+        .add_systems(Update, (current_fx, flow_currents).run_if(in_state(crate::menu::Screen::Battle)));
 }
 
 pub fn spawn(commands: &mut Commands, assets: &AssetServer, data: &Value) {
@@ -441,7 +443,7 @@ fn update(
     mut sfx: MessageWriter<crate::audio::Sfx>,
 ) {
     let Some(mission) = mission else { return };
-    let dt = time.delta_secs().min(0.1);
+    let dt = time.delta_secs();
     for (mut ship, tf) in &mut ships {
         let inside = mission.data["environment"]["nebulae"].as_array().into_iter().flatten().any(|n| {
             crate::data::wot_flag(&n["Nebula Cloud Energy Drain On/Off"])

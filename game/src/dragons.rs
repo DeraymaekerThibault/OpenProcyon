@@ -40,7 +40,7 @@ impl Dragon {
 }
 
 pub fn plugin(app: &mut App) {
-    app.add_systems(Update, think.after(crate::input).before(crate::sail).run_if(in_state(crate::menu::Screen::Battle)));
+    app.add_systems(FixedUpdate, think.in_set(crate::BattleSet::Orders).run_if(in_state(crate::menu::Screen::Battle)));
 }
 
 pub fn spawn(commands: &mut Commands, assets: &AssetServer, data: &Value) {
@@ -111,7 +111,7 @@ fn think(
     let Some(mission) = mission else { return };
     let sc = &mission.script;
     let def = &mission.data["environment"]["dragon"];
-    let dt = time.delta_secs().min(crate::MAX_SIM_STEP);
+    let dt = time.delta_secs();
     let now = time.elapsed_secs();
     let max_speed = def["physics"]["MaxSpeed"].as_f64().unwrap_or(12.0) as f32;
     let sight = def["sight"].as_f64().unwrap_or(500.0) as f32;

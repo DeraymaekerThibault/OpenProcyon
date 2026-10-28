@@ -20,12 +20,13 @@ pub struct Cloak {
     pub level: f32,
     /// The rules let its AI drop the cloak to fire ('AI Can Override').
     pub ai_override: bool,
+    presented_level: f32,
     shown: Option<Entity>,
     sound: Option<Entity>,
 }
 impl Cloak {
     pub fn new(on: bool, ai_override: bool) -> Self {
-        Cloak { on, level: if on { 1.0 } else { 0.0 }, ai_override, shown: None, sound: None }
+        Cloak { on, level: if on { 1.0 } else { 0.0 }, ai_override, presented_level: if on { 1.0 } else { 0.0 }, shown: None, sound: None }
     }
     pub fn hidden(&self) -> bool {
         self.level > 0.5
@@ -38,21 +39,26 @@ pub fn seen(hidden: bool, at: Vec3, from: Vec3) -> bool {
 }
 
 pub fn plugin(app: &mut App) {
-    app.add_systems(Update, fade.run_if(in_state(crate::menu::Screen::Battle)));
+    app.add_systems(FixedUpdate, advance.in_set(crate::BattleSet::Commands).run_if(in_state(crate::menu::Screen::Battle)))
+        .add_systems(Update, fade.run_if(in_state(crate::menu::Screen::Battle)));
+}
+
+fn advance(time: Res<Time>, mut ships: Query<&mut Cloak>) {
+    for mut c in &mut ships {
+        c.level = (c.level + if c.on { time.delta_secs() / FADE } else { -time.delta_secs() / FADE }).clamp(0.0, 1.0);
+    }
 }
 
 fn fade(
-    time: Res<Time>,
     mut commands: Commands,
     assets: Res<AssetServer>,
     fxl: Option<Res<crate::fx::FxLib>>,
     mut ships: Query<(Entity, &mut Cloak, &Ship, &Transform, &mut Visibility, Option<&crate::campaign::MissionShip>)>,
     mut sfx: MessageWriter<Sfx>,
 ) {
-    let dt = time.delta_secs();
     for (e, mut c, ship, tf, mut vis, ms) in &mut ships {
-        let was = c.level;
-        c.level = (c.level + if c.on { dt / FADE } else { -dt / FADE }).clamp(0.0, 1.0);
+        let was = c.presented_level;
+        c.presented_level = c.level;
         let started = was == 0.0 && c.level > 0.0;
         let ended = was == 1.0 && c.level < 1.0;
         if started || ended {

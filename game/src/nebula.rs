@@ -249,7 +249,7 @@ fn move_meteors(
     mut clouds: Query<(&mut Transform, &mut Cloud)>,
     mut shift: ResMut<StormShift>,
 ) {
-    let dt = time.delta_secs().min(crate::MAX_SIM_STEP);
+    let dt = time.delta_secs();
     for (mut tf, mut m) in &mut emitters {
         if let Some(plan) = plans.0.get(&m.group) {
             step_meteor(&mut m, &mut tf.translation, plan, dt);
@@ -330,7 +330,7 @@ fn storms(
         timers.clear();
     }
     let trap = mission.as_ref().is_some_and(|m| m.script.nebula_trap);
-    let dt = time.delta_secs().min(crate::MAX_SIM_STEP);
+    let dt = time.delta_secs();
     let mut rnd = || {
         *seed = seed.wrapping_mul(0x19660d).wrapping_add(0x3c6ef35f);
         (*seed >> 8) as f32 / (1u32 << 24) as f32
@@ -538,7 +538,8 @@ pub fn plugin(app: &mut App) {
     app.add_message::<MeteorRoute>()
         .init_resource::<MeteorPlans>()
         .init_resource::<StormShift>()
-        .add_systems(Update, (update, (route_meteors, move_meteors, storms.before(crate::sail).after(crate::input)).chain()).run_if(in_state(crate::menu::Screen::Battle)));
+        .add_systems(Update, update.run_if(in_state(crate::menu::Screen::Battle)))
+        .add_systems(FixedUpdate, (route_meteors, move_meteors, storms).chain().in_set(crate::BattleSet::Forces).run_if(in_state(crate::menu::Screen::Battle)));
 }
 
 fn update(

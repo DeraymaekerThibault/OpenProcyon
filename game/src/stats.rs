@@ -52,7 +52,7 @@ impl GameStats {
 pub fn plugin(app: &mut App) {
     app.init_resource::<GameStats>()
         .add_systems(OnEnter(crate::menu::Screen::Battle), reset)
-        .add_systems(Update, collect.after(crate::sail).run_if(in_state(crate::menu::Screen::Battle)));
+        .add_systems(FixedUpdate, collect.in_set(crate::BattleSet::Cleanup).run_if(in_state(crate::menu::Screen::Battle)));
 }
 
 fn reset(mut commands: Commands) {
