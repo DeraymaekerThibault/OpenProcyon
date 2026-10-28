@@ -15,7 +15,7 @@ pub(super) fn smoke(world: &mut World, mut stage: Local<(u32, u32)>, mut score: 
     if !world.contains_resource::<Mission>() || frame < 90 {
         return;
     }
-    let pick = |w: &mut World, name: &str| w.query::<(Entity, &MissionShip)>().iter(w).find(|(_, m)| m.name == name).map(|(e, _)| e).unwrap_or_else(|| panic!("no ship {name}"));
+    let pick = |w: &mut World, name: &str| w.query::<(Entity, &MissionShip)>().iter(w).find(|(_, m)| m.name == name).map_or_else(|| panic!("no ship {name}"), |(e, _)| e);
     if script == "lifeboat-m4" || script == "lifeboat-m9" {
         // Placed boats: mission 4 has three real ones (class flag) that nothing collects at the start; mission 9's longboat is a combat ship.
         if frame == 200 {
@@ -41,8 +41,7 @@ pub(super) fn smoke(world: &mut World, mut stage: Local<(u32, u32)>, mut score: 
                 .query::<(Entity, &Ship, &MissionShip, &Health)>()
                 .iter(world)
                 .find(|(_, s, m, h)| m.create_lifeboats && classes[s.class].2 > 0 && !h.destroyed)
-                .map(|(e, s, m, _)| (e, &classes[s.class], m.owner.clone()))
-                .unwrap_or_else(|| panic!("{script}: no flagged enemy ship that leaves boats"));
+                .map_or_else(|| panic!("{script}: no flagged enemy ship that leaves boats"), |(e, s, m, _)| (e, &classes[s.class], m.owner.clone()));
             *expect = Some((class_for(&class.1), owner.clone(), class.2));
             info!("{script}: killing {} of {owner}, expecting {} x {}", class.0, class.2, class_for(&class.1));
             world.get_mut::<Health>(e).unwrap().core = 0.0;

@@ -133,7 +133,7 @@ pub fn refresh_sensors(
                 at: tf.translation,
                 sphere,
                 sight: armed.map(|b| lib.classes[b.class].sight),
-                group: base.map(|b| b.owner.as_str()).unwrap_or("").into(),
+                group: base.map_or("", |b| b.owner.as_str()).into(),
                 shown: health.is_none_or(|h| !h.destroyed) && animal.is_none_or(|a| a.visible && !a.dead) && rock.is_none_or(|r| r.hp > 0.0),
                 cloaked: false,
                 scenery: animal.is_none(),
@@ -172,9 +172,7 @@ fn sensor_smoke(world: &mut World) {
                 world.get_mut::<Transform>(e).unwrap().translation = Vec3::X * x;
                 let mut ship = world.get_mut::<Ship>(e).unwrap();
                 ship.speed = 0.0;
-                ship.order = 0;
-                ship.waypoints.clear();
-                ship.goal = None;
+                ship.halt();
                 world.entity_mut(e).insert(crate::ship::HoldPosition).remove::<crate::combat::GunStates>();
             }
         }
@@ -296,7 +294,9 @@ pub fn plugin(app: &mut App) {
             PreUpdate,
             (sensor_smoke, refresh_sensors).chain().after(crate::smoke::fleet_smoke).before(crate::panels::hud_input).run_if(in_state(crate::menu::Screen::Battle)),
         )
-        .add_systems(Update, (update, current_fx, flow_currents).after(crate::input).before(crate::sail).run_if(in_state(crate::menu::Screen::Battle)));
+        .add_systems(FixedUpdate, refresh_sensors.in_set(crate::BattleSet::Sense).run_if(in_state(crate::menu::Screen::Battle)))
+        .add_systems(FixedUpdate, update.in_set(crate::BattleSet::Forces).run_if(in_state(crate::menu::Screen::Battle)))
+        .add_systems(Update, (current_fx, flow_currents).run_if(in_state(crate::menu::Screen::Battle)));
 }
 
 pub fn spawn(commands: &mut Commands, assets: &AssetServer, data: &Value) {
@@ -443,7 +443,7 @@ fn update(
     mut sfx: MessageWriter<crate::audio::Sfx>,
 ) {
     let Some(mission) = mission else { return };
-    let dt = time.delta_secs().min(0.1);
+    let dt = time.delta_secs();
     for (mut ship, tf) in &mut ships {
         let inside = mission.data["environment"]["nebulae"].as_array().into_iter().flatten().any(|n| {
             crate::data::wot_flag(&n["Nebula Cloud Energy Drain On/Off"])
@@ -575,10 +575,11 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs imported assets"]
     fn sensor_snapshot_tracks_ship_spheres_script_changes_and_cleanup() {
         use crate::combat::{Health, Library};
         let mut app = App::new();
-        let lib = Library::load(&crate::assets_dir());
+        let lib = Library::load(crate::assets_dir());
         let class = lib.index("Ship_Navy_Cutter");
         let health = Health::new(&lib.classes[class]);
         let sphere = lib.classes[class].sphere;
@@ -646,6 +647,7 @@ mod tests {
         assert_eq!(current_mesh(&[]).count_vertices(), 0);
     }
     #[test]
+    #[ignore = "needs imported assets"]
     fn mission4_current_pushes_the_way_nelsons_fleet_sails_out() {
         use bevy::mesh::VertexAttributeValues;
         let mission = crate::campaign::load_id("mission04");
@@ -679,6 +681,7 @@ mod tests {
         assert!(crosses(&concave, Vec2::new(2.0, 8.0), Vec2::new(8.0, 8.0)), "same cloud endpoints can cross its boundary");
     }
     #[test]
+    #[ignore = "needs imported assets"]
     fn enabled_nebula_gates_short_sight_and_group_members_can_see_around_it() {
         let mut mission = crate::campaign::load_id("mission02");
         mission.opening = None;

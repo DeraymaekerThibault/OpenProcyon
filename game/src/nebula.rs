@@ -249,7 +249,7 @@ fn move_meteors(
     mut clouds: Query<(&mut Transform, &mut Cloud)>,
     mut shift: ResMut<StormShift>,
 ) {
-    let dt = time.delta_secs().min(crate::MAX_SIM_STEP);
+    let dt = time.delta_secs();
     for (mut tf, mut m) in &mut emitters {
         if let Some(plan) = plans.0.get(&m.group) {
             step_meteor(&mut m, &mut tf.translation, plan, dt);
@@ -330,7 +330,7 @@ fn storms(
         timers.clear();
     }
     let trap = mission.as_ref().is_some_and(|m| m.script.nebula_trap);
-    let dt = time.delta_secs().min(crate::MAX_SIM_STEP);
+    let dt = time.delta_secs();
     let mut rnd = || {
         *seed = seed.wrapping_mul(0x19660d).wrapping_add(0x3c6ef35f);
         (*seed >> 8) as f32 / (1u32 << 24) as f32
@@ -446,7 +446,7 @@ fn looped(c: &[(f32, f32)], t: f32) -> f32 {
 fn spawn_one(commands: &mut Commands, assets: &AssetServer, effect: &str, mesh_name: &str, pos: Vec3, radius: f32, sound: &str, sound_distance: f32, seed: u32, group: &str) {
     let Some(j) = crate::data::try_json(&assets_dir().join(format!("fx/{effect}.json"))) else { return };
     let chunk = &j["Primitive"][0]["CommonPropertiesChunk"];
-    let Some((base, uv, idx)) = crate::data::mesh_geometry(&assets_dir(), mesh_name) else { return };
+    let Some((base, uv, idx)) = crate::data::mesh_geometry(assets_dir(), mesh_name) else { return };
     let rgb = &chunk["ColorFaderChunk"]["ColorInterpolator3Chunk"];
     commands.spawn((
         Scenario,
@@ -538,7 +538,8 @@ pub fn plugin(app: &mut App) {
     app.add_message::<MeteorRoute>()
         .init_resource::<MeteorPlans>()
         .init_resource::<StormShift>()
-        .add_systems(Update, (update, (route_meteors, move_meteors, storms.before(crate::sail).after(crate::input)).chain()).run_if(in_state(crate::menu::Screen::Battle)));
+        .add_systems(Update, update.run_if(in_state(crate::menu::Screen::Battle)))
+        .add_systems(FixedUpdate, (route_meteors, move_meteors, storms).chain().in_set(crate::BattleSet::Forces).run_if(in_state(crate::menu::Screen::Battle)));
 }
 
 fn update(
@@ -632,8 +633,9 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs imported assets"]
     fn thirty_seconds_in_a_storm_does_not_guarantee_lightning_damage() {
-        let lib = crate::combat::Library::load(&assets_dir());
+        let lib = crate::combat::Library::load(assets_dir());
         let class = lib.index("Ship_Navy_Sloop");
         let hp = crate::combat::Health::new(&lib.classes[class]);
         let ship = crate::Ship {
@@ -675,12 +677,13 @@ mod tests {
     }
 
     fn sim() -> Sim {
-        let (base, ..) = crate::data::mesh_geometry(&assets_dir(), "OvalNebula").expect("mesh");
-        let j: Value = serde_json::from_str(&std::fs::read_to_string(assets_dir().join("fx/Nebula.json")).unwrap()).unwrap();
+        let (base, ..) = crate::data::mesh_geometry(assets_dir(), "OvalNebula").expect("mesh");
+        let j: Value = crate::data::read_json(&assets_dir().join("fx/Nebula.json"));
         Sim::new(&base, shift_params(&j["Primitive"][0]["CommonPropertiesChunk"]["MeshChunk"]), 5)
     }
 
     #[test]
+    #[ignore = "needs imported assets"]
     fn shifting_stays_within_the_exe_limits() {
         let mut s = sim();
         assert!(s.v.iter().any(|v| v.near.len() == MAX_NEIGHBOURS) && s.v.iter().all(|v| v.near.len() <= MAX_NEIGHBOURS));

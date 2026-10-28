@@ -4,7 +4,7 @@ use bevy::prelude::*;
 
 use crate::combat::{Health, Target};
 use crate::panels::{REF_H, Toggles, cinematic};
-use crate::sprites::{Fonts, HudData, inset, sliced, sprite_of};
+use crate::sprites::{Fonts, HudData, image, sliced, sprite_of};
 use crate::{Library, PlayerShip, Ship};
 
 pub fn plugin(app: &mut App) {
@@ -45,7 +45,7 @@ fn end_line(
         f.font_size = FontSize::Px(size);
     } else if let Some(font) = fonts.0.get("Immi14") {
         // the string table is read once, when the line appears
-        let text = crate::menu::text_of(&crate::menu::strings(), id);
+        let text = crate::menu::text_of(crate::menu::strings(), id);
         let node = Node { position_type: PositionType::Absolute, top: Val::Percent(49.0), left: Val::Px(0.0), width: Val::Percent(100.0), ..default() };
         commands.spawn((crate::Scenario, EndLineText, font.text(&text, size / font.size, Color::WHITE), TextLayout::justify(Justify::Center), node, GlobalZIndex(170)));
     }
@@ -93,7 +93,7 @@ fn navigation(
                 Navigation { arrow },
                 Visibility::Hidden,
                 Transform::default(),
-                WorldAssetRoot(assets.load(GltfAssetLabel::Scene(0).from_asset(crate::data::model(&format!("SELECTION_INDICATOR_{part}_SMALL.glb"))))),
+                crate::data::scene(&assets, &format!("SELECTION_INDICATOR_{part}_SMALL.glb")),
             ));
             if !arrow {
                 // PROVISIONAL backing fill: the native indicator render state is not decoded.
@@ -124,17 +124,13 @@ fn navigation(
         // Skirmish: the arrow points at the base the map's end rule says to destroy; with no such objective it is not shown.
         None => victory.as_deref().and_then(|v| {
             let ids = v.objective_bases();
-            bases
-                .iter()
-                .filter(|(_, b, h)| ids.contains(&b.id) && !h.destroyed)
-                .map(|(t, ..)| t.translation)
-                .min_by(|a, b| a.distance(primary_tf.translation).total_cmp(&b.distance(primary_tf.translation)))
+            crate::nearest(bases.iter().filter(|(_, b, h)| ids.contains(&b.id) && !h.destroyed).map(|(t, ..)| t.translation), primary_tf.translation, |p| *p)
         }),
     };
     for (indicator, mut transform, mut vis) in &mut indicators {
         let selected = fleets.selected.and_then(|e| ships.get(e).ok());
         let (tf, ship) = if !indicator.arrow { selected.map_or((primary_tf, ship), |(_, t, s, _)| (t, s)) } else { (primary_tf, ship) };
-        *vis = if cinematic(mission.as_deref()) || (indicator.arrow && goal.is_none()) { Visibility::Hidden } else { Visibility::Inherited };
+        vis.set_if_neq(if cinematic(mission.as_deref()) || (indicator.arrow && goal.is_none()) { Visibility::Hidden } else { Visibility::Inherited });
         transform.translation = tf.translation;
         // The ring's radius is the ship's radius times its WOT fraction. PROVISIONAL: the small indicator's own radius (the compass mesh
         // measures 5.9) is taken as the ring's.
@@ -167,9 +163,7 @@ struct Labeled;
 struct Reticle(usize);
 
 fn spawn_reticle(mut commands: Commands, assets: Res<AssetServer>, hud: Res<HudData>) {
-    let Some((sheet, rect)) = sprite_of(&hud, "ShipTargeted_Icon_Enemy") else { return };
-    let mut img = ImageNode::new(assets.load(format!("hud/tex/{sheet}.png")));
-    img.rect = Some(inset(&sheet, rect));
+    let Some((img, _)) = image(&assets, &hud, "ShipTargeted_Icon_Enemy") else { return };
     // The sprite's tip points up-right, i.e. it belongs at the bottom-left corner; the others are the same sprite turned by 90 degrees.
     for i in 0..4 {
         commands.spawn((
@@ -301,9 +295,11 @@ fn place_labels(
                 // Backdrop sits 50 reference px above the anchor point (Offset_ShipName_Background).
                 node.left = Val::Px(p.x - label.width * s / 2.0);
                 node.top = Val::Px(p.y - 50.0 * s);
-                *vis = Visibility::Inherited;
+                vis.set_if_neq(Visibility::Inherited);
             }
-            _ => *vis = Visibility::Hidden,
+            _ => {
+                vis.set_if_neq(Visibility::Hidden);
+            }
         }
     }
     let shown = (|| {
@@ -330,7 +326,7 @@ fn place_labels(
         Some((p, edge))
     })();
     for (Reticle(i), mut node, mut vis) in &mut reticle {
-        *vis = Visibility::Hidden;
+        vis.set_if_neq(Visibility::Hidden);
         let Some((p, edge)) = shown else { continue };
         let size = (edge * 0.3).clamp(16.0 * s, 40.0 * s);
         let corner = [Vec2::new(-1.0, 1.0), Vec2::new(-1.0, -1.0), Vec2::new(1.0, -1.0), Vec2::new(1.0, 1.0)][*i];
@@ -340,7 +336,7 @@ fn place_labels(
         // Size comes from layout_and_fill (Sprite); set it here after that system ran.
         node.width = Val::Px(size);
         node.height = Val::Px(size);
-        *vis = Visibility::Inherited;
+        vis.set_if_neq(Visibility::Inherited);
     }
 }
 
@@ -349,8 +345,9 @@ mod tests {
     use super::*;
     use crate::assets_dir;
     #[test]
+    #[ignore = "needs imported assets"]
     fn banners_clear_the_sails_of_large_and_small_ships() {
-        let lib = Library::load(&assets_dir());
+        let lib = Library::load(assets_dir());
         for name in ["Ship_Navy_Cutter", "Ship_Navy_ManOWar", "Ship_Pirate_Barque"] {
             let class = &lib.classes[lib.index(name)];
             assert!(class.sections.iter().all(|s| banner_height(class) >= s.max.y + 2.0));

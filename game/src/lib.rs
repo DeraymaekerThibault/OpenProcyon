@@ -18,6 +18,8 @@ pub mod decals;
 pub mod docking;
 pub mod dragons;
 pub mod environment;
+#[cfg(test)]
+mod fixed_tests;
 pub mod flag;
 pub mod fx;
 pub mod lifeboats;
@@ -62,6 +64,8 @@ pub struct Config {
     speed: f32,
     ended: Option<u32>,
     script: Option<smoke::Script>,
+    /// `--autolaunch`: the lobby fills the fleet and starts the battle (dev/smoke hook).
+    autolaunch: bool,
     shot_frame: u32,
     late_frame: u32,
 }
@@ -94,8 +98,8 @@ fn content_dir_from(next_to_exe: Option<PathBuf>, checkout: PathBuf) -> PathBuf 
     next_to_exe.filter(|dir| dir.join("fonts").is_dir()).unwrap_or(checkout)
 }
 /// The asset root: the imported assets with `content/` and any `--mod` folders overlaid on top (see modding.rs).
-pub fn assets_dir() -> PathBuf {
-    ASSETS.get_or_init(|| modding::overlay(&base_assets(), &[content_dir()])).clone()
+pub fn assets_dir() -> &'static std::path::Path {
+    ASSETS.get_or_init(|| modding::overlay(&base_assets(), &[content_dir()]))
 }
 
 /// Runs the game with one presentation (a view plugin such as the binary's `classic::plugin`); without imported assets it opens
@@ -129,6 +133,7 @@ pub fn run(view: fn(&mut App), setup_view: fn(&mut App)) {
         speed: arg("--speed").and_then(|v| v.parse().ok()).unwrap_or(1.0),
         ended: None,
         script,
+        autolaunch: args.iter().any(|a| a == "--autolaunch"),
         shot_frame: arg("--shot-frame").and_then(|v| v.parse().ok()).unwrap_or(500),
         late_frame: arg("--late-frame").and_then(|v| v.parse().ok()).unwrap_or(9000), // 0: no _late shot (slow software rendering)
     };
@@ -202,7 +207,19 @@ pub fn run(view: fn(&mut App), setup_view: fn(&mut App)) {
         .init_resource::<ship::CaptainTargets>()
         .init_resource::<course::Plot>()
         .add_systems(Startup, setup)
-        .add_plugins(smoke::plugin)
+        .add_plugins((smoke::plugin, battle_schedule))
+        .add_systems(
+            FixedUpdate,
+            (
+                ship::reconcile_fleets.in_set(BattleSet::Commands),
+                ai.in_set(BattleSet::Ai),
+                ship::fleet_follow.in_set(BattleSet::Fleet),
+                (briefing::halt_arrival, blackhole::pull, sail).chain().in_set(BattleSet::Simulate),
+                outcome.in_set(BattleSet::Outcome),
+            )
+                .run_if(in_state(menu::Screen::Battle))
+                .run_if(menu::overlay_closed),
+        )
         .add_systems(OnEnter(menu::Screen::Battle), enter_battle)
         .add_systems(OnExit(menu::Screen::Battle), scenario::reset_fleets)
         .add_systems(
@@ -211,20 +228,14 @@ pub fn run(view: fn(&mut App), setup_view: fn(&mut App)) {
                 (
                     (shot_target, restart, debug_kill).chain(),
                     briefing::update,
-                    ship::reconcile_fleets,
                     view::fleet_keys,
                     input,
-                    ai,
-                    ship::fleet_follow,
-                    blackhole::pull,
-                    sail,
                     toggle_debug,
                     camera,
                     sky,
                     wake::update,
                     blackhole::update,
                     course::update,
-                    outcome,
                     hud,
                     leave_battle,
                 )
@@ -255,15 +266,51 @@ fn setup(mut commands: Commands, cfg: Res<Config>, mut vtime: ResMut<Time<Virtua
     }
 }
 
-/// Largest simulated step per frame: `sail`/`environment` clamp dt to this, so bigger steps would desync motion from rule timers.
-const MAX_SIM_STEP: f32 = 0.1;
+/// Retail tick documented in docs/re/gunnery.md and docs/re/effects.md.
+pub const BATTLE_TICK: std::time::Duration = std::time::Duration::from_millis(33);
 
-/// Fast-forward for testing: scale virtual time; Bevy's max_delta clamps the scaled step so it never exceeds MAX_SIM_STEP.
-/// At low frame rates the effective speed drops below `speed` instead of taking unsafe steps.
+/// Ordered shared simulation stages; input and presentation stay on the frame schedules.
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum BattleSet {
+    Commands,
+    Sense,
+    Rules,
+    Ai,
+    Fleet,
+    Orders,
+    Forces,
+    Simulate,
+    Combat,
+    Cleanup,
+    Outcome,
+}
+
+fn battle_schedule(app: &mut App) {
+    app.insert_resource(Time::<Fixed>::from_duration(BATTLE_TICK)).configure_sets(
+        FixedUpdate,
+        (
+            BattleSet::Commands,
+            BattleSet::Sense,
+            BattleSet::Rules,
+            BattleSet::Ai,
+            BattleSet::Fleet,
+            BattleSet::Orders,
+            BattleSet::Forces,
+            BattleSet::Simulate,
+            BattleSet::Combat,
+            BattleSet::Cleanup,
+            BattleSet::Outcome,
+        )
+            .chain(),
+    );
+}
+
+/// Preserve the virtual-time catch-up cap; fixed ticks now advance motion and timers together.
+/// At low frame rates the effective speed drops below `speed` instead of taking unbounded catch-up steps.
 fn set_time_scale(vtime: &mut Time<Virtual>, speed: f32) {
     let speed = speed.max(0.01);
     vtime.set_relative_speed(speed);
-    vtime.set_max_delta(std::time::Duration::from_secs_f32(if speed > 1.0 { MAX_SIM_STEP } else { 0.25 }));
+    vtime.set_max_delta(std::time::Duration::from_secs_f32(if speed > 1.0 { 0.1 } else { 0.25 }));
 }
 
 pub const MAX_GAME_SPEED: f32 = 16.0;
@@ -333,16 +380,35 @@ fn screenshot(mut commands: Commands, mut cfg: ResMut<Config>) {
     }
 }
 
+/// The item whose position is closest to `to`.
+/// `iter.nearest_to(point, pos)`: the item whose `pos` is closest to `point` (see `nearest`).
+pub trait Nearest: Iterator + Sized {
+    fn nearest_to(self, to: Vec3, pos: impl Fn(&Self::Item) -> Vec3) -> Option<Self::Item> {
+        nearest(self, to, pos)
+    }
+}
+impl<I: Iterator> Nearest for I {}
+
+pub fn nearest<T>(items: impl IntoIterator<Item = T>, to: Vec3, pos: impl Fn(&T) -> Vec3) -> Option<T> {
+    items.into_iter().min_by(|a, b| pos(a).distance_squared(to).total_cmp(&pos(b).distance_squared(to)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn nearest_picks_the_closest_position() {
+        let pts = [Vec3::new(5.0, 0.0, 0.0), Vec3::new(1.0, 1.0, 0.0), Vec3::new(-9.0, 0.0, 0.0)];
+        assert_eq!(nearest(pts, Vec3::ZERO, |p| *p), Some(pts[1]));
+        assert_eq!(nearest(Vec::<Vec3>::new(), Vec3::ZERO, |p| *p), None);
+    }
     #[test]
     fn content_next_to_the_executable_wins_over_the_checkout() {
         let dir = std::env::temp_dir().join(format!("procyon-content-test-{}", std::process::id()));
         let (unpacked, checkout) = (dir.join("download/content"), dir.join("checkout/content"));
         assert_eq!(content_dir_from(Some(unpacked.clone()), checkout.clone()), checkout, "no content/ next to a cargo-built binary");
         std::fs::create_dir_all(unpacked.join("fonts")).unwrap();
-        assert_eq!(content_dir_from(Some(unpacked.clone()), checkout.clone()), unpacked);
+        assert_eq!(content_dir_from(Some(unpacked.clone()), checkout), unpacked);
         std::fs::remove_dir_all(dir).unwrap();
     }
 }

@@ -7,6 +7,7 @@
 //! Tows (menu Tow start / stop): the tower steers for the towee and the link is registered inside 50 units of surface distance; the
 //! rigid tow itself lives in rules.rs. The docking status icon lives on the primary ship's bottom-bar portrait in panels.rs.
 //! PROVISIONAL: the tow approach point (the towee's centre, not its tow node).
+use crate::Nearest;
 use bevy::ecs::system::{ParamSet, SystemParam};
 use bevy::prelude::*;
 use serde_json::Value;
@@ -65,11 +66,11 @@ impl Dockable {
     }
     /// The point nearest `from` (world), free or not.
     fn nearest(&self, tf: &Transform, from: Vec3) -> Option<usize> {
-        (0..self.points.len()).min_by(|a, b| self.world(tf, *a).0.distance(from).total_cmp(&self.world(tf, *b).0.distance(from)))
+        (0..self.points.len()).nearest_to(from, |a| self.world(tf, *a).0)
     }
     /// The free point nearest `from`.
     pub fn nearest_free(&self, tf: &Transform, from: Vec3) -> Option<usize> {
-        (0..self.points.len()).filter(|i| self.taken[*i].is_none()).min_by(|a, b| self.world(tf, *a).0.distance(from).total_cmp(&self.world(tf, *b).0.distance(from)))
+        (0..self.points.len()).filter(|i| self.taken[*i].is_none()).nearest_to(from, |a| self.world(tf, *a).0)
     }
     fn release(&mut self, docker: Entity) {
         for t in &mut self.taken {
@@ -97,7 +98,7 @@ pub fn load_docks() -> Value {
     let root = assets_dir();
     let read = |p: std::path::PathBuf| crate::data::try_json(&p);
     let mut docks = read(root.join("data/docks.json")).unwrap_or_else(|| Value::Object(Default::default()));
-    for id in crate::data::ship_ids(&root) {
+    for id in crate::data::ship_ids(root) {
         if let Some(d) = read(root.join(format!("ships/{id}/docks.json"))) {
             docks[id] = d;
         }
@@ -197,28 +198,35 @@ impl Docker {
     }
 }
 pub fn plugin(app: &mut App) {
-    app.add_message::<DockMsg>().add_systems(
-        Update,
-        (ai_repair_dock, handle_messages, routine, tow_routine, markers)
-            .chain()
-            .before(crate::input)
-            .run_if(in_state(crate::menu::Screen::Battle))
-            .run_if(crate::menu::overlay_closed),
-    );
+    app.add_message::<DockMsg>()
+        .add_systems(
+            FixedUpdate,
+            (ai_repair_dock, handle_messages, routine, tow_routine)
+                .chain()
+                .in_set(crate::BattleSet::Orders)
+                .run_if(in_state(crate::menu::Screen::Battle))
+                .run_if(crate::menu::overlay_closed),
+        )
+        .add_systems(Update, (cancel_input, markers).chain().before(crate::input).run_if(in_state(crate::menu::Screen::Battle)).run_if(crate::menu::overlay_closed));
+}
+
+fn cancel_input(keys: Res<ButtonInput<KeyCode>>, fleets: Res<crate::ship::Fleets>, player: Query<Entity, With<PlayerShip>>, mut msgs: MessageWriter<DockMsg>) {
+    if keys.just_pressed(KeyCode::Backspace)
+        && let Some(e) = fleets.selected.or_else(|| player.single().ok())
+    {
+        msgs.write(DockMsg::CancelShip(e));
+    }
 }
 
 fn handle_messages(
     mut msgs: MessageReader<DockMsg>,
-    keys: Res<ButtonInput<KeyCode>>,
     mut commands: Commands,
     player: Query<Entity, With<PlayerShip>>,
     pos: Query<&Transform, With<Ship>>,
     mut dockables: Query<&mut Dockable>,
     dockers: Query<&Docker>,
     mut mission: Option<ResMut<Mission>>,
-    fleets: Option<Res<crate::ship::Fleets>>,
 ) {
-    let cancel = keys.just_pressed(KeyCode::Backspace);
     for m in msgs.read() {
         match *m {
             DockMsg::TowStart { tower, towee } => {
@@ -288,18 +296,6 @@ fn handle_messages(
             }
         }
     }
-    // X / Stop abort the player's approach (a ship already docked stays until its time is up; a registered tow is kept).
-    if cancel && let Some(p) = fleets.as_ref().and_then(|f| f.selected).or_else(|| player.single().ok()) {
-        commands.entity(p).remove::<Tower>();
-        if let Ok(d) = dockers.get(p)
-            && matches!(d.phase, Phase::Wait | Phase::Approach)
-        {
-            if let Ok(mut dk) = dockables.get_mut(d.dockee) {
-                dk.release(p);
-            }
-            commands.entity(p).remove::<Docker>();
-        }
-    }
 }
 
 /// Towers steer for their towee; inside `TOW_RANGE` (surface distance) the link is registered in the rules and the tower is free again.
@@ -335,9 +331,7 @@ fn tow_routine(
             info!("tow: {tower} tows {towee}");
             m.script.set_tow(tower, towee, true);
             commands.entity(tower).remove::<Tower>();
-            sh.waypoints.clear();
-            sh.goal = None;
-            sh.order = 0;
+            sh.halt();
         } else {
             sh.waypoints = vec![(front - (rear - here)).with_y(here.y)];
             sh.goal = None;
@@ -378,6 +372,15 @@ fn flat(a: Vec3, b: Vec3) -> f32 {
 fn approach_point(point: Vec3, fwd: Vec3, ship: Vec3, leg: f32) -> Vec3 {
     let dir = if fwd.dot((ship - point).with_y(0.0)) >= 0.0 { fwd } else { -fwd };
     (point + dir * leg).with_y(ship.y)
+}
+
+/// `e` reserves dock point `i` and (re)starts its approach to it.
+fn claim(dockable: &mut Dockable, docker: &mut Docker, e: Entity, i: usize) {
+    dockable.taken[i] = Some(e);
+    docker.point = Some(i);
+    docker.phase = Phase::Approach;
+    docker.final_leg = false;
+    docker.base_approach = None;
 }
 
 fn routine(
@@ -422,19 +425,12 @@ fn routine(
             && dockable.taken[n].is_none()
         {
             dockable.release(e);
-            dockable.taken[n] = Some(e);
-            docker.point = Some(n);
-            docker.final_leg = false;
-            docker.base_approach = None;
+            claim(&mut dockable, &mut docker, e, n);
         }
         match docker.phase {
             Phase::Wait => {
                 if let Some(i) = dockable.nearest_free(dockee_tf, here) {
-                    dockable.taken[i] = Some(e);
-                    docker.point = Some(i);
-                    docker.phase = Phase::Approach;
-                    docker.final_leg = false;
-                    docker.base_approach = None;
+                    claim(&mut dockable, &mut docker, e, i);
                     continue;
                 }
                 let Some(i) = dockable.nearest(dockee_tf, here) else { continue };
@@ -444,11 +440,7 @@ fn routine(
                 let holder = dockable.taken[i].and_then(pos_of);
                 if ship.speed.abs() > 0.01 && holder.is_some_and(|h| here.distance(p) < h.distance(p)) {
                     bumped.extend(dockable.taken[i]);
-                    dockable.taken[i] = Some(e);
-                    docker.point = Some(i);
-                    docker.phase = Phase::Approach;
-                    docker.final_leg = false;
-                    docker.base_approach = None;
+                    claim(&mut dockable, &mut docker, e, i);
                 } else if here.distance(p) < WAIT_DIST {
                     ship.waypoints.clear();
                     ship.order = 0;
@@ -475,10 +467,8 @@ fn routine(
                     docker.duration = mission.as_ref().and_then(|m| m.script.dock_time(e)).unwrap_or(MIN_DOCK_SECS).max(effect);
                     docker.offset = dockee_tf.compute_affine().inverse().transform_point3(here);
                     info!("docking: {e} docked with {} for {:.1} s (repair {:.1} s)", docker.dockee, docker.duration, docker.repair_secs);
-                    ship.order = 0;
+                    ship.halt();
                     ship.speed = 0.0;
-                    ship.waypoints.clear();
-                    ship.goal = None;
                     if let Some(m) = mission.as_mut() {
                         m.script.set_docked(e, docker.dockee, true);
                     }
@@ -500,9 +490,7 @@ fn routine(
                     docker.base_approach = Some(ap);
                     let scenery = crate::collision::scenery(obstacles.iter());
                     let Some(mut route) = crate::collision::route_clear(class.collision_bounds, here, ap, &scenery) else {
-                        ship.waypoints.clear();
-                        ship.goal = None;
-                        ship.order = 0;
+                        ship.halt();
                         warn!("docking: no clear base approach for {e} to {}", docker.dockee);
                         continue;
                     };
@@ -660,7 +648,7 @@ fn markers(
 }
 
 /// 'Set Group/Unit Towable' FALSE: no tow can be started on this ship.
-#[derive(Component)]
+#[derive(Component, Clone)]
 pub struct NoTow;
 /// The original's repair decision for computer ships: at least two sections hurt to half their hit points or less (destroyed ones
 /// do not count).
@@ -692,10 +680,10 @@ fn ai_repair_dock(
             (Some(m), Some(sc), Some(o)) => !sc.hostile(&m.owner, o),
             _ => dship.is_none_or(|d| d.side == ship.side),
         };
-        let nearest = docks
+        let candidates = docks
             .iter()
-            .filter(|(d, _, dk, dship, dms, base)| *d != e && dk.enabled && dk.repairs && friendly(*dship, dms.map(|m| m.owner.as_str()).or(base.map(|b| b.owner.as_str()))))
-            .min_by(|a, b| a.1.translation.distance(tf.translation).total_cmp(&b.1.translation.distance(tf.translation)));
+            .filter(|(d, _, dk, dship, dms, base)| *d != e && dk.enabled && dk.repairs && friendly(*dship, dms.map(|m| m.owner.as_str()).or(base.map(|b| b.owner.as_str()))));
+        let nearest = crate::nearest(candidates, tf.translation, |d| d.1.translation);
         if let Some((dockee, ..)) = nearest {
             info!("docking: {e} needs repair, sails for {dockee}");
             msg.write(DockMsg::Dock { docker: Some(e), dockee });
@@ -799,315 +787,4 @@ impl Dockees<'_, '_> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::time::Duration;
-
-    #[test]
-    fn skirmish_dock_lights_show_on_friendly_bases_only() {
-        let mut app = App::new();
-        app.init_resource::<FxLib>().add_systems(Update, markers);
-        let point = DockPoint { pos: Vec3::Z * 3.0, fwd: Vec3::NEG_Z };
-        let mut base = |side| {
-            let base = MissionBase { id: 1, owner: "b".into() };
-            app.world_mut().spawn((Transform::default(), Dockable::new(vec![point], true), base, crate::combat::BaseSide(side))).id()
-        };
-        let (own, enemy) = (base(Side::Player), base(Side::Enemy));
-        app.update();
-        assert!(!app.world().get::<Dockable>(own).unwrap().markers.is_empty(), "our base shows its dock lights");
-        assert!(app.world().get::<Dockable>(enemy).unwrap().markers.is_empty(), "the enemy base shows none");
-    }
-
-    #[test]
-    fn mission_two_base_docking_plans_around_the_island_before_allowing_contact() {
-        let (mut app, lib) = app();
-        app.init_resource::<crate::collision::Shapes>().add_systems(Update, crate::collision::sail.after(routine));
-        let map: Value = serde_json::from_slice(&std::fs::read(assets_dir().join("maps/mission02/map.json")).unwrap()).unwrap();
-        let docks = load_docks();
-        let mut dockee = None;
-        let mut start = Vec3::ZERO;
-        for object in map["objects"].as_array().unwrap() {
-            let tf = crate::scenario::scenery_transform(object, crate::scenario::game_rotation(&object["rot"]), &docks);
-            let kind = object["type"].as_str().unwrap();
-            let body = app.world().resource::<crate::collision::Shapes>().obstacle(kind, &tf);
-            let e = app.world_mut().spawn(tf).id();
-            if let Some(body) = body {
-                app.world_mut().entity_mut(e).insert(body);
-            }
-            if kind == "Base_AbandonedCamp" {
-                let dk = dockable_for(&docks, kind).unwrap();
-                let p = dk.world(&tf, 0).0;
-                start = (tf.translation - (p - tf.translation).with_y(0.0).normalize() * 280.0).with_y(0.0);
-                app.world_mut().entity_mut(e).insert(dk);
-                dockee = Some(e);
-            }
-        }
-        let dockee = dockee.unwrap();
-        let (s, h) = ship(&lib, "Ship_Navy_Torpedo", Side::Player);
-        let me = app.world_mut().spawn((Transform::from_translation(start), s, h, PlayerShip, crate::collision::Drift::default())).id();
-        app.world_mut().resource_mut::<Messages<DockMsg>>().write(DockMsg::Dock { docker: None, dockee });
-        tick(&mut app, 0.1);
-        tick(&mut app, 0.1);
-        let d = app.world().get::<Docker>(me).unwrap();
-        assert!(!d.ignores_collision(dockee), "the island stays solid during the detour");
-        let route = app.world().get::<Ship>(me).unwrap().waypoints.clone();
-        assert!(route.len() > 2, "the far-side approach needs a detour: {route:?}");
-        for _ in 0..6000 {
-            tick(&mut app, 0.1);
-            if app.world().get::<Docker>(me).unwrap().is_docked() {
-                return;
-            }
-        }
-        panic!("base detour did not reach the dock: {:?}", app.world().get::<Transform>(me).unwrap().translation);
-    }
-
-    #[test]
-    fn coventry_docks_and_repairs_at_norville_on_the_flight_plane() {
-        let (mut app, lib) = app();
-        app.init_resource::<crate::collision::Shapes>().add_systems(Update, crate::collision::sail.after(routine));
-        let map: Value = serde_json::from_slice(&std::fs::read(assets_dir().join("maps/mission02/map.json")).unwrap()).unwrap();
-        let mission: Value = serde_json::from_slice(&std::fs::read(assets_dir().join("maps/mission02/mission.json")).unwrap()).unwrap();
-        let kind = "Base_Safetytown";
-        let object = map["objects"].as_array().unwrap().iter().find(|o| o["type"] == kind).unwrap();
-        let docks = load_docks();
-        let tf = crate::scenario::scenery_transform(object, crate::scenario::game_rotation(&object["rot"]), &docks);
-        let dk = dockable_for(&docks, kind).unwrap();
-        let (point, axis) = dk.world(&tf, 0);
-        assert!(point.y.abs() < 0.01);
-        let body = app.world().resource::<crate::collision::Shapes>().obstacle(kind, &tf).unwrap();
-        let dockee = app.world_mut().spawn((tf, dk, body)).id();
-        let class = mission["ships"].as_array().unwrap().iter().find(|s| s["name"] == "SS Coventry").unwrap()["type"].as_str().unwrap();
-        let (s, mut h) = ship(&lib, class, Side::Player);
-        let full = h.core;
-        h.core *= 0.25;
-        let start = point + axis * lib.classes[s.class].length * 2.0;
-        let me = app.world_mut().spawn((Transform::from_translation(start), s, h, crate::collision::Drift::default())).id();
-        app.world_mut().resource_mut::<Messages<DockMsg>>().write(DockMsg::Dock { docker: Some(me), dockee });
-        for _ in 0..6000 {
-            tick(&mut app, 0.1);
-            if app.world().get::<Docker>(me).is_some_and(Docker::is_docked) {
-                assert!(app.world().get::<Transform>(me).unwrap().translation.y.abs() < 0.01);
-                tick(&mut app, 6.0);
-                assert_eq!(app.world().get::<Health>(me).unwrap().core, full);
-                return;
-            }
-        }
-        panic!("Coventry could not reach Norville: {:?}", app.world().get::<Transform>(me).unwrap().translation);
-    }
-
-    #[test]
-    fn towing_detaches_only_its_formation_follower() {
-        let (mut w, ids) = crate::ship::movement_tests::fleet_world();
-        crate::ship::set_formation(&mut w, "Player", Some(crate::ship::Formation::Column), true);
-        w.entity_mut(ids[1]).insert(Tower { towee: ids[4] });
-        crate::ship::fleet_follow(&mut w);
-        assert!(!w.get::<crate::ship::FleetPilot>(ids[1]).unwrap().hold);
-        assert!(w.get::<crate::ship::FleetPilot>(ids[2]).unwrap().hold);
-    }
-
-    /// A computer ship docks for repair once two sections are down to half or less (a destroyed one does not count), at the
-    /// nearest friendly dock; the human's ships and healthy ships do not.
-    #[test]
-    fn computer_ship_with_two_half_sections_sails_for_the_nearest_dock() {
-        let (mut app, lib) = app();
-        app.add_systems(Update, ai_repair_dock.before(handle_messages));
-        let docks = load_docks();
-        let base = |app: &mut App, x: f32| app.world_mut().spawn((Transform::from_xyz(x, 0.0, 0.0), dockable_for(&docks, "Base_Safetytown").unwrap())).id();
-        base(&mut app, 900.0);
-        let near = base(&mut app, -300.0);
-        let hurt = |app: &mut App, side: Side, halves: &[usize], dead: &[usize]| {
-            let (s, mut h) = ship(&lib, "Ship_Pirate_Barque", side);
-            for &i in halves {
-                h.sections[i] *= 0.5;
-            }
-            for &i in dead {
-                h.sections[i] = 0.0;
-            }
-            app.world_mut().spawn((Transform::default(), s, h, crate::collision::Drift::default())).id()
-        };
-        let two = hurt(&mut app, Side::Enemy, &[0, 1], &[]);
-        let one = hurt(&mut app, Side::Enemy, &[0], &[1]);
-        let ours = hurt(&mut app, Side::Player, &[0, 1], &[]);
-        tick(&mut app, 0.1);
-        tick(&mut app, 0.1);
-        assert_eq!(app.world().get::<Docker>(two).map(|d| d.dockee), Some(near));
-        assert!(app.world().get::<Docker>(one).is_none() && app.world().get::<Docker>(ours).is_none());
-        assert!(!needs_repair(&lib, &ship(&lib, "Ship_Pirate_Barque", Side::Enemy).0, &ship(&lib, "Ship_Pirate_Barque", Side::Enemy).1));
-    }
-
-    fn app() -> (App, Library) {
-        let lib = Library::load(&assets_dir());
-        let mut app = App::new();
-        app.add_message::<DockMsg>()
-            .add_message::<Sfx>()
-            .insert_resource(Time::<()>::default())
-            .init_resource::<ButtonInput<KeyCode>>()
-            .insert_resource(Library::load(&assets_dir()))
-            .add_systems(Update, (handle_messages, routine).chain());
-        (app, lib)
-    }
-    fn tick(app: &mut App, secs: f32) {
-        app.world_mut().resource_mut::<Time>().advance_by(Duration::from_secs_f32(secs));
-        app.update();
-    }
-    fn ship(lib: &Library, name: &str, side: Side) -> (Ship, Health) {
-        let class = lib.index(name);
-        let c = &lib.classes[class];
-        (
-            Ship {
-                class,
-                side,
-                heading: 0.0,
-                speed: 3.0,
-                ang_vel: 0.0,
-                order: 2,
-                waypoints: vec![],
-                goal: None,
-                cap: 1.0,
-                throttle: None,
-                sail_energy: 1.0,
-                crew_speed: 1.0,
-                crew_turn: 1.0,
-            },
-            Health { sections: c.sections.iter().map(|s| s.hp).collect(), core: c.core_hp, destroyed: false },
-        )
-    }
-    fn point(x: f32) -> DockPoint {
-        DockPoint { pos: Vec3::new(x, 0.0, 0.0), fwd: Vec3::NEG_Z }
-    }
-
-    #[test]
-    fn player_docks_repairs_and_leaves_its_slot_free() {
-        let (mut app, lib) = app();
-        app.add_plugins((TaskPoolPlugin::default(), AssetPlugin::default()))
-            .init_resource::<Assets<Mesh>>()
-            .init_resource::<Assets<StandardMaterial>>()
-            .add_systems(Update, crate::course::update.after(routine));
-        let line = app.world_mut().resource_mut::<Assets<Mesh>>().add(Mesh::new(bevy::mesh::PrimitiveTopology::TriangleList, bevy::asset::RenderAssetUsages::default()));
-        let marks = app.world_mut().resource_mut::<Assets<Mesh>>().add(Mesh::new(bevy::mesh::PrimitiveTopology::TriangleList, bevy::asset::RenderAssetUsages::default()));
-        for mesh in [&line, &marks] {
-            app.world_mut().resource_mut::<Assets<Mesh>>().get_mut(mesh).unwrap().insert_attribute(Mesh::ATTRIBUTE_POSITION, vec![[0.0, 0.0, 0.0]; 3]);
-        }
-        app.world_mut().spawn((crate::course::Course, Mesh3d(line.clone())));
-        app.world_mut().spawn((crate::course::Marks::test(), Mesh3d(marks.clone())));
-        let (s, full) = ship(&lib, "Ship_Navy_Cutter", Side::Player);
-        let mut hurt = Health { sections: full.sections.iter().map(|h| h * 0.2).collect(), core: full.core * 0.2, destroyed: false };
-        hurt.sections[0] = 0.0;
-        let dockee = app.world_mut().spawn((Transform::from_xyz(100.0, 0.0, 0.0), Dockable::new(vec![point(-20.0)], true))).id();
-        let me = app.world_mut().spawn((Transform::from_xyz(60.0, 0.0, 15.0), s, hurt, PlayerShip)).id();
-        app.world_mut().resource_mut::<Messages<DockMsg>>().write(DockMsg::Dock { docker: None, dockee });
-        tick(&mut app, 0.1);
-        tick(&mut app, 0.1);
-        let d = app.world().get::<Docker>(me).unwrap();
-        assert_eq!((d.phase, d.point), (Phase::Approach, Some(0)), "order accepted, point reserved");
-        assert!(d.shows_status(), "approach shows the bottom-bar docking animation");
-        // A base dockee: the approach leg ends one docker length out along the point's axis, on the docker's side (+z here).
-        let wp = app.world().get::<Ship>(me).unwrap().waypoints.clone();
-        assert_eq!(wp.len(), 2);
-        for mesh in [&line, &marks] {
-            assert_eq!(app.world().resource::<Assets<Mesh>>().get(mesh).unwrap().count_vertices(), 0, "automatic docking paths are hidden");
-        }
-        assert!((wp[0] - Vec3::new(80.0, 0.0, lib.classes[lib.index("Ship_Navy_Cutter")].length)).length() < 0.01, "{wp:?}");
-        // the movement system is not part of this test: put the ship on the dock point
-        app.world_mut().get_mut::<Transform>(me).unwrap().translation = Vec3::new(80.0, 0.0, 2.0);
-        tick(&mut app, 0.1);
-        let docker = app.world().get::<Docker>(me).unwrap();
-        assert!(docker.is_docked());
-        assert!(docker.shows_status(), "animation remains during repair");
-        assert!(docker.ignores_collision(dockee));
-        assert!(!docker.ignores_collision(me));
-        tick(&mut app, 2.0);
-        let mid = app.world().get::<Health>(me).unwrap().core;
-        assert_eq!(mid, full.core * 0.2, "no heal before Repair Time: it lands in one step");
-        tick(&mut app, 2.5); // past the 4 s Repair Time (Repair_Small)
-        assert_eq!(app.world().get::<Health>(me).unwrap().sections, full.sections, "base dock: full refit revives the destroyed section");
-        assert!(app.world().get::<Docker>(me).unwrap().is_docked(), "still docked until the 7 s Repair Effect Time");
-        tick(&mut app, 3.0);
-        assert_eq!(app.world().get::<Docker>(me).unwrap().phase, Phase::Clear, "released, collision stays off while inside the hull");
-        app.world_mut().get_mut::<Transform>(me).unwrap().translation = Vec3::new(80.0, 0.0, 200.0);
-        tick(&mut app, 0.1);
-        assert!(app.world().get::<Docker>(me).is_none(), "human ship is free once clear");
-        let h = app.world().get::<Health>(me).unwrap();
-        assert_eq!(h.core, full.core);
-        assert_eq!(h.sections, full.sections);
-        assert!(app.world().get::<Dockable>(dockee).unwrap().nearest_free(&Transform::default(), Vec3::ZERO).is_some(), "slot freed");
-        let position = app.world().get::<Transform>(me).unwrap().translation;
-        {
-            let mut ship = app.world_mut().get_mut::<Ship>(me).unwrap();
-            ship.order = 2;
-            ship.waypoints = vec![position + Vec3::NEG_Z * 100.0];
-        }
-        tick(&mut app, 0.1);
-        for mesh in [&line, &marks] {
-            assert!(app.world().resource::<Assets<Mesh>>().get(mesh).unwrap().count_vertices() > 0, "ordinary routes return after docking");
-        }
-    }
-
-    #[test]
-    fn closer_ship_takes_over_a_point_and_ai_ship_returns_home() {
-        let (mut app, lib) = app();
-        let tender = ship(&lib, "Ship_Navy_Tender", Side::Player);
-        let dockee = app.world_mut().spawn((Transform::default(), Dockable::new(vec![point(10.0)], true), tender.0, tender.1)).id();
-        let (a, ha) = ship(&lib, "Ship_Navy_Cutter", Side::Player);
-        let (b, hb) = ship(&lib, "Ship_Navy_Cutter", Side::Player);
-        let far = app.world_mut().spawn((Transform::from_xyz(10.0, 0.0, 300.0), a, ha)).id();
-        let near = app.world_mut().spawn((Transform::from_xyz(10.0, 0.0, 120.0), b, hb)).id();
-        app.world_mut().resource_mut::<Messages<DockMsg>>().write(DockMsg::Dock { docker: Some(far), dockee });
-        tick(&mut app, 0.1);
-        tick(&mut app, 0.1);
-        assert_eq!(app.world().get::<Docker>(far).unwrap().point, Some(0));
-        app.world_mut().resource_mut::<Messages<DockMsg>>().write(DockMsg::Dock { docker: Some(near), dockee });
-        tick(&mut app, 0.1);
-        tick(&mut app, 0.1);
-        tick(&mut app, 0.1);
-        assert_eq!(app.world().get::<Docker>(near).unwrap().point, Some(0), "the nearer ship takes the point over");
-        assert_eq!(app.world().get::<Docker>(far).unwrap().phase, Phase::Wait, "the other one waits");
-        // Dock `near`, then let its time run out: an AI ship moves away, turns and sails back to where it was ordered from.
-        app.world_mut().get_mut::<Transform>(near).unwrap().translation = Vec3::new(10.0, 0.0, 1.0);
-        tick(&mut app, 0.1);
-        assert_eq!(app.world().get::<Docker>(near).unwrap().phase, Phase::Docked);
-        tick(&mut app, 10.5);
-        assert_eq!(app.world().get::<Docker>(near).unwrap().phase, Phase::Away);
-        tick(&mut app, 10.5);
-        assert_eq!(app.world().get::<Docker>(near).unwrap().phase, Phase::Turn);
-        assert_eq!(app.world().get::<Docker>(far).unwrap().phase, Phase::Approach, "the freed point goes to the waiting ship");
-        tick(&mut app, 10.5);
-        tick(&mut app, 0.1);
-        assert_eq!(app.world().get::<Docker>(near).unwrap().phase, Phase::Return);
-        assert_eq!(app.world().get::<Ship>(near).unwrap().waypoints.last().copied(), Some(Vec3::new(10.0, 0.0, 120.0)));
-    }
-
-    #[test]
-    fn disabled_dockee_refuses_and_exported_points_load() {
-        let (mut app, lib) = app();
-        let (s, h) = ship(&lib, "Ship_Navy_Cutter", Side::Player);
-        let dockee = app.world_mut().spawn((Transform::default(), Dockable::new(vec![point(0.0)], false))).id();
-        let me = app.world_mut().spawn((Transform::from_xyz(0.0, 0.0, 30.0), s, h, PlayerShip)).id();
-        app.world_mut().resource_mut::<Messages<DockMsg>>().write(DockMsg::Dock { docker: None, dockee });
-        tick(&mut app, 0.1);
-        assert!(app.world().get::<Docker>(me).is_none());
-        let docks = load_docks();
-        let tender = dockable_for(&docks, "Ship_Navy_Tender").expect("tender dock points exported");
-        assert_eq!(tender.points.len(), 2);
-        assert!(tender.points[0].pos.x < 0.0 && tender.points[1].pos.x > 0.0, "port and starboard");
-        assert!(tender.enabled && tender.repairs, "tenders can be docked with");
-        assert!(!dockable_for(&docks, "Ship_Navy_Frigate").unwrap().enabled, "other ships only after 'Set Group/Unit Dockable'");
-        assert!(dockable_for(&docks, "Base_Grant").unwrap().enabled, "bases always");
-        assert_eq!(repair_secs(lib.classes[lib.index("Ship_Navy_Tender")].repair_fx.as_deref()), (10.0, 15.0));
-    }
-
-    #[test]
-    fn tow_registers_inside_fifty_units_of_surface_distance() {
-        // Centres 120 apart with 30 + 30 of hull: 60 units of surface gap, out of range; 90 apart: 30, in range.
-        assert!(!tow_in_range(Vec3::ZERO, Vec3::new(120.0, 0.0, 0.0), 30.0, 30.0));
-        assert!(tow_in_range(Vec3::ZERO, Vec3::new(90.0, 0.0, 0.0), 30.0, 30.0));
-        assert!(tow_in_range(Vec3::new(0.0, 500.0, 0.0), Vec3::new(90.0, -500.0, 0.0), 30.0, 30.0), "height is ignored");
-    }
-
-    #[test]
-    fn approach_point_is_on_the_dockers_side_of_the_axis() {
-        let p = Vec3::new(10.0, 0.0, 0.0);
-        assert_eq!(approach_point(p, Vec3::NEG_Z, Vec3::new(50.0, 0.0, -80.0), 30.0), Vec3::new(10.0, 0.0, -30.0));
-        assert_eq!(approach_point(p, Vec3::NEG_Z, Vec3::new(50.0, 0.0, 80.0), 30.0), Vec3::new(10.0, 0.0, 30.0));
-    }
-}
+mod tests;

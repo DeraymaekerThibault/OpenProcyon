@@ -433,6 +433,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs imported assets"]
     fn checkpoint_preserves_outfitting_without_refunding_current_mission_spending() {
         let mut p = CampaignPoints { total: 4, mission: "mission03".into(), last_score: 10, ..default() };
         p.outfit.hired.push("Crew_Navy_BenH".into());
@@ -454,6 +455,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs imported assets"]
     fn shipped_saves_cover_every_mission_and_snapshot_excludes_this_missions_points() {
         let saves = list_saves();
         let shipped: Vec<_> = saves.iter().filter(|s| s.1).map(|s| s.0.mission.as_str()).collect();
@@ -479,9 +481,9 @@ mod tests {
         assert_eq!(user_dir_from(p("/x"), home.clone(), appdata.clone(), true, none), p("/x/openprocyon"));
         assert_eq!(user_dir_from(None, home.clone(), appdata.clone(), true, none), Some(new.clone()));
         assert_eq!(user_dir_from(None, home.clone(), appdata.clone(), true, |d| d == old), Some(old.clone()));
-        assert_eq!(user_dir_from(None, home.clone(), appdata.clone(), true, |_| true), Some(new.clone()), "both exist: APPDATA");
+        assert_eq!(user_dir_from(None, home.clone(), appdata.clone(), true, |_| true), Some(new), "both exist: APPDATA");
         assert_eq!(user_dir_from(None, home.clone(), None, true, none), Some(old.clone()));
-        assert_eq!(user_dir_from(None, home.clone(), appdata.clone(), false, none), Some(old), "Linux/macOS: HOME first as before");
+        assert_eq!(user_dir_from(None, home, appdata, false, none), Some(old), "Linux/macOS: HOME first as before");
         assert_eq!(user_dir_from(None, None, None, true, none), None);
     }
 

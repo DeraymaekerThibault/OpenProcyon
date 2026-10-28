@@ -2,7 +2,9 @@
 //! original screenshots: the fleet-assembly backdrop, Ships / Crew / Arms tabs, the slot bar, crew posts around the ship outline or
 //! the weapon mounts on it, stat bars, and the crew or weapon list. Falls back to a plain list when the model has no `fit`.
 #![allow(deprecated)]
-use super::menu::{Ctx, GOLD, disabled, dropdown, piece, pulldown_cell, scrollbar, selected_tab, sprite, stretched_window, victory_points, wrapped};
+use super::widgets::{
+    Ctx, GOLD, canvas, dropdown, fleet_bar, full_screen, info_panel, list_row, piece, pulldown_cell, scrollbar, selected_tab, sprite, stretched_window, victory_points, wrapped,
+};
 use crate::combat::Library;
 use crate::crew_arms::{Action, CrewSet, FitView, SORTS, ScreenModel};
 use crate::menu::{ScrollKind, strings, text_of};
@@ -59,32 +61,22 @@ fn build(
         plain(&mut commands, &model);
         return;
     };
-    let (ww, wh) = (window.width(), window.height());
-    let scale = (ww / 800.0).min(wh / 600.0);
+    let (canvas, scale) = canvas(&window);
     let ctx = Ctx { assets: &assets, hud: &hud, fonts: &fonts, scale };
     let strings = strings();
-    let s = |id: &str| text_of(&strings, id);
-    let canvas = Node {
-        position_type: PositionType::Absolute,
-        left: Val::Px((ww - 800.0 * scale) / 2.0),
-        top: Val::Px((wh - 600.0 * scale) / 2.0),
-        width: Val::Px(800.0 * scale),
-        height: Val::Px(600.0 * scale),
-        ..default()
-    };
-    let full = Node { position_type: PositionType::Absolute, width: Val::Percent(100.0), height: Val::Percent(100.0), ..default() };
-    commands.spawn((Root, crate::Scenario, Interaction::None, crate::panels::Solid, full, BackgroundColor(Color::BLACK), GlobalZIndex(180))).with_children(|root| {
+    let s = |id: &str| text_of(strings, id);
+    commands.spawn((Root, crate::Scenario, Interaction::None, crate::panels::Solid, full_screen(), BackgroundColor(Color::BLACK), GlobalZIndex(180))).with_children(|root| {
         root.spawn(canvas).with_children(|c| {
-            ctx.image(c, "menu/shipscreen.png", Some(Rect::new(0.0, 0.0, 800.0, 600.0)), 0.0, 0.0, 800.0, 600.0, Color::WHITE);
+            ctx.backdrop(c, "menu/shipscreen.png");
             // Tabs: Ships goes back to the fleet screen; the current tab is the green selected button.
-            button(&ctx, c, [46.0, 45.0, 172.0, 83.0], &s("IDGS_TPFRONTENDTEXT_SCREENS_SHIPS"), Action::Close);
+            ctx.text_button(c, [46.0, 45.0, 172.0, 83.0], &s("IDGS_TPFRONTENDTEXT_SCREENS_SHIPS"), "BlackChancery16", Action::Close);
             for (arms, rect, id) in
                 [(false, [177.0, 45.0, 303.0, 83.0], "IDGS_TPFRONTENDTEXT_SCREENS_CREW"), (true, [308.0, 45.0, 434.0, 83.0], "IDGS_TPFRONTENDTEXT_SCREENS_ARMS")]
             {
                 if arms == fit.arms {
                     selected_tab(&ctx, c, rect, &s(id), "BlackChancery16");
                 } else {
-                    button(&ctx, c, rect, &s(id), Action::Tab);
+                    ctx.text_button(c, rect, &s(id), "BlackChancery16", Action::Tab);
                 }
             }
             let (load, save) = if fit.arms {
@@ -92,65 +84,34 @@ fn build(
             } else {
                 ("IDGS_TPFRONTENDTEXT_SCREENS_LOAD_CREW", "IDGS_TPFRONTENDTEXT_SCREENS_SAVE_CREW")
             };
-            disabled(&ctx, c, [502.0, 45.0, 628.0, 83.0], &s(load), "BlackChancery16");
-            disabled(&ctx, c, [634.0, 45.0, 759.0, 83.0], &s(save), "BlackChancery16");
+            ctx.button(c, [502.0, 45.0, 628.0, 83.0], &s(load), "BlackChancery16", None::<Action>);
+            ctx.button(c, [634.0, 45.0, 759.0, 83.0], &s(save), "BlackChancery16", None::<Action>);
             victory_points(&ctx, c, [488.0, 79.0, 772.0, 109.0], &format!("{} : ", s("IDGS_TPFRONTENDTEXT01_CURRENT_VICTORY_POINTS")), fit.points);
             slot_bar(&ctx, c, fit, &lib);
             if fit.arms {
-                arms(&ctx, c, fit, &lib, &strings);
+                arms(&ctx, c, fit, &lib, strings);
             } else {
-                crew(&ctx, c, fit, &lib, &strings);
+                crew(&ctx, c, fit, &lib, strings);
             }
-            button(&ctx, c, [168.0, 427.0, 320.0, 465.0], &s("IDGS_TPFRONTENDTEXT_SCREENS_AUTO_ASSIGN"), Action::AutoAssign);
-            list(&ctx, c, fit, &strings);
+            ctx.text_button(c, [168.0, 427.0, 320.0, 465.0], &s("IDGS_TPFRONTENDTEXT_SCREENS_AUTO_ASSIGN"), "BlackChancery16", Action::AutoAssign);
+            list(&ctx, c, fit, strings);
             // Next arrow: back to the ships.
             let mut next = c.spawn((Interaction::None, Action::Close, ctx.node(590.0, 510.0, 80.0, 80.0)));
-            next.with_children(|c| piece(&ctx, c, "FrontEnd_Next_Button", [0.0, 0.0, 80.0, 80.0], (false, false)));
+            next.with_children(|c| _ = piece(&ctx, c, "FrontEnd_Next_Button", [0.0, 0.0, 80.0, 80.0]));
         });
         if let Some(icon) = &fit.carrying
-            && let Some((e, _)) = ctx.hud_piece(root, icon, 0.0, 0.0, FACE, FACE)
+            && let Some(e) = piece(&ctx, root, icon, [0.0, 0.0, FACE, FACE])
         {
             root.commands().entity(e).insert((Ghost, GlobalZIndex(181)));
         }
     });
 }
 
-/// A retail text button carrying an outfitting action.
-fn button(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], label: &str, action: Action) {
-    let (w, h) = (r - l, b - t);
-    let cap = 51.0 * h / 45.0;
-    let mut root = c.spawn((Interaction::None, action, ctx.node(l, t, w, h)));
-    root.with_children(|c| {
-        piece(ctx, c, "FrontEnd_Texts_Over_Button_Left", [0.0, 0.0, cap, h], (false, false));
-        piece(ctx, c, "FrontEnd_Texts_Over_Button_Center", [cap, 0.0, w - cap, h], (false, false));
-        piece(ctx, c, "FrontEnd_Texts_Over_Button_Right", [w - cap, 0.0, w, h], (false, false));
-        ctx.text(c, "BlackChancery16", label, 0.0, w, h / 2.0, true, Color::WHITE);
-    });
-}
-
 /// The fleet slot bar as on the Ships screen: five framed slots with the ships' bar icons; clicking one outfits that ship.
 /// PROVISIONAL: the ship being outfitted is marked by a gold tint over its slot.
 fn slot_bar(ctx: &Ctx, c: &mut ChildSpawnerCommands, fit: &FitView, lib: &Library) {
-    super::menu::slot_arrows(ctx, c, fit.slot_scroll, fit.limit, Action::Slots);
-    for k in 0..crate::menu::SLOT_BAR {
-        let (i, x) = (fit.slot_scroll + k, 75.0 + k as f32 * 65.0);
-        let mut b = c.spawn((Interaction::None, ctx.node(x, 488.0, 60.0, 62.0)));
-        if i < fit.fleet.len() {
-            b.insert(Action::SelectShip(i));
-        }
-        b.with_children(|c| {
-            piece(ctx, c, "FrontEnd_Flag_Icon_Background", [0.0, 0.0, 60.0, 62.0], (false, false));
-            match fit.fleet.get(i).and_then(|&ci| lib.classes[ci].icon.as_ref()) {
-                Some(icon) => {
-                    piece(ctx, c, icon, [8.0, 9.0, 52.0, 53.0], (false, false));
-                    if i == fit.ship {
-                        c.spawn((ctx.node(4.0, 4.0, 52.0, 54.0), BackgroundColor(GOLD.with_alpha(0.18))));
-                    }
-                }
-                None => ctx.text(c, "UniversBold14", &(i + 1).to_string(), 0.0, 60.0, 31.0, true, Color::WHITE),
-            }
-        });
-    }
+    let icons: Vec<_> = fit.fleet.iter().map(|&ci| lib.classes[ci].icon.as_deref()).collect();
+    fleet_bar(ctx, c, (fit.slot_scroll, fit.limit), &icons, Some(fit.ship), Action::Slots, Action::SelectShip);
 }
 
 /// A crew portrait: the named crew member's portrait, else the race's generic crew face; clicking selects the post's role.
@@ -160,7 +121,7 @@ fn face(ctx: &Ctx, c: &mut ChildSpawnerCommands, centre: Vec2, slot: &Option<(St
     b.with_children(|c| {
         let generic = format!("CrewFace_{race}_0");
         let name = slot.as_ref().map(|(_, p)| p.as_str()).filter(|p| sprite(ctx.hud, p, IDLE).is_some()).unwrap_or(&generic);
-        piece(ctx, c, name, [0.0, 0.0, FACE, FACE], (false, false));
+        piece(ctx, c, name, [0.0, 0.0, FACE, FACE]);
     });
 }
 
@@ -206,14 +167,10 @@ fn crew(ctx: &Ctx, c: &mut ChildSpawnerCommands, fit: &FitView, lib: &Library, s
         let v = fit.bars[k].clamp(0.0, 1.0);
         let (l, r) = (cx - 39.0, cx + 39.0);
         c.spawn((ctx.node(l + 4.0, 404.0, (r - l - 8.0) * v, 11.0), BackgroundColor(Color::srgb(1.0 - v, 0.3 + 0.6 * v, 0.1))));
-        piece(ctx, c, "FrontEnd_StatBar_Border", [l, 401.0, r, 418.0], (false, false));
+        piece(ctx, c, "FrontEnd_StatBar_Border", [l, 401.0, r, 418.0]);
     }
     // Drop sends the selected post's last named crew member back to the roster.
-    if fit.can_drop {
-        button(ctx, c, [60.0, 427.0, 158.0, 465.0], &s("IDGS_TPFRONTENDTEXT_SCREENS_DROP"), Action::Drop);
-    } else {
-        disabled(ctx, c, [60.0, 427.0, 158.0, 465.0], &s("IDGS_TPFRONTENDTEXT_SCREENS_DROP"), "BlackChancery16");
-    }
+    ctx.button(c, [60.0, 427.0, 158.0, 465.0], &s("IDGS_TPFRONTENDTEXT_SCREENS_DROP"), "BlackChancery16", fit.can_drop.then_some(Action::Drop));
 }
 
 /// The ship's weapon-bar outline at the panel origin.
@@ -222,7 +179,7 @@ fn outline(ctx: &Ctx, c: &mut ChildSpawnerCommands, fit: &FitView, lib: &Library
     let name = lib.classes[ci].icon("WeaponBar");
     if let Some((_, r)) = sprite(ctx.hud, &name, IDLE) {
         let at = PANEL + offset(ctx.hud, "WEAPONBAR_SHIPICON_OFFSET_FROM_TOPLEFT");
-        piece(ctx, c, &name, [at.x, at.y, at.x + r.width(), at.y + r.height()], (false, false));
+        piece(ctx, c, &name, [at.x, at.y, at.x + r.width(), at.y + r.height()]);
     }
 }
 
@@ -242,8 +199,8 @@ fn arms(ctx: &Ctx, c: &mut ChildSpawnerCommands, fit: &FitView, lib: &Library, s
         let at = slot_centre(ctx, *bank) - Vec2::splat(15.5);
         let mut b = c.spawn((Interaction::None, Action::SelectPost(i), ctx.node(at.x, at.y, 31.0, 31.0)));
         b.with_children(|c| {
-            piece(ctx, c, "WeaponBar_GunBankCanHitTarget", [0.0, 0.0, 31.0, 31.0], (false, false));
-            piece(ctx, c, &crate::combat::gun_icon(gun), [0.0, 0.0, 31.0, 31.0], (false, false));
+            piece(ctx, c, "WeaponBar_GunBankCanHitTarget", [0.0, 0.0, 31.0, 31.0]);
+            piece(ctx, c, &crate::combat::gun_icon(gun), [0.0, 0.0, 31.0, 31.0]);
             if i == fit.post {
                 let mut ring = ctx.node(-2.0, -2.0, 35.0, 35.0);
                 ring.border = UiRect::all(Val::Px(2.0 * ctx.scale));
@@ -257,21 +214,8 @@ fn arms(ctx: &Ctx, c: &mut ChildSpawnerCommands, fit: &FitView, lib: &Library, s
 /// rows 19.5 apart from y 346 and the retail scrollbar; clicking a row assigns that crew member or equips that weapon.
 fn list(ctx: &Ctx, c: &mut ChildSpawnerCommands, fit: &FitView, strings: &Value) {
     if let Some(d) = &fit.detail {
-        // As the Ships screen's info panel: the name, the framed icon, 'Point Cost' and the label / value lines.
-        ctx.text(c, BODY_FONT, &d.title, 510.0, 240.0, 130.0, false, Color::WHITE);
-        piece(ctx, c, "FrontEnd_Flag_Icon_Background", [510.0, 151.0, 568.0, 210.0], (false, false));
-        piece(ctx, c, &d.icon, [517.0, 158.0, 561.0, 203.0], (false, false));
-        if let Some(cost) = d.cost {
-            ctx.text(c, "Univers10", &text_of(strings, "IDGS_TPFRONTENDTEXT02_POINT_COST01"), 509.0, 60.0, 220.0, true, Color::WHITE);
-            ctx.text(c, "Univers10", &text_of(strings, "IDGS_TPFRONTENDTEXT02_POINT_COST02"), 509.0, 60.0, 236.0, true, Color::WHITE);
-            ctx.text(c, "Univers26", &cost.to_string(), 499.0, 80.0, 256.0, true, GOLD);
-        }
-        for (k, (label, value)) in d.lines.iter().enumerate() {
-            let cy = 161.5 + k as f32 * 16.0;
-            ctx.text(c, "Univers10", label, 580.0, 95.0, cy, false, Color::WHITE);
-            ctx.text(c, "Univers10", ":", 676.0, 8.0, cy, false, Color::WHITE);
-            ctx.text(c, "Univers10", value, 686.0, 80.0, cy, false, GOLD);
-        }
+        let cost = ["IDGS_TPFRONTENDTEXT02_POINT_COST01", "IDGS_TPFRONTENDTEXT02_POINT_COST02"].map(|id| text_of(strings, id));
+        info_panel(ctx, c, &d.title, Some(&d.icon), d.cost, &d.lines, cost.each_ref().map(String::as_str));
     }
     if fit.arms {
         ctx.text(c, "UniversBold14", &text_of(strings, "IDGS_TPFRONTENDTEXT01_AVAILABLE_WEAPONS"), 505.0, 215.0, 311.0, true, Color::WHITE);
@@ -281,12 +225,8 @@ fn list(ctx: &Ctx, c: &mut ChildSpawnerCommands, fit: &FitView, strings: &Value)
     }
     const ROWS: usize = 8;
     for (row, (label, action)) in fit.list.iter().enumerate().skip(fit.scroll).take(ROWS) {
-        let cy = 346.0 + (row - fit.scroll) as f32 * 19.5;
-        let mut b = c.spawn((Interaction::None, action.clone(), ctx.node(505.0, cy - 9.75, 215.0, 19.5)));
-        if fit.picked == Some(row) {
-            b.insert(BackgroundColor(Color::srgba(0.2, 0.7, 0.8, 0.45)));
-        }
-        b.with_children(|c| ctx.text(c, BODY_FONT, label, 20.0, 195.0, 9.75, false, Color::WHITE));
+        let y = 336.25 + (row - fit.scroll) as f32 * 19.5;
+        list_row(ctx, c, [505.0, y, 215.0, 19.5], label, fit.picked == Some(row), action.clone());
     }
     scrollbar(ctx, c, [742.0, 330.0, 767.0, 505.0], ScrollKind::Crew, fit.list.len(), ROWS, fit.scroll);
     if fit.sort_open {

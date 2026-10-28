@@ -3984,6 +3984,7 @@ version = "0.1.0"
 dependencies = [
  "ab_glyph",
  "bevy",
+ "serde",
  "serde_json",
  "wayland-sys",
 ]

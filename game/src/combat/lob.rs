@@ -94,9 +94,7 @@ pub fn detonate(
         if let Some(m) = mission.as_mut() {
             m.script.mortar_bursts.push(d.at);
         }
-        if let Some(pool) = b.impact_snd.get("Wood").filter(|p| !p.is_empty()) {
-            sfx.write(Sfx { name: pool[(rng.f() * pool.len() as f32) as usize % pool.len()].clone(), at: Some(d.at), vol: b.impact_vol, max: b.impact_max });
-        }
+        sfx.write_batch(b.impact_sound("Wood", d.at, &mut rng));
         let effect = |commands: &mut Commands, name: &Option<String>, at: Vec3| {
             if let Some(n) = name {
                 let t = Transform::from_translation(at);
@@ -167,7 +165,7 @@ pub fn blasts(
             b.struck.push(se);
             hits.write(Hit { shooter: b.shooter.unwrap_or(e), victim: se });
             let Some(k) = nearest_section(class, stf.to_matrix().inverse().transform_point3(c)) else { continue };
-            let key = MATERIALS.iter().find(|m| class.sections[k].material.contains(**m)).copied().unwrap_or("Wood");
+            let key = material_key(&class.sections[k].material);
             apply_ship_hit(class, &mut hp, k, bd.damage[key], ms.map_or(0.0, |m| m.invuln), false, &mut rng);
         }
         for (re, rtf, mut rock) in &mut rocks {
@@ -176,7 +174,7 @@ pub fn blasts(
             }
             b.struck.push(re);
             let [lo, hi, ..] = bd.damage["Stone"];
-            if rock.damage(lo + rng.f() * (hi - lo)) {
+            if rock.damage(rng.range(lo, hi)) {
                 destroyed.write(Destroyed { by: b.shooter.unwrap_or(e), victim: re });
             }
         }
@@ -226,7 +224,7 @@ pub fn strikes(lib: Res<Library>, mut rng: ResMut<Rng>, mut msgs: MessageReader<
         let class = &lib.classes[ship.class];
         let k = m.section;
         let Some(section) = class.sections.get(k).filter(|_| k < hp.sections.len()) else { continue };
-        let key = MATERIALS.iter().find(|x| section.material.contains(**x)).copied().unwrap_or("Wood");
+        let key = material_key(&section.material);
         let Some(damage) = m.damage.get(key) else { continue };
         apply_ship_hit(class, &mut hp, k, *damage, ms.map_or(0.0, |m| m.invuln), false, &mut rng);
     }
@@ -267,8 +265,9 @@ mod tests {
     use super::*;
 
     #[test]
+    #[ignore = "needs imported assets"]
     fn storm_wind_uses_weather_damage_and_respects_mission_protection() {
-        let lib = Library::load(&crate::assets_dir());
+        let lib = Library::load(crate::assets_dir());
         let class = lib.index("Ship_Navy_Sloop");
         let k = lib.classes[class].sections.iter().position(|s| s.material.contains("Cloth")).unwrap();
         let hp = Health::new(&lib.classes[class]);

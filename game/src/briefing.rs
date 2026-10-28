@@ -71,6 +71,16 @@ fn path_position(points: &[Value], mut distance: f32) -> Vec3 {
     game_to_bevy(points.last().unwrap())
 }
 
+pub(crate) fn halt_arrival(mission: Option<Res<Mission>>, mut ships: Query<&mut crate::Ship, With<crate::PlayerShip>>) {
+    if active(mission.as_deref()) {
+        for mut sh in &mut ships {
+            if sh.waypoints.is_empty() {
+                sh.order = 0;
+            }
+        }
+    }
+}
+
 pub fn update(
     mut commands: Commands,
     mut mission: Option<ResMut<Mission>>,
@@ -122,12 +132,6 @@ pub fn update(
     for mut vis in &mut objectives {
         *vis = Visibility::Hidden;
     }
-    // The arrival path ends in a halt; without this the command ship coasts on at full order into the fleet before the NIS ends.
-    for (_, _, mut sh, primary) in &mut ships {
-        if primary && sh.waypoints.is_empty() {
-            sh.order = 0;
-        }
-    }
     let cue = cue_at(opening.elapsed, cues);
     let index = cue.map(|c| c.0);
     if opening.speech != index {
@@ -148,11 +152,14 @@ pub fn update(
         }
         opening.speech = index;
     }
+    let line = cue.map_or("", |(i, _)| cues[i]["text"].as_str().unwrap());
     for mut text in &mut subtitles {
-        **text = cue.map_or("", |(i, _)| cues[i]["text"].as_str().unwrap()).into();
+        if text.0 != line {
+            text.0 = line.into();
+        }
     }
     for mut vis in &mut portraits {
-        *vis = if cue.is_some() { Visibility::Inherited } else { Visibility::Hidden };
+        vis.set_if_neq(if cue.is_some() { Visibility::Inherited } else { Visibility::Hidden });
     }
     let ship_pos = |id| ships.iter().find(|(_, s, ..)| s.id == id).expect("briefing ship").0.translation + Vec3::Y * 4.0;
     let (path, distance, focus) = match cue {
@@ -177,6 +184,7 @@ pub fn update(
 mod tests {
     use super::*;
     #[test]
+    #[ignore = "needs imported assets"]
     fn cue_boundaries_and_path_endpoints() {
         let cues = vec![serde_json::json!({"duration":2}), serde_json::json!({"duration":3})];
         assert_eq!(cue_at(9.9, &cues), None);

@@ -1,4 +1,5 @@
 //! ECS side of the rule interpreter: dispatch of `Script` effects, mission AI, mission UI, music and NIS camera.
+use crate::Nearest;
 use bevy::audio::Volume;
 use bevy::ecs::query::QueryData;
 use bevy::prelude::*;
@@ -44,7 +45,6 @@ struct Extra<'w, 's> {
     meteors: MessageWriter<'w, crate::nebula::MeteorRoute>,
     storm_shift: Res<'w, crate::nebula::StormShift>,
     campaign_points: ResMut<'w, crate::campaign::CampaignPoints>,
-    binds: Res<'w, crate::bindings::Bindings>,
     sensors: Res<'w, crate::environment::Sensors>,
     voices: Query<'w, 's, Entity, With<crate::briefing::Voice>>,
     fxlib: Option<Res<'w, crate::fx::FxLib>>,
@@ -64,22 +64,39 @@ struct MusicFade {
     kill: bool,
 }
 
+#[derive(Resource, Default)]
+struct RuleInput {
+    skip_speech: bool,
+    dock: bool,
+}
+
+fn capture_input(keys: Res<ButtonInput<KeyCode>>, binds: Res<crate::bindings::Bindings>, mission: Res<Mission>, mut input: ResMut<RuleInput>) {
+    input.skip_speech |= mission.opening.is_none() && binds.just_pressed(&keys, crate::bindings::Act::SkipSpeech);
+    input.dock |= keys.just_pressed(KeyCode::KeyD);
+}
+
 pub fn plugin(app: &mut App) {
     use crate::menu::Screen;
-    app.insert_resource(crate::campaign::CampaignPoints::load()).add_systems(
-        Update,
-        (
-            update.after(crate::briefing::update).before(crate::input),
-            crate::smoke::screenshot_hooks.after(update),
-            crate::smoke::autoplay_end.after(update),
-            mission_ai.after(update).before(crate::ship::fleet_follow),
-            leash_player.after(update).before(crate::sail),
-            presentation.after(nis_camera),
-            (ui, music, nis_camera.after(crate::camera)).after(update),
+    app.insert_resource(crate::campaign::CampaignPoints::load())
+        .init_resource::<RuleInput>()
+        .add_systems(
+            FixedUpdate,
+            (update.in_set(crate::BattleSet::Rules), (mission_ai, leash_player).chain().in_set(crate::BattleSet::Ai))
+                .run_if(in_state(Screen::Battle))
+                .run_if(resource_exists::<Mission>),
         )
-            .run_if(in_state(Screen::Battle))
-            .run_if(resource_exists::<Mission>),
-    );
+        .add_systems(
+            Update,
+            (
+                capture_input.before(crate::briefing::update),
+                crate::smoke::screenshot_hooks,
+                crate::smoke::autoplay_end,
+                presentation.after(nis_camera),
+                (ui, music, nis_camera.after(crate::camera)),
+            )
+                .run_if(in_state(Screen::Battle))
+                .run_if(resource_exists::<Mission>),
+        );
 }
 
 /// A mission ship as the rule dispatcher reads and changes it; named fields instead of tuple positions.
@@ -122,10 +139,36 @@ fn units(ships: &Query<RuleShip>, lib: &Library) -> Vec<Unit> {
         .collect()
 }
 
+fn follow_path(
+    ships: &mut Query<RuleShip>,
+    animals: &mut Query<(Entity, &mut crate::environment::SpaceAnimal, &mut Transform, &mut Visibility), Without<Ship>>,
+    units: &[Entity],
+    points: &[Vec3],
+    closest: bool,
+    looping: bool,
+) {
+    for e in units {
+        if let Ok((_, mut animal, tf, _)) = animals.get_mut(*e) {
+            animal.follow(points, tf.translation, closest, looping);
+            continue;
+        }
+        let Ok(RuleShipItem { ship: mut sh, transform: tf, mission: mut ms, .. }) = ships.get_mut(*e) else { continue };
+        let full = points.to_vec(); // Continuous fleet followers supply leader-relative slots, not cloned path offsets.
+        let from = if closest { (0..full.len()).nearest_to(tf.translation, |a| full[*a]).unwrap_or(0) } else { 0 };
+        sh.throttle = None;
+        sh.waypoints = full[from..].to_vec();
+        sh.order = 2;
+        sh.goal = None;
+        ms.attack.clear();
+        ms.stop_at_end = !looping;
+        ms.looping = looping.then_some(full);
+    }
+}
+
 fn update(
     mission: Option<ResMut<Mission>>,
     time: Res<Time>,
-    keys: Res<ButtonInput<KeyCode>>,
+    mut input: ResMut<RuleInput>,
     cfg: Res<Config>,
     lib: Res<Library>,
     mut orbit: ResMut<Orbit>,
@@ -142,6 +185,7 @@ fn update(
 ) {
     let Some(mut mission) = mission else { return };
     let mission = &mut *mission;
+    let input = std::mem::take(&mut *input);
     // Tutorials run the same interpreter but do not count toward the campaign.
     if mission.id.starts_with("mission") {
         extra.campaign_points.record(&mission.id, mission.script.score);
@@ -177,7 +221,7 @@ fn update(
         }
     }
     // Space (Skip Speech Event) ends the current line in every cutscene/gameplay speech, as in the opening NIS.
-    if !opening && extra.binds.just_pressed(&keys, crate::bindings::Act::SkipSpeech) && script.skip_speech() {
+    if !opening && input.skip_speech && script.skip_speech() {
         for e in &extra.voices {
             commands.entity(e).despawn();
         }
@@ -206,31 +250,12 @@ fn update(
                 }
             }
             Fx::Asteroids { units, path, closest, mode, speed, tumble } => {
-                let path = paths[path.as_str()].as_array().map(|a| a.iter().map(game_to_bevy).collect()).unwrap_or_default();
+                let path = path_points(paths, &path);
                 extra.asteroids.write(crate::combat::AsteroidSetup { units, path, closest, mode, speed, tumble });
             }
-            Fx::Path { units, path, closest, looping } => {
-                let pts: Vec<Vec3> = paths[path.as_str()].as_array().map(|a| a.iter().map(game_to_bevy).collect()).unwrap_or_default();
-                for e in &units {
-                    if let Ok((_, mut animal, tf, _)) = animals.get_mut(*e) {
-                        animal.follow(&pts, tf.translation, closest, looping);
-                        continue;
-                    }
-                    let Ok(RuleShipItem { ship: mut sh, transform: tf, mission: mut ms, .. }) = ships.get_mut(*e) else { continue };
-                    let full = pts.clone(); // Continuous fleet followers supply leader-relative slots, not cloned path offsets.
-                    let from =
-                        if closest { (0..full.len()).min_by(|a, bb| full[*a].distance(tf.translation).total_cmp(&full[*bb].distance(tf.translation))).unwrap_or(0) } else { 0 };
-                    sh.throttle = None;
-                    sh.waypoints = full[from..].to_vec();
-                    sh.order = 2;
-                    sh.goal = None;
-                    ms.attack.clear();
-                    ms.stop_at_end = !looping;
-                    ms.looping = looping.then_some(full);
-                }
-            }
+            Fx::Path { units, path, closest, looping } => follow_path(&mut ships, &mut animals, &units, &path_points(paths, &path), closest, looping),
             Fx::MeteorPath { group, path, closest, mode } => {
-                let path = paths[path.as_str()].as_array().map(|a| a.iter().map(game_to_bevy).collect()).unwrap_or_default();
+                let path = path_points(paths, &path);
                 extra.meteors.write(crate::nebula::MeteorRoute::Path { group, path, closest, mode });
             }
             Fx::MeteorSpeed(group, speed) => {
@@ -269,36 +294,20 @@ fn update(
                     sfx.write(crate::audio::Sfx::ui(&name));
                 }
             }
-            Fx::Throttle(u, v) => {
-                for e in u {
-                    if let Ok(RuleShipItem { ship: mut sh, .. }) = ships.get_mut(e) {
-                        sh.cap = v;
-                    }
+            Fx::Throttle(u, v) => each_ship(&mut ships, u, |s| s.ship.cap = v),
+            Fx::Speed(u, v) => each_ship(&mut ships, u, |s| {
+                if !s.primary {
+                    s.ship.cap = v;
+                } else if v <= 0.0 {
+                    s.ship.order = 0;
+                    s.ship.waypoints.clear();
                 }
-            }
-            Fx::Speed(u, v) => {
-                for e in u {
-                    if let Ok(RuleShipItem { ship: mut sh, primary, .. }) = ships.get_mut(e) {
-                        if primary {
-                            if v <= 0.0 {
-                                sh.order = 0;
-                                sh.waypoints.clear();
-                            }
-                        } else {
-                            sh.cap = v;
-                        }
-                    }
-                }
-            }
-            Fx::Destroy(u) => {
-                for e in u {
-                    if let Ok(RuleShipItem { health: mut h, visibility: mut vis, .. }) = ships.get_mut(e) {
-                        h.core = 0.0;
-                        h.destroyed = true;
-                        *vis = Visibility::Hidden;
-                    }
-                }
-            }
+            }),
+            Fx::Destroy(u) => each_ship(&mut ships, u, |s| {
+                s.health.core = 0.0;
+                s.health.destroyed = true;
+                *s.visibility = Visibility::Hidden;
+            }),
             Fx::Teleport(u, p) => {
                 for e in u {
                     if let Ok(RuleShipItem { ship: mut sh, transform: mut tf, .. }) = ships.get_mut(e) {
@@ -343,13 +352,8 @@ fn update(
                     extra.board.write(crate::boarding::BoardMsg::Boardable(e, on));
                 }
             }
-            Fx::Lifeboats(u, on) => {
-                for e in u {
-                    if let Ok(mut ship) = ships.get_mut(e) {
-                        ship.mission.create_lifeboats = on; // ships only: bases, rocks and animals have no flag
-                    }
-                }
-            }
+            // Ships only: bases, rocks and animals have no flag.
+            Fx::Lifeboats(u, on) => each_ship(&mut ships, u, |s| s.mission.create_lifeboats = on),
             Fx::IslandRepair(u, on) => {
                 for e in u {
                     extra.dock.write(DockMsg::Repairs(e, on));
@@ -361,14 +365,8 @@ fn update(
                 }
             }
             Fx::Stance(u, st) => {
-                for e in u {
-                    if let Ok(RuleShipItem { mission: mut ms, .. }) = ships.get_mut(e) {
-                        ms.stance = st;
-                    }
-                    if let Ok(mut d) = extra.dragons.get_mut(e) {
-                        d.stance = st;
-                    }
-                }
+                each_dragon(&mut extra.dragons, &u, |d| d.stance = st);
+                each_ship(&mut ships, u, |s| s.mission.stance = st);
             }
             Fx::Owner(u, o) => {
                 for e in u {
@@ -395,97 +393,47 @@ fn update(
                     }
                 }
             }
-            Fx::Invuln(u, v) => {
-                for e in u {
-                    if let Ok(RuleShipItem { mission: mut ms, .. }) = ships.get_mut(e) {
-                        ms.invuln = v;
-                    }
-                }
-            }
-            Fx::Flag(u, tex) => {
-                for e in u {
-                    if let Ok(RuleShipItem { mission: mut ms, .. }) = ships.get_mut(e) {
-                        ms.flag = tex.clone();
-                    }
-                }
-            }
+            Fx::Invuln(u, v) => each_ship(&mut ships, u, |s| s.mission.invuln = v),
+            Fx::Flag(u, tex) => each_ship(&mut ships, u, |s| s.mission.flag.clone_from(&tex)),
             Fx::Label(u, text) => {
                 for e in u {
                     commands.entity(e).insert(crate::ShipName(text.clone()));
                 }
             }
-            Fx::Banner(u, bn) => {
-                for e in u {
-                    if let Ok(RuleShipItem { mission: mut ms, .. }) = ships.get_mut(e) {
-                        ms.banner = bn.clone();
-                    }
-                }
-            }
-            Fx::Ram(u, g) => {
-                for e in u {
-                    if let Ok(RuleShipItem { mission: mut ms, .. }) = ships.get_mut(e) {
-                        ms.ram = true;
-                        if !ms.attack.contains(&g) {
-                            ms.attack.push(g.clone());
-                        }
-                    }
-                }
-            }
+            Fx::Banner(u, bn) => each_ship(&mut ships, u, |s| s.mission.banner.clone_from(&bn)),
+            Fx::Ram(u, g) => each_ship(&mut ships, u, |s| {
+                s.mission.ram = true;
+                add_once(&mut s.mission.attack, &g);
+            }),
             Fx::Attack(u, g) => {
-                for e in u.iter().copied() {
-                    if let Ok(mut d) = extra.dragons.get_mut(e)
-                        && !d.attack.contains(&g)
-                    {
-                        d.attack.push(g.clone());
-                    }
-                }
-                for e in u {
-                    if let Ok(RuleShipItem { mission: mut ms, .. }) = ships.get_mut(e)
-                        && !ms.attack.contains(&g)
-                    {
-                        ms.attack.push(g.clone());
-                    }
-                }
+                each_dragon(&mut extra.dragons, &u, |d| add_once(&mut d.attack, &g));
+                each_ship(&mut ships, u, |s| add_once(&mut s.mission.attack, &g));
             }
             // Only script-given orders are cleared: the human's own course and throttle stay.
             Fx::Clear(u) => {
-                for e in u.iter().copied() {
-                    if let Ok(mut d) = extra.dragons.get_mut(e) {
-                        d.attack.clear();
-                        d.hold = false;
+                each_dragon(&mut extra.dragons, &u, |d| {
+                    d.attack.clear();
+                    d.hold = false;
+                });
+                each_ship(&mut ships, u, |s| {
+                    s.mission.attack.clear();
+                    s.mission.ram = false;
+                    s.mission.looping = None;
+                    if !s.primary {
+                        s.ship.waypoints.clear();
+                        s.ship.order = 0;
+                        s.ship.goal = None;
                     }
-                }
-                for e in u {
-                    if let Ok(RuleShipItem { ship: mut sh, mission: mut ms, primary, .. }) = ships.get_mut(e) {
-                        ms.attack.clear();
-                        ms.ram = false;
-                        ms.looping = None;
-                        if !primary {
-                            sh.waypoints.clear();
-                            sh.order = 0;
-                            sh.goal = None;
-                        }
-                    }
-                }
+                });
             }
-            Fx::Damage(u, p) => {
-                for e in u {
-                    if let Ok(RuleShipItem { health: mut h, .. }) = ships.get_mut(e) {
-                        h.scale(1.0 - p);
-                    }
-                }
-            }
+            Fx::Damage(u, p) => each_ship(&mut ships, u, |s| s.health.scale(1.0 - p)),
             Fx::Hold(u, on) => {
-                for e in u.iter().copied() {
-                    if let Ok(mut d) = extra.dragons.get_mut(e) {
-                        d.hold = on;
-                    }
-                }
-                for e in u.into_iter().filter(|_| on) {
-                    if let Ok(RuleShipItem { ship: mut sh, .. }) = ships.get_mut(e) {
-                        sh.waypoints.clear();
-                        sh.order = 0;
-                    }
+                each_dragon(&mut extra.dragons, &u, |d| d.hold = on);
+                if on {
+                    each_ship(&mut ships, u, |s| {
+                        s.ship.waypoints.clear();
+                        s.ship.order = 0;
+                    });
                 }
             }
             Fx::ResetHits(u) => {
@@ -495,59 +443,17 @@ fn update(
                 }
             }
             Fx::Border(u, zone) => {
-                for e in u {
-                    if let Ok(RuleShipItem { mission: mut ms, .. }) = ships.get_mut(e) {
-                        ms.border = zone.clone();
-                    }
-                    if let Ok(mut d) = extra.dragons.get_mut(e) {
-                        d.border = zone.clone();
-                    }
-                }
+                each_dragon(&mut extra.dragons, &u, |d| d.border.clone_from(&zone));
+                each_ship(&mut ships, u, |s| s.mission.border.clone_from(&zone));
             }
             Fx::ReturnPoint(u, p) => {
-                for e in u {
-                    if let Ok(RuleShipItem { mission: mut ms, .. }) = ships.get_mut(e) {
-                        ms.return_point = Some(p);
-                    }
-                    if let Ok(mut d) = extra.dragons.get_mut(e) {
-                        d.home = Some(p);
-                    }
-                }
+                each_dragon(&mut extra.dragons, &u, |d| d.home = Some(p));
+                each_ship(&mut ships, u, |s| s.mission.return_point = Some(p));
             }
-            Fx::Towable(u, on) => {
-                for e in u {
-                    if on {
-                        commands.entity(e).remove::<crate::docking::NoTow>();
-                    } else {
-                        commands.entity(e).insert(crate::docking::NoTow);
-                    }
-                }
-            }
-            Fx::Movable(u, on) => {
-                for e in u {
-                    if on {
-                        commands.entity(e).remove::<crate::collision::Pinned>();
-                    } else {
-                        commands.entity(e).insert(crate::collision::Pinned);
-                    }
-                }
-            }
-            Fx::Collidable(u, on) => {
-                for e in u {
-                    if on {
-                        commands.entity(e).remove::<crate::collision::Ghost>();
-                    } else {
-                        commands.entity(e).insert(crate::collision::Ghost);
-                    }
-                }
-            }
-            Fx::Captain(u, human) => {
-                for e in u {
-                    if let Ok(RuleShipItem { mission: mut ms, .. }) = ships.get_mut(e) {
-                        ms.human = human;
-                    }
-                }
-            }
+            Fx::Towable(u, on) => marker(&mut commands, u, !on, crate::docking::NoTow),
+            Fx::Movable(u, on) => marker(&mut commands, u, !on, crate::collision::Pinned),
+            Fx::Collidable(u, on) => marker(&mut commands, u, !on, crate::collision::Ghost),
+            Fx::Captain(u, human) => each_ship(&mut ships, u, |s| s.mission.human = human),
             Fx::Cloak(u, on, ai_override) => {
                 for e in u {
                     if ships.contains(e) {
@@ -563,13 +469,7 @@ fn update(
                     }
                 }
             }
-            Fx::WarningShots(u, on) => {
-                for e in u {
-                    if let Ok(RuleShipItem { mission: mut ms, .. }) = ships.get_mut(e) {
-                        ms.warning_shots = on;
-                    }
-                }
-            }
+            Fx::WarningShots(u, on) => each_ship(&mut ships, u, |s| s.mission.warning_shots = on),
             Fx::Current(path) => {
                 commands.spawn((Scenario, crate::environment::Current::new(path)));
             }
@@ -594,20 +494,8 @@ fn update(
                     }
                 }
             }
-            Fx::DragonStance(u, st) => {
-                for e in u {
-                    if let Ok(mut d) = extra.dragons.get_mut(e) {
-                        d.stance = st;
-                    }
-                }
-            }
-            Fx::DragonThreshold(u, t) => {
-                for e in u {
-                    if let Ok(mut d) = extra.dragons.get_mut(e) {
-                        d.threshold = t;
-                    }
-                }
-            }
+            Fx::DragonStance(u, st) => each_dragon(&mut extra.dragons, &u, |d| d.stance = st),
+            Fx::DragonThreshold(u, t) => each_dragon(&mut extra.dragons, &u, |d| d.threshold = t),
             Fx::Orbit { unit, dist, angle } => {
                 orbit.focus = unit;
                 orbit.dist = dist;
@@ -625,13 +513,53 @@ fn update(
         if wants && near {
             mission.script.hint = "Left-click RLS Bounty (or press D) to dock".into();
         }
-        if near && wants && (keys.just_pressed(KeyCode::KeyD) || matches!(cfg.script.as_deref(), Some("mission" | "dock"))) {
+        if near && wants && (input.dock || matches!(cfg.script.as_deref(), Some("mission" | "dock"))) {
             extra.dock.write(DockMsg::Dock { docker: None, dockee: t.e });
         }
     }
     if cfg.script.as_deref() == Some("mission") {
         mission.script.crew_screen = false; // keep the default crew and arms (missions 3+ open the screen after their first NIS)
         autopilot(&mission.script, &world, &mission.data, &rocks, &mut ships, &mut target);
+    }
+}
+
+/// The points of a mission path (`paths.<name>`), empty when the mission has no such path.
+fn path_points(paths: &Value, name: &str) -> Vec<Vec3> {
+    paths[name].as_array().map(|a| a.iter().map(game_to_bevy).collect()).unwrap_or_default()
+}
+
+/// Runs `f` on each of `units` that is a mission ship (bases, rocks and animals are skipped).
+fn each_ship(ships: &mut Query<RuleShip>, units: Vec<Entity>, mut f: impl FnMut(&mut RuleShipItem)) {
+    for e in units {
+        if let Ok(mut s) = ships.get_mut(e) {
+            f(&mut s);
+        }
+    }
+}
+
+/// Runs `f` on each of `units` that is a dragon.
+fn each_dragon(dragons: &mut Query<&mut crate::dragons::Dragon>, units: &[Entity], mut f: impl FnMut(&mut crate::dragons::Dragon)) {
+    for &e in units {
+        if let Ok(mut d) = dragons.get_mut(e) {
+            f(&mut d);
+        }
+    }
+}
+
+/// Adds or removes a marker component on each of `units`.
+fn marker<C: Component + Clone>(commands: &mut Commands, units: Vec<Entity>, on: bool, c: C) {
+    for e in units {
+        if on {
+            commands.entity(e).insert(c.clone());
+        } else {
+            commands.entity(e).remove::<C>();
+        }
+    }
+}
+
+fn add_once(list: &mut Vec<String>, g: &str) {
+    if !list.iter().any(|x| x == g) {
+        list.push(g.to_string());
     }
 }
 
@@ -649,12 +577,10 @@ fn autopilot(
     }
     let Some(p) = w.iter().find(|u| u.primary && u.alive) else { return };
     // Ships only: whales count as hostile until the reprimand rule (PROVISIONAL default), and chasing them stalled the run after Objective 3.
-    let foe =
-        w.iter().filter(|u| u.alive && u.visible && sc.hostile(&u.owner, &p.owner) && ships.contains(u.e)).min_by(|a, bb| a.pos.distance(p.pos).total_cmp(&bb.pos.distance(p.pos)));
+    let foe = w.iter().filter(|u| u.alive && u.visible && sc.hostile(&u.owner, &p.owner) && ships.contains(u.e)).nearest_to(p.pos, |a| a.pos);
     let dock = sc.task_active("Dock With Tender");
     let shoot_rocks = sc.task_active("Destroy Asteroids");
-    let rock =
-        rocks.iter().filter(|(_, _, a)| a.group == "Asteroid Belt" && a.hp > 0.0).min_by(|a, bb| a.1.translation.distance(p.pos).total_cmp(&bb.1.translation.distance(p.pos)));
+    let rock = rocks.iter().filter(|(_, _, a)| a.group == "Asteroid Belt" && a.hp > 0.0).nearest_to(p.pos, |a| a.1.translation);
     let goal = if let (true, Some((e, tf, _))) = (shoot_rocks, rock.filter(|r| r.1.translation.distance(p.pos) < 400.0)) {
         target.0 = Some(e);
         Some(tf.translation)
@@ -726,7 +652,7 @@ fn mission_ai(
     let n_ships = snap.len();
     snap.extend(rocks.iter().map(|(e, tf, a)| unit(e, a.id, &a.kind, &a.group, tf.translation, a.hp > 0.0)));
     sc.tag(&mut snap);
-    let player_owner = ships.iter().find(|s| s.5).map(|s| s.4.owner.clone()).unwrap_or_else(|| sc.player().into());
+    let player_owner = ships.iter().find(|s| s.5).map_or_else(|| sc.player().into(), |s| s.4.owner.clone());
     for (e, mut ship, tf, h, mut ms, primary, pilot) in &mut ships {
         let is_boat = boats.contains(e);
         let side = if !is_boat && sc.hostile(&ms.owner, &player_owner) { Side::Enemy } else { Side::Player };
@@ -776,7 +702,7 @@ fn mission_ai(
         let near = |pool: &[Unit], pred: &dyn Fn(&Unit) -> bool, acquire: bool| {
             pool.iter()
                 .filter(|s| s.e != e && s.alive && pred(s) && !partner(s.e) && (!acquire || sensors.in_sight(e, s.e, Some(&mission))))
-                .min_by(|a, b| a.pos.distance(tf.translation).total_cmp(&b.pos.distance(tf.translation)))
+                .nearest_to(tf.translation, |a| a.pos)
                 .map(|s| (s.e, s.pos))
         };
         // 'GroupA to attack GroupB': the nearest ship of the target, else the nearest of its rocks ('attack Asteroid Belt').
@@ -895,9 +821,11 @@ fn ui(
             Ui::SpeechFrame => Some("TalkingHead_FloatingPortal_Open".to_string()),
             _ => continue,
         };
-        if let Some((sheet, rect)) = name.and_then(|n| crate::sprites::sprite_of(&hud, &n)) {
-            image.image = assets.load(format!("hud/tex/{sheet}.png"));
-            image.rect = Some(crate::sprites::inset(&sheet, rect));
+        // Only on a change: writing the node every frame would re-render it every frame.
+        if let Some((img, _)) = name.and_then(|n| crate::sprites::image(&assets, &hud, &n))
+            && (image.image != img.image || image.rect != img.rect)
+        {
+            (image.image, image.rect) = (img.image, img.rect);
         }
     }
     for (kind, mut vis, text) in &mut q {
@@ -925,15 +853,18 @@ fn ui(
             ),
             Ui::BarTop | Ui::BarBottom => (sc.nis && !opening, String::new()),
         };
-        *vis = if show { Visibility::Inherited } else { Visibility::Hidden };
+        vis.set_if_neq(if show { Visibility::Inherited } else { Visibility::Hidden });
         if let Some(mut t) = text
             && **t != content
         {
             **t = content;
         }
     }
+    let tasks = if crate::panels::cinematic(Some(&mission)) { String::new() } else { sc.tasks_text() };
     for mut t in &mut objective {
-        **t = if crate::panels::cinematic(Some(&mission)) { String::new() } else { sc.tasks_text() };
+        if **t != tasks {
+            **t = tasks.clone();
+        }
     }
 }
 
@@ -1043,7 +974,7 @@ fn nis_camera(
         let pos = match &c.path {
             Some((name, _, vel)) => {
                 *travelled += vel * dt;
-                let pts: Vec<Vec3> = sc.paths[name.as_str()].as_array().map(|a| a.iter().map(game_to_bevy).collect()).unwrap_or_default();
+                let pts = path_points(&sc.paths, name);
                 let mut left = *travelled;
                 let mut at = pts.first().copied().unwrap_or(cam.translation);
                 for pair in pts.windows(2) {
@@ -1070,14 +1001,41 @@ fn nis_camera(
 #[cfg(test)]
 mod ai_tests {
     use super::*;
+
     #[test]
+    fn rule_keys_latch_until_a_tick_and_opening_skip_is_not_queued_twice() {
+        let data = serde_json::json!({"rules": []});
+        let mission = Mission { id: "synthetic".into(), script: Script::new(&data, serde_json::json!({})), data, opening: None };
+        let mut app = App::new();
+        let binds = crate::bindings::Bindings::default();
+        let skip = binds.key(crate::bindings::Act::SkipSpeech);
+        app.insert_resource(mission).insert_resource(binds).init_resource::<ButtonInput<KeyCode>>().init_resource::<RuleInput>().add_systems(Update, capture_input);
+        app.world_mut().resource_mut::<ButtonInput<KeyCode>>().press(skip);
+        app.world_mut().resource_mut::<ButtonInput<KeyCode>>().press(KeyCode::KeyD);
+        app.update();
+        app.world_mut().resource_mut::<ButtonInput<KeyCode>>().clear();
+        app.update();
+        let pending = std::mem::take(&mut *app.world_mut().resource_mut::<RuleInput>());
+        assert!(pending.skip_speech && pending.dock, "commands survive frames without a simulation tick");
+        app.update();
+        let pending = app.world().resource::<RuleInput>();
+        assert!(!pending.skip_speech && !pending.dock, "consumed commands are not repeated");
+        app.world_mut().resource_mut::<Mission>().opening = Some(default());
+        app.world_mut().resource_mut::<ButtonInput<KeyCode>>().reset(skip);
+        app.world_mut().resource_mut::<ButtonInput<KeyCode>>().press(skip);
+        app.update();
+        assert!(!app.world().resource::<RuleInput>().skip_speech, "the opening briefing owns this skip");
+    }
+
+    #[test]
+    #[ignore = "needs imported assets"]
     fn mission_two_attack_volume_changes_base_owner_and_gunfire_advances_the_story() {
         let mut mission = crate::campaign::load_id("mission02");
         let mut data = mission.data.clone();
         data["rules"].as_array_mut().unwrap().retain(|r| matches!(r["name"].as_str(), Some("SmugglerCampFound2" | "SmugglersCampFound2c")));
         mission.script = Script::new(&data, serde_json::json!({}));
         let player_owner = mission.script.player().to_string();
-        let lib = Library::load(&crate::assets_dir());
+        let lib = Library::load(crate::assets_dir());
         let class = lib.index("Ship_Navy_Torpedo");
         let mut app = App::new();
         app.add_plugins((TaskPoolPlugin::default(), AssetPlugin::default()))
@@ -1085,6 +1043,7 @@ mod ai_tests {
             .init_asset::<bevy::audio::AudioSource>()
             .init_resource::<Time>()
             .init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<RuleInput>()
             .init_resource::<Target>()
             .init_resource::<crate::bindings::Bindings>()
             .init_resource::<crate::campaign::CampaignPoints>()
@@ -1112,6 +1071,7 @@ mod ai_tests {
                 speed: 1.0,
                 ended: None,
                 script: None,
+                autolaunch: false,
                 shot_frame: 0,
                 late_frame: 0,
             })
@@ -1157,8 +1117,9 @@ mod ai_tests {
     }
 
     #[test]
+    #[ignore = "needs imported assets"]
     fn mission_ships_halt_when_their_script_route_runs_out() {
-        let lib = Library::load(&crate::assets_dir());
+        let lib = Library::load(crate::assets_dir());
         let mut app = App::new();
         app.insert_resource(crate::campaign::load())
             .init_resource::<crate::environment::Sensors>()
@@ -1200,9 +1161,9 @@ mod ai_tests {
             ..Default::default()
         };
         let done = app.world_mut().spawn((ship.clone(), health(), Transform::default(), ms(true, None))).id();
-        let en_route = app.world_mut().spawn((Ship { waypoints: vec![Vec3::new(0.0, 0.0, -500.0)], ..ship.clone() }, health(), Transform::default(), ms(true, None))).id();
+        let en_route = app.world_mut().spawn((Ship { waypoints: vec![Vec3::new(0.0, 0.0, -500.0)], ..ship }, health(), Transform::default(), ms(true, None))).id();
         let looping = app.world_mut().spawn((ship.clone(), health(), Transform::default(), ms(true, Some(vec![Vec3::new(0.0, 0.0, -500.0)])))).id();
-        let near = app.world_mut().spawn((Ship { waypoints: vec![Vec3::new(0.0, 0.0, -1.0)], ..ship.clone() }, health(), Transform::default(), ms(true, None))).id();
+        let near = app.world_mut().spawn((Ship { waypoints: vec![Vec3::new(0.0, 0.0, -1.0)], ..ship }, health(), Transform::default(), ms(true, None))).id();
         let foe = app
             .world_mut()
             .spawn((
@@ -1235,5 +1196,23 @@ mod ai_tests {
         app.world_mut().get_mut::<MissionShip>(persistent).unwrap().stance = Stance::Aggressive;
         app.update();
         assert!(app.world().get::<Ship>(persistent).unwrap().waypoints.is_empty(), "aggressive stance switches to combat steering");
+
+        use bevy::ecs::system::RunSystemOnce;
+        app.world_mut().entity_mut(persistent).insert(Visibility::Inherited);
+        let path = vec![Vec3::ZERO, Vec3::X * 290.0, Vec3::X * 500.0];
+        let expected = path.clone();
+        app.world_mut()
+            .run_system_once(
+                move |mut ships: Query<RuleShip>, mut animals: Query<(Entity, &mut crate::environment::SpaceAnimal, &mut Transform, &mut Visibility), Without<Ship>>| {
+                    follow_path(&mut ships, &mut animals, &[persistent], &path, true, true);
+                },
+            )
+            .unwrap();
+        let ship = app.world().get::<Ship>(persistent).unwrap();
+        let mission = app.world().get::<MissionShip>(persistent).unwrap();
+        assert_eq!(ship.waypoints, expected[1..]);
+        assert_eq!(mission.looping.as_ref(), Some(&expected));
+        assert!(!mission.stop_at_end);
+        assert!(mission.attack.is_empty());
     }
 }

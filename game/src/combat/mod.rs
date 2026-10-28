@@ -91,6 +91,12 @@ pub struct Transient;
 pub struct Target(pub Option<Entity>, pub Option<Vec3>, pub GroundFire);
 #[derive(Resource)]
 pub struct Rng(u64);
+
+impl Default for Rng {
+    fn default() -> Self {
+        Self(0x9E3779B97F4A7C15)
+    }
+}
 #[derive(Resource)]
 struct Look {
     mesh: Handle<Mesh>,
@@ -112,10 +118,35 @@ impl Rng {
         self.0 ^= self.0 << 17;
         (self.0 >> 40) as f32 / (1u64 << 24) as f32
     }
+    /// Uniform in `lo..hi` (a damage or speed range).
+    pub fn range(&mut self, lo: f32, hi: f32) -> f32 {
+        lo + self.f() * (hi - lo)
+    }
+    /// 1..=n: one of the numbered variants of a sound (`Explosion_Med01` .. `08`).
+    pub fn variant(&mut self, n: u32) -> u32 {
+        1 + (self.f() * n as f32) as u32 % n
+    }
+    /// A random entry of a non-empty pool.
+    pub fn pick<'a, T>(&mut self, pool: &'a [T]) -> &'a T {
+        &pool[(self.f() * pool.len() as f32) as usize % pool.len()]
+    }
+}
+
+impl crate::data::BulletDef {
+    /// A random impact sound of this bullet on `material` at `at`, if it has any.
+    pub fn impact_sound(&self, material: &str, at: Vec3, rng: &mut Rng) -> Option<crate::audio::Sfx> {
+        let pool = self.impact_snd.get(material).filter(|p| !p.is_empty())?;
+        Some(crate::audio::Sfx { name: rng.pick(pool).clone(), at: Some(at), vol: self.impact_vol, max: self.impact_max })
+    }
+}
+
+/// The damage-table material (`MATERIALS`) a section's material string names; wood when none matches.
+pub fn material_key(material: &str) -> &'static str {
+    MATERIALS.iter().find(|m| material.contains(**m)).copied().unwrap_or("Wood")
 }
 
 pub fn plugin(app: &mut App) {
-    app.insert_resource(Library::load(&assets_dir()))
+    app.insert_resource(Library::load(assets_dir()))
         .init_resource::<Target>()
         .add_message::<Hit>()
         .add_message::<Fired>()
@@ -125,21 +156,20 @@ pub fn plugin(app: &mut App) {
         .add_message::<Strike>()
         .add_message::<AsteroidSetup>()
         .init_resource::<crate::data::AsteroidDefs>()
-        .insert_resource(Rng(0x9E3779B97F4A7C15))
+        .init_resource::<Rng>()
         .add_systems(Startup, setup)
         .add_systems(
-            Update,
+            FixedUpdate,
             (
                 (fire, base_fire, lob::shoot, shells, lob::detonate, lob::blasts, lob::grav_wells, lob::ram_damage, lob::strikes).chain(),
-                (asteroid_deaths, fires, crew_repair, deaths, draw, engine_rate, damage_fx, debris, swap_meshes).chain(),
+                (asteroid_deaths, fires, crew_repair, deaths).chain(),
             )
                 .chain()
-                .after(crate::sail),
+                .in_set(crate::BattleSet::Combat),
         )
-        .add_systems(
-            Update,
-            (asteroid_motion, crate::collision::update_asteroids, asteroid_demo).chain().after(crate::input).before(crate::sail).run_if(in_state(crate::menu::Screen::Battle)),
-        );
+        .add_systems(FixedUpdate, (asteroid_motion, crate::collision::update_asteroids).chain().in_set(crate::BattleSet::Forces).run_if(in_state(crate::menu::Screen::Battle)))
+        .add_systems(Update, (breakup, draw, engine_rate, damage_fx, debris, swap_meshes).chain())
+        .add_systems(Update, asteroid_demo.run_if(in_state(crate::menu::Screen::Battle)));
 }
 
 impl Health {
@@ -224,48 +254,46 @@ fn chunk_offset(d: &crate::data::Destruct, burst: f32, t: f32) -> Option<Vec3> {
 }
 
 /// Gameplay death is immediate; the presentation breaks the hull up for a few seconds, then removes it.
+fn deaths(mut commands: Commands, lib: Res<Library>, mut lost: MessageWriter<crate::lifeboats::ShipLost>, mut ships: Query<(Entity, &Transform, &mut Ship, &mut Health)>) {
+    for (e, tf, mut ship, mut hp) in &mut ships {
+        if hp.destroyed || hp.core > 0.0 {
+            continue;
+        }
+        hp.destroyed = true;
+        ship.speed = 0.0;
+        ship.ang_vel = 0.0;
+        lost.write(crate::lifeboats::ShipLost(e));
+        commands.entity(e).insert(Sinking::new(*tf));
+        info!("{} destroyed", lib.classes[ship.class].name);
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
-fn deaths(
+fn breakup(
     mut commands: Commands,
     lib: Res<Library>,
     fxl: Res<FxLib>,
-    mut rng: ResMut<Rng>,
+    mut rng: Local<Rng>,
     mut sfx: MessageWriter<Sfx>,
-    mut lost: MessageWriter<crate::lifeboats::ShipLost>,
     time: Res<Time>,
     children: Query<&Children>,
-    mut ships: Query<(Entity, &mut Transform, &mut Ship, &mut Health, &mut Visibility, Option<&mut Sinking>)>,
+    mut ships: Query<(Entity, &mut Transform, &Ship, &mut Visibility, &mut Sinking)>,
     mut nodes: Query<(&Name, &mut Transform, &mut Visibility), Without<Ship>>,
 ) {
-    for (e, mut tf, mut ship, mut hp, mut vis, sinking) in &mut ships {
+    for (e, mut tf, ship, mut vis, mut sinking) in &mut ships {
         let class = &lib.classes[ship.class];
-        if !hp.destroyed {
-            if hp.core > 0.0 {
-                continue;
-            }
-            hp.destroyed = true;
-            ship.speed = 0.0;
-            ship.ang_vel = 0.0;
-            lost.write(crate::lifeboats::ShipLost(e));
-            commands.entity(e).insert(Sinking::new(*tf));
-            info!("{} destroyed", class.name);
-            // Retail: the class explosion at the moment of death, before the pieces part. Pool Explosion_Heavy01-08 (8000 units),
-            // PROVISIONAL as the death sound.
-            let at = tf.translation;
-            sfx.write(Sfx { name: format!("Explosion_Heavy0{}", 1 + (rng.f() * 8.0) as u32 % 8), at: Some(at), vol: 1.0, max: 8000.0 });
-            if let Some(n) = &class.explosion_fx {
-                let t = Transform::from_translation(at);
-                fx::spawn(&mut commands, &fxl, n, None, t, t, true);
-            }
-            continue;
-        }
-        // Scripted Destroy remains an immediate, silent removal without lifeboats.
-        let Some(mut sinking) = sinking else { continue };
         let before = sinking.elapsed;
         sinking.elapsed += time.delta_secs();
         let t = sinking.elapsed;
         *tf = sinking.start;
         if sinking.nodes.is_none() {
+            // PROVISIONAL death sound pool; visual randomness must not perturb combat rolls.
+            let at = tf.translation;
+            sfx.write(Sfx { name: format!("Explosion_Heavy0{}", rng.variant(8)), at: Some(at), vol: 1.0, max: 8000.0 });
+            if let Some(n) = &class.explosion_fx {
+                let t = Transform::from_translation(at);
+                fx::spawn(&mut commands, &fxl, n, None, t, t, true);
+            }
             let mut found = vec![];
             for d in children.iter_descendants(e) {
                 let Ok((name, ntf, _)) = nodes.get(d) else { continue };

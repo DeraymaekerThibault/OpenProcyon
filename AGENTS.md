@@ -66,7 +66,7 @@ files to `content/`, or anything that publishes (pushing tags, releases).
 ## Workflow
 
 - `tools/check.sh` (`make check`) is the single validation gate: ruff format/lint (`ruff.toml`), rustfmt, clippy `-D warnings`, Rust tests
-  (only when assets are imported; otherwise they are compiled), Python tests including the hygiene rules. `make fmt` formats both languages. Run it before every commit; do not add
+  (asset-free tests always run; ignored asset tests also run when assets are imported), Python tests including the hygiene rules. `make fmt` formats both languages. Run it before every commit; do not add
   parallel wrappers.
 - Non-trivial changes need a regression test; ECS/UI changes also need a runtime smoke test (a `--script` or screenshot run).
 - Add behaviour to the module that owns it (`docs/development.md`), not a parallel implementation. Keep asset paths and JSON

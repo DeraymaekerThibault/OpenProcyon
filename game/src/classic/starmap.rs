@@ -8,7 +8,7 @@ use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 
 use crate::panels::REF_H;
-use crate::sprites::{Fonts, HudData, inset, sprite_of};
+use crate::sprites::{Fonts, HudData, image};
 use crate::starmap::{MapIconKind, Starmap, StarmapContents};
 
 const OPEN_SECS: f32 = 1.0;
@@ -43,13 +43,6 @@ fn rnd(i: u32, salt: u32) -> f32 {
 /// World position (bevy x, z) to pixels inside the square.
 fn to_square(p: Vec3, half: f32, side: f32) -> Vec2 {
     Vec2::new(p.x + half, p.z + half) / (2.0 * half) * side
-}
-
-fn sprite(hud: &HudData, assets: &AssetServer, name: &str) -> Option<(ImageNode, Vec2)> {
-    let (sheet, rect) = sprite_of(hud, name)?;
-    let mut node = ImageNode::new(assets.load(format!("hud/tex/{sheet}.png")));
-    node.rect = Some(inset(&sheet, rect));
-    Some((node, rect.size()))
 }
 
 #[allow(deprecated)] // shortcut: bevy 0.20 Interaction, same as panels.rs
@@ -110,7 +103,7 @@ fn build(
     }
     let scale = h / REF_H;
     for i in 0..ALIEN_COUNT {
-        let Some((mut img, size)) = sprite(&hud, &assets, "MapBackdrop_RandomText0") else { break };
+        let Some((mut img, size)) = image(&assets, &hud, "MapBackdrop_RandomText0") else { break };
         img.color = Color::srgba(1.0, 1.0, 1.0, 0.0);
         let speed = 10.0 + rnd(i, 3) * 90.0;
         commands.spawn((
@@ -184,7 +177,7 @@ fn redraw(
             MapIconKind::Whale => "MapBackdrop_Icon_Whale".into(),
             MapIconKind::Objective => format!("MapBackdrop_Icon_ObjectivePoint_Frame{frame}"),
         };
-        let Some((img, size)) = sprite(&hud, &assets, &name) else { continue };
+        let Some((img, size)) = image(&assets, &hud, &name) else { continue };
         let (size, centre) = (size * scale, to_square(icon.position, half, side));
         if centre.x < 0.0 || centre.y < 0.0 || centre.x > side || centre.y > side {
             continue;

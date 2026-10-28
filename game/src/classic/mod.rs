@@ -12,11 +12,13 @@ mod ropes;
 pub mod setup;
 mod ship_preview;
 mod starmap;
+mod widgets;
 mod world_hud;
 
 pub fn plugin(app: &mut App) {
     app.add_plugins((
         menu::plugin,
+        widgets::plugin,
         panels::plugin,
         options_menu::plugin,
         crew_arms::plugin,

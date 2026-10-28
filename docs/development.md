@@ -20,14 +20,17 @@ python3 -m tools.import_assets --game <install dir>   # once: convert your own c
 tools/check.sh
 cargo run --release --manifest-path game/Cargo.toml -- --mission 1
 python3 -m unittest discover -s tests -p 'test_trim_hud_rects.py'
-cargo test --release --manifest-path game/Cargo.toml panels::tests  # shared HUD; classic::panels::tests for the retail art
+cargo test --release --manifest-path game/Cargo.toml panels::tests -- --include-ignored  # shared HUD; classic::panels::tests for the retail art
 tools/shot.sh local/mission01.png --mission 1 --script briefing-skip --shot-frame 180 --late-frame 0
 tools/shot.sh local/paused.png --map red_rover --script pause --shot-frame 50 --late-frame 0
 tools/shot.sh local/pause-restart.png --map red_rover --script pause-restart --shot-frame 90 --late-frame 0
 ```
 
 `make check` calls `tools/check.sh`: ruff format check and lint (Python, rules in `ruff.toml`) → rustfmt check → strict Clippy → Rust release tests → Python tests. Rust tests that need converted
-assets only run when an import exists (otherwise the tests are compiled but not run); Python tests that need the install or assets skip.
+assets are marked `#[ignore = "needs imported assets"]`; the gate runs them with `--include-ignored` when an import exists.
+Mark new Rust tests that load imported data with the same ignore reason, including tests that do so through helpers.
+Asset-free Rust tests always run. For a manual full run after importing, use `cargo test --release --manifest-path game/Cargo.toml -- --include-ignored`.
+Python tests that need the install or assets skip.
 `make fmt` formats Rust and Python (`ruff format`, `ruff check --fix`); it does not rewrite generated JSON. `python3 -m tools.format_json assets` formats asset JSON when needed.
 Shared sight smoke: `WAYLAND_DISPLAY= tools/shot.sh local/sight.png --script sight --allies Ship_Navy_Cutter --enemies Ship_Pirate_Schooner --shot-frame 135 --late-frame 0`; it freezes three ships and asserts group/range/cloak transitions against real radar widgets. This is wiring validation, not a campaign playthrough.
 
@@ -45,6 +48,25 @@ Use a scratch `XDG_DATA_HOME` for automated campaign runs if the player's campai
 Converted assets are found in this order: `PROCYON_ASSETS`, `assets/` in the source checkout (regardless of the working directory), then the
 per-user folder `$XDG_DATA_HOME/openprocyon/assets` (Linux default `~/.local/share`; `%APPDATA%\openprocyon\assets` on Windows). Without
 any, the game exits with import instructions. `content/` is always layered on top. CLI mod/screenshot paths remain relative to the working directory.
+
+## Battle clock and scheduling
+
+Battle simulation runs in `FixedUpdate` at **0.033 s**, the interval documented in [re/gunnery.md](re/gunnery.md)
+and [re/effects.md](re/effects.md). `lib.rs::BattleSet` orders command application → sensors → rules → AI → fleet following →
+docking/boarding orders → environmental forces → ship movement → combat → cleanup/accounting → outcome. Keep plugin systems
+in the owning stage; use a local chain for dependencies within one feature. Simulation uses fixed `Res<Time>` without per-system
+delta clamps. Virtual pause and speed still control this clock; the existing per-frame virtual catch-up caps remain 0.25 s at
+normal speed and 0.1 s when fast-forwarding.
+
+Keyboard/mouse/UI capture remains in `PreUpdate`/`Update`. Store a command in the existing resource/component or registered
+message queue and consume it on a fixed tick; never read `just_pressed` in a simulation system. Frame input may wait until the
+next tick. Bevy 0.20's `TimePlugin` gates message maintenance on fixed-schedule execution, retaining commands through zero-tick
+frames and fixed output for frame readers. `fixed_tests.rs` verifies both directions, including multi-tick catch-up and no replay.
+
+Presentation remains frame-driven: cameras, HUD, ropes/markers, damage meshes, breakup/debris, particles and audio playback.
+Visual RNG is local, separate from combat RNG, so rendering extra frames cannot change damage rolls. Opening briefing speech
+keeps its explicit real-time clock, independent of pause/speed; its arrival halt runs per simulation tick. The existing FX
+particle interpolation is unchanged; **ship/camera interpolation is not implemented**, so fixed-rate ship stepping can be visible.
 
 ## Layers
 
@@ -89,7 +111,7 @@ Keep the existing module boundaries. New files should own a real feature, not ju
 | `crew_arms.rs` | Campaign outfitting model, recruitment, post/bank transactions, live crew/equipment application; `classic/crew_arms.rs` draws it | Changing crew/arms purchases, assignment and their gameplay consumers (`docs/re/scoring-saves.md` §7, `docs/re/crew.md`) |
 | `lifeboats.rs` | Lifeboats: `Lifeboat` marker, `ShipLost` message, boat spawn when a flagged ship is destroyed, drift, nearest-ship sphere pickup, pickup sound/points/table, rule-visible owner list | Changing lifeboat creation/pickup (`docs/re/lifeboats.md`); the creation flag lives on `MissionShip`, the saved table in `rules::Script` |
 | `smoke/` | Validated `--script` names, fleet/campaign and lifeboat smoke drivers, tender setup hook, `PROCYON_END_SHOT`/`PROCYON_NIS_SHOT` screenshot hooks | Adding a script name or changing scripted checks; keep production simulation in its owning module and preserve system ordering |
-| `classic/` | Retail-art views (default): `menu.rs` front-end screens and their hover art and list scrolling, `panels.rs` HUD sprites (bar, compass, dial, talking head, weapon panel), `options_menu.rs` right-click menu art and context cursor, `world_hud.rs` ship-name banners, target chevrons and objective indicator, `starmap.rs` star map art, `mission_ui.rs` objectives, speech banners, hints, end text and letterboxes, `boarding_bar.rs` boarding status bar, `crew_arms.rs` outfitting screens, `setup.rs` the first-run import screen (content/ fonts and plain boxes) | Changing how the retail look is drawn; behaviour goes in the shared module |
+| `classic/` | Retail-art views (default): `menu.rs` front-end screens and list scrolling, `widgets.rs` the front-end widget kit (canvas, buttons, lists, scrollbars, pull-downs, fleet bar, info panel) and its hover art, `panels.rs` HUD sprites (bar, compass, dial, talking head, weapon panel), `options_menu.rs` right-click menu art and context cursor, `world_hud.rs` ship-name banners, target chevrons and objective indicator, `starmap.rs` star map art, `mission_ui.rs` objectives, speech banners, hints, end text and letterboxes, `boarding_bar.rs` boarding status bar, `crew_arms.rs` outfitting screens, `setup.rs` the first-run import screen (content/ fonts and plain boxes) | Changing how the retail look is drawn; behaviour goes in the shared module |
 | `victory.rs` | Skirmish end rules: the map's exported `victory` rules (base destroyed, no ships left, last team), decided from a battle snapshot; `scenario::outcome` feeds it | Changing how a skirmish is won or lost |
 | `options_menu.rs` | Right-click menu: opening, items, hit rects, actions and sounds (`OptionsMenuArt` for the views), which context cursor to show (`HoverCursor`: dock / can't / attack) | Adding menu items (Hold and Cloak are implemented; Board and Grapple live in `boarding.rs`) |
 | `briefing.rs` | Opening NIS, subtitles and skip behaviour (widgets: `BriefingUi`, `Subtitle`, `Portrait`) | Changing intro timing, camera handoff or skip placement |
@@ -99,7 +121,7 @@ Keep the existing module boundaries. New files should own a real feature, not ju
 | `setup.rs` | First run without imported assets: its own small app with the "Import your game" screen state, install discovery (Steam libraries, installed-program entries, Program Files or a Wine prefix) and folder checks, the importer child process and its `[n/total]` progress, then a relaunch of the game | Changing how a player gets from a download to the menu |
 | `menu.rs` | Front-end model: screens, `Action`s and their handling, battle entry, the Esc in-game menu (overlay, pauses; Save/Load/Quit), `MenuModel` for the views; `menu/skirmish.rs` lobby slots, races and fleets; `menu/saves.rs` save/load lists and F3/F4 quick save/load; `menu/settings.rs` sound/display options | Changing front-end choices or transitions |
 | `modding.rs` | Asset overlays, merge semantics and inheritance | Changing override rules; preserve base assets and test merges |
-| `environment.rs` | Shared frame-boundary sight/group/contact snapshot, nebula rendering/energy/occlusion and whale motion/calls | Changing environment simulation or shared detection (`docs/re/visibility.md`); UI consumers must not invent separate range tests |
+| `environment.rs` | Shared fixed-tick sight/group/contact snapshot (also refreshed for frame input), nebula rendering/energy/occlusion and whale motion/calls | Changing environment simulation or shared detection (`docs/re/visibility.md`); UI consumers must not invent separate range tests |
 | `fx.rs`, `wake.rs`, `flag.rs`, `course.rs`, `audio.rs` | Feature-specific rendering/audio | Changing those presentations; do not put their tuning in `lib.rs` |
 
 `mod.rs` files re-export their children, so `crate::combat::X` / `crate::rules::X` paths are stable. Split further only when the next concrete feature needs a clearer interface—no empty framework or blanket directory reshuffle.
@@ -109,6 +131,10 @@ Tag battle-owned roots for scenario cleanup and test returning to the same ship/
 ## Data and generated assets
 
 - **Ships:** `assets/ships/<Id>/` (stats, hit geometry, hull mesh, names, dock points per ship).
+  `data/ships.rs` deserializes ship definitions and hit geometry into private input structs, then converts to the existing
+  runtime `Class` types. Keep section/mount insertion order, coordinate/angle conversions and older-mod defaults unchanged.
+  Required typed assets report the logical file, resolved source (including replacement mod symlinks), and parse location or
+  reference field. Unknown fields remain allowed; present fields with invalid types are rejected rather than silently defaulted.
 - **Definitions:** `assets/data/weapons/`, `assets/data/crew.json`, `content/data/hud/bar.json`.
 - **Shipped content:** `content/` holds files that ship with the code, never imported: fonts (URW base35), hand-written data (`data/hud/bar.json`) and the voice event table. The game overlays it on the imported assets like a mod (`assets_dir()` in `lib.rs`), so a file there replaces the imported one of the same path.
 - **World/mission data:** `assets/maps/<id>/` (map, mission, media, backdrop); export coverage is broader than playable runtime support.

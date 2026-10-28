@@ -3,8 +3,9 @@ use super::*;
 /// Gunners take 10 x gunnery seconds off TimeBetweenBursts (docs/re/gunnery.md#gunners): a gunnery-8.5 crew fires the
 /// 12 s heavy cannon every 3.5 s; the cut never goes below zero and leaves in-burst spacing alone.
 #[test]
+#[ignore = "needs imported assets"]
 fn gunners_shorten_reload() {
-    let (guns, _) = load_weapons(&assets_dir());
+    let (guns, _) = load_weapons(assets_dir());
     let heavy = &guns["Gun_CannonBall_Heavy"];
     assert!((heavy.burst_cycle_cut(8.5) - 3.5).abs() < 1e-5);
     assert_eq!(heavy.burst_cycle_cut(0.0), heavy.burst_cycle());
@@ -25,9 +26,10 @@ fn damage_scales_with_side_and_difficulty() {
 }
 
 #[test]
+#[ignore = "needs imported assets"]
 fn destroyed_sail_does_not_absorb_shots_but_destroyed_vital_sections_do() {
-    let (guns, _) = load_weapons(&assets_dir());
-    let mut class = load_class(&assets_dir(), "Ship_Navy_Torpedo", &guns);
+    let (guns, _) = load_weapons(assets_dir());
+    let mut class = load_class(assets_dir(), "Ship_Navy_Torpedo", &guns);
     class.sections.retain(|s| !s.vital);
     assert_eq!(class.sections.len(), 1);
     let [a, b, c] = class.sections[0].tris[0];
@@ -43,8 +45,9 @@ fn destroyed_sail_does_not_absorb_shots_but_destroyed_vital_sections_do() {
 }
 
 #[test]
+#[ignore = "needs imported assets"]
 fn destroyed_torpedo_boat_sail_redirects_aim_to_hull() {
-    let lib = Library::load(&assets_dir());
+    let lib = Library::load(assets_dir());
     let class = &lib.classes[lib.index("Ship_Navy_Torpedo")];
     let k = class.sections.iter().position(|s| !s.vital).unwrap();
     let sail = &class.sections[k];
@@ -72,8 +75,9 @@ fn breakup_chunks_fly_then_burst_inside_their_window() {
 }
 
 #[test]
+#[ignore = "needs imported assets"]
 fn cutter_masts_break_off_as_debris_pieces() {
-    let lib = Library::load(&assets_dir());
+    let lib = Library::load(assets_dir());
     let class = &lib.classes[lib.index("Ship_Navy_Cutter")];
     let by = |label: &str| class.sections.iter().find(|s| s.label == label).unwrap();
     let (model, pivot) = by("Mast_2_cloth").debris.clone().expect("imported debrisMeshScene");
@@ -104,8 +108,9 @@ fn debris_drifts_with_its_ship_sinks_tumbles_and_goes() {
 }
 
 #[test]
+#[ignore = "needs imported assets"]
 fn cutter_breakup_uses_the_retail_section_data() {
-    let lib = Library::load(&assets_dir());
+    let lib = Library::load(assets_dir());
     let class = &lib.classes[lib.index("Ship_Navy_Cutter")];
     let d: Vec<_> = class.sections.iter().map(|s| s.destruct.clone().expect("imported destructFx")).collect();
     // bow: Final_Ship_Chunk at 2.9-3.0 s, flying forward and up (game y forward = bevy -z, game z up = bevy +y)
@@ -116,8 +121,9 @@ fn cutter_breakup_uses_the_retail_section_data() {
 }
 
 #[test]
+#[ignore = "needs imported assets"]
 fn island_gun_towers_load_and_mission_damage_follows_their_vital_sections() {
-    let lib = Library::load(&assets_dir());
+    let lib = Library::load(assets_dir());
     let class = &lib.classes[lib.index("Base_SmugglersCamp")];
     assert_eq!(class.mounts.len(), 2);
     for mount in &class.mounts {
@@ -143,13 +149,14 @@ fn island_gun_towers_load_and_mission_damage_follows_their_vital_sections() {
 }
 
 #[test]
+#[ignore = "needs imported assets"]
 fn resting_muzzles_sit_at_their_authored_points() {
     // Barrel meshes and muzzles are authored in the base frame; the pivot only moves the pitch axis (Dreadnought hull guns
     // were drawn 0.9 too high and 1.2 too far forward when the pivot was added on top).
     let mut app = App::new();
     app.add_plugins((TaskPoolPlugin::default(), AssetPlugin::default(), TransformPlugin)).init_asset::<bevy::world_serialization::WorldAsset>();
     let assets = app.world().resource::<AssetServer>().clone();
-    let lib = Library::load(&assets_dir());
+    let lib = Library::load(assets_dir());
     let class = lib.index("Ship_Procyon_Dreadnought");
     let ship = app.world_mut().spawn(Transform::default()).id();
     let states = spawn_guns(&mut app.world_mut().commands(), &assets, &lib, ship, class);
@@ -167,6 +174,7 @@ fn resting_muzzles_sit_at_their_authored_points() {
 }
 
 #[test]
+#[ignore = "needs imported assets"]
 fn hostile_island_towers_shoot_the_player_and_neutral_ones_do_not() {
     let mut app = App::new();
     app.add_plugins((TaskPoolPlugin::default(), AssetPlugin::default(), TransformPlugin))
@@ -180,7 +188,7 @@ fn hostile_island_towers_shoot_the_player_and_neutral_ones_do_not() {
         .add_message::<crate::decals::Scar>()
         .init_resource::<Time>()
         .init_resource::<FxLib>()
-        .insert_resource(Library::load(&assets_dir()))
+        .insert_resource(Library::load(assets_dir()))
         .insert_resource(Rng::new(7))
         .insert_resource(Look { mesh: default(), shell: default(), enemy_shell: default() })
         .init_resource::<crate::environment::Sensors>()
@@ -192,7 +200,7 @@ fn hostile_island_towers_shoot_the_player_and_neutral_ones_do_not() {
     assert!(!mission.script.hostile(&player, "NO PLAYER"));
     app.insert_resource(mission);
     let assets = app.world().resource::<AssetServer>().clone();
-    let lib = Library::load(&assets_dir());
+    let lib = Library::load(assets_dir());
     let class = lib.index("Base_SmugglersCamp");
     let spawn_base = |app: &mut App, owner: &str, x: f32| {
         let id = app.world_mut().spawn((Transform::from_xyz(x, -27.0, 0.0), crate::campaign::MissionBase { id: 1, owner: owner.into() })).id();
@@ -236,7 +244,7 @@ fn hostile_island_towers_shoot_the_player_and_neutral_ones_do_not() {
         create_lifeboats: false,
         ..Default::default()
     };
-    let player_ship = app.world_mut().spawn((Transform::from_xyz(0.0, 0.0, -120.0), ship.clone(), Health::new(&lib.classes[c]), Fires::default(), ms, PlayerShip)).id();
+    let player_ship = app.world_mut().spawn((Transform::from_xyz(0.0, 0.0, -120.0), ship, Health::new(&lib.classes[c]), Fires::default(), ms, PlayerShip)).id();
     for _ in 0..300 {
         app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs_f32(0.05));
         app.update();
@@ -276,6 +284,7 @@ fn hostile_island_towers_shoot_the_player_and_neutral_ones_do_not() {
 }
 
 #[test]
+#[ignore = "needs imported assets"]
 fn skirmish_bases_shoot_ships_of_other_sides_only() {
     let mut app = App::new();
     app.add_plugins((TaskPoolPlugin::default(), AssetPlugin::default(), TransformPlugin))
@@ -285,14 +294,14 @@ fn skirmish_bases_shoot_ships_of_other_sides_only() {
         .add_message::<Fired>()
         .init_resource::<Time>()
         .init_resource::<FxLib>()
-        .insert_resource(Library::load(&assets_dir()))
+        .insert_resource(Library::load(assets_dir()))
         .insert_resource(Rng::new(7))
         .insert_resource(Look { mesh: default(), shell: default(), enemy_shell: default() })
         .init_resource::<crate::environment::Sensors>()
         .add_systems(PreUpdate, crate::environment::refresh_sensors)
         .add_systems(Update, base_fire);
     let assets = app.world().resource::<AssetServer>().clone();
-    let lib = Library::load(&assets_dir());
+    let lib = Library::load(assets_dir());
     let class = lib.index("Base_SmugglersCamp");
     let spawn_base = |app: &mut App, side: Side, x: f32| {
         let id = app.world_mut().spawn((Transform::from_xyz(x, -27.0, 0.0), crate::campaign::MissionBase { id: 1, owner: format!("base{x}") }, BaseSide(side))).id();
@@ -329,6 +338,7 @@ fn skirmish_bases_shoot_ships_of_other_sides_only() {
 }
 
 #[test]
+#[ignore = "needs imported assets"]
 fn a_volcano_lobs_one_aimed_shell_at_a_time() {
     let mut app = App::new();
     app.add_plugins((TaskPoolPlugin::default(), AssetPlugin::default(), TransformPlugin))
@@ -338,14 +348,14 @@ fn a_volcano_lobs_one_aimed_shell_at_a_time() {
         .add_message::<Fired>()
         .init_resource::<Time>()
         .init_resource::<FxLib>()
-        .insert_resource(Library::load(&assets_dir()))
+        .insert_resource(Library::load(assets_dir()))
         .insert_resource(Rng::new(7))
         .insert_resource(Look { mesh: default(), shell: default(), enemy_shell: default() })
         .init_resource::<crate::environment::Sensors>()
         .add_systems(PreUpdate, crate::environment::refresh_sensors)
         .add_systems(Update, base_fire);
     let assets = app.world().resource::<AssetServer>().clone();
-    let lib = Library::load(&assets_dir());
+    let lib = Library::load(assets_dir());
     let class = lib.index("Island_Volcano_01");
     let spawn_base = |app: &mut App, side: Side, x: f32| {
         let id = app.world_mut().spawn((Transform::from_xyz(x, -27.0, 0.0), crate::campaign::MissionBase { id: 1, owner: format!("base{x}") }, BaseSide(side))).id();
@@ -383,6 +393,7 @@ fn a_volcano_lobs_one_aimed_shell_at_a_time() {
 }
 
 #[test]
+#[ignore = "needs imported assets"]
 fn a_silent_island_never_fires() {
     let mut app = App::new();
     app.add_plugins((TaskPoolPlugin::default(), AssetPlugin::default(), TransformPlugin))
@@ -392,14 +403,14 @@ fn a_silent_island_never_fires() {
         .add_message::<Fired>()
         .init_resource::<Time>()
         .init_resource::<FxLib>()
-        .insert_resource(Library::load(&assets_dir()))
+        .insert_resource(Library::load(assets_dir()))
         .insert_resource(Rng::new(7))
         .insert_resource(Look { mesh: default(), shell: default(), enemy_shell: default() })
         .init_resource::<crate::environment::Sensors>()
         .add_systems(PreUpdate, crate::environment::refresh_sensors)
         .add_systems(Update, base_fire);
     let assets = app.world().resource::<AssetServer>().clone();
-    let lib = Library::load(&assets_dir());
+    let lib = Library::load(assets_dir());
     let class = lib.index("Island_Volcano_01");
     let spawn_base = |app: &mut App, side: Side, x: f32| {
         let id = app.world_mut().spawn((Transform::from_xyz(x, -27.0, 0.0), crate::campaign::MissionBase { id: 1, owner: format!("base{x}") }, BaseSide(side))).id();
@@ -441,6 +452,7 @@ fn better_gunners_spread_less() {
 }
 
 #[test]
+#[ignore = "needs imported assets"]
 fn the_command_ship_holds_fire_until_an_enemy_is_clicked() {
     let mut app = App::new();
     app.add_plugins((TaskPoolPlugin::default(), AssetPlugin::default(), TransformPlugin))
@@ -454,7 +466,7 @@ fn the_command_ship_holds_fire_until_an_enemy_is_clicked() {
         .add_message::<crate::decals::Scar>()
         .init_resource::<Time>()
         .init_resource::<FxLib>()
-        .insert_resource(Library::load(&assets_dir()))
+        .insert_resource(Library::load(assets_dir()))
         .insert_resource(Rng::new(7))
         .insert_resource(Look { mesh: default(), shell: default(), enemy_shell: default() })
         .insert_resource(Target::default())
@@ -462,7 +474,7 @@ fn the_command_ship_holds_fire_until_an_enemy_is_clicked() {
         .add_systems(PreUpdate, crate::environment::refresh_sensors)
         .add_systems(Update, (fire, shells.after(fire)));
     let assets = app.world().resource::<AssetServer>().clone();
-    let lib = Library::load(&assets_dir());
+    let lib = Library::load(assets_dir());
     let c = lib.index("Ship_Navy_Frigate");
     let ship = |side| Ship {
         class: c,
@@ -502,6 +514,7 @@ fn the_command_ship_holds_fire_until_an_enemy_is_clicked() {
 }
 
 #[test]
+#[ignore = "needs imported assets"]
 fn the_command_ship_damages_a_clicked_hostile_skirmish_base() {
     let mut app = App::new();
     app.add_plugins((TaskPoolPlugin::default(), AssetPlugin::default(), TransformPlugin))
@@ -515,7 +528,7 @@ fn the_command_ship_damages_a_clicked_hostile_skirmish_base() {
         .add_message::<crate::decals::Scar>()
         .init_resource::<Time>()
         .init_resource::<FxLib>()
-        .insert_resource(Library::load(&assets_dir()))
+        .insert_resource(Library::load(assets_dir()))
         .insert_resource(Rng::new(7))
         .insert_resource(Look { mesh: default(), shell: default(), enemy_shell: default() })
         .insert_resource(Target::default())
@@ -523,7 +536,7 @@ fn the_command_ship_damages_a_clicked_hostile_skirmish_base() {
         .add_systems(PreUpdate, crate::environment::refresh_sensors)
         .add_systems(Update, (fire, shells.after(fire)));
     let assets = app.world().resource::<AssetServer>().clone();
-    let lib = Library::load(&assets_dir());
+    let lib = Library::load(assets_dir());
     let c = lib.index("Ship_Navy_Frigate");
     let ship = |side| Ship {
         class: c,
@@ -564,8 +577,9 @@ fn the_command_ship_damages_a_clicked_hostile_skirmish_base() {
 }
 
 #[test]
+#[ignore = "needs imported assets"]
 fn ship_hit_rules() {
-    let lib = Library::load(&assets_dir());
+    let lib = Library::load(assets_dir());
     let class = &lib.classes[lib.index("Ship_Navy_Cutter")];
     let stern = class.sections.iter().position(|s| s.vital && s.core_pct == 45.0).unwrap();
     let sure_fire = [10.0, 10.0, 0.0, 1.0, 3.0];
@@ -596,8 +610,9 @@ fn segment_distance_clamps_to_the_ends() {
 }
 
 #[test]
+#[ignore = "needs imported assets"]
 fn core_bleed_scales_with_destroyed_vital_sections() {
-    let lib = Library::load(&assets_dir());
+    let lib = Library::load(assets_dir());
     let class = &lib.classes[lib.index("Ship_Navy_Cutter")];
     let mut hp = Health::new(class);
     assert_eq!(core_bleed(class, &hp, 40.0), 0.0);
@@ -607,8 +622,9 @@ fn core_bleed_scales_with_destroyed_vital_sections() {
 }
 
 #[test]
+#[ignore = "needs imported assets"]
 fn bank_recharge_follows_the_slowest_live_gun() {
-    let lib = Library::load(&assets_dir());
+    let lib = Library::load(assets_dir());
     let ci = lib.index("Ship_Navy_Cutter");
     let class = &lib.classes[ci];
     let bank = class.mounts[0].bank;
@@ -637,9 +653,10 @@ fn bank_recharge_follows_the_slowest_live_gun() {
     assert_eq!(bank_recharge(&lib, &g, class, &health, 99), 0.0, "no live gun in the bank");
 }
 #[test]
+#[ignore = "needs imported assets"]
 fn every_gun_has_a_panel_icon_and_pd_is_hidden() {
-    let hud: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(assets_dir().join("hud/hud.json")).unwrap()).unwrap();
-    let (g, _) = load_weapons(&assets_dir());
+    let hud: serde_json::Value = crate::data::read_json(&assets_dir().join("hud/hud.json"));
+    let (g, _) = load_weapons(assets_dir());
     for name in g.keys() {
         assert!(hud.get(gun_icon(name)).is_some(), "{name} -> {} missing", gun_icon(name));
     }
@@ -647,10 +664,11 @@ fn every_gun_has_a_panel_icon_and_pd_is_hidden() {
     assert!(g["Gun_Lancer_PD_Light"].point_defense);
 }
 #[test]
+#[ignore = "needs imported assets"]
 fn port_and_starboard_sections_sit_on_their_own_side() {
-    let (g, _) = load_weapons(&assets_dir());
+    let (g, _) = load_weapons(assets_dir());
     for name in ["Ship_Pirate_Schooner", "Ship_Navy_Frigate", "Ship_Navy_Cutter"] {
-        let c = load_class(&assets_dir(), name, &g);
+        let c = load_class(assets_dir(), name, &g);
         for s in &c.sections {
             let cx = (s.min.x + s.max.x) / 2.0;
             println!("{name} {} x {:.1}..{:.1}", s.label, s.min.x, s.max.x);
@@ -674,8 +692,9 @@ fn slow_projectile_intercepts_crossing_and_receding_targets() {
     assert_eq!(intercept_time(Vec3::ZERO, Vec3::ZERO, 22.0), Some(0.0));
 }
 #[test]
+#[ignore = "needs imported assets"]
 fn point_defence_wears_a_torpedo_down_instead_of_one_shot_kills() {
-    let lib = Library::load(&crate::assets_dir());
+    let lib = Library::load(crate::assets_dir());
     let torpedo = lib.bullets["Bullet_Torpedo"].hitpoints;
     let bolts = |gun: &str| {
         let bolt = lib.bullets[&lib.guns[gun].bullet].hitpoints;
@@ -688,8 +707,9 @@ fn point_defence_wears_a_torpedo_down_instead_of_one_shot_kills() {
 }
 
 #[test]
+#[ignore = "needs imported assets"]
 fn torpedo_guidance_launch_coast_and_moving_target_intercept() {
-    let lib = Library::load(&assets_dir());
+    let lib = Library::load(assets_dir());
     let physics = lib.bullets["Bullet_Torpedo"].physics.as_ref().unwrap();
     assert!((physics.max_speed - 20.833334).abs() < 0.001);
     let (mut p, mut v, mut spin) = (Vec3::ZERO, Vec3::NEG_Z * 22.0, 0.0);
@@ -719,8 +739,9 @@ fn torpedo_guidance_launch_coast_and_moving_target_intercept() {
 }
 
 #[test]
+#[ignore = "needs imported assets"]
 fn model_hardpoints_are_loaded_in_bevy_axes() {
-    let lib = Library::load(&assets_dir());
+    let lib = Library::load(assets_dir());
     let class = &lib.classes[lib.index("Ship_Navy_Torpedo")];
     assert!((class.homing_point.y - 0.2275).abs() < 0.001);
     assert!(class.tow_points[0].z > 0.0 && class.tow_points[1].z < 0.0);
@@ -743,8 +764,9 @@ fn torpedo_aim_and_launch_do_not_inherit_shooter_motion() {
 /// Retail damage control (refit-resupply.md#crew-damage-control): riggers mend the most damaged sail +3 per successful
 /// roll; engineers mend the most damaged hull by floor(10 x mean engineering x material factor).
 #[test]
+#[ignore = "needs imported assets"]
 fn crew_damage_control_follows_riggers_and_engineers() {
-    let lib = Library::load(&assets_dir());
+    let lib = Library::load(assets_dir());
     let class = &lib.classes[lib.index("Ship_Navy_ManOWar")];
     let full: Vec<f32> = class.sections.iter().map(|s| s.hp).collect();
     let sails: Vec<usize> = (0..full.len()).filter(|&i| class.sections[i].material.contains("Cloth")).collect();
@@ -791,8 +813,9 @@ fn fire_fighting_sums_crew_leadership() {
 /// Retail shells (docs/re/gunnery.md#shell-gravity): gravity MuzzleSpeed^2 / (sqrt(2) * MaximumRange) per gun, launch speed
 /// MuzzleSpeed in the world frame whatever the shooter's motion, lead from the target's velocity alone.
 #[test]
+#[ignore = "needs imported assets"]
 fn shells_match_measured_retail_ballistics() {
-    let (guns, _) = load_weapons(&assets_dir());
+    let (guns, _) = load_weapons(assets_dir());
     // gun, measured gravity (median of repeated retail shells)
     for (gun, measured) in [
         ("Gun_StarMortar", 1.263),
@@ -826,15 +849,16 @@ fn shells_match_measured_retail_ballistics() {
 }
 
 #[test]
+#[ignore = "needs imported assets"]
 fn retail_torpedo_arc_body_and_hull_collision() {
-    let (guns, bullets) = load_weapons(&assets_dir());
-    let torpedo = load_class(&assets_dir(), "Ship_Navy_Torpedo", &guns);
+    let (guns, bullets) = load_weapons(assets_dir());
+    let torpedo = load_class(assets_dir(), "Ship_Navy_Torpedo", &guns);
     let launcher = torpedo.mounts.iter().find(|m| m.gun == "Gun_Torpedo").unwrap();
     assert!((launcher.arc / 2.0 - 22.5f32.to_radians()).abs() < 0.00001);
     assert!(10.0f32.to_radians() < launcher.arc / 2.0);
     let glb = bullets["Bullet_Torpedo"].glb.as_ref().unwrap();
     assert!(assets_dir().join(crate::data::model(glb)).is_file());
-    let target = load_class(&assets_dir(), "Ship_Pirate_Schooner", &guns);
+    let target = load_class(assets_dir(), "Ship_Pirate_Schooner", &guns);
     let start = target.centre + Vec3::Z * 100.0;
     assert!(target.sections.iter().any(|s| seg_mesh(start, target.centre, s).is_some()));
 }
@@ -859,10 +883,11 @@ fn mine_laying_spells() {
 
 /// A ship frozen by an NIS (speed 0) keeps its engine order but shows no exhaust; it shows once the ship moves.
 #[test]
+#[ignore = "needs imported assets"]
 fn engine_exhaust_needs_motion_not_just_an_order() {
     let mut app = App::new();
-    app.init_resource::<FxLib>().insert_resource(Library::load(&assets_dir())).add_systems(Update, engine_rate);
-    let lib = Library::load(&assets_dir());
+    app.init_resource::<FxLib>().insert_resource(Library::load(assets_dir())).add_systems(Update, engine_rate);
+    let lib = Library::load(assets_dir());
     let c = lib.index("Ship_Navy_Torpedo");
     let ship = Ship {
         class: c,
@@ -895,10 +920,11 @@ fn engine_exhaust_needs_motion_not_just_an_order() {
 /// Side-facing point-defence lancers face away from the keel: they hang upside down (rolled about the bow axis) and used to
 /// face inward.
 #[test]
+#[ignore = "needs imported assets"]
 fn side_point_defence_faces_outward() {
-    let (guns, _) = load_weapons(&assets_dir());
+    let (guns, _) = load_weapons(assets_dir());
     for ship in ["Ship_Navy_ManOWar", "Ship_Navy_Cutter", "Ship_Navy_Heavy_Escort", "Ship_Pirate_Galleon"] {
-        let class = load_class(&assets_dir(), ship, &guns);
+        let class = load_class(assets_dir(), ship, &guns);
         let mut side_lancers = 0;
         for m in class.mounts.iter().filter(|m| m.gun.contains("PD") && m.pos.x.abs() > 0.2 && (m.rot * Vec3::NEG_Z).x.abs() > 0.5) {
             side_lancers += 1;
@@ -906,4 +932,78 @@ fn side_point_defence_faces_outward() {
         }
         assert!(side_lancers >= 2, "{ship}");
     }
+}
+
+/// A cannonball flying into an enemy hull goes through `shells` -> `hit_ship`: a Hit message, section damage and the shell gone.
+#[test]
+#[ignore = "needs imported assets"]
+fn shell_into_a_hull_damages_it_and_reports_the_hit() {
+    let mut app = App::new();
+    let lib = Library::load(assets_dir());
+    let c = lib.index("Ship_Navy_Torpedo");
+    app.add_plugins((TaskPoolPlugin::default(), AssetPlugin::default()))
+        .init_resource::<Time>()
+        .init_resource::<FxLib>()
+        .insert_resource(Rng(7))
+        .add_message::<Sfx>()
+        .add_message::<Hit>()
+        .add_message::<Destroyed>()
+        .add_message::<Detonate>()
+        .add_message::<crate::decals::Scar>()
+        .add_systems(Update, shells);
+    let ship = Ship {
+        class: c,
+        side: Side::Enemy,
+        heading: 0.0,
+        speed: 0.0,
+        ang_vel: 0.0,
+        order: 0,
+        waypoints: vec![],
+        goal: None,
+        cap: 1.0,
+        throttle: None,
+        sail_energy: 1.0,
+        crew_speed: 1.0,
+        crew_turn: 1.0,
+    };
+    let target = app.world_mut().spawn((Transform::default(), ship, Health::new(&lib.classes[c]), Fires::default())).id();
+    let shooter = app.world_mut().spawn_empty().id();
+    let bullet = lib.guns["Gun_CannonBall_Heavy"].bullet.clone();
+    // Aimed along the normal at the middle of a hull triangle, from 40 units out.
+    let [ta, tb, tc] = lib.classes[c].sections.iter().find(|s| s.vital).unwrap().tris[0];
+    let normal = (tb - ta).cross(tc - ta).normalize();
+    let farther_ship = app.world().get::<Ship>(target).unwrap().clone();
+    let farther = app.world_mut().spawn((Transform::from_translation(-normal * 100.0), farther_ship, Health::new(&lib.classes[c]), Fires::default())).id();
+    let at = (ta + tb + tc) / 3.0 + normal * 40.0;
+    let shell = Shell {
+        vel: -normal * 200.0,
+        age: 0.0,
+        lifetime: 5.0,
+        gravity: 0.0,
+        bullet: bullet.clone(),
+        side: Side::Player,
+        shooter,
+        target: None,
+        angular_velocity: 0.0,
+        payload: lib.bullets[&bullet].payload,
+        aim: None,
+        pd: false,
+        hp: 1.0,
+        harmless: false,
+    };
+    let id = app.world_mut().spawn((shell, Transform::from_translation(at))).id();
+    app.insert_resource(lib);
+    let full: f32 = app.world().get::<Health>(target).unwrap().sections.iter().sum();
+    let mut hit = false;
+    for _ in 0..20 {
+        // One segment crosses both hulls, so the nearest collision must win.
+        app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs_f32(1.0));
+        app.update();
+        hit |= app.world().resource::<Messages<Hit>>().iter_current_update_messages().any(|h| h.victim == target);
+    }
+    let left: f32 = app.world().get::<Health>(target).unwrap().sections.iter().sum();
+    assert!(left < full, "the hull took damage ({left} of {full})");
+    assert_eq!(app.world().get::<Health>(farther).unwrap().sections.iter().sum::<f32>(), full, "the farther ship must not be hit");
+    assert!(app.world().get_entity(id).is_err(), "the shell is spent");
+    assert!(hit, "a Hit names the ship");
 }

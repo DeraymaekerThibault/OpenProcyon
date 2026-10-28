@@ -25,6 +25,7 @@ fn script() -> Script {
 }
 
 #[test]
+#[ignore = "needs imported assets"]
 fn mission_two_sos_rockets_pick_up_by_entering_their_volume_without_clicking() {
     for (rule, set, gate, flag) in
         [("BottleOnePickup1", "Schooner1SOS", "PlayerHasDockedWithCamp", "PlayerHasPickedUpBottleOne"), ("BottleTwoPickup1", "Schooner2SOS", "NotTowed", "BottleTwoNotPickedUp")]
@@ -47,6 +48,7 @@ fn mission_two_sos_rockets_pick_up_by_entering_their_volume_without_clicking() {
 }
 
 #[test]
+#[ignore = "needs imported assets"]
 fn mission_three_hidden_sloop_does_not_start_the_hunt_at_initialization() {
     let m = crate::campaign::load_id("mission03");
     let mut w: Vec<_> = m.data["ships"]
@@ -134,6 +136,7 @@ fn mission_three_hidden_sloop_does_not_start_the_hunt_at_initialization() {
 }
 
 #[test]
+#[ignore = "needs imported assets"]
 fn mission_three_nebula_entry_tracks_the_travelling_storm() {
     let m = crate::campaign::load_id("mission03");
     let mut sc = m.script;
@@ -149,6 +152,7 @@ fn mission_three_nebula_entry_tracks_the_travelling_storm() {
 }
 
 #[test]
+#[ignore = "needs imported assets"]
 fn fleet_rules_emit_real_named_fleet_and_primary_effects() {
     let mut s = script();
     for (name, expected, hold) in
@@ -172,6 +176,7 @@ fn fleet_rules_emit_real_named_fleet_and_primary_effects() {
 }
 
 #[test]
+#[ignore = "needs imported assets"]
 fn human_captain_actions_hand_over_the_primary_ship() {
     for (mission, rule, ship) in [
         (3, "Setup New Sloop & Essential Ship", "RLS Endurance"),
@@ -203,6 +208,7 @@ fn human_captain_actions_hand_over_the_primary_ship() {
 }
 
 #[test]
+#[ignore = "needs imported assets"]
 fn menu_tow_links_are_kept_per_tower_and_broken() {
     let mut sc = script();
     let mut world = World::new();
@@ -221,6 +227,7 @@ fn menu_tow_links_are_kept_per_tower_and_broken() {
 }
 
 #[test]
+#[ignore = "needs imported assets"]
 fn asteroid_setup_selects_named_groups_and_preserves_kill_attribution() {
     let m = crate::campaign::load();
     let mut sc = m.script;
@@ -242,6 +249,7 @@ fn asteroid_setup_selects_named_groups_and_preserves_kill_attribution() {
 }
 
 #[test]
+#[ignore = "needs imported assets"]
 fn all_rule_condition_and_action_types_are_handled() {
     let m = crate::campaign::load();
     let mut s = m.script;
@@ -260,6 +268,7 @@ fn all_rule_condition_and_action_types_are_handled() {
 /// Convoy Raid's own script (maps/convoy_raid/script.json): points by team for convoy kills (credited to the killer's team),
 /// per-unit arrivals in the safety area, and each event scored once by its repeating rule.
 #[test]
+#[ignore = "needs imported assets"]
 fn convoy_raid_scores_team_points_once_per_event() {
     let Some(data) = crate::data::try_json(&crate::assets_dir().join("maps/convoy_raid/script.json")) else { return };
     let mut s = Script::new(&data, Value::Null);
@@ -297,6 +306,7 @@ fn convoy_raid_scores_team_points_once_per_event() {
 
 /// Every condition and action the skirmish maps' own scripts use is handled (end rules belong to victory.rs).
 #[test]
+#[ignore = "needs imported assets"]
 fn skirmish_script_rule_types_are_handled() {
     let w = vec![unit("RLS Comet", PLAYER, Vec3::ZERO)];
     for map in [
@@ -377,6 +387,7 @@ fn top_speed_percentage_caps_the_named_ships_throttle() {
 }
 
 #[test]
+#[ignore = "needs imported assets"]
 fn unit_within_any_nebula_uses_the_setup_polygons() {
     // Mission 1's only nebula is the 'Clarke' polygon (game x, y); its vertex average lies inside it.
     let m = crate::campaign::load();
@@ -393,6 +404,7 @@ fn unit_within_any_nebula_uses_the_setup_polygons() {
 }
 
 #[test]
+#[ignore = "needs imported assets"]
 fn whales_receive_paths_visibility_and_reprimand_after_attack() {
     let mut sc = script();
     let mut world = World::new();
@@ -423,6 +435,7 @@ fn whales_receive_paths_visibility_and_reprimand_after_attack() {
     assert!(sc.queue.iter().any(|s| s == "M01AMELIA06") || sc.speaking.as_ref().is_some_and(|s| s.0 == "M01AMELIA06"));
 }
 #[test]
+#[ignore = "needs imported assets"]
 fn world_init_sets_flags_objective_and_timers_then_world_timer_starts_fleets() {
     let mut s = script();
     let w = vec![unit("RLS Comet", PLAYER, Vec3::ZERO), unit("RLS Sovereign", "Big Ships (Blue Team)", Vec3::X)];
@@ -444,6 +457,7 @@ fn world_init_sets_flags_objective_and_timers_then_world_timer_starts_fleets() {
     assert!(s.flags["Ships Start Around Archapeligo"]);
 }
 #[test]
+#[ignore = "needs imported assets"]
 fn alliances_hold_fire_and_run_once() {
     let mut s = script();
     assert!(s.hostile("Pirate Schooner", PLAYER) && !s.hostile(PLAYER, "Big Ships (Blue Team)"));
@@ -459,6 +473,7 @@ fn alliances_hold_fire_and_run_once() {
     assert!(!s.hostile(PLAYER, "Big Ships (Blue Team)"));
 }
 #[test]
+#[ignore = "needs imported assets"]
 fn every_mission_loads_and_aliases_the_player_group() {
     for n in 1..=13 {
         let m = crate::campaign::load_id(&format!("mission{n:02}"));
@@ -470,6 +485,7 @@ fn every_mission_loads_and_aliases_the_player_group() {
     }
 }
 #[test]
+#[ignore = "needs imported assets"]
 fn dock_rules_emit_effects_and_read_the_docked_relation() {
     let mut s = script();
     let (mut a, mut b) = (unit("Schooner", "Schooner1", Vec3::ZERO), unit("Camp", "Norville", Vec3::X));
@@ -489,6 +505,7 @@ fn dock_rules_emit_effects_and_read_the_docked_relation() {
     assert!(!s.cond(&c, &w, false));
 }
 #[test]
+#[ignore = "needs imported assets"]
 fn boarding_feeds_team_capture_not_the_lifeboat_capture_count() {
     let mut s = crate::campaign::load_id("mission06").script;
     let mut world = World::new();
@@ -502,7 +519,7 @@ fn boarding_feeds_team_capture_not_the_lifeboat_capture_count() {
     thief.owner = "PlayerStart".into();
     thief.groups = vec!["PirateRunSloop".into()];
     assert!(s.cond(&team, &[thief.clone()], false));
-    assert!(!s.cond(&pvp, &[thief.clone()], false), "boarding does not increment the lifeboat table");
+    assert!(!s.cond(&pvp, &[thief], false), "boarding does not increment the lifeboat table");
     // the lifeboat route of the same rule: the table counts, exactly (collector, owner), no ally sharing
     s.lifeboat_saved("PlayerStart", "PirateRunner");
     assert!(s.cond(&pvp, &[], false));
@@ -517,6 +534,7 @@ fn boarding_feeds_team_capture_not_the_lifeboat_capture_count() {
     assert!(!s.cond(&eq(1, "Roughly", "PlayerStart"), &[], false), "an unknown comparison is false");
 }
 #[test]
+#[ignore = "needs imported assets"]
 fn mission12_defeat_keeps_a_provisional_base_boarding_bridge() {
     let mut m12 = crate::campaign::load_id("mission12").script;
     let e = World::new().spawn_empty().id();
@@ -532,6 +550,7 @@ fn mission12_defeat_keeps_a_provisional_base_boarding_bridge() {
     assert!(!m12.cond(&player, &[], false), "an enemy's is not");
 }
 #[test]
+#[ignore = "needs imported assets"]
 fn player_has_no_lifeboats_follows_the_owners_of_existing_boats() {
     let mut m1 = script();
     let none = serde_json::json!({"Type": "Player has no lifeboats", "Player Name": "Pirate Schooner"});
@@ -547,6 +566,7 @@ fn player_has_no_lifeboats_follows_the_owners_of_existing_boats() {
     assert!(m1.cond(&serde_json::json!({"Type": "Player has no lifeboats", "Player Name": "Nobody"}), &[], false), "an unknown player is true");
 }
 #[test]
+#[ignore = "needs imported assets"]
 fn local_player_scores_only_for_boats_of_players_it_is_not_allied_with() {
     let mut m1 = script(); // player "Player0 Group": allied with 'Navy Tenders', hostile to 'Pirate Schooner'
     m1.lifeboat_saved(PLAYER, "Pirate Schooner");
@@ -562,6 +582,7 @@ fn local_player_scores_only_for_boats_of_players_it_is_not_allied_with() {
     );
 }
 #[test]
+#[ignore = "needs imported assets"]
 fn set_lifeboat_creation_state_targets_the_named_ships() {
     let mut s = script();
     let mut world = World::new();
@@ -577,6 +598,7 @@ fn set_lifeboat_creation_state_targets_the_named_ships() {
     assert!(matches!(&out[1], Fx::Lifeboats(u, false) if u == &[other.e]));
 }
 #[test]
+#[ignore = "needs imported assets"]
 fn skip_to_tender_then_volume_and_dock_progress_the_mission() {
     let mut s = script();
     let mut world = World::new();
@@ -600,6 +622,7 @@ fn skip_to_tender_then_volume_and_dock_progress_the_mission() {
     assert!(!s.task_active("Dock With Tender") && s.task_active("Destroy Asteroids"));
 }
 #[test]
+#[ignore = "needs imported assets"]
 fn destroyed_exit_and_stopped_timer_rules() {
     let mut s = script();
     let mut dead = unit("Ravage", "Pirates", Vec3::ZERO);
@@ -614,6 +637,7 @@ fn destroyed_exit_and_stopped_timer_rules() {
     assert_eq!(s.timer("T"), Some(0.0));
 }
 #[test]
+#[ignore = "needs imported assets"]
 fn volumes_timers_and_speech_conditions() {
     let mut s = script();
     let vol = s.volumes["Meet @ Clarke"].clone();
@@ -642,6 +666,7 @@ fn volumes_timers_and_speech_conditions() {
     assert!(s.cond(&sp, &w, false));
 }
 #[test]
+#[ignore = "needs imported assets"]
 fn speech_events_play_their_twt_file_and_lines_without_audio_still_complete() {
     let mut s = script();
     let w = vec![unit("RLS Comet", PLAYER, Vec3::ZERO)];
@@ -663,6 +688,7 @@ fn speech_events_play_their_twt_file_and_lines_without_audio_still_complete() {
 }
 
 #[test]
+#[ignore = "needs imported assets"]
 fn twt_groups_alliances_and_setup_stances_drive_later_missions() {
     let m = crate::campaign::load_id("mission03");
     let sc = m.script;
@@ -692,6 +718,26 @@ fn twt_groups_alliances_and_setup_stances_drive_later_missions() {
 }
 
 #[test]
+#[ignore = "needs imported assets"]
+fn volume_entry_and_exit_track_transitions() {
+    let mut sc = script();
+    sc.volumes = HashMap::from([("V".to_string(), Region::from_json(&serde_json::json!([[0, 0], [10, 0], [10, 10], [0, 10]])))]);
+    let mut w = vec![unit("a", "G", Vec3::new(50.0, 0.0, -5.0))];
+    let enter = serde_json::json!({"Type": "Enter Volume", "Group Name": "G", "Volume Name": "V"});
+    let exit = serde_json::json!({"Type": "Exit Volume", "Group Name": "G", "Volume Name": "V"});
+    assert!(!sc.cond(&enter, &w, true));
+    assert!(!sc.cond(&exit, &w, true));
+    w[0].pos.x = 5.0;
+    assert!(sc.cond(&enter, &w, true));
+    assert!(!sc.cond(&enter, &w, true));
+    assert!(!sc.cond(&exit, &w, true));
+    w[0].pos.x = 50.0;
+    assert!(sc.cond(&exit, &w, true));
+    assert!(!sc.cond(&exit, &w, true));
+}
+
+#[test]
+#[ignore = "needs imported assets"]
 fn all_units_entered_once_remembers_members_that_left_again() {
     let mut sc = script();
     sc.volumes = HashMap::from([("V".to_string(), Region::from_json(&serde_json::json!([[0, 0], [10, 0], [10, 10], [0, 10]])))]);
@@ -708,6 +754,7 @@ fn all_units_entered_once_remembers_members_that_left_again() {
 
 /// Every rule type of missions 2-13 is interpreted except the features still missing (docs/re/campaign.md "Missions 2-13").
 #[test]
+#[ignore = "needs imported assets"]
 fn later_missions_only_warn_about_known_missing_features() {
     let mut warned = std::collections::BTreeSet::new();
     for id in (2..=13).map(|n| format!("mission{n:02}")).chain(["tutorial".into(), "basic_tutorial".into()]) {
@@ -730,6 +777,7 @@ fn later_missions_only_warn_about_known_missing_features() {
 }
 
 #[test]
+#[ignore = "needs imported assets"]
 fn event_effects_and_special_effects_are_forwarded() {
     let mut s = crate::campaign::load_id("mission02").script;
     let w = vec![unit("x", PLAYER, Vec3::ZERO)];
@@ -760,6 +808,7 @@ fn polygons_skip_malformed_vertices_and_unknown_volumes_contain_nothing() {
     assert_eq!(leash(&sc, "Zone", None, Vec3::new(50.0, 2.0, -5.0)), Some(Vec3::new(5.0, 2.0, -5.0)), "outside: back to the centre");
 }
 #[test]
+#[ignore = "needs imported assets"]
 fn full_tutorial_camera_objective_clears_by_timer_or_by_leaving_the_start_area() {
     // No rule watches the camera: 'Try Out Camera' ends 30 s after line 03D, or when the ship leaves 'Player Wander @ Start'.
     for leave in [false, true] {

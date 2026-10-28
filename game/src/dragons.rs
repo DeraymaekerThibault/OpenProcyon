@@ -40,7 +40,7 @@ impl Dragon {
 }
 
 pub fn plugin(app: &mut App) {
-    app.add_systems(Update, think.after(crate::input).before(crate::sail).run_if(in_state(crate::menu::Screen::Battle)));
+    app.add_systems(FixedUpdate, think.in_set(crate::BattleSet::Orders).run_if(in_state(crate::menu::Screen::Battle)));
 }
 
 pub fn spawn(commands: &mut Commands, assets: &AssetServer, data: &Value) {
@@ -76,7 +76,7 @@ pub fn spawn(commands: &mut Commands, assets: &AssetServer, data: &Value) {
                 roars: id.max(0) as usize,
                 flap: id as f32,
             },
-            WorldAssetRoot(assets.load(GltfAssetLabel::Scene(0).from_asset(crate::data::model(&format!("{scene}.glb"))))),
+            crate::data::scene(assets, &format!("{scene}.glb")),
             Transform::from_translation(pos).with_rotation(Quat::from_rotation_y(heading)),
             Visibility::Inherited,
         ));
@@ -111,7 +111,7 @@ fn think(
     let Some(mission) = mission else { return };
     let sc = &mission.script;
     let def = &mission.data["environment"]["dragon"];
-    let dt = time.delta_secs().min(crate::MAX_SIM_STEP);
+    let dt = time.delta_secs();
     let now = time.elapsed_secs();
     let max_speed = def["physics"]["MaxSpeed"].as_f64().unwrap_or(12.0) as f32;
     let sight = def["sight"].as_f64().unwrap_or(500.0) as f32;
@@ -163,9 +163,7 @@ fn think(
                 .filter(|s| !s.3.destroyed && s.4.is_none_or(|m| m.visible) && s.1.translation.distance(tf.translation) < sight * 1.5)
                 .map(|s| (s.0, s.1.translation, s.2, s.4, s.5))
         };
-        let nearest = |pred: &dyn Fn(Option<&MissionShip>, bool) -> bool| {
-            candidates().filter(|c| pred(c.3, c.4)).min_by(|a, b| a.1.distance(tf.translation).total_cmp(&b.1.distance(tf.translation)))
-        };
+        let nearest = |pred: &dyn Fn(Option<&MissionShip>, bool) -> bool| crate::nearest(candidates().filter(|c| pred(c.3, c.4)), tf.translation, |c| c.1);
         let ordered = nearest(&|m, primary| m.is_some_and(|m| d.attack.iter().any(|g| sc.answers(m.id, &m.owner, &m.name, primary, g))));
         let hostile = || nearest(&|m, _| m.is_some_and(|m| sc.hostile(&animal.owner, &m.owner)));
         let target = match (d.fleeing, d.stance) {
