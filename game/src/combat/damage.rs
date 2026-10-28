@@ -111,16 +111,15 @@ pub fn damage_fx(
     fxl: Res<FxLib>,
     assets: Res<AssetServer>,
     mut rng: Local<Rng>,
-    mut ships: Query<(Entity, &Transform, &Ship, &Health, &mut DamageFx, Option<&Sinking>)>,
+    mut ships: Query<(Entity, &Transform, &Ship, &Health, &mut DamageFx)>,
 ) {
     const NAMES: [&str; 5] = ["", "Damaged Section_Light", "Damaged Section_Medium", "Damaged Section_Heavy", "Damaged Section_Destroyed"];
-    for (e, tf, ship, h, mut d, sinking) in &mut ships {
+    for (e, tf, ship, h, mut d) in &mut ships {
+        // A destroyed ship's smoke goes at once: it would otherwise ride on the tumbling breakup pieces (owner's call).
         if h.destroyed {
-            if sinking.is_none() {
-                for (_, effect) in &mut d.0 {
-                    if let Some(effect) = effect.take() {
-                        commands.entity(effect).try_despawn();
-                    }
+            for (_, effect) in &mut d.0 {
+                if let Some(effect) = effect.take() {
+                    commands.entity(effect).try_despawn();
                 }
             }
             continue;

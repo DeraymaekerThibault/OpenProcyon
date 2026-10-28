@@ -417,7 +417,7 @@ fn hit_ship(
     if let (Some(size), true) = (bd.decal, hp.sections[k] < before) {
         let inv = stf.to_matrix().inverse();
         let material = if sec.material.contains("Cloth") { "Cloth" } else { key };
-        scars.write(crate::decals::Scar { ship: se, local: inv.transform_point3(at), dir: inv.transform_vector3(s.vel).normalize_or_zero(), material, size });
+        scars.write(crate::decals::Scar { ship: se, section: k, local: inv.transform_point3(at), dir: inv.transform_vector3(s.vel).normalize_or_zero(), material, size });
     }
     if let Some(fire_str) = outcome.fire {
         let local = Transform::from_translation(stf.to_matrix().inverse().transform_point3(at));
