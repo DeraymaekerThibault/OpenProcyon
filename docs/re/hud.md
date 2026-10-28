@@ -55,3 +55,12 @@ at the living hostile base named by a rule the human wins by (`Victory::objectiv
 
 What marks a targeted base is not known. A lone Man-O-War cannot beat a Procyon base on Easy (26 guns; it was sunk four times at 137-266 units, and its clicks on the base never
 made it fire at the base): the destruction of a base part has not been filmed yet (issue #97).
+
+## Skirmish team objective (rule action `Setup Team Objective`)
+
+Observed on retail, Border Dispute on Easy, the first ~25 s of a battle and every control of the bottom bar: the skirmish HUD shows **no
+objective text** (no panel, the chat history is empty, the bar buttons are pause, fleet commands, chat history, waypoint mode, plus the
+weapon-bar and ship-bar toggles). The only objective cue is the compass arrow on the ship's ring (gold pointer, the same art as the
+campaign's objective arrow). So the rule's task text is not displayed in skirmish; its point drives the arrow, and a team whose rule says
+`NO OBJECTIVE POINT` (e.g. the Pirates on Ambush) presumably gets none (PROVISIONAL: only the Navy side's arrow was observed, and whether
+the starmap shows an objective marker was not checked). The remake already draws that arrow towards the base the end rule says to destroy.
