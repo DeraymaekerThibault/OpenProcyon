@@ -9,6 +9,7 @@ rust-version = "1.97.1" # Bevy 0.20
 ab_glyph = "0.2.32"
 bevy = { version = "0.20", default-features = false, features = ["default_app", "3d_bevy_render", "ui_bevy_render", "scene", "std", "bevy_winit", "default_font", "multi_threaded", "x11", "wayland", "bevy_audio", "vorbis"] }
 serde_json = { version = "1", features = ["preserve_order"] }
+serde = { version = "1", features = ["derive"] }
 
 [target.'cfg(unix)'.dependencies]
 wayland-sys = { version = "0.31", features = ["dlopen"] }

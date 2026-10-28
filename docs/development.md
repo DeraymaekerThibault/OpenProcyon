@@ -131,6 +131,10 @@ Tag battle-owned roots for scenario cleanup and test returning to the same ship/
 ## Data and generated assets
 
 - **Ships:** `assets/ships/<Id>/` (stats, hit geometry, hull mesh, names, dock points per ship).
+  `data/ships.rs` deserializes ship definitions and hit geometry into private input structs, then converts to the existing
+  runtime `Class` types. Keep section/mount insertion order, coordinate/angle conversions and older-mod defaults unchanged.
+  Required typed assets report the logical file, resolved source (including replacement mod symlinks), and parse location or
+  reference field. Unknown fields remain allowed; present fields with invalid types are rejected rather than silently defaulted.
 - **Definitions:** `assets/data/weapons/`, `assets/data/crew.json`, `content/data/hud/bar.json`.
 - **Shipped content:** `content/` holds files that ship with the code, never imported: fonts (URW base35), hand-written data (`data/hud/bar.json`) and the voice event table. The game overlays it on the imported assets like a mod (`assets_dir()` in `lib.rs`), so a file there replaces the imported one of the same path.
 - **World/mission data:** `assets/maps/<id>/` (map, mission, media, backdrop); export coverage is broader than playable runtime support.

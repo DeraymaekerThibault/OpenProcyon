@@ -4,6 +4,21 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
+mod ships;
+pub use ships::load_class;
+
+fn asset_context(path: &std::path::Path) -> String {
+    let source = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    format!("{} (source {})", path.display(), source.display())
+}
+
+/// Typed required asset with the resolved source path and serde's field/line/column diagnostic.
+fn read_typed<T: serde::de::DeserializeOwned>(path: &std::path::Path) -> Result<T, String> {
+    let context = asset_context(path);
+    let bytes = std::fs::read(path).map_err(|e| format!("{context}: {e}; run tools/build_assets.sh if assets are missing"))?;
+    serde_json::from_slice(&bytes).map_err(|e| format!("{context}: {e}"))
+}
+
 /// Asset path of a converted model given its file name (`NavyCutterShip.glb`): GLBs live in `models/<category>/` (tools/models.py);
 /// the folder is found by scanning once, so mods may add models anywhere. Unknown names fall back to the asset root.
 pub fn model(file: &str) -> String {
@@ -448,149 +463,6 @@ pub fn map_json(id: &str) -> Option<Value> {
 pub fn load_weapons(root: &std::path::Path) -> (HashMap<String, GunDef>, HashMap<String, BulletDef>) {
     let table = |file: &str| read_json(&root.join("data/weapons").join(file)).as_object().unwrap().clone();
     (table("guns.json").iter().map(|(k, g)| (k.clone(), gun_def(g))).collect(), table("bullets.json").iter().map(|(k, b)| (k.clone(), bullet_def(b))).collect())
-}
-
-/// Ship definition `ships/<name>/ship.json` plus its hit meshes (`geometry.json` of the ship named by "geometry"); see docs/data-format.md.
-pub fn load_class(root: &std::path::Path, name: &str, guns: &HashMap<String, GunDef>) -> Class {
-    let j = read_json(&root.join(format!("ships/{name}/ship.json")));
-    let geometry = read_json(&root.join(format!("ships/{}/geometry.json", j["geometry"].as_str().unwrap_or(name))));
-    let sections: Vec<Section> = j["sections"]
-        .as_object()
-        .unwrap()
-        .iter()
-        .map(|(label, s)| {
-            let geo = &geometry[s["layer"].as_str().unwrap()];
-            let (a, b) = (conv_v(&geo["aabb"][0]), conv_v(&geo["aabb"][1]));
-            let t = geo["tris"].as_array().unwrap();
-            Section {
-                label: label.clone(),
-                layer: s["layer"].as_str().unwrap().into(),
-                material: s["material"].as_str().unwrap().into(),
-                hp: num(&s["hp"]),
-                core_pct: num(&s["core_pct"]),
-                min: a.min(b),
-                max: a.max(b),
-                vital: s["vital_ship"].as_bool().unwrap(),
-                speed: s["vital_speed"].as_bool().unwrap(),
-                turn: s["vital_turn"].as_bool().unwrap(),
-                mission: s["vital_mission"].as_bool().unwrap_or(false),
-                destruct: s["destruct"].is_object().then(|| Destruct {
-                    fx: s["destruct"]["fx"].as_str().map(String::from),
-                    start: num(&s["destruct"]["start"]),
-                    end: num(&s["destruct"]["end"]),
-                    vel: conv(num(&s["destruct"]["vel"][0]), num(&s["destruct"]["vel"][1]), num(&s["destruct"]["vel"][2])),
-                }),
-                debris: s["debris"]["model"].as_str().map(|m| (m.to_string(), conv_v(&s["debris"]["pivot"]))),
-                debris_fx: s["debris_fx"].as_str().map(String::from),
-                tris: t
-                    .chunks(9)
-                    .map(|c| {
-                        let p = |i: usize| conv(num(&c[i]), num(&c[i + 1]), num(&c[i + 2]));
-                        [p(0), p(3), p(6)]
-                    })
-                    .collect(),
-            }
-        })
-        .collect();
-    let mounts: Vec<Mount> = j["guns"]
-        .as_object()
-        .unwrap()
-        .values()
-        .map(|g| {
-            let r = &g["rot"];
-            let p = &g["pos"];
-            // Game rotation -> Bevy axes: the roll about the bow axis (about pi for inverted mounts) is outermost and the yaw is turned
-            // in the rolled frame, so an inverted port mount's yaw of -90 degrees still faces port (every ship's inverted lancers).
-            let rot = Quat::from_rotation_z(-num(&r[1])) * Quat::from_rotation_y(num(&r[0])) * Quat::from_rotation_x(num(&r[2]));
-            Mount {
-                pos: conv(num(&p[0]), num(&p[1]), num(&p[2])),
-                rot,
-                arc: num(&g["arc_deg"]).to_radians(),
-                gun: g["gun"].as_str().unwrap().into(),
-                bank: g["bank"].as_str().and_then(|b| b.trim_start_matches("Bank").parse().ok()).unwrap_or(0),
-                parent: g["parent_layer"].as_str().and_then(|l| j["sections"].as_object().unwrap().values().position(|s| s["layer"].as_str() == Some(l))),
-            }
-        })
-        .collect();
-    let hull = |f: &dyn Fn(&Section) -> bool| sections.iter().filter(|s| f(s)).fold((Vec3::MAX, Vec3::MIN), |(a, b), s| (a.min(s.min), b.max(s.max)));
-    let (hmn, hmx) = hull(&|s| s.vital);
-    let (amn, amx) = hull(&|_| true);
-    let ph = &j["physics"];
-    let p = |k: &str| num(&ph[k]);
-    let engage = if mounts.is_empty() { 60.0 } else { mounts.iter().map(|m| guns[&m.gun].range[0]).sum::<f32>() / mounts.len() as f32 };
-    let mut banks: Vec<(usize, f32)> = mounts.iter().map(|m| (m.bank, guns[&m.gun].range[1])).collect();
-    banks.sort_by_key(|b| b.0);
-    banks.dedup_by_key(|b| b.0);
-    let reach = if banks.is_empty() { 125.0 } else { banks.iter().map(|b| b.1).sum::<f32>() / banks.len() as f32 };
-    let bounds = if ph["MinExtents"].is_array() && ph["MaxExtents"].is_array() {
-        let a = crate::game_to_bevy(&ph["MinExtents"]);
-        let b = crate::game_to_bevy(&ph["MaxExtents"]);
-        [a.min(b), a.max(b)]
-    } else {
-        [amn, amx]
-    };
-    let glb = format!("ships/{}/model.glb", j["model"].as_str().unwrap_or(name));
-    let model_bytes = std::fs::read(root.join(&glb)).unwrap_or_default();
-    let nodes = glb_json(&model_bytes).map(|(doc, _)| doc);
-    let point = |kind: &str| {
-        nodes.as_ref()?["nodes"]
-            .as_array()?
-            .iter()
-            .find(|n| n["extras"]["kind"] == kind)
-            .map(|n| Vec3::new(num(&n["translation"][0]), num(&n["translation"][1]), num(&n["translation"][2])))
-    };
-    let hull_bound = sections.iter().map(|s| s.min.abs().max(s.max.abs()).length()).fold(0.0, f32::max);
-    let centre = if hmn.x <= hmx.x { (hmn + hmx) / 2.0 } else { (amn + amx) / 2.0 };
-    let radius = 0.5 * (amx - amn).x.max((amx - amn).z) + 2.0;
-    Class {
-        name: name.into(),
-        race: j["race"].as_str().unwrap_or("").into(),
-        skirmish: j["skirmish"].as_bool().unwrap_or(false),
-        glb,
-        mounts,
-        sections,
-        core_hp: num(&j["core_hp"]),
-        phys: Physics { mass: p("Mass"), thrust: p("MaxThrust"), max_speed: p("MaxSpeed"), rot_friction: p("RotationalFriction"), max_ang_acc: p("MaxAngularAcceleration") },
-        flag: {
-            let at = |l: &str| j["flags"].as_array()?.iter().find(|f| f["label"] == l).map(|f| conv(num(&f["pos"][0]), num(&f["pos"][1]), num(&f["pos"][2])));
-            at("Flag_Top").zip(at("Flag_Bottom"))
-        },
-        engines: j["engines"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|e| {
-                let (p, r) = (&e["pos"], &e["rot"]);
-                (conv(num(&p[0]), num(&p[1]), num(&p[2])), Quat::from_rotation_y(num(&r[0])), e["fx"].as_str().unwrap().to_string())
-            })
-            .collect(),
-        explosion_fx: j["explosion_fx"].as_str().map(String::from),
-        engine_snd: std::array::from_fn(|i| j["engine_snd"][i].as_str().map(String::from)),
-        // PROVISIONAL fallback 0.65 (the most common retail value) for imports and mods without the field.
-        ring: j["ring"].as_f64().unwrap_or(0.65) as f32,
-        centre,
-        radius,
-        hull_bound,
-        engage,
-        reach,
-        sight: j["sight"].as_f64().unwrap_or(400.0) as f32,
-        repair_fx: j["repair_fx"].as_str().map(String::from),
-        // Older exports lack the flag; the submersible is the only cloakable hull in the retail data.
-        cloakable: j["cloakable"].as_bool().unwrap_or_else(|| name.contains("Submersible")),
-        points: j["points"].as_u64().unwrap_or(0) as u32,
-        crew_posts: j["crew_posts"].as_object().map_or(0, |m| m.values().filter_map(|v| v.as_u64()).sum::<u64>() as u32),
-        display_name: j["display_name"].as_str().map(String::from),
-        icon: j["icon"].as_str().map(String::from),
-        length: ph["MaxExtents"][1].as_f64().zip(ph["MinExtents"][1].as_f64()).map_or((amx - amn).z, |(a, b)| (a - b) as f32),
-        collision_bounds: bounds,
-        mass_centre: crate::game_to_bevy(&ph["CenterOfMass"]),
-        lifeboats: j["lifeboats"].as_u64().unwrap_or(0) as u32,
-        is_lifeboat: j["is_lifeboat"].as_bool().unwrap_or(false),
-        sphere: j["sphere"]["radius"].as_f64().map_or((centre, radius), |r| (conv_v(&j["sphere"]["center"]), r as f32)),
-        // PROVISIONAL hull-end fallback for custom models without authored tow/homing nodes.
-        tow_points: [point("TowerPoint").unwrap_or(Vec3::new(0.0, 0.0, bounds[1].z)), point("ToweePoint").unwrap_or(Vec3::new(0.0, 0.0, bounds[0].z))],
-        homing_point: point("TorpedoHomingPoint").unwrap_or((hmn + hmx) * 0.5),
-    }
 }
 
 /// Ship ids: the folders of `ships/` that hold a `ship.json`, sorted.
