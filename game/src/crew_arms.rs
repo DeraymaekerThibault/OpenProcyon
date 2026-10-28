@@ -110,6 +110,10 @@ impl CrewPosts {
         let slots = slots.max(named.len() as u32).max(1);
         (named.iter().sum::<f32>() + 0.1 * (slots as usize - named.len()) as f32) / slots as f32
     }
+    /// Gunnery of the gunner in slot `slot` (the order of the ship's selectable banks); a generic hand (0.1) when the slot is empty or hidden.
+    pub fn gunner_skill(&self, slot: Option<usize>) -> f32 {
+        slot.and_then(|k| self.0[0].get(k)).and_then(|id| ability(id, "gunnery")).unwrap_or(0.1)
+    }
     /// (top-speed, rudder-torque) factors: engineers' engineering and the helmsman's navigation (docs/re/crew.md).
     pub fn handling(&self, caps: &[u32; 8]) -> (f32, f32) {
         (self.post_factor(4, "engineering", caps[4]), self.post_factor(3, "navigation", caps[3]))
@@ -1168,6 +1172,15 @@ mod tests {
         assert_eq!(heard(tab, Interaction::Pressed), ["FE_Button_Select"]);
         assert!(heard(tab, Interaction::Hovered).is_empty(), "releasing the press is silent");
         assert_eq!(heard(add, Interaction::Pressed), ["FE_List_Rollover", "FE_Add"]);
+    }
+    #[test]
+    #[ignore = "needs imported assets"]
+    fn a_gun_reads_its_own_gunner_slot() {
+        let mut posts = CrewPosts(Default::default());
+        posts.0[0] = vec!["Crew_Navy_BenH".into()];
+        assert_eq!(posts.gunner_skill(Some(0)), 0.5);
+        assert_eq!(posts.gunner_skill(Some(1)), 0.1, "an empty slot is a generic hand");
+        assert_eq!(posts.gunner_skill(None), 0.1, "a bank without a slot is a generic hand");
     }
     #[test]
     #[ignore = "needs imported assets"]
