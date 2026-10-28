@@ -323,7 +323,15 @@ pub fn spawn(commands: &mut Commands, assets: &AssetServer, lib: &Library, fxl: 
             commands.entity(*e).insert(MissionBase { id: o["id"].as_i64().unwrap_or(-1), owner: String::new() });
             continue;
         }
-        let Some((_, owner, combat)) = islands.iter().find(|(i, ..)| Some(*i) == o["id"].as_i64()) else { continue };
+        let Some((_, owner, combat)) = islands.iter().find(|(i, ..)| Some(*i) == o["id"].as_i64()) else {
+            // Most volcanoes have no setup rule; they still fire (docs/re/volcanoes.md).
+            if let Some(class) = o["type"].as_str().filter(|t| t.starts_with("Island_Volcano")).and_then(|t| lib.classes.iter().position(|c| c.name == t)) {
+                commands.entity(*e).insert(MissionBase { id: o["id"].as_i64().unwrap_or(-1), owner: String::new() });
+                let states = crate::combat::spawn_guns(commands, assets, lib, *e, class);
+                commands.entity(*e).insert((crate::combat::ArmedBase { class }, crate::combat::Health::new(&lib.classes[class]), states));
+            }
+            continue;
+        };
         commands.entity(*e).insert(MissionBase { id: o["id"].as_i64().unwrap_or(-1), owner: owner.clone() });
         // Bases are boarded only once a rule sets them Boardable (their 'Combat Strength' is what the boarders must wear down).
         commands.entity(*e).insert(crate::boarding::Boardable::base(o["type"].as_str().unwrap_or_default(), *combat, false));
