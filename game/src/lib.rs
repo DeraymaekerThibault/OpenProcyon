@@ -18,6 +18,8 @@ pub mod decals;
 pub mod docking;
 pub mod dragons;
 pub mod environment;
+#[cfg(test)]
+mod fixed_tests;
 pub mod flag;
 pub mod fx;
 pub mod lifeboats;
@@ -205,7 +207,19 @@ pub fn run(view: fn(&mut App), setup_view: fn(&mut App)) {
         .init_resource::<ship::CaptainTargets>()
         .init_resource::<course::Plot>()
         .add_systems(Startup, setup)
-        .add_plugins(smoke::plugin)
+        .add_plugins((smoke::plugin, battle_schedule))
+        .add_systems(
+            FixedUpdate,
+            (
+                ship::reconcile_fleets.in_set(BattleSet::Commands),
+                ai.in_set(BattleSet::Ai),
+                ship::fleet_follow.in_set(BattleSet::Fleet),
+                (briefing::halt_arrival, blackhole::pull, sail).chain().in_set(BattleSet::Simulate),
+                outcome.in_set(BattleSet::Outcome),
+            )
+                .run_if(in_state(menu::Screen::Battle))
+                .run_if(menu::overlay_closed),
+        )
         .add_systems(OnEnter(menu::Screen::Battle), enter_battle)
         .add_systems(OnExit(menu::Screen::Battle), scenario::reset_fleets)
         .add_systems(
@@ -214,20 +228,14 @@ pub fn run(view: fn(&mut App), setup_view: fn(&mut App)) {
                 (
                     (shot_target, restart, debug_kill).chain(),
                     briefing::update,
-                    ship::reconcile_fleets,
                     view::fleet_keys,
                     input,
-                    ai,
-                    ship::fleet_follow,
-                    blackhole::pull,
-                    sail,
                     toggle_debug,
                     camera,
                     sky,
                     wake::update,
                     blackhole::update,
                     course::update,
-                    outcome,
                     hud,
                     leave_battle,
                 )
@@ -258,15 +266,51 @@ fn setup(mut commands: Commands, cfg: Res<Config>, mut vtime: ResMut<Time<Virtua
     }
 }
 
-/// Largest simulated step per frame: `sail`/`environment` clamp dt to this, so bigger steps would desync motion from rule timers.
-const MAX_SIM_STEP: f32 = 0.1;
+/// Retail tick documented in docs/re/gunnery.md and docs/re/effects.md.
+pub const BATTLE_TICK: std::time::Duration = std::time::Duration::from_millis(33);
 
-/// Fast-forward for testing: scale virtual time; Bevy's max_delta clamps the scaled step so it never exceeds MAX_SIM_STEP.
-/// At low frame rates the effective speed drops below `speed` instead of taking unsafe steps.
+/// Ordered shared simulation stages; input and presentation stay on the frame schedules.
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum BattleSet {
+    Commands,
+    Sense,
+    Rules,
+    Ai,
+    Fleet,
+    Orders,
+    Forces,
+    Simulate,
+    Combat,
+    Cleanup,
+    Outcome,
+}
+
+fn battle_schedule(app: &mut App) {
+    app.insert_resource(Time::<Fixed>::from_duration(BATTLE_TICK)).configure_sets(
+        FixedUpdate,
+        (
+            BattleSet::Commands,
+            BattleSet::Sense,
+            BattleSet::Rules,
+            BattleSet::Ai,
+            BattleSet::Fleet,
+            BattleSet::Orders,
+            BattleSet::Forces,
+            BattleSet::Simulate,
+            BattleSet::Combat,
+            BattleSet::Cleanup,
+            BattleSet::Outcome,
+        )
+            .chain(),
+    );
+}
+
+/// Preserve the virtual-time catch-up cap; fixed ticks now advance motion and timers together.
+/// At low frame rates the effective speed drops below `speed` instead of taking unbounded catch-up steps.
 fn set_time_scale(vtime: &mut Time<Virtual>, speed: f32) {
     let speed = speed.max(0.01);
     vtime.set_relative_speed(speed);
-    vtime.set_max_delta(std::time::Duration::from_secs_f32(if speed > 1.0 { MAX_SIM_STEP } else { 0.25 }));
+    vtime.set_max_delta(std::time::Duration::from_secs_f32(if speed > 1.0 { 0.1 } else { 0.25 }));
 }
 
 pub const MAX_GAME_SPEED: f32 = 16.0;

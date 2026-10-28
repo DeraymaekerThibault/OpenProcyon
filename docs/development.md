@@ -49,6 +49,25 @@ Converted assets are found in this order: `PROCYON_ASSETS`, `assets/` in the sou
 per-user folder `$XDG_DATA_HOME/openprocyon/assets` (Linux default `~/.local/share`; `%APPDATA%\openprocyon\assets` on Windows). Without
 any, the game exits with import instructions. `content/` is always layered on top. CLI mod/screenshot paths remain relative to the working directory.
 
+## Battle clock and scheduling
+
+Battle simulation runs in `FixedUpdate` at **0.033 s**, the interval documented in [re/gunnery.md](re/gunnery.md)
+and [re/effects.md](re/effects.md). `lib.rs::BattleSet` orders command application → sensors → rules → AI → fleet following →
+docking/boarding orders → environmental forces → ship movement → combat → cleanup/accounting → outcome. Keep plugin systems
+in the owning stage; use a local chain for dependencies within one feature. Simulation uses fixed `Res<Time>` without per-system
+delta clamps. Virtual pause and speed still control this clock; the existing per-frame virtual catch-up caps remain 0.25 s at
+normal speed and 0.1 s when fast-forwarding.
+
+Keyboard/mouse/UI capture remains in `PreUpdate`/`Update`. Store a command in the existing resource/component or registered
+message queue and consume it on a fixed tick; never read `just_pressed` in a simulation system. Frame input may wait until the
+next tick. Bevy 0.20's `TimePlugin` gates message maintenance on fixed-schedule execution, retaining commands through zero-tick
+frames and fixed output for frame readers. `fixed_tests.rs` verifies both directions, including multi-tick catch-up and no replay.
+
+Presentation remains frame-driven: cameras, HUD, ropes/markers, damage meshes, breakup/debris, particles and audio playback.
+Visual RNG is local, separate from combat RNG, so rendering extra frames cannot change damage rolls. Opening briefing speech
+keeps its explicit real-time clock, independent of pause/speed; its arrival halt runs per simulation tick. The existing FX
+particle interpolation is unchanged; **ship/camera interpolation is not implemented**, so fixed-rate ship stepping can be visible.
+
 ## Layers
 
 The game is one simulation with interchangeable presentations, so every presentation shares every rule and data path and differs
@@ -102,7 +121,7 @@ Keep the existing module boundaries. New files should own a real feature, not ju
 | `setup.rs` | First run without imported assets: its own small app with the "Import your game" screen state, install discovery (Steam libraries, installed-program entries, Program Files or a Wine prefix) and folder checks, the importer child process and its `[n/total]` progress, then a relaunch of the game | Changing how a player gets from a download to the menu |
 | `menu.rs` | Front-end model: screens, `Action`s and their handling, battle entry, the Esc in-game menu (overlay, pauses; Save/Load/Quit), `MenuModel` for the views; `menu/skirmish.rs` lobby slots, races and fleets; `menu/saves.rs` save/load lists and F3/F4 quick save/load; `menu/settings.rs` sound/display options | Changing front-end choices or transitions |
 | `modding.rs` | Asset overlays, merge semantics and inheritance | Changing override rules; preserve base assets and test merges |
-| `environment.rs` | Shared frame-boundary sight/group/contact snapshot, nebula rendering/energy/occlusion and whale motion/calls | Changing environment simulation or shared detection (`docs/re/visibility.md`); UI consumers must not invent separate range tests |
+| `environment.rs` | Shared fixed-tick sight/group/contact snapshot (also refreshed for frame input), nebula rendering/energy/occlusion and whale motion/calls | Changing environment simulation or shared detection (`docs/re/visibility.md`); UI consumers must not invent separate range tests |
 | `fx.rs`, `wake.rs`, `flag.rs`, `course.rs`, `audio.rs` | Feature-specific rendering/audio | Changing those presentations; do not put their tuning in `lib.rs` |
 
 `mod.rs` files re-export their children, so `crate::combat::X` / `crate::rules::X` paths are stable. Split further only when the next concrete feature needs a clearer interface—no empty framework or blanket directory reshuffle.

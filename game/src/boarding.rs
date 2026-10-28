@@ -338,14 +338,23 @@ fn status(boarders: Boarders, mut st: ResMut<BoardStatus>, ships: Query<Entity, 
 }
 
 pub fn plugin(app: &mut App) {
-    app.add_message::<BoardMsg>().add_message::<Captured>().add_message::<Settled>().init_resource::<BoardStatus>().init_resource::<Ropes>().add_systems(
-        Update,
-        (dev_board, handle_messages, set_flags, grapple_orders, winch, ai_boarding, fights, settled, status, ropes)
-            .chain()
-            .before(crate::input)
-            .run_if(in_state(crate::menu::Screen::Battle))
-            .run_if(crate::menu::overlay_closed),
-    );
+    app.add_message::<BoardMsg>()
+        .add_message::<Captured>()
+        .add_message::<Settled>()
+        .init_resource::<BoardStatus>()
+        .init_resource::<Ropes>()
+        .add_systems(
+            FixedUpdate,
+            (handle_messages, set_flags, grapple_orders, winch, ai_boarding, fights, settled)
+                .chain()
+                .in_set(crate::BattleSet::Orders)
+                .run_if(in_state(crate::menu::Screen::Battle))
+                .run_if(crate::menu::overlay_closed),
+        )
+        .add_systems(
+            Update,
+            (dev_board, cancel_grapple_order, status, ropes).chain().before(crate::input).run_if(in_state(crate::menu::Screen::Battle)).run_if(crate::menu::overlay_closed),
+        );
 }
 
 /// The lines between ships, for views to draw (the original's Rope effect): world end points and how much longer than the gap the
@@ -564,26 +573,33 @@ fn set_flags(mut msgs: MessageReader<BoardMsg>, mut flags: Query<&mut Boardable>
     }
 }
 
+fn cancel_grapple_order(keys: Res<ButtonInput<KeyCode>>, mut commands: Commands, player: Query<Entity, With<PlayerShip>>) {
+    if keys.just_pressed(KeyCode::Backspace) {
+        for e in &player {
+            commands.entity(e).remove::<GrappleOrder>();
+        }
+    }
+}
+
 /// The Grapple order: close to harpoon range, stop, fire; the hook bites after its flight.
 fn grapple_orders(
     mut commands: Commands,
     time: Res<Time>,
-    keys: Res<ButtonInput<KeyCode>>,
     lib: Res<Library>,
     assets: Option<Res<AssetServer>>,
     mut rng: ResMut<Rng>,
     mut sfx: MessageWriter<Sfx>,
-    mut orders: Query<(Entity, &GrappleOrder, &mut Ship, &Transform, &Health, Has<PlayerShip>)>,
+    mut orders: Query<(Entity, &GrappleOrder, &mut Ship, &Transform, &Health)>,
     mut hooks: Query<(Entity, &mut Grapple, &Transform)>,
     others: Query<(&Transform, &Ship, &Health), Without<GrappleOrder>>,
     player: Query<Entity, With<PlayerShip>>,
 ) {
-    for (e, order, mut ship, tf, health, human) in &mut orders {
+    for (e, order, mut ship, tf, health) in &mut orders {
         let Ok((ttf, tship, thealth)) = others.get(order.0) else {
             commands.entity(e).remove::<GrappleOrder>();
             continue;
         };
-        if health.destroyed || thealth.destroyed || (human && keys.just_pressed(KeyCode::Backspace)) {
+        if health.destroyed || thealth.destroyed {
             commands.entity(e).remove::<GrappleOrder>();
             continue;
         }
@@ -627,7 +643,7 @@ fn winch(
     fighters: Query<(Entity, &Boarding)>,
     mut ships: Query<(&mut Ship, &Transform, &mut Drift, &Health)>,
 ) {
-    let dt = time.delta_secs().min(crate::MAX_SIM_STEP);
+    let dt = time.delta_secs();
     for (e, mut g) in &mut hooks {
         if g.flight > 0.0 {
             continue;

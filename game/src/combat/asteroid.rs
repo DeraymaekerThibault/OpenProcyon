@@ -137,7 +137,7 @@ pub fn asteroid_motion(
             rock.forward = true;
         }
     }
-    let dt = time.delta_secs().min(crate::MAX_SIM_STEP);
+    let dt = time.delta_secs();
     for (_, mut rock, mut tf, _) in &mut rocks {
         if rock.hp <= 0.0 {
             continue;

@@ -198,28 +198,35 @@ impl Docker {
     }
 }
 pub fn plugin(app: &mut App) {
-    app.add_message::<DockMsg>().add_systems(
-        Update,
-        (ai_repair_dock, handle_messages, routine, tow_routine, markers)
-            .chain()
-            .before(crate::input)
-            .run_if(in_state(crate::menu::Screen::Battle))
-            .run_if(crate::menu::overlay_closed),
-    );
+    app.add_message::<DockMsg>()
+        .add_systems(
+            FixedUpdate,
+            (ai_repair_dock, handle_messages, routine, tow_routine)
+                .chain()
+                .in_set(crate::BattleSet::Orders)
+                .run_if(in_state(crate::menu::Screen::Battle))
+                .run_if(crate::menu::overlay_closed),
+        )
+        .add_systems(Update, (cancel_input, markers).chain().before(crate::input).run_if(in_state(crate::menu::Screen::Battle)).run_if(crate::menu::overlay_closed));
+}
+
+fn cancel_input(keys: Res<ButtonInput<KeyCode>>, fleets: Res<crate::ship::Fleets>, player: Query<Entity, With<PlayerShip>>, mut msgs: MessageWriter<DockMsg>) {
+    if keys.just_pressed(KeyCode::Backspace)
+        && let Some(e) = fleets.selected.or_else(|| player.single().ok())
+    {
+        msgs.write(DockMsg::CancelShip(e));
+    }
 }
 
 fn handle_messages(
     mut msgs: MessageReader<DockMsg>,
-    keys: Res<ButtonInput<KeyCode>>,
     mut commands: Commands,
     player: Query<Entity, With<PlayerShip>>,
     pos: Query<&Transform, With<Ship>>,
     mut dockables: Query<&mut Dockable>,
     dockers: Query<&Docker>,
     mut mission: Option<ResMut<Mission>>,
-    fleets: Option<Res<crate::ship::Fleets>>,
 ) {
-    let cancel = keys.just_pressed(KeyCode::Backspace);
     for m in msgs.read() {
         match *m {
             DockMsg::TowStart { tower, towee } => {
@@ -287,18 +294,6 @@ fn handle_messages(
                     commands.entity(e).remove::<Docker>();
                 }
             }
-        }
-    }
-    // X / Stop abort the player's approach (a ship already docked stays until its time is up; a registered tow is kept).
-    if cancel && let Some(p) = fleets.as_ref().and_then(|f| f.selected).or_else(|| player.single().ok()) {
-        commands.entity(p).remove::<Tower>();
-        if let Ok(d) = dockers.get(p)
-            && matches!(d.phase, Phase::Wait | Phase::Approach)
-        {
-            if let Ok(mut dk) = dockables.get_mut(d.dockee) {
-                dk.release(p);
-            }
-            commands.entity(p).remove::<Docker>();
         }
     }
 }

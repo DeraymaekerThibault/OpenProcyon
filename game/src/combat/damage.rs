@@ -91,7 +91,7 @@ pub fn spawn_debris(commands: &mut Commands, assets: &AssetServer, fxl: &FxLib, 
 
 /// Debris pieces drift on with their ship's velocity, sink and tumble, then go.
 pub fn debris(mut commands: Commands, time: Res<Time>, mut q: Query<(Entity, &mut Transform, &mut Debris)>) {
-    let dt = time.delta_secs().min(crate::MAX_SIM_STEP);
+    let dt = time.delta_secs().min(0.1);
     for (e, mut tf, mut d) in &mut q {
         d.age += dt;
         if d.age > DEBRIS_LIFE {
@@ -110,7 +110,7 @@ pub fn damage_fx(
     lib: Res<Library>,
     fxl: Res<FxLib>,
     assets: Res<AssetServer>,
-    mut rng: ResMut<Rng>,
+    mut rng: Local<Rng>,
     mut ships: Query<(Entity, &Transform, &Ship, &Health, &mut DamageFx, Option<&Sinking>)>,
 ) {
     const NAMES: [&str; 5] = ["", "Damaged Section_Light", "Damaged Section_Medium", "Damaged Section_Heavy", "Damaged Section_Destroyed"];

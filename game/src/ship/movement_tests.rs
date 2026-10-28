@@ -292,7 +292,7 @@ fn open_map_ships_get_distinct_names_from_their_type_pool() {
     assert!(namer.pick(&lib, "Ship_Nonexistent").is_none());
 }
 #[test]
-fn time_scale_never_exceeds_max_sim_step() {
+fn time_scale_preserves_virtual_catch_up_caps() {
     use bevy::time::{TimePlugin, TimeUpdateStrategy};
     use std::time::Duration;
     // Virtual delta after one real frame of `raw` seconds at `speed`.
@@ -305,7 +305,7 @@ fn time_scale_never_exceeds_max_sim_step() {
         app.world().resource::<Time<Virtual>>().delta_secs()
     };
     assert!((step(4.0, 0.01) - 0.04).abs() < 1e-4); // fast frame: full 4x
-    assert!(step(16.0, 1.0 / 60.0) <= MAX_SIM_STEP + 1e-4); // vsync frame: capped
+    assert!(step(16.0, 1.0 / 60.0) <= 0.1 + 1e-4); // vsync frame: capped
     assert!((step(1.0, 0.2) - 0.2).abs() < 1e-4); // 1x keeps Bevy's normal 0.25 s hitch clamp
 }
 

@@ -45,7 +45,6 @@ struct Extra<'w, 's> {
     meteors: MessageWriter<'w, crate::nebula::MeteorRoute>,
     storm_shift: Res<'w, crate::nebula::StormShift>,
     campaign_points: ResMut<'w, crate::campaign::CampaignPoints>,
-    binds: Res<'w, crate::bindings::Bindings>,
     sensors: Res<'w, crate::environment::Sensors>,
     voices: Query<'w, 's, Entity, With<crate::briefing::Voice>>,
     fxlib: Option<Res<'w, crate::fx::FxLib>>,
@@ -65,22 +64,39 @@ struct MusicFade {
     kill: bool,
 }
 
+#[derive(Resource, Default)]
+struct RuleInput {
+    skip_speech: bool,
+    dock: bool,
+}
+
+fn capture_input(keys: Res<ButtonInput<KeyCode>>, binds: Res<crate::bindings::Bindings>, mission: Res<Mission>, mut input: ResMut<RuleInput>) {
+    input.skip_speech |= mission.opening.is_none() && binds.just_pressed(&keys, crate::bindings::Act::SkipSpeech);
+    input.dock |= keys.just_pressed(KeyCode::KeyD);
+}
+
 pub fn plugin(app: &mut App) {
     use crate::menu::Screen;
-    app.insert_resource(crate::campaign::CampaignPoints::load()).add_systems(
-        Update,
-        (
-            update.after(crate::briefing::update).before(crate::input),
-            crate::smoke::screenshot_hooks.after(update),
-            crate::smoke::autoplay_end.after(update),
-            mission_ai.after(update).before(crate::ship::fleet_follow),
-            leash_player.after(update).before(crate::sail),
-            presentation.after(nis_camera),
-            (ui, music, nis_camera.after(crate::camera)).after(update),
+    app.insert_resource(crate::campaign::CampaignPoints::load())
+        .init_resource::<RuleInput>()
+        .add_systems(
+            FixedUpdate,
+            (update.in_set(crate::BattleSet::Rules), (mission_ai, leash_player).chain().in_set(crate::BattleSet::Ai))
+                .run_if(in_state(Screen::Battle))
+                .run_if(resource_exists::<Mission>),
         )
-            .run_if(in_state(Screen::Battle))
-            .run_if(resource_exists::<Mission>),
-    );
+        .add_systems(
+            Update,
+            (
+                capture_input.before(crate::briefing::update),
+                crate::smoke::screenshot_hooks,
+                crate::smoke::autoplay_end,
+                presentation.after(nis_camera),
+                (ui, music, nis_camera.after(crate::camera)),
+            )
+                .run_if(in_state(Screen::Battle))
+                .run_if(resource_exists::<Mission>),
+        );
 }
 
 /// A mission ship as the rule dispatcher reads and changes it; named fields instead of tuple positions.
@@ -152,7 +168,7 @@ fn follow_path(
 fn update(
     mission: Option<ResMut<Mission>>,
     time: Res<Time>,
-    keys: Res<ButtonInput<KeyCode>>,
+    mut input: ResMut<RuleInput>,
     cfg: Res<Config>,
     lib: Res<Library>,
     mut orbit: ResMut<Orbit>,
@@ -169,6 +185,7 @@ fn update(
 ) {
     let Some(mut mission) = mission else { return };
     let mission = &mut *mission;
+    let input = std::mem::take(&mut *input);
     // Tutorials run the same interpreter but do not count toward the campaign.
     if mission.id.starts_with("mission") {
         extra.campaign_points.record(&mission.id, mission.script.score);
@@ -204,7 +221,7 @@ fn update(
         }
     }
     // Space (Skip Speech Event) ends the current line in every cutscene/gameplay speech, as in the opening NIS.
-    if !opening && extra.binds.just_pressed(&keys, crate::bindings::Act::SkipSpeech) && script.skip_speech() {
+    if !opening && input.skip_speech && script.skip_speech() {
         for e in &extra.voices {
             commands.entity(e).despawn();
         }
@@ -496,7 +513,7 @@ fn update(
         if wants && near {
             mission.script.hint = "Left-click RLS Bounty (or press D) to dock".into();
         }
-        if near && wants && (keys.just_pressed(KeyCode::KeyD) || matches!(cfg.script.as_deref(), Some("mission" | "dock"))) {
+        if near && wants && (input.dock || matches!(cfg.script.as_deref(), Some("mission" | "dock"))) {
             extra.dock.write(DockMsg::Dock { docker: None, dockee: t.e });
         }
     }
@@ -984,6 +1001,32 @@ fn nis_camera(
 #[cfg(test)]
 mod ai_tests {
     use super::*;
+
+    #[test]
+    fn rule_keys_latch_until_a_tick_and_opening_skip_is_not_queued_twice() {
+        let data = serde_json::json!({"rules": []});
+        let mission = Mission { id: "synthetic".into(), script: Script::new(&data, serde_json::json!({})), data, opening: None };
+        let mut app = App::new();
+        let binds = crate::bindings::Bindings::default();
+        let skip = binds.key(crate::bindings::Act::SkipSpeech);
+        app.insert_resource(mission).insert_resource(binds).init_resource::<ButtonInput<KeyCode>>().init_resource::<RuleInput>().add_systems(Update, capture_input);
+        app.world_mut().resource_mut::<ButtonInput<KeyCode>>().press(skip);
+        app.world_mut().resource_mut::<ButtonInput<KeyCode>>().press(KeyCode::KeyD);
+        app.update();
+        app.world_mut().resource_mut::<ButtonInput<KeyCode>>().clear();
+        app.update();
+        let pending = std::mem::take(&mut *app.world_mut().resource_mut::<RuleInput>());
+        assert!(pending.skip_speech && pending.dock, "commands survive frames without a simulation tick");
+        app.update();
+        let pending = app.world().resource::<RuleInput>();
+        assert!(!pending.skip_speech && !pending.dock, "consumed commands are not repeated");
+        app.world_mut().resource_mut::<Mission>().opening = Some(default());
+        app.world_mut().resource_mut::<ButtonInput<KeyCode>>().reset(skip);
+        app.world_mut().resource_mut::<ButtonInput<KeyCode>>().press(skip);
+        app.update();
+        assert!(!app.world().resource::<RuleInput>().skip_speech, "the opening briefing owns this skip");
+    }
+
     #[test]
     #[ignore = "needs imported assets"]
     fn mission_two_attack_volume_changes_base_owner_and_gunfire_advances_the_story() {
@@ -1000,6 +1043,7 @@ mod ai_tests {
             .init_asset::<bevy::audio::AudioSource>()
             .init_resource::<Time>()
             .init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<RuleInput>()
             .init_resource::<Target>()
             .init_resource::<crate::bindings::Bindings>()
             .init_resource::<crate::campaign::CampaignPoints>()

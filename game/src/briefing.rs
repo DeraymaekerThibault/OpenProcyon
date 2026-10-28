@@ -71,6 +71,16 @@ fn path_position(points: &[Value], mut distance: f32) -> Vec3 {
     game_to_bevy(points.last().unwrap())
 }
 
+pub(crate) fn halt_arrival(mission: Option<Res<Mission>>, mut ships: Query<&mut crate::Ship, With<crate::PlayerShip>>) {
+    if active(mission.as_deref()) {
+        for mut sh in &mut ships {
+            if sh.waypoints.is_empty() {
+                sh.order = 0;
+            }
+        }
+    }
+}
+
 pub fn update(
     mut commands: Commands,
     mut mission: Option<ResMut<Mission>>,
@@ -121,12 +131,6 @@ pub fn update(
     }
     for mut vis in &mut objectives {
         *vis = Visibility::Hidden;
-    }
-    // The arrival path ends in a halt; without this the command ship coasts on at full order into the fleet before the NIS ends.
-    for (_, _, mut sh, primary) in &mut ships {
-        if primary && sh.waypoints.is_empty() {
-            sh.order = 0;
-        }
     }
     let cue = cue_at(opening.elapsed, cues);
     let index = cue.map(|c| c.0);
