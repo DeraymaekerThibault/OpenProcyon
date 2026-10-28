@@ -329,6 +329,60 @@ fn skirmish_bases_shoot_ships_of_other_sides_only() {
 }
 
 #[test]
+fn a_volcano_lobs_one_aimed_shell_at_a_time() {
+    let mut app = App::new();
+    app.add_plugins((TaskPoolPlugin::default(), AssetPlugin::default(), TransformPlugin))
+        .init_asset::<bevy::world_serialization::WorldAsset>()
+        .init_asset::<bevy::prelude::Image>()
+        .add_message::<Sfx>()
+        .add_message::<Fired>()
+        .init_resource::<Time>()
+        .init_resource::<FxLib>()
+        .insert_resource(Library::load(&assets_dir()))
+        .insert_resource(Rng::new(7))
+        .insert_resource(Look { mesh: default(), shell: default(), enemy_shell: default() })
+        .init_resource::<crate::environment::Sensors>()
+        .add_systems(PreUpdate, crate::environment::refresh_sensors)
+        .add_systems(Update, base_fire);
+    let assets = app.world().resource::<AssetServer>().clone();
+    let lib = Library::load(&assets_dir());
+    let class = lib.index("Island_Volcano_01");
+    let spawn_base = |app: &mut App, side: Side, x: f32| {
+        let id = app.world_mut().spawn((Transform::from_xyz(x, -27.0, 0.0), crate::campaign::MissionBase { id: 1, owner: format!("base{x}") }, BaseSide(side))).id();
+        let states = spawn_guns(&mut app.world_mut().commands(), &assets, &lib, id, class);
+        app.world_mut().entity_mut(id).insert((ArmedBase { class }, Health::new(&lib.classes[class]), states));
+        app.world_mut().flush();
+        id
+    };
+    spawn_base(&mut app, Side::Enemy, 0.0);
+    spawn_base(&mut app, Side::Player, 40.0);
+    let c = lib.index("Ship_Navy_Torpedo");
+    let ship = Ship {
+        class: c,
+        side: Side::Player,
+        heading: 0.0,
+        speed: 0.0,
+        ang_vel: 0.0,
+        order: 0,
+        waypoints: vec![],
+        goal: None,
+        cap: 1.0,
+        throttle: None,
+        sail_energy: 1.0,
+        crew_speed: 1.0,
+        crew_turn: 1.0,
+    };
+    app.world_mut().spawn((Transform::from_xyz(0.0, 0.0, -120.0), ship, Health::new(&lib.classes[c]), Fires::default(), PlayerShip));
+    for _ in 0..200 {
+        app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs_f32(0.05));
+        app.update();
+    }
+    let shells: Vec<Option<Vec3>> = app.world_mut().query::<&Shell>().iter(app.world()).map(|s| s.aim).collect();
+    assert_eq!(shells.len(), 1, "six mounts take turns: one shell per cycle");
+    assert!(shells[0].is_some(), "a lob shell bursts at its aim height, not through the sea");
+}
+
+#[test]
 fn the_command_ship_holds_fire_until_an_enemy_is_clicked() {
     let mut app = App::new();
     app.add_plugins((TaskPoolPlugin::default(), AssetPlugin::default(), TransformPlugin))

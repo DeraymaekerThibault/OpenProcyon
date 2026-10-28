@@ -552,12 +552,15 @@ pub(super) fn base_fire(
     let dt = time.delta_secs();
     for (me, tf, base, armed, health, mut states, skirmish_side) in &mut bases {
         let class = &lib.classes[armed.class];
+        let volcano = class.name.starts_with("Island_Volcano");
         // The nearest visible hostile ship in sight, with its side.
         let target = ships
             .iter()
             .filter(|(_, ship, h, m, _)| {
                 !h.destroyed
                     && match (&campaign, skirmish_side) {
+                        // Volcanoes belong to nobody and fire on every visible ship.
+                        (Some(_), _) if volcano => m.is_some_and(|m| m.visible),
                         (Some(mission), _) => m.is_some_and(|m| m.visible && mission.script.hostile(&base.owner, &m.owner)),
                         (None, Some(side)) => ship.side != side.0,
                         (None, None) => false,
@@ -569,6 +572,8 @@ pub(super) fn base_fire(
             })
             .filter(|(t, _)| sensors.in_sight(me, t.entity, campaign.as_deref()))
             .min_by(|a, b| a.0.position.distance(tf.translation).total_cmp(&b.0.position.distance(tf.translation)));
+        // PROVISIONAL: a volcano fires one shell at a time, its mounts taking turns.
+        let mut volcano_cycle = None;
         for (mount, state) in class.mounts.iter().zip(states.0.iter_mut()) {
             state.cooldown -= dt;
             state.burst_timer -= dt;
@@ -583,11 +588,12 @@ pub(super) fn base_fire(
                 state.burst_left = 0;
                 continue;
             };
-            if state.burst_left == 0 && state.cooldown <= 0.0 && state.aligned {
+            if state.burst_left == 0 && state.cooldown <= 0.0 && state.aligned && volcano_cycle.is_none() {
                 state.burst_left = gun.burst;
                 fired.write(Fired { shooter: me, target: Some(aim_at.entity), bullet: gun.bullet.clone() });
                 state.cooldown = gun.burst_cycle();
                 state.burst_timer = 0.0;
+                volcano_cycle = volcano.then_some(state.cooldown);
                 state.dev = burst_deviation(gun, distance, 0.5, &mut rng);
             }
             if state.burst_left > 0 && state.burst_timer <= 0.0 {
@@ -600,12 +606,15 @@ pub(super) fn base_fire(
                 let side = skirmish_side.map_or(if target_side == Side::Player { Side::Enemy } else { Side::Player }, |b| b.0);
                 let shot = Launch {
                     vel: gun.lob.and_then(|a| lob_velocity(aim_at.position - origin, a, gun.shell_gravity())).map(|v| turn * v),
-                    aim: is_indirect(&mount.gun).then_some(aim_at.position),
+                    aim: (is_indirect(&mount.gun) || gun.lob.is_some()).then_some(aim_at.position),
                     ..default()
                 };
                 let muzzle_transform = globals.get(muzzle).ok().copied();
                 launch_shell(&mut commands, &assets, &lib, &fxl, &look, &mut sfx, gun, muzzle, muzzle_transform, origin, turn * aim_dir, side, me, Some(aim_at.entity), shot);
             }
+        }
+        if let Some(c) = volcano_cycle {
+            states.0.iter_mut().for_each(|st| st.cooldown = st.cooldown.max(c));
         }
     }
 }
