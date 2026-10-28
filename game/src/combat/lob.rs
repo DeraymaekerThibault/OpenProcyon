@@ -95,7 +95,7 @@ pub fn detonate(
             m.script.mortar_bursts.push(d.at);
         }
         if let Some(pool) = b.impact_snd.get("Wood").filter(|p| !p.is_empty()) {
-            sfx.write(Sfx { name: pool[(rng.f() * pool.len() as f32) as usize % pool.len()].clone(), at: Some(d.at), vol: b.impact_vol, max: b.impact_max });
+            sfx.write(Sfx { name: rng.pick(pool).clone(), at: Some(d.at), vol: b.impact_vol, max: b.impact_max });
         }
         let effect = |commands: &mut Commands, name: &Option<String>, at: Vec3| {
             if let Some(n) = name {
@@ -167,7 +167,7 @@ pub fn blasts(
             b.struck.push(se);
             hits.write(Hit { shooter: b.shooter.unwrap_or(e), victim: se });
             let Some(k) = nearest_section(class, stf.to_matrix().inverse().transform_point3(c)) else { continue };
-            let key = MATERIALS.iter().find(|m| class.sections[k].material.contains(**m)).copied().unwrap_or("Wood");
+            let key = material_key(&class.sections[k].material);
             apply_ship_hit(class, &mut hp, k, bd.damage[key], ms.map_or(0.0, |m| m.invuln), false, &mut rng);
         }
         for (re, rtf, mut rock) in &mut rocks {
@@ -176,7 +176,7 @@ pub fn blasts(
             }
             b.struck.push(re);
             let [lo, hi, ..] = bd.damage["Stone"];
-            if rock.damage(lo + rng.f() * (hi - lo)) {
+            if rock.damage(rng.range(lo, hi)) {
                 destroyed.write(Destroyed { by: b.shooter.unwrap_or(e), victim: re });
             }
         }
@@ -226,7 +226,7 @@ pub fn strikes(lib: Res<Library>, mut rng: ResMut<Rng>, mut msgs: MessageReader<
         let class = &lib.classes[ship.class];
         let k = m.section;
         let Some(section) = class.sections.get(k).filter(|_| k < hp.sections.len()) else { continue };
-        let key = MATERIALS.iter().find(|x| section.material.contains(**x)).copied().unwrap_or("Wood");
+        let key = material_key(&section.material);
         let Some(damage) = m.damage.get(key) else { continue };
         apply_ship_hit(class, &mut hp, k, *damage, ms.map_or(0.0, |m| m.invuln), false, &mut rng);
     }

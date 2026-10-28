@@ -122,11 +122,11 @@ pub fn asteroid_motion(
         for &e in &setup.units {
             let Ok((_, mut rock, tf, mut drift)) = rocks.get_mut(e) else { continue };
             drift.0 = Vec3::ZERO; // A new rule-controlled velocity replaces previous contact motion.
-            let speed = setup.speed[0] + rng.f() * (setup.speed[1] - setup.speed[0]);
+            let speed = rng.range(setup.speed[0], setup.speed[1]);
             rock.velocity = rng.direction() * speed;
             rock.speed = speed;
             rock.axis = rng.direction();
-            rock.tumble = setup.tumble[0] + rng.f() * (setup.tumble[1] - setup.tumble[0]);
+            rock.tumble = rng.range(setup.tumble[0], setup.tumble[1]);
             rock.path = setup.path.clone();
             rock.next = if setup.closest {
                 rock.path.iter().enumerate().min_by(|a, b| a.1.distance_squared(tf.translation).total_cmp(&b.1.distance_squared(tf.translation))).map_or(0, |p| p.0)

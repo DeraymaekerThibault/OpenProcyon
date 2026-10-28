@@ -96,16 +96,24 @@ pub(super) fn apply_ship_hit(class: &Class, hp: &mut Health, k: usize, damage: [
     let [lo, hi, _crit, fire_p, fire_str] = damage;
     let protected = invuln >= 1.0;
     let was = hp.sections[k];
-    hp.sections[k] = (was - (1.0 - invuln) * (lo + rng.f() * (hi - lo))).max(0.0);
+    hp.sections[k] = (was - (1.0 - invuln) * (rng.range(lo, hi))).max(0.0);
     // Retail ignition roll per hit: chance > 0 and roll <= chance starts a fire of the bullet's initial strength.
     // PROVISIONAL: one fire per section (the original's extra gate is unknown).
     let fire = (!protected && fire_p > 0.0 && rng.f() <= fire_p && hp.sections[k] > 0.0 && fire_free).then_some(fire_str);
     // Retail: every hit that leaves a vital section at 0 HP (the killing hit and later ones) takes
     // a fresh damage roll x the summed core% of all destroyed vital sections / 100 off the core (rounding provisional).
     if !protected && class.sections[k].vital && hp.sections[k] == 0.0 {
-        hp.core -= core_bleed(class, hp, (1.0 - invuln) * (lo + rng.f() * (hi - lo)));
+        hp.core -= core_bleed(class, hp, (1.0 - invuln) * (rng.range(lo, hi)));
     }
     ShipHit { fire, lost: was > 0.0 && hp.sections[k] == 0.0 }
+}
+
+/// The bullet's impact effect at `at`, facing back along its flight.
+fn hit_fx(commands: &mut Commands, fxl: &FxLib, bd: &BulletDef, at: Vec3, vel: Vec3) {
+    if let Some(n) = &bd.hit_fx {
+        let t = Transform::from_translation(at).looking_to(-vel, Vec3::Y);
+        fx::spawn(commands, fxl, n, None, t, t, true);
+    }
 }
 
 pub(super) fn shells(
@@ -198,7 +206,7 @@ pub(super) fn shells(
                 downed.push(te);
                 commands.entity(te).despawn();
                 fx::spawn(&mut commands, &fxl, "Explosion_Light", None, at, at, true);
-                sfx.write(Sfx { name: format!("Explosion_Med0{}", 1 + (rng.f() * 8.0) as u32 % 8), at: Some(tp), vol: 0.8, max: 600.0 });
+                sfx.write(Sfx { name: format!("Explosion_Med0{}", rng.variant(8)), at: Some(tp), vol: 0.8, max: 600.0 });
             } else if let Some(fx_name) = &bd.hit_fx {
                 fx::spawn(&mut commands, &fxl, fx_name, None, at, at, true);
             }
@@ -249,12 +257,9 @@ pub(super) fn shells(
                 && !s.harmless
             {
                 let [lo, hi, ..] = bd.damage["Dragon"];
-                d.hurt(lo + rng.f() * (hi - lo), s.shooter, now);
+                d.hurt(rng.range(lo, hi), s.shooter, now);
             }
-            if let Some(n) = &bd.hit_fx {
-                let tf = Transform::from_translation(p0 + (p1 - p0) * t).looking_to(-s.vel, Vec3::Y);
-                fx::spawn(&mut commands, &fxl, n, None, tf, tf, true);
-            }
+            hit_fx(&mut commands, &fxl, bd, p0 + (p1 - p0) * t, s.vel);
             commands.entity(e).despawn();
             continue;
         }
@@ -263,16 +268,13 @@ pub(super) fn shells(
             let [lo, hi, ..] = bd.damage["Stone"];
             hits.write(Hit { shooter: s.shooter, victim: re });
             if let Ok((_, _, mut rk, _)) = rocks.get_mut(re) {
-                if rk.damage(lo + rng.f() * (hi - lo)) {
+                if rk.damage(rng.range(lo, hi)) {
                     destroyed.write(Destroyed { by: s.shooter, victim: re });
                 } else {
-                    sfx.write(Sfx { name: format!("Damage_Stone0{}", 1 + (rng.f() * 5.0) as u32 % 5), at: Some(at), vol: 1.0, max: 600.0 });
+                    sfx.write(Sfx { name: format!("Damage_Stone0{}", rng.variant(5)), at: Some(at), vol: 1.0, max: 600.0 });
                 }
             }
-            if let Some(n) = &bd.hit_fx {
-                let tf = Transform::from_translation(at).looking_to(-s.vel, Vec3::Y);
-                fx::spawn(&mut commands, &fxl, n, None, tf, tf, true);
-            }
+            hit_fx(&mut commands, &fxl, bd, at, s.vel);
             commands.entity(e).despawn();
             continue;
         }
@@ -307,18 +309,15 @@ pub(super) fn shells(
             && let Ok((_, _, ab, mut hp, ..)) = bases.get_mut(be)
         {
             let sec = &lib.classes[ab.class].sections[k];
-            let key = MATERIALS.iter().find(|m| sec.material.contains(**m)).copied().unwrap_or("Wood");
+            let key = material_key(&sec.material);
             let [lo, hi, ..] = bd.damage[key];
             let at = p0 + (p1 - p0) * t;
             hits.write(Hit { shooter: s.shooter, victim: be });
-            hp.sections[k] = (hp.sections[k] - (lo + rng.f() * (hi - lo))).max(0.0);
+            hp.sections[k] = (hp.sections[k] - (rng.range(lo, hi))).max(0.0);
             if let Some(pool) = bd.impact_snd.get(key).filter(|p| !p.is_empty()) {
-                sfx.write(Sfx { name: pool[(rng.f() * pool.len() as f32) as usize % pool.len()].clone(), at: Some(at), vol: bd.impact_vol, max: bd.impact_max });
+                sfx.write(Sfx { name: rng.pick(pool).clone(), at: Some(at), vol: bd.impact_vol, max: bd.impact_max });
             }
-            if let Some(n) = &bd.hit_fx {
-                let tf = Transform::from_translation(at).looking_to(-s.vel, Vec3::Y);
-                fx::spawn(&mut commands, &fxl, n, None, tf, tf, true);
-            }
+            hit_fx(&mut commands, &fxl, bd, at, s.vel);
             commands.entity(e).despawn();
             continue;
         }
@@ -327,14 +326,11 @@ pub(super) fn shells(
             if s.harmless {
                 // A warning shot glances off: the bullet's ricochet sound for the struck material.
                 let material = best_ship.and_then(|si| ships.get(si).ok()).map(|x| lib.classes[x.2.class].sections[k].material.clone()).unwrap_or_default();
-                let key = MATERIALS.iter().find(|m| material.contains(**m)).copied().unwrap_or("Wood");
+                let key = material_key(&material);
                 if let Some(name) = bd.ricochet_snd.get(key) {
                     sfx.write(Sfx { name: name.clone(), at: Some(at), vol: 1.0, max: 600.0 });
                 }
-                if let Some(n) = &bd.hit_fx {
-                    let t = Transform::from_translation(at).looking_to(-s.vel, Vec3::Y);
-                    fx::spawn(&mut commands, &fxl, n, None, t, t, true);
-                }
+                hit_fx(&mut commands, &fxl, bd, at, s.vel);
             } else {
                 detonate.write(Detonate { bullet: s.bullet.clone(), at, shooter: Some(s.shooter) });
             }
@@ -345,7 +341,7 @@ pub(super) fn shells(
             let (se, stf, ship, mut hp, mut fires, mission, _) = ships.get_mut(si).unwrap();
             let class = &lib.classes[ship.class];
             let sec = &class.sections[k];
-            let key = MATERIALS.iter().find(|m| sec.material.contains(**m)).copied().unwrap_or("Wood");
+            let key = material_key(&sec.material);
             // Criticals are not modelled: in the original they only feed a tally and crew speech (docs/re/movement.md).
             let mut damage = bd.damage[key];
             let scale = side_damage_scale(s.side, ship.side, crate::menu::difficulty());
@@ -380,7 +376,7 @@ pub(super) fn shells(
                 fires.list.push(Fire { sec: k, intensity: fire_str, state: 0, t: 0.0, fx });
             }
             if let Some(pool) = bd.impact_snd.get(key).filter(|p| !p.is_empty()) {
-                sfx.write(Sfx { name: pool[(rng.f() * pool.len() as f32) as usize % pool.len()].clone(), at: Some(at), vol: bd.impact_vol, max: bd.impact_max });
+                sfx.write(Sfx { name: rng.pick(pool).clone(), at: Some(at), vol: bd.impact_vol, max: bd.impact_max });
             }
             if outcome.lost {
                 // Retail pool per section material (Damage_<Wood|Metal|Sail|Stone>01-05, 600 units). PROVISIONAL: played on section loss.
@@ -392,14 +388,11 @@ pub(super) fn shells(
                     _ => None,
                 };
                 if let Some(p) = pool {
-                    sfx.write(Sfx { name: format!("Damage_{p}0{}", 1 + (rng.f() * 5.0) as u32 % 5), at: Some(at), vol: 1.0, max: 600.0 });
+                    sfx.write(Sfx { name: format!("Damage_{p}0{}", rng.variant(5)), at: Some(at), vol: 1.0, max: 600.0 });
                 }
                 info!("{} of {} destroyed", sec.label, class.name);
             }
-            if let Some(n) = &bd.hit_fx {
-                let t = Transform::from_translation(at).looking_to(-s.vel, Vec3::Y);
-                fx::spawn(&mut commands, &fxl, n, None, t, t, true);
-            }
+            hit_fx(&mut commands, &fxl, bd, at, s.vel);
             commands.entity(e).despawn();
         } else if s.age > s.lifetime || p1.y < -300.0 {
             commands.entity(e).despawn();

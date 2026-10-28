@@ -222,7 +222,7 @@ pub fn fires(
                     if sec.vital {
                         hp.core -= core_bleed(class, &hp, f.intensity); // fire goes through the same damage path
                     }
-                    sfx.write(Sfx { name: format!("Damage_Wood0{}", 1 + (rng.f() * 5.0) as u32 % 5), at: Some(tf.translation), vol: 1.0, max: 600.0 });
+                    sfx.write(Sfx { name: format!("Damage_Wood0{}", rng.variant(5)), at: Some(tf.translation), vol: 1.0, max: 600.0 });
                     info!("{} of {} burnt out", sec.label, class.name);
                 }
             }

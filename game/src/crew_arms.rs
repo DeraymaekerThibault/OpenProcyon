@@ -408,6 +408,11 @@ pub fn selectable_banks(lib: &Library, class: &crate::data::Class) -> Vec<(usize
         .collect()
 }
 
+/// The selectable banks with the gun each carries: the fitted one from `fit`, else the class's own.
+fn equipped_banks(lib: &Library, class: &crate::data::Class, fit: Option<&BTreeMap<usize, String>>) -> Vec<(usize, String)> {
+    selectable_banks(lib, class).into_iter().map(|(bank, first)| (bank, fit.and_then(|f| f.get(&bank)).unwrap_or(&class.mounts[first].gun).clone())).collect()
+}
+
 #[derive(Resource, Default, Clone, PartialEq)]
 pub struct ScreenModel {
     pub open: bool,
@@ -639,8 +644,7 @@ fn screen(
             }
         }
         let (posts, bars) = posts_view(class, fit.map(|f| &f.crew));
-        let banks: Vec<(usize, String)> =
-            selectable_banks(&lib, class).into_iter().map(|(bank, first)| (bank, fit.and_then(|f| f.banks.get(&bank)).unwrap_or(&class.mounts[first].gun).clone())).collect();
+        let banks = equipped_banks(&lib, class, fit.map(|f| &f.banks));
         let list = rows
             .iter()
             .filter_map(|(_, a)| match a {
@@ -863,10 +867,7 @@ fn skirmish_screen(
                         choice.post = i;
                         choice.message = match selectable_banks(&lib, class).get(i) {
                             None => said("IDGS_TPFRONTENDTEXT02_WEAPON_WRONG_MOUNT"),
-                            Some((bank, first)) if !bank_compatible(&lib, class, *bank, &gun) => {
-                                let _ = first;
-                                said("IDGS_TPFRONTENDTEXT02_WEAPON_WRONG_MOUNT")
-                            }
+                            Some((bank, _)) if !bank_compatible(&lib, class, *bank, &gun) => said("IDGS_TPFRONTENDTEXT02_WEAPON_WRONG_MOUNT"),
                             Some((bank, first)) => {
                                 slot.weapons.resize_with(slot.fleet.len(), BTreeMap::new);
                                 let old = slot.weapons[choice.ship].get(bank).unwrap_or(&class.mounts[*first].gun).clone();
@@ -893,25 +894,10 @@ fn skirmish_screen(
     if let Some(d) = sk_slots {
         sk.scroll_slots(d);
     }
-    let Some(slot) = sk.slots.iter().find(|s| s.kind == crate::menu::Kind::Human) else { return };
     if carry.is_none() {
         *origin = None;
     }
-    let points = {
-        // The budget after this frame's changes.
-        let spent: i64 = slot
-            .fleet
-            .iter()
-            .enumerate()
-            .map(|(k, n)| {
-                let class = &lib.classes[lib.index(n)];
-                i64::from(class.points)
-                    + slot.weapons.get(k).map_or(0, |fit| fitting_delta(&lib, class, fit))
-                    + slot.crew.get(k).map_or(0, |c| c.iter().flatten().map(|id| i64::from(crew_points(id))).sum())
-            })
-            .sum();
-        i64::from(sk_limit(&sk)) - spent
-    };
+    let points = sk.points_left(&lib); // the budget after this frame's changes
     let Some(slot) = sk.slots.iter().find(|s| s.kind == crate::menu::Kind::Human) else { return };
     let mut next = ScreenModel {
         open: true,
@@ -923,10 +909,7 @@ fn skirmish_screen(
     if let Some(ship_name) = slot.fleet.get(choice.ship) {
         let ci = lib.index(ship_name);
         let class = &lib.classes[ci];
-        let banks: Vec<(usize, String)> = selectable_banks(&lib, class)
-            .into_iter()
-            .map(|(bank, first)| (bank, slot.weapons.get(choice.ship).and_then(|w| w.get(&bank)).unwrap_or(&class.mounts[first].gun).clone()))
-            .collect();
+        let banks = equipped_banks(&lib, class, slot.weapons.get(choice.ship));
         let assigned = slot.crew.get(choice.ship);
         let (posts, bars) = posts_view(class, assigned);
         let (mut list, mut picked, mut detail) = (vec![], None, None);
@@ -988,11 +971,6 @@ fn skirmish_screen(
     if *model != next {
         *model = next;
     }
-}
-
-/// The victory limit of the lobby (the budget `points_left` subtracts from).
-fn sk_limit(sk: &crate::menu::Skirmish) -> u32 {
-    sk.victory_limit
 }
 
 /// The named crew a skirmish ship was assembled with; `apply_skirmish_crew` turns it into posts, handling and boarding crews.
