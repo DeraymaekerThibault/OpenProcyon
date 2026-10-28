@@ -16,6 +16,11 @@ pub fn model(file: &str) -> String {
     index.get(file).cloned().unwrap_or_else(|| file.to_string())
 }
 
+/// The scene of a converted model (`model(file)`), ready to spawn.
+pub fn scene(assets: &AssetServer, file: &str) -> WorldAssetRoot {
+    WorldAssetRoot(assets.load(GltfAssetLabel::Scene(0).from_asset(model(file))))
+}
+
 /// Converted single-material mesh geometry; malformed or unsupported GLBs fail without indexing outside buffers.
 pub fn mesh_geometry(root: &std::path::Path, name: &str) -> Option<(Vec<Vec3>, Vec<[f32; 2]>, Vec<u32>)> {
     let bytes = std::fs::read(root.join(model(&format!("{name}.glb")))).ok()?;
@@ -608,7 +613,7 @@ impl Library {
         assert!(!ids.is_empty(), "no ships in {}/ships; run tools/build_assets.sh", root.display());
         let (guns, bullets) = load_weapons(root);
         let classes = ids.iter().map(|n| load_class(root, n, &guns)).collect();
-        let names = ids.iter().filter_map(|n| Some((n.clone(), serde_json::from_str(&std::fs::read_to_string(root.join(format!("ships/{n}/names.json"))).ok()?).ok()?))).collect();
+        let names = ids.iter().filter_map(|n| Some((n.clone(), serde_json::from_value(try_json(&root.join(format!("ships/{n}/names.json")))?).ok()?))).collect();
         Library { classes, guns, bullets, names }
     }
 }
@@ -630,7 +635,7 @@ mod lifeboat_tests {
 
     #[test]
     fn lifeboat_class_fields_load_and_default_for_mods_that_omit_them() {
-        let lib = Library::load(&crate::assets_dir());
+        let lib = Library::load(crate::assets_dir());
         let c = |n: &str| &lib.classes[lib.index(n)];
         for race in ["Navy", "Civilian", "Pirate", "Procyon"] {
             assert!(c(&format!("Ship_{race}_Lifeboat")).is_lifeboat, "{race}");

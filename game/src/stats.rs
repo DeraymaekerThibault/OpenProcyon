@@ -60,7 +60,7 @@ fn reset(mut commands: Commands) {
 }
 
 fn owner(ship: &Ship, m: Option<&crate::campaign::MissionShip>) -> String {
-    m.map(|m| m.owner.clone()).unwrap_or_else(|| if ship.side == Side::Player { "Your fleet".into() } else { "Enemy fleet".into() })
+    m.map_or_else(|| if ship.side == Side::Player { "Your fleet".into() } else { "Enemy fleet".into() }, |m| m.owner.clone())
 }
 
 pub(crate) fn collect(

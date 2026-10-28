@@ -1,5 +1,6 @@
 //! Guns: mount hierarchy, turret aim and lead, burst/reload timing, ship and base fire, shell launch (docs/re/gunnery.md).
 use super::*;
+use crate::Nearest;
 
 #[derive(Clone)]
 pub(super) struct GunState {
@@ -50,7 +51,7 @@ pub fn spawn_guns(commands: &mut Commands, assets: &AssetServer, lib: &Library, 
 }
 
 pub(super) fn spawn_gun(commands: &mut Commands, assets: &AssetServer, lib: &Library, ship: Entity, m: &crate::data::Mount, gun: &str) -> GunState {
-    let scene = |glb: &str| WorldAssetRoot(assets.load(GltfAssetLabel::Scene(0).from_asset(crate::data::model(glb))));
+    let scene = |glb: &str| crate::data::scene(assets, glb);
     let g = &lib.guns[gun];
     let root = commands.spawn((GunPart, Transform { translation: m.pos, rotation: m.rot, ..default() }, Visibility::default(), ChildOf(ship))).id();
     let base = commands.spawn((GunPart, Transform::default(), Visibility::default(), ChildOf(root))).id();
@@ -176,16 +177,12 @@ pub(super) struct AimTarget {
 pub(super) fn panic_target(contacts: &[Contact], tf: &Transform, mount: &crate::data::Mount, gun: &crate::data::GunDef) -> Option<AimTarget> {
     let origin = tf.transform_point(mount.pos);
     let to_mount = (tf.rotation * mount.rot).inverse();
-    contacts
-        .iter()
-        .filter(|c| c.side != Side::Player && c.visible)
-        .filter(|c| {
-            let offset = c.aim_point - origin;
-            let local = to_mount * offset;
-            Vec2::new(offset.x, offset.z).length() <= gun.range[2] && (-local.x).atan2(-local.z).abs() <= mount.arc / 2.0
-        })
-        .min_by(|a, b| a.aim_point.distance(origin).total_cmp(&b.aim_point.distance(origin)))
-        .map(Contact::aim)
+    let in_arc = contacts.iter().filter(|c| c.side != Side::Player && c.visible).filter(|c| {
+        let offset = c.aim_point - origin;
+        let local = to_mount * offset;
+        Vec2::new(offset.x, offset.z).length() <= gun.range[2] && (-local.x).atan2(-local.z).abs() <= mount.arc / 2.0
+    });
+    crate::nearest(in_arc, origin, |c| c.aim_point).map(Contact::aim)
 }
 
 /// Aims every mount at the chosen target (base yaw, barrel pitch at the gun's rotation speeds) and fires aligned, loaded guns
@@ -278,12 +275,14 @@ pub(super) fn fire(
             Some((AimTarget { entity, position, velocity: Vec3::ZERO }, side.0))
         })
         .collect();
+    let mut seen: Vec<Contact> = Vec::with_capacity(contacts.len()); // reused: refilled per shooter
     for (me, tf, ship, mut states, health, mission, primary, pilot, cloak, posts) in &mut shooters {
         if health.destroyed {
             continue;
         }
         let reload_cut = gunner_reload_cut(ship, posts, points.as_deref(), &lib);
-        let seen: Vec<Contact> = contacts.iter().map(|c| Contact { visible: c.visible && sensors.in_sight(me, c.entity, campaign.as_deref()), ..*c }).collect();
+        seen.clear();
+        seen.extend(contacts.iter().map(|c| Contact { visible: c.visible && sensors.in_sight(me, c.entity, campaign.as_deref()), ..*c }));
         let cloaked_now = cloak.as_ref().is_some_and(|c| c.level > 0.0);
         let class = &lib.classes[ship.class];
         // Player's command ship: only the clicked target (retail: direct-fire guns need an enemy click or panic fire). Its other
@@ -302,11 +301,7 @@ pub(super) fn fire(
                 Side::Player => seen
                     .iter()
                     .find(|c| primary && Some(c.entity) == target.0 && c.side != Side::Player && c.visible)
-                    .or_else(|| {
-                        seen.iter()
-                            .filter(|c| !primary && c.side != Side::Player && c.visible)
-                            .min_by(|a, b| a.aim_point.distance(tf.translation).total_cmp(&b.aim_point.distance(tf.translation)))
-                    })
+                    .or_else(|| crate::nearest(seen.iter().filter(|c| !primary && c.side != Side::Player && c.visible), tf.translation, |c| c.aim_point))
                     .map(Contact::aim),
                 // Skirmish computer ships fire at their captain's target (ship::CaptainTargets): a ship, else a hostile base; without one, the player ship.
                 _ => match captains.as_deref().and_then(|c| c.of(me)) {
@@ -340,11 +335,12 @@ pub(super) fn fire(
                     velocity: Vec3::ZERO,
                 }),
                 // Point defence: the nearest hostile torpedo or mine within its maximum range (retail: PD guns never fire at ships).
-                _ if gun.point_defense => incoming
-                    .iter()
-                    .filter(|(threat, side)| *side != ship.side && threat.position.distance(tf.transform_point(mount.pos)) <= gun.range[2])
-                    .min_by(|a, b| a.0.position.distance(tf.translation).total_cmp(&b.0.position.distance(tf.translation)))
-                    .map(|(threat, _)| *threat),
+                _ if gun.point_defense => crate::nearest(
+                    incoming.iter().filter(|(threat, side)| *side != ship.side && threat.position.distance(tf.transform_point(mount.pos)) <= gun.range[2]),
+                    tf.translation,
+                    |(threat, _)| threat.position,
+                )
+                .map(|(threat, _)| *threat),
                 (false, _) if primary && target.2.panic => panic_target(&seen, tf, mount, gun).or(ship_target),
                 (false, _) => ship_target,
                 (true, Some((bank, point))) if bank == mount.bank => Some(AimTarget { entity: Entity::PLACEHOLDER, position: point, velocity: Vec3::ZERO }),
@@ -482,7 +478,7 @@ pub(super) fn launch_shell(
     target: Option<Entity>,
     shot: Launch,
 ) {
-    let from = mgt.map(|t| t.translation()).unwrap_or(origin);
+    let from = mgt.map_or(origin, |t| t.translation());
     let b = &lib.bullets[&g.bullet];
     // PROVISIONAL: one fire sound per shell of a burst.
     if let Some((n, vol, max)) = &g.sound {
@@ -518,7 +514,7 @@ pub(super) fn launch_shell(
         commands.entity(shell).insert(crate::audio::Travel { name: name.clone(), vol: *vol, max: *max });
     }
     if let Some(glb) = &b.glb {
-        commands.entity(shell).insert(WorldAssetRoot(assets.load(GltfAssetLabel::Scene(0).from_asset(crate::data::model(glb)))));
+        commands.entity(shell).insert(crate::data::scene(assets, glb));
     } else if b.bullet_fx.is_none() {
         // fx-only shells (Lancer sprite) get no placeholder mesh
         commands.entity(shell).insert((Mesh3d(look.mesh.clone()), MeshMaterial3d(mat)));
@@ -571,7 +567,7 @@ pub(super) fn base_fire(
                 (AimTarget { entity, position, velocity: transform.rotation * Vec3::NEG_Z * ship.speed }, ship.side)
             })
             .filter(|(t, _)| sensors.in_sight(me, t.entity, campaign.as_deref()))
-            .min_by(|a, b| a.0.position.distance(tf.translation).total_cmp(&b.0.position.distance(tf.translation)));
+            .nearest_to(tf.translation, |a| a.0.position);
         // PROVISIONAL: a volcano fires one shell at a time, its mounts taking turns.
         let mut volcano_cycle = None;
         for (mount, state) in class.mounts.iter().zip(states.0.iter_mut()) {

@@ -26,7 +26,7 @@ struct BarParts(Vec<(String, Option<String>)>);
 impl BarParts {
     fn load() -> Self {
         let path = crate::assets_dir().join("data/hud/bar.json");
-        let value: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&path).expect("HUD bar layout")).expect("invalid HUD bar JSON");
+        let value = crate::data::read_json(&path);
         let parts = value
             .as_array()
             .expect("HUD bar must be an array")
@@ -384,97 +384,98 @@ fn build(
         }
     }
 
-    // ---- talking head (bottom-right corner): wooden housing with the portrait seen through its ring ---------------------------
-    let housing = c.size_of("TalkingHead_Solid_Background");
-    if housing.x > 0.0 {
-        let names = || {
-            ["TalkingHead_Portal_Closed"]
-                .into_iter()
-                .map(String::from)
-                .chain((0..10).map(|i| format!("TalkingHead_Portal_ClosedToOpen{i}")))
-                .chain(["TalkingHead_Portal_Open".into()])
-        };
-        let voice = ["Start", "Frame0", "Frame1", "Stop", "Off"].map(|n| format!("TalkingHead_Portal_VoiceBox_{n}"));
-        commands.insert_resource(HeadFrames { iris: names().filter_map(|n| c.frame(&n)).collect(), voice: voice.iter().filter_map(|n| c.frame(n)).collect() });
-        let head = commands
-            .spawn((
-                Node { position_type: PositionType::Absolute, right: Val::Px(0.0), bottom: Val::Px(0.0), width: px(housing.x, s), height: px(housing.y, s), ..default() },
-                ChildOf(root),
-            ))
-            .id();
-        let (face_at, iris_at) = (offset(&hud, "Right_TalkingHead_Character_From_TopLeft"), offset(&hud, "Right_TalkingHead_PortalOverlay_From_TopLeft"));
-        let portal = Vec2::splat(80.0);
-        let layer = |commands: &mut Commands, kind: Head, art: Option<(ImageNode, Vec2)>, at: Vec2, hidden: bool| {
-            let Some((img, sz)) = art else { return };
-            let vis = if hidden { Visibility::Hidden } else { Visibility::Inherited };
-            commands.spawn((kind, img, c.abs(at.x, at.y, sz), vis, ChildOf(head)));
-        };
-        {
-            // Draw order: portrait, iris, housing (its ring is transparent), then the light and voice box on the wood.
-            layer(&mut commands, Head::Face, Some((ImageNode::default(), portal)), face_at, true);
-            layer(&mut commands, Head::Iris, c.sprite("TalkingHead_Portal_Closed", false), iris_at, false);
-            if let Some((img, sz)) = c.sprite("TalkingHead_Solid_Background", false) {
-                commands.spawn((img, c.abs(0.0, 0.0, sz), ChildOf(head), solid()));
-            }
-            // PROVISIONAL placement, measured on the housing art: the light sits over its green lamp, the voice box in the name plate.
-            layer(&mut commands, Head::Light, c.sprite("TalkingHead_Portal_Light_On", false), Vec2::new(75.0, 2.0), true);
-            layer(&mut commands, Head::Voice, c.sprite("TalkingHead_Portal_VoiceBox_Off", false), Vec2::new(20.0, 103.0), false);
-        }
-        // The ship-bar toggle's arm stands on the housing's top-right corner, like the weapon toggle on the compass.
-        let detail = c.size_of("ShipBar_ToggleDetail");
-        let at = Vec2::new(housing.x - detail.x, offset(&hud, "Move_ToggleShipBar_Detail_Down").y - detail.y);
-        let button = offset(&hud, "ToggleShipBar_Button_Offset_From_Detail_TopLeft");
-        c.toggle(&mut commands, head, "ShipBar_ToggleDetail", at, "ShipBar_ToggleButton", button, crate::panels::FleetButton::Ships);
-        // The ship bar opens `SHIPBAR_OFFSET_Y_FROM_TOGGLESHIPBAR_BUTTON` above the toggle button.
-        let top = housing.y - at.y - button.y + offset(&hud, "SHIPBAR_OFFSET_Y_FROM_TOGGLESHIPBAR_BUTTON").y;
-        commands.insert_resource(ShipBarAnchor(top));
-    }
-
-    {
-        // ---- weapon panel (left edge, vertically centred) -----------------------------------------------------------------
-        let wbg = c.size_of("WeaponBar_ShipIcon_Background");
-        let weapon = commands
-            .spawn((
-                WeaponPanel,
-                Node {
-                    position_type: PositionType::Absolute,
-                    left: Val::Px(0.0),
-                    top: Val::Px((window.height() - 255.0 * s) / 2.0),
-                    width: px(wbg.x, s),
-                    height: px(255.0, s),
-                    ..default()
-                },
-                ChildOf(root),
-            ))
-            .id();
-        if let Some((img, sz)) = c.sprite("WeaponBar_ShipIcon_Background", false) {
-            commands.spawn((img, c.abs(0.0, 0.0, sz), ChildOf(weapon), solid()));
-        }
-        if let Some((img, sz)) = c.sprite(&class.icon("WeaponBar"), false) {
-            let o = offset(&hud, "WEAPONBAR_SHIPICON_OFFSET_FROM_TOPLEFT");
-            commands.spawn((img, c.abs(o.x, o.y, sz), ChildOf(weapon)));
-        }
-        for (bank, first) in &banks {
-            let pos = offset(&hud, &format!("WeaponBar_SlotOffset_From_TopLeft_{bank:02}"));
-            let icon_at = pos + offset(&hud, "Offset_WeaponBar_GunIcon");
-            if let Some((img, sz)) = c.sprite("WeaponBar_GunBankCanHitTarget", false) {
-                commands.spawn((GunSlot { bank: *bank, icon: false }, img, c.abs(icon_at.x, icon_at.y, sz), ChildOf(weapon)));
-            }
-            if let Some((img, sz)) = c.sprite(&combat::gun_icon(guns.gun(*first)), false) {
-                commands.spawn((GunSlot { bank: *bank, icon: true }, GunButton(*bank), img, c.abs(icon_at.x, icon_at.y, sz), ChildOf(weapon), solid()));
-            }
-            // Recharge bar beside the icon: the empty bar (WeaponBar_SlotBackground) with the yellow WeaponBar_RechargeStatus growing from the bottom.
-            // PROVISIONAL: drawing order/fill direction are read from the artwork; the original's drawing code was not found.
-            if let (Some((outline, osz)), Some((img, fsz))) = (c.sprite("WeaponBar_SlotBackground", false), c.sprite("WeaponBar_RechargeStatus", false)) {
-                let at = pos + offset(&hud, "Offset_WeaponBar_Recharge");
-                commands.spawn((outline, c.abs(at.x, at.y, osz), ChildOf(weapon)));
-                let base = img.rect.unwrap();
-                let k = sprite_of(&hud, "WeaponBar_RechargeStatus").map_or(1.0, |(sheet, _)| sheet_scale(&sheet));
-                commands.spawn((Fill { gauge: Gauge::Recharge(*bank), full: fsz.y, top: at.y, base, k }, img, c.abs(at.x, at.y, fsz), ChildOf(weapon)));
-            }
-        }
-    }
+    talking_head(&mut commands, &c, root);
+    weapon_panel(&mut commands, &c, root, class, &banks, guns, window.height());
     commands.insert_resource(frames);
+}
+
+/// The talking head (bottom-right corner): wooden housing with the portrait seen through its ring, the iris, light and voice box,
+/// and the ship-bar toggle on its corner.
+fn talking_head(commands: &mut Commands, c: &Ctx, root: Entity) {
+    let (hud, s) = (c.hud, c.s);
+    let solid = || (Interaction::None, FocusPolicy::Block, Solid);
+    let housing = c.size_of("TalkingHead_Solid_Background");
+    if housing.x <= 0.0 {
+        return;
+    }
+    let names = || {
+        ["TalkingHead_Portal_Closed"].into_iter().map(String::from).chain((0..10).map(|i| format!("TalkingHead_Portal_ClosedToOpen{i}"))).chain(["TalkingHead_Portal_Open".into()])
+    };
+    let voice = ["Start", "Frame0", "Frame1", "Stop", "Off"].map(|n| format!("TalkingHead_Portal_VoiceBox_{n}"));
+    commands.insert_resource(HeadFrames { iris: names().filter_map(|n| c.frame(&n)).collect(), voice: voice.iter().filter_map(|n| c.frame(n)).collect() });
+    let head = commands
+        .spawn((
+            Node { position_type: PositionType::Absolute, right: Val::Px(0.0), bottom: Val::Px(0.0), width: px(housing.x, s), height: px(housing.y, s), ..default() },
+            ChildOf(root),
+        ))
+        .id();
+    let (face_at, iris_at) = (offset(hud, "Right_TalkingHead_Character_From_TopLeft"), offset(hud, "Right_TalkingHead_PortalOverlay_From_TopLeft"));
+    let portal = Vec2::splat(80.0);
+    let layer = |commands: &mut Commands, kind: Head, art: Option<(ImageNode, Vec2)>, at: Vec2, hidden: bool| {
+        let Some((img, sz)) = art else { return };
+        let vis = if hidden { Visibility::Hidden } else { Visibility::Inherited };
+        commands.spawn((kind, img, c.abs(at.x, at.y, sz), vis, ChildOf(head)));
+    };
+    {
+        // Draw order: portrait, iris, housing (its ring is transparent), then the light and voice box on the wood.
+        layer(commands, Head::Face, Some((ImageNode::default(), portal)), face_at, true);
+        layer(commands, Head::Iris, c.sprite("TalkingHead_Portal_Closed", false), iris_at, false);
+        if let Some((img, sz)) = c.sprite("TalkingHead_Solid_Background", false) {
+            commands.spawn((img, c.abs(0.0, 0.0, sz), ChildOf(head), solid()));
+        }
+        // PROVISIONAL placement, measured on the housing art: the light sits over its green lamp, the voice box in the name plate.
+        layer(commands, Head::Light, c.sprite("TalkingHead_Portal_Light_On", false), Vec2::new(75.0, 2.0), true);
+        layer(commands, Head::Voice, c.sprite("TalkingHead_Portal_VoiceBox_Off", false), Vec2::new(20.0, 103.0), false);
+    }
+    // The ship-bar toggle's arm stands on the housing's top-right corner, like the weapon toggle on the compass.
+    let detail = c.size_of("ShipBar_ToggleDetail");
+    let at = Vec2::new(housing.x - detail.x, offset(hud, "Move_ToggleShipBar_Detail_Down").y - detail.y);
+    let button = offset(hud, "ToggleShipBar_Button_Offset_From_Detail_TopLeft");
+    c.toggle(commands, head, "ShipBar_ToggleDetail", at, "ShipBar_ToggleButton", button, crate::panels::FleetButton::Ships);
+    // The ship bar opens `SHIPBAR_OFFSET_Y_FROM_TOGGLESHIPBAR_BUTTON` above the toggle button.
+    let top = housing.y - at.y - button.y + offset(hud, "SHIPBAR_OFFSET_Y_FROM_TOGGLESHIPBAR_BUTTON").y;
+    commands.insert_resource(ShipBarAnchor(top));
+}
+
+/// The weapon panel (left edge, vertically centred): the ship outline, and per selectable gun bank its status frame, gun icon and
+/// recharge bar.
+fn weapon_panel(commands: &mut Commands, c: &Ctx, root: Entity, class: &combat::Class, banks: &[(usize, usize)], guns: &GunStates, window_h: f32) {
+    let (hud, s) = (c.hud, c.s);
+    let solid = || (Interaction::None, FocusPolicy::Block, Solid);
+    let wbg = c.size_of("WeaponBar_ShipIcon_Background");
+    let weapon = commands
+        .spawn((
+            WeaponPanel,
+            Node { position_type: PositionType::Absolute, left: Val::Px(0.0), top: Val::Px((window_h - 255.0 * s) / 2.0), width: px(wbg.x, s), height: px(255.0, s), ..default() },
+            ChildOf(root),
+        ))
+        .id();
+    if let Some((img, sz)) = c.sprite("WeaponBar_ShipIcon_Background", false) {
+        commands.spawn((img, c.abs(0.0, 0.0, sz), ChildOf(weapon), solid()));
+    }
+    if let Some((img, sz)) = c.sprite(&class.icon("WeaponBar"), false) {
+        let o = offset(hud, "WEAPONBAR_SHIPICON_OFFSET_FROM_TOPLEFT");
+        commands.spawn((img, c.abs(o.x, o.y, sz), ChildOf(weapon)));
+    }
+    for (bank, first) in banks {
+        let pos = offset(hud, &format!("WeaponBar_SlotOffset_From_TopLeft_{bank:02}"));
+        let icon_at = pos + offset(hud, "Offset_WeaponBar_GunIcon");
+        if let Some((img, sz)) = c.sprite("WeaponBar_GunBankCanHitTarget", false) {
+            commands.spawn((GunSlot { bank: *bank, icon: false }, img, c.abs(icon_at.x, icon_at.y, sz), ChildOf(weapon)));
+        }
+        if let Some((img, sz)) = c.sprite(&combat::gun_icon(guns.gun(*first)), false) {
+            commands.spawn((GunSlot { bank: *bank, icon: true }, GunButton(*bank), img, c.abs(icon_at.x, icon_at.y, sz), ChildOf(weapon), solid()));
+        }
+        // Recharge bar beside the icon: the empty bar (WeaponBar_SlotBackground) with the yellow WeaponBar_RechargeStatus growing from the bottom.
+        // PROVISIONAL: drawing order/fill direction are read from the artwork; the original's drawing code was not found.
+        if let (Some((outline, osz)), Some((img, fsz))) = (c.sprite("WeaponBar_SlotBackground", false), c.sprite("WeaponBar_RechargeStatus", false)) {
+            let at = pos + offset(hud, "Offset_WeaponBar_Recharge");
+            commands.spawn((outline, c.abs(at.x, at.y, osz), ChildOf(weapon)));
+            let base = img.rect.unwrap();
+            let k = sprite_of(hud, "WeaponBar_RechargeStatus").map_or(1.0, |(sheet, _)| sheet_scale(&sheet));
+            commands.spawn((Fill { gauge: Gauge::Recharge(*bank), full: fsz.y, top: at.y, base, k }, img, c.abs(at.x, at.y, fsz), ChildOf(weapon)));
+        }
+    }
 }
 
 /// One bar part plus whatever sits on it: the ship icon on the ship frame, a fill on each status gauge.
@@ -531,8 +532,15 @@ fn update_dial(player: Single<&Ship, With<PlayerShip>>, frames: Option<Res<Frame
     // Retail frames 0..3 match Stop / Slow / Full / Emergency (red through dark green).
     let Some((h, r)) = frames.dial.get(player.order.min(3)) else { return };
     for mut img in &mut q {
+        show(&mut img, h, *r);
+    }
+}
+
+/// Shows sprite `(h, r)` on an image node, touching the node (and so re-rendering it) only when it changes.
+fn show(img: &mut Mut<ImageNode>, h: &Handle<Image>, r: Rect) {
+    if img.image != *h || img.rect != Some(r) {
         img.image = h.clone();
-        img.rect = Some(*r);
+        img.rect = Some(r);
     }
 }
 
@@ -549,21 +557,19 @@ fn head_art(
     let (open, speaking) = (head.open, head.speaking);
     let cycle = (time.elapsed_secs() * VOICE_FPS) as usize % 4;
     for (kind, mut img, mut vis) in &mut parts {
-        let set = |img: &mut ImageNode, (h, r): &(Handle<Image>, Rect)| {
-            img.image = h.clone();
-            img.rect = Some(*r);
-        };
+        let set = |img: &mut Mut<ImageNode>, (h, r): &(Handle<Image>, Rect)| show(img, h, *r);
         match kind {
             Head::Iris => set(&mut img, &frames.iris[iris_frame(open, frames.iris.len())]),
             Head::Voice => set(&mut img, &frames.voice[if speaking && open >= 1.0 { cycle } else { 4 }]),
             Head::Face => {
                 if let Some((sheet, r)) = head.speaker.as_deref().and_then(|n| sprite_of(&hud, n)) {
-                    img.image = assets.load(format!("hud/tex/{sheet}.png"));
-                    img.rect = Some(inset(&sheet, r));
+                    show(&mut img, &assets.load(format!("hud/tex/{sheet}.png")), inset(&sheet, r));
                 }
-                *vis = if open > 0.0 { Visibility::Inherited } else { Visibility::Hidden };
+                vis.set_if_neq(if open > 0.0 { Visibility::Inherited } else { Visibility::Hidden });
             }
-            Head::Light => *vis = if speaking && open >= 1.0 { Visibility::Inherited } else { Visibility::Hidden },
+            Head::Light => {
+                vis.set_if_neq(if speaking && open >= 1.0 { Visibility::Inherited } else { Visibility::Hidden });
+            }
         }
     }
 }
@@ -575,8 +581,7 @@ fn update_sweep(time: Res<Time>, frames: Option<Res<Frames>>, mut q: Query<&mut 
     }
     let (h, r) = &frames.sweep[(time.elapsed_secs() / 0.1) as usize % frames.sweep.len()];
     for mut img in &mut q {
-        img.image = h.clone();
-        img.rect = Some(*r);
+        show(&mut img, h, *r);
     }
 }
 
@@ -588,10 +593,7 @@ fn radar_face(button: Query<&Interaction, With<RadarButton>>, mut q: Query<(&Rad
     });
     for (f, mut img) in &mut q {
         let (h, r) = &f.0[i];
-        if img.image != *h || img.rect != Some(*r) {
-            img.image = h.clone();
-            img.rect = Some(*r);
-        }
+        show(&mut img, h, *r);
     }
 }
 
@@ -608,10 +610,20 @@ fn update_gauges(
         let v = gauge_value(f.gauge, &lib, ship, health, crew, &guns).clamp(0.0, 1.0);
         // Gauges fill from the bottom: keep the bottom of the sprite, crop the top.
         let h = (f.full * v).round();
-        node.top = px(f.top + f.full - h, s);
-        node.height = px(h, s);
-        let mut r = f.base;
-        r.min.y = r.max.y - h * f.k;
+        clip(&mut node, &mut img, f.top + f.full - h, h, s, f.base, f.k);
+    }
+}
+
+/// A bar that empties from the top: `h` reference px of sprite rect `base` (sheet pixels `k` per reference px) shown from `top`,
+/// written only on a change.
+fn clip(node: &mut Mut<Node>, img: &mut Mut<ImageNode>, top: f32, h: f32, s: f32, base: Rect, k: f32) {
+    let (top, height) = (px(top, s), px(h, s));
+    if node.top != top || node.height != height {
+        (node.top, node.height) = (top, height);
+    }
+    let mut r = base;
+    r.min.y = r.max.y - h * k;
+    if img.rect != Some(r) {
         img.rect = Some(r);
     }
 }
@@ -632,19 +644,18 @@ fn update_guns(
         if slot.icon {
             let Some(first) = class.mounts.iter().position(|m| m.bank == slot.bank) else { continue };
             if let Some((h, r)) = frames.icons.get(&combat::gun_icon(guns.gun(first))) {
-                img.image = h.clone();
-                img.rect = Some(*r);
+                show(&mut img, h, *r);
             }
             // Dimmed while the bank reloads (the bar beside it shows how far along it is).
-            img.color = match st {
+            let tint = match st {
                 2 => Color::srgba(1.0, 1.0, 1.0, 0.25),
                 1 => Color::srgb(0.55, 0.55, 0.55),
                 _ => Color::WHITE,
             };
+            img.map_unchanged(|i| &mut i.color).set_if_neq(tint);
         } else if let Some((h, r)) = frames.gun.get(st) {
-            img.image = h.clone();
-            img.rect = Some(*r);
-            img.color = if armed { Color::srgb(1.0, 0.9, 0.3) } else { Color::WHITE };
+            show(&mut img, h, *r);
+            img.map_unchanged(|i| &mut i.color).set_if_neq(if armed { Color::srgb(1.0, 0.9, 0.3) } else { Color::WHITE });
         }
     }
 }
@@ -895,16 +906,13 @@ fn fleet_art(
             B::CeaseFire => art.map(|a| a.0[model.cease_fire as usize].0[state_index(interaction)].clone()),
             _ => None,
         };
-        if let Some((h, r)) = pick
-            && (img.image != h || img.rect != Some(r))
-        {
-            img.image = h;
-            img.rect = Some(r);
+        if let Some((h, r)) = pick {
+            show(&mut img, &h, r);
         }
     }
     for (FleetIcon(i), mut img) in &mut icons {
         if let Some((art, _)) = model.rows.get(*i).and_then(|row| c.sprite(&row.icon, false)) {
-            *img = art;
+            show(&mut img, &art.image, art.rect.unwrap_or_default());
         }
     }
     let full = c.size_of("ShipBar_Health").y;
@@ -912,11 +920,8 @@ fn fleet_art(
         let (Some(row), Some((base, _))) = (model.rows.get(*i), c.sprite("ShipBar_Health", false)) else { continue };
         // Clipped from the top: the strip shrinks towards the bottom as the ship loses health.
         let h = (full * row.health).round();
-        node.top = px(full - h, s);
-        node.height = px(h, s);
-        let mut r = base.rect.unwrap();
-        r.min.y = r.max.y - h * sprite_of(&hud, "ShipBar_Health").map_or(1.0, |(sheet, _)| sheet_scale(&sheet));
-        img.rect = Some(r);
+        let k = sprite_of(&hud, "ShipBar_Health").map_or(1.0, |(sheet, _)| sheet_scale(&sheet));
+        clip(&mut node, &mut img, full - h, h, s, base.rect.unwrap_or_default(), k);
     }
     for (FleetStatus(i), mut img, mut v) in &mut status {
         let kind = model.rows.get(*i).map_or("", |r| r.status);
@@ -924,8 +929,7 @@ fn fleet_art(
         // PROVISIONAL: the status icons cycle Frame0..5 at the speed-dial voice rate; retail cadence not recovered.
         let frame = (time.elapsed_secs() * VOICE_FPS) as usize % 6;
         if let Some((h, r)) = (!kind.is_empty()).then(|| c.frame(&format!("ShipStatus_Icon_{kind}_Frame{frame}"))).flatten() {
-            img.image = h;
-            img.rect = Some(r);
+            show(&mut img, &h, r);
         }
     }
 }
@@ -946,7 +950,7 @@ mod tests {
             assert_eq!(crate::panels::speed_order_at(centre), order);
             assert_eq!(crate::panels::speed_order_at(centre + Vec2::splat(1.0)), order);
         }
-        let data = HudData { comps: serde_json::from_str(&std::fs::read_to_string(assets_dir().join("hud/hud.json")).unwrap()).unwrap(), skin: "Navy" };
+        let data = HudData { comps: crate::data::read_json(&assets_dir().join("hud/hud.json")).into(), skin: "Navy" };
         let frames: Vec<_> = (0..4).map(|i| sprite_of(&data, &format!("SpeedControl_CurrActive{i}_NextActive{i}")).unwrap()).collect();
         for frame in &frames {
             assert_eq!(frame.1.size(), Vec2::new(86.0, 101.0));
@@ -993,8 +997,8 @@ mod tests {
     #[test]
     fn every_class_has_its_hud_icons() {
         // Class names differ from the icon art (Ship_Navy_ManOWar -> Navy_Man_O_War); the WOT icon name resolves them all.
-        let comps: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(assets_dir().join("hud/hud.json")).unwrap()).unwrap();
-        let lib = crate::Library::load(&assets_dir());
+        let comps: std::sync::Arc<serde_json::Value> = crate::data::read_json(&assets_dir().join("hud/hud.json")).into();
+        let lib = crate::Library::load(assets_dir());
         for class in lib.classes.iter().filter(|c| c.name.starts_with("Ship_")) {
             let data = HudData { comps: comps.clone(), skin: crate::sprites::skin_of(&class.race) };
             for bar in ["ShipBar", "WeaponBar"] {
@@ -1005,7 +1009,7 @@ mod tests {
 
     #[test]
     fn every_faction_has_the_bar_parts_it_needs() {
-        let comps: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(assets_dir().join("hud/hud.json")).unwrap()).unwrap();
+        let comps: std::sync::Arc<serde_json::Value> = crate::data::read_json(&assets_dir().join("hud/hud.json")).into();
         for skin in ["Navy", "Pirate", "Procyon"] {
             let data = HudData { comps: comps.clone(), skin };
             for (part, _) in BarParts::load().0 {

@@ -133,7 +133,7 @@ pub fn refresh_sensors(
                 at: tf.translation,
                 sphere,
                 sight: armed.map(|b| lib.classes[b.class].sight),
-                group: base.map(|b| b.owner.as_str()).unwrap_or("").into(),
+                group: base.map_or("", |b| b.owner.as_str()).into(),
                 shown: health.is_none_or(|h| !h.destroyed) && animal.is_none_or(|a| a.visible && !a.dead) && rock.is_none_or(|r| r.hp > 0.0),
                 cloaked: false,
                 scenery: animal.is_none(),
@@ -172,9 +172,7 @@ fn sensor_smoke(world: &mut World) {
                 world.get_mut::<Transform>(e).unwrap().translation = Vec3::X * x;
                 let mut ship = world.get_mut::<Ship>(e).unwrap();
                 ship.speed = 0.0;
-                ship.order = 0;
-                ship.waypoints.clear();
-                ship.goal = None;
+                ship.halt();
                 world.entity_mut(e).insert(crate::ship::HoldPosition).remove::<crate::combat::GunStates>();
             }
         }
@@ -578,7 +576,7 @@ mod tests {
     fn sensor_snapshot_tracks_ship_spheres_script_changes_and_cleanup() {
         use crate::combat::{Health, Library};
         let mut app = App::new();
-        let lib = Library::load(&crate::assets_dir());
+        let lib = Library::load(crate::assets_dir());
         let class = lib.index("Ship_Navy_Cutter");
         let health = Health::new(&lib.classes[class]);
         let sphere = lib.classes[class].sphere;

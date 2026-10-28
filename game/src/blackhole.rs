@@ -7,7 +7,6 @@ use bevy::asset::RenderAssetUsages;
 use bevy::camera::visibility::NoFrustumCulling;
 use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
-use serde_json::Value;
 
 use crate::docking::Docker;
 use crate::{Health, Scenario, Ship, assets_dir, fx};
@@ -170,7 +169,7 @@ impl BlackHole {
 }
 
 fn load(kind: &str) -> Option<Params> {
-    let read = |n: &str| serde_json::from_str::<Value>(&std::fs::read_to_string(assets_dir().join(format!("fx/{n}.json"))).ok()?).ok();
+    let read = |n: &str| crate::data::try_json(&assets_dir().join(format!("fx/{n}.json")));
     let eft = read(&format!("BlackHoleRibbons_{kind}"))?;
     let v = eft["Primitive"].as_array()?.iter().find(|p| p["VORTEX_POINT_EFFECT_NAME"].is_string())?.clone();
     let wake = read(v["VORTEX_POINT_EFFECT_NAME"].as_str()?)?;
@@ -350,7 +349,7 @@ mod tests {
         let mut app = App::new();
         app.add_message::<Hit>()
             .init_resource::<Time>()
-            .insert_resource(Library::load(&assets_dir()))
+            .insert_resource(Library::load(assets_dir()))
             .init_resource::<crate::stats::GameStats>()
             .add_systems(Update, (pull, crate::stats::collect).chain());
         let small = Pull { kill: 10.0, ..Pull::for_terrain("Terrain_BlackHole_Small").unwrap() };
@@ -359,7 +358,7 @@ mod tests {
             let lib = app.world().resource::<Library>();
             let ci = lib.index(class);
             let c = &lib.classes[ci];
-            let health = Health { sections: c.sections.iter().map(|s| s.hp).collect(), core: c.core_hp, destroyed: false };
+            let health = Health::new(c);
             let ship = Ship {
                 class: ci,
                 side,

@@ -327,8 +327,8 @@ fn parse_prim(p: &Value, tex_names: &mut Vec<String>) -> Prim {
     let mesh = get(p, &["CommonPropertiesChunk", "MeshChunk"]).filter(|m| m["UseMorph"] == true).map(|m| {
         let src = m["SourceMeshName"].as_str().expect("Morph source mesh");
         let dst = m["DestinationMeshName"].as_str().expect("Morph destination mesh");
-        let (source, uv, indices) = crate::data::mesh_geometry(&assets_dir(), src).unwrap_or_else(|| panic!("Missing/invalid effect mesh {src}; regenerate effects"));
-        let (destination, _, other_indices) = crate::data::mesh_geometry(&assets_dir(), dst).unwrap_or_else(|| panic!("Missing/invalid effect mesh {dst}; regenerate effects"));
+        let (source, uv, indices) = crate::data::mesh_geometry(assets_dir(), src).unwrap_or_else(|| panic!("Missing/invalid effect mesh {src}; regenerate effects"));
+        let (destination, _, other_indices) = crate::data::mesh_geometry(assets_dir(), dst).unwrap_or_else(|| panic!("Missing/invalid effect mesh {dst}; regenerate effects"));
         assert!(source.len() == destination.len() && indices == other_indices, "Morph topology mismatch: {src} / {dst}");
         MorphMesh { source, destination, uv, indices, model: crate::data::model(&format!("{src}.glb")), weight: Curve::from(m.get("MeshWeightInterpolator")) }
     });
@@ -386,10 +386,10 @@ fn parse_prim(p: &Value, tex_names: &mut Vec<String>) -> Prim {
 impl FromWorld for FxLib {
     fn from_world(_: &mut World) -> Self {
         let dir = assets_dir().join("fx");
-        let names: Vec<String> = std::fs::read_to_string(dir.join("index.json")).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
+        let names: Vec<String> = crate::data::try_json(&dir.join("index.json")).and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default();
         let (mut effects, mut list, mut tex_names) = (HashMap::new(), vec![], vec![]);
         for n in names {
-            let j: Value = serde_json::from_str(&std::fs::read_to_string(dir.join(format!("{n}.json"))).unwrap()).unwrap();
+            let j = crate::data::read_json(&dir.join(format!("{n}.json")));
             let prims = match &j["Primitive"] {
                 Value::Array(a) => a.iter().map(|p| parse_prim(p, &mut tex_names)).collect(),
                 _ => vec![],
@@ -735,7 +735,14 @@ fn render_fx(
             }
         }
     }
-    let used: std::collections::HashSet<(usize, Blend)> = bufs.keys().copied().collect();
+    // Groups with nothing to draw this frame hide (they keep their mesh and material for later).
+    for (key, (e, _)) in &groups.0 {
+        if !bufs.contains_key(key)
+            && let Ok(mut v) = vis.get_mut(*e)
+        {
+            v.set_if_neq(Visibility::Hidden);
+        }
+    }
     for (key, b) in bufs {
         let entry = groups.0.entry(key).or_insert_with(|| {
             let mesh = meshes.add(Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default()));
@@ -764,14 +771,7 @@ fn render_fx(
             m.insert_indices(Indices::U32(b.idx));
         }
         if let Ok(mut v) = vis.get_mut(entry.0) {
-            *v = Visibility::Inherited;
-        }
-    }
-    for (key, (e, _)) in &groups.0 {
-        if !used.contains(key)
-            && let Ok(mut v) = vis.get_mut(*e)
-        {
-            *v = Visibility::Hidden;
+            v.set_if_neq(Visibility::Inherited);
         }
     }
 }

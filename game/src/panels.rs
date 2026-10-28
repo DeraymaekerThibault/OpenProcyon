@@ -412,10 +412,10 @@ fn update_contacts(
         .collect();
     for (Contact(i), mut node, mut vis) in &mut q {
         let Some(v) = contacts.get(*i) else {
-            *vis = Visibility::Hidden;
+            vis.set_if_neq(Visibility::Hidden);
             continue;
         };
-        *vis = Visibility::Inherited;
+        vis.set_if_neq(Visibility::Inherited);
         let size = radar.contact_size;
         let p = radar.centre + Vec2::new(v.x, -v.y) * radar.radius - size / 2.0;
         node.left = px(p.x, s);
@@ -605,7 +605,7 @@ pub fn input_app() -> (App, Entity) {
         .init_resource::<UiClick>()
         .init_resource::<crate::bindings::Bindings>()
         .init_resource::<combat::Target>()
-        .insert_resource(Library::load(&crate::assets_dir()))
+        .insert_resource(Library::load(crate::assets_dir()))
         .insert_resource(Toggles { weapons: true, names: true })
         .insert_resource(crate::Orbit { yaw: 0.0, pitch: 0.5, dist: 50.0, focus: Some(Entity::PLACEHOLDER) })
         .add_systems(Update, hud_input);
@@ -650,6 +650,7 @@ pub mod tests {
             speed: 1.0,
             ended: None,
             script: None,
+            autolaunch: false,
             shot_frame: 0,
             late_frame: 0,
         });

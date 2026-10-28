@@ -472,9 +472,9 @@ mod tests {
         assert_eq!(user_dir_from(p("/x"), home.clone(), appdata.clone(), true, none), p("/x/openprocyon"));
         assert_eq!(user_dir_from(None, home.clone(), appdata.clone(), true, none), Some(new.clone()));
         assert_eq!(user_dir_from(None, home.clone(), appdata.clone(), true, |d| d == old), Some(old.clone()));
-        assert_eq!(user_dir_from(None, home.clone(), appdata.clone(), true, |_| true), Some(new.clone()), "both exist: APPDATA");
+        assert_eq!(user_dir_from(None, home.clone(), appdata.clone(), true, |_| true), Some(new), "both exist: APPDATA");
         assert_eq!(user_dir_from(None, home.clone(), None, true, none), Some(old.clone()));
-        assert_eq!(user_dir_from(None, home.clone(), appdata.clone(), false, none), Some(old), "Linux/macOS: HOME first as before");
+        assert_eq!(user_dir_from(None, home, appdata, false, none), Some(old), "Linux/macOS: HOME first as before");
         assert_eq!(user_dir_from(None, None, None, true, none), None);
     }
 

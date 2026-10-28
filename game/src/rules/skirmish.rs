@@ -1,6 +1,7 @@
 //! A skirmish map's own script (`maps/<id>/script.json`): the same interpreter as the campaign, driving the map's convoys, timers and
 //! team points. The end rules stay with victory.rs; only the effects the skirmish maps use are applied here (paths, owners,
 //! visibility, hold, throttle caps, stances, damage).
+use crate::Nearest;
 use bevy::prelude::*;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -84,7 +85,7 @@ fn run(
                 let pts: Vec<Vec3> = sk.paths[path.as_str()].as_array().map(|a| a.iter().map(game_to_bevy).collect()).unwrap_or_default();
                 for e in &units {
                     let Ok((_, mut sh, tf, _, mut ms, ..)) = ships.get_mut(*e) else { continue };
-                    let from = if closest { (0..pts.len()).min_by(|a, b| pts[*a].distance(tf.translation).total_cmp(&pts[*b].distance(tf.translation))).unwrap_or(0) } else { 0 };
+                    let from = if closest { (0..pts.len()).nearest_to(tf.translation, |a| pts[*a]).unwrap_or(0) } else { 0 };
                     sh.throttle = None;
                     sh.waypoints = pts[from.min(pts.len())..].to_vec();
                     sh.order = 2;

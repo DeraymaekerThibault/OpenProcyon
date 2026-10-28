@@ -98,7 +98,7 @@ mod tests {
     use super::*;
     #[test]
     fn live_head_moves_between_distance_samples() {
-        let lib = crate::combat::Library::load(&crate::assets_dir());
+        let lib = crate::combat::Library::load(crate::assets_dir());
         let class = lib.index("Ship_Navy_Cutter");
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, AssetPlugin::default()))

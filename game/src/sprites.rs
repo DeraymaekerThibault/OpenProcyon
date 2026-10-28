@@ -9,7 +9,8 @@ use crate::{Library, PlayerShip, Ship, assets_dir};
 
 #[derive(Resource)]
 pub struct HudData {
-    pub comps: Value,
+    /// Shared so a view can look sprites up in another skin without copying the table.
+    pub comps: std::sync::Arc<Value>,
     /// Art set of the player's faction ("Navy", "Pirate" or "Procyon"): the in-game HUD changes layout and sprites with it.
     pub skin: &'static str,
 }
@@ -56,7 +57,7 @@ pub fn sprite_area(h: &HudData, name: &str, key: &str) -> Option<(String, Rect)>
 /// (`{"sheet_name": 2}`); layout always stays in reference pixels, only the source rectangle scales.
 pub fn sheet_scale(sheet: &str) -> f32 {
     static S: std::sync::OnceLock<HashMap<String, f32>> = std::sync::OnceLock::new();
-    S.get_or_init(|| std::fs::read_to_string(crate::assets_dir().join("hud/scales.json")).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default())
+    S.get_or_init(|| crate::data::try_json(&crate::assets_dir().join("hud/scales.json")).and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default())
         .get(sheet)
         .copied()
         .unwrap_or(1.0)
@@ -105,7 +106,9 @@ pub fn plugin(app: &mut App) {
         return;
     };
     let comps: Value = serde_json::from_str(&text).expect("hud.json");
-    app.insert_resource(HudData { comps, skin: "Navy" }).add_systems(PostStartup, load_fonts).add_systems(Update, choose_skin.run_if(in_state(crate::menu::Screen::Battle)));
+    app.insert_resource(HudData { comps: comps.into(), skin: "Navy" })
+        .add_systems(PostStartup, load_fonts)
+        .add_systems(Update, choose_skin.run_if(in_state(crate::menu::Screen::Battle)));
 }
 
 // ---- bitmap fonts (Fonts/*.fft) --------------------------------------------------------------------------------
@@ -236,7 +239,7 @@ mod tests {
         assert!(t.contains_key(&'"'), "QUOTE is the double quote");
         assert!(!t.contains_key(&'a'), "row -1: the font does not draw it");
         // Measured on an original screenshot: the Controls header "Control" is 80 units wide in UniversBold14 (advance 77).
-        let f: Value = serde_json::from_str(&std::fs::read_to_string(assets_dir().join("hud/fonts/UniversBold14.json")).unwrap()).unwrap();
+        let f: Value = crate::data::read_json(&assets_dir().join("hud/fonts/UniversBold14.json"));
         let t = glyph_table(&f);
         assert_eq!("Control".chars().map(|c| t[&c].next).sum::<f32>(), 77.0);
     }

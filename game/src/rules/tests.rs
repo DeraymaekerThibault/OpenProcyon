@@ -502,7 +502,7 @@ fn boarding_feeds_team_capture_not_the_lifeboat_capture_count() {
     thief.owner = "PlayerStart".into();
     thief.groups = vec!["PirateRunSloop".into()];
     assert!(s.cond(&team, &[thief.clone()], false));
-    assert!(!s.cond(&pvp, &[thief.clone()], false), "boarding does not increment the lifeboat table");
+    assert!(!s.cond(&pvp, &[thief], false), "boarding does not increment the lifeboat table");
     // the lifeboat route of the same rule: the table counts, exactly (collector, owner), no ally sharing
     s.lifeboat_saved("PlayerStart", "PirateRunner");
     assert!(s.cond(&pvp, &[], false));
@@ -689,6 +689,24 @@ fn twt_groups_alliances_and_setup_stances_drive_later_missions() {
     let lady = Unit { id: 61, e: world.spawn_empty().id(), ..unit("SS Lady J", "Schooner2", Vec3::ZERO) };
     let (fx, _) = sc2.step(std::slice::from_ref(&lady), 0.1, false);
     assert!(fx.iter().any(|f| matches!(f, Fx::Stance(u, Stance::Dummy) if u == &[lady.e])));
+}
+
+#[test]
+fn volume_entry_and_exit_track_transitions() {
+    let mut sc = script();
+    sc.volumes = HashMap::from([("V".to_string(), Region::from_json(&serde_json::json!([[0, 0], [10, 0], [10, 10], [0, 10]])))]);
+    let mut w = vec![unit("a", "G", Vec3::new(50.0, 0.0, -5.0))];
+    let enter = serde_json::json!({"Type": "Enter Volume", "Group Name": "G", "Volume Name": "V"});
+    let exit = serde_json::json!({"Type": "Exit Volume", "Group Name": "G", "Volume Name": "V"});
+    assert!(!sc.cond(&enter, &w, true));
+    assert!(!sc.cond(&exit, &w, true));
+    w[0].pos.x = 5.0;
+    assert!(sc.cond(&enter, &w, true));
+    assert!(!sc.cond(&enter, &w, true));
+    assert!(!sc.cond(&exit, &w, true));
+    w[0].pos.x = 50.0;
+    assert!(sc.cond(&exit, &w, true));
+    assert!(!sc.cond(&exit, &w, true));
 }
 
 #[test]

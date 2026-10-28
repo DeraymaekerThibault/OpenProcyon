@@ -246,6 +246,50 @@ pub fn resume_scenario(world: &mut World) {
     world.resource_mut::<Time<Virtual>>().unpause();
 }
 
+/// The map's scenery (`objects`): models with their collision bodies, dock points, island sounds, black holes and asteroids.
+/// Returns the objects with an id (candidates for rule-addressable bases).
+fn spawn_map_objects(
+    commands: &mut Commands,
+    assets: &AssetServer,
+    fxl: &fx::FxLib,
+    shapes: &collision::Shapes,
+    asteroids: &data::AsteroidDefs,
+    map: &serde_json::Value,
+) -> Vec<(Entity, serde_json::Value)> {
+    let mut bases = vec![];
+    let docks = crate::docking::load_docks();
+    let island_sounds = data::try_json(&crate::assets_dir().join("data/island_sounds.json")).unwrap_or_default();
+    for o in map["objects"].as_array().into_iter().flatten() {
+        let ty = o["type"].as_str().unwrap_or_default();
+        let glb = format!("{}.glb", o["scene"].as_str().unwrap_or_default());
+        let tf = scenery_transform(o, game_rotation(&o["rot"]), &docks);
+        let e = commands.spawn((Scenario, crate::data::scene(assets, &glb), tf)).id();
+        if let Some(body) = shapes.obstacle(ty, &tf) {
+            commands.entity(e).insert(body);
+        }
+        // Every base/island with dock points is dockable on every map type, not only campaign bases a rule sets up.
+        if let Some(d) = crate::docking::dockable_for(&docks, ty) {
+            commands.entity(e).insert(d);
+        }
+        if let Some(i) = island_sounds.get(ty) {
+            commands.entity(e).insert(crate::audio::IslandLoop { sound: i["sound"].as_str().unwrap_or_default().into(), max: i["distance"].as_f64().unwrap_or(200.0) as f32 });
+        }
+        if ty.starts_with("Terrain_BlackHole") {
+            // The funnel mesh is not drawn: the reference video shows only the effect's glow, beam and ribbons.
+            commands.entity(e).insert(Visibility::Hidden);
+            blackhole::spawn(commands, fxl, ty, game_to_bevy(&o["pos"]));
+        }
+        if let Some(mut rock) = combat::Asteroid::new(ty, o["group"].as_str().unwrap_or(""), asteroids) {
+            rock.id = o["id"].as_i64().unwrap_or(-1);
+            commands.entity(e).insert(rock);
+        }
+        if o["id"].is_i64() {
+            bases.push((e, o.clone()));
+        }
+    }
+    bases
+}
+
 /// Skirmish on a retail map (assets/maps/<id>.json from World/*.twt): scenery, skybox and music from the map; our fleet at
 /// the first player's start point, the enemy fleet at the first player of another team, both in formation facing their
 /// start vectors. Without a map: the test arena (player at the origin, enemies on a ring).
@@ -254,53 +298,17 @@ pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Libra
     commands.remove_resource::<crate::rules::skirmish::SkirmishScript>();
     let map = cfg.map.as_deref().and_then(data::map_json);
     commands.insert_resource(MapLighting(map.as_ref().and_then(lighting_of)));
-    let sky = map.as_ref().and_then(|m| m["sky"].as_str()).map(|s| s.rsplit_once("_Layer").map_or(s, |x| x.0).to_string()).unwrap_or("skybox_07".into());
-    commands.spawn((
-        Scenario,
-        Sky,
-        WorldAssetRoot(assets.load(GltfAssetLabel::Scene(0).from_asset(data::model(&format!("{sky}.glb"))))),
-        Transform::from_scale(Vec3::splat(8000.0)),
-        Visibility::default(),
-    ));
+    let sky = map.as_ref().and_then(|m| m["sky"].as_str()).map_or_else(|| "skybox_07".into(), |s| s.rsplit_once("_Layer").map_or(s, |x| x.0).to_string());
+    commands.spawn((Scenario, Sky, crate::data::scene(assets, &format!("{sky}.glb")), Transform::from_scale(Vec3::splat(8000.0)), Visibility::default()));
     let track = map.as_ref().and_then(|m| m["music"].as_str()).unwrap_or("BTL_NavyBig_Full02");
     if !campaign::is_mission(cfg.map.as_deref()) {
         // the mission's rules choose its music
         let m = audio::music(commands, assets, track);
         commands.entity(m).insert(Scenario);
     }
-    let mut bases: Vec<(Entity, serde_json::Value)> = vec![]; // scenery with an object id: candidates for rule-addressable bases
     let ours: Vec<String> = std::iter::once(cfg.player.clone()).chain(cfg.allies.iter().cloned()).collect();
     if let Some(map) = &map {
-        let docks = crate::docking::load_docks();
-        let island_sounds = data::try_json(&crate::assets_dir().join("data/island_sounds.json")).unwrap_or_default();
-        for o in map["objects"].as_array().into_iter().flatten() {
-            let glb = format!("{}.glb", o["scene"].as_str().unwrap_or_default());
-            let rotation = game_rotation(&o["rot"]);
-            let tf = scenery_transform(o, rotation, &docks);
-            let e = commands.spawn((Scenario, WorldAssetRoot(assets.load(GltfAssetLabel::Scene(0).from_asset(data::model(&glb)))), tf)).id();
-            if let Some(body) = shapes.obstacle(o["type"].as_str().unwrap_or_default(), &tf) {
-                commands.entity(e).insert(body);
-            }
-            // Every base/island with dock points is dockable on every map type, not only campaign bases a rule sets up.
-            if let Some(d) = o["type"].as_str().and_then(|t| crate::docking::dockable_for(&docks, t)) {
-                commands.entity(e).insert(d);
-            }
-            if let Some(i) = o["type"].as_str().and_then(|t| island_sounds.get(t)) {
-                commands.entity(e).insert(crate::audio::IslandLoop { sound: i["sound"].as_str().unwrap_or_default().into(), max: i["distance"].as_f64().unwrap_or(200.0) as f32 });
-            }
-            if let Some(t) = o["type"].as_str().filter(|t| t.starts_with("Terrain_BlackHole")) {
-                // The funnel mesh is not drawn: the reference video shows only the effect's glow, beam and ribbons.
-                commands.entity(e).insert(Visibility::Hidden);
-                blackhole::spawn(commands, fxl, t, game_to_bevy(&o["pos"]));
-            }
-            if let Some(mut rock) = combat::Asteroid::new(o["type"].as_str().unwrap_or(""), o["group"].as_str().unwrap_or(""), asteroids) {
-                rock.id = o["id"].as_i64().unwrap_or(-1);
-                commands.entity(e).insert(rock);
-            }
-            if o["id"].is_i64() {
-                bases.push((e, o.clone()));
-            }
-        }
+        let bases = spawn_map_objects(commands, assets, fxl, shapes, asteroids, map);
         nebula::spawn(commands, assets, fxl, map);
         if campaign::is_mission(cfg.map.as_deref()) {
             campaign::spawn(commands, assets, lib, fxl, cfg.map.as_deref().unwrap(), &bases);
@@ -390,7 +398,7 @@ pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Libra
                     continue;
                 }
                 let team = pl["team"].as_i64().unwrap_or(-1) as i32;
-                let side = groups.iter().find(|g| team >= 0 && g.team == team).map(|g| g.side).unwrap_or(Side(groups.iter().map(|g| g.side.0).max().unwrap_or(0) + 1));
+                let side = groups.iter().find(|g| team >= 0 && g.team == team).map_or(Side(groups.iter().map(|g| g.side.0).max().unwrap_or(0) + 1), |g| g.side);
                 groups.push(Group {
                     player: p,
                     side,
@@ -844,7 +852,7 @@ mod rotation_tests {
             .init_asset::<StandardMaterial>()
             .init_asset::<AudioSource>()
             .init_asset::<crate::fx::EffectMaterial>()
-            .insert_resource(Library::load(&crate::assets_dir()))
+            .insert_resource(Library::load(crate::assets_dir()))
             .init_resource::<fx::FxLib>()
             .init_resource::<collision::Shapes>()
             .init_resource::<data::AsteroidDefs>()
@@ -862,6 +870,7 @@ mod rotation_tests {
                 speed: 1.0,
                 ended: None,
                 script: None,
+                autolaunch: false,
                 shot_frame: 0,
                 late_frame: 0,
             });
@@ -908,6 +917,7 @@ mod rotation_tests {
             speed: 1.0,
             ended: None,
             script: None,
+            autolaunch: false,
             shot_frame: 0,
             late_frame: 0,
         });

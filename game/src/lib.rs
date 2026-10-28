@@ -62,6 +62,8 @@ pub struct Config {
     speed: f32,
     ended: Option<u32>,
     script: Option<smoke::Script>,
+    /// `--autolaunch`: the lobby fills the fleet and starts the battle (dev/smoke hook).
+    autolaunch: bool,
     shot_frame: u32,
     late_frame: u32,
 }
@@ -94,8 +96,8 @@ fn content_dir_from(next_to_exe: Option<PathBuf>, checkout: PathBuf) -> PathBuf 
     next_to_exe.filter(|dir| dir.join("fonts").is_dir()).unwrap_or(checkout)
 }
 /// The asset root: the imported assets with `content/` and any `--mod` folders overlaid on top (see modding.rs).
-pub fn assets_dir() -> PathBuf {
-    ASSETS.get_or_init(|| modding::overlay(&base_assets(), &[content_dir()])).clone()
+pub fn assets_dir() -> &'static std::path::Path {
+    ASSETS.get_or_init(|| modding::overlay(&base_assets(), &[content_dir()]))
 }
 
 /// Runs the game with one presentation (a view plugin such as the binary's `classic::plugin`); without imported assets it opens
@@ -129,6 +131,7 @@ pub fn run(view: fn(&mut App), setup_view: fn(&mut App)) {
         speed: arg("--speed").and_then(|v| v.parse().ok()).unwrap_or(1.0),
         ended: None,
         script,
+        autolaunch: args.iter().any(|a| a == "--autolaunch"),
         shot_frame: arg("--shot-frame").and_then(|v| v.parse().ok()).unwrap_or(500),
         late_frame: arg("--late-frame").and_then(|v| v.parse().ok()).unwrap_or(9000), // 0: no _late shot (slow software rendering)
     };
@@ -333,16 +336,35 @@ fn screenshot(mut commands: Commands, mut cfg: ResMut<Config>) {
     }
 }
 
+/// The item whose position is closest to `to`.
+/// `iter.nearest_to(point, pos)`: the item whose `pos` is closest to `point` (see `nearest`).
+pub trait Nearest: Iterator + Sized {
+    fn nearest_to(self, to: Vec3, pos: impl Fn(&Self::Item) -> Vec3) -> Option<Self::Item> {
+        nearest(self, to, pos)
+    }
+}
+impl<I: Iterator> Nearest for I {}
+
+pub fn nearest<T>(items: impl IntoIterator<Item = T>, to: Vec3, pos: impl Fn(&T) -> Vec3) -> Option<T> {
+    items.into_iter().min_by(|a, b| pos(a).distance_squared(to).total_cmp(&pos(b).distance_squared(to)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn nearest_picks_the_closest_position() {
+        let pts = [Vec3::new(5.0, 0.0, 0.0), Vec3::new(1.0, 1.0, 0.0), Vec3::new(-9.0, 0.0, 0.0)];
+        assert_eq!(nearest(pts, Vec3::ZERO, |p| *p), Some(pts[1]));
+        assert_eq!(nearest(Vec::<Vec3>::new(), Vec3::ZERO, |p| *p), None);
+    }
     #[test]
     fn content_next_to_the_executable_wins_over_the_checkout() {
         let dir = std::env::temp_dir().join(format!("procyon-content-test-{}", std::process::id()));
         let (unpacked, checkout) = (dir.join("download/content"), dir.join("checkout/content"));
         assert_eq!(content_dir_from(Some(unpacked.clone()), checkout.clone()), checkout, "no content/ next to a cargo-built binary");
         std::fs::create_dir_all(unpacked.join("fonts")).unwrap();
-        assert_eq!(content_dir_from(Some(unpacked.clone()), checkout.clone()), unpacked);
+        assert_eq!(content_dir_from(Some(unpacked.clone()), checkout), unpacked);
         std::fs::remove_dir_all(dir).unwrap();
     }
 }
