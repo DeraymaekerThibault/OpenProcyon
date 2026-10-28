@@ -2,6 +2,7 @@ use super::*;
 use std::time::Duration;
 
 #[test]
+#[ignore = "needs imported assets"]
 fn skirmish_dock_lights_show_on_friendly_bases_only() {
     let mut app = App::new();
     app.init_resource::<FxLib>().add_systems(Update, markers);
@@ -17,6 +18,7 @@ fn skirmish_dock_lights_show_on_friendly_bases_only() {
 }
 
 #[test]
+#[ignore = "needs imported assets"]
 fn mission_two_base_docking_plans_around_the_island_before_allowing_contact() {
     let (mut app, lib) = app();
     app.init_resource::<crate::collision::Shapes>().add_systems(Update, crate::collision::sail.after(routine));
@@ -60,6 +62,7 @@ fn mission_two_base_docking_plans_around_the_island_before_allowing_contact() {
 }
 
 #[test]
+#[ignore = "needs imported assets"]
 fn coventry_docks_and_repairs_at_norville_on_the_flight_plane() {
     let (mut app, lib) = app();
     app.init_resource::<crate::collision::Shapes>().add_systems(Update, crate::collision::sail.after(routine));
@@ -94,6 +97,7 @@ fn coventry_docks_and_repairs_at_norville_on_the_flight_plane() {
 }
 
 #[test]
+#[ignore = "needs imported assets"]
 fn towing_detaches_only_its_formation_follower() {
     let (mut w, ids) = crate::ship::movement_tests::fleet_world();
     crate::ship::set_formation(&mut w, "Player", Some(crate::ship::Formation::Column), true);
@@ -106,6 +110,7 @@ fn towing_detaches_only_its_formation_follower() {
 /// A computer ship docks for repair once two sections are down to half or less (a destroyed one does not count), at the
 /// nearest friendly dock; the human's ships and healthy ships do not.
 #[test]
+#[ignore = "needs imported assets"]
 fn computer_ship_with_two_half_sections_sails_for_the_nearest_dock() {
     let (mut app, lib) = app();
     app.add_systems(Update, ai_repair_dock.before(handle_messages));
@@ -175,6 +180,7 @@ fn point(x: f32) -> DockPoint {
 }
 
 #[test]
+#[ignore = "needs imported assets"]
 fn player_docks_repairs_and_leaves_its_slot_free() {
     let (mut app, lib) = app();
     app.add_plugins((TaskPoolPlugin::default(), AssetPlugin::default()))
@@ -242,6 +248,7 @@ fn player_docks_repairs_and_leaves_its_slot_free() {
 }
 
 #[test]
+#[ignore = "needs imported assets"]
 fn closer_ship_takes_over_a_point_and_ai_ship_returns_home() {
     let (mut app, lib) = app();
     let tender = ship(&lib, "Ship_Navy_Tender", Side::Player);
@@ -276,6 +283,7 @@ fn closer_ship_takes_over_a_point_and_ai_ship_returns_home() {
 }
 
 #[test]
+#[ignore = "needs imported assets"]
 fn disabled_dockee_refuses_and_exported_points_load() {
     let (mut app, lib) = app();
     let (s, h) = ship(&lib, "Ship_Navy_Cutter", Side::Player);

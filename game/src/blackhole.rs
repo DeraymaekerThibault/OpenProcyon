@@ -340,12 +340,10 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs imported assets"]
     fn the_centre_destroys_a_ship_and_credits_nobody() {
         use crate::combat::{Hit, Library};
         use crate::{Side, collision::Drift};
-        if !assets_dir().join("ships").is_dir() {
-            return; // needs imported assets (tests/imported.py)
-        }
         let mut app = App::new();
         app.add_message::<Hit>()
             .init_resource::<Time>()
@@ -405,6 +403,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs imported assets"]
     fn small_hole_params_match_the_effect_file() {
         let p = hole().p;
         assert_eq!((p.start, p.kill, p.rdelta, p.out, p.width), (150.0, 10.0, 0.45, 0.2, 50.0));
@@ -412,6 +411,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs imported assets"]
     fn points_spiral_in_die_and_trails_fade() {
         let mut h = hole();
         for _ in 0..3000 {

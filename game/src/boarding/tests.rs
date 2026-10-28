@@ -52,6 +52,7 @@ fn interval_scales_with_the_weaker_side() {
 }
 
 #[test]
+#[ignore = "needs imported assets"]
 fn exported_data_has_crews_and_base_points() {
     assert_eq!(counts("Ship_Pirate_Schooner"), SCHOONER);
     assert_eq!(points("Ship_Pirate_Schooner").len(), 2);
@@ -74,6 +75,7 @@ fn drive(time: Res<Time>, mut ships: Query<(&Ship, &mut Transform, &Drift)>) {
 /// A computer Barque with the player's ship on its beam inside harpoon reach, once fired at, grapples it on its own, winches in and boards
 /// (Elite crew); with a boarding strength of 10 it grapples but never sends boarders.
 #[test]
+#[ignore = "needs imported assets"]
 fn computer_captain_grapples_and_boards_its_target() {
     for (attack, boards) in [(None, true), (Some(AI_MIN_ATTACK), false)] {
         let mut app = app();
@@ -142,6 +144,7 @@ fn spawn(app: &mut App, class: &str, side: Side, at: Vec3, skill: Skill) -> Enti
 }
 
 #[test]
+#[ignore = "needs imported assets"]
 fn boarding_a_hostile_skirmish_base_changes_its_side() {
     use crate::combat::{BaseOrigin, BaseSide};
     let mut app = app();
@@ -175,6 +178,7 @@ fn generic_crews_speed_ships_up_by_level() {
 }
 
 #[test]
+#[ignore = "needs imported assets"]
 fn grapple_then_board_captures_the_ship_and_tells_the_rules() {
     let mut app = app();
     let me = spawn(&mut app, "Ship_Navy_Cutter", Side::Player, Vec3::ZERO, Skill::Elite);
@@ -231,6 +235,7 @@ fn grapple_then_board_captures_the_ship_and_tells_the_rules() {
 }
 
 #[test]
+#[ignore = "needs imported assets"]
 fn boarding_needs_a_grapple_and_ends_when_the_ships_drift_apart() {
     let mut app = app();
     let me = spawn(&mut app, "Ship_Navy_Cutter", Side::Player, Vec3::ZERO, Skill::Average);
@@ -255,6 +260,7 @@ fn boarding_needs_a_grapple_and_ends_when_the_ships_drift_apart() {
 }
 
 #[test]
+#[ignore = "needs imported assets"]
 fn a_grapple_does_not_hold_the_ships_and_snaps_when_they_pull_apart() {
     let mut app = app();
     let me = spawn(&mut app, "Ship_Navy_Cutter", Side::Player, Vec3::ZERO, Skill::Average);
@@ -286,6 +292,7 @@ fn a_grapple_does_not_hold_the_ships_and_snaps_when_they_pull_apart() {
 /// beam inside 45 units but not at the 55.7-unit circle it held round an idle Cutter; a Carrack's bow-facing harpoons never
 /// bear on a ship it circles on its beam.
 #[test]
+#[ignore = "needs imported assets"]
 fn ai_harpoons_bear_by_arc_and_long_range() {
     let lib = Library::load(assets_dir());
     let bears = |class: &str, at: Vec3| {
@@ -314,6 +321,7 @@ fn ai_harpoons_bear_by_arc_and_long_range() {
 }
 
 #[test]
+#[ignore = "needs imported assets"]
 fn base_boarding_needs_a_boarding_point_in_reach_and_a_slow_boarder() {
     let lib = Library::load(assets_dir());
     let ci = lib.index("Ship_Navy_Cutter");

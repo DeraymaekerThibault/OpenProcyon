@@ -3,6 +3,7 @@ use super::*;
 /// Gunners take 10 x gunnery seconds off TimeBetweenBursts (docs/re/gunnery.md#gunners): a gunnery-8.5 crew fires the
 /// 12 s heavy cannon every 3.5 s; the cut never goes below zero and leaves in-burst spacing alone.
 #[test]
+#[ignore = "needs imported assets"]
 fn gunners_shorten_reload() {
     let (guns, _) = load_weapons(assets_dir());
     let heavy = &guns["Gun_CannonBall_Heavy"];
@@ -25,6 +26,7 @@ fn damage_scales_with_side_and_difficulty() {
 }
 
 #[test]
+#[ignore = "needs imported assets"]
 fn destroyed_sail_does_not_absorb_shots_but_destroyed_vital_sections_do() {
     let (guns, _) = load_weapons(assets_dir());
     let mut class = load_class(assets_dir(), "Ship_Navy_Torpedo", &guns);
@@ -43,6 +45,7 @@ fn destroyed_sail_does_not_absorb_shots_but_destroyed_vital_sections_do() {
 }
 
 #[test]
+#[ignore = "needs imported assets"]
 fn destroyed_torpedo_boat_sail_redirects_aim_to_hull() {
     let lib = Library::load(assets_dir());
     let class = &lib.classes[lib.index("Ship_Navy_Torpedo")];
@@ -72,6 +75,7 @@ fn breakup_chunks_fly_then_burst_inside_their_window() {
 }
 
 #[test]
+#[ignore = "needs imported assets"]
 fn cutter_masts_break_off_as_debris_pieces() {
     let lib = Library::load(assets_dir());
     let class = &lib.classes[lib.index("Ship_Navy_Cutter")];
@@ -104,6 +108,7 @@ fn debris_drifts_with_its_ship_sinks_tumbles_and_goes() {
 }
 
 #[test]
+#[ignore = "needs imported assets"]
 fn cutter_breakup_uses_the_retail_section_data() {
     let lib = Library::load(assets_dir());
     let class = &lib.classes[lib.index("Ship_Navy_Cutter")];
@@ -116,6 +121,7 @@ fn cutter_breakup_uses_the_retail_section_data() {
 }
 
 #[test]
+#[ignore = "needs imported assets"]
 fn island_gun_towers_load_and_mission_damage_follows_their_vital_sections() {
     let lib = Library::load(assets_dir());
     let class = &lib.classes[lib.index("Base_SmugglersCamp")];
@@ -143,6 +149,7 @@ fn island_gun_towers_load_and_mission_damage_follows_their_vital_sections() {
 }
 
 #[test]
+#[ignore = "needs imported assets"]
 fn resting_muzzles_sit_at_their_authored_points() {
     // Barrel meshes and muzzles are authored in the base frame; the pivot only moves the pitch axis (Dreadnought hull guns
     // were drawn 0.9 too high and 1.2 too far forward when the pivot was added on top).
@@ -167,6 +174,7 @@ fn resting_muzzles_sit_at_their_authored_points() {
 }
 
 #[test]
+#[ignore = "needs imported assets"]
 fn hostile_island_towers_shoot_the_player_and_neutral_ones_do_not() {
     let mut app = App::new();
     app.add_plugins((TaskPoolPlugin::default(), AssetPlugin::default(), TransformPlugin))
@@ -276,6 +284,7 @@ fn hostile_island_towers_shoot_the_player_and_neutral_ones_do_not() {
 }
 
 #[test]
+#[ignore = "needs imported assets"]
 fn skirmish_bases_shoot_ships_of_other_sides_only() {
     let mut app = App::new();
     app.add_plugins((TaskPoolPlugin::default(), AssetPlugin::default(), TransformPlugin))
@@ -329,6 +338,7 @@ fn skirmish_bases_shoot_ships_of_other_sides_only() {
 }
 
 #[test]
+#[ignore = "needs imported assets"]
 fn a_volcano_lobs_one_aimed_shell_at_a_time() {
     let mut app = App::new();
     app.add_plugins((TaskPoolPlugin::default(), AssetPlugin::default(), TransformPlugin))
@@ -383,6 +393,7 @@ fn a_volcano_lobs_one_aimed_shell_at_a_time() {
 }
 
 #[test]
+#[ignore = "needs imported assets"]
 fn the_command_ship_holds_fire_until_an_enemy_is_clicked() {
     let mut app = App::new();
     app.add_plugins((TaskPoolPlugin::default(), AssetPlugin::default(), TransformPlugin))
@@ -444,6 +455,7 @@ fn the_command_ship_holds_fire_until_an_enemy_is_clicked() {
 }
 
 #[test]
+#[ignore = "needs imported assets"]
 fn the_command_ship_damages_a_clicked_hostile_skirmish_base() {
     let mut app = App::new();
     app.add_plugins((TaskPoolPlugin::default(), AssetPlugin::default(), TransformPlugin))
@@ -506,6 +518,7 @@ fn the_command_ship_damages_a_clicked_hostile_skirmish_base() {
 }
 
 #[test]
+#[ignore = "needs imported assets"]
 fn ship_hit_rules() {
     let lib = Library::load(assets_dir());
     let class = &lib.classes[lib.index("Ship_Navy_Cutter")];
@@ -538,6 +551,7 @@ fn segment_distance_clamps_to_the_ends() {
 }
 
 #[test]
+#[ignore = "needs imported assets"]
 fn core_bleed_scales_with_destroyed_vital_sections() {
     let lib = Library::load(assets_dir());
     let class = &lib.classes[lib.index("Ship_Navy_Cutter")];
@@ -549,6 +563,7 @@ fn core_bleed_scales_with_destroyed_vital_sections() {
 }
 
 #[test]
+#[ignore = "needs imported assets"]
 fn bank_recharge_follows_the_slowest_live_gun() {
     let lib = Library::load(assets_dir());
     let ci = lib.index("Ship_Navy_Cutter");
@@ -579,6 +594,7 @@ fn bank_recharge_follows_the_slowest_live_gun() {
     assert_eq!(bank_recharge(&lib, &g, class, &health, 99), 0.0, "no live gun in the bank");
 }
 #[test]
+#[ignore = "needs imported assets"]
 fn every_gun_has_a_panel_icon_and_pd_is_hidden() {
     let hud: serde_json::Value = crate::data::read_json(&assets_dir().join("hud/hud.json"));
     let (g, _) = load_weapons(assets_dir());
@@ -589,6 +605,7 @@ fn every_gun_has_a_panel_icon_and_pd_is_hidden() {
     assert!(g["Gun_Lancer_PD_Light"].point_defense);
 }
 #[test]
+#[ignore = "needs imported assets"]
 fn port_and_starboard_sections_sit_on_their_own_side() {
     let (g, _) = load_weapons(assets_dir());
     for name in ["Ship_Pirate_Schooner", "Ship_Navy_Frigate", "Ship_Navy_Cutter"] {
@@ -616,6 +633,7 @@ fn slow_projectile_intercepts_crossing_and_receding_targets() {
     assert_eq!(intercept_time(Vec3::ZERO, Vec3::ZERO, 22.0), Some(0.0));
 }
 #[test]
+#[ignore = "needs imported assets"]
 fn point_defence_wears_a_torpedo_down_instead_of_one_shot_kills() {
     let lib = Library::load(crate::assets_dir());
     let torpedo = lib.bullets["Bullet_Torpedo"].hitpoints;
@@ -630,6 +648,7 @@ fn point_defence_wears_a_torpedo_down_instead_of_one_shot_kills() {
 }
 
 #[test]
+#[ignore = "needs imported assets"]
 fn torpedo_guidance_launch_coast_and_moving_target_intercept() {
     let lib = Library::load(assets_dir());
     let physics = lib.bullets["Bullet_Torpedo"].physics.as_ref().unwrap();
@@ -661,6 +680,7 @@ fn torpedo_guidance_launch_coast_and_moving_target_intercept() {
 }
 
 #[test]
+#[ignore = "needs imported assets"]
 fn model_hardpoints_are_loaded_in_bevy_axes() {
     let lib = Library::load(assets_dir());
     let class = &lib.classes[lib.index("Ship_Navy_Torpedo")];
@@ -685,6 +705,7 @@ fn torpedo_aim_and_launch_do_not_inherit_shooter_motion() {
 /// Retail damage control (refit-resupply.md#crew-damage-control): riggers mend the most damaged sail +3 per successful
 /// roll; engineers mend the most damaged hull by floor(10 x mean engineering x material factor).
 #[test]
+#[ignore = "needs imported assets"]
 fn crew_damage_control_follows_riggers_and_engineers() {
     let lib = Library::load(assets_dir());
     let class = &lib.classes[lib.index("Ship_Navy_ManOWar")];
@@ -733,6 +754,7 @@ fn fire_fighting_sums_crew_leadership() {
 /// Retail shells (docs/re/gunnery.md#shell-gravity): gravity MuzzleSpeed^2 / (sqrt(2) * MaximumRange) per gun, launch speed
 /// MuzzleSpeed in the world frame whatever the shooter's motion, lead from the target's velocity alone.
 #[test]
+#[ignore = "needs imported assets"]
 fn shells_match_measured_retail_ballistics() {
     let (guns, _) = load_weapons(assets_dir());
     // gun, measured gravity (median of repeated retail shells)
@@ -768,6 +790,7 @@ fn shells_match_measured_retail_ballistics() {
 }
 
 #[test]
+#[ignore = "needs imported assets"]
 fn retail_torpedo_arc_body_and_hull_collision() {
     let (guns, bullets) = load_weapons(assets_dir());
     let torpedo = load_class(assets_dir(), "Ship_Navy_Torpedo", &guns);
@@ -801,6 +824,7 @@ fn mine_laying_spells() {
 
 /// A ship frozen by an NIS (speed 0) keeps its engine order but shows no exhaust; it shows once the ship moves.
 #[test]
+#[ignore = "needs imported assets"]
 fn engine_exhaust_needs_motion_not_just_an_order() {
     let mut app = App::new();
     app.init_resource::<FxLib>().insert_resource(Library::load(assets_dir())).add_systems(Update, engine_rate);
@@ -837,6 +861,7 @@ fn engine_exhaust_needs_motion_not_just_an_order() {
 /// Side-facing point-defence lancers face away from the keel: they hang upside down (rolled about the bow axis) and used to
 /// face inward.
 #[test]
+#[ignore = "needs imported assets"]
 fn side_point_defence_faces_outward() {
     let (guns, _) = load_weapons(assets_dir());
     for ship in ["Ship_Navy_ManOWar", "Ship_Navy_Cutter", "Ship_Navy_Heavy_Escort", "Ship_Pirate_Galleon"] {
@@ -852,6 +877,7 @@ fn side_point_defence_faces_outward() {
 
 /// A cannonball flying into an enemy hull goes through `shells` -> `hit_ship`: a Hit message, section damage and the shell gone.
 #[test]
+#[ignore = "needs imported assets"]
 fn shell_into_a_hull_damages_it_and_reports_the_hit() {
     let mut app = App::new();
     let lib = Library::load(assets_dir());

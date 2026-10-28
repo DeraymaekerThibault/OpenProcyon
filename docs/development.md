@@ -20,14 +20,17 @@ python3 -m tools.import_assets --game <install dir>   # once: convert your own c
 tools/check.sh
 cargo run --release --manifest-path game/Cargo.toml -- --mission 1
 python3 -m unittest discover -s tests -p 'test_trim_hud_rects.py'
-cargo test --release --manifest-path game/Cargo.toml panels::tests  # shared HUD; classic::panels::tests for the retail art
+cargo test --release --manifest-path game/Cargo.toml panels::tests -- --include-ignored  # shared HUD; classic::panels::tests for the retail art
 tools/shot.sh local/mission01.png --mission 1 --script briefing-skip --shot-frame 180 --late-frame 0
 tools/shot.sh local/paused.png --map red_rover --script pause --shot-frame 50 --late-frame 0
 tools/shot.sh local/pause-restart.png --map red_rover --script pause-restart --shot-frame 90 --late-frame 0
 ```
 
 `make check` calls `tools/check.sh`: ruff format check and lint (Python, rules in `ruff.toml`) → rustfmt check → strict Clippy → Rust release tests → Python tests. Rust tests that need converted
-assets only run when an import exists (otherwise the tests are compiled but not run); Python tests that need the install or assets skip.
+assets are marked `#[ignore = "needs imported assets"]`; the gate runs them with `--include-ignored` when an import exists.
+Mark new Rust tests that load imported data with the same ignore reason, including tests that do so through helpers.
+Asset-free Rust tests always run. For a manual full run after importing, use `cargo test --release --manifest-path game/Cargo.toml -- --include-ignored`.
+Python tests that need the install or assets skip.
 `make fmt` formats Rust and Python (`ruff format`, `ruff check --fix`); it does not rewrite generated JSON. `python3 -m tools.format_json assets` formats asset JSON when needed.
 Shared sight smoke: `WAYLAND_DISPLAY= tools/shot.sh local/sight.png --script sight --allies Ship_Navy_Cutter --enemies Ship_Pirate_Schooner --shot-frame 135 --late-frame 0`; it freezes three ships and asserts group/range/cloak transitions against real radar widgets. This is wiring validation, not a campaign playthrough.
 

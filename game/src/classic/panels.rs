@@ -945,6 +945,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs imported assets"]
     fn speed_segments_and_frames_match_engine_orders() {
         for (order, centre) in [(0, Vec2::new(54.0, 71.0)), (1, Vec2::new(44.0, 57.0)), (2, Vec2::new(31.0, 44.0)), (3, Vec2::new(14.0, 34.0))] {
             assert_eq!(crate::panels::speed_order_at(centre), order);
@@ -962,6 +963,7 @@ mod tests {
         }
     }
     #[test]
+    #[ignore = "needs imported assets"]
     fn dial_click_sets_the_engine_order_and_counts_as_a_hud_click() {
         let (mut app, root) = crate::panels::input_app();
         app.add_systems(Update, crate::panels::engine_input.before(crate::panels::hud_input));
@@ -995,6 +997,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs imported assets"]
     fn every_class_has_its_hud_icons() {
         // Class names differ from the icon art (Ship_Navy_ManOWar -> Navy_Man_O_War); the WOT icon name resolves them all.
         let comps: std::sync::Arc<serde_json::Value> = crate::data::read_json(&assets_dir().join("hud/hud.json")).into();
@@ -1008,6 +1011,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs imported assets"]
     fn every_faction_has_the_bar_parts_it_needs() {
         let comps: std::sync::Arc<serde_json::Value> = crate::data::read_json(&assets_dir().join("hud/hud.json")).into();
         for skin in ["Navy", "Pirate", "Procyon"] {

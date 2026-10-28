@@ -1102,6 +1102,7 @@ fn apply_outfit(
 mod tests {
     use super::*;
     #[test]
+    #[ignore = "needs imported assets"]
     fn campaign_screen_without_surviving_ships_still_offers_continue() {
         let lib = Library::load(crate::assets_dir());
         let model = campaign_screen_model(&CampaignPoints::default(), &lib, &[], &mut Choice::default());
@@ -1112,6 +1113,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs imported assets"]
     fn crew_rows_list_the_assigned_member_once_as_a_return() {
         let lib = Library::load(crate::assets_dir());
         let class = &lib.classes[lib.index("Ship_Navy_Torpedo")];
@@ -1128,6 +1130,7 @@ mod tests {
     /// Retail Man-O-War saves (docs/re/crew.md): helmsman Navigation 9 -> navigator factor 1.5, engineers 9/9/8 -> 1.491667,
     /// empty posts -> 1.125 (relative to an uncrewed ship: / 1.125).
     #[test]
+    #[ignore = "needs imported assets"]
     fn post_factors_match_retail_saves() {
         let mut posts = CrewPosts(Default::default());
         posts.0[3] = vec!["Crew_Canid_Navy_EngelbertF".into()];
@@ -1138,6 +1141,7 @@ mod tests {
         assert!((skill_factor(0.7) * 1.125 - 1.425).abs() < 1e-5, "skill 7: the computer Carrack's saved factor");
     }
     #[test]
+    #[ignore = "needs imported assets"]
     fn recruitment_spends_once_and_assignment_moves_without_duplication() {
         let mut p = CampaignPoints::default();
         p.total = 100;
@@ -1155,6 +1159,7 @@ mod tests {
         assert_eq!(CrewPosts(p.outfit.ships["B"].crew.clone()).skill(4, "engineering"), Some(0.5));
     }
     #[test]
+    #[ignore = "needs imported assets"]
     fn bank_purchase_is_atomic_and_matches_mount_types_not_weapon_families() {
         let lib = Library::load(crate::assets_dir());
         let class = &lib.classes[lib.index("Ship_Navy_Cutter")];
@@ -1181,6 +1186,7 @@ mod tests {
         assert!(weapon_rows(&lib, class, mount.bank, &mount.gun, &[], false).iter().any(|(_, a)| *a == Action::Upgrade("Gun_Carronade_Med".into())));
     }
     #[test]
+    #[ignore = "needs imported assets"]
     fn saved_outfit_changes_live_posts_and_weapon_models_without_resetting_casualties() {
         let mut app = App::new();
         app.add_plugins((TaskPoolPlugin::default(), AssetPlugin::default()))
@@ -1253,6 +1259,7 @@ mod tests {
         assert!(app.world().get::<crate::Ship>(ship).unwrap().crew_speed > 1.0 || ability("Crew_Navy_BenH", "engineering").unwrap() <= 0.1);
     }
     #[test]
+    #[ignore = "needs imported assets"]
     fn roster_lists_the_races_crew_with_costs_and_sorts() {
         let navy = roster("Navy", 0);
         assert!(navy.len() > 10 && navy.iter().all(|id| crew_data()[id]["race"] == "Navy"));
@@ -1265,6 +1272,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs imported assets"]
     fn best_gunner_sets_the_legacy_crewed_accuracy() {
         let mut p = CampaignPoints::default();
         p.crew = vec!["Crew_Navy_BenH".into()];

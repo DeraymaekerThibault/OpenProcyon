@@ -265,6 +265,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[ignore = "needs imported assets"]
     fn storm_wind_uses_weather_damage_and_respects_mission_protection() {
         let lib = Library::load(crate::assets_dir());
         let class = lib.index("Ship_Navy_Sloop");

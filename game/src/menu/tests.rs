@@ -12,6 +12,7 @@ fn difficulty_toggle_cycles_normal_hard_easy() {
 }
 
 #[test]
+#[ignore = "needs imported assets"]
 fn auto_assign_fills_the_fleet_within_the_points() {
     let lib = Library::load(assets_dir());
     let mut sk = skirmish("red_rover");
@@ -26,6 +27,7 @@ fn auto_assign_fills_the_fleet_within_the_points() {
 }
 
 #[test]
+#[ignore = "needs imported assets"]
 fn frigate_stats_match_the_original_fleet_screen() {
     let lib = Library::load(assets_dir());
     let st = ship_stats(&lib, lib.index("Ship_Navy_Frigate"));
@@ -33,6 +35,7 @@ fn frigate_stats_match_the_original_fleet_screen() {
 }
 
 #[test]
+#[ignore = "needs imported assets"]
 fn fleet_spends_victory_points() {
     let lib = Library::load(assets_dir());
     let mut sk = skirmish("red_rover");
@@ -48,6 +51,7 @@ fn fleet_spends_victory_points() {
 }
 
 #[test]
+#[ignore = "needs imported assets"]
 fn map_info_opens_and_closes_the_lobby_dialog() {
     let lib = Library::load(assets_dir());
     let mut sk = skirmish("ambush");
@@ -58,6 +62,7 @@ fn map_info_opens_and_closes_the_lobby_dialog() {
 }
 
 #[test]
+#[ignore = "needs imported assets"]
 fn skirmish_list_counts_playable_players_like_the_original() {
     let maps = skirmish_maps();
     let get = |id: &str| maps.iter().find(|m| m.0 == id).unwrap_or_else(|| panic!("{id}"));
@@ -85,6 +90,7 @@ fn menu_widgets_play_rollover_once_and_their_own_select_sound() {
 }
 
 #[test]
+#[ignore = "needs imported assets"]
 fn every_menu_sound_is_a_retail_file() {
     let back = ArrowButton { forward: false };
     let actions = [Action::Quit, Action::PickMap(0), Action::FleetSize(1), Action::Launch, Action::AddShip, Action::DropShip];
@@ -128,6 +134,7 @@ fn skirmish(id: &str) -> Skirmish {
     sk
 }
 #[test]
+#[ignore = "needs imported assets"]
 fn skirmish_ship_names_default_to_the_pool_and_follow_the_pull_down() {
     let lib = Library::load(assets_dir());
     let mut sk = skirmish("diablo_straight");
@@ -154,6 +161,7 @@ fn skirmish_ship_names_default_to_the_pool_and_follow_the_pull_down() {
     assert_eq!(sk.slots[human].names.len(), 1, "dropping a ship drops its name");
 }
 #[test]
+#[ignore = "needs imported assets"]
 fn border_dispute_keeps_the_humans_command_ship() {
     use crate::*;
     use bevy::ecs::system::RunSystemOnce;
@@ -206,6 +214,7 @@ fn border_dispute_keeps_the_humans_command_ship() {
     assert_eq!(n, 1, "the human's command ship must stay the player's ship once the scenario has been reconciled");
 }
 #[test]
+#[ignore = "needs imported assets"]
 fn skirmish_weapon_choices_follow_fleet_entries_and_survive_launch_planning() {
     let lib = Library::load(assets_dir());
     let mut sk = skirmish("diablo_straight");
@@ -240,6 +249,7 @@ fn skirmish_weapon_choices_follow_fleet_entries_and_survive_launch_planning() {
 }
 
 #[test]
+#[ignore = "needs imported assets"]
 fn historical_map_commands_the_ship_its_rules_mark_primary() {
     // Iron War lists Navy 1's two torpedo boats first, but its Setup Ship rule makes the fast frigate the primary.
     let lib = Library::load(assets_dir());
@@ -249,6 +259,7 @@ fn historical_map_commands_the_ship_its_rules_mark_primary() {
 }
 
 #[test]
+#[ignore = "needs imported assets"]
 fn historical_map_keeps_preplaced_fleets_and_fixed_fleet_types() {
     let slots = new_slots(&map("ambush"));
     assert_eq!(slots.iter().map(|s| (s.race, s.team)).collect::<Vec<_>>(), [(0, 0), (2, 1), (2, 1), (2, 1)]);
@@ -265,6 +276,7 @@ fn historical_map_keeps_preplaced_fleets_and_fixed_fleet_types() {
     assert_eq!(sides, [(0, crate::Side::Enemy, false, true), (1, crate::Side::Player, false, true), (2, crate::Side::Player, true, true), (3, crate::Side::Player, false, true)]);
 }
 #[test]
+#[ignore = "needs imported assets"]
 fn three_team_historical_map_is_a_three_way_battle() {
     // The Maw: Navy, Procyon and Pirates are three teams; the two computer fleets are hostile to each other as well.
     let lib = Library::load(assets_dir());
@@ -272,6 +284,7 @@ fn three_team_historical_map_is_a_three_way_battle() {
     assert_eq!(sides, [crate::Side::Player, crate::Side::Enemy, crate::Side(2)]);
 }
 #[test]
+#[ignore = "needs imported assets"]
 fn open_map_locks_fleet_type_to_team_and_needs_a_fleet() {
     let mut sk = skirmish("red_rover");
     assert_eq!((sk.slots[0].race, sk.slots[1].race), (0, 2));
@@ -298,6 +311,7 @@ fn open_map_locks_fleet_type_to_team_and_needs_a_fleet() {
     assert_eq!((sk.slots[1].kind, sk.slots[1].race, sk.slots[1].team), (Kind::Closed, 4, -1));
 }
 #[test]
+#[ignore = "needs imported assets"]
 fn lobby_actions_edit_slots_and_fleet() {
     let lib = Library::load(assets_dir());
     let mut sk = skirmish("diablo_straight"); // free-for-all
@@ -321,6 +335,7 @@ fn lobby_actions_edit_slots_and_fleet() {
     assert_eq!(sk.slots[2].kind, Kind::Computer);
 }
 #[test]
+#[ignore = "needs imported assets"]
 fn named_crew_cost_victory_points_and_leave_with_their_ship() {
     let lib = Library::load(assets_dir());
     let mut sk = skirmish("diablo_straight");
@@ -337,6 +352,7 @@ fn named_crew_cost_victory_points_and_leave_with_their_ship() {
     assert_eq!(sk.points_left(&lib), 300);
 }
 #[test]
+#[ignore = "needs imported assets"]
 fn auto_assign_mixes_hulls_that_fit_and_spends_the_rest_on_crew() {
     let lib = Library::load(assets_dir());
     let mut sk = skirmish("diablo_straight");
@@ -355,6 +371,7 @@ fn auto_assign_mixes_hulls_that_fit_and_spends_the_rest_on_crew() {
     assert!(!sk.slots[0].fleet.is_empty() && sk.points_left(&lib) >= 0);
 }
 #[test]
+#[ignore = "needs imported assets"]
 fn computers_cycle_fleet_types_by_slot_and_fleets_never_share_a_flag() {
     let mut sk = skirmish("diablo_straight");
     for i in 1..=4 {
@@ -374,6 +391,7 @@ fn computers_cycle_fleet_types_by_slot_and_fleets_never_share_a_flag() {
     assert_ne!(sk.slots[3].flag, sk.slots[4].flag);
 }
 #[test]
+#[ignore = "needs imported assets"]
 fn computer_fleets_use_auto_assign_inside_the_victory_limit() {
     let lib = Library::load(assets_dir());
     let mut sk = skirmish("diablo_straight");
@@ -392,6 +410,7 @@ fn computer_fleets_use_auto_assign_inside_the_victory_limit() {
     assert!(sk.plan(&lib)[1].crew.is_empty(), "computer ships keep the measured computer crew factor");
 }
 #[test]
+#[ignore = "needs imported assets"]
 fn slot_bar_shows_five_slots_and_follows_the_picked_one() {
     let lib = Library::load(assets_dir());
     let mut sk = skirmish("diablo_straight");
@@ -409,6 +428,7 @@ fn slot_bar_shows_five_slots_and_follows_the_picked_one() {
     assert_eq!(sk.slot_scroll, 0);
 }
 #[test]
+#[ignore = "needs imported assets"]
 fn create_skirmish_sliders_use_the_retail_ranges() {
     let lib = Library::load(assets_dir());
     let mut sk = skirmish("diablo_straight");
@@ -428,6 +448,7 @@ fn create_skirmish_sliders_use_the_retail_ranges() {
     assert_eq!((FLEET_SIZE.at(-3.0), FLEET_SIZE.at(0.5), FLEET_SIZE.at(9.0)), (1, 6, 10));
 }
 #[test]
+#[ignore = "needs imported assets"]
 fn fleet_screen_starts_blank_and_greys_crew_arms_drop() {
     let lib = Library::load(assets_dir());
     let mut sk = skirmish("diablo_straight");
@@ -440,6 +461,7 @@ fn fleet_screen_starts_blank_and_greys_crew_arms_drop() {
     assert!(!sk.slot_filled());
 }
 #[test]
+#[ignore = "needs imported assets"]
 fn fleet_screen_offers_every_fleet_type_without_story_hulls() {
     let lib = Library::load(assets_dir());
     for (race, name) in [(0, "Navy"), (2, "Pirate"), (3, "Procyon")] {

@@ -3,6 +3,7 @@ fn rect(x: f32, z: f32, yaw: f32) -> BoxBody {
     box_body([Vec3::new(-1.0, -1.0, -3.0), Vec3::new(1.0, 1.0, 3.0)], &Transform::from_xyz(x, 0.0, z).with_rotation(Quat::from_rotation_y(yaw)))
 }
 #[test]
+#[ignore = "needs imported assets"]
 fn tumbling_asteroid_collision_follows_transform() {
     let mut app = App::new();
     app.init_resource::<Shapes>().init_resource::<crate::data::AsteroidDefs>().add_systems(Update, update_asteroids);
@@ -27,6 +28,7 @@ fn tumbling_asteroid_collision_follows_transform() {
 }
 
 #[test]
+#[ignore = "needs imported assets"]
 fn contact_translation_keeps_tumbling_rock_faces_and_bounds_aligned() {
     let shapes = Shapes::from_world(&mut World::new());
     let tf = Transform::default().with_rotation(Quat::from_rotation_x(0.7));
@@ -84,6 +86,7 @@ fn wall_blocks_but_geometry_above_ship_does_not() {
     assert!(slab(&wall.map(|p| p + Vec3::Y * 10.0), -1.0, 1.0).is_empty());
 }
 #[test]
+#[ignore = "needs imported assets"]
 fn nis_stops_helm_and_combat_motion_but_keeps_scripted_routes_and_resumes() {
     let lib = crate::Library::load(crate::assets_dir());
     let class = lib.index("Ship_Navy_Cutter");
@@ -137,6 +140,7 @@ fn nis_stops_helm_and_combat_motion_but_keeps_scripted_routes_and_resumes() {
 }
 
 #[test]
+#[ignore = "needs imported assets"]
 fn ecs_ship_contact_and_static_wall_do_not_pass_through() {
     let mut lib = crate::Library::load(crate::assets_dir());
     let class = lib.index("Ship_Navy_Cutter");
@@ -180,6 +184,7 @@ fn ecs_ship_contact_and_static_wall_do_not_pass_through() {
     assert!(app.world().get::<Transform>(a).unwrap().translation.z >= -2.001, "bow must remain on this side of the wall");
 }
 #[test]
+#[ignore = "needs imported assets"]
 fn ai_ship_on_a_path_detours_round_a_wall_instead_of_grinding_into_it() {
     let mut lib = crate::Library::load(crate::assets_dir());
     let class = lib.index("Ship_Navy_Cutter");
@@ -218,6 +223,7 @@ fn ai_ship_on_a_path_detours_round_a_wall_instead_of_grinding_into_it() {
     assert!(best < 10.0, "the ship reaches the marker behind the wall (closest {best})");
 }
 #[test]
+#[ignore = "needs imported assets"]
 fn base_hover_hits_the_island_hull_but_not_the_water_near_its_dock_points() {
     let shapes = Shapes::from_world(&mut World::new());
     let base = shapes.obstacle("Base_Safetytown", &Transform::default()).unwrap();
@@ -229,6 +235,7 @@ fn base_hover_hits_the_island_hull_but_not_the_water_near_its_dock_points() {
 }
 
 #[test]
+#[ignore = "needs imported assets"]
 fn retail_island_mesh_blocks_a_ship_driven_through_its_centre() {
     let lib = crate::Library::load(crate::assets_dir());
     let class = lib.index("Ship_Navy_Cutter");
@@ -344,6 +351,7 @@ fn ship_rock_contact(mass: f32, rock_velocity: Vec3) -> (Vec3, Vec3, Vec3) {
 }
 
 #[test]
+#[ignore = "needs imported assets"]
 fn ship_asteroid_contact_transfers_momentum_by_authored_mass() {
     for mass in [1000.0, 40000.0] {
         let (ship, rock, position) = ship_rock_contact(mass, Vec3::ZERO);
@@ -356,6 +364,7 @@ fn ship_asteroid_contact_transfers_momentum_by_authored_mass() {
 }
 
 #[test]
+#[ignore = "needs imported assets"]
 fn ecs_ship_contact_preserves_light_and_heavy_ship_mass_ratios() {
     for other in ["Ship_Navy_Torpedo", "Ship_Navy_Tug"] {
         let mut lib = crate::Library::load(crate::assets_dir());
@@ -397,6 +406,7 @@ fn ecs_ship_contact_preserves_light_and_heavy_ship_mass_ratios() {
 }
 
 #[test]
+#[ignore = "needs imported assets"]
 fn moving_asteroid_contact_uses_relative_velocity() {
     let (ship, rock, _) = ship_rock_contact(10000.0, Vec3::Z * 4.0);
     assert!(ship.length() < 1e-4 && rock.length() < 1e-4, "equal opposing momenta stop in an inelastic contact: {ship:?}, {rock:?}");
@@ -420,6 +430,7 @@ fn off_centre_impulse_transfers_spin_without_creating_energy() {
 }
 
 #[test]
+#[ignore = "needs imported assets"]
 fn tow_uses_mass_and_independent_hardpoints_and_breaks_without_teleporting() {
     let lib = crate::Library::load(crate::assets_dir());
     let class = lib.index("Ship_Navy_Cutter");

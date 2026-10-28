@@ -781,6 +781,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[ignore = "needs imported assets"]
     fn meteor_shower_spreads_above_the_emitter_and_falls_vertically() {
         let doc: Value = serde_json::from_slice(&std::fs::read(assets_dir().join("fx/MeteorStorm.json")).unwrap()).unwrap();
         let gt = GlobalTransform::from(Transform::from_xyz(30.0, 20.0, -40.0));
@@ -803,6 +804,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs imported assets"]
     fn meteor_streaks_end_at_the_splash_plane_at_their_authored_lifetime() {
         let doc: Value = serde_json::from_slice(&std::fs::read(assets_dir().join("fx/MeteorStorm.json")).unwrap()).unwrap();
         let mut rng = FxRng(13);
@@ -828,6 +830,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs imported assets"]
     fn meteor_splash_lies_flat_independently_of_camera_orientation() {
         let doc: Value = serde_json::from_slice(&std::fs::read(assets_dir().join("fx/MeteorStorm.json")).unwrap()).unwrap();
         let prim = parse_prim(&doc["Primitive"][2], &mut vec![]);
@@ -845,6 +848,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs imported assets"]
     fn angle_velocity_uses_its_own_emitter_or_the_position_when_requested() {
         let doc: Value = serde_json::from_slice(&std::fs::read(assets_dir().join("fx/CannonBall_Light_Muzzle.json")).unwrap()).unwrap();
         let mut prim = parse_prim(&doc["Primitive"][0], &mut vec![]);
@@ -863,6 +867,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs imported assets"]
     fn repair_meshes_have_matching_topology_and_deploy_retract_curves() {
         for name in ["Repair_Small", "Repair_Medium", "Repair_Large", "Repair_IC_Medium", "Repair_IC_Large"] {
             let doc: Value = serde_json::from_slice(&std::fs::read(assets_dir().join(format!("fx/{name}.json"))).unwrap()).unwrap();
@@ -937,6 +942,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs imported assets"]
     fn lifetime_fallback_preserves_start_only_source_pools_and_authored_expiration() {
         let lib = FxLib::from_world(&mut World::new());
         let marker = &lib.list[lib.effects["Docking_Point"]].prims[8];
@@ -949,6 +955,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs imported assets"]
     fn only_the_gravity_well_is_thinned_to_the_particle_budget() {
         let lib = FxLib::from_world(&mut World::new());
         let well = &lib.list[lib.effects["GravCharge_Medium_Impact"]].prims[0];
@@ -971,6 +978,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs imported assets"]
     fn sos_beacon_keeps_its_fixed_particles_and_pulses_until_released() {
         let mut app = App::new();
         app.init_resource::<Time>().init_resource::<FxLib>().insert_resource(FxRng(123)).add_systems(Update, update_fx);
@@ -994,6 +1002,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs imported assets"]
     fn docking_marker_particles_are_bounded_over_a_long_mission() {
         let mut app = App::new();
         app.init_resource::<Time>().init_resource::<FxLib>().insert_resource(FxRng(123)).add_systems(Update, update_fx);
@@ -1012,6 +1021,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs imported assets"]
     fn dock_light_flares_draw_with_the_unpremultiplied_additive_material() {
         let mut app = App::new();
         app.init_resource::<Time>()
@@ -1040,6 +1050,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs imported assets"]
     fn mission_effect_particle_counts_do_not_grow_with_elapsed_time() {
         let mut app = App::new();
         app.init_resource::<Time>().init_resource::<FxLib>().insert_resource(FxRng(123)).add_systems(Update, update_fx);
