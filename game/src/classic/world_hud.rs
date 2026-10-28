@@ -136,11 +136,16 @@ fn navigation(
         let (tf, ship) = if !indicator.arrow { selected.map_or((primary_tf, ship), |(_, t, s, _)| (t, s)) } else { (primary_tf, ship) };
         *vis = if cinematic(mission.as_deref()) || (indicator.arrow && goal.is_none()) { Visibility::Hidden } else { Visibility::Inherited };
         transform.translation = tf.translation;
-        // PROVISIONAL size selection: scale the authored small indicator to the player's ship radius.
-        transform.scale = Vec3::splat((lib.classes[ship.class].radius / 6.0).clamp(1.0, 3.0));
+        // The ring's radius is the ship's radius times its WOT fraction. PROVISIONAL: the small indicator's own radius (the compass mesh
+        // measures 5.9) is taken as the ring's.
+        let class = &lib.classes[ship.class];
+        transform.scale = Vec3::splat(class.radius * class.ring / COMPASS_RADIUS);
         transform.rotation = if indicator.arrow { Quat::from_rotation_y(navigation_heading(tf.translation, goal.unwrap_or(tf.translation))) } else { Quat::IDENTITY };
     }
 }
+
+/// Outer radius of `SELECTION_INDICATOR_COMPASS_SMALL` in model units.
+const COMPASS_RADIUS: f32 = 5.9;
 
 fn navigation_heading(ship: Vec3, goal: Vec3) -> f32 {
     let d = goal - ship;
