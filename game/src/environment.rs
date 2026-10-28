@@ -172,9 +172,7 @@ fn sensor_smoke(world: &mut World) {
                 world.get_mut::<Transform>(e).unwrap().translation = Vec3::X * x;
                 let mut ship = world.get_mut::<Ship>(e).unwrap();
                 ship.speed = 0.0;
-                ship.order = 0;
-                ship.waypoints.clear();
-                ship.goal = None;
+                ship.halt();
                 world.entity_mut(e).insert(crate::ship::HoldPosition).remove::<crate::combat::GunStates>();
             }
         }

@@ -335,9 +335,7 @@ fn tow_routine(
             info!("tow: {tower} tows {towee}");
             m.script.set_tow(tower, towee, true);
             commands.entity(tower).remove::<Tower>();
-            sh.waypoints.clear();
-            sh.goal = None;
-            sh.order = 0;
+            sh.halt();
         } else {
             sh.waypoints = vec![(front - (rear - here)).with_y(here.y)];
             sh.goal = None;
@@ -473,10 +471,8 @@ fn routine(
                     docker.duration = mission.as_ref().and_then(|m| m.script.dock_time(e)).unwrap_or(MIN_DOCK_SECS).max(effect);
                     docker.offset = dockee_tf.compute_affine().inverse().transform_point3(here);
                     info!("docking: {e} docked with {} for {:.1} s (repair {:.1} s)", docker.dockee, docker.duration, docker.repair_secs);
-                    ship.order = 0;
+                    ship.halt();
                     ship.speed = 0.0;
-                    ship.waypoints.clear();
-                    ship.goal = None;
                     if let Some(m) = mission.as_mut() {
                         m.script.set_docked(e, docker.dockee, true);
                     }
@@ -498,9 +494,7 @@ fn routine(
                     docker.base_approach = Some(ap);
                     let scenery = crate::collision::scenery(obstacles.iter());
                     let Some(mut route) = crate::collision::route_clear(class.collision_bounds, here, ap, &scenery) else {
-                        ship.waypoints.clear();
-                        ship.goal = None;
-                        ship.order = 0;
+                        ship.halt();
                         warn!("docking: no clear base approach for {e} to {}", docker.dockee);
                         continue;
                     };

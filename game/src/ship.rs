@@ -54,6 +54,15 @@ pub struct Ship {
     pub crew_turn: f32,        // helmsman's factor on rudder torque
 }
 
+impl Ship {
+    /// Drops the course and heading goal and orders a stop (the speed bleeds off on its own).
+    pub fn halt(&mut self) {
+        self.waypoints.clear();
+        self.goal = None;
+        self.order = 0;
+    }
+}
+
 #[derive(Component)]
 pub struct PlayerShip;
 
@@ -683,9 +692,7 @@ pub fn fleet_follow(world: &mut World) {
         if world.get::<PlayerShip>(*e).is_none()
             && let Some(mut s) = world.get_mut::<Ship>(*e)
         {
-            s.order = 0;
-            s.waypoints.clear();
-            s.goal = None;
+            s.halt();
         }
     }
     for fleet in fleets.values() {

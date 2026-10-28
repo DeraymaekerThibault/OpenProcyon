@@ -588,9 +588,7 @@ fn grapple_orders(
         }
         let surface = tf.translation.distance(ttf.translation) - lib.classes[ship.class].radius - lib.classes[tship.class].radius;
         if surface <= HARPOON_RANGE {
-            ship.waypoints.clear();
-            ship.order = 0;
-            ship.goal = None;
+            ship.halt();
             commands.entity(e).remove::<GrappleOrder>().insert(Grapple::new(order.0, (surface / HARPOON_SPEED).max(0.1)));
             sfx.write(Sfx { name: "Weapon_GrapHarpoon_Fire".into(), at: Some(tf.translation), vol: 0.7, max: 600.0 });
         } else {
@@ -872,9 +870,7 @@ fn settled(
                     commands.entity(s.target).insert((member, crate::ship::FleetPilot::default()));
                 }
                 if let Some(mut sh) = tship {
-                    sh.order = 0;
-                    sh.waypoints.clear();
-                    sh.goal = None;
+                    sh.halt();
                     if let Some(side) = side_of(&bship) {
                         sh.side = side;
                     }
