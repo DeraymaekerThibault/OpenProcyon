@@ -887,6 +887,8 @@ fn shell_into_a_hull_damages_it_and_reports_the_hit() {
     // Aimed along the normal at the middle of a hull triangle, from 40 units out.
     let [ta, tb, tc] = lib.classes[c].sections.iter().find(|s| s.vital).unwrap().tris[0];
     let normal = (tb - ta).cross(tc - ta).normalize();
+    let farther_ship = app.world().get::<Ship>(target).unwrap().clone();
+    let farther = app.world_mut().spawn((Transform::from_translation(-normal * 100.0), farther_ship, Health::new(&lib.classes[c]), Fires::default())).id();
     let at = (ta + tb + tc) / 3.0 + normal * 40.0;
     let shell = Shell {
         vel: -normal * 200.0,
@@ -909,12 +911,14 @@ fn shell_into_a_hull_damages_it_and_reports_the_hit() {
     let full: f32 = app.world().get::<Health>(target).unwrap().sections.iter().sum();
     let mut hit = false;
     for _ in 0..20 {
-        app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs_f32(0.05));
+        // One segment crosses both hulls, so the nearest collision must win.
+        app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs_f32(1.0));
         app.update();
         hit |= app.world().resource::<Messages<Hit>>().iter_current_update_messages().any(|h| h.victim == target);
     }
     let left: f32 = app.world().get::<Health>(target).unwrap().sections.iter().sum();
     assert!(left < full, "the hull took damage ({left} of {full})");
+    assert_eq!(app.world().get::<Health>(farther).unwrap().sections.iter().sum::<f32>(), full, "the farther ship must not be hit");
     assert!(app.world().get_entity(id).is_err(), "the shell is spent");
     assert!(hit, "a Hit names the ship");
 }

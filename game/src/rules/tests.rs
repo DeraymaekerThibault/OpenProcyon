@@ -692,6 +692,24 @@ fn twt_groups_alliances_and_setup_stances_drive_later_missions() {
 }
 
 #[test]
+fn volume_entry_and_exit_track_transitions() {
+    let mut sc = script();
+    sc.volumes = HashMap::from([("V".to_string(), Region::from_json(&serde_json::json!([[0, 0], [10, 0], [10, 10], [0, 10]])))]);
+    let mut w = vec![unit("a", "G", Vec3::new(50.0, 0.0, -5.0))];
+    let enter = serde_json::json!({"Type": "Enter Volume", "Group Name": "G", "Volume Name": "V"});
+    let exit = serde_json::json!({"Type": "Exit Volume", "Group Name": "G", "Volume Name": "V"});
+    assert!(!sc.cond(&enter, &w, true));
+    assert!(!sc.cond(&exit, &w, true));
+    w[0].pos.x = 5.0;
+    assert!(sc.cond(&enter, &w, true));
+    assert!(!sc.cond(&enter, &w, true));
+    assert!(!sc.cond(&exit, &w, true));
+    w[0].pos.x = 50.0;
+    assert!(sc.cond(&exit, &w, true));
+    assert!(!sc.cond(&exit, &w, true));
+}
+
+#[test]
 fn all_units_entered_once_remembers_members_that_left_again() {
     let mut sc = script();
     sc.volumes = HashMap::from([("V".to_string(), Region::from_json(&serde_json::json!([[0, 0], [10, 0], [10, 10], [0, 10]])))]);

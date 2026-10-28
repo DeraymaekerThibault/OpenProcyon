@@ -733,6 +733,30 @@ impl Script {
         None
     }
 
+    fn group_in_volume(&mut self, c: &Value, w: &[Unit], entering: bool, repeating: bool) -> bool {
+        let key = (s(c, "Group Name").to_string() + "|" + s(c, "Volume Name"), 0);
+        let vol = self.volume(s(c, "Volume Name"));
+        let m: Vec<_> = members(w, s(c, "Group Name")).into_iter().filter(|u| u.alive && u.visible).collect();
+        let all = !entering && b(c, "Entire Group");
+        let now = !m.is_empty() && if all { m.iter().all(|u| in_volume(vol, u.pos)) } else { m.iter().any(|u| in_volume(vol, u.pos)) };
+        // Hidden placement/reveal is not entry: track physical membership before applying visibility.
+        let inside = members(w, s(c, "Group Name")).into_iter().any(|u| u.alive && in_volume(vol, u.pos));
+        let armed = self.prev_inside.entry((key.0.clone(), 2)).or_insert(now);
+        *armed |= !inside;
+        let entered = *armed;
+        let was = self.prev_inside.insert(key, inside).unwrap_or(false);
+        if entering { now && if repeating { !was } else { entered } } else { now }
+    }
+
+    fn group_exited_volume(&mut self, c: &Value, w: &[Unit]) -> bool {
+        let key = (s(c, "Group Name").to_string() + "|" + s(c, "Volume Name"), 1);
+        let vol = self.volume(s(c, "Volume Name"));
+        let m: Vec<_> = members(w, s(c, "Group Name")).into_iter().filter(|u| u.alive && u.visible).collect();
+        let now = !m.is_empty() && m.iter().any(|u| in_volume(vol, u.pos));
+        let was = self.prev_inside.insert(key, now).unwrap_or(false);
+        was && !now
+    }
+
     pub(super) fn cond(&mut self, c: &Value, w: &[Unit], repeating: bool) -> bool {
         let t = s(c, "Type");
         match t {
@@ -744,28 +768,8 @@ impl Script {
                 let n = s(c, "Speech Event Name");
                 !self.played.contains(n) && !self.queue.iter().any(|q| q == n) && self.speaking.as_ref().is_none_or(|x| x.0 != n)
             }
-            "Is Group In Volume" | "Enter Volume" => {
-                let key = (s(c, "Group Name").to_string() + "|" + s(c, "Volume Name"), 0);
-                let vol = self.volume(s(c, "Volume Name"));
-                let m: Vec<_> = members(w, s(c, "Group Name")).into_iter().filter(|u| u.alive && u.visible).collect();
-                let all = t == "Is Group In Volume" && b(c, "Entire Group");
-                let now = !m.is_empty() && if all { m.iter().all(|u| in_volume(vol, u.pos)) } else { m.iter().any(|u| in_volume(vol, u.pos)) };
-                // Hidden placement/reveal is not entry: track physical membership before applying visibility.
-                let inside = members(w, s(c, "Group Name")).into_iter().any(|u| u.alive && in_volume(vol, u.pos));
-                let armed = self.prev_inside.entry((key.0.clone(), 2)).or_insert(now);
-                *armed |= !inside;
-                let entered = *armed;
-                let was = self.prev_inside.insert(key, inside).unwrap_or(false);
-                if t == "Enter Volume" { now && if repeating { !was } else { entered } } else { now }
-            }
-            "Exit Volume" => {
-                let key = (s(c, "Group Name").to_string() + "|" + s(c, "Volume Name"), 1);
-                let vol = self.volume(s(c, "Volume Name"));
-                let m: Vec<_> = members(w, s(c, "Group Name")).into_iter().filter(|u| u.alive && u.visible).collect();
-                let now = !m.is_empty() && m.iter().any(|u| in_volume(vol, u.pos));
-                let was = self.prev_inside.insert(key, now).unwrap_or(false);
-                was && !now
-            }
+            "Is Group In Volume" | "Enter Volume" => self.group_in_volume(c, w, t == "Enter Volume", repeating),
+            "Exit Volume" => self.group_exited_volume(c, w),
             "Group Destroyed" => {
                 let m = members(w, s(c, "Group Name"));
                 !m.is_empty() && m.iter().all(|u| !u.alive)

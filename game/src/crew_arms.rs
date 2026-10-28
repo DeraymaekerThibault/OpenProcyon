@@ -566,6 +566,18 @@ fn screen(
             choice.message = if changed { "Saved.".into() } else { String::new() };
         }
     }
+    let next = campaign_screen_model(&points, &lib, &fleet, &mut choice);
+    if *model != next {
+        *model = next;
+    }
+}
+
+fn campaign_screen_model(
+    points: &CampaignPoints,
+    lib: &Library,
+    fleet: &[(Entity, &crate::Ship, &crate::combat::Health, &crate::campaign::MissionShip)],
+    choice: &mut Choice,
+) -> ScreenModel {
     let mut next = ScreenModel {
         open: true,
         title: format!("CREW & ARMS — {} victory points", points.total),
@@ -585,7 +597,7 @@ fn screen(
         let fit = points.outfit.ships.get(&key);
         let mut rows = vec![];
         if choice.arms {
-            let banks = selectable_banks(&lib, class);
+            let banks = selectable_banks(lib, class);
             choice.post = choice.post.min(banks.len().saturating_sub(1));
             if let Some((bank, first)) = banks.get(choice.post) {
                 let equipped = fit.and_then(|s| s.banks.get(bank)).unwrap_or(&class.mounts[*first].gun);
@@ -595,7 +607,7 @@ fn screen(
                     bank,
                     equipped.trim_start_matches("Gun_").replace('_', " ")
                 );
-                rows = weapon_rows(&lib, class, *bank, equipped, &points.arms, true);
+                rows = weapon_rows(lib, class, *bank, equipped, &points.arms, true);
             } else {
                 next.detail = "This hull has no editable weapon banks.".into();
             }
@@ -609,10 +621,10 @@ fn screen(
                 assigned.len(),
                 crate::boarding::counts(&class.name)[role]
             );
-            rows = crew_rows(&points, class, role, assigned);
+            rows = crew_rows(points, class, role, assigned);
         }
         let (posts, bars) = posts_view(class, fit.map(|f| &f.crew));
-        let banks = equipped_banks(&lib, class, fit.map(|f| &f.banks));
+        let banks = equipped_banks(lib, class, fit.map(|f| &f.banks));
         let list = rows
             .iter()
             .filter_map(|(_, a)| match a {
@@ -631,7 +643,7 @@ fn screen(
             posts,
             post: choice.post,
             bars,
-            detail: if choice.arms { banks.get(choice.post).and_then(|(_, g)| weapon_detail(&lib, g)) } else { None },
+            detail: if choice.arms { banks.get(choice.post).and_then(|(_, g)| weapon_detail(lib, g)) } else { None },
             banks,
             list,
             ..default()
@@ -644,9 +656,7 @@ fn screen(
         next.detail = "No surviving own ship.".into();
     }
     next.navigation.extend([("Previous page".into(), Action::Page(-1)), ("Next page".into(), Action::Page(1)), ("Continue (Enter)".into(), Action::Close)]);
-    if *model != next {
-        *model = next;
-    }
+    next
 }
 
 /// The campaign Crew rows of post `role`: send each `assigned` member back to the reserve, then assign hired crew or recruit new
@@ -905,6 +915,24 @@ fn skirmish_screen(
     }
     let points = sk.points_left(&lib); // the budget after this frame's changes
     let Some(slot) = sk.slots.iter().find(|s| s.kind == crate::menu::Kind::Human) else { return };
+    let next = skirmish_screen_model(&sk, slot, &lib, &mut choice, &carry, *sort, *sort_open, points);
+    sk.fleet_pick = choice.ship;
+    sk.show_picked_slot();
+    if *model != next {
+        *model = next;
+    }
+}
+
+fn skirmish_screen_model(
+    sk: &crate::menu::Skirmish,
+    slot: &crate::menu::Slot,
+    lib: &Library,
+    choice: &mut Choice,
+    carry: &Option<Carry>,
+    sort: usize,
+    sort_open: bool,
+    points: i64,
+) -> ScreenModel {
     let mut next = ScreenModel {
         open: true,
         title: "SKIRMISH — CREW & ARMS".into(),
@@ -915,27 +943,27 @@ fn skirmish_screen(
     if let Some(ship_name) = slot.fleet.get(choice.ship) {
         let ci = lib.index(ship_name);
         let class = &lib.classes[ci];
-        let banks = equipped_banks(&lib, class, slot.weapons.get(choice.ship));
+        let banks = equipped_banks(lib, class, slot.weapons.get(choice.ship));
         let assigned = slot.crew.get(choice.ship);
         let (posts, bars) = posts_view(class, assigned);
         let (mut list, mut picked, mut detail) = (vec![], None, None);
         if choice.arms {
             choice.post = choice.post.min(banks.len().saturating_sub(1));
             if let Some((bank, equipped)) = banks.get(choice.post) {
-                let mut guns: Vec<&String> = lib.guns.keys().filter(|g| bank_compatible(&lib, class, *bank, g)).collect();
+                let mut guns: Vec<&String> = lib.guns.keys().filter(|g| bank_compatible(lib, class, *bank, g)).collect();
                 guns.sort_by_key(|g| gun_label(g));
-                let want = match &*carry {
+                let want = match carry {
                     Some(Carry::Gun(g)) => g,
                     _ => equipped,
                 };
                 picked = guns.iter().position(|g| *g == want);
-                detail = weapon_detail(&lib, want);
+                detail = weapon_detail(lib, want);
                 list = guns.into_iter().map(|g| (gun_label(g), Action::PickWeapon(g.clone()))).collect();
             }
         } else {
             let used: Vec<&String> = slot.crew.iter().flatten().flatten().collect();
-            let ids: Vec<String> = roster(&class.race, *sort).into_iter().filter(|id| !used.contains(&id)).collect();
-            if let Some(Carry::Crew(id)) = &*carry {
+            let ids: Vec<String> = roster(&class.race, sort).into_iter().filter(|id| !used.contains(&id)).collect();
+            if let Some(Carry::Crew(id)) = carry {
                 picked = ids.iter().position(|x| x == id);
                 detail = Some(crew_detail(id));
             }
@@ -959,8 +987,8 @@ fn skirmish_screen(
             message: choice.message.clone(),
             can_drop,
             picked,
-            sort: SORTS[*sort],
-            sort_open: *sort_open && !choice.arms,
+            sort: SORTS[sort],
+            sort_open: sort_open && !choice.arms,
             carrying: carry.as_ref().map(|c| match c {
                 Carry::Crew(id) => crew_data()[id]["portrait"].as_str().unwrap_or_default().to_string(),
                 Carry::Gun(g) => crate::combat::gun_icon(g),
@@ -972,11 +1000,7 @@ fn skirmish_screen(
     } else {
         next.detail = "Add a ship to the fleet first.".into();
     }
-    sk.fleet_pick = choice.ship;
-    sk.show_picked_slot();
-    if *model != next {
-        *model = next;
-    }
+    next
 }
 
 /// The named crew a skirmish ship was assembled with; `apply_skirmish_crew` turns it into posts, handling and boarding crews.
@@ -1077,6 +1101,16 @@ fn apply_outfit(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn campaign_screen_without_surviving_ships_still_offers_continue() {
+        let lib = Library::load(crate::assets_dir());
+        let model = campaign_screen_model(&CampaignPoints::default(), &lib, &[], &mut Choice::default());
+        assert!(model.open);
+        assert_eq!(model.detail, "No surviving own ship.");
+        assert!(model.fit.is_none());
+        assert!(model.navigation.iter().any(|(_, action)| *action == Action::Close));
+    }
+
     #[test]
     fn crew_rows_list_the_assigned_member_once_as_a_return() {
         let lib = Library::load(crate::assets_dir());

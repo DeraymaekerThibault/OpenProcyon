@@ -123,6 +123,32 @@ fn units(ships: &Query<RuleShip>, lib: &Library) -> Vec<Unit> {
         .collect()
 }
 
+fn follow_path(
+    ships: &mut Query<RuleShip>,
+    animals: &mut Query<(Entity, &mut crate::environment::SpaceAnimal, &mut Transform, &mut Visibility), Without<Ship>>,
+    units: &[Entity],
+    points: &[Vec3],
+    closest: bool,
+    looping: bool,
+) {
+    for e in units {
+        if let Ok((_, mut animal, tf, _)) = animals.get_mut(*e) {
+            animal.follow(points, tf.translation, closest, looping);
+            continue;
+        }
+        let Ok(RuleShipItem { ship: mut sh, transform: tf, mission: mut ms, .. }) = ships.get_mut(*e) else { continue };
+        let full = points.to_vec(); // Continuous fleet followers supply leader-relative slots, not cloned path offsets.
+        let from = if closest { (0..full.len()).nearest_to(tf.translation, |a| full[*a]).unwrap_or(0) } else { 0 };
+        sh.throttle = None;
+        sh.waypoints = full[from..].to_vec();
+        sh.order = 2;
+        sh.goal = None;
+        ms.attack.clear();
+        ms.stop_at_end = !looping;
+        ms.looping = looping.then_some(full);
+    }
+}
+
 fn update(
     mission: Option<ResMut<Mission>>,
     time: Res<Time>,
@@ -210,25 +236,7 @@ fn update(
                 let path = path_points(paths, &path);
                 extra.asteroids.write(crate::combat::AsteroidSetup { units, path, closest, mode, speed, tumble });
             }
-            Fx::Path { units, path, closest, looping } => {
-                let pts = path_points(paths, &path);
-                for e in &units {
-                    if let Ok((_, mut animal, tf, _)) = animals.get_mut(*e) {
-                        animal.follow(&pts, tf.translation, closest, looping);
-                        continue;
-                    }
-                    let Ok(RuleShipItem { ship: mut sh, transform: tf, mission: mut ms, .. }) = ships.get_mut(*e) else { continue };
-                    let full = pts.clone(); // Continuous fleet followers supply leader-relative slots, not cloned path offsets.
-                    let from = if closest { (0..full.len()).nearest_to(tf.translation, |a| full[*a]).unwrap_or(0) } else { 0 };
-                    sh.throttle = None;
-                    sh.waypoints = full[from..].to_vec();
-                    sh.order = 2;
-                    sh.goal = None;
-                    ms.attack.clear();
-                    ms.stop_at_end = !looping;
-                    ms.looping = looping.then_some(full);
-                }
-            }
+            Fx::Path { units, path, closest, looping } => follow_path(&mut ships, &mut animals, &units, &path_points(paths, &path), closest, looping),
             Fx::MeteorPath { group, path, closest, mode } => {
                 let path = path_points(paths, &path);
                 extra.meteors.write(crate::nebula::MeteorRoute::Path { group, path, closest, mode });
@@ -1142,5 +1150,23 @@ mod ai_tests {
         app.world_mut().get_mut::<MissionShip>(persistent).unwrap().stance = Stance::Aggressive;
         app.update();
         assert!(app.world().get::<Ship>(persistent).unwrap().waypoints.is_empty(), "aggressive stance switches to combat steering");
+
+        use bevy::ecs::system::RunSystemOnce;
+        app.world_mut().entity_mut(persistent).insert(Visibility::Inherited);
+        let path = vec![Vec3::ZERO, Vec3::X * 290.0, Vec3::X * 500.0];
+        let expected = path.clone();
+        app.world_mut()
+            .run_system_once(
+                move |mut ships: Query<RuleShip>, mut animals: Query<(Entity, &mut crate::environment::SpaceAnimal, &mut Transform, &mut Visibility), Without<Ship>>| {
+                    follow_path(&mut ships, &mut animals, &[persistent], &path, true, true);
+                },
+            )
+            .unwrap();
+        let ship = app.world().get::<Ship>(persistent).unwrap();
+        let mission = app.world().get::<MissionShip>(persistent).unwrap();
+        assert_eq!(ship.waypoints, expected[1..]);
+        assert_eq!(mission.looping.as_ref(), Some(&expected));
+        assert!(!mission.stop_at_end);
+        assert!(mission.attack.is_empty());
     }
 }

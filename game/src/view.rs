@@ -29,6 +29,27 @@ pub struct Pointer<'w> {
     pub plot: ResMut<'w, course::Plot>,
 }
 
+fn camera_input(mouse: &ButtonInput<MouseButton>, keys: &ButtonInput<KeyCode>, pointer: &Pointer, orbit: &mut Orbit, dt: f32) {
+    // Camera controls use real time, independent of simulation speed or pause.
+    if mouse.pressed(MouseButton::Right) {
+        orbit.yaw -= pointer.motion.delta.x * 0.005;
+        orbit.pitch = (orbit.pitch + pointer.motion.delta.y * 0.005).clamp(0.05, 1.5);
+    }
+    orbit.dist = (orbit.dist - pointer.scroll.delta.y * 3.0).clamp(10.0, 300.0);
+    if pointer.binds.pressed(keys, Act::RotateLeft) {
+        orbit.yaw += 1.5 * dt;
+    }
+    if pointer.binds.pressed(keys, Act::RotateRight) {
+        orbit.yaw -= 1.5 * dt;
+    }
+    if pointer.binds.pressed(keys, Act::ZoomIn) {
+        orbit.dist = (orbit.dist - 60.0 * dt).clamp(10.0, 300.0);
+    }
+    if pointer.binds.pressed(keys, Act::ZoomOut) {
+        orbit.dist = (orbit.dist + 60.0 * dt).clamp(10.0, 300.0);
+    }
+}
+
 pub fn input(
     mouse: Res<ButtonInput<MouseButton>>,
     keys: Res<ButtonInput<KeyCode>>,
@@ -61,27 +82,8 @@ pub fn input(
         if briefing::active(mission.as_deref()) || rules::locked(mission.as_deref()) {
             return;
         }
-        // Manual: right-drag horizontally rotates, vertically tilts (wheel/Up/Down zoom); arrow keys adjust the viewpoint.
-        if mouse.pressed(MouseButton::Right) {
-            orbit.yaw -= pointer.motion.delta.x * 0.005;
-            orbit.pitch = (orbit.pitch + pointer.motion.delta.y * 0.005).clamp(0.05, 1.5);
-        }
-        orbit.dist = (orbit.dist - pointer.scroll.delta.y * 3.0).clamp(10.0, 300.0);
-        let dt = time.delta_secs(); // Camera controls stay at 1x, independent of simulation speed or pause.
+        camera_input(&mouse, &keys, &pointer, &mut orbit, time.delta_secs());
         let b = &pointer.binds;
-        if b.pressed(&keys, Act::RotateLeft) {
-            orbit.yaw += 1.5 * dt;
-        }
-        if b.pressed(&keys, Act::RotateRight) {
-            orbit.yaw -= 1.5 * dt;
-        }
-        // Retail Up/Down zoom; tilting is right-drag only (pitch still stops short of vertical elsewhere).
-        if b.pressed(&keys, Act::ZoomIn) {
-            orbit.dist = (orbit.dist - 60.0 * dt).clamp(10.0, 300.0);
-        }
-        if b.pressed(&keys, Act::ZoomOut) {
-            orbit.dist = (orbit.dist + 60.0 * dt).clamp(10.0, 300.0);
-        }
 
         // Engine orders: +/- step through All Stop .. Emergency.
         if direct && (b.just_pressed(&keys, Act::SpeedUp) || keys.just_pressed(KeyCode::NumpadAdd)) {
@@ -486,5 +488,15 @@ mod camera_tests {
             assert!((orbit.yaw - 0.15).abs() < 0.00001, "rotation at {speed}x: {}", orbit.yaw);
             assert!((orbit.dist - 94.0).abs() < 0.00001, "zoom at {speed}x: {}", orbit.dist);
         }
+        world.resource_mut::<ButtonInput<KeyCode>>().reset_all();
+        world.resource_mut::<ButtonInput<MouseButton>>().press(MouseButton::Right);
+        world.resource_mut::<AccumulatedMouseMotion>().delta = Vec2::new(20.0, 500.0);
+        world.resource_mut::<AccumulatedMouseScroll>().delta = Vec2::new(0.0, 100.0);
+        world.insert_resource(Orbit { yaw: 0.0, pitch: 0.5, dist: 100.0, focus: Some(ids[0]) });
+        world.run_system_once(input).unwrap();
+        let orbit = world.resource::<Orbit>();
+        assert!((orbit.yaw + 0.1).abs() < 0.00001);
+        assert_eq!(orbit.pitch, 1.5);
+        assert_eq!(orbit.dist, 10.0);
     }
 }

@@ -117,6 +117,34 @@ fn hit_fx(commands: &mut Commands, fxl: &FxLib, bd: &BulletDef, at: Vec3, vel: V
     }
 }
 
+type ShipTargets<'w, 's> = Query<
+    'w,
+    's,
+    (Entity, &'static Transform, &'static Ship, &'static mut Health, &'static mut Fires, Option<&'static crate::campaign::MissionShip>, Option<&'static crate::collision::Drift>),
+    Without<crate::lifeboats::Lifeboat>,
+>;
+
+fn nearest_ship_hit(ships: &ShipTargets, lib: &Library, side: Side, p0: Vec3, p1: Vec3) -> Option<(Entity, f32, usize, Vec3)> {
+    let mut best: Option<(Entity, f32, usize, Vec3)> = None;
+    for (entity, tf, ship, hp, _, mission, _) in ships.iter() {
+        if hp.destroyed || ship.side == side || mission.is_some_and(|m| !m.visible) {
+            continue;
+        }
+        let class = &lib.classes[ship.class];
+        if segment_distance(tf.translation, p0, p1) > class.hull_bound * tf.scale.max_element() {
+            continue;
+        }
+        let inv = tf.to_matrix().inverse();
+        let (a, b) = (inv.transform_point3(p0), inv.transform_point3(p1));
+        if let Some((t, section)) = ship_segment_hit(class, hp, a, b)
+            && best.as_ref().is_none_or(|hit| t < hit.1)
+        {
+            best = Some((entity, t, section, p0 + (p1 - p0) * t));
+        }
+    }
+    best
+}
+
 pub(super) fn shells(
     mut commands: Commands,
     time: Res<Time>,
@@ -132,10 +160,7 @@ pub(super) fn shells(
     campaign: Option<Res<crate::campaign::Mission>>,
     mut q: Query<(Entity, &mut Shell, &mut Transform), Without<Ship>>,
     // Shells pass through lifeboats (no weapon-vs-lifeboat response is registered in the original; PROVISIONAL, docs/re/lifeboats.md §2.4).
-    mut ships: Query<
-        (Entity, &Transform, &Ship, &mut Health, &mut Fires, Option<&crate::campaign::MissionShip>, Option<&crate::collision::Drift>),
-        Without<crate::lifeboats::Lifeboat>,
-    >,
+    mut ships: ShipTargets,
     mut detonate: MessageWriter<Detonate>,
     (mut dragons, mut scars): (Query<&mut crate::dragons::Dragon>, MessageWriter<crate::decals::Scar>),
 ) {
@@ -220,26 +245,9 @@ pub(super) fn shells(
             commands.entity(e).despawn();
             continue;
         }
-        let mut best: Option<(f32, usize, Vec3)> = None; // (t, section, class)
-        let mut best_ship: Option<Entity> = None;
-        for (i, stf, ship, hp, _, m, _) in ships.iter() {
-            if hp.destroyed || ship.side == s.side || m.is_some_and(|m| !m.visible) {
-                continue;
-            }
-            let class = &lib.classes[ship.class];
-            if segment_distance(stf.translation, p0, p1) > class.hull_bound * stf.scale.max_element() {
-                continue;
-            }
-            let inv = stf.to_matrix().inverse();
-            let (a, b) = (inv.transform_point3(p0), inv.transform_point3(p1));
-            let hit = ship_segment_hit(class, hp, a, b);
-            if let Some((t, k)) = hit
-                && best.as_ref().is_none_or(|x| t < x.0)
-            {
-                best = Some((t, k, p0 + (p1 - p0) * t));
-                best_ship = Some(i);
-            }
-        }
+        let hit = nearest_ship_hit(&ships, &lib, s.side, p0, p1);
+        let best = hit.map(|(_, t, section, at)| (t, section, at));
+        let best_ship = hit.map(|(entity, ..)| entity);
         let rock = rocks
             .iter()
             .filter(|(_, _, rk, _)| rk.hp > 0.0)
