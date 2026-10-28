@@ -280,7 +280,6 @@ pub(super) fn fire(
         if health.destroyed {
             continue;
         }
-        let reload_cut = gunner_reload_cut(ship, posts, points.as_deref(), &lib);
         seen.clear();
         seen.extend(contacts.iter().map(|c| Contact { visible: c.visible && sensors.in_sight(me, c.entity, campaign.as_deref()), ..*c }));
         let cloaked_now = cloak.as_ref().is_some_and(|c| c.level > 0.0);
@@ -381,7 +380,7 @@ pub(super) fn fire(
                     let target = gun_target.map(|t| t.entity).filter(|e| *e != Entity::PLACEHOLDER);
                     fired.write(Fired { shooter: me, target, bullet: gun.bullet.clone() });
                 }
-                state.cooldown = gun.burst_cycle_cut(reload_cut);
+                state.cooldown = gun.burst_cycle_cut(gunner_reload_cut(ship, posts, points.as_deref(), &lib, mount.bank));
                 state.burst_timer = 0.0;
                 // Accuracy factor: 0.5 for the plain AI; crewed ships use 1 - 0.8 * gunnery skill (the campaign roster's best gunner for
                 // the human fleet).
@@ -690,16 +689,20 @@ fn burst_turn(aim_dir: Vec3, deviation: f32, rng: &mut Rng) -> Quat {
 
 /// Damage rules of one shell hit on section `k` (`damage` = [lower, upper, crit, fire chance, fire strength]).
 /// Criticals are not modelled: in the original they only feed a tally and crew speech (docs/re/movement.md).
-/// Seconds the gunners take off TimeBetweenBursts: 10 x gunnery (0..1), for the player's crewed ships only; computer
+/// Seconds the gunner of `bank` takes off TimeBetweenBursts: 10 x gunnery (0..1), for the player's crewed ships only; computer
 /// ships fire every TimeBetweenBursts (measured). Measured on retail: gunners of gunnery 7-9 brought one gun's hits down to
-/// every 3.5-3.9 s (heavy cannon, 12 s). PROVISIONAL: each retail gun reads its own gunner slot (mapping unknown); here the
-/// mean over the gunner slots (generic hands 0.1), or the campaign roster's best gunner without posts.
-pub(super) fn gunner_reload_cut(ship: &Ship, posts: Option<&crate::crew_arms::CrewPosts>, points: Option<&crate::campaign::CampaignPoints>, lib: &Library) -> f32 {
+/// every 3.5-3.9 s (heavy cannon, 12 s). Each gun reads the gunner of its own bank (the crew screen's gunner slots follow the
+/// selectable banks; owner-confirmed). PROVISIONAL: the point-defence banks have no visible slot and count as a generic hand (0.1);
+/// without posts the campaign roster's best gunner crews every gun.
+pub(super) fn gunner_reload_cut(ship: &Ship, posts: Option<&crate::crew_arms::CrewPosts>, points: Option<&crate::campaign::CampaignPoints>, lib: &Library, bank: usize) -> f32 {
     if ship.side != Side::Player {
         return 0.0;
     }
     let gunnery = match posts {
-        Some(p) => p.post_skill(0, "gunnery", crate::boarding::counts(&lib.classes[ship.class].name)[0]),
+        Some(p) => {
+            let slot = crate::crew_arms::selectable_banks(lib, &lib.classes[ship.class]).iter().position(|(b, _)| *b == bank);
+            p.gunner_skill(slot)
+        }
         None => points.and_then(|p| crate::crew_arms::best(p, "gunnery")).unwrap_or(0.1),
     };
     10.0 * gunnery

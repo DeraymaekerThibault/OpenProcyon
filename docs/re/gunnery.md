@@ -65,8 +65,10 @@ ballistic arc and attributed to the ship it started from.
 - Measured on the original (headless 1-vs-1 skirmish, Navy Man-O-War with nine gunners of Gunnery 7-9 vs a Galleon, the
   Galleon's section HP at 20 Hz): one gun's hits arrived every 3.5-3.9 s for 90 s, against at least ~13 s between heavy
   hits with the default crew. 12 s - 8.5 = 3.5 s fits a heavy cannon with a gunnery-8.5 gunner.
-- PROVISIONAL: each gun reads one gunner slot (which gun maps to which slot is not known); the engine uses the mean
-  Gunnery of the gunner slots (generic hands 0.1). The gunner's captain/first-mate leadership bonuses are not modelled.
+- Each gun reads the gunner of its own bank, not a ship-wide average (owner-confirmed; the crew screen's gunner slots sit at the
+  selectable banks, in the same order). PROVISIONAL: the point-defence banks have no visible slot and count as a generic hand
+  (0.1); which slot a gun reads was inferred from the screen, not decoded. The gunner's captain/first-mate leadership bonuses
+  are not modelled.
 
 ## Lob shells
 Measured on the running original game (2026-10): a Navy Man-O-War's bow Star Mortar fired at open etherium in a
