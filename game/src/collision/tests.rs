@@ -111,8 +111,7 @@ fn nis_stops_helm_and_combat_motion_but_keeps_scripted_routes_and_resumes() {
     app.insert_resource(time).insert_resource(lib).insert_resource(mission).add_systems(Update, sail);
     let primary = app.world_mut().spawn((ship.clone(), primary_health, Transform::default(), Drift(Vec3::X * 10.0), crate::PlayerShip)).id();
     let combat_pos = Vec3::X * 100.0;
-    let combat =
-        app.world_mut().spawn((crate::Ship { waypoints: vec![], goal: Some(1.0), ..ship.clone() }, combat_health, Transform::from_translation(combat_pos), Drift::default())).id();
+    let combat = app.world_mut().spawn((crate::Ship { waypoints: vec![], goal: Some(1.0), ..ship }, combat_health, Transform::from_translation(combat_pos), Drift::default())).id();
     let route_pos = Vec3::X * 200.0;
     let route = app
         .world_mut()

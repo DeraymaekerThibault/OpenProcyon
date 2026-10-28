@@ -298,7 +298,7 @@ pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Libra
     commands.remove_resource::<crate::rules::skirmish::SkirmishScript>();
     let map = cfg.map.as_deref().and_then(data::map_json);
     commands.insert_resource(MapLighting(map.as_ref().and_then(lighting_of)));
-    let sky = map.as_ref().and_then(|m| m["sky"].as_str()).map(|s| s.rsplit_once("_Layer").map_or(s, |x| x.0).to_string()).unwrap_or("skybox_07".into());
+    let sky = map.as_ref().and_then(|m| m["sky"].as_str()).map_or_else(|| "skybox_07".into(), |s| s.rsplit_once("_Layer").map_or(s, |x| x.0).to_string());
     commands.spawn((Scenario, Sky, crate::data::scene(assets, &format!("{sky}.glb")), Transform::from_scale(Vec3::splat(8000.0)), Visibility::default()));
     let track = map.as_ref().and_then(|m| m["music"].as_str()).unwrap_or("BTL_NavyBig_Full02");
     if !campaign::is_mission(cfg.map.as_deref()) {
@@ -398,7 +398,7 @@ pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Libra
                     continue;
                 }
                 let team = pl["team"].as_i64().unwrap_or(-1) as i32;
-                let side = groups.iter().find(|g| team >= 0 && g.team == team).map(|g| g.side).unwrap_or(Side(groups.iter().map(|g| g.side.0).max().unwrap_or(0) + 1));
+                let side = groups.iter().find(|g| team >= 0 && g.team == team).map_or(Side(groups.iter().map(|g| g.side.0).max().unwrap_or(0) + 1), |g| g.side);
                 groups.push(Group {
                     player: p,
                     side,

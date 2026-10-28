@@ -180,7 +180,7 @@ pub fn check_install(input: &str) -> Result<PathBuf, String> {
         return Err("Type or paste the folder you installed the game in, or drop it on this window.".into());
     }
     let mut path = match text.strip_prefix("~/") {
-        Some(rest) => std::env::var_os("HOME").map(|h| PathBuf::from(h).join(rest)).unwrap_or_else(|| PathBuf::from(text)),
+        Some(rest) => std::env::var_os("HOME").map_or_else(|| PathBuf::from(text), |h| PathBuf::from(h).join(rest)),
         None => PathBuf::from(text),
     };
     if path.is_file() {

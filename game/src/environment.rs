@@ -133,7 +133,7 @@ pub fn refresh_sensors(
                 at: tf.translation,
                 sphere,
                 sight: armed.map(|b| lib.classes[b.class].sight),
-                group: base.map(|b| b.owner.as_str()).unwrap_or("").into(),
+                group: base.map_or("", |b| b.owner.as_str()).into(),
                 shown: health.is_none_or(|h| !h.destroyed) && animal.is_none_or(|a| a.visible && !a.dead) && rock.is_none_or(|r| r.hp > 0.0),
                 cloaked: false,
                 scenery: animal.is_none(),

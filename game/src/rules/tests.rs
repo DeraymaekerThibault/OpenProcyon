@@ -502,7 +502,7 @@ fn boarding_feeds_team_capture_not_the_lifeboat_capture_count() {
     thief.owner = "PlayerStart".into();
     thief.groups = vec!["PirateRunSloop".into()];
     assert!(s.cond(&team, &[thief.clone()], false));
-    assert!(!s.cond(&pvp, &[thief.clone()], false), "boarding does not increment the lifeboat table");
+    assert!(!s.cond(&pvp, &[thief], false), "boarding does not increment the lifeboat table");
     // the lifeboat route of the same rule: the table counts, exactly (collector, owner), no ally sharing
     s.lifeboat_saved("PlayerStart", "PirateRunner");
     assert!(s.cond(&pvp, &[], false));

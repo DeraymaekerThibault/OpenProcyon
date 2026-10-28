@@ -164,7 +164,7 @@ pub fn voice_line(event: &str, n: usize, race: &str, posts: Option<&crate::crew_
         let prefix = SPECIES_VOICE.iter().find(|v| Some(v.0) == crate::crew_arms::species(id))?.1;
         Some((prefix, crate::crew_arms::portrait(id).unwrap_or(face)))
     });
-    let (file, face) = voices.chain([(faction, face)]).map(|(v, f)| (format!("{v}{rest}"), f)).find(|(f, _)| exists(f)).unwrap_or((base.to_string(), face));
+    let (file, face) = voices.chain([(faction, face)]).map(|(v, f)| (format!("{v}{rest}"), f)).find(|(f, _)| exists(f)).unwrap_or_else(|| (base.to_string(), face));
     Some((file, face.to_string()))
 }
 

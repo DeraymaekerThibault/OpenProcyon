@@ -236,7 +236,7 @@ fn hostile_island_towers_shoot_the_player_and_neutral_ones_do_not() {
         create_lifeboats: false,
         ..Default::default()
     };
-    let player_ship = app.world_mut().spawn((Transform::from_xyz(0.0, 0.0, -120.0), ship.clone(), Health::new(&lib.classes[c]), Fires::default(), ms, PlayerShip)).id();
+    let player_ship = app.world_mut().spawn((Transform::from_xyz(0.0, 0.0, -120.0), ship, Health::new(&lib.classes[c]), Fires::default(), ms, PlayerShip)).id();
     for _ in 0..300 {
         app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs_f32(0.05));
         app.update();

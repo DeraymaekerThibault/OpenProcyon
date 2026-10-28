@@ -478,7 +478,7 @@ pub(super) fn launch_shell(
     target: Option<Entity>,
     shot: Launch,
 ) {
-    let from = mgt.map(|t| t.translation()).unwrap_or(origin);
+    let from = mgt.map_or(origin, |t| t.translation());
     let b = &lib.bullets[&g.bullet];
     // PROVISIONAL: one fire sound per shell of a burst.
     if let Some((n, vol, max)) = &g.sound {

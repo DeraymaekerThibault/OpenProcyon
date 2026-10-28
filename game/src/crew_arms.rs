@@ -194,8 +194,7 @@ pub fn bank_cost(lib: &Library, class: &crate::data::Class, bank: usize, gun: &s
     if !bank_compatible(lib, class, bank, gun) {
         return None;
     }
-    let mounts: Vec<_> = class.mounts.iter().filter(|m| m.bank == bank).collect();
-    g.points?.checked_mul(u32::try_from(mounts.len()).ok()?)
+    g.points?.checked_mul(u32::try_from(class.mounts.iter().filter(|m| m.bank == bank).count()).ok()?)
 }
 /// Victory points a skirmish ship's fitting costs beyond its stock guns: per bank, the price of the fitted guns minus the stock ones
 /// (negative when cheaper). Measured on the original: swapping a four-gun heavy bank from a 10-point gun to an 8-point gun showed
@@ -548,7 +547,7 @@ fn screen(
                         }
                         Action::Upgrade(gun) => selectable_banks(&lib, class)
                             .get(choice.post)
-                            .ok_or("No weapon bank.".into())
+                            .ok_or_else(|| "No weapon bank.".into())
                             .and_then(|(bank, _)| upgrade(&mut points, &lib, class, &key, *bank, &gun)),
                         _ => Ok(()),
                     }
@@ -630,7 +629,7 @@ fn screen(
                 }
                 let skill = ability(id, SKILLS[role]).unwrap_or(0.0) * 10.0;
                 if points.outfit.hired.contains(id) {
-                    let location = points.outfit.location(id).map_or("reserve".to_string(), |(_, r)| format!("assigned: {}", ROLES[r]));
+                    let location = points.outfit.location(id).map_or_else(|| "reserve".to_string(), |(_, r)| format!("assigned: {}", ROLES[r]));
                     rows.push((
                         format!("Assign {} — {} {:.0}, combat {:.0} ({})", name(id), SKILLS[role], skill, ability(id, "combat").unwrap_or(0.0) * 10.0, location),
                         Action::Assign(id.clone()),

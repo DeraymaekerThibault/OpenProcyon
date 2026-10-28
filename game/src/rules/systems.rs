@@ -627,7 +627,7 @@ fn mission_ai(
     let n_ships = snap.len();
     snap.extend(rocks.iter().map(|(e, tf, a)| unit(e, a.id, &a.kind, &a.group, tf.translation, a.hp > 0.0)));
     sc.tag(&mut snap);
-    let player_owner = ships.iter().find(|s| s.5).map(|s| s.4.owner.clone()).unwrap_or_else(|| sc.player().into());
+    let player_owner = ships.iter().find(|s| s.5).map_or_else(|| sc.player().into(), |s| s.4.owner.clone());
     for (e, mut ship, tf, h, mut ms, primary, pilot) in &mut ships {
         let is_boat = boats.contains(e);
         let side = if !is_boat && sc.hostile(&ms.owner, &player_owner) { Side::Enemy } else { Side::Player };
@@ -1107,9 +1107,9 @@ mod ai_tests {
             ..Default::default()
         };
         let done = app.world_mut().spawn((ship.clone(), health(), Transform::default(), ms(true, None))).id();
-        let en_route = app.world_mut().spawn((Ship { waypoints: vec![Vec3::new(0.0, 0.0, -500.0)], ..ship.clone() }, health(), Transform::default(), ms(true, None))).id();
+        let en_route = app.world_mut().spawn((Ship { waypoints: vec![Vec3::new(0.0, 0.0, -500.0)], ..ship }, health(), Transform::default(), ms(true, None))).id();
         let looping = app.world_mut().spawn((ship.clone(), health(), Transform::default(), ms(true, Some(vec![Vec3::new(0.0, 0.0, -500.0)])))).id();
-        let near = app.world_mut().spawn((Ship { waypoints: vec![Vec3::new(0.0, 0.0, -1.0)], ..ship.clone() }, health(), Transform::default(), ms(true, None))).id();
+        let near = app.world_mut().spawn((Ship { waypoints: vec![Vec3::new(0.0, 0.0, -1.0)], ..ship }, health(), Transform::default(), ms(true, None))).id();
         let foe = app
             .world_mut()
             .spawn((

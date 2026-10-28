@@ -364,7 +364,7 @@ mod tests {
         let (unpacked, checkout) = (dir.join("download/content"), dir.join("checkout/content"));
         assert_eq!(content_dir_from(Some(unpacked.clone()), checkout.clone()), checkout, "no content/ next to a cargo-built binary");
         std::fs::create_dir_all(unpacked.join("fonts")).unwrap();
-        assert_eq!(content_dir_from(Some(unpacked.clone()), checkout.clone()), unpacked);
+        assert_eq!(content_dir_from(Some(unpacked.clone()), checkout), unpacked);
         std::fs::remove_dir_all(dir).unwrap();
     }
 }

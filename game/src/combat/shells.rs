@@ -338,57 +338,8 @@ pub(super) fn shells(
         }
         if let (Some((_, k, at)), Some(si)) = (best, best_ship) {
             let (se, stf, ship, mut hp, mut fires, mission, _) = ships.get_mut(si).unwrap();
-            let class = &lib.classes[ship.class];
-            let sec = &class.sections[k];
-            let key = material_key(&sec.material);
-            // Criticals are not modelled: in the original they only feed a tally and crew speech (docs/re/movement.md).
-            let mut damage = bd.damage[key];
-            let scale = side_damage_scale(s.side, ship.side, crate::menu::difficulty());
-            damage[0] *= scale;
-            damage[1] *= scale;
-            hits.write(Hit { shooter: s.shooter, victim: se });
-            // Script vulnerability: 'Invulnerable Percent' 1.0 takes no damage and no fire; partial values scale the damage.
-            let invuln = mission.map_or(0.0, |m| m.invuln);
-            if s.bullet == TORPEDO_BULLET {
-                info!("Torpedo hit {} ({}){}", class.name, sec.label, if invuln >= 1.0 { " [training: invulnerable]" } else { "" });
-            }
-            let fire_free = !fires.list.iter().any(|f| f.sec == k && f.state == 0);
-            let before = hp.sections[k];
-            let outcome = apply_ship_hit(class, &mut hp, k, damage, invuln, fire_free, &mut rng);
-            if let (Some(size), true) = (bd.decal, hp.sections[k] < before) {
-                let inv = stf.to_matrix().inverse();
-                let material = if sec.material.contains("Cloth") { "Cloth" } else { key };
-                scars.write(crate::decals::Scar { ship: se, local: inv.transform_point3(at), dir: inv.transform_vector3(s.vel).normalize_or_zero(), material, size });
-            }
-            if let Some(fire_str) = outcome.fire {
-                let local = Transform::from_translation(stf.to_matrix().inverse().transform_point3(at));
-                let fx = fx::spawn(&mut commands, &fxl, "FireOnShip", Some(se), local, Transform::from_translation(at), false);
-                if let Some(e) = fx {
-                    let sc = fire_scale(fire_str);
-                    commands.entity(e).queue(move |mut w: EntityWorldMut| {
-                        if let Some(mut f) = w.get_mut::<fx::Fx>() {
-                            f.rate_scale = sc;
-                        }
-                    });
-                }
-                info!("fire on {} of {}", sec.label, class.name);
-                fires.list.push(Fire { sec: k, intensity: fire_str, state: 0, t: 0.0, fx });
-            }
-            sfx.write_batch(bd.impact_sound(key, at, &mut rng));
-            if outcome.lost {
-                // Retail pool per section material (Damage_<Wood|Metal|Sail|Stone>01-05, 600 units). PROVISIONAL: played on section loss.
-                let pool = match key {
-                    "Wood" | "Reinforced" => Some("Wood"),
-                    "Iron" => Some("Metal"),
-                    "Cloth" => Some("Sail"),
-                    "Stone" => Some("Stone"),
-                    _ => None,
-                };
-                if let Some(p) = pool {
-                    sfx.write(Sfx { name: format!("Damage_{p}0{}", rng.variant(5)), at: Some(at), vol: 1.0, max: 600.0 });
-                }
-                info!("{} of {} destroyed", sec.label, class.name);
-            }
+            let target = ShipTarget { entity: se, transform: stf, side: ship.side, class: &lib.classes[ship.class], invuln: mission.map_or(0.0, |m| m.invuln) };
+            hit_ship(&mut commands, &fxl, &mut rng, (&mut sfx, &mut hits, &mut scars), bd, &s, target, &mut hp, &mut fires, k, at);
             hit_fx(&mut commands, &fxl, bd, at, s.vel);
             commands.entity(e).despawn();
         } else if s.age > s.lifetime || p1.y < -300.0 {
@@ -403,5 +354,80 @@ pub(super) fn shells(
         if let Some(&hp) = threat_hp.get(&e) {
             s.hp = hp;
         }
+    }
+}
+
+/// The ship a shell struck.
+struct ShipTarget<'a> {
+    entity: Entity,
+    transform: &'a Transform,
+    side: Side,
+    class: &'a crate::data::Class,
+    /// Script vulnerability: 'Invulnerable Percent' 1.0 takes no damage and no fire; partial values scale the damage.
+    invuln: f32,
+}
+
+/// A shell striking section `k` of a ship at `at`: damage, fire, hull scar and sounds (the impact effect is the caller's).
+fn hit_ship(
+    commands: &mut Commands,
+    fxl: &FxLib,
+    rng: &mut Rng,
+    (sfx, hits, scars): (&mut MessageWriter<Sfx>, &mut MessageWriter<Hit>, &mut MessageWriter<crate::decals::Scar>),
+    bd: &crate::data::BulletDef,
+    s: &Shell,
+    target: ShipTarget,
+    hp: &mut Health,
+    fires: &mut Fires,
+    k: usize,
+    at: Vec3,
+) {
+    let ShipTarget { entity: se, transform: stf, side, class, invuln } = target;
+    let sec = &class.sections[k];
+    let key = material_key(&sec.material);
+    // Criticals are not modelled: in the original they only feed a tally and crew speech (docs/re/movement.md).
+    let mut damage = bd.damage[key];
+    let scale = side_damage_scale(s.side, side, crate::menu::difficulty());
+    damage[0] *= scale;
+    damage[1] *= scale;
+    hits.write(Hit { shooter: s.shooter, victim: se });
+    if s.bullet == TORPEDO_BULLET {
+        info!("Torpedo hit {} ({}){}", class.name, sec.label, if invuln >= 1.0 { " [training: invulnerable]" } else { "" });
+    }
+    let fire_free = !fires.list.iter().any(|f| f.sec == k && f.state == 0);
+    let before = hp.sections[k];
+    let outcome = apply_ship_hit(class, hp, k, damage, invuln, fire_free, rng);
+    if let (Some(size), true) = (bd.decal, hp.sections[k] < before) {
+        let inv = stf.to_matrix().inverse();
+        let material = if sec.material.contains("Cloth") { "Cloth" } else { key };
+        scars.write(crate::decals::Scar { ship: se, local: inv.transform_point3(at), dir: inv.transform_vector3(s.vel).normalize_or_zero(), material, size });
+    }
+    if let Some(fire_str) = outcome.fire {
+        let local = Transform::from_translation(stf.to_matrix().inverse().transform_point3(at));
+        let fx = fx::spawn(commands, fxl, "FireOnShip", Some(se), local, Transform::from_translation(at), false);
+        if let Some(e) = fx {
+            let sc = fire_scale(fire_str);
+            commands.entity(e).queue(move |mut w: EntityWorldMut| {
+                if let Some(mut f) = w.get_mut::<fx::Fx>() {
+                    f.rate_scale = sc;
+                }
+            });
+        }
+        info!("fire on {} of {}", sec.label, class.name);
+        fires.list.push(Fire { sec: k, intensity: fire_str, state: 0, t: 0.0, fx });
+    }
+    sfx.write_batch(bd.impact_sound(key, at, rng));
+    if outcome.lost {
+        // Retail pool per section material (Damage_<Wood|Metal|Sail|Stone>01-05, 600 units). PROVISIONAL: played on section loss.
+        let pool = match key {
+            "Wood" | "Reinforced" => Some("Wood"),
+            "Iron" => Some("Metal"),
+            "Cloth" => Some("Sail"),
+            "Stone" => Some("Stone"),
+            _ => None,
+        };
+        if let Some(p) = pool {
+            sfx.write(Sfx { name: format!("Damage_{p}0{}", rng.variant(5)), at: Some(at), vol: 1.0, max: 600.0 });
+        }
+        info!("{} of {} destroyed", sec.label, class.name);
     }
 }
