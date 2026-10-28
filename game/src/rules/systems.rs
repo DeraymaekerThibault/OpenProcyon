@@ -170,7 +170,9 @@ fn update(
     }
     for d in killed.read() {
         if let Some(o) = owner_of(d.by) {
-            *script.kills.entry(o.clone()).or_default() += 1;
+            // A destroyed rock is one the belt remembers (it may already be gone from the unit list).
+            let rock = script.belt.contains_key(&d.victim);
+            *script.kills.entry((o.clone(), rock)).or_default() += 1;
             script.record_destroyed(&o, d.victim);
         }
     }

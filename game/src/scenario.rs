@@ -81,6 +81,46 @@ pub enum Outcome {
     Defeat,
 }
 
+/// The light a map authors (map.json `lighting`): the roof light's colour and travel direction (Bevy frame) and the floor light's colour.
+/// PROVISIONAL: the original blends an ambient colour with floor/roof hemisphere lights; the remake uses the roof light as the sun and
+/// the floor colour as the uniform ambient.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Lighting {
+    pub direction: Vec3,
+    pub sun: Color,
+    pub ambient: Color,
+}
+#[derive(Resource, Default)]
+pub struct MapLighting(pub Option<Lighting>);
+
+pub fn lighting_of(map: &serde_json::Value) -> Option<Lighting> {
+    let l = map.get("lighting")?;
+    let colour = |v: &serde_json::Value| {
+        let c: Vec<f32> = v.as_array()?.iter().filter_map(|x| x.as_f64().map(|x| x as f32)).collect();
+        (c.len() >= 3).then(|| Color::srgb(c[0], c[1], c[2]))
+    };
+    let direction = game_to_bevy(&l["roof_direction"]);
+    Some(Lighting { direction: direction.try_normalize()?, sun: colour(&l["roof"])?, ambient: colour(&l["floor"])? })
+}
+
+/// Apply the map's light, or the default white light from above when it has none.
+pub fn apply_lighting(light: MapLighting_, mut ambient: ResMut<GlobalAmbientLight>, map: Res<MapLighting>) {
+    let (mut sun, mut tf) = light.into_inner();
+    match map.0 {
+        Some(l) => {
+            sun.color = l.sun;
+            *tf = Transform::IDENTITY.looking_to(l.direction, Vec3::Y);
+            ambient.color = l.ambient;
+        }
+        None => {
+            sun.color = Color::WHITE;
+            *tf = Transform::from_xyz(30.0, 60.0, 20.0).looking_at(Vec3::ZERO, Vec3::Y);
+            ambient.color = Color::WHITE;
+        }
+    }
+}
+type MapLighting_<'w, 's> = Single<'w, 's, (&'static mut DirectionalLight, &'static mut Transform)>;
+
 /// The end message (string id) of the map rule that decided the battle, for the Game Summary; none: the default VICTORY/DEFEAT.
 #[derive(Resource, Default)]
 pub struct EndMessage(pub Option<String>);
@@ -205,6 +245,7 @@ pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Libra
     commands.queue(resume_scenario);
     commands.remove_resource::<crate::rules::skirmish::SkirmishScript>();
     let map = cfg.map.as_deref().and_then(data::map_json);
+    commands.insert_resource(MapLighting(map.as_ref().and_then(lighting_of)));
     let sky = map.as_ref().and_then(|m| m["sky"].as_str()).map(|s| s.rsplit_once("_Layer").map_or(s, |x| x.0).to_string()).unwrap_or("skybox_07".into());
     commands.spawn((
         Scenario,
@@ -452,11 +493,21 @@ pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Libra
             Some(s) => commands.insert_resource(s),
             None => commands.remove_resource::<crate::rules::skirmish::SkirmishScript>(),
         }
-        // Bases fight for the side whose fleet type is theirs; a base no fleet claims stays neutral (and silent).
+        // Bases fight for the side whose fleet type is theirs; a base no fleet claims stays neutral (and silent). Armed islands (the
+        // volcanoes) belong to nobody: they fire on every ship and cannot be boarded.
         for (e, o) in &bases {
-            let Some(class) = o["type"].as_str().filter(|t| t.starts_with("Base_")).and_then(|t| lib.classes.iter().position(|c| c.name == t)) else { continue };
+            let Some(class) = o["type"].as_str().filter(|t| t.starts_with("Base_") || t.starts_with("Island_")).and_then(|t| lib.classes.iter().position(|c| c.name == t)) else {
+                continue;
+            };
+            let island = lib.classes[class].name.starts_with("Island_");
             let owner = o["player"].as_u64().and_then(|i| players.get(i as usize)).and_then(|p| p["name"].as_str()).and_then(faction);
-            let Some(side) = owner.or_else(|| o["type"].as_str().and_then(faction)).and_then(|f| groups.iter().find(|g| g.race == f)).map(|g| g.side) else { continue };
+            let Some(side) = (if island {
+                Some(HOSTILE_TO_ALL)
+            } else {
+                owner.or_else(|| o["type"].as_str().and_then(faction)).and_then(|f| groups.iter().find(|g| g.race == f)).map(|g| g.side)
+            }) else {
+                continue;
+            };
             let id = o["id"].as_i64().unwrap_or(-1);
             let states = combat::spawn_guns(commands, assets, lib, *e, class);
             commands.entity(*e).insert((
@@ -464,10 +515,12 @@ pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Libra
                 combat::ArmedBase { class },
                 combat::BaseSide(side),
                 combat::BaseOrigin(side),
-                boarding::Boardable::base(&lib.classes[class].name, SKIRMISH_BASE_STRENGTH, true),
                 combat::Health::new(&lib.classes[class]),
                 states,
             ));
+            if !island {
+                commands.entity(*e).insert(boarding::Boardable::base(&lib.classes[class].name, SKIRMISH_BASE_STRENGTH, true));
+            }
         }
     } else {
         commands.queue(|w: &mut World| {
@@ -600,6 +653,9 @@ pub fn restart(
     }
     spawn_scenario(&mut commands, &assets, &lib, &fxl, &shapes, &asteroids, &cfg);
 }
+
+/// The side of an armed island: no ship belongs to it, so it fires on all of them.
+const HOSTILE_TO_ALL: Side = Side(u8::MAX);
 
 /// Boarding strength of a skirmish base (the retail value is not measured; campaign islands use 50-100). PROVISIONAL.
 const SKIRMISH_BASE_STRENGTH: i32 = 50;
@@ -818,5 +874,20 @@ mod rotation_tests {
         });
         app.world_mut().run_system_once(outcome).unwrap(); // no PlayerShip left
         assert!(*app.world().resource::<Outcome>() == Outcome::Victory);
+    }
+}
+
+#[cfg(test)]
+mod lighting_tests {
+    use super::*;
+    #[test]
+    fn map_light_is_read_in_the_bevy_frame_and_absent_without_the_field() {
+        let map = serde_json::json!({"lighting": {"ambient": [0, 0, 0, 1], "roof_direction": [0.0, 1.0, -1.0], "floor": [0.4, 0.45, 0.8, 1.0], "roof": [1.0, 1.0, 1.0, 1.0]}});
+        let l = lighting_of(&map).unwrap();
+        // game (x starboard, y forward, z up) -> Bevy (x, z, -y): forward-and-down travels toward -y and -z
+        assert!((l.direction - Vec3::new(0.0, -1.0, -1.0).normalize()).length() < 1e-5, "{:?}", l.direction);
+        assert_eq!(l.ambient, Color::srgb(0.4, 0.45, 0.8));
+        assert!(lighting_of(&serde_json::json!({"sky": "x"})).is_none(), "older imports keep the default light");
+        assert!(lighting_of(&serde_json::json!({"lighting": {"roof_direction": [0, 0, 0], "floor": [1, 1, 1], "roof": [1, 1, 1]}})).is_none(), "a zero direction is no light");
     }
 }

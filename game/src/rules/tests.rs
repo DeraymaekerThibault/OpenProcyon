@@ -237,7 +237,7 @@ fn asteroid_setup_selects_named_groups_and_preserves_kill_attribution() {
     }
     assert!(effects.iter().any(|e| matches!(e, Fx::Asteroids { units, speed: [0.0, 0.0], tumble: [0.5, 0.9], .. } if units == &[belt.e])));
     assert!(effects.iter().any(|e| matches!(e, Fx::Asteroids { units, tumble: [0.5, 0.75], .. } if units == &[montressor.e])));
-    sc.kills.insert(PLAYER.into(), 1);
+    sc.kills.insert((PLAYER.into(), true), 1);
     assert!(sc.cond(&serde_json::json!({"Type":"Player Killed A Object", "Player Name":PLAYER, "World Object Type":"Asteroid"}), &[], false));
 }
 
@@ -798,4 +798,40 @@ fn never_fired_lists_rules_that_did_not_fire_once_repeating_ones_included() {
     assert_eq!(sc.never_fired(), ["Every frame", "Waits"]);
     sc.step(&[], 0.1, false);
     assert_eq!(sc.never_fired(), ["Waits"]);
+}
+
+/// A kill is an event: a repeating rule scores once per kill, by the kind of object destroyed (mission 1's rocks, mission 3's ships).
+#[test]
+fn killing_an_object_scores_once_per_kill_and_by_kind() {
+    let data = |kind: &str| {
+        serde_json::json!({"rules": [{"name": "points", "Run Once": false, "Is Active": true,
+            "conditions": [{"Type": "Player Killed A Object", "Player Name": PLAYER, "World Object Type": kind}],
+            "actions": [{"Type": "Add Victory Points for SinglePlayer", "Victory points to be added": 1}]}]})
+    };
+    let w = vec![unit("RLS Comet", PLAYER, Vec3::ZERO)];
+    for (kind, rock) in [("Asteroid", true), ("Ship", false)] {
+        let mut sc = Script::new(&data(kind), serde_json::Value::Null);
+        sc.step(&w, 0.1, false);
+        assert_eq!(sc.score, 0, "{kind}: nothing destroyed yet");
+        sc.kills.insert((PLAYER.into(), rock), 1);
+        sc.kills.insert((PLAYER.into(), !rock), 5); // the other kind does not count
+        for _ in 0..3 {
+            sc.step(&w, 0.1, false);
+        }
+        assert_eq!(sc.score, 1, "{kind}: one kill scores once");
+        *sc.kills.get_mut(&(PLAYER.into(), rock)).unwrap() += 1;
+        sc.step(&w, 0.1, false);
+        sc.step(&w, 0.1, false);
+        assert_eq!(sc.score, 2, "{kind}: the next kill scores again");
+    }
+}
+
+#[test]
+fn subtitle_colour_is_the_speech_events_own() {
+    let mut sc = Script::new(&serde_json::json!({"rules": []}), serde_json::json!({"speech": {"Hello": {"color": [0.5, 0.25, 1.0, 1.0]}, "Plain": {}}}));
+    assert_eq!(sc.speech_colour(), None, "nobody speaks");
+    sc.speaking = Some(("Hello".into(), 1.0));
+    assert_eq!(sc.speech_colour(), Some([0.5, 0.25, 1.0, 1.0]));
+    sc.speaking = Some(("Plain".into(), 1.0));
+    assert_eq!(sc.speech_colour(), None, "an event without a colour keeps the default gold");
 }
