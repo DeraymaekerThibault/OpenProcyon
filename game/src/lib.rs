@@ -178,6 +178,8 @@ pub fn run(view: fn(&mut App), setup_view: fn(&mut App)) {
         .insert_resource(Outcome::Playing)
         .init_resource::<scenario::EndMessage>()
         .init_resource::<scenario::EndLine>()
+        .init_resource::<scenario::MapLighting>()
+        .add_systems(Update, scenario::apply_lighting.run_if(resource_changed::<scenario::MapLighting>))
         .insert_resource(bindings::Bindings::load())
         .insert_resource({
             let c: Vec<f32> = arg("--cam").map(|v| v.split(',').filter_map(|x| x.parse().ok()).collect()).unwrap_or_default();

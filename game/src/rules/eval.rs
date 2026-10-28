@@ -248,7 +248,7 @@ pub struct Script {
     /// 'Set Current Objective Point On Ship': the objective marker follows this unit (`point_pos`).
     pub(super) point_on: Option<String>,
     pub point_pos: Option<Vec3>,
-    pub(super) kills: HashMap<String, u32>,
+    pub(super) kills: HashMap<(String, bool), u32>,
     pub hint: String,
     pub(super) warned: HashSet<String>,
     /// 'Set Radar Active State': radar contacts shown.
@@ -514,6 +514,11 @@ impl Script {
     /// Talking-head sprite of the line being spoken: the TWT speech event's FaceTexture (media `face`), if exported.
     pub(super) fn face(&self) -> Option<&str> {
         self.media["speech"][self.speaking.as_ref()?.0.as_str()]["face"].as_str()
+    }
+    /// Subtitle colour (RGBA) of the line being spoken: the TWT speech event's 'Text Color' (media `color`), if exported.
+    pub fn speech_colour(&self) -> Option<[f32; 4]> {
+        let c = self.media["speech"][self.speaking.as_ref()?.0.as_str()]["color"].as_array()?;
+        Some(std::array::from_fn(|i| c.get(i).and_then(|v| v.as_f64()).unwrap_or(1.0) as f32))
     }
     pub fn hostile(&self, a: &str, bb: &str) -> bool {
         a != bb && (self.hostile.contains(&(a.into(), bb.into())) || self.hostile.contains(&(bb.into(), a.into())))
@@ -879,7 +884,12 @@ impl Script {
                 }
                 hit || self.mortar_seen.contains(s(c, "Volume Name"))
             }
-            "Player Killed A Object" => s(c, "World Object Type") == "Asteroid" && self.kills.get(base(s(c, "Player Name"))).is_some_and(|n| *n > 0),
+            // One event per object destroyed by the player, by kind (rocks or ships); a repeating rule scores once per kill.
+            "Player Killed A Object" => {
+                let (player, kind) = (base(s(c, "Player Name")), s(c, "World Object Type"));
+                let n = self.kills.get(&(player.to_string(), kind == "Asteroid")).copied().unwrap_or(0);
+                self.event(format!("killed|{player}|{kind}"), n, 0.0)
+            }
             other => {
                 self.warn(&format!("condition '{other}'"));
                 false

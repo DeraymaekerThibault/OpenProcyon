@@ -13,7 +13,18 @@ use crate::sprites::{HudData, inset, sprite_of};
 const SPEECH_GOLD: Color = Color::srgb(1.0, 0.65, 0.1);
 
 pub fn plugin(app: &mut App) {
-    app.add_systems(Update, (build_mission, build_briefing).before(crate::briefing::update).run_if(in_state(crate::menu::Screen::Battle)).run_if(resource_exists::<Mission>));
+    app.add_systems(Update, (build_mission, build_briefing).before(crate::briefing::update).run_if(in_state(crate::menu::Screen::Battle)).run_if(resource_exists::<Mission>))
+        .add_systems(Update, speech_colour.run_if(in_state(crate::menu::Screen::Battle)).run_if(resource_exists::<Mission>));
+}
+
+/// Gameplay and cutscene subtitles take the speech event's own text colour (each speaker has one); gold when the event has none.
+fn speech_colour(mission: Res<Mission>, mut texts: Query<(&Ui, &mut TextColor)>) {
+    let colour = mission.script.speech_colour().map_or(SPEECH_GOLD, |[r, g, b, a]| Color::srgba(r, g, b, a));
+    for (ui, mut c) in &mut texts {
+        if matches!(ui, Ui::Speech | Ui::SpeechTop) && c.0 != colour {
+            c.0 = colour;
+        }
+    }
 }
 
 /// The top strip both the briefing and cutscene speech use.
