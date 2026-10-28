@@ -275,12 +275,14 @@ pub(super) fn fire(
             Some((AimTarget { entity, position, velocity: Vec3::ZERO }, side.0))
         })
         .collect();
+    let mut seen: Vec<Contact> = Vec::with_capacity(contacts.len()); // reused: refilled per shooter
     for (me, tf, ship, mut states, health, mission, primary, pilot, cloak, posts) in &mut shooters {
         if health.destroyed {
             continue;
         }
         let reload_cut = gunner_reload_cut(ship, posts, points.as_deref(), &lib);
-        let seen: Vec<Contact> = contacts.iter().map(|c| Contact { visible: c.visible && sensors.in_sight(me, c.entity, campaign.as_deref()), ..*c }).collect();
+        seen.clear();
+        seen.extend(contacts.iter().map(|c| Contact { visible: c.visible && sensors.in_sight(me, c.entity, campaign.as_deref()), ..*c }));
         let cloaked_now = cloak.as_ref().is_some_and(|c| c.level > 0.0);
         let class = &lib.classes[ship.class];
         // Player's command ship: only the clicked target (retail: direct-fire guns need an enemy click or panic fire). Its other
