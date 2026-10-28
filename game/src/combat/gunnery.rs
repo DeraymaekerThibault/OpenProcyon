@@ -176,16 +176,12 @@ pub(super) struct AimTarget {
 pub(super) fn panic_target(contacts: &[Contact], tf: &Transform, mount: &crate::data::Mount, gun: &crate::data::GunDef) -> Option<AimTarget> {
     let origin = tf.transform_point(mount.pos);
     let to_mount = (tf.rotation * mount.rot).inverse();
-    contacts
-        .iter()
-        .filter(|c| c.side != Side::Player && c.visible)
-        .filter(|c| {
-            let offset = c.aim_point - origin;
-            let local = to_mount * offset;
-            Vec2::new(offset.x, offset.z).length() <= gun.range[2] && (-local.x).atan2(-local.z).abs() <= mount.arc / 2.0
-        })
-        .min_by(|a, b| a.aim_point.distance(origin).total_cmp(&b.aim_point.distance(origin)))
-        .map(Contact::aim)
+    let in_arc = contacts.iter().filter(|c| c.side != Side::Player && c.visible).filter(|c| {
+        let offset = c.aim_point - origin;
+        let local = to_mount * offset;
+        Vec2::new(offset.x, offset.z).length() <= gun.range[2] && (-local.x).atan2(-local.z).abs() <= mount.arc / 2.0
+    });
+    crate::nearest(in_arc, origin, |c| c.aim_point).map(Contact::aim)
 }
 
 /// Aims every mount at the chosen target (base yaw, barrel pitch at the gun's rotation speeds) and fires aligned, loaded guns
@@ -302,11 +298,7 @@ pub(super) fn fire(
                 Side::Player => seen
                     .iter()
                     .find(|c| primary && Some(c.entity) == target.0 && c.side != Side::Player && c.visible)
-                    .or_else(|| {
-                        seen.iter()
-                            .filter(|c| !primary && c.side != Side::Player && c.visible)
-                            .min_by(|a, b| a.aim_point.distance(tf.translation).total_cmp(&b.aim_point.distance(tf.translation)))
-                    })
+                    .or_else(|| crate::nearest(seen.iter().filter(|c| !primary && c.side != Side::Player && c.visible), tf.translation, |c| c.aim_point))
                     .map(Contact::aim),
                 // Skirmish computer ships fire at their captain's target (ship::CaptainTargets): a ship, else a hostile base; without one, the player ship.
                 _ => match captains.as_deref().and_then(|c| c.of(me)) {
@@ -340,11 +332,12 @@ pub(super) fn fire(
                     velocity: Vec3::ZERO,
                 }),
                 // Point defence: the nearest hostile torpedo or mine within its maximum range (retail: PD guns never fire at ships).
-                _ if gun.point_defense => incoming
-                    .iter()
-                    .filter(|(threat, side)| *side != ship.side && threat.position.distance(tf.transform_point(mount.pos)) <= gun.range[2])
-                    .min_by(|a, b| a.0.position.distance(tf.translation).total_cmp(&b.0.position.distance(tf.translation)))
-                    .map(|(threat, _)| *threat),
+                _ if gun.point_defense => crate::nearest(
+                    incoming.iter().filter(|(threat, side)| *side != ship.side && threat.position.distance(tf.transform_point(mount.pos)) <= gun.range[2]),
+                    tf.translation,
+                    |(threat, _)| threat.position,
+                )
+                .map(|(threat, _)| *threat),
                 (false, _) if primary && target.2.panic => panic_target(&seen, tf, mount, gun).or(ship_target),
                 (false, _) => ship_target,
                 (true, Some((bank, point))) if bank == mount.bank => Some(AimTarget { entity: Entity::PLACEHOLDER, position: point, velocity: Vec3::ZERO }),

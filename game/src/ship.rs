@@ -238,7 +238,7 @@ pub fn ai(
         // Nothing in sight: a computer ship goes for the nearest living hostile base, however far (retail: a Procyon ship held the
         // Navy base ~2000 units away as its target from the first second). PROVISIONAL: nearest, and ships in sight come first.
         let base = if chosen.is_none() && s.side != Side::Player && explicit.is_none() {
-            bases.iter().filter(|b| b.2.0 != s.side && !b.3.destroyed).min_by(|a, b| a.1.translation.distance(tf.translation).total_cmp(&b.1.translation.distance(tf.translation)))
+            crate::nearest(bases.iter().filter(|b| b.2.0 != s.side && !b.3.destroyed), tf.translation, |b| b.1.translation)
         } else {
             None
         };

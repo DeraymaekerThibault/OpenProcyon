@@ -336,9 +336,20 @@ fn screenshot(mut commands: Commands, mut cfg: ResMut<Config>) {
     }
 }
 
+/// The item whose position is closest to `to`.
+pub fn nearest<T>(items: impl IntoIterator<Item = T>, to: Vec3, pos: impl Fn(&T) -> Vec3) -> Option<T> {
+    items.into_iter().min_by(|a, b| pos(a).distance_squared(to).total_cmp(&pos(b).distance_squared(to)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn nearest_picks_the_closest_position() {
+        let pts = [Vec3::new(5.0, 0.0, 0.0), Vec3::new(1.0, 1.0, 0.0), Vec3::new(-9.0, 0.0, 0.0)];
+        assert_eq!(nearest(pts, Vec3::ZERO, |p| *p), Some(pts[1]));
+        assert_eq!(nearest(Vec::<Vec3>::new(), Vec3::ZERO, |p| *p), None);
+    }
     #[test]
     fn content_next_to_the_executable_wins_over_the_checkout() {
         let dir = std::env::temp_dir().join(format!("procyon-content-test-{}", std::process::id()));

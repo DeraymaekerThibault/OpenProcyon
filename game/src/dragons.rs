@@ -163,9 +163,7 @@ fn think(
                 .filter(|s| !s.3.destroyed && s.4.is_none_or(|m| m.visible) && s.1.translation.distance(tf.translation) < sight * 1.5)
                 .map(|s| (s.0, s.1.translation, s.2, s.4, s.5))
         };
-        let nearest = |pred: &dyn Fn(Option<&MissionShip>, bool) -> bool| {
-            candidates().filter(|c| pred(c.3, c.4)).min_by(|a, b| a.1.distance(tf.translation).total_cmp(&b.1.distance(tf.translation)))
-        };
+        let nearest = |pred: &dyn Fn(Option<&MissionShip>, bool) -> bool| crate::nearest(candidates().filter(|c| pred(c.3, c.4)), tf.translation, |c| c.1);
         let ordered = nearest(&|m, primary| m.is_some_and(|m| d.attack.iter().any(|g| sc.answers(m.id, &m.owner, &m.name, primary, g))));
         let hostile = || nearest(&|m, _| m.is_some_and(|m| sc.hostile(&animal.owner, &m.owner)));
         let target = match (d.fleeing, d.stance) {

@@ -124,11 +124,7 @@ fn navigation(
         // Skirmish: the arrow points at the base the map's end rule says to destroy; with no such objective it is not shown.
         None => victory.as_deref().and_then(|v| {
             let ids = v.objective_bases();
-            bases
-                .iter()
-                .filter(|(_, b, h)| ids.contains(&b.id) && !h.destroyed)
-                .map(|(t, ..)| t.translation)
-                .min_by(|a, b| a.distance(primary_tf.translation).total_cmp(&b.distance(primary_tf.translation)))
+            crate::nearest(bases.iter().filter(|(_, b, h)| ids.contains(&b.id) && !h.destroyed).map(|(t, ..)| t.translation), primary_tf.translation, |p| *p)
         }),
     };
     for (indicator, mut transform, mut vis) in &mut indicators {

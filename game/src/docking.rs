@@ -690,10 +690,10 @@ fn ai_repair_dock(
             (Some(m), Some(sc), Some(o)) => !sc.hostile(&m.owner, o),
             _ => dship.is_none_or(|d| d.side == ship.side),
         };
-        let nearest = docks
+        let candidates = docks
             .iter()
-            .filter(|(d, _, dk, dship, dms, base)| *d != e && dk.enabled && dk.repairs && friendly(*dship, dms.map(|m| m.owner.as_str()).or(base.map(|b| b.owner.as_str()))))
-            .min_by(|a, b| a.1.translation.distance(tf.translation).total_cmp(&b.1.translation.distance(tf.translation)));
+            .filter(|(d, _, dk, dship, dms, base)| *d != e && dk.enabled && dk.repairs && friendly(*dship, dms.map(|m| m.owner.as_str()).or(base.map(|b| b.owner.as_str()))));
+        let nearest = crate::nearest(candidates, tf.translation, |d| d.1.translation);
         if let Some((dockee, ..)) = nearest {
             info!("docking: {e} needs repair, sails for {dockee}");
             msg.write(DockMsg::Dock { docker: Some(e), dockee });
