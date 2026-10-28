@@ -609,38 +609,7 @@ fn screen(
                 assigned.len(),
                 crate::boarding::counts(&class.name)[role]
             );
-            for id in assigned {
-                rows.push((format!("Return {} to reserve", name(id)), Action::Reserve(id.clone())));
-            }
-            let mut catalogue: Vec<_> = crew_data()
-                .as_object()
-                .into_iter()
-                .flatten()
-                .filter(|(id, d)| {
-                    (d["race"].as_str() == Some(&class.race) || points.outfit.hired.contains(id))
-                        && d["points"].is_u64()
-                        && (points.crew.is_empty() || points.crew.contains(id) || points.outfit.hired.contains(id))
-                })
-                .collect();
-            catalogue.sort_by(|a, b| name(a.0).cmp(name(b.0)));
-            for (id, d) in catalogue {
-                if assigned.contains(id) {
-                    continue;
-                }
-                let skill = ability(id, SKILLS[role]).unwrap_or(0.0) * 10.0;
-                if points.outfit.hired.contains(id) {
-                    let location = points.outfit.location(id).map_or_else(|| "reserve".to_string(), |(_, r)| format!("assigned: {}", ROLES[r]));
-                    rows.push((
-                        format!("Assign {} — {} {:.0}, combat {:.0} ({})", name(id), SKILLS[role], skill, ability(id, "combat").unwrap_or(0.0) * 10.0, location),
-                        Action::Assign(id.clone()),
-                    ));
-                } else {
-                    rows.push((
-                        format!("Recruit {} — {} VP, {} {:.0}, combat {:.0}", name(id), d["points"], SKILLS[role], skill, ability(id, "combat").unwrap_or(0.0) * 10.0),
-                        Action::Recruit(id.clone()),
-                    ));
-                }
-            }
+            rows = crew_rows(&points, class, role, assigned);
         }
         let (posts, bars) = posts_view(class, fit.map(|f| &f.crew));
         let banks = equipped_banks(&lib, class, fit.map(|f| &f.banks));
@@ -678,6 +647,45 @@ fn screen(
     if *model != next {
         *model = next;
     }
+}
+
+/// The campaign Crew rows of post `role`: send each `assigned` member back to the reserve, then assign hired crew or recruit new
+/// ones of the ship's race (from the campaign's roster when it has one), by name.
+fn crew_rows(points: &CampaignPoints, class: &crate::data::Class, role: usize, assigned: &[String]) -> Vec<(String, Action)> {
+    let mut rows = vec![];
+    for id in assigned {
+        rows.push((format!("Return {} to reserve", name(id)), Action::Reserve(id.clone())));
+    }
+    let mut catalogue: Vec<_> = crew_data()
+        .as_object()
+        .into_iter()
+        .flatten()
+        .filter(|(id, d)| {
+            (d["race"].as_str() == Some(&class.race) || points.outfit.hired.contains(id))
+                && d["points"].is_u64()
+                && (points.crew.is_empty() || points.crew.contains(id) || points.outfit.hired.contains(id))
+        })
+        .collect();
+    catalogue.sort_by(|a, b| name(a.0).cmp(name(b.0)));
+    for (id, d) in catalogue {
+        if assigned.contains(id) {
+            continue;
+        }
+        let skill = ability(id, SKILLS[role]).unwrap_or(0.0) * 10.0;
+        if points.outfit.hired.contains(id) {
+            let location = points.outfit.location(id).map_or_else(|| "reserve".to_string(), |(_, r)| format!("assigned: {}", ROLES[r]));
+            rows.push((
+                format!("Assign {} — {} {:.0}, combat {:.0} ({})", name(id), SKILLS[role], skill, ability(id, "combat").unwrap_or(0.0) * 10.0, location),
+                Action::Assign(id.clone()),
+            ));
+        } else {
+            rows.push((
+                format!("Recruit {} — {} VP, {} {:.0}, combat {:.0}", name(id), d["points"], SKILLS[role], skill, ability(id, "combat").unwrap_or(0.0) * 10.0),
+                Action::Recruit(id.clone()),
+            ));
+        }
+    }
+    rows
 }
 
 fn weapon_rows(lib: &Library, class: &crate::data::Class, bank: usize, equipped: &str, available: &[String], paid: bool) -> Vec<(String, Action)> {
@@ -1069,6 +1077,20 @@ fn apply_outfit(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn crew_rows_list_the_assigned_member_once_as_a_return() {
+        let lib = Library::load(crate::assets_dir());
+        let class = &lib.classes[lib.index("Ship_Navy_Torpedo")];
+        let roster = roster(&class.race, 0);
+        let (first, second) = (roster[0].clone(), roster[1].clone());
+        let mut points = CampaignPoints::default();
+        points.outfit.hired.push(second.clone());
+        let rows = crew_rows(&points, class, 1, std::slice::from_ref(&first));
+        assert_eq!(rows[0].1, Action::Reserve(first.clone()));
+        assert!(!rows[1..].iter().any(|(_, a)| matches!(a, Action::Assign(id) | Action::Recruit(id) if *id == first)));
+        assert!(rows.iter().any(|(_, a)| *a == Action::Assign(second.clone())), "a hired member is offered for assignment");
+        assert!(rows.iter().any(|(_, a)| matches!(a, Action::Recruit(_))), "the rest of the race's crew can be recruited");
+    }
     /// Retail Man-O-War saves (docs/re/crew.md): helmsman Navigation 9 -> navigator factor 1.5, engineers 9/9/8 -> 1.491667,
     /// empty posts -> 1.125 (relative to an uncrewed ship: / 1.125).
     #[test]
