@@ -440,8 +440,60 @@ fn cycle(value: usize, delta: i32, len: usize) -> usize {
 
 pub fn plugin(app: &mut App) {
     app.init_resource::<ScreenModel>()
+        .add_systems(Update, button_sounds.run_if(|m: Res<ScreenModel>| m.open))
         .add_systems(Update, (screen, skirmish_screen).chain().in_set(CrewSet).after(crate::menu::RunButtons).before(crate::input))
         .add_systems(FixedUpdate, (apply_outfit, apply_skirmish_weapons, apply_skirmish_crew).chain().in_set(crate::BattleSet::Commands));
+}
+
+/// The retail front-end sound for pointing at (`select == false`) or pressing a widget of these screens (names as `menu::button_sound`).
+pub fn button_sound(action: &Action, select: bool) -> &'static str {
+    let list = matches!(
+        action,
+        Action::SelectShip(_)
+            | Action::SelectPost(_)
+            | Action::PostFace(..)
+            | Action::PickCrew(_)
+            | Action::PickWeapon(_)
+            | Action::SortBy(_)
+            | Action::Assign(_)
+            | Action::Recruit(_)
+            | Action::Reserve(_)
+            | Action::Upgrade(_)
+    );
+    match (select, action) {
+        (false, _) => {
+            if list {
+                "FE_List_Rollover"
+            } else {
+                "FE_Button_Rollover"
+            }
+        }
+        (true, Action::Close) => "FE_Button_Forward_Select",
+        (true, Action::Assign(_) | Action::Recruit(_) | Action::Upgrade(_)) => "FE_Add",
+        (true, Action::Reserve(_) | Action::Drop) => "FE_Drop",
+        (true, _) if list => "FE_List_Select",
+        _ => "FE_Button_Select",
+    }
+}
+
+/// Rollover when the pointer first reaches a widget, the select sound when it is pressed (as `menu::button_sounds`).
+fn button_sounds(
+    q: Query<(Entity, &Interaction, &Action), Changed<Interaction>>,
+    mut pointed: Local<std::collections::HashSet<Entity>>,
+    mut sfx: MessageWriter<crate::audio::Sfx>,
+) {
+    for (e, i, action) in &q {
+        if *i == Interaction::None {
+            pointed.remove(&e);
+            continue;
+        }
+        if pointed.insert(e) {
+            sfx.write(crate::audio::Sfx::ui(button_sound(action, false)));
+        }
+        if *i == Interaction::Pressed {
+            sfx.write(crate::audio::Sfx::ui(button_sound(action, true)));
+        }
+    }
 }
 
 fn screen(
@@ -1101,6 +1153,22 @@ fn apply_outfit(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn widgets_play_rollover_once_and_select_on_press() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins).add_message::<crate::audio::Sfx>().add_systems(Update, button_sounds);
+        let tab = app.world_mut().spawn((Action::Tab, Interaction::None)).id();
+        let add = app.world_mut().spawn((Action::Assign("x".into()), Interaction::None)).id();
+        let mut heard = |e: Entity, i: Interaction| -> Vec<String> {
+            *app.world_mut().get_mut::<Interaction>(e).unwrap() = i;
+            app.update();
+            app.world_mut().resource_mut::<Messages<crate::audio::Sfx>>().drain().map(|s| s.name).collect()
+        };
+        assert_eq!(heard(tab, Interaction::Hovered), ["FE_Button_Rollover"]);
+        assert_eq!(heard(tab, Interaction::Pressed), ["FE_Button_Select"]);
+        assert!(heard(tab, Interaction::Hovered).is_empty(), "releasing the press is silent");
+        assert_eq!(heard(add, Interaction::Pressed), ["FE_List_Rollover", "FE_Add"]);
+    }
     #[test]
     #[ignore = "needs imported assets"]
     fn campaign_screen_without_surviving_ships_still_offers_continue() {
