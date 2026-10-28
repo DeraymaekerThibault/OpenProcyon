@@ -10,6 +10,7 @@ use crate::{Library, PlayerShip, Ship};
 pub fn plugin(app: &mut App) {
     app.add_systems(PostStartup, spawn_reticle.run_if(resource_exists::<HudData>))
         .add_systems(Update, navigation.after(crate::camera).before(crate::sky).run_if(in_state(crate::menu::Screen::Battle)).run_if(crate::menu::overlay_closed))
+        .add_systems(Update, end_line.run_if(in_state(crate::menu::Screen::Battle)).run_if(resource_exists::<Fonts>))
         .add_systems(
             Update,
             (place_ref_rects, scale_label_text, spawn_labels, place_labels)
@@ -19,6 +20,35 @@ pub fn plugin(app: &mut App) {
                 .run_if(resource_exists::<HudData>)
                 .run_if(resource_exists::<Fonts>),
         );
+}
+
+#[derive(Component)]
+struct EndLineText;
+
+/// The retail game-over line ("Game Lost!  Exiting...") in white, centred on the window while a decided skirmish winds down.
+/// PROVISIONAL: size (one reference-footage frame: about 16 px of 1080) and the exact vertical centre.
+fn end_line(
+    mut commands: Commands,
+    window: Single<&Window, With<bevy::window::PrimaryWindow>>,
+    fonts: Res<Fonts>,
+    line: Res<crate::scenario::EndLine>,
+    mut shown: Query<(Entity, &mut Text, &mut TextFont), With<EndLineText>>,
+) {
+    let size = 17.0 * window.height() / 1080.0;
+    let Some(id) = line.0.as_deref() else {
+        for (e, ..) in &shown {
+            commands.entity(e).despawn();
+        }
+        return;
+    };
+    if let Ok((_, _, mut f)) = shown.single_mut() {
+        f.font_size = FontSize::Px(size);
+    } else if let Some(font) = fonts.0.get("Immi14") {
+        // the string table is read once, when the line appears
+        let text = crate::menu::text_of(&crate::menu::strings(), id);
+        let node = Node { position_type: PositionType::Absolute, top: Val::Percent(49.0), left: Val::Px(0.0), width: Val::Percent(100.0), ..default() };
+        commands.spawn((crate::Scenario, EndLineText, font.text(&text, size / font.size, Color::WHITE), TextLayout::justify(Justify::Center), node, GlobalZIndex(170)));
+    }
 }
 
 /// A label child placed in reference pixels relative to its label root (scaled to the window by `place_ref_rects`).
