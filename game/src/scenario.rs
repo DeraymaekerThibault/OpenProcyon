@@ -259,6 +259,7 @@ fn spawn_map_objects(
     let mut bases = vec![];
     let docks = crate::docking::load_docks();
     let island_sounds = data::try_json(&crate::assets_dir().join("data/island_sounds.json")).unwrap_or_default();
+    let mesh_effects = data::try_json(&crate::assets_dir().join("data/mesh_effects.json")).unwrap_or_default();
     for o in map["objects"].as_array().into_iter().flatten() {
         let ty = o["type"].as_str().unwrap_or_default();
         let glb = format!("{}.glb", o["scene"].as_str().unwrap_or_default());
@@ -274,6 +275,13 @@ fn spawn_map_objects(
         if let Some(i) = island_sounds.get(ty) {
             commands.entity(e).insert(crate::audio::IslandLoop { sound: i["sound"].as_str().unwrap_or_default().into(), max: i["distance"].as_f64().unwrap_or(200.0) as f32 });
         }
+        for p in mesh_effects[o["scene"].as_str().unwrap_or_default()].as_array().into_iter().flatten() {
+            let name = |k: &str| p[k].as_str().unwrap_or_default();
+            if let Some(effect) = ambient_effect(name("kind"), name("name"), name("descriptor")) {
+                let local = Transform::from_translation(game_to_bevy(&p["pos"]));
+                fx::spawn(commands, fxl, effect, Some(e), local, tf * local, false);
+            }
+        }
         if ty.starts_with("Terrain_BlackHole") {
             // The funnel mesh is not drawn: the reference video shows only the effect's glow, beam and ribbons.
             commands.entity(e).insert(Visibility::Hidden);
@@ -288,6 +296,23 @@ fn spawn_map_objects(
         }
     }
     bases
+}
+
+/// The effect file of one ambient point of a mesh scene (`data/mesh_effects.json`). PROVISIONAL: matched by node name; the
+/// volcano fountain descriptors (Volcano_Effect1-4) and lighthouse_light2/3 name no file of their own and stay unplaced.
+fn ambient_effect(kind: &str, node: &str, descriptor: &str) -> Option<&'static str> {
+    if kind == "VolcanoSmoke" {
+        return Some("VolcanoSmoke");
+    }
+    match (descriptor, node) {
+        ("Volcano_sparks", _) => Some("volcanoSparks"),
+        ("lighthouse_light", _) => Some("Lighthouse"),
+        ("default", "Light_null") => Some("bouy"),
+        ("default", n) if n.starts_with("Fire") => Some("FireStack"),
+        ("default", "CraterSmoke") => Some("Crater_Smoke"),
+        ("default", n) if n.starts_with("Smoke") => Some("Island_Smoke"),
+        _ => None,
+    }
 }
 
 /// Skirmish on a retail map (assets/maps/<id>.json from World/*.twt): scenery, skybox and music from the map; our fleet at
@@ -763,6 +788,19 @@ pub fn game_rotation(r: &serde_json::Value) -> Quat {
     let game = Mat3::from_cols(Vec3::new(m(0), m(1), m(2)), Vec3::new(m(3), m(4), m(5)), Vec3::new(m(6), m(7), m(8)));
     let c = Mat3::from_cols(Vec3::X, Vec3::NEG_Z, Vec3::Y);
     Quat::from_mat3(&(c * game * c.transpose())).normalize()
+}
+
+#[cfg(test)]
+mod ambient_tests {
+    use super::ambient_effect as a;
+    #[test]
+    fn ambient_points_pick_their_effect_by_node() {
+        assert_eq!(a("PlayEffect", "FireStack2", "default"), Some("FireStack"));
+        assert_eq!(a("PlayEffect", "CraterSmoke", "default"), Some("Crater_Smoke"));
+        assert_eq!(a("PlayEffect", "SmokeNode4", "Volcano_sparks"), Some("volcanoSparks"));
+        assert_eq!(a("VolcanoSmoke", "SmokeNode4", "SmokeNode4"), Some("VolcanoSmoke"));
+        assert_eq!(a("PlayEffect", "Volcano_Effect1", "Volcano_Effect1"), None);
+    }
 }
 
 #[cfg(test)]
