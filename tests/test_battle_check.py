@@ -72,6 +72,14 @@ class Evaluate(unittest.TestCase):
             ["Ship_Pirate_Barque (side1) ground on scenery for 7.5 s"],
         )
 
+    def test_stutter_fails(self):
+        # Border Dispute before the lazy planner: a 0.5 s route plan every few seconds.
+        r = report()
+        r["frame_ms"] = {"p50": 16.0, "p99": 525.0, "worst": 535.0, "over_50": 29}
+        self.assertEqual(
+            evaluate(r, set()), ["stutter: 29 frames over 50 ms (worst 535 ms)"]
+        )
+
     def test_late_first_shot(self):
         self.assertEqual(
             evaluate(report(first=95.0), {"fight"}),

@@ -238,6 +238,19 @@ fn contact_point(a: &[Vec3], b: &[Vec3], normal: Vec3) -> Vec3 {
     let (bl, bh) = range(b, tangent);
     normal * ((an + bn) * 0.5) + tangent * ((al.max(bl) + ah.min(bh)) * 0.5)
 }
+/// Whether `body` overlaps `obstacle` (`static_contacts` without computing the pushes; stops at the first touching triangle).
+fn hits(body: &BoxBody, obstacle: &Obstacle) -> bool {
+    if !body.bounds.overlaps(obstacle.body.bounds) {
+        return false;
+    }
+    if obstacle.triangles.is_empty() {
+        return contact(&body.points, &obstacle.body.points).is_some();
+    }
+    obstacle.triangles.iter().filter(|t| body.bounds.overlaps(t.bounds)).any(|t| {
+        let p = slab(&t.points, body.bounds.min.y, body.bounds.max.y);
+        p.len() >= 2 && contact(&body.points, &p).is_some()
+    })
+}
 fn static_contacts(body: &BoxBody, obstacle: &Obstacle) -> Vec<Contact> {
     if !body.bounds.overlaps(obstacle.body.bounds) {
         return vec![];
@@ -267,7 +280,7 @@ pub fn scenery<'a>(obstacles: impl Iterator<Item = (&'a Obstacle, Option<&'a Vis
 /// Whether a ship box at `tf` overlaps any scenery, with the same test as sailing contact.
 pub fn touches(bounds: [Vec3; 2], tf: &Transform, scenery: &[&Obstacle]) -> bool {
     let body = box_body(bounds, tf);
-    scenery.iter().any(|o| !static_contacts(&body, o).is_empty())
+    scenery.iter().any(|o| hits(&body, o))
 }
 
 /// Number of leading path poses that stay clear of scenery; the course preview stops drawing at this index.
@@ -294,31 +307,35 @@ pub fn route_clear(bounds: [Vec3; 2], start: Vec3, goal: Vec3, scenery: &[&Obsta
             [(b.min.x - pad, b.min.z - pad), (b.min.x - pad, b.max.z + pad), (b.max.x + pad, b.min.z - pad), (b.max.x + pad, b.max.z + pad)].map(|(x, z)| Vec3::new(x, start.y, z)),
         );
     }
-    let mut cost = vec![f32::INFINITY; points.len()];
+    // Lazy A*: corners ordered by route length so far + straight distance to the goal; an edge is swept for scenery only when the
+    // search is about to take it (a handful of sweeps instead of one per corner pair: ~0.5 s per plan on Border Dispute before).
+    // Keys and lengths are kept as non-negative f32 bit patterns, which sort like the numbers.
+    let ahead = |i: usize| points[i].distance(goal);
+    let mut done = vec![false; points.len()];
     let mut previous = vec![0; points.len()];
-    let mut visited = vec![false; points.len()];
-    cost[0] = 0.0;
-    loop {
-        let next = (0..points.len()).filter(|i| !visited[*i] && cost[*i].is_finite()).min_by(|a, b| cost[*a].total_cmp(&cost[*b]))?;
-        if next == 1 {
+    let mut open = std::collections::BinaryHeap::from([(std::cmp::Reverse(ahead(0).to_bits()), 0, 0, 0_u32)]);
+    while let Some((_, i, from, length)) = open.pop() {
+        if done[i] || (i != 0 && !clear(points[from], points[i])) {
+            continue;
+        }
+        done[i] = true;
+        previous[i] = from;
+        if i == 1 {
             let mut route = vec![goal];
-            let mut i = previous[1];
-            while i != 0 {
-                route.push(points[i]);
-                i = previous[i];
+            let mut k = previous[1];
+            while k != 0 {
+                route.push(points[k]);
+                k = previous[k];
             }
             route.reverse();
             return Some(route);
         }
-        visited[next] = true;
-        for i in 1..points.len() {
-            let distance = cost[next] + points[next].distance(points[i]);
-            if !visited[i] && distance < cost[i] && clear(points[next], points[i]) {
-                cost[i] = distance;
-                previous[i] = next;
-            }
+        for j in (1..points.len()).filter(|j| !done[*j]) {
+            let length = f32::from_bits(length) + points[i].distance(points[j]);
+            open.push((std::cmp::Reverse((length + ahead(j)).to_bits()), j, i, length.to_bits()));
         }
     }
+    None
 }
 
 fn sweep_radius(bounds: [Vec3; 2]) -> f32 {
@@ -344,37 +361,48 @@ const REPLAN_SECS: f32 = 4.0;
 /// PROVISIONAL: the padded-corner planner, not the original's path planner (`steer_clear` still handles what it misses).
 /// ponytail: a plan costs ~25 ms on The Diablo Strait (17 islands, release build); cache a visibility graph per map if that hitches.
 #[derive(Default)]
-pub struct Detours(HashMap<Entity, (Vec3, f32)>);
+pub struct Detours(HashMap<Entity, Plan>);
+/// The last plan of one ship: where it was for, how old it is, and whether it found a route (a failed plan is kept too, so an
+/// unreachable goal is not planned again every tick).
+struct Plan {
+    dest: Vec3,
+    age: f32,
+    routed: bool,
+}
 impl Detours {
     /// Sets `ship`'s waypoints to a route to `dest` and returns true when scenery blocks the straight line and a route exists;
     /// otherwise drops any earlier detour and returns false, leaving the caller to steer.
     pub fn route(&mut self, e: Entity, ship: &mut crate::Ship, bounds: [Vec3; 2], pos: Vec3, dest: Vec3, scenery: &[&Obstacle], dt: f32) -> bool {
         let dest = dest.with_y(pos.y);
-        let planned = (!path_clear(bounds, pos, dest, scenery))
-            .then(|| match self.0.get_mut(&e) {
-                Some((at, age)) if at.distance(dest) < REPLAN_MOVE && *age < REPLAN_SECS && !ship.waypoints.is_empty() => {
-                    *age += dt;
-                    Some(None) // keep the route being sailed (its reached corners are already popped)
-                }
-                _ => route_clear(bounds, pos, dest, scenery).map(Some),
-            })
-            .flatten();
-        match planned {
-            Some(route) => {
-                if let Some(route) = route {
-                    ship.waypoints = route;
-                    self.0.insert(e, (dest, 0.0));
-                }
-                ship.goal = None;
-                true
+        if path_clear(bounds, pos, dest, scenery) {
+            if self.0.remove(&e).is_some_and(|p| p.routed) {
+                ship.waypoints.clear();
             }
-            None => {
-                if self.0.remove(&e).is_some() {
-                    ship.waypoints.clear();
-                }
-                false
-            }
+            return false;
         }
+        if let Some(p) = self.0.get_mut(&e)
+            && p.dest.distance(dest) < REPLAN_MOVE
+            && p.age < REPLAN_SECS
+            && (!p.routed || !ship.waypoints.is_empty())
+        {
+            p.age += dt; // keep sailing the route (its reached corners are already popped), or keep the failure
+            if p.routed {
+                ship.goal = None;
+            }
+            return p.routed;
+        }
+        let route = route_clear(bounds, pos, dest, scenery);
+        let routed = route.is_some();
+        match route {
+            Some(route) => {
+                ship.waypoints = route;
+                ship.goal = None;
+            }
+            None if self.0.get(&e).is_some_and(|p| p.routed) => ship.waypoints.clear(),
+            None => {}
+        }
+        self.0.insert(e, Plan { dest, age: 0.0, routed });
+        routed
     }
 }
 

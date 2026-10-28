@@ -16,6 +16,8 @@ pub struct Report {
     sides: BTreeMap<String, SideLine>,
     ships: HashMap<Entity, ShipLine>,
     closest: f32,
+    /// Real frame times (ms), for stutter: a few long frames hide in an average.
+    frames: Vec<f32>,
 }
 
 #[derive(Default)]
@@ -42,8 +44,33 @@ fn side_name(side: Side) -> String {
 
 pub fn plugin(app: &mut App) {
     let Some(limit) = std::env::var("PROCYON_REPORT").ok().and_then(|v| v.parse().ok()) else { return };
-    app.insert_resource(Report { limit, time: 0.0, sides: BTreeMap::new(), ships: HashMap::new(), closest: f32::INFINITY })
-        .add_systems(FixedUpdate, watch.in_set(crate::BattleSet::Outcome).run_if(in_state(crate::menu::Screen::Battle)));
+    app.insert_resource(Report { limit, time: 0.0, sides: BTreeMap::new(), ships: HashMap::new(), closest: f32::INFINITY, frames: vec![] })
+        .add_systems(FixedUpdate, watch.in_set(crate::BattleSet::Outcome).run_if(in_state(crate::menu::Screen::Battle)))
+        .add_systems(Update, frame_time.run_if(in_state(crate::menu::Screen::Battle)));
+}
+
+fn frame_time(time: Res<Time<Real>>, mut report: ResMut<Report>) {
+    report.frames.push(time.delta_secs() * 1000.0);
+}
+
+/// (median, 99th percentile, worst, frames over 50 ms) of the battle's frame times, after the first second (loading).
+fn frame_stats(frames: &[f32]) -> (f32, f32, f32, usize) {
+    let mut elapsed = 0.0;
+    let mut f: Vec<f32> = frames
+        .iter()
+        .copied()
+        .filter(|ms| {
+            elapsed += ms;
+            elapsed > 1000.0
+        })
+        .collect();
+    if f.is_empty() {
+        return (0.0, 0.0, 0.0, 0);
+    }
+    let over = f.iter().filter(|ms| **ms > 50.0).count();
+    f.sort_by(f32::total_cmp);
+    let at = |q: f32| f[((f.len() - 1) as f32 * q) as usize];
+    (at(0.5), at(0.99), f[f.len() - 1], over)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -107,8 +134,10 @@ fn watch(
     if report.time < report.limit && (sides_alive > 1 || report.time < 5.0) {
         return;
     }
+    let (p50, p99, worst, over) = frame_stats(&report.frames);
     let json = serde_json::json!({
         "time": report.time.round(),
+        "frame_ms": {"p50": p50.round(), "p99": p99.round(), "worst": worst.round(), "over_50": over},
         "closest": if report.closest.is_finite() { report.closest.round() } else { -1.0 },
         "sides": report.sides.iter().map(|(name, l)| (name.clone(), serde_json::json!({
             "ships": l.ships, "alive": l.alive, "bursts": l.bursts, "hits": l.hits, "first_burst": l.first_burst.map(f32::round),

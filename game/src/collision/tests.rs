@@ -107,6 +107,12 @@ fn a_captain_blocked_by_an_island_sails_a_detour_then_steers_again() {
     let left = ship.waypoints.clone();
     assert!(detours.route(e, &mut ship, bounds, start, foe + Vec3::X, &[&island], 0.03));
     assert_eq!(ship.waypoints, left);
+    // An unreachable goal (inside the island) is not planned again every tick: the failure is kept until the goal moves or ages.
+    let (other, mut ship2) = (Entity::from_raw_u32(2).unwrap(), crate::Ship { waypoints: vec![], ..ship.clone() });
+    assert!(!detours.route(other, &mut ship2, bounds, start, Vec3::ZERO, &[&island], 0.03));
+    assert!(!detours.0[&other].routed);
+    assert!(!detours.route(other, &mut ship2, bounds, start, Vec3::ZERO, &[&island], 0.03));
+    assert!((detours.0[&other].age - 0.03).abs() < 1e-6, "kept, not replanned");
     // Past the island the line is clear: the detour is dropped and the caller steers again.
     assert!(!detours.route(e, &mut ship, bounds, Vec3::new(0.0, 0.0, -40.0), foe, &[&island], 0.03));
     assert!(ship.waypoints.is_empty());

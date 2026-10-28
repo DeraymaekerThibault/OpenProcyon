@@ -24,6 +24,8 @@ FLEETS = ["--ship", "Ship_Navy_Cutter", "--allies", "Ship_Navy_Cutter",
           "--enemies", "Ship_Pirate_Barque,Ship_Pirate_Sloop"]  # fmt: skip
 # Seconds a ship may stay in contact with scenery without a break before it counts as grinding.
 GRIND = 3.0
+# Frames over 50 ms a battle may have (after the first second) before it counts as stuttering; healthy runs have 0-1.
+STUTTER = 10
 
 # name, map, game seconds, expectations. "fight": both sides fire and hit, the computer's first burst within 60 s.
 # "patrol": every computer ship sails at least 300 units (does not park). Every scenario also checks for panics and grinding.
@@ -58,6 +60,11 @@ def evaluate(report, expect):
         for s in report["ships"]:
             if s["side"] != "player" and s["sailed"] < 300:
                 fails.append(f"{s['class']} sailed only {s['sailed']:.0f} units")
+    frames = report.get("frame_ms", {})
+    if frames.get("over_50", 0) > STUTTER:
+        fails.append(
+            f"stutter: {frames['over_50']} frames over 50 ms (worst {frames['worst']:.0f} ms)"
+        )
     for s in report["ships"]:
         if s["worst_contact"] > GRIND:
             fails.append(
