@@ -17,7 +17,10 @@ import tempfile
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
-GAME = REPO / "game/target/release/openprocyon"
+GAME = (
+    Path(os.environ.get("CARGO_TARGET_DIR", REPO / "game/target"))
+    / "release/openprocyon"
+)
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
 REPORT = re.compile(r"battle report (\{.*\})")
 FLEETS = ["--ship", "Ship_Navy_Cutter", "--allies", "Ship_Navy_Cutter",
