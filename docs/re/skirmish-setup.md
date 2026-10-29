@@ -100,6 +100,12 @@ skill can read N/A). Dragging one onto a post spends its cost (a 9-point captain
 - Computers build their fleets with the same routine as Auto Assign (`auto_build`, armed hulls only, same victory limit, weapon swaps and named crew:
   speed, turning and sight follow the posts). Read out of 14 retail battle saves ([crew.md](crew.md#computer-fleets-carry-named-crew-the-missing-post-rule-14-retail-battle-saves-2026-10)): the crew
   and factors match; which hulls the original picks for a given budget is not separated (PROVISIONAL).
+- Computer weapons (36 ships in 14 retail battle saves, one entry per bank): the guns a computer swapped *in* were only Carronade Light/Medium/Heavy
+  (33), Gattling Light (13), Plasma Light/Medium/Heavy (10), Cannon Light/Medium (11) and one Star Mortar; never a harpoon, lancer, energy net,
+  gravity charge or fire launcher. Stock banks holding such guns were swapped away wherever the fleet could afford it (harpoons 15 of 15, light
+  lancers 4 of 4, energy nets 4 of 4, gravity charge 1 of 1) and kept where the budget was spent (a two-ship fleet kept its lancers). Banks of stock cannons,
+  carronades and Gattlings were swapped about half the time; two-deck banks, point-defence lancers, mines and torpedoes were never touched. The remake's
+  default list is exactly that set (`RETAIL_COMPUTER_GUNS`, overridable by `data/ai/weapons.json`); PROVISIONAL: a gun that never showed up may still be allowed.
 - Launch Game is greyed until a computer opponent is in and (open maps) a fleet is assembled; I'm Ready is always greyed in single player
   (measured: fresh lobby, lobby with a computer and no fleet, and with a fleet).
 - Every scrollbar (maps, ships, crew / weapons) shares one drag rule (`menu::scroll_drag`): press the track or thumb and drag. What a drag
