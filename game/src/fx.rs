@@ -394,6 +394,12 @@ impl FromWorld for FxLib {
                 Value::Array(a) => a.iter().map(|p| parse_prim(p, &mut tex_names)).collect(),
                 _ => vec![],
             };
+            let mut prims: Vec<Prim> = prims;
+            if SPRITE_SHELLS.contains(&n.as_str())
+                && let Some(sprite) = prims.first_mut()
+            {
+                sprite.start = 0;
+            }
             effects.insert(n, list.len());
             list.push(Effect { prims });
         }
@@ -415,6 +421,25 @@ fn load_textures(lib: Res<FxLib>, assets: Res<AssetServer>, mut tex: ResMut<FxTe
     tex.0 = lib.tex_names.iter().map(|n| assets.load(format!("fx/tex/{n}.png"))).collect();
 }
 
+/// Visual refinement, not retail: damage and debris smoke is emitted at 15% of its authored rate. Retail's additive smoke
+/// (one particle per tick per system, ten seconds each, several systems per section) saturates to a white blob on a damaged ship
+/// and is the main particle load in a long fight.
+const SMOKE_THINNING: f32 = 0.15;
+fn smoke_thinning(name: &str) -> f32 {
+    if name.starts_with("Damaged Section_") || name == "Falling_Debris" { SMOKE_THINNING } else { 1.0 }
+}
+
+/// Bullet effects whose first primitive is the flat "pseudo 3D" shell sprite: the shell is drawn as a 3D body instead
+/// (`combat::gunnery::launch_shell`), so the sprite emits nothing.
+const SPRITE_SHELLS: &[&str] = &[
+    "CannonBall_Light_Bullet_Particles",
+    "CannonBall_Med_Bullet_Particles",
+    "CannonBall_Heavy_Bullet_Particles",
+    "Lancer_LightBullet_Sprite",
+    "Lancer_MediumBullet_Sprite",
+    "Lancer_HeavyBullet_Sprite",
+];
+
 /// Starts effect `name` at world transform `world` (so the first frame is right), optionally as a child of `parent`
 /// (then `local` is relative to it). Unknown names are ignored. Returns the effect entity.
 pub fn spawn(commands: &mut Commands, lib: &FxLib, name: &str, parent: Option<Entity>, local: Transform, world: Transform, transient: bool) -> Option<Entity> {
@@ -426,7 +451,7 @@ pub fn spawn(commands: &mut Commands, lib: &FxLib, name: &str, parent: Option<En
         move_acc: 0.0,
         previous_world: world,
         prims: lib.list[eff].prims.iter().map(|_| PrimState { started: false, parts: vec![] }).collect(),
-        rate_scale: 1.0,
+        rate_scale: smoke_thinning(name),
         size_scale: 1.0,
         emitting: true,
         src_half: Vec3::ZERO,
@@ -1078,5 +1103,13 @@ mod tests {
         assert_eq!(detail_factor(0.1, 0.0), 1.0);
         assert!((detail_factor(0.1, 175.0) - 0.55).abs() < 1e-6);
         assert!((detail_factor(0.1, 1000.0) - 0.1).abs() < 1e-6);
+    }
+
+    #[test]
+    fn damage_and_debris_smoke_is_thinned_other_effects_are_not() {
+        assert_eq!(smoke_thinning("Damaged Section_Heavy"), SMOKE_THINNING);
+        assert_eq!(smoke_thinning("Falling_Debris"), SMOKE_THINNING);
+        assert_eq!(smoke_thinning("Explosion_Light"), 1.0);
+        assert_eq!(smoke_thinning("FireOnShip"), 1.0);
     }
 }

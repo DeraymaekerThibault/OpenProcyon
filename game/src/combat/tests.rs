@@ -190,7 +190,7 @@ fn hostile_island_towers_shoot_the_player_and_neutral_ones_do_not() {
         .init_resource::<FxLib>()
         .insert_resource(Library::load(assets_dir()))
         .insert_resource(Rng::new(7))
-        .insert_resource(Look { mesh: default(), shell: default(), enemy_shell: default() })
+        .insert_resource(Look { mesh: default(), shell: default(), enemy_shell: default(), bodies: default() })
         .init_resource::<crate::environment::Sensors>()
         .add_systems(PreUpdate, crate::environment::refresh_sensors)
         .add_systems(Update, base_fire);
@@ -296,7 +296,7 @@ fn skirmish_bases_shoot_ships_of_other_sides_only() {
         .init_resource::<FxLib>()
         .insert_resource(Library::load(assets_dir()))
         .insert_resource(Rng::new(7))
-        .insert_resource(Look { mesh: default(), shell: default(), enemy_shell: default() })
+        .insert_resource(Look { mesh: default(), shell: default(), enemy_shell: default(), bodies: default() })
         .init_resource::<crate::environment::Sensors>()
         .add_systems(PreUpdate, crate::environment::refresh_sensors)
         .add_systems(Update, base_fire);
@@ -350,7 +350,7 @@ fn a_volcano_lobs_one_aimed_shell_at_a_time() {
         .init_resource::<FxLib>()
         .insert_resource(Library::load(assets_dir()))
         .insert_resource(Rng::new(7))
-        .insert_resource(Look { mesh: default(), shell: default(), enemy_shell: default() })
+        .insert_resource(Look { mesh: default(), shell: default(), enemy_shell: default(), bodies: default() })
         .init_resource::<crate::environment::Sensors>()
         .add_systems(PreUpdate, crate::environment::refresh_sensors)
         .add_systems(Update, base_fire);
@@ -405,7 +405,7 @@ fn a_silent_island_never_fires() {
         .init_resource::<FxLib>()
         .insert_resource(Library::load(assets_dir()))
         .insert_resource(Rng::new(7))
-        .insert_resource(Look { mesh: default(), shell: default(), enemy_shell: default() })
+        .insert_resource(Look { mesh: default(), shell: default(), enemy_shell: default(), bodies: default() })
         .init_resource::<crate::environment::Sensors>()
         .add_systems(PreUpdate, crate::environment::refresh_sensors)
         .add_systems(Update, base_fire);
@@ -468,7 +468,7 @@ fn the_command_ship_holds_fire_until_an_enemy_is_clicked() {
         .init_resource::<FxLib>()
         .insert_resource(Library::load(assets_dir()))
         .insert_resource(Rng::new(7))
-        .insert_resource(Look { mesh: default(), shell: default(), enemy_shell: default() })
+        .insert_resource(Look { mesh: default(), shell: default(), enemy_shell: default(), bodies: default() })
         .insert_resource(Target::default())
         .init_resource::<crate::environment::Sensors>()
         .add_systems(PreUpdate, crate::environment::refresh_sensors)
@@ -530,7 +530,7 @@ fn a_skirmish_computer_ship_with_a_map_script_fires_at_its_captains_target() {
         .init_resource::<FxLib>()
         .insert_resource(Library::load(assets_dir()))
         .insert_resource(Rng::new(7))
-        .insert_resource(Look { mesh: default(), shell: default(), enemy_shell: default() })
+        .insert_resource(Look { mesh: default(), shell: default(), enemy_shell: default(), bodies: default() })
         .insert_resource(Target::default())
         .init_resource::<crate::ship::CaptainTargets>()
         .init_resource::<crate::environment::Sensors>()
@@ -591,7 +591,7 @@ fn the_command_ship_damages_a_clicked_hostile_skirmish_base() {
         .init_resource::<FxLib>()
         .insert_resource(Library::load(assets_dir()))
         .insert_resource(Rng::new(7))
-        .insert_resource(Look { mesh: default(), shell: default(), enemy_shell: default() })
+        .insert_resource(Look { mesh: default(), shell: default(), enemy_shell: default(), bodies: default() })
         .insert_resource(Target::default())
         .init_resource::<crate::environment::Sensors>()
         .add_systems(PreUpdate, crate::environment::refresh_sensors)
@@ -661,7 +661,7 @@ fn a_destroyed_base_part_blasts() {
         .init_resource::<FxLib>()
         .insert_resource(Library::load(assets_dir()))
         .insert_resource(Rng::new(7))
-        .insert_resource(Look { mesh: default(), shell: default(), enemy_shell: default() })
+        .insert_resource(Look { mesh: default(), shell: default(), enemy_shell: default(), bodies: default() })
         .insert_resource(Target::default())
         .init_resource::<crate::environment::Sensors>()
         .add_systems(PreUpdate, crate::environment::refresh_sensors)
@@ -1142,4 +1142,17 @@ fn shell_into_a_hull_damages_it_and_reports_the_hit() {
     assert_eq!(app.world().get::<Health>(farther).unwrap().sections.iter().sum::<f32>(), full, "the farther ship must not be hit");
     assert!(app.world().get_entity(id).is_err(), "the shell is spent");
     assert!(hit, "a Hit names the ship");
+}
+
+#[test]
+fn sprite_shells_and_3d_bodies_cover_the_same_bullets() {
+    // every bullet whose flat sprite is suppressed has a body, and every body's bullet name is distinct
+    let bodies: Vec<&str> = SHELL_BODIES.iter().map(|b| b.0).collect();
+    for b in ["Bullet_CannonBall_Light", "Bullet_CannonBall_Med", "Bullet_CannonBall_Heavy", "Bullet_Lancer_Light", "Bullet_Lancer_Med", "Bullet_Lancer_Heavy"] {
+        assert!(bodies.contains(&b), "{b} lost its sprite but has no body");
+    }
+    let mut sorted = bodies.clone();
+    sorted.sort_unstable();
+    sorted.dedup();
+    assert_eq!(sorted.len(), bodies.len());
 }

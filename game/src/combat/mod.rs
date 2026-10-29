@@ -102,7 +102,31 @@ struct Look {
     mesh: Handle<Mesh>,
     shell: Handle<StandardMaterial>,
     enemy_shell: Handle<StandardMaterial>,
+    /// 3D bodies of the shells retail draws as flat sprites, by bullet name (`SHELL_BODIES`).
+    bodies: std::collections::HashMap<&'static str, (Handle<Mesh>, Handle<StandardMaterial>)>,
 }
+
+/// How a shell is built in 3D: a ball of the given radius, or a bolt (capsule along the flight line) of radius and length.
+enum Body {
+    Ball(f32),
+    Bolt(f32, f32),
+}
+
+/// Visual refinement, not retail: retail draws cannonballs, plasma and lancer shots as flat "pseudo 3D" sprites, which read as
+/// 2D cut-outs from the tilted camera. Sizes follow the sprites (0.25 / 0.5 / 1.0 cannonballs, 0.5 / 0.75 plasma, 0.3 lancer);
+/// colours: iron, the plasma trail's own orange-yellow, the lancer sprite's blue. PROVISIONAL: sizes and look.
+/// (bullet, body, base colour, emissive colour)
+const SHELL_BODIES: &[(&str, Body, [f32; 3], [f32; 3])] = &[
+    ("Bullet_CannonBall_Light", Body::Ball(0.2), [0.14, 0.14, 0.15], [0.0, 0.0, 0.0]),
+    ("Bullet_CannonBall_Med", Body::Ball(0.3), [0.14, 0.14, 0.15], [0.0, 0.0, 0.0]),
+    ("Bullet_CannonBall_Heavy", Body::Ball(0.5), [0.14, 0.14, 0.15], [0.0, 0.0, 0.0]),
+    ("Bullet_Plasma_Light", Body::Ball(0.3), [1.0, 0.7, 0.1], [4.0, 2.6, 0.2]),
+    ("Bullet_Plasma_Med", Body::Ball(0.45), [1.0, 0.7, 0.1], [4.0, 2.6, 0.2]),
+    ("Bullet_Plasma_Heavy", Body::Ball(0.6), [1.0, 0.7, 0.1], [4.0, 2.6, 0.2]),
+    ("Bullet_Lancer_Light", Body::Bolt(0.08, 1.2), [0.5, 0.7, 1.0], [2.0, 3.0, 6.0]),
+    ("Bullet_Lancer_Med", Body::Bolt(0.12, 1.8), [0.5, 0.7, 1.0], [2.0, 3.0, 6.0]),
+    ("Bullet_Lancer_Heavy", Body::Bolt(0.18, 2.6), [0.5, 0.7, 1.0], [2.0, 3.0, 6.0]),
+];
 
 impl Rng {
     #[cfg(test)]
@@ -216,10 +240,30 @@ pub struct GroundFire {
 
 fn setup(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut mats: ResMut<Assets<StandardMaterial>>) {
     let lit = |c: Color, mats: &mut Assets<StandardMaterial>| mats.add(StandardMaterial { base_color: c, unlit: true, ..default() });
+    let bodies = SHELL_BODIES
+        .iter()
+        .map(|(bullet, body, base, glow)| {
+            let mesh = match body {
+                Body::Ball(r) => meshes.add(Sphere::new(*r)),
+                // the capsule's axis is Y; the shell looks along -Z, so the body is laid down by `launch_shell`
+                Body::Bolt(r, len) => meshes.add(Capsule3d::new(*r, *len)),
+            };
+            let iron = glow[0] == 0.0;
+            let mat = mats.add(StandardMaterial {
+                base_color: Color::srgb(base[0], base[1], base[2]),
+                emissive: LinearRgba::rgb(glow[0], glow[1], glow[2]),
+                metallic: if iron { 0.8 } else { 0.0 },
+                perceptual_roughness: if iron { 0.45 } else { 0.6 },
+                ..default()
+            });
+            (*bullet, (mesh, mat))
+        })
+        .collect();
     commands.insert_resource(Look {
         mesh: meshes.add(Sphere::new(0.35)),
         shell: lit(Color::srgb(1.0, 0.8, 0.3), &mut mats),
         enemy_shell: lit(Color::srgb(1.0, 0.25, 0.25), &mut mats),
+        bodies,
     });
 }
 

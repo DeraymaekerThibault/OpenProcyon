@@ -232,6 +232,15 @@ place, keeps the ship's velocity at the moment it broke, sinks at 1.5 units/s, t
 horizontal axis through its pivot, and is removed after 10 s (all PROVISIONAL: no retail numbers). The exporter writes the meshes
 to `models/debris/` and `sections[].debris` = {model, pivot}.
 
+### Visual refinements that depart from retail (2026-10, requested by the owner)
+- **Damage and debris smoke is thinned** to 15% of the authored rate (`fx::SMOKE_THINNING`, effects `Damaged Section_*` and `Falling_Debris`). Retail's additive
+  smoke emits one particle per tick per system, each living ten seconds, several systems per section; here that saturates to a white blob on a damaged ship and
+  is the main particle load in a long fight.
+- **A debris piece's smoke trail stops after 3 s** (`DEBRIS_SMOKE_TIME`); smoke already out fades on its own.
+- **Cannonballs, plasma and lancer shots have 3D bodies** (`combat::SHELL_BODIES`): retail draws them as flat "pseudo 3D" sprites (a side and a front texture),
+  which read as cut-outs from the tilted camera. Their sprite emits nothing now (`fx::SPRITE_SHELLS`); the plasma trail, smoke and muzzle effects are unchanged.
+  Sizes follow the sprites; PROVISIONAL look (iron balls, an orange-yellow glowing plasma ball, a blue capsule bolt).
+
 ## Fire (ignite, update, fire-fighting)
 - Ignite on a hit: if the bullet's Chance of Fire for the section material is > 0 and a uniform roll is <= it (and an
   extra check passes, unknown), a fire starts on the section with the bullet's Initial Fire Strength.

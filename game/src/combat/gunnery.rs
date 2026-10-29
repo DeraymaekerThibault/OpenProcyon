@@ -513,6 +513,11 @@ pub(super) fn launch_shell(
     if let Some((name, vol, max)) = &b.travel_snd {
         commands.entity(shell).insert(crate::audio::Travel { name: name.clone(), vol: *vol, max: *max });
     }
+    if let Some((mesh, mat)) = look.bodies.get(g.bullet.as_str()) {
+        let bolt = SHELL_BODIES.iter().any(|(n, body, ..)| *n == g.bullet && matches!(body, Body::Bolt(..)));
+        let lay = if bolt { Quat::from_rotation_x(std::f32::consts::FRAC_PI_2) } else { Quat::IDENTITY };
+        commands.entity(shell).with_child((Mesh3d(mesh.clone()), MeshMaterial3d(mat.clone()), Transform::from_rotation(lay)));
+    }
     if let Some(glb) = &b.glb {
         commands.entity(shell).insert(crate::data::scene(assets, glb));
     } else if b.bullet_fx.is_none() {
