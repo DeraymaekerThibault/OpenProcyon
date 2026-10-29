@@ -74,6 +74,13 @@ pub struct Debris {
 pub const DEBRIS_FALL: f32 = 1.5;
 pub const DEBRIS_SPIN: f32 = 0.5;
 pub const DEBRIS_LIFE: f32 = 10.0;
+/// A piece's smoke trail stops after this long (the smoke already out fades on its own), so a tumbling piece does not smoulder
+/// for its whole fall. Visual refinement, not retail.
+pub const DEBRIS_SMOKE_TIME: f32 = 3.0;
+
+/// The smoke trail effect of a debris piece.
+#[derive(Component)]
+pub struct DebrisSmoke(Entity);
 
 /// Spawns section `sec`'s debris piece off a ship at `tf` moving at `ship_vel`; `roll` gives 0..1 numbers for the tumble.
 pub fn spawn_debris(commands: &mut Commands, assets: &AssetServer, fxl: &FxLib, sec: &Section, tf: &Transform, ship_vel: Vec3, mut roll: impl FnMut() -> f32) {
@@ -84,16 +91,26 @@ pub fn spawn_debris(commands: &mut Commands, assets: &AssetServer, fxl: &FxLib, 
         .spawn((Debris { vel: ship_vel, axis, spin: DEBRIS_SPIN * (0.5 + roll()), age: 0.0 }, Transient, at, Visibility::default()))
         .with_child((crate::data::scene(assets, model), Transform::from_translation(-*pivot)))
         .id();
-    if let Some(name) = &sec.debris_fx {
-        fx::spawn(commands, fxl, name, Some(e), Transform::IDENTITY, at, false);
+    if let Some(name) = &sec.debris_fx
+        && let Some(smoke) = fx::spawn(commands, fxl, name, Some(e), Transform::IDENTITY, at, false)
+    {
+        commands.entity(e).insert(DebrisSmoke(smoke));
     }
 }
 
 /// Debris pieces drift on with their ship's velocity, sink and tumble, then go.
-pub fn debris(mut commands: Commands, time: Res<Time>, mut q: Query<(Entity, &mut Transform, &mut Debris)>) {
+pub fn debris(mut commands: Commands, time: Res<Time>, mut q: Query<(Entity, &mut Transform, &mut Debris, Option<&DebrisSmoke>)>, mut smokes: Query<&mut fx::Fx>) {
     let dt = time.delta_secs().min(0.1);
-    for (e, mut tf, mut d) in &mut q {
+    for (e, mut tf, mut d, smoke) in &mut q {
         d.age += dt;
+        if d.age > DEBRIS_SMOKE_TIME
+            && let Some(DebrisSmoke(s)) = smoke
+        {
+            if let Ok(mut fx) = smokes.get_mut(*s) {
+                fx.emitting = false;
+            }
+            commands.entity(e).remove::<DebrisSmoke>();
+        }
         if d.age > DEBRIS_LIFE {
             commands.entity(e).despawn();
             continue;

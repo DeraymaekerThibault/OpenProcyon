@@ -152,6 +152,8 @@ struct Prim {
     ang_len: Curve,
     ang_len_err: Curve,
     tex: Option<usize>,
+    /// Pseudo-billboards carry a second, "front" texture: seen along its axis the streak turns into this round glow.
+    tex2: Option<usize>,
     blend: Blend,
     size: Curve,
     rgb: [Curve; 3],
@@ -272,13 +274,15 @@ fn parse_prim(p: &Value, tex_names: &mut Vec<String>) -> Prim {
         }
     }
     let cp = &merged;
-    let tex = get(cp, &["SimpleTextureChunk", "TextureName"]).and_then(|t| t.as_str()).map(|t| {
+    let mut texture = |t: &str| {
         let n = std::path::Path::new(t).file_stem().unwrap().to_string_lossy().to_lowercase();
         tex_names.iter().position(|x| *x == n).unwrap_or_else(|| {
             tex_names.push(n);
             tex_names.len() - 1
         })
-    });
+    };
+    let tex = get(cp, &["SimpleTextureChunk", "TextureName"]).and_then(|t| t.as_str()).map(&mut texture);
+    let tex2 = cp.get("SimpleTextureChunk").and_then(|c| c.as_array()).and_then(|a| a.get(1)).and_then(|c| c["TextureName"].as_str()).map(&mut texture);
     let src = get(cp, &["BlendChunk", "BlendSource"]).and_then(|v| v.as_str()).unwrap_or("SRCALPHA");
     let dst = get(cp, &["BlendChunk", "BlendDestination"]).and_then(|v| v.as_str()).unwrap_or("INVSRCALPHA");
     let blend = if dst == "ONE" {
@@ -334,6 +338,7 @@ fn parse_prim(p: &Value, tex_names: &mut Vec<String>) -> Prim {
     });
     Prim {
         mesh,
+        tex2,
         duration: num("Duration"),
         delay: num("StartDelay"),
         ever: flag("Everlasting"),
@@ -415,6 +420,14 @@ fn load_textures(lib: Res<FxLib>, assets: Res<AssetServer>, mut tex: ResMut<FxTe
     tex.0 = lib.tex_names.iter().map(|n| assets.load(format!("fx/tex/{n}.png"))).collect();
 }
 
+/// Visual refinement, not retail: damage and debris smoke is emitted at 15% of its authored rate. Retail's additive smoke
+/// (one particle per tick per system, ten seconds each, several systems per section) saturates to a white blob on a damaged ship
+/// and is the main particle load in a long fight.
+const SMOKE_THINNING: f32 = 0.15;
+fn smoke_thinning(name: &str) -> f32 {
+    if name.starts_with("Damaged Section_") || name == "Falling_Debris" { SMOKE_THINNING } else { 1.0 }
+}
+
 /// Starts effect `name` at world transform `world` (so the first frame is right), optionally as a child of `parent`
 /// (then `local` is relative to it). Unknown names are ignored. Returns the effect entity.
 pub fn spawn(commands: &mut Commands, lib: &FxLib, name: &str, parent: Option<Entity>, local: Transform, world: Transform, transient: bool) -> Option<Entity> {
@@ -426,7 +439,7 @@ pub fn spawn(commands: &mut Commands, lib: &FxLib, name: &str, parent: Option<En
         move_acc: 0.0,
         previous_world: world,
         prims: lib.list[eff].prims.iter().map(|_| PrimState { started: false, parts: vec![] }).collect(),
-        rate_scale: 1.0,
+        rate_scale: smoke_thinning(name),
         size_scale: 1.0,
         emitting: true,
         src_half: Vec3::ZERO,
@@ -580,6 +593,11 @@ fn particle_sample(p: &P, remainder: f32) -> (Vec3, f32) {
     (p.pos + p.vel * remainder, p.age + remainder)
 }
 
+/// Share of the front texture in a pseudo-billboard seen along `view`: 0 side-on, 1 looking down its axis.
+fn front_weight(view: Vec3, axis: Vec3) -> f32 {
+    view.dot(axis).powi(2)
+}
+
 fn streak_axes(direction: Vec3, right: Vec3, up: Vec3, view: Vec3) -> (Vec3, Vec3) {
     let Some(axis) = direction.try_normalize() else { return (right, up) };
     // Keep length along the world-space axis: flattening it into the camera plane lifts horizontal flames.
@@ -724,6 +742,23 @@ fn render_fx(
                     None => (-0.5, 0.5, 0.5, -0.5),
                 };
                 let (ax, ay) = particle_axes(prim, gt, vel, [right, up, view]);
+                // Pseudo-billboard with a front texture: the side streak fades into the round front glow as the view turns
+                // along its axis. PROVISIONAL: the blend is cos^2 of the angle between view and axis (retail's is unknown).
+                let streak = prim.tex2.is_some() && (prim.along_velocity || prim.pseudo_dir.is_some());
+                let front = if streak { front_weight(view, ay) } else { 0.0 };
+                if let (true, Some(t2)) = (streak, prim.tex2) {
+                    let fcol = [col[0] * front, col[1] * front, col[2] * front, col[3]];
+                    let half = 0.5 * (x1 - x0).abs() * size;
+                    let b = bufs.entry((t2, prim.blend)).or_default();
+                    let i = b.pos.len() as u32;
+                    for (cx, cy, u, v) in [(-half, half, 0.0, 0.0), (half, half, 1.0, 0.0), (half, -half, 1.0, 1.0), (-half, -half, 0.0, 1.0)] {
+                        b.pos.push((pos + right * cx + up * cy).to_array());
+                        b.uv.push([u, v]);
+                        b.col.push(fcol);
+                    }
+                    b.idx.extend([i, i + 1, i + 2, i, i + 2, i + 3]);
+                }
+                let col = if streak { [col[0] * (1.0 - front), col[1] * (1.0 - front), col[2] * (1.0 - front), col[3]] } else { col };
                 let b = bufs.entry((ti, prim.blend)).or_default();
                 let i = b.pos.len() as u32;
                 for (cx, cy, u, v) in [(x0, y0, 0.0, 0.0), (x1, y0, 1.0, 0.0), (x1, y1, 1.0, 1.0), (x0, y1, 0.0, 1.0)] {
@@ -1070,7 +1105,8 @@ mod tests {
                 counts.push(total);
             }
         }
-        assert!(counts[0] > 0 && counts[1] <= counts[0] * 11 / 10, "particle counts at 30/60 seconds: {counts:?}");
+        // 20%: thinned smoke spawns by chance (a fractional rate per tick), so the two counts differ by a few percent either way
+        assert!(counts[0] > 0 && counts[1] <= counts[0] * 6 / 5, "particle counts at 30/60 seconds: {counts:?}");
     }
 
     #[test]
@@ -1078,5 +1114,29 @@ mod tests {
         assert_eq!(detail_factor(0.1, 0.0), 1.0);
         assert!((detail_factor(0.1, 175.0) - 0.55).abs() < 1e-6);
         assert!((detail_factor(0.1, 1000.0) - 0.1).abs() < 1e-6);
+    }
+
+    #[test]
+    fn damage_and_debris_smoke_is_thinned_other_effects_are_not() {
+        assert_eq!(smoke_thinning("Damaged Section_Heavy"), SMOKE_THINNING);
+        assert_eq!(smoke_thinning("Falling_Debris"), SMOKE_THINNING);
+        assert_eq!(smoke_thinning("Explosion_Light"), 1.0);
+        assert_eq!(smoke_thinning("FireOnShip"), 1.0);
+    }
+
+    #[test]
+    fn pseudo_billboards_turn_from_streak_to_front_glow() {
+        assert!(front_weight(Vec3::NEG_Z, Vec3::X).abs() < 1e-6, "side-on: all streak");
+        assert!((front_weight(Vec3::NEG_Z, Vec3::Z) - 1.0).abs() < 1e-6, "end-on: all front glow");
+        assert!((front_weight(Vec3::NEG_Z, Vec3::new(0.0, 1.0, 1.0).normalize()) - 0.5).abs() < 1e-5);
+    }
+
+    #[test]
+    #[ignore = "needs imported assets"]
+    fn shell_sprites_carry_their_front_texture() {
+        let doc: Value = serde_json::from_slice(&std::fs::read(assets_dir().join("fx/CannonBall_Med_Bullet_Particles.json")).unwrap()).unwrap();
+        let mut names = vec![];
+        let prim = parse_prim(&doc["Primitive"][0], &mut names);
+        assert_eq!((names[prim.tex.unwrap()].as_str(), names[prim.tex2.unwrap()].as_str()), ("cannonballpseudo00", "cannonballfrontpseudo00"));
     }
 }

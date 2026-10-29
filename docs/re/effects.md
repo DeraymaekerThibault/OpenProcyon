@@ -162,7 +162,7 @@ with `k = Const + WithDist/d + WithDistSquared/d^2`, `d = |target - pos|`. The c
 Gravity: `vel += g * dt * 0.033`. Friction: scales velocity by a factor, zero once speed falls below a threshold.
 
 ## Pseudo-billboard
-Flag clear: a fixed axis from three curves (default (0,1,0) if all zero). Flag set: the axis is the particle's velocity
+Two `SimpleTexture` entries: side and front (see "Visual refinements" below for how they are blended). Flag clear: a fixed axis from three curves (default (0,1,0) if all zero). Flag set: the axis is the particle's velocity
 direction (`vel / 0.033`), (0,1,0) if the velocity is zero.
 
 ## Still open
@@ -231,6 +231,18 @@ torn-off Cutter mast still drifting and turning 6+ s later. Remake (`combat::dam
 place, keeps the ship's velocity at the moment it broke, sinks at 1.5 units/s, tumbles at 0.25-0.75 rad/s about a random
 horizontal axis through its pivot, and is removed after 10 s (all PROVISIONAL: no retail numbers). The exporter writes the meshes
 to `models/debris/` and `sections[].debris` = {model, pivot}.
+
+### Visual refinements that depart from retail (2026-10, requested by the owner)
+- **Damage and debris smoke is thinned** to 15% of the authored rate (`fx::SMOKE_THINNING`, effects `Damaged Section_*` and `Falling_Debris`). Retail's additive
+  smoke emits one particle per tick per system, each living ten seconds, several systems per section; here that saturates to a white blob on a damaged ship and
+  is the main particle load in a long fight.
+- **A debris piece's smoke trail stops after 3 s** (`DEBRIS_SMOKE_TIME`); smoke already out fades on its own.
+- **Shell sprites use both of their textures.** A pseudo-billboard effect lists a side texture and a front texture (cannonballs, lancer shots, the Gattling
+  tracer, meteors). Retail shows the side streak when seen from the side and a round glow when seen along the shell's flight line, which is what gives
+  its shells a 3D feel; we drew only the side texture. The streak and the camera-facing front quad are now drawn together, weighted by cos^2 of the angle between
+  the view and the axis (PROVISIONAL blend). A cannonball is a glowing fireball with a flame tail, not an iron ball.
+  To look at every shell type at once: `tools/shot.sh local/x.png --script shells --shot-frame 45 --dist 80 --pitch 89` (also `--yaw`; the log lists the order,
+  two rows of up to twelve, left to right).
 
 ## Fire (ignite, update, fire-fighting)
 - Ignite on a hit: if the bullet's Chance of Fire for the section material is > 0 and a uniform roll is <= it (and an
