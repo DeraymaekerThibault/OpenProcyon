@@ -176,7 +176,7 @@ Headless retail skirmishes, one computer ship against our idle or fleeing Navy C
   the Navy base (Base_Grant, ~2000 units away, far beyond its 562.5 scan range) from the first second of the battle and still
   60 s later. So with a hostile base on the map the computer goes for the base (which sits near our start) instead of
   exploring; on maps without bases it explores. Whether that is "nearest hostile base regardless of range" or a map/player
-  setting is not checked (one map). The skirmish map's bases belong to non-playable players named "navybase" / "procbase";
+  setting: checked on the other retail runs (2026-10): Diablo Strait and Zemyatin have no bases and the computer ships explored quadrant centres (Carrack to (812, 812), Assault Cutter between the upper centres), while on Red Rover (bases at both ends) a pirate Carrack started at the far end, ran straight south past our idle Man-O-War and on toward the Navy base (it was already ~200 units off its straight line at 62 s, likely island/ship avoidance). So the rule reads "base on the map: go for it, else explore" on all four maps seen; which base it picks with several hostile ones is not separated (every run had one hostile base). The skirmish map's bases belong to non-playable players named "navybase" / "procbase";
   the Navy base fired on the Procyon ship (r5) and not on our idle Cutter. Remake: a skirmish base fights for the side whose fleet
   type is its own, fires on ships of other sides and is a target for them; a computer ship with nothing in sight heads for the
   nearest living hostile base, however far, and only then explores (PROVISIONAL: nearest base, ships in sight first;
