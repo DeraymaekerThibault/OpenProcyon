@@ -542,6 +542,8 @@ pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Libra
         if let Some(script) = data::try_json(&crate::assets_dir().join(format!("maps/{map_id}/script.json"))) {
             crate::environment::spawn(commands, assets, &script, true);
         }
+        // The map script's Setup Island 'Combat Strength' is what boarders must wear down (retail: it seeds the base's strength).
+        let strengths = data::try_json(&crate::assets_dir().join(format!("maps/{map_id}/script.json"))).map(|s| setup_strengths(&s)).unwrap_or_default();
         // Bases fight for the side whose fleet type is theirs; a base no fleet claims stays neutral (and silent). Armed islands (the
         // volcanoes) belong to nobody: they fire on every ship and cannot be boarded.
         for (e, o) in &bases {
@@ -568,7 +570,11 @@ pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Libra
                 states,
             ));
             if !island {
-                commands.entity(*e).insert(boarding::Boardable::base(&lib.classes[class].name, SKIRMISH_BASE_STRENGTH, true));
+                commands.entity(*e).insert(boarding::Boardable::base(
+                    &lib.classes[class].name,
+                    strengths.get(&id).copied().filter(|s| *s > 0).unwrap_or(SKIRMISH_BASE_STRENGTH),
+                    true,
+                ));
             }
         }
     } else {
@@ -703,10 +709,16 @@ pub fn restart(
     spawn_scenario(&mut commands, &assets, &lib, &fxl, &shapes, &asteroids, &cfg);
 }
 
+/// Setup Island 'Combat Strength' by world-object id, from a map script.
+fn setup_strengths(script: &serde_json::Value) -> std::collections::HashMap<i64, i32> {
+    let actions = script["rules"].as_array().into_iter().flatten().flat_map(|r| r["actions"].as_array().into_iter().flatten());
+    actions.filter(|a| a["Type"] == "*State Init* Setup Island").filter_map(|a| Some((a["World Object ID"].as_i64()?, a["Combat Strength"].as_i64()? as i32))).collect()
+}
+
 /// The side of an armed island: no ship belongs to it, so it fires on all of them.
 const HOSTILE_TO_ALL: Side = Side(u8::MAX);
 
-/// Boarding strength of a skirmish base (the retail value is not measured; campaign islands use 50-100). PROVISIONAL.
+/// Boarding strength of a skirmish base whose map script gives none (the retail strengths are the script's 'Combat Strength'). PROVISIONAL.
 const SKIRMISH_BASE_STRENGTH: i32 = 50;
 
 /// The battlefield's game-over line. The map rule's own message, else the default. PROVISIONAL: only "Game Lost" is measured (the human's
@@ -984,5 +996,15 @@ mod lighting_tests {
         assert_eq!(l.ambient, Color::srgb(0.4, 0.45, 0.8));
         assert!(lighting_of(&serde_json::json!({"sky": "x"})).is_none(), "older imports keep the default light");
         assert!(lighting_of(&serde_json::json!({"lighting": {"roof_direction": [0, 0, 0], "floor": [1, 1, 1], "roof": [1, 1, 1]}})).is_none(), "a zero direction is no light");
+    }
+
+    #[test]
+    fn setup_island_strengths_come_from_the_script() {
+        let script = serde_json::json!({"rules": [{"actions": [
+            {"Type": "*State Init* Setup Island", "World Object ID": 1, "Combat Strength": 60},
+            {"Type": "*State Init* Setup Island", "World Object ID": 133, "Combat Strength": 80},
+            {"Type": "Play Music Track"}]}]});
+        let s = setup_strengths(&script);
+        assert_eq!((s[&1], s[&133], s.len()), (60, 80, 2));
     }
 }
