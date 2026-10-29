@@ -52,6 +52,8 @@ fn run(
     mut ships: Query<(Entity, &mut Ship, &Transform, &mut Health, &mut MissionShip, &mut Visibility, Has<PlayerShip>)>,
     mut animals: Query<(Entity, &mut crate::environment::SpaceAnimal, &Transform, &mut Visibility), Without<Ship>>,
     mut meteors: MessageWriter<crate::nebula::MeteorRoute>,
+    mut belts: MessageWriter<crate::combat::AsteroidSetup>,
+    rocks: Query<(Entity, &Transform, &crate::combat::Asteroid), (Without<Ship>, Without<crate::environment::SpaceAnimal>)>,
     mut dragons: Query<&mut crate::dragons::Dragon>,
 ) {
     let sk = &mut *sk;
@@ -74,6 +76,8 @@ fn run(
         })
         .collect();
     world.extend(animals.iter().map(|(e, a, tf, _)| a.unit(e, tf)));
+    // Moving belts: the rocks are units too, tagged with the script's groups by their world-object id.
+    world.extend(rocks.iter().map(|(e, tf, a)| a.unit(e, tf)));
     sk.script.tag(&mut world);
     for d in killed.read() {
         if let Some(by) = world.iter().find(|u| u.e == d.by) {
@@ -147,6 +151,10 @@ fn run(
                         animal.speed = speed;
                     }
                 }
+            }
+            Fx::Asteroids { units, path, closest, mode, speed, tumble } => {
+                let path = sk.paths[path.as_str()].as_array().map(|a| a.iter().map(game_to_bevy).collect()).unwrap_or_default();
+                belts.write(crate::combat::AsteroidSetup { units, path, closest, mode, speed, tumble });
             }
             Fx::MeteorPath { group, path, closest, mode } => {
                 let path = sk.paths[path.as_str()].as_array().map(|a| a.iter().map(game_to_bevy).collect()).unwrap_or_default();

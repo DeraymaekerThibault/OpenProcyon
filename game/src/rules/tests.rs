@@ -884,3 +884,18 @@ fn subtitle_colour_is_the_speech_events_own() {
     sc.speaking = Some(("Plain".into(), 1.0));
     assert_eq!(sc.speech_colour(), None, "an event without a colour keeps the default gold");
 }
+
+/// Mousetrap: the Procyon supply convoy holds until a pirate ship enters the repair area ('Team Member Enters Volume').
+#[test]
+fn a_team_member_in_the_volume_fires_for_that_team_only() {
+    let mut sc = bare_script(serde_json::json!({"area": [[-10.0, -10.0], [10.0, -10.0], [10.0, 10.0], [-10.0, 10.0]]}), Value::Null);
+    sc.set_teams(vec![("PIRATES".into(), vec!["pirate".into()]), ("PROCYON".into(), vec!["procyon".into()])]);
+    let cond = serde_json::json!({"Type": "Team Member Enters Volume", "Team Name": "PIRATES", "Volume Name": "area"});
+    let outside = [unit("a", "pirate", Vec3::new(500.0, 0.0, 500.0)), unit("b", "procyon", Vec3::ZERO)];
+    assert!(!sc.cond(&cond, &outside, false), "only a Procyon ship is inside");
+    let inside = [unit("a", "pirate", Vec3::ZERO)];
+    assert!(sc.cond(&cond, &inside, false));
+    let mut dead = unit("a", "pirate", Vec3::ZERO);
+    dead.alive = false;
+    assert!(!sc.cond(&cond, &[dead], false), "a sunk ship does not count");
+}

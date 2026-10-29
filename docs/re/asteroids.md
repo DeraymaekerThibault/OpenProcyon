@@ -82,3 +82,9 @@ Both effects are now exported into `assets/fx` and spawned through the existing 
 Regression tests cover retail HP and asset dependencies, invalid/cyclic definitions, group membership/setup, tumble intervals without centre drift, path velocity/stopping, one-shot death, recursive 2-medium → 6-small breakup/termination, target cleanup, effects, child colliders and rotated/translated collision bounds. `--script asteroid` skips the opening, frames a large belt rock at frame 90 and destroys it at frame 180. Runtime screenshot: `local/asteroid-breakup.png` (frame 195) shows the two children and flash/sparks; no ECS query conflict occurred.
 
 Explicitly provisional: moving-parent fragment velocity, the collision-size field interpreted as spawn-offset radius, initial child orientation, inherited named group membership, effect scale/sound pool, retail rotation multiplication order, waypoint path controller and exact engine PRNG sequencing (the runtime reuses combat's random stream). Full Mission 1 progression with the original lower HP and new collisions remains unverified; missions 2–13 remain first-pass, not validated gameplay.
+
+## Skirmish maps
+Skirmish map scripts move their belts the same way (`Setup Asteroid Belt`: route, speed and tumble ranges, `teleport loop` and the rest; Mousetrap's arc
+belt of 53 rocks is the example). The skirmish rule runner treats every rock as a unit tagged with its script group by world-object id (the skirmish map data
+carries no group names on the rocks) and forwards the belt setup to the same asteroid motion as the campaign. Mousetrap's 'Team Member Enters Volume' (a ship of the
+team's players inside the volume) releases the Procyon supply convoy's hold. Not checked in play.

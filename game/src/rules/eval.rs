@@ -770,6 +770,11 @@ impl Script {
             }
             "Is Group In Volume" | "Enter Volume" => self.group_in_volume(c, w, t == "Enter Volume", repeating),
             "Exit Volume" => self.group_exited_volume(c, w),
+            // A live, visible ship of one of the team's players inside the volume (skirmish teams; anyone in the campaign).
+            "Team Member Enters Volume" => {
+                let (team, vol) = (s(c, "Team Name"), self.volume(s(c, "Volume Name")));
+                w.iter().any(|u| u.alive && u.visible && self.in_team(team, &u.owner) && in_volume(vol, u.pos))
+            }
             "Group Destroyed" => {
                 let m = members(w, s(c, "Group Name"));
                 !m.is_empty() && m.iter().all(|u| !u.alive)
