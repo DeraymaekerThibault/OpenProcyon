@@ -45,6 +45,7 @@ exact trigger of each is PROVISIONAL).
   slot 0, Navy), and the lowest free team number (owner observation; the first computer was seen as Pirate, Team 2).
   Fleets of one type cannot share a flag: a new fleet takes the lowest free flag of its type, a taken flag is dimmed in the picker. Changing a fleet type or team empties that
   player's fleet (the game's own text: the host changed your team, resetting your fleet).
+- The map flag *Is Alliance Change Allowed* is what unlocks those pull-downs: true on exactly the free-for-all maps (Diablo Strait, Dragons' Nest, Shadow Dance, Zemyatin), false on every team map (checked against the lobby on both kinds).
 - Team maps (Border Dispute ...): fleet and team cells have no pull-down for anyone; the team column shows the map's team name
   (Navy, Procyon ...) and the fleet type is the team's race.
 
