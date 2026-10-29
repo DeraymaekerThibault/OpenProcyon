@@ -453,7 +453,29 @@ pub struct FleetPilot {
     pub target: Option<Entity>,
     pub destination: Option<Vec3>,
     pub hold_fire: bool,
+    /// Seconds to the next re-plan; runs whether or not the ship holds formation, so an order waits for the next one.
+    pub replan_in: f32,
+    pub plan: Option<SlotPlan>,
 }
+
+/// The path a held follower is on: its slot as it was at the last re-plan, carried along at the leader's velocity then.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct SlotPlan {
+    pub point: Vec3,
+    pub velocity: Vec3,
+    pub age: f32,
+}
+
+impl SlotPlan {
+    pub fn goal(&self) -> Vec3 {
+        self.point + self.velocity * self.age
+    }
+}
+
+/// Seconds between a follower's re-plans. Retail (30 Hz logs of a Cutter in a Diamond slot): its movement path is reissued every 4.2 s
+/// (the speed drops to 0 and ramps up again at each), a formation order is only picked up at the next one (first move 0-4.2 s later),
+/// and a leader on a straight course is tracked exactly while one in a turn is not (the carried-along point is wrong between re-plans).
+const REPLAN: f32 = 4.2;
 
 impl FleetPilot {
     pub fn move_to(&mut self, point: Vec3) {
@@ -705,12 +727,17 @@ pub fn fleet_help(world: &mut World, owner: &str, attack: bool) {
 /// Distance to the slot inside which a follower stops closing (retail Cutter: full speed to ~4 units out, then stops).
 const SLOT_ARRIVE: f32 = 4.5;
 
+/// Heading error (radians) under which a follower runs at full speed, and the throttle it keeps while turned further off its slot. Retail
+/// Cutter assembling into a Diamond slot: ~1.7 units/s (0.19 of its ~9) while the error was above about 4 degrees, 6-9 once it fell below.
+const ALIGNED: f32 = 0.09;
+const TURNING_THROTTLE: f32 = 0.2;
+
 /// A follower's wanted speed. Measured on retail (docs/re/fleet-controls.md, Diamond slot behind a stationary Man-O-War): full speed until
 /// the last few units, then it stops dead; in the slot it matches the leader's speed. No proportional slow-down on the way in. A ship
 /// sent to a destination (not holding formation) stops within 5 units of it.
-fn follow_speed(hold: bool, distance: f32, leader_speed: f32, max: f32) -> f32 {
+fn follow_speed(hold: bool, distance: f32, leader_speed: f32, max: f32, heading_error: f32) -> f32 {
     if hold {
-        if distance > SLOT_ARRIVE { max } else { leader_speed.clamp(0.0, max) }
+        if distance > SLOT_ARRIVE { if heading_error.abs() > ALIGNED { TURNING_THROTTLE * max } else { max } } else { leader_speed.clamp(0.0, max) }
     } else if distance < 5.0 {
         0.0
     } else {
@@ -765,15 +792,41 @@ pub fn fleet_follow(world: &mut World) {
             let Some(here) = world.get::<Transform>(e).map(|t| t.translation) else { continue };
             let Some(ship) = world.get::<Ship>(e) else { continue };
             let max = world.get::<Health>(e).map_or(0.0, |h| max_speed(ship, &world.resource::<Library>().classes[ship.class], h));
-            let goal = if pilot.hold { Some(tf.translation + tf.rotation * pilot.slot) } else { pilot.destination };
+            let (class_index, heading) = (ship.class, ship.heading);
+            let leader_velocity = world.get::<Ship>(leader).map_or(Vec3::ZERO, |l| Vec3::new(-l.heading.sin(), 0.0, -l.heading.cos()) * l.speed);
+            let dt = world.get_resource::<Time>().map_or(0.0, |t| t.delta_secs());
+            let pilot = {
+                let mut p = pilot;
+                p.replan_in -= dt;
+                if !p.hold {
+                    p.plan = None;
+                } else if let Some(plan) = p.plan.as_mut() {
+                    plan.age += dt;
+                }
+                if p.replan_in <= 0.0 {
+                    p.replan_in = REPLAN;
+                    if p.hold {
+                        p.plan = Some(SlotPlan { point: tf.translation + tf.rotation * p.slot, velocity: leader_velocity, age: 0.0 });
+                    }
+                }
+                if let Some(mut live) = world.get_mut::<FleetPilot>(e) {
+                    live.replan_in = p.replan_in;
+                    live.plan = p.plan;
+                }
+                p
+            };
+            let goal = if pilot.hold { pilot.plan.map(|p| p.goal()) } else { pilot.destination };
             if let Some(goal) = goal {
                 // PROVISIONAL: captain movement keeps altitude; the shared integrator has no vertical thrust.
                 let goal = goal.with_y(here.y);
                 let distance = here.distance(goal);
                 let lib = world.resource::<Library>();
-                let clearance = lib.classes[ship.class].radius + world.get::<Ship>(leader).map_or(0.0, |l| lib.classes[l.class].radius);
+                let clearance = lib.classes[class_index].radius + world.get::<Ship>(leader).map_or(0.0, |l| lib.classes[l.class].radius);
                 let aim = steer_round(here, goal, tf.translation, clearance);
-                let wanted = follow_speed(pilot.hold, distance, speed, max);
+                let to_goal = goal - here;
+                let heading_error = if to_goal.length_squared() > 1.0 { (-to_goal.x).atan2(-to_goal.z) - heading } else { 0.0 };
+                let heading_error = (heading_error + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
+                let wanted = follow_speed(pilot.hold, distance, speed, max, heading_error);
                 if let Some(mut s) = world.get_mut::<Ship>(e) {
                     s.waypoints = if distance > 3.0 { vec![aim] } else { vec![] };
                     s.goal = if pilot.hold { Some((-(tf.rotation * Vec3::NEG_Z).x).atan2(-(tf.rotation * Vec3::NEG_Z).z)) } else { None };
@@ -806,10 +859,29 @@ mod follow_speed_tests {
     use super::follow_speed;
     #[test]
     fn followers_run_full_speed_until_the_slot_then_match_the_leader() {
-        assert_eq!(follow_speed(true, 30.0, 0.0, 9.0), 9.0);
-        assert_eq!(follow_speed(true, 5.0, 0.0, 9.0), 9.0);
-        assert_eq!(follow_speed(true, 2.0, 0.0, 9.0), 0.0);
-        assert_eq!(follow_speed(true, 2.0, 2.3, 9.0), 2.3);
-        assert_eq!(follow_speed(true, 2.0, 20.0, 9.0), 9.0);
+        assert_eq!(follow_speed(true, 30.0, 0.0, 9.0, 0.0), 9.0);
+        assert_eq!(follow_speed(true, 5.0, 0.0, 9.0, 0.0), 9.0);
+        assert_eq!(follow_speed(true, 2.0, 0.0, 9.0, 0.0), 0.0);
+        assert_eq!(follow_speed(true, 2.0, 2.3, 9.0, 0.0), 2.3);
+        assert_eq!(follow_speed(true, 2.0, 20.0, 9.0, 0.0), 9.0);
+    }
+    #[test]
+    fn a_follower_crawls_while_turned_away_from_its_slot() {
+        assert!((follow_speed(true, 30.0, 0.0, 9.0, 0.5) - 1.8).abs() < 1e-4);
+        assert_eq!(follow_speed(true, 30.0, 0.0, 9.0, -0.05), 9.0);
+    }
+}
+
+#[cfg(test)]
+mod slot_plan_tests {
+    use super::SlotPlan;
+    use bevy::prelude::*;
+    #[test]
+    fn a_plan_follows_a_straight_leader_exactly_and_misses_a_turning_one() {
+        let plan = SlotPlan { point: Vec3::new(0.0, 0.0, 10.0), velocity: Vec3::new(0.0, 0.0, -2.0), age: 3.0 };
+        assert_eq!(plan.goal(), Vec3::new(0.0, 0.0, 4.0));
+        // a leader that turned away since the plan: the carried-along point is off the real slot
+        let real = Vec3::new(1.0, 0.0, 4.5);
+        assert!(plan.goal().distance(real) > 1.0);
     }
 }

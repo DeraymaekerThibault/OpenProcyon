@@ -126,7 +126,24 @@ until ~4 units from the slot, then stops dead (8.5 -> 2.1 -> 0 within 1 s, arriv
 way in. In the slot it matches the leader's speed (2.3 with the leader at Ahead Full) and keeps its leader-relative offset within a few
 units. The slot itself sat 46.7 units from the leader at 31 degrees off the stern for the second member (35 degrees nominal; the member
 size R behind the spacing is therefore about 17 here). Remake: `follow_speed` (full speed beyond 4.5 units, then the leader's speed),
-turn-in-place and the start delay come from the shared ship model (the delay is not modelled, PROVISIONAL). One run, one follower; whether
+Speed is gated by heading: the Cutter held ~1.7 units/s (0.19 of its ~9 top speed, rising from 0 as it accelerates) while its heading
+error to the slot was above about 4 degrees, and jumped to 6-9 once the error fell below that (error 45 -> 4 degrees in 3.5 s; speed 1.8 at
+7.5 degrees, 6.3 at 3.7). Second run, leader sailing a continuous turn at ~4.2 degrees/s (speed 2.3, turn radius ~31): the follower's heading
+error stayed at 76-145 degrees and its speed fell to 0.9 and lower, so it did not hold its slot through the turn (it ended up ahead of the
+leader after a half circle); on the straight leg before it, its offset drifted ~11 units sideways over 60 s while its speed equalled the
+leader's. **Re-plan cadence (measured):** a held follower reissues its movement path every **4.2 s** (events at 130.0, 134.2, 138.4, 142.6, 146.9,
+151.1, 155.3 s and again at 193.8, 198.0, 202.2 s; the logger updates every 34 ms there, so it is not a sampling artefact). At each re-plan its
+speed drops to exactly 0.00 for ~0.3-0.5 s and ramps back up (to 0.9 on those legs), only while it is off its slot: on a straight leg with
+the slot reached there were none. A formation order is therefore picked up at the follower's next re-plan, 0-4.2 s later, and the follower
+then needs ~3.5 s to turn and accelerate: the ~5 s "reaction" first measured is that wait, not a fixed latency. Remake: `REPLAN` = 4.2 s,
+`FleetPilot::replan_in` free-runs for every member; a held follower with no plan yet does not move. The speed-to-zero restart at each
+re-plan is not modelled. PROVISIONAL (inferred, not fitted): between re-plans the follower aims at the slot as it was at the last
+one, carried along at the leader's velocity then (`SlotPlan`), which tracks a straight leader exactly and a turning one poorly, as
+observed. A least-squares fit of that model against the turn run did not separate it from "aim at the live slot" (both ~10 degrees off,
+best offsets at the edge of the search grid, ahead of the leader), so the aiming rule during turns is still open.
+
+Not modelled: how the original aims during a turn (look-ahead on the leader's velocity is documented from the static side only).
+Remake: `follow_speed` gates on a 5 degree error with a 0.2 throttle, turn-in-place and the start delay come from the shared ship model (the delay is not modelled, PROVISIONAL). One run, one follower; whether
 the controller treats the leader's turns with a look-ahead is not yet separated from this data.
 
 **Unknown:** exact look-ahead/catch-up/heading thresholds, collision/path-planner interplay, member reassignment after casualty or primary change, whether every position-locked ship is excluded by each fleet command, and native size-field equivalence. These are calibration tasks, not a reason to implement None/Custom/Column as LineAbreast.

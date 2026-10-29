@@ -181,6 +181,10 @@ fn all_layouts_custom_and_rotated_following_preserve_altitude_and_limits() {
     set_formation(&mut w, "Player", Some(Formation::Column), true);
     let slot = w.get::<FleetPilot>(ids[1]).unwrap().slot;
     fleet_follow(&mut w);
+    // The order is only picked up at the follower's next re-plan (retail: up to 4.2 s later): still on the old plan, so no new waypoint.
+    assert_eq!(w.get::<Ship>(ids[1]).unwrap().waypoints, Vec::<Vec3>::new());
+    w.get_mut::<FleetPilot>(ids[1]).unwrap().replan_in = 0.0;
+    fleet_follow(&mut w);
     let leader = w.get::<Transform>(ids[0]).unwrap();
     let expected = leader.translation + leader.rotation * slot;
     assert!(w.get::<Ship>(ids[1]).unwrap().waypoints[0].distance(expected) < 0.001);
