@@ -705,12 +705,17 @@ pub fn fleet_help(world: &mut World, owner: &str, attack: bool) {
 /// Distance to the slot inside which a follower stops closing (retail Cutter: full speed to ~4 units out, then stops).
 const SLOT_ARRIVE: f32 = 4.5;
 
+/// Heading error (radians) under which a follower runs at full speed, and the throttle it keeps while turned further off its slot. Retail
+/// Cutter assembling into a Diamond slot: ~1.7 units/s (0.19 of its ~9) while the error was above about 4 degrees, 6-9 once it fell below.
+const ALIGNED: f32 = 0.09;
+const TURNING_THROTTLE: f32 = 0.2;
+
 /// A follower's wanted speed. Measured on retail (docs/re/fleet-controls.md, Diamond slot behind a stationary Man-O-War): full speed until
 /// the last few units, then it stops dead; in the slot it matches the leader's speed. No proportional slow-down on the way in. A ship
 /// sent to a destination (not holding formation) stops within 5 units of it.
-fn follow_speed(hold: bool, distance: f32, leader_speed: f32, max: f32) -> f32 {
+fn follow_speed(hold: bool, distance: f32, leader_speed: f32, max: f32, heading_error: f32) -> f32 {
     if hold {
-        if distance > SLOT_ARRIVE { max } else { leader_speed.clamp(0.0, max) }
+        if distance > SLOT_ARRIVE { if heading_error.abs() > ALIGNED { TURNING_THROTTLE * max } else { max } } else { leader_speed.clamp(0.0, max) }
     } else if distance < 5.0 {
         0.0
     } else {
@@ -773,7 +778,10 @@ pub fn fleet_follow(world: &mut World) {
                 let lib = world.resource::<Library>();
                 let clearance = lib.classes[ship.class].radius + world.get::<Ship>(leader).map_or(0.0, |l| lib.classes[l.class].radius);
                 let aim = steer_round(here, goal, tf.translation, clearance);
-                let wanted = follow_speed(pilot.hold, distance, speed, max);
+                let to_goal = goal - here;
+                let heading_error = if to_goal.length_squared() > 1.0 { (-to_goal.x).atan2(-to_goal.z) - ship.heading } else { 0.0 };
+                let heading_error = (heading_error + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
+                let wanted = follow_speed(pilot.hold, distance, speed, max, heading_error);
                 if let Some(mut s) = world.get_mut::<Ship>(e) {
                     s.waypoints = if distance > 3.0 { vec![aim] } else { vec![] };
                     s.goal = if pilot.hold { Some((-(tf.rotation * Vec3::NEG_Z).x).atan2(-(tf.rotation * Vec3::NEG_Z).z)) } else { None };
@@ -806,10 +814,15 @@ mod follow_speed_tests {
     use super::follow_speed;
     #[test]
     fn followers_run_full_speed_until_the_slot_then_match_the_leader() {
-        assert_eq!(follow_speed(true, 30.0, 0.0, 9.0), 9.0);
-        assert_eq!(follow_speed(true, 5.0, 0.0, 9.0), 9.0);
-        assert_eq!(follow_speed(true, 2.0, 0.0, 9.0), 0.0);
-        assert_eq!(follow_speed(true, 2.0, 2.3, 9.0), 2.3);
-        assert_eq!(follow_speed(true, 2.0, 20.0, 9.0), 9.0);
+        assert_eq!(follow_speed(true, 30.0, 0.0, 9.0, 0.0), 9.0);
+        assert_eq!(follow_speed(true, 5.0, 0.0, 9.0, 0.0), 9.0);
+        assert_eq!(follow_speed(true, 2.0, 0.0, 9.0, 0.0), 0.0);
+        assert_eq!(follow_speed(true, 2.0, 2.3, 9.0, 0.0), 2.3);
+        assert_eq!(follow_speed(true, 2.0, 20.0, 9.0, 0.0), 9.0);
+    }
+    #[test]
+    fn a_follower_crawls_while_turned_away_from_its_slot() {
+        assert!((follow_speed(true, 30.0, 0.0, 9.0, 0.5) - 1.8).abs() < 1e-4);
+        assert_eq!(follow_speed(true, 30.0, 0.0, 9.0, -0.05), 9.0);
     }
 }
