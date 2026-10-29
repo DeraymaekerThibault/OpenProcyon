@@ -162,7 +162,7 @@ with `k = Const + WithDist/d + WithDistSquared/d^2`, `d = |target - pos|`. The c
 Gravity: `vel += g * dt * 0.033`. Friction: scales velocity by a factor, zero once speed falls below a threshold.
 
 ## Pseudo-billboard
-Flag clear: a fixed axis from three curves (default (0,1,0) if all zero). Flag set: the axis is the particle's velocity
+Two `SimpleTexture` entries: side and front (see "Visual refinements" below for how they are blended). Flag clear: a fixed axis from three curves (default (0,1,0) if all zero). Flag set: the axis is the particle's velocity
 direction (`vel / 0.033`), (0,1,0) if the velocity is zero.
 
 ## Still open
@@ -237,9 +237,10 @@ to `models/debris/` and `sections[].debris` = {model, pivot}.
   smoke emits one particle per tick per system, each living ten seconds, several systems per section; here that saturates to a white blob on a damaged ship and
   is the main particle load in a long fight.
 - **A debris piece's smoke trail stops after 3 s** (`DEBRIS_SMOKE_TIME`); smoke already out fades on its own.
-- **Cannonballs, plasma and lancer shots have 3D bodies** (`combat::SHELL_BODIES`): retail draws them as flat "pseudo 3D" sprites (a side and a front texture),
-  which read as cut-outs from the tilted camera. Their sprite emits nothing now (`fx::SPRITE_SHELLS`); the plasma trail, smoke and muzzle effects are unchanged.
-  Sizes follow the sprites; PROVISIONAL look (iron balls, an orange-yellow glowing plasma ball, a blue capsule bolt).
+- **Shell sprites use both of their textures.** A pseudo-billboard effect lists a side texture and a front texture (cannonballs, lancer shots, the Gattling
+  tracer, meteors). Retail shows the side streak when seen from the side and a round glow when seen along the shell's flight line, which is what gives
+  its shells a 3D feel; we drew only the side texture. The streak and the camera-facing front quad are now drawn together, weighted by cos^2 of the angle between
+  the view and the axis (PROVISIONAL blend). A cannonball is a glowing fireball with a flame tail, not an iron ball.
 
 ## Fire (ignite, update, fire-fighting)
 - Ignite on a hit: if the bullet's Chance of Fire for the section material is > 0 and a uniform roll is <= it (and an
