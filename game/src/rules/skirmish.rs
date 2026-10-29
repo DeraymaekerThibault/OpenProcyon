@@ -19,6 +19,8 @@ pub struct SkirmishScript {
     paths: Value,
     /// The script's environment block (space animal and dragon definitions).
     pub environment: Value,
+    /// The script's map text (place names the star map labels).
+    pub map_text: Value,
 }
 
 impl SkirmishScript {
@@ -27,7 +29,7 @@ impl SkirmishScript {
         let data = crate::data::try_json(&crate::assets_dir().join(format!("maps/{map}/script.json")))?;
         let mut script = Script::new(&without_end_rules(&data), Value::Null);
         script.set_teams(teams);
-        Some(SkirmishScript { script, sides, paths: data["paths"].clone(), environment: data["environment"].clone() })
+        Some(SkirmishScript { script, sides, paths: data["paths"].clone(), environment: data["environment"].clone(), map_text: data["map_text"].clone() })
     }
     /// The rules' names of the map-placed ships ('Setup Ship' names) by world-object id; none when the map has no script.
     pub fn ship_names(map: &str) -> Option<HashMap<i64, String>> {

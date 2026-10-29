@@ -244,6 +244,20 @@ def export_skirmish_script(root, out, twt):
     export_environment(
         root, out, script
     )  # whale/dragon definitions and models for maps with animals
+    # Task texts and the star map's place names, resolved as in a mission (the star map and its objectives panel show them).
+    names = strings(root)
+    for task in script["tasks"]:
+        task["text"] = names.get(task.get("TextStringID"), task.get("Name"))
+    script["map_text"] = [
+        dict(
+            f,
+            name=f["Name"],
+            text=names.get(f["DisplayedText"], f["Name"]),
+            pos=f["Position"],
+            visible=f["Visible"],
+        )
+        for f in script["map_text"]
+    ]
     (out / "campaign").mkdir(exist_ok=True)
     (out / f"campaign/{mid}_script.json").write_text(json.dumps(script, indent=2))
 

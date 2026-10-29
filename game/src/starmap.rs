@@ -55,6 +55,8 @@ pub struct MapLabel {
 pub struct StarmapContents {
     pub icons: Vec<MapIcon>,
     pub labels: Vec<MapLabel>,
+    /// The "Objectives:" panel's text (skirmish: the human team's objective task).
+    pub objective: Option<String>,
 }
 
 /// Opening, closing and `describe`; views draw after it.
@@ -125,9 +127,12 @@ fn describe(
     ships: Query<(Entity, &Ship, &Health, &Transform, Option<&crate::campaign::MissionShip>, Has<PlayerShip>)>,
     animals: Query<(Entity, &Transform), (With<crate::environment::SpaceAnimal>, Without<Ship>)>,
     sensors: Res<crate::environment::Sensors>,
+    skirmish: Option<Res<crate::rules::skirmish::SkirmishScript>>,
+    fleets: Res<crate::ship::Fleets>,
 ) {
     contents.icons.clear();
     contents.labels.clear();
+    contents.objective = None;
     if open.is_empty() {
         return;
     }
@@ -144,6 +149,24 @@ fn describe(
         if sensors.player_sees(entity, mission.as_deref()) {
             icon(MapIconKind::Whale, transform);
         }
+    }
+    if let Some(sk) = skirmish.as_deref().filter(|_| mission.is_none()) {
+        // Skirmish (retail, Border Dispute): the map's place names, the human team's objective point and an "Objectives:" panel.
+        for text in sk.map_text.as_array().into_iter().flatten() {
+            let name = text["name"].as_str().unwrap_or_default();
+            if sk.script.map_text.get(name).copied().unwrap_or(text["visible"].as_bool().unwrap_or(false)) {
+                contents.labels.push(MapLabel { text: text["text"].as_str().unwrap_or_default().into(), position: crate::game_to_bevy(&text["pos"]) });
+            }
+        }
+        if let Some(team) = sk.script.team_of(&fleets.local)
+            && let Some((point, task)) = sk.script.team_objective(team)
+        {
+            if let Some(p) = point {
+                contents.icons.push(MapIcon { kind: MapIconKind::Objective, position: crate::game_to_bevy(&p), yaw: 0.0 });
+            }
+            contents.objective = task;
+        }
+        return;
     }
     let Some(mission) = mission else { return };
     if mission.script.point_on_map

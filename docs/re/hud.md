@@ -58,9 +58,12 @@ made it fire at the base): the destruction of a base part has not been filmed ye
 
 ## Skirmish team objective (rule action `Setup Team Objective`)
 
-Observed on retail, Border Dispute on Easy, the first ~25 s of a battle and every control of the bottom bar: the skirmish HUD shows **no
-objective text** (no panel, the chat history is empty, the bar buttons are pause, fleet commands, chat history, waypoint mode, plus the
-weapon-bar and ship-bar toggles). The only objective cue is the compass arrow on the ship's ring (gold pointer, the same art as the
-campaign's objective arrow). So the rule's task text is not displayed in skirmish; its point drives the arrow, and a team whose rule says
-`NO OBJECTIVE POINT` (e.g. the Pirates on Ambush) presumably gets none (PROVISIONAL: only the Navy side's arrow was observed, and whether
-the starmap shows an objective marker was not checked). The remake already draws that arrow towards the base the end rule says to destroy.
+Observed on retail, Border Dispute on Easy: during the battle the skirmish HUD shows **no objective text** (no panel, the chat history is empty, the bar buttons are pause,
+fleet commands, chat history, waypoint mode, plus the weapon-bar and ship-bar toggles). The objective cue there is the compass arrow on the ship's ring (gold pointer,
+the same art as the campaign's objective arrow), which the remake draws towards the base the end rule says to destroy.
+
+**The star map (M) shows it** (second retail check, same map): a blue panel with a gold border at the top left reads "Objectives:" over the team's task text
+("Destroy Enemy Base."), the team's objective point is drawn with the objective-point icon (a target ring on the enemy base, Starkeep Cerebrus), and the map's place
+names are written in yellow-gold (Starkeep Cerebrus, Orpheus Cove, Outpost Perseus, The Mourning Nebula). Remake: the skirmish star map draws all three from the map
+script (`Setup Team Objective`, `tasks`, `map_text`). Still PROVISIONAL: a team whose rule says `NO OBJECTIVE POINT` (e.g. the Pirates on Ambush) shows no ring
+(its panel text is drawn if it has a task); only the Navy side's map was observed.
