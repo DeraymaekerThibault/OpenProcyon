@@ -72,7 +72,11 @@ Saves made mid-battle store per ship an engineer and a navigator factor. Measure
 ## Open
 - Placed and computer ships' generic crews do get crew factors. Retail saves (missions 3 and 11) store per ship an engineer and a
   navigator factor: Green crews 1.15, Average 1.30-1.37, Elite 1.40-1.47, default (rating-1) hands 1.05-1.10, i.e. about
-  1 + 0.05 × skill plus a small extra. Measured speed factors are relative to the uncrewed ship (c(1) = 1), whose saved factor
+  1 + 0.05 × skill plus a small extra. Over 384 factors of generic-crew ships in 17 retail saves (2026-10) the generic crews
+  (skill 3 / 6 / 8 in every skill, `Crew_General_*`) give values on a 0.025 grid between 1 + 0.05 × skill (the floor: 1.15 /
+  1.30 / 1.40) and the floor + 0.075 (1.225 / 1.375 / 1.475, the per-crewman value above): means 1.163 / 1.326 / 1.441, Green
+  mostly at the floor (61 of 90), Average 101 of 200, Elite split between floor and top. Engineer and navigator differ within
+  a ship; which slots are filled (the spread) is not resolved. Measured speed factors are relative to the uncrewed ship (c(1) = 1), whose saved factor
   is 1.125, so speed follows the saved factor itself (see "Saved crew factors" above).
   Computer skirmish ships ran in at 1.267 × Emergency, between this curve's Average (1.219) and Elite (1.296).
   Remake: mission ships take the middle of their crew level's saved range / 1.125 for speed and rudder
