@@ -472,6 +472,13 @@ const LOWEST_DETAIL_DISTANCE: f32 = 350.0;
 /// except GravCharge_Medium_Impact (180 per tick for 18 s, ~97000 additive quads): it saturates to a white blob and stalls the
 /// frame. Over-budget primitives emit proportionally fewer particles, keeping their shape. The original's own pool limit is unknown.
 const MAX_LIVE: f32 = 4000.0;
+/// Whole-scene live-particle budget (not retail): above it every effect emits proportionally fewer particles, so a long fight with many
+/// Gattling tracers, damage smoke and impacts cannot pile up thousands of quads per frame. PROVISIONAL: sized for a mid-range GPU; the
+/// per-primitive `MAX_LIVE` still applies. The count lags the emission by a frame.
+const SCENE_LIVE_BUDGET: f32 = 15_000.0;
+fn scene_budget_factor(live: usize) -> f32 {
+    (SCENE_LIVE_BUDGET / live.max(1) as f32).min(1.0)
+}
 
 fn update_fx(
     mut commands: Commands,
@@ -482,6 +489,7 @@ fn update_fx(
     cam: Query<&GlobalTransform, With<Camera3d>>,
 ) {
     let frame = time.delta_secs().min(0.25);
+    let scene = scene_budget_factor(q.iter().map(|(_, f, _)| f.particle_count()).sum());
     let cam_pos = cam.single().ok().map(|c| c.translation());
     for (e, mut fx, gt) in &mut q {
         fx.tick_acc += frame;
@@ -498,7 +506,7 @@ fn update_fx(
             fx.age += TICK;
             fx.move_acc += TICK;
             let move_dt = if fx.move_acc > MOVE_STEP { std::mem::take(&mut fx.move_acc) } else { 0.0 };
-            let (age, scale, emitting) = (fx.age, fx.rate_scale * crate::menu::detail_scale(), fx.emitting);
+            let (age, scale, emitting) = (fx.age, fx.rate_scale * crate::menu::detail_scale() * scene, fx.emitting);
             busy = false;
             // A source emitter places particles at the positions of its source primitive's particles.
             let sources: HashMap<usize, Vec<Vec3>> =
@@ -1138,5 +1146,12 @@ mod tests {
         let mut names = vec![];
         let prim = parse_prim(&doc["Primitive"][0], &mut names);
         assert_eq!((names[prim.tex.unwrap()].as_str(), names[prim.tex2.unwrap()].as_str()), ("cannonballpseudo00", "cannonballfrontpseudo00"));
+    }
+
+    #[test]
+    fn scene_budget_only_bites_above_the_budget() {
+        assert_eq!(scene_budget_factor(0), 1.0);
+        assert_eq!(scene_budget_factor(15_000), 1.0);
+        assert!((scene_budget_factor(30_000) - 0.5).abs() < 1e-6);
     }
 }
