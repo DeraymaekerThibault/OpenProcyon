@@ -82,13 +82,14 @@ pub(super) struct ShipHit {
 }
 
 /// Measured on retail (headless 1-vs-1 skirmishes per difficulty): the bullet table's damage is scaled by side and difficulty.
-/// Player shells on computer ships: Easy x4, Normal x2, Hard x1; computer shells on the player's: x0.25, x0.5, x1.
-/// PROVISIONAL: Easy x4 rests on two hits; computer-vs-computer and allied hits are not measured (1.0 here).
+/// Player shells on computer ships: Easy x3, Normal x2, Hard x1; computer shells on the player's: x0.25, x0.5, x1.
+/// PROVISIONAL: computer-vs-computer and allied hits are not measured (1.0 here).
 pub(super) fn side_damage_scale(shooter: Side, victim: Side, difficulty: u8) -> f32 {
-    let k = [4.0, 2.0, 1.0][difficulty.min(2) as usize];
+    let d = difficulty.min(2) as usize;
+    let (out, inc) = ([3.0, 2.0, 1.0][d], [0.25, 0.5, 1.0][d]);
     match (shooter, victim) {
-        (Side::Player, v) if v != Side::Player => k,
-        (s, Side::Player) if s != Side::Player => 1.0 / k,
+        (Side::Player, v) if v != Side::Player => out,
+        (s, Side::Player) if s != Side::Player => inc,
         _ => 1.0,
     }
 }

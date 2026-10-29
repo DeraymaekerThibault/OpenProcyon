@@ -73,18 +73,20 @@ measured bank limit above.
 - Section damage roll = round(uniform(lo, hi)). Damage-smoke level from remaining HP fraction: >75% none,
   50-75 Light, 25-50 Medium, 0-25 Heavy, 0 Destroyed: identical to the remake's thresholds.
 
-## Player vs computer damage factor (measured, retail headless skirmishes 2026-10-16)
+## Player vs computer damage factor (measured, retail headless skirmishes 2026-10-16, Easy re-measured 2026-10-29)
 - 1-vs-1 skirmishes on The Diablo Strait (Navy Man-O-War vs one computer Pirate Barque or Carrack), one per difficulty
   level, section HP logged at 20 Hz on both ships. Drops match the bullet table scaled by side and the Single Player
   Difficulty Level (the retail default is Normal):
 
   | Difficulty | player shells on computer ships | computer shells on the player's |
   |---|---|---|
-  | Easy | x 4 (two hits only: heavy cannon on reinforced wood, table 35-45, dropped 155 and 156) | x 0.25 (wood 3-13) |
+  | Easy | x 3 (gattling on cloth, table 5-7, dropped 15-20 seventeen times; medium cannon on cloth, table 14-15, dropped 43-44 four times; medium on reinforced, table 20-30, dropped 60 and 70) | x 0.25 (wood 3-13) |
   | Normal | x 2 (medium cannon on cloth, table 14-15, dropped 28-29 five times; heavy on reinforced 72-89) | x 0.5 (gattling on wood, table 4-7, dropped 2 or 3) |
   | Hard | x 1 (cloth 5-7 / 14-19, reinforced 28, 43) | x 1 (cannon on wood 30-48, cloth 15) |
 - The scaling applies before rounding (Normal gattling drops of 2 and 3 come about 1:2, as round(0.5 x roll) gives).
-- PROVISIONAL: Easy x 4 rests on two hits. Computer-vs-computer and allied hits are not measured (the engine uses 1.0).
+- Easy out is x 3, not the inverse of x 0.25 in: the seventeen gattling drops on sails spread 15-20 (x 3 gives 15-21,
+  x 4 would give 20-28). The earlier two Easy drops of 155 and 156 on reinforced wood fit two medium cannon hits landing in the same 50 ms sample.
+- PROVISIONAL: computer-vs-computer and allied hits are not measured (the engine uses 1.0).
   Whether the core bleed roll is scaled too is not measured (the engine scales it).
 - Volcano meteors (The Diablo Strait) hit every section of a ship at once for 10-20 each; they are not shells.
 - Damage control mends hulls only through engineers and sails through riggers (refit-resupply.md 3.4).
