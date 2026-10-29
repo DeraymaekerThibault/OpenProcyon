@@ -141,6 +141,5 @@ placement and colours; effect placement (the original's extra main effect is not
 ## Skirmish bases (remake, 2026-10-27)
 Border Dispute's end rules award the game for 'capturing a ship from' the other side's base (a boarding party taking the base), so skirmish
 bases are boardable: a boarding point within 15 units and a speed under 2, like campaign bases (§4). On a won fight the base changes
-sides: its guns fight for the captor and the end rules count it as captured (the side the map gave it is remembered). PROVISIONAL: the
-retail skirmish base's boarding strength is not measured (the remake uses 50, campaign islands use 50-100); computer ships do not board
+sides: its guns fight for the captor and the end rules count it as captured (the side the map gave it is remembered). A skirmish base's boarding strength is its map script's *Setup Island* `Combat Strength`, as in the campaign (Red Rover: navy base 60, pirate base 80; Border Dispute 100 / 150; Locusts 100; the remake uses 50 for a base whose script gives none, PROVISIONAL). PROVISIONAL: computer ships do not board
 skirmish bases (no AI path in the original, §5); whether the capturing team matters to the rule is not checked.
