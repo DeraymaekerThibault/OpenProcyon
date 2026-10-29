@@ -191,6 +191,8 @@ pub struct Script {
     /// Star map switches set by rules: the current objective point's visibility (PROVISIONAL default shown) and per-name map text visibility.
     pub point_on_map: bool,
     pub map_text: HashMap<String, bool>,
+    /// Skirmish `Setup Team Objective`: team name id -> (objective point name, task name).
+    pub(super) team_objectives: HashMap<String, (String, String)>,
     pub(super) hold_fire: HashSet<String>,
     pub(super) hostile: HashSet<(String, String)>,
     pub(super) player: String,
@@ -466,6 +468,7 @@ impl Script {
             destroyed: vec![],
             teams: HashMap::new(),
             team_points: HashMap::new(),
+            team_objectives: HashMap::new(),
             events: HashMap::new(),
             consume: vec![],
             players: players.iter().map(|p| p.to_string()).collect(),
@@ -603,6 +606,18 @@ impl Script {
     /// A ship was destroyed by player `by` (skirmish kills, 'Team has destroyed a ship').
     pub fn record_destroyed(&mut self, by: &str, unit: Entity) {
         self.destroyed.push((by.into(), unit));
+    }
+    /// A skirmish team's objective as the star map shows it: the objective point's game position (none for 'NO OBJECTIVE POINT') and
+    /// the task's text.
+    pub fn team_objective(&self, team: &str) -> Option<(Option<Value>, Option<String>)> {
+        let (point, task) = self.team_objectives.get(team)?;
+        let position = self.points.as_array().and_then(|p| p.iter().find(|x| x["Name"] == point.as_str())).map(|x| x["Position"].clone());
+        let text = self.tasks.iter().find(|t| &t.name == task).map(|t| t.text.clone()).filter(|t| !t.is_empty());
+        Some((position, text))
+    }
+    /// The skirmish team (name id) `player` plays for.
+    pub fn team_of(&self, player: &str) -> Option<&str> {
+        self.teams.iter().find(|(_, p)| p.iter().any(|x| x == player)).map(|(n, _)| n.as_str())
     }
     /// Skirmish teams: (team name id, its players).
     pub fn set_teams(&mut self, teams: Vec<(String, Vec<String>)>) {
@@ -1171,7 +1186,10 @@ impl Script {
             "Dragon - Set Damage Threshold" => out.push(Fx::DragonThreshold(g("Group Name"), f(a, "Damage Threshold"))),
             "Grant Team X Points" => *self.team_points.entry(s(a, "Team Name").into()).or_default() += f(a, "Points") as i32,
             // Skirmish only: the winner is decided by victory.rs from the map's end rules; objective markers are not shown yet.
-            "Team X Wins" | "Remaining Team Wins" | "Setup Team Objective" => {}
+            "Setup Team Objective" => {
+                self.team_objectives.insert(s(a, "Team Name").into(), (s(a, "Objective Point").into(), s(a, "Objective Task").into()));
+            }
+            "Team X Wins" | "Remaining Team Wins" => {}
             "Reset Shots Fired Count" => {
                 for e in g("Group/Unit Name") {
                     self.shots.remove(&e);

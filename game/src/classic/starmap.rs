@@ -150,6 +150,9 @@ fn animate(
     }
 }
 
+/// Retail's map text colour (a yellow-gold, read off a Border Dispute screenshot).
+const LABEL_GOLD: Color = Color::srgb(0.95, 0.85, 0.3);
+
 /// Icons and labels for `StarmapContents`.
 fn redraw(
     mut commands: Commands,
@@ -158,7 +161,7 @@ fn redraw(
     fonts: Option<Res<Fonts>>,
     time: Res<Time<Real>>,
     window: Single<&Window, With<PrimaryWindow>>,
-    root: Query<&Starmap>,
+    root: Query<(Entity, &Starmap)>,
     square: Query<(Entity, &Square)>,
     old: Query<Entity, With<Dynamic>>,
     contents: Res<StarmapContents>,
@@ -166,7 +169,7 @@ fn redraw(
     for e in &old {
         commands.entity(e).despawn();
     }
-    let (Ok(map), Ok((square, &Square { side })), Some(hud)) = (root.single(), square.single(), hud) else { return };
+    let (Ok((root, map)), Ok((square, &Square { side })), Some(hud)) = (root.single(), square.single(), hud) else { return };
     let (half, scale) = (map.half, window.height() / REF_H);
     let frame = (time.elapsed_secs() / FRAME_SECS) as usize % 4;
     for icon in &contents.icons {
@@ -198,12 +201,35 @@ fn redraw(
         ));
     }
     let Some(font) = fonts.as_ref().and_then(|f| f.0.get(crate::sprites::BODY_FONT)) else { return };
+    if let Some(text) = &contents.objective {
+        // Retail: a blue panel with a gold border at the top left, "Objectives:" over the task text (Border Dispute, 1440x1080: ~160x58 px).
+        commands
+            .spawn((
+                Dynamic,
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(8.0 * scale),
+                    top: Val::Px(8.0 * scale),
+                    padding: UiRect::axes(Val::Px(10.0 * scale), Val::Px(6.0 * scale)),
+                    border: UiRect::all(Val::Px(3.0 * scale)),
+                    flex_direction: FlexDirection::Column,
+                    ..default()
+                },
+                BackgroundColor(Color::srgb(0.1, 0.35, 0.6)),
+                BorderColor::all(Color::srgb(0.85, 0.7, 0.25)),
+                ChildOf(root),
+            ))
+            .with_children(|panel| {
+                panel.spawn(font.text("Objectives:", scale, Color::WHITE));
+                panel.spawn(font.text(text, scale, LABEL_GOLD));
+            });
+    }
     for label in &contents.labels {
         let at = to_square(label.position, half, side);
         let width = font.width(&label.text) * scale;
         commands.spawn((
             Dynamic,
-            font.text(&label.text, scale, Color::srgb(0.75, 1.0, 0.9)),
+            font.text(&label.text, scale, LABEL_GOLD),
             Node { position_type: PositionType::Absolute, left: Val::Px(at.x - width / 2.0), top: Val::Px(at.y), ..default() },
             ChildOf(square),
         ));

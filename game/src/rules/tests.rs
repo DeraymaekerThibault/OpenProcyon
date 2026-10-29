@@ -899,3 +899,26 @@ fn a_team_member_in_the_volume_fires_for_that_team_only() {
     dead.alive = false;
     assert!(!sc.cond(&cond, &[dead], false), "a sunk ship does not count");
 }
+
+/// Skirmish star map: a team's objective is its point's position and its task's text; 'NO OBJECTIVE POINT' has no position.
+#[test]
+fn team_objectives_resolve_to_a_point_and_a_task_text() {
+    let data = serde_json::json!({
+        "rules": [], "ships": [], "volumes": {}, "environment": {},
+        "points": [{"Name": "navy target", "Position": [1.0, 2.0, 0.0]}],
+        "tasks": [{"Name": "navy obj", "text": "Destroy Enemy Base.", "Active": false}, {"Name": "pirate obj", "text": "Survive", "Active": false}]
+    });
+    let mut sc = Script::new(&data, Value::Null);
+    sc.set_teams(vec![("NAVY".into(), vec!["navy".into()]), ("PIRATES".into(), vec!["pirate".into()])]);
+    let mut out = vec![];
+    let w: Vec<Unit> = vec![];
+    for (team, point, task) in [("NAVY", "navy target", "navy obj"), ("PIRATES", "NO OBJECTIVE POINT", "pirate obj")] {
+        sc.act(&serde_json::json!({"Type": "Setup Team Objective", "Team Name": team, "Objective Point": point, "Objective Task": task}), &w, &mut out, "setup");
+    }
+    assert_eq!(sc.team_of("navy"), Some("NAVY"));
+    let (position, text) = sc.team_objective("NAVY").unwrap();
+    assert_eq!((position.unwrap()[0].as_f64(), text.as_deref()), (Some(1.0), Some("Destroy Enemy Base.")));
+    let (position, text) = sc.team_objective("PIRATES").unwrap();
+    assert!(position.is_none(), "no objective point, no ring");
+    assert_eq!(text.as_deref(), Some("Survive"));
+}
