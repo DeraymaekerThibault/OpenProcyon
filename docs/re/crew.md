@@ -69,6 +69,19 @@ Saves made mid-battle store per ship an engineer and a navigator factor. Measure
 - Leadership: the Carrack's captain (Leadership 7) did not change its factors beyond the formula; whether leadership adds
   anything elsewhere is not measured.
 
+## Computer fleets carry named crew; the missing-post rule (14 retail battle saves, 2026-10)
+Saves taken seconds into skirmishes (seven maps; budgets and fleet limits varied) show every
+computer ship with named crew from the roster (`Crew_Navy_*`, even for Pirate and Procyon hulls), bought with the same victory points as the hulls:
+the first ship is crewed in full (gunners, captain, first mate, navigator, engineers, riggers, fighters, lookout) and later ships get what is left, so
+the last ones are mostly empty posts (empty slot = the rating-1 hand). Each ship's saved engineer and navigator factor is reproduced exactly from its
+crew (62 of 64 ships): the per-crewman value above, averaged over the post's slots, **and when the class has no such post at all (a Sloop has no engineers,
+a Gunboat no navigator) the factor is 1 + 0.05 x the captain's rating in that skill** (no 0.075; an empty captain post counts as rating 1: 1.05).
+The two misses are Pirate ships under a Crag captain whose engineering is not listed in the data (the saved 1.30 reads as rating 6).
+This is also where the generic levels' floors come from: a Green / Average / Elite captain is rated 3 / 6 / 8, so a postless factor is 1.15 / 1.30 / 1.40.
+Scan range follows the same rule on the lookout post and spotting: 712.5 = 500 x 1.425 (lookout rated 7), 525 = 500 x 1.05 (no lookout post, empty captain).
+Not resolved: the exact buying order (hulls first, then crew; every fleet's total came to 264-350 points against a default budget of 300 and the lobby's step per click
+is not known) and the choice of crewman (the best of the roster per post fits what was seen, not proven).
+
 ## Open
 - Placed and computer ships' generic crews do get crew factors. Retail saves (missions 3 and 11) store per ship an engineer and a
   navigator factor: Green crews 1.15, Average 1.30-1.37, Elite 1.40-1.47, default (rating-1) hands 1.05-1.10, i.e. about

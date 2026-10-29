@@ -574,13 +574,17 @@ impl Skirmish {
                     team: s.team,
                     ids,
                     ships,
-                    // A built computer fleet keeps its weapons but not its named crew: computer ships run at the measured computer crew factor.
+                    // A built computer fleet keeps its weapons and its named crew (retail computer ships carry named crew; their speed and sight follow the posts).
                     weapons: match &computer_build {
                         Some((weapons, _)) => weapons.clone(),
                         None if open => s.weapons.clone(),
                         None => vec![],
                     },
-                    crew: if open && computer_build.is_none() { s.crew.clone() } else { vec![] },
+                    crew: match &computer_build {
+                        Some((_, crew)) => crew.clone(),
+                        None if open => s.crew.clone(),
+                        None => vec![],
+                    },
                 }
             })
             .collect()
