@@ -702,6 +702,20 @@ pub fn fleet_help(world: &mut World, owner: &str, attack: bool) {
     }
 }
 
+/// Where a follower aims on its way to `goal`: straight, unless that line passes within `clearance` of the leader (a slot behind the
+/// leader is reached from beside it at spawn), then a point off the leader's flank on the side the line already passes. PROVISIONAL: the
+/// original's follower pathing is unknown; this only keeps followers from driving through the ship they follow and shoving it.
+fn steer_round(from: Vec3, goal: Vec3, leader: Vec3, clearance: f32) -> Vec3 {
+    let (d, rel) = ((goal - from).with_y(0.0), (leader - from).with_y(0.0));
+    let t = if d.length_squared() > 0.0 { (rel.dot(d) / d.length_squared()).clamp(0.0, 1.0) } else { 0.0 };
+    let off = (from + d * t - leader).with_y(0.0);
+    if off.length() >= clearance || (goal - leader).with_y(0.0).length() < clearance {
+        return goal;
+    }
+    let side = off.try_normalize().unwrap_or_else(|| Vec3::new(-d.z, 0.0, d.x).normalize_or_zero());
+    (leader + side * clearance * 1.2).with_y(goal.y)
+}
+
 pub fn fleet_follow(world: &mut World) {
     let fleets = world.resource::<Fleets>().groups.clone();
     let busy: std::collections::HashSet<_> = world.query_filtered::<Entity, CaptainBusy>().iter(world).collect();
@@ -740,6 +754,9 @@ pub fn fleet_follow(world: &mut World) {
                 // PROVISIONAL: captain movement keeps altitude; the shared integrator has no vertical thrust.
                 let goal = goal.with_y(here.y);
                 let distance = here.distance(goal);
+                let lib = world.resource::<Library>();
+                let clearance = lib.classes[ship.class].radius + world.get::<Ship>(leader).map_or(0.0, |l| lib.classes[l.class].radius);
+                let aim = steer_round(here, goal, tf.translation, clearance);
                 // PROVISIONAL proportional catch-up controller; native look-ahead/heading thresholds await calibration.
                 let wanted = if pilot.hold {
                     (speed + distance * 0.15).min(max)
@@ -749,7 +766,7 @@ pub fn fleet_follow(world: &mut World) {
                     max
                 };
                 if let Some(mut s) = world.get_mut::<Ship>(e) {
-                    s.waypoints = if distance > 3.0 { vec![goal] } else { vec![] };
+                    s.waypoints = if distance > 3.0 { vec![aim] } else { vec![] };
                     s.goal = if pilot.hold { Some((-(tf.rotation * Vec3::NEG_Z).x).atan2(-(tf.rotation * Vec3::NEG_Z).z)) } else { None };
                     s.order = if wanted < 0.01 { 0 } else { 2 };
                     s.throttle = Some(if max > 0.001 { (wanted / max).clamp(0.0, 1.0) } else { 0.0 });
@@ -761,3 +778,16 @@ pub fn fleet_follow(world: &mut World) {
 
 #[cfg(test)]
 pub mod movement_tests;
+
+#[cfg(test)]
+mod steer_round_tests {
+    use super::steer_round;
+    use bevy::prelude::*;
+    #[test]
+    fn a_follower_goes_round_the_leader_it_would_cross() {
+        let (from, goal, leader) = (Vec3::new(13.0, 0.0, -25.0), Vec3::new(41.0, 0.0, 30.0), Vec3::ZERO);
+        let aim = steer_round(from, goal, leader, 40.0);
+        assert!(aim.length() > 40.0 && aim != goal, "{aim:?}");
+        assert_eq!(steer_round(Vec3::new(200.0, 0.0, 0.0), Vec3::new(300.0, 0.0, 0.0), leader, 60.0), Vec3::new(300.0, 0.0, 0.0));
+    }
+}
