@@ -119,11 +119,21 @@ impl CrewPosts {
         (self.post_factor(4, "engineering", caps[4]), self.post_factor(3, "navigation", caps[3]))
     }
     /// Mean of every slot's `skill_factor` (capacity `slots`; empty slots hold a rating-1 hand), as in retail saves: three
-    /// engineers rated 9, 9, 8 give (1.5 + 1.5 + 1.475) / 3 / 1.125.
+    /// engineers rated 9, 9, 8 give (1.5 + 1.5 + 1.475) / 3 / 1.125. A class with no such post at all (`slots` 0, e.g. a Sloop
+    /// without engineers) is rated on its captain instead, without the 0.075 a crewman earns: 1 + 0.05 x the captain's rating
+    /// (a rating-1 hand when the captain's post is empty: 1.05; 32 of 34 saved ships, docs/re/crew.md).
     pub fn post_factor(&self, role: usize, skill: &str, slots: u32) -> f32 {
+        if slots == 0 && self.0[role].is_empty() {
+            let rating = self.0[1].first().and_then(|id| ability(id, skill)).map_or(1.0, |a| a * 10.0);
+            return (1.0 + 0.05 * rating) / 1.125;
+        }
         let named: Vec<f32> = self.0[role].iter().map(|id| skill_factor(ability(id, skill).unwrap_or(0.1))).collect();
         let slots = slots.max(named.len() as u32).max(1);
         (named.iter().sum::<f32>() + (slots as usize - named.len()) as f32) / slots as f32
+    }
+    /// The saved crew factor on sight range (absolute, like `ScanFactor`): the lookouts' spotting by the same rule as handling.
+    pub fn scan(&self, caps: &[u32; 8]) -> f32 {
+        self.post_factor(7, "spotting", caps[7]) * 1.125
     }
     pub fn combat(&self, role: usize, generic: f32) -> Vec<f32> {
         self.0[role].iter().map(|c| ability(c, "combat").unwrap_or(generic)).collect()
@@ -1066,12 +1076,16 @@ pub struct SkirmishCrew(pub [Vec<String>; 8]);
 fn apply_skirmish_crew(
     mut commands: Commands,
     lib: Res<Library>,
-    mut ships: Query<(Entity, &mut crate::Ship, &SkirmishCrew, &mut crate::boarding::Boardable), Added<SkirmishCrew>>,
+    mut ships: Query<(Entity, &mut crate::Ship, &SkirmishCrew, &mut crate::boarding::Boardable, Option<&mut crate::environment::ScanFactor>), Added<SkirmishCrew>>,
 ) {
-    for (e, mut ship, crew, mut boarding) in &mut ships {
+    for (e, mut ship, crew, mut boarding, scan) in &mut ships {
         let caps = crate::boarding::counts(&lib.classes[ship.class].name);
         let posts = CrewPosts(std::array::from_fn(|r| crew.0[r].iter().take(caps[r] as usize).cloned().collect()));
         (ship.crew_speed, ship.crew_turn) = posts.handling(&caps);
+        // A computer ship's sight follows its lookouts too (human ships keep their plain sight).
+        if let Some(mut scan) = scan {
+            scan.0 = posts.scan(&caps);
+        }
         boarding.apply_posts(&posts);
         commands.entity(e).insert(posts);
     }
@@ -1220,6 +1234,22 @@ mod tests {
         assert!((posts.post_factor(4, "engineering", 3) * 1.125 - 1.491667).abs() < 1e-5);
         assert!((CrewPosts(Default::default()).post_factor(4, "engineering", 3) - 1.0).abs() < 1e-6);
         assert!((skill_factor(0.7) * 1.125 - 1.425).abs() < 1e-5, "skill 7: the computer Carrack's saved factor");
+    }
+    /// A class with no engineer post is rated on its captain: 1 + 0.05 x the captain's rating (retail Sloops: 1.05 with an empty
+    /// captain post, 1.30 under a rating-6 captain), scan range likewise on the lookouts.
+    #[test]
+    fn a_post_a_class_lacks_is_rated_on_its_captain() {
+        let posts = CrewPosts(Default::default());
+        assert!((posts.post_factor(4, "engineering", 0) * 1.125 - 1.05).abs() < 1e-6);
+        assert!((posts.scan(&[0; 8]) - 1.05).abs() < 1e-6, "no lookout post, no captain: sight x 1.05");
+        assert!((posts.scan(&[0, 1, 0, 1, 1, 0, 0, 1]) - 1.125).abs() < 1e-6, "an empty lookout post: sight x 1.125");
+    }
+    #[test]
+    #[ignore = "needs imported assets"]
+    fn a_rated_captain_sets_the_factor_of_a_missing_post() {
+        let mut posts = CrewPosts(Default::default());
+        posts.0[1] = vec!["Crew_Navy_JimHawkins".into()]; // engineering 2
+        assert!((posts.post_factor(4, "engineering", 0) * 1.125 - 1.10).abs() < 1e-5);
     }
     #[test]
     #[ignore = "needs imported assets"]

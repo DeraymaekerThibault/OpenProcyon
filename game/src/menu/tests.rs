@@ -407,7 +407,7 @@ fn computer_fleets_use_auto_assign_inside_the_victory_limit() {
     sk.victory_limit = 60;
     let (n, points) = cost(&sk);
     assert!(n > 0 && points <= 60, "a small limit buys cheap hulls: {n} ships cost {points}");
-    assert!(sk.plan(&lib)[1].crew.is_empty(), "computer ships keep the measured computer crew factor");
+    assert!(sk.plan(&lib)[1].crew.iter().flatten().any(|post| !post.is_empty()), "computer ships carry named crew (retail saves), so their factors follow the posts");
 }
 #[test]
 #[ignore = "needs imported assets"]
