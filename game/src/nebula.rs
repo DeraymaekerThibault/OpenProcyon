@@ -196,14 +196,20 @@ fn step_meteor(m: &mut MeteorEmitter, pos: &mut Vec3, plan: &MeteorPlan, dt: f32
     follow_path(pos, &plan.path, &mut m.next, &mut m.forward, plan.mode, plan.speed, dt);
 }
 
-fn route_meteors(mut routes: MessageReader<MeteorRoute>, mut plans: ResMut<MeteorPlans>) {
+fn route_meteors(mut routes: MessageReader<MeteorRoute>, mut plans: ResMut<MeteorPlans>, storms: Option<Res<Storms>>) {
     for r in routes.read() {
-        match r {
-            MeteorRoute::Path { group, path, closest, mode } => {
-                let p = plans.0.entry(group.clone()).or_default();
-                (p.path, p.closest, p.mode) = (path.clone(), *closest, *mode);
-            }
-            MeteorRoute::Speed { group, speed } => plans.0.entry(group.clone()).or_default().speed = *speed,
+        let (group, apply): (&String, Box<dyn Fn(&mut MeteorPlan)>) = match r {
+            MeteorRoute::Path { group, path, closest, mode } => (group, Box::new(|p| (p.path, p.closest, p.mode) = (path.clone(), *closest, *mode))),
+            MeteorRoute::Speed { group, speed } => (group, Box::new(|p| p.speed = *speed)),
+        };
+        // A rule names a script group; the nebula follows under its own name when that group holds its object.
+        let held = storms
+            .iter()
+            .flat_map(|s| s.0.as_array().into_iter().flatten())
+            .filter(|n| n["groups"].as_array().is_some_and(|g| g.iter().any(|x| x == group.as_str())))
+            .filter_map(|n| n["name"].as_str());
+        for key in std::iter::once(group.as_str()).chain(held) {
+            apply(plans.0.entry(key.into()).or_default());
         }
     }
 }
@@ -697,6 +703,18 @@ mod tests {
 
     fn emitter(group: &str) -> MeteorEmitter {
         MeteorEmitter { group: group.into(), next: 0, forward: true, started: false }
+    }
+
+    #[test]
+    fn a_rule_moves_the_storm_whose_object_is_in_its_group() {
+        let mut app = App::new();
+        app.add_message::<MeteorRoute>().init_resource::<MeteorPlans>().add_systems(Update, route_meteors);
+        app.insert_resource(Storms(serde_json::json!([{ "name": "storm", "groups": ["stormgroup"] }, { "name": "other", "groups": [] }])));
+        app.world_mut().write_message(MeteorRoute::Speed { group: "stormgroup".into(), speed: 10.0 });
+        app.update();
+        let plans = &app.world().resource::<MeteorPlans>().0;
+        assert_eq!(plans["storm"].speed, 10.0);
+        assert!(!plans.contains_key("other"));
     }
 
     #[test]

@@ -151,7 +151,7 @@ Headless retail skirmishes, one computer ship against our idle or fleeing Navy C
   (radius 145) for 13 minutes instead of closing.
 - **Storms:** on Red Rover (solar-storm nebulae) idle ships of ours lost 5,400-6,300 hull points that no player was credited with, and a
   circling Carrack broke off at Emergency Speed shortly before; the save's avoid list names nebulae. PROVISIONAL reading: the
-  storm drifted over the idle ship and the computer captain kept out of it.
+  storm drifted over the idle ship and the computer captain kept out of it. Confirmed from the map data: Red Rover's script sends the group holding the storm round a looped route at 10 units/s (a rule at world start), and Storm Front's does the same; the group's name differs from the nebula's, so it is the group's member (the nebula's object) that ties them.
 - **Boarding:** Barques (Red Rover, two runs) boarded and captured a Man-O-War that was manoeuvring and being fired at (though rarely
   hit): after circling at ~60 units they dropped to ~3.5 units/s and made grapple passes to 12-18 units, broke away at speed to 40-110
   units, and came back; on the third pass in one run they held 12 units for ~12 s (grappled, winched) and the ship was taken within
