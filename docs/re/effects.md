@@ -236,6 +236,7 @@ to `models/debris/` and `sections[].debris` = {model, pivot}.
 - **Damage and debris smoke is thinned** to 15% of the authored rate (`fx::SMOKE_THINNING`, effects `Damaged Section_*` and `Falling_Debris`). Retail's additive
   smoke emits one particle per tick per system, each living ten seconds, several systems per section; here that saturates to a white blob on a damaged ship and
   is the main particle load in a long fight.
+- **Scene-wide particle budget** (`fx::SCENE_LIVE_BUDGET`, 15,000 live particles): above it every effect emits proportionally less. The worst single sources by authored rate are a Gattling tracer (about 600 live particles per bullet), docking points (2,400 each) and the gravity-charge impact (capped per primitive at 4,000). Not retail; PROVISIONAL size.
 - **A debris piece's smoke trail stops after 3 s** (`DEBRIS_SMOKE_TIME`); smoke already out fades on its own.
 - **Shell sprites use both of their textures.** A pseudo-billboard effect lists a side texture and a front texture (cannonballs, lancer shots, the Gattling
   tracer, meteors). Retail shows the side streak when seen from the side and a round glow when seen along the shell's flight line, which is what gives
