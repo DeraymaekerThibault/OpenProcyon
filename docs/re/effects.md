@@ -241,6 +241,8 @@ to `models/debris/` and `sections[].debris` = {model, pivot}.
   tracer, meteors). Retail shows the side streak when seen from the side and a round glow when seen along the shell's flight line, which is what gives
   its shells a 3D feel; we drew only the side texture. The streak and the camera-facing front quad are now drawn together, weighted by cos^2 of the angle between
   the view and the axis (PROVISIONAL blend). A cannonball is a glowing fireball with a flame tail, not an iron ball.
+  To look at every shell type at once: `tools/shot.sh local/x.png --script shells --shot-frame 45 --dist 80 --pitch 89` (also `--yaw`; the log lists the order,
+  two rows of up to twelve, left to right).
 
 ## Fire (ignite, update, fire-fighting)
 - Ignite on a hit: if the bullet's Chance of Fire for the section material is > 0 and a uniform roll is <= it (and an

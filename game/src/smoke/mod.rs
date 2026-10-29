@@ -2,6 +2,7 @@
 mod fleet;
 mod lifeboats;
 mod report;
+mod shells;
 pub use fleet::fleet_smoke;
 
 use crate::{Config, campaign::Mission, rules::RuleShip};
@@ -54,14 +55,15 @@ scripts! {
     LifeboatM4 => "lifeboat-m4", LifeboatM9 => "lifeboat-m9", LifeboatKill => "lifeboat-kill",
     MapInfo => "map-info", MenuSelected => "menu-selected", MenuFriendly => "menu-friendly", MenuEnemy => "menu-enemy",
     Mission => "mission", Pause => "pause", PauseRestart => "pause-restart", Quick => "quick",
-    Restart => "restart", Sight => "sight", Speedtest => "speedtest",
+    Restart => "restart", Shells => "shells", Sight => "sight", Speedtest => "speedtest",
     StormM3 => "storm-m3", StormM3Damage => "storm-m3-damage", Talk => "talk", Target => "target", Victory => "victory",
 }
 
 pub fn plugin(app: &mut App) {
     report::plugin(app);
     app.add_systems(PreUpdate, fleet::fleet_smoke.after(bevy::ui::UiSystems::Focus).before(crate::panels::hud_input))
-        .add_systems(PreUpdate, lifeboats::smoke.after(bevy::ui::UiSystems::Focus));
+        .add_systems(PreUpdate, lifeboats::smoke.after(bevy::ui::UiSystems::Focus))
+        .add_systems(Update, shells::shells);
 }
 
 /// Jump to the tender and damage the player to exercise repair; called at the original point in rule dispatch.
