@@ -408,7 +408,8 @@ impl Skirmish {
     }
     /// Whether fleet types and teams are chosen by the players (free-for-all open maps); team maps lock both to the map's team list.
     pub fn free_teams(&self) -> bool {
-        self.open() && self.map_json["teams"].as_array().is_none_or(|t| t.is_empty())
+        // The map's 'Is Alliance Change Allowed' (true on exactly the free-for-all maps); older imports fall back to 'no team list'.
+        self.open() && self.map_json["alliance_change"].as_bool().unwrap_or_else(|| self.map_json["teams"].as_array().is_none_or(|t| t.is_empty()))
     }
     /// The entries of a pull-down, the current value first (as the original lists them). Empty = the cell is not editable.
     pub fn choices(&self, cell: Cell) -> Vec<Choice> {
