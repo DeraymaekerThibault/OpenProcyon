@@ -40,6 +40,12 @@ def nebulae(text, source):
         out.append(
             {
                 "name": n["New Nebula Name"],
+                # the script groups holding this nebula's world object: rules move a storm by its group's name
+                "groups": [
+                    g
+                    for g, ids in m["groups"].items()
+                    if n.get("World Object ID") in ids
+                ],
                 "polygon": m["volumes"].get(n["Polygon Name"], []),
                 "cloud": {
                     "effect": n["Nebula Cloud Effect Name"],
