@@ -408,6 +408,11 @@ fn computer_fleets_use_auto_assign_inside_the_victory_limit() {
     let (n, points) = cost(&sk);
     assert!(n > 0 && points <= 60, "a small limit buys cheap hulls: {n} ships cost {points}");
     assert!(sk.plan(&lib)[1].crew.iter().flatten().any(|post| !post.is_empty()), "computer ships carry named crew (retail saves), so their factors follow the posts");
+    // Any gun a computer swapped in comes from the retail list (no harpoons, lancers, energy nets).
+    sk.victory_limit = 1000;
+    let swapped: Vec<String> = sk.plan(&lib)[1].weapons.iter().flat_map(|w| w.values().cloned()).collect();
+    assert!(!swapped.is_empty(), "a big budget buys some swaps");
+    assert!(swapped.iter().all(|g| super::skirmish::RETAIL_COMPUTER_GUNS.contains(&g.as_str())), "{swapped:?}");
 }
 #[test]
 #[ignore = "needs imported assets"]

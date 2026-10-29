@@ -232,11 +232,29 @@ pub fn offered(lib: &Library, race: u8) -> Vec<usize> {
 /// affordable hulls and weapons looked random: PROVISIONAL, here a fixed pseudo-random pick (a coin flip per bank) so the result
 /// repeats; crew go to the posts in order, best skill first. Computers use it too (PROVISIONAL: the original's computer fleet was
 /// not read out of a battle; the budget is the same victory limit, and `armed_only` keeps tenders and tugs out of its fleets).
-/// The guns computer captains may fit (`data/ai/weapons.json`, `{gun: true|false}`, merged key by key across mods). No file: every gun the
-/// arms editor allows (the original's own list is not read out; PROVISIONAL).
+/// The guns computer captains may fit (`data/ai/weapons.json`, `{gun: true|false}`, merged key by key across mods). No file: the guns
+/// retail computers were seen to fit (`RETAIL_COMPUTER_GUNS`).
 fn computer_guns() -> Option<std::collections::HashSet<String>> {
-    allowed_guns(&crate::data::try_json(&crate::assets_dir().join("data/ai/weapons.json"))?)
+    match crate::data::try_json(&crate::assets_dir().join("data/ai/weapons.json")) {
+        Some(list) => allowed_guns(&list),
+        None => Some(RETAIL_COMPUTER_GUNS.iter().map(|g| g.to_string()).collect()),
+    }
 }
+
+/// The guns retail computers swapped in, read from 36 computer ships in 14 battle saves (docs/re/skirmish-setup.md): never a harpoon,
+/// lancer, energy net, gravity charge or fire launcher, whatever the hull. PROVISIONAL: a gun that never appeared may still be allowed.
+pub(super) const RETAIL_COMPUTER_GUNS: &[&str] = &[
+    "Gun_Carronade_Light",
+    "Gun_Carronade_Med",
+    "Gun_Carronade_Heavy",
+    "Gun_Gattling_Light",
+    "Gun_Plasma_Light",
+    "Gun_Plasma_Med",
+    "Gun_Plasma_Heavy",
+    "Gun_CannonBall_Light",
+    "Gun_CannonBall_Med",
+    "Gun_StarMortar",
+];
 
 fn allowed_guns(list: &Value) -> Option<std::collections::HashSet<String>> {
     Some(list.as_object()?.iter().filter(|(_, on)| on.as_bool() == Some(true)).map(|(g, _)| g.clone()).collect())
