@@ -487,6 +487,10 @@ pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Libra
                 }
                 if let Some(crew) = g.crew.get(i).filter(|c| c.iter().any(|r| !r.is_empty())) {
                     commands.entity(e).insert(crate::crew_arms::SkirmishCrew(crew.clone()));
+                } else if g.human {
+                    // No crew assigned: every post holds the rating-1 hand, which still gives the lookout factor 1.125 (retail saves).
+                    let scan = crate::crew_arms::CrewPosts(Default::default()).scan(&crate::boarding::counts(name));
+                    commands.entity(e).insert(crate::environment::ScanFactor(scan));
                 }
                 if g.side == Side::Player && !(g.human && i == 0) {
                     commands.entity(e).remove::<PlayerShip>();

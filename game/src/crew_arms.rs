@@ -1076,16 +1076,14 @@ pub struct SkirmishCrew(pub [Vec<String>; 8]);
 fn apply_skirmish_crew(
     mut commands: Commands,
     lib: Res<Library>,
-    mut ships: Query<(Entity, &mut crate::Ship, &SkirmishCrew, &mut crate::boarding::Boardable, Option<&mut crate::environment::ScanFactor>), Added<SkirmishCrew>>,
+    mut ships: Query<(Entity, &mut crate::Ship, &SkirmishCrew, &mut crate::boarding::Boardable), Added<SkirmishCrew>>,
 ) {
-    for (e, mut ship, crew, mut boarding, scan) in &mut ships {
+    for (e, mut ship, crew, mut boarding) in &mut ships {
         let caps = crate::boarding::counts(&lib.classes[ship.class].name);
         let posts = CrewPosts(std::array::from_fn(|r| crew.0[r].iter().take(caps[r] as usize).cloned().collect()));
         (ship.crew_speed, ship.crew_turn) = posts.handling(&caps);
-        // A computer ship's sight follows its lookouts too (human ships keep their plain sight).
-        if let Some(mut scan) = scan {
-            scan.0 = posts.scan(&caps);
-        }
+        // Sight follows the lookouts, for every ship (retail: scan range = sight x the lookout post's factor, ours included).
+        commands.entity(e).insert(crate::environment::ScanFactor(posts.scan(&caps)));
         boarding.apply_posts(&posts);
         commands.entity(e).insert(posts);
     }
@@ -1151,6 +1149,11 @@ fn apply_outfit(
         });
         if posts != wanted.as_ref() {
             (ship.crew_speed, ship.crew_turn) = wanted.as_ref().map_or((1.0, 1.0), |p| p.handling(&crate::boarding::counts(&class.name)));
+            if ms.owner == mission.script.player() {
+                // The player's ships see as far as their lookouts allow (an empty post still gives 1.125).
+                let caps = crate::boarding::counts(&class.name);
+                commands.entity(e).insert(crate::environment::ScanFactor(wanted.as_ref().unwrap_or(&CrewPosts(Default::default())).scan(&caps)));
+            }
             if let Some(posts) = &wanted {
                 boarding.apply_posts(posts);
                 commands.entity(e).insert(posts.clone());
