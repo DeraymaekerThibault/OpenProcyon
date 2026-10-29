@@ -3,6 +3,7 @@ use bevy::prelude::*;
 use serde_json::Value;
 
 use super::*;
+use crate::profiles::{Profile, ShipProfile};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Kind {
@@ -139,10 +140,78 @@ impl Slot {
             .sum::<i64>()
             + self.crew.iter().flatten().flatten().map(|id| i64::from(crate::crew_arms::crew_points(id))).sum::<i64>()
     }
+    /// What Save writes for `kind`: the whole fleet, or the ship `i` (its crew or its guns).
+    pub fn profile_of(&self, kind: crate::profiles::Kind, i: usize) -> Profile {
+        let ship =
+            |i: usize| ShipProfile { class: self.fleet[i].clone(), crew: self.crew.get(i).cloned().unwrap_or_default(), arms: self.weapons.get(i).cloned().unwrap_or_default() };
+        let range = if kind == crate::profiles::Kind::Fleet { 0..self.fleet.len() } else { i..(i + 1).min(self.fleet.len()) };
+        Profile { name: String::new(), ships: range.map(ship).collect() }
+    }
+    /// Load: a fleet replaces the fleet; crew or arms replace those of ship `i` (same hull class). Refused, leaving the slot as it was, when
+    /// the fleet would exceed the size limit or the victory points, a hull is not on offer, or crew would be posted twice.
+    pub fn apply_profile(&mut self, kind: crate::profiles::Kind, p: &Profile, i: usize, lib: &Library, limit: u32, fleet_size: usize) -> Result<(), &'static str> {
+        use crate::profiles::Kind;
+        let mut next = self.clone();
+        match kind {
+            Kind::Fleet => {
+                if p.ships.len() > fleet_size {
+                    return Err("The fleet is larger than the fleet size limit.");
+                }
+                let offered = offered(lib, self.race);
+                next.clear_fleet();
+                for s in &p.ships {
+                    if !offered.iter().any(|&ci| lib.classes[ci].name == s.class) {
+                        return Err("The fleet has ships this fleet type cannot field.");
+                    }
+                    next.push_ship(&s.class);
+                    *next.crew.last_mut().unwrap() = s.crew.clone();
+                    *next.weapons.last_mut().unwrap() = s.arms.clone();
+                }
+            }
+            Kind::Crew | Kind::Arms => {
+                let (Some(s), Some(own)) = (p.ships.first(), self.fleet.get(i)) else { return Err("Pick a ship first.") };
+                if &s.class != own {
+                    return Err("The file is for another ship.");
+                }
+                if kind == Kind::Crew {
+                    let elsewhere = |id: &String| self.crew.iter().enumerate().any(|(j, c)| j != i && c.iter().flatten().any(|x| x == id));
+                    if s.crew.iter().flatten().any(elsewhere) {
+                        return Err("Some of the crew are posted on another ship.");
+                    }
+                    *next.crew_mut(i) = s.crew.clone();
+                } else {
+                    let class = lib.classes.iter().find(|c| &c.name == own).ok_or("Unknown ship.")?;
+                    if s.arms.iter().any(|(&b, g)| !crate::crew_arms::bank_compatible(lib, class, b, g)) {
+                        return Err("The weapons do not fit this ship.");
+                    }
+                    next.weapons.resize_with(self.fleet.len(), Default::default);
+                    next.weapons[i] = s.arms.clone();
+                }
+            }
+        }
+        if next.spent(lib) > i64::from(limit) {
+            return Err("Not enough victory points.");
+        }
+        *self = next;
+        Ok(())
+    }
     /// Where a named crew member is posted in this fleet: (fleet entry, post).
     pub fn crew_at(&self, id: &str) -> Option<(usize, usize)> {
         self.crew.iter().enumerate().find_map(|(i, c)| c.iter().position(|r| r.iter().any(|x| x == id)).map(|r| (i, r)))
     }
+}
+
+/// The Load / Save dialog of the Ships, Crew and Arms screens (retail Fleet / Crew / Arms File Dialog Screen): the profiles on offer,
+/// the picked one and the file name being typed.
+#[derive(Clone, PartialEq, Debug)]
+pub struct ProfileDialog {
+    pub kind: crate::profiles::Kind,
+    pub save: bool,
+    pub files: Vec<crate::profiles::Profile>,
+    pub picked: Option<usize>,
+    pub name: String,
+    pub scroll: usize,
+    pub error: Option<&'static str>,
 }
 
 /// What the front end has chosen; read by the battle setup.
@@ -179,6 +248,8 @@ pub struct Skirmish {
     pub arms_tab: bool,
     /// The lobby's Map Description dialog ('Map Info') is open.
     pub map_info: bool,
+    /// The Load / Save Fleet, Crew or Arms dialog, if open.
+    pub profile: Option<ProfileDialog>,
     /// First row of the classic fixed-height ship list.
     pub scroll: usize,
 }
@@ -502,6 +573,59 @@ impl Skirmish {
         self.slot_scroll = (self.slot_scroll as i64 + i64::from(d)).clamp(0, max as i64) as usize;
     }
     /// Keep the picked fleet slot inside the slot bar.
+    /// The profiles the dialog offers: a fleet's by fleet type, a ship's crew or arms by hull class.
+    pub fn open_profile(&mut self, kind: crate::profiles::Kind, save: bool, lib: &Library) {
+        use crate::profiles::Kind as K;
+        let Some(h) = self.human() else { return };
+        let ship = h.fleet.get(self.fleet_pick);
+        if save && (h.fleet.is_empty() || (kind != K::Fleet && ship.is_none())) || !save && kind != K::Fleet && ship.is_none() {
+            return;
+        }
+        let (offered, class) = (offered(lib, h.race), ship.cloned());
+        let fits = |p: &Profile| match kind {
+            K::Fleet => p.ships.iter().all(|s| offered.iter().any(|&ci| lib.classes[ci].name == s.class)),
+            _ => p.ships.len() == 1 && Some(&p.ships[0].class) == class.as_ref(),
+        };
+        let files = crate::profiles::list(kind).into_iter().filter(fits).collect();
+        self.profile = Some(ProfileDialog { kind, save, files, picked: None, name: String::new(), scroll: 0, error: None });
+    }
+    pub fn pick_profile(&mut self, n: usize) {
+        if let Some(d) = self.profile.as_mut().filter(|d| n < d.files.len()) {
+            d.picked = Some(n);
+            d.error = None;
+            if d.save {
+                d.name = d.files[n].name.clone();
+            }
+        }
+    }
+    /// Save writes the typed name; Load applies the picked file. A refused load keeps the dialog open with the reason.
+    pub fn do_profile(&mut self, lib: &Library) {
+        let Some(d) = self.profile.clone() else { return };
+        let (limit, size, pick) = (self.victory_limit, self.fleet_size, self.fleet_pick);
+        let Some(h) = self.slots.iter_mut().find(|s| s.kind == Kind::Human) else { return };
+        let result = if d.save {
+            let mut p = h.profile_of(d.kind, pick);
+            p.name = d.name.clone();
+            crate::profiles::write(d.kind, &p).map_err(|e| {
+                warn!("could not save the profile: {e}");
+                "Could not write the file."
+            })
+        } else if let Some(p) = d.picked.and_then(|n| d.files.get(n)) {
+            h.apply_profile(d.kind, p, pick, lib, limit, size)
+        } else {
+            return;
+        };
+        match result {
+            Ok(()) => {
+                self.profile = None;
+                if !d.save && d.kind == crate::profiles::Kind::Fleet {
+                    (self.fleet_pick, self.slot_scroll, self.view_slot, self.name_open) = (0, 0, true, false);
+                    self.show_picked_slot();
+                }
+            }
+            Err(e) => self.profile.as_mut().unwrap().error = Some(e),
+        }
+    }
     pub fn show_picked_slot(&mut self) {
         if self.fleet_pick < self.slot_scroll {
             self.slot_scroll = self.fleet_pick;

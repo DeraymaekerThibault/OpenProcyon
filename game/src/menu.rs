@@ -92,6 +92,11 @@ pub enum Action {
     Remove,
     /// Open or close the lobby's Map Description dialog.
     MapInfo(bool),
+    /// Open the Load (false) or Save (true) dialog of fleets, crews or arms; pick a file in it; Load / Save; Cancel.
+    OpenProfile(crate::profiles::Kind, bool),
+    PickProfile(usize),
+    DoProfile,
+    CloseProfile,
     QuitToMenu,
     QuickSave,
     QuickLoad,
@@ -233,6 +238,7 @@ pub fn plugin(app: &mut App) {
         arms_open: false,
         arms_tab: false,
         map_info: false,
+        profile: None,
     };
     sk.load_map();
     app.insert_resource(sk)
@@ -256,6 +262,7 @@ pub fn plugin(app: &mut App) {
                 button_sounds.before(RunButtons).run_if(menu_active),
                 save_actions,
                 save_text.run_if(menu_active),
+                profile_keys.run_if(menu_active),
             ),
         )
         .add_systems(PostUpdate, (summary_on_end, esc_menu).chain().run_if(in_state(Screen::Battle)))
@@ -469,9 +476,11 @@ impl MenuModel<'_> {
 }
 
 /// Dev/smoke hook (`--menu lobby --autolaunch`): fills the human fleet like the fleet screen would and launches.
-/// Screenshot hook (`--menu fleet --script fleet-crew|fleet-arms`): an auto-assigned Navy fleet with the Crew / Arms screen open.
+/// Screenshot hook (`--menu fleet --script fleet-crew|fleet-arms`): an auto-assigned Navy fleet with the Crew / Arms screen open;
+/// `fleet-profile` / `fleet-profile-crew` open the Save Fleet / Save Crew dialog on it, typed with a name.
 fn fleet_hook(mut sk: ResMut<Skirmish>, lib: Res<Library>, cfg: Res<crate::Config>, mut done: Local<bool>) {
-    if *done || !matches!(cfg.script, Some(crate::smoke::Script::FleetCrew | crate::smoke::Script::FleetArms)) {
+    use crate::smoke::Script as S;
+    if *done || !matches!(cfg.script, Some(S::FleetCrew | S::FleetArms | S::FleetProfile | S::FleetProfileCrew)) {
         return;
     }
     *done = true;
@@ -480,8 +489,22 @@ fn fleet_hook(mut sk: ResMut<Skirmish>, lib: Res<Library>, cfg: Res<crate::Confi
     }
     sk.fleet_size = 5;
     apply(&mut sk, &lib, &Action::AutoAssign);
-    sk.arms_open = true;
-    sk.arms_tab = cfg.script == Some(crate::smoke::Script::FleetArms);
+    sk.arms_open = cfg.script != Some(S::FleetProfile);
+    sk.arms_tab = cfg.script == Some(S::FleetArms);
+    match cfg.script {
+        Some(S::FleetProfile) => sk.open_profile(crate::profiles::Kind::Fleet, true, &lib),
+        Some(S::FleetProfileCrew) => sk.open_profile(crate::profiles::Kind::Crew, true, &lib),
+        _ => {}
+    }
+    if let Some(d) = sk.profile.as_mut() {
+        d.name = "Strike fleet".into();
+    }
+    // The fleet profile is saved, then listed in the Load dialog with its points.
+    if cfg.script == Some(S::FleetProfile) {
+        sk.do_profile(&lib);
+        sk.open_profile(crate::profiles::Kind::Fleet, false, &lib);
+        sk.pick_profile(0);
+    }
 }
 
 fn autolaunch(mut sk: ResMut<Skirmish>, lib: Res<Library>, cfg: Res<crate::Config>, mut next: ResMut<NextState<Screen>>) {
@@ -663,6 +686,10 @@ fn apply(sk: &mut Skirmish, lib: &Library, action: &Action) {
         }
         Action::PickShip(row) => (sk.ship_pick, sk.ship_chosen, sk.view_slot, sk.name_open) = (*row, true, false, false),
         Action::MapInfo(open) => sk.map_info = *open,
+        Action::OpenProfile(kind, save) => sk.open_profile(*kind, *save, lib),
+        Action::PickProfile(n) => sk.pick_profile(*n),
+        Action::DoProfile => sk.do_profile(lib),
+        Action::CloseProfile => sk.profile = None,
         Action::PickFleet(row) => {
             (sk.fleet_pick, sk.view_slot, sk.name_open) = (*row, true, false);
             sk.show_picked_slot();
@@ -711,7 +738,8 @@ fn buttons(
         if *i != Interaction::Pressed {
             continue;
         }
-        if sk.arms_open {
+        let profile = matches!(action, Action::OpenProfile(..) | Action::PickProfile(_) | Action::DoProfile | Action::CloseProfile);
+        if sk.arms_open && !profile {
             continue;
         }
         apply(&mut sk, &lib, action);

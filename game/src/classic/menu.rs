@@ -107,6 +107,9 @@ fn build(
                 if *state.get() == Screen::Lobby && sk.map_info {
                     map_info_dialog(&ctx, c, sk, strings);
                 }
+                if *state.get() == Screen::Fleet && !sk.arms_open {
+                    profile_dialog(&ctx, c, sk, &model.lib, strings);
+                }
             });
         });
 }
@@ -327,6 +330,10 @@ fn element(ctx: &Ctx, c: &mut ChildSpawnerCommands, m: &MenuModel, e: &Value, st
             None
         }
         (Screen::Fleet, "AutoAssign Button") => Some(Action::AutoAssign),
+        (Screen::Fleet, "Open Load Fleet Profile Dialog Button") => Some(Action::OpenProfile(crate::profiles::Kind::Fleet, false)),
+        (Screen::Fleet, "Open Save Fleet Profile Dialog Button") if sk.human().is_some_and(|h| !h.fleet.is_empty()) => {
+            Some(Action::OpenProfile(crate::profiles::Kind::Fleet, true))
+        }
         (Screen::CreateSkirmish, "Victory Limit Label") => {
             ctx.text(
                 c,
@@ -716,6 +723,42 @@ fn map_info_dialog(ctx: &Ctx, c: &mut ChildSpawnerCommands, sk: &Skirmish, strin
     ctx.image(c, "menu/frontenddialogscreen.png", None, x, y, w, h, Color::WHITE);
     wrapped(ctx, c, "Univers10", sk.map_json["description"].as_str().unwrap_or_default(), [146.0, 207.0, 641.0, 330.0]);
     ctx.text_button(c, [324.0, 339.0, 457.0, 383.0], &text_of(strings, "IDGS_TPFRONTENDTEXT01_BACK"), "BlackChancery16", Action::MapInfo(false));
+}
+
+/// The Load / Save dialog of fleets, crews and arms (`Fleet File Dialog Screen.tst` and its Crew and Arms twins, same layout): the frame
+/// over the screen, the profile list with its title, the picked profile's victory points, the file name entry, Save / Load and Cancel.
+/// A full-screen blocker keeps what is beneath from reacting. PROVISIONAL: title and number positions are eyeballed from a screenshot.
+pub(super) fn profile_dialog(ctx: &Ctx, c: &mut ChildSpawnerCommands, sk: &Skirmish, lib: &Library, strings: &Value) {
+    use crate::profiles::Kind as K;
+    let Some(d) = &sk.profile else { return };
+    let s = |id: &str| text_of(strings, id);
+    c.spawn((ctx.node(0.0, 0.0, 800.0, 600.0), Interaction::None, bevy::ui::FocusPolicy::Block, BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.35)), ZIndex(1)));
+    c.spawn((ctx.node(0.0, 0.0, 800.0, 600.0), ZIndex(2))).with_children(|c| {
+        let [x, y, w, h] = dialog_frame([69.0, 169.0, 603.0, 420.0]);
+        ctx.image(c, "menu/frontenddialogscreen.png", None, x, y, w, h, Color::WHITE);
+        let title = match d.kind {
+            K::Fleet => "IDGS_TPFRONTENDTEXT01_PROFILES_FLEET",
+            K::Crew => "IDGS_TPFRONTENDTEXT01_PROFILES_CREW",
+            K::Arms => "IDGS_TPFRONTENDTEXT01_PROFILES_ARMS",
+        };
+        ctx.text(c, "UniversBold14", &s(title), 189.0, 297.0, 232.0, true, Color::WHITE);
+        for (i, p) in d.files.iter().enumerate().skip(d.scroll).take(crate::menu::PROFILE_ROWS) {
+            cell(ctx, c, [189.0, 248.0 + (i - d.scroll) as f32 * 19.0, 297.0, 18.0], &p.name, d.picked == Some(i), Some(Action::PickProfile(i)));
+        }
+        ctx.text(c, "UniversBold14", &s("IDGS_TPFRONTENDTEXT_SCREENS_VICTORYPOINTS"), 500.0, 134.0, 232.0, true, Color::WHITE);
+        if let Some(p) = d.picked.and_then(|n| d.files.get(n)) {
+            ctx.text(c, "UniversBold14", &p.points(lib).to_string(), 500.0, 134.0, 262.0, true, Color::srgb(1.0, 0.9, 0.4));
+        }
+        let (go, ready) = if d.save { ("IDGS_TPFRONTENDTEXT_SCREENS_SAVE", !d.name.trim().is_empty()) } else { ("IDGS_TPFRONTENDTEXT_SCREENS_LOAD", d.picked.is_some()) };
+        ctx.button(c, [505.0, 284.0, 627.0, 328.0], &s(go), "BlackChancery16", ready.then_some(Action::DoProfile));
+        ctx.text_button(c, [505.0, 337.0, 627.0, 381.0], &s("IDGS_TPFRONTENDTEXT_SCREENS_CANCEL"), "BlackChancery16", Action::CloseProfile);
+        ctx.text(c, BODY_FONT, &s("IDGS_TPFRONTENDTEXT_SCREENS_FILENAME"), 128.0, 135.0, 359.5, true, Color::WHITE);
+        let typed = if d.save { format!("{}_", d.name) } else { String::new() };
+        cell(ctx, c, [278.0, 341.0, 159.0, 41.0], &typed, false, None::<Action>);
+        if let Some(e) = d.error {
+            ctx.text(c, BODY_FONT, e, 189.0, 297.0, 398.0, true, Color::srgb(1.0, 0.4, 0.3));
+        }
+    });
 }
 
 const SHIP_ROWS: usize = 8;

@@ -61,7 +61,7 @@ behaviour not from original evidence) · Unvalidated (implemented, not compared 
 | CAM-03 | Partial | Mid-mission save/load: saves restart the mission; no snapshot of ships, projectiles, AI, timers, rule progress. | `campaign.rs`; [scoring-saves.md](re/scoring-saves.md) |
 | CAM-04 | Partial | Difficulty effects beyond damage, retail stats/outfitting layout, economy calibration. | `stats.rs`, `crew_arms.rs`; [scoring-saves.md](re/scoring-saves.md) |
 | FE-01 | Provisional | Profiles; inventory of other retail front-end paths; `fe_*` front-end sounds unwired. | `menu.rs`, `classic/menu.rs` |
-| FE-02 | Partial | Skirmish arms: victory-point budget/Auto Assign for weapons, crew/fleet load-save, AI fleet construction; owner acceptance. | `menu.rs`; [skirmish-setup.md](re/skirmish-setup.md) |
+| FE-02 | Partial | Skirmish arms: victory-point budget/Auto Assign for weapons, AI fleet construction; owner acceptance. | `menu.rs`; [skirmish-setup.md](re/skirmish-setup.md) |
 | INV-01 | Unknown | Complete inventory of ship/weapon variants, scenery gameplay, alternate campaign branches. An exported asset is not runtime support. | manual, TST/TWT/WOT, exporters |
 
 ### Front end against retail screenshots
@@ -71,8 +71,8 @@ Reference screenshots are local only (`local/reference/`, never committed).
 | ID | Status | Open work |
 |---|---|---|
 | UIR-01 | Partial | World labels and star map still use vector fonts, not the retail glyph sheets. |
-| UIR-05 | Partial | Ships screen: ship-name drop-down, Load/Save Fleet, slot-bar scrolling. |
-| UIR-06 | Partial | Crew/Arms: skirmish crew roster, drag and drop, Load/Save, Auto Assign, stat-bar post mapping ([crew.md](re/crew.md)). |
+| UIR-05 | Partial | Ships screen: ship-name drop-down, slot-bar scrolling. |
+| UIR-06 | Partial | Crew/Arms: skirmish crew roster, drag and drop, Auto Assign, stat-bar post mapping ([crew.md](re/crew.md)). |
 | UIR-08 | Partial | Game Summary: retail VICTORY! matches the layout (one page, green bar per column's best, winner's row first; rows now ordered by ships left). Open: panel art, flag choice, whether campaign summaries add a kills-by-type table. |
 | UIR-09 | Unvalidated | Battle HUD vs `battle_hud.png` and the 2026-10-15 references (player list, speech box, talking head, weapon bar). |
 | UIR-10 | Partial | Ship selection: "N victory points remaining" dialog (Auto Assign / Cancel / Continue). |
