@@ -120,6 +120,15 @@ The layout stores **leader-relative distance and angle**; reconstructs a slot fr
 
 Formation following checks fleet/type/membership, gets the current slot, adds a leader-velocity look-ahead, and chooses speed according to slot/heading conditions and leader/follower limits. It supplies a movement path and normalizes the desired speed against follower maximum speed. This is continuous following, not a one-off spawn arrangement or cloned group waypoints. Attacking in formation combines formation movement and attack handling.
 
+**Measured (retail, Diablo Strait, Easy; one Cutter in a Diamond slot behind a stationary Man-O-War, 30 Hz logs):** the follower starts
+moving about 5 s after the order, spends ~3.5 s at 1-1.8 units/s turning to face its slot, then runs at full speed (Cutter ~9) and holds it
+until ~4 units from the slot, then stops dead (8.5 -> 2.1 -> 0 within 1 s, arriving at 0.0 units). There is no proportional slow-down on the
+way in. In the slot it matches the leader's speed (2.3 with the leader at Ahead Full) and keeps its leader-relative offset within a few
+units. The slot itself sat 46.7 units from the leader at 31 degrees off the stern for the second member (35 degrees nominal; the member
+size R behind the spacing is therefore about 17 here). Remake: `follow_speed` (full speed beyond 4.5 units, then the leader's speed),
+turn-in-place and the start delay come from the shared ship model (the delay is not modelled, PROVISIONAL). One run, one follower; whether
+the controller treats the leader's turns with a look-ahead is not yet separated from this data.
+
 **Unknown:** exact look-ahead/catch-up/heading thresholds, collision/path-planner interplay, member reassignment after casualty or primary change, whether every position-locked ship is excluded by each fleet command, and native size-field equivalence. These are calibration tasks, not a reason to implement None/Custom/Column as LineAbreast.
 
 ### Mission evidence that needs real consumers
