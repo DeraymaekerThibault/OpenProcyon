@@ -122,14 +122,14 @@ skill can read N/A). Dragging one onto a post spends its cost (a 9-point captain
 - Historical maps: the world rules' `*State Init* Setup Ship` action gives each pre-placed ship (by world object id) a script name and a
   localized name id; the exporter stores the English text as `ships[].name` in the map JSON. The banner shows it.
 - Open maps: each ship type's WOT lists 12 `Available Unique Ship Name ID NN` strings (`data/ship_names.json`, `tools/export_ship_names.py`).
-  Remake: a random unused name of the type's pool per ship (repeats only once the pool is used up). PROVISIONAL: the original's pick and uniqueness scope.
+  Remake: a random unused name of the type's pool per ship (repeats only once the pool is used up). Measured in 14 retail battle saves (2026-10): computer and human ships alike carry a pool name, never repeated within a battle (about 40 ships), and the same hull drew different names in different launches, so the pick is random per ship and unique per battle.
 - Fleet screen (measured on the original): while a fleet ship is shown (after Add or clicking its slot, not when only a hull type is
   clicked) a name box sits at the top left of the preview: the ship's name plus a pull-down arrow, widening with the name. Holding the
   button on it opens a list under the box of the hull's *other* names, in the pool's fixed order (11 of the 12), 19 px apart; releasing
   over an entry renames the ship, and the old name returns to the list at its pool position. A fresh ship starts with some pool name
   (two adds of the same hull showed different ones). Remake: `Slot::names`, the box is `ship_name_field`; the default is the first pool
-  name no other ship of the fleet bears (PROVISIONAL, retail's looked random); the picked names are the ships' battle names, and the
-  computers' random picks skip them. PROVISIONAL: whether two ships of a fleet may share a name in retail, and the box's exact look.
+  name no other ship of the fleet bears (retail's pick is random, see above); the picked names are the ships' battle names, and the
+  computers' random picks skip them. PROVISIONAL: the box's exact look (a fleet sharing a name with another fleet was not seen; none repeated within a battle).
 - Campaign ships keep their rule-set names (`MissionShip`).
 
 ## Arms acceptance (owner-run)
