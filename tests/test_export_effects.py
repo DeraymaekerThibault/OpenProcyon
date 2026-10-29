@@ -1,8 +1,10 @@
+import json
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from tests.imported import ASSETS, needs_assets
 from tools.eft import parse_eft
 from tools.export_effects import EXTRAS, export_morph_meshes
 from tools.models import model_path
@@ -103,3 +105,18 @@ NumberLoops Int 9999999
                 },
             )
             converter.assert_not_called()
+
+
+@needs_assets
+class WeaponEffectsAreExported(unittest.TestCase):
+    def test_every_bullet_hit_and_muzzle_effect_exists(self):
+        # Base and island guns (heavy carronade) are exported after the stock ships; their shells were invisible without this.
+        index = set(json.loads((ASSETS / "fx/index.json").read_text()))
+        wdir = ASSETS / "data/weapons"
+        names = set()
+        for rec in json.loads((wdir / "bullets.json").read_text()).values():
+            names |= {rec.get("bullet_fx"), rec.get("hit_fx")}
+        for rec in json.loads((wdir / "guns.json").read_text()).values():
+            names.add(rec.get("MuzzleFlashEffect"))
+        names -= {None, "", "none", "NoEffect"}
+        self.assertEqual(sorted(names - index), [])

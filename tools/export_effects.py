@@ -114,6 +114,21 @@ def main(root, outdir, ship_jsons):
     names = set(EXTRAS)
     for p in ship_jsons:
         names |= fx_names(json.loads(Path(p).read_text()))
+    # Weapons no stock ship carries (base and island guns, swappable guns) are exported before this step; their bullet, impact and
+    # muzzle effects are needed too, or their shells are invisible.
+    wdir = Path(outdir) / "data/weapons"
+    for f, keys in (
+        ("bullets.json", ("bullet_fx", "hit_fx")),
+        ("guns.json", ("MuzzleFlashEffect",)),
+    ):
+        if (wdir / f).is_file():
+            for rec in json.loads((wdir / f).read_text()).values():
+                names |= {rec.get(k) for k in keys}
+    if (
+        fx / "index.json"
+    ).is_file():  # a second pass (after the base weapons exist) adds to the first
+        names |= set(json.loads((fx / "index.json").read_text()))
+    names -= {None, "none", "NoEffect", ""}
     done, missing = [], []
     for n in sorted(names):
         try:

@@ -249,6 +249,8 @@ def steps(root, out, want, part=lambda i, k: None):
         ("layout", lambda: tool("tools.pack_layout", out)),
         # Armed bases (island gun towers) join the ship folders; needs data/weapons from pack_data.
         ("bases", lambda: tool("tools.export_bases", root, out)),
+        # The base guns' bullet, impact and muzzle effects (no stock ship carries them).
+        ("base effects", lambda: tool("tools.export_effects", root, out)),
     ]
 
 
