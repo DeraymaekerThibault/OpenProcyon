@@ -702,6 +702,22 @@ pub fn fleet_help(world: &mut World, owner: &str, attack: bool) {
     }
 }
 
+/// Distance to the slot inside which a follower stops closing (retail Cutter: full speed to ~4 units out, then stops).
+const SLOT_ARRIVE: f32 = 4.5;
+
+/// A follower's wanted speed. Measured on retail (docs/re/fleet-controls.md, Diamond slot behind a stationary Man-O-War): full speed until
+/// the last few units, then it stops dead; in the slot it matches the leader's speed. No proportional slow-down on the way in. A ship
+/// sent to a destination (not holding formation) stops within 5 units of it.
+fn follow_speed(hold: bool, distance: f32, leader_speed: f32, max: f32) -> f32 {
+    if hold {
+        if distance > SLOT_ARRIVE { max } else { leader_speed.clamp(0.0, max) }
+    } else if distance < 5.0 {
+        0.0
+    } else {
+        max
+    }
+}
+
 /// Where a follower aims on its way to `goal`: straight, unless that line passes within `clearance` of the leader (a slot behind the
 /// leader is reached from beside it at spawn), then a point off the leader's flank on the side the line already passes. PROVISIONAL: the
 /// original's follower pathing is unknown; this only keeps followers from driving through the ship they follow and shoving it.
@@ -757,14 +773,7 @@ pub fn fleet_follow(world: &mut World) {
                 let lib = world.resource::<Library>();
                 let clearance = lib.classes[ship.class].radius + world.get::<Ship>(leader).map_or(0.0, |l| lib.classes[l.class].radius);
                 let aim = steer_round(here, goal, tf.translation, clearance);
-                // PROVISIONAL proportional catch-up controller; native look-ahead/heading thresholds await calibration.
-                let wanted = if pilot.hold {
-                    (speed + distance * 0.15).min(max)
-                } else if distance < 5.0 {
-                    0.0
-                } else {
-                    max
-                };
+                let wanted = follow_speed(pilot.hold, distance, speed, max);
                 if let Some(mut s) = world.get_mut::<Ship>(e) {
                     s.waypoints = if distance > 3.0 { vec![aim] } else { vec![] };
                     s.goal = if pilot.hold { Some((-(tf.rotation * Vec3::NEG_Z).x).atan2(-(tf.rotation * Vec3::NEG_Z).z)) } else { None };
@@ -789,5 +798,18 @@ mod steer_round_tests {
         let aim = steer_round(from, goal, leader, 40.0);
         assert!(aim.length() > 40.0 && aim != goal, "{aim:?}");
         assert_eq!(steer_round(Vec3::new(200.0, 0.0, 0.0), Vec3::new(300.0, 0.0, 0.0), leader, 60.0), Vec3::new(300.0, 0.0, 0.0));
+    }
+}
+
+#[cfg(test)]
+mod follow_speed_tests {
+    use super::follow_speed;
+    #[test]
+    fn followers_run_full_speed_until_the_slot_then_match_the_leader() {
+        assert_eq!(follow_speed(true, 30.0, 0.0, 9.0), 9.0);
+        assert_eq!(follow_speed(true, 5.0, 0.0, 9.0), 9.0);
+        assert_eq!(follow_speed(true, 2.0, 0.0, 9.0), 0.0);
+        assert_eq!(follow_speed(true, 2.0, 2.3, 9.0), 2.3);
+        assert_eq!(follow_speed(true, 2.0, 20.0, 9.0), 9.0);
     }
 }
