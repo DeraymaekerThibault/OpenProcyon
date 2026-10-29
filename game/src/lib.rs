@@ -28,6 +28,7 @@ pub mod modding;
 pub mod nebula;
 pub mod options_menu;
 pub mod panels;
+pub mod profiles;
 pub mod rules;
 pub mod scenario;
 pub mod setup;

@@ -249,10 +249,15 @@ pub fn list_saves() -> Vec<(CampaignSave, bool)> {
     all
 }
 
-/// Player save file for `name`: only letters, digits, space, `-` and `_` survive, so a name cannot escape the folder.
-fn save_path(name: &str) -> Option<std::path::PathBuf> {
+/// A file name from user input: only letters, digits, space, `-`, `_` and brackets survive, so a name cannot escape its folder.
+pub fn clean_name(name: &str) -> String {
     let clean: String = name.chars().filter(|c| c.is_alphanumeric() || " -_()".contains(*c)).collect();
-    let clean = clean.trim();
+    clean.trim().to_string()
+}
+
+/// Player save file for `name`.
+fn save_path(name: &str) -> Option<std::path::PathBuf> {
+    let clean = clean_name(name);
     (!clean.is_empty()).then(|| user_dir().map(|d| d.join("saves").join(format!("{clean}.json"))))?
 }
 

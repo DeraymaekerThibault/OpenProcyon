@@ -7,7 +7,7 @@ use super::widgets::{
 };
 use crate::combat::Library;
 use crate::crew_arms::{Action, CrewSet, FitView, SORTS, ScreenModel};
-use crate::menu::{ScrollKind, strings, text_of};
+use crate::menu::{Action as MenuAction, ScrollKind, strings, text_of};
 use crate::sprites::{BODY_FONT, Fonts, HudData, IDLE, offset};
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
@@ -46,11 +46,16 @@ fn build(
     hud: Option<Res<HudData>>,
     fonts: Option<Res<Fonts>>,
     lib: Res<Library>,
+    sk: Res<crate::menu::Skirmish>,
+    mut shown: Local<Option<crate::menu::ProfileDialog>>,
     window: Single<&Window, With<PrimaryWindow>>,
 ) {
-    if !model.is_changed() && (model.open == !old.is_empty()) {
+    // The profile dialog lives in the skirmish state, which changes every frame here (the picked ship is written back): compare it.
+    let dialog_changed = *shown != sk.profile;
+    if !model.is_changed() && !dialog_changed && (model.open == !old.is_empty()) {
         return;
     }
+    *shown = sk.profile.clone();
     for root in &old {
         commands.entity(root).despawn();
     }
@@ -84,8 +89,9 @@ fn build(
             } else {
                 ("IDGS_TPFRONTENDTEXT_SCREENS_LOAD_CREW", "IDGS_TPFRONTENDTEXT_SCREENS_SAVE_CREW")
             };
-            ctx.button(c, [502.0, 45.0, 628.0, 83.0], &s(load), "BlackChancery16", None::<Action>);
-            ctx.button(c, [634.0, 45.0, 759.0, 83.0], &s(save), "BlackChancery16", None::<Action>);
+            let kind = if fit.arms { crate::profiles::Kind::Arms } else { crate::profiles::Kind::Crew };
+            ctx.button(c, [502.0, 45.0, 628.0, 83.0], &s(load), "BlackChancery16", (!fit.fleet.is_empty()).then_some(MenuAction::OpenProfile(kind, false)));
+            ctx.button(c, [634.0, 45.0, 759.0, 83.0], &s(save), "BlackChancery16", (!fit.fleet.is_empty()).then_some(MenuAction::OpenProfile(kind, true)));
             victory_points(&ctx, c, [488.0, 79.0, 772.0, 109.0], &format!("{} : ", s("IDGS_TPFRONTENDTEXT01_CURRENT_VICTORY_POINTS")), fit.points);
             slot_bar(&ctx, c, fit, &lib);
             if fit.arms {
@@ -98,6 +104,7 @@ fn build(
             // Next arrow: back to the ships.
             let mut next = c.spawn((Interaction::None, Action::Close, ctx.node(590.0, 510.0, 80.0, 80.0)));
             next.with_children(|c| _ = piece(&ctx, c, "FrontEnd_Next_Button", [0.0, 0.0, 80.0, 80.0]));
+            super::menu::profile_dialog(&ctx, c, &sk, &lib, strings);
         });
         if let Some(icon) = &fit.carrying
             && let Some(e) = piece(&ctx, root, icon, [0.0, 0.0, FACE, FACE])

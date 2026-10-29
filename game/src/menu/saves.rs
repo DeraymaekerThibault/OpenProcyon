@@ -155,3 +155,38 @@ pub(super) fn save_text(mut keys: MessageReader<bevy::input::keyboard::KeyboardI
         }
     }
 }
+
+/// Keys of the Load / Save profile dialog: typing the file name, Backspace, Enter (Load / Save), Escape (Cancel) and the wheel over the list.
+pub(super) fn profile_keys(
+    mut keys: MessageReader<bevy::input::keyboard::KeyboardInput>,
+    mut wheel: MessageReader<bevy::input::mouse::MouseWheel>,
+    mut sk: ResMut<Skirmish>,
+    lib: Res<Library>,
+) {
+    use bevy::input::keyboard::Key;
+    if sk.profile.is_none() {
+        keys.clear();
+        wheel.clear();
+        return;
+    }
+    let dy: f32 = wheel.read().map(|w| w.y).sum();
+    for k in keys.read().filter(|k| k.state.is_pressed()) {
+        let Some(d) = sk.profile.as_mut() else { break };
+        match &k.logical_key {
+            Key::Character(c) if d.save && d.name.chars().count() < 32 => d.name.extend(c.chars().filter(|c| !c.is_control())),
+            Key::Space if d.save && d.name.chars().count() < 32 => d.name.push(' '),
+            Key::Backspace => {
+                d.name.pop();
+            }
+            Key::Escape => sk.profile = None,
+            Key::Enter => sk.do_profile(&lib),
+            _ => {}
+        }
+    }
+    if let Some(d) = sk.profile.as_mut().filter(|_| dy != 0.0) {
+        d.scroll = (d.scroll as i64 - dy.signum() as i64).clamp(0, d.files.len().saturating_sub(PROFILE_ROWS) as i64) as usize;
+    }
+}
+
+/// Rows of the dialog's file list (the retail list area is 90 units high).
+pub const PROFILE_ROWS: usize = 4;

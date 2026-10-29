@@ -837,7 +837,7 @@ fn skirmish_screen(
     } else {
         None
     };
-    let action = if keys.just_pressed(KeyCode::Enter) || keys.just_pressed(KeyCode::Escape) { Some(Action::Close) } else { pressed.or(released_on) };
+    let action = if sk.profile.is_none() && (keys.just_pressed(KeyCode::Enter) || keys.just_pressed(KeyCode::Escape)) { Some(Action::Close) } else { pressed.or(released_on) };
     if action == Some(Action::Close) {
         keys.clear_just_pressed(KeyCode::Enter);
         keys.clear_just_pressed(KeyCode::Escape);
@@ -983,6 +983,7 @@ fn skirmish_screen(
     let Some(slot) = sk.slots.iter().find(|s| s.kind == crate::menu::Kind::Human) else { return };
     let next = skirmish_screen_model(&sk, slot, &lib, &mut choice, &carry, *sort, *sort_open, points);
     sk.fleet_pick = choice.ship;
+    sk.arms_tab = choice.arms;
     sk.show_picked_slot();
     if *model != next {
         *model = next;

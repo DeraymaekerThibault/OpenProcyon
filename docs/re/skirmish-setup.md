@@ -65,6 +65,12 @@ remaining. Would you like to continue?" with Auto Assign / Cancel / Continue.
   unspent, so the leftover is not always spent (it was 0 only on small budgets). The pick among affordable hulls looked random: PROVISIONAL. The remake uses a fixed pseudo-random pick, a coin flip per weapon bank on the hulls it adds, and gives the leftover to the best
   affordable crew per post.
 
+**Load / Save Fleet, Crew, Arms.** Each opens a modal gold frame ("Fleet / Crew / Arms Profiles") with a list of files, a *Victory Points*
+column header (the picked file's cost), a *File Name* entry and Save (or Load) and Cancel buttons; the same layout for all three. Save with a name
+closes the dialog; Load stays greyed until a file is picked. Saving a fleet wrote three files in the install's `UserFleetProfiles`: the fleet
+list, a crew file and an arms file for the ship slots (one record per ship). The game also ships one such profile (a mission 1 torpedo boat fleet with
+named crew). Not measured: which files the lists offer for another hull or race, and what Load does when the file costs more than the budget.
+
 **Arms tab.** A top-down ship outline with one icon per selectable weapon bank (a mount of several guns is one bank). Clicking a bank
 shows a tooltip "Heavy Mount / 4 Guns" and the list *Available Weapons* for that mount type, the fitted gun highlighted, with its name,
 max range, best range, damage range and Point Cost. Dragging a weapon from the list onto the bank swaps it; the left panel then says
@@ -91,6 +97,12 @@ skill can read N/A). Dragging one onto a post spends its cost (a 9-point captain
   follows the measured rules and uses the original's messages (wrong mount, not enough points, Total Cost).
 - In battle the human fleet's named crew become `CrewPosts` (speed and rudder factors, boarding crews) through `SkirmishCrew`.
   Named gunners (posts) already drive the human ships' accuracy and gun reload (`combat/gunnery.rs`, docs/re/gunnery.md).
+- Load / Save Fleet, Crew and Arms (`profiles.rs`, `Skirmish::open_profile` / `do_profile`, `Slot::apply_profile`, dialog drawn by `classic/menu.rs` `profile_dialog`
+  on the Ships and Crew/Arms screens): same dialog as above, our own JSON files (`docs/data-format.md`). A fleet file lists the human fleet type's hulls
+  with crew and swapped guns; a crew or arms file is for the selected ship's hull class. Load is refused with a message when the fleet exceeds the
+  size limit or the victory points, a hull is not on offer, a crew member is posted on another ship or a gun does not fit its bank; the fleet is left as it was.
+  Enter saves / loads, Escape cancels, the wheel scrolls the list. PROVISIONAL: the lists' filtering, the over-budget refusal and the title / number
+  positions inside the frame.
 - Slot bar: five slots at a time with scroll arrows (`Skirmish::slot_scroll`), following the picked slot.
 - Posted crew move by dragging their face onto another post (the points come back and are re-spent; a failed drop puts them back).
 - Flag column: only your own flag is clickable; it opens a modal gold frame with your fleet type's ten flags (two rows of five); a pick sets
