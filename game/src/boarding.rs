@@ -59,12 +59,12 @@ impl Skill {
     }
     /// Engineer/helmsman factor (`Ship::crew_speed`, `crew_turn`) of a generic crew: retail saves show such ships with crew
     /// factors 1.15 / 1.30-1.37 / 1.40-1.47, and speed follows the saved factor / 1.125 (docs/re/crew.md); 'Players' ships take
-    /// theirs from their posts instead. PROVISIONAL: the middle of each saved range.
+    /// theirs from their posts instead. PROVISIONAL: the mean of the saved values (1.163 / 1.326 / 1.441).
     pub fn handling(self) -> f32 {
         match self {
-            Self::Green => 1.15 / 1.125,
-            Self::Average => 1.335 / 1.125,
-            Self::Elite => 1.435 / 1.125,
+            Self::Green => 1.163 / 1.125,
+            Self::Average => 1.326 / 1.125,
+            Self::Elite => 1.441 / 1.125,
             Self::Players => 1.0,
         }
     }
