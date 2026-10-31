@@ -226,9 +226,34 @@ importer: a Procyon Minelayer (7.5 units/s) and a Procyon Frigate (6.6) on their
 - **Stops are not avoidance:** the 10-27 second stops of Navy computer ships at the map-centre island (Torpedo boats about 12 s, Fast Frigates 23-27 s,
   then a 180-degree turn) are the end of a patrol leg: those ships shuttle between the Procyon base standoff and the map centre.
 - **Open:** concave coasts; why the Frigate looped (radius about 38-55) 120-250 units from our idle ship instead of circling it; the patrol legs.
-- Remake: `collision::contact_slow` sets `Ship::avoid` (the speed fraction `ship::step` multiplies in) for AI ships; `steer_clear` keeps turning
-  them on the unslowed speed's look-ahead. PROVISIONAL: one curve from one class. Computer captains (skirmish and missions) plan no routes round islands, as in the
-  original; the corner-route planner (`collision::route_clear`) is only used for base docking approaches.
+- Remake: the collision avoider below (`collision/avoid.rs`) does all of this; no route planning round islands for computer captains.
+
+## Collision avoidance (read from the original's code, 2026-10-31)
+Static analysis of the original's AI, written as rules; it explains the island behaviour above with the same mechanism for ships.
+- **One avoider for everything:** every AI-steered ship (attacks, ram, board, tow, dock, formation, explore, and the human's move orders) runs the same
+  local avoider while it follows its course. There is no route planner: a course is a list of points, and only the avoider bends it.
+- **Obstacles:** ships, asteroids, black holes, torpedoes, mines, dragons, islands and nebulae (not currents, guns, shells or whales). Every ship counts,
+  whatever its side or owner; only a lifeboat ignores other lifeboats. Friendly mines are skipped.
+- **When:** twice a second per ship, spread over 0.05 s steps.
+- **Looking ahead:** along the ship's present heading at its present speed for 10 s (less when the next course point is closer), one test per hull length
+  of travel. Other ships are carried along their own heading at their own speed; islands use their collision triangles. The first sample with
+  any contact decides, and of several obstacles there the nearest counts.
+- **Braking:** the throttle is capped from 0.1 to 1.0 as the gap grows from the ship's radius r to 4r. For land the gap is the distance along the
+  course to the contact; for anything else it is the distance between the two spheres.
+- **Turning away:** the present heading is turned in steps of the hull's angular width (2 x atan(half width / length)), up to half a circle each way;
+  the smallest turn whose 10 s look-ahead is clear wins, a tie goes away from the destination. The ship sails to a point max(4r, look distance)
+  ahead on that heading, then on to its course point. The detour is dropped once the straight line to the course point is clear for 17.5 s.
+- **Right of way:** after the same obstacle six thinks in a row (about 3 s), each side's priority is its speed, plus 50 for a moving ship commanded by the
+  human; anything that is not a ship has 0. If the obstacle's priority is at least the ship's own, the ship stops for 4 s, again while it persists.
+  So computer ships give way to the human's moving ships, the slower of two computer ships stops, and a moving ship never stops for land.
+- **Inside a black hole or nebula:** straight out to 2r beyond its rim. **Pressed and stopped** against an obstacle for over 5 s: it turns toward the
+  clearer side (the exact physics is not read).
+- Fits play: computer ships keep clear of each other (both sides steer) but meet the human's ships, which do not steer for them, and stop in front of a
+  moving one of them.
+- Remake: `collision/avoid.rs`, run from `collision::sail` for every AI-steered ship except the human's own ship and docking ships; it sets
+  `Ship::avoid` (the speed fraction `ship::step` multiplies in) and puts the detour point in front of the course. PROVISIONAL (not ported yet):
+  mines, torpedoes, dragons, black holes and nebulae as obstacles (black holes and storms are left to `ship::captain_steer`), the sight-range limit,
+  the turn-out-when-pressed rule, and the human's move orders.
 
 ## Computer ships and a hostile base (Border Dispute, 2026-10-27; re-read 2026-10-31)
 
