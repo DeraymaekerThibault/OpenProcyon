@@ -96,6 +96,7 @@ fn a_captain_blocked_by_an_island_sails_a_detour_then_steers_again() {
         sail_energy: 1.0,
         crew_speed: 1.0,
         crew_turn: 1.0,
+        avoid: 1.0,
     };
     let (e, mut detours) = (Entity::from_raw_u32(1).unwrap(), Detours::default());
     let (start, foe) = (Vec3::new(0.0, 0.0, 80.0), Vec3::new(0.0, 0.0, -80.0));
@@ -144,6 +145,7 @@ fn nis_stops_helm_and_combat_motion_but_keeps_scripted_routes_and_resumes() {
         sail_energy: 1.0,
         crew_speed: 1.0,
         crew_turn: 1.0,
+        avoid: 1.0,
     };
     let mut mission = crate::campaign::load_id("mission03");
     mission.script.nis = true;
@@ -203,6 +205,7 @@ fn ecs_ship_contact_and_static_wall_do_not_pass_through() {
         sail_energy: 1.0,
         crew_speed: 1.0,
         crew_turn: 1.0,
+        avoid: 1.0,
     };
     let health = || crate::Health::new(&app.world().resource::<crate::Library>().classes[class]);
     let h1 = health();
@@ -252,6 +255,7 @@ fn ai_ship_on_a_path_detours_round_a_wall_instead_of_grinding_into_it() {
         sail_energy: 1.0,
         crew_speed: 1.0,
         crew_turn: 1.0,
+        avoid: 1.0,
     };
     let e = app.world_mut().spawn((ship, health, Transform::default(), Drift::default())).id();
     let mut best = f32::INFINITY;
@@ -260,6 +264,59 @@ fn ai_ship_on_a_path_detours_round_a_wall_instead_of_grinding_into_it() {
         best = best.min(app.world().get::<Transform>(e).unwrap().translation.distance(goal));
     }
     assert!(best < 10.0, "the ship reaches the marker behind the wall (closest {best})");
+}
+#[test]
+#[ignore = "needs imported assets"]
+fn ai_ship_slows_for_an_island_in_its_way_creeps_round_it_and_picks_up_speed_again() {
+    // Retail Frigate on Border Dispute: 6.6 u/s straight at the map-centre island, down to 1.6 u/s at 5 units, never stopped, back to cruise.
+    // A wall stands in for the island; the captain keeps asking for the straight line, as `ship::ai` does every tick.
+    let lib = crate::Library::load(crate::assets_dir());
+    let class = lib.index("Ship_Procyon_Frigate");
+    let health = crate::Health::new(&lib.classes[class]);
+    let mut app = App::new();
+    let mut time = Time::<()>::default();
+    time.advance_by(std::time::Duration::from_secs_f32(0.1));
+    app.insert_resource(time).insert_resource(lib).add_systems(Update, sail);
+    let wall = [Vec3::new(-45.0, -2.0, -200.0), Vec3::new(45.0, -2.0, -200.0), Vec3::new(0.0, 2.0, -200.0)];
+    app.world_mut()
+        .spawn(Obstacle { body: BoxBody { points: wall.to_vec(), bounds: Bounds::points(&wall) }, triangles: vec![Triangle { points: wall, bounds: Bounds::points(&wall) }] });
+    let ship = crate::Ship {
+        class,
+        side: crate::Side::Enemy,
+        heading: 0.0,
+        speed: 6.6,
+        ang_vel: 0.0,
+        order: 3,
+        waypoints: vec![],
+        goal: Some(0.0),
+        cap: 1.0,
+        throttle: None,
+        sail_energy: 1.0,
+        crew_speed: 1.0,
+        crew_turn: 1.0,
+        avoid: 1.0,
+    };
+    let e = app.world_mut().spawn((ship, health, Transform::default(), Drift::default())).id();
+    let (mut cruise, mut slowest, mut passed_at) = (0.0f32, f32::INFINITY, None);
+    for frame in 0..1200 {
+        app.world_mut().get_mut::<crate::Ship>(e).unwrap().goal = Some(0.0); // the captain keeps asking for the straight line
+        app.update();
+        let (speed, z) = (app.world().get::<crate::Ship>(e).unwrap().speed, app.world().get::<Transform>(e).unwrap().translation.z);
+        if z > -100.0 {
+            cruise = cruise.max(speed);
+        }
+        if z < -150.0 && z > -250.0 {
+            slowest = slowest.min(speed);
+        }
+        if z < -260.0 && passed_at.is_none() {
+            passed_at = Some(frame);
+        }
+    }
+    assert!(passed_at.is_some(), "the ship gets round the island");
+    assert!(slowest < 0.6 * cruise, "slows near the island: {slowest} against cruise {cruise}");
+    // Retail hugged the coast 3-9 units from its centre (the hull scrapes) at 1.3-1.6 u/s; contact takes a little more speed off here.
+    assert!(slowest > 0.2, "creeps, does not stop: {slowest}");
+    assert!(app.world().get::<crate::Ship>(e).unwrap().speed > 0.8 * cruise, "back to cruise once clear");
 }
 #[test]
 #[ignore = "needs imported assets"]
@@ -301,6 +358,7 @@ fn retail_island_mesh_blocks_a_ship_driven_through_its_centre() {
         sail_energy: 1.0,
         crew_speed: 1.0,
         crew_turn: 1.0,
+        avoid: 1.0,
     };
     let e = app.world_mut().spawn((ship, health, Transform::from_xyz(0.0, 0.0, 80.0), Drift::default())).id();
     for _ in 0..100 {
@@ -342,6 +400,28 @@ fn steer_away_keeps_clear_of_a_head_on_island() {
     let far = Transform::from_xyz(0.0, 0.0, 200.0);
     assert_eq!(steer_clear(bounds, &far, 10.0, 0.0, &scenery), 0.0);
 }
+#[test]
+fn land_ahead_slows_a_ship_along_the_retail_curve_and_a_clear_pass_does_not() {
+    // Retail Procyon Frigate, 6.6 u/s, land on its line: 5.7 u/s at 47 units from the coast, 3.6 at 21, 1.6 at 5 (0.86 / 0.55 / 0.24 of cruise).
+    let bounds = [Vec3::new(-1.0, -1.0, -3.0), Vec3::new(1.0, 1.0, 3.0)];
+    let wall_at = |z: f32| {
+        let t = [Vec3::new(-40.0, -2.0, z), Vec3::new(40.0, -2.0, z), Vec3::new(0.0, 2.0, z)];
+        Obstacle { body: BoxBody { points: t.to_vec(), bounds: Bounds::points(&t) }, triangles: vec![Triangle { points: t, bounds: Bounds::points(&t) }] }
+    };
+    let slow = |coast: f32| contact_slow(bounds, Vec3::ZERO, 0.0, 6.6, &[&wall_at(-coast)]);
+    for (coast, retail) in [(47.0, 0.86), (21.0, 0.55), (5.0, 0.24)] {
+        let f = slow(coast);
+        assert!((f - retail).abs() < 0.12, "{coast} units from land: {f} against retail {retail}");
+    }
+    assert_eq!(slow(200.0), 1.0, "land beyond the look-ahead does not slow it");
+    assert!(slow(10.0) < slow(20.0) && slow(20.0) < slow(40.0), "slower the closer the land");
+    // An island it would clear by 27 units is passed at full speed (the retail Frigate did exactly that at Island08).
+    let beside = {
+        let t = [Vec3::new(27.0, -2.0, -60.0), Vec3::new(27.0, -2.0, 20.0), Vec3::new(80.0, 2.0, -20.0)];
+        Obstacle { body: BoxBody { points: t.to_vec(), bounds: Bounds::points(&t) }, triangles: vec![Triangle { points: t, bounds: Bounds::points(&t) }] }
+    };
+    assert_eq!(contact_slow(bounds, Vec3::ZERO, 0.0, 6.6, &[&beside]), 1.0);
+}
 fn ship_rock_contact(mass: f32, rock_velocity: Vec3) -> (Vec3, Vec3, Vec3) {
     let mut lib = crate::Library::load(crate::assets_dir());
     let class = lib.index("Ship_Navy_Cutter");
@@ -370,6 +450,7 @@ fn ship_rock_contact(mass: f32, rock_velocity: Vec3) -> (Vec3, Vec3, Vec3) {
         sail_energy: 1.0,
         crew_speed: 1.0,
         crew_turn: 1.0,
+        avoid: 1.0,
     };
     let a = app.world_mut().spawn((ship, health, Transform::from_xyz(0.0, 0.0, 1.5), Drift::default())).id();
     let body = box_body([Vec3::splat(-1.0), Vec3::splat(1.0)], &Transform::default());
@@ -434,6 +515,7 @@ fn ecs_ship_contact_preserves_light_and_heavy_ship_mass_ratios() {
             sail_energy: 1.0,
             crew_speed: 1.0,
             crew_turn: 1.0,
+            avoid: 1.0,
         };
         let ea = app.world_mut().spawn((ship.clone(), ha, Transform::from_xyz(0.0, 0.0, 1.5), Drift::default())).id();
         let eb = app.world_mut().spawn((crate::Ship { class: b, speed: 0.0, ..ship }, hb, Transform::default(), Drift::default())).id();
@@ -488,6 +570,7 @@ fn tow_uses_mass_and_independent_hardpoints_and_breaks_without_teleporting() {
         sail_energy: 1.0,
         crew_speed: 1.0,
         crew_turn: 1.0,
+        avoid: 1.0,
     };
     let mut app = App::new();
     let a = app.world_mut().spawn((hull.clone(), health(), Transform::default(), Drift::default())).id();

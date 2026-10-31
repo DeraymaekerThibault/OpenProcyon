@@ -99,6 +99,7 @@ fn lifeboats(
                     sail_energy: 1.0,
                     crew_speed: 1.0,
                     crew_turn: 1.0,
+                    avoid: 1.0,
                 },
             ));
             present.push((None, ms.owner.clone()));
@@ -165,6 +166,7 @@ mod tests {
             sail_energy: 1.0,
             crew_speed: 1.0,
             crew_turn: 1.0,
+            avoid: 1.0,
         };
         let ms = MissionShip {
             id: -1,
@@ -269,6 +271,7 @@ mod tests {
             sail_energy: 1.0,
             crew_speed: 1.0,
             crew_turn: 1.0,
+            avoid: 1.0,
         };
         let mut time = Time::<()>::default();
         time.advance_by(std::time::Duration::from_secs_f32(0.1));

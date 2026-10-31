@@ -1334,6 +1334,7 @@ mod tests {
                     sail_energy: 1.0,
                     crew_speed: 1.0,
                     crew_turn: 1.0,
+                    avoid: 1.0,
                 },
                 crate::combat::Health::new(&lib.classes[class]),
                 ms,

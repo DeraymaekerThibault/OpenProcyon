@@ -139,6 +139,7 @@ fn spawn(app: &mut App, class: &str, side: Side, at: Vec3, skill: Skill) -> Enti
         sail_energy: 1.0,
         crew_speed: 1.0,
         crew_turn: 1.0,
+        avoid: 1.0,
     };
     app.world_mut().spawn((Transform::from_translation(at), ship, health, Drift::default(), Boardable::ship(class, skill, true))).id()
 }
@@ -311,6 +312,7 @@ fn ai_harpoons_bear_by_arc_and_long_range() {
             sail_energy: 1.0,
             crew_speed: 1.0,
             crew_turn: 1.0,
+            avoid: 1.0,
         };
         harpoon_bears(&lib, &ship, &Health::new(&lib.classes[ci]), None, &Transform::IDENTITY, at)
     };
@@ -339,6 +341,7 @@ fn base_boarding_needs_a_boarding_point_in_reach_and_a_slow_boarder() {
         sail_energy: 1.0,
         crew_speed: 1.0,
         crew_turn: 1.0,
+        avoid: 1.0,
     };
     let base_tf = Transform::from_xyz(100.0, 0.0, 0.0);
     let point = Vec3::new(-10.0, 0.0, 0.0); // world (90, 0, 0)

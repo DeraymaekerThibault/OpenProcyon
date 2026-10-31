@@ -207,6 +207,24 @@ Headless retail skirmishes, one computer ship against our idle or fleeing Navy C
   the band holds. The computer's circling turn rates then need rudder torque × 1.72 (Barque) and × 1.87 (Carrack) under campaign-save
   navigator factors (1.31, 1.37) squared; the same-ship save above gives 1.605 = 1.267². Remake: `ship::COMPUTER_TURN` = 1.267².
 
+## Land ahead: computer ships slow and steer away (Border Dispute, 2026-10-31)
+Position logs (about 30 Hz) of computer ships crossing Border Dispute's islands, checked against the islands' collision meshes as placed by the
+importer: a Procyon Minelayer (7.5 units/s) and a Procyon Frigate (6.6) on their run-in to the Navy base, and a 12-ship, 27-minute recording.
+- **Cruise:** a computer ship holds a constant bearing at its run-in speed. It does not route round islands in advance: it passed one island
+  27 units off at full speed (the line cleared it) and slowed only for islands the line would touch.
+- **Slowing:** with land on its line the speed falls with the centre-to-coast distance, Frigate: 5.7 units/s at 47 units, 3.6 at 21, 1.6 at 5 (0.86, 0.55,
+  0.24 of cruise); the slowest any ship went was 1.3 units/s. It never stopped. Fit used by the remake: 0.2 + 0.8 x distance / 60, floor 0.2.
+- **Steering:** the course turns away gradually (the Frigate: -50 to -137 degrees over about 15 s, left of the island), the hull runs 3-25 units from the
+  coast (it scrapes at 3-9: the hull is about 6 wide), and the speed climbs back to cruise within a few units of clearance, while the island is still
+  alongside. Then the original bearing is resumed. With its target hidden behind an island the Frigate crept round the coast at 25-30 units and
+  re-aimed when the target came into view again.
+- **After the island:** the speed settles at the path's minimum throttle (0.65 x 6.6 = 4.3 units/s for the Frigate; the saves hold 0.65-0.75).
+- **Stops are not avoidance:** the 10-27 second stops of Navy computer ships at the map-centre island (Torpedo boats about 12 s, Fast Frigates 23-27 s,
+  then a 180-degree turn) are the end of a patrol leg: those ships shuttle between the Procyon base standoff and the map centre.
+- **Open:** concave coasts; why the Frigate looped (radius about 38-55) 120-250 units from our idle ship instead of circling it; the patrol legs.
+- Remake: `collision::contact_slow` sets `Ship::avoid` (the speed fraction `ship::step` multiplies in) for AI ships; `steer_clear` keeps turning
+  them on the unslowed speed's look-ahead. PROVISIONAL: one curve from one class; the route planner (`Detours`) is still in front of it.
+
 ## Computer ships and a hostile base: they hold off (Border Dispute, 2026-10-27)
 
 Footage and position logs of a 27-minute Border Dispute battle (us plus three Navy computer fleets against one Procyon computer fleet,

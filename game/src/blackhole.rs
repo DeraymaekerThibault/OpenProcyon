@@ -371,6 +371,7 @@ mod tests {
                 sail_energy: 1.0,
                 crew_speed: 1.0,
                 crew_turn: 1.0,
+                avoid: 1.0,
             };
             app.world_mut().spawn((Transform::from_translation(at), ship, health, Drift::default())).id()
         };
