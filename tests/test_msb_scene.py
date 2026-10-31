@@ -1,7 +1,7 @@
 import struct
 import unittest
 
-from tools.msb import parse_scene
+from tools.msb import parse, parse_scene
 
 NAMES = [
     "Name", "ID", "Nodes - Size", "Nodes - Element", "Parent ID", "Type", "Pivot Position", "Element",
@@ -96,6 +96,13 @@ class StrictScene(unittest.TestCase):
         bad[12:16] = struct.pack("<I", 7)  # the first tag must be Name
         with self.assertRaises(ValueError):
             parse_scene(bytes(bad))
+
+
+    def test_the_flat_node_list_comes_from_the_strict_reader(self):
+        (node,) = parse(scene())
+        self.assertEqual((node.name, node.parent, node.pos), ("Smoke1", -1, (1.0, 2.0, 3.0)))
+        self.assertEqual((node.kind, node.label), ("PlayEffect", "default"))
+        self.assertEqual(parse(b"\0" * 64), [])  # unreadable: the pattern scan finds nothing
 
 
 if __name__ == "__main__":
