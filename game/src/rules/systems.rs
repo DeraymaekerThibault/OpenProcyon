@@ -653,6 +653,8 @@ fn mission_ai(
     let n_ships = snap.len();
     snap.extend(rocks.iter().map(|(e, tf, a)| unit(e, a.id, &a.kind, &a.group, tf.translation, a.hp > 0.0)));
     sc.tag(&mut snap);
+    // Where each ship's damage sections are, for the attack's aim point (`ship::attack::aim`).
+    let hulls: std::collections::HashMap<Entity, (Transform, usize, Vec<f32>)> = ships.iter().map(|s| (s.0, (*s.2, s.1.class, s.3.sections.clone()))).collect();
     let player_owner = ships.iter().find(|s| s.5).map_or_else(|| sc.player().into(), |s| s.4.owner.clone());
     for (e, mut ship, tf, h, mut ms, primary, pilot) in &mut ships {
         let is_boat = boats.contains(e);
@@ -732,7 +734,7 @@ fn mission_ai(
         if ms.human {
             continue;
         }
-        if let (Some((_, fp)), false) = (chase, ms.stance == Stance::Dummy) {
+        if let (Some((foe, fp)), false) = (chase, ms.stance == Stance::Dummy) {
             let (goal, order, throttle) = if ms.ram && ordered.is_some() {
                 let d = fp - tf.translation;
                 ((-d.x).atan2(-d.z), 3, None)
@@ -744,7 +746,11 @@ fn mission_ai(
                 match crate::ship::attack::plan(&lib, class, h, guns.get(e).ok()) {
                     Some((routine, range)) => {
                         let gap = (fp - tf.translation).with_y(0.0).length() - class.radius;
-                        let course = crate::ship::attack::course(routine, tf.translation, ship.heading, fp, gap, range[0], time.elapsed_secs(), breakoffs.entry(e).or_default());
+                        let at = match hulls.get(&foe) {
+                            Some((t, c, hp)) if routine != crate::ship::attack::Routine::Ram => crate::ship::attack::aim(&lib.classes[*c].sections, hp, t, tf.translation, false),
+                            _ => fp, // Ram, or a rock
+                        };
+                        let course = crate::ship::attack::course(routine, tf.translation, ship.heading, at, gap, range[0], time.elapsed_secs(), breakoffs.entry(e).or_default());
                         let d = course[0] - tf.translation;
                         ((-d.x).atan2(-d.z), 3, crate::ship::attack::throttle(e, tf.translation, ship.heading, course[0]))
                     }

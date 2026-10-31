@@ -28,6 +28,10 @@ fn a_frontal_attacker_charges_to_r_then_breaks_off_square_for_up_to_fifteen_seco
     assert!(b.is_some() && leg[0].z == near.z && (leg[0].x - near.x).abs() == 130.0, "breaks off at right angles: {leg:?}");
     assert_eq!(course(Routine::Frontal, near, 0.0, FOE, 100.0, 130.0, 15.9, &mut b), leg, "keeps the same leg");
     assert_eq!(course(Routine::Frontal, near, 0.0, FOE, 140.0, 130.0, 16.0, &mut b), vec![FOE], "out of range: charges again");
+    assert!(leg[0].x > near.x, "a target dead ahead: breaks off to starboard");
+    let mut b = None;
+    let port_bow = course(Routine::Frontal, near, 0.0, Vec3::new(-60.0, 0.0, 0.0), 100.0, 130.0, 1.0, &mut b);
+    assert!(port_bow[0].x < near.x, "a target on the port bow: turns to port, toward it: {port_bow:?}");
     let mut b = Some((0.0, Vec3::X));
     course(Routine::Frontal, near, 0.0, FOE, 100.0, 130.0, 15.0, &mut b);
     assert!(b.is_some_and(|(since, _)| since == 15.0), "a new break-off after 15 s");
@@ -70,4 +74,15 @@ fn stock_fits_pick_the_decoded_routine_and_range() {
         assert_eq!(got, routine, "{name}");
         assert!((range[0] - r).abs() < 0.1, "{name}: R {} against {r}", range[0]);
     }
+}
+
+#[test]
+fn the_aim_is_the_nearest_damage_section_of_a_ship_dead_or_alive_and_a_bases_nearest_live_one() {
+    let section = |x: f32, mission: bool| crate::data::Section { min: Vec3::new(x - 1.0, -1.0, -1.0), max: Vec3::new(x + 1.0, 1.0, 1.0), mission, ..Default::default() };
+    let class = [section(-10.0, true), section(10.0, true)];
+    let tf = Transform::from_xyz(0.0, 0.0, 100.0);
+    let from = Vec3::new(50.0, 0.0, 100.0);
+    assert_eq!(aim(&class, &[1.0, 0.0], &tf, from, false), Vec3::new(10.0, 0.0, 100.0), "a ship: the nearest, though dead");
+    assert_eq!(aim(&class, &[1.0, 0.0], &tf, from, true), Vec3::new(-10.0, 0.0, 100.0), "a base: the nearest live one");
+    assert_eq!(aim(&class, &[0.0, 0.0], &tf, from, true), tf.translation, "a base with none left: its centre");
 }

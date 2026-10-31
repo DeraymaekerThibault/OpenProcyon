@@ -232,6 +232,7 @@ pub struct Mount {
     pub bank: usize,           // weapon-panel slot (WOT `BankNN`; indexes WeaponBar_SlotOffset_From_TopLeft_NN)
     pub parent: Option<usize>, // damage section that carries this gun; destroyed section => gun disabled
 }
+#[derive(Default)]
 pub struct Section {
     pub label: String,
     pub layer: String, // section mesh node, e.g. NavyCutterShip_Layer1
