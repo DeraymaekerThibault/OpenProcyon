@@ -300,7 +300,7 @@ fn open_map_locks_fleet_type_to_team_and_needs_a_fleet() {
     let plan = sk.plan(&lib);
     assert_eq!(plan.len(), 2);
     assert_eq!(plan[1].side, crate::Side::Enemy);
-    assert!(plan[1].ships.len() == sk.fleet_size && plan[1].ships.iter().all(|s| s.0.contains("Pirate")), "computer fleet is built from its fleet type");
+    assert!((1..=3).contains(&plan[1].ships.len()) && plan[1].ships.iter().all(|s| s.0.contains("Pirate")), "computer fleet is built from its fleet type");
     // Free-for-all map: you choose the fleet type yourself.
     let mut sk = skirmish("diablo_straight");
     assert_eq!((sk.slots[0].race, sk.slots[0].team, sk.slots[1].kind), (0, 0, Kind::Open), "retail: you are Navy, Team 1");
@@ -404,7 +404,10 @@ fn computer_fleets_use_auto_assign_inside_the_victory_limit() {
         (g.ships.len(), ships)
     };
     let (n, points) = cost(&sk);
-    assert!(n > 0 && points <= 300, "{n} ships cost {points}");
+    assert!((1..=3).contains(&n) && points <= 210, "retail: 1-3 hulls, at most half the points left each: {n} ships cost {points}");
+    let plan = sk.plan(&lib);
+    let crew: Vec<&String> = plan[1].crew.iter().flatten().flatten().collect();
+    assert!(crew.iter().all(|id| id.contains("_Navy_")), "computer crews come from the Navy roster: {crew:?}");
     sk.victory_limit = 60;
     let (n, points) = cost(&sk);
     assert!(n > 0 && points <= 60, "a small limit buys cheap hulls: {n} ships cost {points}");

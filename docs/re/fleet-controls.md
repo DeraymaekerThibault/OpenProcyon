@@ -114,7 +114,8 @@ Formation types:
 | 6 | Diamond | Alternating signed starboard-axis steps rotated ±35°, relative to max(i−2,0), step R+30. Do not substitute a generic four-point diamond. |
 | 7 | Convoy | Same alternating construction, but ±45°, step R+30. |
 
-R is the **largest retail member size field**, not an established match for our section-box radius. Geometry is planar (z component cleared); slot 0 is leader position. Angles are 35° / 45°; spacing constant is 30. Direction signs here describe the original game axes (x starboard, y forward, z up), not Bevy yaw signs. Check those transforms when implementing.
+R is the **largest retail member size field**. The measured Diamond slot (below) puts R at about 17 for a Man-O-War, its WOT bounding-sphere
+radius, so the remake uses each class's bounding-sphere radius. Geometry is planar (z component cleared); slot 0 is leader position. Angles are 35° / 45°; spacing constant is 30. Direction signs here describe the original game axes (x starboard, y forward, z up), not Bevy yaw signs. Check those transforms when implementing.
 
 The layout stores **leader-relative distance and angle**; reconstructs a slot from the leader's current pose. Thus slots rotate and translate with the leader, not fixed lateral offsets along every route point. A post-pass (except Custom and Column) swaps slot assignments using a distance/heading-cost calculation. The generated geometry is recovered, but **exact member-to-slot assignment/tie behaviour is still unknown**; do not freeze ECS iteration order as retail slot order.
 

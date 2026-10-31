@@ -14,10 +14,11 @@ use crate::{Library, PlayerShip, Ship};
 /// Height of the reference screen the HUD art is scaled against (the reference video draws the 640x480 art at twice that height).
 pub const REF_H: f32 = 960.0;
 pub const MAX_CONTACTS: usize = 16;
-/// PROVISIONAL: radar range in world units mapped to the disk's radius.
-const RADAR_RANGE: f32 = 300.0;
-// PROVISIONAL: retail docking animation cadence has not been recovered.
-const DOCKING_FPS: f32 = 8.0;
+/// Radar range in world units mapped to the disk's radius: retail draws ships out to ~153 units (0.297 px per unit on a 45.6 px disk)
+/// and none beyond (docs/re/hud.md).
+const RADAR_RANGE: f32 = 153.0;
+/// Ship status icons (docking, boarding, ...): `HUDRadar Ship Status Icon - Time To Next Frame` 0.13 s.
+pub const STATUS_FPS: f32 = 1.0 / 0.13;
 /// Retail `Animation Speed TalkingHeadWindow` is 2.0; PROVISIONAL: read as open/close progress per second.
 const HEAD_SPEED: f32 = 2.0;
 
@@ -241,9 +242,9 @@ pub struct GunButton(pub usize);
 /// The radar disk as a button: clicking it opens the star map (`starmap.rs`).
 #[derive(Component)]
 pub struct RadarButton;
-/// Radar blip `i`, positioned by `update_contacts` inside the view's radar node.
+/// Radar blip `i` of a hostile (`false`) or friendly (`true`) ship, positioned by `update_contacts` inside the view's radar node.
 #[derive(Component)]
-pub struct Contact(pub usize);
+pub struct Contact(pub usize, pub bool);
 /// The view's radar disk in its own reference px (inserted by the view's builder).
 #[derive(Resource)]
 pub struct Radar {
@@ -348,7 +349,7 @@ fn update_docking_status(
     let docking = player.iter().any(|p| p.1.is_some_and(|d| d.shows_status()));
     let boarding = player.iter().any(|p| p.2.is_some_and(|f| f.live()) || fights.iter().any(|f| f.live() && f.target() == p.0));
     let set = if docking || boarding_art.is_empty() || !boarding { docking_art } else { boarding_art };
-    let (image, rect) = &set[(time.elapsed_secs() * DOCKING_FPS) as usize % set.len()];
+    let (image, rect) = &set[(time.elapsed_secs() * STATUS_FPS) as usize % set.len()];
     for (mut img, mut vis) in &mut icons {
         if img.image != *image {
             img.image = image.clone();
@@ -398,20 +399,23 @@ fn update_contacts(
     let s = window.height() / REF_H;
     // 'Set Radar Active State' FALSE blanks the disk.
     let on = mission.as_deref().is_none_or(|m| m.script.radar);
-    // Living hostile ships relative to the player's heading (forward = up), clamped to the disk.
+    // Living ships within range relative to the player's heading (forward = up); retail shows friendly ships too and none past the rim.
     let inv = player.rotation.inverse();
-    let contacts: Vec<Vec2> = others
-        .iter()
-        .filter(|_| on)
-        .filter(|(e, sh, h, _, ms)| sh.side != crate::Side::Player && !h.destroyed && ms.is_none_or(|m| m.visible) && sensors.player_sees(*e, mission.as_deref()))
-        .map(|(_, _, _, tf, _)| {
-            let l = inv * (tf.translation - player.translation);
-            let v = Vec2::new(l.x, -l.z) / RADAR_RANGE;
-            if v.length() > 1.0 { v.normalize() } else { v }
-        })
-        .collect();
-    for (Contact(i), mut node, mut vis) in &mut q {
-        let Some(v) = contacts.get(*i) else {
+    let contacts = |friendly: bool| -> Vec<Vec2> {
+        others
+            .iter()
+            .filter(|_| on)
+            .filter(|(e, sh, h, _, ms)| (sh.side == crate::Side::Player) == friendly && !h.destroyed && ms.is_none_or(|m| m.visible) && sensors.player_sees(*e, mission.as_deref()))
+            .map(|(_, _, _, tf, _)| {
+                let l = inv * (tf.translation - player.translation);
+                Vec2::new(l.x, -l.z) / RADAR_RANGE
+            })
+            .filter(|v| v.length() <= 1.0)
+            .collect()
+    };
+    let contacts = [contacts(false), contacts(true)];
+    for (Contact(i, friendly), mut node, mut vis) in &mut q {
+        let Some(v) = contacts[usize::from(*friendly)].get(*i) else {
             vis.set_if_neq(Visibility::Hidden);
             continue;
         };

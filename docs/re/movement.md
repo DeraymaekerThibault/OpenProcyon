@@ -52,8 +52,8 @@ A move click from All Stop with no key pressed runs the cutter at its Ahead Full
   lean), holds it while the rudder is over and levels at the same rate. While a ship steers for a clicked point straight ahead
   its heading weaves: cutter ±2.2° (roll ±3.5°) with a 3.8 s period, Man-O-War ±0.45° with an 11.6 s period. Once it has
   passed its point and holds a course, the heading is dead steady on both (no weave in 30+ s). PROVISIONAL reading: the weave
-  is the course controller hunting for the point, not a straight-course wobble. At Emergency Speed there is no roll. Remake: roll target = 0.25 × rudder, rate-limited; the weave
-  and the Emergency exception are not modelled.
+  is the course controller hunting for the point, not a straight-course wobble. At Emergency Speed there is no roll. Remake: roll target = 0.25 × rudder, rate-limited, none at Emergency Speed; the weave
+  is not modelled.
 
 ## Other constants
 0.33 / 1.0 / 5/3 / 1/3 (speed bands), 60.0 (α clamp), 0.1 (rudder-speed constant), 0.5 and 0.3 (lateral terms); 0.25 is the
@@ -87,6 +87,10 @@ measured bank limit above.
 - Easy out is x 3, not the inverse of x 0.25 in: the seventeen gattling drops on sails spread 15-20 (x 3 gives 15-21,
   x 4 would give 20-28). The earlier two Easy drops of 155 and 156 on reinforced wood fit two medium cannon hits landing in the same 50 ms sample.
 - PROVISIONAL: computer-vs-computer and allied hits are not measured (the engine uses 1.0).
+- Our base's guns on a computer ship hit at x 1 on Normal, not x 2: a Minelayer sunk by our Navy base alone (Border Dispute) lost
+  43-54 (heavy) and 38 (medium) per cannon or mortar round on wood, 36-38 / 23-29 on reinforced wood, each one round at the table's
+  value; x 2 would be 80-120. So the outgoing factor is the player's ships' only (the engine gives base shells x 1).
+  PROVISIONAL: a hostile base's guns on the player's ships keep the incoming factor (not measured).
   Whether the core bleed roll is scaled too is not measured (the engine scales it).
 - Volcano meteors (The Diablo Strait) hit every section of a ship at once for 10-20 each; they are not shells.
 - Damage control mends hulls only through engineers and sails through riggers (refit-resupply.md 3.4).
@@ -127,7 +131,7 @@ Headless retail skirmishes, one computer ship against our idle or fleeing Navy C
   1.425 / 1.125 = 1.267 ([crew.md](crew.md#saved-crew-factors)). A patrolling Assault Cutter sailed at 8.56 (0.98 × Emergency).
 - **Approach:** at that crewed Emergency Speed, aiming off the bow toward a tangent of the circle it will fly (we sat 17° off its
   bow at 330 units, 48° at 100, 66° at 60).
-- **Circling:** from ~60-75 units it turns onto a circle around the target and holds it, the target on one beam (±90°, the side it
+- **Circling:** from ~48-64 units it turns onto a circle around the target and holds it, the target on one beam (±90°, the side it
   approached on: port in two runs, starboard in one). Carrack 54 units (Man-O-War target; 36-70 spread while the target moved),
   Barque 55.7 (51-58) around an idle Cutter, turning a steady 8°/s; an Assault Cutter ~95 (60-120, with a Barque); a Procyon
   Minelayer a perfect 109-113 for 10 minutes; a Procyon Frigate kept us on its beam (55-125°) on a fixed 6°/s turn while we moved,
@@ -194,7 +198,7 @@ Headless retail skirmishes, one computer ship against our idle or fleeing Navy C
 - Remake (`ship::captain_steer`, shared by the skirmish AI and mission attack orders): the broadside aim point above, with R =
   `Class::reach` (mean LongRange over the gun banks: Carrack 150, Barque 128.6; which of the gun's range values the original
   averages is not confirmed, PROVISIONAL), Emergency run-in, throttle 1.4 (≈0.7 × Emergency) inside 0.6 × R (PROVISIONAL: the
-  original's switch is not decoded; retail slowed 60-75 units out), keeping 15 units outside black holes and damaging nebulae
+  original's switch is not decoded; retail slowed 48-64 units out, see below), keeping 15 units outside black holes and damaging nebulae
   (solar storm / meteors, as circles: `nebula::storm_circles`); computer skirmish ships get crew factor 1.267 on speed and
   1.267² on rudder. Simulated circles: Carrack 47.7 units (retail 45-50), Barque 55-66 (retail 51-58). Skirmish enemies with
   nothing in sight explore (`ship::Explore`: quadrant centre, then its x-neighbour, switching 220 units short). PROVISIONAL: the
@@ -225,12 +229,20 @@ importer: a Procyon Minelayer (7.5 units/s) and a Procyon Frigate (6.6) on their
 - Remake: `collision::contact_slow` sets `Ship::avoid` (the speed fraction `ship::step` multiplies in) for AI ships; `steer_clear` keeps turning
   them on the unslowed speed's look-ahead. PROVISIONAL: one curve from one class; the route planner (`Detours`) is still in front of it.
 
-## Computer ships and a hostile base: they hold off (Border Dispute, 2026-10-27)
+## Computer ships and a hostile base (Border Dispute, 2026-10-27; re-read 2026-10-31)
 
 Footage and position logs of a 27-minute Border Dispute battle (us plus three Navy computer fleets against one Procyon computer fleet,
-12 ships, Easy): all nine Navy computer ships (Frigate, Fast Frigates, Torpedo boats) sailed straight at the Procyon base from the first
-second and then stayed between 325 and 460 units from it for the rest of the battle: the Frigate parked at 325, one Torpedo boat parked at
-462 and another at 392, the others patrolled back and forth at 350-400 at full speed. None came inside gun range of the base and the base
-was never damaged by them. The Procyon ships went to the middle of the map and to the front of their own base, not at our base.
-The remake sends computer ships to a hostile base and holds them at 390 units (`BASE_STANDOFF`), PROVISIONAL: one number for all classes,
-and patrolling is not modelled. Taking the base is left to the human.
+12 ships, Easy). The position log keeps a sunk ship's last position, so only each track up to its sinking counts (an earlier reading
+took two sunk ships for parked ones). All the Navy computer ships sailed straight at the Procyon base from the first second. The
+Torpedo boats then patrolled 340-405 units off the base centre (median ~375) at 7-11 units/s for over 20 minutes. The Frigate and
+the Fast Frigates closed to 124-173 units, about their mean gun range (162-165), stayed inside 300 units for 1-4 minutes at a time
+and sank there. The Procyon ships went to the middle of the map and to the front of their own base, not at our base.
+The remake holds computer ships off a hostile base at a per-class distance (`ship::base_standoff`: Torpedo boats 375, Frigates 150,
+other classes 390, PROVISIONAL: unmeasured); patrolling is not modelled.
+
+Turning (same log, `COMPUTER_TURN`): re-running each steady turn through our turn model gives a torque factor of about 2.0 for an
+uncrewed Submersible (11 turns) and 0.9-1.1 for crewed Fast Frigates (15 turns), 2.3 for a crewed Minelayer, 1.5-3.8 for a crewed
+Frigate; Torpedo boats slow and weave in turns and do not fit. Crewed ships do not turn harder than uncrewed ones, so the
+factor-squared reading above is not supported; 1.267² stays as the Carrack circle's fit. PROVISIONAL.
+Run-in slow-down: four run-ins slowed 48-64 units from their target whatever the class (Carrack 48, Barque 49 and 60, Minelayer
+64), i.e. 0.32-0.59 of the gun reach; the remake keeps 0.6 × reach because our turn model needs it for the measured circles.

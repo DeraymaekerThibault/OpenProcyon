@@ -1,6 +1,7 @@
 //! Sound: original Ogg files from assets/sound (tools/build_assets.sh). Names, volumes and max distances come from the WOTs
 //! (gun SoundName/SoundVolume/SoundMaxDistance, bullet impact pools, ship EngineSoundName Half/Full/Emergency) and the original's
-//! built-in pools (docs/re/sound.md). PROVISIONAL: the distance falloff curve, engine/music levels, and which event uses which built-in pool.
+//! built-in pools (docs/re/sound.md). PROVISIONAL: the distance falloff curve, engine/music levels, and which event uses which built-in pool (ship death = Explosion_Heavy
+//! is measured; the Damage_* pool on section loss was never heard in retail).
 
 use bevy::audio::Volume;
 use bevy::prelude::*;

@@ -356,3 +356,11 @@ fn base_boarding_needs_a_boarding_point_in_reach_and_a_slow_boarder() {
     assert!(!range(90.0 - r - 16.0, 0.0), "too far");
     assert!(!range(90.0 - r - 14.0, 2.5), "too fast (limit 2)");
 }
+
+#[test]
+fn island_gunners_aim_by_the_generic_crews_gunnery() {
+    // Crew_General_* gunnery 3 / 6 / 8: 1 - 0.8 x gunnery relative to Average.
+    assert!((Skill::Green.gunnery_vs_average() - 0.76 / 0.52).abs() < 1e-5);
+    assert_eq!(Skill::Average.gunnery_vs_average(), 1.0);
+    assert!((Skill::Elite.gunnery_vs_average() - 0.36 / 0.52).abs() < 1e-5);
+}

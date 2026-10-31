@@ -301,8 +301,9 @@ pub fn offered(lib: &Library, race: u8) -> Vec<usize> {
 /// mixing classes (300 points / 5 ships gave a Heavy Scout, a Heavy Escort and three Warsloops; 50 points two Torpedo Boats). Hulls it
 /// adds itself also get weapon swaps (a hand-added ship only gets crew), and the points that remain buy named crew. The choice among
 /// affordable hulls and weapons looked random: PROVISIONAL, here a fixed pseudo-random pick (a coin flip per bank) so the result
-/// repeats; crew go to the posts in order, best skill first. Computers use it too (PROVISIONAL: the original's computer fleet was
-/// not read out of a battle; the budget is the same victory limit, and `armed_only` keeps tenders and tugs out of its fleets).
+/// repeats; crew go to the posts in order, best skill first. Computers use it too with `armed_only` (no tenders or tugs), following
+/// 14 retail battle saves: 1-3 hulls each at most half the points left, all hulls and weapon swaps before any crew, then Navy-roster
+/// crew ship by ship until the points run out (13 of 15 fleets spent the budget to the point).
 /// The guns computer captains may fit (`data/ai/weapons.json`, `{gun: true|false}`, merged key by key across mods). No file: the guns
 /// retail computers were seen to fit (`RETAIL_COMPUTER_GUNS`).
 fn computer_guns() -> Option<std::collections::HashSet<String>> {
@@ -340,8 +341,11 @@ pub fn auto_build(slot: &mut Slot, limit: u32, fleet_size: usize, lib: &Library,
     let mut seed = u64::from(limit) * 31 + fleet_size as u64 * 7 + 1 + salt * 977;
     let left = |slot: &Slot| i64::from(limit) - slot.spent(lib);
     let first_new = slot.fleet.len();
-    while slot.fleet.len() < fleet_size {
-        let budget = left(slot);
+    // Computers (14 retail battle saves, docs/re/skirmish-setup.md) buy 1-3 hulls whatever the fleet limit, each costing at most half
+    // the points still left, so about half the budget remains for weapons and crew. PROVISIONAL: the count looked random.
+    let ships = if armed_only { (first_new + 1 + next(&mut seed) as usize % 3).min(fleet_size) } else { fleet_size };
+    while slot.fleet.len() < ships {
+        let budget = if armed_only { left(slot) / 2 } else { left(slot) };
         let fits: Vec<usize> =
             offered(lib, slot.race).into_iter().filter(|&c| i64::from(lib.classes[c].points) <= budget && (!armed_only || !lib.classes[c].mounts.is_empty())).collect();
         if fits.is_empty() {
@@ -375,7 +379,8 @@ pub fn auto_build(slot: &mut Slot, limit: u32, fleet_size: usize, lib: &Library,
             slot.weapons[ship].insert(bank, gun);
         }
     }
-    let name = RACES.iter().find(|r| r.0 == slot.race).map_or("Navy", |r| r.1);
+    // Computer crews come from the Navy roster whatever the race (retail saves); the human's from their own race.
+    let name = if armed_only { "Navy" } else { RACES.iter().find(|r| r.0 == slot.race).map_or("Navy", |r| r.1) };
     for ship in 0..slot.fleet.len() {
         let class = &lib.classes[lib.index(&slot.fleet[ship])];
         let caps = crate::boarding::counts(&class.name);
@@ -384,10 +389,16 @@ pub fn auto_build(slot: &mut Slot, limit: u32, fleet_size: usize, lib: &Library,
                 let budget = left(slot);
                 let used: Vec<String> = slot.crew.iter().flatten().flatten().cloned().collect();
                 let skill = crate::crew_arms::post_skill_name(role);
+                // Computers: 257 of 319 retail picks were rated exactly 7 in the post's skill and the 8-9s were all gunners, so they take
+                // the best gunner and otherwise the crewman nearest 7. PROVISIONAL: the original's pick is not recovered.
+                let score = |id: &String| {
+                    let a = crate::crew_arms::ability(id, skill).unwrap_or(0.0);
+                    if armed_only && skill != "gunnery" { -(a - 0.7).abs() } else { a }
+                };
                 let best = crate::crew_arms::roster(name, 0)
                     .into_iter()
                     .filter(|id| !used.contains(id) && i64::from(crate::crew_arms::crew_points(id)) <= budget)
-                    .max_by(|a, b| crate::crew_arms::ability(a, skill).unwrap_or(0.0).total_cmp(&crate::crew_arms::ability(b, skill).unwrap_or(0.0)).then_with(|| b.cmp(a)));
+                    .max_by(|a, b| score(a).total_cmp(&score(b)).then_with(|| b.cmp(a)));
                 let Some(id) = best else { break };
                 slot.crew_mut(ship)[role].push(id);
             }

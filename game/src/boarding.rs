@@ -28,7 +28,7 @@ const BASE_SPEED: f32 = 2.0;
 /// Casualty interval: (9 + 1.5·r) / (2·weaker strength) seconds.
 const TICK_BASE: f32 = 9.0;
 const TICK_SPREAD: f32 = 1.5;
-/// The harpoon's longest reach and speed (Gun_Harpoon_Light; PROVISIONAL numbers).
+/// The harpoon's longest reach and speed (Gun_Harpoon_Light MaximumRange and MuzzleSpeed).
 const HARPOON_RANGE: f32 = 100.0;
 const HARPOON_SPEED: f32 = 45.0;
 /// A grapple snaps when the ships' centres get this much further apart than when the hook bit.
@@ -78,10 +78,15 @@ impl Skill {
             Self::Players => 1.0,
         }
     }
-    /// Gunnery accuracy factor relative to an Average crew (1 - 0.8 x ability, as for crewed ships in gunnery.rs); below 1 is better.
-    /// PROVISIONAL: carries the generic crews' per-man ability over to island gunners.
+    /// Gunnery accuracy factor relative to an Average crew (1 - 0.8 x gunnery, as for crewed ships in gunnery.rs); below 1 is better.
+    /// Gunnery is the generic crewman's (`Crew_General_*`: 3 / 6 / 8 out of 10). PROVISIONAL: that island gunners use these crews.
     pub fn gunnery_vs_average(self) -> f32 {
-        (1.0 - 0.8 * self.member()) / (1.0 - 0.8 * Self::Average.member())
+        let gunnery = |s| match s {
+            Self::Green => 0.3,
+            Self::Average | Self::Players => 0.6,
+            Self::Elite => 0.8,
+        };
+        (1.0 - 0.8 * gunnery(self)) / (1.0 - 0.8 * gunnery(Self::Average))
     }
     fn member(self) -> f32 {
         match self {

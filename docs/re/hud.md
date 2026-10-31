@@ -36,8 +36,10 @@ The manual gives no numbers: speeds, turning, timing and damage come from data a
 ## Compass and radar
 
 Brass frame `COMPASS_OVERLAY` (128x123) over the radar disk (offset 18,12) and a 10-frame sweep (0.1 s per frame, offset 17,13).
-Enemy contacts use `HUDRADAR_ICON_ENEMYSHIP_*`, ship-relative with forward up. PROVISIONAL: screen placement, radar range (300 units);
-friendly/other contact types and animated icon frames not done.
+Contacts are ship-relative with forward up: hostile ships `HUDRADAR_ICON_ENEMYSHIP_*`, friendly ships `HUDRADAR_ICON_FRIENDLYSHIP_*`.
+Measured on a 27-minute retail recording (2026-10-31, 1080p, compass drawn 1:1): 0.297 px per world unit on the 48 px disk; ships out
+to ~153 units are drawn and ships further out are not drawn at all (not pinned to the rim); icons blink. PROVISIONAL: screen
+placement; asteroid/torpedo/animal contact types and animated icon frames not done.
 
 ## Target marker
 

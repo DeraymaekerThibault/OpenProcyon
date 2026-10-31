@@ -4,8 +4,8 @@ use crate::*;
 /// All Stop, Ahead Slow, Ahead Full, Emergency Speed as fractions of Ahead Full speed (measured on the retail cutter, docs/re/movement.md).
 pub const ORDERS: [(&str, f32); 4] = [("All Stop", 0.0), ("Ahead Slow", 0.5), ("Ahead Full", 1.0), ("Emergency Speed", 2.0)];
 
-/// Ahead Full without crew settles at this fraction of WOT MaxSpeed (so Emergency is 1.125 x MaxSpeed). Measured on the cutter
-/// and the Man-O-War; PROVISIONAL for the others; the engineers raise it (`Ship::crew_speed`).
+/// Ahead Full without crew settles at this fraction of WOT MaxSpeed (so Emergency is 1.125 x MaxSpeed). Measured on the cutter,
+/// Man-O-War, Carrack, Barque and Minelayer (docs/re/movement.md); the engineers raise it (`Ship::crew_speed`).
 pub const FULL_SPEED: f32 = 0.5625;
 
 /// Full-rudder torque relative to the decoded turn formula. Measured: cutter at Slow, Full and Emergency, Man-O-War at Full
@@ -81,8 +81,10 @@ pub fn angdiff(a: f32, b: f32) -> f32 {
 
 pub type CaptainBusy = Or<(With<docking::Docker>, With<docking::Tower>, With<boarding::GrappleOrder>, With<boarding::Grapple>, With<boarding::Boarding>)>;
 
-/// Computer captains slow to `ORBIT_THROTTLE` inside this fraction of their aim distance (`Class::reach`). Retail ships slowed
-/// 60-75 units from their target (Carrack, reach 150); PROVISIONAL: the original's switch is not decoded.
+/// Computer captains slow to `ORBIT_THROTTLE` inside this fraction of their aim distance (`Class::reach`). PROVISIONAL: retail
+/// run-ins slowed 48-64 units out whatever the class (Carrack 48, Barque 49 and 60, Minelayer 64: 0.32-0.59 of reach), but with
+/// that switch our turn model circles the Barque at 62-88 units (retail 51-58); 0.6 keeps the measured circles until the
+/// computer turn factor (`COMPUTER_TURN`) is settled.
 pub const ORBIT_SLOW: f32 = 0.6;
 /// Throttle (fraction of Ahead Full) while circling: retail circles at its path's saved minimum throttle (random 0.65-0.75 per
 /// ship) x the crewed Emergency speed (saved Carrack: 0.745 x 8.71 = 6.49, measured 6.47); 1.4 is that range's mean x 2.
@@ -170,12 +172,20 @@ pub fn hole_list(
     out
 }
 
-/// How far from a hostile base a computer ship stops (units). Retail, Border Dispute: every Navy computer ship (Frigate, Fast Frigate,
-/// Torpedo boats) sailed straight at the Procyon base and then stayed 325-460 units from it, outside the base's guns, for the rest of the
-/// 27-minute battle; none attacked it (docs/re/movement.md). PROVISIONAL: one number for all classes.
-pub const BASE_STANDOFF: f32 = 390.0;
-fn at_base_standoff(ship: Vec3, base: Vec3) -> bool {
-    Vec2::new(base.x - ship.x, base.z - ship.z).length() <= BASE_STANDOFF
+/// How far from a hostile base a computer ship stops (units). Retail, Border Dispute (docs/re/movement.md): Torpedo boats patrolled
+/// 340-405 units off the Procyon base for the whole battle, the Frigate and Fast Frigates closed to 124-173 (about their gun range) and
+/// sank there. PROVISIONAL: other classes take the old single figure; patrolling is not modelled.
+pub fn base_standoff(class: &str) -> f32 {
+    if class.contains("Torpedo") {
+        375.0
+    } else if class.contains("Frigate") {
+        150.0
+    } else {
+        390.0
+    }
+}
+fn at_base_standoff(ship: Vec3, base: Vec3, class: &str) -> bool {
+    Vec2::new(base.x - ship.x, base.z - ship.z).length() <= base_standoff(class)
 }
 /// Seconds a computer captain keeps its target before choosing again (the original's target-selection timer).
 pub const RESELECT_SECS: f32 = 6.0;
@@ -287,7 +297,7 @@ pub fn ai(
         if explore.quadrant.contains_key(&e) {
             s.waypoints.clear(); // contact: drop the exploring course (the quadrant is kept for later)
         }
-        if base.is_some() && at_base_standoff(tf.translation, foe.1) {
+        if base.is_some() && at_base_standoff(tf.translation, foe.1, &lib.classes[s.class].name) {
             s.goal = None;
             s.order = 0; // arrived: hold off the base
             continue;
@@ -356,10 +366,11 @@ pub fn step(ship: &mut Ship, tf: &mut Transform, class: &combat::Class, health: 
         ship.speed = approach_speed(ship.speed, target, drag, dt);
         let fwd = Vec3::new(-ship.heading.sin(), 0.0, -ship.heading.cos());
         tf.translation += fwd * ship.speed * dt;
-        // Roll about the bow axis toward the rudder, rate-limited. PROVISIONAL: target proportional to rudder; retail also
-        // weaves slightly while steering for a point and does not lean at Emergency Speed (not modelled).
+        // Roll about the bow axis toward the rudder, rate-limited; none at Emergency Speed (measured, docs/re/movement.md).
+        // PROVISIONAL: target proportional to rudder; retail also weaves slightly while steering for a point (not modelled).
+        let lean = if ship.order == 3 { 0.0 } else { steer * MAX_ROLL };
         let roll = tf.rotation.to_euler(EulerRot::YXZ).2;
-        let roll = roll + (steer * MAX_ROLL - roll).clamp(-ROLL_RATE * dt, ROLL_RATE * dt);
+        let roll = roll + (lean - roll).clamp(-ROLL_RATE * dt, ROLL_RATE * dt);
         tf.rotation = Quat::from_rotation_y(ship.heading) * Quat::from_rotation_z(roll);
     }
 }
@@ -491,7 +502,8 @@ impl FleetPilot {
 }
 
 /// Native layout construction in game axes, converted to leader-local Bevy coordinates.
-/// PROVISIONAL: section-box radius and stable roster assignment replace native size/cost assignment.
+/// R is the largest member's bounding-sphere radius: the retail Diamond slot sat R + 30 = 46.7 from a Man-O-War leader, whose WOT sphere
+/// radius is 17 (docs/re/fleet-controls.md). PROVISIONAL: stable roster assignment replaces native size/cost assignment.
 pub fn formation_slots(kind: Formation, radii: &[f32]) -> Vec<Vec3> {
     let r = radii.iter().copied().fold(0.0, f32::max);
     let mut slots = vec![Vec3::ZERO; radii.len()];
@@ -602,7 +614,7 @@ pub fn set_formation(world: &mut World, owner: &str, kind: Option<Formation>, ho
     }) else {
         return;
     };
-    let radii: Vec<_> = fleet.members.iter().map(|e| world.get::<Ship>(*e).map_or(0.0, |s| world.resource::<Library>().classes[s.class].radius)).collect();
+    let radii: Vec<_> = fleet.members.iter().map(|e| world.get::<Ship>(*e).map_or(0.0, |s| world.resource::<Library>().classes[s.class].sphere.1)).collect();
     let slots = formation_slots(fleet.formation, &radii);
     let leader = fleet.members.first().and_then(|e| world.get::<Transform>(*e)).copied().unwrap_or_default();
     for (i, e) in fleet.members.iter().enumerate().skip(1) {
@@ -687,7 +699,7 @@ pub fn promote(world: &mut World, candidate: Entity, scripted: bool) -> bool {
         fleets.selected = Some(candidate);
         fleets.groups.get(&owner).unwrap().clone()
     };
-    let radii: Vec<_> = f.members.iter().map(|e| world.get::<Ship>(*e).map_or(0.0, |s| world.resource::<Library>().classes[s.class].radius)).collect();
+    let radii: Vec<_> = f.members.iter().map(|e| world.get::<Ship>(*e).map_or(0.0, |s| world.resource::<Library>().classes[s.class].sphere.1)).collect();
     let slots = formation_slots(f.formation, &radii);
     for (i, e) in f.members.iter().enumerate().skip(1) {
         if f.formation != Formation::Custom

@@ -452,7 +452,7 @@ pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Libra
             let Some(p) = players.get(g.player) else { continue };
             let f = game_to_bevy(&p["forward"]);
             let heading = (-f.x).atan2(-f.z);
-            let radii: Vec<f32> = g.ships.iter().map(|(n, ..)| lib.classes[lib.index(n)].radius).collect();
+            let radii: Vec<f32> = g.ships.iter().map(|(n, ..)| lib.classes[lib.index(n)].sphere.1).collect();
             let kind = ship::Formation::from_index(p["formation"].as_u64().unwrap_or(0) as usize);
             let slots: Vec<_> = ship::formation_slots(kind, &radii).into_iter().map(|v| game_to_bevy(&p["start"]) + Quat::from_rotation_y(heading) * v).collect();
             // A scripted map's ships answer to their map player's name (`MissionShip::owner`), so the fleet is keyed the same way, or the
@@ -478,7 +478,10 @@ pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Libra
                         ..default()
                     });
                 }
-                if !g.human {
+                // A computer fleet built in the lobby carries its crew (`SkirmishCrew` below); its ships left without crew have empty posts
+                // like ours (retail saves: factor 1.125, scan x1.125). Pre-placed computer ships keep the measured crewed factor.
+                let built = g.crew.iter().any(|c| c.iter().any(|r| !r.is_empty()));
+                if !g.human && !built {
                     commands.entity(e).entry::<Ship>().and_modify(|mut s| (s.crew_speed, s.crew_turn) = (ship::COMPUTER_CREW, ship::COMPUTER_TURN));
                     // PROVISIONAL: the crew factor matching the measured speed (Average-to-Elite, retail save scale)
                     commands.entity(e).insert(crate::environment::ScanFactor(1.35));
@@ -488,7 +491,7 @@ pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Libra
                 }
                 if let Some(crew) = g.crew.get(i).filter(|c| c.iter().any(|r| !r.is_empty())) {
                     commands.entity(e).insert(crate::crew_arms::SkirmishCrew(crew.clone()));
-                } else if g.human {
+                } else if g.human || built {
                     // No crew assigned: every post holds the rating-1 hand, which still gives the lookout factor 1.125 (retail saves).
                     let scan = crate::crew_arms::CrewPosts(Default::default()).scan(&crate::boarding::counts(name));
                     commands.entity(e).insert(crate::environment::ScanFactor(scan));

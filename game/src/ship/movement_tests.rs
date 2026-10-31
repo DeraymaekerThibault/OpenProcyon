@@ -425,7 +425,7 @@ fn captain_runs_in_then_circles_with_the_foe_abeam() {
 
 #[test]
 #[ignore = "needs imported assets"]
-fn computer_ships_stop_390_units_off_a_hostile_base() {
+fn computer_ships_stop_their_class_standoff_off_a_hostile_base() {
     let lib = combat::Library::load(crate::assets_dir());
     let ci = lib.index("Ship_Navy_Frigate");
     let class = &lib.classes[ci];
@@ -448,7 +448,7 @@ fn computer_ships_stop_390_units_off_a_hostile_base() {
     };
     let (base, mut tf, dt) = (Vec3::ZERO, Transform::from_xyz(0.0, 0.0, 1500.0), 1.0 / 30.0);
     for _ in 0..(300.0 / dt) as usize {
-        if at_base_standoff(tf.translation, base) {
+        if at_base_standoff(tf.translation, base, &class.name) {
             (ship.goal, ship.order) = (None, 0);
         } else {
             let (goal, order, throttle) = captain_steer(ship.heading, tf.translation, base, class.reach, &[]);
@@ -457,7 +457,7 @@ fn computer_ships_stop_390_units_off_a_hostile_base() {
         step(&mut ship, &mut tf, class, &h, dt);
     }
     let d = Vec2::new(tf.translation.x, tf.translation.z).length();
-    assert!((d - BASE_STANDOFF).abs() < 40.0 && ship.speed.abs() < 0.5, "stopped {d} units from the base at speed {}", ship.speed);
+    assert!((d - base_standoff(&class.name)).abs() < 40.0 && ship.speed.abs() < 0.5, "stopped {d} units from the base at speed {}", ship.speed);
 }
 
 /// Retail Navy Cutter without crew, sampled from the running original (docs/re/movement.md, "Measured").
@@ -614,4 +614,38 @@ fn stop_is_frame_rate_independent_and_reaches_rest() {
     }
     assert_eq!(speed, 0.0);
     assert!(approach_speed(0.0, 11.0, rate, 100.0) <= 11.0);
+}
+
+#[test]
+#[ignore = "needs imported assets"]
+fn ships_lean_into_turns_except_at_emergency_speed() {
+    let lib = combat::Library::load(crate::assets_dir());
+    let ci = lib.index("Ship_Navy_Cutter");
+    let class = &lib.classes[ci];
+    let h = Health { sections: vec![1.0; class.sections.len()], core: 1.0, destroyed: false };
+    let roll = |order| {
+        let mut ship = Ship {
+            class: ci,
+            side: Side::Player,
+            heading: 0.0,
+            speed: 0.0,
+            ang_vel: 0.0,
+            order,
+            waypoints: vec![Vec3::new(-200.0, 0.0, -10.0)],
+            goal: None,
+            cap: 1.0,
+            throttle: None,
+            sail_energy: 1.0,
+            crew_speed: 1.0,
+            crew_turn: 1.0,
+            avoid: 1.0,
+        };
+        let mut tf = Transform::default();
+        for _ in 0..60 {
+            step(&mut ship, &mut tf, class, &h, 0.033);
+        }
+        tf.rotation.to_euler(EulerRot::YXZ).2.abs()
+    };
+    assert!(roll(2) > 0.05, "Ahead Full leans: {}", roll(2));
+    assert!(roll(3) < 1e-4, "Emergency Speed stays level: {}", roll(3));
 }

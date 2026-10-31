@@ -708,8 +708,7 @@ fn apply(sk: &mut Skirmish, lib: &Library, action: &Action) {
             sk.error = None;
             sk.show_picked_slot();
         }
-        // PROVISIONAL: the original's auto-assign rule is not recovered; this adds the most expensive ship that still fits until the
-        // fleet is full or nothing fits.
+        // PROVISIONAL: the original's auto-assign rule is not recovered; `auto_build` picks random hulls that fit (skirmish.rs).
         Action::AutoAssign => auto_assign(sk, lib),
         Action::DropShip => {
             sk.name_open = false;

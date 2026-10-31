@@ -59,8 +59,8 @@ enum Head {
     Light,
     Voice,
 }
-/// PROVISIONAL: the original cycles the voice box through its Start..Stop frames while speaking; the cadence was not recovered.
-const VOICE_FPS: f32 = 8.0;
+/// The voice box cycles while speaking: `Talking Head Voice Box - Time To Next Frame` 0.1 s.
+const VOICE_FPS: f32 = 10.0;
 #[derive(Resource)]
 struct HeadFrames {
     /// `Portal_Closed`, `Portal_ClosedToOpen0..9`, `Portal_Open`.
@@ -352,9 +352,11 @@ fn build(
         let o = offset(&hud, "RADAR_SWEEP_OFFSET_FROM_TOPLEFT");
         commands.spawn((Sweep, img, c.abs(o.x, o.y, sz), ChildOf(compass)));
     }
-    if let Some((img, sz)) = c.sprite("HUDRADAR_ICON_ENEMYSHIP_FRAME0", false) {
-        for i in 0..MAX_CONTACTS {
-            commands.spawn((Contact(i), img.clone(), c.abs(0.0, 0.0, sz), Visibility::Hidden, ChildOf(compass)));
+    for (friendly, icon) in [(false, "HUDRADAR_ICON_ENEMYSHIP_FRAME0"), (true, "HUDRADAR_ICON_FRIENDLYSHIP_FRAME0")] {
+        if let Some((img, sz)) = c.sprite(icon, false) {
+            for i in 0..MAX_CONTACTS {
+                commands.spawn((Contact(i, friendly), img.clone(), c.abs(0.0, 0.0, sz), Visibility::Hidden, ChildOf(compass)));
+            }
         }
     }
     if let Some((img, sz)) = c.sprite("COMPASS_OVERLAY", false) {
@@ -926,8 +928,7 @@ fn fleet_art(
     for (FleetStatus(i), mut img, mut v) in &mut status {
         let kind = model.rows.get(*i).map_or("", |r| r.status);
         v.set_if_neq(if kind.is_empty() { Visibility::Hidden } else { Visibility::Inherited });
-        // PROVISIONAL: the status icons cycle Frame0..5 at the speed-dial voice rate; retail cadence not recovered.
-        let frame = (time.elapsed_secs() * VOICE_FPS) as usize % 6;
+        let frame = (time.elapsed_secs() * crate::panels::STATUS_FPS) as usize % 6;
         if let Some((h, r)) = (!kind.is_empty()).then(|| c.frame(&format!("ShipStatus_Icon_{kind}_Frame{frame}"))).flatten() {
             show(&mut img, &h, r);
         }

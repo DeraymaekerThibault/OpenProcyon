@@ -23,6 +23,8 @@ pub struct Shell {
     pub(super) hp: f32,
     /// A warning shot ('Set Group/Unit Warning Shot Mode'): no damage.
     pub(super) harmless: bool,
+    /// Fired by a base's guns: its hits on ships take no outgoing difficulty factor (`side_damage_scale`).
+    pub(super) base: bool,
 }
 /// Core damage of one hit on a destroyed vital section: `roll` x (sum of core% over destroyed vital sections) / 100.
 pub(super) fn core_bleed(class: &Class, hp: &Health, roll: f32) -> f32 {
@@ -83,12 +85,19 @@ pub(super) struct ShipHit {
 
 /// Measured on retail (headless 1-vs-1 skirmishes per difficulty): the bullet table's damage is scaled by side and difficulty.
 /// Player shells on computer ships: Easy x3, Normal x2, Hard x1; computer shells on the player's: x0.25, x0.5, x1.
-/// PROVISIONAL: computer-vs-computer and allied hits are not measured (1.0 here).
-pub(super) fn side_damage_scale(shooter: Side, victim: Side, difficulty: u8) -> f32 {
+/// Our base's guns on a computer ship hit at x1 on Normal (retail HP log of a Minelayer sunk by the base alone), so the outgoing
+/// factor is the player's ships' only. PROVISIONAL: computer-vs-computer, allied and hostile-base-on-player hits are not measured.
+pub(super) fn side_damage_scale(shooter: Side, victim: Side, difficulty: u8, base: bool) -> f32 {
     let d = difficulty.min(2) as usize;
     let (out, inc) = ([3.0, 2.0, 1.0][d], [0.25, 0.5, 1.0][d]);
     match (shooter, victim) {
-        (Side::Player, v) if v != Side::Player => out,
+        (Side::Player, v) if v != Side::Player => {
+            if base {
+                1.0
+            } else {
+                out
+            }
+        }
         (s, Side::Player) if s != Side::Player => inc,
         _ => 1.0,
     }
@@ -405,7 +414,7 @@ fn hit_ship(
     let key = material_key(&sec.material);
     // Criticals are not modelled: in the original they only feed a tally and crew speech (docs/re/movement.md).
     let mut damage = bd.damage[key];
-    let scale = side_damage_scale(s.side, side, crate::menu::difficulty());
+    let scale = side_damage_scale(s.side, side, crate::menu::difficulty(), s.base);
     damage[0] *= scale;
     damage[1] *= scale;
     hits.write(Hit { shooter: s.shooter, victim: se });

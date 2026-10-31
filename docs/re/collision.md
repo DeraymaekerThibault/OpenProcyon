@@ -24,8 +24,8 @@ before and after (section HP from the saves).
   smoothly over ~1.2 s (9.07 → 6.2 units/s, then ~5.8) and was deflected by ~30° of heading while it kept steering inward; no
   bounce.
 - **Damage:** both ships lost hit points on *every* section, not only near the contact: Cutter −75 (−11 to −15 on each of its 6
-  sections), Man-O-War −86 (−1 to −18 on each of 9). Whether difficulty scales it (Easy) is not known; the remake damages the
-  nearest section only (`combat::lob::ram_damage`).
+  sections), Man-O-War −86 (−1 to −18 on each of 9). Whether difficulty scales it (Easy) is not known; the remake damages every
+  section of both ships (`combat::lob::ram_damage`), the amount per section PROVISIONAL.
 - A head-on Emergency ram missed (passed 24 units off) and did nothing.
 
 ## Implementation

@@ -78,9 +78,8 @@ Measured on two retail 2-player defeats (window drawn 1:1 at 800x600): status la
 x 767 with a 30 px heading band (column titles centred at y 175); one player per 60 px from y 210 (flag 28x25 at x 37, name from x 77,
 four 128x24 gold-rimmed boxes at x 197 + 140 * column); columns in order Ships Sunk, Ships Left (`left/start`), Damage Inflicted, Damage
 Taken; the panel ends 20 px below the last box centre. Each column's best value (most sunk / left / inflicted, least taken; ties all
-count) is a green box, the others plain. Seen screens are 2-player only; the next arrow's target is not observed.
-So: one row per player (name, then columns of counts as horizontal bars), the kill-count-by-object-type table, a points panel for
-campaign games. The exact column order, which object types are listed and how bars scale are not recovered. PROVISIONAL.
+count) is a green box, the others plain. Seen screens are 2-player only. On a won skirmish the next arrow goes straight to the main menu.
+Which object types the kill-count-by-object-type table lists and the campaign points panel are not recovered. PROVISIONAL.
 
 Implemented: `GameStats` (`stats.rs`) and the Game Summary page of the classic in-game overlay (`Page::Summary`, opened when a
 skirmish is decided and by the in-game menu's Summary button), drawn from `Multiplayer Stats Screen.tst` with the measurements above;
@@ -91,7 +90,7 @@ mission's table is not persisted).
 Data the screen reads, serialized as `GameStats` (see saves): `PlayerKillInfo`, `PlayerDockInfo`, `PlayerLifeBoatSavedInfo`,
 `FleetSizeInfo` (per player `Starting Size`, `Ending Size`), `PlayerDamageInfo` (per player `Damage Inflicted`, `Damage Received`) and
 `SinglePlayer Points` (points earned in *this* mission; the campaign total is the separate `SinglePlayerVictoryPoints`).
-Ships Left = Ending Size; Ships Sunk presumably = kills from `PlayerKillInfo` (PROVISIONAL).
+Ships Left = Ending Size; Ships Sunk = kills from `PlayerKillInfo` (a won 1-vs-1 skirmish showed Ships Sunk 1 after one kill).
 
 ## 4. Save games
 
