@@ -470,12 +470,12 @@ pub fn sail(
             cables.insert((tower, towee), (p - q).with_y(0.0).length());
         }
     }
+    let local = fleets.as_ref().map(|f| f.local.as_str());
+    // The human's ships (`Captain_Human` in the original): the player ship and the human's fleet; allied computer fleets share the side.
+    let humans = |e: Entity, side: crate::Side| side == crate::Side::Player && (human.contains(e) || members.get(e).ok().is_none_or(|m| Some(m.0.as_str()) == local));
     // The original's collision avoider (`avoid`) for every AI-steered ship: not the human's own ship, not while docking.
     {
         use avoid::{Avoid, Key, Me, Other, Shape};
-        let local = fleets.as_ref().map(|f| f.local.as_str());
-        // The human's ships (`Captain_Human` in the original): the player ship and the human's fleet; allied computer fleets share the side.
-        let humans = |e: Entity, side: crate::Side| side == crate::Side::Player && (human.contains(e) || members.get(e).ok().is_none_or(|m| Some(m.0.as_str()) == local));
         let priority = |e: Entity, s: &crate::Ship| s.speed.abs() + if s.speed.abs() >= 0.001 && humans(e, s.side) { avoid::HUMAN_PRIORITY } else { 0.0 };
         let mut others: Vec<Other> = vec![];
         for (oe, o, v) in &obstacles {
@@ -561,7 +561,8 @@ pub fn sail(
                 continue;
             }
             let class = &lib.classes[s.class];
-            crate::step(&mut s, &mut tf, class, health, substep);
+            let ai = !humans(e, s.side);
+            crate::ship::helm_step(&mut s, &mut tf, class, health, substep, ai);
             // Etherium currents push along their path (environment.rs); force / mass, as for thrust.
             for c in &currents {
                 drift.0 += c.force(tf.translation) / class.phys.mass * substep;

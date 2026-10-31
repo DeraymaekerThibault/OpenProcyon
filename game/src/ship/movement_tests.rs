@@ -381,9 +381,8 @@ fn a_broadside_attacker_circles_an_idle_ship_on_its_turning_circle() {
     let lib = combat::Library::load(crate::assets_dir());
     let foe = Vec3::ZERO;
     // Minimum throttle: the measured Carrack's save holds 0.745; the Barque takes the range's mean (each ship draws 0.65-0.75).
-    // ponytail: aiming at the Cutter's nearest section (as the original), the circles run 42-49 (Carrack) and 43-73 (Barque): the right
-    // size, but the Barque breathes more than retail. Not the aim (centre-aimed it was 43-72); left: our turn model (movement.md).
-    for (name, min_throttle, lo_ok, hi_ok) in [("Ship_Pirate_Carrack", 0.745, 38.0, 53.0), ("Ship_Pirate_Barque", 0.7, 40.0, 76.0)] {
+    // With the computer helm's torque boost and the crew factor applied once, the circles run 43-48 (Carrack) and 53-58 (Barque).
+    for (name, min_throttle, lo_ok, hi_ok) in [("Ship_Pirate_Carrack", 0.745, 41.0, 51.0), ("Ship_Pirate_Barque", 0.7, 50.0, 61.0)] {
         let ci = lib.index(name);
         let class = &lib.classes[ci];
         let h = Health { sections: class.sections.iter().map(|s| s.hp).collect(), core: class.core_hp, destroyed: false };
@@ -401,7 +400,7 @@ fn a_broadside_attacker_circles_an_idle_ship_on_its_turning_circle() {
             throttle: None,
             sail_energy: 1.0,
             crew_speed: COMPUTER_CREW,
-            crew_turn: COMPUTER_TURN,
+            crew_turn: COMPUTER_CREW,
             avoid: 1.0,
         };
         let mut tf = Transform::from_xyz(30.0, 0.0, 400.0);
@@ -416,7 +415,7 @@ fn a_broadside_attacker_circles_an_idle_ship_on_its_turning_circle() {
             let course = attack::course(routine, tf.translation, ship.heading, at, gap, range[0], i as f32 * dt, &mut None);
             let throttle = attack::throttle(e, tf.translation, ship.heading, course[0]).map(|_| 2.0 * min_throttle);
             (ship.throttle, ship.waypoints, ship.goal, ship.order) = (throttle, course, None, 3);
-            step(&mut ship, &mut tf, class, &h, dt);
+            helm_step(&mut ship, &mut tf, class, &h, dt, true);
             if i as f32 * dt > 120.0 {
                 let d = foe - tf.translation;
                 dists.push(Vec2::new(d.x, d.z).length());

@@ -64,7 +64,8 @@ Saves made mid-battle store per ship an engineer and a navigator factor. Measure
   mean rating 8.67 would give 1.508).
 - **Speed:** Ahead Full = 0.5 × WOT MaxSpeed × engineer factor; Emergency twice that. The speed bands of the turn formula use the
   uncrewed MaxSpeed (the engineers' Man-O-War at Full, 0.745 × MaxSpeed, falls in the top band: 2.68°/s measured and predicted).
-- **Rudder (player ships):** torque × navigator factor, linear. Computer ships turn harder (the Carrack's circle needs
+- **Rudder (player ships):** torque × navigator factor, linear. Computer ships turn harder (the computer helm's torque boost,
+  [movement.md](movement.md#computer-helm-read-from-the-originals-code-2026-10-31); the Carrack's circle needs
   (1.425 / 1.125)² on top of the uncrewed formula, [movement.md](movement.md#computer-captains-measured-2026-10)); PROVISIONAL.
 - Leadership: the Carrack's captain (Leadership 7) did not change its factors beyond the formula; whether leadership adds
   anything elsewhere is not measured.
