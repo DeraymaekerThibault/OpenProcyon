@@ -238,24 +238,26 @@ fn nearest_section(class: &Class, local: Vec3) -> Option<usize> {
     })
 }
 
-/// Hull damage of a hard contact (collision.rs `Ram`): both ships lose hit points on the section nearest the contact.
-/// PROVISIONAL: (impulse - threshold) / 400 hit points, a guess sized so a full-speed ram costs a frigate section about a third.
+/// Hull damage of a hard contact (collision.rs `Ram`): both ships lose hit points on every section, not only near the contact
+/// (retail glancing ram, docs/re/collision.md). PROVISIONAL: (impulse - threshold) / 400 hit points per section, a guess; retail
+/// cost a Cutter 11-15 and a Man-O-War 1-18 per section for a ~4 s slide at 9 units/s (one sample, Easy).
 pub fn ram_damage(
     lib: Res<Library>,
     mut rng: ResMut<Rng>,
     mut msgs: MessageReader<crate::collision::Ram>,
-    mut ships: Query<(&Transform, &Ship, &mut Health, Option<&crate::campaign::MissionShip>)>,
+    mut ships: Query<(&Ship, &mut Health, Option<&crate::campaign::MissionShip>)>,
 ) {
     for r in msgs.read() {
         let amount = (r.impulse - crate::collision::RAM_IMPULSE) / 400.0;
         for e in if r.a == r.b { vec![r.a] } else { vec![r.a, r.b] } {
-            let Ok((tf, ship, mut hp, ms)) = ships.get_mut(e) else { continue };
+            let Ok((ship, mut hp, ms)) = ships.get_mut(e) else { continue };
             if hp.destroyed {
                 continue;
             }
             let class = &lib.classes[ship.class];
-            let Some(k) = nearest_section(class, tf.to_matrix().inverse().transform_point3(r.at)) else { continue };
-            apply_ship_hit(class, &mut hp, k, [amount, amount, 0.0, 0.0, 0.0], ms.map_or(0.0, |m| m.invuln), false, &mut rng);
+            for k in 0..class.sections.len().min(hp.sections.len()) {
+                apply_ship_hit(class, &mut hp, k, [amount, amount, 0.0, 0.0, 0.0], ms.map_or(0.0, |m| m.invuln), false, &mut rng);
+            }
         }
     }
 }
@@ -308,6 +310,38 @@ mod tests {
         app.world_mut().write_message(Strike { victim: e, damage: tables["meteor"].clone(), section: k });
         app.update();
         assert_eq!(app.world().get::<Health>(e).unwrap().sections[k], after);
+    }
+
+    #[test]
+    #[ignore = "needs imported assets"]
+    fn a_ram_damages_every_section_of_both_ships() {
+        let lib = Library::load(crate::assets_dir());
+        let mut app = App::new();
+        let ship = |class| Ship {
+            class,
+            side: crate::Side::Player,
+            heading: 0.0,
+            speed: 0.0,
+            ang_vel: 0.0,
+            order: 0,
+            waypoints: vec![],
+            goal: None,
+            cap: 1.0,
+            throttle: None,
+            sail_energy: 1.0,
+            crew_speed: 1.0,
+            crew_turn: 1.0,
+        };
+        let [cutter, mow] = ["Ship_Navy_Cutter", "Ship_Navy_ManOWar"].map(|n| lib.index(n));
+        let [a, b] = [cutter, mow].map(|c| app.world_mut().spawn((ship(c), Health::new(&lib.classes[c]))).id());
+        let full = [cutter, mow].map(|c| Health::new(&lib.classes[c]).sections);
+        app.insert_resource(lib).insert_resource(Rng(7)).add_message::<crate::collision::Ram>().add_systems(Update, ram_damage);
+        app.world_mut().write_message(crate::collision::Ram { a, b, impulse: crate::collision::RAM_IMPULSE + 4000.0, at: Vec3::ZERO });
+        app.update();
+        for (e, full) in [(a, &full[0]), (b, &full[1])] {
+            let hp = &app.world().get::<Health>(e).unwrap().sections;
+            assert!(hp.iter().zip(full).all(|(now, was)| now < was), "every section loses hit points: {hp:?} vs {full:?}");
+        }
     }
 
     #[test]

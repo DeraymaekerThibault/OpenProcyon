@@ -615,3 +615,36 @@ fn stop_is_frame_rate_independent_and_reaches_rest() {
     assert_eq!(speed, 0.0);
     assert!(approach_speed(0.0, 11.0, rate, 100.0) <= 11.0);
 }
+
+#[test]
+#[ignore = "needs imported assets"]
+fn ships_lean_into_turns_except_at_emergency_speed() {
+    let lib = combat::Library::load(crate::assets_dir());
+    let ci = lib.index("Ship_Navy_Cutter");
+    let class = &lib.classes[ci];
+    let h = Health { sections: vec![1.0; class.sections.len()], core: 1.0, destroyed: false };
+    let roll = |order| {
+        let mut ship = Ship {
+            class: ci,
+            side: Side::Player,
+            heading: 0.0,
+            speed: 0.0,
+            ang_vel: 0.0,
+            order,
+            waypoints: vec![Vec3::new(-200.0, 0.0, -10.0)],
+            goal: None,
+            cap: 1.0,
+            throttle: None,
+            sail_energy: 1.0,
+            crew_speed: 1.0,
+            crew_turn: 1.0,
+        };
+        let mut tf = Transform::default();
+        for _ in 0..60 {
+            step(&mut ship, &mut tf, class, &h, 0.033);
+        }
+        tf.rotation.to_euler(EulerRot::YXZ).2.abs()
+    };
+    assert!(roll(2) > 0.05, "Ahead Full leans: {}", roll(2));
+    assert!(roll(3) < 1e-4, "Emergency Speed stays level: {}", roll(3));
+}

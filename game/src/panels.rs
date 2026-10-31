@@ -16,8 +16,8 @@ pub const REF_H: f32 = 960.0;
 pub const MAX_CONTACTS: usize = 16;
 /// PROVISIONAL: radar range in world units mapped to the disk's radius.
 const RADAR_RANGE: f32 = 300.0;
-// PROVISIONAL: retail docking animation cadence has not been recovered.
-const DOCKING_FPS: f32 = 8.0;
+/// Ship status icons (docking, boarding, ...): `HUDRadar Ship Status Icon - Time To Next Frame` 0.13 s.
+pub const STATUS_FPS: f32 = 1.0 / 0.13;
 /// Retail `Animation Speed TalkingHeadWindow` is 2.0; PROVISIONAL: read as open/close progress per second.
 const HEAD_SPEED: f32 = 2.0;
 
@@ -348,7 +348,7 @@ fn update_docking_status(
     let docking = player.iter().any(|p| p.1.is_some_and(|d| d.shows_status()));
     let boarding = player.iter().any(|p| p.2.is_some_and(|f| f.live()) || fights.iter().any(|f| f.live() && f.target() == p.0));
     let set = if docking || boarding_art.is_empty() || !boarding { docking_art } else { boarding_art };
-    let (image, rect) = &set[(time.elapsed_secs() * DOCKING_FPS) as usize % set.len()];
+    let (image, rect) = &set[(time.elapsed_secs() * STATUS_FPS) as usize % set.len()];
     for (mut img, mut vis) in &mut icons {
         if img.image != *image {
             img.image = image.clone();

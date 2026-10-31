@@ -52,8 +52,8 @@ A move click from All Stop with no key pressed runs the cutter at its Ahead Full
   lean), holds it while the rudder is over and levels at the same rate. While a ship steers for a clicked point straight ahead
   its heading weaves: cutter ±2.2° (roll ±3.5°) with a 3.8 s period, Man-O-War ±0.45° with an 11.6 s period. Once it has
   passed its point and holds a course, the heading is dead steady on both (no weave in 30+ s). PROVISIONAL reading: the weave
-  is the course controller hunting for the point, not a straight-course wobble. At Emergency Speed there is no roll. Remake: roll target = 0.25 × rudder, rate-limited; the weave
-  and the Emergency exception are not modelled.
+  is the course controller hunting for the point, not a straight-course wobble. At Emergency Speed there is no roll. Remake: roll target = 0.25 × rudder, rate-limited, none at Emergency Speed; the weave
+  is not modelled.
 
 ## Other constants
 0.33 / 1.0 / 5/3 / 1/3 (speed bands), 60.0 (α clamp), 0.1 (rudder-speed constant), 0.5 and 0.3 (lateral terms); 0.25 is the

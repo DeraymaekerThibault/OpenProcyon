@@ -452,7 +452,7 @@ pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Libra
             let Some(p) = players.get(g.player) else { continue };
             let f = game_to_bevy(&p["forward"]);
             let heading = (-f.x).atan2(-f.z);
-            let radii: Vec<f32> = g.ships.iter().map(|(n, ..)| lib.classes[lib.index(n)].radius).collect();
+            let radii: Vec<f32> = g.ships.iter().map(|(n, ..)| lib.classes[lib.index(n)].sphere.1).collect();
             let kind = ship::Formation::from_index(p["formation"].as_u64().unwrap_or(0) as usize);
             let slots: Vec<_> = ship::formation_slots(kind, &radii).into_iter().map(|v| game_to_bevy(&p["start"]) + Quat::from_rotation_y(heading) * v).collect();
             // A scripted map's ships answer to their map player's name (`MissionShip::owner`), so the fleet is keyed the same way, or the

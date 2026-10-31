@@ -26,7 +26,7 @@ The float is read as the pool's max distance (same field order as the WOT pools)
 - Which event uses which original pool: damage pool on section loss, heavy explosion on ship destruction. Collision and
   `Explosion_Med01` pools are unused (no collisions yet).
 - Falloff (PROVISIONAL): inverse-distance rolloff like DirectSound 3D: full volume within 25 units of the camera, halving per doubling of distance, silent beyond the max distance; no stereo panning. The earlier linear falloff kept nearby collisions near full volume at normal zoom.
-- Engine loops: no max distance in the data (300 used), level 0.6; silent at All Stop. Music level 0.35, one fixed track.
+- Engine loops: no max distance in the data (300 used), level 0.25 (PROVISIONAL mix); silent at All Stop. Music level 0.35, one fixed track.
 - One fire sound per shell of a burst.
 
 ## Crew voice lines (from the community Unity remake)

@@ -4,8 +4,8 @@ use crate::*;
 /// All Stop, Ahead Slow, Ahead Full, Emergency Speed as fractions of Ahead Full speed (measured on the retail cutter, docs/re/movement.md).
 pub const ORDERS: [(&str, f32); 4] = [("All Stop", 0.0), ("Ahead Slow", 0.5), ("Ahead Full", 1.0), ("Emergency Speed", 2.0)];
 
-/// Ahead Full without crew settles at this fraction of WOT MaxSpeed (so Emergency is 1.125 x MaxSpeed). Measured on the cutter
-/// and the Man-O-War; PROVISIONAL for the others; the engineers raise it (`Ship::crew_speed`).
+/// Ahead Full without crew settles at this fraction of WOT MaxSpeed (so Emergency is 1.125 x MaxSpeed). Measured on the cutter,
+/// Man-O-War, Carrack, Barque and Minelayer (docs/re/movement.md); the engineers raise it (`Ship::crew_speed`).
 pub const FULL_SPEED: f32 = 0.5625;
 
 /// Full-rudder torque relative to the decoded turn formula. Measured: cutter at Slow, Full and Emergency, Man-O-War at Full
@@ -356,10 +356,11 @@ pub fn step(ship: &mut Ship, tf: &mut Transform, class: &combat::Class, health: 
         ship.speed = approach_speed(ship.speed, target, drag, dt);
         let fwd = Vec3::new(-ship.heading.sin(), 0.0, -ship.heading.cos());
         tf.translation += fwd * ship.speed * dt;
-        // Roll about the bow axis toward the rudder, rate-limited. PROVISIONAL: target proportional to rudder; retail also
-        // weaves slightly while steering for a point and does not lean at Emergency Speed (not modelled).
+        // Roll about the bow axis toward the rudder, rate-limited; none at Emergency Speed (measured, docs/re/movement.md).
+        // PROVISIONAL: target proportional to rudder; retail also weaves slightly while steering for a point (not modelled).
+        let lean = if ship.order == 3 { 0.0 } else { steer * MAX_ROLL };
         let roll = tf.rotation.to_euler(EulerRot::YXZ).2;
-        let roll = roll + (steer * MAX_ROLL - roll).clamp(-ROLL_RATE * dt, ROLL_RATE * dt);
+        let roll = roll + (lean - roll).clamp(-ROLL_RATE * dt, ROLL_RATE * dt);
         tf.rotation = Quat::from_rotation_y(ship.heading) * Quat::from_rotation_z(roll);
     }
 }
@@ -491,7 +492,8 @@ impl FleetPilot {
 }
 
 /// Native layout construction in game axes, converted to leader-local Bevy coordinates.
-/// PROVISIONAL: section-box radius and stable roster assignment replace native size/cost assignment.
+/// R is the largest member's bounding-sphere radius: the retail Diamond slot sat R + 30 = 46.7 from a Man-O-War leader, whose WOT sphere
+/// radius is 17 (docs/re/fleet-controls.md). PROVISIONAL: stable roster assignment replaces native size/cost assignment.
 pub fn formation_slots(kind: Formation, radii: &[f32]) -> Vec<Vec3> {
     let r = radii.iter().copied().fold(0.0, f32::max);
     let mut slots = vec![Vec3::ZERO; radii.len()];
@@ -602,7 +604,7 @@ pub fn set_formation(world: &mut World, owner: &str, kind: Option<Formation>, ho
     }) else {
         return;
     };
-    let radii: Vec<_> = fleet.members.iter().map(|e| world.get::<Ship>(*e).map_or(0.0, |s| world.resource::<Library>().classes[s.class].radius)).collect();
+    let radii: Vec<_> = fleet.members.iter().map(|e| world.get::<Ship>(*e).map_or(0.0, |s| world.resource::<Library>().classes[s.class].sphere.1)).collect();
     let slots = formation_slots(fleet.formation, &radii);
     let leader = fleet.members.first().and_then(|e| world.get::<Transform>(*e)).copied().unwrap_or_default();
     for (i, e) in fleet.members.iter().enumerate().skip(1) {
@@ -687,7 +689,7 @@ pub fn promote(world: &mut World, candidate: Entity, scripted: bool) -> bool {
         fleets.selected = Some(candidate);
         fleets.groups.get(&owner).unwrap().clone()
     };
-    let radii: Vec<_> = f.members.iter().map(|e| world.get::<Ship>(*e).map_or(0.0, |s| world.resource::<Library>().classes[s.class].radius)).collect();
+    let radii: Vec<_> = f.members.iter().map(|e| world.get::<Ship>(*e).map_or(0.0, |s| world.resource::<Library>().classes[s.class].sphere.1)).collect();
     let slots = formation_slots(f.formation, &radii);
     for (i, e) in f.members.iter().enumerate().skip(1) {
         if f.formation != Formation::Custom

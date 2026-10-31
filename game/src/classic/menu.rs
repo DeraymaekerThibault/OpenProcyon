@@ -2,7 +2,7 @@
 //! from the retail string table, button/list/arrow art from the hud.hdt FrontEnd_* sprites with their NoCursor/CursorOver/CursorDown
 //! states, the backdrop BD_GUITextures FrontEndScreen0. State and actions live in `menu.rs`; this only draws and scrolls.
 //! PROVISIONAL: which element shows the map picture (Lobby Information area), the description font, the fleet editor
-//! (click a slot to cycle ship classes; the retail Ship Selection screen is not done), no transitions.
+//! no transitions.
 
 #![allow(deprecated)] // shortcut: bevy 0.20 Interaction (deprecated for picking Hovered/Pressed); port when it is removed
 use bevy::prelude::*;
@@ -158,7 +158,7 @@ fn element(ctx: &Ctx, c: &mut ChildSpawnerCommands, m: &MenuModel, e: &Value, st
             summary(ctx, c, stats, **outcome, end_message.0.as_deref(), strings);
             None
         }
-        // A decided battle continues to the main menu; opened from the in-game menu it goes back there. PROVISIONAL.
+        // A decided battle continues to the main menu (measured on a won skirmish); opened from the in-game menu it goes back there.
         (Screen::Battle, "Open Next Arrow Button") => {
             let next = if **outcome == crate::scenario::Outcome::Playing { Action::Ingame(Some(Page::Menu)) } else { Action::QuitToMenu };
             arrow(ctx, c, rect, "FrontEnd_Next_Button", next);
@@ -804,7 +804,7 @@ pub(super) fn class_name(lib: &Library, ci: usize, strings: &Value) -> String {
     cl.display_name.as_deref().and_then(|id| strings[id].as_str()).map_or_else(|| pretty(&cl.name), String::from)
 }
 
-/// Ship Information for the picked hull (`info_panel`): seven stat lines. PROVISIONAL: retail shows more (guns by class, crew, victory points).
+/// Ship Information for the picked hull (`info_panel`): seven stat lines and the point cost, as retail.
 fn ship_info(ctx: &Ctx, c: &mut ChildSpawnerCommands, _rect: [f32; 4], sk: &Skirmish, lib: &Library, strings: &Value) {
     let Some(ci) = sk.shown_class(lib) else { return };
     let s = |id: &str| text_of(strings, id);
