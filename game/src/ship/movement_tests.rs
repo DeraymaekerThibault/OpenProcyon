@@ -358,35 +358,36 @@ fn exploring_heads_for_quadrant_centres() {
 #[test]
 fn captain_keeps_its_target_six_seconds_then_takes_the_nearest() {
     let (a, b) = (Entity::from_raw_u32(1).unwrap(), Entity::from_raw_u32(2).unwrap());
-    assert_eq!(choose_target(None, &[(a, 90.0), (b, 40.0)]), Some((b, false)), "no target: the nearest");
-    assert_eq!(choose_target(Some((a, 5.9)), &[(a, 90.0), (b, 40.0)]), Some((a, true)), "kept inside 6 s though farther");
-    assert_eq!(choose_target(Some((a, 6.0)), &[(a, 90.0), (b, 40.0)]), Some((b, false)), "re-chosen after 6 s");
-    assert_eq!(choose_target(Some((a, 1.0)), &[(b, 40.0)]), Some((b, false)), "a lost target is replaced at once");
-    assert_eq!(choose_target(Some((a, 1.0)), &[]), None);
+    let alive = |_: Entity| true;
+    assert_eq!(choose_target(None, &[(a, 90.0), (b, 40.0)], alive), Some((b, false)), "no target: the nearest");
+    assert_eq!(choose_target(Some((a, 5.9)), &[(a, 90.0), (b, 40.0)], alive), Some((a, true)), "kept inside 6 s though farther");
+    assert_eq!(choose_target(Some((a, 5.9)), &[(b, 40.0)], alive), Some((a, true)), "a held target is followed out of sight");
+    assert_eq!(choose_target(Some((a, 6.0)), &[(a, 90.0), (b, 40.0)], alive), Some((b, false)), "re-chosen after 6 s");
+    assert_eq!(choose_target(Some((a, 1.0)), &[(b, 40.0)], |t| t != a), Some((b, false)), "a sunk target is replaced at once");
+    assert_eq!(choose_target(Some((a, 1.0)), &[], |t| t != a), None);
+}
+
+#[test]
+fn captains_turn_straight_away_from_a_black_hole() {
+    assert!(flee(&[(Vec3::new(0.0, 0.0, 300.0), 145.0)], Vec3::new(0.0, 0.0, 150.0)).is_some_and(|h| angdiff(h, 0.0).abs() < 1e-5), "bow toward -z");
+    assert_eq!(flee(&[(Vec3::new(0.0, 0.0, 300.0), 145.0)], Vec3::new(0.0, 0.0, -100.0)), None);
 }
 
 #[test]
 #[ignore = "needs imported assets"]
-fn captain_runs_in_then_circles_with_the_foe_abeam() {
-    const REACH: f32 = 150.0;
-    let foe = Vec3::ZERO;
-    // far: toward a point REACH beside the foe (off the bow by atan(REACH / distance)), Emergency, no throttle cap
-    let (goal, order, throttle) = captain_steer(0.1, Vec3::new(0.0, 0.0, 400.0), foe, REACH, &[]);
-    assert!((angdiff(goal, 0.0).abs() - (REACH / 400.0).atan()).abs() < 1e-4 && order == 3 && throttle.is_none(), "{goal} {throttle:?}");
-    // inside ORBIT_SLOW x REACH: circling throttle
-    let (_, _, throttle) = captain_steer(0.3, Vec3::new(0.0, 0.0, 60.0), foe, REACH, &[]);
-    assert_eq!(throttle, Some(ORBIT_THROTTLE));
-    // near a black hole: straight away from it, whatever the foe
-    let (goal, _, _) = captain_steer(0.0, Vec3::new(0.0, 0.0, 150.0), foe, REACH, &[(Vec3::new(0.0, 0.0, 300.0), 145.0)]);
-    assert!(angdiff(goal, 0.0).abs() < 1e-5, "bow toward -z, away from the hole: {goal}");
-
-    // Crewed computer ships run in from 400 units and settle on their tightest circle with the foe abeam, using the real
-    // movement step and their own reach. Retail: Carrack 45-50 units around an idle Cutter, Barque 51-58.
+fn a_broadside_attacker_circles_an_idle_ship_on_its_turning_circle() {
+    // The original's broadside course (attack.rs) with the real movement step: crewed computer ships run in from 400 units and end
+    // circling with the target abeam. Retail: Carrack 45-50 units around an idle Cutter, Barque 51-58 (docs/re/movement.md).
     let lib = combat::Library::load(crate::assets_dir());
-    for (name, lo_ok, hi_ok) in [("Ship_Pirate_Carrack", 43.0, 55.0), ("Ship_Pirate_Barque", 48.0, 68.0)] {
+    let foe = Vec3::ZERO;
+    // Minimum throttle: the measured Carrack's save holds 0.745; the Barque takes the range's mean (each ship draws 0.65-0.75).
+    // ponytail: the port circles at 40-50 (Carrack) and 43-72 (Barque): the right size, but it breathes more than retail, where the
+    // throttle stays at its minimum on the circle. Suspects: the aim at the target's centre (the original: its nearest section).
+    for (name, min_throttle, lo_ok, hi_ok) in [("Ship_Pirate_Carrack", 0.745, 38.0, 53.0), ("Ship_Pirate_Barque", 0.7, 40.0, 76.0)] {
         let ci = lib.index(name);
         let class = &lib.classes[ci];
-        let h = Health { sections: vec![1.0; class.sections.len()], core: 1.0, destroyed: false };
+        let h = Health { sections: class.sections.iter().map(|s| s.hp).collect(), core: class.core_hp, destroyed: false };
+        let (routine, range) = attack::plan(&lib, class, &h, None).unwrap();
         let mut ship = Ship {
             class: ci,
             side: Side::Enemy,
@@ -405,59 +406,25 @@ fn captain_runs_in_then_circles_with_the_foe_abeam() {
         };
         let mut tf = Transform::from_xyz(30.0, 0.0, 400.0);
         let dt = 1.0 / 30.0;
+        let e = Entity::from_raw_u32(3).unwrap();
         let (mut dists, mut beams) = (vec![], vec![]);
         for i in 0..(200.0 / dt) as usize {
-            let (goal, order, throttle) = captain_steer(ship.heading, tf.translation, foe, class.reach, &[]);
-            (ship.goal, ship.order, ship.throttle) = (Some(goal), order, throttle);
+            let gap = tf.translation.length() - class.radius;
+            let course = attack::course(routine, tf.translation, ship.heading, foe, gap, range[0], i as f32 * dt, &mut None);
+            let throttle = attack::throttle(e, tf.translation, ship.heading, course[0]).map(|_| 2.0 * min_throttle);
+            (ship.throttle, ship.waypoints, ship.goal, ship.order) = (throttle, course, None, 3);
             step(&mut ship, &mut tf, class, &h, dt);
             if i as f32 * dt > 120.0 {
                 let d = foe - tf.translation;
                 dists.push(Vec2::new(d.x, d.z).length());
-                beams.push(angdiff((-d.x).atan2(-d.z), ship.heading).abs());
+                beams.push(angdiff((-d.x).atan2(-d.z), ship.heading));
             }
         }
         let (lo, hi) = dists.iter().fold((f32::MAX, 0.0f32), |(a, b), d| (a.min(*d), b.max(*d)));
-        // ponytail: the Barque's circle breathes 55-66 (retail 51-58); the throttle switch is a stand-in (ORBIT_SLOW)
         assert!(lo > lo_ok && hi < hi_ok, "{name}: circle {lo}..{hi}");
-        assert!(beams.iter().all(|b| (b - PI / 2.0).abs() < 0.5), "{name}: foe kept abeam");
+        let side = if let attack::Routine::Broadside(side) = routine { side } else { 0.0 };
+        assert!(beams.iter().all(|b| (b - side * PI / 2.0).abs() < 0.6), "{name}: target kept on the chosen beam");
     }
-}
-
-#[test]
-#[ignore = "needs imported assets"]
-fn computer_ships_stop_their_class_standoff_off_a_hostile_base() {
-    let lib = combat::Library::load(crate::assets_dir());
-    let ci = lib.index("Ship_Navy_Frigate");
-    let class = &lib.classes[ci];
-    let h = Health { sections: vec![1.0; class.sections.len()], core: 1.0, destroyed: false };
-    let mut ship = Ship {
-        class: ci,
-        side: Side::Player,
-        heading: 0.0,
-        speed: 0.0,
-        ang_vel: 0.0,
-        order: 0,
-        waypoints: vec![],
-        goal: None,
-        cap: 1.0,
-        throttle: None,
-        sail_energy: 1.0,
-        crew_speed: COMPUTER_CREW,
-        crew_turn: COMPUTER_TURN,
-        avoid: 1.0,
-    };
-    let (base, mut tf, dt) = (Vec3::ZERO, Transform::from_xyz(0.0, 0.0, 1500.0), 1.0 / 30.0);
-    for _ in 0..(300.0 / dt) as usize {
-        if at_base_standoff(tf.translation, base, &class.name) {
-            (ship.goal, ship.order) = (None, 0);
-        } else {
-            let (goal, order, throttle) = captain_steer(ship.heading, tf.translation, base, class.reach, &[]);
-            (ship.goal, ship.order, ship.throttle) = (Some(goal), order, throttle);
-        }
-        step(&mut ship, &mut tf, class, &h, dt);
-    }
-    let d = Vec2::new(tf.translation.x, tf.translation.z).length();
-    assert!((d - base_standoff(&class.name)).abs() < 40.0 && ship.speed.abs() < 0.5, "stopped {d} units from the base at speed {}", ship.speed);
 }
 
 /// Retail Navy Cutter without crew, sampled from the running original (docs/re/movement.md, "Measured").

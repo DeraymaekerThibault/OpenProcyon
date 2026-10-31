@@ -166,8 +166,7 @@ Headless retail skirmishes, one computer ship against our idle or fleeing Navy C
   [boarding.md](boarding.md) §5.
 - **Target choice:** a computer ship takes the nearest hostile object within its scan range as its target, and chooses again
   every 6 s (keeping a farther target until then) or at once when the target is gone. It circles and fires at that target, so
-  in a fleet battle each computer ship goes for whichever of our ships is nearest. PROVISIONAL: the remake counts only ships as
-  candidates (the original also filters some object kinds; which non-ship hostiles qualify is not checked; bases do, see below).
+  in a fleet battle each computer ship goes for whichever of our ships is nearest (the full rule, read from the code, is below).
   Checked in a fleet battle (Zemyatin, our Man-O-War + Cutter vs a computer Assault Cutter + Barque, six saves over 28 s): both
   computer ships took our Cutter, the nearer of our two ships by 45 units, from 2.8 s on and kept it; no spreading over targets.
   Remake:
@@ -184,9 +183,8 @@ Headless retail skirmishes, one computer ship against our idle or fleeing Navy C
   exploring; on maps without bases it explores. Whether that is "nearest hostile base regardless of range" or a map/player
   setting: checked on the other retail runs (2026-10): Diablo Strait and Zemyatin have no bases and the computer ships explored quadrant centres (Carrack to (812, 812), Assault Cutter between the upper centres), while on Red Rover (bases at both ends) a pirate Carrack started at the far end, ran straight south past our idle Man-O-War and on toward the Navy base (it was already ~200 units off its straight line at 62 s, likely island/ship avoidance). So the rule reads "base on the map: go for it, else explore" on all four maps seen; which base it picks with several hostile ones is not separated (every run had one hostile base). The skirmish map's bases belong to non-playable players named "navybase" / "procbase";
   the Navy base fired on the Procyon ship (r5) and not on our idle Cutter. Remake: a skirmish base fights for the side whose fleet
-  type is its own, fires on ships of other sides and is a target for them; a computer ship with nothing in sight heads for the
-  nearest living hostile base, however far, and only then explores (PROVISIONAL: nearest base, ships in sight first;
-  [skirmish-setup.md](skirmish-setup.md#bases)).
+  type is its own, fires on ships of other sides and is a target for them ([skirmish-setup.md](skirmish-setup.md#bases)); the
+  captain's choice between ships and bases is below.
 - **Scan range = WOT sight × the lookout post's factor:** the Minelayer (sight 500, empty lookout) saves 562.5 = 500 × 1.125; the
   Carrack (lookout rated 7) 712.5 = 500 × 1.425 (crew factors: [crew.md](crew.md#saved-crew-factors)).
 - **Other routines in the save** (per computer ship): target selection with an attack timer; a simple attack routine with a random
@@ -195,14 +193,7 @@ Headless retail skirmishes, one computer ship against our idle or fleeing Navy C
   collision avoidance against ships, asteroids, black holes, torpedoes, mines, dragons, islands and nebulae; waypoint following with
   a random minimum throttle 0.65-0.75; a scan range = WOT sight × the crew factor.
 - **Fire:** see [gunnery.md](gunnery.md) (computer guns fire without clicks; the human command ship's do not).
-- Remake (`ship::captain_steer`, shared by the skirmish AI and mission attack orders): the broadside aim point above, with R =
-  `Class::reach` (mean LongRange over the gun banks: Carrack 150, Barque 128.6; which of the gun's range values the original
-  averages is not confirmed, PROVISIONAL), Emergency run-in, throttle 1.4 (≈0.7 × Emergency) inside 0.6 × R (PROVISIONAL: the
-  original's switch is not decoded; retail slowed 48-64 units out, see below), keeping 15 units outside black holes and damaging nebulae
-  (solar storm / meteors, as circles: `nebula::storm_circles`); computer skirmish ships get crew factor 1.267 on speed and
-  1.267² on rudder. Simulated circles: Carrack 47.7 units (retail 45-50), Barque 55-66 (retail 51-58). Skirmish enemies with
-  nothing in sight explore (`ship::Explore`: quadrant centre, then its x-neighbour, switching 220 units short). PROVISIONAL: the
-  start quadrant and visiting order, and the ships that head straight for the enemy instead.
+- Remake: see "Computer captains: decisions and attack" below (read from the original's code).
 - **Helm (decoded):** the waypoint steering puts the rudder hard over when the heading error to the current point exceeds 20°
   and proportionally (error / 20°) inside it; a path point counts as reached within 2 × the ship's radius. Remake: `ship::HELM_FULL`
   for every ship.
@@ -252,7 +243,7 @@ Static analysis of the original's AI, written as rules; it explains the island b
   moving one of them.
 - Remake: `collision/avoid.rs`, run from `collision::sail` for every AI-steered ship except the human's own ship and docking ships; it sets
   `Ship::avoid` (the speed fraction `ship::step` multiplies in) and puts the detour point in front of the course. PROVISIONAL (not ported yet):
-  mines, torpedoes, dragons, black holes and nebulae as obstacles (black holes and storms are left to `ship::captain_steer`), the sight-range limit,
+  mines, torpedoes, dragons, black holes and nebulae as obstacles (black holes and storms are left to `ship::flee`), the sight-range limit,
   the turn-out-when-pressed rule, and the human's move orders.
 
 ## Computer ships and a hostile base (Border Dispute, 2026-10-27; re-read 2026-10-31)
@@ -263,12 +254,47 @@ took two sunk ships for parked ones). All the Navy computer ships sailed straigh
 Torpedo boats then patrolled 340-405 units off the base centre (median ~375) at 7-11 units/s for over 20 minutes. The Frigate and
 the Fast Frigates closed to 124-173 units, about their mean gun range (162-165), stayed inside 300 units for 1-4 minutes at a time
 and sank there. The Procyon ships went to the middle of the map and to the front of their own base, not at our base.
-The remake holds computer ships off a hostile base at a per-class distance (`ship::base_standoff`: Torpedo boats 375, Frigates 150,
-other classes 390, PROVISIONAL: unmeasured); patrolling is not modelled.
+Read from the code (below): against a base the attack range is the guns' mean long range, so a Navy Frigate (161.7) works at
+124-173 units; there is no separate standoff.
 
 Turning (same log, `COMPUTER_TURN`): re-running each steady turn through our turn model gives a torque factor of about 2.0 for an
 uncrewed Submersible (11 turns) and 0.9-1.1 for crewed Fast Frigates (15 turns), 2.3 for a crewed Minelayer, 1.5-3.8 for a crewed
 Frigate; Torpedo boats slow and weave in turns and do not fit. Crewed ships do not turn harder than uncrewed ones, so the
 factor-squared reading above is not supported; 1.267² stays as the Carrack circle's fit. PROVISIONAL.
 Run-in slow-down: four run-ins slowed 48-64 units from their target whatever the class (Carrack 48, Barque 49 and 60, Minelayer
-64), i.e. 0.32-0.59 of the gun reach; the remake keeps 0.6 × reach because our turn model needs it for the measured circles.
+64), i.e. 0.32-0.59 of the gun reach. Read from the code: the throttle drops to the ship's minimum whenever its next course point is
+more than 11.25° off the bow, which the broadside aim point is once the ship nears its target.
+
+## Computer captains: decisions and attack (read from the original's code, 2026-10-31)
+Static analysis of the original's captain AI, written as rules. Every computer ship thinks twice a second; nothing in it depends on
+the difficulty setting.
+- **What to do, in order:** with at least two damage sections at or below half their hit points, dock for repair
+  ([docking-and-orders.md](docking-and-orders.md)); else choose a target and attack it; with no target, explore (Aggressive ships, which
+  every skirmish computer ship is) or stop and hold. There is no fleeing or retreat.
+- **Target:** kept for 6 s, then chosen again (at once when it sinks or turns friendly); a held target is followed anywhere. An Aggressive
+  captain takes the nearer of the nearest hostile ship in its scan range and the nearest hostile base (at any range in skirmish, within
+  scan range in a campaign). Failing both it takes the target of a ship of its own fleet, else of an allied ship. Other stances only
+  answer ships that target them.
+- **Which attack:** the primary gun bank is the one whose live guns cost the most victory points. Its guns' directions and arc edges
+  (counted counter-clockwise from the bow in quadrants; an arc over 180° covers all four) decide: only forward quadrants → **frontal**;
+  both rear quadrants → **rear**; otherwise **broadside** on the side it covers (port if only port quadrants). No live gun → **ram**
+  a ship (against a base it explores). Stock fits: Barque, Navy Frigate and Cutter broadside to port; Carrack and Procyon Minelayer
+  to starboard; Procyon Frigate, torpedo boats and other bow-gun ships frontal; Assault Cutters rear.
+- **Attack range R:** the mean over the ship's gun banks of each bank's first live gun's effective range (long range against a base).
+- **Broadside:** every think the course runs to a point R abeam of the target (on the chosen side) and on to a point R beyond it.
+  Aiming that far out keeps the rudder hard over and, past 11.25° off the bow, the throttle at the ship's minimum, so the ship ends on
+  its own tightest turning circle round the target (the ~55-unit circles measured above), not at R.
+- **Frontal:** straight at the target until the gap between the hulls is R, then sail at right angles to the line of sight (R ahead)
+  for up to 15 s or until out of range, then charge again. **Rear:** inside R run straight away to R, outside it come straight back.
+  **Ram:** straight at it, full throttle within 5° of the bow.
+- **Throttle:** full while the next course point is within 11.25° of the bow, else the ship's own minimum, 0.65-0.75 of full (drawn
+  per ship).
+- **Explore:** sail for the centre of a quadrant (a quarter of the map's extent out on each axis); within half the scan range of it,
+  pick a quadrant at random (possibly the same).
+- **Grapple and board** (every think, any attack): with a hostile ship in a free harpoon's line of fire, fire the harpoons with a 5 %
+  chance; boarding starts with a 20 % chance per think once possible and with a boarding strength over 10.
+- Remake: `ship::attack` (choice, R, courses, throttle) for the skirmish captains (`ship::ai`) and mission attack orders, with the
+  target rule in `ship::ai`. PROVISIONAL: the aim at the target's centre (the original: its damage section nearest to us), the frontal
+  break-off side (away from the beam the target is on), tie order between equal banks (the ship file's order), the explore border
+  margin and random draw. Simulated circles: Carrack 40-50 units (retail 45-50), Barque 43-72 (retail 51-58, its throttle staying at the
+  minimum); the port circles the right size but breathes more.

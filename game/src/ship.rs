@@ -81,15 +81,6 @@ pub fn angdiff(a: f32, b: f32) -> f32 {
 
 pub type CaptainBusy = Or<(With<docking::Docker>, With<docking::Tower>, With<boarding::GrappleOrder>, With<boarding::Grapple>, With<boarding::Boarding>)>;
 
-/// Computer captains slow to `ORBIT_THROTTLE` inside this fraction of their aim distance (`Class::reach`). PROVISIONAL: retail
-/// run-ins slowed 48-64 units out whatever the class (Carrack 48, Barque 49 and 60, Minelayer 64: 0.32-0.59 of reach), but with
-/// that switch our turn model circles the Barque at 62-88 units (retail 51-58); 0.6 keeps the measured circles until the
-/// computer turn factor (`COMPUTER_TURN`) is settled.
-pub const ORBIT_SLOW: f32 = 0.6;
-/// Throttle (fraction of Ahead Full) while circling: retail circles at its path's saved minimum throttle (random 0.65-0.75 per
-/// ship) x the crewed Emergency speed (saved Carrack: 0.745 x 8.71 = 6.49, measured 6.47); 1.4 is that range's mean x 2.
-/// ponytail: one mean for every ship; draw it per ship if circles need the spread.
-pub const ORBIT_THROTTLE: f32 = 1.4;
 /// Speed factor (`Ship::crew_speed`) of computer skirmish ships: retail Carrack and Barque ran in at exactly 1.267 x their
 /// Emergency Speed. A retail save of such a Carrack holds engineer and navigator factor 1.425, our uncrewed Cutter 1.125, and
 /// 1.425 / 1.125 = 1.267 (docs/re/crew.md).
@@ -100,13 +91,9 @@ pub const COMPUTER_CREW: f32 = 1.267;
 pub const COMPUTER_TURN: f32 = COMPUTER_CREW * COMPUTER_CREW;
 /// Computer captains keep this far outside a black hole's radius (retail: a Carrack rode 157-165 units from a 145-radius hole).
 pub const HOLE_MARGIN: f32 = 15.0;
-/// Exploring ships switch quadrant this close to the current quadrant's centre (retail: an Assault Cutter turned ~220 units short
-/// of the centres (±625, 625) of a 1250-half map). PROVISIONAL.
-pub const EXPLORE_REACH: f32 = 220.0;
-
-/// Map exploration of skirmish captains with nothing in sight (retail saves: every computer ship carries an explore-map routine
-/// with a quadrant index 0-3). Each ship sails for the centre of its quadrant, then for the neighbouring one across the map's
-/// x axis, back and forth (as the retail Assault Cutter did). PROVISIONAL: the start quadrant (here from the entity) and the order.
+/// Map exploration of skirmish captains with no target (read from the original's code): each ship sails for the centre of a
+/// quadrant (a quarter of the map's extent out on each axis) and, within half its sight range of it, picks a quadrant at random
+/// (possibly the same one). PROVISIONAL: the map's border margin is ignored; the random draw is a fixed hash, not the original's.
 #[derive(Default)]
 pub struct Explore {
     map: Option<Option<String>>,
@@ -119,7 +106,7 @@ impl Explore {
         let (x, y) = (if q & 1 == 1 { half / 2.0 } else { -half / 2.0 }, if q & 2 == 2 { half / 2.0 } else { -half / 2.0 });
         Vec3::new(x, 0.0, -y)
     }
-    fn goal(&mut self, cfg: &Config, e: Entity, here: Vec3) -> Vec3 {
+    fn goal(&mut self, cfg: &Config, e: Entity, here: Vec3, sight: f32) -> Vec3 {
         if self.map.as_ref() != Some(&cfg.map) {
             let map = cfg.map.as_ref().and_then(|id| crate::data::map_json(id)).unwrap_or_default();
             self.half = map["world_half"].as_f64().unwrap_or(1000.0) as f32;
@@ -128,38 +115,28 @@ impl Explore {
         }
         let half = self.half;
         let q = self.quadrant.entry(e).or_insert(e.index_u32() as usize % 4);
-        if Vec2::new(here.x, here.z).distance(Explore::centre(*q, half).xz()) < EXPLORE_REACH {
-            *q ^= 1;
+        if Vec2::new(here.x, here.z).distance(Explore::centre(*q, half).xz()) < 0.5 * sight {
+            let draw = (e.to_bits() ^ (here.x.to_bits() as u64) << 7 ^ here.z.to_bits() as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+            *q = (draw >> 62) as usize;
         }
         Explore::centre(*q, half)
     }
 }
 
-/// The original's broadside attack, shared by the skirmish and mission AIs: every tick the captain steers for a point `reach`
-/// units beside the foe (the line of sight turned 90° toward the beam the foe already lies on), so it runs in at Emergency Speed
-/// and ends on its tightest turn around the foe, which stays abeam (docs/re/movement.md "What makes the circle"). It slows to
-/// ORBIT_THROTTLE inside ORBIT_SLOW x `reach`. Near a black hole or damaging nebula (`holes`: centre, radius) it turns straight
-/// away first. Returns (goal heading, engine order, throttle).
-pub fn captain_steer(heading: f32, pos: Vec3, foe: Vec3, reach: f32, holes: &[(Vec3, f32)]) -> (f32, usize, Option<f32>) {
-    let toward = |d: Vec3| (-d.x).atan2(-d.z); // heading that points the bow along d
-    if let Some((c, _)) = holes.iter().find(|(c, r)| Vec2::new(pos.x - c.x, pos.z - c.z).length() < r + HOLE_MARGIN) {
-        return (toward(pos - *c), 3, None);
-    }
-    let d = foe - pos;
-    let dist = Vec2::new(d.x, d.z).length();
-    let bearing = toward(d);
-    // Keep the foe on the beam it is already on (+1: the foe lies at bearing - heading = +90°), so the choice never flips.
-    let beam = if angdiff(bearing, heading) >= 0.0 { 1.0 } else { -1.0 };
-    let side = Vec3::new(d.z, 0.0, -d.x) / dist.max(1e-3) * beam; // the line of sight turned 90° away from the foe's beam
-    (toward(foe - side * reach - pos), 3, (dist < ORBIT_SLOW * reach).then_some(ORBIT_THROTTLE))
+/// Near a black hole or damaging nebula (`holes`: centre, radius) a captain turns straight away from it: the heading to take.
+pub fn flee(holes: &[(Vec3, f32)], pos: Vec3) -> Option<f32> {
+    holes.iter().find(|(c, r)| Vec2::new(pos.x - c.x, pos.z - c.z).length() < r + HOLE_MARGIN).map(|(c, _)| {
+        let d = pos - *c;
+        (-d.x).atan2(-d.z)
+    })
 }
 
-/// Whether `pos` is inside a keep-out area of `hole_list` (where `captain_steer` flees).
+/// Whether `pos` is inside a keep-out area of `hole_list` (where `flee` turns away).
 pub fn in_hole(holes: &[(Vec3, f32)], pos: Vec3) -> bool {
     holes.iter().any(|(c, r)| Vec2::new(pos.x - c.x, pos.z - c.z).length() < r + HOLE_MARGIN)
 }
 
-/// Areas captains keep out of, as (centre, radius) for `captain_steer`: black holes and damaging nebulae.
+/// Areas captains keep out of, as (centre, radius) for `flee`: black holes and damaging nebulae.
 pub fn hole_list(
     holes: &Query<(&Transform, &crate::blackhole::Pull), Without<Ship>>,
     storms: Option<&crate::nebula::Storms>,
@@ -172,21 +149,6 @@ pub fn hole_list(
     out
 }
 
-/// How far from a hostile base a computer ship stops (units). Retail, Border Dispute (docs/re/movement.md): Torpedo boats patrolled
-/// 340-405 units off the Procyon base for the whole battle, the Frigate and Fast Frigates closed to 124-173 (about their gun range) and
-/// sank there. PROVISIONAL: other classes take the old single figure; patrolling is not modelled.
-pub fn base_standoff(class: &str) -> f32 {
-    if class.contains("Torpedo") {
-        375.0
-    } else if class.contains("Frigate") {
-        150.0
-    } else {
-        390.0
-    }
-}
-fn at_base_standoff(ship: Vec3, base: Vec3, class: &str) -> bool {
-    Vec2::new(base.x - ship.x, base.z - ship.z).length() <= base_standoff(class)
-}
 /// Seconds a computer captain keeps its target before choosing again (the original's target-selection timer).
 pub const RESELECT_SECS: f32 = 6.0;
 /// Each skirmish captain's current target and how long it has held it: the original's target selection takes the nearest hostile
@@ -200,26 +162,27 @@ impl CaptainTargets {
     }
 }
 
-/// One target-selection step: keep the `held` target (with its age) while it is younger than `RESELECT_SECS` and still a
-/// candidate, else take the nearest candidate (entity, distance). Returns the target and whether it was kept.
-fn choose_target(held: Option<(Entity, f32)>, candidates: &[(Entity, f32)]) -> Option<(Entity, bool)> {
-    held.filter(|h| h.1 < RESELECT_SECS && candidates.iter().any(|c| c.0 == h.0))
-        .map(|h| (h.0, true))
-        .or_else(|| candidates.iter().min_by(|a, b| a.1.total_cmp(&b.1)).map(|c| (c.0, false)))
+/// One target-selection step: keep the `held` target (with its age) while it is younger than `RESELECT_SECS` and still `valid`
+/// (alive and hostile: the original follows a held target anywhere), else take the nearest candidate (entity, distance). Returns
+/// the target and whether it was kept.
+fn choose_target(held: Option<(Entity, f32)>, candidates: &[(Entity, f32)], valid: impl Fn(Entity) -> bool) -> Option<(Entity, bool)> {
+    held.filter(|h| h.1 < RESELECT_SECS && valid(h.0)).map(|h| (h.0, true)).or_else(|| candidates.iter().min_by(|a, b| a.1.total_cmp(&b.1)).map(|c| (c.0, false)))
 }
 
-/// Skirmish captains: hunt their target (`CaptainTargets`) with `captain_steer`; with nothing in sight an enemy ship explores the map
-/// at Emergency Speed (`Explore`). The player ship only uses this in demo (--shot) mode as an autopilot.
+/// Skirmish captains, as read from the original's code (docs/re/movement.md "Computer captains"): every think the target is the nearer
+/// of the nearest hostile ship in sight and the nearest hostile base at any range, kept for `RESELECT_SECS`; failing both, a fleet
+/// mate's or an ally's target. The attack itself is `attack`. With no target a computer ship explores (`Explore`). The player ship
+/// only uses this in demo (--shot) mode as an autopilot.
 pub fn ai(
     cfg: Res<Config>,
     mission: Option<Res<campaign::Mission>>,
-    mut ships: Query<(Entity, &Transform, &mut Ship, &Health, Has<PlayerShip>, Option<&FleetPilot>, Option<&FleetMember>)>,
+    mut ships: Query<(Entity, &Transform, &mut Ship, &Health, Has<PlayerShip>, Option<&FleetPilot>, Option<&FleetMember>, Option<&combat::GunStates>)>,
     busy: Query<(), CaptainBusy>,
     sensors: Res<crate::environment::Sensors>,
     held: Query<(), With<HoldPosition>>,
     holes: Query<(&Transform, &crate::blackhole::Pull), Without<Ship>>,
     storms: (Option<Res<crate::nebula::Storms>>, Option<Res<crate::nebula::StormShift>>),
-    mut explore: Local<Explore>,
+    (mut explore, mut breakoffs): (Local<Explore>, Local<std::collections::HashMap<Entity, attack::Breakoff>>),
     (time, mut targets): (Res<Time>, ResMut<CaptainTargets>),
     (lib, fleets): (Res<combat::Library>, Res<Fleets>),
     bases: Query<(Entity, &Transform, &combat::BaseSide, &Health, &combat::ArmedBase)>,
@@ -233,8 +196,12 @@ pub fn ai(
     let left_to_script = |e: Entity| scripted.get(e).is_ok_and(|m| !m.visible || matches!(m.stance, crate::rules::Stance::Persistent | crate::rules::Stance::Dummy));
     let dt = time.delta_secs();
     let holes = hole_list(&holes, storms.0.as_deref(), storms.1.as_deref());
-    let snap: Vec<(Entity, Vec3, Side, bool)> = ships.iter().map(|(e, t, s, h, ..)| (e, t.translation, s.side, !h.destroyed)).collect();
-    for (e, tf, mut s, h, me, pilot, member) in &mut ships {
+    let now = time.elapsed_secs();
+    // (entity, position, side, afloat, radius, fleet)
+    let snap: Vec<(Entity, Vec3, Side, bool, f32, Option<String>)> =
+        ships.iter().map(|(e, t, s, h, _, _, m, _)| (e, t.translation, s.side, !h.destroyed, lib.classes[s.class].radius, m.map(|m| m.0.clone()))).collect();
+    breakoffs.retain(|e, _| snap.iter().any(|f| f.0 == *e));
+    for (e, tf, mut s, h, me, pilot, member, guns) in &mut ships {
         // The human's own fleet waits for orders; allied computer fleets share the human's side but hunt like any computer.
         let human = s.side == Side::Player && member.is_none_or(|m| m.0 == fleets.local);
         if busy.contains(e) || left_to_script(e) {
@@ -261,48 +228,67 @@ pub fn ai(
             .filter(|f| f.2 != s.side && f.3 && (explicit == Some(f.0) || sensors.in_sight(e, f.0, None)) && explicit.is_none_or(|e| e == f.0))
             .map(|f| (f.0, f.1.distance(tf.translation)))
             .collect();
-        let mut chosen = choose_target(targets.0.get(&e).copied(), &candidates);
-        // Nothing in sight: a computer ship goes for the nearest living hostile base, however far (retail: a Procyon ship held the
-        // Navy base ~2000 units away as its target from the first second). PROVISIONAL: nearest, and ships in sight come first.
+        // Aggressive computer captains also weigh the nearest hostile base, at any range in skirmish (the nearer of the two wins).
         // Armed volcano islands fire on everyone but are no base to go for (retail Diablo Strait: the computer came for our ships).
-        let base = if chosen.is_none() && !human && explicit.is_none() {
-            let island = |b: &combat::ArmedBase| lib.classes[b.class].name.starts_with("Island_");
-            crate::nearest(bases.iter().filter(|b| b.2.0 != s.side && !b.3.destroyed && !island(b.4)), tf.translation, |b| b.1.translation)
-        } else {
-            None
-        };
-        if let Some(b) = base {
-            chosen = Some((b.0, false));
+        let island = |b: &combat::ArmedBase| lib.classes[b.class].name.starts_with("Island_");
+        let hostile_base = |b: &(Entity, &Transform, &combat::BaseSide, &Health, &combat::ArmedBase)| b.2.0 != s.side && !b.3.destroyed && !island(b.4);
+        let mut candidates = candidates;
+        if !human
+            && explicit.is_none()
+            && let Some(b) = crate::nearest(bases.iter().filter(hostile_base), tf.translation, |b| b.1.translation)
+        {
+            candidates.push((b.0, b.1.translation.distance(tf.translation)));
+        }
+        let valid = |t: Entity| snap.iter().any(|f| f.0 == t && f.2 != s.side && f.3) || bases.get(t).is_ok_and(|b| hostile_base(&b));
+        let mut chosen = choose_target(targets.0.get(&e).copied(), &candidates, valid);
+        // Nothing found: a fleet mate's target, else an allied ship's (same side, another fleet).
+        if chosen.is_none() && !human && explicit.is_none() {
+            let fleet = member.map(|m| m.0.as_str());
+            let adopt =
+                |same_fleet: bool| snap.iter().filter(|f| f.0 != e && f.2 == s.side && (f.5.as_deref() == fleet) == same_fleet).find_map(|f| targets.of(f.0).filter(|t| valid(*t)));
+            chosen = adopt(true).or_else(|| adopt(false)).map(|t| (t, false));
         }
         match chosen {
             Some((t, true)) => targets.0.entry(e).or_insert((t, 0.0)).1 += dt,
             Some((t, false)) => _ = targets.0.insert(e, (t, 0.0)),
             None => _ = targets.0.remove(&e),
         }
-        let base_pos = base.map(|b| (b.0, b.1.translation));
-        let foe = chosen.and_then(|(t, _)| snap.iter().find(|f| f.0 == t).map(|f| (f.0, f.1)).or(base_pos.filter(|b| b.0 == t)));
-        let Some(foe) = foe else {
+        // (position, radius, is a base)
+        let foe = chosen.and_then(|(t, _)| {
+            snap.iter().find(|f| f.0 == t).map(|f| (f.1, f.4, false)).or_else(|| bases.get(t).ok().map(|b| (b.1.translation, lib.classes[b.4.class].radius, true)))
+        });
+        let class = &lib.classes[s.class];
+        let explore_now = |s: &mut Ship, explore: &mut Explore| {
+            (s.waypoints, s.goal, s.order) = (vec![explore.goal(&cfg, e, tf.translation, class.sight)], None, 3);
+        };
+        let Some((foe_pos, foe_radius, foe_base)) = foe else {
             s.goal = None;
             if human || explicit.is_some() {
                 s.order = 0;
                 continue;
             }
-            s.waypoints = vec![explore.goal(&cfg, e, tf.translation)];
-            s.order = 3;
+            explore_now(&mut s, &mut explore);
             continue;
         };
         s.waypoints.clear(); // contact: drop any exploring course (the quadrant is kept for later)
-        if base.is_some() && at_base_standoff(tf.translation, foe.1, &lib.classes[s.class].name) {
-            s.goal = None;
-            s.order = 0; // arrived: hold off the base
+        if let Some(away) = flee(&holes, tf.translation) {
+            (s.goal, s.order) = (Some(away), 3);
             continue;
         }
-        let (goal, order, throttle) = captain_steer(s.heading, tf.translation, foe.1, lib.classes[s.class].reach, &holes);
-        // Land in the way is left to the slow-and-steer near land in `collision::sail`: retail captains hold their bearing and never
-        // plan a route round an island (docs/re/movement.md, "Land ahead").
-        s.goal = Some(goal);
-        s.order = order;
-        s.throttle = throttle;
+        let Some((routine, range)) = attack::plan(&lib, class, h, guns) else {
+            (s.goal, s.order) = (None, 0);
+            continue;
+        };
+        if routine == attack::Routine::Ram && foe_base {
+            explore_now(&mut s, &mut explore); // the original: no gun left and a base to attack, so explore instead
+            continue;
+        }
+        let r = if foe_base { range[1] } else { range[0] };
+        let gap = (foe_pos - tf.translation).with_y(0.0).length() - class.radius - foe_radius;
+        // PROVISIONAL: the original aims at the target's damage section nearest to us; here at its centre.
+        let course = attack::course(routine, tf.translation, s.heading, foe_pos, gap, r, now, breakoffs.entry(e).or_default());
+        s.throttle = attack::throttle(e, tf.translation, s.heading, course[0]);
+        (s.waypoints, s.goal, s.order) = (course, None, 3);
     }
 }
 
@@ -842,6 +828,7 @@ pub fn fleet_follow(world: &mut World) {
     }
 }
 
+pub mod attack;
 #[cfg(test)]
 pub mod movement_tests;
 

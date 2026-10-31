@@ -112,7 +112,6 @@ fn moving_ship() -> (App, Entity) {
         radius: 1.0,
         hull_bound: 1.0,
         engage: 0.0,
-        reach: 0.0,
         flag: None,
         engines: vec![],
         explosion_fx: None,

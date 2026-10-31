@@ -210,10 +210,6 @@ fn try_load_class(root: &Path, name: &str, guns: &HashMap<String, GunDef>) -> Re
     let (amn, amx) = hull(&|_| true);
     let ph = &j.physics;
     let engage = if mounts.is_empty() { 60.0 } else { mounts.iter().map(|m| guns[&m.gun].range[0]).sum::<f32>() / mounts.len() as f32 };
-    let mut banks: Vec<(usize, f32)> = mounts.iter().map(|m| (m.bank, guns[&m.gun].range[1])).collect();
-    banks.sort_by_key(|b| b.0);
-    banks.dedup_by_key(|b| b.0);
-    let reach = if banks.is_empty() { 125.0 } else { banks.iter().map(|b| b.1).sum::<f32>() / banks.len() as f32 };
     let bounds = if ph.min_extents.is_some() && ph.max_extents.is_some() {
         let (a, b) = (optional_point(ph.min_extents.as_ref()), optional_point(ph.max_extents.as_ref()));
         [a.min(b), a.max(b)]
@@ -262,7 +258,6 @@ fn try_load_class(root: &Path, name: &str, guns: &HashMap<String, GunDef>) -> Re
         radius,
         hull_bound,
         engage,
-        reach,
         cloakable: j.cloakable.unwrap_or_else(|| name.contains("Submersible")),
         points: j.points as u32,
         crew_posts: j.crew_posts.map_or(0, |v| v.values().sum::<u64>() as u32),

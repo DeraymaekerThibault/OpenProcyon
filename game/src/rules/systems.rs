@@ -626,6 +626,7 @@ fn mission_ai(
     held: Query<(), With<crate::ship::HoldPosition>>,
     holes: Query<(&Transform, &crate::blackhole::Pull), Without<Ship>>,
     storms: (Option<Res<crate::nebula::Storms>>, Option<Res<crate::nebula::StormShift>>),
+    (guns, time, mut breakoffs): (Query<&crate::combat::GunStates>, Res<Time>, Local<std::collections::HashMap<Entity, crate::ship::attack::Breakoff>>),
 ) {
     let Some(mission) = mission else { return };
     let holes = crate::ship::hole_list(&holes, storms.0.as_deref(), storms.1.as_deref());
@@ -721,7 +722,7 @@ fn mission_ai(
         if ms.target != want {
             ms.target = want;
         }
-        // Movement: an attack order or an aggressive stance closes on the foe (`ship::captain_steer`, shared with the skirmish AI).
+        // Movement: an attack order or an aggressive stance closes on the foe with the original's attack (`ship::attack`, as skirmish).
         // A human-captained ship (Captain_Human) only fires: it moves on the human fleet's orders (ship.rs fleet_follow).
         let chase = if ms.human || (ms.stance == Stance::Persistent && !ship.waypoints.is_empty()) {
             None // Persistent scripted routes take precedence over combat steering (Mission 3's swoop/retreat).
@@ -735,8 +736,20 @@ fn mission_ai(
             let (goal, order, throttle) = if ms.ram && ordered.is_some() {
                 let d = fp - tf.translation;
                 ((-d.x).atan2(-d.z), 3, None)
+            } else if let Some(away) = crate::ship::flee(&holes, tf.translation) {
+                (away, 3, None)
             } else {
-                crate::ship::captain_steer(ship.heading, tf.translation, fp, lib.classes[ship.class].reach, &holes)
+                // PROVISIONAL: the target's radius is left out of the gap (rocks and ships alike), and the course is steered as a heading.
+                let class = &lib.classes[ship.class];
+                match crate::ship::attack::plan(&lib, class, h, guns.get(e).ok()) {
+                    Some((routine, range)) => {
+                        let gap = (fp - tf.translation).with_y(0.0).length() - class.radius;
+                        let course = crate::ship::attack::course(routine, tf.translation, ship.heading, fp, gap, range[0], time.elapsed_secs(), breakoffs.entry(e).or_default());
+                        let d = course[0] - tf.translation;
+                        ((-d.x).atan2(-d.z), 3, crate::ship::attack::throttle(e, tf.translation, ship.heading, course[0]))
+                    }
+                    None => (ship.heading, 0, None),
+                }
             };
             ms.stop_at_end = true;
             // Land in the way is left to the slow-and-steer near land (`collision::sail`); retail captains never pre-route round islands.
