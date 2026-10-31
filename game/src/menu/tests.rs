@@ -417,7 +417,10 @@ fn computer_fleets_use_auto_assign_inside_the_victory_limit() {
     (sk.victory_limit, sk.fleet_size) = (1000, 10);
     let (n, points) = cost(&sk);
     assert!(n >= 3 && (400..=600).contains(&points), "1000 points: {n} ships cost {points}");
-    assert!(sk.plan(&lib)[1].ships.iter().all(|s| !s.0.contains("Tender") && !s.0.contains("Tug")), "retail computers never field support ships");
+    assert!(
+        sk.plan(&lib)[1].ships.iter().all(|s| !s.0.contains("Tender") && !s.0.contains("Tug") && !s.0.contains("Barge")),
+        "retail computers never field support ships or barges"
+    );
     let swapped: Vec<String> = sk.plan(&lib)[1].weapons.iter().flat_map(|w| w.values().cloned()).collect();
     assert!(!swapped.is_empty(), "a big budget buys some swaps");
     assert!(swapped.iter().all(|g| super::skirmish::RETAIL_COMPUTER_GUNS.contains(&g.as_str())), "{swapped:?}");

@@ -40,6 +40,8 @@ struct ShipLine {
     computer: bool,
     contact: f32,
     worst_contact: f32,
+    /// Sank during the watch: a ship sunk early cannot be judged on how far it sailed.
+    sunk: bool,
 }
 
 fn side_name(side: Side) -> String {
@@ -138,11 +140,13 @@ fn watch(
             report.sides.entry(side.clone()).or_default().ships += 1;
             // The same test the captain AI uses (ship.rs `ai`): only the human's own fleet waits for orders.
             let computer = !(ship.side == Side::Player && member.is_none_or(|m| m.0 == fleets.local));
-            report
-                .ships
-                .insert(e, ShipLine { class: class.name.clone(), side: side.clone(), last: tf.translation, sailed: 0.0, bursts: 0, computer, contact: 0.0, worst_contact: 0.0 });
+            report.ships.insert(
+                e,
+                ShipLine { class: class.name.clone(), side: side.clone(), last: tf.translation, sailed: 0.0, bursts: 0, computer, contact: 0.0, worst_contact: 0.0, sunk: false },
+            );
         }
         if health.destroyed {
+            report.ships.get_mut(&e).unwrap().sunk = true;
             continue;
         }
         report.sides.entry(side).or_default().alive += 1;
@@ -174,7 +178,7 @@ fn watch(
             "ships": l.ships, "alive": l.alive, "bursts": l.bursts, "hits": l.hits, "first_burst": l.first_burst.map(f32::round),
         }))).collect::<serde_json::Map<_, _>>(),
         "ships": report.ships.values().map(|s| serde_json::json!({
-            "class": s.class, "side": s.side, "computer": s.computer, "bursts": s.bursts, "sailed": s.sailed.round(),
+            "class": s.class, "side": s.side, "computer": s.computer, "bursts": s.bursts, "sailed": s.sailed.round(), "sunk": s.sunk,
             "worst_contact": (s.worst_contact * 10.0).round() / 10.0,
         })).collect::<Vec<_>>(),
         "fleets": fleets_json(&cfg, &sk, &lib),

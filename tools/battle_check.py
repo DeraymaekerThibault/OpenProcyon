@@ -58,7 +58,7 @@ def lobby(name, spec, seconds, expect):
 
 
 # Expectations. "fight": both sides fire and hit, the computer's first burst within 60 s. "patrol": every computer-commanded ship
-# (allied computer fleets included, the human's own fleet excluded) sails at least 300 units. "fire": every side fires within FIRE_BY
+# (allied computer fleets included, the human's own fleet excluded) that is still afloat sails at least 300 units. "fire": every side fires within FIRE_BY
 # s, and on a side with computer ships one of them fires. "budget": every computer fleet spends most of its victory points.
 # Every scenario also checks for panics, grinding and stutter ("no-stutter" skips the last, only with an open issue).
 SCENARIOS = [
@@ -115,7 +115,7 @@ def evaluate(report, expect):
                 fails.append(f"no computer ship of {name} fired")
     if "patrol" in expect:
         for s in report["ships"]:
-            if computer(s) and s["sailed"] < 300:
+            if computer(s) and not s.get("sunk") and s["sailed"] < 300:
                 fails.append(
                     f"{s['class']} ({s['side']}) sailed only {s['sailed']:.0f} units"
                 )

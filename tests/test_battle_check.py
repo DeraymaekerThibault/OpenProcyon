@@ -65,6 +65,12 @@ class Evaluate(unittest.TestCase):
             [],
             "a fight does not need the computer to sail",
         )
+        sunk = report(sailed=0.0)
+        for s in sunk["ships"]:
+            s["sunk"] = True
+        self.assertEqual(
+            evaluate(sunk, {"patrol"}), [], "a ship sunk early is not parked"
+        )
 
     def test_grinding_on_scenery_always_fails(self):
         self.assertEqual(

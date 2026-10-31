@@ -341,10 +341,11 @@ fn allowed_guns(list: &Value) -> Option<std::collections::HashSet<String>> {
     Some(list.as_object()?.iter().filter(|(_, on)| on.as_bool() == Some(true)).map(|(g, _)| g.clone()).collect())
 }
 
-/// A hull computers buy: armed, and no Tender or Tug (none among 104 computer ships in retail battle saves; they carry a gun or two, so
-/// "armed" alone let them in). PROVISIONAL: by class name, the data has no support-ship flag.
+/// A hull computers buy: armed, able to sail, and no Tender or Tug (none of these among 104 computer ships in retail battle saves; tenders
+/// and tugs carry a gun or two, so "armed" alone let them in, and Weapon Barges have a MaxSpeed of 0.003). PROVISIONAL: tenders and tugs by
+/// class name, the data has no support-ship flag.
 fn computer_hull(class: &crate::data::Class) -> bool {
-    !class.mounts.is_empty() && !class.name.contains("Tender") && !class.name.contains("Tug")
+    !class.mounts.is_empty() && class.phys.max_speed > 1.0 && !class.name.contains("Tender") && !class.name.contains("Tug")
 }
 
 pub fn auto_build(slot: &mut Slot, limit: u32, fleet_size: usize, lib: &Library, salt: u64, armed_only: bool) {
