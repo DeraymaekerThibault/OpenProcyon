@@ -227,6 +227,9 @@ fn think(
                     shooter: e,
                     target: Some(t.0),
                     gravity: BREATH_G,
+                    aim: None,
+                    // The dragon breath gun's factor: never ricochets.
+                    ricochet: -200.0,
                 });
                 if let Some(name) = gun["sound"].as_str() {
                     sfx.write(crate::audio::Sfx { name: name.into(), at: Some(mouth), vol: 1.0, max: 700.0 });

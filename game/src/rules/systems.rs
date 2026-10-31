@@ -476,7 +476,7 @@ fn update(
             Fx::DarkMatter(volume) => {
                 // The blast starts at the volume's centre (game x, y) at the ships' height.
                 if let Some(c) = mission.script.volume(&volume).centroid() {
-                    extra.detonate.write(crate::combat::Detonate { bullet: "Bullet_DarkMatterExplosion".into(), at: Vec3::new(c.x, 0.0, -c.y), shooter: None });
+                    extra.detonate.write(crate::combat::Detonate { bullet: "Bullet_DarkMatterExplosion".into(), at: Vec3::new(c.x, 0.0, -c.y), shooter: None, owner: None });
                 }
             }
             Fx::Longboat(u) => {
