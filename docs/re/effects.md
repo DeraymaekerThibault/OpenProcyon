@@ -267,7 +267,7 @@ to `models/debris/` and `sections[].debris` = {model, pivot}.
   modelled (thresholds unknown, as for damage control); at most one fire per section (retail allows several).
 
 ## Black holes (Vortex primitive, spawn, point update; Trail)
-Terrain_BlackHole_* WOTs name a render mesh, a radius, `Magnitude` (pull, not implemented), an ambient sound and a
+Terrain_BlackHole_* WOTs name a render mesh, a radius, `Magnitude` (the pull, below), an ambient sound and a
 `VortexEffectName` (BlackHoleRibbons_*). That effect = six ordinary particle systems (the vertical beams, glow, black
 core: run by fx.rs) plus a `Vortex` primitive, implemented in `game/src/blackhole.rs`:
 * Per 30 Hz tick a point spawns with probability SPAWN_PROBABILITY (detail clamp = 1) at a random angle, START_RADIUS from
@@ -280,40 +280,38 @@ core: run by fx.rs) plus a `Vortex` primitive, implemented in `game/src/blackhol
 * Trail segment every 15 ticks, life 300 ticks. Edges start at pos +- right*OutDrift*InitialWidth, then each tick move
   +-right*OutDrift and both +forward*BackDrift, plus per-edge random jitter (+-0.07, +-0.07, +-0.02). Alpha rises 1/60 per
   tick for 60 ticks, then falls 1/240 per tick. A trail is drawn only with more than two segments.
-* Pull: the WOT CUSTOMINFO `Magnitude` is 9000 / 15000 / 25000 for Small / Med / Big (radius 145 / 260 / 625). The original's pull law is
-  unknown; the remake applies PROVISIONAL inverse-square pull on free ships, softened at the radius, gain 25 (`blackhole.rs`).
-  Measured on the Small hole (Zemyatin Anomaly skirmishes, ships at All Stop, 2026-10):
-  - Outside the radius nothing moves: a Cutter at 372 units (2.6 radii) for 22 s and a Man-O-War at 200-203 units (1.4 radii)
-    for 6 minutes had zero displacement. The remake's law gives 1.6 and 5.6 units/s² there.
-  - Inside the radius a resting ship creeps toward the centre at a constant speed, independent of distance: Man-O-War 0.033
-    units/s at both 105 and 48 units, Cutter 0.093 units/s at 122 units. The motion is mostly radial with a sideways part of
-    about a quarter (a ~15° inward spiral). The ship's own velocity stays 0 (it keeps its rest snap), so the hole moves the
-    position directly rather than accelerating the hull.
-  - A Cutter that rested ~21 s inside (at ~121 units) then moved straight in at a constant 2.32 units/s with no order given
-    (twice, identical), and was destroyed 33.6 units from the centre. A Man-O-War resting 200 s at 105 units never did this;
-    driven to the centre it was destroyed somewhere inside 17 units.
+* Pull: the WOT CUSTOMINFO `Magnitude` is 9000 / 15000 / 25000 for Small / Med / Big (radius R = 145 / 260 / 625). Measured
+  on the Small hole (Zemyatin Anomaly skirmishes, 2026-10; Navy Cutter twice, Frigate, Man-O-War; ship positions and speeds
+  logged every engine tick of ~0.033 s):
+  - **Law.** The hole accelerates a ship by a(d) = A × min((R − d) / D, 1) at distance d from the centre, for R/4 < d ≤ R;
+    nothing outside the radius (a Cutter at 2.6 radii and a Man-O-War at 1.4 radii for 6 minutes did not move) and nothing
+    inside R/4. The ramp D fits 36-38 units, about R/4 (the remake uses D = R/4). The pull points at the centre turned about
+    15° to one side (clockwise seen from above): sideways / inward = 0.27 in every log, whatever the ship's heading.
+  - **Only ships that are not under way.** The pull acts only while the ship's own speed is zero (All Stop, or idle). A
+    Man-O-War driven from 48 to 17 units moved exactly at its own speed throughout and was still afloat 17 s after passing
+    R/4. A ship crossing the radius under way feels nothing.
+  - **Resting ships creep.** At rest the engine snaps the velocity back to zero every tick, so the pull is cancelled each
+    tick and the ship only creeps in at one tick's worth of it, about a × 0.033 units/s: Cutter 0.091 units/s at 23 units
+    inside the edge, Frigate 0.040 and Man-O-War 0.033 at full depth (the Man-O-War the same at 105 and 48 units).
+  - **Breaking free.** A ship that breaks free of the snap falls freely: its velocity follows v' = a − k v with the hull's
+    own rate k = MaxThrust / (MaxSpeed × Mass) (Cutter 1.862/s), so it settles at A / k (Cutter 2.42 units/s, measured
+    within 0.05 units over a 37 s fall). Inside R/4 the pull stops and the speed decays at the same rate. What triggers the
+    break is not known (PROVISIONAL): both Cutter runs broke free ~21 s after stopping 122.5 units out, at 120.5 units where
+    a ≈ 2.9-3.0 units/s²; a Frigate (a ≤ 1.26) resting 45 s and a Man-O-War (a ≤ 1.04) resting 200 s never did. Both Cutter
+    runs started at the same spot, so time spent inside and depth cannot be told apart; the remake breaks free at
+    a ≥ 2.9 units/s².
+  - **Class.** Full-depth pull A: Cutter 4.50, Frigate 1.21-1.26, Man-O-War 0.99-1.04 units/s². A × Mass divided by the
+    hull length (collision box MaxExtents.y − MinExtents.y: 13.5, 18, 31) gives 1333, 1344-1400 and 1290-1342, so
+    A ≈ 1330 × length / Mass fits all three within ~4 % (1/√Mass does not). PROVISIONAL: three classes only. The scaling
+    with Magnitude (A × Magnitude / 9000) is PROVISIONAL too: only the Small hole was measured.
+  - **Kill.** A ship that is not under way is destroyed about 1.1 s after it comes inside R/4 (Cutter at 35.3 units, Frigate
+    at 32.4; the pull ends at 36.5 ± 0.5). The hull then breaks up where it is (the distances logged earlier, 33.6 and ~21
+    units, were where the wreck stopped). Not measured (PROVISIONAL): a ship that stops inside R/4 after an order; the remake
+    starts its 1.1 s once it is at rest there.
   - Destruction by the hole credits no kill: the Game Summary showed the computer with 0 Ships Sunk, and our Damage Taken only
-    counted the earlier gunfire (2139 of the Man-O-War's 4940 hull and core HP).
-  - Navy Frigate (mass 20000, half the Man-O-War's; Easy, 2026-10-17): rest drift 0.0046 units/s at 140.8 units (0.97 radii),
-    0.0342 at 113.5 (0.78), 0.0396 at 53.9 (0.37), sideways part 0.27 of the inward one. Near the edge the drift grows with the
-    depth inside the radius (0.0046 × 31.5 / 4.2 = 0.0345, as measured at 113.5), deeper it levels off: the Frigate creeps about
-    as fast as the Man-O-War, not the √2 faster a 1/√mass law gives.
-  - **The pull is an acceleration, hidden by the rest snap.** A save taken while the Frigate "rested" holds a physics velocity of
-    1.26 units/s, mostly tangential (the logged speed field, which the earlier notes read as "velocity 0", is a different
-    value). Once the ship moved faster than the snap's 1 unit/s it fell freely: from 67 units it spiralled in at up to 5 units/s
-    (inward ≈ 1.1-1.4 units/s² between 66 and 40 units after the hull's own drag rate 0.214/s is added back, tangential ≈ 0.3),
-    turning 75° around the centre, slowing again inside ~35 units, and was destroyed at about 21 units. Reading (PROVISIONAL):
-    at All Stop each tick's pull is mostly cancelled by the snap, so the creep is roughly one tick's worth of acceleration
-    (1.2 units/s² × 0.034 s ≈ 0.04 units/s), and anything that lifts the speed above 1 unit/s (a ram, a push, the hole's own
-    swirl) starts a free fall: this is likely the Cutter's "plunge".
-  - Destroy distance: Cutter 33.6, Frigate ~21, Man-O-War < 17 units (larger hull → closer?). PROVISIONAL.
-  So the hole is a trap at its centre, not a long-range pull. Unknown (PROVISIONAL): the drift's dependence on class (mass,
-  thrust or size), what starts the cutter's plunge (time inside, distance, class), the destroy radius per class, and whether a
-  moving ship feels any extra pull (a Man-O-War crossing the radius at Emergency showed none clearly).
-  Remake (`blackhole.rs`): no pull outside the radius; inside, every free ship's position moves toward the centre at
-  6.2 × (Magnitude / 9000) / √Mass units/s turned 14° clockwise (fits both measured classes within 6 %; the mass law and the
-  Magnitude scaling are PROVISIONAL), and a ship closer than the vortex's KILL_RADIUS (10 / 100 / 290 for Small / Med / Big;
-  PROVISIONAL as the destroy distance) loses its core and sinks, credited to nobody in the Game Summary. The Cutter's plunge is
-  not modelled.
+    counted the earlier gunfire.
+  Remake (`blackhole.rs`): exactly the law above for every free, undocked ship, with A = 1330 × length / Mass × Magnitude /
+  9000, D = R/4, the break-free threshold 2.9 units/s² and the 1.1 s kill inside R/4, credited to nobody in the Game Summary.
+  The vortex's KILL_RADIUS only ends its ribbon points. Computer captains keep out of the radius (movement.md).
 * Unknown: strip UV mapping/blend (ours: additive, v = 0.5 per segment), the funnel mesh
   (not drawn: the reference video shows only the glow, beams and ribbons).

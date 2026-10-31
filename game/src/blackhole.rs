@@ -2,7 +2,7 @@
 //! `Vortex` primitive, which fx.rs cannot run. Behaviour as specified in docs/re/effects.md "Vortex"
 //! (point spawn and update, trail segment init and update).
 //! Everything ticks at the engine's 30 Hz. PROVISIONAL: ribbon texture mapping/blend and the point-effect orientation's
-//! normalisation (unknown). Pull (`Magnitude`): see `pull` below, from retail measurements (docs/re/effects.md).
+//! normalisation (unknown). Pull (`Magnitude`) and the core kill: see `pull` below, from retail measurements (docs/re/effects.md).
 use bevy::asset::RenderAssetUsages;
 use bevy::camera::visibility::NoFrustumCulling;
 use bevy::mesh::{Indices, PrimitiveTopology};
@@ -14,25 +14,37 @@ use crate::{Health, Scenario, Ship, assets_dir, fx};
 const TICK: f32 = 1.0 / 30.0;
 const SEG_LIFE: i32 = 300; // trail segment lifetime in ticks
 const SEG_EVERY: i32 = 15; // ticks between trail segments
-/// Inward drift inside the radius = DRIFT_GAIN * (Magnitude / 9000) / sqrt(Mass) units/s. Fits the Small hole's measured drifts
-/// (Man-O-War 0.033, Cutter 0.093) within 6 %. PROVISIONAL: the mass law and the Magnitude scaling are guesses from two classes.
-const DRIFT_GAIN: f32 = 6.2;
-/// The drift turns this far clockwise (seen from above) off the line to the centre: sideways ~0.26 x radial, measured.
-const DRIFT_SWIRL: f32 = 0.256;
+/// Full-depth pull of a Magnitude 9000 hole = CLASS_GAIN x hull length / Mass (units/s²). Fits the Small hole's measured Cutter
+/// 4.50, Frigate 1.21-1.26 and Man-O-War 0.99-1.04 within ~4 %. PROVISIONAL: a candidate law from three classes.
+pub const CLASS_GAIN: f32 = 1330.0;
+/// The pull is turned this far off the line to the centre (clockwise seen from above): sideways / inward = 0.27, the same in
+/// every measured creep and fall, whatever the ship's heading.
+const DRIFT_SWIRL: f32 = 0.27;
+/// A resting ship breaks free of its rest snap and falls once the pull reaches this (units/s²). PROVISIONAL: both retail Cutter
+/// runs broke free at 2.9-3.0 while a Frigate (1.26 at most) and a Man-O-War (1.04) never did; time spent inside is not ruled out.
+const BREAK_FREE: f32 = 2.9;
+/// Seconds a ship that is not under way survives inside the hole's core (measured ~1.1 s for a Cutter and a Frigate).
+pub const KILL_DELAY: f32 = 1.1;
 
-/// A hole's CUSTOMINFO `Magnitude` and `Radius` (Terrain_BlackHole_*.wot; retail values 9000/145, 15000/260, 25000/625), and the
-/// distance at which it destroys a ship: its vortex's KILL_RADIUS (PROVISIONAL: retail destroyed a Man-O-War inside 17 units of
-/// the Small hole, whose vortex kills at 10; a plunging Cutter went at 33.6).
+/// A hole's CUSTOMINFO `Magnitude` and `Radius` (Terrain_BlackHole_*.wot; retail values 9000/145, 15000/260, 25000/625).
 #[derive(Component, Clone, Copy, Debug, PartialEq)]
 pub struct Pull {
     pub magnitude: f32,
     pub radius: f32,
-    pub kill: f32,
 }
 
 /// Set on a ship the hole destroyed: the Game Summary credits nobody with it (retail: Ships Sunk stayed 0).
 #[derive(Component)]
 pub struct Swallowed;
+
+/// A ship's state inside a hole's radius: its own velocity once it broke free of the rest snap, and how long it has been in the
+/// core while not under way.
+#[derive(Component, Default, Debug, Clone, Copy)]
+pub struct Caught {
+    pub free: bool,
+    pub velocity: Vec3,
+    pub inside: f32,
+}
 
 impl Pull {
     /// Retail values for a WOT type, or None for other terrain.
@@ -43,13 +55,28 @@ impl Pull {
             "Big" => (25000.0, 625.0),
             _ => return None,
         };
-        Some(Pull { magnitude, radius, kill: 0.0 })
+        Some(Pull { magnitude, radius })
     }
 
-    /// Drift speed (units/s) of a ship of `mass` at `distance`: zero outside the radius, constant inside (retail: nothing moved at
-    /// 1.4 and 2.6 radii; the same speed at 0.73 and 0.33 radii).
-    pub fn drift(&self, distance: f32, mass: f32) -> f32 {
-        if distance > self.radius { 0.0 } else { DRIFT_GAIN * self.magnitude / 9000.0 / mass.max(1.0).sqrt() }
+    /// The core: inside this distance the pull stops and a ship not under way is destroyed. A quarter of the radius (measured
+    /// 36.5 ± 0.5 on the Small hole; PROVISIONAL for the larger holes).
+    pub fn core(&self) -> f32 {
+        self.radius / 4.0
+    }
+
+    /// Full-depth pull (units/s²) on a hull of `length` (collision box, bow to stern) and `mass`. PROVISIONAL: the class law
+    /// (`CLASS_GAIN`) and the linear Magnitude scaling (only the Small hole was measured).
+    pub fn strength(&self, length: f32, mass: f32) -> f32 {
+        CLASS_GAIN * length / mass.max(1.0) * self.magnitude / 9000.0
+    }
+
+    /// Pull (units/s²) at `distance`: zero outside the radius and inside the core; in between it rises linearly with the depth
+    /// inside the edge over one core width (measured ramp 36 units on the Small hole), then stays at `strength`.
+    pub fn accel(&self, distance: f32, length: f32, mass: f32) -> f32 {
+        if distance > self.radius || distance <= self.core() {
+            return 0.0;
+        }
+        self.strength(length, mass) * ((self.radius - distance) / self.core()).min(1.0)
     }
 }
 
@@ -200,42 +227,78 @@ pub fn spawn(commands: &mut Commands, lib: &fx::FxLib, terrain: &str, pos: Vec3)
         _ => "Small",
     };
     let Some(p) = load(kind) else { return };
-    let kill = p.kill;
     let mut hole =
         commands.spawn((Scenario, BlackHole { p, pts: vec![], acc: 0.0, rng: 0x1234_5678 ^ pos.x.to_bits(), mesh: None }, Transform::from_translation(pos), Visibility::default()));
     if let Some(pull) = Pull::for_terrain(terrain) {
-        hole.insert(Pull { kill, ..pull });
+        hole.insert(pull);
     }
     let e = hole.id();
     fx::spawn(commands, lib, &format!("BlackHoleRibbons_{kind}"), Some(e), Transform::IDENTITY, Transform::from_translation(pos), false);
 }
 
-/// Moves every free ship inside a black hole's radius toward its centre, and destroys it there. Retail moves the position directly
-/// (a resting ship keeps zero velocity while it creeps in), so this shifts the transform and leaves speed and drift alone.
-/// Docked and destroyed ships are left alone. PROVISIONAL / not modelled: a resting retail Cutter, after ~21 s inside, went straight
-/// in at a constant 2.32 units/s (a Man-O-War resting 200 s never did); what triggers it is unknown.
+/// Black-hole pull (docs/re/effects.md "Black holes"). It acts only on ships that are not under way (engine speed 0); a ship under
+/// orders feels nothing. A resting ship's rest snap cancels the pull every engine tick, so it only creeps in at one tick's worth of
+/// acceleration; once the pull reaches `BREAK_FREE` it falls freely, its velocity following v' = a - k v with the hull's own rate
+/// k = MaxThrust / (MaxSpeed x Mass). In the core the pull stops and a ship not under way is destroyed after `KILL_DELAY`.
+/// Docked and destroyed ships are left alone.
 pub fn pull(
     mut commands: Commands,
     time: Res<Time>,
     lib: Res<crate::combat::Library>,
     holes: Query<(&Transform, &Pull), Without<Ship>>,
-    mut ships: Query<(Entity, &Ship, &mut Transform, &mut Health, Option<&Docker>)>,
+    mut ships: Query<(Entity, &Ship, &mut Transform, &mut Health, Option<&Docker>, Option<&mut Caught>)>,
 ) {
     let dt = time.delta_secs();
-    for (e, ship, mut tf, mut health, docker) in &mut ships {
+    for (e, ship, mut tf, mut health, docker, caught) in &mut ships {
         if health.destroyed || docker.is_some_and(Docker::is_docked) {
             continue;
         }
-        let mass = lib.classes[ship.class].phys.mass;
+        let class = &lib.classes[ship.class];
+        let (mut accel, mut in_radius, mut in_core) = (Vec3::ZERO, false, false);
         for (hole, pull) in &holes {
-            if horizontal(hole.translation, tf.translation).length() < pull.kill {
-                health.core = 0.0; // combat::deaths sinks it next
-                commands.entity(e).insert(Swallowed);
-            } else {
-                let step = pull_step(hole.translation, *pull, tf.translation, mass, dt);
-                tf.translation += step;
-            }
+            let distance = horizontal(hole.translation, tf.translation).length();
+            in_radius |= distance <= pull.radius;
+            in_core |= distance <= pull.core();
+            accel += pull_dir(hole.translation, tf.translation) * pull.accel(distance, class.length, class.phys.mass);
         }
+        let Some(mut caught) = caught else {
+            if in_radius {
+                commands.entity(e).insert(Caught::default());
+            }
+            continue;
+        };
+        let rate = class.phys.thrust / (class.phys.max_speed * class.phys.mass);
+        let (step, killed) = caught.step(ship.speed == 0.0, accel, in_core, rate, dt);
+        tf.translation += step;
+        if killed {
+            health.core = 0.0; // combat::deaths sinks it next
+            commands.entity(e).insert(Swallowed);
+        }
+    }
+}
+
+impl Caught {
+    /// One frame for a ship that is `resting` (engine speed 0) or under way, pulled by `accel` (units/s²) and with hull rate `rate`
+    /// (1/s): its displacement, and whether the hole destroys it now.
+    pub fn step(&mut self, resting: bool, accel: Vec3, in_core: bool, rate: f32, dt: f32) -> (Vec3, bool) {
+        self.inside = if in_core && resting { self.inside + dt } else { 0.0 };
+        if !resting {
+            // Under way the engine owns the motion: no pull, and a fall ends.
+            (self.free, self.velocity) = (false, Vec3::ZERO);
+            return (Vec3::ZERO, false);
+        }
+        if !self.free && accel.length() >= BREAK_FREE {
+            self.free = true;
+            self.velocity = accel * TICK;
+        }
+        let step = if self.free {
+            let terminal = accel / rate.max(1e-6);
+            self.velocity = terminal + (self.velocity - terminal) * (-rate * dt).exp();
+            self.velocity * dt
+        } else {
+            accel * TICK * dt // the rest snap leaves one tick's worth of the pull
+        };
+        (step, self.inside >= KILL_DELAY)
     }
 }
 
@@ -243,17 +306,11 @@ fn horizontal(hole: Vec3, ship: Vec3) -> Vec3 {
     Vec3::new(hole.x - ship.x, 0.0, hole.z - ship.z)
 }
 
-/// Displacement of a ship of `mass` at `ship` by one hole at `hole` over `dt`: toward the centre, turned DRIFT_SWIRL clockwise.
-fn pull_step(hole: Vec3, pull: Pull, ship: Vec3, mass: f32, dt: f32) -> Vec3 {
-    let to = horizontal(hole, ship);
-    let distance = to.length();
-    if distance <= 0.0 {
-        return Vec3::ZERO;
-    }
-    let inward = to / distance;
+/// Unit direction of a hole's pull on a ship at `ship`: toward the centre, turned DRIFT_SWIRL clockwise seen from above.
+fn pull_dir(hole: Vec3, ship: Vec3) -> Vec3 {
+    let Some(inward) = horizontal(hole, ship).try_normalize() else { return Vec3::ZERO };
     // Bevy is y-up with game forward = -z, so clockwise seen from above is a negative turn about +y.
-    let dir = Quat::from_rotation_y(-DRIFT_SWIRL.atan()) * inward;
-    dir * pull.drift(distance, mass) * dt
+    Quat::from_rotation_y(-DRIFT_SWIRL.atan()) * inward
 }
 
 pub fn update(
@@ -313,30 +370,131 @@ pub fn update(
 mod tests {
     use super::*;
 
-    #[test]
-    fn drift_matches_the_retail_small_hole() {
-        let small = Pull::for_terrain("Terrain_BlackHole_Small").unwrap();
-        assert_eq!(small, Pull { magnitude: 9000.0, radius: 145.0, kill: 0.0 });
-        assert_eq!(Pull::for_terrain("Terrain_Island"), None);
-        // nothing outside the radius (retail: Man-O-War at 200-203 for 6 min, Cutter at 372)
-        assert_eq!(small.drift(200.0, 40000.0), 0.0);
-        assert_eq!(small.drift(372.0, 4000.0), 0.0);
-        // constant inside: Man-O-War 0.033 at 105 and 48 units, Cutter 0.093 at 122
-        assert_eq!(small.drift(105.0, 40000.0), small.drift(48.0, 40000.0));
-        assert!((small.drift(105.0, 40000.0) / 0.0328 - 1.0).abs() < 0.07);
-        assert!((small.drift(122.0, 4000.0) / 0.0925 - 1.0).abs() < 0.07);
+    fn small() -> Pull {
+        Pull::for_terrain("Terrain_BlackHole_Small").unwrap()
+    }
+    // Hull length (collision box) and Mass of the measured classes, and the hull rate MaxThrust / (MaxSpeed x Mass) of the Cutter.
+    const CUTTER: (f32, f32) = (13.5, 4000.0);
+    const FRIGATE: (f32, f32) = (18.0, 20000.0);
+    const MAN_O_WAR: (f32, f32) = (31.0, 40000.0);
+    const CUTTER_RATE: f32 = 1.862;
+
+    /// Runs a ship standing still at `distance` from a Small hole for `secs`: (inward distance covered, whether it broke free).
+    fn rest(hull: (f32, f32), distance: f32, secs: f32) -> (f32, Caught) {
+        let pull = small();
+        let mut c = Caught::default();
+        let mut pos = Vec3::new(distance, 0.0, 0.0);
+        for _ in 0..(secs * 30.0).round() as usize {
+            let d = pos.length();
+            let a = pull_dir(Vec3::ZERO, pos) * pull.accel(d, hull.0, hull.1);
+            pos += c.step(true, a, d <= pull.core(), CUTTER_RATE, TICK).0;
+        }
+        (distance - pos.length(), c)
     }
 
     #[test]
-    fn drift_spirals_clockwise_toward_the_centre_and_is_horizontal() {
-        let pull = Pull::for_terrain("Terrain_BlackHole_Small").unwrap();
+    fn pull_law_matches_the_retail_small_hole() {
+        let pull = small();
+        assert_eq!(pull, Pull { magnitude: 9000.0, radius: 145.0 });
+        assert_eq!(Pull::for_terrain("Terrain_Island"), None);
+        // measured full-depth pull per class: Cutter 4.50, Frigate 1.21-1.26, Man-O-War 0.99-1.04
+        for (hull, measured) in [(CUTTER, 4.50), (FRIGATE, 1.235), (MAN_O_WAR, 1.015)] {
+            let a = pull.strength(hull.0, hull.1);
+            assert!((a / measured - 1.0).abs() < 0.05, "{hull:?}: {a} vs {measured}");
+        }
+        // nothing outside the radius (retail: Man-O-War at 200-203 for 6 min, Cutter at 372) nor inside the core (36.5 measured)
+        assert_eq!(pull.accel(200.0, MAN_O_WAR.0, MAN_O_WAR.1), 0.0);
+        assert_eq!(pull.accel(372.0, CUTTER.0, CUTTER.1), 0.0);
+        assert_eq!(pull.accel(36.0, CUTTER.0, CUTTER.1), 0.0);
+        assert!((pull.core() - 36.5).abs() <= 0.5);
+        // linear ramp over the first ~36 units, then constant (Man-O-War: the same creep at 105 and 48 units)
+        let full = pull.strength(CUTTER.0, CUTTER.1);
+        assert!((pull.accel(145.0 - 18.125, CUTTER.0, CUTTER.1) - full / 2.0).abs() < 1e-4);
+        assert_eq!(pull.accel(105.0, MAN_O_WAR.0, MAN_O_WAR.1), pull.accel(48.0, MAN_O_WAR.0, MAN_O_WAR.1));
+        // Magnitude scales the pull (PROVISIONAL)
+        let big = Pull::for_terrain("Terrain_BlackHole_Big").unwrap();
+        assert!((big.strength(CUTTER.0, CUTTER.1) / full - 25.0 / 9.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn a_resting_ship_creeps_one_tick_of_pull_per_second() {
+        // retail: Cutter 0.0908 units/s at depth 22.9 inside the edge, Frigate 0.0398 and Man-O-War 0.0328 at full depth
+        for (hull, distance, measured) in [(CUTTER, 145.0 - 22.9, 0.0908), (FRIGATE, 54.0, 0.0398), (MAN_O_WAR, 105.0, 0.0328)] {
+            let (moved, c) = rest(hull, distance, 1.0);
+            assert!(!c.free, "{hull:?} stays snapped");
+            assert!((moved / measured - 1.0).abs() < 0.06, "{hull:?}: {moved} vs {measured} units/s");
+        }
+        // a Man-O-War resting 200 s never broke free and stays alive
+        let (_, c) = rest(MAN_O_WAR, 105.0, 200.0);
+        assert!(!c.free && c.inside == 0.0);
+    }
+
+    #[test]
+    fn a_ship_under_way_feels_no_pull_and_survives_the_core() {
+        let mut c = Caught { free: true, velocity: Vec3::X, inside: 0.0 };
+        for _ in 0..17 * 30 {
+            let (step, killed) = c.step(false, Vec3::new(-4.5, 0.0, 0.0), true, CUTTER_RATE, TICK);
+            assert_eq!((step, killed), (Vec3::ZERO, false));
+        }
+        assert!(!c.free && c.velocity == Vec3::ZERO, "getting under way ends a fall");
+    }
+
+    #[test]
+    fn a_deep_cutter_breaks_free_and_falls_at_the_hull_rate() {
+        // PROVISIONAL trigger: 2.9 units/s². Below it the Cutter stays snapped; past it, it falls to A / k = 2.42 units/s.
+        assert!(!rest(CUTTER, 123.0, 5.0).1.free);
+        let pull = small();
+        let a = pull_dir(Vec3::ZERO, Vec3::new(90.0, 0.0, 0.0)) * pull.accel(90.0, CUTTER.0, CUTTER.1);
+        let mut c = Caught::default();
+        for _ in 0..300 {
+            c.step(true, a, false, CUTTER_RATE, TICK);
+        }
+        assert!(c.free);
+        assert!((c.velocity.length() - 2.42).abs() < 0.03, "terminal speed {}", c.velocity.length());
+        // inside the core the pull stops and the speed decays at the hull rate
+        let v0 = c.velocity.length();
+        c.step(true, Vec3::ZERO, true, CUTTER_RATE, 0.5);
+        assert!((c.velocity.length() - v0 * (-CUTTER_RATE * 0.5).exp()).abs() < 1e-4);
+    }
+
+    #[test]
+    fn the_core_destroys_a_resting_ship_after_1_1_s() {
+        let mut c = Caught::default();
+        let mut killed_at = None;
+        for i in 1..=60 {
+            if c.step(true, Vec3::ZERO, true, CUTTER_RATE, TICK).1 {
+                killed_at = Some(i as f32 * TICK);
+                break;
+            }
+        }
+        assert!(killed_at.is_some_and(|t| (t - KILL_DELAY).abs() < 0.05), "{killed_at:?}");
+        // leaving the core or getting under way resets the clock
+        let mut c = Caught { inside: 1.0, ..default() };
+        c.step(false, Vec3::ZERO, true, CUTTER_RATE, TICK);
+        assert_eq!(c.inside, 0.0);
+    }
+
+    #[test]
+    fn pull_spirals_clockwise_toward_the_centre_and_is_horizontal() {
         // ship 100 units east of the hole (game +x = bevy +x); the centre is west
-        let v = pull_step(Vec3::ZERO, pull, Vec3::new(100.0, 40.0, 0.0), 40000.0, 1.0);
-        assert!(v.x < 0.0 && v.y == 0.0, "toward the centre and horizontal, got {v}");
-        assert!((v.length() - pull.drift(100.0, 40000.0)).abs() < 1e-6);
-        // clockwise from above while heading west turns north (game +y = bevy -z)
+        let v = pull_dir(Vec3::ZERO, Vec3::new(100.0, 40.0, 0.0));
+        assert!(v.x < 0.0 && v.y == 0.0 && (v.length() - 1.0).abs() < 1e-6, "toward the centre and horizontal, got {v}");
+        // clockwise from above while heading west turns north (game +y = bevy -z): 15° off, sideways / inward 0.27
         assert!(v.z < 0.0 && (v.z / v.x - DRIFT_SWIRL).abs() < 1e-3, "sideways part, got {v}");
-        assert_eq!(pull_step(Vec3::ZERO, pull, Vec3::ZERO, 40000.0, 1.0), Vec3::ZERO, "no direction at the centre");
+        assert_eq!(pull_dir(Vec3::ZERO, Vec3::ZERO), Vec3::ZERO, "no direction at the centre");
+    }
+
+    #[test]
+    #[ignore = "needs imported assets"]
+    fn class_data_gives_the_measured_pulls() {
+        let lib = crate::combat::Library::load(assets_dir());
+        for (class, measured) in [("Ship_Navy_Cutter", 4.50), ("Ship_Navy_Frigate", 1.235), ("Ship_Navy_ManOWar", 1.015)] {
+            let c = &lib.classes[lib.index(class)];
+            let a = small().strength(c.length, c.phys.mass);
+            assert!((a / measured - 1.0).abs() < 0.05, "{class}: {a} vs {measured}");
+        }
+        let c = &lib.classes[lib.index("Ship_Navy_Cutter")];
+        assert!((c.phys.thrust / (c.phys.max_speed * c.phys.mass) - CUTTER_RATE).abs() < 0.01);
     }
 
     #[test]
@@ -350,8 +508,7 @@ mod tests {
             .insert_resource(Library::load(assets_dir()))
             .init_resource::<crate::stats::GameStats>()
             .add_systems(Update, (pull, crate::stats::collect).chain());
-        let small = Pull { kill: 10.0, ..Pull::for_terrain("Terrain_BlackHole_Small").unwrap() };
-        app.world_mut().spawn((Transform::default(), small));
+        app.world_mut().spawn((Transform::default(), small()));
         let ship = |app: &mut App, class: &str, side: Side, at: Vec3| {
             let lib = app.world().resource::<Library>();
             let ci = lib.index(class);
@@ -375,17 +532,23 @@ mod tests {
             app.world_mut().spawn((Transform::from_translation(at), ship, health, Drift::default())).id()
         };
         let gunner = ship(&mut app, "Ship_Pirate_Carrack", Side::Enemy, Vec3::new(300.0, 0.0, 0.0));
-        let victim = ship(&mut app, "Ship_Navy_ManOWar", Side::Player, Vec3::new(30.0, 0.0, 0.0));
-        app.update(); // stats registers both hulls
+        let victim = ship(&mut app, "Ship_Navy_ManOWar", Side::Player, Vec3::new(100.0, 0.0, 0.0));
+        app.update(); // stats registers both hulls; the victim is caught
         app.world_mut().write_message(Hit { shooter: gunner, victim });
         app.world_mut().get_mut::<Health>(victim).unwrap().sections[0] -= 50.0; // the Carrack's last hit
         app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs_f32(0.05));
         app.update();
         let before = app.world().get::<Transform>(victim).unwrap().translation;
-        assert!(before.x < 30.0 && app.world().get::<Health>(victim).unwrap().core > 0.0, "drifting in, still alive: {before}");
-        app.world_mut().get_mut::<Transform>(victim).unwrap().translation = Vec3::new(5.0, 0.0, 0.0);
-        app.update();
-        assert_eq!(app.world().get::<Health>(victim).unwrap().core, 0.0, "inside the kill radius the core goes");
+        assert!(before.x < 100.0 && app.world().get::<Health>(victim).unwrap().core > 0.0, "creeping in, still alive: {before}");
+        app.world_mut().get_mut::<Transform>(victim).unwrap().translation = Vec3::new(30.0, 0.0, 0.0);
+        for _ in 0..20 {
+            app.update(); // 1.0 s in the core
+        }
+        assert!(app.world().get::<Health>(victim).unwrap().core > 0.0, "the core takes ~1.1 s");
+        for _ in 0..3 {
+            app.update();
+        }
+        assert_eq!(app.world().get::<Health>(victim).unwrap().core, 0.0, "after 1.1 s in the core the hull goes");
         assert!(app.world().get::<Swallowed>(victim).is_some());
         let far = app.world().get::<Transform>(gunner).unwrap().translation;
         assert_eq!(far, Vec3::new(300.0, 0.0, 0.0), "outside the radius nothing moves");
