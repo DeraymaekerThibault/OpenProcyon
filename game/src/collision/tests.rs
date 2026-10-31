@@ -79,46 +79,6 @@ fn docking_route_goes_around_scenery_and_rejects_unreachable_points() {
     assert_eq!(route_clear(bounds, start, goal, &[]).unwrap(), vec![goal]);
 }
 #[test]
-fn a_captain_blocked_by_an_island_sails_a_detour_then_steers_again() {
-    let bounds = [Vec3::new(-1.0, -1.0, -3.0), Vec3::new(1.0, 1.0, 3.0)];
-    let island = Obstacle { body: box_body([Vec3::new(-30.0, -5.0, -20.0), Vec3::new(30.0, 5.0, 20.0)], &Transform::default()), triangles: vec![] };
-    let mut ship = crate::Ship {
-        class: 0,
-        side: crate::Side::Enemy,
-        heading: 0.0,
-        speed: 0.0,
-        ang_vel: 0.0,
-        order: 3,
-        waypoints: vec![],
-        goal: Some(0.0),
-        cap: 1.0,
-        throttle: None,
-        sail_energy: 1.0,
-        crew_speed: 1.0,
-        crew_turn: 1.0,
-        avoid: 1.0,
-    };
-    let (e, mut detours) = (Entity::from_raw_u32(1).unwrap(), Detours::default());
-    let (start, foe) = (Vec3::new(0.0, 0.0, 80.0), Vec3::new(0.0, 0.0, -80.0));
-    assert!(detours.route(e, &mut ship, bounds, start, foe, &[&island], 0.03), "the island is in the way");
-    assert!(ship.waypoints.len() >= 2 && ship.goal.is_none(), "sails a route around it, not the goal heading");
-    assert_eq!(ship.waypoints.last(), Some(&foe));
-    // Next tick, the foe barely moved: the route being sailed is kept (its reached corners stay popped).
-    ship.waypoints.remove(0);
-    let left = ship.waypoints.clone();
-    assert!(detours.route(e, &mut ship, bounds, start, foe + Vec3::X, &[&island], 0.03));
-    assert_eq!(ship.waypoints, left);
-    // An unreachable goal (inside the island) is not planned again every tick: the failure is kept until the goal moves or ages.
-    let (other, mut ship2) = (Entity::from_raw_u32(2).unwrap(), crate::Ship { waypoints: vec![], ..ship.clone() });
-    assert!(!detours.route(other, &mut ship2, bounds, start, Vec3::ZERO, &[&island], 0.03));
-    assert!(!detours.0[&other].routed);
-    assert!(!detours.route(other, &mut ship2, bounds, start, Vec3::ZERO, &[&island], 0.03));
-    assert!((detours.0[&other].age - 0.03).abs() < 1e-6, "kept, not replanned");
-    // Past the island the line is clear: the detour is dropped and the caller steers again.
-    assert!(!detours.route(e, &mut ship, bounds, Vec3::new(0.0, 0.0, -40.0), foe, &[&island], 0.03));
-    assert!(ship.waypoints.is_empty());
-}
-#[test]
 fn wall_blocks_but_geometry_above_ship_does_not() {
     let body = rect(0.0, 0.0, 0.0);
     let wall = [Vec3::new(0.5, -2.0, -5.0), Vec3::new(0.5, 2.0, -5.0), Vec3::new(0.5, 0.0, 5.0)];

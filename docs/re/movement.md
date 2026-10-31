@@ -227,7 +227,8 @@ importer: a Procyon Minelayer (7.5 units/s) and a Procyon Frigate (6.6) on their
   then a 180-degree turn) are the end of a patrol leg: those ships shuttle between the Procyon base standoff and the map centre.
 - **Open:** concave coasts; why the Frigate looped (radius about 38-55) 120-250 units from our idle ship instead of circling it; the patrol legs.
 - Remake: `collision::contact_slow` sets `Ship::avoid` (the speed fraction `ship::step` multiplies in) for AI ships; `steer_clear` keeps turning
-  them on the unslowed speed's look-ahead. PROVISIONAL: one curve from one class; the route planner (`Detours`) is still in front of it.
+  them on the unslowed speed's look-ahead. PROVISIONAL: one curve from one class. Computer captains (skirmish and missions) plan no routes round islands, as in the
+  original; the corner-route planner (`collision::route_clear`) is only used for base docking approaches.
 
 ## Computer ships and a hostile base (Border Dispute, 2026-10-27; re-read 2026-10-31)
 

@@ -351,61 +351,6 @@ pub fn path_clear(bounds: [Vec3; 2], a: Vec3, b: Vec3, scenery: &[&Obstacle]) ->
     !touches(swept, &tf, scenery)
 }
 
-/// A captain's goal moves less than this (units) before its detour is planned again, and a detour is replanned at least this often (s).
-/// PROVISIONAL: tuned by eye, not the original's planner.
-const REPLAN_MOVE: f32 = 40.0;
-const REPLAN_SECS: f32 = 4.0;
-
-/// AI detours around scenery: when land blocks the straight line to a captain's destination, the ship sails a `route_clear` route
-/// (as waypoints) instead of steering straight at it; once the line is clear it steers normally again. Keyed by ship.
-/// PROVISIONAL: the padded-corner planner, not the original's path planner (`steer_clear` still handles what it misses).
-/// ponytail: a plan costs ~25 ms on The Diablo Strait (17 islands, release build); cache a visibility graph per map if that hitches.
-#[derive(Default)]
-pub struct Detours(HashMap<Entity, Plan>);
-/// The last plan of one ship: where it was for, how old it is, and whether it found a route (a failed plan is kept too, so an
-/// unreachable goal is not planned again every tick).
-struct Plan {
-    dest: Vec3,
-    age: f32,
-    routed: bool,
-}
-impl Detours {
-    /// Sets `ship`'s waypoints to a route to `dest` and returns true when scenery blocks the straight line and a route exists;
-    /// otherwise drops any earlier detour and returns false, leaving the caller to steer.
-    pub fn route(&mut self, e: Entity, ship: &mut crate::Ship, bounds: [Vec3; 2], pos: Vec3, dest: Vec3, scenery: &[&Obstacle], dt: f32) -> bool {
-        let dest = dest.with_y(pos.y);
-        if path_clear(bounds, pos, dest, scenery) {
-            if self.0.remove(&e).is_some_and(|p| p.routed) {
-                ship.waypoints.clear();
-            }
-            return false;
-        }
-        if let Some(p) = self.0.get_mut(&e)
-            && p.dest.distance(dest) < REPLAN_MOVE
-            && p.age < REPLAN_SECS
-            && (!p.routed || !ship.waypoints.is_empty())
-        {
-            p.age += dt; // keep sailing the route (its reached corners are already popped), or keep the failure
-            if p.routed {
-                ship.goal = None;
-            }
-            return p.routed;
-        }
-        let route = route_clear(bounds, pos, dest, scenery);
-        let routed = route.is_some();
-        match route {
-            Some(route) => {
-                ship.waypoints = route;
-                ship.goal = None;
-            }
-            None if self.0.get(&e).is_some_and(|p| p.routed) => ship.waypoints.clear(),
-            None => {}
-        }
-        self.0.insert(e, Plan { dest, age: 0.0, routed });
-        routed
-    }
-}
-
 /// Seconds of travel probed ahead for steer-away, and the minimum probe length in world units.
 /// PROVISIONAL: tuned by eye, not recovered from the original's AI.
 const STEER_TIME: f32 = 6.0;
