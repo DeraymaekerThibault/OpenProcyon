@@ -126,12 +126,13 @@ type MapLighting_<'w, 's> = Single<'w, 's, (&'static mut DirectionalLight, &'sta
 pub struct EndMessage(pub Option<String>);
 
 /// The string id of the line the battlefield shows while a decided skirmish winds down (retail: "Game Lost!  Exiting..." under the
-/// camera's centre for about 13 s, then the Game Summary opens; measured on Border Dispute when the last human ship sank).
+/// camera's centre; the battle plays on under it until the Game Summary opens).
 #[derive(Resource, Default)]
 pub struct EndLine(pub Option<String>);
 
-/// Seconds the end line shows before the Game Summary opens (retail, one observation at 1 frame/s: 13 s).
-pub const END_LINE_SECS: f32 = 13.0;
+/// Seconds the end line shows before the Game Summary opens (read from the original's code: 10 s after the end rule fires; the
+/// rules run once a second, and a 1 frame/s recording saw about 13 s from the sinking). ponytail: our rules run every frame.
+pub const END_LINE_SECS: f32 = 10.0;
 
 /// Battle start: the front end's choice (map, fleets) if any, else the command line.
 pub fn enter_battle(
@@ -729,11 +730,11 @@ const HOSTILE_TO_ALL: Side = Side(u8::MAX);
 /// Boarding strength of a skirmish base whose map script gives none (the retail strengths are the script's 'Combat Strength'). PROVISIONAL.
 const SKIRMISH_BASE_STRENGTH: i32 = 50;
 
-/// The battlefield's game-over line. The map rule's own message, else the default. PROVISIONAL: only "Game Lost" is measured (the human's
-/// ships all gone, whatever the summary header says); "Game Won" and a map message on the field are inferred from the string table.
-fn end_line_id(outcome: Outcome, human_lost: bool, message: Option<&str>) -> Option<String> {
-    (outcome != Outcome::Playing)
-        .then(|| message.map_or_else(|| format!("IDGS_TPINGAMEMESSAGE_GAME_{}", if outcome == Outcome::Victory && !human_lost { "WON" } else { "LOST" }), str::to_string))
+/// The battlefield's game-over line (read from the original's code): the firing rule's own message for the human's side, else
+/// "Game Won!" when the human is among the winners and "Game Lost!" otherwise. (Border Dispute's no-human-ships rule names "Game
+/// Lost" for winners and losers alike, which is why that line showed under a VICTORY! summary.)
+fn end_line_id(outcome: Outcome, message: Option<&str>) -> Option<String> {
+    (outcome != Outcome::Playing).then(|| message.map_or_else(|| format!("IDGS_TPINGAMEMESSAGE_GAME_{}", if outcome == Outcome::Victory { "WON" } else { "LOST" }), str::to_string))
 }
 
 pub fn outcome(
@@ -744,7 +745,7 @@ pub fn outcome(
     player: Query<&Health, With<PlayerShip>>,
     ships: Query<(&Health, &Ship), Without<PlayerShip>>,
     rules: (Option<Res<victory::Victory>>, Option<Res<combat::Library>>, Option<Res<ship::Fleets>>, Option<Res<crate::rules::skirmish::SkirmishScript>>),
-    all: Query<(&Health, &Ship, &Transform, Option<&ship::FleetMember>, Option<&MapObject>)>,
+    all: Query<(&Health, &Ship, &Transform, Option<&ship::FleetMember>, Option<&MapObject>), Without<crate::lifeboats::Lifeboat>>,
     bases: Query<(&campaign::MissionBase, &combat::ArmedBase, &Health, Option<(&combat::BaseSide, &combat::BaseOrigin)>)>,
 ) {
     let enemies = || ships.iter().filter(|(_, s)| s.side != Side::Player).map(|(h, _)| h);
@@ -754,7 +755,6 @@ pub fn outcome(
         return;
     }
     let mut end_message = None;
-    let mut human_lost = true;
     let new = if let (Some(victory), Some(lib)) = (&rules.0, &rules.1) {
         // The map's own rules decide: a base falling, the human fleet or every ship lost.
         let local = rules.2.as_ref().map(|f| f.local.as_str());
@@ -772,14 +772,12 @@ pub fn outcome(
         let damage: Vec<(i64, f32)> = bases.iter().map(|(b, a, h, _)| (b.id, combat::base_mission_damage(&lib.classes[a.class], h))).collect();
         let captured: Vec<i64> = bases.iter().filter(|b| b.3.is_some_and(|(side, origin)| side.0 != origin.0)).map(|b| b.0.id).collect();
         let points = rules.3.as_ref().map(|s| s.points()).unwrap_or_default();
-        human_lost = !states.iter().any(|s| s.human && s.alive);
         let decided = victory.decide_with_message(&victory::Snapshot { ships: &states, bases: &damage, captured: &captured, points: &points });
         end_message = decided.as_ref().and_then(|d| d.1.clone());
         decided.map_or(Outcome::Playing, |d| d.0)
     } else if player.single().is_err() || player.single().is_ok_and(|h| h.destroyed) {
         Outcome::Defeat
     } else if enemies().count() > 0 && enemies().all(|h| h.destroyed) {
-        human_lost = false;
         Outcome::Victory
     } else {
         Outcome::Playing
@@ -789,7 +787,7 @@ pub fn outcome(
         cfg.ended = Some(cfg.frame);
     }
     *out = new;
-    line.0 = end_line_id(new, human_lost, end_message.as_deref());
+    line.0 = end_line_id(new, end_message.as_deref());
     message.0 = end_message;
 }
 
@@ -831,14 +829,12 @@ mod ambient_tests {
 mod end_line_tests {
     use super::*;
     #[test]
-    fn game_lost_whenever_the_human_fleet_is_gone() {
-        let id = |o, lost, m| end_line_id(o, lost, m);
-        assert_eq!(id(Outcome::Playing, true, None), None);
-        // retail: allies won (summary VICTORY!) but the field still read "Game Lost"
-        assert_eq!(id(Outcome::Victory, true, None).as_deref(), Some("IDGS_TPINGAMEMESSAGE_GAME_LOST"));
-        assert_eq!(id(Outcome::Victory, false, None).as_deref(), Some("IDGS_TPINGAMEMESSAGE_GAME_WON"));
-        assert_eq!(id(Outcome::Defeat, false, None).as_deref(), Some("IDGS_TPINGAMEMESSAGE_GAME_LOST"));
-        assert_eq!(id(Outcome::Defeat, true, Some("IDGS_X")).as_deref(), Some("IDGS_X"));
+    fn game_won_for_the_winners_lost_for_the_rest_unless_the_rule_names_a_message() {
+        assert_eq!(end_line_id(Outcome::Playing, None), None);
+        assert_eq!(end_line_id(Outcome::Victory, None).as_deref(), Some("IDGS_TPINGAMEMESSAGE_GAME_WON"));
+        assert_eq!(end_line_id(Outcome::Defeat, None).as_deref(), Some("IDGS_TPINGAMEMESSAGE_GAME_LOST"));
+        // Border Dispute's no-human-ships rule: allies won (summary VICTORY!) but the rule's message is "Game Lost" for everyone.
+        assert_eq!(end_line_id(Outcome::Victory, Some("IDGS_TPINGAMEMESSAGE_GAME_LOST")).as_deref(), Some("IDGS_TPINGAMEMESSAGE_GAME_LOST"));
     }
 }
 
