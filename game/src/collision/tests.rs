@@ -320,7 +320,7 @@ fn course_prefix_stops_before_a_wall() {
     assert!(path[keep].translation.z < -26.0 && path[keep].translation.z > -31.5, "clip at box-to-wall contact, got {}", path[keep].translation.z);
     assert!(!touches(bounds, &path[keep - 1], &scenery));
 }
-fn ship_rock_contact(mass: f32, rock_velocity: Vec3) -> (Vec3, Vec3, Vec3) {
+fn ship_rock_contact(mass: f32) -> (Vec3, Vec3, Vec3, f32) {
     let mut lib = crate::Library::load(crate::assets_dir());
     let class = lib.index("Ship_Navy_Cutter");
     lib.classes[class].phys.thrust = 0.0; // Isolate collision from engine acceleration/braking.
@@ -328,8 +328,8 @@ fn ship_rock_contact(mass: f32, rock_velocity: Vec3) -> (Vec3, Vec3, Vec3) {
     let health = crate::Health::new(&lib.classes[class]);
     let mut defs = crate::data::AsteroidDefs::from_world(&mut World::new());
     defs.0.get_mut("Asteroid_Small").unwrap().mass = mass;
-    let mut rock = crate::combat::Asteroid::new("Asteroid_Small", "rocks", &defs).unwrap();
-    rock.velocity = rock_velocity;
+    let rock = crate::combat::Asteroid::new("Asteroid_Small", "rocks", &defs).unwrap();
+    let hp = rock.hp;
     let mut app = App::new();
     let mut time = Time::<()>::default();
     time.advance_by(std::time::Duration::from_secs_f32(0.1));
@@ -356,39 +356,33 @@ fn ship_rock_contact(mass: f32, rock_velocity: Vec3) -> (Vec3, Vec3, Vec3) {
     app.update();
     let ship = app.world().get::<crate::Ship>(a).unwrap();
     let va = forward(ship) * ship.speed + app.world().get::<Drift>(a).unwrap().0;
-    let vb = app.world().get::<crate::combat::Asteroid>(b).unwrap().velocity + app.world().get::<Drift>(b).unwrap().0;
+    let drift = app.world().get::<Drift>(b).unwrap().0;
     let position = app.world().get::<Transform>(b).unwrap().translation;
     let obstacle = app.world().get::<Obstacle>(b).unwrap();
     assert!((obstacle.body.bounds.min - (position - Vec3::ONE)).length() < 1e-5, "rock collider follows contact movement");
-    if rock_velocity == Vec3::ZERO {
-        app.update();
-        let next = app.world().get::<Transform>(b).unwrap().translation;
-        assert!((next - position - vb * 0.1).length() < 1e-4, "contact velocity must persist into the next frame");
-    }
-    (va, vb, position)
+    (va, drift, position, hp - app.world().get::<crate::combat::Asteroid>(b).unwrap().hp)
 }
 
 #[test]
 #[ignore = "needs imported assets"]
-fn ship_asteroid_contact_transfers_momentum_by_authored_mass() {
+fn a_rock_contact_pushes_apart_by_mass_keeps_the_ships_speed_and_hurts_the_rock() {
+    // The original: no momentum exchange; the rock is shoved away from the ship and both take its mass x the closing speed.
     for mass in [1000.0, 40000.0] {
-        let (ship, rock, position) = ship_rock_contact(mass, Vec3::ZERO);
-        let expected = -4000.0 * 10.0 / (4000.0 + mass);
-        assert!((ship.z - expected).abs() < 1e-4, "ship response for rock mass {mass}: {ship:?}");
-        assert!((rock.z - expected).abs() < 1e-4, "finite-mass rock must receive momentum: {rock:?}");
+        let (ship, drift, position, lost) = ship_rock_contact(mass);
+        assert!((ship - Vec3::NEG_Z * 10.0).length() < 1e-4, "the ship keeps its velocity: {ship:?}");
+        assert!(drift.z < 0.0 && drift.x.abs() < 1e-4, "the rock is shoved away from the ship: {drift:?}");
         assert!(position.z < 0.0, "rock is displaced rather than treated as an immovable wall");
-        assert!((ship * 4000.0 + rock * mass - Vec3::NEG_Z * 40000.0).length() < 0.05);
+        assert!(lost > 0.0, "the rock loses hit points");
     }
 }
 
 #[test]
 #[ignore = "needs imported assets"]
-fn ecs_ship_contact_preserves_light_and_heavy_ship_mass_ratios() {
+fn ship_contact_pushes_the_hulls_apart_and_keeps_both_speeds() {
     for other in ["Ship_Navy_Torpedo", "Ship_Navy_Tug"] {
         let mut lib = crate::Library::load(crate::assets_dir());
         let a = lib.index("Ship_Navy_Cutter");
         let b = lib.index(other);
-        let expected = 10.0 * lib.classes[a].phys.mass / (lib.classes[a].phys.mass + lib.classes[b].phys.mass);
         for index in [a, b] {
             lib.classes[index].phys.thrust = 0.0;
             lib.classes[index].collision_bounds = [Vec3::splat(-1.0), Vec3::splat(1.0)];
@@ -418,17 +412,11 @@ fn ecs_ship_contact_preserves_light_and_heavy_ship_mass_ratios() {
         let ea = app.world_mut().spawn((ship.clone(), ha, Transform::from_xyz(0.0, 0.0, 1.5), Drift::default())).id();
         let eb = app.world_mut().spawn((crate::Ship { class: b, speed: 0.0, ..ship }, hb, Transform::default(), Drift::default())).id();
         app.update();
-        for e in [ea, eb] {
-            assert!((app.world().get::<crate::Ship>(e).unwrap().speed - expected).abs() < 1e-4, "incorrect momentum transfer for {other}");
-        }
+        let speed = |e| app.world().get::<crate::Ship>(e).unwrap().speed;
+        assert!((speed(ea) - 10.0).abs() < 1e-4 && speed(eb).abs() < 1e-4, "no bounce: both keep their speed ({other})");
+        let moved_b = app.world().get::<Transform>(eb).unwrap().translation.length();
+        assert!(moved_b > 0.0, "the struck ship is pushed ({other})");
     }
-}
-
-#[test]
-#[ignore = "needs imported assets"]
-fn moving_asteroid_contact_uses_relative_velocity() {
-    let (ship, rock, _) = ship_rock_contact(10000.0, Vec3::Z * 4.0);
-    assert!(ship.length() < 1e-4 && rock.length() < 1e-4, "equal opposing momenta stop in an inelastic contact: {ship:?}, {rock:?}");
 }
 
 #[test]

@@ -253,6 +253,8 @@ pub struct Section {
     pub debris: Option<(String, Vec3)>,
     /// Effect trailing that piece (WOT `debrisFx`, e.g. Falling_Debris).
     pub debris_fx: Option<String>,
+    /// Neighbouring sections (indices) a destroyed section passes damage on to (WOT `adjacent`).
+    pub adjacent: Vec<usize>,
 }
 /// A section's part of a ship's final breakup (docs/re/effects.md "Ship destruction"): its mesh flies at `vel` (ship-local, bevy
 /// axes, units/s) from the moment of death, bursts with effect `fx` (if any) at `start` seconds and is gone at `end`.

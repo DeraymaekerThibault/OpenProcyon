@@ -107,7 +107,8 @@ pub(super) fn apply_ship_hit(class: &Class, hp: &mut Health, k: usize, damage: [
     let [lo, hi, _crit, fire_p, fire_str] = damage;
     let protected = invuln >= 1.0;
     let was = hp.sections[k];
-    hp.sections[k] = (was - (1.0 - invuln) * rng.range(lo, hi)).max(0.0);
+    let roll = rng.range(lo, hi);
+    hp.sections[k] = (was - (1.0 - invuln) * roll).max(0.0);
     // Retail ignition roll per hit: chance > 0 and roll <= chance starts a fire of the bullet's initial strength.
     // PROVISIONAL: one fire per section (the original's extra gate is unknown).
     let fire = (!protected && fire_p > 0.0 && rng.f() <= fire_p && hp.sections[k] > 0.0 && fire_free).then_some(fire_str);
@@ -116,7 +117,28 @@ pub(super) fn apply_ship_hit(class: &Class, hp: &mut Health, k: usize, damage: [
     if !protected && class.sections[k].vital && hp.sections[k] == 0.0 {
         hp.core -= core_bleed(class, hp, (1.0 - invuln) * rng.range(lo, hi));
     }
+    if hp.sections[k] == 0.0 {
+        spill(class, hp, k, 0.4 * roll, invuln, &mut vec![k]);
+    }
     ShipHit { fire, lost: was > 0.0 && hp.sections[k] == 0.0 }
+}
+
+/// Read from the original's code: a hit that leaves its section at 0 hit points (already dead or not) passes 0.4 x its damage on
+/// to every neighbouring section, and on from any of those left at 0, each section once per hit.
+fn spill(class: &Class, hp: &mut Health, k: usize, damage: f32, invuln: f32, seen: &mut Vec<usize>) {
+    for &n in &class.sections[k].adjacent {
+        if seen.contains(&n) || n >= hp.sections.len() {
+            continue;
+        }
+        seen.push(n);
+        hp.sections[n] = (hp.sections[n] - (1.0 - invuln) * damage).max(0.0);
+        if invuln < 1.0 && class.sections[n].vital && hp.sections[n] == 0.0 {
+            hp.core -= core_bleed(class, hp, (1.0 - invuln) * damage);
+        }
+        if hp.sections[n] == 0.0 {
+            spill(class, hp, n, 0.4 * damage, invuln, seen);
+        }
+    }
 }
 
 /// The bullet's impact effect at `at`, facing back along its flight.

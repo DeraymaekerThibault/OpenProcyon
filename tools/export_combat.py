@@ -378,6 +378,8 @@ def export(root, ship, outdir):
                 vital_turn=a["vitalToManeuverability"] == "1",
                 vital_mission=a.get("vitalToMission") == "1",
                 core_pct=float(a.get("vitalSectionCoreDamagePercent", 0)),
+                # Neighbouring sections (layer names) a destroyed section passes damage on to.
+                adjacent=[x for x in a.get("adjacent", "").split("+") if x],
                 debris_fx=a.get("debrisFx"),
                 destruct_fx=(
                     a.get("destructFx", "").replace("{", "").split() or [None]
