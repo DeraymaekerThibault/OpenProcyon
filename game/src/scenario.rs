@@ -483,7 +483,7 @@ pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Libra
                 // like ours (retail saves: factor 1.125, scan x1.125). Pre-placed computer ships keep the measured crewed factor.
                 let built = g.crew.iter().any(|c| c.iter().any(|r| !r.is_empty()));
                 if !g.human && !built {
-                    commands.entity(e).entry::<Ship>().and_modify(|mut s| (s.crew_speed, s.crew_turn) = (ship::COMPUTER_CREW, ship::COMPUTER_TURN));
+                    commands.entity(e).entry::<Ship>().and_modify(|mut s| (s.crew_speed, s.crew_turn) = (ship::COMPUTER_CREW, ship::COMPUTER_CREW));
                     // PROVISIONAL: the crew factor matching the measured speed (Average-to-Elite, retail save scale)
                     commands.entity(e).insert(crate::environment::ScanFactor(1.35));
                 }

@@ -148,9 +148,8 @@ Headless retail skirmishes, one computer ship against our idle or fleeing Navy C
 - **Circling speed:** the path's saved minimum throttle × the crewed top speed: Carrack 0.745 × 8.71 = 6.49, measured 6.47; the
   Carrack and Barque ratios above (0.66, 0.74) lie in the saves' 0.65-0.75 range.
 - **Computer turn rate:** the circling Carrack's 8.23°/s at 6.47 needs rudder torque × 1.605 on top of the uncrewed formula,
-  the square of its saved navigator factor relative to ours (1.267² = 1.605 predicts 8.25°/s; × 1.267 would give 7.33).
-  PROVISIONAL: one ship with its own save. The original's code applies the navigator factor once, linearly, for every ship, so
-  the extra is not the crew; how hard the computer's helm puts the rudder over is not read yet.
+  more than its navigator factor alone gives (× 1.267 relative to ours: 7.33°/s). The original's code explains it (below,
+  "Computer helm"): the computer's helm boosts rudder torque while the course point is more than 11.25° off the bow.
 - **Assault Cutter (Zemyatin, idle Cutter target):** it did not circle: it swung back and forth across our bow at 6.3 units/s
   between 66 and 117 units for 90 s (turn reversing every ~10-20 s), then closed at Emergency and rammed our Cutter, which sank
   (the save's frontal-attack routine holds a move-away vector and timer). PROVISIONAL reading: frontal attack.
@@ -201,7 +200,24 @@ Headless retail skirmishes, one computer ship against our idle or fleeing Navy C
 - **Turning at speed (measured, Navy Cutter, no crew):** full rudder 13.6°/s at Ahead Full (4.53) and 9.70°/s at Emergency
   (9.06); speed does not drop in the turn. Our turn formula with its torque / 3 band above 0.67 × MaxSpeed predicts 9.70°/s, so
   the band holds. The computer's circling turn rates then need rudder torque × 1.72 (Barque) and × 1.87 (Carrack) under campaign-save
-  navigator factors (1.31, 1.37) squared; the same-ship save above gives 1.605 = 1.267². Remake: `ship::COMPUTER_TURN` = 1.267².
+  navigator factors (1.31, 1.37) squared; the same-ship save above gives 1.605 = 1.267². Explained by the computer helm's torque
+boost (below), not by the crew.
+
+## Computer helm (read from the original's code, 2026-10-31)
+- **Rudder:** the same law for the computer and the human: rudder = heading error to the course point / 20°, capped at full,
+  no dead band. The computer sets it at each think (every 0.5 s) and holds it between thinks; the remake steers every frame
+  (ponytail: with the boost below the simulated circles already match, so the hold is not ported).
+- **Torque boost (computer only):** while the error is at least 11.25°, the ship's maximum angular acceleration is raised by
+  1 + 3 × (error − 11.25°) / (180° − 11.25°): × 1.16 at 20°, × 1.33 at 30°, × 1.6 at 45°, × 2.4 at 90°, × 4 at 180°. Ships
+  of the human's on an ordinary move order never get it. So a circling computer ship turns faster than its crew factor says:
+  the Carrack's 8.23°/s at a steady error of about 25° (× 1.25).
+- **Crew:** the navigator factor scales the rudder once, linearly, for every ship ([crew.md](crew.md)); computer ships use their
+  navigator factor as is (`ship::COMPUTER_CREW` for ships without named crew), not squared.
+- **Throttle:** the boost step also asks for a low throttle (0.2 down to 0.1 with the error), but the ship's minimum throttle
+  (0.65-0.75) overrides it. Computer ships get no order multiplier: speed = throttle × engineer factor × MaxSpeed.
+- The yaw "bias" term of the turn physics is an accumulator for impacts (cleared every tick), not steering.
+- Remake: `ship::helm_step` with `ai` for every ship that is not the human's (`collision::sail`). Simulated circles round an
+  idle Cutter: Carrack 43-48 units (retail 45-50), Barque 53-58 (retail 51-58).
 
 ## Land ahead: computer ships slow and steer away (Border Dispute, 2026-10-31)
 Position logs (about 30 Hz) of computer ships crossing Border Dispute's islands, checked against the islands' collision meshes as placed by the
@@ -267,8 +283,7 @@ Read from the code (below): against a base the attack range is the guns' mean lo
 Turning (same log, `COMPUTER_TURN`): re-running each steady turn through our turn model gives a torque factor of about 2.0 for an
 uncrewed Submersible (11 turns) and 0.9-1.1 for crewed Fast Frigates (15 turns), 2.3 for a crewed Minelayer, 1.5-3.8 for a crewed
 Frigate; Torpedo boats slow and weave in turns and do not fit. Crewed ships do not turn harder than uncrewed ones, so the
-factor-squared reading above is not supported; the original's code agrees (the navigator factor scales the rudder linearly, the
-same for every ship, [crew.md](crew.md)). 1.267² stays as the Carrack circle's fit. PROVISIONAL.
+factor-squared reading above is not supported; the computer helm's torque boost ("Computer helm") explains the extra turning.
 Run-in slow-down: four run-ins slowed 48-64 units from their target whatever the class (Carrack 48, Barque 49 and 60, Minelayer
 64), i.e. 0.32-0.59 of the gun reach. Read from the code: the throttle drops to the ship's minimum whenever its next course point is
 more than 11.25° off the bow, which the broadside aim point is once the ship nears its target.
@@ -314,5 +329,4 @@ the difficulty setting.
   target rule in `ship::ai`. PROVISIONAL: which per-section flag limits a base's aim sections (the remake takes its
   mission sections), the explore border margin and random draw. A measured Carrack held side A where its stock guns predict side B;
   computer skirmish ships carry swapped guns and that run's fit was not recorded, so it is unresolved. Simulated circles round an idle
-  Cutter, aiming at its nearest section: Carrack 42-49 units (retail 45-50), Barque 43-73 (retail 51-58, its throttle staying at the
-  minimum); the right size, but the Barque breathes more, which the aim point does not explain.
+  Cutter, aiming at its nearest section, with the computer helm: Carrack 43-48 units (retail 45-50), Barque 53-58 (retail 51-58).
