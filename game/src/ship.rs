@@ -85,10 +85,9 @@ pub type CaptainBusy = Or<(With<docking::Docker>, With<docking::Tower>, With<boa
 /// Emergency Speed. A retail save of such a Carrack holds engineer and navigator factor 1.425, our uncrewed Cutter 1.125, and
 /// 1.425 / 1.125 = 1.267 (docs/re/crew.md).
 pub const COMPUTER_CREW: f32 = 1.267;
-/// Rudder-torque factor (`Ship::crew_turn`) of computer skirmish ships: the square of their navigator factor. Measured on the
-/// saved Carrack: it circled at 8.23°/s at 6.47 units/s, our turn model with torque x 1.267² predicts 8.25°/s (x 1.267: 7.33).
-/// PROVISIONAL: a fit, not the crew (the original applies the navigator factor once for every ship); the cause is not read yet.
-pub const COMPUTER_TURN: f32 = COMPUTER_CREW * COMPUTER_CREW;
+/// The original's computer helm (read from its code): while the course point is at least this far off the bow, the ship's rudder
+/// torque rises linearly from x1 to x4 at 180°. Human-captained ships never get it.
+const AI_BOOST_FROM: f32 = 11.25 * PI / 180.0;
 /// Computer captains keep this far outside a black hole's radius (retail: a Carrack rode 157-165 units from a 145-radius hole).
 pub const HOLE_MARGIN: f32 = 15.0;
 /// Map exploration of skirmish captains with no target (read from the original's code): each ship sails for the centre of a
@@ -310,12 +309,18 @@ pub fn full_speed(class: &combat::Class) -> f32 {
 
 /// One movement step for a ship; also used to predict the player's course.
 pub fn step(ship: &mut Ship, tf: &mut Transform, class: &combat::Class, health: &Health, dt: f32) {
+    helm_step(ship, tf, class, health, dt, false);
+}
+
+/// `step`, for a ship whose helm is the computer's (`ai`) or the human's.
+pub fn helm_step(ship: &mut Ship, tf: &mut Transform, class: &combat::Class, health: &Health, dt: f32, ai: bool) {
     {
         let ph = &class.phys;
         let drag = ph.thrust / ph.mass / ph.max_speed; // 1/s; retail settles with this rate for every order change
         let fraction = if ship.order == 0 { 0.0 } else { ship.throttle.unwrap_or(ORDERS[ship.order].1) };
         let target = fraction * max_speed(ship, class, health) * ship.avoid;
         let mut steer = 0.0;
+        let mut boost = 1.0;
         let mut want = None;
         if let Some(&wp) = ship.waypoints.first() {
             let d = wp - tf.translation;
@@ -332,12 +337,16 @@ pub fn step(ship: &mut Ship, tf: &mut Transform, class: &combat::Class, health: 
             want = Some(g);
         }
         if let Some(w) = want {
-            steer = (angdiff(w, ship.heading) / HELM_FULL).clamp(-1.0, 1.0);
+            let off = angdiff(w, ship.heading);
+            steer = (off / HELM_FULL).clamp(-1.0, 1.0);
+            if ai {
+                boost = (1.0 + 3.0 * (off.abs() - AI_BOOST_FROM) / (PI - AI_BOOST_FROM)).clamp(1.0, 4.0);
+            }
         }
         // Turning follows the original's ship physics (docs/re/movement.md). Assumed mapping (not verified):
         // rudder in [-1,1] is `steer`, and the torque scale is WOT MaxAngularAcceleration.
         let v = ship.speed.abs();
-        let mut a = steer * TURN_SCALE * ship.crew_turn * ph.max_ang_acc * (1.0 - 1.0 / (0.1 * v + 1.0)) * combat::turn_factor(class, health);
+        let mut a = steer * TURN_SCALE * ship.crew_turn * boost * ph.max_ang_acc * (1.0 - 1.0 / (0.1 * v + 1.0)) * combat::turn_factor(class, health);
         if v > 0.67 * ph.max_speed {
             a /= 3.0
         } else if v < 0.33 * ph.max_speed {

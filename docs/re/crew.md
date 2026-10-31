@@ -68,8 +68,8 @@ Saves made mid-battle store per ship an engineer and a navigator factor. Measure
   original's code, 2026-10-31). The factor scales the rudder term only; the speed bands (on the uncrewed MaxSpeed) and the
   rotational drag follow, so a steady turn grows with the square root of the factor. The engineer factor scales thrust, so it
   multiplies top speed and the first acceleration alike; drag is not scaled, so the time constant does not change. Computer ships
-  still turn harder in the measurements (the Carrack's circle needs (1.425 / 1.125)², [movement.md](movement.md#computer-captains-measured-2026-10));
-  crew factors do not explain it, so the cause is elsewhere, likely how hard the computer's helm puts the rudder over. PROVISIONAL.
+  still turn harder: not the crew, but the computer helm's torque boost
+  ([movement.md](movement.md#computer-helm-read-from-the-originals-code-2026-10-31)).
 - **Leadership** (read from the original's code, 2026-10-31): each ship draws two chances in [0, 1) once when it is crewed. Every
   crewman but the captain and the first mate gains 0.1 skill (on the 0-1 scale, capped at 1) when the captain's Leadership / 10
   beats the first chance, and 0.05 when the first mate's beats the second. So a Leadership-7 captain lifts the crew 70 % of the
