@@ -608,3 +608,16 @@ fn impulse_conserves_momentum_and_leaves_separating_contacts_alone() {
     assert!((a * 2.0 + b * 4.0 - va * 2.0).length() < 1e-4);
     assert_eq!(impulse(&ContactBody { velocity: Vec3::X, inverse_mass: 1.0, ..fixed_body() }, &b_body, Vec3::X), Vec3::ZERO);
 }
+#[test]
+fn a_ship_pressed_against_another_for_three_seconds_steers_around_it_for_fifteen() {
+    // Issue #191: an allied computer ship rammed the human's parked Tug and stayed pressed against it for 230 s.
+    let mut p = Pressed::default();
+    for _ in 0..29 {
+        assert!(p.tick(true, 0.1));
+    }
+    assert_eq!(p.avoid, 0.0, "a bump is not yet a reason to steer off");
+    p.tick(true, 0.2);
+    assert_eq!(p.avoid, PRESSED_AVOID_SECS);
+    assert!(p.tick(false, 10.0) && p.avoid > 0.0, "keeps steering around it after the contact ends");
+    assert!(!p.tick(false, 6.0), "then forgets it");
+}

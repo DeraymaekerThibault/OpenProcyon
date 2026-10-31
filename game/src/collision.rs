@@ -535,6 +535,7 @@ pub fn sail(
     currents: Query<&crate::environment::Current>,
     mut rams: Option<ResMut<Messages<Ram>>>,
     captains: Query<&crate::campaign::MissionShip>,
+    (fleets, members, mut pressed): (Option<Res<crate::ship::Fleets>>, Query<&crate::ship::FleetMember>, Local<HashMap<(Entity, Entity), Pressed>>),
 ) {
     let cinematic = mission.as_deref().is_some_and(|m| m.script.nis && m.opening.is_none());
     // PROVISIONAL: stop ordinary helm/combat motion in NIS, but retain authored routes (e.g. Exile's retreat).
@@ -585,6 +586,22 @@ pub fn sail(
     // (taken within ~3 s, then the leg is re-tested), so script paths entered from the far side of islands do not grind into them.
     {
         let all = scenery(obstacles.iter().map(|(_, o, v)| (o, v)).chain(rocks.iter().filter(|(r, ..)| r.hp > 0.0).map(|(_, _, o, _, v)| (o, v))));
+        // Skirmish computer captains steer around other computers' ships like land (owner's play of the original: computer ships
+        // bump into the human's ships, never into each other's); a ship of the human's fleet is steered around only after pressing
+        // against it (`Pressed`). Ships of one fleet keep formation and do not avoid each other. PROVISIONAL: the original's avoid-ship
+        // routine is not decoded; ships count as standing still over the look-ahead.
+        let local = fleets.as_ref().map(|f| f.local.as_str());
+        let fleet_of = |e: Entity| members.get(e).ok().map(|m| m.0.as_str());
+        let computer = |e: Entity, side: crate::Side| !(side == crate::Side::Player && fleet_of(e).is_none_or(|f| Some(f) == local));
+        let hulls: Vec<(Entity, bool, Obstacle)> = if mission.is_some() {
+            vec![]
+        } else {
+            ships
+                .iter()
+                .filter(|(e, _, _, h, ..)| !h.destroyed && !boats.contains(*e) && !ghost(*e))
+                .map(|(e, s, tf, ..)| (e, computer(e, s.side), Obstacle { body: box_body(lib.classes[s.class].collision_bounds, tf), triangles: vec![] }))
+                .collect()
+        };
         for (e, mut s, tf, health, _, docker) in &mut ships {
             if health.destroyed || docker.is_some() || pinned(e) {
                 s.avoid = 1.0;
@@ -594,6 +611,13 @@ pub fn sail(
             s.avoid = if human.contains(e) { 1.0 } else { contact_slow(bounds, tf.translation, s.heading, s.speed, &all) };
             // Steer on the speed the ship would have without the slowdown: braking must not shorten the look-ahead and delay the turn.
             let cruise = s.speed / s.avoid.max(CONTACT_SLOW_MIN);
+            let mut all = all.clone();
+            if !human.contains(e) && computer(e, s.side) {
+                let avoids = |h: &&(Entity, bool, Obstacle)| {
+                    h.0 != e && if h.1 { fleet_of(h.0).is_none() || fleet_of(h.0) != fleet_of(e) } else { pressed.get(&(e, h.0)).is_some_and(|p| p.avoid > 0.0) }
+                };
+                all.extend(hulls.iter().filter(avoids).map(|h| &h.2));
+            }
             if let Some(&wp) = s.waypoints.first().filter(|_| !human.contains(e)) {
                 let d = wp - tf.translation;
                 let want = (-d.x).atan2(-d.z);
@@ -611,6 +635,7 @@ pub fn sail(
     let fastest = ships.iter().map(|(_, s, _, _, d, _)| s.speed.abs() + d.0.length() + 5.0).chain(rocks.iter().map(|(_, _, _, d, _)| d.0.length())).fold(0.0, f32::max);
     let steps = (fastest * dt / 0.5).max(dt * 60.0).ceil().clamp(1.0, 32.0) as usize; // cap: a runaway drift must not freeze the frame
     let substep = dt / steps as f32;
+    let mut touching = std::collections::HashSet::new();
     for _ in 0..steps {
         for (rock, mut tf, mut obstacle, drift, visible) in &mut rocks {
             if rock.hp <= 0.0 || visible == Some(&Visibility::Hidden) || drift.0 == Vec3::ZERO {
@@ -739,6 +764,8 @@ pub fn sail(
                     continue;
                 }
                 let Some(push) = contact(&ba.points, &bb.points) else { continue };
+                touching.insert((ea, eb));
+                touching.insert((eb, ea));
                 let normal = push.normalize();
                 let point = contact_point(&ba.points, &bb.points, normal);
                 let fixed = |body: ContactBody, pin: bool| if pin { ContactBody { inverse_mass: 0.0, inverse_inertia: 0.0, ..body } } else { body };
@@ -759,6 +786,29 @@ pub fn sail(
                 apply_impulse(&mut b, &mut db, &b_body, -j);
             }
         }
+    }
+    for &(a, b) in &touching {
+        pressed.entry((a, b)).or_default();
+    }
+    pressed.retain(|pair, p| p.tick(touching.contains(pair), dt));
+}
+
+/// Seconds a computer ship stays pressed against a ship before it steers around it, and how long it keeps steering around it after.
+/// PROVISIONAL: the owner remembers computer ships bumping into the human's ships; what they do next is not observed.
+const PRESSED_SECS: f32 = 3.0;
+const PRESSED_AVOID_SECS: f32 = 15.0;
+/// One ship's contact with another: seconds pressed against it without a break, and seconds left of steering around it.
+#[derive(Default)]
+pub struct Pressed {
+    secs: f32,
+    avoid: f32,
+}
+impl Pressed {
+    /// Advances by `dt`; false once the pair is neither in contact nor being avoided (the entry can go).
+    fn tick(&mut self, touching: bool, dt: f32) -> bool {
+        self.secs = if touching { self.secs + dt } else { 0.0 };
+        self.avoid = if self.secs >= PRESSED_SECS { PRESSED_AVOID_SECS } else { (self.avoid - dt).max(0.0) };
+        touching || self.avoid > 0.0
     }
 }
 

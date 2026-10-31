@@ -229,6 +229,15 @@ importer: a Procyon Minelayer (7.5 units/s) and a Procyon Frigate (6.6) on their
 - Remake: `collision::contact_slow` sets `Ship::avoid` (the speed fraction `ship::step` multiplies in) for AI ships; `steer_clear` keeps turning
   them on the unslowed speed's look-ahead. PROVISIONAL: one curve from one class; the route planner (`Detours`) is still in front of it.
 
+## Other ships ahead (owner's play, 2026-10-31)
+- **Observed:** computer ships bump into the human's ships but never into each other. The saved captain state of retail computer ships lists an
+  avoid routine for ships (next to asteroids, black holes, torpedoes, mines, dragons, islands and nebulae); its rules are not measured.
+- **Not observed:** what a computer ship does after bumping into a stopped ship of the human's.
+- Remake (PROVISIONAL): in skirmish a computer captain's `steer_clear` look-ahead treats other computer-commanded ships (any side, outside its own
+  fleet) as land, standing still; ships of its own fleet keep formation and may touch. The human's ships are not avoided until the computer ship has
+  pressed against one for 3 s without a break; it then steers around that ship for 15 s (`collision::Pressed`). Before this, an allied Heavy Scout
+  rammed the human's parked Tug and pushed against it for 230 s (issue #191). No braking for ships (`contact_slow` is land only).
+
 ## Computer ships and a hostile base (Border Dispute, 2026-10-27; re-read 2026-10-31)
 
 Footage and position logs of a 27-minute Border Dispute battle (us plus three Navy computer fleets against one Procyon computer fleet,

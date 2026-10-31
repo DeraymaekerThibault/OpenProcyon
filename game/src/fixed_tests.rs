@@ -171,3 +171,46 @@ fn ship_motion_is_identical_for_one_large_frame_and_ten_small_frames() {
     assert!(large.world().get::<Ship>(a).unwrap() == small.world().get::<Ship>(b).unwrap());
     assert_eq!(large.world().resource::<Time<Fixed>>().elapsed(), BATTLE_TICK * 3);
 }
+
+/// A computer ship heading at 0 (towards -z) with a stopped ship of `side` 15 units ahead; returns the computer's goal heading
+/// after one frame of `sail`.
+fn goal_with_a_ship_ahead(side: Side) -> f32 {
+    let (mut app, e) = moving_ship();
+    let mut ship = app.world().get::<Ship>(e).unwrap().clone();
+    app.world_mut().entity_mut(e).remove::<PlayerShip>().insert(Ship { side: Side(1), goal: Some(0.0), ..ship.clone() });
+    ship.side = side;
+    ship.speed = 0.0;
+    ship.order = 0;
+    ship.goal = None;
+    app.world_mut().spawn((ship, Health { sections: vec![], core: 100.0, destroyed: false }, Transform::from_xyz(0.0, 0.0, -15.0), collision::Drift::default()));
+    frame(&mut app, 34);
+    app.world().get::<Ship>(e).unwrap().goal.unwrap()
+}
+
+#[test]
+fn computer_ships_steer_around_each_other_but_not_around_the_humans_ships() {
+    // Issue #191 / owner's play of the original: computer ships never bump into each other, but do bump into the human's ships.
+    assert_ne!(goal_with_a_ship_ahead(Side(2)), 0.0, "a hostile computer ship ahead is steered around");
+    assert_eq!(goal_with_a_ship_ahead(Side::Player), 0.0, "the human's ship is not");
+}
+
+#[test]
+fn a_computer_ship_pressed_against_the_humans_ship_steers_off_after_three_seconds() {
+    // Issue #191: an allied computer ship rammed the human's parked Tug and pushed against it for 230 s.
+    let (mut app, e) = moving_ship();
+    let mut ship = app.world().get::<Ship>(e).unwrap().clone();
+    app.world_mut().entity_mut(e).remove::<PlayerShip>().insert(Ship { side: Side(1), goal: Some(0.0), ..ship.clone() });
+    (ship.speed, ship.order, ship.goal) = (0.0, 0, None);
+    // Hand-authored stand-in for a parked hull: pinned, as the Tug held its station against the push.
+    app.world_mut().spawn((ship, Health { sections: vec![], core: 100.0, destroyed: false }, Transform::from_xyz(0.0, 0.0, -1.9), collision::Drift::default(), collision::Pinned));
+    let goal = |app: &App| app.world().get::<Ship>(e).unwrap().goal.unwrap();
+    for _ in 0..25 {
+        frame(&mut app, 100);
+        assert_eq!(goal(&app), 0.0, "bumps into the human's ship first");
+        app.world_mut().get_mut::<Ship>(e).unwrap().goal = Some(0.0); // the captain keeps aiming through it
+    }
+    for _ in 0..10 {
+        frame(&mut app, 100);
+    }
+    assert_ne!(goal(&app), 0.0, "then steers around it");
+}

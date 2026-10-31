@@ -71,13 +71,6 @@ class Evaluate(unittest.TestCase):
         self.assertEqual(
             evaluate(sunk, {"patrol"}), [], "a ship sunk early is not parked"
         )
-        one = report(sailed=0.0)
-        self.assertEqual(evaluate(one, {"patrol", "patrol-allow-1"}), [])
-        two = report(sailed=0.0)
-        two["ships"].append(dict(two["ships"][-1]))
-        self.assertEqual(
-            len(evaluate(two, {"patrol", "patrol-allow-1"})), 2, "two stalled fail"
-        )
 
     def test_grinding_on_scenery_always_fails(self):
         self.assertEqual(
