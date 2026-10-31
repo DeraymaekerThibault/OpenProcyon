@@ -88,9 +88,12 @@ None → waiting to dock → approach → pre-docked → docked → moving away 
   over and send the holder back to waiting (1); otherwise hold (path cleared) inside **80 units** of the point, or path toward it.
 - **Approach point**: on the dock-point node's own forward axis, on the side the docker is on (axis flipped when the docker is
   ≥ 90° off it), **1.5 × dockee length** out for a ship dockee, **1 × docker length** for a base (lengths = collision-box y extents).
-- **2 dock approach**: within **10 units** → 3. While the path runs, the movement controller's target is the dock point itself; each tick
-  the angle seen from the dockee's centre between the docker and the approach point is checked: above **0.6π** (ship dockees only) the path is
-  dropped; in both cases the approach is re-planned (the dockee may move).
+- **2 dock approach** (read from the code, 2026-10-31): within **10 units** → 3. The approach point is recomputed every think (twice a
+  second; the side follows the docker) and sailed as a one-point course through the collision avoider ([movement.md](movement.md#collision-avoidance-read-from-the-originals-code-2026-10-31));
+  nothing checks whether it lies on land, and there is no route planning. Above **0.6π** seen from a ship dockee's centre the course is only
+  reset. Once the approach point is reached (within **2 × the docker's radius**) the ship **glides**: normal sailing is off, the heading turns
+  toward the dock point at up to **0.5 rad/s** (in proportion inside 20°) and the ship moves along its own heading at **4 units/s** while
+  turning, **min(top speed, 8)** once lined up; no avoidance. It is not turned to the dock point's heading at the end.
 - **3 docked (entry)**: stamps the start time, plays `HUD_Options_Dock`; for repairing dockees runs the repair setup (below);
   registers the dock relation (docker, dockee, point index; **not for base dockees**) so rules see "is docked"; the dock
   duration is `max(dock time (5.0 s default, 'Set Dock Time'), repair time)`.
@@ -98,9 +101,10 @@ None → waiting to dock → approach → pre-docked → docked → moving away 
   go to 5 and then 6/7; the **human ship just stays where it is** (no return trip).
 - **5 moving away**: ship dockees only (bases → 6 at once): target = dock point + node axis × ⅔·(dockee length + docker length), axis
   flipped when the docker faces > 90° away from it; done within 5 units or after 10 s. → 6.
-- **6 turning to return**: controller turn-to mode toward the start; done within 0.1 rad or after 10 s, then path via a point 100 units
-  toward the start. **7 returning**: follow the path until it ends → 0.
-Tow: the tower paths to the towee's back/front tow nodes; **inside 50 units of surface distance the tow link is registered**
+- The move-away leg (5) is the same glide.
+- **6 turning to return**: turns in place (glide, no movement) toward the start; done within 0.1 rad or after 10 s, then a one-point course
+  **100 units toward the start** (not to the start itself). **7 returning**: sail it (with the avoider) until it ends → 0.
+Tow: the tower sails at the towee's centre (read from the code; not its tow nodes); **inside 50 units of surface distance the tow link is registered**
 (`ToweePoint = front_tow`, `TowerPoint = back_tow` mesh nodes). The remake now uses these nodes for approach and a shared mass-weighted cable constraint; retail spring/damping remain PROVISIONAL.
 
 ### Repair on docking
@@ -117,10 +121,11 @@ is **[? not confirmed]**; the rule action `Toggle Island Repair When Docked` fli
 ### Computer ships docking for repair
 Computer players' ships (not the human's, not ones under explicit orders) decide on their own to dock for repair: once **at
 least two of their damage sections are at or below half their hit points** (destroyed sections do not count), they pick the
-nearest dockable object of their own or an allied player and run the dock routine above on it (AI ships then leave and sail
-back to where they started). Overall hull share is not the test, which is why a skirmish computer ship at 80 % hull with its damage
-spread thin never docked ([movement.md](movement.md#computer-captains-measured-2026-10)). PROVISIONAL: no distance limit, and
-the choice among friendly docks taken as the nearest; not yet seen in play. Remake: `docking::ai_repair_dock`.
+nearest (by surface gap) friendly dockable ship or island that repairs, at any distance in skirmish, and run the dock routine above on it
+(read from the code). The choice is re-made every think, so a ship can switch docks on the way; once started the routine runs to its end
+even if repairs are no longer needed, and there is no give-up timer. Overall hull share is not the test, which is why a skirmish computer ship at 80 % hull with its damage
+spread thin never docked ([movement.md](movement.md#computer-captains-measured-2026-10)). Remake: `docking::ai_repair_dock` (PROVISIONAL:
+nearest by centre distance, and the first choice is kept).
 
 ### Dock-point markers
 While an object is dockable every dock point carries an effect on its node; when it stops being dockable they are removed. The
@@ -135,20 +140,15 @@ In the remake every map object and ship type with exported dock points gets them
 (skirmish, historical and campaign). Bases no rule assigns an owner to (all skirmish bases) are dockable by every side **[PROVISIONAL]**.
 
 ## 5. Not reversed yet
-Boarding fight / grapple mechanics (reversed, see [boarding.md](boarding.md)), the path planner and the arrival
-controller used by the dock legs, where `ShipStatus_Icon_Docking_*` (animated docking status icon) is drawn, cloak effect,
+Boarding fight / grapple mechanics (reversed, see [boarding.md](boarding.md)), where `ShipStatus_Icon_Docking_*` (animated docking status icon) is drawn, cloak effect,
 hold-position semantics, waypoint-mode click behaviour, and what the two `RepairVitalSection` rule actions do per section.
 
-## Mission 2 base-approach correction
+## Mission 2 base approach
 
-Owner playtesting found the ship sailing through the abandoned island to its dock. The shared routine now caches a clear
-base approach route around visible solid scenery instead of replacing it with straight legs each tick; reservation changes
-invalidate that route. `collision::route_clear` uses conservative swept hull boxes and padded scenery-bound corners to find
-a shortest clear route. An unreachable approach stops the ship. Dockee contact is allowed only for the final approach,
-docked hold and departure/clearance, never while waiting or travelling the detour. This is a provisional planner, not the
-recovered; it does not continuously re-plan around moving obstacles.
-Regression simulates the Mission 2 torpedo ship's full approach around the actual abandoned-island collider into the dock;
-synthetic checks cover clear, blocked and unreachable routes. See [campaign.md](campaign.md#mission-2-owner-playtest-fixes-islands-and-gun-towers).
+Owner playtesting found the ship sailing through the abandoned island to its dock. The original has no route planner: the approach
+point is sailed under the collision avoider, which takes the ship round the island (the remake's earlier corner-route planner is gone).
+Regressions: the Mission 2 torpedo ship from the island's far side, and a Procyon Sloop at Border Dispute's centre island, whose approach
+point the planner put on land (issue #192), both dock.
 
 ## Implementation status
 Done: `tools/export_docks.py` → `assets/data/docks.json` (MSB `DockPoint` nodes with yaw, `tender`); ship JSON `sight` / `repair_fx`;
@@ -158,9 +158,8 @@ rules `Dock Ships`, `Set Dock Time`, `Set Group/Unit Dockable`, `Toggle Island R
 addressed by rules (`MissionBase`); left-click / menu dock gated by the sight test (no range constant); `options_menu.rs` with the three
 variants (any friendly ship gets the friendly menu), retail icons/backgrounds/slot offsets and menu sounds, Focus / Stop / Dock live and the
 rest greyed; context cursors. Camera: right-drag still rotates, a short right click opens the menu.
-PROVISIONAL in the remake: scenery-clear corner routing for bases and simple detour legs for ship dockees instead of the original path planner, approach-leg
-tolerance (docker length or lined up), the docked ship settling onto the point parallel to its axis (the original's arrival steering is
-unknown), dock-point yaw sign, the docked sound only for player-side dockers, one repair effect at the ship centre, sight test by centre
+PROVISIONAL in the remake: dock-point yaw sign, the dock time not stored back on the ship (the original keeps the longer time for later
+dockings), docked ships keeping station on a moving dockee, one repair effect at the ship centre, sight test by centre
 distance minus our hull radii and the player's ship only (no group), the relation is also registered for base dockees.
 Verified in Mission 1 (`--mission 1 --script dock|dock-click|dock-menu`: `Script::skip_to_tender` jumps to Objective 4 and puts the player,
 half damaged, next to RLS Bounty; `dock` sends the order like the D key, `dock-click` / `dock-menu` drive the real left click / right-click

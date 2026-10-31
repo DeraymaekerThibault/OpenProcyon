@@ -172,9 +172,9 @@ M02ONYX05/JIM03 then activate Destroy Gun Towers. Destroying both `vitalToMissio
 Discovery alone does not start combat: the ship must also enter the attack volume.
 
 Fixed from owner feedback:
-- Base docking no longer disables island contact for the whole approach. It plans and keeps a scenery-clear detour to a fixed
-  approach point; only the final short docking leg allows contact with the dockee. The planner uses conservative swept hull
-  boxes and scenery-bound corners, not recovered retail navigation. No route means stop, not pass through land.
+- Base docking no longer disables island contact for the whole approach: the approach is sailed under the collision avoider, as
+  in the original (no route planner), and only the final glide onto the dock point allows contact with the dockee
+  ([docking-and-orders.md](docking-and-orders.md#mission-2-base-approach)).
 - `Set Group/Unit Owner` now updates `MissionBase` as well as ships/animals. The previous ship-only dispatcher left the camp
   neutral, so it never fired and the subsequent first-shot dialogue condition never became true.
 - Base gun-node positions are already in the MDB mesh frame. `export_combat.py` now uses those positions instead of adding

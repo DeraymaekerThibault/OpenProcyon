@@ -19,7 +19,7 @@ fn skirmish_dock_lights_show_on_friendly_bases_only() {
 
 #[test]
 #[ignore = "needs imported assets"]
-fn mission_two_base_docking_plans_around_the_island_before_allowing_contact() {
+fn mission_two_base_docking_from_the_far_side_reaches_the_dock_round_the_island() {
     let (mut app, lib) = app();
     app.init_resource::<crate::collision::Shapes>().add_systems(Update, crate::collision::sail.after(routine));
     let map: Value = serde_json::from_slice(&std::fs::read(assets_dir().join("maps/mission02/map.json")).unwrap()).unwrap();
@@ -48,17 +48,54 @@ fn mission_two_base_docking_plans_around_the_island_before_allowing_contact() {
     app.world_mut().resource_mut::<Messages<DockMsg>>().write(DockMsg::Dock { docker: None, dockee });
     tick(&mut app, 0.1);
     tick(&mut app, 0.1);
+    // The original plans no route: one approach point on the dock axis, and the collision avoider bends the course round the island.
     let d = app.world().get::<Docker>(me).unwrap();
-    assert!(!d.ignores_collision(dockee), "the island stays solid during the detour");
-    let route = app.world().get::<Ship>(me).unwrap().waypoints.clone();
-    assert!(route.len() > 2, "the far-side approach needs a detour: {route:?}");
+    assert!(!d.ignores_collision(dockee), "the island stays solid on the approach");
     for _ in 0..6000 {
         tick(&mut app, 0.1);
         if app.world().get::<Docker>(me).unwrap().is_docked() {
             return;
         }
     }
-    panic!("base detour did not reach the dock: {:?}", app.world().get::<Transform>(me).unwrap().translation);
+    panic!("far-side approach did not reach the dock: {:?}", app.world().get::<Transform>(me).unwrap().translation);
+}
+
+/// A computer ship docking at a dockable island of a map: every scenery object placed as the scenario does; returns whether it docked
+/// within `secs` from `start` (Bevy frame).
+fn docks_at_island(map: &str, island: &str, class: &str, start: Vec3, secs: u32) -> bool {
+    let (mut app, lib) = app();
+    app.init_resource::<crate::collision::Shapes>().add_systems(Update, crate::collision::sail.after(routine));
+    let map: Value = serde_json::from_slice(&std::fs::read(assets_dir().join(format!("maps/{map}/map.json"))).unwrap()).unwrap();
+    let docks = load_docks();
+    let mut dockee = None;
+    for object in map["objects"].as_array().unwrap() {
+        let tf = crate::scenario::scenery_transform(object, crate::scenario::game_rotation(&object["rot"]), &docks);
+        let kind = object["type"].as_str().unwrap();
+        let body = app.world().resource::<crate::collision::Shapes>().obstacle(kind, &tf);
+        let e = app.world_mut().spawn(tf).id();
+        if let Some(body) = body {
+            app.world_mut().entity_mut(e).insert(body);
+        }
+        if kind == island {
+            app.world_mut().entity_mut(e).insert(dockable_for(&docks, kind).unwrap());
+            dockee = Some(e);
+        }
+    }
+    let (s, h) = ship(&lib, class, Side::Enemy);
+    let me = app.world_mut().spawn((Transform::from_translation(start), s, h, crate::collision::Drift::default())).id();
+    app.world_mut().resource_mut::<Messages<DockMsg>>().write(DockMsg::Dock { docker: Some(me), dockee: dockee.unwrap() });
+    (0..secs * 10).any(|_| {
+        tick(&mut app, 0.1);
+        app.world().get::<Docker>(me).is_some_and(Docker::is_docked)
+    })
+}
+
+#[test]
+#[ignore = "needs imported assets"]
+fn a_computer_ship_docks_at_border_disputes_centre_island_from_the_south_east() {
+    // Issue #192: from here the remake's approach point fell on the island's land and the ship parked for good. The original puts it
+    // on the dock axis on the ship's side, unchecked, and lets the collision avoider take the ship there.
+    assert!(docks_at_island("border_dispute", "Island_Large01", "Ship_Procyon_Sloop", Vec3::new(141.0, 0.0, -173.0), 300));
 }
 
 #[test]
@@ -199,7 +236,7 @@ fn player_docks_repairs_and_leaves_its_slot_free() {
     let mut hurt = Health { sections: full.sections.iter().map(|h| h * 0.2).collect(), core: full.core * 0.2, destroyed: false };
     hurt.sections[0] = 0.0;
     let dockee = app.world_mut().spawn((Transform::from_xyz(100.0, 0.0, 0.0), Dockable::new(vec![point(-20.0)], true))).id();
-    let me = app.world_mut().spawn((Transform::from_xyz(60.0, 0.0, 15.0), s, hurt, PlayerShip)).id();
+    let me = app.world_mut().spawn((Transform::from_xyz(60.0, 0.0, 90.0), s, hurt, PlayerShip)).id();
     app.world_mut().resource_mut::<Messages<DockMsg>>().write(DockMsg::Dock { docker: None, dockee });
     tick(&mut app, 0.1);
     tick(&mut app, 0.1);
@@ -208,7 +245,7 @@ fn player_docks_repairs_and_leaves_its_slot_free() {
     assert!(d.shows_status(), "approach shows the bottom-bar docking animation");
     // A base dockee: the approach leg ends one docker length out along the point's axis, on the docker's side (+z here).
     let wp = app.world().get::<Ship>(me).unwrap().waypoints.clone();
-    assert_eq!(wp.len(), 2);
+    assert_eq!(wp.len(), 1, "one approach point, no route");
     for mesh in [&line, &marks] {
         assert_eq!(app.world().resource::<Assets<Mesh>>().get(mesh).unwrap().count_vertices(), 0, "automatic docking paths are hidden");
     }
@@ -268,7 +305,7 @@ fn closer_ship_takes_over_a_point_and_ai_ship_returns_home() {
     tick(&mut app, 0.1);
     assert_eq!(app.world().get::<Docker>(near).unwrap().point, Some(0), "the nearer ship takes the point over");
     assert_eq!(app.world().get::<Docker>(far).unwrap().phase, Phase::Wait, "the other one waits");
-    // Dock `near`, then let its time run out: an AI ship moves away, turns and sails back to where it was ordered from.
+    // Dock `near`, then let its time run out: an AI ship glides away, turns in place and sails one 100-unit leg toward where it came from.
     app.world_mut().get_mut::<Transform>(near).unwrap().translation = Vec3::new(10.0, 0.0, 1.0);
     tick(&mut app, 0.1);
     assert_eq!(app.world().get::<Docker>(near).unwrap().phase, Phase::Docked);
@@ -280,7 +317,11 @@ fn closer_ship_takes_over_a_point_and_ai_ship_returns_home() {
     tick(&mut app, 10.5);
     tick(&mut app, 0.1);
     assert_eq!(app.world().get::<Docker>(near).unwrap().phase, Phase::Return);
-    assert_eq!(app.world().get::<Ship>(near).unwrap().waypoints.last().copied(), Some(Vec3::new(10.0, 0.0, 120.0)));
+    let here = app.world().get::<Transform>(near).unwrap().translation;
+    let leg = app.world().get::<Ship>(near).unwrap().waypoints.clone();
+    assert_eq!(leg.len(), 1);
+    assert!(((leg[0] - here).length() - 100.0).abs() < 0.01, "{leg:?} from {here}");
+    assert!((leg[0] - here).normalize().dot((Vec3::new(10.0, 0.0, 120.0) - here).normalize()) > 0.99, "toward the start");
 }
 
 #[test]

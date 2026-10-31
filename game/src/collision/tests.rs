@@ -57,28 +57,6 @@ fn boxes_separate_and_rotated_contact_resolves() {
     assert!(contact(&moved, &b.points).is_none());
 }
 #[test]
-fn docking_route_goes_around_scenery_and_rejects_unreachable_points() {
-    let bounds = [Vec3::new(-1.0, -1.0, -3.0), Vec3::new(1.0, 1.0, 3.0)];
-    let island = Obstacle { body: box_body([Vec3::new(-30.0, -5.0, -20.0), Vec3::new(30.0, 5.0, 20.0)], &Transform::default()), triangles: vec![] };
-    let start = Vec3::new(0.0, 0.0, 80.0);
-    let goal = Vec3::new(0.0, 0.0, -80.0);
-    let route = route_clear(bounds, start, goal, &[&island]).unwrap();
-    assert!(route.len() >= 3, "cannot take a straight leg through the island");
-    let mut from = start;
-    for to in route {
-        let d = to - from;
-        let yaw = (-d.x).atan2(-d.z);
-        for i in 0..=100 {
-            let tf = Transform::from_translation(from.lerp(to, i as f32 / 100.0)).with_rotation(Quat::from_rotation_y(yaw));
-            assert!(!touches(bounds, &tf, &[&island]));
-        }
-        from = to;
-    }
-    assert_eq!(from, goal);
-    assert!(route_clear(bounds, start, Vec3::ZERO, &[&island]).is_none());
-    assert_eq!(route_clear(bounds, start, goal, &[]).unwrap(), vec![goal]);
-}
-#[test]
 fn wall_blocks_but_geometry_above_ship_does_not() {
     let body = rect(0.0, 0.0, 0.0);
     let wall = [Vec3::new(0.5, -2.0, -5.0), Vec3::new(0.5, 2.0, -5.0), Vec3::new(0.5, 0.0, 5.0)];

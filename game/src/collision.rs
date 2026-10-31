@@ -288,69 +288,6 @@ pub fn clear_prefix(bounds: [Vec3; 2], path: &[Transform], scenery: &[&Obstacle]
     path.iter().position(|tf| touches(bounds, tf, scenery)).unwrap_or(path.len())
 }
 
-/// PROVISIONAL docking planner: shortest clear route via padded scenery-bound corners, not the native path planner.
-/// Swept boxes conservatively cover the hull through turns; unreachable approaches return None instead of crossing land.
-pub fn route_clear(bounds: [Vec3; 2], start: Vec3, goal: Vec3, scenery: &[&Obstacle]) -> Option<Vec<Vec3>> {
-    let radius = sweep_radius(bounds);
-    let clear = |a: Vec3, b: Vec3| path_clear(bounds, a, b, scenery);
-    if clear(start, goal) {
-        return Some(vec![goal]);
-    }
-    let mut points = vec![start, goal];
-    for obstacle in scenery {
-        let b = obstacle.body.bounds;
-        if b.max.y < start.y + bounds[0].y || b.min.y > start.y + bounds[1].y {
-            continue;
-        }
-        let pad = radius + 2.0;
-        points.extend(
-            [(b.min.x - pad, b.min.z - pad), (b.min.x - pad, b.max.z + pad), (b.max.x + pad, b.min.z - pad), (b.max.x + pad, b.max.z + pad)].map(|(x, z)| Vec3::new(x, start.y, z)),
-        );
-    }
-    // Lazy A*: corners ordered by route length so far + straight distance to the goal; an edge is swept for scenery only when the
-    // search is about to take it (a handful of sweeps instead of one per corner pair: ~0.5 s per plan on Border Dispute before).
-    // Keys and lengths are kept as non-negative f32 bit patterns, which sort like the numbers.
-    let ahead = |i: usize| points[i].distance(goal);
-    let mut done = vec![false; points.len()];
-    let mut previous = vec![0; points.len()];
-    let mut open = std::collections::BinaryHeap::from([(std::cmp::Reverse(ahead(0).to_bits()), 0, 0, 0_u32)]);
-    while let Some((_, i, from, length)) = open.pop() {
-        if done[i] || (i != 0 && !clear(points[from], points[i])) {
-            continue;
-        }
-        done[i] = true;
-        previous[i] = from;
-        if i == 1 {
-            let mut route = vec![goal];
-            let mut k = previous[1];
-            while k != 0 {
-                route.push(points[k]);
-                k = previous[k];
-            }
-            route.reverse();
-            return Some(route);
-        }
-        for j in (1..points.len()).filter(|j| !done[*j]) {
-            let length = f32::from_bits(length) + points[i].distance(points[j]);
-            open.push((std::cmp::Reverse((length + ahead(j)).to_bits()), j, i, length.to_bits()));
-        }
-    }
-    None
-}
-
-fn sweep_radius(bounds: [Vec3; 2]) -> f32 {
-    bounds.iter().map(|p| Vec2::new(p.x, p.z).length()).fold(0.0, f32::max) + 2.0
-}
-
-/// Whether the hull, swept from `a` to `b` (a box as wide as the hull's farthest corner, so turns stay covered), misses all scenery.
-pub fn path_clear(bounds: [Vec3; 2], a: Vec3, b: Vec3, scenery: &[&Obstacle]) -> bool {
-    let radius = sweep_radius(bounds);
-    let d = (b - a).with_y(0.0);
-    let tf = Transform::from_translation(a).with_rotation(Quat::from_rotation_y((-d.x).atan2(-d.z)));
-    let swept = [Vec3::new(-radius, bounds[0].y, -d.length() - radius), Vec3::new(radius, bounds[1].y, radius)];
-    !touches(swept, &tf, scenery)
-}
-
 fn forward(ship: &crate::Ship) -> Vec3 {
     Vec3::new(-ship.heading.sin(), 0.0, -ship.heading.cos())
 }
@@ -500,7 +437,8 @@ pub fn sail(
         let mut seen = 0;
         avoiders.retain(|e, _| ships.contains(*e));
         for (e, mut s, tf, health, _, docker) in &mut ships {
-            if health.destroyed || docker.is_some() || pinned(e) || human.contains(e) {
+            // The human's own ship avoids only on its dock routine (the original's dock orders run through the avoider too).
+            if health.destroyed || docker.map_or(human.contains(e), |d| !d.avoids()) || pinned(e) {
                 s.avoid = 1.0;
                 continue;
             }
@@ -553,6 +491,10 @@ pub fn sail(
         }
         for (e, mut s, mut tf, health, mut drift, docker) in &mut ships {
             if health.destroyed {
+                continue;
+            }
+            if docker.is_some_and(crate::docking::Docker::gliding) {
+                drift.0 = Vec3::ZERO;
                 continue;
             }
             if docker.is_some_and(crate::docking::Docker::is_docked) || pinned(e) {
