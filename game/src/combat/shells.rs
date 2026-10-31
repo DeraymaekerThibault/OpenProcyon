@@ -123,6 +123,17 @@ pub(super) fn apply_ship_hit(class: &Class, hp: &mut Health, k: usize, damage: [
     ShipHit { fire, lost: was > 0.0 && hp.sections[k] == 0.0 }
 }
 
+/// A shell's `roll` on base part `k`: base parts take the same hit routine as hulls, so a part left at 0 spills to its neighbours.
+/// The parts this hit brought down. PROVISIONAL: no difficulty factor (not measured for bases).
+pub(super) fn apply_base_hit(class: &Class, hp: &mut Health, k: usize, roll: f32) -> Vec<usize> {
+    let was_up: Vec<bool> = hp.sections.iter().map(|h| *h > 0.0).collect();
+    hp.sections[k] = (hp.sections[k] - roll).max(0.0);
+    if hp.sections[k] == 0.0 {
+        spill(class, hp, k, 0.4 * roll, 0.0, &mut vec![k]);
+    }
+    (0..was_up.len()).filter(|j| was_up[*j] && hp.sections[*j] == 0.0).collect()
+}
+
 /// Read from the original's code: a hit that leaves its section at 0 hit points (already dead or not) passes 0.4 x its damage on
 /// to every neighbouring section, and on from any of those left at 0, each section once per hit.
 fn spill(class: &Class, hp: &mut Health, k: usize, damage: f32, invuln: f32, seen: &mut Vec<usize>) {
@@ -363,12 +374,12 @@ pub(super) fn shells(
             let [lo, hi, ..] = bd.damage[key];
             let at = p0 + (p1 - p0) * t;
             hits.write(Hit { shooter: s.shooter, victim: be });
-            let was_up = hp.sections[k] > 0.0;
-            hp.sections[k] = (hp.sections[k] - rng.range(lo, hi)).max(0.0);
+            let class = &lib.classes[ab.class];
+            let fallen = apply_base_hit(class, &mut hp, k, rng.range(lo, hi));
             sfx.write_batch(bd.impact_sound(key, at, &mut rng));
             // A base part going down bursts with its destruct effect and a blast. PROVISIONAL: retail's effect for a destroyed
             // base part is not measured; the part's WOT destruct effect and the ship-explosion sound stand in.
-            if was_up && hp.sections[k] <= 0.0 && sec.mission {
+            for sec in fallen.into_iter().map(|j| &class.sections[j]).filter(|sec| sec.mission) {
                 let centre = Transform::from_translation(btf.transform_point((sec.min + sec.max) / 2.0));
                 if let Some(name) = sec.destruct.as_ref().and_then(|d| d.fx.as_deref()) {
                     fx::spawn(&mut commands, &fxl, name, None, centre, centre, true);

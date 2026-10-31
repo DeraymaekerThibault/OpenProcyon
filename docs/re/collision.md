@@ -33,14 +33,14 @@ Source: observed behaviour of the original game, WOT collision definitions and t
   ship's not scaled by difficulty, no cooldown, no ally test); the rock breaks at 0.
 - **Spill (every hit, shells too):** a hit that leaves its section at 0 hit points (already dead or not) passes 0.4 x its damage
   on to each of the section's neighbours (the WOT section's `adjacent` list), and on again from any neighbour left at 0, each
-  section at most once per hit.
+  section at most once per hit. Base parts (towers, defence rings) take shells through the same routine, so they spill too.
 - **Sound:** each tick a touching pair has a 7 % chance of a collision sound: a coin picks one of the two hulls, and its section
   nearest the contact plays `Ship_Collision_Wood` or `_Metal` by material (cloth, stone and others are silent), heard to 700 units.
   A damaging ram plays the struck section's `Damage_<material>` sound at the contact (once when both struck sections share a
   material). Lifeboats pass through ships.
-- Remake: `collision::sail`, `combat::lob::ram_damage` and `combat::shells::apply_ship_hit` (spill). PROVISIONAL: a rock touch
-  plays the ship's collision sound (the rock's own impact sound is not read); bases' sections do not spill yet (their hits take a
-  separate path).
+- Remake: `collision::sail`, `combat::lob::ram_damage`, `combat::shells::apply_ship_hit` and `apply_base_hit` (spill). PROVISIONAL:
+  a rock touch plays the ship's collision sound (the rock's own impact sound is not read); shells on bases take no difficulty factor
+  (the original applies one on the same routine, but its value for bases is not measured).
 
 ## Land and bases (read from the original's code, 2026-10-31)
 
