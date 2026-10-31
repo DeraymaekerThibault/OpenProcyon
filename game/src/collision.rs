@@ -103,6 +103,41 @@ impl Obstacle {
             })
             .min_by(f32::total_cmp)
     }
+    /// Scenery made of these world-space triangles.
+    #[cfg(test)]
+    pub fn from_triangles(tris: &[[Vec3; 3]]) -> Self {
+        let all: Vec<Vec3> = tris.iter().flatten().copied().collect();
+        let bounds = Bounds::points(&all);
+        let triangles = tris.iter().map(|t| Triangle { points: *t, bounds: Bounds::points(t) }).collect();
+        Obstacle { body: BoxBody { points: vec![bounds.min, bounds.max], bounds }, triangles }
+    }
+    /// Fraction along the segment `a`-`b` where it first meets a triangle (the original sweeps every projectile's step this way).
+    pub fn segment_hit(&self, a: Vec3, b: Vec3) -> Option<f32> {
+        let seg = Bounds::points(&[a, b]);
+        if !self.body.bounds.overlaps(seg) {
+            return None;
+        }
+        let d = b - a;
+        self.triangles
+            .iter()
+            .filter(|t| t.bounds.overlaps(seg))
+            .filter_map(|t| {
+                let [p, q, r] = t.points;
+                let (e1, e2) = (q - p, r - p);
+                let h = d.cross(e2);
+                let det = e1.dot(h);
+                if det.abs() < 1e-9 {
+                    return None;
+                }
+                let s = a - p;
+                let u = s.dot(h) / det;
+                let qv = s.cross(e1);
+                let v = d.dot(qv) / det;
+                let t = e2.dot(qv) / det;
+                (u >= 0.0 && v >= 0.0 && u + v <= 1.0 && (0.0..=1.0).contains(&t)).then_some(t)
+            })
+            .min_by(f32::total_cmp)
+    }
     pub fn translate(&mut self, delta: Vec3) {
         for p in &mut self.body.points {
             *p += delta;

@@ -1156,3 +1156,82 @@ fn shell_into_a_hull_damages_it_and_reports_the_hit() {
     assert!(app.world().get_entity(id).is_err(), "the shell is spent");
     assert!(hit, "a Hit names the ship");
 }
+
+/// The original sweeps every shot against islands: land between the gun and the hull takes the shot instead.
+#[test]
+#[ignore = "needs imported assets"]
+fn land_in_the_way_stops_a_shell_before_the_hull() {
+    let mut app = App::new();
+    let lib = Library::load(assets_dir());
+    let c = lib.index("Ship_Navy_Torpedo");
+    app.add_plugins((TaskPoolPlugin::default(), AssetPlugin::default()))
+        .init_resource::<Time>()
+        .init_resource::<FxLib>()
+        .insert_resource(Rng(7))
+        .add_message::<Sfx>()
+        .add_message::<Hit>()
+        .add_message::<Destroyed>()
+        .add_message::<Detonate>()
+        .add_message::<crate::decals::Scar>()
+        .add_systems(Update, shells);
+    let ship = Ship {
+        class: c,
+        side: Side::Enemy,
+        heading: 0.0,
+        speed: 0.0,
+        ang_vel: 0.0,
+        order: 0,
+        waypoints: vec![],
+        goal: None,
+        cap: 1.0,
+        throttle: None,
+        sail_energy: 1.0,
+        crew_speed: 1.0,
+        crew_turn: 1.0,
+        avoid: 1.0,
+    };
+    let target = app.world_mut().spawn((Transform::default(), ship, Health::new(&lib.classes[c]), Fires::default())).id();
+    let shooter = app.world_mut().spawn_empty().id();
+    let bullet = lib.guns["Gun_CannonBall_Heavy"].bullet.clone();
+    // Aimed along the normal at the middle of a hull triangle, from 40 units out.
+    let [ta, tb, tc] = lib.classes[c].sections.iter().find(|s| s.vital).unwrap().tris[0];
+    let normal = (tb - ta).cross(tc - ta).normalize();
+    let farther_ship = app.world().get::<Ship>(target).unwrap().clone();
+    let _farther = app.world_mut().spawn((Transform::from_translation(-normal * 100.0), farther_ship, Health::new(&lib.classes[c]), Fires::default())).id();
+    let at = (ta + tb + tc) / 3.0 + normal * 40.0;
+    let shell = Shell {
+        vel: -normal * 200.0,
+        age: 0.0,
+        lifetime: 5.0,
+        gravity: 0.0,
+        bullet: bullet.clone(),
+        side: Side::Player,
+        shooter,
+        target: None,
+        angular_velocity: 0.0,
+        payload: lib.bullets[&bullet].payload,
+        aim: None,
+        pd: false,
+        hp: 1.0,
+        harmless: false,
+        base: false,
+    };
+    let id = app.world_mut().spawn((shell, Transform::from_translation(at))).id();
+    // A wall of land across the line of fire, 20 units in front of the hull.
+    let (u, v) = (normal.any_orthonormal_vector() * 500.0, normal.cross(normal.any_orthonormal_vector()) * 500.0);
+    let c0 = (ta + tb + tc) / 3.0 + normal * 20.0;
+    app.world_mut().spawn(crate::collision::Obstacle::from_triangles(&[[c0 - u - v, c0 + u - v, c0 + u + v], [c0 - u - v, c0 + u + v, c0 - u + v]]));
+    app.insert_resource(lib);
+    let full: f32 = app.world().get::<Health>(target).unwrap().sections.iter().sum();
+    let mut hit = false;
+    for _ in 0..20 {
+        // One segment crosses both hulls, so the nearest collision must win.
+        app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs_f32(1.0));
+        app.update();
+        hit |= app.world().resource::<Messages<Hit>>().iter_current_update_messages().any(|h| h.victim == target);
+    }
+    let left: f32 = app.world().get::<Health>(target).unwrap().sections.iter().sum();
+    assert_eq!(left, full, "the hull behind the land is untouched");
+    assert!(app.world().get_entity(id).is_err(), "the shell is spent on the land");
+    assert!(!hit, "no Hit");
+}

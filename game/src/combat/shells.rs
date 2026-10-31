@@ -194,7 +194,11 @@ pub(super) fn shells(
     // Shells pass through lifeboats (no weapon-vs-lifeboat response is registered in the original; PROVISIONAL, docs/re/lifeboats.md §2.4).
     mut ships: ShipTargets,
     mut detonate: MessageWriter<Detonate>,
-    (mut dragons, mut scars): (Query<&mut crate::dragons::Dragon>, MessageWriter<crate::decals::Scar>),
+    (mut dragons, mut scars, land): (
+        Query<&mut crate::dragons::Dragon>,
+        MessageWriter<crate::decals::Scar>,
+        Query<(Entity, &crate::collision::Obstacle, Option<&Visibility>), (Without<Shell>, Without<Ship>, Without<Asteroid>)>,
+    ),
 ) {
     let dt = time.delta_secs();
     let now = time.elapsed_secs();
@@ -270,6 +274,11 @@ pub(super) fn shells(
             }
             continue;
         }
+        // Islands and bases (read from the original's code): every projectile's step is swept against their collision triangles, so
+        // nothing beyond the first land it meets can be hit; an island's or base's own shots leave it freely (the original exempts
+        // the firer). A gun tower's section a hair past the surface still counts.
+        let ground = land.iter().filter(|(oe, _, v)| *oe != s.shooter && *v != Some(&Visibility::Hidden)).filter_map(|(_, o, _)| o.segment_hit(p0, p1)).min_by(f32::total_cmp);
+        let p1 = ground.map_or(p1, |t| p0.lerp(p1, (t + 0.5 / p0.distance(p1).max(1e-3)).min(1.0)));
         // Lob shells burst where they come down through the height they were aimed at.
         if let Some(a) = s.aim.filter(|a| !matches!(s.payload, Payload::Mine { .. }) && s.vel.y < 0.0 && p1.y <= a.y) {
             let t = if (p0.y - p1.y).abs() > 1e-4 { ((p0.y - a.y) / (p0.y - p1.y)).clamp(0.0, 1.0) } else { 1.0 };
@@ -391,6 +400,17 @@ pub(super) fn shells(
             let target = ShipTarget { entity: se, transform: stf, side: ship.side, class: &lib.classes[ship.class], invuln: mission.map_or(0.0, |m| m.invuln) };
             hit_ship(&mut commands, &fxl, &mut rng, (&mut sfx, &mut hits, &mut scars), bd, &s, target, &mut hp, &mut fires, k, at);
             hit_fx(&mut commands, &fxl, bd, at, s.vel);
+            commands.entity(e).despawn();
+        } else if let Some(t) = ground {
+            // Land: the shot is spent with its impact; explosive and lobbed shells burst there. PROVISIONAL (not decoded): the
+            // island hit effect the original shows half the time near the player, and how a section hit ricochets.
+            let at = p0.lerp(p1, t.min(1.0));
+            if !s.harmless && (s.aim.is_some() || matches!(s.payload, Payload::Blast { .. } | Payload::Nova | Payload::Grav { .. } | Payload::Mine { .. })) {
+                detonate.write(Detonate { bullet: s.bullet.clone(), at, shooter: Some(s.shooter) });
+            } else {
+                sfx.write_batch(bd.impact_sound("Stone", at, &mut rng));
+                hit_fx(&mut commands, &fxl, bd, at, s.vel);
+            }
             commands.entity(e).despawn();
         } else if s.age > s.lifetime || p1.y < -300.0 {
             commands.entity(e).despawn();
