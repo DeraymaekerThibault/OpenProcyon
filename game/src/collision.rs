@@ -624,6 +624,9 @@ pub fn sail(
                     // ponytail: a rock touch sounds like a ship touch on the ship's side (the rock's own impact sound is not read).
                     bump([(class, &*tf), (class, &*tf)], contact.point, substep);
                     rock_drift.0 = (rock_tf.translation - tf.translation).with_y(0.0) * 0.25;
+                    // ...and dropped from its belt for good: the original clears its waypoints on every touching tick.
+                    rock.path.clear();
+                    rock.velocity = Vec3::ZERO;
                     let hurt = ROCK_FACTOR * rock.mass * (a.velocity - b.velocity).length() * substep / TICK;
                     rock.hp -= hurt;
                     if let Some(r) = rams.as_mut().filter(|_| hurt > 0.0) {

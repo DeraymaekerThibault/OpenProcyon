@@ -28,7 +28,26 @@ starting index (which also filters by a heading test not modelled). Implemented 
 `Meteor Storm` nebulae in missions 7/8 use the same `teleport loop` rule on their group (`Group to follow path` plus `Set Group Space Objects velocity` 25 m/s).
 The remake moves each meteor emitter (not a meteor object) with the shared `combat::follow_path`, see `nebula.rs`; PROVISIONAL. Mission 3's Storm Shower is not moved yet.
 Mission 3's `MontgomeryIslands` setup names a group with no members in the map, so it does nothing (also true in the data).
-Skirmish maps have no setup rule, so their rocks stay static.
+Skirmish maps move their belts too (see "Skirmish maps" below).
+
+## Belt motion in detail (read from the original's code, 2026-11)
+- Setup, per rock: a speed drawn once in the rule's Lower..Upper range (units per second, no scaling), a tumble rate in its range
+  (radians per second), a random start direction and a random tumble axis. The speed is the rock's speed cap.
+- Each 1/30 s tick the path controller pushes the rock toward its current point with the rock's WOT `Acceleration` (150 Huge/Large,
+  100 Med/Darkmatter, 500 Small), clamped to its speed: within a few ticks it flies at its drawn speed straight at the point. There is
+  no slowing on approach. A point counts as reached once the rock has crossed the line through it across the path (corner bisector
+  inside); `loop` then flies from the last point straight back to the first, `teleport loop` jumps there, `to end` hovers at the last.
+- **Each rock follows its own copy of the path**: every point moved sideways (the path's horizontal normal) by the rock's signed
+  distance from the path, and raised by the rock's height. A belt keeps its cross-section; rocks do not converge on the centre line.
+- **Find Closest Point**: the start is the nearest point that lies within 90 degrees of the bearing to the path's last point, as seen
+  from the rock; point 0 when none does (and always without the option).
+- **Rocks never collide with each other**: the original has the routine for it but never enables it, so belt rocks pass through each
+  other. Rock against island, base or armed rock: pushed out only; rock against wreck, whale or moon: pushed apart by mass only.
+- **A ship that touches a belt rock drops it from the belt for good**: its waypoints are cleared and it flies away from the ship at
+  0.25 x the centres' distance per second.
+- Remake: `combat::asteroid` (`rock_path`, `closest_point`, `follow_path`), `collision::sail`. PROVISIONAL: the rock moves on straight
+  legs at its speed (the few-tick turn, the crossing-line arrival and the random start direction are not modelled), the side-test signs
+  of the offset are inferred, and a rock pushed off its belt slows with the contact drift instead of keeping its speed.
 
 ## Authored strength and breakup
 
@@ -77,7 +96,7 @@ Both effects are now exported into `assets/fx` and spawned through the existing 
 
 `data.rs` loads/validates the definitions. `lib.rs` tags ordinary asteroids on every map; armed asteroids are excluded. `rules/` dispatches `Setup Asteroid Belt` by actual group, supplying translation/tumble intervals and path settings. `combat/asteroid.rs` owns motion, shooting, death and fragment creation. Death is emitted only on the positive-to-zero HP transition; already dead rocks are excluded from subsequent shell hits, so deferred despawning cannot repeat breakup/kill credit. Destroying a target clears it, and child rocks retain the named group provisionally so the belt attack order can select them.
 
-`collision.rs` rebuilds changed asteroid obstacles before ship movement. Tumbling box obstacles use transformed 3D faces, and broad-phase bounds include all eight transformed corners. Child rocks gain collision at spawn and lose it on despawn. Ship contacts now use finite rock mass and relative velocity, with a separate required `collision::Drift` component for collision motion; substeps translate the collider along with the rock. Explicit rule setup clears contact drift, but path ticks preserve it, and breakup includes it in the provisional parent-velocity inheritance. The planar inelastic contact response is shared with ships, not a recovered retail asteroid formula; collision damage, torque and rock/rock or rock/static response remain unimplemented. See [collision.md](collision.md).
+`collision.rs` rebuilds changed asteroid obstacles before ship movement. Tumbling box obstacles use transformed 3D faces, and broad-phase bounds include all eight transformed corners. Child rocks gain collision at spawn and lose it on despawn. Ship contacts now use finite rock mass and relative velocity, with a separate required `collision::Drift` component for collision motion; substeps translate the collider along with the rock. Explicit rule setup clears contact drift, but path ticks preserve it, and breakup includes it in the provisional parent-velocity inheritance. The planar inelastic contact response is shared with ships, not a recovered retail asteroid formula; collision damage and torque remain unimplemented; the original has no rock/rock response (above). See [collision.md](collision.md).
 
 Regression tests cover retail HP and asset dependencies, invalid/cyclic definitions, group membership/setup, tumble intervals without centre drift, path velocity/stopping, one-shot death, recursive 2-medium → 6-small breakup/termination, target cleanup, effects, child colliders and rotated/translated collision bounds. `--script asteroid` skips the opening, frames a large belt rock at frame 90 and destroys it at frame 180. Runtime screenshot: `local/asteroid-breakup.png` (frame 195) shows the two children and flash/sparks; no ECS query conflict occurred.
 

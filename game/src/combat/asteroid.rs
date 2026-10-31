@@ -127,12 +127,8 @@ pub fn asteroid_motion(
             rock.speed = speed;
             rock.axis = rng.direction();
             rock.tumble = rng.range(setup.tumble[0], setup.tumble[1]);
-            rock.path = setup.path.clone();
-            rock.next = if setup.closest {
-                rock.path.iter().enumerate().min_by(|a, b| a.1.distance_squared(tf.translation).total_cmp(&b.1.distance_squared(tf.translation))).map_or(0, |p| p.0)
-            } else {
-                0
-            };
+            rock.path = rock_path(&setup.path, tf.translation);
+            rock.next = if setup.closest { closest_point(&rock.path, tf.translation) } else { 0 };
             rock.mode = setup.mode;
             rock.forward = true;
         }
@@ -155,6 +151,37 @@ pub fn asteroid_motion(
         // PROVISIONAL world-axis multiplication order; native axis-angle rate is recovered.
         tf.rotation = (Quat::from_axis_angle(rock.axis, rock.tumble * dt) * tf.rotation).normalize();
     }
+}
+
+/// The rock's own copy of a belt path (docs/re/asteroids.md): every point moved sideways by the rock's signed horizontal offset
+/// from the path line nearest to it, and raised by the rock's height, so a belt keeps its cross-section instead of every rock
+/// flying to the same points. Sideways is the horizontal normal: the segment's perpendicular at the ends, the corner bisector
+/// inside. PROVISIONAL: the original's side test signs are inferred; a path of fewer than two points is left as is.
+pub fn rock_path(path: &[Vec3], at: Vec3) -> Vec<Vec3> {
+    if path.len() < 2 {
+        return path.to_vec();
+    }
+    let flat = |v: Vec3| v.with_y(0.0);
+    let last = path.len() - 1;
+    let normal = |i: usize| {
+        let d = flat(path[(i + 1).min(last)] - path[i.saturating_sub(1)]).normalize_or_zero();
+        Vec3::new(-d.z, 0.0, d.x) // the path direction turned 90 degrees (to starboard of travel)
+    };
+    let near = (0..path.len()).min_by(|&a, &b| path[a].distance_squared(at).total_cmp(&path[b].distance_squared(at))).unwrap_or(0);
+    let lateral = flat(at - path[near]).dot(normal(near));
+    (0..path.len()).map(|i| path[i] + normal(i) * lateral + Vec3::Y * at.y).collect()
+}
+
+/// Find Closest Point: the nearest path point that lies within 90 degrees of the bearing to the path's last point, as seen from
+/// the rock (so a rock never starts by flying back along the belt); point 0 when none does.
+pub fn closest_point(path: &[Vec3], at: Vec3) -> usize {
+    let Some(&end) = path.last() else { return 0 };
+    let bearing = |p: Vec3| (p - at).with_y(0.0);
+    let to_end = bearing(end);
+    (0..path.len())
+        .filter(|&i| bearing(path[i]).angle_between(to_end) < std::f32::consts::FRAC_PI_2)
+        .min_by(|&a, &b| path[a].distance_squared(at).total_cmp(&path[b].distance_squared(at)))
+        .unwrap_or(0)
 }
 
 /// Waypoint following shared by asteroid belts and meteor emitters. PROVISIONAL: straight legs replace the native
@@ -268,6 +295,26 @@ pub fn asteroid_demo(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn each_rock_follows_the_belt_path_shifted_by_its_own_offset_and_height() {
+        // A path along +x (Bevy: -z is forward, x is starboard); a rock 6 units to one side of it and 3 up.
+        let path = [Vec3::ZERO, Vec3::X * 50.0, Vec3::X * 100.0];
+        let own = rock_path(&path, Vec3::new(40.0, 3.0, 6.0));
+        for (p, q) in path.iter().zip(&own) {
+            assert!((*q - *p - Vec3::new(0.0, 3.0, 6.0)).length() < 1e-4, "{q} vs {p}");
+        }
+        // The other side shifts the other way: two rocks never share their points.
+        assert!((rock_path(&path, Vec3::new(40.0, 0.0, -6.0))[1] - Vec3::new(50.0, 0.0, -6.0)).length() < 1e-4);
+    }
+
+    #[test]
+    fn find_closest_point_skips_points_behind_the_rock() {
+        let path = [Vec3::ZERO, Vec3::X * 10.0, Vec3::X * 20.0, Vec3::X * 30.0];
+        // Nearest is point 1 (behind), but only points ahead toward the end count.
+        assert_eq!(closest_point(&path, Vec3::new(13.0, 0.0, 0.0)), 2);
+        assert_eq!(closest_point(&path, Vec3::new(-5.0, 0.0, 0.0)), 0);
+    }
 
     #[test]
     #[ignore = "needs imported assets"]
