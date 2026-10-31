@@ -46,6 +46,8 @@ pub fn shoot(mut commands: Commands, lib: Res<Library>, fxl: Res<FxLib>, mut msg
                     hp: b.hitpoints,
                     harmless: false,
                     base: false,
+                    // ponytail: only the dragon's breath comes this way, and its factor (-200) never ricochets.
+                    ricochet: -200.0,
                 },
                 Transient,
                 stf,

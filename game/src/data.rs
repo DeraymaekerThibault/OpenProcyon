@@ -151,7 +151,9 @@ pub struct GunDef {
     pub reload: f32,
     pub burst: u32,
     pub burst_reload: f32,
-    pub range: [f32; 3],     // effective, long, maximum
+    pub range: [f32; 3], // effective, long, maximum
+    /// Per range band (effective, long, maximum): the ricochet factor a shell of this gun takes when fired (0 when absent).
+    pub ricochet: [f32; 3],
     pub deviation: [f32; 3], // per range band (effective, long, maximum): accuracy deviation (rad); PROVISIONAL: used as max cone half-angle
     pub gravity: bool,
     pub bullet: String,
@@ -365,6 +367,7 @@ pub fn gun_def(g: &Value) -> GunDef {
         burst: g["BulletsPerBurst"].as_u64().unwrap() as u32,
         burst_reload: num(&g["DuringBurstReloadTime"]),
         range: [num(&g["EffectiveRange_Range"]), num(&g["LongRange_Range"]), num(&g["MaximumRange_Range"])],
+        ricochet: ["EffectiveRange", "LongRange", "MaximumRange"].map(|b| g[format!("{b}_RicochetFactor")].as_f64().unwrap_or(0.0) as f32),
         deviation: [num(&g["EffectiveRange_AccuracyDeviation"]), num(&g["LongRange_AccuracyDeviation"]), num(&g["MaximumRange_AccuracyDeviation"])],
         gravity: g["BulletAffectedByGravity"].as_bool().unwrap(),
         bullet: g["BulletTypeName_Primary"].as_str().unwrap().into(),

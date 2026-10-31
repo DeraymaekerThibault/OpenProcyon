@@ -176,7 +176,21 @@ meets can be hit. The firer's own island or base is exempt. Only scenery with no
 dock buoys) lets shots through. A lob shell clears an island only if its arc passes above the triangles. On land with no damage
 section the shot is spent with its impact (its impact sound and effect; an explosive or lobbed shell bursts there); a gun tower's
 section takes the hit as before. Remake: `combat::shells` with `collision::Obstacle::segment_hit`. PROVISIONAL (not decoded): the
-island hit effect the original shows half the time near the player, the ricochet roll on a section hit, the exact removal.
+island hit effect the original shows half the time near the player, the exact removal.
+
+## Ricochet (read from the original's code, 2026-10-31)
+Every shot that strikes a damage section (a hull, a gun tower, a volcano) first rolls a ricochet:
+- Chance = (F + M + angle) / 100, clamped to 0..1, one uniform draw per strike.
+- F is the firing gun's ricochet factor for the range band it fired in (`EffectiveRange_`, `LongRange_`, `MaximumRange_RicochetFactor`,
+  picked by the distance to its target like the accuracy bands). Vanilla: cannonballs -60/-50/-40 (effective/long/maximum), gattling
+  -10/0/0, plasma, harpoons and lancers far below zero, torpedoes and mines -1000 (never), mortars 0.
+- M by the section's material: wood 0, reinforced 25, iron 50, stone 50, cloth -100 (sails never deflect), dragon 0.
+- angle: degrees between the shot's flight relative to the target, reversed, and the struck face's normal: 0 head-on, 90 grazing.
+- A ricochet does no damage, no spill, no fire and no impact effect. The shot mirrors off the face at 0.6 of its speed and keeps
+  flying (it can hit something else), and the bullet's `RicochetSound` for the material plays at the strike.
+- Remake: `combat::shells::ricochet`. PROVISIONAL: a small extra effect the original also plays is not identified; the sound's range
+  is the warning shot's 600 units; warning shots keep their harmless glance; mines' forced ricochet off friendly hulls is not ported
+  (our mines do not strike friendly hulls at all). Rocks never deflect a shot (their material term is -100).
 
 ## Destroyed base part (PROVISIONAL)
 

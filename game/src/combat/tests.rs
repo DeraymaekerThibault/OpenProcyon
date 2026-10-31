@@ -1139,6 +1139,7 @@ fn shell_into_a_hull_damages_it_and_reports_the_hit() {
         hp: 1.0,
         harmless: false,
         base: false,
+        ricochet: -1000.0,
     };
     let id = app.world_mut().spawn((shell, Transform::from_translation(at))).id();
     app.insert_resource(lib);
@@ -1215,6 +1216,7 @@ fn land_in_the_way_stops_a_shell_before_the_hull() {
         hp: 1.0,
         harmless: false,
         base: false,
+        ricochet: -1000.0,
     };
     let id = app.world_mut().spawn((shell, Transform::from_translation(at))).id();
     // A wall of land across the line of fire, 20 units in front of the hull.
@@ -1251,4 +1253,26 @@ fn a_hit_on_a_downed_base_ring_spills_to_its_neighbours() {
     assert_eq!(hp.sections[ring(4)], 396.0);
     assert!((hp.sections[ring(3)] - 398.4).abs() < 1e-3, "{}", hp.sections[ring(3)]);
     assert_eq!(hp.sections[class.sections.iter().position(|s| s.label == "default").unwrap()], 800.0);
+}
+
+#[test]
+fn ricochet_chance_adds_gun_factor_material_and_angle() {
+    // A cannonball at effective range (-60) head-on into wood never glances; at maximum range (-40) grazing iron at 80° mostly does.
+    assert_eq!(ricochet_chance(-60.0, "Wood", 0.0), 0.0);
+    assert!((ricochet_chance(-40.0, "Iron", 80.0) - 0.9).abs() < 1e-6);
+    // Sails swallow everything; a mortar (factor 0) on stone glances half the time even head-on.
+    assert_eq!(ricochet_chance(0.0, "Cloth", 90.0), 0.0);
+    assert_eq!(ricochet_chance(0.0, "Stone", 0.0), 0.5);
+    assert_eq!(ricochet_chance(0.0, "Iron", 90.0), 1.0);
+}
+
+#[test]
+fn a_struck_face_normal_points_back_at_the_shot() {
+    let tri = [Vec3::new(-1.0, -1.0, 0.0), Vec3::new(1.0, -1.0, 0.0), Vec3::new(0.0, 1.0, 0.0)];
+    let s = crate::data::Section { tris: vec![tri, [tri[0], tri[2], tri[1]]], min: Vec3::splat(-1.0), max: Vec3::splat(1.0), ..default() };
+    for dir in [1.0, -1.0] {
+        let (t, n) = hit_test::seg_mesh_hit(Vec3::new(0.0, 0.0, 2.0 * dir), Vec3::new(0.0, 0.0, -2.0 * dir), &s).unwrap();
+        assert!((t - 0.5).abs() < 1e-6);
+        assert_eq!(n, Vec3::Z * dir);
+    }
 }

@@ -76,6 +76,11 @@ pub(super) fn seg_aabb(a: Vec3, b: Vec3, min: Vec3, max: Vec3) -> Option<f32> {
 
 /// Segment vs the section's triangles (box first); earliest hit fraction in [0, 1]. Triangles are double-sided.
 pub(super) fn seg_mesh(a: Vec3, b: Vec3, s: &Section) -> Option<f32> {
+    seg_mesh_hit(a, b, s).map(|h| h.0)
+}
+
+/// The first triangle of `s` the segment `a`-`b` crosses: its fraction along the segment and its unit normal, turned to face `a`.
+pub(super) fn seg_mesh_hit(a: Vec3, b: Vec3, s: &Section) -> Option<(f32, Vec3)> {
     seg_aabb(a, b, s.min, s.max)?;
     let d = b - a;
     s.tris
@@ -98,9 +103,10 @@ pub(super) fn seg_mesh(a: Vec3, b: Vec3, s: &Section) -> Option<f32> {
                 return None;
             }
             let t = f * e2.dot(qv);
-            (0.0..=1.0).contains(&t).then_some(t)
+            let n = e1.cross(e2).normalize_or_zero();
+            (0.0..=1.0).contains(&t).then_some((t, if n.dot(d) > 0.0 { -n } else { n }))
         })
-        .reduce(f32::min)
+        .min_by(|x, y| x.0.total_cmp(&y.0))
 }
 
 /// Distance from `p` to the segment `a`-`b`.
