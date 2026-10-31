@@ -20,8 +20,10 @@ enum Cond {
     NoTeamHasShips,
     NoHumanShips,
     TeamHasNoShips(String),
-    /// "Skirmish Game Complete" / "Team Game Complete". PROVISIONAL: at most one side still has ships.
-    GameComplete,
+    /// "Skirmish Game Complete": every ship left sails for one team (allies), or no human ship is left.
+    SkirmishComplete,
+    /// "Team Game Complete": exactly one team still has ships.
+    TeamComplete,
     /// Every ship of the group is gone (and the group has ships).
     GroupDestroyed(Vec<i64>),
     /// A named unit is (or is not) still afloat.
@@ -52,7 +54,7 @@ enum Test {
 #[derive(Clone, Debug)]
 struct Rule {
     conditions: Vec<Cond>,
-    /// Team name id the rule declares the winner; none for draws and for the game-complete rules (the last side wins).
+    /// Team name id the rule declares the winner; none: the survivors win if they are one team, else nobody does.
     winner: Option<String>,
     /// String ids of the message shown to the winners and to the losers (`end` in `map.json`); none for the default "GAME STRING".
     messages: (Option<String>, Option<String>),
@@ -139,6 +141,12 @@ impl Victory {
             s
         };
         let team_has_ships = |name: &str| self.teams.iter().any(|(n, sides)| n == name && sides.iter().any(|s| alive_sides.contains(&s.0)));
+        // The map teams with ships afloat (a side on no team counts as its own); mutual allies are one team.
+        let mut alive_teams: Vec<String> =
+            alive_sides.iter().map(|s| self.teams.iter().find(|t| t.1.iter().any(|x| x.0 == *s)).map_or_else(|| format!("side {s}"), |t| t.0.clone())).collect();
+        alive_teams.sort();
+        alive_teams.dedup();
+        let human_alive = snap.ships.iter().any(|a| a.alive && a.human);
         let of = |objects: &[i64]| snap.ships.iter().filter(|s| s.id.is_some_and(|i| objects.contains(&i))).collect::<Vec<_>>();
         for rule in &self.rules {
             let hit = rule.conditions.iter().all(|c| match c {
@@ -152,9 +160,11 @@ impl Victory {
                         })
                 }
                 Cond::NoTeamHasShips => alive_sides.is_empty(),
-                Cond::NoHumanShips => !snap.ships.iter().any(|a| a.alive && a.human),
+                Cond::NoHumanShips => !human_alive,
                 Cond::TeamHasNoShips(team) => self.teams.iter().any(|t| &t.0 == team) && !team_has_ships(team),
-                Cond::GameComplete => self.sides >= 2 && alive_sides.len() <= 1,
+                // ponytail: a battle with one side only (a test or dev run) never completes.
+                Cond::SkirmishComplete => self.sides >= 2 && (alive_teams.len() <= 1 || !human_alive),
+                Cond::TeamComplete => self.sides >= 2 && alive_teams.len() == 1,
                 Cond::GroupDestroyed(objects) => {
                     let group = of(objects);
                     !group.is_empty() && group.iter().all(|s| !s.alive)
@@ -171,15 +181,12 @@ impl Victory {
             if !hit {
                 continue;
             }
+            // The winners: the named team's players (sunk or not); with no team named, the survivors when they are one team, and
+            // all their allies (a sunk human whose allies cleared the field wins: retail Border Dispute read VICTORY!), else nobody.
+            let ours = self.teams.iter().find(|(_, sides)| sides.contains(&Side::Player)).map_or_else(|| format!("side {}", Side::Player.0), |t| t.0.clone());
             let human_wins = match &rule.winner {
-                Some(team) => self.teams.iter().any(|(n, sides)| n == team && sides.contains(&Side::Player)),
-                None if rule.conditions.contains(&Cond::NoHumanShips) => {
-                    // Retail: with every human ship lost the result still reads VICTORY when the human's team has ships left and no
-                    // other team has (Border Dispute, our Man-O-War sunk after the Navy computers cleared the Procyon fleet).
-                    let ours = self.teams.iter().find(|(_, sides)| sides.contains(&Side::Player)).map(|t| t.0.as_str());
-                    ours.is_some_and(|ours| team_has_ships(ours) && self.teams.iter().all(|(n, _)| n == ours || !team_has_ships(n)))
-                }
-                None => rule.conditions.contains(&Cond::GameComplete) && alive_sides == [Side::Player.0],
+                Some(team) => *team == ours,
+                None => alive_teams == [ours],
             };
             let (win, lose) = &rule.messages;
             return Some(if human_wins { (Outcome::Victory, win.clone()) } else { (Outcome::Defeat, lose.clone()) });
@@ -204,7 +211,8 @@ fn condition(c: &Value) -> Option<Cond> {
         "No Team Has Ships" => Cond::NoTeamHasShips,
         "No Human Controlled Ships Remain" => Cond::NoHumanShips,
         "Team X has no ships" => Cond::TeamHasNoShips(c["Team Name"].as_str()?.to_string()),
-        "Skirmish Game Complete" | "Team Game Complete" => Cond::GameComplete,
+        "Skirmish Game Complete" => Cond::SkirmishComplete,
+        "Team Game Complete" => Cond::TeamComplete,
         // a base's capture comes from the snapshot's captured bases
         "Team has captured a ship from Group/Unit" => Cond::Captured(objects()?),
         "Group Destroyed" => Cond::GroupDestroyed(objects()?),
@@ -335,6 +343,22 @@ mod tests {
         let mut a = a;
         (a.alive, b.alive) = (false, true);
         assert_eq!(v.decide(&state(&[a, b], &[])), Some(Outcome::Defeat));
+    }
+
+    #[test]
+    fn skirmish_complete_also_ends_when_the_human_is_sunk_and_team_complete_needs_one_team_left() {
+        let teams = vec![(NAVY.into(), vec![Side::Player, Side(2)]), (PROC.into(), vec![Side(1)])];
+        let rule = |t: &str| Victory::from_map(&json!({"victory": [{"name": "end", "winner": null, "if": [{"Type": t}]}]}), teams.clone()).unwrap();
+        let (mut human, ally, foe) = (ship(Side::Player, true), ship(Side(2), false), ship(Side(1), false));
+        let sunk = |mut s: ShipState| {
+            s.alive = false;
+            s
+        };
+        assert_eq!(rule("Skirmish Game Complete").decide(&state(&[human.clone(), ally.clone(), sunk(foe.clone())], &[])), Some(Outcome::Victory), "allies are one team");
+        human.alive = false;
+        assert_eq!(rule("Skirmish Game Complete").decide(&state(&[human.clone(), ally.clone(), foe.clone()], &[])), Some(Outcome::Defeat), "no human ship: over");
+        assert_eq!(rule("Team Game Complete").decide(&state(&[human.clone(), ally.clone(), foe.clone()], &[])), None, "two teams afloat");
+        assert_eq!(rule("Team Game Complete").decide(&state(&[human, ally, sunk(foe)], &[])), Some(Outcome::Victory), "a sunk human's team won");
     }
 
     /// Ambush: reach the volume with the Mercy, or destroy all three pirate groups; losing the Mercy ends it.

@@ -199,8 +199,20 @@ retail map files (2026-10-27), not from a played battle:
   Border Dispute also when no team has any ship (a draw). Mousetrap and Convoy Raid additionally give the other side the win when a
   team has no ships left.
 - **Maps without bases (Diablo Strait, Dragon's Nest, Shadow Dance, The Maw, Zemyatin Anomaly, Iron War, Storm Front):** one rule ends
-  the game on the engine conditions "Skirmish Game Complete" or "Team Game Complete" (the engine logs "Team Game Completed - 1 team
-  remains"). PROVISIONAL meaning: the game ends when only one team still has ships; the exact skirmish variant is not decoded.
+  the game on the engine conditions "Skirmish Game Complete" (Diablo Strait, Dragon's Nest, Shadow Dance, The Maw, Zemyatin) or
+  "Team Game Complete" (Iron War, Storm Front; Red Rover uses it too). Read from the original's code (2026-10-31): Skirmish Game
+  Complete holds when every player with ships left is allied with every other, **or when no human-controlled player has a ship**, so
+  on those maps losing the human fleet ends the battle at once even while allies fight on. Team Game Complete holds when exactly one
+  team still has ships.
+
+**How the original ends a battle** (read from its code, 2026-10-31). There is no built-in "last team standing": a battle ends only when
+a map rule's End Game action runs, and a map without such a rule never ends by itself. The rules are checked once a second; every
+skirmish end rule runs once. What counts as "having ships": ships, not bases or islands, and never lifeboats; a captured ship counts
+for its new owner; hidden, Persistent and Dummy ships count. The winners are the named team's players, sunk ones included (Team X
+Wins, Remaining Team Wins); with no team named, the surviving players if they are all allied, plus everyone allied to them, and
+nobody when the survivors are enemies (a draw is a loss for all). The battlefield line is the rule's own message for the human's
+side when it sets one, else "Game Won!  Exiting..." for a winner and "Game Lost!  Exiting..." for everyone else. Ten seconds after
+the end the Game Summary opens; nothing pauses the battle in between. No victory points are scored at the end of a skirmish.
 - **Historical maps** use their own goals: Ambush (reach the volume with the Mercy / capture it / destroy the three pirate groups),
   Convoy Raid (a team reaches 350 / 400 points, or the pirates have no ships), Locusts (the command fleet reaches the safety volume,
   or the privateers capture it, or lose all ships), Bayles Stand (destroy the Procyon group, or the Procyons wreck/capture the base).
@@ -229,17 +241,21 @@ the ships of non-playable map players (Convoy Raid's convoys) join on their team
 end Convoy Raid ('Team has X points'). PROVISIONAL: ships with a Persistent or Dummy stance, and hidden ones, are left to the script by
 the computer captains; other scripted routes (Ambush's Mercy) are still overridden by the captain AI; a Navy player who loses every
 ship on Convoy Raid has no rule ending the game (the original's behaviour there is unknown). A map without exported rules keeps the
-plain "no enemy ships left" outcome. The map rule's
+plain "no enemy ships left" outcome (the original would never end it). The map rule's
 winner/loser message (`IDGS_TPINGAMEMESSAGE_*`, the human's side) is shown under the VICTORY!/DEFEAT! label of the Game Summary
 (PROVISIONAL: retail position and timing unmeasured; "GAME STRING" means no custom message).
 
 ## Result when the human's ships are all lost (retail, Border Dispute, 2026-10-27)
+The original's code explains these observations (above): Border Dispute's "no human ships" and "draw" rules name "Game Lost" as their
+message for winners and losers alike, so the field reads Game Lost even when the human's allies won. Which header the Game Summary
+shows is not read from the code; the remake uses the human's place among the winners (PROVISIONAL, fits both observations).
+
 When every human ship sinks, the battlefield shows "Game Lost! Exiting..." and the game ends, but the Game Summary header depends on the
 teams: with Navy computer allies alive and the whole Procyon fleet sunk (both bases standing) it read VICTORY!, twice; with the lone Procyon
 Frigate still alive and no allies it read DEFEAT! The remake reads this as: victory when the human's team still has ships and no other team
 has any (PROVISIONAL: two observations, rule inferred).
 
-The line is white, centred on the window at about mid-height, and stayed up for 13 s (1 frame/s footage) before the Game Summary opened; the
-battle keeps running under it. The remake shows "Game Lost!  Exiting..." whenever the human's ships are all gone, and "Game Won!  Exiting..."
-for a victory with a surviving human ship (PROVISIONAL: only the lost line is observed; the won string exists in the string table). A map
-rule's own end message replaces the default on the field (PROVISIONAL, inferred). The delay from the last ship sinking to the line is not measured.
+The line is white, centred on the window at about mid-height, and stayed up for 13 s (1 frame/s footage) before the Game Summary opened;
+the code waits 10 s from the end rule, which runs within a second of the sinking. The battle keeps running under it. The remake follows
+the code: the rule's message, else Game Won / Game Lost by the winners, and the summary 10 s later (its rules run every frame, not once
+a second).
