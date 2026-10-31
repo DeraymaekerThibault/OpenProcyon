@@ -2,8 +2,9 @@
 //! docked, then for AI ships move away / turn / return), repair while docked, dock-point marker effects and the rule hooks
 //! (`Dock Ships`, `Set Group/Unit Dockable`, `Set Dock Time`, `Toggle Island Repair When Docked`, `Group/Unit Is Docked`).
 //! Clicks and the right-click menu issue `DockMsg`s; rules.rs reads `Script::docked`, which this module keeps up to date.
-//! PROVISIONAL: straight-line legs (the original plans paths around obstacles), the far-side detour point, dock-point yaw sign, which
-//! dockers hear the docked sound, and the repair effect placement (one at the ship centre).
+//! The movement is the original's (read from its code, docs/re/docking-and-orders.md): one approach point on the dock point's axis,
+//! sailed under the collision avoider (no route planning), then a scripted glide onto the point; leaving glides away, turns in place
+//! and sails one leg back. PROVISIONAL: dock-point yaw sign and the repair effect placement (one at the ship centre).
 //! Tows (menu Tow start / stop): the tower steers for the towee and the link is registered inside 50 units of surface distance; the
 //! rigid tow itself lives in rules.rs. The docking status icon lives on the primary ship's bottom-bar portrait in panels.rs.
 //! PROVISIONAL: the tow approach point (the towee's centre, not its tow node).
@@ -25,8 +26,12 @@ const ARRIVE: f32 = 10.0;
 const WAIT_DIST: f32 = 80.0;
 /// Retail default dock duration; the actual one is the larger of this ('Set Dock Time' overrides it) and the repair time.
 const MIN_DOCK_SECS: f32 = 5.0;
-/// Approach accepted when the ship and the approach point are within this angle seen from the dockee (retail π·0.6); bases always pass.
-const APPROACH_ARC: f32 = PI * 0.6;
+/// The glide (final leg, moving away, turning to return): full turn rate (rad/s) reached at this heading error, speeds while turning and
+/// once lined up (capped by the ship's own top speed), all retail.
+const GLIDE_TURN: f32 = 0.5;
+const GLIDE_FULL_ERR: f32 = 20.0 * PI / 180.0;
+const GLIDE_TURNING: f32 = 4.0;
+const GLIDE_STRAIGHT: f32 = 8.0;
 /// Leaving a ship dockee: distance ⅔·(both lengths) along the dock axis, done within 5 units or after 10 s (retail constant).
 const AWAY_FRAC: f32 = 2.0 / 3.0;
 const AWAY_DONE: f32 = 5.0;
@@ -169,10 +174,8 @@ pub struct Docker {
     dockee: Entity,
     point: Option<usize>,
     phase: Phase,
-    /// Approach: the approach leg is done and the ship steers straight for the dock point.
+    /// Approach: the approach point is reached and the ship glides onto the dock point.
     final_leg: bool,
-    /// Fixed base approach point; keep its detour until the ship has sailed around the island.
-    base_approach: Option<Vec3>,
     timer: f32,
     duration: f32,
     repair_secs: f32,
@@ -191,6 +194,14 @@ impl Docker {
     /// The docking status icon shows while the ship waits for, approaches or sits in a dock.
     pub fn shows_status(&self) -> bool {
         matches!(self.phase, Phase::Wait | Phase::Approach | Phase::Docked)
+    }
+    /// Moved by the dock routine's glide, not by sailing: the final leg, moving away and turning to return.
+    pub fn gliding(&self) -> bool {
+        (self.phase == Phase::Approach && self.final_leg) || matches!(self.phase, Phase::Away | Phase::Turn)
+    }
+    /// Sails under the collision avoider: waiting for a point, the approach leg and the leg back.
+    pub fn avoids(&self) -> bool {
+        matches!(self.phase, Phase::Wait | Phase::Return) || (self.phase == Phase::Approach && !self.final_leg)
     }
     pub fn ignores_collision(&self, other: Entity) -> bool {
         // PROVISIONAL: allow docking contact until the retail collision rejection list is decoded.
@@ -263,7 +274,6 @@ fn handle_messages(
                     point: None,
                     phase: Phase::Wait,
                     final_leg: false,
-                    base_approach: None,
                     timer: 0.0,
                     duration: 0.0,
                     repair_secs: 0.0,
@@ -380,7 +390,26 @@ fn claim(dockable: &mut Dockable, docker: &mut Docker, e: Entity, i: usize) {
     docker.point = Some(i);
     docker.phase = Phase::Approach;
     docker.final_leg = false;
-    docker.base_approach = None;
+}
+
+/// One tick of the original's dock glide toward `to`: the heading turns at up to `GLIDE_TURN` (in proportion inside `GLIDE_FULL_ERR`)
+/// and the ship moves along its own heading, `GLIDE_TURNING` while turning and up to `GLIDE_STRAIGHT` once lined up; `turn_only`
+/// turns in place. Normal sailing is off meanwhile (`collision::sail` skips gliding ships).
+fn glide(ship: &mut Ship, tf: &mut Transform, to: Vec3, top: f32, turn_only: bool, dt: f32) {
+    let err = angdiff(bearing(tf.translation, to), ship.heading);
+    let step = err.signum() * (err.abs() / GLIDE_FULL_ERR).min(1.0) * GLIDE_TURN * dt;
+    ship.heading += step;
+    ship.ang_vel = 0.0;
+    ship.speed = if turn_only {
+        0.0
+    } else if step.abs() < 0.001 {
+        top.min(GLIDE_STRAIGHT)
+    } else {
+        GLIDE_TURNING
+    };
+    (ship.waypoints, ship.goal, ship.order) = (vec![], None, 0);
+    tf.translation += Vec3::new(-ship.heading.sin(), 0.0, -ship.heading.cos()) * ship.speed * dt;
+    tf.rotation = Quat::from_rotation_y(ship.heading);
 }
 
 fn routine(
@@ -392,7 +421,6 @@ fn routine(
     mut mission: Option<ResMut<Mission>>,
     mut dockers: Query<(Entity, &mut Transform, &mut Ship, &mut Health, &mut Docker, Has<PlayerShip>, Option<&mut crate::combat::GunStates>)>,
     mut dockees: Query<(&Transform, &mut Dockable, Option<&Ship>, Option<&Health>), Without<Docker>>,
-    obstacles: Query<(&crate::collision::Obstacle, Option<&Visibility>), (Without<Ship>, Without<crate::collision::Ghost>)>,
 ) {
     let dt = time.delta_secs();
     let positions: Vec<(Entity, Vec3)> = dockers.iter().map(|(e, tf, ..)| (e, tf.translation)).collect();
@@ -472,10 +500,8 @@ fn routine(
                     if let Some(m) = mission.as_mut() {
                         m.script.set_docked(e, docker.dockee, true);
                     }
-                    // Retail: the dock routine plays HUD_Options_Dock on docking and the repair setup starts the ship's repair effect.
-                    if human || ship.side == Side::Player {
-                        sfx.write(Sfx::ui("HUD_Options_Dock"));
-                    }
+                    // Retail: the dock routine plays HUD_Options_Dock on docking (for every ship) and the repair setup starts the repair effect.
+                    sfx.write(Sfx::ui("HUD_Options_Dock"));
                     if docker.repair_secs > 0.0
                         && let (Some(fxl), Some(name)) = (fxl.as_deref(), class.repair_fx.as_deref())
                     {
@@ -484,61 +510,22 @@ fn routine(
                     }
                     continue;
                 }
+                // Retail, every think: the approach point on the dock point's axis on the ship's present side (no check for land), sailed
+                // under the avoider; inside two of its radii the glide takes over.
                 let leg = if base { class.length } else { 1.5 * dockee_len };
-                let ap = docker.base_approach.unwrap_or_else(|| approach_point(p, fwd, here, leg));
-                if base && docker.base_approach.is_none() {
-                    docker.base_approach = Some(ap);
-                    let scenery = crate::collision::scenery(obstacles.iter());
-                    let Some(mut route) = crate::collision::route_clear(class.collision_bounds, here, ap, &scenery) else {
-                        ship.halt();
-                        warn!("docking: no clear base approach for {e} to {}", docker.dockee);
-                        continue;
-                    };
-                    route.push(p.with_y(here.y));
-                    ship.waypoints = route;
-                }
-                if base && !docker.final_leg && ship.waypoints.is_empty() {
-                    ship.order = 0;
-                    continue;
-                }
-                // The leg is done near the approach point, or once the ship is already lined up between it and the dock point.
-                // PROVISIONAL: the original's path-follower tolerance is unknown; 10 units alone makes a cutter circle the point.
-                let rel = (here - p).with_y(0.0);
-                let along = (ap - p).with_y(0.0).normalize_or_zero();
-                let lined_up = rel.dot(along) < leg && (rel - along * rel.dot(along)).length() < class.length;
-                if !docker.final_leg && (!base || ship.waypoints.len() <= 2) && (flat(ap, here) < ARRIVE.max(class.length) || lined_up) {
+                let ap = approach_point(p, fwd, here, leg);
+                if !docker.final_leg && flat(ap, here) < 2.0 * class.radius {
                     docker.final_leg = true;
                 }
-                ship.goal = None;
                 if docker.final_leg {
-                    ship.waypoints = vec![p.with_y(here.y)];
-                    ship.order = 1;
-                } else if base {
-                    ship.order = 2;
+                    glide(&mut ship, &mut tf, p, crate::ship::full_speed(class), false, dt);
                 } else {
-                    // Retail: a ship on the far side of a ship dockee (angle at its centre > 0.6π) re-plans around it; with straight legs
-                    // here that is a detour point out beside the dock point first.
-                    let c = dockee_tf.translation;
-                    let far = !base && (here - c).with_y(0.0).angle_between((ap - c).with_y(0.0)) > APPROACH_ARC;
-                    let side = (p + (p - c).with_y(0.0).normalize_or_zero() * (class.length + dockee_len)).with_y(here.y);
-                    ship.waypoints = if far { vec![side, ap, p.with_y(here.y)] } else { vec![ap, p.with_y(here.y)] };
-                    ship.order = 2;
+                    (ship.waypoints, ship.goal, ship.order) = (vec![ap], None, 2);
                 }
             }
             Phase::Docked => {
                 docker.timer += dt;
-                // PROVISIONAL: the original's arrival steering (not decoded) carries the ship the last few units; here it settles onto the
-                // point, parallel to the point's axis, instead of stopping up to 10 units short.
-                let k = 1.0 - (-2.0 * dt).exp();
-                if let Some(i) = docker.point {
-                    let pl = dockable.points[i].pos.with_y(docker.offset.y);
-                    docker.offset = docker.offset.lerp(pl, k);
-                    let (_, fwd) = dockable.world(dockee_tf, i);
-                    let along = bearing(Vec3::ZERO, fwd);
-                    let want = if angdiff(along, ship.heading).abs() <= PI / 2.0 { along } else { along + PI };
-                    ship.heading += angdiff(want, ship.heading) * k;
-                    ship.ang_vel = 0.0;
-                }
+                // Retail: the ship stays where the glide left it (within 10 units, any heading); it keeps station on a moving dockee.
                 tf.translation = dockee_tf.transform_point(docker.offset);
                 ship.order = 0;
                 ship.speed = 0.0;
@@ -578,8 +565,7 @@ fn routine(
                 let heading = Vec3::new(-ship.heading.sin(), 0.0, -ship.heading.cos());
                 let dir = if heading.dot(fwd) >= 0.0 { fwd } else { -fwd };
                 let to = (p + dir * AWAY_FRAC * (dockee_len + class.length)).with_y(here.y);
-                ship.waypoints = vec![to];
-                ship.order = 1;
+                glide(&mut ship, &mut tf, to, crate::ship::full_speed(class), false, dt);
                 if flat(to, here) < AWAY_DONE || docker.timer >= LEG_SECS {
                     docker.phase = Phase::Turn;
                     docker.timer = 0.0;
@@ -587,21 +573,16 @@ fn routine(
             }
             Phase::Turn => {
                 docker.timer += dt;
-                let want = bearing(here, docker.start);
-                ship.waypoints.clear();
-                ship.goal = Some(want);
-                ship.order = 1;
-                if angdiff(want, ship.heading).abs() < TURN_DONE || docker.timer >= LEG_SECS {
+                glide(&mut ship, &mut tf, docker.start, 0.0, true, dt);
+                if angdiff(bearing(here, docker.start), ship.heading).abs() < TURN_DONE || docker.timer >= LEG_SECS {
+                    // Retail: one leg of 100 units toward where the ship came from, not back to that point.
                     let dir = (docker.start - here).with_y(0.0).normalize_or_zero();
-                    ship.goal = None;
-                    ship.waypoints = if flat(docker.start, here) > RETURN_LEG { vec![here + dir * RETURN_LEG, docker.start] } else { vec![docker.start] };
-                    ship.order = 2;
+                    (ship.waypoints, ship.order) = (vec![here + dir * RETURN_LEG], 2);
                     docker.phase = Phase::Return;
                 }
             }
             Phase::Return => {
-                if ship.waypoints.is_empty() || flat(docker.start, here) < ARRIVE {
-                    ship.waypoints.clear();
+                if ship.waypoints.is_empty() {
                     ship.order = 0;
                     commands.entity(e).remove::<Docker>();
                 }
