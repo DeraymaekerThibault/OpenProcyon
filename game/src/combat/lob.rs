@@ -241,13 +241,15 @@ fn nearest_section(class: &Class, local: Vec3) -> Option<usize> {
 
 /// Contact damage (collision.rs `Ram`, read from the original's code): one hit on the victim's section nearest the contact,
 /// through the normal hit path, scaled by side and difficulty as shells are when a ship rammed it (rocks are not scaled).
-/// PROVISIONAL (not ported): a destroyed section passing the damage on to its child sections at x0.4, and the hit material's sound.
+/// The struck section's damage sound plays at the contact, once for the pair when both struck sections share a material.
 pub fn ram_damage(
     lib: Res<Library>,
     mut rng: ResMut<Rng>,
     mut msgs: MessageReader<crate::collision::Ram>,
     mut ships: Query<(&Ship, &Transform, &mut Health, Option<&crate::campaign::MissionShip>)>,
+    mut sfx: Option<MessageWriter<crate::audio::Sfx>>,
 ) {
+    let mut played: Vec<(Vec3, &str)> = vec![];
     for r in msgs.read() {
         let rammer = ships.get(r.b).ok().map(|(s, ..)| s.side);
         let Ok((ship, tf, mut hp, ms)) = ships.get_mut(r.a) else { continue };
@@ -256,10 +258,19 @@ pub fn ram_damage(
         }
         let class = &lib.classes[ship.class];
         let scale = rammer.map_or(1.0, |side| super::shells::side_damage_scale(side, ship.side, crate::menu::difficulty(), false));
-        let near = |k: &usize| tf.transform_point((class.sections[*k].min + class.sections[*k].max) * 0.5).distance_squared(r.at);
-        let Some(k) = (0..class.sections.len().min(hp.sections.len())).min_by(|a, b| near(a).total_cmp(&near(b))) else { continue };
+        let Some(k) = crate::collision::nearest_section(class, tf, r.at).filter(|k| *k < hp.sections.len()) else { continue };
         let d = r.damage * scale;
         apply_ship_hit(class, &mut hp, k, [d, d, 0.0, 0.0, 0.0], ms.map_or(0.0, |m| m.invuln), false, &mut rng);
+        let pool = match super::material_key(&class.sections[k].material) {
+            "Wood" | "Reinforced" => "Wood",
+            "Iron" => "Metal",
+            "Cloth" => "Sail",
+            _ => "Stone",
+        };
+        if let Some(sfx) = sfx.as_mut().filter(|_| rammer.is_some() && !played.contains(&(r.at, pool))) {
+            played.push((r.at, pool));
+            sfx.write(crate::audio::Sfx { name: format!("Damage_{pool}0{}", rng.variant(5)), at: Some(r.at), vol: 1.0, max: 600.0 });
+        }
     }
 }
 
@@ -348,7 +359,31 @@ mod tests {
         app.update();
         let hp = &app.world().get::<Health>(a).unwrap().sections;
         assert_eq!(hp[0], (full[0] - damage).max(0.0), "the nearest section takes it all");
-        assert_eq!(&hp[1..], &full[1..], "no other section is touched");
+        // It kills the 120-point bow, which spills 0.4 of the hit to its neighbours only.
+        let lib = app.world().resource::<Library>();
+        let adjacent = &lib.classes[cutter].sections[0].adjacent;
+        for n in 1..hp.len() {
+            let want = if adjacent.contains(&n) { (full[n] - 0.4 * damage).max(0.0) } else { full[n] };
+            assert!((hp[n] - want).abs() < 1e-3, "section {n}: {} vs {want}", hp[n]);
+        }
+    }
+
+    #[test]
+    #[ignore = "needs imported assets"]
+    fn a_hit_on_a_dead_section_spills_four_tenths_to_its_neighbours() {
+        let lib = Library::load(crate::assets_dir());
+        let c = lib.index("Ship_Navy_Cutter");
+        let class = &lib.classes[c];
+        let k = class.sections.iter().position(|s| s.label == "bow_wood").unwrap();
+        let mut hp = Health::new(class);
+        hp.sections[k] = 0.0;
+        let full = hp.sections.clone();
+        apply_ship_hit(class, &mut hp, k, [10.0, 10.0, 0.0, 0.0, 0.0], 0.0, false, &mut Rng(7));
+        for (n, (now, was)) in hp.sections.iter().zip(&full).enumerate() {
+            let want = if class.sections[k].adjacent.contains(&n) { was - 4.0 } else { *was };
+            assert!((now - want).abs() < 1e-4, "{}: {now} vs {want}", class.sections[n].label);
+        }
+        assert!(!class.sections[k].adjacent.is_empty(), "the bow has neighbours");
     }
 
     #[test]

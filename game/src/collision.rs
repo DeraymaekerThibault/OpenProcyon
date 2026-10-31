@@ -335,6 +335,12 @@ fn fixed_body() -> ContactBody {
     ContactBody { velocity: Vec3::ZERO, spin: 0.0, inverse_mass: 0.0, inverse_inertia: 0.0, arm: Vec3::ZERO }
 }
 
+/// The index of `class`'s damage section (placed by `tf`) whose box centre is nearest `at`.
+pub fn nearest_section(class: &crate::data::Class, tf: &Transform, at: Vec3) -> Option<usize> {
+    let d = |k: &usize| tf.transform_point((class.sections[*k].min + class.sections[*k].max) * 0.5).distance_squared(at);
+    (0..class.sections.len()).min_by(|a, b| d(a).total_cmp(&d(b)))
+}
+
 /// Contact damage `damage` to ship `a` from ship or rock `b` at `at` (docs/re/collision.md, read from the original's code):
 /// `combat::lob::ram_damage` puts it on `a`'s section nearest `at`, scaled by difficulty when `b` is a ship.
 #[derive(Message)]
@@ -363,7 +369,7 @@ pub fn sail(
     boats: Query<(), With<crate::lifeboats::Lifeboat>>,
     mut ships: Query<(Entity, &mut crate::Ship, &mut Transform, &crate::Health, &mut Drift, Option<&crate::docking::Docker>)>,
     mut sfx: Option<ResMut<Messages<crate::audio::Sfx>>>,
-    mut quiet: Local<f32>,
+    mut rng: Option<ResMut<crate::combat::Rng>>,
     flags: Query<(Has<Pinned>, Has<Ghost>)>,
     currents: Query<&crate::environment::Current>,
     mut rams: Option<ResMut<Messages<Ram>>>,
@@ -393,16 +399,21 @@ pub fn sail(
     let pinned = |e: Entity| stopped.contains(&e) || flags.get(e).is_ok_and(|f| f.0);
     let ghost = |e: Entity| flags.get(e).is_ok_and(|f| f.1);
     let dt = time.delta_secs();
-    *quiet -= dt;
-    let mut bump = |class: &crate::data::Class, at: Vec3, j: Vec3| {
-        // Contacts resolve every frame while overlapping: one sound per half second, none for grazing touches.
-        if *quiet > 0.0 || j.length() < 1.0 {
+    // The original's collision sound: a 7 % chance per touching pair each 1/30 s tick; a coin picks one of the two hulls, and its
+    // section nearest the contact sounds wood or metal (cloth, stone and the rest are silent), heard out to 700 units.
+    let mut bump = |classes: [(&crate::data::Class, &Transform); 2], at: Vec3, dt: f32| {
+        let (Some(rng), Some(sfx)) = (rng.as_mut(), sfx.as_mut()) else { return };
+        if rng.f() >= 0.07 * dt / TICK {
             return;
         }
-        *quiet = 0.5;
-        if let Some(sfx) = sfx.as_mut() {
-            let pool = if class.sections.first().is_some_and(|s| s.material.contains("Iron")) { "Metal" } else { "Wood" };
-            sfx.write(crate::audio::Sfx { name: format!("Ship_Collision_{pool}0{}", 1 + (time.elapsed_secs() * 7.0) as u32 % 5), at: Some(at), vol: 1.0, max: 200.0 });
+        let (class, tf) = classes[usize::from(rng.f() < 0.5)];
+        let pool = nearest_section(class, tf, at).and_then(|k| match crate::combat::material_key(&class.sections[k].material) {
+            "Wood" | "Reinforced" => Some("Wood"),
+            "Iron" => Some("Metal"),
+            _ => None,
+        });
+        if let Some(pool) = pool {
+            sfx.write(crate::audio::Sfx { name: format!("Ship_Collision_{pool}0{}", rng.variant(5)), at: Some(at), vol: 1.0, max: 700.0 });
         }
     };
     let tows = mission.as_ref().map_or(&[][..], |m| m.script.tows());
@@ -575,7 +586,8 @@ pub fn sail(
                     let delta = -push * (b.inverse_mass / (a.inverse_mass + b.inverse_mass));
                     rock_tf.translation += delta;
                     obstacle.translate(delta);
-                    bump(class, contact.point, push * 1000.0);
+                    // ponytail: a rock touch sounds like a ship touch on the ship's side (the rock's own impact sound is not read).
+                    bump([(class, &*tf), (class, &*tf)], contact.point, substep);
                     rock_drift.0 = (rock_tf.translation - tf.translation).with_y(0.0) * 0.25;
                     let hurt = ROCK_FACTOR * rock.mass * (a.velocity - b.velocity).length() * substep / TICK;
                     rock.hp -= hurt;
@@ -658,14 +670,15 @@ pub fn sail(
                     let force = dir * 0.1 * (common - body.velocity).length() / TICK; // per unit of own mass
                     (body.arm.cross(force).y * 12.0 / (size.x * size.x + size.z * size.z).max(1e-3)).clamp(-60.0, 60.0) * substep
                 };
-                let size = |c: &crate::data::Class| c.collision_bounds[1] - c.collision_bounds[0];
+                // The box inertia's width and length: twice the collision box's starboard and forward extents.
+                let size = |c: &crate::data::Class| Vec3::new(2.0 * c.collision_bounds[1].x, 0.0, -2.0 * c.collision_bounds[0].z);
                 if !pinned(ea) {
                     a.ang_vel += kick(&a_body, size(ca), normal);
                 }
                 if !pinned(eb) {
                     b.ang_vel += kick(&b_body, size(cb), -normal);
                 }
-                bump(ca, point, push * 1000.0);
+                bump([(ca, &*ta), (cb, &*tb)], point, substep);
                 // Ram damage: the other ship's mass x the closing speed on the section nearest the contact, at most once per 3.5 s
                 // per ship, never between allies.
                 let closing = (a_body.velocity - b_body.velocity).length();

@@ -14,24 +14,33 @@ Source: observed behaviour of the original game, WOT collision definitions and t
 
 ## Ships and rocks (read from the original's code, 2026-10-31)
 
+- **Contact shapes:** ship against ship tests the two physics boxes (the WOT `MinExtents` / `MaxExtents`, no padding) once their
+  collision spheres overlap, by separating axes (the box faces and the cross products of their edges); the axis of least
+  penetration is the normal and the contact point is the centre of the touching corners.
 - **Ship against ship**, checked every physics tick (1/30 s) while the hulls overlap: the two are pushed apart along the contact
   normal in proportion to the other's mass (the heavier one moves less; an idle ship is no exception). Neither ship's velocity
   changes: no bounce, restitution or friction. Each gets a yaw kick at the contact point: a force of 0.1 x its mass x the
   difference between its velocity and the pair's mass-weighted common velocity, per tick, over its box inertia (mass x (width² +
-  length²) / 12), the angular acceleration capped at ±60. Its own mass cancels, so a Man-O-War barely turns and a Cutter swings.
+  length²) / 12, width and length twice the box's starboard and forward extents), at the contact point taken at deck height; the
+  angular acceleration is capped at ±60. Its own mass cancels, so a Man-O-War barely turns and a Cutter swings.
 - **Ram damage:** a ship takes 0.0004 x the *other* ship's mass x the closing speed, on its one section nearest the contact,
-  through the normal hit path (a destroyed section passes damage on to its child sections at x0.4 per level). At most once per
+  through the normal hit path. At most once per
   3.5 s per ship, no speed threshold, no material or ram-bow factor. None between allies. Scaled by side and difficulty like
   shells (Easy: the human's ships x0.25, computer ships rammed by the human's x3; Normal x0.5 / x2; Hard x1). Example: a Cutter
   rammed by an enemy Man-O-War at 9 units/s loses 144; the Man-O-War 14.4.
 - **Ship against rock:** pushed apart by mass, the ship's speed and turn untouched; the rock is shoved away from the ship at
   0.25 x the offset between their centres per second. Every tick both take 0.0002 x the rock's mass x the closing speed (the
   ship's not scaled by difficulty, no cooldown, no ally test); the rock breaks at 0.
-- **Sound:** each tick in contact a 7 % chance of `Ship_Collision_Wood` / `_Metal` by the touching sections' materials (none for
-  cloth or stone); a damaging ram plays the hit material's damage sound. Lifeboats pass through ships.
-- Remake: `collision::sail` and `combat::lob::ram_damage`. PROVISIONAL (not ported): the child-section spill, the damage sound,
-  the 7 % sound draw (one collision sound per half second instead), the exact contact boxes (the original likely uses the
-  rendered model's bounds for ship against ship, see the measurement below) and the box inertia's width and length.
+- **Spill (every hit, shells too):** a hit that leaves its section at 0 hit points (already dead or not) passes 0.4 x its damage
+  on to each of the section's neighbours (the WOT section's `adjacent` list), and on again from any neighbour left at 0, each
+  section at most once per hit.
+- **Sound:** each tick a touching pair has a 7 % chance of a collision sound: a coin picks one of the two hulls, and its section
+  nearest the contact plays `Ship_Collision_Wood` or `_Metal` by material (cloth, stone and others are silent), heard to 700 units.
+  A damaging ram plays the struck section's `Damage_<material>` sound at the contact (once when both struck sections share a
+  material). Lifeboats pass through ships.
+- Remake: `collision::sail`, `combat::lob::ram_damage` and `combat::shells::apply_ship_hit` (spill). PROVISIONAL: a rock touch
+  plays the ship's collision sound (the rock's own impact sound is not read); bases' sections do not spill yet (their hits take a
+  separate path).
 
 ## Land and bases (read from the original's code, 2026-10-31)
 
@@ -47,13 +56,9 @@ matches the Diablo Strait volcano meteors, which hit every section at once.
 
 Headless Diablo Strait skirmish on Easy, our Navy Cutter driven past our own idle Man-O-War; both ships logged at 30 Hz and saved
 before and after (section HP from the saves).
-- **Contact size:** the Cutter (9.07 units/s, Emergency) slid along the Man-O-War's port side held at a steady 12.7-12.9 units
-  from its centre line for ~4 s, where the physics boxes (half-beams 3 and 2.25) leave about 7.5 units of clearance. The
-  Man-O-War's model is 9.76 units half-beam (yards and sails), so the original's ship contact is wider than the physics extents:
-  plausibly the rendered model's bounds. PROVISIONAL: one sample.
-- **Response:** the idle Man-O-War did not move or turn at all (position, heading and velocity unchanged). The Cutter lost speed
-  smoothly over ~1.2 s (9.07 → 6.2 units/s, then ~5.8) and was deflected by ~30° of heading while it kept steering inward; no
-  bounce.
+- **Not a contact either:** the Cutter (9.07 units/s, Emergency) passed the Man-O-War's port side 12.7-12.9 units from its centre
+  line, slowing to 6.2 units/s and turning ~30°. Replayed against the physics boxes the two never overlapped (closest 2.5 units
+  apart): the slow-down and turn were the Cutter's collision avoider, not contact.
 - **Damage:** both ships lost hit points on every section during the run (Cutter −75, Man-O-War −86): meteors, not the contact.
 - A head-on Emergency ram missed (passed 24 units off) and did nothing.
 
