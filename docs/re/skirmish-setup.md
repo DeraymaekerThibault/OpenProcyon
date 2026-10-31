@@ -112,17 +112,21 @@ skill can read N/A). Dragging one onto a post spends its cost (a 9-point captain
   also takes that (release over an entry other than the first picks it) next to the click, click path.
 - Computers build their fleets with the same routine as Auto Assign (`auto_build`, armed hulls only, same victory limit, weapon swaps and named crew:
   speed, turning and sight follow the posts). Read out of 14 retail battle saves ([crew.md](crew.md#computer-fleets-carry-named-crew-the-missing-post-rule-14-retail-battle-saves-2026-10)): the crew
-  and factors match. Hulls (2026-10-31, the batch's real budgets 300/340 re-read from the lobby slider, which keeps its value between
-  launches): 1-3 hulls whatever the fleet limit of 5 (filling the limit fits 1 fleet of 15), each costing at most half the points
-  still left (14/15; all hulls together at most 0.7 of the budget, 15/15), never the dearest that fits; hulls take 27-68 % of the
-  budget. All hulls and their weapon swaps come first, then named crew ship by ship in fleet order (15/15; hull-then-its-crew fits
-  10/15), cheap crewmen filling the last posts, so 13 of 15 fleets spent the budget to the point. Crew: 257 of 319 picks are rated
-  exactly 7 in the post's skill, the 8-9s are all gunners, and 24 crewmen rated 8+ (story characters) were never used. Remake:
-  1-3 hulls at random, each at most half the points left, then weapons, then crew (best gunner, otherwise the crewman nearest 7).
-  PROVISIONAL: the ship count and hull choice look random; the crew pick is not recovered (the same hull got the same crew across launches).
+  and factors match. Hulls (2026-10-31: the 14 saves at 300/340 points re-read with the lobby slider's remembered value, plus 5 saves at
+  1000 points / limit 10 (three of them, one with all 7 other Border Dispute slots computers, 7 fleets), 1000 / limit 5 and 600 / limit 10;
+  27 fleets): hulls take about half the budget (27-68 %, 21 of 27 between 43 and 62 %, at every budget), each costing at most half the
+  points still left (26/27), never the dearest that fits. The ship count follows from the hulls drawn: 1-3 at 300/340 points, 4 at 600,
+  3-8 at 1000; the fleet limit of 10 was never reached (limit 5 at 1000: 4 ships). Fleets end with cheap boats (Gunboats, Torpedo boats).
+  No Tender or Tug in 104 computer ships. All hulls and their weapon swaps come first, then named crew ship by ship in fleet order
+  (hull-then-its-crew fits 10/15), cheap crewmen filling the last posts, so 25 of 27 fleets spent the budget to the point. Crew: 257 of
+  319 picks (first batch) are rated exactly 7 in the post's skill, the 8-9s are all gunners, and 24 crewmen rated 8+ (story characters)
+  were never used. Remake: a hull share drawn from 40-60 % of the budget, hulls at random each at most half the points left and within
+  that share, no Tenders or Tugs, then weapons, then crew (best gunner, otherwise the crewman nearest 7). PROVISIONAL: the share and the
+  hull choice look random; the crew pick is not recovered (the same hull got the same crew across launches).
 - Computer weapons (36 ships in 14 retail battle saves, one entry per bank): the guns a computer swapped *in* were only Carronade Light/Medium/Heavy
   (33), Gattling Light (13), Plasma Light/Medium/Heavy (10), Cannon Light/Medium (11) and one Star Mortar; never a harpoon, lancer, energy net,
-  gravity charge or fire launcher. Stock banks holding such guns were swapped away wherever the fleet could afford it (harpoons 15 of 15, light
+  gravity charge or fire launcher. At 600-1000 points (68 more ships) the same guns plus Fire Launcher Heavy (7 banks, Procyon Frigates'
+  heavy decks) and Cannon Heavy (4); still no harpoon, lancer, energy net or gravity charge. Stock banks holding such guns were swapped away wherever the fleet could afford it (harpoons 15 of 15, light
   lancers 4 of 4, energy nets 4 of 4, gravity charge 1 of 1) and kept where the budget was spent (a two-ship fleet kept its lancers). Banks of stock cannons,
   carronades and Gattlings were swapped about half the time; two-deck banks, point-defence lancers, mines and torpedoes were never touched. The remake's
   default list is exactly that set (`RETAIL_COMPUTER_GUNS`, overridable by `data/ai/weapons.json`); PROVISIONAL: a gun that never showed up may still be allowed.
