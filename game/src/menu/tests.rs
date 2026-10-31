@@ -526,13 +526,28 @@ fn loading_a_fleet_crew_or_arms_profile_restores_what_was_saved_and_refuses_what
     sk.slots[human].crew_mut(0)[0] = vec![id.clone()];
     let before = sk.slots[human].clone();
     let fleet = before.profile_of(K::Fleet, 0);
-    // Save, drop the fleet, load: the same ships, crew and guns come back.
+    // Save, drop the fleet, load: the same hulls come back, with stock guns and no crew.
     sk.slots[human].clear_fleet();
     assert_eq!(sk.slots[human].apply_profile(K::Fleet, &fleet, 0, &lib, 1000, 5), Ok(()));
     let after = &sk.slots[human];
-    assert_eq!((&after.fleet, &after.crew[0], &after.weapons), (&before.fleet, &before.crew[0], &before.weapons));
+    assert_eq!(after.fleet, before.fleet);
+    assert!(after.crew.iter().flatten().all(Vec::is_empty) && after.weapons.iter().all(|w| w.is_empty()), "a fleet is hulls only");
+    // Arms saved from one Man-O-War load onto another.
+    let mut two = sk.slots[human].clone();
+    two.clear_fleet();
+    two.push_ship("Ship_Navy_ManOWar");
+    two.push_ship("Ship_Navy_ManOWar");
+    let class = &lib.classes[lib.index("Ship_Navy_ManOWar")];
+    let (bank, first) = crate::crew_arms::selectable_banks(&lib, class)[0];
+    let swap = |g: &&String| *g != &class.mounts[first].gun && crate::crew_arms::bank_compatible(&lib, class, bank, g);
+    let gun = lib.guns.keys().find(swap).unwrap().clone();
+    two.weapons[0].insert(bank, gun);
+    let arms = two.profile_of(K::Arms, 0);
+    assert_eq!(two.apply_profile(K::Arms, &arms, 1, &lib, 1000, 5), Ok(()));
+    assert_eq!(two.weapons[1], two.weapons[0]);
     // Crew belongs to its hull class and may not be posted twice.
     let crew = before.profile_of(K::Crew, 0);
+    sk.slots[human].crew_mut(0)[0] = vec![id.clone()];
     assert!(sk.slots[human].apply_profile(K::Crew, &crew, 1, &lib, 1000, 5).is_err() || before.fleet[0] == before.fleet[1]);
     let mut twice = crew.clone();
     twice.ships[0].class = before.fleet[1].clone();

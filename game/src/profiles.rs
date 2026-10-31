@@ -1,6 +1,7 @@
 //! Fleet, crew and arms profiles: what the skirmish screens' Load / Save buttons read and write. One JSON file per profile in
 //! `<user data dir>/profiles/{fleets,crews,arms}/<name>.json`: `{"ships": [{"class", "crew": [8 post lists], "arms": {"bank": "gun"}}]}`.
-//! A fleet file holds every ship with its crew and guns; a crew or arms file holds the one ship it was saved from (and only that part).
+//! A fleet file holds the hulls only (they load with stock guns and no crew); a crew or arms file holds one ship's crew or guns, and
+//! loads onto any ship of that hull class.
 //! The original keeps three binary files per fleet; this format is ours. PROVISIONAL: which files the lists offer (a ship's crew and
 //! arms by hull class, a fleet by race) is not measured.
 use std::collections::BTreeMap;
@@ -48,10 +49,10 @@ impl Profile {
             .iter()
             .map(|s| {
                 let mut v = json!({ "class": s.class });
-                if kind != Kind::Arms {
+                if kind == Kind::Crew {
                     v["crew"] = json!(s.crew);
                 }
-                if kind != Kind::Crew {
+                if kind == Kind::Arms {
                     v["arms"] = Value::Object(s.arms.iter().map(|(b, g)| (b.to_string(), json!(g))).collect());
                 }
                 v
@@ -102,7 +103,12 @@ pub fn list(kind: Kind) -> Vec<Profile> {
         .flatten()
         .filter_map(|e| {
             let name = e.path().file_stem()?.to_str()?.to_string();
-            Profile::from_json(&name, &crate::data::try_json(&e.path())?)
+            let mut p = Profile::from_json(&name, &crate::data::try_json(&e.path())?)?;
+            if kind == Kind::Fleet {
+                // Fleets are hulls only; older fleet files also stored crew and guns.
+                p.ships.iter_mut().for_each(|s| (s.crew, s.arms) = Default::default());
+            }
+            Some(p)
         })
         .collect();
     all.sort_by_key(|a| a.name.to_lowercase());
@@ -129,7 +135,8 @@ mod tests {
         ship.crew[0] = vec!["Crew_Navy_AlexG".into()];
         ship.arms.insert(3, "Gun_Harpoon_Light".into());
         let p = Profile { name: "x".into(), ships: vec![ship] };
-        assert_eq!(Profile::from_json("x", &p.to_json(Kind::Fleet)), Some(p.clone()));
+        let fleet = Profile::from_json("x", &p.to_json(Kind::Fleet)).unwrap();
+        assert_eq!((fleet.ships[0].class.as_str(), fleet.ships[0].crew[0].len(), fleet.ships[0].arms.len()), ("Ship_Navy_ManOWar", 0, 0));
         let crew = Profile::from_json("x", &p.to_json(Kind::Crew)).unwrap();
         assert_eq!((crew.ships[0].crew[0].len(), crew.ships[0].arms.len()), (1, 0));
         let arms = Profile::from_json("x", &p.to_json(Kind::Arms)).unwrap();
