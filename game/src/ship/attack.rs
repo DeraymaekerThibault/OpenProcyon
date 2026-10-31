@@ -70,6 +70,20 @@ pub fn plan(lib: &Library, class: &Class, health: &Health, guns: Option<&GunStat
     Some((routine, range))
 }
 
+/// The point a Broadside, Frontal or Rear attack steers by (Ram steers at the target's centre): the centre of the target's damage
+/// section nearest to `from`, re-picked every think, the first section on a tie. A ship's dead sections count; a base's only live
+/// ones, and with none left its centre. PROVISIONAL: the original's per-section filter on bases is read as our mission flag.
+pub fn aim(sections: &[crate::data::Section], hp: &[f32], tf: &Transform, from: Vec3, base: bool) -> Vec3 {
+    let live = |k: usize| hp.get(k).is_some_and(|hp| *hp > 0.0);
+    sections
+        .iter()
+        .enumerate()
+        .filter(|(k, s)| !base || (s.mission && live(*k)))
+        .map(|(_, s)| tf.transform_point((s.min + s.max) * 0.5).with_y(tf.translation.y))
+        .min_by(|a, b| a.distance_squared(from).total_cmp(&b.distance_squared(from)))
+        .unwrap_or(tf.translation)
+}
+
 /// A Frontal attacker's break-off: (game time it started, direction).
 pub type Breakoff = Option<(f32, Vec3)>;
 
@@ -91,9 +105,10 @@ pub fn course(routine: Routine, pos: Vec3, heading: f32, foe: Vec3, gap: f32, r:
             if gap >= r {
                 return vec![foe];
             }
-            // PROVISIONAL: which way the original breaks off is not read; here away from the beam the target bears on.
-            let port = crate::ship::angdiff((-d.x).atan2(-d.z), heading) >= 0.0;
-            let v = if port { right } else { -right };
+            // The line of sight turned 90° toward the side the target bears on (to port when it is on the port bow, else to starboard):
+            // the ship turns toward it and circles it on that side. Fixed in the world for the whole leg.
+            let port = crate::ship::angdiff((-d.x).atan2(-d.z), heading) > 0.0;
+            let v = if port { -right } else { right };
             *breakoff = Some((now, v));
             vec![pos + v * r]
         }

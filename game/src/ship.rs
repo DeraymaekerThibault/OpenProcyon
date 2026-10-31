@@ -197,9 +197,11 @@ pub fn ai(
     let dt = time.delta_secs();
     let holes = hole_list(&holes, storms.0.as_deref(), storms.1.as_deref());
     let now = time.elapsed_secs();
-    // (entity, position, side, afloat, radius, fleet)
-    let snap: Vec<(Entity, Vec3, Side, bool, f32, Option<String>)> =
-        ships.iter().map(|(e, t, s, h, _, _, m, _)| (e, t.translation, s.side, !h.destroyed, lib.classes[s.class].radius, m.map(|m| m.0.clone()))).collect();
+    // (entity, position, side, afloat, radius, fleet, the aim point seen from a position)
+    let snap: Vec<(Entity, Vec3, Side, bool, f32, Option<String>, (Transform, usize, Vec<f32>))> = ships
+        .iter()
+        .map(|(e, t, s, h, _, _, m, _)| (e, t.translation, s.side, !h.destroyed, lib.classes[s.class].radius, m.map(|m| m.0.clone()), (*t, s.class, h.sections.clone())))
+        .collect();
     breakoffs.retain(|e, _| snap.iter().any(|f| f.0 == *e));
     for (e, tf, mut s, h, me, pilot, member, guns) in &mut ships {
         // The human's own fleet waits for orders; allied computer fleets share the human's side but hunt like any computer.
@@ -253,15 +255,20 @@ pub fn ai(
             Some((t, false)) => _ = targets.0.insert(e, (t, 0.0)),
             None => _ = targets.0.remove(&e),
         }
-        // (position, radius, is a base)
+        // (position, radius, is a base, aim point)
         let foe = chosen.and_then(|(t, _)| {
-            snap.iter().find(|f| f.0 == t).map(|f| (f.1, f.4, false)).or_else(|| bases.get(t).ok().map(|b| (b.1.translation, lib.classes[b.4.class].radius, true)))
+            snap.iter().find(|f| f.0 == t).map(|f| (f.1, f.4, false, attack::aim(&lib.classes[f.6.1].sections, &f.6.2, &f.6.0, tf.translation, false))).or_else(|| {
+                bases
+                    .get(t)
+                    .ok()
+                    .map(|b| (b.1.translation, lib.classes[b.4.class].radius, true, attack::aim(&lib.classes[b.4.class].sections, &b.3.sections, b.1, tf.translation, true)))
+            })
         });
         let class = &lib.classes[s.class];
         let explore_now = |s: &mut Ship, explore: &mut Explore| {
             (s.waypoints, s.goal, s.order) = (vec![explore.goal(&cfg, e, tf.translation, class.sight)], None, 3);
         };
-        let Some((foe_pos, foe_radius, foe_base)) = foe else {
+        let Some((foe_pos, foe_radius, foe_base, foe_aim)) = foe else {
             s.goal = None;
             if human || explicit.is_some() {
                 s.order = 0;
@@ -285,8 +292,8 @@ pub fn ai(
         }
         let r = if foe_base { range[1] } else { range[0] };
         let gap = (foe_pos - tf.translation).with_y(0.0).length() - class.radius - foe_radius;
-        // PROVISIONAL: the original aims at the target's damage section nearest to us; here at its centre.
-        let course = attack::course(routine, tf.translation, s.heading, foe_pos, gap, r, now, breakoffs.entry(e).or_default());
+        let at = if routine == attack::Routine::Ram { foe_pos } else { foe_aim };
+        let course = attack::course(routine, tf.translation, s.heading, at, gap, r, now, breakoffs.entry(e).or_default());
         s.throttle = attack::throttle(e, tf.translation, s.heading, course[0]);
         (s.waypoints, s.goal, s.order) = (course, None, 3);
     }

@@ -381,8 +381,8 @@ fn a_broadside_attacker_circles_an_idle_ship_on_its_turning_circle() {
     let lib = combat::Library::load(crate::assets_dir());
     let foe = Vec3::ZERO;
     // Minimum throttle: the measured Carrack's save holds 0.745; the Barque takes the range's mean (each ship draws 0.65-0.75).
-    // ponytail: the port circles at 40-50 (Carrack) and 43-72 (Barque): the right size, but it breathes more than retail, where the
-    // throttle stays at its minimum on the circle. Suspects: the aim at the target's centre (the original: its nearest section).
+    // ponytail: aiming at the Cutter's nearest section (as the original), the circles run 42-49 (Carrack) and 43-73 (Barque): the right
+    // size, but the Barque breathes more than retail. Not the aim (centre-aimed it was 43-72); left: our turn model (movement.md).
     for (name, min_throttle, lo_ok, hi_ok) in [("Ship_Pirate_Carrack", 0.745, 38.0, 53.0), ("Ship_Pirate_Barque", 0.7, 40.0, 76.0)] {
         let ci = lib.index(name);
         let class = &lib.classes[ci];
@@ -405,12 +405,15 @@ fn a_broadside_attacker_circles_an_idle_ship_on_its_turning_circle() {
             avoid: 1.0,
         };
         let mut tf = Transform::from_xyz(30.0, 0.0, 400.0);
+        let cutter = &lib.classes[lib.index("Ship_Navy_Cutter")].sections;
+        let cutter_hp: Vec<f32> = cutter.iter().map(|s| s.hp).collect();
         let dt = 1.0 / 30.0;
         let e = Entity::from_raw_u32(3).unwrap();
         let (mut dists, mut beams) = (vec![], vec![]);
         for i in 0..(200.0 / dt) as usize {
             let gap = tf.translation.length() - class.radius;
-            let course = attack::course(routine, tf.translation, ship.heading, foe, gap, range[0], i as f32 * dt, &mut None);
+            let at = attack::aim(cutter, &cutter_hp, &Transform::IDENTITY, tf.translation, false);
+            let course = attack::course(routine, tf.translation, ship.heading, at, gap, range[0], i as f32 * dt, &mut None);
             let throttle = attack::throttle(e, tf.translation, ship.heading, course[0]).map(|_| 2.0 * min_throttle);
             (ship.throttle, ship.waypoints, ship.goal, ship.order) = (throttle, course, None, 3);
             step(&mut ship, &mut tf, class, &h, dt);

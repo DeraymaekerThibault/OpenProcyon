@@ -280,21 +280,31 @@ the difficulty setting.
   both rear quadrants → **rear**; otherwise **broadside** on the side it covers (port if only port quadrants). No live gun → **ram**
   a ship (against a base it explores). Stock fits: Barque, Navy Frigate and Cutter broadside to port; Carrack and Procyon Minelayer
   to starboard; Procyon Frigate, torpedo boats and other bow-gun ships frontal; Assault Cutters rear.
+- **Bank order:** banks count in the order their guns first appear in the ship's file; on equal victory points the first one wins.
+  The original also has timers for switching to a second bank, but their condition can never hold, so a ship keeps its primary bank
+  until its guns die.
+- **Aim point:** broadside, frontal and rear courses are laid relative to the target's damage section nearest to the attacker,
+  picked again every think (the first section on a tie). A ship's sections all count, dead or not; a base's only live ones, and
+  with none left its centre. Ram steers at the target's centre, and the frontal range test uses the gap between the hulls.
 - **Attack range R:** the mean over the ship's gun banks of each bank's first live gun's effective range (long range against a base).
 - **Broadside:** every think the course runs to a point R abeam of the target (on the chosen side) and on to a point R beyond it.
   Aiming that far out keeps the rudder hard over and, past 11.25° off the bow, the throttle at the ship's minimum, so the ship ends on
   its own tightest turning circle round the target (the ~55-unit circles measured above), not at R.
-- **Frontal:** straight at the target until the gap between the hulls is R, then sail at right angles to the line of sight (R ahead)
-  for up to 15 s or until out of range, then charge again. **Rear:** inside R run straight away to R, outside it come straight back.
+- **Frontal:** straight at the target until the gap between the hulls is R, then turn the line of sight 90° toward the side the target bears on
+  (to port when it is on the port bow, to starboard when on the starboard bow or dead ahead) and sail that fixed direction (R ahead)
+  for up to 15 s or until out of range, then charge again (or break off again, with a new direction, if still inside R). The ship so
+  turns toward its target and swings round it on that side. **Rear:** inside R run straight away to R, outside it come straight back.
   **Ram:** straight at it, full throttle within 5° of the bow.
 - **Throttle:** full while the next course point is within 11.25° of the bow, else the ship's own minimum, 0.65-0.75 of full (drawn
-  per ship).
+  per ship). That minimum is a floor under every slow-down but the collision avoider's, so nothing else slows an attacker near its
+  course points.
 - **Explore:** sail for the centre of a quadrant (a quarter of the map's extent out on each axis); within half the scan range of it,
   pick a quadrant at random (possibly the same).
 - **Grapple and board** (every think, any attack): with a hostile ship in a free harpoon's line of fire, fire the harpoons with a 5 %
   chance; boarding starts with a 20 % chance per think once possible and with a boarding strength over 10.
 - Remake: `ship::attack` (choice, R, courses, throttle) for the skirmish captains (`ship::ai`) and mission attack orders, with the
-  target rule in `ship::ai`. PROVISIONAL: the aim at the target's centre (the original: its damage section nearest to us), the frontal
-  break-off side (away from the beam the target is on), tie order between equal banks (the ship file's order), the explore border
-  margin and random draw. Simulated circles: Carrack 40-50 units (retail 45-50), Barque 43-72 (retail 51-58, its throttle staying at the
-  minimum); the port circles the right size but breathes more.
+  target rule in `ship::ai`. PROVISIONAL: which per-section flag limits a base's aim sections (the remake takes its
+  mission sections), the explore border margin and random draw. A measured Carrack held side A where its stock guns predict side B;
+  computer skirmish ships carry swapped guns and that run's fit was not recorded, so it is unresolved. Simulated circles round an idle
+  Cutter, aiming at its nearest section: Carrack 42-49 units (retail 45-50), Barque 43-73 (retail 51-58, its throttle staying at the
+  minimum); the right size, but the Barque breathes more, which the aim point does not explain.
