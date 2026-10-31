@@ -88,7 +88,26 @@ skirmish, the shell position sampled about 30 times a second.
 - A shell that hits nothing bursts where it reaches the flight plane.
 - Look: in flight a small pink-white spark with a short trail. On impact a white flash with long rays, then about a second
   later a wide flat pink-orange ring spreading over the flight plane (blast MaxRadius 60 over Duration 3 in the bullet
-  data); a ring from a shell ~50 units ahead reached the firing ship. Ring growth timing not measured.
+  data); a ring from a shell ~50 units ahead reached the firing ship.
+
+## Mortar blasts (read from the original's code, 2026-10-31)
+- Star-class blasts (Star mortar, Nova secondaries, the volcano's magma bolt, mission 9's dark matter) are a ring spreading from the
+  burst at MaxRadius / Duration (Star: 60 over 3 s, 20 units/s). A Star shell bursts where it comes down to the flight plane; one that
+  strikes a hull or tower first deals its normal hit (unless it ricochets), then bursts there. One that times out just vanishes.
+- The ring strikes everything once, when it reaches its centre: every ship and base section whose centre it passes (not just the
+  nearest one), rocks, and shells in flight. Damage = the bullet's roll for the material x max(0.1, 1 - distance / MaxRadius): full at
+  the centre, half at 30 units, a tenth from 54 (Star). Ship sections take the difficulty factor and spill; no fires or criticals start.
+  Nobody is spared: the shooter's own ships are struck too. Rocks take the Stone roll, shells in flight the Iron roll off their hit
+  points (a torpedo within about 32 units of the centre dies). Star-class shells are immune.
+- A Nova mortar splits at the top of its arc (with a flash and its detonate sound) into five `Bullet_NovaMortar_Secondary` shells at
+  its speed: one straight on and four turned 0.1 rad either way about its up and right axes, landing roughly 25 units apart. Each
+  is a Star blast (radius 60 over 3 s). A Nova that strikes a hull before its apex is spent.
+- Ordinary shells have no splash.
+- Remake: `combat::lob::blasts`, `nova_split`. PROVISIONAL: the push a blast gives everything inside it (the bullet's `Magnitude`,
+  constant over the radius) and the gravity well's pull (`Magnitude` 40000, zero at the centre and rim, peak at half the radius; it
+  does not freeze ships) are not ported: their scale to ship motion is unmeasured, so the well still slows ships as before. The Nova
+  pattern is not rolled with the shell's spin; lifeboats are not struck. The remake bursts lob shells at their aim point's height,
+  not at the flight plane.
 
 ## Playtest fixes: arcs and torpedoes
 

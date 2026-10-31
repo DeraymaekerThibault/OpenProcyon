@@ -26,6 +26,8 @@ pub(super) fn shells(cfg: Res<crate::Config>, lib: Res<Library>, player: Query<&
             shooter: Entity::PLACEHOLDER,
             target: None,
             gravity: 0.0,
+            aim: None,
+            ricochet: 0.0,
         });
     }
 }

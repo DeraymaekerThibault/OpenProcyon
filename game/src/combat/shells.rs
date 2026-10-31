@@ -136,6 +136,18 @@ pub(super) fn apply_base_hit(class: &Class, hp: &mut Health, k: usize, roll: f32
     (0..was_up.len()).filter(|j| was_up[*j] && hp.sections[*j] == 0.0).collect()
 }
 
+/// The base parts in `fallen` that are mission parts burst with their destruct effect and a blast. PROVISIONAL: retail's effect for a
+/// destroyed base part is not measured; the part's WOT destruct effect and the ship-explosion sound stand in.
+pub(super) fn base_parts_burst(commands: &mut Commands, fxl: &FxLib, sfx: &mut MessageWriter<Sfx>, rng: &mut Rng, class: &Class, btf: &Transform, fallen: Vec<usize>) {
+    for sec in fallen.into_iter().map(|j| &class.sections[j]).filter(|sec| sec.mission) {
+        let centre = Transform::from_translation(btf.transform_point((sec.min + sec.max) / 2.0));
+        if let Some(name) = sec.destruct.as_ref().and_then(|d| d.fx.as_deref()) {
+            fx::spawn(commands, fxl, name, None, centre, centre, true);
+        }
+        sfx.write(Sfx { name: format!("Explosion_Med0{}", rng.variant(8)), at: Some(centre.translation), vol: 1.0, max: 900.0 });
+    }
+}
+
 /// Read from the original's code: the chance a shell striking a section glances off it unharmed, from the gun's range-band factor,
 /// the section's material and the angle in degrees between the shell's flight (relative to the target) reversed and the face's normal
 /// (0 head-on, 90 grazing).
@@ -186,7 +198,7 @@ fn spill(class: &Class, hp: &mut Health, k: usize, damage: f32, invuln: f32, see
 }
 
 /// The bullet's impact effect at `at`, facing back along its flight.
-fn hit_fx(commands: &mut Commands, fxl: &FxLib, bd: &BulletDef, at: Vec3, vel: Vec3) {
+pub(super) fn hit_fx(commands: &mut Commands, fxl: &FxLib, bd: &BulletDef, at: Vec3, vel: Vec3) {
     if let Some(n) = &bd.hit_fx {
         let t = Transform::from_translation(at).looking_to(-vel, Vec3::Y);
         fx::spawn(commands, fxl, n, None, t, t, true);
@@ -238,9 +250,10 @@ pub(super) fn shells(
     // Shells pass through lifeboats (no weapon-vs-lifeboat response is registered in the original; PROVISIONAL, docs/re/lifeboats.md §2.4).
     mut ships: ShipTargets,
     mut detonate: MessageWriter<Detonate>,
-    (mut dragons, mut scars, land): (
+    (mut dragons, mut scars, mut shoot, land): (
         Query<&mut crate::dragons::Dragon>,
         MessageWriter<crate::decals::Scar>,
+        MessageWriter<Shoot>,
         Query<(Entity, &crate::collision::Obstacle, Option<&Visibility>), (Without<Shell>, Without<Ship>, Without<Asteroid>)>,
     ),
 ) {
@@ -257,7 +270,20 @@ pub(super) fn shells(
         }
         let p0 = tf.translation;
         let bd = &lib.bullets[&s.bullet];
+        let rising = s.vel.y >= 0.0;
         s.vel.y -= s.gravity * dt;
+        // A Nova mortar splits at the top of its arc into five secondaries (each a star blast when it comes down), with a flash.
+        if matches!(s.payload, Payload::Nova) && rising && s.vel.y < 0.0 {
+            let at = Transform::from_translation(p0);
+            fx::spawn(&mut commands, &fxl, "Lancer_Muzzle_Flash", None, at, at, true);
+            sfx.write(Sfx { name: "Weapon_Novamortar_Detonate".into(), at: Some(p0), vol: 1.0, max: 900.0 });
+            for vel in lob::nova_split(s.vel) {
+                let (bullet, side, shooter, target, gravity, aim, ricochet) = (lob::NOVA_SECONDARY.into(), s.side, s.shooter, s.target, s.gravity, s.aim, s.ricochet);
+                shoot.write(Shoot { bullet, from: p0, vel, side, shooter, target, gravity, aim, ricochet });
+            }
+            commands.entity(e).despawn();
+            continue;
+        }
         // Mines (MineAI sight, MinePhysics max speed): home on the nearest hostile ship in sight, else coast to rest at the drop point.
         // PROVISIONAL: the original's mine steering/drag is unknown.
         if let Payload::Mine { sight, speed } = s.payload {
@@ -326,7 +352,7 @@ pub(super) fn shells(
         // Lob shells burst where they come down through the height they were aimed at.
         if let Some(a) = s.aim.filter(|a| !matches!(s.payload, Payload::Mine { .. }) && s.vel.y < 0.0 && p1.y <= a.y) {
             let t = if (p0.y - p1.y).abs() > 1e-4 { ((p0.y - a.y) / (p0.y - p1.y)).clamp(0.0, 1.0) } else { 1.0 };
-            detonate.write(Detonate { bullet: s.bullet.clone(), at: p0.lerp(p1, t), shooter: Some(s.shooter) });
+            detonate.write(Detonate { bullet: s.bullet.clone(), at: p0.lerp(p1, t), shooter: Some(s.shooter), owner: Some((s.side, s.base)) });
             commands.entity(e).despawn();
             continue;
         }
@@ -416,16 +442,12 @@ pub(super) fn shells(
             let class = &lib.classes[ab.class];
             let fallen = apply_base_hit(class, &mut hp, k, rng.range(lo, hi));
             sfx.write_batch(bd.impact_sound(key, at, &mut rng));
-            // A base part going down bursts with its destruct effect and a blast. PROVISIONAL: retail's effect for a destroyed
-            // base part is not measured; the part's WOT destruct effect and the ship-explosion sound stand in.
-            for sec in fallen.into_iter().map(|j| &class.sections[j]).filter(|sec| sec.mission) {
-                let centre = Transform::from_translation(btf.transform_point((sec.min + sec.max) / 2.0));
-                if let Some(name) = sec.destruct.as_ref().and_then(|d| d.fx.as_deref()) {
-                    fx::spawn(&mut commands, &fxl, name, None, centre, centre, true);
-                }
-                sfx.write(Sfx { name: format!("Explosion_Med0{}", rng.variant(8)), at: Some(centre.translation), vol: 1.0, max: 900.0 });
-            }
+            base_parts_burst(&mut commands, &fxl, &mut sfx, &mut rng, class, btf, fallen);
             hit_fx(&mut commands, &fxl, bd, at, s.vel);
+            // A star mortar bursts where it struck, after its direct hit.
+            if matches!(s.payload, Payload::Blast { .. }) {
+                detonate.write(Detonate { bullet: s.bullet.clone(), at, shooter: Some(s.shooter), owner: Some((s.side, s.base)) });
+            }
             commands.entity(e).despawn();
             continue;
         }
@@ -443,8 +465,9 @@ pub(super) fn shells(
                 continue;
             }
         }
-        // Blast, Nova and gravity shells burst on the hull they strike; warning shots splash harmlessly.
-        if let (Some((_, k, at)), true) = (best, s.harmless || matches!(s.payload, Payload::Blast { .. } | Payload::Nova | Payload::Grav { .. })) {
+        // A gravity charge bursts on the hull it strikes, a Nova is spent there (star mortars hit, then burst, below); warning shots
+        // splash harmlessly.
+        if let (Some((_, k, at)), true) = (best, s.harmless || matches!(s.payload, Payload::Nova | Payload::Grav { .. })) {
             if s.harmless {
                 // A warning shot glances off: the bullet's ricochet sound for the struck material.
                 let material = best_ship.and_then(|si| ships.get(si).ok()).map(|x| lib.classes[x.2.class].sections[k].material.clone()).unwrap_or_default();
@@ -453,8 +476,8 @@ pub(super) fn shells(
                     sfx.write(Sfx { name: name.clone(), at: Some(at), vol: 1.0, max: 600.0 });
                 }
                 hit_fx(&mut commands, &fxl, bd, at, s.vel);
-            } else {
-                detonate.write(Detonate { bullet: s.bullet.clone(), at, shooter: Some(s.shooter) });
+            } else if !matches!(s.payload, Payload::Nova) {
+                detonate.write(Detonate { bullet: s.bullet.clone(), at, shooter: Some(s.shooter), owner: Some((s.side, s.base)) });
             }
             commands.entity(e).despawn();
             continue;
@@ -464,13 +487,16 @@ pub(super) fn shells(
             let target = ShipTarget { entity: se, transform: stf, side: ship.side, class: &lib.classes[ship.class], invuln: mission.map_or(0.0, |m| m.invuln) };
             hit_ship(&mut commands, &fxl, &mut rng, (&mut sfx, &mut hits, &mut scars), bd, &s, target, &mut hp, &mut fires, k, at);
             hit_fx(&mut commands, &fxl, bd, at, s.vel);
+            if matches!(s.payload, Payload::Blast { .. }) {
+                detonate.write(Detonate { bullet: s.bullet.clone(), at, shooter: Some(s.shooter), owner: Some((s.side, s.base)) });
+            }
             commands.entity(e).despawn();
         } else if let Some(t) = ground {
             // Land: the shot is spent with its impact; explosive and lobbed shells burst there. PROVISIONAL (not decoded): the
             // island hit effect the original shows half the time near the player, and how a section hit ricochets.
             let at = p0.lerp(p1, t.min(1.0));
             if !s.harmless && (s.aim.is_some() || matches!(s.payload, Payload::Blast { .. } | Payload::Nova | Payload::Grav { .. } | Payload::Mine { .. })) {
-                detonate.write(Detonate { bullet: s.bullet.clone(), at, shooter: Some(s.shooter) });
+                detonate.write(Detonate { bullet: s.bullet.clone(), at, shooter: Some(s.shooter), owner: Some((s.side, s.base)) });
             } else {
                 sfx.write_batch(bd.impact_sound("Stone", at, &mut rng));
                 hit_fx(&mut commands, &fxl, bd, at, s.vel);

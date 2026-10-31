@@ -9,9 +9,11 @@ pub struct Detonate {
     pub bullet: String,
     pub at: Vec3,
     pub shooter: Option<Entity>,
+    /// The shooter's side and whether it is a base, for the difficulty factor (`side_damage_scale`); None for scripted blasts.
+    pub owner: Option<(Side, bool)>,
 }
 
-/// A shot from a shooter that has no gun mounts (a dragon's breath): spawned as an ordinary shell of `bullet`.
+/// A shell spawned without a gun mount (a dragon's breath, a Nova mortar's secondaries): an ordinary shell of `bullet`.
 #[derive(Message)]
 pub struct Shoot {
     pub bullet: String,
@@ -22,6 +24,9 @@ pub struct Shoot {
     pub target: Option<Entity>,
     /// Downward acceleration on the shell (units/s^2).
     pub gravity: f32,
+    /// A lob's aim point (it bursts coming down through its height).
+    pub aim: Option<Vec3>,
+    pub ricochet: f32,
 }
 
 pub fn shoot(mut commands: Commands, lib: Res<Library>, fxl: Res<FxLib>, mut msgs: MessageReader<Shoot>) {
@@ -41,13 +46,12 @@ pub fn shoot(mut commands: Commands, lib: Res<Library>, fxl: Res<FxLib>, mut msg
                     target: m.target,
                     angular_velocity: 0.0,
                     payload: b.payload,
-                    aim: None,
+                    aim: m.aim,
                     pd: false,
                     hp: b.hitpoints,
                     harmless: false,
                     base: false,
-                    // ponytail: only the dragon's breath comes this way, and its factor (-200) never ricochets.
-                    ricochet: -200.0,
+                    ricochet: m.ricochet,
                 },
                 Transient,
                 stf,
@@ -60,15 +64,16 @@ pub fn shoot(mut commands: Commands, lib: Res<Library>, fxl: Res<FxLib>, mut msg
     }
 }
 
-/// A growing blast sphere (StarMortarCustomInfoFactory: MaxRadius over Duration). Every unit it reaches is struck once.
+/// A star-class blast (StarMortarCustomInfoFactory: MaxRadius over Duration), read from the original's code: a ring spreading from
+/// the burst at MaxRadius / Duration that strikes everything once as it passes its centre (`blasts`).
 #[derive(Component)]
 pub struct Blast {
     bullet: String,
     shooter: Option<Entity>,
+    owner: Option<(Side, bool)>,
     radius: f32,
     duration: f32,
     age: f32,
-    struck: Vec<Entity>,
 }
 
 /// A gravity charge's well (GravChargeCustomInfoFactory: Radius, Duration): ships inside are held.
@@ -78,9 +83,8 @@ pub struct GravWell {
     left: f32,
 }
 
-/// The Nova mortar bursts into secondary star-mortar blasts. PROVISIONAL layout: one at the landing point and four around it at
-/// half the secondary's radius; the original spawns the secondaries itself and their count/placement is unknown.
-const NOVA_SECONDARY: &str = "Bullet_NovaMortar_Secondary";
+/// What a Nova mortar splits into at the top of its arc (`split_nova`).
+pub(super) const NOVA_SECONDARY: &str = "Bullet_NovaMortar_Secondary";
 
 pub fn detonate(
     mut commands: Commands,
@@ -98,87 +102,127 @@ pub fn detonate(
             m.script.mortar_bursts.push(d.at);
         }
         sfx.write_batch(b.impact_sound("Wood", d.at, &mut rng));
-        let effect = |commands: &mut Commands, name: &Option<String>, at: Vec3| {
-            if let Some(n) = name {
-                let t = Transform::from_translation(at);
-                fx::spawn(commands, &fxl, n, None, t, t, true);
-            }
-        };
-        let blast = |commands: &mut Commands, bullet: &str, at: Vec3, radius: f32, duration: f32| {
-            commands.spawn((
-                Blast { bullet: bullet.into(), shooter: d.shooter, radius, duration: duration.max(0.1), age: 0.0, struck: vec![] },
-                Transform::from_translation(at),
-                Transient,
-                crate::Scenario,
-            ));
-        };
-        effect(&mut commands, &b.hit_fx, d.at);
+        if let Some(n) = &b.hit_fx {
+            let t = Transform::from_translation(d.at);
+            fx::spawn(&mut commands, &fxl, n, None, t, t, true);
+        }
         match b.payload {
-            Payload::Blast { radius, duration } => blast(&mut commands, &d.bullet, d.at, radius, duration),
-            Payload::Nova => {
-                if let Some(sec) = lib.bullets.get(NOVA_SECONDARY)
-                    && let Payload::Blast { radius, duration } = sec.payload
-                {
-                    for k in 0..5 {
-                        let off = if k == 0 { Vec3::ZERO } else { Quat::from_rotation_y(k as f32 * std::f32::consts::FRAC_PI_2) * Vec3::X * radius * 0.5 };
-                        effect(&mut commands, &sec.hit_fx, d.at + off);
-                        blast(&mut commands, NOVA_SECONDARY, d.at + off, radius, duration);
-                    }
-                }
+            Payload::Blast { radius, duration } => {
+                commands.spawn((
+                    Blast { bullet: d.bullet.clone(), shooter: d.shooter, owner: d.owner, radius, duration: duration.max(0.1), age: 0.0 },
+                    Transform::from_translation(d.at),
+                    Transient,
+                    crate::Scenario,
+                ));
             }
             Payload::Grav { radius, duration } => {
                 commands.spawn((GravWell { radius, left: duration }, Transform::from_translation(d.at), Transient, crate::Scenario));
             }
-            Payload::Shell | Payload::Mine { .. } => {}
+            // A Nova splits in flight (`split_nova`); one that lands or strikes first is just spent.
+            Payload::Nova | Payload::Shell | Payload::Mine { .. } => {}
         }
     }
 }
 
-/// Grows each blast and strikes every ship, base section and rock it reaches with the bullet's damage for that material.
-/// PROVISIONAL: the struck section is the one nearest the blast centre; no fires are started; friend and foe alike are hit
-/// (only the shooter itself is spared).
+/// The five secondaries' velocities of a Nova mortar splitting with velocity `v`: one straight on, four turned 0.1 rad either way
+/// about the shell's up and right axes (read from the original's code). PROVISIONAL: the pattern is not rolled with the shell's spin.
+pub(super) fn nova_split(v: Vec3) -> [Vec3; 5] {
+    let right = v.cross(Vec3::Y).normalize_or(Vec3::X);
+    let up = right.cross(v).normalize_or(Vec3::Y);
+    [(0.0, 0.0), (-0.1, -0.1), (0.1, -0.1), (-0.1, 0.1), (0.1, 0.1)].map(|(yaw, pitch)| Quat::from_axis_angle(up, yaw) * Quat::from_axis_angle(right, pitch) * v)
+}
+
+/// Spreads each blast and strikes what its ring passes, read from the original's code: every ship and base section, rock and shell
+/// in flight is struck once, when the ring (radius MaxRadius x age / Duration) reaches its centre, for the bullet's damage roll for
+/// the material times max(0.1, 1 - distance / MaxRadius). Ship sections take the difficulty factor and spill; no fires start. Nobody is
+/// spared, the shooter's own ships included; star-class shells are immune. PROVISIONAL: the push the blast gives what is inside it
+/// (the bullet's `Magnitude`) is not ported (its scale to ship motion is unmeasured); lifeboats are not struck.
+#[allow(clippy::too_many_arguments)]
 pub fn blasts(
     mut commands: Commands,
     time: Res<Time>,
     lib: Res<Library>,
+    fxl: Res<FxLib>,
     mut rng: ResMut<Rng>,
-    mut hits: MessageWriter<Hit>,
-    mut destroyed: MessageWriter<Destroyed>,
-    mut q: Query<(Entity, &mut Blast, &Transform), Without<Ship>>,
+    (mut hits, mut destroyed, mut sfx): (MessageWriter<Hit>, MessageWriter<Destroyed>, MessageWriter<Sfx>),
+    q: Query<(Entity, &mut Blast, &Transform), (Without<Ship>, Without<Shell>)>,
     mut ships: Query<(Entity, &Transform, &Ship, &mut Health, Option<&crate::campaign::MissionShip>), Without<crate::lifeboats::Lifeboat>>,
-    mut rocks: Query<(Entity, &Transform, &mut Asteroid), Without<Ship>>,
+    mut bases: Query<(Entity, &Transform, &ArmedBase, &mut Health), (Without<Ship>, Without<Blast>)>,
+    mut rocks: Query<(Entity, &Transform, &mut Asteroid), (Without<Ship>, Without<Blast>)>,
+    mut shells: Query<(Entity, &mut Shell, &Transform), (Without<Ship>, Without<Blast>)>,
 ) {
     let dt = time.delta_secs();
+    let mut q = q;
     for (e, mut b, tf) in &mut q {
+        let before = b.radius * (b.age / b.duration).min(1.0);
         b.age += dt;
-        let r = b.radius * (b.age / b.duration).min(1.0);
-        let c = tf.translation;
+        let now = b.radius * (b.age / b.duration).min(1.0);
+        let (c, max) = (tf.translation, b.radius);
+        let passed = |p: Vec3| {
+            let r = p.distance(c);
+            (r >= before && r < now && r < max).then(|| (1.0 - r / max).max(0.1))
+        };
         let Some(bd) = lib.bullets.get(&b.bullet) else {
             commands.entity(e).despawn();
             continue;
         };
+        let by = b.shooter.unwrap_or(e);
         for (se, stf, ship, mut hp, ms) in &mut ships {
-            if hp.destroyed || Some(se) == b.shooter || b.struck.contains(&se) {
+            if hp.destroyed {
                 continue;
             }
             let class = &lib.classes[ship.class];
-            if stf.translation.distance(c) - class.radius > r {
+            let scale = b.owner.map_or(1.0, |(side, base)| side_damage_scale(side, ship.side, crate::menu::difficulty(), base));
+            let mut struck = false;
+            for k in 0..class.sections.len() {
+                let sec = &class.sections[k];
+                let Some(f) = passed(stf.transform_point((sec.min + sec.max) / 2.0)) else { continue };
+                let [lo, hi, ..] = bd.damage[material_key(&sec.material)];
+                let f = f * scale;
+                apply_ship_hit(class, &mut hp, k, [lo * f, hi * f, 0.0, 0.0, 0.0], ms.map_or(0.0, |m| m.invuln), false, &mut rng);
+                struck = true;
+            }
+            if struck {
+                hits.write(Hit { shooter: by, victim: se });
+            }
+        }
+        for (be, btf, ab, mut hp) in &mut bases {
+            if hp.destroyed {
                 continue;
             }
-            b.struck.push(se);
-            hits.write(Hit { shooter: b.shooter.unwrap_or(e), victim: se });
-            let Some(k) = nearest_section(class, stf.to_matrix().inverse().transform_point3(c)) else { continue };
-            let key = material_key(&class.sections[k].material);
-            apply_ship_hit(class, &mut hp, k, bd.damage[key], ms.map_or(0.0, |m| m.invuln), false, &mut rng);
+            let class = &lib.classes[ab.class];
+            let mut struck = false;
+            for k in 0..class.sections.len() {
+                let sec = &class.sections[k];
+                let Some(f) = passed(btf.transform_point((sec.min + sec.max) / 2.0)) else { continue };
+                let [lo, hi, ..] = bd.damage[material_key(&sec.material)];
+                let fallen = apply_base_hit(class, &mut hp, k, rng.range(lo, hi) * f);
+                base_parts_burst(&mut commands, &fxl, &mut sfx, &mut rng, class, btf, fallen);
+                struck = true;
+            }
+            if struck {
+                hits.write(Hit { shooter: by, victim: be });
+            }
         }
         for (re, rtf, mut rock) in &mut rocks {
-            if rock.hp <= 0.0 || b.struck.contains(&re) || rtf.translation.distance(c) - rock.radius > r {
+            let Some(f) = passed(rtf.translation).filter(|_| rock.hp > 0.0) else { continue };
+            let [lo, hi, ..] = bd.damage["Stone"];
+            if rock.damage(rng.range(lo, hi) * f) {
+                destroyed.write(Destroyed { by, victim: re });
+            }
+        }
+        for (pe, mut shell, ptf) in &mut shells {
+            if matches!(shell.payload, Payload::Blast { .. }) {
                 continue;
             }
-            b.struck.push(re);
-            let [lo, hi, ..] = bd.damage["Stone"];
-            if rock.damage(rng.range(lo, hi)) {
-                destroyed.write(Destroyed { by: b.shooter.unwrap_or(e), victim: re });
+            let Some(f) = passed(ptf.translation) else { continue };
+            let [lo, hi, ..] = bd.damage["Iron"];
+            shell.hp -= rng.range(lo, hi) * f;
+            if shell.hp <= 0.0 {
+                if let Some(pd) = lib.bullets.get(&shell.bullet) {
+                    hit_fx(&mut commands, &fxl, pd, ptf.translation, shell.vel);
+                }
+                commands.entity(pe).despawn();
             }
         }
         if b.age >= b.duration {
@@ -233,14 +277,6 @@ pub fn strikes(lib: Res<Library>, mut rng: ResMut<Rng>, mut msgs: MessageReader<
     }
 }
 
-/// The section whose box centre is nearest `local` (a point in the ship's frame).
-fn nearest_section(class: &Class, local: Vec3) -> Option<usize> {
-    (0..class.sections.len()).min_by(|x, y| {
-        let d = |i: usize| ((class.sections[i].min + class.sections[i].max) / 2.0).distance(local);
-        d(*x).total_cmp(&d(*y))
-    })
-}
-
 /// Contact damage (collision.rs `Ram`, read from the original's code): one hit on the victim's section nearest the contact,
 /// through the normal hit path, scaled by side and difficulty as shells are when a ship rammed it (rocks are not scaled).
 /// The struck section's damage sound plays at the contact, once for the pair when both struck sections share a material.
@@ -279,6 +315,77 @@ pub fn ram_damage(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_nova_splits_into_one_straight_and_four_turned_secondaries() {
+        let v = Vec3::new(30.0, 0.0, -40.0);
+        let out = nova_split(v);
+        assert_eq!(out[0], v);
+        for w in &out[1..] {
+            assert!((w.length() - 50.0).abs() < 1e-3);
+            // Turned 0.1 rad about two perpendicular axes: about 0.141 rad off the straight one.
+            assert!((w.angle_between(v) - 0.1414).abs() < 2e-3, "{}", w.angle_between(v));
+        }
+        assert!(out[1].y < 0.0 && out[4].y > 0.0, "two dip and two rise");
+    }
+
+    #[test]
+    #[ignore = "needs imported assets"]
+    fn a_star_blast_strikes_every_section_once_as_its_ring_passes_and_spares_nobody() {
+        let lib = Library::load(crate::assets_dir());
+        let class = lib.index("Ship_Navy_Cutter");
+        let ship = Ship {
+            class,
+            side: Side::Enemy,
+            heading: 0.0,
+            speed: 0.0,
+            ang_vel: 0.0,
+            order: 0,
+            waypoints: vec![],
+            goal: None,
+            cap: 1.0,
+            throttle: None,
+            sail_energy: 1.0,
+            crew_speed: 1.0,
+            crew_turn: 1.0,
+            avoid: 1.0,
+        };
+        let data = Library::load(crate::assets_dir());
+        let c = &data.classes[class];
+        let bullet = "Bullet_StarMortar";
+        let Payload::Blast { radius, .. } = lib.bullets[bullet].payload else { panic!("star mortar is a blast") };
+        let damage = lib.bullets[bullet].damage.clone();
+        let mut app = App::new();
+        app.insert_resource(lib)
+            .insert_resource(Rng(5))
+            .init_resource::<Time>()
+            .init_resource::<FxLib>()
+            .add_message::<Hit>()
+            .add_message::<Destroyed>()
+            .add_message::<Sfx>()
+            .add_systems(Update, blasts);
+        let e = app.world_mut().spawn((Transform::default(), ship, Health::new(c))).id();
+        // Fired by the ship's own side: it is struck all the same (same side: no difficulty factor).
+        let at = Vec3::new(20.0, 0.0, 0.0);
+        let blast = Blast { bullet: bullet.into(), shooter: None, owner: Some((Side::Enemy, false)), radius, duration: 3.0, age: 0.0 };
+        app.world_mut().spawn((blast, Transform::from_translation(at)));
+        for _ in 0..100 {
+            app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs_f32(1.0 / 30.0));
+            app.update();
+        }
+        let hp = &app.world().get::<Health>(e).unwrap().sections;
+        for (k, sec) in c.sections.iter().enumerate() {
+            let r = ((sec.min + sec.max) / 2.0).distance(at);
+            let [lo, hi, ..] = damage[material_key(&sec.material)];
+            let d = (1.0 - r / radius).max(0.1);
+            let lost = sec.hp - hp[k];
+            if r < radius {
+                assert!(lost >= lo * d - 1e-3 && lost <= hi * d + 1e-3, "{}: lost {lost} at {r}, want {lo}-{hi} x {d}", sec.label);
+            } else {
+                assert_eq!(lost, 0.0, "{} is out of reach", sec.label);
+            }
+        }
+    }
 
     #[test]
     #[ignore = "needs imported assets"]

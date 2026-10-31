@@ -187,6 +187,7 @@ fn hostile_island_towers_shoot_the_player_and_neutral_ones_do_not() {
         .add_message::<Hit>()
         .add_message::<Destroyed>()
         .add_message::<Detonate>()
+        .add_message::<Shoot>()
         .add_message::<crate::decals::Scar>()
         .init_resource::<Time>()
         .init_resource::<FxLib>()
@@ -469,6 +470,7 @@ fn the_command_ship_holds_fire_until_an_enemy_is_clicked() {
         .add_message::<Hit>()
         .add_message::<Destroyed>()
         .add_message::<Detonate>()
+        .add_message::<Shoot>()
         .add_message::<crate::decals::Scar>()
         .init_resource::<Time>()
         .init_resource::<FxLib>()
@@ -532,6 +534,7 @@ fn a_skirmish_computer_ship_with_a_map_script_fires_at_its_captains_target() {
         .add_message::<Hit>()
         .add_message::<Destroyed>()
         .add_message::<Detonate>()
+        .add_message::<Shoot>()
         .add_message::<crate::decals::Scar>()
         .init_resource::<Time>()
         .init_resource::<FxLib>()
@@ -594,6 +597,7 @@ fn the_command_ship_damages_a_clicked_hostile_skirmish_base() {
         .add_message::<Hit>()
         .add_message::<Destroyed>()
         .add_message::<Detonate>()
+        .add_message::<Shoot>()
         .add_message::<crate::decals::Scar>()
         .init_resource::<Time>()
         .init_resource::<FxLib>()
@@ -665,6 +669,7 @@ fn a_destroyed_base_part_blasts() {
         .add_message::<Hit>()
         .add_message::<Destroyed>()
         .add_message::<Detonate>()
+        .add_message::<Shoot>()
         .add_message::<crate::decals::Scar>()
         .init_resource::<Time>()
         .init_resource::<FxLib>()
@@ -1096,6 +1101,7 @@ fn shell_into_a_hull_damages_it_and_reports_the_hit() {
         .add_message::<Hit>()
         .add_message::<Destroyed>()
         .add_message::<Detonate>()
+        .add_message::<Shoot>()
         .add_message::<crate::decals::Scar>()
         .add_systems(Update, shells);
     let ship = Ship {
@@ -1173,6 +1179,7 @@ fn land_in_the_way_stops_a_shell_before_the_hull() {
         .add_message::<Hit>()
         .add_message::<Destroyed>()
         .add_message::<Detonate>()
+        .add_message::<Shoot>()
         .add_message::<crate::decals::Scar>()
         .add_systems(Update, shells);
     let ship = Ship {
