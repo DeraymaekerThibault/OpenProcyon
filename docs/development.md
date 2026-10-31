@@ -17,6 +17,23 @@ Work from the repository root with the Python virtual environment active. Use `m
    grinds on scenery, or the game panics. The game writes one `battle report {json}` line (`PROCYON_REPORT=<game s>`,
    `smoke/report.rs`); read it before adding print statements. When a change touches targeting, steering or what counts as a
    base/ship, add or tighten a scenario there rather than relying on a long manual run.
+   Two kinds of scenario: a map with the `--ship/--allies/--enemies` shortcut (the human's own fleet; no lobby), and a lobby
+   scenario (`--lobby "map=border_dispute;points=1000;limit=10;slots=human,7*computer"`, `menu/lobby_scenario.rs`) that sets the
+   skirmish lobby up through the same model as its pull-downs, Auto Assign and Launch button. Only lobby scenarios play allied
+   computer slots, full lobbies and large budgets, so a change to skirmish setup or computer fleets needs one. A spec the lobby
+   refuses ends the run with status 2. The report marks each ship `computer` (the captain AI's test: only the human's own fleet
+   waits for orders) and lists each fleet's victory points spent against its budget; the expectations `patrol`, `fire` and
+   `budget` in `tools/battle_check.py` read those.
+
+   Headless runs (spike, 2026-10, read from the code, not yet built): `run` adds `DefaultPlugins` and `setup` demands a primary
+   window, so the game cannot start without a window and GPU today. The simulation itself is already apart from rendering: it
+   runs in `FixedUpdate` at the 33 ms battle tick, and collision shapes, hardpoints and muzzles come from the imported JSON, not
+   from the GLB scenes. Known blockers, in order: `setup`/`set_game_speed` take the `Window` (also `view.rs`, `panels.rs`,
+   `menu/settings.rs`, `options_menu.rs`); `fx` and `combat::setup` register meshes and the `EffectMaterial` render asset;
+   `combat/mod.rs` and `combat/damage.rs` toggle ship parts by scene node `Name`, so ships need their scene children (the GLB
+   loads without a GPU, but that is untested); audio needs an output device. First experiment: a `run_headless` entry that uses
+   `MinimalPlugins` + asset, state, transform and scene plugins, steps `app.update()` with a manual time strategy, and drops
+   `view`, `fx` and `audio`. Anything that then fails is the real list.
 6. Review `git diff --check` and `git diff --stat`. Never commit converted assets (`assets/` is git-ignored).
 
 ```sh

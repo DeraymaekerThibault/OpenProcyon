@@ -130,15 +130,7 @@ impl Slot {
     }
     /// Victory points the fleet costs: hulls, weapon swaps and named crew.
     pub fn spent(&self, lib: &Library) -> i64 {
-        self.fleet
-            .iter()
-            .enumerate()
-            .filter_map(|(i, n)| {
-                let class = lib.classes.iter().find(|c| &c.name == n)?;
-                Some(i64::from(class.points) + self.weapons.get(i).map_or(0, |fit| crate::crew_arms::fitting_delta(lib, class, fit)))
-            })
-            .sum::<i64>()
-            + self.crew.iter().flatten().flatten().map(|id| i64::from(crate::crew_arms::crew_points(id))).sum::<i64>()
+        fleet_points(lib, &self.fleet, &self.weapons, &self.crew)
     }
     /// What Save writes for `kind`: the fleet's hulls only (stock guns, no crew), or the ship `i`'s crew or guns.
     pub fn profile_of(&self, kind: crate::profiles::Kind, i: usize) -> Profile {
@@ -255,6 +247,19 @@ pub struct Skirmish {
     pub scroll: usize,
 }
 
+/// Victory points a fleet costs: its hulls, the weapon swaps per hull and the named crew (what the lobby shows as spent).
+pub fn fleet_points(lib: &Library, fleet: &[String], weapons: &[std::collections::BTreeMap<usize, String>], crew: &[[Vec<String>; 8]]) -> i64 {
+    fleet
+        .iter()
+        .enumerate()
+        .filter_map(|(i, n)| {
+            let class = lib.classes.iter().find(|c| &c.name == n)?;
+            Some(i64::from(class.points) + weapons.get(i).map_or(0, |fit| crate::crew_arms::fitting_delta(lib, class, fit)))
+        })
+        .sum::<i64>()
+        + crew.iter().flatten().flatten().map(|id| i64::from(crate::crew_arms::crew_points(id))).sum::<i64>()
+}
+
 /// A Create Skirmish slider (measured on the original: victory points 50-1000 in steps of 10, default 300; fleet size 1-10, default 5).
 pub struct SliderRange {
     pub min: u32,
@@ -336,10 +341,11 @@ fn allowed_guns(list: &Value) -> Option<std::collections::HashSet<String>> {
     Some(list.as_object()?.iter().filter(|(_, on)| on.as_bool() == Some(true)).map(|(g, _)| g.clone()).collect())
 }
 
-/// A hull computers buy: armed, and no Tender or Tug (none among 104 computer ships in retail battle saves; they carry a gun or two, so
-/// "armed" alone let them in). PROVISIONAL: by class name, the data has no support-ship flag.
+/// A hull computers buy: armed, able to sail, and no Tender or Tug (none of these among 104 computer ships in retail battle saves; tenders
+/// and tugs carry a gun or two, so "armed" alone let them in, and Weapon Barges have a MaxSpeed of 0.003). PROVISIONAL: tenders and tugs by
+/// class name, the data has no support-ship flag.
 fn computer_hull(class: &crate::data::Class) -> bool {
-    !class.mounts.is_empty() && !class.name.contains("Tender") && !class.name.contains("Tug")
+    !class.mounts.is_empty() && class.phys.max_speed > 1.0 && !class.name.contains("Tender") && !class.name.contains("Tug")
 }
 
 pub fn auto_build(slot: &mut Slot, limit: u32, fleet_size: usize, lib: &Library, salt: u64, armed_only: bool) {
