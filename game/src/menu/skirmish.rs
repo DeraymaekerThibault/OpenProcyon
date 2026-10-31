@@ -130,15 +130,7 @@ impl Slot {
     }
     /// Victory points the fleet costs: hulls, weapon swaps and named crew.
     pub fn spent(&self, lib: &Library) -> i64 {
-        self.fleet
-            .iter()
-            .enumerate()
-            .filter_map(|(i, n)| {
-                let class = lib.classes.iter().find(|c| &c.name == n)?;
-                Some(i64::from(class.points) + self.weapons.get(i).map_or(0, |fit| crate::crew_arms::fitting_delta(lib, class, fit)))
-            })
-            .sum::<i64>()
-            + self.crew.iter().flatten().flatten().map(|id| i64::from(crate::crew_arms::crew_points(id))).sum::<i64>()
+        fleet_points(lib, &self.fleet, &self.weapons, &self.crew)
     }
     /// What Save writes for `kind`: the fleet's hulls only (stock guns, no crew), or the ship `i`'s crew or guns.
     pub fn profile_of(&self, kind: crate::profiles::Kind, i: usize) -> Profile {
@@ -253,6 +245,19 @@ pub struct Skirmish {
     pub profile: Option<ProfileDialog>,
     /// First row of the classic fixed-height ship list.
     pub scroll: usize,
+}
+
+/// Victory points a fleet costs: its hulls, the weapon swaps per hull and the named crew (what the lobby shows as spent).
+pub fn fleet_points(lib: &Library, fleet: &[String], weapons: &[std::collections::BTreeMap<usize, String>], crew: &[[Vec<String>; 8]]) -> i64 {
+    fleet
+        .iter()
+        .enumerate()
+        .filter_map(|(i, n)| {
+            let class = lib.classes.iter().find(|c| &c.name == n)?;
+            Some(i64::from(class.points) + weapons.get(i).map_or(0, |fit| crate::crew_arms::fitting_delta(lib, class, fit)))
+        })
+        .sum::<i64>()
+        + crew.iter().flatten().flatten().map(|id| i64::from(crate::crew_arms::crew_points(id))).sum::<i64>()
 }
 
 /// A Create Skirmish slider (measured on the original: victory points 50-1000 in steps of 10, default 300; fleet size 1-10, default 5).

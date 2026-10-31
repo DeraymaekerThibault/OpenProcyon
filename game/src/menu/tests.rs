@@ -105,7 +105,7 @@ fn every_menu_sound_is_a_retail_file() {
 fn map(id: &str) -> Value {
     crate::data::read_json(&assets_dir().join(format!("maps/{id}/map.json")))
 }
-fn skirmish(id: &str) -> Skirmish {
+pub(super) fn skirmish(id: &str) -> Skirmish {
     let mut sk = Skirmish {
         map: None,
         slots: vec![],

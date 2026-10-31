@@ -4,9 +4,11 @@
 //! and tag their buttons with an `Action`; `buttons` / `save_actions` here run them. Maps: assets/maps/<id> (tools/export_maps.py).
 
 #![allow(deprecated)] // shortcut: bevy 0.20 Interaction (deprecated for picking Hovered/Pressed); port when it is removed
+mod lobby_scenario;
 mod saves;
 mod settings;
 mod skirmish;
+pub use lobby_scenario::*;
 pub use saves::*;
 pub use settings::*;
 pub use skirmish::*;
@@ -266,7 +268,7 @@ pub fn plugin(app: &mut App) {
             ),
         )
         .add_systems(PostUpdate, (summary_on_end, esc_menu).chain().run_if(in_state(Screen::Battle)))
-        .add_systems(Update, autolaunch.run_if(in_state(Screen::Lobby)))
+        .add_systems(Update, (lobby_scenario, autolaunch).chain().run_if(in_state(Screen::Lobby)))
         .add_systems(Update, fleet_hook.run_if(in_state(Screen::Fleet)));
 }
 
@@ -505,6 +507,27 @@ fn fleet_hook(mut sk: ResMut<Skirmish>, lib: Res<Library>, cfg: Res<crate::Confi
         sk.open_profile(crate::profiles::Kind::Fleet, false, &lib);
         sk.pick_profile(0);
     }
+}
+
+/// The Launch button: the battle starts when the lobby has a human and an opponent (and, on open maps, a fleet).
+fn launch(sk: &mut Skirmish, next: &mut NextState<Screen>) {
+    sk.error = sk.launch_error();
+    if sk.error.is_none() {
+        sk.map = sk.maps.get(sk.selected).map(|m| m.0.clone());
+        next.set(Screen::Battle);
+    }
+}
+
+/// `--lobby <spec>` (`lobby_scenario.rs`, tools/battle_check.py): sets the lobby up from the spec, then presses Launch. A spec the
+/// lobby refuses ends the run with status 2 instead of silently playing something else.
+fn lobby_scenario(scenario: Option<Res<LobbyScenario>>, mut sk: ResMut<Skirmish>, lib: Res<Library>, mut next: ResMut<NextState<Screen>>, mut done: Local<bool>) {
+    let Some(scenario) = scenario.filter(|_| !*done) else { return };
+    *done = true;
+    if let Err(err) = scenario.apply(&mut sk, &lib) {
+        eprintln!("{err}");
+        std::process::exit(2);
+    }
+    launch(&mut sk, &mut next);
 }
 
 fn autolaunch(mut sk: ResMut<Skirmish>, lib: Res<Library>, cfg: Res<crate::Config>, mut next: ResMut<NextState<Screen>>) {
@@ -769,13 +792,7 @@ fn buttons(
                 cfg.ended = None;
                 next.set(Screen::Battle);
             }
-            Action::Launch => {
-                sk.error = sk.launch_error();
-                if sk.error.is_none() {
-                    sk.map = sk.maps.get(sk.selected).map(|m| m.0.clone());
-                    next.set(Screen::Battle);
-                }
-            }
+            Action::Launch => launch(&mut sk, &mut next),
             _ => {}
         }
     }

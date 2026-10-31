@@ -165,8 +165,23 @@ pub fn run(view: fn(&mut App), setup_view: fn(&mut App)) {
                 app.add_plugins(bevy::diagnostic::FrameTimeDiagnosticsPlugin::default()).add_systems(Last, profile_counts);
             }
         })
+        .add_plugins(|app: &mut App| {
+            // --lobby <spec>: play a skirmish setup through the lobby model instead of the --ship/--allies/--enemies shortcut.
+            if let Some(spec) = std::env::args().skip_while(|a| a != "--lobby").nth(1) {
+                match menu::LobbyScenario::parse(&spec) {
+                    Ok(scenario) => {
+                        app.insert_resource(scenario);
+                    }
+                    Err(err) => {
+                        eprintln!("{err}");
+                        std::process::exit(2);
+                    }
+                }
+            }
+        })
         // Interactive runs open the front end; scripted/screenshot runs and --map go straight to battle (--menu forces the menu).
         .insert_state(match arg("--menu").as_deref() {
+            _ if arg("--lobby").is_some() => menu::Screen::Lobby,
             Some("single") => menu::Screen::SinglePlayer,
             Some("skirmish") => menu::Screen::CreateSkirmish,
             Some("lobby") => menu::Screen::Lobby,

@@ -1,6 +1,7 @@
 //! PROCYON_REPORT=<game seconds> (tools/battle_check.py): watch a skirmish battle and, when one side is gone or the time is up, log one
 //! `battle report {json}` line and quit. Per side: ships, bursts fired, hits, game time of the first burst. Per ship: distance
-//! sailed and the longest unbroken scenery contact. Plus the closest approach between hostile ships. The checker turns these
+//! sailed, bursts fired, whether a computer commands it, and the longest unbroken scenery contact. Per fleet of a lobby skirmish:
+//! victory points spent against the budget. Plus the closest approach between hostile ships. The checker turns these
 //! into pass/fail expectations ("the computer engages", "nobody grinds on an island") so whole-battle regressions show up in
 //! `tools/check.sh` instead of in playtests.
 use bevy::prelude::*;
@@ -34,6 +35,9 @@ struct ShipLine {
     side: String,
     last: Vec3,
     sailed: f32,
+    bursts: u32,
+    /// A computer captain commands it: not the human's own fleet (allied computer fleets share the human's side).
+    computer: bool,
     contact: f32,
     worst_contact: f32,
 }
@@ -73,12 +77,32 @@ fn frame_stats(frames: &[f32]) -> (f32, f32, f32, usize) {
     (at(0.5), at(0.99), f[f.len() - 1], over)
 }
 
+/// Victory points each fleet of a lobby skirmish spent against the budget (`Skirmish::victory_limit`). Only open maps assemble fleets;
+/// historical maps and the command-line shortcut have no budget, so they report none.
+fn fleets_json(cfg: &crate::Config, sk: &crate::menu::Skirmish, lib: &crate::Library) -> serde_json::Value {
+    if sk.map.is_none() || !sk.open() {
+        return serde_json::Value::Array(vec![]);
+    }
+    cfg.groups
+        .iter()
+        .map(|g| {
+            let names: Vec<String> = g.ships.iter().map(|s| s.0.clone()).collect();
+            serde_json::json!({
+                "player": g.player, "side": side_name(g.side), "human": g.human, "ships": names.len(),
+                "spent": crate::menu::fleet_points(lib, &names, &g.weapons, &g.crew), "budget": sk.victory_limit, "limit": sk.fleet_size,
+            })
+        })
+        .collect()
+}
+
 #[allow(clippy::too_many_arguments)]
 fn watch(
     time: Res<Time>,
     lib: Res<crate::Library>,
     mut report: ResMut<Report>,
-    ships: Query<(Entity, &Ship, &Transform, &Health)>,
+    (cfg, sk): (Res<crate::Config>, Res<crate::menu::Skirmish>),
+    ships: Query<(Entity, &Ship, &Transform, &Health, Option<&crate::ship::FleetMember>)>,
+    fleets: Res<crate::ship::Fleets>,
     obstacles: Query<(&crate::collision::Obstacle, Option<&Visibility>), (Without<Ship>, Without<crate::combat::Asteroid>)>,
     mut fired: MessageReader<Fired>,
     mut hits: MessageReader<Hit>,
@@ -93,6 +117,9 @@ fn watch(
             line.bursts += 1;
             line.first_burst.get_or_insert(now);
         }
+        if let Some(line) = report.ships.get_mut(&f.shooter) {
+            line.bursts += 1;
+        }
     }
     for h in hits.read() {
         if let Some(side) = side_of(h.shooter) {
@@ -104,12 +131,16 @@ fn watch(
         line.alive = 0;
     }
     let mut live: Vec<(Side, Vec3)> = vec![];
-    for (e, ship, tf, health) in &ships {
+    for (e, ship, tf, health, member) in &ships {
         let side = side_name(ship.side);
         let class = &lib.classes[ship.class];
         if !report.ships.contains_key(&e) {
             report.sides.entry(side.clone()).or_default().ships += 1;
-            report.ships.insert(e, ShipLine { class: class.name.clone(), side: side.clone(), last: tf.translation, sailed: 0.0, contact: 0.0, worst_contact: 0.0 });
+            // The same test the captain AI uses (ship.rs `ai`): only the human's own fleet waits for orders.
+            let computer = !(ship.side == Side::Player && member.is_none_or(|m| m.0 == fleets.local));
+            report
+                .ships
+                .insert(e, ShipLine { class: class.name.clone(), side: side.clone(), last: tf.translation, sailed: 0.0, bursts: 0, computer, contact: 0.0, worst_contact: 0.0 });
         }
         if health.destroyed {
             continue;
@@ -143,8 +174,10 @@ fn watch(
             "ships": l.ships, "alive": l.alive, "bursts": l.bursts, "hits": l.hits, "first_burst": l.first_burst.map(f32::round),
         }))).collect::<serde_json::Map<_, _>>(),
         "ships": report.ships.values().map(|s| serde_json::json!({
-            "class": s.class, "side": s.side, "sailed": s.sailed.round(), "worst_contact": (s.worst_contact * 10.0).round() / 10.0,
+            "class": s.class, "side": s.side, "computer": s.computer, "bursts": s.bursts, "sailed": s.sailed.round(),
+            "worst_contact": (s.worst_contact * 10.0).round() / 10.0,
         })).collect::<Vec<_>>(),
+        "fleets": fleets_json(&cfg, &sk, &lib),
     });
     info!("battle report {json}");
     std::process::exit(0);
