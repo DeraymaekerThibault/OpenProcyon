@@ -342,46 +342,6 @@ fn course_prefix_stops_before_a_wall() {
     assert!(path[keep].translation.z < -26.0 && path[keep].translation.z > -31.5, "clip at box-to-wall contact, got {}", path[keep].translation.z);
     assert!(!touches(bounds, &path[keep - 1], &scenery));
 }
-#[test]
-fn steer_away_keeps_clear_of_a_head_on_island() {
-    let block = [Vec3::new(-10.0, -2.0, -30.0), Vec3::new(10.0, -2.0, -30.0), Vec3::new(0.0, 2.0, -30.0)];
-    let obstacle =
-        Obstacle { body: BoxBody { points: block.to_vec(), bounds: Bounds::points(&block) }, triangles: vec![Triangle { points: block, bounds: Bounds::points(&block) }] };
-    let scenery = [&obstacle];
-    let bounds = [Vec3::new(-1.0, -1.0, -3.0), Vec3::new(1.0, 1.0, 3.0)];
-    let tf = Transform::default();
-    // Heading straight for the obstacle (-Z is heading 0): must be nudged, not kept.
-    let want = 0.0;
-    let h = steer_clear(bounds, &tf, 10.0, want, &scenery);
-    assert!(h.abs() > 0.1, "head-on order is nudged, got {h}");
-    assert!(h.abs() <= 2.2 + 1e-4, "nudge stays within the offset ceiling");
-    // A clear heading is returned unchanged.
-    assert_eq!(steer_clear(bounds, &tf, 10.0, 0.0, &[]), 0.0);
-    let far = Transform::from_xyz(0.0, 0.0, 200.0);
-    assert_eq!(steer_clear(bounds, &far, 10.0, 0.0, &scenery), 0.0);
-}
-#[test]
-fn land_ahead_slows_a_ship_along_the_retail_curve_and_a_clear_pass_does_not() {
-    // Retail Procyon Frigate, 6.6 u/s, land on its line: 5.7 u/s at 47 units from the coast, 3.6 at 21, 1.6 at 5 (0.86 / 0.55 / 0.24 of cruise).
-    let bounds = [Vec3::new(-1.0, -1.0, -3.0), Vec3::new(1.0, 1.0, 3.0)];
-    let wall_at = |z: f32| {
-        let t = [Vec3::new(-40.0, -2.0, z), Vec3::new(40.0, -2.0, z), Vec3::new(0.0, 2.0, z)];
-        Obstacle { body: BoxBody { points: t.to_vec(), bounds: Bounds::points(&t) }, triangles: vec![Triangle { points: t, bounds: Bounds::points(&t) }] }
-    };
-    let slow = |coast: f32| contact_slow(bounds, Vec3::ZERO, 0.0, 6.6, &[&wall_at(-coast)]);
-    for (coast, retail) in [(47.0, 0.86), (21.0, 0.55), (5.0, 0.24)] {
-        let f = slow(coast);
-        assert!((f - retail).abs() < 0.12, "{coast} units from land: {f} against retail {retail}");
-    }
-    assert_eq!(slow(200.0), 1.0, "land beyond the look-ahead does not slow it");
-    assert!(slow(10.0) < slow(20.0) && slow(20.0) < slow(40.0), "slower the closer the land");
-    // An island it would clear by 27 units is passed at full speed (the retail Frigate did exactly that at Island08).
-    let beside = {
-        let t = [Vec3::new(27.0, -2.0, -60.0), Vec3::new(27.0, -2.0, 20.0), Vec3::new(80.0, 2.0, -20.0)];
-        Obstacle { body: BoxBody { points: t.to_vec(), bounds: Bounds::points(&t) }, triangles: vec![Triangle { points: t, bounds: Bounds::points(&t) }] }
-    };
-    assert_eq!(contact_slow(bounds, Vec3::ZERO, 0.0, 6.6, &[&beside]), 1.0);
-}
 fn ship_rock_contact(mass: f32, rock_velocity: Vec3) -> (Vec3, Vec3, Vec3) {
     let mut lib = crate::Library::load(crate::assets_dir());
     let class = lib.index("Ship_Navy_Cutter");

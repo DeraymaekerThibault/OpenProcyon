@@ -351,62 +351,6 @@ pub fn path_clear(bounds: [Vec3; 2], a: Vec3, b: Vec3, scenery: &[&Obstacle]) ->
     !touches(swept, &tf, scenery)
 }
 
-/// Seconds of travel probed ahead for steer-away, and the minimum probe length in world units.
-/// PROVISIONAL: tuned by eye, not recovered from the original's AI.
-const STEER_TIME: f32 = 6.0;
-const STEER_MIN: f32 = 25.0;
-/// Heading offsets (radians) tried when `want` is blocked, smallest first, up to beam-on and a little back (a ship pressed
-/// against a long coast must turn along it). PROVISIONAL ceiling: only these fixed offsets are tried, one reactive probe per
-/// frame and no route planning, so a ship in a concave coastline or pocket can still be held against scenery.
-const STEER_OFFSETS: [f32; 10] = [0.3, -0.3, 0.6, -0.6, 1.0, -1.0, 1.6, -1.6, 2.2, -2.2];
-
-/// PROVISIONAL steer-away for AI ships: returns `want` if a box driven along it stays clear of scenery over the
-/// look-ahead, otherwise the nearest clear offset heading (or `want` if none is clear).
-pub fn steer_clear(bounds: [Vec3; 2], tf: &Transform, speed: f32, want: f32, scenery: &[&Obstacle]) -> f32 {
-    let reach = (speed.abs() * STEER_TIME).max(STEER_MIN);
-    // Probe boxes at most one hull length apart, so a thin coast cannot fall between two samples.
-    let n = (reach / (bounds[1].z - bounds[0].z).max(2.0)).ceil().max(2.0) as usize;
-    let clear = |heading: f32| {
-        let fwd = Vec3::new(-heading.sin(), 0.0, -heading.cos());
-        (1..=n).all(|i| {
-            let probe = Transform::from_translation(tf.translation + fwd * reach * i as f32 / n as f32).with_rotation(Quat::from_rotation_y(heading));
-            !touches(bounds, &probe, scenery)
-        })
-    };
-    if clear(want) {
-        return want;
-    }
-    STEER_OFFSETS.iter().map(|o| want + o).find(|heading| clear(*heading)).unwrap_or(want)
-}
-
-/// Speed fraction below which a captain never slows for land, and the centre-to-coast distance (units) at which it is back to full speed.
-/// Retail Procyon Frigate (6.6 u/s) on Border Dispute, land in its way: 5.7 u/s at 47 units, 3.6 at 21, 1.6 at 5, back to 5.3 within a
-/// few units of clearance (procyon-re evidence, openprocyon docs/re/movement.md "Land ahead"). Fit: 0.2 + 0.8 x distance / 60.
-/// PROVISIONAL: one curve, taken from one ship class; the original's braking rule is not decoded.
-pub const CONTACT_SLOW_MIN: f32 = 0.2;
-pub const CONTACT_SLOW_RANGE: f32 = 60.0;
-
-/// Speed fraction an AI ship keeps with land on its present course: 1.0 when a box driven straight ahead stays clear over `CONTACT_SLOW_RANGE`
-/// (or 6 s of travel when longer), else `CONTACT_SLOW_MIN` rising linearly with the centre-to-contact distance. Retail ships cruise
-/// straight past an island they would clear (27 units off at full speed) and slow only when the line would touch.
-pub fn contact_slow(bounds: [Vec3; 2], pos: Vec3, heading: f32, speed: f32, scenery: &[&Obstacle]) -> f32 {
-    let reach = (speed.abs() * STEER_TIME).max(CONTACT_SLOW_RANGE);
-    let fwd = Vec3::new(-heading.sin(), 0.0, -heading.cos());
-    let touches_at = |t: f32| touches(bounds, &Transform::from_translation(pos + fwd * t).with_rotation(Quat::from_rotation_y(heading)), scenery);
-    let n = (reach / ((bounds[1].z - bounds[0].z) * 0.5).max(1.0)).ceil().max(2.0) as usize; // half a hull apart: a thin coast cannot fall between probes
-    let Some(first) = (1..=n).map(|i| reach * i as f32 / n as f32).find(|&t| touches_at(t)) else {
-        return 1.0;
-    };
-    // The contact lies between the last clear probe and `first`: bisect it, then add the bow's half length (box centre -> hull front).
-    let (mut lo, mut hi) = (first - reach / n as f32, first);
-    for _ in 0..5 {
-        let mid = (lo + hi) * 0.5;
-        if touches_at(mid) { hi = mid } else { lo = mid }
-    }
-    let bow = bounds[0].z.abs().max(bounds[1].z.abs());
-    (CONTACT_SLOW_MIN + (1.0 - CONTACT_SLOW_MIN) * (hi + bow) / CONTACT_SLOW_RANGE).clamp(CONTACT_SLOW_MIN, 1.0)
-}
-
 fn forward(ship: &crate::Ship) -> Vec3 {
     Vec3::new(-ship.heading.sin(), 0.0, -ship.heading.cos())
 }
@@ -480,6 +424,7 @@ pub fn sail(
     currents: Query<&crate::environment::Current>,
     mut rams: Option<ResMut<Messages<Ram>>>,
     captains: Query<&crate::campaign::MissionShip>,
+    (fleets, members, mut avoiders): (Option<Res<crate::ship::Fleets>>, Query<&crate::ship::FleetMember>, Local<HashMap<Entity, avoid::Avoid>>),
 ) {
     let cinematic = mission.as_deref().is_some_and(|m| m.script.nis && m.opening.is_none());
     // PROVISIONAL: stop ordinary helm/combat motion in NIS, but retain authored routes (e.g. Exile's retreat).
@@ -525,30 +470,71 @@ pub fn sail(
             cables.insert((tower, towee), (p - q).with_y(0.0).length());
         }
     }
-    // PROVISIONAL: AI ships without a dock routine re-aim away from scenery before stepping. A goal heading is rewritten each
-    // frame by the AI, so the nudge does not accumulate; a blocked path leg gets a detour marker ahead on the clear heading
-    // (taken within ~3 s, then the leg is re-tested), so script paths entered from the far side of islands do not grind into them.
+    // The original's collision avoider (`avoid`) for every AI-steered ship: not the human's own ship, not while docking.
     {
-        let all = scenery(obstacles.iter().map(|(_, o, v)| (o, v)).chain(rocks.iter().filter(|(r, ..)| r.hp > 0.0).map(|(_, _, o, _, v)| (o, v))));
+        use avoid::{Avoid, Key, Me, Other, Shape};
+        let local = fleets.as_ref().map(|f| f.local.as_str());
+        // The human's ships (`Captain_Human` in the original): the player ship and the human's fleet; allied computer fleets share the side.
+        let humans = |e: Entity, side: crate::Side| side == crate::Side::Player && (human.contains(e) || members.get(e).ok().is_none_or(|m| Some(m.0.as_str()) == local));
+        let priority = |e: Entity, s: &crate::Ship| s.speed.abs() + if s.speed.abs() >= 0.001 && humans(e, s.side) { avoid::HUMAN_PRIORITY } else { 0.0 };
+        let mut others: Vec<Other> = vec![];
+        for (oe, o, v) in &obstacles {
+            if v != Some(&Visibility::Hidden) && !ghost(oe) {
+                let (centre, radius) = o.sphere();
+                others.push(Other { key: Key::Entity(oe), centre, radius, priority: 0.0, lifeboat: false, shape: Shape::Fixed { obstacle: o, island: true } });
+            }
+        }
+        for (i, (r, _, o, _, v)) in rocks.iter().enumerate() {
+            if r.hp > 0.0 && v != Some(&Visibility::Hidden) {
+                let (centre, radius) = o.sphere();
+                others.push(Other { key: Key::Rock(i), centre, radius, priority: 0.0, lifeboat: false, shape: Shape::Fixed { obstacle: o, island: false } });
+            }
+        }
+        for (oe, s, tf, h, ..) in &ships {
+            if !h.destroyed && !ghost(oe) {
+                let class = &lib.classes[s.class];
+                let shape = Shape::Ship { bounds: class.collision_bounds, heading: s.heading, velocity: Vec3::new(-s.heading.sin(), 0.0, -s.heading.cos()) * s.speed };
+                others.push(Other { key: Key::Entity(oe), centre: tf.translation, radius: class.radius, priority: priority(oe, s), lifeboat: boats.contains(oe), shape });
+            }
+        }
+        let mut seen = 0;
+        avoiders.retain(|e, _| ships.contains(*e));
         for (e, mut s, tf, health, _, docker) in &mut ships {
-            if health.destroyed || docker.is_some() || pinned(e) {
+            if health.destroyed || docker.is_some() || pinned(e) || human.contains(e) {
                 s.avoid = 1.0;
                 continue;
             }
-            let bounds = lib.classes[s.class].collision_bounds;
-            s.avoid = if human.contains(e) { 1.0 } else { contact_slow(bounds, tf.translation, s.heading, s.speed, &all) };
-            // Steer on the speed the ship would have without the slowdown: braking must not shorten the look-ahead and delay the turn.
-            let cruise = s.speed / s.avoid.max(CONTACT_SLOW_MIN);
-            if let Some(&wp) = s.waypoints.first().filter(|_| !human.contains(e)) {
-                let d = wp - tf.translation;
-                let want = (-d.x).atan2(-d.z);
-                let heading = steer_clear(bounds, &tf, cruise, want, &all);
-                let reach = (cruise.abs() * STEER_TIME).max(STEER_MIN);
-                if heading != want && d.with_y(0.0).length() > reach {
-                    s.waypoints.insert(0, tf.translation + Vec3::new(-heading.sin(), 0.0, -heading.cos()) * reach);
+            seen += 1;
+            let a = avoiders.entry(e).or_insert_with(|| Avoid::new(0.05 * (seen % 10) as f32));
+            // A detour the avoider set last tick is its own marker, not the ship's course.
+            if a.detour.is_some() && s.waypoints.first() == a.detour.as_ref() {
+                s.waypoints.remove(0);
+            }
+            if a.due(dt) {
+                let class = &lib.classes[s.class];
+                let me = Me {
+                    pos: tf.translation,
+                    heading: s.heading,
+                    speed: s.speed,
+                    bounds: class.collision_bounds,
+                    radius: class.radius,
+                    priority: priority(e, &s),
+                    lifeboat: boats.contains(e),
+                };
+                let ahead = |h: f32| tf.translation + Vec3::new(-h.sin(), 0.0, -h.cos()) * (s.speed.abs() * 2.0 * avoid::LOOK + class.radius + 1.0);
+                let dest = s.waypoints.first().copied().or(s.goal.map(ahead));
+                match dest {
+                    Some(dest) => a.think(&me, dest, &others, Key::Entity(e)),
+                    None => *a = Avoid::new(0.0),
                 }
-            } else if let Some(g) = s.goal {
-                s.goal = Some(steer_clear(bounds, &tf, cruise, g, &all));
+            }
+            s.avoid = a.cap;
+            if let Some(d) = a.detour {
+                if (d - tf.translation).with_y(0.0).length() < (s.speed.abs() * 3.0).max(lib.classes[s.class].radius) {
+                    a.detour = None;
+                } else {
+                    s.waypoints.insert(0, d);
+                }
             }
         }
     }
@@ -707,5 +693,6 @@ pub fn sail(
     }
 }
 
+mod avoid;
 #[cfg(test)]
 mod tests;
