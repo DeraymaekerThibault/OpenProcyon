@@ -45,15 +45,16 @@ pub fn fire_fighting(posts: &[Vec<f32>; 8]) -> f32 {
 
 /// The 0..1 `skill` of every slot of post `role`: named crew first, then generic hands up to the class capacity.
 /// PROVISIONAL: computer crews are rated 0.75 (fits the measured computer hull repair, reinforced +5 and iron +2 per tick);
-/// the player's empty slots are generic hands (0.1). The captain/first-mate leadership bonuses (+0.1 / +0.05 above a
-/// threshold) are not modelled: their thresholds are not known.
-pub fn crew_slots(ship: &Ship, class: &Class, posts: Option<&crate::crew_arms::CrewPosts>, role: usize, skill: &str) -> Vec<f32> {
+/// the player's empty slots are generic hands (0.1). Every slot but the captain's and first mate's gains the ship's leadership
+/// bonus (`crew_arms::leadership_bonus`, 0 for a ship without named crew).
+pub fn crew_slots(e: Entity, ship: &Ship, class: &Class, posts: Option<&crate::crew_arms::CrewPosts>, role: usize, skill: &str) -> Vec<f32> {
     const COMPUTER: f32 = 0.75;
     const GENERIC: f32 = 0.1;
     let cap = crate::boarding::counts(&class.name)[role] as usize;
     let named: Vec<f32> = posts.map(|p| p.0[role].iter().map(|id| crate::crew_arms::ability(id, skill).unwrap_or(GENERIC)).collect()).unwrap_or_default();
     let fill = if ship.side == crate::Side::Player { GENERIC } else { COMPUTER };
-    named.iter().copied().chain(std::iter::repeat(fill)).take(cap.max(named.len())).collect()
+    let bonus = if matches!(role, 1 | 2) { 0.0 } else { posts.map_or(0.0, |p| crate::crew_arms::leadership_bonus(e, p)) };
+    named.iter().copied().chain(std::iter::repeat(fill)).take(cap.max(named.len())).map(|v| (v + bonus).min(1.0)).collect()
 }
 
 pub fn fire_scale(i: f32) -> f32 {
@@ -195,11 +196,11 @@ pub fn fires(
     lib: Res<Library>,
     mut rng: ResMut<Rng>,
     mut sfx: MessageWriter<Sfx>,
-    mut ships: Query<(&Transform, &Ship, &mut Health, &mut Fires, Option<&crate::crew_arms::CrewPosts>)>,
+    mut ships: Query<(Entity, &Transform, &Ship, &mut Health, &mut Fires, Option<&crate::crew_arms::CrewPosts>)>,
     mut fxq: Query<&mut fx::Fx>,
 ) {
     let dt = time.delta_secs();
-    for (tf, ship, mut hp, mut fires, posts) in &mut ships {
+    for (me, tf, ship, mut hp, mut fires, posts) in &mut ships {
         let fires = &mut *fires;
         if hp.destroyed {
             for f in fires.list.drain(..) {
@@ -219,7 +220,7 @@ pub fn fires(
         if tick {
             fires.tick = 0.0;
             let class = &lib.classes[ship.class];
-            let mut crew = fire_fighting(&std::array::from_fn(|role| crew_slots(ship, class, posts, role, "leadership")));
+            let mut crew = fire_fighting(&std::array::from_fn(|role| crew_slots(me, ship, class, posts, role, "leadership")));
             while crew > 0.0 {
                 let Some(f) = fires.list.iter_mut().filter(|f| f.state == 0).max_by(|a, b| a.intensity.total_cmp(&b.intensity)) else { break };
                 let used = crew.min(f.intensity);
@@ -358,18 +359,24 @@ pub fn damage_control(class: &Class, sections: &mut [f32], engineers: &[f32], ri
     }
 }
 
-pub fn crew_repair(time: Res<Time>, lib: Res<Library>, mut rng: ResMut<Rng>, mut ships: Query<(&Ship, &mut Health, Option<&crate::crew_arms::CrewPosts>)>, mut acc: Local<f32>) {
+pub fn crew_repair(
+    time: Res<Time>,
+    lib: Res<Library>,
+    mut rng: ResMut<Rng>,
+    mut ships: Query<(Entity, &Ship, &mut Health, Option<&crate::crew_arms::CrewPosts>)>,
+    mut acc: Local<f32>,
+) {
     *acc += time.delta_secs();
     if *acc < CREW_REPAIR_TICK {
         return;
     }
     *acc -= CREW_REPAIR_TICK;
-    for (ship, mut h, posts) in &mut ships {
+    for (e, ship, mut h, posts) in &mut ships {
         if h.destroyed {
             continue;
         }
         let class = &lib.classes[ship.class];
-        let (engineers, riggers) = (crew_slots(ship, class, posts, 4, "engineering"), crew_slots(ship, class, posts, 5, "rigging"));
+        let (engineers, riggers) = (crew_slots(e, ship, class, posts, 4, "engineering"), crew_slots(e, ship, class, posts, 5, "rigging"));
         damage_control(class, &mut h.sections, &engineers, &riggers, &mut || rng.f());
     }
 }

@@ -96,7 +96,7 @@ pub const ORBIT_THROTTLE: f32 = 1.4;
 pub const COMPUTER_CREW: f32 = 1.267;
 /// Rudder-torque factor (`Ship::crew_turn`) of computer skirmish ships: the square of their navigator factor. Measured on the
 /// saved Carrack: it circled at 8.23°/s at 6.47 units/s, our turn model with torque x 1.267² predicts 8.25°/s (x 1.267: 7.33).
-/// PROVISIONAL: why the computer's rudder takes the factor squared (one ship with its own save; two earlier tracks agree within 4 %).
+/// PROVISIONAL: a fit, not the crew (the original applies the navigator factor once for every ship); the cause is not read yet.
 pub const COMPUTER_TURN: f32 = COMPUTER_CREW * COMPUTER_CREW;
 /// Computer captains keep this far outside a black hole's radius (retail: a Carrack rode 157-165 units from a 145-radius hole).
 pub const HOLE_MARGIN: f32 = 15.0;

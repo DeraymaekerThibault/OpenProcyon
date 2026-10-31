@@ -124,7 +124,9 @@ impl CrewPosts {
     /// (a rating-1 hand when the captain's post is empty: 1.05; 32 of 34 saved ships, docs/re/crew.md).
     pub fn post_factor(&self, role: usize, skill: &str, slots: u32) -> f32 {
         if slots == 0 && self.0[role].is_empty() {
-            let rating = self.0[1].first().and_then(|id| ability(id, skill)).map_or(1.0, |a| a * 10.0);
+            // The stand-in: the first mate (then the captain) for the helm, fighters and lookout, else the captain.
+            let standin = if matches!(role, 3 | 6 | 7) { self.0[2].first().or(self.0[1].first()) } else { self.0[1].first() };
+            let rating = standin.and_then(|id| ability(id, skill)).map_or(1.0, |a| a * 10.0);
             return (1.0 + 0.05 * rating) / 1.125;
         }
         let named: Vec<f32> = self.0[role].iter().map(|id| skill_factor(ability(id, skill).unwrap_or(0.1))).collect();
@@ -138,6 +140,17 @@ impl CrewPosts {
     pub fn combat(&self, role: usize, generic: f32) -> Vec<f32> {
         self.0[role].iter().map(|c| ability(c, "combat").unwrap_or(generic)).collect()
     }
+}
+
+/// Leadership (docs/re/crew.md): each ship draws two chances in [0, 1) once; every crewman but the captain and first mate gains 0.1
+/// skill when the captain's Leadership (0..1) beats the first, and 0.05 when the first mate's beats the second. The saved speed and
+/// rudder factors always carry both (`skill_factor`); this is for gunnery, repairs, fire-fighting and boarding.
+pub fn leadership_bonus(e: Entity, posts: &CrewPosts) -> f32 {
+    let lead = |role: usize| posts.0[role].first().and_then(|id| ability(id, "leadership")).unwrap_or(0.0);
+    // ponytail: fixed per-ship draws from the entity, not the original's random generator.
+    let h = e.to_bits().wrapping_mul(0x9E37_79B9_7F4A_7C15);
+    let u = |shift: u32| ((h >> shift) & 0xFF_FFFF) as f32 / (1u32 << 24) as f32;
+    (if lead(1) > u(40) { 0.1 } else { 0.0 }) + if lead(2) > u(16) { 0.05 } else { 0.0 }
 }
 
 /// One crewman's factor on top speed (engineering) or rudder torque (navigation), relative to a rating-1 hand: retail saves
@@ -1085,7 +1098,7 @@ fn apply_skirmish_crew(
         (ship.crew_speed, ship.crew_turn) = posts.handling(&caps);
         // Sight follows the lookouts, for every ship (retail: scan range = sight x the lookout post's factor, ours included).
         commands.entity(e).insert(crate::environment::ScanFactor(posts.scan(&caps)));
-        boarding.apply_posts(&posts);
+        boarding.apply_posts(&posts, leadership_bonus(e, &posts));
         commands.entity(e).insert(posts);
     }
 }
@@ -1156,7 +1169,7 @@ fn apply_outfit(
                 commands.entity(e).insert(crate::environment::ScanFactor(wanted.as_ref().unwrap_or(&CrewPosts(Default::default())).scan(&caps)));
             }
             if let Some(posts) = &wanted {
-                boarding.apply_posts(posts);
+                boarding.apply_posts(posts, leadership_bonus(e, posts));
                 commands.entity(e).insert(posts.clone());
             } else {
                 boarding.reset_crew();
@@ -1254,6 +1267,27 @@ mod tests {
         let mut posts = CrewPosts(Default::default());
         posts.0[1] = vec!["Crew_Navy_JimHawkins".into()]; // engineering 2
         assert!((posts.post_factor(4, "engineering", 0) * 1.125 - 1.10).abs() < 1e-5);
+    }
+    #[test]
+    #[ignore = "needs imported assets"]
+    fn the_first_mate_stands_in_for_a_missing_helm_and_the_captain_for_missing_engineers() {
+        let mut posts = CrewPosts(Default::default());
+        posts.0[1] = vec!["Crew_Navy_JimHawkins".into()]; // navigation 7, engineering 2
+        posts.0[2] = vec!["Crew_Navy_Gerspach".into()]; // navigation 8
+        assert!((posts.post_factor(3, "navigation", 0) * 1.125 - 1.40).abs() < 1e-5);
+        assert!((posts.post_factor(4, "engineering", 0) * 1.125 - 1.10).abs() < 1e-5);
+    }
+    #[test]
+    #[ignore = "needs imported assets"]
+    fn a_leadership_ten_captain_always_lifts_the_crew_and_no_officers_never_do() {
+        let mut posts = CrewPosts(Default::default());
+        for i in 0..50 {
+            assert_eq!(leadership_bonus(Entity::from_raw_u32(i).unwrap(), &posts), 0.0);
+        }
+        posts.0[1] = vec!["Crew_Navy_Amelia".into()]; // leadership 10
+        for i in 0..50 {
+            assert!(leadership_bonus(Entity::from_raw_u32(i).unwrap(), &posts) >= 0.1);
+        }
     }
     #[test]
     #[ignore = "needs imported assets"]

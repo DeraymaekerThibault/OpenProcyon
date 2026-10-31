@@ -149,7 +149,8 @@ Headless retail skirmishes, one computer ship against our idle or fleeing Navy C
   Carrack and Barque ratios above (0.66, 0.74) lie in the saves' 0.65-0.75 range.
 - **Computer turn rate:** the circling Carrack's 8.23°/s at 6.47 needs rudder torque × 1.605 on top of the uncrewed formula,
   the square of its saved navigator factor relative to ours (1.267² = 1.605 predicts 8.25°/s; × 1.267 would give 7.33).
-  PROVISIONAL: one ship with its own save; why the computer's rudder takes the factor squared is not known.
+  PROVISIONAL: one ship with its own save. The original's code applies the navigator factor once, linearly, for every ship, so
+  the extra is not the crew; how hard the computer's helm puts the rudder over is not read yet.
 - **Assault Cutter (Zemyatin, idle Cutter target):** it did not circle: it swung back and forth across our bow at 6.3 units/s
   between 66 and 117 units for 90 s (turn reversing every ~10-20 s), then closed at Emergency and rammed our Cutter, which sank
   (the save's frontal-attack routine holds a move-away vector and timer). PROVISIONAL reading: frontal attack.
@@ -269,6 +270,7 @@ other classes 390, PROVISIONAL: unmeasured); patrolling is not modelled.
 Turning (same log, `COMPUTER_TURN`): re-running each steady turn through our turn model gives a torque factor of about 2.0 for an
 uncrewed Submersible (11 turns) and 0.9-1.1 for crewed Fast Frigates (15 turns), 2.3 for a crewed Minelayer, 1.5-3.8 for a crewed
 Frigate; Torpedo boats slow and weave in turns and do not fit. Crewed ships do not turn harder than uncrewed ones, so the
-factor-squared reading above is not supported; 1.267² stays as the Carrack circle's fit. PROVISIONAL.
+factor-squared reading above is not supported; the original's code agrees (the navigator factor scales the rudder linearly, the
+same for every ship, [crew.md](crew.md)). 1.267² stays as the Carrack circle's fit. PROVISIONAL.
 Run-in slow-down: four run-ins slowed 48-64 units from their target whatever the class (Carrack 48, Barque 49 and 60, Minelayer
 64), i.e. 0.32-0.59 of the gun reach; the remake keeps 0.6 × reach because our turn model needs it for the measured circles.
