@@ -140,14 +140,17 @@ impl Slot {
             .sum::<i64>()
             + self.crew.iter().flatten().flatten().map(|id| i64::from(crate::crew_arms::crew_points(id))).sum::<i64>()
     }
-    /// What Save writes for `kind`: the whole fleet, or the ship `i` (its crew or its guns).
+    /// What Save writes for `kind`: the fleet's hulls only (stock guns, no crew), or the ship `i`'s crew or guns.
     pub fn profile_of(&self, kind: crate::profiles::Kind, i: usize) -> Profile {
+        if kind == crate::profiles::Kind::Fleet {
+            return Profile { name: String::new(), ships: self.fleet.iter().map(|c| ShipProfile { class: c.clone(), ..Default::default() }).collect() };
+        }
         let ship =
             |i: usize| ShipProfile { class: self.fleet[i].clone(), crew: self.crew.get(i).cloned().unwrap_or_default(), arms: self.weapons.get(i).cloned().unwrap_or_default() };
-        let range = if kind == crate::profiles::Kind::Fleet { 0..self.fleet.len() } else { i..(i + 1).min(self.fleet.len()) };
-        Profile { name: String::new(), ships: range.map(ship).collect() }
+        Profile { name: String::new(), ships: (i..(i + 1).min(self.fleet.len())).map(ship).collect() }
     }
-    /// Load: a fleet replaces the fleet; crew or arms replace those of ship `i` (same hull class). Refused, leaving the slot as it was, when
+    /// Load: a fleet replaces the fleet with its hulls (stock guns, no crew); crew or arms replace those of ship `i` (any ship of the
+    /// same hull class). Refused, leaving the slot as it was, when
     /// the fleet would exceed the size limit or the victory points, a hull is not on offer, or crew would be posted twice.
     pub fn apply_profile(&mut self, kind: crate::profiles::Kind, p: &Profile, i: usize, lib: &Library, limit: u32, fleet_size: usize) -> Result<(), &'static str> {
         use crate::profiles::Kind;
@@ -164,8 +167,6 @@ impl Slot {
                         return Err("The fleet has ships this fleet type cannot field.");
                     }
                     next.push_ship(&s.class);
-                    *next.crew.last_mut().unwrap() = s.crew.clone();
-                    *next.weapons.last_mut().unwrap() = s.arms.clone();
                 }
             }
             Kind::Crew | Kind::Arms => {

@@ -70,6 +70,8 @@ column header (the picked file's cost), a *File Name* entry and Save (or Load) a
 closes the dialog; Load stays greyed until a file is picked. Saving a fleet wrote three files in the install's `UserFleetProfiles`: the fleet
 list, a crew file and an arms file for the ship slots (one record per ship). The game also ships one such profile (a mission 1 torpedo boat fleet with
 named crew). Not measured: which files the lists offer for another hull or race, and what Load does when the file costs more than the budget.
+Remake (owner's choice, 2026-10-31): a fleet profile is the hulls only, loading with stock guns and no crew; crew and arms are saved and
+loaded per ship from the Crew / Arms screen and offered for any ship of the same hull class.
 
 **Arms tab.** A top-down ship outline with one icon per selectable weapon bank (a mount of several guns is one bank). Clicking a bank
 shows a tooltip "Heavy Mount / 4 Guns" and the list *Available Weapons* for that mount type, the fitted gun highlighted, with its name,
