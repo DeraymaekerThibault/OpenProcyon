@@ -75,8 +75,7 @@ SCENARIOS = [
         "border_dispute_full",
         "map=border_dispute;points=1000;limit=10;slots=human,7*computer",
         300,
-        # PROVISIONAL "no-stutter": full lobbies hitch (issue #190, worst frame ~1.2 s at 4x and 16x); drop it once fixed.
-        {"patrol", "fire", "no-stutter"},
+        {"patrol", "fire", "budget"},
     ),
 ]
 
