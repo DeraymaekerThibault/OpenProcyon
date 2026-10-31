@@ -81,8 +81,10 @@ pub fn angdiff(a: f32, b: f32) -> f32 {
 
 pub type CaptainBusy = Or<(With<docking::Docker>, With<docking::Tower>, With<boarding::GrappleOrder>, With<boarding::Grapple>, With<boarding::Boarding>)>;
 
-/// Computer captains slow to `ORBIT_THROTTLE` inside this fraction of their aim distance (`Class::reach`). Retail ships slowed
-/// 60-75 units from their target (Carrack, reach 150); PROVISIONAL: the original's switch is not decoded.
+/// Computer captains slow to `ORBIT_THROTTLE` inside this fraction of their aim distance (`Class::reach`). PROVISIONAL: retail
+/// run-ins slowed 48-64 units out whatever the class (Carrack 48, Barque 49 and 60, Minelayer 64: 0.32-0.59 of reach), but with
+/// that switch our turn model circles the Barque at 62-88 units (retail 51-58); 0.6 keeps the measured circles until the
+/// computer turn factor (`COMPUTER_TURN`) is settled.
 pub const ORBIT_SLOW: f32 = 0.6;
 /// Throttle (fraction of Ahead Full) while circling: retail circles at its path's saved minimum throttle (random 0.65-0.75 per
 /// ship) x the crewed Emergency speed (saved Carrack: 0.745 x 8.71 = 6.49, measured 6.47); 1.4 is that range's mean x 2.
@@ -170,12 +172,20 @@ pub fn hole_list(
     out
 }
 
-/// How far from a hostile base a computer ship stops (units). Retail, Border Dispute: every Navy computer ship (Frigate, Fast Frigate,
-/// Torpedo boats) sailed straight at the Procyon base and then stayed 325-460 units from it, outside the base's guns, for the rest of the
-/// 27-minute battle; none attacked it (docs/re/movement.md). PROVISIONAL: one number for all classes.
-pub const BASE_STANDOFF: f32 = 390.0;
-fn at_base_standoff(ship: Vec3, base: Vec3) -> bool {
-    Vec2::new(base.x - ship.x, base.z - ship.z).length() <= BASE_STANDOFF
+/// How far from a hostile base a computer ship stops (units). Retail, Border Dispute (docs/re/movement.md): Torpedo boats patrolled
+/// 340-405 units off the Procyon base for the whole battle, the Frigate and Fast Frigates closed to 124-173 (about their gun range) and
+/// sank there. PROVISIONAL: other classes take the old single figure; patrolling is not modelled.
+pub fn base_standoff(class: &str) -> f32 {
+    if class.contains("Torpedo") {
+        375.0
+    } else if class.contains("Frigate") {
+        150.0
+    } else {
+        390.0
+    }
+}
+fn at_base_standoff(ship: Vec3, base: Vec3, class: &str) -> bool {
+    Vec2::new(base.x - ship.x, base.z - ship.z).length() <= base_standoff(class)
 }
 /// Seconds a computer captain keeps its target before choosing again (the original's target-selection timer).
 pub const RESELECT_SECS: f32 = 6.0;
@@ -287,7 +297,7 @@ pub fn ai(
         if explore.quadrant.contains_key(&e) {
             s.waypoints.clear(); // contact: drop the exploring course (the quadrant is kept for later)
         }
-        if base.is_some() && at_base_standoff(tf.translation, foe.1) {
+        if base.is_some() && at_base_standoff(tf.translation, foe.1, &lib.classes[s.class].name) {
             s.goal = None;
             s.order = 0; // arrived: hold off the base
             continue;

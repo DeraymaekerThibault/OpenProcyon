@@ -403,6 +403,7 @@ pub(super) fn fire(
                     aim: goal.filter(|_| is_indirect(&state.gun)),
                     pd: gun.point_defense,
                     harmless: mission.is_some_and(|ms| ms.warning_shots),
+                    base: false,
                 };
                 launch_shell(
                     &mut commands,
@@ -458,6 +459,7 @@ pub(super) struct Launch {
     pub(super) aim: Option<Vec3>,
     pub(super) pd: bool,
     pub(super) harmless: bool,
+    pub(super) base: bool,
 }
 
 /// Spawns one shell of gun `g` from muzzle `mz` (its fire sound, muzzle flash and bullet effect included).
@@ -505,6 +507,7 @@ pub(super) fn launch_shell(
                 pd: shot.pd,
                 hp: b.hitpoints,
                 harmless: shot.harmless,
+                base: shot.base,
             },
             Transient,
             stf,
@@ -604,6 +607,7 @@ pub(super) fn base_fire(
                 let shot = Launch {
                     vel: gun.lob.and_then(|a| lob_velocity(aim_at.position - origin, a, gun.shell_gravity())).map(|v| turn * v),
                     aim: (is_indirect(&mount.gun) || gun.lob.is_some()).then_some(aim_at.position),
+                    base: true,
                     ..default()
                 };
                 let muzzle_transform = globals.get(muzzle).ok().copied();

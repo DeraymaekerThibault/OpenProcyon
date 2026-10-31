@@ -79,8 +79,8 @@ a Gunboat no navigator) the factor is 1 + 0.05 x the captain's rating in that sk
 The two misses are Pirate ships under a Crag captain whose engineering is not listed in the data (the saved 1.30 reads as rating 6).
 This is also where the generic levels' floors come from: a Green / Average / Elite captain is rated 3 / 6 / 8, so a postless factor is 1.15 / 1.30 / 1.40.
 Scan range follows the same rule on the lookout post and spotting: 712.5 = 500 x 1.425 (lookout rated 7), 525 = 500 x 1.05 (no lookout post, empty captain).
-Not resolved: the exact buying order (hulls first, then crew; every fleet's total came to 264-350 points against a default budget of 300 and the lobby's step per click
-is not known) and the choice of crewman (the best of the roster per post fits what was seen, not proven).
+Buying order (2026-10-31, budgets re-read): all hulls and weapons first, then crew ship by ship; 13 of 15 fleets spent their 300 or 340 points
+to the point ([skirmish-setup.md](skirmish-setup.md)). Not resolved: the choice of crewman (257 of 319 picks rated exactly 7 in the post's skill, gunners 8-9).
 
 ## Open
 - Placed and computer ships' generic crews do get crew factors. Retail saves (missions 3 and 11) store per ship an engineer and a

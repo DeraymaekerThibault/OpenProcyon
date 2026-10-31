@@ -23,8 +23,11 @@ The float is read as the pool's max distance (same field order as the WOT pools)
 `HUD_SpeedControl_Up/Down` and `HUD_FireAll` are also original-global names.
 
 ## PROVISIONAL in the remake
-- Which event uses which original pool: damage pool on section loss, heavy explosion on ship destruction. Collision and
-  `Explosion_Med01` pools are unused (no collisions yet).
+- Which event uses which original pool. Measured (27-minute retail recording, 2026-10-31): a ship's death plays one file of the
+  `Explosion_Heavy` pool, about 2.3 s before its wreck stops moving (4 of 9 deaths matched, each file heard almost nowhere else).
+  `Explosion_Med01` plays at the same moment in 4 of 9 deaths and about 70 other times (perhaps section loss, not tested). The
+  `Damage_*` pools and `Ship_Destroyed01-03` were never heard, so the remake's damage pool on section loss stays PROVISIONAL.
+  Collision pools are unused.
 - Falloff (PROVISIONAL): inverse-distance rolloff like DirectSound 3D: full volume within 25 units of the camera, halving per doubling of distance, silent beyond the max distance; no stereo panning. The earlier linear falloff kept nearby collisions near full volume at normal zoom.
 - Engine loops: no max distance in the data (300 used), level 0.25 (PROVISIONAL mix); silent at All Stop. Music level 0.35, one fixed track.
 - One fire sound per shell of a burst.

@@ -425,7 +425,7 @@ fn captain_runs_in_then_circles_with_the_foe_abeam() {
 
 #[test]
 #[ignore = "needs imported assets"]
-fn computer_ships_stop_390_units_off_a_hostile_base() {
+fn computer_ships_stop_their_class_standoff_off_a_hostile_base() {
     let lib = combat::Library::load(crate::assets_dir());
     let ci = lib.index("Ship_Navy_Frigate");
     let class = &lib.classes[ci];
@@ -448,7 +448,7 @@ fn computer_ships_stop_390_units_off_a_hostile_base() {
     };
     let (base, mut tf, dt) = (Vec3::ZERO, Transform::from_xyz(0.0, 0.0, 1500.0), 1.0 / 30.0);
     for _ in 0..(300.0 / dt) as usize {
-        if at_base_standoff(tf.translation, base) {
+        if at_base_standoff(tf.translation, base, &class.name) {
             (ship.goal, ship.order) = (None, 0);
         } else {
             let (goal, order, throttle) = captain_steer(ship.heading, tf.translation, base, class.reach, &[]);
@@ -457,7 +457,7 @@ fn computer_ships_stop_390_units_off_a_hostile_base() {
         step(&mut ship, &mut tf, class, &h, dt);
     }
     let d = Vec2::new(tf.translation.x, tf.translation.z).length();
-    assert!((d - BASE_STANDOFF).abs() < 40.0 && ship.speed.abs() < 0.5, "stopped {d} units from the base at speed {}", ship.speed);
+    assert!((d - base_standoff(&class.name)).abs() < 40.0 && ship.speed.abs() < 0.5, "stopped {d} units from the base at speed {}", ship.speed);
 }
 
 /// Retail Navy Cutter without crew, sampled from the running original (docs/re/movement.md, "Measured").

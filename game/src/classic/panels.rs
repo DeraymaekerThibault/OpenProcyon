@@ -352,9 +352,11 @@ fn build(
         let o = offset(&hud, "RADAR_SWEEP_OFFSET_FROM_TOPLEFT");
         commands.spawn((Sweep, img, c.abs(o.x, o.y, sz), ChildOf(compass)));
     }
-    if let Some((img, sz)) = c.sprite("HUDRADAR_ICON_ENEMYSHIP_FRAME0", false) {
-        for i in 0..MAX_CONTACTS {
-            commands.spawn((Contact(i), img.clone(), c.abs(0.0, 0.0, sz), Visibility::Hidden, ChildOf(compass)));
+    for (friendly, icon) in [(false, "HUDRADAR_ICON_ENEMYSHIP_FRAME0"), (true, "HUDRADAR_ICON_FRIENDLYSHIP_FRAME0")] {
+        if let Some((img, sz)) = c.sprite(icon, false) {
+            for i in 0..MAX_CONTACTS {
+                commands.spawn((Contact(i, friendly), img.clone(), c.abs(0.0, 0.0, sz), Visibility::Hidden, ChildOf(compass)));
+            }
         }
     }
     if let Some((img, sz)) = c.sprite("COMPASS_OVERLAY", false) {

@@ -16,14 +16,15 @@ fn gunners_shorten_reload() {
 
 #[test]
 fn damage_scales_with_side_and_difficulty() {
-    assert_eq!(side_damage_scale(Side::Player, Side::Enemy, 1), 2.0);
-    assert_eq!(side_damage_scale(Side::Enemy, Side::Player, 1), 0.5);
-    assert_eq!(side_damage_scale(Side::Enemy, Side::Player, 0), 0.25);
-    assert_eq!(side_damage_scale(Side::Player, Side::Enemy, 0), 3.0, "Easy is x3 out, not the inverse of x0.25 in");
-    assert_eq!(side_damage_scale(Side::Player, Side::Enemy, 2), 1.0);
-    assert_eq!(side_damage_scale(Side::Enemy, Side::Enemy, 0), 1.0);
-    assert_eq!(side_damage_scale(Side::Player, Side(2), 1), 2.0, "every computer team takes the difficulty factor");
-    assert_eq!(side_damage_scale(Side::Enemy, Side(2), 0), 1.0);
+    assert_eq!(side_damage_scale(Side::Player, Side::Enemy, 1, false), 2.0);
+    assert_eq!(side_damage_scale(Side::Enemy, Side::Player, 1, false), 0.5);
+    assert_eq!(side_damage_scale(Side::Enemy, Side::Player, 0, false), 0.25);
+    assert_eq!(side_damage_scale(Side::Player, Side::Enemy, 0, false), 3.0, "Easy is x3 out, not the inverse of x0.25 in");
+    assert_eq!(side_damage_scale(Side::Player, Side::Enemy, 2, false), 1.0);
+    assert_eq!(side_damage_scale(Side::Enemy, Side::Enemy, 0, false), 1.0);
+    assert_eq!(side_damage_scale(Side::Player, Side(2), 1, false), 2.0, "every computer team takes the difficulty factor");
+    assert_eq!(side_damage_scale(Side::Enemy, Side(2), 0, false), 1.0);
+    assert_eq!(side_damage_scale(Side::Player, Side::Enemy, 1, true), 1.0, "our base hits computer ships at x1 on Normal");
 }
 
 #[test]
@@ -1137,6 +1138,7 @@ fn shell_into_a_hull_damages_it_and_reports_the_hit() {
         pd: false,
         hp: 1.0,
         harmless: false,
+        base: false,
     };
     let id = app.world_mut().spawn((shell, Transform::from_translation(at))).id();
     app.insert_resource(lib);

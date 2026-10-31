@@ -112,7 +112,14 @@ skill can read N/A). Dragging one onto a post spends its cost (a 9-point captain
   also takes that (release over an entry other than the first picks it) next to the click, click path.
 - Computers build their fleets with the same routine as Auto Assign (`auto_build`, armed hulls only, same victory limit, weapon swaps and named crew:
   speed, turning and sight follow the posts). Read out of 14 retail battle saves ([crew.md](crew.md#computer-fleets-carry-named-crew-the-missing-post-rule-14-retail-battle-saves-2026-10)): the crew
-  and factors match; which hulls the original picks for a given budget is not separated (PROVISIONAL).
+  and factors match. Hulls (2026-10-31, the batch's real budgets 300/340 re-read from the lobby slider, which keeps its value between
+  launches): 1-3 hulls whatever the fleet limit of 5 (filling the limit fits 1 fleet of 15), each costing at most half the points
+  still left (14/15; all hulls together at most 0.7 of the budget, 15/15), never the dearest that fits; hulls take 27-68 % of the
+  budget. All hulls and their weapon swaps come first, then named crew ship by ship in fleet order (15/15; hull-then-its-crew fits
+  10/15), cheap crewmen filling the last posts, so 13 of 15 fleets spent the budget to the point. Crew: 257 of 319 picks are rated
+  exactly 7 in the post's skill, the 8-9s are all gunners, and 24 crewmen rated 8+ (story characters) were never used. Remake:
+  1-3 hulls at random, each at most half the points left, then weapons, then crew (best gunner, otherwise the crewman nearest 7).
+  PROVISIONAL: the ship count and hull choice look random; the crew pick is not recovered (the same hull got the same crew across launches).
 - Computer weapons (36 ships in 14 retail battle saves, one entry per bank): the guns a computer swapped *in* were only Carronade Light/Medium/Heavy
   (33), Gattling Light (13), Plasma Light/Medium/Heavy (10), Cannon Light/Medium (11) and one Star Mortar; never a harpoon, lancer, energy net,
   gravity charge or fire launcher. Stock banks holding such guns were swapped away wherever the fleet could afford it (harpoons 15 of 15, light
