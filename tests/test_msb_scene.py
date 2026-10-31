@@ -97,12 +97,15 @@ class StrictScene(unittest.TestCase):
         with self.assertRaises(ValueError):
             parse_scene(bytes(bad))
 
-
     def test_the_flat_node_list_comes_from_the_strict_reader(self):
         (node,) = parse(scene())
-        self.assertEqual((node.name, node.parent, node.pos), ("Smoke1", -1, (1.0, 2.0, 3.0)))
+        self.assertEqual(
+            (node.name, node.parent, node.pos), ("Smoke1", -1, (1.0, 2.0, 3.0))
+        )
         self.assertEqual((node.kind, node.label), ("PlayEffect", "default"))
-        self.assertEqual(parse(b"\0" * 64), [])  # unreadable: the pattern scan finds nothing
+        self.assertEqual(
+            parse(b"\0" * 64), []
+        )  # unreadable: the pattern scan finds nothing
 
 
 if __name__ == "__main__":
