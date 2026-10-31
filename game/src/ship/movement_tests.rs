@@ -638,6 +638,7 @@ fn ships_lean_into_turns_except_at_emergency_speed() {
             sail_energy: 1.0,
             crew_speed: 1.0,
             crew_turn: 1.0,
+            avoid: 1.0,
         };
         let mut tf = Transform::default();
         for _ in 0..60 {

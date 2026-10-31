@@ -332,6 +332,7 @@ mod tests {
             sail_energy: 1.0,
             crew_speed: 1.0,
             crew_turn: 1.0,
+            avoid: 1.0,
         };
         let [cutter, mow] = ["Ship_Navy_Cutter", "Ship_Navy_ManOWar"].map(|n| lib.index(n));
         let [a, b] = [cutter, mow].map(|c| app.world_mut().spawn((ship(c), Health::new(&lib.classes[c]))).id());
