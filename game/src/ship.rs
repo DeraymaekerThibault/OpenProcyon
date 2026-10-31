@@ -213,7 +213,7 @@ fn choose_target(held: Option<(Entity, f32)>, candidates: &[(Entity, f32)]) -> O
 pub fn ai(
     cfg: Res<Config>,
     mission: Option<Res<campaign::Mission>>,
-    mut ships: Query<(Entity, &Transform, &mut Ship, &Health, Has<PlayerShip>, Option<&FleetPilot>)>,
+    mut ships: Query<(Entity, &Transform, &mut Ship, &Health, Has<PlayerShip>, Option<&FleetPilot>, Option<&FleetMember>)>,
     busy: Query<(), CaptainBusy>,
     sensors: Res<crate::environment::Sensors>,
     held: Query<(), With<HoldPosition>>,
@@ -221,7 +221,7 @@ pub fn ai(
     storms: (Option<Res<crate::nebula::Storms>>, Option<Res<crate::nebula::StormShift>>),
     (mut explore, mut detours): (Local<Explore>, Local<crate::collision::Detours>),
     (time, mut targets): (Res<Time>, ResMut<CaptainTargets>),
-    lib: Res<combat::Library>,
+    (lib, fleets): (Res<combat::Library>, Res<Fleets>),
     bases: Query<(Entity, &Transform, &combat::BaseSide, &Health, &combat::ArmedBase)>,
     scripted: Query<&campaign::MissionShip>,
     obstacles: Query<(&crate::collision::Obstacle, Option<&Visibility>), (Without<Ship>, Without<combat::Asteroid>)>,
@@ -234,9 +234,11 @@ pub fn ai(
     let left_to_script = |e: Entity| scripted.get(e).is_ok_and(|m| !m.visible || matches!(m.stance, crate::rules::Stance::Persistent | crate::rules::Stance::Dummy));
     let dt = time.delta_secs();
     let holes = hole_list(&holes, storms.0.as_deref(), storms.1.as_deref());
-    let snap: Vec<(Entity, Vec3, Side, bool)> = ships.iter().map(|(e, t, s, h, _, _)| (e, t.translation, s.side, !h.destroyed)).collect();
+    let snap: Vec<(Entity, Vec3, Side, bool)> = ships.iter().map(|(e, t, s, h, ..)| (e, t.translation, s.side, !h.destroyed)).collect();
     let scenery = crate::collision::scenery(obstacles.iter());
-    for (e, tf, mut s, h, me, pilot) in &mut ships {
+    for (e, tf, mut s, h, me, pilot, member) in &mut ships {
+        // The human's own fleet waits for orders; allied computer fleets share the human's side but hunt like any computer.
+        let human = s.side == Side::Player && member.is_none_or(|m| m.0 == fleets.local);
         if busy.contains(e) || left_to_script(e) {
             continue;
         }
@@ -265,7 +267,7 @@ pub fn ai(
         // Nothing in sight: a computer ship goes for the nearest living hostile base, however far (retail: a Procyon ship held the
         // Navy base ~2000 units away as its target from the first second). PROVISIONAL: nearest, and ships in sight come first.
         // Armed volcano islands fire on everyone but are no base to go for (retail Diablo Strait: the computer came for our ships).
-        let base = if chosen.is_none() && s.side != Side::Player && explicit.is_none() {
+        let base = if chosen.is_none() && !human && explicit.is_none() {
             let island = |b: &combat::ArmedBase| lib.classes[b.class].name.starts_with("Island_");
             crate::nearest(bases.iter().filter(|b| b.2.0 != s.side && !b.3.destroyed && !island(b.4)), tf.translation, |b| b.1.translation)
         } else {
@@ -283,7 +285,7 @@ pub fn ai(
         let foe = chosen.and_then(|(t, _)| snap.iter().find(|f| f.0 == t).map(|f| (f.0, f.1)).or(base_pos.filter(|b| b.0 == t)));
         let Some(foe) = foe else {
             s.goal = None;
-            if s.side == Side::Player || explicit.is_some() {
+            if human || explicit.is_some() {
                 s.order = 0;
                 continue;
             }

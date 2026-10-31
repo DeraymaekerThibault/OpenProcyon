@@ -649,3 +649,37 @@ fn ships_lean_into_turns_except_at_emergency_speed() {
     assert!(roll(2) > 0.05, "Ahead Full leans: {}", roll(2));
     assert!(roll(3) < 1e-4, "Emergency Speed stays level: {}", roll(3));
 }
+
+/// Border Dispute with every slot filled: allied computer fleets share the human's side but must still go for the enemy base,
+/// while the human's own ships wait for orders.
+#[test]
+#[ignore = "needs imported assets"]
+fn allied_computer_ships_hunt_the_enemy_base_the_humans_fleet_waits() {
+    use bevy::ecs::system::RunSystemOnce;
+    let (mut w, ids) = fleet_world();
+    w.despawn(ids[5]);
+    let class = w.resource::<Library>().index("Base_SmugglersCamp");
+    let health = Health::new(&w.resource::<Library>().classes[class]);
+    w.spawn((Transform::from_xyz(0.0, 0.0, -2000.0), combat::BaseSide(Side::Enemy), health, combat::ArmedBase { class }));
+    w.insert_resource(crate::Config {
+        groups: vec![],
+        player: String::new(),
+        allies: vec![],
+        enemies: vec![],
+        map: None,
+        shot: None,
+        frame: 0,
+        speed: 1.0,
+        ended: None,
+        script: None,
+        autolaunch: false,
+        shot_frame: 0,
+        late_frame: 0,
+    });
+    w.init_resource::<crate::environment::Sensors>();
+    w.init_resource::<CaptainTargets>();
+    w.init_resource::<Time>();
+    w.run_system_once(ai).unwrap();
+    assert!(w.get::<Ship>(ids[4]).unwrap().order > 0, "the ally sets off for the enemy base");
+    assert_eq!(w.get::<Ship>(ids[1]).unwrap().order, 0, "the human's own ship waits for orders");
+}
