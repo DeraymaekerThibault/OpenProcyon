@@ -239,27 +239,27 @@ fn nearest_section(class: &Class, local: Vec3) -> Option<usize> {
     })
 }
 
-/// Hull damage of a hard contact (collision.rs `Ram`): both ships lose hit points on every section, not only near the contact
-/// (retail glancing ram, docs/re/collision.md). PROVISIONAL: (impulse - threshold) / 400 hit points per section, a guess; retail
-/// cost a Cutter 11-15 and a Man-O-War 1-18 per section for a ~4 s slide at 9 units/s (one sample, Easy).
+/// Contact damage (collision.rs `Ram`, read from the original's code): one hit on the victim's section nearest the contact,
+/// through the normal hit path, scaled by side and difficulty as shells are when a ship rammed it (rocks are not scaled).
+/// PROVISIONAL (not ported): a destroyed section passing the damage on to its child sections at x0.4, and the hit material's sound.
 pub fn ram_damage(
     lib: Res<Library>,
     mut rng: ResMut<Rng>,
     mut msgs: MessageReader<crate::collision::Ram>,
-    mut ships: Query<(&Ship, &mut Health, Option<&crate::campaign::MissionShip>)>,
+    mut ships: Query<(&Ship, &Transform, &mut Health, Option<&crate::campaign::MissionShip>)>,
 ) {
     for r in msgs.read() {
-        let amount = (r.impulse - crate::collision::RAM_IMPULSE) / 400.0;
-        for e in if r.a == r.b { vec![r.a] } else { vec![r.a, r.b] } {
-            let Ok((ship, mut hp, ms)) = ships.get_mut(e) else { continue };
-            if hp.destroyed {
-                continue;
-            }
-            let class = &lib.classes[ship.class];
-            for k in 0..class.sections.len().min(hp.sections.len()) {
-                apply_ship_hit(class, &mut hp, k, [amount, amount, 0.0, 0.0, 0.0], ms.map_or(0.0, |m| m.invuln), false, &mut rng);
-            }
+        let rammer = ships.get(r.b).ok().map(|(s, ..)| s.side);
+        let Ok((ship, tf, mut hp, ms)) = ships.get_mut(r.a) else { continue };
+        if hp.destroyed {
+            continue;
         }
+        let class = &lib.classes[ship.class];
+        let scale = rammer.map_or(1.0, |side| super::shells::side_damage_scale(side, ship.side, crate::menu::difficulty(), false));
+        let near = |k: &usize| tf.transform_point((class.sections[*k].min + class.sections[*k].max) * 0.5).distance_squared(r.at);
+        let Some(k) = (0..class.sections.len().min(hp.sections.len())).min_by(|a, b| near(a).total_cmp(&near(b))) else { continue };
+        let d = r.damage * scale;
+        apply_ship_hit(class, &mut hp, k, [d, d, 0.0, 0.0, 0.0], ms.map_or(0.0, |m| m.invuln), false, &mut rng);
     }
 }
 
@@ -315,12 +315,12 @@ mod tests {
 
     #[test]
     #[ignore = "needs imported assets"]
-    fn a_ram_damages_every_section_of_both_ships() {
+    fn a_ram_hits_only_the_section_nearest_the_contact() {
         let lib = Library::load(crate::assets_dir());
         let mut app = App::new();
-        let ship = |class| Ship {
+        let ship = |class, side| Ship {
             class,
-            side: crate::Side::Player,
+            side,
             heading: 0.0,
             speed: 0.0,
             ang_vel: 0.0,
@@ -335,15 +335,20 @@ mod tests {
             avoid: 1.0,
         };
         let [cutter, mow] = ["Ship_Navy_Cutter", "Ship_Navy_ManOWar"].map(|n| lib.index(n));
-        let [a, b] = [cutter, mow].map(|c| app.world_mut().spawn((ship(c), Health::new(&lib.classes[c]))).id());
-        let full = [cutter, mow].map(|c| Health::new(&lib.classes[c]).sections);
+        // Two computer sides: no difficulty factor.
+        let a = app.world_mut().spawn((ship(cutter, crate::Side(1)), Transform::default(), Health::new(&lib.classes[cutter]))).id();
+        let b = app.world_mut().spawn((ship(mow, crate::Side(2)), Transform::default(), Health::new(&lib.classes[mow]))).id();
+        let full = Health::new(&lib.classes[cutter]).sections;
+        let s = &lib.classes[cutter].sections[0];
+        let at = (s.min + s.max) * 0.5;
+        // A Cutter rammed by an enemy Man-O-War at 9 units/s: 0.0004 x 40000 x 9 = 144 hit points.
+        let damage = 0.0004 * lib.classes[mow].phys.mass * 9.0;
         app.insert_resource(lib).insert_resource(Rng(7)).add_message::<crate::collision::Ram>().add_systems(Update, ram_damage);
-        app.world_mut().write_message(crate::collision::Ram { a, b, impulse: crate::collision::RAM_IMPULSE + 4000.0, at: Vec3::ZERO });
+        app.world_mut().write_message(crate::collision::Ram { a, b, damage, at });
         app.update();
-        for (e, full) in [(a, &full[0]), (b, &full[1])] {
-            let hp = &app.world().get::<Health>(e).unwrap().sections;
-            assert!(hp.iter().zip(full).all(|(now, was)| now < was), "every section loses hit points: {hp:?} vs {full:?}");
-        }
+        let hp = &app.world().get::<Health>(a).unwrap().sections;
+        assert_eq!(hp[0], (full[0] - damage).max(0.0), "the nearest section takes it all");
+        assert_eq!(&hp[1..], &full[1..], "no other section is touched");
     }
 
     #[test]

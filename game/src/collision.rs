@@ -335,22 +335,28 @@ fn fixed_body() -> ContactBody {
     ContactBody { velocity: Vec3::ZERO, spin: 0.0, inverse_mass: 0.0, inverse_inertia: 0.0, arm: Vec3::ZERO }
 }
 
-/// A hard contact (impulse above `RAM_IMPULSE`, mass x speed units) between ships `a` and `b`, or ship `a` and scenery (`a == b`):
-/// combat.rs turns it into hull damage. PROVISIONAL: the original's collision damage is unknown (docs/re/collision.md).
+/// Contact damage `damage` to ship `a` from ship or rock `b` at `at` (docs/re/collision.md, read from the original's code):
+/// `combat::lob::ram_damage` puts it on `a`'s section nearest `at`, scaled by difficulty when `b` is a ship.
 #[derive(Message)]
 pub struct Ram {
     pub a: Entity,
     pub b: Entity,
-    pub impulse: f32,
+    pub damage: f32,
     pub at: Vec3,
 }
-pub const RAM_IMPULSE: f32 = 8000.0;
+/// Ship-against-ship damage: this x the other ship's mass x the closing speed, at most once per `RAM_COOLDOWN` s per ship.
+const RAM_FACTOR: f32 = 0.0004;
+const RAM_COOLDOWN: f32 = 3.5;
+/// Ship-against-rock damage, to both, every physics tick (1/30 s) in contact: this x the rock's mass x the closing speed.
+const ROCK_FACTOR: f32 = 0.0002;
+/// The original's physics tick, which its contact rates are written for.
+const TICK: f32 = 1.0 / 30.0;
 
 pub fn sail(
     time: Res<Time>,
     lib: Res<crate::Library>,
     obstacles: Query<(Entity, &Obstacle, Option<&Visibility>), (Without<crate::Ship>, Without<crate::combat::Asteroid>)>,
-    mut rocks: Query<(&mut crate::combat::Asteroid, &mut Transform, &mut Obstacle, &mut Drift, Option<&Visibility>), Without<crate::Ship>>,
+    mut rocks: Query<(Entity, &mut crate::combat::Asteroid, &mut Transform, &mut Obstacle, &mut Drift, Option<&Visibility>), Without<crate::Ship>>,
     mission: Option<Res<crate::campaign::Mission>>,
     mut cables: Local<HashMap<(Entity, Entity), f32>>,
     human: Query<(), With<crate::PlayerShip>>,
@@ -362,8 +368,15 @@ pub fn sail(
     currents: Query<&crate::environment::Current>,
     mut rams: Option<ResMut<Messages<Ram>>>,
     captains: Query<&crate::campaign::MissionShip>,
-    (fleets, members, mut avoiders): (Option<Res<crate::ship::Fleets>>, Query<&crate::ship::FleetMember>, Local<HashMap<Entity, avoid::Avoid>>),
+    (fleets, members, mut avoiders, mut rammed): (
+        Option<Res<crate::ship::Fleets>>,
+        Query<&crate::ship::FleetMember>,
+        Local<HashMap<Entity, avoid::Avoid>>,
+        Local<HashMap<Entity, f32>>,
+    ),
 ) {
+    let now = time.elapsed_secs();
+    rammed.retain(|_, until| *until > now);
     let cinematic = mission.as_deref().is_some_and(|m| m.script.nis && m.opening.is_none());
     // PROVISIONAL: stop ordinary helm/combat motion in NIS, but retain authored routes (e.g. Exile's retreat).
     let mut stopped = std::collections::HashSet::new();
@@ -422,7 +435,7 @@ pub fn sail(
                 others.push(Other { key: Key::Entity(oe), centre, radius, priority: 0.0, lifeboat: false, shape: Shape::Fixed { obstacle: o, island: true } });
             }
         }
-        for (i, (r, _, o, _, v)) in rocks.iter().enumerate() {
+        for (i, (_, r, _, o, _, v)) in rocks.iter().enumerate() {
             if r.hp > 0.0 && v != Some(&Visibility::Hidden) {
                 let (centre, radius) = o.sphere();
                 others.push(Other { key: Key::Rock(i), centre, radius, priority: 0.0, lifeboat: false, shape: Shape::Fixed { obstacle: o, island: false } });
@@ -478,11 +491,11 @@ pub fn sail(
         }
     }
     // shortcut: small adaptive steps instead of continuous OBB sweeps; upgrade if speeds exceed retail orders.
-    let fastest = ships.iter().map(|(_, s, _, _, d, _)| s.speed.abs() + d.0.length() + 5.0).chain(rocks.iter().map(|(_, _, _, d, _)| d.0.length())).fold(0.0, f32::max);
+    let fastest = ships.iter().map(|(_, s, _, _, d, _)| s.speed.abs() + d.0.length() + 5.0).chain(rocks.iter().map(|(_, _, _, _, d, _)| d.0.length())).fold(0.0, f32::max);
     let steps = (fastest * dt / 0.5).max(dt * 60.0).ceil().clamp(1.0, 32.0) as usize; // cap: a runaway drift must not freeze the frame
     let substep = dt / steps as f32;
     for _ in 0..steps {
-        for (rock, mut tf, mut obstacle, drift, visible) in &mut rocks {
+        for (_, rock, mut tf, mut obstacle, drift, visible) in &mut rocks {
             if rock.hp <= 0.0 || visible == Some(&Visibility::Hidden) || drift.0 == Vec3::ZERO {
                 continue;
             }
@@ -539,7 +552,7 @@ pub fn sail(
             }
             // PROVISIONAL: native asteroid restitution/inertia remain unresolved.
             // shortcut: share the planar ship solver for rocks; upgrade when native asteroid response is decoded.
-            for (mut rock, mut rock_tf, mut obstacle, mut rock_drift, visible) in &mut rocks {
+            for (rock_e, mut rock, mut rock_tf, mut obstacle, mut rock_drift, visible) in &mut rocks {
                 if rock.hp <= 0.0 || visible == Some(&Visibility::Hidden) {
                     continue;
                 }
@@ -555,15 +568,23 @@ pub fn sail(
                         inverse_inertia: 12.0 / (rock.mass * (size.x * size.x + size.z * size.z).max(0.001)),
                         arm: (contact.point - rock_tf.translation).with_y(0.0),
                     };
-                    let j = impulse(&a, &b, contact.push.normalize());
-                    tf.translation += contact.push * (a.inverse_mass / (a.inverse_mass + b.inverse_mass));
-                    let delta = -contact.push * (b.inverse_mass / (a.inverse_mass + b.inverse_mass));
+                    // The original: pushed apart by mass, the ship's speed and turn untouched, the rock shoved away from the ship
+                    // (0.25 x the centres' offset per second), and both damaged every tick by the rock's mass x the closing speed.
+                    let push = contact.push.with_y(0.0);
+                    tf.translation += push * (a.inverse_mass / (a.inverse_mass + b.inverse_mass));
+                    let delta = -push * (b.inverse_mass / (a.inverse_mass + b.inverse_mass));
                     rock_tf.translation += delta;
                     obstacle.translate(delta);
-                    bump(class, contact.point, j);
-                    apply_impulse(&mut s, &mut drift, &a, j);
-                    rock_drift.0 -= j * b.inverse_mass;
-                    rock.add_contact_spin(-b.arm.cross(j).y * b.inverse_inertia);
+                    bump(class, contact.point, push * 1000.0);
+                    rock_drift.0 = (rock_tf.translation - tf.translation).with_y(0.0) * 0.25;
+                    let hurt = ROCK_FACTOR * rock.mass * (a.velocity - b.velocity).length() * substep / TICK;
+                    rock.hp -= hurt;
+                    if let Some(r) = rams.as_mut().filter(|_| hurt > 0.0) {
+                        r.write(Ram { a: e, b: rock_e, damage: hurt, at: contact.point });
+                    }
+                    if rock.hp <= 0.0 {
+                        break;
+                    }
                 }
             }
         }
@@ -595,7 +616,7 @@ pub fn sail(
         // Two passes also settle small initial formation overlaps without moving destroyed ships.
         for _ in 0..2 {
             let mut pairs = ships.iter_combinations_mut();
-            while let Some([(ea, mut a, mut ta, ha, mut da, docka), (eb, mut b, mut tb, hb, mut db, dockb)]) = pairs.fetch_next() {
+            while let Some([(ea, mut a, mut ta, ha, da, docka), (eb, mut b, mut tb, hb, db, dockb)]) = pairs.fetch_next() {
                 // In the original a ship hitting a lifeboat has no response: lifeboats pass through ships and each other (they still touch for pickup).
                 if ha.destroyed
                     || hb.destroyed
@@ -625,15 +646,37 @@ pub fn sail(
                 if total <= 0.0 {
                     continue;
                 }
+                // The original (read from its code): pushed apart by mass, the heavier hull moving less; no bounce, both keep their
+                // velocity. Each gets a yaw kick at the contact point from 0.1 x its mass x its change to the pair's common velocity
+                // per 1/30 s, over a box's inertia (the own mass cancels: a light ship swings, a heavy one hardly turns).
+                let push = push.with_y(0.0);
                 ta.translation += push * (a_body.inverse_mass / total);
                 tb.translation -= push * (b_body.inverse_mass / total);
-                let j = impulse(&a_body, &b_body, normal);
-                bump(ca, point, j);
-                if let Some(r) = rams.as_mut().filter(|_| j.length() > RAM_IMPULSE) {
-                    r.write(Ram { a: ea, b: eb, impulse: j.length(), at: point });
+                let (ma, mb) = (ca.phys.mass, cb.phys.mass);
+                let common = (a_body.velocity * ma + b_body.velocity * mb) / (ma + mb);
+                let kick = |body: &ContactBody, size: Vec3, dir: Vec3| {
+                    let force = dir * 0.1 * (common - body.velocity).length() / TICK; // per unit of own mass
+                    (body.arm.cross(force).y * 12.0 / (size.x * size.x + size.z * size.z).max(1e-3)).clamp(-60.0, 60.0) * substep
+                };
+                let size = |c: &crate::data::Class| c.collision_bounds[1] - c.collision_bounds[0];
+                if !pinned(ea) {
+                    a.ang_vel += kick(&a_body, size(ca), normal);
                 }
-                apply_impulse(&mut a, &mut da, &a_body, j);
-                apply_impulse(&mut b, &mut db, &b_body, -j);
+                if !pinned(eb) {
+                    b.ang_vel += kick(&b_body, size(cb), -normal);
+                }
+                bump(ca, point, push * 1000.0);
+                // Ram damage: the other ship's mass x the closing speed on the section nearest the contact, at most once per 3.5 s
+                // per ship, never between allies.
+                let closing = (a_body.velocity - b_body.velocity).length();
+                for (victim, other, m, side, other_side) in [(ea, eb, mb, a.side, b.side), (eb, ea, ma, b.side, a.side)] {
+                    if side != other_side && !rammed.contains_key(&victim) && closing > 0.0 {
+                        rammed.insert(victim, now + RAM_COOLDOWN);
+                        if let Some(r) = rams.as_mut() {
+                            r.write(Ram { a: victim, b: other, damage: RAM_FACTOR * m * closing, at: point });
+                        }
+                    }
+                }
             }
         }
     }

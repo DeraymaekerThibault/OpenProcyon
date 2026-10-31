@@ -1002,7 +1002,7 @@ impl Script {
             "Set Group Throttle Percent" => out.push(Fx::Speed(g("Group Name"), f(a, "Throttle Percent"))),
             "Destroy Group/Unit" => out.push(Fx::Destroy(g("Group Name"))),
             "Transfer Group/Unit to Group" => out.push(Fx::Owner(g("Group/Unit to transfer"), s(a, "Target Group").into())),
-            // An attack order flown bow-on at emergency speed; the contact damage is collision.rs `Ram` (PROVISIONAL).
+            // An attack order flown bow-on at emergency speed; the contact damage is collision.rs `Ram`.
             "GroupA to Ram GroupB" => out.push(Fx::Ram(g("Group Name"), s(a, "Group Unit Target").into())),
             "Teleport Group/Unit" => {
                 if let Some(p) = self.point_sets[s(a, "Point Set Name")].get(0) {

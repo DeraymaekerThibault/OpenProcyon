@@ -12,6 +12,27 @@ Source: observed behaviour of the original game, WOT collision definitions and t
 - Helper uses a contact point's displacement from the transformed centre of mass and collision-box dimensions to accumulate angular acceleration, clamped to ±60. The exact torque/sign relationship is not recovered well enough to port.
 - Debug strings include `Collision LOD Level Index` and `Valid Collision Triangle Indices`. The exact collision LOD, triangle rejection rules, response dispatcher, restitution, sound trigger and damage calculation remain unresolved.
 
+## Ships and rocks (read from the original's code, 2026-10-31)
+
+- **Ship against ship**, checked every physics tick (1/30 s) while the hulls overlap: the two are pushed apart along the contact
+  normal in proportion to the other's mass (the heavier one moves less; an idle ship is no exception). Neither ship's velocity
+  changes: no bounce, restitution or friction. Each gets a yaw kick at the contact point: a force of 0.1 x its mass x the
+  difference between its velocity and the pair's mass-weighted common velocity, per tick, over its box inertia (mass x (width² +
+  length²) / 12), the angular acceleration capped at ±60. Its own mass cancels, so a Man-O-War barely turns and a Cutter swings.
+- **Ram damage:** a ship takes 0.0004 x the *other* ship's mass x the closing speed, on its one section nearest the contact,
+  through the normal hit path (a destroyed section passes damage on to its child sections at x0.4 per level). At most once per
+  3.5 s per ship, no speed threshold, no material or ram-bow factor. None between allies. Scaled by side and difficulty like
+  shells (Easy: the human's ships x0.25, computer ships rammed by the human's x3; Normal x0.5 / x2; Hard x1). Example: a Cutter
+  rammed by an enemy Man-O-War at 9 units/s loses 144; the Man-O-War 14.4.
+- **Ship against rock:** pushed apart by mass, the ship's speed and turn untouched; the rock is shoved away from the ship at
+  0.25 x the offset between their centres per second. Every tick both take 0.0002 x the rock's mass x the closing speed (the
+  ship's not scaled by difficulty, no cooldown, no ally test); the rock breaks at 0.
+- **Sound:** each tick in contact a 7 % chance of `Ship_Collision_Wood` / `_Metal` by the touching sections' materials (none for
+  cloth or stone); a damaging ram plays the hit material's damage sound. Lifeboats pass through ships.
+- Remake: `collision::sail` and `combat::lob::ram_damage`. PROVISIONAL (not ported): the child-section spill, the damage sound,
+  the 7 % sound draw (one collision sound per half second instead), the exact contact boxes (the original likely uses the
+  rendered model's bounds for ship against ship, see the measurement below) and the box inertia's width and length.
+
 ## Land and bases (read from the original's code, 2026-10-31)
 
 Contact with an island or a base pushes the ship's hull straight out along the horizontal normal, and nothing else: its speed,
@@ -19,7 +40,10 @@ throttle and turn are untouched, it takes no damage and makes no sound. A ship p
 capped) speed and slides along it; one wedged bow-first is freed by the avoider's turn in place ([movement.md](movement.md)).
 Remake: `collision::sail` (the old impulse response for land is gone; ships and rocks keep it until their rules are ported).
 
-## Measured on retail (2026-10, one glancing ram)
+## Measured on retail (2026-10, one glancing ram between our own ships)
+
+Since read from the code: ships of one alliance never damage each other by contact, so the damage below was not the ram; it
+matches the Diablo Strait volcano meteors, which hit every section at once.
 
 Headless Diablo Strait skirmish on Easy, our Navy Cutter driven past our own idle Man-O-War; both ships logged at 30 Hz and saved
 before and after (section HP from the saves).
@@ -30,9 +54,7 @@ before and after (section HP from the saves).
 - **Response:** the idle Man-O-War did not move or turn at all (position, heading and velocity unchanged). The Cutter lost speed
   smoothly over ~1.2 s (9.07 → 6.2 units/s, then ~5.8) and was deflected by ~30° of heading while it kept steering inward; no
   bounce.
-- **Damage:** both ships lost hit points on *every* section, not only near the contact: Cutter −75 (−11 to −15 on each of its 6
-  sections), Man-O-War −86 (−1 to −18 on each of 9). Whether difficulty scales it (Easy) is not known; the remake damages every
-  section of both ships (`combat::lob::ram_damage`), the amount per section PROVISIONAL.
+- **Damage:** both ships lost hit points on every section during the run (Cutter −75, Man-O-War −86): meteors, not the contact.
 - A head-on Emergency ram missed (passed 24 units off) and did nothing.
 
 ## Implementation
