@@ -287,6 +287,7 @@ mod tests {
             sail_energy: 1.0,
             crew_speed: 1.0,
             crew_turn: 1.0,
+            avoid: 1.0,
         };
         let tables: std::collections::HashMap<String, std::collections::HashMap<String, [f32; 5]>> =
             serde_json::from_value(crate::data::read_json(&crate::assets_dir().join("data/nebula.json"))).unwrap();

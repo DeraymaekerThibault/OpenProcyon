@@ -148,6 +148,7 @@ fn moving_ship() -> (App, Entity) {
         sail_energy: 1.0,
         crew_speed: 1.0,
         crew_turn: 1.0,
+        avoid: 1.0,
     };
     let mut app = clock();
     app.insert_resource(Library { classes: vec![class], guns: default(), bullets: default(), names: default() }).add_systems(FixedUpdate, sail.in_set(BattleSet::Simulate));

@@ -434,6 +434,34 @@ pub fn steer_clear(bounds: [Vec3; 2], tf: &Transform, speed: f32, want: f32, sce
     STEER_OFFSETS.iter().map(|o| want + o).find(|heading| clear(*heading)).unwrap_or(want)
 }
 
+/// Speed fraction below which a captain never slows for land, and the centre-to-coast distance (units) at which it is back to full speed.
+/// Retail Procyon Frigate (6.6 u/s) on Border Dispute, land in its way: 5.7 u/s at 47 units, 3.6 at 21, 1.6 at 5, back to 5.3 within a
+/// few units of clearance (procyon-re evidence, openprocyon docs/re/movement.md "Land ahead"). Fit: 0.2 + 0.8 x distance / 60.
+/// PROVISIONAL: one curve, taken from one ship class; the original's braking rule is not decoded.
+pub const CONTACT_SLOW_MIN: f32 = 0.2;
+pub const CONTACT_SLOW_RANGE: f32 = 60.0;
+
+/// Speed fraction an AI ship keeps with land on its present course: 1.0 when a box driven straight ahead stays clear over `CONTACT_SLOW_RANGE`
+/// (or 6 s of travel when longer), else `CONTACT_SLOW_MIN` rising linearly with the centre-to-contact distance. Retail ships cruise
+/// straight past an island they would clear (27 units off at full speed) and slow only when the line would touch.
+pub fn contact_slow(bounds: [Vec3; 2], pos: Vec3, heading: f32, speed: f32, scenery: &[&Obstacle]) -> f32 {
+    let reach = (speed.abs() * STEER_TIME).max(CONTACT_SLOW_RANGE);
+    let fwd = Vec3::new(-heading.sin(), 0.0, -heading.cos());
+    let touches_at = |t: f32| touches(bounds, &Transform::from_translation(pos + fwd * t).with_rotation(Quat::from_rotation_y(heading)), scenery);
+    let n = (reach / ((bounds[1].z - bounds[0].z) * 0.5).max(1.0)).ceil().max(2.0) as usize; // half a hull apart: a thin coast cannot fall between probes
+    let Some(first) = (1..=n).map(|i| reach * i as f32 / n as f32).find(|&t| touches_at(t)) else {
+        return 1.0;
+    };
+    // The contact lies between the last clear probe and `first`: bisect it, then add the bow's half length (box centre -> hull front).
+    let (mut lo, mut hi) = (first - reach / n as f32, first);
+    for _ in 0..5 {
+        let mid = (lo + hi) * 0.5;
+        if touches_at(mid) { hi = mid } else { lo = mid }
+    }
+    let bow = bounds[0].z.abs().max(bounds[1].z.abs());
+    (CONTACT_SLOW_MIN + (1.0 - CONTACT_SLOW_MIN) * (hi + bow) / CONTACT_SLOW_RANGE).clamp(CONTACT_SLOW_MIN, 1.0)
+}
+
 fn forward(ship: &crate::Ship) -> Vec3 {
     Vec3::new(-ship.heading.sin(), 0.0, -ship.heading.cos())
 }
@@ -559,19 +587,23 @@ pub fn sail(
         let all = scenery(obstacles.iter().map(|(_, o, v)| (o, v)).chain(rocks.iter().filter(|(r, ..)| r.hp > 0.0).map(|(_, _, o, _, v)| (o, v))));
         for (e, mut s, tf, health, _, docker) in &mut ships {
             if health.destroyed || docker.is_some() || pinned(e) {
+                s.avoid = 1.0;
                 continue;
             }
             let bounds = lib.classes[s.class].collision_bounds;
+            s.avoid = if human.contains(e) { 1.0 } else { contact_slow(bounds, tf.translation, s.heading, s.speed, &all) };
+            // Steer on the speed the ship would have without the slowdown: braking must not shorten the look-ahead and delay the turn.
+            let cruise = s.speed / s.avoid.max(CONTACT_SLOW_MIN);
             if let Some(&wp) = s.waypoints.first().filter(|_| !human.contains(e)) {
                 let d = wp - tf.translation;
                 let want = (-d.x).atan2(-d.z);
-                let heading = steer_clear(bounds, &tf, s.speed, want, &all);
-                let reach = (s.speed.abs() * STEER_TIME).max(STEER_MIN);
+                let heading = steer_clear(bounds, &tf, cruise, want, &all);
+                let reach = (cruise.abs() * STEER_TIME).max(STEER_MIN);
                 if heading != want && d.with_y(0.0).length() > reach {
                     s.waypoints.insert(0, tf.translation + Vec3::new(-heading.sin(), 0.0, -heading.cos()) * reach);
                 }
             } else if let Some(g) = s.goal {
-                s.goal = Some(steer_clear(bounds, &tf, s.speed, g, &all));
+                s.goal = Some(steer_clear(bounds, &tf, cruise, g, &all));
             }
         }
     }

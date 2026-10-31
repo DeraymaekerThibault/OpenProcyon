@@ -20,6 +20,7 @@ pub fn fleet_world() -> (World, [Entity; 6]) {
                 sail_energy: 1.0,
                 crew_speed: 1.0,
                 crew_turn: 1.0,
+                avoid: 1.0,
             },
             Health::new(class),
             Transform::from_xyz(i as f32 * 50.0, 0.0, 0.0),
@@ -334,6 +335,7 @@ fn ship_keeps_speed_and_heading_past_last_waypoint() {
         sail_energy: 1.0,
         crew_speed: 1.0,
         crew_turn: 1.0,
+        avoid: 1.0,
     };
     let mut tf = Transform::default();
     let h = Health { sections: vec![1.0; class.sections.len()], core: 1.0, destroyed: false };
@@ -399,6 +401,7 @@ fn captain_runs_in_then_circles_with_the_foe_abeam() {
             sail_energy: 1.0,
             crew_speed: COMPUTER_CREW,
             crew_turn: COMPUTER_TURN,
+            avoid: 1.0,
         };
         let mut tf = Transform::from_xyz(30.0, 0.0, 400.0);
         let dt = 1.0 / 30.0;
@@ -441,6 +444,7 @@ fn computer_ships_stop_390_units_off_a_hostile_base() {
         sail_energy: 1.0,
         crew_speed: COMPUTER_CREW,
         crew_turn: COMPUTER_TURN,
+        avoid: 1.0,
     };
     let (base, mut tf, dt) = (Vec3::ZERO, Transform::from_xyz(0.0, 0.0, 1500.0), 1.0 / 30.0);
     for _ in 0..(300.0 / dt) as usize {
@@ -484,6 +488,7 @@ fn cutter_matches_measured_retail_movement() {
         sail_energy: 1.0,
         crew_speed: 1.0,
         crew_turn: 1.0,
+        avoid: 1.0,
     };
     let mut tf = Transform::default();
     run(&mut ship, &mut tf, 1.0);
@@ -542,6 +547,7 @@ fn crewed_cutter_matches_measured_retail_speed_and_turn() {
             sail_energy: 1.0,
             crew_speed: f,
             crew_turn: f,
+            avoid: 1.0,
         };
         let mut tf = Transform::default();
         for _ in 0..300 {
@@ -579,6 +585,7 @@ fn uncrewed_turns_match_measured_retail() {
             sail_energy: 1.0,
             crew_speed: 1.0,
             crew_turn: 1.0,
+            avoid: 1.0,
         };
         let mut tf = Transform::default();
         for _ in 0..1500 {

@@ -1101,6 +1101,7 @@ mod ai_tests {
             sail_energy: 1.0,
             crew_speed: 1.0,
             crew_turn: 1.0,
+            avoid: 1.0,
         };
         let player = app
             .world_mut()
@@ -1150,6 +1151,7 @@ mod ai_tests {
             sail_energy: 1.0,
             crew_speed: 1.0,
             crew_turn: 1.0,
+            avoid: 1.0,
         };
         let n = lib.classes[0].sections.len();
         let health = || Health { sections: vec![1.0; n], core: 1.0, destroyed: false };

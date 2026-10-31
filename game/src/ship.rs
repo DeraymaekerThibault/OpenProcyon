@@ -52,6 +52,7 @@ pub struct Ship {
     pub sail_energy: f32,      // nebula drain, separate from permanent sail damage
     pub crew_speed: f32,       // engineers' factor on top speed (crew_arms::skill_factor)
     pub crew_turn: f32,        // helmsman's factor on rudder torque
+    pub avoid: f32,            // speed fraction with land close ahead (collision::contact_slow, AI ships only); 1.0 = clear
 }
 
 impl Ship {
@@ -319,7 +320,7 @@ pub fn step(ship: &mut Ship, tf: &mut Transform, class: &combat::Class, health: 
         let ph = &class.phys;
         let drag = ph.thrust / ph.mass / ph.max_speed; // 1/s; retail settles with this rate for every order change
         let fraction = if ship.order == 0 { 0.0 } else { ship.throttle.unwrap_or(ORDERS[ship.order].1) };
-        let target = fraction * max_speed(ship, class, health);
+        let target = fraction * max_speed(ship, class, health) * ship.avoid;
         let mut steer = 0.0;
         let mut want = None;
         if let Some(&wp) = ship.waypoints.first() {

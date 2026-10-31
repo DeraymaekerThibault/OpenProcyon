@@ -625,6 +625,7 @@ pub fn input_app() -> (App, Entity) {
             sail_energy: 1.0,
             crew_speed: 1.0,
             crew_turn: 1.0,
+            avoid: 1.0,
         },
     ));
     let root = app.world_mut().spawn((HudRoot, Visibility::Inherited)).id();
