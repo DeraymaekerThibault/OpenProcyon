@@ -40,7 +40,7 @@ const REEL_MIN: f32 = 12.0;
 const REEL_RATE: f32 = 2.0;
 
 /// WOT 'Crew Skill Level'. The per-man combat ability is the generic crew's (Crew_General_*: 1, 3, 4 of 10).
-/// PROVISIONAL: 'Players' (the campaign roster) uses Average, and the captains' leadership bonus is not applied.
+/// PROVISIONAL: 'Players' (the campaign roster) uses Average, and generic crews get no leadership bonus (named crews do).
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Skill {
     Green,
@@ -218,12 +218,14 @@ impl Boardable {
         self.replace_strength(Strength::ship(self.counts, self.skill.member()));
     }
 
-    pub fn apply_posts(&mut self, posts: &crate::crew_arms::CrewPosts) {
-        // Named crew replace generic hands; unrecovered captain-leadership thresholds are not invented.
+    /// Named crew replace generic hands; `bonus` (`crew_arms::leadership_bonus`) lifts every slot but the captain's and first mate's.
+    pub fn apply_posts(&mut self, posts: &crate::crew_arms::CrewPosts, bonus: f32) {
         let mut totals = [0.0; 8];
         for (role, total) in totals.iter_mut().enumerate() {
+            let b = if matches!(role, 1 | 2) { 0.0 } else { bonus };
             let members = posts.combat(role, self.skill.member());
-            *total = members.iter().sum::<f32>() + self.counts[role].saturating_sub(members.len() as u32) as f32 * self.skill.member();
+            let hands = self.counts[role].saturating_sub(members.len() as u32) as f32;
+            *total = members.iter().map(|v| (v + b).min(1.0)).sum::<f32>() + hands * (self.skill.member() + b).min(1.0);
         }
         let fighters = (totals[6] * 10.0).round() as i32;
         let crew = (totals.iter().enumerate().filter(|(i, _)| *i != 6).map(|(_, v)| v).sum::<f32>() * 10.0).round() as i32;

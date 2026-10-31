@@ -386,7 +386,11 @@ pub(super) fn fire(
                 // Accuracy factor: 0.5 for the plain AI; crewed ships use 1 - 0.8 * gunnery skill (the campaign roster's best gunner for
                 // the human fleet).
                 let human = campaign.as_deref().is_some_and(|c| mission.is_some_and(|ms| ms.owner == c.script.player()));
-                let factor = if human { posts.map_or(crewed, |p| p.skill(0, "gunnery").map_or(0.5, |skill| 1.0 - 0.8 * skill)) } else { 0.5 };
+                let factor = if human {
+                    posts.map_or(crewed, |p| p.skill(0, "gunnery").map_or(0.5, |skill| 1.0 - 0.8 * (skill + crate::crew_arms::leadership_bonus(me, p)).min(1.0)))
+                } else {
+                    0.5
+                };
                 state.dev = if nis_aim { 0.0 } else { burst_deviation(gun, distance, factor, &mut rng) };
             }
             if state.burst_left > 0 && state.burst_timer <= 0.0 {

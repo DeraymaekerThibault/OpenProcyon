@@ -64,10 +64,19 @@ Saves made mid-battle store per ship an engineer and a navigator factor. Measure
   mean rating 8.67 would give 1.508).
 - **Speed:** Ahead Full = 0.5 × WOT MaxSpeed × engineer factor; Emergency twice that. The speed bands of the turn formula use the
   uncrewed MaxSpeed (the engineers' Man-O-War at Full, 0.745 × MaxSpeed, falls in the top band: 2.68°/s measured and predicted).
-- **Rudder (player ships):** torque × navigator factor, linear. Computer ships turn harder (the Carrack's circle needs
-  (1.425 / 1.125)² on top of the uncrewed formula, [movement.md](movement.md#computer-captains-measured-2026-10)); PROVISIONAL.
-- Leadership: the Carrack's captain (Leadership 7) did not change its factors beyond the formula; whether leadership adds
-  anything elsewhere is not measured.
+- **Rudder:** torque × navigator factor, linear, the same for every ship, human or computer, at any difficulty (read from the
+  original's code, 2026-10-31). The factor scales the rudder term only; the speed bands (on the uncrewed MaxSpeed) and the
+  rotational drag follow, so a steady turn grows with the square root of the factor. The engineer factor scales thrust, so it
+  multiplies top speed and the first acceleration alike; drag is not scaled, so the time constant does not change. Computer ships
+  still turn harder in the measurements (the Carrack's circle needs (1.425 / 1.125)², [movement.md](movement.md#computer-captains-measured-2026-10));
+  crew factors do not explain it, so the cause is elsewhere, likely how hard the computer's helm puts the rudder over. PROVISIONAL.
+- **Leadership** (read from the original's code, 2026-10-31): each ship draws two chances in [0, 1) once when it is crewed. Every
+  crewman but the captain and the first mate gains 0.1 skill (on the 0-1 scale, capped at 1) when the captain's Leadership / 10
+  beats the first chance, and 0.05 when the first mate's beats the second. So a Leadership-7 captain lifts the crew 70 % of the
+  time, fixed for the battle. The bonus counts wherever a crewman's skill does: gunnery accuracy, sail and hull repair,
+  fire-fighting, boarding strength and spotting cloaked ships. The saved speed, rudder and sight factors are worked out before
+  the draw, when both bonuses still apply, which is why they always equal min(1.075 + 0.05 x rating, 1.5) (rating/10 + 0.15
+  through the 1 + 0.5 x skill rule) and why the Carrack's Leadership-7 captain changed nothing there.
 
 ## Computer fleets carry named crew; the missing-post rule (14 retail battle saves, 2026-10)
 Saves taken seconds into skirmishes (seven maps; budgets and fleet limits varied) show every
@@ -75,7 +84,9 @@ computer ship with named crew from the roster (`Crew_Navy_*`, even for Pirate an
 the first ship is crewed in full (gunners, captain, first mate, navigator, engineers, riggers, fighters, lookout) and later ships get what is left, so
 the last ones are mostly empty posts (empty slot = the rating-1 hand). Each ship's saved engineer and navigator factor is reproduced exactly from its
 crew (62 of 64 ships): the per-crewman value above, averaged over the post's slots, **and when the class has no such post at all (a Sloop has no engineers,
-a Gunboat no navigator) the factor is 1 + 0.05 x the captain's rating in that skill** (no 0.075; an empty captain post counts as rating 1: 1.05).
+a Gunboat no navigator) the factor is 1 + 0.05 x a stand-in's rating in that skill** (no 0.075; no stand-in counts as rating 1: 1.05). The stand-in is
+the first mate (failing that the captain) for the navigator, fighter and lookout posts, and the captain for the others (read from
+the original's code).
 The two misses are Pirate ships under a Crag captain whose engineering is not listed in the data (the saved 1.30 reads as rating 6).
 This is also where the generic levels' floors come from: a Green / Average / Elite captain is rated 3 / 6 / 8, so a postless factor is 1.15 / 1.30 / 1.40.
 Scan range follows the same rule on the lookout post and spotting: 712.5 = 500 x 1.425 (lookout rated 7), 525 = 500 x 1.05 (no lookout post, empty captain).
@@ -94,5 +105,4 @@ to the point ([skirmish-setup.md](skirmish-setup.md)). Not resolved: the choice 
   Computer skirmish ships ran in at 1.267 × Emergency, between this curve's Average (1.219) and Elite (1.296).
   Remake: mission ships take the middle of their crew level's saved range / 1.125 for speed and rudder
   (`boarding::Skill::handling`); computer skirmish ships use the measured 1.267.
-- Leadership (manual: "improves the effectiveness of your entire crew"): no bar shows it; not measured.
 - Spotting range. (Repair Rate: refit-resupply.md 3.4; rate of fire: gunnery.md#gunners.)

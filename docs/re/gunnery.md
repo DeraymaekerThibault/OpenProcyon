@@ -67,8 +67,8 @@ ballistic arc and attributed to the ship it started from.
   hits with the default crew. 12 s - 8.5 = 3.5 s fits a heavy cannon with a gunnery-8.5 gunner.
 - Each gun reads the gunner of its own bank, not a ship-wide average (owner-confirmed; the crew screen's gunner slots sit at the
   selectable banks, in the same order). PROVISIONAL: the point-defence banks have no visible slot and count as a generic hand
-  (0.1); which slot a gun reads was inferred from the screen, not decoded. The gunner's captain/first-mate leadership bonuses
-  are not modelled.
+  (0.1); which slot a gun reads was inferred from the screen, not decoded. The ship's leadership bonus ([crew.md](crew.md)) adds to the
+  gunner's skill before the 1 - 0.8 x skill factor.
 
 ## Lob shells
 Measured on the running original game (2026-10): a Navy Man-O-War's bow Star Mortar fired at open etherium in a
