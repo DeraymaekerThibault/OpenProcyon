@@ -238,14 +238,20 @@ Static analysis of the original's AI, written as rules; it explains the island b
 - **Right of way:** after the same obstacle six thinks in a row (about 3 s), each side's priority is its speed, plus 50 for a moving ship commanded by the
   human; anything that is not a ship has 0. If the obstacle's priority is at least the ship's own, the ship stops for 4 s, again while it persists.
   So computer ships give way to the human's moving ships, the slower of two computer ships stops, and a moving ship never stops for land.
-- **Inside a black hole or nebula:** straight out to 2r beyond its rim. **Pressed and stopped** against an obstacle for over 5 s: it turns toward the
-  clearer side (the exact physics is not read).
+- **Inside a black hole or nebula:** straight out to 2r beyond its rim. **Wedged** (read from the original's code): when the same obstacle has been
+  found on more than ten thinks in a row (about 5.5 s), the ship overlaps its bounding sphere (gap under 1 unit) and it barely moves (under
+  0.1 units per 1/30 s), the avoider drops the detour and turns the ship in place toward the side of the smaller clear turn (a tie, or no
+  clear side: the original's sign convention). The turn runs at a fixed sqrt(MaxAngularAcceleration / RotationalFriction) / 3 rad/s (a
+  Carrack 5.7°/s), whatever the speed, rudder, crew or damage; meanwhile nothing else moves the ship and its speed and throttle are kept.
+  It ends on the first think where any condition fails. Retail saves never caught a ship in it: a last resort, since a moving ship's
+  look-ahead keeps it off land. At a standstill the look-ahead covers only obstacles whose sphere the ship already overlaps.
 - Fits play: computer ships keep clear of each other (both sides steer) but meet the human's ships, which do not steer for them, and stop in front of a
   moving one of them.
 - Remake: `collision/avoid.rs`, run from `collision::sail` for every AI-steered ship except the human's own ship and docking ships; it sets
   `Ship::avoid` (the speed fraction `ship::step` multiplies in) and puts the detour point in front of the course. PROVISIONAL (not ported yet):
   mines, torpedoes, dragons, black holes and nebulae as obstacles (black holes and storms are left to `ship::flee`), the sight-range limit,
-  the turn-out-when-pressed rule, and the human's move orders.
+  and the human's move orders. PROVISIONAL: "barely moves" is read as a speed under 3 units/s (the original tests the
+  last position change, push-outs included).
 
 ## Computer ships and a hostile base (Border Dispute, 2026-10-27; re-read 2026-10-31)
 

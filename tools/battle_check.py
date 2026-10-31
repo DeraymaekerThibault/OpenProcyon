@@ -29,8 +29,9 @@ ANSI = re.compile(r"\x1b\[[0-9;]*m")
 REPORT = re.compile(r"battle report (\{.*\})")
 FLEETS = ["--ship", "Ship_Navy_Cutter", "--allies", "Ship_Navy_Cutter",
           "--enemies", "Ship_Pirate_Barque,Ship_Pirate_Sloop"]  # fmt: skip
-# Seconds a ship may stay in contact with scenery without a break before it counts as grinding.
-GRIND = 3.0
+# Seconds a ship may stay in contact with scenery without a break before it counts as grinding. A wedged computer ship first waits
+# for the original's unstick (the same obstacle for 5.5 s), then turns in place until it is free (docs/re/movement.md).
+GRIND = 10.0
 # Frames over 50 ms a battle may have (after the first second) before it counts as stuttering; healthy runs have 0-1.
 STUTTER = 10
 

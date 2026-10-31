@@ -1,8 +1,8 @@
 //! The original's collision avoider for AI-steered ships (docs/re/movement.md, "Collision avoidance"): one local rule for land,
 //! ships and rocks alike, no route planning. Twice a second each ship looks up to 10 s ahead along its current heading; an obstacle
 //! in the way caps its speed by the gap, sends it to a detour point on the smallest clear turn, and after about 3 s of the same
-//! obstacle the lower-priority ship stops for 4 s. PROVISIONAL (not ported): mines, torpedoes, dragons, black holes and nebulae as
-//! obstacles, the scanner range limit, the avoider's exclusion list, and the turn-in-place unstick.
+//! obstacle the lower-priority ship stops for 4 s; a ship wedged against an obstacle turns in place (`Avoid::stuck`). PROVISIONAL
+//! (not ported): mines, torpedoes, dragons, black holes and nebulae as obstacles, the scanner range limit, the avoider's exclusion list.
 use super::{Obstacle, box_body, contact, hits};
 use bevy::prelude::*;
 use std::f32::consts::PI;
@@ -13,6 +13,10 @@ pub(super) const LOOK: f32 = 10.0;
 const RELEASE: f32 = 1.75;
 const SAME_LIMIT: u32 = 5;
 const WAIT: f32 = 4.0;
+/// Stuck: the same obstacle for more than this many thinks while overlapping its sphere (gap under 1 unit) and barely moving.
+const STUCK_THINKS: u32 = 10;
+/// "Barely moving": the original tests the last position change per physics tick (1/30 s) under 0.1 units. PROVISIONAL: read as speed.
+const STUCK_SPEED: f32 = 3.0;
 /// Priority a moving ship of the human's gets on top of its speed: computer ships give way to it.
 pub(super) const HUMAN_PRIORITY: f32 = 50.0;
 
@@ -60,11 +64,13 @@ pub struct Avoid {
     pub detour: Option<Vec3>,
     last: Option<Key>,
     same: u32,
+    /// Wedged: turning in place, +1 toward port, -1 toward starboard (`collision::sail` turns the hull; nothing else moves it).
+    pub stuck: Option<f32>,
 }
 impl Avoid {
     /// `stagger` delays the first think (the original spreads thinks over 0.05 s steps).
     pub fn new(stagger: f32) -> Self {
-        Avoid { next: stagger, wait: 0.0, cap: 1.0, detour: None, last: None, same: 0 }
+        Avoid { next: stagger, wait: 0.0, cap: 1.0, detour: None, last: None, same: 0, stuck: None }
     }
     /// Advances the clocks by `dt`; true when the ship thinks this tick.
     pub fn due(&mut self, dt: f32) -> bool {
@@ -82,7 +88,7 @@ impl Avoid {
         self.wait <= 0.0
     }
     fn reset(&mut self) {
-        (self.cap, self.detour, self.last, self.same) = (1.0, None, None, 0);
+        (self.cap, self.detour, self.last, self.same, self.stuck) = (1.0, None, None, 0, None);
     }
 
     /// One think toward `dest` (the current waypoint, or a point ahead on the goal heading); `me_key` is the ship itself.
@@ -97,17 +103,28 @@ impl Avoid {
         let t = if shortened { left / v } else { LOOK };
         let reach = t * v;
         let cands: Vec<&Other> =
-            others.iter().filter(|o| o.key != me_key && !(me.lifeboat && o.lifeboat) && (o.centre - me.pos).with_y(0.0).length() - me.radius - o.radius <= reach).collect();
+            others.iter().filter(|o| o.key != me_key && !(me.lifeboat && o.lifeboat) && (o.centre - me.pos).with_y(0.0).length() - me.radius - o.radius < reach).collect();
         let dest_heading = (-to_dest.x).atan2(-to_dest.z);
         if self.detour.is_some() && sweep(me, dest_heading, if shortened { t } else { RELEASE * t }, &cands).is_none() {
             self.detour = None;
         }
         let Some((hit_t, o)) = sweep(me, me.heading, t, &cands) else {
-            (self.cap, self.last, self.same) = (1.0, None, 0);
+            (self.cap, self.last, self.same, self.stuck) = (1.0, None, 0, None);
             return;
         };
         self.same = if self.last == Some(o.key) { self.same + 1 } else { 0 };
         self.last = Some(o.key);
+        // Wedged: turn in place toward the smaller clear turn (a tie, or none clear: as the original, minus on a tie, else port),
+        // the side fixed until any condition fails on a later think.
+        let sphere_gap = (o.centre - me.pos).with_y(0.0).length() - me.radius - o.radius;
+        if sphere_gap < 1.0 && me.speed.abs() < STUCK_SPEED && self.same > STUCK_THINKS {
+            if self.stuck.is_none() {
+                self.detour = None;
+                self.stuck = Some(clear_heading(me, dest_heading, t, &cands).map_or(1.0, |h| if crate::ship::angdiff(h, me.heading) > 0.0 { 1.0 } else { -1.0 }));
+            }
+            return;
+        }
+        self.stuck = None;
         if self.same > SAME_LIMIT && o.priority >= me.priority {
             (self.cap, self.wait) = (0.0, WAIT);
             return;

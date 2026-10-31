@@ -330,6 +330,7 @@ fn apply_impulse(ship: &mut crate::Ship, drift: &mut Drift, body: &ContactBody, 
     set_velocity(ship, drift, body.velocity + j * body.inverse_mass);
     ship.ang_vel += body.arm.cross(j).y * body.inverse_inertia;
 }
+#[cfg(test)]
 fn fixed_body() -> ContactBody {
     ContactBody { velocity: Vec3::ZERO, spin: 0.0, inverse_mass: 0.0, inverse_inertia: 0.0, arm: Vec3::ZERO }
 }
@@ -503,7 +504,14 @@ pub fn sail(
                 continue;
             }
             let class = &lib.classes[s.class];
-            crate::step(&mut s, &mut tf, class, health, substep);
+            if let Some(dir) = avoiders.get(&e).and_then(|a| a.stuck) {
+                // The original's unstick: a fixed turn in place, sqrt(MaxAngularAcceleration / RotationalFriction) / 3 rad/s, whatever
+                // the speed, rudder or crew; the ship keeps its speed but does not move until it is free.
+                s.heading += dir * (class.phys.max_ang_acc / class.phys.rot_friction.max(1e-3)).sqrt() / 3.0 * substep;
+                tf.rotation = Quat::from_rotation_y(s.heading);
+            } else {
+                crate::step(&mut s, &mut tf, class, health, substep);
+            }
             // Etherium currents push along their path (environment.rs); force / mass, as for thrust.
             for c in &currents {
                 drift.0 += c.force(tf.translation) / class.phys.mass * substep;
@@ -523,14 +531,9 @@ pub fn sail(
                     let body = box_body(class.collision_bounds, &tf);
                     let contacts = static_contacts(&body, obstacle);
                     let Some(contact) = closest_contact(contacts) else { break };
-                    let body = ship_body(&s, &tf, &drift, class, contact.point);
-                    let j = impulse(&body, &fixed_body(), contact.push.normalize());
-                    tf.translation += contact.push;
-                    bump(class, contact.point, j);
-                    if let Some(r) = rams.as_mut().filter(|_| j.length() > RAM_IMPULSE) {
-                        r.write(Ram { a: e, b: e, impulse: j.length(), at: contact.point });
-                    }
-                    apply_impulse(&mut s, &mut drift, &body, j);
+                    // The original (read from its code): land and bases only push the hull out along the horizontal normal; speed,
+                    // turn, damage and sound are untouched, so a ship slides along the shore and can still turn free.
+                    tf.translation += contact.push.with_y(0.0);
                 }
             }
             // PROVISIONAL: native asteroid restitution/inertia remain unresolved.

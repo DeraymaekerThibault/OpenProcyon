@@ -74,8 +74,8 @@ class Evaluate(unittest.TestCase):
 
     def test_grinding_on_scenery_always_fails(self):
         self.assertEqual(
-            evaluate(report(contact=7.5), set()),
-            ["Ship_Pirate_Barque (side1) ground on scenery for 7.5 s"],
+            evaluate(report(contact=12.5), set()),
+            ["Ship_Pirate_Barque (side1) ground on scenery for 12.5 s"],
         )
 
     def test_stutter_fails(self):
