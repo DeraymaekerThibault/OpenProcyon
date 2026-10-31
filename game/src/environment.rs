@@ -162,7 +162,8 @@ fn sensor_smoke(world: &mut World) {
         let radar = world.query_filtered::<&Visibility, With<crate::panels::Contact>>().iter(world).any(|v| *v != Visibility::Hidden);
         let expected = matches!(frame, 65 | 125);
         assert_eq!(seen, expected, "sight smoke contact frame {frame}");
-        assert_eq!(radar, expected, "sight smoke radar frame {frame}");
+        // The radar only reaches ~153 units (panels.rs): the enemy shared by the far ally at frame 65 is past the rim.
+        assert_eq!(radar, frame == 125, "sight smoke radar frame {frame}");
     }
     match frame {
         30 => {
