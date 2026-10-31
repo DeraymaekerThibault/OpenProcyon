@@ -29,10 +29,13 @@ def export_environment(root, out, mission):
         }
         dst = model_path(out, "SpaceWhale", mkdir=True)
         if not dst.exists():
-            # The animated MSB is not supported; export its single retail bind-pose mesh explicitly.
+            # Its one mesh, skinned to the scene skeleton with the swim clip (tools/skin.py).
             dst.write_bytes(
                 convert(
-                    root, "SpaceWhale", files=[root / "BD_Meshes/SpaceWhale_Layer1.mdb"]
+                    root,
+                    "SpaceWhale",
+                    files=[root / "BD_Meshes/SpaceWhale_Layer1.mdb"],
+                    skin="AnimalSpaceWhale",
                 )
             )
     if environment.get("dragons"):
@@ -92,6 +95,7 @@ def export_environment(root, out, mission):
                     root,
                     "SpaceDragon",
                     files=[root / "BD_Meshes/SpaceDragon_Layer1.mdb"],
+                    skin="AnimalSpaceDragon",
                 )
             )
     if environment["nebulae"]:

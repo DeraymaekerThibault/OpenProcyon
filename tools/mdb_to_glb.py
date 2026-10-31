@@ -22,6 +22,7 @@ from PIL import Image
 from tools.gamefs import ci_file, ci_files
 from tools.mdb import normal, parse
 from tools.msb import parse as parse_msb
+from tools.skin import build as build_skin
 
 
 def to_gltf(p):
@@ -79,8 +80,9 @@ def pad4(b, fill=b"\0"):
     return b + fill * (-len(b) % 4)
 
 
-def convert(root, scene, model=0, files=None):
-    """files: explicit MDB paths (e.g. one gun layer); default is every <scene>_Layer*.mdb plus MSB hardpoints."""
+def convert(root, scene, model=0, files=None, skin=None):
+    """files: explicit MDB paths (e.g. one gun layer); default is every <scene>_Layer*.mdb plus MSB hardpoints.
+    skin: the MSB scene holding the skeleton and clip of a skinned animal mesh (tools/skin.py)."""
     root = Path(root)
     explicit = files is not None
     files = (
@@ -111,6 +113,7 @@ def convert(root, scene, model=0, files=None):
         [],
         [],
     )
+    skins, animations, extra_roots = [], [], []
     mat_index = {}
 
     def add_view(data, target=None):
@@ -163,7 +166,8 @@ def convert(root, scene, model=0, files=None):
         return mat_index[name]
 
     for f in files:
-        mdb = parse(f.read_bytes())
+        raw = f.read_bytes()
+        mdb = parse(raw)
         m = mdb.models[model]
         pos = b"".join(struct.pack("<3f", *to_gltf(v.pos)) for v in m.vertices)
         # Skybox art is dark above/below its bright band (v<0.2, v>0.8; it keeps 0.3..0.7) and the sphere maps the whole texture; squeeze the sphere's
@@ -234,7 +238,19 @@ def convert(root, scene, model=0, files=None):
                 }
             )
         meshes.append({"name": f.stem, "primitives": prims})
+        mesh_node = len(nodes)
         nodes.append({"name": f.stem, "mesh": len(meshes) - 1})
+        skinned = skin and build_skin(
+            root, skin, raw, len(m.vertices), add_view, accessors, nodes
+        )
+        if skinned:
+            attrs, sk, anims, skeleton = skinned
+            for prim in prims:
+                prim["attributes"].update(attrs)
+            nodes[mesh_node]["skin"] = len(skins)
+            skins.append(sk)
+            animations += anims
+            extra_roots.append(skeleton)
 
     first_hp = len(nodes)
     for n, pos in [] if explicit else hardpoints(root, scene):
@@ -247,7 +263,7 @@ def convert(root, scene, model=0, files=None):
                 "extras": {"kind": n.kind, "node": n.name, "rot_raw": list(n.rot)},
             }
         )
-    hp = list(range(first_hp, len(nodes)))
+    hp = [i for i in range(first_hp, len(nodes)) if "extras" in nodes[i]]
     nodes.append({"name": "hardpoints", "children": hp})
     gltf = {
         "asset": {"version": "2.0", "generator": "tools.mdb_to_glb"},
@@ -257,13 +273,23 @@ def convert(root, scene, model=0, files=None):
             if scene.lower().startswith(("skybox", "selection_indicator"))
             else []
         ),
-        "scenes": [{"nodes": [*range(first_hp), len(nodes) - 1]}],
+        "scenes": [
+            {
+                "nodes": [
+                    *(i for i, n in enumerate(nodes[:first_hp]) if "mesh" in n),
+                    *extra_roots,
+                    len(nodes) - 1,
+                ]
+            }
+        ],
         "nodes": nodes,
         "meshes": meshes,
         "materials": materials,
         "textures": textures,
         "images": images,
         "accessors": accessors,
+        **({"skins": skins} if skins else {}),
+        **({"animations": animations} if animations else {}),
         "bufferViews": views,
         "buffers": [{"byteLength": len(blob)}],
     }

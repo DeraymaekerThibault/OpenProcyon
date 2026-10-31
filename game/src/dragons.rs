@@ -29,7 +29,6 @@ pub struct Dragon {
     cooldown: f32,
     roar_in: f32,
     roars: usize,
-    flap: f32,
 }
 impl Dragon {
     /// A shell or blast struck it (combat.rs).
@@ -74,9 +73,9 @@ pub fn spawn(commands: &mut Commands, assets: &AssetServer, data: &Value) {
                 cooldown: 0.0,
                 roar_in: 4.0 + (id.rem_euclid(5)) as f32,
                 roars: id.max(0) as usize,
-                flap: id as f32,
             },
             crate::data::scene(assets, &format!("{scene}.glb")),
+            crate::environment::Clip::load(assets, &format!("{scene}.glb")),
             Transform::from_translation(pos).with_rotation(Quat::from_rotation_y(heading)),
             Visibility::Inherited,
         ));
@@ -206,9 +205,6 @@ fn think(
                 tf.rotation = tf.rotation.slerp(Quat::from_rotation_y(heading), 1.0 - (-3.0 * dt).exp());
             }
         }
-        // Wing beat: a gentle bob (bind pose only; the retail skeletal animation is not decoded).
-        d.flap += dt;
-        tf.translation.y += (d.flap * 2.0).sin() * 0.6 * dt;
         // Breath: in range and roughly facing.
         if let Some(t) = target
             && d.cooldown <= 0.0
@@ -265,7 +261,6 @@ mod tests {
             cooldown: 0.0,
             roar_in: 0.0,
             roars: 0,
-            flap: 0.0,
         };
         d.hurt(600.0, Entity::PLACEHOLDER, 3.0);
         assert_eq!(d.hp, 0.0);

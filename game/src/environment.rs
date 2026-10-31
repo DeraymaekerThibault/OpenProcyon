@@ -194,6 +194,32 @@ fn sensor_smoke(world: &mut World) {
     }
 }
 
+/// The swim or wing-beat clip baked into an animal's model (tools/skin.py, docs/re/effects.md "Animal skeletons").
+#[derive(Component)]
+pub struct Clip(pub Handle<AnimationClip>);
+impl Clip {
+    pub fn load(assets: &AssetServer, file: &str) -> Self {
+        Clip(assets.load(GltfAssetLabel::Animation(0).from_asset(crate::data::model(file))))
+    }
+}
+
+/// Loops an animal's clip once its model has spawned (the glTF loader puts the player on the skeleton root).
+/// PROVISIONAL: the clip loops at its authored speed whatever the animal does.
+fn play_clips(
+    mut commands: Commands,
+    mut players: Query<(Entity, &mut AnimationPlayer), Added<AnimationPlayer>>,
+    parents: Query<&ChildOf>,
+    clips: Query<&Clip>,
+    mut graphs: ResMut<Assets<AnimationGraph>>,
+) {
+    for (e, mut player) in &mut players {
+        let Some(clip) = parents.iter_ancestors(e).find_map(|a| clips.get(a).ok()) else { continue };
+        let (graph, node) = AnimationGraph::from_clip(clip.0.clone());
+        player.play(node).repeat();
+        commands.entity(e).insert(AnimationGraphHandle(graphs.add(graph)));
+    }
+}
+
 #[derive(Component)]
 pub struct SpaceAnimal {
     pub home: String,
@@ -206,7 +232,6 @@ pub struct SpaceAnimal {
     next: usize,
     looping: bool,
     offset: Vec3,
-    phase: f32,
     call_in: f32,
     calls: usize,
     /// Another system (dragons.rs) is steering it: no path following or calls here.
@@ -227,7 +252,6 @@ impl SpaceAnimal {
             next: 0,
             looping: false,
             offset,
-            phase: id as f32,
             call_in: 3.0 + (id % 7) as f32,
             calls: id as usize,
             paused: false,
@@ -297,7 +321,8 @@ pub fn plugin(app: &mut App) {
         )
         .add_systems(FixedUpdate, refresh_sensors.in_set(crate::BattleSet::Sense).run_if(in_state(crate::menu::Screen::Battle)))
         .add_systems(FixedUpdate, update.in_set(crate::BattleSet::Forces).run_if(in_state(crate::menu::Screen::Battle)))
-        .add_systems(Update, (current_fx, flow_currents).run_if(in_state(crate::menu::Screen::Battle)));
+        .add_systems(Update, (current_fx, flow_currents).run_if(in_state(crate::menu::Screen::Battle)))
+        .add_systems(Update, play_clips);
 }
 
 /// `whales_shown`: campaign missions start their whales hidden (the rules show them); skirmish maps' scripts never do.
@@ -321,7 +346,8 @@ pub fn spawn(commands: &mut Commands, assets: &AssetServer, data: &Value, whales
         commands.spawn((
             Scenario,
             SpaceAnimal::new(home, (max - min).length() / 2.0, pos - centre, id, whales_shown),
-            WorldAssetRoot(assets.load(GltfAssetLabel::Scene(0).from_asset(crate::data::model(&format!("{}.glb", whale["scene"].as_str().expect("whale scene")))))),
+            crate::data::scene(assets, &format!("{}.glb", whale["scene"].as_str().expect("whale scene"))),
+            Clip::load(assets, &format!("{}.glb", whale["scene"].as_str().expect("whale scene"))),
             Transform::from_translation(pos).with_rotation(Quat::from_rotation_y(heading)),
             if whales_shown { Visibility::Inherited } else { Visibility::Hidden },
         ));
@@ -462,11 +488,8 @@ fn update(
         }
         animal.advance(&mut tf, dt);
         if dragon {
-            continue; // dragons roar and flap in dragons.rs
+            continue; // dragons roar in dragons.rs
         }
-        animal.phase += dt;
-        // Bind-pose fallback: gentle body roll, not the retail skeletal fin/tail animation.
-        tf.rotation *= Quat::from_rotation_z(0.02 * dt * animal.phase.sin());
         animal.call_in -= dt;
         if animal.call_in <= 0.0 {
             if let Some(sounds) = def["sounds"].as_array().filter(|a| !a.is_empty()) {
@@ -709,7 +732,7 @@ mod tests {
 
     #[test]
     fn whale_paths_loop_and_duplicate_points_do_not_hang() {
-        let mut animal = SpaceAnimal { speed: 12.0, phase: 0.0, call_in: 3.0, calls: 0, ..SpaceAnimal::new("Whales", 6.0, Vec3::ZERO, 0, true) };
+        let mut animal = SpaceAnimal { speed: 12.0, call_in: 3.0, calls: 0, ..SpaceAnimal::new("Whales", 6.0, Vec3::ZERO, 0, true) };
         let mut tf = Transform::default();
         animal.follow(&[Vec3::ZERO, Vec3::X * 12.0], tf.translation, true, true);
         animal.advance(&mut tf, 0.0);

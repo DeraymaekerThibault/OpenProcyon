@@ -223,6 +223,20 @@ Other scenes: the animals' swim cycles are rotations of their bones (whale up to
 translation); base windmills turn one full yaw (-2 pi) over 10-16.7 s and loop; base cranes run 10 s and mostly return to start; one base
 (the iron-clad mines) has a 43 s clip with up to 67 keys.
 
+### Animal skeletons (space dragon, whale)
+The animals are single skinned meshes. Their mesh file keeps, after each face list, one influence map per bone (a list of
+vertex index and weight pairs) and, after the texture table, a bone table: each bone's name and the inverse of its bind pose
+as a 4x4 matrix (dragon 32 bones, whale 38 including one `NULL` bone the scene does not name). The mesh scene holds the bone
+hierarchy with a rest position and yaw/pitch/roll per bone; a node's rotation is a turn about up (yaw), then about starboard
+(pitch), then about forward (roll), which reproduces the stored bind matrices exactly for most dragon bones. The scene's rest
+pose differs from the bind pose on the dragon's tail tip and wings (the rest pose is posed). Each animal scene has one clip
+(dragon 1.67 s, a wing beat with tail, neck and leg motion and a 0.7-unit bob of the body); its keys start at zero on every
+channel, so they are offsets from the rest values. Keys are cubic Hermite segments with per-key in/out tangents in value units
+per segment. Remake: `tools/skin.py` bakes the skeleton, weights and clip (sampled at 30 per second) into the animal's GLB;
+the game loops it (`environment::play_clips`). PROVISIONAL: weights are normalised per vertex (stored values are small and do
+not sum to one; most vertices have a single bone), at most four kept; offsets are added to the rest Euler angles; the clip
+loops at its authored speed whatever the animal does; the manta ray is not exported.
+
 ### Section debris
 A section destroyed mid-fight swaps to its damaged mesh and, when its WOT association names a `debrisMeshScene`, drops that piece
 (a torn-off mast, the bow, the engine block): the scene holds one `...Damage_LayerN` mesh in the hull's own model space, its node
