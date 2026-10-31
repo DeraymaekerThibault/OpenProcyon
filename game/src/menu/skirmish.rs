@@ -303,8 +303,8 @@ pub fn offered(lib: &Library, race: u8) -> Vec<usize> {
 /// adds itself also get weapon swaps (a hand-added ship only gets crew), and the points that remain buy named crew. The choice among
 /// affordable hulls and weapons looked random: PROVISIONAL, here a fixed pseudo-random pick (a coin flip per bank) so the result
 /// repeats; crew go to the posts in order, best skill first. Computers use it too with `armed_only` (no tenders or tugs), following
-/// 14 retail battle saves: 1-3 hulls each at most half the points left, all hulls and weapon swaps before any crew, then Navy-roster
-/// crew ship by ship until the points run out (13 of 15 fleets spent the budget to the point).
+/// retail battle saves: hulls for about half the budget, each at most half the points left, all hulls and weapon swaps before any crew,
+/// then Navy-roster crew ship by ship until the points run out (25 of 27 fleets spent the budget to the point).
 /// The guns computer captains may fit (`data/ai/weapons.json`, `{gun: true|false}`, merged key by key across mods). No file: the guns
 /// retail computers were seen to fit (`RETAIL_COMPUTER_GUNS`).
 fn computer_guns() -> Option<std::collections::HashSet<String>> {
@@ -314,8 +314,9 @@ fn computer_guns() -> Option<std::collections::HashSet<String>> {
     }
 }
 
-/// The guns retail computers swapped in, read from 36 computer ships in 14 battle saves (docs/re/skirmish-setup.md): never a harpoon,
-/// lancer, energy net, gravity charge or fire launcher, whatever the hull. PROVISIONAL: a gun that never appeared may still be allowed.
+/// The guns retail computers swapped in, read from 104 computer ships in 19 battle saves (docs/re/skirmish-setup.md): never a harpoon,
+/// lancer, energy net or gravity charge, whatever the hull; Heavy fire launchers and Heavy cannons only at large budgets. PROVISIONAL: a
+/// gun that never appeared may still be allowed.
 pub(super) const RETAIL_COMPUTER_GUNS: &[&str] = &[
     "Gun_Carronade_Light",
     "Gun_Carronade_Med",
@@ -326,11 +327,19 @@ pub(super) const RETAIL_COMPUTER_GUNS: &[&str] = &[
     "Gun_Plasma_Heavy",
     "Gun_CannonBall_Light",
     "Gun_CannonBall_Med",
+    "Gun_CannonBall_Heavy",
+    "Gun_ArcturianFire_Heavy",
     "Gun_StarMortar",
 ];
 
 fn allowed_guns(list: &Value) -> Option<std::collections::HashSet<String>> {
     Some(list.as_object()?.iter().filter(|(_, on)| on.as_bool() == Some(true)).map(|(g, _)| g.clone()).collect())
+}
+
+/// A hull computers buy: armed, and no Tender or Tug (none among 104 computer ships in retail battle saves; they carry a gun or two, so
+/// "armed" alone let them in). PROVISIONAL: by class name, the data has no support-ship flag.
+fn computer_hull(class: &crate::data::Class) -> bool {
+    !class.mounts.is_empty() && !class.name.contains("Tender") && !class.name.contains("Tug")
 }
 
 pub fn auto_build(slot: &mut Slot, limit: u32, fleet_size: usize, lib: &Library, salt: u64, armed_only: bool) {
@@ -342,17 +351,19 @@ pub fn auto_build(slot: &mut Slot, limit: u32, fleet_size: usize, lib: &Library,
     let mut seed = u64::from(limit) * 31 + fleet_size as u64 * 7 + 1 + salt * 977;
     let left = |slot: &Slot| i64::from(limit) - slot.spent(lib);
     let first_new = slot.fleet.len();
-    // Computers (14 retail battle saves, docs/re/skirmish-setup.md) buy 1-3 hulls whatever the fleet limit, each costing at most half
-    // the points still left, so about half the budget remains for weapons and crew. PROVISIONAL: the count looked random.
-    let ships = if armed_only { (first_new + 1 + next(&mut seed) as usize % 3).min(fleet_size) } else { fleet_size };
-    while slot.fleet.len() < ships {
-        let budget = if armed_only { left(slot) / 2 } else { left(slot) };
+    // Computers (27 fleets in retail battle saves at 300-1000 points, docs/re/skirmish-setup.md) spend about half the budget on hulls
+    // (mostly 43-59 %), each costing at most half the points still left; the ship count follows (1-3 at 300 points, 3-8 at 1000), cheap
+    // boats filling the end. PROVISIONAL: the share is drawn at random from 40-60 %.
+    let mut hull_room = if armed_only { i64::from(limit) * (40 + (next(&mut seed) % 21) as i64) / 100 } else { i64::MAX };
+    while slot.fleet.len() < fleet_size {
+        let budget = if armed_only { (left(slot) / 2).min(hull_room) } else { left(slot) };
         let fits: Vec<usize> =
-            offered(lib, slot.race).into_iter().filter(|&c| i64::from(lib.classes[c].points) <= budget && (!armed_only || !lib.classes[c].mounts.is_empty())).collect();
+            offered(lib, slot.race).into_iter().filter(|&c| i64::from(lib.classes[c].points) <= budget && (!armed_only || computer_hull(&lib.classes[c]))).collect();
         if fits.is_empty() {
             break;
         }
         let pick = fits[next(&mut seed) as usize % fits.len()];
+        hull_room -= i64::from(lib.classes[pick].points);
         slot.push_ship(&lib.classes[pick].name);
     }
     for ship in first_new..slot.fleet.len() {
