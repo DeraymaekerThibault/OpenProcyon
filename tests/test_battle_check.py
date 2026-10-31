@@ -79,6 +79,7 @@ class Evaluate(unittest.TestCase):
         self.assertEqual(
             evaluate(r, set()), ["stutter: 29 frames over 50 ms (worst 535 ms)"]
         )
+        self.assertEqual(evaluate(r, {"no-stutter"}), [], "only an open issue skips it")
 
     def test_late_first_shot(self):
         self.assertEqual(
