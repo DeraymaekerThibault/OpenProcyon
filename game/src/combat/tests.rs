@@ -1235,3 +1235,20 @@ fn land_in_the_way_stops_a_shell_before_the_hull() {
     assert!(app.world().get_entity(id).is_err(), "the shell is spent on the land");
     assert!(!hit, "no Hit");
 }
+
+#[test]
+#[ignore = "needs imported assets"]
+fn a_hit_on_a_downed_base_ring_spills_to_its_neighbours() {
+    let lib = Library::load(assets_dir());
+    let class = &lib.classes[lib.index("Base_Procyon1")];
+    let ring = |n: u8| class.sections.iter().position(|s| s.label == format!("DefenceRing{n}_Metal")).unwrap();
+    let mut hp = Health::new(class);
+    hp.sections[ring(1)] = 0.0;
+    hp.sections[ring(2)] = 1.0;
+    let fallen = apply_base_hit(class, &mut hp, ring(1), 10.0);
+    // Ring 1 neighbours rings 2 and 4: each takes 4; ring 2 falls and spills 1.6 on to ring 3.
+    assert_eq!(fallen, vec![ring(2)]);
+    assert_eq!(hp.sections[ring(4)], 396.0);
+    assert!((hp.sections[ring(3)] - 398.4).abs() < 1e-3, "{}", hp.sections[ring(3)]);
+    assert_eq!(hp.sections[class.sections.iter().position(|s| s.label == "default").unwrap()], 800.0);
+}
