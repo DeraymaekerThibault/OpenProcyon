@@ -48,6 +48,9 @@ GUN_SOUND_KEYS = (
     "Victory Point Cost",
     "Exclusion Race",
     "Mount Type",
+    "EffectiveRange_RicochetFactor",
+    "LongRange_RicochetFactor",
+    "MaximumRange_RicochetFactor",
 )
 # Bullet WOT surface names (ImpactSounds<surface>) -> the material keys used for damage.
 SURFACES = {

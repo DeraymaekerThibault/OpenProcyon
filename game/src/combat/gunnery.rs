@@ -408,6 +408,7 @@ pub(super) fn fire(
                     pd: gun.point_defense,
                     harmless: mission.is_some_and(|ms| ms.warning_shots),
                     base: false,
+                    ricochet: band(gun, distance, gun.ricochet),
                 };
                 launch_shell(
                     &mut commands,
@@ -464,6 +465,7 @@ pub(super) struct Launch {
     pub(super) pd: bool,
     pub(super) harmless: bool,
     pub(super) base: bool,
+    pub(super) ricochet: f32,
 }
 
 /// Spawns one shell of gun `g` from muzzle `mz` (its fire sound, muzzle flash and bullet effect included).
@@ -512,6 +514,7 @@ pub(super) fn launch_shell(
                 hp: b.hitpoints,
                 harmless: shot.harmless,
                 base: shot.base,
+                ricochet: shot.ricochet,
             },
             Transient,
             stf,
@@ -612,6 +615,7 @@ pub(super) fn base_fire(
                     vel: gun.lob.and_then(|a| lob_velocity(aim_at.position - origin, a, gun.shell_gravity())).map(|v| turn * v),
                     aim: (is_indirect(&mount.gun) || gun.lob.is_some()).then_some(aim_at.position),
                     base: true,
+                    ricochet: band(gun, distance, gun.ricochet),
                     ..default()
                 };
                 let muzzle_transform = globals.get(muzzle).ok().copied();
@@ -679,14 +683,18 @@ fn aim_turret(
 
 /// A burst's deviation angle, drawn once per burst: the range band's deviation * 0.5, uniform in +-that, times `accuracy`.
 fn burst_deviation(gun: &GunDef, distance: f32, accuracy: f32, rng: &mut Rng) -> f32 {
-    let band = if distance <= gun.range[0] {
-        gun.deviation[0]
+    (rng.f() * 2.0 - 1.0) * band(gun, distance, gun.deviation) * 0.5 * accuracy
+}
+
+/// The value of a per-range-band gun field (effective, long, maximum) at `distance` from the gun's target.
+fn band(gun: &GunDef, distance: f32, v: [f32; 3]) -> f32 {
+    if distance <= gun.range[0] {
+        v[0]
     } else if distance <= gun.range[1] {
-        gun.deviation[1]
+        v[1]
     } else {
-        gun.deviation[2]
-    };
-    (rng.f() * 2.0 - 1.0) * band * 0.5 * accuracy
+        v[2]
+    }
 }
 
 /// One shot's turn off the aim: the burst's angle about two muzzle axes, each with a random sign.

@@ -8,7 +8,7 @@ WOT names differ in case from the files (`Engine_NAVY_FULL` vs `Engine_Navy_Full
 - Gun: `SoundName`, `SoundVolume`, `SoundMaxDistance` (fire sound).
 - Bullet: `ImpactSounds<surface>` blocks of 5 slots (empty slots unused) per surface `Hull Wood`, `Hull ReInforced Wood`,
   `Hull Iron`, `Sail Cloth`, `Wall Stone`, `Dragon Scale`; `Impact Sound Volume`, `Impact Sound Max Distance`.
-  Also `RicochetSound: <surface>` and `Travel Sound` (not used yet: no ricochets, travel sounds mostly empty).
+  Also `RicochetSound: <surface>` and `Travel Sound` (ricochet sounds play on a ricochet, `docs/re/gunnery.md`; travel sounds mostly empty).
 - Ship: `EngineSoundName Half|Full|Emergency` (looping engine sound per engine order).
 - Music: each skirmish map's TWT script plays one track ("Play Music Track", `File Name String`), e.g. Red Rover
   `BTL_NavyBig_Full02`, Ambush `BTL_DeadlyPirate_Full02`, Bayles Stand `BTL_ProcWarDrums_Full`.

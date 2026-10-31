@@ -25,6 +25,8 @@ pub struct Shell {
     pub(super) harmless: bool,
     /// Fired by a base's guns: its hits on ships take no outgoing difficulty factor (`side_damage_scale`).
     pub(super) base: bool,
+    /// The firing gun's ricochet factor for the range band it was fired in (`ricochet_chance`).
+    pub(super) ricochet: f32,
 }
 /// Core damage of one hit on a destroyed vital section: `roll` x (sum of core% over destroyed vital sections) / 100.
 pub(super) fn core_bleed(class: &Class, hp: &Health, roll: f32) -> f32 {
@@ -132,6 +134,37 @@ pub(super) fn apply_base_hit(class: &Class, hp: &mut Health, k: usize, roll: f32
         spill(class, hp, k, 0.4 * roll, 0.0, &mut vec![k]);
     }
     (0..was_up.len()).filter(|j| was_up[*j] && hp.sections[*j] == 0.0).collect()
+}
+
+/// Read from the original's code: the chance a shell striking a section glances off it unharmed, from the gun's range-band factor,
+/// the section's material and the angle in degrees between the shell's flight (relative to the target) reversed and the face's normal
+/// (0 head-on, 90 grazing).
+pub(super) fn ricochet_chance(factor: f32, material: &str, angle: f32) -> f32 {
+    let m = match material {
+        "Reinforced" => 25.0,
+        "Iron" | "Stone" => 50.0,
+        "Cloth" => -100.0,
+        _ => 0.0,
+    };
+    ((factor + m + angle) / 100.0).clamp(0.0, 1.0)
+}
+
+/// Rolls a ricochet for shell `s` striking a face with world normal `n` at `at`, `target` the struck body's velocity. On a
+/// ricochet the shell mirrors off the face at 0.6 of its speed, keeps flying and plays its ricochet sound for the material.
+/// PROVISIONAL: the small extra effect the original also plays is not identified; the sound's range is the warning shot's.
+#[allow(clippy::too_many_arguments)]
+fn ricochet(s: &mut Shell, tf: &mut Transform, bd: &BulletDef, key: &str, at: Vec3, n: Vec3, target: Vec3, rng: &mut Rng, sfx: &mut MessageWriter<Sfx>) -> bool {
+    let angle = (target - s.vel).angle_between(n).to_degrees();
+    if s.harmless || rng.f() >= ricochet_chance(s.ricochet, key, angle) {
+        return false;
+    }
+    s.vel = (s.vel - 2.0 * s.vel.dot(n) * n) * 0.6;
+    tf.translation = at + n * 0.05;
+    tf.look_to(s.vel, Vec3::Y);
+    if let Some(name) = bd.ricochet_snd.get(key) {
+        sfx.write(Sfx { name: name.clone(), at: Some(at), vol: 1.0, max: 600.0 });
+    }
+    true
 }
 
 /// Read from the original's code: a hit that leaves its section at 0 hit points (already dead or not) passes 0.4 x its damage on
@@ -373,6 +406,12 @@ pub(super) fn shells(
             let key = material_key(&sec.material);
             let [lo, hi, ..] = bd.damage[key];
             let at = p0 + (p1 - p0) * t;
+            let inv = btf.to_matrix().inverse();
+            if let Some((_, n)) = seg_mesh_hit(inv.transform_point3(p0), inv.transform_point3(p1), sec)
+                && ricochet(&mut s, &mut tf, bd, key, at, (btf.rotation * n).normalize(), Vec3::ZERO, &mut rng, &mut sfx)
+            {
+                continue;
+            }
             hits.write(Hit { shooter: s.shooter, victim: be });
             let class = &lib.classes[ab.class];
             let fallen = apply_base_hit(class, &mut hp, k, rng.range(lo, hi));
@@ -389,6 +428,20 @@ pub(super) fn shells(
             hit_fx(&mut commands, &fxl, bd, at, s.vel);
             commands.entity(e).despawn();
             continue;
+        }
+        // A shell striking a hull section may glance off it unharmed (all shells, bursting ones too).
+        if let (Some((_, k, at)), Some(si)) = (best, best_ship)
+            && let Ok((_, stf, ship, _, _, _, drift)) = ships.get(si)
+        {
+            let class = &lib.classes[ship.class];
+            let inv = stf.to_matrix().inverse();
+            let hull = Vec3::new(-ship.heading.sin(), 0.0, -ship.heading.cos()) * ship.speed + drift.map_or(Vec3::ZERO, |d| d.0);
+            let key = material_key(&class.sections[k].material);
+            if let Some((_, n)) = seg_mesh_hit(inv.transform_point3(p0), inv.transform_point3(p1), &class.sections[k])
+                && ricochet(&mut s, &mut tf, bd, key, at, (stf.rotation * n).normalize(), hull, &mut rng, &mut sfx)
+            {
+                continue;
+            }
         }
         // Blast, Nova and gravity shells burst on the hull they strike; warning shots splash harmlessly.
         if let (Some((_, k, at)), true) = (best, s.harmless || matches!(s.payload, Payload::Blast { .. } | Payload::Nova | Payload::Grav { .. })) {
