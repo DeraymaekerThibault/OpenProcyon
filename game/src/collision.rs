@@ -289,10 +289,19 @@ pub fn clear_prefix(bounds: [Vec3; 2], path: &[Transform], scenery: &[&Obstacle]
 }
 
 /// PROVISIONAL docking planner: shortest clear route via padded scenery-bound corners, not the native path planner.
-/// Swept boxes conservatively cover the hull through turns; unreachable approaches return None instead of crossing land.
+/// Swept boxes conservatively cover the hull through turns; unreachable approaches return None instead of crossing land, after at most `PLAN_SWEEPS` sweeps.
 pub fn route_clear(bounds: [Vec3; 2], start: Vec3, goal: Vec3, scenery: &[&Obstacle]) -> Option<Vec<Vec3>> {
+    route_within(bounds, start, goal, scenery, PLAN_SWEEPS)
+}
+
+/// `route_clear` giving up (None) after `max_sweeps` scenery sweeps: an unreachable goal otherwise costs a sweep per corner pair.
+fn route_within(bounds: [Vec3; 2], start: Vec3, goal: Vec3, scenery: &[&Obstacle], max_sweeps: usize) -> Option<Vec<Vec3>> {
     let radius = sweep_radius(bounds);
-    let clear = |a: Vec3, b: Vec3| path_clear(bounds, a, b, scenery);
+    let sweeps = std::cell::Cell::new(0);
+    let clear = |a: Vec3, b: Vec3| {
+        sweeps.set(sweeps.get() + 1);
+        path_clear(bounds, a, b, scenery)
+    };
     if clear(start, goal) {
         return Some(vec![goal]);
     }
@@ -315,6 +324,9 @@ pub fn route_clear(bounds: [Vec3; 2], start: Vec3, goal: Vec3, scenery: &[&Obsta
     let mut previous = vec![0; points.len()];
     let mut open = std::collections::BinaryHeap::from([(std::cmp::Reverse(ahead(0).to_bits()), 0, 0, 0_u32)]);
     while let Some((_, i, from, length)) = open.pop() {
+        if sweeps.get() >= max_sweeps {
+            return None;
+        }
         if done[i] || (i != 0 && !clear(points[from], points[i])) {
             continue;
         }
@@ -355,11 +367,14 @@ pub fn path_clear(bounds: [Vec3; 2], a: Vec3, b: Vec3, scenery: &[&Obstacle]) ->
 /// PROVISIONAL: tuned by eye, not the original's planner.
 const REPLAN_MOVE: f32 = 40.0;
 const REPLAN_SECS: f32 = 4.0;
+/// Scenery sweeps one route plan (detour or base approach) may spend before it counts as failed. Routes found in the battle-check maps
+/// took at most 224 sweeps; unreachable goals on Border Dispute took ~3000 (0.05-0.3 s each, the full-lobby hitches of issue #190).
+const PLAN_SWEEPS: usize = 600;
 
 /// AI detours around scenery: when land blocks the straight line to a captain's destination, the ship sails a `route_clear` route
 /// (as waypoints) instead of steering straight at it; once the line is clear it steers normally again. Keyed by ship.
 /// PROVISIONAL: the padded-corner planner, not the original's path planner (`steer_clear` still handles what it misses).
-/// ponytail: a plan costs ~25 ms on The Diablo Strait (17 islands, release build); cache a visibility graph per map if that hitches.
+/// ponytail: a plan stops after `PLAN_SWEEPS` sweeps (~30 ms on Border Dispute); cache a visibility graph per map if that hitches.
 #[derive(Default)]
 pub struct Detours(HashMap<Entity, Plan>);
 /// The last plan of one ship: where it was for, how old it is, and whether it found a route (a failed plan is kept too, so an
@@ -374,6 +389,13 @@ impl Detours {
     /// otherwise drops any earlier detour and returns false, leaving the caller to steer.
     pub fn route(&mut self, e: Entity, ship: &mut crate::Ship, bounds: [Vec3; 2], pos: Vec3, dest: Vec3, scenery: &[&Obstacle], dt: f32) -> bool {
         let dest = dest.with_y(pos.y);
+        // Land the hull cannot fit next to at the destination (the island a base stands on, a coast a target hugs) is left out: no
+        // route ends there, and a plan to it searched every corner pair (issue #190). The last leg is left to the braking and
+        // steer-away near land (`contact_slow`, `steer_clear`) and the base standoff.
+        let r = sweep_radius(bounds);
+        let at_dest = [Vec3::new(-r, bounds[0].y, -r), Vec3::new(r, bounds[1].y, r)];
+        let scenery: Vec<&Obstacle> = scenery.iter().copied().filter(|o| !touches(at_dest, &Transform::from_translation(dest), &[*o])).collect();
+        let scenery = &scenery[..];
         if path_clear(bounds, pos, dest, scenery) {
             if self.0.remove(&e).is_some_and(|p| p.routed) {
                 ship.waypoints.clear();

@@ -108,15 +108,55 @@ fn a_captain_blocked_by_an_island_sails_a_detour_then_steers_again() {
     let left = ship.waypoints.clone();
     assert!(detours.route(e, &mut ship, bounds, start, foe + Vec3::X, &[&island], 0.03));
     assert_eq!(ship.waypoints, left);
-    // An unreachable goal (inside the island) is not planned again every tick: the failure is kept until the goal moves or ages.
+    // An unreachable goal (walled in) is not planned again every tick: the failure is kept until the goal moves or ages.
+    let wall = |x0: f32, z0: f32, x1: f32, z1: f32| Obstacle { body: box_body([Vec3::new(x0, -5.0, z0), Vec3::new(x1, 5.0, z1)], &Transform::default()), triangles: vec![] };
+    let ring = [wall(-40.0, 30.0, 40.0, 40.0), wall(-40.0, -40.0, 40.0, -30.0), wall(-40.0, -40.0, -30.0, 40.0), wall(30.0, -40.0, 40.0, 40.0)];
+    let ring: Vec<&Obstacle> = ring.iter().collect();
     let (other, mut ship2) = (Entity::from_raw_u32(2).unwrap(), crate::Ship { waypoints: vec![], ..ship.clone() });
-    assert!(!detours.route(other, &mut ship2, bounds, start, Vec3::ZERO, &[&island], 0.03));
+    assert!(!detours.route(other, &mut ship2, bounds, start, Vec3::ZERO, &ring, 0.03));
     assert!(!detours.0[&other].routed);
-    assert!(!detours.route(other, &mut ship2, bounds, start, Vec3::ZERO, &[&island], 0.03));
+    assert!(!detours.route(other, &mut ship2, bounds, start, Vec3::ZERO, &ring, 0.03));
     assert!((detours.0[&other].age - 0.03).abs() < 1e-6, "kept, not replanned");
     // Past the island the line is clear: the detour is dropped and the caller steers again.
     assert!(!detours.route(e, &mut ship, bounds, Vec3::new(0.0, 0.0, -40.0), foe, &[&island], 0.03));
     assert!(ship.waypoints.is_empty());
+}
+#[test]
+fn a_captain_routes_to_a_base_on_its_island_around_the_land_between() {
+    // Issue #190: a goal on land (a base on its island) has no route; planning one searched every corner pair each few seconds per
+    // ship (0.3 s hitches in full lobbies). The land at the goal is left out, so the route goes around the island in between.
+    let bounds = [Vec3::new(-1.0, -1.0, -3.0), Vec3::new(1.0, 1.0, 3.0)];
+    let between = Obstacle { body: box_body([Vec3::new(-30.0, -5.0, -20.0), Vec3::new(30.0, 5.0, 20.0)], &Transform::default()), triangles: vec![] };
+    let base_island = Obstacle { body: box_body([Vec3::new(-15.0, -5.0, -95.0), Vec3::new(15.0, 5.0, -65.0)], &Transform::default()), triangles: vec![] };
+    let mut ship = crate::Ship {
+        class: 0,
+        side: crate::Side::Enemy,
+        heading: 0.0,
+        speed: 0.0,
+        ang_vel: 0.0,
+        order: 3,
+        waypoints: vec![],
+        goal: Some(0.0),
+        cap: 1.0,
+        throttle: None,
+        sail_energy: 1.0,
+        crew_speed: 1.0,
+        crew_turn: 1.0,
+        avoid: 1.0,
+    };
+    let (e, mut detours) = (Entity::from_raw_u32(1).unwrap(), Detours::default());
+    let (start, base) = (Vec3::new(0.0, 0.0, 80.0), Vec3::new(0.0, 0.0, -80.0));
+    assert!(route_clear(bounds, start, base, &[&between, &base_island]).is_none(), "no route ends on land");
+    assert!(detours.route(e, &mut ship, bounds, start, base, &[&between, &base_island], 0.03), "routed around the island in between");
+    assert_eq!(ship.waypoints.last(), Some(&base));
+}
+#[test]
+fn an_unreachable_plan_stops_at_its_sweep_budget() {
+    let bounds = [Vec3::new(-1.0, -1.0, -3.0), Vec3::new(1.0, 1.0, 3.0)];
+    let island = Obstacle { body: box_body([Vec3::new(-30.0, -5.0, -20.0), Vec3::new(30.0, 5.0, 20.0)], &Transform::default()), triangles: vec![] };
+    let (start, goal) = (Vec3::new(0.0, 0.0, 80.0), Vec3::new(0.0, 0.0, -80.0));
+    assert!(route_within(bounds, start, goal, &[&island], 2).is_none(), "out of sweeps before the way round is checked");
+    assert!(route_within(bounds, start, goal, &[&island], PLAN_SWEEPS).is_some());
 }
 #[test]
 fn wall_blocks_but_geometry_above_ship_does_not() {

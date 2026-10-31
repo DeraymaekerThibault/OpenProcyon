@@ -75,10 +75,9 @@ SCENARIOS = [
         "border_dispute_full",
         "map=border_dispute;points=1000;limit=10;slots=human,7*computer",
         300,
-        # PROVISIONAL "no-stutter": full lobbies hitch (issue #190, worst frame ~1.2 s at 4x and 16x); drop it once fixed.
         # PROVISIONAL "patrol-allow-1": an allied ship wedges against the human's parked Tug (issue #191); the allied-AI regression
         # this scenario guards stalled many more, so one is excused until #191 is fixed.
-        {"patrol", "patrol-allow-1", "fire", "no-stutter"},
+        {"patrol", "patrol-allow-1", "fire", "budget"},
     ),
 ]
 
