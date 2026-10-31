@@ -12,6 +12,13 @@ Source: observed behaviour of the original game, WOT collision definitions and t
 - Helper uses a contact point's displacement from the transformed centre of mass and collision-box dimensions to accumulate angular acceleration, clamped to ±60. The exact torque/sign relationship is not recovered well enough to port.
 - Debug strings include `Collision LOD Level Index` and `Valid Collision Triangle Indices`. The exact collision LOD, triangle rejection rules, response dispatcher, restitution, sound trigger and damage calculation remain unresolved.
 
+## Land and bases (read from the original's code, 2026-10-31)
+
+Contact with an island or a base pushes the ship's hull straight out along the horizontal normal, and nothing else: its speed,
+throttle and turn are untouched, it takes no damage and makes no sound. A ship pressing into a shore therefore keeps its (avoider-
+capped) speed and slides along it; one wedged bow-first is freed by the avoider's turn in place ([movement.md](movement.md)).
+Remake: `collision::sail` (the old impulse response for land is gone; ships and rocks keep it until their rules are ported).
+
 ## Measured on retail (2026-10, one glancing ram)
 
 Headless Diablo Strait skirmish on Easy, our Navy Cutter driven past our own idle Man-O-War; both ships logged at 30 Hz and saved

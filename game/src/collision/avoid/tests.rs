@@ -94,3 +94,24 @@ fn a_computer_ship_gives_way_to_the_humans_moving_ship_but_never_stops_for_land(
     }
     assert!(b.cap > 0.0, "a moving ship outranks land");
 }
+
+#[test]
+fn a_ship_wedged_against_land_turns_in_place_after_eleven_thinks_toward_the_smaller_clear_turn() {
+    // The bow 1 unit into a wide wall dead ahead, creeping at 0.5 units/s.
+    let w = wall(14.0, 0.0, 400.0);
+    let mut a = Avoid::new(0.0);
+    for _ in 0..11 {
+        a.think(&me(0.5), FAR, &[island(&w)], SELF);
+    }
+    assert_eq!(a.stuck, None, "not before the twelfth think on the same obstacle");
+    a.think(&me(0.5), FAR, &[island(&w)], SELF);
+    assert_eq!(a.stuck, Some(-1.0), "both sides clear at the same turn: the minus side, as the original");
+    let free = Me { heading: -PI / 2.0, ..me(0.5) };
+    a.think(&free, FAR, &[island(&w)], SELF);
+    assert_eq!(a.stuck, None, "released once the bow is clear");
+    let mut fast = Avoid::new(0.0);
+    for _ in 0..20 {
+        fast.think(&me(6.6), FAR, &[island(&w)], SELF);
+    }
+    assert_eq!(fast.stuck, None, "a ship still under way is never stuck");
+}
