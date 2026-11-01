@@ -52,6 +52,7 @@ pub struct Ship {
     pub sail_energy: f32,      // nebula drain, separate from permanent sail damage
     pub crew_speed: f32,       // engineers' factor on top speed (crew_arms::skill_factor)
     pub crew_turn: f32,        // helmsman's factor on rudder torque
+    pub net: f32,              // energy nets on the hull: product of (1 - dissipated) over the active nets; 1.0 = free
     pub avoid: f32,            // speed fraction with land close ahead (collision::contact_slow, AI ships only); 1.0 = clear
 }
 
@@ -299,7 +300,7 @@ pub fn ai(
 }
 
 fn max_speed(ship: &Ship, class: &combat::Class, health: &Health) -> f32 {
-    full_speed(class) * combat::speed_factor(class, health) * ship.cap * ship.sail_energy * ship.crew_speed
+    full_speed(class) * combat::speed_factor(class, health) * ship.cap * ship.sail_energy * ship.crew_speed * ship.net
 }
 
 /// Undamaged Ahead Full speed.

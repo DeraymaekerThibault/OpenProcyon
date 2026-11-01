@@ -110,7 +110,8 @@ This is a provisional workaround, not recovered retail damaged-mesh collision: s
   Transformer Guns -> weapons_destroyed (50 %), Rudder Linkage -> rudder_destroyed, Munnitions -> ammo_hit; the other tags are
   silent. Cloth sections: destroyed -> sails_destroyed, hit -> sails_damaged; crossing 50 % HP on another section -> firstmate07,
   destroying one -> firstmate08. Every event has a 15 s minimum interval (weapons_destroyed 3-10 s, all_weapons_destroyed 40 s).
-  PROVISIONAL: crew.rs does not emit these yet (the old "never emitted" note stands).
+  Remake: `crew.rs` speaks the five mapped tags from the exported `criticals` list; engine_hit, weapons_destroyed and fire_weapon play with
+  chance 0.5 (rolled once the 15 s interval allows); the firstmate lines are not modelled (PROVISIONAL).
 
 ## Path end behaviour (partial)
 Ship path following defaults to "stop at end" (= 1, throttle clamp 0..1). Its state

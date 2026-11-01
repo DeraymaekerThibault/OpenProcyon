@@ -12,6 +12,26 @@ pub fn loss(c: &Class, h: &Health, flag: fn(&Section) -> bool) -> f32 {
     (lost as f32 / total as f32).min(0.9)
 }
 
+/// Energy nets holding a ship: (seconds left, share of speed dissipated) per net hit (docs/re/sound.md "Energy nets").
+#[derive(Component, Default)]
+pub struct Netted(pub Vec<(f32, f32)>);
+
+/// Speed factor of the active nets: they stack multiplicatively.
+pub fn net_factor(nets: &[(f32, f32)]) -> f32 {
+    nets.iter().map(|n| 1.0 - n.1).product()
+}
+
+pub fn tick_nets(mut commands: Commands, time: Res<Time>, mut ships: Query<(Entity, &mut Netted, &mut Ship)>) {
+    for (e, mut nets, mut ship) in &mut ships {
+        nets.0.iter_mut().for_each(|n| n.0 -= time.delta_secs());
+        nets.0.retain(|n| n.0 > 0.0);
+        ship.net = net_factor(&nets.0);
+        if nets.0.is_empty() {
+            commands.entity(e).remove::<Netted>();
+        }
+    }
+}
+
 pub fn speed_factor(c: &Class, h: &Health) -> f32 {
     1.0 - loss(c, h, |s| s.speed)
 }
@@ -103,4 +123,14 @@ pub fn guns_ready(g: &GunStates, c: &Class, h: &Health) -> (usize, usize) {
 
 pub fn section_lines(c: &Class, h: &Health) -> String {
     c.sections.iter().zip(&h.sections).map(|(s, hp)| format!("{:<22} {:>3.0}/{:.0}\n", s.label, hp, s.hp)).collect()
+}
+
+#[cfg(test)]
+mod net_tests {
+    #[test]
+    fn nets_stack_multiplicatively() {
+        assert_eq!(super::net_factor(&[]), 1.0);
+        assert!((super::net_factor(&[(10.0, 0.55)]) - 0.45).abs() < 1e-6);
+        assert!((super::net_factor(&[(10.0, 0.55), (1.0, 0.55)]) - 0.2025).abs() < 1e-6);
+    }
 }

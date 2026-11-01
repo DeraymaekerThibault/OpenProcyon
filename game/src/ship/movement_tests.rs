@@ -20,6 +20,7 @@ pub fn fleet_world() -> (World, [Entity; 6]) {
                 sail_energy: 1.0,
                 crew_speed: 1.0,
                 crew_turn: 1.0,
+                net: 1.0,
                 avoid: 1.0,
             },
             Health::new(class),
@@ -335,6 +336,7 @@ fn ship_keeps_speed_and_heading_past_last_waypoint() {
         sail_energy: 1.0,
         crew_speed: 1.0,
         crew_turn: 1.0,
+        net: 1.0,
         avoid: 1.0,
     };
     let mut tf = Transform::default();
@@ -401,6 +403,7 @@ fn a_broadside_attacker_circles_an_idle_ship_on_its_turning_circle() {
             sail_energy: 1.0,
             crew_speed: COMPUTER_CREW,
             crew_turn: COMPUTER_CREW,
+            net: 1.0,
             avoid: 1.0,
         };
         let mut tf = Transform::from_xyz(30.0, 0.0, 400.0);
@@ -457,6 +460,7 @@ fn cutter_matches_measured_retail_movement() {
         sail_energy: 1.0,
         crew_speed: 1.0,
         crew_turn: 1.0,
+        net: 1.0,
         avoid: 1.0,
     };
     let mut tf = Transform::default();
@@ -516,6 +520,7 @@ fn crewed_cutter_matches_measured_retail_speed_and_turn() {
             sail_energy: 1.0,
             crew_speed: f,
             crew_turn: f,
+            net: 1.0,
             avoid: 1.0,
         };
         let mut tf = Transform::default();
@@ -554,6 +559,7 @@ fn uncrewed_turns_match_measured_retail() {
             sail_energy: 1.0,
             crew_speed: 1.0,
             crew_turn: 1.0,
+            net: 1.0,
             avoid: 1.0,
         };
         let mut tf = Transform::default();
@@ -607,6 +613,7 @@ fn ships_lean_into_turns_except_at_emergency_speed() {
             sail_energy: 1.0,
             crew_speed: 1.0,
             crew_turn: 1.0,
+            net: 1.0,
             avoid: 1.0,
         };
         let mut tf = Transform::default();

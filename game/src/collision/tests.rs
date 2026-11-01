@@ -83,6 +83,7 @@ fn nis_stops_helm_and_combat_motion_but_keeps_scripted_routes_and_resumes() {
         sail_energy: 1.0,
         crew_speed: 1.0,
         crew_turn: 1.0,
+        net: 1.0,
         avoid: 1.0,
     };
     let mut mission = crate::campaign::load_id("mission03");
@@ -143,6 +144,7 @@ fn ecs_ship_contact_and_static_wall_do_not_pass_through() {
         sail_energy: 1.0,
         crew_speed: 1.0,
         crew_turn: 1.0,
+        net: 1.0,
         avoid: 1.0,
     };
     let health = || crate::Health::new(&app.world().resource::<crate::Library>().classes[class]);
@@ -192,6 +194,7 @@ fn wall_run(player: bool) -> f32 {
         sail_energy: 1.0,
         crew_speed: 1.0,
         crew_turn: 1.0,
+        net: 1.0,
         avoid: 1.0,
     };
     let e = app.world_mut().spawn((ship, health, Transform::default(), Drift::default())).id();
@@ -248,6 +251,7 @@ fn ai_ship_slows_for_an_island_in_its_way_creeps_round_it_and_picks_up_speed_aga
         sail_energy: 1.0,
         crew_speed: 1.0,
         crew_turn: 1.0,
+        net: 1.0,
         avoid: 1.0,
     };
     let e = app.world_mut().spawn((ship, health, Transform::default(), Drift::default())).id();
@@ -312,6 +316,7 @@ fn retail_island_mesh_blocks_a_ship_driven_through_its_centre() {
         sail_energy: 1.0,
         crew_speed: 1.0,
         crew_turn: 1.0,
+        net: 1.0,
         avoid: 1.0,
     };
     let e = app.world_mut().spawn((ship, health, Transform::from_xyz(0.0, 0.0, 80.0), Drift::default())).id();
@@ -364,6 +369,7 @@ fn ship_rock_contact(mass: f32) -> (Vec3, Vec3, Vec3, f32) {
         sail_energy: 1.0,
         crew_speed: 1.0,
         crew_turn: 1.0,
+        net: 1.0,
         avoid: 1.0,
     };
     let a = app.world_mut().spawn((ship, health, Transform::from_xyz(0.0, 0.0, 1.5), Drift::default())).id();
@@ -423,6 +429,7 @@ fn ship_contact_pushes_the_hulls_apart_and_keeps_both_speeds() {
             sail_energy: 1.0,
             crew_speed: 1.0,
             crew_turn: 1.0,
+            net: 1.0,
             avoid: 1.0,
         };
         let ea = app.world_mut().spawn((ship.clone(), ha, Transform::from_xyz(0.0, 0.0, 1.5), Drift::default())).id();
@@ -472,6 +479,7 @@ fn tow_uses_mass_and_independent_hardpoints_and_breaks_without_teleporting() {
         sail_energy: 1.0,
         crew_speed: 1.0,
         crew_turn: 1.0,
+        net: 1.0,
         avoid: 1.0,
     };
     let mut app = App::new();

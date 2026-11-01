@@ -191,6 +191,7 @@ fn hostile_island_towers_shoot_the_player_and_neutral_ones_do_not() {
         sail_energy: 1.0,
         crew_speed: 1.0,
         crew_turn: 1.0,
+        net: 1.0,
         avoid: 1.0,
     };
     let ms = crate::campaign::MissionShip {
@@ -293,6 +294,7 @@ fn skirmish_bases_shoot_ships_of_other_sides_only() {
         sail_energy: 1.0,
         crew_speed: 1.0,
         crew_turn: 1.0,
+        net: 1.0,
         avoid: 1.0,
     };
     app.world_mut().spawn((Transform::from_xyz(0.0, 0.0, -120.0), ship, Health::new(&lib.classes[c]), Fires::default(), PlayerShip));
@@ -348,6 +350,7 @@ fn a_volcano_lobs_one_aimed_shell_at_a_time() {
         sail_energy: 1.0,
         crew_speed: 1.0,
         crew_turn: 1.0,
+        net: 1.0,
         avoid: 1.0,
     };
     app.world_mut().spawn((Transform::from_xyz(0.0, 0.0, -120.0), ship, Health::new(&lib.classes[c]), Fires::default(), PlayerShip));
@@ -404,6 +407,7 @@ fn a_silent_island_never_fires() {
         sail_energy: 1.0,
         crew_speed: 1.0,
         crew_turn: 1.0,
+        net: 1.0,
         avoid: 1.0,
     };
     app.world_mut().spawn((Transform::from_xyz(0.0, 0.0, -120.0), ship, Health::new(&lib.classes[c]), Fires::default(), PlayerShip));
@@ -460,6 +464,7 @@ fn the_command_ship_holds_fire_until_an_enemy_is_clicked() {
         sail_energy: 1.0,
         crew_speed: 1.0,
         crew_turn: 1.0,
+        net: 1.0,
         avoid: 1.0,
     };
     let spawn = |app: &mut App, side, x: f32| {
@@ -525,6 +530,7 @@ fn a_skirmish_computer_ship_with_a_map_script_fires_at_its_captains_target() {
         sail_energy: 1.0,
         crew_speed: 1.0,
         crew_turn: 1.0,
+        net: 1.0,
         avoid: 1.0,
     };
     let spawn = |app: &mut App, side, x: f32| {
@@ -587,6 +593,7 @@ fn the_command_ship_damages_a_clicked_hostile_skirmish_base() {
         sail_energy: 1.0,
         crew_speed: 1.0,
         crew_turn: 1.0,
+        net: 1.0,
         avoid: 1.0,
     };
     let spawn = |app: &mut App, side, x: f32| {
@@ -660,6 +667,7 @@ fn a_destroyed_base_part_blasts() {
         sail_energy: 1.0,
         crew_speed: 1.0,
         crew_turn: 1.0,
+        net: 1.0,
         avoid: 1.0,
     };
     let spawn = |app: &mut App, side, x: f32| {
@@ -1016,6 +1024,7 @@ fn engine_exhaust_needs_motion_not_just_an_order() {
         sail_energy: 1.0,
         crew_speed: 1.0,
         crew_turn: 1.0,
+        net: 1.0,
         avoid: 1.0,
     };
     let s = app.world_mut().spawn((Transform::default(), ship, Health::new(&lib.classes[c]))).id();
@@ -1080,6 +1089,7 @@ fn shell_into_a_hull_damages_it_and_reports_the_hit() {
         sail_energy: 1.0,
         crew_speed: 1.0,
         crew_turn: 1.0,
+        net: 1.0,
         avoid: 1.0,
     };
     let target = app.world_mut().spawn((Transform::default(), ship, Health::new(&lib.classes[c]), Fires::default())).id();
@@ -1158,6 +1168,7 @@ fn land_in_the_way_stops_a_shell_before_the_hull() {
         sail_energy: 1.0,
         crew_speed: 1.0,
         crew_turn: 1.0,
+        net: 1.0,
         avoid: 1.0,
     };
     let target = app.world_mut().spawn((Transform::default(), ship, Health::new(&lib.classes[c]), Fires::default())).id();
@@ -1292,6 +1303,7 @@ fn a_lost_section_plays_the_med_explosion_once_and_no_damage_file() {
         sail_energy: 1.0,
         crew_speed: 1.0,
         crew_turn: 1.0,
+        net: 1.0,
         avoid: 1.0,
     };
     let dfx = DamageFx::new(&app.world().resource::<Library>().classes[class]);

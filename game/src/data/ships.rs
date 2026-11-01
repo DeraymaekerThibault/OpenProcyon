@@ -98,6 +98,8 @@ struct SectionDoc {
     /// Layers of the neighbouring sections; absent in imports that predate it.
     #[serde(default)]
     adjacent: Vec<String>,
+    #[serde(default)]
+    criticals: Vec<String>,
 }
 #[derive(Deserialize)]
 struct DestructDoc {
@@ -186,6 +188,7 @@ fn try_load_class(root: &Path, name: &str, guns: &HashMap<String, GunDef>) -> Re
                 destruct: s.destruct.as_ref().map(|d| Destruct { fx: d.fx.clone(), start: d.start as f32, end: d.end as f32, point: point(d.point) }),
                 debris: s.debris.as_ref().map(|d| (d.model.clone(), point(d.pivot))),
                 debris_fx: s.debris_fx.clone(),
+                criticals: s.criticals.clone(),
                 adjacent: s.adjacent.iter().filter_map(|l| j.sections.iter().position(|(_, o)| o.layer == *l)).collect(),
                 tris: geo.tris.as_chunks::<9>().0.iter().map(|c| [point([c[0], c[1], c[2]]), point([c[3], c[4], c[5]]), point([c[6], c[7], c[8]])]).collect(),
             })

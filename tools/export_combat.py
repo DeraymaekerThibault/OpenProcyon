@@ -228,6 +228,10 @@ def bullet_record(root, b, outdir):
             radius=bp.get("MaxRadius", bp.get("Radius")),
             duration=bp.get("Duration", 0.0),
         )
+    if factory == "EnergyNetCustomInfoFactory":
+        rec["net"] = dict(
+            duration=bp["Duration"], dissipated=bp["PercentageOfEnergyDissipated"]
+        )
     if mine:
         rec["mine"] = dict(
             sight=bp.get("Default SightRange", 50.0),
@@ -402,6 +406,8 @@ def export(root, ship, outdir):
                 core_pct=float(a.get("vitalSectionCoreDamagePercent", 0)),
                 # Neighbouring sections (layer names) a destroyed section passes damage on to.
                 adjacent=[x for x in a.get("adjacent", "").split("+") if x],
+                # System tags the section carries (crew speech when it is destroyed on the player's ship).
+                criticals=[x for x in a.get("criticals", "").split("+") if x],
                 debris_fx=a.get("debrisFx"),
                 destruct_fx=(
                     a.get("destructFx", "").replace("{", "").split() or [None]

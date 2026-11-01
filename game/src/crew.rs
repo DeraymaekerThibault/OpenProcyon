@@ -16,6 +16,15 @@ use crate::{PlayerShip, Ship, Side};
 
 const COOLDOWN: f32 = 15.0;
 
+/// Chance a due event is spoken (the original's per-event value); every other event always plays. PROVISIONAL: the original may roll
+/// per voice line (some events list lines with 1.0 and 0.5), and rolls before or after its interval check.
+fn play_chance(ev: &str) -> f32 {
+    match ev {
+        "engine_hit" | "weapons_destroyed" | "fire_weapon" => 0.5,
+        _ => 1.0,
+    }
+}
+
 /// What `Tracker` watches, gathered from the ECS each frame.
 #[derive(Default, Clone)]
 pub struct Snapshot {
@@ -208,6 +217,8 @@ fn callouts(
     mut queue: Local<VecDeque<&'static str>>,
     mut last: Local<HashMap<&'static str, f32>>,
     mut n: Local<usize>,
+    mut dead: Local<Vec<bool>>,
+    mut rng: ResMut<crate::combat::Rng>,
 ) {
     let Some(player) = player else { return };
     let (me, tf, ship, hp, docked, boarding, posts) = *player;
@@ -253,6 +264,22 @@ fn callouts(
             reports.push("fire_weapon");
         }
     }
+    // A destroyed section's systems speak, once per tag (docs/re/movement.md "Critical hits").
+    let now_dead: Vec<bool> = hp.sections.iter().map(|h| *h <= 0.0).collect();
+    if dead.len() == now_dead.len() {
+        for (k, _) in now_dead.iter().zip(dead.iter()).enumerate().filter(|(_, (n, o))| **n && !**o) {
+            for tag in &lib.classes[ship.class].sections[k].criticals {
+                match tag.as_str() {
+                    "Power Transformer Engines" | "Engines" => reports.push("engine_hit"),
+                    "Power Transformer Guns" => reports.push("weapons_destroyed"),
+                    "Rudder Linkage" => reports.push("rudder_destroyed"),
+                    "Munnitions" => reports.push("ammo_hit"),
+                    _ => {}
+                }
+            }
+        }
+    }
+    *dead = now_dead;
     if world.rams.read().any(|r| r.a == me || r.b == me) {
         reports.push("collision_alarm");
     }
@@ -296,7 +323,7 @@ fn callouts(
         weapons_left,
     };
     for ev in tracker.observe(snap).into_iter().filter(|_| crew_speech) {
-        if last.get(ev).is_none_or(|t| now - t >= COOLDOWN) && queue.len() < 3 {
+        if last.get(ev).is_none_or(|t| now - t >= COOLDOWN) && queue.len() < 3 && rng.f() < play_chance(ev) {
             last.insert(ev, now);
             queue.push_back(ev);
         }
@@ -322,6 +349,12 @@ mod tests {
 
     fn snap() -> Snapshot {
         Snapshot { hull: 1.0, sails: vec![1.0, 1.0], enemies: vec![(1, false, false)], ..default() }
+    }
+
+    #[test]
+    fn only_the_half_chance_events_can_stay_silent() {
+        assert_eq!(play_chance("engine_hit"), 0.5);
+        assert_eq!(play_chance("ammo_hit"), 1.0);
     }
 
     #[test]
@@ -373,6 +406,11 @@ mod tests {
             "out_of_bounds",
             "put_out_fire",
             "all_weapons_destroyed",
+            "engine_hit",
+            "weapons_destroyed",
+            "rudder_destroyed",
+            "ammo_hit",
+            "fire_weapon",
             "enemy_ship_spotted_pirate",
             "enemy_ship_spotted_procyon",
         ] {
