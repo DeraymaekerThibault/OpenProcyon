@@ -216,9 +216,7 @@ zero the core and go through the same path. Classes without a clip hold 1 s.
 `data/animations.json` holds every clip (`tools/export_animations.py`). Values are offsets added to the node's rest position and rest
 yaw/pitch/roll. No ship clip returns to its start (0 of 41). Other scenes: the animals' swim cycles are rotations of their bones
 (whale up to 0.6 rad, manta 1.0, dragon 1.4 plus up to one unit of translation); base windmills (clip `ENVIRONMENT`, also some mine
-and shipyard machinery) loop from spawn, one full yaw (-2 pi) over 10-16.7 s (`clips::play_loops`); base cranes (`CRANES`,
-`CRANES01`-`04`, matched to dock points by name) run 10 s only while started and snap to their end pose when stopped. PROVISIONAL / not
-done: cranes are not played yet, since what starts them is not confirmed (probably docking). The smoothing value of a key picks the curve
+and shipyard machinery) loop from spawn, one full yaw (-2 pi) over 10-16.7 s (`clips::play_loops`); base cranes (`CRANES`, or `CRANES01`-`04` for the dock point of that number) run 10 s from their first frame while a ship sits docked at a matching point and stop on their end pose (`docking::play_cranes`). PROVISIONAL: that docking starts them is the owner's reading (the clips are matched to dock points by name); the exact start/stop moments in the dock routine are not measured. The smoothing value of a key picks the curve
 (see "Animal skeletons").
 
 ### Animal skeletons (space dragon, whale)

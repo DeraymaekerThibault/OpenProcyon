@@ -358,3 +358,47 @@ fn approach_point_is_on_the_dockers_side_of_the_axis() {
     assert_eq!(approach_point(p, Vec3::NEG_Z, Vec3::new(50.0, 0.0, -80.0), 30.0), Vec3::new(10.0, 0.0, -30.0));
     assert_eq!(approach_point(p, Vec3::NEG_Z, Vec3::new(50.0, 0.0, 80.0), 30.0), Vec3::new(10.0, 0.0, 30.0));
 }
+
+#[test]
+fn cranes_run_while_a_ship_is_docked_and_stop_on_their_end_pose() {
+    let mut app = App::new();
+    let clips = std::collections::HashMap::from([("BaseX".to_string(), vec![("CRANES01".to_string(), crate::clips::Clip::slide("Crane", 10.0, 5.0))])]);
+    app.insert_resource(Library { classes: vec![], guns: default(), bullets: default(), names: default(), clips }).init_resource::<Time>().add_systems(Update, play_cranes);
+    let dock = |phase| Docker {
+        dockee: Entity::PLACEHOLDER,
+        point: Some(0),
+        phase,
+        final_leg: false,
+        timer: 0.0,
+        duration: 0.0,
+        repair_secs: 0.0,
+        healed: false,
+        full: false,
+        start: Vec3::ZERO,
+        offset: Vec3::ZERO,
+    };
+    let ship = app.world_mut().spawn(dock(Phase::Docked)).id();
+    let mut dockable = Dockable::new(vec![point(0.0), point(1.0)], true);
+    dockable.numbers = vec![1, 2];
+    dockable.taken[1] = Some(ship);
+    let crane = app.world_mut().spawn((Name::new("Crane"), Transform::default())).id();
+    let base = app.world_mut().spawn((crate::clips::SceneLoop("BaseX".into()), dockable)).add_child(crane).id();
+    let x = |app: &App| app.world().get::<Transform>(crane).unwrap().translation.x;
+    let step = |app: &mut App, secs: f32| {
+        app.world_mut().resource_mut::<Time>().advance_by(Duration::from_secs_f32(secs));
+        app.update();
+    };
+    for _ in 0..3 {
+        step(&mut app, 1.0);
+    }
+    assert_eq!(x(&app), 0.0, "point 2 is docked, so crane set 1 stays at rest");
+    app.world_mut().get_mut::<Dockable>(base).unwrap().taken = vec![Some(ship), None];
+    for _ in 0..8 {
+        step(&mut app, 1.0);
+    }
+    assert!(x(&app) > 0.0 && x(&app) < 5.0, "running: {}", x(&app));
+    app.world_mut().get_mut::<Dockable>(base).unwrap().taken = vec![None, None];
+    step(&mut app, 1.0);
+    step(&mut app, 1.0);
+    assert!((x(&app) - 5.0).abs() < 1e-4, "stopped on the end pose: {}", x(&app));
+}

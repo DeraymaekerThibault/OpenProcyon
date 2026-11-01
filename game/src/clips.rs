@@ -71,6 +71,12 @@ fn sample(keys: &[Key], t: f32) -> f32 {
 }
 
 impl Clip {
+    /// A hand-made clip for tests: `target` slides `x` units along starboard over `duration` seconds.
+    #[cfg(test)]
+    pub fn slide(target: &str, duration: f32, x: f32) -> Clip {
+        let line = |v: f32| vec![[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], [duration, v, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]];
+        Clip { duration, motions: HashMap::from([(target.to_string(), [line(x), line(0.0), line(0.0), line(0.0), line(0.0), line(0.0)])]) }
+    }
     /// The pose of element `name` at clip time `t` as its rest transform plus the clip's offsets (position added, yaw about up then
     /// pitch about starboard then roll about forward added to the rest angles, here composed after the rest rotation), in Bevy
     /// axes. None if the clip does not animate it.
@@ -92,37 +98,42 @@ pub struct SceneLoop(pub String);
 
 /// The animated node's pose before the clip touched it.
 #[derive(Component)]
-struct Rest(Transform);
+pub struct Rest(Transform);
 
 pub fn plugin(app: &mut App) {
     app.add_systems(Update, play_loops);
 }
 
-fn play_loops(
-    mut commands: Commands,
-    time: Res<Time>,
-    lib: Option<Res<crate::data::Library>>,
-    scenery: Query<(Entity, &SceneLoop)>,
-    children: Query<&Children>,
-    mut nodes: Query<(&Name, &mut Transform, Option<&Rest>)>,
-) {
+/// The nodes a clip animates, with their pre-clip pose.
+pub type Nodes<'w, 's> = Query<'w, 's, (&'static Name, &'static mut Transform, Option<&'static Rest>)>;
+
+/// Poses the nodes below `root` at clip time `t`. The first call only records each node's rest pose (applied from the next frame).
+pub fn pose_scene(commands: &mut Commands, clip: &Clip, t: f32, root: Entity, children: &Query<&Children>, nodes: &mut Nodes) {
+    for d in children.iter_descendants(root) {
+        let Ok((name, mut tf, rest)) = nodes.get_mut(d) else { continue };
+        if !clip.animates(name) {
+            continue;
+        }
+        let Some(rest) = rest else {
+            commands.entity(d).insert(Rest(*tf));
+            continue;
+        };
+        if let Some(pose) = clip.pose(name, t, rest.0) {
+            *tf = pose;
+        }
+    }
+}
+
+/// The named clip of a scene.
+pub fn find<'a>(clips: &'a Clips, scene: &str, name: &str) -> Option<&'a Clip> {
+    clips.get(scene)?.iter().find(|(n, _)| n == name).map(|(_, c)| c)
+}
+
+fn play_loops(mut commands: Commands, time: Res<Time>, lib: Option<Res<crate::data::Library>>, scenery: Query<(Entity, &SceneLoop)>, children: Query<&Children>, mut nodes: Nodes) {
     let Some(lib) = lib else { return };
     for (e, SceneLoop(scene)) in &scenery {
-        let Some(clip) = lib.clips.get(scene).and_then(|c| c.iter().find(|(n, _)| n == "ENVIRONMENT")).map(|(_, c)| c) else { continue };
-        let t = time.elapsed_secs() % clip.duration.max(1e-3);
-        for d in children.iter_descendants(e) {
-            let Ok((name, mut tf, rest)) = nodes.get_mut(d) else { continue };
-            if !clip.animates(name) {
-                continue;
-            }
-            let Some(rest) = rest else {
-                commands.entity(d).insert(Rest(*tf));
-                continue;
-            };
-            if let Some(pose) = clip.pose(name, t, rest.0) {
-                *tf = pose;
-            }
-        }
+        let Some(clip) = find(&lib.clips, scene, "ENVIRONMENT") else { continue };
+        pose_scene(&mut commands, clip, time.elapsed_secs() % clip.duration.max(1e-3), e, &children, &mut nodes);
     }
 }
 
