@@ -46,7 +46,7 @@ scripts! {
     Animals => "animals", Asteroid => "asteroid", Board => "board", BriefingSkip => "briefing-skip",
     Course => "course", CurrentM3 => "current-m3", Damage => "damage", Defeat => "defeat",
     Dock => "dock", DockClick => "dock-click", DockMenu => "dock-menu",
-    Fleet => "fleet", FleetPrimary => "fleet-primary", FleetCrew => "fleet-crew", FleetArms => "fleet-arms", FleetProfile => "fleet-profile", FleetProfileCrew => "fleet-profile-crew",
+    Fleet => "fleet", FleetPrimary => "fleet-primary", FleetCrew => "fleet-crew", FleetArms => "fleet-arms", FleetProfile => "fleet-profile", FleetProfileCrew => "fleet-profile-crew", FleetProfileArms => "fleet-profile-arms",
     FxTest => "fxtest", HuntM3 => "hunt-m3",
     Ingame => "ingame", IngameLoad => "ingame-load", IngameDoLoad => "ingame-do-load",
     IngameSave => "ingame-save", IngameOptions => "ingame-options", IngameControls => "ingame-controls",

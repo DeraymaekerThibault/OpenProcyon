@@ -755,8 +755,9 @@ pub(super) fn profile_dialog(ctx: &Ctx, c: &mut ChildSpawnerCommands, sk: &Skirm
         ctx.text(c, BODY_FONT, &s("IDGS_TPFRONTENDTEXT_SCREENS_FILENAME"), 128.0, 135.0, 359.5, true, Color::WHITE);
         let typed = if d.save { format!("{}_", d.name) } else { String::new() };
         cell(ctx, c, [278.0, 341.0, 159.0, 41.0], &typed, false, None::<Action>);
+        // Why the last Save or Load was refused, inside the frame above the file name (it used to sit on the frame's border).
         if let Some(e) = d.error {
-            ctx.text(c, BODY_FONT, e, 189.0, 297.0, 398.0, true, Color::srgb(1.0, 0.4, 0.3));
+            ctx.text(c, BODY_FONT, e, 128.0, 309.0, 322.0, true, Color::srgb(1.0, 0.45, 0.35));
         }
     });
 }

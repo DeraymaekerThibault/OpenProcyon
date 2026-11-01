@@ -11,6 +11,7 @@ pub fn fleet_smoke(world: &mut World, mut previous: Local<Option<Entity>>) {
         Some("storm-m3" | "storm-m3-damage") => storm_m3(world, frame),
         Some("fleet-primary") => fleet_primary(world, frame),
         Some("fleet") => fleet(world, frame, &mut previous),
+        Some("fleet-profile-arms") => profile_arms(world, frame),
         _ => {}
     }
 }
@@ -374,6 +375,73 @@ fn fleet(world: &mut World, frame: u32, previous: &mut Option<Entity>) {
             assert_eq!(f.roster().len(), 4);
         }
         260 => info!("fleet ECS/UI smoke passed: selection, promotion, six buttons, detach/rejoin, cease/resume, restart and re-entry"),
+        _ => {}
+    }
+}
+
+/// `--menu fleet --script fleet-profile-arms` (scratch `XDG_DATA_HOME`): an auto-assigned Navy fleet on the Arms tab with a swapped gun
+/// is saved as an arms profile, the gun is put back, and Load Arms is clicked through its buttons: refused while every point is spent
+/// (shot at frame 55 shows the reason), then the swapped gun comes back once there is room.
+#[allow(deprecated)]
+fn profile_arms(world: &mut World, frame: u32) {
+    use crate::menu::{Action as A, Skirmish};
+    let press = |world: &mut World, what: &str, want: &dyn Fn(&A) -> bool| {
+        let mut found = false;
+        for (a, mut i) in world.query::<(&A, &mut Interaction)>().iter_mut(world) {
+            if want(a) {
+                *i = Interaction::Pressed;
+                found = true;
+            }
+        }
+        assert!(found, "no {what} button");
+        world.resource_mut::<ButtonInput<MouseButton>>().press(MouseButton::Left);
+    };
+    let human = |sk: &Skirmish| sk.slots.iter().position(|s| s.kind == crate::menu::Kind::Human).unwrap();
+    match frame {
+        20 => world.resource_scope(|world, lib: Mut<Library>| {
+            let mut sk = world.resource_mut::<Skirmish>();
+            let h = human(&sk);
+            sk.slots[h].race = 0;
+            sk.fleet_size = 5;
+            crate::menu::auto_assign(&mut sk, &lib);
+            // Every point spent (the hook has no map, so set the budget to what the fleet costs).
+            sk.victory_limit = sk.slots[h].spent(&lib) as u32;
+            let class = &lib.classes[lib.index(&sk.slots[h].fleet[0])];
+            let (bank, first) = crate::crew_arms::selectable_banks(&lib, class)[0];
+            let cost = |g: &str| crate::crew_arms::bank_cost(&lib, class, bank, g).unwrap_or(0);
+            let stock = cost(&class.mounts[first].gun);
+            let gun = lib.guns.keys().find(|g| crate::crew_arms::bank_compatible(&lib, class, bank, g) && cost(g) > stock).expect("a dearer gun").clone();
+            let n = sk.slots[h].fleet.len();
+            sk.slots[h].weapons.resize_with(n, Default::default);
+            sk.slots[h].weapons[0] = [(bank, gun)].into();
+            (sk.fleet_pick, sk.arms_open, sk.arms_tab) = (0, true, true);
+            sk.open_profile(crate::profiles::Kind::Arms, true, &lib);
+            sk.profile.as_mut().unwrap().name = "smoke arms".into();
+            sk.do_profile(&lib);
+            assert!(sk.profile.is_none(), "save closes the dialog");
+            sk.slots[h].weapons[0].clear();
+        }),
+        30 => press(world, "Load Arms", &|a| matches!(a, A::OpenProfile(crate::profiles::Kind::Arms, false))),
+        40 => {
+            let sk = world.resource::<Skirmish>();
+            let d = sk.profile.as_ref().expect("Load Arms opens the dialog");
+            let n = d.files.iter().position(|p| p.name == "smoke arms").expect("the saved arms are listed");
+            press(world, "profile row", &|a| matches!(a, A::PickProfile(k) if *k == n));
+        }
+        // Auto assign spent every point, so the upgrade is refused with a reason; with room it loads.
+        50 | 70 => press(world, "Load", &|a| matches!(a, A::DoProfile)),
+        60 => {
+            let mut sk = world.resource_mut::<Skirmish>();
+            assert_eq!(sk.profile.as_ref().and_then(|d| d.error), Some("Not enough victory points."));
+            sk.victory_limit += 500;
+        }
+        80 => {
+            let sk = world.resource::<Skirmish>();
+            assert!(sk.profile.is_none(), "load closes the dialog: {:?}", sk.profile.as_ref().and_then(|d| d.error));
+            assert_eq!(sk.slots[human(sk)].weapons[0].len(), 1, "the saved gun is back");
+            info!("fleet-profile-arms smoke passed");
+        }
+        31 | 41 | 51 | 71 => world.resource_mut::<ButtonInput<MouseButton>>().release(MouseButton::Left),
         _ => {}
     }
 }

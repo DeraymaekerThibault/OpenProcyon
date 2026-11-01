@@ -71,7 +71,8 @@ closes the dialog; Load stays greyed until a file is picked. Saving a fleet wrot
 list, a crew file and an arms file for the ship slots (one record per ship). The game also ships one such profile (a mission 1 torpedo boat fleet with
 named crew). Not measured: which files the lists offer for another hull or race, and what Load does when the file costs more than the budget.
 Remake (owner's choice, 2026-10-31): a fleet profile is the hulls only, loading with stock guns and no crew; crew and arms are saved and
-loaded per ship from the Crew / Arms screen and offered for any ship of the same hull class.
+loaded per ship from the Crew / Arms screen and offered for any ship of the same hull class. A Load that would take the fleet over the victory points is refused with the reason shown in the dialog, unless it adds no
+cost (PROVISIONAL: retail's over-budget Load is not measured). Auto Assign spends every point, so upgrades loaded after it are refused.
 
 **Arms tab.** A top-down ship outline with one icon per selectable weapon bank (a mount of several guns is one bank). Clicking a bank
 shows a tooltip "Heavy Mount / 4 Guns" and the list *Available Weapons* for that mount type, the fitted gun highlighted, with its name,

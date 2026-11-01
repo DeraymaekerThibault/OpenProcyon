@@ -546,12 +546,19 @@ fn loading_a_fleet_crew_or_arms_profile_restores_what_was_saved_and_refuses_what
     two.push_ship("Ship_Navy_ManOWar");
     let class = &lib.classes[lib.index("Ship_Navy_ManOWar")];
     let (bank, first) = crate::crew_arms::selectable_banks(&lib, class)[0];
-    let swap = |g: &&String| *g != &class.mounts[first].gun && crate::crew_arms::bank_compatible(&lib, class, bank, g);
+    let cost = |g: &str| crate::crew_arms::bank_cost(&lib, class, bank, g).unwrap_or(0);
+    let swap = |g: &&String| cost(g) > cost(&class.mounts[first].gun) && crate::crew_arms::bank_compatible(&lib, class, bank, g);
     let gun = lib.guns.keys().find(swap).unwrap().clone();
     two.weapons[0].insert(bank, gun);
     let arms = two.profile_of(K::Arms, 0);
     assert_eq!(two.apply_profile(K::Arms, &arms, 1, &lib, 1000, 5), Ok(()));
     assert_eq!(two.weapons[1], two.weapons[0]);
+    // Over a lowered budget: a load that adds cost is refused, one that adds none still goes through.
+    let spent = two.spent(&lib) as u32;
+    let mut stock = arms.clone();
+    stock.ships[0].arms.clear();
+    assert_eq!(two.clone().apply_profile(K::Arms, &arms, 1, &lib, spent - 1, 5), Ok(()), "same guns again: no extra cost");
+    assert_eq!(two.clone().apply_profile(K::Arms, &stock, 1, &lib, spent - 1, 5), Ok(()), "back to stock costs less");
     // Crew belongs to its hull class and may not be posted twice.
     let crew = before.profile_of(K::Crew, 0);
     sk.slots[human].crew_mut(0)[0] = vec![id.clone()];
@@ -560,7 +567,9 @@ fn loading_a_fleet_crew_or_arms_profile_restores_what_was_saved_and_refuses_what
     twice.ships[0].class = before.fleet[1].clone();
     assert!(sk.slots[human].apply_profile(K::Crew, &twice, 1, &lib, 1000, 5).is_err(), "the crew member is posted on ship 0");
     // The budget and the fleet size limit are kept.
-    assert_eq!(sk.slots[human].apply_profile(K::Fleet, &fleet, 0, &lib, 10, 5), Err("Not enough victory points."));
+    let mut empty = sk.slots[human].clone();
+    empty.clear_fleet();
+    assert_eq!(empty.apply_profile(K::Fleet, &fleet, 0, &lib, 10, 5), Err("Not enough victory points."));
     assert!(sk.slots[human].apply_profile(K::Fleet, &fleet, 0, &lib, 1000, 1).is_err());
     assert_eq!(sk.slots[human].fleet, before.fleet, "a refused load leaves the fleet alone");
 }
