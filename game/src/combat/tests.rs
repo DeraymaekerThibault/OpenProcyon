@@ -1262,3 +1262,42 @@ fn a_map_mine_rests_where_the_map_put_it_and_fights_for_no_one_until_given_an_ow
     assert_eq!(shell.side, crate::scenario::HOSTILE_TO_ALL, "hostile to every ship until the script names an owner");
     assert!(matches!(shell.payload, Payload::Mine { sight, .. } if sight == 50.0));
 }
+
+#[test]
+#[ignore = "needs imported assets"]
+fn a_lost_section_plays_the_med_explosion_once_and_no_damage_file() {
+    let lib = Library::load(assets_dir());
+    let class = lib.index("Ship_Navy_Cutter");
+    let mut health = Health::new(&lib.classes[class]);
+    health.sections[0] = 0.0;
+    let mut app = App::new();
+    app.add_plugins((TaskPoolPlugin::default(), AssetPlugin::default()))
+        .init_resource::<FxLib>()
+        .init_resource::<Assets<Mesh>>()
+        .init_asset::<bevy::world_serialization::WorldAsset>()
+        .add_message::<crate::audio::Sfx>()
+        .insert_resource(lib)
+        .add_systems(Update, damage_fx);
+    let ship = crate::Ship {
+        class,
+        side: Side::Player,
+        heading: 0.0,
+        speed: 0.0,
+        ang_vel: 0.0,
+        order: 0,
+        waypoints: vec![],
+        goal: None,
+        cap: 1.0,
+        throttle: None,
+        sail_energy: 1.0,
+        crew_speed: 1.0,
+        crew_turn: 1.0,
+        avoid: 1.0,
+    };
+    let dfx = DamageFx::new(&app.world().resource::<Library>().classes[class]);
+    app.world_mut().spawn((ship, health, dfx, Transform::default()));
+    app.update();
+    app.update();
+    let names: Vec<String> = app.world_mut().resource_mut::<Messages<crate::audio::Sfx>>().drain().map(|s| s.name).collect();
+    assert_eq!(names, ["Explosion_Med01"], "one Med file for the lost section, no Damage_ file: {names:?}");
+}

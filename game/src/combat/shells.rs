@@ -138,13 +138,13 @@ pub(super) fn apply_base_hit(class: &Class, hp: &mut Health, k: usize, roll: f32
 
 /// The base parts in `fallen` that are mission parts burst with their destruct effect and a blast. PROVISIONAL: retail's effect for a
 /// destroyed base part is not measured; the part's WOT destruct effect and the ship-explosion sound stand in.
-pub(super) fn base_parts_burst(commands: &mut Commands, fxl: &FxLib, sfx: &mut MessageWriter<Sfx>, rng: &mut Rng, class: &Class, btf: &Transform, fallen: Vec<usize>) {
+pub(super) fn base_parts_burst(commands: &mut Commands, fxl: &FxLib, sfx: &mut MessageWriter<Sfx>, class: &Class, btf: &Transform, fallen: Vec<usize>) {
     for sec in fallen.into_iter().map(|j| &class.sections[j]).filter(|sec| sec.mission) {
         let centre = Transform::from_translation(btf.transform_point((sec.min + sec.max) / 2.0));
         if let Some(name) = sec.destruct.as_ref().and_then(|d| d.fx.as_deref()) {
             fx::spawn(commands, fxl, name, None, centre, centre, true);
         }
-        sfx.write(Sfx { name: format!("Explosion_Med0{}", rng.variant(8)), at: Some(centre.translation), vol: 1.0, max: 900.0 });
+        sfx.write(Sfx { name: "Explosion_Med01".to_string(), at: Some(centre.translation), vol: 1.0, max: 900.0 });
     }
 }
 
@@ -338,7 +338,7 @@ pub(super) fn shells(
                 downed.push(te);
                 commands.entity(te).despawn();
                 fx::spawn(&mut commands, &fxl, "Explosion_Light", None, at, at, true);
-                sfx.write(Sfx { name: format!("Explosion_Med0{}", rng.variant(8)), at: Some(tp), vol: 0.8, max: 600.0 });
+                sfx.write(Sfx { name: "Explosion_Med01".to_string(), at: Some(tp), vol: 0.8, max: 600.0 });
             } else if let Some(fx_name) = &bd.hit_fx {
                 fx::spawn(&mut commands, &fxl, fx_name, None, at, at, true);
             }
@@ -442,7 +442,7 @@ pub(super) fn shells(
             let class = &lib.classes[ab.class];
             let fallen = apply_base_hit(class, &mut hp, k, rng.range(lo, hi));
             sfx.write_batch(bd.impact_sound(key, at, &mut rng));
-            base_parts_burst(&mut commands, &fxl, &mut sfx, &mut rng, class, btf, fallen);
+            base_parts_burst(&mut commands, &fxl, &mut sfx, class, btf, fallen);
             hit_fx(&mut commands, &fxl, bd, at, s.vel);
             // A star mortar bursts where it struck, after its direct hit.
             if matches!(s.payload, Payload::Blast { .. }) {
