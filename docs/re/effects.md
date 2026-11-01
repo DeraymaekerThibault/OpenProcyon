@@ -237,6 +237,15 @@ otherwise). Remake: `tools/skin.py` bakes the skeleton, weights and clip (sample
 not sum to one; most vertices have a single bone), at most four kept; the whale's on/off value is read as its speed; the manta ray
 is not exported.
 
+### Ambient effect points on scenery
+A mesh scene node can carry a `PlayEffect` attribute; the world object that uses the scene lists it under the node's name with a
+descriptor (a label) and an association, and **the association names the effect file the point plays**. All 38 points: fire stacks
+(`FireStack`), smoke (`Island_Smoke`, `Crater_Smoke`), the dock buoy light (`bouy`), the lighthouse beam (`Lighthouse`, also on the
+shipyard's three towers), the volcano fountains (`volcanoSparks`, on every `Volcano_Effect1-4` and `SmokeNode` spark point) and the
+Dolinor fires (`FireOnShip`, not `FireStack`). `VolcanoSmoke` points are a separate attribute with no effect name and play `VolcanoSmoke`.
+The point's position is the node's own position in the scene. Each point is exported with its `effect`
+(`data/mesh_effects.json`) and placed at spawn by the scenery loader. Not measured: the effects' look against footage.
+
 ### Section debris
 A section destroyed mid-fight swaps to its damaged mesh and, when its WOT association names a `debrisMeshScene`, drops that piece
 (a torn-off mast, the bow, the engine block): the scene holds one `...Damage_LayerN` mesh in the hull's own model space, its node

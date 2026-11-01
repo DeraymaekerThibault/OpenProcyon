@@ -14,6 +14,14 @@ class MeshSceneExports(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             root, out = Path(d, "game"), Path(d, "out")
             (root / "BD_MeshScenes").mkdir(parents=True)
+            (root / "WorldObjects").mkdir()
+            (root / "WorldObjects/Island_Fire.wot").write_text(
+                "Mesh Scene Name String 'Fire'\n"
+                "MeshName String 'Smoke1'\n"
+                "AttributeName String 'PlayEffect'\n"
+                "DescriptorName String 'default'\n"
+                "AssociationName String 'Island_Smoke'\n"
+            )
             out.mkdir()
             (root / "BD_MeshScenes/Fire.msb").write_bytes(scene())
             fn(root, out)
@@ -27,8 +35,20 @@ class MeshSceneExports(unittest.TestCase):
         self.assertEqual(
             got["Fire"],
             [
-                dict(kind="PlayEffect", name="Smoke1", descriptor="default", pos=pos),
-                dict(kind="VolcanoSmoke", name="Smoke1", descriptor="Smoke1", pos=pos),
+                dict(
+                    kind="PlayEffect",
+                    name="Smoke1",
+                    descriptor="default",
+                    effect="Island_Smoke",
+                    pos=pos,
+                ),
+                dict(
+                    kind="VolcanoSmoke",
+                    name="Smoke1",
+                    descriptor="Smoke1",
+                    effect=None,
+                    pos=pos,
+                ),
             ],
         )
 
