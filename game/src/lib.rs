@@ -136,7 +136,8 @@ pub fn run(view: fn(&mut App), setup_view: fn(&mut App)) {
         eprintln!("No converted game assets in {}: opening the import screen.", base.display());
         return setup::run(base, content_dir(), setup_view);
     }
-    let layers: Vec<PathBuf> = std::iter::once(content_dir()).chain(mods).collect();
+    let installed = modding::installed().into_iter().filter(|m| m.enabled).map(|m| m.dir);
+    let layers: Vec<PathBuf> = std::iter::once(content_dir()).chain(installed).chain(mods).collect();
     let _ = ASSETS.set(modding::overlay(&base, &layers));
     let arg = |k: &str| args.iter().position(|a| a == k).and_then(|i| args.get(i + 1)).cloned();
     let shot = arg("--shot");
@@ -191,6 +192,7 @@ pub fn run(view: fn(&mut App), setup_view: fn(&mut App)) {
             Some("skirmish") => menu::Screen::CreateSkirmish,
             Some("lobby") => menu::Screen::Lobby,
             Some("options") => menu::Screen::Options,
+            Some("mods") => menu::Screen::Mods,
             Some("controls") => menu::Screen::Controls,
             Some("fleet") => menu::Screen::Fleet,
             Some("load") => menu::Screen::Load,

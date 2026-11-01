@@ -1,0 +1,9 @@
+{
+  "extends": "ProcEngine_Heavy",
+  "EffectName": "ICEngine_Heavy",
+  "set": {
+    "/Primitive/0/SpawnedEachTimePropertiesChunk/ColorFaderChunk/ColorInterpolator3Chunk/Value1Interpolator/curve/0/1": 0.16,
+    "/Primitive/0/SpawnedEachTimePropertiesChunk/ColorFaderChunk/ColorInterpolator3Chunk/Value2Interpolator/curve/0/1": 0.2,
+    "/Primitive/0/SpawnedEachTimePropertiesChunk/ColorFaderChunk/ColorInterpolator3Chunk/Value3Interpolator/curve/0/1": 0.0
+  }
+}

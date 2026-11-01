@@ -24,7 +24,7 @@ use super::widgets::{
 };
 
 pub fn plugin(app: &mut App) {
-    app.add_systems(Update, ((scroll_controls, scroll_saves).before(BuildMenu), build.in_set(BuildMenu), wheel.after(RunButtons)).run_if(menu_active));
+    app.add_systems(Update, ((scroll_controls, scroll_saves, scroll_mods).before(BuildMenu), build.in_set(BuildMenu), wheel.after(RunButtons)).run_if(menu_active));
 }
 
 /// Rebuilds the current screen when the state, the selection or the window size changes.
@@ -68,14 +68,15 @@ fn build(
         (Screen::Display, _) | (Screen::Battle, Some(Page::Display)) => Some(true),
         _ => None,
     };
+    let mods_page = *state.get() == Screen::Mods;
     let file = match state.get() {
-        _ if page.is_some() || settings_page.is_some() => "",
+        _ if page.is_some() || settings_page.is_some() || mods_page => "",
         Screen::Battle if ig.page() == Some(Page::Menu) => "ingamemenu_default",
         Screen::Battle if ig.page() == Some(Page::Summary) => "multiplayer_stats_screen",
         Screen::Battle if ig.page().is_some() => "ingamemenu_load_campaign",
         Screen::Load => "load_campaign_screen",
         Screen::Tutorial => "tutorial_screen",
-        Screen::Options | Screen::Controls | Screen::Audio | Screen::Display => unreachable!(),
+        Screen::Options | Screen::Mods | Screen::Controls | Screen::Audio | Screen::Display => unreachable!(),
         Screen::Main => "mainmenu",
         Screen::SinglePlayer => "singleplayer_menu",
         Screen::CreateSkirmish => "create_skirmish_game_screen",
@@ -98,11 +99,18 @@ fn build(
                 if let Some(controls) = page {
                     options_page(&ctx, c, controls, ingame, strings, binds, cui);
                 }
+                if mods_page {
+                    mods_page_view(&ctx, c, &model.mods);
+                }
                 if let Some(display) = settings_page {
                     sound_display_page(&ctx, c, display, ingame, strings, settings);
                 }
                 for e in &els {
                     element(&ctx, c, &model, e, strings, preview.as_deref());
+                }
+                if *state.get() == Screen::Main {
+                    // Small corner button: the retail main menu has no Mods entry.
+                    ctx.text_button(c, [670.0, 553.0, 780.0, 581.0], "Mods", "BlackChancery16", Action::Goto(Screen::Mods));
                 }
                 if *state.get() == Screen::Lobby && sk.map_info {
                     map_info_dialog(&ctx, c, sk, strings);
@@ -512,6 +520,51 @@ fn sound_display_page(ctx: &Ctx, c: &mut ChildSpawnerCommands, display: bool, in
     }
 }
 
+const MOD_ROWS: usize = 6;
+
+/// Mods table: checkbox, name with its description, category, version. A header click sorts by that column, the category button
+/// filters, the mouse wheel scrolls. PROVISIONAL: no retail screen, laid out like the Control Options table; the strings are ours.
+fn mods_page_view(ctx: &Ctx, c: &mut ChildSpawnerCommands, mods: &crate::menu::ModList) {
+    use crate::menu::ModCol;
+    settings_frame(ctx, c, false, (Page::Options, Screen::Main));
+    ctx.text(c, "BlackChancery22", "Mods", 250.0, 300.0, 150.0, true, SETTINGS_GOLD);
+    let (l, r, t) = (140.0, 660.0, 185.0);
+    let filter = format!("Category: {}", mods.category.as_deref().unwrap_or("All"));
+    ctx.text_button(c, [r - 190.0, 135.0, r, 167.0], &filter, "BlackChancery16", Action::ModCategory);
+    // Header: clicking a title sorts by it; the arrow marks the sorted column.
+    c.spawn((ctx.node(l, t, r - l, 26.0), BackgroundColor(Color::srgba(0.1, 0.4, 0.6, 0.8))));
+    let arrow = |col| if mods.sort.0 == col { if mods.sort.1 { " ^" } else { " v" } } else { "" };
+    for (col, label, x, w) in
+        [(ModCol::Enabled, "On", l, 40.0), (ModCol::Name, "Name", l + 40.0, 280.0), (ModCol::Category, "Category", l + 320.0, 110.0), (ModCol::Version, "Version", l + 430.0, 90.0)]
+    {
+        let mut h = c.spawn((ctx.node(x, t, w, 26.0), Interaction::None, Action::SortMods(col), BackgroundColor(Color::NONE), Rest(Color::NONE)));
+        h.with_children(|c| ctx.text(c, "UniversBold14", &format!("{label}{}", arrow(col)), 8.0, w, 13.0, false, Color::WHITE));
+    }
+    let row_h = 38.0;
+    c.spawn((ctx.node(l, t + 26.0, r - l, row_h * MOD_ROWS as f32 + 4.0), BackgroundColor(Color::srgba(0.0, 0.1, 0.3, 0.6))));
+    let rows = mods.rows();
+    for (n, &i) in rows.iter().enumerate().skip(mods.scroll).take(MOD_ROWS) {
+        let m = &mods.mods[i];
+        let y = t + 28.0 + (n - mods.scroll) as f32 * row_h;
+        let mut row = c.spawn((ctx.node(l, y, r - l, row_h), Interaction::None, Action::ToggleMod(i), BackgroundColor(Color::NONE), Rest(Color::NONE)));
+        row.with_children(|c| {
+            // Checkbox: a light frame, filled gold when the mod is on.
+            c.spawn((ctx.node(12.0, row_h / 2.0 - 9.0, 18.0, 18.0), BackgroundColor(Color::srgb(0.75, 0.85, 0.95))));
+            c.spawn((ctx.node(14.0, row_h / 2.0 - 7.0, 14.0, 14.0), BackgroundColor(if m.enabled { SETTINGS_GOLD } else { Color::srgb(0.02, 0.08, 0.2) })));
+            ctx.text(c, "UniversBold14", &m.name, 48.0, 280.0, 11.0, false, Color::WHITE);
+            let desc: String = m.description.chars().take(40).collect();
+            ctx.text(c, "Univers10", &desc, 48.0, 270.0, 27.0, false, Color::srgb(0.8, 0.8, 0.8));
+            ctx.text(c, "Univers10", &m.category, 328.0, 100.0, row_h / 2.0, false, Color::WHITE);
+            ctx.text(c, "Univers10", &m.version, 438.0, 70.0, row_h / 2.0, false, Color::WHITE);
+        });
+    }
+    let note = match mods.mods.is_empty() {
+        true => format!("No mods installed. Put mod folders in {}", crate::modding::mods_dir().map_or(String::new(), |d| d.display().to_string())),
+        false => format!("{} of {} shown. Changes apply the next time the game starts.", rows.len(), mods.mods.len()),
+    };
+    ctx.text(c, "Univers10", &note, l, r - l, t + 26.0 + row_h * MOD_ROWS as f32 + 16.0, false, Color::WHITE);
+}
+
 /// Title gold of the Options pages.
 const SETTINGS_GOLD: Color = Color::srgb(1.0, 0.85, 0.2);
 
@@ -849,6 +902,16 @@ fn scroll_controls(mut wheel: MessageReader<bevy::input::mouse::MouseWheel>, sta
     if dy != 0.0 && (*state.get() == Screen::Controls || ig.page() == Some(Page::Controls)) {
         let max = binds.rows.len().saturating_sub(if ig.page().is_some() { 8 } else { 17 });
         cui.scroll = wheel_step(cui.scroll, dy, max);
+    }
+}
+
+/// Mouse wheel scrolls the Mods table.
+fn scroll_mods(mut wheel: MessageReader<bevy::input::mouse::MouseWheel>, state: Res<State<Screen>>, mut mods: ResMut<crate::menu::ModList>) {
+    let dy: f32 = wheel.read().map(|e| e.y).sum();
+    if dy != 0.0 && *state.get() == Screen::Mods {
+        let max = mods.rows().len().saturating_sub(MOD_ROWS);
+        let next = wheel_step(mods.scroll, dy, max);
+        mods.scroll = next;
     }
 }
 

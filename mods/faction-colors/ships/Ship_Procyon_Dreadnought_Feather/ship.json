@@ -1,0 +1,7 @@
+{
+  "extends": "Ship_Procyon_Dreadnought_Feather",
+  "set": {
+    "/engines/0/fx": "ICEngine_ExtraHeavy",
+    "/engines/1/fx": "ICEngine_ExtraHeavy"
+  }
+}

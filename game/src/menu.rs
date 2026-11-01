@@ -5,10 +5,12 @@
 
 #![allow(deprecated)] // shortcut: bevy 0.20 Interaction (deprecated for picking Hovered/Pressed); port when it is removed
 mod lobby_scenario;
+mod mods;
 mod saves;
 mod settings;
 mod skirmish;
 pub use lobby_scenario::*;
+pub use mods::*;
 pub use saves::*;
 pub use settings::*;
 pub use skirmish::*;
@@ -31,6 +33,8 @@ pub enum Screen {
     Fleet,
     Load,
     Options,
+    /// Options > Mods: enable or disable the mods installed in the user folder.
+    Mods,
     Controls,
     /// Main menu > Tutorial: Basic Training / Full Training (`Tutorial Screen.tst`).
     Tutorial,
@@ -106,6 +110,11 @@ pub enum Action {
     RestoreKeys,
     /// Step one Sound / Display option (`Settings`).
     Setting(Setting),
+    /// Switch installed mod `n` on or off (applies on the next launch).
+    ToggleMod(usize),
+    SortMods(ModCol),
+    /// Cycle the Mods table's category filter.
+    ModCategory,
 }
 
 impl Action {
@@ -181,7 +190,7 @@ pub fn button_sound(action: &Action, arrow: Option<&ArrowButton>, select: bool) 
             }
         }
         _ if list => "FE_List_Select",
-        (Action::FleetSize(_) | Action::VictoryLimit(_) | Action::Setting(_), _) => "SpinButton",
+        (Action::FleetSize(_) | Action::VictoryLimit(_) | Action::Setting(_) | Action::ToggleMod(_) | Action::SortMods(_) | Action::ModCategory, _) => "SpinButton",
         (Action::Launch | Action::Campaign | Action::Tutorial(_), _) => "StartButton",
         (Action::AddShip, _) => "FE_Add",
         (Action::DropShip | Action::Remove, _) => "FE_Drop",
@@ -251,6 +260,7 @@ pub fn plugin(app: &mut App) {
         .init_resource::<ScrollTo>()
         .init_resource::<CtrlUi>()
         .insert_resource(Settings::load())
+        .insert_resource(ModList::load())
         .add_systems(Update, apply_settings)
         .configure_sets(Update, BuildMenu.after(capture_key).before(RunButtons).run_if(menu_active))
         .add_systems(
@@ -318,6 +328,7 @@ pub struct MenuModel<'w> {
     pub lib: Res<'w, Library>,
     pub state: Res<'w, State<Screen>>,
     pub settings: Res<'w, Settings>,
+    pub mods: Res<'w, ModList>,
     pub stats: Res<'w, crate::stats::GameStats>,
     pub outcome: Res<'w, crate::scenario::Outcome>,
     pub end_message: Res<'w, crate::scenario::EndMessage>,
@@ -443,6 +454,7 @@ impl MenuModel<'_> {
             || self.ctrl.is_changed()
             || self.state.is_changed()
             || self.settings.is_changed()
+            || self.mods.is_changed()
             || self.stats.is_changed()
     }
     pub fn key(&self, window: &Window) -> MenuKey {
@@ -467,7 +479,7 @@ impl MenuModel<'_> {
                 ui.list.len(),
                 cui.scroll,
                 (cui.capture, &self.binds.rows),
-                self.settings,
+                (&self.settings, &self.mods),
                 (sk.dropdown, sk.name_open),
                 sk.flag_picker,
                 sk.map_scroll,
@@ -754,7 +766,7 @@ fn buttons(
     lib: Res<Library>,
     mut exit: MessageWriter<AppExit>,
     mut cfg: ResMut<crate::Config>,
-    (mut binds, mut cui, mut settings): (ResMut<Bindings>, ResMut<CtrlUi>, ResMut<Settings>),
+    (mut binds, mut cui, mut settings, mut mods): (ResMut<Bindings>, ResMut<CtrlUi>, ResMut<Settings>, ResMut<ModList>),
 ) {
     for (i, action) in &q {
         if *i != Interaction::Pressed {
@@ -768,6 +780,9 @@ fn buttons(
         match action {
             Action::Goto(s) => next.set(*s),
             Action::Rebind(n) => cui.capture = Some(*n),
+            Action::ToggleMod(n) => mods.toggle(*n),
+            Action::SortMods(c) => mods.sort_by(*c),
+            Action::ModCategory => mods.next_category(),
             Action::Setting(s) => {
                 settings.step(*s);
                 settings.save();

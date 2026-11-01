@@ -1,0 +1,11 @@
+{
+  "extends": "Ship_Procyon_Submersible",
+  "set": {
+    "/engines/0/fx": "ICEngine_Medium",
+    "/engines/1/fx": "ICEngine_Medium",
+    "/engines/2/fx": "ICEngine_Light",
+    "/engines/3/fx": "ICEngine_Light",
+    "/engines/4/fx": "ICEngine_Light",
+    "/engines/5/fx": "ICEngine_Light"
+  }
+}

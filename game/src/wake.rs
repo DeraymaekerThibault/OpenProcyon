@@ -17,6 +17,19 @@ pub struct Wake {
     pts: Vec<(Vec3, f32, f32)>,
 } // (position, age, strength 0..1 from speed when laid)
 
+/// Multiplier of the wake texture per fleet type, from the optional `data/fx/wake_tint.json` (`{"Navy": [r, g, b]}`, values may exceed 1).
+/// Absent: the retail colour for everyone. A mod ships the file, so wakes can tell the factions apart without new textures.
+fn wake_tint(race: &str) -> Option<[f32; 3]> {
+    static TINTS: std::sync::OnceLock<serde_json::Value> = std::sync::OnceLock::new();
+    let tints = TINTS.get_or_init(|| crate::data::try_json(&crate::assets_dir().join("data/fx/wake_tint.json")).unwrap_or_default());
+    let v = tints.get(race)?.as_array()?;
+    Some([v.first()?.as_f64()? as f32, v.get(1)?.as_f64()? as f32, v.get(2)?.as_f64()? as f32])
+}
+
+fn sh_class(ships: &Query<(Entity, &Transform, &Ship, Option<&crate::combat::Health>), With<Ship>>, e: Entity) -> usize {
+    ships.get(e).map_or(0, |(_, _, sh, _)| sh.class)
+}
+
 pub fn update(
     mut commands: Commands,
     time: Res<Time>,
@@ -34,7 +47,11 @@ pub fn update(
         }
         if !wakes.iter().any(|(_, w, _)| w.ship == s) {
             let mesh = meshes.add(Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default()));
-            let mat = mats.add(crate::fx::additive_material(assets.load("fx/tex/wake.png")));
+            let mut material = crate::fx::additive_material(assets.load("fx/tex/wake.png"));
+            if let Some([r, g, b]) = wake_tint(&lib.classes[sh_class(&ships, s)].race) {
+                material.base.base_color = Color::LinearRgba(LinearRgba::new(r, g, b, 1.0));
+            }
+            let mat = mats.add(material);
             commands.spawn((Scenario, Wake { ship: s, pts: vec![] }, Mesh3d(mesh), MeshMaterial3d(mat), Transform::default(), Visibility::default(), NoFrustumCulling));
         }
     }
