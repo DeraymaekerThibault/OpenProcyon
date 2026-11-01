@@ -356,6 +356,7 @@ fn set_time_scale(vtime: &mut Time<Virtual>, speed: f32) {
     vtime.set_max_delta(std::time::Duration::from_secs_f32(if speed > 1.0 { 0.1 } else { 0.25 }));
 }
 
+/// Fastest speed of the HUD speed buttons when `data/hud/speed.json` gives no `max`.
 pub const MAX_GAME_SPEED: f32 = 16.0;
 
 /// Freezes or resumes the simulation by pausing virtual time (the HUD pause button and non-retail Pause key). The speed setting is kept.

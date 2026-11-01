@@ -35,6 +35,7 @@ so put changes in a mod (`docs/modding.md`). The authored HUD layout `data/hud/b
 | `data/boarding.json` | per Ship_/Base_/Island_ type: `points` (BoardingEffectPoint nodes, game frame) and, for ships, `crew` (WOT `Max number of` Gunners, Captains, First Mates, Navigators, Engineers, Riggers, Fighters, Lookouts); `tools/export_boarding.py`, see `docs/re/boarding.md` |
 | `data/crew.json` | all 297 crew members: race, species, name, points, active skills, portrait; campaign recruitment uses `points`, assigned skills feed gunnery/repair/boarding (portrait UI remains open) |
 | `data/hud/bar.json` | authored HUD bar part order and optional decorative backdrops; not overwritten by retail export |
+| `data/hud/speed.json` | optional, mod-only (`mods/game-speed`): `{"max": 16}` turns on the not-retail game-speed buttons; absent, the HUD has none |
 | `hud/hud.json`, `hud/scales.json` | UI sprite rectangles and per-sheet HD scale |
 | `hud/tex/bar_<skin>_<sprite>.png` | generated isolated bar sprites; regenerate with `tools/trim_hud_rects.py` after atlas changes |
 
