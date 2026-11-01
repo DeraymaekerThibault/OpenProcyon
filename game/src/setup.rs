@@ -31,6 +31,79 @@ pub enum Phase {
     Failed { step: Option<String>, reason: String },
     /// Import done: the game starts again with the assets.
     Starting,
+    /// The game crashed (`--crashed <log>`): what it said, and where the report is.
+    Crashed { message: String, log: PathBuf },
+}
+
+/// Written into the asset folder after a successful import from this screen: the game version that imported it and the install
+/// it came from. A player's folder (`%APPDATA%`/XDG) is only used when it matches this build (`imported`).
+pub const STAMP: &str = "import.json";
+
+/// Why the import screen opened instead of the game.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Imported {
+    Ready,
+    /// No converted assets yet.
+    Missing,
+    /// Converted by another version (`None`: before imports were stamped); `game` is the install it came from.
+    Outdated {
+        version: Option<String>,
+        game: Option<PathBuf>,
+    },
+}
+
+/// The state of a player's asset folder for game version `version`: every release converts the game again.
+pub fn imported(dir: &Path, version: &str) -> Imported {
+    if !dir.join("ships").is_dir() {
+        return Imported::Missing;
+    }
+    let stamp: serde_json::Value = std::fs::read_to_string(dir.join(STAMP)).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
+    let found = stamp["version"].as_str().map(String::from);
+    if found.as_deref() == Some(version) {
+        return Imported::Ready;
+    }
+    Imported::Outdated { version: found, game: stamp["game"].as_str().map(PathBuf::from) }
+}
+
+pub fn write_stamp(dir: &Path, version: &str, game: &Path) -> std::io::Result<()> {
+    let stamp = serde_json::json!({ "version": version, "game": game.display().to_string() });
+    std::fs::write(dir.join(STAMP), format!("{stamp:#}\n"))
+}
+
+/// The folder a player's import is written to before it replaces `out`, so a failed or cancelled import keeps the old one.
+pub fn staging(out: &Path) -> PathBuf {
+    out.with_file_name(format!("{}.importing", out.file_name().map_or("assets".into(), |n| n.to_string_lossy())))
+}
+
+/// Puts the finished import `staged` in place of `out` (the old folder is removed only once the new one is in place).
+pub fn swap_in(staged: &Path, out: &Path) -> std::io::Result<()> {
+    let old = out.with_file_name(format!("{}.replaced", out.file_name().map_or("assets".into(), |n| n.to_string_lossy())));
+    if old.exists() {
+        std::fs::remove_dir_all(&old)?;
+    }
+    if out.exists() {
+        retry(|| std::fs::rename(out, &old))?;
+    }
+    if let Err(err) = retry(|| std::fs::rename(staged, out)) {
+        let _ = std::fs::rename(&old, out);
+        return Err(err);
+    }
+    let _ = std::fs::remove_dir_all(&old);
+    Ok(())
+}
+
+/// Windows refuses to rename a folder while a virus scanner or the indexer briefly holds a file in it.
+fn retry(mut f: impl FnMut() -> std::io::Result<()>) -> std::io::Result<()> {
+    let mut tries = 0;
+    loop {
+        match f() {
+            Err(_) if tries < 20 => {
+                tries += 1;
+                std::thread::sleep(std::time::Duration::from_millis(250));
+            }
+            done => return done,
+        }
+    }
 }
 
 /// The setup screen's input and importer polling; views draw after it.
@@ -44,8 +117,10 @@ pub enum SetupAction {
     Pick(usize),
     Paste,
     Import,
-    /// Back to the folder field after a failure.
+    /// Back to the folder field after a failure or crash.
     Change,
+    /// Show the crash report in the system's text viewer.
+    OpenLog,
     Quit,
 }
 
@@ -70,6 +145,12 @@ pub struct Setup {
     pub log: Vec<String>,
     /// Which importer runs (frozen next to the game, or Python from the checkout).
     pub importer: String,
+    /// Why the screen opened when there are assets already (an older import); shown above the folder field.
+    pub reason: Option<String>,
+    /// A player's folder: the import goes to `staging(out)` and replaces `out` only when it succeeded.
+    pub staged: bool,
+    /// The install being imported (recorded in the stamp).
+    from: Option<PathBuf>,
     tx: mpsc::Sender<Msg>,
     rx: Mutex<mpsc::Receiver<Msg>>,
     child: Option<Arc<Mutex<Child>>>,
@@ -80,7 +161,42 @@ impl Setup {
         let found = find_installs();
         let path = path.or_else(|| found.first().map(|p| p.display().to_string())).unwrap_or_default();
         let (tx, rx) = mpsc::channel();
-        Setup { check: check_install(&path), path, found, out, phase: Phase::Choose, log: vec![], importer: String::new(), tx, rx: Mutex::new(rx), child: None }
+        Setup {
+            check: check_install(&path),
+            path,
+            found,
+            out,
+            phase: Phase::Choose,
+            log: vec![],
+            importer: String::new(),
+            reason: None,
+            staged: false,
+            from: None,
+            tx,
+            rx: Mutex::new(rx),
+            child: None,
+        }
+    }
+
+    /// Where this import writes.
+    fn target(&self) -> PathBuf {
+        if self.staged { staging(&self.out) } else { self.out.clone() }
+    }
+
+    /// After the importer exited cleanly: stamp the import and, for a player's folder, put it in place of the old one.
+    fn finish(&self) -> Result<(), String> {
+        let target = self.target();
+        if !target.join("ships").is_dir() {
+            return Err(format!("The importer finished but wrote no ships/ to {}.", target.display()));
+        }
+        write_stamp(&target, env!("CARGO_PKG_VERSION"), self.from.as_deref().unwrap_or(Path::new("")))
+            .map_err(|err| format!("Could not write {} ({err}).", target.join(STAMP).display()))?;
+        if self.staged {
+            swap_in(&target, &self.out).map_err(|err| {
+                format!("The import finished in {}, but it could not replace {} ({err}). Close other programs using that folder and retry.", target.display(), self.out.display())
+            })?;
+        }
+        Ok(())
     }
 
     pub fn set_path(&mut self, path: String) {
@@ -95,10 +211,20 @@ impl Setup {
             return;
         }
         self.log.clear();
-        match spawn_import(&game, &self.out, self.tx.clone()) {
+        let target = self.target();
+        if self.staged
+            && target.exists()
+            && let Err(err) = std::fs::remove_dir_all(&target)
+        {
+            // A stopped earlier import; it never replaced the assets in use.
+            self.phase = Phase::Failed { step: None, reason: format!("Could not clear the unfinished import in {} ({err}).", target.display()) };
+            return;
+        }
+        match spawn_import(&game, &target, self.tx.clone()) {
             Ok((label, child)) => {
                 self.importer = label;
                 self.child = Some(child);
+                self.from = Some(game);
                 self.phase = Phase::Importing { step: 0, total: 0, name: "starting the importer".into(), percent: None };
             }
             Err(reason) => self.phase = Phase::Failed { step: None, reason },
@@ -132,8 +258,10 @@ impl Setup {
                         _ => None,
                     };
                     self.phase = match result {
-                        Ok(()) if self.out.join("ships").is_dir() => Phase::Starting,
-                        Ok(()) => Phase::Failed { step: last, reason: format!("The importer finished but wrote no ships/ to {}.", self.out.display()) },
+                        Ok(()) => match self.finish() {
+                            Ok(()) => Phase::Starting,
+                            Err(reason) => Phase::Failed { step: last, reason },
+                        },
                         Err(reason) => Phase::Failed { step: self.log.iter().rev().find_map(|l| failed_step(l)).or(last), reason },
                     };
                 }
@@ -462,6 +590,20 @@ fn spawn_import(game: &Path, out: &Path, tx: mpsc::Sender<Msg>) -> Result<(Strin
     Err(format!("Could not start the importer. The download has openprocyon-import next to the game; from source, Python 3 with requirements.txt is needed.\n{}", tried.join("\n")))
 }
 
+/// Opens a file with the system's default program (the crash report in a text viewer).
+fn open_file(path: &Path) {
+    let opener = if cfg!(windows) {
+        Command::new("explorer").arg(path).spawn()
+    } else if cfg!(target_os = "macos") {
+        Command::new("open").arg(path).spawn()
+    } else {
+        Command::new("xdg-open").arg(path).spawn()
+    };
+    if let Err(err) = opener {
+        error!("could not open {} ({err})", path.display());
+    }
+}
+
 /// Reads the clipboard as text with the system's own tool (no clipboard crate), off the main thread.
 fn paste(tx: mpsc::Sender<Msg>) {
     std::thread::spawn(move || {
@@ -497,6 +639,11 @@ fn buttons(q: Query<(&Interaction, &SetupAction), Changed<Interaction>>, mut set
             SetupAction::Paste => paste(setup.tx.clone()),
             SetupAction::Import => setup.start(),
             SetupAction::Change => setup.phase = Phase::Choose,
+            SetupAction::OpenLog => {
+                if let Phase::Crashed { log, .. } = &setup.phase {
+                    open_file(log);
+                }
+            }
             SetupAction::Quit => {
                 exit.write(AppExit::Success);
             }
@@ -575,13 +722,13 @@ fn relaunch(setup: Res<Setup>, mut exit: MessageWriter<AppExit>, mut done: Local
     exit.write(AppExit::Success);
 }
 
-/// The command line for the game: without the setup screen's own `--import` and `--setup-shot <path>`.
+/// The command line for the game: without the setup screen's own `--import`, `--setup-shot <path>` and `--crashed <log>`.
 fn game_args(mut args: impl Iterator<Item = String>) -> Vec<String> {
     let mut out = vec![];
     while let Some(a) = args.next() {
         match a.as_str() {
             "--import" => {}
-            "--setup-shot" => {
+            "--setup-shot" | "--crashed" => {
                 args.next();
             }
             _ => out.push(a),
@@ -606,16 +753,78 @@ fn shot(mut commands: Commands, mut frame: Local<u32>, mut exit: MessageWriter<A
     }
 }
 
+/// For a player's game: a panic writes `dir/crash.log` and opens the crash screen (this app with `--crashed`) in a new process, so
+/// the error is seen instead of the window just closing. Only the game installs it, never the setup app, so it cannot loop.
+pub fn report_crashes(dir: PathBuf) {
+    let default = std::panic::take_hook();
+    let reported = std::sync::atomic::AtomicBool::new(false);
+    std::panic::set_hook(Box::new(move |info| {
+        default(info);
+        if reported.swap(true, std::sync::atomic::Ordering::SeqCst) {
+            return; // one report: the first panic, not the threads that fail after it
+        }
+        let log = dir.join("crash.log");
+        if std::fs::write(&log, crash_report(info, &std::backtrace::Backtrace::force_capture().to_string())).is_err() {
+            return;
+        }
+        let args = game_args(std::env::args().skip(1));
+        if let Ok(binary) = std::env::current_exe() {
+            let _ = Command::new(binary).args(args).arg("--crashed").arg(&log).spawn();
+        }
+    }));
+}
+
+fn crash_report(info: &std::panic::PanicHookInfo, backtrace: &str) -> String {
+    let message = info.payload().downcast_ref::<&str>().map(|s| s.to_string()).or_else(|| info.payload().downcast_ref::<String>().cloned()).unwrap_or_default();
+    let place = info.location().map_or(String::new(), |l| format!("{}:{}", l.file(), l.line()));
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    format!(
+        "OpenProcyon {} crashed. Please attach this file when you report the problem.\nmessage: {}\nat: {place}\nsystem: {} {}\narguments: {}\n\n{backtrace}\n",
+        env!("CARGO_PKG_VERSION"),
+        message.replace('\n', " "),
+        std::env::consts::OS,
+        std::env::consts::ARCH,
+        args.join(" ")
+    )
+}
+
+/// Why an older import has to be converted again, for the screen.
+fn outdated_reason(version: Option<&str>) -> String {
+    let now = env!("CARGO_PKG_VERSION");
+    let by = version.map_or("an older version of OpenProcyon".to_owned(), |v| format!("OpenProcyon {v}"));
+    format!("Your game was converted by {by}. OpenProcyon {now} needs it converted again: click Import (a few minutes). Only the converted files are replaced.")
+}
+
+/// The crash screen's message: the report's panic line (`message` in `crash::report`).
+fn crash_message(log: &Path) -> String {
+    let text = std::fs::read_to_string(log).unwrap_or_default();
+    text.lines().find_map(|l| l.strip_prefix("message: ")).unwrap_or("unknown error").to_owned()
+}
+
 /// The setup app: `out` is the folder the game reads its assets from, `fonts` the `content/` folder (the screen's only art),
-/// `view` draws it. `--game DIR` fills the folder field; `--import` also starts importing it.
-pub fn run(out: PathBuf, fonts: PathBuf, view: fn(&mut App)) {
+/// `view` draws it. `status` says why it opened; `staged` (a player's folder) imports beside `out` and swaps it in on success.
+/// `--game DIR` fills the folder field (else the install the old import came from, else a detected one); `--import` also starts
+/// importing it; `--crashed LOG` opens the crash screen for the game's report.
+pub fn run(out: PathBuf, fonts: PathBuf, view: fn(&mut App), status: Imported, staged: bool) {
     let args: Vec<String> = std::env::args().collect();
-    let game = args.iter().position(|a| a == "--game").and_then(|i| args.get(i + 1)).cloned();
-    let mut setup = Setup::new(out, game);
-    if args.iter().any(|a| a == "--import") {
+    let arg = |k: &str| args.iter().position(|a| a == k).and_then(|i| args.get(i + 1)).cloned();
+    let previous = match &status {
+        Imported::Outdated { game: Some(game), .. } if is_install(game) => Some(game.display().to_string()),
+        _ => None,
+    };
+    let mut setup = Setup::new(out, arg("--game").or(previous));
+    setup.staged = staged;
+    if let Imported::Outdated { version, .. } = &status {
+        setup.reason = Some(outdated_reason(version.as_deref()));
+    }
+    let crashed = arg("--crashed").map(PathBuf::from);
+    if let Some(log) = crashed.clone() {
+        setup.phase = Phase::Crashed { message: crash_message(&log), log };
+    } else if args.iter().any(|a| a == "--import") {
         setup.start();
     }
-    let window = Window { title: "OpenProcyon: import your game".into(), ..default() };
+    let title = if crashed.is_some() { "OpenProcyon: something went wrong" } else { "OpenProcyon: import your game" };
+    let window = Window { title: title.into(), ..default() };
     App::new()
         .add_plugins(
             DefaultPlugins.set(AssetPlugin { file_path: fonts.to_string_lossy().into_owned(), ..default() }).set(WindowPlugin { primary_window: Some(window), ..default() }),
@@ -738,8 +947,87 @@ mod tests {
 
     #[test]
     fn the_game_gets_the_command_line_without_setup_flags() {
-        let args = ["--game", "D:/x", "--import", "--setup-shot", "a.png", "--menu", "--shot", "b.png"].map(String::from);
+        let args = ["--game", "D:/x", "--import", "--setup-shot", "a.png", "--menu", "--crashed", "c.log", "--shot", "b.png"].map(String::from);
         assert_eq!(game_args(args.into_iter()), ["--game", "D:/x", "--menu", "--shot", "b.png"]);
+    }
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("procyon-setup-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn a_players_import_must_come_from_this_version() {
+        let dir = scratch("stamp");
+        let assets = dir.join("assets");
+        assert_eq!(imported(&assets, "0.1.4"), Imported::Missing);
+        std::fs::create_dir_all(assets.join("ships")).unwrap();
+        assert_eq!(imported(&assets, "0.1.4"), Imported::Outdated { version: None, game: None }, "imports from before the stamp");
+        write_stamp(&assets, "0.1.3", Path::new("D:/Games/TP")).unwrap();
+        assert_eq!(imported(&assets, "0.1.4"), Imported::Outdated { version: Some("0.1.3".into()), game: Some(PathBuf::from("D:/Games/TP")) });
+        write_stamp(&assets, "0.1.4", Path::new("D:/Games/TP")).unwrap();
+        assert_eq!(imported(&assets, "0.1.4"), Imported::Ready);
+        std::fs::write(assets.join(STAMP), "not json").unwrap();
+        assert!(matches!(imported(&assets, "0.1.4"), Imported::Outdated { version: None, .. }));
+        assert!(outdated_reason(Some("0.1.3")).contains("OpenProcyon 0.1.3"));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_finished_import_replaces_the_old_folder_whole() {
+        let dir = scratch("swap");
+        let (out, staged) = (dir.join("assets"), dir.join("assets.importing"));
+        assert_eq!(staging(&out), staged);
+        std::fs::create_dir_all(out.join("ships")).unwrap();
+        std::fs::write(out.join("ships/leftover.json"), "old").unwrap();
+        std::fs::create_dir_all(staged.join("ships")).unwrap();
+        std::fs::write(staged.join("ships/new.json"), "new").unwrap();
+        swap_in(&staged, &out).unwrap();
+        assert!(out.join("ships/new.json").is_file() && !out.join("ships/leftover.json").exists(), "no files left from the old import");
+        assert!(!staged.exists() && !dir.join("assets.replaced").exists());
+        // First import: nothing to replace.
+        std::fs::remove_dir_all(&out).unwrap();
+        std::fs::create_dir_all(staged.join("ships")).unwrap();
+        swap_in(&staged, &out).unwrap();
+        assert!(out.join("ships").is_dir());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_staged_import_stamps_and_swaps_only_when_it_succeeds() {
+        let dir = scratch("staged");
+        let out = dir.join("assets");
+        std::fs::create_dir_all(out.join("ships")).unwrap();
+        let mut setup = Setup::new(out.clone(), Some(String::new()));
+        setup.staged = true;
+        setup.from = Some(PathBuf::from("D:/Games/TP"));
+        // The importer failed: the old import stays in use.
+        std::fs::create_dir_all(staging(&out).join("ships")).unwrap();
+        setup.phase = Phase::Importing { step: 3, total: 3, name: "bases".into(), percent: None };
+        setup.tx.send(Msg::Exit(Err("exit 1".into()))).unwrap();
+        setup.poll();
+        assert!(matches!(setup.phase, Phase::Failed { .. }));
+        assert!(out.join("ships").is_dir() && !out.join(STAMP).exists());
+        // It succeeded: the new import, stamped with this version, replaces the old one.
+        setup.phase = Phase::Importing { step: 3, total: 3, name: "bases".into(), percent: None };
+        setup.tx.send(Msg::Exit(Ok(()))).unwrap();
+        setup.poll();
+        assert_eq!(setup.phase, Phase::Starting);
+        assert_eq!(imported(&out, env!("CARGO_PKG_VERSION")), Imported::Ready);
+        assert!(!staging(&out).exists());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn the_crash_screen_shows_the_reports_message() {
+        let dir = scratch("crash");
+        let log = dir.join("crash.log");
+        std::fs::write(&log, "OpenProcyon 0.1.4 crashed.\nmessage: missing field `point`\nat: src/data/ships.rs:157\n").unwrap();
+        assert_eq!(crash_message(&log), "missing field `point`");
+        assert_eq!(crash_message(&dir.join("missing.log")), "unknown error");
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

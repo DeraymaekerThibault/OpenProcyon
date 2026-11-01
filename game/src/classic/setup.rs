@@ -82,6 +82,9 @@ fn build(mut commands: Commands, setup: Res<Setup>, assets: Res<AssetServer>, ro
     };
     commands.spawn((Root, screen)).with_children(|s| {
         s.spawn((panel, BackgroundColor(PANEL), BorderColor::all(EDGE))).with_children(|p| {
+            if let Phase::Crashed { message, log } = &setup.phase {
+                return crashed(p, &fonts, message, log);
+            }
             p.spawn(label(&fonts, "Import your game", 34.0, GOLD, true));
             p.spawn(label(
                 &fonts,
@@ -101,12 +104,16 @@ fn build(mut commands: Commands, setup: Res<Setup>, assets: Res<AssetServer>, ro
                 Phase::Starting => {
                     p.spawn(label(&fonts, "Import complete. Starting the game...", 20.0, GOOD, true));
                 }
+                Phase::Crashed { .. } => {}
             }
         });
     });
 }
 
 fn choose(p: &mut ChildSpawnerCommands, fonts: &Fonts, setup: &Setup) {
+    if let Some(reason) = &setup.reason {
+        p.spawn(label(fonts, reason, 16.0, GOLD, false));
+    }
     if setup.found.is_empty() {
         p.spawn(label(fonts, "No install found on this computer (Steam or disc). Type or paste the game folder below, or drop it on this window.", 15.0, DIM, false));
     } else {
@@ -196,6 +203,27 @@ fn failed(p: &mut ChildSpawnerCommands, fonts: &Fonts, setup: &Setup, step: Opti
         r.spawn(row(10.0)).with_children(|r| {
             button(r, fonts, "Change folder", SetupAction::Change, true);
             button(r, fonts, "Retry", SetupAction::Import, setup.check.is_ok());
+        });
+    });
+}
+
+fn crashed(p: &mut ChildSpawnerCommands, fonts: &Fonts, message: &str, report: &std::path::Path) {
+    p.spawn(label(fonts, "OpenProcyon stopped because of an error", 30.0, BAD, true));
+    p.spawn(label(
+        fonts,
+        "If you updated OpenProcyon or changed mods, converting your game again usually fixes this. If it keeps happening, please \
+         report it on the issue tracker and attach the error report.",
+        16.0,
+        INK,
+        false,
+    ));
+    log(p, fonts, &[message.to_owned()], INK);
+    p.spawn(label(fonts, format!("Error report: {}", report.display()), 13.0, DIM, false));
+    p.spawn(Node { justify_content: JustifyContent::SpaceBetween, margin: UiRect::top(Val::Px(8.0)), ..row(10.0) }).with_children(|r| {
+        button(r, fonts, "Quit", SetupAction::Quit, true);
+        r.spawn(row(10.0)).with_children(|r| {
+            button(r, fonts, "Open the error report", SetupAction::OpenLog, true);
+            button(r, fonts, "Convert my game again", SetupAction::Change, true);
         });
     });
 }
