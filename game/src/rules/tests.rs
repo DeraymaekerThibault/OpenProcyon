@@ -921,4 +921,11 @@ fn team_objectives_resolve_to_a_point_and_a_task_text() {
     let (position, text) = sc.team_objective("PIRATES").unwrap();
     assert!(position.is_none(), "no objective point, no ring");
     assert_eq!(text.as_deref(), Some("Survive"));
+    // A later setup keeps older tasks active, leaves the point on an unknown name and clears it for NO OBJECTIVE POINT.
+    sc.act(&serde_json::json!({"Type": "Setup Team Objective", "Team Name": "NAVY", "Objective Point": "nowhere", "Objective Task": "pirate obj"}), &w, &mut out, "setup");
+    let (position, text) = sc.team_objective("NAVY").unwrap();
+    assert_eq!(position.unwrap()[0].as_f64(), Some(1.0));
+    assert_eq!(text.as_deref(), Some("Destroy Enemy Base.\nSurvive"));
+    sc.act(&serde_json::json!({"Type": "Setup Team Objective", "Team Name": "NAVY", "Objective Point": "NO OBJECTIVE POINT", "Objective Task": "navy obj"}), &w, &mut out, "setup");
+    assert!(sc.team_objective("NAVY").unwrap().0.is_none());
 }

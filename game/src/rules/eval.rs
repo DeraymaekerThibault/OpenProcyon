@@ -191,8 +191,10 @@ pub struct Script {
     /// Star map switches set by rules: the current objective point's visibility (PROVISIONAL default shown) and per-name map text visibility.
     pub point_on_map: bool,
     pub map_text: HashMap<String, bool>,
-    /// Skirmish `Setup Team Objective`: team name id -> (objective point name, task name).
-    pub(super) team_objectives: HashMap<String, (String, String)>,
+    /// Skirmish `Setup Team Objective`: team name id -> (current objective point name, active task names). A setup activates its task
+    /// (older ones stay active), sets the point when the name exists in the map and clears it for "NO OBJECTIVE POINT"; any other
+    /// unknown name leaves the point as it was (decoded).
+    pub(super) team_objectives: HashMap<String, (String, Vec<String>)>,
     pub(super) hold_fire: HashSet<String>,
     pub(super) hostile: HashSet<(String, String)>,
     pub(super) player: String,
@@ -610,9 +612,10 @@ impl Script {
     /// A skirmish team's objective as the star map shows it: the objective point's game position (none for 'NO OBJECTIVE POINT') and
     /// the task's text.
     pub fn team_objective(&self, team: &str) -> Option<(Option<Value>, Option<String>)> {
-        let (point, task) = self.team_objectives.get(team)?;
+        let (point, tasks) = self.team_objectives.get(team)?;
         let position = self.points.as_array().and_then(|p| p.iter().find(|x| x["Name"] == point.as_str())).map(|x| x["Position"].clone());
-        let text = self.tasks.iter().find(|t| &t.name == task).map(|t| t.text.clone()).filter(|t| !t.is_empty());
+        let texts: Vec<&str> = tasks.iter().filter_map(|n| self.tasks.iter().find(|t| &t.name == n)).map(|t| t.text.as_str()).filter(|t| !t.is_empty()).collect();
+        let text = (!texts.is_empty()).then(|| texts.join("\n"));
         Some((position, text))
     }
     /// The skirmish team (name id) `player` plays for.
@@ -1185,9 +1188,19 @@ impl Script {
             "Dragon - Set AI Stance" => out.push(Fx::DragonStance(g("Group/Unit Name"), Stance::parse(s(a, "AI Stance")))),
             "Dragon - Set Damage Threshold" => out.push(Fx::DragonThreshold(g("Group Name"), f(a, "Damage Threshold"))),
             "Grant Team X Points" => *self.team_points.entry(s(a, "Team Name").into()).or_default() += f(a, "Points") as i32,
-            // Skirmish only: the winner is decided by victory.rs from the map's end rules; objective markers are not shown yet.
+            // Skirmish only: the winner is decided by victory.rs from the map's end rules; the objective point and task texts are shown by the star map and the ship ring.
             "Setup Team Objective" => {
-                self.team_objectives.insert(s(a, "Team Name").into(), (s(a, "Objective Point").into(), s(a, "Objective Task").into()));
+                let (point, task) = (s(a, "Objective Point"), s(a, "Objective Task"));
+                let known = self.points.as_array().is_some_and(|p| p.iter().any(|x| x["Name"] == point));
+                let entry = self.team_objectives.entry(s(a, "Team Name").into()).or_default();
+                if known {
+                    entry.0 = point.into();
+                } else if point == "NO OBJECTIVE POINT" {
+                    entry.0.clear();
+                }
+                if !task.is_empty() && !entry.1.iter().any(|t| t == task) {
+                    entry.1.push(task.into());
+                }
             }
             "Team X Wins" | "Remaining Team Wins" => {}
             "Reset Shots Fired Count" => {
