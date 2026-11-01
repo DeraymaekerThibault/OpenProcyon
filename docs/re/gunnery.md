@@ -59,16 +59,18 @@ ballistic arc and attributed to the ship it started from.
   DuringBurstReloadTime.
 
 ## Gunners
-- On the player's crewed ships each gun waits **TimeBetweenBursts - 10 x its gunner's Gunnery** (Gunnery 0-10 read as 0..1,
-  so a gunnery-7 gunner takes 7 s off), never below 0, before its next burst. The in-burst spacing is unchanged, and other
-  per-gun modifiers multiply the wait (1 normally). Computer ships ignore crew here: they fire every TimeBetweenBursts.
-- Measured on the original (headless 1-vs-1 skirmish, Navy Man-O-War with nine gunners of Gunnery 7-9 vs a Galleon, the
-  Galleon's section HP at 20 Hz): one gun's hits arrived every 3.5-3.9 s for 90 s, against at least ~13 s between heavy
-  hits with the default crew. 12 s - 8.5 = 3.5 s fits a heavy cannon with a gunnery-8.5 gunner.
-- Each gun reads the gunner of its own bank, not a ship-wide average (owner-confirmed; the crew screen's gunner slots sit at the
-  selectable banks, in the same order). PROVISIONAL: the point-defence banks have no visible slot and count as a generic hand
-  (0.1); which slot a gun reads was inferred from the screen, not decoded. The ship's leadership bonus ([crew.md](crew.md)) adds to the
-  gunner's skill before the 1 - 0.8 x skill factor.
+- **Only torpedo launchers** (the gun flag `Is TorpedoLauncher Gun`; in retail data only `Gun_Torpedo`, TimeBetweenBursts 35) have their wait
+  shortened by crew (decoded from the original's logic): wait = max(0, TimeBetweenBursts - 10 x the raw Gunnery (0..1) of the gunner at the
+  gun's bank), with no leadership bonus, no difficulty term and no human/computer distinction (a computer torpedo ship uses its own generic
+  crew's gunnery; PROVISIONAL, remake: computer ships fire at the authored time). Every other gun (cannons, carronades, Gattlings, lancers,
+  mortars, mines, point defence) reloads at its authored TimeBetweenBursts whoever mans it. The in-burst spacing never changes. The wait is
+  compared against the current skill at every readiness check, so a crew change takes effect at once (remake: latched when the burst starts).
+- Earlier measurement (Navy Man-O-War, nine gunners of 7-9, one gun's hits every 3.5-3.9 s) was read as a cannon crew effect; it more likely
+  was several heavy guns hitting in turn, since the schooner's medium-cannon spacing shows no crew effect. Retail check still open: a torpedo
+  ship with gunnery 0 vs 9 should show about 35 s vs about 26 s between torpedoes; a cannon ship no difference.
+- Each gun reads the gunner of its own bank (bank index, shared by the bank's guns); the remake's slots follow the weapon banks including
+  fixed ones. PROVISIONAL: the original may also count point-defence banks in that index. The ship's leadership bonus ([crew.md](crew.md))
+  applies to accuracy only, not to reload.
 
 ## Lob shells
 Measured on the running original game (2026-10): a Navy Man-O-War's bow Star Mortar fired at open etherium in a

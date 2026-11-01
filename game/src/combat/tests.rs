@@ -1313,3 +1313,11 @@ fn a_lost_section_plays_the_med_explosion_once_and_no_damage_file() {
     let names: Vec<String> = app.world_mut().resource_mut::<Messages<crate::audio::Sfx>>().drain().map(|s| s.name).collect();
     assert_eq!(names, ["Explosion_Med01"], "one Med file for the lost section, no Damage_ file: {names:?}");
 }
+
+#[test]
+#[ignore = "needs imported assets"]
+fn only_the_torpedo_launcher_has_a_crew_shortened_reload() {
+    let lib = Library::load(assets_dir());
+    let flagged: Vec<&str> = lib.guns.iter().filter(|(_, g)| g.torpedo_launcher).map(|(n, _)| n.as_str()).collect();
+    assert_eq!(flagged, ["Gun_Torpedo"]);
+}

@@ -39,6 +39,7 @@ GUN_KEYS = (
     "EffectiveRange_AccuracyDeviation",
     "BulletTypeName_Primary",
     "Is PointDefense Gun",
+    "Is TorpedoLauncher Gun",
 )
 GUN_SOUND_KEYS = (
     "SoundName",
