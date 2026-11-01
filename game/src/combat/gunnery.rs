@@ -722,7 +722,7 @@ pub(super) fn gunner_reload_cut(ship: &Ship, posts: Option<&crate::crew_arms::Cr
     }
     let gunnery = match posts {
         Some(p) => {
-            let slot = crate::crew_arms::selectable_banks(lib, &lib.classes[ship.class]).iter().position(|(b, _)| *b == bank);
+            let slot = crate::crew_arms::weapon_banks(lib, &lib.classes[ship.class]).iter().position(|(b, _)| *b == bank);
             p.gunner_skill(slot)
         }
         None => points.and_then(|p| crate::crew_arms::best(p, "gunnery")).unwrap_or(0.1),

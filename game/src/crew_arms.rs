@@ -426,7 +426,13 @@ fn gun_label(gun: &str) -> String {
     gun.trim_start_matches("Gun_").replace('_', " ")
 }
 
-/// The weapon banks the Arms screen shows: those whose mounts are selectable (the retail screen hides 'Non-Selectable' mounts).
+/// Every weapon bank the Arms screen lists and the gunner slots follow, fixed ones (torpedoes, mines) included so crew can be
+/// assigned to them; point defence has no slot. A fixed bank shows its gun but offers no replacement (`bank_compatible`).
+pub fn weapon_banks(lib: &Library, class: &crate::data::Class) -> Vec<(usize, usize)> {
+    crate::combat::banks(lib, class)
+}
+
+/// The banks whose guns can be swapped: those whose mounts are not 'Non-Selectable'.
 pub fn selectable_banks(lib: &Library, class: &crate::data::Class) -> Vec<(usize, usize)> {
     crate::combat::banks(lib, class)
         .into_iter()
@@ -436,7 +442,7 @@ pub fn selectable_banks(lib: &Library, class: &crate::data::Class) -> Vec<(usize
 
 /// The selectable banks with the gun each carries: the fitted one from `fit`, else the class's own.
 fn equipped_banks(lib: &Library, class: &crate::data::Class, fit: Option<&BTreeMap<usize, String>>) -> Vec<(usize, String)> {
-    selectable_banks(lib, class).into_iter().map(|(bank, first)| (bank, fit.and_then(|f| f.get(&bank)).unwrap_or(&class.mounts[first].gun).clone())).collect()
+    weapon_banks(lib, class).into_iter().map(|(bank, first)| (bank, fit.and_then(|f| f.get(&bank)).unwrap_or(&class.mounts[first].gun).clone())).collect()
 }
 
 #[derive(Resource, Default, Clone, PartialEq)]
@@ -593,7 +599,7 @@ fn screen(
                 Ok(())
             }
             Action::Post(d) => {
-                let len = fleet.get(choice.ship).map_or(0, |(_, s, _, _)| if choice.arms { selectable_banks(&lib, &lib.classes[s.class]).len() } else { ROLES.len() });
+                let len = fleet.get(choice.ship).map_or(0, |(_, s, _, _)| if choice.arms { weapon_banks(&lib, &lib.classes[s.class]).len() } else { ROLES.len() });
                 choice.post = cycle(choice.post, d, len);
                 choice.page = 0;
                 Ok(())
@@ -624,7 +630,7 @@ fn screen(
                             }
                             Ok(())
                         }
-                        Action::Upgrade(gun) => selectable_banks(&lib, class)
+                        Action::Upgrade(gun) => weapon_banks(&lib, class)
                             .get(choice.post)
                             .ok_or_else(|| "No weapon bank.".into())
                             .and_then(|(bank, _)| upgrade(&mut points, &lib, class, &key, *bank, &gun)),
@@ -676,7 +682,7 @@ fn campaign_screen_model(
         let fit = points.outfit.ships.get(&key);
         let mut rows = vec![];
         if choice.arms {
-            let banks = selectable_banks(lib, class);
+            let banks = weapon_banks(lib, class);
             choice.post = choice.post.min(banks.len().saturating_sub(1));
             if let Some((bank, first)) = banks.get(choice.post) {
                 let equipped = fit.and_then(|s| s.banks.get(bank)).unwrap_or(&class.mounts[*first].gun);
@@ -888,7 +894,7 @@ fn skirmish_screen(
                 (choice.post, choice.page) = (0, 0);
             }
             Action::Post(d) => {
-                let len = slot.fleet.get(choice.ship).map_or(0, |n| selectable_banks(&lib, &lib.classes[lib.index(n)]).len());
+                let len = slot.fleet.get(choice.ship).map_or(0, |n| weapon_banks(&lib, &lib.classes[lib.index(n)]).len());
                 choice.post = cycle(choice.post, d, len);
                 choice.page = 0;
             }
@@ -960,7 +966,7 @@ fn skirmish_screen(
                     // Fitting a weapon on a mount of the Arms tab.
                     Some(Carry::Gun(gun)) if choice.arms => {
                         choice.post = i;
-                        choice.message = match selectable_banks(&lib, class).get(i) {
+                        choice.message = match weapon_banks(&lib, class).get(i) {
                             None => said("IDGS_TPFRONTENDTEXT02_WEAPON_WRONG_MOUNT"),
                             Some((bank, _)) if !bank_compatible(&lib, class, *bank, &gun) => said("IDGS_TPFRONTENDTEXT02_WEAPON_WRONG_MOUNT"),
                             Some((bank, first)) => {
@@ -1307,6 +1313,18 @@ mod tests {
         assert_eq!(Outfit::from_json(&p.outfit.to_json()), p.outfit);
         assert_eq!(CrewPosts(p.outfit.ships["B"].crew.clone()).skill(4, "engineering"), Some(0.5));
     }
+    #[test]
+    #[ignore = "needs imported assets"]
+    fn fixed_banks_are_listed_for_crew_but_cannot_be_swapped() {
+        let lib = Library::load(crate::assets_dir());
+        let class = &lib.classes[lib.index("Ship_Navy_Torpedo")];
+        let all = weapon_banks(&lib, class);
+        let swappable = selectable_banks(&lib, class);
+        assert!(all.len() > swappable.len(), "the torpedo tubes are listed too");
+        let (bank, first) = *all.iter().find(|b| !swappable.contains(b)).unwrap();
+        assert!(!weapon_rows(&lib, class, bank, &class.mounts[first].gun, &[], true).iter().any(|_| true), "nothing replaces a fixed bank");
+    }
+
     #[test]
     #[ignore = "needs imported assets"]
     fn bank_purchase_is_atomic_and_matches_mount_types_not_weapon_families() {
