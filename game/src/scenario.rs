@@ -51,6 +51,11 @@ pub struct Group {
     pub crew: Vec<[Vec<String>; 8]>,
 }
 
+/// The colour of the map player that owns a ship (`players[].color` of the map): its name banner is tinted with it, and the
+/// roster lists the player's name in it.
+#[derive(Component, Clone, Copy)]
+pub struct PlayerColor(pub Color);
+
 /// A skirmish ship's map identity for the end rules: the world-object id the map gave it (historical maps) and the side it started on.
 #[derive(Component, Clone, Copy)]
 pub struct MapObject {
@@ -463,6 +468,10 @@ pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Libra
                 let e = spawn_ship(commands, assets, lib, fxl, name, g.side, pos, heading, label.clone().or_else(|| namer.pick(lib, name)));
                 let id = g.ids.get(i).copied().flatten();
                 commands.entity(e).insert((ship::FleetMember(owner.clone(), i), MapObject { id, start: g.side }));
+                if let Some(c) = p["color"].as_array().filter(|c| c.len() >= 3) {
+                    let k = |i: usize| c[i].as_f64().unwrap_or(0.0) as f32;
+                    commands.entity(e).insert(PlayerColor(Color::srgb(k(0), k(1), k(2))));
+                }
                 if let Some(names) = &script_names {
                     commands.entity(e).insert(campaign::MissionShip {
                         id: id.unwrap_or(-1),
