@@ -365,6 +365,12 @@ def main(root, out):
         del m["ship_names"], m["primaries"]
         for o in m["objects"]:
             o["scene"] = mesh_scene(root, o["type"])
+        # Pre-placed mines (a Bullet_ object the map's script hands to a player) are listed apart from the scenery.
+        m["mines"] = [
+            dict(type=o["type"], id=o["id"], pos=o["pos"])
+            for o in m["objects"]
+            if o["type"].startswith("Bullet_StarMine")
+        ]
         # Scenery only (incl. black holes): ships, bullets (mines), animals and nebulae are not static meshes.
         m["objects"] = [
             o

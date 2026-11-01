@@ -540,6 +540,11 @@ pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Libra
             Some(s) => commands.insert_resource(s),
             None => commands.remove_resource::<crate::rules::skirmish::SkirmishScript>(),
         }
+        // Mines the map placed (Border Dispute, Red Rover): the script gives each field to a player.
+        for m in map["mines"].as_array().into_iter().flatten() {
+            let (Some(bullet), Some(id)) = (m["type"].as_str(), m["id"].as_i64()) else { continue };
+            commands.spawn((Scenario, combat::MapMine { id, bullet: bullet.into(), owner: String::new(), side: None }, Transform::from_translation(game_to_bevy(&m["pos"]))));
+        }
         // The map's space whales and dragons (named in its script's environment).
         if let Some(script) = data::try_json(&crate::assets_dir().join(format!("maps/{map_id}/script.json"))) {
             crate::environment::spawn(commands, assets, &script, true);
@@ -718,7 +723,7 @@ fn setup_strengths(script: &serde_json::Value) -> std::collections::HashMap<i64,
 }
 
 /// The side of an armed island: no ship belongs to it, so it fires on all of them.
-const HOSTILE_TO_ALL: Side = Side(u8::MAX);
+pub const HOSTILE_TO_ALL: Side = Side(u8::MAX);
 
 /// Boarding strength of a skirmish base whose map script gives none (the retail strengths are the script's 'Combat Strength'). PROVISIONAL.
 const SKIRMISH_BASE_STRENGTH: i32 = 50;

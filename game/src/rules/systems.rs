@@ -28,7 +28,33 @@ pub enum Ui {
 }
 /// A looping effect created by 'Create/Release Event Effect', keyed by point set + effect name.
 #[derive(Component)]
-struct EventFx(String);
+pub(super) struct EventFx(String);
+
+/// 'Create/Release Event Effect': removes the effect's old copies and, when `on`, plays it at every point of the set.
+pub(super) fn event_effect<'a>(
+    commands: &mut Commands,
+    existing: impl Iterator<Item = (Entity, &'a EventFx)>,
+    lib: Option<&crate::fx::FxLib>,
+    points: &serde_json::Value,
+    set: &str,
+    name: &str,
+    on: bool,
+) {
+    let key = format!("{set}/{name}");
+    for (e, f) in existing {
+        if f.0 == key {
+            commands.entity(e).despawn();
+        }
+    }
+    if let Some(lib) = lib.filter(|_| on) {
+        for p in points[set].as_array().into_iter().flatten() {
+            let at = Transform::from_translation(game_to_bevy(&p["pos"]));
+            if let Some(e) = crate::fx::spawn(commands, lib, name, None, at, at, false) {
+                commands.entity(e).insert((EventFx(key.clone()), Scenario));
+            }
+        }
+    }
+}
 /// Parameters of `update` beyond Bevy's 16-argument limit.
 #[derive(bevy::ecs::system::SystemParam)]
 struct Extra<'w, 's> {
@@ -268,22 +294,7 @@ fn update(
                     }
                 }
             }
-            Fx::Event(set, name, on) => {
-                let key = format!("{set}/{name}");
-                for (e, f) in &extra.event_fx {
-                    if f.0 == key {
-                        commands.entity(e).despawn();
-                    }
-                }
-                if let Some(lib) = extra.fxlib.as_deref().filter(|_| on) {
-                    for p in mission.script.point_sets[set.as_str()].as_array().into_iter().flatten() {
-                        let at = Transform::from_translation(game_to_bevy(&p["pos"]));
-                        if let Some(e) = crate::fx::spawn(&mut commands, lib, &name, None, at, at, false) {
-                            commands.entity(e).insert((EventFx(key.clone()), Scenario));
-                        }
-                    }
-                }
-            }
+            Fx::Event(set, name, on) => event_effect(&mut commands, extra.event_fx.iter(), extra.fxlib.as_deref(), &mission.script.point_sets, &set, &name, on),
             Fx::WeaponBar(open) => {
                 if let Some(t) = extra.toggles.as_mut() {
                     t.weapons = open;

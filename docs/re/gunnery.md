@@ -188,6 +188,13 @@ time of 10 s and a no-laying time of 20 s (retail saves: `LAYMINESMAXTIME` 10, `
   50-unit thresholds, and that the human player's minelayers run it too, are not yet observed in play.
 - Remake: `combat::gunnery::MineLaying`; mine guns never aim at a target.
 
+### Placed minefields
+Border Dispute (186 mines) and Red Rover (135) place `Bullet_StarMine_Med` world objects in the map. The script's `Set Group/Unit Owner` hands each
+field (a group of object ids) to a player; the mines then fight for that player's side with the same homing as a laid mine (sight 50,
+speed 20) and rest where they were put. Until given an owner a mine is hostile to every ship. Remake: `combat::minefield`
+(`maps/<id>/map.json` `mines`). The mine's mesh is the scene's first mesh element (`StarmineV2_Layer1`), now exported so mines are visible.
+PROVISIONAL: whether an unowned mine really is hostile to all (the scripts always assign every field at world start).
+
 ## Shots and land (read from the original's code, 2026-10-31)
 Every projectile (cannon shells, lob shells, harpoons, nets, torpedoes, mines and lancer bolts alike) has each step of its flight
 swept as a 3-D segment against the collision triangles of islands, bases and armed asteroids, so nothing behind the first land it

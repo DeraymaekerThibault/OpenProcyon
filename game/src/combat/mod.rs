@@ -13,6 +13,7 @@ mod damage;
 mod gunnery;
 mod hit_test;
 mod lob;
+mod minefield;
 mod shells;
 mod status;
 #[cfg(test)]
@@ -23,6 +24,7 @@ pub use damage::*;
 pub use gunnery::*;
 pub use hit_test::*;
 pub use lob::{Detonate, Shoot, Strike};
+pub use minefield::MapMine;
 pub use shells::*;
 pub use status::*;
 
@@ -161,7 +163,7 @@ pub fn plugin(app: &mut App) {
         .add_systems(
             FixedUpdate,
             (
-                (fire, base_fire, lob::shoot, shells, lob::detonate, lob::blasts, lob::grav_wells, lob::ram_damage, lob::strikes).chain(),
+                (minefield::arm, fire, base_fire, lob::shoot, shells, lob::detonate, lob::blasts, lob::grav_wells, lob::ram_damage, lob::strikes).chain(),
                 (asteroid_deaths, fires, crew_repair, deaths).chain(),
             )
                 .chain()

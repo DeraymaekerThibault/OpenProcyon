@@ -1,6 +1,6 @@
 //! A skirmish map's own script (`maps/<id>/script.json`): the same interpreter as the campaign, driving the map's convoys, timers and
 //! team points. The end rules stay with victory.rs; only the effects the skirmish maps use are applied here (paths, owners,
-//! visibility, hold, throttle caps, stances, damage, space animals' paths and speed, storm routes).
+//! visibility, hold, throttle caps, placed mines, stances, damage, space animals' paths and speed, storm routes).
 use crate::Nearest;
 use bevy::prelude::*;
 use serde_json::Value;
@@ -57,6 +57,10 @@ fn run(
     mut belts: MessageWriter<crate::combat::AsteroidSetup>,
     rocks: Query<(Entity, &Transform, &crate::combat::Asteroid), (Without<Ship>, Without<crate::environment::SpaceAnimal>)>,
     mut dragons: Query<&mut crate::dragons::Dragon>,
+    mut mines: Query<(Entity, &Transform, &mut crate::combat::MapMine, Option<&mut crate::combat::Shell>)>,
+    mut commands: Commands,
+    fxlib: Option<Res<crate::fx::FxLib>>,
+    event_fx: Query<(Entity, &super::systems::EventFx)>,
 ) {
     let sk = &mut *sk;
     let mut world: Vec<Unit> = ships
@@ -80,6 +84,7 @@ fn run(
     world.extend(animals.iter().map(|(e, a, tf, _)| a.unit(e, tf)));
     // Moving belts: the rocks are units too, tagged with the script's groups by their world-object id.
     world.extend(rocks.iter().map(|(e, tf, a)| a.unit(e, tf)));
+    world.extend(mines.iter().map(|(e, tf, m, _)| m.unit(e, tf)));
     sk.script.tag(&mut world);
     for d in killed.read() {
         if let Some(by) = world.iter().find(|u| u.e == d.by) {
@@ -116,6 +121,14 @@ fn run(
                     if let Ok((_, mut animal, ..)) = animals.get_mut(*e) {
                         animal.owner.clone_from(&owner);
                     }
+                    // A placed mine fights for its new owner's side.
+                    if let Ok((.., mut mine, shell)) = mines.get_mut(*e) {
+                        mine.owner.clone_from(&owner);
+                        mine.side = sk.sides.get(&owner).copied();
+                        if let (Some(mut shell), Some(side)) = (shell, mine.side) {
+                            shell.side = side;
+                        }
+                    }
                     let Ok((_, mut sh, _, _, mut ms, ..)) = ships.get_mut(*e) else { continue };
                     if let Some(side) = sk.sides.get(&owner) {
                         sh.side = *side;
@@ -134,17 +147,45 @@ fn run(
                     *vis = if on { Visibility::Inherited } else { Visibility::Hidden };
                 }
             }
-            Fx::Hold(units, true) => {
+            // 'Hold position' is the captain's lock (the right-click menu's Hold): the ship stays where it is and still fires; releasing
+            // hands it back to its captain or to the next order the script gives.
+            Fx::Hold(units, on) => {
                 for e in &units {
                     let Ok((_, mut sh, ..)) = ships.get_mut(*e) else { continue };
-                    sh.waypoints.clear();
-                    sh.order = 0;
+                    if on {
+                        sh.waypoints.clear();
+                        sh.order = 0;
+                        commands.entity(*e).insert(crate::ship::HoldPosition);
+                    } else {
+                        commands.entity(*e).remove::<crate::ship::HoldPosition>();
+                    }
                 }
             }
             Fx::Throttle(units, cap) => {
                 for e in &units {
                     let Ok((_, mut sh, ..)) = ships.get_mut(*e) else { continue };
                     sh.cap = cap;
+                }
+            }
+            Fx::Event(set, name, on) => super::systems::event_effect(&mut commands, event_fx.iter(), fxlib.as_deref(), &sk.script.point_sets, &set, &name, on),
+            // 'Set Group Throttle Percent': a ship's current speed cap (the human's own ship keeps its throttle); dragons and
+            // animals move at their own rates.
+            Fx::Speed(units, v) => {
+                for e in &units {
+                    let Ok((_, mut sh, .., primary)) = ships.get_mut(*e) else { continue };
+                    if !primary {
+                        sh.cap = v;
+                    }
+                }
+            }
+            Fx::ReturnPoint(units, p) => {
+                for e in &units {
+                    if let Ok(mut d) = dragons.get_mut(*e) {
+                        d.home = Some(p);
+                    }
+                    if let Ok((.., mut ms, _, _)) = ships.get_mut(*e) {
+                        ms.return_point = Some(p);
+                    }
                 }
             }
             Fx::Velocity(units, speed) => {
