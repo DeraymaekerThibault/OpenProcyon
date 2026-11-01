@@ -6,9 +6,9 @@ Layout (own words, read from the retail files; docs/re/effects.md "Animal skelet
 - MDB tail, right after the texture table: the bone table: a count, then per bone a sized record: name (length-prefixed)
   and a 4x4 row-vector matrix, the inverse of the bone's bind pose in model space.
 - MSB scene: the bone hierarchy and rest pose (position, yaw/pitch/roll), and the clips. A node's rotation is
-  Rz(yaw) Rx(pitch) Ry(roll) (fits the 32 dragon bind matrices); clip keys are offsets added to the rest values.
-PROVISIONAL: weights are normalised per vertex (stored values are small and do not sum to one), at most four kept;
-offsets are added to the rest Euler angles; the clip loops.
+  Rz(yaw) Rx(pitch) Ry(roll) (fits the 32 dragon bind matrices); clip keys are offsets added to the rest position and to the
+  rest Euler angles (as the original does).
+PROVISIONAL: weights are normalised per vertex (stored values are small and do not sum to one), at most four kept.
 """
 
 import itertools
@@ -56,19 +56,34 @@ def _quat(m):
 
 
 def _hermite(keys, t):
-    """One channel at time t: keys are [time, value, smoothing, tension, continuity, bias, in tangent, out tangent]."""
+    """One channel at time t: keys are [time, value, smoothing, tension, continuity, bias, in tangent, out tangent]. The segment's
+    first key picks the curve: 0 linear, 1 Hermite with the stored tangents, 2 Kochanek-Bartels from the values (the original's
+    incoming tangent is only the chord: its look-ahead index is clamped wrongly, kept here). Values are held outside the keys."""
     if len(keys) == 1 or t <= keys[0][0]:
         return keys[0][1]
-    for a, b in itertools.pairwise(keys):
+    for k, (a, b) in enumerate(itertools.pairwise(keys)):
         if t <= b[0]:
             u = (t - a[0]) / max(b[0] - a[0], 1e-6)
+            if a[2] == 0:
+                return a[1] + (b[1] - a[1]) * u
             h = (
                 2 * u**3 - 3 * u**2 + 1,
                 u**3 - 2 * u**2 + u,
                 -2 * u**3 + 3 * u**2,
                 u**3 - u**2,
             )
-            return h[0] * a[1] + h[1] * a[7] + h[2] * b[1] + h[3] * b[6]
+            if a[2] == 1:
+                s0, s1 = a[7], b[6]
+            else:
+                p = keys[k - 1] if k > 0 else a
+                t0, c0, b0 = a[3:6]
+                t1, c1, b1 = b[3:6]
+                s0 = (
+                    (1 - t0) * (1 + c0) * (1 + b0) * (a[1] - p[1])
+                    + (1 - t0) * (1 - c0) * (1 - b0) * (b[1] - a[1])
+                ) * ((b[0] - a[0]) / max(b[0] - p[0], 1e-6))
+                s1 = (1 - t1) * (1 - c1) * (1 + b1) * (b[1] - a[1])
+            return h[0] * a[1] + h[1] * s0 + h[2] * b[1] + h[3] * s1
     return keys[-1][1]
 
 

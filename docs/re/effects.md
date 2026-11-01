@@ -231,11 +231,15 @@ hierarchy with a rest position and yaw/pitch/roll per bone; a node's rotation is
 (pitch), then about forward (roll), which reproduces the stored bind matrices exactly for most dragon bones. The scene's rest
 pose differs from the bind pose on the dragon's tail tip and wings (the rest pose is posed). Each animal scene has one clip
 (dragon 1.67 s, a wing beat with tail, neck and leg motion and a 0.7-unit bob of the body); its keys start at zero on every
-channel, so they are offsets from the rest values. Keys are cubic Hermite segments with per-key in/out tangents in value units
-per segment. Remake: `tools/skin.py` bakes the skeleton, weights and clip (sampled at 30 per second) into the animal's GLB;
-the game loops it (`environment::play_clips`). PROVISIONAL: weights are normalised per vertex (stored values are small and do
-not sum to one; most vertices have a single bone), at most four kept; offsets are added to the rest Euler angles; the clip
-loops at its authored speed whatever the animal does; the manta ray is not exported.
+channel, so they are offsets from the rest values: position = rest + offset, and the offset angles are added to the rest yaw,
+pitch and roll before the rotation is rebuilt. A channel's curve is picked by its segment's first key: 0 linear, 1 Hermite with the
+stored tangents, 2 (nearly every key) Kochanek-Bartels from the key values with its tension/continuity/bias (almost always 0; the
+incoming tangent is only the chord, so two-key channels are straight lines). The dragon's clip always loops from a random start
+phase at 0.2 x its speed, held between 0.8 and 1.3; the whale's loops at 1 from a random phase but only while it moves (frozen
+otherwise). Remake: `tools/skin.py` bakes the skeleton, weights and clip (sampled at 30 per second) into the animal's GLB;
+`environment::play_clips` / `clip_rates` play it. PROVISIONAL: weights are normalised per vertex (stored values are small and do
+not sum to one; most vertices have a single bone), at most four kept; the whale's on/off value is read as its speed; the manta ray
+is not exported.
 
 ### Section debris
 A section destroyed mid-fight swaps to its damaged mesh and, when its WOT association names a `debrisMeshScene`, drops that piece

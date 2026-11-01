@@ -196,27 +196,55 @@ fn sensor_smoke(world: &mut World) {
 
 /// The swim or wing-beat clip baked into an animal's model (tools/skin.py, docs/re/effects.md "Animal skeletons").
 #[derive(Component)]
-pub struct Clip(pub Handle<AnimationClip>);
+pub struct Clip {
+    pub clip: Handle<AnimationClip>,
+    /// The entity holding the clip's player and the graph node playing it, once the model has spawned.
+    player: Option<(Entity, AnimationNodeIndex)>,
+}
 impl Clip {
     pub fn load(assets: &AssetServer, file: &str) -> Self {
-        Clip(assets.load(GltfAssetLabel::Animation(0).from_asset(crate::data::model(file))))
+        Clip { clip: assets.load(GltfAssetLabel::Animation(0).from_asset(crate::data::model(file))), player: None }
     }
 }
 
-/// Loops an animal's clip once its model has spawned (the glTF loader puts the player on the skeleton root).
-/// PROVISIONAL: the clip loops at its authored speed whatever the animal does.
+/// Starts an animal's clip once its model has spawned (the glTF loader puts the player on the skeleton root): looped, from a
+/// phase of its own (the original draws a random start in [0, duration)). ponytail: the phase comes from the entity, not a draw.
 fn play_clips(
     mut commands: Commands,
     mut players: Query<(Entity, &mut AnimationPlayer), Added<AnimationPlayer>>,
     parents: Query<&ChildOf>,
-    clips: Query<&Clip>,
+    mut clips: Query<&mut Clip>,
+    assets: Res<Assets<AnimationClip>>,
     mut graphs: ResMut<Assets<AnimationGraph>>,
 ) {
     for (e, mut player) in &mut players {
-        let Some(clip) = parents.iter_ancestors(e).find_map(|a| clips.get(a).ok()) else { continue };
-        let (graph, node) = AnimationGraph::from_clip(clip.0.clone());
-        player.play(node).repeat();
+        let Some(owner) = parents.iter_ancestors(e).find(|a| clips.contains(*a)) else { continue };
+        let mut clip = clips.get_mut(owner).unwrap();
+        let (graph, node) = AnimationGraph::from_clip(clip.clip.clone());
+        let phase = (owner.to_bits().wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 40) as f32 / (1u64 << 24) as f32;
+        let duration = assets.get(&clip.clip).map_or(0.0, |c| c.duration());
+        player.play(node).repeat().seek_to(phase * duration);
         commands.entity(e).insert(AnimationGraphHandle(graphs.add(graph)));
+        clip.player = Some((e, node));
+    }
+}
+
+/// The clip's rate (the original's rules): a dragon beats its wings at 0.2 x its speed, held between 0.8 and 1.3; a whale swims
+/// at 1 while it moves and holds its pose while it does not. PROVISIONAL: the whale's on/off value is read as its speed.
+fn clip_rates(animals: Query<(&Clip, &SpaceAnimal, Has<crate::dragons::Dragon>)>, mut players: Query<&mut AnimationPlayer>) {
+    for (clip, animal, dragon) in &animals {
+        let Some((e, node)) = clip.player else { continue };
+        let Ok(mut player) = players.get_mut(e) else { continue };
+        let Some(active) = player.animation_mut(node) else { continue };
+        let speed = animal.velocity.length();
+        let rate = if dragon {
+            (0.2 * speed).clamp(0.8, 1.3)
+        } else if speed >= 0.01 {
+            1.0
+        } else {
+            0.0
+        };
+        active.set_speed(rate);
     }
 }
 
@@ -322,7 +350,7 @@ pub fn plugin(app: &mut App) {
         .add_systems(FixedUpdate, refresh_sensors.in_set(crate::BattleSet::Sense).run_if(in_state(crate::menu::Screen::Battle)))
         .add_systems(FixedUpdate, update.in_set(crate::BattleSet::Forces).run_if(in_state(crate::menu::Screen::Battle)))
         .add_systems(Update, (current_fx, flow_currents).run_if(in_state(crate::menu::Screen::Battle)))
-        .add_systems(Update, play_clips);
+        .add_systems(Update, (play_clips, clip_rates).chain());
 }
 
 /// `whales_shown`: campaign missions start their whales hidden (the rules show them); skirmish maps' scripts never do.

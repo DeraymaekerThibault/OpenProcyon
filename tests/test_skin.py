@@ -12,8 +12,16 @@ from tools.skin import _hermite, _quat, _rot
 
 
 class Helpers(unittest.TestCase):
-    def test_hermite_passes_through_keys_and_uses_tangents(self):
-        keys = [[0, 0, 2, 0, 0, 0, 0, 1], [1, 1, 2, 0, 0, 0, 1, 0]]
+    def test_two_key_kochanek_bartels_is_linear_and_hermite_uses_tangents(self):
+        kb = [
+            [0, 0, 2, 0, 0, 0, 9, 9],
+            [1, 1, 2, 0, 0, 0, 9, 9],
+        ]  # stored tangents ignored
+        self.assertAlmostEqual(_hermite(kb, 0.3), 0.3)
+        self.assertAlmostEqual(
+            _hermite([[0, 0, 0, 0, 0, 0, 0, 0], [2, 4, 0, 0, 0, 0, 0, 0]], 0.5), 1
+        )
+        keys = [[0, 0, 1, 0, 0, 0, 0, 1], [1, 1, 1, 0, 0, 0, 1, 0]]
         self.assertAlmostEqual(_hermite(keys, 0), 0)
         self.assertAlmostEqual(_hermite(keys, 1), 1)
         self.assertAlmostEqual(
