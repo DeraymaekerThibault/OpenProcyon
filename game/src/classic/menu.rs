@@ -727,12 +727,13 @@ fn map_info_dialog(ctx: &Ctx, c: &mut ChildSpawnerCommands, sk: &Skirmish, strin
 
 /// The Load / Save dialog of fleets, crews and arms (`Fleet File Dialog Screen.tst` and its Crew and Arms twins, same layout): the frame
 /// over the screen, the profile list with its title, the picked profile's victory points, the file name entry, Save / Load and Cancel.
-/// A full-screen blocker keeps what is beneath from reacting. PROVISIONAL: title and number positions are eyeballed from a screenshot.
+/// A full-screen blocker keeps what is beneath from reacting; it does not dim it (retail shows the screen behind through the frame art's
+/// translucent middle, undimmed). PROVISIONAL: title and number positions are eyeballed from a screenshot.
 pub(super) fn profile_dialog(ctx: &Ctx, c: &mut ChildSpawnerCommands, sk: &Skirmish, lib: &Library, strings: &Value) {
     use crate::profiles::Kind as K;
     let Some(d) = &sk.profile else { return };
     let s = |id: &str| text_of(strings, id);
-    c.spawn((ctx.node(0.0, 0.0, 800.0, 600.0), Interaction::None, bevy::ui::FocusPolicy::Block, BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.35)), ZIndex(1)));
+    c.spawn((ctx.node(0.0, 0.0, 800.0, 600.0), Interaction::None, bevy::ui::FocusPolicy::Block, ZIndex(1)));
     c.spawn((ctx.node(0.0, 0.0, 800.0, 600.0), ZIndex(2))).with_children(|c| {
         let [x, y, w, h] = dialog_frame([69.0, 169.0, 603.0, 420.0]);
         ctx.image(c, "menu/frontenddialogscreen.png", None, x, y, w, h, Color::WHITE);

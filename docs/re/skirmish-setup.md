@@ -101,7 +101,7 @@ skill can read N/A). Dragging one onto a post spends its cost (a 9-point captain
 - In battle the human fleet's named crew become `CrewPosts` (speed and rudder factors, boarding crews) through `SkirmishCrew`.
   Named gunners (posts) already drive the human ships' accuracy and gun reload (`combat/gunnery.rs`, docs/re/gunnery.md).
 - Load / Save Fleet, Crew and Arms (`profiles.rs`, `Skirmish::open_profile` / `do_profile`, `Slot::apply_profile`, dialog drawn by `classic/menu.rs` `profile_dialog`
-  on the Ships and Crew/Arms screens): same dialog as above, our own JSON files (`docs/data-format.md`). A fleet file lists the human fleet type's hulls
+  on the Ships and Crew/Arms screens): same dialog as above (retail Load Fleet on the Ships screen: the frame art's translucent middle shows the screen behind it, with no extra dimming; ours matches), our own JSON files (`docs/data-format.md`). A fleet file lists the human fleet type's hulls
   with crew and swapped guns; a crew or arms file is for the selected ship's hull class. Load is refused with a message when the fleet exceeds the
   size limit or the victory points, a hull is not on offer, a crew member is posted on another ship or a gun does not fit its bank; the fleet is left as it was.
   Enter saves / loads, Escape cancels, the wheel scrolls the list. PROVISIONAL: the lists' filtering, the over-budget refusal and the title / number
