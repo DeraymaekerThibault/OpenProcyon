@@ -483,7 +483,8 @@ fn fleet_screen_offers_every_fleet_type_without_story_hulls() {
     for (race, name) in [(0, "Navy"), (2, "Pirate"), (3, "Procyon")] {
         let list = offered(&lib, race);
         assert!(list.len() >= 5, "{name}: {}", list.len());
-        assert!(list.iter().all(|&i| lib.classes[i].race == name && !NOT_OFFERED.iter().any(|n| lib.classes[i].name.contains(n))));
+        assert!(list.iter().all(|&i| lib.classes[i].race == name && lib.classes[i].skirmish));
+        assert!(list.iter().all(|&i| lib.classes[i].name != "Ship_Pirate_Silver"), "Silver's ship is not offered in retail");
     }
     assert!(offered(&lib, 4).is_empty());
 }

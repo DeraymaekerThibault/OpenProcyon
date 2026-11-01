@@ -446,6 +446,8 @@ def export(root, ship, outdir):
         cloakable=p.get("Is Cloakable", False) is True,
         # Fleet-screen facts: point cost, crew posts ('Max number of <role>s'), display name string and ship-bar icon.
         points=int(p.get("Victory Point Cost", 0)),
+        # Retail's own flag for ships the single-player fleet screens offer.
+        skirmish=p.get("Available in Multiplayer?") is True,
         crew_posts={
             k[len("Max number of ") :]: int(v)
             for k, v in p.items()

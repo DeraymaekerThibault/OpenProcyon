@@ -119,7 +119,7 @@ Unresolved (impact in brackets):
 | Death path (`combat/`, `scenario.rs`) | ships hide/despawn on destruction, no spawn | spawn hook at explosion start |
 | Stats | no `GameStats` resource yet (`docs/re/scoring-saves.md` plan) | minimal `lifeboats_saved: Vec<(collector, owner, n)>` that the future stats screen can adopt |
 | Audio | `assets/sound/ui/hud_lifeboat_pickup.ogg` exists | play `Sfx::ui("HUD_Lifeboat_Pickup")` on pickup |
-| Menu | `NOT_OFFERED` matches the name `Lifeboat` | fine for the fleet picker; do not reuse for gameplay (Mission9 trap) |
+| Menu | the fleet picker lists ships flagged `skirmish` (retail's "Available in Multiplayer?"), which lifeboats are not | fine for the fleet picker; do not reuse for gameplay (Mission9 trap) |
 
 ## 6. Implementation checklist (ordered)
 
