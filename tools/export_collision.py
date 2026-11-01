@@ -1,7 +1,7 @@
 """Export WOT collision boxes and converted scenery triangles to data/collision.json.
 
 usage: python3 -m tools.export_collision <game_root> <assets_dir>
-Mesh model/LOD 0 is provisional; retail selects its collision LOD separately.
+Triangles come from each layer's collision detail level (MeshDetailSettings 'Collision LOD Level Index').
 """
 
 import json
@@ -9,8 +9,9 @@ import struct
 import sys
 from pathlib import Path
 
+from tools.export_mesh_detail import collision_lods
 from tools.gamefs import ci_file
-from tools.models import model_path
+from tools.mdb_to_glb import convert
 from tools.pack_data import rnd
 from tools.wot import fields, parse_text, properties, records
 
@@ -91,6 +92,7 @@ def export(root, assets):
         if isinstance(m, dict):
             scenes.update({o["type"]: o["scene"] for o in m.get("objects", [])})
     types = set(scenes)
+    lod = collision_lods(root)
     out = {}
     for typ in sorted(types):
         d = definition(
@@ -99,7 +101,7 @@ def export(root, assets):
         if not d:
             continue
         if d["detection"] == "OBBTree":
-            tris = triangles(model_path(assets, scenes[typ]).read_bytes())
+            tris = triangles(convert(root, scenes[typ], model=lod))
             points = list(dict.fromkeys(tuple(p) for t in tris for p in t))
             if not points:
                 raise ValueError(f"Empty collision mesh: {typ}")

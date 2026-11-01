@@ -82,6 +82,7 @@ def pad4(b, fill=b"\0"):
 
 def convert(root, scene, model=0, files=None, skin=None):
     """files: explicit MDB paths (e.g. one gun layer); default is every <scene>_Layer*.mdb plus MSB hardpoints.
+    model: the detail level (index into the MDB's models), or a function of the layer's file stem.
     skin: the MSB scene holding the skeleton and clip of a skinned animal mesh (tools/skin.py)."""
     root = Path(root)
     explicit = files is not None
@@ -168,7 +169,8 @@ def convert(root, scene, model=0, files=None, skin=None):
     for f in files:
         raw = f.read_bytes()
         mdb = parse(raw)
-        m = mdb.models[model]
+        level = model(f.stem) if callable(model) else model
+        m = mdb.models[min(level, len(mdb.models) - 1)]
         pos = b"".join(struct.pack("<3f", *to_gltf(v.pos)) for v in m.vertices)
         # Skybox art is dark above/below its bright band (v<0.2, v>0.8; it keeps 0.3..0.7) and the sphere maps the whole texture; squeeze the sphere's
         # v range (0.127..0.875) into the bright band so no direction looks black. shortcut: not what the retail renderer does if it clamps the camera pitch.
