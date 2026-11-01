@@ -163,9 +163,8 @@ fn ecs_ship_contact_and_static_wall_do_not_pass_through() {
     }
     assert!(app.world().get::<Transform>(a).unwrap().translation.z >= -2.001, "bow must remain on this side of the wall");
 }
-#[test]
-#[ignore = "needs imported assets"]
-fn ai_ship_on_a_path_detours_round_a_wall_instead_of_grinding_into_it() {
+/// Closest approach to a marker behind a wall for a cutter on a move order; `player` makes it the human's own ship.
+fn wall_run(player: bool) -> f32 {
     let mut lib = crate::Library::load(crate::assets_dir());
     let class = lib.index("Ship_Navy_Cutter");
     lib.classes[class].collision_bounds = [Vec3::new(-1.0, -1.0, -3.0), Vec3::new(1.0, 1.0, 3.0)];
@@ -196,12 +195,29 @@ fn ai_ship_on_a_path_detours_round_a_wall_instead_of_grinding_into_it() {
         avoid: 1.0,
     };
     let e = app.world_mut().spawn((ship, health, Transform::default(), Drift::default())).id();
+    if player {
+        app.world_mut().entity_mut(e).insert(crate::PlayerShip);
+    }
     let mut best = f32::INFINITY;
     for _ in 0..1500 {
         app.update();
         best = best.min(app.world().get::<Transform>(e).unwrap().translation.distance(goal));
     }
+    best
+}
+
+#[test]
+#[ignore = "needs imported assets"]
+fn ai_ship_on_a_path_detours_round_a_wall_instead_of_grinding_into_it() {
+    let best = wall_run(false);
     assert!(best < 10.0, "the ship reaches the marker behind the wall (closest {best})");
+}
+
+#[test]
+#[ignore = "needs imported assets"]
+fn the_humans_move_order_detours_round_a_wall_too() {
+    let best = wall_run(true);
+    assert!(best < 10.0, "the human's ship reaches the marker behind the wall (closest {best})");
 }
 #[test]
 #[ignore = "needs imported assets"]

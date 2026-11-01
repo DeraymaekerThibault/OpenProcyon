@@ -263,10 +263,9 @@ Static analysis of the original's AI, written as rules; it explains the island b
   look-ahead keeps it off land. At a standstill the look-ahead covers only obstacles whose sphere the ship already overlaps.
 - Fits play: computer ships keep clear of each other (both sides steer) but meet the human's ships, which do not steer for them, and stop in front of a
   moving one of them.
-- Remake: `collision/avoid.rs`, run from `collision::sail` for every AI-steered ship except the human's own ship and docking ships; it sets
+- Remake: `collision/avoid.rs`, run from `collision::sail` for every AI-steered ship, the human's own ship while it follows a move order (a course-point list; a heading or manual throttle bypasses it), and docking ships; it sets
   `Ship::avoid` (the speed fraction `ship::step` multiplies in) and puts the detour point in front of the course. PROVISIONAL (not ported yet):
-  mines, torpedoes, dragons, black holes and nebulae as obstacles (black holes and storms are left to `ship::flee`), the sight-range limit,
-  and the human's move orders. PROVISIONAL: "barely moves" is read as a speed under 3 units/s (the original tests the
+  mines, torpedoes, dragons, black holes and nebulae as obstacles (black holes and storms are left to `ship::flee`), the sight-range limit. PROVISIONAL: "barely moves" is read as a speed under 3 units/s (the original tests the
   last position change, push-outs included).
 
 ## Computer ships and a hostile base (Border Dispute, 2026-10-27; re-read 2026-10-31)
