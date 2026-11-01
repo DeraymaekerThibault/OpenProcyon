@@ -336,6 +336,7 @@ mod tests {
             sail_energy: 1.0,
             crew_speed: 1.0,
             crew_turn: 1.0,
+            net: 1.0,
             avoid: 1.0,
         };
         let data = Library::load(crate::assets_dir());
@@ -398,6 +399,7 @@ mod tests {
             sail_energy: 1.0,
             crew_speed: 1.0,
             crew_turn: 1.0,
+            net: 1.0,
             avoid: 1.0,
         };
         let tables: std::collections::HashMap<String, std::collections::HashMap<String, [f32; 5]>> =
@@ -440,6 +442,7 @@ mod tests {
             sail_energy: 1.0,
             crew_speed: 1.0,
             crew_turn: 1.0,
+            net: 1.0,
             avoid: 1.0,
         };
         let [cutter, mow] = ["Ship_Navy_Cutter", "Ship_Navy_ManOWar"].map(|n| lib.index(n));

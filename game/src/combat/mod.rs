@@ -164,7 +164,7 @@ pub fn plugin(app: &mut App) {
             FixedUpdate,
             (
                 (minefield::arm, fire, base_fire, lob::shoot, shells, lob::detonate, lob::blasts, lob::grav_wells, lob::ram_damage, lob::strikes).chain(),
-                (asteroid_deaths, fires, crew_repair, deaths).chain(),
+                (asteroid_deaths, fires, status::tick_nets, crew_repair, deaths).chain(),
             )
                 .chain()
                 .in_set(crate::BattleSet::Combat),

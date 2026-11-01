@@ -225,6 +225,8 @@ pub struct BulletDef {
     pub ricochet_snd: HashMap<String, String>,
     /// 'Decal Damage Size' class of the scar it leaves (0 Small, 1 Medium, 2 Large).
     pub decal: Option<u8>,
+    /// Energy net: a hit slows the ship for `duration` seconds, thrust and top speed x (1 - `dissipated`); nets stack.
+    pub net: Option<(f32, f32)>,
 }
 pub struct Mount {
     pub pos: Vec3,
@@ -427,6 +429,7 @@ pub fn bullet_def(b: &Value) -> BulletDef {
             .iter()
             .map(|(m, v)| (m.clone(), v.as_array().unwrap().iter().map(|s| s.as_str().unwrap().to_string()).collect()))
             .collect(),
+        net: b["net"].as_object().map(|n| (n["duration"].as_f64().unwrap_or(0.0) as f32, n["dissipated"].as_f64().unwrap_or(0.0) as f32)),
         hit_fx: b["hit_fx"].as_str().map(String::from),
         bullet_fx: b["bullet_fx"].as_str().map(String::from),
         payload: {

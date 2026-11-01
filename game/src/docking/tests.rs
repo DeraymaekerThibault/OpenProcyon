@@ -208,6 +208,7 @@ fn ship(lib: &Library, name: &str, side: Side) -> (Ship, Health) {
             sail_energy: 1.0,
             crew_speed: 1.0,
             crew_turn: 1.0,
+            net: 1.0,
             avoid: 1.0,
         },
         Health::new(c),

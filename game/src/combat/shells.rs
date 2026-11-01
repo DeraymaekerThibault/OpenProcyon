@@ -550,6 +550,15 @@ fn hit_ship(
     damage[0] *= scale;
     damage[1] *= scale;
     hits.write(Hit { shooter: s.shooter, victim: se });
+    if let Some((duration, dissipated)) = bd.net {
+        commands.entity(se).queue(move |mut w: EntityWorldMut| {
+            if let Some(mut n) = w.get_mut::<status::Netted>() {
+                n.0.push((duration, dissipated));
+            } else {
+                w.insert(status::Netted(vec![(duration, dissipated)]));
+            }
+        });
+    }
     if s.bullet == TORPEDO_BULLET {
         info!("Torpedo hit {} ({}){}", class.name, sec.label, if invuln >= 1.0 { " [training: invulnerable]" } else { "" });
     }

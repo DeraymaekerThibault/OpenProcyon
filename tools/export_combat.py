@@ -228,6 +228,10 @@ def bullet_record(root, b, outdir):
             radius=bp.get("MaxRadius", bp.get("Radius")),
             duration=bp.get("Duration", 0.0),
         )
+    if factory == "EnergyNetCustomInfoFactory":
+        rec["net"] = dict(
+            duration=bp["Duration"], dissipated=bp["PercentageOfEnergyDissipated"]
+        )
     if mine:
         rec["mine"] = dict(
             sight=bp.get("Default SightRange", 50.0),
