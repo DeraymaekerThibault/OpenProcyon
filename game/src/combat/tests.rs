@@ -383,15 +383,15 @@ fn a_silent_island_never_fires() {
     let assets = app.world().resource::<AssetServer>().clone();
     let lib = Library::load(assets_dir());
     let class = lib.index("Island_Volcano_01");
-    let spawn_base = |app: &mut App, side: Side, x: f32| {
+    let spawn_base = |app: &mut App, side: Side, x: f32, neutral: bool| {
         let id = app.world_mut().spawn((Transform::from_xyz(x, -27.0, 0.0), crate::campaign::MissionBase { id: 1, owner: format!("base{x}") }, BaseSide(side))).id();
         let states = spawn_guns(&mut app.world_mut().commands(), &assets, &lib, id, class);
-        app.world_mut().entity_mut(id).insert((ArmedBase { class }, Health::new(&lib.classes[class]), states, IslandGunnery { accuracy: 1.0, silent: true }));
+        app.world_mut().entity_mut(id).insert((ArmedBase { class }, Health::new(&lib.classes[class]), states, IslandGunnery { accuracy: 1.0, silent: !neutral, neutral }));
         app.world_mut().flush();
         id
     };
-    spawn_base(&mut app, Side::Enemy, 0.0);
-    spawn_base(&mut app, Side::Player, 40.0);
+    spawn_base(&mut app, Side::Enemy, 0.0, false);
+    spawn_base(&mut app, Side::Player, 40.0, true);
     let c = lib.index("Ship_Navy_Torpedo");
     let ship = Ship {
         class: c,
@@ -415,7 +415,7 @@ fn a_silent_island_never_fires() {
         app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs_f32(0.05));
         app.update();
     }
-    assert_eq!(app.world_mut().query::<&Shell>().iter(app.world()).count(), 0, "a Dummy or Neutral island holds fire");
+    assert_eq!(app.world_mut().query::<&Shell>().iter(app.world()).count(), 0, "a Dummy island, and a Neutral one nobody targets, hold fire");
 }
 
 #[test]

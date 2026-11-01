@@ -249,8 +249,9 @@ fn callouts(
     for f in world.fired.read().filter(|f| f.shooter == me) {
         if f.bullet.starts_with(crate::data::TORPEDO_BULLET) {
             reports.push("torpedoes_away");
-        } else if f.bullet.contains("Mortar") {
-            reports.push("fire_mortar");
+        } else if !f.bullet.contains("Mine") {
+            // Retail: every gun's Firing Crew Alert is fire_weapon except the torpedo's and the mine's (none); no gun uses fire_mortar.
+            reports.push("fire_weapon");
         }
     }
     // A destroyed section's systems speak, once per tag (docs/re/movement.md "Critical hits").

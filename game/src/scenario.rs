@@ -586,6 +586,10 @@ pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Libra
                 combat::Health::new(&lib.classes[class]),
                 states,
             ));
+            if island {
+                // An island no setup rule touches shoots with perfect aim (docs/re/volcanoes.md).
+                commands.entity(*e).insert(combat::IslandGunnery { accuracy: 0.0, silent: false, neutral: false });
+            }
             if !island {
                 commands.entity(*e).insert(boarding::Boardable::base(
                     &lib.classes[class].name,
