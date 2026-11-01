@@ -259,6 +259,8 @@ pub struct Section {
     pub debris_fx: Option<String>,
     /// Neighbouring sections (indices) a destroyed section passes damage on to (WOT `adjacent`).
     pub adjacent: Vec<usize>,
+    /// System tags (WOT `criticals`, e.g. "Rudder Linkage"); empty in imports that predate it.
+    pub criticals: Vec<String>,
 }
 /// A section's part of a ship's final breakup (docs/re/effects.md "Ship destruction"): its mesh moves with the break-apart clip,
 /// and with effect `fx` (if any) it bursts at `point` (in the section's own frame, bevy axes) once the clip passes `start`

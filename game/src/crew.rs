@@ -208,6 +208,7 @@ fn callouts(
     mut queue: Local<VecDeque<&'static str>>,
     mut last: Local<HashMap<&'static str, f32>>,
     mut n: Local<usize>,
+    mut dead: Local<Vec<bool>>,
 ) {
     let Some(player) = player else { return };
     let (me, tf, ship, hp, docked, boarding, posts) = *player;
@@ -252,6 +253,22 @@ fn callouts(
             reports.push("fire_mortar");
         }
     }
+    // A destroyed section's systems speak, once per tag (docs/re/movement.md "Critical hits").
+    let now_dead: Vec<bool> = hp.sections.iter().map(|h| *h <= 0.0).collect();
+    if dead.len() == now_dead.len() {
+        for (k, _) in now_dead.iter().zip(dead.iter()).enumerate().filter(|(_, (n, o))| **n && !**o) {
+            for tag in &lib.classes[ship.class].sections[k].criticals {
+                match tag.as_str() {
+                    "Power Transformer Engines" | "Engines" => reports.push("engine_hit"),
+                    "Power Transformer Guns" => reports.push("weapons_destroyed"),
+                    "Rudder Linkage" => reports.push("rudder_destroyed"),
+                    "Munnitions" => reports.push("ammo_hit"),
+                    _ => {}
+                }
+            }
+        }
+    }
+    *dead = now_dead;
     if world.rams.read().any(|r| r.a == me || r.b == me) {
         reports.push("collision_alarm");
     }
@@ -372,6 +389,11 @@ mod tests {
             "out_of_bounds",
             "put_out_fire",
             "all_weapons_destroyed",
+            "engine_hit",
+            "weapons_destroyed",
+            "rudder_destroyed",
+            "ammo_hit",
+            "fire_weapon",
             "enemy_ship_spotted_pirate",
             "enemy_ship_spotted_procyon",
         ] {

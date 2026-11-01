@@ -106,6 +106,10 @@ This is a provisional workaround, not recovered retail damaged-mesh collision: s
   destroying the section always yields one. The system is picked uniformly from that section's list and its hit count increments.
 - Hit counts are only read by the debug overlay; the gameplay effect is crew speech for the player's ship on section
   loss (by system type). No physics/gun effect found, so the remake does not model criticals.
+  Speech: when a section of the player's ship is destroyed, each tag it carries speaks once: Power Transformer Engines / Engines ->
+  engine_hit, Power Transformer Guns -> weapons_destroyed, Rudder Linkage -> rudder_destroyed, Munnitions -> ammo_hit; the other
+  tags are silent. Remake: `crew.rs` does this from the exported `criticals` list; the originals' 50 % play chance on some events is
+  not modelled (PROVISIONAL).
 
 ## Path end behaviour (partial)
 Ship path following defaults to "stop at end" (= 1, throttle clamp 0..1). Its state
