@@ -21,7 +21,7 @@ pub struct ModList {
 
 impl ModList {
     pub fn load() -> Self {
-        Self::from(crate::modding::installed())
+        Self::from(crate::modding::installed(crate::bundled_mods_dir().as_deref()))
     }
     pub fn from(mods: Vec<crate::modding::Installed>) -> Self {
         ModList { mods, sort: (ModCol::Name, true), category: None, scroll: 0 }

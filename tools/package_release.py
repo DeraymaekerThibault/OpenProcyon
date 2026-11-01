@@ -1,4 +1,4 @@
-"""Package a player download: the release game binary, content/ and the importer frozen by PyInstaller. No game content.
+"""Package a player download: the release game binary, content/, mods/ and the importer frozen by PyInstaller. No game content.
 usage: python -m tools.package_release NAME   (after `cargo build --release` in game/; needs requirements-release.txt)
 Writes dist/NAME/ (the folder players unpack) and, outside Windows, dist/NAME.tar.gz (keeps the executable bits).
 Used by .github/workflows/release.yml; runs the same locally."""
@@ -174,6 +174,8 @@ def main(argv):
     )
     # content/ ships with the code; its README records each file's licence and travels with it.
     shutil.copytree(REPO / "content", out / "content")
+    # The example mods (JSON diffs of our own, no game content) are listed in the Mods screen, off until the player ticks them.
+    shutil.copytree(REPO / "mods", out / "mods")
     windows = sys.platform == "win32"
     (out / "PLAY.txt").write_text(
         PLAY.format(
