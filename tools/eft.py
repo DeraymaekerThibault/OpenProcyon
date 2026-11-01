@@ -22,6 +22,14 @@ def _curve(children):
     if len(ts) != len(vs):
         raise ValueError("curve with unequal t/value counts")
     out = {"curve": [[t, v] for t, v in zip(ts, vs, strict=True)]}
+    # UseValuesAtKeysOnly: the value is returned only on the tick the time enters a new key interval, else 0 (a one-shot per key).
+    if any(
+        n["kind"] == "property"
+        and n["name"] == "UseValuesAtKeysOnly"
+        and n["value"] is True
+        for n in children
+    ):
+        out["keys_only"] = True
     for n in children:
         if n["kind"] == "block" and n["name"] == "LoopInfo":
             loop = _block(n["children"])

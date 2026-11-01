@@ -351,3 +351,13 @@ These effects' particles carry a 2D rectangle but no size entry (planks 2x20 up 
 is a plank the length of a ship (owner playtest). The original sends no scale message when it plays them and the renderer was not decoded, so
 the remake multiplies such rectangles by 0.1 (`fx::Prim::rect_scale`); rectangles that have a size entry (ship-death streaks, debris smoke)
 keep their authored size. Tunable: confirm against retail footage.
+
+## Keys-only rate curves (decoded)
+A particle-rate curve flagged `UseValuesAtKeysOnly` (exported as `keys_only`) is not a per-tick rate: it returns its value only on the tick
+where the sample time enters a new key interval (the first tick counts as entering key 0, a loop wrap back to key 0 counts), else 0. A one-key
+curve is therefore a single burst at spawn. The flag is on the docking-point lights, damage smoke, volcano and island smoke, debris, splinters,
+Gattling and carronade impacts and others. Docking lights are discrete flares (life 1 s, 8 directions, 1-4 flares per key, keys 0.5 s apart,
+looping every 2 s, strobing inward); damage smoke puffs once at creation and every 3 s (Heavy 4 per 20 s, Light 5 per 25 s, Medium and
+Destroyed 3 per 15 s), each living 10 s. Once a curve's repeats are used up, time carries on from the loop's end rather than restarting at
+its start. Remake: `fx::Curve` (`keys_only`, `key_index`, `looped`), `PrimState::last_key`. PROVISIONAL: the blue docking dots stay alive while
+the marker exists in the original (ours expire after the 20 s fallback life).

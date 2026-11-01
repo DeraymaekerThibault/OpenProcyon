@@ -60,6 +60,22 @@ class MorphMeshes(unittest.TestCase):
                 self.assertEqual(model_path(out, name).read_bytes(), b"converted")
             self.assertEqual(converter.call_count, 2)
 
+    def test_curve_flags_keys_only_values(self):
+        text = """00000001 EffectStream
+{
+00000002 ParticleRateInterpolator
+{
+UseValuesAtKeysOnly Bool True
+NumKeys Int 1
+t Float 0
+value Float 1
+}
+}
+"""
+        self.assertTrue(parse_eft(text)["ParticleRateInterpolator"]["keys_only"])
+        plain = text.replace("Bool True", "Bool False")
+        self.assertNotIn("keys_only", parse_eft(plain)["ParticleRateInterpolator"])
+
     def test_curve_keeps_active_loop_metadata_and_omits_disabled_loops(self):
         text = """00000001 EffectStream
 {
