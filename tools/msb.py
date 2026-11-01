@@ -1,7 +1,7 @@
-"""Reader for BD_MeshScenes/*.msb node records (hardpoints, damage sections, ...).
+"""Reader for BD_MeshScenes/*.msb scenes: nodes (hardpoints, damage sections, ...), mesh layers, bones and clips.
 
-The file is a tagged stream with nested/variant blocks that are not fully understood, so this scans for
-the node record pattern instead of walking a grammar:
+`parse_scene` reads the file by its tag table (every retail scene parses to its end); `parse` gives the flat node list the
+exporters use. The older pattern scan (kept as the fallback for files the strict reader rejects) looks for the node record:
   02 id | 05 parent | 06 ? | 01 name | 07 3*u32 | 08 f32 *6 | 09 u32 | [0a u32 | 0b str | 0c str]
 Each tag is a u32; `str` is u32 length + bytes. The six floats are x, y, z, yaw, ?, ? (radians; only
 yaw is non-zero in the Navy Cutter). Positions are in the parent mesh's local frame, which for the
@@ -35,6 +35,26 @@ def _str(d, o):
 
 
 def parse(d):
+    """Every node, mesh layer and bone as a `Node` (its first attribute as kind/label), read with the strict reader; the pattern
+    scan below is the fallback for a scene the strict reader rejects (a modded file)."""
+    try:
+        scene = parse_scene(d)
+    except (ValueError, struct.error, IndexError):
+        return _scan(d)
+    return [
+        Node(
+            e["id"],
+            e["parent"],
+            e["name"],
+            tuple(e["pos"]),
+            tuple(e["rot"]),
+            *(e["attributes"][0] if e["attributes"] else ("", "")),
+        )
+        for e in scene["nodes"] + scene["meshes"] + scene["bones"]
+    ]
+
+
+def _scan(d):
     nodes, o = [], 0
     while o + 28 <= len(d):
         if not (
