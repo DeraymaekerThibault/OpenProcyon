@@ -411,10 +411,25 @@ fn parse_prim(p: &Value, tex_names: &mut Vec<String>) -> Prim {
     }
 }
 
+/// The imported index, then any other `<name>.json` in the folder (an effect a mod adds is not in the imported index).
+fn effect_names(dir: &std::path::Path) -> Vec<String> {
+    let mut names: Vec<String> = crate::data::try_json(&dir.join("index.json")).and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default();
+    let mut extra: Vec<String> = std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|e| e.file_name().to_str()?.strip_suffix(".json").map(String::from))
+        .filter(|n| n != "index" && !names.contains(n))
+        .collect();
+    extra.sort();
+    names.extend(extra);
+    names
+}
+
 impl FromWorld for FxLib {
     fn from_world(_: &mut World) -> Self {
         let dir = assets_dir().join("fx");
-        let names: Vec<String> = crate::data::try_json(&dir.join("index.json")).and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default();
+        let names = effect_names(&dir);
         let (mut effects, mut list, mut tex_names) = (HashMap::new(), vec![], vec![]);
         for n in names {
             let j = crate::data::read_json(&dir.join(format!("{n}.json")));
@@ -947,6 +962,18 @@ mod tests {
         let material = additive_material(Handle::default());
         assert_eq!(material.base.alpha_mode, AlphaMode::Blend, "shader must leave source RGB unpremultiplied for ONE/ONE");
         assert!(material.base.depth_bias >= ADDITIVE_SORT_BIAS, "additive effects sort after alpha-blended sails (PT-05)");
+    }
+
+    #[test]
+    fn effects_a_mod_adds_are_loaded_without_being_in_the_index() {
+        let dir = std::env::temp_dir().join(format!("procyon-fx-names-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("index.json"), r#"["A"]"#).unwrap();
+        for f in ["A.json", "ModEffect.json", "notes.txt"] {
+            std::fs::write(dir.join(f), "{}").unwrap();
+        }
+        assert_eq!(effect_names(&dir), ["A", "ModEffect"]);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

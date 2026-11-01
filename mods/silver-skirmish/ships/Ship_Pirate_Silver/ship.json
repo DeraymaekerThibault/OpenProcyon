@@ -1,5 +1,7 @@
 {
   "extends": "Ship_Pirate_Silver",
   "skirmish": true,
-  "points": 255
+  "points": 255,
+  "display_name": "IDGS_TPDISPLAYABLESHIPTYPENAME_TPPIRATESILVER",
+  "icon": "ShipBar_ShipIcon_Pirate_Silver"
 }
