@@ -345,3 +345,9 @@ core: run by fx.rs) plus a `Vortex` primitive, implemented in `game/src/blackhol
   The vortex's KILL_RADIUS only ends its ribbon points. Computer captains keep out of the radius (movement.md).
 * Unknown: strip UV mapping/blend (ours: additive, v = 0.5 per segment), the funnel mesh
   (not drawn: the reference video shows only the glow, beams and ribbons).
+
+## Plank sprites (Splintering_Wood, Boarding_Fight) - PROVISIONAL scale
+These effects' particles carry a 2D rectangle but no size entry (planks 2x20 up to 6x20, boarding sprites 2x11). Drawn at face value a splinter
+is a plank the length of a ship (owner playtest). The original sends no scale message when it plays them and the renderer was not decoded, so
+the remake multiplies such rectangles by 0.1 (`fx::Prim::rect_scale`); rectangles that have a size entry (ship-death streaks, debris smoke)
+keep their authored size. Tunable: confirm against retail footage.

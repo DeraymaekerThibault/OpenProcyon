@@ -159,6 +159,7 @@ struct Prim {
     rgb: [Curve; 3],
     alpha: Curve,
     rect: Option<[Curve; 4]>,
+    rect_scale: f32, // PROVISIONAL: 0.1 for a rectangle with no size entry (planks, boarding sprites), else 1; see docs/re/effects.md
     flat: bool,
     along_velocity: bool,
     pseudo_dir: Option<Vec3>, // fixed streak axis in effect space (PseudoBillboardChunk)
@@ -299,6 +300,7 @@ fn parse_prim(p: &Value, tex_names: &mut Vec<String>) -> Prim {
     let rgb = c3(cc);
     let alpha = Curve::from(get(cp, &["ColorFaderChunk", "AlphaComponentChunk"]));
     let size = Curve::from(get(cp, &["SizeChunk", "SizeInterpolatorChunk"]));
+    let rect_scale = if get(cp, &["Rectangle2dChunk"]).is_some() && size.is_empty() { 0.1 } else { 1.0 };
     let rect = get(cp, &["Rectangle2dChunk"])
         .map(|r| ["TopLeftXInterpolatorChunk", "TopLeftYInterpolatorChunk", "BottomRightXInterpolatorChunk", "BottomRightYInterpolatorChunk"].map(|k| Curve::from(r.get(k))));
     let life = get(cp, &["ExpirationChunk", "ExpirationInterpolateChunk"]).map(|c| Curve::from(Some(c))).filter(|c| !c.is_empty());
@@ -374,6 +376,7 @@ fn parse_prim(p: &Value, tex_names: &mut Vec<String>) -> Prim {
         size,
         rgb,
         alpha,
+        rect_scale,
         rect,
         flat: cp.get("Flat").is_some(),
         along_velocity: get(cp, &["PseudoBillboardChunk", "PseudoDirectionUseVelocity"]).and_then(|v| v.as_bool()).unwrap_or(false),
@@ -740,7 +743,9 @@ fn render_fx(
                 let size = prim.size.at(age, 1.0) * f.size_scale;
                 let col = [prim.rgb[0].at(age, 1.0), prim.rgb[1].at(age, 1.0), prim.rgb[2].at(age, 1.0), prim.alpha.at(age, 1.0)];
                 let (x0, y0, x1, y1) = match &prim.rect {
-                    Some(r) => (r[0].at(age, -0.5), r[1].at(age, 0.5), r[2].at(age, 0.5), r[3].at(age, -0.5)),
+                    Some(r) => {
+                        (r[0].at(age, -0.5) * prim.rect_scale, r[1].at(age, 0.5) * prim.rect_scale, r[2].at(age, 0.5) * prim.rect_scale, r[3].at(age, -0.5) * prim.rect_scale)
+                    }
                     None => (-0.5, 0.5, 0.5, -0.5),
                 };
                 let (ax, ay) = particle_axes(prim, gt, vel, [right, up, view]);
