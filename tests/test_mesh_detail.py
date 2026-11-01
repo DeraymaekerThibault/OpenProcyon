@@ -1,6 +1,6 @@
 import unittest
 
-from tools.export_mesh_detail import parse
+from tools.export_mesh_detail import lod_lookup, parse
 
 DMT = """Mesh Detail Settings Chunk Int 2
 Mesh Name String ''
@@ -33,6 +33,10 @@ class MeshDetail(unittest.TestCase):
         hull = m["HULL_Layer1"]
         self.assertEqual(hull["levels"], [[0.0, 1.0], [1000.0, 0.2]])
         self.assertEqual((hull["no_draw"], hull["collision_lod"]), (2500.0, 1))
+
+    def test_collision_level_lookup_ignores_case_and_defaults(self):
+        lod = lod_lookup(parse(DMT))
+        self.assertEqual((lod("hull_layer1"), lod("OTHER_Layer1")), (1, 0))
 
 
 if __name__ == "__main__":

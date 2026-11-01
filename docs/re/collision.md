@@ -64,7 +64,7 @@ before and after (section HP from the saves).
 
 ## Implementation
 
-`tools/export_collision.py` exports `assets/data/collision.json` keyed by retail entity type. Scenery/asteroid boxes come directly from the collision definition, mapped to Bevy axes. Ship boxes reuse the existing `data/ships/<id>.json` physics `MinExtents` / `MaxExtents`, so inherited mods keep their collision shape; custom ships without those fields provisionally use section bounds. Static objects use indexed triangles extracted from the already converted GLB, **provisionally model/LOD 0**. No raw WOT/MDB or executable is committed. Regenerate after mesh/exporter changes:
+`tools/export_collision.py` exports `assets/data/collision.json` keyed by retail entity type. Scenery/asteroid boxes come directly from the collision definition, mapped to Bevy axes. Ship boxes reuse the existing `data/ships/<id>.json` physics `MinExtents` / `MaxExtents`, so inherited mods keep their collision shape; custom ships without those fields provisionally use section bounds. Static objects use indexed triangles from each layer's **collision detail level** (the `Collision LOD Level Index` of `MeshDetailSettings`, level 1 for most hulls and islands: the lower-detail model; the export converts each layer at that level), and a ship section's `geometry.json` triangles use it too (its box still spans the full-detail model). No raw WOT/MDB or executable is committed. Regenerate after mesh/exporter changes:
 
 ```sh
 set -a; source .env; set +a

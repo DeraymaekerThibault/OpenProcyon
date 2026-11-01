@@ -9,6 +9,7 @@ import json
 import sys
 from pathlib import Path
 
+from tools.export_mesh_detail import collision_lods
 from tools.export_ship import export as export_physics
 from tools.gamefs import ci_file, ci_files
 from tools.mdb import parse as parse_mdb
@@ -381,10 +382,13 @@ def export(root, ship, outdir):
     sections = []
     for mesh, label, assoc in associations(nodes, "DamageSection"):
         a = kv(assoc)
-        m = parse_mdb(
+        models = parse_mdb(
             ci_file(Path(root) / "BD_Meshes", f"{mesh}.mdb").read_bytes()
-        ).models[0]
-        xs = list(zip(*[v.pos for v in m.vertices], strict=True))
+        ).models
+        # The triangles are the detail level retail collides with; the box also covers the full-detail model (it feeds aim points,
+        # ring and radius, which were measured on the visible hull).
+        m = models[min(collision_lods(root)(mesh), len(models) - 1)]
+        xs = list(zip(*[v.pos for v in models[0].vertices + m.vertices], strict=True))
         sections.append(
             dict(
                 layer=mesh,

@@ -3,6 +3,7 @@ no_draw, collision_lod}} from MeshDetailSettings/MeshDetailSettings.dmt. The ent
 `collision_lod` is the index of the level whose triangles retail collides with (docs/re/collision.md).
 usage: python -m tools.export_mesh_detail <game_root> <assets_dir>"""
 
+import functools
 import json
 import re
 import sys
@@ -31,6 +32,23 @@ def parse(text):
         elif m := re.match(r"Collision LOD Level Index Int (\d+)", line):
             cur["collision_lod"] = int(m.group(1))
     return meshes
+
+
+def lod_lookup(meshes):
+    """Function mesh name (any case) -> index of the model (detail level) retail collides with; unlisted meshes use the default entry."""
+    default = meshes.get("", {}).get("collision_lod", 0)
+    lower = {k.lower(): v["collision_lod"] for k, v in meshes.items()}
+    return lambda name: lower.get(name.lower(), default)
+
+
+@functools.cache
+def _lods(root):
+    src = ci_file(Path(root) / "MeshDetailSettings", "MeshDetailSettings.dmt")
+    return lod_lookup(parse(src.read_text(encoding="latin1")))
+
+
+def collision_lods(root):
+    return _lods(str(root))
 
 
 def export(root, out):
