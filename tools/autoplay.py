@@ -10,6 +10,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -57,7 +58,9 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
     wrap = (
         []
-        if os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")
+        if sys.platform == "win32"
+        or os.environ.get("DISPLAY")
+        or os.environ.get("WAYLAND_DISPLAY")
         else ["xvfb-run", "-a", "-s", "-screen 0 1280x720x24"]
     )
     rows = []

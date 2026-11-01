@@ -3,6 +3,9 @@
 ## Short daily loop
 
 Work from the repository root with the Python virtual environment active. Use `make help` for commands.
+The Makefile and `tools/check.sh` use the checkout's `.venv` when there is one, even if it is not active. On Windows, install GNU Make
+(`winget install ezwinports.make`) and Git for Windows. `make` then works from PowerShell or Git Bash: the shell scripts run through
+Git Bash (`GIT_BASH=<path>` if it is not in the default place), and the screenshot and battle tools use the desktop instead of Xvfb.
 
 1. Read the owning module and its callers; pick one complete behaviour or visual batch.
 2. Put editable gameplay changes in `mods/`; change exporters only when the retail conversion is wrong.
