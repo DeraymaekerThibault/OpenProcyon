@@ -223,18 +223,25 @@ fn setup(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut mats: Res
     });
 }
 
-/// A destroyed ship breaking up (docs/re/effects.md "Ship destruction"): the class explosion plays at once, then every section's
-/// mesh flies off at its WOT `destructFx` velocity and bursts with its effect somewhere in its [start, end] window, as retail does.
+/// A destroyed ship breaking up (docs/re/effects.md "Ship sinking and final destruction"): the class explosion plays at once, then
+/// the scene's break-apart clip moves the section meshes rigidly; a section is hidden, with its effect burst, when the clip passes
+/// its `destructFx` start.
 #[derive(Component)]
 pub struct Sinking {
     start: Transform,
     elapsed: f32,
-    /// Section mesh nodes: (node, section, rest translation, burst time); filled on the first breakup frame.
-    nodes: Option<Vec<(Entity, usize, Vec3, f32)>>,
+    /// Section mesh nodes: (node, section, rest pose, burst done); filled on the first breakup frame.
+    nodes: Option<Vec<(Entity, usize, Transform, bool)>>,
 }
 
-/// Breakup length when a class has no destruct data (older imports). PROVISIONAL.
+/// Seconds between the kill and the start of the break-apart clip.
+const CLIP_DELAY: f32 = 0.14;
+/// Breakup length when a class has no break-apart clip (older imports, mods). PROVISIONAL.
 const BREAKUP_FALLBACK: f32 = 1.0;
+/// The ship's break-apart clip.
+fn breakup_clip<'a>(lib: &'a Library, class: &crate::data::Class) -> Option<&'a crate::clips::Clip> {
+    lib.clips.get(class.scene.as_deref()?)?.iter().find(|(n, _)| n == "ANIMATION00").map(|(_, c)| c)
+}
 
 impl Sinking {
     fn new(start: Transform) -> Self {
@@ -242,15 +249,10 @@ impl Sinking {
     }
 }
 
-/// When a section's chunk is gone: at its burst (a point in [start, end] picked by `roll` in 0..1) when it has an effect, else
-/// at `end` (retail's mid hulls just drift apart and vanish).
-fn burst_time(d: &crate::data::Destruct, roll: f32) -> f32 {
-    if d.fx.is_some() { d.start + (d.end - d.start) * roll } else { d.end }
-}
-
-/// The section's offset from its place on the hull at `t` seconds (ship-local), or None once its chunk is gone.
-fn chunk_offset(d: &crate::data::Destruct, burst: f32, t: f32) -> Option<Vec3> {
-    (t < burst).then(|| d.vel * t)
+/// Clip time at which a section's chunk is gone: when the clip passes `start` for sections with an effect (always just before the
+/// clip's end), else at `end` (retail's mid hulls carry no effect and have start 0). PROVISIONAL for effect-less sections.
+fn hide_time(d: &crate::data::Destruct) -> f32 {
+    if d.fx.is_some() { d.start } else { d.end }
 }
 
 /// Gameplay death is immediate; the presentation breaks the hull up for a few seconds, then removes it.
@@ -282,9 +284,9 @@ fn breakup(
 ) {
     for (e, mut tf, ship, mut vis, mut sinking) in &mut ships {
         let class = &lib.classes[ship.class];
-        let before = sinking.elapsed;
+        let clip = breakup_clip(&lib, class);
         sinking.elapsed += time.delta_secs();
-        let t = sinking.elapsed;
+        let t = (sinking.elapsed - CLIP_DELAY).max(0.0);
         *tf = sinking.start;
         if sinking.nodes.is_none() {
             // PROVISIONAL death sound pool; visual randomness must not perturb combat rolls.
@@ -299,35 +301,34 @@ fn breakup(
                 let Ok((name, ntf, _)) = nodes.get(d) else { continue };
                 let base = name.as_str().replacen("Damage_", "_", 1);
                 if let Some(i) = class.sections.iter().position(|s| s.layer.eq_ignore_ascii_case(&base)) {
-                    let burst = class.sections[i].destruct.as_ref().map_or(BREAKUP_FALLBACK, |d| burst_time(d, rng.f()));
-                    found.push((d, i, ntf.translation, burst));
+                    found.push((d, i, *ntf, false));
                 }
             }
             sinking.nodes = Some(found);
         }
-        let mut last = BREAKUP_FALLBACK;
-        for &(node, i, rest, burst) in sinking.nodes.as_deref().unwrap_or_default() {
-            let section = &class.sections[i];
+        for (node, i, rest, done) in sinking.nodes.as_mut().into_iter().flatten() {
+            let section = &class.sections[*i];
+            let Ok((name, mut ntf, mut nvis)) = nodes.get_mut(*node) else { continue };
+            if let Some(pose) = clip.and_then(|c| c.pose(&section.layer, t, *rest)) {
+                *ntf = pose;
+            }
             let Some(d) = &section.destruct else { continue };
-            last = last.max(burst);
-            let Ok((name, mut ntf, mut nvis)) = nodes.get_mut(node) else { continue };
-            match chunk_offset(d, burst, t) {
-                Some(off) => ntf.translation = rest + off,
-                None if *nvis != Visibility::Hidden => *nvis = Visibility::Hidden,
-                None => {}
+            if t < hide_time(d) {
+                continue;
+            }
+            if *nvis != Visibility::Hidden {
+                *nvis = Visibility::Hidden;
             }
             // One burst per section, from its visible (undamaged or damaged) mesh.
-            if before < burst
-                && t >= burst
-                && !name.as_str().contains("Damage_")
-                && let Some(fx_name) = &d.fx
-            {
-                let centre = (section.min + section.max) / 2.0 + d.vel * burst;
-                let at = Transform::from_translation(tf.transform_point(centre));
-                fx::spawn(&mut commands, &fxl, fx_name, None, at, at, true);
+            if !*done && !name.as_str().contains("Damage_") {
+                *done = true;
+                if let Some(fx_name) = &d.fx {
+                    let at = Transform::from_translation(tf.transform_point(ntf.transform_point(d.point)));
+                    fx::spawn(&mut commands, &fxl, fx_name, None, at, at, true);
+                }
             }
         }
-        if t < last {
+        if t < clip.map_or(BREAKUP_FALLBACK, |c| c.duration) {
             continue;
         }
         *vis = Visibility::Hidden;

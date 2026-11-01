@@ -91,8 +91,9 @@ def debris_record(root, scene, outdir):
 
 
 def destruct_record(text):
-    """A section's `destructFx` ("{ Final_Ship_Chunk 2.4 2.5 ( -1.8 10.2 5.6 ) }": effect or none, start and end seconds,
-    ship-axes velocity of the flying chunk) as {fx, start, end, vel}; None when absent or malformed."""
+    """A section's `destructFx` ("{ Final_Ship_Chunk 2.4 2.5 ( -1.8 10.2 5.6 ) }": effect or none, start and end seconds, and where
+    the burst appears) as {fx, start, end, point}; None when absent or malformed. The point is in the section's own frame; the
+    file lists its numbers in the order x, z, y, so `point` is reordered to game axes (x, y, z)."""
     w = (
         (text or "")
         .replace("{", " ")
@@ -104,11 +105,14 @@ def destruct_record(text):
     if len(w) != 6:
         return None
     try:
-        start, end, *vel = (float(v) for v in w[1:])
+        start, end, x, z, y = (float(v) for v in w[1:])
     except ValueError:
         return None
     return dict(
-        fx=None if w[0].lower() == "none" else w[0], start=start, end=end, vel=vel
+        fx=None if w[0].lower() == "none" else w[0],
+        start=start,
+        end=end,
+        point=[x, y, z],
     )
 
 
