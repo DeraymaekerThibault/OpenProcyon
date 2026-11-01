@@ -112,7 +112,6 @@ pub(super) fn apply_ship_hit(class: &Class, hp: &mut Health, k: usize, damage: [
     let roll = rng.range(lo, hi);
     hp.sections[k] = (was - (1.0 - invuln) * roll).max(0.0);
     // Retail ignition roll per hit: chance > 0 and roll <= chance starts a fire of the bullet's initial strength.
-    // PROVISIONAL: one fire per section (the original's extra gate is unknown).
     let fire = (!protected && fire_p > 0.0 && rng.f() <= fire_p && hp.sections[k] > 0.0 && fire_free).then_some(fire_str);
     // Retail: every hit that leaves a vital section at 0 HP (the killing hit and later ones) takes
     // a fresh damage roll x the summed core% of all destroyed vital sections / 100 off the core (rounding provisional).
@@ -581,8 +580,8 @@ fn hit_ship(
     if s.bullet == TORPEDO_BULLET {
         info!("Torpedo hit {} ({}){}", class.name, sec.label, if invuln >= 1.0 { " [training: invulnerable]" } else { "" });
     }
-    let fire_free = !fires.list.iter().any(|f| f.sec == k && f.state == 0);
-    let outcome = apply_ship_hit(class, hp, k, damage, invuln, fire_free, rng);
+    // Decoded: no check for an existing fire on the section, so one section can burn several fires.
+    let outcome = apply_ship_hit(class, hp, k, damage, invuln, true, rng);
     if let (Some(size), true) = (bd.decal, invuln < 1.0) {
         let inv = stf.to_matrix().inverse();
         let material = if sec.material.contains("Cloth") { "Cloth" } else { key };

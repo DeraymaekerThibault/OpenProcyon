@@ -222,10 +222,14 @@ the sum of their radii (the same edges): overlap % = (R^2 - d^2) / R^2 x 100, R 
 is smaller or the overlap is under T[new][old] (new Small 50/20/0, Medium 75/10/0, Large 99/70/0 for old Small/Medium/Large); otherwise
 the new scar is refused. If something was merged and the new class is not larger, the new scar takes the next class up (two nearby small
 hits become a medium). No new scar once a ship carries over 150; scars never fade and go only when merged or with their destroyed
-section's mesh swap. Remake: `decals.rs` (a camera-lit quad instead of a clipped box; the repair clear-out is ours). Not applied yet:
-the exact texture groups per material (ours are inferred from file names), damage smoke placed at the layer node with particles on random
-mesh vertices plus a flame primitive, freezing off-screen effects, several fires per section, fire state changes only on the 6 s tick,
-ship hit effects parented to the ship.
+section's mesh swap. Remake: `decals.rs` (a camera-lit quad instead of a clipped box; the repair clear-out is ours). Damage smoke (decoded, applied): each section's effect is attached at the hull origin, ship-local, and every primitive that
+declares the mesh-vertex variable adds a random vertex of the section's mesh to each spawn position (the invisible source primitive keeps
+10 particles for Light and 2 for the others, re-rolled when the state changes; the smoke follows them; the third primitive is a flame
+spawning at a fresh vertex). Fires (decoded, applied): several per section allowed; they change state only on the 6 s ticks: a fire that is
+out (no strength or its section gone) stops emitting on the tick that finds it, is cut loose from the ship (keeping its world pose) on
+the next and deleted on the one after. Not applied yet: the exact decal texture groups per material (ours are inferred from file names),
+freezing effects that are off-screen (a unit-radius frustum test; spawn gate 700 with 50 hysteresis), ship hit effects parented to
+the ship, the fire's tilt for steep shells.
 
 ## Ricochet (read from the original's code, 2026-10-31)
 Every shot that strikes a damage section (a hull, a gun tower, a volcano) first rolls a ricochet:

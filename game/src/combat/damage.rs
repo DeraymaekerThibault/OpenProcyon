@@ -26,14 +26,12 @@ pub struct Fire {
     pub fx: Option<Entity>,
 }
 
-/// Fire tick (s), growth per tick, intensity at which the effect is full size, burn-out delays after the fire dies (s).
+/// Fire tick (s), growth per tick, intensity at which the effect is full size.
 pub const FIRE_TICK: f32 = 6.0;
 
 pub const FIRE_GROWTH: f32 = 2.0;
 
 pub const FIRE_FULL: f32 = 20.0;
-
-pub const FIRE_FADE: [f32; 2] = [3.0, 5.0];
 
 /// Intensity the crew puts out per tick, spent on the strongest fire first (docs/re/effects.md): every crew member of every
 /// post adds their leadership (0..1). An unmanned gunner, engineer or rigger post counts the first mates instead.
@@ -172,13 +170,13 @@ fn section_smoke(
         {
             c.despawn();
         }
-        let local = Transform::from_translation((sec.min + sec.max) / 2.0);
+        // Decoded: the effect sits at the hull origin and takes its particle positions from the section mesh's vertices.
         let new = if level > 0 {
-            fx::spawn(commands, fxl, NAMES[level as usize], Some(e), local, *tf * local, false).inspect(|&en| {
-                let half = (sec.max - sec.min) / 2.0;
+            fx::spawn(commands, fxl, NAMES[level as usize], Some(e), Transform::IDENTITY, *tf, false).inspect(|&en| {
+                let vertices: Vec<Vec3> = sec.tris.iter().flatten().copied().collect();
                 commands.entity(en).queue(move |mut w: EntityWorldMut| {
                     if let Some(mut f) = w.get_mut::<fx::Fx>() {
-                        f.src_half = half;
+                        f.vertices = vertices;
                     }
                 });
             })
@@ -242,9 +240,6 @@ pub fn fires(
             }
             continue;
         }
-        for f in fires.list.iter_mut().filter(|f| f.state > 0) {
-            f.t += dt;
-        }
         fires.tick += dt;
         let tick = fires.tick >= FIRE_TICK && !fires.list.is_empty();
         if tick {
@@ -252,14 +247,10 @@ pub fn fires(
             let class = &lib.classes[ship.class];
             let mut crew = fire_fighting(&std::array::from_fn(|role| crew_slots(me, ship, class, posts, role, "leadership")));
             while crew > 0.0 {
-                let Some(f) = fires.list.iter_mut().filter(|f| f.state == 0).max_by(|a, b| a.intensity.total_cmp(&b.intensity)) else { break };
+                let Some(f) = fires.list.iter_mut().filter(|f| f.state == 0 && f.intensity > 0.0).max_by(|a, b| a.intensity.total_cmp(&b.intensity)) else { break };
                 let used = crew.min(f.intensity);
                 f.intensity -= used;
                 crew -= used;
-                if f.intensity <= 0.0 {
-                    f.state = 1;
-                    f.t = 0.0;
-                }
             }
             for f in fires.list.iter().filter(|f| f.state == 0) {
                 let was = hp.sections[f.sec];
@@ -272,32 +263,36 @@ pub fn fires(
                     info!("{} of {} burnt out", sec.label, class.name);
                 }
             }
-        }
-        for f in &mut fires.list {
-            if f.state == 0 && hp.sections[f.sec] <= 0.0 {
-                f.state = 1;
-                f.t = 0.0;
-            }
-            if f.state == 1 && f.t >= FIRE_FADE[0] {
-                f.state = 2;
-                f.t = 0.0;
-                if let Some(Ok(mut x)) = f.fx.map(|e| fxq.get_mut(e)) {
-                    x.emitting = false;
+            // Decoded: a fire changes state only on these ticks. One that is out (no strength, or its section gone) stops emitting
+            // on the tick that finds it, is cut loose from the ship on the next and deleted on the one after; a burning fire doubles.
+            for f in &mut fires.list {
+                match f.state {
+                    2 => f.state = 3,
+                    1 => {
+                        f.state = 2;
+                        if let Some(e) = f.fx {
+                            commands.entity(e).queue(|mut w: EntityWorldMut| {
+                                let world = w.get::<GlobalTransform>().map(|g| g.compute_transform());
+                                w.remove::<ChildOf>();
+                                if let (Some(t), Some(mut local)) = (world, w.get_mut::<Transform>()) {
+                                    *local = t;
+                                }
+                            });
+                        }
+                    }
+                    _ if f.intensity <= 0.0 || hp.sections[f.sec] <= 0.0 => {
+                        f.state = 1;
+                        if let Some(Ok(mut x)) = f.fx.map(|e| fxq.get_mut(e)) {
+                            x.emitting = false;
+                        }
+                    }
+                    _ => {
+                        f.intensity *= FIRE_GROWTH;
+                        if let Some(Ok(mut x)) = f.fx.map(|e| fxq.get_mut(e)) {
+                            x.rate_scale = fire_scale(f.intensity);
+                        }
+                    }
                 }
-            }
-            if f.state == 2 && f.t >= FIRE_FADE[1] {
-                f.state = 3;
-            }
-            if tick && f.state == 0 {
-                f.intensity *= FIRE_GROWTH;
-                if let Some(Ok(mut x)) = f.fx.map(|e| fxq.get_mut(e)) {
-                    x.rate_scale = fire_scale(f.intensity);
-                }
-            }
-            if f.state == 1
-                && let Some(Ok(mut x)) = f.fx.map(|e| fxq.get_mut(e))
-            {
-                x.emitting = false;
             }
         }
         fires.list.retain(|f| {
@@ -446,5 +441,57 @@ mod level_tests {
         let levels = [1.0, 0.8, 0.7, 0.5, 0.4, 0.25, 0.1, 0.0].map(damage_level);
         assert_eq!(levels, [0, 0, 1, 1, 2, 2, 3, 4]);
         assert_eq!(damage_level(0.75), 3, "exactly 0.75 is in no band and falls to Heavy");
+    }
+}
+
+#[cfg(test)]
+mod fire_tests {
+    use super::*;
+
+    /// A fire whose section is gone stops on the 6 s tick that finds it, is cut loose on the next and deleted on the one after.
+    #[test]
+    #[ignore = "needs imported assets"]
+    fn a_dead_fire_changes_state_only_on_the_six_second_ticks() {
+        let lib = Library::load(crate::assets_dir());
+        let class = lib.index("Ship_Navy_Cutter");
+        let mut app = App::new();
+        app.init_resource::<Time>().add_systems(Update, fires);
+        let mut hp = Health::new(&lib.classes[class]);
+        hp.sections[0] = 0.0;
+        let ship = crate::Ship {
+            class,
+            side: crate::Side::Enemy,
+            heading: 0.0,
+            speed: 0.0,
+            ang_vel: 0.0,
+            order: 0,
+            waypoints: vec![],
+            goal: None,
+            cap: 1.0,
+            throttle: None,
+            sail_energy: 1.0,
+            crew_speed: 1.0,
+            crew_turn: 1.0,
+            net: 1.0,
+            avoid: 1.0,
+        };
+        app.insert_resource(lib);
+        let fire = Fire { sec: 0, intensity: 5.0, state: 0, t: 0.0, fx: None };
+        let e = app.world_mut().spawn((Transform::default(), ship, hp, Fires { list: vec![fire], tick: 0.0 })).id();
+        let states = |app: &App| app.world().get::<Fires>(e).unwrap().list.iter().map(|f| f.state).collect::<Vec<_>>();
+        let step = |app: &mut App, secs: f32| {
+            app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs_f32(secs));
+            app.update();
+        };
+        step(&mut app, 5.0);
+        assert_eq!(states(&app), [0], "no tick yet: nothing changes");
+        step(&mut app, 1.5);
+        assert_eq!(states(&app), [1], "the tick finds the dead fire");
+        step(&mut app, 1.0);
+        assert_eq!(states(&app), [1], "between ticks it stays put");
+        step(&mut app, 5.5);
+        assert_eq!(states(&app), [2]);
+        step(&mut app, 6.0);
+        assert!(states(&app).is_empty(), "deleted on the third tick");
     }
 }
