@@ -197,7 +197,7 @@ pub fn blasts(
                 let Some(f) = passed(btf.transform_point((sec.min + sec.max) / 2.0)) else { continue };
                 let [lo, hi, ..] = bd.damage[material_key(&sec.material)];
                 let fallen = apply_base_hit(class, &mut hp, k, rng.range(lo, hi) * f);
-                base_parts_burst(&mut commands, &fxl, &mut sfx, &mut rng, class, btf, fallen);
+                base_parts_burst(&mut commands, &fxl, &mut sfx, class, btf, fallen);
                 struck = true;
             }
             if struck {
@@ -279,15 +279,13 @@ pub fn strikes(lib: Res<Library>, mut rng: ResMut<Rng>, mut msgs: MessageReader<
 
 /// Contact damage (collision.rs `Ram`, read from the original's code): one hit on the victim's section nearest the contact,
 /// through the normal hit path, scaled by side and difficulty as shells are when a ship rammed it (rocks are not scaled).
-/// The struck section's damage sound plays at the contact, once for the pair when both struck sections share a material.
+/// The collision sound (collision.rs) is the only sound of a ram; the original plays no Damage_ file for it.
 pub fn ram_damage(
     lib: Res<Library>,
     mut rng: ResMut<Rng>,
     mut msgs: MessageReader<crate::collision::Ram>,
     mut ships: Query<(&Ship, &Transform, &mut Health, Option<&crate::campaign::MissionShip>)>,
-    mut sfx: Option<MessageWriter<crate::audio::Sfx>>,
 ) {
-    let mut played: Vec<(Vec3, &str)> = vec![];
     for r in msgs.read() {
         let rammer = ships.get(r.b).ok().map(|(s, ..)| s.side);
         let Ok((ship, tf, mut hp, ms)) = ships.get_mut(r.a) else { continue };
@@ -299,16 +297,6 @@ pub fn ram_damage(
         let Some(k) = crate::collision::nearest_section(class, tf, r.at).filter(|k| *k < hp.sections.len()) else { continue };
         let d = r.damage * scale;
         apply_ship_hit(class, &mut hp, k, [d, d, 0.0, 0.0, 0.0], ms.map_or(0.0, |m| m.invuln), false, &mut rng);
-        let pool = match super::material_key(&class.sections[k].material) {
-            "Wood" | "Reinforced" => "Wood",
-            "Iron" => "Metal",
-            "Cloth" => "Sail",
-            _ => "Stone",
-        };
-        if let Some(sfx) = sfx.as_mut().filter(|_| rammer.is_some() && !played.contains(&(r.at, pool))) {
-            played.push((r.at, pool));
-            sfx.write(crate::audio::Sfx { name: format!("Damage_{pool}0{}", rng.variant(5)), at: Some(r.at), vol: 1.0, max: 600.0 });
-        }
     }
 }
 

@@ -129,6 +129,7 @@ pub fn damage_fx(
     fxl: Res<FxLib>,
     assets: Res<AssetServer>,
     mut rng: Local<Rng>,
+    mut sfx: MessageWriter<Sfx>,
     mut ships: Query<(Entity, &Transform, &Ship, &Health, &mut DamageFx)>,
 ) {
     const NAMES: [&str; 5] = ["", "Damaged Section_Light", "Damaged Section_Medium", "Damaged Section_Heavy", "Damaged Section_Destroyed"];
@@ -161,6 +162,8 @@ pub fn damage_fx(
                 continue;
             }
             if level == 4 && cur < 4 {
+                // The original plays its one `Explosion_Med` file where a section is lost (docs/re/sound.md), never a Damage_ file.
+                sfx.write(Sfx { name: "Explosion_Med01".into(), at: Some(tf.translation), vol: 1.0, max: 6000.0 });
                 let vel = tf.rotation * Vec3::NEG_Z * ship.speed;
                 spawn_debris(&mut commands, &assets, &fxl, sec, tf, vel, || rng.f());
             }
@@ -194,13 +197,11 @@ pub fn fires(
     mut commands: Commands,
     time: Res<Time>,
     lib: Res<Library>,
-    mut rng: ResMut<Rng>,
-    mut sfx: MessageWriter<Sfx>,
     mut ships: Query<(Entity, &Transform, &Ship, &mut Health, &mut Fires, Option<&crate::crew_arms::CrewPosts>)>,
     mut fxq: Query<&mut fx::Fx>,
 ) {
     let dt = time.delta_secs();
-    for (me, tf, ship, mut hp, mut fires, posts) in &mut ships {
+    for (me, _, ship, mut hp, mut fires, posts) in &mut ships {
         let fires = &mut *fires;
         if hp.destroyed {
             for f in fires.list.drain(..) {
@@ -239,7 +240,6 @@ pub fn fires(
                     if sec.vital {
                         hp.core -= core_bleed(class, &hp, f.intensity); // fire goes through the same damage path
                     }
-                    sfx.write(Sfx { name: format!("Damage_Wood0{}", rng.variant(5)), at: Some(tf.translation), vol: 1.0, max: 600.0 });
                     info!("{} of {} burnt out", sec.label, class.name);
                 }
             }

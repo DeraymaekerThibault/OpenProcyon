@@ -23,11 +23,16 @@ The float is read as the pool's max distance (same field order as the WOT pools)
 `HUD_SpeedControl_Up/Down` and `HUD_FireAll` are also original-global names.
 
 ## PROVISIONAL in the remake
-- Which event uses which original pool. Measured (27-minute retail recording, 2026-10-31): a ship's death plays one file of the
-  `Explosion_Heavy` pool, about 2.3 s before its wreck stops moving (4 of 9 deaths matched, each file heard almost nowhere else).
-  `Explosion_Med01` plays at the same moment in 4 of 9 deaths and about 70 other times (perhaps section loss, not tested). The
-  `Damage_*` pools and `Ship_Destroyed01-03` were never heard, so the remake's damage pool on section loss stays PROVISIONAL.
-  Collision pools are unused.
+- Which event uses which original pool (read from the original's code, 2026-11-01; earlier recording: one `Explosion_Heavy` file about 2.3 s before a wreck stops).
+  - Each pool plays one uniformly random item at a position; max distance as above, full volume inside a tenth of it. Volume field not decoded (1.0 used).
+  - **Section lost** (HP reaches 0): one `Explosion_Med01` at the ship, never a `Damage_*` file. (Gated by a section flag not resolved; PROVISIONAL that it applies to every section.)
+  - **Ship destroyed:** one `Explosion_Heavy` file when the destruction is decided (ships and bases only). The dying ship's section explosion list (times and effect names in the
+    data) also plays `Explosion_Med01` and then the section material's `Damage_*` pool as each entry's time passes; which hulls have such entries is not read yet (not implemented).
+  - **`Damage_*` is played by:** that death list, nebula lightning (struck section's material), meteor hits (`Damage_Stone`, then a random section's material), storm wind (`Damage_Sail`),
+    and rocks (`Damage_Stone` when a shot damages a destructible rock, when it is destroyed, and on ship-rock or rock-rock contact). Ordinary shell hits on ships use only the bullet's own impact sounds.
+  - **Ship-ship contact** plays only `Ship_Collision_*` (by section material), never `Damage_*`.
+  - **Rock destroyed:** `Explosion_Heavy` if the rock's size value is above 10, else `Explosion_Med01` (our size mapping is not ported: we play Med01).
+  - `Ship_Destroyed01-03`, `Damage_*06-10` and `Explosion_Med02-08` are named nowhere in the original's tables (dead assets); `Explosion_Med01-03` also appear in six bullet WOTs (data-driven impact).
 - Falloff (PROVISIONAL): inverse-distance rolloff like DirectSound 3D: full volume within 25 units of the camera, halving per doubling of distance, silent beyond the max distance; no stereo panning. The earlier linear falloff kept nearby collisions near full volume at normal zoom.
 - Engine loops: no max distance in the data (300 used), level 0.25 (PROVISIONAL mix); silent at All Stop. Music level 0.35, one fixed track.
 - One fire sound per shell of a burst.
