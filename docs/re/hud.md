@@ -53,7 +53,7 @@ Retail footage (headless runs, Border Dispute and The Diablo Strait): the compas
 gold arrow on it appears only when the map has a base to destroy. On Border Dispute it points at the enemy base from the first frame
 (no waypoint set) and keeps pointing there; on The Diablo Strait (end rule: last ships standing) there is no arrow. Whether it also
 follows waypoints, and what it shows on maps with a group objective (convoy, capture), is not measured: PROVISIONAL. The remake points
-at the living hostile base named by a rule the human wins by (`Victory::objective_bases`) and hides the arrow otherwise.
+at the local team's current objective point (see "Skirmish team objective") and hides the arrow when there is none.
 
 What marks a targeted base is not known. A lone Man-O-War cannot beat a Procyon base on Easy (26 guns; it was sunk four times at 137-266 units, and its clicks on the base never
 made it fire at the base): the destruction of a base part has not been filmed yet (issue #97).
@@ -62,7 +62,9 @@ made it fire at the base): the destruction of a base part has not been filmed ye
 
 Observed on retail, Border Dispute on Easy: during the battle the skirmish HUD shows **no objective text** (no panel, the chat history is empty, the bar buttons are pause,
 fleet commands, chat history, waypoint mode, plus the weapon-bar and ship-bar toggles). The objective cue there is the compass arrow on the ship's ring (gold pointer,
-the same art as the campaign's objective arrow), which the remake draws towards the base the end rule says to destroy.
+the same art as the campaign's objective arrow), which the remake draws towards the team's objective point.
+
+**Decoded rules** (static analysis): `Setup Team Objective` acts only for the local human's team. Its point name, when found in the map's points, becomes the one current objective point; `NO OBJECTIVE POINT` clears it (no arrow, no ring); any other unknown name leaves it unchanged. Its task name sets that task active; nothing deactivates older tasks, and the panel lists each active task's own text. The star-map ring and the ship-ring arrow both read the same current point (the arrow's own routine was not located: PROVISIONAL, but it is the only objective data path, and it fits Border Dispute, whose point lies beside the enemy base, and the maps with no arrow). Untested prediction: Ambush's Navy side gets an arrow towards its docking point. Remake: `Script::team_objectives`, `classic/world_hud.rs` `navigation`.
 
 **The star map (M) shows it** (second retail check, same map): a blue panel with a gold border at the top left reads "Objectives:" over the team's task text
 ("Destroy Enemy Base."), the team's objective point is drawn with the objective-point icon (a target ring on the enemy base, Starkeep Cerebrus), and the map's place

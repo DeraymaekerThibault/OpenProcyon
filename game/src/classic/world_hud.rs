@@ -82,8 +82,7 @@ fn navigation(
     ships: Query<(Entity, &Transform, &Ship, Has<PlayerShip>)>,
     fleets: Res<crate::ship::Fleets>,
     mission: Option<Res<crate::campaign::Mission>>,
-    victory: Option<Res<crate::victory::Victory>>,
-    bases: Query<(&Transform, &crate::campaign::MissionBase, &crate::combat::Health), (With<crate::combat::ArmedBase>, Without<Ship>, Without<Navigation>)>,
+    skirmish: Option<Res<crate::rules::skirmish::SkirmishScript>>,
     mut indicators: Query<(&Navigation, &mut Transform, &mut Visibility), Without<Ship>>,
 ) {
     if indicators.is_empty() {
@@ -121,10 +120,11 @@ fn navigation(
     let primary_tf = tf;
     let goal = match mission.as_deref() {
         Some(m) => crate::campaign::objective_point(m),
-        // Skirmish: the arrow points at the base the map's end rule says to destroy; with no such objective it is not shown.
-        None => victory.as_deref().and_then(|v| {
-            let ids = v.objective_bases();
-            crate::nearest(bases.iter().filter(|(_, b, h)| ids.contains(&b.id) && !h.destroyed).map(|(t, ..)| t.translation), primary_tf.translation, |p| *p)
+        // Skirmish: the arrow points at the local team's current objective point (the one `Setup Team Objective` last set, the same
+        // the star map rings); with none, or 'NO OBJECTIVE POINT', it is not shown. Decoded; the arrow's own routine is PROVISIONAL.
+        None => skirmish.as_deref().and_then(|sk| {
+            let (point, _) = sk.script.team_objective(sk.script.team_of(&fleets.local)?)?;
+            Some(crate::game_to_bevy(&point?))
         }),
     };
     for (indicator, mut transform, mut vis) in &mut indicators {
