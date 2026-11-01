@@ -618,6 +618,7 @@ fn autopilot(
             s.ship.waypoints = vec![g];
             s.ship.order = 2;
             s.ship.goal = None;
+            s.ship.throttle = None; // a move order releases a manual throttle (the opening NIS leaves it at 0)
         } else {
             s.ship.waypoints.clear();
             s.ship.order = 1;

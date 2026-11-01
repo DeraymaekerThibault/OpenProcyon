@@ -470,7 +470,7 @@ pub fn sail(
     let local = fleets.as_ref().map(|f| f.local.as_str());
     // The human's ships (`Captain_Human` in the original): the player ship and the human's fleet; allied computer fleets share the side.
     let humans = |e: Entity, side: crate::Side| side == crate::Side::Player && (human.contains(e) || members.get(e).ok().is_none_or(|m| Some(m.0.as_str()) == local));
-    // The original's collision avoider (`avoid`) for every AI-steered ship: not the human's own ship, not while docking.
+    // The original's collision avoider (`avoid`) for every AI-steered ship and the human's own ship on a move order; not while docking.
     {
         use avoid::{Avoid, Key, Me, Other, Shape};
         let priority = |e: Entity, s: &crate::Ship| s.speed.abs() + if s.speed.abs() >= 0.001 && humans(e, s.side) { avoid::HUMAN_PRIORITY } else { 0.0 };
@@ -497,8 +497,9 @@ pub fn sail(
         let mut seen = 0;
         avoiders.retain(|e, _| ships.contains(*e));
         for (e, mut s, tf, health, _, docker) in &mut ships {
-            // The human's own ship avoids only on its dock routine (the original's dock orders run through the avoider too).
-            if health.destroyed || docker.map_or(human.contains(e), |d| !d.avoids()) || pinned(e) {
+            // The human's own ship avoids on its dock routine and while it follows a move order (a list of course points; the original's
+            // move and dock orders run through the avoider, a heading or manual throttle does not).
+            if health.destroyed || docker.map_or(human.contains(e) && s.waypoints.is_empty(), |d| !d.avoids()) || pinned(e) {
                 s.avoid = 1.0;
                 continue;
             }
