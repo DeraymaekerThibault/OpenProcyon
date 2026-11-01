@@ -74,7 +74,7 @@ Remake (owner's choice, 2026-10-31): a fleet profile is the hulls only, loading 
 loaded per ship from the Crew / Arms screen and offered for any ship of the same hull class. A Load that would take the fleet over the victory points is refused with the reason shown in the dialog, unless it adds no
 cost (PROVISIONAL: retail's over-budget Load is not measured). Auto Assign spends every point, so upgrades loaded after it are refused.
 
-**Arms tab.** A top-down ship outline with one icon per selectable weapon bank (a mount of several guns is one bank). Clicking a bank
+**Arms tab.** A top-down ship outline with one icon per weapon bank (a mount of several guns is one bank), fixed banks such as torpedo tubes and mines included so crew can be assigned to them; a fixed bank offers no replacement weapons (owner playtest 2026-11: the screen listed only swappable banks and hid guns). Clicking a bank
 shows a tooltip "Heavy Mount / 4 Guns" and the list *Available Weapons* for that mount type, the fitted gun highlighted, with its name,
 max range, best range, damage range and Point Cost. Dragging a weapon from the list onto the bank swaps it; the left panel then says
 "Total Cost: N / Weapon Upgrade Successful". The change is the price difference times the number of guns in the bank: four heavy guns

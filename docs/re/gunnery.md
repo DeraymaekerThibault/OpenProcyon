@@ -65,8 +65,8 @@ ballistic arc and attributed to the ship it started from.
 - Measured on the original (headless 1-vs-1 skirmish, Navy Man-O-War with nine gunners of Gunnery 7-9 vs a Galleon, the
   Galleon's section HP at 20 Hz): one gun's hits arrived every 3.5-3.9 s for 90 s, against at least ~13 s between heavy
   hits with the default crew. 12 s - 8.5 = 3.5 s fits a heavy cannon with a gunnery-8.5 gunner.
-- Each gun reads the gunner of its own bank, not a ship-wide average (owner-confirmed; the crew screen's gunner slots sit at the
-  selectable banks, in the same order). PROVISIONAL: the point-defence banks have no visible slot and count as a generic hand
+- Each gun reads the gunner of its own bank, not a ship-wide average (owner-confirmed; the crew screen's gunner slots follow the
+  weapon banks, fixed ones included, in the same order). PROVISIONAL: the point-defence banks have no visible slot and count as a generic hand
   (0.1); which slot a gun reads was inferred from the screen, not decoded. The ship's leadership bonus ([crew.md](crew.md)) adds to the
   gunner's skill before the 1 - 0.8 x skill factor.
 
