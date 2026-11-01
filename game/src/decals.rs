@@ -96,7 +96,7 @@ fn place(
         }
         let Some((gone, class)) = merge(&old, s.local, s.size.min(2)) else { continue };
         // Nearest size class that has art for the material.
-        let Some(names) = [class, 1, 0, 2].into_iter().find_map(|z| lib.pool.get(&(s.material.to_string(), z)).filter(|v| !v.is_empty()).map(|v| (z, v))) else { continue };
+        let Some(names) = (class..=2).find_map(|z| lib.pool.get(&(s.material.to_string(), z)).filter(|v| !v.is_empty()).map(|v| (z, v))) else { continue };
         let (size, names) = names;
         lib.n += 1;
         let name = names[lib.n % names.len()].clone();

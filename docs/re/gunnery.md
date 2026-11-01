@@ -227,9 +227,11 @@ declares the mesh-vertex variable adds a random vertex of the section's mesh to 
 10 particles for Light and 2 for the others, re-rolled when the state changes; the smoke follows them; the third primitive is a flame
 spawning at a fresh vertex). Fires (decoded, applied): several per section allowed; they change state only on the 6 s ticks: a fire that is
 out (no strength or its section gone) stops emitting on the tick that finds it, is cut loose from the ship (keeping its world pose) on
-the next and deleted on the one after. Not applied yet: the exact decal texture groups per material (ours are inferred from file names),
-freezing effects that are off-screen (a unit-radius frustum test; spawn gate 700 with 50 hysteresis), ship hit effects parented to
-the ship, the fire's tilt for steep shells.
+the next and deleted on the one after. Also applied: hit effects on a ship (the bullet's own and the splinters) are attached to the hull and ride with it; a new fire takes the
+shell's orientation, so it tilts for steep shots (PROVISIONAL: the original's conversion of that basis was not decoded); decal textures
+are filed by the original's table (five in every group, six in wood and cloth, the rest by name; engine_part, rudder and hole_damage60
+are never used); the 15 % smoke thinning is gone. Not applied yet: freezing effects that are off-screen (a unit-radius frustum test;
+spawn gate 700 with 50 hysteresis).
 
 ## Ricochet (read from the original's code, 2026-10-31)
 Every shot that strikes a damage section (a hull, a gun tower, a volcano) first rolls a ricochet:

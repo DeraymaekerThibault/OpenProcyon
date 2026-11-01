@@ -220,7 +220,7 @@ pub fn blasts(
             shell.hp -= rng.range(lo, hi) * f;
             if shell.hp <= 0.0 {
                 if let Some(pd) = lib.bullets.get(&shell.bullet) {
-                    hit_fx(&mut commands, &fxl, pd, ptf.translation, shell.vel);
+                    hit_fx(&mut commands, &fxl, pd, ptf.translation, shell.vel, None);
                 }
                 commands.entity(pe).despawn();
             }
