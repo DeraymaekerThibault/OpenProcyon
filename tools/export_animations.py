@@ -6,6 +6,7 @@ Retail: 61 scenes, 65 clips. Ships carry one break-apart clip (ANIMATION00, 2-20
 pose or absolute poses is not settled (docs/re/effects.md). usage: python -m tools.export_animations <game_root> <assets_dir>"""
 
 import json
+import struct
 import sys
 from pathlib import Path
 
@@ -37,7 +38,13 @@ def rounded(clip, names):
 def export(root, out):
     scenes = {}
     for msb in ci_files(Path(root) / "BD_MeshScenes", "*.msb"):
-        scene = parse_scene(msb.read_bytes())
+        try:
+            scene = parse_scene(msb.read_bytes())
+        except (ValueError, struct.error) as e:
+            print(
+                f"{msb.name}: skipped ({e})"
+            )  # unreadable (modded) scene: no animations
+            continue
         if scene["animations"]:
             names = {
                 e["id"]: e["name"]

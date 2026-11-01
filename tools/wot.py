@@ -5,7 +5,7 @@ import re
 
 from tools.source_text import SourceLine
 
-HEADER = re.compile(r"([0-9]{8})\s+(.+)")
+HEADER = re.compile(r"([0-9]{8,})\s+(.+)")
 TYPE_TOKEN = re.compile(r"\s+(String|Int|Float|Bool|Vector3|Matrix33|Coord|Colour)\b")
 NUMBER = re.compile(r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?")
 FACTORIES = {

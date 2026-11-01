@@ -33,7 +33,9 @@ def main(root, out):
         if f:
             found[n] = counters(f[0].read_text(encoding="latin1"))
     found[1] = {"points": 0, "crew": [], "arms": []}
-    found[13] = found[12]
+    found[13] = found.get(
+        12, found[max(found)]
+    )  # campaign files may be missing or removed
     for n, c in sorted(found.items()):
         save = {"name": f"Mission {n:02} (start)", "mission": f"mission{n:02}", **c}
         (out / f"mission{n:02}.json").write_text(json.dumps(save, indent=1) + "\n")

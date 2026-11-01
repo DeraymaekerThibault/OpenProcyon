@@ -6,10 +6,13 @@ from pathlib import Path
 
 
 def ci_files(directory, pattern):
-    """Case-insensitive glob in one directory, sorted by path."""
+    """Case-insensitive glob in one directory, sorted by path; empty when the directory does not exist."""
+    directory = Path(directory)
+    if not directory.is_dir():
+        return []
     return sorted(
         p
-        for p in Path(directory).iterdir()
+        for p in directory.iterdir()
         if fnmatch.fnmatch(p.name.lower(), pattern.lower())
     )
 

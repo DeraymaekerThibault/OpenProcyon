@@ -12,6 +12,7 @@ from pathlib import Path
 from tools.export_mesh_detail import collision_lods
 from tools.export_ship import export as export_physics
 from tools.gamefs import ci_file, ci_files
+from tools.mdb import MdbError
 from tools.mdb import parse as parse_mdb
 from tools.mdb_to_glb import convert, hardpoints
 from tools.models import model_path
@@ -335,10 +336,12 @@ def export(root, ship, outdir):
                 g = flat(load(root, gun))
                 if g["BulletTypeName_Primary"] == "NoBulletType":
                     raise KeyError("no bullet")
-                gun_defs[gun] = {k: g[k] for k in GUN_KEYS} | {
-                    k: g.get(k) for k in GUN_SOUND_KEYS
-                }
-                gun_defs[gun]["visual"] = gun_visual(root, gun, outdir)
+                # Cached only once complete: a gun whose model fails (mods) must not leave a definition without visual.
+                gun_defs[gun] = (
+                    {k: g[k] for k in GUN_KEYS}
+                    | {k: g.get(k) for k in GUN_SOUND_KEYS}
+                    | {"visual": gun_visual(root, gun, outdir)}
+                )
             b = gun_defs[gun]["BulletTypeName_Primary"]
             for name in (b, *EXTRA_BULLETS.get(b, ())):
                 if name not in bullets:
@@ -387,9 +390,14 @@ def export(root, ship, outdir):
     sections = []
     for mesh, label, assoc in associations(nodes, "DamageSection"):
         a = kv(assoc)
-        models = parse_mdb(
-            ci_file(Path(root) / "BD_Meshes", f"{mesh}.mdb").read_bytes()
-        ).models
+        try:
+            models = parse_mdb(
+                ci_file(Path(root) / "BD_Meshes", f"{mesh}.mdb").read_bytes()
+            ).models
+        except MdbError as e:
+            # Mods ship truncated placeholder meshes for some sections: the ship keeps its other sections.
+            print(f"warning: {ship} section {label}: {mesh}.mdb unreadable ({e})")
+            continue
         # The triangles are the detail level retail collides with; the box also covers the full-detail model (it feeds aim points,
         # ring and radius, which were measured on the visible hull).
         m = models[min(collision_lods(root)(mesh), len(models) - 1)]
