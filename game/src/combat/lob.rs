@@ -144,7 +144,7 @@ pub fn blasts(
     lib: Res<Library>,
     fxl: Res<FxLib>,
     mut rng: ResMut<Rng>,
-    (mut hits, mut destroyed, mut sfx): (MessageWriter<Hit>, MessageWriter<Destroyed>, MessageWriter<Sfx>),
+    (mut hits, mut destroyed): (MessageWriter<Hit>, MessageWriter<Destroyed>),
     q: Query<(Entity, &mut Blast, &Transform), (Without<Ship>, Without<Shell>)>,
     mut ships: Query<(Entity, &Transform, &Ship, &mut Health, Option<&crate::campaign::MissionShip>), Without<crate::lifeboats::Lifeboat>>,
     mut bases: Query<(Entity, &Transform, &ArmedBase, &mut Health), (Without<Ship>, Without<Blast>)>,
@@ -197,7 +197,7 @@ pub fn blasts(
                 let Some(f) = passed(btf.transform_point((sec.min + sec.max) / 2.0)) else { continue };
                 let [lo, hi, ..] = bd.damage[material_key(&sec.material)];
                 let fallen = apply_base_hit(class, &mut hp, k, rng.range(lo, hi) * f);
-                base_parts_burst(&mut commands, &fxl, &mut sfx, class, btf, fallen);
+                base_parts_burst(&mut commands, &fxl, class, btf, fallen);
                 struck = true;
             }
             if struck {

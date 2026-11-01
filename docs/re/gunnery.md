@@ -202,7 +202,18 @@ meets can be hit. The firer's own island or base is exempt. Only scenery with no
 dock buoys) lets shots through. A lob shell clears an island only if its arc passes above the triangles. On land with no damage
 section the shot is spent with its impact (its impact sound and effect; an explosive or lobbed shell bursts there); a gun tower's
 section takes the hit as before. Remake: `combat::shells` with `collision::Obstacle::segment_hit`. PROVISIONAL (not decoded): the
-island hit effect the original shows half the time near the player, the exact removal.
+exact removal.
+
+## Base and island hit feedback (decoded)
+Bases are islands and take hits like ship sections. A shell that is not ricocheted and has positive damage on the material makes a wood or
+reinforced-wood section play `Splintering_Wood` and a stone section `Rock_Chunks`, 50 % of the time and only within 300 units of the
+camera (iron, cloth, dragon: nothing; island mesh between sections: only the shell's own impact). Smoke per section from the remaining
+share r of its HP: over 0.75 none, 0.5 up to 0.75 Light, 0.25 up to 0.5 Medium, under 0.25 Heavy, none left Destroyed (exactly 0.75 falls
+to Heavy), swapped when the state changes, no sight test. A destroyed base section plays each of its destruct effects at once at its
+point (or `ShipExplosion_Medium` at its centre when it has none), one explosion sound, and drops its debris piece. There is no health bar
+or section readout for an enemy (PROVISIONAL: inferred from the absent HUD resources); guns aim at the clicked point, stored in the
+target's frame. Remake: `combat::damage::section_smoke` serves ships and bases; `shells::base_parts_burst`; the 300-unit camera gate is
+not applied. Not decoded: how a click picks a point on a base mesh.
 
 ## Ricochet (read from the original's code, 2026-10-31)
 Every shot that strikes a damage section (a hull, a gun tower, a volcano) first rolls a ricochet:

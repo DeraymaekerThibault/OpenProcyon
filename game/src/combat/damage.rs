@@ -121,7 +121,68 @@ pub fn debris(mut commands: Commands, time: Res<Time>, mut q: Query<(Entity, &mu
     }
 }
 
-/// PROVISIONAL thresholds: lost HP fraction under 25% none, then Light, Medium, Heavy at 25/50/75%, Destroyed at 0 HP.
+/// Damage state of a section from its remaining share `r` of HP, as the original bands it: over 0.75 none, 0.5 up to 0.75 Light,
+/// 0.25 up to 0.5 Medium, under 0.25 Heavy, none left Destroyed. Exactly 0.75 is in no band and falls to Heavy (decoded quirk).
+fn damage_level(r: f32) -> u8 {
+    if r <= 0.0 {
+        4
+    } else if r > 0.75 {
+        0
+    } else if (0.5..0.75).contains(&r) {
+        1
+    } else if (0.25..0.5).contains(&r) {
+        2
+    } else {
+        3
+    }
+}
+
+/// Smoke and section-loss effects of one hull or base: swaps each section's looping smoke when its damage state changes, and on
+/// loss plays the one explosion sound and drops the debris piece.
+#[allow(clippy::too_many_arguments)]
+fn section_smoke(
+    commands: &mut Commands,
+    (assets, fxl): (&AssetServer, &FxLib),
+    rng: &mut Rng,
+    sfx: &mut MessageWriter<Sfx>,
+    (e, tf, class, vel): (Entity, &Transform, &crate::data::Class, Vec3),
+    h: &Health,
+    d: &mut DamageFx,
+) {
+    const NAMES: [&str; 5] = ["", "Damaged Section_Light", "Damaged Section_Medium", "Damaged Section_Heavy", "Damaged Section_Destroyed"];
+    for (i, sec) in class.sections.iter().enumerate() {
+        let level = damage_level(h.sections[i] / sec.hp);
+        let (cur, ent) = d.0[i];
+        if level == cur {
+            continue;
+        }
+        if level == 4 && cur < 4 {
+            // The original plays its one `Explosion_Med` file where a section is lost (docs/re/sound.md), never a Damage_ file.
+            sfx.write(Sfx { name: "Explosion_Med01".into(), at: Some(tf.translation), vol: 1.0, max: 6000.0 });
+            spawn_debris(commands, assets, fxl, sec, tf, vel, || rng.f());
+        }
+        if let Some(old) = ent
+            && let Ok(mut c) = commands.get_entity(old)
+        {
+            c.despawn();
+        }
+        let local = Transform::from_translation((sec.min + sec.max) / 2.0);
+        let new = if level > 0 {
+            fx::spawn(commands, fxl, NAMES[level as usize], Some(e), local, *tf * local, false).inspect(|&en| {
+                let half = (sec.max - sec.min) / 2.0;
+                commands.entity(en).queue(move |mut w: EntityWorldMut| {
+                    if let Some(mut f) = w.get_mut::<fx::Fx>() {
+                        f.src_half = half;
+                    }
+                });
+            })
+        } else {
+            None
+        };
+        d.0[i] = (level, new);
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn damage_fx(
     mut commands: Commands,
@@ -131,8 +192,8 @@ pub fn damage_fx(
     mut rng: Local<Rng>,
     mut sfx: MessageWriter<Sfx>,
     mut ships: Query<(Entity, &Transform, &Ship, &Health, &mut DamageFx)>,
+    mut bases: Query<(Entity, &Transform, &super::ArmedBase, &Health, &mut DamageFx), Without<Ship>>,
 ) {
-    const NAMES: [&str; 5] = ["", "Damaged Section_Light", "Damaged Section_Medium", "Damaged Section_Heavy", "Damaged Section_Destroyed"];
     for (e, tf, ship, h, mut d) in &mut ships {
         // A destroyed ship's smoke goes at once: it would otherwise ride on the tumbling breakup pieces (owner's call).
         if h.destroyed {
@@ -143,50 +204,12 @@ pub fn damage_fx(
             }
             continue;
         }
-        let class = &lib.classes[ship.class];
-        for (i, sec) in class.sections.iter().enumerate() {
-            let lost = 1.0 - h.sections[i] / sec.hp;
-            let level = if h.sections[i] <= 0.0 {
-                4
-            } else if lost >= 0.75 {
-                3
-            } else if lost >= 0.5 {
-                2
-            } else if lost >= 0.25 {
-                1
-            } else {
-                0
-            };
-            let (cur, ent) = d.0[i];
-            if level == cur {
-                continue;
-            }
-            if level == 4 && cur < 4 {
-                // The original plays its one `Explosion_Med` file where a section is lost (docs/re/sound.md), never a Damage_ file.
-                sfx.write(Sfx { name: "Explosion_Med01".into(), at: Some(tf.translation), vol: 1.0, max: 6000.0 });
-                let vel = tf.rotation * Vec3::NEG_Z * ship.speed;
-                spawn_debris(&mut commands, &assets, &fxl, sec, tf, vel, || rng.f());
-            }
-            if let Some(old) = ent
-                && let Ok(mut c) = commands.get_entity(old)
-            {
-                c.despawn();
-            }
-            let local = Transform::from_translation((sec.min + sec.max) / 2.0);
-            let new = if level > 0 {
-                fx::spawn(&mut commands, &fxl, NAMES[level as usize], Some(e), local, *tf * local, false).inspect(|&en| {
-                    let half = (sec.max - sec.min) / 2.0;
-                    commands.entity(en).queue(move |mut w: EntityWorldMut| {
-                        if let Some(mut f) = w.get_mut::<fx::Fx>() {
-                            f.src_half = half;
-                        }
-                    });
-                })
-            } else {
-                None
-            };
-            d.0[i] = (level, new);
-        }
+        let vel = tf.rotation * Vec3::NEG_Z * ship.speed;
+        section_smoke(&mut commands, (&assets, &fxl), &mut rng, &mut sfx, (e, tf, &lib.classes[ship.class], vel), h, &mut d);
+    }
+    // Bases lose sections the same way; no sight test gates it (decoded: only the effect manager's distance cull).
+    for (e, tf, base, h, mut d) in &mut bases {
+        section_smoke(&mut commands, (&assets, &fxl), &mut rng, &mut sfx, (e, tf, &lib.classes[base.class], Vec3::ZERO), h, &mut d);
     }
 }
 
@@ -405,5 +428,17 @@ mod swap_tests {
         assert_eq!([vis(&app, whole), vis(&app, hurt)], [Visibility::Hidden, Visibility::Inherited]);
         assert_eq!([vis(&app, other), vis(&app, other_hurt)], [Visibility::Inherited, Visibility::Hidden]);
         assert_eq!(vis(&app, stray), Visibility::Hidden);
+    }
+}
+
+#[cfg(test)]
+mod level_tests {
+    use super::damage_level;
+
+    #[test]
+    fn smoke_bands_follow_the_originals_remaining_share() {
+        let levels = [1.0, 0.8, 0.7, 0.5, 0.4, 0.25, 0.1, 0.0].map(damage_level);
+        assert_eq!(levels, [0, 0, 1, 1, 2, 2, 3, 4]);
+        assert_eq!(damage_level(0.75), 3, "exactly 0.75 is in no band and falls to Heavy");
     }
 }

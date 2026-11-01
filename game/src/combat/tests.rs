@@ -649,7 +649,7 @@ fn a_destroyed_base_part_blasts() {
         .init_resource::<crate::environment::Sensors>()
         .add_systems(PreUpdate, crate::environment::refresh_sensors)
         .init_resource::<Blasts>()
-        .add_systems(Update, (fire, shells.after(fire), count_blasts.after(shells)));
+        .add_systems(Update, (fire, shells.after(fire), damage_fx.after(shells), count_blasts.after(damage_fx)));
     let assets = app.world().resource::<AssetServer>().clone();
     let lib = Library::load(assets_dir());
     let c = lib.index("Ship_Navy_Frigate");
@@ -682,7 +682,7 @@ fn a_destroyed_base_part_blasts() {
     let class = lib.index("Base_PirateMP");
     let base = app.world_mut().spawn((Transform::from_xyz(120.0, -27.0, 0.0), crate::campaign::MissionBase { id: 1, owner: "base1".into() }, BaseSide(Side::Enemy))).id();
     let states = spawn_guns(&mut app.world_mut().commands(), &assets, &lib, base, class);
-    app.world_mut().entity_mut(base).insert((ArmedBase { class }, Health::new(&lib.classes[class]), states));
+    app.world_mut().entity_mut(base).insert((ArmedBase { class }, Health::new(&lib.classes[class]), DamageFx::new(&lib.classes[class]), states));
     app.world_mut().flush();
     for (h, sec) in app.world_mut().get_mut::<Health>(base).unwrap().sections.iter_mut().zip(&lib.classes[class].sections) {
         if sec.mission {

@@ -33,6 +33,8 @@ EXTRAS = [
     "BlackHoleRibbons_Large",
     "Wake_Hole",
     "ShipExplosion_Medium",
+    "Splintering_Wood",
+    "Rock_Chunks",
     "Explosion_Huge",
     "Nebula",
     "SolarStorm",

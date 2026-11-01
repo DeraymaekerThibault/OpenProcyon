@@ -136,15 +136,17 @@ pub(super) fn apply_base_hit(class: &Class, hp: &mut Health, k: usize, roll: f32
     (0..was_up.len()).filter(|j| was_up[*j] && hp.sections[*j] == 0.0).collect()
 }
 
-/// The base parts in `fallen` that are mission parts burst with their destruct effect and a blast. PROVISIONAL: retail's effect for a
-/// destroyed base part is not measured; the part's WOT destruct effect and the ship-explosion sound stand in.
-pub(super) fn base_parts_burst(commands: &mut Commands, fxl: &FxLib, sfx: &mut MessageWriter<Sfx>, class: &Class, btf: &Transform, fallen: Vec<usize>) {
-    for sec in fallen.into_iter().map(|j| &class.sections[j]).filter(|sec| sec.mission) {
-        let centre = Transform::from_translation(btf.transform_point((sec.min + sec.max) / 2.0));
-        if let Some(name) = sec.destruct.as_ref().and_then(|d| d.fx.as_deref()) {
-            fx::spawn(commands, fxl, name, None, centre, centre, true);
-        }
-        sfx.write(Sfx { name: "Explosion_Med01".to_string(), at: Some(centre.translation), vol: 1.0, max: 900.0 });
+/// A base part brought down plays its destruct effect at once at the effect's point in the base frame (start times are ignored on
+/// this path), or `ShipExplosion_Medium` at the part's centre when it has none (decoded). The explosion sound and debris come
+/// from `damage_fx`.
+pub(super) fn base_parts_burst(commands: &mut Commands, fxl: &FxLib, class: &Class, btf: &Transform, fallen: Vec<usize>) {
+    for sec in fallen.into_iter().map(|j| &class.sections[j]) {
+        let (name, local) = match sec.destruct.as_ref().and_then(|d| d.fx.as_deref().map(|n| (n, d.point))) {
+            Some((n, point)) => (n, point),
+            None => ("ShipExplosion_Medium", (sec.min + sec.max) / 2.0),
+        };
+        let at = Transform::from_translation(btf.transform_point(local));
+        fx::spawn(commands, fxl, name, None, at, at, true);
     }
 }
 
@@ -442,8 +444,19 @@ pub(super) fn shells(
             let class = &lib.classes[ab.class];
             let fallen = apply_base_hit(class, &mut hp, k, rng.range(lo, hi));
             sfx.write_batch(bd.impact_sound(key, at, &mut rng));
-            base_parts_burst(&mut commands, &fxl, &mut sfx, class, btf, fallen);
+            base_parts_burst(&mut commands, &fxl, class, btf, fallen);
             hit_fx(&mut commands, &fxl, bd, at, s.vel);
+            // Decoded: a struck wood section splinters and a stone one throws chunks, half the time (the original also needs the
+            // hit within 300 of the camera; not gated here, far hits are unseen anyway).
+            let splinter = match key {
+                "Wood" | "Reinforced" => Some("Splintering_Wood"),
+                "Stone" => Some("Rock_Chunks"),
+                _ => None,
+            };
+            if let Some(name) = splinter.filter(|_| hi > 0.0 && rng.f() < 0.5) {
+                let t = Transform::from_translation(at);
+                fx::spawn(&mut commands, &fxl, name, None, t, t, true);
+            }
             // A star mortar bursts where it struck, after its direct hit.
             if matches!(s.payload, Payload::Blast { .. }) {
                 detonate.write(Detonate { bullet: s.bullet.clone(), at, shooter: Some(s.shooter), owner: Some((s.side, s.base)) });
