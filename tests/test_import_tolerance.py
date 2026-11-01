@@ -3,9 +3,11 @@
 import struct
 import tempfile
 import unittest
+from collections import defaultdict
 from pathlib import Path
+from unittest import mock
 
-from tools import export_saves
+from tools import export_combat, export_saves
 from tools.export_campaign import parse_mission
 from tools.gamefs import ci_files
 from tools.mdb import MdbError
@@ -46,6 +48,27 @@ class ImportTolerance(unittest.TestCase):
     def test_truncated_mdb_raises_mdb_error(self):
         with self.assertRaises(MdbError):
             parse_mdb(struct.pack("<5I", 0, 0, 0, 1, 100))
+
+    def test_gun_with_unreadable_model_leaves_no_definition(self):
+        # Two mounts of one gun whose model fails: the second must not reuse a half-built (visual-less) definition.
+        mounts = [("m", "A", "Gun_X,90,Port"), ("m", "B", "Gun_X,90,Port")]
+        with mock.patch.multiple(
+            export_combat,
+            load=mock.DEFAULT,
+            scene_name=mock.Mock(return_value="S"),
+            hardpoints=mock.Mock(return_value=[]),
+            parse_msb=mock.Mock(return_value=[]),
+            ci_file=mock.DEFAULT,
+            associations=lambda _, kind: mounts if kind == "GunPlacement" else [],
+            flat=lambda _: defaultdict(float, {"BulletTypeName_Primary": "B"}),
+            gun_visual=mock.Mock(side_effect=MdbError("truncated")),
+            base_safe_physics=mock.Mock(return_value={}),
+            lifeboat_fields=mock.Mock(return_value={}),
+        ):
+            j = export_combat.export("root", "Ship_X", "out")
+        self.assertEqual(j["gun_defs"], {})
+        self.assertEqual(j["guns"], [])
+        self.assertEqual(len(j["skipped_guns"]), 2)
 
 
 if __name__ == "__main__":

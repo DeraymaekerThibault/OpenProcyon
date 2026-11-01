@@ -336,10 +336,12 @@ def export(root, ship, outdir):
                 g = flat(load(root, gun))
                 if g["BulletTypeName_Primary"] == "NoBulletType":
                     raise KeyError("no bullet")
-                gun_defs[gun] = {k: g[k] for k in GUN_KEYS} | {
-                    k: g.get(k) for k in GUN_SOUND_KEYS
-                }
-                gun_defs[gun]["visual"] = gun_visual(root, gun, outdir)
+                # Cached only once complete: a gun whose model fails (mods) must not leave a definition without visual.
+                gun_defs[gun] = (
+                    {k: g[k] for k in GUN_KEYS}
+                    | {k: g.get(k) for k in GUN_SOUND_KEYS}
+                    | {"visual": gun_visual(root, gun, outdir)}
+                )
             b = gun_defs[gun]["BulletTypeName_Primary"]
             for name in (b, *EXTRA_BULLETS.get(b, ())):
                 if name not in bullets:
