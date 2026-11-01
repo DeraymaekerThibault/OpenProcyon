@@ -323,8 +323,15 @@ pub fn spawn(commands: &mut Commands, assets: &AssetServer, lib: &Library, fxl: 
         .filter_map(|a| {
             let stance = a["AI Stance"].as_str().unwrap_or_default().to_lowercase();
             let gunnery = crate::combat::IslandGunnery {
-                accuracy: crate::boarding::Skill::parse(a["Gunnery Level"].as_str().unwrap_or_default()).gunnery_vs_average(),
-                silent: stance.contains("dummy") || stance.contains("neutral"),
+                // Green/Average/Elite scale the spread by 0.7/0.4/0.1; the "CREW SKILL LEVEL" placeholder leaves it at 1.
+                accuracy: match a["Gunnery Level"].as_str().unwrap_or_default() {
+                    "Green" => 0.7,
+                    "Average" => 0.4,
+                    "Elite" => 0.1,
+                    _ => 1.0,
+                },
+                silent: stance.contains("dummy"),
+                neutral: stance.contains("neutral"),
             };
             Some((a["World Object ID"].as_i64()?, a["Player/Owner"].as_str()?.to_string(), a["Combat Strength"].as_i64().unwrap_or(0) as i32, gunnery))
         })
@@ -340,7 +347,12 @@ pub fn spawn(commands: &mut Commands, assets: &AssetServer, lib: &Library, fxl: 
             if let Some(class) = o["type"].as_str().filter(|t| t.starts_with("Island_Volcano")).and_then(|t| lib.classes.iter().position(|c| c.name == t)) {
                 commands.entity(*e).insert(MissionBase { id: o["id"].as_i64().unwrap_or(-1), owner: String::new() });
                 let states = crate::combat::spawn_guns(commands, assets, lib, *e, class);
-                commands.entity(*e).insert((crate::combat::ArmedBase { class }, crate::combat::Health::new(&lib.classes[class]), states));
+                commands.entity(*e).insert((
+                    crate::combat::ArmedBase { class },
+                    crate::combat::Health::new(&lib.classes[class]),
+                    states,
+                    crate::combat::IslandGunnery { accuracy: 0.0, silent: false, neutral: false },
+                ));
             }
             continue;
         };

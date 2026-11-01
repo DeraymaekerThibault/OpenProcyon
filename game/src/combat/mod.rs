@@ -37,12 +37,13 @@ pub struct Health {
     pub core: f32,
     pub destroyed: bool,
 }
-/// How a mission's 'Setup Island' makes the island's guns shoot: `accuracy` scales the plain AI's burst spread, a silent island
-/// (Dummy or Neutral stance) never opens fire. PROVISIONAL: what Neutral does in the original is not verified.
+/// How a mission's 'Setup Island' makes the island's guns shoot: `accuracy` is the factor on the gun's burst spread (docs/re/volcanoes.md;
+/// 0 = perfect aim), a `silent` island (Dummy stance) never opens fire, a `neutral` one only fires at ships that target it.
 #[derive(Component, Clone, Copy)]
 pub struct IslandGunnery {
     pub accuracy: f32,
     pub silent: bool,
+    pub neutral: bool,
 }
 
 /// A base with gun towers (island): `class` is its `Base_*` entry in the library (mounts and sections); `Health` holds the section HP.

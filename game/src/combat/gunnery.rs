@@ -551,7 +551,7 @@ pub(super) fn base_fire(
     mut fired: MessageWriter<Fired>,
     campaign: Option<Res<crate::campaign::Mission>>,
     mut bases: Query<(Entity, &Transform, &crate::campaign::MissionBase, &ArmedBase, &Health, &mut GunStates, Option<&BaseSide>, Option<&IslandGunnery>), Without<GunPart>>,
-    ships: Query<(&Transform, &Ship, &Health, Option<&crate::campaign::MissionShip>, Entity)>,
+    ships: Query<(&Transform, &Ship, &Health, Option<&crate::campaign::MissionShip>, Entity, Option<&crate::ship::FleetPilot>)>,
     mut parts: Query<&mut Transform, (With<GunPart>, Without<Ship>)>,
     (globals, sensors): (Query<&GlobalTransform, With<GunPart>>, Res<crate::environment::Sensors>),
 ) {
@@ -562,9 +562,11 @@ pub(super) fn base_fire(
         // The nearest visible hostile ship in sight, with its side.
         let target = ships
             .iter()
-            .filter(|(_, ship, h, m, _)| {
+            .filter(|(_, ship, h, m, _, pilot)| {
                 !h.destroyed
                     && !island.is_some_and(|i| i.silent)
+                    // PROVISIONAL: a Neutral island fires only at ships whose captain targets it.
+                    && !island.is_some_and(|i| i.neutral && !pilot.is_some_and(|p| p.target == Some(me)))
                     && match (&campaign, skirmish_side) {
                         // Volcanoes belong to nobody and fire on every visible ship.
                         (Some(_), _) if volcano => m.is_some_and(|m| m.visible),
@@ -573,7 +575,7 @@ pub(super) fn base_fire(
                         (None, None) => false,
                     }
             })
-            .map(|(transform, ship, _, _, entity)| {
+            .map(|(transform, ship, _, _, entity, _)| {
                 let position = transform.transform_point(lib.classes[ship.class].centre);
                 (AimTarget { entity, position, velocity: transform.rotation * Vec3::NEG_Z * ship.speed }, ship.side)
             })
@@ -601,7 +603,7 @@ pub(super) fn base_fire(
                 state.cooldown = gun.burst_cycle();
                 state.burst_timer = 0.0;
                 volcano_cycle = volcano.then_some(state.cooldown);
-                state.dev = burst_deviation(gun, distance, 0.5 * island.map_or(1.0, |i| i.accuracy), &mut rng);
+                state.dev = burst_deviation(gun, distance, island.map_or(0.5, |i| i.accuracy), &mut rng);
             }
             if state.burst_left > 0 && state.burst_timer <= 0.0 {
                 state.burst_left -= 1;
