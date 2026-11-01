@@ -68,14 +68,15 @@ fn build(
         (Screen::Display, _) | (Screen::Battle, Some(Page::Display)) => Some(true),
         _ => None,
     };
+    let mods_page = *state.get() == Screen::Mods;
     let file = match state.get() {
-        _ if page.is_some() || settings_page.is_some() => "",
+        _ if page.is_some() || settings_page.is_some() || mods_page => "",
         Screen::Battle if ig.page() == Some(Page::Menu) => "ingamemenu_default",
         Screen::Battle if ig.page() == Some(Page::Summary) => "multiplayer_stats_screen",
         Screen::Battle if ig.page().is_some() => "ingamemenu_load_campaign",
         Screen::Load => "load_campaign_screen",
         Screen::Tutorial => "tutorial_screen",
-        Screen::Options | Screen::Controls | Screen::Audio | Screen::Display => unreachable!(),
+        Screen::Options | Screen::Mods | Screen::Controls | Screen::Audio | Screen::Display => unreachable!(),
         Screen::Main => "mainmenu",
         Screen::SinglePlayer => "singleplayer_menu",
         Screen::CreateSkirmish => "create_skirmish_game_screen",
@@ -97,6 +98,9 @@ fn build(
             root.spawn(canvas).with_children(|c| {
                 if let Some(controls) = page {
                     options_page(&ctx, c, controls, ingame, strings, binds, cui);
+                }
+                if mods_page {
+                    mods_page_view(&ctx, c, &model.mods);
                 }
                 if let Some(display) = settings_page {
                     sound_display_page(&ctx, c, display, ingame, strings, settings);
@@ -443,6 +447,9 @@ fn options_page(ctx: &Ctx, c: &mut ChildSpawnerCommands, controls: bool, ingame:
                 None => disabled(ctx, c, rect, &s(id), "BlackChancery22"), // audio / display options: not done
             }
         }
+        if !ingame {
+            ctx.text_button(c, [290.0, 379.0, 508.0, 410.0], "Mods", "BlackChancery22", Action::Goto(Screen::Mods));
+        }
         return;
     }
     // Control Options: header + scrolling list of (control, key).
@@ -509,6 +516,25 @@ fn sound_display_page(ctx: &Ctx, c: &mut ChildSpawnerCommands, display: bool, in
             "BlackChancery16",
             Action::Setting(crate::menu::Setting::RestoreDisplay),
         );
+    }
+}
+
+/// Options > Mods: one row per installed mod (name, version, On/Off button) and its description under the name.
+/// PROVISIONAL: no retail screen, laid out like the Sound / Display pages; the strings are ours.
+fn mods_page_view(ctx: &Ctx, c: &mut ChildSpawnerCommands, mods: &crate::menu::ModList) {
+    settings_frame(ctx, c, false, (Page::Options, Screen::Options));
+    ctx.text(c, "BlackChancery22", "Mods", 250.0, 300.0, 160.0, true, SETTINGS_GOLD);
+    let note = match mods.0.is_empty() {
+        true => format!("No mods installed. Put mod folders in {}", crate::modding::mods_dir().map_or(String::new(), |d| d.display().to_string())),
+        false => "Changes apply the next time the game starts".to_string(),
+    };
+    ctx.text(c, "Univers10", &note, 60.0, 680.0, 520.0, false, Color::WHITE);
+    for (i, m) in mods.0.iter().enumerate().take(6) {
+        let y = 195.0 + 52.0 * i as f32;
+        ctx.text(c, "UniversBold14", &format!("{}  {}", m.name, m.version), 60.0, 460.0, y + 10.0, false, Color::WHITE);
+        let desc: String = m.description.chars().take(70).collect();
+        ctx.text(c, "Univers10", &desc, 60.0, 460.0, y + 30.0, false, Color::srgb(0.8, 0.8, 0.8));
+        ctx.text_button(c, [560.0, y, 700.0, y + 32.0], if m.enabled { "On" } else { "Off" }, "BlackChancery16", Action::ToggleMod(i));
     }
 }
 

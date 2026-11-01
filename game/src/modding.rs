@@ -34,6 +34,56 @@ pub fn merge(base: &mut Value, over: &Value) {
     }
 }
 
+/// A mod folder found in `<user dir>/mods/`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Installed {
+    pub id: String,
+    pub name: String,
+    pub version: String,
+    pub description: String,
+    pub dir: PathBuf,
+    pub enabled: bool,
+}
+
+/// Mods are installed by unzipping into this folder; `mods.json` beside it (`{"enabled": ["id", ...]}`, load order, later wins) lists the
+/// ones that are on. A mod never listed stays off, so dropping a folder in changes nothing until the player enables it.
+pub fn mods_dir() -> Option<PathBuf> {
+    Some(crate::campaign::user_dir()?.join("mods"))
+}
+
+/// Every `<dir>/*/` with its `mod.json` (`id` defaults to the folder name, `name` to the id), enabled ones first in `mods.json` order.
+pub fn installed_in(dir: &Path) -> Vec<Installed> {
+    let on: Vec<String> = read(&dir.join("mods.json")).and_then(|v| serde_json::from_value(v["enabled"].clone()).ok()).unwrap_or_default();
+    let mut found: Vec<Installed> = std::fs::read_dir(dir.join("mods"))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|e| e.path().is_dir())
+        .map(|e| {
+            let meta = read(&e.path().join("mod.json")).unwrap_or_default();
+            let text = |k: &str| meta[k].as_str().unwrap_or_default().to_string();
+            let id = Some(text("id")).filter(|s| !s.is_empty()).unwrap_or_else(|| e.file_name().to_string_lossy().into_owned());
+            let name = Some(text("name")).filter(|s| !s.is_empty()).unwrap_or_else(|| id.clone());
+            Installed { enabled: on.contains(&id), id, name, version: text("version"), description: text("description"), dir: e.path() }
+        })
+        .collect();
+    found.sort_by_key(|m| (on.iter().position(|i| *i == m.id).unwrap_or(usize::MAX), m.id.clone()));
+    found
+}
+
+pub fn installed() -> Vec<Installed> {
+    crate::campaign::user_dir().map(|d| installed_in(&d)).unwrap_or_default()
+}
+
+/// Writes `mods.json` from the list's enabled mods, in list order.
+pub fn save_enabled_in(dir: &Path, mods: &[Installed]) {
+    let on: Vec<&str> = mods.iter().filter(|m| m.enabled).map(|m| m.id.as_str()).collect();
+    let _ = std::fs::create_dir_all(dir);
+    if let Err(e) = std::fs::write(dir.join("mods.json"), serde_json::to_string_pretty(&serde_json::json!({ "enabled": on })).unwrap_or_default()) {
+        eprintln!("could not save mods.json: {e}");
+    }
+}
+
 /// Object files that mods add keys to instead of replacing.
 const MERGED: &[&str] = &["hud/scales.json", "data/weapons/guns.json", "data/weapons/bullets.json", "data/ai/weapons.json"];
 
@@ -117,6 +167,25 @@ mod tests {
         let root = overlay(&base, &[m]);
         let b: Value = read(&root.join("data/b.json")).unwrap();
         assert_eq!((b["x"].as_i64(), b["y"].as_i64()), (Some(2), Some(3)), "b extends the mod's own a.json, not the base one");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn discovery_lists_folders_and_keeps_enabled_order() {
+        let dir = std::env::temp_dir().join(format!("procyon-mods-list-{}", std::process::id()));
+        for (f, meta) in [("a", r#"{"name": "Alpha", "version": "1"}"#), ("b", r#"{"id": "bee"}"#), ("c", "")] {
+            std::fs::create_dir_all(dir.join("mods").join(f)).unwrap();
+            if !meta.is_empty() {
+                std::fs::write(dir.join("mods").join(f).join("mod.json"), meta).unwrap();
+            }
+        }
+        std::fs::write(dir.join("mods.json"), r#"{"enabled": ["c", "bee", "gone"]}"#).unwrap();
+        let mut list = installed_in(&dir);
+        let ids: Vec<_> = list.iter().map(|m| (m.id.as_str(), m.enabled)).collect();
+        assert_eq!(ids, [("c", true), ("bee", true), ("a", false)], "enabled mods first in file order, unknown ids ignored");
+        assert_eq!(list[2].name, "Alpha");
+        list[2].enabled = true;
+        save_enabled_in(&dir, &list);
+        assert_eq!(installed_in(&dir).iter().filter(|m| m.enabled).count(), 3);
         std::fs::remove_dir_all(dir).unwrap();
     }
     #[test]

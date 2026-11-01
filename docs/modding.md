@@ -1,6 +1,8 @@
 # Modding
 
-Run with `--mod <folder>` (repeatable, later mods win): `cargo run --release -- --mod ../mods/example --ship Ship_Navy_Cutter_Fast --map red_rover`.
+Installing: unzip a mod into `<user data dir>/mods/` (`$XDG_DATA_HOME/openprocyon`, `%APPDATA%\openprocyon`), then switch it on in Options > Mods. The choice is stored in `mods.json` beside that folder (`{"enabled": ["id", ...]}`, load order, later wins); a mod that is not listed stays off. The overlay is built at launch, so changes apply on the next start. `mods/silver-skirmish` is a one-ship example (Silver's ship at 255 points). `mod.json` takes `id` (default: folder name), `name`, `version`, `description`; `game_version` and `requires` are not read yet.
+
+For development, run with `--mod <folder>` (repeatable, later mods win): `cargo run --release -- --mod ../mods/example --ship Ship_Navy_Cutter_Fast --map red_rover`.
 
 A mod folder mirrors `assets/`. At launch `game/src/modding.rs` builds `local/overlay/` (symlinks to the base files, mod files on top) and the
 game, Bevy's asset server included, reads only that tree.
