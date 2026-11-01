@@ -174,7 +174,7 @@ def main(argv):
     )
     # content/ ships with the code; its README records each file's licence and travels with it.
     shutil.copytree(REPO / "content", out / "content")
-    # The example mods (JSON diffs of our own, no game content) are listed in the Mods screen, off until the player ticks them.
+    # The bundled mods (JSON diffs of our own, no game content) are listed in the Mods screen, off until the player ticks them.
     shutil.copytree(REPO / "mods", out / "mods")
     windows = sys.platform == "win32"
     (out / "PLAY.txt").write_text(

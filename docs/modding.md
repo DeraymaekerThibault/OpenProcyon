@@ -2,7 +2,7 @@
 
 Mods that ship with the game live in `mods/` (the checkout's, or next to the executable in a download; `tools/package_release.py` copies it) and are listed in the Mods screen, off until ticked. Installing another: unzip it into `<user data dir>/mods/` (`$XDG_DATA_HOME/openprocyon`, `%APPDATA%\openprocyon`), then switch it on in the Mods button in the corner of the main menu (a table: click a column title to sort, the category button filters, click a row to switch it on or off). The choice is stored in `mods.json` beside that folder (`{"enabled": ["id", ...]}`, load order, later wins); a mod that is not listed stays off; a mod in the user folder replaces a bundled one with the same `id`. Every folder in `mods/` needs a `mod.json` (`tests/test_bundled_mods.py`). The overlay is built at launch, so changes apply on the next start. Examples: `mods/silver-skirmish` (Silver's ship at 255 points, flagged `skirmish`) and `mods/faction-colors` (wakes tinted per fleet type, green engine flames on the Procyon ironclads; JSON only, no art). `mod.json` takes `id` (default: folder name), `name`, `version`, `description`, `category` (the Mods table's filter; default "Other"); `game_version` and `requires` are not read yet.
 
-For development, run with `--mod <folder>` (repeatable, later mods win): `cargo run --release -- --mod ../mods/example --ship Ship_Navy_Cutter_Fast --map red_rover`.
+For development, run with `--mod <folder>` (repeatable, later mods win): `cargo run --release -- --mod ../mods/silver-skirmish --ship Ship_Pirate_Silver --map red_rover`.
 
 A mod folder mirrors `assets/`. At launch `game/src/modding.rs` builds `local/overlay/` (symlinks to the base files, mod files on top) and the
 game, Bevy's asset server included, reads only that tree.
@@ -10,7 +10,7 @@ game, Bevy's asset server included, reads only that tree.
 | Mod file | Effect |
 |---|---|
 | any file with a base path (`hud/tex/fe_05.png`, `ships/Ship_X/model.glb`, `fonts/Sans.otf`, `sound/<kind>/*.ogg`) | replaces the base file: texture packs, upscaled art, new fonts, sounds |
-| `ships/<Id>/ship.json` containing `"extends": "Ship_Navy_Cutter"` | deep-merged over that ship: object keys override one by one, arrays and scalars replace; a new ship or weapon is a few lines (see `mods/example`) |
+| `ships/<Id>/ship.json` containing `"extends": "Ship_Navy_Cutter"` | deep-merged over that ship: object keys override one by one, arrays and scalars replace; a new ship or weapon is a few lines (see `mods/silver-skirmish`) |
 | an `extends` file may also carry `"set": {"/engines/0/fx": "X"}` (JSON pointers, applied after the merge) to change one value inside an array, which a merge cannot do; a pointer that does not exist is an error |
 | `data/fx/wake_tint.json` (`{"Navy": [r, g, b], "Pirate": ..., "Procyon": ..., "Civilian": ...}`) | multiplies the wake texture per fleet type (values may exceed 1); absent: retail colours |
 | a new `ships/<Id>/` folder (`ship.json`, plus `geometry.json`/`model.glb` or `geometry`/`model` pointing at another ship), a new `maps/<id>/` folder (`map.json`, `backdrop.png`; `"skirmish": true` lists it), `models/<any folder>/*.glb`, `sound/<any folder>/*.ogg` | new content (schema in `docs/data-format.md`) |

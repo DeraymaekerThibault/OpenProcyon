@@ -1,5 +1,0 @@
-{
-  "extends": "Ship_Navy_Cutter",
-  "entity": "Ship_Navy_Cutter_Fast",
-  "physics": { "MaxSpeed": 22.0, "MaxThrust": 40000.0 }
-}
