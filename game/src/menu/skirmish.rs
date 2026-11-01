@@ -143,7 +143,8 @@ impl Slot {
     }
     /// Load: a fleet replaces the fleet with its hulls (stock guns, no crew); crew or arms replace those of ship `i` (any ship of the
     /// same hull class). Refused, leaving the slot as it was, when
-    /// the fleet would exceed the size limit or the victory points, a hull is not on offer, or crew would be posted twice.
+    /// the fleet would exceed the size limit or go over the victory points (a load that adds no cost always goes through), a hull is not
+    /// on offer, or crew would be posted twice. PROVISIONAL: retail's over-budget Load is not measured.
     pub fn apply_profile(&mut self, kind: crate::profiles::Kind, p: &Profile, i: usize, lib: &Library, limit: u32, fleet_size: usize) -> Result<(), &'static str> {
         use crate::profiles::Kind;
         let mut next = self.clone();
@@ -182,7 +183,8 @@ impl Slot {
                 }
             }
         }
-        if next.spent(lib) > i64::from(limit) {
+        // A load that costs no more than what it replaces is always allowed (a fleet already over a lowered budget can still swap).
+        if next.spent(lib) > i64::from(limit) && next.spent(lib) > self.spent(lib) {
             return Err("Not enough victory points.");
         }
         *self = next;
