@@ -1245,3 +1245,20 @@ fn a_struck_face_normal_points_back_at_the_shot() {
         assert_eq!(n, Vec3::Z * dir);
     }
 }
+
+#[test]
+fn a_map_mine_rests_where_the_map_put_it_and_fights_for_no_one_until_given_an_owner() {
+    let mine = serde_json::json!({"lifetime": 100.0, "hitpoints": 20.0, "impact_vol": 1.0, "impact_max": 100.0, "impact_snd": {}, "damage": {}, "kind": "Mine", "mine": {"sight": 50.0, "speed": 20.0}});
+    let mut app = App::new();
+    app.add_plugins((TaskPoolPlugin::default(), AssetPlugin::default()))
+        .init_resource::<FxLib>()
+        .insert_resource(Library { classes: vec![], guns: default(), bullets: [("Bullet_StarMine_Med".to_string(), bullet_def(&mine))].into(), names: default(), clips: default() })
+        .add_systems(Update, minefield::arm);
+    let at = Vec3::new(10.0, 0.0, -20.0);
+    let e = app.world_mut().spawn((MapMine { id: 34, bullet: "Bullet_StarMine_Med".into(), owner: String::new(), side: None }, Transform::from_translation(at))).id();
+    app.update();
+    let shell = app.world().get::<Shell>(e).expect("the map mine became a shell");
+    assert_eq!((shell.vel, shell.aim), (Vec3::ZERO, Some(at)));
+    assert_eq!(shell.side, crate::scenario::HOSTILE_TO_ALL, "hostile to every ship until the script names an owner");
+    assert!(matches!(shell.payload, Payload::Mine { sight, .. } if sight == 50.0));
+}

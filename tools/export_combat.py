@@ -15,6 +15,7 @@ from tools.mdb import parse as parse_mdb
 from tools.mdb_to_glb import convert, hardpoints
 from tools.models import model_path
 from tools.msb import parse as parse_msb
+from tools.msb import parse_scene
 from tools.source_text import read_source_lines
 from tools.wot import parse_lines, properties
 
@@ -175,7 +176,10 @@ def bullet_record(root, b, outdir):
     bp = flat(bn)
     body = None
     factory = bp.get("FactoryType", "")
-    if factory == "TorpedoCustomInfoFactory":
+    mine = "MineAI" in [
+        p["value"] for p in properties(bn) if p["name"] == "FactoryType"
+    ]
+    if factory == "TorpedoCustomInfoFactory" or mine:
         # The bullet scene name differs from its MDB layer name; use its authored MSB root mesh.
         scene_nodes = parse_msb(
             ci_file(
@@ -183,6 +187,12 @@ def bullet_record(root, b, outdir):
             ).read_bytes()
         )
         mesh = next(n.name for n in scene_nodes if n.parent < 0)
+        if mine:  # the mine's scene root is an empty node; its mesh is the scene's first mesh element
+            mesh = parse_scene(
+                ci_file(
+                    Path(root) / "BD_MeshScenes", bp["Mesh Scene Name"] + ".msb"
+                ).read_bytes()
+            )["meshes"][0]["name"]
         body = mesh + ".glb"
         model_path(outdir, body, mkdir=True).write_bytes(
             convert(
@@ -217,7 +227,7 @@ def bullet_record(root, b, outdir):
             radius=bp.get("MaxRadius", bp.get("Radius")),
             duration=bp.get("Duration", 0.0),
         )
-    if "MineAI" in [p["value"] for p in properties(bn) if p["name"] == "FactoryType"]:
+    if mine:
         rec["mine"] = dict(
             sight=bp.get("Default SightRange", 50.0),
             speed=bp.get("Maximum speed", 20.0),
@@ -237,6 +247,7 @@ def bullet_record(root, b, outdir):
         rec["ricochet_snd"] = ricochet
     if body:
         rec["glb"] = body
+    if body and not mine:
         rec["physics"] = {
             k: bp[k]
             for k in (

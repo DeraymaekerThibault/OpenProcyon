@@ -10,7 +10,7 @@ pub struct Shell {
     /// Downward acceleration (units/s^2): the firing gun's `GunDef::shell_gravity`, 0 for straight-flying shells.
     pub(super) gravity: f32,
     pub(super) bullet: String,
-    pub(super) side: Side,
+    pub side: Side,
     pub(super) shooter: Entity,
     pub(super) target: Option<Entity>,
     pub(super) angular_velocity: f32,
