@@ -280,7 +280,7 @@ fn spawn_map_objects(
         }
         for p in mesh_effects[o["scene"].as_str().unwrap_or_default()].as_array().into_iter().flatten() {
             let name = |k: &str| p[k].as_str().unwrap_or_default();
-            if let Some(effect) = ambient_effect(name("kind"), name("name"), name("descriptor")) {
+            if let Some(effect) = ambient_effect(name("kind"), name("effect")) {
                 let local = Transform::from_translation(game_to_bevy(&p["pos"]));
                 fx::spawn(commands, fxl, effect, Some(e), local, tf * local, false);
             }
@@ -301,21 +301,13 @@ fn spawn_map_objects(
     bases
 }
 
-/// The effect file of one ambient point of a mesh scene (`data/mesh_effects.json`). PROVISIONAL: matched by node name; the
-/// volcano fountain descriptors (Volcano_Effect1-4) and lighthouse_light2/3 name no file of their own and stay unplaced.
-fn ambient_effect(kind: &str, node: &str, descriptor: &str) -> Option<&'static str> {
+/// The effect file of one ambient point of a mesh scene (`data/mesh_effects.json`): the effect its world object names for the
+/// point (`effect`), or the volcano smoke for `VolcanoSmoke` points.
+fn ambient_effect<'a>(kind: &str, effect: &'a str) -> Option<&'a str> {
     if kind == "VolcanoSmoke" {
         return Some("VolcanoSmoke");
     }
-    match (descriptor, node) {
-        ("Volcano_sparks", _) => Some("volcanoSparks"),
-        ("lighthouse_light", _) => Some("Lighthouse"),
-        ("default", "Light_null") => Some("bouy"),
-        ("default", n) if n.starts_with("Fire") => Some("FireStack"),
-        ("default", "CraterSmoke") => Some("Crater_Smoke"),
-        ("default", n) if n.starts_with("Smoke") => Some("Island_Smoke"),
-        _ => None,
-    }
+    Some(effect).filter(|e| !e.is_empty())
 }
 
 /// Skirmish on a retail map (assets/maps/<id>.json from World/*.twt): scenery, skybox and music from the map; our fleet at
@@ -817,12 +809,11 @@ pub fn game_rotation(r: &serde_json::Value) -> Quat {
 mod ambient_tests {
     use super::ambient_effect as a;
     #[test]
-    fn ambient_points_pick_their_effect_by_node() {
-        assert_eq!(a("PlayEffect", "FireStack2", "default"), Some("FireStack"));
-        assert_eq!(a("PlayEffect", "CraterSmoke", "default"), Some("Crater_Smoke"));
-        assert_eq!(a("PlayEffect", "SmokeNode4", "Volcano_sparks"), Some("volcanoSparks"));
-        assert_eq!(a("VolcanoSmoke", "SmokeNode4", "SmokeNode4"), Some("VolcanoSmoke"));
-        assert_eq!(a("PlayEffect", "Volcano_Effect1", "Volcano_Effect1"), None);
+    fn ambient_points_play_the_effect_their_world_object_names() {
+        assert_eq!(a("PlayEffect", "FireOnShip"), Some("FireOnShip"));
+        assert_eq!(a("PlayEffect", "volcanoSparks"), Some("volcanoSparks"));
+        assert_eq!(a("VolcanoSmoke", ""), Some("VolcanoSmoke"));
+        assert_eq!(a("PlayEffect", ""), None, "older imports name none");
     }
 }
 
