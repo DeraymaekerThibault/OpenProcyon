@@ -69,3 +69,9 @@ the same art as the campaign's objective arrow), which the remake draws towards 
 names are written in yellow-gold (Starkeep Cerebrus, Orpheus Cove, Outpost Perseus, The Mourning Nebula). Remake: the skirmish star map draws all three from the map
 script (`Setup Team Objective`, `tasks`, `map_text`). Still PROVISIONAL: a team whose rule says `NO OBJECTIVE POINT` (e.g. the Pirates on Ambush) shows no ring
 (its panel text is drawn if it has a task); only the Navy side's map was observed.
+
+## Ship name banners (retail frame, 2026-11-01)
+A ship's name ribbon is tinted with the colour of the map player that owns it: in a Diablo Strait skirmish our banner is green, the same green as our name in the
+top-right roster (slots 1-3 green, navy blue, teal; `players[].color` in the map file gives all eight). The banner is fully opaque with the camera close to
+the deck (no fade). A rule's banner type ('Banner BlueTeam' ...) still overrides in missions. Not observed: enemy and allied banners in a frame, and what
+`Max Banner Visible World Distance` (150) limits. Remake: `scenario::PlayerColor`, `classic/world_hud.rs` `banner_tint`; the fade we had was a guess.
