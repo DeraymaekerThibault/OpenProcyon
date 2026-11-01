@@ -581,6 +581,7 @@ pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Libra
             commands.entity(*e).insert((
                 campaign::MissionBase { id, owner: format!("base{id}") },
                 combat::ArmedBase { class },
+                combat::DamageFx::new(&lib.classes[class]),
                 combat::BaseSide(side),
                 combat::BaseOrigin(side),
                 combat::Health::new(&lib.classes[class]),

@@ -202,7 +202,36 @@ meets can be hit. The firer's own island or base is exempt. Only scenery with no
 dock buoys) lets shots through. A lob shell clears an island only if its arc passes above the triangles. On land with no damage
 section the shot is spent with its impact (its impact sound and effect; an explosive or lobbed shell bursts there); a gun tower's
 section takes the hit as before. Remake: `combat::shells` with `collision::Obstacle::segment_hit`. PROVISIONAL (not decoded): the
-island hit effect the original shows half the time near the player, the exact removal.
+exact removal.
+
+## Base and island hit feedback (decoded)
+Bases are islands and take hits like ship sections. A shell that is not ricocheted and whose upper damage on the material is over 10 makes a wood or
+reinforced-wood section play `Splintering_Wood` and a stone section `Rock_Chunks`, 50 % of the time and only within 300 units of the
+camera (iron, cloth, dragon: nothing; island mesh between sections: only the shell's own impact). Smoke per section from the remaining
+share r of its HP: over 0.75 none, 0.5 up to 0.75 Light, 0.25 up to 0.5 Medium, under 0.25 Heavy, none left Destroyed (exactly 0.75 falls
+to Heavy), swapped when the state changes, no sight test. A destroyed base section plays each of its destruct effects at once at its
+point (or `ShipExplosion_Medium` at its centre when it has none), one explosion sound, and drops its debris piece. There is no health bar
+or section readout for an enemy (PROVISIONAL: inferred from the absent HUD resources); guns aim at the clicked point, stored in the
+target's frame. Remake: `combat::damage::section_smoke` serves ships and bases; `shells::base_parts_burst`; the 300-unit camera gate is
+not applied. Not decoded: how a click picks a point on a base mesh.
+
+Ships take the same splinter/rock rule, and a destroyed ship section also bursts into one `ShipExplosion_Medium` at its place. Hull scars
+(decals): every hit that is not a ricochet leaves one unless the target is fully invulnerable, even with no HP lost. The scar is a box
+of edge 0.25 / 0.5 / 1.0 (Small / Medium / Large, the bullet's decal size) on the struck hull. A new scar meets each older one closer than
+the sum of their radii (the same edges): overlap % = (R^2 - d^2) / R^2 x 100, R the radius sum. The older scar is merged away if its class
+is smaller or the overlap is under T[new][old] (new Small 50/20/0, Medium 75/10/0, Large 99/70/0 for old Small/Medium/Large); otherwise
+the new scar is refused. If something was merged and the new class is not larger, the new scar takes the next class up (two nearby small
+hits become a medium). No new scar once a ship carries over 150; scars never fade and go only when merged or with their destroyed
+section's mesh swap. Remake: `decals.rs` (a camera-lit quad instead of a clipped box; the repair clear-out is ours). Damage smoke (decoded, applied): each section's effect is attached at the hull origin, ship-local, and every primitive that
+declares the mesh-vertex variable adds a random vertex of the section's mesh to each spawn position (the invisible source primitive keeps
+10 particles for Light and 2 for the others, re-rolled when the state changes; the smoke follows them; the third primitive is a flame
+spawning at a fresh vertex). Fires (decoded, applied): several per section allowed; they change state only on the 6 s ticks: a fire that is
+out (no strength or its section gone) stops emitting on the tick that finds it, is cut loose from the ship (keeping its world pose) on
+the next and deleted on the one after. Also applied: hit effects on a ship (the bullet's own and the splinters) are attached to the hull and ride with it; a new fire takes the
+shell's orientation, so it tilts for steep shots (PROVISIONAL: the original's conversion of that basis was not decoded); decal textures
+are filed by the original's table (five in every group, six in wood and cloth, the rest by name; engine_part, rudder and hole_damage60
+are never used); the 15 % smoke thinning is gone. Not applied yet: freezing effects that are off-screen (a unit-radius frustum test;
+spawn gate 700 with 50 hysteresis).
 
 ## Ricochet (read from the original's code, 2026-10-31)
 Every shot that strikes a damage section (a hull, a gun tower, a volcano) first rolls a ricochet:

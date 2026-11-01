@@ -166,9 +166,10 @@ struct Prim {
     life: Option<Curve>,
     attract: Option<([Curve; 3], [Curve; 3])>,
     fallback_life: f32,
-    low_rate: f32,      // LowDetailParticleRateMultiply
-    budget: f32,        // emission scale keeping the steady live count under MAX_LIVE
-    src: Option<usize>, // spawn at the positions of this primitive's particles (invisible "source" emitters)
+    low_rate: f32,       // LowDetailParticleRateMultiply
+    budget: f32,         // emission scale keeping the steady live count under MAX_LIVE
+    src: Option<usize>,  // spawn at the positions of this primitive's particles (invisible "source" emitters)
+    mesh_vertices: bool, // effect variable ASSIGN_RANDOM_POSITIONS_FROM_MESH_VERTEXES: add a random vertex of the owner's mesh to each spawn
 }
 struct Effect {
     prims: Vec<Prim>,
@@ -224,7 +225,8 @@ pub struct Fx {
     pub rate_scale: f32,
     pub size_scale: f32,
     pub emitting: bool,
-    pub src_half: Vec3,
+    /// The vertices of the mesh the effect is told about (a damaged section's layer), ship-local; see `Prim::mesh_vertices`.
+    pub vertices: Vec<Vec3>,
     meshes: Vec<Option<(Handle<Mesh>, Handle<StandardMaterial>)>>,
 }
 
@@ -385,6 +387,7 @@ fn parse_prim(p: &Value, tex_names: &mut Vec<String>) -> Prim {
         low_rate: p["LowDetailParticleRateMultiply"].as_f64().unwrap_or(1.0) as f32,
         budget,
         src,
+        mesh_vertices: p["CHUNKDATA_CONST_ACCEPTS_EFFECT_VARIABLES_STRING_VECTOR - Element"].as_str() == Some("ASSIGN_RANDOM_POSITIONS_FROM_MESH_VERTEXES"),
     }
 }
 
@@ -420,14 +423,6 @@ fn load_textures(lib: Res<FxLib>, assets: Res<AssetServer>, mut tex: ResMut<FxTe
     tex.0 = lib.tex_names.iter().map(|n| assets.load(format!("fx/tex/{n}.png"))).collect();
 }
 
-/// Visual refinement, not retail: damage and debris smoke is emitted at 15% of its authored rate. Retail's additive smoke
-/// (one particle per tick per system, ten seconds each, several systems per section) saturates to a white blob on a damaged ship
-/// and is the main particle load in a long fight.
-const SMOKE_THINNING: f32 = 0.15;
-fn smoke_thinning(name: &str) -> f32 {
-    if name.starts_with("Damaged Section_") || name == "Falling_Debris" { SMOKE_THINNING } else { 1.0 }
-}
-
 /// Starts effect `name` at world transform `world` (so the first frame is right), optionally as a child of `parent`
 /// (then `local` is relative to it). Unknown names are ignored. Returns the effect entity.
 pub fn spawn(commands: &mut Commands, lib: &FxLib, name: &str, parent: Option<Entity>, local: Transform, world: Transform, transient: bool) -> Option<Entity> {
@@ -439,10 +434,10 @@ pub fn spawn(commands: &mut Commands, lib: &FxLib, name: &str, parent: Option<En
         move_acc: 0.0,
         previous_world: world,
         prims: lib.list[eff].prims.iter().map(|_| PrimState { started: false, parts: vec![] }).collect(),
-        rate_scale: smoke_thinning(name),
+        rate_scale: 1.0,
         size_scale: 1.0,
         emitting: true,
-        src_half: Vec3::ZERO,
+        vertices: vec![],
         meshes: lib.list[eff].prims.iter().map(|_| None).collect(),
     };
     let mut e = commands.spawn((fx, local, GlobalTransform::from(world), Visibility::default()));
@@ -492,6 +487,7 @@ fn update_fx(
     let scene = scene_budget_factor(q.iter().map(|(_, f, _)| f.particle_count()).sum());
     let cam_pos = cam.single().ok().map(|c| c.translation());
     for (e, mut fx, gt) in &mut q {
+        let fx = &mut *fx;
         fx.tick_acc += frame;
         let world = gt.compute_transform();
         let previous_world = fx.previous_world;
@@ -511,9 +507,7 @@ fn update_fx(
             // A source emitter places particles at the positions of its source primitive's particles.
             let sources: HashMap<usize, Vec<Vec3>> =
                 eff.prims.iter().filter_map(|p| p.src).map(|i| (i, fx.prims[i.min(fx.prims.len() - 1)].parts.iter().map(|p| p.pos).collect())).collect();
-            let half = fx.src_half;
-            for (pi, (prim, st)) in eff.prims.iter().zip(fx.prims.iter_mut()).enumerate() {
-                let is_source = eff.prims.iter().any(|q| q.src == Some(pi));
+            for (prim, st) in eff.prims.iter().zip(fx.prims.iter_mut()) {
                 let t = age - prim.delay;
                 for p in &mut st.parts {
                     p.age += TICK;
@@ -557,9 +551,9 @@ fn update_fx(
                         if meteor {
                             align_meteor_particle(&mut np, tick_world.translation().y);
                         }
-                        // Data flag ASSIGN_RANDOM_POSITIONS_FROM_MESH_VERTEXES; shortcut: random point in the section's box, not its real vertices.
-                        if is_source && half != Vec3::ZERO {
-                            np.pos = half * Vec3::new(rng.f() * 2.0 - 1.0, rng.f() * 2.0 - 1.0, rng.f() * 2.0 - 1.0);
+                        // Decoded: each spawn gets a uniformly random vertex of the mesh added to its position (not area-weighted).
+                        if prim.mesh_vertices && !fx.vertices.is_empty() {
+                            np.pos += fx.vertices[(rng.f() * fx.vertices.len() as f32) as usize % fx.vertices.len()];
                         }
                         if let Some(si) = prim.src {
                             let pool = &sources[&si];
@@ -1122,14 +1116,6 @@ mod tests {
         assert_eq!(detail_factor(0.1, 0.0), 1.0);
         assert!((detail_factor(0.1, 175.0) - 0.55).abs() < 1e-6);
         assert!((detail_factor(0.1, 1000.0) - 0.1).abs() < 1e-6);
-    }
-
-    #[test]
-    fn damage_and_debris_smoke_is_thinned_other_effects_are_not() {
-        assert_eq!(smoke_thinning("Damaged Section_Heavy"), SMOKE_THINNING);
-        assert_eq!(smoke_thinning("Falling_Debris"), SMOKE_THINNING);
-        assert_eq!(smoke_thinning("Explosion_Light"), 1.0);
-        assert_eq!(smoke_thinning("FireOnShip"), 1.0);
     }
 
     #[test]

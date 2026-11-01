@@ -349,6 +349,7 @@ pub fn spawn(commands: &mut Commands, assets: &AssetServer, lib: &Library, fxl: 
                 let states = crate::combat::spawn_guns(commands, assets, lib, *e, class);
                 commands.entity(*e).insert((
                     crate::combat::ArmedBase { class },
+                    crate::combat::DamageFx::new(&lib.classes[class]),
                     crate::combat::Health::new(&lib.classes[class]),
                     states,
                     crate::combat::IslandGunnery { accuracy: 0.0, silent: false, neutral: false },
@@ -362,7 +363,13 @@ pub fn spawn(commands: &mut Commands, assets: &AssetServer, lib: &Library, fxl: 
         // Island gun towers: a `Base_*` class with mounts makes the base a shooter and a target (combat::base_fire).
         if let Some(class) = lib.classes.iter().position(|c| Some(c.name.as_str()) == o["type"].as_str()) {
             let states = crate::combat::spawn_guns(commands, assets, lib, *e, class);
-            commands.entity(*e).insert((crate::combat::ArmedBase { class }, crate::combat::Health::new(&lib.classes[class]), states, *gunnery));
+            commands.entity(*e).insert((
+                crate::combat::ArmedBase { class },
+                crate::combat::Health::new(&lib.classes[class]),
+                states,
+                crate::combat::DamageFx::new(&lib.classes[class]),
+                *gunnery,
+            ));
         }
     }
     let mut ships: Vec<Value> = mission.data["ships"].as_array().expect("mission ships").clone();

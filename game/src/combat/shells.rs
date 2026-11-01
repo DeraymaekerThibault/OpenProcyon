@@ -112,7 +112,6 @@ pub(super) fn apply_ship_hit(class: &Class, hp: &mut Health, k: usize, damage: [
     let roll = rng.range(lo, hi);
     hp.sections[k] = (was - (1.0 - invuln) * roll).max(0.0);
     // Retail ignition roll per hit: chance > 0 and roll <= chance starts a fire of the bullet's initial strength.
-    // PROVISIONAL: one fire per section (the original's extra gate is unknown).
     let fire = (!protected && fire_p > 0.0 && rng.f() <= fire_p && hp.sections[k] > 0.0 && fire_free).then_some(fire_str);
     // Retail: every hit that leaves a vital section at 0 HP (the killing hit and later ones) takes
     // a fresh damage roll x the summed core% of all destroyed vital sections / 100 off the core (rounding provisional).
@@ -136,15 +135,28 @@ pub(super) fn apply_base_hit(class: &Class, hp: &mut Health, k: usize, roll: f32
     (0..was_up.len()).filter(|j| was_up[*j] && hp.sections[*j] == 0.0).collect()
 }
 
-/// The base parts in `fallen` that are mission parts burst with their destruct effect and a blast. PROVISIONAL: retail's effect for a
-/// destroyed base part is not measured; the part's WOT destruct effect and the ship-explosion sound stand in.
-pub(super) fn base_parts_burst(commands: &mut Commands, fxl: &FxLib, sfx: &mut MessageWriter<Sfx>, class: &Class, btf: &Transform, fallen: Vec<usize>) {
-    for sec in fallen.into_iter().map(|j| &class.sections[j]).filter(|sec| sec.mission) {
-        let centre = Transform::from_translation(btf.transform_point((sec.min + sec.max) / 2.0));
-        if let Some(name) = sec.destruct.as_ref().and_then(|d| d.fx.as_deref()) {
-            fx::spawn(commands, fxl, name, None, centre, centre, true);
-        }
-        sfx.write(Sfx { name: "Explosion_Med01".to_string(), at: Some(centre.translation), vol: 1.0, max: 900.0 });
+/// The material effect a struck section throws (decoded): wood and reinforced wood splinter, stone throws chunks, iron and cloth
+/// nothing; only for shells whose upper damage on that material is over 10. The caller rolls the 50 % chance.
+fn splinter_fx(key: &str, upper: f32) -> Option<&'static str> {
+    match key {
+        _ if upper <= 10.0 => None,
+        "Wood" | "Reinforced" => Some("Splintering_Wood"),
+        "Stone" => Some("Rock_Chunks"),
+        _ => None,
+    }
+}
+
+/// A base part brought down plays its destruct effect at once at the effect's point in the base frame (start times are ignored on
+/// this path), or `ShipExplosion_Medium` at the part's centre when it has none (decoded). The explosion sound and debris come
+/// from `damage_fx`.
+pub(super) fn base_parts_burst(commands: &mut Commands, fxl: &FxLib, class: &Class, btf: &Transform, fallen: Vec<usize>) {
+    for sec in fallen.into_iter().map(|j| &class.sections[j]) {
+        let (name, local) = match sec.destruct.as_ref().and_then(|d| d.fx.as_deref().map(|n| (n, d.point))) {
+            Some((n, point)) => (n, point),
+            None => ("ShipExplosion_Medium", (sec.min + sec.max) / 2.0),
+        };
+        let at = Transform::from_translation(btf.transform_point(local));
+        fx::spawn(commands, fxl, name, None, at, at, true);
     }
 }
 
@@ -197,11 +209,25 @@ fn spill(class: &Class, hp: &mut Health, k: usize, damage: f32, invuln: f32, see
     }
 }
 
-/// The bullet's impact effect at `at`, facing back along its flight.
-pub(super) fn hit_fx(commands: &mut Commands, fxl: &FxLib, bd: &BulletDef, at: Vec3, vel: Vec3) {
+/// The bullet's impact effect at `at`, facing back along its flight. On a ship (`host`) it is attached to the hull, so it rides along
+/// with the ship (decoded) instead of staying where the ship was.
+pub(super) fn hit_fx(commands: &mut Commands, fxl: &FxLib, bd: &BulletDef, at: Vec3, vel: Vec3, host: Option<(Entity, &Transform)>) {
     if let Some(n) = &bd.hit_fx {
         let t = Transform::from_translation(at).looking_to(-vel, Vec3::Y);
-        fx::spawn(commands, fxl, n, None, t, t, true);
+        spawn_on(commands, fxl, n, t, host);
+    }
+}
+
+/// Spawns effect `name` at world pose `world`, parented to `host` when given.
+fn spawn_on(commands: &mut Commands, fxl: &FxLib, name: &str, world: Transform, host: Option<(Entity, &Transform)>) {
+    match host {
+        Some((ship, stf)) => {
+            let local = Transform::from_matrix(stf.to_matrix().inverse() * world.to_matrix());
+            fx::spawn(commands, fxl, name, Some(ship), local, world, true);
+        }
+        None => {
+            fx::spawn(commands, fxl, name, None, world, world, true);
+        }
     }
 }
 
@@ -379,7 +405,7 @@ pub(super) fn shells(
                 let [lo, hi, ..] = bd.damage["Dragon"];
                 d.hurt(rng.range(lo, hi), s.shooter, now);
             }
-            hit_fx(&mut commands, &fxl, bd, p0 + (p1 - p0) * t, s.vel);
+            hit_fx(&mut commands, &fxl, bd, p0 + (p1 - p0) * t, s.vel, None);
             commands.entity(e).despawn();
             continue;
         }
@@ -394,7 +420,7 @@ pub(super) fn shells(
                     sfx.write(Sfx { name: format!("Damage_Stone0{}", rng.variant(5)), at: Some(at), vol: 1.0, max: 600.0 });
                 }
             }
-            hit_fx(&mut commands, &fxl, bd, at, s.vel);
+            hit_fx(&mut commands, &fxl, bd, at, s.vel, None);
             commands.entity(e).despawn();
             continue;
         }
@@ -442,8 +468,14 @@ pub(super) fn shells(
             let class = &lib.classes[ab.class];
             let fallen = apply_base_hit(class, &mut hp, k, rng.range(lo, hi));
             sfx.write_batch(bd.impact_sound(key, at, &mut rng));
-            base_parts_burst(&mut commands, &fxl, &mut sfx, class, btf, fallen);
-            hit_fx(&mut commands, &fxl, bd, at, s.vel);
+            base_parts_burst(&mut commands, &fxl, class, btf, fallen);
+            hit_fx(&mut commands, &fxl, bd, at, s.vel, None);
+            // Decoded: a struck wood section splinters and a stone one throws chunks, half the time (the original also needs the
+            // hit within 300 of the camera; not gated here, far hits are unseen anyway).
+            if let Some(name) = splinter_fx(key, hi).filter(|_| rng.f() < 0.5) {
+                let t = Transform::from_translation(at);
+                fx::spawn(&mut commands, &fxl, name, None, t, t, true);
+            }
             // A star mortar bursts where it struck, after its direct hit.
             if matches!(s.payload, Payload::Blast { .. }) {
                 detonate.write(Detonate { bullet: s.bullet.clone(), at, shooter: Some(s.shooter), owner: Some((s.side, s.base)) });
@@ -475,7 +507,7 @@ pub(super) fn shells(
                 if let Some(name) = bd.ricochet_snd.get(key) {
                     sfx.write(Sfx { name: name.clone(), at: Some(at), vol: 1.0, max: 600.0 });
                 }
-                hit_fx(&mut commands, &fxl, bd, at, s.vel);
+                hit_fx(&mut commands, &fxl, bd, at, s.vel, None);
             } else if !matches!(s.payload, Payload::Nova) {
                 detonate.write(Detonate { bullet: s.bullet.clone(), at, shooter: Some(s.shooter), owner: Some((s.side, s.base)) });
             }
@@ -486,7 +518,7 @@ pub(super) fn shells(
             let (se, stf, ship, mut hp, mut fires, mission, _) = ships.get_mut(si).unwrap();
             let target = ShipTarget { entity: se, transform: stf, side: ship.side, class: &lib.classes[ship.class], invuln: mission.map_or(0.0, |m| m.invuln) };
             hit_ship(&mut commands, &fxl, &mut rng, (&mut sfx, &mut hits, &mut scars), bd, &s, target, &mut hp, &mut fires, k, at);
-            hit_fx(&mut commands, &fxl, bd, at, s.vel);
+            hit_fx(&mut commands, &fxl, bd, at, s.vel, Some((se, stf)));
             if matches!(s.payload, Payload::Blast { .. }) {
                 detonate.write(Detonate { bullet: s.bullet.clone(), at, shooter: Some(s.shooter), owner: Some((s.side, s.base)) });
             }
@@ -499,7 +531,7 @@ pub(super) fn shells(
                 detonate.write(Detonate { bullet: s.bullet.clone(), at, shooter: Some(s.shooter), owner: Some((s.side, s.base)) });
             } else {
                 sfx.write_batch(bd.impact_sound("Stone", at, &mut rng));
-                hit_fx(&mut commands, &fxl, bd, at, s.vel);
+                hit_fx(&mut commands, &fxl, bd, at, s.vel, None);
             }
             commands.entity(e).despawn();
         } else if s.age > s.lifetime || p1.y < -300.0 {
@@ -562,17 +594,22 @@ fn hit_ship(
     if s.bullet == TORPEDO_BULLET {
         info!("Torpedo hit {} ({}){}", class.name, sec.label, if invuln >= 1.0 { " [training: invulnerable]" } else { "" });
     }
-    let fire_free = !fires.list.iter().any(|f| f.sec == k && f.state == 0);
-    let before = hp.sections[k];
-    let outcome = apply_ship_hit(class, hp, k, damage, invuln, fire_free, rng);
-    if let (Some(size), true) = (bd.decal, hp.sections[k] < before) {
+    // Decoded: no check for an existing fire on the section, so one section can burn several fires.
+    let outcome = apply_ship_hit(class, hp, k, damage, invuln, true, rng);
+    if let (Some(size), true) = (bd.decal, invuln < 1.0) {
         let inv = stf.to_matrix().inverse();
         let material = if sec.material.contains("Cloth") { "Cloth" } else { key };
         scars.write(crate::decals::Scar { ship: se, section: k, local: inv.transform_point3(at), dir: inv.transform_vector3(s.vel).normalize_or_zero(), material, size });
     }
+    if let Some(name) = splinter_fx(key, bd.damage[key][1]).filter(|_| rng.f() < 0.5) {
+        spawn_on(commands, fxl, name, Transform::from_translation(at), Some((se, stf)));
+    }
     if let Some(fire_str) = outcome.fire {
-        let local = Transform::from_translation(stf.to_matrix().inverse().transform_point3(at));
-        let fx = fx::spawn(commands, fxl, "FireOnShip", Some(se), local, Transform::from_translation(at), false);
+        // The flame takes the shell's orientation (its up axis tilts with a steep shot), in the hull's frame. PROVISIONAL: the original's
+        // conversion of that basis into the hull's frame was not decoded.
+        let world = Transform::from_translation(at).looking_to(s.vel.normalize_or(Vec3::NEG_Z), Vec3::Y);
+        let local = Transform::from_matrix(stf.to_matrix().inverse() * world.to_matrix());
+        let fx = fx::spawn(commands, fxl, "FireOnShip", Some(se), local, world, false);
         if let Some(e) = fx {
             let sc = fire_scale(fire_str);
             commands.entity(e).queue(move |mut w: EntityWorldMut| {
