@@ -114,7 +114,7 @@ this is a provisional inelastic cable, not a literal port. Regression covers off
 ## Explicitly provisional / unfinished
 
 - Inelastic response (zero restitution), positional separation, lateral damping, and the planar solver are stand-ins, not a recovered retail response. Contact torque is implemented with provisional box inertia; impact damage and collision sound are not.
-- Ordinary asteroid contacts are now finite-mass, but their retail restitution/torque response still needs tracing. Rocks do not yet resolve rock/rock or rock/static contacts. Existing path motion occurs before the ship substeps, so fast moving belts still lack continuous collision detection. Whales/mines are not movement colliders in this pass.
+- Ordinary asteroid contacts are now finite-mass, but their retail restitution/torque response still needs tracing. The original never resolves rock/rock contacts (belt rocks pass through each other, docs/re/asteroids.md); rock/static push-out is not ported. Existing path motion occurs before the ship substeps, so fast moving belts still lack continuous collision detection. Whales/mines are not movement colliders in this pass.
 - Docking ignores only the assigned dockee during approach/docked/departure so repairs are not broken; the original collision rejection-list rules are unknown.
 - Obstacle avoidance for AI ships: the original's avoider, see [movement.md](movement.md#collision-avoidance-read-from-the-originals-code-2026-10-31).
 - Course preview (`course.rs`) is clipped at the first pose whose box touches visible scenery (`collision::clear_prefix`). It still uses free motion (no drift, no steer-away) and 0.1 s samples, so very thin walls can be stepped over in the preview.
