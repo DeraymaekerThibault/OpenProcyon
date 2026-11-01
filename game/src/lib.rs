@@ -90,6 +90,10 @@ fn base_assets() -> PathBuf {
 fn user_assets() -> Option<PathBuf> {
     Some(campaign::user_dir()?.join("assets"))
 }
+/// Whether `base` is the per-user folder a player's download imports into (not PROCYON_ASSETS or the checkout's assets/).
+fn player_assets(base: &std::path::Path) -> bool {
+    std::env::var_os("PROCYON_ASSETS").is_none() && user_assets().is_some_and(|u| u == base)
+}
 /// Files that ship with the code (fonts, hand-written data), layered over the imported assets: `content/` next to the
 /// executable (the release download), else `content/` in the checkout.
 fn content_dir() -> PathBuf {
@@ -137,9 +141,20 @@ pub fn run(view: fn(&mut App), setup_view: fn(&mut App)) {
     });
     let mods: Vec<PathBuf> = args.windows(2).filter(|w| w[0] == "--mod").map(|w| PathBuf::from(&w[1])).collect();
     let base = base_assets();
-    if !base.join("ships").is_dir() {
-        eprintln!("No converted game assets in {}: opening the import screen.", base.display());
-        return setup::run(base, content_dir(), setup_view);
+    // A player's folder (the download's import) must come from this version and is replaced whole when imported again; a
+    // developer's assets (PROCYON_ASSETS, the checkout's assets/) are used as they are.
+    let player = player_assets(&base);
+    let status = match player {
+        true => setup::imported(&base, env!("CARGO_PKG_VERSION")),
+        false if base.join("ships").is_dir() => setup::Imported::Ready,
+        false => setup::Imported::Missing,
+    };
+    if status != setup::Imported::Ready || args.iter().any(|a| a == "--crashed") {
+        eprintln!("Game assets in {}: {status:?}; opening the import screen.", base.display());
+        return setup::run(base, content_dir(), setup_view, status, player);
+    }
+    if player && let Some(dir) = base.parent() {
+        setup::report_crashes(dir.to_path_buf());
     }
     let installed = modding::installed(bundled_mods_dir().as_deref()).into_iter().filter(|m| m.enabled).map(|m| m.dir);
     let layers: Vec<PathBuf> = std::iter::once(content_dir()).chain(installed).chain(mods).collect();

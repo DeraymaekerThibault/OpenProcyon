@@ -6,6 +6,7 @@ so put changes in a mod (`docs/modding.md`). The authored HUD layout `data/hud/b
 
 | Path | Contents |
 |---|---|
+| `import.json` | written by the game's import screen after a successful import: `version` (the game version that imported) and `game` (the install folder). A player's per-user folder (`%APPDATA%\openprocyon\assets`, `~/.local/share/openprocyon/assets`) is only used when `version` is the running game's; otherwise the import screen opens and converts the game again, into `assets.importing` beside it, replacing `assets` only when it succeeds. `PROCYON_ASSETS` and the checkout's `assets/` are used without it (`game/src/setup.rs`) |
 | `data/docks.json` | dock points of bases and islands (ships keep theirs in `ships/<id>/docks.json`): `pos` local game frame, `yaw` radians about z, `tender` (WOT `Is Tender`: dockable by default) (`tools/export_docks.py`) |
 | `data/mesh_detail.json` | per-mesh detail settings: `levels` ([max camera distance, detail fraction]), `no_draw` distance, `collision_lod` (level whose triangles retail collides with); the empty name is the default (`tools/export_mesh_detail.py`) |
 | `data/animations.json` | mesh scene animation clips: `{scene: [{name, duration, motions: [{node, target, channels}]}]}`, six channels per motion (x, y, z, yaw, pitch, roll in radians), keyframe `[time, value, smoothing, tension, continuity, bias, in tangent, out tangent]` (`tools/export_animations.py`, `tools/msb.py parse_scene`). The animals' clips are also baked into their GLBs (below) |
