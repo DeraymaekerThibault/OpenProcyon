@@ -63,7 +63,7 @@ pub fn curve_keys(v: &Value) -> Vec<(f32, f32)> {
 }
 
 #[derive(Clone, Default)]
-struct Curve(Vec<(f32, f32)>, Option<(f32, f32, u32)>);
+struct Curve(Vec<(f32, f32)>, Option<(f32, f32, u32)>, bool);
 impl Curve {
     fn from(v: Option<&Value>) -> Curve {
         let keys = v.map(curve_keys);
@@ -71,7 +71,12 @@ impl Curve {
             let (start, end, count) = (l["StartLoopingT"].as_f64()? as f32, l["EndLoopingT"].as_f64()? as f32, l["NumberLoops"].as_u64()?);
             (start.is_finite() && end.is_finite() && end > start && count > 0).then_some((start, end, count.min(u32::MAX as u64) as u32))
         });
-        Curve(keys.unwrap_or_default(), looping)
+        Curve(keys.unwrap_or_default(), looping, v.is_some_and(|v| v["keys_only"] == true))
+    }
+    /// Index of the key interval time `t` falls in (the last key at or before it, after the loop mapping).
+    fn key_index(&self, t: f32) -> usize {
+        let t = self.looped(t);
+        self.0.iter().rposition(|k| k.0 <= t).unwrap_or(0)
     }
     fn is_empty(&self) -> bool {
         self.0.is_empty()
@@ -79,12 +84,22 @@ impl Curve {
     fn last_t(&self) -> f32 {
         self.0.last().map_or(0.0, |k| k.0)
     }
-    /// Linear between keys, with authored interval repeats; held outside the keys, `def` when empty.
-    fn at(&self, mut t: f32, def: f32) -> f32 {
+    /// `t` mapped through the authored loop; once the repeats are used up time carries on from the loop's end (decoded).
+    fn looped(&self, mut t: f32) -> f32 {
         if let Some((start, end, count)) = self.1 {
             let period = end - start;
-            t -= ((t - start) / period).floor().clamp(0.0, count as f32) * period;
+            let done = ((t - start) / period).floor();
+            if done >= count as f32 {
+                t = end + (t - start - count as f32 * period);
+            } else if done > 0.0 {
+                t -= done * period;
+            }
         }
+        t
+    }
+    /// Linear between keys, with authored interval repeats; held outside the keys, `def` when empty.
+    fn at(&self, t: f32, def: f32) -> f32 {
+        let t = self.looped(t);
         let k = &self.0;
         match k.len() {
             0 => def,
@@ -159,6 +174,7 @@ struct Prim {
     rgb: [Curve; 3],
     alpha: Curve,
     rect: Option<[Curve; 4]>,
+    rect_scale: f32, // PROVISIONAL: 0.1 for a rectangle with no size entry (planks, boarding sprites), else 1; see docs/re/effects.md
     flat: bool,
     along_velocity: bool,
     pseudo_dir: Option<Vec3>, // fixed streak axis in effect space (PseudoBillboardChunk)
@@ -210,6 +226,8 @@ struct P {
 }
 struct PrimState {
     started: bool,
+    /// Keys-only rate curves fire once as the time enters each key interval: the interval last fired.
+    last_key: Option<usize>,
     parts: Vec<P>,
 }
 
@@ -299,6 +317,7 @@ fn parse_prim(p: &Value, tex_names: &mut Vec<String>) -> Prim {
     let rgb = c3(cc);
     let alpha = Curve::from(get(cp, &["ColorFaderChunk", "AlphaComponentChunk"]));
     let size = Curve::from(get(cp, &["SizeChunk", "SizeInterpolatorChunk"]));
+    let rect_scale = if get(cp, &["Rectangle2dChunk"]).is_some() && size.is_empty() { 0.1 } else { 1.0 };
     let rect = get(cp, &["Rectangle2dChunk"])
         .map(|r| ["TopLeftXInterpolatorChunk", "TopLeftYInterpolatorChunk", "BottomRightXInterpolatorChunk", "BottomRightYInterpolatorChunk"].map(|k| Curve::from(r.get(k))));
     let life = get(cp, &["ExpirationChunk", "ExpirationInterpolateChunk"]).map(|c| Curve::from(Some(c))).filter(|c| !c.is_empty());
@@ -374,6 +393,7 @@ fn parse_prim(p: &Value, tex_names: &mut Vec<String>) -> Prim {
         size,
         rgb,
         alpha,
+        rect_scale,
         rect,
         flat: cp.get("Flat").is_some(),
         along_velocity: get(cp, &["PseudoBillboardChunk", "PseudoDirectionUseVelocity"]).and_then(|v| v.as_bool()).unwrap_or(false),
@@ -433,7 +453,7 @@ pub fn spawn(commands: &mut Commands, lib: &FxLib, name: &str, parent: Option<En
         tick_acc: 0.0,
         move_acc: 0.0,
         previous_world: world,
-        prims: lib.list[eff].prims.iter().map(|_| PrimState { started: false, parts: vec![] }).collect(),
+        prims: lib.list[eff].prims.iter().map(|_| PrimState { started: false, last_key: None, parts: vec![] }).collect(),
         rate_scale: 1.0,
         size_scale: 1.0,
         emitting: true,
@@ -537,7 +557,14 @@ fn update_fx(
                     }
                     if live {
                         // Retail: rate is particles per tick; a fractional rate spawns one with that probability.
-                        let r = prim.rate.at(t, 0.0) * prim.budget * scale * detail_factor(prim.low_rate, cam_pos.map_or(0.0, |c| c.distance(gt.translation())));
+                        // A keys-only curve gives its value only on the tick that enters a new key interval, else 0.
+                        let key = prim.rate.key_index(t);
+                        let fire = !prim.rate.2 || st.last_key.replace(key) != Some(key);
+                        let r = prim.rate.at(t, 0.0)
+                            * f32::from(u8::from(fire))
+                            * prim.budget
+                            * scale
+                            * detail_factor(prim.low_rate, cam_pos.map_or(0.0, |c| c.distance(gt.translation())));
                         n += if r >= 1.0 {
                             r as u32
                         } else if r > 0.0 && rng.f() < r {
@@ -740,7 +767,9 @@ fn render_fx(
                 let size = prim.size.at(age, 1.0) * f.size_scale;
                 let col = [prim.rgb[0].at(age, 1.0), prim.rgb[1].at(age, 1.0), prim.rgb[2].at(age, 1.0), prim.alpha.at(age, 1.0)];
                 let (x0, y0, x1, y1) = match &prim.rect {
-                    Some(r) => (r[0].at(age, -0.5), r[1].at(age, 0.5), r[2].at(age, 0.5), r[3].at(age, -0.5)),
+                    Some(r) => {
+                        (r[0].at(age, -0.5) * prim.rect_scale, r[1].at(age, 0.5) * prim.rect_scale, r[2].at(age, 0.5) * prim.rect_scale, r[3].at(age, -0.5) * prim.rect_scale)
+                    }
                     None => (-0.5, 0.5, 0.5, -0.5),
                 };
                 let (ax, ay) = particle_axes(prim, gt, vel, [right, up, view]);
@@ -894,8 +923,8 @@ mod tests {
         assert!(particle.pos.length() > 0.0);
         assert_eq!(particle.vel, particle.pos);
         prim.angle_pos_velocity = false;
-        prim.vel_ang_dir = [Curve::default(), Curve::default(), Curve(vec![(0.0, -1.0)], None)];
-        prim.vel_ang_len = Curve(vec![(0.0, 12.0)], None);
+        prim.vel_ang_dir = [Curve::default(), Curve::default(), Curve(vec![(0.0, -1.0)], None, false)];
+        prim.vel_ang_len = Curve(vec![(0.0, 12.0)], None, false);
         prim.vel_ang_len_err = Curve::default();
         prim.vel_ang_min = Curve::default();
         prim.vel_ang_max = Curve::default();
@@ -1008,8 +1037,10 @@ mod tests {
         assert_eq!(c.at(0.5, 0.0), 5.0);
         assert_eq!(c.at(2.0, 0.0), 20.0);
         assert_eq!(c.at(3.0, 0.0), 10.0);
-        assert_eq!(c.at(6.0, 0.0), 20.0);
-        assert_eq!(c.at(7.5, 0.0), 35.0);
+        // Once the repeats are used up (at t = 5) time carries on from the loop's end (decoded), here into the held tail.
+        assert_eq!(c.at(5.0, 0.0), 30.0);
+        assert_eq!(c.at(5.5, 0.0), 35.0);
+        assert_eq!(c.at(7.5, 0.0), 40.0);
         let invalid = Curve::from(Some(&serde_json::json!({"curve": [[0, 1]], "loop": {"StartLoopingT": 1, "EndLoopingT": 1, "NumberLoops": 2}})));
         assert!(invalid.1.is_none());
     }
@@ -1139,5 +1170,19 @@ mod tests {
         assert_eq!(scene_budget_factor(0), 1.0);
         assert_eq!(scene_budget_factor(15_000), 1.0);
         assert!((scene_budget_factor(30_000) - 0.5).abs() < 1e-6);
+    }
+}
+
+#[cfg(test)]
+mod keys_only_tests {
+    use super::*;
+
+    #[test]
+    fn keys_only_curves_fire_once_per_key_interval_and_loops_continue_from_their_end() {
+        let curve = Curve(vec![(0.0, 1.0), (0.5, 2.0), (1.0, 3.0)], Some((0.0, 2.0, 2)), true);
+        let idx: Vec<usize> = [0.0, 0.2, 0.5, 0.7, 1.0, 1.9, 2.0, 2.6, 4.1, 5.0].iter().map(|t| curve.key_index(*t)).collect();
+        // Second round restarts at key 0; after the two loops time carries on from the end (2.0): no further wraps.
+        assert_eq!(idx, [0, 0, 1, 1, 2, 2, 0, 1, 2, 2]);
+        assert_eq!(curve.looped(4.5), 2.5);
     }
 }
