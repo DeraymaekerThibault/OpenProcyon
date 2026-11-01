@@ -381,7 +381,9 @@ pub(super) fn fire(
                     let target = gun_target.map(|t| t.entity).filter(|e| *e != Entity::PLACEHOLDER);
                     fired.write(Fired { shooter: me, target, bullet: gun.bullet.clone() });
                 }
-                state.cooldown = gun.burst_cycle_cut(gunner_reload_cut(ship, posts, points.as_deref(), &lib, mount.bank));
+                // Decoded: the gunner shortens only a torpedo launcher's wait (all other guns reload at their authored time).
+                let cut = if gun.torpedo_launcher { gunner_reload_cut(ship, posts, points.as_deref(), &lib, mount.bank) } else { 0.0 };
+                state.cooldown = gun.burst_cycle_cut(cut);
                 state.burst_timer = 0.0;
                 // Accuracy factor: 0.5 for the plain AI; crewed ships use 1 - 0.8 * gunnery skill (the campaign roster's best gunner for
                 // the human fleet).
@@ -709,10 +711,11 @@ fn burst_turn(aim_dir: Vec3, deviation: f32, rng: &mut Rng) -> Quat {
 /// Damage rules of one shell hit on section `k` (`damage` = [lower, upper, crit, fire chance, fire strength]).
 /// Criticals are not modelled: in the original they only feed a tally and crew speech (docs/re/movement.md).
 /// Seconds the gunner of `bank` takes off TimeBetweenBursts: 10 x gunnery (0..1), for the player's crewed ships only; computer
-/// ships fire every TimeBetweenBursts (measured). Measured on retail: gunners of gunnery 7-9 brought one gun's hits down to
-/// every 3.5-3.9 s (heavy cannon, 12 s). Each gun reads the gunner of its own bank (the crew screen's gunner slots follow the
-/// selectable banks; owner-confirmed). PROVISIONAL: the point-defence banks have no visible slot and count as a generic hand (0.1);
-/// without posts the campaign roster's best gunner crews every gun.
+/// ships fire every TimeBetweenBursts here. Decoded: only torpedo launchers use it (the caller checks), the wait is
+/// max(0, TimeBetweenBursts - 10 x the raw gunnery of the bank's gunner), with no leadership bonus; computer ships' torpedo launchers
+/// use their own crew's gunnery in the original (PROVISIONAL, not modelled). Each gun reads the gunner of its own bank (the crew
+/// screen's gunner slots follow the weapon banks). PROVISIONAL: the point-defence banks have no visible slot and count as a generic
+/// hand (0.1); without posts the campaign roster's best gunner crews every gun.
 pub(super) fn gunner_reload_cut(ship: &Ship, posts: Option<&crate::crew_arms::CrewPosts>, points: Option<&crate::campaign::CampaignPoints>, lib: &Library, bank: usize) -> f32 {
     if ship.side != Side::Player {
         return 0.0;

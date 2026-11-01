@@ -146,7 +146,8 @@ pub struct GunDef {
     pub mount_type: Option<String>,
     pub points: Option<u32>,
     pub exclusion: Option<String>,
-    pub point_defense: bool, // WOT `Is PointDefense Gun`: automatic anti-torpedo/mine gun, never fires at ships
+    pub point_defense: bool,    // WOT `Is PointDefense Gun`: automatic anti-torpedo/mine gun, never fires at ships
+    pub torpedo_launcher: bool, // WOT `Is TorpedoLauncher Gun`: the only guns whose reload the gunner shortens (docs/re/gunnery.md)
     pub muzzle: f32,
     pub reload: f32,
     pub burst: u32,
@@ -371,6 +372,7 @@ pub fn gun_def(g: &Value) -> GunDef {
         points: g["Victory Point Cost"].as_u64().and_then(|v| u32::try_from(v).ok()),
         exclusion: g["Exclusion Race"].as_str().filter(|s| *s != "None").map(String::from),
         point_defense: g["Is PointDefense Gun"].as_bool().unwrap_or(false),
+        torpedo_launcher: g["Is TorpedoLauncher Gun"].as_bool().unwrap_or(false),
         muzzle: num(&g["MuzzleSpeed"]),
         reload: num(&g["TimeBetweenBursts"]),
         burst: g["BulletsPerBurst"].as_u64().unwrap() as u32,
