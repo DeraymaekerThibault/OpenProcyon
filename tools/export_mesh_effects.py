@@ -7,6 +7,7 @@ usage: python -m tools.export_mesh_effects <game_root> <assets_dir>"""
 
 import json
 import re
+import struct
 import sys
 from pathlib import Path
 
@@ -41,7 +42,13 @@ def export(root, out):
     scenes = {}
     effects = associations(root)
     for msb in ci_files(Path(root) / "BD_MeshScenes", "*.msb"):
-        scene = parse_scene(msb.read_bytes())
+        try:
+            scene = parse_scene(msb.read_bytes())
+        except (ValueError, struct.error) as e:
+            print(
+                f"{msb.name}: skipped ({e})"
+            )  # unreadable (modded) scene: no effect points
+            continue
         points = [
             dict(
                 kind=kind,

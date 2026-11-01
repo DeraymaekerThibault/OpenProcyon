@@ -25,11 +25,11 @@ SOURCE = "World/SinglePlayer/Mission01.twt"  # set per mission by main()
 
 def parse_mission(text):
     nodes, diagnostics = parse_text(text, SOURCE)
-    # Unsupported property types are tolerated; structural errors are not.
+    # Unsupported property types and stray closing braces (mod files) are tolerated; structural errors are not.
     errors = [
         d
         for d in diagnostics
-        if d["code"] not in ("unsupported_line", "invalid_property")
+        if d["code"] not in ("unsupported_line", "invalid_property", "unexpected_close")
     ]
     if errors:
         raise ValueError(errors[:3])
@@ -158,6 +158,7 @@ def parse_mission(text):
         [names[f["Player0"]], names[f["Player1"]]]
         for b in blocks(nodes, "PlayerAllianceInfoVector - Element")
         for f in [fields(b["children"])]
+        if max(f["Player0"], f["Player1"]) < len(names)  # mods leave dangling players
     ]
     # The journal screen's entry: one page per picture, each with a spoken line and its text.
     journal = None
@@ -230,7 +231,11 @@ def main(root, out):
     for twt in sorted((root / "World/SinglePlayer").glob("*.twt")):
         export_mission(root, out, twt)
     for twt in sorted((root / "World").glob("*.twt")):
-        export_skirmish_script(root, out, twt)
+        try:
+            export_skirmish_script(root, out, twt)
+        except (ValueError, KeyError, IndexError) as e:
+            # Modded maps can be malformed; the map still imports without its rule script.
+            print(f"{twt.name}: rule script skipped ({e!r:.200})")
 
 
 def export_skirmish_script(root, out, twt):

@@ -12,6 +12,7 @@ from pathlib import Path
 from tools.export_mesh_detail import collision_lods
 from tools.export_ship import export as export_physics
 from tools.gamefs import ci_file, ci_files
+from tools.mdb import MdbError
 from tools.mdb import parse as parse_mdb
 from tools.mdb_to_glb import convert, hardpoints
 from tools.models import model_path
@@ -387,9 +388,14 @@ def export(root, ship, outdir):
     sections = []
     for mesh, label, assoc in associations(nodes, "DamageSection"):
         a = kv(assoc)
-        models = parse_mdb(
-            ci_file(Path(root) / "BD_Meshes", f"{mesh}.mdb").read_bytes()
-        ).models
+        try:
+            models = parse_mdb(
+                ci_file(Path(root) / "BD_Meshes", f"{mesh}.mdb").read_bytes()
+            ).models
+        except MdbError as e:
+            # Mods ship truncated placeholder meshes for some sections: the ship keeps its other sections.
+            print(f"warning: {ship} section {label}: {mesh}.mdb unreadable ({e})")
+            continue
         # The triangles are the detail level retail collides with; the box also covers the full-detail model (it feeds aim points,
         # ring and radius, which were measured on the visible hull).
         m = models[min(collision_lods(root)(mesh), len(models) - 1)]
