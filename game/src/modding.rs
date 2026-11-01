@@ -41,6 +41,8 @@ pub struct Installed {
     pub name: String,
     pub version: String,
     pub description: String,
+    /// `mod.json` `category` ("Ships", "Visuals", ...); "Other" when absent.
+    pub category: String,
     pub dir: PathBuf,
     pub enabled: bool,
 }
@@ -64,7 +66,15 @@ pub fn installed_in(dir: &Path) -> Vec<Installed> {
             let text = |k: &str| meta[k].as_str().unwrap_or_default().to_string();
             let id = Some(text("id")).filter(|s| !s.is_empty()).unwrap_or_else(|| e.file_name().to_string_lossy().into_owned());
             let name = Some(text("name")).filter(|s| !s.is_empty()).unwrap_or_else(|| id.clone());
-            Installed { enabled: on.contains(&id), id, name, version: text("version"), description: text("description"), dir: e.path() }
+            Installed {
+                enabled: on.contains(&id),
+                id,
+                name,
+                version: text("version"),
+                description: text("description"),
+                category: Some(text("category")).filter(|s| !s.is_empty()).unwrap_or_else(|| "Other".into()),
+                dir: e.path(),
+            }
         })
         .collect();
     found.sort_by_key(|m| (on.iter().position(|i| *i == m.id).unwrap_or(usize::MAX), m.id.clone()));
@@ -141,6 +151,15 @@ pub fn overlay(base: &Path, mods: &[PathBuf]) -> PathBuf {
                 let mut b = read(&base).unwrap_or_else(|| panic!("mod {}: extends unknown '{parent}'", m.display()));
                 merge(&mut b, &v);
                 b.as_object_mut().unwrap().remove("extends");
+                // "set": {"/engines/0/fx": "X"} replaces single values inside arrays, which a merge cannot reach.
+                if let Some(Value::Object(set)) = b.as_object_mut().unwrap().remove("set") {
+                    for (ptr, value) in set {
+                        match b.pointer_mut(&ptr) {
+                            Some(slot) => *slot = value,
+                            None => panic!("mod {}: {name} sets '{ptr}', which does not exist", m.display()),
+                        }
+                    }
+                }
                 let _ = std::fs::remove_file(&to);
                 std::fs::write(&to, serde_json::to_string(&b).unwrap()).unwrap();
             } else {
@@ -186,6 +205,20 @@ mod tests {
         list[2].enabled = true;
         save_enabled_in(&dir, &list);
         assert_eq!(installed_in(&dir).iter().filter(|m| m.enabled).count(), 3);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn set_replaces_one_value_inside_an_array() {
+        let dir = std::env::temp_dir().join(format!("procyon-mod-set-{}", std::process::id()));
+        let (base, m) = (dir.join("assets"), dir.join("mod"));
+        for d in [base.join("data"), m.join("data")] {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        std::fs::write(base.join("data/a.json"), r#"{"list": [{"fx": "x", "pos": 1}, {"fx": "y"}]}"#).unwrap();
+        std::fs::write(m.join("data/a.json"), r#"{"extends": "a", "set": {"/list/1/fx": "z"}}"#).unwrap();
+        let root = overlay(&base, &[m]);
+        let a: Value = read(&root.join("data/a.json")).unwrap();
+        assert_eq!(a, serde_json::json!({"list": [{"fx": "x", "pos": 1}, {"fx": "z"}]}));
         std::fs::remove_dir_all(dir).unwrap();
     }
     #[test]

@@ -112,6 +112,9 @@ pub enum Action {
     Setting(Setting),
     /// Switch installed mod `n` on or off (applies on the next launch).
     ToggleMod(usize),
+    SortMods(ModCol),
+    /// Cycle the Mods table's category filter.
+    ModCategory,
 }
 
 impl Action {
@@ -187,7 +190,7 @@ pub fn button_sound(action: &Action, arrow: Option<&ArrowButton>, select: bool) 
             }
         }
         _ if list => "FE_List_Select",
-        (Action::FleetSize(_) | Action::VictoryLimit(_) | Action::Setting(_) | Action::ToggleMod(_), _) => "SpinButton",
+        (Action::FleetSize(_) | Action::VictoryLimit(_) | Action::Setting(_) | Action::ToggleMod(_) | Action::SortMods(_) | Action::ModCategory, _) => "SpinButton",
         (Action::Launch | Action::Campaign | Action::Tutorial(_), _) => "StartButton",
         (Action::AddShip, _) => "FE_Add",
         (Action::DropShip | Action::Remove, _) => "FE_Drop",
@@ -778,6 +781,8 @@ fn buttons(
             Action::Goto(s) => next.set(*s),
             Action::Rebind(n) => cui.capture = Some(*n),
             Action::ToggleMod(n) => mods.toggle(*n),
+            Action::SortMods(c) => mods.sort_by(*c),
+            Action::ModCategory => mods.next_category(),
             Action::Setting(s) => {
                 settings.step(*s);
                 settings.save();

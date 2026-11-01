@@ -1,0 +1,6 @@
+{
+  "extends": "Ship_Procyon_Destroyer",
+  "set": {
+    "/engines/0/fx": "ICEngine_ExtraHeavy"
+  }
+}

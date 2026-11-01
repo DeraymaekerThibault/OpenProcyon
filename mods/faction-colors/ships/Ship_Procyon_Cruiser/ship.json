@@ -1,0 +1,9 @@
+{
+  "extends": "Ship_Procyon_Cruiser",
+  "set": {
+    "/engines/0/fx": "ICEngine_Heavy",
+    "/engines/1/fx": "ICEngine_Heavy",
+    "/engines/2/fx": "ICEngine_Heavy",
+    "/engines/3/fx": "ICEngine_Heavy"
+  }
+}
