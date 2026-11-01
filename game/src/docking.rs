@@ -59,11 +59,13 @@ pub struct Dockable {
     /// 'Repair When Docked With' / 'Toggle Island Repair When Docked': same defaults as `enabled`.
     pub repairs: bool,
     markers: Vec<Entity>,
+    /// Per point, the number in its label (`DockPoint3` -> 3, 0 if none): picks the base's `CRANESnn` clip.
+    pub numbers: Vec<u32>,
 }
 impl Dockable {
     pub fn new(points: Vec<DockPoint>, enabled: bool) -> Self {
         let taken = vec![None; points.len()];
-        Dockable { points, taken, enabled, repairs: enabled, markers: vec![] }
+        Dockable { numbers: vec![0; points.len()], points, taken, enabled, repairs: enabled, markers: vec![] }
     }
     fn world(&self, tf: &Transform, i: usize) -> (Vec3, Vec3) {
         let p = &self.points[i];
@@ -120,7 +122,9 @@ pub fn dockable_for(docks: &Value, entity: &str) -> Option<Dockable> {
         .map(|p| DockPoint { pos: game_to_bevy(&p["pos"]), fwd: Quat::from_rotation_y(p["yaw"].as_f64().unwrap_or(0.0) as f32) * Vec3::NEG_Z })
         .collect();
     let enabled = !entity.starts_with("Ship_") || d["tender"].as_bool().unwrap_or(false);
-    (!points.is_empty()).then(|| Dockable::new(points, enabled))
+    let numbers: Vec<u32> =
+        d["points"].as_array()?.iter().map(|p| p["label"].as_str().unwrap_or("").trim_start_matches(|c: char| !c.is_ascii_digit()).parse().unwrap_or(0)).collect();
+    (!points.is_empty()).then(|| Dockable { numbers, ..Dockable::new(points, enabled) })
 }
 
 #[derive(Message)]
@@ -218,7 +222,55 @@ pub fn plugin(app: &mut App) {
                 .run_if(in_state(crate::menu::Screen::Battle))
                 .run_if(crate::menu::overlay_closed),
         )
+        .add_systems(Update, play_cranes.run_if(in_state(crate::menu::Screen::Battle)))
         .add_systems(Update, (cancel_input, markers).chain().before(crate::input).run_if(in_state(crate::menu::Screen::Battle)).run_if(crate::menu::overlay_closed));
+}
+
+/// Where a base's crane clips are: `CRANES` (one set, any dock) or `CRANESnn` (the set of dock point nn) run from their first frame
+/// while a ship sits docked at a matching point, and stop on their end pose (docs/re/effects.md). Per clip: (time, running).
+#[derive(Component, Default)]
+struct CranePlay(Vec<(String, f32, bool)>);
+
+fn play_cranes(
+    mut commands: Commands,
+    time: Res<Time>,
+    lib: Option<Res<Library>>,
+    mut bases: Query<(Entity, &crate::clips::SceneLoop, &Dockable, Option<&mut CranePlay>)>,
+    dockers: Query<&Docker>,
+    children: Query<&Children>,
+    mut nodes: crate::clips::Nodes,
+) {
+    let Some(lib) = lib else { return };
+    for (e, crate::clips::SceneLoop(scene), dockable, play) in &mut bases {
+        let Some(mut play) = play else {
+            commands.entity(e).insert(CranePlay::default());
+            continue;
+        };
+        for (name, clip) in lib.clips.get(scene).into_iter().flatten().filter(|(n, _)| n.starts_with("CRANES")) {
+            let number: Option<u32> = name.trim_start_matches("CRANES").parse().ok();
+            let active = dockable
+                .taken
+                .iter()
+                .enumerate()
+                .any(|(i, t)| number.is_none_or(|n| dockable.numbers[i] == n) && t.and_then(|d| dockers.get(d).ok()).is_some_and(|d| d.is_docked()));
+            let i = match play.0.iter().position(|(n, ..)| n == name) {
+                Some(i) => i,
+                None if active => {
+                    play.0.push((name.clone(), 0.0, false));
+                    play.0.len() - 1
+                }
+                None => continue,
+            };
+            let (_, t, running) = &mut play.0[i];
+            if active {
+                *t = if *running { (*t + time.delta_secs()).min(clip.duration) } else { 0.0 };
+            } else if *running {
+                *t = clip.duration;
+            }
+            *running = active;
+            crate::clips::pose_scene(&mut commands, clip, *t, e, &children, &mut nodes);
+        }
+    }
 }
 
 fn cancel_input(keys: Res<ButtonInput<KeyCode>>, fleets: Res<crate::ship::Fleets>, player: Query<Entity, With<PlayerShip>>, mut msgs: MessageWriter<DockMsg>) {

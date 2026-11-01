@@ -64,49 +64,12 @@ fn destroyed_torpedo_boat_sail_redirects_aim_to_hull() {
 }
 
 #[test]
-fn breakup_chunks_fly_then_burst_inside_their_window() {
-    let chunk = crate::data::Destruct { fx: Some("Final_Ship_Chunk".into()), start: 2.4, end: 2.5, vel: Vec3::new(-1.8, 5.6, -10.2) };
-    let burst = burst_time(&chunk, 0.5);
-    assert!((burst - 2.45).abs() < 1e-5, "the burst falls inside the window");
-    assert_eq!(chunk_offset(&chunk, burst, 0.0), Some(Vec3::ZERO), "every piece starts on the hull");
-    assert_eq!(chunk_offset(&chunk, burst, 1.0), Some(chunk.vel), "then flies at its velocity");
-    assert_eq!(chunk_offset(&chunk, burst, 2.46), None, "and is gone after its burst");
-    // a section without an effect (retail mid hulls) drifts until its window closes
-    let drift = crate::data::Destruct { fx: None, start: 0.0, end: 2.0, vel: Vec3::X * 4.0 };
-    assert_eq!(burst_time(&drift, 0.0), 2.0);
-}
-
-#[test]
-#[ignore = "needs imported assets"]
-fn cutter_masts_break_off_as_debris_pieces() {
-    let lib = Library::load(assets_dir());
-    let class = &lib.classes[lib.index("Ship_Navy_Cutter")];
-    let by = |label: &str| class.sections.iter().find(|s| s.label == label).unwrap();
-    let (model, pivot) = by("Mast_2_cloth").debris.clone().expect("imported debrisMeshScene");
-    assert!(model.ends_with(".glb") && crate::data::model(&model).starts_with("models/debris/"), "{model}");
-    assert!(pivot.y > 10.0, "the fore-mast piece pivots high up the mast (bevy y up)");
-    assert_eq!(by("Mast_2_cloth").debris_fx.as_deref(), Some("Falling_Debris"));
-    assert!(by("Port_Mid_Hull_wood").debris.is_none());
-}
-
-#[test]
-fn debris_drifts_with_its_ship_sinks_tumbles_and_goes() {
-    let mut app = App::new();
-    app.init_resource::<Time>().add_systems(Update, debris);
-    let start = Transform::from_xyz(0.0, 10.0, 0.0);
-    let e = app.world_mut().spawn((Debris { vel: Vec3::new(0.0, 0.0, -4.0), axis: Vec3::X, spin: DEBRIS_SPIN, age: 0.0 }, start)).id();
-    for _ in 0..20 {
-        app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_millis(50));
-        app.update();
-    }
-    let tf = *app.world().get::<Transform>(e).unwrap();
-    assert!((tf.translation.z + 4.0).abs() < 0.3, "keeps the ship's velocity: {tf:?}");
-    assert!(tf.translation.y < 10.0 - DEBRIS_FALL * 0.8, "and sinks");
-    assert!(tf.rotation.angle_between(start.rotation) > 0.3, "and tumbles");
-    app.world_mut().get_mut::<Debris>(e).unwrap().age = DEBRIS_LIFE;
-    app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_millis(50));
-    app.update();
-    assert!(app.world().get_entity(e).is_err(), "gone after its life");
+fn chunks_vanish_at_their_effect_start_or_window_end() {
+    let burst = crate::data::Destruct { fx: Some("Final_Ship_Chunk".into()), start: 2.9, end: 3.0, point: Vec3::ZERO };
+    assert_eq!(hide_time(&burst), 2.9);
+    // a section without an effect (retail mid hulls, start 0) stays until its window closes
+    let drift = crate::data::Destruct { fx: None, start: 0.0, end: 2.0, point: Vec3::ZERO };
+    assert_eq!(hide_time(&drift), 2.0);
 }
 
 #[test]
@@ -115,10 +78,9 @@ fn cutter_breakup_uses_the_retail_section_data() {
     let lib = Library::load(assets_dir());
     let class = &lib.classes[lib.index("Ship_Navy_Cutter")];
     let d: Vec<_> = class.sections.iter().map(|s| s.destruct.clone().expect("imported destructFx")).collect();
-    // bow: Final_Ship_Chunk at 2.9-3.0 s, flying forward and up (game y forward = bevy -z, game z up = bevy +y)
+    // bow: Final_Ship_Chunk at 2.9-3.0 s
     let bow = &d[0];
     assert_eq!((bow.fx.as_deref(), bow.start, bow.end), (Some("Final_Ship_Chunk"), 2.9, 3.0));
-    assert!(bow.vel.y > 0.0 && bow.vel.z < 0.0);
     assert!(d.iter().all(|c| c.end <= 3.0), "the whole breakup is over within 3 s");
 }
 

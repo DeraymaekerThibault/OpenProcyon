@@ -258,14 +258,15 @@ pub struct Section {
     /// Neighbouring sections (indices) a destroyed section passes damage on to (WOT `adjacent`).
     pub adjacent: Vec<usize>,
 }
-/// A section's part of a ship's final breakup (docs/re/effects.md "Ship destruction"): its mesh flies at `vel` (ship-local, bevy
-/// axes, units/s) from the moment of death, bursts with effect `fx` (if any) at `start` seconds and is gone at `end`.
+/// A section's part of a ship's final breakup (docs/re/effects.md "Ship destruction"): its mesh moves with the break-apart clip,
+/// and with effect `fx` (if any) it bursts at `point` (in the section's own frame, bevy axes) once the clip passes `start`
+/// seconds. A section without an effect is gone at `end`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Destruct {
     pub fx: Option<String>,
     pub start: f32,
     pub end: f32,
-    pub vel: Vec3,
+    pub point: Vec3,
 }
 pub struct Physics {
     pub mass: f32,
@@ -279,6 +280,8 @@ pub struct Class {
     pub race: String,   // "Navy", "Pirate", ...
     pub skirmish: bool, // offered in the skirmish ship pickers
     pub glb: String,
+    /// Retail mesh scene name (`scene` in ship.json): keys the scene's animation clips.
+    pub scene: Option<String>,
     pub mounts: Vec<Mount>,
     pub sections: Vec<Section>,
     pub core_hp: f32,
@@ -336,6 +339,8 @@ pub struct Library {
     pub bullets: HashMap<String, BulletDef>,
     /// Per ship type, the pool open skirmish maps name ships from (`ships/<id>/names.json`, WOT 'Available Unique Ship Name').
     pub names: HashMap<String, Vec<String>>,
+    /// Mesh scene animation clips (`data/animations.json`).
+    pub clips: crate::clips::Clips,
 }
 impl Library {
     pub fn index(&self, name: &str) -> usize {
@@ -490,7 +495,7 @@ impl Library {
         let (guns, bullets) = load_weapons(root);
         let classes = ids.iter().map(|n| load_class(root, n, &guns)).collect();
         let names = ids.iter().filter_map(|n| Some((n.clone(), serde_json::from_value(try_json(&root.join(format!("ships/{n}/names.json")))?).ok()?))).collect();
-        Library { classes, guns, bullets, names }
+        Library { classes, guns, bullets, names, clips: crate::clips::load(root) }
     }
 }
 

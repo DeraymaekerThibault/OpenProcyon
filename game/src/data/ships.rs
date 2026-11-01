@@ -37,6 +37,7 @@ where
 struct ShipDoc {
     geometry: Option<String>,
     model: Option<String>,
+    scene: Option<String>,
     #[serde(default)]
     race: String,
     #[serde(default)]
@@ -103,7 +104,7 @@ struct DestructDoc {
     fx: Option<String>,
     start: f64,
     end: f64,
-    vel: [f64; 3],
+    point: [f64; 3],
 }
 #[derive(Deserialize)]
 struct DebrisDoc {
@@ -182,7 +183,7 @@ fn try_load_class(root: &Path, name: &str, guns: &HashMap<String, GunDef>) -> Re
                 speed: s.vital_speed,
                 turn: s.vital_turn,
                 mission: s.vital_mission,
-                destruct: s.destruct.as_ref().map(|d| Destruct { fx: d.fx.clone(), start: d.start as f32, end: d.end as f32, vel: point(d.vel) }),
+                destruct: s.destruct.as_ref().map(|d| Destruct { fx: d.fx.clone(), start: d.start as f32, end: d.end as f32, point: point(d.point) }),
                 debris: s.debris.as_ref().map(|d| (d.model.clone(), point(d.pivot))),
                 debris_fx: s.debris_fx.clone(),
                 adjacent: s.adjacent.iter().filter_map(|l| j.sections.iter().position(|(_, o)| o.layer == *l)).collect(),
@@ -240,6 +241,7 @@ fn try_load_class(root: &Path, name: &str, guns: &HashMap<String, GunDef>) -> Re
         race: j.race,
         skirmish: j.skirmish,
         glb,
+        scene: j.scene,
         mounts,
         sections,
         core_hp: j.core_hp as f32,

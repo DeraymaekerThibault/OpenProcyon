@@ -4,12 +4,12 @@ import unittest
 
 
 class DestructRecordTests(unittest.TestCase):
-    def test_parses_effect_times_and_velocity(self):
+    def test_parses_effect_times_and_burst_point(self):
         from tools.export_combat import destruct_record
 
         self.assertEqual(
             destruct_record("{ Some_Chunk 1.5 1.6 ( 1.0 -2.0 3.0 ) }"),
-            dict(fx="Some_Chunk", start=1.5, end=1.6, vel=[1.0, -2.0, 3.0]),
+            dict(fx="Some_Chunk", start=1.5, end=1.6, point=[1.0, 3.0, -2.0]),
         )
         self.assertIsNone(destruct_record("{ none 0 2 ( 1 2 3 ) }")["fx"])
         self.assertIsNone(destruct_record(None))

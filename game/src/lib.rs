@@ -7,6 +7,7 @@ pub mod blackhole;
 pub mod boarding;
 pub mod briefing;
 pub mod campaign;
+pub mod clips;
 pub mod cloak;
 pub mod collision;
 pub mod combat;
@@ -156,6 +157,7 @@ pub fn run(view: fn(&mut App), setup_view: fn(&mut App)) {
     };
     App::new()
         .add_plugins(DefaultPlugins.set(AssetPlugin { file_path: assets_dir().to_string_lossy().into_owned(), ..default() }))
+        .add_plugins(clips::plugin)
         .add_plugins((
             fx::plugin,
             combat::plugin,

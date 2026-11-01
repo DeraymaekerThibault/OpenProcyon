@@ -196,32 +196,28 @@ apart where it is: the class `Explosion Effect Name` (fireballs, white flash, sm
 pieces (planks, the stern with its wings, the masts), each piece bursts in its own fireball within the next ~3 s, then only smoke
 remains. The ship's physics object does not move at all through this; it is purely presentation.
 
-The timeline is data: every damage section's WOT association carries `destructFx = { effect start end ( vx vy vz ) }`, e.g. the
-Cutter's bow `Final_Ship_Chunk 2.9 3.0 ( 8.8 4.1 11.1 )`, stern `Final_Ship_Chunk_large 1.9 2.0`, upper mast `0.9 1.0`, mid hulls
-`none 0 2 ( ±4 ... )`. Reading (matches the frames): the section's mesh flies at the velocity (ship axes, units/s) from the moment of
-death and bursts with the effect at a time inside [start, end]; `none` sections just drift and are gone at `end`. The stern piece
-vanished ~2 s in, as its 1.9-2.0 window says. A mast that broke off earlier in the fight (section destroyed before death) keeps tumbling away for
-6+ s: see "Section debris" below.
+The timeline is data, in two parts. Each ship's mesh scene carries one clip `ANIMATION00` (2-20 s) that moves the section layers
+rigidly (translation up to 17 units, rotation up to 8.5 rad; values are offsets from the rest pose). It starts 0.14 s after the
+kill and plays once; the ship is removed 0.14 s + the clip length after the kill. Each damage section's WOT association also
+carries `destructFx = { effect start end ( a b c ) }`, e.g. the Cutter's bow `Final_Ship_Chunk 2.9 3.0`, stern `1.9 2.0`, upper mast
+`0.9 1.0`, mid hulls `none 0 2`. When the clip time passes a section's `start` the section is hidden and its effect bursts
+(`start` is the clip's end for that piece minus 0.1 s). The three numbers are **where the burst appears**, a point in the section's
+own frame read in the order first, third, second (game x, y, z), not a velocity. Sections with `none` and start 0 stay until `end`
+(PROVISIONAL; the earlier frames show the mid hulls drifting away, and a hide at start 0 would remove them at once). A mast that broke off earlier in the fight keeps
+tumbling away for 6+ s: see "Section debris" below.
 
-Implementation (`combat/mod.rs`): death marks Health destroyed and reports ShipLost at once, plays the class explosion and the
-death sound, then moves each section's mesh nodes (normal and damaged variants) along its `destruct.vel`, bursts its effect at a
-random moment of its window and hides it; after the last burst the presentation is removed (the logical ship stays for mission
-references). The exporter writes `sections[].destruct` = {fx, start, end, vel}. Dev kills (K/J, `--script victory|defeat`) zero the
-core and go through the same path. PROVISIONAL: no tumbling of the pieces, linear flight (no gravity or drag), the burst moment
-picked uniformly, sections without data hold 1 s.
+Implementation (`combat/mod.rs`, `clips.rs`): death marks Health destroyed and reports ShipLost at once, plays the class explosion
+and the death sound, then plays the clip on the section mesh nodes (normal and damaged variants), hides and bursts each section as
+above, and removes the presentation at the end (the logical ship stays for mission references). The exporter writes
+`sections[].destruct` = {fx, start, end, point} (point in game axes, already reordered). Dev kills (K/J, `--script victory|defeat`)
+zero the core and go through the same path. Classes without a clip hold 1 s.
 
 ### Break-apart animation clips (mesh scene animations)
-Every ship's mesh scene carries one clip (`ANIMATION00`, 2-20 s; exported in `data/animations.json`). Decoded on the Navy Cutter (3.0 s,
-eight motions, two linear keys each): it is the one-shot break-apart motion, not an idle loop. No ship clip returns to its start (0 of
-41), translations reach 3.8-16.8 units and rotations 0.7-8.5 rad. The end times per piece match the `destructFx` windows above: bow 3.0 s,
-stern layers 2.0 s, masts 1.0 s, and layer 6 at 2.5 s. The displacements do not match the WOT velocities (bow clip totals 5.9 / 6.6 /
-7.4 units against velocities 8.8 / 4.1 / 11.1 per second), so whether retail uses the clip, the velocities or both is open. The clip
-supplies the rotation (the tumble) that the implementation above lacks. Open: whether values are offsets from the rest pose or absolute
-poses (layer values start at 0, which suggests offsets, but the constants on helper nodes look absolute); the meaning of the keyframe
-smoothing value (0, 1 or 2; 2 on almost all keys; tangents are per segment, linear for two-key segments).
-Other scenes: the animals' swim cycles are rotations of their bones (whale up to 0.6 rad, manta 1.0, dragon 1.4 plus up to one unit of
-translation); base windmills turn one full yaw (-2 pi) over 10-16.7 s and loop; base cranes run 10 s and mostly return to start; one base
-(the iron-clad mines) has a 43 s clip with up to 67 keys.
+`data/animations.json` holds every clip (`tools/export_animations.py`). Values are offsets added to the node's rest position and rest
+yaw/pitch/roll. No ship clip returns to its start (0 of 41). Other scenes: the animals' swim cycles are rotations of their bones
+(whale up to 0.6 rad, manta 1.0, dragon 1.4 plus up to one unit of translation); base windmills (clip `ENVIRONMENT`, also some mine
+and shipyard machinery) loop from spawn, one full yaw (-2 pi) over 10-16.7 s (`clips::play_loops`); base cranes (`CRANES`, or `CRANES01`-`04` for the dock point of that number) run 10 s from their first frame while a ship sits docked at a matching point and stop on their end pose (`docking::play_cranes`). PROVISIONAL: that docking starts them is the owner's reading (the clips are matched to dock points by name); the exact start/stop moments in the dock routine are not measured. The smoothing value of a key picks the curve
+(see "Animal skeletons").
 
 ### Animal skeletons (space dragon, whale)
 The animals are single skinned meshes. Their mesh file keeps, after each face list, one influence map per bone (a list of
