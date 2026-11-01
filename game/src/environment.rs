@@ -194,6 +194,60 @@ fn sensor_smoke(world: &mut World) {
     }
 }
 
+/// The swim or wing-beat clip baked into an animal's model (tools/skin.py, docs/re/effects.md "Animal skeletons").
+#[derive(Component)]
+pub struct Clip {
+    pub clip: Handle<AnimationClip>,
+    /// The entity holding the clip's player and the graph node playing it, once the model has spawned.
+    player: Option<(Entity, AnimationNodeIndex)>,
+}
+impl Clip {
+    pub fn load(assets: &AssetServer, file: &str) -> Self {
+        Clip { clip: assets.load(GltfAssetLabel::Animation(0).from_asset(crate::data::model(file))), player: None }
+    }
+}
+
+/// Starts an animal's clip once its model has spawned (the glTF loader puts the player on the skeleton root): looped, from a
+/// phase of its own (the original draws a random start in [0, duration)). ponytail: the phase comes from the entity, not a draw.
+fn play_clips(
+    mut commands: Commands,
+    mut players: Query<(Entity, &mut AnimationPlayer), Added<AnimationPlayer>>,
+    parents: Query<&ChildOf>,
+    mut clips: Query<&mut Clip>,
+    assets: Res<Assets<AnimationClip>>,
+    mut graphs: ResMut<Assets<AnimationGraph>>,
+) {
+    for (e, mut player) in &mut players {
+        let Some(owner) = parents.iter_ancestors(e).find(|a| clips.contains(*a)) else { continue };
+        let mut clip = clips.get_mut(owner).unwrap();
+        let (graph, node) = AnimationGraph::from_clip(clip.clip.clone());
+        let phase = (owner.to_bits().wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 40) as f32 / (1u64 << 24) as f32;
+        let duration = assets.get(&clip.clip).map_or(0.0, |c| c.duration());
+        player.play(node).repeat().seek_to(phase * duration);
+        commands.entity(e).insert(AnimationGraphHandle(graphs.add(graph)));
+        clip.player = Some((e, node));
+    }
+}
+
+/// The clip's rate (the original's rules): a dragon beats its wings at 0.2 x its speed, held between 0.8 and 1.3; a whale swims
+/// at 1 while it moves and holds its pose while it does not. PROVISIONAL: the whale's on/off value is read as its speed.
+fn clip_rates(animals: Query<(&Clip, &SpaceAnimal, Has<crate::dragons::Dragon>)>, mut players: Query<&mut AnimationPlayer>) {
+    for (clip, animal, dragon) in &animals {
+        let Some((e, node)) = clip.player else { continue };
+        let Ok(mut player) = players.get_mut(e) else { continue };
+        let Some(active) = player.animation_mut(node) else { continue };
+        let speed = animal.velocity.length();
+        let rate = if dragon {
+            (0.2 * speed).clamp(0.8, 1.3)
+        } else if speed >= 0.01 {
+            1.0
+        } else {
+            0.0
+        };
+        active.set_speed(rate);
+    }
+}
+
 #[derive(Component)]
 pub struct SpaceAnimal {
     pub home: String,
@@ -206,7 +260,6 @@ pub struct SpaceAnimal {
     next: usize,
     looping: bool,
     offset: Vec3,
-    phase: f32,
     call_in: f32,
     calls: usize,
     /// Another system (dragons.rs) is steering it: no path following or calls here.
@@ -227,7 +280,6 @@ impl SpaceAnimal {
             next: 0,
             looping: false,
             offset,
-            phase: id as f32,
             call_in: 3.0 + (id % 7) as f32,
             calls: id as usize,
             paused: false,
@@ -297,7 +349,8 @@ pub fn plugin(app: &mut App) {
         )
         .add_systems(FixedUpdate, refresh_sensors.in_set(crate::BattleSet::Sense).run_if(in_state(crate::menu::Screen::Battle)))
         .add_systems(FixedUpdate, update.in_set(crate::BattleSet::Forces).run_if(in_state(crate::menu::Screen::Battle)))
-        .add_systems(Update, (current_fx, flow_currents).run_if(in_state(crate::menu::Screen::Battle)));
+        .add_systems(Update, (current_fx, flow_currents).run_if(in_state(crate::menu::Screen::Battle)))
+        .add_systems(Update, (play_clips, clip_rates).chain());
 }
 
 /// `whales_shown`: campaign missions start their whales hidden (the rules show them); skirmish maps' scripts never do.
@@ -321,7 +374,8 @@ pub fn spawn(commands: &mut Commands, assets: &AssetServer, data: &Value, whales
         commands.spawn((
             Scenario,
             SpaceAnimal::new(home, (max - min).length() / 2.0, pos - centre, id, whales_shown),
-            WorldAssetRoot(assets.load(GltfAssetLabel::Scene(0).from_asset(crate::data::model(&format!("{}.glb", whale["scene"].as_str().expect("whale scene")))))),
+            crate::data::scene(assets, &format!("{}.glb", whale["scene"].as_str().expect("whale scene"))),
+            Clip::load(assets, &format!("{}.glb", whale["scene"].as_str().expect("whale scene"))),
             Transform::from_translation(pos).with_rotation(Quat::from_rotation_y(heading)),
             if whales_shown { Visibility::Inherited } else { Visibility::Hidden },
         ));
@@ -462,11 +516,8 @@ fn update(
         }
         animal.advance(&mut tf, dt);
         if dragon {
-            continue; // dragons roar and flap in dragons.rs
+            continue; // dragons roar in dragons.rs
         }
-        animal.phase += dt;
-        // Bind-pose fallback: gentle body roll, not the retail skeletal fin/tail animation.
-        tf.rotation *= Quat::from_rotation_z(0.02 * dt * animal.phase.sin());
         animal.call_in -= dt;
         if animal.call_in <= 0.0 {
             if let Some(sounds) = def["sounds"].as_array().filter(|a| !a.is_empty()) {
@@ -709,7 +760,7 @@ mod tests {
 
     #[test]
     fn whale_paths_loop_and_duplicate_points_do_not_hang() {
-        let mut animal = SpaceAnimal { speed: 12.0, phase: 0.0, call_in: 3.0, calls: 0, ..SpaceAnimal::new("Whales", 6.0, Vec3::ZERO, 0, true) };
+        let mut animal = SpaceAnimal { speed: 12.0, call_in: 3.0, calls: 0, ..SpaceAnimal::new("Whales", 6.0, Vec3::ZERO, 0, true) };
         let mut tf = Transform::default();
         animal.follow(&[Vec3::ZERO, Vec3::X * 12.0], tf.translation, true, true);
         animal.advance(&mut tf, 0.0);

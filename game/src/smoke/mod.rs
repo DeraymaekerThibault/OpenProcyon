@@ -43,7 +43,7 @@ macro_rules! scripts {
 }
 
 scripts! {
-    Asteroid => "asteroid", Board => "board", BriefingSkip => "briefing-skip",
+    Animals => "animals", Asteroid => "asteroid", Board => "board", BriefingSkip => "briefing-skip",
     Course => "course", CurrentM3 => "current-m3", Damage => "damage", Defeat => "defeat",
     Dock => "dock", DockClick => "dock-click", DockMenu => "dock-menu",
     Fleet => "fleet", FleetPrimary => "fleet-primary", FleetCrew => "fleet-crew", FleetArms => "fleet-arms", FleetProfile => "fleet-profile", FleetProfileCrew => "fleet-profile-crew",
@@ -63,7 +63,22 @@ pub fn plugin(app: &mut App) {
     report::plugin(app);
     app.add_systems(PreUpdate, fleet::fleet_smoke.after(bevy::ui::UiSystems::Focus).before(crate::panels::hud_input))
         .add_systems(PreUpdate, lifeboats::smoke.after(bevy::ui::UiSystems::Focus))
-        .add_systems(Update, shells::shells);
+        .add_systems(Update, (shells::shells, animals));
+}
+
+/// `--script animals --map dragons_nest --shot <png> --shot-frame N`: from frame 20 the first space animal (a dragon here, a
+/// whale on Shadow Dance) is held 40 units ahead of the player's ship, so a screenshot shows its baked clip mid-beat. Visual only.
+fn animals(
+    cfg: Res<crate::Config>,
+    player: Query<&Transform, (With<crate::PlayerShip>, Without<crate::environment::SpaceAnimal>)>,
+    mut animals: Query<&mut Transform, With<crate::environment::SpaceAnimal>>,
+) {
+    if cfg.script != Some(Script::Animals) || cfg.frame < 20 {
+        return;
+    }
+    let (Ok(ship), Some(mut tf)) = (player.single(), animals.iter_mut().next()) else { return };
+    tf.translation = ship.translation + *ship.forward() * 40.0 + Vec3::Y * 4.0;
+    tf.rotation = ship.rotation * Quat::from_rotation_y(std::f32::consts::FRAC_PI_2);
 }
 
 /// Jump to the tender and damage the player to exercise repair; called at the original point in rule dispatch.
