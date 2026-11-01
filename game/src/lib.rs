@@ -96,6 +96,11 @@ fn content_dir() -> PathBuf {
     let exe_dir = std::env::current_exe().ok().and_then(|path| path.parent().map(|dir| dir.join("content")));
     content_dir_from(exe_dir, PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../content"))
 }
+/// The `mods/` that ships with the game: next to the executable in a download, the checkout's under `make run`.
+pub fn bundled_mods_dir() -> Option<PathBuf> {
+    let beside_binary = std::env::current_exe().ok().and_then(|path| path.parent().map(|dir| dir.join("mods")));
+    beside_binary.filter(|dir| dir.is_dir()).or_else(|| Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../mods")).filter(|d| d.is_dir()))
+}
 fn content_dir_from(next_to_exe: Option<PathBuf>, checkout: PathBuf) -> PathBuf {
     next_to_exe.filter(|dir| dir.join("fonts").is_dir()).unwrap_or(checkout)
 }
@@ -136,7 +141,7 @@ pub fn run(view: fn(&mut App), setup_view: fn(&mut App)) {
         eprintln!("No converted game assets in {}: opening the import screen.", base.display());
         return setup::run(base, content_dir(), setup_view);
     }
-    let installed = modding::installed().into_iter().filter(|m| m.enabled).map(|m| m.dir);
+    let installed = modding::installed(bundled_mods_dir().as_deref()).into_iter().filter(|m| m.enabled).map(|m| m.dir);
     let layers: Vec<PathBuf> = std::iter::once(content_dir()).chain(installed).chain(mods).collect();
     let _ = ASSETS.set(modding::overlay(&base, &layers));
     let arg = |k: &str| args.iter().position(|a| a == k).and_then(|i| args.get(i + 1)).cloned();

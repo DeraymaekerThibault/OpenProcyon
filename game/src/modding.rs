@@ -53,36 +53,30 @@ pub fn mods_dir() -> Option<PathBuf> {
     Some(crate::campaign::user_dir()?.join("mods"))
 }
 
-/// Every `<dir>/*/` with its `mod.json` (`id` defaults to the folder name, `name` to the id), enabled ones first in `mods.json` order.
-pub fn installed_in(dir: &Path) -> Vec<Installed> {
-    let on: Vec<String> = read(&dir.join("mods.json")).and_then(|v| serde_json::from_value(v["enabled"].clone()).ok()).unwrap_or_default();
-    let mut found: Vec<Installed> = std::fs::read_dir(dir.join("mods"))
-        .into_iter()
-        .flatten()
-        .flatten()
-        .filter(|e| e.path().is_dir())
-        .map(|e| {
+/// Every mod folder in `<user>/mods/` and in `bundled` (the `mods/` that ships with the game; a user folder of the same id wins), with
+/// its `mod.json` (`id` defaults to the folder name, `name` to the id). Enabled ones first in `mods.json` order, the rest by id.
+pub fn installed_in(user: &Path, bundled: Option<&Path>) -> Vec<Installed> {
+    let on: Vec<String> = read(&user.join("mods.json")).and_then(|v| serde_json::from_value(v["enabled"].clone()).ok()).unwrap_or_default();
+    let mut found: Vec<Installed> = vec![];
+    for dir in [Some(user.join("mods")), bundled.map(Path::to_path_buf)].into_iter().flatten() {
+        for e in std::fs::read_dir(dir).into_iter().flatten().flatten().filter(|e| e.path().is_dir()) {
             let meta = read(&e.path().join("mod.json")).unwrap_or_default();
             let text = |k: &str| meta[k].as_str().unwrap_or_default().to_string();
             let id = Some(text("id")).filter(|s| !s.is_empty()).unwrap_or_else(|| e.file_name().to_string_lossy().into_owned());
-            let name = Some(text("name")).filter(|s| !s.is_empty()).unwrap_or_else(|| id.clone());
-            Installed {
-                enabled: on.contains(&id),
-                id,
-                name,
-                version: text("version"),
-                description: text("description"),
-                category: Some(text("category")).filter(|s| !s.is_empty()).unwrap_or_else(|| "Other".into()),
-                dir: e.path(),
+            if found.iter().any(|m| m.id == id) {
+                continue;
             }
-        })
-        .collect();
+            let name = Some(text("name")).filter(|s| !s.is_empty()).unwrap_or_else(|| id.clone());
+            let category = Some(text("category")).filter(|s| !s.is_empty()).unwrap_or_else(|| "Other".into());
+            found.push(Installed { enabled: on.contains(&id), id, name, version: text("version"), description: text("description"), category, dir: e.path() });
+        }
+    }
     found.sort_by_key(|m| (on.iter().position(|i| *i == m.id).unwrap_or(usize::MAX), m.id.clone()));
     found
 }
 
-pub fn installed() -> Vec<Installed> {
-    crate::campaign::user_dir().map(|d| installed_in(&d)).unwrap_or_default()
+pub fn installed(bundled: Option<&Path>) -> Vec<Installed> {
+    crate::campaign::user_dir().map(|d| installed_in(&d, bundled)).unwrap_or_else(|| installed_in(Path::new(""), bundled))
 }
 
 /// Writes `mods.json` from the list's enabled mods, in list order.
@@ -198,13 +192,17 @@ mod tests {
             }
         }
         std::fs::write(dir.join("mods.json"), r#"{"enabled": ["c", "bee", "gone"]}"#).unwrap();
-        let mut list = installed_in(&dir);
+        let bundled = dir.join("bundled");
+        std::fs::create_dir_all(bundled.join("a")).unwrap();
+        std::fs::create_dir_all(bundled.join("zz")).unwrap();
+        std::fs::write(bundled.join("a/mod.json"), r#"{"name": "Shadowed"}"#).unwrap();
+        let mut list = installed_in(&dir, Some(&bundled));
         let ids: Vec<_> = list.iter().map(|m| (m.id.as_str(), m.enabled)).collect();
-        assert_eq!(ids, [("c", true), ("bee", true), ("a", false)], "enabled mods first in file order, unknown ids ignored");
-        assert_eq!(list[2].name, "Alpha");
+        assert_eq!(ids, [("c", true), ("bee", true), ("a", false), ("zz", false)], "enabled first in file order, unknown ids ignored, bundled listed too");
+        assert_eq!(list[2].name, "Alpha", "the user folder wins over a bundled mod of the same id");
         list[2].enabled = true;
         save_enabled_in(&dir, &list);
-        assert_eq!(installed_in(&dir).iter().filter(|m| m.enabled).count(), 3);
+        assert_eq!(installed_in(&dir, Some(&bundled)).iter().filter(|m| m.enabled).count(), 3);
         std::fs::remove_dir_all(dir).unwrap();
     }
     #[test]

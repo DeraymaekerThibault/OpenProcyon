@@ -45,7 +45,7 @@ PROVISIONAL in `docs/` are guesses. The campaign economy (points, availability, 
 **Campaign saves** are small JSON files `{name, mission, points, crew, arms, outfit, replay_debt}` (older files without the last two fields remain supported): shipped mission-start saves `assets/saves/missionNN.json` (13, read-only; `tools/export_saves.py` copies the counters from the retail `SavedGames/Mission NN.twt`; mission 13 has no retail snapshot and reuses mission 12's, PROVISIONAL) and the player's own in `<data dir>/openprocyon/saves/<name>.json` (written by the in-game Save page; `QuickSave.json` is F3/F4). Loading restores the counters/outfits and restarts that mission; running rule/ship state is not saved. `outfit` has `hired` (purchased crew IDs) and `ships` keyed by hull type + script name (world object ID if unnamed). Each ship has eight `crew` lists in the boarding role order and `banks` mapping bank number to gun ID. `replay_debt` offsets replayed mission rewards when a checkpoint carries purchases funded by those rewards. The automatic economy file accepts the old bare-number format and now writes an object with `points`, `crew`, `arms`, `outfit`, `replay_debt`. These remain user data, not mod files.
 
 ## Example: a faster cutter with a heavier gun
-`mods/example/ships/Ship_Navy_Cutter_Fast/ship.json`:
+A mod's `ships/Ship_Navy_Cutter_Fast/ship.json`:
 ```json
 { "extends": "Ship_Navy_Cutter", "entity": "Ship_Navy_Cutter_Fast", "physics": { "MaxSpeed": 22.0 } }
 ```

@@ -161,7 +161,7 @@ Tag battle-owned roots for scenario cleanup and test returning to the same ship/
 - **Shipped content:** `content/` holds files that ship with the code, never imported: fonts (URW base35), hand-written data (`data/hud/bar.json`) and the voice event table. The game overlays it on the imported assets like a mod (`assets_dir()` in `lib.rs`), so a file there replaces the imported one of the same path.
 - **World/mission data:** `assets/maps/<id>/` (map, mission, media, backdrop); export coverage is broader than playable runtime support.
 - **Generated presentation:** 3D models in `models/{weapons,scenery,bases,sky,ui}/` (ship hulls are `ships/<Id>/model.glb`) (category from the name: `tools/models.py`; the Rust loader finds them by file name via `data::model`), `hud/`, `menu/`, `fx/`, `flags/`, `sound/<kind>/` (found by name via `audio::sound`; mission-only dialogue in `maps/<id>/speech/`), `fonts/` and waypoint art.
-- **Persistent custom edits:** `mods/<name>/` mirrors asset-relative paths. Example: `mods/example/`.
+- **Persistent custom edits:** `mods/<name>/` mirrors asset-relative paths. Example: `mods/silver-skirmish/`.
 - **Scratch:** `local/` only (git-ignored). Never put screenshots, logs or raw retail inputs anywhere tracked.
 
 Do not change converted asset paths just to make the tree look tidy: JSON, Bevy asset handles and mod overlays reference those paths.
