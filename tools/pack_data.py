@@ -75,7 +75,7 @@ def pack(assets):
             )
             if k in j
         }
-        ship["skirmish"] = name in SKIRMISH
+        ship["skirmish"] = j.get("skirmish", name in SKIRMISH)
         ship["geometry"] = name
         ship["core_hp"] = j["core_hp"]
         ship["physics"] = {k: v["value"] for k, v in j["physics"].items()}

@@ -290,16 +290,10 @@ pub const FLEET_SIZE: SliderRange = SliderRange { min: 1, max: 10, step: 1, defa
 
 pub const RACES: [(u8, &str, &str); 3] =
     [(0, "Navy", "IDGS_TPFRONTENDTEXT03_FLEET_NAVY"), (2, "Pirate", "IDGS_TPFRONTENDTEXT03_FLEET_PIRATE"), (3, "Procyon", "IDGS_TPFRONTENDTEXT03_FLEET_PROCYON")];
-/// Hulls the retail fleet screen is not expected to offer: story/NIS/tutorial variants, lifeboats, wrecks, targets.
-/// PROVISIONAL: the original lists every ship type of the chosen race; this name filter stands in for whatever hides these.
-/// The original's Navy list includes the StarHammer and the Heavy Scout (Legacy hull), so those are not filtered.
-pub(super) const NOT_OFFERED: [&str; 10] = ["NIS", "Tutorial", "Feather", "Jim", "Amelia", "Wrecked", "Lifeboat", "Target", "FastTurn", "WeaponBarge"];
-
-/// Ship classes the fleet screen offers for a race (mods can opt hulls in with `"skirmish": true`).
+/// Ship classes the fleet screen offers for a race: those flagged `"skirmish"` (retail's own "Available in Multiplayer?"; mods can flag more).
 pub fn offered(lib: &Library, race: u8) -> Vec<usize> {
     let Some((_, name, _)) = RACES.iter().find(|r| r.0 == race) else { return vec![] };
-    let mut list: Vec<usize> =
-        (0..lib.classes.len()).filter(|&i| lib.classes[i].race == *name && (lib.classes[i].skirmish || !NOT_OFFERED.iter().any(|n| lib.classes[i].name.contains(n)))).collect();
+    let mut list: Vec<usize> = (0..lib.classes.len()).filter(|&i| lib.classes[i].race == *name && lib.classes[i].skirmish).collect();
     // As the original's 'Available Ships': most expensive first (StarHammer, Man-O-War, Frigate, ...).
     list.sort_by(|&a, &b| lib.classes[b].points.cmp(&lib.classes[a].points).then_with(|| lib.classes[a].name.cmp(&lib.classes[b].name)));
     list

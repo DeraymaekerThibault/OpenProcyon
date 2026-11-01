@@ -63,10 +63,8 @@ class DockExportTests(unittest.TestCase):
     def test_base_dock_points_lie_beside_the_model(self):
         # The node's own position is in the model's frame; adding the parent layer's offset (as gun mounts need) threw
         # Montgomery's docks ~100 units off its piers.
-        d = {
-            f.parent.name: json.loads(f.read_text())
-            for f in ASSETS.glob("ships/Base_*/docks.json")
-        }
+        # Bases and islands are in data/docks.json; ships have their own ships/<Id>/docks.json (as the game reads them).
+        d = json.loads((ASSETS / "data/docks.json").read_text())
         for name, scene in [
             ("Base_Montgomery", "BaseMontgomery"),
             ("Base_Grant", "BaseGrant"),
