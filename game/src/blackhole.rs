@@ -20,10 +20,12 @@ pub const CLASS_GAIN: f32 = 1330.0;
 /// The pull is turned this far off the line to the centre (clockwise seen from above): sideways / inward = 0.27, the same in
 /// every measured creep and fall, whatever the ship's heading.
 const DRIFT_SWIRL: f32 = 0.27;
-/// A resting ship breaks free of its rest snap and falls once the pull reaches this (units/s²). PROVISIONAL: both retail Cutter
-/// runs broke free at 2.9-3.0 while a Frigate (1.26 at most) and a Man-O-War (1.04) never did; time spent inside is not ruled out.
-const BREAK_FREE: f32 = 2.9;
-/// Seconds a ship that is not under way survives inside the hole's core (measured ~1.1 s for a Cutter and a Frigate).
+/// A resting ship breaks free of its rest snap and falls once one tick of pull (at 30 Hz) outruns the integrator's snap of speeds
+/// under 0.1 to zero: pull >= 0.1 x 30 = 3.0 units/s² (decoded; both retail Cutter runs broke free at 2.9-3.0, a Frigate and a
+/// Man-O-War never reach it on the Small hole).
+const BREAK_FREE: f32 = 3.0;
+/// Seconds a ship that is not under way survives inside the hole's core (measured ~1.1 s for a Cutter and a Frigate). The original's
+/// code kills at once inside the core; the delay is probably its destruction sequence. PROVISIONAL.
 pub const KILL_DELAY: f32 = 1.1;
 
 /// A hole's CUSTOMINFO `Magnitude` and `Radius` (Terrain_BlackHole_*.wot; retail values 9000/145, 15000/260, 25000/625).

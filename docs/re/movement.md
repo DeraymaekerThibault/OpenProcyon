@@ -106,6 +106,11 @@ This is a provisional workaround, not recovered retail damaged-mesh collision: s
   destroying the section always yields one. The system is picked uniformly from that section's list and its hit count increments.
 - Hit counts are only read by the debug overlay; the gameplay effect is crew speech for the player's ship on section
   loss (by system type). No physics/gun effect found, so the remake does not model criticals.
+  Speech (player's ship, section destroyed, once per list entry): Power Transformer Engines / Engines -> engine_hit (50 %), Power
+  Transformer Guns -> weapons_destroyed (50 %), Rudder Linkage -> rudder_destroyed, Munnitions -> ammo_hit; the other tags are
+  silent. Cloth sections: destroyed -> sails_destroyed, hit -> sails_damaged; crossing 50 % HP on another section -> firstmate07,
+  destroying one -> firstmate08. Every event has a 15 s minimum interval (weapons_destroyed 3-10 s, all_weapons_destroyed 40 s).
+  PROVISIONAL: crew.rs does not emit these yet (the old "never emitted" note stands).
 
 ## Path end behaviour (partial)
 Ship path following defaults to "stop at end" (= 1, throttle clamp 0..1). Its state
