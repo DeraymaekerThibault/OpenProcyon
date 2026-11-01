@@ -146,6 +146,7 @@ fn section_smoke(
     rng: &mut Rng,
     sfx: &mut MessageWriter<Sfx>,
     (e, tf, class, vel): (Entity, &Transform, &crate::data::Class, Vec3),
+    explode: bool,
     h: &Health,
     d: &mut DamageFx,
 ) {
@@ -160,6 +161,11 @@ fn section_smoke(
             // The original plays its one `Explosion_Med` file where a section is lost (docs/re/sound.md), never a Damage_ file.
             sfx.write(Sfx { name: "Explosion_Med01".into(), at: Some(tf.translation), vol: 1.0, max: 6000.0 });
             spawn_debris(commands, assets, fxl, sec, tf, vel, || rng.f());
+            if explode {
+                // A ship section also bursts into one ShipExplosion_Medium at its own place (bases play their destruct effects instead).
+                let at = Transform::from_translation(tf.transform_point((sec.min + sec.max) / 2.0));
+                fx::spawn(commands, fxl, "ShipExplosion_Medium", None, at, at, true);
+            }
         }
         if let Some(old) = ent
             && let Ok(mut c) = commands.get_entity(old)
@@ -205,11 +211,11 @@ pub fn damage_fx(
             continue;
         }
         let vel = tf.rotation * Vec3::NEG_Z * ship.speed;
-        section_smoke(&mut commands, (&assets, &fxl), &mut rng, &mut sfx, (e, tf, &lib.classes[ship.class], vel), h, &mut d);
+        section_smoke(&mut commands, (&assets, &fxl), &mut rng, &mut sfx, (e, tf, &lib.classes[ship.class], vel), true, h, &mut d);
     }
     // Bases lose sections the same way; no sight test gates it (decoded: only the effect manager's distance cull).
     for (e, tf, base, h, mut d) in &mut bases {
-        section_smoke(&mut commands, (&assets, &fxl), &mut rng, &mut sfx, (e, tf, &lib.classes[base.class], Vec3::ZERO), h, &mut d);
+        section_smoke(&mut commands, (&assets, &fxl), &mut rng, &mut sfx, (e, tf, &lib.classes[base.class], Vec3::ZERO), false, h, &mut d);
     }
 }
 

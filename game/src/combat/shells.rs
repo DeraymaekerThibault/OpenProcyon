@@ -136,6 +136,17 @@ pub(super) fn apply_base_hit(class: &Class, hp: &mut Health, k: usize, roll: f32
     (0..was_up.len()).filter(|j| was_up[*j] && hp.sections[*j] == 0.0).collect()
 }
 
+/// The material effect a struck section throws (decoded): wood and reinforced wood splinter, stone throws chunks, iron and cloth
+/// nothing; only for shells whose upper damage on that material is over 10. The caller rolls the 50 % chance.
+fn splinter_fx(key: &str, upper: f32) -> Option<&'static str> {
+    match key {
+        _ if upper <= 10.0 => None,
+        "Wood" | "Reinforced" => Some("Splintering_Wood"),
+        "Stone" => Some("Rock_Chunks"),
+        _ => None,
+    }
+}
+
 /// A base part brought down plays its destruct effect at once at the effect's point in the base frame (start times are ignored on
 /// this path), or `ShipExplosion_Medium` at the part's centre when it has none (decoded). The explosion sound and debris come
 /// from `damage_fx`.
@@ -448,12 +459,7 @@ pub(super) fn shells(
             hit_fx(&mut commands, &fxl, bd, at, s.vel);
             // Decoded: a struck wood section splinters and a stone one throws chunks, half the time (the original also needs the
             // hit within 300 of the camera; not gated here, far hits are unseen anyway).
-            let splinter = match key {
-                "Wood" | "Reinforced" => Some("Splintering_Wood"),
-                "Stone" => Some("Rock_Chunks"),
-                _ => None,
-            };
-            if let Some(name) = splinter.filter(|_| hi > 0.0 && rng.f() < 0.5) {
+            if let Some(name) = splinter_fx(key, hi).filter(|_| rng.f() < 0.5) {
                 let t = Transform::from_translation(at);
                 fx::spawn(&mut commands, &fxl, name, None, t, t, true);
             }
@@ -576,12 +582,15 @@ fn hit_ship(
         info!("Torpedo hit {} ({}){}", class.name, sec.label, if invuln >= 1.0 { " [training: invulnerable]" } else { "" });
     }
     let fire_free = !fires.list.iter().any(|f| f.sec == k && f.state == 0);
-    let before = hp.sections[k];
     let outcome = apply_ship_hit(class, hp, k, damage, invuln, fire_free, rng);
-    if let (Some(size), true) = (bd.decal, hp.sections[k] < before) {
+    if let (Some(size), true) = (bd.decal, invuln < 1.0) {
         let inv = stf.to_matrix().inverse();
         let material = if sec.material.contains("Cloth") { "Cloth" } else { key };
         scars.write(crate::decals::Scar { ship: se, section: k, local: inv.transform_point3(at), dir: inv.transform_vector3(s.vel).normalize_or_zero(), material, size });
+    }
+    if let Some(name) = splinter_fx(key, bd.damage[key][1]).filter(|_| rng.f() < 0.5) {
+        let t = Transform::from_translation(at);
+        fx::spawn(commands, fxl, name, None, t, t, true);
     }
     if let Some(fire_str) = outcome.fire {
         let local = Transform::from_translation(stf.to_matrix().inverse().transform_point3(at));

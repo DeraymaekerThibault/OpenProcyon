@@ -205,7 +205,7 @@ section takes the hit as before. Remake: `combat::shells` with `collision::Obsta
 exact removal.
 
 ## Base and island hit feedback (decoded)
-Bases are islands and take hits like ship sections. A shell that is not ricocheted and has positive damage on the material makes a wood or
+Bases are islands and take hits like ship sections. A shell that is not ricocheted and whose upper damage on the material is over 10 makes a wood or
 reinforced-wood section play `Splintering_Wood` and a stone section `Rock_Chunks`, 50 % of the time and only within 300 units of the
 camera (iron, cloth, dragon: nothing; island mesh between sections: only the shell's own impact). Smoke per section from the remaining
 share r of its HP: over 0.75 none, 0.5 up to 0.75 Light, 0.25 up to 0.5 Medium, under 0.25 Heavy, none left Destroyed (exactly 0.75 falls
@@ -214,6 +214,18 @@ point (or `ShipExplosion_Medium` at its centre when it has none), one explosion 
 or section readout for an enemy (PROVISIONAL: inferred from the absent HUD resources); guns aim at the clicked point, stored in the
 target's frame. Remake: `combat::damage::section_smoke` serves ships and bases; `shells::base_parts_burst`; the 300-unit camera gate is
 not applied. Not decoded: how a click picks a point on a base mesh.
+
+Ships take the same splinter/rock rule, and a destroyed ship section also bursts into one `ShipExplosion_Medium` at its place. Hull scars
+(decals): every hit that is not a ricochet leaves one unless the target is fully invulnerable, even with no HP lost. The scar is a box
+of edge 0.25 / 0.5 / 1.0 (Small / Medium / Large, the bullet's decal size) on the struck hull. A new scar meets each older one closer than
+the sum of their radii (the same edges): overlap % = (R^2 - d^2) / R^2 x 100, R the radius sum. The older scar is merged away if its class
+is smaller or the overlap is under T[new][old] (new Small 50/20/0, Medium 75/10/0, Large 99/70/0 for old Small/Medium/Large); otherwise
+the new scar is refused. If something was merged and the new class is not larger, the new scar takes the next class up (two nearby small
+hits become a medium). No new scar once a ship carries over 150; scars never fade and go only when merged or with their destroyed
+section's mesh swap. Remake: `decals.rs` (a camera-lit quad instead of a clipped box; the repair clear-out is ours). Not applied yet:
+the exact texture groups per material (ours are inferred from file names), damage smoke placed at the layer node with particles on random
+mesh vertices plus a flame primitive, freezing off-screen effects, several fires per section, fire state changes only on the 6 s tick,
+ship hit effects parented to the ship.
 
 ## Ricochet (read from the original's code, 2026-10-31)
 Every shot that strikes a damage section (a hull, a gun tower, a volcano) first rolls a ricochet:
