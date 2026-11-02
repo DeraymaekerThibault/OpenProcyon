@@ -296,9 +296,10 @@ pub struct Class {
     pub radius: f32,
     /// Farthest corner of any section box from the ship origin: a shell farther than this from the hull cannot hit.
     pub hull_bound: f32,
-    pub engage: f32,                        // mean effective range of its guns; AI keeps about this distance
-    pub flag: Option<(Vec3, Vec3)>,         // pole attachment points: top, bottom (Bevy ship frame)
-    pub engines: Vec<(Vec3, Quat, String)>, // exhaust effect placements
+    pub engage: f32,                                       // mean effective range of its guns; AI keeps about this distance
+    pub flag: Option<(Vec3, Vec3)>,                        // pole attachment points: top, bottom (Bevy ship frame)
+    pub engines: Vec<(Vec3, Quat, String, Option<usize>)>, // exhaust effect placements and the section each hangs on
+    pub wake: Option<(Vec3, String)>,                      // wake placement (Bevy ship frame) and its Trail effect, e.g. Wake_Medium
     pub explosion_fx: Option<String>,
     pub engine_snd: [Option<String>; 3], // loops for Half, Full, Emergency
     /// WOT 'Selected Indicator Percentage Of Radius': the selection ring's radius as a fraction of `radius`.

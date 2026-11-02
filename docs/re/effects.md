@@ -74,7 +74,8 @@ Bevy's premultiplying `AlphaMode::Add` drew them black, which hid the dock light
 flares (PT-11). With the bounded flare lifetime above, the Docking_Point markers no longer overbrighten.
 
 Wakes share the corrected material, bake their existing age/speed fade into RGB, drop the guessed 0.7 brightness multiplier, and
-render a live stern endpoint between distance-sampled points to avoid trailing-end jumps. Width/lifetime remain provisional.
+render a live stern endpoint between distance-sampled points to avoid trailing-end jumps. (Superseded: the wake now follows the decoded
+Trail, see "Wakes and engine flames".)
 GPU smoke reaches the docked repair phase and shows scaffolding (`local/feedback-scaffold.png`); the oblique torpedo arena and
 Mission 1 training-fleet impacts exercise guidance/attached effects. Geometry, morph curves, malformed GLBs and export endpoint
 regressions are included in `tools/check.sh` (98 Rust tests, 61 Python tests, six Python skips), including a live wake-head ECS test.
@@ -182,6 +183,32 @@ the system creates every 50 ticks, `HitGround`, `Jitter`, `AttractorLine`, and t
 ## Consequence for movement
 The same engine tick (1/30 s) is probably the ship-physics step too, which may fix the provisional x0.1 thrust time
 scale in `docs/re/movement.md` (not yet checked).
+
+## Wakes and engine flames (read from the original's code, 2026-11)
+
+Both are attached to a placement on the ship's mesh scene (`WakePlacement`, `EnginePortPlacement`; the node faces astern, yaw pi) and
+are fed once per second by a keeper object: the ship's **speed fraction** (0..1, clamped) is sent to the effect as the
+EMITTER_RATE_MULTIPLY and SPHERE_VELOCITY_EMITTER_LENGTH_MULTIPLY messages (the engine keeper also multiplies it by 1 minus the
+cloaking fraction). The effect is created on the first update with a value above 0 and released when the section it hangs on is
+destroyed. PROVISIONAL: the fraction is speed over Full (the original multiplies two physics values not yet named).
+
+**Engine flame** (`NavyEngine_*`, one particle system): 2 particles per tick x the rate multiplier, life 1 s, size 0.4 (Medium) to
+1.6 (ExtraHeavy), launched astern at `LengthInterpolator` (4 to 16 units/s) x the velocity multiplier, so the plume length follows
+speed. Remake: `combat::engine_rate`, `fx::Fx::vel_scale`. Still provisional: `size_scale` 2.6 (the data sizes give a thread
+against the reference footage; whether a particle's quad is size or twice size without a Rectangle2D is undecided).
+
+**Wake** (`Wake_Light/Medium/Heavy`, one Trail primitive): `BackDrift` 0.11 / 0.13 / 0.15, `OutDrift` 0.02 / 0.04 / 0.05,
+`InitialWidth` 30 / 40 / 50 (constructor defaults 0.15 / 0.05 / 3). Per engine tick, in world space:
+* every 15 ticks a point is laid at the node: edges at the node position +- right x OutDrift x InitialWidth (so 3.2 wide for
+  Medium), life 300 ticks. In between, the newest point is rewritten from the node every tick (the trail stays joined to the stern).
+* each tick, for every point: life -1; the edges move +-right x OutDrift (so the strip widens 2 x OutDrift per tick) and both move
+  astern by BackDrift x the speed multiplier (the multiplier at the time the point was laid); each edge also jitters by
+  +-0.07 / +-0.07 / +-0.02. Alpha rises 1/60 per tick for 60 ticks, then falls 1/240 per tick; at multiplier exactly 0 all alphas
+  are x0.9 per tick. The oldest point is dropped when its life ends. A multiplier of 0 stops laying points until every old one is
+  gone.
+* texture offset along the trail scrolls 0.01 per tick (against the flow for `TextureFlowBack`), wrapping at 0.5.
+Remake: `wake.rs` (`Trail`, logic tested). Replaces the by-eye wake (distance-sampled points, 14 s life). PROVISIONAL: how the
+scroll offset and segment index enter the texture coordinates (the draw code was not found); the effect's draw order and height.
 
 ## Damage mesh swap (setup, on destruction)
 A swappable damage section whose layer mesh is "<A>_<B>" gets the swap mesh "<A>Damage_<B>" (split at the first '_').
