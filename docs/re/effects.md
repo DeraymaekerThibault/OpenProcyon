@@ -187,7 +187,15 @@ scale in `docs/re/movement.md` (not yet checked).
 A swappable damage section whose layer mesh is "<A>_<B>" gets the swap mesh "<A>Damage_<B>" (split at the first '_').
 When the section is destroyed the layer's mesh is exchanged for it. Extra Damage_ layers beyond the section count (the
 cutter has Damage_Layer7-10) are not referenced by this rule. Destruction also spawns the section's debrisMeshScene
-(not done in the remake).
+(remake: see "Section debris").
+
+The exchange is done on the section's own mesh node (the node's alternate mesh replaces the current one); the section's children
+(gun mounts and the flag hang on the layer node they sit on in the mesh scene) are not touched by it, and no code that hides them
+was found. The damaged meshes carry their own wrecked cannons and mounts (cannon and mount materials appear in 100 of the 168
+damaged meshes whose section carries guns), so keeping the real guns would draw them twice. Remake (`damage::swap_meshes`,
+`flag::hide_lost`): the guns and the flag of a destroyed section are hidden with its intact mesh, shown again when the section is
+revived. PROVISIONAL: that retail hides them (rather than the wrecked mesh simply covering them) is inferred from the meshes.
+The exporter writes the flag's section as `flags[].parent_layer`.
 
 ## Ship sinking and final destruction
 
