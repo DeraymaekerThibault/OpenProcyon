@@ -189,6 +189,10 @@ struct Prim {
 }
 struct Effect {
     prims: Vec<Prim>,
+    /// Particles that drift farther than this from the effect's origin are removed. PROVISIONAL (owner's choice): only the
+    /// Star mortar impact, whose attractor pushes its glow outward without limit (docs/re/effects.md); its authored
+    /// `EffectMaxRadius` (200) is the bound. No retail rule that removes them was found.
+    bound: Option<f32>,
 }
 
 #[derive(Resource)]
@@ -437,8 +441,9 @@ impl FromWorld for FxLib {
                 Value::Array(a) => a.iter().map(|p| parse_prim(p, &mut tex_names)).collect(),
                 _ => vec![],
             };
+            let bound = (n == "StarMortar_Heavy_Impact").then(|| j["EffectMaxRadius"].as_f64().unwrap_or(200.0) as f32);
             effects.insert(n, list.len());
-            list.push(Effect { prims });
+            list.push(Effect { prims, bound });
         }
         Self { effects, list, tex_names }
     }
@@ -559,7 +564,7 @@ fn update_fx(
                         p.vel += to * strength * move_dt;
                     }
                 }
-                st.parts.retain(|p| p.age < p.life);
+                st.parts.retain(|p| p.age < p.life && eff.bound.is_none_or(|b| p.pos.length() <= b));
                 if !prim.ever && t > prim.duration {
                     st.parts.clear();
                 }
@@ -1055,6 +1060,14 @@ mod tests {
         assert!(well.rate.at(0.0, 0.0) * well.budget / TICK * well.fallback_life <= MAX_LIVE + 1.0);
         let thinned: Vec<_> = lib.effects.iter().filter(|&(_, &i)| lib.list[i].prims.iter().any(|p| p.budget < 1.0)).map(|(n, _)| n.as_str()).collect();
         assert_eq!(thinned, ["GravCharge_Medium_Impact"], "other effects keep their authored rates");
+    }
+
+    #[test]
+    #[ignore = "needs imported assets"]
+    fn only_the_star_mortar_glow_is_bounded_to_its_effect_radius() {
+        let lib = FxLib::from_world(&mut World::new());
+        assert_eq!(lib.list[lib.effects["StarMortar_Heavy_Impact"]].bound, Some(200.0));
+        assert!(!lib.effects.iter().any(|(n, &i)| n != "StarMortar_Heavy_Impact" && lib.list[i].bound.is_some()));
     }
 
     #[test]
