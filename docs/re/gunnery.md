@@ -111,6 +111,12 @@ skirmish, the shell position sampled about 30 times a second.
   pattern is not rolled with the shell's spin; lifeboats are not struck. The remake bursts lob shells at their aim point's height,
   not at the flight plane.
 
+- **Star mortar impact glow** (`StarMortar_Heavy_Impact`): its two particle systems start at rest next to the centre and an
+  attractor term that flips from +5 to -20 / -27 after 0.5 s pushes them outward without limit (about 12-50 units at 1 s, hundreds
+  at 1.5 s). The effect's authored `EffectMaxRadius` is 200 (the other effects that set one use it as their extent: black hole
+  ribbons 200 / 400 / 800, the gravity charge impact 20 for its radius-10 ring). Remake: particles of this effect that pass 200 units
+  from the burst are removed (`fx::Effect::bound`). PROVISIONAL (owner's choice): no retail code that removes them was found.
+
 ## Playtest fixes: arcs and torpedoes
 
 - Fixed a runtime units bug: mount arcs were converted from degrees to radians in the loader, then converted again
