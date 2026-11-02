@@ -297,7 +297,6 @@ pub struct Class {
     pub hull_bound: f32,
     pub engage: f32,                        // mean effective range of its guns; AI keeps about this distance
     pub flag: Option<(Vec3, Vec3)>,         // pole attachment points: top, bottom (Bevy ship frame)
-    pub flag_section: Option<usize>,        // damage section whose mesh carries the flag; the flag goes with it
     pub engines: Vec<(Vec3, Quat, String)>, // exhaust effect placements
     pub explosion_fx: Option<String>,
     pub engine_snd: [Option<String>; 3], // loops for Half, Full, Emergency

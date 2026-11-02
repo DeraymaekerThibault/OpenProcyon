@@ -18,16 +18,7 @@ struct Flag {
 struct Flagged;
 
 pub fn plugin(app: &mut App) {
-    app.add_systems(Update, (spawn, wave, retexture, hide_lost));
-}
-
-/// A flag hangs on a section's mesh node: when that section is destroyed the flag goes with it. PROVISIONAL (see `swap_meshes`).
-fn hide_lost(lib: Res<Library>, ships: Query<(&Ship, &crate::Health)>, mut flags: Query<(&ChildOf, &mut Visibility), With<Flag>>) {
-    for (parent, mut vis) in &mut flags {
-        let Ok((ship, h)) = ships.get(parent.parent()) else { continue };
-        let lost = lib.classes[ship.class].flag_section.is_some_and(|s| h.sections.get(s).is_some_and(|hp| *hp <= 0.0));
-        vis.set_if_neq(if lost { Visibility::Hidden } else { Visibility::Inherited });
-    }
+    app.add_systems(Update, (spawn, wave, retexture));
 }
 
 fn spawn(

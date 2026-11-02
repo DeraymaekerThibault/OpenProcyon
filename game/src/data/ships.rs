@@ -132,7 +132,6 @@ struct EngineDoc {
 struct FlagDoc {
     label: String,
     pos: [f64; 3],
-    parent_layer: Option<String>,
 }
 #[derive(Deserialize)]
 struct SphereDoc {
@@ -240,7 +239,6 @@ fn try_load_class(root: &Path, name: &str, guns: &HashMap<String, GunDef>) -> Re
     let radius = 0.5 * (amx - amn).x.max((amx - amn).z) + 2.0;
     let flag_at = |label: &str| j.flags.as_ref()?.iter().find(|f| f.label == label).map(|f| point(f.pos));
     let flag = flag_at("Flag_Top").zip(flag_at("Flag_Bottom"));
-    let flag_section = j.flags.as_ref().and_then(|f| f.iter().find(|f| f.label == "Flag_Top")?.parent_layer.as_deref()).and_then(|l| sections.iter().position(|s| s.layer == l));
     Ok(Class {
         name: name.into(),
         race: j.race,
@@ -258,7 +256,6 @@ fn try_load_class(root: &Path, name: &str, guns: &HashMap<String, GunDef>) -> Re
             max_ang_acc: ph.max_angular_acceleration as f32,
         },
         flag,
-        flag_section,
         engines: j.engines.into_iter().map(|e| (point(e.pos), Quat::from_rotation_y(e.rot[0] as f32), e.fx)).collect(),
         explosion_fx: j.explosion_fx,
         engine_snd: std::array::from_fn(|i| j.engine_snd.as_ref().and_then(|v| v.get(i)).cloned().flatten()),

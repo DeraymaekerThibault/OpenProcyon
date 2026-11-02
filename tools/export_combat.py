@@ -385,13 +385,6 @@ def export(root, ship, outdir):
                 out.append(
                     dict(label=label, fx=assoc, pos=list(pos), rot=list(node.rot))
                 )
-                parent = msb.get(node.parent)
-                if (
-                    kind == "FlagAttachmentPoint"
-                    and parent
-                    and parent.kind == "DamageSection"
-                ):
-                    out[-1]["parent_layer"] = parent.name
         return out
 
     sections = []

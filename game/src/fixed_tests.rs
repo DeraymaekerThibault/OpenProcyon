@@ -114,7 +114,6 @@ fn moving_ship() -> (App, Entity) {
         hull_bound: 1.0,
         engage: 0.0,
         flag: None,
-        flag_section: None,
         engines: vec![],
         explosion_fx: None,
         engine_snd: [None, None, None],
