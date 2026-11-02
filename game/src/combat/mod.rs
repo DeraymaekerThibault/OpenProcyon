@@ -12,7 +12,7 @@ mod asteroid;
 mod damage;
 mod gunnery;
 mod hit_test;
-mod lob;
+pub mod lob;
 mod minefield;
 mod shells;
 mod status;

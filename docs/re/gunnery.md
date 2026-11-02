@@ -106,10 +106,16 @@ skirmish, the shell position sampled about 30 times a second.
   is a Star blast (radius 60 over 3 s). A Nova that strikes a hull before its apex is spent.
 - Ordinary shells have no splash.
 - Remake: `combat::lob::blasts`, `nova_split`. PROVISIONAL: the push a blast gives everything inside it (the bullet's `Magnitude`,
-  constant over the radius) and the gravity well's pull (`Magnitude` 40000, zero at the centre and rim, peak at half the radius; it
-  does not freeze ships) are not ported: their scale to ship motion is unmeasured, so the well still slows ships as before. The Nova
+  constant over the radius) is not ported: its scale to ship motion is unmeasured. The Nova
   pattern is not rolled with the shell's spin; lifeboats are not struck. The remake bursts lob shells at their aim point's height,
   not at the flight plane.
+- **Gravity charge well** (read from the original's code): for 17 s after it lands (Radius 40) everything within 40 units (flat
+  distance, no friend/foe filter, the shooter's ships included) is pulled straight at the centre with force Magnitude (40000) x
+  4 s² for s < 0.5, 4 (1 - s)² beyond, s = (40 - d) / 40: zero at the centre and at the rim, the full 40000 at d = 20, a quarter of it
+  at 10 and 30. It does no damage. Remake: `combat::lob::GravWell::force`; ships get it through the black hole's pull
+  (`blackhole::pull`: the same force-to-acceleration scale, only ships not under way move, the rest snap and break-free rule),
+  so a resting Cutter is dragged in near the peak and a Man-O-War barely moves. PROVISIONAL: the scale is the black hole's,
+  and that ships under way are unmoved by a well is assumed from it.
 
 ## Playtest fixes: arcs and torpedoes
 
