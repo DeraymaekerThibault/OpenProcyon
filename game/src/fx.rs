@@ -242,6 +242,8 @@ pub struct Fx {
     prims: Vec<PrimState>,
     pub rate_scale: f32,
     pub size_scale: f32,
+    /// SPHERE_VELOCITY_EMITTER_LENGTH_MULTIPLY: scales the speed of the particles the velocity emitter gives (1 = authored).
+    pub vel_scale: f32,
     pub emitting: bool,
     /// The vertices of the mesh the effect is told about (a damaged section's layer), ship-local; see `Prim::mesh_vertices`.
     pub vertices: Vec<Vec3>,
@@ -471,6 +473,7 @@ pub fn spawn(commands: &mut Commands, lib: &FxLib, name: &str, parent: Option<En
         prims: lib.list[eff].prims.iter().map(|_| PrimState { started: false, last_key: None, parts: vec![] }).collect(),
         rate_scale: 1.0,
         size_scale: 1.0,
+        vel_scale: 1.0,
         emitting: true,
         vertices: vec![],
         meshes: lib.list[eff].prims.iter().map(|_| None).collect(),
@@ -589,7 +592,7 @@ fn update_fx(
                         };
                     }
                     for _ in 0..n {
-                        let mut np = spawn_particle(prim, t, &tick_world, &mut rng);
+                        let mut np = spawn_particle(prim, t, &tick_world, &mut rng, fx.vel_scale);
                         if meteor {
                             align_meteor_particle(&mut np, tick_world.translation().y);
                         }
@@ -662,7 +665,7 @@ fn particle_axes(prim: &Prim, gt: &GlobalTransform, vel: Vec3, camera_axes: [Vec
     }
 }
 
-fn spawn_particle(p: &Prim, t: f32, gt: &GlobalTransform, rng: &mut FxRng) -> P {
+fn spawn_particle(p: &Prim, t: f32, gt: &GlobalTransform, rng: &mut FxRng, vel_scale: f32) -> P {
     let at = |c: &[Curve; 3]| Vec3::new(c[0].at(t, 0.0), c[1].at(t, 0.0), c[2].at(t, 0.0));
     // Retail: the error is one-sided, uniform between 0 and err.
     let jitter = |len: f32, err: f32, rng: &mut FxRng| len + err * rng.f();
@@ -683,7 +686,8 @@ fn spawn_particle(p: &Prim, t: f32, gt: &GlobalTransform, rng: &mut FxRng) -> P 
     if p.target_on {
         let offset = emit(at(&p.pos_t), p.pos_r.at(t, 0.0), p.pos_l.at(t, 0.0), p.pos_le.at(t, 0.0), rng);
         pos += offset;
-        vel += if p.target_pos_velocity { offset } else { emit(at(&p.vel_t), p.vel_r.at(t, 0.0), p.vel_l.at(t, 0.0), p.vel_le.at(t, 0.0), rng) };
+        // SPHERE_VELOCITY_EMITTER_LENGTH_MULTIPLY: the keeper's message scales the velocity emitter's length (engine flames).
+        vel += if p.target_pos_velocity { offset } else { emit(at(&p.vel_t), p.vel_r.at(t, 0.0), p.vel_l.at(t, 0.0) * vel_scale, p.vel_le.at(t, 0.0) * vel_scale, rng) };
     }
     if p.angle_on {
         let offset = angle(&p.ang_dir, &p.ang_min, &p.ang_max, &p.ang_len, &p.ang_len_err, rng);
@@ -870,7 +874,7 @@ mod tests {
         for (i, data) in doc["Primitive"].as_array().unwrap().iter().enumerate() {
             let prim = parse_prim(data, &mut vec![]);
             for _ in 0..64 {
-                let particle = spawn_particle(&prim, 0.0, &gt, &mut rng);
+                let particle = spawn_particle(&prim, 0.0, &gt, &mut rng, 1.0);
                 if i < 2 {
                     assert!(particle.pos.y > gt.translation().y + 99.0);
                     assert!(particle.vel.y <= -50.0);
@@ -894,7 +898,7 @@ mod tests {
             for (i, data) in doc["Primitive"].as_array().unwrap().iter().enumerate() {
                 let prim = parse_prim(data, &mut vec![]);
                 for _ in 0..100 {
-                    let mut p = spawn_particle(&prim, 0.0, &gt, &mut rng);
+                    let mut p = spawn_particle(&prim, 0.0, &gt, &mut rng, 1.0);
                     let horizontal = p.pos.with_y(0.0);
                     align_meteor_particle(&mut p, surface);
                     assert_eq!(p.pos.with_y(0.0), horizontal);
@@ -934,7 +938,7 @@ mod tests {
         let doc: Value = serde_json::from_slice(&std::fs::read(assets_dir().join("fx/CannonBall_Light_Muzzle.json")).unwrap()).unwrap();
         let mut prim = parse_prim(&doc["Primitive"][0], &mut vec![]);
         let mut rng = FxRng(12345);
-        let particle = spawn_particle(&prim, 0.0, &GlobalTransform::IDENTITY, &mut rng);
+        let particle = spawn_particle(&prim, 0.0, &GlobalTransform::IDENTITY, &mut rng, 1.0);
         assert!(particle.pos.length() > 0.0);
         assert_eq!(particle.vel, particle.pos);
         prim.angle_pos_velocity = false;
@@ -943,7 +947,7 @@ mod tests {
         prim.vel_ang_len_err = Curve::default();
         prim.vel_ang_min = Curve::default();
         prim.vel_ang_max = Curve::default();
-        let particle = spawn_particle(&prim, 0.0, &GlobalTransform::IDENTITY, &mut rng);
+        let particle = spawn_particle(&prim, 0.0, &GlobalTransform::IDENTITY, &mut rng, 1.0);
         assert_eq!(particle.vel, Vec3::NEG_Y * 12.0);
     }
 
