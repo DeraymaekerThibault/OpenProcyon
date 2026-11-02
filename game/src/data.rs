@@ -203,8 +203,9 @@ pub enum Payload {
     Blast { radius: f32, duration: f32 },
     /// Nova mortar: bursts into secondary blasts where it lands.
     Nova,
-    /// Gravity charge: a well of `radius` that holds ships for `duration` seconds.
-    Grav { radius: f32, duration: f32 },
+    /// Gravity charge: a well of `radius` that pulls everything inside toward its centre for `duration` seconds, with force
+    /// `magnitude` at its strongest.
+    Grav { radius: f32, duration: f32, magnitude: f32 },
     /// Mine: drifts at `speed` toward ships within `sight` and bursts on contact.
     Mine { sight: f32, speed: f32 },
 }
@@ -441,7 +442,8 @@ pub fn bullet_def(b: &Value) -> BulletDef {
             match (b["kind"].as_str().unwrap_or(""), &b["blast"], &b["mine"]) {
                 (_, _, m) if m.is_object() => Payload::Mine { sight: f(m, "sight"), speed: f(m, "speed") },
                 ("NovaMortar", ..) => Payload::Nova,
-                ("GravCharge", bl, _) => Payload::Grav { radius: f(bl, "radius"), duration: f(bl, "duration") },
+                // 40000: the retail value, for imports made before `magnitude` was exported.
+                ("GravCharge", bl, _) => Payload::Grav { radius: f(bl, "radius"), duration: f(bl, "duration"), magnitude: bl["magnitude"].as_f64().map_or(40000.0, |m| m as f32) },
                 (_, bl, _) if bl.is_object() => Payload::Blast { radius: f(bl, "radius"), duration: f(bl, "duration") },
                 _ => Payload::Shell,
             }
