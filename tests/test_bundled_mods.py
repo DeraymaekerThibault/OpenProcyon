@@ -14,6 +14,9 @@ class BundledMods(unittest.TestCase):
             for key in ("id", "name", "version", "category", "description"):
                 self.assertTrue(meta.get(key), f"{d.name}/mod.json: {key}")
             self.assertEqual(meta["id"], d.name)
+            self.assertIsInstance(
+                meta.get("default", False), bool, f"{d.name}/mod.json: default"
+            )
 
 
 if __name__ == "__main__":

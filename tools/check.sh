@@ -1,9 +1,11 @@
 #!/bin/sh
 # The validation gate: format, lint, repository hygiene and tests. usage: tools/check.sh
-# Needs ruff (pip install -r requirements-dev.txt).
+# Needs ruff (pip install -r requirements-dev.txt); a .venv in the checkout is used when present.
 # Asset-free Rust tests always run; ignored asset tests, the startup smoke and the battle check also run when an import exists.
 set -e
 cd "$(dirname "$0")/.."
+# The checkout's virtualenv first (bin/ on Linux and macOS, Scripts/ on Windows, where python3 may be the Store stub).
+for bin in .venv/bin .venv/Scripts; do [ -d "$bin" ] && PATH="$PWD/$bin:$PATH"; done
 command -v ruff >/dev/null || { echo "ruff not found: pip install -r requirements-dev.txt" >&2; exit 1; }
 ruff format --check .
 ruff check .
@@ -17,7 +19,7 @@ if [ "$imported" = 1 ]; then
   # startup panics. Runs the menu for 10 s; needs a display or Xvfb (like tools/shot.sh).
   cargo build --release
   run=""
-  [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || run="xvfb-run -a -s '-screen 0 1280x720x24' env WGPU_BACKEND=vulkan"
+  [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || [ "$(uname -o 2>/dev/null)" = Msys ] || run="xvfb-run -a -s '-screen 0 1280x720x24' env WGPU_BACKEND=vulkan"
   # timeout ends the game with status 124; only a panic in the log is a failure
   if eval "$run timeout 10 target/release/openprocyon" 2>&1 | grep -q "panicked at"; then
     echo "startup smoke failed: the game panicked in the menu" >&2

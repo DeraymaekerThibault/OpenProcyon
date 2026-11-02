@@ -47,7 +47,19 @@ pub struct HudRoot;
 /// Every node that takes the mouse: clicks on it must not reach the world.
 #[derive(Component)]
 pub struct Solid;
-/// Testing aid (not retail): game-speed buttons; each click halves / doubles the speed between 1x and `MAX_GAME_SPEED`.
+/// Not retail: the game-speed control, present only when the overlay has `data/hud/speed.json` (`{"max": 16}`), which the bundled
+/// `game-speed` mod ships (on by default). `max` is the fastest speed the buttons reach (default `MAX_GAME_SPEED`, at least 1).
+#[derive(Resource, Clone, Copy, PartialEq, Debug)]
+pub struct SpeedControl {
+    pub max: f32,
+}
+impl SpeedControl {
+    pub fn load(root: &std::path::Path) -> Option<Self> {
+        let v = crate::data::try_json(&root.join("data/hud/speed.json"))?;
+        Some(SpeedControl { max: v["max"].as_f64().map_or(crate::MAX_GAME_SPEED, |m| m as f32).max(1.0) })
+    }
+}
+/// Game-speed buttons (with `SpeedControl`); each click halves / doubles the speed between 1x and its `max`.
 #[derive(Component, Clone, Copy, PartialEq, Debug)]
 pub enum SpeedButton {
     Slower,
@@ -278,6 +290,9 @@ pub struct HeadState {
 }
 
 pub fn plugin(app: &mut App) {
+    if let Some(speed) = SpeedControl::load(crate::assets_dir()) {
+        app.insert_resource(speed);
+    }
     app.insert_resource(Toggles { weapons: true, names: true })
         .init_resource::<UiClick>()
         .init_resource::<Talk>()
@@ -584,11 +599,12 @@ fn speed_button(
     buttons: Query<(&SpeedButton, &Interaction)>,
     mut labels: Query<&mut Text, With<SpeedLabel>>,
     mission: Option<Res<crate::campaign::Mission>>,
+    control: Option<Res<SpeedControl>>,
 ) {
     let clicked = buttons.iter().find(|(_, i)| **i != Interaction::None).map(|(b, _)| *b);
-    if let Some(b) = clicked.filter(|_| !cinematic(mission.as_deref()) && mouse.just_pressed(MouseButton::Left)) {
+    if let (Some(b), Some(control)) = (clicked.filter(|_| !cinematic(mission.as_deref()) && mouse.just_pressed(MouseButton::Left)), control) {
         let speed = vtime.relative_speed() * if b == SpeedButton::Faster { 2.0 } else { 0.5 };
-        crate::set_game_speed(&mut vtime, &mut window, speed.clamp(1.0, crate::MAX_GAME_SPEED));
+        crate::set_game_speed(&mut vtime, &mut window, speed.clamp(1.0, control.max));
     }
     let label = if vtime.is_paused() { "Paused".to_string() } else { format!("{}x", vtime.relative_speed()) };
     for mut text in &mut labels {
@@ -841,7 +857,7 @@ pub mod tests {
     #[test]
     fn speed_buttons_step_and_clamp_the_game_speed() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins).init_resource::<ButtonInput<MouseButton>>().add_systems(Update, speed_button);
+        app.add_plugins(MinimalPlugins).init_resource::<ButtonInput<MouseButton>>().insert_resource(SpeedControl { max: 16.0 }).add_systems(Update, speed_button);
         app.world_mut().spawn((Window::default(), bevy::window::PrimaryWindow));
         let faster = app.world_mut().spawn((SpeedButton::Faster, Interaction::None)).id();
         let slower = app.world_mut().spawn((SpeedButton::Slower, Interaction::None)).id();
@@ -858,6 +874,18 @@ pub mod tests {
         }
         assert_eq!(seen, [2.0, 4.0, 8.0, 16.0, 16.0, 8.0, 4.0, 2.0, 1.0, 1.0, 1.0]);
         assert_eq!(app.world().get::<Text>(label).unwrap().0, "1x");
+    }
+
+    #[test]
+    fn speed_control_comes_from_the_mod_file() {
+        let dir = std::env::temp_dir().join(format!("procyon-speed-control-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("data/hud")).unwrap();
+        assert_eq!(SpeedControl::load(&dir), None, "vanilla: no speed control");
+        std::fs::write(dir.join("data/hud/speed.json"), r#"{"max": 4}"#).unwrap();
+        assert_eq!(SpeedControl::load(&dir), Some(SpeedControl { max: 4.0 }));
+        std::fs::write(dir.join("data/hud/speed.json"), "{}").unwrap();
+        assert_eq!(SpeedControl::load(&dir), Some(SpeedControl { max: crate::MAX_GAME_SPEED }));
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

@@ -86,6 +86,7 @@ mod tests {
             category: category.into(),
             dir: Default::default(),
             enabled,
+            default: false,
         }
     }
     #[test]

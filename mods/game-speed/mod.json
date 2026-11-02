@@ -1,0 +1,8 @@
+{
+  "id": "game-speed",
+  "name": "Game speed control",
+  "version": "1.0",
+  "category": "Gameplay",
+  "default": true,
+  "description": "Not in the original: slower / faster buttons beside the command bar run battles at 1x to 16x."
+}

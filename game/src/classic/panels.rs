@@ -228,6 +228,7 @@ fn build(
     player: Single<(&Ship, &GunStates), With<PlayerShip>>,
     old: Query<Entity, With<HudRoot>>,
     mut last: Local<Option<(usize, &'static str, u32, Vec<String>)>>,
+    speed: Option<Res<crate::panels::SpeedControl>>,
 ) {
     let s = window.height() / REF_H;
     let (player, guns) = *player;
@@ -269,7 +270,9 @@ fn build(
     };
     let bar_w = items.iter().map(width).sum::<f32>() - overlap * (items.len() as f32 - 1.0);
     commands_window(&mut commands, &c, root, window.width() / s, bar_w, floor);
-    speed_plate(&mut commands, &c, fonts.as_deref(), root, (window.width() / s + bar_w) / 2.0);
+    if speed.is_some() {
+        speed_plate(&mut commands, &c, fonts.as_deref(), root, (window.width() / s + bar_w) / 2.0);
+    }
     {
         let dock = commands
             .spawn((
@@ -732,7 +735,7 @@ fn commands_window(commands: &mut Commands, c: &Ctx, root: Entity, screen_w: f32
     }
 }
 
-/// Game-speed control (testing aid, not retail): a tooltip-backdrop plate beside the main bar's right end between round slower /
+/// Game-speed control (not retail; only with `SpeedControl`, from the `game-speed` mod): a tooltip-backdrop plate beside the main bar's right end between round slower /
 /// faster buttons (the front-end Prev / Next art at 30 px, which only the Navy set has).
 fn speed_plate(commands: &mut Commands, c: &Ctx, fonts: Option<&crate::sprites::Fonts>, root: Entity, bar_right: f32) {
     use crate::panels::{SpeedButton, SpeedLabel};

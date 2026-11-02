@@ -1,44 +1,50 @@
 .DEFAULT_GOAL := help
 .PHONY: help run check fmt test-python shot smokes autoplay battles assets
 
+# The checkout's virtualenv when there is one (bin/ on Linux and macOS, Scripts/ on Windows, where python3 may be the Store stub).
+PY := $(or $(wildcard .venv/bin/python),$(if $(wildcard .venv/Scripts/python*),.venv/Scripts/python),python3)
+# Windows: make may run recipes with cmd, so the shell scripts go through Git Bash (override with GIT_BASH=<path to bash>).
+ifeq ($(OS),Windows_NT)
+SH := "$(or $(GIT_BASH),$(or $(ProgramW6432),$(ProgramFiles))/Git/bin/bash)"
+endif
+
 help:
-	@printf '%s\n' \
-	  'make run [ARGS="--mission 1"]     Run the game from the repository root' \
-	  'make check                        Format check, strict Clippy, Rust + Python tests' \
-	  'make fmt                          Format Rust and Python source' \
-	  'make test-python                  Fast parser/exporter tests (no Rust build)' \
-	  'make shot OUT=local/ui.png [ARGS="--shot-frame 80 --late-frame 0"]' \
-	  'make smokes [ARGS=fleet]          Run the documented --script smokes (needs a display or Xvfb; ~20 s each)' \
-	  'make battles [ARGS=ambush]        Play short fixed-fleet skirmishes and check they behave like battles (~1-2 min)' \
-	  'make autoplay [ARGS=1]            Play campaign missions unattended and summarise what broke (long: ~mission length each)' \
-	  'make assets ARGS="--game <install dir>"  Import your copy of the game (once; again after exporter changes)'
+	$(info make run [ARGS="--mission 1"]     Run the game from the repository root)
+	$(info make check                        Format check, strict Clippy, Rust + Python tests)
+	$(info make fmt                          Format Rust and Python source)
+	$(info make test-python                  Fast parser/exporter tests (no Rust build))
+	$(info make shot OUT=local/ui.png [ARGS="--shot-frame 80 --late-frame 0"])
+	$(info make smokes [ARGS=fleet]          Run the documented --script smokes (needs a display or Xvfb; ~20 s each))
+	$(info make battles [ARGS=ambush]        Play short fixed-fleet skirmishes and check they behave like battles (~1-2 min))
+	$(info make autoplay [ARGS=1]            Play campaign missions unattended and summarise what broke (long: ~mission length each))
+	$(info make assets ARGS="--game <install dir>"  Import your copy of the game (once; again after exporter changes))
 
 run:
 	cargo run --release --manifest-path game/Cargo.toml -- $(ARGS)
 
 check:
-	tools/check.sh
+	$(SH) tools/check.sh
 
 fmt:
 	cargo fmt --manifest-path game/Cargo.toml
-	ruff format .
-	ruff check --fix .
+	$(PY) -m ruff format .
+	$(PY) -m ruff check --fix .
 
 test-python:
-	python3 -m unittest discover -s tests
+	$(PY) -m unittest discover -s tests
 
 shot:
-	@test -n "$(OUT)" || { echo 'Use make shot OUT=local/ui.png [ARGS="..."]' >&2; exit 1; }
-	tools/shot.sh "$(OUT)" $(ARGS)
+	$(if $(OUT),,$(error Use make shot OUT=local/ui.png [ARGS="..."]))
+	$(SH) tools/shot.sh "$(OUT)" $(ARGS)
 
 smokes:
-	tools/smokes.sh $(ARGS)
+	$(SH) tools/smokes.sh $(ARGS)
 
 battles:
-	python3 -m tools.battle_check $(ARGS)
+	$(PY) -m tools.battle_check $(ARGS)
 
 autoplay:
-	python3 -m tools.autoplay $(ARGS)
+	$(PY) -m tools.autoplay $(ARGS)
 
 assets:
-	python3 -m tools.import_assets $(ARGS)
+	$(PY) -m tools.import_assets $(ARGS)
