@@ -10,7 +10,7 @@ use crate::{PlayerShip, Ship, Side, assets_dir};
 
 mod asteroid;
 mod damage;
-mod gunnery;
+pub mod gunnery;
 mod hit_test;
 pub mod lob;
 mod minefield;
