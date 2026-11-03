@@ -61,6 +61,44 @@ class ImportAssets(unittest.TestCase):
             # The curated skirmish ships come first, then every other hull in the install.
             self.assertEqual(ran, [[*import_assets.FIRST, "Ship_Extra"]])
 
+    def test_reimport_replaces_the_old_folder_whole_and_only_on_success(self):
+        # A model from an earlier import (e.g. a dragon converted before its clip was baked in) must not survive a re-import.
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "game/WorldObjects").mkdir(parents=True)
+            out = Path(d, "out")
+            (out / "models/scenery").mkdir(parents=True)
+            (out / "models/scenery/SpaceDragon.glb").write_text("old")
+            written = []
+
+            def fake_steps(root, target, want, part):
+                def write():
+                    written.append(target)
+                    (target / "models/scenery/SpaceDragon.glb").write_text("new")
+
+                return [("one", write)]
+
+            def failing_steps(root, target, want, part):
+                def fail():
+                    (target / "models/scenery/SpaceDragon.glb").write_text("half")
+                    raise import_assets.StepFailed("tools.export_hud")
+
+                return [("one", fail)]
+
+            args = ["--game", str(Path(d, "game")), "--out", str(out)]
+            with contextlib.redirect_stdout(io.StringIO()):
+                with mock.patch.object(import_assets, "steps", failing_steps):
+                    self.assertRaises(SystemExit, import_assets.main, args)
+                self.assertEqual(
+                    (out / "models/scenery/SpaceDragon.glb").read_text(), "old"
+                )
+                with mock.patch.object(import_assets, "steps", fake_steps):
+                    import_assets.main(args)
+            self.assertNotEqual(written[0].resolve(), out.resolve())
+            self.assertEqual(
+                (out / "models/scenery/SpaceDragon.glb").read_text(), "new"
+            )
+            self.assertEqual(sorted(p.name for p in Path(d).iterdir()), ["game", "out"])
+
     def test_percent_follows_step_weights_and_parts(self):
         progress = import_assets.Progress()
         progress.names = ["ships", "hud", "maps"]  # weights 31, 1, 10 of 42

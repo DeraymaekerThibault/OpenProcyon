@@ -5,6 +5,7 @@ usage: python -m tools.import_assets [--game DIR] [--out DIR] [Ship_Name ...]   
   --out   where the converted assets go (default: assets/ in this checkout, or for the frozen importer the per-user folder
           ${XDG_DATA_HOME:-~/.local/share}/openprocyon/assets or %APPDATA%\\openprocyon\\assets; the game finds all of these,
           see base_assets() in game/src/lib.rs)
+An existing --out is replaced whole: the import is built in <out>.importing and swapped in only when every step succeeded.
 Each step prints `[n/total] name` first, so a front end can show progress. Exits non-zero on the first failing step."""
 
 import contextlib
@@ -14,6 +15,7 @@ import os
 import runpy
 import shutil
 import sys
+import time
 import traceback
 import warnings
 from pathlib import Path
@@ -281,10 +283,15 @@ def main(argv):
     if not want:
         names = sorted(f.stem for f in (root / "WorldObjects").glob("Ship_*.wot"))
         want = FIRST + [n for n in names if n not in FIRST]
+    # Every import is a clean pass: the steps skip files that already exist (models shared by many maps), so importing over an
+    # earlier import would keep its outdated files. A folder with content is rebuilt beside it and replaced only on success.
+    target = staging(out) if out.exists() and any(out.iterdir()) else out
+    if target != out and target.exists():
+        shutil.rmtree(target)  # an earlier import that failed or was stopped
     for kind in ("ships", "sky", "scenery", "ui"):
-        (out / "models" / kind).mkdir(parents=True, exist_ok=True)
+        (target / "models" / kind).mkdir(parents=True, exist_ok=True)
     progress = Progress()
-    todo = steps(root, out, want, progress.part)
+    todo = steps(root, target, want, progress.part)
     progress.names = [name for name, _ in todo]
     for n, (name, run) in enumerate(todo, 1):
         progress.step(n)
@@ -292,7 +299,44 @@ def main(argv):
             run()
         except StepFailed as e:
             sys.exit(f"import failed at step {name!r}: {e}")
+    if target != out:
+        try:
+            swap_in(target, out)
+        except OSError as e:
+            sys.exit(
+                f"the import finished in {target}, but it could not replace {out} ({e}); close programs using it and retry"
+            )
     print(f"done: {out}")
+
+
+def staging(out):
+    """Where an import over an existing folder is written first (the name the game's setup screen also uses)."""
+    return out.with_name(f"{out.name}.importing")
+
+
+def swap_in(staged, out):
+    """Puts the finished import `staged` in place of `out`; the old folder is removed only once the new one is in place."""
+    old = out.with_name(f"{out.name}.replaced")
+    if old.exists():
+        shutil.rmtree(old)
+    retry(lambda: out.rename(old))
+    try:
+        retry(lambda: staged.rename(out))
+    except OSError:
+        old.rename(out)
+        raise
+    shutil.rmtree(old, ignore_errors=True)
+
+
+def retry(f, tries=20):
+    """Windows refuses to rename a folder while a virus scanner or the indexer briefly holds a file in it."""
+    for i in range(tries):
+        try:
+            return f()
+        except OSError:
+            if i == tries - 1:
+                raise
+            time.sleep(0.25)
 
 
 if __name__ == "__main__":

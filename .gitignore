@@ -1,5 +1,7 @@
 # OpenProcyon ships no game content. Converted assets come from each player's own copy (tools/build_assets.sh) and never enter Git.
 /assets/
+/assets.importing/
+/assets.replaced/
 /local/
 
 # Local configuration: never store installation paths in tracked files.
