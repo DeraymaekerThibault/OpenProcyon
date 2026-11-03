@@ -94,6 +94,26 @@ pub struct Engine {
     mult: f32,
     since: f32,
     started: bool,
+    effect: String,
+}
+
+impl Engine {
+    /// The speed fraction the exhaust was last sent (0..1).
+    pub fn thrust(&self) -> f32 {
+        self.mult
+    }
+    /// The exhaust's effect file name (jets such as `NavyEngine_Heavy`, or `SmokeStack_Smoke` on Procyon funnels).
+    pub fn effect(&self) -> &str {
+        &self.effect
+    }
+}
+
+/// Multiplies the emitter rate of the exhausts whose effect name contains `matching`: scale 1 = classic; a look that draws
+/// its own jet flame (the render profile, render/trails.rs) thins those sprites while funnel smoke stays.
+#[derive(Resource, Clone, PartialEq, Debug)]
+pub struct ExhaustParticles {
+    pub scale: f32,
+    pub matching: String,
 }
 /// Marks entities that a restart must despawn.
 #[derive(Component)]
@@ -109,11 +129,12 @@ impl Default for Rng {
         Self(0x9E3779B97F4A7C15)
     }
 }
+/// How shells are drawn: an unlit sphere, gold for the player's side, red for the enemy's.
 #[derive(Resource)]
-struct Look {
-    mesh: Handle<Mesh>,
-    shell: Handle<StandardMaterial>,
-    enemy_shell: Handle<StandardMaterial>,
+pub struct Look {
+    pub mesh: Handle<Mesh>,
+    pub shell: Handle<StandardMaterial>,
+    pub enemy_shell: Handle<StandardMaterial>,
 }
 
 impl Rng {
@@ -199,7 +220,7 @@ pub fn spawn_engines(commands: &mut Commands, fxl: &FxLib, lib: &Library, ship: 
     for (pos, rot, name, section) in &lib.classes[class].engines {
         let local = Transform { translation: *pos, rotation: *rot, ..default() };
         if let Some(e) = fx::spawn(commands, fxl, name, Some(ship), local, world * local, false) {
-            commands.entity(e).insert(Engine { section: *section, ..default() });
+            commands.entity(e).insert(Engine { section: *section, effect: name.clone(), ..default() });
         }
     }
 }
@@ -208,7 +229,13 @@ pub fn spawn_engines(commands: &mut Commands, fxl: &FxLib, lib: &Library, ship: 
 /// emitter-rate and the velocity-length multiplier of every exhaust; an exhaust exists only while that is above 0 and its
 /// section stands, and the cloaking factor (1 - level) scales the rate. PROVISIONAL: the fraction is speed over Full (the original
 /// multiplies two physics values).
-fn engine_rate(time: Res<Time>, lib: Res<Library>, ships: Query<(&Ship, &Health, Option<&crate::cloak::Cloak>)>, mut q: Query<(&mut fx::Fx, &mut Engine, &ChildOf)>) {
+fn engine_rate(
+    time: Res<Time>,
+    lib: Res<Library>,
+    particles: Option<Res<ExhaustParticles>>,
+    ships: Query<(&Ship, &Health, Option<&crate::cloak::Cloak>)>,
+    mut q: Query<(&mut fx::Fx, &mut Engine, &ChildOf)>,
+) {
     for (mut f, mut engine, parent) in &mut q {
         let Ok((ship, h, cloak)) = ships.get(parent.parent()) else { continue };
         engine.since += time.delta_secs();
@@ -221,7 +248,8 @@ fn engine_rate(time: Res<Time>, lib: Res<Library>, ships: Query<(&Ship, &Health,
         let open = 1.0 - cloak.map_or(0.0, |c| c.level());
         f.emitting = !h.destroyed && !section_lost && engine.mult > 0.0 && open > 0.0;
         f.size_scale = 2.6; // PROVISIONAL: data size 1.6 gives a thread; the reference jet is about hull-wide
-        (f.rate_scale, f.vel_scale) = (engine.mult * open, engine.mult);
+        let thin = particles.as_ref().filter(|p| engine.effect.contains(&p.matching)).map_or(1.0, |p| p.scale);
+        (f.rate_scale, f.vel_scale) = (engine.mult * open * thin, engine.mult);
     }
 }
 

@@ -1,5 +1,5 @@
 //! Mods: `--mod <dir>` (repeatable) overlays a folder onto the base assets. The merged tree is built once per launch under
-//! `<assets>/../local/overlay` as symlinks (copies off Unix) so every loader, Bevy's included, sees a single root.
+//! `<assets>/../local/overlay` as symlinks (hard links, or copies, off Unix) so every loader, Bevy's included, sees a single root.
 //! Rules: a mod file replaces the base file of the same path (a new `ships/<id>/` or `maps/<id>/` folder is new content);
 //! a JSON with `"extends": "Ship_Navy_Cutter"` is deep-merged over the same file of that base ship/map, so a new ship is a few lines.
 use serde_json::Value;
@@ -18,8 +18,12 @@ fn link(from: &Path, to: &Path) {
     let _ = std::fs::remove_file(to);
     #[cfg(unix)]
     std::os::unix::fs::symlink(&from, to).expect("symlink");
+    // A hard link costs nothing (symlinks need a privilege on Windows); a copy when the overlay is on another volume.
+    // Safe because the overlay never writes through a file: merged ones are removed first and written anew.
     #[cfg(not(unix))]
-    std::fs::copy(&from, to).expect("copy");
+    if std::fs::hard_link(&from, to).is_err() {
+        std::fs::copy(&from, to).expect("copy");
+    }
 }
 
 /// Objects merge key by key, anything else is replaced.
@@ -190,6 +194,8 @@ mod tests {
         let root = overlay(&base, &[m]);
         let b: Value = read(&root.join("data/b.json")).unwrap();
         assert_eq!((b["x"].as_i64(), b["y"].as_i64()), (Some(2), Some(3)), "b extends the mod's own a.json, not the base one");
+        // overlay files may be links to the base: replacing one must never write through to the original
+        assert_eq!(std::fs::read_to_string(base.join("data/a.json")).unwrap(), r#"{"x": 1, "y": 1}"#);
         std::fs::remove_dir_all(dir).unwrap();
     }
     #[test]

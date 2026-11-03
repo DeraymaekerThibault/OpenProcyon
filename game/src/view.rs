@@ -330,6 +330,46 @@ pub fn sky(cam: Single<&Transform, (With<Camera3d>, Without<Sky>)>, mut sky: Sin
     sky.1.set_if_neq(want);
 }
 
+/// A baked cube map for this retail sky (`models/sky/<sky>_cube.png`, six square faces stacked +X -X +Y -Y +Z -Z;
+/// not retail), when a mod provides one: the scenario draws it instead of the sky sphere.
+pub fn hd_sky_file(root: &std::path::Path, sky: &str) -> Option<String> {
+    let rel = format!("models/sky/{sky}_cube.png");
+    root.join(&rel).is_file().then_some(rel)
+}
+
+/// On the `Sky` entity in place of the sphere's scene.
+#[derive(Component)]
+pub struct HdSky(pub Handle<Image>);
+
+/// Puts the baked sky on the battle camera as its skybox once the image has loaded, and takes it off again when the
+/// sky is hidden ('Render Background') or gone (battle over).
+pub fn hd_sky(mut commands: Commands, cams: Query<(Entity, Option<&bevy::light::Skybox>), With<Camera3d>>, sky: Query<(&HdSky, &Visibility)>, mut images: ResMut<Assets<Image>>) {
+    use bevy::render::render_resource::{TextureViewDescriptor, TextureViewDimension};
+    let Some(want) = sky.iter().find(|(_, v)| **v != Visibility::Hidden).map(|(s, _)| &s.0) else {
+        for (cam, _) in cams.iter().filter(|(_, s)| s.is_some()) {
+            commands.entity(cam).remove::<bevy::light::Skybox>();
+        }
+        return;
+    };
+    let Ok((cam, current)) = cams.single() else { return };
+    if current.and_then(|s| s.image.as_ref()) == Some(want) {
+        return;
+    }
+    let Some(loaded) = images.get(want) else { return };
+    let layers = loaded.texture_descriptor.size.depth_or_array_layers;
+    if layers == 1 && loaded.height() != loaded.width() * 6 {
+        warn_once!("baked sky is {}x{}, not six square faces stacked: drawing none", loaded.width(), loaded.height());
+        return;
+    }
+    if layers == 1 {
+        let mut image = images.get_mut(want).unwrap();
+        image.reinterpret_stacked_2d_as_array(6).expect("six stacked faces");
+        image.texture_view_descriptor = Some(TextureViewDescriptor { dimension: Some(TextureViewDimension::Cube), ..default() });
+    }
+    // Brightness that cancels the camera's default exposure, so the texels show as they are, like the unlit sphere.
+    commands.entity(cam).insert(bevy::light::Skybox { image: Some(want.clone()), brightness: 1.0 / bevy::camera::Exposure::default().exposure(), ..default() });
+}
+
 pub fn camera(
     orbit: Res<Orbit>,
     ship: Query<&Transform, (With<PlayerShip>, Without<Camera3d>)>,
@@ -509,5 +549,64 @@ mod camera_tests {
         assert!((orbit.yaw + 0.1).abs() < 0.00001);
         assert_eq!(orbit.pitch, 1.5);
         assert_eq!(orbit.dist, 10.0);
+    }
+}
+
+#[cfg(test)]
+mod hd_sky_tests {
+    use super::*;
+    use bevy::asset::RenderAssetUsages;
+    use bevy::ecs::system::RunSystemOnce;
+    use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat, TextureViewDimension};
+
+    fn stacked(width: u32, height: u32) -> Image {
+        Image::new_fill(Extent3d { width, height, depth_or_array_layers: 1 }, TextureDimension::D2, &[0, 0, 0, 255], TextureFormat::Rgba8UnormSrgb, RenderAssetUsages::default())
+    }
+
+    #[test]
+    fn baked_sky_is_the_camera_skybox_while_shown_and_leaves_with_the_sky() {
+        let mut world = World::new();
+        world.init_resource::<Assets<Image>>();
+        let handle = world.resource_mut::<Assets<Image>>().add(stacked(4, 24));
+        let cam = world.spawn(Camera3d::default()).id();
+        let sky = world.spawn((HdSky(handle.clone()), Visibility::Inherited)).id();
+        let skybox = |world: &World| world.get::<bevy::light::Skybox>(cam).and_then(|s| s.image.clone());
+        world.run_system_once(hd_sky).unwrap();
+        assert_eq!(skybox(&world), Some(handle.clone()));
+        let image = world.resource::<Assets<Image>>().get(&handle).unwrap();
+        assert_eq!(image.texture_descriptor.size, Extent3d { width: 4, height: 4, depth_or_array_layers: 6 });
+        assert_eq!(image.texture_view_descriptor.as_ref().and_then(|v| v.dimension), Some(TextureViewDimension::Cube));
+        // 'Render Background' off hides it, on brings it back (the image is reinterpreted once)
+        *world.get_mut::<Visibility>(sky).unwrap() = Visibility::Hidden;
+        world.run_system_once(hd_sky).unwrap();
+        assert_eq!(skybox(&world), None);
+        *world.get_mut::<Visibility>(sky).unwrap() = Visibility::Inherited;
+        world.run_system_once(hd_sky).unwrap();
+        assert_eq!(skybox(&world), Some(handle));
+        world.despawn(sky);
+        world.run_system_once(hd_sky).unwrap();
+        assert_eq!(skybox(&world), None, "the battle's sky gone, the menu camera draws none");
+    }
+
+    #[test]
+    fn a_baked_sky_that_is_not_six_stacked_faces_is_not_drawn() {
+        let mut world = World::new();
+        world.init_resource::<Assets<Image>>();
+        let handle = world.resource_mut::<Assets<Image>>().add(stacked(4, 20));
+        let cam = world.spawn(Camera3d::default()).id();
+        world.spawn((HdSky(handle), Visibility::Inherited));
+        world.run_system_once(hd_sky).unwrap();
+        assert!(world.get::<bevy::light::Skybox>(cam).is_none());
+    }
+
+    #[test]
+    fn only_a_sky_with_a_baked_file_gets_one() {
+        let root = std::env::temp_dir().join(format!("procyon-hd-sky-{}", std::process::id()));
+        std::fs::create_dir_all(root.join("models/sky")).unwrap();
+        assert_eq!(hd_sky_file(&root, "skybox_07"), None, "without the file the scenario keeps the retail sphere");
+        std::fs::write(root.join("models/sky/skybox_07_cube.png"), b"").unwrap();
+        assert_eq!(hd_sky_file(&root, "skybox_07").as_deref(), Some("models/sky/skybox_07_cube.png"));
+        assert_eq!(hd_sky_file(&root, "skybox_17"), None);
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

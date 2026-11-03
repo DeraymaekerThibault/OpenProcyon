@@ -257,7 +257,18 @@ pub struct Fx {
     meshes: Vec<Option<(Handle<Mesh>, Handle<StandardMaterial>)>>,
 }
 
+impl FxLib {
+    /// Every loaded effect: its file name and the index `Fx::effect` reports.
+    pub fn names(&self) -> impl Iterator<Item = (&str, usize)> {
+        self.effects.iter().map(|(n, &i)| (n.as_str(), i))
+    }
+}
+
 impl Fx {
+    /// Which effect this is (an index into `FxLib::names`).
+    pub fn effect(&self) -> usize {
+        self.eff
+    }
     pub fn particle_count(&self) -> usize {
         self.prims.iter().map(|p| p.parts.len()).sum()
     }
@@ -767,6 +778,13 @@ fn render_mesh_fx(
 #[derive(Resource, Default)]
 struct Groups(HashMap<(usize, Blend), (Entity, Handle<Mesh>)>);
 
+/// On every pooled particle mesh: whether it blends ONE/ONE (glows) or over the scene (smoke, debris). Classic draws all of
+/// them unlit; their quads carry normals facing the camera so a render profile (render/materials.rs) can shade smoke.
+#[derive(Component, Clone, Copy, PartialEq, Debug)]
+pub struct ParticleGroup {
+    pub additive: bool,
+}
+
 fn render_fx(
     mut commands: Commands,
     lib: Res<FxLib>,
@@ -849,7 +867,7 @@ fn render_fx(
     for (key, b) in bufs {
         let entry = groups.0.entry(key).or_insert_with(|| {
             let mesh = meshes.add(Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default()));
-            let mut entity = commands.spawn((Mesh3d(mesh.clone()), Transform::default(), NoFrustumCulling, Visibility::default()));
+            let mut entity = commands.spawn((Mesh3d(mesh.clone()), Transform::default(), NoFrustumCulling, Visibility::default(), ParticleGroup { additive: key.1 == Blend::Add }));
             // Every ONE/ONE texture, flares included: several (flare, cannon-ball pseudo) have an all-zero alpha channel, which
             // Bevy's premultiplying AlphaMode::Add turned black, hiding dock lights, repair sparkles and the SOS beacon (PT-11).
             if key.1 == Blend::Add {
@@ -868,6 +886,7 @@ fn render_fx(
             (e, mesh)
         });
         if let Some(mut m) = meshes.get_mut(&entry.1) {
+            m.insert_attribute(Mesh::ATTRIBUTE_NORMAL, vec![(-view).to_array(); b.pos.len()]);
             m.insert_attribute(Mesh::ATTRIBUTE_POSITION, b.pos);
             m.insert_attribute(Mesh::ATTRIBUTE_UV_0, b.uv);
             m.insert_attribute(Mesh::ATTRIBUTE_COLOR, b.col);

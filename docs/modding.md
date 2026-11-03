@@ -16,6 +16,7 @@ game, Bevy's asset server included, reads only that tree.
 | `fx/<Name>.json` | a new effect file is loaded without being listed anywhere; `extends` + `set` recolours a copy of a retail effect |
 | `data/hud/speed.json` (`{"max": 16}`) | shows the game-speed buttons beside the command bar (not retail), stepping 1x to `max` (default 16); absent: no speed control, as in retail. `--speed N` on the command line works either way |
 | `data/fx/wake_tint.json` (`{"Navy": [r, g, b], "Pirate": ..., "Procyon": ..., "Civilian": ...}`) | multiplies the wake texture per fleet type (multiplied in linear light, values may exceed 1); absent: retail colours |
+| `models/sky/<sky>_cube.png` (six square cube faces stacked vertically, +X -X +Y -Y +Z -Z in Bevy's cube-map frame) | drawn as the battle camera's skybox instead of that retail sky's sphere (not retail); with a render profile's `sky_light` it also lights the scene. A sky made from the player's own imported sky is derived from game content: keep it local, never ship it |
 | a new `ships/<Id>/` folder (`ship.json`, plus `geometry.json`/`model.glb` or `geometry`/`model` pointing at another ship), a new `maps/<id>/` folder (`map.json`, `backdrop.png`; `"skirmish": true` lists it), `models/<any folder>/*.glb`, `sound/<any folder>/*.ogg` | new content (schema in `docs/data-format.md`) |
 
 Limits (provisional): the fleet screen lists, per fleet type (`race` Navy/Pirate/Procyon), every ship whose `ship.json` has `"skirmish": true` (the importer copies retail's "Available in Multiplayer?" flag; a mod can set it on any ship); `mod.json` (`name`, `version`, `description`) is only printed at startup. Weapons and bullets are shared files, `data/weapons/guns.json` and `bullets.json`; a mod's copies are merged key by key, so adding a gun is one entry. Computer captains fit the guns retail computers were seen to fit (carronades, Gattling, plasma, light/medium cannons, star mortar) unless a mod ships `data/ai/weapons.json` (`{"Gun_Name": true|false}`, merged the same way) to restrict or extend what they may pick. The full layout is in `docs/data-format.md`.
@@ -30,3 +31,40 @@ An upscaled/HD pack is just a mod that replaces `hud/tex/*.png` at 2x or 4x; spr
 Layout is always in retail reference pixels. A mod can replace any `hud/tex/<sheet>.png` with a higher-resolution copy and declare the factor in
 `hud/scales.json` (`{"fe_05": 2}`, merged across mods); only the source rectangles scale. Buttons and ship-name ribbons are single 9-slice nodes built from
 `hud/tex/slice_<button|ribbon>_<skin>_<state>.png` (made by `tools/make_slices.py`); replace those (plus a `scales.json` entry named like the file) for HD buttons.
+
+## Graphics mods: the render profile (not retail)
+Graphics upgrades are mods, never engine forks. The engine (`game/src/render/`) provides building blocks; a mod switches
+them on and tunes them with one file, `data/render/look.json`, and ships the shaders three of them draw with
+(`shaders/sail.wesl`, `shaders/plume.wesl`, `shaders/wake.wesl`; the engine ships none, and a block whose shader is
+missing stays off with a warning). Without `look.json` every part renders as classic, and a profile only changes drawing,
+never rules. Every key is optional; an absent block leaves that feature classic.
+
+| Key | Effect |
+|---|---|
+| `camera` | HDR camera: `bloom` (intensity), `bloom_threshold` (only light brighter than this blooms; 0 = Bevy's natural bloom, which hazes the image), `tonemapping` (`tony_mc_mapface`, `agx`, `aces`, `blender_filmic`, `reinhard_luminance`), `saturation`, `contrast`, `exposure` (stops), `smaa` (replaces MSAA), `ssao` (crashes with some effects meshes, keep false) |
+| `sky_light`, `ambient` | image-based light (cd/m²) computed once from a mod's cube-map sky (`models/sky/<sky>_cube.png`), and the multiplier on the flat ambient light while it is on |
+| `sun` | `shadows`, `shadow_distance` (cascades out to this many units) |
+| `fx_gain`, `shell_gain` | multiply ONE/ONE effect colour and the shells' spheres, so they pass 1 and bloom |
+| `lit_smoke` | blended particles (smoke, dust) take the scene's lights: explosions light their own smoke |
+| `lights` | point lights on effects: `effects` (a fragment of the effect file name, first entry that matches wins), `color`, `lumens`, `range`, `seconds` (quadratic fade; 0 = steady while the effect lives), `flicker` (share) |
+| `sails` | glTF materials whose name contains one of `match` (default `["sail"]`) get `shaders/sail.wesl`: `glow` RGB (0 for names in `plain`), `speed`, `cells` (pattern cells across the sail), `params` (four numbers for the shader, also settable one by one as `line`, `wave`, `steady`, `fill`), `backlit`, `transmission`, `opaque` (solid, casts shadows), `billow` (bellies out between its edges, more with speed) |
+| `flags` | `flag::Cloth`: `flutter` (ripples across the flag), `lit`, `wind` (follows the ship's speed) |
+| `engines` | a plume per jet (an exhaust whose effect name contains `effects`, default `Engine`; Procyon funnels are `SmokeStack_Smoke`) drawn with `shaders/plume.wesl`: `layers` (`[{width, length, inner}]`, shares of `width`/`length`, which are shares of the ship's length), `brightness`, `core` and per-race `colors` (`default` otherwise), `particles` (share of the retail flame sprites kept, jets only) |
+| `wakes` | the retail wake drawn as one ribbon per `planes` tilt (degrees, default `[0, 60, -60]`; `[0]` = the retail ribbon) with `shaders/wake.wesl`: `height` (squashes tilted ribbons), `brightness`, `hot`, `core`; the faction tint comes from `data/fx/wake_tint.json` |
+
+### Shaders
+The three shaders are fragment shaders in Bevy's WESL. Each gets the mesh's `VertexOutput` (world position and normal,
+UV, vertex colour) and one uniform at `@group(constants::MATERIAL_BIND_GROUP) @binding(100)`, whose layout is a Rust
+struct the engine fills; the field order and types must match. A replacement keeps the uniform and may use its fields as it
+likes.
+
+| Shader | Drawn as | Uniform (`game/src/render/`) | Engine-provided values |
+|---|---|---|---|
+| `sail.wesl` | the sail's StandardMaterial extended: call `pbr_input_from_standard_material` and `apply_pbr_lighting`, then add light | `SailGlowUniform` in `sails.rs`: `color`, `params`, `sun`, `motion`, `pattern` | sun direction, the ship's smoothed speed share, a per-sail phase and clock, pattern cells per UV unit |
+| `plume.wesl` | additive (ONE/ONE: write unpremultiplied light, alpha ignored) on a unit cone, u around, v from nozzle (0) to tail (1) | `PlumeUniform` in `trails.rs`: `core`, `edge` (w = 1 on the inner layer), `params` (brightness, thrust, clock, seed) | thrust, clock, seed |
+| `wake.wesl` | additive on each ribbon, u across, v along (newest at the ship), vertex colour = retail fade | `WakeUniform` in `trails.rs`: `tint`, `hot`, `params` (length, clock, core) | the ribbon's length and the clock |
+
+To make a graphics mod: start from an empty `data/render/look.json`, add the blocks you want, and put the shaders of the
+`sails`, `engines` and `wakes` blocks in the mod's `shaders/` folder. Run with `--mod <folder>`;
+the profile is read at launch, so restart after edits. New kinds of material (a shader for hulls, say) need a Rust building
+block in `game/src/render/` first: add it there, keep classic unchanged without the profile key, and document its uniform here.
