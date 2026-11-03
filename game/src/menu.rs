@@ -563,7 +563,7 @@ fn autolaunch(mut sk: ResMut<Skirmish>, lib: Res<Library>, cfg: Res<crate::Confi
 }
 
 /// Esc: open the in-game menu (pausing the simulation), or step back / resume. Runs in PostUpdate so systems that used this Esc
-/// (star map, right-click menu) can swallow it first. `--script ingame|ingame-load|ingame-save` opens a page at frame 60 for screenshots.
+/// (star map, right-click menu) can swallow it first. `--script ingame|ingame-load|ingame-save|ingame-quit` opens a page at frame 60 for screenshots.
 fn esc_menu(
     mission: Option<Res<crate::campaign::Mission>>,
     keys: Res<ButtonInput<KeyCode>>,
@@ -580,6 +580,7 @@ fn esc_menu(
     let scripted = (cfg.frame == 60).then(|| match cfg.script.as_deref() {
         Some("ingame") => Some(Page::Menu),
         Some("ingame-load" | "ingame-do-load") => Some(Page::Load),
+        Some("ingame-quit") => Some(Page::Menu),
         Some("ingame-save") => Some(Page::Save),
         Some("ingame-options") => Some(Page::Options),
         Some("ingame-controls") => Some(Page::Controls),

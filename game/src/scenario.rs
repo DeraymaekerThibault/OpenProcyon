@@ -236,6 +236,7 @@ pub fn game_to_bevy(v: &serde_json::Value) -> Vec3 {
 
 /// A fresh scenario must not inherit pause from the battle it replaces; keep the chosen game speed.
 pub fn reset_fleets(world: &mut World) {
+    world.remove_resource::<campaign::Mission>();
     world.insert_resource(ship::Fleets::default());
     world.insert_resource(crate::environment::Sensors::default());
     if let Some(mut orbit) = world.get_resource_mut::<Orbit>() {
