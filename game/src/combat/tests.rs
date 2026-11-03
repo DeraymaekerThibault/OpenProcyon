@@ -1326,3 +1326,50 @@ fn only_the_torpedo_launcher_has_a_crew_shortened_reload() {
     let flagged: Vec<&str> = lib.guns.iter().filter(|(_, g)| g.torpedo_launcher).map(|(n, _)| n.as_str()).collect();
     assert_eq!(flagged, ["Gun_Torpedo"]);
 }
+
+#[test]
+#[ignore = "needs imported assets"]
+/// Mission 2 towers: the default aim point (roof) must be reachable from far more bearings than the old box centre was.
+fn tower_aim_point_is_reachable_over_the_island_terrain() {
+    use bevy::ecs::world::FromWorld;
+    let shapes = crate::collision::Shapes::from_world(&mut World::new());
+    let lib = Library::load(assets_dir());
+    let class = &lib.classes[lib.index("Base_SmugglersCamp")];
+    let map: serde_json::Value = serde_json::from_slice(&std::fs::read(assets_dir().join("maps/mission02/map.json")).unwrap()).unwrap();
+    let o = map["objects"].as_array().unwrap().iter().find(|o| o["type"] == "Base_SmugglersCamp").unwrap();
+    let docks = crate::docking::load_docks();
+    let tf = crate::scenario::scenery_transform(o, crate::scenario::game_rotation(&o["rot"]), &docks);
+    let ob = shapes.obstacle("Base_SmugglersCamp", &tf).unwrap();
+    for (i, s) in class.sections.iter().enumerate().filter(|(_, s)| s.mission) {
+        let c = (s.min + s.max) * 0.5;
+        let top = Vec3::new(c.x, s.max.y, c.z);
+        let cents: Vec<Vec3> = s.tris.iter().map(|[a, b, c]| (*a + *b + *c) / 3.0).collect();
+        for r in [50.0f32, 100.0] {
+            let (mut n, mut ok_c, mut ok_t, mut ok_any) = (0, 0, 0, 0);
+            for k in 0..72 {
+                let a = k as f32 * 5f32.to_radians();
+                let w = tf.transform_point(c);
+                let from = Vec3::new(w.x + r * a.cos(), 3.0, w.z + r * a.sin());
+                let clear = |local: Vec3| {
+                    let to = tf.transform_point(local);
+                    let len = from.distance(to);
+                    let tower = seg_mesh_world(&tf, s, from, to).map(|t| t * len);
+                    match (ob.segment_hit(from, to).map(|t| t * len), tower) {
+                        (Some(g), Some(t)) => g >= t - 0.5,
+                        (Some(_), None) => false,
+                        _ => true,
+                    }
+                };
+                n += 1;
+                ok_c += clear(c) as i32;
+                ok_t += clear(top) as i32;
+                ok_any += cents.iter().step_by(7).any(|p| clear(*p)) as i32;
+            }
+            assert!(ok_t >= 30 && ok_t > ok_c, "tower {i} r={r}: roof {ok_t}/{n}, centre {ok_c}/{n}, any face {ok_any}/{n}");
+        }
+    }
+}
+fn seg_mesh_world(tf: &Transform, s: &Section, a: Vec3, b: Vec3) -> Option<f32> {
+    let inv = tf.to_matrix().inverse();
+    hit_test::seg_mesh(inv.transform_point3(a), inv.transform_point3(b), s)
+}
