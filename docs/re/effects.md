@@ -153,6 +153,19 @@ Regression samples all four primitives at two surface heights and proves streaks
 there. Gate passed (188 Rust / 74 Python, seven skips); Classic isolated smoke `local/meteor-flight-plane.png` shows the shower
 above the ship's plane. Other effects retain their existing emitters and positions.
 
+Third follow-up (owner: "white drops" beside the meteors): a scratch spawn of `MeteorStorm` showed them to be the grey rock disc
+(`solar storm_front00`, the front texture of the two streak primitives) that the pseudo-billboard blend below drew on every streak.
+It was weighted by cos^2 of the view/axis angle, so from the battle camera (pitch about 0.9 rad) falling meteors got 60 % disc and the
+streak was dimmed to 40 %. The disc is as wide as the whole streak quad (4 units) while the rock head painted into the streak
+texture is a quarter of that, so it read as a second, larger white drop on each meteor. The splash primitives are not involved:
+the rings (primitive 2) are small white-to-blue flat rings, and the glow blobs (primitive 3) have their source-emitter index set
+(2) but the source emitter *disabled*, so they are independent of the rings (they spawn on their own around the storm and are
+pulled downward for 0.5 s). `front_weight` now takes the quad's length/width and gives the front texture only once the streak's
+projected length falls below its width (cross-fade in between): a meteor streak (11 x 2) shows no disc unless the camera looks
+within roughly 10 degrees of its fall line. PROVISIONAL: the retail front/side switching rule was not recovered (the draw path
+that picks the second texture was not found in the executable); it also applies to other pseudo-billboard shells, which
+are mostly seen side-on from the battle camera and look the same as before.
+
 ## Attractor (movement info slot 4)
 `vel += (target - pos) * k * dt * 0.033` (in per-tick units; i.e. per second `vel += (target-pos)*k*dt`),
 with `k = Const + WithDist/d + WithDistSquared/d^2`, `d = |target - pos|`. The chunk's
@@ -261,8 +274,8 @@ to `models/debris/` and `sections[].debris` = {model, pivot}.
 - **A debris piece's smoke trail stops after 3 s** (`DEBRIS_SMOKE_TIME`); smoke already out fades on its own.
 - **Shell sprites use both of their textures.** A pseudo-billboard effect lists a side texture and a front texture (cannonballs, lancer shots, the Gattling
   tracer, meteors). Retail shows the side streak when seen from the side and a round glow when seen along the shell's flight line, which is what gives
-  its shells a 3D feel; we drew only the side texture. The streak and the camera-facing front quad are now drawn together, weighted by cos^2 of the angle between
-  the view and the axis (PROVISIONAL blend). A cannonball is a glowing fireball with a flame tail, not an iron ball.
+  its shells a 3D feel; we drew only the side texture. The streak and the camera-facing front quad are now drawn together, weighted by how foreshortened the
+  streak is (see the third meteor follow-up; PROVISIONAL blend). A cannonball is a glowing fireball with a flame tail, not an iron ball.
   To look at every shell type at once: `tools/shot.sh local/x.png --script shells --shot-frame 45 --dist 80 --pitch 89` (also `--yaw`; the log lists the order,
   two rows of up to twelve, left to right).
 

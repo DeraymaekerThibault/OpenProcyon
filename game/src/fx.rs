@@ -637,9 +637,13 @@ fn particle_sample(p: &P, remainder: f32) -> (Vec3, f32) {
     (p.pos + p.vel * remainder, p.age + remainder)
 }
 
-/// Share of the front texture in a pseudo-billboard seen along `view`: 0 side-on, 1 looking down its axis.
-fn front_weight(view: Vec3, axis: Vec3) -> f32 {
-    view.dot(axis).powi(2)
+/// Share of the front texture in a pseudo-billboard seen along `view`: 0 while the streak still reads as a streak, 1 looking down its axis.
+/// `aspect` is the streak quad's length over its width. PROVISIONAL: the front texture replaces the streak only once the streak's
+/// projected length drops below its width (cross-fading in between); a weight of cos^2 showed meteors' rock disc, four times wider than
+/// the head drawn in the streak texture, as a white drop beside every streak seen from the battle camera.
+fn front_weight(view: Vec3, axis: Vec3, aspect: f32) -> f32 {
+    let foreshortened = (1.0 - view.dot(axis).powi(2)).max(0.0).sqrt();
+    (1.0 - aspect * foreshortened).clamp(0.0, 1.0)
 }
 
 fn streak_axes(direction: Vec3, right: Vec3, up: Vec3, view: Vec3) -> (Vec3, Vec3) {
@@ -791,7 +795,7 @@ fn render_fx(
                 // Pseudo-billboard with a front texture: the side streak fades into the round front glow as the view turns
                 // along its axis. PROVISIONAL: the blend is cos^2 of the angle between view and axis (retail's is unknown).
                 let streak = prim.tex2.is_some() && (prim.along_velocity || prim.pseudo_dir.is_some());
-                let front = if streak { front_weight(view, ay) } else { 0.0 };
+                let front = if streak { front_weight(view, ay, (y0 - y1).abs() / (x1 - x0).abs().max(1e-3)) } else { 0.0 };
                 if let (true, Some(t2)) = (streak, prim.tex2) {
                     let fcol = [col[0] * front, col[1] * front, col[2] * front, col[3]];
                     let half = 0.5 * (x1 - x0).abs() * size;
@@ -907,6 +911,26 @@ mod tests {
                     }
                 }
             }
+        }
+    }
+
+    #[test]
+    #[ignore = "needs imported assets"]
+    fn meteor_rock_disc_only_shows_when_a_streak_is_seen_end_on() {
+        let doc: Value = serde_json::from_slice(&std::fs::read(assets_dir().join("fx/MeteorStorm.json")).unwrap()).unwrap();
+        let mut names = vec![];
+        for i in 0..2 {
+            let prim = parse_prim(&doc["Primitive"][i], &mut names);
+            let r = prim.rect.as_ref().expect("streak rectangle");
+            let aspect = (r[1].at(0.0, 0.5) - r[3].at(0.0, -0.5)).abs() / (r[2].at(0.0, 0.5) - r[0].at(0.0, -0.5)).abs();
+            assert!(aspect > 4.0, "meteor streaks are long and thin");
+            assert!(prim.tex2.is_some() && prim.along_velocity);
+            // Falling straight down, seen from the battle camera (pitch 0.9 to 1.2 rad): only the streak, no white disc.
+            for pitch in [0.9f32, 1.2] {
+                let view = Vec3::new(0.0, -pitch.sin(), -pitch.cos());
+                assert_eq!(front_weight(view, Vec3::NEG_Y, aspect), 0.0, "pitch {pitch}");
+            }
+            assert_eq!(front_weight(Vec3::NEG_Y, Vec3::NEG_Y, aspect), 1.0, "looking straight down the fall");
         }
     }
 
@@ -1178,9 +1202,13 @@ mod tests {
 
     #[test]
     fn pseudo_billboards_turn_from_streak_to_front_glow() {
-        assert!(front_weight(Vec3::NEG_Z, Vec3::X).abs() < 1e-6, "side-on: all streak");
-        assert!((front_weight(Vec3::NEG_Z, Vec3::Z) - 1.0).abs() < 1e-6, "end-on: all front glow");
-        assert!((front_weight(Vec3::NEG_Z, Vec3::new(0.0, 1.0, 1.0).normalize()) - 0.5).abs() < 1e-5);
+        assert!(front_weight(Vec3::NEG_Z, Vec3::X, 5.5).abs() < 1e-6, "side-on: all streak");
+        assert!((front_weight(Vec3::NEG_Z, Vec3::Z, 5.5) - 1.0).abs() < 1e-6, "end-on: all front glow");
+        // A meteor streak (11 long, 2 wide) falling vertically, seen from the battle camera at 0.9 rad pitch: still a streak, no rock disc.
+        let view = Vec3::new(0.0, -0.9f32.sin(), -0.9f32.cos());
+        assert_eq!(front_weight(view, Vec3::Y, 5.5), 0.0);
+        // Nearly end-on, the streak is shorter than it is wide: the glow is back.
+        assert!(front_weight(Vec3::NEG_Z, Vec3::new(0.0, 0.05, 1.0).normalize(), 5.5) > 0.5);
     }
 
     #[test]
