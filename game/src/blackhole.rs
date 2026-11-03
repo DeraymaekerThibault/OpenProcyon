@@ -248,10 +248,11 @@ pub fn pull(
     time: Res<Time>,
     lib: Res<crate::combat::Library>,
     holes: Query<(&Transform, &Pull), Without<Ship>>,
-    mut ships: Query<(Entity, &Ship, &mut Transform, &mut Health, Option<&Docker>, Option<&mut Caught>)>,
+    wells: Query<(&Transform, &crate::combat::lob::GravWell), Without<Ship>>,
+    mut ships: Query<(Entity, &Ship, &mut Transform, &mut Health, Option<&Docker>, Option<&mut Caught>, Option<&mut crate::cloak::Cloak>)>,
 ) {
     let dt = time.delta_secs();
-    for (e, ship, mut tf, mut health, docker, caught) in &mut ships {
+    for (e, ship, mut tf, mut health, docker, caught, mut cloak) in &mut ships {
         if health.destroyed || docker.is_some_and(Docker::is_docked) {
             continue;
         }
@@ -262,6 +263,18 @@ pub fn pull(
             in_radius |= distance <= pull.radius;
             in_core |= distance <= pull.core();
             accel += pull_dir(hole.translation, tf.translation) * pull.accel(distance, class.length, class.phys.mass);
+        }
+        // A gravity charge's well goes through the same force helper (decoded), straight at its centre, with no core.
+        for (well, w) in &wells {
+            let to_centre = horizontal(well.translation, tf.translation);
+            in_radius |= to_centre.length() <= w.radius;
+            // A cloaked ship inside a gravity charge's well is ordered to decloak every tick (the only projectile that does this).
+            if to_centre.length() <= w.radius
+                && let Some(c) = cloak.as_deref_mut()
+            {
+                c.stop();
+            }
+            accel += to_centre.normalize_or_zero() * CLASS_GAIN * class.length / class.phys.mass.max(1.0) * w.force(to_centre.length()) / 9000.0;
         }
         let Some(mut caught) = caught else {
             if in_radius {

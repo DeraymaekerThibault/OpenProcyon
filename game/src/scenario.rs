@@ -43,6 +43,9 @@ pub struct Group {
     pub race: u8,
     /// Index in the map's team list (or the lobby team on free-for-all maps), -1: on its own.
     pub team: i32,
+    /// The lobby slot behind this fleet (the in-battle player list shows one row per slot): the human's name (none: "Computer") and the
+    /// fleet type's flag icon number. None for fleets that are no lobby slot.
+    pub row: Option<(Option<String>, usize)>,
     /// The map's world-object id of each ship that the map placed (historical maps), else none.
     pub ids: Vec<Option<i64>>,
     pub ships: Vec<(String, Option<[f32; 3]>, Option<String>)>, // class, start position, scripted name
@@ -357,6 +360,7 @@ pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Libra
                     human: true,
                     race: players[0]["race"].as_u64().unwrap_or(4) as u8,
                     team: players[0]["team"].as_i64().unwrap_or(-1) as i32,
+                    row: None,
                     ids: vec![],
                     ships: fleet(&ours),
                     weapons: vec![],
@@ -368,6 +372,7 @@ pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Libra
                     human: false,
                     race: players[them]["race"].as_u64().unwrap_or(4) as u8,
                     team: players[them]["team"].as_i64().unwrap_or(-1) as i32,
+                    row: None,
                     ids: vec![],
                     ships: fleet(&cfg.enemies),
                     weapons: vec![],
@@ -383,6 +388,7 @@ pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Libra
                     human: g.human,
                     race: g.race,
                     team: g.team,
+                    row: g.row.clone(),
                     ids: g.ids.clone(),
                     ships: g.ships.clone(),
                     weapons: g.weapons.clone(),
@@ -399,6 +405,7 @@ pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Libra
                 human: false,
                 race: 4,
                 team: -1,
+                row: None,
                 ids: vec![],
                 ships: vec![(ship::DEFAULT_SHIP.into(), None, Some("Allied captain".into()))],
                 weapons: vec![],
@@ -431,6 +438,7 @@ pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Libra
                     human: false,
                     race: 4,
                     team,
+                    row: None,
                     ids: placed.iter().map(|o| o["id"].as_i64()).collect(),
                     ships: placed
                         .iter()
@@ -448,6 +456,7 @@ pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Libra
             }
         }
         let mut namer = Namer::new();
+        let mut roster = alliance::Roster { changeable: map["alliance_change"].as_bool().unwrap_or(false), ..default() };
         for g in &groups {
             let Some(p) = players.get(g.player) else { continue };
             let f = game_to_bevy(&p["forward"]);
@@ -458,6 +467,13 @@ pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Libra
             // A scripted map's ships answer to their map player's name (`MissionShip::owner`), so the fleet is keyed the same way, or the
             // fleet bookkeeping drops the human's command ship (no control, no HUD).
             let owner = if script_names.is_some() { p["name"].as_str().unwrap_or_default().to_string() } else { format!("player{}", g.player) };
+            if let Some((name, flag)) = &g.row {
+                let colour = p["color"]
+                    .as_array()
+                    .filter(|c| c.len() >= 3)
+                    .map_or(Color::WHITE, |c| Color::srgb(c[0].as_f64().unwrap_or(1.0) as f32, c[1].as_f64().unwrap_or(1.0) as f32, c[2].as_f64().unwrap_or(1.0) as f32));
+                roster.rows.push(alliance::Row::new(owner.clone(), name.clone(), *flag, colour, g.side == Side::Player));
+            }
             if g.human {
                 let owner = owner.clone();
                 commands.queue(move |w: &mut World| {
@@ -506,6 +522,11 @@ pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Libra
             }
             let owner = owner.clone();
             commands.queue(move |w: &mut World| ship::set_formation(w, &owner, Some(kind), kind != ship::Formation::None));
+        }
+        if roster.rows.is_empty() {
+            commands.remove_resource::<alliance::Roster>();
+        } else {
+            commands.insert_resource(roster);
         }
         // The map's own end rules, when we model all of them (else the plain "no enemy ships left" outcome stays).
         let map_teams = map["teams"].as_array().cloned().unwrap_or_default();

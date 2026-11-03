@@ -541,6 +541,10 @@ fn context_cursor(
     ui: Res<crate::panels::UiClick>,
     mission: Option<Res<crate::campaign::Mission>>,
     ships: Query<(Entity, &Transform, &Ship, &Health)>,
+    objects: Query<
+        (Entity, &Transform, Option<&crate::combat::Asteroid>, Option<&crate::environment::SpaceAnimal>),
+        Or<(With<crate::combat::Asteroid>, With<crate::environment::SpaceAnimal>)>,
+    >,
     sensors: Res<crate::environment::Sensors>,
     fleets: Res<crate::ship::Fleets>,
     docks: Dockees,
@@ -570,7 +574,9 @@ fn context_cursor(
             }
         } else if let Some((_, ok)) = docks.under(ray, actor) {
             if ok { "Cursor_Dock_With_WorldObject_Under_Cursor" } else { "Cursor_Cant_Do_Anything_To_WorldObject_Under_Cursor" }
-        } else if docks.hostile_base_hit(ray, ships.get(actor).ok()?.1.translation).is_some() {
+        } else if docks.hostile_base_hit(ray, ships.get(actor).ok()?.1.translation).is_some()
+            || crate::view::object_hit(objects.iter(), ray, &sensors, mission.as_deref()).is_some()
+        {
             if fleets.direct() { "Cursor_PrimaryShip_AttackShip" } else { "Cursor_SecondaryShip_AttackShip" }
         } else if let Some((_, _, sh, _)) =
             ships.iter().find(|(e, tf, sh, h)| !h.destroyed && sensors.player_sees(*e, mission.as_deref()) && ray_hit(&lib.classes[sh.class], tf, ray).is_some())

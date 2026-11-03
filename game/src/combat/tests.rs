@@ -1007,7 +1007,12 @@ fn mine_laying_spells() {
 #[ignore = "needs imported assets"]
 fn engine_exhaust_needs_motion_not_just_an_order() {
     let mut app = App::new();
-    app.init_resource::<FxLib>().insert_resource(Library::load(assets_dir())).add_systems(Update, engine_rate);
+    // Updates are long (virtual time caps them at 0.25 s): the speed fraction reaches the exhaust once a second.
+    app.add_plugins(MinimalPlugins)
+        .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(std::time::Duration::from_millis(1100)))
+        .init_resource::<FxLib>()
+        .insert_resource(Library::load(assets_dir()))
+        .add_systems(Update, engine_rate);
     let lib = Library::load(assets_dir());
     let c = lib.index("Ship_Navy_Torpedo");
     let ship = Ship {
@@ -1036,7 +1041,7 @@ fn engine_exhaust_needs_motion_not_just_an_order() {
     app.update();
     assert!(!app.world().get::<fx::Fx>(fx).unwrap().emitting, "stopped ship with an engine order");
     app.world_mut().get_mut::<Ship>(s).unwrap().speed = 5.0;
-    app.update();
+    (0..6).for_each(|_| app.update()); // virtual time moves at most 0.25 s per update
     assert!(app.world().get::<fx::Fx>(fx).unwrap().emitting);
 }
 

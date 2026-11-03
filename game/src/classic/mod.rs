@@ -8,6 +8,7 @@ pub mod menu;
 mod mission_ui;
 pub mod options_menu;
 pub mod panels;
+mod player_names;
 mod ropes;
 pub mod setup;
 mod ship_preview;
@@ -20,6 +21,7 @@ pub fn plugin(app: &mut App) {
         menu::plugin,
         widgets::plugin,
         panels::plugin,
+        player_names::plugin,
         options_menu::plugin,
         crew_arms::plugin,
         ship_preview::plugin,

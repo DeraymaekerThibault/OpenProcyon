@@ -192,6 +192,10 @@ struct Prim {
 }
 struct Effect {
     prims: Vec<Prim>,
+    /// Particles that drift farther than this from the effect's origin are removed. PROVISIONAL (owner's choice): only the
+    /// Star mortar impact, whose attractor pushes its glow outward without limit (docs/re/effects.md); its authored
+    /// `EffectMaxRadius` (200) is the bound. No retail rule that removes them was found.
+    bound: Option<f32>,
 }
 
 #[derive(Resource)]
@@ -245,6 +249,8 @@ pub struct Fx {
     prims: Vec<PrimState>,
     pub rate_scale: f32,
     pub size_scale: f32,
+    /// SPHERE_VELOCITY_EMITTER_LENGTH_MULTIPLY: scales the speed of the particles the velocity emitter gives (1 = authored).
+    pub vel_scale: f32,
     pub emitting: bool,
     /// The vertices of the mesh the effect is told about (a damaged section's layer), ship-local; see `Prim::mesh_vertices`.
     pub vertices: Vec<Vec3>,
@@ -442,8 +448,9 @@ impl FromWorld for FxLib {
                 Value::Array(a) => a.iter().map(|p| parse_prim(p, &mut tex_names)).collect(),
                 _ => vec![],
             };
+            let bound = (n == "StarMortar_Heavy_Impact").then(|| j["EffectMaxRadius"].as_f64().unwrap_or(200.0) as f32);
             effects.insert(n, list.len());
-            list.push(Effect { prims });
+            list.push(Effect { prims, bound });
         }
         Self { effects, list, tex_names }
     }
@@ -476,6 +483,7 @@ pub fn spawn(commands: &mut Commands, lib: &FxLib, name: &str, parent: Option<En
         prims: lib.list[eff].prims.iter().map(|_| PrimState { started: false, last_key: None, parts: vec![] }).collect(),
         rate_scale: 1.0,
         size_scale: 1.0,
+        vel_scale: 1.0,
         emitting: true,
         vertices: vec![],
         meshes: lib.list[eff].prims.iter().map(|_| None).collect(),
@@ -564,7 +572,7 @@ fn update_fx(
                         p.vel += to * strength * move_dt;
                     }
                 }
-                st.parts.retain(|p| p.age < p.life);
+                st.parts.retain(|p| p.age < p.life && eff.bound.is_none_or(|b| p.pos.length() <= b));
                 if !prim.ever && t > prim.duration {
                     st.parts.clear();
                 }
@@ -594,7 +602,7 @@ fn update_fx(
                         };
                     }
                     for _ in 0..n {
-                        let mut np = spawn_particle(prim, t, &tick_world, &mut rng);
+                        let mut np = spawn_particle(prim, t, &tick_world, &mut rng, fx.vel_scale);
                         if meteor {
                             align_meteor_particle(&mut np, tick_world.translation().y);
                         }
@@ -642,9 +650,15 @@ fn particle_sample(p: &P, remainder: f32) -> (Vec3, f32) {
     (p.pos + p.vel * remainder, p.age + remainder)
 }
 
-/// Share of the front texture in a pseudo-billboard seen along `view`: 0 side-on, 1 looking down its axis.
-fn front_weight(view: Vec3, axis: Vec3) -> f32 {
-    view.dot(axis).powi(2)
+/// Colour weights `(side, front)` of the two textures of a pseudo-billboard particle, from the direction `to_camera` (particle to
+/// camera) and the streak `axis`. Retail draws the particle twice: the side texture as a streak scaled by sin(angle) and the
+/// front texture as a camera-facing square scaled by |cos(angle)|, `angle` being the one between axis and view line. Both are
+/// plain colour factors (ONE/ONE adds the two); there is no cross-fade. Either vector being (near) zero gives angle 0 (retail
+/// leaves the streak unscaled then).
+fn pseudo_weights(to_camera: Vec3, axis: Vec3) -> (f32, f32) {
+    let (Some(v), Some(a)) = (to_camera.try_normalize(), axis.try_normalize()) else { return (1.0, 1.0) };
+    let c = v.dot(a).clamp(-1.0, 1.0);
+    ((1.0 - c * c).sqrt(), c.abs())
 }
 
 fn streak_axes(direction: Vec3, right: Vec3, up: Vec3, view: Vec3) -> (Vec3, Vec3) {
@@ -667,7 +681,7 @@ fn particle_axes(prim: &Prim, gt: &GlobalTransform, vel: Vec3, camera_axes: [Vec
     }
 }
 
-fn spawn_particle(p: &Prim, t: f32, gt: &GlobalTransform, rng: &mut FxRng) -> P {
+fn spawn_particle(p: &Prim, t: f32, gt: &GlobalTransform, rng: &mut FxRng, vel_scale: f32) -> P {
     let at = |c: &[Curve; 3]| Vec3::new(c[0].at(t, 0.0), c[1].at(t, 0.0), c[2].at(t, 0.0));
     // Retail: the error is one-sided, uniform between 0 and err.
     let jitter = |len: f32, err: f32, rng: &mut FxRng| len + err * rng.f();
@@ -688,7 +702,8 @@ fn spawn_particle(p: &Prim, t: f32, gt: &GlobalTransform, rng: &mut FxRng) -> P 
     if p.target_on {
         let offset = emit(at(&p.pos_t), p.pos_r.at(t, 0.0), p.pos_l.at(t, 0.0), p.pos_le.at(t, 0.0), rng);
         pos += offset;
-        vel += if p.target_pos_velocity { offset } else { emit(at(&p.vel_t), p.vel_r.at(t, 0.0), p.vel_l.at(t, 0.0), p.vel_le.at(t, 0.0), rng) };
+        // SPHERE_VELOCITY_EMITTER_LENGTH_MULTIPLY: the keeper's message scales the velocity emitter's length (engine flames).
+        vel += if p.target_pos_velocity { offset } else { emit(at(&p.vel_t), p.vel_r.at(t, 0.0), p.vel_l.at(t, 0.0) * vel_scale, p.vel_le.at(t, 0.0) * vel_scale, rng) };
     }
     if p.angle_on {
         let offset = angle(&p.ang_dir, &p.ang_min, &p.ang_max, &p.ang_len, &p.ang_len_err, rng);
@@ -765,6 +780,7 @@ fn render_fx(
     mut vis: Query<&mut Visibility>,
 ) {
     let (right, up, view) = (cam.right().as_vec3(), cam.up().as_vec3(), cam.forward().as_vec3());
+    let cam_pos = cam.translation();
     #[derive(Default)]
     struct Buf {
         pos: Vec<[f32; 3]>,
@@ -793,13 +809,14 @@ fn render_fx(
                     None => (-0.5, 0.5, 0.5, -0.5),
                 };
                 let (ax, ay) = particle_axes(prim, gt, vel, [right, up, view]);
-                // Pseudo-billboard with a front texture: the side streak fades into the round front glow as the view turns
-                // along its axis. PROVISIONAL: the blend is cos^2 of the angle between view and axis (retail's is unknown).
+                // Pseudo-billboard with a front texture: retail draws the streak (side texture) scaled by sin(angle) and a
+                // camera-facing square (front texture, half-extent = size, the rectangle is ignored) scaled by |cos(angle)|,
+                // angle = view line vs streak axis (docs/re/effects.md, "Pseudo-billboard blend").
                 let streak = prim.tex2.is_some() && (prim.along_velocity || prim.pseudo_dir.is_some());
-                let front = if streak { front_weight(view, ay) } else { 0.0 };
+                let (side, front) = if streak { pseudo_weights(cam_pos - pos, ay) } else { (1.0, 0.0) };
                 if let (true, Some(t2)) = (streak, prim.tex2) {
-                    let fcol = [col[0] * front, col[1] * front, col[2] * front, col[3]];
-                    let half = 0.5 * (x1 - x0).abs() * size;
+                    let fcol = col.map(|c| c * front);
+                    let half = size;
                     let b = bufs.entry((t2, prim.blend)).or_default();
                     let i = b.pos.len() as u32;
                     for (cx, cy, u, v) in [(-half, half, 0.0, 0.0), (half, half, 1.0, 0.0), (half, -half, 1.0, 1.0), (-half, -half, 0.0, 1.0)] {
@@ -809,7 +826,7 @@ fn render_fx(
                     }
                     b.idx.extend([i, i + 1, i + 2, i, i + 2, i + 3]);
                 }
-                let col = if streak { [col[0] * (1.0 - front), col[1] * (1.0 - front), col[2] * (1.0 - front), col[3]] } else { col };
+                let col = if streak { col.map(|c| c * side) } else { col };
                 let b = bufs.entry((ti, prim.blend)).or_default();
                 let i = b.pos.len() as u32;
                 for (cx, cy, u, v) in [(x0, y0, 0.0, 0.0), (x1, y0, 1.0, 0.0), (x1, y1, 1.0, 1.0), (x0, y1, 0.0, 1.0)] {
@@ -875,7 +892,7 @@ mod tests {
         for (i, data) in doc["Primitive"].as_array().unwrap().iter().enumerate() {
             let prim = parse_prim(data, &mut vec![]);
             for _ in 0..64 {
-                let particle = spawn_particle(&prim, 0.0, &gt, &mut rng);
+                let particle = spawn_particle(&prim, 0.0, &gt, &mut rng, 1.0);
                 if i < 2 {
                     assert!(particle.pos.y > gt.translation().y + 99.0);
                     assert!(particle.vel.y <= -50.0);
@@ -899,7 +916,7 @@ mod tests {
             for (i, data) in doc["Primitive"].as_array().unwrap().iter().enumerate() {
                 let prim = parse_prim(data, &mut vec![]);
                 for _ in 0..100 {
-                    let mut p = spawn_particle(&prim, 0.0, &gt, &mut rng);
+                    let mut p = spawn_particle(&prim, 0.0, &gt, &mut rng, 1.0);
                     let horizontal = p.pos.with_y(0.0);
                     align_meteor_particle(&mut p, surface);
                     assert_eq!(p.pos.with_y(0.0), horizontal);
@@ -912,6 +929,20 @@ mod tests {
                     }
                 }
             }
+        }
+    }
+
+    #[test]
+    #[ignore = "needs imported assets"]
+    fn meteor_streaks_carry_the_front_disc_with_the_retail_weights() {
+        let doc: Value = serde_json::from_slice(&std::fs::read(assets_dir().join("fx/MeteorStorm.json")).unwrap()).unwrap();
+        for i in 0..2 {
+            let prim = parse_prim(&doc["Primitive"][i], &mut vec![]);
+            assert!(prim.tex2.is_some() && prim.along_velocity, "streak with a front texture");
+            // Falling straight down, seen from the battle camera (pitch 0.9 rad): streak sin, disc |cos|, both partly visible.
+            let to_camera = Vec3::new(0.0, 0.9f32.sin(), 0.9f32.cos());
+            let (side, front) = pseudo_weights(to_camera, Vec3::NEG_Y);
+            assert!((side - 0.9f32.cos()).abs() < 1e-5 && (front - 0.9f32.sin()).abs() < 1e-5);
         }
     }
 
@@ -939,7 +970,7 @@ mod tests {
         let doc: Value = serde_json::from_slice(&std::fs::read(assets_dir().join("fx/CannonBall_Light_Muzzle.json")).unwrap()).unwrap();
         let mut prim = parse_prim(&doc["Primitive"][0], &mut vec![]);
         let mut rng = FxRng(12345);
-        let particle = spawn_particle(&prim, 0.0, &GlobalTransform::IDENTITY, &mut rng);
+        let particle = spawn_particle(&prim, 0.0, &GlobalTransform::IDENTITY, &mut rng, 1.0);
         assert!(particle.pos.length() > 0.0);
         assert_eq!(particle.vel, particle.pos);
         prim.angle_pos_velocity = false;
@@ -948,7 +979,7 @@ mod tests {
         prim.vel_ang_len_err = Curve::default();
         prim.vel_ang_min = Curve::default();
         prim.vel_ang_max = Curve::default();
-        let particle = spawn_particle(&prim, 0.0, &GlobalTransform::IDENTITY, &mut rng);
+        let particle = spawn_particle(&prim, 0.0, &GlobalTransform::IDENTITY, &mut rng, 1.0);
         assert_eq!(particle.vel, Vec3::NEG_Y * 12.0);
     }
 
@@ -1060,6 +1091,14 @@ mod tests {
         assert!(well.rate.at(0.0, 0.0) * well.budget / TICK * well.fallback_life <= MAX_LIVE + 1.0);
         let thinned: Vec<_> = lib.effects.iter().filter(|&(_, &i)| lib.list[i].prims.iter().any(|p| p.budget < 1.0)).map(|(n, _)| n.as_str()).collect();
         assert_eq!(thinned, ["GravCharge_Medium_Impact"], "other effects keep their authored rates");
+    }
+
+    #[test]
+    #[ignore = "needs imported assets"]
+    fn only_the_star_mortar_glow_is_bounded_to_its_effect_radius() {
+        let lib = FxLib::from_world(&mut World::new());
+        assert_eq!(lib.list[lib.effects["StarMortar_Heavy_Impact"]].bound, Some(200.0));
+        assert!(!lib.effects.iter().any(|(n, &i)| n != "StarMortar_Heavy_Impact" && lib.list[i].bound.is_some()));
     }
 
     #[test]
@@ -1182,10 +1221,15 @@ mod tests {
     }
 
     #[test]
-    fn pseudo_billboards_turn_from_streak_to_front_glow() {
-        assert!(front_weight(Vec3::NEG_Z, Vec3::X).abs() < 1e-6, "side-on: all streak");
-        assert!((front_weight(Vec3::NEG_Z, Vec3::Z) - 1.0).abs() < 1e-6, "end-on: all front glow");
-        assert!((front_weight(Vec3::NEG_Z, Vec3::new(0.0, 1.0, 1.0).normalize()) - 0.5).abs() < 1e-5);
+    fn pseudo_billboard_weights_follow_the_view_angle() {
+        let (side, front) = pseudo_weights(Vec3::Z, Vec3::X);
+        assert!((side - 1.0).abs() < 1e-6 && front.abs() < 1e-6, "side-on: all streak");
+        let (side, front) = pseudo_weights(Vec3::Z, Vec3::Z);
+        assert!(side.abs() < 1e-6 && (front - 1.0).abs() < 1e-6, "end-on: all front");
+        let (side, front) = pseudo_weights(Vec3::new(0.0, 1.0, 1.0), Vec3::Z);
+        assert!((side - 0.5f32.sqrt()).abs() < 1e-5 && (front - 0.5f32.sqrt()).abs() < 1e-5, "45 degrees: sin and cos, not complementary");
+        assert_eq!(pseudo_weights(Vec3::Z, -Vec3::Z), (0.0, 1.0), "the sign of the axis does not matter");
+        assert_eq!(pseudo_weights(Vec3::ZERO, Vec3::Z), (1.0, 1.0), "degenerate vectors count as angle 0");
     }
 
     #[test]

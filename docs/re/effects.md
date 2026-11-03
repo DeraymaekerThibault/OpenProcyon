@@ -74,7 +74,8 @@ Bevy's premultiplying `AlphaMode::Add` drew them black, which hid the dock light
 flares (PT-11). With the bounded flare lifetime above, the Docking_Point markers no longer overbrighten.
 
 Wakes share the corrected material, bake their existing age/speed fade into RGB, drop the guessed 0.7 brightness multiplier, and
-render a live stern endpoint between distance-sampled points to avoid trailing-end jumps. Width/lifetime remain provisional.
+render a live stern endpoint between distance-sampled points to avoid trailing-end jumps. (Superseded: the wake now follows the decoded
+Trail, see "Wakes and engine flames".)
 GPU smoke reaches the docked repair phase and shows scaffolding (`local/feedback-scaffold.png`); the oblique torpedo arena and
 Mission 1 training-fleet impacts exercise guidance/attached effects. Geometry, morph curves, malformed GLBs and export endpoint
 regressions are included in `tools/check.sh` (98 Rust tests, 61 Python tests, six Python skips), including a live wake-head ECS test.
@@ -153,6 +154,17 @@ Regression samples all four primitives at two surface heights and proves streaks
 there. Gate passed (188 Rust / 74 Python, seven skips); Classic isolated smoke `local/meteor-flight-plane.png` shows the shower
 above the ship's plane. Other effects retain their existing emitters and positions.
 
+Third follow-up (owner: "white drops" beside the meteors): a scratch spawn of `MeteorStorm` showed them to be the grey rock disc
+(`solar storm_front00`, the front texture of the two streak primitives) that the pseudo-billboard blend below drew on every streak.
+It was weighted by cos^2 of the view/axis angle, so from the battle camera (pitch about 0.9 rad) falling meteors got 60 % disc and the
+streak was dimmed to 40 %. The disc is as wide as the whole streak quad (4 units) while the rock head painted into the streak
+texture is a quarter of that, so it read as a second, larger white drop on each meteor. The splash primitives are not involved:
+the rings (primitive 2) are small white-to-blue flat rings, and the glow blobs (primitive 3) have their source-emitter index set
+(2) but the source emitter *disabled*, so they are independent of the rings (they spawn on their own around the storm and are
+pulled downward for 0.5 s). The first fix here (show the disc only near end-on) was a guess; the retail rule was then recovered
+and replaces it, see "Pseudo-billboard blend" below. By that rule the disc is part of retail's look: at the battle camera it
+carries |cos| of about 0.78 of the colour and the streak sin of about 0.62.
+
 ## Attractor (movement info slot 4)
 `vel += (target - pos) * k * dt * 0.033` (in per-tick units; i.e. per second `vel += (target-pos)*k*dt`),
 with `k = Const + WithDist/d + WithDistSquared/d^2`, `d = |target - pos|`. The chunk's
@@ -164,6 +176,26 @@ Gravity: `vel += g * dt * 0.033`. Friction: scales velocity by a factor, zero on
 ## Pseudo-billboard
 Two `SimpleTexture` entries: side and front (see "Visual refinements" below for how they are blended). Flag clear: a fixed axis from three curves (default (0,1,0) if all zero). Flag set: the axis is the particle's velocity
 direction (`vel / 0.033`), (0,1,0) if the velocity is zero.
+
+### Pseudo-billboard blend (side and front texture)
+Decoded from the executable's particle draw path (static analysis). A primitive with two `SimpleTexture` entries (side first, front
+second, the order of the file) is drawn in two passes, once per texture, each pass using that texture's draw list:
+- **Side pass** (a pseudo-billboard or `Flat` primitive): the streak quad as authored (rectangle, size), with the particle's
+  colour multiplied by sin(theta). All four channels are scaled, alpha included.
+- **Front pass**: a camera-facing square, corners (+-1, +-1) in camera right/up times the size curve (so 2 x size wide; the
+  rectangle and any 2D rotation are ignored), with the colour multiplied by |cos(theta)|.
+- theta is the angle between the streak axis (the particle's velocity for "use velocity", else the fixed axis) and the line from
+  the particle to the camera, both normalised, computed per particle and per frame in the side pass. The front pass reuses the
+  value the side pass stored on the particle, so the two passes can differ by a frame. If the axis or the view vector is
+  (near) zero, theta stays 0: the streak is drawn unscaled and the front square at full colour.
+- The two weights are independent factors, not a cross-fade: at 45 degrees both textures draw at 71 % and, being ONE/ONE
+  (additive), simply sum. Looking along the axis only the front square remains; looking from the side only the streak.
+- A primitive with a single texture is drawn once, unscaled. A plain billboard (no pseudo-billboard, no flat) with two textures
+  has no angle: it is drawn at full colour once for each texture (PROVISIONAL: that path was not read closely).
+The nine two-texture primitives in the retail data are all pseudo-billboards (three cannonball sprites, the Gattling bullet, three
+lancer sprites, two meteor streaks), so the Flat variant (same weights, flat axis) is not implemented.
+Remake: `fx::pseudo_weights` and `render_fx`.
+
 
 ## Still open
 Expiration/fade interplay (what keeps a particle without an Expiration chunk alive), the `0x24`-byte batch object
@@ -183,11 +215,45 @@ the system creates every 50 ticks, `HitGround`, `Jitter`, `AttractorLine`, and t
 The same engine tick (1/30 s) is probably the ship-physics step too, which may fix the provisional x0.1 thrust time
 scale in `docs/re/movement.md` (not yet checked).
 
+## Wakes and engine flames (read from the original's code, 2026-11)
+
+Both are attached to a placement on the ship's mesh scene (`WakePlacement`, `EnginePortPlacement`; the node faces astern, yaw pi) and
+are fed once per second by a keeper object: the ship's **speed fraction** (0..1, clamped) is sent to the effect as the
+EMITTER_RATE_MULTIPLY and SPHERE_VELOCITY_EMITTER_LENGTH_MULTIPLY messages (the engine keeper also multiplies it by 1 minus the
+cloaking fraction). The effect is created on the first update with a value above 0 and released when the section it hangs on is
+destroyed. PROVISIONAL: the fraction is speed over Full (the original multiplies two physics values not yet named).
+
+**Engine flame** (`NavyEngine_*`, one particle system): 2 particles per tick x the rate multiplier, life 1 s, size 0.4 (Medium) to
+1.6 (ExtraHeavy), launched astern at `LengthInterpolator` (4 to 16 units/s) x the velocity multiplier, so the plume length follows
+speed. Remake: `combat::engine_rate`, `fx::Fx::vel_scale`. Still provisional: `size_scale` 2.6 (the data sizes give a thread
+against the reference footage; whether a particle's quad is size or twice size without a Rectangle2D is undecided).
+
+**Wake** (`Wake_Light/Medium/Heavy`, one Trail primitive): `BackDrift` 0.11 / 0.13 / 0.15, `OutDrift` 0.02 / 0.04 / 0.05,
+`InitialWidth` 30 / 40 / 50 (constructor defaults 0.15 / 0.05 / 3). Per engine tick, in world space:
+* every 15 ticks a point is laid at the node: edges at the node position +- right x OutDrift x InitialWidth (so 3.2 wide for
+  Medium), life 300 ticks. In between, the newest point is rewritten from the node every tick (the trail stays joined to the stern).
+* each tick, for every point: life -1; the edges move +-right x OutDrift (so the strip widens 2 x OutDrift per tick) and both move
+  astern by BackDrift x the speed multiplier (the multiplier at the time the point was laid); each edge also jitters by
+  +-0.07 / +-0.07 / +-0.02. Alpha rises 1/60 per tick for 60 ticks, then falls 1/240 per tick; at multiplier exactly 0 all alphas
+  are x0.9 per tick. The oldest point is dropped when its life ends. A multiplier of 0 stops laying points until every old one is
+  gone.
+* texture offset along the trail scrolls 0.01 per tick (against the flow for `TextureFlowBack`), wrapping at 0.5.
+Remake: `wake.rs` (`Trail`, logic tested). Replaces the by-eye wake (distance-sampled points, 14 s life). PROVISIONAL: how the
+scroll offset and segment index enter the texture coordinates (the draw code was not found); the effect's draw order and height.
+
 ## Damage mesh swap (setup, on destruction)
 A swappable damage section whose layer mesh is "<A>_<B>" gets the swap mesh "<A>Damage_<B>" (split at the first '_').
 When the section is destroyed the layer's mesh is exchanged for it. Extra Damage_ layers beyond the section count (the
 cutter has Damage_Layer7-10) are not referenced by this rule. Destruction also spawns the section's debrisMeshScene
-(not done in the remake).
+(remake: see "Section debris").
+
+The exchange is done on the section's own mesh node (the node's alternate mesh replaces the current one); the section's children
+(gun mounts and the flag hang on the layer node they sit on in the mesh scene) are not touched by it, and no code that hides them
+was found. The damaged meshes carry their own wrecked cannons and mounts (cannon and mount materials appear in 100 of the 168
+damaged meshes whose section carries guns), so keeping the real guns would draw them twice. Remake (`damage::swap_meshes`): the
+guns of a destroyed section are hidden with its intact mesh, shown again when the section is revived. PROVISIONAL: that retail hides
+them (rather than the wrecked mesh simply covering them) is inferred from the meshes. The flag is left as it is: nothing says it
+goes with its section (it hangs on the stern layer).
 
 ## Ship sinking and final destruction
 
@@ -261,8 +327,8 @@ to `models/debris/` and `sections[].debris` = {model, pivot}.
 - **A debris piece's smoke trail stops after 3 s** (`DEBRIS_SMOKE_TIME`); smoke already out fades on its own.
 - **Shell sprites use both of their textures.** A pseudo-billboard effect lists a side texture and a front texture (cannonballs, lancer shots, the Gattling
   tracer, meteors). Retail shows the side streak when seen from the side and a round glow when seen along the shell's flight line, which is what gives
-  its shells a 3D feel; we drew only the side texture. The streak and the camera-facing front quad are now drawn together, weighted by cos^2 of the angle between
-  the view and the axis (PROVISIONAL blend). A cannonball is a glowing fireball with a flame tail, not an iron ball.
+  its shells a 3D feel; we drew only the side texture. The streak and the camera-facing front quad are now drawn together, weighted by sin and |cos| of the angle between
+  the view line and the axis (the retail rule, see "Pseudo-billboard blend"). A cannonball is a glowing fireball with a flame tail, not an iron ball.
   To look at every shell type at once: `tools/shot.sh local/x.png --script shells --shot-frame 45 --dist 80 --pitch 89` (also `--yaw`; the log lists the order,
   two rows of up to twelve, left to right).
 

@@ -49,6 +49,8 @@ struct ShipDoc {
     #[serde(deserialize_with = "ordered")]
     guns: Vec<(String, MountDoc)>,
     engines: Vec<EngineDoc>,
+    #[serde(default)]
+    wakes: Vec<WakeDoc>,
     flags: Option<Vec<FlagDoc>>,
     explosion_fx: Option<String>,
     engine_snd: Option<Vec<Option<String>>>,
@@ -124,8 +126,14 @@ struct MountDoc {
 }
 #[derive(Deserialize)]
 struct EngineDoc {
+    parent_layer: Option<String>,
     pos: [f64; 3],
     rot: [f64; 3],
+    fx: String,
+}
+#[derive(Deserialize)]
+struct WakeDoc {
+    pos: [f64; 3],
     fx: String,
 }
 #[derive(Deserialize)]
@@ -249,6 +257,14 @@ fn try_load_class(root: &Path, name: &str, guns: &HashMap<String, GunDef>) -> Re
     let radius = 0.5 * (amx - amn).x.max((amx - amn).z) + 2.0;
     let flag_at = |label: &str| j.flags.as_ref()?.iter().find(|f| f.label == label).map(|f| point(f.pos));
     let flag = flag_at("Flag_Top").zip(flag_at("Flag_Bottom"));
+    let engines = j
+        .engines
+        .into_iter()
+        .map(|e| {
+            let section = e.parent_layer.as_deref().and_then(|l| sections.iter().position(|s| s.layer == l));
+            (point(e.pos), Quat::from_rotation_y(e.rot[0] as f32), e.fx, section)
+        })
+        .collect();
     Ok(Class {
         name: name.into(),
         race: j.race,
@@ -266,7 +282,8 @@ fn try_load_class(root: &Path, name: &str, guns: &HashMap<String, GunDef>) -> Re
             max_ang_acc: ph.max_angular_acceleration as f32,
         },
         flag,
-        engines: j.engines.into_iter().map(|e| (point(e.pos), Quat::from_rotation_y(e.rot[0] as f32), e.fx)).collect(),
+        wake: j.wakes.first().map(|w| (point(w.pos), w.fx.clone())),
+        engines,
         explosion_fx: j.explosion_fx,
         engine_snd: std::array::from_fn(|i| j.engine_snd.as_ref().and_then(|v| v.get(i)).cloned().flatten()),
         // PROVISIONAL fallbacks retained for older imports and mods.

@@ -76,11 +76,26 @@ pub struct Blast {
     age: f32,
 }
 
-/// A gravity charge's well (GravChargeCustomInfoFactory: Radius, Duration): ships inside are held.
+/// A gravity charge's well (GravChargeCustomInfoFactory: Magnitude, Radius, Duration), read from the original's code: for
+/// `Duration` seconds everything within `radius` (flat distance) is pulled straight toward its centre, with no friend/foe filter.
+/// The ship pull itself is `blackhole::pull`, which reads `force`.
 #[derive(Component)]
 pub struct GravWell {
-    radius: f32,
+    pub radius: f32,
+    magnitude: f32,
     left: f32,
+}
+
+impl GravWell {
+    /// Force at flat distance `d` from the centre, in Magnitude units: 0 at the centre and at the rim, `magnitude` at half the
+    /// radius (profile 4 s² for s < 0.5, 4 (1 - s)² beyond, s = (radius - d) / radius).
+    pub fn force(&self, d: f32) -> f32 {
+        if d >= self.radius {
+            return 0.0;
+        }
+        let s = (self.radius - d) / self.radius;
+        self.magnitude * 4.0 * if s < 0.5 { s * s } else { (1.0 - s) * (1.0 - s) }
+    }
 }
 
 /// What a Nova mortar splits into at the top of its arc (`split_nova`).
@@ -115,8 +130,8 @@ pub fn detonate(
                     crate::Scenario,
                 ));
             }
-            Payload::Grav { radius, duration } => {
-                commands.spawn((GravWell { radius, left: duration }, Transform::from_translation(d.at), Transient, crate::Scenario));
+            Payload::Grav { radius, duration, magnitude } => {
+                commands.spawn((GravWell { radius, magnitude, left: duration }, Transform::from_translation(d.at), Transient, crate::Scenario));
             }
             // A Nova splits in flight (`split_nova`); one that lands or strikes first is just spent.
             Payload::Nova | Payload::Shell | Payload::Mine { .. } => {}
@@ -232,29 +247,12 @@ pub fn blasts(
     }
 }
 
-/// Ships inside a gravity well lose their way. PROVISIONAL rate (the original's well force is unknown); the data only says the
-/// well holds ships, so there is no pull towards its centre (an earlier guessed 4 units/s^2 pull dragged ships across it).
-pub fn grav_wells(
-    mut commands: Commands,
-    time: Res<Time>,
-    mut wells: Query<(Entity, &mut GravWell, &Transform), Without<Ship>>,
-    mut ships: Query<(&Transform, &mut Ship, &Health, Option<&mut crate::cloak::Cloak>)>,
-) {
-    let dt = time.delta_secs();
-    for (e, mut w, tf) in &mut wells {
-        w.left -= dt;
+/// Wells expire after their duration; the pull on ships is `blackhole::pull`.
+pub fn grav_wells(mut commands: Commands, time: Res<Time>, mut wells: Query<(Entity, &mut GravWell)>) {
+    for (e, mut w) in &mut wells {
+        w.left -= time.delta_secs();
         if w.left <= 0.0 {
             commands.entity(e).despawn();
-            continue;
-        }
-        for (stf, mut ship, h, cloak) in &mut ships {
-            if !h.destroyed && (tf.translation - stf.translation).with_y(0.0).length() <= w.radius {
-                ship.speed *= (-1.5 * dt).exp();
-                // A cloaked ship in the well is ordered to decloak every tick (the only projectile that does this).
-                if let Some(mut c) = cloak {
-                    c.stop();
-                }
-            }
         }
     }
 }
@@ -307,6 +305,14 @@ pub fn ram_damage(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_gravity_well_pulls_hardest_at_half_its_radius_and_not_at_the_centre_or_rim() {
+        let w = GravWell { radius: 40.0, magnitude: 40000.0, left: 17.0 };
+        assert_eq!((w.force(0.0), w.force(40.0), w.force(55.0)), (0.0, 0.0, 0.0));
+        assert!((w.force(20.0) - 40000.0).abs() < 1.0);
+        assert!((w.force(10.0) - 10000.0).abs() < 1.0 && (w.force(30.0) - 10000.0).abs() < 1.0, "a quarter at 10 and 30 units");
+    }
+
     use super::*;
 
     #[test]

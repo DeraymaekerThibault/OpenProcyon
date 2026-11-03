@@ -21,7 +21,7 @@ pub(super) struct GunState {
 }
 /// Marks the entities of a gun's visual hierarchy (root, base, barrel, muzzle points).
 #[derive(Component)]
-pub(super) struct GunPart;
+pub struct GunPart;
 #[derive(Component)]
 pub struct GunStates(pub(super) Vec<GunState>);
 impl GunStates {

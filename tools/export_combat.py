@@ -230,6 +230,8 @@ def bullet_record(root, b, outdir):
             radius=bp.get("MaxRadius", bp.get("Radius")),
             duration=bp.get("Duration", 0.0),
         )
+        if "Magnitude" in bp:
+            rec["blast"]["magnitude"] = bp["Magnitude"]
     if factory == "EnergyNetCustomInfoFactory":
         rec["net"] = dict(
             duration=bp["Duration"], dissipated=bp["PercentageOfEnergyDissipated"]
@@ -385,6 +387,13 @@ def export(root, ship, outdir):
                 out.append(
                     dict(label=label, fx=assoc, pos=list(pos), rot=list(node.rot))
                 )
+                parent = msb.get(node.parent)
+                if (
+                    kind == "EnginePortPlacement"
+                    and parent
+                    and parent.kind == "DamageSection"
+                ):
+                    out[-1]["parent_layer"] = parent.name
         return out
 
     sections = []

@@ -1,6 +1,7 @@
 //! Shared game library: simulation, rules, data and input. Skirmish slice: your ship vs enemy ships, original models/data, AI that fights back, damage effects, win/lose, restart.
 //! Everything marked PROVISIONAL is a stand-in, not measured original behaviour (see AGENTS.md, rule 5).
 
+pub mod alliance;
 pub mod audio;
 pub mod bindings;
 pub mod blackhole;
@@ -196,7 +197,7 @@ pub fn run(view: fn(&mut App), setup_view: fn(&mut App)) {
             options_menu::plugin,
             starmap::plugin,
         ))
-        .add_plugins((lifeboats::plugin, dragons::plugin, cloak::plugin, decals::plugin, stats::plugin, crew_arms::plugin))
+        .add_plugins((alliance::plugin, lifeboats::plugin, dragons::plugin, cloak::plugin, decals::plugin, stats::plugin, crew_arms::plugin))
         // The presentation (docs/development.md "Layers"): views live outside this library, so shared code cannot reach into them.
         .add_plugins(view)
         .add_plugins(|app: &mut App| {

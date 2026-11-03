@@ -10,9 +10,9 @@ use crate::{PlayerShip, Ship, Side, assets_dir};
 
 mod asteroid;
 mod damage;
-mod gunnery;
+pub mod gunnery;
 mod hit_test;
-mod lob;
+pub mod lob;
 mod minefield;
 mod shells;
 mod status;
@@ -86,9 +86,15 @@ pub struct Fired {
     /// The burst's bullet type (crew callouts: torpedoes away, mortar fired).
     pub bullet: String,
 }
-/// Exhaust effect on a ship; its rate follows the ship's speed (PROVISIONAL: 30% idle up to 100% at top speed).
-#[derive(Component)]
-pub struct Engine;
+/// Exhaust effect on a ship. The ship's speed fraction is sent to it once a second as both the emitter rate and the
+/// velocity-length multiplier (read from the original's code); it goes out with the section it hangs on.
+#[derive(Component, Default)]
+pub struct Engine {
+    section: Option<usize>,
+    mult: f32,
+    since: f32,
+    started: bool,
+}
 /// Marks entities that a restart must despawn.
 #[derive(Component)]
 pub struct Transient;
@@ -190,25 +196,32 @@ impl Health {
     }
 }
 pub fn spawn_engines(commands: &mut Commands, fxl: &FxLib, lib: &Library, ship: Entity, class: usize, world: Transform) {
-    for (pos, rot, name) in &lib.classes[class].engines {
+    for (pos, rot, name, section) in &lib.classes[class].engines {
         let local = Transform { translation: *pos, rotation: *rot, ..default() };
         if let Some(e) = fx::spawn(commands, fxl, name, Some(ship), local, world * local, false) {
-            commands.entity(e).insert(Engine);
+            commands.entity(e).insert(Engine { section: *section, ..default() });
         }
     }
 }
 
-fn engine_rate(ships: Query<(&Ship, &Health, Option<&crate::cloak::Cloak>)>, mut q: Query<(&mut fx::Fx, &ChildOf), With<Engine>>) {
-    for (mut f, parent) in &mut q {
-        if let Ok((ship, h, cloak)) = ships.get(parent.parent()) {
-            let open = 1.0 - cloak.map_or(0.0, |c| c.level()); // the flames fade with the hull, gone at full cloak
-            // Thrust follows the engine order: dark at All Stop, brighter with each step up (PROVISIONAL curve).
-            // A ship held still (NIS freeze, docked) keeps its order but shows no thrust.
-            let throttle = crate::ORDERS[ship.order].1;
-            f.emitting = !h.destroyed && throttle > 0.0 && ship.speed.abs() > 0.01 && open > 0.0;
-            f.size_scale = 2.6; // PROVISIONAL: data size 1.6 gives a thread; the reference jet is about hull-wide
-            f.rate_scale = 0.75 * (0.25 + 0.75 * throttle.min(1.25)) * open;
+/// The engine keeper's update (read from the original's code): once a second the ship's speed fraction (0..1) becomes both the
+/// emitter-rate and the velocity-length multiplier of every exhaust; an exhaust exists only while that is above 0 and its
+/// section stands, and the cloaking factor (1 - level) scales the rate. PROVISIONAL: the fraction is speed over Full (the original
+/// multiplies two physics values).
+fn engine_rate(time: Res<Time>, lib: Res<Library>, ships: Query<(&Ship, &Health, Option<&crate::cloak::Cloak>)>, mut q: Query<(&mut fx::Fx, &mut Engine, &ChildOf)>) {
+    for (mut f, mut engine, parent) in &mut q {
+        let Ok((ship, h, cloak)) = ships.get(parent.parent()) else { continue };
+        engine.since += time.delta_secs();
+        if !engine.started || engine.since > 1.0 {
+            (engine.started, engine.since) = (true, 0.0);
+            engine.mult = (ship.speed.abs() / crate::ship::full_speed(&lib.classes[ship.class])).clamp(0.0, 1.0);
         }
+        let section_lost = engine.section.is_some_and(|s| h.sections.get(s).is_some_and(|hp| *hp <= 0.0));
+        // The flames fade with the hull as a ship cloaks (1 - level), gone at full cloak.
+        let open = 1.0 - cloak.map_or(0.0, |c| c.level());
+        f.emitting = !h.destroyed && !section_lost && engine.mult > 0.0 && open > 0.0;
+        f.size_scale = 2.6; // PROVISIONAL: data size 1.6 gives a thread; the reference jet is about hull-wide
+        (f.rate_scale, f.vel_scale) = (engine.mult * open, engine.mult);
     }
 }
 

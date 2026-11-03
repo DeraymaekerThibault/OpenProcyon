@@ -312,17 +312,30 @@ pub fn fires(
 /// The GLB carries both; show whichever matches the section state. Runs every frame so freshly loaded scenes are covered.
 pub fn swap_meshes(
     lib: Res<Library>,
-    ships: Query<(Entity, &Ship, &Health), Without<super::Sinking>>,
-    bases: Query<(Entity, &super::ArmedBase, &Health), Without<Ship>>,
+    ships: Query<(Entity, &Ship, &Health, Option<&super::GunStates>), Without<super::Sinking>>,
+    bases: Query<(Entity, &super::ArmedBase, &Health, Option<&super::GunStates>), Without<Ship>>,
     children: Query<&Children>,
     mut nodes: Query<(&Name, &mut Visibility)>,
+    mut gun_roots: Query<&mut Visibility, (With<super::gunnery::GunPart>, Without<Name>)>,
 ) {
     // A breaking-up ship's section nodes belong to `deaths` until it is gone. Armed bases swap their destroyed parts the same way.
-    for (e, class, h) in ships.iter().map(|(e, s, h)| (e, s.class, h)).chain(bases.iter().map(|(e, b, h)| (e, b.class, h))) {
+    for (e, class, h, guns) in ships.iter().map(|(e, s, h, g)| (e, s.class, h, g)).chain(bases.iter().map(|(e, b, h, g)| (e, b.class, h, g))) {
         let class = &lib.classes[class];
+        // The damaged mesh carries its own wrecked mounts, so the guns the section carried go with the intact mesh. PROVISIONAL: no
+        // retail code that hides them was found; the original keeps them as children of the section's node.
+        for (mount, state) in class.mounts.iter().zip(guns.iter().flat_map(|g| g.0.iter())) {
+            let want = if mount.parent.is_some_and(|p| h.sections[p] <= 0.0) { Visibility::Hidden } else { Visibility::Inherited };
+            if let Ok(mut v) = gun_roots.get_mut(state.root) {
+                v.set_if_neq(want);
+            }
+        }
         for d in children.iter_descendants(e) {
             let Ok((name, mut vis)) = nodes.get_mut(d) else { continue };
             let n = name.as_str();
+            // A layer node's primitives are named "<layer>.<texture>": they follow their node, which is the one that is swapped.
+            if n.contains('.') {
+                continue;
+            }
             let (base, damaged) = match n.split_once("Damage_") {
                 Some((a, b)) => (format!("{a}_{b}"), true),
                 None => (n.to_string(), false),
@@ -412,6 +425,42 @@ mod swap_tests {
 
     #[test]
     #[ignore = "needs imported assets"]
+    fn guns_of_a_destroyed_section_are_hidden_with_its_intact_mesh() {
+        let lib = Library::load(crate::assets_dir());
+        let class = lib.classes.iter().position(|c| c.mounts.iter().any(|m| m.parent.is_some())).expect("a class with a mounted section");
+        let lost = lib.classes[class].mounts.iter().find_map(|m| m.parent).unwrap();
+        let mut app = App::new();
+        app.insert_resource(Library::load(crate::assets_dir())).add_systems(Update, swap_meshes);
+        let mut hp = Health::new(&lib.classes[class]);
+        hp.sections[lost] = 0.0;
+        let state = |root| crate::combat::gunnery::GunState {
+            gun: String::new(),
+            root,
+            cooldown: 0.0,
+            burst_left: 0,
+            burst_timer: 0.0,
+            base: Entity::PLACEHOLDER,
+            barrel: Entity::PLACEHOLDER,
+            muzzles: vec![],
+            next_muzzle: 0,
+            yaw: 0.0,
+            pitch: 0.0,
+            aligned: false,
+            in_range: false,
+            dev: 0.0,
+        };
+        let roots: Vec<Entity> = lib.classes[class].mounts.iter().map(|_| app.world_mut().spawn((crate::combat::gunnery::GunPart, Visibility::default())).id()).collect();
+        let guns = crate::combat::gunnery::GunStates(roots.iter().map(|r| state(*r)).collect());
+        app.world_mut().spawn((ArmedBase { class }, hp, guns));
+        app.update();
+        for (m, r) in lib.classes[class].mounts.iter().zip(&roots) {
+            let want = if m.parent == Some(lost) { Visibility::Hidden } else { Visibility::Inherited };
+            assert_eq!(*app.world().get::<Visibility>(*r).unwrap(), want);
+        }
+    }
+
+    #[test]
+    #[ignore = "needs imported assets"]
     fn a_destroyed_base_part_shows_its_damaged_mesh() {
         let lib = Library::load(crate::assets_dir());
         let class = lib.index("Base_Procyon1");
@@ -424,11 +473,13 @@ mod swap_tests {
         let [whole, hurt, other, other_hurt] =
             ["BaseProcyons_Layer2", "BaseProcyonsDamage_Layer2", "BaseProcyons_Layer3", "BaseProcyonsDamage_Layer3"].map(|n| node(&mut app, base, n));
         let stray = node(&mut app, base, "BaseProcyonsDamage_Layer1");
+        let hurt_primitive = node(&mut app, hurt, "BaseProcyonsDamage_Layer2.damage_cutter1.tga");
         app.update();
         let vis = |app: &App, e| *app.world().get::<Visibility>(e).unwrap();
         assert_eq!([vis(&app, whole), vis(&app, hurt)], [Visibility::Hidden, Visibility::Inherited]);
         assert_eq!([vis(&app, other), vis(&app, other_hurt)], [Visibility::Inherited, Visibility::Hidden]);
         assert_eq!(vis(&app, stray), Visibility::Hidden);
+        assert_eq!(vis(&app, hurt_primitive), Visibility::Inherited, "a damaged layer's primitives are never hidden on their own");
     }
 }
 

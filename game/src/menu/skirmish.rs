@@ -740,6 +740,7 @@ impl Skirmish {
                     human: s.kind == Kind::Human,
                     race: if s.race == 4 { crate::scenario::faction(&s.name).unwrap_or(4) } else { s.race },
                     team: s.team,
+                    row: Some((matches!(s.kind, Kind::Human).then(|| s.name.clone()), flag_icon(s.race, s.flag))),
                     ids,
                     ships,
                     // A built computer fleet keeps its weapons and its named crew (retail computer ships carry named crew; their speed and sight follow the posts).
@@ -815,6 +816,15 @@ pub fn ship_stats(lib: &Library, ci: usize) -> ShipStats {
         light: size("Light"),
         points: c.points,
     }
+}
+
+/// First flag icon of a fleet type's block of ten (`FrontEnd_Flag_*Icon_NN`): Navy 0, Pirate 10, Procyon 20, plus the slot's flag.
+pub fn flag_icon(race: u8, flag: u8) -> usize {
+    (match race {
+        2 => 10,
+        3 => 20,
+        _ => 0,
+    }) + usize::from(flag)
 }
 
 #[cfg(test)]
