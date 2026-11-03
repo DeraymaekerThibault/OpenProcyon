@@ -637,13 +637,15 @@ fn particle_sample(p: &P, remainder: f32) -> (Vec3, f32) {
     (p.pos + p.vel * remainder, p.age + remainder)
 }
 
-/// Share of the front texture in a pseudo-billboard seen along `view`: 0 while the streak still reads as a streak, 1 looking down its axis.
-/// `aspect` is the streak quad's length over its width. PROVISIONAL: the front texture replaces the streak only once the streak's
-/// projected length drops below its width (cross-fading in between); a weight of cos^2 showed meteors' rock disc, four times wider than
-/// the head drawn in the streak texture, as a white drop beside every streak seen from the battle camera.
-fn front_weight(view: Vec3, axis: Vec3, aspect: f32) -> f32 {
-    let foreshortened = (1.0 - view.dot(axis).powi(2)).max(0.0).sqrt();
-    (1.0 - aspect * foreshortened).clamp(0.0, 1.0)
+/// Colour weights `(side, front)` of the two textures of a pseudo-billboard particle, from the direction `to_camera` (particle to
+/// camera) and the streak `axis`. Retail draws the particle twice: the side texture as a streak scaled by sin(angle) and the
+/// front texture as a camera-facing square scaled by |cos(angle)|, `angle` being the one between axis and view line. Both are
+/// plain colour factors (ONE/ONE adds the two); there is no cross-fade. Either vector being (near) zero gives angle 0 (retail
+/// leaves the streak unscaled then).
+fn pseudo_weights(to_camera: Vec3, axis: Vec3) -> (f32, f32) {
+    let (Some(v), Some(a)) = (to_camera.try_normalize(), axis.try_normalize()) else { return (1.0, 1.0) };
+    let c = v.dot(a).clamp(-1.0, 1.0);
+    ((1.0 - c * c).sqrt(), c.abs())
 }
 
 fn streak_axes(direction: Vec3, right: Vec3, up: Vec3, view: Vec3) -> (Vec3, Vec3) {
@@ -764,6 +766,7 @@ fn render_fx(
     mut vis: Query<&mut Visibility>,
 ) {
     let (right, up, view) = (cam.right().as_vec3(), cam.up().as_vec3(), cam.forward().as_vec3());
+    let cam_pos = cam.translation();
     #[derive(Default)]
     struct Buf {
         pos: Vec<[f32; 3]>,
@@ -792,13 +795,14 @@ fn render_fx(
                     None => (-0.5, 0.5, 0.5, -0.5),
                 };
                 let (ax, ay) = particle_axes(prim, gt, vel, [right, up, view]);
-                // Pseudo-billboard with a front texture: the side streak fades into the round front glow as the view turns
-                // along its axis. PROVISIONAL: the blend is cos^2 of the angle between view and axis (retail's is unknown).
+                // Pseudo-billboard with a front texture: retail draws the streak (side texture) scaled by sin(angle) and a
+                // camera-facing square (front texture, half-extent = size, the rectangle is ignored) scaled by |cos(angle)|,
+                // angle = view line vs streak axis (docs/re/effects.md, "Pseudo-billboard blend").
                 let streak = prim.tex2.is_some() && (prim.along_velocity || prim.pseudo_dir.is_some());
-                let front = if streak { front_weight(view, ay, (y0 - y1).abs() / (x1 - x0).abs().max(1e-3)) } else { 0.0 };
+                let (side, front) = if streak { pseudo_weights(cam_pos - pos, ay) } else { (1.0, 0.0) };
                 if let (true, Some(t2)) = (streak, prim.tex2) {
-                    let fcol = [col[0] * front, col[1] * front, col[2] * front, col[3]];
-                    let half = 0.5 * (x1 - x0).abs() * size;
+                    let fcol = col.map(|c| c * front);
+                    let half = size;
                     let b = bufs.entry((t2, prim.blend)).or_default();
                     let i = b.pos.len() as u32;
                     for (cx, cy, u, v) in [(-half, half, 0.0, 0.0), (half, half, 1.0, 0.0), (half, -half, 1.0, 1.0), (-half, -half, 0.0, 1.0)] {
@@ -808,7 +812,7 @@ fn render_fx(
                     }
                     b.idx.extend([i, i + 1, i + 2, i, i + 2, i + 3]);
                 }
-                let col = if streak { [col[0] * (1.0 - front), col[1] * (1.0 - front), col[2] * (1.0 - front), col[3]] } else { col };
+                let col = if streak { col.map(|c| c * side) } else { col };
                 let b = bufs.entry((ti, prim.blend)).or_default();
                 let i = b.pos.len() as u32;
                 for (cx, cy, u, v) in [(x0, y0, 0.0, 0.0), (x1, y0, 1.0, 0.0), (x1, y1, 1.0, 1.0), (x0, y1, 0.0, 1.0)] {
@@ -916,21 +920,15 @@ mod tests {
 
     #[test]
     #[ignore = "needs imported assets"]
-    fn meteor_rock_disc_only_shows_when_a_streak_is_seen_end_on() {
+    fn meteor_streaks_carry_the_front_disc_with_the_retail_weights() {
         let doc: Value = serde_json::from_slice(&std::fs::read(assets_dir().join("fx/MeteorStorm.json")).unwrap()).unwrap();
-        let mut names = vec![];
         for i in 0..2 {
-            let prim = parse_prim(&doc["Primitive"][i], &mut names);
-            let r = prim.rect.as_ref().expect("streak rectangle");
-            let aspect = (r[1].at(0.0, 0.5) - r[3].at(0.0, -0.5)).abs() / (r[2].at(0.0, 0.5) - r[0].at(0.0, -0.5)).abs();
-            assert!(aspect > 4.0, "meteor streaks are long and thin");
-            assert!(prim.tex2.is_some() && prim.along_velocity);
-            // Falling straight down, seen from the battle camera (pitch 0.9 to 1.2 rad): only the streak, no white disc.
-            for pitch in [0.9f32, 1.2] {
-                let view = Vec3::new(0.0, -pitch.sin(), -pitch.cos());
-                assert_eq!(front_weight(view, Vec3::NEG_Y, aspect), 0.0, "pitch {pitch}");
-            }
-            assert_eq!(front_weight(Vec3::NEG_Y, Vec3::NEG_Y, aspect), 1.0, "looking straight down the fall");
+            let prim = parse_prim(&doc["Primitive"][i], &mut vec![]);
+            assert!(prim.tex2.is_some() && prim.along_velocity, "streak with a front texture");
+            // Falling straight down, seen from the battle camera (pitch 0.9 rad): streak sin, disc |cos|, both partly visible.
+            let to_camera = Vec3::new(0.0, 0.9f32.sin(), 0.9f32.cos());
+            let (side, front) = pseudo_weights(to_camera, Vec3::NEG_Y);
+            assert!((side - 0.9f32.cos()).abs() < 1e-5 && (front - 0.9f32.sin()).abs() < 1e-5);
         }
     }
 
@@ -1201,14 +1199,15 @@ mod tests {
     }
 
     #[test]
-    fn pseudo_billboards_turn_from_streak_to_front_glow() {
-        assert!(front_weight(Vec3::NEG_Z, Vec3::X, 5.5).abs() < 1e-6, "side-on: all streak");
-        assert!((front_weight(Vec3::NEG_Z, Vec3::Z, 5.5) - 1.0).abs() < 1e-6, "end-on: all front glow");
-        // A meteor streak (11 long, 2 wide) falling vertically, seen from the battle camera at 0.9 rad pitch: still a streak, no rock disc.
-        let view = Vec3::new(0.0, -0.9f32.sin(), -0.9f32.cos());
-        assert_eq!(front_weight(view, Vec3::Y, 5.5), 0.0);
-        // Nearly end-on, the streak is shorter than it is wide: the glow is back.
-        assert!(front_weight(Vec3::NEG_Z, Vec3::new(0.0, 0.05, 1.0).normalize(), 5.5) > 0.5);
+    fn pseudo_billboard_weights_follow_the_view_angle() {
+        let (side, front) = pseudo_weights(Vec3::Z, Vec3::X);
+        assert!((side - 1.0).abs() < 1e-6 && front.abs() < 1e-6, "side-on: all streak");
+        let (side, front) = pseudo_weights(Vec3::Z, Vec3::Z);
+        assert!(side.abs() < 1e-6 && (front - 1.0).abs() < 1e-6, "end-on: all front");
+        let (side, front) = pseudo_weights(Vec3::new(0.0, 1.0, 1.0), Vec3::Z);
+        assert!((side - 0.5f32.sqrt()).abs() < 1e-5 && (front - 0.5f32.sqrt()).abs() < 1e-5, "45 degrees: sin and cos, not complementary");
+        assert_eq!(pseudo_weights(Vec3::Z, -Vec3::Z), (0.0, 1.0), "the sign of the axis does not matter");
+        assert_eq!(pseudo_weights(Vec3::ZERO, Vec3::Z), (1.0, 1.0), "degenerate vectors count as angle 0");
     }
 
     #[test]

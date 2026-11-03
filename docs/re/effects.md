@@ -160,11 +160,9 @@ streak was dimmed to 40 %. The disc is as wide as the whole streak quad (4 units
 texture is a quarter of that, so it read as a second, larger white drop on each meteor. The splash primitives are not involved:
 the rings (primitive 2) are small white-to-blue flat rings, and the glow blobs (primitive 3) have their source-emitter index set
 (2) but the source emitter *disabled*, so they are independent of the rings (they spawn on their own around the storm and are
-pulled downward for 0.5 s). `front_weight` now takes the quad's length/width and gives the front texture only once the streak's
-projected length falls below its width (cross-fade in between): a meteor streak (11 x 2) shows no disc unless the camera looks
-within roughly 10 degrees of its fall line. PROVISIONAL: the retail front/side switching rule was not recovered (the draw path
-that picks the second texture was not found in the executable); it also applies to other pseudo-billboard shells, which
-are mostly seen side-on from the battle camera and look the same as before.
+pulled downward for 0.5 s). The first fix here (show the disc only near end-on) was a guess; the retail rule was then recovered
+and replaces it, see "Pseudo-billboard blend" below. By that rule the disc is part of retail's look: at the battle camera it
+carries |cos| of about 0.78 of the colour and the streak sin of about 0.62.
 
 ## Attractor (movement info slot 4)
 `vel += (target - pos) * k * dt * 0.033` (in per-tick units; i.e. per second `vel += (target-pos)*k*dt`),
@@ -177,6 +175,26 @@ Gravity: `vel += g * dt * 0.033`. Friction: scales velocity by a factor, zero on
 ## Pseudo-billboard
 Two `SimpleTexture` entries: side and front (see "Visual refinements" below for how they are blended). Flag clear: a fixed axis from three curves (default (0,1,0) if all zero). Flag set: the axis is the particle's velocity
 direction (`vel / 0.033`), (0,1,0) if the velocity is zero.
+
+### Pseudo-billboard blend (side and front texture)
+Decoded from the executable's particle draw path (static analysis). A primitive with two `SimpleTexture` entries (side first, front
+second, the order of the file) is drawn in two passes, once per texture, each pass using that texture's draw list:
+- **Side pass** (a pseudo-billboard or `Flat` primitive): the streak quad as authored (rectangle, size), with the particle's
+  colour multiplied by sin(theta). All four channels are scaled, alpha included.
+- **Front pass**: a camera-facing square, corners (+-1, +-1) in camera right/up times the size curve (so 2 x size wide; the
+  rectangle and any 2D rotation are ignored), with the colour multiplied by |cos(theta)|.
+- theta is the angle between the streak axis (the particle's velocity for "use velocity", else the fixed axis) and the line from
+  the particle to the camera, both normalised, computed per particle and per frame in the side pass. The front pass reuses the
+  value the side pass stored on the particle, so the two passes can differ by a frame. If the axis or the view vector is
+  (near) zero, theta stays 0: the streak is drawn unscaled and the front square at full colour.
+- The two weights are independent factors, not a cross-fade: at 45 degrees both textures draw at 71 % and, being ONE/ONE
+  (additive), simply sum. Looking along the axis only the front square remains; looking from the side only the streak.
+- A primitive with a single texture is drawn once, unscaled. A plain billboard (no pseudo-billboard, no flat) with two textures
+  has no angle: it is drawn at full colour once for each texture (PROVISIONAL: that path was not read closely).
+The nine two-texture primitives in the retail data are all pseudo-billboards (three cannonball sprites, the Gattling bullet, three
+lancer sprites, two meteor streaks), so the Flat variant (same weights, flat axis) is not implemented.
+Remake: `fx::pseudo_weights` and `render_fx`.
+
 
 ## Still open
 Expiration/fade interplay (what keeps a particle without an Expiration chunk alive), the `0x24`-byte batch object
@@ -274,8 +292,8 @@ to `models/debris/` and `sections[].debris` = {model, pivot}.
 - **A debris piece's smoke trail stops after 3 s** (`DEBRIS_SMOKE_TIME`); smoke already out fades on its own.
 - **Shell sprites use both of their textures.** A pseudo-billboard effect lists a side texture and a front texture (cannonballs, lancer shots, the Gattling
   tracer, meteors). Retail shows the side streak when seen from the side and a round glow when seen along the shell's flight line, which is what gives
-  its shells a 3D feel; we drew only the side texture. The streak and the camera-facing front quad are now drawn together, weighted by how foreshortened the
-  streak is (see the third meteor follow-up; PROVISIONAL blend). A cannonball is a glowing fireball with a flame tail, not an iron ball.
+  its shells a 3D feel; we drew only the side texture. The streak and the camera-facing front quad are now drawn together, weighted by sin and |cos| of the angle between
+  the view line and the axis (the retail rule, see "Pseudo-billboard blend"). A cannonball is a glowing fireball with a flame tail, not an iron ball.
   To look at every shell type at once: `tools/shot.sh local/x.png --script shells --shot-frame 45 --dist 80 --pitch 89` (also `--yaw`; the log lists the order,
   two rows of up to twelve, left to right).
 
