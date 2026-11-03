@@ -238,7 +238,7 @@ pub fn grav_wells(
     mut commands: Commands,
     time: Res<Time>,
     mut wells: Query<(Entity, &mut GravWell, &Transform), Without<Ship>>,
-    mut ships: Query<(&Transform, &mut Ship, &Health)>,
+    mut ships: Query<(&Transform, &mut Ship, &Health, Option<&mut crate::cloak::Cloak>)>,
 ) {
     let dt = time.delta_secs();
     for (e, mut w, tf) in &mut wells {
@@ -247,9 +247,13 @@ pub fn grav_wells(
             commands.entity(e).despawn();
             continue;
         }
-        for (stf, mut ship, h) in &mut ships {
+        for (stf, mut ship, h, cloak) in &mut ships {
             if !h.destroyed && (tf.translation - stf.translation).with_y(0.0).length() <= w.radius {
                 ship.speed *= (-1.5 * dt).exp();
+                // A cloaked ship in the well is ordered to decloak every tick (the only projectile that does this).
+                if let Some(mut c) = cloak {
+                    c.stop();
+                }
             }
         }
     }
