@@ -128,6 +128,8 @@ impl Trail {
 #[derive(Component)]
 pub struct Wake {
     ship: Entity,
+    /// Index into the class's wake placements (twin-hull ships have two, one trail each).
+    idx: usize,
     trail: Trail,
     acc: f32,
     since_refresh: f32,
@@ -165,19 +167,23 @@ pub fn update(
 ) {
     let dt = time.delta_secs().min(0.25);
     for (s, _, sh, health) in &ships {
-        if health.is_some_and(|h| h.destroyed) || wakes.iter().any(|(_, w, _)| w.ship == s) {
+        if health.is_some_and(|h| h.destroyed) {
             continue;
         }
         let class = &lib.classes[sh.class];
-        let Some((_, effect)) = &class.wake else { continue };
-        let mesh = meshes.add(Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default()));
-        let mut material = crate::fx::additive_material(assets.load("fx/tex/wake.png"));
-        if let Some([r, g, b]) = wake_tint(&class.race) {
-            material.base.base_color = Color::LinearRgba(LinearRgba::new(r, g, b, 1.0));
+        for (idx, (_, effect)) in class.wake.iter().enumerate() {
+            if wakes.iter().any(|(_, w, _)| w.ship == s && w.idx == idx) {
+                continue;
+            }
+            let mesh = meshes.add(Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default()));
+            let mut material = crate::fx::additive_material(assets.load("fx/tex/wake.png"));
+            if let Some([r, g, b]) = wake_tint(&class.race) {
+                material.base.base_color = Color::LinearRgba(LinearRgba::new(r, g, b, 1.0));
+            }
+            let trail = Trail::new(TrailParams::load(effect), speed_fraction(sh, &lib), s.index().index() * 2 + idx as u32);
+            let wake = Wake { ship: s, idx, trail, acc: 0.0, since_refresh: 0.0 };
+            commands.spawn((Scenario, wake, Mesh3d(mesh), MeshMaterial3d(mats.add(material)), Transform::default(), Visibility::default(), NoFrustumCulling));
         }
-        let trail = Trail::new(TrailParams::load(effect), speed_fraction(sh, &lib), s.index().index());
-        let wake = Wake { ship: s, trail, acc: 0.0, since_refresh: 0.0 };
-        commands.spawn((Scenario, wake, Mesh3d(mesh), MeshMaterial3d(mats.add(material)), Transform::default(), Visibility::default(), NoFrustumCulling));
     }
     for (e, mut w, mesh) in &mut wakes {
         let Ok((_, tf, sh, health)) = ships.get(w.ship) else {
@@ -188,7 +194,7 @@ pub fn update(
             commands.entity(e).despawn();
             continue;
         }
-        let Some((at, _)) = &lib.classes[sh.class].wake else { continue };
+        let Some((at, _)) = lib.classes[sh.class].wake.get(w.idx) else { continue };
         w.since_refresh += dt;
         if w.since_refresh > REFRESH {
             w.since_refresh = 0.0;
@@ -225,6 +231,15 @@ pub fn update(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "needs imported assets"]
+    fn twin_hull_ships_have_two_wakes() {
+        let lib = crate::combat::Library::load(crate::assets_dir());
+        let n = |name: &str| lib.classes.iter().find(|c| c.name == name).map(|c| c.wake.len());
+        assert_eq!(n("Ship_Procyon_Dreadnought"), Some(2));
+        assert_eq!(n("Ship_Navy_Frigate"), Some(1));
+    }
 
     fn trail(mult: f32) -> Trail {
         Trail::new(TrailParams { back: 0.13, out: 0.04, width: 40.0 }, mult, 1)

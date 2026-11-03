@@ -282,7 +282,7 @@ fn try_load_class(root: &Path, name: &str, guns: &HashMap<String, GunDef>) -> Re
             max_ang_acc: ph.max_angular_acceleration as f32,
         },
         flag,
-        wake: j.wakes.first().map(|w| (point(w.pos), w.fx.clone())),
+        wake: j.wakes.iter().map(|w| (point(w.pos), w.fx.clone())).collect(),
         engines,
         explosion_fx: j.explosion_fx,
         engine_snd: std::array::from_fn(|i| j.engine_snd.as_ref().and_then(|v| v.get(i)).cloned().flatten()),
