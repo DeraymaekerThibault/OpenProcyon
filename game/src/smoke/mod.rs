@@ -48,7 +48,7 @@ scripts! {
     Dock => "dock", DockClick => "dock-click", DockMenu => "dock-menu",
     Fleet => "fleet", FleetPrimary => "fleet-primary", FleetCrew => "fleet-crew", FleetArms => "fleet-arms", FleetProfile => "fleet-profile", FleetProfileCrew => "fleet-profile-crew", FleetProfileArms => "fleet-profile-arms",
     FxTest => "fxtest", HuntM3 => "hunt-m3",
-    Ingame => "ingame", IngameLoad => "ingame-load", IngameDoLoad => "ingame-do-load",
+    Ingame => "ingame", IngameLoad => "ingame-load", IngameDoLoad => "ingame-do-load", IngameQuit => "ingame-quit",
     IngameSave => "ingame-save", IngameOptions => "ingame-options", IngameControls => "ingame-controls",
     LifeboatM1 => "lifeboat-m1", LifeboatM1Fallback => "lifeboat-m1-fallback",
     LifeboatM2 => "lifeboat-m2", LifeboatM2Ladyj => "lifeboat-m2-ladyj",

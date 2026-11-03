@@ -42,6 +42,10 @@ pub(super) fn save_actions(
         ui.selected = ui.list.iter().position(|s| s.0.mission == "mission05");
         acts.push(Action::DoLoad);
     }
+    // Dev hook: `--script ingame-quit` presses Quit on the in-game menu at frame 120.
+    if cfg.script == Some(crate::smoke::Script::IngameQuit) && cfg.frame == 120 {
+        acts.push(Action::QuitToMenu);
+    }
     // Dev hook: `--script quick` quick-saves at frame 60 and quick-loads at frame 120.
     acts.extend(match (cfg.script.as_deref(), cfg.frame) {
         (Some("quick"), 60) => Some(Action::QuickSave),
@@ -132,7 +136,7 @@ pub(super) fn save_actions(
                 for e in &old {
                     commands.entity(e).despawn();
                 }
-                commands.remove_resource::<crate::campaign::Mission>();
+                // The mission is removed on leaving the battle (`reset_fleets`), not here: mission systems still running this frame would panic on it.
                 close_overlay(&mut commands, &roots, &mut ig, &mut vtime);
                 next.set(Screen::Main);
             }
