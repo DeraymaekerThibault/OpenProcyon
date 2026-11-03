@@ -29,13 +29,19 @@ pub fn base_ray_hit(c: &Class, hp: &Health, tf: &Transform, ray: Ray3d) -> Optio
     c.sections.iter().zip(&hp.sections).filter(|(s, h)| s.mission && **h > 0.0).filter_map(|(s, _)| seg_mesh(o, o + d * 1000.0, s)).map(|t| t * 1000.0).reduce(f32::min)
 }
 
+/// Aim point on a live mission section: the clicked mesh point when it lies on one (as the original aims at the clicked point),
+/// else the roof centre of the section nearest the click. The box centre sits inside the tower body, behind the island terrain
+/// from most approaches (docs/re/gunnery.md#gun-tower-aim-point).
 pub(super) fn base_aim_point(c: &Class, hp: &Health, clicked: Option<Vec3>) -> Option<Vec3> {
-    c.sections
-        .iter()
-        .zip(&hp.sections)
-        .filter(|(s, h)| s.mission && **h > 0.0)
-        .map(|(s, _)| (s.min + s.max) * 0.5)
-        .min_by(|a, b| a.distance_squared(clicked.unwrap_or(c.centre)).total_cmp(&b.distance_squared(clicked.unwrap_or(c.centre))))
+    let live = || c.sections.iter().zip(&hp.sections).filter(|(s, h)| s.mission && **h > 0.0).map(|(s, _)| s);
+    if let Some(p) = clicked
+        && live().any(|s| p.cmpge(s.min - Vec3::splat(0.5)).all() && p.cmple(s.max + Vec3::splat(0.5)).all())
+    {
+        return Some(p);
+    }
+    let roof = |s: &Section| Vec3::new((s.min.x + s.max.x) * 0.5, s.max.y, (s.min.z + s.max.z) * 0.5);
+    let from = clicked.unwrap_or(c.centre);
+    live().map(roof).min_by(|a, b| a.distance_squared(from).total_cmp(&b.distance_squared(from)))
 }
 
 // PROVISIONAL: omit destroyed non-vital geometry until damaged-mesh collision is exported.

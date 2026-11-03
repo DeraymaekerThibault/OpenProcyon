@@ -229,6 +229,14 @@ or section readout for an enemy (PROVISIONAL: inferred from the absent HUD resou
 target's frame. Remake: `combat::damage::section_smoke` serves ships and bases; `shells::base_parts_burst`; the 300-unit camera gate is
 not applied. Not decoded: how a click picks a point on a base mesh.
 
+### Gun tower aim point
+Owner playtest of mission 2 (two island guns): most player shells hit the island, not the towers. Cause, measured against the exported
+collision mesh: the remake aimed at the centre of the tower's bounding box, which is inside the tower body and behind terrain from most
+approaches (flight plane at the tower's mid height; from 50 units out, only 5 of 72 compass bearings had a clear line to the centre of tower 2,
+31 of 72 for tower 1; the roof was clear from 48 and 34, any face from 61 and 56). Now the aim is the clicked point on the tower mesh
+(what the original does), and the roof centre when no click is available (computer-less fallback, PROVISIONAL). The remaining blocked
+bearings are real terrain occlusion, which the original's swept collision also applies. Remake: `combat::hit_test::base_aim_point`.
+
 Ships take the same splinter/rock rule, and a destroyed ship section also bursts into one `ShipExplosion_Medium` at its place. Hull scars
 (decals): every hit that is not a ricochet leaves one unless the target is fully invulnerable, even with no HP lost. The scar is a box
 of edge 0.25 / 0.5 / 1.0 (Small / Medium / Large, the bullet's decal size) on the struck hull. A new scar meets each older one closer than
