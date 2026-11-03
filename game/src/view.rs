@@ -159,23 +159,7 @@ pub fn input(
                 .filter(|(e, _, s, h, m)| s.side != Side::Player && !*h && *m && sensors.player_sees(*e, mission.as_deref()))
                 .filter_map(|(e, tf, s, _, _)| combat::ray_hit(&lib.classes[s.class], tf, ray).map(|t| (*e, t)))
                 .min_by(|a, b| a.1.total_cmp(&b.1));
-            let object = objects
-                .iter()
-                .filter_map(|(e, tf, rock, animal)| {
-                    if !sensors.player_sees(e, mission.as_deref()) {
-                        return None;
-                    }
-                    let radius = if let Some(a) = animal {
-                        if !a.visible || !mission.as_deref().is_some_and(|m| m.script.hostile(m.script.player(), &a.owner)) {
-                            return None;
-                        }
-                        a.radius
-                    } else {
-                        rock?.radius
-                    };
-                    combat::seg_sphere(ray.origin, ray.origin + *ray.direction * 3000.0, tf.translation, radius).map(|t| (e, t * 3000.0))
-                })
-                .min_by(|a, b| a.1.total_cmp(&b.1));
+            let object = object_hit(objects.iter(), ray, &sensors, mission.as_deref());
             let base = docks.hostile_base_hit(ray, player_tf.translation());
             let pick = [hit, object, base.map(|(e, t, _)| (e, t))].into_iter().flatten().min_by(|a, b| a.1.total_cmp(&b.1));
             if let Some((e, t)) = pick {
@@ -420,6 +404,31 @@ pub fn hud(
             **t = text.into(); // only on change: an assignment re-lays the text out
         }
     }
+}
+
+/// The nearest visible asteroid or hostile space animal on the ray (entity, distance); shared by the click and the hover cursor.
+pub fn object_hit<'a>(
+    objects: impl Iterator<Item = (Entity, &'a Transform, Option<&'a combat::Asteroid>, Option<&'a environment::SpaceAnimal>)>,
+    ray: Ray3d,
+    sensors: &environment::Sensors,
+    mission: Option<&campaign::Mission>,
+) -> Option<(Entity, f32)> {
+    objects
+        .filter_map(|(e, tf, rock, animal)| {
+            if !sensors.player_sees(e, mission) {
+                return None;
+            }
+            let radius = if let Some(a) = animal {
+                if !a.visible || !mission.is_some_and(|m| m.script.hostile(m.script.player(), &a.owner)) {
+                    return None;
+                }
+                a.radius
+            } else {
+                rock?.radius
+            };
+            combat::seg_sphere(ray.origin, ray.origin + *ray.direction * 3000.0, tf.translation, radius).map(|t| (e, t * 3000.0))
+        })
+        .min_by(|a, b| a.1.total_cmp(&b.1))
 }
 
 #[cfg(test)]
