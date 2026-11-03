@@ -21,11 +21,11 @@ pub fn net_factor(nets: &[(f32, f32)]) -> f32 {
     nets.iter().map(|n| 1.0 - n.1).product()
 }
 
-pub fn tick_nets(mut commands: Commands, time: Res<Time>, mut ships: Query<(Entity, &mut Netted, &mut Ship)>) {
-    for (e, mut nets, mut ship) in &mut ships {
+pub fn tick_nets(mut commands: Commands, time: Res<Time>, mut ships: Query<(Entity, &mut Netted, &mut Ship, Option<&crate::cloak::Cloak>)>) {
+    for (e, mut nets, mut ship, cloak) in &mut ships {
         nets.0.iter_mut().for_each(|n| n.0 -= time.delta_secs());
         nets.0.retain(|n| n.0 > 0.0);
-        ship.net = net_factor(&nets.0);
+        ship.net = net_factor(&nets.0) * cloak.map_or(1.0, |c| c.speed_factor()); // the cloak's slowing rides on the same multiplier
         if nets.0.is_empty() {
             commands.entity(e).remove::<Netted>();
         }

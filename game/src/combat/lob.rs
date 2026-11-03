@@ -159,7 +159,7 @@ pub fn blasts(
     lib: Res<Library>,
     fxl: Res<FxLib>,
     mut rng: ResMut<Rng>,
-    (mut hits, mut destroyed): (MessageWriter<Hit>, MessageWriter<Destroyed>),
+    (mut hits, mut destroyed, mut splashes): (MessageWriter<Hit>, MessageWriter<Destroyed>, MessageWriter<super::Splashed>),
     q: Query<(Entity, &mut Blast, &Transform), (Without<Ship>, Without<Shell>)>,
     mut ships: Query<(Entity, &Transform, &Ship, &mut Health, Option<&crate::campaign::MissionShip>), Without<crate::lifeboats::Lifeboat>>,
     mut bases: Query<(Entity, &Transform, &ArmedBase, &mut Health), (Without<Ship>, Without<Blast>)>,
@@ -199,6 +199,7 @@ pub fn blasts(
             }
             if struck {
                 hits.write(Hit { shooter: by, victim: se });
+                splashes.write(super::Splashed(se));
             }
         }
         for (be, btf, ab, mut hp) in &mut bases {
@@ -360,6 +361,7 @@ mod tests {
             .init_resource::<Time>()
             .init_resource::<FxLib>()
             .add_message::<Hit>()
+            .add_message::<super::Splashed>()
             .add_message::<Destroyed>()
             .add_message::<Sfx>()
             .add_systems(Update, blasts);

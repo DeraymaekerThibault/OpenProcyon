@@ -310,6 +310,8 @@ pub struct Class {
     pub repair_fx: Option<String>,
     /// WOT 'Is Cloakable' (only the Procyon submersible).
     pub cloakable: bool,
+    /// The cloak effects' mount points (Cloaking / DeCloaking, FullyCloaked): translation and rotation in hull space.
+    pub cloak_points: Option<[(Vec3, Quat); 2]>,
     /// Fleet-screen facts from the WOT: 'Victory Point Cost', total crew posts ('Max number of ...'), display-name string id and
     /// ship-bar icon sprite.
     pub points: u32,

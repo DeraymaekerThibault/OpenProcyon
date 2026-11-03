@@ -468,12 +468,26 @@ fn update(
             Fx::Cloak(u, on, ai_override) => {
                 for e in u {
                     if ships.contains(e) {
-                        // A ship already fitted fades; a fresh one (world init) starts in the ordered state.
-                        commands.queue(move |w: &mut World| match w.get_mut::<crate::cloak::Cloak>(e) {
-                            Some(mut c) => (c.on, c.ai_override) = (on, ai_override),
-                            None => {
-                                if let Ok(mut x) = w.get_entity_mut(e) {
-                                    x.insert(crate::cloak::Cloak::new(on, ai_override));
+                        // 'AI Can Override' is always stored. TRUE starts a cloak when one is allowed (never within 5 s of the ship's
+                        // creation: re-fire it later); FALSE stops one that is closing or closed. A ship without a keeper yet (world init)
+                        // starts in the ordered state. PROVISIONAL: that last case is the remake's.
+                        commands.queue(move |w: &mut World| {
+                            let side = w.get::<Ship>(e).map(|s| s.side);
+                            match (w.get_mut::<crate::cloak::Cloak>(e), side) {
+                                (Some(mut c), Some(side)) => {
+                                    c.ai_modify = ai_override;
+                                    if on {
+                                        c.start(side);
+                                    } else {
+                                        c.stop();
+                                    }
+                                }
+                                _ => {
+                                    if let Ok(mut x) = w.get_entity_mut(e) {
+                                        let mut c = crate::cloak::Cloak::new(on);
+                                        c.ai_modify = ai_override;
+                                        x.insert(c);
+                                    }
                                 }
                             }
                         });

@@ -69,6 +69,9 @@ pub struct Hit {
     pub shooter: Entity,
     pub victim: Entity,
 }
+/// A blast (mortar, mine, star burst) struck a section of `.0`: cloaked ships drop their cloak (cloak.rs).
+#[derive(Message)]
+pub struct Splashed(pub Entity);
 /// An asteroid crossed the death threshold; breakup and rules consume independent readers.
 #[derive(Message)]
 pub struct Destroyed {
@@ -158,6 +161,7 @@ pub fn plugin(app: &mut App) {
     app.insert_resource(Library::load(assets_dir()))
         .init_resource::<Target>()
         .add_message::<Hit>()
+        .add_message::<Splashed>()
         .add_message::<Fired>()
         .add_message::<Destroyed>()
         .add_message::<Detonate>()
@@ -202,20 +206,22 @@ pub fn spawn_engines(commands: &mut Commands, fxl: &FxLib, lib: &Library, ship: 
 
 /// The engine keeper's update (read from the original's code): once a second the ship's speed fraction (0..1) becomes both the
 /// emitter-rate and the velocity-length multiplier of every exhaust; an exhaust exists only while that is above 0 and its
-/// section stands. PROVISIONAL: the fraction is speed over Full (the original multiplies two physics values), and the cloaking
-/// factor (the flame fades as a ship cloaks) is not applied.
-fn engine_rate(time: Res<Time>, lib: Res<Library>, ships: Query<(&Ship, &Health)>, mut q: Query<(&mut fx::Fx, &mut Engine, &ChildOf)>) {
+/// section stands, and the cloaking factor (1 - level) scales the rate. PROVISIONAL: the fraction is speed over Full (the original
+/// multiplies two physics values).
+fn engine_rate(time: Res<Time>, lib: Res<Library>, ships: Query<(&Ship, &Health, Option<&crate::cloak::Cloak>)>, mut q: Query<(&mut fx::Fx, &mut Engine, &ChildOf)>) {
     for (mut f, mut engine, parent) in &mut q {
-        let Ok((ship, h)) = ships.get(parent.parent()) else { continue };
+        let Ok((ship, h, cloak)) = ships.get(parent.parent()) else { continue };
         engine.since += time.delta_secs();
         if !engine.started || engine.since > 1.0 {
             (engine.started, engine.since) = (true, 0.0);
             engine.mult = (ship.speed.abs() / crate::ship::full_speed(&lib.classes[ship.class])).clamp(0.0, 1.0);
         }
         let section_lost = engine.section.is_some_and(|s| h.sections.get(s).is_some_and(|hp| *hp <= 0.0));
-        f.emitting = !h.destroyed && !section_lost && engine.mult > 0.0;
+        // The flames fade with the hull as a ship cloaks (1 - level), gone at full cloak.
+        let open = 1.0 - cloak.map_or(0.0, |c| c.level());
+        f.emitting = !h.destroyed && !section_lost && engine.mult > 0.0 && open > 0.0;
         f.size_scale = 2.6; // PROVISIONAL: data size 1.6 gives a thread; the reference jet is about hull-wide
-        (f.rate_scale, f.vel_scale) = (engine.mult, engine.mult);
+        (f.rate_scale, f.vel_scale) = (engine.mult * open, engine.mult);
     }
 }
 

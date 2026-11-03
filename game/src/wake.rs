@@ -161,6 +161,7 @@ pub fn update(
     ships: Query<(Entity, &Transform, &Ship, Option<&crate::combat::Health>), With<Ship>>,
     lib: Res<crate::combat::Library>,
     mut wakes: Query<(Entity, &mut Wake, &Mesh3d)>,
+    cloaks: Query<&crate::cloak::Cloak>,
 ) {
     let dt = time.delta_secs().min(0.25);
     for (s, _, sh, health) in &ships {
@@ -191,7 +192,8 @@ pub fn update(
         w.since_refresh += dt;
         if w.since_refresh > REFRESH {
             w.since_refresh = 0.0;
-            w.trail.mult = speed_fraction(sh, &lib);
+            // The wake fades with the hull as a ship cloaks (1 - level), gone at full cloak.
+            w.trail.mult = speed_fraction(sh, &lib) * (1.0 - cloaks.get(w.ship).map_or(0.0, |c| c.level()));
         }
         w.acc += dt;
         let node = frame(tf, *at);

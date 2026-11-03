@@ -94,14 +94,20 @@ def textures(node, out):
             textures(v, out)
 
 
+# Meshes an effect draws without morphing them (game/src/fx.rs STATIC_MESHES); the nebula meshes are exported elsewhere.
+STATIC_MESHES = ("Periscope_Layer1",)
+
+
 def export_morph_meshes(root, outdir, effect):
     """Use the existing GLB converter for authored mesh-morph endpoints."""
     for primitive in effect.get("Primitive", []):
         mesh = primitive.get("CommonPropertiesChunk", {}).get("MeshChunk", {})
-        if not mesh.get("UseMorph"):
+        if not mesh.get("UseMorph") and mesh.get("SourceMeshName") not in STATIC_MESHES:
             continue
         for key in ("SourceMeshName", "DestinationMeshName"):
             name = mesh[key]
+            if not name:
+                continue
             dst = model_path(outdir, name, mkdir=True)
             dst.write_bytes(
                 convert(
