@@ -135,9 +135,16 @@ pub struct Wake {
     since_refresh: f32,
 }
 
+impl Wake {
+    /// The ship this wake trails.
+    pub fn ship(&self) -> Entity {
+        self.ship
+    }
+}
+
 /// Multiplier of the wake texture per fleet type, from the optional `data/fx/wake_tint.json` (`{"Navy": [r, g, b]}`, values may exceed 1).
 /// Absent: the retail colour for everyone. A mod ships the file, so wakes can tell the factions apart without new textures.
-fn wake_tint(race: &str) -> Option<[f32; 3]> {
+pub fn wake_tint(race: &str) -> Option<[f32; 3]> {
     static TINTS: std::sync::OnceLock<serde_json::Value> = std::sync::OnceLock::new();
     let tints = TINTS.get_or_init(|| crate::data::try_json(&crate::assets_dir().join("data/fx/wake_tint.json")).unwrap_or_default());
     let v = tints.get(race)?.as_array()?;

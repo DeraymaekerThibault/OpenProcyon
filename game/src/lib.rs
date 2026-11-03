@@ -31,6 +31,7 @@ pub mod nebula;
 pub mod options_menu;
 pub mod panels;
 pub mod profiles;
+pub mod render;
 pub mod rules;
 pub mod scenario;
 pub mod setup;
@@ -179,7 +180,7 @@ pub fn run(view: fn(&mut App), setup_view: fn(&mut App)) {
     };
     App::new()
         .add_plugins(DefaultPlugins.set(AssetPlugin { file_path: assets_dir().to_string_lossy().into_owned(), ..default() }))
-        .add_plugins(clips::plugin)
+        .add_plugins((clips::plugin, render::plugin))
         .add_plugins((
             fx::plugin,
             combat::plugin,
@@ -287,6 +288,7 @@ pub fn run(view: fn(&mut App), setup_view: fn(&mut App)) {
                     .run_if(in_state(menu::Screen::Battle))
                     .run_if(menu::overlay_closed),
                 screenshot,
+                view::hd_sky,
                 view::screenshot_key,
                 view::focus_projectile.run_if(in_state(menu::Screen::Battle)),
             ),

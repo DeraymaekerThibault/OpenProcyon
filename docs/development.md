@@ -148,6 +148,7 @@ Keep the existing module boundaries. New files should own a real feature, not ju
 | `modding.rs` | Asset overlays, merge semantics and inheritance | Changing override rules; preserve base assets and test merges |
 | `environment.rs` | Shared fixed-tick sight/group/contact snapshot (also refreshed for frame input), nebula rendering/energy/occlusion and whale motion/calls | Changing environment simulation or shared detection (`docs/re/visibility.md`); UI consumers must not invent separate range tests |
 | `fx.rs`, `wake.rs`, `flag.rs`, `course.rs`, `audio.rs` | Feature-specific rendering/audio | Changing those presentations; do not put their tuning in `lib.rs` |
+| `render/` | Render profile building blocks (not retail), on only with `data/render/look.json`: `mod.rs` profile, camera, sun, sky light; `lights.rs` effect lights; `materials.rs` effect/shell gain, lit smoke, effect shadows; `sails.rs` sail material and billow; `trails.rs` engine plumes and wake ribbons; their shaders come from the mod | Adding a graphics building block; classic must stay unchanged without its profile key, and its shader uniform goes in docs/modding.md |
 
 `mod.rs` files re-export their children, so `crate::combat::X` / `crate::rules::X` paths are stable. Split further only when the next concrete feature needs a clearer interface—no empty framework or blanket directory reshuffle.
 Use explicit system ordering where one system reads another's updates (for example faction selection before panel rebuild).

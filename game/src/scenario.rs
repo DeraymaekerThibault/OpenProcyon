@@ -328,7 +328,11 @@ pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Libra
     let map = cfg.map.as_deref().and_then(data::map_json);
     commands.insert_resource(MapLighting(map.as_ref().and_then(lighting_of)));
     let sky = map.as_ref().and_then(|m| m["sky"].as_str()).map_or_else(|| "skybox_07".into(), |s| s.rsplit_once("_Layer").map_or(s, |x| x.0).to_string());
-    commands.spawn((Scenario, Sky, crate::data::scene(assets, &format!("{sky}.glb")), Transform::from_scale(Vec3::splat(8000.0)), Visibility::default()));
+    let mut sky_entity = commands.spawn((Scenario, Sky, Transform::from_scale(Vec3::splat(8000.0)), Visibility::default()));
+    match view::hd_sky_file(assets_dir(), &sky) {
+        Some(file) => sky_entity.insert(view::HdSky(assets.load(file))),
+        None => sky_entity.insert(crate::data::scene(assets, &format!("{sky}.glb"))),
+    };
     let track = map.as_ref().and_then(|m| m["music"].as_str()).unwrap_or("BTL_NavyBig_Full02");
     if !campaign::is_mission(cfg.map.as_deref()) {
         // the mission's rules choose its music
