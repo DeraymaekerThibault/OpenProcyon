@@ -11,7 +11,10 @@ struct SensorObject {
     sight: Option<f32>,
     group: String,
     shown: bool,
-    cloaked: bool,
+    /// The teams that still see this ship while it is fully cloaked (None: not fully cloaked).
+    cloak: Option<Vec<crate::Side>>,
+    /// The ship's team (bases and scenery: none that any cloak knows).
+    side: crate::Side,
     scenery: bool,
 }
 
@@ -36,7 +39,9 @@ impl Sensors {
             (*e == observer || (!from.group.is_empty() && member.group == from.group))
                 && member.shown
                 && member.sight.is_some_and(|range| {
-                    crate::lifeboats::surface_distance(member.sphere, to.sphere) < range && crate::cloak::seen(to.cloaked, to.at, member.at) && can_see(mission, member.at, to.at)
+                    crate::lifeboats::surface_distance(member.sphere, to.sphere) < range
+                        && to.cloak.as_ref().is_none_or(|knows| knows.contains(&member.side))
+                        && can_see(mission, member.at, to.at)
                 })
         })
     }
@@ -105,7 +110,8 @@ pub fn refresh_sensors(
                 sight: (!class.is_lifeboat).then_some(class.sight * scan.map_or(1.0, |f| f.0)),
                 group: fleet.map(|f| f.0.as_str()).or_else(|| ms.map(|m| m.owner.as_str())).unwrap_or("").into(),
                 shown: !health.destroyed && ms.is_none_or(|m| m.visible),
-                cloaked: cloak.is_some_and(|c| c.hidden()),
+                cloak: cloak.filter(|c| c.state == crate::cloak::State::Full).map(|c| c.knows.clone()),
+                side: ship.side,
                 scenery: false,
             },
         );
@@ -135,7 +141,8 @@ pub fn refresh_sensors(
                 sight: armed.map(|b| lib.classes[b.class].sight),
                 group: base.map_or("", |b| b.owner.as_str()).into(),
                 shown: health.is_none_or(|h| !h.destroyed) && animal.is_none_or(|a| a.visible && !a.dead) && rock.is_none_or(|r| r.hp > 0.0),
-                cloaked: false,
+                cloak: None,
+                side: crate::Side(u8::MAX),
                 scenery: animal.is_none(),
             },
         );
@@ -181,12 +188,10 @@ fn sensor_smoke(world: &mut World) {
         65 => world.get_mut::<crate::ship::FleetMember>(ally).unwrap().0 = "Unrelated ally".into(),
         85 => {
             world.get_mut::<crate::ship::FleetMember>(ally).unwrap().0 = group;
-            world.entity_mut(enemy).insert(crate::cloak::Cloak::new(true, false));
+            world.entity_mut(enemy).insert(crate::cloak::Cloak::new(true));
         }
         105 => {
-            let mut cloak = world.get_mut::<crate::cloak::Cloak>(enemy).unwrap();
-            cloak.on = false;
-            cloak.level = 0.0;
+            world.entity_mut(enemy).remove::<crate::cloak::Cloak>();
             world.get_mut::<Transform>(enemy).unwrap().translation = Vec3::X * 120.0;
         }
         125 => info!("sight ECS/UI smoke passed: range loss/reveal, group sharing, unrelated ally, cloak and radar"),
@@ -572,7 +577,7 @@ mod tests {
     use super::*;
 
     fn sensor_object(position: Vec3, radius: f32, group: &str, sight: f32) -> SensorObject {
-        SensorObject { at: position, sphere: (position, radius), sight: Some(sight), group: group.into(), shown: true, cloaked: false, scenery: false }
+        SensorObject { at: position, sphere: (position, radius), sight: Some(sight), group: group.into(), shown: true, cloak: None, side: crate::Side(u8::MAX), scenery: false }
     }
 
     #[test]
@@ -611,16 +616,19 @@ mod tests {
         let mut sensors = Sensors { primary: Some(a), ..default() };
         sensors.objects.insert(a, sensor_object(Vec3::ZERO, 0.0, "A", 100.0));
         sensors.objects.insert(b, sensor_object(Vec3::X * 80.0, 0.0, "B", 100.0));
-        sensors.objects.get_mut(&b).unwrap().cloaked = true;
+        sensors.objects.get_mut(&b).unwrap().cloak = Some(vec![]);
         assert!(!sensors.player_sees(b, None));
         sensors.objects.get_mut(&b).unwrap().sphere.0.x = 10.0;
         sensors.objects.get_mut(&b).unwrap().at.x = 10.0;
-        assert!(sensors.player_sees(b, None));
+        assert!(!sensors.player_sees(b, None), "no distance reveals a cloaked ship");
+        sensors.objects.get_mut(&b).unwrap().cloak = Some(vec![crate::Side(u8::MAX)]);
+        assert!(sensors.player_sees(b, None), "a team that knows it sees it");
+        sensors.objects.get_mut(&b).unwrap().cloak = None;
         sensors.objects.get_mut(&b).unwrap().shown = false;
         sensors.primary = None;
         assert!(!sensors.player_sees(b, None), "no primary never reveals a script-hidden object");
         sensors.objects.get_mut(&b).unwrap().shown = true;
-        sensors.objects.get_mut(&b).unwrap().cloaked = false;
+        sensors.objects.get_mut(&b).unwrap().cloak = None;
         assert!(sensors.player_sees(b, None), "native no-primary exception");
         sensors.primary = Some(a);
         sensors.objects.get_mut(&b).unwrap().sphere.0.x = 1000.0;

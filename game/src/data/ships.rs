@@ -234,6 +234,16 @@ fn try_load_class(root: &Path, name: &str, guns: &HashMap<String, GunDef>) -> Re
             .find(|n| n["extras"]["kind"] == kind)
             .map(|n| Vec3::new(num(&n["translation"][0]), num(&n["translation"][1]), num(&n["translation"][2])))
     };
+    // The cloak's two effect points (MSB 'CloakingEffectPoint' / 'FullyCloakedEffectPoint'): where Cloaking/DeCloaking and the
+    // FullyCloaked periscope trail play; the second faces aft (rot_raw is a yaw about the hull's up axis).
+    let effect_point = |kind: &str| {
+        nodes.as_ref()?["nodes"]
+            .as_array()?
+            .iter()
+            .find(|n| n["extras"]["kind"] == kind)
+            .map(|n| (Vec3::new(num(&n["translation"][0]), num(&n["translation"][1]), num(&n["translation"][2])), Quat::from_rotation_y(num(&n["extras"]["rot_raw"][0]))))
+    };
+    let cloak_points = effect_point("CloakingEffectPoint").zip(effect_point("FullyCloakedEffectPoint")).map(|(a, b)| [a, b]);
     let hull_bound = sections.iter().map(|s| s.min.abs().max(s.max.abs()).length()).fold(0.0, f32::max);
     let centre = if hmn.x <= hmx.x { (hmn + hmx) / 2.0 } else { (amn + amx) / 2.0 };
     let radius = 0.5 * (amx - amn).x.max((amx - amn).z) + 2.0;
@@ -268,6 +278,7 @@ fn try_load_class(root: &Path, name: &str, guns: &HashMap<String, GunDef>) -> Re
         hull_bound,
         engage,
         cloakable: j.cloakable.unwrap_or_else(|| name.contains("Submersible")),
+        cloak_points,
         points: j.points as u32,
         crew_posts: j.crew_posts.map_or(0, |v| v.values().sum::<u64>() as u32),
         display_name: j.display_name,

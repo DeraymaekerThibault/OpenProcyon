@@ -83,7 +83,7 @@ struct Hooks {
     grapple: (bool, bool),
     /// Own ship: holding position now; cloak state when its hull can cloak (Some(on)).
     hold: bool,
-    cloak: Option<bool>,
+    cloak: Option<(bool, bool)>,
     focus_unavailable: bool,
 }
 /// The tow slot of a friendly ship's menu: start (enabled when a tow can be made) or, when the player's ship already tows it, stop.
@@ -144,8 +144,9 @@ fn items(kind: Kind, can_dock: bool, tow: Tow, hooks: Hooks) -> Vec<(Act, &'stat
             (Stop, "OPTIONS_MENU_BUTTON_STOP", true),
             if hooks.hold { (HoldOff, "OPTIONS_MENU_BUTTON_AI_NOT_LOCK_POSITION", true) } else { (HoldOn, "OPTIONS_MENU_BUTTON_AI_LOCK_POSITION", true) },
             match hooks.cloak {
-                Some(true) => (CloakStop, "OPTIONS_MENU_BUTTON_CLOAK_STOP", true),
-                Some(false) => (CloakStart, "OPTIONS_MENU_BUTTON_CLOAK_START", true),
+                Some((true, _)) => (CloakStop, "OPTIONS_MENU_BUTTON_CLOAK_STOP", true),
+                // Start is shown while off or decloaking, and greyed until a start is allowed (5 s idle after the last decloak).
+                Some((false, ok)) => (CloakStart, "OPTIONS_MENU_BUTTON_CLOAK_START", ok),
                 None => (Unavailable, "OPTIONS_MENU_BUTTON_CLOAK_START", false),
             },
         ],
@@ -278,12 +279,14 @@ fn menu(
             }
             Some(a @ (Act::CloakStart | Act::CloakStop)) => {
                 let on = a == Act::CloakStart;
-                commands.queue(move |w: &mut World| match w.get_mut::<crate::cloak::Cloak>(actor) {
-                    Some(mut c) => c.on = on,
-                    None => {
-                        let mut c = crate::cloak::Cloak::new(false, false);
-                        c.on = on;
-                        w.entity_mut(actor).insert(c);
+                commands.queue(move |w: &mut World| {
+                    let side = w.get::<Ship>(actor).map(|s| s.side);
+                    if let (Some(mut c), Some(side)) = (w.get_mut::<crate::cloak::Cloak>(actor), side) {
+                        if on {
+                            c.start(side);
+                        } else {
+                            c.stop();
+                        }
                     }
                 });
                 if on { "HUD_Options_CloakStart" } else { "HUD_Options_CloakStop" }
@@ -386,8 +389,8 @@ fn menu(
     };
     // The player's ship already towing this one gets Stop; any other ship gets Start, enabled for ships when a tow can be made.
     let tow = if docks.towee_of(player.0) == Some(target) { Tow::Stop } else { Tow::Start(docks.can_tow() && docks.towable(target) && ships.get(target).is_ok()) };
-    let (held, cloak) = flags.get(actor).map(|(h, c)| (h, c.map(|c| c.on))).unwrap_or_default();
-    let cloak = cloak.or_else(|| lib.classes[player.1.class].cloakable.then_some(false));
+    let (held, cloak) = flags.get(actor).map(|(h, c)| (h, c.map(|c| (c.stop_shown(), c.stop_shown() || c.can_start())))).unwrap_or_default();
+    let cloak = cloak.or_else(|| lib.classes[player.1.class].cloakable.then_some((false, false)));
     let mut hooks = if ships.get(target).is_err() {
         // A base: boarding goes by range, there is nothing to grapple.
         let boarding = boarders.boarding(actor, target);

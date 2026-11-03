@@ -69,6 +69,9 @@ pub struct Hit {
     pub shooter: Entity,
     pub victim: Entity,
 }
+/// A blast (mortar, mine, star burst) struck a section of `.0`: cloaked ships drop their cloak (cloak.rs).
+#[derive(Message)]
+pub struct Splashed(pub Entity);
 /// An asteroid crossed the death threshold; breakup and rules consume independent readers.
 #[derive(Message)]
 pub struct Destroyed {
@@ -152,6 +155,7 @@ pub fn plugin(app: &mut App) {
     app.insert_resource(Library::load(assets_dir()))
         .init_resource::<Target>()
         .add_message::<Hit>()
+        .add_message::<Splashed>()
         .add_message::<Fired>()
         .add_message::<Destroyed>()
         .add_message::<Detonate>()
@@ -194,15 +198,16 @@ pub fn spawn_engines(commands: &mut Commands, fxl: &FxLib, lib: &Library, ship: 
     }
 }
 
-fn engine_rate(ships: Query<(&Ship, &Health)>, mut q: Query<(&mut fx::Fx, &ChildOf), With<Engine>>) {
+fn engine_rate(ships: Query<(&Ship, &Health, Option<&crate::cloak::Cloak>)>, mut q: Query<(&mut fx::Fx, &ChildOf), With<Engine>>) {
     for (mut f, parent) in &mut q {
-        if let Ok((ship, h)) = ships.get(parent.parent()) {
+        if let Ok((ship, h, cloak)) = ships.get(parent.parent()) {
+            let open = 1.0 - cloak.map_or(0.0, |c| c.level()); // the flames fade with the hull, gone at full cloak
             // Thrust follows the engine order: dark at All Stop, brighter with each step up (PROVISIONAL curve).
             // A ship held still (NIS freeze, docked) keeps its order but shows no thrust.
             let throttle = crate::ORDERS[ship.order].1;
-            f.emitting = !h.destroyed && throttle > 0.0 && ship.speed.abs() > 0.01;
+            f.emitting = !h.destroyed && throttle > 0.0 && ship.speed.abs() > 0.01 && open > 0.0;
             f.size_scale = 2.6; // PROVISIONAL: data size 1.6 gives a thread; the reference jet is about hull-wide
-            f.rate_scale = 0.75 * (0.25 + 0.75 * throttle.min(1.25));
+            f.rate_scale = 0.75 * (0.25 + 0.75 * throttle.min(1.25)) * open;
         }
     }
 }

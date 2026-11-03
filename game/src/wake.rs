@@ -39,6 +39,7 @@ pub fn update(
     ships: Query<(Entity, &Transform, &Ship, Option<&crate::combat::Health>), With<Ship>>,
     lib: Res<crate::combat::Library>,
     mut wakes: Query<(Entity, &mut Wake, &Mesh3d)>,
+    cloaks: Query<&crate::cloak::Cloak>,
 ) {
     let dt = time.delta_secs();
     for (s, _, _, health) in &ships {
@@ -75,6 +76,7 @@ pub fn update(
         let (mut pos, mut uv, mut col, mut idx) = (vec![], vec![], vec![], vec![]);
         let n = w.pts.len() + 1; // Draw a live head between distance-sampled points, so the trail does not jump every STEP.
         let strength = (sh.speed / crate::ship::full_speed(&lib.classes[sh.class])).clamp(0.0, 1.0);
+        let open = 1.0 - cloaks.get(w.ship).map_or(0.0, |c| c.level()); // the wake fades with the hull
         let mut v = 0.0;
         for i in 0..n {
             let (p, age, k) = if i + 1 < n { w.pts[i] } else { (stern, 0.0, strength) };
@@ -88,7 +90,7 @@ pub fn update(
             let side = dir.cross(Vec3::Y).try_normalize().unwrap_or(Vec3::X);
             let t = age / LIFE;
             let half = 1.5 * (2.0 + 7.0 * t.sqrt()) * (0.4 + 0.6 * k);
-            let a = (1.0 - t) * (1.0 - t) * k.sqrt(); // No extra guessed 0.7 brightness multiplier.
+            let a = (1.0 - t) * (1.0 - t) * k.sqrt() * open; // No extra guessed 0.7 brightness multiplier.
             if i > 0 {
                 v += p.distance(w.pts[i - 1].0) / 8.0;
             }

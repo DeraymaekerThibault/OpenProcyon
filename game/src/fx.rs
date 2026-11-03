@@ -127,6 +127,9 @@ enum Blend {
     Multiply,
 }
 
+/// Effect meshes drawn without a morph (exported by tools/export_effects.py too).
+const STATIC_MESHES: [&str; 1] = ["Periscope_Layer1"];
+
 struct MorphMesh {
     source: Vec<Vec3>,
     destination: Vec<Vec3>,
@@ -349,14 +352,16 @@ fn parse_prim(p: &Value, tex_names: &mut Vec<String>) -> Prim {
         .filter(|s| s["CHUNKDATA_PARTICLE_SYSTEM_SOURCE_EMITTER_ENABLED"].as_bool() == Some(true))
         .and_then(|s| s["CHUNKDATA_PARTICLE_SYSTEM_SOURCE_EMITTER_INDEX"].as_u64())
         .map(|i| i as usize);
-    let mesh = get(p, &["CommonPropertiesChunk", "MeshChunk"]).filter(|m| m["UseMorph"] == true).map(|m| {
-        let src = m["SourceMeshName"].as_str().expect("Morph source mesh");
-        let dst = m["DestinationMeshName"].as_str().expect("Morph destination mesh");
-        let (source, uv, indices) = crate::data::mesh_geometry(assets_dir(), src).unwrap_or_else(|| panic!("Missing/invalid effect mesh {src}; regenerate effects"));
-        let (destination, _, other_indices) = crate::data::mesh_geometry(assets_dir(), dst).unwrap_or_else(|| panic!("Missing/invalid effect mesh {dst}; regenerate effects"));
-        assert!(source.len() == destination.len() && indices == other_indices, "Morph topology mismatch: {src} / {dst}");
-        MorphMesh { source, destination, uv, indices, model: crate::data::model(&format!("{src}.glb")), weight: Curve::from(m.get("MeshWeightInterpolator")) }
-    });
+    // A mesh that does not morph is drawn as it is (the cloaked ship's periscope); the nebula meshes are drawn by nebula.rs.
+    let mesh =
+        get(p, &["CommonPropertiesChunk", "MeshChunk"]).filter(|m| m["UseMorph"] == true || m["SourceMeshName"].as_str().is_some_and(|n| STATIC_MESHES.contains(&n))).map(|m| {
+            let src = m["SourceMeshName"].as_str().expect("Morph source mesh");
+            let dst = if m["UseMorph"] == true { m["DestinationMeshName"].as_str().expect("Morph destination mesh") } else { src };
+            let (source, uv, indices) = crate::data::mesh_geometry(assets_dir(), src).unwrap_or_else(|| panic!("Missing/invalid effect mesh {src}; regenerate effects"));
+            let (destination, _, other_indices) = crate::data::mesh_geometry(assets_dir(), dst).unwrap_or_else(|| panic!("Missing/invalid effect mesh {dst}; regenerate effects"));
+            assert!(source.len() == destination.len() && indices == other_indices, "Morph topology mismatch: {src} / {dst}");
+            MorphMesh { source, destination, uv, indices, model: crate::data::model(&format!("{src}.glb")), weight: Curve::from(m.get("MeshWeightInterpolator")) }
+        });
     Prim {
         mesh,
         tex2,

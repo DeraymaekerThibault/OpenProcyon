@@ -44,7 +44,7 @@ macro_rules! scripts {
 
 scripts! {
     Animals => "animals", Asteroid => "asteroid", Board => "board", BriefingSkip => "briefing-skip",
-    Course => "course", CurrentM3 => "current-m3", Damage => "damage", Defeat => "defeat",
+    Cloak => "cloak", Course => "course", CurrentM3 => "current-m3", Damage => "damage", Defeat => "defeat",
     Dock => "dock", DockClick => "dock-click", DockMenu => "dock-menu",
     Fleet => "fleet", FleetPrimary => "fleet-primary", FleetCrew => "fleet-crew", FleetArms => "fleet-arms", FleetProfile => "fleet-profile", FleetProfileCrew => "fleet-profile-crew", FleetProfileArms => "fleet-profile-arms",
     FxTest => "fxtest", HuntM3 => "hunt-m3",

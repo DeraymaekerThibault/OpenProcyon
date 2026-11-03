@@ -121,6 +121,7 @@ fn moving_ship() -> (App, Entity) {
         sight: 100.0,
         repair_fx: None,
         cloakable: false,
+        cloak_points: None,
         points: 0,
         crew_posts: 0,
         display_name: None,

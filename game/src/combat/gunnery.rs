@@ -240,11 +240,12 @@ pub(super) fn fire(
     // Script visibility stays separate from observer-dependent detection.
     let contacts: Vec<Contact> = others
         .iter()
-        .map(|(entity, transform, ship, health, is_player, mission_ship, _)| Contact {
+        .map(|(entity, transform, ship, health, is_player, mission_ship, cloak)| Contact {
             entity,
             side: ship.side,
             aim_point: transform.transform_point(ship_aim_point(&lib.classes[ship.class], health, if Some(entity) == target.0 { target.1 } else { None })),
-            visible: !health.destroyed && mission_ship.is_none_or(|m| m.visible),
+            // A fully cloaked ship is never picked as a gun target, whoever knows it is there.
+            visible: !health.destroyed && mission_ship.is_none_or(|m| m.visible) && cloak.is_none_or(|c| c.state != crate::cloak::State::Full),
             is_player,
             velocity: transform.rotation * Vec3::NEG_Z * ship.speed,
         })
@@ -282,7 +283,7 @@ pub(super) fn fire(
         }
         seen.clear();
         seen.extend(contacts.iter().map(|c| Contact { visible: c.visible && sensors.in_sight(me, c.entity, campaign.as_deref()), ..*c }));
-        let cloaked_now = cloak.as_ref().is_some_and(|c| c.level > 0.0);
+        let cloaked_now = cloak.as_ref().is_some_and(|c| c.holds_fire());
         let class = &lib.classes[ship.class];
         // Player's command ship: only the clicked target (retail: direct-fire guns need an enemy click or panic fire). Its other
         // ships: the nearest living enemy. Enemies: their captain's target.
@@ -362,15 +363,9 @@ pub(super) fn fire(
                 state.burst_left = 0;
                 continue;
             };
-            // Guns that cannot fire while cloaked hold, unless the rules let this AI drop its cloak to shoot.
+            // Guns that cannot fire while cloaked hold from the first moment of cloaking until the decloak is over; torpedoes and the
+            // light Gattling are never held, and firing does not touch the cloak.
             if cloaked_now && !gun.cloak_fire {
-                if cloak.is_some_and(|cloak| cloak.ai_override && cloak.on && !primary) && state.cooldown <= 0.0 {
-                    commands.queue(move |w: &mut World| {
-                        if let Some(mut c) = w.get_mut::<crate::cloak::Cloak>(me) {
-                            c.on = false;
-                        }
-                    });
-                }
                 state.burst_left = 0;
                 continue;
             }
