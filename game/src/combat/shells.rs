@@ -284,7 +284,6 @@ pub(super) fn shells(
     ),
 ) {
     let dt = time.delta_secs();
-    let now = time.elapsed_secs();
     // Torpedoes and mines in flight, for point-defence intercepts; each is shot down at most once.
     let threats: Vec<(Entity, Vec3, Side)> =
         q.iter().filter(|(_, s, _)| s.bullet.starts_with(TORPEDO_BULLET) || matches!(s.payload, Payload::Mine { .. })).map(|(e, s, t)| (e, t.translation, s.side)).collect();
@@ -403,7 +402,8 @@ pub(super) fn shells(
                 && !s.harmless
             {
                 let [lo, hi, ..] = bd.damage["Dragon"];
-                d.hurt(rng.range(lo, hi), s.shooter, now);
+                // Retail rolls the same difficulty factor against a dragon as against a computer ship (decoded; not measured on a dragon).
+                d.hurt(rng.range(lo, hi).round() * side_damage_scale(s.side, Side::Enemy, crate::menu::difficulty(), s.base));
             }
             hit_fx(&mut commands, &fxl, bd, p0 + (p1 - p0) * t, s.vel, None);
             commands.entity(e).despawn();
