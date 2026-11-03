@@ -238,6 +238,7 @@ against the reference footage; whether a particle's quad is size or twice size w
   are x0.9 per tick. The oldest point is dropped when its life ends. A multiplier of 0 stops laying points until every old one is
   gone.
 * texture offset along the trail scrolls 0.01 per tick (against the flow for `TextureFlowBack`), wrapping at 0.5.
+Ships with two `WakePlacement`s (Procyon Cruiser, Destroyer, Destroyer_FastTurn, Dreadnought and its Feather variant; all others have one or none) get one independent trail per placement.
 Remake: `wake.rs` (`Trail`, logic tested). Replaces the by-eye wake (distance-sampled points, 14 s life). PROVISIONAL: how the
 scroll offset and segment index enter the texture coordinates (the draw code was not found); the effect's draw order and height.
 
