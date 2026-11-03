@@ -100,7 +100,7 @@ struct Frames {
 }
 /// Idle / hover / pressed art of a button, swapped by its own `Interaction`.
 #[derive(Component)]
-struct States([(Handle<Image>, Rect); 3]);
+pub(super) struct States([(Handle<Image>, Rect); 3]);
 /// The radar disk's idle/hover/pressed art (the hover and pressed art live on another sheet).
 #[derive(Component)]
 struct RadarFace([(Handle<Image>, Rect); 3]);
@@ -151,17 +151,17 @@ fn overlay(mut commands: Commands, assets: Res<AssetServer>, mission: Option<Res
 }
 
 /// What the build needs to turn a sprite name into a node.
-struct Ctx<'a> {
-    assets: &'a AssetServer,
-    hud: &'a HudData,
-    s: f32,
+pub(super) struct Ctx<'a> {
+    pub(super) assets: &'a AssetServer,
+    pub(super) hud: &'a HudData,
+    pub(super) s: f32,
     /// Bar parts use their trimmed rects (non-Navy sets tile exactly; Navy parts share an edge pixel).
-    trim: bool,
+    pub(super) trim: bool,
 }
 impl Ctx<'_> {
     /// Image node and reference size of a sprite. `tight` keeps the full rect (parts that butt against each other); otherwise the
     /// rect is inset against sheet bleed.
-    fn sprite(&self, name: &str, tight: bool) -> Option<(ImageNode, Vec2)> {
+    pub(super) fn sprite(&self, name: &str, tight: bool) -> Option<(ImageNode, Vec2)> {
         let (sheet, r) = if tight && self.trim { sprite_trimmed(self.hud, name) } else { sprite_of(self.hud, name) }?;
         let standalone = format!("bar_{}_{}", self.hud.skin.to_lowercase(), name.to_lowercase());
         let path = format!("hud/tex/{standalone}.png");
@@ -176,7 +176,7 @@ impl Ctx<'_> {
         Some((node, r.size()))
     }
     /// The NoCursor / CursorOver / CursorDown art of a sprite (a missing state uses the idle art).
-    fn states(&self, name: &str) -> Option<States> {
+    pub(super) fn states(&self, name: &str) -> Option<States> {
         let idle = self.frame(name)?;
         let state = |k: &str| {
             sprite_area(self.hud, name, &format!("TextureArea - {k}"))
@@ -197,7 +197,7 @@ impl Ctx<'_> {
     fn frame(&self, name: &str) -> Option<(Handle<Image>, Rect)> {
         sprite_of(self.hud, name).map(|(sheet, r)| (self.assets.load::<Image>(format!("hud/tex/{sheet}.png")), inset(&sheet, r)))
     }
-    fn size_of(&self, name: &str) -> Vec2 {
+    pub(super) fn size_of(&self, name: &str) -> Vec2 {
         sprite_of(self.hud, name).map_or(Vec2::ZERO, |(_, r)| r.size())
     }
     /// Size of a bar part as drawn.
@@ -205,7 +205,7 @@ impl Ctx<'_> {
         if self.trim { sprite_trimmed(self.hud, name) } else { sprite_of(self.hud, name) }.map_or(Vec2::ZERO, |(_, r)| r.size())
     }
     /// Absolutely positioned node at reference position `(x, y)`.
-    fn abs(&self, x: f32, y: f32, size: Vec2) -> Node {
+    pub(super) fn abs(&self, x: f32, y: f32, size: Vec2) -> Node {
         Node { position_type: PositionType::Absolute, left: px(x, self.s), top: px(y, self.s), width: px(size.x, self.s), height: px(size.y, self.s), ..default() }
     }
 }
