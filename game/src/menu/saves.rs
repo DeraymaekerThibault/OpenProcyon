@@ -101,7 +101,6 @@ pub(super) fn save_actions(
                     for e in &old {
                         commands.entity(e).despawn();
                     }
-                    commands.remove_resource::<crate::campaign::Mission>();
                     close_overlay(&mut commands, &roots, &mut ig, &mut vtime);
                 }
                 next.set(Screen::Battle); // from the battle too: re-entering the state spawns the mission again
