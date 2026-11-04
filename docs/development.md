@@ -101,8 +101,11 @@ loop the simulation's pose is put back. So `FixedUpdate` systems only ever see t
 picking, flags, sails and particles follow the drawn one. The drawn pose lags the simulation by up to one tick (33 ms). Above 1x the
 overstep fraction still applies; while virtual time is paused it does not move, which holds the last drawn pose. Entities spawned in
 a tick are drawn where they spawned. A `Transform` written by a frame system (a scripted teleport) becomes the new simulation pose and
-snaps, and `Sinking` ships are not interpolated (`breakup` owns their pose). Systems in `FixedUpdate` that read propagated
-`GlobalTransform` (gun muzzles) see the drawn pose of their parent ship, as they always saw a once-per-frame propagation.
+snaps, and `Sinking` ships are not interpolated (`breakup` owns their pose). `GlobalTransform` is propagated once per frame in
+`PostUpdate`, from the drawn pose, but gunnery reads muzzle `GlobalTransform`s on the tick: so the first thing in every tick
+(`FixedPreUpdate`, `propagate_sim`) rebuilds the `GlobalTransform`s under each tracked entity whose `Transform` changed since the
+last tick from the simulation pose. Shell spawn points therefore do not depend on the frame rate; the cost is one extra walk over
+the moved ships' node trees per tick (30 per second), not per frame.
 
 ## Layers
 

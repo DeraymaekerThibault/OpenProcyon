@@ -81,11 +81,34 @@ fn draw(fixed: Res<Time<Fixed>>, mut q: Query<(&mut Transform, &mut Interp), Wit
     }
 }
 
+/// Start of every tick: `GlobalTransform`s under a tracked entity follow the simulation's pose. They are normally propagated once per
+/// frame in `PostUpdate`, from the drawn pose, and gunnery reads a muzzle's `GlobalTransform` on the tick; without this a shell's
+/// spawn point would depend on the frame rate. Only subtrees whose root moved since the last tick are walked; an unmoved root is
+/// drawn at its simulation pose, so the frame's propagation already left its subtree right.
+fn propagate_sim(
+    mut roots: Query<(Ref<Transform>, &mut GlobalTransform, Option<&Children>), (With<Interp>, Without<ChildOf>)>,
+    mut nodes: Query<(&Transform, &mut GlobalTransform, Option<&Children>), With<ChildOf>>,
+    mut stack: Local<Vec<(Entity, GlobalTransform)>>,
+) {
+    for (tf, mut global, children) in &mut roots {
+        if !tf.is_changed() {
+            continue;
+        }
+        global.set_if_neq(GlobalTransform::from(*tf));
+        stack.extend(children.into_iter().flatten().map(|c| (*c, *global)));
+        while let Some((e, parent)) = stack.pop() {
+            let Ok((local, mut global, children)) = nodes.get_mut(e) else { continue };
+            global.set_if_neq(parent * GlobalTransform::from(*local));
+            stack.extend(children.into_iter().flatten().map(|c| (*c, *global)));
+        }
+    }
+}
+
 pub fn plugin(app: &mut App) {
     use bevy::app::RunFixedMainLoopSystems::{AfterFixedMainLoop, BeforeFixedMainLoop};
     app.add_systems(RunFixedMainLoop, (attach, restore).chain().in_set(BeforeFixedMainLoop))
         .add_systems(RunFixedMainLoop, (attach, draw).chain().in_set(AfterFixedMainLoop))
         // Spawned during a tick: its first drawn pose is where it spawned, and the next tick records from there.
         .add_systems(FixedLast, attach)
-        .add_systems(FixedPreUpdate, record);
+        .add_systems(FixedPreUpdate, (record, propagate_sim));
 }

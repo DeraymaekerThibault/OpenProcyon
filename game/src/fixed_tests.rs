@@ -273,3 +273,35 @@ fn a_write_from_a_frame_system_is_a_teleport_not_a_glide() {
     let drawn = app.world().get::<Transform>(e).unwrap().translation;
     assert!(drawn.distance(far) < 1.0, "drawn {drawn:?}, expected near {far:?}");
 }
+
+/// A child of the ship (a gun muzzle) as seen on the tick: `GlobalTransform` is propagated per frame in `PostUpdate`, from the
+/// drawn pose, so only the tick-start propagation keeps what gunnery reads on the simulation's pose.
+#[derive(Component)]
+struct Muzzle;
+#[derive(Resource, Default)]
+struct MuzzleView(Vec<Vec3>);
+
+fn see_muzzle(q: Query<&GlobalTransform, With<Muzzle>>, mut view: ResMut<MuzzleView>) {
+    view.0.push(q.single().unwrap().translation());
+}
+
+#[test]
+fn a_childs_global_transform_on_the_tick_follows_the_simulation_pose() {
+    let offset = Vec3::new(0.5, 1.5, -0.25);
+    let (mut app, ship) = interpolated_ship();
+    app.add_plugins(bevy::transform::TransformPlugin).init_resource::<MuzzleView>().add_systems(FixedUpdate, see_muzzle.in_set(BattleSet::Commands).after(see_start));
+    app.world_mut().spawn((Muzzle, Transform::from_translation(offset), ChildOf(ship)));
+    frame(&mut app, 33);
+    frame_micros(&mut app, 16_500); // drawn half-way: PostUpdate propagates the drawn pose
+    frame_micros(&mut app, 16_500); // tick
+    frame(&mut app, 99); // three more ticks in one frame
+    let (view, muzzles) = (app.world().resource::<TickView>(), app.world().resource::<MuzzleView>());
+    assert_eq!(muzzles.0.len(), 5);
+    assert_eq!(view.start.len(), 5);
+    let moved = view.start.iter().map(|t| t.translation).collect::<Vec<_>>();
+    assert!(moved.windows(2).all(|w| w[0] != w[1]), "the ship moves between ticks");
+    for (i, (pose, seen)) in view.start.iter().zip(&muzzles.0).enumerate() {
+        let want = pose.transform_point(offset);
+        assert!(seen.distance(want) < 1e-4, "tick {i}: the muzzle was at {seen:?}, the simulation pose puts it at {want:?}");
+    }
+}
