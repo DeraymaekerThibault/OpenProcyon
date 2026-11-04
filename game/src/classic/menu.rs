@@ -16,11 +16,11 @@ use crate::menu::{
     Action, BuildMenu, Cell, Choice, CtrlUi, FLEET_SIZE, InGame, Kind, MenuKey, MenuModel, MenuRoot, Page, RACES, RunButtons, SaveUi, Screen, ScrollKind, Skirmish, SliderTrack,
     VICTORY_LIMIT, menu_active, offered, pretty, strings, text_of,
 };
-use crate::sprites::{BODY_FONT, Fonts, HudData, IDLE};
+use crate::sprites::{BODY_FONT, Fonts, HudData};
 
 use super::widgets::{
     Ctx, GOLD, HEADING, PICKED, Rest, arrow, canvas, cell, disabled, dropdown, fleet_bar, full_screen, info_panel, list_row, piece, piece_flipped, pulldown_cell, radio, scrollbar,
-    selected_tab, slider, sprite, stretched_window, victory_points, wheel_step, wrapped,
+    selected_tab, size_of, slider, stretched_window, victory_points, wheel_step, wrapped,
 };
 
 pub fn plugin(app: &mut App) {
@@ -609,8 +609,8 @@ fn dialog_frame([l, t, r, b]: [f32; 4]) -> [f32; 4] {
 /// the faint `FrontEndMap` contour overlay and the `FrontEnd_TP_Logo` centred at the top. The engine draws these, not the screen files.
 /// PROVISIONAL: which scene a screen shows is taken from screenshots (Skirmish 2, Options pages 1), 0 elsewhere.
 fn frontend_backdrop(ctx: &Ctx, c: &mut ChildSpawnerCommands, scene: usize) {
-    if let Some((_, r)) = sprite(ctx.hud, "FrontEnd_Letterbox_Tile", IDLE) {
-        let (w, h) = (r.width(), r.height());
+    if let Some(r) = size_of("FrontEnd_Letterbox_Tile") {
+        let (w, h) = (r.x, r.y);
         let mut x = 0.0;
         while x < 800.0 {
             for (y, flip) in [(113.0 - h, false), (507.0, true)] {
@@ -621,8 +621,8 @@ fn frontend_backdrop(ctx: &Ctx, c: &mut ChildSpawnerCommands, scene: usize) {
     }
     ctx.image(c, &format!("menu/frontendscreen{scene}.png"), Some(Rect::new(0.0, 0.0, 800.0, 394.0)), 0.0, 113.0, 800.0, 394.0, Color::WHITE);
     ctx.image(c, "menu/frontendmap.png", None, 0.0, 113.0 + (394.0 - 375.0) / 2.0, 800.0, 375.0, Color::WHITE);
-    if let Some((_, r)) = sprite(ctx.hud, "FrontEnd_TP_Logo", IDLE) {
-        piece(ctx, c, "FrontEnd_TP_Logo", [400.0 - r.width() / 2.0, 0.0, 400.0 + r.width() / 2.0, r.height()]);
+    if let Some(r) = size_of("FrontEnd_TP_Logo") {
+        piece(ctx, c, "FrontEnd_TP_Logo", [400.0 - r.x / 2.0, 0.0, 400.0 + r.x / 2.0, r.y]);
     }
 }
 

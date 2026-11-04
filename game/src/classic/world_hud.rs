@@ -4,7 +4,7 @@ use bevy::prelude::*;
 
 use crate::combat::{Health, Target};
 use crate::panels::{REF_H, Toggles, cinematic};
-use crate::sprites::{Fonts, HudData, image, sliced, sprite_of};
+use crate::sprites::{Fonts, HudData, size_of, sliced, sprite};
 use crate::{Library, PlayerShip, Ship};
 
 pub fn plugin(app: &mut App) {
@@ -163,16 +163,16 @@ struct Labeled;
 struct Reticle(usize);
 
 fn spawn_reticle(mut commands: Commands, assets: Res<AssetServer>, hud: Res<HudData>) {
-    let Some((img, _)) = image(&assets, &hud, "ShipTargeted_Icon_Enemy") else { return };
+    let Some(art) = sprite(&assets, &hud, "ShipTargeted_Icon_Enemy") else { return };
     // The sprite's tip points up-right, i.e. it belongs at the bottom-left corner; the others are the same sprite turned by 90 degrees.
+    // The turning node is the whole (square) box, sized every frame; the art sits in it by shares, so it turns about the box centre.
+    let [left, top, width, height] = art.own().fractions();
     for i in 0..4 {
-        commands.spawn((
-            Reticle(i),
-            img.clone(),
-            Node { position_type: PositionType::Absolute, ..default() },
-            UiTransform::from_rotation(Rot2::degrees(-90.0 * i as f32)),
-            Visibility::Hidden,
-        ));
+        commands
+            .spawn((Reticle(i), Node { position_type: PositionType::Absolute, ..default() }, UiTransform::from_rotation(Rot2::degrees(-90.0 * i as f32)), Visibility::Hidden))
+            .with_children(|turn| {
+                turn.spawn((art.image_node(), Node { position_type: PositionType::Absolute, left, top, width, height, ..default() }));
+            });
     }
 }
 
@@ -222,7 +222,7 @@ fn spawn_labels(
         commands.entity(e).insert(Labeled);
         // Reference video: thin white ribbon (ShipNameBackdrop_*_WhiteBanner) tinted red for our side, blue for the others.
         let tint = banner_tint(ship.side, mission, owner);
-        let part = |side: &str| sprite_of(&hud, &format!("ShipNameBackdrop_{side}_WhiteBanner"));
+        let part = |side: &str| size_of(&hud, &format!("ShipNameBackdrop_{side}_WhiteBanner"));
         let (Some(l), Some(c), Some(r)) = (part("Left"), part("Center"), part("Right")) else { continue };
         let text = mission
             .map(|m| m.name.clone())
@@ -232,13 +232,13 @@ fn spawn_labels(
         // PROVISIONAL font scale; the ribbon's opaque strip is only 21 px, not its 33 px atlas height.
         let font_scale = 1.05;
         let tw = font.width(&text) * font_scale;
-        let total = l.1.width() + r.1.width() + c.1.width().max(tw + 8.0);
+        let total = l.x + r.x + c.x.max(tw + 8.0);
         let text_pos = Vec2::new(((total - tw) / 2.0).round(), ((22.0 - font.height * font_scale) / 2.0 + 3.0).round()); // +3: the line box sits above the ribbon strip
         let root = commands.spawn((Label { ship: e, width: total }, Node { position_type: PositionType::Absolute, ..default() }, Visibility::Hidden)).id();
         let mut kids = vec![];
-        let mut img = sliced(&assets, "ribbon", hud.skin, "nocursor", l.1.width(), r.1.width());
+        let mut img = sliced(&assets, "ribbon", hud.skin, "nocursor", l.x, r.x);
         img.color = tint;
-        kids.push(commands.spawn((img, Node { position_type: PositionType::Absolute, ..default() }, RefRect { pos: Vec2::ZERO, size: Vec2::new(total, l.1.height()) })).id());
+        kids.push(commands.spawn((img, Node { position_type: PositionType::Absolute, ..default() }, RefRect { pos: Vec2::ZERO, size: Vec2::new(total, l.y) })).id());
         let wrapper = commands
             .spawn((
                 Node { position_type: PositionType::Absolute, justify_content: JustifyContent::Center, ..default() },

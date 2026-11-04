@@ -84,7 +84,6 @@ fn board_bars(
 
 /// `boarder_left`: the boarder's disc is the left one (the friendly side sits on the left); the sword goes on the boarder, the shield on the target.
 fn spawn_bar(commands: &mut Commands, assets: &AssetServer, hud: &HudData, boarder: Entity, scale: f32, boarder_left: bool) {
-    use crate::sprites::image;
     let absolute = |at: Vec2, size: Vec2| Node {
         position_type: PositionType::Absolute,
         left: Val::Px(at.x * scale),
@@ -108,9 +107,12 @@ fn spawn_bar(commands: &mut Commands, assets: &AssetServer, hud: &HudData, board
             ("BOARDINGSTATUS_ATTACKERICON", sword, Color::WHITE),
             ("BOARDINGSTATUS_DEFENDERICON", shield, Color::WHITE),
         ] {
-            if let Some((mut image, size)) = image(assets, hud, name) {
+            if let Some(art) = crate::sprites::sprite(assets, hud, name) {
+                let mut image = art.image_node();
                 image.color = tint;
-                bar.spawn((image, absolute(at, size)));
+                let mut node = absolute(at, art.size);
+                art.own().place(&mut node, scale, UiRect::DEFAULT);
+                bar.spawn((image, node));
             }
         }
     });

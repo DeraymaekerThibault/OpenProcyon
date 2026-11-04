@@ -17,7 +17,7 @@ use crate::panels::{
     Contact, DockingStatus, Gauge, GunButton, HeadState, HudRoot, HudSet, MAX_CONTACTS, PanicButton, PauseButton, REF_H, Radar, RadarButton, ShipIconButton, Solid, ToggleButton,
     WeaponPanel, gauge_value, px,
 };
-use crate::sprites::{HudData, IDLE, inset, offset, sheet_scale, sprite_area, sprite_of, sprite_trimmed, src};
+use crate::sprites::{HudData, IDLE, Sprite, View, meta, offset, size_of, sprite, sprite_state};
 use crate::{Library, PlayerShip, Ship};
 
 /// Ordered bar parts and optional decorative backdrops, editable through the asset overlay.
@@ -42,11 +42,14 @@ impl BarParts {
     }
 }
 
-/// Running / paused art of the bar's PAUSE button.
+/// Running / paused art of the bar's PAUSE button, with the layout margin its node carries.
 #[derive(Component)]
 struct PauseArt {
-    running: ImageNode,
-    paused: ImageNode,
+    running: Sprite,
+    paused: Sprite,
+    /// The part's gap in the bar row (not part of the sprite's box).
+    extra: UiRect,
+    s: f32,
 }
 #[derive(Component)]
 struct Dial;
@@ -64,9 +67,11 @@ const VOICE_FPS: f32 = 10.0;
 #[derive(Resource)]
 struct HeadFrames {
     /// `Portal_Closed`, `Portal_ClosedToOpen0..9`, `Portal_Open`.
-    iris: Vec<(Handle<Image>, Rect)>,
+    iris: Vec<Sprite>,
     /// `VoiceBox_Start`, `Frame0`, `Frame1`, `Stop`, then `Off`.
-    voice: Vec<(Handle<Image>, Rect)>,
+    voice: Vec<Sprite>,
+    /// Reference-to-screen scale the HUD was built at.
+    s: f32,
 }
 /// Iris frame for open progress 0..=1.
 fn iris_frame(progress: f32, frames: usize) -> usize {
@@ -74,14 +79,12 @@ fn iris_frame(progress: f32, frames: usize) -> usize {
 }
 #[derive(Component)]
 struct Sweep;
-/// A gauge fill that grows from the bottom: `full` is its sprite height and `top` its y (reference px, inside the parent) when full.
+/// A gauge fill that grows from the bottom: `top` is the y (reference px, inside the parent) of its sprite's box when full.
 #[derive(Component)]
 struct Fill {
     gauge: Gauge,
-    full: f32,
+    art: Sprite,
     top: f32,
-    base: Rect,
-    k: f32,
 }
 /// Weapon-panel slot of a gun bank: its status frame, or the gun's icon when `icon`.
 #[derive(Component)]
@@ -90,20 +93,24 @@ struct GunSlot {
     icon: bool,
 }
 
-/// Images that change at runtime, as (handle, source rect).
+/// Sprites that change at runtime, and the scale the HUD was built at.
 #[derive(Resource)]
 struct Frames {
-    gun: Vec<(Handle<Image>, Rect)>,
-    dial: Vec<(Handle<Image>, Rect)>,
-    sweep: Vec<(Handle<Image>, Rect)>,
-    icons: HashMap<String, (Handle<Image>, Rect)>,
+    gun: Vec<Sprite>,
+    dial: Vec<Sprite>,
+    sweep: Vec<Sprite>,
+    icons: HashMap<String, Sprite>,
+    s: f32,
 }
-/// Idle / hover / pressed art of a button, swapped by its own `Interaction`.
+/// Idle / hover / pressed art of a button, swapped by its own `Interaction` (`s`: the scale it was built at).
+#[derive(Component, Clone)]
+pub(super) struct States {
+    art: [Sprite; 3],
+    s: f32,
+}
+/// The radar disk's idle/hover/pressed art.
 #[derive(Component)]
-pub(super) struct States([(Handle<Image>, Rect); 3]);
-/// The radar disk's idle/hover/pressed art (the hover and pressed art live on another sheet).
-#[derive(Component)]
-struct RadarFace([(Handle<Image>, Rect); 3]);
+struct RadarFace(States);
 
 pub fn plugin(app: &mut App) {
     app.insert_resource(BarParts::load()).add_systems(
@@ -155,54 +162,56 @@ pub(super) struct Ctx<'a> {
     pub(super) assets: &'a AssetServer,
     pub(super) hud: &'a HudData,
     pub(super) s: f32,
-    /// Bar parts use their trimmed rects (non-Navy sets tile exactly; Navy parts share an edge pixel).
+    /// Bar parts leave their transparent right columns out of the layout (non-Navy sets tile exactly; Navy parts share an edge pixel).
     pub(super) trim: bool,
 }
 impl Ctx<'_> {
-    /// Image node and reference size of a sprite. `tight` keeps the full rect (parts that butt against each other); otherwise the
-    /// rect is inset against sheet bleed.
-    pub(super) fn sprite(&self, name: &str, tight: bool) -> Option<(ImageNode, Vec2)> {
-        let (sheet, r) = if tight && self.trim { sprite_trimmed(self.hud, name) } else { sprite_of(self.hud, name) }?;
-        let standalone = format!("bar_{}_{}", self.hud.skin.to_lowercase(), name.to_lowercase());
-        let path = format!("hud/tex/{standalone}.png");
-        let node = if tight && sheet_scale(&sheet) == 1.0 && crate::assets_dir().join(&path).exists() {
-            // Standalone bar sprites cannot sample their atlas neighbours at fractional UI scales.
-            ImageNode::new(self.assets.load(path))
-        } else {
-            let mut image = ImageNode::new(self.assets.load(format!("hud/tex/{sheet}.png")));
-            image.rect = Some(if tight && !self.trim { src(&sheet, r) } else { inset(&sheet, r) });
-            image
-        };
-        Some((node, r.size()))
+    /// The idle sprite of a component in the player's art set.
+    pub(super) fn sprite(&self, name: &str) -> Option<Sprite> {
+        sprite(self.assets, self.hud, name)
+    }
+    /// Image and absolutely positioned node drawing `art` at reference position `(x, y)`, trimmed art placed where the untrimmed
+    /// sprite would be.
+    pub(super) fn put(&self, art: &Sprite, x: f32, y: f32) -> (ImageNode, Node) {
+        self.put_box(art, x, y, art.size)
+    }
+    /// `put` with the sprite's whole box stretched over `to` reference px.
+    pub(super) fn put_box(&self, art: &Sprite, x: f32, y: f32, to: Vec2) -> (ImageNode, Node) {
+        let mut node = Node { position_type: PositionType::Absolute, left: px(x, self.s), top: px(y, self.s), ..default() };
+        art.fit(to).place(&mut node, self.s, UiRect::DEFAULT);
+        (art.image_node(), node)
     }
     /// The NoCursor / CursorOver / CursorDown art of a sprite (a missing state uses the idle art).
     pub(super) fn states(&self, name: &str) -> Option<States> {
-        let idle = self.frame(name)?;
-        let state = |k: &str| {
-            sprite_area(self.hud, name, &format!("TextureArea - {k}"))
-                .map_or(idle.clone(), |(sheet, r)| (self.assets.load::<Image>(format!("hud/tex/{sheet}.png")), inset(&sheet, r)))
-        };
-        Some(States([idle.clone(), state("CursorOver"), state("CursorDown")]))
+        let art = [IDLE, "CursorOver", "CursorDown"].map(|k| sprite_state(self.assets, self.hud, name, k));
+        let [Some(a), Some(b), Some(c)] = art else { return None };
+        Some(States { art: [a, b, c], s: self.s })
     }
     /// A button: its decorative arm (`detail`, drawn first) and the button sprite at `at` inside it, with hover/press art.
     fn toggle(&self, commands: &mut Commands, parent: Entity, detail: &str, detail_at: Vec2, button: &str, at: Vec2, marker: impl Bundle) {
-        if let Some((img, sz)) = self.sprite(detail, false) {
-            commands.spawn((img, self.abs(detail_at.x, detail_at.y, sz), ChildOf(parent), Solid, Interaction::None, FocusPolicy::Block));
+        if let Some(art) = self.sprite(detail) {
+            commands.spawn((self.put(&art, detail_at.x, detail_at.y), ChildOf(parent), Solid, Interaction::None, FocusPolicy::Block));
         }
-        if let (Some((img, sz)), Some(states)) = (self.sprite(button, false), self.states(button)) {
+        if let (Some(art), Some(states)) = (self.sprite(button), self.states(button)) {
             let at = detail_at + at;
-            commands.spawn((marker, img, states, self.abs(at.x, at.y, sz), ChildOf(parent), Solid, Interaction::None, FocusPolicy::Block));
+            commands.spawn((marker, self.put(&art, at.x, at.y), states, ChildOf(parent), Solid, Interaction::None, FocusPolicy::Block));
         }
     }
-    fn frame(&self, name: &str) -> Option<(Handle<Image>, Rect)> {
-        sprite_of(self.hud, name).map(|(sheet, r)| (self.assets.load::<Image>(format!("hud/tex/{sheet}.png")), inset(&sheet, r)))
+    fn frame(&self, name: &str) -> Option<Sprite> {
+        self.sprite(name)
     }
+    /// Untrimmed reference size of a sprite (zero when the art set lacks it).
     pub(super) fn size_of(&self, name: &str) -> Vec2 {
-        sprite_of(self.hud, name).map_or(Vec2::ZERO, |(_, r)| r.size())
+        size_of(self.hud, name).unwrap_or(Vec2::ZERO)
     }
-    /// Size of a bar part as drawn.
+    /// Size of a bar part as laid out: with `trim`, less its transparent right columns.
     fn bar_size(&self, name: &str) -> Vec2 {
-        if self.trim { sprite_trimmed(self.hud, name) } else { sprite_of(self.hud, name) }.map_or(Vec2::ZERO, |(_, r)| r.size())
+        meta(self.hud, name, IDLE).map_or(Vec2::ZERO, |m| if self.trim { Vec2::new(m.size.x - m.trim.right, m.size.y) } else { m.size })
+    }
+    /// How a bar part sits in its layout box (`bar_size`): the same box either way, the art placed by its trim.
+    fn bar_view(&self, art: &Sprite) -> View {
+        let size = if self.trim { Vec2::new(art.size.x - art.trim.right, art.size.y) } else { art.size };
+        art.view(Rect::from_corners(Vec2::ZERO, size), size)
     }
     /// Absolutely positioned node at reference position `(x, y)`.
     pub(super) fn abs(&self, x: f32, y: f32, size: Vec2) -> Node {
@@ -241,7 +250,7 @@ fn build(
         commands.entity(e).despawn();
     }
     let class = &lib.classes[player.class];
-    let has_wings = sprite_of(&hud, "MainBar_LeftStretchedDetail").is_some();
+    let has_wings = size_of(&hud, "MainBar_LeftStretchedDetail").is_some();
     let c = Ctx { assets: &assets, hud: &hud, s, trim: !has_wings };
     let solid = || (Interaction::None, FocusPolicy::Block, Solid);
 
@@ -298,20 +307,9 @@ fn build(
                     let h = members.iter().map(|i| c.bar_size(&bar.0[*i].0).y).fold(0.0, f32::max);
                     let wing = commands.spawn((Node { width: px(w, s), height: px(h, s), margin: gap, ..default() }, ChildOf(row))).id();
                     let tile = c.size_of(strip);
-                    for k in 0..(w / (tile.x - 1.0)).ceil() as usize {
-                        if let Some((img, ts)) = c.sprite(strip, true) {
-                            commands.spawn((
-                                img,
-                                Node {
-                                    position_type: PositionType::Absolute,
-                                    left: px(k as f32 * (tile.x - 1.0), s),
-                                    top: Val::Px(0.0),
-                                    width: px(ts.x, s),
-                                    height: px(ts.y, s),
-                                    ..default()
-                                },
-                                ChildOf(wing),
-                            ));
+                    if let Some(art) = c.sprite(strip) {
+                        for k in 0..(w / (tile.x - 1.0)).ceil() as usize {
+                            commands.spawn((c.put(&art, k as f32 * (tile.x - 1.0), 0.0), ChildOf(wing)));
                         }
                     }
                     let mut x = 0.0;
@@ -334,12 +332,8 @@ fn build(
         ))
         .id();
     let (bg, bg_pos) = (c.size_of("Compass_Background"), offset(&hud, "COMPASS_WINDOW_BACKGROUND"));
-    if let Some((img, sz)) = c.sprite("Compass_Background", false) {
-        let face = [IDLE, "CursorOver", "CursorDown"].map(|k| {
-            let (sheet, r) = sprite_area(&hud, "Compass_Background", &format!("TextureArea - {k}")).expect("Compass_Background art");
-            (assets.load::<Image>(format!("hud/tex/{sheet}.png")), inset(&sheet, r))
-        });
-        commands.spawn((img, c.abs(bg_pos.x, bg_pos.y, sz), RadarFace(face), ChildOf(compass)));
+    if let (Some(art), Some(face)) = (c.sprite("Compass_Background"), c.states("Compass_Background")) {
+        commands.spawn((c.put(&art, bg_pos.x, bg_pos.y), RadarFace(face), ChildOf(compass)));
     }
     let banks = combat::banks(&lib, class);
     let frames = Frames {
@@ -350,20 +344,22 @@ fn build(
         dial: (0..4).filter_map(|i| c.frame(&format!("SpeedControl_CurrActive{i}_NextActive{i}"))).collect(),
         sweep: (0..10).filter_map(|i| c.frame(&format!("HUDRadar_Sweep_Frame{i}"))).collect(),
         icons: banks.iter().map(|b| combat::gun_icon(guns.gun(b.1))).filter_map(|n| c.frame(&n).map(|f| (n, f))).collect(),
+        s,
     };
-    if let Some((img, sz)) = c.sprite("HUDRadar_Sweep_Frame0", false) {
+    if let Some(art) = c.sprite("HUDRadar_Sweep_Frame0") {
         let o = offset(&hud, "RADAR_SWEEP_OFFSET_FROM_TOPLEFT");
-        commands.spawn((Sweep, img, c.abs(o.x, o.y, sz), ChildOf(compass)));
+        commands.spawn((Sweep, c.put(&art, o.x, o.y), ChildOf(compass)));
     }
     for (friendly, icon) in [(false, "HUDRADAR_ICON_ENEMYSHIP_FRAME0"), (true, "HUDRADAR_ICON_FRIENDLYSHIP_FRAME0")] {
-        if let Some((img, sz)) = c.sprite(icon, false) {
+        if let Some(art) = c.sprite(icon) {
+            let (img, node) = c.put(&art, 0.0, 0.0);
             for i in 0..MAX_CONTACTS {
-                commands.spawn((Contact(i, friendly), img.clone(), c.abs(0.0, 0.0, sz), Visibility::Hidden, ChildOf(compass)));
+                commands.spawn((Contact(i, friendly), img.clone(), node.clone(), Visibility::Hidden, ChildOf(compass)));
             }
         }
     }
-    if let Some((img, sz)) = c.sprite("COMPASS_OVERLAY", false) {
-        commands.spawn((img, c.abs(0.0, 0.0, sz), ChildOf(compass), solid()));
+    if let Some(art) = c.sprite("COMPASS_OVERLAY") {
+        commands.spawn((c.put(&art, 0.0, 0.0), ChildOf(compass), solid()));
     }
     commands.spawn((RadarButton, c.abs(bg_pos.x, bg_pos.y, bg), ChildOf(compass), solid()));
     {
@@ -376,16 +372,19 @@ fn build(
     commands.insert_resource(Radar { centre: bg_pos + bg / 2.0, radius: bg.x * 0.47, contact_size: c.size_of("HUDRADAR_ICON_ENEMYSHIP_FRAME0") });
     {
         // The speed gauge hangs off the compass's top-right shoulder (reference video): its top edge is 44 px above the compass.
-        if let Some((img, sz)) = c.sprite("SpeedControl_CurrActive0_NextActive0", false) {
-            commands.spawn((
-                Dial,
-                crate::panels::EngineDial,
-                img,
-                Node { position_type: PositionType::Absolute, left: px(76.0, s), bottom: px(overlay.y + 44.0 - sz.y, s), width: px(sz.x, s), height: px(sz.y, s), ..default() },
-                RelativeCursorPosition::default(),
-                ChildOf(root),
-                solid(),
-            ));
+        if let Some(art) = c.sprite("SpeedControl_CurrActive0_NextActive0") {
+            // The clickable box is the whole reference box (the dial input reads the cursor inside it); the art sits in it by its trim.
+            let sz = art.size;
+            let dial = commands
+                .spawn((
+                    crate::panels::EngineDial,
+                    Node { position_type: PositionType::Absolute, left: px(76.0, s), bottom: px(overlay.y + 44.0 - sz.y, s), width: px(sz.x, s), height: px(sz.y, s), ..default() },
+                    RelativeCursorPosition::default(),
+                    ChildOf(root),
+                    solid(),
+                ))
+                .id();
+            commands.spawn((Dial, c.put(&art, 0.0, 0.0), ChildOf(dial)));
         }
     }
 
@@ -407,7 +406,7 @@ fn talking_head(commands: &mut Commands, c: &Ctx, root: Entity) {
         ["TalkingHead_Portal_Closed"].into_iter().map(String::from).chain((0..10).map(|i| format!("TalkingHead_Portal_ClosedToOpen{i}"))).chain(["TalkingHead_Portal_Open".into()])
     };
     let voice = ["Start", "Frame0", "Frame1", "Stop", "Off"].map(|n| format!("TalkingHead_Portal_VoiceBox_{n}"));
-    commands.insert_resource(HeadFrames { iris: names().filter_map(|n| c.frame(&n)).collect(), voice: voice.iter().filter_map(|n| c.frame(n)).collect() });
+    commands.insert_resource(HeadFrames { iris: names().filter_map(|n| c.frame(&n)).collect(), voice: voice.iter().filter_map(|n| c.frame(n)).collect(), s });
     let head = commands
         .spawn((
             Node { position_type: PositionType::Absolute, right: Val::Px(0.0), bottom: Val::Px(0.0), width: px(housing.x, s), height: px(housing.y, s), ..default() },
@@ -416,21 +415,21 @@ fn talking_head(commands: &mut Commands, c: &Ctx, root: Entity) {
         .id();
     let (face_at, iris_at) = (offset(hud, "Right_TalkingHead_Character_From_TopLeft"), offset(hud, "Right_TalkingHead_PortalOverlay_From_TopLeft"));
     let portal = Vec2::splat(80.0);
-    let layer = |commands: &mut Commands, kind: Head, art: Option<(ImageNode, Vec2)>, at: Vec2, hidden: bool| {
-        let Some((img, sz)) = art else { return };
+    let layer = |commands: &mut Commands, kind: Head, art: Option<Sprite>, at: Vec2, hidden: bool| {
+        let Some(art) = art else { return };
         let vis = if hidden { Visibility::Hidden } else { Visibility::Inherited };
-        commands.spawn((kind, img, c.abs(at.x, at.y, sz), vis, ChildOf(head)));
+        commands.spawn((kind, c.put(&art, at.x, at.y), vis, ChildOf(head)));
     };
     {
         // Draw order: portrait, iris, housing (its ring is transparent), then the light and voice box on the wood.
-        layer(commands, Head::Face, Some((ImageNode::default(), portal)), face_at, true);
-        layer(commands, Head::Iris, c.sprite("TalkingHead_Portal_Closed", false), iris_at, false);
-        if let Some((img, sz)) = c.sprite("TalkingHead_Solid_Background", false) {
-            commands.spawn((img, c.abs(0.0, 0.0, sz), ChildOf(head), solid()));
+        commands.spawn((Head::Face, ImageNode::default(), c.abs(face_at.x, face_at.y, portal), Visibility::Hidden, ChildOf(head)));
+        layer(commands, Head::Iris, c.sprite("TalkingHead_Portal_Closed"), iris_at, false);
+        if let Some(art) = c.sprite("TalkingHead_Solid_Background") {
+            commands.spawn((c.put(&art, 0.0, 0.0), ChildOf(head), solid()));
         }
         // PROVISIONAL placement, measured on the housing art: the light sits over its green lamp, the voice box in the name plate.
-        layer(commands, Head::Light, c.sprite("TalkingHead_Portal_Light_On", false), Vec2::new(75.0, 2.0), true);
-        layer(commands, Head::Voice, c.sprite("TalkingHead_Portal_VoiceBox_Off", false), Vec2::new(20.0, 103.0), false);
+        layer(commands, Head::Light, c.sprite("TalkingHead_Portal_Light_On"), Vec2::new(75.0, 2.0), true);
+        layer(commands, Head::Voice, c.sprite("TalkingHead_Portal_VoiceBox_Off"), Vec2::new(20.0, 103.0), false);
     }
     // The ship-bar toggle's arm stands on the housing's top-right corner, like the weapon toggle on the compass.
     let detail = c.size_of("ShipBar_ToggleDetail");
@@ -455,58 +454,55 @@ fn weapon_panel(commands: &mut Commands, c: &Ctx, root: Entity, class: &combat::
             ChildOf(root),
         ))
         .id();
-    if let Some((img, sz)) = c.sprite("WeaponBar_ShipIcon_Background", false) {
-        commands.spawn((img, c.abs(0.0, 0.0, sz), ChildOf(weapon), solid()));
+    if let Some(art) = c.sprite("WeaponBar_ShipIcon_Background") {
+        commands.spawn((c.put(&art, 0.0, 0.0), ChildOf(weapon), solid()));
     }
-    if let Some((img, sz)) = c.sprite(&class.icon("WeaponBar"), false) {
+    if let Some(art) = c.sprite(&class.icon("WeaponBar")) {
         let o = offset(hud, "WEAPONBAR_SHIPICON_OFFSET_FROM_TOPLEFT");
-        commands.spawn((img, c.abs(o.x, o.y, sz), ChildOf(weapon)));
+        commands.spawn((c.put(&art, o.x, o.y), ChildOf(weapon)));
     }
     for (bank, first) in banks {
         let pos = offset(hud, &format!("WeaponBar_SlotOffset_From_TopLeft_{bank:02}"));
         let icon_at = pos + offset(hud, "Offset_WeaponBar_GunIcon");
-        if let Some((img, sz)) = c.sprite("WeaponBar_GunBankCanHitTarget", false) {
-            commands.spawn((GunSlot { bank: *bank, icon: false }, img, c.abs(icon_at.x, icon_at.y, sz), ChildOf(weapon)));
+        if let Some(art) = c.sprite("WeaponBar_GunBankCanHitTarget") {
+            commands.spawn((GunSlot { bank: *bank, icon: false }, c.put(&art, icon_at.x, icon_at.y), ChildOf(weapon)));
         }
-        if let Some((img, sz)) = c.sprite(&combat::gun_icon(guns.gun(*first)), false) {
-            commands.spawn((GunSlot { bank: *bank, icon: true }, GunButton(*bank), img, c.abs(icon_at.x, icon_at.y, sz), ChildOf(weapon), solid()));
+        if let Some(art) = c.sprite(&combat::gun_icon(guns.gun(*first))) {
+            commands.spawn((GunSlot { bank: *bank, icon: true }, GunButton(*bank), c.put(&art, icon_at.x, icon_at.y), ChildOf(weapon), solid()));
         }
         // Recharge bar beside the icon: the empty bar (WeaponBar_SlotBackground) with the yellow WeaponBar_RechargeStatus growing from the bottom.
         // PROVISIONAL: drawing order/fill direction are read from the artwork; the original's drawing code was not found.
-        if let (Some((outline, osz)), Some((img, fsz))) = (c.sprite("WeaponBar_SlotBackground", false), c.sprite("WeaponBar_RechargeStatus", false)) {
+        if let (Some(outline), Some(fill)) = (c.sprite("WeaponBar_SlotBackground"), c.sprite("WeaponBar_RechargeStatus")) {
             let at = pos + offset(hud, "Offset_WeaponBar_Recharge");
-            commands.spawn((outline, c.abs(at.x, at.y, osz), ChildOf(weapon)));
-            let base = img.rect.unwrap();
-            let k = sprite_of(hud, "WeaponBar_RechargeStatus").map_or(1.0, |(sheet, _)| sheet_scale(&sheet));
-            commands.spawn((Fill { gauge: Gauge::Recharge(*bank), full: fsz.y, top: at.y, base, k }, img, c.abs(at.x, at.y, fsz), ChildOf(weapon)));
+            commands.spawn((c.put(&outline, at.x, at.y), ChildOf(weapon)));
+            commands.spawn((Fill { gauge: Gauge::Recharge(*bank), art: fill.clone(), top: at.y }, c.put(&fill, at.x, at.y), ChildOf(weapon)));
         }
     }
 }
 
 /// One bar part plus whatever sits on it: the ship icon on the ship frame, a fill on each status gauge.
 fn spawn_part(commands: &mut Commands, c: &Ctx, class: &combat::Class, parent: Entity, name: &str, mut node: Node) {
-    let Some((img, size)) = c.sprite(name, true) else { return };
-    node.width = px(size.x, c.s);
-    node.height = px(size.y, c.s);
-    let pause_art = (name == "MAINBAR_IS_NOT_PAUSED_BUTTON").then(|| c.sprite("MAINBAR_IS_PAUSED_BUTTON", true)).flatten();
-    let running = img.clone();
+    let Some(art) = c.sprite(name) else { return };
+    let extra = node.margin;
+    let view = c.bar_view(&art);
+    view.place(&mut node, c.s, extra);
+    let mut img = art.image_node();
+    img.rect = view.rect;
+    let pause_art = (name == "MAINBAR_IS_NOT_PAUSED_BUTTON").then(|| c.sprite("MAINBAR_IS_PAUSED_BUTTON")).flatten();
     let part = commands.spawn((img, node, ChildOf(parent), Solid, Interaction::None, FocusPolicy::Block)).id();
     if name == "MainBar_PanicButton" {
         commands.entity(part).insert(PanicButton);
     }
-    if let Some((paused, _)) = pause_art {
-        commands.entity(part).insert((PauseButton, PauseArt { running, paused }));
+    if let Some(paused) = pause_art {
+        commands.entity(part).insert((PauseButton, PauseArt { running: art.clone(), paused, extra, s: c.s }));
     }
     if name == "MainBar_ShipIcon" {
         commands.entity(part).insert(ShipIconButton);
     }
     let fill = |commands: &mut Commands, sprite: &str, offset_name: &str, gauge: Gauge| {
-        let Some((img, fsize)) = c.sprite(sprite, false) else { return };
+        let Some(art) = c.sprite(sprite) else { return };
         let o = offset(c.hud, offset_name);
-        let top = o.y;
-        let base = img.rect.unwrap();
-        let k = sprite_of(c.hud, sprite).map_or(1.0, |(sheet, _)| sheet_scale(&sheet));
-        commands.spawn((Fill { gauge, full: fsize.y, top, base, k }, img, c.abs(o.x, top, fsize), ChildOf(part)));
+        commands.spawn((Fill { gauge, art: art.clone(), top: o.y }, c.put(&art, o.x, o.y), ChildOf(part)));
     };
     if name == "MainBar_FleetFormationsButton" {
         commands.entity(part).insert(crate::panels::FleetButton::Commands);
@@ -516,12 +512,12 @@ fn spawn_part(commands: &mut Commands, c: &Ctx, class: &combat::Class, parent: E
     }
     match name {
         "MainBar_ShipIcon" => {
-            if let Some((img, isz)) = c.sprite(&class.icon("ShipBar"), false) {
+            if let Some(icon) = c.sprite(&class.icon("ShipBar")) {
                 let o = offset(c.hud, "MainBar_ShipIcon_Offset_From_Background_TopLeft");
-                let portrait = commands.spawn((img, c.abs(o.x, o.y, isz), ChildOf(part))).id();
-                if let Some((status, sz)) = c.sprite("ShipStatus_Icon_Docking_Frame0", false) {
+                let portrait = commands.spawn((c.put(&icon, o.x, o.y), ChildOf(part))).id();
+                if let Some(status) = c.sprite("ShipStatus_Icon_Docking_Frame0") {
                     let at = offset(c.hud, "PRIMARY_SHIP_STATUS_ICON_OFFSET_FROM_PRIMARYSHIPICON_TOPLEFT");
-                    commands.spawn((DockingStatus, status, c.abs(at.x, at.y, sz), Visibility::Hidden, ChildOf(portrait)));
+                    commands.spawn((DockingStatus, c.put(&status, at.x, at.y), Visibility::Hidden, ChildOf(portrait)));
                 }
             }
         }
@@ -532,20 +528,12 @@ fn spawn_part(commands: &mut Commands, c: &Ctx, class: &combat::Class, parent: E
     }
 }
 
-fn update_dial(player: Single<&Ship, With<PlayerShip>>, frames: Option<Res<Frames>>, mut q: Query<&mut ImageNode, With<Dial>>) {
+fn update_dial(player: Single<&Ship, With<PlayerShip>>, frames: Option<Res<Frames>>, mut q: Query<(&mut ImageNode, &mut Node), With<Dial>>) {
     let Some(frames) = frames else { return };
     // Retail frames 0..3 match Stop / Slow / Full / Emergency (red through dark green).
-    let Some((h, r)) = frames.dial.get(player.order.min(3)) else { return };
-    for mut img in &mut q {
-        show(&mut img, h, *r);
-    }
-}
-
-/// Shows sprite `(h, r)` on an image node, touching the node (and so re-rendering it) only when it changes.
-fn show(img: &mut Mut<ImageNode>, h: &Handle<Image>, r: Rect) {
-    if img.image != *h || img.rect != Some(r) {
-        img.image = h.clone();
-        img.rect = Some(r);
+    let Some(art) = frames.dial.get(player.order.min(3)) else { return };
+    for (mut img, mut node) in &mut q {
+        art.show(&mut img, &mut node, frames.s);
     }
 }
 
@@ -556,19 +544,18 @@ fn head_art(
     hud: Res<HudData>,
     assets: Res<AssetServer>,
     frames: Option<Res<HeadFrames>>,
-    mut parts: Query<(&Head, &mut ImageNode, &mut Visibility)>,
+    mut parts: Query<(&Head, &mut ImageNode, &mut Node, &mut Visibility)>,
 ) {
     let Some(frames) = frames.filter(|f| !f.iris.is_empty() && f.voice.len() == 5) else { return };
     let (open, speaking) = (head.open, head.speaking);
     let cycle = (time.elapsed_secs() * VOICE_FPS) as usize % 4;
-    for (kind, mut img, mut vis) in &mut parts {
-        let set = |img: &mut Mut<ImageNode>, (h, r): &(Handle<Image>, Rect)| show(img, h, *r);
+    for (kind, mut img, mut node, mut vis) in &mut parts {
         match kind {
-            Head::Iris => set(&mut img, &frames.iris[iris_frame(open, frames.iris.len())]),
-            Head::Voice => set(&mut img, &frames.voice[if speaking && open >= 1.0 { cycle } else { 4 }]),
+            Head::Iris => frames.iris[iris_frame(open, frames.iris.len())].show(&mut img, &mut node, frames.s),
+            Head::Voice => frames.voice[if speaking && open >= 1.0 { cycle } else { 4 }].show(&mut img, &mut node, frames.s),
             Head::Face => {
-                if let Some((sheet, r)) = head.speaker.as_deref().and_then(|n| sprite_of(&hud, n)) {
-                    show(&mut img, &assets.load(format!("hud/tex/{sheet}.png")), inset(&sheet, r));
+                if let Some(art) = head.speaker.as_deref().and_then(|n| sprite(&assets, &hud, n)) {
+                    art.show(&mut img, &mut node, frames.s);
                 }
                 vis.set_if_neq(if open > 0.0 { Visibility::Inherited } else { Visibility::Hidden });
             }
@@ -579,26 +566,21 @@ fn head_art(
     }
 }
 
-fn update_sweep(time: Res<Time>, frames: Option<Res<Frames>>, mut q: Query<&mut ImageNode, With<Sweep>>) {
+fn update_sweep(time: Res<Time>, frames: Option<Res<Frames>>, mut q: Query<(&mut ImageNode, &mut Node), With<Sweep>>) {
     let Some(frames) = frames else { return };
     if frames.sweep.is_empty() {
         return;
     }
-    let (h, r) = &frames.sweep[(time.elapsed_secs() / 0.1) as usize % frames.sweep.len()];
-    for mut img in &mut q {
-        show(&mut img, h, *r);
+    let art = &frames.sweep[(time.elapsed_secs() / 0.1) as usize % frames.sweep.len()];
+    for (mut img, mut node) in &mut q {
+        art.show(&mut img, &mut node, frames.s);
     }
 }
 
-fn radar_face(button: Query<&Interaction, With<RadarButton>>, mut q: Query<(&RadarFace, &mut ImageNode)>) {
-    let i = button.iter().next().map_or(0, |i| match i {
-        Interaction::None => 0,
-        Interaction::Hovered => 1,
-        Interaction::Pressed => 2,
-    });
-    for (f, mut img) in &mut q {
-        let (h, r) = &f.0[i];
-        show(&mut img, h, *r);
+fn radar_face(button: Query<&Interaction, With<RadarButton>>, mut q: Query<(&RadarFace, &mut ImageNode, &mut Node)>) {
+    let i = button.iter().next().map_or(0, state_index);
+    for (f, mut img, mut node) in &mut q {
+        f.0.art[i].show(&mut img, &mut node, f.0.s);
     }
 }
 
@@ -614,22 +596,24 @@ fn update_gauges(
     for (f, mut node, mut img) in &mut q {
         let v = gauge_value(f.gauge, &lib, ship, health, crew, &guns).clamp(0.0, 1.0);
         // Gauges fill from the bottom: keep the bottom of the sprite, crop the top.
-        let h = (f.full * v).round();
-        clip(&mut node, &mut img, f.top + f.full - h, h, s, f.base, f.k);
+        let h = (f.art.size.y * v).round();
+        clip(&mut node, &mut img, &f.art, f.top, h, s);
     }
 }
 
-/// A bar that empties from the top: `h` reference px of sprite rect `base` (sheet pixels `k` per reference px) shown from `top`,
-/// written only on a change.
-fn clip(node: &mut Mut<Node>, img: &mut Mut<ImageNode>, top: f32, h: f32, s: f32, base: Rect, k: f32) {
-    let (top, height) = (px(top, s), px(h, s));
-    if node.top != top || node.height != height {
-        (node.top, node.height) = (top, height);
+/// A bar that empties from the top: the bottom `h` reference px of the sprite `art`, whose box starts at `top` when full. Written
+/// only on a change.
+fn clip(node: &mut Mut<Node>, img: &mut Mut<ImageNode>, art: &Sprite, top: f32, h: f32, s: f32) {
+    let full = art.size.y;
+    let region = Rect::new(0.0, full - h, art.size.x, full);
+    let view = art.view(region, region.size());
+    let (width, height, margin) = view.geometry(s, UiRect::DEFAULT);
+    let top = px(top + full - h, s);
+    if (node.top, node.width, node.height, node.margin) != (top, width, height, margin) {
+        (node.top, node.width, node.height, node.margin) = (top, width, height, margin);
     }
-    let mut r = base;
-    r.min.y = r.max.y - h * k;
-    if img.rect != Some(r) {
-        img.rect = Some(r);
+    if img.rect != view.rect {
+        img.rect = view.rect;
     }
 }
 
@@ -638,18 +622,18 @@ fn update_guns(
     lib: Res<Library>,
     target: Res<combat::Target>,
     player: Single<(&Ship, &Health, &GunStates), With<PlayerShip>>,
-    mut q: Query<(&GunSlot, &mut ImageNode)>,
+    mut q: Query<(&GunSlot, &mut ImageNode, &mut Node)>,
 ) {
     let Some(frames) = frames else { return };
     let (ship, health, guns) = *player;
     let class = &lib.classes[ship.class];
-    for (slot, mut img) in &mut q {
+    for (slot, mut img, mut node) in &mut q {
         let st = combat::bank_state(guns, class, health, slot.bank);
         let armed = target.2.armed == Some(slot.bank);
         if slot.icon {
             let Some(first) = class.mounts.iter().position(|m| m.bank == slot.bank) else { continue };
-            if let Some((h, r)) = frames.icons.get(&combat::gun_icon(guns.gun(first))) {
-                show(&mut img, h, *r);
+            if let Some(art) = frames.icons.get(&combat::gun_icon(guns.gun(first))) {
+                art.show(&mut img, &mut node, frames.s);
             }
             // Dimmed while the bank reloads (the bar beside it shows how far along it is).
             let tint = match st {
@@ -658,8 +642,8 @@ fn update_guns(
                 _ => Color::WHITE,
             };
             img.map_unchanged(|i| &mut i.color).set_if_neq(tint);
-        } else if let Some((h, r)) = frames.gun.get(st) {
-            show(&mut img, h, *r);
+        } else if let Some(art) = frames.gun.get(st) {
+            art.show(&mut img, &mut node, frames.s);
             img.map_unchanged(|i| &mut i.color).set_if_neq(if armed { Color::srgb(1.0, 0.9, 0.3) } else { Color::WHITE });
         }
     }
@@ -667,14 +651,11 @@ fn update_guns(
 
 /// PAUSE button art follows the simulation pause. PROVISIONAL: the retail hourglass art is swapped; any retail restrictions while
 /// paused are not decoded.
-fn pause_art(vtime: Res<Time<Virtual>>, mut q: Query<(&PauseArt, &mut ImageNode)>) {
+fn pause_art(vtime: Res<Time<Virtual>>, mut q: Query<(&PauseArt, &mut ImageNode, &mut Node)>) {
     let paused = vtime.is_paused();
-    for (button, mut img) in &mut q {
+    for (button, mut img, mut node) in &mut q {
         let want = if paused { &button.paused } else { &button.running };
-        if img.image != want.image || img.rect != want.rect {
-            img.image = want.image.clone();
-            img.rect = want.rect;
-        }
+        want.show_with(&mut img, &mut node, button.s, button.extra);
     }
 }
 
@@ -707,9 +688,10 @@ fn commands_window(commands: &mut Commands, c: &Ctx, root: Entity, screen_w: f32
     let node = Node { bottom: px(floor - top - h, c.s), ..c.abs((screen_w - bar_w) / 2.0, 0.0, Vec2::new(bar_w, h)) };
     let bar = commands.spawn((crate::panels::FleetWindow(false), Node { top: Val::Auto, ..node }, Visibility::Hidden, ChildOf(root))).id();
     let piece = |commands: &mut Commands, name: &str, x: f32, w: f32| {
-        if let Some((mut img, sz)) = c.sprite(name, false) {
+        if let Some(art) = c.sprite(name) {
+            let (mut img, node) = c.put_box(&art, x, 0.0, Vec2::new(w, art.size.y));
             img.image_mode = NodeImageMode::Stretch;
-            commands.spawn((img, c.abs(x, 0.0, Vec2::new(w, sz.y)), ChildOf(bar), Solid, Interaction::None, FocusPolicy::Block));
+            commands.spawn((img, node, ChildOf(bar), Solid, Interaction::None, FocusPolicy::Block));
         }
     };
     piece(commands, "FormationBar_StretchedCenter", l.x, bar_w - l.x - r.x);
@@ -728,10 +710,10 @@ fn commands_window(commands: &mut Commands, c: &Ctx, root: Entity, screen_w: f32
     buttons.push((B::CeaseFire, "FORMATIONBAR_ICON_HOLD_FIRE".into(), "FORMATIONBAR_ICON_NOT_HOLD_FIRE".into(), 0.0));
     let mut at = offset(c.hud, "Offset_FormationBar_Icons");
     for (action, idle, on, gap) in buttons {
-        let (Some((img, sz)), Some(a), Some(b)) = (c.sprite(&idle, false), c.states(&idle), c.states(&on)) else { continue };
+        let (Some(art), Some(a), Some(b)) = (c.sprite(&idle), c.states(&idle), c.states(&on)) else { continue };
         at.x += gap;
-        commands.spawn((action, img, CommandArt([a, b]), c.abs(at.x, at.y, sz), ChildOf(bar), Solid, Interaction::None, FocusPolicy::Block));
-        at.x += sz.x;
+        commands.spawn((action, c.put(&art, at.x, at.y), CommandArt([a, b]), ChildOf(bar), Solid, Interaction::None, FocusPolicy::Block));
+        at.x += art.size.x;
     }
 }
 
@@ -744,17 +726,19 @@ fn speed_plate(commands: &mut Commands, c: &Ctx, fonts: Option<&crate::sprites::
     let plate = commands.spawn((Node { top: Val::Auto, bottom: px(6.0, c.s), ..c.abs(bar_right + 6.0, 0.0, Vec2::new(w, h)) }, ChildOf(root))).id();
     let (x0, x1) = (b / 2.0, w - b / 2.0);
     for (name, x, pw) in [("ToolTipBackdrop_Center", x0 + l, x1 - x0 - l - r), ("ToolTipBackdrop_Left", x0, l), ("ToolTipBackdrop_Right", x1 - r, r)] {
-        if let Some((mut img, _)) = c.sprite(name, false) {
+        if let Some(art) = c.sprite(name) {
+            let (mut img, node) = c.put_box(&art, x, 0.0, Vec2::new(pw, h));
             img.image_mode = NodeImageMode::Stretch;
-            commands.spawn((img, c.abs(x, 0.0, Vec2::new(pw, h)), ChildOf(plate), Solid, Interaction::None, FocusPolicy::Block));
+            commands.spawn((img, node, ChildOf(plate), Solid, Interaction::None, FocusPolicy::Block));
         }
     }
     let menu = HudData { comps: c.hud.comps.clone(), skin: crate::sprites::MENU_SKIN };
     let arrows = Ctx { hud: &menu, ..*c };
     for (button, name, x) in [(SpeedButton::Slower, "FrontEnd_Prev_Button", 0.0), (SpeedButton::Faster, "FrontEnd_Next_Button", w - b)] {
-        if let (Some((mut img, _)), Some(states)) = (arrows.sprite(name, false), arrows.states(name)) {
+        if let (Some(art), Some(states)) = (arrows.sprite(name), arrows.states(name)) {
+            let (mut img, node) = c.put_box(&art, x, (h - b) / 2.0, Vec2::splat(b));
             img.image_mode = NodeImageMode::Stretch;
-            commands.spawn((button, img, states, c.abs(x, (h - b) / 2.0, Vec2::splat(b)), ChildOf(plate), Solid, Interaction::None, FocusPolicy::Block));
+            commands.spawn((button, img, node, states, ChildOf(plate), Solid, Interaction::None, FocusPolicy::Block));
         }
     }
     let Some(font) = fonts.and_then(|f| f.0.get("UniversBold14")) else { return };
@@ -793,10 +777,14 @@ fn name_plate(
         let row = commands.spawn((crate::panels::SelectedName, row, Visibility::Hidden, ChildOf(root))).id();
         let text_y = offset(&hud, "ShipName_HUDComponent_Text_Offset_From_Backdrop_TopLeft").y;
         for side in ["Left", "Center", "Right"] {
-            let Some((mut img, sz)) = c.sprite(&part(side), false) else { continue };
+            let Some(art) = c.sprite(&part(side)) else { continue };
+            let sz = art.size;
+            let mut img = art.image_node();
             img.image_mode = NodeImageMode::Stretch;
-            let mut node = Node { width: px(sz.x, s), height: px(sz.y, s), ..default() };
+            let mut node = Node::default();
+            art.own().place(&mut node, s, UiRect::DEFAULT);
             if side == "Center" {
+                // The centre stretches with the name: its width is the text, at least the art's own.
                 (node.width, node.min_width) = (Val::Auto, px(sz.x, s));
                 node.justify_content = JustifyContent::Center;
             }
@@ -816,11 +804,9 @@ fn name_plate(
     }
 }
 
-fn button_states(mut q: Query<(&States, &Interaction, &mut ImageNode), Or<(Changed<Interaction>, Added<States>)>>) {
-    for (states, i, mut img) in &mut q {
-        let (h, r) = &states.0[state_index(i)];
-        img.image = h.clone();
-        img.rect = Some(*r);
+fn button_states(mut q: Query<(&States, &Interaction, &mut ImageNode, &mut Node), Or<(Changed<Interaction>, Added<States>)>>) {
+    for (states, i, mut img, mut node) in &mut q {
+        states.art[state_index(i)].show(&mut img, &mut node, states.s);
     }
 }
 fn state_index(i: &Interaction) -> usize {
@@ -848,10 +834,13 @@ fn fleet_art(
     mut built: Local<Option<(Entity, usize)>>,
     old: Query<(Entity, &crate::panels::FleetWindow)>,
     mut windows: Query<(&crate::panels::FleetWindow, &mut Visibility), (Without<crate::panels::FleetButton>, Without<FleetStatus>, Without<crate::panels::SelectedName>)>,
-    mut buttons: Query<(&crate::panels::FleetButton, &Interaction, &mut ImageNode, Option<&CommandArt>), Without<FleetIcon>>,
-    mut icons: Query<(&FleetIcon, &mut ImageNode), Without<crate::panels::FleetButton>>,
-    mut health: Query<(&FleetHealth, &mut Node, &mut ImageNode), (Without<crate::panels::FleetButton>, Without<FleetIcon>)>,
-    mut status: Query<(&FleetStatus, &mut ImageNode, &mut Visibility), (Without<crate::panels::FleetButton>, Without<FleetIcon>, Without<FleetHealth>)>,
+    mut buttons: Query<
+        (&crate::panels::FleetButton, &Interaction, &mut ImageNode, &mut Node, Option<&CommandArt>),
+        (Without<FleetIcon>, Without<FleetHealth>, Without<FleetStatus>),
+    >,
+    mut icons: Query<(&FleetIcon, &mut ImageNode, &mut Node), (Without<crate::panels::FleetButton>, Without<FleetHealth>, Without<FleetStatus>)>,
+    mut health: Query<(&FleetHealth, &mut Node, &mut ImageNode), (Without<crate::panels::FleetButton>, Without<FleetIcon>, Without<FleetStatus>)>,
+    mut status: Query<(&FleetStatus, &mut ImageNode, &mut Node, &mut Visibility), (Without<crate::panels::FleetButton>, Without<FleetIcon>, Without<FleetHealth>)>,
 ) {
     use crate::panels::{FleetButton as B, FleetWindow};
     let (Some(root), Some(anchor)) = (roots.iter().next(), anchor) else { return };
@@ -873,8 +862,8 @@ fn fleet_art(
         let mut y = 0.0;
         for (name, size, count) in [("ShipBar_TopDetail", top, 1), ("ShipBar_StretchedCenter", mid, rows - 1), ("ShipBar_BottomDetail", bottom, 1)] {
             for _ in 0..count {
-                if let Some((img, _)) = c.sprite(name, false) {
-                    commands.spawn((img, c.abs(0.0, y, size), ChildOf(bar), Solid, Interaction::None, FocusPolicy::Block));
+                if let Some(art) = c.sprite(name) {
+                    commands.spawn((c.put_box(&art, 0.0, y, size), ChildOf(bar), Solid, Interaction::None, FocusPolicy::Block));
                 }
                 y += size.y;
             }
@@ -885,55 +874,54 @@ fn fleet_art(
         let gap = (inner - 2.0 * slot.x) / 3.0;
         for i in 0..n {
             let x = if i + 1 == n && i % 2 == 0 { (inner - slot.x) / 2.0 } else { gap + (i % 2) as f32 * (slot.x + gap) };
-            let Some((img, _)) = c.sprite("ShipBar_SlotBackground", false) else { continue };
-            let cell = commands.spawn((B::Slot(i), img, c.abs(x, first + (i / 2) as f32 * mid.y, slot), ChildOf(bar), Solid, Interaction::None, FocusPolicy::Block)).id();
+            let Some(art) = c.sprite("ShipBar_SlotBackground") else { continue };
+            let cell = commands.spawn((B::Slot(i), c.put_box(&art, x, first + (i / 2) as f32 * mid.y, slot), ChildOf(bar), Solid, Interaction::None, FocusPolicy::Block)).id();
             let o = offset(&hud, "Offset_ShipBar_ShipIcon");
             commands.spawn((FleetIcon(i), ImageNode::default(), c.abs(o.x, o.y, c.size_of("ShipBar_ShipIcon_Navy_Cutter")), ChildOf(cell)));
-            if let Some((img, sz)) = c.sprite("ShipBar_Health", false) {
-                commands.spawn((FleetHealth(i), img, c.abs(0.0, 0.0, sz), ChildOf(cell)));
+            if let Some(art) = c.sprite("ShipBar_Health") {
+                commands.spawn((FleetHealth(i), c.put(&art, 0.0, 0.0), ChildOf(cell)));
             }
-            if let Some((img, sz)) = c.sprite("ShipStatus_Icon_Docking_Frame0", false) {
+            if let Some(art) = c.sprite("ShipStatus_Icon_Docking_Frame0") {
                 let at = o + offset(&hud, "PRIMARY_SHIP_STATUS_ICON_OFFSET_FROM_PRIMARYSHIPICON_TOPLEFT");
-                commands.spawn((FleetStatus(i), img, c.abs(at.x, at.y, sz), Visibility::Hidden, ChildOf(cell)));
+                commands.spawn((FleetStatus(i), c.put(&art, at.x, at.y), Visibility::Hidden, ChildOf(cell)));
             }
         }
     }
     for (w, mut v) in &mut windows {
         v.set_if_neq(if if w.0 { model.ships } else { model.commands } { Visibility::Inherited } else { Visibility::Hidden });
     }
-    for (b, interaction, mut img, art) in &mut buttons {
+    for (b, interaction, mut img, mut node, art) in &mut buttons {
         let pick = match b {
             B::Slot(i) => model.rows.get(*i).and_then(|row| {
                 let art = if row.selected { "ShipBar_Selected_SlotBackground" } else { "ShipBar_SlotBackground" };
-                c.states(art).map(|st| st.0[state_index(interaction)].clone())
+                c.states(art).map(|st| st.art[state_index(interaction)].clone())
             }),
-            B::Formation(kind) => art.map(|a| a.0[(model.active == Some(*kind)) as usize].0[state_index(interaction)].clone()),
-            B::CeaseFire => art.map(|a| a.0[model.cease_fire as usize].0[state_index(interaction)].clone()),
+            B::Formation(kind) => art.map(|a| a.0[(model.active == Some(*kind)) as usize].art[state_index(interaction)].clone()),
+            B::CeaseFire => art.map(|a| a.0[model.cease_fire as usize].art[state_index(interaction)].clone()),
             _ => None,
         };
-        if let Some((h, r)) = pick {
-            show(&mut img, &h, r);
+        if let Some(pick) = pick {
+            pick.show(&mut img, &mut node, s);
         }
     }
-    for (FleetIcon(i), mut img) in &mut icons {
-        if let Some((art, _)) = model.rows.get(*i).and_then(|row| c.sprite(&row.icon, false)) {
-            show(&mut img, &art.image, art.rect.unwrap_or_default());
+    for (FleetIcon(i), mut img, mut node) in &mut icons {
+        if let Some(art) = model.rows.get(*i).and_then(|row| c.sprite(&row.icon)) {
+            art.show(&mut img, &mut node, s);
         }
     }
-    let full = c.size_of("ShipBar_Health").y;
+    let health_art = c.sprite("ShipBar_Health");
     for (FleetHealth(i), mut node, mut img) in &mut health {
-        let (Some(row), Some((base, _))) = (model.rows.get(*i), c.sprite("ShipBar_Health", false)) else { continue };
+        let (Some(row), Some(art)) = (model.rows.get(*i), health_art.as_ref()) else { continue };
         // Clipped from the top: the strip shrinks towards the bottom as the ship loses health.
-        let h = (full * row.health).round();
-        let k = sprite_of(&hud, "ShipBar_Health").map_or(1.0, |(sheet, _)| sheet_scale(&sheet));
-        clip(&mut node, &mut img, full - h, h, s, base.rect.unwrap_or_default(), k);
+        let h = (art.size.y * row.health).round();
+        clip(&mut node, &mut img, art, 0.0, h, s);
     }
-    for (FleetStatus(i), mut img, mut v) in &mut status {
+    for (FleetStatus(i), mut img, mut node, mut v) in &mut status {
         let kind = model.rows.get(*i).map_or("", |r| r.status);
         v.set_if_neq(if kind.is_empty() { Visibility::Hidden } else { Visibility::Inherited });
         let frame = (time.elapsed_secs() * crate::panels::STATUS_FPS) as usize % 6;
-        if let Some((h, r)) = (!kind.is_empty()).then(|| c.frame(&format!("ShipStatus_Icon_{kind}_Frame{frame}"))).flatten() {
-            show(&mut img, &h, r);
+        if let Some(art) = (!kind.is_empty()).then(|| c.frame(&format!("ShipStatus_Icon_{kind}_Frame{frame}"))).flatten() {
+            art.show(&mut img, &mut node, s);
         }
     }
 }
@@ -956,13 +944,13 @@ mod tests {
             assert_eq!(crate::panels::speed_order_at(centre + Vec2::splat(1.0)), order);
         }
         let data = HudData { comps: crate::data::read_json(&assets_dir().join("hud/hud.json")).into(), skin: "Navy" };
-        let frames: Vec<_> = (0..4).map(|i| sprite_of(&data, &format!("SpeedControl_CurrActive{i}_NextActive{i}")).unwrap()).collect();
+        let frames: Vec<_> = (0..4).map(|i| meta(&data, &format!("SpeedControl_CurrActive{i}_NextActive{i}"), IDLE).unwrap()).collect();
         for frame in &frames {
-            assert_eq!(frame.1.size(), Vec2::new(86.0, 101.0));
+            assert_eq!(frame.size, Vec2::new(86.0, 101.0));
         }
         for i in 0..4 {
             for j in i + 1..4 {
-                assert_ne!(frames[i], frames[j]);
+                assert_ne!(frames[i].inner(), frames[j].inner(), "distinct art");
             }
         }
     }
@@ -989,12 +977,17 @@ mod tests {
     fn pause_art_follows_the_pause() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins).add_systems(Update, pause_art);
-        let running = ImageNode::new(bevy::asset::uuid_handle!("00000000-0000-0000-0000-000000000001"));
-        let paused = ImageNode::new(bevy::asset::uuid_handle!("00000000-0000-0000-0000-000000000002"));
-        let button = app.world_mut().spawn((PauseArt { running: running.clone(), paused: paused.clone() }, running.clone())).id();
+        let art = |image: Handle<Image>, trim: f32| Sprite { image, size: Vec2::new(20.0, 20.0), trim: crate::sprites::Trim { left: trim, ..default() }, scale: 1.0 };
+        let running = art(bevy::asset::uuid_handle!("00000000-0000-0000-0000-000000000001"), 0.0);
+        let paused = art(bevy::asset::uuid_handle!("00000000-0000-0000-0000-000000000002"), 4.0);
+        let node = Node { width: Val::Px(20.0), height: Val::Px(20.0), ..default() };
+        let button = app.world_mut().spawn((PauseArt { running: running.clone(), paused: paused.clone(), extra: UiRect::DEFAULT, s: 1.0 }, running.image_node(), node)).id();
         app.world_mut().resource_mut::<Time<Virtual>>().pause();
         app.update();
         assert_eq!(app.world().get::<ImageNode>(button).unwrap().image, paused.image);
+        // The paused art has 4 transparent columns on the left: the node keeps its 20 px box and draws the rest.
+        let node = app.world().get::<Node>(button).unwrap();
+        assert_eq!((node.width, node.margin.left), (Val::Px(16.0), Val::Px(4.0)));
         app.world_mut().resource_mut::<Time<Virtual>>().unpause();
         app.update();
         assert_eq!(app.world().get::<ImageNode>(button).unwrap().image, running.image);
@@ -1009,7 +1002,7 @@ mod tests {
         for class in lib.classes.iter().filter(|c| c.name.starts_with("Ship_")) {
             let data = HudData { comps: comps.clone(), skin: crate::sprites::skin_of(&class.race) };
             for bar in ["ShipBar", "WeaponBar"] {
-                assert!(sprite_of(&data, &class.icon(bar)).is_some(), "{} lacks {}", class.name, class.icon(bar));
+                assert!(size_of(&data, &class.icon(bar)).is_some(), "{} lacks {}", class.name, class.icon(bar));
             }
         }
     }
@@ -1021,7 +1014,7 @@ mod tests {
         for skin in ["Navy", "Pirate", "Procyon"] {
             let data = HudData { comps: comps.clone(), skin };
             for (part, _) in BarParts::load().0 {
-                assert!(sprite_of(&data, &part).is_some(), "{skin} lacks {part}");
+                assert!(size_of(&data, &part).is_some(), "{skin} lacks {part}");
             }
         }
     }

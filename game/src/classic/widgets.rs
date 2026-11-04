@@ -7,7 +7,7 @@ use bevy::prelude::*;
 use bevy::ui::{FocusPolicy, RelativeCursorPosition};
 
 use crate::menu::{ArrowButton, ListEntry, RunButtons, SLIDER_KNOB, SLOT_BAR, ScrollKind, ScrollTrack, SliderTrack, menu_active};
-use crate::sprites::{BODY_FONT, Fonts, HudData, IDLE, MENU_SKIN, inset, sliced};
+use crate::sprites::{BODY_FONT, Fonts, HudData, IDLE, MENU_SKIN, Sprite, meta_in, sliced, sprite_in};
 
 /// Retail gold for highlighted labels (the `Center Justify Label` title colour).
 pub(super) const GOLD: Color = Color::srgb(1.0, 0.796, 0.0);
@@ -51,11 +51,11 @@ pub fn plugin(app: &mut App) {
 fn hover(
     q: Query<(Entity, &Interaction, Option<&Art>, Option<&Rest>), Changed<Interaction>>,
     mut fills: Query<&mut BackgroundColor>,
-    hud: Option<Res<HudData>>,
     assets: Res<AssetServer>,
-    mut imgs: Query<&mut ImageNode>,
+    window: Single<&Window, With<bevy::window::PrimaryWindow>>,
+    mut imgs: Query<(&mut ImageNode, &mut Node)>,
 ) {
-    let Some(hud) = hud else { return };
+    let scale = canvas(&window).1;
     for (e, i, art, rest) in &q {
         if let (Some(rest), Ok(mut bg)) = (rest, fills.get_mut(e)) {
             bg.0 = if *i == Interaction::None { rest.0 } else { CELL_HOVER };
@@ -66,33 +66,32 @@ fn hover(
             Interaction::None => IDLE,
         };
         for (e, piece) in art.map(|a| a.0.as_slice()).unwrap_or(&[]) {
-            let Ok(mut img) = imgs.get_mut(*e) else { continue };
-            let (name, cropped) = match piece {
-                Piece::Slice(group) => {
-                    img.image = assets.load(format!("hud/tex/slice_{group}_{}_{}.png", MENU_SKIN.to_lowercase(), state.to_lowercase()));
-                    continue;
+            let Ok((mut img, mut node)) = imgs.get_mut(*e) else { continue };
+            match piece {
+                Piece::Slice(group) => img.image = assets.load(format!("hud/tex/slice_{group}_{}_{}.png", MENU_SKIN.to_lowercase(), state.to_lowercase())),
+                Piece::Sprite(name) => {
+                    if let Some(art) = sprite_in(&assets, MENU_SKIN, name, state) {
+                        art.show(&mut img, &mut node, scale);
+                    }
                 }
-                Piece::Sprite(name) => (name, None),
-                Piece::Crop { name, left, w } => (name, Some((*left, *w))),
-            };
-            if let Some((sheet, r)) = sprite(&hud, name, state) {
-                img.image = assets.load(format!("hud/tex/{sheet}.png"));
-                img.rect = Some(inset(&sheet, cropped.map_or(r, |(left, w)| crop(r, left, w))));
+                Piece::Crop { name, left, w } => {
+                    if let Some(art) = sprite_in(&assets, MENU_SKIN, name, state) {
+                        art.show_region(&mut img, &mut node, scale, crop(&art, *left, *w));
+                    }
+                }
             }
         }
     }
 }
 
-/// Sprite rect of a hud.hdt component for a cursor state (`IDLE` = "NoCursor", "CursorOver", "CursorDown").
-pub(super) fn sprite(hud: &HudData, name: &str, state: &str) -> Option<(String, Rect)> {
-    let d = hud.comps.get(name)?.get(MENU_SKIN)?;
-    let r = d[format!("TextureArea - {state}")].as_array()?;
-    let n = |i: usize| r[i].as_f64().unwrap_or(0.0) as f32;
-    Some((d[format!("TextureName - {state}")].as_str()?.to_lowercase(), Rect::new(n(0), n(1), n(2) + 1.0, n(3) + 1.0)))
+/// Untrimmed reference size of a menu sprite (the Navy set, `MENU_SKIN`).
+pub(super) fn size_of(name: &str) -> Option<Vec2> {
+    meta_in(MENU_SKIN, name, IDLE).map(|m| m.size)
 }
 
-fn crop(r: Rect, left: bool, w: f32) -> Rect {
-    if left { Rect::new(r.min.x, r.min.y, r.min.x + w, r.max.y) } else { Rect::new(r.max.x - w, r.min.y, r.max.x, r.max.y) }
+/// The left or right `w` reference px of a sprite's box.
+fn crop(art: &Sprite, left: bool, w: f32) -> Rect {
+    if left { Rect::new(0.0, 0.0, w, art.size.y) } else { Rect::new(art.size.x - w, 0.0, art.size.x, art.size.y) }
 }
 
 /// What every widget needs: art, fonts and the reference-to-window scale.
@@ -172,7 +171,7 @@ impl Ctx<'_> {
     }
     /// The idle gold-rimmed pill of the retail text buttons over `[x, y, w, h]` (one 9-slice node).
     pub(super) fn button_art(&self, c: &mut ChildSpawnerCommands, [x, y, w, h]: [f32; 4]) -> Entity {
-        let cap = |name| sprite(self.hud, name, IDLE).map_or(50.0, |(_, r)| r.width());
+        let cap = |name| size_of(name).map_or(50.0, |size| size.x);
         let art = sliced(self.assets, "button", MENU_SKIN, "nocursor", cap("FrontEnd_Texts_Over_Button_Left"), cap("FrontEnd_Texts_Over_Button_Right"));
         c.spawn((art, self.node(x, y, w, h))).id()
     }
@@ -191,18 +190,25 @@ pub(super) fn piece(ctx: &Ctx, c: &mut ChildSpawnerCommands, name: &str, rect: [
 }
 
 pub(super) fn piece_flipped(ctx: &Ctx, c: &mut ChildSpawnerCommands, name: &str, [l, t, r, b]: [f32; 4], flip: (bool, bool)) -> Option<Entity> {
-    let (sheet, rect) = sprite(ctx.hud, name, IDLE)?;
-    let mut img = ImageNode::new(ctx.assets.load(format!("hud/tex/{sheet}.png")));
-    img.rect = Some(inset(&sheet, rect));
+    let art = sprite_in(ctx.assets, MENU_SKIN, name, IDLE)?;
+    let mut img = art.image_node();
     img.image_mode = NodeImageMode::Stretch;
     (img.flip_x, img.flip_y) = flip;
-    Some(c.spawn((img, ctx.node(l, t, r - l, b - t))).id())
+    let mut node = ctx.node(l, t, r - l, b - t);
+    art.fit(Vec2::new(r - l, b - t)).flipped(flip.0, flip.1).place(&mut node, ctx.scale, UiRect::DEFAULT);
+    Some(c.spawn((img, node)).id())
 }
 
 /// A cropped part of a sprite (see `Piece::Crop`) stretched over `[x, y, w, h]`, with its `Art` entry.
 fn crop_piece(ctx: &Ctx, c: &mut ChildSpawnerCommands, name: &str, left: bool, w: f32, [x, y, bw, bh]: [f32; 4]) -> Option<(Entity, Piece)> {
-    let (sheet, r) = sprite(ctx.hud, name, IDLE)?;
-    let e = ctx.image(c, &format!("hud/tex/{sheet}.png"), Some(inset(&sheet, crop(r, left, w))), x, y, bw, bh, Color::WHITE);
+    let art = sprite_in(ctx.assets, MENU_SKIN, name, IDLE)?;
+    let view = art.view(crop(&art, left, w), Vec2::new(bw, bh));
+    let mut img = art.image_node();
+    img.rect = view.rect;
+    img.image_mode = NodeImageMode::Stretch;
+    let mut node = ctx.node(x, y, bw, bh);
+    view.place(&mut node, ctx.scale, UiRect::DEFAULT);
+    let e = c.spawn((img, node)).id();
     Some((e, Piece::Crop { name: name.to_string(), left, w }))
 }
 
@@ -255,7 +261,7 @@ pub(super) fn stretched_window(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r
 /// (`..._SLIDER_BACKGROUND_TOP/STRETCHED_CENTER/BOTTOM`) and a thumb that never gets shorter than its two end caps and stays inside the
 /// track; pressing and dragging the track moves it (`menu::scroll_drag`, the same everywhere).
 pub(super) fn scrollbar(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], kind: ScrollKind, total: usize, visible: usize, first: usize) {
-    let cap = |name: &str| sprite(ctx.hud, name, IDLE).map_or(20.0, |(_, r)| r.height());
+    let cap = |name: &str| size_of(name).map_or(20.0, |size| size.y);
     let track = |c: &mut ChildSpawnerCommands, prefix: &str, t: f32, b: f32| {
         let (top, bottom) = (cap(&format!("{prefix}_TOP")), cap(&format!("{prefix}_BOTTOM")));
         piece(ctx, c, &format!("{prefix}_TOP"), [l, t, r, t + top]);
@@ -472,12 +478,13 @@ pub(super) fn wheel_step(first: usize, dy: f32, max: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sprites::Trim;
 
     #[test]
     fn crop_keeps_the_named_side() {
-        let r = Rect::new(10.0, 0.0, 110.0, 20.0);
-        assert_eq!(crop(r, true, 30.0), Rect::new(10.0, 0.0, 40.0, 20.0));
-        assert_eq!(crop(r, false, 30.0), Rect::new(80.0, 0.0, 110.0, 20.0));
+        let art = Sprite { image: Handle::default(), size: Vec2::new(100.0, 20.0), trim: Trim::default(), scale: 1.0 };
+        assert_eq!(crop(&art, true, 30.0), Rect::new(0.0, 0.0, 30.0, 20.0));
+        assert_eq!(crop(&art, false, 30.0), Rect::new(70.0, 0.0, 100.0, 20.0));
     }
 
     #[test]
