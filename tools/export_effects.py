@@ -94,7 +94,7 @@ def textures(node, out):
             textures(v, out)
 
 
-# Meshes an effect draws without morphing them (game/src/fx.rs STATIC_MESHES); the nebula meshes are exported elsewhere.
+# Meshes an effect draws without morphing them (game/src/fx/lib.rs STATIC_MESHES); the nebula meshes are exported elsewhere.
 STATIC_MESHES = ("Periscope_Layer1",)
 
 

@@ -129,7 +129,7 @@ Other converted effects have not been regenerated to restore their previously di
 Owner playtesting found the shower travelling horizontally instead of falling like rain. `MeteorStorm` combines a near-horizontal
 position cone (88–89 degrees around game +Z) with a target-emitter position above the storm and velocity along game -Z.
 The runtime incorrectly replaced both target contributions with the position cone and used that cone for velocity.
-`fx.rs::spawn_particle` now adds the enabled target/angle contributions separately and honours each emitter's
+`fx/sim.rs::spawn_particle` now adds the enabled target/angle contributions separately and honours each emitter's
 use-position-for-velocity flag; otherwise the angle velocity uses its own authored cone. No asset values were changed.
 Regressions sample all four MeteorStorm primitives: the two streak layers spawn above the emitter and fall vertically,
 while the splash layers do not inherit cone velocity. A muzzle regression checks reused position versus independent angle velocity.
@@ -357,7 +357,7 @@ to `models/debris/` and `sections[].debris` = {model, pivot}.
 ## Black holes (Vortex primitive, spawn, point update; Trail)
 Terrain_BlackHole_* WOTs name a render mesh, a radius, `Magnitude` (the pull, below), an ambient sound and a
 `VortexEffectName` (BlackHoleRibbons_*). That effect = six ordinary particle systems (the vertical beams, glow, black
-core: run by fx.rs) plus a `Vortex` primitive, implemented in `game/src/blackhole.rs`:
+core: run by fx/) plus a `Vortex` primitive, implemented in `game/src/blackhole.rs`:
 * Per 30 Hz tick a point spawns with probability SPAWN_PROBABILITY (detail clamp = 1) at a random angle, START_RADIUS from
   the centre, CENTER_Z_OFFSET below it. Each point owns a Wake_Hole Trail effect.
 * Point tick: angle step += ANGLE_DELTA_CHANGE; radius -= RADIUS_DELTA; angle += step; xy = centre + r(cos, sin);

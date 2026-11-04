@@ -1,5 +1,5 @@
-//! Black holes (Terrain_BlackHole_*): the funnel mesh, the BlackHoleRibbons effect's particle systems (via fx.rs) and its
-//! `Vortex` primitive, which fx.rs cannot run. Behaviour as specified in docs/re/effects.md "Vortex"
+//! Black holes (Terrain_BlackHole_*): the funnel mesh, the BlackHoleRibbons effect's particle systems (via fx/) and its
+//! `Vortex` primitive, which fx/ cannot run. Behaviour as specified in docs/re/effects.md "Vortex"
 //! (point spawn and update, trail segment init and update).
 //! Everything ticks at the engine's 30 Hz. PROVISIONAL: ribbon texture mapping/blend and the point-effect orientation's
 //! normalisation (unknown). Pull (`Magnitude`) and the core kill: see `pull` below, from retail measurements (docs/re/effects.md).
