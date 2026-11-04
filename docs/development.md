@@ -144,6 +144,8 @@ classic/  (this binary)  retail-art views
 
 Keep the existing module boundaries. New files should own a real feature, not just hide a long function.
 
+`lib.rs` re-exports a fixed list of names from `scenario`, `ship` and `view` (grouped by owner) so older code can write `crate::Ship`. Do not add glob re-exports (`pub use module::*`) to `lib.rs`, and do not grow that list for new code: write `crate::module::Name` so the owner is visible at the use site.
+
 | Module (`game/src/`) | Owns | Change here when… |
 |---|---|---|
 | `lib.rs` | Library root and `run(view)`: application wiring, CLI `Config`, time scale/pause, profiling and the screenshot driver | Wiring/ordering systems; feature logic goes in its owning module |
