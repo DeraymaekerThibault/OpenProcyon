@@ -45,9 +45,13 @@ pub mod victory;
 pub mod view;
 pub mod wake;
 
-pub use scenario::*;
-pub use ship::*;
-pub use view::*;
+// Explicit crate-root re-exports, grouped by owning module. No glob re-exports here (docs/development.md).
+// scenario.rs: battle lifecycle and map objects.
+pub use scenario::{Group, Namer, Outcome, Scenario, debug_kill, enter_battle, game_to_bevy, leave_battle, outcome, restart, resume_scenario, shot_target, spawn_ship};
+// ship.rs: ship state, sides and AI.
+pub use ship::{ORDERS, PlayerShip, Ship, ShipName, Side, ai, angdiff, approach_speed, step};
+// view.rs: camera, input and HUD wiring.
+pub use view::{Orbit, Sky, Slot, camera, hud, input, sky, toggle_debug};
 
 use bevy::input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll};
 use bevy::prelude::*;
