@@ -118,7 +118,7 @@ pub(super) struct Restyled<M: Material> {
 }
 
 /// Textured, lit, not see-through retail materials get a surface material, one per retail material (instances share it).
-fn surfaces(
+pub(super) fn surfaces(
     mut commands: Commands,
     look: Res<Look>,
     new: Query<(Entity, &GltfMaterialName, &MeshMaterial3d<StandardMaterial>), (Added<MeshMaterial3d<StandardMaterial>>, Without<Restyled<SurfaceMaterial>>)>,

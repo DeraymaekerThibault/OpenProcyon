@@ -136,7 +136,7 @@ struct Billow {
 
 /// Materials named like retail sail textures ("sail.tga", "square sails orange.tga") become sail materials, one per sail
 /// mesh so each follows its own ship's speed.
-fn sails(
+pub(super) fn sails(
     mut commands: Commands,
     look: Res<Look>,
     new: Query<(Entity, &GltfMaterialName, &MeshMaterial3d<StandardMaterial>, &Mesh3d), (Added<MeshMaterial3d<StandardMaterial>>, Without<Restyled<SailMaterial>>)>,
