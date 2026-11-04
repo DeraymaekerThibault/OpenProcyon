@@ -6,7 +6,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 
 use super::{Look, num, rgb};
-use crate::fx::{Fx, FxLib};
+use crate::fx::{EffectStarted, FxLib};
 
 /// A point light the profile gives every effect whose file name contains `effects`.
 #[derive(Clone, Debug, PartialEq)]
@@ -62,13 +62,14 @@ fn effect_lights(
     mut commands: Commands,
     look: Res<Look>,
     lib: Option<Res<FxLib>>,
-    new: Query<(Entity, &Fx), Added<Fx>>,
+    mut started: MessageReader<EffectStarted>,
     mut by_effect: Local<Option<HashMap<usize, EffectLight>>>,
 ) {
     let Some(lib) = lib else { return };
     let table = by_effect.get_or_insert_with(|| lib.names().filter_map(|(n, i)| Some((i, light_for(&look.lights, n)?.clone()))).collect());
-    for (e, fx) in &new {
-        let Some(l) = table.get(&fx.effect()) else { continue };
+    for m in started.read() {
+        let e = m.entity;
+        let Some(l) = table.get(&m.effect) else { continue };
         // a flash starts at its peak; a steady light starts at a random point of its flicker, so fires do not pulse in step
         let age = if l.seconds > 0.0 { 0.0 } else { e.index().index() as f32 * 0.37 % 7.0 };
         let light = (
@@ -125,6 +126,26 @@ mod tests {
         assert_eq!(light_for(&lights, "Explosion_Huge").map(|l| l.lumens), Some(5.0));
         assert_eq!(light_for(&lights, "CannonBall_Heavy_Impact").map(|l| l.color), Some(Color::linear_rgb(1.0, 0.5, 0.25)));
         assert!(light_for(&lights, "NavyEngine_Heavy").is_none());
+    }
+
+    #[test]
+    fn a_started_effect_gets_the_light_of_its_file_name() {
+        use bevy::ecs::system::RunSystemOnce;
+        let mut world = World::new();
+        world.init_resource::<Messages<EffectStarted>>();
+        world.insert_resource(FxLib::with_names(&["Gun_Muzzle_Flash", "NavyEngine_Heavy"]));
+        world.insert_resource(Look::parse(&serde_json::json!({"lights": [{"effects": "Muzzle", "lumens": 5.0, "seconds": 0.2}]})));
+        let (flash, engine) = world
+            .run_system_once(|mut commands: Commands, lib: Res<FxLib>| {
+                let at = Transform::from_xyz(1.0, 2.0, 3.0);
+                let flash = crate::fx::spawn(&mut commands, &lib, "Gun_Muzzle_Flash", None, at, at, true).unwrap();
+                (flash, crate::fx::spawn(&mut commands, &lib, "NavyEngine_Heavy", None, at, at, false).unwrap())
+            })
+            .unwrap();
+        world.run_system_once(effect_lights).unwrap();
+        let light = world.get::<Children>(flash).and_then(|c| c.iter().find_map(|c| world.get::<EffectGlow>(c))).expect("the flash carries its light");
+        assert_eq!((light.peak, light.seconds, light.age), (5.0, 0.2, 0.0));
+        assert!(world.get::<Children>(engine).is_none(), "no rule, no light");
     }
 
     #[test]
