@@ -202,7 +202,7 @@ pub fn run(view: fn(&mut App), setup_view: fn(&mut App)) {
         // The presentation (docs/development.md "Layers"): views live outside this library, so shared code cannot reach into them.
         .add_plugins(view)
         .add_plugins(|app: &mut App| {
-            if std::env::var_os("PROCYON_PROFILE").is_some() {
+            if profiling() {
                 app.add_plugins(bevy::diagnostic::FrameTimeDiagnosticsPlugin::default()).add_systems(Last, profile_counts);
             }
         })
@@ -368,10 +368,30 @@ pub fn toggle_pause(vtime: &mut Time<Virtual>) {
     if vtime.is_paused() { vtime.unpause() } else { vtime.pause() }
 }
 
-/// Testing fast-forward; vsync is off while fast so more capped steps fit in a second.
+/// Whether `PROCYON_PROFILE` is set (frame-time logging, and vsync off so the display does not cap the measurement).
+fn profiling() -> bool {
+    std::env::var_os("PROCYON_PROFILE").is_some()
+}
+
+/// Vsync is off while fast-forwarding (more capped steps fit in a second) and whenever profiling (a vsynced frame time only
+/// measures the display period).
+fn present_mode(profiling: bool, speed: f32) -> bevy::window::PresentMode {
+    if profiling || speed > 1.0 { bevy::window::PresentMode::AutoNoVsync } else { bevy::window::PresentMode::AutoVsync }
+}
+
+/// Testing fast-forward; see [`present_mode`] for the vsync rule.
 pub fn set_game_speed(vtime: &mut Time<Virtual>, window: &mut Window, speed: f32) {
     set_time_scale(vtime, speed);
-    window.present_mode = if speed > 1.0 { bevy::window::PresentMode::AutoNoVsync } else { bevy::window::PresentMode::AutoVsync };
+    window.present_mode = present_mode(profiling(), speed);
+}
+
+/// 99th-percentile (nearest rank) of per-frame times; 0 for no samples. Sorts the slice.
+fn p99(samples: &mut [f64]) -> f64 {
+    samples.sort_by(f64::total_cmp);
+    match samples.len() {
+        0 => 0.0,
+        n => samples[(n * 99).div_ceil(100) - 1],
+    }
 }
 
 fn profile_counts(
@@ -384,24 +404,39 @@ fn profile_counts(
     effects: Query<&fx::Fx>,
     meshes: Res<Assets<Mesh>>,
     audio: Query<&AudioPlayer>,
+    point_lights: Query<&PointLight>,
+    spot_lights: Query<&SpotLight>,
+    draws: Query<&Mesh3d>,
+    standard_materials: Res<Assets<StandardMaterial>>,
+    effect_materials: Res<Assets<fx::EffectMaterial>>,
     mut last: Local<(f32, bool)>,
+    mut frame_samples: Local<Vec<f64>>,
 ) {
+    // One sample per rendered frame; the p99 covers the frames since the previous log line.
+    if let Some(sample) = diagnostics.get(&bevy::diagnostic::FrameTimeDiagnosticsPlugin::FRAME_TIME).and_then(|d| d.value()) {
+        frame_samples.push(sample);
+    }
     let (mission_time, objective, ended) = mission.as_ref().map_or((0.0, None, false), |m| (m.script.time, m.script.point, m.script.ended.is_some()));
     if time.elapsed_secs() - last.0 < 5.0 && ended == last.1 {
         return;
     }
     *last = (time.elapsed_secs(), ended);
     let frame_ms = diagnostics.get(&bevy::diagnostic::FrameTimeDiagnosticsPlugin::FRAME_TIME).and_then(|d| d.average()).unwrap_or(0.0);
+    let p99_ms = p99(&mut frame_samples);
+    frame_samples.clear();
     let particles: usize = effects.iter().map(fx::Fx::particle_count).sum();
     info!(
-        "profile real={:.1} mission={mission_time:.1} objective={objective:?} ended={ended} frame_ms={frame_ms:.2} entities={} ships={} rocks={} effects={} particles={particles} mesh_assets={} audio={}",
+        "profile real={:.1} mission={mission_time:.1} objective={objective:?} ended={ended} frame_ms={frame_ms:.2} entities={} ships={} rocks={} effects={} particles={particles} mesh_assets={} audio={} p99_ms={p99_ms:.2} lights={} draw_entities={} materials={}",
         time.elapsed_secs(),
         entities.iter().count(),
         ships.iter().count(),
         rocks.iter().count(),
         effects.iter().count(),
         meshes.len(),
-        audio.iter().count()
+        audio.iter().count(),
+        point_lights.iter().count() + spot_lights.iter().count(),
+        draws.iter().count(),
+        standard_materials.len() + effect_materials.len()
     );
 }
 
@@ -448,6 +483,26 @@ mod tests {
         let pts = [Vec3::new(5.0, 0.0, 0.0), Vec3::new(1.0, 1.0, 0.0), Vec3::new(-9.0, 0.0, 0.0)];
         assert_eq!(nearest(pts, Vec3::ZERO, |p| *p), Some(pts[1]));
         assert_eq!(nearest(Vec::<Vec3>::new(), Vec3::ZERO, |p| *p), None);
+    }
+    #[test]
+    fn p99_is_the_nearest_rank_sample() {
+        assert_eq!(p99(&mut []), 0.0);
+        assert_eq!(p99(&mut [7.0]), 7.0);
+        let mut hundred: Vec<f64> = (1..=100).rev().map(f64::from).collect();
+        assert_eq!(p99(&mut hundred), 99.0, "one outlier in a hundred frames is excluded");
+        let mut stutter = vec![16.0; 99];
+        stutter.push(250.0);
+        assert_eq!(p99(&mut stutter), 16.0);
+        stutter.push(250.0);
+        assert_eq!(p99(&mut stutter), 250.0, "two slow frames in 101 are the tail");
+    }
+    #[test]
+    fn profiling_turns_vsync_off_at_every_speed() {
+        use bevy::window::PresentMode::{AutoNoVsync, AutoVsync};
+        assert_eq!(present_mode(false, 1.0), AutoVsync);
+        assert_eq!(present_mode(false, 4.0), AutoNoVsync);
+        assert_eq!(present_mode(true, 1.0), AutoNoVsync);
+        assert_eq!(present_mode(true, 4.0), AutoNoVsync);
     }
     #[test]
     fn content_next_to_the_executable_wins_over_the_checkout() {

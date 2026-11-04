@@ -62,7 +62,7 @@ Shared sight smoke: `WAYLAND_DISPLAY= tools/shot.sh local/sight.png --script sig
 Screenshot tests need a display, or Xvfb + Mesa for the headless helper. Outputs belong in ignored `local/`.
 The `pause` / `pause-restart` scripts assert that the non-retail Pause key freezes virtual time and that Pause / restarting resumes it; let the run finish past frame 70, not just write its screenshot.
 `PROCYON_PROFILE=1 make run ARGS='--mission 1'` logs rolling real frame time and world/FX/mesh/audio counts every five real seconds
-and on mission-end changes. Fleet smoke: `tools/shot.sh local/fleet.png --map red_rover --allies Ship_Navy_Cutter,Ship_Navy_Cutter,Ship_Navy_Cutter --script fleet --shot-frame 210 --late-frame 260`; it exercises shared keys/widgets, two heights, promotion, formations, restart and menu re-entry. Lifeboat smoke (scripted, needs `--shot` for the frame counter; run the binary directly with `WAYLAND_DISPLAY=`): `--mission 1 --script lifeboat-m1` (kill Warrior, collect both boats, immediate next level), `lifeboat-m1-fallback --speed 16` (no pickup, ~109 s timers), `--mission 2 --script lifeboat-m2|lifeboat-m2-ladyj`, `--mission 4|9 --script lifeboat-m4|lifeboat-m9`, `--mission 5|6|7|10|12 --script lifeboat-kill`. They kill ships through health and teleport collectors: scripted wiring checks, **not** combat validation. `--mission 3 --script fleet-primary` isolates the real sloop setup rule to check the human-captain handoff; `--mission 5|9 --script fleet-primary` replaces rules with a synthetic primary action to check ECS dispatch, **not** later-mission gameplay. P and brackets now belong to fleet bindings; pause/speed remain on existing HUD/menu controls (Pause key is an explicitly non-retail convenience).
+and on mission-end changes (`PROCYON_PROFILE` also turns vsync off at every speed; see "Measuring a look"). Fleet smoke: `tools/shot.sh local/fleet.png --map red_rover --allies Ship_Navy_Cutter,Ship_Navy_Cutter,Ship_Navy_Cutter --script fleet --shot-frame 210 --late-frame 260`; it exercises shared keys/widgets, two heights, promotion, formations, restart and menu re-entry. Lifeboat smoke (scripted, needs `--shot` for the frame counter; run the binary directly with `WAYLAND_DISPLAY=`): `--mission 1 --script lifeboat-m1` (kill Warrior, collect both boats, immediate next level), `lifeboat-m1-fallback --speed 16` (no pickup, ~109 s timers), `--mission 2 --script lifeboat-m2|lifeboat-m2-ladyj`, `--mission 4|9 --script lifeboat-m4|lifeboat-m9`, `--mission 5|6|7|10|12 --script lifeboat-kill`. They kill ships through health and teleport collectors: scripted wiring checks, **not** combat validation. `--mission 3 --script fleet-primary` isolates the real sloop setup rule to check the human-captain handoff; `--mission 5|9 --script fleet-primary` replaces rules with a synthetic primary action to check ECS dispatch, **not** later-mission gameplay. P and brackets now belong to fleet bindings; pause/speed remain on existing HUD/menu controls (Pause key is an explicitly non-retail convenience).
 Mission 3 storm smoke: `tools/shot.sh local/m3-storm.png --mission 3 --script storm-m3 --speed 16 --shot-frame 1050 --late-frame 0` isolates the retail storm trigger/entry/release rules and asserts ship carriage (invulnerable ship placed at trigger; not combat validation).
 Use `storm-m3-damage` with the same storm arguments to check survival under normal mission protection (no forced invulnerability).
 Post-storm hunt/NIS smoke: `tools/shot.sh local/m3-hunt.png --mission 3 --script hunt-m3 --speed 16 --shot-frame 140 --late-frame 0`
@@ -73,6 +73,16 @@ Use a scratch `XDG_DATA_HOME` for automated campaign runs if the player's campai
 Converted assets are found in this order: `PROCYON_ASSETS`, `assets/` in the source checkout (regardless of the working directory), then the
 per-user folder `$XDG_DATA_HOME/openprocyon/assets` (Linux default `~/.local/share`; `%APPDATA%\openprocyon\assets` on Windows). Without
 any, the game exits with import instructions. `content/` is always layered on top. CLI mod/screenshot paths remain relative to the working directory.
+
+### Measuring a look
+
+To measure what a look costs (a graphics mod, the render profile in `docs/modding.md`), run the same battle twice with `PROCYON_PROFILE=1`, once
+without and once with `--mod <dir>`, e.g. `PROCYON_PROFILE=1 make run ARGS='--map red_rover'` and the same with `--mod mods/look`. `PROCYON_PROFILE`
+sets `PresentMode::AutoNoVsync` at every speed (also after the speed buttons), so `frame_ms` is the real render cost, not the display period.
+Compare `frame_ms` (rolling average) and `p99_ms` (99th percentile of the per-frame times since the previous line; a steady 60 fps needs it near 16.7).
+The counters next to them say why a look is slower: `lights` (point + spot lights), `draw_entities` (`Mesh3d` entities), `materials`
+(`StandardMaterial` plus effect-material assets), `particles` and `mesh_assets`. Let each run settle for a few log lines before reading it;
+only compare runs on the same machine and scene.
 
 ## Battle clock and scheduling
 
