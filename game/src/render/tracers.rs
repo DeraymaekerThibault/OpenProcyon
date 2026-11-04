@@ -20,7 +20,7 @@ use std::collections::{HashMap, VecDeque};
 use super::bursts::Part;
 use super::{Look, num, rgb};
 use crate::combat::Shell;
-use crate::fx::Fx;
+use crate::fx::{EffectStarted, Fx};
 
 /// The shader's asset path; the mod ships it.
 pub const SHADER: &str = "shaders/tracer.wesl";
@@ -136,14 +136,16 @@ struct Streaks(HashMap<Entity, Streak>);
 #[derive(Component)]
 struct TracerMesh;
 
-/// The retail flight effect riding on a new shell keeps `particles` of its rate.
-fn thin_flight_fx(look: Res<Look>, mut fx: Query<(&mut Fx, &ChildOf), Added<Fx>>, shells: Query<(), With<Shell>>) {
+/// The retail flight effect riding on a new shell (the effect is the shell's child) keeps `particles` of its rate.
+fn thin_flight_fx(look: Res<Look>, mut started: MessageReader<EffectStarted>, mut fx: Query<(&mut Fx, &ChildOf)>) {
     let Some(t) = &look.tracers else { return };
     if t.particles >= 1.0 {
         return;
     }
-    for (mut f, parent) in &mut fx {
-        if shells.contains(parent.parent()) {
+    for m in started.read() {
+        // short effects can be gone already
+        let Ok((mut f, parent)) = fx.get_mut(m.entity) else { continue };
+        if m.shell == Some(parent.parent()) {
             f.rate_scale *= t.particles.max(0.0);
         }
     }
@@ -305,6 +307,7 @@ fn ribbon(b: &mut Built, s: &Streak, now: f32, cam: &GlobalTransform) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::fx::FxLib;
 
     fn tracers() -> Tracers {
         parse(&serde_json::json!({
@@ -342,6 +345,45 @@ mod tests {
         assert_eq!(p.len(), 1, "a live shell keeps its head");
         expire(&mut p, 5.0, false);
         assert!(p.is_empty());
+    }
+
+    #[test]
+    fn only_the_effect_riding_on_a_shell_is_thinned() {
+        use bevy::ecs::system::RunSystemOnce;
+        let mut world = World::new();
+        world.init_resource::<Messages<EffectStarted>>();
+        world.insert_resource(FxLib::with_names(&["Flight", "Muzzle"]));
+        world.insert_resource(Look::parse(&serde_json::json!({"tracers": {"particles": 0.25}})));
+        let shell = world.spawn_empty().id();
+        let mount = world.spawn_empty().id();
+        let started = world
+            .run_system_once(move |mut commands: Commands, lib: Res<FxLib>| {
+                let flight = crate::fx::spawn_with(
+                    &mut commands,
+                    &lib,
+                    "Flight",
+                    Some(shell),
+                    Transform::default(),
+                    Transform::default(),
+                    false,
+                    crate::fx::Origin { shell: Some(shell), ..default() },
+                );
+                let muzzle = crate::fx::spawn_with(
+                    &mut commands,
+                    &lib,
+                    "Muzzle",
+                    Some(mount),
+                    Transform::default(),
+                    Transform::default(),
+                    false,
+                    crate::fx::Origin { shell: Some(shell), ..default() },
+                );
+                (flight.unwrap(), muzzle.unwrap())
+            })
+            .unwrap();
+        world.run_system_once(thin_flight_fx).unwrap();
+        assert_eq!(world.get::<Fx>(started.0).unwrap().rate_scale, 0.25);
+        assert_eq!(world.get::<Fx>(started.1).unwrap().rate_scale, 1.0, "a muzzle flash fires the shell but does not ride on it");
     }
 
     #[test]

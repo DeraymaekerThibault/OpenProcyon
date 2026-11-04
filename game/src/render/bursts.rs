@@ -19,7 +19,7 @@ use bevy::shader::ShaderRef;
 use serde_json::Value;
 
 use super::{Look, num, rgb};
-use crate::fx::{Fx, FxLib};
+use crate::fx::{EffectStarted, Fx, FxLib};
 
 pub const SHADER: &str = "shaders/burst.wesl";
 pub const SMOKE_SHADER: &str = "shaders/smoke.wesl";
@@ -281,7 +281,8 @@ struct Emitter {
     next: f32,
 }
 
-/// Retail effects starting now throw their rule's parts.
+/// Retail effects starting now throw their rule's parts: along the message's `forward` (a muzzle flash blows along its shot, an
+/// impact about the surface it struck).
 #[allow(clippy::too_many_arguments)]
 fn start(
     mut commands: Commands,
@@ -289,8 +290,7 @@ fn start(
     look: Res<Look>,
     lib: Option<Res<FxLib>>,
     mut parts: ResMut<Particles>,
-    new: Query<(Entity, &Fx, &GlobalTransform), Added<Fx>>,
-    fired: Query<&Transform, Added<crate::combat::Shell>>,
+    mut started: MessageReader<EffectStarted>,
     cams: Query<&GlobalTransform, With<Camera3d>>,
     mut names: Local<Vec<String>>,
 ) {
@@ -305,24 +305,19 @@ fn start(
     }
     let now = time.elapsed_secs();
     let eye = cams.iter().next().map(|c| c.translation());
-    for (e, fx, gt) in &new {
-        let Some(name) = names.get(fx.effect()) else { continue };
+    for m in started.read() {
+        let Some(name) = names.get(m.effect) else { continue };
         let Some(r) = b.rule(name) else { continue };
         let rule = &b.rules[r];
-        // a muzzle flash blows along the shot fired from it (a shell just launched beside it), not its mount's axes
-        let at = gt.translation();
-        let shot =
-            fired.iter().filter(|t| t.translation.distance_squared(at) < 16.0).min_by(|a, b| a.translation.distance_squared(at).total_cmp(&b.translation.distance_squared(at)));
-        let forward = shot.map_or(gt.forward().as_vec3(), |t| t.forward().as_vec3());
         for (kind, p) in &rule.parts {
-            parts.throw(*kind, p, at, forward, now, None);
+            parts.throw(*kind, p, m.at, m.forward, now, None);
         }
         if rule.shake > 0.0 {
-            let d = eye.map_or(0.0, |c| c.distance(at));
+            let d = eye.map_or(0.0, |c| c.distance(m.at));
             parts.shake = parts.shake.max(rule.shake / (1.0 + d / 150.0));
         }
         if rule.every > 0.0 {
-            commands.entity(e).try_insert(Emitter { rule: r, next: now + rule.every });
+            commands.entity(m.entity).try_insert(Emitter { rule: r, next: now + rule.every });
         }
     }
 }
@@ -600,6 +595,64 @@ mod tests {
         assert_eq!(still.motion(2.0).0, Vec3::new(20.0, 2.0, 0.0));
     }
 
+    /// Spawns effects through `fx::spawn_with`, so `EffectStarted` carries what the real callers send, then runs `start`.
+    fn thrown(spawns: Vec<(&'static str, Transform, crate::fx::Origin)>) -> Vec<Particle> {
+        use bevy::ecs::system::RunSystemOnce;
+        let mut world = World::new();
+        world.init_resource::<Messages<EffectStarted>>();
+        world.init_resource::<Particles>();
+        world.insert_resource(Time::<()>::default());
+        world.insert_resource(FxLib::with_names(&["Gun_Muzzle_Flash", "Gun_Impact", "Boarding_Fight"]));
+        world.insert_resource(Look::parse(&serde_json::json!({"bursts": {"effects": [
+            {"match": "muzzle", "sparks": {"count": 60, "spread": 20}},
+            {"match": "_impact", "sparks": {"count": 60, "spread": 30}},
+        ]}})));
+        world
+            .run_system_once(move |mut commands: Commands, lib: Res<FxLib>| {
+                for (name, tf, origin) in &spawns {
+                    crate::fx::spawn_with(&mut commands, &lib, name, None, *tf, *tf, true, *origin);
+                }
+            })
+            .unwrap();
+        world.run_system_once(start).unwrap();
+        world.resource::<Particles>().list.clone()
+    }
+
+    fn inside(list: &[Particle], axis: Vec3, degrees: f32) -> bool {
+        list.iter().all(|p| p.vel.normalize().dot(axis.normalize()) >= degrees.to_radians().cos() - 1e-3)
+    }
+
+    #[test]
+    fn a_muzzle_flash_throws_along_the_shot_not_its_mounts_axes() {
+        let mount = Transform::from_xyz(5.0, 0.0, 0.0).looking_to(Vec3::NEG_Z, Vec3::Y);
+        let shot = Vec3::new(1.0, 0.2, 0.0).normalize();
+        let origin = crate::fx::Origin { forward: Some(shot), shell: Some(Entity::from_raw_u32(7).unwrap()), host: None };
+        let list = thrown(vec![("Gun_Muzzle_Flash", mount, origin)]);
+        assert_eq!(list.len(), 60);
+        assert!(inside(&list, shot, 20.0), "inside the cone about the shot's velocity");
+        assert!(!inside(&list, Vec3::NEG_Z, 20.0), "and not about the mount");
+        assert!(list.iter().all(|p| p.from == mount.translation));
+    }
+
+    #[test]
+    fn an_impact_burst_spreads_about_the_surface_normal() {
+        let normal = Vec3::new(0.0, 1.0, 0.5).normalize();
+        // the effect node faces back along the flight, 90 degrees from the surface normal here
+        let node = Transform::from_xyz(0.0, 3.0, 0.0).looking_to(Vec3::X, Vec3::Y);
+        let origin = crate::fx::Origin { forward: Some(normal), shell: None, host: Some(Entity::from_raw_u32(9).unwrap()) };
+        let list = thrown(vec![("Gun_Impact", node, origin)]);
+        assert_eq!(list.len(), 60);
+        assert!(inside(&list, normal, 30.0));
+        assert!(!inside(&list, Vec3::X, 30.0));
+    }
+
+    #[test]
+    fn an_effect_without_shell_or_normal_keeps_its_nodes_forward() {
+        let node = Transform::from_xyz(1.0, 2.0, 3.0).looking_to(Vec3::new(-1.0, 0.0, 1.0), Vec3::Y);
+        let list = thrown(vec![("Gun_Impact", node, crate::fx::Origin::default()), ("Boarding_Fight", node, crate::fx::Origin::default())]);
+        assert_eq!(list.len(), 60, "only the effect with a rule throws");
+        assert!(inside(&list, node.forward().as_vec3(), 30.0));
+    }
     #[test]
     fn quads_carry_kind_seed_and_age_and_motes_fill_the_box() {
         let cam = GlobalTransform::from(Transform::from_xyz(0.0, 50.0, 0.0).looking_at(Vec3::ZERO, Vec3::NEG_Z));

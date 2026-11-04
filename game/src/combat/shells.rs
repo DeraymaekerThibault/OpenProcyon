@@ -216,24 +216,33 @@ fn spill(class: &Class, hp: &mut Health, k: usize, damage: f32, invuln: f32, see
     }
 }
 
+/// What a shell struck, for the `EffectStarted` message of its impact effect: the ship or base and the outward surface normal where
+/// the hit routine found one (a rock, a dragon or the ground have none: the effect then keeps facing back along the flight).
+#[derive(Clone, Copy, Default)]
+pub(super) struct Surface {
+    pub body: Option<Entity>,
+    pub normal: Option<Vec3>,
+}
+
 /// The bullet's impact effect at `at`, facing back along its flight. On a ship (`host`) it is attached to the hull, so it rides along
-/// with the ship (decoded) instead of staying where the ship was.
-pub(super) fn hit_fx(commands: &mut Commands, fxl: &FxLib, bd: &BulletDef, at: Vec3, vel: Vec3, host: Option<(Entity, &Transform)>) {
+/// with the ship (decoded) instead of staying where the ship was. `struck` tells the profile blocks what was hit (presentation only).
+pub(super) fn hit_fx(commands: &mut Commands, fxl: &FxLib, bd: &BulletDef, at: Vec3, vel: Vec3, host: Option<(Entity, &Transform)>, struck: Surface) {
     if let Some(n) = &bd.hit_fx {
         let t = Transform::from_translation(at).looking_to(-vel, Vec3::Y);
-        spawn_on(commands, fxl, n, t, host);
+        let origin = fx::Origin { forward: struck.normal, shell: None, host: struck.body.or(host.map(|h| h.0)) };
+        spawn_on(commands, fxl, n, t, host, origin);
     }
 }
 
 /// Spawns effect `name` at world pose `world`, parented to `host` when given.
-fn spawn_on(commands: &mut Commands, fxl: &FxLib, name: &str, world: Transform, host: Option<(Entity, &Transform)>) {
+fn spawn_on(commands: &mut Commands, fxl: &FxLib, name: &str, world: Transform, host: Option<(Entity, &Transform)>, origin: fx::Origin) {
     match host {
         Some((ship, stf)) => {
             let local = Transform::from_matrix(stf.to_matrix().inverse() * world.to_matrix());
-            fx::spawn(commands, fxl, name, Some(ship), local, world, true);
+            fx::spawn_with(commands, fxl, name, Some(ship), local, world, true, origin);
         }
         None => {
-            fx::spawn(commands, fxl, name, None, world, world, true);
+            fx::spawn_with(commands, fxl, name, None, world, world, true, origin);
         }
     }
 }
@@ -412,7 +421,7 @@ pub(super) fn shells(
                 // Retail rolls the same difficulty factor against a dragon as against a computer ship (decoded; not measured on a dragon).
                 d.hurt(rng.range(lo, hi).round() * side_damage_scale(s.side, Side::Enemy, crate::menu::difficulty(), s.base));
             }
-            hit_fx(&mut commands, &fxl, bd, p0 + (p1 - p0) * t, s.vel, None);
+            hit_fx(&mut commands, &fxl, bd, p0 + (p1 - p0) * t, s.vel, None, Surface::default());
             commands.entity(e).despawn();
             continue;
         }
@@ -427,7 +436,7 @@ pub(super) fn shells(
                     sfx.write(Sfx { name: format!("Damage_Stone0{}", rng.variant(5)), at: Some(at), vol: 1.0, max: 600.0 });
                 }
             }
-            hit_fx(&mut commands, &fxl, bd, at, s.vel, None);
+            hit_fx(&mut commands, &fxl, bd, at, s.vel, None, Surface::default());
             commands.entity(e).despawn();
             continue;
         }
@@ -466,8 +475,9 @@ pub(super) fn shells(
             let [lo, hi, ..] = bd.damage[key];
             let at = p0 + (p1 - p0) * t;
             let inv = btf.to_matrix().inverse();
-            if let Some((_, n)) = seg_mesh_hit(inv.transform_point3(p0), inv.transform_point3(p1), sec)
-                && ricochet(&mut s, &mut tf, bd, key, at, (btf.rotation * n).normalize(), Vec3::ZERO, &mut rng, &mut sfx)
+            let normal = seg_mesh_hit(inv.transform_point3(p0), inv.transform_point3(p1), sec).map(|(_, n)| (btf.rotation * n).normalize());
+            if let Some(n) = normal
+                && ricochet(&mut s, &mut tf, bd, key, at, n, Vec3::ZERO, &mut rng, &mut sfx)
             {
                 continue;
             }
@@ -476,7 +486,7 @@ pub(super) fn shells(
             let fallen = apply_base_hit(class, &mut hp, k, rng.range(lo, hi));
             sfx.write_batch(bd.impact_sound(key, at, &mut rng));
             base_parts_burst(&mut commands, &fxl, class, btf, fallen);
-            hit_fx(&mut commands, &fxl, bd, at, s.vel, None);
+            hit_fx(&mut commands, &fxl, bd, at, s.vel, None, Surface { body: Some(be), normal });
             // Decoded: a struck wood section splinters and a stone one throws chunks, half the time (the original also needs the
             // hit within 300 of the camera; not gated here, far hits are unseen anyway).
             if let Some(name) = splinter_fx(key, hi).filter(|_| rng.f() < 0.5) {
@@ -491,6 +501,7 @@ pub(super) fn shells(
             continue;
         }
         // A shell striking a hull section may glance off it unharmed (all shells, bursting ones too).
+        let mut hull_normal = None;
         if let (Some((_, k, at)), Some(si)) = (best, best_ship)
             && let Ok((_, stf, ship, _, _, _, drift)) = ships.get(si)
         {
@@ -498,8 +509,9 @@ pub(super) fn shells(
             let inv = stf.to_matrix().inverse();
             let hull = Vec3::new(-ship.heading.sin(), 0.0, -ship.heading.cos()) * ship.speed + drift.map_or(Vec3::ZERO, |d| d.0);
             let key = material_key(&class.sections[k].material);
-            if let Some((_, n)) = seg_mesh_hit(inv.transform_point3(p0), inv.transform_point3(p1), &class.sections[k])
-                && ricochet(&mut s, &mut tf, bd, key, at, (stf.rotation * n).normalize(), hull, &mut rng, &mut sfx)
+            hull_normal = seg_mesh_hit(inv.transform_point3(p0), inv.transform_point3(p1), &class.sections[k]).map(|(_, n)| (stf.rotation * n).normalize());
+            if let Some(n) = hull_normal
+                && ricochet(&mut s, &mut tf, bd, key, at, n, hull, &mut rng, &mut sfx)
             {
                 continue;
             }
@@ -514,7 +526,7 @@ pub(super) fn shells(
                 if let Some(name) = bd.ricochet_snd.get(key) {
                     sfx.write(Sfx { name: name.clone(), at: Some(at), vol: 1.0, max: 600.0 });
                 }
-                hit_fx(&mut commands, &fxl, bd, at, s.vel, None);
+                hit_fx(&mut commands, &fxl, bd, at, s.vel, None, Surface::default());
             } else if !matches!(s.payload, Payload::Nova) {
                 detonate.write(Detonate { bullet: s.bullet.clone(), at, shooter: Some(s.shooter), owner: Some((s.side, s.base)) });
             }
@@ -525,7 +537,7 @@ pub(super) fn shells(
             let (se, stf, ship, mut hp, mut fires, mission, _) = ships.get_mut(si).unwrap();
             let target = ShipTarget { entity: se, transform: stf, side: ship.side, class: &lib.classes[ship.class], invuln: mission.map_or(0.0, |m| m.invuln) };
             hit_ship(&mut commands, &fxl, &mut rng, (&mut sfx, &mut hits, &mut scars), bd, &s, target, &mut hp, &mut fires, k, at);
-            hit_fx(&mut commands, &fxl, bd, at, s.vel, Some((se, stf)));
+            hit_fx(&mut commands, &fxl, bd, at, s.vel, Some((se, stf)), Surface { body: Some(se), normal: hull_normal });
             if matches!(s.payload, Payload::Blast { .. }) {
                 detonate.write(Detonate { bullet: s.bullet.clone(), at, shooter: Some(s.shooter), owner: Some((s.side, s.base)) });
             }
@@ -538,7 +550,7 @@ pub(super) fn shells(
                 detonate.write(Detonate { bullet: s.bullet.clone(), at, shooter: Some(s.shooter), owner: Some((s.side, s.base)) });
             } else {
                 sfx.write_batch(bd.impact_sound("Stone", at, &mut rng));
-                hit_fx(&mut commands, &fxl, bd, at, s.vel, None);
+                hit_fx(&mut commands, &fxl, bd, at, s.vel, None, Surface::default());
             }
             commands.entity(e).despawn();
         } else if s.age > s.lifetime || p1.y < -300.0 {
@@ -609,7 +621,7 @@ fn hit_ship(
         scars.write(crate::decals::Scar { ship: se, section: k, local: inv.transform_point3(at), dir: inv.transform_vector3(s.vel).normalize_or_zero(), material, size });
     }
     if let Some(name) = splinter_fx(key, bd.damage[key][1]).filter(|_| rng.f() < 0.5) {
-        spawn_on(commands, fxl, name, Transform::from_translation(at), Some((se, stf)));
+        spawn_on(commands, fxl, name, Transform::from_translation(at), Some((se, stf)), fx::Origin { host: Some(se), ..default() });
     }
     if let Some(fire_str) = outcome.fire {
         // The flame takes the shell's orientation (its up axis tilts with a steep shot), in the hull's frame. PROVISIONAL: the original's

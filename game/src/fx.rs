@@ -262,6 +262,16 @@ impl FxLib {
     pub fn names(&self) -> impl Iterator<Item = (&str, usize)> {
         self.effects.iter().map(|(n, &i)| (n.as_str(), i))
     }
+
+    /// A library of empty effects with these names (index = position), for tests that need effect names but no game data.
+    #[cfg(test)]
+    pub fn with_names(names: &[&str]) -> Self {
+        Self {
+            effects: names.iter().enumerate().map(|(i, n)| (n.to_string(), i)).collect(),
+            list: names.iter().map(|_| Effect { prims: vec![], bound: None }).collect(),
+            tex_names: vec![],
+        }
+    }
 }
 
 impl Fx {
@@ -469,6 +479,7 @@ impl FromWorld for FxLib {
 
 pub fn plugin(app: &mut App) {
     app.add_plugins(MaterialPlugin::<EffectMaterial>::default())
+        .add_message::<EffectStarted>()
         .init_resource::<FxLib>()
         .insert_resource(FxRng(0xD1B54A32D192ED03))
         .init_resource::<FxTextures>()
@@ -481,9 +492,43 @@ fn load_textures(lib: Res<FxLib>, assets: Res<AssetServer>, mut tex: ResMut<FxTe
     tex.0 = lib.tex_names.iter().map(|n| assets.load(format!("fx/tex/{n}.png"))).collect();
 }
 
+/// A retail effect started: what a renderer needs to decorate it. Written by `spawn` on the tick that starts the effect and read in
+/// `Update` (messages are retained across frames without a tick). Presentation input only: nothing in the simulation reads it. The
+/// optional render-profile blocks (lights, bursts, tracers) use it instead of watching effects appear.
+#[derive(Message, Clone, Debug, PartialEq)]
+pub struct EffectStarted {
+    pub entity: Entity,
+    /// `FxLib` index, as `Fx::effect()`.
+    pub effect: usize,
+    /// World position it starts at.
+    pub at: Vec3,
+    /// The shot's direction for a muzzle flash, the surface normal for an impact, else the effect node's own forward.
+    pub forward: Vec3,
+    /// The shell it belongs to: the one a muzzle flash fires, the one a flight effect rides on.
+    pub shell: Option<Entity>,
+    /// The ship or base an impact struck.
+    pub host: Option<Entity>,
+}
+
+/// What a caller knows about the effect it starts, beyond its pose: it fills the `EffectStarted` message.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Origin {
+    /// Replaces the effect node's forward in the message.
+    pub forward: Option<Vec3>,
+    pub shell: Option<Entity>,
+    pub host: Option<Entity>,
+}
+
 /// Starts effect `name` at world transform `world` (so the first frame is right), optionally as a child of `parent`
 /// (then `local` is relative to it). Unknown names are ignored. Returns the effect entity.
 pub fn spawn(commands: &mut Commands, lib: &FxLib, name: &str, parent: Option<Entity>, local: Transform, world: Transform, transient: bool) -> Option<Entity> {
+    spawn_with(commands, lib, name, parent, local, world, transient, Origin::default())
+}
+
+/// `spawn`, telling the `EffectStarted` message more than the pose says (the shot's direction, the surface normal, the shell, the host).
+/// The message is queued as a command, so `spawn` keeps taking `&mut Commands` and its callers stay as they are.
+#[allow(clippy::too_many_arguments)]
+pub fn spawn_with(commands: &mut Commands, lib: &FxLib, name: &str, parent: Option<Entity>, local: Transform, world: Transform, transient: bool, origin: Origin) -> Option<Entity> {
     let &eff = lib.effects.get(name)?;
     let fx = Fx {
         eff,
@@ -506,7 +551,16 @@ pub fn spawn(commands: &mut Commands, lib: &FxLib, name: &str, parent: Option<En
     if transient {
         e.insert(Transient);
     }
-    Some(e.id())
+    let entity = e.id();
+    let started =
+        EffectStarted { entity, effect: eff, at: world.translation, forward: origin.forward.unwrap_or_else(|| world.forward().as_vec3()), shell: origin.shell, host: origin.host };
+    commands.queue(move |world: &mut World| {
+        // no message store (a test world without the plugin): nobody listens
+        if let Some(mut messages) = world.get_resource_mut::<Messages<EffectStarted>>() {
+            messages.write(started);
+        }
+    });
+    Some(entity)
 }
 
 /// Engine tick (retail constant 0.033): particles spawn and advance once per tick; velocities are stored per second.
@@ -902,6 +956,28 @@ fn render_fx(
 mod tests {
     use super::*;
 
+    #[test]
+    fn spawning_an_effect_announces_it_with_the_nodes_forward_unless_the_caller_knows_more() {
+        use bevy::ecs::system::RunSystemOnce;
+        let mut world = World::new();
+        world.init_resource::<Messages<EffectStarted>>();
+        world.insert_resource(FxLib::with_names(&["A", "B"]));
+        let node = Transform::from_xyz(1.0, 2.0, 3.0).looking_to(Vec3::X, Vec3::Y);
+        let (shell, host) = (world.spawn_empty().id(), world.spawn_empty().id());
+        let made = world
+            .run_system_once(move |mut commands: Commands, lib: Res<FxLib>| {
+                let plain = spawn(&mut commands, &lib, "B", None, node, node, true).unwrap();
+                let told = spawn_with(&mut commands, &lib, "A", None, node, node, true, Origin { forward: Some(Vec3::Y), shell: Some(shell), host: Some(host) }).unwrap();
+                assert!(spawn(&mut commands, &lib, "Unknown", None, node, node, true).is_none());
+                (plain, told)
+            })
+            .unwrap();
+        let sent: Vec<_> = world.resource_mut::<Messages<EffectStarted>>().drain().collect();
+        assert_eq!(sent.len(), 2, "one per effect started, none for an unknown name");
+        let plain = EffectStarted { entity: made.0, effect: 1, at: node.translation, forward: node.forward().as_vec3(), shell: None, host: None };
+        assert_eq!(sent[0], plain, "no shell: the node's own forward");
+        assert_eq!(sent[1], EffectStarted { entity: made.1, effect: 0, forward: Vec3::Y, shell: Some(shell), host: Some(host), ..plain });
+    }
     #[test]
     #[ignore = "needs imported assets"]
     fn meteor_shower_spreads_above_the_emitter_and_falls_vertically() {

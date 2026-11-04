@@ -1,6 +1,7 @@
 //! Area weapons: lob-shell detonations (star/nova mortars, gravity charges), the blast spheres and gravity wells they leave,
 //! mission 9's dark-matter blast, and hull damage from hard collisions (rams).
 //! Data: the bullets' custom-info fields (`Payload`, exported by tools/export_combat.py). PROVISIONAL behaviour is marked below.
+use super::shells::Surface;
 use super::*;
 
 /// A bullet bursts at `at` (a landed lob shell, or a scripted blast with no shooter).
@@ -59,7 +60,7 @@ pub fn shoot(mut commands: Commands, lib: Res<Library>, fxl: Res<FxLib>, mut msg
             ))
             .id();
         if let Some(n) = &b.bullet_fx {
-            fx::spawn(&mut commands, &fxl, n, Some(shell), Transform::default(), stf, false);
+            fx::spawn_with(&mut commands, &fxl, n, Some(shell), Transform::default(), stf, false, fx::Origin { shell: Some(shell), ..default() });
         }
     }
 }
@@ -236,7 +237,7 @@ pub fn blasts(
             shell.hp -= rng.range(lo, hi) * f;
             if shell.hp <= 0.0 {
                 if let Some(pd) = lib.bullets.get(&shell.bullet) {
-                    hit_fx(&mut commands, &fxl, pd, ptf.translation, shell.vel, None);
+                    hit_fx(&mut commands, &fxl, pd, ptf.translation, shell.vel, None, Surface::default());
                 }
                 commands.entity(pe).despawn();
             }

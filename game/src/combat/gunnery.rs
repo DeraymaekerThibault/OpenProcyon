@@ -527,10 +527,20 @@ pub(super) fn launch_shell(
         commands.entity(shell).insert((Mesh3d(look.mesh.clone()), MeshMaterial3d(mat)));
     }
     if let Some(n) = &b.bullet_fx {
-        fx::spawn(commands, fxl, n, Some(shell), Transform::default(), stf, false);
+        fx::spawn_with(commands, fxl, n, Some(shell), Transform::default(), stf, false, fx::Origin { shell: Some(shell), ..default() });
     }
     if let (Some(n), Some(mg)) = (&g.muzzle_fx, mgt) {
-        fx::spawn(commands, fxl, n, Some(mz), Transform::default(), mg.compute_transform(), false);
+        // a muzzle flash faces the shot fired from it, not its mount's axes
+        fx::spawn_with(
+            commands,
+            fxl,
+            n,
+            Some(mz),
+            Transform::default(),
+            mg.compute_transform(),
+            false,
+            fx::Origin { forward: Some(stf.forward().as_vec3()), shell: Some(shell), host: None },
+        );
     }
 }
 

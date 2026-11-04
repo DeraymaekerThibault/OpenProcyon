@@ -56,6 +56,26 @@ never rules. Every key is optional; an absent block leaves that feature classic.
 | `surfaces` | textured, lit, non-blended glTF materials (not sails) get `shaders/surface.wesl`, which derives relief from the colour texture while drawing: `rules` (`[{match: [...], roughness, metallic, reflectance, bump, cavity, gloss}]` against the material name, first match wins, unset keys from `default`), `skip` (names left retail), `rim` and `rim_strength` (light along the silhouettes). A cloaking ship's meshes (and sails) wear their retail material while faded |
 | `bursts` | particles thrown when a retail effect starts whose name contains a rule's `match` (`effects`, first match wins): parts `flash`, `sparks`, `embers`, `fireball`, `ring` (flat shockwave), `smoke`, each `{count, color, size, seconds, speed, spread (degrees about the effect's forward; a muzzle's is its shot's), drag, rise}`; `every` (seconds: keep throwing while the effect lives, e.g. fires), `shake` (camera jolt). `scorch` (a part: glow where a shell scars a hull), `motes` (a part: `count` specks of dust within `speed` units of the camera). Glows draw with `shaders/burst.wesl`, smoke with `shaders/smoke.wesl` |
 
+### Effect events
+The blocks that decorate retail effects (`lights`, `bursts`, and `tracers` for thinning flight effects) learn that one started
+from a single message, `fx::EffectStarted`, not by watching components appear. It is presentation input only: the simulation
+never reads it, and existing messages (`Hit`, `Destroyed`, `Scar`, `Shoot`, `Detonate`) are unchanged. `fx::spawn` queues it as a
+command, so it is written on the tick that starts the effect and read in `Update` (messages are retained across frames without a
+tick; see [development.md](development.md) "Battle clock").
+
+| Field | Meaning |
+|---|---|
+| `entity` | the effect (it may already be gone by the time a short one is read) |
+| `effect` | the effect's `FxLib` index, as `Fx::effect()` |
+| `at` | world position it starts at |
+| `forward` | the effect node's own forward, except: a muzzle flash gets its shot's direction (`combat/gunnery.rs`), an impact the surface normal where the hit found one (`combat/shells.rs` `hit_fx`: ships and bases; rocks, dragons and the ground keep the node's, which faces back along the flight) |
+| `shell` | the shell a muzzle flash fires, or the one a flight effect rides on (that effect is the shell's child) |
+| `host` | the ship or base an impact struck |
+
+A caller that knows more than the pose uses `fx::spawn_with(…, fx::Origin { forward, shell, host })`; everything else calls
+`fx::spawn` and sends the node's forward. A new block that needs "a shell hit a hull at X with normal N" reads this message
+instead of adding another query.
+
 ### Shaders
 The shaders are fragment shaders in Bevy's WESL. Each gets the mesh's `VertexOutput` (world position and normal,
 UV, vertex colour) and one uniform at `@group(constants::MATERIAL_BIND_GROUP) @binding(100)`, whose layout is a Rust
