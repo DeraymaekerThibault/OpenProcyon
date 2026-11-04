@@ -9,7 +9,7 @@ game, Bevy's asset server included, reads only that tree.
 
 | Mod file | Effect |
 |---|---|
-| any file with a base path (`hud/tex/fe_05.png`, `ships/Ship_X/model.glb`, `fonts/Sans.otf`, `sound/<kind>/*.ogg`) | replaces the base file: texture packs, upscaled art, new fonts, sounds |
+| any file with a base path (`hud/sprites/MainBar_PanicButton/Navy/NoCursor.png`, `ships/Ship_X/model.glb`, `fonts/Sans.otf`, `sound/<kind>/*.ogg`) | replaces the base file: texture packs, upscaled art, new fonts, sounds |
 | `ships/<Id>/ship.json` containing `"extends": "Ship_Navy_Cutter"` | deep-merged over that ship: object keys override one by one, arrays and scalars replace; a new ship or weapon is a few lines (see `mods/silver-skirmish`) |
 | an `extends` file may also carry `"set": {"/engines/0/fx": "X"}` (JSON pointers, applied after the merge) to change one value inside an array, which a merge cannot do; a pointer that does not exist is an error |
 | `menu/strings.json` | merged key by key with the retail string table: new ids for names a mod's ships and screens use (e.g. a ship's `display_name`) |
@@ -23,14 +23,22 @@ Limits (provisional): the fleet screen lists, per fleet type (`race` Navy/Pirate
 
 ## UI art and fonts
 UI text is vector (`content/fonts/`: Chancery = URW Z003 for the BlackChancery slots, Nimbus Sans for Univers/Immi; both URW base35 fonts, AGPL with font exception, so they ship with the code).
-Sprite sheets are cleaned by `tools/fix_alpha_bleed.py` (transparent texels take their neighbours' colour, which removed the light hairlines at fractional scales).
-An upscaled/HD pack is just a mod that replaces `hud/tex/*.png` at 2x or 4x; sprite rectangles are in reference pixels, so a pack must keep the layout
-(scale the atlas and the rects together) until the HUD loader reads a per-sheet scale (not done).
+Every UI sprite is its own PNG, `hud/sprites/<component>/<skin>/<state>.png` (`<component>` is the retail `hud.hdt` name such as `MainBar_PanicButton`, `<skin>` is
+`Navy`, `Pirate` or `Procyon`, `<state>` is `NoCursor`, `CursorOver`, `CursorDown`), without its fully transparent border and with the colour under transparent pixels
+cleaned (so scaling never pulls a halo in). `hud/sprites/<component>/<skin>.json` says how big the untrimmed sprite is and how much was trimmed (`docs/data-format.md`).
 
-### HD UI sheets and 9-slice strips
-Layout is always in retail reference pixels. A mod can replace any `hud/tex/<sheet>.png` with a higher-resolution copy and declare the factor in
-`hud/scales.json` (`{"fe_05": 2}`, merged across mods); only the source rectangles scale. Buttons and ship-name ribbons are single 9-slice nodes built from
-`hud/tex/slice_<button|ribbon>_<skin>_<state>.png` (made by `tools/make_slices.py`); replace those (plus a `scales.json` entry named like the file) for HD buttons.
+### HD UI art
+Layout is always in retail reference pixels. **To replace a sprite, ship `hud/sprites/<component>/<skin>/<state>.png` at any size**: the game draws the whole image
+where the retail one was, and a sprite's scale is its PNG size divided by the size of its trimmed retail art, so a 2x, 4x or odd-sized replacement needs no other
+file. Keep the art inside the trimmed rectangle (a pixel-exact redraw of the retail picture at N times the size); art that should reach further needs the
+`<skin>.json` replaced too (`size`, `trim`; a JSON file replaces the base one whole). A state with no file of its own (`CursorOver` on most buttons) uses
+`NoCursor`; to give one its own art, add the file and a matching entry under `states` in `<skin>.json`. Each sprite is replaced on its own, so a pack can redo
+only the bar. Offsets and numbers stay in `hud/hud.json`; a mod that ships it replaces the whole file, so leave it alone unless the layout should move.
+
+The old way, replacing a whole atlas `hud/tex/<sheet>.png` at 2x and declaring it in `hud/scales.json`, is gone: the atlases are not exported or read any more.
+Buttons and ship-name ribbons are single 9-slice nodes built from `hud/tex/slice_<button|ribbon>_<skin>_<state>.png` (made by `tools/make_slices.py`); replace
+those (plus a `hud/scales.json` entry named like the file, e.g. `{"slice_button_navy_nocursor": 2}`, merged across mods) for HD buttons. That is the only use of
+`scales.json` left.
 
 ## Graphics mods: the render profile (not retail)
 Graphics upgrades are mods, never engine forks. The engine (`game/src/render/`) provides building blocks; a mod switches

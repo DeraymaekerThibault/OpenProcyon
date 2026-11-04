@@ -3,12 +3,12 @@
 //! the weapon mounts on it, stat bars, and the crew or weapon list. Falls back to a plain list when the model has no `fit`.
 #![allow(deprecated)]
 use super::widgets::{
-    Ctx, GOLD, canvas, dropdown, fleet_bar, full_screen, info_panel, list_row, piece, pulldown_cell, scrollbar, selected_tab, sprite, stretched_window, victory_points, wrapped,
+    Ctx, GOLD, canvas, dropdown, fleet_bar, full_screen, info_panel, list_row, piece, pulldown_cell, scrollbar, selected_tab, size_of, stretched_window, victory_points, wrapped,
 };
 use crate::combat::Library;
 use crate::crew_arms::{Action, CrewSet, FitView, SORTS, ScreenModel};
 use crate::menu::{Action as MenuAction, ScrollKind, strings, text_of};
-use crate::sprites::{BODY_FONT, Fonts, HudData, IDLE, offset};
+use crate::sprites::{BODY_FONT, Fonts, HudData, offset};
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use serde_json::Value;
@@ -127,7 +127,7 @@ fn face(ctx: &Ctx, c: &mut ChildSpawnerCommands, centre: Vec2, slot: &Option<(St
     let mut b = c.spawn((Interaction::None, action, ctx.node(centre.x - FACE / 2.0, centre.y - FACE / 2.0, FACE, FACE)));
     b.with_children(|c| {
         let generic = format!("CrewFace_{race}_0");
-        let name = slot.as_ref().map(|(_, p)| p.as_str()).filter(|p| sprite(ctx.hud, p, IDLE).is_some()).unwrap_or(&generic);
+        let name = slot.as_ref().map(|(_, p)| p.as_str()).filter(|p| size_of(p).is_some()).unwrap_or(&generic);
         piece(ctx, c, name, [0.0, 0.0, FACE, FACE]);
     });
 }
@@ -184,9 +184,9 @@ fn crew(ctx: &Ctx, c: &mut ChildSpawnerCommands, fit: &FitView, lib: &Library, s
 fn outline(ctx: &Ctx, c: &mut ChildSpawnerCommands, fit: &FitView, lib: &Library) {
     let Some(&ci) = fit.fleet.get(fit.ship) else { return };
     let name = lib.classes[ci].icon("WeaponBar");
-    if let Some((_, r)) = sprite(ctx.hud, &name, IDLE) {
+    if let Some(r) = size_of(&name) {
         let at = PANEL + offset(ctx.hud, "WEAPONBAR_SHIPICON_OFFSET_FROM_TOPLEFT");
-        piece(ctx, c, &name, [at.x, at.y, at.x + r.width(), at.y + r.height()]);
+        piece(ctx, c, &name, [at.x, at.y, at.x + r.x, at.y + r.y]);
     }
 }
 

@@ -211,11 +211,11 @@ def steps(root, out, want, part=lambda i, k: None):
         ("ships", lambda: export_ships(root, out, want, part)),
         ("models", lambda: models(root, out)),
         ("hud", lambda: tool("tools.export_hud", root, out)),
-        ("hud rects", lambda: tool("tools.trim_hud_rects", out)),
         # Waypoint/course art lives in BD_Textures (DDS), not BD_GUITextures.
         ("waypoint art", lambda: tool("tools.export_waypoint_art", root, out)),
-        ("alpha bleed", lambda: tool("tools.fix_alpha_bleed", out / "hud/tex")),
         ("slices", lambda: tool("tools.make_slices", out)),
+        # Font sheets, waypoint art and the slice strips (the sprites are fixed as they are exported).
+        ("alpha bleed", lambda: tool("tools.fix_alpha_bleed", out / "hud/tex")),
         ("sounds", lambda: sounds(root, out)),
         ("flags", lambda: flags(root, out)),
         # Maps (World/*.twt), their scenery/skybox GLBs, music, backdrops; front-end screen layouts (Screens/*.tst) and strings.

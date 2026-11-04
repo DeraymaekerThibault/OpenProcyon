@@ -44,7 +44,7 @@ Git Bash (`GIT_BASH=<path>` if it is not in the default place), and the screensh
 python3 -m tools.import_assets --game <install dir>   # once: convert your own copy of the game into assets/
 tools/check.sh
 cargo run --release --manifest-path game/Cargo.toml -- --mission 1
-python3 -m unittest discover -s tests -p 'test_trim_hud_rects.py'
+python3 -m unittest discover -s tests -p 'test_export_hud.py'
 cargo test --release --manifest-path game/Cargo.toml panels::tests -- --include-ignored  # shared HUD; classic::panels::tests for the retail art
 tools/shot.sh local/mission01.png --mission 1 --script briefing-skip --shot-frame 180 --late-frame 0
 tools/shot.sh local/paused.png --map red_rover --script pause --shot-frame 50 --late-frame 0
@@ -166,7 +166,7 @@ Keep the existing module boundaries. New files should own a real feature, not ju
 | `briefing.rs` | Opening NIS, subtitles and skip behaviour (widgets: `BriefingUi`, `Subtitle`, `Portrait`) | Changing intro timing, camera handoff or skip placement |
 | `panels.rs` | HUD contract: widget markers, HUD input, gauge values, radar contacts, status icon, talking-head state, pause and speed buttons | Adding panel controls: marker + behaviour here, drawing in each view |
 | `starmap.rs` | Star map opened by the radar disk (`docs/re/starmap.md`): open/close, sounds and what it shows (`StarmapContents`) | Which icons/labels the map shows; world extent comes from map JSON `world_half` |
-| `sprites.rs` | Retail sprite/font access for any view: `HudData` and faction skin choice, sprite rects/offsets, HD sheet scales, 9-slices, `image`, `Fonts` | Changing shared art metrics; keep menus (`MENU_SKIN`) separate from battle skin selection |
+| `sprites.rs` | Retail sprite/font access for any view: `HudData` and faction skin choice, `Sprite`/`View` (a trimmed per-sprite PNG and where it sits in its untrimmed box), offsets, 9-slices and their HD scales, `Fonts` | Changing shared art metrics; keep menus (`MENU_SKIN`) separate from battle skin selection |
 | `setup.rs` | First run without imported assets: its own small app with the "Import your game" screen state, install discovery (Steam libraries, installed-program entries, Program Files or a Wine prefix) and folder checks, the importer child process and its `[n/total]` progress, then a relaunch of the game | Changing how a player gets from a download to the menu |
 | `menu.rs` | Front-end model: screens, `Action`s and their handling, battle entry, the Esc in-game menu (overlay, pauses; Save/Load/Quit), `MenuModel` for the views; `menu/skirmish.rs` lobby slots, races and fleets; `menu/saves.rs` save/load lists and F3/F4 quick save/load; `menu/settings.rs` sound/display options | Changing front-end choices or transitions |
 | `modding.rs` | Asset overlays, merge semantics and inheritance | Changing override rules; preserve base assets and test merges |
@@ -195,7 +195,7 @@ Tag battle-owned roots for scenario cleanup and test returning to the same ship/
 Do not change converted asset paths just to make the tree look tidy: JSON, Bevy asset handles and mod overlays reference those paths.
 Converted content is never committed: every player and contributor imports their own copy. `tools/compare_assets.py <expected> <actual>`
 compares two imports by meaning (JSON by value, images by pixels) to check exporter changes. See [data-format.md](data-format.md) and [modding.md](modding.md).
-`data/hud/bar.json` is authored layout configuration; its sprite crops are generated. Most other retail JSON is regenerated, so edits belong in mods.
+`data/hud/bar.json` is authored layout configuration; the sprites it names are generated (`hud/sprites/`). Most other retail JSON is regenerated, so edits belong in mods.
 
 ## Tool ownership
 
@@ -206,7 +206,7 @@ compares two imports by meaning (JSON by value, images by pixels) to check expor
 | Retail format readers | `source_text.py`, `wot.py`, `mdb.py`, `msb.py`, `hdt.py`, `fft.py`, `eft.py` |
 | Mesh conversion | `mdb_to_glb.py`, `preview.py` |
 | Content export | `export_ship.py`, `export_combat.py`, `export_maps.py`, `export_campaign.py`, `export_campaign_media.py`, `export_environment.py`, `export_crew.py`, `export_effects.py`, `export_hud.py`, `export_voices.py`, `export_waypoint_art.py`, `export_collision.py`, `export_asteroids.py`, `ogg.py` |
-| Asset preparation | `pack_data.py`, `format_json.py`, `fix_alpha_bleed.py`, `make_slices.py`, `trim_hud_rects.py` |
+| Asset preparation | `pack_data.py`, `format_json.py`, `fix_alpha_bleed.py`, `make_slices.py`, `hud_sprites.py` (shared sprite layout) |
 | Workflow | `import_assets.py` (the importer; `build_assets.sh` wraps it), `check.sh`, `shot.sh`, `compare_assets.py`, `package_release.py` (player download) |
 | Research | `extract_wot.py` (catalog of WOT properties) |
 
@@ -214,7 +214,7 @@ The build pipeline is defined once in `tools/import_assets.py`: export raw ships
 The steps run in one process (`tool()` runs each module as `python -m` would), so the importer also works frozen: the `release`
 workflow (`.github/workflows/release.yml`, `tools/package_release.py`) ships it as `openprocyon-import` next to the release game binary and `content/`.
 Raw per-ship exports are temporary inputs to later exporters and removed by packing; do not commit them.
-HUD trimming/crops run before alpha-bleed cleanup. Importing needs a read-only retail install (`--game <dir>` or `PROCYON_GAME_ROOT` in `.env`); the install is never modified.
+The HUD sprites are cut out, trimmed and alpha-cleaned in `export_hud.py`; the slice strips are made from them, then cleaned. Importing needs a read-only retail install (`--game <dir>` or `PROCYON_GAME_ROOT` in `.env`); the install is never modified.
 Python dependencies are in `requirements.txt` (the checks add ruff via `requirements-dev.txt`, release packaging PyInstaller via `requirements-release.txt`); Rust dependencies and resolved versions are in `game/Cargo.toml` and `game/Cargo.lock`.
 
 ## Implementation order

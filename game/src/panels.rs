@@ -8,7 +8,7 @@ use bevy::prelude::*;
 
 use crate::bindings::Act;
 use crate::combat::{self, GunStates, Health};
-use crate::sprites::{HudData, inset, sprite_of};
+use crate::sprites::{HudData, Sprite};
 use crate::{Library, PlayerShip, Ship};
 
 /// Height of the reference screen the HUD art is scaled against (the reference video draws the 640x480 art at twice that height).
@@ -322,11 +322,6 @@ pub fn px(v: f32, s: f32) -> Val {
     Val::Px(v * s)
 }
 
-/// (handle, source rect) of a hud.hdt sprite in the current faction's set.
-pub fn frame(assets: &AssetServer, hud: &HudData, name: &str) -> Option<(Handle<Image>, Rect)> {
-    sprite_of(hud, name).map(|(sheet, r)| (assets.load::<Image>(format!("hud/tex/{sheet}.png")), inset(&sheet, r)))
-}
-
 fn update_visibility(
     mut root: Query<&mut Visibility, (With<HudRoot>, Without<WeaponPanel>)>,
     mut weapons: Query<&mut Visibility, With<WeaponPanel>>,
@@ -350,11 +345,12 @@ fn update_docking_status(
     assets: Res<AssetServer>,
     player: Query<(Entity, Option<&crate::docking::Docker>, Option<&crate::boarding::Boarding>), With<PlayerShip>>,
     fights: Query<&crate::boarding::Boarding>,
-    mut frames: Local<Option<(&'static str, [Vec<(Handle<Image>, Rect)>; 2])>>,
-    mut icons: Query<(&mut ImageNode, &mut Visibility), With<DockingStatus>>,
+    window: Single<&Window, With<bevy::window::PrimaryWindow>>,
+    mut frames: Local<Option<(&'static str, [Vec<Sprite>; 2])>>,
+    mut icons: Query<(&mut ImageNode, &mut Node, &mut Visibility), With<DockingStatus>>,
 ) {
     if frames.as_ref().is_none_or(|f| f.0 != hud.skin) {
-        let load = |kind: &str| (0..6).filter_map(|i| frame(&assets, &hud, &format!("ShipStatus_Icon_{kind}_Frame{i}"))).collect();
+        let load = |kind: &str| (0..6).filter_map(|i| crate::sprites::sprite(&assets, &hud, &format!("ShipStatus_Icon_{kind}_Frame{i}"))).collect();
         *frames = Some((hud.skin, [load("Docking"), load("Boarding")]));
     }
     let [docking_art, boarding_art] = &frames.as_ref().unwrap().1;
@@ -364,14 +360,9 @@ fn update_docking_status(
     let docking = player.iter().any(|p| p.1.is_some_and(|d| d.shows_status()));
     let boarding = player.iter().any(|p| p.2.is_some_and(|f| f.live()) || fights.iter().any(|f| f.live() && f.target() == p.0));
     let set = if docking || boarding_art.is_empty() || !boarding { docking_art } else { boarding_art };
-    let (image, rect) = &set[(time.elapsed_secs() * STATUS_FPS) as usize % set.len()];
-    for (mut img, mut vis) in &mut icons {
-        if img.image != *image {
-            img.image = image.clone();
-        }
-        if img.rect != Some(*rect) {
-            img.rect = Some(*rect);
-        }
+    let frame = &set[(time.elapsed_secs() * STATUS_FPS) as usize % set.len()];
+    for (mut img, mut node, mut vis) in &mut icons {
+        frame.show(&mut img, &mut node, window.height() / REF_H);
         vis.set_if_neq(if docking || boarding { Visibility::Inherited } else { Visibility::Hidden });
     }
 }

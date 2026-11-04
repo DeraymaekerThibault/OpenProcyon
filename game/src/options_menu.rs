@@ -15,7 +15,7 @@ use crate::boarding::BoardMsg;
 use crate::combat::{Health, Library, ray_hit};
 use crate::docking::Dockees;
 use crate::panels::REF_H;
-use crate::sprites::{HudData, image, offset, sprite_of};
+use crate::sprites::{HudData, offset, size_of};
 use crate::{Orbit, Ship, Side};
 
 const CLICK_PX: f32 = 6.0;
@@ -194,7 +194,6 @@ fn menu(
     window: Single<&Window, With<PrimaryWindow>>,
     cam: Single<(&Camera, &GlobalTransform)>,
     hud: Option<Res<HudData>>,
-    assets: Res<AssetServer>,
     lib: Res<Library>,
     state: Res<OptionsMenu>,
     mut local: Local<Local2>,
@@ -404,7 +403,7 @@ fn menu(
     };
     (hooks.hold, hooks.cloak) = (held, cloak);
     hooks.focus_unavailable = target != actor && !sensors.in_sight(actor, target, mission.as_deref());
-    let (root, rects) = spawn_menu(&mut commands, &assets, &hud, &window, cursor, kind, can_dock, tow, hooks);
+    let (root, rects) = spawn_menu(&mut commands, &hud, &window, cursor, kind, can_dock, tow, hooks);
     *open_menu = Some(Open { actor, target, root, items: rects });
     *hover = None;
     sfx.write(Sfx::ui("HUD_Options_Open"));
@@ -421,17 +420,7 @@ pub struct OptionsMenuArt {
 }
 
 /// Spawns the menu root around `cursor` with its `OptionsMenuArt`; hit rects are the retail icons at the retail slot offsets.
-fn spawn_menu(
-    commands: &mut Commands,
-    assets: &AssetServer,
-    hud: &HudData,
-    window: &Window,
-    cursor: Vec2,
-    kind: Kind,
-    can_dock: bool,
-    tow: Tow,
-    hooks: Hooks,
-) -> (Entity, Vec<(Act, Rect, bool)>) {
+fn spawn_menu(commands: &mut Commands, hud: &HudData, window: &Window, cursor: Vec2, kind: Kind, can_dock: bool, tow: Tow, hooks: Hooks) -> (Entity, Vec<(Act, Rect, bool)>) {
     let s = window.height() / REF_H;
     let list = items(kind, can_dock, tow, hooks);
     let n = list.len();
@@ -439,7 +428,7 @@ fn spawn_menu(
     let mut rects = vec![];
     let mut slots = vec![];
     for (i, (act, sprite, on)) in list.into_iter().enumerate() {
-        let Some((_, size)) = image(assets, hud, sprite) else { continue };
+        let Some(size) = size_of(hud, sprite) else { continue };
         let at = offset(hud, &format!("OPTIONS_MENU_SLOT_OFFSET_{i}_OF_{n}"));
         let min = centre + at * s;
         rects.push((act, Rect::from_corners(min, min + size * s), on));
@@ -499,7 +488,7 @@ fn dev_click(
             // The Friendly menu's Dock icon is slot 2 of 3 (`items`).
             let (Some(hud), Some(cursor)) = (hud, window.cursor_position()) else { return };
             let s = window.height() / REF_H;
-            let size = sprite_of(&hud, "OPTIONS_MENU_BUTTON_DOCK").expect("dock icon").1.size();
+            let size = size_of(&hud, "OPTIONS_MENU_BUTTON_DOCK").expect("dock icon");
             let at = menu_centre(&window, cursor) + (offset(&hud, "OPTIONS_MENU_SLOT_OFFSET_2_OF_3") + size / 2.0) * s;
             window.set_cursor_position(Some(at));
             *step = 4;
@@ -517,7 +506,7 @@ fn dev_click(
 }
 
 /// Dev hook: `--script menu-selected|menu-friendly|menu-enemy` opens that variant in the middle of the screen at frame 30 (screenshots).
-fn dev_menu(cfg: Res<crate::Config>, window: Single<&Window, With<PrimaryWindow>>, hud: Option<Res<HudData>>, assets: Res<AssetServer>, mut commands: Commands) {
+fn dev_menu(cfg: Res<crate::Config>, window: Single<&Window, With<PrimaryWindow>>, hud: Option<Res<HudData>>, mut commands: Commands) {
     let Some(hud) = hud else { return };
     let kind = match cfg.script.as_deref() {
         Some("menu-selected") => Kind::Selected,
@@ -526,7 +515,7 @@ fn dev_menu(cfg: Res<crate::Config>, window: Single<&Window, With<PrimaryWindow>
         _ => return,
     };
     if cfg.frame == 30 {
-        spawn_menu(&mut commands, &assets, &hud, &window, Vec2::new(window.width(), window.height()) / 2.0, kind, true, Tow::Start(true), Hooks::default());
+        spawn_menu(&mut commands, &hud, &window, Vec2::new(window.width(), window.height()) / 2.0, kind, true, Tow::Start(true), Hooks::default());
     }
 }
 

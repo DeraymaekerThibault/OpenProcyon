@@ -8,7 +8,7 @@ use crate::Scenario;
 use crate::briefing::{BriefingUi, Portrait, Subtitle};
 use crate::campaign::{Mission, ObjectiveText};
 use crate::rules::Ui;
-use crate::sprites::{HudData, image};
+use crate::sprites::{HudData, sprite};
 
 const SPEECH_GOLD: Color = Color::srgb(1.0, 0.65, 0.1);
 
@@ -90,8 +90,10 @@ fn build_briefing(mut commands: Commands, mission: Res<Mission>, assets: Res<Ass
     }
     commands.spawn((Scenario, BriefingUi, GlobalZIndex(150), speech_strip(), BackgroundColor(Color::BLACK))).with_children(|strip| {
         for (name, left, top, size) in [("TalkingHead_Character_Amelia_Happy", 26.0, 21.0, 64.0), ("TalkingHead_FloatingPortal_Open", 6.0, 1.0, 104.0)] {
-            let (image, _) = image(&assets, &hud, name).expect("briefing portrait sprite");
-            strip.spawn((Portrait, image, Visibility::Hidden, absolute(left, top, size)));
+            let art = sprite(&assets, &hud, name).expect("briefing portrait sprite");
+            let mut node = absolute(left, top, size);
+            art.fit(Vec2::splat(size)).place(&mut node, 1.0, UiRect::DEFAULT);
+            strip.spawn((Portrait, art.image_node(), Visibility::Hidden, node));
         }
         strip.spawn((Subtitle, text(20.0, SPEECH_GOLD), speech_line()));
     });

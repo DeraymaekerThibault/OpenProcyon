@@ -8,7 +8,7 @@ use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 
 use crate::panels::REF_H;
-use crate::sprites::{Fonts, HudData, image};
+use crate::sprites::{Fonts, HudData, sprite};
 use crate::starmap::{MapIconKind, Starmap, StarmapContents};
 
 const OPEN_SECS: f32 = 1.0;
@@ -65,22 +65,15 @@ fn build(
         GlobalZIndex(30),
     ));
     // World lines: the corner texture mirrored into the four quadrants.
-    for (i, (flip_x, flip_y)) in [(false, false), (true, false), (false, true), (true, true)].into_iter().enumerate() {
-        let mut img = ImageNode::new(assets.load("hud/tex/640hud_20.png"));
-        (img.flip_x, img.flip_y, img.color) = (flip_x, flip_y, Color::srgba(1.0, 1.0, 1.0, 0.0));
-        commands.spawn((
-            img,
-            Fade(0.0, 1.0),
-            Node {
-                position_type: PositionType::Absolute,
-                left: Val::Px(if i % 2 == 0 { 0.0 } else { w / 2.0 }),
-                top: Val::Px(if i < 2 { 0.0 } else { h / 2.0 }),
-                width: Val::Px(w / 2.0),
-                height: Val::Px(h / 2.0),
-                ..default()
-            },
-            ChildOf(root),
-        ));
+    if let Some(corner) = sprite(&assets, &hud, "MapBackdrop_TopLeftCorner") {
+        for (i, (flip_x, flip_y)) in [(false, false), (true, false), (false, true), (true, true)].into_iter().enumerate() {
+            let mut img = corner.image_node();
+            (img.flip_x, img.flip_y, img.color) = (flip_x, flip_y, Color::srgba(1.0, 1.0, 1.0, 0.0));
+            let mut node =
+                Node { position_type: PositionType::Absolute, left: Val::Px(if i % 2 == 0 { 0.0 } else { w / 2.0 }), top: Val::Px(if i < 2 { 0.0 } else { h / 2.0 }), ..default() };
+            corner.fit(Vec2::new(w / 2.0, h / 2.0)).flipped(flip_x, flip_y).place(&mut node, 1.0, UiRect::DEFAULT);
+            commands.spawn((img, Fade(0.0, 1.0), node, ChildOf(root)));
+        }
     }
     let square = commands
         .spawn((
@@ -103,23 +96,13 @@ fn build(
     }
     let scale = h / REF_H;
     for i in 0..ALIEN_COUNT {
-        let Some((mut img, size)) = image(&assets, &hud, "MapBackdrop_RandomText0") else { break };
+        let Some(art) = sprite(&assets, &hud, "MapBackdrop_RandomText0") else { break };
+        let mut img = art.image_node();
         img.color = Color::srgba(1.0, 1.0, 1.0, 0.0);
         let speed = 10.0 + rnd(i, 3) * 90.0;
-        commands.spawn((
-            img,
-            Fade(0.8, 1.0),
-            Alien { speed, width: size.x * scale },
-            Node {
-                position_type: PositionType::Absolute,
-                left: Val::Px(rnd(i, 1) * w),
-                top: Val::Px(rnd(i, 2) * h),
-                width: Val::Px(size.x * scale),
-                height: Val::Px(size.y * scale),
-                ..default()
-            },
-            ChildOf(root),
-        ));
+        let mut node = Node { position_type: PositionType::Absolute, left: Val::Px(rnd(i, 1) * w), top: Val::Px(rnd(i, 2) * h), ..default() };
+        art.own().place(&mut node, scale, UiRect::DEFAULT);
+        commands.spawn((img, Fade(0.8, 1.0), Alien { speed, width: art.size.x * scale }, node, ChildOf(root)));
     }
 }
 
@@ -180,25 +163,31 @@ fn redraw(
             MapIconKind::Whale => "MapBackdrop_Icon_Whale".into(),
             MapIconKind::Objective => format!("MapBackdrop_Icon_ObjectivePoint_Frame{frame}"),
         };
-        let Some((img, size)) = image(&assets, &hud, &name) else { continue };
-        let (size, centre) = (size * scale, to_square(icon.position, half, side));
+        let Some(art) = sprite(&assets, &hud, &name) else { continue };
+        let (size, centre) = (art.size * scale, to_square(icon.position, half, side));
         if centre.x < 0.0 || centre.y < 0.0 || centre.x > side || centre.y > side {
             continue;
         }
-        commands.spawn((
-            Dynamic,
-            img,
-            Node {
-                position_type: PositionType::Absolute,
-                left: Val::Px(centre.x - size.x / 2.0),
-                top: Val::Px(centre.y - size.y / 2.0),
-                width: Val::Px(size.x),
-                height: Val::Px(size.y),
-                ..default()
-            },
-            UiTransform::from_rotation(Rot2::radians(-icon.yaw)),
-            ChildOf(square),
-        ));
+        // The turning box is the whole reference box, so the icon spins about its centre as the untrimmed sprite did.
+        let mut inner = Node { position_type: PositionType::Absolute, ..default() };
+        art.own().place(&mut inner, scale, UiRect::DEFAULT);
+        commands
+            .spawn((
+                Dynamic,
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(centre.x - size.x / 2.0),
+                    top: Val::Px(centre.y - size.y / 2.0),
+                    width: Val::Px(size.x),
+                    height: Val::Px(size.y),
+                    ..default()
+                },
+                UiTransform::from_rotation(Rot2::radians(-icon.yaw)),
+                ChildOf(square),
+            ))
+            .with_children(|turn| {
+                turn.spawn((art.image_node(), inner));
+            });
     }
     let Some(font) = fonts.as_ref().and_then(|f| f.0.get(crate::sprites::BODY_FONT)) else { return };
     if let Some(text) = &contents.objective {

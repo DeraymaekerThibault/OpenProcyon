@@ -847,7 +847,7 @@ fn ui(
     mut talk: ResMut<crate::panels::Talk>,
     assets: Res<AssetServer>,
     hud: Res<crate::sprites::HudData>,
-    mut images: Query<(&Ui, &mut ImageNode)>,
+    mut images: Query<(&Ui, &mut ImageNode, &mut Node)>,
     mission: Res<Mission>,
     campaign_points: Res<crate::campaign::CampaignPoints>,
     stats: Option<Res<crate::stats::GameStats>>,
@@ -861,17 +861,15 @@ fn ui(
     let portrait = sc.face().map(String::from).or_else(|| sc.speaking.as_ref().and_then(|s| speaker_portrait(&s.0)).map(|p| format!("TalkingHead_Character_{p}")));
     // The bottom-right talking head (panels.rs) takes over gameplay speech; cutscenes use the top banner.
     talk.0 = (speaking && !sc.nis).then(|| portrait.clone()).flatten();
-    for (kind, mut image) in &mut images {
+    for (kind, mut image, mut node) in &mut images {
         let name = match kind {
             Ui::SpeechHead => portrait.clone(),
             Ui::SpeechFrame => Some("TalkingHead_FloatingPortal_Open".to_string()),
             _ => continue,
         };
-        // Only on a change: writing the node every frame would re-render it every frame.
-        if let Some((img, _)) = name.and_then(|n| crate::sprites::image(&assets, &hud, &n))
-            && (image.image != img.image || image.rect != img.rect)
-        {
-            (image.image, image.rect) = (img.image, img.rect);
+        // Only on a change: writing the node every frame would re-render it every frame. The banner is laid out in screen px.
+        if let Some(sprite) = name.and_then(|n| crate::sprites::sprite(&assets, &hud, &n)) {
+            sprite.show(&mut image, &mut node, 1.0);
         }
     }
     for (kind, mut vis, text) in &mut q {

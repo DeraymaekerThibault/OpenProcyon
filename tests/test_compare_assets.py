@@ -38,6 +38,46 @@ class CompareAssets(unittest.TestCase):
         self.assertEqual(sorted(r["differ"]), ["pix.png", "value.json"])
         self.assertIn("/ship/hp 100 != 120", r["differ"]["value.json"])
 
+    def test_sprites_compare_on_their_full_canvas(self):
+        def sprite(root, pixels, trim=(1, 0, 1, 0)):
+            folder = root / "hud/sprites/Test_Part"
+            (folder / "Navy").mkdir(parents=True, exist_ok=True)
+            (folder / "Navy.json").write_text(
+                json.dumps(
+                    {"states": {"NoCursor": {"size": [4, 2], "trim": list(trim)}}}
+                )
+            )
+            image = Image.new("RGBA", (2, 2))
+            for xy, rgba in pixels.items():
+                image.putpixel(xy, rgba)
+            image.save(folder / "Navy/NoCursor.png")
+
+        with tempfile.TemporaryDirectory() as d:
+            exp, act = Path(d, "e"), Path(d, "a")
+            red = {
+                (0, 0): (255, 0, 0, 255),
+                (1, 0): (255, 0, 0, 255),
+                (0, 1): (255, 0, 0, 255),
+                (1, 1): (255, 0, 0, 255),
+            }
+            sprite(exp, {**red, (1, 1): (9, 9, 9, 0)})
+            # Only the colour under a transparent pixel differs: the same sprite.
+            sprite(act, {**red, (1, 1): (200, 100, 50, 0)})
+            self.assertEqual(compare(exp, act)["differ"], {})
+            # A pixel that shows differs; so does a sprite that now sits elsewhere in its box.
+            sprite(act, {**red, (1, 0): (0, 255, 0, 255)})
+            self.assertEqual(
+                list(compare(exp, act)["differ"]),
+                ["hud/sprites/Test_Part/Navy/NoCursor.png"],
+            )
+            sprite(act, {**red, (1, 1): (9, 9, 9, 0)}, trim=(0, 0, 2, 0))
+            self.assertIn(
+                "hud/sprites/Test_Part/Navy.json", compare(exp, act)["differ"]
+            )
+            self.assertIn(
+                "hud/sprites/Test_Part/Navy/NoCursor.png", compare(exp, act)["differ"]
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

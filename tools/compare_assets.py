@@ -11,6 +11,8 @@ from pathlib import Path
 
 from PIL import Image
 
+from tools.hud_sprites import untrimmed
+
 IMAGES = {".png", ".tga", ".dds", ".jpg"}
 
 
@@ -50,6 +52,24 @@ def json_diff(a, b, path="", tol=1e-4):
     return None if a == b else f"{path} {str(a)[:60]!r} != {str(b)[:60]!r}"
 
 
+def sprite_canvas(path):
+    """A hud/sprites PNG on its full reference canvas (its `<skin>.json` next to the folder says where the trimmed art sits), with
+    the colour of fully transparent pixels zeroed; None for any other image. Two imports that trim a sprite differently, or one
+    that only cleaned the colour under transparency, then compare equal, while a moved or repainted sprite does not."""
+    if path.suffix.lower() != ".png" or path.parts[-5:-3] != ("hud", "sprites"):
+        return None
+    meta = path.parent.with_suffix(".json")
+    try:
+        info = json.loads(meta.read_text())["states"][path.stem]
+        with Image.open(path) as image:
+            canvas = untrimmed(image, info["size"], info["trim"])
+    except (OSError, KeyError, ValueError):
+        return None
+    clear = Image.new("RGBA", canvas.size)
+    clear.paste(canvas, mask=canvas.getchannel("A").point(lambda v: 255 if v else 0))
+    return clear
+
+
 def differs(a, b):
     """Why two files differ in meaning, or None when they match."""
     ext = a.suffix.lower()
@@ -59,7 +79,9 @@ def differs(a, b):
         except ValueError as e:
             return f"unreadable JSON: {e}"
     if ext in IMAGES:
-        x, y = Image.open(a).convert("RGBA"), Image.open(b).convert("RGBA")
+        x, y = sprite_canvas(a), sprite_canvas(b)
+        if x is None or y is None:
+            x, y = Image.open(a).convert("RGBA"), Image.open(b).convert("RGBA")
         if x.size != y.size:
             return f"size {x.size} != {y.size}"
         return None if x.tobytes() == y.tobytes() else "pixels differ"

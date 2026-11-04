@@ -55,9 +55,10 @@ fn window(
     for (name, y, size) in
         [(centre, top.y, Vec2::new(w, h - top.y - bottom.y)), ("PLAYER_NAMES_WINDOW_TOP_DETAIL", 0.0, top), ("PLAYER_NAMES_WINDOW_BOTTOM_DETAIL", h - bottom.y, bottom)]
     {
-        if let Some((mut img, _)) = c.sprite(name, false) {
+        if let Some(art) = c.sprite(name) {
+            let (mut img, node) = c.put_box(&art, 0.0, y, size);
             img.image_mode = NodeImageMode::Stretch;
-            commands.spawn((img, c.abs(0.0, y, size), ChildOf(window), solid()));
+            commands.spawn((img, node, ChildOf(window), solid()));
         }
     }
     let font = fonts.as_deref().and_then(|f| f.0.get("Univers10"));
@@ -66,9 +67,10 @@ fn window(
         .map(|k| hud.comps["Player Names Window"]["_"][format!("PlayerNamesWindow: Pixels Between {k}")].as_f64().unwrap_or(0.0) as f32);
     for (i, row) in roster.rows.iter().enumerate() {
         let y = list_y + i as f32 * ROW;
-        if let Some((mut img, _)) = flags.sprite(&format!("FrontEnd_Flag_Small_Icon_{:02}", row.flag), false) {
+        if let Some(art) = flags.sprite(&format!("FrontEnd_Flag_Small_Icon_{:02}", row.flag)) {
+            let (mut img, node) = c.put_box(&art, margin, y, FLAG);
             img.image_mode = NodeImageMode::Stretch;
-            commands.spawn((img, c.abs(margin, y, FLAG), ChildOf(window)));
+            commands.spawn((img, node, ChildOf(window)));
         }
         let (x, icon_w) = (margin + FLAG.x + gap, 29.0);
         let label = row.name.clone().unwrap_or_else(|| strings["IDGS_TPFRONTENDTEXT01_COMPUTER"].as_str().unwrap_or("Computer").to_string());
@@ -89,10 +91,12 @@ fn window(
             continue;
         }
         let name = format!("PLAYER_ALLIANCE_STATUS_{}{}", if row.allied { "ALLIED" } else { "NOT_ALLIED" }, if roster.changeable { "_CHANGE" } else { "" });
-        let Some((mut img, size)) = c.sprite(&name, false) else { continue };
-        img.image_mode = NodeImageMode::Stretch;
+        let Some(art) = c.sprite(&name) else { continue };
+        let size = art.size;
         let at = Vec2::new(w - edge - size.x, y + (FLAG.y - size.y) / 2.0);
-        let mut icon = commands.spawn((img, c.abs(at.x, at.y, size), ChildOf(window), solid()));
+        let (mut img, node) = c.put(&art, at.x, at.y);
+        img.image_mode = NodeImageMode::Stretch;
+        let mut icon = commands.spawn((img, node, ChildOf(window), solid()));
         if roster.changeable && row.alive {
             icon.insert(AllianceIcon(i));
             if let Some(states) = c.states(&name) {
