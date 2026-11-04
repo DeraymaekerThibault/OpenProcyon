@@ -175,3 +175,133 @@ fn ship_motion_is_identical_for_one_large_frame_and_ten_small_frames() {
     assert!(large.world().get::<Ship>(a).unwrap() == small.world().get::<Ship>(b).unwrap());
     assert_eq!(large.world().resource::<Time<Fixed>>().elapsed(), BATTLE_TICK * 3);
 }
+
+fn frame_micros(app: &mut App, us: u64) {
+    app.insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_micros(us)));
+    app.update();
+}
+
+/// What a system running in `FixedUpdate` saw of the ship's `Transform`, and the pose the tick left it in.
+#[derive(Resource, Default)]
+struct TickView {
+    start: Vec<Transform>,
+    end: Vec<Transform>,
+}
+
+fn see_start(q: Query<&Transform, With<Ship>>, mut view: ResMut<TickView>) {
+    view.start.push(*q.single().unwrap());
+}
+
+fn see_end(q: Query<&Transform, With<Ship>>, mut view: ResMut<TickView>) {
+    view.end.push(*q.single().unwrap());
+}
+
+fn interpolated_ship() -> (App, Entity) {
+    let (mut app, e) = moving_ship();
+    app.add_plugins(interpolate::plugin).init_resource::<TickView>().add_systems(FixedUpdate, (see_start.in_set(BattleSet::Commands), see_end.after(BattleSet::Simulate)));
+    (app, e)
+}
+
+#[test]
+fn two_frames_between_ticks_draw_the_pose_half_way() {
+    let (mut app, e) = interpolated_ship();
+    frame(&mut app, 33); // tick 1 lands exactly on the tick boundary
+    let (p0, p1) = {
+        let view = app.world().resource::<TickView>();
+        (view.start[0], view.end[0])
+    };
+    assert!((p1.translation - p0.translation).length() > 0.01, "the ship must move during a tick");
+    assert_eq!(app.world().get::<Transform>(e).unwrap().translation, p0.translation, "overstep 0 draws the pose the tick started from");
+    frame_micros(&mut app, 8_250);
+    frame_micros(&mut app, 8_250); // two frames, a quarter of a tick each
+    let drawn = *app.world().get::<Transform>(e).unwrap();
+    assert_eq!(app.world().resource::<TickView>().end.len(), 1, "no tick ran between the frames");
+    let half = interpolate::blend(&p0, &p1, 0.5);
+    assert!((drawn.translation - half.translation).length() < 1e-4, "{:?} vs {:?}", drawn.translation, half.translation);
+    assert!(drawn.rotation.angle_between(half.rotation) < 1e-4);
+    assert_ne!(drawn.translation, p1.translation);
+    // The state under the drawn pose is the simulation's, untouched.
+    let it = app.world().get::<interpolate::Interp>(e).unwrap();
+    assert_eq!(it.sim_pose(&drawn), p1);
+}
+
+#[test]
+fn fixed_systems_see_the_tick_pose_and_ticks_without_frames_in_between_are_unchanged() {
+    let (mut app, e) = interpolated_ship();
+    let (mut reference, r) = moving_ship();
+    reference.init_resource::<TickView>().add_systems(FixedUpdate, (see_start.in_set(BattleSet::Commands), see_end.after(BattleSet::Simulate)));
+    frame(&mut app, 33);
+    frame_micros(&mut app, 16_500); // drawn half-way between two simulation poses
+    frame(&mut app, 99); // 16.5 ms overstep + 99 ms: three ticks, none with a frame between them
+    frame(&mut reference, 33);
+    frame_micros(&mut reference, 16_500);
+    frame(&mut reference, 99);
+    let (view, base) = (app.world().resource::<TickView>(), reference.world().resource::<TickView>());
+    assert_eq!(view.start.len(), 4);
+    assert_eq!(view.start, base.start, "every tick starts from the simulation's pose, never the interpolated one");
+    assert_eq!(view.end, base.end, "and ends in the pose the simulation alone would have produced");
+    for i in 1..view.start.len() {
+        assert_eq!(view.start[i], view.end[i - 1], "a tick starts where the previous one ended");
+    }
+    let drawn = *app.world().get::<Transform>(e).unwrap();
+    let it = app.world().get::<interpolate::Interp>(e).unwrap();
+    assert_eq!(it.sim_pose(&drawn), *reference.world().get::<Transform>(r).unwrap(), "the simulation state is bit-identical");
+    assert!(app.world().get::<Ship>(e).unwrap() == reference.world().get::<Ship>(r).unwrap());
+}
+
+#[test]
+fn a_paused_clock_holds_the_last_drawn_pose() {
+    let (mut app, e) = interpolated_ship();
+    frame(&mut app, 33);
+    frame_micros(&mut app, 16_500);
+    let held = *app.world().get::<Transform>(e).unwrap();
+    app.world_mut().resource_mut::<Time<Virtual>>().pause();
+    for _ in 0..5 {
+        frame(&mut app, 16);
+        assert_eq!(*app.world().get::<Transform>(e).unwrap(), held);
+    }
+}
+
+#[test]
+fn a_write_from_a_frame_system_is_a_teleport_not_a_glide() {
+    let (mut app, e) = interpolated_ship();
+    frame(&mut app, 33);
+    frame_micros(&mut app, 16_500);
+    let far = Vec3::new(500.0, 0.0, -500.0);
+    app.world_mut().get_mut::<Transform>(e).unwrap().translation = far;
+    frame_micros(&mut app, 1_000);
+    let drawn = app.world().get::<Transform>(e).unwrap().translation;
+    assert!(drawn.distance(far) < 1.0, "drawn {drawn:?}, expected near {far:?}");
+}
+
+/// A child of the ship (a gun muzzle) as seen on the tick: `GlobalTransform` is propagated per frame in `PostUpdate`, from the
+/// drawn pose, so only the tick-start propagation keeps what gunnery reads on the simulation's pose.
+#[derive(Component)]
+struct Muzzle;
+#[derive(Resource, Default)]
+struct MuzzleView(Vec<Vec3>);
+
+fn see_muzzle(q: Query<&GlobalTransform, With<Muzzle>>, mut view: ResMut<MuzzleView>) {
+    view.0.push(q.single().unwrap().translation());
+}
+
+#[test]
+fn a_childs_global_transform_on_the_tick_follows_the_simulation_pose() {
+    let offset = Vec3::new(0.5, 1.5, -0.25);
+    let (mut app, ship) = interpolated_ship();
+    app.add_plugins(bevy::transform::TransformPlugin).init_resource::<MuzzleView>().add_systems(FixedUpdate, see_muzzle.in_set(BattleSet::Commands).after(see_start));
+    app.world_mut().spawn((Muzzle, Transform::from_translation(offset), ChildOf(ship)));
+    frame(&mut app, 33);
+    frame_micros(&mut app, 16_500); // drawn half-way: PostUpdate propagates the drawn pose
+    frame_micros(&mut app, 16_500); // tick
+    frame(&mut app, 99); // three more ticks in one frame
+    let (view, muzzles) = (app.world().resource::<TickView>(), app.world().resource::<MuzzleView>());
+    assert_eq!(muzzles.0.len(), 5);
+    assert_eq!(view.start.len(), 5);
+    let moved = view.start.iter().map(|t| t.translation).collect::<Vec<_>>();
+    assert!(moved.windows(2).all(|w| w[0] != w[1]), "the ship moves between ticks");
+    for (i, (pose, seen)) in view.start.iter().zip(&muzzles.0).enumerate() {
+        let want = pose.transform_point(offset);
+        assert!(seen.distance(want) < 1e-4, "tick {i}: the muzzle was at {seen:?}, the simulation pose puts it at {want:?}");
+    }
+}
