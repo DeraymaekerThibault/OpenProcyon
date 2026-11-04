@@ -14,6 +14,7 @@ use bevy::render::render_resource::{AsBindGroup, ShaderType};
 use bevy::shader::ShaderRef;
 use serde_json::Value;
 
+use super::surfaces::Restyled;
 use super::{Look, names, num, rgb};
 
 /// The sail shader's asset path; the mod ships it.
@@ -78,7 +79,7 @@ pub fn parse(s: &Value) -> Option<Sails> {
 
 pub fn plugin(app: &mut App, look: &Look) {
     if look.sails.is_some() {
-        app.add_plugins(MaterialPlugin::<SailMaterial>::default()).add_systems(Update, (sails, sail_motion, billow).chain());
+        app.add_plugins(MaterialPlugin::<SailMaterial>::default()).add_systems(Update, (sails, sail_motion, billow, super::surfaces::cloaked::<SailMaterial>).chain());
     }
 }
 
@@ -138,7 +139,7 @@ struct Billow {
 fn sails(
     mut commands: Commands,
     look: Res<Look>,
-    new: Query<(Entity, &GltfMaterialName, &MeshMaterial3d<StandardMaterial>, &Mesh3d), Added<MeshMaterial3d<StandardMaterial>>>,
+    new: Query<(Entity, &GltfMaterialName, &MeshMaterial3d<StandardMaterial>, &Mesh3d), (Added<MeshMaterial3d<StandardMaterial>>, Without<Restyled<SailMaterial>>)>,
     parents: Query<&ChildOf>,
     ships: Query<(), With<crate::Ship>>,
     standard: Res<Assets<StandardMaterial>>,
@@ -174,7 +175,8 @@ fn sails(
         });
         let ship = parents.iter_ancestors(e).find(|a| ships.contains(*a));
         let mut entity = commands.entity(e);
-        entity.try_remove::<MeshMaterial3d<StandardMaterial>>().try_insert((MeshMaterial3d(handle), Sail { ship, wind: 0.0, clock: 0.0, phase }));
+        let restyled = Restyled { original: mat.0.clone(), styled: handle.clone(), ship };
+        entity.try_remove::<MeshMaterial3d<StandardMaterial>>().try_insert((MeshMaterial3d(handle), Sail { ship, wind: 0.0, clock: 0.0, phase }, restyled));
         if !s.opaque {
             entity.try_insert(NotShadowCaster);
         }

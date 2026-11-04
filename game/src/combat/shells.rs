@@ -28,6 +28,13 @@ pub struct Shell {
     /// The firing gun's ricochet factor for the range band it was fired in (`ricochet_chance`).
     pub(super) ricochet: f32,
 }
+impl Shell {
+    /// The bullet type it is (`BulletDef` key, e.g. `Bullet_CannonBall_Heavy`).
+    pub fn bullet(&self) -> &str {
+        &self.bullet
+    }
+}
+
 /// Core damage of one hit on a destroyed vital section: `roll` x (sum of core% over destroyed vital sections) / 100.
 pub(super) fn core_bleed(class: &Class, hp: &Health, roll: f32) -> f32 {
     let pct: f32 = class.sections.iter().zip(&hp.sections).filter(|(s, h)| s.vital && **h <= 0.0).map(|(s, _)| s.core_pct).sum();

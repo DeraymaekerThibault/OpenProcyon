@@ -95,7 +95,7 @@ pub fn parse_wakes(v: &Value) -> Option<Wakes> {
 }
 
 /// ONE/ONE blending like the retail additive effects (fx::RetailAdd): the shaders write unpremultiplied light.
-fn additive(descriptor: &mut RenderPipelineDescriptor) {
+pub(super) fn additive(descriptor: &mut RenderPipelineDescriptor) {
     let component = BlendComponent { src_factor: BlendFactor::One, dst_factor: BlendFactor::One, operation: BlendOperation::Add };
     if let Some(fragment) = descriptor.fragment.as_mut() {
         for target in fragment.targets.iter_mut().flatten() {
@@ -108,7 +108,7 @@ fn additive(descriptor: &mut RenderPipelineDescriptor) {
 }
 
 /// Unlit, two-sided, drawn after the scene's blended meshes like the retail additive effects.
-fn additive_base(texture: Option<Handle<Image>>) -> StandardMaterial {
+pub(super) fn additive_base(texture: Option<Handle<Image>>) -> StandardMaterial {
     StandardMaterial {
         base_color_texture: texture,
         unlit: true,

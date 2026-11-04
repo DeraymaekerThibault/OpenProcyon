@@ -8,7 +8,11 @@
 //! - `lights.rs`: point lights the profile puts on effects (flashes fade, fires and engines flicker);
 //! - `materials.rs`: brighter additive effects and shells for the bloom, smoke lit by the scene, shadow rules for effects;
 //! - `sails.rs`: sail materials with a shader (`shaders/sail.wesl`) and cloth that bellies out with the ship's speed;
-//! - `trails.rs`: engine plumes (`shaders/plume.wesl`) and wakes drawn as crossed ribbons (`shaders/wake.wesl`).
+//! - `trails.rs`: engine plumes (`shaders/plume.wesl`) and wakes drawn as crossed ribbons (`shaders/wake.wesl`);
+//! - `tracers.rs`: streaks of light behind shells in flight (`shaders/tracer.wesl`);
+//! - `surfaces.rs`: relief, roughness and metal for the retail models' textured materials (`shaders/surface.wesl`);
+//! - `bursts.rs`: sparks, embers, fireballs, shockwaves and smoke thrown by retail effects, glowing hull scars, ether dust
+//!   and the camera jolt with its colour fringing (`shaders/burst.wesl`, `shaders/smoke.wesl`).
 //!
 //! Flags are drawn by flag.rs; the profile only sets its `flag::Cloth`.
 
@@ -21,9 +25,12 @@ use bevy::prelude::*;
 use bevy::render::view::{ColorGrading, ColorGradingGlobal, ColorGradingSection};
 use serde_json::Value;
 
+mod bursts;
 mod lights;
 mod materials;
 mod sails;
+mod surfaces;
+mod tracers;
 mod trails;
 
 /// The render profile's asset path.
@@ -58,6 +65,19 @@ pub struct Look {
     pub flags: crate::flag::Cloth,
     pub engines: Option<trails::Engines>,
     pub wakes: Option<trails::Wakes>,
+    pub tracers: Option<tracers::Tracers>,
+    pub surfaces: Option<surfaces::Surfaces>,
+    pub bursts: Option<bursts::Bursts>,
+    /// Darkened screen corners (Bevy `Vignette` intensity; 0 = none).
+    pub vignette: f32,
+    /// Colour fringing at rest and how much a big blast's jolt adds.
+    pub aberration: f32,
+    pub aberration_pulse: f32,
+    /// Screen-space contact shadows from the sun (fine shade where parts touch; needs a depth prepass).
+    pub contact_shadows: bool,
+    /// The sun's colour is multiplied by this and its strength by `sun_intensity`.
+    pub sun_color: Vec3,
+    pub sun_intensity: f32,
 }
 
 /// A number from the profile, or `d` when absent.
@@ -110,6 +130,15 @@ impl Look {
             sails: sails::parse(&v["sails"]),
             engines: trails::parse_engines(&v["engines"]),
             wakes: trails::parse_wakes(&v["wakes"]),
+            tracers: tracers::parse(&v["tracers"]),
+            surfaces: surfaces::parse(&v["surfaces"]),
+            bursts: bursts::parse(&v["bursts"]),
+            vignette: num(&cam["vignette"], 0.0),
+            aberration: num(&cam["aberration"], 0.0),
+            aberration_pulse: num(&cam["aberration_pulse"], 0.0),
+            contact_shadows: cam["contact_shadows"].as_bool().unwrap_or(false),
+            sun_color: rgb(&v["sun"]["color"]).unwrap_or(Vec3::ONE),
+            sun_intensity: num(&v["sun"]["intensity"], 1.0),
             flags: crate::flag::Cloth {
                 flutter: num(&v["flags"]["flutter"], 0.0),
                 lit: v["flags"]["lit"].as_bool().unwrap_or(false),
@@ -130,6 +159,15 @@ impl Look {
         }
         if self.wakes.is_some() && !has_shader(root, "wakes", trails::WAKE_SHADER) {
             self.wakes = None;
+        }
+        if self.tracers.is_some() && !has_shader(root, "tracers", tracers::SHADER) {
+            self.tracers = None;
+        }
+        if self.surfaces.is_some() && !has_shader(root, "surfaces", surfaces::SHADER) {
+            self.surfaces = None;
+        }
+        if self.bursts.is_some() && !(has_shader(root, "bursts", bursts::SHADER) & has_shader(root, "bursts", bursts::SMOKE_SHADER)) {
+            self.bursts = None;
         }
         self
     }
@@ -152,6 +190,9 @@ pub fn plugin(app: &mut App) {
     materials::plugin(app);
     sails::plugin(app, &look);
     trails::plugin(app, &look);
+    tracers::plugin(app, &look);
+    surfaces::plugin(app, &look);
+    bursts::plugin(app, &look);
     app.insert_resource(look.flags).insert_resource(look).add_systems(Update, (camera, sun, sky_light));
 }
 
@@ -183,12 +224,22 @@ fn camera(mut commands: Commands, look: Res<Look>, cams: Query<Entity, (With<Cam
         if look.ssao {
             e.insert(ScreenSpaceAmbientOcclusion::default());
         }
+        if look.vignette > 0.0 {
+            e.insert(bevy::post_process::effect_stack::Vignette { intensity: look.vignette, ..default() });
+        }
+        if look.contact_shadows {
+            e.insert(bevy::pbr::ContactShadows::default());
+        }
     }
 }
 
 fn sun(mut commands: Commands, look: Res<Look>, mut suns: Query<(Entity, &mut DirectionalLight), Without<Styled>>) {
     for (e, mut sun) in &mut suns {
         sun.shadow_maps_enabled = look.shadows;
+        sun.contact_shadows_enabled = look.contact_shadows;
+        let c = sun.color.to_linear().to_vec3() * look.sun_color;
+        sun.color = Color::linear_rgb(c.x, c.y, c.z);
+        sun.illuminance *= look.sun_intensity;
         let cascades = CascadeShadowConfigBuilder { num_cascades: 4, first_cascade_far_bound: look.shadow_distance / 20.0, maximum_distance: look.shadow_distance, ..default() };
         commands.entity(e).insert((Styled, cascades.build()));
     }
@@ -253,6 +304,8 @@ mod tests {
         let look = Look::parse(&serde_json::json!({}));
         assert_eq!((look.bloom, look.fx_gain, look.sky_light, look.shadows, look.smaa, look.lit_smoke), (0.15, 1.0, 0.0, false, true, false));
         assert!(look.lights.is_empty() && look.sails.is_none() && look.engines.is_none() && look.wakes.is_none());
+        assert!(look.tracers.is_none() && look.surfaces.is_none() && look.bursts.is_none());
+        assert_eq!((look.vignette, look.aberration_pulse, look.contact_shadows, look.sun_color, look.sun_intensity), (0.0, 0.0, false, Vec3::ONE, 1.0));
         assert_eq!(look.flags, crate::flag::Cloth::default());
         let look = Look::parse(&serde_json::json!({
             "camera": {"bloom": 0.3, "tonemapping": "agx", "ssao": true},
@@ -276,7 +329,9 @@ mod tests {
             "sails": {"glow": [1, 0.7, 0.3], "opaque": true, "billow": 0.03},
             "flags": {"flutter": 1, "lit": true, "wind": true},
             "engines": {"colors": {"Navy": [0.3, 0.6, 1.0]}}, "wakes": {"planes": [0, 60, -60]},
+            "tracers": {"bullets": [{"match": "Lancer", "color": [0.4, 0.7, 1]}]}, "surfaces": {"rules": [{"match": ["metal"], "metallic": 0.8}]},
         }));
+        assert!(look.tracers.is_some() && look.surfaces.is_some());
         assert!(look.lights.iter().any(|l| "Explosion_Medium".contains(&l.effects)));
         assert!(look.sails.is_some() && look.engines.is_some() && look.wakes.is_some());
         assert_eq!((look.bloom_threshold, look.sky_light, look.flags.wind), (1.0, 600.0, true));
@@ -289,8 +344,9 @@ mod tests {
         assert!(!has_shader(&root, "sails", sails::SHADER), "the engine ships no shaders");
         std::fs::write(root.join(sails::SHADER), "").unwrap();
         assert!(has_shader(&root, "sails", sails::SHADER));
-        let look = Look::parse(&serde_json::json!({"sails": {}, "engines": {}, "wakes": {}, "fx_gain": 2})).with_shaders(&root);
+        let look = Look::parse(&serde_json::json!({"sails": {}, "engines": {}, "wakes": {}, "tracers": {}, "surfaces": {}, "bursts": {}, "fx_gain": 2})).with_shaders(&root);
         assert!(look.sails.is_some() && look.engines.is_none() && look.wakes.is_none(), "only the block whose shader is there");
+        assert!(look.tracers.is_none() && look.surfaces.is_none() && look.bursts.is_none());
         assert_eq!(look.fx_gain, 2.0, "blocks without shaders are unaffected");
         std::fs::remove_dir_all(root).unwrap();
     }
