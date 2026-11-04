@@ -91,7 +91,18 @@ frames and fixed output for frame readers. `fixed_tests.rs` verifies both direct
 Presentation remains frame-driven: cameras, HUD, ropes/markers, damage meshes, breakup/debris, particles and audio playback.
 Visual RNG is local, separate from combat RNG, so rendering extra frames cannot change damage rolls. Opening briefing speech
 keeps its explicit real-time clock, independent of pause/speed; its arrival halt runs per simulation tick. The existing FX
-particle interpolation is unchanged; **ship/camera interpolation is not implemented**, so fixed-rate ship stepping can be visible.
+particle interpolation (`tick_acc`) is unchanged.
+
+Ships (lifeboats included), asteroids and shells are drawn between ticks by `interpolate.rs`, so a 60 or 144 Hz display does not
+show 30 Hz steps. The simulation keeps reading and writing `Transform` on the tick. `FixedPreUpdate` records the pose the tick starts
+from; right after the fixed loop (`RunFixedMainLoopSystems::AfterFixedMainLoop`, before `Update` and transform propagation) each
+tracked `Transform` is replaced by `previous.lerp(current, Time::<Fixed>::overstep_fraction())`, and right before the next fixed
+loop the simulation's pose is put back. So `FixedUpdate` systems only ever see their own tick's pose, while the orbit camera, wakes,
+picking, flags, sails and particles follow the drawn one. The drawn pose lags the simulation by up to one tick (33 ms). Above 1x the
+overstep fraction still applies; while virtual time is paused it does not move, which holds the last drawn pose. Entities spawned in
+a tick are drawn where they spawned. A `Transform` written by a frame system (a scripted teleport) becomes the new simulation pose and
+snaps, and `Sinking` ships are not interpolated (`breakup` owns their pose). Systems in `FixedUpdate` that read propagated
+`GlobalTransform` (gun muzzles) see the drawn pose of their parent ship, as they always saw a once-per-frame propagation.
 
 ## Layers
 

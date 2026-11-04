@@ -24,6 +24,7 @@ pub mod environment;
 mod fixed_tests;
 pub mod flag;
 pub mod fx;
+pub mod interpolate;
 pub mod lifeboats;
 pub mod menu;
 pub mod modding;
@@ -252,7 +253,7 @@ pub fn run(view: fn(&mut App), setup_view: fn(&mut App)) {
         .init_resource::<ship::CaptainTargets>()
         .init_resource::<course::Plot>()
         .add_systems(Startup, setup)
-        .add_plugins((smoke::plugin, battle_schedule))
+        .add_plugins((smoke::plugin, battle_schedule, interpolate::plugin))
         .add_systems(
             FixedUpdate,
             (
