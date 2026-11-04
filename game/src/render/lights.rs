@@ -1,5 +1,7 @@
 //! Not retail: point lights the render profile's `lights` list puts on effects by file name (part of render/mod.rs's look).
 //! A flash fades out quadratically over `seconds`; a steady light (`seconds` 0) lives as long as its effect and may flicker.
+//! Effect lights are not occluded (no shadow maps unless `shadows`), so a point light on a gun lights the deck behind it and the
+//! hull around it. `cone` makes a light a spot light facing along the shot (the shot's direction the effect message carries) and `offset` moves it that far ahead of the effect, off the barrel and its hull.
 
 use bevy::prelude::*;
 use serde_json::Value;
@@ -20,6 +22,12 @@ pub struct EffectLight {
     pub seconds: f32,
     /// Share of the intensity that flickers (fires).
     pub flicker: f32,
+    /// Full opening angle in degrees of a spot light facing along the shot; 0 = a point light shining all round.
+    pub cone: f32,
+    /// Distance the light sits ahead of the effect along the shot.
+    pub offset: f32,
+    /// The light casts shadows (a point light renders the scene six times while it lives: use sparingly, with `cone` for one).
+    pub shadows: bool,
 }
 
 /// The `lights` list; an entry without `effects` is dropped.
@@ -35,6 +43,9 @@ pub fn parse(v: &Value) -> Vec<EffectLight> {
                 range: num(&l["range"], 100.0),
                 seconds: num(&l["seconds"], 0.3),
                 flicker: num(&l["flicker"], 0.0),
+                cone: num(&l["cone"], 0.0).clamp(0.0, 170.0),
+                offset: num(&l["offset"], 0.0),
+                shadows: l["shadows"].as_bool().unwrap_or(false),
             })
         })
         .collect()
@@ -63,6 +74,7 @@ fn effect_lights(
     look: Res<Look>,
     lib: Option<Res<FxLib>>,
     mut started: MessageReader<EffectStarted>,
+    frames: Query<&GlobalTransform>,
     mut by_effect: Local<Option<HashMap<usize, EffectLight>>>,
 ) {
     let Some(lib) = lib else { return };
@@ -72,14 +84,35 @@ fn effect_lights(
         let Some(l) = table.get(&m.effect) else { continue };
         // a flash starts at its peak; a steady light starts at a random point of its flicker, so fires do not pulse in step
         let age = if l.seconds > 0.0 { 0.0 } else { e.index().index() as f32 * 0.37 % 7.0 };
-        let light = (
-            PointLight { color: l.color, intensity: l.lumens, range: l.range, shadow_maps_enabled: false, ..default() },
-            EffectGlow { peak: l.lumens, seconds: l.seconds, age, flicker: l.flicker },
-            Transform::default(),
-        );
+        let glow = EffectGlow { peak: l.lumens, seconds: l.seconds, age, flicker: l.flicker };
+        let (mut at, mut spot) = (Transform::default(), None);
+        if l.cone > 0.0 || l.offset != 0.0 {
+            // the light is the effect's child: its place and facing are given in the effect's frame
+            let turn = frames.get(e).map_or(Quat::IDENTITY, |g| g.rotation());
+            let local = (turn.inverse() * m.forward).normalize_or(Vec3::NEG_Z);
+            at = Transform::from_translation(local * l.offset).looking_to(local, Vec3::Y);
+            if l.cone > 0.0 {
+                let outer = (l.cone.to_radians() * 0.5).min(std::f32::consts::FRAC_PI_2 - 0.01);
+                spot = Some(SpotLight {
+                    color: l.color,
+                    intensity: l.lumens,
+                    range: l.range,
+                    shadow_maps_enabled: l.shadows,
+                    outer_angle: outer,
+                    inner_angle: outer * 0.5,
+                    ..default()
+                });
+            }
+        }
+        let point = PointLight { color: l.color, intensity: l.lumens, range: l.range, shadow_maps_enabled: l.shadows, ..default() };
         // short effects can be gone by the time commands apply
-        commands.entity(e).queue_silenced(move |mut fx: EntityWorldMut| {
-            fx.with_child(light);
+        commands.entity(e).queue_silenced(move |mut fx: EntityWorldMut| match spot {
+            Some(spot) => {
+                fx.with_child((spot, glow, at));
+            }
+            None => {
+                fx.with_child((point, glow, at));
+            }
         });
     }
 }
@@ -100,15 +133,22 @@ fn glow_at(g: &EffectGlow) -> Option<f32> {
     Some(g.peak * fade * (1.0 - g.flicker * noise))
 }
 
-fn fade_lights(mut commands: Commands, time: Res<Time>, mut lights: Query<(Entity, &mut EffectGlow, &mut PointLight)>) {
-    for (e, mut glow, mut light) in &mut lights {
+fn fade_lights(mut commands: Commands, time: Res<Time>, mut lights: Query<(Entity, &mut EffectGlow, Option<&mut PointLight>, Option<&mut SpotLight>)>) {
+    for (e, mut glow, point, spot) in &mut lights {
         if glow.seconds <= 0.0 && glow.flicker <= 0.0 {
             continue;
         }
         // a flash's age starts at 0; a steady light's offset only decorrelates its flicker
         glow.age += time.delta_secs();
         match glow_at(&glow) {
-            Some(i) => light.intensity = i,
+            Some(i) => {
+                if let Some(mut p) = point {
+                    p.intensity = i;
+                }
+                if let Some(mut s) = spot {
+                    s.intensity = i;
+                }
+            }
             None => commands.entity(e).despawn(),
         }
     }
@@ -149,15 +189,24 @@ mod tests {
     }
 
     #[test]
+    fn a_light_can_be_a_cone_ahead_of_its_effect() {
+        let l = &parse(&serde_json::json!([{"effects": "_Muzzle", "cone": 70, "offset": 3, "shadows": true}, {"effects": "x", "cone": 400}]));
+        assert_eq!((l[0].cone, l[0].offset, l[0].shadows), (70.0, 3.0, true));
+        assert_eq!((l[1].cone, l[1].offset, l[1].shadows), (170.0, 0.0, false), "a cone is kept below a half sphere; all off by default");
+    }
+
+    #[test]
     fn effect_lights_fade_out_and_steady_ones_stay() {
         let mut world = World::new();
         world.insert_resource(Time::<()>::default());
         let flash = world.spawn((EffectGlow { peak: 100.0, seconds: 1.0, age: 0.0, flicker: 0.0 }, PointLight::default())).id();
+        let cone = world.spawn((EffectGlow { peak: 100.0, seconds: 1.0, age: 0.0, flicker: 0.0 }, SpotLight::default())).id();
         let steady = world.spawn((EffectGlow { peak: 100.0, seconds: 0.0, age: 0.0, flicker: 0.0 }, PointLight { intensity: 100.0, ..default() })).id();
         let fire = world.spawn((EffectGlow { peak: 100.0, seconds: 0.0, age: 0.0, flicker: 0.5 }, PointLight { intensity: 100.0, ..default() })).id();
         world.resource_mut::<Time>().advance_by(std::time::Duration::from_secs_f32(0.5));
         world.run_system_once(fade_lights).unwrap();
         assert!((world.get::<PointLight>(flash).unwrap().intensity - 25.0).abs() < 1e-3, "quadratic fade: half way is a quarter");
+        assert!((world.get::<SpotLight>(cone).unwrap().intensity - 25.0).abs() < 1e-3, "a cone fades like a point light");
         let flame = world.get::<PointLight>(fire).unwrap().intensity;
         assert!((50.0..=100.0).contains(&flame), "flicker takes at most its share: {flame}");
         world.resource_mut::<Time>().advance_by(std::time::Duration::from_secs_f32(0.6));
