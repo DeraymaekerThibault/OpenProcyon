@@ -26,6 +26,7 @@ use bevy::prelude::*;
 use bevy::render::view::{ColorGrading, ColorGradingGlobal, ColorGradingSection};
 use serde_json::Value;
 
+pub(crate) mod batch;
 mod bursts;
 mod lights;
 mod materials;

@@ -13,7 +13,7 @@ behaviour not from original evidence) · Unvalidated (implemented, not compared 
 
 | ID | Status | Open work | Code; spec |
 |---|---|---|---|
-| M1-01 | Unvalidated | Owner completed Mission 1 manually. Replay in normal combat after recent changes: tender repair, asteroids, pirates, navy tow, ending; check late-run frame time and particle counts stay bounded. | `scenario.rs`, `docking.rs`, `fx.rs`; [campaign.md](re/campaign.md#next) |
+| M1-01 | Unvalidated | Owner completed Mission 1 manually. Replay in normal combat after recent changes: tender repair, asteroids, pirates, navy tow, ending; check late-run frame time and particle counts stay bounded. | `scenario.rs`, `docking.rs`, `fx/`; [campaign.md](re/campaign.md#next) |
 | M1-02 | Unvalidated | Defeat, restart, leave and re-enter: camera, pause, HUD, entities, audio, campaign counters. | `scenario.rs`, `menu.rs`, `campaign.rs` |
 | M1-03 | Provisional | Refit and lifeboats implemented per spec (scripted smoke `lifeboat-m1`, `lifeboat-m1-fallback`). Open: normal-combat replay, NIS speech timing of the early exit, lifeboat look/banner, crew-skill scaling of damage control. | `docking.rs`, `lifeboats.rs`; [refit-resupply.md](re/refit-resupply.md), [lifeboats.md](re/lifeboats.md) |
 
@@ -49,7 +49,7 @@ behaviour not from original evidence) · Unvalidated (implemented, not compared 
 | SIM-10 | Partial | Whale and dragon skeletal animation, whale damage, asteroid fragment/contact fidelity. | `dragons.rs`, `environment.rs`; [dragons.md](re/dragons.md), [asteroids.md](re/asteroids.md) |
 | SIM-11 | Partial | Sensing implemented. Open: retail mesh hiding/contact memory, cloak/NIS/range-modifier semantics, scenery UI distance, moving storms/overlapping clouds, dragon/projectile acquisition. | `environment.rs`, `panels.rs`; [visibility.md](re/visibility.md) |
 | SIM-12 | Partial | Scenery height uses a first-dock datum workaround until MDB/MSB pivot/pose semantics are known; visual comparison and mission/NIS replay after the orientation fix. | `scenario.rs`, `tools/mdb_to_glb.py`; [scenery-placement.md](re/scenery-placement.md) |
-| PT-03 | Partial | Procyon submersible dive/surface look: find which effects/rules the hull uses. | `fx.rs`, `cloak.rs` |
+| PT-03 | Partial | Procyon submersible dive/surface look: find which effects/rules the hull uses. | `fx/`, `cloak.rs` |
 | PT-04 | Unknown | Procyon on an open skirmish map spawned at the Navy base: check whether retail start position follows faction or slot. | `scenario.rs`, `menu.rs` |
 
 ## 4. Campaign and front end
@@ -83,13 +83,13 @@ Reference screenshots are local only (`local/reference/`, never committed).
 |---|---|---|---|
 | AV-01 | Missing | Pre-rendered campaign/ending movies with skip/transition (needs a video dependency: ask first). | `menu.rs`, `campaign.rs`; [movies.md](re/movies.md) |
 | AV-02 | Provisional | Retail NIS spline/acceleration/focus transitions, later-mission openings, portrait expressions, speech cadence. | `briefing.rs`, `rules/`; [campaign.md](re/campaign.md) |
-| AV-03 | Partial | Scenario-based visual pass: mesh-shifting/skeletal effects, emitters, wake/sail/sky geometry, blend rules. Decals: trigger (per hit vs threshold), placement, per-ship cap. | `fx.rs`, `wake.rs`, `decals.rs`; [effects.md](re/effects.md) |
+| AV-03 | Partial | Scenario-based visual pass: mesh-shifting/skeletal effects, emitters, wake/sail/sky geometry, blend rules. Decals: trigger (per hit vs threshold), placement, per-ship cap. | `fx/`, `wake.rs`, `decals.rs`; [effects.md](re/effects.md) |
 | AV-04 | Partial | Faction voices (pirate generic crew), spatial mix/falloff; crew callouts for engine/rudder hits, boarding defence, retreat. | `audio.rs`, `crew.rs`; [sound.md](re/sound.md) |
 | AV-05 | Provisional | Ship destruction follows the retail breakup (class explosion, the break-apart clip moving the sections, `destructFx` bursts at the section's point). Sections destroyed mid-fight drop their `debrisMeshScene` pieces. Open: retail debris drift/fall/spin numbers, owner visual check. | `combat/mod.rs`; [effects.md](re/effects.md#ship-sinking-and-final-destruction) |
 | PT-01 | Unvalidated | Crew lines open the talking head with the speaker's portrait; check whether every callout does in retail. | `audio.rs`, `briefing.rs` |
 | PT-02 | Unvalidated | Crew lines use the post's crew species or the faction crew; pirate generic voice, retail check. | `audio.rs`; [sound.md](re/sound.md) |
-| PT-05 | Unvalidated | Additive effects sort after alpha meshes; a trail behind a translucent sail shows undimmed (per-emitter sort would fix). Owner visual check. | `fx.rs` |
-| PT-11 | Unvalidated | Dock/repair/SOS flares now draw; retail look not compared. | `fx.rs`, `docking.rs` |
+| PT-05 | Unvalidated | Additive effects sort after alpha meshes; a trail behind a translucent sail shows undimmed (per-emitter sort would fix). Owner visual check. | `fx/` |
+| PT-11 | Unvalidated | Dock/repair/SOS flares now draw; retail look not compared. | `fx/`, `docking.rs` |
 
 ## Next retail measurements
 

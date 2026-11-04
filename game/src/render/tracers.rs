@@ -3,13 +3,13 @@
 //! additively with the mod's `shaders/tracer.wesl`. When the shell is gone (a hit, a miss running out) its streak shrinks
 //! into the point where it ended. The bullet's rule (`tracers.bullets`, first whose `match` is in the bullet's name, else
 //! `tracers.default`) gives its colour and size; width 0 draws none. The retail flight effects stay, thinned by
-//! `particles`. All streaks are one mesh, rebuilt each frame. Contract: `TracerUniform`, and the mesh described at
+//! `particles`. All streaks are one mesh, rebuilt each frame through a `QuadBatch`. Contract: `TracerUniform`, and the mesh described at
 //! `ribbon`.
 
 use bevy::asset::RenderAssetUsages;
 use bevy::camera::visibility::NoFrustumCulling;
 use bevy::light::NotShadowCaster;
-use bevy::mesh::{Indices, MeshVertexBufferLayoutRef, PrimitiveTopology};
+use bevy::mesh::{MeshVertexBufferLayoutRef, PrimitiveTopology};
 use bevy::pbr::{ExtendedMaterial, MaterialExtension, MaterialExtensionKey, MaterialExtensionPipeline};
 use bevy::prelude::*;
 use bevy::render::render_resource::{AsBindGroup, RenderPipelineDescriptor, ShaderType, SpecializedMeshPipelineError};
@@ -17,6 +17,7 @@ use bevy::shader::ShaderRef;
 use serde_json::Value;
 use std::collections::{HashMap, VecDeque};
 
+use super::batch::QuadBatch;
 use super::bursts::Part;
 use super::{Look, num, rgb};
 use crate::combat::Shell;
@@ -165,6 +166,7 @@ fn tracers(
     target: Query<(&Mesh3d, &MeshMaterial3d<TracerMaterial>, &mut Visibility), With<TracerMesh>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<TracerMaterial>>,
+    mut batch: Local<Option<QuadBatch>>,
 ) {
     let Some(t) = &look.tracers else { return };
     let now = time.elapsed_secs();
@@ -207,18 +209,12 @@ fn tracers(
         ));
         return;
     };
-    let mut b = Built::default();
+    let batch = batch.get_or_insert_with(QuadBatch::with_normals);
+    batch.clear();
     for s in streaks.0.values() {
-        ribbon(&mut b, s, now, cam);
+        ribbon(batch, s, now, cam);
     }
-    vis.set_if_neq(if b.idx.is_empty() { Visibility::Hidden } else { Visibility::Inherited });
-    if let Some(mut m) = meshes.get_mut(&mesh.0) {
-        m.insert_attribute(Mesh::ATTRIBUTE_POSITION, b.pos);
-        m.insert_attribute(Mesh::ATTRIBUTE_NORMAL, b.nor);
-        m.insert_attribute(Mesh::ATTRIBUTE_UV_0, b.uv);
-        m.insert_attribute(Mesh::ATTRIBUTE_COLOR, b.col);
-        m.insert_indices(Indices::U32(b.idx));
-    }
+    vis.set_if_neq(batch.upload(&mut meshes, &mesh.0));
     if let Some(mut m) = materials.get_mut(&mat.0) {
         m.extension.u.params.x = now;
     }
@@ -246,20 +242,11 @@ fn expire(points: &mut VecDeque<(Vec3, f32)>, oldest: f32, alive: bool) {
     }
 }
 
-#[derive(Default)]
-struct Built {
-    pos: Vec<[f32; 3]>,
-    nor: Vec<[f32; 3]>,
-    uv: Vec<[f32; 2]>,
-    col: Vec<[f32; 4]>,
-    idx: Vec<u32>,
-}
-
 /// One streak into the mesh. The streak: a strip facing the camera, u across (0..1), v its age (0 at the head, 1 the
 /// oldest point drawn); colour rgb the tracer's, a how much is left of a gone shell's streak. The head (live shells only):
 /// a camera-facing quad stretched along the flight, u 2..3 along it (3 at the front) and v 0..1 across, so the shader
 /// tells the two apart by u.
-fn ribbon(b: &mut Built, s: &Streak, now: f32, cam: &GlobalTransform) {
+fn ribbon(b: &mut QuadBatch, s: &Streak, now: f32, cam: &GlobalTransform) {
     let tr = &s.tracer;
     let eye = cam.translation();
     let left = s.gone.map_or(1.0, |g| (1.0 - (now - g) / tr.seconds).clamp(0.0, 1.0));
@@ -273,19 +260,16 @@ fn ribbon(b: &mut Built, s: &Streak, now: f32, cam: &GlobalTransform) {
             let side = along.cross(to_cam).normalize_or(Vec3::X) * (tr.width * 0.5);
             let v = ((now - p.1) / tr.seconds).clamp(0.0, 1.0);
             for (end, u) in [(1.0, 0.0), (-1.0, 1.0)] {
-                b.pos.push((p.0 + side * end).to_array());
-                b.nor.push(to_cam.to_array());
-                b.uv.push([u, v]);
-                b.col.push(col);
+                b.vertex(p.0 + side * end, to_cam, Vec2::new(u, v), col);
             }
         }
         for i in 0..(pts.len() - 1) as u32 {
             let a = first + 2 * i;
-            b.idx.extend([a, a + 1, a + 2, a + 1, a + 3, a + 2]);
+            b.triangle(a, a + 1, a + 2);
+            b.triangle(a + 1, a + 3, a + 2);
         }
     }
     if tr.head > 0.0 && s.gone.is_none() {
-        let first = b.pos.len() as u32;
         let to_cam = (eye - pts[0]).normalize_or(Vec3::Y);
         let flight = pts.get(1).map_or(Vec3::ZERO, |&p| pts[0] - p);
         let along = if flight.cross(to_cam).length_squared() > 1e-8 { flight.normalize() } else { cam.right().as_vec3() };
@@ -293,14 +277,7 @@ fn ribbon(b: &mut Built, s: &Streak, now: f32, cam: &GlobalTransform) {
         let length = along * (tr.head * 0.5 * (1.0 + tr.stretch));
         // the front of the head at the shell, the rest trailing
         let centre = pts[0] - along * (tr.head * 0.5 * tr.stretch);
-        let normal = to_cam.to_array();
-        for (x, y) in [(-1.0, -1.0), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)] {
-            b.pos.push((centre + length * x + side * y).to_array());
-            b.nor.push(normal);
-            b.uv.push([2.5 + 0.5 * x, 0.5 + 0.5 * y]);
-            b.col.push(col);
-        }
-        b.idx.extend([first, first + 1, first + 2, first + 1, first + 3, first + 2]);
+        b.quad(centre, length, side, to_cam, Rect::new(2.0, 0.0, 3.0, 1.0), col);
     }
 }
 
@@ -391,7 +368,7 @@ mod tests {
         let tracer = tracers().default;
         let s = Streak { tracer, points: [(Vec3::ZERO, 0.0), (Vec3::new(0.0, 0.0, -5.0), 0.1)].into(), gone: None, puffs: 0.0 };
         let cam = GlobalTransform::from(Transform::from_xyz(0.0, 50.0, 0.0).looking_at(Vec3::ZERO, Vec3::NEG_Z));
-        let mut b = Built::default();
+        let mut b = QuadBatch::with_normals();
         ribbon(&mut b, &s, 0.1, &cam);
         assert_eq!((b.pos.len(), b.idx.len()), (4 + 4, 6 + 6), "a two-point strip and the head quad");
         assert!(b.idx.iter().all(|&i| (i as usize) < b.pos.len()));
@@ -400,7 +377,7 @@ mod tests {
         assert_eq!((b.uv[0][1], b.uv[2][1]), (0.0, 0.1 / tracer.seconds), "v: 0 at the head, then the age over `seconds`");
         assert!(b.uv[4..].iter().all(|uv| uv[0] >= 2.0), "head vertices have u >= 2");
         let gone = Streak { gone: Some(0.1), ..s };
-        let mut b = Built::default();
+        let mut b = QuadBatch::with_normals();
         ribbon(&mut b, &gone, 0.2, &cam);
         assert_eq!(b.pos.len(), 4, "a gone shell has no head");
         assert!((b.col[0][3] - (1.0 - 0.1 / tracer.seconds)).abs() < 1e-4, "and its streak fades");

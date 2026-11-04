@@ -10,7 +10,7 @@
 use bevy::asset::RenderAssetUsages;
 use bevy::camera::visibility::NoFrustumCulling;
 use bevy::light::NotShadowCaster;
-use bevy::mesh::{Indices, MeshVertexBufferLayoutRef, PrimitiveTopology};
+use bevy::mesh::{MeshVertexBufferLayoutRef, PrimitiveTopology};
 use bevy::pbr::{ExtendedMaterial, MaterialExtension, MaterialExtensionKey, MaterialExtensionPipeline};
 use bevy::post_process::effect_stack::ChromaticAberration;
 use bevy::prelude::*;
@@ -18,6 +18,7 @@ use bevy::render::render_resource::{AsBindGroup, RenderPipelineDescriptor, Shade
 use bevy::shader::ShaderRef;
 use serde_json::Value;
 
+use super::batch::QuadBatch;
 use super::{Look, num, rgb};
 use crate::fx::{EffectStarted, Fx, FxLib};
 
@@ -359,41 +360,29 @@ struct Glows;
 #[derive(Component)]
 struct Smokes;
 
-#[derive(Default)]
-struct Built {
-    pos: Vec<[f32; 3]>,
-    nor: Vec<[f32; 3]>,
-    uv: Vec<[f32; 2]>,
-    col: Vec<[f32; 4]>,
-    idx: Vec<u32>,
+/// The batches the two meshes are built through, kept between frames.
+struct Batches {
+    glow: QuadBatch,
+    smoke: QuadBatch,
 }
 
-impl Built {
-    /// One quad: `centre` with half extents `a` and `b`. Vertex contract: uv.x = kind * 4 + u (0..1 across the quad),
-    /// uv.y = seed * 2 + v (seed 0..63, v 0..1), colour rgb the particle's, a its age as a share of its life.
-    fn quad(&mut self, kind: Kind, centre: Vec3, a: Vec3, b: Vec3, normal: Vec3, color: Vec3, age: f32, seed: u32) {
-        let first = self.pos.len() as u32;
-        for (x, y) in [(-1.0, -1.0), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)] {
-            self.pos.push((centre + a * x + b * y).to_array());
-            self.nor.push(normal.to_array());
-            self.uv.push([kind as u32 as f32 * 4.0 + 0.5 + 0.5 * x, seed as f32 * 2.0 + 0.5 + 0.5 * y]);
-            self.col.push(color.extend(age).to_array());
-        }
-        self.idx.extend([first, first + 1, first + 2, first + 1, first + 3, first + 2]);
+impl Default for Batches {
+    fn default() -> Self {
+        Self { glow: QuadBatch::with_normals(), smoke: QuadBatch::with_normals() }
     }
+}
 
-    fn write(self, mesh: &mut Mesh) {
-        mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, self.pos);
-        mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, self.nor);
-        mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, self.uv);
-        mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, self.col);
-        mesh.insert_indices(Indices::U32(self.idx));
-    }
+/// One quad: `centre` with half extents `a` and `b`. Vertex contract: uv.x = kind * 4 + u (0..1 across the quad),
+/// uv.y = seed * 2 + v (seed 0..63, v 0..1), colour rgb the particle's, a its age as a share of its life.
+#[allow(clippy::too_many_arguments)]
+fn quad(batch: &mut QuadBatch, kind: Kind, centre: Vec3, a: Vec3, b: Vec3, normal: Vec3, color: Vec3, age: f32, seed: u32) {
+    let (u, v) = (kind as u32 as f32 * 4.0, seed as f32 * 2.0);
+    batch.quad(centre, a, b, normal, Rect::new(u, v, u + 1.0, v + 1.0), color.extend(age).to_array());
 }
 
 /// The quad a live particle is drawn as, `t` seconds old: flashes, embers, fireballs, scorches, motes and smoke face
 /// the camera and grow as the kind does; sparks stretch along their flight; rings lie flat and spread.
-fn place(b: &mut Built, p: &Particle, at: Vec3, t: f32, cam: &GlobalTransform) {
+fn place(b: &mut QuadBatch, p: &Particle, at: Vec3, t: f32, cam: &GlobalTransform) {
     let age = (t / p.life).clamp(0.0, 1.0);
     let (offset, vel) = p.motion(t);
     let centre = at + offset;
@@ -411,13 +400,13 @@ fn place(b: &mut Built, p: &Particle, at: Vec3, t: f32, cam: &GlobalTransform) {
             let to_cam = (cam.translation() - centre).normalize_or(back);
             let along = vel * 0.04 + vel.normalize_or(Vec3::Y) * p.size;
             let side = along.cross(to_cam).normalize_or(right) * p.size;
-            b.quad(p.kind, centre - along * 0.5, along * 0.5, side, to_cam, p.color, age, p.seed);
+            quad(b, p.kind, centre - along * 0.5, along * 0.5, side, to_cam, p.color, age, p.seed);
         }
         Kind::Ring => {
             let r = p.size + offset.length();
-            b.quad(p.kind, at, Vec3::X * r, Vec3::Z * r, Vec3::Y, p.color, age, p.seed);
+            quad(b, p.kind, at, Vec3::X * r, Vec3::Z * r, Vec3::Y, p.color, age, p.seed);
         }
-        _ => b.quad(p.kind, centre + back * s * 0.3, right * s, up * s, back, p.color, age, p.seed),
+        _ => quad(b, p.kind, centre + back * s * 0.3, right * s, up * s, back, p.color, age, p.seed),
     }
 }
 
@@ -435,6 +424,7 @@ fn draw(
     mut smokes: Query<(&Mesh3d, &MeshMaterial3d<SmokeMaterial>, &mut Visibility), (With<Smokes>, Without<Glows>)>,
     mut meshes: ResMut<Assets<Mesh>>,
     (mut glow_mats, mut smoke_mats): (ResMut<Assets<BurstMaterial>>, ResMut<Assets<SmokeMaterial>>),
+    mut batches: Local<Batches>,
 ) {
     let Some(b) = &look.bursts else { return };
     let now = time.elapsed_secs();
@@ -455,7 +445,9 @@ fn draw(
         }
         return;
     }
-    let (mut glow, mut smoke) = (Built::default(), Built::default());
+    let Batches { glow, smoke } = &mut *batches;
+    glow.clear();
+    smoke.clear();
     let eye = cam.translation();
     let mut smoky: Vec<(f32, &Particle, Vec3)> = vec![];
     for p in &parts.list {
@@ -463,29 +455,23 @@ fn draw(
         if p.kind == Kind::Smoke {
             smoky.push((eye.distance_squared(at + p.motion(now - p.born).0), p, at));
         } else {
-            place(&mut glow, p, at, now - p.born, cam);
+            place(glow, p, at, now - p.born, cam);
         }
     }
     smoky.sort_by(|a, b| b.0.total_cmp(&a.0));
     for (_, p, at) in smoky {
-        place(&mut smoke, p, at, now - p.born, cam);
+        place(smoke, p, at, now - p.born, cam);
     }
     if let Some(m) = b.motes {
-        motes(&mut glow, &m, eye, now, cam);
+        motes(glow, &m, eye, now, cam);
     }
     let (gm, gmat, mut gvis) = glows.single_mut().expect("one glow mesh");
-    gvis.set_if_neq(if glow.idx.is_empty() { Visibility::Hidden } else { Visibility::Inherited });
-    if let Some(mut mesh) = meshes.get_mut(&gm.0) {
-        glow.write(&mut mesh);
-    }
+    gvis.set_if_neq(glow.upload(&mut meshes, &gm.0));
     if let Some(mut m) = glow_mats.get_mut(&gmat.0) {
         m.extension.u.params.x = now;
     }
     let (sm, smat, mut svis) = smokes.single_mut().expect("one smoke mesh");
-    svis.set_if_neq(if smoke.idx.is_empty() { Visibility::Hidden } else { Visibility::Inherited });
-    if let Some(mut mesh) = meshes.get_mut(&sm.0) {
-        smoke.write(&mut mesh);
-    }
+    svis.set_if_neq(smoke.upload(&mut meshes, &sm.0));
     if let Some(mut m) = smoke_mats.get_mut(&smat.0) {
         let (dir, light) = sun.iter().next().map_or((Vec3::NEG_Y, Vec3::ONE), |(l, t)| (t.forward().as_vec3(), l.color.to_linear().to_vec3()));
         m.extension.u.sun = dir.extend(now);
@@ -496,7 +482,7 @@ fn draw(
 }
 
 /// Specks of dust in a box around the camera, each drifting slowly on its own; the box wraps, so they never run out.
-fn motes(b: &mut Built, m: &Part, eye: Vec3, now: f32, cam: &GlobalTransform) {
+fn motes(b: &mut QuadBatch, m: &Part, eye: Vec3, now: f32, cam: &GlobalTransform) {
     let half = m.speed.max(1.0);
     let span = 2.0 * half;
     let (right, up, back) = (cam.right().as_vec3(), cam.up().as_vec3(), cam.back().as_vec3());
@@ -511,7 +497,7 @@ fn motes(b: &mut Built, m: &Part, eye: Vec3, now: f32, cam: &GlobalTransform) {
         let near = (rel.length() / (half * 0.08)).clamp(0.0, 1.0);
         let fade = 1.0 - (1.0 - edge * edge) * near;
         let s = m.size * (0.5 + h(7));
-        b.quad(Kind::Mote, p, right * s, up * s, back, m.color, fade, (h(8) * 63.0) as u32);
+        quad(b, Kind::Mote, p, right * s, up * s, back, m.color, fade, (h(8) * 63.0) as u32);
     }
 }
 
@@ -658,13 +644,13 @@ mod tests {
         let cam = GlobalTransform::from(Transform::from_xyz(0.0, 50.0, 0.0).looking_at(Vec3::ZERO, Vec3::NEG_Z));
         let mut ps = Particles::default();
         ps.throw(Kind::Ember, &defaults(Kind::Ember), Vec3::ZERO, Vec3::Y, 0.0, None);
-        let mut b = Built::default();
+        let mut b = QuadBatch::with_normals();
         let p = ps.list[0];
         place(&mut b, &p, Vec3::ZERO, p.life * 0.5, &cam);
         assert_eq!((b.pos.len(), b.idx.len()), (4, 6));
         assert!(b.uv.iter().all(|uv| (uv[0] / 4.0).floor() == Kind::Ember as u32 as f32 && (uv[1] / 2.0).floor() == p.seed as f32));
         assert!((b.col[0][3] - 0.5).abs() < 1e-4, "alpha is the age share");
-        let mut m = Built::default();
+        let mut m = QuadBatch::with_normals();
         motes(&mut m, &defaults(Kind::Mote), Vec3::new(1000.0, 5.0, -300.0), 12.0, &cam);
         assert_eq!(m.pos.len(), 4 * 300);
         assert!(m.pos.iter().all(|p| (Vec3::from(*p) - Vec3::new(1000.0, 5.0, -300.0)).abs().max_element() <= 121.0), "around the camera");

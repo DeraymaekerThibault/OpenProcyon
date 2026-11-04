@@ -43,7 +43,7 @@ files to `content/`, or anything that publishes (pushing tags, releases).
   table. The game overlays `content/` on the imported assets like a mod (`assets_dir()` in `game/src/lib.rs`).
 - `game/` Rust + Bevy 0.20. `lib.rs` is the `openprocyon` library: wiring and `run(view)`. `main.rs` runs it with the classic view.
   Shared modules own state, input, rules and simulation: `ship.rs`/`scenario.rs`/`view.rs` (ships + AI, battle lifecycle,
-  camera/input), `data.rs` (JSON loading), `combat/`, `fx.rs`, `docking.rs`, `options_menu.rs`, `boarding.rs`, `sprites.rs`,
+  camera/input), `data.rs` (JSON loading), `combat/`, `fx/`, `docking.rs`, `options_menu.rs`, `boarding.rs`, `sprites.rs`,
   `panels.rs` (HUD contract/input), `menu.rs` (front-end model), `campaign.rs` + `rules/` (data-driven mission rule
   interpreter), `briefing.rs`, `audio.rs`, ... Module ownership and implementation order: `docs/development.md`.
 - `game/src/classic/` the retail presentation. Views only draw; state, input and rules stay in shared modules. Shared code never
