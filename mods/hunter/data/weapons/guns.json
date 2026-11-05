@@ -1,0 +1,41 @@
+{
+  "Gun_Hunter_Railgun": {
+    "MuzzleSpeed": 220.0,
+    "TimeBetweenBursts": 6.0,
+    "BulletsPerBurst": 1,
+    "DuringBurstReloadTime": 0.0,
+    "MaximumRange_Range": 420.0,
+    "LongRange_Range": 340.0,
+    "EffectiveRange_Range": 260.0,
+    "BulletAffectedByGravity": false,
+    "HorizontalRotationSpeed": 0.7,
+    "VerticalMinAngle": -0.6,
+    "VerticalMaxAngle": 1.0,
+    "VerticalRotationSpeed": 0.7,
+    "MuzzleFlashEffect": "Lancer_Muzzle_Flash",
+    "MaximumRange_AccuracyDeviation": 0.01,
+    "LongRange_AccuracyDeviation": 0.006,
+    "EffectiveRange_AccuracyDeviation": 0.003,
+    "BulletTypeName_Primary": "Bullet_Hunter_Slug",
+    "Is PointDefense Gun": false,
+    "Is TorpedoLauncher Gun": false,
+    "SoundName": "Weapon_Lancer_Pirate_FireLarge",
+    "SoundVolume": 0.9,
+    "SoundMaxDistance": 600.0,
+    "LobAngle": 0.0,
+    "Is Lobbing Gun": false,
+    "Can Be Fired While Cloaked": false,
+    "Victory Point Cost": 16,
+    "Exclusion Race": "None",
+    "Mount Type": "Heavy  Mount",
+    "EffectiveRange_RicochetFactor": -100.0,
+    "LongRange_RicochetFactor": -100.0,
+    "MaximumRange_RicochetFactor": -100.0,
+    "visual": {
+      "base": "gun_Hunter_Layer1.glb",
+      "barrel": "gun_Hunter_Layer2.glb",
+      "pivot": [0.0, 0.0, 0.0],
+      "muzzles": [[0.0, 4.6, 0.5]]
+    }
+  }
+}

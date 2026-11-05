@@ -1,0 +1,7 @@
+{
+  "id": "hunter",
+  "name": "Hunter (fast sniper ship)",
+  "version": "1.0",
+  "category": "Ships",
+  "description": "A fast, fragile Pirate needle ship with its own hull and a long-range railgun. Meshes are CC0, built by tools/make_hunter.py."
+}

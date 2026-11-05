@@ -1,0 +1,17 @@
+{
+  "extends": "Ship_Navy_Cutter",
+  "entity": "Ship_Hunter",
+  "race": "Pirate",
+  "skirmish": true,
+  "points": 85,
+  "model": "Ship_Hunter",
+  "geometry": "Ship_Navy_Cutter",
+  "display_name": "IDGS_HUNTER_SHIP_NAME",
+  "icon": "ShipBar_ShipIcon_Pirate_FastAttack",
+  "core_hp": 120.0,
+  "sight": 500.0,
+  "physics": {"Mass": 2500.0, "MaxThrust": 90000.0, "MaxSpeed": 14.0, "MaxAngularAcceleration": 5.0},
+  "guns": {
+    "Forward_Heavymount": {"gun": "Gun_Hunter_Railgun", "arc_deg": 50.0}
+  }
+}
