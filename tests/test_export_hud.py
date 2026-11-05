@@ -182,7 +182,7 @@ class ExportHud(unittest.TestCase):
                 (out / "hud/sprites/MainBar_Test/Navy/NoCursor.png").exists()
             )
 
-    def test_font_sheets_are_still_exported(self):
+    def test_font_metrics_are_exported_without_sheets(self):
         with tempfile.TemporaryDirectory() as d:
             root, out = Path(d, "game"), Path(d, "out")
             (root / "BD_GUITextures").mkdir(parents=True)
@@ -197,7 +197,8 @@ class ExportHud(unittest.TestCase):
                 contextlib.redirect_stdout(io.StringIO()),
             ):
                 main(root, out)
-            self.assertTrue((out / "hud/tex/font_0.png").exists())
+            self.assertTrue((out / "hud/fonts/Test14.json").exists())
+            self.assertFalse((out / "hud/tex/font_0.png").exists())
             self.assertTrue((out / "hud/fonts/Test14.json").exists())
             self.assertFalse((out / "hud/tex/sheet_a.png").exists())
 

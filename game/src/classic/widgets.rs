@@ -180,14 +180,17 @@ impl Ctx<'_> {
     pub(super) fn fill(&self, c: &mut ChildSpawnerCommands, [x, y, w, h]: [f32; 4], colour: Color) {
         c.spawn((self.node(x, y, w, h), BackgroundColor(colour)));
     }
-    /// Retail bitmap text, horizontally centred in [x, x+w] (or left-aligned), vertically centred on `cy`.
+    /// UI text in the vector face of a retail font (retail advances for the layout), horizontally centred in [x, x+w] (or left-aligned), vertically centred on `cy`.
     pub(super) fn text(&self, c: &mut ChildSpawnerCommands, font: &str, s: &str, x: f32, w: f32, cy: f32, centre: bool, tint: Color) {
         let Some(f) = self.fonts.0.get(font).or_else(|| self.fonts.0.get("BlackChancery22")) else { return };
         let mut n = self.node(x, cy - f.height / 2.0, w, f.height);
         n.align_items = AlignItems::Center;
         n.justify_content = if centre { JustifyContent::Center } else { JustifyContent::FlexStart };
         c.spawn(n).with_children(|c| {
-            f.glyphs(c, s, self.scale, tint);
+            let line = Node { width: Val::Px(f.width(s) * self.scale), height: Val::Px(f.height * self.scale), flex_shrink: 0.0, align_items: AlignItems::Center, ..default() };
+            c.spawn(line).with_children(|c| {
+                c.spawn((f.text(s, self.scale, tint), TextLayout::no_wrap()));
+            });
         });
     }
     /// Text button over the 3-piece FrontEnd_Texts_Over_Button art (44 px tall in the sheet, stretched to the rect).
