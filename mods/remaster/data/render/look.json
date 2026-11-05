@@ -24,6 +24,12 @@
         0.5,
         0.0
       ]
+    },
+    "stars": {
+      "brightness": 1.0,
+      "twinkle": 0.45,
+      "speed": 2.0,
+      "gain": 16
     }
   },
   "ambient": 0.4,
