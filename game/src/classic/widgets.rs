@@ -12,10 +12,14 @@ use crate::theme::{Look, Looks, State, Theme};
 
 /// Retail gold for highlighted labels (the `Center Justify Label` title colour).
 pub(super) const GOLD: Color = Color::srgb(1.0, 0.796, 0.0);
-/// Teal bar behind the picked row of a list.
-pub(super) const PICKED: Color = Color::srgba(0.2, 0.7, 0.8, 0.45);
-/// Lighter heading band at the top of a framed table.
-pub(super) const HEADING: Color = Color::srgba(0.25, 0.75, 0.85, 0.22);
+/// Teal bar behind the picked row of a list (theme.json `picked`).
+pub(super) fn picked() -> Color {
+    Theme::current().picked
+}
+/// Lighter heading band at the top of a framed table (theme.json `heading`).
+pub(super) fn heading() -> Color {
+    Theme::current().heading
+}
 /// Behind an open pull-down's entries: the pull-down art is translucent, so the list needs a solid backing to read over what it covers.
 pub(super) const LIST_BACKING: Color = Color::srgb(0.03, 0.12, 0.3);
 /// Resting / hover fill of a list cell (the retail SortList slot art carries decoration that only fits full-width rows).
@@ -289,6 +293,8 @@ pub(super) enum PanelKind {
     Inner,
     /// The lighter strip along the bottom of a list box (flat, no rim).
     Band,
+    /// A framed window: translucent fill, teal rim, soft teal glow.
+    Window,
     /// A small bevelled frame: a fleet slot, the ship icon, a stat bar.
     Slot,
 }
@@ -302,6 +308,7 @@ pub(super) fn panel_geometry([l, t, r, b]: [f32; 4], kind: PanelKind, theme: &Th
         PanelKind::Inner => (theme.edge_width, theme.box_radius),
         PanelKind::Band => (0.0, 0.0),
         PanelKind::Slot => (theme.edge_width, theme.slot_radius),
+        PanelKind::Window => (theme.edge_width, theme.box_radius),
     };
     let border = if border > 0.0 { snap(border, scale).max(1.0) } else { 0.0 };
     let (w, h) = (snap(r, scale) - snap(l, scale), snap(b, scale) - snap(t, scale));
@@ -343,6 +350,14 @@ pub(super) fn panel(ctx: &Ctx, c: &mut ChildSpawnerCommands, rect: [f32; 4], kin
             ))
             .id(),
         PanelKind::Inner => c.spawn((node, BackgroundColor(theme.box_fill), BorderColor::all(theme.edge))).id(),
+        PanelKind::Window => c
+            .spawn((
+                node,
+                BackgroundColor(theme.window_fill),
+                BorderColor::all(theme.window_rim),
+                BoxShadow::new(theme.window_rim.with_alpha(0.3), Val::Px(0.0), Val::Px(0.0), Val::Px(ctx.scale.round()), Val::Px((6.0 * ctx.scale).round())),
+            ))
+            .id(),
         PanelKind::Slot => c.spawn((node, BackgroundColor(theme.box_fill), BorderColor { top: theme.rim_light, left: theme.rim_light, right: theme.rim, bottom: theme.rim })).id(),
         PanelKind::Band => c.spawn((node, BackgroundColor(theme.band_fill))).id(),
     }
@@ -397,19 +412,11 @@ pub(super) fn arrow(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32;
     root.insert(Art(parts));
 }
 
-/// The retail framed panel: `FRONTEND_STRETCHEDWINDOW_*` gives one corner (mirrored to the other three), an edge column/row and a fill.
-pub(super) fn stretched_window(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4]) {
-    let k = 33.0; // corner tile size
-    piece(ctx, c, "FRONTEND_STRETCHEDWINDOW_CENTERFILL_TILE", [l + k, t + k, r - k, b - k]);
-    for (flip_x, x0, x1) in [(false, l, l + k), (true, r - k, r)] {
-        for (flip_y, y0, y1) in [(false, t, t + k), (true, b - k, b)] {
-            piece_flipped(ctx, c, "FRONTEND_STRETCHEDWINDOW_TOPLEFT_CORNERTILE", [x0, y0, x1, y1], (flip_x, flip_y));
-        }
-        piece_flipped(ctx, c, "FRONTEND_STRETCHEDWINDOW_LEFTCENTER_TILE", [x0, t + k, x1, b - k], (flip_x, false));
-    }
-    for (flip_y, y0, y1) in [(false, t, t + k), (true, b - k, b)] {
-        piece_flipped(ctx, c, "FRONTEND_STRETCHEDWINDOW_TOPCENTER_TILE", [l + k, y0, r - k, y1], (false, flip_y));
-    }
+/// A framed window (the map list, the Game Summary table, the Arms help box, the lobby player list): a drawn translucent panel with a
+/// teal rim and glow (theme.json `window_*`). The ornate frames stay bitmap, being pictorial rather than a shape: the in-game menu window
+/// (`menu/fe_ingame_window.png`, `menu.rs` `ingame_window`) and the dialog frame (`menu/frontenddialogscreen.png`, `dialog_frame`).
+pub(super) fn stretched_window(ctx: &Ctx, c: &mut ChildSpawnerCommands, rect: [f32; 4]) {
+    panel(ctx, c, rect, PanelKind::Window);
 }
 
 /// A vertical scrollbar for a list of `total` rows of which `visible` show from row `first`: a rounded dark track and a gold-rimmed pill
@@ -559,7 +566,7 @@ pub(super) fn info_panel(ctx: &Ctx, c: &mut ChildSpawnerCommands, title: &str, i
 
 /// One clickable Univers12 row of a list (`[x, y, w, h]`, text 20 in), on the teal bar when `picked`.
 pub(super) fn list_row(ctx: &Ctx, c: &mut ChildSpawnerCommands, [x, y, w, h]: [f32; 4], label: &str, picked: bool, action: impl Bundle) {
-    let fill = BackgroundColor(if picked { PICKED } else { Color::NONE });
+    let fill = BackgroundColor(if picked { self::picked() } else { Color::NONE });
     c.spawn((Interaction::None, action, fill, ctx.node(x, y, w, h))).with_children(|c| ctx.text(c, BODY_FONT, label, 20.0, w - 20.0, h / 2.0, false, Color::WHITE));
 }
 
@@ -745,7 +752,7 @@ mod tests {
     fn panel_edges_land_on_whole_physical_pixels() {
         let theme = Theme::default();
         for scale in [1.0, 1.125, 1.8, 2.4] {
-            for kind in [PanelKind::Outer, PanelKind::Inner, PanelKind::Band, PanelKind::Slot] {
+            for kind in [PanelKind::Outer, PanelKind::Inner, PanelKind::Band, PanelKind::Slot, PanelKind::Window] {
                 let g = panel_geometry([23.3, 38.7, 459.4, 471.1], kind, &theme, scale);
                 assert!(g.iter().all(|v| v.fract() == 0.0), "{kind:?} at {scale}: {g:?}");
             }
