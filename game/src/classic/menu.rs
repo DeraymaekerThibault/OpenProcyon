@@ -865,7 +865,9 @@ fn ship_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, _rect: [f32; 4], sk: &Skir
 fn fleet_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, sk: &Skirmish, lib: &Library) {
     let fleet = sk.human().map(|h| h.fleet.as_slice()).unwrap_or_default();
     let icons: Vec<_> = fleet.iter().map(|n| lib.classes.iter().find(|cl| &cl.name == n).and_then(|cl| cl.icon.as_deref())).collect();
-    fleet_bar(ctx, c, (sk.slot_scroll, sk.fleet_size), &icons, None, Action::SlotScroll, Action::PickFleet);
+    // The picked fleet ship (the one Drop removes) is marked like on the Crew and Arms screens.
+    let shown = sk.slot_filled().then_some(sk.fleet_pick);
+    fleet_bar(ctx, c, (sk.slot_scroll, sk.fleet_size), &icons, shown, Action::SlotScroll, Action::PickFleet);
 }
 
 /// A class's displayable name ('Displayable Shipname String ID'), else its WOT name tidied up.

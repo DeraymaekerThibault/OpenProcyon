@@ -358,6 +358,8 @@ pub struct FitView {
     pub list: Vec<(String, Action)>,
     /// Extra columns of `list`, row for row (empty when the list has none).
     pub rows: Vec<RowInfo>,
+    /// Headings of the two columns of `rows`: the rating's skill (empty when there is none) and what the price column means.
+    pub headers: (String, String),
     /// The info panel (top right): the picked crew member or weapon.
     pub detail: Option<Detail>,
     /// The left box on the Arms screen: retail shows the help text until an upgrade reports its cost or why it failed.
@@ -1134,6 +1136,7 @@ fn skirmish_screen_model(
         let assigned = slot.crew.get(choice.ship);
         let (posts, bars) = posts_view(class, assigned);
         let (mut list, mut picked, mut detail, mut rows) = (vec![], None, None, vec![]);
+        let mut headers = (String::new(), String::new());
         if choice.arms {
             choice.post = choice.post.min(banks.len().saturating_sub(1));
             if let Some((bank, equipped)) = banks.get(choice.post) {
@@ -1162,6 +1165,7 @@ fn skirmish_screen_model(
             } else {
                 None
             };
+            headers = (skill.map(|s| s[..1].to_uppercase() + &s[1..]).unwrap_or_default(), "Cost".into());
             rows = ids
                 .iter()
                 .map(|id| RowInfo {
@@ -1187,6 +1191,7 @@ fn skirmish_screen_model(
             banks,
             list,
             rows,
+            headers,
             detail,
             message: choice.message.clone(),
             can_drop,

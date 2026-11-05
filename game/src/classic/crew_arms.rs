@@ -38,6 +38,8 @@ fn follow_cursor(window: Single<&Window, With<PrimaryWindow>>, mut ghosts: Query
 const PANEL: Vec2 = Vec2::new(286.5, 116.5);
 /// Crew portrait size (reference units).
 const FACE: f32 = 30.0;
+/// Faces in one row of Engineers / Riggers / Fighters: nine end short of the gunners' ship outline.
+const FACES_PER_ROW: usize = 9;
 
 fn build(
     mut commands: Commands,
@@ -157,8 +159,10 @@ fn crew(ctx: &Ctx, c: &mut ChildSpawnerCommands, fit: &FitView, lib: &Library, s
             continue;
         }
         ctx.text(c, "Univers10", &s(id), 45.0, 120.0, label_y, false, tint(role));
+        // A long post (the fighters of a big hull) wraps to a second row before it reaches the gunners' outline.
         for (i, slot) in fit.posts[role].iter().enumerate() {
-            face(ctx, c, Vec2::new(61.0 + i as f32 * 31.0, label_y + 29.5), slot, &fit.race, (role, i));
+            let (col, row) = ((i % FACES_PER_ROW) as f32, (i / FACES_PER_ROW) as f32);
+            face(ctx, c, Vec2::new(61.0 + col * 31.0, label_y + 29.5 + row * 31.0), slot, &fit.race, (role, i));
         }
     }
     // Gunners: the ship outline with a portrait at each gun bank's slot.
@@ -233,6 +237,14 @@ fn list(ctx: &Ctx, c: &mut ChildSpawnerCommands, fit: &FitView, strings: &Value)
         pulldown_cell(ctx, c, [520.0, 297.0, 710.0, 326.0], &sort, fit.sort_open, Some(Action::Sort), true);
     }
     const ROWS: usize = 8;
+    // Column headings over the right-aligned columns (the rating and the price or price change).
+    if !fit.rows.is_empty() {
+        let tint = Color::srgba(1.0, 1.0, 1.0, 0.6);
+        if !fit.headers.0.is_empty() {
+            ctx.text_end(c, "Univers10", &fit.headers.0, 505.0, 163.0, 333.0, tint);
+        }
+        ctx.text_end(c, "Univers10", &fit.headers.1, 505.0, 203.0, 333.0, tint);
+    }
     for (row, (label, action)) in fit.list.iter().enumerate().skip(fit.scroll).take(ROWS) {
         let y = 336.25 + (row - fit.scroll) as f32 * 19.5;
         // Rows with columns (the crew roster: skill rating and price) dim when the points left cannot pay.
