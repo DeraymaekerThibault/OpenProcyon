@@ -272,3 +272,17 @@ Every shot that strikes a damage section (a hull, a gun tower, a volcano) first 
 ## Destroyed base part (PROVISIONAL)
 
 When a mission-vital part of an armed base (building, defence ring) drops to 0 hit points, the remake plays that part's own destruct effect (from the retail section data) at the centre of the part, plus a ship-explosion sound. The part then swaps to its damaged mesh and stops blocking shells. Retail's actual effect and sound for a destroyed base part have not been measured; every headless attempt lost to the base's guns first (#97).
+
+## Lob targeting cursor
+Source: static reading of the original; **[?]** = inferred, not seen in play. Remake: `combat::LobAim`/`lob_solution`, `options_menu::context_cursor`, `view::input`, `classic/world_hud.rs` (PROVISIONAL where marked).
+- **Arming**: a left click on a weapon-bar bank whose first gun is a lob gun arms it for the *primary* ship (no ammo/reload check); the weapon type
+  comes from the bank's bullet (gravity charge, nova mortar, star mortar). Other banks get the ordinary fire toggle.
+- **Leaving**: a right click while armed cancels it, plays `HUD_LobWeapon_Cancel` and opens no menu. A left click with a ground point under the cursor
+  sends the lob order and clears the mode (one shot at a time); a left click with no ground point keeps it armed. No Esc, no cancel on reselecting a ship [?].
+- **Ground point**: the camera ray through the cursor meets the sea plane (z = 0), whatever is under the cursor; none over the HUD.
+- **Cursor**: while armed with a ground point, the lob cursor of the weapon type shows over ships, bases and open sea alike [?: priority over the hover
+  cursors]. The `_HAS_NO_FIRING_SOLUTION` variant shows when no live gun of the bank has the point within its maximum horizontal range and mount arc
+  (the engage test above). Minimum range, height, reload, crew and line of sight do not count. A click is accepted either way.
+- **Ground icon**: each frame, the weapon's `LobTarget_Icon_*` (no-solution variant when so) is drawn at the ground point, opaque, and disappears with the mode:
+  no marker while shells fly. Data: `LobIcon WorldSpace Radius` 10, `Z Plane Offset: LobIcon` -3; the retail draw ignores both, so the size is PROVISIONAL (remake: 10 as half-width).
+- **Sounds**: `HUD_LobWeapon_Accept` / `_Reject` on the click for gravity charges only (solution / none); star and nova clicks play neither [? looks odd, confirm in play].

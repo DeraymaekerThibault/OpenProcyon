@@ -100,7 +100,7 @@ struct MenuUi;
 pub struct HoverCursor(pub Option<(&'static str, Vec2)>);
 
 pub fn plugin(app: &mut App) {
-    app.init_resource::<OptionsMenu>().init_resource::<BarMenuRequest>().init_resource::<HoverCursor>().add_systems(
+    app.init_resource::<OptionsMenu>().init_resource::<BarMenuRequest>().init_resource::<HoverCursor>().init_resource::<crate::combat::LobAim>().add_systems(
         Update,
         (
             (dev_click, menu, context_cursor, dev_menu).chain().before(crate::input).run_if(in_state(crate::menu::Screen::Battle)).run_if(crate::menu::overlay_closed),
@@ -176,7 +176,7 @@ fn background(kind: Kind) -> [&'static str; 4] {
 }
 
 fn menu(
-    (mouse, mut keys, mission, boarders, mut board, fleets, mut bar, status, ui, flags, sensors): (
+    (mouse, mut keys, mission, boarders, mut board, fleets, mut bar, status, ui, flags, sensors, mut target): (
         Res<ButtonInput<MouseButton>>,
         ResMut<ButtonInput<KeyCode>>,
         Option<Res<crate::campaign::Mission>>,
@@ -188,6 +188,7 @@ fn menu(
         Res<crate::panels::UiClick>,
         Query<(Has<crate::ship::HoldPosition>, Option<&crate::cloak::Cloak>)>,
         Res<crate::environment::Sensors>,
+        ResMut<crate::combat::Target>,
     ),
     time: Res<Time<Real>>,
     motion: Res<AccumulatedMouseMotion>,
@@ -345,6 +346,11 @@ fn menu(
             return;
         }
         if crate::panels::cinematic(mission.as_deref()) {
+            return;
+        }
+        // A right click while a lob bank is armed only cancels it (no menu).
+        if target.2.armed.take().is_some() {
+            sfx.write(Sfx::ui("HUD_LobWeapon_Cancel"));
             return;
         }
     }
@@ -538,7 +544,9 @@ fn context_cursor(
     fleets: Res<crate::ship::Fleets>,
     docks: Dockees,
     mut hover: ResMut<HoverCursor>,
+    (target, guns, mut lob): (Res<crate::combat::Target>, Query<&crate::combat::GunStates>, ResMut<crate::combat::LobAim>),
 ) {
+    let mut aim = None;
     let want = (|| {
         hud.as_ref()?;
         if crate::panels::cinematic(mission.as_deref()) || menu.open.load(Ordering::Relaxed) || ui.0 {
@@ -548,6 +556,17 @@ fn context_cursor(
         let (camera, gt) = *cam;
         let ray = camera.viewport_to_world(gt, cursor).ok()?;
         let actor = fleets.selected?;
+        // Armed lob bank: its cursor shows over everything (ships, bases, sea) while the pointer is on the sea plane.
+        if let (true, Some(bank), Ok((_, tf, sh, health)), Ok(g)) = (fleets.direct(), target.2.armed, ships.get(actor), guns.get(actor)) {
+            let class = &lib.classes[sh.class];
+            let kind = class.mounts.iter().enumerate().find(|(_, m)| m.bank == bank).and_then(|(i, _)| crate::combat::lob_kind(&lib.guns[g.gun(i)].bullet));
+            let point = ray.intersect_plane(Vec3::ZERO, InfinitePlane3d::new(Vec3::Y)).map(|t| ray.get_point(t));
+            if let (Some(kind), Some(point)) = (kind, point) {
+                let a = crate::combat::LobAimed { kind, solution: crate::combat::lob_solution(&lib, class, health, g, tf, bank, point), point };
+                aim = Some(a);
+                return Some((a.sprites().0, cursor));
+            }
+        }
         let own = ships
             .iter()
             .filter(|(e, _, _, h)| !h.destroyed && fleets.roster().contains(e))
@@ -582,6 +601,9 @@ fn context_cursor(
         Some((name, cursor))
     })();
     pointer.visible = want.is_none();
+    if lob.0 != aim {
+        lob.0 = aim;
+    }
     if hover.0 != want {
         hover.0 = want;
     }

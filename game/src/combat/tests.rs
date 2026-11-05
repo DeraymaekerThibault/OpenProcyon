@@ -1373,3 +1373,13 @@ fn seg_mesh_world(tf: &Transform, s: &Section, a: Vec3, b: Vec3) -> Option<f32> 
     let inv = tf.to_matrix().inverse();
     hit_test::seg_mesh(inv.transform_point3(a), inv.transform_point3(b), s)
 }
+
+#[test]
+fn lob_cursor_sprites_follow_weapon_and_solution() {
+    assert_eq!(lob_kind("Bullet_NovaMortar"), Some(1));
+    assert_eq!(lob_kind("Bullet_CannonBall"), None);
+    let a = LobAimed { kind: 2, solution: true, point: Vec3::ZERO };
+    assert_eq!(a.sprites(), ("Cursor_PrimaryShip_SetLobTarget_StarMortar", "LobTarget_Icon_StarMortar"));
+    let b = LobAimed { kind: 0, solution: false, ..a };
+    assert_eq!(b.sprites().1, "LobTarget_Icon_GravCharge_HAS_NO_FIRING_SOLUTION");
+}

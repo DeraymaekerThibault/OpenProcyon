@@ -10,6 +10,7 @@ use crate::{Library, PlayerShip, Ship};
 pub fn plugin(app: &mut App) {
     app.add_systems(PostStartup, spawn_reticle.run_if(resource_exists::<HudData>))
         .add_systems(Update, navigation.after(crate::camera).before(crate::sky).run_if(in_state(crate::menu::Screen::Battle)).run_if(crate::menu::overlay_closed))
+        .add_systems(Update, lob_icon.run_if(in_state(crate::menu::Screen::Battle)).run_if(resource_exists::<HudData>).run_if(resource_exists::<crate::combat::LobAim>))
         .add_systems(Update, end_line.run_if(in_state(crate::menu::Screen::Battle)).run_if(resource_exists::<Fonts>))
         .add_systems(
             Update,
@@ -20,6 +21,50 @@ pub fn plugin(app: &mut App) {
                 .run_if(resource_exists::<HudData>)
                 .run_if(resource_exists::<Fonts>),
         );
+}
+
+#[derive(Component)]
+struct LobIcon;
+
+/// The armed lob bank's ground icon at the point under the mouse (its "no firing solution" art when out of range or arc).
+/// PROVISIONAL: size = hud.hdt `LobIcon WorldSpace Radius` (10) as the icon's half-width; the retail draw ignores it, so the real size is unknown.
+fn lob_icon(
+    mut commands: Commands,
+    assets: Res<AssetServer>,
+    hud: Res<HudData>,
+    aim: Res<crate::combat::LobAim>,
+    cam: Single<(&Camera, &GlobalTransform)>,
+    window: Single<&Window, With<bevy::window::PrimaryWindow>>,
+    mut shown: Query<(Entity, &mut Node, &mut ImageNode), With<LobIcon>>,
+    mut current: Local<&'static str>,
+) {
+    let (camera, gt) = *cam;
+    let placed = aim.0.and_then(|a| {
+        let at = camera.world_to_viewport(gt, a.point).ok()?;
+        let edge = camera.world_to_viewport(gt, a.point + gt.right() * 10.0).ok()?;
+        Some((a.sprites().1, at, 2.0 * (edge.x - at.x).abs()))
+    });
+    let Some((name, at, width)) = placed else {
+        for (e, ..) in &shown {
+            commands.entity(e).despawn();
+        }
+        return;
+    };
+    let Some(art) = sprite(&assets, &hud, name) else { return };
+    let s = window.height() / REF_H;
+    let to = Vec2::splat(width / s);
+    let mut node = Node { position_type: PositionType::Absolute, left: Val::Px(at.x - width / 2.0), top: Val::Px(at.y - width / 2.0), ..default() };
+    art.fit(to).place(&mut node, s, UiRect::DEFAULT);
+    if let Ok((_, mut n, mut img)) = shown.single_mut() {
+        *n = node;
+        if *current != name {
+            *img = art.image_node();
+            *current = name;
+        }
+    } else {
+        *current = name;
+        commands.spawn((LobIcon, crate::Scenario, GlobalZIndex(60), art.image_node(), node));
+    }
 }
 
 #[derive(Component)]
