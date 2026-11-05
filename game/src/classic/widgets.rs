@@ -474,12 +474,12 @@ pub(super) fn panel(ctx: &Ctx, c: &mut ChildSpawnerCommands, rect: [f32; 4], kin
 /// fleet list panel, the ship information panel, the slot bar panel, the list box with its band and the information box.
 pub(super) fn ship_screen_backdrop(ctx: &Ctx, c: &mut ChildSpawnerCommands) {
     ctx.backdrop(c, "menu/gamelobby.png");
-    for rect in [[23.0, 38.0, 459.0, 471.0], [482.0, 38.0, 776.0, 506.0], [25.0, 477.0, 459.0, 560.0]] {
+    for rect in [[23.0, 35.0, 459.0, 473.0], [482.0, 35.0, 776.0, 508.0], [25.0, 478.0, 459.0, 562.0]] {
         panel(ctx, c, rect, PanelKind::Outer);
     }
-    panel(ctx, c, [44.0, 89.0, 440.0, 425.0], PanelKind::Inner);
-    panel(ctx, c, [46.0, 375.0, 438.0, 423.0], PanelKind::Band);
-    panel(ctx, c, [492.0, 117.0, 768.0, 283.0], PanelKind::Inner);
+    panel(ctx, c, [40.0, 89.0, 444.0, 425.0], PanelKind::Inner);
+    panel(ctx, c, [42.0, 375.0, 442.0, 423.0], PanelKind::Band);
+    panel(ctx, c, [496.0, 117.0, 766.0, 283.0], PanelKind::Inner);
 }
 
 /// One retail sprite stretched over a box (reference units).
