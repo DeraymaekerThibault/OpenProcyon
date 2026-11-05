@@ -226,7 +226,10 @@ pub fn update(
                 idx.extend([b - 2, b - 1, b, b - 1, b + 1, b]);
             }
         }
-        if let Some(mut m) = meshes.get_mut(&mesh.0) {
+        // An empty mesh is only written once, to clear the last frame's wake: rewriting it every frame makes Bevy warn "no vertices".
+        if (!pos.is_empty() || meshes.get(&mesh.0).is_some_and(|m| m.count_vertices() > 0))
+            && let Some(mut m) = meshes.get_mut(&mesh.0)
+        {
             m.insert_attribute(Mesh::ATTRIBUTE_POSITION, pos);
             m.insert_attribute(Mesh::ATTRIBUTE_UV_0, uv);
             m.insert_attribute(Mesh::ATTRIBUTE_COLOR, col);

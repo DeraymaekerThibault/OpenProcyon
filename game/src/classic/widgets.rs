@@ -146,10 +146,11 @@ impl Ctx<'_> {
     pub(super) fn node(&self, x: f32, y: f32, w: f32, h: f32) -> Node {
         Node {
             position_type: PositionType::Absolute,
-            left: Val::Px(x * self.scale),
-            top: Val::Px(y * self.scale),
-            width: Val::Px(w * self.scale),
-            height: Val::Px(h * self.scale),
+            left: crate::panels::px(x, self.scale),
+            top: crate::panels::px(y, self.scale),
+            // Right and bottom edges are rounded, so abutting boxes share an edge.
+            width: Val::Px(crate::panels::snap(x + w, self.scale) - crate::panels::snap(x, self.scale)),
+            height: Val::Px(crate::panels::snap(y + h, self.scale) - crate::panels::snap(y, self.scale)),
             ..default()
         }
     }

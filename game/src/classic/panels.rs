@@ -3,10 +3,10 @@
 //!
 //! Sprites come from the retail `hud.hdt` (`hud/hud.json`) in the art set of the player's faction (`HudData::skin`). Sizes are in the
 //! 640x480 reference pixels of that data, multiplied by `window height / REF_H` when the tree is built; the tree is rebuilt when the ship,
-//! faction or window size changes. Layout is done by the UI engine (flex rows and anchored containers), so the bar needs no per-faction
-//! numbers: it is the list of parts below, each as wide and tall as its sprite. Parts share their top edge (the data's gauge offsets are
-//! "from MainBar TopLeft", and every part's art starts its frame on the same row); rects differ by 1-2 transparent or border rows at the
-//! bottom, so the bar is docked with its shortest part's bottom on the screen edge and taller parts run off-screen.
+//! faction or window size changes. Every node edge is rounded to whole physical pixels (`panels::snap`). The main bar is one image per
+//! faction composed at import (`tools/compose_bar.py`: `hud/bar/<skin>.png` and the part boxes in `.json`); only what moves is drawn on
+//! it: the buttons' hover and pressed art and the gauge fills. Parts share their top edge (the data's gauge offsets are "from MainBar
+//! TopLeft"), and the bar is docked with its shortest part's bottom on the screen edge.
 #![allow(deprecated)] // shortcut: bevy 0.20 Interaction (deprecated for picking Hovered/Pressed); port with menu.rs when it is removed
 use bevy::prelude::*;
 use bevy::ui::{FocusPolicy, RelativeCursorPosition};
@@ -17,39 +17,46 @@ use crate::panels::{
     Contact, DockingStatus, Gauge, GunButton, HeadState, HudRoot, HudSet, MAX_CONTACTS, PanicButton, PauseButton, REF_H, Radar, RadarButton, ShipIconButton, Solid, ToggleButton,
     WeaponPanel, gauge_value, px,
 };
-use crate::sprites::{HudData, IDLE, Sprite, View, meta, offset, size_of, sprite, sprite_state};
+use crate::sprites::{HudData, IDLE, Sprite, offset, size_of, sprite, sprite_state};
 use crate::{Library, PlayerShip, Ship};
 
-/// Ordered bar parts and optional decorative backdrops, editable through the asset overlay.
-#[derive(Resource)]
-struct BarParts(Vec<(String, Option<String>)>);
-impl BarParts {
-    fn load() -> Self {
-        let path = crate::assets_dir().join("data/hud/bar.json");
-        let value = crate::data::read_json(&path);
-        let parts = value
+/// The composed main bar of an art set (`hud/bar/<skin>.json` next to its `.png`): the image holds every part's idle art, the parts
+/// are the boxes the dynamic pieces sit on. Reference pixels.
+struct BarLayout {
+    size: Vec2,
+    parts: Vec<BarPart>,
+}
+struct BarPart {
+    sprite: String,
+    x: f32,
+    size: Vec2,
+}
+impl BarLayout {
+    fn path(skin: &str) -> String {
+        format!("hud/bar/{}", skin.to_lowercase())
+    }
+    fn load(skin: &str) -> Self {
+        let value = crate::data::read_json(&crate::assets_dir().join(format!("{}.json", Self::path(skin))));
+        let num = |v: &serde_json::Value, key: &str| v[key].as_f64().unwrap_or_else(|| panic!("HUD bar {skin}: `{key}` must be a number")) as f32;
+        let parts = value["parts"]
             .as_array()
-            .expect("HUD bar must be an array")
+            .expect("HUD bar needs parts")
             .iter()
-            .map(|part| {
-                let sprite = part["sprite"].as_str().filter(|s| !s.is_empty()).expect("HUD bar part needs a sprite").to_string();
-                let backdrop = part.get("backdrop").map(|v| v.as_str().expect("HUD backdrop must be a sprite name").to_string());
-                (sprite, backdrop)
-            })
-            .collect::<Vec<_>>();
-        assert!(!parts.is_empty(), "HUD bar must have parts");
-        Self(parts)
+            .map(|p| BarPart { sprite: p["sprite"].as_str().expect("HUD bar part needs a sprite").to_string(), x: num(p, "x"), size: Vec2::new(num(p, "width"), num(p, "height")) })
+            .collect();
+        Self { size: Vec2::new(num(&value, "width"), num(&value, "height")), parts }
     }
 }
 
-/// Running / paused art of the bar's PAUSE button, with the layout margin its node carries.
+/// A main-bar button: its box is drawn by the composed bar, so it shows art only while hovered or pressed (or, for PAUSE, while paused).
 #[derive(Component)]
-struct PauseArt {
-    running: Sprite,
-    paused: Sprite,
-    /// The part's gap in the bar row (not part of the sprite's box).
-    extra: UiRect,
-    s: f32,
+struct BarButton {
+    /// Idle / hover / pressed art.
+    states: States,
+    /// The same for the paused game, on the PAUSE button.
+    paused: Option<States>,
+    /// The part's box in reference pixels (art past its right edge is not part of the layout).
+    region: Rect,
 }
 #[derive(Component)]
 struct Dial;
@@ -113,11 +120,11 @@ pub(super) struct States {
 struct RadarFace(States);
 
 pub fn plugin(app: &mut App) {
-    app.insert_resource(BarParts::load()).add_systems(
+    app.add_systems(
         Update,
         (
             build.before(HudSet).after(crate::sprites::choose_skin).run_if(in_state(crate::menu::Screen::Battle)),
-            (overlay, update_dial, update_sweep, radar_face, button_states, update_gauges, update_guns, head_art, pause_art, fleet_art, name_plate).after(HudSet),
+            (overlay, update_dial, update_sweep, radar_face, button_states, update_gauges, update_guns, head_art, bar_button_art, fleet_art, name_plate).after(HudSet),
         ),
     );
 }
@@ -162,8 +169,6 @@ pub(super) struct Ctx<'a> {
     pub(super) assets: &'a AssetServer,
     pub(super) hud: &'a HudData,
     pub(super) s: f32,
-    /// Bar parts leave their transparent right columns out of the layout (non-Navy sets tile exactly; Navy parts share an edge pixel).
-    pub(super) trim: bool,
 }
 impl Ctx<'_> {
     /// The idle sprite of a component in the player's art set.
@@ -204,25 +209,12 @@ impl Ctx<'_> {
     pub(super) fn size_of(&self, name: &str) -> Vec2 {
         size_of(self.hud, name).unwrap_or(Vec2::ZERO)
     }
-    /// Size of a bar part as laid out: with `trim`, less its transparent right columns.
-    fn bar_size(&self, name: &str) -> Vec2 {
-        meta(self.hud, name, IDLE).map_or(Vec2::ZERO, |m| if self.trim { Vec2::new(m.size.x - m.trim.right, m.size.y) } else { m.size })
-    }
-    /// How a bar part sits in its layout box (`bar_size`): the same box either way, the art placed by its trim.
-    fn bar_view(&self, art: &Sprite) -> View {
-        let size = if self.trim { Vec2::new(art.size.x - art.trim.right, art.size.y) } else { art.size };
-        art.view(Rect::from_corners(Vec2::ZERO, size), size)
-    }
     /// Absolutely positioned node at reference position `(x, y)`.
     pub(super) fn abs(&self, x: f32, y: f32, size: Vec2) -> Node {
-        Node { position_type: PositionType::Absolute, left: px(x, self.s), top: px(y, self.s), width: px(size.x, self.s), height: px(size.y, self.s), ..default() }
+        let snap = |at: f32, len: f32| (px(at, self.s), Val::Px(crate::panels::snap(at + len, self.s) - crate::panels::snap(at, self.s)));
+        let ((left, width), (top, height)) = (snap(x, size.x), snap(y, size.y));
+        Node { position_type: PositionType::Absolute, left, top, width, height, ..default() }
     }
-}
-
-enum Item {
-    Part(usize),
-    /// A strip of wooden tiles (sprite name) with the listed parts on top of it.
-    Wing(String, Vec<usize>),
 }
 
 /// (Re)builds the whole HUD tree.
@@ -230,7 +222,6 @@ fn build(
     mut commands: Commands,
     assets: Res<AssetServer>,
     hud: Res<HudData>,
-    bar: Res<BarParts>,
     lib: Res<Library>,
     window: Single<&Window, With<bevy::window::PrimaryWindow>>,
     fonts: Option<Res<crate::sprites::Fonts>>,
@@ -250,76 +241,39 @@ fn build(
         commands.entity(e).despawn();
     }
     let class = &lib.classes[player.class];
-    let has_wings = size_of(&hud, "MainBar_LeftStretchedDetail").is_some();
-    let c = Ctx { assets: &assets, hud: &hud, s, trim: !has_wings };
+    let c = Ctx { assets: &assets, hud: &hud, s };
     let solid = || (Interaction::None, FocusPolicy::Block, Solid);
 
     let root = commands
         .spawn((crate::Scenario, HudRoot, Node { position_type: PositionType::Absolute, width: Val::Percent(100.0), height: Val::Percent(100.0), ..default() }, GlobalZIndex(10)))
         .id();
 
-    // ---- main bar: a bottom-docked flex row of parts, each overlapping its neighbour by `overlap` --------------------------
-    let parts: Vec<usize> = (0..bar.0.len()).filter(|i| c.bar_size(&bar.0[*i].0).x > 0.0).collect();
-    // PROVISIONAL: which bottom rows retail shows is not measured per faction; Navy and Procyon art ends on the same row in every part.
-    let floor = parts.iter().map(|i| c.bar_size(&bar.0[*i].0).y).fold(f32::MAX, f32::min);
-    // Trimmed atlas edges still need a half-pixel overlap to hide bilinear edge blending at fractional scales.
-    let overlap = if has_wings { 1.0 } else { 0.5 };
-    let mut items: Vec<Item> = vec![];
-    for &i in &parts {
-        let strip = bar.0[i].1.as_ref().filter(|name| c.size_of(name).x > 1.0);
-        match (strip, items.last_mut()) {
-            (Some(name), Some(Item::Wing(n, members))) if n == name => members.push(i),
-            (Some(name), _) => items.push(Item::Wing(name.clone(), vec![i])),
-            (None, _) => items.push(Item::Part(i)),
-        }
-    }
-    let width = |item: &Item| match item {
-        Item::Part(i) => c.bar_size(&bar.0[*i].0).x,
-        Item::Wing(_, members) => members.iter().map(|i| c.bar_size(&bar.0[*i].0).x - overlap).sum::<f32>() + overlap,
-    };
-    let bar_w = items.iter().map(width).sum::<f32>() - overlap * (items.len() as f32 - 1.0);
+    // ---- main bar: the composed image bottom-docked and centred, the dynamic parts on their boxes ---------------------------
+    // PROVISIONAL: which bottom rows retail shows is not measured per faction; the composed bar ends on its shortest part.
+    let layout = BarLayout::load(hud.skin);
+    let (bar_w, floor) = (layout.size.x, layout.size.y);
     commands_window(&mut commands, &c, root, window.width() / s, bar_w, floor);
     if speed.is_some() {
         speed_plate(&mut commands, &c, fonts.as_deref(), root, (window.width() / s + bar_w) / 2.0);
     }
     {
-        let dock = commands
-            .spawn((
-                Node {
-                    position_type: PositionType::Absolute,
-                    left: Val::Px(0.0),
-                    right: Val::Px(0.0),
-                    bottom: Val::Px(0.0),
-                    height: px(floor, s),
-                    justify_content: JustifyContent::Center,
-                    ..default()
-                },
-                ChildOf(root),
-            ))
-            .id();
-        let row = commands.spawn((Node { flex_direction: FlexDirection::Row, align_items: AlignItems::FlexStart, ..default() }, ChildOf(dock))).id();
-        for (n, item) in items.iter().enumerate() {
-            let gap = if n == 0 { UiRect::DEFAULT } else { UiRect::left(px(-overlap, s)) };
-            match item {
-                Item::Part(i) => spawn_part(&mut commands, &c, class, row, &bar.0[*i].0, Node { margin: gap, ..default() }),
-                Item::Wing(strip, members) => {
-                    let w = width(item);
-                    let h = members.iter().map(|i| c.bar_size(&bar.0[*i].0).y).fold(0.0, f32::max);
-                    let wing = commands.spawn((Node { width: px(w, s), height: px(h, s), margin: gap, ..default() }, ChildOf(row))).id();
-                    let tile = c.size_of(strip);
-                    if let Some(art) = c.sprite(strip) {
-                        for k in 0..(w / (tile.x - 1.0)).ceil() as usize {
-                            commands.spawn((c.put(&art, k as f32 * (tile.x - 1.0), 0.0), ChildOf(wing)));
-                        }
-                    }
-                    let mut x = 0.0;
-                    for i in members {
-                        let node = Node { position_type: PositionType::Absolute, left: px(x, s), top: Val::Px(0.0), ..default() };
-                        spawn_part(&mut commands, &c, class, wing, &bar.0[*i].0, node);
-                        x += c.bar_size(&bar.0[*i].0).x - overlap;
-                    }
-                }
-            }
+        // Centred on a whole pixel: half a pixel of slack would blur the whole image.
+        let width = crate::panels::snap(bar_w, s);
+        let node = Node {
+            position_type: PositionType::Absolute,
+            left: Val::Px(((window.width() - width) / 2.0).floor()),
+            bottom: Val::Px(0.0),
+            width: Val::Px(width),
+            height: px(floor, s),
+            ..default()
+        };
+        let bar = commands.spawn((node, ChildOf(root))).id();
+        let mut art = ImageNode::new(assets.load(format!("{}.png", BarLayout::path(hud.skin))));
+        art.image_mode = NodeImageMode::Stretch;
+        let fill = Node { position_type: PositionType::Absolute, width: Val::Percent(100.0), height: Val::Percent(100.0), ..default() };
+        commands.spawn((art, fill, ChildOf(bar), solid(), Name::new("MainBar")));
+        for part in &layout.parts {
+            spawn_part(&mut commands, &c, class, bar, part, floor);
         }
     }
 
@@ -481,40 +435,48 @@ fn weapon_panel(commands: &mut Commands, c: &Ctx, root: Entity, class: &combat::
 }
 
 /// One bar part plus whatever sits on it: the ship icon on the ship frame, a fill on each status gauge.
-fn spawn_part(commands: &mut Commands, c: &Ctx, class: &combat::Class, parent: Entity, name: &str, mut node: Node) {
+/// The box of one bar part: clicks, hover and pressed art, and the anchor of what is drawn on the part (gauge fills, ship portrait).
+fn spawn_part(commands: &mut Commands, c: &Ctx, class: &combat::Class, parent: Entity, part: &BarPart, floor: f32) {
+    let name = part.sprite.as_str();
     let Some(art) = c.sprite(name) else { return };
-    let extra = node.margin;
-    let view = c.bar_view(&art);
-    view.place(&mut node, c.s, extra);
+    let size = Vec2::new(part.size.x, part.size.y.min(floor));
+    let node = c.abs(part.x, 0.0, size);
+    // Retail art without hover or pressed variants (the gauge troughs) is only a box.
+    let states = c.states(name).filter(|st| st.art[1].image != st.art[0].image || st.art[2].image != st.art[0].image);
+    let paused = (name == "MAINBAR_IS_NOT_PAUSED_BUTTON").then(|| c.states("MAINBAR_IS_PAUSED_BUTTON")).flatten();
     let mut img = art.image_node();
-    img.rect = view.rect;
-    let pause_art = (name == "MAINBAR_IS_NOT_PAUSED_BUTTON").then(|| c.sprite("MAINBAR_IS_PAUSED_BUTTON")).flatten();
-    let part = commands.spawn((img, node, ChildOf(parent), Solid, Interaction::None, FocusPolicy::Block)).id();
-    if name == "MainBar_PanicButton" {
-        commands.entity(part).insert(PanicButton);
+    img.color = Color::NONE;
+    let part_entity = commands.spawn((node, ChildOf(parent), Solid, Interaction::None, FocusPolicy::Block)).id();
+    if let Some(states) = states {
+        commands.entity(part_entity).insert((img, BarButton { states, paused, region: Rect::from_corners(Vec2::ZERO, size) }));
     }
-    if let Some(paused) = pause_art {
-        commands.entity(part).insert((PauseButton, PauseArt { running: art.clone(), paused, extra, s: c.s }));
+    if name == "MAINBAR_IS_NOT_PAUSED_BUTTON" {
+        commands.entity(part_entity).insert(PauseButton);
+    }
+    // The gauge offsets and the portrait are measured from where the part's art starts, not from its transparent margin.
+    let anchor = commands.spawn((Node { position_type: PositionType::Absolute, left: px(art.trim.left, c.s), top: px(art.trim.top, c.s), ..default() }, ChildOf(part_entity))).id();
+    if name == "MainBar_PanicButton" {
+        commands.entity(part_entity).insert(PanicButton);
     }
     if name == "MainBar_ShipIcon" {
-        commands.entity(part).insert(ShipIconButton);
+        commands.entity(part_entity).insert(ShipIconButton);
     }
     let fill = |commands: &mut Commands, sprite: &str, offset_name: &str, gauge: Gauge| {
         let Some(art) = c.sprite(sprite) else { return };
         let o = offset(c.hud, offset_name);
-        commands.spawn((Fill { gauge, art: art.clone(), top: o.y }, c.put(&art, o.x, o.y), ChildOf(part)));
+        commands.spawn((Fill { gauge, art: art.clone(), top: o.y }, c.put(&art, o.x, o.y), ChildOf(anchor)));
     };
     if name == "MainBar_FleetFormationsButton" {
-        commands.entity(part).insert(crate::panels::FleetButton::Commands);
+        commands.entity(part_entity).insert(crate::panels::FleetButton::Commands);
     }
     if name == "MainBar_BeginnerMovementTypeButton" {
-        commands.entity(part).insert(crate::panels::MovementButton);
+        commands.entity(part_entity).insert(crate::panels::MovementButton);
     }
     match name {
         "MainBar_ShipIcon" => {
             if let Some(icon) = c.sprite(&class.icon("ShipBar")) {
                 let o = offset(c.hud, "MainBar_ShipIcon_Offset_From_Background_TopLeft");
-                let portrait = commands.spawn((c.put(&icon, o.x, o.y), ChildOf(part))).id();
+                let portrait = commands.spawn((c.put(&icon, o.x, o.y), ChildOf(anchor))).id();
                 if let Some(status) = c.sprite("ShipStatus_Icon_Docking_Frame0") {
                     let at = offset(c.hud, "PRIMARY_SHIP_STATUS_ICON_OFFSET_FROM_PRIMARYSHIPICON_TOPLEFT");
                     commands.spawn((DockingStatus, c.put(&status, at.x, at.y), Visibility::Hidden, ChildOf(portrait)));
@@ -649,13 +611,23 @@ fn update_guns(
     }
 }
 
-/// PAUSE button art follows the simulation pause. PROVISIONAL: the retail hourglass art is swapped; any retail restrictions while
-/// paused are not decoded.
-fn pause_art(vtime: Res<Time<Virtual>>, mut q: Query<(&PauseArt, &mut ImageNode, &mut Node)>) {
-    let paused = vtime.is_paused();
-    for (button, mut img, mut node) in &mut q {
-        let want = if paused { &button.paused } else { &button.running };
-        want.show_with(&mut img, &mut node, button.s, button.extra);
+/// Bar buttons draw their hover and pressed art over the composed bar (PAUSE: the paused art, always, while the game is paused).
+/// PROVISIONAL: the retail hourglass art is swapped; any retail restrictions while paused are not decoded.
+fn bar_button_art(vtime: Res<Time<Virtual>>, mut q: Query<(&BarButton, &Interaction, &mut ImageNode, &mut Node)>) {
+    for (button, interaction, mut img, mut node) in &mut q {
+        let at = state_index(interaction);
+        let art = match (&button.paused, vtime.is_paused(), at) {
+            (Some(paused), true, _) => Some(&paused.art[at]),
+            (_, _, 0) => None,
+            _ => Some(&button.states.art[at]),
+        };
+        let color = if art.is_some() { Color::WHITE } else { Color::NONE };
+        if img.color != color {
+            img.color = color;
+        }
+        if let Some(art) = art {
+            art.show_region(&mut img, &mut node, button.states.s, button.region);
+        }
     }
 }
 
@@ -758,7 +730,7 @@ fn name_plate(
 ) {
     let Some(root) = roots.iter().next() else { return };
     let s = window.height() / REF_H;
-    let c = Ctx { assets: &assets, hud: &hud, s, trim: false };
+    let c = Ctx { assets: &assets, hud: &hud, s };
     let plate_live = plate.iter().any(|(_, p)| p.parent() == root);
     if !plate_live {
         // Name plate of a selected secondary ship (the HUD then hides the controls that only work on the command ship).
@@ -841,7 +813,7 @@ fn fleet_art(
     use crate::panels::{FleetButton as B, FleetWindow};
     let (Some(root), Some(anchor)) = (roots.iter().next(), anchor) else { return };
     let s = window.height() / REF_H;
-    let c = Ctx { assets: &assets, hud: &hud, s, trim: false };
+    let c = Ctx { assets: &assets, hud: &hud, s };
     let n = model.rows.len();
     if *built != Some((root, n)) {
         *built = Some((root, n));
@@ -926,6 +898,7 @@ fn fleet_art(
 mod tests {
     use super::*;
     use crate::assets_dir;
+    use crate::sprites::meta;
 
     #[test]
     fn iris_frames_run_closed_to_open() {
@@ -970,14 +943,23 @@ mod tests {
     }
 
     #[test]
-    fn pause_art_follows_the_pause() {
+    fn bar_buttons_draw_art_only_when_hovered_or_paused() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins).add_systems(Update, pause_art);
+        app.add_plugins(MinimalPlugins).add_systems(Update, bar_button_art);
         let art = |image: Handle<Image>, trim: f32| Sprite { image, size: Vec2::new(20.0, 20.0), trim: crate::sprites::Trim { left: trim, ..default() }, scale: 1.0 };
-        let running = art(bevy::asset::uuid_handle!("00000000-0000-0000-0000-000000000001"), 0.0);
-        let paused = art(bevy::asset::uuid_handle!("00000000-0000-0000-0000-000000000002"), 4.0);
+        let states = |a: &Sprite| States { art: [a.clone(), a.clone(), a.clone()], s: 1.0 };
+        let (idle, paused) =
+            (art(bevy::asset::uuid_handle!("00000000-0000-0000-0000-000000000001"), 0.0), art(bevy::asset::uuid_handle!("00000000-0000-0000-0000-000000000002"), 4.0));
         let node = Node { width: Val::Px(20.0), height: Val::Px(20.0), ..default() };
-        let button = app.world_mut().spawn((PauseArt { running: running.clone(), paused: paused.clone(), extra: UiRect::DEFAULT, s: 1.0 }, running.image_node(), node)).id();
+        let region = Rect::from_corners(Vec2::ZERO, Vec2::splat(20.0));
+        let button = app.world_mut().spawn((BarButton { states: states(&idle), paused: Some(states(&paused)), region }, Interaction::None, idle.image_node(), node)).id();
+        app.update();
+        // Idle and running: the composed bar shows the button, the node draws nothing.
+        assert_eq!(app.world().get::<ImageNode>(button).unwrap().color, Color::NONE);
+        *app.world_mut().get_mut::<Interaction>(button).unwrap() = Interaction::Hovered;
+        app.update();
+        assert_eq!(app.world().get::<ImageNode>(button).unwrap().color, Color::WHITE);
+        *app.world_mut().get_mut::<Interaction>(button).unwrap() = Interaction::None;
         app.world_mut().resource_mut::<Time<Virtual>>().pause();
         app.update();
         assert_eq!(app.world().get::<ImageNode>(button).unwrap().image, paused.image);
@@ -986,7 +968,7 @@ mod tests {
         assert_eq!((node.width, node.margin.left), (Val::Px(16.0), Val::Px(4.0)));
         app.world_mut().resource_mut::<Time<Virtual>>().unpause();
         app.update();
-        assert_eq!(app.world().get::<ImageNode>(button).unwrap().image, running.image);
+        assert_eq!(app.world().get::<ImageNode>(button).unwrap().color, Color::NONE);
     }
 
     #[test]
@@ -1009,8 +991,8 @@ mod tests {
         let comps: std::sync::Arc<serde_json::Value> = crate::data::read_json(&assets_dir().join("hud/hud.json")).into();
         for skin in ["Navy", "Pirate", "Procyon"] {
             let data = HudData { comps: comps.clone(), skin };
-            for (part, _) in BarParts::load().0 {
-                assert!(size_of(&data, &part).is_some(), "{skin} lacks {part}");
+            for part in BarLayout::load(skin).parts {
+                assert!(size_of(&data, &part.sprite).is_some(), "{skin} lacks {}", part.sprite);
             }
         }
     }
