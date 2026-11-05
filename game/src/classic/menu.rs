@@ -19,7 +19,7 @@ use crate::menu::{
 use crate::sprites::{BODY_FONT, Fonts, HudData};
 
 use super::widgets::{
-    Ctx, GOLD, Rest, arrow, canvas, cell, disabled, dropdown, fleet_bar, full_screen, heading, info_panel, list_row, pad, picked, piece, piece_flipped, pulldown_cell, radio,
+    Ctx, GOLD, Rest, arrow, canvas, cell, disabled, dropdown, fleet_bar, full_screen, heading, info_panel, list_row_cost, pad, picked, piece, piece_flipped, pulldown_cell, radio,
     scrollbar, selected_tab, size_of, slider, stretched_window, victory_points, wheel_step, wrapped,
 };
 
@@ -841,9 +841,13 @@ fn ship_name_field(ctx: &Ctx, c: &mut ChildSpawnerCommands, sk: &Skirmish, lib: 
 fn ship_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, _rect: [f32; 4], sk: &Skirmish, lib: &Library, strings: &Value) {
     ctx.text(c, "UniversBold14", &text_of(strings, "IDGS_TPFRONTENDTEXT01_AVAILABLE_SHIPS"), 505.0, 215.0, 311.0, true, Color::WHITE);
     let list = sk.human().map(|h| offered(lib, h.race)).unwrap_or_default();
+    let left = sk.points_left(lib);
     for (row, &ci) in list.iter().enumerate().skip(sk.scroll).take(SHIP_ROWS) {
         let y = 338.0 + (row - sk.scroll) as f32 * 19.0;
-        list_row(ctx, c, [505.0, y, 215.0, 19.0], &class_name(lib, ci, strings), sk.ship_chosen && row == sk.ship_pick, Action::PickShip(row));
+        // Point cost right-aligned; hulls the points left cannot pay for are dimmed (retail shows neither: PROVISIONAL).
+        let cost = lib.classes[ci].points;
+        let grey = i64::from(cost) > left;
+        list_row_cost(ctx, c, [505.0, y, 215.0, 19.0], &class_name(lib, ci, strings), Some(&cost.to_string()), sk.ship_chosen && row == sk.ship_pick, grey, Action::PickShip(row));
     }
     scrollbar(ctx, c, [735.0, 330.0, 759.0, 497.0], ScrollKind::Ships, list.len(), SHIP_ROWS, sk.scroll);
 }
@@ -877,6 +881,10 @@ fn ship_info(ctx: &Ctx, c: &mut ChildSpawnerCommands, _rect: [f32; 4], sk: &Skir
     ];
     let cost = [s("IDGS_TPFRONTENDTEXT02_POINT_COST01"), s("IDGS_TPFRONTENDTEXT02_POINT_COST02")];
     info_panel(ctx, c, &class_name(lib, ci, strings), lib.classes[ci].icon.as_deref(), Some(st.points), &rows, cost.each_ref().map(String::as_str));
+    // A refused Add (PROVISIONAL: retail only greys the button) says why under the stats.
+    if let Some(e) = sk.error {
+        ctx.text(c, BODY_FONT, strings[e].as_str().unwrap_or(e), 496.0, 270.0, 292.0, true, Color::srgb(1.0, 0.4, 0.3));
+    }
 }
 
 /// Mouse wheel scrolls the Ship Types Available list.
