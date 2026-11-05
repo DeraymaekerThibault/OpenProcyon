@@ -8,6 +8,7 @@ use bevy::ui::{FocusPolicy, RelativeCursorPosition};
 
 use crate::menu::{ArrowButton, ListEntry, RunButtons, SLIDER_KNOB, SLOT_BAR, ScrollKind, ScrollTrack, SliderTrack, menu_active};
 use crate::sprites::{BODY_FONT, Fonts, HudData, IDLE, MENU_SKIN, meta_in, slice, sprite_in};
+use crate::theme::Theme;
 
 /// Retail gold for highlighted labels (the `Center Justify Label` title colour).
 pub(super) const GOLD: Color = Color::srgb(1.0, 0.796, 0.0);
@@ -113,6 +114,7 @@ pub(super) struct Ctx<'a> {
     pub(super) hud: &'a HudData,
     pub(super) fonts: &'a Fonts,
     pub(super) scale: f32,
+    pub(super) theme: &'a Theme,
     /// Reference px of window beyond the canvas on each side (zero at 4:3): where backdrops reach past it.
     pub(super) pad: Vec2,
 }
@@ -221,6 +223,82 @@ impl Ctx<'_> {
             None => disabled(self, c, rect, label, font),
         }
     }
+}
+
+/// The kinds of drawn panel (`panel`), looks from `data/hud/theme.json`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) enum PanelKind {
+    /// Big translucent gold-rimmed rounded panel.
+    Outer,
+    /// Dark list / information box with a teal hairline.
+    Inner,
+    /// The lighter strip along the bottom of a list box (flat, no rim).
+    Band,
+}
+
+/// Physical-px geometry of a panel: `(left, top, width, height, border, radius)`, every edge on a whole pixel so the rim stays crisp
+/// at fractional scales (the right and bottom edges are rounded, so abutting panels share them).
+pub(super) fn panel_geometry([l, t, r, b]: [f32; 4], kind: PanelKind, theme: &Theme, scale: f32) -> [f32; 6] {
+    use crate::panels::snap;
+    let (border, radius) = match kind {
+        PanelKind::Outer => (theme.rim_width, theme.panel_radius),
+        PanelKind::Inner => (theme.edge_width, theme.box_radius),
+        PanelKind::Band => (0.0, 0.0),
+    };
+    let border = if border > 0.0 { snap(border, scale).max(1.0) } else { 0.0 };
+    [snap(l, scale), snap(t, scale), snap(r, scale) - snap(l, scale), snap(b, scale) - snap(t, scale), border, snap(radius, scale)]
+}
+
+/// A drawn panel over the retail rect `[l, t, r, b]` (reference units): rounded corners, a gold bevelled rim or teal hairline, a gradient
+/// fill and a soft shadow, all UI node features (no art). Returns the node so a caller can parent content to it.
+pub(super) fn panel(ctx: &Ctx, c: &mut ChildSpawnerCommands, rect: [f32; 4], kind: PanelKind) -> Entity {
+    let theme = ctx.theme;
+    let [left, top, width, height, border, radius] = panel_geometry(rect, kind, theme, ctx.scale);
+    let node = Node {
+        position_type: PositionType::Absolute,
+        left: Val::Px(left),
+        top: Val::Px(top),
+        width: Val::Px(width),
+        height: Val::Px(height),
+        border: UiRect::all(Val::Px(border)),
+        border_radius: BorderRadius::all(Val::Px(radius)),
+        ..default()
+    };
+    let shade = |k: f32| {
+        let s = theme.panel_fill.to_srgba();
+        Color::srgba((s.red * k).min(1.0), (s.green * k).min(1.0), (s.blue * k).min(1.0), s.alpha)
+    };
+    match kind {
+        PanelKind::Outer => c
+            .spawn((
+                node,
+                BackgroundGradient::from(LinearGradient::to_bottom(vec![ColorStop::new(shade(1.25), Val::Percent(0.0)), ColorStop::new(shade(0.85), Val::Percent(100.0))])),
+                BorderColor { top: theme.rim_light, left: theme.rim_light, right: theme.rim, bottom: theme.rim },
+                BoxShadow::new(
+                    Color::BLACK.with_alpha(theme.shadow_alpha),
+                    Val::Px(0.0),
+                    Val::Px((2.0 * ctx.scale).round()),
+                    Val::Px(0.0),
+                    Val::Px((theme.shadow_blur * ctx.scale).round()),
+                ),
+            ))
+            .id(),
+        PanelKind::Inner => c.spawn((node, BackgroundColor(theme.box_fill), BorderColor::all(theme.edge))).id(),
+        PanelKind::Band => c.spawn((node, BackgroundColor(theme.band_fill))).id(),
+    }
+}
+
+/// The scenery and panels of the Ships, Crew and Arms screens: `menu/gamelobby.png` (the scene without the panels) over the whole
+/// window, then the engine-drawn panels at the rects measured on the retail `menu/shipscreen.png` (PROVISIONAL, 800x600 part): the
+/// fleet list panel, the ship information panel, the slot bar panel, the list box with its band and the information box.
+pub(super) fn ship_screen_backdrop(ctx: &Ctx, c: &mut ChildSpawnerCommands) {
+    ctx.backdrop(c, "menu/gamelobby.png");
+    for rect in [[23.0, 38.0, 459.0, 471.0], [482.0, 38.0, 776.0, 506.0], [25.0, 477.0, 459.0, 560.0]] {
+        panel(ctx, c, rect, PanelKind::Outer);
+    }
+    panel(ctx, c, [44.0, 89.0, 440.0, 425.0], PanelKind::Inner);
+    panel(ctx, c, [46.0, 375.0, 438.0, 423.0], PanelKind::Band);
+    panel(ctx, c, [492.0, 117.0, 768.0, 283.0], PanelKind::Inner);
 }
 
 /// One retail sprite stretched over a box (reference units).
@@ -519,6 +597,25 @@ mod tests {
         assert_eq!(pad(&window, scale), Vec2::new((2560.0 / 1.8 - 800.0) / 2.0, 0.0));
         window.resolution.set(1600.0, 1200.0);
         assert_eq!(pad(&window, canvas(&window).1), Vec2::ZERO);
+    }
+
+    #[test]
+    fn panel_edges_land_on_whole_physical_pixels() {
+        let theme = Theme::default();
+        for scale in [1.0, 1.125, 1.8, 2.4] {
+            for kind in [PanelKind::Outer, PanelKind::Inner, PanelKind::Band] {
+                let g = panel_geometry([23.3, 38.7, 459.4, 471.1], kind, &theme, scale);
+                assert!(g.iter().all(|v| v.fract() == 0.0), "{kind:?} at {scale}: {g:?}");
+            }
+        }
+        // 1080p canvas scale 1.8: the 3 px rim is 5 physical px, the box hairline 4, a band has no border.
+        assert_eq!(panel_geometry([0.0, 0.0, 10.0, 10.0], PanelKind::Outer, &theme, 1.8)[4], 5.0);
+        assert_eq!(panel_geometry([0.0, 0.0, 10.0, 10.0], PanelKind::Inner, &theme, 1.8)[4], 4.0);
+        assert_eq!(panel_geometry([0.0, 0.0, 10.0, 10.0], PanelKind::Band, &theme, 1.8)[4], 0.0);
+        // Abutting panels share an edge: widths sum to the span.
+        let a = panel_geometry([0.0, 0.0, 10.5, 10.0], PanelKind::Band, &theme, 1.125);
+        let b = panel_geometry([10.5, 0.0, 20.0, 10.0], PanelKind::Band, &theme, 1.125);
+        assert_eq!(a[0] + a[2], b[0]);
     }
 
     #[test]

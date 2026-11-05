@@ -7,5 +7,6 @@ Files that ship with the code. Everything here must be our own work or carry a l
 |---|---|---|
 | `fonts/Chancery.otf` | heading font (stands in for the retail BlackChancery bitmap font) | URW Z003, URW base35 fonts, AGPL-3.0 with font exception |
 | `fonts/Sans.otf`, `fonts/SansBold.otf` | body font (stands in for Univers/Immi) | URW Nimbus Sans, URW base35 fonts, AGPL-3.0 with font exception |
+| `data/hud/theme.json` | front-end chrome palette and geometry (panels) | hand-written for this project (PROVISIONAL numbers) |
 | `data/hud/bar.json` | in-game command bar part order and backdrops | hand-written for this project (PROVISIONAL order) |
 | `voice/events.json` | crew voice event → retail dialogue file names | event grouping derived from the community CL ModPack's voice-line folder layout (names only, no audio); the audio is copied from the player's own install at import |

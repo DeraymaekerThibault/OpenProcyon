@@ -86,7 +86,7 @@ fn build(
     };
     let els: Vec<Value> = crate::data::try_json(&assets_dir().join(format!("menu/{file}.json"))).and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default();
     let (canvas, scale) = canvas(&window);
-    let ctx = Ctx { assets: &assets, hud: &hud, fonts: &fonts, scale, pad: pad(&window, scale) };
+    let ctx = Ctx { assets: &assets, hud: &hud, fonts: &fonts, scale, theme: crate::theme::Theme::current(), pad: pad(&window, scale) };
     commands
         .spawn((
             MenuRoot,
@@ -285,7 +285,7 @@ fn element(ctx: &Ctx, c: &mut ChildSpawnerCommands, m: &MenuModel, e: &Value, st
             None
         }
         (Screen::Fleet, "Assemble Fleet Backdrop") => {
-            ctx.backdrop(c, "menu/shipscreen.png");
+            super::widgets::ship_screen_backdrop(ctx, c);
             None
         }
         (Screen::Fleet, "Ship Types Available") => {
