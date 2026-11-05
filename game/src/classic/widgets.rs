@@ -38,11 +38,14 @@ enum Family {
     Pulldown,
 }
 
-/// A control drawn from `theme.json`: its family, and whether its resting state is the selected one.
+/// A control drawn from `theme.json`: its family, whether its resting state is the selected one, the node whose fill follows the cursor
+/// and whether that fill is a sphere (round buttons) rather than a vertical gradient.
 #[derive(Component, Clone, Copy)]
 struct Drawn {
     family: Family,
     selected: bool,
+    fill: Entity,
+    round: bool,
 }
 
 /// The state a drawn control shows: the cursor's wins, else selected or idle.
@@ -62,26 +65,26 @@ fn looks(theme: &Theme, family: Family) -> &Looks {
     }
 }
 
-fn gradient(look: &Look) -> BackgroundGradient {
-    let [top, mid, bottom] = look.fill;
-    BackgroundGradient::from(LinearGradient::to_bottom(vec![
-        ColorStop::new(top, Val::Percent(0.0)),
-        ColorStop::new(mid, Val::Percent(50.0)),
-        ColorStop::new(bottom, Val::Percent(100.0)),
-    ]))
-}
-
-fn rim(look: &Look) -> BorderColor {
-    BorderColor { top: look.rim[0], left: look.rim[0], right: look.rim[1], bottom: look.rim[1] }
+/// The fill of a drawn control in one state: five vertical stops, or for a sphere a radial highlight at the upper left (the lit peak
+/// fading to the dark body).
+fn gradient(look: &Look, round: bool) -> BackgroundGradient {
+    if round {
+        let stops = vec![ColorStop::new(look.fill[1], Val::Percent(0.0)), ColorStop::new(look.fill[2], Val::Percent(100.0))];
+        let at = UiPosition::new(Vec2::new(-0.2, -0.25), Val::Px(0.0), Val::Px(0.0));
+        return BackgroundGradient(vec![Gradient::Radial(RadialGradient::new(at, RadialGradientShape::FarthestCorner, stops))]);
+    }
+    let at = [0.0, 20.0, 72.0, 92.0, 100.0];
+    BackgroundGradient::from(LinearGradient::to_bottom(look.fill.iter().zip(at).map(|(c, p)| ColorStop::new(*c, Val::Percent(p))).collect()))
 }
 
 /// Restyle drawn buttons and pull-downs when the cursor enters, presses or leaves them.
-fn hover_drawn(mut q: Query<(&Interaction, &Drawn, &mut BackgroundGradient, &mut BorderColor), Changed<Interaction>>) {
+fn hover_drawn(q: Query<(&Interaction, &Drawn), Changed<Interaction>>, mut fills: Query<&mut BackgroundGradient>) {
     let theme = Theme::current();
-    for (i, drawn, mut fill, mut border) in &mut q {
+    for (i, drawn) in &q {
         let look = looks(theme, drawn.family).get(state_of(*i, drawn.selected));
-        *fill = gradient(look);
-        *border = rim(look);
+        if let Ok(mut fill) = fills.get_mut(drawn.fill) {
+            *fill = gradient(look, drawn.round);
+        }
     }
 }
 
@@ -90,7 +93,7 @@ fn hover_drawn(mut q: Query<(&Interaction, &Drawn, &mut BackgroundGradient, &mut
 pub(super) struct Rest(pub(super) Color);
 
 pub fn plugin(app: &mut App) {
-    app.add_systems(Update, (hover, hover_drawn, hover_knob).after(RunButtons).run_if(menu_active)).add_systems(Update, fit_cover.after(crate::menu::BuildMenu));
+    app.add_systems(Update, (hover, hover_drawn).after(RunButtons).run_if(menu_active)).add_systems(Update, fit_cover.after(crate::menu::BuildMenu));
 }
 
 /// A backdrop picture that covers its frame: scaled up (never distorted) until both sides are filled, centre-cropped. The picture's
@@ -239,32 +242,37 @@ impl Ctx<'_> {
             c.spawn((f.text(s, self.scale, tint), TextLayout::no_wrap(), Node { flex_shrink: 0.0, ..default() }));
         });
     }
-    /// A drawn text button over `[l, t, r, b]`: a pill with a gold rim and a gradient fill that follows the cursor (theme.json `button`).
+    /// A drawn text button over `[l, t, r, b]`: a pill in a gold tube rim whose fill follows the cursor (theme.json `button`).
     pub(super) fn text_button(&self, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], label: &str, font: &str, action: impl Bundle) {
         let (w, h) = (r - l, b - t);
-        let inset = self.theme.button.rim_width;
-        let mut root = c.spawn((Interaction::None, action, Drawn { family: Family::Button, selected: false }, self.drawn(Family::Button, State::Idle, [l, t, w, h])));
-        // Children sit inside the rim, so the label is shifted back by its width to stay centred on the whole pill.
-        root.with_children(|c| self.text(c, font, label, -inset, w, h / 2.0 - inset, true, Color::WHITE));
+        let (root, fill) = self.pill(c, Family::Button, State::Idle, [l, t, w, h], false);
+        let mut cmds = c.commands();
+        // Children sit inside the outline, so the label is shifted back by its width to stay centred on the whole pill.
+        cmds.entity(root)
+            .insert((Interaction::None, action, Drawn { family: Family::Button, selected: false, fill, round: false }))
+            .with_children(|c| self.text(c, font, label, -1.0, w, h / 2.0 - 1.0, true, Color::WHITE));
     }
     /// The idle pill of a text button over `[x, y, w, h]` (no label, not clickable).
     pub(super) fn button_art(&self, c: &mut ChildSpawnerCommands, rect: [f32; 4]) -> Entity {
-        c.spawn(self.drawn(Family::Button, State::Idle, rect)).id()
+        self.pill(c, Family::Button, State::Idle, rect, false).0
     }
-    /// The node, rim, fill and shadow of a drawn control in `state` over `[x, y, w, h]` (reference units, edges snapped to whole pixels):
-    /// a button is a pill, a pull-down a rounded box.
-    fn drawn(&self, family: Family, state: State, [x, y, w, h]: [f32; 4]) -> impl Bundle {
+    /// A pill (or, `round`, a sphere) over `[x, y, w, h]` in a gold tube rim: `(root, fill node)`. A pull-down is one flat node.
+    fn pill(&self, c: &mut ChildSpawnerCommands, family: Family, state: State, [x, y, w, h]: [f32; 4], round: bool) -> (Entity, Entity) {
         let looks = looks(self.theme, family);
         let look = looks.get(state);
         let [left, top, width, height, ..] = panel_geometry([x, y, x + w, y + h], PanelKind::Band, self.theme, self.scale);
-        let border = crate::panels::snap(looks.rim_width, self.scale).max(1.0).min(height / 2.0);
-        let radius = if family == Family::Button { width.min(height) / 2.0 } else { crate::panels::snap(6.0, self.scale).min(height / 2.0) };
-        (
-            Node { border: UiRect::all(Val::Px(border)), border_radius: BorderRadius::all(Val::Px(radius)), ..bare(left, top, width, height) },
-            gradient(look),
-            rim(look),
-            BoxShadow::new(Color::BLACK.with_alpha(0.35), Val::Px(0.0), Val::Px(self.scale.round()), Val::Px(0.0), Val::Px((3.0 * self.scale).round())),
-        )
+        if family == Family::Pulldown {
+            let radius = crate::panels::snap(6.0, self.scale).min(height / 2.0);
+            let node = Node { border_radius: BorderRadius::all(Val::Px(radius)), ..bare(left, top, width, height) };
+            let mut root = c.spawn((node, gradient(look, false)));
+            let id = root.id();
+            root.with_children(|c| edges(c, radius, [true, false, true, false], crate::panels::snap(6.0, self.scale), look.rim[0]));
+            return (id, id);
+        }
+        let grey = (state == State::Disabled).then_some(look.rim);
+        tube(self, c, [left, top, width, height], width.min(height) / 2.0, looks.rim_width, grey, true, |c, radius, _| {
+            c.spawn((Node { border_radius: BorderRadius::all(Val::Px(radius)), ..fill_box() }, gradient(look, round))).id()
+        })
     }
     /// A text button when it has an action, else its greyed-out retail art.
     pub(super) fn button(&self, c: &mut ChildSpawnerCommands, rect: [f32; 4], label: &str, font: &str, action: Option<impl Bundle>) {
@@ -278,27 +286,30 @@ impl Ctx<'_> {
 /// The kinds of drawn panel (`panel`), looks from `data/hud/theme.json`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) enum PanelKind {
-    /// Big translucent gold-rimmed rounded panel.
+    /// Big translucent panel in a gold tube rim, recessed along its inside edge.
     Outer,
-    /// Dark list / information box with a teal hairline.
+    /// Dark list / information box with an inside shadow and a soft teal glow along its edge.
     Inner,
     /// The lighter strip along the bottom of a list box (flat, no rim).
     Band,
-    /// A framed window: translucent fill, teal rim, soft teal glow.
+    /// A framed window: translucent fill, soft teal glow outside, no hard rim.
     Window,
-    /// A small bevelled frame: a fleet slot, the ship icon, a stat bar.
+    /// A small frame in a gold tube rim: a fleet slot, the ship icon.
     Slot,
+    /// A thinner such frame for the stat bars.
+    Stat,
 }
 
 /// Physical-px geometry of a panel: `(left, top, width, height, border, radius)`, every edge on a whole pixel so the rim stays crisp
-/// at fractional scales (the right and bottom edges are rounded, so abutting panels share them).
+/// at fractional scales (the right and bottom edges are rounded, so abutting panels share them). `border` is the single line of a
+/// box or window; the tube rims of `Outer`, `Slot` and `Stat` are built from `tube_layers`.
 pub(super) fn panel_geometry([l, t, r, b]: [f32; 4], kind: PanelKind, theme: &Theme, scale: f32) -> [f32; 6] {
     use crate::panels::snap;
     let (border, radius) = match kind {
         PanelKind::Outer => (theme.rim_width, theme.panel_radius),
         PanelKind::Inner => (theme.edge_width, theme.box_radius),
         PanelKind::Band => (0.0, 0.0),
-        PanelKind::Slot => (theme.edge_width, theme.slot_radius),
+        PanelKind::Slot | PanelKind::Stat => (0.0, theme.slot_radius),
         PanelKind::Window => (theme.edge_width, theme.box_radius),
     };
     let border = if border > 0.0 { snap(border, scale).max(1.0) } else { 0.0 };
@@ -306,50 +317,154 @@ pub(super) fn panel_geometry([l, t, r, b]: [f32; 4], kind: PanelKind, theme: &Th
     [snap(l, scale), snap(t, scale), w, h, border, snap(radius, scale).min(w.min(h) / 2.0).floor()]
 }
 
-/// A drawn panel over the retail rect `[l, t, r, b]` (reference units): rounded corners, a gold bevelled rim or teal hairline, a gradient
-/// fill and a soft shadow, all UI node features (no art). Returns the node so a caller can parent content to it.
+/// One layer of a tube rim: its width in whole physical px and its colours.
+struct Layer {
+    w: f32,
+    colour: BorderColor,
+}
+
+/// The layers of a tube rim, outside in: a dark outline (1 reference px), the gold (`gold` px; its middle line is a bright core) and a
+/// dark keyline (1). Widths are the differences of the snapped running total, so the whole rim is as thick as `gold + 2` snapped and
+/// every layer is at least one whole pixel. `grey` replaces the gold of a disabled control (top, other sides).
+fn tube_layers(theme: &Theme, gold: f32, scale: f32, grey: Option<[Color; 2]>) -> Vec<Layer> {
+    let side = match grey {
+        Some([top, rest]) => BorderColor { top, left: rest, right: rest, bottom: rest },
+        None => BorderColor { top: theme.rim_light, left: theme.rim, right: theme.rim, bottom: theme.rim },
+    };
+    let core = match grey {
+        Some([top, _]) => BorderColor::all(top),
+        None => BorderColor { top: theme.rim_core, left: theme.rim_light, right: theme.rim_light, bottom: theme.rim_light },
+    };
+    let mut parts = vec![(1.0, BorderColor::all(theme.rim_outline))];
+    if gold >= 2.0 {
+        parts.push((1.0, side));
+    }
+    parts.push((1.0, core));
+    if gold >= 3.0 {
+        parts.push((gold - 2.0, side));
+    }
+    parts.push((1.0, BorderColor::all(theme.rim_keyline)));
+    let (mut total, mut drawn) = (0.0, 0.0);
+    parts
+        .into_iter()
+        .map(|(w, colour)| {
+            total += w;
+            let px = (crate::panels::snap(total, scale) - drawn).max(1.0);
+            drawn += px;
+            Layer { w: px, colour }
+        })
+        .collect()
+}
+
+/// A fill node covering its parent's whole padding box.
+fn fill_box() -> Node {
+    Node { position_type: PositionType::Absolute, left: Val::Px(0.0), top: Val::Px(0.0), width: Val::Percent(100.0), height: Val::Percent(100.0), ..default() }
+}
+
+/// Nest the remaining `layers` (each a bordered node filling the one outside it), then let `inner` draw the content box; returns what
+/// `inner` returned.
+fn nest(c: &mut ChildSpawnerCommands, layers: &[Layer], radius: f32, size: Vec2, inner: &mut dyn FnMut(&mut ChildSpawnerCommands, f32, Vec2) -> Entity) -> Entity {
+    let Some((layer, rest)) = layers.split_first() else { return inner(c, radius.max(0.0), size) };
+    let node = Node { border: UiRect::all(Val::Px(layer.w)), border_radius: BorderRadius::all(Val::Px(radius.max(0.0))), ..fill_box() };
+    let mut found = Entity::PLACEHOLDER;
+    c.spawn((node, layer.colour)).with_children(|c| found = nest(c, rest, radius - layer.w, size - Vec2::splat(2.0 * layer.w), inner));
+    found
+}
+
+/// A shape over physical `[left, top, width, height]` in a gold tube rim (see `tube_layers`) with a hard dark band under its bottom edge
+/// and a soft shadow; `inner` draws the content box (given its corner radius and size in physical px) and returns its fill node.
+/// Returns `(root, fill)`.
+fn tube(
+    ctx: &Ctx,
+    c: &mut ChildSpawnerCommands,
+    [left, top, width, height]: [f32; 4],
+    radius: f32,
+    gold: f32,
+    grey: Option<[Color; 2]>,
+    soft: bool,
+    mut inner: impl FnMut(&mut ChildSpawnerCommands, f32, Vec2) -> Entity,
+) -> (Entity, Entity) {
+    let theme = ctx.theme;
+    let layers = tube_layers(theme, gold, ctx.scale, grey);
+    let band =
+        ShadowStyle { color: theme.rim_shadow, x_offset: Val::Px(0.0), y_offset: Val::Px((2.0 * ctx.scale).round()), spread_radius: Val::Px(0.0), blur_radius: Val::Px(0.0) };
+    let mut shadow = vec![band];
+    if soft {
+        shadow.push(ShadowStyle {
+            color: Color::BLACK.with_alpha(theme.shadow_alpha),
+            x_offset: Val::Px(0.0),
+            y_offset: Val::Px((2.0 * ctx.scale).round()),
+            spread_radius: Val::Px(0.0),
+            blur_radius: Val::Px((theme.shadow_blur * ctx.scale).round()),
+        });
+    }
+    let first = &layers[0];
+    let node = Node { border: UiRect::all(Val::Px(first.w)), border_radius: BorderRadius::all(Val::Px(radius)), ..bare(left, top, width, height) };
+    let mut root = c.spawn((node, first.colour, BoxShadow(shadow)));
+    let id = root.id();
+    let mut fill = Entity::PLACEHOLDER;
+    root.with_children(|c| fill = nest(c, &layers[1..], radius - first.w, Vec2::new(width, height) - Vec2::splat(2.0 * first.w), &mut inner));
+    (id, fill)
+}
+
+/// A node over its parent's padding box shading `sides` (top, right, bottom, left) from `colour` fading out over `size` physical px:
+/// an inside shadow or glow. One gradient per side stacked on a single node.
+fn edges(c: &mut ChildSpawnerCommands, radius: f32, sides: [bool; 4], size: f32, colour: Color) {
+    let stops = || vec![ColorStop::new(colour, Val::Px(0.0)), ColorStop::new(colour.with_alpha(0.0), Val::Px(size))];
+    let angles = [LinearGradient::TO_BOTTOM, LinearGradient::TO_LEFT, LinearGradient::TO_TOP, LinearGradient::TO_RIGHT];
+    let all = sides.iter().zip(angles).filter(|(on, _)| **on).map(|(_, a)| Gradient::Linear(LinearGradient::new(a, stops()))).collect();
+    c.spawn((Node { border_radius: BorderRadius::all(Val::Px(radius)), ..fill_box() }, BackgroundGradient(all)));
+}
+
+/// A drawn panel over the retail rect `[l, t, r, b]` (reference units), all UI node features (no art): `Outer`, `Slot` and `Stat` in a
+/// gold tube rim with a recessed fill, `Inner` a dark box with an inside shadow and teal glow, `Window` a translucent glow-edged
+/// window, `Band` a flat strip. Returns the root node.
 pub(super) fn panel(ctx: &Ctx, c: &mut ChildSpawnerCommands, rect: [f32; 4], kind: PanelKind) -> Entity {
     let theme = ctx.theme;
-    let [left, top, width, height, border, radius] = panel_geometry(rect, kind, theme, ctx.scale);
-    let node = Node {
-        position_type: PositionType::Absolute,
-        left: Val::Px(left),
-        top: Val::Px(top),
-        width: Val::Px(width),
-        height: Val::Px(height),
-        border: UiRect::all(Val::Px(border)),
-        border_radius: BorderRadius::all(Val::Px(radius)),
-        ..default()
-    };
+    let scale = ctx.scale;
+    let [left, top, width, height, border, radius] = panel_geometry(rect, kind, theme, scale);
+    let snap = |v: f32| crate::panels::snap(v, scale);
+    let node = Node { border: UiRect::all(Val::Px(border)), border_radius: BorderRadius::all(Val::Px(radius)), ..bare(left, top, width, height) };
     let shade = |k: f32| {
         let s = theme.panel_fill.to_srgba();
         Color::srgba((s.red * k).min(1.0), (s.green * k).min(1.0), (s.blue * k).min(1.0), s.alpha)
     };
     match kind {
-        PanelKind::Outer => c
-            .spawn((
-                node,
-                BackgroundGradient::from(LinearGradient::to_bottom(vec![ColorStop::new(shade(1.25), Val::Percent(0.0)), ColorStop::new(shade(0.85), Val::Percent(100.0))])),
-                BorderColor { top: theme.rim_light, left: theme.rim_light, right: theme.rim, bottom: theme.rim },
-                BoxShadow::new(
-                    Color::BLACK.with_alpha(theme.shadow_alpha),
-                    Val::Px(0.0),
-                    Val::Px((2.0 * ctx.scale).round()),
-                    Val::Px(0.0),
-                    Val::Px((theme.shadow_blur * ctx.scale).round()),
-                ),
-            ))
-            .id(),
-        PanelKind::Inner => c.spawn((node, BackgroundColor(theme.box_fill), BorderColor::all(theme.edge))).id(),
+        PanelKind::Outer => {
+            let fill = LinearGradient::to_bottom(vec![ColorStop::new(shade(1.2), Val::Percent(0.0)), ColorStop::new(shade(0.85), Val::Percent(100.0))]);
+            tube(ctx, c, [left, top, width, height], radius, theme.rim_width, None, true, |c, r, _| {
+                let mut e = c.spawn((Node { border_radius: BorderRadius::all(Val::Px(r)), ..fill_box() }, BackgroundGradient::from(fill.clone())));
+                e.with_children(|c| edges(c, r, [true; 4], snap(theme.inset_size), theme.inset_shadow));
+                e.id()
+            })
+            .0
+        }
+        PanelKind::Slot | PanelKind::Stat => {
+            let gold = if kind == PanelKind::Stat { 1.0 } else { 2.0 };
+            tube(ctx, c, [left, top, width, height], radius, gold, None, false, |c, r, _| {
+                let mut e = c.spawn((Node { border_radius: BorderRadius::all(Val::Px(r)), ..fill_box() }, BackgroundColor(theme.box_fill)));
+                e.with_children(|c| edges(c, r, [true; 4], snap(theme.box_inset_size), theme.inset_shadow));
+                e.id()
+            })
+            .0
+        }
+        PanelKind::Inner => {
+            let mut e = c.spawn((node, BackgroundColor(theme.box_fill), BorderColor::all(theme.edge)));
+            let inner = (radius - border).max(0.0);
+            e.with_children(|c| {
+                edges(c, inner, [true; 4], snap(theme.box_inset_size), theme.inset_shadow);
+                edges(c, inner, [true; 4], snap(theme.glow_size), theme.glow);
+            });
+            e.id()
+        }
         PanelKind::Window => c
             .spawn((
                 node,
                 BackgroundColor(theme.window_fill),
-                BorderColor::all(theme.window_rim),
-                BoxShadow::new(theme.window_rim.with_alpha(0.3), Val::Px(0.0), Val::Px(0.0), Val::Px(ctx.scale.round()), Val::Px((6.0 * ctx.scale).round())),
+                BorderColor::all(theme.window_rim.with_alpha(0.5)),
+                BoxShadow::new(theme.window_rim.with_alpha(0.55), Val::Px(0.0), Val::Px(0.0), Val::Px(0.0), Val::Px(snap(7.0))),
             ))
             .id(),
-        PanelKind::Slot => c.spawn((node, BackgroundColor(theme.box_fill), BorderColor { top: theme.rim_light, left: theme.rim_light, right: theme.rim, bottom: theme.rim })).id(),
         PanelKind::Band => c.spawn((node, BackgroundColor(theme.band_fill))).id(),
     }
 }
@@ -384,13 +499,13 @@ pub(super) fn piece_flipped(ctx: &Ctx, c: &mut ChildSpawnerCommands, name: &str,
 
 /// A greyed-out retail text button (not clickable).
 pub(super) fn disabled(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], label: &str, font: &str) {
-    c.spawn(ctx.drawn(Family::Button, State::Disabled, [l, t, r - l, b - t]));
+    ctx.pill(c, Family::Button, State::Disabled, [l, t, r - l, b - t], false);
     ctx.text(c, font, label, l, r - l, (t + b) / 2.0, true, Color::srgb(0.55, 0.55, 0.55));
 }
 
 /// The current tab of a Ships / Crew / Arms row: the green `FrontEnd_Texts_Over_Button_Selected_*` button, not clickable.
 pub(super) fn selected_tab(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], label: &str, font: &str) {
-    c.spawn(ctx.drawn(Family::Button, State::Selected, [l, t, r - l, b - t]));
+    ctx.pill(c, Family::Button, State::Selected, [l, t, r - l, b - t], false);
     ctx.text(c, font, label, l, r - l, (t + b) / 2.0, true, Color::WHITE);
 }
 
@@ -410,14 +525,14 @@ pub(super) fn stretched_window(ctx: &Ctx, c: &mut ChildSpawnerCommands, rect: [f
     panel(ctx, c, rect, PanelKind::Window);
 }
 
-/// A vertical scrollbar for a list of `total` rows of which `visible` show from row `first`: a rounded dark track and a gold-rimmed pill
-/// thumb that never gets shorter than the track is wide and stays inside it; pressing and dragging the track moves it
-/// (`menu::scroll_drag`, the same everywhere).
+/// A vertical scrollbar for a list of `total` rows of which `visible` show from row `first`: a light translucent track in a gold rim and a
+/// cylinder-glossed pill thumb that never gets shorter than the track is wide and stays inside it; pressing and dragging the track moves
+/// it (`menu::scroll_drag`, the same everywhere).
 pub(super) fn scrollbar(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], kind: ScrollKind, total: usize, visible: usize, first: usize) {
     let h = b - t;
     let (len, top) = thumb_span(h, total, visible, first, r - l);
     track(ctx, c, [l, t, r, b]);
-    c.spawn(ctx.drawn(Family::Button, State::Idle, [l + 2.0, t + top, r - l - 4.0, len]));
+    thumb(ctx, c, [l + 4.0, t + top, r - l - 8.0, len]);
     c.spawn((Interaction::None, ScrollTrack { kind, total, visible, thumb: len / h }, RelativeCursorPosition::default(), ctx.node(l, t, r - l, h)));
 }
 
@@ -430,11 +545,24 @@ fn thumb_span(h: f32, total: usize, visible: usize, first: usize, min: f32) -> (
     (len, pos.clamp(0.0, 1.0) * (h - len))
 }
 
-/// A rounded dark groove (scrollbar and slider tracks): the inner-box fill with its teal hairline.
+/// A scrollbar or slider track: a light translucent blue pill, lighter toward the bottom, in a gold tube rim.
 fn track(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4]) {
-    let [left, top, width, height, border, _] = panel_geometry([l, t, r, b], PanelKind::Inner, ctx.theme, ctx.scale);
-    let node = Node { border: UiRect::all(Val::Px(border)), border_radius: BorderRadius::all(Val::Px((width.min(height) / 2.0).floor())), ..bare(left, top, width, height) };
-    c.spawn((node, BackgroundColor(ctx.theme.box_fill), BorderColor::all(ctx.theme.edge)));
+    let [left, top, width, height, ..] = panel_geometry([l, t, r, b], PanelKind::Band, ctx.theme, ctx.scale);
+    let [a, z] = ctx.theme.track_fill;
+    tube(ctx, c, [left, top, width, height], width.min(height) / 2.0, 2.0, None, false, |c, r, _| {
+        let fill = LinearGradient::to_bottom(vec![ColorStop::new(a, Val::Percent(0.0)), ColorStop::new(z, Val::Percent(100.0))]);
+        c.spawn((Node { border_radius: BorderRadius::all(Val::Px(r)), ..fill_box() }, BackgroundGradient::from(fill))).id()
+    });
+}
+
+/// A scrollbar thumb or slider knob: a pill in a thin gold rim with a left-to-right cylinder gloss.
+fn thumb(ctx: &Ctx, c: &mut ChildSpawnerCommands, [x, y, w, h]: [f32; 4]) {
+    let [left, top, width, height, ..] = panel_geometry([x, y, x + w, y + h], PanelKind::Band, ctx.theme, ctx.scale);
+    let [a, z] = ctx.theme.thumb;
+    tube(ctx, c, [left, top, width, height], width.min(height) / 2.0, 1.0, None, false, |c, r, _| {
+        let fill = LinearGradient::to_right(vec![ColorStop::new(a, Val::Percent(0.0)), ColorStop::new(z, Val::Percent(100.0))]);
+        c.spawn((Node { border_radius: BorderRadius::all(Val::Px(r)), ..fill_box() }, BackgroundGradient::from(fill))).id()
+    });
 }
 
 /// The Create Skirmish slider: a rounded track between two round step buttons (33 px, each with a chevron) and a pill knob that follows
@@ -443,44 +571,29 @@ pub(super) fn slider(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32
     const CAP: f32 = 33.0;
     let cy = (t + b) / 2.0;
     let top = cy - 16.5;
-    track(ctx, c, [l + CAP / 2.0, cy - 7.0, r - CAP / 2.0, cy + 7.0]);
+    track(ctx, c, [l + CAP / 2.0, cy - 8.0, r - CAP / 2.0, cy + 8.0]);
     step_button(ctx, c, true, [l, top, CAP, 33.0], Some((dec, ArrowButton { forward: false })));
     step_button(ctx, c, false, [r - CAP, top, CAP, 33.0], Some((inc, ArrowButton { forward: true })));
     let track_w = r - l - 2.0 * CAP;
     let mut root = c.spawn((Interaction::None, kind, RelativeCursorPosition::default(), ctx.node(l + CAP, top, track_w, 33.0)));
-    let mut knob = Entity::PLACEHOLDER;
-    root.with_children(|c| {
-        let x = fraction * (track_w - SLIDER_KNOB);
-        knob = c.spawn((ctx.drawn(Family::Button, State::Idle, [x, 7.5, SLIDER_KNOB, 18.0]),)).id();
-    });
-    root.insert(Knob(knob));
+    root.with_children(|c| thumb(ctx, c, [fraction * (track_w - SLIDER_KNOB), 5.0, SLIDER_KNOB, 23.0]));
 }
 
-/// The knob of a slider, on the slider's hit box: it follows the cursor over that box.
-#[derive(Component)]
-struct Knob(Entity);
-
-fn hover_knob(q: Query<(&Interaction, &Knob), Changed<Interaction>>, mut knobs: Query<(&mut BackgroundGradient, &mut BorderColor)>) {
-    for (i, Knob(e)) in &q {
-        let Ok((mut fill, mut border)) = knobs.get_mut(*e) else { continue };
-        let look = Theme::current().button.get(state_of(*i, false));
-        *fill = gradient(look);
-        *border = rim(look);
-    }
-}
-
-/// A round step button over `[x, y, w, h]` with a chevron pointing left or right: gold-rimmed and clickable with an action, greyed and
-/// inert without one.
+/// A round step button over `[x, y, w, h]`: a sphere in a gold ring with a chevron pointing left or right; clickable with an action,
+/// greyed and inert without one.
 fn step_button(ctx: &Ctx, c: &mut ChildSpawnerCommands, left: bool, rect: [f32; 4], action: Option<impl Bundle>) {
     let state = if action.is_some() { State::Idle } else { State::Disabled };
-    let mut root = c.spawn(ctx.drawn(Family::Button, state, rect));
-    if let Some(a) = action {
-        root.insert((Interaction::None, Drawn { family: Family::Button, selected: false }, a));
-    }
-    let (w, border) = (crate::panels::snap(rect[2], ctx.scale), crate::panels::snap(ctx.theme.button.rim_width, ctx.scale).max(1.0));
-    let (cx, cy) = ((w - 2.0 * border) / 2.0, (crate::panels::snap(rect[3], ctx.scale) - 2.0 * border) / 2.0);
+    let (root, fill) = ctx.pill(c, Family::Button, state, rect, true);
+    let [_, _, w, h, ..] = panel_geometry([rect[0], rect[1], rect[0] + rect[2], rect[1] + rect[3]], PanelKind::Band, ctx.theme, ctx.scale);
+    let outline = tube_layers(ctx.theme, ctx.theme.button.rim_width, ctx.scale, None)[0].w;
+    let (cx, cy) = ((w - 2.0 * outline) / 2.0, (h - 2.0 * outline) / 2.0);
     let tint = if state == State::Disabled { Color::srgb(0.55, 0.55, 0.55) } else { Color::WHITE };
-    root.with_children(|c| chevron(ctx, c, left, rect[2].min(rect[3]), (cx, cy), tint));
+    let mut cmds = c.commands();
+    let mut e = cmds.entity(root);
+    if let Some(a) = action {
+        e.insert((Interaction::None, Drawn { family: Family::Button, selected: false, fill, round: true }, a));
+    }
+    e.with_children(|c| chevron(ctx, c, left, rect[2].min(rect[3]), (cx, cy), tint));
 }
 
 /// A chevron of two rotated bars centred on `(cx, cy)` physical px; `size` (reference px) is the button it sits on.
@@ -561,20 +674,24 @@ pub(super) fn list_row(ctx: &Ctx, c: &mut ChildSpawnerCommands, [x, y, w, h]: [f
     c.spawn((Interaction::None, action, fill, ctx.node(x, y, w, h))).with_children(|c| ctx.text(c, BODY_FONT, label, 20.0, w - 20.0, h / 2.0, false, Color::WHITE));
 }
 
-/// A drawn check box over `[x, y, w, h]`: a small rounded square with a gold rim and, when `on`, a tick of two rotated bars.
+/// A drawn check box over `[x, y, w, h]`: a small rounded square with a gold rim and, when `on`, a green tick with a white core.
 fn check_box(ctx: &Ctx, c: &mut ChildSpawnerCommands, [x, y, w, h]: [f32; 4], on: bool) {
     let theme = ctx.theme;
     let [left, top, width, height, border, _] = panel_geometry([x, y, x + w, y + h], PanelKind::Inner, theme, ctx.scale);
+    let border = border.max(crate::panels::snap(1.0, ctx.scale));
     let node = Node { border: UiRect::all(Val::Px(border)), border_radius: BorderRadius::all(Val::Px(crate::panels::snap(3.0, ctx.scale))), ..bare(left, top, width, height) };
     c.spawn((node, BackgroundColor(theme.box_fill), BorderColor::all(theme.rim_light))).with_children(|c| {
         if !on {
             return;
         }
         // Bars are placed by their centre inside the box, then turned about it: the short stroke runs down-right, the long one up-right.
-        for (len, cx, cy, deg) in [(5.0, 4.5, 8.5, 45.0), (9.0, 8.2, 6.5, -45.0)] {
-            let (bw, bh) = (len * ctx.scale, 2.2 * ctx.scale);
-            let n = Node { border_radius: BorderRadius::all(Val::Px(bh / 2.0)), ..bare(cx * ctx.scale - bw / 2.0, cy * ctx.scale - bh / 2.0, bw, bh) };
-            c.spawn((n, BackgroundColor(GOLD), UiTransform::from_rotation(Rot2::degrees(deg))));
+        // The green stroke is drawn first, a thinner white one over its middle.
+        for (thick, tint) in [(2.6, theme.tick), (1.0, Color::WHITE)] {
+            for (len, cx, cy, deg) in [(5.0, 4.5, 8.5, 45.0), (9.0, 8.2, 6.5, -45.0)] {
+                let (bw, bh) = ((len - 2.6 + thick) * ctx.scale, thick * ctx.scale);
+                let n = Node { border_radius: BorderRadius::all(Val::Px(bh / 2.0)), ..bare(cx * ctx.scale - bw / 2.0, cy * ctx.scale - bh / 2.0, bw, bh) };
+                c.spawn((n, BackgroundColor(tint), UiTransform::from_rotation(Rot2::degrees(deg))));
+            }
         }
     });
 }
@@ -635,18 +752,20 @@ pub(super) fn cell(ctx: &Ctx, c: &mut ChildSpawnerCommands, [x, y, w, h]: [f32; 
 /// A drawn pull-down box (theme.json `pulldown`, its selected look for the local player) with centred Univers10 text and, for
 /// drop-downs, the retail `FrontEnd_PullDown_Arrow` at its right end.
 pub(super) fn pulldown_cell(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], label: &str, selected: bool, action: Option<impl Bundle>, arrow: bool) {
-    let inset = ctx.theme.pulldown.rim_width;
     let state = state_of(Interaction::None, selected);
-    let mut root = c.spawn((Interaction::None, Drawn { family: Family::Pulldown, selected }, ctx.drawn(Family::Pulldown, state, [l, t, r - l, b - t])));
+    let (root, fill) = ctx.pill(c, Family::Pulldown, state, [l, t, r - l, b - t], false);
+    let mut cmds = c.commands();
+    let mut e = cmds.entity(root);
+    e.insert((Interaction::None, Drawn { family: Family::Pulldown, selected, fill, round: false }));
     if let Some(a) = action {
-        root.insert(a);
+        e.insert(a);
     }
-    root.with_children(|c| {
+    e.with_children(|c| {
         let (w, h) = (r - l, b - t);
         let text_w = if arrow { w - 24.0 } else { w };
-        ctx.text(c, "Univers10", label, -inset, text_w, h / 2.0 - inset, true, Color::WHITE);
+        ctx.text(c, "Univers10", label, 0.0, text_w, h / 2.0, true, Color::WHITE);
         if arrow {
-            piece(ctx, c, "FrontEnd_PullDown_Arrow", [w - 20.0 - inset, h / 2.0 - 8.5 - inset, w - inset, h / 2.0 + 8.5 - inset]);
+            piece(ctx, c, "FrontEnd_PullDown_Arrow", [w - 20.0, h / 2.0 - 8.5, w, h / 2.0 + 8.5]);
         }
     });
 }
@@ -743,19 +862,41 @@ mod tests {
     fn panel_edges_land_on_whole_physical_pixels() {
         let theme = Theme::default();
         for scale in [1.0, 1.125, 1.8, 2.4] {
-            for kind in [PanelKind::Outer, PanelKind::Inner, PanelKind::Band, PanelKind::Slot, PanelKind::Window] {
+            for kind in [PanelKind::Outer, PanelKind::Inner, PanelKind::Band, PanelKind::Slot, PanelKind::Stat, PanelKind::Window] {
                 let g = panel_geometry([23.3, 38.7, 459.4, 471.1], kind, &theme, scale);
                 assert!(g.iter().all(|v| v.fract() == 0.0), "{kind:?} at {scale}: {g:?}");
             }
         }
-        // 1080p canvas scale 1.8: the 3 px rim is 5 physical px, the box hairline 4, a band has no border.
-        assert_eq!(panel_geometry([0.0, 0.0, 10.0, 10.0], PanelKind::Outer, &theme, 1.8)[4], 5.0);
-        assert_eq!(panel_geometry([0.0, 0.0, 10.0, 10.0], PanelKind::Inner, &theme, 1.8)[4], 4.0);
+        // 1080p canvas scale 1.8: a 4 px rim is 7 physical px, the box line 2, a band has no border.
+        assert_eq!(panel_geometry([0.0, 0.0, 10.0, 10.0], PanelKind::Outer, &theme, 1.8)[4], 7.0);
+        assert_eq!(panel_geometry([0.0, 0.0, 10.0, 10.0], PanelKind::Inner, &theme, 1.8)[4], 2.0);
         assert_eq!(panel_geometry([0.0, 0.0, 10.0, 10.0], PanelKind::Band, &theme, 1.8)[4], 0.0);
         // Abutting panels share an edge: widths sum to the span.
         let a = panel_geometry([0.0, 0.0, 10.5, 10.0], PanelKind::Band, &theme, 1.125);
         let b = panel_geometry([10.5, 0.0, 20.0, 10.0], PanelKind::Band, &theme, 1.125);
         assert_eq!(a[0] + a[2], b[0]);
+    }
+
+    #[test]
+    fn tube_rim_layers_land_on_whole_pixels() {
+        let theme = Theme::default();
+        for scale in [1.0, 1.2, 1.6, 2.4] {
+            for gold in [1.0, 2.0, 3.0, 4.0] {
+                let layers = tube_layers(&theme, gold, scale, None);
+                // outline, gold (outer, core, inner as the width allows), keyline
+                let count = 3 + usize::from(gold >= 2.0) + usize::from(gold >= 3.0);
+                assert_eq!(layers.len(), count, "gold {gold}");
+                assert!(layers.iter().all(|l| l.w >= 1.0 && l.w.fract() == 0.0), "{gold} at {scale}");
+                // The whole rim is as thick as its reference width snapped: the layers add up exactly.
+                let total: f32 = layers.iter().map(|l| l.w).sum();
+                assert_eq!(total, (((gold + 2.0) * scale).round()).max(count as f32), "gold {gold} at {scale}");
+            }
+        }
+        // A disabled control's gold is grey, its outline and keyline are not.
+        let grey = tube_layers(&theme, 3.0, 1.0, Some([Color::WHITE, Color::BLACK]));
+        assert_eq!(grey[0].colour, BorderColor::all(theme.rim_outline));
+        assert_eq!(grey[1].colour.left, Color::BLACK);
+        assert_eq!(grey.last().unwrap().colour, BorderColor::all(theme.rim_keyline));
     }
 
     #[test]
