@@ -14,6 +14,7 @@ pub fn fleet_smoke(world: &mut World, mut previous: Local<Option<Entity>>) {
         Some("fleet-profile-arms") => profile_arms(world, frame),
         Some("fleet-ships") => ships_double_click(world, frame),
         Some("fleet-crew") => crew_clicks(world, frame),
+        Some("fleet-arms") => arms_clicks(world, frame),
         _ => {}
     }
 }
@@ -565,3 +566,44 @@ fn crew_clicks(world: &mut World, frame: u32) {
 
 #[derive(Resource)]
 struct ClickedRow(String);
+
+/// `--menu fleet --script fleet-arms`: on the Arms tab a weapon row that fits the selected bank is double-clicked and the bank carries
+/// that gun afterwards.
+#[allow(deprecated)]
+fn arms_clicks(world: &mut World, frame: u32) {
+    use crate::crew_arms::Action as A;
+    use crate::menu::Skirmish;
+    let press_row = |world: &mut World, gun: &str, to: Interaction| {
+        for (a, mut i) in world.query::<(&A, &mut Interaction)>().iter_mut(world) {
+            if matches!(a, A::PickWeapon(g) if g == gun) {
+                *i = to;
+            }
+        }
+    };
+    match frame {
+        20 => world.resource_mut::<Skirmish>().victory_limit += 500,
+        30 | 34 => {
+            let model = world.resource::<crate::crew_arms::ScreenModel>();
+            let fit = model.fit.as_ref().expect("the Arms tab is open");
+            let bank = fit.banks[fit.post].0;
+            let equipped = fit.banks[fit.post].1.clone();
+            // The first row that is not what the bank carries.
+            let gun = fit.list.iter().find_map(|(_, a)| if let A::PickWeapon(g) = a { Some(g.clone()).filter(|g| *g != equipped) } else { None }).expect("another weapon fits");
+            world.insert_resource(DoubleClicked(bank, gun.clone()));
+            press_row(world, &gun, Interaction::Pressed);
+            world.resource_mut::<ButtonInput<MouseButton>>().press(MouseButton::Left);
+        }
+        31 | 35 => world.resource_mut::<ButtonInput<MouseButton>>().release(MouseButton::Left),
+        40 => {
+            let DoubleClicked(bank, gun) = world.remove_resource::<DoubleClicked>().unwrap();
+            let sk = world.resource::<Skirmish>();
+            let h = sk.slots.iter().find(|s| s.kind == crate::menu::Kind::Human).unwrap();
+            assert_eq!(h.weapons[sk.fleet_pick].get(&bank), Some(&gun), "a double-click fits the weapon to the selected bank");
+            info!("fleet-arms smoke passed");
+        }
+        _ => {}
+    }
+}
+
+#[derive(Resource)]
+struct DoubleClicked(usize, String);
