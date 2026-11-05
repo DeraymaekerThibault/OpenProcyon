@@ -1,9 +1,12 @@
+import contextlib
+import io
 import tempfile
 import unittest
 from pathlib import Path
 
 import numpy as np
 
+from tools import import_assets
 from tools.bake_sky import (
     BANDS,
     STAR_GAIN,
@@ -15,7 +18,9 @@ from tools.bake_sky import (
     draw_stars,
     face_dirs,
     fit_mapping,
+    progress,
     read_png16,
+    replacing,
     shade_face,
     write_png16,
 )
@@ -131,6 +136,43 @@ class BakeSky(unittest.TestCase):
             write_png16(path, img)
             np.testing.assert_array_equal(read_png16(path), img)
         self.assertGreater(STAR_GAIN, 1.0)
+
+    def test_progress_lines_use_the_importers_format(self):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            step = progress(3)
+            step("face 0 band 0: 2 skies shaded")
+            step("skybox_07_cube.png (4 MB)")
+        self.assertEqual(
+            out.getvalue().splitlines(),
+            [
+                "[1/3] face 0 band 0: 2 skies shaded (33%)",
+                "[2/3] skybox_07_cube.png (4 MB) (66%)",
+            ],
+        )
+
+    def test_a_write_that_fails_keeps_the_old_file(self):
+        with tempfile.TemporaryDirectory() as d:
+            dst = Path(d, "skybox_07_cube.png")
+            dst.write_bytes(b"old")
+            with self.assertRaises(KeyboardInterrupt), replacing(dst) as part:
+                part.write_bytes(b"cut off")
+                raise KeyboardInterrupt
+            self.assertEqual(dst.read_bytes(), b"old")
+            self.assertEqual([p.name for p in Path(d).iterdir()], [dst.name])
+            with replacing(dst) as part:
+                part.write_bytes(b"new")
+            self.assertEqual(dst.read_bytes(), b"new")
+
+    def test_the_importer_runs_the_baker(self):
+        """The release download has only the frozen importer, so `--bake-skies` must reach the baker; a bake that stops
+        writes no mod.json (the Mods screen would list a broken mod)."""
+        with tempfile.TemporaryDirectory() as d:
+            out = Path(d, "hd-skies")
+            with self.assertRaises(SystemExit) as e:
+                import_assets.main(["--bake-skies", "--assets", d, "--out", str(out)])
+            self.assertIn("import the game first", str(e.exception.code))
+            self.assertFalse((out / "mod.json").exists())
 
 
 if __name__ == "__main__":

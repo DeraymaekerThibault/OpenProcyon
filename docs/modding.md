@@ -107,7 +107,11 @@ never rules. Every key is optional; an absent block leaves that feature classic.
 `python -m tools.bake_sky [--size 2048] [--jobs N] [--split-stars] [skybox_07 ...]` rebakes each imported battle sky as a high-resolution cube map
 (`models/sky/<sky>_cube.png`) into the local mod `<user data dir>/mods/hd-skies`, which is then switched on in the Mods screen.
 The result is derived from the player's own game copy, so it is made on their machine and never committed or shipped. Without it
-the game draws the retail sky sphere. Needs NumPy and Pillow. The `sky` block (above) adds a layer of gas in front of it; with `--split-stars` the baker writes the stars as their own 16-bit cube (`<sky>_stars.png`) for the block's twinkling stars, and the sky cube is then without them (a profile without the block shows none).
+the game draws the retail sky sphere. Needs NumPy and Pillow, or nothing in the release download: there the baker runs inside
+the frozen importer (`openprocyon-import --bake-skies [the same options]`), and the Mods screen's "Bake HD skies" button (on the
+HD skies and Remaster look panels) runs it with the default options (plus `--split-stars` while the Remaster look is on), shows its `[n/total] ... (p%)` progress and switches the
+mod on when it is done. Each PNG is written beside its target and renamed over it, and `mod.json` comes last, so a stopped bake
+leaves no cut-off files and no half-made mod in the list. The `sky` block (above) adds a layer of gas in front of it; with `--split-stars` the baker writes the stars as their own 16-bit cube (`<sky>_stars.png`) for the block's twinkling stars, and the sky cube is then without them (a profile without the block shows none).
 
 ### Effect events
 The blocks that decorate retail effects (`lights`, `bursts`, and `tracers` for thinning flight effects) learn that one started

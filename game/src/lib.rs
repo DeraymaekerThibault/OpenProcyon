@@ -83,7 +83,7 @@ pub struct Config {
 static ASSETS: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
 /// Converted assets: `PROCYON_ASSETS`, else `assets/` in the source checkout, else the per-user folder the importer
 /// (`python -m tools.import_assets`, or the release download's `openprocyon-import`) fills. Nothing from the original game ships with the code.
-fn base_assets() -> PathBuf {
+pub(crate) fn base_assets() -> PathBuf {
     if let Some(dir) = std::env::var_os("PROCYON_ASSETS") {
         return PathBuf::from(dir);
     }
