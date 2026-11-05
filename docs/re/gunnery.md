@@ -283,6 +283,8 @@ Source: static reading of the original; **[?]** = inferred, not seen in play. Re
 - **Cursor**: while armed with a ground point, the lob cursor of the weapon type shows over ships, bases and open sea alike [?: priority over the hover
   cursors]. The `_HAS_NO_FIRING_SOLUTION` variant shows when no live gun of the bank has the point within its maximum horizontal range and mount arc
   (the engage test above). Minimum range, height, reload, crew and line of sight do not count. A click is accepted either way.
-- **Ground icon**: each frame, the weapon's `LobTarget_Icon_*` (no-solution variant when so) is drawn at the ground point, opaque, and disappears with the mode:
-  no marker while shells fly. Data: `LobIcon WorldSpace Radius` 10, `Z Plane Offset: LobIcon` -3; the retail draw ignores both, so the size is PROVISIONAL (remake: 10 as half-width).
+- **Cursor art**: hud.hdt gives all six lob cursors the same art as the plain move arrow (the Pirate set uses one other arrow), so the cursor *shape* does not change; only the marker below tells the states apart.
+- **Ground marker**: not a HUD sprite (the `LobTarget_Icon_*` rectangles in hud.hdt are unused placeholders cut from HUD panels). The game draws one of six
+  small flat meshes (per weapon, plus a "no firing solution" twin) on the ground point each frame, and removes it with the mode: no marker while shells fly.
+  Data: `LobIcon WorldSpace Radius` 10, `Z Plane Offset: LobIcon` -3; the draw call ignores both, so size and height are PROVISIONAL (remake: the mesh's own size, on the sea plane).
 - **Sounds**: `HUD_LobWeapon_Accept` / `_Reject` on the click for gravity charges only (solution / none); star and nova clicks play neither [? looks odd, confirm in play].

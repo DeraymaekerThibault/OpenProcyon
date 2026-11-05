@@ -181,6 +181,11 @@ def models(root, out):
     for part in ("COMPASS", "ARROW"):
         name = f"SELECTION_INDICATOR_{part}_SMALL"
         tool("tools.mdb_to_glb", root, name, out / "models/ui" / f"{name}.glb")
+    # The lob-aim ground marker: one mesh per weapon, and a "no firing solution" twin of each.
+    for weapon in ("GRAVCHARGE", "STARMORTAR", "NOVAMORTAR"):
+        for suffix in ("", "_HAS_NO_FIRING_SOLUTION"):
+            name = f"LOBTARGET_{weapon}{suffix}"
+            tool("tools.mdb_to_glb", root, name, out / "models/ui" / f"{name}.glb")
 
 
 def sounds(root, out):

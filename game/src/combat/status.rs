@@ -59,19 +59,14 @@ pub struct LobAimed {
     pub point: Vec3,
 }
 impl LobAimed {
-    /// hud.hdt sprite names: (cursor, ground icon).
-    pub fn sprites(&self) -> (&'static str, &'static str) {
+    /// The hud.hdt cursor sprite (retail draws the plain move arrow for all six).
+    pub fn cursor(&self) -> &'static str {
         const C: [[&str; 2]; 3] = [
             ["Cursor_PrimaryShip_SetLobTarget_GravCharge", "Cursor_PrimaryShip_SetLobTarget_GravCharge_HAS_NO_FIRING_SOLUTION"],
             ["Cursor_PrimaryShip_SetLobTarget_NovaMortar", "Cursor_PrimaryShip_SetLobTarget_NovaMortar_HAS_NO_FIRING_SOLUTION"],
             ["Cursor_PrimaryShip_SetLobTarget_StarMortar", "Cursor_PrimaryShip_SetLobTarget_StarMortar_HAS_NO_FIRING_SOLUTION"],
         ];
-        const I: [[&str; 2]; 3] = [
-            ["LobTarget_Icon_GravCharge", "LobTarget_Icon_GravCharge_HAS_NO_FIRING_SOLUTION"],
-            ["LobTarget_Icon_NovaMortar", "LobTarget_Icon_NovaMortar_HAS_NO_FIRING_SOLUTION"],
-            ["LobTarget_Icon_StarMortar", "LobTarget_Icon_StarMortar_HAS_NO_FIRING_SOLUTION"],
-        ];
-        (C[self.kind][!self.solution as usize], I[self.kind][!self.solution as usize])
+        C[self.kind][!self.solution as usize]
     }
 }
 

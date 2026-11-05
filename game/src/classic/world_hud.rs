@@ -10,7 +10,7 @@ use crate::{Library, PlayerShip, Ship};
 pub fn plugin(app: &mut App) {
     app.add_systems(PostStartup, spawn_reticle.run_if(resource_exists::<HudData>))
         .add_systems(Update, navigation.after(crate::camera).before(crate::sky).run_if(in_state(crate::menu::Screen::Battle)).run_if(crate::menu::overlay_closed))
-        .add_systems(Update, lob_icon.run_if(in_state(crate::menu::Screen::Battle)).run_if(resource_exists::<HudData>).run_if(resource_exists::<crate::combat::LobAim>))
+        .add_systems(Update, lob_marker.run_if(in_state(crate::menu::Screen::Battle)).run_if(resource_exists::<crate::combat::LobAim>))
         .add_systems(Update, end_line.run_if(in_state(crate::menu::Screen::Battle)).run_if(resource_exists::<Fonts>))
         .add_systems(
             Update,
@@ -24,47 +24,34 @@ pub fn plugin(app: &mut App) {
 }
 
 #[derive(Component)]
-struct LobIcon;
+struct LobMarker(usize, bool);
 
-/// The armed lob bank's ground icon at the point under the mouse (its "no firing solution" art when out of range or arc).
-/// PROVISIONAL: size = hud.hdt `LobIcon WorldSpace Radius` (10) as the icon's half-width; the retail draw ignores it, so the real size is unknown.
-fn lob_icon(
-    mut commands: Commands,
-    assets: Res<AssetServer>,
-    hud: Res<HudData>,
-    aim: Res<crate::combat::LobAim>,
-    cam: Single<(&Camera, &GlobalTransform)>,
-    window: Single<&Window, With<bevy::window::PrimaryWindow>>,
-    mut shown: Query<(Entity, &mut Node, &mut ImageNode), With<LobIcon>>,
-    mut current: Local<&'static str>,
-) {
-    let (camera, gt) = *cam;
-    let placed = aim.0.and_then(|a| {
-        let at = camera.world_to_viewport(gt, a.point).ok()?;
-        let edge = camera.world_to_viewport(gt, a.point + gt.right() * 10.0).ok()?;
-        Some((a.sprites().1, at, 2.0 * (edge.x - at.x).abs()))
-    });
-    let Some((name, at, width)) = placed else {
+/// The armed lob bank's ground marker: a flat retail mesh (one per weapon, plus a "no firing solution" twin) lying on the sea at
+/// the point under the mouse. PROVISIONAL: drawn at the mesh's own size (about 7 radius, the data says `LobIcon WorldSpace Radius` 10)
+/// and on the plane itself (the data's `Z Plane Offset: LobIcon` is -3; the retail draw call ignores both).
+fn lob_marker(mut commands: Commands, assets: Res<AssetServer>, aim: Res<crate::combat::LobAim>, mut shown: Query<(Entity, &LobMarker, &mut Transform)>) {
+    let Some(a) = aim.0 else {
         for (e, ..) in &shown {
             commands.entity(e).despawn();
         }
         return;
     };
-    let Some(art) = sprite(&assets, &hud, name) else { return };
-    let s = window.height() / REF_H;
-    let to = Vec2::splat(width / s);
-    let mut node = Node { position_type: PositionType::Absolute, left: Val::Px(at.x - width / 2.0), top: Val::Px(at.y - width / 2.0), ..default() };
-    art.fit(to).place(&mut node, s, UiRect::DEFAULT);
-    if let Ok((_, mut n, mut img)) = shown.single_mut() {
-        *n = node;
-        if *current != name {
-            *img = art.image_node();
-            *current = name;
+    if let Ok((e, m, mut tf)) = shown.single_mut() {
+        if (m.0, m.1) == (a.kind, a.solution) {
+            tf.translation = a.point;
+            return;
         }
-    } else {
-        *current = name;
-        commands.spawn((LobIcon, crate::Scenario, GlobalZIndex(60), art.image_node(), node));
+        commands.entity(e).despawn();
     }
+    let weapon = ["GRAVCHARGE", "NOVAMORTAR", "STARMORTAR"][a.kind];
+    let twin = if a.solution { "" } else { "_HAS_NO_FIRING_SOLUTION" };
+    commands.spawn((
+        LobMarker(a.kind, a.solution),
+        crate::Scenario,
+        Transform::from_translation(a.point),
+        Visibility::default(),
+        crate::data::scene(&assets, &format!("LOBTARGET_{weapon}{twin}.glb")),
+    ));
 }
 
 #[derive(Component)]

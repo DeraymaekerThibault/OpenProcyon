@@ -564,7 +564,7 @@ fn context_cursor(
             if let (Some(kind), Some(point)) = (kind, point) {
                 let a = crate::combat::LobAimed { kind, solution: crate::combat::lob_solution(&lib, class, health, g, tf, bank, point), point };
                 aim = Some(a);
-                return Some((a.sprites().0, cursor));
+                return Some((a.cursor(), cursor));
             }
         }
         let own = ships
