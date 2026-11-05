@@ -296,7 +296,7 @@ def draw_stars(img, face, n, stars):
         # faint stars about a texel across; bright ones get a soft halo, the brightest small cross spikes
         sigma = (0.55 + 0.35 * min(lum[i], 1)) * max(scale, 0.5)
         halo_s = sigma * 4 * min(lum[i], 3) if lum[i] > 0.6 else 0
-        ls = 9 * scale * lum[i] if lum[i] > 1.5 else 0
+        ls = 3.5 * scale * lum[i] if lum[i] > 1.5 else 0
         # the patch must hold the whole star (core, halo, spikes) or its edge shows as a square
         r = int(np.ceil(max(sigma * 4, halo_s * 3.5, ls * 4)))
         cx, cy = px[i], py[i]
@@ -311,11 +311,12 @@ def draw_stars(img, face, n, stars):
         r2 = dx * dx + dy * dy
         k = np.exp(-r2 / (2 * sigma * sigma))
         if lum[i] > 0.6:
-            k = k + 0.04 * np.exp(-r2 / (2 * halo_s * halo_s))
+            k = k + 0.07 * np.exp(-r2 / (2 * halo_s * halo_s))
         if lum[i] > 1.5:
             spikes = np.exp(-(dx * dx) / 0.5) * np.exp(-np.abs(dy) / ls)
             spikes += np.exp(-(dy * dy) / 0.5) * np.exp(-np.abs(dx) / ls)
-            k = k + 0.15 * spikes
+            # faint and short: a hint of a diffraction cross, not a plus sign
+            k = k + 0.035 * spikes
         # fade to exactly zero at the patch edge so no cut-off can show
         k = k * np.clip(1 - np.sqrt(r2) / (r + 1), 0, 1) ** 0.5
         img[y0:y1, x0:x1] += k[..., None] * (lum[i] * col[i])
