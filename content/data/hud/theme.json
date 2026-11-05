@@ -1,0 +1,16 @@
+{
+  "_comment": "Front-end chrome drawn by the engine (classic/widgets.rs): colours as #RRGGBB, lengths in 800x600 reference px. Measured on the retail Navy art; every number is PROVISIONAL. A mod overlays this file; absent keys keep these values.",
+  "panel_fill": "#001A44",
+  "panel_alpha": 0.82,
+  "box_fill": "#00103E",
+  "band_fill": "#0F2E63",
+  "edge": "#0F7070",
+  "rim": "#9B721F",
+  "rim_light": "#FFB626",
+  "rim_width": 3.0,
+  "edge_width": 2.0,
+  "panel_radius": 20.0,
+  "box_radius": 4.0,
+  "shadow_alpha": 0.5,
+  "shadow_blur": 8.0
+}

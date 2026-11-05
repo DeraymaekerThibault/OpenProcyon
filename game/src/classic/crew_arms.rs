@@ -68,12 +68,12 @@ fn build(
         return;
     };
     let (canvas, scale) = canvas(&window);
-    let ctx = Ctx { assets: &assets, hud: &hud, fonts: &fonts, scale, pad: pad(&window, scale) };
+    let ctx = Ctx { assets: &assets, hud: &hud, fonts: &fonts, scale, theme: crate::theme::Theme::current(), pad: pad(&window, scale) };
     let strings = strings();
     let s = |id: &str| text_of(strings, id);
     commands.spawn((Root, crate::Scenario, Interaction::None, crate::panels::Solid, full_screen(), BackgroundColor(Color::BLACK), GlobalZIndex(180))).with_children(|root| {
         root.spawn(canvas).with_children(|c| {
-            ctx.backdrop(c, "menu/shipscreen.png");
+            super::widgets::ship_screen_backdrop(&ctx, c);
             // Tabs: Ships goes back to the fleet screen; the current tab is the green selected button.
             ctx.text_button(c, [46.0, 45.0, 172.0, 83.0], &s("IDGS_TPFRONTENDTEXT_SCREENS_SHIPS"), "BlackChancery16", Action::Close);
             for (arms, rect, id) in
