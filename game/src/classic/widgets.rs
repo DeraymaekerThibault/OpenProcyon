@@ -27,14 +27,9 @@ const CELL: Color = Color::srgba(0.0, 0.05, 0.2, 0.7);
 const CELL_ON: Color = Color::srgba(0.35, 0.28, 0.05, 0.75);
 const CELL_HOVER: Color = Color::srgba(0.1, 0.25, 0.55, 0.85);
 
-/// One swappable part of a widget's art.
-enum Piece {
-    Sprite(String),
-}
-
-/// Hover/press art: a widget's pieces, swapped between NoCursor / CursorOver / CursorDown by `hover`.
+/// Hover/press art: a widget's sprites (by name), swapped between NoCursor / CursorOver / CursorDown by `hover`.
 #[derive(Component)]
-struct Art(Vec<(Entity, Piece)>);
+struct Art(Vec<(Entity, String)>);
 
 /// Which drawn control family a node belongs to (`hover_drawn` restyles it with the cursor).
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -145,14 +140,10 @@ fn hover(
             Interaction::Hovered => "CursorOver",
             Interaction::None => IDLE,
         };
-        for (e, piece) in art.map(|a| a.0.as_slice()).unwrap_or(&[]) {
+        for (e, name) in art.map(|a| a.0.as_slice()).unwrap_or(&[]) {
             let Ok((mut img, mut node)) = imgs.get_mut(*e) else { continue };
-            match piece {
-                Piece::Sprite(name) => {
-                    if let Some(art) = sprite_in(&assets, MENU_SKIN, name, state) {
-                        art.show(&mut img, &mut node, scale);
-                    }
-                }
+            if let Some(art) = sprite_in(&assets, MENU_SKIN, name, state) {
+                art.show(&mut img, &mut node, scale);
             }
         }
     }
@@ -408,7 +399,7 @@ pub(super) fn arrow(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32;
     let forward = name.contains("Next") || name.contains("Right");
     let mut root = c.spawn((Interaction::None, action, ArrowButton { forward }, ctx.node(l, t, r - l, b - t)));
     let mut parts = vec![];
-    root.with_children(|c| parts.extend(piece(ctx, c, name, [0.0, 0.0, r - l, b - t]).map(|e| (e, Piece::Sprite(name.to_string())))));
+    root.with_children(|c| parts.extend(piece(ctx, c, name, [0.0, 0.0, r - l, b - t]).map(|e| (e, name.to_string()))));
     root.insert(Art(parts));
 }
 
@@ -692,10 +683,10 @@ mod tests {
 
     #[test]
     #[ignore = "needs imported assets"]
-    fn every_strip_the_widgets_draw_is_a_slice_group() {
-        // The groups come from data/hud/slices.json: explicit caps win, else the widths of the end pieces.
-        assert_eq!(crate::sprites::slice_caps("hscroll", MENU_SKIN), Some((33.0, 33.0)));
-        for group in ["button", "button_disabled", "button_selected", "pulldown", "pulldown_selected"] {
+    fn every_strip_the_battle_hud_draws_is_a_slice_group() {
+        // The groups come from data/hud/slices.json (the front-end ones are drawn from theme.json now): explicit caps win, else the
+        // widths of the end pieces.
+        for group in ["tooltip", "ribbon"] {
             let (l, r) = crate::sprites::slice_caps(group, MENU_SKIN).unwrap_or_else(|| panic!("no slice group {group}"));
             assert!(l > 0.0 && r > 0.0, "{group}");
         }

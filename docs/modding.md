@@ -42,7 +42,9 @@ and `height` where its button, gauge or ship icon sits. The part names are the s
 pressed art, gauge fills, the ship portrait) are placed on those boxes.
 
 The old way, replacing a whole atlas `hud/tex/<sheet>.png` at 2x and declaring it in `hud/scales.json`, is gone: the atlases are not exported or read any more.
-Stretchy strips (the text buttons and their disabled/selected looks, the pull-down boxes, the horizontal scrollbar track, the tooltip plate, the
+The front-end chrome (panels, text buttons, pull-downs, check boxes, scrollbars, sliders, slot and stat-bar frames, framed windows) is not art any more: it is drawn from
+`data/hud/theme.json` (see "Front-end theme" below). Bitmap replacement applies to the pictorial sprites (portraits, ship and weapon icons, flags, the logo, the scenery backdrops,
+the ornate in-game window and dialog frames) and to the battle HUD. The stretchy strips of the battle HUD (the tooltip plate, the
 ship-name ribbon) are single 9-slice nodes built from `hud/tex/slice_<group>_<skin>_<state>.png`. The groups are data, `data/hud/slices.json`:
 
 ```json
@@ -54,7 +56,7 @@ ship-name ribbon) are single 9-slice nodes built from `hud/tex/slice_<group>_<sk
 defaults to `["NoCursor"]`; `caps` are the reference pixels of each end that must not stretch, default the widths of `left` and `right`. The game
 reads the caps from this file; `python3 -m tools.make_slices <assets dir> [slices.json [out dir]]` joins the pieces into the strip PNGs (the importer runs
 it for the file in `content/`). So a mod that adds a group overlays `data/hud/slices.json` and ships the strip PNGs it names (for HD, a `hud/scales.json`
-entry named like the file, e.g. `{"slice_button_navy_nocursor": 2}`, merged across mods, which is the only use of `scales.json` left). Code that draws
+entry named like the file, e.g. `{"slice_tooltip_navy_nocursor": 2}`, merged across mods, which is the only use of `scales.json` left). Code that draws
 a group asks for it by name, so a new group only changes art that already uses one of the names above, or a mod's own screens.
 
 **Front-end theme** (`data/hud/theme.json`, shipped in `content/`): the palette and geometry of the chrome the engine draws itself instead of stretching art, currently the
@@ -63,7 +65,7 @@ under them). Colours are `#RRGGBB` (`panel_fill`, `box_fill`, `band_fill`, `edge
 `panel_radius`, `box_radius`, `shadow_blur`), `panel_alpha` and `shadow_alpha` are 0..1. A mod overlays the file; a key it leaves out keeps the shipped value. All values
 are PROVISIONAL (measured on the retail Navy art). `button` (text buttons, drawn as pills) and `pulldown` (pull-down boxes) each name the five states `idle`,
 `hover`, `pressed`, `selected` and `disabled`; a state is `{"fill": [top, middle, bottom], "rim": [top edge, bottom edge]}` (`#RRGGBB` or `#RRGGBBAA`), and `rim_width`
-is the rim in reference px. Framed windows (map list, summary table, lobby players, Arms help box) use `window_fill` and `window_rim` (with a glow of the rim colour), `heading` is the band across a table's top and `picked` the bar behind the chosen list row; the ornate in-game menu window and dialog frame stay bitmap pictures. Check boxes use `box_fill` and `rim_light`; scrollbar and slider tracks use `box_fill` and `edge`, their thumbs, knobs and round step buttons the `button` looks, and the slot, ship-icon and stat-bar frames `box_fill`, the rim colours and `slot_radius`. The picture strips `slice_button_*` and `slice_pulldown_*` are no longer drawn.
+is the rim in reference px. Framed windows (map list, summary table, lobby players, Arms help box) use `window_fill` and `window_rim` (with a glow of the rim colour), `heading` is the band across a table's top and `picked` the bar behind the chosen list row; the ornate in-game menu window and dialog frame stay bitmap pictures. Check boxes use `box_fill` and `rim_light`; scrollbar and slider tracks use `box_fill` and `edge`, their thumbs, knobs and round step buttons the `button` looks, and the slot, ship-icon and stat-bar frames `box_fill`, the rim colours and `slot_radius`. The retail text-button, pull-down and scrollbar strips are no longer built or drawn.
 
 **Front-end backdrops** (`menu/gamelobby.png`, `menu/shipscreen.png`, the `menu/frontendscreen<N>.png` scene and `menu/frontendmap.png` overlay) fill the whole
 window: the 800x600 canvas that every retail screen is laid out on stays centred on top at its own scale, while the picture is scaled up until it covers its frame
