@@ -1,0 +1,44 @@
+{
+  "button": {
+    "left": "FrontEnd_Texts_Over_Button_Left",
+    "center": "FrontEnd_Texts_Over_Button_Center",
+    "right": "FrontEnd_Texts_Over_Button_Right",
+    "states": ["NoCursor", "CursorOver", "CursorDown"]
+  },
+  "button_disabled": {
+    "left": "FrontEnd_Texts_Over_Button_Disabled_Left",
+    "center": "FrontEnd_Texts_Over_Button_Disabled_Center",
+    "right": "FrontEnd_Texts_Over_Button_Disabled_Right"
+  },
+  "button_selected": {
+    "left": "FrontEnd_Texts_Over_Button_Selected_Left",
+    "center": "FrontEnd_Texts_Over_Button_Selected_Center",
+    "right": "FrontEnd_Texts_Over_Button_Selected_Right"
+  },
+  "pulldown": {
+    "left": "FrontEnd_Left_PullDown_Background",
+    "center": "FrontEnd_Center_PullDown_Background",
+    "right": "FrontEnd_Right_PullDown_Background"
+  },
+  "pulldown_selected": {
+    "left": "FrontEnd_Left_PullDown_Background_Selected",
+    "center": "FrontEnd_Center_PullDown_Background_Selected",
+    "right": "FrontEnd_Right_PullDown_Background_Selected"
+  },
+  "hscroll": {
+    "left": "FrontEnd_Horizontal_Scrollbar_Background_Left",
+    "right": "FrontEnd_Horizontal_Scrollbar_Background_Right",
+    "caps": [33, 33],
+    "states": ["NoCursor", "CursorOver", "CursorDown"]
+  },
+  "tooltip": {
+    "left": "ToolTipBackdrop_Left",
+    "center": "ToolTipBackdrop_Center",
+    "right": "ToolTipBackdrop_Right"
+  },
+  "ribbon": {
+    "left": "ShipNameBackdrop_Left_WhiteBanner",
+    "center": "ShipNameBackdrop_Center_WhiteBanner",
+    "right": "ShipNameBackdrop_Right_WhiteBanner"
+  }
+}

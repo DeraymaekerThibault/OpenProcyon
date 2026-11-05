@@ -280,6 +280,29 @@ pub fn sheet_scale(name: &str) -> f32 {
         .copied()
         .unwrap_or(1.0)
 }
+/// The slice groups of `data/hud/slices.json` (the file `tools/make_slices.py` builds the strips from), read once per process. A mod
+/// adds a group by overlaying the file and shipping the strip PNGs `hud/tex/slice_<group>_<skin>_<state>.png`.
+fn slice_groups() -> &'static Value {
+    static G: std::sync::OnceLock<Value> = std::sync::OnceLock::new();
+    G.get_or_init(|| crate::data::read_json(&assets_dir().join("data/hud/slices.json")))
+}
+
+/// Left and right cap widths (reference px) of a slice group: its `caps`, else the widths of its end pieces in `skin`.
+pub fn slice_caps(group: &str, skin: &str) -> Option<(f32, f32)> {
+    let spec = slice_groups().get(group)?;
+    if let Some([l, r]) = spec.get("caps").and_then(|c| c.as_array()).map(Vec::as_slice) {
+        return Some((l.as_f64()? as f32, r.as_f64()? as f32));
+    }
+    let width = |end: &str| meta_in(skin, spec.get(end)?.as_str()?, IDLE).map(|m| m.size.x);
+    Some((width("left")?, width("right")?))
+}
+
+/// The strip of slice group `group` in `skin` and cursor `state` (lower case, as in the file name) as a 9-slice node.
+pub fn slice(assets: &AssetServer, group: &str, skin: &str, state: &str) -> Option<ImageNode> {
+    let (left, right) = slice_caps(group, skin)?;
+    Some(sliced(assets, group, skin, state, left, right))
+}
+
 /// A left-cap | stretchy-centre | right-cap strip from `tools/make_slices.py`, drawn as one Bevy 9-slice node. Caps are in reference
 /// pixels and grow with the node height, so it stays seam-free at any UI scale or HD replacement.
 pub fn sliced(assets: &AssetServer, group: &str, skin: &str, state: &str, left: f32, right: f32) -> ImageNode {

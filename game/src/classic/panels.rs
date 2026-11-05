@@ -721,16 +721,12 @@ fn commands_window(commands: &mut Commands, c: &Ctx, root: Entity, screen_w: f32
 /// faster buttons (the front-end Prev / Next art at 30 px, which only the Navy set has).
 fn speed_plate(commands: &mut Commands, c: &Ctx, fonts: Option<&crate::sprites::Fonts>, root: Entity, bar_right: f32) {
     use crate::panels::{SpeedButton, SpeedLabel};
-    let (l, r, h) = (c.size_of("ToolTipBackdrop_Left").x, c.size_of("ToolTipBackdrop_Right").x, c.size_of("ToolTipBackdrop_Center").y);
+    let h = c.size_of("ToolTipBackdrop_Center").y;
     let (w, b) = (110.0, 30.0);
     let plate = commands.spawn((Node { top: Val::Auto, bottom: px(6.0, c.s), ..c.abs(bar_right + 6.0, 0.0, Vec2::new(w, h)) }, ChildOf(root))).id();
     let (x0, x1) = (b / 2.0, w - b / 2.0);
-    for (name, x, pw) in [("ToolTipBackdrop_Center", x0 + l, x1 - x0 - l - r), ("ToolTipBackdrop_Left", x0, l), ("ToolTipBackdrop_Right", x1 - r, r)] {
-        if let Some(art) = c.sprite(name) {
-            let (mut img, node) = c.put_box(&art, x, 0.0, Vec2::new(pw, h));
-            img.image_mode = NodeImageMode::Stretch;
-            commands.spawn((img, node, ChildOf(plate), Solid, Interaction::None, FocusPolicy::Block));
-        }
+    if let Some(art) = crate::sprites::slice(c.assets, "tooltip", c.hud.skin, "nocursor") {
+        commands.spawn((art, c.abs(x0, 0.0, Vec2::new(x1 - x0, h)), ChildOf(plate), Solid, Interaction::None, FocusPolicy::Block));
     }
     let menu = HudData { comps: c.hud.comps.clone(), skin: crate::sprites::MENU_SKIN };
     let arrows = Ctx { hud: &menu, ..*c };

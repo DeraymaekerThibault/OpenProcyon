@@ -36,9 +36,26 @@ file. Keep the art inside the trimmed rectangle (a pixel-exact redraw of the ret
 only the bar. Offsets and numbers stay in `hud/hud.json`; a mod that ships it replaces the whole file, so leave it alone unless the layout should move.
 
 The old way, replacing a whole atlas `hud/tex/<sheet>.png` at 2x and declaring it in `hud/scales.json`, is gone: the atlases are not exported or read any more.
-Buttons and ship-name ribbons are single 9-slice nodes built from `hud/tex/slice_<button|ribbon>_<skin>_<state>.png` (made by `tools/make_slices.py`); replace
-those (plus a `hud/scales.json` entry named like the file, e.g. `{"slice_button_navy_nocursor": 2}`, merged across mods) for HD buttons. That is the only use of
-`scales.json` left.
+Stretchy strips (the text buttons and their disabled/selected looks, the pull-down boxes, the horizontal scrollbar track, the tooltip plate, the
+ship-name ribbon) are single 9-slice nodes built from `hud/tex/slice_<group>_<skin>_<state>.png`. The groups are data, `data/hud/slices.json`:
+
+```json
+{"plate": {"left": "MyPlate_Left", "center": "MyPlate_Center", "right": "MyPlate_Right",
+           "states": ["NoCursor", "CursorOver"], "caps": [12, 12]}}
+```
+
+`left`, `center` and `right` are component names (the sprites under `hud/sprites/`); `center` may be left out (two pieces are butted); `states`
+defaults to `["NoCursor"]`; `caps` are the reference pixels of each end that must not stretch, default the widths of `left` and `right`. The game
+reads the caps from this file; `python3 -m tools.make_slices <assets dir> [slices.json [out dir]]` joins the pieces into the strip PNGs (the importer runs
+it for the file in `content/`). So a mod that adds a group overlays `data/hud/slices.json` and ships the strip PNGs it names (for HD, a `hud/scales.json`
+entry named like the file, e.g. `{"slice_button_navy_nocursor": 2}`, merged across mods, which is the only use of `scales.json` left). Code that draws
+a group asks for it by name, so a new group only changes art that already uses one of the names above, or a mod's own screens.
+
+**Front-end backdrops** (`menu/gamelobby.png`, `menu/shipscreen.png`, the `menu/frontendscreen<N>.png` scene and `menu/frontendmap.png` overlay) fill the whole
+window: the 800x600 canvas that every retail screen is laid out on stays centred on top at its own scale, while the picture is scaled up until it covers its frame
+and cropped about the centre (the scene and the overlay cover the band between the grid strips, which run on to the window edges). A mod ships a wider backdrop
+under the same file name at any aspect ratio (2560x1080 for 21:9, say) and it fills a wide window without code; the picture shows whole, whereas the retail
+files carry spare rows below their picture, which the engine leaves out (the visible height is `min(height, width x 0.75)`, for the scene `min(height, width x 394/800)`).
 
 ## Graphics mods: the render profile (not retail)
 Graphics upgrades are mods, never engine forks. The engine (`game/src/render/`) provides building blocks; a mod switches
