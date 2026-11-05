@@ -118,6 +118,8 @@ pub enum Action {
     /// Open / close the Mods category pull-down; pick its entry `n` (0 = All).
     ModFilterOpen,
     ModFilter(usize),
+    /// Bake the HD skies from the imported ones (`SkyBake`), or stop the bake running.
+    BakeSkies,
 }
 
 impl Action {
@@ -274,7 +276,9 @@ pub fn plugin(app: &mut App) {
         .init_resource::<CtrlUi>()
         .insert_resource(Settings::load())
         .insert_resource(ModList::load())
-        .add_systems(Update, apply_settings)
+        .init_resource::<BakeJob>()
+        .add_systems(Update, (apply_settings, poll_bake))
+        .add_systems(Last, stop_bake_on_exit)
         .configure_sets(Update, BuildMenu.after(capture_key).before(RunButtons).run_if(menu_active))
         .add_systems(
             Update,
@@ -292,7 +296,8 @@ pub fn plugin(app: &mut App) {
         )
         .add_systems(PostUpdate, (summary_on_end, esc_menu).chain().run_if(in_state(Screen::Battle)))
         .add_systems(Update, (lobby_scenario, autolaunch).chain().run_if(in_state(Screen::Lobby)))
-        .add_systems(Update, fleet_hook.run_if(in_state(Screen::Fleet)));
+        .add_systems(Update, fleet_hook.run_if(in_state(Screen::Fleet)))
+        .add_systems(Update, mods_bake_hook.run_if(in_state(Screen::Mods)));
 }
 
 #[derive(Component)]
@@ -502,6 +507,26 @@ impl MenuModel<'_> {
                 sk.slot_scroll
             ) + &if self.ig.page == Some(Page::Summary) { self.stats.table() } else { String::new() },
         )
+    }
+}
+
+/// Smoke hook (`--menu mods --script mods-bake`): picks the Remaster look and presses "Bake HD skies", so a screenshot shows the
+/// bake running, then presses Stop after the late shot (`_late.png`) if it still runs, so the run also checks that stopping
+/// ends the baker; a late frame past the bake's end shows it finished instead.
+/// It bakes into the real user folder: point XDG_DATA_HOME at a scratch folder to keep a player's own skies.
+fn mods_bake_hook(mut mods: ResMut<ModList>, mut job: ResMut<BakeJob>, cfg: Res<crate::Config>, mut pressed: Local<u8>) {
+    if cfg.script != Some(crate::smoke::Script::ModsBake) {
+        return;
+    }
+    let press = match *pressed {
+        0 => true,
+        1 => cfg.frame > cfg.late_frame + 20 && matches!(mods.bake, SkyBake::Running { .. }),
+        _ => false,
+    };
+    if press {
+        *pressed += 1;
+        mods.picked = mods.mods.iter().position(|m| m.id == "remaster");
+        mods.bake_or_stop(&mut job);
     }
 }
 
@@ -810,7 +835,7 @@ fn buttons(
     lib: Res<Library>,
     mut exit: MessageWriter<AppExit>,
     mut cfg: ResMut<crate::Config>,
-    (mut binds, mut cui, mut settings, mut mods): (ResMut<Bindings>, ResMut<CtrlUi>, ResMut<Settings>, ResMut<ModList>),
+    (mut binds, mut cui, mut settings, mut mods, mut bake): (ResMut<Bindings>, ResMut<CtrlUi>, ResMut<Settings>, ResMut<ModList>, ResMut<BakeJob>),
     time: Res<Time<Real>>,
     mut clicks: Local<ClickClock>,
 ) {
@@ -842,6 +867,7 @@ fn buttons(
             }
             Action::ModFilterOpen => mods.filter_open = !mods.filter_open,
             Action::ModFilter(n) => mods.set_filter(*n),
+            Action::BakeSkies => mods.bake_or_stop(&mut bake),
             Action::Setting(s) => {
                 settings.step(*s);
                 settings.save();

@@ -1,6 +1,7 @@
 """Import: convert the original install into the game's asset folder. Nothing from the install is modified.
 usage: python -m tools.import_assets [--game DIR] [--out DIR] [Ship_Name ...]   (default ships below; first is the default player ship)
        openprocyon-import [--game DIR] [--out DIR] [Ship_Name ...]   (the same, frozen into the release download)
+       openprocyon-import --bake-skies [options]   (the optional HD skies: tools.bake_sky on the imported assets)
   --game  the original install (default: PROCYON_GAME_ROOT from the environment or .env)
   --out   where the converted assets go (default: assets/ in this checkout, or for the frozen importer the per-user folder
           ${XDG_DATA_HOME:-~/.local/share}/openprocyon/assets or %APPDATA%\\openprocyon\\assets; the game finds all of these,
@@ -11,6 +12,7 @@ Each step prints `[n/total] name` first, so a front end can show progress. Exits
 import contextlib
 import io
 import json
+import multiprocessing
 import os
 import runpy
 import shutil
@@ -258,6 +260,11 @@ def steps(root, out, want, part=lambda i, k: None):
 
 
 def main(argv):
+    if argv[:1] == ["--bake-skies"]:
+        # The baker ships inside the frozen importer: the release download has no Python to run it with.
+        from tools import bake_sky
+
+        return bake_sky.main(argv[1:])
     opts, want = {"--game": None, "--out": None}, []
     args = list(argv)
     while args:
@@ -341,4 +348,7 @@ def retry(f, tries=20):
 
 
 if __name__ == "__main__":
+    # The baker's worker processes start this program again; frozen, they have to be caught here, before main() (a no-op
+    # when not frozen).
+    multiprocessing.freeze_support()
     main(sys.argv[1:])

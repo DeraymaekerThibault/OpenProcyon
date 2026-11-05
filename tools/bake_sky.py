@@ -8,15 +8,22 @@ skybox instead of the sphere when the file exists (`scenario.rs`, `view::hd_sky`
 The result is derived from the player's own copy, so it stays local: by default a mod folder `<user dir>/mods/hd-skies`,
 switched on in the Mods screen. Needs only NumPy and Pillow.
 usage: python3 -m tools.bake_sky [--assets assets] [--out DIR] [--size 2048] [--jobs N] [--split-stars] [skybox_07 ...]
+       openprocyon-import --bake-skies [the same options]   (the release download; the Mods screen runs this)
 """
 
 import argparse
+import contextlib
 import io
 import json
+import multiprocessing
 import os
+import select
+import shutil
 import struct
 import sys
 import tempfile
+import threading
+import time
 import zlib
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
@@ -363,6 +370,18 @@ def draw_stars(img, face, n, stars):
 STAR_GAIN = 16.0
 
 
+@contextlib.contextmanager
+def replacing(dst):
+    """Yields a path beside `dst` to write, then renames it over `dst`: a bake that is stopped never leaves a cut-off PNG,
+    and a running game keeps the files it linked into its asset overlay at launch (`modding::overlay`)."""
+    part = dst.with_name(dst.name + ".part")
+    try:
+        yield part
+        os.replace(part, dst)
+    finally:
+        part.unlink(missing_ok=True)
+
+
 def write_png16(path, img):
     """Writes (H, W, 3) uint16 as a 16-bit RGB PNG (Pillow cannot write 16-bit colour)."""
     h, w, _ = img.shape
@@ -516,7 +535,8 @@ def assemble_job(glb, out, tmp, split_stars):
     )
     dst = out / "models" / "sky" / f"{glb.stem}_cube.png"
     dst.parent.mkdir(parents=True, exist_ok=True)
-    Image.fromarray(img, "RGB").save(dst, compress_level=6)
+    with replacing(dst) as part:
+        Image.fromarray(img, "RGB").save(part, "PNG", compress_level=6)
     note = ""
     if split_stars:
         star_img = np.concatenate(
@@ -527,9 +547,13 @@ def assemble_job(glb, out, tmp, split_stars):
             ],
             0,
         )
-        write_png16(dst.with_name(f"{glb.stem}_stars.png"), star_img)
+        with replacing(dst.with_name(f"{glb.stem}_stars.png")) as part:
+            write_png16(part, star_img)
         note = " + stars"
-    return f"{dst} ({dst.stat().st_size >> 20} MB{note})"
+    else:
+        # A stars cube left by an earlier --split-stars bake would draw its stars a second time over these.
+        dst.with_name(f"{glb.stem}_stars.png").unlink(missing_ok=True)
+    return f"{dst.name} ({dst.stat().st_size >> 20} MB{note})"
 
 
 def default_assets():
@@ -558,7 +582,14 @@ def main(argv=None):
         help="bake the stars into their own 16-bit <sky>_stars.png (for the `sky` block's twinkling stars) and leave them out of <sky>_cube.png",
     )
     ap.add_argument("--jobs", type=int, default=max(1, (os.cpu_count() or 2) // 2))
+    ap.add_argument(
+        "--watch-stdin",
+        action="store_true",
+        help="stop when standard input closes (the game keeps it open while the bake should run)",
+    )
     args = ap.parse_args(argv)
+    if args.watch_stdin:
+        stop_when_stdin_closes()
     assets = args.assets or default_assets()
     out = args.out
     if out is None:
@@ -572,14 +603,16 @@ def main(argv=None):
     if not glbs:
         sys.exit(f"no sky models in {assets / 'models' / 'sky'}: import the game first")
     out.mkdir(parents=True, exist_ok=True)
-    (out / "mod.json").write_text(json.dumps(MOD, indent=2) + "\n")
-    with (
-        tempfile.TemporaryDirectory(dir=out) as t,
-        ProcessPoolExecutor(args.jobs) as pool,
-    ):
-        tmp = Path(t)
+    # The faces wait in one fixed folder outside the mod (the game links a mod's every file into its asset overlay), cleared
+    # first: a bake that was stopped could not clear its own. One folder per output folder, so two bakes elsewhere never meet.
+    key = zlib.crc32(str(out.resolve()).encode())
+    tmp = Path(tempfile.gettempdir()) / f"openprocyon-bake-{key:08x}"
+    shutil.rmtree(tmp, ignore_errors=True)
+    tmp.mkdir(parents=True)
+    with ProcessPoolExecutor(args.jobs, initializer=stop_with_parent) as pool:
         n = len(glbs)
         jobs = [(f, k) for k in range(BANDS) for f in range(6)]
+        step = progress(len(jobs) + n)
         for face, band in pool.map(
             bake_face_job,
             jobs,
@@ -589,12 +622,69 @@ def main(argv=None):
             [args.seed] * len(jobs),
             [args.split_stars] * len(jobs),
         ):
-            print(f"face {face} band {band}: {n} skies shaded", flush=True)
+            step(f"face {face} band {band}: {n} skies shaded")
         for line in pool.map(
             assemble_job, glbs, [out] * n, [tmp] * n, [args.split_stars] * n
         ):
-            print(line, flush=True)
+            step(line)
+    shutil.rmtree(tmp, ignore_errors=True)
+    # Written last, so a bake that failed or was stopped does not show in the Mods screen as a finished mod.
+    (out / "mod.json").write_text(json.dumps(MOD, indent=2) + "\n")
     print(f"done: switch on '{MOD['name']}' in the Mods screen (or --mod {out})")
+
+
+def stop_with_parent():
+    """Worker initializer: the worker ends when the bake does. A stopped bake (the Mods screen's Stop, or quitting the game)
+    is killed without a chance to stop its pool, and workers left behind would keep baking."""
+    parent = multiprocessing.parent_process()
+    if parent is not None:
+
+        def watch():
+            parent.join()
+            os._exit(1)
+
+        threading.Thread(target=watch, daemon=True).start()
+
+
+def stop_when_stdin_closes():
+    """Ends the bake when its standard input closes. Killing a process does not end its children everywhere (the release's
+    one-file importer runs Python as a child of a small launcher, which a kill leaves behind), but the pipe the game holds
+    closes however the game lets go of it: Stop, quitting or a crash. It is polled, never read with a blocking call: on
+    Windows a thread blocked reading a pipe stalls the start of the worker processes."""
+
+    def watch():
+        while not stdin_closed():
+            time.sleep(0.5)
+        os._exit(1)
+
+    threading.Thread(target=watch, daemon=True).start()
+
+
+def stdin_closed():
+    """Whether nothing can come on standard input any more (its writer closed it); never blocks."""
+    try:
+        if sys.platform == "win32":
+            import _winapi
+            import msvcrt
+
+            _winapi.PeekNamedPipe(msvcrt.get_osfhandle(sys.stdin.fileno()), 0)
+            return False
+        ready, _, _ = select.select([sys.stdin], [], [], 0)
+        return bool(ready) and not os.read(sys.stdin.fileno(), 4096)
+    except (OSError, ValueError):
+        return True
+
+
+def progress(total):
+    """A function that prints `[k/total] what (p%)` as each piece of work finishes: the importer's progress format, which
+    the Mods screen reads while it runs the bake (`menu::SkyBake`)."""
+    done = [0]
+
+    def step(what):
+        done[0] += 1
+        print(f"[{done[0]}/{total}] {what} ({100 * done[0] // total}%)", flush=True)
+
+    return step
 
 
 if __name__ == "__main__":

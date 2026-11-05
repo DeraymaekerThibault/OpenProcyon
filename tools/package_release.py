@@ -29,6 +29,8 @@ This download contains no game content: you need your own copy of the original g
      {importer} --game "<path to Treasure Planet Battle at Procyon>"
    pass --out <dir> to put the assets elsewhere and set PROCYON_ASSETS to that folder.
    Then run {game} (add --mission 1 to go straight into Mission 1).
+3. Optional HD skies: in Mods, pick "Remaster look" and press "Bake HD skies" (a few minutes, once). They are made from your
+   own game files, so they cannot be part of the download. From a terminal: {importer} --bake-skies
 
 OpenProcyon is free software under the GNU GPL v3.0 or later (LICENSE); source code:
 https://github.com/DeraymaekerThibault/OpenProcyon

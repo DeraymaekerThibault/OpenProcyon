@@ -573,9 +573,26 @@ fn mods_page_view(ctx: &Ctx, c: &mut ChildSpawnerCommands, mods: &crate::menu::M
                 ctx.text(c, "Univers10", ":", 566.0, 8.0, cy, false, Color::WHITE);
                 ctx.text(c, "Univers10", value, 576.0, 170.0, cy, false, GOLD);
             }
-            wrapped(ctx, c, "Univers10", &m.description, [506.0, 290.0, 736.0, 430.0]);
             let label = if m.enabled { "Switch off" } else { "Switch on" };
-            ctx.text_button(c, [546.0, 440.0, 696.0, 468.0], label, "BlackChancery16", Action::ToggleMod(i));
+            if mods.offers_bake(i) {
+                // The HD skies are baked here from the player's own copy (`menu::SkyBake`): a status line and a second button.
+                use crate::menu::SkyBake;
+                wrapped(ctx, c, "Univers10", &m.description, [506.0, 290.0, 736.0, 380.0]);
+                let status = match &mods.bake {
+                    SkyBake::Idle => "HD skies are made once on this computer from your own game files. It takes a few minutes.".to_string(),
+                    SkyBake::Running { percent: Some(p), .. } => format!("Baking the HD skies: {p}%"),
+                    SkyBake::Running { .. } => "Baking the HD skies: starting".to_string(),
+                    SkyBake::Done => "HD skies baked and switched on. They show the next time the game starts.".to_string(),
+                    SkyBake::Failed(why) => format!("The bake failed: {}", why.lines().next().unwrap_or("")),
+                };
+                wrapped(ctx, c, "Univers10", &status, [506.0, 386.0, 736.0, 434.0]);
+                let bake = if matches!(mods.bake, SkyBake::Running { .. }) { "Stop" } else { "Bake HD skies" };
+                ctx.text_button(c, [498.0, 440.0, 618.0, 468.0], label, "BlackChancery16", Action::ToggleMod(i));
+                ctx.text_button(c, [624.0, 440.0, 744.0, 468.0], bake, "BlackChancery16", Action::BakeSkies);
+            } else {
+                wrapped(ctx, c, "Univers10", &m.description, [506.0, 290.0, 736.0, 430.0]);
+                ctx.text_button(c, [546.0, 440.0, 696.0, 468.0], label, "BlackChancery16", Action::ToggleMod(i));
+            }
         }
         None => {
             let dir = crate::modding::mods_dir().map_or(String::new(), |d| d.display().to_string());

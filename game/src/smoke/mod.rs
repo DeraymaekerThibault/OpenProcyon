@@ -53,7 +53,7 @@ scripts! {
     LifeboatM1 => "lifeboat-m1", LifeboatM1Fallback => "lifeboat-m1-fallback",
     LifeboatM2 => "lifeboat-m2", LifeboatM2Ladyj => "lifeboat-m2-ladyj",
     LifeboatM4 => "lifeboat-m4", LifeboatM9 => "lifeboat-m9", LifeboatKill => "lifeboat-kill",
-    MapInfo => "map-info", MenuSelected => "menu-selected", MenuFriendly => "menu-friendly", MenuEnemy => "menu-enemy",
+    MapInfo => "map-info", MenuSelected => "menu-selected", MenuFriendly => "menu-friendly", MenuEnemy => "menu-enemy", ModsBake => "mods-bake",
     Mission => "mission", Pause => "pause", PauseRestart => "pause-restart", Quick => "quick",
     Restart => "restart", Shells => "shells", Sight => "sight", Speedtest => "speedtest",
     StormM3 => "storm-m3", StormM3Damage => "storm-m3-damage", Talk => "talk", Target => "target", Victory => "victory",

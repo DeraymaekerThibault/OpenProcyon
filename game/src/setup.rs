@@ -124,10 +124,21 @@ pub enum SetupAction {
     Quit,
 }
 
-enum Msg {
+/// What a child started by `spawn_tool` says: an output line, then how it ended.
+pub enum ToolMsg {
     Line(String),
     Exit(Result<(), String>),
+}
+
+enum Msg {
+    Tool(ToolMsg),
     Paste(String),
+}
+
+impl From<ToolMsg> for Msg {
+    fn from(m: ToolMsg) -> Self {
+        Msg::Tool(m)
+    }
 }
 
 #[derive(Resource)]
@@ -220,7 +231,8 @@ impl Setup {
             self.phase = Phase::Failed { step: None, reason: format!("Could not clear the unfinished import in {} ({err}).", target.display()) };
             return;
         }
-        match spawn_import(&game, &target, self.tx.clone()) {
+        let args = ["--game".into(), game.clone().into_os_string(), "--out".into(), target.into_os_string()];
+        match spawn_tool(&args, false, self.tx.clone()) {
             Ok((label, child)) => {
                 self.importer = label;
                 self.child = Some(child);
@@ -242,7 +254,7 @@ impl Setup {
                         self.set_path(text.lines().next().unwrap_or("").trim().to_owned());
                     }
                 }
-                Msg::Line(line) => {
+                Msg::Tool(ToolMsg::Line(line)) => {
                     if let (Some((step, total, name, percent)), Phase::Importing { .. }) = (parse_progress(&line), &self.phase) {
                         self.phase = Phase::Importing { step, total, name: name.to_owned(), percent };
                     }
@@ -251,7 +263,7 @@ impl Setup {
                         self.log.remove(0);
                     }
                 }
-                Msg::Exit(result) => {
+                Msg::Tool(ToolMsg::Exit(result)) => {
                     self.child = None;
                     let last = match &self.phase {
                         Phase::Importing { step, name, .. } if *step > 0 => Some(name.clone()),
@@ -505,11 +517,11 @@ fn no_window(cmd: &mut Command) -> &mut Command {
     cmd
 }
 
-/// The importers to try, in order: `openprocyon-import` next to the game (the release download), else Python on the checkout's
-/// `tools.import_assets` (its `.venv` first).
-fn importers(game: &Path, out: &Path) -> Vec<(String, Command)> {
+/// The importers to try, in order, each with `args`: `openprocyon-import` next to the game (the release download), else Python on
+/// the checkout's `tools.import_assets` (its `.venv` first).
+fn importers(args: &[std::ffi::OsString]) -> Vec<(String, Command)> {
     let args = |cmd: &mut Command| {
-        cmd.arg("--game").arg(game).arg("--out").arg(out);
+        cmd.args(args);
     };
     let mut list = vec![];
     let name = if cfg!(windows) { "openprocyon-import.exe" } else { "openprocyon-import" };
@@ -541,11 +553,14 @@ fn importers(game: &Path, out: &Path) -> Vec<(String, Command)> {
     list
 }
 
-/// Starts the first importer that runs; its output and exit arrive on `tx`.
-fn spawn_import(game: &Path, out: &Path, tx: mpsc::Sender<Msg>) -> Result<(String, Arc<Mutex<Child>>), String> {
+/// Starts the first importer that runs with `args` (an import, or `--bake-skies` for the Mods screen); its output lines and
+/// exit arrive on `tx`. Returns which importer runs and the child, for stopping it. With `pipe_stdin` the child's standard
+/// input is a pipe (take it from the child to hold it open; the baker's `--watch-stdin` stops when it closes), else empty.
+pub fn spawn_tool<M: From<ToolMsg> + Send + 'static>(args: &[std::ffi::OsString], pipe_stdin: bool, tx: mpsc::Sender<M>) -> Result<(String, Arc<Mutex<Child>>), String> {
     let mut tried = vec![];
-    for (label, mut cmd) in importers(game, out) {
-        no_window(&mut cmd).env("PYTHONUNBUFFERED", "1").stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    for (label, mut cmd) in importers(args) {
+        let stdin = if pipe_stdin { Stdio::piped() } else { Stdio::null() };
+        no_window(&mut cmd).env("PYTHONUNBUFFERED", "1").stdin(stdin).stdout(Stdio::piped()).stderr(Stdio::piped());
         let mut child = match cmd.spawn() {
             Ok(child) => child,
             Err(err) => {
@@ -560,7 +575,7 @@ fn spawn_import(game: &Path, out: &Path, tx: mpsc::Sender<Msg>) -> Result<(Strin
                 let tx = tx.clone();
                 std::thread::spawn(move || {
                     for line in BufReader::new(stream).split(b'\n').map_while(Result::ok) {
-                        let _ = tx.send(Msg::Line(String::from_utf8_lossy(&line).trim_end().to_owned()));
+                        let _ = tx.send(ToolMsg::Line(String::from_utf8_lossy(&line).trim_end().to_owned()).into());
                     }
                 })
             })
@@ -579,11 +594,14 @@ fn spawn_import(game: &Path, out: &Path, tx: mpsc::Sender<Msg>) -> Result<(Strin
                     Err(_) => break Err("lost the importer".into()),
                 }
             };
-            let _ = tx.send(Msg::Exit(match status {
-                Ok(s) if s.success() => Ok(()),
-                Ok(s) => Err(format!("The importer stopped ({s}).")),
-                Err(err) => Err(err),
-            }));
+            let _ = tx.send(
+                ToolMsg::Exit(match status {
+                    Ok(s) if s.success() => Ok(()),
+                    Ok(s) => Err(format!("The importer stopped ({s}).")),
+                    Err(err) => Err(err),
+                })
+                .into(),
+            );
         });
         return Ok((label, child));
     }
@@ -1006,13 +1024,13 @@ mod tests {
         // The importer failed: the old import stays in use.
         std::fs::create_dir_all(staging(&out).join("ships")).unwrap();
         setup.phase = Phase::Importing { step: 3, total: 3, name: "bases".into(), percent: None };
-        setup.tx.send(Msg::Exit(Err("exit 1".into()))).unwrap();
+        setup.tx.send(Msg::Tool(ToolMsg::Exit(Err("exit 1".into())))).unwrap();
         setup.poll();
         assert!(matches!(setup.phase, Phase::Failed { .. }));
         assert!(out.join("ships").is_dir() && !out.join(STAMP).exists());
         // It succeeded: the new import, stamped with this version, replaces the old one.
         setup.phase = Phase::Importing { step: 3, total: 3, name: "bases".into(), percent: None };
-        setup.tx.send(Msg::Exit(Ok(()))).unwrap();
+        setup.tx.send(Msg::Tool(ToolMsg::Exit(Ok(())))).unwrap();
         setup.poll();
         assert_eq!(setup.phase, Phase::Starting);
         assert_eq!(imported(&out, env!("CARGO_PKG_VERSION")), Imported::Ready);
@@ -1036,22 +1054,22 @@ mod tests {
         let mut setup = Setup::new(dir.clone(), Some(String::new()));
         setup.phase = Phase::Importing { step: 0, total: 0, name: String::new(), percent: None };
         for line in ["[1/3] ships (0%)", "skip Ship_Wreck", "[2/3] models (40%)", "import failed at step 'models': tools.mdb_to_glb"] {
-            setup.tx.send(Msg::Line(line.into())).unwrap();
+            setup.tx.send(Msg::Tool(ToolMsg::Line(line.into()))).unwrap();
         }
         assert!(setup.poll());
         assert_eq!(setup.phase, Phase::Importing { step: 2, total: 3, name: "models".into(), percent: Some(40) });
-        setup.tx.send(Msg::Exit(Err("exit 1".into()))).unwrap();
+        setup.tx.send(Msg::Tool(ToolMsg::Exit(Err("exit 1".into())))).unwrap();
         setup.poll();
         assert_eq!(setup.phase, Phase::Failed { step: Some("models".into()), reason: "exit 1".into() });
         assert_eq!(setup.log.len(), 4);
         // A clean exit without ships/ is still a failure; with it the game starts.
         setup.phase = Phase::Importing { step: 3, total: 3, name: "bases".into(), percent: None };
-        setup.tx.send(Msg::Exit(Ok(()))).unwrap();
+        setup.tx.send(Msg::Tool(ToolMsg::Exit(Ok(())))).unwrap();
         setup.poll();
         assert!(matches!(setup.phase, Phase::Failed { .. }));
         std::fs::create_dir_all(dir.join("ships")).unwrap();
         setup.phase = Phase::Importing { step: 3, total: 3, name: "bases".into(), percent: None };
-        setup.tx.send(Msg::Exit(Ok(()))).unwrap();
+        setup.tx.send(Msg::Tool(ToolMsg::Exit(Ok(())))).unwrap();
         setup.poll();
         assert_eq!(setup.phase, Phase::Starting);
         assert!(!setup.poll(), "nothing new");
