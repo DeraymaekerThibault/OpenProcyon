@@ -1,5 +1,5 @@
 // Not retail: solar-sail glow of the render profile (game/src/render/sails.rs; contract: `SailGlowUniform` there, our own
-// work under the project licence). A mod replaces it by shipping shaders/sail.wesl. The sail is lit as a normal StandardMaterial; over it
+// work under the project licence). The sail is lit as a normal StandardMaterial; over it
 // runs a honeycomb of light drawn here (the retail sail textures are too small to carry a crisp one), its cells the same
 // size on every sail. Bands of light sweep across the cloth and light whole cells as they pass, each a moment early or
 // late; the sweep is stronger and quicker the faster the ship sails. The pattern glows more at grazing angles and where

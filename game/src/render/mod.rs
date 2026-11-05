@@ -274,7 +274,7 @@ fn sky_drift(look: Res<Look>, time: Res<Time<Real>>, mut cams: Query<&mut Skybox
     if look.sky_drift == 0.0 {
         return;
     }
-    let angle = (time.elapsed_secs_wrapped() * look.sky_drift / 60.0).to_radians();
+    let angle = (time.elapsed_secs() * look.sky_drift / 60.0).to_radians();
     let rotation = Quat::from_axis_angle(Vec3::new(0.2, 1.0, 0.1).normalize(), angle);
     for mut sky in &mut cams {
         sky.rotation = rotation;

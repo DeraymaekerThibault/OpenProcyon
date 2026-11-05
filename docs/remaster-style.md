@@ -51,3 +51,8 @@ Springfield), https://history.siggraph.org/learning/creating-3d-painterly-enviro
   `mods/remaster`, and the classic presentation stays the default.
 - Nothing derived from game content is committed or shared: baked skies, or maps generated from retail textures. Those
   are made on each player's machine (`python -m tools.bake_sky`, see "HD skies" in `modding.md`).
+
+## Notes on `look.json`
+
+- `bursts.effects` lists `Lancer` and `Plasma` before `_Impact` / `_Muzzle` on purpose: the first matching rule wins, so the
+  energy weapons' own entries (no smoke) take their impact and muzzle effects before the generic rules do.

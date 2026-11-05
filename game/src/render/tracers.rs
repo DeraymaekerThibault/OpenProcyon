@@ -30,7 +30,7 @@ pub const SHADER: &str = "shaders/tracer.wesl";
 #[derive(Clone, Debug, PartialEq)]
 pub struct Tracers {
     /// Per bullet type, first match wins; `default` for the rest.
-    pub bullets: Vec<(String, Tracer)>,
+    pub bullets: Vec<(Vec<String>, Tracer)>,
     pub default: Tracer,
     /// White-hot colour of the head and the streak's middle.
     pub core: Vec3,
@@ -63,11 +63,20 @@ fn tracer(v: &Value, d: Tracer) -> Tracer {
     }
 }
 
+/// A rule's `match`: one name fragment or a list of them, lower-cased; none when absent or empty.
+fn bullet_names(v: &Value) -> Option<Vec<String>> {
+    let n: Vec<String> = match v.as_str() {
+        Some(s) => vec![s.to_lowercase()],
+        None => v.as_array()?.iter().filter_map(|x| Some(x.as_str()?.to_lowercase())).collect(),
+    };
+    (!n.is_empty()).then_some(n)
+}
+
 pub fn parse(v: &Value) -> Option<Tracers> {
     v.is_object().then(|| {
         let default = tracer(&v["default"], Tracer { color: Vec3::new(1.0, 0.6, 0.3), width: 0.4, seconds: 0.25, head: 1.0, stretch: 1.5, smoke: None });
         Tracers {
-            bullets: v["bullets"].as_array().into_iter().flatten().filter_map(|b| Some((b["match"].as_str()?.to_lowercase(), tracer(b, default)))).collect(),
+            bullets: v["bullets"].as_array().into_iter().flatten().filter_map(|b| Some((bullet_names(&b["match"])?, tracer(b, default)))).collect(),
             default,
             core: rgb(&v["core"]).unwrap_or(Vec3::new(1.0, 0.95, 0.85)),
             brightness: num(&v["brightness"], 2.0),
@@ -80,7 +89,7 @@ impl Tracers {
     /// The tracer of a bullet type, none when it draws no streak and no head.
     pub fn of(&self, bullet: &str) -> Option<Tracer> {
         let b = bullet.to_lowercase();
-        let t = self.bullets.iter().find(|(m, _)| b.contains(m.as_str())).map_or(self.default, |(_, t)| *t);
+        let t = self.bullets.iter().find(|(m, _)| m.iter().any(|m| b.contains(m.as_str()))).map_or(self.default, |(_, t)| *t);
         (t.width > 0.0 || t.head > 0.0).then_some(t)
     }
 }
@@ -289,7 +298,7 @@ mod tests {
     fn tracers() -> Tracers {
         parse(&serde_json::json!({
             "default": {"width": 0.5},
-            "bullets": [{"match": "Lancer", "color": [0.4, 0.7, 1.0], "seconds": 0.1}, {"match": "StarMine", "width": 0, "head": 0}],
+            "bullets": [{"match": "Lancer", "color": [0.4, 0.7, 1.0], "seconds": 0.1}, {"match": ["StarMine", "Mine2"], "width": 0, "head": 0}],
         }))
         .unwrap()
     }
@@ -301,6 +310,7 @@ mod tests {
         assert_eq!((lancer.color, lancer.seconds, lancer.width), (Vec3::new(0.4, 0.7, 1.0), 0.1, 0.5), "unset keys come from the default");
         assert_eq!(t.of("Bullet_CannonBall_Med"), Some(t.default));
         assert!(t.of("Bullet_StarMine_Med").is_none());
+        assert!(t.of("Bullet_Mine2").is_none(), "`match` may be a list of names");
         assert!(parse(&Value::Null).is_none());
         assert_eq!(parse(&serde_json::json!({})).unwrap().particles, 1.0, "retail flight effects stay by default");
     }

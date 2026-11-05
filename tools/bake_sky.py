@@ -22,18 +22,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image, ImageFilter
 
-
-def user_dir(env=os.environ, windows=sys.platform == "win32"):
-    """The game's per-user folder, chosen like OpenProcyon's campaign::user_dir(): XDG_DATA_HOME, then HOME/.local/share
-    and APPDATA; on Windows APPDATA first, unless only a HOME one exists already."""
-    if env.get("XDG_DATA_HOME"):
-        return Path(env["XDG_DATA_HOME"], "openprocyon")
-    home = env.get("HOME") and Path(env["HOME"], ".local/share/openprocyon")
-    appdata = env.get("APPDATA") and Path(env["APPDATA"], "openprocyon")
-    if windows and appdata and not (home and home.is_dir() and not appdata.is_dir()):
-        return appdata
-    return home or appdata or None
-
+from tools.import_assets import user_dir
 
 MOD = {
     "id": "hd-skies",
@@ -377,17 +366,10 @@ def bake_file(glb, out, size, seed):
 
 
 def default_assets():
+    """PROCYON_ASSETS, else this checkout's assets/ (the baker lives in tools/), else the per-user folder."""
     if os.environ.get("PROCYON_ASSETS"):
         return Path(os.environ["PROCYON_ASSETS"])
-    here = (
-        Path(
-            os.environ.get(
-                "PROCYON_CHECKOUT",
-                Path(__file__).resolve().parent.parent.parent / "OpenProcyon",
-            )
-        )
-        / "assets"
-    )
+    here = Path(__file__).resolve().parent.parent / "assets"
     if here.is_dir():
         return here
     d = user_dir()

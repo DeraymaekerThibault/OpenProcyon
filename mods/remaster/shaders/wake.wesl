@@ -1,5 +1,5 @@
 // Not retail: wake trail of the render profile (game/src/render/trails.rs; contract: `WakeUniform` there, our own work
-// under the project licence). A mod replaces it by shipping shaders/wake.wesl. Drawn additively (ONE/ONE: write
+// under the project licence). Drawn additively (ONE/ONE: write
 // unpremultiplied light). The retail ribbon (wake.rs) is drawn as crossed
 // ribbons along the same path (the flat retail one and two leaning either way), so the trail has depth from every angle:
 // u runs across a ribbon, v along it (0.5 per segment, the newest at the ship), vertex colour carries the retail fade.

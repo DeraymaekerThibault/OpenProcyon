@@ -474,33 +474,10 @@
         }
       },
       {
-        "match": "Fire",
-        "color": [
-          1.0,
-          0.45,
-          0.1
+        "match": [
+          "Fire",
+          "DragonBreath"
         ],
-        "width": 0.5,
-        "seconds": 0.3,
-        "head": 1.2,
-        "stretch": 2.0,
-        "smoke": {
-          "count": 16,
-          "color": [
-            0.3,
-            0.3,
-            0.306
-          ],
-          "size": 1.0,
-          "seconds": 1.6,
-          "speed": 1.0,
-          "spread": 60,
-          "drag": 2.0,
-          "rise": 0.3
-        }
-      },
-      {
-        "match": "DragonBreath",
         "color": [
           1.0,
           0.45,
