@@ -19,7 +19,7 @@ use crate::menu::{
 use crate::sprites::{BODY_FONT, Fonts, HudData};
 
 use super::widgets::{
-    Ctx, GOLD, HEADING, PICKED, Rest, arrow, canvas, cell, disabled, dropdown, fleet_bar, full_screen, info_panel, list_row, pad, piece, piece_flipped, pulldown_cell, radio,
+    Ctx, GOLD, Rest, arrow, canvas, cell, disabled, dropdown, fleet_bar, full_screen, heading, info_panel, list_row, pad, picked, piece, piece_flipped, pulldown_cell, radio,
     scrollbar, selected_tab, size_of, slider, stretched_window, victory_points, wheel_step, wrapped,
 };
 
@@ -390,7 +390,7 @@ fn summary(ctx: &Ctx, c: &mut ChildSpawnerCommands, stats: &crate::stats::GameSt
     }
     let rows = stats.players.len().max(1) as f32;
     stretched_window(ctx, c, [35.0, 160.0, 767.0, 190.0 + rows * 60.0 - 20.0]);
-    c.spawn((ctx.node(39.0, 162.0, 724.0, 28.0), BackgroundColor(HEADING)));
+    c.spawn((ctx.node(39.0, 162.0, 724.0, 28.0), BackgroundColor(heading())));
     let columns = ["SHIPSSUNK", "SHIPSLEFT", "DAMAGEINFLICTED", "DAMAGETAKEN"].map(|k| s(&format!("IDGS_TPFRONTENDTEXT02_STATS_SCREEN_{k}")));
     for (i, title) in columns.iter().enumerate() {
         ctx.text(c, "Univers10", title, 195.0 + i as f32 * 140.0, 130.0, 175.0, true, Color::WHITE);
@@ -637,7 +637,7 @@ const MAP_ROWS: usize = 8;
 fn map_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, sk: &Skirmish, strings: &Value) {
     let (l, r) = (280.0, 712.0);
     stretched_window(ctx, c, [l, 120.0, r, 318.0]);
-    c.spawn((ctx.node(l + 4.0, 122.0, r - l - 8.0, 30.0), BackgroundColor(HEADING)));
+    c.spawn((ctx.node(l + 4.0, 122.0, r - l - 8.0, 30.0), BackgroundColor(heading())));
     let heading = if sk.historical { "IDGS_TPFRONTENDTEXT01_VIEW_PRESET_MAPS" } else { "IDGS_TPFRONTENDTEXT01_VIEW_OPEN_MAPS" };
     ctx.text(c, "UniversBold14", &text_of(strings, heading), 298.0, 240.0, 136.0, false, Color::WHITE);
     ctx.text(c, "UniversBold14", &text_of(strings, "IDGS_TPFRONTENDTEXT01_PLAYERS"), 540.0, 80.0, 136.0, true, Color::WHITE);
@@ -645,7 +645,7 @@ fn map_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, sk: &Skirmish, strings: &Va
     for (row, (i, m)) in rows.iter().enumerate().skip(sk.map_scroll).take(MAP_ROWS) {
         let cy = 172.0 + (row - sk.map_scroll) as f32 * 19.0;
         let mut b = c.spawn((Interaction::None, Action::PickMap(*i), ctx.node(l + 4.0, cy - 9.5, r - l - 8.0, 19.0)));
-        b.insert(BackgroundColor(if *i == sk.selected { PICKED } else { Color::NONE }));
+        b.insert(BackgroundColor(if *i == sk.selected { picked() } else { Color::NONE }));
         b.with_children(|c| {
             ctx.text(c, BODY_FONT, &m.1, 14.0, 240.0, 9.5, false, Color::WHITE);
             ctx.text(c, BODY_FONT, &m.3.to_string(), 278.0, 40.0, 9.5, true, Color::WHITE);
@@ -668,7 +668,7 @@ fn players_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, _rect: [f32; 4], sk: &S
     let s = |id: &str| strings[id].as_str().unwrap_or(id).to_string();
     let open = sk.open();
     stretched_window(ctx, c, [222.0, 122.0, 782.0, 448.0]);
-    c.spawn((ctx.node(226.0, 124.0, 552.0, 30.0), BackgroundColor(HEADING)));
+    c.spawn((ctx.node(226.0, 124.0, 552.0, 30.0), BackgroundColor(heading())));
     for (id, x0, x1) in [
         ("IDGS_TPFRONTENDTEXT03_FLAG", 236.0, 292.0),
         ("IDGS_TPFRONTENDTEXT_SCREENS_PLAYER", 287.0, 460.0),

@@ -16,6 +16,12 @@ pub struct Theme {
     pub band_fill: Color,
     /// Teal hairline around an inner box.
     pub edge: Color,
+    /// Framed windows (map list, summary table, lobby players): translucent fill, teal rim and glow.
+    pub window_fill: Color,
+    pub window_rim: Color,
+    /// Heading band across the top of a framed table, and the bar behind the picked row of a list.
+    pub heading: Color,
+    pub picked: Color,
     /// Gold rim of a panel (the shaded sides) and its highlight (top and left).
     pub rim: Color,
     pub rim_light: Color,
@@ -119,6 +125,10 @@ impl Default for Theme {
             box_fill: c("#00103E"),
             band_fill: c("#0F2E63"),
             edge: c("#0F7070"),
+            window_fill: c("#0E478AB3"),
+            window_rim: c("#2FC4D4"),
+            heading: c("#40BFD938"),
+            picked: c("#33B3CC73"),
             rim: c("#9B721F"),
             rim_light: c("#FFB626"),
             rim_width: 3.0,
@@ -159,7 +169,17 @@ impl Theme {
         } else if let Some(a) = num("panel_alpha") {
             t.panel_fill = t.panel_fill.with_alpha(a.clamp(0.0, 1.0));
         }
-        for (slot, key) in [(&mut t.box_fill, "box_fill"), (&mut t.band_fill, "band_fill"), (&mut t.edge, "edge"), (&mut t.rim, "rim"), (&mut t.rim_light, "rim_light")] {
+        for (slot, key) in [
+            (&mut t.box_fill, "box_fill"),
+            (&mut t.band_fill, "band_fill"),
+            (&mut t.edge, "edge"),
+            (&mut t.window_fill, "window_fill"),
+            (&mut t.window_rim, "window_rim"),
+            (&mut t.heading, "heading"),
+            (&mut t.picked, "picked"),
+            (&mut t.rim, "rim"),
+            (&mut t.rim_light, "rim_light"),
+        ] {
             *slot = colour(key).unwrap_or(*slot);
         }
         for (slot, key) in [
