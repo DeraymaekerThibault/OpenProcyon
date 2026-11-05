@@ -318,8 +318,19 @@ fn name_toggle(keys: Res<ButtonInput<KeyCode>>, mut toggles: ResMut<Toggles>) {
     }
 }
 
+/// Reference pixels to whole physical pixels: at a fractional scale (1.125 at 1080p) unsnapped edges blur and butted parts show hairlines.
+pub fn snap(v: f32, s: f32) -> f32 {
+    (v * s).round()
+}
+
+/// A span of `size` starting `offset` inside a box `to` wide, as whole physical pixels `(before, size, after)` that sum to `snap(to)`.
+pub fn snap_span(offset: f32, size: f32, to: f32, s: f32) -> (f32, f32, f32) {
+    let (a, b, end) = (snap(offset, s), snap(offset + size, s), snap(to, s));
+    (a, b - a, end - b)
+}
+
 pub fn px(v: f32, s: f32) -> Val {
-    Val::Px(v * s)
+    Val::Px(snap(v, s))
 }
 
 fn update_visibility(
@@ -647,6 +658,23 @@ pub fn input_app() -> (App, Entity) {
 #[cfg(test)]
 pub mod tests {
     use super::*;
+
+    #[test]
+    fn fractional_scales_snap_to_whole_pixels_and_butted_parts_stay_butted() {
+        let s = 1080.0 / REF_H;
+        assert_eq!(s, 1.125);
+        let widths = [37.0_f32, 61.5, 23.0, 90.0];
+        let (mut x, mut right) = (0.0, 0.0);
+        for w in widths {
+            let (before, size, _) = snap_span(x, w, 300.0, s);
+            assert_eq!((before, size), (before.round(), size.round()));
+            assert_eq!(before, right, "part at {x} leaves a gap or overlaps");
+            right = before + size;
+            x += w;
+        }
+        assert_eq!(right, snap(x, s));
+        assert_eq!(snap_span(3.3, 10.7, 20.0, s).0 + snap_span(3.3, 10.7, 20.0, s).1 + snap_span(3.3, 10.7, 20.0, s).2, snap(20.0, s));
+    }
 
     #[test]
     fn a_crew_line_opens_the_talking_head_on_its_speaker() {
