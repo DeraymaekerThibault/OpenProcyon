@@ -170,6 +170,58 @@ pub fn crew_points(id: &str) -> u32 {
     crew_data()[id]["points"].as_u64().and_then(|v| u32::try_from(v).ok()).unwrap_or(0)
 }
 
+/// The Sort By entry (`SORTS` index) of a post's skill: Captain and First Mate to Leadership, Helmsman to Navigation, Lookout to
+/// Spotting, Engineers to Engineering, Riggers to Rigging, Fighters to Combat, Gunners to Gunnery (docs/re/crew.md). PROVISIONAL: selecting
+/// a post re-sorting the roster is not in retail.
+pub fn sort_for_post(role: usize) -> usize {
+    let skill = post_skill_name(role);
+    SORTS.iter().position(|s| s.eq_ignore_ascii_case(skill)).unwrap_or(0)
+}
+
+/// Seats `id` on `post` of a ship of `class` (the drop rules): a full post gives up its last member, the points must cover the price
+/// (a crew member lifted off the post `moved` comes back first). Returns the message to show, empty on success; on a refusal a moved
+/// member goes back where they were.
+fn place_crew(crew: &mut [Vec<String>; 8], class: &str, id: String, post: usize, moved: Option<(usize, usize)>, points: i64) -> String {
+    let post = post.min(7);
+    let cap = crate::boarding::counts(class)[post] as usize;
+    if let Some((r, _)) = moved {
+        crew[r.min(7)].retain(|c| c != &id);
+    }
+    let back = if moved.is_some() { i64::from(crew_points(&id)) } else { 0 };
+    let refund = if crew[post].len() >= cap { crew[post].last().map_or(0, |l| i64::from(crew_points(l))) } else { 0 };
+    let message = if cap == 0 {
+        "This ship has no such post.".to_string()
+    } else if i64::from(crew_points(&id)) > points + refund + back {
+        "You do not have enough victory points.".to_string()
+    } else {
+        if crew[post].len() >= cap {
+            crew[post].pop();
+        }
+        crew[post].push(id.clone());
+        return String::new();
+    };
+    if let Some((r, k)) = moved {
+        let r = r.min(7);
+        let at = k.min(crew[r].len());
+        crew[r].insert(at, id);
+    }
+    message
+}
+
+/// Takes the crew member in seat `k` of post `r` off the ship (their points come back); `None` when the seat is empty.
+fn unpost(crew: &mut [Vec<String>; 8], r: usize, k: usize) -> Option<String> {
+    let post = &mut crew[r.min(7)];
+    (k < post.len()).then(|| post.remove(k))
+}
+
+/// The first post (in `ROLES` order) with a free seat that counts the crew member's best skill: the target of a double-click when no
+/// post is selected. PROVISIONAL.
+pub fn auto_post(crew: &[Vec<String>; 8], class: &str, id: &str) -> Option<usize> {
+    let caps = crate::boarding::counts(class);
+    let best = SKILLS.iter().filter_map(|s| ability(id, s).map(|v| (*s, v))).fold(None::<(&str, f32)>, |a, b| a.filter(|a| a.1 >= b.1).or(Some(b)))?.0;
+    (0..8).find(|&r| SKILLS[r] == best && (crew[r].len() as u32) < caps[r])
+}
+
 fn spend(points: &mut CampaignPoints, cost: u32) -> Result<(), String> {
     points.total = points.total.checked_sub(cost).ok_or("Not enough victory points.")?;
     Ok(())
@@ -277,6 +329,11 @@ pub enum Action {
     SortBy(usize),
     Drop,
     AutoAssign,
+    /// Seat a crew member on the selected post (a click on a roster row while a post is selected); on the first free post that counts
+    /// their best skill (a double-click with no post selected); take the member on a post back to the roster (right-click on the face).
+    Hire(String),
+    HireAuto(String),
+    Unpost(usize, usize),
 }
 /// What the retail Crew Select / Arms Selection screens show, filled by both the campaign and the skirmish builders.
 #[derive(Clone, Default, PartialEq, Debug)]
@@ -299,6 +356,8 @@ pub struct FitView {
     pub banks: Vec<(usize, String)>,
     /// The right-hand list (crew names or weapons) and what clicking each does.
     pub list: Vec<(String, Action)>,
+    /// Extra columns of `list`, row for row (empty when the list has none).
+    pub rows: Vec<RowInfo>,
     /// The info panel (top right): the picked crew member or weapon.
     pub detail: Option<Detail>,
     /// The left box on the Arms screen: retail shows the help text until an upgrade reports its cost or why it failed.
@@ -318,6 +377,14 @@ pub struct FitView {
     /// First fleet slot in the slot bar and the number of slots the fleet may have.
     pub slot_scroll: usize,
     pub limit: usize,
+}
+
+/// The columns of a list row: a value (a skill rating) and a price or price change, and whether the row is out of reach.
+#[derive(Clone, Default, PartialEq, Debug)]
+pub struct RowInfo {
+    pub value: String,
+    pub price: String,
+    pub grey: bool,
 }
 
 /// The info panel of the Crew and Arms screens: a name, an icon, an optional point cost and label / value lines.
@@ -464,6 +531,8 @@ struct Choice {
     post: usize,
     page: usize,
     arms: bool,
+    /// A post was chosen by clicking it (not just the default): roster clicks hire onto it.
+    post_picked: bool,
     paused_here: bool,
     message: String,
 }
@@ -487,6 +556,7 @@ pub fn button_sound(action: &Action, select: bool) -> &'static str {
             | Action::PostFace(..)
             | Action::PickCrew(_)
             | Action::PickWeapon(_)
+            | Action::Unpost(..)
             | Action::SortBy(_)
             | Action::Assign(_)
             | Action::Recruit(_)
@@ -824,6 +894,7 @@ fn skirmish_screen(
     mut sort_open: Local<bool>,
     mut origin: Local<Option<(usize, usize)>>,
     mut scroll_to: ResMut<crate::menu::ScrollTo>,
+    (time, mut clicks): (Res<Time<Real>>, Local<crate::menu::ClickClock>),
 ) {
     use crate::menu::Screen;
     if *state.get() == Screen::Battle {
@@ -849,14 +920,44 @@ fn skirmish_screen(
         a => a.clone(),
     };
     let carrying = carry.is_some();
-    let pressed = if mouse.just_pressed(MouseButton::Left) { buttons.iter().find(|(_, i)| **i == Interaction::Pressed).map(|(a, _)| as_target(a, carrying)) } else { None };
+    let mut pressed = if mouse.just_pressed(MouseButton::Left) { buttons.iter().find(|(_, i)| **i == Interaction::Pressed).map(|(a, _)| as_target(a, carrying)) } else { None };
+    // Double-click a roster row with no post selected: seat the member on the first free post that counts their best skill.
+    if let Some(Action::PickCrew(id)) = &pressed
+        && !choice.post_picked
+        && let Some(row) = model.fit.as_ref().and_then(|f| f.list.iter().position(|(_, a)| a == &Action::PickCrew(id.clone())))
+        && clicks.double(1, row, time.elapsed_secs_f64())
+    {
+        pressed = Some(Action::HireAuto(id.clone()));
+    }
+    // Clicking a roster row (press and release on it, no drag) with a post selected seats the member there.
+    let clicked_row = if mouse.just_released(MouseButton::Left) && !choice.arms && choice.post_picked && origin.is_none() {
+        match carry.as_ref() {
+            Some(Carry::Crew(id)) if all.iter().any(|(a, i)| matches!(a, Action::PickCrew(x) if x == id) && *i != Interaction::None) => Some(Action::Hire(id.clone())),
+            _ => None,
+        }
+    } else {
+        None
+    };
+    // Right-click on a posted face: back to the roster.
+    let unposted = if mouse.just_pressed(MouseButton::Right) && !choice.arms {
+        all.iter().find_map(|(a, i)| match a {
+            Action::PostFace(r, k) if *i != Interaction::None => Some(Action::Unpost(*r, *k)),
+            _ => None,
+        })
+    } else {
+        None
+    };
     // Released over a post or mount while carrying: the drop of a drag.
     let released_on = if mouse.just_released(MouseButton::Left) && carry.is_some() {
         all.iter().find(|(a, i)| matches!(a, Action::SelectPost(_) | Action::PostFace(..)) && **i != Interaction::None).map(|(a, _)| as_target(a, true))
     } else {
         None
     };
-    let action = if sk.profile.is_none() && (keys.just_pressed(KeyCode::Enter) || keys.just_pressed(KeyCode::Escape)) { Some(Action::Close) } else { pressed.or(released_on) };
+    let action = if sk.profile.is_none() && (keys.just_pressed(KeyCode::Enter) || keys.just_pressed(KeyCode::Escape)) {
+        Some(Action::Close)
+    } else {
+        pressed.or(released_on).or(clicked_row).or(unposted)
+    };
     if action == Some(Action::Close) {
         keys.clear_just_pressed(KeyCode::Enter);
         keys.clear_just_pressed(KeyCode::Escape);
@@ -888,10 +989,11 @@ fn skirmish_screen(
         let placing = matches!(action, Action::SelectPost(_));
         let picks = matches!(action, Action::PickCrew(_) | Action::PickWeapon(_) | Action::PostFace(..));
         let held = if picks { None } else { carry.take().filter(|_| placing) };
+        let auto = matches!(action, Action::HireAuto(_));
         match action {
             Action::Ship(d) => {
                 choice.ship = cycle(choice.ship, d, slot.fleet.len());
-                (choice.post, choice.page) = (0, 0);
+                (choice.post, choice.page, choice.post_picked) = (0, 0, false);
             }
             Action::Post(d) => {
                 let len = slot.fleet.get(choice.ship).map_or(0, |n| weapon_banks(&lib, &lib.classes[lib.index(n)]).len());
@@ -901,12 +1003,12 @@ fn skirmish_screen(
             Action::Page(d) => choice.page = (choice.page as i64 + i64::from(d)).max(0) as usize,
             Action::Tab => {
                 choice.arms = !choice.arms;
-                (choice.post, choice.page) = (0, 0);
+                (choice.post, choice.page, choice.post_picked) = (0, 0, false);
                 choice.message.clear();
             }
             Action::SelectShip(i) => {
                 choice.ship = i.min(slot.fleet.len().saturating_sub(1));
-                (choice.post, choice.page) = (0, 0);
+                (choice.post, choice.page, choice.post_picked) = (0, 0, false);
                 choice.message.clear();
             }
             Action::Slots(d) => sk_slots = Some(d),
@@ -918,12 +1020,31 @@ fn skirmish_screen(
             }
             Action::PostFace(r, k) => {
                 choice.post = r;
+                if !choice.arms {
+                    (choice.post_picked, *sort) = (true, sort_for_post(r));
+                }
                 if let Some(id) = slot.crew.get(choice.ship).and_then(|c| c[r.min(7)].get(k)).cloned() {
                     *carry = Some(Carry::Crew(id));
                     *origin = Some((r, k));
                 }
             }
             Action::PickWeapon(gun) => *carry = Some(Carry::Gun(gun)),
+            Action::Hire(id) | Action::HireAuto(id) if !choice.arms => {
+                let Some(class_name) = slot.fleet.get(choice.ship).cloned() else { return };
+                let post = if auto { auto_post(slot.crew_mut(choice.ship), &class_name, &id) } else { Some(choice.post) };
+                choice.message = match post {
+                    Some(r) => {
+                        (choice.post, choice.post_picked, *sort) = (r, true, sort_for_post(r));
+                        place_crew(slot.crew_mut(choice.ship), &class_name, id, r, None, points)
+                    }
+                    None => format!("No free post suits {}.", name(&id)),
+                };
+            }
+            Action::Unpost(r, k) => {
+                if let Some(gone) = unpost(slot.crew_mut(choice.ship), r, k) {
+                    choice.message = format!("{} returned to the roster.", name(&gone));
+                }
+            }
             Action::Drop => {
                 if let Some(last) = slot.crew.get_mut(choice.ship).and_then(|c| c.get_mut(choice.post)).and_then(Vec::pop) {
                     choice.message = format!("{} returned to the roster.", name(&last));
@@ -935,33 +1056,10 @@ fn skirmish_screen(
                 match held {
                     // Placing a crew member on a post of the Crew tab.
                     Some(Carry::Crew(id)) if !choice.arms => {
-                        choice.post = i;
-                        let cap = crate::boarding::counts(&class.name)[i.min(7)] as usize;
-                        let crew = slot.crew_mut(choice.ship);
+                        (choice.post, choice.post_picked, *sort) = (i, true, sort_for_post(i));
                         // Moving a posted crew member lifts them off their post first (their points come back).
                         let moved = origin.take();
-                        if let Some((r, _)) = moved {
-                            crew[r].retain(|c| c != &id);
-                        }
-                        let back = if moved.is_some() { i64::from(crew_points(&id)) } else { 0 };
-                        let refund = if crew[i].len() >= cap { crew[i].last().map_or(0, |l| i64::from(crew_points(l))) } else { 0 };
-                        choice.message = if cap == 0 {
-                            "This ship has no such post.".into()
-                        } else if i64::from(crew_points(&id)) > points + refund + back {
-                            "You do not have enough victory points.".into()
-                        } else {
-                            if crew[i].len() >= cap {
-                                crew[i].pop();
-                            }
-                            crew[i].push(id.clone());
-                            String::new()
-                        };
-                        if !choice.message.is_empty()
-                            && let Some((r, k)) = moved
-                        {
-                            let at = k.min(crew[r].len());
-                            crew[r].insert(at, id);
-                        }
+                        choice.message = place_crew(slot.crew_mut(choice.ship), &class.name, id, i, moved, points);
                     }
                     // Fitting a weapon on a mount of the Arms tab.
                     Some(Carry::Gun(gun)) if choice.arms => {
@@ -985,6 +1083,9 @@ fn skirmish_screen(
                     }
                     _ => {
                         (choice.post, choice.page) = (i, 0);
+                        if !choice.arms {
+                            (choice.post_picked, *sort) = (true, sort_for_post(i));
+                        }
                         choice.message.clear();
                     }
                 }
@@ -1032,7 +1133,7 @@ fn skirmish_screen_model(
         let banks = equipped_banks(lib, class, slot.weapons.get(choice.ship));
         let assigned = slot.crew.get(choice.ship);
         let (posts, bars) = posts_view(class, assigned);
-        let (mut list, mut picked, mut detail) = (vec![], None, None);
+        let (mut list, mut picked, mut detail, mut rows) = (vec![], None, None, vec![]);
         if choice.arms {
             choice.post = choice.post.min(banks.len().saturating_sub(1));
             if let Some((bank, equipped)) = banks.get(choice.post) {
@@ -1053,6 +1154,22 @@ fn skirmish_screen_model(
                 picked = ids.iter().position(|x| x == id);
                 detail = Some(crew_detail(id));
             }
+            // Columns: the rating in the selected post's skill (else the sort's skill) and the price; dearer than the points left is greyed.
+            let skill: Option<&str> = if choice.post_picked {
+                Some(post_skill_name(choice.post))
+            } else if sort >= 2 {
+                SKILLS.iter().copied().find(|k| k.eq_ignore_ascii_case(SORTS[sort]))
+            } else {
+                None
+            };
+            rows = ids
+                .iter()
+                .map(|id| RowInfo {
+                    value: skill.map(|s| ability(id, s).map_or_else(|| "-".to_string(), |v| format!("{:.0}", v * 10.0))).unwrap_or_default(),
+                    price: crew_points(id).to_string(),
+                    grey: i64::from(crew_points(id)) > points,
+                })
+                .collect();
             list = ids.into_iter().map(|id| (name(&id).to_string(), Action::PickCrew(id))).collect();
         }
         choice.page = choice.page.min(list.len().saturating_sub(8));
@@ -1069,6 +1186,7 @@ fn skirmish_screen_model(
             bars,
             banks,
             list,
+            rows,
             detail,
             message: choice.message.clone(),
             can_drop,
@@ -1448,5 +1566,47 @@ mod tests {
         assert_eq!(best(&p, "gunnery"), Some(0.5));
         assert!((accuracy(Some(&p)) - 0.6).abs() < 1e-6);
         assert_eq!(accuracy(Some(&CampaignPoints::default())), 0.5);
+    }
+
+    #[test]
+    fn selecting_a_post_sorts_the_roster_by_its_skill() {
+        let want = ["Gunnery", "Leadership", "Leadership", "Navigation", "Engineering", "Rigging", "Combat", "Spotting"];
+        for (role, skill) in want.iter().enumerate() {
+            assert_eq!(SORTS[sort_for_post(role)], *skill, "{}", ROLES[role]);
+        }
+    }
+
+    #[test]
+    #[ignore = "needs imported assets"]
+    fn a_roster_click_seats_the_member_within_the_points_and_a_right_click_returns_them() {
+        let navy = roster("Navy", 3); // gunnery first
+        let id = navy[0].clone();
+        let price = i64::from(crew_points(&id));
+        let mut crew: [Vec<String>; 8] = Default::default();
+        let broke = place_crew(&mut crew, "Ship_Navy_Frigate", id.clone(), 0, None, price - 1);
+        assert_eq!(broke, "You do not have enough victory points.");
+        assert!(crew[0].is_empty(), "a refused hire seats nobody");
+        assert_eq!(place_crew(&mut crew, "Ship_Navy_Frigate", id.clone(), 0, None, price), "");
+        assert_eq!(crew[0].len(), 1);
+        assert_eq!(crew[0][0], id);
+        assert_eq!(unpost(&mut crew, 0, 0), Some(id));
+        assert!(crew[0].is_empty());
+        assert_eq!(unpost(&mut crew, 0, 0), None, "nothing on that seat");
+    }
+
+    #[test]
+    #[ignore = "needs imported assets"]
+    fn a_double_click_seats_the_member_on_the_first_free_post_for_their_best_skill() {
+        let id = roster("Navy", 3)[0].clone();
+        let mut crew: [Vec<String>; 8] = Default::default();
+        let post = auto_post(&crew, "Ship_Navy_Frigate", &id).expect("a free post");
+        let top = SKILLS.iter().filter_map(|k| ability(&id, k)).fold(0.0, f32::max);
+        assert_eq!(ability(&id, SKILLS[post]), Some(top), "the post rates their best skill");
+        // Once every seat of that skill is taken, no post suits.
+        let caps = crate::boarding::counts("Ship_Navy_Frigate");
+        for r in (0..8).filter(|&r| SKILLS[r] == SKILLS[post]) {
+            crew[r] = vec!["x".into(); caps[r] as usize];
+        }
+        assert_eq!(auto_post(&crew, "Ship_Navy_Frigate", &id), None);
     }
 }

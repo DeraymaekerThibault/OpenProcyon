@@ -680,16 +680,28 @@ pub(super) fn info_panel(ctx: &Ctx, c: &mut ChildSpawnerCommands, title: &str, i
 
 /// One clickable Univers12 row of a list (`[x, y, w, h]`, text 20 in), on the teal bar when `picked`.
 pub(super) fn list_row(ctx: &Ctx, c: &mut ChildSpawnerCommands, rect: [f32; 4], label: &str, picked: bool, action: impl Bundle) {
-    list_row_cost(ctx, c, rect, label, None, picked, false, action);
+    list_row_cost(ctx, c, rect, label, (None, None), picked, false, action);
 }
 
 /// A list row with a price column: `cost` is right-aligned, `grey` dims the whole row (a hull the points left cannot pay for).
 #[allow(clippy::too_many_arguments)]
-pub(super) fn list_row_cost(ctx: &Ctx, c: &mut ChildSpawnerCommands, [x, y, w, h]: [f32; 4], label: &str, cost: Option<&str>, picked: bool, grey: bool, action: impl Bundle) {
+pub(super) fn list_row_cost(
+    ctx: &Ctx,
+    c: &mut ChildSpawnerCommands,
+    [x, y, w, h]: [f32; 4],
+    label: &str,
+    (value, cost): (Option<&str>, Option<&str>),
+    picked: bool,
+    grey: bool,
+    action: impl Bundle,
+) {
     let fill = BackgroundColor(if picked { self::picked() } else { Color::NONE });
     let tint = if grey { Color::srgba(1.0, 1.0, 1.0, 0.4) } else { Color::WHITE };
     c.spawn((Interaction::None, action, fill, ctx.node(x, y, w, h))).with_children(|c| {
         ctx.text(c, BODY_FONT, label, 20.0, w - 20.0, h / 2.0, false, tint);
+        if let Some(value) = value {
+            ctx.text_end(c, BODY_FONT, value, 0.0, w - 52.0, h / 2.0, tint);
+        }
         if let Some(cost) = cost {
             ctx.text_end(c, BODY_FONT, cost, 0.0, w - 12.0, h / 2.0, tint);
         }

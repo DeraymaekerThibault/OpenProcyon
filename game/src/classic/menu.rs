@@ -847,7 +847,16 @@ fn ship_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, _rect: [f32; 4], sk: &Skir
         // Point cost right-aligned; hulls the points left cannot pay for are dimmed (retail shows neither: PROVISIONAL).
         let cost = lib.classes[ci].points;
         let grey = i64::from(cost) > left;
-        list_row_cost(ctx, c, [505.0, y, 215.0, 19.0], &class_name(lib, ci, strings), Some(&cost.to_string()), sk.ship_chosen && row == sk.ship_pick, grey, Action::PickShip(row));
+        list_row_cost(
+            ctx,
+            c,
+            [505.0, y, 215.0, 19.0],
+            &class_name(lib, ci, strings),
+            (None, Some(&cost.to_string())),
+            sk.ship_chosen && row == sk.ship_pick,
+            grey,
+            Action::PickShip(row),
+        );
     }
     scrollbar(ctx, c, [735.0, 330.0, 759.0, 497.0], ScrollKind::Ships, list.len(), SHIP_ROWS, sk.scroll);
 }

@@ -3,8 +3,8 @@
 //! the weapon mounts on it, stat bars, and the crew or weapon list. Falls back to a plain list when the model has no `fit`.
 #![allow(deprecated)]
 use super::widgets::{
-    Ctx, GOLD, PanelKind, canvas, dropdown, fleet_bar, full_screen, info_panel, list_row, pad, panel, piece, pulldown_cell, scrollbar, selected_tab, size_of, stretched_window,
-    victory_points, wrapped,
+    Ctx, GOLD, PanelKind, canvas, dropdown, fleet_bar, full_screen, info_panel, list_row, list_row_cost, pad, panel, piece, pulldown_cell, scrollbar, selected_tab, size_of,
+    stretched_window, victory_points, wrapped,
 };
 use crate::combat::Library;
 use crate::crew_arms::{Action, CrewSet, FitView, SORTS, ScreenModel};
@@ -235,7 +235,20 @@ fn list(ctx: &Ctx, c: &mut ChildSpawnerCommands, fit: &FitView, strings: &Value)
     const ROWS: usize = 8;
     for (row, (label, action)) in fit.list.iter().enumerate().skip(fit.scroll).take(ROWS) {
         let y = 336.25 + (row - fit.scroll) as f32 * 19.5;
-        list_row(ctx, c, [505.0, y, 215.0, 19.5], label, fit.picked == Some(row), action.clone());
+        // Rows with columns (the crew roster: skill rating and price) dim when the points left cannot pay.
+        match fit.rows.get(row) {
+            Some(r) => list_row_cost(
+                ctx,
+                c,
+                [505.0, y, 215.0, 19.5],
+                label,
+                ((!r.value.is_empty()).then_some(r.value.as_str()), Some(r.price.as_str())),
+                fit.picked == Some(row),
+                r.grey,
+                action.clone(),
+            ),
+            None => list_row(ctx, c, [505.0, y, 215.0, 19.5], label, fit.picked == Some(row), action.clone()),
+        }
     }
     scrollbar(ctx, c, [735.0, 330.0, 759.0, 497.0], ScrollKind::Crew, fit.list.len(), ROWS, fit.scroll);
     if fit.sort_open {
