@@ -117,6 +117,11 @@ skill can read N/A). Dragging one onto a post spends its cost (a 9-point captain
   selected post's skill (else the sort's skill) and the price, right-aligned; a row dearer than the points left is dimmed and refused with the
   usual message. With no post selected, a double-click on a row (0.4 s, `menu::ClickClock`) seats the member on the first free post, in post
   order, that rates their best skill (`auto_post`); if none is free it says so. A right-click on a posted face returns that member to the roster.
+- Arms screen quality of life (#300; PROVISIONAL, retail has none of it): each row of Available Weapons shows the signed price change of fitting
+  it on the selected bank (`+8`, `-8`, `0`: the price difference times the guns in the bank, as `fitting_delta`); a row the points left cannot pay
+  for is dimmed. A double-click on a row (0.4 s, `menu::ClickClock`) fits it to the selected bank, a plain click still picks it for dragging.
+  Shift-click fits it to every bank of the same mount type on the ship (`banks_for`, the banks `bank_compatible` accepts) in one transaction
+  (`fit_guns`): the summed change is charged at once, or the points message appears and nothing changes. There is no drawn button for it yet.
 - In battle the human fleet's named crew become `CrewPosts` (speed and rudder factors, boarding crews) through `SkirmishCrew`.
   Named gunners (posts) already drive the human ships' accuracy and gun reload (`combat/gunnery.rs`, docs/re/gunnery.md).
 - Load / Save Fleet, Crew and Arms (`profiles.rs`, `Skirmish::open_profile` / `do_profile`, `Slot::apply_profile`, dialog drawn by `classic/menu.rs` `profile_dialog`

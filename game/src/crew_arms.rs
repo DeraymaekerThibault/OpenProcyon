@@ -208,10 +208,58 @@ fn place_crew(crew: &mut [Vec<String>; 8], class: &str, id: String, post: usize,
     message
 }
 
+/// Why a weapon fit was refused.
+#[derive(Debug, PartialEq)]
+enum FitError {
+    WrongMount,
+    NotEnough,
+}
+
+/// Price change of fitting `gun` on `bank` (`first` is its first mount) over what it carries now (`fit`, else the stock gun): the price
+/// difference times the guns in the bank. `None` when the gun does not fit the bank.
+fn bank_delta(lib: &Library, class: &crate::data::Class, fit: &BTreeMap<usize, String>, (bank, first): (usize, usize), gun: &str) -> Option<i64> {
+    let old = fit.get(&bank).unwrap_or(&class.mounts[first].gun);
+    Some(i64::from(bank_cost(lib, class, bank, gun)?) - i64::from(bank_cost(lib, class, bank, old).unwrap_or(0)))
+}
+
+/// Fits `gun` to every bank in `targets` ((bank, first mount) pairs), all or nothing against `points`: the summed price change is
+/// charged at once, or nothing changes. Returns the change.
+fn fit_guns(lib: &Library, class: &crate::data::Class, fit: &mut BTreeMap<usize, String>, targets: &[(usize, usize)], gun: &str, points: i64) -> Result<i64, FitError> {
+    let deltas: Option<Vec<i64>> = targets.iter().map(|&t| bank_delta(lib, class, fit, t, gun)).collect();
+    let deltas = deltas.filter(|d| !d.is_empty()).ok_or(FitError::WrongMount)?;
+    let total: i64 = deltas.iter().sum();
+    if total > points {
+        return Err(FitError::NotEnough);
+    }
+    for &(bank, _) in targets {
+        fit.insert(bank, gun.to_string());
+    }
+    Ok(total)
+}
+
+/// The banks of the ship `gun` can be fitted to (the same mount type): what shift-click fits at once.
+fn banks_for(lib: &Library, class: &crate::data::Class, gun: &str) -> Vec<(usize, usize)> {
+    weapon_banks(lib, class).into_iter().filter(|(bank, _)| bank_compatible(lib, class, *bank, gun)).collect()
+}
+
+/// A price change as the lists show it: `+8`, `-8`, `0`.
+fn signed(d: i64) -> String {
+    if d == 0 { "0".into() } else { format!("{d:+}") }
+}
+
 /// Takes the crew member in seat `k` of post `r` off the ship (their points come back); `None` when the seat is empty.
 fn unpost(crew: &mut [Vec<String>; 8], r: usize, k: usize) -> Option<String> {
     let post = &mut crew[r.min(7)];
     (k < post.len()).then(|| post.remove(k))
+}
+
+/// The Arms screen's message for a fit: retail's 'Total Cost: <change>' block, or why it was refused.
+fn fit_message(said: &dyn Fn(&str) -> String, result: Result<i64, FitError>) -> String {
+    match result {
+        Err(FitError::WrongMount) => said("IDGS_TPFRONTENDTEXT02_WEAPON_WRONG_MOUNT"),
+        Err(FitError::NotEnough) => said("IDGS_TPFRONTENDTEXT02_WEAPON_NOT_ENOUGH_VICTORY_POINTS"),
+        Ok(delta) => format!("{} {}\n{}", said("IDGS_TPFRONTENDTEXT02_TOTAL_COST"), delta, said("IDGS_TPFRONTENDTEXT02_WEAPON_UPGRADE_SUCCESSFUL")),
+    }
 }
 
 /// The first post (in `ROLES` order) with a free seat that counts the crew member's best skill: the target of a double-click when no
@@ -334,6 +382,9 @@ pub enum Action {
     Hire(String),
     HireAuto(String),
     Unpost(usize, usize),
+    /// Arms tab: fit a weapon to the selected bank (a double-click on its row); to every bank of the same mount type (shift-click).
+    FitWeapon(String),
+    FitAll(String),
 }
 /// What the retail Crew Select / Arms Selection screens show, filled by both the campaign and the skirmish builders.
 #[derive(Clone, Default, PartialEq, Debug)]
@@ -929,6 +980,17 @@ fn skirmish_screen(
     {
         pressed = Some(Action::HireAuto(id.clone()));
     }
+    // Arms tab: shift-click a weapon fits every bank of its mount type, a double-click fits the selected bank.
+    if let Some(Action::PickWeapon(gun)) = &pressed {
+        let row = model.fit.as_ref().and_then(|f| f.list.iter().position(|(_, a)| a == &Action::PickWeapon(gun.clone())));
+        if keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight) {
+            pressed = Some(Action::FitAll(gun.clone()));
+        } else if let Some(row) = row
+            && clicks.double(2, row, time.elapsed_secs_f64())
+        {
+            pressed = Some(Action::FitWeapon(gun.clone()));
+        }
+    }
     // Clicking a roster row (press and release on it, no drag) with a post selected seats the member there.
     let clicked_row = if mouse.just_released(MouseButton::Left) && !choice.arms && choice.post_picked && origin.is_none() {
         match carry.as_ref() {
@@ -990,6 +1052,7 @@ fn skirmish_screen(
         let picks = matches!(action, Action::PickCrew(_) | Action::PickWeapon(_) | Action::PostFace(..));
         let held = if picks { None } else { carry.take().filter(|_| placing) };
         let auto = matches!(action, Action::HireAuto(_));
+        let fit_all = matches!(action, Action::FitAll(_));
         match action {
             Action::Ship(d) => {
                 choice.ship = cycle(choice.ship, d, slot.fleet.len());
@@ -1040,6 +1103,13 @@ fn skirmish_screen(
                     None => format!("No free post suits {}.", name(&id)),
                 };
             }
+            Action::FitWeapon(gun) | Action::FitAll(gun) if choice.arms => {
+                let Some(class_name) = slot.fleet.get(choice.ship).cloned() else { return };
+                let class = &lib.classes[lib.index(&class_name)];
+                slot.weapons.resize_with(slot.fleet.len(), BTreeMap::new);
+                let targets: Vec<_> = if fit_all { banks_for(&lib, class, &gun) } else { weapon_banks(&lib, class).get(choice.post).copied().into_iter().collect() };
+                choice.message = fit_message(&said, fit_guns(&lib, class, &mut slot.weapons[choice.ship], &targets, &gun, points));
+            }
             Action::Unpost(r, k) => {
                 if let Some(gone) = unpost(slot.crew_mut(choice.ship), r, k) {
                     choice.message = format!("{} returned to the roster.", name(&gone));
@@ -1064,22 +1134,9 @@ fn skirmish_screen(
                     // Fitting a weapon on a mount of the Arms tab.
                     Some(Carry::Gun(gun)) if choice.arms => {
                         choice.post = i;
-                        choice.message = match weapon_banks(&lib, class).get(i) {
-                            None => said("IDGS_TPFRONTENDTEXT02_WEAPON_WRONG_MOUNT"),
-                            Some((bank, _)) if !bank_compatible(&lib, class, *bank, &gun) => said("IDGS_TPFRONTENDTEXT02_WEAPON_WRONG_MOUNT"),
-                            Some((bank, first)) => {
-                                slot.weapons.resize_with(slot.fleet.len(), BTreeMap::new);
-                                let old = slot.weapons[choice.ship].get(bank).unwrap_or(&class.mounts[*first].gun).clone();
-                                let delta = i64::from(bank_cost(&lib, class, *bank, &gun).unwrap_or(0)) - i64::from(bank_cost(&lib, class, *bank, &old).unwrap_or(0));
-                                if delta > points {
-                                    said("IDGS_TPFRONTENDTEXT02_WEAPON_NOT_ENOUGH_VICTORY_POINTS")
-                                } else {
-                                    slot.weapons[choice.ship].insert(*bank, gun);
-                                    // Retail's message block: 'Total Cost: <change>' and 'Weapon Upgrade Successful'.
-                                    format!("{} {}\n{}", said("IDGS_TPFRONTENDTEXT02_TOTAL_COST"), delta, said("IDGS_TPFRONTENDTEXT02_WEAPON_UPGRADE_SUCCESSFUL"))
-                                }
-                            }
-                        };
+                        slot.weapons.resize_with(slot.fleet.len(), BTreeMap::new);
+                        let targets: Vec<_> = weapon_banks(&lib, class).get(i).copied().into_iter().collect();
+                        choice.message = fit_message(&said, fit_guns(&lib, class, &mut slot.weapons[choice.ship], &targets, &gun, points));
                     }
                     _ => {
                         (choice.post, choice.page) = (i, 0);
@@ -1145,6 +1202,16 @@ fn skirmish_screen_model(
                 };
                 picked = guns.iter().position(|g| *g == want);
                 detail = weapon_detail(lib, want);
+                // The price change of each weapon on the selected bank; one the points left cannot pay for is dimmed.
+                let fit = slot.weapons.get(choice.ship).cloned().unwrap_or_default();
+                let first = weapon_banks(lib, class).into_iter().find(|(b, _)| b == bank).map_or(0, |(_, f)| f);
+                rows = guns
+                    .iter()
+                    .map(|g| {
+                        let delta = bank_delta(lib, class, &fit, (*bank, first), g).unwrap_or(0);
+                        RowInfo { value: String::new(), price: signed(delta), grey: delta > points }
+                    })
+                    .collect();
                 list = guns.into_iter().map(|g| (gun_label(g), Action::PickWeapon(g.clone()))).collect();
             }
         } else {
@@ -1608,5 +1675,55 @@ mod tests {
             crew[r] = vec!["x".into(); caps[r] as usize];
         }
         assert_eq!(auto_post(&crew, "Ship_Navy_Frigate", &id), None);
+    }
+
+    #[test]
+    fn price_changes_read_signed() {
+        assert_eq!((signed(8), signed(-8), signed(0)), ("+8".to_string(), "-8".to_string(), "0".to_string()));
+    }
+
+    /// A class with a gun that fits at least two of its banks, and that gun.
+    #[cfg(test)]
+    fn class_with_twin_banks(lib: &Library) -> (usize, String) {
+        for (ci, class) in lib.classes.iter().enumerate() {
+            for gun in lib.guns.keys() {
+                if banks_for(lib, class, gun).len() >= 2 && class.mounts.iter().all(|m| lib.guns.contains_key(&m.gun)) {
+                    return (ci, gun.clone());
+                }
+            }
+        }
+        panic!("no class has two banks of one mount type");
+    }
+
+    #[test]
+    #[ignore = "needs imported assets"]
+    fn fitting_every_bank_of_a_mount_type_is_all_or_nothing_against_the_points() {
+        let lib = Library::load(crate::assets_dir());
+        let (ci, gun) = class_with_twin_banks(&lib);
+        let class = &lib.classes[ci];
+        let targets = banks_for(&lib, class, &gun);
+        let need: i64 = targets.iter().map(|&t| bank_delta(&lib, class, &BTreeMap::new(), t, &gun).unwrap()).sum();
+        let mut fit = BTreeMap::new();
+        assert_eq!(fit_guns(&lib, class, &mut fit, &targets, &gun, need - 1), Err(FitError::NotEnough));
+        assert!(fit.is_empty(), "a refused fit changes no bank");
+        assert_eq!(fit_guns(&lib, class, &mut fit, &targets, &gun, need), Ok(need));
+        assert!(targets.iter().all(|(b, _)| fit.get(b) == Some(&gun)), "every bank got the gun");
+        // Fitting it again changes nothing and costs nothing.
+        assert_eq!(fit_guns(&lib, class, &mut fit, &targets, &gun, 0), Ok(0));
+        assert_eq!(fit_guns(&lib, class, &mut fit, &[], &gun, 0), Err(FitError::WrongMount), "no bank takes it");
+    }
+
+    #[test]
+    #[ignore = "needs imported assets"]
+    fn the_price_change_is_the_difference_times_the_guns_in_the_bank() {
+        let lib = Library::load(crate::assets_dir());
+        let (ci, gun) = class_with_twin_banks(&lib);
+        let class = &lib.classes[ci];
+        let target = banks_for(&lib, class, &gun)[0];
+        let stock = &class.mounts[target.1].gun;
+        let guns = class.mounts.iter().filter(|m| m.bank == target.0).count() as i64;
+        let (a, b) = (i64::from(lib.guns[&gun].points.unwrap_or(0)), i64::from(lib.guns[stock].points.unwrap_or(0)));
+        assert_eq!(bank_delta(&lib, class, &BTreeMap::new(), target, &gun), Some((a - b) * guns));
+        assert_eq!(bank_delta(&lib, class, &BTreeMap::new(), target, stock), Some(0));
     }
 }
