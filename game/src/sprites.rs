@@ -237,13 +237,10 @@ impl View {
     /// The node size and margins that draw the image: the node's outer box (size plus margins, `extra` included) is the whole
     /// `to` box, so flex layout and absolute positions behave as if the untrimmed sprite were drawn.
     pub fn geometry(&self, s: f32, extra: UiRect) -> (Val, Val, UiRect) {
-        let margin = UiRect {
-            left: add(extra.left, self.offset.x * s),
-            right: add(extra.right, (self.to.x - self.offset.x - self.size.x) * s),
-            top: add(extra.top, self.offset.y * s),
-            bottom: add(extra.bottom, (self.to.y - self.offset.y - self.size.y) * s),
-        };
-        (Val::Px(self.size.x * s), Val::Px(self.size.y * s), margin)
+        // Edges, not sizes, are rounded: the three spans always add up to the snapped `to` box, so neighbours still butt.
+        let (x, y) = (crate::panels::snap_span(self.offset.x, self.size.x, self.to.x, s), crate::panels::snap_span(self.offset.y, self.size.y, self.to.y, s));
+        let margin = UiRect { left: add(extra.left, x.0), right: add(extra.right, x.2), top: add(extra.top, y.0), bottom: add(extra.bottom, y.2) };
+        (Val::Px(x.1), Val::Px(y.1), margin)
     }
     /// The same placement as shares of the box, for a child of a node that is the box itself (its size changes every frame):
     /// left, top, width and height.
