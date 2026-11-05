@@ -13,6 +13,7 @@ pub fn fleet_smoke(world: &mut World, mut previous: Local<Option<Entity>>) {
         Some("fleet") => fleet(world, frame, &mut previous),
         Some("fleet-profile-arms") => profile_arms(world, frame),
         Some("fleet-ships") => ships_double_click(world, frame),
+        Some("fleet-crew") => crew_clicks(world, frame),
         _ => {}
     }
 }
@@ -499,3 +500,68 @@ fn ships_double_click(world: &mut World, frame: u32) {
         _ => {}
     }
 }
+
+/// `--menu fleet --script fleet-crew`: on the Crew tab of an auto-assigned fleet a post is clicked, then a roster row is clicked
+/// (press and release, no drag) and the member is seated on that post; a right-click on their face returns them to the roster.
+#[allow(deprecated)]
+fn crew_clicks(world: &mut World, frame: u32) {
+    use crate::crew_arms::Action as A;
+    use crate::menu::Skirmish;
+    let touch = |world: &mut World, want: &dyn Fn(&A) -> bool, to: Interaction| -> Option<A> {
+        let mut hit = None;
+        for (a, mut i) in world.query::<(&A, &mut Interaction)>().iter_mut(world) {
+            if want(a) {
+                *i = to;
+                hit = Some(a.clone());
+            }
+        }
+        hit
+    };
+    let seated = |world: &World| {
+        let sk = world.resource::<Skirmish>();
+        sk.slots.iter().find(|s| s.kind == crate::menu::Kind::Human).and_then(|h| h.crew.get(sk.fleet_pick).map(|c| c[0].clone())).unwrap_or_default()
+    };
+    match frame {
+        20 => {
+            let mut sk = world.resource_mut::<Skirmish>();
+            let h = sk.slots.iter().position(|s| s.kind == crate::menu::Kind::Human).unwrap();
+            sk.victory_limit += 500;
+            let ship = sk.fleet_pick;
+            sk.slots[h].crew_mut(ship)[0].clear();
+        }
+        30 => {
+            assert!(touch(world, &|a| matches!(a, A::SelectPost(0)), Interaction::Pressed).is_some(), "no Gunners post to click");
+            world.resource_mut::<ButtonInput<MouseButton>>().press(MouseButton::Left);
+        }
+        31 => world.resource_mut::<ButtonInput<MouseButton>>().release(MouseButton::Left),
+        34 => {
+            assert!(touch(world, &|a| matches!(a, A::PickCrew(_)), Interaction::None).is_some(), "no roster rows");
+            let row = world.query::<&A>().iter(world).find(|a| matches!(a, A::PickCrew(_))).cloned().unwrap();
+            let id = if let A::PickCrew(id) = &row { id.clone() } else { unreachable!() };
+            world.insert_resource(ClickedRow(id));
+            touch(world, &|a| a == &row, Interaction::Pressed);
+            world.resource_mut::<ButtonInput<MouseButton>>().press(MouseButton::Left);
+        }
+        36 => {
+            let id = world.resource::<ClickedRow>().0.clone();
+            touch(world, &|a| matches!(a, A::PickCrew(x) if *x == id), Interaction::Hovered);
+            world.resource_mut::<ButtonInput<MouseButton>>().release(MouseButton::Left);
+        }
+        40 => {
+            let id = world.resource::<ClickedRow>().0.clone();
+            assert_eq!(seated(world), [id], "clicking a roster row with a post selected seats the member");
+        }
+        44 => {
+            assert!(touch(world, &|a| matches!(a, A::PostFace(0, 0)), Interaction::Hovered).is_some(), "no face on the post");
+            world.resource_mut::<ButtonInput<MouseButton>>().press(MouseButton::Right);
+        }
+        46 => {
+            assert!(seated(world).is_empty(), "a right-click returns the member to the roster");
+            info!("fleet-crew smoke passed");
+        }
+        _ => {}
+    }
+}
+
+#[derive(Resource)]
+struct ClickedRow(String);

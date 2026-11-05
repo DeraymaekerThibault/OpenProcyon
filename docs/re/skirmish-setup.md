@@ -109,6 +109,14 @@ skill can read N/A). Dragging one onto a post spends its cost (a 9-point captain
   panel (portrait, cost, seven skills, N/A where none); a release over, or a later click on, a face / mount places it. A full post
   replaces its last named crew member (PROVISIONAL). Drop returns the selected post's last named crew member. Weapon placement
   follows the measured rules and uses the original's messages (wrong mount, not enough points, Total Cost).
+- Crew screen quality of life (#299; every rule here is PROVISIONAL, retail has none of it, the drag and drop above is unchanged):
+  clicking a post or a face selects it (`Choice::post_picked`; the post shown by default does not count) and sorts the roster by that post's
+  skill (`sort_for_post`: Captain and First Mate Leadership, Helmsman Navigation, Lookout Spotting, Engineers Engineering, Riggers Rigging,
+  Fighters Combat, Gunners Gunnery). While a post is selected, a click on a roster row (press and release on it, no drag) seats that member on
+  it under the drop rules (`place_crew`: a full post gives up its last member, the price must fit the points left). Rows show the rating in the
+  selected post's skill (else the sort's skill) and the price, right-aligned; a row dearer than the points left is dimmed and refused with the
+  usual message. With no post selected, a double-click on a row (0.4 s, `menu::ClickClock`) seats the member on the first free post, in post
+  order, that rates their best skill (`auto_post`); if none is free it says so. A right-click on a posted face returns that member to the roster.
 - In battle the human fleet's named crew become `CrewPosts` (speed and rudder factors, boarding crews) through `SkirmishCrew`.
   Named gunners (posts) already drive the human ships' accuracy and gun reload (`combat/gunnery.rs`, docs/re/gunnery.md).
 - Load / Save Fleet, Crew and Arms (`profiles.rs`, `Skirmish::open_profile` / `do_profile`, `Slot::apply_profile`, dialog drawn by `classic/menu.rs` `profile_dialog`
