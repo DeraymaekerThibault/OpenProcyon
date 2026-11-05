@@ -1,5 +1,5 @@
 """Export the in-game HUD: hud/hud.json (components without their art), one trimmed PNG per sprite under hud/sprites/ (layout in
-tools/hud_sprites.py) and the bitmap font sheets in hud/tex/.
+tools/hud_sprites.py) and the font metrics in hud/fonts/ (no glyph sheets: UI text is vector).
 
 usage: python -m tools.export_hud <game_root> <outdir>
 """
@@ -118,11 +118,6 @@ def main(root, out):
     for f in ci_files(Path(root) / "Fonts", "*.fft"):
         font = parse_font(Path(f).read_text(encoding="latin1"))
         (hud / "fonts" / (Path(f).stem + ".json")).write_text(json.dumps(font))
-        for t in font["textures"]:
-            dst = hud / "tex" / f"{t.lower()}.png"
-            src = ci_files(Path(root) / "BD_GUITextures", t + ".tga")
-            if src:
-                Image.open(src[0]).convert("RGBA").save(dst)
     print(
         f"exported {len(comps)} HUD components, {count} sprites; missing sheets: {sorted(missing)}"
     )

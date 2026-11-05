@@ -70,7 +70,7 @@ Reference screenshots are local only (`local/reference/`, never committed).
 
 | ID | Status | Open work |
 |---|---|---|
-| UIR-01 | Partial | World labels and star map still use vector fonts, not the retail glyph sheets. |
+| UIR-01 | Partial | All UI text is vector (retail advances for layout), not the retail hand-hinted glyph sheets; sizes are PROVISIONAL. |
 | UIR-05 | Partial | Ships screen: ship-name drop-down, slot-bar scrolling. |
 | UIR-06 | Partial | Crew/Arms: skirmish crew roster, drag and drop, Auto Assign, stat-bar post mapping ([crew.md](re/crew.md)). |
 | UIR-08 | Partial | Game Summary: retail VICTORY! matches the layout (one page, green bar per column's best, winner's row first; rows now ordered by ships left). Open: panel art, flag choice, whether campaign summaries add a kills-by-type table. |
