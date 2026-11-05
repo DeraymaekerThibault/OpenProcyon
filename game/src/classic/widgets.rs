@@ -38,7 +38,7 @@ struct Art(Vec<(Entity, Piece)>);
 pub(super) struct Rest(pub(super) Color);
 
 pub fn plugin(app: &mut App) {
-    app.add_systems(Update, hover.after(RunButtons).run_if(menu_active)).add_systems(Update, fit_cover);
+    app.add_systems(Update, hover.after(RunButtons).run_if(menu_active)).add_systems(Update, fit_cover.after(crate::menu::BuildMenu));
 }
 
 /// A backdrop picture that covers its frame: scaled up (never distorted) until both sides are filled, centre-cropped. The picture's
@@ -187,10 +187,8 @@ impl Ctx<'_> {
         n.align_items = AlignItems::Center;
         n.justify_content = if centre { JustifyContent::Center } else { JustifyContent::FlexStart };
         c.spawn(n).with_children(|c| {
-            let line = Node { width: Val::Px(f.width(s) * self.scale), height: Val::Px(f.height * self.scale), flex_shrink: 0.0, align_items: AlignItems::Center, ..default() };
-            c.spawn(line).with_children(|c| {
-                c.spawn((f.text(s, self.scale, tint), TextLayout::no_wrap()));
-            });
+            // The vector text is as wide as it is, not as the retail advances: centre that, not the advance sum.
+            c.spawn((f.text(s, self.scale, tint), TextLayout::no_wrap(), Node { flex_shrink: 0.0, ..default() }));
         });
     }
     /// Text button over the 3-piece FrontEnd_Texts_Over_Button art (44 px tall in the sheet, stretched to the rect).
