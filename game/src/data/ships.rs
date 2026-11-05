@@ -255,8 +255,12 @@ fn try_load_class(root: &Path, name: &str, guns: &HashMap<String, GunDef>) -> Re
     let hull_bound = sections.iter().map(|s| s.min.abs().max(s.max.abs()).length()).fold(0.0, f32::max);
     let centre = if hmn.x <= hmx.x { (hmn + hmx) / 2.0 } else { (amn + amx) / 2.0 };
     let radius = 0.5 * (amx - amn).x.max((amx - amn).z) + 2.0;
-    let flag_at = |label: &str| j.flags.as_ref()?.iter().find(|f| f.label == label).map(|f| point(f.pos));
-    let flag = flag_at("Flag_Top").zip(flag_at("Flag_Bottom"));
+    // The retail hulls spell the pole's two points many ways (Flag_Top, Top_Flag, flag_top, Top_FlagPoint, Flag_Botom ...).
+    let flag_at = |end: &str| {
+        let flags = j.flags.as_ref()?;
+        flags.iter().find(|f| f.label.to_lowercase().contains("flag") && f.label.to_lowercase().contains(end)).map(|f| point(f.pos))
+    };
+    let flag = flag_at("top").zip(flag_at("bot"));
     let engines = j
         .engines
         .into_iter()
