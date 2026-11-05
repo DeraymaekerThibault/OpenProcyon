@@ -35,6 +35,12 @@ file. Keep the art inside the trimmed rectangle (a pixel-exact redraw of the ret
 `NoCursor`; to give one its own art, add the file and a matching entry under `states` in `<skin>.json`. Each sprite is replaced on its own, so a pack can redo
 only the bar. Offsets and numbers stay in `hud/hud.json`; a mod that ships it replaces the whole file, so leave it alone unless the layout should move.
 
+The main bar is one image per faction, `hud/bar/<skin>.png` with `hud/bar/<skin>.json` listing the part boxes (see `docs/data-format.md`); the importer composes
+it from the sprites above (`tools/compose_bar.py`), so a pack that only redoes some part art needs no extra step beyond re-running the import. To redesign the
+bar, ship both files of a skin in the mod: draw the whole bar in the PNG (any resolution; its json is in reference pixels) and give each part's `x`, `width`
+and `height` where its button, gauge or ship icon sits. The part names are the sprite names of `data/hud/bar.json`; parts the game drives (the buttons' hover and
+pressed art, gauge fills, the ship portrait) are placed on those boxes.
+
 The old way, replacing a whole atlas `hud/tex/<sheet>.png` at 2x and declaring it in `hud/scales.json`, is gone: the atlases are not exported or read any more.
 Buttons and ship-name ribbons are single 9-slice nodes built from `hud/tex/slice_<button|ribbon>_<skin>_<state>.png` (made by `tools/make_slices.py`); replace
 those (plus a `hud/scales.json` entry named like the file, e.g. `{"slice_button_navy_nocursor": 2}`, merged across mods) for HD buttons. That is the only use of

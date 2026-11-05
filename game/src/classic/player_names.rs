@@ -41,7 +41,7 @@ fn window(
     }
     *last = Some(key);
     let s = win.height() / REF_H;
-    let c = Ctx { assets: &assets, hud: &hud, s, trim: false };
+    let c = Ctx { assets: &assets, hud: &hud, s };
     let menu = HudData { comps: hud.comps.clone(), skin: MENU_SKIN };
     let flags = Ctx { hud: &menu, ..c };
     let (top, bottom, centre) = (c.size_of("PLAYER_NAMES_WINDOW_TOP_DETAIL"), c.size_of("PLAYER_NAMES_WINDOW_BOTTOM_DETAIL"), "PLAYER_NAMES_WINDOW_STRETCHED_CENTER");

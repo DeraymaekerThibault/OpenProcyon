@@ -214,6 +214,7 @@ def steps(root, out, want, part=lambda i, k: None):
         # Waypoint/course art lives in BD_Textures (DDS), not BD_GUITextures.
         ("waypoint art", lambda: tool("tools.export_waypoint_art", root, out)),
         ("slices", lambda: tool("tools.make_slices", out)),
+        ("main bar", lambda: tool("tools.compose_bar", out)),
         # Font sheets, waypoint art and the slice strips (the sprites are fixed as they are exported).
         ("alpha bleed", lambda: tool("tools.fix_alpha_bleed", out / "hud/tex")),
         ("sounds", lambda: sounds(root, out)),
