@@ -303,8 +303,8 @@ pub(super) fn slider(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32
     let cy = (t + b) / 2.0;
     let top = cy - 16.5;
     ctx.slice(c, "hscroll", [l, top, r - l, 33.0]);
-    end_cap(ctx, c, true, [l, top, CAP, 33.0], Some((dec, ArrowButton { forward: false })));
-    end_cap(ctx, c, false, [r - CAP, top, CAP, 33.0], Some((inc, ArrowButton { forward: true })));
+    end_cap(ctx, c, true, r - l, [l, top, CAP, 33.0], Some((dec, ArrowButton { forward: false })));
+    end_cap(ctx, c, false, r - l, [r - CAP, top, CAP, 33.0], Some((inc, ArrowButton { forward: true })));
     let track_w = r - l - 2.0 * CAP;
     let mut track = c.spawn((Interaction::None, kind, RelativeCursorPosition::default(), ctx.node(l + CAP, top, track_w, 33.0)));
     let mut parts = vec![];
@@ -317,14 +317,14 @@ pub(super) fn slider(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32
 }
 
 /// A round end of the horizontal scrollbar art (`hscroll` slice group) drawn as a step button over `[x, y, w, h]` (inert without an
-/// action): the strip, twice as wide as the button, shows its left or right half through the button's box.
-fn end_cap(ctx: &Ctx, c: &mut ChildSpawnerCommands, left: bool, [x, y, w, h]: [f32; 4], action: Option<impl Bundle>) {
+/// action): the whole strip (as wide as the slider, so its caps are never rescaled) shows its left or right end through the button's box.
+fn end_cap(ctx: &Ctx, c: &mut ChildSpawnerCommands, left: bool, strip: f32, [x, y, w, h]: [f32; 4], action: Option<impl Bundle>) {
     let mut root = c.spawn((Interaction::None, Node { overflow: Overflow::clip(), ..ctx.node(x, y, w, h) }));
     if let Some(a) = action {
         root.insert(a);
     }
     let mut parts = vec![];
-    root.with_children(|c| parts.push((ctx.slice(c, "hscroll", [if left { 0.0 } else { -w }, 0.0, 2.0 * w, h]), Piece::Slice("hscroll"))));
+    root.with_children(|c| parts.push((ctx.slice(c, "hscroll", [if left { 0.0 } else { w - strip }, 0.0, strip, h]), Piece::Slice("hscroll"))));
     root.insert(Art(parts));
 }
 
@@ -343,7 +343,7 @@ pub(super) fn fleet_bar<A: Bundle>(
     pick: impl Fn(usize) -> A,
 ) {
     for (left, x, live) in [(true, 36.0, scroll > 0), (false, 402.0, scroll + SLOT_BAR < limit)] {
-        end_cap(ctx, c, left, [x, 507.0, 22.0, 22.0], live.then(|| scroll_by(if left { -1 } else { 1 })));
+        end_cap(ctx, c, left, 44.0, [x, 507.0, 22.0, 22.0], live.then(|| scroll_by(if left { -1 } else { 1 })));
     }
     for k in 0..SLOT_BAR {
         let (i, x) = (scroll + k, 75.0 + k as f32 * 65.0);
