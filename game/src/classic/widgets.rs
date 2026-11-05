@@ -7,7 +7,7 @@ use bevy::prelude::*;
 use bevy::ui::{FocusPolicy, RelativeCursorPosition};
 
 use crate::menu::{ArrowButton, ListEntry, RunButtons, SLIDER_KNOB, SLOT_BAR, ScrollKind, ScrollTrack, SliderTrack, menu_active};
-use crate::sprites::{BODY_FONT, Fonts, HudData, IDLE, MENU_SKIN, meta_in, slice, sprite_in};
+use crate::sprites::{BODY_FONT, Fonts, HudData, IDLE, MENU_SKIN, meta_in, sprite_in};
 use crate::theme::{Look, Looks, State, Theme};
 
 /// Retail gold for highlighted labels (the `Center Justify Label` title colour).
@@ -26,8 +26,6 @@ const CELL_HOVER: Color = Color::srgba(0.1, 0.25, 0.55, 0.85);
 /// One swappable part of a widget's art.
 enum Piece {
     Sprite(String),
-    /// A `sprites::slice` strip of this group (`data/hud/slices.json`).
-    Slice(&'static str),
 }
 
 /// Hover/press art: a widget's pieces, swapped between NoCursor / CursorOver / CursorDown by `hover`.
@@ -93,7 +91,7 @@ fn hover_drawn(mut q: Query<(&Interaction, &Drawn, &mut BackgroundGradient, &mut
 pub(super) struct Rest(pub(super) Color);
 
 pub fn plugin(app: &mut App) {
-    app.add_systems(Update, (hover, hover_drawn).after(RunButtons).run_if(menu_active)).add_systems(Update, fit_cover.after(crate::menu::BuildMenu));
+    app.add_systems(Update, (hover, hover_drawn, hover_knob).after(RunButtons).run_if(menu_active)).add_systems(Update, fit_cover.after(crate::menu::BuildMenu));
 }
 
 /// A backdrop picture that covers its frame: scaled up (never distorted) until both sides are filled, centre-cropped. The picture's
@@ -146,7 +144,6 @@ fn hover(
         for (e, piece) in art.map(|a| a.0.as_slice()).unwrap_or(&[]) {
             let Ok((mut img, mut node)) = imgs.get_mut(*e) else { continue };
             match piece {
-                Piece::Slice(group) => img.image = assets.load(format!("hud/tex/slice_{group}_{}_{}.png", MENU_SKIN.to_lowercase(), state.to_lowercase())),
                 Piece::Sprite(name) => {
                     if let Some(art) = sprite_in(&assets, MENU_SKIN, name, state) {
                         art.show(&mut img, &mut node, scale);
@@ -266,21 +263,13 @@ impl Ctx<'_> {
         let look = looks.get(state);
         let [left, top, width, height, ..] = panel_geometry([x, y, x + w, y + h], PanelKind::Band, self.theme, self.scale);
         let border = crate::panels::snap(looks.rim_width, self.scale).max(1.0).min(height / 2.0);
-        let radius = if family == Family::Button { height / 2.0 } else { crate::panels::snap(6.0, self.scale).min(height / 2.0) };
+        let radius = if family == Family::Button { width.min(height) / 2.0 } else { crate::panels::snap(6.0, self.scale).min(height / 2.0) };
         (
             Node { border: UiRect::all(Val::Px(border)), border_radius: BorderRadius::all(Val::Px(radius)), ..bare(left, top, width, height) },
             gradient(look),
             rim(look),
             BoxShadow::new(Color::BLACK.with_alpha(0.35), Val::Px(0.0), Val::Px(self.scale.round()), Val::Px(0.0), Val::Px((3.0 * self.scale).round())),
         )
-    }
-    /// The idle strip of slice group `group` over `[x, y, w, h]`, one 9-slice node (nothing when the art set lacks the group).
-    pub(super) fn slice(&self, c: &mut ChildSpawnerCommands, group: &str, [x, y, w, h]: [f32; 4]) -> Entity {
-        let node = self.node(x, y, w, h);
-        match slice(self.assets, group, MENU_SKIN, "nocursor") {
-            Some(art) => c.spawn((art, node)).id(),
-            None => c.spawn(node).id(),
-        }
     }
     /// A text button when it has an action, else its greyed-out retail art.
     pub(super) fn button(&self, c: &mut ChildSpawnerCommands, rect: [f32; 4], label: &str, font: &str, action: Option<impl Bundle>) {
@@ -300,6 +289,8 @@ pub(super) enum PanelKind {
     Inner,
     /// The lighter strip along the bottom of a list box (flat, no rim).
     Band,
+    /// A small bevelled frame: a fleet slot, the ship icon, a stat bar.
+    Slot,
 }
 
 /// Physical-px geometry of a panel: `(left, top, width, height, border, radius)`, every edge on a whole pixel so the rim stays crisp
@@ -310,9 +301,11 @@ pub(super) fn panel_geometry([l, t, r, b]: [f32; 4], kind: PanelKind, theme: &Th
         PanelKind::Outer => (theme.rim_width, theme.panel_radius),
         PanelKind::Inner => (theme.edge_width, theme.box_radius),
         PanelKind::Band => (0.0, 0.0),
+        PanelKind::Slot => (theme.edge_width, theme.slot_radius),
     };
     let border = if border > 0.0 { snap(border, scale).max(1.0) } else { 0.0 };
-    [snap(l, scale), snap(t, scale), snap(r, scale) - snap(l, scale), snap(b, scale) - snap(t, scale), border, snap(radius, scale)]
+    let (w, h) = (snap(r, scale) - snap(l, scale), snap(b, scale) - snap(t, scale));
+    [snap(l, scale), snap(t, scale), w, h, border, snap(radius, scale).min(w.min(h) / 2.0).floor()]
 }
 
 /// A drawn panel over the retail rect `[l, t, r, b]` (reference units): rounded corners, a gold bevelled rim or teal hairline, a gradient
@@ -350,6 +343,7 @@ pub(super) fn panel(ctx: &Ctx, c: &mut ChildSpawnerCommands, rect: [f32; 4], kin
             ))
             .id(),
         PanelKind::Inner => c.spawn((node, BackgroundColor(theme.box_fill), BorderColor::all(theme.edge))).id(),
+        PanelKind::Slot => c.spawn((node, BackgroundColor(theme.box_fill), BorderColor { top: theme.rim_light, left: theme.rim_light, right: theme.rim, bottom: theme.rim })).id(),
         PanelKind::Band => c.spawn((node, BackgroundColor(theme.band_fill))).id(),
     }
 }
@@ -418,58 +412,89 @@ pub(super) fn stretched_window(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r
     }
 }
 
-/// The retail vertical scrollbar for a list of `total` rows of which `visible` show from row `first`: track
-/// (`..._SLIDER_BACKGROUND_TOP/STRETCHED_CENTER/BOTTOM`) and a thumb that never gets shorter than its two end caps and stays inside the
-/// track; pressing and dragging the track moves it (`menu::scroll_drag`, the same everywhere).
+/// A vertical scrollbar for a list of `total` rows of which `visible` show from row `first`: a rounded dark track and a gold-rimmed pill
+/// thumb that never gets shorter than the track is wide and stays inside it; pressing and dragging the track moves it
+/// (`menu::scroll_drag`, the same everywhere).
 pub(super) fn scrollbar(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], kind: ScrollKind, total: usize, visible: usize, first: usize) {
-    let cap = |name: &str| size_of(name).map_or(20.0, |size| size.y);
-    let track = |c: &mut ChildSpawnerCommands, prefix: &str, t: f32, b: f32| {
-        let (top, bottom) = (cap(&format!("{prefix}_TOP")), cap(&format!("{prefix}_BOTTOM")));
-        piece(ctx, c, &format!("{prefix}_TOP"), [l, t, r, t + top]);
-        piece(ctx, c, &format!("{prefix}_STRETCHED_CENTER"), [l, t + top, r, b - bottom]);
-        piece(ctx, c, &format!("{prefix}_BOTTOM"), [l, b - bottom, r, b]);
-    };
-    track(c, "FRONTEND_SCROLLBAR_SLIDER_BACKGROUND", t, b);
     let h = b - t;
-    let min = cap("FRONTEND_SCROLLBAR_SLIDER_TOP") + cap("FRONTEND_SCROLLBAR_SLIDER_BOTTOM");
-    let share = if total == 0 { 1.0 } else { (visible as f32 / total as f32).min(1.0) };
-    let len = (share * h).max(min).min(h);
-    let pos = first as f32 / total.saturating_sub(visible).max(1) as f32;
-    let top = t + pos.clamp(0.0, 1.0) * (h - len);
-    track(c, "FRONTEND_SCROLLBAR_SLIDER", top, top + len);
+    let (len, top) = thumb_span(h, total, visible, first, r - l);
+    track(ctx, c, [l, t, r, b]);
+    c.spawn(ctx.drawn(Family::Button, State::Idle, [l + 2.0, t + top, r - l - 4.0, len]));
     c.spawn((Interaction::None, ScrollTrack { kind, total, visible, thumb: len / h }, RelativeCursorPosition::default(), ctx.node(l, t, r - l, h)));
 }
 
-/// The Create Skirmish slider: the scrollbar art whose rounded 33 px ends are the step buttons, a 134 px track between them and a
-/// knob that follows `fraction` (dragging the track moves it, see `menu::slider_drag`).
+/// Length and offset (reference px) of a scrollbar thumb in a track `h` long: its share of the track is `visible / total` rows but never
+/// less than `min`, and `first` of the `total - visible` scrollable rows places it.
+fn thumb_span(h: f32, total: usize, visible: usize, first: usize, min: f32) -> (f32, f32) {
+    let share = if total == 0 { 1.0 } else { (visible as f32 / total as f32).min(1.0) };
+    let len = (share * h).max(min).min(h);
+    let pos = first as f32 / total.saturating_sub(visible).max(1) as f32;
+    (len, pos.clamp(0.0, 1.0) * (h - len))
+}
+
+/// A rounded dark groove (scrollbar and slider tracks): the inner-box fill with its teal hairline.
+fn track(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4]) {
+    let [left, top, width, height, border, _] = panel_geometry([l, t, r, b], PanelKind::Inner, ctx.theme, ctx.scale);
+    let node = Node { border: UiRect::all(Val::Px(border)), border_radius: BorderRadius::all(Val::Px((width.min(height) / 2.0).floor())), ..bare(left, top, width, height) };
+    c.spawn((node, BackgroundColor(ctx.theme.box_fill), BorderColor::all(ctx.theme.edge)));
+}
+
+/// The Create Skirmish slider: a rounded track between two round step buttons (33 px, each with a chevron) and a pill knob that follows
+/// `fraction` (dragging the track moves it, see `menu::slider_drag`). The 134 px hit box between the buttons is the retail track.
 pub(super) fn slider(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], fraction: f32, dec: impl Bundle, inc: impl Bundle, kind: SliderTrack) {
     const CAP: f32 = 33.0;
     let cy = (t + b) / 2.0;
     let top = cy - 16.5;
-    ctx.slice(c, "hscroll", [l, top, r - l, 33.0]);
-    end_cap(ctx, c, true, r - l, [l, top, CAP, 33.0], Some((dec, ArrowButton { forward: false })));
-    end_cap(ctx, c, false, r - l, [r - CAP, top, CAP, 33.0], Some((inc, ArrowButton { forward: true })));
+    track(ctx, c, [l + CAP / 2.0, cy - 7.0, r - CAP / 2.0, cy + 7.0]);
+    step_button(ctx, c, true, [l, top, CAP, 33.0], Some((dec, ArrowButton { forward: false })));
+    step_button(ctx, c, false, [r - CAP, top, CAP, 33.0], Some((inc, ArrowButton { forward: true })));
     let track_w = r - l - 2.0 * CAP;
-    let mut track = c.spawn((Interaction::None, kind, RelativeCursorPosition::default(), ctx.node(l + CAP, top, track_w, 33.0)));
-    let mut parts = vec![];
-    track.with_children(|c| {
+    let mut root = c.spawn((Interaction::None, kind, RelativeCursorPosition::default(), ctx.node(l + CAP, top, track_w, 33.0)));
+    let mut knob = Entity::PLACEHOLDER;
+    root.with_children(|c| {
         let x = fraction * (track_w - SLIDER_KNOB);
-        let name = "FrontEnd_Horizontal_Scrollbar_Slider";
-        parts.extend(piece(ctx, c, name, [x, 5.5, x + SLIDER_KNOB, 5.5 + SLIDER_KNOB]).map(|e| (e, Piece::Sprite(name.into()))));
+        knob = c.spawn((ctx.drawn(Family::Button, State::Idle, [x, 7.5, SLIDER_KNOB, 18.0]),)).id();
     });
-    track.insert(Art(parts));
+    root.insert(Knob(knob));
 }
 
-/// A round end of the horizontal scrollbar art (`hscroll` slice group) drawn as a step button over `[x, y, w, h]` (inert without an
-/// action): the whole strip (as wide as the slider, so its caps are never rescaled) shows its left or right end through the button's box.
-fn end_cap(ctx: &Ctx, c: &mut ChildSpawnerCommands, left: bool, strip: f32, [x, y, w, h]: [f32; 4], action: Option<impl Bundle>) {
-    let mut root = c.spawn((Interaction::None, Node { overflow: Overflow::clip(), ..ctx.node(x, y, w, h) }));
-    if let Some(a) = action {
-        root.insert(a);
+/// The knob of a slider, on the slider's hit box: it follows the cursor over that box.
+#[derive(Component)]
+struct Knob(Entity);
+
+fn hover_knob(q: Query<(&Interaction, &Knob), Changed<Interaction>>, mut knobs: Query<(&mut BackgroundGradient, &mut BorderColor)>) {
+    for (i, Knob(e)) in &q {
+        let Ok((mut fill, mut border)) = knobs.get_mut(*e) else { continue };
+        let look = Theme::current().button.get(state_of(*i, false));
+        *fill = gradient(look);
+        *border = rim(look);
     }
-    let mut parts = vec![];
-    root.with_children(|c| parts.push((ctx.slice(c, "hscroll", [if left { 0.0 } else { w - strip }, 0.0, strip, h]), Piece::Slice("hscroll"))));
-    root.insert(Art(parts));
+}
+
+/// A round step button over `[x, y, w, h]` with a chevron pointing left or right: gold-rimmed and clickable with an action, greyed and
+/// inert without one.
+fn step_button(ctx: &Ctx, c: &mut ChildSpawnerCommands, left: bool, rect: [f32; 4], action: Option<impl Bundle>) {
+    let state = if action.is_some() { State::Idle } else { State::Disabled };
+    let mut root = c.spawn(ctx.drawn(Family::Button, state, rect));
+    if let Some(a) = action {
+        root.insert((Interaction::None, Drawn { family: Family::Button, selected: false }, a));
+    }
+    let (w, border) = (crate::panels::snap(rect[2], ctx.scale), crate::panels::snap(ctx.theme.button.rim_width, ctx.scale).max(1.0));
+    let (cx, cy) = ((w - 2.0 * border) / 2.0, (crate::panels::snap(rect[3], ctx.scale) - 2.0 * border) / 2.0);
+    let tint = if state == State::Disabled { Color::srgb(0.55, 0.55, 0.55) } else { Color::WHITE };
+    root.with_children(|c| chevron(ctx, c, left, rect[2].min(rect[3]), (cx, cy), tint));
+}
+
+/// A chevron of two rotated bars centred on `(cx, cy)` physical px; `size` (reference px) is the button it sits on.
+fn chevron(ctx: &Ctx, c: &mut ChildSpawnerCommands, left: bool, size: f32, (cx, cy): (f32, f32), tint: Color) {
+    let s = ctx.scale * size / 33.0;
+    let (len, thick, dx, dy) = (9.0 * s, 3.0 * s, if left { -1.0 } else { 1.0 } * 0.8 * s, 3.2 * s);
+    // "<": the upper bar runs up-right ("/", anticlockwise), the lower down-right ("\"); ">" is the mirror.
+    for (up, deg) in [(true, if left { -45.0 } else { 45.0 }), (false, if left { 45.0 } else { -45.0 })] {
+        let y = cy + if up { -dy } else { dy };
+        let n = Node { border_radius: BorderRadius::all(Val::Px(thick / 2.0)), ..bare(cx + dx - len / 2.0, y - thick / 2.0, len, thick) };
+        c.spawn((n, BackgroundColor(tint), UiTransform::from_rotation(Rot2::degrees(deg))));
+    }
 }
 
 /// The fleet slot bar under the Ships / Crew / Arms screens ('Fleet Select Button' [27,479,459,559]) as measured: round scroll arrows
@@ -487,7 +512,7 @@ pub(super) fn fleet_bar<A: Bundle>(
     pick: impl Fn(usize) -> A,
 ) {
     for (left, x, live) in [(true, 36.0, scroll > 0), (false, 402.0, scroll + SLOT_BAR < limit)] {
-        end_cap(ctx, c, left, 44.0, [x, 507.0, 22.0, 22.0], live.then(|| scroll_by(if left { -1 } else { 1 })));
+        step_button(ctx, c, left, [x, 507.0, 22.0, 22.0], live.then(|| scroll_by(if left { -1 } else { 1 })));
     }
     for k in 0..SLOT_BAR {
         let (i, x) = (scroll + k, 75.0 + k as f32 * 65.0);
@@ -496,7 +521,7 @@ pub(super) fn fleet_bar<A: Bundle>(
             b.insert(pick(i));
         }
         b.with_children(|c| {
-            piece(ctx, c, "FrontEnd_Flag_Icon_Background", [0.0, 0.0, 60.0, 62.0]);
+            panel(ctx, c, [0.0, 0.0, 60.0, 62.0], PanelKind::Slot);
             match icons.get(i).copied().flatten() {
                 Some(icon) => {
                     piece(ctx, c, icon, [8.0, 9.0, 52.0, 53.0]);
@@ -515,7 +540,7 @@ pub(super) fn fleet_bar<A: Bundle>(
 /// label / value lines from y 161.5, 16 apart, labels at x 580, the colon at 676 and gold values at 686.
 pub(super) fn info_panel(ctx: &Ctx, c: &mut ChildSpawnerCommands, title: &str, icon: Option<&str>, cost: Option<u32>, lines: &[(String, String)], cost_label: [&str; 2]) {
     ctx.text(c, BODY_FONT, title, 510.0, 240.0, 130.0, false, Color::WHITE);
-    piece(ctx, c, "FrontEnd_Flag_Icon_Background", [510.0, 151.0, 568.0, 210.0]);
+    panel(ctx, c, [510.0, 151.0, 568.0, 210.0], PanelKind::Slot);
     if let Some(icon) = icon {
         piece(ctx, c, icon, [517.0, 158.0, 561.0, 203.0]);
     }
@@ -701,10 +726,26 @@ mod tests {
     }
 
     #[test]
+    fn thumb_fills_its_share_and_stays_inside_the_track() {
+        // 5 of 20 rows show: a quarter of a 100 px track, at the top, middle and bottom of the scroll range.
+        assert_eq!(thumb_span(100.0, 20, 5, 0, 10.0), (25.0, 0.0));
+        assert_eq!(thumb_span(100.0, 20, 5, 15, 10.0), (25.0, 75.0));
+        let (len, top) = thumb_span(100.0, 20, 5, 7, 10.0);
+        assert_eq!(len, 25.0);
+        assert!((top - 75.0 * 7.0 / 15.0).abs() < 1e-4);
+        // A long list keeps the minimum length; a list that fits fills the track; an empty list does not divide by zero.
+        assert_eq!(thumb_span(100.0, 1000, 5, 0, 21.0).0, 21.0);
+        assert_eq!(thumb_span(100.0, 3, 5, 0, 21.0), (100.0, 0.0));
+        assert_eq!(thumb_span(100.0, 0, 5, 0, 21.0), (100.0, 0.0));
+        // Scrolled past the end clamps.
+        assert_eq!(thumb_span(100.0, 20, 5, 99, 10.0).1, 75.0);
+    }
+
+    #[test]
     fn panel_edges_land_on_whole_physical_pixels() {
         let theme = Theme::default();
         for scale in [1.0, 1.125, 1.8, 2.4] {
-            for kind in [PanelKind::Outer, PanelKind::Inner, PanelKind::Band] {
+            for kind in [PanelKind::Outer, PanelKind::Inner, PanelKind::Band, PanelKind::Slot] {
                 let g = panel_geometry([23.3, 38.7, 459.4, 471.1], kind, &theme, scale);
                 assert!(g.iter().all(|v| v.fract() == 0.0), "{kind:?} at {scale}: {g:?}");
             }
