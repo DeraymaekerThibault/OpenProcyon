@@ -44,6 +44,9 @@ Springfield), https://history.siggraph.org/learning/creating-3d-painterly-enviro
 - **Thin even-width tracer lines**: they read as debug lines, so tracers became the layered bolts above.
 - **Strong relief from texture brightness**: it came out as embossed noise on the small painted textures, so it was
   cut to about a third.
+- **Rigid sky drift** (`sky_drift`: the whole baked sky turning at 0.6 degrees a minute): nobody sees 9 degrees in a battle, and
+  when seen, every star and cloud moving together reads as the camera rolling. Replaced by the `sky` dome: relative motion
+  (parallax, a current) instead of rotation.
 - **Warm or contrasty colour grading**: colours turned red and too dark, so grading stays neutral.
 
 ## Rules

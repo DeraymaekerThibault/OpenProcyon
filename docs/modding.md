@@ -88,7 +88,7 @@ never rules. Every key is optional; an absent block leaves that feature classic.
 | Key | Effect |
 |---|---|
 | `camera` | HDR camera: `bloom` (intensity), `bloom_threshold` (only light brighter than this blooms; 0 = Bevy's natural bloom, which hazes the image), `tonemapping` (`tony_mc_mapface`, `agx`, `aces`, `blender_filmic`, `reinhard_luminance`), `saturation`, `contrast`, `exposure` (stops), `smaa` (replaces MSAA), `ssao` (crashes with some effects meshes, keep false), `vignette` (corner darkening), `aberration` and `aberration_pulse` (colour fringing at rest, and added by a blast's camera jolt), `contact_shadows` (screen-space sun shadows where parts touch; adds a depth prepass) |
-| `sky_drift` | degrees per minute (real time, so pause and the speed buttons do not change it) the baked sky turns about a tilted axis; absent or 0: still |
+| `sky` | a dome over the baked sky (needs `models/sky/<sky>_cube.png` and `shaders/sky.wesl`): `near` (`distance`, `opacity` 0..1, `threshold` and `softness` of the brightness kept, `drift` the map-wide current in world units a second, game axes), a sparse soft copy of the sky's gas that slides against it as the camera moves (parallax) and drifts along the current. Replaces the retired `sky_drift`, a rigid turn of the whole sky that read as the camera rolling |
 | `sky_light`, `ambient` | image-based light (cd/m²) computed once from a mod's cube-map sky (`models/sky/<sky>_cube.png`), and the multiplier on the flat ambient light while it is on |
 | `sun` | `shadows`, `shadow_distance` (cascades out to this many units), `color` (multiplies the map's sun colour), `intensity` (multiplies its strength) |
 | `fx_gain`, `shell_gain` | multiply ONE/ONE effect colour and the shells' spheres, so they pass 1 and bloom |
@@ -107,7 +107,7 @@ never rules. Every key is optional; an absent block leaves that feature classic.
 `python -m tools.bake_sky [--size 2048] [--jobs N] [skybox_07 ...]` rebakes each imported battle sky as a high-resolution cube map
 (`models/sky/<sky>_cube.png`) into the local mod `<user data dir>/mods/hd-skies`, which is then switched on in the Mods screen.
 The result is derived from the player's own game copy, so it is made on their machine and never committed or shipped. Without it
-the game draws the retail sky sphere. Needs NumPy and Pillow. With `sky_drift` (above) the baked sky turns slowly.
+the game draws the retail sky sphere. Needs NumPy and Pillow. The `sky` block (above) adds a layer of gas in front of it.
 
 ### Effect events
 The blocks that decorate retail effects (`lights`, `bursts`, and `tracers` for thinning flight effects) learn that one started
@@ -144,10 +144,11 @@ likes.
 | `surface.wesl` | the retail StandardMaterial extended (roughness, metallic, reflectance already set from the rule): call `pbr_input_from_standard_material`, change `N`, colour and roughness, then `apply_pbr_lighting`; read `base_color_texture` for relief | `SurfaceUniform` in `surfaces.rs`: `params` (bump, cavity, gloss), `rim` (colour, strength) | none |
 | `burst.wesl` | additive on one mesh of every glowing particle: uv.x = kind × 4 + u, uv.y = seed × 2 + v (u, v 0..1 across the quad; kinds 0 flash, 1 spark (u tail to head), 2 ember, 3 fireball, 4 ring (flat), 5 scorch, 6 dust); vertex colour rgb = colour, a = age share of its life (dust: its fade) | `BurstUniform` in `bursts.rs`: `params` (clock) | the clock |
 | `smoke.wesl` | alpha-blended camera-facing puffs sorted far to near, same vertex layout (kind 7) | `SmokeUniform` in `bursts.rs`: `sun` (direction, clock), `light` (sun colour), `shade` (ambient colour) | the sun, the ambient light, the clock |
+| `sky.wesl` | alpha-blended on an inverted unit sphere around the camera (behind the world by depth test), the baked sky cube bound at 101 and its sampler at 102 | `SkyUniform` in `sky.rs`: `clock` (real seconds unwrapped, battle seconds, delta), `near` (opacity, threshold, softness, distance), `current` | the camera position (`view`) |
 | any `shader` of a `materials` rule | the retail StandardMaterial extended, like `surface.wesl`: call `pbr_input_from_standard_material`, change what you like (colour, normal, roughness, emission), then `apply_pbr_lighting`; the prepass and shadows keep Bevy's shaders. Every rule shares one uniform | `RuleUniform` in `rules.rs`: `params`, `params2` (the rule's numbers), `clock` (x elapsed seconds, y frame delta), `sun` (xyz the direction the light travels, w illuminance in units of 10000 lux), `ship` (x the owning ship's smoothed share of full speed, y its heading in radians, z a 0..1 seed per ship; all 0 for a mesh of no ship) | the clock, the sun, the ship's speed, heading and seed |
 
 To make a graphics mod: start from an empty `data/render/look.json`, add the blocks you want, and put the shaders of the
-`sails`, `engines`, `wakes`, `tracers`, `surfaces`, `bursts` and `materials` blocks in the mod's `shaders/` folder. Run with `--mod <folder>`;
+`sails`, `engines`, `wakes`, `tracers`, `surfaces`, `bursts`, `sky` and `materials` blocks in the mod's `shaders/` folder. Run with `--mod <folder>`;
 the profile is read at launch, so restart after edits. A new kind of material (a shader for hulls, rock or water, say) is a
 `materials` rule and a shader file in the mod, not a Rust block: only something a rule cannot express (a mesh the engine must
 build or move, as for sails) needs a building block in `game/src/render/` first; then keep classic unchanged without the
