@@ -71,6 +71,7 @@ Reference screenshots are local only (`local/reference/`, never committed).
 | ID | Status | Open work |
 |---|---|---|
 | UIR-01 | Partial | All UI text is vector (retail advances for layout), not the retail hand-hinted glyph sheets; sizes are PROVISIONAL. |
+| UIR-11 | Partial | Front-end chrome (panels, buttons, pull-downs, check boxes, scrollbars, sliders, slot and stat-bar frames, windows) is drawn from `content/data/hud/theme.json` instead of stretched retail bitmaps; the palette, radii and per-state looks are measured on the Navy art but PROVISIONAL (hover / pressed / disabled shades are estimates). Ornate in-game window and dialog frames stay bitmap. |
 | UIR-05 | Partial | Ships screen: ship-name drop-down, slot-bar scrolling. |
 | UIR-06 | Partial | Crew/Arms: skirmish crew roster, drag and drop, Auto Assign, stat-bar post mapping ([crew.md](re/crew.md)). |
 | UIR-08 | Partial | Game Summary: retail VICTORY! matches the layout (one page, green bar per column's best, winner's row first; rows now ordered by ships left). Open: panel art, flag choice, whether campaign summaries add a kills-by-type table. |
