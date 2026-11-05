@@ -8,7 +8,7 @@ use bevy::ui::{FocusPolicy, RelativeCursorPosition};
 
 use crate::menu::{ArrowButton, ListEntry, RunButtons, SLIDER_KNOB, SLOT_BAR, ScrollKind, ScrollTrack, SliderTrack, menu_active};
 use crate::sprites::{BODY_FONT, Fonts, HudData, IDLE, MENU_SKIN, meta_in, slice, sprite_in};
-use crate::theme::Theme;
+use crate::theme::{Look, Looks, State, Theme};
 
 /// Retail gold for highlighted labels (the `Center Justify Label` title colour).
 pub(super) const GOLD: Color = Color::srgb(1.0, 0.796, 0.0);
@@ -34,12 +34,66 @@ enum Piece {
 #[derive(Component)]
 struct Art(Vec<(Entity, Piece)>);
 
+/// Which drawn control family a node belongs to (`hover_drawn` restyles it with the cursor).
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Family {
+    Button,
+    Pulldown,
+}
+
+/// A control drawn from `theme.json`: its family, and whether its resting state is the selected one.
+#[derive(Component, Clone, Copy)]
+struct Drawn {
+    family: Family,
+    selected: bool,
+}
+
+/// The state a drawn control shows: the cursor's wins, else selected or idle.
+pub(super) fn state_of(interaction: Interaction, selected: bool) -> State {
+    match interaction {
+        Interaction::Pressed => State::Pressed,
+        Interaction::Hovered => State::Hover,
+        Interaction::None if selected => State::Selected,
+        Interaction::None => State::Idle,
+    }
+}
+
+fn looks(theme: &Theme, family: Family) -> &Looks {
+    match family {
+        Family::Button => &theme.button,
+        Family::Pulldown => &theme.pulldown,
+    }
+}
+
+fn gradient(look: &Look) -> BackgroundGradient {
+    let [top, mid, bottom] = look.fill;
+    BackgroundGradient::from(LinearGradient::to_bottom(vec![
+        ColorStop::new(top, Val::Percent(0.0)),
+        ColorStop::new(mid, Val::Percent(50.0)),
+        ColorStop::new(bottom, Val::Percent(100.0)),
+    ]))
+}
+
+fn rim(look: &Look) -> BorderColor {
+    BorderColor { top: look.rim[0], left: look.rim[0], right: look.rim[1], bottom: look.rim[1] }
+}
+
+/// Restyle drawn buttons and pull-downs when the cursor enters, presses or leaves them.
+fn hover_drawn(mut q: Query<(&Interaction, &Drawn, &mut BackgroundGradient, &mut BorderColor), Changed<Interaction>>) {
+    let theme = Theme::current();
+    for (i, drawn, mut fill, mut border) in &mut q {
+        let look = looks(theme, drawn.family).get(state_of(*i, drawn.selected));
+        *fill = gradient(look);
+        *border = rim(look);
+    }
+}
+
 /// The fill a cell returns to when the cursor leaves it.
 #[derive(Component)]
 pub(super) struct Rest(pub(super) Color);
 
 pub fn plugin(app: &mut App) {
-    app.add_systems(Update, hover.after(RunButtons).run_if(menu_active)).add_systems(Update, fit_cover.after(crate::menu::BuildMenu));
+    app.add_systems(Update, (hover, hover_drawn).after(RunButtons).run_if(menu_active)).add_systems(Update, fit_cover.after(crate::menu::BuildMenu));
 }
 
 /// A backdrop picture that covers its frame: scaled up (never distorted) until both sides are filled, centre-cropped. The picture's
@@ -193,20 +247,32 @@ impl Ctx<'_> {
             c.spawn((f.text(s, self.scale, tint), TextLayout::no_wrap(), Node { flex_shrink: 0.0, ..default() }));
         });
     }
-    /// Text button over the 3-piece FrontEnd_Texts_Over_Button art (44 px tall in the sheet, stretched to the rect).
+    /// A drawn text button over `[l, t, r, b]`: a pill with a gold rim and a gradient fill that follows the cursor (theme.json `button`).
     pub(super) fn text_button(&self, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], label: &str, font: &str, action: impl Bundle) {
         let (w, h) = (r - l, b - t);
-        let mut root = c.spawn((Interaction::None, action, self.node(l, t, w, h)));
-        let mut slice = Entity::PLACEHOLDER;
-        root.with_children(|c| {
-            slice = self.button_art(c, [0.0, 0.0, w, h]);
-            self.text(c, font, label, 0.0, w, h / 2.0, true, Color::WHITE);
-        });
-        root.insert(Art(vec![(slice, Piece::Slice("button"))]));
+        let inset = self.theme.button.rim_width;
+        let mut root = c.spawn((Interaction::None, action, Drawn { family: Family::Button, selected: false }, self.drawn(Family::Button, State::Idle, [l, t, w, h])));
+        // Children sit inside the rim, so the label is shifted back by its width to stay centred on the whole pill.
+        root.with_children(|c| self.text(c, font, label, -inset, w, h / 2.0 - inset, true, Color::WHITE));
     }
-    /// The idle gold-rimmed pill of the retail text buttons over `[x, y, w, h]` (one 9-slice node).
-    pub(super) fn button_art(&self, c: &mut ChildSpawnerCommands, [x, y, w, h]: [f32; 4]) -> Entity {
-        self.slice(c, "button", [x, y, w, h])
+    /// The idle pill of a text button over `[x, y, w, h]` (no label, not clickable).
+    pub(super) fn button_art(&self, c: &mut ChildSpawnerCommands, rect: [f32; 4]) -> Entity {
+        c.spawn(self.drawn(Family::Button, State::Idle, rect)).id()
+    }
+    /// The node, rim, fill and shadow of a drawn control in `state` over `[x, y, w, h]` (reference units, edges snapped to whole pixels):
+    /// a button is a pill, a pull-down a rounded box.
+    fn drawn(&self, family: Family, state: State, [x, y, w, h]: [f32; 4]) -> impl Bundle {
+        let looks = looks(self.theme, family);
+        let look = looks.get(state);
+        let [left, top, width, height, ..] = panel_geometry([x, y, x + w, y + h], PanelKind::Band, self.theme, self.scale);
+        let border = crate::panels::snap(looks.rim_width, self.scale).max(1.0).min(height / 2.0);
+        let radius = if family == Family::Button { height / 2.0 } else { crate::panels::snap(6.0, self.scale).min(height / 2.0) };
+        (
+            Node { border: UiRect::all(Val::Px(border)), border_radius: BorderRadius::all(Val::Px(radius)), ..bare(left, top, width, height) },
+            gradient(look),
+            rim(look),
+            BoxShadow::new(Color::BLACK.with_alpha(0.35), Val::Px(0.0), Val::Px(self.scale.round()), Val::Px(0.0), Val::Px((3.0 * self.scale).round())),
+        )
     }
     /// The idle strip of slice group `group` over `[x, y, w, h]`, one 9-slice node (nothing when the art set lacks the group).
     pub(super) fn slice(&self, c: &mut ChildSpawnerCommands, group: &str, [x, y, w, h]: [f32; 4]) -> Entity {
@@ -318,13 +384,13 @@ pub(super) fn piece_flipped(ctx: &Ctx, c: &mut ChildSpawnerCommands, name: &str,
 
 /// A greyed-out retail text button (not clickable).
 pub(super) fn disabled(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], label: &str, font: &str) {
-    ctx.slice(c, "button_disabled", [l, t, r - l, b - t]);
+    c.spawn(ctx.drawn(Family::Button, State::Disabled, [l, t, r - l, b - t]));
     ctx.text(c, font, label, l, r - l, (t + b) / 2.0, true, Color::srgb(0.55, 0.55, 0.55));
 }
 
 /// The current tab of a Ships / Crew / Arms row: the green `FrontEnd_Texts_Over_Button_Selected_*` button, not clickable.
 pub(super) fn selected_tab(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], label: &str, font: &str) {
-    ctx.slice(c, "button_selected", [l, t, r - l, b - t]);
+    c.spawn(ctx.drawn(Family::Button, State::Selected, [l, t, r - l, b - t]));
     ctx.text(c, font, label, l, r - l, (t + b) / 2.0, true, Color::WHITE);
 }
 
@@ -472,12 +538,35 @@ pub(super) fn list_row(ctx: &Ctx, c: &mut ChildSpawnerCommands, [x, y, w, h]: [f
     c.spawn((Interaction::None, action, fill, ctx.node(x, y, w, h))).with_children(|c| ctx.text(c, BODY_FONT, label, 20.0, w - 20.0, h / 2.0, false, Color::WHITE));
 }
 
-/// A retail radio choice: check box (`FrontEnd_Check_Box_Ready` ticked / `_NotReady`) and its Univers12 label.
+/// A drawn check box over `[x, y, w, h]`: a small rounded square with a gold rim and, when `on`, a tick of two rotated bars.
+fn check_box(ctx: &Ctx, c: &mut ChildSpawnerCommands, [x, y, w, h]: [f32; 4], on: bool) {
+    let theme = ctx.theme;
+    let [left, top, width, height, border, _] = panel_geometry([x, y, x + w, y + h], PanelKind::Inner, theme, ctx.scale);
+    let node = Node { border: UiRect::all(Val::Px(border)), border_radius: BorderRadius::all(Val::Px(crate::panels::snap(3.0, ctx.scale))), ..bare(left, top, width, height) };
+    c.spawn((node, BackgroundColor(theme.box_fill), BorderColor::all(theme.rim_light))).with_children(|c| {
+        if !on {
+            return;
+        }
+        // Bars are placed by their centre inside the box, then turned about it: the short stroke runs down-right, the long one up-right.
+        for (len, cx, cy, deg) in [(5.0, 4.5, 8.5, 45.0), (9.0, 8.2, 6.5, -45.0)] {
+            let (bw, bh) = (len * ctx.scale, 2.2 * ctx.scale);
+            let n = Node { border_radius: BorderRadius::all(Val::Px(bh / 2.0)), ..bare(cx * ctx.scale - bw / 2.0, cy * ctx.scale - bh / 2.0, bw, bh) };
+            c.spawn((n, BackgroundColor(GOLD), UiTransform::from_rotation(Rot2::degrees(deg))));
+        }
+    });
+}
+
+/// An absolutely placed node of physical-px geometry.
+fn bare(left: f32, top: f32, width: f32, height: f32) -> Node {
+    Node { position_type: PositionType::Absolute, left: Val::Px(left), top: Val::Px(top), width: Val::Px(width), height: Val::Px(height), ..default() }
+}
+
+/// A radio choice: a drawn check box and its Univers12 label.
 pub(super) fn radio(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], label: &str, on: bool, action: impl Bundle) {
     let cy = (t + b) / 2.0 - 3.0; // measured: the original row sits 3 units above the element's centre
     let mut root = c.spawn((Interaction::None, action, ctx.node(l, t, r - l, b - t)));
     root.with_children(|c| {
-        piece(ctx, c, if on { "FrontEnd_Check_Box_Ready" } else { "FrontEnd_Check_Box_NotReady" }, [0.0, (b - t) / 2.0 - 10.0, 18.0, (b - t) / 2.0 + 10.0]);
+        check_box(ctx, c, [0.0, (b - t) / 2.0 - 9.0, 18.0, 18.0], on);
         ctx.text(c, BODY_FONT, label, 24.0, r - l - 24.0, cy - t, false, Color::WHITE);
     });
 }
@@ -520,21 +609,21 @@ pub(super) fn cell(ctx: &Ctx, c: &mut ChildSpawnerCommands, [x, y, w, h]: [f32; 
     b.with_children(|c| ctx.text(c, BODY_FONT, label, 8.0, w - 8.0, h / 2.0, false, tint));
 }
 
-/// A retail pull-down box (`FrontEnd_Left/Center/Right_PullDown_Background`, `_Selected` for the local player) with centred Univers10
-/// text and, for drop-downs, the `FrontEnd_PullDown_Arrow` at its right end.
+/// A drawn pull-down box (theme.json `pulldown`, its selected look for the local player) with centred Univers10 text and, for
+/// drop-downs, the retail `FrontEnd_PullDown_Arrow` at its right end.
 pub(super) fn pulldown_cell(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], label: &str, selected: bool, action: Option<impl Bundle>, arrow: bool) {
-    let sel = if selected { "_Selected" } else { "" };
-    let mut root = c.spawn((ctx.node(l, t, r - l, b - t), Interaction::None));
+    let inset = ctx.theme.pulldown.rim_width;
+    let state = state_of(Interaction::None, selected);
+    let mut root = c.spawn((Interaction::None, Drawn { family: Family::Pulldown, selected }, ctx.drawn(Family::Pulldown, state, [l, t, r - l, b - t])));
     if let Some(a) = action {
         root.insert(a);
     }
     root.with_children(|c| {
         let (w, h) = (r - l, b - t);
-        ctx.slice(c, &format!("pulldown{}", sel.to_lowercase()), [0.0, 0.0, w, h]);
         let text_w = if arrow { w - 24.0 } else { w };
-        ctx.text(c, "Univers10", label, 0.0, text_w, h / 2.0, true, Color::WHITE);
+        ctx.text(c, "Univers10", label, -inset, text_w, h / 2.0 - inset, true, Color::WHITE);
         if arrow {
-            piece(ctx, c, "FrontEnd_PullDown_Arrow", [w - 20.0, h / 2.0 - 8.5, w, h / 2.0 + 8.5]);
+            piece(ctx, c, "FrontEnd_PullDown_Arrow", [w - 20.0 - inset, h / 2.0 - 8.5 - inset, w - inset, h / 2.0 + 8.5 - inset]);
         }
     });
 }
@@ -597,6 +686,18 @@ mod tests {
         assert_eq!(pad(&window, scale), Vec2::new((2560.0 / 1.8 - 800.0) / 2.0, 0.0));
         window.resolution.set(1600.0, 1200.0);
         assert_eq!(pad(&window, canvas(&window).1), Vec2::ZERO);
+    }
+
+    #[test]
+    fn cursor_and_selection_map_to_a_state() {
+        assert_eq!(state_of(Interaction::None, false), State::Idle);
+        assert_eq!(state_of(Interaction::None, true), State::Selected);
+        assert_eq!(state_of(Interaction::Hovered, true), State::Hover);
+        assert_eq!(state_of(Interaction::Pressed, false), State::Pressed);
+        // The looks the states pick are the theme's own per-state colours.
+        let t = Theme::default();
+        assert_eq!(looks(&t, Family::Button).get(State::Hover).fill[0], t.button.hover.fill[0]);
+        assert_ne!(looks(&t, Family::Pulldown).get(State::Idle), looks(&t, Family::Pulldown).get(State::Selected));
     }
 
     #[test]

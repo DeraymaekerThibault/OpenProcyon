@@ -26,12 +26,87 @@ pub struct Theme {
     /// Opacity and blur (reference px) of the soft shadow under a panel.
     pub shadow_alpha: f32,
     pub shadow_blur: f32,
+    /// Text buttons (a pill with a gold rim) and the pull-down boxes.
+    pub button: Looks,
+    pub pulldown: Looks,
 }
 
+/// `#RRGGBB` or `#RRGGBBAA`.
 fn hex(s: &str) -> Option<Color> {
     let s = s.strip_prefix('#')?;
-    let v = u32::from_str_radix(s, 16).ok().filter(|_| s.len() == 6)?;
-    Some(Color::srgb_u8((v >> 16) as u8, (v >> 8) as u8, v as u8))
+    let v = u32::from_str_radix(s, 16).ok().filter(|_| s.len() == 6 || s.len() == 8)?;
+    let (rgb, a) = if s.len() == 8 { (v >> 8, v as u8) } else { (v, 255) };
+    Some(Color::srgba_u8((rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8, a))
+}
+
+/// One state of a drawn control: a top / middle / bottom vertical gradient fill and the rim colours at the top and bottom edge.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Look {
+    pub fill: [Color; 3],
+    pub rim: [Color; 2],
+}
+
+/// The five states of a drawn control (`classic/widgets.rs` maps the cursor and the screen's rules onto them).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum State {
+    Idle,
+    Hover,
+    Pressed,
+    Selected,
+    Disabled,
+}
+
+/// The looks of one control family (text buttons, pull-downs).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Looks {
+    pub idle: Look,
+    pub hover: Look,
+    pub pressed: Look,
+    pub selected: Look,
+    pub disabled: Look,
+    /// Rim width in reference px.
+    pub rim_width: f32,
+}
+
+impl Looks {
+    pub fn get(&self, state: State) -> &Look {
+        match state {
+            State::Idle => &self.idle,
+            State::Hover => &self.hover,
+            State::Pressed => &self.pressed,
+            State::Selected => &self.selected,
+            State::Disabled => &self.disabled,
+        }
+    }
+
+    fn from_json(v: Option<&Value>, mut base: Looks) -> Looks {
+        let Some(v) = v else { return base };
+        for (slot, key) in
+            [(&mut base.idle, "idle"), (&mut base.hover, "hover"), (&mut base.pressed, "pressed"), (&mut base.selected, "selected"), (&mut base.disabled, "disabled")]
+        {
+            if let Some(look) = v.get(key) {
+                let list = |name: &str, n: usize| -> Option<Vec<Color>> {
+                    let c: Option<Vec<Color>> = look.get(name)?.as_array()?.iter().map(|c| hex(c.as_str()?)).collect();
+                    c.filter(|c| c.len() == n)
+                };
+                if let Some(c) = list("fill", 3) {
+                    slot.fill = [c[0], c[1], c[2]];
+                }
+                if let Some(c) = list("rim", 2) {
+                    slot.rim = [c[0], c[1]];
+                }
+            }
+        }
+        if let Some(w) = v.get("rim_width").and_then(Value::as_f64).filter(|w| *w >= 0.0) {
+            base.rim_width = w as f32;
+        }
+        base
+    }
+}
+
+fn look(fill: [&str; 3], rim: [&str; 2]) -> Look {
+    let c = |s| hex(s).unwrap_or(Color::BLACK);
+    Look { fill: fill.map(c), rim: rim.map(c) }
 }
 
 impl Default for Theme {
@@ -50,6 +125,22 @@ impl Default for Theme {
             box_radius: 4.0,
             shadow_alpha: 0.5,
             shadow_blur: 8.0,
+            button: Looks {
+                idle: look(["#5186A3", "#1A4181", "#042657"], ["#E1A233", "#CB932E"]),
+                hover: look(["#4BAFDA", "#2583AD", "#0E5D6D"], ["#F0B545", "#D9A03A"]),
+                pressed: look(["#003830", "#007A66", "#00B89C"], ["#CB932E", "#E1A233"]),
+                selected: look(["#004A40", "#00987E", "#00EECA"], ["#E1A233", "#CB932E"]),
+                disabled: look(["#4A5560", "#2A3038", "#14181E"], ["#7A6A48", "#5E5238"]),
+                rim_width: 2.0,
+            },
+            pulldown: Looks {
+                idle: look(["#00133A", "#00133A", "#00133A"], ["#00D0E0", "#00B0C0"]),
+                hover: look(["#0A2A5A", "#0A2A5A", "#0A2A5A"], ["#40E8F4", "#20D0DC"]),
+                pressed: look(["#0C3A78", "#0C3A78", "#0C3A78"], ["#40E8F4", "#20D0DC"]),
+                selected: look(["#0B376F", "#0C3A78", "#0B376F"], ["#1FA8C8", "#0A7F9F"]),
+                disabled: look(["#10182A", "#10182A", "#10182A"], ["#3A5058", "#2E4048"]),
+                rim_width: 2.0,
+            },
         }
     }
 }
@@ -78,6 +169,8 @@ impl Theme {
         ] {
             *slot = num(key).filter(|n| *n >= 0.0).unwrap_or(*slot);
         }
+        t.button = Looks::from_json(v.get("button"), t.button);
+        t.pulldown = Looks::from_json(v.get("pulldown"), t.pulldown);
         t
     }
 
@@ -101,9 +194,33 @@ mod tests {
     }
 
     #[test]
+    fn hex_takes_six_or_eight_digits() {
+        assert_eq!(hex("#102030"), Some(Color::srgba_u8(0x10, 0x20, 0x30, 255)));
+        assert_eq!(hex("#10203080"), Some(Color::srgba_u8(0x10, 0x20, 0x30, 0x80)));
+        assert_eq!((hex("#12345"), hex("123456"), hex("#gg0000")), (None, None, None));
+    }
+
+    #[test]
+    fn every_state_has_its_own_look() {
+        let t = Theme::default();
+        let states = [State::Idle, State::Hover, State::Pressed, State::Selected, State::Disabled];
+        for family in [&t.button, &t.pulldown] {
+            for (i, a) in states.iter().enumerate() {
+                for b in &states[i + 1..] {
+                    assert_ne!(family.get(*a), family.get(*b), "{a:?} vs {b:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
     fn a_mod_overlay_changes_only_the_keys_it_names() {
         let t = Theme::from_json(&serde_json::json!({"rim": "#112233", "rim_width": 5, "box_radius": "bad", "edge": "nope"}));
         assert_eq!(t.rim, Color::srgb_u8(0x11, 0x22, 0x33));
         assert_eq!((t.rim_width, t.box_radius, t.edge), (5.0, 4.0, Theme::default().edge));
+        let t = Theme::from_json(&serde_json::json!({"button": {"hover": {"fill": ["#000000", "#111111", "#222222"], "rim": ["#333333"]}, "rim_width": 1}}));
+        assert_eq!(t.button.hover.fill[2], Color::srgb_u8(0x22, 0x22, 0x22));
+        // A malformed list (one rim colour, not two) keeps its default.
+        assert_eq!((t.button.hover.rim, t.button.rim_width, &t.button.idle), (Theme::default().button.hover.rim, 1.0, &Theme::default().button.idle));
     }
 }
