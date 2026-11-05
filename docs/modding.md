@@ -61,7 +61,9 @@ a group asks for it by name, so a new group only changes art that already uses o
 gold-rimmed panels and dark list boxes of the Ships / Crew / Arms screens (the picture `menu/shipscreen.png` is no longer drawn there; `menu/gamelobby.png` is the scenery
 under them). Colours are `#RRGGBB` (`panel_fill`, `box_fill`, `band_fill`, `edge`, `rim`, `rim_light`), lengths are 800x600 reference px (`rim_width`, `edge_width`,
 `panel_radius`, `box_radius`, `shadow_blur`), `panel_alpha` and `shadow_alpha` are 0..1. A mod overlays the file; a key it leaves out keeps the shipped value. All values
-are PROVISIONAL (measured on the retail Navy art).
+are PROVISIONAL (measured on the retail Navy art). `button` (text buttons, drawn as pills) and `pulldown` (pull-down boxes) each name the five states `idle`,
+`hover`, `pressed`, `selected` and `disabled`; a state is `{"fill": [top, middle, bottom], "rim": [top edge, bottom edge]}` (`#RRGGBB` or `#RRGGBBAA`), and `rim_width`
+is the rim in reference px. Check boxes use `box_fill` and `rim_light`. The picture strips `slice_button_*` and `slice_pulldown_*` are no longer drawn.
 
 **Front-end backdrops** (`menu/gamelobby.png`, `menu/shipscreen.png`, the `menu/frontendscreen<N>.png` scene and `menu/frontendmap.png` overlay) fill the whole
 window: the 800x600 canvas that every retail screen is laid out on stays centred on top at its own scale, while the picture is scaled up until it covers its frame
