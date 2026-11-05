@@ -230,8 +230,8 @@ fn element(ctx: &Ctx, c: &mut ChildSpawnerCommands, m: &MenuModel, e: &Value, st
         (Screen::CreateSkirmish, "Map Information Button") => {
             // Measured: framed panel at the element's area; gold 'Map Description:' then Univers10 lines 16 apart.
             stretched_window(ctx, c, [r[0], r[1] - 3.0, r[2], r[3] + 2.0]);
-            ctx.text(c, "Univers10", &format!("{}:", text_of(strings, "IDGS_TPFRONTENDTEXT02_MAP_DESCRIPTION")), r[0] + 5.0, 200.0, r[1] + 9.0, false, GOLD);
-            wrapped(ctx, c, "Univers10", sk.map_json["description"].as_str().unwrap_or_default(), [r[0] + 5.0, r[1] + 25.0, r[2] - 12.0, r[3]]);
+            ctx.text(c, "Univers10", &format!("{}:", text_of(strings, "IDGS_TPFRONTENDTEXT02_MAP_DESCRIPTION")), r[0] + 14.0, 200.0, r[1] + 16.0, false, GOLD);
+            wrapped(ctx, c, "Univers10", sk.map_json["description"].as_str().unwrap_or_default(), [r[0] + 14.0, r[1] + 32.0, r[2] - 18.0, r[3] - 8.0]);
             None
         }
         (Screen::CreateSkirmish, "Radio Historical Map Button") => {
