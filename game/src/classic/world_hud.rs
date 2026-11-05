@@ -10,6 +10,7 @@ use crate::{Library, PlayerShip, Ship};
 pub fn plugin(app: &mut App) {
     app.add_systems(PostStartup, spawn_reticle.run_if(resource_exists::<HudData>))
         .add_systems(Update, navigation.after(crate::camera).before(crate::sky).run_if(in_state(crate::menu::Screen::Battle)).run_if(crate::menu::overlay_closed))
+        .add_systems(Update, lob_marker.run_if(in_state(crate::menu::Screen::Battle)).run_if(resource_exists::<crate::combat::LobAim>))
         .add_systems(Update, end_line.run_if(in_state(crate::menu::Screen::Battle)).run_if(resource_exists::<Fonts>))
         .add_systems(
             Update,
@@ -20,6 +21,37 @@ pub fn plugin(app: &mut App) {
                 .run_if(resource_exists::<HudData>)
                 .run_if(resource_exists::<Fonts>),
         );
+}
+
+#[derive(Component)]
+struct LobMarker(usize, bool);
+
+/// The armed lob bank's ground marker: a flat retail mesh (one per weapon, plus a "no firing solution" twin) lying on the sea at
+/// the point under the mouse. PROVISIONAL: drawn at the mesh's own size (about 7 radius, the data says `LobIcon WorldSpace Radius` 10)
+/// and on the plane itself (the data's `Z Plane Offset: LobIcon` is -3; the retail draw call ignores both).
+fn lob_marker(mut commands: Commands, assets: Res<AssetServer>, aim: Res<crate::combat::LobAim>, mut shown: Query<(Entity, &LobMarker, &mut Transform)>) {
+    let Some(a) = aim.0 else {
+        for (e, ..) in &shown {
+            commands.entity(e).despawn();
+        }
+        return;
+    };
+    if let Ok((e, m, mut tf)) = shown.single_mut() {
+        if (m.0, m.1) == (a.kind, a.solution) {
+            tf.translation = a.point;
+            return;
+        }
+        commands.entity(e).despawn();
+    }
+    let weapon = ["GRAVCHARGE", "NOVAMORTAR", "STARMORTAR"][a.kind];
+    let twin = if a.solution { "" } else { "_HAS_NO_FIRING_SOLUTION" };
+    commands.spawn((
+        LobMarker(a.kind, a.solution),
+        crate::Scenario,
+        Transform::from_translation(a.point),
+        Visibility::default(),
+        crate::data::scene(&assets, &format!("LOBTARGET_{weapon}{twin}.glb")),
+    ));
 }
 
 #[derive(Component)]

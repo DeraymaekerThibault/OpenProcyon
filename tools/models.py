@@ -11,7 +11,7 @@ def category(name):
         return "sky"
     if n.startswith("Base"):
         return "bases"
-    if n.startswith("SELECTION_INDICATOR"):
+    if n.startswith(("SELECTION_INDICATOR", "LOBTARGET_")):
         return "ui"
     if "Broken" in n:
         return "debris"  # pieces that break off destroyed ship sections (WOT debrisMeshScene)

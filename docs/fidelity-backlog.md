@@ -29,7 +29,7 @@ behaviour not from original evidence) · Unvalidated (implemented, not compared 
 | UI-06 | Provisional | All bindings have a consumer (screenshot, focus projectile, attack-only). Open: retail dispatch/click effects of attack-only. | `view.rs` |
 | UI-07 | Provisional | Retail comparison of gauge meanings, radar range/contact animation, faction placement, cursors, tooltips, target/nav marker geometry. | `panels.rs`, `classic/world_hud.rs`; [hud.md](re/hud.md), [starmap.md](re/starmap.md) |
 | PT-06 | Provisional | Wake and dotted course line need a visual pass against the original (retail: chunky dashed yellow tiles). | `wake.rs`, `course.rs` |
-| PT-07 | Missing | Lob aiming cursor: ground target marker, firing-solution feedback, lob accept/cancel/reject sounds (art and sounds exported, unused). | `view.rs`, `classic/world_hud.rs` |
+| PT-07 | Provisional | Lob aiming cursor, ground marker mesh and accept/reject/cancel sounds implemented from a static decode ([gunnery.md](re/gunnery.md) "Lob targeting cursor"). Open: marker size/height, cursor priority and star/nova sounds need a retail look. | `options_menu.rs`, `view.rs`, `combat/status.rs`, `classic/world_hud.rs` |
 | HUD-01 | Missing | Selection indicator arrow/compass models (exported, unused). | `classic/world_hud.rs` |
 
 ## 3. Simulation

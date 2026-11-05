@@ -44,6 +44,42 @@ pub fn is_indirect(gun: &str) -> bool {
     gun.contains("Mortar") || gun.contains("Mine") || gun.contains("GravCharge")
 }
 
+/// Lob weapon of a bullet: 0 gravity charge, 1 nova mortar, 2 star mortar (None: not a lob weapon with a targeting cursor).
+pub fn lob_kind(bullet: &str) -> Option<usize> {
+    [("GravCharge", 0), ("NovaMortar", 1), ("StarMortar", 2)].into_iter().find(|(n, _)| bullet.contains(n)).map(|(_, k)| k)
+}
+
+/// The armed lob bank's aim under the mouse (docs/re/gunnery.md "Lob targeting cursor"); None when not armed or no ground point.
+#[derive(Resource, Default)]
+pub struct LobAim(pub Option<LobAimed>);
+#[derive(Clone, Copy, PartialEq)]
+pub struct LobAimed {
+    pub kind: usize,
+    pub solution: bool,
+    pub point: Vec3,
+}
+impl LobAimed {
+    /// The hud.hdt cursor sprite (retail draws the plain move arrow for all six).
+    pub fn cursor(&self) -> &'static str {
+        const C: [[&str; 2]; 3] = [
+            ["Cursor_PrimaryShip_SetLobTarget_GravCharge", "Cursor_PrimaryShip_SetLobTarget_GravCharge_HAS_NO_FIRING_SOLUTION"],
+            ["Cursor_PrimaryShip_SetLobTarget_NovaMortar", "Cursor_PrimaryShip_SetLobTarget_NovaMortar_HAS_NO_FIRING_SOLUTION"],
+            ["Cursor_PrimaryShip_SetLobTarget_StarMortar", "Cursor_PrimaryShip_SetLobTarget_StarMortar_HAS_NO_FIRING_SOLUTION"],
+        ];
+        C[self.kind][!self.solution as usize]
+    }
+}
+
+/// Firing solution for a lob bank: any live gun of the bank has the point within its maximum horizontal range and mount arc
+/// (no minimum range, height, reload or line-of-sight test).
+pub fn lob_solution(lib: &Library, class: &Class, health: &Health, guns: &GunStates, tf: &Transform, bank: usize, point: Vec3) -> bool {
+    class.mounts.iter().enumerate().filter(|(_, m)| m.bank == bank && m.parent.is_none_or(|p| health.sections[p] > 0.0)).any(|(i, m)| {
+        let offset = point - tf.transform_point(m.pos);
+        let local = (tf.rotation * m.rot).inverse() * offset;
+        Vec2::new(offset.x, offset.z).length() <= lib.guns[guns.gun(i)].range[2] && (-local.x).atan2(-local.z).abs() <= m.arc / 2.0
+    })
+}
+
 /// Weapon-panel banks as (bank number, first mount); point-defence guns are not shown.
 pub fn banks(lib: &Library, c: &Class) -> Vec<(usize, usize)> {
     let mut v: Vec<(usize, usize)> = vec![];

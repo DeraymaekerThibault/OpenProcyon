@@ -64,7 +64,7 @@ pub fn input(
     mut vtime: ResMut<Time<Virtual>>,
     ui: Res<crate::panels::UiClick>,
     mut docks: docking::Dockees,
-    (sensors, mission): (Res<environment::Sensors>, Option<Res<campaign::Mission>>),
+    (sensors, mission, mut sfx, lob): (Res<environment::Sensors>, Option<Res<campaign::Mission>>, MessageWriter<audio::Sfx>, Res<combat::LobAim>),
     objects: Query<(Entity, &Transform, Option<&combat::Asteroid>, Option<&environment::SpaceAnimal>), Or<(With<combat::Asteroid>, With<environment::SpaceAnimal>)>>,
     mut commands: Commands,
 ) {
@@ -130,6 +130,16 @@ pub fn input(
             let (camera, gt) = *cam;
             let Ok(ray) = camera.viewport_to_world(gt, cursor) else { return };
             // An armed indirect bank takes this click as its shot target.
+            // (a click with no ground point under it keeps the bank armed)
+            if let (true, Some(bank), Some(t)) = (direct, target.2.armed, ray.intersect_plane(Vec3::ZERO, InfinitePlane3d::new(Vec3::Y))) {
+                target.2.armed = None;
+                target.2.shot = Some((bank, ray.get_point(t)));
+                // Retail plays a sound only for gravity charges (PROVISIONAL: star/nova silent as decoded, unconfirmed in play)
+                if let Some(a) = lob.0.filter(|a| a.kind == 0) {
+                    sfx.write(audio::Sfx::ui(if a.solution { "HUD_LobWeapon_Accept" } else { "HUD_LobWeapon_Reject" }));
+                }
+                return;
+            }
             let own = others
                 .iter()
                 .filter(|(e, _, _, h, m)| pointer.fleets.roster().contains(e) && !*h && *m)
@@ -137,12 +147,6 @@ pub fn input(
                 .min_by(|a, b| a.1.total_cmp(&b.1));
             if let Some((e, _)) = own {
                 pointer.fleets.select(e, &mut orbit);
-                return;
-            }
-            if let Some(bank) = direct.then(|| target.2.armed.take()).flatten() {
-                if let Some(t) = ray.intersect_plane(Vec3::ZERO, InfinitePlane3d::new(Vec3::Y)) {
-                    target.2.shot = Some((bank, ray.get_point(t)));
-                }
                 return;
             }
             // Attack Only Mode (held key): a click only picks targets, never a dock or a destination.
@@ -526,6 +530,8 @@ mod camera_tests {
         world.init_resource::<options_menu::OptionsMenu>();
         world.init_resource::<environment::Sensors>();
         world.init_resource::<Messages<docking::DockMsg>>();
+        world.init_resource::<Messages<audio::Sfx>>();
+        world.init_resource::<combat::LobAim>();
         world.resource_mut::<ButtonInput<KeyCode>>().press(KeyCode::ArrowLeft);
         world.resource_mut::<ButtonInput<KeyCode>>().press(KeyCode::ArrowUp);
         let mut real = Time::<Real>::default();
