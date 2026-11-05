@@ -96,6 +96,11 @@ skill can read N/A). Dragging one onto a post spends its cost (a 9-point captain
 - Lobby: open maps start as above (`Kind::Open`), pull-downs through `Skirmish::dropdown` / `choices` / `choose`.
 - Fleet screen: blank start, greyed Crew / Arms / Drop / Add (`shown_class`, `slot_filled`, `ship_chosen`). Crew and Arms still open
   the shared editor.
+- Ships screen quality of life (#301, all PROVISIONAL: retail shows none of it): Available Ships rows carry the point cost right-aligned;
+  hulls dearer than the points left are dimmed; Add on such a hull is refused with "Not enough victory points." in red under the info
+  panel (retail only greys the button until a hull is picked), cleared by picking another hull; double-clicking a row (two clicks on
+  the same row within 0.4 s, `menu::ClickClock`, shared with the Crew and Arms lists) adds the hull like Add. A summed fleet cost line
+  is not drawn.
 - Arms and Crew in skirmish charge or refund against the budget: `fitting_delta` for weapons, `crew_points` for named crew
   (`Slot::crew`, one post list per fleet entry; dropping a ship or changing fleet type returns its crew).
 - Crew / Arms screens (`crew_arms.rs` `skirmish_screen`, drawn by `classic/crew_arms.rs` over the fleet screen): the Crew button opens

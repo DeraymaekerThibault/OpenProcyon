@@ -12,6 +12,7 @@ pub fn fleet_smoke(world: &mut World, mut previous: Local<Option<Entity>>) {
         Some("fleet-primary") => fleet_primary(world, frame),
         Some("fleet") => fleet(world, frame, &mut previous),
         Some("fleet-profile-arms") => profile_arms(world, frame),
+        Some("fleet-ships") => ships_double_click(world, frame),
         _ => {}
     }
 }
@@ -442,6 +443,59 @@ fn profile_arms(world: &mut World, frame: u32) {
             info!("fleet-profile-arms smoke passed");
         }
         31 | 41 | 51 | 71 => world.resource_mut::<ButtonInput<MouseButton>>().release(MouseButton::Left),
+        _ => {}
+    }
+}
+
+/// `--menu fleet --script fleet-ships`: on the Ships screen the cheapest Navy hull is double-clicked (two presses of its row a few
+/// frames apart) and lands in the fleet; a dearer hull is double-clicked with too few points left and is refused with a reason.
+#[allow(deprecated)]
+fn ships_double_click(world: &mut World, frame: u32) {
+    use crate::menu::{Action as A, Skirmish};
+    let press = |world: &mut World, row: usize| {
+        let mut found = false;
+        for (a, mut i) in world.query::<(&A, &mut Interaction)>().iter_mut(world) {
+            if matches!(a, A::PickShip(r) if *r == row) {
+                *i = Interaction::Pressed;
+                found = true;
+            }
+        }
+        assert!(found, "no ship row {row}");
+    };
+    match frame {
+        20 => {
+            let mut sk = world.resource_mut::<Skirmish>();
+            let h = sk.slots.iter().position(|s| s.kind == crate::menu::Kind::Human).unwrap();
+            sk.slots[h].race = 0;
+            while !sk.slots[h].fleet.is_empty() {
+                sk.slots[h].remove_ship(0);
+            }
+            sk.fleet_size = 5;
+            sk.victory_limit = 150;
+        }
+        // The cheapest hull sits on the last row; the list shows eight rows, so scroll it into view.
+        22 => {
+            let lib = world.resource::<Library>();
+            let n = crate::menu::offered(lib, 0).len();
+            world.resource_mut::<Skirmish>().scroll = n.saturating_sub(8);
+        }
+        26 | 30 => {
+            let n = crate::menu::offered(world.resource::<Library>(), 0).len();
+            press(world, n - 1);
+        }
+        32 => {
+            let sk = world.resource::<Skirmish>();
+            assert_eq!(sk.human().unwrap().fleet.len(), 1, "a double-click adds the hull");
+            assert_eq!(sk.error, None);
+        }
+        34 => world.resource_mut::<Skirmish>().scroll = 0,
+        36 | 40 => press(world, 0),
+        44 => {
+            let sk = world.resource::<Skirmish>();
+            assert_eq!(sk.human().unwrap().fleet.len(), 1, "the StarHammer costs more than the points left");
+            assert_eq!(sk.error, Some("Not enough victory points."));
+            info!("fleet-ships smoke passed");
+        }
         _ => {}
     }
 }

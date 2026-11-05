@@ -574,3 +574,34 @@ fn loading_a_fleet_crew_or_arms_profile_restores_what_was_saved_and_refuses_what
     assert!(sk.slots[human].apply_profile(K::Fleet, &fleet, 0, &lib, 1000, 1).is_err());
     assert_eq!(sk.slots[human].fleet, before.fleet, "a refused load leaves the fleet alone");
 }
+
+#[test]
+fn two_quick_clicks_on_one_row_make_a_double_click() {
+    let mut c = ClickClock::default();
+    assert!(!c.double(0, 3, 10.0), "the first click only picks");
+    assert!(c.double(0, 3, 10.3), "a second click within the window on the same row");
+    assert!(!c.double(0, 3, 10.4), "the double-click is spent: a third click starts over");
+    assert!(!c.double(0, 3, 11.0));
+    assert!(!c.double(0, 3, 11.5), "too slow");
+    assert!(!c.double(0, 4, 11.6), "another row");
+    assert!(!c.double(1, 4, 11.7), "another list");
+    assert!(c.double(1, 4, 11.8));
+}
+
+#[test]
+#[ignore = "needs imported assets"]
+fn a_hull_over_the_points_left_is_refused_with_a_reason() {
+    let lib = Library::load(assets_dir());
+    let mut sk = skirmish("red_rover");
+    sk.slots[0].race = 0;
+    sk.fleet_size = 5;
+    sk.victory_limit = 100; // dearer than every frigate-class hull, cheaper than the StarHammer
+    apply(&mut sk, &lib, &Action::PickShip(0));
+    apply(&mut sk, &lib, &Action::AddShip);
+    assert!(sk.human().unwrap().fleet.is_empty());
+    assert_eq!(sk.error, Some("Not enough victory points."));
+    apply(&mut sk, &lib, &Action::PickShip(offered(&lib, 0).len() - 1));
+    assert_eq!(sk.error, None, "picking another hull clears the message");
+    apply(&mut sk, &lib, &Action::AddShip);
+    assert_eq!(sk.human().unwrap().fleet.len(), 1, "an affordable hull is added");
+}

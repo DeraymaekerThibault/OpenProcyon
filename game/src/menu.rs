@@ -720,7 +720,10 @@ fn apply(sk: &mut Skirmish, lib: &Library, action: &Action) {
             sk.arms_open = sk.open() && sk.slot_filled();
             sk.arms_tab = matches!(action, Action::OpenArms);
         }
-        Action::PickShip(row) => (sk.ship_pick, sk.ship_chosen, sk.view_slot, sk.name_open) = (*row, true, false, false),
+        Action::PickShip(row) => {
+            (sk.ship_pick, sk.ship_chosen, sk.view_slot, sk.name_open) = (*row, true, false, false);
+            sk.error = None;
+        }
         Action::MapInfo(open) => sk.map_info = *open,
         Action::OpenProfile(kind, save) => sk.open_profile(*kind, *save, lib),
         Action::PickProfile(n) => sk.pick_profile(*n),
@@ -733,15 +736,20 @@ fn apply(sk: &mut Skirmish, lib: &Library, action: &Action) {
         Action::AddShip => {
             sk.name_open = false;
             let (limit, pick, left) = (sk.fleet_size, sk.ship_pick, sk.points_left(lib));
+            let mut error = None;
             if let Some(h) = sk.slots.iter_mut().find(|s| s.kind == Kind::Human).filter(|h| h.fleet.len() < limit)
                 && let Some(&ci) = offered(lib, h.race).get(pick)
-                && i64::from(lib.classes[ci].points) <= left
             {
-                h.push_ship(&lib.classes[ci].name);
-                sk.fleet_pick = h.fleet.len() - 1;
-                sk.view_slot = true;
+                if i64::from(lib.classes[ci].points) <= left {
+                    h.push_ship(&lib.classes[ci].name);
+                    sk.fleet_pick = h.fleet.len() - 1;
+                    sk.view_slot = true;
+                } else {
+                    // PROVISIONAL: retail greys the Add button only; the message is ours.
+                    error = Some("Not enough victory points.");
+                }
             }
-            sk.error = None;
+            sk.error = error;
             sk.show_picked_slot();
         }
         // PROVISIONAL: the original's auto-assign rule is not recovered; `auto_build` picks random hulls that fit (skirmish.rs).
@@ -759,6 +767,25 @@ fn apply(sk: &mut Skirmish, lib: &Library, action: &Action) {
     }
 }
 
+/// Seconds between two clicks on the same list row that make a double-click (Bevy has none). PROVISIONAL: the retail value is not
+/// recovered.
+pub const DOUBLE_CLICK: f64 = 0.4;
+
+/// Remembers the last list-row click so the second of two quick clicks on one row can be told apart. `kind` separates the lists
+/// (ships, crew roster, weapons); `row` is the row clicked; `now` is real time in seconds.
+#[derive(Default, Debug)]
+pub struct ClickClock {
+    last: Option<(u8, usize, f64)>,
+}
+impl ClickClock {
+    /// Records a click and says whether it completes a double-click (a third click starts over).
+    pub fn double(&mut self, kind: u8, row: usize, now: f64) -> bool {
+        let hit = self.last.is_some_and(|(k, r, t)| (k, r) == (kind, row) && now - t <= DOUBLE_CLICK);
+        self.last = if hit { None } else { Some((kind, row, now)) };
+        hit
+    }
+}
+
 /// Runs the `Action` of a pressed button (whichever view drew it).
 fn buttons(
     q: Query<(&Interaction, &Action), Changed<Interaction>>,
@@ -768,6 +795,8 @@ fn buttons(
     mut exit: MessageWriter<AppExit>,
     mut cfg: ResMut<crate::Config>,
     (mut binds, mut cui, mut settings, mut mods): (ResMut<Bindings>, ResMut<CtrlUi>, ResMut<Settings>, ResMut<ModList>),
+    time: Res<Time<Real>>,
+    mut clicks: Local<ClickClock>,
 ) {
     for (i, action) in &q {
         if *i != Interaction::Pressed {
@@ -778,6 +807,12 @@ fn buttons(
             continue;
         }
         apply(&mut sk, &lib, action);
+        // Double-click a hull in Available Ships: add it.
+        if let Action::PickShip(row) = action
+            && clicks.double(0, *row, time.elapsed_secs_f64())
+        {
+            apply(&mut sk, &lib, &Action::AddShip);
+        }
         match action {
             Action::Goto(s) => next.set(*s),
             Action::Rebind(n) => cui.capture = Some(*n),

@@ -242,6 +242,16 @@ impl Ctx<'_> {
             c.spawn((f.text(s, self.scale, tint), TextLayout::no_wrap(), Node { flex_shrink: 0.0, ..default() }));
         });
     }
+    /// Like `text`, but the right end of the text sits at `x + w` (price columns).
+    pub(super) fn text_end(&self, c: &mut ChildSpawnerCommands, font: &str, s: &str, x: f32, w: f32, cy: f32, tint: Color) {
+        let Some(f) = self.fonts.0.get(font).or_else(|| self.fonts.0.get("BlackChancery22")) else { return };
+        let mut n = self.node(x, cy - f.height / 2.0, w, f.height);
+        n.align_items = AlignItems::Center;
+        n.justify_content = JustifyContent::FlexEnd;
+        c.spawn(n).with_children(|c| {
+            c.spawn((f.text(s, self.scale, tint), TextLayout::no_wrap(), Node { flex_shrink: 0.0, ..default() }));
+        });
+    }
     /// A drawn text button over `[l, t, r, b]`: a pill in a gold tube rim whose fill follows the cursor (theme.json `button`).
     pub(super) fn text_button(&self, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], label: &str, font: &str, action: impl Bundle) {
         let (w, h) = (r - l, b - t);
@@ -669,9 +679,21 @@ pub(super) fn info_panel(ctx: &Ctx, c: &mut ChildSpawnerCommands, title: &str, i
 }
 
 /// One clickable Univers12 row of a list (`[x, y, w, h]`, text 20 in), on the teal bar when `picked`.
-pub(super) fn list_row(ctx: &Ctx, c: &mut ChildSpawnerCommands, [x, y, w, h]: [f32; 4], label: &str, picked: bool, action: impl Bundle) {
+pub(super) fn list_row(ctx: &Ctx, c: &mut ChildSpawnerCommands, rect: [f32; 4], label: &str, picked: bool, action: impl Bundle) {
+    list_row_cost(ctx, c, rect, label, None, picked, false, action);
+}
+
+/// A list row with a price column: `cost` is right-aligned, `grey` dims the whole row (a hull the points left cannot pay for).
+#[allow(clippy::too_many_arguments)]
+pub(super) fn list_row_cost(ctx: &Ctx, c: &mut ChildSpawnerCommands, [x, y, w, h]: [f32; 4], label: &str, cost: Option<&str>, picked: bool, grey: bool, action: impl Bundle) {
     let fill = BackgroundColor(if picked { self::picked() } else { Color::NONE });
-    c.spawn((Interaction::None, action, fill, ctx.node(x, y, w, h))).with_children(|c| ctx.text(c, BODY_FONT, label, 20.0, w - 20.0, h / 2.0, false, Color::WHITE));
+    let tint = if grey { Color::srgba(1.0, 1.0, 1.0, 0.4) } else { Color::WHITE };
+    c.spawn((Interaction::None, action, fill, ctx.node(x, y, w, h))).with_children(|c| {
+        ctx.text(c, BODY_FONT, label, 20.0, w - 20.0, h / 2.0, false, tint);
+        if let Some(cost) = cost {
+            ctx.text_end(c, BODY_FONT, cost, 0.0, w - 12.0, h / 2.0, tint);
+        }
+    });
 }
 
 /// A drawn check box over `[x, y, w, h]`: a small rounded square with a gold rim and, when `on`, a green tick with a white core.
