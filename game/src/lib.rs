@@ -26,6 +26,7 @@ pub mod flag;
 pub mod fx;
 pub mod interpolate;
 pub mod lifeboats;
+pub mod logging;
 pub mod menu;
 pub mod modding;
 pub mod nebula;
@@ -185,7 +186,7 @@ pub fn run(view: fn(&mut App), setup_view: fn(&mut App)) {
         late_frame: arg("--late-frame").and_then(|v| v.parse().ok()).unwrap_or(9000), // 0: no _late shot (slow software rendering)
     };
     App::new()
-        .add_plugins(DefaultPlugins.set(AssetPlugin { file_path: assets_dir().to_string_lossy().into_owned(), ..default() }))
+        .add_plugins(DefaultPlugins.set(AssetPlugin { file_path: assets_dir().to_string_lossy().into_owned(), ..default() }).set(logging::plugin()))
         .add_plugins((clips::plugin, render::plugin))
         .add_plugins((
             fx::plugin,

@@ -324,6 +324,7 @@ fn ambient_effect<'a>(kind: &str, effect: &'a str) -> Option<&'a str> {
 /// the first player's start point, the enemy fleet at the first player of another team, both in formation facing their
 /// start vectors. Without a map: the test arena (player at the origin, enemies on a ring).
 pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Library, fxl: &fx::FxLib, shapes: &collision::Shapes, asteroids: &data::AsteroidDefs, cfg: &Config) {
+    info!("battle start: map={:?} player={} allies={:?} enemies={:?}", cfg.map, cfg.player, cfg.allies, cfg.enemies);
     commands.queue(resume_scenario);
     commands.remove_resource::<crate::rules::skirmish::SkirmishScript>();
     let map = cfg.map.as_deref().and_then(data::map_json);
