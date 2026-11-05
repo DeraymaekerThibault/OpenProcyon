@@ -3,8 +3,8 @@
 //! the weapon mounts on it, stat bars, and the crew or weapon list. Falls back to a plain list when the model has no `fit`.
 #![allow(deprecated)]
 use super::widgets::{
-    Ctx, GOLD, canvas, dropdown, fleet_bar, full_screen, info_panel, list_row, pad, piece, pulldown_cell, scrollbar, selected_tab, size_of, stretched_window, victory_points,
-    wrapped,
+    Ctx, GOLD, PanelKind, canvas, dropdown, fleet_bar, full_screen, info_panel, list_row, pad, panel, piece, pulldown_cell, scrollbar, selected_tab, size_of, stretched_window,
+    victory_points, wrapped,
 };
 use crate::combat::Library;
 use crate::crew_arms::{Action, CrewSet, FitView, SORTS, ScreenModel};
@@ -174,8 +174,9 @@ fn crew(ctx: &Ctx, c: &mut ChildSpawnerCommands, fit: &FitView, lib: &Library, s
         ctx.text(c, "Univers10", &s(&format!("IDGS_TPFRONTENDTEXT01_STATBAR_LABEL_{id}")), cx - 50.0, 100.0, 387.0, true, Color::WHITE);
         let v = fit.bars[k].clamp(0.0, 1.0);
         let (l, r) = (cx - 39.0, cx + 39.0);
-        c.spawn((ctx.node(l + 4.0, 404.0, (r - l - 8.0) * v, 11.0), BackgroundColor(Color::srgb(1.0 - v, 0.3 + 0.6 * v, 0.1))));
-        piece(ctx, c, "FrontEnd_StatBar_Border", [l, 401.0, r, 418.0]);
+        panel(ctx, c, [l, 401.0, r, 418.0], PanelKind::Slot);
+        let fill = Node { border_radius: BorderRadius::all(Val::Px(4.0 * ctx.scale)), ..ctx.node(l + 4.0, 404.0, (r - l - 8.0) * v, 11.0) };
+        c.spawn((fill, BackgroundColor(Color::srgb(1.0 - v, 0.3 + 0.6 * v, 0.1))));
     }
     // Drop sends the selected post's last named crew member back to the roster.
     ctx.button(c, [60.0, 427.0, 158.0, 465.0], &s("IDGS_TPFRONTENDTEXT_SCREENS_DROP"), "BlackChancery16", fit.can_drop.then_some(Action::Drop));

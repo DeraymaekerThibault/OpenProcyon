@@ -11,6 +11,7 @@
   "edge_width": 2.0,
   "panel_radius": 20.0,
   "box_radius": 4.0,
+  "slot_radius": 6.0,
   "shadow_alpha": 0.5,
   "shadow_blur": 8.0,
   "button": {

@@ -23,6 +23,8 @@ pub struct Theme {
     pub edge_width: f32,
     pub panel_radius: f32,
     pub box_radius: f32,
+    /// Corner radius of the small slot frames.
+    pub slot_radius: f32,
     /// Opacity and blur (reference px) of the soft shadow under a panel.
     pub shadow_alpha: f32,
     pub shadow_blur: f32,
@@ -123,6 +125,7 @@ impl Default for Theme {
             edge_width: 2.0,
             panel_radius: 20.0,
             box_radius: 4.0,
+            slot_radius: 6.0,
             shadow_alpha: 0.5,
             shadow_blur: 8.0,
             button: Looks {
@@ -164,6 +167,7 @@ impl Theme {
             (&mut t.edge_width, "edge_width"),
             (&mut t.panel_radius, "panel_radius"),
             (&mut t.box_radius, "box_radius"),
+            (&mut t.slot_radius, "slot_radius"),
             (&mut t.shadow_alpha, "shadow_alpha"),
             (&mut t.shadow_blur, "shadow_blur"),
         ] {
