@@ -25,6 +25,7 @@ lifeboat-m2-ladyj|--mission 2 --script lifeboat-m2-ladyj --shot-frame 3000 --lat
 lifeboat-m4|--mission 4 --script lifeboat-m4 --shot-frame 3000 --late-frame 0
 lifeboat-m9|--mission 9 --script lifeboat-m9 --shot-frame 3000 --late-frame 0
 lifeboat-kill-m5|--mission 5 --script lifeboat-kill --shot-frame 3000 --late-frame 0
+mods|--menu mods --shot-frame 40 --late-frame 0
 fxtest|--script fxtest --shot-frame 120 --late-frame 0
 victory|--script victory --shot-frame 300 --late-frame 0
 defeat|--script defeat --shot-frame 300 --late-frame 0
