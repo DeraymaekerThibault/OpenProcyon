@@ -709,7 +709,7 @@ pub(super) fn list_row_cost(
 }
 
 /// A drawn check box over `[x, y, w, h]`: a small rounded square with a gold rim and, when `on`, a green tick with a white core.
-fn check_box(ctx: &Ctx, c: &mut ChildSpawnerCommands, [x, y, w, h]: [f32; 4], on: bool) {
+pub(super) fn check_box(ctx: &Ctx, c: &mut ChildSpawnerCommands, [x, y, w, h]: [f32; 4], on: bool) {
     let theme = ctx.theme;
     let [left, top, width, height, border, _] = panel_geometry([x, y, x + w, y + h], PanelKind::Inner, theme, ctx.scale);
     let border = border.max(crate::panels::snap(1.0, ctx.scale));

@@ -113,8 +113,11 @@ pub enum Action {
     /// Switch installed mod `n` on or off (applies on the next launch).
     ToggleMod(usize),
     SortMods(ModCol),
-    /// Cycle the Mods table's category filter.
-    ModCategory,
+    /// Pick mod `n` for the Mods screen's right-hand panel.
+    PickMod(usize),
+    /// Open / close the Mods category pull-down; pick its entry `n` (0 = All).
+    ModFilterOpen,
+    ModFilter(usize),
 }
 
 impl Action {
@@ -190,7 +193,17 @@ pub fn button_sound(action: &Action, arrow: Option<&ArrowButton>, select: bool) 
             }
         }
         _ if list => "FE_List_Select",
-        (Action::FleetSize(_) | Action::VictoryLimit(_) | Action::Setting(_) | Action::ToggleMod(_) | Action::SortMods(_) | Action::ModCategory, _) => "SpinButton",
+        (
+            Action::FleetSize(_)
+            | Action::VictoryLimit(_)
+            | Action::Setting(_)
+            | Action::ToggleMod(_)
+            | Action::SortMods(_)
+            | Action::PickMod(_)
+            | Action::ModFilterOpen
+            | Action::ModFilter(_),
+            _,
+        ) => "SpinButton",
         (Action::Launch | Action::Campaign | Action::Tutorial(_), _) => "StartButton",
         (Action::AddShip, _) => "FE_Add",
         (Action::DropShip | Action::Remove, _) => "FE_Drop",
@@ -353,6 +366,7 @@ fn dropdown_release(mouse: Res<ButtonInput<MouseButton>>, entries: Query<(&Actio
 pub enum ScrollKind {
     Maps,
     Ships,
+    Mods,
     /// The crew / weapon list of the Crew and Arms screens (owned by `crew_arms`, which reads `ScrollTo`).
     Crew,
 }
@@ -374,6 +388,7 @@ fn scroll_drag(
     mouse: Res<ButtonInput<MouseButton>>,
     mut sk: ResMut<Skirmish>,
     mut to: ResMut<ScrollTo>,
+    mut mods: ResMut<ModList>,
     mut dragging: Local<Option<ScrollKind>>,
 ) {
     if !mouse.pressed(MouseButton::Left) {
@@ -391,6 +406,7 @@ fn scroll_drag(
     match kind {
         ScrollKind::Maps => sk.map_scroll = row,
         ScrollKind::Ships => sk.scroll = row,
+        ScrollKind::Mods => mods.scroll = row,
         ScrollKind::Crew => to.0 = Some((kind, row)),
     }
 }
@@ -818,7 +834,14 @@ fn buttons(
             Action::Rebind(n) => cui.capture = Some(*n),
             Action::ToggleMod(n) => mods.toggle(*n),
             Action::SortMods(c) => mods.sort_by(*c),
-            Action::ModCategory => mods.next_category(),
+            Action::PickMod(n) => {
+                mods.picked = Some(*n);
+                if clicks.double(1, *n, time.elapsed_secs_f64()) {
+                    mods.toggle(*n);
+                }
+            }
+            Action::ModFilterOpen => mods.filter_open = !mods.filter_open,
+            Action::ModFilter(n) => mods.set_filter(*n),
             Action::Setting(s) => {
                 settings.step(*s);
                 settings.save();

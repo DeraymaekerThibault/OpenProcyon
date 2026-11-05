@@ -19,8 +19,8 @@ use crate::menu::{
 use crate::sprites::{BODY_FONT, Fonts, HudData};
 
 use super::widgets::{
-    Ctx, GOLD, Rest, arrow, canvas, cell, disabled, dropdown, fleet_bar, full_screen, heading, info_panel, list_row_cost, pad, picked, piece, piece_flipped, pulldown_cell, radio,
-    scrollbar, selected_tab, size_of, slider, stretched_window, victory_points, wheel_step, wrapped,
+    Ctx, GOLD, Rest, arrow, canvas, cell, check_box, disabled, dropdown, fleet_bar, full_screen, heading, info_panel, list_row_cost, pad, picked, piece, piece_flipped,
+    pulldown_cell, radio, scrollbar, selected_tab, size_of, slider, stretched_window, victory_points, wheel_step, wrapped,
 };
 
 pub fn plugin(app: &mut App) {
@@ -520,49 +520,78 @@ fn sound_display_page(ctx: &Ctx, c: &mut ChildSpawnerCommands, display: bool, in
     }
 }
 
-const MOD_ROWS: usize = 6;
-
-/// Mods table: checkbox, name with its description, category, version. A header click sorts by that column, the category button
-/// filters, the mouse wheel scrolls. PROVISIONAL: no retail screen, laid out like the Control Options table; the strings are ours.
+/// Mods screen: the list on the left (sortable column titles, check boxes, scrollbar), the picked mod on the right, the category
+/// pull-down above it. PROVISIONAL: no retail screen, so the layout and the strings are ours.
 fn mods_page_view(ctx: &Ctx, c: &mut ChildSpawnerCommands, mods: &crate::menu::ModList) {
-    use crate::menu::ModCol;
+    use crate::menu::{MOD_ROWS, ModCol};
     settings_frame(ctx, c, false, (Page::Options, Screen::Main));
-    ctx.text(c, "BlackChancery22", "Mods", 250.0, 300.0, 150.0, true, SETTINGS_GOLD);
-    let (l, r, t) = (140.0, 660.0, 185.0);
-    let filter = format!("Category: {}", mods.category.as_deref().unwrap_or("All"));
-    ctx.text_button(c, [r - 190.0, 135.0, r, 167.0], &filter, "BlackChancery16", Action::ModCategory);
-    // Header: clicking a title sorts by it; the arrow marks the sorted column.
-    c.spawn((ctx.node(l, t, r - l, 26.0), BackgroundColor(Color::srgba(0.1, 0.4, 0.6, 0.8))));
-    let arrow = |col| if mods.sort.0 == col { if mods.sort.1 { " ^" } else { " v" } } else { "" };
-    for (col, label, x, w) in
-        [(ModCol::Enabled, "On", l, 40.0), (ModCol::Name, "Name", l + 40.0, 280.0), (ModCol::Category, "Category", l + 320.0, 110.0), (ModCol::Version, "Version", l + 430.0, 90.0)]
-    {
-        let mut h = c.spawn((ctx.node(x, t, w, 26.0), Interaction::None, Action::SortMods(col), BackgroundColor(Color::NONE), Rest(Color::NONE)));
-        h.with_children(|c| ctx.text(c, "UniversBold14", &format!("{label}{}", arrow(col)), 8.0, w, 13.0, false, Color::WHITE));
-    }
-    let row_h = 38.0;
-    c.spawn((ctx.node(l, t + 26.0, r - l, row_h * MOD_ROWS as f32 + 4.0), BackgroundColor(Color::srgba(0.0, 0.1, 0.3, 0.6))));
+    ctx.text(c, "BlackChancery22", "Mods", 250.0, 300.0, 120.0, true, SETTINGS_GOLD);
     let rows = mods.rows();
-    for (n, &i) in rows.iter().enumerate().skip(mods.scroll).take(MOD_ROWS) {
-        let m = &mods.mods[i];
-        let y = t + 28.0 + (n - mods.scroll) as f32 * row_h;
-        let mut row = c.spawn((ctx.node(l, y, r - l, row_h), Interaction::None, Action::ToggleMod(i), BackgroundColor(Color::NONE), Rest(Color::NONE)));
-        row.with_children(|c| {
-            // Checkbox: a light frame, filled gold when the mod is on.
-            c.spawn((ctx.node(12.0, row_h / 2.0 - 9.0, 18.0, 18.0), BackgroundColor(Color::srgb(0.75, 0.85, 0.95))));
-            c.spawn((ctx.node(14.0, row_h / 2.0 - 7.0, 14.0, 14.0), BackgroundColor(if m.enabled { SETTINGS_GOLD } else { Color::srgb(0.02, 0.08, 0.2) })));
-            ctx.text(c, "UniversBold14", &m.name, 48.0, 280.0, 11.0, false, Color::WHITE);
-            let desc: String = m.description.chars().take(40).collect();
-            ctx.text(c, "Univers10", &desc, 48.0, 270.0, 27.0, false, Color::srgb(0.8, 0.8, 0.8));
-            ctx.text(c, "Univers10", &m.category, 328.0, 100.0, row_h / 2.0, false, Color::WHITE);
-            ctx.text(c, "Univers10", &m.version, 438.0, 70.0, row_h / 2.0, false, Color::WHITE);
+    // Left: the list.
+    stretched_window(ctx, c, [48.0, 128.0, 470.0, 478.0]);
+    ctx.fill(c, [52.0, 132.0, 414.0, 20.0], heading());
+    let arrow = |col| if mods.sort.0 == col { if mods.sort.1 { " ^" } else { " v" } } else { "" };
+    let cols = [(ModCol::Enabled, "On", 52.0, 36.0), (ModCol::Name, "Name", 88.0, 200.0), (ModCol::Category, "Category", 288.0, 100.0), (ModCol::Version, "Version", 388.0, 78.0)];
+    for (col, label, x, w) in cols {
+        c.spawn((ctx.node(x, 132.0, w, 20.0), Interaction::None, Action::SortMods(col), BackgroundColor(Color::NONE), Rest(Color::NONE))).with_children(|c| {
+            ctx.text(c, BODY_FONT, &format!("{label}{}", arrow(col)), 6.0, w - 6.0, 10.0, false, Color::WHITE);
         });
     }
-    let note = match mods.mods.is_empty() {
-        true => format!("No mods installed. Put mod folders in {}", crate::modding::mods_dir().map_or(String::new(), |d| d.display().to_string())),
-        false => format!("{} of {} shown. Changes apply the next time the game starts.", rows.len(), mods.mods.len()),
-    };
-    ctx.text(c, "Univers10", &note, l, r - l, t + 26.0 + row_h * MOD_ROWS as f32 + 16.0, false, Color::WHITE);
+    for (n, &i) in rows.iter().enumerate().skip(mods.scroll).take(MOD_ROWS) {
+        let m = &mods.mods[i];
+        let (y, h) = (154.0 + (n - mods.scroll) as f32 * 19.5, 19.5);
+        let fill = BackgroundColor(if mods.picked == Some(i) { picked() } else { Color::NONE });
+        c.spawn((ctx.node(52.0, y, 414.0, h), Interaction::None, Action::PickMod(i), fill)).with_children(|c| {
+            c.spawn((ctx.node(12.0, 2.5, 14.0, 14.0), Interaction::None, Action::ToggleMod(i))).with_children(|c| check_box(ctx, c, [0.0, 0.0, 14.0, 14.0], m.enabled));
+            ctx.text(c, BODY_FONT, &m.name, 42.0, 196.0, h / 2.0, false, Color::WHITE);
+            ctx.text(c, BODY_FONT, &m.category, 242.0, 100.0, h / 2.0, false, Color::WHITE);
+            ctx.text(c, BODY_FONT, &m.version, 342.0, 70.0, h / 2.0, false, Color::WHITE);
+        });
+    }
+    scrollbar(ctx, c, [472.0, 128.0, 488.0, 478.0], ScrollKind::Mods, rows.len(), MOD_ROWS, mods.scroll);
+    let note = if mods.mods.is_empty() { String::new() } else { format!("{} of {} shown. Changes apply the next time the game starts.", rows.len(), mods.mods.len()) };
+    ctx.text(c, "Univers10", &note, 48.0, 422.0, 490.0, false, Color::WHITE);
+    // Right: the category filter and the picked mod.
+    let filter = format!("Category: {}", mods.category.as_deref().unwrap_or("All"));
+    pulldown_cell(ctx, c, [490.0, 128.0, 752.0, 150.0], &filter, mods.filter_open, Some(Action::ModFilterOpen), true);
+    stretched_window(ctx, c, [490.0, 158.0, 752.0, 478.0]);
+    match mods.picked.and_then(|i| mods.mods.get(i).map(|m| (i, m))) {
+        Some((i, m)) => {
+            ctx.text(c, "UniversBold14", &m.name, 506.0, 230.0, 178.0, false, Color::WHITE);
+            let bundled = crate::bundled_mods_dir().is_some_and(|d| m.dir.starts_with(d));
+            let folder = m.dir.file_name().map_or(String::new(), |f| f.to_string_lossy().into_owned());
+            let lines = [
+                ("Category", m.category.clone()),
+                ("Version", m.version.clone()),
+                ("Source", (if bundled { "bundled" } else { "installed" }).into()),
+                ("Default", (if m.default { "on" } else { "off" }).into()),
+                ("Folder", folder),
+            ];
+            for (k, (label, value)) in lines.iter().enumerate() {
+                let cy = 202.0 + k as f32 * 16.0;
+                ctx.text(c, "Univers10", label, 506.0, 60.0, cy, false, Color::WHITE);
+                ctx.text(c, "Univers10", ":", 566.0, 8.0, cy, false, Color::WHITE);
+                ctx.text(c, "Univers10", value, 576.0, 170.0, cy, false, GOLD);
+            }
+            wrapped(ctx, c, "Univers10", &m.description, [506.0, 290.0, 736.0, 430.0]);
+            let label = if m.enabled { "Switch off" } else { "Switch on" };
+            ctx.text_button(c, [546.0, 440.0, 696.0, 468.0], label, "BlackChancery16", Action::ToggleMod(i));
+        }
+        None => {
+            let dir = crate::modding::mods_dir().map_or(String::new(), |d| d.display().to_string());
+            let help = if mods.mods.is_empty() {
+                "No mods installed. Unzip a mod folder into the mods folder:"
+            } else {
+                "Pick a mod to see its details. To install one, unzip its folder into the mods folder:"
+            };
+            wrapped(ctx, c, "Univers10", help, [506.0, 172.0, 736.0, 250.0]);
+            wrapped(ctx, c, "Univers10", &dir, [506.0, 256.0, 736.0, 330.0]);
+        }
+    }
+    if mods.filter_open {
+        let entries = std::iter::once("All".to_string()).chain(mods.categories()).enumerate().map(|(k, f)| (f, Action::ModFilter(k))).collect();
+        dropdown(ctx, c, Action::ModFilterOpen, [490.0, 150.0, 262.0, 22.0], entries, None);
+    }
 }
 
 /// Title gold of the Options pages.
@@ -928,7 +957,7 @@ fn scroll_controls(mut wheel: MessageReader<bevy::input::mouse::MouseWheel>, sta
 fn scroll_mods(mut wheel: MessageReader<bevy::input::mouse::MouseWheel>, state: Res<State<Screen>>, mut mods: ResMut<crate::menu::ModList>) {
     let dy: f32 = wheel.read().map(|e| e.y).sum();
     if dy != 0.0 && *state.get() == Screen::Mods {
-        let max = mods.rows().len().saturating_sub(MOD_ROWS);
+        let max = mods.rows().len().saturating_sub(crate::menu::MOD_ROWS);
         let next = wheel_step(mods.scroll, dy, max);
         mods.scroll = next;
     }
