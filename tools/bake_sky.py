@@ -7,7 +7,7 @@ it lacks at modern resolutions: domain-warped filaments, dust lanes, fine grain 
 skybox instead of the sphere when the file exists (`scenario.rs`, `view::hd_sky`).
 The result is derived from the player's own copy, so it stays local: by default a mod folder `<user dir>/mods/hd-skies`,
 switched on in the Mods screen. Needs only NumPy and Pillow.
-usage: python3 -m tools.bake_sky [--assets assets] [--out DIR] [--size 2048] [--jobs N] [skybox_07 ...]
+usage: python3 -m tools.bake_sky [--assets assets] [--out DIR] [--size 2048] [--jobs N] [--split-stars] [skybox_07 ...]
 """
 
 import argparse
@@ -16,24 +16,14 @@ import json
 import os
 import struct
 import sys
+import zlib
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 import numpy as np
 from PIL import Image, ImageFilter
 
-
-def user_dir(env=os.environ, windows=sys.platform == "win32"):
-    """The game's per-user folder, chosen like OpenProcyon's campaign::user_dir(): XDG_DATA_HOME, then HOME/.local/share
-    and APPDATA; on Windows APPDATA first, unless only a HOME one exists already."""
-    if env.get("XDG_DATA_HOME"):
-        return Path(env["XDG_DATA_HOME"], "openprocyon")
-    home = env.get("HOME") and Path(env["HOME"], ".local/share/openprocyon")
-    appdata = env.get("APPDATA") and Path(env["APPDATA"], "openprocyon")
-    if windows and appdata and not (home and home.is_dir() and not appdata.is_dir()):
-        return appdata
-    return home or appdata or None
-
+from tools.import_assets import user_dir
 
 MOD = {
     "id": "hd-skies",
@@ -306,7 +296,7 @@ def draw_stars(img, face, n, stars):
         # faint stars about a texel across; bright ones get a soft halo, the brightest small cross spikes
         sigma = (0.55 + 0.35 * min(lum[i], 1)) * max(scale, 0.5)
         halo_s = sigma * 4 * min(lum[i], 3) if lum[i] > 0.6 else 0
-        ls = 9 * scale * lum[i] if lum[i] > 1.5 else 0
+        ls = 3.5 * scale * lum[i] if lum[i] > 1.5 else 0
         # the patch must hold the whole star (core, halo, spikes) or its edge shows as a square
         r = int(np.ceil(max(sigma * 4, halo_s * 3.5, ls * 4)))
         cx, cy = px[i], py[i]
@@ -321,18 +311,62 @@ def draw_stars(img, face, n, stars):
         r2 = dx * dx + dy * dy
         k = np.exp(-r2 / (2 * sigma * sigma))
         if lum[i] > 0.6:
-            k = k + 0.04 * np.exp(-r2 / (2 * halo_s * halo_s))
+            k = k + 0.07 * np.exp(-r2 / (2 * halo_s * halo_s))
         if lum[i] > 1.5:
             spikes = np.exp(-(dx * dx) / 0.5) * np.exp(-np.abs(dy) / ls)
             spikes += np.exp(-(dy * dy) / 0.5) * np.exp(-np.abs(dx) / ls)
-            k = k + 0.15 * spikes
+            # faint and short: a hint of a diffraction cross, not a plus sign
+            k = k + 0.035 * spikes
         # fade to exactly zero at the patch edge so no cut-off can show
         k = k * np.clip(1 - np.sqrt(r2) / (r + 1), 0, 1) ** 0.5
         img[y0:y1, x0:x1] += k[..., None] * (lum[i] * col[i])
 
 
+# The stars layer is stored as 16-bit linear light divided by this, so the brightest stars exceed 1 (and bloom) when the
+# game multiplies it back (`stars.gain` of the sky block, same default).
+STAR_GAIN = 16.0
+
+
+def write_png16(path, img):
+    """Writes (H, W, 3) uint16 as a 16-bit RGB PNG (Pillow cannot write 16-bit colour)."""
+    h, w, _ = img.shape
+    raw = b"".join(b"\0" + row.astype(">u2").tobytes() for row in img)
+
+    def chunk(kind, data):
+        body = kind + data
+        return struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body))
+
+    with open(path, "wb") as f:
+        f.write(b"\x89PNG\r\n\x1a\n")
+        f.write(chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 16, 2, 0, 0, 0)))
+        f.write(chunk(b"IDAT", zlib.compress(raw, 6)))
+        f.write(chunk(b"IEND", b""))
+
+
+def read_png16(path):
+    """Reads back what write_png16 wrote: (H, W, 3) uint16."""
+    data = Path(path).read_bytes()[8:]
+    idat, pos = b"", 0
+    while pos < len(data):
+        (n,) = struct.unpack(">I", data[pos : pos + 4])
+        kind, body = data[pos + 4 : pos + 8], data[pos + 8 : pos + 8 + n]
+        if kind == b"IHDR":
+            w, h = struct.unpack(">II", body[:8])
+        elif kind == b"IDAT":
+            idat += body
+        pos += 12 + n
+    rows = np.frombuffer(zlib.decompress(idat), np.uint8).reshape(h, 1 + w * 6)
+    return rows[:, 1:].copy().view(">u2").reshape(h, w, 3).astype(np.uint16)
+
+
 def bake(tex, pos, uv, size, seed=1, stars=60000):
     """The six faces (6 * size x size x 3 uint8, stacked +X -X +Y -Y +Z -Z) for one retail sky."""
+    return bake_layers(tex, pos, uv, size, seed, stars)[0]
+
+
+def bake_layers(tex, pos, uv, size, seed=1, stars=60000, split_stars=False):
+    """(nebula, stars): the nebula faces as `bake` returns them and, with split_stars, the stars alone (6 * size x size x 3
+    uint16, linear light over STAR_GAIN, already dimmed by the gas in front of them) left out of the nebula; else None."""
     *mapping, _ = fit_mapping(pos, uv)
     guide = prepare_guide(tex)
     rows = guide.mean(1)
@@ -340,7 +374,7 @@ def bake(tex, pos, uv, size, seed=1, stars=60000):
     noise = Noise(seed)
     field = star_field(seed, int(stars * (size / 2048) ** 0.5))
     rng = np.random.default_rng(seed + 2000)
-    faces = []
+    faces, star_faces = [], []
     for face in range(6):
         d = face_dirs(face, size)
         smooth = upscale(smooth_fields(face_dirs(face, max(size // 4, 2)), noise), size)
@@ -356,38 +390,43 @@ def bake(tex, pos, uv, size, seed=1, stars=60000):
         star = np.zeros_like(col)
         draw_stars(star, face, size, field)
         # thick gas hides the stars behind it
-        col += star * (1 - 0.6 * np.clip(dens, 0, 1) ** 0.7)[..., None]
+        star *= (1 - 0.6 * np.clip(dens, 0, 1) ** 0.7)[..., None]
+        if split_stars:
+            star_faces.append(
+                np.clip(star / STAR_GAIN * 65535 + 0.5, 0, 65535).astype(np.uint16)
+            )
+        else:
+            col += star
         out = linear_to_srgb(col) * 255
         # triangular dither: no banding in the dark gradients
         out += rng.random(out.shape, np.float32) - rng.random(out.shape, np.float32)
         faces.append(np.clip(out + 0.5, 0, 255).astype(np.uint8))
-    return np.concatenate(faces, 0)
+    return np.concatenate(faces, 0), (
+        np.concatenate(star_faces, 0) if split_stars else None
+    )
 
 
-def bake_file(glb, out, size, seed):
+def bake_file(glb, out, size, seed, split_stars=False):
     tex, pos, uv = read_glb(glb)
     *_, err = fit_mapping(pos, uv)
     if err > 0.2:
         return f"{glb.stem}: sphere UVs do not follow the retail mapping (error {err:.3f}), skipped"
-    img = bake(tex, pos, uv, size, seed)
+    img, star_img = bake_layers(tex, pos, uv, size, seed, split_stars=split_stars)
     dst = out / "models" / "sky" / f"{glb.stem}_cube.png"
     dst.parent.mkdir(parents=True, exist_ok=True)
     Image.fromarray(img, "RGB").save(dst, compress_level=6)
-    return f"{dst} ({dst.stat().st_size >> 20} MB)"
+    note = ""
+    if star_img is not None:
+        write_png16(dst.with_name(f"{glb.stem}_stars.png"), star_img)
+        note = " + stars"
+    return f"{dst} ({dst.stat().st_size >> 20} MB{note})"
 
 
 def default_assets():
+    """PROCYON_ASSETS, else this checkout's assets/ (the baker lives in tools/), else the per-user folder."""
     if os.environ.get("PROCYON_ASSETS"):
         return Path(os.environ["PROCYON_ASSETS"])
-    here = (
-        Path(
-            os.environ.get(
-                "PROCYON_CHECKOUT",
-                Path(__file__).resolve().parent.parent.parent / "OpenProcyon",
-            )
-        )
-        / "assets"
-    )
+    here = Path(__file__).resolve().parent.parent / "assets"
     if here.is_dir():
         return here
     d = user_dir()
@@ -403,6 +442,11 @@ def main(argv=None):
     ap.add_argument("--out", type=Path, default=None, help="mod folder to write")
     ap.add_argument("--size", type=int, default=2048, help="cube face size in texels")
     ap.add_argument("--seed", type=int, default=1)
+    ap.add_argument(
+        "--split-stars",
+        action="store_true",
+        help="bake the stars into their own 16-bit <sky>_stars.png (for the `sky` block's twinkling stars) and leave them out of <sky>_cube.png",
+    )
     ap.add_argument("--jobs", type=int, default=max(1, (os.cpu_count() or 2) // 2))
     args = ap.parse_args(argv)
     assets = args.assets or default_assets()
@@ -426,6 +470,7 @@ def main(argv=None):
             [out] * len(glbs),
             [args.size] * len(glbs),
             [args.seed] * len(glbs),
+            [args.split_stars] * len(glbs),
         ):
             print(line, flush=True)
     print(f"done: switch on '{MOD['name']}' in the Mods screen (or --mod {out})")

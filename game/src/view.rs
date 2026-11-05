@@ -341,10 +341,24 @@ pub fn hd_sky_file(root: &std::path::Path, sky: &str) -> Option<String> {
 #[derive(Component)]
 pub struct HdSky(pub Handle<Image>);
 
+/// Turns a loaded image of six square faces stacked +X -X +Y -Y +Z -Z into a cube map, once; false (with a warning) when it
+/// is not that shape. Already a cube: true.
+pub fn as_cube(image: &mut Image) -> bool {
+    use bevy::render::render_resource::{TextureViewDescriptor, TextureViewDimension};
+    if image.texture_descriptor.size.depth_or_array_layers == 1 {
+        if image.height() != image.width() * 6 {
+            warn_once!("baked sky is {}x{}, not six square faces stacked: drawing none", image.width(), image.height());
+            return false;
+        }
+        image.reinterpret_stacked_2d_as_array(6).expect("six stacked faces");
+        image.texture_view_descriptor = Some(TextureViewDescriptor { dimension: Some(TextureViewDimension::Cube), ..default() });
+    }
+    true
+}
+
 /// Puts the baked sky on the battle camera as its skybox once the image has loaded, and takes it off again when the
 /// sky is hidden ('Render Background') or gone (battle over).
 pub fn hd_sky(mut commands: Commands, cams: Query<(Entity, Option<&bevy::light::Skybox>), With<Camera3d>>, sky: Query<(&HdSky, &Visibility)>, mut images: ResMut<Assets<Image>>) {
-    use bevy::render::render_resource::{TextureViewDescriptor, TextureViewDimension};
     let Some(want) = sky.iter().find(|(_, v)| **v != Visibility::Hidden).map(|(s, _)| &s.0) else {
         for (cam, _) in cams.iter().filter(|(_, s)| s.is_some()) {
             commands.entity(cam).remove::<bevy::light::Skybox>();
@@ -355,17 +369,11 @@ pub fn hd_sky(mut commands: Commands, cams: Query<(Entity, Option<&bevy::light::
     if current.and_then(|s| s.image.as_ref()) == Some(want) {
         return;
     }
-    let Some(loaded) = images.get(want) else { return };
-    let layers = loaded.texture_descriptor.size.depth_or_array_layers;
-    if layers == 1 && loaded.height() != loaded.width() * 6 {
-        warn_once!("baked sky is {}x{}, not six square faces stacked: drawing none", loaded.width(), loaded.height());
+    let Some(mut loaded) = images.get_mut(want) else { return };
+    if !as_cube(&mut loaded) {
         return;
     }
-    if layers == 1 {
-        let mut image = images.get_mut(want).unwrap();
-        image.reinterpret_stacked_2d_as_array(6).expect("six stacked faces");
-        image.texture_view_descriptor = Some(TextureViewDescriptor { dimension: Some(TextureViewDimension::Cube), ..default() });
-    }
+    drop(loaded);
     // Brightness that cancels the camera's default exposure, so the texels show as they are, like the unlit sphere.
     commands.entity(cam).insert(bevy::light::Skybox { image: Some(want.clone()), brightness: 1.0 / bevy::camera::Exposure::default().exposure(), ..default() });
 }

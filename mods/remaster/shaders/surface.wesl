@@ -1,5 +1,5 @@
 // Not retail: surface detail of the render profile (game/src/render/surfaces.rs; contract: `SurfaceUniform` there, our
-// own work under the project licence). A mod replaces it by shipping shaders/surface.wesl. The retail models have only
+// own work under the project licence). The retail models have only
 // colour textures, so the relief is read from the colour texture's brightness as it draws: darker texels lie lower (plank
 // seams, rivets, cracks in rock). Their slope tilts the normal (in a frame built from the screen-space derivatives, so
 // the mesh needs no tangents), the crevices are shaded darker, and brighter texels are a little smoother. The relief fades

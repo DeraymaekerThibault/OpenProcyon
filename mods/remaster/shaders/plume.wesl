@@ -1,5 +1,5 @@
 // Not retail: engine exhaust of the render profile (game/src/render/trails.rs; contract: `PlumeUniform` there, our own
-// work under the project licence). A mod replaces it by shipping shaders/plume.wesl. Drawn additively (ONE/ONE: write
+// work under the project licence). Drawn additively (ONE/ONE: write
 // unpremultiplied light, alpha ignored) on cones trailing astern of each
 // engine: a long outer flame in the faction colour and a short white-hot inner core. The cone's u runs around it, v from
 // the nozzle (0) to the tail (1). Dense where the camera looks through the cone's middle, licking tongues of flame at its

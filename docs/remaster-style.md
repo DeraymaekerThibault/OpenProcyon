@@ -44,6 +44,9 @@ Springfield), https://history.siggraph.org/learning/creating-3d-painterly-enviro
 - **Thin even-width tracer lines**: they read as debug lines, so tracers became the layered bolts above.
 - **Strong relief from texture brightness**: it came out as embossed noise on the small painted textures, so it was
   cut to about a third.
+- **Rigid sky drift** (`sky_drift`: the whole baked sky turning at 0.6 degrees a minute): nobody sees 9 degrees in a battle, and
+  when seen, every star and cloud moving together reads as the camera rolling. Replaced by the `sky` dome: relative motion
+  (parallax, a current) instead of rotation.
 - **Warm or contrasty colour grading**: colours turned red and too dark, so grading stays neutral.
 
 ## Rules
@@ -51,3 +54,8 @@ Springfield), https://history.siggraph.org/learning/creating-3d-painterly-enviro
   `mods/remaster`, and the classic presentation stays the default.
 - Nothing derived from game content is committed or shared: baked skies, or maps generated from retail textures. Those
   are made on each player's machine (`python -m tools.bake_sky`, see "HD skies" in `modding.md`).
+
+## Notes on `look.json`
+
+- `bursts.effects` lists `Lancer` and `Plasma` before `_Impact` / `_Muzzle` on purpose: the first matching rule wins, so the
+  energy weapons' own entries (no smoke) take their impact and muzzle effects before the generic rules do.

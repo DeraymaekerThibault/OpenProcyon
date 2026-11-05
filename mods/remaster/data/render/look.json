@@ -13,7 +13,25 @@
     "contact_shadows": true
   },
   "sky_light": 600,
-  "sky_drift": 0.6,
+  "sky": {
+    "near": {
+      "distance": 3000,
+      "opacity": 0.45,
+      "threshold": 0.3,
+      "softness": 0.35,
+      "drift": [
+        1.2,
+        0.5,
+        0.0
+      ]
+    },
+    "stars": {
+      "brightness": 1.0,
+      "twinkle": 0.45,
+      "speed": 2.0,
+      "gain": 16
+    }
+  },
   "ambient": 0.4,
   "sun": {
     "shadows": true,
@@ -474,33 +492,10 @@
         }
       },
       {
-        "match": "Fire",
-        "color": [
-          1.0,
-          0.45,
-          0.1
+        "match": [
+          "Fire",
+          "DragonBreath"
         ],
-        "width": 0.5,
-        "seconds": 0.3,
-        "head": 1.2,
-        "stretch": 2.0,
-        "smoke": {
-          "count": 16,
-          "color": [
-            0.3,
-            0.3,
-            0.306
-          ],
-          "size": 1.0,
-          "seconds": 1.6,
-          "speed": 1.0,
-          "spread": 60,
-          "drag": 2.0,
-          "rise": 0.3
-        }
-      },
-      {
-        "match": "DragonBreath",
         "color": [
           1.0,
           0.45,

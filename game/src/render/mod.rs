@@ -11,6 +11,7 @@
 //! - `trails.rs`: engine plumes (`shaders/plume.wesl`) and wakes drawn as crossed ribbons (`shaders/wake.wesl`);
 //! - `tracers.rs`: streaks of light behind shells in flight (`shaders/tracer.wesl`);
 //! - `surfaces.rs`: relief, roughness and metal for the retail models' textured materials (`shaders/surface.wesl`);
+//! - `sky.rs`: a dome over the baked sky with a near layer of gas that slides against it (`shaders/sky.wesl`);
 //! - `rules.rs`: the generic `materials` block, any shader of the mod on any matched retail material, one uniform for all;
 //! - `bursts.rs`: sparks, embers, fireballs, shockwaves and smoke thrown by retail effects, glowing hull scars, ether dust
 //!   and the camera jolt with its colour fringing (`shaders/burst.wesl`, `shaders/smoke.wesl`).
@@ -32,6 +33,7 @@ mod lights;
 mod materials;
 mod rules;
 mod sails;
+mod sky;
 mod surfaces;
 mod tracers;
 mod trails;
@@ -53,8 +55,8 @@ pub struct Look {
     pub ssao: bool,
     /// Image-based light from the baked sky, cd/m²; 0 = none.
     pub sky_light: f32,
-    /// Slow turn of the baked sky, degrees per minute of real time; 0 = still.
-    pub sky_drift: f32,
+    /// The sky dome (a near layer of gas with parallax) over the baked sky; none = off.
+    pub sky: Option<sky::SkyDome>,
     /// Multiplies the flat ambient light while the sky light is on: the sky takes over its role, in the sky's colours.
     pub ambient: f32,
     pub shadows: bool,
@@ -126,7 +128,7 @@ impl Look {
             smaa: cam["smaa"].as_bool().unwrap_or(true),
             ssao: cam["ssao"].as_bool().unwrap_or(false),
             sky_light: num(&v["sky_light"], 0.0),
-            sky_drift: num(&v["sky_drift"], 0.0),
+            sky: sky::parse(&v["sky"]),
             ambient: num(&v["ambient"], 1.0),
             shadows: v["sun"]["shadows"].as_bool().unwrap_or(false),
             shadow_distance: num(&v["sun"]["shadow_distance"], 2000.0),
@@ -177,6 +179,9 @@ impl Look {
         if self.bursts.is_some() && !(has_shader(root, "bursts", bursts::SHADER) & has_shader(root, "bursts", bursts::SMOKE_SHADER)) {
             self.bursts = None;
         }
+        if self.sky.is_some() && !has_shader(root, "sky", sky::SHADER) {
+            self.sky = None;
+        }
         self.materials = self.materials.and_then(|m| m.with_shaders(root));
         self
     }
@@ -203,7 +208,8 @@ pub fn plugin(app: &mut App) {
     surfaces::plugin(app, &look);
     bursts::plugin(app, &look);
     rules::plugin(app, &look);
-    app.insert_resource(look.flags).insert_resource(look).add_systems(Update, (camera, sun, sky_light, sky_drift));
+    sky::plugin(app, &look);
+    app.insert_resource(look.flags).insert_resource(look).add_systems(Update, (camera, sun, sky_light));
 }
 
 /// Marks a camera or sun the profile has set up.
@@ -267,20 +273,6 @@ struct SkyLit {
 /// the finished `EnvironmentMapLight` stays.
 const SKY_LIGHT_FRAMES: u32 = 30;
 
-/// Turns the baked sky slowly about a tilted axis, so the backdrop is never quite still. Real time, not the battle clock:
-/// the speed buttons and pause leave it alone. The sky's image-based light is made once and is not turned (it is far too
-/// soft for a few degrees to show).
-fn sky_drift(look: Res<Look>, time: Res<Time<Real>>, mut cams: Query<&mut Skybox, With<Camera3d>>) {
-    if look.sky_drift == 0.0 {
-        return;
-    }
-    let angle = (time.elapsed_secs_wrapped() * look.sky_drift / 60.0).to_radians();
-    let rotation = Quat::from_axis_angle(Vec3::new(0.2, 1.0, 0.1).normalize(), angle);
-    for mut sky in &mut cams {
-        sky.rotation = rotation;
-    }
-}
-
 /// The camera's skybox (the baked sky) also lights the scene, following it on and off; meanwhile the flat ambient light
 /// is scaled by `ambient`.
 fn sky_light(
@@ -327,7 +319,7 @@ mod tests {
     fn profile_keys_are_optional() {
         let look = Look::parse(&serde_json::json!({}));
         assert_eq!((look.bloom, look.fx_gain, look.sky_light, look.shadows, look.smaa, look.lit_smoke), (0.15, 1.0, 0.0, false, true, false));
-        assert_eq!(look.sky_drift, 0.0);
+        assert!(look.sky.is_none());
         assert!(look.lights.is_empty() && look.sails.is_none() && look.engines.is_none() && look.wakes.is_none());
         assert!(look.tracers.is_none() && look.surfaces.is_none() && look.bursts.is_none() && look.materials.is_none());
         assert_eq!((look.vignette, look.aberration_pulse, look.contact_shadows, look.sun_color, look.sun_intensity), (0.0, 0.0, false, Vec3::ONE, 1.0));
@@ -349,7 +341,7 @@ mod tests {
     #[test]
     fn a_profile_with_every_block_parses() {
         let look = Look::parse(&serde_json::json!({
-            "camera": {"bloom": 0.1, "bloom_threshold": 1.0}, "sky_light": 600, "sky_drift": 0.5, "ambient": 0.4, "sun": {"shadows": true},
+            "camera": {"bloom": 0.1, "bloom_threshold": 1.0}, "sky_light": 600, "sky": {"near": {"distance": 900}}, "ambient": 0.4, "sun": {"shadows": true},
             "lights": [{"effects": "Explosion_", "lumens": 1e8, "seconds": 1.5}],
             "sails": {"glow": [1, 0.7, 0.3], "opaque": true, "billow": 0.03},
             "flags": {"flutter": 1, "lit": true, "wind": true},
@@ -361,7 +353,7 @@ mod tests {
         assert_eq!(look.materials.as_ref().map(|m| (m.rules.len(), m.find("hull.tga"), m.find("water"))), Some((1, Some(0), None)));
         assert!(look.lights.iter().any(|l| "Explosion_Medium".contains(&l.effects)));
         assert!(look.sails.is_some() && look.engines.is_some() && look.wakes.is_some());
-        assert_eq!((look.bloom_threshold, look.sky_light, look.sky_drift, look.flags.wind), (1.0, 600.0, 0.5, true));
+        assert_eq!((look.bloom_threshold, look.sky_light, look.sky.as_ref().map(|s| s.distance), look.flags.wind), (1.0, 600.0, Some(900.0), true));
     }
 
     #[test]
