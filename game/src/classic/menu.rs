@@ -19,8 +19,8 @@ use crate::menu::{
 use crate::sprites::{BODY_FONT, Fonts, HudData};
 
 use super::widgets::{
-    Ctx, GOLD, HEADING, PICKED, Rest, arrow, canvas, cell, disabled, dropdown, fleet_bar, full_screen, info_panel, list_row, piece, piece_flipped, pulldown_cell, radio, scrollbar,
-    selected_tab, size_of, slider, stretched_window, victory_points, wheel_step, wrapped,
+    Ctx, GOLD, HEADING, PICKED, Rest, arrow, canvas, cell, disabled, dropdown, fleet_bar, full_screen, info_panel, list_row, pad, piece, piece_flipped, pulldown_cell, radio,
+    scrollbar, selected_tab, size_of, slider, stretched_window, victory_points, wheel_step, wrapped,
 };
 
 pub fn plugin(app: &mut App) {
@@ -86,7 +86,7 @@ fn build(
     };
     let els: Vec<Value> = crate::data::try_json(&assets_dir().join(format!("menu/{file}.json"))).and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default();
     let (canvas, scale) = canvas(&window);
-    let ctx = Ctx { assets: &assets, hud: &hud, fonts: &fonts, scale };
+    let ctx = Ctx { assets: &assets, hud: &hud, fonts: &fonts, scale, pad: pad(&window, scale) };
     commands
         .spawn((
             MenuRoot,
@@ -611,16 +611,18 @@ fn dialog_frame([l, t, r, b]: [f32; 4]) -> [f32; 4] {
 fn frontend_backdrop(ctx: &Ctx, c: &mut ChildSpawnerCommands, scene: usize) {
     if let Some(r) = size_of("FrontEnd_Letterbox_Tile") {
         let (w, h) = (r.x, r.y);
-        let mut x = 0.0;
-        while x < 800.0 {
+        // The grid strips run on past the canvas to the window edges.
+        let mut x = -(ctx.pad.x / w).ceil() * w;
+        while x < 800.0 + ctx.pad.x {
             for (y, flip) in [(113.0 - h, false), (507.0, true)] {
                 piece_flipped(ctx, c, "FrontEnd_Letterbox_Tile", [x, y, x + w, y + h], (false, flip));
             }
             x += w;
         }
     }
-    ctx.image(c, &format!("menu/frontendscreen{scene}.png"), Some(Rect::new(0.0, 0.0, 800.0, 394.0)), 0.0, 113.0, 800.0, 394.0, Color::WHITE);
-    ctx.image(c, "menu/frontendmap.png", None, 0.0, 113.0 + (394.0 - 375.0) / 2.0, 800.0, 375.0, Color::WHITE);
+    let wide = 800.0 + 2.0 * ctx.pad.x;
+    ctx.cover(c, &format!("menu/frontendscreen{scene}.png"), [-ctx.pad.x, 113.0, wide, 394.0], 394.0 / 800.0);
+    ctx.cover(c, "menu/frontendmap.png", [-ctx.pad.x, 113.0 + (394.0 - 375.0) / 2.0, wide, 375.0], 375.0 / 800.0);
     if let Some(r) = size_of("FrontEnd_TP_Logo") {
         piece(ctx, c, "FrontEnd_TP_Logo", [400.0 - r.x / 2.0, 0.0, 400.0 + r.x / 2.0, r.y]);
     }

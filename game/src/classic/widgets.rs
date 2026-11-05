@@ -7,7 +7,7 @@ use bevy::prelude::*;
 use bevy::ui::{FocusPolicy, RelativeCursorPosition};
 
 use crate::menu::{ArrowButton, ListEntry, RunButtons, SLIDER_KNOB, SLOT_BAR, ScrollKind, ScrollTrack, SliderTrack, menu_active};
-use crate::sprites::{BODY_FONT, Fonts, HudData, IDLE, MENU_SKIN, Sprite, meta_in, sliced, sprite_in};
+use crate::sprites::{BODY_FONT, Fonts, HudData, IDLE, MENU_SKIN, meta_in, slice, sprite_in};
 
 /// Retail gold for highlighted labels (the `Center Justify Label` title colour).
 pub(super) const GOLD: Color = Color::srgb(1.0, 0.796, 0.0);
@@ -25,13 +25,7 @@ const CELL_HOVER: Color = Color::srgba(0.1, 0.25, 0.55, 0.85);
 /// One swappable part of a widget's art.
 enum Piece {
     Sprite(String),
-    /// The left or right `w` px of a sprite (all of its states share the crop): the slider's and slot bar's end caps.
-    Crop {
-        name: String,
-        left: bool,
-        w: f32,
-    },
-    /// A `sprites::sliced` strip of this group.
+    /// A `sprites::slice` strip of this group (`data/hud/slices.json`).
     Slice(&'static str),
 }
 
@@ -44,7 +38,36 @@ struct Art(Vec<(Entity, Piece)>);
 pub(super) struct Rest(pub(super) Color);
 
 pub fn plugin(app: &mut App) {
-    app.add_systems(Update, hover.after(RunButtons).run_if(menu_active));
+    app.add_systems(Update, hover.after(RunButtons).run_if(menu_active)).add_systems(Update, fit_cover);
+}
+
+/// A backdrop picture that covers its frame: scaled up (never distorted) until both sides are filled, centre-cropped. The picture's
+/// size is only known once it has loaded, so `fit_cover` sizes the node then. `ratio` is the height of the part of the picture to
+/// show per unit of its width (retail files carry spare rows below their picture; a mod's picture of any aspect shows whole).
+#[derive(Component)]
+pub(super) struct Cover {
+    /// The frame in physical px.
+    frame: Vec2,
+    ratio: f32,
+}
+#[derive(Component)]
+struct Fitted;
+
+fn fit_cover(mut commands: Commands, images: Res<Assets<Image>>, mut q: Query<(Entity, &Cover, &mut ImageNode, &mut Node), Without<Fitted>>) {
+    for (e, cover, mut img, mut node) in &mut q {
+        let Some(size) = images.get(&img.image).map(|i| i.size().as_vec2()) else { continue };
+        let shown = Vec2::new(size.x, size.y.min(size.x * cover.ratio));
+        let size = cover_size(shown, cover.frame);
+        img.rect = Some(Rect::from_corners(Vec2::ZERO, shown));
+        (node.left, node.top) = (Val::Px((cover.frame.x - size.x) / 2.0), Val::Px((cover.frame.y - size.y) / 2.0));
+        (node.width, node.height) = (Val::Px(size.x), Val::Px(size.y));
+        commands.entity(e).insert(Fitted);
+    }
+}
+
+/// The size a picture of `shown` px is drawn at to cover `frame` without distortion.
+fn cover_size(shown: Vec2, frame: Vec2) -> Vec2 {
+    shown * (frame.x / shown.x).max(frame.y / shown.y)
 }
 
 /// Hover/press art of the retail buttons and list cells.
@@ -74,11 +97,6 @@ fn hover(
                         art.show(&mut img, &mut node, scale);
                     }
                 }
-                Piece::Crop { name, left, w } => {
-                    if let Some(art) = sprite_in(&assets, MENU_SKIN, name, state) {
-                        art.show_region(&mut img, &mut node, scale, crop(&art, *left, *w));
-                    }
-                }
             }
         }
     }
@@ -89,17 +107,19 @@ pub(super) fn size_of(name: &str) -> Option<Vec2> {
     meta_in(MENU_SKIN, name, IDLE).map(|m| m.size)
 }
 
-/// The left or right `w` reference px of a sprite's box.
-fn crop(art: &Sprite, left: bool, w: f32) -> Rect {
-    if left { Rect::new(0.0, 0.0, w, art.size.y) } else { Rect::new(art.size.x - w, 0.0, art.size.x, art.size.y) }
-}
-
 /// What every widget needs: art, fonts and the reference-to-window scale.
 pub(super) struct Ctx<'a> {
     pub(super) assets: &'a AssetServer,
     pub(super) hud: &'a HudData,
     pub(super) fonts: &'a Fonts,
     pub(super) scale: f32,
+    /// Reference px of window beyond the canvas on each side (zero at 4:3): where backdrops reach past it.
+    pub(super) pad: Vec2,
+}
+
+/// `Ctx::pad` of a window.
+pub(super) fn pad(window: &Window, scale: f32) -> Vec2 {
+    Vec2::new((window.width() / scale - 800.0) / 2.0, (window.height() / scale - 600.0) / 2.0).max(Vec2::ZERO)
 }
 
 /// The 800x600 reference canvas centred in the window, and its scale.
@@ -141,9 +161,20 @@ impl Ctx<'_> {
         img.image_mode = NodeImageMode::Stretch;
         c.spawn((img, self.node(x, y, w, h))).id()
     }
-    /// A full 800x600 backdrop picture.
+    /// A full-screen backdrop picture: covers the whole window (the 800x600 canvas sits on it), so a mod's wider picture fills it.
     pub(super) fn backdrop(&self, c: &mut ChildSpawnerCommands, path: &str) {
-        self.image(c, path, Some(Rect::new(0.0, 0.0, 800.0, 600.0)), 0.0, 0.0, 800.0, 600.0, Color::WHITE);
+        let (w, h) = (800.0 + 2.0 * self.pad.x, 600.0 + 2.0 * self.pad.y);
+        self.cover(c, path, [-self.pad.x, -self.pad.y, w, h], 0.75);
+    }
+    /// The picture at `path` covering `[x, y, w, h]` (reference units, may reach past the canvas); see `Cover`.
+    pub(super) fn cover(&self, c: &mut ChildSpawnerCommands, path: &str, [x, y, w, h]: [f32; 4], ratio: f32) {
+        let mut img = ImageNode::new(self.assets.load(path.to_string()));
+        img.image_mode = NodeImageMode::Stretch;
+        let frame = Node { overflow: Overflow::clip(), ..self.node(x, y, w, h) };
+        let picture = Node { position_type: PositionType::Absolute, width: Val::Px(0.0), height: Val::Px(0.0), ..default() };
+        c.spawn(frame).with_children(|c| {
+            c.spawn((img, picture, Cover { frame: Vec2::new(w, h) * self.scale, ratio }));
+        });
     }
     /// A flat colour box.
     pub(super) fn fill(&self, c: &mut ChildSpawnerCommands, [x, y, w, h]: [f32; 4], colour: Color) {
@@ -172,9 +203,15 @@ impl Ctx<'_> {
     }
     /// The idle gold-rimmed pill of the retail text buttons over `[x, y, w, h]` (one 9-slice node).
     pub(super) fn button_art(&self, c: &mut ChildSpawnerCommands, [x, y, w, h]: [f32; 4]) -> Entity {
-        let cap = |name| size_of(name).map_or(50.0, |size| size.x);
-        let art = sliced(self.assets, "button", MENU_SKIN, "nocursor", cap("FrontEnd_Texts_Over_Button_Left"), cap("FrontEnd_Texts_Over_Button_Right"));
-        c.spawn((art, self.node(x, y, w, h))).id()
+        self.slice(c, "button", [x, y, w, h])
+    }
+    /// The idle strip of slice group `group` over `[x, y, w, h]`, one 9-slice node (nothing when the art set lacks the group).
+    pub(super) fn slice(&self, c: &mut ChildSpawnerCommands, group: &str, [x, y, w, h]: [f32; 4]) -> Entity {
+        let node = self.node(x, y, w, h);
+        match slice(self.assets, group, MENU_SKIN, "nocursor") {
+            Some(art) => c.spawn((art, node)).id(),
+            None => c.spawn(node).id(),
+        }
     }
     /// A text button when it has an action, else its greyed-out retail art.
     pub(super) fn button(&self, c: &mut ChildSpawnerCommands, rect: [f32; 4], label: &str, font: &str, action: Option<impl Bundle>) {
@@ -200,37 +237,15 @@ pub(super) fn piece_flipped(ctx: &Ctx, c: &mut ChildSpawnerCommands, name: &str,
     Some(c.spawn((img, node)).id())
 }
 
-/// A cropped part of a sprite (see `Piece::Crop`) stretched over `[x, y, w, h]`, with its `Art` entry.
-fn crop_piece(ctx: &Ctx, c: &mut ChildSpawnerCommands, name: &str, left: bool, w: f32, [x, y, bw, bh]: [f32; 4]) -> Option<(Entity, Piece)> {
-    let art = sprite_in(ctx.assets, MENU_SKIN, name, IDLE)?;
-    let view = art.view(crop(&art, left, w), Vec2::new(bw, bh));
-    let mut img = art.image_node();
-    img.rect = view.rect;
-    img.image_mode = NodeImageMode::Stretch;
-    let mut node = ctx.node(x, y, bw, bh);
-    view.place(&mut node, ctx.scale, UiRect::DEFAULT);
-    let e = c.spawn((img, node)).id();
-    Some((e, Piece::Crop { name: name.to_string(), left, w }))
-}
-
-/// A left cap | stretched centre | right cap strip of three sprites over `[l, t, r, b]`, the caps `cap` wide.
-fn strip(ctx: &Ctx, c: &mut ChildSpawnerCommands, [left, centre, right]: [&str; 3], [l, t, r, b]: [f32; 4], cap: f32) {
-    piece(ctx, c, left, [l, t, l + cap, b]);
-    piece(ctx, c, centre, [l + cap, t, (r - cap).max(l + cap), b]);
-    piece(ctx, c, right, [r - cap, t, r, b]);
-}
-
 /// A greyed-out retail text button (not clickable).
 pub(super) fn disabled(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], label: &str, font: &str) {
-    let names = ["FrontEnd_Texts_Over_Button_Disabled_Left", "FrontEnd_Texts_Over_Button_Disabled_Center", "FrontEnd_Texts_Over_Button_Disabled_Right"];
-    strip(ctx, c, names, [l, t, r, b], 50.0 * (b - t) / 44.0);
+    ctx.slice(c, "button_disabled", [l, t, r - l, b - t]);
     ctx.text(c, font, label, l, r - l, (t + b) / 2.0, true, Color::srgb(0.55, 0.55, 0.55));
 }
 
 /// The current tab of a Ships / Crew / Arms row: the green `FrontEnd_Texts_Over_Button_Selected_*` button, not clickable.
 pub(super) fn selected_tab(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], label: &str, font: &str) {
-    let names = ["FrontEnd_Texts_Over_Button_Selected_Left", "FrontEnd_Texts_Over_Button_Selected_Center", "FrontEnd_Texts_Over_Button_Selected_Right"];
-    strip(ctx, c, names, [l, t, r, b], 51.0 * (b - t) / 45.0);
+    ctx.slice(c, "button_selected", [l, t, r - l, b - t]);
     ctx.text(c, font, label, l, r - l, (t + b) / 2.0, true, Color::WHITE);
 }
 
@@ -284,15 +299,11 @@ pub(super) fn scrollbar(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [
 /// knob that follows `fraction` (dragging the track moves it, see `menu::slider_drag`).
 pub(super) fn slider(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], fraction: f32, dec: impl Bundle, inc: impl Bundle, kind: SliderTrack) {
     const CAP: f32 = 33.0;
-    const ENDS: [&str; 2] = ["FrontEnd_Horizontal_Scrollbar_Background_Left", "FrontEnd_Horizontal_Scrollbar_Background_Right"];
-    let (cy, half) = ((t + b) / 2.0, (r - l) / 2.0);
+    let cy = (t + b) / 2.0;
     let top = cy - 16.5;
-    // The body: left half of the left piece, right half of the right piece, both idle.
-    for (name, left, x) in [(ENDS[0], true, l), (ENDS[1], false, l + half)] {
-        crop_piece(ctx, c, name, left, half, [x, top, half, 33.0]);
-    }
-    end_cap(ctx, c, ENDS[0], true, [l, top, CAP, 33.0], Some((dec, ArrowButton { forward: false })));
-    end_cap(ctx, c, ENDS[1], false, [r - CAP, top, CAP, 33.0], Some((inc, ArrowButton { forward: true })));
+    ctx.slice(c, "hscroll", [l, top, r - l, 33.0]);
+    end_cap(ctx, c, true, [l, top, CAP, 33.0], Some((dec, ArrowButton { forward: false })));
+    end_cap(ctx, c, false, [r - CAP, top, CAP, 33.0], Some((inc, ArrowButton { forward: true })));
     let track_w = r - l - 2.0 * CAP;
     let mut track = c.spawn((Interaction::None, kind, RelativeCursorPosition::default(), ctx.node(l + CAP, top, track_w, 33.0)));
     let mut parts = vec![];
@@ -304,14 +315,15 @@ pub(super) fn slider(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32
     track.insert(Art(parts));
 }
 
-/// A round 33 px end of the horizontal scrollbar art drawn as a step button over `[x, y, w, h]` (inert without an action).
-fn end_cap(ctx: &Ctx, c: &mut ChildSpawnerCommands, name: &str, left: bool, [x, y, w, h]: [f32; 4], action: Option<impl Bundle>) {
-    let mut root = c.spawn((Interaction::None, ctx.node(x, y, w, h)));
+/// A round end of the horizontal scrollbar art (`hscroll` slice group) drawn as a step button over `[x, y, w, h]` (inert without an
+/// action): the strip, twice as wide as the button, shows its left or right half through the button's box.
+fn end_cap(ctx: &Ctx, c: &mut ChildSpawnerCommands, left: bool, [x, y, w, h]: [f32; 4], action: Option<impl Bundle>) {
+    let mut root = c.spawn((Interaction::None, Node { overflow: Overflow::clip(), ..ctx.node(x, y, w, h) }));
     if let Some(a) = action {
         root.insert(a);
     }
     let mut parts = vec![];
-    root.with_children(|c| parts.extend(crop_piece(ctx, c, name, left, 33.0, [0.0, 0.0, w, h])));
+    root.with_children(|c| parts.push((ctx.slice(c, "hscroll", [if left { 0.0 } else { -w }, 0.0, 2.0 * w, h]), Piece::Slice("hscroll"))));
     root.insert(Art(parts));
 }
 
@@ -330,8 +342,7 @@ pub(super) fn fleet_bar<A: Bundle>(
     pick: impl Fn(usize) -> A,
 ) {
     for (left, x, live) in [(true, 36.0, scroll > 0), (false, 402.0, scroll + SLOT_BAR < limit)] {
-        let name = if left { "FrontEnd_Horizontal_Scrollbar_Background_Left" } else { "FrontEnd_Horizontal_Scrollbar_Background_Right" };
-        end_cap(ctx, c, name, left, [x, 507.0, 22.0, 22.0], live.then(|| scroll_by(if left { -1 } else { 1 })));
+        end_cap(ctx, c, left, [x, 507.0, 22.0, 22.0], live.then(|| scroll_by(if left { -1 } else { 1 })));
     }
     for k in 0..SLOT_BAR {
         let (i, x) = (scroll + k, 75.0 + k as f32 * 65.0);
@@ -440,8 +451,7 @@ pub(super) fn pulldown_cell(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b
     }
     root.with_children(|c| {
         let (w, h) = (r - l, b - t);
-        let names = ["Left", "Center", "Right"].map(|p| format!("FrontEnd_{p}_PullDown_Background{sel}"));
-        strip(ctx, c, names.each_ref().map(String::as_str), [0.0, 0.0, w, h], 12.0);
+        ctx.slice(c, &format!("pulldown{}", sel.to_lowercase()), [0.0, 0.0, w, h]);
         let text_w = if arrow { w - 24.0 } else { w };
         ctx.text(c, "Univers10", label, 0.0, text_w, h / 2.0, true, Color::WHITE);
         if arrow {
@@ -479,13 +489,35 @@ pub(super) fn wheel_step(first: usize, dy: f32, max: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sprites::Trim;
 
     #[test]
-    fn crop_keeps_the_named_side() {
-        let art = Sprite { image: Handle::default(), size: Vec2::new(100.0, 20.0), trim: Trim::default(), scale: 1.0 };
-        assert_eq!(crop(&art, true, 30.0), Rect::new(0.0, 0.0, 30.0, 20.0));
-        assert_eq!(crop(&art, false, 30.0), Rect::new(70.0, 0.0, 100.0, 20.0));
+    #[ignore = "needs imported assets"]
+    fn every_strip_the_widgets_draw_is_a_slice_group() {
+        // The groups come from data/hud/slices.json: explicit caps win, else the widths of the end pieces.
+        assert_eq!(crate::sprites::slice_caps("hscroll", MENU_SKIN), Some((33.0, 33.0)));
+        for group in ["button", "button_disabled", "button_selected", "pulldown", "pulldown_selected"] {
+            let (l, r) = crate::sprites::slice_caps(group, MENU_SKIN).unwrap_or_else(|| panic!("no slice group {group}"));
+            assert!(l > 0.0 && r > 0.0, "{group}");
+        }
+        assert_eq!(crate::sprites::slice_caps("no_such_group", MENU_SKIN), None);
+    }
+
+    #[test]
+    fn backdrops_cover_the_window_and_the_canvas_keeps_its_scale() {
+        // 16:9: the 4:3 picture is scaled to the width and cropped top and bottom, never distorted.
+        let near = |a: Vec2, b: Vec2| assert!(a.abs_diff_eq(b, 0.01), "{a} != {b}");
+        near(cover_size(Vec2::new(800.0, 600.0), Vec2::new(1920.0, 1080.0)), Vec2::new(1920.0, 1440.0));
+        // A wide picture fills 21:9 as it is; a taller window scales by height.
+        near(cover_size(Vec2::new(2560.0, 1080.0), Vec2::new(2560.0, 1080.0)), Vec2::new(2560.0, 1080.0));
+        near(cover_size(Vec2::new(800.0, 600.0), Vec2::new(600.0, 900.0)), Vec2::new(1200.0, 900.0));
+        // The canvas is scaled by height on a wide window and has no padding at 4:3; the sides are what is left.
+        let mut window = Window::default();
+        window.resolution.set(2560.0, 1080.0);
+        let scale = canvas(&window).1;
+        assert_eq!(scale, 1.8);
+        assert_eq!(pad(&window, scale), Vec2::new((2560.0 / 1.8 - 800.0) / 2.0, 0.0));
+        window.resolution.set(1600.0, 1200.0);
+        assert_eq!(pad(&window, canvas(&window).1), Vec2::ZERO);
     }
 
     #[test]

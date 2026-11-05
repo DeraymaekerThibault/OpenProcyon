@@ -3,7 +3,8 @@
 //! the weapon mounts on it, stat bars, and the crew or weapon list. Falls back to a plain list when the model has no `fit`.
 #![allow(deprecated)]
 use super::widgets::{
-    Ctx, GOLD, canvas, dropdown, fleet_bar, full_screen, info_panel, list_row, piece, pulldown_cell, scrollbar, selected_tab, size_of, stretched_window, victory_points, wrapped,
+    Ctx, GOLD, canvas, dropdown, fleet_bar, full_screen, info_panel, list_row, pad, piece, pulldown_cell, scrollbar, selected_tab, size_of, stretched_window, victory_points,
+    wrapped,
 };
 use crate::combat::Library;
 use crate::crew_arms::{Action, CrewSet, FitView, SORTS, ScreenModel};
@@ -67,7 +68,7 @@ fn build(
         return;
     };
     let (canvas, scale) = canvas(&window);
-    let ctx = Ctx { assets: &assets, hud: &hud, fonts: &fonts, scale };
+    let ctx = Ctx { assets: &assets, hud: &hud, fonts: &fonts, scale, pad: pad(&window, scale) };
     let strings = strings();
     let s = |id: &str| text_of(strings, id);
     commands.spawn((Root, crate::Scenario, Interaction::None, crate::panels::Solid, full_screen(), BackgroundColor(Color::BLACK), GlobalZIndex(180))).with_children(|root| {

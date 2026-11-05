@@ -4,7 +4,7 @@ use bevy::prelude::*;
 
 use crate::combat::{Health, Target};
 use crate::panels::{REF_H, Toggles, cinematic};
-use crate::sprites::{Fonts, HudData, size_of, sliced, sprite};
+use crate::sprites::{Fonts, HudData, size_of, slice, sprite};
 use crate::{Library, PlayerShip, Ship};
 
 pub fn plugin(app: &mut App) {
@@ -220,6 +220,7 @@ fn spawn_labels(
     let Some(font) = fonts.0.get("Immi14") else { return };
     for (e, ship, mission, named, owner) in &ships {
         commands.entity(e).insert(Labeled);
+        let Some(mut img) = slice(&assets, "ribbon", hud.skin, "nocursor") else { continue };
         // Reference video: thin white ribbon (ShipNameBackdrop_*_WhiteBanner) tinted red for our side, blue for the others.
         let tint = banner_tint(ship.side, mission, owner);
         let part = |side: &str| size_of(&hud, &format!("ShipNameBackdrop_{side}_WhiteBanner"));
@@ -236,7 +237,6 @@ fn spawn_labels(
         let text_pos = Vec2::new(((total - tw) / 2.0).round(), ((22.0 - font.height * font_scale) / 2.0 + 3.0).round()); // +3: the line box sits above the ribbon strip
         let root = commands.spawn((Label { ship: e, width: total }, Node { position_type: PositionType::Absolute, ..default() }, Visibility::Hidden)).id();
         let mut kids = vec![];
-        let mut img = sliced(&assets, "ribbon", hud.skin, "nocursor", l.x, r.x);
         img.color = tint;
         kids.push(commands.spawn((img, Node { position_type: PositionType::Absolute, ..default() }, RefRect { pos: Vec2::ZERO, size: Vec2::new(total, l.y) })).id());
         let wrapper = commands

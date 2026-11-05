@@ -14,7 +14,11 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 SUFFIX = ".exe" if sys.platform == "win32" else ""
 # Files the frozen importer reads from the checkout (tools resolve them next to their own module, see export_voices).
-IMPORTER_DATA = ["content/voice/events.json", "content/data/hud/bar.json"]
+IMPORTER_DATA = [
+    "content/voice/events.json",
+    "content/data/hud/bar.json",
+    "content/data/hud/slices.json",
+]
 
 PLAY = """OpenProcyon: an unofficial, open-source engine for Treasure Planet: Battle at Procyon (2002).
 This download contains no game content: you need your own copy of the original game.
