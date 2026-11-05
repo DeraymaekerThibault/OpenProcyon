@@ -88,6 +88,7 @@ never rules. Every key is optional; an absent block leaves that feature classic.
 | Key | Effect |
 |---|---|
 | `camera` | HDR camera: `bloom` (intensity), `bloom_threshold` (only light brighter than this blooms; 0 = Bevy's natural bloom, which hazes the image), `tonemapping` (`tony_mc_mapface`, `agx`, `aces`, `blender_filmic`, `reinhard_luminance`), `saturation`, `contrast`, `exposure` (stops), `smaa` (replaces MSAA), `ssao` (crashes with some effects meshes, keep false), `vignette` (corner darkening), `aberration` and `aberration_pulse` (colour fringing at rest, and added by a blast's camera jolt), `contact_shadows` (screen-space sun shadows where parts touch; adds a depth prepass) |
+| `sky_drift` | degrees per minute (real time, so pause and the speed buttons do not change it) the baked sky turns about a tilted axis; absent or 0: still |
 | `sky_light`, `ambient` | image-based light (cd/m²) computed once from a mod's cube-map sky (`models/sky/<sky>_cube.png`), and the multiplier on the flat ambient light while it is on |
 | `sun` | `shadows`, `shadow_distance` (cascades out to this many units), `color` (multiplies the map's sun colour), `intensity` (multiplies its strength) |
 | `fx_gain`, `shell_gain` | multiply ONE/ONE effect colour and the shells' spheres, so they pass 1 and bloom |
@@ -101,6 +102,12 @@ never rules. Every key is optional; an absent block leaves that feature classic.
 | `surfaces` | textured, lit, non-blended glTF materials (not sails) get `shaders/surface.wesl`, which derives relief from the colour texture while drawing: `rules` (`[{match: [...], roughness, metallic, reflectance, bump, cavity, gloss}]` against the material name, first match wins, unset keys from `default`), `skip` (names left retail), `rim` and `rim_strength` (light along the silhouettes). A cloaking ship's meshes (and sails) wear their retail material while faded |
 | `materials` | the generic block for any other kind of restyled material: `rules` (`[{match: [...], shader, params, params2, roughness, metallic, reflectance, opaque, shadows}]`): a glTF material whose name contains one of `match` (not listed in `skip`; first rule wins; any retail material, textured or not, not sails or surfaces, which a rule claims first) gets the rule's `shader` (a path in the mod, e.g. `shaders/hull.wesl`; a rule whose file is missing stays off with a warning). `params` and `params2` are four numbers each for the shader (missing ones 0); `roughness`, `metallic` and `reflectance` override the retail StandardMaterial's (unset = retail); `opaque` makes it solid; `shadows` (default true) lets it cast shadows. One material per retail material, rule and ship, so a ship's meshes still batch. A cloaking ship's meshes wear their retail material while faded |
 | `bursts` | particles thrown when a retail effect starts whose name contains a rule's `match` (`effects`, first match wins): parts `flash`, `sparks`, `embers`, `fireball`, `ring` (flat shockwave), `smoke`, each `{count, color, size, seconds, speed, spread (degrees about the effect's forward; a muzzle's is its shot's), drag, rise}`; `every` (seconds: keep throwing while the effect lives, e.g. fires), `shake` (camera jolt). `scorch` (a part: glow where a shell scars a hull), `motes` (a part: `count` specks of dust within `speed` units of the camera). Glows draw with `shaders/burst.wesl`, smoke with `shaders/smoke.wesl` |
+
+### HD skies (`tools/bake_sky.py`)
+`python -m tools.bake_sky [--size 2048] [--jobs N] [skybox_07 ...]` rebakes each imported battle sky as a high-resolution cube map
+(`models/sky/<sky>_cube.png`) into the local mod `<user data dir>/mods/hd-skies`, which is then switched on in the Mods screen.
+The result is derived from the player's own game copy, so it is made on their machine and never committed or shipped. Without it
+the game draws the retail sky sphere. Needs NumPy and Pillow. With `sky_drift` (above) the baked sky turns slowly.
 
 ### Effect events
 The blocks that decorate retail effects (`lights`, `bursts`, and `tracers` for thinning flight effects) learn that one started
