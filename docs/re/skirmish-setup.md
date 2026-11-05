@@ -17,7 +17,9 @@ described in our own words.
 - Ships / Crew / Arms: the engine draws the four gold panels over the scenery `menu/gamelobby.png` instead of showing `menu/shipscreen.png` (whose
   pixels carry them, so they grew away from the widgets on wide windows). Rects measured on that picture's 800x600 part (PROVISIONAL): fleet list
   panel x 23..459, y 38..471; information panel x 482..776, y 38..506; slot bar panel x 25..459, y 477..560; list box x 44..440, y 89..425 with a
-  lighter band over y 375..425; information box x 492..768, y 117..283. Colours and radii: `data/hud/theme.json`.
+  lighter band over y 375..425; information box x 492..768, y 117..283. The engine-drawn rims are thicker than the picture's, so the drawn panels
+  stretch 3 to 4 units beyond those rects (top 35, bottom 473 / 508 / 562), the list box is x 40..444 and the information box x 496..766, and the list scrollbars
+  stop at y 497, to keep the retail-placed buttons and text clear of the rim. Colours and radii: `data/hud/theme.json`.
 - Skirmish Game Lobby (`Skirmish Game Lobby.tst`): Assemble Fleet, I'm Ready, Launch Game, Abort, Map Information, chat, a player
   list area (233,155)-(795,445) drawn by `LobbyPlayersList_Button` (draw), backdrop texture `GameLobby`.
 - The player list draws one row per player with four cells: name, state (open/closed/computer/human), fleet type (string

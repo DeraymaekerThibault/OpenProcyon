@@ -237,7 +237,7 @@ fn list(ctx: &Ctx, c: &mut ChildSpawnerCommands, fit: &FitView, strings: &Value)
         let y = 336.25 + (row - fit.scroll) as f32 * 19.5;
         list_row(ctx, c, [505.0, y, 215.0, 19.5], label, fit.picked == Some(row), action.clone());
     }
-    scrollbar(ctx, c, [742.0, 330.0, 767.0, 505.0], ScrollKind::Crew, fit.list.len(), ROWS, fit.scroll);
+    scrollbar(ctx, c, [735.0, 330.0, 759.0, 497.0], ScrollKind::Crew, fit.list.len(), ROWS, fit.scroll);
     if fit.sort_open {
         // The entries hang under the box 25 apart (measured with the retail driver).
         let entries = SORTS.iter().enumerate().map(|(k, f)| (f.to_string(), Action::SortBy(k))).collect();

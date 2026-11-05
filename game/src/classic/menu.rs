@@ -716,7 +716,7 @@ fn players_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, _rect: [f32; 4], sk: &S
         let mut cells = vec![(287.0, 460.0, kind, player.clone(), player.is_some() && open)];
         if live {
             cells.push((470.0, 561.0, race, pull(Cell::Fleet(i)), sk.free_teams()));
-            cells.push((571.0, 779.0, team, pull(Cell::Team(i)), sk.free_teams()));
+            cells.push((571.0, 772.0, team, pull(Cell::Team(i)), sk.free_teams()));
         }
         for (x0, x1, label, action, drop) in cells {
             pulldown_cell(ctx, c, [x0, cy - 14.5, x1, cy + 14.5], &label, false, action, drop);
@@ -845,7 +845,7 @@ fn ship_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, _rect: [f32; 4], sk: &Skir
         let y = 338.0 + (row - sk.scroll) as f32 * 19.0;
         list_row(ctx, c, [505.0, y, 215.0, 19.0], &class_name(lib, ci, strings), sk.ship_chosen && row == sk.ship_pick, Action::PickShip(row));
     }
-    scrollbar(ctx, c, [742.0, 330.0, 767.0, 505.0], ScrollKind::Ships, list.len(), SHIP_ROWS, sk.scroll);
+    scrollbar(ctx, c, [735.0, 330.0, 759.0, 497.0], ScrollKind::Ships, list.len(), SHIP_ROWS, sk.scroll);
 }
 
 /// Fleet Select: the assembled fleet on the slot bar (`fleet_bar`); the picked entry is the one Drop removes.
