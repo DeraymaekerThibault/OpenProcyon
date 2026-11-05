@@ -16,6 +16,7 @@ import json
 import os
 import struct
 import sys
+import tempfile
 import zlib
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
@@ -137,7 +138,11 @@ class Noise:
             ]
             g = GRADS[h % 12]
             dot = np.sum(g * (f - o), axis=-1)
-            wt = np.prod(np.where(o == 1, w, 1 - w), axis=-1)
+            wt = (
+                (w[..., 0] if o[0] else 1 - w[..., 0])
+                * (w[..., 1] if o[1] else 1 - w[..., 1])
+                * (w[..., 2] if o[2] else 1 - w[..., 2])
+            )
             out += wt * dot
         return out
 
@@ -206,9 +211,43 @@ def smooth_fields(d, noise):
     )
 
 
-def nebula(d, smooth, guide, rows, mapping, noise, mean):
-    """Linear RGB and density of the nebula for directions d (N, 3); smooth holds smooth_fields for the same
-    directions, rows the guide's mean colour per row."""
+# Each cube face is baked in this many horizontal bands (the unit of parallel work, so 6 faces keep every core busy; the
+# count is fixed, not the job count, so the pixels never depend on --jobs).
+BANDS = 4
+CHUNK = 1 << 13  # texels per piece of noise work
+
+
+def band_rows(size, band):
+    return size * band // BANDS, size * (band + 1) // BANDS
+
+
+def direction_fields(face, size, noise, r0=0, r1=None):
+    """Everything the nebula needs that depends only on the look direction and the seed (so is the same for every sky):
+    (size, size, 6) float32 with the warp x/y, dust, haze (already shaped), ridged filaments and grain."""
+    r1 = size if r1 is None else r1
+    d = face_dirs(face, size)[r0:r1]
+    smooth = upscale(smooth_fields(face_dirs(face, max(size // 4, 2)), noise), size)[
+        r0:r1
+    ]
+    ridge = np.empty(d.shape[:2], np.float32)
+    grain = np.empty(d.shape[:2], np.float32)
+    # in pieces small enough for the cache: the noise makes many temporaries, and on big arrays the bake is limited by
+    # memory bandwidth, which the parallel processes share
+    step = max(1, CHUNK // size)
+    for r in range(0, len(d), step):
+        c = d[r : r + step]
+        ridge[r : r + step] = noise.fbm(c + 1.7, 7, 6, gain=0.55, ridged=True)
+        grain[r : r + step] = 1 + 0.06 * noise.fbm(c + 7.9, 160, 2)
+    haze = np.clip(smooth[..., 3] * 0.5 + 0.5, 0, 1) ** 3
+    return np.concatenate(
+        [smooth[..., :3], haze[..., None], ridge[..., None], grain[..., None]], -1
+    ).astype(np.float32)
+
+
+def nebula(d, fields, guide, rows, mapping, mean):
+    """Linear RGB and density of the nebula for directions d (N, 3); fields holds `direction_fields` for the same
+    directions (warp x/y, dust, haze, ridged filaments, grain: all independent of the sky), rows the guide's mean
+    colour per row."""
     repeats, offset, slope, centre = mapping
     az, _ = azimuth_elevation(d)
     u = offset - repeats * az / 360
@@ -217,7 +256,7 @@ def nebula(d, smooth, guide, rows, mapping, noise, mean):
     v = centre + slope * d[..., 1]
     # Domain warp: the guide is sampled a little off its true place, by large and small swirls, which turns its
     # soft blobs into folded, streaky gas without moving any feature far from where the retail sky has it.
-    wx, wy, dust, haze = (smooth[..., k] for k in range(4))
+    wx, wy, dust, haze, ridge, grain = (fields[..., k] for k in range(6))
     base = sample(guide, u + wx, v + wy)
     # Toward the poles u converges to a point: fade to the row's average colour so nothing pinches there.
     flat = np.clip((np.sqrt(np.maximum(1 - d[..., 1] ** 2, 0)) - 0.08) / 0.4, 0, 1)
@@ -226,19 +265,16 @@ def nebula(d, smooth, guide, rows, mapping, noise, mean):
     dens = np.clip(luminance(base) / max(luminance(mean) * 2.5, 1e-4), 0, 1)
     # Filaments: ridged noise, strongest where the gas is of middling density (cores stay bright, voids stay dark).
     # Being 3D noise on the direction it is the same size every way, which hides the art's vertical stretch.
-    ridge = noise.fbm(d + 1.7, 7, 6, gain=0.55, ridged=True)
     strength = 0.95 * np.sqrt(dens) * (1 - 0.5 * dens)
     detail = 1 + strength * (ridge * 2.2 - 1.0)
     # Dust lanes: dark absorbing bands across the gas.
     lanes = np.clip((dust - 0.08) / 0.25, 0, 1) ** 2 * np.clip(dens * 3, 0, 1)
     # Fine grain at about texel scale, so the gas does not look smooth at 1:1.
-    grain = 1 + 0.06 * noise.fbm(d + 7.9, 160, 2)
     col = base * (np.clip(detail, 0.15, 3) * (1 - 0.65 * lanes) * grain)[..., None]
     # Bright cores glow a little hotter (whiter) than the guide, for depth.
     core = np.clip(dens - 0.6, 0, 1)[..., None] ** 2
     col = col + core * luminance(col)[..., None] * 0.6
     # Where the retail art is black, a very faint haze in the sky's own mean colour keeps space from looking empty.
-    haze = np.clip(haze * 0.5 + 0.5, 0, 1) ** 3
     col = col + mean * (0.08 * haze)[..., None]
     return col, dens
 
@@ -359,6 +395,62 @@ def read_png16(path):
     return rows[:, 1:].copy().view(">u2").reshape(h, w, 3).astype(np.uint16)
 
 
+class FaceBase:
+    """What one band of a cube face needs that is the same for every sky: directions, noise fields and the undimmed
+    stars."""
+
+    def __init__(self, face, size, seed, stars=60000, band=0):
+        noise = Noise(seed)
+        self.face, self.size, self.seed, self.band = face, size, seed, band
+        r0, r1 = band_rows(size, band)
+        self.d = face_dirs(face, size)[r0:r1]
+        self.fields = direction_fields(face, size, noise, r0, r1)
+        full = np.zeros((size, size, 3), np.float32)
+        draw_stars(
+            full, face, size, star_field(seed, int(stars * (size / 2048) ** 0.5))
+        )
+        self.stars = full[r0:r1].copy()
+
+
+class SkyGuide:
+    """The per-sky inputs: the smoothed retail art and how the sphere maps it."""
+
+    def __init__(self, tex, pos, uv):
+        *self.mapping, _ = fit_mapping(pos, uv)
+        self.guide = prepare_guide(tex)
+        self.rows = self.guide.mean(1)
+        self.mean = srgb_to_linear(tex.reshape(-1, 3).astype(np.float32) / 255).mean(0)
+
+
+def shade_face(base, sky, split_stars=False):
+    """(nebula band uint8, stars band uint16 or None) of one sky on the face band `base` was prepared for."""
+    size, rows = base.size, len(base.d)
+    col = np.empty((rows, size, 3), np.float32)
+    dens = np.empty((rows, size), np.float32)
+    step = max(1, CHUNK // size)
+    for r in range(0, rows, step):
+        col[r : r + step], dens[r : r + step] = nebula(
+            base.d[r : r + step],
+            base.fields[r : r + step],
+            sky.guide,
+            sky.rows,
+            sky.mapping,
+            sky.mean,
+        )
+    # thick gas hides the stars behind it
+    star = base.stars * (1 - 0.6 * np.clip(dens, 0, 1) ** 0.7)[..., None]
+    star_face = None
+    if split_stars:
+        star_face = np.clip(star / STAR_GAIN * 65535 + 0.5, 0, 65535).astype(np.uint16)
+    else:
+        col += star
+    out = linear_to_srgb(col) * 255
+    # triangular dither: no banding in the dark gradients (seeded per face so faces can be baked apart)
+    rng = np.random.default_rng([base.seed + 2000, base.face, base.band])
+    out += rng.random(out.shape, np.float32) - rng.random(out.shape, np.float32)
+    return np.clip(out + 0.5, 0, 255).astype(np.uint8), star_face
+
+
 def bake(tex, pos, uv, size, seed=1, stars=60000):
     """The six faces (6 * size x size x 3 uint8, stacked +X -X +Y -Y +Z -Z) for one retail sky."""
     return bake_layers(tex, pos, uv, size, seed, stars)[0]
@@ -367,56 +459,74 @@ def bake(tex, pos, uv, size, seed=1, stars=60000):
 def bake_layers(tex, pos, uv, size, seed=1, stars=60000, split_stars=False):
     """(nebula, stars): the nebula faces as `bake` returns them and, with split_stars, the stars alone (6 * size x size x 3
     uint16, linear light over STAR_GAIN, already dimmed by the gas in front of them) left out of the nebula; else None."""
-    *mapping, _ = fit_mapping(pos, uv)
-    guide = prepare_guide(tex)
-    rows = guide.mean(1)
-    mean = srgb_to_linear(tex.reshape(-1, 3).astype(np.float32) / 255).mean(0)
-    noise = Noise(seed)
-    field = star_field(seed, int(stars * (size / 2048) ** 0.5))
-    rng = np.random.default_rng(seed + 2000)
+    sky = SkyGuide(tex, pos, uv)
     faces, star_faces = [], []
     for face in range(6):
-        d = face_dirs(face, size)
-        smooth = upscale(smooth_fields(face_dirs(face, max(size // 4, 2)), noise), size)
-        col = np.empty((size, size, 3), np.float32)
-        dens = np.empty((size, size), np.float32)
-        step = max(
-            1, (1 << 20) // size
-        )  # about a million texels per pass keeps memory modest
-        for r in range(0, size, step):
-            col[r : r + step], dens[r : r + step] = nebula(
-                d[r : r + step], smooth[r : r + step], guide, rows, mapping, noise, mean
+        for band in range(BANDS):
+            nebula_face, star_face = shade_face(
+                FaceBase(face, size, seed, stars, band), sky, split_stars
             )
-        star = np.zeros_like(col)
-        draw_stars(star, face, size, field)
-        # thick gas hides the stars behind it
-        star *= (1 - 0.6 * np.clip(dens, 0, 1) ** 0.7)[..., None]
-        if split_stars:
-            star_faces.append(
-                np.clip(star / STAR_GAIN * 65535 + 0.5, 0, 65535).astype(np.uint16)
-            )
-        else:
-            col += star
-        out = linear_to_srgb(col) * 255
-        # triangular dither: no banding in the dark gradients
-        out += rng.random(out.shape, np.float32) - rng.random(out.shape, np.float32)
-        faces.append(np.clip(out + 0.5, 0, 255).astype(np.uint8))
+            faces.append(nebula_face)
+            star_faces.append(star_face)
     return np.concatenate(faces, 0), (
         np.concatenate(star_faces, 0) if split_stars else None
     )
 
 
-def bake_file(glb, out, size, seed, split_stars=False):
+def load_sky(glb):
+    """(SkyGuide, None) of a sky GLB, or (None, reason) when its sphere does not follow the retail mapping."""
     tex, pos, uv = read_glb(glb)
     *_, err = fit_mapping(pos, uv)
     if err > 0.2:
-        return f"{glb.stem}: sphere UVs do not follow the retail mapping (error {err:.3f}), skipped"
-    img, star_img = bake_layers(tex, pos, uv, size, seed, split_stars=split_stars)
+        return (
+            None,
+            f"{glb.stem}: sphere UVs do not follow the retail mapping (error {err:.3f}), skipped",
+        )
+    return SkyGuide(tex, pos, uv), None
+
+
+def bake_face_job(job, glbs, tmp, size, seed, split_stars):
+    """Stage 1, one process per cube face: the direction-only fields once, then every sky through them. Faces are
+    left in `tmp` as .npy files for `assemble_job`. `job` is (face, band)."""
+    face, band = job
+    base = FaceBase(face, size, seed, band=band)
+    for glb in glbs:
+        sky, _ = load_sky(glb)
+        if sky is None:
+            continue
+        nebula_face, star_face = shade_face(base, sky, split_stars)
+        np.save(tmp / f"{glb.stem}.{face}.{band}.npy", nebula_face)
+        if star_face is not None:
+            np.save(tmp / f"{glb.stem}.{face}.{band}.stars.npy", star_face)
+    return job
+
+
+def assemble_job(glb, out, tmp, split_stars):
+    """Stage 2, one process per sky: stacks the six faces and writes the PNGs."""
+    sky, why = load_sky(glb)
+    if sky is None:
+        return why
+    img = np.concatenate(
+        [
+            np.load(tmp / f"{glb.stem}.{f}.{k}.npy")
+            for f in range(6)
+            for k in range(BANDS)
+        ],
+        0,
+    )
     dst = out / "models" / "sky" / f"{glb.stem}_cube.png"
     dst.parent.mkdir(parents=True, exist_ok=True)
     Image.fromarray(img, "RGB").save(dst, compress_level=6)
     note = ""
-    if star_img is not None:
+    if split_stars:
+        star_img = np.concatenate(
+            [
+                np.load(tmp / f"{glb.stem}.{f}.{k}.stars.npy")
+                for f in range(6)
+                for k in range(BANDS)
+            ],
+            0,
+        )
         write_png16(dst.with_name(f"{glb.stem}_stars.png"), star_img)
         note = " + stars"
     return f"{dst} ({dst.stat().st_size >> 20} MB{note})"
@@ -463,14 +573,25 @@ def main(argv=None):
         sys.exit(f"no sky models in {assets / 'models' / 'sky'}: import the game first")
     out.mkdir(parents=True, exist_ok=True)
     (out / "mod.json").write_text(json.dumps(MOD, indent=2) + "\n")
-    with ProcessPoolExecutor(args.jobs) as pool:
+    with (
+        tempfile.TemporaryDirectory(dir=out) as t,
+        ProcessPoolExecutor(args.jobs) as pool,
+    ):
+        tmp = Path(t)
+        n = len(glbs)
+        jobs = [(f, k) for k in range(BANDS) for f in range(6)]
+        for face, band in pool.map(
+            bake_face_job,
+            jobs,
+            [glbs] * len(jobs),
+            [tmp] * len(jobs),
+            [args.size] * len(jobs),
+            [args.seed] * len(jobs),
+            [args.split_stars] * len(jobs),
+        ):
+            print(f"face {face} band {band}: {n} skies shaded", flush=True)
         for line in pool.map(
-            bake_file,
-            glbs,
-            [out] * len(glbs),
-            [args.size] * len(glbs),
-            [args.seed] * len(glbs),
-            [args.split_stars] * len(glbs),
+            assemble_job, glbs, [out] * n, [tmp] * n, [args.split_stars] * n
         ):
             print(line, flush=True)
     print(f"done: switch on '{MOD['name']}' in the Mods screen (or --mod {out})")

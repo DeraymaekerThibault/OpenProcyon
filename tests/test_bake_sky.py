@@ -5,7 +5,10 @@ from pathlib import Path
 import numpy as np
 
 from tools.bake_sky import (
+    BANDS,
     STAR_GAIN,
+    FaceBase,
+    SkyGuide,
     azimuth_elevation,
     bake,
     bake_layers,
@@ -13,6 +16,7 @@ from tools.bake_sky import (
     face_dirs,
     fit_mapping,
     read_png16,
+    shade_face,
     write_png16,
 )
 
@@ -97,6 +101,27 @@ class BakeSky(unittest.TestCase):
         self.assertGreater(stars.max(), 0)
         self.assertLessEqual(clean.astype(int).sum(), whole.astype(int).sum())
         self.assertTrue((clean != whole).any(), "the stars are not in the nebula cube")
+
+    def test_sharing_a_face_between_skies_gives_the_one_sky_pixels(self):
+        pos, uv = uv_sphere(2, 0.5, -0.2, 0.5)
+        skies = [np.full((64, 64, 3), g, np.uint8) for g in (40, 120)]
+        skies[1][20:44, :, 2] = 220
+        size, seed = 24, 5
+        want = [bake_layers(t, pos, uv, size, seed, 300, True) for t in skies]
+        guides = [SkyGuide(t, pos, uv) for t in skies]
+        got = [([], []) for _ in skies]
+        for face in range(6):
+            for band in range(BANDS):
+                base = FaceBase(
+                    face, size, seed, 300, band
+                )  # computed once, used by both skies
+                for k, guide in enumerate(guides):
+                    neb, stars = shade_face(base, guide, True)
+                    got[k][0].append(neb)
+                    got[k][1].append(stars)
+        for k in range(len(skies)):
+            np.testing.assert_array_equal(np.concatenate(got[k][0]), want[k][0])
+            np.testing.assert_array_equal(np.concatenate(got[k][1]), want[k][1])
 
     def test_16_bit_png_round_trips(self):
         img = np.arange(4 * 3 * 3, dtype=np.uint16).reshape(4, 3, 3) * 5000
