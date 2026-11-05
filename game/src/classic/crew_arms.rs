@@ -174,7 +174,7 @@ fn crew(ctx: &Ctx, c: &mut ChildSpawnerCommands, fit: &FitView, lib: &Library, s
         ctx.text(c, "Univers10", &s(&format!("IDGS_TPFRONTENDTEXT01_STATBAR_LABEL_{id}")), cx - 50.0, 100.0, 387.0, true, Color::WHITE);
         let v = fit.bars[k].clamp(0.0, 1.0);
         let (l, r) = (cx - 39.0, cx + 39.0);
-        panel(ctx, c, [l, 401.0, r, 418.0], PanelKind::Slot);
+        panel(ctx, c, [l, 401.0, r, 418.0], PanelKind::Stat);
         let fill = Node { border_radius: BorderRadius::all(Val::Px(4.0 * ctx.scale)), ..ctx.node(l + 4.0, 404.0, (r - l - 8.0) * v, 11.0) };
         c.spawn((fill, BackgroundColor(Color::srgb(1.0 - v, 0.3 + 0.6 * v, 0.1))));
     }
