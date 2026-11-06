@@ -135,6 +135,8 @@ fn moving_ship() -> (App, Entity) {
         sphere: (Vec3::ZERO, 1.0),
         tow_points: [Vec3::ZERO; 2],
         homing_point: Vec3::ZERO,
+        crew: [0; 8],
+        boarding_points: vec![],
     };
     let ship = Ship {
         class: 0,

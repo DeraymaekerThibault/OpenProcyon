@@ -180,16 +180,32 @@ static DATA: OnceLock<Value> = OnceLock::new();
 fn data() -> &'static Value {
     DATA.get_or_init(|| crate::data::try_json(&assets_dir().join("data/boarding.json")).unwrap_or(Value::Null))
 }
+/// Crew and boarding points of ships `data/boarding.json` does not list (a mod's ships carry theirs in `ship.json` and the model).
+static MODDED: std::sync::Mutex<Vec<(String, [u32; 8], Vec<Vec3>)>> = std::sync::Mutex::new(Vec::new());
+/// Offers a class's own crew and boarding points; used only for types the retail table lacks.
+pub fn register(entity: &str, crew: [u32; 8], points: &[Vec3]) {
+    if data()[entity].is_null() {
+        let mut m = MODDED.lock().unwrap();
+        m.retain(|(n, ..)| n != entity);
+        m.push((entity.into(), crew, points.to_vec()));
+    }
+}
 pub fn counts(entity: &str) -> [u32; 8] {
     let mut out = [0; 8];
     for (o, v) in out.iter_mut().zip(data()[entity]["crew"].as_array().into_iter().flatten()) {
         *o = v.as_u64().unwrap_or(0) as u32;
+    }
+    if let Some((_, crew, _)) = MODDED.lock().unwrap().iter().find(|(n, ..)| n == entity) {
+        out = *crew;
     }
     out
 }
 /// The object's BoardingEffectPoint nodes in its Bevy frame.
 fn points(entity: &str) -> Vec<Vec3> {
     let f = |v: &Value, i: usize| v[i].as_f64().unwrap_or(0.0) as f32;
+    if let Some((_, _, p)) = MODDED.lock().unwrap().iter().find(|(n, ..)| n == entity) {
+        return p.clone();
+    }
     data()[entity]["points"].as_array().into_iter().flatten().map(|p| conv(f(p, 0), f(p, 1), f(p, 2))).collect()
 }
 

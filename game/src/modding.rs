@@ -170,11 +170,26 @@ pub fn overlay(base: &Path, mods: &[PathBuf]) -> PathBuf {
                 }
                 let _ = std::fs::remove_file(&to);
                 std::fs::write(&to, serde_json::to_string(&b).unwrap()).unwrap();
+            } else if name.ends_with(".glb") && (name.starts_with("ships/") || name.starts_with("models/")) {
+                // A model that names retail textures (`retail:<name>`) gets them from the player's import (retail_tex.rs).
+                match std::fs::read(&from).ok().and_then(|bytes| crate::retail_tex::bake(&bytes, base)) {
+                    Some(baked) => {
+                        let _ = std::fs::remove_file(&to);
+                        std::fs::write(&to, baked).unwrap();
+                    }
+                    None => link(&from, &to),
+                }
             } else {
                 link(&from, &to);
             }
         }
     }
+    // Ships the mods bring get the UI art their model implies, unless they ship their own (shipart.rs).
+    let mut ids: Vec<String> =
+        mods.iter().flat_map(|m| std::fs::read_dir(m.join("ships")).into_iter().flatten().flatten()).filter_map(|e| e.file_name().into_string().ok()).collect();
+    ids.sort();
+    ids.dedup();
+    crate::shipart::generate(&root, &ids);
     root
 }
 

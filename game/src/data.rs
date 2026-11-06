@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::sync::OnceLock;
 
 mod ships;
-pub use ships::load_class;
+pub use ships::{derive, load_class};
 
 fn asset_context(path: &std::path::Path) -> String {
     let source = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
@@ -85,7 +85,7 @@ pub fn mesh_geometry(root: &std::path::Path, name: &str) -> Option<(Vec<Vec3>, V
 }
 
 /// The JSON chunk of a binary glTF 2.0 file and the offset where it ends (the BIN chunk header follows); None unless the header is valid.
-fn glb_json(bytes: &[u8]) -> Option<(Value, usize)> {
+pub(crate) fn glb_json(bytes: &[u8]) -> Option<(Value, usize)> {
     if bytes.get(0..4)? != b"glTF" || bytes.get(4..8)? != 2u32.to_le_bytes() || bytes.get(16..20)? != b"JSON" {
         return None;
     }
@@ -331,6 +331,10 @@ pub struct Class {
     pub sphere: (Vec3, f32),
     pub tow_points: [Vec3; 2], // TowerPoint (stern), ToweePoint (bow)
     pub homing_point: Vec3,
+    /// Crew per post in boarding order (Gunners, Captains, First Mates, Navigators, Engineers, Riggers, Fighters, Lookouts) and the
+    /// BoardingEffectPoint nodes: `boarding::register` offers them for ships `data/boarding.json` does not list.
+    pub crew: [u32; 8],
+    pub boarding_points: Vec<Vec3>,
 }
 impl Class {
     /// The class's HUD icon of a bar ("ShipBar", "WeaponBar"): the WOT icon name (several classes share art, and names differ from
@@ -505,7 +509,10 @@ impl Library {
         let ids = ship_ids(root);
         assert!(!ids.is_empty(), "no ships in {}/ships; run tools/build_assets.sh", root.display());
         let (guns, bullets) = load_weapons(root);
-        let classes = ids.iter().map(|n| load_class(root, n, &guns)).collect();
+        let classes: Vec<Class> = ids.iter().map(|n| load_class(root, n, &guns)).collect();
+        for c in &classes {
+            crate::boarding::register(&c.name, c.crew, &c.boarding_points);
+        }
         let names = ids.iter().filter_map(|n| Some((n.clone(), serde_json::from_value(try_json(&root.join(format!("ships/{n}/names.json")))?).ok()?))).collect();
         Library { classes, guns, bullets, names, clips: crate::clips::load(root) }
     }

@@ -5,6 +5,8 @@ use serde::de::{MapAccess, Visitor};
 use std::fmt;
 use std::path::Path;
 
+pub mod derive;
+
 /// Preserve authored section/mount order: parent indices and weapon banks depend on it.
 fn ordered<'de, D, T>(deserializer: D) -> Result<Vec<(String, T)>, D::Error>
 where
@@ -42,15 +44,15 @@ struct ShipDoc {
     race: String,
     #[serde(default)]
     skirmish: bool,
-    core_hp: f64,
-    physics: ShipPhysics,
-    #[serde(deserialize_with = "ordered")]
-    sections: Vec<(String, SectionDoc)>,
-    #[serde(deserialize_with = "ordered")]
-    guns: Vec<(String, MountDoc)>,
-    engines: Vec<EngineDoc>,
+    core_hp: Option<f64>,
     #[serde(default)]
-    wakes: Vec<WakeDoc>,
+    physics: ShipPhysics,
+    #[serde(default, deserialize_with = "ordered")]
+    sections: Vec<(String, SectionDoc)>,
+    #[serde(default, deserialize_with = "ordered")]
+    guns: Vec<(String, MountDoc)>,
+    engines: Option<Vec<EngineDoc>>,
+    wakes: Option<Vec<WakeDoc>>,
     flags: Option<Vec<FlagDoc>>,
     explosion_fx: Option<String>,
     engine_snd: Option<Vec<Option<String>>>,
@@ -70,8 +72,9 @@ struct ShipDoc {
     sphere: Option<SphereDoc>,
 }
 
+/// PROVISIONAL defaults, about a Navy Cutter's, for a ship that states no physics.
 #[derive(Deserialize)]
-#[serde(rename_all = "PascalCase")]
+#[serde(rename_all = "PascalCase", default)]
 struct ShipPhysics {
     mass: f64,
     max_thrust: f64,
@@ -81,6 +84,20 @@ struct ShipPhysics {
     min_extents: Option<Vec<f64>>,
     max_extents: Option<Vec<f64>>,
     center_of_mass: Option<Vec<f64>>,
+}
+impl Default for ShipPhysics {
+    fn default() -> Self {
+        Self {
+            mass: 4000.0,
+            max_thrust: 60000.0,
+            max_speed: 8.0,
+            rotational_friction: 20.0,
+            max_angular_acceleration: 3.0,
+            min_extents: None,
+            max_extents: None,
+            center_of_mass: None,
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -117,8 +134,8 @@ struct DebrisDoc {
 }
 #[derive(Deserialize)]
 struct MountDoc {
-    pos: [f64; 3],
-    rot: [f64; 3],
+    pos: Option<[f64; 3]>,
+    rot: Option<[f64; 3]>,
     arc_deg: f64,
     gun: String,
     bank: Option<String>,
@@ -126,10 +143,11 @@ struct MountDoc {
 }
 #[derive(Deserialize)]
 struct EngineDoc {
+    label: Option<String>,
     parent_layer: Option<String>,
-    pos: [f64; 3],
-    rot: [f64; 3],
-    fx: String,
+    pos: Option<[f64; 3]>,
+    rot: Option<[f64; 3]>,
+    fx: Option<String>,
 }
 #[derive(Deserialize)]
 struct WakeDoc {
@@ -167,11 +185,22 @@ pub fn load_class(root: &Path, name: &str, guns: &HashMap<String, GunDef>) -> Cl
 
 fn try_load_class(root: &Path, name: &str, guns: &HashMap<String, GunDef>) -> Result<Class, String> {
     let path = root.join(format!("ships/{name}/ship.json"));
-    let j: ShipDoc = read_typed(&path)?;
+    let mut j: ShipDoc = read_typed(&path)?;
+    let glb = format!("ships/{}/model.glb", j.model.as_deref().unwrap_or(name));
+    let model_bytes = std::fs::read(root.join(&glb)).unwrap_or_default();
+    let facts = derive::read(&model_bytes);
     let geo_path = root.join(format!("ships/{}/geometry.json", j.geometry.as_deref().unwrap_or(name)));
-    let geometry: HashMap<String, GeometryDoc> = read_typed(&geo_path)?;
+    // A ship with no geometry.json of its own is built from its model (docs/modding.md "A ship from a model").
+    let (geometry, geo_context): (HashMap<String, GeometryDoc>, String) = match &facts {
+        Some(f) if j.geometry.is_none() && !geo_path.is_file() => {
+            (f.layers.iter().map(|l| (l.name.clone(), GeometryDoc { aabb: l.aabb, tris: l.tris.clone() })).collect(), format!("{glb} (derived)"))
+        }
+        _ => (read_typed(&geo_path)?, asset_context(&geo_path)),
+    };
+    if let Some(f) = &facts {
+        derive::complete(&mut j, f, root);
+    }
     let context = asset_context(&path);
-    let geo_context = asset_context(&geo_path);
     let sections = j
         .sections
         .iter()
@@ -209,9 +238,12 @@ fn try_load_class(root: &Path, name: &str, guns: &HashMap<String, GunDef>) -> Re
             if !guns.contains_key(&g.gun) {
                 return Err(format!("{context}: guns.{label}.gun references unknown weapon {:?}", g.gun));
             }
-            let r = g.rot.map(|v| v as f32);
+            let (Some(pos), Some(rot)) = (g.pos, g.rot) else {
+                return Err(format!("{context}: guns.{label} has no pos/rot and the model has no hardpoint node named {label:?}"));
+            };
+            let r = rot.map(|v| v as f32);
             Ok(Mount {
-                pos: point(g.pos),
+                pos: point(pos),
                 // Preserve the rolled frame of inverted mounts.
                 rot: Quat::from_rotation_z(-r[1]) * Quat::from_rotation_y(r[0]) * Quat::from_rotation_x(r[2]),
                 arc: (g.arc_deg as f32).to_radians(),
@@ -232,8 +264,6 @@ fn try_load_class(root: &Path, name: &str, guns: &HashMap<String, GunDef>) -> Re
     } else {
         [amn, amx]
     };
-    let glb = format!("ships/{}/model.glb", j.model.as_deref().unwrap_or(name));
-    let model_bytes = std::fs::read(root.join(&glb)).unwrap_or_default();
     let nodes = glb_json(&model_bytes).map(|(doc, _)| doc);
     let node_point = |kind: &str| {
         nodes.as_ref()?["nodes"]
@@ -264,9 +294,10 @@ fn try_load_class(root: &Path, name: &str, guns: &HashMap<String, GunDef>) -> Re
     let engines = j
         .engines
         .into_iter()
-        .map(|e| {
+        .flatten()
+        .filter_map(|e| {
             let section = e.parent_layer.as_deref().and_then(|l| sections.iter().position(|s| s.layer == l));
-            (point(e.pos), Quat::from_rotation_y(e.rot[0] as f32), e.fx, section)
+            Some((point(e.pos?), Quat::from_rotation_y(e.rot.map_or(0.0, |r| r[0] as f32)), e.fx?, section))
         })
         .collect();
     Ok(Class {
@@ -277,7 +308,7 @@ fn try_load_class(root: &Path, name: &str, guns: &HashMap<String, GunDef>) -> Re
         scene: j.scene,
         mounts,
         sections,
-        core_hp: j.core_hp as f32,
+        core_hp: j.core_hp.unwrap_or(100.0) as f32,
         phys: Physics {
             mass: ph.mass as f32,
             thrust: ph.max_thrust as f32,
@@ -286,7 +317,7 @@ fn try_load_class(root: &Path, name: &str, guns: &HashMap<String, GunDef>) -> Re
             max_ang_acc: ph.max_angular_acceleration as f32,
         },
         flag,
-        wake: j.wakes.iter().map(|w| (point(w.pos), w.fx.clone())).collect(),
+        wake: j.wakes.iter().flatten().map(|w| (point(w.pos), w.fx.clone())).collect(),
         engines,
         explosion_fx: j.explosion_fx,
         engine_snd: std::array::from_fn(|i| j.engine_snd.as_ref().and_then(|v| v.get(i)).cloned().flatten()),
@@ -301,7 +332,10 @@ fn try_load_class(root: &Path, name: &str, guns: &HashMap<String, GunDef>) -> Re
         cloakable: j.cloakable.unwrap_or_else(|| name.contains("Submersible")),
         cloak_points,
         points: j.points as u32,
-        crew_posts: j.crew_posts.map_or(0, |v| v.values().sum::<u64>() as u32),
+        crew_posts: j.crew_posts.as_ref().map_or(0, |v| v.values().sum::<u64>() as u32),
+        crew: ["Gunners", "Captains", "First Mates", "Navigators", "Engineers", "Riggers", "Fighters", "Lookouts"]
+            .map(|k| j.crew_posts.as_ref().and_then(|v| v.get(k)).map_or(0, |n| *n as u32)),
+        boarding_points: facts.iter().flat_map(|f| f.points.iter()).filter(|p| p.kind == "BoardingEffectPoint").map(|p| point(p.pos)).collect(),
         display_name: j.display_name,
         icon: j.icon,
         length: ph.max_extents.as_ref().and_then(|v| v.get(1)).zip(ph.min_extents.as_ref().and_then(|v| v.get(1))).map_or((amx - amn).z, |(a, b)| (a - b) as f32),

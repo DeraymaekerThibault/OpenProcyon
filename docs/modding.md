@@ -17,9 +17,61 @@ game, Bevy's asset server included, reads only that tree.
 | `data/hud/speed.json` (`{"max": 16}`) | shows the game-speed buttons beside the command bar (not retail), stepping 1x to `max` (default 16); absent: no speed control, as in retail. `--speed N` on the command line works either way |
 | `data/fx/wake_tint.json` (`{"Navy": [r, g, b], "Pirate": ..., "Procyon": ..., "Civilian": ...}`) | multiplies the wake texture per fleet type (multiplied in linear light, values may exceed 1); absent: retail colours |
 | `models/sky/<sky>_cube.png` (six square cube faces stacked vertically, +X -X +Y -Y +Z -Z in Bevy's cube-map frame) | drawn as the battle camera's skybox instead of that retail sky's sphere (not retail); with a render profile's `sky_light` it also lights the scene. A sky made from the player's own imported sky is derived from game content: keep it local, never ship it |
-| a new `ships/<Id>/` folder (`ship.json`, plus `geometry.json`/`model.glb` or `geometry`/`model` pointing at another ship), a new `maps/<id>/` folder (`map.json`, `backdrop.png`; `"skirmish": true` lists it), `models/<any folder>/*.glb`, `sound/<any folder>/*.ogg` | new content (schema in `docs/data-format.md`) |
+| a new `ships/<Id>/` folder (`ship.json` and a `model.glb`, see "A ship from a model"; or `geometry`/`model` pointing at another ship), a new `maps/<id>/` folder (`map.json`, `backdrop.png`; `"skirmish": true` lists it), `models/<any folder>/*.glb`, `sound/<any folder>/*.ogg` | new content (schema in `docs/data-format.md`) |
 
 Limits (provisional): the fleet screen lists, per fleet type (`race` Navy/Pirate/Procyon), every ship whose `ship.json` has `"skirmish": true` (the importer copies retail's "Available in Multiplayer?" flag; a mod can set it on any ship); `mod.json` (`name`, `version`, `description`) is only printed at startup. Weapons and bullets are shared files, `data/weapons/guns.json` and `bullets.json`; a mod's copies are merged key by key, so adding a gun is one entry. Computer captains fit the guns retail computers were seen to fit (carronades, Gattling, plasma, light/medium cannons, star mortar) unless a mod ships `data/ai/weapons.json` (`{"Gun_Name": true|false}`, merged the same way) to restrict or extend what they may pick. The full layout is in `docs/data-format.md`.
+
+## A ship from a model
+
+A ship needs no retail ship to extend: a folder `ships/<Id>/` with a `model.glb` and a small `ship.json` is a complete ship. The
+engine reads the model and derives what the file leaves out, so the ship behaves like a retail one (hits, damage sections, wake,
+engines, crew, boarding, and the command-bar and weapon-panel art). Whatever `ship.json` states wins over what is derived; every derived
+value is PROVISIONAL (the retail files state each one, the engine only needs a sensible value). `mods/hunter` is the worked example.
+
+**Layers.** Every mesh node of the model is a layer. With no `geometry.json` (and no `"geometry"` naming another ship), the hit mesh of
+each layer comes from the model's own triangles. With no `sections`, each intact layer becomes one damage section: hull (150 HP, vital to
+the ship, an equal share of the core) or, when its node name contains `sail`, `mast`, `cloth` or `canvas`, cloth (70 HP, vital to speed,
+no core share). Layers that touch (boxes within 0.3) pass hits on to each other. Name a damaged variant `<A>Damage_<B>` for layer
+`<A>_<B>` to have it swapped in when the section is destroyed, as the retail hulls do; a destroyed section with none just disappears. A
+`sections` object in `ship.json` replaces the derived ones (the retail schema, `docs/data-format.md`); its `layer` names the mesh node.
+
+**Hardpoints.** Empty nodes mark where things go, in the ship's own frame (glTF axes: x starboard, y up, z aft; the exporter and
+Blender's glTF export both write this). Give the node an extra `kind` (Blender: a custom property on the empty), or just name it so the
+engine can tell:
+
+| `kind` | name contains | derives |
+|---|---|---|
+| `GunPlacement` | `mount`, `lancer`, `turret` | a mount, joined to the `guns` entry of the **same name**; `ship.json` says which `gun` and its `arc_deg` |
+| `EnginePortPlacement` | `engine` | an engine plume (`<Race>Engine_<Light/Medium/Heavy/ExtraHeavy>` by hull length) |
+| `WakePlacement` | `wake` | a wake (`Wake_Light/Medium/Heavy`); with none, one at the stern's waterline |
+| `FlagAttachmentPoint` | `flag` | the flag pole's ends (names with `top` and `bottom`) |
+| `BoardingEffectPoint` | `boarding` | where boarders cross |
+| `ToweePoint`, `TowerPoint`, `TorpedoHomingPoint` | `tow` (front/back), `homing` | tow and homing points |
+
+A node's heading about up is its rotation about glTF y (or the extra `rot_raw[0]`): 0 faces forward, a quarter turn to port is +90
+degrees. A gun entry may still give `pos`, `rot`, `parent_layer` itself; `parent_layer` otherwise is the nearest hull layer.
+
+**What `ship.json` can leave out.** `physics` (defaults about a Navy Cutter's: mass 4000, thrust 60000, speed 8, turn 3), `core_hp` (a
+quarter of the hull sections' HP, at least 50), `sections`, `engines`, `wakes`, `flags`, `explosion_fx`, `engine_snd`, `repair_fx` (by
+race and size), `crew_posts` (one gunner per two guns, a captain, mate, navigator, engineer, a rigger per sail, a fighter or two),
+`sphere`, extents, `icon`. `race` picks the engines, sounds and HUD skin; `display_name` is a string id the mod adds in
+`menu/strings.json`; `points` and `"skirmish": true` list the ship on the fleet screen. Crew and boarding points of a ship that
+`data/boarding.json` does not list come from `crew_posts` and the model.
+
+**Retail textures in a mod model.** A mod may not ship game art, but its models can use the player's own: name a glTF material
+`retail:<texture>` (the retail texture's file name without `.tga`: `retail:o_main_body`, `retail:proc_front_tri_sail`; the names are the
+materials of the imported `ships/*/model.glb`). When the overlay is built, each such material is given that texture from the import
+and renamed to the retail name (`o_main_body.tga`), so the engine's name rules (a name containing `sail` is a sail, render-profile
+`surfaces` rules) work as for a retail model. The model needs UV coordinates; repeat the texture as you like (the sampler repeats), and
+give the material a flat `baseColorFactor` as a fallback look. The baked model exists only in the overlay (`local/overlay`, git-ignored),
+so nothing converted from the game is committed; a name the import does not have leaves that material untextured and logs a warning.
+Applies to `ships/` and `models/` GLBs of a mod. `tools/make_hunter.py` is a worked example.
+
+**UI art.** A ship with no `hud/sprites/ShipBar_ShipIcon_<art>` and `WeaponBar_ShipIcon_<art>` (`<art>` = its `icon` without the prefix, else
+its id without `Ship_`) gets them made from the model when the overlay is built: a solid pale side silhouette for the command bar and
+fleet cells, and a thin top-down hull outline for the weapon panel, drawn like the retail ones (`game/src/shipart.rs`). Ship your own PNGs
+(`hud/sprites/...`, see "UI art and fonts") to replace either. A gun with no `bank` takes the weapon-panel slot nearest to its place on the outline
+(the panel has 80 fixed slots), one bank per gun; name the same `Bank<NN>` on several guns to have them fire together.
 
 ## UI art and fonts
 UI text is vector, laid out with the retail font advances (`hud/fonts/<name>.json` holds metrics only, no glyph sheets). Slots: BlackChancery* uses `fonts/Chancery.otf`, names containing Bold use `fonts/SansBold.otf`, every other Univers/Immi face uses `fonts/Sans.otf`; a mod replaces a slot by dropping a file at that path (`content/fonts/`: Chancery = URW Z003 for the BlackChancery slots, Nimbus Sans for Univers/Immi; both URW base35 fonts, AGPL with font exception, so they ship with the code).
