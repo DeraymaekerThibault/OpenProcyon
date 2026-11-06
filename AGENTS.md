@@ -50,6 +50,7 @@ files to `content/`, or anything that publishes (pushing tags, releases).
   imports a view or builds UI widgets (`tests/test_layers.py`; the compiler enforces the first too, since views live in the binary). Other presentations
   belong in their own crates that depend on the `openprocyon` library.
 - `mods/` mod folders (`--mod <dir>`, `docs/modding.md`). `docs/data-format.md` describes the asset layout.
+- `docs/world/` the world and design-language notes (how ships and factions look, the retail catalogue): read before designing ships, art or missions.
 - Game axes: x = starboard, y = forward, z = up; GLB uses (x, z, -y) with winding (a, c, b).
 
 ## Setup and running
