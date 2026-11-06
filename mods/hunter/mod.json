@@ -3,5 +3,5 @@
   "name": "Hunter (fast sniper ship)",
   "version": "1.0",
   "category": "Ships",
-  "description": "A fast, fragile Pirate needle ship with its own hull and a long-range railgun. Meshes are CC0, built by tools/make_hunter.py."
+  "description": "A fast, fragile Procyon sniper ship with its own long needle hull, pontoons and side sails, and a long-range railgun: a standalone ship whose engine data comes from its model (docs/modding.md, \"A ship from a model\"). Meshes are CC0, built by tools/make_hunter.py."
 }

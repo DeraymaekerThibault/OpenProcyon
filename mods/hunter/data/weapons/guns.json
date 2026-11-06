@@ -19,7 +19,7 @@
     "BulletTypeName_Primary": "Bullet_Hunter_Slug",
     "Is PointDefense Gun": false,
     "Is TorpedoLauncher Gun": false,
-    "SoundName": "Weapon_Lancer_Pirate_FireLarge",
+    "SoundName": "Weapon_Lancer_ICDualFireLarge",
     "SoundVolume": 0.9,
     "SoundMaxDistance": 600.0,
     "LobAngle": 0.0,
