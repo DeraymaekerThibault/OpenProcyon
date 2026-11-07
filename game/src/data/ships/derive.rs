@@ -459,6 +459,12 @@ pub(crate) mod tests {
         assert_eq!(c.phys.mass, 4000.0, "unstated physics take the provisional defaults");
         assert!(c.crew.iter().sum::<u32>() >= 5 && c.crew_posts == c.crew.iter().sum::<u32>());
         assert!(c.engines[0].3.is_some(), "the engine hangs on a section");
+        // The menus' ship picture (`Class::icon`) names the art shipart.rs generates for a ship with no `icon`.
+        assert!(c.icon.is_none());
+        crate::shipart::generate(&root, &["Model_Only".into()]);
+        for bar in ["ShipBar", "WeaponBar"] {
+            assert!(root.join("hud/sprites").join(c.icon(bar)).join("Navy/NoCursor.png").is_file(), "{bar}: {}", c.icon(bar));
+        }
         std::fs::remove_dir_all(&root).unwrap();
     }
 

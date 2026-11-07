@@ -910,7 +910,9 @@ fn ship_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, _rect: [f32; 4], sk: &Skir
 /// Fleet Select: the assembled fleet on the slot bar (`fleet_bar`); the picked entry is the one Drop removes.
 fn fleet_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, sk: &Skirmish, lib: &Library) {
     let fleet = sk.human().map(|h| h.fleet.as_slice()).unwrap_or_default();
-    let icons: Vec<_> = fleet.iter().map(|n| lib.classes.iter().find(|cl| &cl.name == n).and_then(|cl| cl.icon.as_deref())).collect();
+    // `Class::icon` falls back to the class name, so a mod ship's generated art (shipart.rs) shows like a retail icon.
+    let icons: Vec<_> = fleet.iter().map(|n| lib.classes.iter().find(|cl| &cl.name == n).map(|cl| cl.icon("ShipBar"))).collect();
+    let icons: Vec<_> = icons.iter().map(Option::as_deref).collect();
     fleet_bar(ctx, c, (sk.slot_scroll, sk.fleet_size), &icons, None, Action::SlotScroll, Action::PickFleet);
 }
 
@@ -935,7 +937,7 @@ fn ship_info(ctx: &Ctx, c: &mut ChildSpawnerCommands, _rect: [f32; 4], sk: &Skir
         (s("IDGS_TPFRONTENDTEXT_SHIP_MOUNTS_LIGHT"), st.light.to_string()),
     ];
     let cost = [s("IDGS_TPFRONTENDTEXT02_POINT_COST01"), s("IDGS_TPFRONTENDTEXT02_POINT_COST02")];
-    info_panel(ctx, c, &class_name(lib, ci, strings), lib.classes[ci].icon.as_deref(), Some(st.points), &rows, cost.each_ref().map(String::as_str));
+    info_panel(ctx, c, &class_name(lib, ci, strings), Some(&lib.classes[ci].icon("ShipBar")), Some(st.points), &rows, cost.each_ref().map(String::as_str));
     // A refused Add (PROVISIONAL: retail only greys the button) says why under the stats.
     if let Some(e) = sk.error {
         ctx.text(c, BODY_FONT, strings[e].as_str().unwrap_or(e), 496.0, 270.0, 292.0, true, Color::srgb(1.0, 0.4, 0.3));

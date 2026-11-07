@@ -118,7 +118,8 @@ fn build(
 /// The fleet slot bar as on the Ships screen: five framed slots with the ships' bar icons; clicking one outfits that ship.
 /// PROVISIONAL: the ship being outfitted is marked by a gold tint over its slot.
 fn slot_bar(ctx: &Ctx, c: &mut ChildSpawnerCommands, fit: &FitView, lib: &Library) {
-    let icons: Vec<_> = fit.fleet.iter().map(|&ci| lib.classes[ci].icon.as_deref()).collect();
+    let icons: Vec<_> = fit.fleet.iter().map(|&ci| lib.classes[ci].icon("ShipBar")).collect();
+    let icons: Vec<_> = icons.iter().map(|i| Some(i.as_str())).collect();
     fleet_bar(ctx, c, (fit.slot_scroll, fit.limit), &icons, Some(fit.ship), Action::Slots, Action::SelectShip);
 }
 

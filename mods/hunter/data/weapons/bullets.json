@@ -1,7 +1,7 @@
 {
   "Bullet_Hunter_Slug": {
-    "lifetime": 4.0,
-    "hitpoints": 3,
+    "lifetime": 6.0,
+    "hitpoints": 40,
     "hit_fx": "Lancer_Heavy_Impact",
     "bullet_fx": "Lancer_HeavyBullet_Sprite",
     "impact_snd": {

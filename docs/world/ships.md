@@ -74,6 +74,7 @@ capital ship. HP runs from 300 (torpedo boat) to about 6400 (Pirate Galleon).
 ## Where the Hunter sits
 
 The Hunter mod (`mods/hunter`, a Procyon trimaran): 85 points, 50 km/h, turn 5 (as the data states it), 120 core HP plus its sections, one
-heavy railgun. It is faster than every retail ship (the fastest is 45 km/h) and has one gun against 3 to 7 on the fast raiders: a
+heavy railgun built into the bow (16 degree arc, so the ship turns to aim; a slow, heavy slug that drops with range and
+reloads in 8 s). It is faster than every retail ship (the fastest is 45 km/h) and has one gun against 3 to 7 on the fast raiders: a
 sniper by design, a role the retail fleet does not have. That is fine for a mod; it is also why it must read as *different* on screen
 while still looking Procyon (`design-language.md`, audit).

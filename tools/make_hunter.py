@@ -7,7 +7,8 @@ Own art, CC0. Game axes (x starboard, y forward, z up); GLB uses (x, z, -y) with
 The surfaces name retail textures (`retail:<texture>`, docs/modding.md "Retail textures in a mod model"): the game fills them in from
 the player's own import when it builds the overlay, so no game art is stored here. Each material also carries a flat fallback colour.
 The design follows docs/world/design-language.md and factions.md: a slender planked central hull with a raised cabin, two outrigger
-pontoons ending in engines, a tall mast with a pale emblem sail, a long gun on the bow.
+pontoons ending in engines, a tall main mast with a pale emblem sail and rigging, a mizzen with a spanker, side sails on the pontoons,
+and a long gun built into a plated casemate on the bow: it traverses only a few degrees, so the ship aims it by turning.
 """
 
 import json
@@ -36,6 +37,17 @@ MATS = {
     "sail": ("proc_front_tri_sail", (0.77, 0.8, 0.85, 1), "fit", 1.0),
     "flag": ("proc_flag2", (0.2, 0.45, 0.35, 1), "fit", 1.0),
     "gun": ("d_pon_main", (0.5, 0.5, 0.5, 1), "tile", 3.0),
+    "barrel": ("d_canon2", (0.35, 0.38, 0.4, 1), "tile", 2.0),
+    "mount": ("MountV3", (0.45, 0.45, 0.48, 1), "tile", 1.5),
+    "rivets": ("hull rivets", (0.5, 0.5, 0.52, 1), "tile", 2.0),
+    "ring": ("proc_mast_ring", (0.6, 0.55, 0.45, 1), "tile", 1.5),
+    "rope": ("strings", (0.55, 0.5, 0.4, 1), "tile", 2.0),
+    "spanker": ("proc_back_tri_sail", (0.77, 0.8, 0.85, 1), "fit", 1.0),
+    "side_sail": ("proc_side_sail", (0.77, 0.8, 0.85, 1), "fit", 1.0),
+    "rudder": ("o_rudder", (0.45, 0.32, 0.2, 1), "fit", 1.0),
+    "lamp": ("proc_blue_light", (0.5, 0.85, 0.9, 1), "fit", 1.0),
+    "crate": ("SY_box", (0.55, 0.4, 0.25, 1), "fit", 1.0),
+    "stairs": ("stairs", (0.5, 0.35, 0.22, 1), "fit", 1.0),
 }
 
 
@@ -143,6 +155,56 @@ def box(c, s):
         (2, 3, 7, 6),
         (0, 2, 6, 4),
         (1, 5, 7, 3),
+    ]
+
+
+def rod(a, b, r, sides=4):
+    """A thin cylinder from point a to point b (rigging, spars, posts)."""
+    d = [b[i] - a[i] for i in range(3)]
+    ln = math.sqrt(sum(x * x for x in d)) or 1
+    d = [x / ln for x in d]
+    up = (0, 0, 1) if abs(d[2]) < 0.9 else (1, 0, 0)
+    e1 = [
+        d[1] * up[2] - d[2] * up[1],
+        d[2] * up[0] - d[0] * up[2],
+        d[0] * up[1] - d[1] * up[0],
+    ]
+    l1 = math.sqrt(sum(x * x for x in e1))
+    e1 = [x / l1 for x in e1]
+    e2 = [
+        d[1] * e1[2] - d[2] * e1[1],
+        d[2] * e1[0] - d[0] * e1[2],
+        d[0] * e1[1] - d[1] * e1[0],
+    ]
+    v = []
+    for end in (a, b):
+        for i in range(sides):
+            t = 2 * math.pi * (i + 0.5) / sides
+            v.append(
+                tuple(
+                    end[j] + r * (math.cos(t) * e1[j] + math.sin(t) * e2[j])
+                    for j in range(3)
+                )
+            )
+    f = [(i, (i + 1) % sides, sides + (i + 1) % sides, sides + i) for i in range(sides)]
+    return v, [*f, tuple(range(sides)), tuple(range(2 * sides - 1, sides - 1, -1))]
+
+
+def slab(pts, thick):
+    """A flat convex polygon given by 3D points, thickened along its normal (a sail or a board at any angle)."""
+    a, b, c = pts[0], pts[1], pts[2]
+    u, w = [b[i] - a[i] for i in range(3)], [c[i] - a[i] for i in range(3)]
+    n = [
+        u[1] * w[2] - u[2] * w[1],
+        u[2] * w[0] - u[0] * w[2],
+        u[0] * w[1] - u[1] * w[0],
+    ]
+    ln = math.sqrt(sum(x * x for x in n)) or 1
+    n = [x * thick / ln for x in n]
+    k = len(pts)
+    v = [tuple(p) for p in pts] + [tuple(p[i] + n[i] for i in range(3)) for p in pts]
+    return v, [tuple(range(k)), tuple(range(2 * k - 1, k - 1, -1))] + [
+        (i, (i + 1) % k, k + (i + 1) % k, k + i) for i in range(k)
     ]
 
 
@@ -285,14 +347,20 @@ def _part_faces(part):
 
 
 # Hunter's mounts, engines, wake and boarding point. The engine reads these; ship.json only names the gun.
+# The gun's pivot sits in the casemate's front face (MOUNT); the turret itself is the mantlet that closes it.
+MOUNT = (0, 6.8, 2.6)
 POINTS = [
-    ("Forward_Heavymount", "GunPlacement", (0, 6.2, 2.62), 0),
+    ("Forward_Heavymount", "GunPlacement", MOUNT, 0),
     ("Engine_Port", "EnginePortPlacement", (-PX, -9.2, 1.6), math.pi),
     ("Engine_Center", "EnginePortPlacement", (0, -9.5, 1.6), math.pi),
     ("Engine_Starboard", "EnginePortPlacement", (PX, -9.2, 1.6), math.pi),
     ("Wake1", "WakePlacement", (0, -9.0, 0.9), math.pi),
-    ("Boarding1", "BoardingEffectPoint", (0, -3.5, 2.8), 0),
+    ("Boarding1", "BoardingEffectPoint", (0, 0.5, 2.9), 0),
 ]
+MAIN = (0, -1.0)  # main mast (y, deck z)
+MAIN_TOP = 17.0
+MIZZEN = (-5.6, 4.41)  # on the wheelhouse roof
+MIZZEN_TOP = 11.6
 
 
 def hull():
@@ -301,13 +369,18 @@ def hull():
     Hull-like layers use (side, top) materials: planked sides with the frieze on the gunwale, plank decking on top."""
     n = {}
     side = ("hull", "deck")
+    # The casemate: a riveted plate housing over the foredeck, open at the front where the gun's mantlet sits. Side profile (y, z).
+    casemate = [(3.4, 2.55), (7.0, 2.4), (7.0, 3.35), (4.0, 3.5)]
     n["Hunter nose"] = [
         (*loft(HULL, 3, 10.5), side),
         (*loft(HULL, 4.4, 4.9, k=1.04), "band"),
-        (*loft(HULL, 7.2, 7.7, k=1.04), "band"),
-        (*box((0, 6.2, 2.62), (1.5, 2.4, 0.26)), "plate"),  # the gun's raised platform
+        (*loft(HULL, 8.2, 8.7, k=1.04), "band"),
+        (*prism(casemate, lambda u, w, d: (d - 0.78, u, w), 1.56), ("rivets", "plate")),
+        (*box((0, 4.6, 2.95), (1.66, 0.16, 1.05)), "band"),
+        (*box((0, 6.0, 2.92), (1.66, 0.16, 0.98)), "band"),
+        (*box((0, 6.95, 3.38), (1.7, 0.2, 0.1)), "band"),  # the brow over the gun port
         (
-            *cyl((0, 1.6, 2.75), 0.55, 0.12, axis=2, sides=14),
+            *cyl((0, 2.3, 2.72), 0.5, 0.12, axis=2, sides=14),
             "hatch",
         ),  # an emblem hatch on the foredeck
     ]
@@ -315,6 +388,21 @@ def hull():
         (*loft(HULL, -3, 3), side),
         (*loft(HULL, -0.9, -0.4, k=1.04), "band"),
         (*loft(HULL, 1.3, 1.8, k=1.04), "band"),
+        (*box((-0.6, 0.6, 2.97), (0.5, 0.5, 0.5)), "crate"),
+        (*box((0.55, 0.9, 2.92), (0.42, 0.42, 0.42)), "crate"),
+        (*box((-0.55, 1.15, 2.85), (0.3, 0.3, 0.3)), "crate"),
+        (
+            *slab(
+                [
+                    (-0.35, -1.95, 2.7),
+                    (0.35, -1.95, 2.7),
+                    (0.35, -2.9, 4.4),
+                    (-0.35, -2.9, 4.4),
+                ],
+                0.06,
+            ),
+            "stairs",
+        ),
     ]
     n["Hunter stern"] = [
         (*loft(HULL, -9, -3), side),
@@ -322,11 +410,27 @@ def hull():
         (*loft(HULL, -4.4, -3.9, k=1.04), "band"),
         (*box((0, -4.6, 3.55), (1.9, 3.4, 1.5)), "cabin"),  # raised wheelhouse
         (*box((0, -4.6, 4.35), (2.1, 3.6, 0.12)), "deck"),
-        (*box((-1.12, -1.0, 3.0), (0.07, 6.0, 0.5)), "rail"),
-        (*box((1.12, -1.0, 3.0), (0.07, 6.0, 0.5)), "rail"),
+        (*box((-1.12, -0.5, 3.0), (0.07, 5.0, 0.5)), "rail"),
+        (*box((1.12, -0.5, 3.0), (0.07, 5.0, 0.5)), "rail"),
+        (*box((-1.0, -8.0, 2.75), (0.07, 2.6, 0.45)), "rail"),
+        (*box((1.0, -8.0, 2.75), (0.07, 2.6, 0.45)), "rail"),
         (*cyl((0, -9.5, 1.6), 0.6, 0.9, sides=12), "engine"),
         (*cyl((0, -10.0, 1.6), 0.45, 0.1, sides=12), "glow"),
+        (
+            *prism(
+                [(-8.5, 1.0), (-9.3, 1.0), (-9.5, 0.1), (-8.7, -0.1)],
+                lambda u, w, d: (d - 0.06, u, w),
+                0.12,
+            ),
+            "rudder",
+        ),
     ]
+    for s in (-1, 1):
+        # stern lamps on short posts
+        n["Hunter stern"] += [
+            (*rod((s * 0.85, -8.7, 2.5), (s * 0.85, -8.7, 3.5), 0.05), "wood"),
+            (*box((s * 0.85, -8.7, 3.62), (0.24, 0.24, 0.3)), "lamp"),
+        ]
     for s in (-1, 1):
         name = "Hunter port" if s < 0 else "Hunter starboard"
         n[name + " pontoon"] = [
@@ -335,42 +439,100 @@ def hull():
             (*loft(PONTOON, 1.8, 2.3, dx=s * PX, k=1.05), "band"),
             (*box((s * 2.3, -3.0, 2.0), (2.6, 0.45, 0.3)), "strut"),
             (*box((s * 2.3, 2.0, 2.0), (2.6, 0.45, 0.3)), "strut"),
+            (*box((s * (PX + 0.55), -1.0, 2.55), (0.06, 6.5, 0.35)), "rail"),
             (*cyl((s * PX, -9.0, 1.6), 0.5, 0.8, sides=12), "engine"),
             (*cyl((s * PX, -9.45, 1.6), 0.38, 0.1, sides=12), "glow"),
         ]
+    my, mz = MAIN
+    zy, zz = MIZZEN
     kite = [
-        (-1.0, 3.4),
-        (-6.0, 7.4),
-        (-2.8, 13.4),
-        (1.6, 8.0),
-    ]  # (y, z): a diamond of cloth beside the mast
+        (-0.6, 4.2),
+        (-6.0, 8.8),
+        (-2.4, 16.2),
+        (2.0, 9.6),
+    ]  # (y, z): a diamond of cloth beside the main mast
+    rigging = [
+        ((0, my, MAIN_TOP - 0.3), (0, 10.2, 2.3)),  # forestay to the bow
+        ((0, my, MAIN_TOP - 0.3), (0, zy, MIZZEN_TOP - 0.3)),  # main to mizzen
+        ((0, zy, MIZZEN_TOP - 0.3), (0, -9.0, 2.6)),  # mizzen backstay
+    ]
+    for s in (-1, 1):
+        rigging += [
+            ((0, my, 13.3), (s * PX, -3.0, 2.4)),
+            ((0, my, 13.3), (s * PX, 1.5, 2.4)),
+            ((0, zy, 10.0), (s * PX, -7.0, 2.3)),
+        ]
     n["Hunter mast and sail"] = [
-        (*cyl((0, -1.5, 8.3), 0.16, 11.4, axis=2, sides=8), "wood"),
-        (*cyl((0, -1.5, 1.0), 0.22, 0.2, axis=2, sides=8), "wood"),
-        (*prism(kite, lambda u, w, d: (0.35 + d, u, w), 0.05), "sail"),
+        (
+            *cyl((0, my, (mz + MAIN_TOP) / 2), 0.17, MAIN_TOP - mz, axis=2, sides=8),
+            "wood",
+        ),
+        (*cyl((0, my, mz + 0.2), 0.34, 0.4, axis=2, sides=10), "ring"),
+        (*cyl((0, my, 13.3), 0.55, 0.45, axis=2, sides=10), "ring"),  # crow's nest
+        (*prism(kite, lambda u, w, d: (0.3 + d, u, w), 0.05), "sail"),
         (
             *prism(
-                [(-2.8, 13.4), (-2.8, 12.7), (-5.6, 13.05)],
-                lambda u, w, d: (d, u, w),
+                [(MAIN_TOP, 0), (MAIN_TOP - 0.7, 0), (MAIN_TOP - 0.35, -2.8)],
+                lambda u, w, d: (d, my + w, u),
                 0.04,
             ),
             "flag",
         ),
+        *[(*rod(a, b, 0.03), "rope") for a, b in rigging],
     ]
+    n["Hunter mizzen sail"] = [
+        (
+            *cyl(
+                (0, zy, (zz + MIZZEN_TOP) / 2), 0.13, MIZZEN_TOP - zz, axis=2, sides=8
+            ),
+            "wood",
+        ),
+        (*cyl((0, zy, zz + 0.15), 0.26, 0.3, axis=2, sides=10), "ring"),
+        (*rod((0, zy, 5.3), (0, -9.4, 5.6), 0.07), "wood"),  # boom
+        (
+            *prism(
+                [(zy + 0.1, 5.5), (zy + 0.1, 11.2), (-9.4, 5.7)],
+                lambda u, w, d: (0.2 + d, u, w),
+                0.05,
+            ),
+            "spanker",
+        ),
+    ]
+    side_sails = []
+    for s in (-1, 1):
+        root, tip = (s * (PX + 0.4), -1.6, 2.4), (s * (PX + 2.4), -2.6, 6.4)
+        side_sails += [
+            (*rod(root, tip, 0.07), "wood"),
+            (
+                *slab(
+                    [
+                        (s * (PX + 0.5), -4.2, 2.6),
+                        (s * (PX + 0.5), 0.6, 2.6),
+                        (s * (PX + 2.35), -2.6, 6.2),
+                    ],
+                    0.04,
+                ),
+                "side_sail",
+            ),
+        ]
+    n["Hunter side sails"] = side_sails
     return n
 
 
 def gun():
-    """Turret base ring and a long barrel along +y; muzzle at (0, 4.6, 0.5)."""
+    """The railgun is built into the bow casemate: the base is the armoured mantlet that closes the gun port and turns a few degrees,
+    the barrel runs out along the bow. Pivot at (0, 0, 0.4) (the barrel's axis); muzzle at (0, 4.4, 0.4)."""
     base = [
-        (*cyl((0, 0, 0.15), 0.5, 0.3, 2, 16), "gun"),
-        (*cyl((0, 0, 0.45), 0.3, 0.9, 0), "gun"),
+        (*cyl((0, 0, 0.47), 0.5, 0.95, 2, 16), "mount"),
+        (*cyl((0, 0, 0.98), 0.52, 0.08, 2, 16), "band"),
     ]
     barrel = [
-        (*box((0, 0.2, 0.5), (0.42, 2.4, 0.36)), "gun"),
-        (*cyl((0, 2.6, 0.5), 0.09, 4.0), "gun"),
-        (*cyl((0, 2.0, 0.5), 0.14, 0.25), "gun"),
-        (*cyl((0, 4.45, 0.5), 0.16, 0.35, sides=8), "gun"),
+        (*box((0, -0.35, 0.4), (0.5, 1.3, 0.44)), "gun"),  # breech, inside the casemate
+        (*cyl((0, 2.3, 0.4), 0.12, 3.9), "barrel"),
+        (*cyl((0, 1.0, 0.4), 0.18, 1.3, sides=12), "barrel"),  # reinforcing sleeve
+        (*cyl((0, 2.3, 0.4), 0.16, 0.14, sides=12), "band"),
+        (*cyl((0, 3.3, 0.4), 0.16, 0.14, sides=12), "band"),
+        (*cyl((0, 4.2, 0.4), 0.21, 0.42, sides=8), "gun"),  # muzzle brake
     ]
     return {"gun_Hunter_Layer1": base}, {"gun_Hunter_Layer2": barrel}
 

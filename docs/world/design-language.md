@@ -66,25 +66,28 @@ engines and tall masts with huge pale blue-grey emblem sails. (Measured from the
 ## Audit: the Hunter mod against this (`mods/hunter`, built by `tools/make_hunter.py`)
 
 The Hunter is a **Procyon** ship, the most technologically advanced fleet (`factions.md`), and a sniper: fast, fragile, one long-range
-railgun. It is built as a Procyon trimaran: a slender planked central hull with a raised wheelhouse, two outrigger pontoons with white
-bands and struts, a glowing engine at the stern of each hull, a tall mast with a pale emblem sail and a green pennant, and the gun on a
-raised platform at the bow. Its surfaces use retail textures (`retail:<name>`, `docs/modding.md`), so it carries the same planks, frieze,
-plating and emblem as the originals while the repository holds no game art. Two earlier versions (a black-and-orange jet-like needle,
-then a grey metal needle with side fins) read as modern aircraft and broke the guiding idea above; the retail Procyon models showed
-why: they are wooden trimarans under big sails, not metal hulls.
+railgun. It is built as a Procyon trimaran: a slender planked central hull with a raised wheelhouse (stairs up to it, two stern lamps, a rudder),
+two outrigger pontoons with white bands, struts and rails, a glowing engine at the stern of each hull, a tall main mast with a mast ring,
+crow's nest, rigging, a pale emblem sail and a green pennant, a mizzen on the wheelhouse with a spanker, a side sail over each pontoon,
+and crates on the deck. The railgun is built into a riveted plate casemate on the foredeck: only its armoured mantlet and the long barrel
+show, and it traverses 8 degrees each way, so the ship aims it by turning (heavy weapons look bolted on: the casemate is the added
+part). Its surfaces use retail textures (`retail:<name>`, `docs/modding.md`), so it carries the same planks, frieze, plating and emblem
+as the originals while the repository holds no game art. Two earlier versions (a black-and-orange jet-like needle, then a grey metal
+needle with side fins) read as modern aircraft and broke the guiding idea above; the retail Procyon models showed why: they are wooden
+trimarans under big sails, not metal hulls.
 
 | | Hunter | Closest retail (Procyon Cutter) |
 |---|---|---|
-| Length / width / height | 20.6 / 8.9 / 13.2 | 19.6 / 11.0 / 21.1 |
+| Length / width / height | 20.6 / 12.1 / 18.0 | 19.6 / 11.0 / 21.1 |
 | Hulls | central hull plus two pontoons | central hull plus two pontoons |
-| Materials | 15 retail textures (planks, frieze, plate, silver, sail, emblem hatch) | 33 painted textures |
-| Sails | one emblem sail on a tall mast, green pennant | two masts, emblem sails, green flag |
+| Materials | 27 retail textures (planks, frieze, plate, rivets, silver, mount, cannon, sails, rigging, emblem hatch, lamp, crates) | 33 painted textures |
+| Sails | emblem sail on the main mast, spanker on the mizzen, two side sails, green pennant | two masts, emblem sails, green flag |
 | Engines | three blue-teal housings with a cyan glow | two, blue-teal with a glow |
-| Triangle count | about 2100 | about 8100 |
+| Triangle count | about 2600 | about 8100 |
 
-What still separates it from the retail ships: one mast instead of two, no rigging lines or spars, fewer fittings (no windows beyond
-the wheelhouse texture, no stairs, no lamps) and about a quarter of the detail. Rigging lines, a second sail and more deck fittings
-are the first things to add.
+What still separates it from the retail ships: about a third of the detail (no windows beyond the wheelhouse texture, simple boxes
+for fittings) and no damaged (`Damage_`) layers, so a destroyed section just disappears. PROVISIONAL: proportions and fittings are
+judged by eye against the retail Procyon Cutter, not measured part by part.
 
 ## Still unknown (ask before inventing)
 
