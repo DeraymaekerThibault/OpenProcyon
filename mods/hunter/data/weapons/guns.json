@@ -27,7 +27,7 @@
     "Can Be Fired While Cloaked": false,
     "Victory Point Cost": 16,
     "Exclusion Race": "None",
-    "Mount Type": "Heavy  Mount",
+    "Mount Type": "Non-Selectable Heavy Mount",
     "EffectiveRange_RicochetFactor": -100.0,
     "LongRange_RicochetFactor": -100.0,
     "MaximumRange_RicochetFactor": -100.0,
