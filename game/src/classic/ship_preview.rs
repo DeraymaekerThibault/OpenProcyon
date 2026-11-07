@@ -1,6 +1,8 @@
 //! The Ships screen's 3D preview ('Ship ViewPort Button'): the selected hull rendered by an off-screen camera into an image that the
 //! menu draws over the globe grid. Everything lives on its own render layer, so the battle camera never sees it.
-//! PROVISIONAL: the original's camera angle is matched by eye on one screenshot, and the slow turn is not confirmed.
+//! The hull stands still at a fixed bearing; dragging with the mouse over the viewport turns it.
+//! PROVISIONAL: the original's camera angle is matched by eye on one screenshot.
+#![allow(deprecated)] // shortcut: bevy 0.20 Interaction, as in menu.rs
 use bevy::app::{HierarchyPropagatePlugin, Propagate};
 use bevy::camera::RenderTarget;
 use bevy::camera::visibility::RenderLayers;
@@ -25,14 +27,18 @@ struct PreviewHull(usize);
 const LAYER: usize = 7;
 /// Render size: the 393x285 viewport at twice its reference size.
 const SIZE: UVec2 = UVec2::new(786, 570);
-/// Turn rate (rad/s) and camera elevation / bearing, matched by eye on the original screenshot.
-const TURN: f32 = 0.25;
+/// Radians of hull turn per pixel of mouse drag.
+const DRAG: f32 = 0.01;
+
+/// Marks the menu node that shows the preview; pressing and dragging on it turns the hull.
+#[derive(Component)]
+pub struct PreviewDrag;
 
 pub fn plugin(app: &mut App) {
     app.add_plugins(HierarchyPropagatePlugin::<RenderLayers>::new(PostUpdate))
         .add_systems(OnEnter(Screen::Fleet), spawn_rig)
         .add_systems(OnExit(Screen::Fleet), despawn)
-        .add_systems(Update, (show_hull, frame, turn).run_if(in_state(Screen::Fleet)));
+        .add_systems(Update, (show_hull, frame, drag).run_if(in_state(Screen::Fleet)));
 }
 
 /// The rig (camera and light) for the Fleet screen; the target image is created on first use (the initial screen's enter hook can
@@ -48,6 +54,8 @@ fn spawn_rig(mut commands: Commands, preview: Option<Res<ShipPreview>>, mut imag
     };
     commands.spawn((
         PreviewPart,
+        // Plain camera and light: the profile's HDR, bloom and shadows would turn the transparent background opaque.
+        crate::render::Styled,
         Camera3d::default(),
         Camera { order: -10, clear_color: ClearColorConfig::Custom(Color::NONE), ..default() },
         RenderTarget::Image(image.into()),
@@ -56,6 +64,7 @@ fn spawn_rig(mut commands: Commands, preview: Option<Res<ShipPreview>>, mut imag
     ));
     commands.spawn((
         PreviewPart,
+        crate::render::Styled,
         DirectionalLight { illuminance: 9000.0, shadow_maps_enabled: false, ..default() },
         RenderLayers::layer(LAYER),
         Transform::from_xyz(-30.0, 60.0, 40.0).looking_at(Vec3::ZERO, Vec3::Y),
@@ -96,8 +105,11 @@ fn frame(lib: Res<Library>, hulls: Query<&PreviewHull>, mut camera: Query<&mut T
     *cam = Transform::from_xyz(d * 0.6, d * 0.18, d * 0.78).looking_at(Vec3::Y * r * 0.2, Vec3::Y);
 }
 
-fn turn(time: Res<Time<Real>>, mut hulls: Query<&mut Transform, With<PreviewHull>>) {
+fn drag(viewport: Query<&Interaction, With<PreviewDrag>>, motion: Res<bevy::input::mouse::AccumulatedMouseMotion>, mut hulls: Query<&mut Transform, With<PreviewHull>>) {
+    if !viewport.iter().any(|i| matches!(i, Interaction::Pressed)) {
+        return;
+    }
     for mut t in &mut hulls {
-        t.rotate_y(TURN * time.delta_secs());
+        t.rotate_y(motion.delta.x * DRAG);
     }
 }

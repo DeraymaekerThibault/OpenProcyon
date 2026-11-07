@@ -212,9 +212,9 @@ pub fn plugin(app: &mut App) {
     app.insert_resource(look.flags).insert_resource(look).add_systems(Update, (camera, sun, sky_light));
 }
 
-/// Marks a camera or sun the profile has set up.
+/// Marks a camera or sun the profile has set up (or that must keep plain settings, like the Ships screen's off-screen preview).
 #[derive(Component)]
-struct Styled;
+pub struct Styled;
 
 fn camera(mut commands: Commands, look: Res<Look>, cams: Query<Entity, (With<Camera3d>, Without<Styled>)>) {
     for cam in &cams {
