@@ -287,7 +287,7 @@ fn subdivide(mesh: &Mesh) -> Option<(Mesh, Billow)> {
 }
 
 /// Which sail each vertex belongs to (a representative vertex index): triangles joined by shared or coincident corners.
-fn sail_of(pos: &[[f32; 3]], tris: &[[usize; 3]]) -> Vec<usize> {
+pub(crate) fn sail_of(pos: &[[f32; 3]], tris: &[[usize; 3]]) -> Vec<usize> {
     let mut parent: Vec<usize> = (0..pos.len()).collect();
     fn root(parent: &mut [usize], mut i: usize) -> usize {
         while parent[i] != i {

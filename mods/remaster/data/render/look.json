@@ -78,7 +78,8 @@
   "flags": {
     "flutter": 1.0,
     "lit": true,
-    "wind": true
+    "wind": true,
+    "snap": 3.0
   },
   "lights": [
     {
