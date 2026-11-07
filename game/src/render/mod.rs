@@ -153,7 +153,6 @@ impl Look {
                 flutter: num(&v["flags"]["flutter"], 0.0),
                 lit: v["flags"]["lit"].as_bool().unwrap_or(false),
                 wind: v["flags"]["wind"].as_bool().unwrap_or(false),
-                snap: num(&v["flags"]["snap"], 0.0),
             },
         }
     }
@@ -330,7 +329,7 @@ mod tests {
             "sun": {"shadows": true}, "fx_gain": 2.5, "flags": {"flutter": 1, "lit": true},
         }));
         assert_eq!((look.bloom, look.tonemapping, look.ssao, look.shadows, look.fx_gain), (0.3, Tonemapping::AgX, true, true, 2.5));
-        assert_eq!(look.flags, crate::flag::Cloth { flutter: 1.0, lit: true, wind: false, snap: 0.0 });
+        assert_eq!(look.flags, crate::flag::Cloth { flutter: 1.0, lit: true, wind: false });
     }
 
     #[test]

@@ -1,4 +1,6 @@
 //! Ship flags: a waving cloth strip hung between the hull's Flag_Top / Flag_Bottom attachment points (streaming astern).
+//! Not retail: some hulls' points miss their staff (the Legacy's by about 2.2 units, the Heavy Escorts' and the Navy Assault
+//! Cutter's by about 0.5), so every flag is hung on the nearest staff within `SNAP` units, at the points' heights (`snap`).
 use bevy::asset::RenderAssetUsages;
 use bevy::camera::visibility::NoFrustumCulling;
 use bevy::mesh::{Indices, PrimitiveTopology};
@@ -19,9 +21,10 @@ pub struct Cloth {
     pub flutter: f32,
     pub lit: bool,
     pub wind: bool,
-    /// Hang the flag on the nearest thin staff within this many units when its retail points miss it; 0 = retail points.
-    pub snap: f32,
 }
+
+/// How far (units) from its retail points a flag looks for the staff it hangs on.
+const SNAP: f32 = 3.0;
 #[derive(Component)]
 struct Flag {
     top: Vec3,
@@ -33,7 +36,7 @@ struct Flag {
 }
 #[derive(Component)]
 struct Flagged;
-/// With `Cloth::snap`: a flag not yet moved onto its staff (it waits for the ship's meshes to load).
+/// A flag not yet moved onto its staff (it waits for the ship's meshes to load).
 #[derive(Component)]
 struct Unsnapped;
 
@@ -70,9 +73,10 @@ fn spawn(
         let mut material = cloth_material(assets.load(format!("flags/{tex}.png")));
         material.unlit = !cloth.lit;
         let mat = mats.add(material);
-        let mut flag = commands.spawn((
+        commands.spawn((
             Scenario,
             Flag { top, bottom, phase: e.index().index() as f32, clock: 0.0, wind: 0.0 },
+            Unsnapped,
             Mesh3d(meshes.add(m)),
             MeshMaterial3d(mat),
             Transform::default(),
@@ -80,17 +84,13 @@ fn spawn(
             NoFrustumCulling,
             ChildOf(e),
         ));
-        if cloth.snap > 0.0 {
-            flag.insert(Unsnapped);
-        }
     }
 }
 
-/// `Cloth::snap`: once the ship's meshes are loaded, moves the flag onto the nearest staff (`onto_staff`). Damage layers are left
+/// Once the ship's meshes are loaded, moves the flag onto the nearest staff (`onto_staff`). Damage layers are left
 /// out (their staff may be broken).
 fn snap(
     mut commands: Commands,
-    cloth: Res<Cloth>,
     meshes: Res<Assets<Mesh>>,
     children: Query<&Children>,
     parts: Query<(&Mesh3d, &GlobalTransform, &ChildOf)>,
@@ -121,7 +121,7 @@ fn snap(
         if pieces.is_empty() {
             continue; // the ship's scene has not spawned yet
         }
-        if let Some((top, bottom)) = onto_staff(&pieces, f.top, f.bottom, cloth.snap) {
+        if let Some((top, bottom)) = onto_staff(&pieces, f.top, f.bottom, SNAP) {
             (f.top, f.bottom) = (top, bottom);
         }
         commands.entity(e).remove::<Unsnapped>();
@@ -305,7 +305,7 @@ mod tests {
         assert_eq!(flutter(0.0, 0.5, 1.0), 0.0, "the hoist stays on the pole");
         let across: Vec<f32> = (0..=ROWS).map(|j| flutter(1.0, j as f32 / ROWS as f32, 0.7)).collect();
         assert!(across.iter().any(|&x| (x - across[0]).abs() > 0.01), "ripples differ from Flag_Top to Flag_Bottom: {across:?}");
-        assert_eq!(Cloth::default(), Cloth { flutter: 0.0, lit: false, wind: false, snap: 0.0 });
+        assert_eq!(Cloth::default(), Cloth { flutter: 0.0, lit: false, wind: false });
     }
 
     #[test]
