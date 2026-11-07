@@ -3,7 +3,9 @@
 // colour textures, so the relief is read from the colour texture's brightness as it draws: darker texels lie lower (plank
 // seams, rivets, cracks in rock). Their slope tilts the normal (in a frame built from the screen-space derivatives, so
 // the mesh needs no tangents), the crevices are shaded darker, and brighter texels are a little smoother. The relief fades
-// out where the texture is drawn smaller than its texels, so distant ships do not shimmer. A soft light along the
+// out where the texture is drawn smaller than its texels, so distant ships do not shimmer. When the player has baked surface
+// maps (tools/bake_surfaces.py) the slope, crevices and height come from the material's map instead, filtered offline and
+// taken at several scales, so rock and asteroids show their larger shapes too. A soft light along the
 // silhouettes (the rim) lifts the hulls off the dark sky, the way a painter edges a figure against the night.
 import bevy_pbr::render::{
     forward_io::{VertexOutput, FragmentOutput},
@@ -14,13 +16,18 @@ import bevy_pbr::render::{
 };
 
 struct Surface {
-    // x: relief strength, y: crevice shading, z: gloss, w: unused
+    // x: relief strength, y: crevice shading, z: gloss, w: 1 when `surface_map` is a baked map
     params: vec4<f32>,
     // rgb: rim light colour, a: its strength
     rim: vec4<f32>,
 }
 
 @group(constants::MATERIAL_BIND_GROUP) @binding(100) var<uniform> surface: Surface;
+// linear RGBA: u and v slope (times SLOPE_GAIN, 0.5 flat), crevice, height
+@group(constants::MATERIAL_BIND_GROUP) @binding(101) var surface_map: texture_2d<f32>;
+@group(constants::MATERIAL_BIND_GROUP) @binding(102) var surface_map_sampler: sampler;
+// `SLOPE_GAIN` in tools/bake_surfaces.py
+const SLOPE_GAIN: f32 = 3.0;
 
 fn luma(uv: vec2<f32>) -> f32 {
     return dot(textureSample(base_color_texture, base_color_sampler, uv).rgb, vec3<f32>(0.299, 0.587, 0.114));
@@ -36,11 +43,25 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
     let dpy = dpdy(in.world_position.xyz);
     let duvx = dpdx(uv);
     let duvy = dpdy(uv);
-    let h = luma(uv);
-    let hr = luma(uv + vec2<f32>(texel.x, 0.0));
-    let hl = luma(uv - vec2<f32>(texel.x, 0.0));
-    let hd = luma(uv + vec2<f32>(0.0, texel.y));
-    let hu = luma(uv - vec2<f32>(0.0, texel.y));
+    // height, its slope along u and v, and how far below its surroundings it lies; the branch is on a uniform, so the
+    // samples stay in uniform control flow
+    var h: f32;
+    var slope: vec2<f32>;
+    var below: f32;
+    if surface.params.w > 0.5 {
+        let m = textureSample(surface_map, surface_map_sampler, uv);
+        h = m.a;
+        slope = (m.rg * 2.0 - 1.0) / SLOPE_GAIN;
+        below = m.b;
+    } else {
+        h = luma(uv);
+        let hr = luma(uv + vec2<f32>(texel.x, 0.0));
+        let hl = luma(uv - vec2<f32>(texel.x, 0.0));
+        let hd = luma(uv + vec2<f32>(0.0, texel.y));
+        let hu = luma(uv - vec2<f32>(0.0, texel.y));
+        slope = vec2<f32>(hr - hl, hd - hu) * 0.5;
+        below = clamp(((hr + hl + hd + hu) * 0.25 - h) * 6.0, 0.0, 1.0);
+    }
 
     var pbr_input = pbr_input_from_standard_material(in, is_front);
     pbr_input.material.base_color = alpha_discard(pbr_input.material.flags, pbr_input.material.alpha_cutoff, pbr_input.material.base_color);
@@ -56,13 +77,11 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
     let t = dp2perp * duvx.x + dp1perp * duvy.x;
     let b = dp2perp * duvx.y + dp1perp * duvy.y;
     let inv = inverseSqrt(max(max(dot(t, t), dot(b, b)), 1e-30));
-    let slope = vec2<f32>(hr - hl, hd - hu) * 0.5;
     let bump = surface.params.x * detail;
     pbr_input.N = normalize(n - bump * (slope.x * t * inv + slope.y * b * inv));
 
     // crevices: lower than their neighbours
-    let around = (hr + hl + hd + hu) * 0.25;
-    let crevice = clamp((around - h) * 6.0, 0.0, 1.0) * detail;
+    let crevice = below * detail;
     let shade = 1.0 - surface.params.y * crevice;
     pbr_input.material.base_color = vec4<f32>(pbr_input.material.base_color.rgb * shade, pbr_input.material.base_color.a);
     pbr_input.diffuse_occlusion = pbr_input.diffuse_occlusion * shade;
