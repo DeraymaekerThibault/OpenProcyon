@@ -247,14 +247,14 @@ fn spawn_on(commands: &mut Commands, fxl: &FxLib, name: &str, world: Transform, 
     }
 }
 
-type ShipTargets<'w, 's> = Query<
+pub(super) type ShipTargets<'w, 's> = Query<
     'w,
     's,
     (Entity, &'static Transform, &'static Ship, &'static mut Health, &'static mut Fires, Option<&'static crate::campaign::MissionShip>, Option<&'static crate::collision::Drift>),
     Without<crate::lifeboats::Lifeboat>,
 >;
 
-fn nearest_ship_hit(ships: &ShipTargets, lib: &Library, side: Side, p0: Vec3, p1: Vec3) -> Option<(Entity, f32, usize, Vec3)> {
+pub(super) fn nearest_ship_hit(ships: &ShipTargets, lib: &Library, side: Side, p0: Vec3, p1: Vec3) -> Option<(Entity, f32, usize, Vec3)> {
     let mut best: Option<(Entity, f32, usize, Vec3)> = None;
     for (entity, tf, ship, hp, _, mission, _) in ships.iter() {
         if hp.destroyed || ship.side == side || mission.is_some_and(|m| !m.visible) {
@@ -536,7 +536,7 @@ pub(super) fn shells(
         if let (Some((_, k, at)), Some(si)) = (best, best_ship) {
             let (se, stf, ship, mut hp, mut fires, mission, _) = ships.get_mut(si).unwrap();
             let target = ShipTarget { entity: se, transform: stf, side: ship.side, class: &lib.classes[ship.class], invuln: mission.map_or(0.0, |m| m.invuln) };
-            hit_ship(&mut commands, &fxl, &mut rng, (&mut sfx, &mut hits, &mut scars), bd, &s, target, &mut hp, &mut fires, k, at);
+            hit_ship(&mut commands, &fxl, &mut rng, (&mut sfx, &mut hits, &mut scars), bd, &s, target, &mut hp, &mut fires, k, at, 1.0);
             hit_fx(&mut commands, &fxl, bd, at, s.vel, Some((se, stf)), Surface { body: Some(se), normal: hull_normal });
             if matches!(s.payload, Payload::Blast { .. }) {
                 detonate.write(Detonate { bullet: s.bullet.clone(), at, shooter: Some(s.shooter), owner: Some((s.side, s.base)) });
@@ -569,17 +569,19 @@ pub(super) fn shells(
 }
 
 /// The ship a shell struck.
-struct ShipTarget<'a> {
-    entity: Entity,
-    transform: &'a Transform,
-    side: Side,
-    class: &'a crate::data::Class,
+pub(super) struct ShipTarget<'a> {
+    pub(super) entity: Entity,
+    pub(super) transform: &'a Transform,
+    pub(super) side: Side,
+    pub(super) class: &'a crate::data::Class,
     /// Script vulnerability: 'Invulnerable Percent' 1.0 takes no damage and no fire; partial values scale the damage.
-    invuln: f32,
+    pub(super) invuln: f32,
 }
 
-/// A shell striking section `k` of a ship at `at`: damage, fire, hull scar and sounds (the impact effect is the caller's).
-fn hit_ship(
+/// A shell striking section `k` of a ship at `at`: damage, fire, hull scar and sounds (the impact effect is the caller's). `power`
+/// multiplies the damage roll (1 for shells; a beam's ramp, `combat/beam.rs`).
+#[allow(clippy::too_many_arguments)]
+pub(super) fn hit_ship(
     commands: &mut Commands,
     fxl: &FxLib,
     rng: &mut Rng,
@@ -591,6 +593,7 @@ fn hit_ship(
     fires: &mut Fires,
     k: usize,
     at: Vec3,
+    power: f32,
 ) {
     let ShipTarget { entity: se, transform: stf, side, class, invuln } = target;
     let sec = &class.sections[k];
@@ -598,8 +601,8 @@ fn hit_ship(
     // Criticals are not modelled: in the original they only feed a tally and crew speech (docs/re/movement.md).
     let mut damage = bd.damage[key];
     let scale = side_damage_scale(s.side, side, crate::menu::difficulty(), s.base);
-    damage[0] *= scale;
-    damage[1] *= scale;
+    damage[0] *= scale * power;
+    damage[1] *= scale * power;
     hits.write(Hit { shooter: s.shooter, victim: se });
     if let Some((duration, dissipated)) = bd.net {
         commands.entity(se).queue(move |mut w: EntityWorldMut| {

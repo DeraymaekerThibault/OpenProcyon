@@ -1537,20 +1537,20 @@ mod tests {
         assert!(!bank_compatible(&lib, class, fixed.bank, "Gun_Lancer_Med"));
         assert!(weapon_rows(&lib, class, mount.bank, &mount.gun, &[], false).iter().any(|(_, a)| *a == Action::Upgrade("Gun_Carronade_Med".into())));
     }
-    /// The Hunter mod's railgun is built into its hull: on a non-selectable mount, so no other ship can fit it and the Hunter cannot swap it.
+    /// The Hunter mod's beam gun is built into its hull: on a non-selectable mount, so no other ship can fit it and the Hunter cannot swap it.
     #[test]
     #[ignore = "needs imported assets"]
-    fn the_hunter_railgun_fits_no_other_ship() {
+    fn the_hunter_beam_gun_fits_no_other_ship() {
         let mut lib = Library::load(crate::assets_dir());
         let mods: Value = crate::data::try_json(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../mods/hunter/data/weapons/guns.json")).unwrap();
-        lib.guns.insert("Gun_Hunter_Railgun".into(), crate::data::gun_def(&mods["Gun_Hunter_Railgun"]));
+        lib.guns.insert("Gun_Hunter_Beam".into(), crate::data::gun_def(&mods["Gun_Hunter_Beam"]));
         for class in &lib.classes {
             for (bank, _) in weapon_banks(&lib, class) {
-                assert!(!bank_compatible(&lib, class, bank, "Gun_Hunter_Railgun"), "{} bank {bank}", class.name);
+                assert!(!bank_compatible(&lib, class, bank, "Gun_Hunter_Beam"), "{} bank {bank}", class.name);
             }
         }
-        let rail = &lib.guns["Gun_Hunter_Railgun"];
-        assert!(rail.mount_type.as_deref().is_some_and(|t| t.contains("Non-Selectable") && t.contains("Heavy")), "fixed, and still counted as a heavy mount");
+        let beam = &lib.guns["Gun_Hunter_Beam"];
+        assert!(beam.mount_type.as_deref().is_some_and(|t| t.contains("Non-Selectable") && t.contains("Heavy")), "fixed, and still counted as a heavy mount");
     }
     #[test]
     #[ignore = "needs imported assets"]

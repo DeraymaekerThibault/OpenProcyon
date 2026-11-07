@@ -174,6 +174,46 @@ pub struct GunDef {
     pub lob: Option<f32>,
     /// WOT 'Can Be Fired While Cloaked' (torpedoes and gatlings).
     pub cloak_fire: bool,
+    /// Not in the original: a mod gun with a `beam` block charges, then holds a beam instead of firing shells (`combat/beam.rs`).
+    pub beam: Option<BeamDef>,
+}
+
+/// A beam gun's `beam` block in `guns.json` (not retail; for mods). The gun's bullet supplies the damage table (one tick's damage)
+/// and the impact effect; `SoundName` plays once when the charge starts, so one sound can carry the charge and the beam.
+#[derive(Clone, Debug, PartialEq)]
+pub struct BeamDef {
+    /// Seconds of charging before the beam fires (the gun glows at the muzzle).
+    pub charge: f32,
+    /// Seconds the beam is held; then the gun reloads for TimeBetweenBursts.
+    pub duration: f32,
+    /// Seconds between damage ticks while the beam touches a ship.
+    pub tick: f32,
+    /// Damage multiplier gained per second the beam stays on the same ship (1 + ramp x seconds), capped at `max_power`.
+    pub ramp: f32,
+    pub max_power: f32,
+    /// Look: the beam's width (world units) and colour (linear RGB, may exceed 1 to bloom).
+    pub width: f32,
+    pub color: [f32; 3],
+}
+
+impl BeamDef {
+    pub fn from_json(b: &Value) -> Option<BeamDef> {
+        let f = |k: &str, d: f64| b[k].as_f64().unwrap_or(d) as f32;
+        let c = |i: usize, d: f64| b["color"][i].as_f64().unwrap_or(d) as f32;
+        b.is_object().then(|| BeamDef {
+            charge: f("charge", 1.5).max(0.0),
+            duration: f("duration", 3.0).max(0.0),
+            tick: f("tick", 0.25).max(0.02),
+            ramp: f("ramp", 0.0).max(0.0),
+            max_power: f("max_power", 1.0).max(1.0),
+            width: f("width", 0.4).max(0.01),
+            color: [c(0, 0.5), c(1, 1.5), c(2, 2.0)],
+        })
+    }
+    /// The damage multiplier after the beam has stayed `seconds` on one ship.
+    pub fn power(&self, seconds: f32) -> f32 {
+        (1.0 + self.ramp * seconds.max(0.0)).min(self.max_power)
+    }
 }
 impl GunDef {
     /// Gravity on this gun's shells (units/s^2): MuzzleSpeed^2 / (sqrt(2) * MaximumRange), so a shell fired at 45 degrees
@@ -407,6 +447,7 @@ pub fn gun_def(g: &Value) -> GunDef {
             let b = g["BulletTypeName_Primary"].as_str().unwrap_or_default();
             b.starts_with(TORPEDO_BULLET) || b == "Bullet_Gattling"
         }),
+        beam: BeamDef::from_json(&g["beam"]),
     }
 }
 

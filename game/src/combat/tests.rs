@@ -764,6 +764,7 @@ fn bank_recharge_follows_the_slowest_live_gun() {
         aligned: false,
         in_range: false,
         dev: 0.0,
+        beam: Default::default(),
     };
     let health = Health::new(class);
     let mut g = GunStates(class.mounts.iter().map(|m| gun(&m.gun, 0.0)).collect());

@@ -14,7 +14,7 @@
   },
   "guns": {
     "Forward_Heavymount": {
-      "gun": "Gun_Hunter_Railgun",
+      "gun": "Gun_Hunter_Beam",
       "arc_deg": 16.0
     }
   }

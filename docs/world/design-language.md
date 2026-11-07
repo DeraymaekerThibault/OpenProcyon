@@ -66,10 +66,10 @@ engines and tall masts with huge pale blue-grey emblem sails. (Measured from the
 ## Audit: the Hunter mod against this (`mods/hunter`, built by `tools/make_hunter.py`)
 
 The Hunter is a **Procyon** ship, the most technologically advanced fleet (`factions.md`), and a sniper: fast, fragile, one long-range
-railgun. It is built as a Procyon trimaran: a slender planked central hull with a raised wheelhouse (stairs up to it, two stern lamps, a rudder),
+beam gun. It is built as a Procyon trimaran: a slender planked central hull with a raised wheelhouse (stairs up to it, two stern lamps, a rudder),
 two outrigger pontoons with white bands, struts and rails, a glowing engine at the stern of each hull, a tall main mast with a mast ring,
 crow's nest, rigging, a pale emblem sail and a green pennant, a mizzen on the wheelhouse with a spanker, a side sail over each pontoon,
-and crates on the deck. The railgun is built into a riveted plate casemate on the foredeck: only its armoured mantlet and the long barrel
+and crates on the deck. The beam gun is built into a riveted plate casemate on the foredeck: only its armoured mantlet and the long barrel with its glowing emitter
 show, and it traverses 8 degrees each way, so the ship aims it by turning (heavy weapons look bolted on: the casemate is the added
 part). Its surfaces use retail textures (`retail:<name>`, `docs/modding.md`), so it carries the same planks, frieze, plating and emblem
 as the originals while the repository holds no game art. Two earlier versions (a black-and-orange jet-like needle, then a grey metal

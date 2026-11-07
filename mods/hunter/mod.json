@@ -3,5 +3,5 @@
   "name": "Hunter (fast sniper ship)",
   "version": "1.0",
   "category": "Ships",
-  "description": "A fast, fragile Procyon sniper ship with its own long needle hull, pontoons and side sails, and a long-range railgun: a standalone ship whose engine data comes from its model (docs/modding.md, \"A ship from a model\"). Meshes are CC0, built by tools/make_hunter.py."
+  "description": "A fast, fragile Procyon sniper ship with its own long needle hull, pontoons and side sails, and a beam gun built into its bow that charges, then holds a beam that burns harder the longer it stays on a ship (aim it by turning): a standalone ship whose engine data comes from its model (docs/modding.md, \"A ship from a model\"). Meshes are CC0, built by tools/make_hunter.py; the beam sound is from Pixabay (sound/weapons/SOURCE.md)."
 }

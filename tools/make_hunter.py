@@ -1,4 +1,4 @@
-"""Builds the meshes of mods/hunter (a Procyon sniper trimaran and its railgun turret) as GLB, pure Python, no Blender.
+"""Builds the meshes of mods/hunter (a Procyon sniper trimaran and its beam gun) as GLB, pure Python, no Blender.
 
     python3 tools/make_hunter.py mods/hunter
 
@@ -8,7 +8,7 @@ The surfaces name retail textures (`retail:<texture>`, docs/modding.md "Retail t
 the player's own import when it builds the overlay, so no game art is stored here. Each material also carries a flat fallback colour.
 The design follows docs/world/design-language.md and factions.md: a slender planked central hull with a raised cabin, two outrigger
 pontoons ending in engines, a tall main mast with a pale emblem sail and rigging, a mizzen with a spanker, side sails on the pontoons,
-and a long gun built into a plated casemate on the bow: it traverses only a few degrees, so the ship aims it by turning.
+and a beam gun built into a plated casemate on the bow: it traverses only a few degrees, so the ship aims it by turning.
 """
 
 import json
@@ -520,19 +520,24 @@ def hull():
 
 
 def gun():
-    """The railgun is built into the bow casemate: the base is the armoured mantlet that closes the gun port and turns a few degrees,
-    the barrel runs out along the bow. Pivot at (0, 0, 0.4) (the barrel's axis); muzzle at (0, 4.4, 0.4)."""
+    """The beam gun is built into the bow casemate: the base is the armoured mantlet that closes the gun port and turns a few degrees,
+    the barrel runs out along the bow to an emitter with a glowing lens. Pivot at (0, 0, 0.4) (the barrel's axis); muzzle at (0, 4.4, 0.4).
+    """
     base = [
         (*cyl((0, 0, 0.47), 0.5, 0.95, 2, 16), "mount"),
         (*cyl((0, 0, 0.98), 0.52, 0.08, 2, 16), "band"),
     ]
     barrel = [
         (*box((0, -0.35, 0.4), (0.5, 1.3, 0.44)), "gun"),  # breech, inside the casemate
-        (*cyl((0, 2.3, 0.4), 0.12, 3.9), "barrel"),
+        (*cyl((0, 2.0, 0.4), 0.12, 3.3), "barrel"),
         (*cyl((0, 1.0, 0.4), 0.18, 1.3, sides=12), "barrel"),  # reinforcing sleeve
         (*cyl((0, 2.3, 0.4), 0.16, 0.14, sides=12), "band"),
-        (*cyl((0, 3.3, 0.4), 0.16, 0.14, sides=12), "band"),
-        (*cyl((0, 4.2, 0.4), 0.21, 0.42, sides=8), "gun"),  # muzzle brake
+        (*cyl((0, 3.0, 0.4), 0.16, 0.14, sides=12), "band"),
+        # the emitter: three focusing rings stepping out to a lens
+        (*cyl((0, 3.75, 0.4), 0.2, 0.18, sides=12), "band"),
+        (*cyl((0, 3.98, 0.4), 0.25, 0.18, sides=12), "gun"),
+        (*cyl((0, 4.2, 0.4), 0.3, 0.2, sides=12), "band"),
+        (*cyl((0, 4.33, 0.4), 0.22, 0.06, sides=12), "glow"),
     ]
     return {"gun_Hunter_Layer1": base}, {"gun_Hunter_Layer2": barrel}
 

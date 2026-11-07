@@ -9,6 +9,7 @@ use crate::fx::{self, FxLib};
 use crate::{PlayerShip, Ship, Side, assets_dir};
 
 mod asteroid;
+pub mod beam;
 mod damage;
 pub mod gunnery;
 mod hit_test;
@@ -191,18 +192,18 @@ pub fn plugin(app: &mut App) {
         .add_message::<AsteroidSetup>()
         .init_resource::<crate::data::AsteroidDefs>()
         .init_resource::<Rng>()
-        .add_systems(Startup, setup)
+        .add_systems(Startup, (setup, beam::setup_look))
         .add_systems(
             FixedUpdate,
             (
-                (minefield::arm, fire, base_fire, lob::shoot, shells, lob::detonate, lob::blasts, lob::grav_wells, lob::ram_damage, lob::strikes).chain(),
+                (minefield::arm, fire, beam::burn, base_fire, lob::shoot, shells, lob::detonate, lob::blasts, lob::grav_wells, lob::ram_damage, lob::strikes).chain(),
                 (asteroid_deaths, fires, status::tick_nets, crew_repair, deaths).chain(),
             )
                 .chain()
                 .in_set(crate::BattleSet::Combat),
         )
         .add_systems(FixedUpdate, (asteroid_motion, crate::collision::update_asteroids).chain().in_set(crate::BattleSet::Forces).run_if(in_state(crate::menu::Screen::Battle)))
-        .add_systems(Update, (breakup, draw, engine_rate, damage_fx, debris, swap_meshes).chain())
+        .add_systems(Update, (breakup, draw, engine_rate, damage_fx, debris, swap_meshes, beam::draw).chain())
         .add_systems(Update, asteroid_demo.run_if(in_state(crate::menu::Screen::Battle)));
 }
 

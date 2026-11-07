@@ -18,6 +18,8 @@ pub(super) struct GunState {
     pub(super) aligned: bool,
     pub(super) in_range: bool, // a target is within range and the mount's arc (weapon bar: green outline)
     pub(super) dev: f32,       // this burst's deviation angle, drawn once when the burst starts (retail: once per burst)
+    /// A beam gun's cycle (`combat/beam.rs`); always idle for shell guns.
+    pub(super) beam: super::beam::Phase,
 }
 /// Marks the entities of a gun's visual hierarchy (root, base, barrel, muzzle points).
 #[derive(Component)]
@@ -41,7 +43,7 @@ impl GunStates {
     /// A refit re-creates every mount: loaded, no burst in progress.
     pub fn rearm(&mut self) {
         for g in &mut self.0 {
-            (g.cooldown, g.burst_left, g.burst_timer) = (0.0, 0, 0.0);
+            (g.cooldown, g.burst_left, g.burst_timer, g.beam) = (0.0, 0, 0.0, Default::default());
         }
     }
 }
@@ -80,6 +82,7 @@ pub(super) fn spawn_gun(commands: &mut Commands, assets: &AssetServer, lib: &Lib
         aligned: false,
         in_range: false,
         dev: 0.0,
+        beam: Default::default(),
     }
 }
 
@@ -359,6 +362,42 @@ pub(super) fn fire(
             let aim_at = gun_target.filter(|_| !dead && !state.gun.contains("Harpoon"));
             let engaged = aim_turret(state, gun, mount, mount_rot, origin, aim_at, dt, &mut parts);
             shot_engaged |= on_shot && engaged.is_some();
+            // A beam gun charges, then holds its beam (combat/beam.rs burns what it touches); it fires no shells.
+            if let Some(def) = &gun.beam {
+                let ready = engaged.is_some() && state.cooldown <= 0.0 && state.aligned && !(cloaked_now && !gun.cloak_fire);
+                if dead {
+                    state.beam = super::beam::Phase::Idle;
+                }
+                match super::beam::advance(&mut state.beam, def, dt, ready && !dead, gun.range[2]) {
+                    super::beam::Step::Charge => {
+                        shot_fired |= on_shot;
+                        let target = gun_target.map(|t| t.entity).filter(|e| *e != Entity::PLACEHOLDER);
+                        fired.write(Fired { shooter: me, target, bullet: gun.bullet.clone() });
+                        if let Some((n, vol, max)) = &gun.sound {
+                            sfx.write(Sfx { name: n.clone(), at: Some(origin), vol: *vol, max: *max });
+                        }
+                    }
+                    super::beam::Step::Fire => {
+                        let muzzle = state.muzzles.first().copied();
+                        if let (Some(n), Some(mz), Some(mg)) = (&gun.muzzle_fx, muzzle, muzzle.and_then(|m| globals.get(m).ok())) {
+                            let forward = mg.rotation() * Vec3::NEG_Z;
+                            fx::spawn_with(
+                                &mut commands,
+                                &fxl,
+                                n,
+                                Some(mz),
+                                Transform::default(),
+                                mg.compute_transform(),
+                                false,
+                                fx::Origin { forward: Some(forward), ..default() },
+                            );
+                        }
+                    }
+                    super::beam::Step::Done => state.cooldown = gun.reload,
+                    super::beam::Step::None => {}
+                }
+                continue;
+            }
             let Some((aim_dir, distance)) = engaged else {
                 state.burst_left = 0;
                 continue;
