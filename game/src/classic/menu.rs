@@ -332,7 +332,7 @@ fn element(ctx: &Ctx, c: &mut ChildSpawnerCommands, m: &MenuModel, e: &Value, st
             // The 512x288 texture holds the grid in its top-left 393x285, the viewport's size: drawn 1:1.
             ctx.image(c, "menu/fe_shipscreen_bg.png", Some(Rect::new(0.0, 0.0, r[2] - r[0], r[3] - r[1])), r[0], r[1], r[2] - r[0], r[3] - r[1], Color::WHITE);
             if let Some(p) = &preview {
-                c.spawn((ImageNode::new(p.image.clone()), ctx.node(r[0], r[1], r[2] - r[0], r[3] - r[1])));
+                c.spawn((ImageNode::new(p.image.clone()), ctx.node(r[0], r[1], r[2] - r[0], r[3] - r[1]), Interaction::None, super::ship_preview::PreviewDrag));
             }
             ship_name_field(ctx, c, sk, lib);
             None
