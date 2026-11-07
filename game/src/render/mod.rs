@@ -32,7 +32,7 @@ mod bursts;
 mod lights;
 mod materials;
 mod rules;
-mod sails;
+pub(crate) mod sails;
 mod sky;
 mod surfaces;
 mod tracers;

@@ -1,4 +1,6 @@
 //! Ship flags: a waving cloth strip hung between the hull's Flag_Top / Flag_Bottom attachment points (streaming astern).
+//! Not retail: some hulls' points miss their staff (the Legacy's by about 2.2 units, the Heavy Escorts' and the Navy Assault
+//! Cutter's by about 0.5), so every flag is hung on the nearest staff within `SNAP` units, at the points' heights (`snap`).
 use bevy::asset::RenderAssetUsages;
 use bevy::camera::visibility::NoFrustumCulling;
 use bevy::mesh::{Indices, PrimitiveTopology};
@@ -20,6 +22,9 @@ pub struct Cloth {
     pub lit: bool,
     pub wind: bool,
 }
+
+/// How far (units) from its retail points a flag looks for the staff it hangs on.
+const SNAP: f32 = 3.0;
 #[derive(Component)]
 struct Flag {
     top: Vec3,
@@ -31,9 +36,12 @@ struct Flag {
 }
 #[derive(Component)]
 struct Flagged;
+/// A flag not yet moved onto its staff (it waits for the ship's meshes to load).
+#[derive(Component)]
+struct Unsnapped;
 
 pub fn plugin(app: &mut App) {
-    app.init_resource::<Cloth>().add_systems(Update, (spawn, wave, retexture));
+    app.init_resource::<Cloth>().add_systems(Update, (spawn, snap, wave, retexture));
 }
 
 fn spawn(
@@ -68,6 +76,7 @@ fn spawn(
         commands.spawn((
             Scenario,
             Flag { top, bottom, phase: e.index().index() as f32, clock: 0.0, wind: 0.0 },
+            Unsnapped,
             Mesh3d(meshes.add(m)),
             MeshMaterial3d(mat),
             Transform::default(),
@@ -76,6 +85,82 @@ fn spawn(
             ChildOf(e),
         ));
     }
+}
+
+/// Once the ship's meshes are loaded, moves the flag onto the nearest staff (`onto_staff`). Damage layers are left
+/// out (their staff may be broken).
+fn snap(
+    mut commands: Commands,
+    meshes: Res<Assets<Mesh>>,
+    children: Query<&Children>,
+    parts: Query<(&Mesh3d, &GlobalTransform, &ChildOf)>,
+    names: Query<&Name>,
+    frames: Query<&GlobalTransform>,
+    mut flags: Query<(Entity, &mut Flag, &ChildOf), With<Unsnapped>>,
+) {
+    'flags: for (e, mut f, parent) in &mut flags {
+        let ship = parent.parent();
+        let Ok(frame) = frames.get(ship) else { continue };
+        let to_ship = frame.affine().inverse();
+        let mut pieces = vec![];
+        for d in children.iter_descendants(ship) {
+            let Ok((mesh, at, node)) = parts.get(d) else { continue };
+            if [d, node.parent()].iter().any(|n| names.get(*n).is_ok_and(|n| n.as_str().contains("Damage_"))) {
+                continue;
+            }
+            let Some(m) = meshes.get(&mesh.0) else { continue 'flags };
+            let Some(bevy::mesh::VertexAttributeValues::Float32x3(pos)) = m.attribute(Mesh::ATTRIBUTE_POSITION) else { continue };
+            let local = to_ship * at.affine();
+            let pos: Vec<[f32; 3]> = pos.iter().map(|p| local.transform_point3(Vec3::from(*p)).to_array()).collect();
+            let tris = match m.indices() {
+                Some(i) => i.iter().collect::<Vec<_>>().as_chunks::<3>().0.to_vec(),
+                None => (0..pos.len() / 3).map(|t| [3 * t, 3 * t + 1, 3 * t + 2]).collect(),
+            };
+            pieces.push((pos, tris));
+        }
+        if pieces.is_empty() {
+            continue; // the ship's scene has not spawned yet
+        }
+        if let Some((top, bottom)) = onto_staff(&pieces, f.top, f.bottom, SNAP) {
+            (f.top, f.bottom) = (top, bottom);
+        }
+        commands.entity(e).remove::<Unsnapped>();
+    }
+}
+
+/// The flag's top and bottom moved onto the nearest staff, keeping their heights: a connected piece of mesh (ship frame) no more
+/// than 0.4 thick about the line from its lowest to its highest point and at least 0.6 of the flag's height tall, whose line passes
+/// within `radius` of the flag's middle. None when there is none.
+fn onto_staff(pieces: &[(Vec<[f32; 3]>, Vec<[usize; 3]>)], top: Vec3, bottom: Vec3, radius: f32) -> Option<(Vec3, Vec3)> {
+    let mid = (top + bottom) / 2.0;
+    let tall = 0.6 * (top.y - bottom.y).abs();
+    let off_line = |p: Vec3, a: Vec3, dir: Vec3| (p - a).reject_from_normalized(dir).length();
+    let mut best: Option<(f32, Vec3, Vec3)> = None;
+    for (pos, tris) in pieces {
+        let piece = crate::render::sails::sail_of(pos, tris);
+        let mut groups: std::collections::HashMap<usize, Vec<Vec3>> = std::collections::HashMap::new();
+        for &i in tris.iter().flatten() {
+            groups.entry(piece[i]).or_default().push(Vec3::from(pos[i]));
+        }
+        for v in groups.values() {
+            let lo = v.iter().copied().min_by(|a, b| a.y.total_cmp(&b.y)).unwrap_or_default();
+            let hi = v.iter().copied().max_by(|a, b| a.y.total_cmp(&b.y)).unwrap_or_default();
+            if hi.y - lo.y < tall.max(1e-3) {
+                continue;
+            }
+            let dir = (hi - lo).normalize();
+            if v.iter().any(|&p| off_line(p, lo, dir) > 0.4) {
+                continue;
+            }
+            let d = off_line(mid, lo, dir);
+            if d <= radius && best.is_none_or(|b| d < b.0) {
+                best = Some((d, lo, hi - lo));
+            }
+        }
+    }
+    let (_, lo, axis) = best?;
+    let at = |y: f32| lo + axis * ((y - lo.y) / axis.y);
+    Some((at(top.y), at(bottom.y)))
 }
 
 /// Unlit, double-sided cloth. The retail flag art cuts its outline with alpha (the pirate flag's tattered edge), so transparent
@@ -188,6 +273,18 @@ fn retexture(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_flag_that_misses_its_staff_is_hung_on_the_nearest_one() {
+        // a staff: a thin quad from (0, 0, 2) up to (0, 4, 2.4), leaning aft; a wide deck slab nearer the flag must not count
+        let staff: Vec<[f32; 3]> = [[-0.1, 0.0, 2.0], [0.1, 0.0, 2.0], [-0.1, 4.0, 2.4], [0.1, 4.0, 2.4]].to_vec();
+        let deck: Vec<[f32; 3]> = [[-3.0, 0.5, 0.0], [3.0, 0.5, 0.0], [-3.0, 3.5, 0.2], [3.0, 3.5, 0.2]].to_vec();
+        let quad = vec![[0, 1, 2], [1, 3, 2]];
+        let pieces = vec![(staff, quad.clone()), (deck, quad)];
+        let (top, bottom) = onto_staff(&pieces, Vec3::new(0.0, 3.0, 0.0), Vec3::new(0.0, 1.0, 0.0), 3.0).unwrap();
+        assert!(top.distance(Vec3::new(0.0, 3.0, 2.3)) < 0.11 && bottom.distance(Vec3::new(0.0, 1.0, 2.1)) < 0.11, "{top} {bottom}");
+        assert!(onto_staff(&pieces, Vec3::new(0.0, 3.0, 0.0), Vec3::new(0.0, 1.0, 0.0), 1.0).is_none(), "out of reach: retail points kept");
+    }
 
     #[test]
     fn flag_cloth_masks_the_transparent_parts_of_the_art() {
