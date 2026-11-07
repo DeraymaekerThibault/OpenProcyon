@@ -2,7 +2,8 @@
 //! `sails.match` get a material of their own: the retail StandardMaterial (made solid with `opaque`) extended by the shader
 //! `shaders/sail.wesl`, which the mod ships. The engine feeds it the profile's numbers, the sun, the sail's UV
 //! stretch and its ship's speed (see `SailGlowUniform` for the contract); with `billow` the mesh is cut finer and bellies
-//! out between its edges, more with speed.
+//! out between its edges, more with speed; with `furl` each sail folds up to its top edge (the yard) while its ship is
+//! ordered to All Stop, as the film's solar sails fold away.
 
 use bevy::asset::RenderAssetUsages;
 use bevy::gltf::GltfMaterialName;
@@ -44,6 +45,8 @@ pub struct Sails {
     pub billow: f32,
     /// Solid cloth instead of retail's see-through sails (they then also cast shadows).
     pub opaque: bool,
+    /// Share of a sail's height folded away while its ship is ordered to stop; 0 = never, as in classic.
+    pub furl: f32,
 }
 
 impl Sails {
@@ -74,6 +77,7 @@ pub fn parse(s: &Value) -> Option<Sails> {
         transmission: num(&s["transmission"], 0.0),
         billow: num(&s["billow"], 0.0),
         opaque: s["opaque"].as_bool().unwrap_or(false),
+        furl: num(&s["furl"], 0.0).clamp(0.0, 1.0),
     })
 }
 
@@ -122,15 +126,19 @@ struct Sail {
     wind: f32,
     clock: f32,
     phase: f32,
+    /// 0 = set, 1 = furled (eased in `billow`).
+    furl: f32,
 }
 
-/// A sail cut into a finer mesh of its own, with the rest shape it bellies out from.
+/// A sail cut into a finer mesh of its own, with the rest shape it bellies out from and folds up from.
 #[derive(Component)]
 struct Billow {
     rest: Vec<Vec3>,
     normal: Vec<Vec3>,
     /// 0 at the sail's edges (held by yards and lines), 1 in its middle.
     pin: Vec<f32>,
+    /// Height (mesh up, +Y) of the top edge of the sail each vertex belongs to; one mesh holds several sails.
+    top: Vec<f32>,
     size: f32,
 }
 
@@ -141,7 +149,7 @@ pub(super) fn sails(
     look: Res<Look>,
     new: Query<(Entity, &GltfMaterialName, &MeshMaterial3d<StandardMaterial>, &Mesh3d), (Added<MeshMaterial3d<StandardMaterial>>, Without<Restyled<SailMaterial>>)>,
     parents: Query<&ChildOf>,
-    ships: Query<(), With<crate::Ship>>,
+    ships: Query<&crate::Ship>,
     standard: Res<Assets<StandardMaterial>>,
     mut sail_mats: ResMut<Assets<SailMaterial>>,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -174,13 +182,15 @@ pub(super) fn sails(
             },
         });
         let ship = parents.iter_ancestors(e).find(|a| ships.contains(*a));
+        // a ship that starts stopped starts with its sails folded
+        let furl = ship.and_then(|e| ships.get(e).ok()).map_or(0.0, |sh| f32::from(u8::from(sh.ordered() == 0.0)));
         let mut entity = commands.entity(e);
         let restyled = Restyled { original: mat.0.clone(), styled: handle.clone(), ship };
-        entity.try_remove::<MeshMaterial3d<StandardMaterial>>().try_insert((MeshMaterial3d(handle), Sail { ship, wind: 0.0, clock: 0.0, phase }, restyled));
+        entity.try_remove::<MeshMaterial3d<StandardMaterial>>().try_insert((MeshMaterial3d(handle), Sail { ship, wind: 0.0, clock: 0.0, phase, furl }, restyled));
         if !s.opaque {
             entity.try_insert(NotShadowCaster);
         }
-        if s.billow > 0.0
+        if (s.billow > 0.0 || s.furl > 0.0)
             && let Some((fine, billow)) = meshes.get(&mesh.0).and_then(subdivide)
         {
             entity.try_insert((Mesh3d(meshes.add(fine)), billow));
@@ -234,7 +244,12 @@ fn subdivide(mesh: &Mesh) -> Option<(Mesh, Billow)> {
     let size = (hi - lo).length().max(1e-3);
     let (ulo, uhi) = used.iter().fold((Vec2::MAX, Vec2::MIN), |(lo, hi), &i| (lo.min(Vec2::from(uv[i])), hi.max(Vec2::from(uv[i]))));
     let uspan = (uhi - ulo).max(Vec2::splat(1e-3));
-    let (mut out_p, mut out_n, mut out_uv, mut pin, mut idx) = (vec![], vec![], vec![], vec![], vec![]);
+    let sail = sail_of(pos, &tris);
+    let mut top = vec![f32::MIN; pos.len()];
+    for &i in &used {
+        top[sail[i]] = top[sail[i]].max(p(i).y);
+    }
+    let (mut out_p, mut out_n, mut out_uv, mut pin, mut idx, mut out_top) = (vec![], vec![], vec![], vec![], vec![], vec![]);
     for [a, b, c] in tris {
         let edge = p(a).distance(p(b)).max(p(b).distance(p(c))).max(p(c).distance(p(a)));
         let n = ((edge / (size / 14.0)).ceil() as usize).clamp(1, 12);
@@ -251,6 +266,7 @@ fn subdivide(mesh: &Mesh) -> Option<(Mesh, Billow)> {
                 out_uv.push(t.to_array());
                 let s = (t - ulo) / uspan;
                 pin.push((16.0 * s.x * (1.0 - s.x) * s.y * (1.0 - s.y)).clamp(0.0, 1.0).sqrt());
+                out_top.push(top[sail[a]]);
             }
         }
         for i in 0..n {
@@ -267,7 +283,39 @@ fn subdivide(mesh: &Mesh) -> Option<(Mesh, Billow)> {
     fine.insert_attribute(Mesh::ATTRIBUTE_NORMAL, out_n.iter().map(|v| v.to_array()).collect::<Vec<_>>());
     fine.insert_attribute(Mesh::ATTRIBUTE_UV_0, out_uv);
     fine.insert_indices(Indices::U32(idx));
-    Some((fine, Billow { rest: out_p, normal: out_n, pin, size }))
+    Some((fine, Billow { rest: out_p, normal: out_n, pin, top: out_top, size }))
+}
+
+/// Which sail each vertex belongs to (a representative vertex index): triangles joined by shared or coincident corners.
+fn sail_of(pos: &[[f32; 3]], tris: &[[usize; 3]]) -> Vec<usize> {
+    let mut parent: Vec<usize> = (0..pos.len()).collect();
+    fn root(parent: &mut [usize], mut i: usize) -> usize {
+        while parent[i] != i {
+            parent[i] = parent[parent[i]];
+            i = parent[i];
+        }
+        i
+    }
+    fn join(parent: &mut [usize], a: usize, b: usize) {
+        let (ra, rb) = (root(parent, a), root(parent, b));
+        parent[ra] = rb;
+    }
+    let mut seen = std::collections::HashMap::new();
+    for (i, v) in pos.iter().enumerate() {
+        let key = v.map(|c| (c * 1000.0).round() as i64);
+        let first = *seen.entry(key).or_insert(i);
+        join(&mut parent, i, first);
+    }
+    for &[a, b, c] in tris {
+        join(&mut parent, a, b);
+        join(&mut parent, b, c);
+    }
+    (0..pos.len()).map(|i| root(&mut parent, i)).collect()
+}
+
+/// A sail point folded up toward its sail's top edge: `amount` 0 leaves it, 1 lifts it onto the top.
+fn furled(p: Vec3, top: f32, amount: f32) -> Vec3 {
+    Vec3::new(p.x, top - (top - p.y) * (1.0 - amount), p.z)
 }
 
 /// How far (a share of the sail size) a sail point bellies out at the sail's clock: a slow breath plus ripples running
@@ -295,6 +343,9 @@ fn sail_motion(
         let share = sail.ship.and_then(|e| ships.get(e).ok()).map_or(0.0, |sh| (sh.speed.abs() / crate::ship::full_speed(&lib.classes[sh.class]).max(1e-3)).clamp(0.0, 1.0));
         sail.wind += (share - sail.wind) * (dt * 1.2).min(1.0);
         sail.clock += dt * s.speed * (0.35 + 0.65 * sail.wind);
+        // PROVISIONAL: the crew folds the sails on the All Stop order (not when the ship has coasted to a stop), in 1.5 s.
+        let stopped = sail.ship.and_then(|e| ships.get(e).ok()).is_some_and(|sh| sh.ordered() == 0.0);
+        sail.furl = (sail.furl + if stopped { dt / 1.5 } else { -dt / 1.5 }).clamp(0.0, 1.0);
         if let Some(mut m) = materials.get_mut(&mat.0) {
             m.extension.u.motion = Vec4::new(sail.wind, sail.phase, sail.clock, 0.0);
             m.extension.u.sun = sun.extend(s.backlit);
@@ -306,9 +357,14 @@ fn billow(look: Res<Look>, sails: Query<(&Billow, &Sail, &Mesh3d)>, mut meshes: 
     let Some(s) = &look.sails else { return };
     for (b, sail, mesh) in &sails {
         let Some(mut m) = meshes.get_mut(&mesh.0) else { continue };
-        let amp = s.billow * b.size;
-        let pos: Vec<[f32; 3]> =
-            (0..b.rest.len()).map(|i| (b.rest[i] + b.normal[i] * amp * b.pin[i] * belly(b.rest[i], b.size, sail.phase, sail.clock, sail.wind)).to_array()).collect();
+        let f = sail.furl * sail.furl * (3.0 - 2.0 * sail.furl); // smoothstep
+        let amp = s.billow * b.size * (1.0 - f);
+        let pos: Vec<[f32; 3]> = (0..b.rest.len())
+            .map(|i| {
+                let p = b.rest[i] + b.normal[i] * amp * b.pin[i] * belly(b.rest[i], b.size, sail.phase, sail.clock, sail.wind);
+                furled(p, b.top[i], s.furl * f).to_array()
+            })
+            .collect();
         m.insert_attribute(Mesh::ATTRIBUTE_POSITION, pos);
         m.compute_smooth_normals();
     }
@@ -353,6 +409,25 @@ mod tests {
         assert!(b.pin.iter().any(|&x| x > 0.9), "the middle bellies out");
         assert!((0.0..=1.1).contains(&belly(Vec3::ZERO, 14.0, 0.3, 2.0, 1.0)));
         assert!(belly(Vec3::ZERO, 14.0, 0.3, 2.0, 0.0) < belly(Vec3::ZERO, 14.0, 0.3, 2.0, 1.0), "slack without wind");
+    }
+
+    #[test]
+    fn each_sail_of_a_mesh_folds_up_to_its_own_top() {
+        // two sails in one mesh, one above the other: 0..10 and 20..25 high
+        let mut two = quad(10.0, 10.0);
+        let upper = [[0.0, 20.0, 0.0], [10.0, 20.0, 0.0], [10.0, 25.0, 0.0], [0.0, 25.0, 0.0]];
+        let Some(VertexAttributeValues::Float32x3(p)) = two.attribute(Mesh::ATTRIBUTE_POSITION).cloned() else { panic!() };
+        two.insert_attribute(Mesh::ATTRIBUTE_POSITION, [p, upper.to_vec()].concat());
+        two.insert_attribute(Mesh::ATTRIBUTE_NORMAL, vec![[0.0, 0.0, 1.0]; 8]);
+        two.insert_attribute(Mesh::ATTRIBUTE_UV_0, [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]].repeat(2));
+        two.insert_indices(Indices::U32(vec![0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7]));
+        let (_, b) = subdivide(&two).unwrap();
+        for (p, top) in b.rest.iter().zip(&b.top) {
+            assert_eq!(*top, if p.y >= 20.0 { 25.0 } else { 10.0 }, "{p}");
+            let f = furled(*p, *top, 0.9);
+            assert!((top - f.y - 0.1 * (top - p.y)).abs() < 1e-4 && f.x == p.x && f.z == p.z, "{p} -> {f}");
+        }
+        assert_eq!(parse(&serde_json::json!({})).unwrap().furl, 0.0, "classic unless asked");
     }
 
     #[test]
