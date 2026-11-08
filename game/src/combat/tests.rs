@@ -102,6 +102,10 @@ fn island_gun_towers_load_and_mission_damage_follows_their_vital_sections() {
     let point = base_aim_point(class, &hp, Some(class.mounts[0].pos)).unwrap();
     let ray = Ray3d::new(point + Vec3::Y * 20.0, Dir3::NEG_Y);
     assert!(base_ray_hit(class, &hp, &Transform::default(), ray).is_some());
+    // The world-space aim point follows the base's placement (the dev autopilot steers at it).
+    let tf = Transform::from_xyz(500.0, 0.0, -300.0).with_rotation(Quat::from_rotation_y(1.0));
+    let world = crate::combat::live_tower_point(class, &hp, &tf, tf.transform_point(class.mounts[0].pos)).unwrap();
+    assert!(world.distance(tf.transform_point(point)) < 1e-3);
     for (s, c) in hp.sections.iter_mut().zip(&class.sections) {
         if c.mission {
             *s = 0.0;
@@ -109,6 +113,7 @@ fn island_gun_towers_load_and_mission_damage_follows_their_vital_sections() {
     }
     assert_eq!(base_mission_damage(class, &hp), 1.0);
     assert!(base_aim_point(class, &hp, Some(point)).is_none());
+    assert!(crate::combat::live_tower_point(class, &hp, &Transform::default(), point).is_none(), "no live tower left to steer at");
     assert!(base_ray_hit(class, &hp, &Transform::default(), ray).is_none(), "destroyed towers are no longer attack targets");
 }
 
