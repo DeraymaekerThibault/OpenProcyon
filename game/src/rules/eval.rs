@@ -2,6 +2,7 @@ use bevy::prelude::*;
 use serde_json::Value;
 use std::collections::{HashMap, HashSet, VecDeque};
 
+use crate::Nearest;
 use crate::campaign::Mission;
 use crate::game_to_bevy;
 
@@ -176,6 +177,9 @@ pub struct Script {
     /// Rules that fired at least once, repeating ones included (the autoplay report lists the others).
     pub(super) ran: Vec<bool>,
     pub(super) init_done: bool,
+    /// The mission's opening NIS rules are played by briefing.rs instead (mission 1 only), so the interpreter skips them. Other
+    /// missions (7, 8) have rules named "Opening NIS ..." of their own, which must run: mission 8's end its opening cutscene.
+    pub briefing_opening: bool,
     pub time: f32,
     pub(super) flags: HashMap<String, bool>,
     pub(super) timers: HashMap<String, f32>,
@@ -331,6 +335,20 @@ pub(super) fn alias_player(v: Value, player: &str) -> Value {
 /// A mission volume: a closed polygon in game axes (x, y), read once from the exported `[[x, y], ...]` list.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Region(pub Vec<Vec2>);
+/// Something an unfired rule waits for the player to do (`Script::wants`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Want {
+    /// Sail into a trigger volume (its centroid, Bevy space).
+    Reach(Vec3),
+    /// Shoot this unit.
+    Hit(Entity),
+    /// Land a mortar shell in a volume (its centroid, Bevy space): mission 9's Dark Matter.
+    Lob(Vec3),
+    /// Take this ship in tow (mission 11's SS Harvester).
+    Tow(Entity),
+    /// Get the ship the player tows out of a volume (its centroid, Bevy space): mission 11's black hole.
+    Leave(Vec3),
+}
 /// What an unknown volume name reads as: contains nothing.
 static NO_VOLUME: Region = Region(Vec::new());
 impl Region {
@@ -353,6 +371,27 @@ impl Region {
     /// Mean of the vertices (game axes); None for an empty polygon.
     pub fn centroid(&self) -> Option<Vec2> {
         (!self.0.is_empty()).then(|| self.0.iter().sum::<Vec2>() / self.0.len() as f32)
+    }
+    /// The point of the polygon nearest `from` (itself when inside), moved 15 units in toward the centroid so it lies inside.
+    pub fn near_inside(&self, from: Vec2) -> Option<Vec2> {
+        let c = self.centroid()?;
+        if self.contains(from) {
+            return Some(from);
+        }
+        let edge = |i: usize| {
+            let (a, b) = (self.0[i], self.0[(i + 1) % self.0.len()]);
+            let t = ((from - a).dot(b - a) / (b - a).length_squared().max(1e-6)).clamp(0.0, 1.0);
+            a + (b - a) * t
+        };
+        let near = (0..self.0.len()).map(edge).min_by(|x, y| x.distance_squared(from).total_cmp(&y.distance_squared(from)))?;
+        Some(near + (c - near).normalize_or_zero() * 15.0_f32.min(near.distance(c)))
+    }
+    /// Points inside the polygon on an `n` x `n` grid over its bounding box (cell centres).
+    pub fn grid(&self, n: usize) -> Vec<Vec2> {
+        let Some(lo) = self.0.iter().copied().reduce(Vec2::min) else { return vec![] };
+        let hi = self.0.iter().copied().fold(lo, Vec2::max);
+        let step = (hi - lo) / n as f32;
+        (0..n * n).map(|k| lo + step * Vec2::new((k % n) as f32 + 0.5, (k / n) as f32 + 0.5)).filter(|q| self.contains(*q)).collect()
     }
     pub fn len(&self) -> usize {
         self.0.len()
@@ -424,6 +463,7 @@ impl Script {
             fired: vec![false; n],
             ran: vec![false; n],
             init_done: false,
+            briefing_opening: false,
             time: 0.0,
             flags: HashMap::new(),
             timers: HashMap::new(),
@@ -699,7 +739,127 @@ impl Script {
     }
     /// Names of the rules that have not fired yet, in script order. The opening NIS rules are left out: briefing.rs plays them.
     pub fn never_fired(&self) -> Vec<&str> {
-        self.rules.iter().zip(&self.ran).filter(|(r, ran)| !**ran && !opening_rule(&r.name)).map(|(r, _)| r.name.trim()).collect()
+        self.rules.iter().zip(&self.ran).filter(|(r, ran)| !**ran && !(self.briefing_opening && opening_rule(&r.name))).map(|(r, _)| r.name.trim()).collect()
+    }
+    /// What a rule that has not fired yet waits for the player's ship to dock with ("Group/Unit Docked" with the player among the dockers),
+    /// minus the pairs already docked: the dev autopilot's dock targets (missions 5, 7, 8 dock with bases their tasks only name loosely).
+    pub fn dock_targets(&self, w: &[Unit]) -> Vec<Entity> {
+        let Some(p) = w.iter().find(|u| u.primary && u.alive) else { return vec![] };
+        let mut out = vec![];
+        for (r, _) in self.rules.iter().zip(&self.fired).filter(|(_, fired)| !**fired) {
+            // A dock behind an unmet flag/timer/speech gate is not wanted yet (mission 5's Elzrand waits for the warning shot; docking
+            // there early just docks and undocks forever).
+            if r.conds.iter().any(|c| self.gate(c) == Some(false)) {
+                continue;
+            }
+            for c in r.conds.iter().filter(|c| matches!(s(c, "Type"), "Group/Unit Docked" | "Group/Unit Is Docked")) {
+                if !members(w, s(c, "Dockers Group/Unit Name")).iter().any(|u| u.e == p.e) {
+                    continue;
+                }
+                for t in members(w, s(c, "Targets Group/Unit Name")) {
+                    if t.e != p.e && !self.docked.contains(&(p.e, t.e)) && !out.contains(&t.e) {
+                        out.push(t.e);
+                    }
+                }
+            }
+        }
+        out
+    }
+    /// What the unfired rules wait for the player to do, for the dev autopilot (`--script mission`) when the objective point does not
+    /// say (mission 4's "Search the Area Marked Red", mission 5's warning shot). A rule counts once its flag, timer and speech gates
+    /// hold (other conditions are not checked); rules that only warn or fail the player are left out. PROVISIONAL heuristic.
+    pub fn wants(&self, w: &[Unit]) -> Vec<Want> {
+        let Some(p) = w.iter().find(|u| u.primary && u.alive) else { return vec![] };
+        let mut out = vec![];
+        for (r, _) in self.rules.iter().zip(&self.fired).filter(|(_, fired)| !**fired) {
+            if (self.briefing_opening && opening_rule(&r.name)) || !self.worth_wanting(r) {
+                continue;
+            }
+            if r.conds.iter().any(|c| self.gate(c) == Some(false)) {
+                continue;
+            }
+            let player_in = |spec: &str| members(w, spec).iter().any(|u| u.e == p.e);
+            for c in &r.conds {
+                match s(c, "Type") {
+                    "Enter Volume" | "Is Group In Volume" if player_in(s(c, "Group Name")) => {
+                        let vol = self.volume(s(c, "Volume Name"));
+                        if let Some(m) = vol.centroid().filter(|_| !in_volume(vol, p.pos)) {
+                            out.push(Want::Reach(Vec3::new(m.x, 0.0, -m.y)));
+                        }
+                    }
+                    // Mission 4's stuck sloop and mission 6's PirateBigBrother are spotted by closing in.
+                    "Group to Group Distance" if s(c, "Equivalence") == "Less Than" && player_in(s(c, "GroupA Name")) => {
+                        if let Some(u) = members(w, s(c, "GroupB Name")).into_iter().filter(|u| u.alive && u.visible && u.e != p.e).nearest_to(p.pos, |u| u.pos)
+                            && u.pos.distance(p.pos) >= f(c, "Distance")
+                        {
+                            out.push(Want::Reach(u.pos));
+                        }
+                    }
+                    // Mission 5's warning shot: firing on the blockading fishing boats.
+                    "Is Group A attacking Group B" if player_in(s(c, "GroupA Name")) => {
+                        out.extend(members(w, s(c, "GroupB Name")).iter().filter(|u| u.alive && u.visible && u.owner != p.owner).map(|u| Want::Hit(u.e)));
+                    }
+                    "Is Ship In Tow" if b(c, "Boolean") && player_in(s(c, "Towing Group")) => {
+                        let towed = |e: Entity| self.tows.iter().any(|t| t.0 == p.e && t.1 == e);
+                        out.extend(members(w, s(c, "Target to Tow")).iter().filter(|u| u.alive && u.e != p.e && !towed(u.e)).map(|u| Want::Tow(u.e)));
+                    }
+                    "Exit Volume" => {
+                        let vol = self.volume(s(c, "Volume Name"));
+                        // Only a ship the player tows: the player's own ship starts inside big area volumes (mission 2), and
+                        // running from their centre took the bot off its objective.
+                        let mine = |u: &Unit| self.tows.iter().any(|t| t.0 == p.e && t.1 == u.e);
+                        if members(w, s(c, "Group Name")).iter().any(|u| mine(u) && u.alive && in_volume(vol, u.pos))
+                            && let Some(m) = vol.centroid()
+                        {
+                            out.push(Want::Leave(Vec3::new(m.x, 0.0, -m.y)));
+                        }
+                    }
+                    // The part of the volume nearest the player: mission 9's StarHammer cannot move, and the Dark Matter's centre lies
+                    // beyond the Star Mortar's 350 reach.
+                    "Mission 9 - If Mortar explodes within Area" => {
+                        // The nearest point first, then a grid across the volume: the wreck's one Nova Mortar covers only 15
+                        // degrees dead ahead, so the bot takes the first point a mount can reach.
+                        let vol = self.volume(s(c, "Volume Name"));
+                        let at = |m: Vec2| Want::Lob(Vec3::new(m.x, 0.0, -m.y));
+                        out.extend(vol.near_inside(Vec2::new(p.pos.x, -p.pos.z)).map(at));
+                        out.extend(vol.grid(8).into_iter().map(at));
+                    }
+                    "Player has hit Group/Unit at least x Times" | "Group/Unit Hit at least x Times by Player ( with eqivalence )" if base(s(c, "Player Name")) == p.owner => {
+                        out.extend(members(w, s(c, "Group/Unit Name")).iter().filter(|u| u.alive && u.visible && u.owner != p.owner).map(|u| Want::Hit(u.e)));
+                    }
+                    "Group Destroyed" | "Group/Unit Vital Section has >,<,= X damage" | "Group/Unit has >,<,= X damage" => {
+                        let spec = if s(c, "Type") == "Group Destroyed" { s(c, "Group Name") } else { s(c, "Group/Unit Name") };
+                        out.extend(members(w, spec).iter().filter(|u| u.alive && u.visible && self.hostile(&u.owner, &p.owner)).map(|u| Want::Hit(u.e)));
+                    }
+                    _ => {}
+                }
+            }
+        }
+        out
+    }
+    /// A condition the rules decide without the world: Some(holds) for flag, timer and speech gates, None for the rest.
+    fn gate(&self, c: &Value) -> Option<bool> {
+        Some(match s(c, "Type") {
+            "World Initialize" => false,
+            "Flag Condition" => self.flags.get(s(c, "Flag Name")).copied().unwrap_or(false) == b(c, "Boolean Value"),
+            "Timer Condition" => self.timer(s(c, "Timer Name")).is_some_and(|v| cmp(s(c, "Equivalence"), v, f(c, "Time in seconds"))),
+            "Speech Event Played Once" => self.played.contains(s(c, "Speech Event Name")),
+            "Speech Event Not Played Yet" => !self.played.contains(s(c, "Speech Event Name")),
+            _ => return None,
+        })
+    }
+    /// A rule that moves the story on: it changes state (flags, objectives, paths, timers, the level) and neither ends the game nor
+    /// only warns ("Player Goes Wrong Way", "Out Of Bounds", "FAIL Mission").
+    fn worth_wanting(&self, r: &Rule) -> bool {
+        let name = r.name.to_ascii_lowercase();
+        let bad = ["fail", "wrong", "bounds", "dead", "punish", "too long", "ignores", "death", "lose", "lost"];
+        if bad.iter().any(|x| name.contains(x)) || r.acts.iter().any(|a| s(a, "Type") == "End Game") {
+            return false;
+        }
+        r.acts.iter().any(|a| {
+            let t = s(a, "Type");
+            !(t.starts_with("Play ") || t.starts_with("NIS") || t.starts_with("Focus Camera") || t.contains("Music") || t.contains("Victory Points"))
+        })
     }
     pub fn tasks_text(&self) -> String {
         self.tasks
@@ -1227,7 +1387,7 @@ impl Script {
         let rules = std::mem::take(&mut self.rules);
         for (i, r) in rules.iter().enumerate() {
             // The opening NIS camera/speech rules are replaced by briefing.rs (which marks its speech as played).
-            if self.fired[i] || opening_rule(&r.name) {
+            if self.fired[i] || (self.briefing_opening && opening_rule(&r.name)) {
                 continue;
             }
             let mut ok = true;

@@ -136,8 +136,11 @@ pub(super) fn render_fx(
             continue;
         }
         let entry = groups.0.entry(key).or_insert_with(|| {
+            // Filled before the entity exists and spawned hidden: an empty mesh (no position attribute) must never be drawn, it
+            // fails pipeline validation and Bevy quits (seen when a new effect texture first appeared, a ship's death).
             let mesh = meshes.add(Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default()));
-            let mut entity = commands.spawn((Mesh3d(mesh.clone()), Transform::default(), NoFrustumCulling, Visibility::default(), ParticleGroup { additive: key.1 == Blend::Add }));
+            let shown = batch.upload(&mut meshes, &mesh);
+            let mut entity = commands.spawn((Mesh3d(mesh.clone()), Transform::default(), NoFrustumCulling, shown, ParticleGroup { additive: key.1 == Blend::Add }));
             // Every ONE/ONE texture, flares included: several (flare, cannon-ball pseudo) have an all-zero alpha channel, which
             // Bevy's premultiplying AlphaMode::Add turned black, hiding dock lights, repair sparkles and the SOS beacon (PT-11).
             if key.1 == Blend::Add {

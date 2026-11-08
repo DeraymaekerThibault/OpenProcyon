@@ -309,9 +309,10 @@ pub fn load_id(id: &str) -> Mission {
     };
     let data: Value = serde_json::from_str(&read("mission")).expect("invalid mission JSON");
     let media: Value = serde_json::from_str(&read("media")).expect("invalid media JSON");
-    let script = rules::Script::new(&data, media);
+    let mut script = rules::Script::new(&data, media);
     // The scripted opening NIS (briefing.rs) only exists for mission 1; later missions start at once and run their own NIS rules.
-    Mission { id: id.into(), data, opening: (id == "mission01").then(default), script }
+    script.briefing_opening = id == "mission01";
+    Mission { id: id.into(), data, opening: script.briefing_opening.then(default), script }
 }
 
 /// `bases`: the map's scenery entities with their exported object records (id, type); those that a rule sets up become `MissionBase`s.
@@ -343,6 +344,12 @@ pub fn spawn(commands: &mut Commands, assets: &AssetServer, lib: &Library, fxl: 
             continue;
         }
         let Some((_, owner, combat, gunnery)) = islands.iter().find(|(i, ..)| Some(*i) == o["id"].as_i64()) else {
+            // A dockable base no rule sets up (mission 5's Grant, 7's Regina, 8's Mining Camp) is still a rules unit: the rules address it by
+            // its TWT group for docking, owner and dockable changes. Without this a dock with it never satisfied 'Group/Unit Docked'.
+            if o["type"].as_str().is_some_and(|t| t.starts_with("Base_")) {
+                commands.entity(*e).insert(MissionBase { id: o["id"].as_i64().unwrap_or(-1), owner: String::new() });
+                continue;
+            }
             // Most volcanoes have no setup rule; they still fire (docs/re/volcanoes.md).
             if let Some(class) = o["type"].as_str().filter(|t| t.starts_with("Island_Volcano")).and_then(|t| lib.classes.iter().position(|c| c.name == t)) {
                 commands.entity(*e).insert(MissionBase { id: o["id"].as_i64().unwrap_or(-1), owner: String::new() });
@@ -445,6 +452,37 @@ pub fn objective_point(m: &Mission) -> Option<Vec3> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Mission 5's Waystation Grant has no 'Setup Island' rule. It must still be a rules unit, or docking there never satisfies the
+    /// opening 'Group/Unit Docked' condition and the mission cannot advance (found by autoplay, #68).
+    #[test]
+    #[ignore = "needs imported assets"]
+    fn a_base_without_a_setup_rule_is_a_dock_target_of_the_rules() {
+        use bevy::ecs::system::RunSystemOnce;
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, bevy::asset::AssetPlugin::default()))
+            .init_asset::<bevy::world_serialization::WorldAsset>()
+            .init_asset::<Mesh>()
+            .init_asset::<Image>()
+            .init_asset::<StandardMaterial>();
+        app.insert_resource(Library::load(assets_dir())).init_resource::<crate::fx::FxLib>().init_resource::<crate::ship::Fleets>();
+        let map: Value = serde_json::from_slice(&std::fs::read(assets_dir().join("maps/mission05/map.json")).unwrap()).unwrap();
+        let objects: Vec<Value> = map["objects"].as_array().unwrap().iter().filter(|o| o["type"] == "Base_Grant").cloned().collect();
+        let bases: Vec<(Entity, Value)> = objects.into_iter().map(|o| (app.world_mut().spawn(Transform::default()).id(), o)).collect();
+        let grant = bases.iter().find(|(_, o)| o["type"] == "Base_Grant").unwrap().0;
+        app.world_mut()
+            .run_system_once(move |mut commands: Commands, assets: Res<AssetServer>, lib: Res<Library>, fxl: Res<crate::fx::FxLib>| {
+                spawn(&mut commands, &assets, &lib, &fxl, "mission05", &bases)
+            })
+            .unwrap();
+        let base = app.world().get::<MissionBase>(grant).expect("Base_Grant is a MissionBase");
+        let mission = load_id("mission05");
+        let mut player = base.unit(Entity::PLACEHOLDER, &Transform::default(), 0.0);
+        (player.primary, player.owner, player.id) = (true, mission.script.player().to_string(), -2);
+        let mut w = vec![player, base.unit(grant, &Transform::default(), 0.0)];
+        mission.script.tag(&mut w);
+        assert!(mission.script.dock_targets(&w).contains(&grant), "the opening dock rule waits for Grant");
+    }
 
     #[test]
     fn victory_points_accumulate_across_missions_without_double_counting() {

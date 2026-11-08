@@ -1,7 +1,8 @@
 //! Not retail: point lights the render profile's `lights` list puts on effects by file name (part of render/mod.rs's look).
 //! A flash fades out quadratically over `seconds`; a steady light (`seconds` 0) lives as long as its effect and may flicker.
 //! Effect lights are not occluded (no shadow maps unless `shadows`), so a point light on a gun lights the deck behind it and the
-//! hull around it. `cone` makes a light a spot light facing along the shot (the shot's direction the effect message carries) and `offset` moves it that far ahead of the effect, off the barrel and its hull.
+//! hull around it. A light on a ship's engine exhaust follows the engine's thrust, so a ship at All Stop sheds no engine light.
+//! `cone` makes a light a spot light facing along the shot (the shot's direction the effect message carries) and `offset` moves it that far ahead of the effect, off the barrel and its hull.
 
 use bevy::prelude::*;
 use serde_json::Value;
@@ -67,6 +68,8 @@ pub struct EffectGlow {
     pub seconds: f32,
     pub age: f32,
     pub flicker: f32,
+    /// On an engine exhaust: the smoothed thrust (0..1) the light is scaled by; None until it is known, and on other effects.
+    pub thrust: Option<f32>,
 }
 
 fn effect_lights(
@@ -84,7 +87,7 @@ fn effect_lights(
         let Some(l) = table.get(&m.effect) else { continue };
         // a flash starts at its peak; a steady light starts at a random point of its flicker, so fires do not pulse in step
         let age = if l.seconds > 0.0 { 0.0 } else { e.index().index() as f32 * 0.37 % 7.0 };
-        let glow = EffectGlow { peak: l.lumens, seconds: l.seconds, age, flicker: l.flicker };
+        let glow = EffectGlow { peak: l.lumens, seconds: l.seconds, age, flicker: l.flicker, thrust: None };
         let (mut at, mut spot) = (Transform::default(), None);
         if l.cone > 0.0 || l.offset != 0.0 {
             // the light is the effect's child: its place and facing are given in the effect's frame
@@ -130,12 +133,21 @@ fn glow_at(g: &EffectGlow) -> Option<f32> {
     };
     let t = g.age;
     let noise = 0.5 + 0.5 * ((13.0 * t).sin() * (7.3 * t + 1.1).sin() * 0.7 + (23.0 * t + 2.0).sin() * 0.3);
-    Some(g.peak * fade * (1.0 - g.flicker * noise))
+    Some(g.peak * fade * (1.0 - g.flicker * noise) * g.thrust.unwrap_or(1.0))
 }
 
-fn fade_lights(mut commands: Commands, time: Res<Time>, mut lights: Query<(Entity, &mut EffectGlow, Option<&mut PointLight>, Option<&mut SpotLight>)>) {
-    for (e, mut glow, point, spot) in &mut lights {
-        if glow.seconds <= 0.0 && glow.flicker <= 0.0 {
+fn fade_lights(
+    mut commands: Commands,
+    time: Res<Time>,
+    engines: Query<(&crate::combat::Engine, Option<&crate::fx::Fx>)>,
+    mut lights: Query<(Entity, &mut EffectGlow, Option<&ChildOf>, Option<&mut PointLight>, Option<&mut SpotLight>)>,
+) {
+    for (e, mut glow, parent, point, spot) in &mut lights {
+        // the plume's rule (render/trails.rs): an exhaust that is not emitting has no thrust; a new light starts at it, no fade-in
+        if let Some((engine, fx)) = parent.and_then(|p| engines.get(p.parent()).ok()) {
+            let target = if fx.is_none_or(|f| f.emitting) { engine.thrust() } else { 0.0 };
+            glow.thrust = Some(glow.thrust.map_or(target, |t| t + (target - t) * (time.delta_secs() * 2.5).min(1.0)));
+        } else if glow.seconds <= 0.0 && glow.flicker <= 0.0 {
             continue;
         }
         // a flash's age starts at 0; a steady light's offset only decorrelates its flicker
@@ -199,10 +211,10 @@ mod tests {
     fn effect_lights_fade_out_and_steady_ones_stay() {
         let mut world = World::new();
         world.insert_resource(Time::<()>::default());
-        let flash = world.spawn((EffectGlow { peak: 100.0, seconds: 1.0, age: 0.0, flicker: 0.0 }, PointLight::default())).id();
-        let cone = world.spawn((EffectGlow { peak: 100.0, seconds: 1.0, age: 0.0, flicker: 0.0 }, SpotLight::default())).id();
-        let steady = world.spawn((EffectGlow { peak: 100.0, seconds: 0.0, age: 0.0, flicker: 0.0 }, PointLight { intensity: 100.0, ..default() })).id();
-        let fire = world.spawn((EffectGlow { peak: 100.0, seconds: 0.0, age: 0.0, flicker: 0.5 }, PointLight { intensity: 100.0, ..default() })).id();
+        let flash = world.spawn((EffectGlow { peak: 100.0, seconds: 1.0, age: 0.0, flicker: 0.0, thrust: None }, PointLight::default())).id();
+        let cone = world.spawn((EffectGlow { peak: 100.0, seconds: 1.0, age: 0.0, flicker: 0.0, thrust: None }, SpotLight::default())).id();
+        let steady = world.spawn((EffectGlow { peak: 100.0, seconds: 0.0, age: 0.0, flicker: 0.0, thrust: None }, PointLight { intensity: 100.0, ..default() })).id();
+        let fire = world.spawn((EffectGlow { peak: 100.0, seconds: 0.0, age: 0.0, flicker: 0.5, thrust: None }, PointLight { intensity: 100.0, ..default() })).id();
         world.resource_mut::<Time>().advance_by(std::time::Duration::from_secs_f32(0.5));
         world.run_system_once(fade_lights).unwrap();
         assert!((world.get::<PointLight>(flash).unwrap().intensity - 25.0).abs() < 1e-3, "quadratic fade: half way is a quarter");
@@ -214,5 +226,17 @@ mod tests {
         assert!(world.get_entity(flash).is_err(), "gone once faded");
         assert_eq!(world.get::<PointLight>(steady).unwrap().intensity, 100.0);
         assert!(world.get_entity(fire).is_ok(), "a fire's light lasts as long as the fire");
+    }
+
+    #[test]
+    fn an_engine_light_follows_its_engine_thrust_and_is_dark_at_all_stop() {
+        let mut world = World::new();
+        world.insert_resource(Time::<()>::default());
+        let exhaust = world.spawn(crate::combat::Engine::default()).id(); // thrust 0: All Stop
+        let glow = EffectGlow { peak: 100.0, seconds: 0.0, age: 0.0, flicker: 0.0, thrust: None };
+        let light = world.spawn((glow, PointLight { intensity: 100.0, ..default() }, ChildOf(exhaust))).id();
+        world.resource_mut::<Time>().advance_by(std::time::Duration::from_secs_f32(0.1));
+        world.run_system_once(fade_lights).unwrap();
+        assert_eq!(world.get::<PointLight>(light).unwrap().intensity, 0.0, "a stopped ship's engine starts dark, no fade-in");
     }
 }

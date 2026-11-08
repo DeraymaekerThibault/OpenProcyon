@@ -382,8 +382,10 @@ fn talking_head(commands: &mut Commands, c: &Ctx, root: Entity) {
             commands.spawn((c.put(&art, 0.0, 0.0), ChildOf(head), solid()));
         }
         // PROVISIONAL placement, measured on the housing art: the light sits over its green lamp, the voice box in the name plate.
-        layer(commands, Head::Light, c.sprite("TalkingHead_Portal_Light_On"), Vec2::new(75.0, 2.0), true);
-        layer(commands, Head::Voice, c.sprite("TalkingHead_Portal_VoiceBox_Off"), Vec2::new(20.0, 103.0), false);
+        // The art differs per faction (the pirate housing is wider, its portal further right): the lamp stays on the housing's right
+        // edge and the name plate follows the portal.
+        layer(commands, Head::Light, c.sprite("TalkingHead_Portal_Light_On"), Vec2::new(housing.x - 52.0, 2.0), true);
+        layer(commands, Head::Voice, c.sprite("TalkingHead_Portal_VoiceBox_Off"), Vec2::new(13.0 + iris_at.x, 103.0), false);
     }
     // The ship-bar toggle's arm stands on the housing's top-right corner, like the weapon toggle on the compass.
     let detail = c.size_of("ShipBar_ToggleDetail");

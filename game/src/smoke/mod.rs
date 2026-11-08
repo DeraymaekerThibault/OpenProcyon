@@ -153,7 +153,7 @@ pub fn screenshot_hooks(mut commands: Commands, time: Res<Time>, mission: Res<Mi
 }
 
 /// Game seconds a single NIS may run, or the player's ship stay within `STUCK_RANGE` units of one spot, before autoplay calls it stuck.
-const STUCK_NIS: f32 = 300.0;
+const STUCK_NIS: f32 = 600.0; // mission 13's credits roll runs ~303 s
 const STUCK_RANGE: f32 = 50.0;
 
 /// PROCYON_AUTOPLAY=<game seconds> (with `--script mission`, see tools/autoplay.py): when the mission ends, an NIS runs past
@@ -188,6 +188,9 @@ pub fn autoplay_end(
         _ if sc.time > limit => "time limit",
         _ => return,
     };
+    // Where the run stood, for triage: the objective point and the active tasks.
+    let point = sc.point.and_then(|i| mission.data["points"][i]["Name"].as_str()).unwrap_or("none");
+    info!("autoplay state point={point:?} tasks={:?}", sc.tasks_text());
     info!("autoplay end outcome={outcome:?} time={:.0} never_fired={:?}", sc.time, sc.never_fired());
     std::process::exit(0);
 }

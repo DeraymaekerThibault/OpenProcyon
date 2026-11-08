@@ -58,6 +58,7 @@
     "backlit": 1.5,
     "transmission": 0.1,
     "billow": 0.035,
+    "furl": 0.9,
     "opaque": true,
     "line": 0.04,
     "fill": 0.15,

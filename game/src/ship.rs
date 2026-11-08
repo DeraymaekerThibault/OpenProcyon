@@ -63,6 +63,11 @@ impl Ship {
         self.goal = None;
         self.order = 0;
     }
+
+    /// The commanded share of Ahead Full: 0 at All Stop (or a throttle of 0), otherwise the throttle or the order's fraction.
+    pub fn ordered(&self) -> f32 {
+        if self.order == 0 { 0.0 } else { self.throttle.unwrap_or(ORDERS[self.order].1) }
+    }
 }
 
 #[derive(Component)]
@@ -318,7 +323,7 @@ pub fn helm_step(ship: &mut Ship, tf: &mut Transform, class: &combat::Class, hea
     {
         let ph = &class.phys;
         let drag = ph.thrust / ph.mass / ph.max_speed; // 1/s; retail settles with this rate for every order change
-        let fraction = if ship.order == 0 { 0.0 } else { ship.throttle.unwrap_or(ORDERS[ship.order].1) };
+        let fraction = ship.ordered();
         let target = fraction * max_speed(ship, class, health) * ship.avoid;
         let mut steer = 0.0;
         let mut boost = 1.0;

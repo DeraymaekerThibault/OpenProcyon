@@ -53,7 +53,7 @@ Springfield), https://history.siggraph.org/learning/creating-3d-painterly-enviro
 - The engine (`game/src/render/`) gets only the building blocks: profile settings, uniforms, docs, tests. The look lives in
   `mods/remaster`, and the classic presentation stays the default.
 - Nothing derived from game content is committed or shared: baked skies, or maps generated from retail textures. Those
-  are made on each player's machine (`python -m tools.bake_sky`, or the Mods screen's "Bake HD skies" button in the download; see "HD skies" in `modding.md`).
+  are made on each player's machine (`python -m tools.bake_sky`, or the Mods screen's "Bake HD skies" button in the download; `python -m tools.bake_surfaces` for surface maps; see "HD skies" and "Baked surfaces" in `modding.md`).
 
 ## Notes on `look.json`
 

@@ -844,9 +844,78 @@ fn never_fired_lists_rules_that_did_not_fire_once_repeating_ones_included() {
         {"name": "Opening NIS 1", "conditions": [timer], "actions": []},
     ], "ships": [], "volumes": null, "environment": {}});
     let mut sc = Script::new(&data, Value::Null);
+    sc.briefing_opening = true; // mission 1: briefing.rs plays the opening rules
     assert_eq!(sc.never_fired(), ["Every frame", "Waits"]);
     sc.step(&[], 0.1, false);
     assert_eq!(sc.never_fired(), ["Waits"]);
+}
+
+/// Only mission 1's opening rules are replaced by briefing.rs. Mission 8's "Opening NISb" (a World timer rule that plays the line ending
+/// its opening cutscene) is an ordinary rule: skipping it left the mission in that cutscene for good.
+#[test]
+fn opening_nis_rules_run_in_missions_without_the_scripted_briefing() {
+    let data = serde_json::json!({"rules": [
+        {"name": "Init", "conditions": [{"Type": "World Initialize"}], "actions": [{"Type": "Start Timer", "Timer Name": "World timer"}]},
+        {"name": "Opening NISb", "conditions": [{"Type": "Timer Condition", "Timer Name": "World timer", "Equivalence": "Greater Than", "Time in seconds": 1}],
+         "actions": [{"Type": "Set Flag Action", "Flag Name": "spoken", "Boolean Value": "TRUE"}]},
+    ], "ships": [], "volumes": null, "environment": {}});
+    for briefing in [false, true] {
+        let mut sc = Script::new(&data, Value::Null);
+        sc.briefing_opening = briefing;
+        for _ in 0..30 {
+            sc.step(&[], 0.1, false);
+        }
+        assert_eq!(sc.flags.get("spoken").copied().unwrap_or(false), !briefing, "briefing_opening={briefing}");
+    }
+}
+
+/// The dev autopilot's fallback: an unfired rule whose flag gate holds asks the player to enter its volume or shoot its group; a rule
+/// behind an unmet flag, a fail rule and a speech-only warning ask for nothing (#68: missions 4, 5 and 8 stalled without a point).
+#[test]
+fn wants_lists_what_open_rules_wait_for_the_player_to_do() {
+    let vol = serde_json::json!([[100.0, 100.0], [200.0, 100.0], [200.0, 200.0], [100.0, 200.0]]);
+    let enter = |name: &str, flag: bool, acts: Value| {
+        serde_json::json!({"name": name, "conditions": [
+            {"Type": "Flag Condition", "Flag Name": "go", "Boolean Value": if flag { "TRUE" } else { "FALSE" }},
+            {"Type": "Enter Volume", "Group Name": "Player0 Group,HUMAN CONTROLLED COMMAND SHIP", "Volume Name": "Search"}], "actions": acts})
+    };
+    let set = serde_json::json!([{"Type": "Set Flag Action", "Flag Name": "found", "Boolean Value": "TRUE"}]);
+    let data = serde_json::json!({"rules": [
+        enter("Found Ships", false, set.clone()),
+        enter("Locked", true, set.clone()),
+        enter("FAIL Mission", false, set),
+        enter("Wrong Way Speech", false, serde_json::json!([{"Type": "Play speech event", "Speech Event Name": "x"}])),
+        {"name": "Warning Shot", "conditions": [{"Type": "Player has hit Group/Unit at least x Times", "Player Name": PLAYER, "Group/Unit Name": "Blockade", "Number Of Times Hit": 1}],
+         "actions": [{"Type": "Set Flag Action", "Flag Name": "shot", "Boolean Value": "TRUE"}]},
+    ], "ships": [], "volumes": {"Search": vol}, "environment": {}});
+    let sc = Script::new(&data, Value::Null);
+    let mut blockader = unit("Blockader", "Blockade", Vec3::new(500.0, 0.0, 0.0));
+    blockader.e = Entity::from_raw_u32(7).unwrap();
+    let shoot = blockader.e;
+    let w = vec![unit("RLS Comet", PLAYER, Vec3::ZERO), blockader];
+    assert_eq!(sc.wants(&w), vec![Want::Reach(Vec3::new(150.0, 0.0, -150.0)), Want::Hit(shoot)]);
+    // Mission 9's mortar target and mission 11's tow out of the black hole.
+    let data2 = serde_json::json!({"rules": [
+        {"name": "Ignite", "conditions": [{"Type": "Mission 9 - If Mortar explodes within Area", "Volume Name": "Search"}], "actions": [{"Type": "Start Timer", "Timer Name": "t"}]},
+        {"name": "Towing", "conditions": [{"Type": "Is Ship In Tow", "Towing Group": "Player0 Group,HUMAN CONTROLLED COMMAND SHIP", "Target to Tow": "Blockade,Blockader", "Boolean": "TRUE"}],
+         "actions": [{"Type": "Set Flag Action", "Flag Name": "towing", "Boolean Value": "TRUE"}]},
+        {"name": "Saved", "conditions": [{"Type": "Exit Volume", "Group Name": "Blockade,Blockader", "Volume Name": "Search"}], "actions": [{"Type": "Set Flag Action", "Flag Name": "saved", "Boolean Value": "TRUE"}]},
+    ], "ships": [], "volumes": {"Search": vol}, "environment": {}});
+    let mut sc2 = Script::new(&data2, Value::Null);
+    // The mortar aims at the volume's nearest corner (100, 100), 15 units inside.
+    let inward = (Vec2::splat(100.0) + Vec2::splat(50.0).normalize() * 15.0).x;
+    let (lob, towee) = (Want::Lob(Vec3::new(inward, 0.0, -inward)), w[1].e);
+    let lobs = |v: &[Want]| v.iter().filter(|x| matches!(x, Want::Lob(_))).count();
+    let got = sc2.wants(&w);
+    assert_eq!((got[0], lobs(&got), *got.last().unwrap()), (lob, 1 + 64, Want::Tow(towee)), "nearest point, the grid, then the tow; nothing to leave");
+    let mut inside = w.clone();
+    inside[1].pos = Vec3::new(150.0, 0.0, -150.0);
+    sc2.tows.push((inside[0].e, towee));
+    let got = sc2.wants(&inside);
+    assert_eq!(*got.last().unwrap(), Want::Leave(Vec3::new(150.0, 0.0, -150.0)), "towed and inside: pull it out");
+    // Inside the volume already: only the shot is left.
+    let w = vec![unit("RLS Comet", PLAYER, Vec3::new(150.0, 0.0, -150.0)), w[1].clone()];
+    assert_eq!(sc.wants(&w), vec![Want::Hit(w[1].e)]);
 }
 
 /// A kill is an event: a repeating rule scores once per kill, by the kind of object destroyed (mission 1's rocks, mission 3's ships).
