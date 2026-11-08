@@ -1,7 +1,8 @@
 """Autoplay: run campaign missions unattended and summarise what broke (#68).
-usage: python3 -m tools.autoplay [MISSION ...] [--speed N] [--limit SECONDS]   (default: missions 1-13, speed 8, limit 3600)
+usage: python3 -m tools.autoplay [MISSION ...] [--speed N] [--limit SECONDS] [--mortal]   (default: missions 1-13, speed 8, limit 3600)
 Each mission runs the release game with the `--script mission` autopilot steering the player's ship (PROCYON_AUTOPLAY in
-game/src/smoke/mod.rs ends the run). Logs go to local/autoplay/missionNN.log; the table lists the outcome, the game time
+game/src/smoke/mod.rs ends the run). The player's fleet is invulnerable (PROCYON_AUTOINVULN) unless --mortal is given: the
+bot has no tactics, and the goal is to reach every rule, not to win fights. Logs go to local/autoplay/missionNN.log; the table lists the outcome, the game time
 reached, peak entity/particle counts, the slowest frame and how many rules never fired (listed in the log's last line).
 Needs a display, or Xvfb + Mesa like tools/shot.sh. The effective speed is capped by the frame rate (0.1 game s per frame)."""
 
@@ -50,6 +51,11 @@ def main():
         default=3600,
         help="game seconds before giving up on a mission",
     )
+    ap.add_argument(
+        "--mortal",
+        action="store_true",
+        help="let the player's fleet take damage (default: invulnerable)",
+    )
     args = ap.parse_args()
     subprocess.run(
         ["cargo", "build", "--release", "--quiet"], cwd=REPO / "game", check=True
@@ -76,6 +82,8 @@ def main():
             "PROCYON_AUTOPLAY": str(args.limit),
             "PROCYON_PROFILE": "1",
         }
+        if not args.mortal:
+            env["PROCYON_AUTOINVULN"] = "1"
         if wrap:
             env["WGPU_BACKEND"] = "vulkan"
         for n in args.missions:

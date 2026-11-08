@@ -63,6 +63,11 @@ pub fn base_mission_damage(class: &Class, hp: &Health) -> f32 {
     let v: Vec<f32> = class.sections.iter().zip(&hp.sections).filter(|(c, _)| c.mission).map(|(c, h)| 1.0 - h / c.hp.max(1.0)).collect();
     if v.is_empty() { 0.0 } else { (v.iter().sum::<f32>() / v.len() as f32).clamp(0.0, 1.0) }
 }
+/// World position of the live mission section of a base nearest `from` (None when every vital section is destroyed): where a gun must point.
+pub fn live_tower_point(class: &Class, hp: &Health, tf: &Transform, from: Vec3) -> Option<Vec3> {
+    let local = tf.to_matrix().inverse().transform_point3(from);
+    hit_test::base_aim_point(class, hp, Some(local)).map(|p| tf.transform_point(p))
+}
 /// A shell struck `victim` (counted even when the victim is invulnerable); fed to the mission rules.
 #[derive(Message)]
 pub struct Hit {
