@@ -2,6 +2,7 @@
 usage: python -m tools.import_assets [--game DIR] [--out DIR] [Ship_Name ...]   (default ships below; first is the default player ship)
        openprocyon-import [--game DIR] [--out DIR] [Ship_Name ...]   (the same, frozen into the release download)
        openprocyon-import --bake-skies [options]   (the optional HD skies: tools.bake_sky on the imported assets)
+       openprocyon-import --bake-surfaces [options]   (the optional surface maps: tools.bake_surfaces)
   --game  the original install (default: PROCYON_GAME_ROOT from the environment or .env)
   --out   where the converted assets go (default: assets/ in this checkout, or for the frozen importer the per-user folder
           ${XDG_DATA_HOME:-~/.local/share}/openprocyon/assets or %APPDATA%\\openprocyon\\assets; the game finds all of these,
@@ -270,6 +271,10 @@ def main(argv):
         from tools import bake_sky
 
         return bake_sky.main(argv[1:])
+    if argv[:1] == ["--bake-surfaces"]:
+        from tools import bake_surfaces
+
+        return bake_surfaces.main(argv[1:])
     opts, want = {"--game": None, "--out": None}, []
     args = list(argv)
     while args:

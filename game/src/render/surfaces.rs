@@ -1,7 +1,8 @@
 //! Not retail: surface detail of the render profile (part of render/mod.rs's look). The retail models carry only colour
 //! textures; each textured glTF material (hulls, decks, metal fittings, islands, ...) gets the retail StandardMaterial
-//! extended by the mod's `shaders/surface.wesl`, which derives relief from the colour texture as it draws (nothing is
-//! generated or stored, so a mod ships no maps made from game art). The profile's rules, matched against the glTF
+//! extended by the mod's `shaders/surface.wesl`, which derives relief from the colour texture as it draws. A surface map
+//! baked from that texture on the player's machine (`tools/bake_surfaces.py`, `map_file`) replaces the derivation when an
+//! enabled mod has one; no mod ships maps made from game art. The profile's rules, matched against the glTF
 //! material name (the retail texture name), set how rough or metallic each surface is and how strong the shader's
 //! relief, crevice shading and gloss are (`SurfaceUniform`). Sails are left to `sails`.
 //!
@@ -9,6 +10,7 @@
 //! back to their retail material and come back after (`Restyled`); the same holds for sails.
 
 use bevy::gltf::GltfMaterialName;
+use bevy::image::{ImageAddressMode, ImageLoaderSettings, ImageSampler, ImageSamplerDescriptor};
 use bevy::pbr::{ExtendedMaterial, MaterialExtension};
 use bevy::prelude::*;
 use bevy::render::render_resource::{AsBindGroup, ShaderType};
@@ -83,7 +85,7 @@ impl Surfaces {
 /// What the shader gets at `@group(MATERIAL_BIND_GROUP) @binding(100)`, besides the StandardMaterial bindings.
 #[derive(Clone, Copy, Default, Debug, ShaderType)]
 pub struct SurfaceUniform {
-    /// x: relief, y: crevice shading, z: gloss, w: unused
+    /// x: relief, y: crevice shading, z: gloss, w: 1 when `map` is a baked surface map
     pub params: Vec4,
     /// rgb: rim light colour, a: its strength
     pub rim: Vec4,
@@ -93,6 +95,18 @@ pub struct SurfaceUniform {
 pub struct SurfaceDetail {
     #[uniform(100)]
     pub u: SurfaceUniform,
+    /// The baked surface map (linear RGBA: u and v slope, crevice, height; see `tools/bake_surfaces.py`).
+    #[texture(101)]
+    #[sampler(102)]
+    pub map: Option<Handle<Image>>,
+}
+
+/// The baked surface map for a glTF material name (`textures/surface/<name without .tga, lowercase>.png`), when an enabled
+/// mod has one.
+pub fn map_file(root: &std::path::Path, material: &str) -> Option<String> {
+    let name = material.to_lowercase();
+    let rel = format!("textures/surface/{}.png", name.strip_suffix(".tga").unwrap_or(&name));
+    root.join(&rel).is_file().then_some(rel)
 }
 
 impl MaterialExtension for SurfaceDetail {
@@ -121,6 +135,7 @@ pub(super) struct Restyled<M: Material> {
 pub(super) fn surfaces(
     mut commands: Commands,
     look: Res<Look>,
+    assets: Res<AssetServer>,
     new: Query<(Entity, &GltfMaterialName, &MeshMaterial3d<StandardMaterial>), (Added<MeshMaterial3d<StandardMaterial>>, Without<Restyled<SurfaceMaterial>>)>,
     parents: Query<&ChildOf>,
     ships: Query<(), With<crate::Ship>>,
@@ -142,10 +157,24 @@ pub(super) fn surfaces(
             .entry(mat.0.id())
             .or_insert_with(|| {
                 let base = StandardMaterial { perceptual_roughness: surface.roughness, metallic: surface.metallic, reflectance: surface.reflectance, ..base.clone() };
-                surface_mats.add(SurfaceMaterial {
-                    base,
-                    extension: SurfaceDetail { u: SurfaceUniform { params: Vec4::new(surface.bump, surface.cavity, surface.gloss, 0.0), rim: s.rim } },
-                })
+                let map = map_file(crate::assets_dir(), &name.0).map(|f| {
+                    assets
+                        .load_builder()
+                        .with_settings(|s: &mut ImageLoaderSettings| {
+                            s.is_srgb = false;
+                            s.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
+                                address_mode_u: ImageAddressMode::Repeat,
+                                address_mode_v: ImageAddressMode::Repeat,
+                                ..ImageSamplerDescriptor::linear()
+                            });
+                        })
+                        .load(f)
+                });
+                if map.is_some() {
+                    info_once!("surfaces: drawing with baked surface maps");
+                }
+                let params = Vec4::new(surface.bump, surface.cavity, surface.gloss, if map.is_some() { 1.0 } else { 0.0 });
+                surface_mats.add(SurfaceMaterial { base, extension: SurfaceDetail { u: SurfaceUniform { params, rim: s.rim }, map } })
             })
             .clone();
         let ship = parents.iter_ancestors(e).find(|a| ships.contains(*a));
@@ -184,5 +213,15 @@ mod tests {
         assert_eq!(s.of("piratehull1.tga"), Some(s.default));
         assert!(s.of("Water.tga").is_none());
         assert!(parse(&Value::Null).is_none());
+    }
+
+    #[test]
+    fn baked_maps_are_found_by_lowercase_material_name() {
+        let root = std::env::temp_dir().join(format!("openprocyon-surface-map-{}", std::process::id()));
+        std::fs::create_dir_all(root.join("textures/surface")).unwrap();
+        std::fs::write(root.join("textures/surface/rock fissure.png"), b"").unwrap();
+        assert_eq!(map_file(&root, "Rock Fissure.tga").as_deref(), Some("textures/surface/rock fissure.png"));
+        assert_eq!(map_file(&root, "MOCM1.tga"), None, "no map: the shader derives the relief");
+        std::fs::remove_dir_all(&root).unwrap();
     }
 }
