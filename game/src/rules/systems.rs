@@ -836,11 +836,15 @@ fn unstick(time: f32, pos: Vec3, goal: Option<Vec3>, cell: &std::sync::Mutex<Opt
 }
 
 /// The ship a `Tow...` task asks the player to tow: the one the task name ends with, else the named ship its text mentions (mission 4's
-/// "Tow tender to safety" reads "Tow the RLS Bachanalia to the Rally Point.", #351).
+/// "Tow tender to safety" reads "Tow the RLS Bachanalia to the Rally Point.", #351). A task whose text alone starts with "Tow" counts
+/// too: mission 4's "MO4 free stuck sloop" reads "Tow the RLS Yorkshire Clear of the Island it has Run Aground On.".
 fn task_towee<'a>(t: &super::eval::Task, w: &'a [Unit], player: Entity) -> Option<&'a Unit> {
-    let name = t.name.strip_prefix("Tow").filter(|n| !n.is_empty())?;
+    let name = t.name.strip_prefix("Tow").filter(|n| !n.is_empty());
+    if name.is_none() && !t.text.starts_with("Tow ") {
+        return None;
+    }
     let candidates = || w.iter().filter(|u| u.alive && u.e != player && !u.name.is_empty());
-    candidates().find(|u| u.name.ends_with(name)).or_else(|| candidates().find(|u| t.text.contains(u.name.as_str())))
+    name.and_then(|n| candidates().find(|u| u.name.ends_with(n))).or_else(|| candidates().find(|u| t.text.contains(u.name.as_str())))
 }
 
 fn autopilot_tow(sc: &Script, w: &[Unit], extra: &mut Extra) {
@@ -1703,6 +1707,9 @@ mod ai_tests {
         assert_eq!(task_towee(&task("TowHarvester", ""), &w, me).map(|u| u.e), Some(w[3].e), "a name suffix still wins");
         assert!(task_towee(&task("Tow the wreck", "Tow the wreck home."), &w, me).is_none(), "an unnamed ship never matches the text");
         assert!(task_towee(&task("Protect the RLS Bachanalia", "Protect the RLS Bachanalia."), &w, me).is_none(), "only Tow tasks");
+        let w = [unit(1, "RLS Sea Sparrow"), unit(5, "RLS Yorkshire")];
+        let sloop = task("MO4 free stuck sloop", "Tow the RLS Yorkshire Clear of the Island it has Run Aground On.");
+        assert_eq!(task_towee(&sloop, &w, me).map(|u| u.e), Some(w[1].e), "a task whose text says Tow");
     }
 
     #[test]
