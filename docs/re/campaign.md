@@ -51,7 +51,9 @@ explicitly listed below; unsupported ones are logged once (`unsupported ...`) an
   speech played / not yet played, Is Group In Volume / Enter Volume (polygon test), Is Group A attacking Group B, hit counts (by anyone or by a
   player), group member counts, damage fraction, mission-essential ships, unit flag texture (original group membership), group distance, docked.
 - **Actions**: paths (with Find Closest Point, per-ship 35-unit lateral offsets as a stand-in for formations), max throttle (`Ship.cap`), AI stance,
-  owner changes, visibility (hidden ships cannot be targeted or hit), vulnerability (`Invulnerable Percent` scales damage; 1.0 also blocks fires),
+  owner changes, visibility (hidden ships cannot be targeted or hit), vulnerability (`Invulnerable Percent` is a hull floor: full damage, but hits and fires leave the core at least that share of its hit points;
+  1.0 blocks all damage and fires. PROVISIONAL, inferred from the values the campaign uses, e.g. mission 4's towed RLS Bachanalia at 0.1
+  after an 80% damage action, the player at 0.1 through scripted chases and 0.45 through mission 3's storm),
   flag texture and banner tint, attack orders, Clear all AI commands, Damage by percent, hold position/fire, reset hit counts, alliances (a
   hostility set between players; default: only the pirate schooner is hostile), towing (Providence trails Warrior) / Break Tow, objective points and
   tasks (HUD text), speech queue with subtitles (one line at a time, sequential), music with fade in/out, NIS bars + camera

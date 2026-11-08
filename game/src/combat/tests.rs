@@ -757,6 +757,19 @@ fn ship_hit_rules() {
     let core = hp.core;
     let out = apply_ship_hit(class, &mut hp, stern, sure_fire, 0.0, true, &mut rng);
     assert!(!out.lost && hp.core < core);
+    // Partial invulnerability is a hull floor (#351, mission 4's towed tender at 0.1): full damage until the core reaches that share.
+    let mut hp = Health::new(class);
+    hp.sections[stern] = 0.0;
+    let fresh = apply_ship_hit(class, &mut hp, stern, sure_fire, 0.1, true, &mut rng);
+    assert!(fresh.fire.is_none() && hp.core < class.core_hp, "a partial value does not shield the core");
+    hp.core = 0.12 * class.core_hp;
+    for _ in 0..50 {
+        apply_ship_hit(class, &mut hp, stern, sure_fire, 0.1, true, &mut rng);
+    }
+    assert_eq!(hp.core, 0.1 * class.core_hp, "the core stops at the floor");
+    hp.core = 0.05 * class.core_hp;
+    apply_ship_hit(class, &mut hp, stern, sure_fire, 0.1, true, &mut rng);
+    assert_eq!(hp.core, 0.05 * class.core_hp, "a core already under the floor is not healed and loses no more");
 }
 
 #[test]

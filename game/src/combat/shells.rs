@@ -112,22 +112,34 @@ pub(super) fn side_damage_scale(shooter: Side, victim: Side, difficulty: u8, bas
     }
 }
 
+/// `Invulnerable Percent` (rules' Set Group/Unit Vulnerability) as a hull floor: hits and fires do their full damage, but the core does
+/// not drop below that share of its hit points through them (1.0: no damage, no fires). PROVISIONAL: inferred from the campaign's
+/// values (mission 4's towed tender at 0.1 after an 80% damage action, the player held at 10% through scripted chases, 45% through
+/// mission 3's storm); the original's code was not read. A core already below the floor stays where it is.
+pub(super) fn floor_core(class: &Class, hp: &mut Health, before: f32, invuln: f32) {
+    if invuln > 0.0 {
+        hp.core = hp.core.max(before.min(invuln * class.core_hp));
+    }
+}
+
 pub(super) fn apply_ship_hit(class: &Class, hp: &mut Health, k: usize, damage: [f32; 5], invuln: f32, fire_free: bool, rng: &mut Rng) -> ShipHit {
     let [lo, hi, _crit, fire_p, fire_str] = damage;
     let protected = invuln >= 1.0;
-    let was = hp.sections[k];
+    let scale = if protected { 0.0 } else { 1.0 };
+    let (was, core) = (hp.sections[k], hp.core);
     let roll = rng.range(lo, hi);
-    hp.sections[k] = (was - (1.0 - invuln) * roll).max(0.0);
+    hp.sections[k] = (was - scale * roll).max(0.0);
     // Retail ignition roll per hit: chance > 0 and roll <= chance starts a fire of the bullet's initial strength.
     let fire = (!protected && fire_p > 0.0 && rng.f() <= fire_p && hp.sections[k] > 0.0 && fire_free).then_some(fire_str);
     // Retail: every hit that leaves a vital section at 0 HP (the killing hit and later ones) takes
     // a fresh damage roll x the summed core% of all destroyed vital sections / 100 off the core (rounding provisional).
     if !protected && class.sections[k].vital && hp.sections[k] == 0.0 {
-        hp.core -= core_bleed(class, hp, (1.0 - invuln) * rng.range(lo, hi));
+        hp.core -= core_bleed(class, hp, rng.range(lo, hi));
     }
     if hp.sections[k] == 0.0 {
-        spill(class, hp, k, 0.4 * roll, invuln, &mut vec![k]);
+        spill(class, hp, k, 0.4 * roll * scale, &mut vec![k]);
     }
+    floor_core(class, hp, core, invuln);
     ShipHit { fire, lost: was > 0.0 && hp.sections[k] == 0.0 }
 }
 
@@ -137,7 +149,7 @@ pub(super) fn apply_base_hit(class: &Class, hp: &mut Health, k: usize, roll: f32
     let was_up: Vec<bool> = hp.sections.iter().map(|h| *h > 0.0).collect();
     hp.sections[k] = (hp.sections[k] - roll).max(0.0);
     if hp.sections[k] == 0.0 {
-        spill(class, hp, k, 0.4 * roll, 0.0, &mut vec![k]);
+        spill(class, hp, k, 0.4 * roll, &mut vec![k]);
     }
     (0..was_up.len()).filter(|j| was_up[*j] && hp.sections[*j] == 0.0).collect()
 }
@@ -200,18 +212,18 @@ fn ricochet(s: &mut Shell, tf: &mut Transform, bd: &BulletDef, key: &str, at: Ve
 
 /// Read from the original's code: a hit that leaves its section at 0 hit points (already dead or not) passes 0.4 x its damage on
 /// to every neighbouring section, and on from any of those left at 0, each section once per hit.
-fn spill(class: &Class, hp: &mut Health, k: usize, damage: f32, invuln: f32, seen: &mut Vec<usize>) {
+fn spill(class: &Class, hp: &mut Health, k: usize, damage: f32, seen: &mut Vec<usize>) {
     for &n in &class.sections[k].adjacent {
         if seen.contains(&n) || n >= hp.sections.len() {
             continue;
         }
         seen.push(n);
-        hp.sections[n] = (hp.sections[n] - (1.0 - invuln) * damage).max(0.0);
-        if invuln < 1.0 && class.sections[n].vital && hp.sections[n] == 0.0 {
-            hp.core -= core_bleed(class, hp, (1.0 - invuln) * damage);
+        hp.sections[n] = (hp.sections[n] - damage).max(0.0);
+        if damage > 0.0 && class.sections[n].vital && hp.sections[n] == 0.0 {
+            hp.core -= core_bleed(class, hp, damage);
         }
         if hp.sections[n] == 0.0 {
-            spill(class, hp, n, 0.4 * damage, invuln, seen);
+            spill(class, hp, n, 0.4 * damage, seen);
         }
     }
 }
@@ -574,7 +586,7 @@ struct ShipTarget<'a> {
     transform: &'a Transform,
     side: Side,
     class: &'a crate::data::Class,
-    /// Script vulnerability: 'Invulnerable Percent' 1.0 takes no damage and no fire; partial values scale the damage.
+    /// Script vulnerability: 'Invulnerable Percent' 1.0 takes no damage and no fire; partial values are a hull floor (`floor_core`).
     invuln: f32,
 }
 
