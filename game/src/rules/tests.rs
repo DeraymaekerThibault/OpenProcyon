@@ -949,6 +949,25 @@ fn the_player_group_is_every_ship_the_human_owns() {
     assert_eq!(sc.flags.get("shot"), Some(&true), "the command ship's shot at the boats is the group's attack");
 }
 
+/// Break Tow ends a tow whichever group is named first: mission 4 and 11 name the towed ship as TowerGroupA and the player as
+/// TowerGroupB, and the player stayed hitched to the tender, unable to take the next tow (#351, #355).
+#[test]
+fn break_tow_matches_either_group_order() {
+    let data = serde_json::json!({"rules": [
+        {"name": "safe", "conditions": [{"Type": "Flag Condition", "Flag Name": "go", "Boolean Value": "TRUE"}],
+         "actions": [{"Type": "Break Tow", "TowerGroupA": "wounded Tender", "TowerGroupB": PLAYER}]},
+    ], "ships": [], "volumes": {}, "environment": {}});
+    let mut sc = Script::new(&data, Value::Null);
+    let (mut me, mut tender) = (unit("RLS Comet", PLAYER, Vec3::ZERO), unit("RLS Bachanalia", "tender side", Vec3::ZERO));
+    (me.e, tender.e) = (Entity::from_raw_u32(1).unwrap(), Entity::from_raw_u32(2).unwrap());
+    tender.groups = vec!["wounded Tender".into()];
+    let w = vec![me, tender];
+    sc.set_tow(w[0].e, w[1].e, true);
+    sc.flags.insert("go".into(), true);
+    sc.step(&w, 0.1, false);
+    assert!(sc.tows().is_empty(), "the player's tow of the tender is broken");
+}
+
 /// A kill is an event: a repeating rule scores once per kill, by the kind of object destroyed (mission 1's rocks, mission 3's ships).
 #[test]
 fn killing_an_object_scores_once_per_kill_and_by_kind() {

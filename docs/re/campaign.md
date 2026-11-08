@@ -55,7 +55,7 @@ explicitly listed below; unsupported ones are logged once (`unsupported ...`) an
   1.0 blocks all damage and fires. PROVISIONAL, inferred from the values the campaign uses, e.g. mission 4's towed RLS Bachanalia at 0.1
   after an 80% damage action, the player at 0.1 through scripted chases and 0.45 through mission 3's storm),
   flag texture and banner tint, attack orders, Clear all AI commands, Damage by percent, hold position/fire, reset hit counts, alliances (a
-  hostility set between players; default: only the pirate schooner is hostile), towing (Providence trails Warrior) / Break Tow, objective points and
+  hostility set between players; default: only the pirate schooner is hostile), towing (Providence trails Warrior) / Break Tow (either group may be the tower: missions 4 and 11 name the towed ship first), objective points and
   tasks (HUD text), speech queue with subtitles (one line at a time, sequential), music with fade in/out, NIS bars + camera
   (attach / path flight / focus), Focus Camera On Group, victory points, End Game / Goto Next Level (end overlay).
 - **Hostility drives combat**: each frame `Ship.side` = Enemy iff the unit's owner is hostile to the player's owner; non-player units pick targets

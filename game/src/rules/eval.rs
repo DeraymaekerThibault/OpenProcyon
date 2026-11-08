@@ -1232,10 +1232,13 @@ impl Script {
                 }
             }
             "Tow Ship" => self.tow_specs.push((s(a, "Docking Group").into(), s(a, "Target to Tow").into())),
+            // Either group may be the tower: mission 4's "pirated tender safe" and mission 11's "Player Saves Civ Galleon" name the towed
+            // ship first and the player second (#351, #355).
             "Break Tow" => {
-                let (x, y) = (ids(w, s(a, "TowerGroupA")), ids(w, s(a, "TowerGroupB")));
-                self.tows.retain(|t| !(x.contains(&t.0) && y.contains(&t.1)));
-                self.tow_specs.retain(|p| !(p.0 == s(a, "TowerGroupA") && p.1 == s(a, "TowerGroupB")));
+                let (ga, gb) = (s(a, "TowerGroupA"), s(a, "TowerGroupB"));
+                let (x, y) = (ids(w, ga), ids(w, gb));
+                self.tows.retain(|t| !((x.contains(&t.0) && y.contains(&t.1)) || (y.contains(&t.0) && x.contains(&t.1))));
+                self.tow_specs.retain(|p| !((p.0 == ga && p.1 == gb) || (p.0 == gb && p.1 == ga)));
             }
             "NIS Start" => {
                 self.nis = true;
