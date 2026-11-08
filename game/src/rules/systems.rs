@@ -765,17 +765,22 @@ fn unstick(time: f32, pos: Vec3, goal: Option<Vec3>, cell: &std::sync::Mutex<Opt
     Some(d)
 }
 
+/// The ship a `Tow...` task asks the player to tow: the one the task name ends with, else the named ship its text mentions (mission 4's
+/// "Tow tender to safety" reads "Tow the RLS Bachanalia to the Rally Point.", #351).
+fn task_towee<'a>(t: &super::eval::Task, w: &'a [Unit], player: Entity) -> Option<&'a Unit> {
+    let name = t.name.strip_prefix("Tow").filter(|n| !n.is_empty())?;
+    let candidates = || w.iter().filter(|u| u.alive && u.e != player && !u.name.is_empty());
+    candidates().find(|u| u.name.ends_with(name)).or_else(|| candidates().find(|u| t.text.contains(u.name.as_str())))
+}
+
 fn autopilot_tow(sc: &Script, w: &[Unit], extra: &mut Extra) {
     let Some(p) = w.iter().find(|u| u.primary && u.alive) else { return };
     if sc.nis || !extra.towing_player.is_empty() || !extra.docking_player.is_empty() || sc.tows().iter().any(|t| t.0 == p.e) {
         return;
     }
-    for t in sc.tasks.iter().filter(|t| t.active && !t.complete) {
-        let Some(name) = t.name.strip_prefix("Tow").filter(|n| !n.is_empty()) else { continue };
-        if let Some(towee) = w.iter().find(|u| u.alive && u.e != p.e && u.name.ends_with(name)) {
-            extra.dock.write(DockMsg::TowStart { tower: None, towee: towee.e });
-            return;
-        }
+    if let Some(towee) = sc.tasks.iter().filter(|t| t.active && !t.complete).find_map(|t| task_towee(t, w, p.e)) {
+        extra.dock.write(DockMsg::TowStart { tower: None, towee: towee.e });
+        return;
     }
     // Otherwise a visible ship an unfired rule waits for the player to tow (mission 11's SS Harvester at the black hole).
     let towee = sc
@@ -1548,6 +1553,34 @@ mod ai_tests {
         assert!(!ticks(21.0, 45.0, 0.6), "damage rising restarts the clock");
         assert!(ticks(46.0, 60.0, 0.6));
         assert!(!ticks(100.0, 120.0, 0.6), "leaving the hold starts over");
+    }
+
+    #[test]
+    fn a_tow_task_names_its_ship_by_name_suffix_or_in_its_text() {
+        let task = |name: &str, text: &str| super::super::eval::Task { name: name.into(), text: text.into(), active: true, complete: false, failed: false };
+        let unit = |n: u32, name: &str| super::super::eval::Unit {
+            e: Entity::from_raw_u32(n).unwrap(),
+            id: n as i64,
+            name: name.into(),
+            owner: "Navy".into(),
+            owner_is_named_group: false,
+            groups: vec![],
+            pos: Vec3::ZERO,
+            alive: true,
+            visible: true,
+            primary: n == 1,
+            damage: 0.0,
+            flag: String::new(),
+            attack: vec![],
+        };
+        let w = [unit(1, "RLS Sea Sparrow"), unit(2, ""), unit(3, "RLS Bachanalia"), unit(4, "Harvester")];
+        let me = w[0].e;
+        // Mission 4 (#351): the task name says "tender", the text names the ship.
+        let m4 = task("Tow tender to safety", "Tow the RLS Bachanalia to the Rally Point.");
+        assert_eq!(task_towee(&m4, &w, me).map(|u| u.e), Some(w[2].e));
+        assert_eq!(task_towee(&task("TowHarvester", ""), &w, me).map(|u| u.e), Some(w[3].e), "a name suffix still wins");
+        assert!(task_towee(&task("Tow the wreck", "Tow the wreck home."), &w, me).is_none(), "an unnamed ship never matches the text");
+        assert!(task_towee(&task("Protect the RLS Bachanalia", "Protect the RLS Bachanalia."), &w, me).is_none(), "only Tow tasks");
     }
 
     #[test]
