@@ -244,7 +244,10 @@ Normal-timeline pickup/rescue/towing continuation still needs owner playtesting.
 
 ## Missions 2-13 (first pass, untested in play)
 `--mission N` loads `maps/missionNN/mission.json` through the same rule interpreter; only mission 1 has the scripted opening NIS (`briefing.rs`).
-Rules call the human group "Player0 Group"; `Script::new` rewrites it to the TWT's player name. A mission with no primary ship (9, 13)
+Rules call the human group "Player0 Group"; `Script::new` rewrites it to the TWT's player name. That group is every ship the human
+owns, even when a TWT group of the same name lists only some of them: mission 5's command ship is TWT group "Jim", the TWT group "Player"
+holds its two escorts, and the warning shot ("Is Group A attacking Group B" from "Player0 Group") is fired by the command ship. PROVISIONAL:
+read from mission 5's rules, which only complete this way. A mission with no primary ship (9, 13)
 gets the player group's first ship, else a stand-in cutter. Hulls without a class (`*_Wrecked`) are skipped.
 
 Primary-ship handoffs use both `Set Fleet Primary Ship` and `Set Group/Unit AI Captain` with `Captain_Human`.
@@ -338,4 +341,6 @@ light and voice-box positions (measured on the art), which side the real game de
 `TalkingHeadLocation` option, per-line portrait expression beyond the data's `face`, moving the gameplay subtitle onto the speech-event bar.
 
 ## Island gun towers
-Bases whose WOT places guns (`Base_SmugglersCamp`, `Base_Grant`, ...) export as `assets/ships/Base_*/` (`tools/export_bases.py`, no hull model; the scenery GLB is drawn) and become `combat::ArmedBase` + `Health` + guns when a rule sets them up. `combat::base_fire` shoots the nearest visible ship the base owner is hostile to (neutral owners such as mission 2's "NO PLAYER" camp stay quiet until a rule changes the owner); shells damage the base sections, and the rules' "Vital Section damage" reads the mean damage of the `vitalToMission` sections (PROVISIONAL). Not done: AI stance / attack orders for bases, tower collapse visuals, fires on bases.
+Bases whose WOT places guns (`Base_SmugglersCamp`, `Base_Grant`, ...), and gunless bases with a `vitalToMission` section (`Base_PirateStockade`, whose
+`Camp_wood` gate mission 6 must shoot down), export as `assets/ships/Base_*/` (`tools/export_bases.py`, no hull model; the scenery GLB is drawn) and become `combat::ArmedBase` + `Health` + guns when a rule sets them up. `combat::base_fire` shoots the nearest visible ship the base owner is hostile to (neutral owners such as mission 2's "NO PLAYER" camp stay quiet until a rule changes the owner); shells damage the base sections, and the rules' "Vital Section damage" reads the mean damage of the `vitalToMission` sections (PROVISIONAL). A skirmish map's gunless base (Convoy Raid's stockade) stays scenery (PROVISIONAL: not observed whether skirmish fleets
+can shoot or board it). Not done: AI stance / attack orders for bases, tower collapse visuals, fires on bases.

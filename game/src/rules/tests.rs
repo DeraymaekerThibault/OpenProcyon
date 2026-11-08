@@ -918,6 +918,37 @@ fn wants_lists_what_open_rules_wait_for_the_player_to_do() {
     assert_eq!(sc.wants(&w), vec![Want::Hit(w[1].e)]);
 }
 
+/// "Player0 Group" is every ship the human owns, even where a TWT group named after the human holds only some of them (#352). Mission 5:
+/// the command ship is in TWT group "Jim", TWT group "Player" holds its two escorts, and the warning shot rule asks whether "Player0
+/// Group" is attacking the boats and the command ship has fired.
+#[test]
+fn the_player_group_is_every_ship_the_human_owns() {
+    let data = serde_json::json!({"rules": [
+        {"name": "Warning Shot", "conditions": [
+            {"Type": "Is Group A attacking Group B", "GroupA Name": PLAYER, "GroupB Name": "Boats"},
+            {"Type": "Group/Unit Fired X Shots", "Group/Unit Name": "Player0 Group,HUMAN CONTROLLED COMMAND SHIP", "Number Of Rounds Fired": 0, "Equivalence": "Greater Than"}],
+         "actions": [{"Type": "Set Flag Action", "Flag Name": "shot", "Boolean Value": "TRUE"}]},
+    ], "ships": [], "volumes": {}, "environment": {},
+       "player_start": {"name": "Player"}, "groups": {"Player": [192, 193], "Jim": [195], "Boats": [197]}});
+    let mut sc = Script::new(&data, Value::Null);
+    let at = |name: &str, owner: &str, id: i64, n: u32| {
+        let mut u = unit(name, owner, Vec3::ZERO);
+        (u.id, u.e) = (id, Entity::from_raw_u32(n).unwrap());
+        u
+    };
+    let mut w = vec![at("RLS Comet", "Player", 195, 1), at("Sea Sparrow", "Player", 192, 2), at("Boat", "Fishers", 197, 3), at("Other", "Fishers", 300, 4)];
+    sc.tag(&mut w);
+    let ids = |spec: &str| members(&w, spec).iter().map(|u| u.id).collect::<Vec<_>>();
+    assert_eq!(ids("Player"), vec![195, 192], "the command ship of TWT group Jim belongs to the human's group");
+    assert_eq!(ids("Jim"), vec![195]);
+    assert_eq!(ids("Fishers"), vec![197, 300], "an owner without a group of its name still selects by owner");
+    assert!(sc.answers(195, "Player", "RLS Comet", true, "Player"));
+    assert!(!sc.answers(300, "Fishers", "Other", false, "Player"));
+    sc.record_fire(w[0].e, Some(w[2].e));
+    sc.step(&w, 0.1, false);
+    assert_eq!(sc.flags.get("shot"), Some(&true), "the command ship's shot at the boats is the group's attack");
+}
+
 /// A kill is an event: a repeating rule scores once per kill, by the kind of object destroyed (mission 1's rocks, mission 3's ships).
 #[test]
 fn killing_an_object_scores_once_per_kill_and_by_kind() {
