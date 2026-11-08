@@ -11,7 +11,18 @@ fn gunless_stockade_is_a_base_whose_mission_section_can_be_destroyed() {
     assert!(class.sections.iter().any(|s| s.mission), "the gate's Camp_wood section is vitalToMission");
     let mut hp = Health::new(class);
     assert_eq!(base_mission_damage(class, &hp), 0.0);
-    assert!(hit_test::base_aim_point(class, &hp, None).is_some(), "a live mission section is something to aim at");
+    // The aim point lies on the gate's mesh, not in the air above its bounding box (the shells flew over it).
+    let aim = hit_test::base_aim_point(class, &hp, None).expect("a live mission section is something to aim at");
+    let gate = class.sections.iter().find(|s| s.mission).unwrap();
+    assert!(hit_test::seg_mesh(aim + Vec3::Y * 0.5, aim - Vec3::Y * 0.5, gate).is_some(), "aim {aim} is on the gate");
+    // Mission 2's compact gun towers keep their roof-centre aim (docs/re/gunnery.md#gun-tower-aim-point).
+    let camp = &lib.classes[lib.index("Base_SmugglersCamp")];
+    let camp_hp = Health::new(camp);
+    let tower = camp.sections.iter().find(|s| s.mission).unwrap();
+    let roof = Vec3::new((tower.min.x + tower.max.x) * 0.5, tower.max.y, (tower.min.z + tower.max.z) * 0.5);
+    let near = camp.sections.iter().filter(|s| s.mission).map(|s| Vec3::new((s.min.x + s.max.x) * 0.5, s.max.y, (s.min.z + s.max.z) * 0.5)).collect::<Vec<_>>();
+    let got = hit_test::base_aim_point(camp, &camp_hp, None).unwrap();
+    assert!(near.iter().any(|r| r.distance(got) < 2.0), "tower aim {got} stays at a roof centre (first {roof})");
     for (s, h) in class.sections.iter().zip(hp.sections.iter_mut()) {
         if s.mission {
             *h = 0.0;
