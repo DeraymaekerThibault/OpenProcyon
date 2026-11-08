@@ -569,11 +569,19 @@ pub fn reconcile_fleets(world: &mut World) {
             f.members.insert(0, e);
         }
         if valid.is_none() {
+            // The script's throttle cap on the command ship ("HUMAN CONTROLLED COMMAND SHIP") belongs to the command, not the hull: the
+            // replacement takes it over, instead of keeping whatever cap a rule set on it before (a ship captured from a capped enemy
+            // group, a stationary escort), which could leave the player with a ship that cannot move (#356). PROVISIONAL: the
+            // original's handoff of the cap after a capture or loss has not been observed.
+            let cap = command.and_then(|e| world.get::<Ship>(e)).map_or(1.0, |s| s.cap);
             if let Some(e) = command {
                 world.entity_mut(e).remove::<PlayerShip>();
             }
             if let Some(e) = fleets.primary() {
                 let target = world.get::<FleetPilot>(e).and_then(|p| p.target);
+                if let Some(mut s) = world.get_mut::<Ship>(e) {
+                    s.cap = cap;
+                }
                 install_primary(world, e, target);
             }
         }
