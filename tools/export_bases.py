@@ -28,12 +28,14 @@ def export_bases(root, assets):
     for wot in wots:
         name = wot.stem
         try:
-            if not any(associations(load(root, name), "GunPlacement")):
+            armed = any(associations(load(root, name), "GunPlacement"))
+            # A gunless base with a vitalToMission section is still a rules target: mission 6's stockade gate must be shot down.
+            if not armed and not name.startswith("Base_"):
                 continue
             j = export(root, name, assets)
         except (KeyError, ValueError, FileNotFoundError, StopIteration):
             continue
-        if not j["guns"]:
+        if not j["guns"] and not any(s["vital_mission"] for s in j["sections"]):
             continue
         for k, g in j["gun_defs"].items():
             guns.setdefault(k, g)

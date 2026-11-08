@@ -1,5 +1,26 @@
 use super::*;
 
+/// #353: mission 6's stockade gate has no guns, only a vitalToMission section, and the rules wait for that section's damage to reach 1.
+/// The importer must export it as a class (an attackable base), and shooting the section down must read as full mission damage.
+#[test]
+#[ignore = "needs imported assets"]
+fn gunless_stockade_is_a_base_whose_mission_section_can_be_destroyed() {
+    let lib = Library::load(assets_dir());
+    let class = &lib.classes[lib.index("Base_PirateStockade")];
+    assert!(class.mounts.is_empty());
+    assert!(class.sections.iter().any(|s| s.mission), "the gate's Camp_wood section is vitalToMission");
+    let mut hp = Health::new(class);
+    assert_eq!(base_mission_damage(class, &hp), 0.0);
+    assert!(hit_test::base_aim_point(class, &hp, None).is_some(), "a live mission section is something to aim at");
+    for (s, h) in class.sections.iter().zip(hp.sections.iter_mut()) {
+        if s.mission {
+            *h = 0.0;
+        }
+    }
+    assert_eq!(base_mission_damage(class, &hp), 1.0);
+    assert!(hit_test::base_aim_point(class, &hp, None).is_none());
+}
+
 /// Gunners take 10 x gunnery seconds off TimeBetweenBursts (docs/re/gunnery.md#gunners): a gunnery-8.5 crew fires the
 /// 12 s heavy cannon every 3.5 s; the cut never goes below zero and leaves in-burst spacing alone.
 #[test]
