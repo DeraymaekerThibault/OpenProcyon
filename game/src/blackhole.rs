@@ -242,18 +242,20 @@ pub fn spawn(commands: &mut Commands, lib: &fx::FxLib, terrain: &str, pos: Vec3)
 /// orders feels nothing. A resting ship's rest snap cancels the pull every engine tick, so it only creeps in at one tick's worth of
 /// acceleration; once the pull reaches `BREAK_FREE` it falls freely, its velocity following v' = a - k v with the hull's own rate
 /// k = MaxThrust / (MaxSpeed x Mass). In the core the pull stops and a ship not under way is destroyed after `KILL_DELAY`.
-/// Docked and destroyed ships are left alone.
+/// Docked and destroyed ships are left alone, and so are ships the rules pinned in place ('Set Group/Unit Movable' FALSE): the ships
+/// stranded in mission 4's Vanov hole and mission 11's SS Harvester wait there to be towed out, and were swallowed before the player
+/// arrived (#351, #355). The rules unpin them once the tow starts.
 pub fn pull(
     mut commands: Commands,
     time: Res<Time>,
     lib: Res<crate::combat::Library>,
     holes: Query<(&Transform, &Pull), Without<Ship>>,
     wells: Query<(&Transform, &crate::combat::lob::GravWell), Without<Ship>>,
-    mut ships: Query<(Entity, &Ship, &mut Transform, &mut Health, Option<&Docker>, Option<&mut Caught>, Option<&mut crate::cloak::Cloak>)>,
+    mut ships: Query<(Entity, &Ship, &mut Transform, &mut Health, Option<&Docker>, Option<&mut Caught>, Option<&mut crate::cloak::Cloak>, Has<crate::collision::Pinned>)>,
 ) {
     let dt = time.delta_secs();
-    for (e, ship, mut tf, mut health, docker, caught, mut cloak) in &mut ships {
-        if health.destroyed || docker.is_some_and(Docker::is_docked) {
+    for (e, ship, mut tf, mut health, docker, caught, mut cloak, pinned) in &mut ships {
+        if health.destroyed || pinned || docker.is_some_and(Docker::is_docked) {
             continue;
         }
         let class = &lib.classes[ship.class];
@@ -550,6 +552,9 @@ mod tests {
         };
         let gunner = ship(&mut app, "Ship_Pirate_Carrack", Side::Enemy, Vec3::new(300.0, 0.0, 0.0));
         let victim = ship(&mut app, "Ship_Navy_ManOWar", Side::Player, Vec3::new(100.0, 0.0, 0.0));
+        // A ship the rules pinned (mission 4's stranded St. Christopher, #351) waits in the core to be towed out.
+        let stranded = ship(&mut app, "Ship_Navy_Tender", Side::Enemy, Vec3::new(0.0, 0.0, 20.0));
+        app.world_mut().entity_mut(stranded).insert(crate::collision::Pinned);
         app.update(); // stats registers both hulls; the victim is caught
         app.world_mut().write_message(Hit { shooter: gunner, victim });
         app.world_mut().get_mut::<Health>(victim).unwrap().sections[0] -= 50.0; // the Carrack's last hit
@@ -567,6 +572,8 @@ mod tests {
         }
         assert_eq!(app.world().get::<Health>(victim).unwrap().core, 0.0, "after 1.1 s in the core the hull goes");
         assert!(app.world().get::<Swallowed>(victim).is_some());
+        assert!(app.world().get::<Health>(stranded).unwrap().core > 0.0, "a pinned ship is not swallowed");
+        assert_eq!(app.world().get::<Transform>(stranded).unwrap().translation, Vec3::new(0.0, 0.0, 20.0), "nor pulled");
         let far = app.world().get::<Transform>(gunner).unwrap().translation;
         assert_eq!(far, Vec3::new(300.0, 0.0, 0.0), "outside the radius nothing moves");
         // combat::deaths would set `destroyed`; the summary then shows the loss but no kill and no extra damage
