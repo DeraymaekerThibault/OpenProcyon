@@ -580,6 +580,7 @@ fn update(
                 extra.board.write(crate::boarding::BoardMsg::Boardable(s.entity, false));
             }
         }
+        mission.script.watch(&world, dt);
         autopilot_dock(&mission.script, &world, &mission.data, &mut extra);
         autopilot_tow(&mission.script, &world, &mission.data, &mut extra);
         // While running, the fleet follows in formation with cease fire, as a player would order from the fleet bar: left to their
@@ -645,6 +646,9 @@ fn update(
         }
     }
 }
+
+/// What the dev autopilot was pursuing when last sampled (goal, target, wants), for the autoplay stall report.
+pub static BOT_NOTE: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
 
 /// How far ahead the dev autopilot sets its waypoint while leaving a volume (PROVISIONAL).
 const LEAVE_STEP: f32 = 400.0;
@@ -1159,6 +1163,13 @@ fn autopilot(
         && g == u.pos
     {
         target.0 = Some(u.e);
+    }
+    // Once a game second: the same facts, kept for the stall report (`smoke::autoplay_end`). Names are looked up here, not at the end.
+    static NOTED_SECOND: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(u32::MAX);
+    if NOTED_SECOND.swap(sc.time as u32, std::sync::atomic::Ordering::Relaxed) != sc.time as u32 {
+        let name = |e: Entity| w.iter().find(|u| u.e == e).map_or_else(|| format!("{e:?}"), |u| format!("{}/{} dmg {:.2}", u.owner, u.name, u.damage));
+        let note = format!("goal={goal:.0?} target={:?} wants={:?}", target.0.map(name), (wants.len(), &wants[..wants.len().min(6)]));
+        *BOT_NOTE.lock().unwrap_or_else(|e| e.into_inner()) = note;
     }
     // Once a game minute: what the bot is after, for reading a stalled autoplay log (#68).
     static LOGGED_MINUTE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);

@@ -14,7 +14,13 @@ Git Bash (`GIT_BASH=<path>` if it is not in the default place), and the screensh
 5. For ECS wiring or UI changes, also run a screenshot smoke test. Unit tests do not detect every Bevy query conflict or layout problem. `make smokes` runs every documented smoke with its arguments (`tools/smokes.sh`; add new smokes to its list).
    `make autoplay [ARGS="1 2"]` (`tools/autoplay.py`) plays campaign missions with the `--script mission` autopilot and prints a
    table per mission: outcome (won, lost, time limit, stuck in NIS, panic), peak entities/particles, slowest frame and how many
-   mission rules never fired (named in the log). It finds crashes and soft-locks, not fidelity problems.
+   mission rules never fired, split into story/win rules (the real gaps) and loss/presentation rules (named in the log). It finds crashes
+   and soft-locks, not fidelity problems. A run that ends without winning logs why under `autoplay blocked`: one line per unfired story or
+   win rule whose flag, timer and speech gates hold (`Script::frontier_report`, classified from the rule's actions, sampled once a game
+   second by `Script::watch`), listing each false condition with its arguments, how many game seconds it has been false and the player's
+   relation to it (inside/outside a volume and how far, the nearest pair distance against the threshold), then the player's position and
+   what the bot was pursuing (goal, target, wants). Read it to tell a bot gap (the bot never went where the condition asks) from an
+   engine bug (the bot is inside the volume, in range, and the condition is still false).
    `make battles [ARGS=ambush]` (`tools/battle_check.py`, part of `make check` when assets are imported) plays short skirmishes with
    fixed fleets at 16x and fails when one stops behaving like a battle: a side never fires or hits, a computer ship parks, a ship
    grinds on scenery, or the game panics. The game writes one `battle report {json}` line (`PROCYON_REPORT=<game s>`,
