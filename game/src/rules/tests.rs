@@ -869,53 +869,152 @@ fn opening_nis_rules_run_in_missions_without_the_scripted_briefing() {
     }
 }
 
-/// The dev autopilot's fallback: an unfired rule whose flag gate holds asks the player to enter its volume or shoot its group; a rule
-/// behind an unmet flag, a fail rule and a speech-only warning ask for nothing (#68: missions 4, 5 and 8 stalled without a point).
+const WIN: &str = r#"[{"Type": "Goto Next Level", "World": "Mission02.twt"}]"#;
+const LOSE: &str = r#"[{"Type": "End Game"}]"#;
+
+/// A synthetic rule: `conds` and `acts` as JSON text, run once.
+fn rule(name: &str, conds: &str, acts: &str) -> Value {
+    serde_json::json!({"name": name, "conditions": serde_json::from_str::<Value>(conds).unwrap(), "actions": serde_json::from_str::<Value>(acts).unwrap()})
+}
+fn set_flag(name: &str) -> String {
+    format!(r#"[{{"Type": "Set Flag Action", "Flag Name": "{name}", "Boolean Value": "TRUE"}}]"#)
+}
+fn flag(name: &str) -> String {
+    format!(r#"{{"Type": "Flag Condition", "Flag Name": "{name}", "Boolean Value": "TRUE"}}"#)
+}
+fn enter(group: &str, vol: &str) -> String {
+    format!(r#"{{"Type": "Enter Volume", "Group Name": "{group}", "Volume Name": "{vol}"}}"#)
+}
+const ME: &str = "Player0 Group,HUMAN CONTROLLED COMMAND SHIP";
+fn square(x: f32) -> Value {
+    serde_json::json!([[x, 100.0], [x + 100.0, 100.0], [x + 100.0, 200.0], [x, 200.0]])
+}
+fn id(n: u32) -> Entity {
+    Entity::from_raw_u32(n).unwrap()
+}
+
+/// Rules that can lead to the win are critical, with their hops to it; those that can only lead to a loss are hazards; the rest are
+/// optional. A rule on both counts as critical. Names mean nothing.
 #[test]
-fn wants_lists_what_open_rules_wait_for_the_player_to_do() {
-    let vol = serde_json::json!([[100.0, 100.0], [200.0, 100.0], [200.0, 200.0], [100.0, 200.0]]);
-    let enter = |name: &str, flag: bool, acts: Value| {
-        serde_json::json!({"name": name, "conditions": [
-            {"Type": "Flag Condition", "Flag Name": "go", "Boolean Value": if flag { "TRUE" } else { "FALSE" }},
-            {"Type": "Enter Volume", "Group Name": "Player0 Group,HUMAN CONTROLLED COMMAND SHIP", "Volume Name": "Search"}], "actions": acts})
-    };
-    let set = serde_json::json!([{"Type": "Set Flag Action", "Flag Name": "found", "Boolean Value": "TRUE"}]);
+fn rule_graph_marks_critical_hazard_and_optional_rules_by_chaining_back_from_the_endings() {
     let data = serde_json::json!({"rules": [
-        enter("Found Ships", false, set.clone()),
-        enter("Locked", true, set.clone()),
-        enter("FAIL Mission", false, set),
-        enter("Wrong Way Speech", false, serde_json::json!([{"Type": "Play speech event", "Speech Event Name": "x"}])),
-        {"name": "Warning Shot", "conditions": [{"Type": "Player has hit Group/Unit at least x Times", "Player Name": PLAYER, "Group/Unit Name": "Blockade", "Number Of Times Hit": 1}],
-         "actions": [{"Type": "Set Flag Action", "Flag Name": "shot", "Boolean Value": "TRUE"}]},
-    ], "ships": [], "volumes": {"Search": vol}, "environment": {}});
+        rule("a", &format!("[{}]", enter(ME, "V")), &set_flag("f")),
+        rule("b", &format!("[{}]", flag("f")), WIN),
+        rule("c", &format!("[{}]", enter(ME, "V")), &set_flag("g")),
+        rule("d", &format!("[{}]", flag("g")), LOSE),
+        rule("e", &format!("[{}]", enter(ME, "V")), &set_flag("h")),
+        rule("both", &format!("[{}]", enter(ME, "V")), r#"[{"Type": "Set Flag Action", "Flag Name": "f", "Boolean Value": "TRUE"}, {"Type": "Set Flag Action", "Flag Name": "g", "Boolean Value": "TRUE"}]"#),
+        rule("via speech", &format!("[{}]", flag("s")), &set_flag("f")),
+        rule("speaks", r#"[{"Type": "World Initialize"}]"#, r#"[{"Type": "Play speech event", "Speech Event Name": "line"}, {"Type": "Set Flag Action", "Flag Name": "s", "Boolean Value": "TRUE"}]"#),
+    ], "ships": [], "volumes": {"V": square(100.0)}, "environment": {}});
     let sc = Script::new(&data, Value::Null);
-    let mut blockader = unit("Blockader", "Blockade", Vec3::new(500.0, 0.0, 0.0));
-    blockader.e = Entity::from_raw_u32(7).unwrap();
-    let shoot = blockader.e;
-    let w = vec![unit("RLS Comet", PLAYER, Vec3::ZERO), blockader];
-    assert_eq!(sc.wants(&w), vec![Want::Reach(Vec3::new(150.0, 0.0, -150.0)), Want::Hit(shoot)]);
-    // Mission 9's mortar target and mission 11's tow out of the black hole.
-    let data2 = serde_json::json!({"rules": [
-        {"name": "Ignite", "conditions": [{"Type": "Mission 9 - If Mortar explodes within Area", "Volume Name": "Search"}], "actions": [{"Type": "Start Timer", "Timer Name": "t"}]},
-        {"name": "Towing", "conditions": [{"Type": "Is Ship In Tow", "Towing Group": "Player0 Group,HUMAN CONTROLLED COMMAND SHIP", "Target to Tow": "Blockade,Blockader", "Boolean": "TRUE"}],
-         "actions": [{"Type": "Set Flag Action", "Flag Name": "towing", "Boolean Value": "TRUE"}]},
-        {"name": "Saved", "conditions": [{"Type": "Exit Volume", "Group Name": "Blockade,Blockader", "Volume Name": "Search"}], "actions": [{"Type": "Set Flag Action", "Flag Name": "saved", "Boolean Value": "TRUE"}]},
-    ], "ships": [], "volumes": {"Search": vol}, "environment": {}});
-    let mut sc2 = Script::new(&data2, Value::Null);
-    // The mortar aims at the volume's nearest corner (100, 100), 15 units inside.
-    let inward = (Vec2::splat(100.0) + Vec2::splat(50.0).normalize() * 15.0).x;
-    let (lob, towee) = (Want::Lob(Vec3::new(inward, 0.0, -inward)), w[1].e);
-    let lobs = |v: &[Want]| v.iter().filter(|x| matches!(x, Want::Lob(_))).count();
-    let got = sc2.wants(&w);
-    assert_eq!((got[0], lobs(&got), *got.last().unwrap()), (lob, 1 + 64, Want::Tow(towee)), "nearest point, the grid, then the tow; nothing to leave");
-    let mut inside = w.clone();
-    inside[1].pos = Vec3::new(150.0, 0.0, -150.0);
-    sc2.tows.push((inside[0].e, towee));
-    let got = sc2.wants(&inside);
-    assert_eq!(*got.last().unwrap(), Want::Leave(Vec3::new(150.0, 0.0, -150.0)), "towed and inside: pull it out");
-    // Inside the volume already: only the shot is left.
-    let w = vec![unit("RLS Comet", PLAYER, Vec3::new(150.0, 0.0, -150.0)), w[1].clone()];
-    assert_eq!(sc.wants(&w), vec![Want::Hit(w[1].e)]);
+    let roles: Vec<_> = (0..8).map(|i| sc.role(i)).collect();
+    use Role::*;
+    assert_eq!(roles, [Critical(1), Critical(0), Hazard(1), Hazard(0), Optional, Critical(1), Critical(1), Critical(2)]);
+}
+
+/// What the bot wants comes from critical rules whose gates hold, nearest to the win first; optional rules only when no critical rule
+/// yields a want; hazard rules never.
+#[test]
+fn plan_prefers_critical_wants_over_optional_ones_and_never_follows_hazards() {
+    let data = serde_json::json!({"rules": [
+        rule("far step", &format!("[{}]", enter(ME, "Far")), &set_flag("b")),
+        rule("near step", &format!("[{}]", enter(ME, "Near")), &set_flag("a")),
+        rule("win", &format!("[{}, {}]", flag("a"), flag("b")), WIN),
+        rule("deeper", &format!("[{}]", enter(ME, "Deep")), &set_flag("c")),
+        rule("second step", &format!("[{}, {}]", flag("c"), enter(ME, "Win")), &set_flag("a")),
+        rule("side", &format!("[{}]", enter(ME, "Side")), &set_flag("z")),
+        rule("trap", &format!("[{}]", enter(ME, "Trap")), &set_flag("t")),
+        rule("lose", &format!("[{}]", flag("t")), LOSE),
+        rule("gated", &format!("[{}, {}]", flag("never"), enter(ME, "Gate")), &set_flag("q")),
+    ], "ships": [], "volumes": {"Near": square(100.0), "Far": square(2000.0), "Deep": square(300.0), "Win": square(500.0), "Side": square(-900.0), "Trap": square(-1900.0), "Gate": square(900.0)}, "environment": {}});
+    let mut sc = Script::new(&data, Value::Null);
+    let w = vec![unit("RLS Comet", PLAYER, Vec3::new(0.0, 0.0, 0.0))];
+    let centre = |x: f32| Want::Reach(Vec3::new(x + 50.0, 0.0, -150.0));
+    let got: Vec<_> = sc.plan(&w).iter().map(|x| (x.want, x.critical, x.dist)).collect();
+    // Near step and far step are one hop from the win, deeper is two hops (it enables second step, which enables the win through a):
+    // nearest to the win first, then nearest to the player. "second step" waits for flag c, so only "deeper" is open. The side rule is
+    // optional, the trap a hazard, the gated one waits for a flag nobody provides: none is wanted.
+    assert_eq!(got, [(centre(100.0), true, 1), (centre(2000.0), true, 1), (centre(300.0), true, 2)]);
+    // With the critical steps done, the optional side rule is all that is left to want.
+    for i in [0, 1, 3, 4] {
+        sc.fired[i] = true;
+    }
+    let got: Vec<_> = sc.plan(&w).iter().map(|x| (x.want, x.critical)).collect();
+    assert_eq!(got, [(centre(-900.0), false)]);
+}
+
+/// Each condition type the bot turns into something to do, and the ones it cannot (`no-plan`).
+#[test]
+fn plan_turns_world_conditions_into_wants_and_reports_the_rest_as_no_plan() {
+    let cond = |text: &str| -> Value { serde_json::from_str(text).unwrap() };
+    let docked = cond(&format!(r#"{{"Type": "Group/Unit Docked", "Dockers Group/Unit Name": "{ME}", "Targets Group/Unit Name": "Camp"}}"#));
+    let tow = cond(&format!(r#"{{"Type": "Is Ship In Tow", "Towing Group": "{ME}", "Target to Tow": "Convoy", "Boolean": "TRUE"}}"#));
+    let shots = cond(&format!(r#"{{"Type": "Group/Unit Fired X Shots", "Group/Unit Name": "{ME}", "Equivalence": "Greater Than", "Number Of Rounds Fired": 3}}"#));
+    let near = cond(&format!(r#"{{"Type": "Group to Group Distance", "GroupA Name": "{ME}", "GroupB Name": "Foe", "Equivalence": "Less Than", "Distance": 50}}"#));
+    let away = cond(&format!(r#"{{"Type": "Group to Group Distance", "GroupA Name": "{ME}", "GroupB Name": "Foe", "Equivalence": "Greater Than", "Distance": 5000}}"#));
+    let dead = cond(r#"{"Type": "Group Destroyed", "Group Name": "Foe"}"#);
+    let boats = cond(&format!(
+        r#"{{"Type": "Player Vs Player capture count", "Player Name A": "{PLAYER}", "Player Name B": "Foe", "Equivalence": "Greater Than", "Number Of Captures": 0}}"#
+    ));
+    let rules: Vec<Value> = [docked, tow, shots, near, away, dead, boats]
+        .into_iter()
+        .enumerate()
+        .map(|(i, c)| serde_json::json!({"name": format!("r{i}"), "conditions": [c], "actions": serde_json::from_str::<Value>(WIN).unwrap()}))
+        .collect();
+    let data = serde_json::json!({"rules": rules, "ships": [], "volumes": null, "environment": {}});
+    let mut sc = Script::new(&data, Value::Null);
+    let mut foe = unit("Pirate", "Foe", Vec3::new(400.0, 0.0, 0.0));
+    foe.e = id(2);
+    let mut camp = unit("Camp", "Camp", Vec3::new(0.0, 0.0, 300.0));
+    camp.e = id(3);
+    let mut convoy = unit("Convoy", "Convoy", Vec3::new(0.0, 0.0, 600.0));
+    convoy.e = id(4);
+    let mut me = unit("RLS Comet", PLAYER, Vec3::ZERO);
+    me.e = id(1);
+    let w = vec![me, foe, camp, convoy];
+    sc.hostile.insert(("Foe".into(), PLAYER.into()));
+    let wants: Vec<Want> = sc.plan(&w).iter().map(|x| x.want).collect();
+    for expected in [Want::Dock(id(3)), Want::Tow(id(4)), Want::Reach(Vec3::new(400.0, 0.0, 0.0)), Want::Leave(Vec3::new(400.0, 0.0, 0.0)), Want::Hit(id(2)), Want::Lifeboats] {
+        assert!(wants.contains(&expected), "{expected:?} in {wants:?}");
+    }
+    // The shots condition has no plan: the report says so on the false condition.
+    let report = sc.frontier_report(&w);
+    let flagged: Vec<_> = report.iter().filter(|r| r.conds.iter().any(|c| c.no_plan)).map(|r| r.name.as_str()).collect();
+    assert_eq!(flagged, ["r2"]);
+    assert!(report.iter().all(|r| r.role == Role::Critical(0)));
+}
+
+/// The hazard rules' world conditions become constraints: a group whose loss ends the mission is protected, a volume the player must
+/// not enter is avoided, and a timer is only reported.
+#[test]
+fn hazard_rules_give_groups_to_protect_volumes_to_avoid_and_timers_to_report() {
+    let data = serde_json::json!({"rules": [
+        rule("win", &format!("[{}]", flag("a")), WIN),
+        rule("step", &format!("[{}]", enter(ME, "Goal")), &set_flag("a")),
+        rule("lose convoy", r#"[{"Type": "Group Destroyed", "Group Name": "Convoy"}]"#, LOSE),
+        rule("lose trap", &format!("[{}]", enter(ME, "Trap")), LOSE),
+        rule("lose late", r#"[{"Type": "Timer Condition", "Timer Name": "clock", "Equivalence": "Greater Than", "Time in seconds": 600}]"#, LOSE),
+        rule("start clock", r#"[{"Type": "World Initialize"}]"#, r#"[{"Type": "Start Timer", "Timer Name": "clock"}]"#),
+    ], "ships": [], "volumes": {"Goal": square(2000.0), "Trap": square(100.0)}, "environment": {}});
+    let mut sc = Script::new(&data, Value::Null);
+    let mut me = unit("RLS Comet", PLAYER, Vec3::new(-500.0, 0.0, 0.0));
+    me.e = id(1);
+    let mut convoy = unit("Barge", "Convoy", Vec3::new(1000.0, 0.0, 0.0));
+    convoy.e = id(2);
+    let mut raider = unit("Pirate", "Foe", Vec3::new(1300.0, 0.0, 0.0));
+    raider.e = id(3);
+    let mut far = unit("Pirate", "Foe", Vec3::new(-3000.0, 0.0, 0.0));
+    far.e = id(4);
+    let w = vec![me.clone(), convoy, raider, far];
+    sc.hostile.insert(("Foe".into(), "Convoy".into()));
+    sc.hostile.insert(("Foe".into(), PLAYER.into()));
+    assert_eq!(sc.protected_units(&w, &me).iter().map(|u| u.e).collect::<Vec<_>>(), [id(2)]);
+    assert_eq!(sc.raider(&w, &me, |_| true).map(|u| u.e), Some(id(3)), "the pirate within reach of the convoy, not the far one");
+    assert!(sc.avoided(&w, &me, Vec3::new(150.0, 0.0, -150.0)) && !sc.avoided(&w, &me, Vec3::new(2050.0, 0.0, -150.0)));
+    assert!(sc.hazards_text().contains("clock Greater Than 600s"), "{}", sc.hazards_text());
+    // A hazard rule is never wanted, whatever its conditions ask.
+    assert!(sc.plan(&w).iter().all(|x| x.rule == 1));
 }
 
 /// A kill is an event: a repeating rule scores once per kill, by the kind of object destroyed (mission 1's rocks, mission 3's ships).
@@ -1143,4 +1242,80 @@ fn gated_rules_name_the_flag_a_story_rule_waits_for() {
     assert_eq!(gated.len(), 1, "{gated:?}");
     assert_eq!(gated[0].0, "Gated story");
     assert!(gated[0].1[0].contains("Flag Condition") && gated[0].1[0].contains("Flag Name=go") && gated[0].1[0].contains("flag is true"), "{:?}", gated[0].1);
+}
+
+/// A world condition about a group that some rule makes visible waits for that rule: the rule that reveals the pirates is on the way to
+/// the win that needs them sunk (mission 7), and the one that makes a camp dockable is on the way to the dock.
+#[test]
+fn rule_graph_links_world_conditions_to_the_rules_that_reveal_their_groups() {
+    let data = serde_json::json!({"rules": [
+        rule("win", r#"[{"Type": "Group Destroyed", "Group Name": "Pirates"}, {"Type": "Group/Unit Docked", "Dockers Group/Unit Name": "Player0 Group", "Targets Group/Unit Name": "Camp"}]"#, WIN),
+        rule("reveal", &format!("[{}]", flag("go")), r#"[{"Type": "Set Group/Unit Visibility", "Group/Unit Name": "Pirates", "Boolean": "TRUE"}]"#),
+        rule("open camp", &format!("[{}]", flag("go")), r#"[{"Type": "Set Group/Unit Dockable", "Group Name": "Camp", "Boolean": "TRUE"}]"#),
+        rule("go", &format!("[{}]", enter(ME, "V")), &set_flag("go")),
+        rule("hide other", &format!("[{}]", flag("go")), r#"[{"Type": "Set Group/Unit Visibility", "Group/Unit Name": "Whales", "Boolean": "TRUE"}]"#),
+    ], "ships": [], "volumes": {"V": square(100.0)}, "environment": {}});
+    let sc = Script::new(&data, Value::Null);
+    use Role::*;
+    assert_eq!((0..5).map(|i| sc.role(i)).collect::<Vec<_>>(), [Critical(0), Critical(1), Critical(1), Critical(2), Optional]);
+}
+
+/// A tow condition naming a group yields one tow, of the nearest member, and none once the player tows one of them. At the same chain
+/// distance the want the objective point marks comes before a nearer one.
+#[test]
+fn plan_tows_one_ship_and_prefers_the_want_the_objective_point_marks() {
+    let tow = format!(r#"{{"Type": "Is Ship In Tow", "Towing Group": "{ME}", "Target to Tow": "Convoy", "Boolean": "TRUE"}}"#);
+    let data = serde_json::json!({
+        "rules": [
+            rule("tow", &format!("[{tow}]"), WIN),
+            rule("near", &format!("[{}]", enter(ME, "Near")), &set_flag("a")),
+            rule("far", &format!("[{}]", enter(ME, "Far")), &set_flag("a")),
+            rule("end", &format!("[{}]", flag("a")), WIN),
+        ],
+        "ships": [], "volumes": {"Near": square(100.0), "Far": square(2000.0)}, "environment": {},
+        "points": [{"Name": "mark", "Position": [2050.0, 150.0, 0.0]}],
+    });
+    let mut sc = Script::new(&data, Value::Null);
+    let mut ships = vec![unit("RLS Comet", PLAYER, Vec3::ZERO)];
+    for (n, z) in [(2, 900.0), (3, 300.0), (4, 600.0)] {
+        let mut c = unit("Barge", "Convoy", Vec3::new(0.0, 0.0, z));
+        c.e = id(n);
+        ships.push(c);
+    }
+    ships[0].e = id(1);
+    let tows: Vec<_> = sc.plan(&ships).iter().filter(|x| matches!(x.want, Want::Tow(_))).map(|x| x.want).collect();
+    assert_eq!(tows, [Want::Tow(id(3))], "one tow, of the nearest member");
+    sc.tows.push((id(1), id(4)));
+    assert!(!sc.plan(&ships).iter().any(|x| matches!(x.want, Want::Tow(_))), "towing one of them satisfies it");
+    // Both volumes are one hop from the end rule; the point sits at the far one.
+    sc.point = Some(0);
+    let reach: Vec<_> = sc.plan(&ships).iter().filter(|x| x.rule > 0 && x.rule < 3).map(|x| x.rule).collect();
+    assert_eq!(reach, [2, 1], "the marked volume first, then the nearer one");
+}
+
+/// A dock waits for the rule that makes the camp dockable (mission 2: the island's towers come first): until it has fired the dock is
+/// not wanted, only what leads to it is.
+#[test]
+fn a_dock_is_not_wanted_before_the_rule_that_makes_its_target_dockable_has_fired() {
+    let dock = format!(r#"{{"Type": "Group/Unit Docked", "Dockers Group/Unit Name": "{ME}", "Targets Group/Unit Name": "Camp"}}"#);
+    let hit = r#"{"Type": "Group Destroyed", "Group Name": "Camp"}"#;
+    let data = serde_json::json!({"rules": [
+        rule("win", &format!("[{}]", flag("docked")), WIN),
+        rule("dock", &format!("[{dock}]"), &set_flag("docked")),
+        rule("open", &format!("[{}]", flag("down")), r#"[{"Type": "Set Group/Unit Dockable", "Group Name": "Camp", "Boolean": "TRUE"}]"#),
+        rule("towers", &format!("[{hit}]"), &set_flag("down")),
+    ], "ships": [], "volumes": null, "environment": {}});
+    let mut sc = Script::new(&data, Value::Null);
+    let mut camp = unit("Camp", "Camp", Vec3::new(0.0, 0.0, 300.0));
+    camp.e = id(3);
+    let mut me = unit("RLS Comet", PLAYER, Vec3::ZERO);
+    me.e = id(1);
+    let w = vec![me, camp];
+    sc.hostile.insert(("Camp".into(), PLAYER.into()));
+    let wants: Vec<Want> = sc.plan(&w).iter().map(|x| x.want).collect();
+    assert_eq!(wants, [Want::Hit(id(3))], "shoot first");
+    sc.ran[2] = true;
+    sc.fired[2] = true;
+    let wants: Vec<Want> = sc.plan(&w).iter().map(|x| x.want).collect();
+    assert!(wants.contains(&Want::Dock(id(3))), "{wants:?}");
 }

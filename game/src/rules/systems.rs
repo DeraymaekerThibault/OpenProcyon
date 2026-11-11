@@ -236,7 +236,7 @@ fn update(
     mission.script.tag(&mut world);
     let owner_of = |e: Entity| world.iter().find(|u| u.e == e).map(|u| u.owner.clone());
     for h in hits.read() {
-        mission.script.record_hit(owner_of(h.shooter).as_deref(), h.victim);
+        mission.script.record_hit(h.shooter, owner_of(h.shooter).as_deref(), h.victim);
     }
     for fr in fired.read() {
         mission.script.record_fire(fr.shooter, fr.target);
@@ -545,6 +545,7 @@ fn update(
     // Mission 1's refit task: a hint while the weapons tender is in range (docking itself is docking.rs; D is a keyboard shortcut).
     // `world` is last frame-start's snapshot: good enough for a hint and the dev autopilot.
     mission.script.hint.clear();
+    let mut tender_dock = false; // the hook below is docking the bot this frame
     if let (Some(p), Some(t)) = (world.iter().find(|u| u.primary && u.alive), world.iter().find(|u| u.name == "RLS Bounty")) {
         let wants = mission.script.task_active("Dock With Tender");
         let near = extra.sensors.in_sight(p.e, t.e, Some(mission)) && !mission.script.docked.contains(&(p.e, t.e));
@@ -553,6 +554,7 @@ fn update(
         }
         if near && wants && (input.dock || matches!(cfg.script.as_deref(), Some("mission" | "dock"))) {
             extra.dock.write(DockMsg::Dock { docker: None, dockee: t.e });
+            tender_dock = true;
         }
     }
     // Not during mission 1's scripted opening (briefing.rs): the player sails the rules' arrival path into the fleet meanwhile.
@@ -568,11 +570,14 @@ fn update(
             }
         }
         mission.script.watch(&world, dt);
-        autopilot_dock(&mission.script, &world, &mission.data, &mut extra);
-        autopilot_tow(&mission.script, &world, &mut extra);
+        let plan = mission.script.plan(&world);
+        if !tender_dock {
+            autopilot_dock(&mission.script, &world, &plan, &mut extra);
+        }
+        autopilot_tow(&mission.script, &world, &plan, &mut extra);
         // While running, the fleet follows in formation with cease fire, as a player would order from the fleet bar: left to their
         // own captains the escorts stay and fight a battle they cannot win (mission 3's ambush). Released when the run ends.
-        let flee = fleeing(&mission.script);
+        let flee = fleeing(&mission.script, &world, &plan);
         if flee != *extra.fleet_fleeing {
             *extra.fleet_fleeing = flee;
             commands.queue(move |w: &mut World| {
@@ -612,7 +617,7 @@ fn update(
                     )
                 })
                 .unwrap_or_default();
-            autopilot(&mission.script, &world, &mission.data, &rocks, &base_ids, &boats, &mut ships, &mut target, &mortars);
+            autopilot(&mission.script, &world, &plan, &base_ids, &boats, &mut ships, &mut target, &mortars);
         }
     }
 }
@@ -635,38 +640,16 @@ const LOB_REACH: f32 = 0.8;
 /// Distance at which the dev autopilot counts the objective point as reached (PROVISIONAL).
 const POINT_REACHED: f32 = 150.0;
 
-/// How far from a defended objective point the dev autopilot looks for its attackers (PROVISIONAL).
-const DEFEND_RADIUS: f32 = 600.0;
-
-/// True for an objective text that tells the player to guard something (dev autopilot heuristic, PROVISIONAL: English task texts).
-fn defend_task(text: &str) -> bool {
-    let t = text.to_ascii_lowercase();
-    ["defend", "protect", "keep the pirates from"].iter().any(|w| t.contains(w))
+/// The autopilot is running past the enemy instead of fighting: nothing the critical rules want needs a fight (no shot, lob, tow, dock
+/// or pickup), it has somewhere to go, and no protected unit is under attack. The player cannot sink under PROCYON_AUTOINVULN, so
+/// fighting there never ends and the escorts die (mission 3's ambush).
+fn fleeing(sc: &Script, w: &[Unit], plan: &[Wanted]) -> bool {
+    let Some(p) = w.iter().find(|u| u.primary && u.alive) else { return false };
+    let engages = |x: &&Wanted| !matches!(x.want, Want::Reach(_) | Want::Leave(_));
+    let somewhere = sc.point.is_some() || sc.point_pos.is_some() || plan.iter().any(|x| !engages(&x));
+    somewhere && !plan.iter().any(|x| engages(&x)) && sc.raider(w, p, |_| true).is_none()
 }
 
-/// Where the objective marker is: a ship it follows ('Set Current Objective Point On Ship', mission 9's St Roch), else the point.
-fn objective_at(sc: &Script, data: &Value) -> Option<Vec3> {
-    sc.point_pos.or_else(|| sc.point.map(|i| game_to_bevy(&data["points"][i]["Position"])))
-}
-
-/// A task to dock, by its name or its text (mission 9's "M09E - Return To Ship" reads "Return to and dock with Command Ship").
-fn is_dock_task(t: &Task) -> bool {
-    t.name.to_ascii_lowercase().contains("dock") || t.text.to_ascii_lowercase().contains("dock")
-}
-
-/// The dev autopilot is running for the objective point instead of fighting (see `flee_task`).
-fn fleeing(sc: &Script) -> bool {
-    (sc.point.is_some() || sc.point_pos.is_some()) && sc.tasks.iter().any(|t| t.active && !t.complete && flee_task(&t.text))
-}
-
-/// True for an objective text that tells the player to get away rather than fight (dev autopilot heuristic, PROVISIONAL: English task texts).
-fn flee_task(text: &str) -> bool {
-    let t = text.to_ascii_lowercase();
-    ["take cover", "avoid", "escape", "flee", "alive", "retreat"].iter().any(|w| t.contains(w))
-}
-
-/// `--script mission`: for any active task named `Tow<name>` (mission 2's `TowCoventry`), orders a tow of the ship whose name ends with
-/// `<name>` (as the menu's Tow would) unless the player already tows or is on the way; once linked, the autopilot sails for the objective point.
 /// The bot's progress check: where the ship was at the last check, and a detour it is on.
 #[derive(Default)]
 struct Stuck {
@@ -769,68 +752,59 @@ fn unstick(time: f32, pos: Vec3, goal: Option<Vec3>, cell: &std::sync::Mutex<Opt
     Some(d)
 }
 
-fn autopilot_tow(sc: &Script, w: &[Unit], extra: &mut Extra) {
+/// `--script mission`: orders a tow (as the menu's Tow would) of the nearest visible ship the rules want towed, unless the player already
+/// tows or is on the way; once linked, the autopilot sails the tow where the rules want it (`Script::want_of`).
+fn autopilot_tow(sc: &Script, w: &[Unit], plan: &[Wanted], extra: &mut Extra) {
     let Some(p) = w.iter().find(|u| u.primary && u.alive) else { return };
     if sc.nis || !extra.towing_player.is_empty() || !extra.docking_player.is_empty() || sc.tows().iter().any(|t| t.0 == p.e) {
         return;
     }
-    for t in sc.tasks.iter().filter(|t| t.active && !t.complete) {
-        let Some(name) = t.name.strip_prefix("Tow").filter(|n| !n.is_empty()) else { continue };
-        if let Some(towee) = w.iter().find(|u| u.alive && u.e != p.e && u.name.ends_with(name)) {
-            extra.dock.write(DockMsg::TowStart { tower: None, towee: towee.e });
-            return;
-        }
-    }
-    // Otherwise a visible ship an unfired rule waits for the player to tow (mission 11's SS Harvester at the black hole).
-    let towee = sc
-        .wants(w)
-        .into_iter()
-        .filter_map(|x| match x {
-            Want::Tow(e) => w.iter().find(|u| u.e == e && u.visible),
+    // Only a critical rule's tow, and only the ship it names.
+    let towee = plan
+        .iter()
+        .filter(|x| x.critical)
+        .filter_map(|x| match x.want {
+            Want::Tow(e) => w.iter().find(|u| u.e == e && u.visible).map(|u| (x, u)),
             _ => None,
         })
-        .nearest_to(p.pos, |u| u.pos);
-    if let Some(towee) = towee {
-        extra.dock.write(DockMsg::TowStart { tower: None, towee: towee.e });
+        .min_by(|a, b| a.0.dist.cmp(&b.0.dist).then(a.1.pos.distance(p.pos).total_cmp(&b.1.pos.distance(p.pos))));
+    if let Some((x, u)) = towee {
+        log_order(sc, "tow", u, x);
+        extra.dock.write(DockMsg::TowStart { tower: None, towee: u.e });
     }
 }
 
-/// `--script mission`: for any active task named `Dock...` (mission 2's camps), once the player is near the task's objective point
-/// (the point carries the task's name), orders the dock with the base nearest that point, as a click on it would. Mission 1's
-/// tender has its own hook above.
-fn autopilot_dock(sc: &Script, w: &[Unit], data: &Value, extra: &mut Extra) {
+/// Logs a tow or dock order once per (kind, unit), with the rule that asked for it, so a wrong one can be traced.
+fn log_order(sc: &Script, kind: &'static str, u: &Unit, x: &Wanted) {
+    static LAST: std::sync::Mutex<Option<(&'static str, Entity)>> = std::sync::Mutex::new(None);
+    let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
+    if *last != Some((kind, u.e)) {
+        *last = Some((kind, u.e));
+        info!("autoplay order {kind} unit={}/{} rule={:?} class={} t={:.0}", u.owner, u.name, sc.rules[x.rule].name.trim(), sc.role(x.rule).label(), sc.time);
+    }
+}
+
+/// `--script mission`: once the player is within `NEAR` of a unit the rules wait for it to dock with (a camp, a base: `Want::Dock`),
+/// orders the dock as a click on it would. Mission 1's tender has its own hook above.
+fn autopilot_dock(sc: &Script, w: &[Unit], plan: &[Wanted], extra: &mut Extra) {
     const NEAR: f32 = 600.0;
-    const BASE_RANGE: f32 = 400.0;
     let Some(p) = w.iter().find(|u| u.primary && u.alive) else { return };
-    if !extra.docking_player.is_empty() || sc.nis || sc.task_active("Dock With Tender") {
+    if !extra.docking_player.is_empty() || sc.nis {
         return;
     }
-    let dock_task = |t: &&Task| t.active && !t.complete && is_dock_task(t);
-    for t in sc.tasks.iter().filter(dock_task) {
-        // A task whose objective point carries its name (mission 2's camps): the base nearest that point.
-        let Some(at) = data["points"].as_array().and_then(|a| a.iter().find(|x| x["Name"] == t.name.as_str())).map(|x| game_to_bevy(&x["Position"])) else { continue };
-        if at.distance(p.pos) > NEAR {
-            continue;
-        }
-        let base = extra.bases.iter().filter(|(_, _, tf, _)| tf.translation.distance(at) < BASE_RANGE).nearest_to(at, |b| b.2.translation);
-        if let Some((dockee, ..)) = base {
-            extra.dock.write(DockMsg::Dock { docker: None, dockee });
-            return;
-        }
+    // `plan` holds optional wants only when no critical rule wants anything, so an optional dock is what the bot is steering for then
+    // (mission 2's abandoned camp, which the objective point leads to); a tow is only ever a critical rule's.
+    let dockee = plan
+        .iter()
+        .filter_map(|x| match x.want {
+            Want::Dock(e) => w.iter().find(|u| u.e == e).filter(|u| u.pos.distance(p.pos) < NEAR).map(|u| (x, u)),
+            _ => None,
+        })
+        .min_by(|a, b| a.0.dist.cmp(&b.0.dist).then(a.1.pos.distance(p.pos).total_cmp(&b.1.pos.distance(p.pos))));
+    if let Some((x, u)) = dockee {
+        log_order(sc, "dock", u, x);
+        extra.dock.write(DockMsg::Dock { docker: None, dockee: u.e });
     }
-    // Otherwise whatever an unfired rule waits for the player to dock with, once the player is near it: while a task says to dock, or
-    // when the target sits at the objective point (mission 5's "Deliver Supplies to Alamein" is a dock at Alamein).
-    let point = objective_at(sc, data);
-    if let Some((dockee, at)) = dock_target(sc, w, p.pos).filter(|(_, at)| at.distance(p.pos) < NEAR)
-        && (sc.tasks.iter().any(|t| dock_task(&t)) || point.is_some_and(|q| q.distance(at) < BASE_RANGE))
-    {
-        extra.dock.write(DockMsg::Dock { docker: None, dockee });
-    }
-}
-
-/// The nearest of the rules' dock targets (`Script::dock_targets`) and where it is.
-fn dock_target(sc: &Script, w: &[Unit], from: Vec3) -> Option<(Entity, Vec3)> {
-    sc.dock_targets(w).into_iter().filter_map(|e| w.iter().find(|u| u.e == e && u.alive).map(|u| (e, u.pos))).nearest_to(from, |t| t.1)
 }
 
 /// The points of a mission path (`paths.<name>`), empty when the mission has no such path.
@@ -873,12 +847,207 @@ fn add_once(list: &mut Vec<String>, g: &str) {
     }
 }
 
-/// `--script mission`: follows the objective point, then closes on the nearest hostile and targets it (smoke test of the rules).
+/// PROVISIONAL bot tuning: a hostile this close to the player, or this close to its straight course to the goal, is in the way and gets
+/// engaged even though no rule asks for it.
+const BLOCK_NEAR: f32 = 250.0;
+const BLOCK_LANE: f32 = 120.0;
+/// PROVISIONAL bot tuning: a target held this long (game seconds) with no change in its damage is logged once (`autoplay target
+/// stalled`) and left alone for `TARGET_IGNORE_SECS`.
+const TARGET_STALL_SECS: f32 = 60.0;
+/// ...but only counted while the target is this close: sailing for a far one takes a while without damaging anything (PROVISIONAL).
+const TARGET_STALL_RANGE: f32 = 500.0;
+const TARGET_IGNORE_SECS: f32 = 120.0;
+
+/// The target the bot is holding: since when, its damage then, the last call, the targets already logged and those being left alone.
+#[derive(Default)]
+struct TargetHold {
+    target: Option<Entity>,
+    since: f32,
+    damage: f32,
+    last: f32,
+    logged: Vec<Entity>,
+    ignored: Vec<(Entity, f32)>,
+}
+static TARGET_HOLD: std::sync::Mutex<Option<TargetHold>> = std::sync::Mutex::new(None);
+
+/// The targets the bot is leaving alone at game time `time` (they stalled it).
+fn ignored_targets(time: f32) -> Vec<Entity> {
+    let mut lock = TARGET_HOLD.lock().unwrap_or_else(|e| e.into_inner());
+    let hold = lock.get_or_insert_with(TargetHold::default);
+    if time < hold.last {
+        *hold = TargetHold::default(); // a new run
+    }
+    hold.ignored.retain(|(_, until)| *until > time);
+    hold.ignored.iter().map(|x| x.0).collect()
+}
+
+/// Notes the target held this frame (`None`: not engaged). One held for `TARGET_STALL_SECS` with its damage unchanged is logged once
+/// and ignored for a while; the aiming itself is not the bot's business here (step 3).
+fn track_target(time: f32, w: &[Unit], p: &Unit, held: Option<Entity>, may_ignore: bool) {
+    let mut lock = TARGET_HOLD.lock().unwrap_or_else(|e| e.into_inner());
+    let hold = lock.get_or_insert_with(TargetHold::default);
+    let unit = held.and_then(|e| w.iter().find(|u| u.e == e));
+    let damage = unit.map_or(0.0, |u| u.damage);
+    let far = unit.is_some_and(|u| u.pos.distance(p.pos) > TARGET_STALL_RANGE);
+    if held != hold.target || time - hold.last > 2.0 || (damage - hold.damage).abs() > 0.005 || far {
+        (hold.target, hold.since, hold.damage) = (held, time, damage);
+    }
+    hold.last = time;
+    if let (Some(e), Some(u)) = (held, unit)
+        && time - hold.since >= TARGET_STALL_SECS
+    {
+        if !hold.logged.contains(&e) {
+            hold.logged.push(e);
+            info!("autoplay target stalled target={}/{} dist={:.0} damage={:.2} held={:.0}s", u.owner, u.name, u.pos.distance(p.pos), u.damage, time - hold.since);
+        }
+        // A raider attacking what must be kept alive is never left alone (mission 12's boarders take the Parliament meanwhile).
+        if may_ignore {
+            hold.ignored.push((e, time + TARGET_IGNORE_SECS));
+        }
+        hold.target = None;
+    }
+}
+
+/// What the player's ship did to one target while the bot was engaging it (`autoplay gunnery`, evidence for step 3's aiming).
+struct Gunnery {
+    name: String,
+    first: f32,
+    last: f32,
+    samples: u32,
+    range_sum: f32,
+    range_min: f32,
+    bearing_sum: f32,
+    shots: (u32, u32),
+    hits: (u32, u32),
+    damage: (f32, f32),
+}
+static GUNNERY: std::sync::Mutex<Vec<(Entity, Gunnery)>> = std::sync::Mutex::new(Vec::new());
+
+/// One `autoplay gunnery` line per engaged target: shots the player's ship fired and hits it landed while engaged, the range and the
+/// bearing off the bow (0 = dead ahead) averaged over the engagement.
+pub fn gunnery_lines() -> Vec<String> {
+    let lock = GUNNERY.lock().unwrap_or_else(|e| e.into_inner());
+    lock.iter()
+        .map(|(_, g)| {
+            let n = g.samples.max(1) as f32;
+            format!(
+                "autoplay gunnery target={} engaged={:.0}s..{:.0}s bursts={} hits={} range avg={:.0} min={:.0} bearing_off_bow avg={:.0}deg damage {:.2}->{:.2}",
+                g.name,
+                g.first,
+                g.last,
+                g.shots.1 - g.shots.0,
+                g.hits.1 - g.hits.0,
+                g.range_sum / n,
+                g.range_min,
+                (g.bearing_sum / n).to_degrees(),
+                g.damage.0,
+                g.damage.1
+            )
+        })
+        .collect()
+}
+
+/// Notes one frame of the player's ship engaging `e`.
+fn note_gunnery(sc: &Script, w: &[Unit], p: &Unit, heading: f32, e: Entity) {
+    let Some(u) = w.iter().find(|u| u.e == e) else { return };
+    // The flagship's own bursts aimed at this target and bullets that hit it (not the fleet's: `hits_by` counts every ship of the owner).
+    let (shots, hits) = (sc.bursts_at.get(&(p.e, e)).copied().unwrap_or(0), sc.hits_from.get(&(p.e, e)).copied().unwrap_or(0));
+    let off = u.pos - p.pos;
+    let bearing = ((-off.x).atan2(-off.z) - heading + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
+    let mut lock = GUNNERY.lock().unwrap_or_else(|e| e.into_inner());
+    if !lock.iter().any(|x| x.0 == e) {
+        let name = format!("{}/{}", u.owner, u.name);
+        lock.push((
+            e,
+            Gunnery {
+                name,
+                first: sc.time,
+                last: sc.time,
+                samples: 0,
+                range_sum: 0.0,
+                range_min: f32::MAX,
+                bearing_sum: 0.0,
+                shots: (shots, shots),
+                hits: (hits, hits),
+                damage: (u.damage, u.damage),
+            },
+        ));
+    }
+    if let Some((_, g)) = lock.iter_mut().find(|x| x.0 == e) {
+        let d = off.length();
+        (g.last, g.samples, g.range_sum, g.range_min, g.bearing_sum, g.shots.1, g.hits.1, g.damage.1) =
+            (sc.time, g.samples + 1, g.range_sum + d, g.range_min.min(d), g.bearing_sum + bearing.abs(), shots, hits, u.damage);
+    }
+}
+
+/// Distance from `at` to the segment `a`-`b`, on the sea plane.
+fn lane_distance(a: Vec3, b: Vec3, at: Vec3) -> f32 {
+    let (ab, aq) = ((b - a).with_y(0.0), (at - a).with_y(0.0));
+    let t = (aq.dot(ab) / ab.length_squared().max(1e-6)).clamp(0.0, 1.0);
+    (a.with_y(0.0) + ab * t).distance(at.with_y(0.0))
+}
+
+/// PROVISIONAL bot tuning: transit legs longer than this go at Emergency Speed.
+const SPRINT_LEG: f32 = 800.0;
+/// PROVISIONAL bot tuning: a shot, tow or dock this far off waits for the objective point's course while there is one to follow.
+const ENGAGE_RANGE: f32 = 800.0;
+
+/// A want, for remembering which one the bot is pursuing: (rule, kind, unit or place).
+type Key = (usize, u8, u64);
+static STICKY: std::sync::Mutex<Option<Key>> = std::sync::Mutex::new(None);
+
+fn key_of(x: &Wanted) -> Key {
+    let at = |a: Vec3| ((a.x.round() as i64 as u64) << 32) ^ (a.z.round() as i64 as u64 & 0xffff_ffff);
+    match x.want {
+        Want::Hit(e) => (x.rule, 0, e.to_bits()),
+        Want::Tow(e) => (x.rule, 1, e.to_bits()),
+        Want::Dock(e) => (x.rule, 2, e.to_bits()),
+        Want::Reach(a) => (x.rule, 3, at(a)),
+        Want::Lob(a) => (x.rule, 4, at(a)),
+        Want::Leave(a) => (x.rule, 5, at(a)),
+        Want::Lifeboats => (x.rule, 6, 0),
+    }
+}
+
+/// Remembers the want pursued and logs a change of goal once (`autoplay goal`), not every frame.
+fn note_goal(sc: &Script, why: &'static str, key: Option<Key>, pick: &Option<Pick>, from: Vec3) {
+    static LAST: std::sync::Mutex<Option<(&'static str, Option<Key>)>> = std::sync::Mutex::new(None);
+    *STICKY.lock().unwrap_or_else(|e| e.into_inner()) = key.filter(|k| k.0 != usize::MAX);
+    let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
+    if *last != Some((why, key)) {
+        *last = Some((why, key));
+        let at = match pick {
+            Some(Pick::Foe(_, a) | Pick::At(a) | Pick::Go(a) | Pick::Away(a) | Pick::Tower(_, a, _)) => Some(*a),
+            _ => None,
+        };
+        let rule = key.filter(|k| k.0 != usize::MAX).map_or("-", |k| sc.rules[k.0].name.trim());
+        info!("autoplay goal t={:.0} why={why} rule={rule:?} at={at:.0?} from={from:.0}", sc.time);
+    }
+}
+
+/// Where the autopilot sails and what it shoots, once chosen.
+enum Pick {
+    /// Close on a unit and shoot it.
+    Foe(Entity, Vec3),
+    /// A live gun tower: (entity, world point, point in the base's frame).
+    Tower(Entity, Vec3, Vec3),
+    /// Approach a unit or place to act there (dock, tow, pickup): at Ahead Full.
+    At(Vec3),
+    /// Transit to a volume or the objective point: Emergency Speed when far.
+    Go(Vec3),
+    /// Away from this point.
+    Away(Vec3),
+    Lob,
+}
+
+/// `--script mission`: steers the player's ship for what the rule graph asks (`Script::plan`). In order: whoever attacks a unit the
+/// hazard rules need kept alive; the critical rules' wants to act (shoot, tow, dock, lob), nearest to the win first; the objective
+/// point; the critical rules' volumes to reach; the optional rules' wants
+/// (only when no critical rule wants anything); a hostile in the way. A hostile no rule asks for does not outrank any of them.
 fn autopilot(
     sc: &Script,
     w: &[Unit],
-    data: &Value,
-    rocks: &Query<(Entity, &Transform, &Asteroid), (Without<Ship>, Without<crate::environment::SpaceAnimal>)>,
+    plan: &[Wanted],
     bases: &[(Entity, Vec3, Vec3)],
     lifeboats: &[(Vec3, &str)],
     ships: &mut Query<RuleShip>,
@@ -893,39 +1062,10 @@ fn autopilot(
         return;
     }
     let Some(p) = w.iter().find(|u| u.primary && u.alive) else { return };
-    // Ships only: whales count as hostile until the reprimand rule (PROVISIONAL default), and chasing them stalled the run after Objective 3.
-    let foe = w.iter().filter(|u| u.alive && u.visible && sc.hostile(&u.owner, &p.owner) && ships.contains(u.e)).nearest_to(p.pos, |a| a.pos);
-    // An enemy towing a friendly ship away (mission 10's Plunder takes the convoy's lead ship) comes first, wherever it is: the convoy
-    // waits until the tow breaks. Only once it is visible: mission 1's hidden Pirate Schooner tows the tender in distress from the start,
-    // and chasing it then pulls the player away from the fleet before the opening is over.
-    let kidnapper = sc.tows().iter().find_map(|&(tower, towee)| {
-        let (t, v) = (w.iter().find(|u| u.e == tower)?, w.iter().find(|u| u.e == towee)?);
-        (t.alive && t.visible && sc.hostile(&t.owner, &p.owner) && !sc.hostile(&v.owner, &p.owner)).then_some(t)
-    });
-    // A task to defend what sits at the objective point (mission 12's "Defend Her Majesty Aboard Parliament"): the enemy closest to that
-    // point comes before whatever attacks the player, or the boarders capture it while the bot duels submarines.
-    let raider = objective_at(sc, data).filter(|_| sc.tasks.iter().any(|t| t.active && !t.complete && defend_task(&t.text))).and_then(|at| {
-        w.iter().filter(|u| u.alive && u.visible && sc.hostile(&u.owner, &p.owner) && ships.contains(u.e)).nearest_to(at, |u| u.pos).filter(|u| u.pos.distance(at) < DEFEND_RADIUS)
-    });
-    // What the unfired rules wait for (`Script::wants`): a volume to enter or a unit to shoot (mission 5's blockaders) is where to sail
-    // once the objective point is reached or there is none (mission 4's and 8's searches). It never outranks the point: optional
-    // rules (mission 1's whales) would pull the bot off its course.
-    let wants = sc.wants(w);
-    let wanted_hit = wants
-        .iter()
-        .filter_map(|x| match x {
-            Want::Hit(e) => w.iter().find(|u| u.e == *e),
-            _ => None,
-        })
-        .nearest_to(p.pos, |u| u.pos);
-    let wanted_at = wants
-        .iter()
-        .filter_map(|x| match x {
-            Want::Reach(at) => Some(*at),
-            _ => None,
-        })
-        .chain(wanted_hit.map(|u| u.pos))
-        .nearest_to(p.pos, |a| *a);
+    let ignored = ignored_targets(sc.time);
+    let wanted: Vec<&Wanted> = plan.iter().filter(|x| !matches!(x.want, Want::Hit(e) if ignored.contains(&e))).collect();
+    let flee = fleeing(sc, w, plan);
+    let raider = sc.raider(w, p, |u| ships.contains(u.e)).filter(|u| !ignored.contains(&u.e));
     // A shell the rules want landed in a volume (mission 9's Dark Matter): close to within the mortar's reach, then fire it at the
     // centroid as a click with the lob cursor would. Gunnery drops the shot once fired; the next follows until the rule fires.
     // A mount whose arc covers the point fires; with none, the ship turns its bow on it (an immobile ship may never manage).
@@ -939,13 +1079,13 @@ fn autopilot(
             })
             .map(|m| m.bank)
     };
-    let lob_points: Vec<Vec3> = wants
+    let lob_points: Vec<Vec3> = wanted
         .iter()
-        .filter_map(|x| match x {
-            Want::Lob(at) => Some(*at),
+        .filter_map(|x| match x.want {
+            Want::Lob(at) => Some(at),
             _ => None,
         })
-        .filter(|_| !fleeing(sc) && !mortars.is_empty())
+        .filter(|_| !mortars.is_empty())
         .collect();
     // The first point (the nearest is listed first) a mount covers, else the nearest one to sail or turn for.
     let lob = lob_points.iter().find_map(|at| covering(*at).map(|bank| (*at, range, Some(bank)))).or_else(|| lob_points.first().map(|at| (*at, range, None)));
@@ -954,101 +1094,153 @@ fn autopilot(
     {
         target.2.shot = Some((bank, at));
     }
-    let kidnapper = kidnapper.or(raider);
-    // Hostile bases (mission 2's island gun towers) must be shot down before they can be docked.
-    let tower = w
-        .iter()
-        .filter(|u| u.alive && sc.hostile(&u.owner, &p.owner))
-        .filter_map(|u| bases.iter().find(|b| b.0 == u.e).copied())
-        .filter(|(_, at, _)| at.distance(p.pos) < 900.0)
-        .min_by(|a, b| a.1.distance(p.pos).total_cmp(&b.1.distance(p.pos)));
     target.1 = None; // no click point unless a tower is the target (set below)
-    let dock = sc.task_active("Dock With Tender");
-    let shoot_rocks = sc.task_active("Destroy Asteroids");
-    let rock = rocks.iter().filter(|(_, _, a)| a.group == "Asteroid Belt" && a.hp > 0.0).nearest_to(p.pos, |a| a.1.translation);
-    let mut face: Option<f32> = None; // hold position with the bow on this heading (a gun tower in reach)
-    // A task that says to run (mission 3's "Take Cover in the Asteroid Field", "Avoid the Pirate Trap"): sail for the objective point and
-    // leave the enemy alone. The player cannot sink under PROCYON_AUTOINVULN, so fighting there never ends and the escorts die.
-    let flee = fleeing(sc);
-    let foe = foe.filter(|_| !flee);
-    let tower = tower.filter(|_| !flee);
-    let goal = if let (true, Some((e, tf, _))) = (shoot_rocks, rock.filter(|r| r.1.translation.distance(p.pos) < 400.0)) {
-        target.0 = Some(e);
-        Some(tf.translation)
-    } else if let Some((at, range, covered)) = lob {
-        // In reach: hold; with no mount covering the point, bow on it (gunnery drops a shot outside the mount's arc).
-        let d = at.distance(p.pos);
-        let stopped = ships.iter().find(|s| s.primary).is_some_and(|s| s.ship.speed.abs() < 0.1);
-        if covered.is_none() && (d <= range * LOB_REACH || (d < range && stopped)) {
-            face = Some((-(at.x - p.pos.x)).atan2(-(at.z - p.pos.z)));
-        }
-        Some(if face.is_some() || covered.is_some() { p.pos } else { at })
-    } else if let Some(from) = wants.iter().find_map(|x| match x {
-        Want::Leave(at) => Some(*at),
-        _ => None,
-    }) {
-        // Out of the volume, straight away from its centre (mission 11: dragging the galleon clear of the black hole).
-        Some(p.pos + (p.pos - from).normalize_or(Vec3::X) * LEAVE_STEP)
-    } else if let Some(foe) = kidnapper.filter(|_| !flee).or(foe.filter(|f| f.pos.distance(p.pos) < 700.0)) {
-        target.0 = Some(foe.e);
-        Some(foe.pos)
-    } else if let Some((e, at, local)) = tower {
-        // Aim at the tower being approached, as a click on it would: without a click point the guns pick the tower nearest the
-        // island centre, which can be the other one, out of the Lancer's arc or range.
-        target.0 = Some(e);
-        target.1 = Some(local);
-        // Straight at the live tower, then hold with the bow on it: only the front gun can target towers, and the ship keeps its heading.
-        // Holding creeps forward (order 1), so a ship that closes inside `TOWER_MIN` (roof too steep above, hull against the island)
-        // sails back out to the hold distance before it turns bow-on again.
-        let at = at.with_y(0.0);
-        let off = p.pos - at;
-        let d = off.length();
-        let backing_out = ships.iter().find(|s| s.primary).is_some_and(|s| !s.ship.waypoints.is_empty());
-        if (TOWER_MIN..=TOWER_HOLD).contains(&d) && (!backing_out || d >= TOWER_HOLD - 15.0) {
-            face = Some((-(at.x - p.pos.x)).atan2(-(at.z - p.pos.z))); // heading 0 faces -Z, rotating about +Y
-            // A hold that lands no hit (hull pinned on the island with the tower out of the gun's reach) moves round the tower.
-            let damage = w.iter().find(|u| u.e == e).map_or(0.0, |u| u.damage);
-            if hold_stalled(sc.time, damage, &TOWER_STALL) {
-                let round = Quat::from_rotation_y(TOWER_ROUND) * off.normalize_or(Vec3::X);
-                start_detour(sc.time, at + round * TOWER_HOLD * 1.3, &STUCK);
+    let enemy_boat = || lifeboats.iter().filter(|b| sc.hostile(b.1, &p.owner)).nearest_to(p.pos, |b| b.0).map(|b| b.0);
+    let pick_of = |x: &Wanted| -> Option<Pick> {
+        match x.want {
+            Want::Hit(e) => {
+                let u = w.iter().find(|u| u.e == e && u.alive)?;
+                Some(bases.iter().find(|b| b.0 == e).map_or(Pick::Foe(e, u.pos), |b| Pick::Tower(e, b.1, b.2)))
             }
+            Want::Lob(_) => lob.map(|_| Pick::Lob),
+            Want::Leave(from) => Some(Pick::Away(from)),
+            Want::Reach(at) => (!sc.avoided(w, p, at)).then_some(Pick::Go(at)),
+            Want::Dock(e) | Want::Tow(e) => w.iter().find(|u| u.e == e && u.alive).map(|u| Pick::At(u.pos)),
+            Want::Lifeboats => enemy_boat().map(Pick::At),
         }
-        Some(if face.is_some() { p.pos } else { at + off.normalize_or(Vec3::X) * TOWER_HOLD })
-    } else if let Some((at, _)) = lifeboats.iter().filter(|b| sc.hostile(b.1, &p.owner) && b.0.distance(p.pos) < 1500.0).nearest_to(p.pos, |b| b.0) {
-        Some(*at) // touching an enemy lifeboat collects it (mission 2's PickUpLifeboats counts it as a capture)
-    } else if dock {
-        w.iter().find(|u| u.name == "RLS Bounty").map(|u| u.pos)
-    } else {
-        // No objective point (mission 8's "Dock with Mining Camp"): sail for what the rules wait for the player to dock with.
-        // An objective point already reached that nothing answers (mission 5's "Dock @ Elzrand" waits for a warning shot) gives way
-        // to what the rules want.
-        objective_at(sc, data)
-            .filter(|at| at.distance(p.pos) > POINT_REACHED || wanted_at.is_none())
-            .or_else(|| sc.tasks.iter().any(|t| t.active && !t.complete && is_dock_task(t)).then(|| dock_target(sc, w, p.pos).map(|t| t.1)).flatten())
-            .or(wanted_at)
-            // Still nowhere to go (mission 10's "Defend Merchant Fleet"): stay with the nearest friendly ship outside the player's fleet.
-            // Only once the ship is idle: a course the rules gave (mission 1's "Player Ordered Around Archipelago" path) wins.
-            .or_else(|| {
-                let idle = ships.iter().find(|s| s.primary).is_some_and(|s| s.ship.waypoints.is_empty());
-                w.iter()
-                    .filter(|_| idle)
-                    .filter(|u| u.alive && u.visible && u.owner != p.owner && !sc.hostile(&u.owner, &p.owner) && ships.contains(u.e))
-                    .nearest_to(p.pos, |u| u.pos)
-                    .filter(|u| u.pos.distance(p.pos) < 2000.0)
-                    .map(|u| u.pos)
-            })
     };
-    // Sailing for a unit the rules want shot (the fallback below the objective point): it is the target as well.
-    if let (Some(g), Some(u)) = (goal, wanted_hit)
-        && g == u.pos
+    let point = sc.objective_pos();
+    let mut face: Option<f32> = None; // hold position with the bow on this heading (a gun tower in reach)
+    let mut why = "idle";
+    let mut chosen: Option<Key> = None;
+    let sticky = *STICKY.lock().unwrap_or_else(|e| e.into_inner());
+    // The first want that gives somewhere to go, keeping the one chosen last time while it is still wanted.
+    let first = |list: Vec<&Wanted>| -> Option<(Key, Pick)> {
+        let mut list = list;
+        if let Some(i) = list.iter().position(|x| Some(key_of(x)) == sticky) {
+            let kept = list.remove(i);
+            list.insert(0, kept);
+        }
+        list.into_iter().find_map(|x| pick_of(x).map(|pick| (key_of(x), pick)))
+    };
+    let mut pick = raider.map(|u| Pick::Foe(u.e, u.pos)).inspect(|_| why = "protect");
+    // What needs doing rather than going (a shot, a tow, a dock, a lob, a pickup) outranks the objective point; a volume to reach does
+    // not: the point is the course the designers gave (mission 3's route round the islands), and sailing straight at the volume wedges.
+    // Only a near one: a far target is reached by the objective point's course, not by a straight line across the islands (mission 1).
+    let near = |x: &&Wanted| match x.want {
+        Want::Hit(e) | Want::Tow(e) | Want::Dock(e) => w.iter().find(|u| u.e == e).is_none_or(|u| u.pos.distance(p.pos) < ENGAGE_RANGE),
+        _ => true,
+    };
+    let route = point.is_some_and(|at| at.distance(p.pos) > POINT_REACHED);
+    if pick.is_none()
+        && let Some((k, found)) = first(wanted.iter().copied().filter(|x| x.critical && !matches!(x.want, Want::Reach(_)) && (!route || near(x))).collect())
     {
-        target.0 = Some(u.e);
+        (pick, chosen, why) = (Some(found), Some(k), "critical");
+    }
+    if pick.is_none() {
+        pick = point.filter(|at| at.distance(p.pos) > POINT_REACHED).map(Pick::Go).inspect(|_| why = "point");
+    }
+    if pick.is_none()
+        && let Some((k, found)) = first(wanted.iter().copied().filter(|x| x.critical).collect())
+    {
+        (pick, chosen, why) = (Some(found), Some(k), "critical reach");
+    }
+    if pick.is_none()
+        && let Some((k, found)) = first(wanted.iter().copied().filter(|x| !x.critical).collect())
+    {
+        (pick, chosen, why) = (Some(found), Some(k), "optional");
+    }
+    if pick.is_none() {
+        pick = point.map(Pick::Go).inspect(|_| why = "point reached");
+    }
+    // A hostile in the way (close to the player, or on its straight course) is engaged although no rule asks for it.
+    if !flee && !matches!(pick, Some(Pick::Foe(..) | Pick::Tower(..))) {
+        let course = match &pick {
+            Some(Pick::At(g) | Pick::Go(g)) => Some(*g),
+            _ => None,
+        };
+        let blocker = w
+            .iter()
+            .filter(|u| u.alive && u.visible && sc.hostile(&u.owner, &p.owner) && ships.contains(u.e) && !ignored.contains(&u.e))
+            .filter(|u| u.pos.distance(p.pos) < BLOCK_NEAR || course.is_some_and(|g| u.pos.distance(p.pos) < g.distance(p.pos) && lane_distance(p.pos, g, u.pos) < BLOCK_LANE))
+            .nearest_to(p.pos, |u| u.pos);
+        if let Some(u) = blocker {
+            pick = Some(Pick::Foe(u.e, u.pos));
+            why = "in the way";
+            chosen = Some((usize::MAX, 255, u.e.to_bits()));
+        }
+    }
+    if let Some(Pick::Foe(e, _)) = &pick
+        && chosen.is_none()
+    {
+        chosen = Some((usize::MAX, 254, e.to_bits())); // the protect raider
+    }
+    note_goal(sc, why, chosen, &pick, p.pos);
+    let transit = matches!(pick, Some(Pick::Go(_)));
+    let mut engaged = false;
+    let goal = match pick {
+        Some(Pick::Foe(e, at)) => {
+            target.0 = Some(e);
+            engaged = true;
+            Some(at)
+        }
+        Some(Pick::Lob) => lob.map(|(at, range, covered)| {
+            // In reach: hold; with no mount covering the point, bow on it (gunnery drops a shot outside the mount's arc).
+            let d = at.distance(p.pos);
+            let stopped = ships.iter().find(|s| s.primary).is_some_and(|s| s.ship.speed.abs() < 0.1);
+            if covered.is_none() && (d <= range * LOB_REACH || (d < range && stopped)) {
+                face = Some((-(at.x - p.pos.x)).atan2(-(at.z - p.pos.z)));
+            }
+            if face.is_some() || covered.is_some() { p.pos } else { at }
+        }),
+        // Mission 11: dragging the galleon clear of the black hole.
+        Some(Pick::Away(from)) => Some(p.pos + (p.pos - from).normalize_or(Vec3::X) * LEAVE_STEP),
+        Some(Pick::Tower(e, at, local)) => {
+            // Aim at the tower being approached, as a click on it would: without a click point the guns pick the tower nearest the
+            // island centre, which can be the other one, out of the Lancer's arc or range.
+            target.0 = Some(e);
+            target.1 = Some(local);
+            engaged = true;
+            // Straight at the live tower, then hold with the bow on it: only the front gun can target towers, and the ship keeps its heading.
+            // Holding creeps forward (order 1), so a ship that closes inside `TOWER_MIN` (roof too steep above, hull against the island)
+            // sails back out to the hold distance before it turns bow-on again.
+            let at = at.with_y(0.0);
+            let off = p.pos - at;
+            let d = off.length();
+            let backing_out = ships.iter().find(|s| s.primary).is_some_and(|s| !s.ship.waypoints.is_empty());
+            if (TOWER_MIN..=TOWER_HOLD).contains(&d) && (!backing_out || d >= TOWER_HOLD - 15.0) {
+                face = Some((-(at.x - p.pos.x)).atan2(-(at.z - p.pos.z))); // heading 0 faces -Z, rotating about +Y
+                // A hold that lands no hit (hull pinned on the island with the tower out of the gun's reach) moves round the tower.
+                let damage = w.iter().find(|u| u.e == e).map_or(0.0, |u| u.damage);
+                if hold_stalled(sc.time, damage, &TOWER_STALL) {
+                    let round = Quat::from_rotation_y(TOWER_ROUND) * off.normalize_or(Vec3::X);
+                    start_detour(sc.time, at + round * TOWER_HOLD * 1.3, &STUCK);
+                }
+            }
+            Some(if face.is_some() { p.pos } else { at + off.normalize_or(Vec3::X) * TOWER_HOLD })
+        }
+        Some(Pick::At(at) | Pick::Go(at)) => Some(at),
+        // Still nowhere to go (mission 10's "Defend Merchant Fleet"): stay with the nearest friendly ship outside the player's fleet.
+        // Only once the ship is idle: a course the rules gave (mission 1's "Player Ordered Around Archipelago" path) wins.
+        None => {
+            let idle = ships.iter().find(|s| s.primary).is_some_and(|s| s.ship.waypoints.is_empty());
+            w.iter()
+                .filter(|_| idle)
+                .filter(|u| u.alive && u.visible && u.owner != p.owner && !sc.hostile(&u.owner, &p.owner) && ships.contains(u.e))
+                .nearest_to(p.pos, |u| u.pos)
+                .filter(|u| u.pos.distance(p.pos) < 2000.0)
+                .map(|u| u.pos)
+        }
+    };
+    track_target(sc.time, w, p, if engaged { target.0 } else { None }, why != "protect");
+    if let (true, Some(e), Some(s)) = (engaged, target.0, ships.iter().find(|s| s.primary)) {
+        note_gunnery(sc, w, p, s.ship.heading, e);
     }
     // Once a game second: the same facts, kept for the stall report (`smoke::autoplay_end`). Names are looked up here, not at the end.
     static NOTED_SECOND: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(u32::MAX);
     if NOTED_SECOND.swap(sc.time as u32, std::sync::atomic::Ordering::Relaxed) != sc.time as u32 {
         let name = |e: Entity| w.iter().find(|u| u.e == e).map_or_else(|| format!("{e:?}"), |u| format!("{}/{} dmg {:.2}", u.owner, u.name, u.damage));
-        let note = format!("goal={goal:.0?} target={:?} wants={:?}", target.0.map(name), (wants.len(), &wants[..wants.len().min(6)]));
+        let note = format!("why={why} flee={flee} goal={goal:.0?} target={:?} plan={:?}", target.0.map(name), (plan.len(), &plan[..plan.len().min(6)]));
         *BOT_NOTE.lock().unwrap_or_else(|e| e.into_inner()) = note;
     }
     // Once a game minute: what the bot is after, for reading a stalled autoplay log (#68).
@@ -1058,26 +1250,18 @@ fn autopilot(
         let helm = ships
             .iter()
             .find(|s| s.primary)
-            .map(|s| (s.ship.order, s.ship.waypoints.len(), s.ship.throttle, s.ship.speed, s.ship.cap, s.ship.heading, face, mortars.len(), target.2.shot));
+            .map(|s| (s.ship.order, s.ship.waypoints.len(), s.ship.throttle, s.ship.speed, s.ship.cap, s.ship.avoid, s.ship.heading, face, mortars.len(), target.2.shot));
         let target_damage = target.0.and_then(|e| w.iter().find(|u| u.e == e)).map(|u| u.damage);
         info!(
-            "autopilot t={:.0} pos={:.0} goal={:.0?} target={:?} damage={:.2?} helm(order,wps,throttle,speed,cap,heading,face,mortar,shot)={:?} wants={:?}",
+            "autopilot t={:.0} pos={:.0} why={why} goal={:.0?} target={:?} damage={:.2?} helm(order,wps,throttle,speed,cap,avoid,heading,face,mortar,shot)={:?} plan={:?}",
             sc.time,
             p.pos,
             goal,
             target.0,
             target_damage,
             helm,
-            (wants.len(), &wants[..wants.len().min(6)])
+            (plan.len(), &plan[..plan.len().min(6)])
         );
-    }
-    // Dev shortcut for end-to-end runs: PROCYON_AUTOKILL=1 sinks the pirate once the player is close.
-    if std::env::var_os("PROCYON_AUTOKILL").is_some()
-        && let Some(wr) =
-            w.iter().find(|u| u.name == "Warrior" && u.alive && u.visible && u.pos.distance(p.pos) < 250.0 && sc.hits_by.get(&(PLAYER.to_string(), u.e)).is_some_and(|n| *n >= 3))
-        && let Ok(mut x) = ships.get_mut(wr.e)
-    {
-        x.health.core = 0.0;
     }
     // Dev switch for unattended runs (tools/autoplay.py): PROCYON_AUTOINVULN=1 keeps the player's fleet (every ship the player owns) from
     // taking damage, so the bot survives mission 2's island towers and mission 3's escort outlives the chase, and the later rules get
@@ -1101,9 +1285,10 @@ fn autopilot(
             s.ship.goal = Some(h);
             s.ship.order = 1;
             s.ship.throttle = None;
-        } else if g.distance(p.pos) > 60.0 || foe.is_none() {
+        } else if g.distance(p.pos) > 60.0 || !engaged {
             s.ship.waypoints = vec![g];
-            s.ship.order = 2;
+            // Emergency Speed costs nothing but a wider turn (docs/re/movement.md): for transit legs, not for closing in.
+            s.ship.order = if transit && g.distance(p.pos) > SPRINT_LEG { 3 } else { 2 };
             s.ship.goal = None;
             s.ship.throttle = None; // a move order releases a manual throttle (the opening NIS leaves it at 0)
         } else {
@@ -1559,17 +1744,6 @@ mod ai_tests {
         assert!(!ticks(21.0, 45.0, 0.6), "damage rising restarts the clock");
         assert!(ticks(46.0, 60.0, 0.6));
         assert!(!ticks(100.0, 120.0, 0.6), "leaving the hold starts over");
-    }
-
-    #[test]
-    fn autopilot_flees_on_cover_and_escape_objectives_but_fights_the_rest() {
-        assert!(flee_task("Take Cover in the Asteroid Field."));
-        assert!(flee_task("Avoid the Pirate Trap. Return to Crescentia Right Away."));
-        assert!(!flee_task("Hold off Pirate Attack until Repairs are Complete."));
-        assert!(!flee_task("Destroy Both Camp Cannon Towers."));
-        assert!(defend_task("Defend Her Majesty Aboard Parliament."));
-        assert!(defend_task("Keep the Pirates From Firing on Dorlinor."));
-        assert!(!defend_task("Search Nearby Islands for Ships."));
     }
 
     #[test]

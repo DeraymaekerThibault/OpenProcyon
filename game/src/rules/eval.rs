@@ -2,7 +2,6 @@ use bevy::prelude::*;
 use serde_json::Value;
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use crate::Nearest;
 use crate::campaign::Mission;
 use crate::game_to_bevy;
 
@@ -220,6 +219,10 @@ pub struct Script {
     pub(super) nebulae: Vec<Region>,
     pub(super) hits: HashMap<Entity, u32>,
     pub(super) hits_by: HashMap<(String, Entity), u32>,
+    /// Hits by shooting ship and victim (bullets), and gun bursts by shooting ship and the target they were aimed at: the autoplay
+    /// gunnery report. `shots` counts bursts too, one `Fired` per burst, while each bullet of a burst is a `Hit`.
+    pub(super) hits_from: HashMap<(Entity, Entity), u32>,
+    pub(super) bursts_at: HashMap<(Entity, Entity), u32>,
     pub(super) fired_at: HashMap<Entity, (f32, Entity)>,
     pub(super) prev_inside: HashMap<(String, usize), bool>,
     /// 'All Units from Group have entered trigger volume Once': members seen inside, per group|volume.
@@ -293,6 +296,8 @@ pub struct Script {
     false_for: HashMap<(usize, usize), f32>,
     /// The frontier as of the last `watch` sample (what `autoplay_end` prints).
     frontier: Vec<RuleReport>,
+    /// The mission's rule graph (rules.rs `plan`): roles and the constraints the hazard rules put on the player.
+    pub(super) graph: super::plan::Graph,
 }
 
 /// What a rule does to the game, from its actions alone (`Script::rule_class`).
@@ -333,6 +338,8 @@ pub struct CondReport {
     pub false_for: f32,
     /// World facts that explain a false volume, distance, flag, timer or group condition; empty for other types.
     pub detail: String,
+    /// A false world condition the bot cannot turn into anything to do (`Script::want_of`).
+    pub no_plan: bool,
 }
 
 /// An unfired rule with each condition's truth (`Script::unfired_report`).
@@ -343,12 +350,13 @@ pub struct RuleReport {
     pub class: RuleClass,
     /// Every flag, timer and speech gate holds: only world conditions are left.
     pub gates_hold: bool,
+    pub role: super::plan::Role,
     pub conds: Vec<CondReport>,
 }
 impl RuleReport {
     /// An unfired story or win rule whose gates hold: the rules that only the world blocks.
     pub fn on_frontier(&self) -> bool {
-        self.class.advances() && self.gates_hold
+        self.class.advances() && self.gates_hold && !matches!(self.role, super::plan::Role::Hazard(_))
     }
 }
 
@@ -435,8 +443,12 @@ pub enum Want {
     Lob(Vec3),
     /// Take this ship in tow (mission 11's SS Harvester).
     Tow(Entity),
-    /// Get the ship the player tows out of a volume (its centroid, Bevy space): mission 11's black hole.
+    /// Get the ship the player tows out of a volume, or away from a group (its centroid, Bevy space): mission 11's black hole.
     Leave(Vec3),
+    /// Dock with this unit.
+    Dock(Entity),
+    /// Pick up the lifeboats of the players the player is not allied with.
+    Lifeboats,
 }
 /// What an unknown volume name reads as: contains nothing.
 static NO_VOLUME: Region = Region(Vec::new());
@@ -563,6 +575,7 @@ impl Script {
             .flatten()
             .map(|t| Task { name: s(t, "Name").into(), text: s(t, "text").into(), active: t["Active"] == true, complete: false, failed: false })
             .collect();
+        let graph = super::plan::Graph::build(&rules, &player);
         Script {
             rules,
             fired: vec![false; n],
@@ -603,6 +616,8 @@ impl Script {
             nebulae: crate::nebula::polygons(data, &crate::nebula::StormShift::default()),
             hits: HashMap::new(),
             hits_by: HashMap::new(),
+            hits_from: HashMap::new(),
+            bursts_at: HashMap::new(),
             fired_at: HashMap::new(),
             prev_inside: HashMap::new(),
             entered: HashMap::new(),
@@ -643,6 +658,7 @@ impl Script {
             watch_acc: 0.0,
             false_for: HashMap::new(),
             frontier: vec![],
+            graph,
         }
     }
 
@@ -830,8 +846,9 @@ impl Script {
         self.timers.get(name).copied()
     }
 
-    pub fn record_hit(&mut self, shooter_owner: Option<&str>, victim: Entity) {
+    pub fn record_hit(&mut self, shooter: Entity, shooter_owner: Option<&str>, victim: Entity) {
         *self.hits.entry(victim).or_default() += 1;
+        *self.hits_from.entry((shooter, victim)).or_default() += 1;
         if let Some(o) = shooter_owner {
             *self.hits_by.entry((o.into(), victim)).or_default() += 1;
         }
@@ -839,6 +856,7 @@ impl Script {
     pub fn record_fire(&mut self, shooter: Entity, target: Option<Entity>) {
         *self.shots.entry(shooter).or_default() += 1;
         if let Some(t) = target {
+            *self.bursts_at.entry((shooter, t)).or_default() += 1;
             self.fired_at.insert(shooter, (self.time, t));
         }
     }
@@ -874,80 +892,8 @@ impl Script {
         }
         out
     }
-    /// What the unfired rules wait for the player to do, for the dev autopilot (`--script mission`) when the objective point does not
-    /// say (mission 4's "Search the Area Marked Red", mission 5's warning shot). A rule counts once its flag, timer and speech gates
-    /// hold (other conditions are not checked); rules that only warn or fail the player are left out. PROVISIONAL heuristic.
-    pub fn wants(&self, w: &[Unit]) -> Vec<Want> {
-        let Some(p) = w.iter().find(|u| u.primary && u.alive) else { return vec![] };
-        let mut out = vec![];
-        for (r, _) in self.rules.iter().zip(&self.fired).filter(|(_, fired)| !**fired) {
-            if (self.briefing_opening && opening_rule(&r.name)) || !self.worth_wanting(r) {
-                continue;
-            }
-            if r.conds.iter().any(|c| self.gate(c) == Some(false)) {
-                continue;
-            }
-            let player_in = |spec: &str| members(w, spec).iter().any(|u| u.e == p.e);
-            for c in &r.conds {
-                match s(c, "Type") {
-                    "Enter Volume" | "Is Group In Volume" if player_in(s(c, "Group Name")) => {
-                        let vol = self.volume(s(c, "Volume Name"));
-                        if let Some(m) = vol.centroid().filter(|_| !in_volume(vol, p.pos)) {
-                            out.push(Want::Reach(Vec3::new(m.x, 0.0, -m.y)));
-                        }
-                    }
-                    // Mission 4's stuck sloop and mission 6's PirateBigBrother are spotted by closing in.
-                    "Group to Group Distance" if s(c, "Equivalence") == "Less Than" && player_in(s(c, "GroupA Name")) => {
-                        if let Some(u) = members(w, s(c, "GroupB Name")).into_iter().filter(|u| u.alive && u.visible && u.e != p.e).nearest_to(p.pos, |u| u.pos)
-                            && u.pos.distance(p.pos) >= f(c, "Distance")
-                        {
-                            out.push(Want::Reach(u.pos));
-                        }
-                    }
-                    // Mission 5's warning shot: firing on the blockading fishing boats.
-                    "Is Group A attacking Group B" if player_in(s(c, "GroupA Name")) => {
-                        out.extend(members(w, s(c, "GroupB Name")).iter().filter(|u| u.alive && u.visible && u.owner != p.owner).map(|u| Want::Hit(u.e)));
-                    }
-                    "Is Ship In Tow" if b(c, "Boolean") && player_in(s(c, "Towing Group")) => {
-                        let towed = |e: Entity| self.tows.iter().any(|t| t.0 == p.e && t.1 == e);
-                        out.extend(members(w, s(c, "Target to Tow")).iter().filter(|u| u.alive && u.e != p.e && !towed(u.e)).map(|u| Want::Tow(u.e)));
-                    }
-                    "Exit Volume" => {
-                        let vol = self.volume(s(c, "Volume Name"));
-                        // Only a ship the player tows: the player's own ship starts inside big area volumes (mission 2), and
-                        // running from their centre took the bot off its objective.
-                        let mine = |u: &Unit| self.tows.iter().any(|t| t.0 == p.e && t.1 == u.e);
-                        if members(w, s(c, "Group Name")).iter().any(|u| mine(u) && u.alive && in_volume(vol, u.pos))
-                            && let Some(m) = vol.centroid()
-                        {
-                            out.push(Want::Leave(Vec3::new(m.x, 0.0, -m.y)));
-                        }
-                    }
-                    // The part of the volume nearest the player: mission 9's StarHammer cannot move, and the Dark Matter's centre lies
-                    // beyond the Star Mortar's 350 reach.
-                    "Mission 9 - If Mortar explodes within Area" => {
-                        // The nearest point first, then a grid across the volume: the wreck's one Nova Mortar covers only 15
-                        // degrees dead ahead, so the bot takes the first point a mount can reach.
-                        let vol = self.volume(s(c, "Volume Name"));
-                        let at = |m: Vec2| Want::Lob(Vec3::new(m.x, 0.0, -m.y));
-                        out.extend(vol.near_inside(Vec2::new(p.pos.x, -p.pos.z)).map(at));
-                        out.extend(vol.grid(8).into_iter().map(at));
-                    }
-                    "Player has hit Group/Unit at least x Times" | "Group/Unit Hit at least x Times by Player ( with eqivalence )" if base(s(c, "Player Name")) == p.owner => {
-                        out.extend(members(w, s(c, "Group/Unit Name")).iter().filter(|u| u.alive && u.visible && u.owner != p.owner).map(|u| Want::Hit(u.e)));
-                    }
-                    "Group Destroyed" | "Group/Unit Vital Section has >,<,= X damage" | "Group/Unit has >,<,= X damage" => {
-                        let spec = if s(c, "Type") == "Group Destroyed" { s(c, "Group Name") } else { s(c, "Group/Unit Name") };
-                        out.extend(members(w, spec).iter().filter(|u| u.alive && u.visible && self.hostile(&u.owner, &p.owner)).map(|u| Want::Hit(u.e)));
-                    }
-                    _ => {}
-                }
-            }
-        }
-        out
-    }
     /// A condition the rules decide without the world: Some(holds) for flag, timer and speech gates, None for the rest.
-    fn gate(&self, c: &Value) -> Option<bool> {
+    pub(super) fn gate(&self, c: &Value) -> Option<bool> {
         Some(match s(c, "Type") {
             "World Initialize" => false,
             "Flag Condition" => self.flags.get(s(c, "Flag Name")).copied().unwrap_or(false) == b(c, "Boolean Value"),
@@ -957,21 +903,8 @@ impl Script {
             _ => return None,
         })
     }
-    /// A rule that moves the story on: it changes state (flags, objectives, paths, timers, the level) and neither ends the game nor
-    /// only warns ("Player Goes Wrong Way", "Out Of Bounds", "FAIL Mission").
-    fn worth_wanting(&self, r: &Rule) -> bool {
-        let name = r.name.to_ascii_lowercase();
-        let bad = ["fail", "wrong", "bounds", "dead", "punish", "too long", "ignores", "death", "lose", "lost"];
-        if bad.iter().any(|x| name.contains(x)) || r.acts.iter().any(|a| s(a, "Type") == "End Game") {
-            return false;
-        }
-        r.acts.iter().any(|a| {
-            let t = s(a, "Type");
-            !(t.starts_with("Play ") || t.starts_with("NIS") || t.starts_with("Focus Camera") || t.contains("Music") || t.contains("Victory Points"))
-        })
-    }
     /// What a rule does, from its actions (never its name): a win or loss ending, story state, or presentation only.
-    fn rule_class(r: &Rule) -> RuleClass {
+    pub(super) fn rule_class(r: &Rule) -> RuleClass {
         let has = |f: &dyn Fn(&str) -> bool| r.acts.iter().any(|a| f(s(a, "Type")));
         if has(&|t| matches!(t, "Goto Next Level" | "Team X Wins" | "Remaining Team Wins")) {
             RuleClass::Win
@@ -985,7 +918,7 @@ impl Script {
     }
 
     /// Indices of the rules that have not fired (`never_fired`'s set).
-    fn unfired(&self) -> Vec<usize> {
+    pub(super) fn unfired(&self) -> Vec<usize> {
         (0..self.rules.len()).filter(|&i| !self.ran[i] && !(self.briefing_opening && opening_rule(&self.rules[i].name))).collect()
     }
 
@@ -1020,7 +953,12 @@ impl Script {
     fn report(&mut self, w: &[Unit], frontier_only: bool) -> Vec<RuleReport> {
         let p = w.iter().find(|u| u.primary && u.alive);
         let open = |sc: &Script, r: &Rule| r.conds.iter().all(|c| sc.gate(c) != Some(false));
-        let idx: Vec<usize> = self.unfired().into_iter().filter(|&i| !frontier_only || (Self::rule_class(&self.rules[i]).advances() && open(self, &self.rules[i]))).collect();
+        let roles = self.live_roles();
+        let idx: Vec<usize> = self
+            .unfired()
+            .into_iter()
+            .filter(|&i| !frontier_only || (Self::rule_class(&self.rules[i]).advances() && !matches!(roles[i], super::plan::Role::Hazard(_)) && open(self, &self.rules[i])))
+            .collect();
         let truth = self.probe(w, &idx);
         idx.into_iter()
             .zip(truth)
@@ -1036,9 +974,10 @@ impl Script {
                         holds,
                         false_for: 0.0,
                         detail: if holds { String::new() } else { self.detail(c, w, p) },
+                        no_plan: !holds && p.is_some_and(|p| self.want_of(c, w, p).is_none()),
                     })
                     .collect();
-                RuleReport { index: i, name: r.name.trim().into(), class: Self::rule_class(r), gates_hold: open(self, r), conds }
+                RuleReport { index: i, name: r.name.trim().into(), class: Self::rule_class(r), gates_hold: open(self, r), role: roles[i], conds }
             })
             .collect()
     }
@@ -1751,7 +1690,7 @@ pub fn without_end_rules(data: &Value) -> Value {
     data
 }
 
-fn opening_rule(name: &str) -> bool {
+pub(super) fn opening_rule(name: &str) -> bool {
     name.starts_with("Opening NIS") || name.starts_with("START Opening NIS")
 }
 

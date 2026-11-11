@@ -195,27 +195,42 @@ pub fn autoplay_end(
     info!("autoplay state point={point:?} tasks={:?}", sc.tasks_text());
     info!("autoplay end outcome={outcome:?} time={:.0} never_fired={:?}", sc.time, sc.never_fired());
     let (story, win, loss, presentation) = sc.never_fired_by_class();
+    let (critical, optional, hazard) = sc.role_counts();
+    info!("autoplay roles unfired critical={critical} optional={optional} hazard={hazard}");
     info!("autoplay unfired story_win={} story={story} win={win} loss={loss} presentation={presentation}", story + win);
     // Why progress stopped: the unfired story/win rules only the world blocks, longest-blocked first (sampled about once a game second).
     let pos = player.single().map_or(Vec3::ZERO, |tf| tf.translation);
     let bot = crate::rules::BOT_NOTE.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    info!("autoplay bot player={pos:.0} {bot}");
+    info!("autoplay hazards {}", sc.hazards_text());
+    for line in crate::rules::gunnery_lines() {
+        info!("{line}");
+    }
     let mut frontier: Vec<_> = sc.frontier().iter().collect();
     let blocked_for = |r: &crate::rules::RuleReport| r.conds.iter().map(|c| c.false_for).fold(0.0, f32::max);
-    frontier.sort_by(|a, b| blocked_for(b).total_cmp(&blocked_for(a)));
+    // Critical rules first (nearest to the win first), then the optional ones, longest-blocked first within each.
+    let rank = |r: &crate::rules::RuleReport| match r.role {
+        crate::rules::Role::Critical(d) => (0, d),
+        _ => (1, 0),
+    };
+    frontier.sort_by(|a, b| rank(a).cmp(&rank(b)).then(blocked_for(b).total_cmp(&blocked_for(a))));
     for r in frontier.iter().take(BLOCKED_LINES) {
         let falses: Vec<String> = r
             .conds
             .iter()
             .filter(|c| !c.holds)
-            .map(|c| format!("{}({}) false {:.0}s{}", c.kind, c.args, c.false_for, if c.detail.is_empty() { String::new() } else { format!(" [{}]", c.detail) }))
+            .map(|c| {
+                let detail = if c.detail.is_empty() { String::new() } else { format!(" [{}]", c.detail) };
+                format!("{}({}) false {:.0}s{detail}{}", c.kind, c.args, c.false_for, if c.no_plan { " no-plan" } else { "" })
+            })
             .collect();
-        info!("autoplay blocked rule={:?} class={} false={falses:?} player={pos:.0} bot: {bot}", r.name, r.class.label());
+        info!("autoplay blocked rule={:?} class={} role={} false={falses:?} player={pos:.0}", r.name, r.class.label(), r.role.label());
     }
     if frontier.len() > BLOCKED_LINES {
         info!("autoplay blocked ... and {} more frontier rules", frontier.len() - BLOCKED_LINES);
     }
     if frontier.is_empty() {
-        info!("autoplay blocked none: no unfired story or win rule has all its flag, timer and speech gates open (player={pos:.0} bot: {bot})");
+        info!("autoplay blocked none: no unfired story or win rule has all its flag, timer and speech gates open (player={pos:.0})");
         // A flag chain that never completes: the rules waiting on a flag or timer, and which one.
         let gated = sc.gated_rules();
         for (name, why) in gated.iter().take(BLOCKED_LINES) {
