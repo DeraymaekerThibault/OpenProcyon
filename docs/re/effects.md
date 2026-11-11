@@ -378,6 +378,11 @@ core: run by fx/) plus a `Vortex` primitive, implemented in `game/src/blackhole.
   - **Only ships that are not under way.** The pull acts only while the ship's own speed is zero (All Stop, or idle). A
     Man-O-War driven from 48 to 17 units moved exactly at its own speed throughout and was still afloat 17 s after passing
     R/4. A ship crossing the radius under way feels nothing.
+  - **Pinned ships. PROVISIONAL.** Observed: mission 11 sets the civilian galleon immovable ('Set Group/Unit Movable' FALSE) at
+    about 133 units from a Small hole (inside R = 145) and needs it afloat until the player tows it out; the "fails to save"
+    rule fires the moment it is destroyed. Without an exemption our pull crept it into the core (31 units, core 36.25) and
+    destroyed it at 6.7 s. Assumed: the original leaves immovable ships out of the pull and the core kill. The remake skips
+    ships carrying `Pinned` (blackhole.rs `pull`); the rules' Movable TRUE at the tow start releases it into the normal law.
   - **Resting ships creep.** At rest the engine snaps the velocity back to zero every tick, so the pull is cancelled each
     tick and the ship only creeps in at one tick's worth of it, about a × 0.033 units/s: Cutter 0.091 units/s at 23 units
     inside the edge, Frigate 0.040 and Man-O-War 0.033 at full depth (the Man-O-War the same at 105 and 48 units).

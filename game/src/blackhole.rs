@@ -249,11 +249,14 @@ pub fn pull(
     lib: Res<crate::combat::Library>,
     holes: Query<(&Transform, &Pull), Without<Ship>>,
     wells: Query<(&Transform, &crate::combat::lob::GravWell), Without<Ship>>,
-    mut ships: Query<(Entity, &Ship, &mut Transform, &mut Health, Option<&Docker>, Option<&mut Caught>, Option<&mut crate::cloak::Cloak>)>,
+    mut ships: Query<(Entity, &Ship, &mut Transform, &mut Health, Option<&Docker>, Option<&mut Caught>, Option<&mut crate::cloak::Cloak>, Has<crate::collision::Pinned>)>,
 ) {
     let dt = time.delta_secs();
-    for (e, ship, mut tf, mut health, docker, caught, mut cloak) in &mut ships {
-        if health.destroyed || docker.is_some_and(Docker::is_docked) {
+    for (e, ship, mut tf, mut health, docker, caught, mut cloak, pinned) in &mut ships {
+        // PROVISIONAL: a ship the rules pinned ('Set Group/Unit Movable' FALSE) is neither pulled nor swallowed. Observed: mission 11 pins
+        // the civilian galleon inside the Small hole's radius and needs it afloat until the player tows it out (the rules set Movable
+        // TRUE then); unpinned, it drifted into the core and was destroyed 1.1 s later. Assumed: the original exempts immovable ships.
+        if pinned || health.destroyed || docker.is_some_and(Docker::is_docked) {
             continue;
         }
         let class = &lib.classes[ship.class];
@@ -576,6 +579,54 @@ mod tests {
         let (enemy, player) = (&stats.players["Enemy fleet"], &stats.players["Your fleet"]);
         assert_eq!((player.end, enemy.sunk), (0, 0));
         assert_eq!((enemy.inflicted, player.taken), (50.0, 50.0), "only the gunfire counts");
+    }
+
+    /// PROVISIONAL (mission 11's civilian galleon): a ship pinned by 'Set Group/Unit Movable' FALSE inside the radius neither creeps in nor
+    /// is swallowed in the core; the same ship unpinned (the tow started) is pulled and destroyed as before.
+    #[test]
+    #[ignore = "needs imported assets"]
+    fn a_pinned_ship_is_not_pulled_or_swallowed_until_it_is_released() {
+        use crate::{
+            Side,
+            collision::{Drift, Pinned},
+            combat::Library,
+        };
+        let mut app = App::new();
+        app.init_resource::<Time>().insert_resource(Library::load(assets_dir())).add_systems(Update, pull);
+        app.world_mut().spawn((Transform::default(), small()));
+        let lib = app.world().resource::<Library>();
+        let ci = lib.index("Ship_Navy_ManOWar");
+        let health = Health::new(&lib.classes[ci]);
+        let ship = Ship {
+            class: ci,
+            side: Side::Player,
+            heading: 0.0,
+            speed: 0.0,
+            ang_vel: 0.0,
+            order: 0,
+            waypoints: vec![],
+            goal: None,
+            cap: 1.0,
+            throttle: None,
+            sail_energy: 1.0,
+            crew_speed: 1.0,
+            crew_turn: 1.0,
+            net: 1.0,
+            avoid: 1.0,
+        };
+        let at = Vec3::new(30.0, 0.0, 0.0); // inside the core
+        let e = app.world_mut().spawn((Transform::from_translation(at), ship, health, Drift::default(), Pinned)).id();
+        app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs_f32(0.05));
+        for _ in 0..80 {
+            app.update(); // 4 s: well past the 1.1 s the core takes
+        }
+        assert_eq!(app.world().get::<Transform>(e).unwrap().translation, at, "a pinned ship does not drift");
+        assert!(app.world().get::<Health>(e).unwrap().core > 0.0 && app.world().get::<Swallowed>(e).is_none(), "nor is it swallowed");
+        app.world_mut().entity_mut(e).remove::<Pinned>(); // the tow starts: the rules set Movable TRUE
+        for _ in 0..80 {
+            app.update();
+        }
+        assert_eq!(app.world().get::<Health>(e).unwrap().core, 0.0, "released, the core takes it");
     }
 
     fn hole() -> BlackHole {
