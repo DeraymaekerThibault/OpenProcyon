@@ -998,3 +998,149 @@ fn team_objectives_resolve_to_a_point_and_a_task_text() {
     sc.act(&serde_json::json!({"Type": "Setup Team Objective", "Team Name": "NAVY", "Objective Point": "NO OBJECTIVE POINT", "Objective Task": "navy obj"}), &w, &mut out, "setup");
     assert!(sc.team_objective("NAVY").unwrap().0.is_none());
 }
+
+/// Synthetic mission for the stall report: a loss rule, presentation rules and story rules, some behind a flag gate. Names say
+/// nothing about what the rules do (classification reads the actions).
+fn stall_data() -> Value {
+    let vol = serde_json::json!([[100.0, 100.0], [200.0, 100.0], [200.0, 200.0], [100.0, 200.0]]);
+    let flag = |on: bool| serde_json::json!({"Type": "Flag Condition", "Flag Name": "go", "Boolean Value": if on { "TRUE" } else { "FALSE" }});
+    let enter = serde_json::json!({"Type": "Enter Volume", "Group Name": "Player0 Group,HUMAN CONTROLLED COMMAND SHIP", "Volume Name": "Search"});
+    let set = serde_json::json!([{"Type": "Set Flag Action", "Flag Name": "found", "Boolean Value": "TRUE"}]);
+    let speak = serde_json::json!([{"Type": "Play speech event", "Speech Event Name": "x"}, {"Type": "Add Victory Points for SinglePlayer", "Victory points to be added": 5}]);
+    serde_json::json!({"rules": [
+        {"name": "Open story", "conditions": [flag(true), enter], "actions": set},
+        {"name": "Gated story", "conditions": [flag(false), enter], "actions": set},
+        {"name": "FAIL Mission", "conditions": [flag(true), enter], "actions": [{"Type": "Set Flag Action", "Flag Name": "found", "Boolean Value": "TRUE"}, {"Type": "End Game"}]},
+        {"name": "Open win", "conditions": [flag(true), {"Type": "Group Destroyed", "Group Name": "Blockade"}], "actions": [{"Type": "Goto Next Level", "World": "Mission02.twt"}]},
+        {"name": "Open speech", "conditions": [flag(true), enter], "actions": speak},
+        {"name": "Odd", "conditions": [flag(true), {"Type": "No Such Condition"}], "actions": set},
+    ], "ships": [], "volumes": {"Search": vol}, "environment": {}})
+}
+
+fn stall_world(player_at: Vec3) -> Vec<Unit> {
+    let mut blockader = unit("Blockader", "Blockade", Vec3::new(500.0, 0.0, 0.0));
+    blockader.e = Entity::from_raw_u32(7).unwrap();
+    vec![unit("RLS Comet", PLAYER, player_at), blockader]
+}
+
+/// The report evaluates conditions with the evaluator's own path and leaves nothing behind: edge state, pending events and the
+/// "unsupported" warning are as before, so the rule still fires on the player's real entry.
+#[test]
+fn unfired_report_gives_each_condition_its_truth_and_changes_nothing() {
+    let mut sc = Script::new(&stall_data(), Value::Null);
+    sc.flags.insert("go".into(), true);
+    let mut w = stall_world(Vec3::ZERO);
+    let before = (sc.prev_inside.clone(), sc.entered.clone(), sc.events.clone(), sc.consume.clone(), sc.warned.clone());
+    let report = sc.unfired_report(&w);
+    assert_eq!((sc.prev_inside.clone(), sc.entered.clone(), sc.events.clone(), sc.consume.clone(), sc.warned.clone()), before);
+    assert_eq!(report.len(), 6);
+    let open = &report[0];
+    assert_eq!((open.name.as_str(), open.class, open.gates_hold), ("Open story", RuleClass::Story, true));
+    assert_eq!(open.conds.iter().map(|c| (c.kind.as_str(), c.holds)).collect::<Vec<_>>(), [("Flag Condition", true), ("Enter Volume", false)]);
+    assert!(open.conds[1].args.contains("Volume Name=Search"), "{}", open.conds[1].args);
+    assert!(open.conds[1].detail.contains("player outside, 141 from edge"), "{}", open.conds[1].detail);
+    assert!(open.conds[0].detail.is_empty(), "a holding condition needs no explanation");
+    assert!(report[1].conds[0].detail.contains("flag is true"), "{}", report[1].conds[0].detail);
+    assert!(!report[5].conds[1].holds, "an unsupported condition reads false");
+    // The player's real entry still counts as the edge.
+    w[0].pos = Vec3::new(150.0, 0.0, -150.0);
+    let after_probe = sc.unfired_report(&w);
+    assert!(after_probe[0].conds[1].holds && after_probe[0].conds[1].detail.is_empty());
+    sc.step(&w, 0.1, false);
+    assert!(sc.fired[0] && sc.flags["found"], "entry is still seen as an entry after probing");
+}
+
+#[test]
+fn rules_are_classified_by_their_actions_not_their_names() {
+    let mut sc = Script::new(&stall_data(), Value::Null);
+    let classes: Vec<_> = sc.unfired_report(&stall_world(Vec3::ZERO)).iter().map(|r| (r.name.clone(), r.class)).collect();
+    use RuleClass::*;
+    assert_eq!(classes.iter().map(|c| c.1).collect::<Vec<_>>(), [Story, Story, Loss, Win, Presentation, Story], "{classes:?}");
+    assert_eq!(sc.never_fired_by_class(), (3, 1, 1, 1));
+}
+
+/// The frontier is the unfired story or win rules whose flag gates hold; `watch` adds up how long each of their conditions has been false.
+#[test]
+fn frontier_keeps_open_story_and_win_rules_and_times_their_false_conditions() {
+    let mut sc = Script::new(&stall_data(), Value::Null);
+    sc.flags.insert("go".into(), true);
+    let mut w = stall_world(Vec3::ZERO);
+    for _ in 0..25 {
+        sc.watch(&w, 0.1); // 2.5 s: two samples
+    }
+    let names: Vec<_> = sc.frontier().iter().map(|r| r.name.as_str()).collect();
+    assert_eq!(names, ["Open story", "Open win", "Odd"], "gated, loss and presentation rules are not on the frontier");
+    let enter = &sc.frontier()[0].conds[1];
+    assert!(!enter.holds && (enter.false_for - 2.0).abs() < 1e-3, "{enter:?}");
+    let win = &sc.frontier()[1].conds[1];
+    assert!(win.detail.contains("1 members, 1 alive"), "{}", win.detail);
+    // The condition holds once the player is inside: its clock starts over when it is false again.
+    w[0].pos = Vec3::new(150.0, 0.0, -150.0);
+    sc.watch(&w, 1.0);
+    assert!(sc.frontier()[0].conds[1].holds && sc.frontier()[0].conds[1].false_for == 0.0);
+    w[0].pos = Vec3::ZERO;
+    sc.watch(&w, 1.0);
+    assert!((sc.frontier()[0].conds[1].false_for - 1.0).abs() < 1e-3);
+    // Opening the gate puts the gated rule on the frontier; a rule that fired leaves it.
+    sc.flags.insert("go".into(), false);
+    sc.watch(&w, 1.0);
+    assert_eq!(sc.frontier().iter().map(|r| r.name.as_str()).collect::<Vec<_>>(), ["Gated story"]);
+}
+
+/// Report fields for volume and distance conditions state the player's relation: inside or outside, and how far.
+#[test]
+fn distance_condition_detail_names_the_nearest_pair_and_the_players_side() {
+    let data = serde_json::json!({"rules": [
+        {"name": "Close", "conditions": [{"Type": "Group to Group Distance", "GroupA Name": "Player0 Group,HUMAN CONTROLLED COMMAND SHIP", "GroupB Name": "Blockade", "Equivalence": "Less Than", "Distance": 300}],
+         "actions": [{"Type": "Set Flag Action", "Flag Name": "near", "Boolean Value": "TRUE"}]},
+    ], "ships": [], "volumes": null, "environment": {}});
+    let mut sc = Script::new(&data, Value::Null);
+    let r = sc.unfired_report(&stall_world(Vec3::ZERO));
+    let c = &r[0].conds[0];
+    assert!(!c.holds);
+    assert!(c.detail.contains("nearest pair 500 vs Less Than 300") && c.detail.contains("player is in A, nearest other 500"), "{}", c.detail);
+}
+
+/// Probing leaves no trace: a script sampled by `watch` every frame fires its enter, exit, once-per-unit and kill rules on exactly the
+/// frames an unwatched copy does.
+#[test]
+fn watching_does_not_change_when_rules_fire() {
+    let vol = serde_json::json!([[100.0, 100.0], [200.0, 100.0], [200.0, 200.0], [100.0, 200.0]]);
+    let rule = |name: &str, cond: Value| serde_json::json!({"name": name, "Run Once": false, "conditions": [cond], "actions": [{"Type": "Start Timer", "Timer Name": name}]});
+    let data = serde_json::json!({"rules": [
+        rule("enter", serde_json::json!({"Type": "Enter Volume", "Group Name": "Blockade", "Volume Name": "Search"})),
+        rule("exit", serde_json::json!({"Type": "Exit Volume", "Group Name": "Blockade", "Volume Name": "Search"})),
+        rule("all", serde_json::json!({"Type": "All Units from Group have entered trigger volume Once", "Group Name": "Blockade", "Volume Name": "Search"})),
+        rule("once", serde_json::json!({"Type": "Unit from Group enters trigger volume ( Once per Unit )", "Group Name": "Blockade", "Volume Name": "Search", "Team Name": ""})),
+        rule("bursts", serde_json::json!({"Type": "Mission 9 - If Mortar explodes within Area", "Volume Name": "Search"})),
+        rule("unknown", serde_json::json!({"Type": "No Such Condition"})),
+    ], "ships": [], "volumes": {"Search": vol}, "environment": {}});
+    let (mut plain, mut watched) = (Script::new(&data, Value::Null), Script::new(&data, Value::Null));
+    for frame in 0..60 {
+        let x = if (10..20).contains(&frame) || frame >= 40 { 150.0 } else { 500.0 };
+        let w = stall_world(Vec3::ZERO).into_iter().map(|mut u| (u.name == "Blockader").then(|| u.pos = Vec3::new(x, 0.0, -150.0)).map_or(u.clone(), |_| u)).collect::<Vec<_>>();
+        if frame == 50 {
+            plain.mortar_bursts.push(Vec3::new(150.0, 0.0, -150.0));
+            watched.mortar_bursts.push(Vec3::new(150.0, 0.0, -150.0));
+        }
+        watched.watch(&w, 1.0);
+        watched.unfired_report(&w);
+        plain.step(&w, 1.0, false);
+        watched.step(&w, 1.0, false);
+        assert_eq!(plain.ran, watched.ran, "frame {frame}");
+        assert_eq!(plain.timers, watched.timers, "frame {frame}");
+    }
+    assert!(plain.ran[..5].iter().all(|r| *r), "every synthetic rule should have fired: {:?}", plain.ran);
+    assert!(watched.warned.is_empty() || plain.warned == watched.warned);
+}
+
+/// With the frontier empty, the gated list names the flag that story and win rules wait on (not loss or presentation rules).
+#[test]
+fn gated_rules_name_the_flag_a_story_rule_waits_for() {
+    let mut sc = Script::new(&stall_data(), Value::Null);
+    sc.flags.insert("go".into(), true);
+    let gated = sc.gated_rules();
+    assert_eq!(gated.len(), 1, "{gated:?}");
+    assert_eq!(gated[0].0, "Gated story");
+    assert!(gated[0].1[0].contains("Flag Condition") && gated[0].1[0].contains("Flag Name=go") && gated[0].1[0].contains("flag is true"), "{:?}", gated[0].1);
+}

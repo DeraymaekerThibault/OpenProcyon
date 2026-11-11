@@ -285,6 +285,95 @@ pub struct Script {
     pub(super) mortar_seen: HashSet<String>,
     /// 'Open Crew and Arms Screens': the front end shows the crew and arms screen once (menu.rs clears it).
     pub crew_screen: bool,
+    /// Set while `probe` evaluates conditions without consuming anything: `warn` stays quiet.
+    probing: bool,
+    /// Game seconds since the last `watch` sample.
+    watch_acc: f32,
+    /// Seconds each condition of a frontier rule has been false, by (rule index, condition index) (`watch`).
+    false_for: HashMap<(usize, usize), f32>,
+    /// The frontier as of the last `watch` sample (what `autoplay_end` prints).
+    frontier: Vec<RuleReport>,
+}
+
+/// What a rule does to the game, from its actions alone (`Script::rule_class`).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum RuleClass {
+    /// Ends the game as a loss.
+    Loss,
+    /// Ends the mission or match as a win.
+    Win,
+    /// Changes story state: flags, tasks, the objective point, timers, paths, units.
+    Story,
+    /// Speech, music, camera, NIS, victory points and the like only.
+    Presentation,
+}
+impl RuleClass {
+    pub fn label(self) -> &'static str {
+        match self {
+            RuleClass::Loss => "loss",
+            RuleClass::Win => "win",
+            RuleClass::Story => "story",
+            RuleClass::Presentation => "presentation",
+        }
+    }
+    /// Story and win rules move the mission forward; the others are constraints or decoration.
+    pub fn advances(self) -> bool {
+        matches!(self, RuleClass::Story | RuleClass::Win)
+    }
+}
+
+/// One condition of an unfired rule: its truth now, how long it has been false (`watch`), and the player's relation to it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CondReport {
+    pub kind: String,
+    /// The condition's other fields as `key=value`, comma separated.
+    pub args: String,
+    pub holds: bool,
+    /// Game seconds this condition has been false in a row (0 outside `watch`).
+    pub false_for: f32,
+    /// World facts that explain a false volume, distance, flag, timer or group condition; empty for other types.
+    pub detail: String,
+}
+
+/// An unfired rule with each condition's truth (`Script::unfired_report`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct RuleReport {
+    pub index: usize,
+    pub name: String,
+    pub class: RuleClass,
+    /// Every flag, timer and speech gate holds: only world conditions are left.
+    pub gates_hold: bool,
+    pub conds: Vec<CondReport>,
+}
+impl RuleReport {
+    /// An unfired story or win rule whose gates hold: the rules that only the world blocks.
+    pub fn on_frontier(&self) -> bool {
+        self.class.advances() && self.gates_hold
+    }
+}
+
+/// The game-seconds step of `Script::watch` (the condition probe is not free).
+const WATCH_EVERY: f32 = 1.0;
+
+/// A condition's fields other than its type, as `key=value` pairs.
+fn cond_args(c: &Value) -> String {
+    c.as_object()
+        .into_iter()
+        .flatten()
+        .filter(|(k, _)| *k != "Type")
+        .map(|(k, v)| format!("{k}={}", v.as_str().map_or_else(|| v.to_string(), String::from)))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn presentation_action(t: &str) -> bool {
+    t.starts_with("Play ")
+        || t.starts_with("NIS")
+        || t.starts_with("Focus Camera")
+        || t.starts_with("Crew Speech")
+        || t.contains("Music")
+        || t.contains("Victory Points")
+        || matches!(t, "Create/Release Event Effect" | "Open HUD Texture Overlay" | "Close HUD Texture Overlay" | "Open Weapon Bar")
 }
 
 pub(super) fn s<'a>(v: &'a Value, k: &str) -> &'a str {
@@ -385,6 +474,22 @@ impl Region {
         };
         let near = (0..self.0.len()).map(edge).min_by(|x, y| x.distance_squared(from).total_cmp(&y.distance_squared(from)))?;
         Some(near + (c - near).normalize_or_zero() * 15.0_f32.min(near.distance(c)))
+    }
+    /// Distance from `p` to the polygon: 0 inside, else to the nearest edge; None for an empty polygon.
+    pub fn distance_to(&self, p: Vec2) -> Option<f32> {
+        if self.0.is_empty() {
+            return None;
+        }
+        if self.contains(p) {
+            return Some(0.0);
+        }
+        (0..self.0.len())
+            .map(|i| {
+                let (a, bb) = (self.0[i], self.0[(i + 1) % self.0.len()]);
+                let t = ((p - a).dot(bb - a) / (bb - a).length_squared().max(1e-6)).clamp(0.0, 1.0);
+                p.distance(a + (bb - a) * t)
+            })
+            .min_by(f32::total_cmp)
     }
     /// Points inside the polygon on an `n` x `n` grid over its bounding box (cell centres).
     pub fn grid(&self, n: usize) -> Vec<Vec2> {
@@ -534,6 +639,10 @@ impl Script {
             mortar_bursts: vec![],
             mortar_seen: HashSet::new(),
             crew_screen: false,
+            probing: false,
+            watch_acc: 0.0,
+            false_for: HashMap::new(),
+            frontier: vec![],
         }
     }
 
@@ -710,7 +819,7 @@ impl Script {
         &self.tows
     }
     pub(super) fn warn(&mut self, what: &str) {
-        if self.warned.insert(what.into()) {
+        if !self.probing && self.warned.insert(what.into()) {
             warn!("mission rules: unsupported {what} (ignored)");
         }
     }
@@ -861,6 +970,199 @@ impl Script {
             !(t.starts_with("Play ") || t.starts_with("NIS") || t.starts_with("Focus Camera") || t.contains("Music") || t.contains("Victory Points"))
         })
     }
+    /// What a rule does, from its actions (never its name): a win or loss ending, story state, or presentation only.
+    fn rule_class(r: &Rule) -> RuleClass {
+        let has = |f: &dyn Fn(&str) -> bool| r.acts.iter().any(|a| f(s(a, "Type")));
+        if has(&|t| matches!(t, "Goto Next Level" | "Team X Wins" | "Remaining Team Wins")) {
+            RuleClass::Win
+        } else if has(&|t| t == "End Game") {
+            RuleClass::Loss
+        } else if has(&|t| !presentation_action(t)) {
+            RuleClass::Story
+        } else {
+            RuleClass::Presentation
+        }
+    }
+
+    /// Indices of the rules that have not fired (`never_fired`'s set).
+    fn unfired(&self) -> Vec<usize> {
+        (0..self.rules.len()).filter(|&i| !self.ran[i] && !(self.briefing_opening && opening_rule(&self.rules[i].name))).collect()
+    }
+
+    /// How many rules have not fired yet, by class: (story, win, loss, presentation).
+    pub fn never_fired_by_class(&self) -> (usize, usize, usize, usize) {
+        let mut n = [0; 4];
+        for i in self.unfired() {
+            n[match Self::rule_class(&self.rules[i]) {
+                RuleClass::Story => 0,
+                RuleClass::Win => 1,
+                RuleClass::Loss => 2,
+                RuleClass::Presentation => 3,
+            }] += 1;
+        }
+        (n[0], n[1], n[2], n[3])
+    }
+
+    /// The truth of every condition of the rules `idx`, evaluated by `cond` itself with nothing left behind: the state `cond` advances
+    /// (enter/exit edges, per-unit entries, pending events, mortar bursts seen) is restored and its "unsupported" warning stays quiet.
+    /// `&mut self` only because `cond` takes it; after the call the script is as it was.
+    fn probe(&mut self, w: &[Unit], idx: &[usize]) -> Vec<Vec<bool>> {
+        let saved = (self.prev_inside.clone(), self.entered.clone(), self.events.clone(), self.consume.clone(), self.mortar_seen.clone());
+        let rules = std::mem::take(&mut self.rules);
+        self.probing = true;
+        let out = idx.iter().map(|&i| rules[i].conds.iter().map(|c| self.cond(c, w, !rules[i].once)).collect()).collect();
+        self.probing = false;
+        self.rules = rules;
+        (self.prev_inside, self.entered, self.events, self.consume, self.mortar_seen) = saved;
+        out
+    }
+
+    fn report(&mut self, w: &[Unit], frontier_only: bool) -> Vec<RuleReport> {
+        let p = w.iter().find(|u| u.primary && u.alive);
+        let open = |sc: &Script, r: &Rule| r.conds.iter().all(|c| sc.gate(c) != Some(false));
+        let idx: Vec<usize> = self.unfired().into_iter().filter(|&i| !frontier_only || (Self::rule_class(&self.rules[i]).advances() && open(self, &self.rules[i]))).collect();
+        let truth = self.probe(w, &idx);
+        idx.into_iter()
+            .zip(truth)
+            .map(|(i, holds)| {
+                let r = &self.rules[i];
+                let conds = r
+                    .conds
+                    .iter()
+                    .zip(holds)
+                    .map(|(c, holds)| CondReport {
+                        kind: s(c, "Type").into(),
+                        args: cond_args(c),
+                        holds,
+                        false_for: 0.0,
+                        detail: if holds { String::new() } else { self.detail(c, w, p) },
+                    })
+                    .collect();
+                RuleReport { index: i, name: r.name.trim().into(), class: Self::rule_class(r), gates_hold: open(self, r), conds }
+            })
+            .collect()
+    }
+
+    /// Every rule that has not fired, with each condition's current truth (no side effects, see `probe`), classified by its actions.
+    pub fn unfired_report(&mut self, w: &[Unit]) -> Vec<RuleReport> {
+        self.report(w, false)
+    }
+
+    /// The unfired story and win rules whose flag, timer and speech gates all hold, so only the world blocks them.
+    pub fn frontier_report(&mut self, w: &[Unit]) -> Vec<RuleReport> {
+        self.report(w, true)
+    }
+
+    /// Dev autoplay: call every frame; about once a game second it re-reads the frontier and adds the elapsed time to the conditions
+    /// that stayed false (a condition that held, or whose rule left the frontier, starts over).
+    pub fn watch(&mut self, w: &[Unit], dt: f32) {
+        self.watch_acc += dt;
+        if self.watch_acc < WATCH_EVERY {
+            return;
+        }
+        let dt = std::mem::take(&mut self.watch_acc);
+        let mut frontier = self.report(w, true);
+        let before = std::mem::take(&mut self.false_for);
+        for r in &mut frontier {
+            for (j, c) in r.conds.iter_mut().enumerate().filter(|(_, c)| !c.holds) {
+                c.false_for = before.get(&(r.index, j)).copied().unwrap_or(0.0) + dt;
+                self.false_for.insert((r.index, j), c.false_for);
+            }
+        }
+        self.frontier = frontier;
+    }
+
+    /// Unfired story and win rules that wait on a flag or timer gate (and on no other kind of gate), with each false gate and its
+    /// current state: a broken flag chain shows here when the frontier is empty. Reads no world state.
+    pub fn gated_rules(&self) -> Vec<(String, Vec<String>)> {
+        let mut out = vec![];
+        for i in self.unfired() {
+            let r = &self.rules[i];
+            let shut: Vec<&Value> = r.conds.iter().filter(|c| self.gate(c) == Some(false)).collect();
+            if Self::rule_class(r).advances() && !shut.is_empty() && shut.iter().all(|c| matches!(s(c, "Type"), "Flag Condition" | "Timer Condition")) {
+                out.push((r.name.trim().to_string(), shut.iter().map(|c| format!("{} ({}) [{}]", s(c, "Type"), cond_args(c), self.detail(c, &[], None))).collect()));
+            }
+        }
+        out
+    }
+
+    /// The frontier as of the last `watch` sample.
+    pub fn frontier(&self) -> &[RuleReport] {
+        &self.frontier
+    }
+
+    /// The world facts behind a false condition, with the player's relation to volumes and distances ("inside or outside, how far").
+    fn detail(&self, c: &Value, w: &[Unit], p: Option<&Unit>) -> String {
+        let flat = |pos: Vec3| Vec2::new(pos.x, -pos.z);
+        let volume = |c: &Value| {
+            let name = s(c, "Volume Name");
+            let vol = self.volume(name);
+            let mut out = vec![];
+            if vol.is_empty() {
+                out.push(format!("volume '{name}' is unknown or empty"));
+            } else if let Some(p) = p {
+                let d = vol.distance_to(flat(p.pos)).unwrap_or(0.0);
+                let to_centre = vol.centroid().map_or(0.0, |m| m.distance(flat(p.pos)));
+                out.push(if d == 0.0 { format!("player inside, {to_centre:.0} from centre") } else { format!("player outside, {d:.0} from edge, {to_centre:.0} from centre") });
+            }
+            if let Some(g) = c["Group Name"].as_str() {
+                let m = members(w, g);
+                let live: Vec<_> = m.iter().filter(|u| u.alive && u.visible).collect();
+                let inside = live.iter().filter(|u| in_volume(vol, u.pos)).count();
+                out.push(format!(
+                    "group: {} members, {} alive+visible, {inside} inside, player is member={}",
+                    m.len(),
+                    live.len(),
+                    p.is_some_and(|p| m.iter().any(|u| u.e == p.e))
+                ));
+            }
+            out.join("; ")
+        };
+        match s(c, "Type") {
+            "Is Group In Volume"
+            | "Enter Volume"
+            | "Exit Volume"
+            | "Team Member Enters Volume"
+            | "All Units from Group have entered trigger volume Once"
+            | "Unit from Group enters trigger volume ( Once per Unit )" => volume(c),
+            "Group to Group Distance" => {
+                let (a, bb) = (members(w, s(c, "GroupA Name")), members(w, s(c, "GroupB Name")));
+                let la: Vec<&Unit> = a.iter().copied().filter(|u| u.alive && u.visible).collect();
+                let lb: Vec<&Unit> = bb.iter().copied().filter(|u| u.alive && u.visible).collect();
+                let d = la.iter().flat_map(|x| lb.iter().map(move |y| x.pos.distance(y.pos))).fold(f32::INFINITY, f32::min);
+                let mut out = format!(
+                    "nearest pair {} vs {} {:.0}; A {}/{} B {}/{} alive+visible",
+                    if d.is_finite() { format!("{d:.0}") } else { "none".into() },
+                    s(c, "Equivalence"),
+                    f(c, "Distance"),
+                    la.len(),
+                    a.len(),
+                    lb.len(),
+                    bb.len()
+                );
+                if let Some(p) = p {
+                    for (side, mine, other) in [("A", &a, &lb), ("B", &bb, &la)] {
+                        if mine.iter().any(|u| u.e == p.e) {
+                            let near = other.iter().filter(|u| u.e != p.e).map(|u| u.pos.distance(p.pos)).fold(f32::INFINITY, f32::min);
+                            out += &format!("; player is in {side}, nearest other {}", if near.is_finite() { format!("{near:.0}") } else { "none".into() });
+                        }
+                    }
+                }
+                out
+            }
+            "Flag Condition" => format!("flag is {}", self.flags.get(s(c, "Flag Name")).map_or("unset".into(), |v| v.to_string())),
+            "Timer Condition" => format!(
+                "timer {}",
+                self.timer(s(c, "Timer Name")).map_or("not started".into(), |v| format!("at {v:.0}{}", if self.stopped.contains(s(c, "Timer Name")) { " (stopped)" } else { "" }))
+            ),
+            "Group Destroyed" | "Group has X members" => {
+                let m = members(w, s(c, "Group Name"));
+                format!("group: {} members, {} alive", m.len(), m.iter().filter(|u| u.alive).count())
+            }
+            _ => String::new(),
+        }
+    }
+
     pub fn tasks_text(&self) -> String {
         self.tasks
             .iter()
