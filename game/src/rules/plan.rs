@@ -48,6 +48,15 @@ pub struct Wanted {
 /// A want this close to the objective point counts as the one the point marks (PROVISIONAL).
 const POINT_MARKS: f32 = 400.0;
 
+/// Where a want is: the point or volume centre, or the unit's position.
+fn want_at(want: Want, w: &[Unit]) -> Option<Vec3> {
+    match want {
+        Want::Reach(a) | Want::Lob(a) | Want::Leave(a) => Some(a),
+        Want::Hit(e) | Want::Tow(e) | Want::Dock(e) => w.iter().find(|u| u.e == e).map(|u| u.pos),
+        Want::Lifeboats => None,
+    }
+}
+
 /// How far from a protected unit the autopilot looks for its attackers (PROVISIONAL).
 const RAIDER_RADIUS: f32 = 600.0;
 
@@ -137,6 +146,8 @@ pub(super) struct Graph {
     roles: Vec<Role>,
     /// Groups whose destruction or damage a hazard rule waits for: the player is to keep them alive.
     protect: Vec<String>,
+    /// Groups whose survival or number a scoring rule ('Add Victory Points') reads: kept alive when it costs nothing (mission 10's convoy).
+    score: Vec<String>,
     /// (group, volume) a hazard rule waits for the group to be in: the player is to keep out of the volume.
     avoid: Vec<(String, String)>,
     /// (timer, equivalence, seconds) a hazard rule waits for: reported only.
@@ -186,6 +197,18 @@ impl Graph {
                     g.towable.insert(base(y).into());
                 } else if base(y) == player {
                     g.towable.insert(base(x).into());
+                }
+            }
+            if r.acts.iter().any(|a| s(a, "Type").contains("Victory Points")) {
+                for c in &r.conds {
+                    match s(c, "Type") {
+                        "Group has X members" => keep(&mut g.score, s(c, "Group Name")),
+                        "Group Destroyed" | "Group Under Attack" => keep(&mut g.score, s(c, "Group Name")),
+                        "Group/Unit has >,<,= X damage" | "Group/Unit Vital Section has >,<,= X damage" | "Group/Unit Hit at least x Times" => {
+                            keep(&mut g.score, s(c, "Group/Unit Name"))
+                        }
+                        _ => {}
+                    }
                 }
             }
             if !matches!(g.roles[i], Role::Hazard(_)) {
@@ -428,6 +451,8 @@ impl Script {
         let Some(p) = w.iter().find(|u| u.primary && u.alive) else { return vec![] };
         let (mut critical, mut optional) = (vec![], vec![]);
         let roles = self.live_roles();
+        let task_open = self.tasks.iter().any(|t| t.active && !t.complete && !t.failed);
+        let point = self.objective_pos();
         for (i, r) in self.rules.iter().enumerate() {
             let role = roles[i];
             if self.fired[i] || matches!(role, Role::Hazard(_)) || (self.briefing_opening && super::eval::opening_rule(&r.name)) || !Self::rule_class(r).advances() {
@@ -441,8 +466,11 @@ impl Script {
                 _ => (false, 0),
             };
             for want in r.conds.iter().filter_map(|c| self.want_of(c, w, p)).flatten() {
-                let wanted = Wanted { want, rule: i, critical: crit, dist };
-                if crit { &mut critical } else { &mut optional }.push(wanted);
+                // What the mission asks for right now: a want at the objective point while a task is open (mission 11's tow of the
+                // galleon, mission 2's camp dock) counts as critical whatever its rule's place in the graph, tows and docks alike.
+                let now = !crit && task_open && point.is_some_and(|o| want_at(want, w).is_some_and(|a| a.distance(o) < POINT_MARKS));
+                let wanted = Wanted { want, rule: i, critical: crit || now, dist: if now { 0 } else { dist } };
+                if crit || now { &mut critical } else { &mut optional }.push(wanted);
             }
         }
         // An optional reason to destroy a unit that a story rule needs afloat is dropped. A critical rule's reason is kept: those wants
@@ -452,11 +480,7 @@ impl Script {
             optional.retain(|x| !matches!(x.want, Want::Hit(e) if keep.contains(&e)));
         }
         let mut out = if critical.is_empty() { optional } else { critical };
-        let at = |x: &Wanted| match x.want {
-            Want::Reach(a) | Want::Lob(a) | Want::Leave(a) => a.distance(p.pos),
-            Want::Hit(e) | Want::Tow(e) | Want::Dock(e) => w.iter().find(|u| u.e == e).map_or(f32::MAX, |u| u.pos.distance(p.pos)),
-            Want::Lifeboats => 0.0,
-        };
+        let at = |x: &Wanted| want_at(x.want, w).map_or(if matches!(x.want, Want::Lifeboats) { 0.0 } else { f32::MAX }, |a| a.distance(p.pos));
         // Within a chain distance, the want the objective point marks (it is the designers' next stop), else the nearest.
         let marked = |x: &Wanted| match (self.objective_pos(), x.want) {
             (Some(o), Want::Reach(a) | Want::Lob(a) | Want::Leave(a)) => o.distance(a) < POINT_MARKS,
@@ -468,7 +492,7 @@ impl Script {
 
     /// Live units of the groups the hazard rules need kept alive, other than the player's own fleet and the player's enemies.
     pub fn protected_units<'a>(&self, w: &'a [Unit], p: &Unit) -> Vec<&'a Unit> {
-        self.graph.protect.iter().flat_map(|g| members(w, g)).filter(|u| u.alive && u.owner != p.owner && !self.hostile(&u.owner, &p.owner)).collect()
+        self.graph.protect.iter().chain(&self.graph.score).flat_map(|g| members(w, g)).filter(|u| u.alive && u.owner != p.owner && !self.hostile(&u.owner, &p.owner)).collect()
     }
 
     /// The hostile that is closest to a protected unit and within `RAIDER_RADIUS` of it, among the units `ship` accepts. Stateless on
@@ -491,6 +515,6 @@ impl Script {
     /// The constraints the hazard rules put on the player, for the stall report.
     pub fn hazards_text(&self) -> String {
         let timers: Vec<String> = self.graph.timers.iter().map(|(n, eq, t)| format!("{n} {eq} {t:.0}s")).collect();
-        format!("protect={:?} avoid={:?} timers={timers:?}", self.graph.protect, self.graph.avoid)
+        format!("protect={:?} protect_score={:?} avoid={:?} timers={timers:?}", self.graph.protect, self.graph.score, self.graph.avoid)
     }
 }

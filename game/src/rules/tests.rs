@@ -1347,3 +1347,46 @@ fn optional_attacks_spare_units_that_other_story_rules_need_afloat() {
     let wants: Vec<Want> = sc.plan(&w).iter().map(|x| x.want).collect();
     assert!(wants.contains(&Want::Hit(id(2))), "a critical rule that wants it sunk gets it: {wants:?}");
 }
+
+/// A want at the objective point while a task is open is what the mission asks for now: critical for ordering whatever its rule's place in
+/// the graph, a tow like any other (mission 11's galleon). With no open task it stays optional.
+#[test]
+fn a_want_at_the_objective_point_with_an_open_task_counts_as_critical() {
+    let tow = format!(r#"{{"Type": "Is Ship In Tow", "Towing Group": "{ME}", "Target to Tow": "Convoy", "Boolean": "TRUE"}}"#);
+    let data = |active: bool| {
+        serde_json::json!({
+            "rules": [rule("save", &format!("[{tow}]"), &set_flag("saved"))],
+            "ships": [], "volumes": null, "environment": {},
+            "points": [{"Name": "save it", "Position": [0.0, -300.0, 0.0]}],
+            "tasks": [{"Name": "Save", "text": "Save the ship.", "Active": active}],
+        })
+    };
+    let mut me = unit("RLS Comet", PLAYER, Vec3::new(500.0, 0.0, 0.0));
+    me.e = id(1);
+    let mut barge = unit("Barge", "Convoy", Vec3::new(0.0, 0.0, 300.0));
+    barge.e = id(2);
+    let w = vec![me, barge];
+    for (active, critical) in [(true, true), (false, false)] {
+        let mut sc = Script::new(&data(active), Value::Null);
+        sc.point = Some(0);
+        let plan = sc.plan(&w);
+        assert_eq!(plan.iter().map(|x| (x.want, x.critical)).collect::<Vec<_>>(), [(Want::Tow(id(2)), critical)], "task active: {active}");
+    }
+}
+
+/// A group whose number a scoring rule reads is protected too (mission 10's loss rule reads only the player's own ships).
+#[test]
+fn groups_that_scoring_rules_count_are_protected() {
+    let data = serde_json::json!({"rules": [
+        rule("points", r#"[{"Type": "Group has X members", "Group Name": "Convoy", "Equivalence": "Equal To", "number": 3}]"#, r#"[{"Type": "Add Victory Points for SinglePlayer", "Victory points to be added": 90}]"#),
+        rule("lose", &format!("[{}]", r#"{"Type": "Group/Unit contains no mission essential ships", "Group Name": "Player0 Group"}"#), LOSE),
+    ], "ships": [], "volumes": null, "environment": {}});
+    let sc = Script::new(&data, Value::Null);
+    let mut me = unit("RLS Comet", PLAYER, Vec3::ZERO);
+    me.e = id(1);
+    let mut barge = unit("Barge", "Convoy", Vec3::new(100.0, 0.0, 0.0));
+    barge.e = id(2);
+    let w = vec![me.clone(), barge];
+    assert_eq!(sc.protected_units(&w, &me).iter().map(|u| u.e).collect::<Vec<_>>(), [id(2)]);
+    assert!(sc.hazards_text().contains("protect_score=[\"Convoy\"]"), "{}", sc.hazards_text());
+}

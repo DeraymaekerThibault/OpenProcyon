@@ -792,10 +792,10 @@ fn autopilot_dock(sc: &Script, w: &[Unit], plan: &[Wanted], extra: &mut Extra) {
     if !extra.docking_player.is_empty() || sc.nis {
         return;
     }
-    // `plan` holds optional wants only when no critical rule wants anything, so an optional dock is what the bot is steering for then
-    // (mission 2's abandoned camp, which the objective point leads to); a tow is only ever a critical rule's.
+    // Only critical wants, which include what the objective point and an open task ask for (`Script::plan`).
     let dockee = plan
         .iter()
+        .filter(|x| x.critical)
         .filter_map(|x| match x.want {
             Want::Dock(e) => w.iter().find(|u| u.e == e).filter(|u| u.pos.distance(p.pos) < NEAR).map(|u| (x, u)),
             _ => None,
