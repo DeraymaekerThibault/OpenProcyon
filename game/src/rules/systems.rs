@@ -857,6 +857,8 @@ const TARGET_STALL_SECS: f32 = 60.0;
 /// ...but only counted while the target is this close: sailing for a far one takes a while without damaging anything (PROVISIONAL).
 const TARGET_STALL_RANGE: f32 = 500.0;
 const TARGET_IGNORE_SECS: f32 = 120.0;
+/// ...and a hostile only in the way, which no rule asks for, is left alone much longer (mission 8's ironclad held the bot 1500 s).
+const UNWANTED_IGNORE_SECS: f32 = 900.0;
 
 /// The target the bot is holding: since when, its damage then, the last call, the targets already logged and those being left alone.
 #[derive(Default)]
@@ -883,7 +885,7 @@ fn ignored_targets(time: f32) -> Vec<Entity> {
 
 /// Notes the target held this frame (`None`: not engaged). One held for `TARGET_STALL_SECS` with its damage unchanged is logged once
 /// and ignored for a while; the aiming itself is not the bot's business here (step 3).
-fn track_target(time: f32, w: &[Unit], p: &Unit, held: Option<Entity>, may_ignore: bool) {
+fn track_target(time: f32, w: &[Unit], p: &Unit, held: Option<Entity>, ignore_for: Option<f32>) {
     let mut lock = TARGET_HOLD.lock().unwrap_or_else(|e| e.into_inner());
     let hold = lock.get_or_insert_with(TargetHold::default);
     let unit = held.and_then(|e| w.iter().find(|u| u.e == e));
@@ -901,8 +903,8 @@ fn track_target(time: f32, w: &[Unit], p: &Unit, held: Option<Entity>, may_ignor
             info!("autoplay target stalled target={}/{} dist={:.0} damage={:.2} held={:.0}s", u.owner, u.name, u.pos.distance(p.pos), u.damage, time - hold.since);
         }
         // A raider attacking what must be kept alive is never left alone (mission 12's boarders take the Parliament meanwhile).
-        if may_ignore {
-            hold.ignored.push((e, time + TARGET_IGNORE_SECS));
+        if let Some(secs) = ignore_for {
+            hold.ignored.push((e, time + secs));
         }
         hold.target = None;
     }
@@ -1063,6 +1065,7 @@ fn autopilot(
     }
     let Some(p) = w.iter().find(|u| u.primary && u.alive) else { return };
     let ignored = ignored_targets(sc.time);
+    let needed = sc.needed_alive(w, p);
     let wanted: Vec<&Wanted> = plan.iter().filter(|x| !matches!(x.want, Want::Hit(e) if ignored.contains(&e))).collect();
     let flee = fleeing(sc, w, plan);
     let raider = sc.raider(w, p, |u| ships.contains(u.e)).filter(|u| !ignored.contains(&u.e));
@@ -1161,7 +1164,7 @@ fn autopilot(
         };
         let blocker = w
             .iter()
-            .filter(|u| u.alive && u.visible && sc.hostile(&u.owner, &p.owner) && ships.contains(u.e) && !ignored.contains(&u.e))
+            .filter(|u| u.alive && u.visible && sc.hostile(&u.owner, &p.owner) && ships.contains(u.e) && !ignored.contains(&u.e) && !needed.contains(&u.e))
             .filter(|u| u.pos.distance(p.pos) < BLOCK_NEAR || course.is_some_and(|g| u.pos.distance(p.pos) < g.distance(p.pos) && lane_distance(p.pos, g, u.pos) < BLOCK_LANE))
             .nearest_to(p.pos, |u| u.pos);
         if let Some(u) = blocker {
@@ -1232,7 +1235,17 @@ fn autopilot(
                 .map(|u| u.pos)
         }
     };
-    track_target(sc.time, w, p, if engaged { target.0 } else { None }, why != "protect");
+    track_target(
+        sc.time,
+        w,
+        p,
+        if engaged { target.0 } else { None },
+        match why {
+            "protect" => None,
+            "in the way" => Some(UNWANTED_IGNORE_SECS),
+            _ => Some(TARGET_IGNORE_SECS),
+        },
+    );
     if let (true, Some(e), Some(s)) = (engaged, target.0, ships.iter().find(|s| s.primary)) {
         note_gunnery(sc, w, p, s.ship.heading, e);
     }

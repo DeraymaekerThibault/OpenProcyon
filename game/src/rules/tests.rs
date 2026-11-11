@@ -1319,3 +1319,31 @@ fn a_dock_is_not_wanted_before_the_rule_that_makes_its_target_dockable_has_fired
     let wants: Vec<Want> = sc.plan(&w).iter().map(|x| x.want).collect();
     assert!(wants.contains(&Want::Dock(id(3))), "{wants:?}");
 }
+
+/// A unit a story rule needs afloat (mission 10's ironclad must reach the convoy ship) is not attacked for an optional reason; a
+/// critical rule that wants it destroyed still gets it.
+#[test]
+fn optional_attacks_spare_units_that_other_story_rules_need_afloat() {
+    let near = format!(r#"{{"Type": "Group to Group Distance", "GroupA Name": "Escort", "GroupB Name": "{ME}", "Equivalence": "Less Than", "Distance": 50}}"#);
+    let data = |critical_kill: bool| {
+        let mut rules = vec![rule("meet", &format!("[{near}]"), &set_flag("met")), rule("shoot", r#"[{"Type": "Group Destroyed", "Group Name": "Escort"}]"#, &set_flag("dead"))];
+        if critical_kill {
+            rules.push(rule("win", &format!("[{}]", flag("dead")), WIN));
+        }
+        serde_json::json!({"rules": rules, "ships": [], "volumes": null, "environment": {}})
+    };
+    let mut escort = unit("Escort", "Escort", Vec3::new(400.0, 0.0, 0.0));
+    escort.e = id(2);
+    let mut me = unit("RLS Comet", PLAYER, Vec3::ZERO);
+    me.e = id(1);
+    let w = vec![me, escort];
+    let mut sc = Script::new(&data(false), Value::Null);
+    sc.hostile.insert(("Escort".into(), PLAYER.into()));
+    let wants: Vec<Want> = sc.plan(&w).iter().map(|x| x.want).collect();
+    assert!(!wants.contains(&Want::Hit(id(2))), "the optional rule to sink it is dropped: {wants:?}");
+    assert!(wants.contains(&Want::Reach(Vec3::new(400.0, 0.0, 0.0))), "the one that needs it close stays: {wants:?}");
+    let mut sc = Script::new(&data(true), Value::Null);
+    sc.hostile.insert(("Escort".into(), PLAYER.into()));
+    let wants: Vec<Want> = sc.plan(&w).iter().map(|x| x.want).collect();
+    assert!(wants.contains(&Want::Hit(id(2))), "a critical rule that wants it sunk gets it: {wants:?}");
+}

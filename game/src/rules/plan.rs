@@ -394,6 +394,33 @@ impl Script {
         }
     }
 
+    /// Units that an unfired story rule (critical or optional) needs afloat: members of the groups its distance, volume, dock and tow
+    /// conditions name, other than the player's own group. The bot does not attack them for an optional reason (mission 10's ironclad
+    /// has to reach the convoy ship for the story to go on).
+    pub fn needed_alive(&self, w: &[Unit], p: &Unit) -> HashSet<Entity> {
+        let roles = self.live_roles();
+        let mut out = HashSet::new();
+        for i in self.unfired().into_iter().filter(|&i| !matches!(roles[i], Role::Hazard(_)) && Self::rule_class(&self.rules[i]).advances()) {
+            for c in &self.rules[i].conds {
+                let specs: Vec<&str> = match s(c, "Type") {
+                    "Group to Group Distance" => vec![s(c, "GroupA Name"), s(c, "GroupB Name")],
+                    "Enter Volume"
+                    | "Is Group In Volume"
+                    | "Exit Volume"
+                    | "All Units from Group have entered trigger volume Once"
+                    | "Unit from Group enters trigger volume ( Once per Unit )" => vec![s(c, "Group Name")],
+                    "Group/Unit Docked" | "Group/Unit Is Docked" => vec![s(c, "Dockers Group/Unit Name"), s(c, "Targets Group/Unit Name")],
+                    "Is Ship In Tow" => vec![s(c, "Target to Tow")],
+                    _ => continue,
+                };
+                for spec in specs.into_iter().filter(|g| !g.is_empty() && !Self::player_in(w, p, g)) {
+                    out.extend(members(w, spec).into_iter().filter(|u| u.alive && u.e != p.e).map(|u| u.e));
+                }
+            }
+        }
+        out
+    }
+
     /// What the unfired rules ask the player to do, in the order to pursue it. Only rules that move the story on (class story or win)
     /// whose flag, timer and speech gates hold count. Critical rules come first, nearest to the win first, and the nearest want first
     /// within a rule distance; optional rules only count when no critical rule yields a want; hazard rules never do.
@@ -417,6 +444,12 @@ impl Script {
                 let wanted = Wanted { want, rule: i, critical: crit, dist };
                 if crit { &mut critical } else { &mut optional }.push(wanted);
             }
+        }
+        // An optional reason to destroy a unit that a story rule needs afloat is dropped. A critical rule's reason is kept: those wants
+        // are only ever in `critical`, which is used whenever it has any.
+        if critical.is_empty() {
+            let keep = self.needed_alive(w, p);
+            optional.retain(|x| !matches!(x.want, Want::Hit(e) if keep.contains(&e)));
         }
         let mut out = if critical.is_empty() { optional } else { critical };
         let at = |x: &Wanted| match x.want {
