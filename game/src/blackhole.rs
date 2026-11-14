@@ -17,6 +17,10 @@ const SEG_EVERY: i32 = 15; // ticks between trail segments
 /// Full-depth pull of a Magnitude 9000 hole = CLASS_GAIN x hull length / Mass (units/s²). Fits the Small hole's measured Cutter
 /// 4.50, Frigate 1.21-1.26 and Man-O-War 0.99-1.04 within ~4 %. PROVISIONAL: a candidate law from three classes.
 pub const CLASS_GAIN: f32 = 1330.0;
+/// Hull mass the pull law sees at least: the lightest measured class (the Cutter). A retail mission 11 save shows the pinned SS
+/// Harvester (`_Feather` galleon, Mass 2000) with no stored pull speed 26 s in, so its full-depth pull is under 9.35, not the law's 13.6;
+/// the law is not carried below its fitted range. PROVISIONAL: an upper bound only (a smaller hull term would fit too).
+pub const MIN_PULL_MASS: f32 = 4000.0;
 /// The pull is turned this far off the line to the centre (clockwise seen from above): sideways / inward = 0.27, the same in
 /// every measured creep and fall, whatever the ship's heading.
 const DRIFT_SWIRL: f32 = 0.27;
@@ -69,7 +73,7 @@ impl Pull {
     /// Full-depth pull (units/s²) on a hull of `length` (collision box, bow to stern) and `mass`. PROVISIONAL: the class law
     /// (`CLASS_GAIN`) and the linear Magnitude scaling (only the Small hole was measured).
     pub fn strength(&self, length: f32, mass: f32) -> f32 {
-        CLASS_GAIN * length / mass.max(1.0) * self.magnitude / 9000.0
+        CLASS_GAIN * length / mass.max(MIN_PULL_MASS) * self.magnitude / 9000.0
     }
 
     /// Pull (units/s²) at `distance`: zero outside the radius and inside the core; in between it rises linearly with the depth
@@ -243,8 +247,8 @@ pub fn spawn(commands: &mut Commands, lib: &fx::FxLib, terrain: &str, pos: Vec3)
 /// acceleration; once the pull reaches `BREAK_FREE` it falls freely, its velocity following v' = a - k v with the hull's own rate
 /// k = MaxThrust / (MaxSpeed x Mass). In the core the pull stops and a ship not under way is destroyed after `KILL_DELAY`.
 /// Docked and destroyed ships are left alone, and so are ships the rules pinned in place ('Set Group/Unit Movable' FALSE): the ships
-/// stranded in mission 4's Vanov hole and mission 11's SS Harvester wait there to be towed out, and were swallowed before the player
-/// arrived (#351, #355). The rules unpin them once the tow starts.
+/// stranded in mission 4's Vanov hole and mission 11's SS Harvester wait there to be towed out (their light hulls feel the pull of
+/// `MIN_PULL_MASS`, #351, #355). The rules unpin them once the player comes for them.
 pub fn pull(
     mut commands: Commands,
     time: Res<Time>,
@@ -276,7 +280,7 @@ pub fn pull(
             {
                 c.stop();
             }
-            accel += to_centre.normalize_or_zero() * CLASS_GAIN * class.length / class.phys.mass.max(1.0) * w.force(to_centre.length()) / 9000.0;
+            accel += to_centre.normalize_or_zero() * CLASS_GAIN * class.length / class.phys.mass.max(MIN_PULL_MASS) * w.force(to_centre.length()) / 9000.0;
         }
         let Some(mut caught) = caught else {
             if in_radius {
@@ -510,6 +514,10 @@ mod tests {
             let a = small().strength(c.length, c.phys.mass);
             assert!((a / measured - 1.0).abs() < 0.05, "{class}: {a} vs {measured}");
         }
+        // Mission 11's pinned SS Harvester (Mass 2000, 11.6 units inside a Small hole's rim) builds no pull speed in retail: one tick
+        // of its pull stays under the 0.1 snap there (a retail save, #355).
+        let h = &lib.classes[lib.index("Ship_Civilian_Galleon_Feather")];
+        assert!(h.phys.mass < MIN_PULL_MASS && small().accel(145.0 - 11.6, h.length, h.phys.mass) < BREAK_FREE);
         let c = &lib.classes[lib.index("Ship_Navy_Cutter")];
         assert!((c.phys.thrust / (c.phys.max_speed * c.phys.mass) - CUTTER_RATE).abs() < 0.01);
     }
