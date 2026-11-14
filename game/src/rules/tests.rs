@@ -998,3 +998,26 @@ fn team_objectives_resolve_to_a_point_and_a_task_text() {
     sc.act(&serde_json::json!({"Type": "Setup Team Objective", "Team Name": "NAVY", "Objective Point": "NO OBJECTIVE POINT", "Objective Task": "navy obj"}), &w, &mut out, "setup");
     assert!(sc.team_objective("NAVY").unwrap().0.is_none());
 }
+
+/// Mission 10's "Spot Pirates" has the Plunder tow the SS Spirit of the West from ~700 units away: the rule asks for the tow (the
+/// tower sails over first, rules::systems), it is no instant link; and a tow ends when the tower is destroyed.
+#[test]
+#[ignore = "needs imported assets"]
+fn mission_ten_tow_is_requested_not_linked_and_ends_with_the_tower() {
+    let mut s = crate::campaign::load_id("mission10").script;
+    s.rules.retain(|r| r.name == "Spot Pirates");
+    let mut world = World::new();
+    let mut ship = |id: i64, name: &str, owner: &str, pos: Vec3| Unit { e: world.spawn_empty().id(), id, ..unit(name, owner, pos) };
+    let plunder = ship(46, "Plunder", "pirates", Vec3::new(938.0, 0.0, -256.0));
+    let spirit = ship(55, "SS Spirit of the West", "merchants", Vec3::new(1226.0, 0.0, -969.0));
+    let player = ship(71, "RLS Comet", s.player(), plunder.pos + Vec3::X * 100.0);
+    let mut w = vec![plunder.clone(), spirit.clone(), player];
+    s.tag(&mut w);
+    let (fx, _) = s.step(&w, 0.1, false);
+    assert!(fx.iter().any(|f| matches!(f, Fx::Tow(a, b) if *a == plunder.e && *b == spirit.e)), "the rule asks for the tow");
+    assert!(s.tows().is_empty(), "no link before the tower reaches its towee");
+    s.set_tow(plunder.e, spirit.e, true);
+    w[0].alive = false;
+    s.step(&w, 0.1, false);
+    assert!(s.tows().is_empty(), "a destroyed tower drops its tow");
+}

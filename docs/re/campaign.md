@@ -136,6 +136,10 @@ Prioritise the owner-observed Mission 1 polish issues before new mission support
    a mass-weighted slack cable in movement substeps, transferring linear force and off-axis torque to both ships. Tow approach
    uses the nodes; script/menu break-tow relationships are preserved. Tests cover pulling, independent turning and release.
    Cable length is the registration distance and the constraint is inelastic, not recovered retail spring physics.
+   A rule `Tow Ship` links at once only when the two ships are already within tow range (the tugs of missions 1, 4, 5 and 13
+   start alongside their tows). Otherwise the tower first sails to its towee, as the original's tow routine does (mission 10's
+   Plunder starts about 700 units from the SS Spirit of the West). A tow ends when either ship is destroyed. The towee keeps the
+   course it was on and sails on along it once released. PROVISIONAL: what the original's towee does after release is not traced.
 5. **Dim world nebula — blend corrected:** retail ONE/ONE blending no longer multiplies the cloud RGB by texture/common alpha;
    edge fading is applied to RGB. Star-map art is unchanged. Exact edge fade and retail cloud morphing still require comparison.
 6. **Dim low-angle engine trail — blend/motion corrected:** additive particle RGB no longer gets Bevy's additional texture-alpha

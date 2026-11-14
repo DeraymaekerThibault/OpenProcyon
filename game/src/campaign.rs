@@ -33,6 +33,8 @@ pub struct MissionShip {
     pub warning_shots: bool,
     /// 'GroupA to Ram GroupB': its attack order is flown bow-on at emergency speed.
     pub ram: bool,
+    /// The course it was on when a tow took it; it sails on from there once the tow ends (`rules::systems` AI).
+    pub towed_course: Option<Vec<Vec3>>,
 }
 use crate::rules;
 /// A mission base/island that rules can address ('*State Init* Setup Island'): `owner` is its group, e.g. 'AbandonedCamp'.

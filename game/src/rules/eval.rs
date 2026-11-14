@@ -103,6 +103,8 @@ pub enum Fx {
     Throttle(Vec<Entity>, f32),
     /// 'Dock Ships': dockers, then the dockee group's units (the first with a free dock point is used).
     Dock(Vec<Entity>, Vec<Entity>),
+    /// 'Tow Ship' (tower, towee): linked at once when in tow range, else the tower sails over first (docking.rs `Tower`).
+    Tow(Entity, Entity),
     Dockable(Vec<Entity>, bool),
     Boardable(Vec<Entity>, bool),
     /// 'Set Lifeboat Creation State': the ships' Create Lifeboats flag (lifeboats.rs reads it when they are destroyed).
@@ -1428,9 +1430,11 @@ impl Script {
         self.cam.attach_e = first(self.cam.attach.as_ref().map(|a| a.0.as_str()));
         self.cam.focus_e = first(self.cam.focus_unit.as_deref());
         self.point_pos = self.point_on.as_deref().and_then(|sp| members(&w, sp).into_iter().find(|u| u.alive)).map(|u| u.pos);
+        // A tow ends when either ship is destroyed (mission 10: the Plunder sunk with the SS Spirit of the West in tow).
+        self.tows.retain(|t| [t.0, t.1].iter().all(|e| w.iter().any(|u| u.e == *e && u.alive)));
         for (tower, towed) in std::mem::take(&mut self.tow_specs) {
             if let (Some(a), Some(bb)) = (ids(&w, &tower).first(), ids(&w, &towed).first()) {
-                self.tows.push((*a, *bb));
+                out.push(Fx::Tow(*a, *bb));
             } else {
                 self.tow_specs.push((tower, towed));
             }

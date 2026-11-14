@@ -366,6 +366,17 @@ fn update(
                     }
                 }
             }
+            Fx::Tow(tower, towee) => {
+                let at = |e| ships.get(e).ok().map(|s| (s.transform.translation, lib.classes[s.ship.class].radius));
+                if let (Some((p, rp)), Some((q, rq))) = (at(tower), at(towee))
+                    && crate::docking::tow_in_range(p, q, rp, rq)
+                {
+                    mission.script.set_tow(tower, towee, true); // tugs placed alongside their tow (missions 1, 4, 5, 13)
+                } else {
+                    // Mission 10's Plunder starts ~700 units from the merchant it tows. PROVISIONAL: the original's approach is not traced.
+                    extra.dock.write(DockMsg::TowStart { tower: Some(tower), towee });
+                }
+            }
             Fx::Dockable(u, on) => {
                 for e in u {
                     extra.dock.write(DockMsg::Enabled(e, on));
@@ -1158,10 +1169,18 @@ fn mission_ai(
             ms.hold_fire = hold;
         }
         if sc.tows().iter().any(|link| link.1 == e) {
+            // PROVISIONAL: the original's towee after release is not traced; it resumes its course (mission 10's convoy leader).
+            if ms.towed_course.is_none() && ship.order == 2 && !ship.waypoints.is_empty() {
+                ms.towed_course = Some(std::mem::take(&mut ship.waypoints));
+            }
             ship.waypoints.clear();
             ship.order = 0;
             ship.goal = None;
             continue; // Movement/turning come from the shared tow constraint, not a rigid teleport.
+        }
+        if ms.towed_course.is_some() && !h.destroyed {
+            ship.waypoints = ms.towed_course.take().unwrap_or_default();
+            ship.order = 2;
         }
         // Border zone: a ship outside its leash volume drops what it was doing and heads back (to its return point, else the
         // zone's centre). PROVISIONAL: the original's border AI is unknown; this re-enters and resumes on the next frame inside.
