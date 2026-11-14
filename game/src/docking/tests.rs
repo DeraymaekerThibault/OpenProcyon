@@ -175,6 +175,34 @@ fn computer_ship_with_two_half_sections_sails_for_the_nearest_dock() {
     assert!(!needs_repair(&lib, &ship(&lib, "Ship_Pirate_Barque", Side::Enemy).0, &ship(&lib, "Ship_Pirate_Barque", Side::Enemy).1));
 }
 
+/// In a campaign a Persistent captain keeps to its script (mission 10's damaged convoy left its route for repairs), and a dock out of
+/// sight is not considered.
+#[test]
+#[ignore = "needs imported assets"]
+fn campaign_repair_skips_persistent_captains_and_docks_out_of_sight() {
+    use crate::rules::Stance;
+    let (mut app, lib) = app();
+    app.insert_resource(crate::campaign::load_id("mission10")).add_systems(Update, ai_repair_dock.before(handle_messages));
+    let docks = load_docks();
+    let dock = app.world_mut().spawn((Transform::default(), dockable_for(&docks, "Base_Safetytown").unwrap(), MissionBase { id: 1, owner: "merchants".into() })).id();
+    let sight = lib.classes[lib.index("Ship_Pirate_Barque")].sight;
+    let hurt = |app: &mut App, x: f32, stance: Stance| {
+        let (s, mut h) = ship(&lib, "Ship_Pirate_Barque", Side::Enemy);
+        h.sections[0] *= 0.5;
+        h.sections[1] *= 0.5;
+        let ms = crate::campaign::MissionShip { owner: "merchants".into(), stance, visible: true, ..default() };
+        app.world_mut().spawn((Transform::from_xyz(x, 0.0, 0.0), s, h, ms, crate::collision::Drift::default())).id()
+    };
+    let near = hurt(&mut app, 0.5 * sight, Stance::Aggressive);
+    let persistent = hurt(&mut app, 0.5 * sight, Stance::Persistent);
+    let far = hurt(&mut app, 1.5 * sight, Stance::Aggressive);
+    tick(&mut app, 0.1);
+    tick(&mut app, 0.1);
+    assert_eq!(app.world().get::<Docker>(near).map(|d| d.dockee), Some(dock));
+    assert!(app.world().get::<Docker>(persistent).is_none(), "Persistent captains keep their scripted route");
+    assert!(app.world().get::<Docker>(far).is_none(), "campaign docks out of sight are not chosen");
+}
+
 fn app() -> (App, Library) {
     let lib = Library::load(assets_dir());
     let mut app = App::new();

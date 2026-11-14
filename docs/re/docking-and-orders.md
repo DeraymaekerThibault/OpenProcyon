@@ -119,13 +119,15 @@ is **[? not confirmed]**; the rule action `Toggle Island Repair When Docked` fli
 (ships), `DockPoint1/2` or `Dock_Point` with an association name such as `CRANES` (bases/islands), described by WOT `MeshAttributes` entries with `AttributeName 'DockPoint'`.
 
 ### Computer ships docking for repair
-Computer players' ships (not the human's, not ones under explicit orders) decide on their own to dock for repair: once **at
+Computer players' ships (not the human's, not ones under explicit orders, never a Persistent-stance captain) decide on their own to dock for repair: once **at
 least two of their damage sections are at or below half their hit points** (destroyed sections do not count), they pick the
-nearest (by surface gap) friendly dockable ship or island that repairs, at any distance in skirmish, and run the dock routine above on it
+nearest (by surface gap) friendly dockable ship or island that repairs, at any distance in skirmish but only within the ship's sight range in a
+campaign, and run the dock routine above on it
 (read from the code). The choice is re-made every think, so a ship can switch docks on the way; once started the routine runs to its end
 even if repairs are no longer needed, and there is no give-up timer. Overall hull share is not the test, which is why a skirmish computer ship at 80 % hull with its damage
 spread thin never docked ([movement.md](movement.md#computer-captains-measured-2026-10)). Remake: `docking::ai_repair_dock` (PROVISIONAL:
-nearest by centre distance, and the first choice is kept).
+nearest by centre distance, and the first choice is kept). Mission 10 shows why the stance matters: its convoy is Persistent, and
+without the check the damaged lead merchant left its scripted route for a repair dock, so the convoy never reached the next objective.
 
 ### Dock-point markers
 While an object is dockable every dock point carries an effect on its node; when it stops being dockable they are removed. The
