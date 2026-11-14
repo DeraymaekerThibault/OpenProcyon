@@ -848,14 +848,19 @@ fn unstick(time: f32, pos: Vec3, goal: Option<Vec3>, cell: &std::sync::Mutex<Opt
 
 /// The ship a `Tow...` task asks the player to tow: the one the task name ends with, else the named ship its text mentions (mission 4's
 /// "Tow tender to safety" reads "Tow the RLS Bachanalia to the Rally Point.", #351). A task whose text alone starts with "Tow" counts
-/// too: mission 4's "MO4 free stuck sloop" reads "Tow the RLS Yorkshire Clear of the Island it has Run Aground On.".
+/// too: mission 4's "MO4 free stuck sloop" reads "Tow the RLS Yorkshire Clear of the Island it has Run Aground On.". The text may
+/// misspell the name (mission 4's "Tow the RLS Indominable ..." for the RLS Indomitable), so the first six letters of the name's last
+/// word are enough.
 fn task_towee<'a>(t: &super::eval::Task, w: &'a [Unit], player: Entity) -> Option<&'a Unit> {
     let name = t.name.strip_prefix("Tow").filter(|n| !n.is_empty());
     if name.is_none() && !t.text.starts_with("Tow ") {
         return None;
     }
     let candidates = || w.iter().filter(|u| u.alive && u.e != player && !u.name.is_empty());
-    name.and_then(|n| candidates().find(|u| u.name.ends_with(n))).or_else(|| candidates().find(|u| t.text.contains(u.name.as_str())))
+    let stem = |u: &&Unit| u.name.rsplit(' ').next().and_then(|w| w.get(..6)).is_some_and(|w| t.text.contains(w));
+    name.and_then(|n| candidates().find(|u| u.name.ends_with(n)))
+        .or_else(|| candidates().find(|u| t.text.contains(u.name.as_str())))
+        .or_else(|| candidates().find(stem))
 }
 
 fn autopilot_tow(sc: &Script, w: &[Unit], extra: &mut Extra) {
@@ -1729,6 +1734,9 @@ mod ai_tests {
         let w = [unit(1, "RLS Sea Sparrow"), unit(5, "RLS Yorkshire")];
         let sloop = task("MO4 free stuck sloop", "Tow the RLS Yorkshire Clear of the Island it has Run Aground On.");
         assert_eq!(task_towee(&sloop, &w, me).map(|u| u.e), Some(w[1].e), "a task whose text says Tow");
+        let w = [unit(1, "RLS Sea Sparrow"), unit(6, "RLS Indomitable")];
+        let mow = task("rescue bh man o war", "Tow the RLS Indominable Clear of the Vanov Black Hole.");
+        assert_eq!(task_towee(&mow, &w, me).map(|u| u.e), Some(w[1].e), "the misspelt name still matches");
     }
 
     #[test]
