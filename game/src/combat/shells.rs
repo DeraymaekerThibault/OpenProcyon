@@ -112,13 +112,18 @@ pub(super) fn side_damage_scale(shooter: Side, victim: Side, difficulty: u8, bas
     }
 }
 
-/// `Invulnerable Percent` (rules' Set Group/Unit Vulnerability) as a hull floor: hits and fires do their full damage, but the core does
-/// not drop below that share of its hit points through them (1.0: no damage, no fires). PROVISIONAL: inferred from the campaign's
-/// values (mission 4's towed tender at 0.1 after an 80% damage action, the player held at 10% through scripted chases, 45% through
-/// mission 3's storm); the original's code was not read. A core already below the floor stays where it is.
-pub(super) fn floor_core(class: &Class, hp: &mut Health, before: f32, invuln: f32) {
-    if invuln > 0.0 {
-        hp.core = hp.core.max(before.min(invuln * class.core_hp));
+/// `Invulnerable Percent` (rules' Set Group/Unit Vulnerability) as a hull floor: hits and fires do their full damage, but neither the
+/// core nor any section drops below that share of its hit points through them (1.0: no damage, no fires), so a protected ship keeps
+/// its sails, masts, helm and guns. PROVISIONAL: inferred from the campaign's values (mission 4's towed tender at 0.1 after an 80%
+/// damage action, the player held at 10% through scripted chases, 45% through mission 3's storm); the original's code was not read.
+/// A part already below the floor (`before`) stays where it is.
+pub(super) fn floor_hull(class: &Class, hp: &mut Health, before: (f32, &[f32]), invuln: f32) {
+    if invuln <= 0.0 {
+        return;
+    }
+    hp.core = hp.core.max(before.0.min(invuln * class.core_hp));
+    for ((now, was), sec) in hp.sections.iter_mut().zip(before.1).zip(&class.sections) {
+        *now = now.max(was.min(invuln * sec.hp));
     }
 }
 
@@ -126,7 +131,7 @@ pub(super) fn apply_ship_hit(class: &Class, hp: &mut Health, k: usize, damage: [
     let [lo, hi, _crit, fire_p, fire_str] = damage;
     let protected = invuln >= 1.0;
     let scale = if protected { 0.0 } else { 1.0 };
-    let (was, core) = (hp.sections[k], hp.core);
+    let (was, core, secs) = (hp.sections[k], hp.core, hp.sections.clone());
     let roll = rng.range(lo, hi);
     hp.sections[k] = (was - scale * roll).max(0.0);
     // Retail ignition roll per hit: chance > 0 and roll <= chance starts a fire of the bullet's initial strength.
@@ -139,7 +144,7 @@ pub(super) fn apply_ship_hit(class: &Class, hp: &mut Health, k: usize, damage: [
     if hp.sections[k] == 0.0 {
         spill(class, hp, k, 0.4 * roll * scale, &mut vec![k]);
     }
-    floor_core(class, hp, core, invuln);
+    floor_hull(class, hp, (core, &secs), invuln);
     ShipHit { fire, lost: was > 0.0 && hp.sections[k] == 0.0 }
 }
 
@@ -586,7 +591,7 @@ struct ShipTarget<'a> {
     transform: &'a Transform,
     side: Side,
     class: &'a crate::data::Class,
-    /// Script vulnerability: 'Invulnerable Percent' 1.0 takes no damage and no fire; partial values are a hull floor (`floor_core`).
+    /// Script vulnerability: 'Invulnerable Percent' 1.0 takes no damage and no fire; partial values are a hull floor (`floor_hull`).
     invuln: f32,
 }
 

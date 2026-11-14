@@ -51,7 +51,7 @@ explicitly listed below; unsupported ones are logged once (`unsupported ...`) an
   speech played / not yet played, Is Group In Volume / Enter Volume (polygon test), Is Group A attacking Group B, hit counts (by anyone or by a
   player), group member counts, damage fraction, mission-essential ships, unit flag texture (original group membership), group distance, docked.
 - **Actions**: paths (with Find Closest Point, per-ship 35-unit lateral offsets as a stand-in for formations), max throttle (`Ship.cap`), AI stance,
-  owner changes, visibility (hidden ships cannot be targeted or hit), vulnerability (`Invulnerable Percent` is a hull floor: full damage, but hits and fires leave the core at least that share of its hit points;
+  owner changes, visibility (hidden ships cannot be targeted or hit), vulnerability (`Invulnerable Percent` is a hull floor: full damage, but hits and fires leave the core and every section at least that share of their hit points, so sails, helm and guns survive;
   1.0 blocks all damage and fires. PROVISIONAL, inferred from the values the campaign uses, e.g. mission 4's towed RLS Bachanalia at 0.1
   after an 80% damage action, the player at 0.1 through scripted chases and 0.45 through mission 3's storm),
   flag texture and banner tint, attack orders, Clear all AI commands, Damage by percent, hold position/fire, reset hit counts, alliances (a
@@ -247,8 +247,10 @@ Normal-timeline pickup/rescue/towing continuation still needs owner playtesting.
 ## Missions 2-13 (first pass, untested in play)
 `--mission N` loads `maps/missionNN/mission.json` through the same rule interpreter; only mission 1 has the scripted opening NIS (`briefing.rs`).
 Rules call the human group "Player0 Group"; `Script::new` rewrites it to the TWT's player name. That group is every ship the human
-owns, even when a TWT group of the same name lists only some of them: mission 5's command ship is TWT group "Jim", the TWT group "Player"
-holds its two escorts, and the warning shot ("Is Group A attacking Group B" from "Player0 Group") is fired by the command ship. PROVISIONAL:
+owns, even when a TWT group of the same name lists only some of them. Mission 5 starts with the RLS Sea Sparrow (primary) and the RLS
+Comet in TWT group "Player"; the RLS Superior (TWT group "Jim", placed with owner `NO PLAYER`) is handed to the player and made fleet
+primary by a rule partway in, so it is the human's command ship without being in TWT group "Player". The warning shot ("Is Group A
+attacking Group B" from "Player0 Group") is fired by that command ship. PROVISIONAL:
 read from mission 5's rules, which only complete this way. A mission with no primary ship (9, 13)
 gets the player group's first ship, else a stand-in cutter. Hulls without a class (`*_Wrecked`) are skipped.
 

@@ -252,7 +252,7 @@ pub fn fires(
                 f.intensity -= used;
                 crew -= used;
             }
-            let core = hp.core;
+            let (core, secs) = (hp.core, hp.sections.clone());
             for f in fires.list.iter().filter(|f| f.state == 0) {
                 let was = hp.sections[f.sec];
                 hp.sections[f.sec] = (was - f.intensity).max(0.0);
@@ -264,7 +264,7 @@ pub fn fires(
                     info!("{} of {} burnt out", sec.label, class.name);
                 }
             }
-            super::shells::floor_core(class, &mut hp, core, mission.map_or(0.0, |m| m.invuln));
+            super::shells::floor_hull(class, &mut hp, (core, &secs), mission.map_or(0.0, |m| m.invuln));
             // Decoded: a fire changes state only on these ticks. One that is out (no strength, or its section gone) stops emitting
             // on the tick that finds it, is cut loose from the ship on the next and deleted on the one after; a burning fire doubles.
             for f in &mut fires.list {

@@ -770,6 +770,28 @@ fn ship_hit_rules() {
     hp.core = 0.05 * class.core_hp;
     apply_ship_hit(class, &mut hp, stern, sure_fire, 0.1, true, &mut rng);
     assert_eq!(hp.core, 0.05 * class.core_hp, "a core already under the floor is not healed and loses no more");
+    // The floor holds every section too: a protected ship keeps its sails, helm and guns (review of #358).
+    let mut hp = Health::new(class);
+    for _ in 0..200 {
+        apply_ship_hit(class, &mut hp, stern, sure_fire, 0.1, true, &mut rng);
+    }
+    for (h, sec) in hp.sections.iter().zip(&class.sections) {
+        assert!(*h >= 0.1 * sec.hp - 1e-3, "{} fell below the floor: {h} of {}", sec.label, sec.hp);
+    }
+    // Fires use the same floor: at 1.0 a burn takes nothing, at a partial value it stops at the share.
+    let fresh = Health::new(class);
+    let before = (fresh.core, fresh.sections.clone());
+    let wrecked = || {
+        let mut h = Health::new(class);
+        h.sections.iter_mut().for_each(|s| *s = 0.0);
+        h.core = 0.0;
+        h
+    };
+    let (mut burnt, mut full) = (wrecked(), wrecked());
+    super::shells::floor_hull(class, &mut full, (before.0, &before.1), 1.0);
+    assert_eq!((full.core, &full.sections), (fresh.core, &fresh.sections), "1.0 blocks fire damage");
+    super::shells::floor_hull(class, &mut burnt, (before.0, &before.1), 0.45);
+    assert!(burnt.sections.iter().zip(&class.sections).all(|(h, s)| (*h - 0.45 * s.hp).abs() < 1e-3) && burnt.core == 0.45 * class.core_hp);
 }
 
 #[test]
