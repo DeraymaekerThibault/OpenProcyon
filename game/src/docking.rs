@@ -690,7 +690,8 @@ pub fn needs_repair(lib: &Library, ship: &Ship, h: &Health) -> bool {
 }
 
 /// Computer ships that need repair sail for the nearest friendly dock that repairs (docs/re/docking-and-orders.md, AI repair).
-/// PROVISIONAL: no distance limit, and the original's choice among friendly docks is taken to be the nearest.
+/// Persistent captains never decide this (scripted convoys keep their route: mission 10's damaged merchants), and in a campaign the
+/// dock must be within the ship's sight range; skirmish has no limit. PROVISIONAL: centre distance, and the nearest dock is taken.
 #[allow(clippy::type_complexity)]
 fn ai_repair_dock(
     lib: Res<Library>,
@@ -703,7 +704,7 @@ fn ai_repair_dock(
     for (e, ship, h, tf, ms) in &ships {
         // Computer players only: skirmish enemies, and mission ships the human does not own; scripted dummies never decide.
         let computer = match (ms, script) {
-            (Some(m), Some(sc)) => m.owner != sc.player() && m.stance != crate::rules::Stance::Dummy,
+            (Some(m), Some(sc)) => m.owner != sc.player() && !matches!(m.stance, crate::rules::Stance::Dummy | crate::rules::Stance::Persistent),
             _ => ship.side != Side::Player,
         };
         if h.destroyed || !computer || !needs_repair(&lib, ship, h) {
@@ -716,6 +717,8 @@ fn ai_repair_dock(
         let candidates = docks
             .iter()
             .filter(|(d, _, dk, dship, dms, base)| *d != e && dk.enabled && dk.repairs && friendly(*dship, dms.map(|m| m.owner.as_str()).or(base.map(|b| b.owner.as_str()))));
+        let reach = if script.is_some() { lib.classes[ship.class].sight } else { f32::INFINITY };
+        let candidates = candidates.filter(|d| d.1.translation.distance(tf.translation) <= reach);
         let nearest = crate::nearest(candidates, tf.translation, |d| d.1.translation);
         if let Some((dockee, ..)) = nearest {
             info!("docking: {e} needs repair, sails for {dockee}");
