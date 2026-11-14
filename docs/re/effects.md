@@ -411,10 +411,13 @@ core: run by fx/) plus a `Vortex` primitive, implemented in `game/src/blackhole.
   9000, D = R/4, the break-free threshold 3.0 units/s² and the 1.1 s kill inside R/4, credited to nobody in the Game Summary.
   The vortex's KILL_RADIUS only ends its ribbon points. Computer captains keep out of the radius (movement.md).
   A ship the rules pinned ('Set Group/Unit Movable' FALSE) is neither pulled nor destroyed: missions 4 and 11 strand ships at a
-  hole's rim that way until the player comes to tow them (inferred from the scripts, PROVISIONAL). Once the rules unpin them, the
-  light `_Feather` hulls (Mass 4000, against 20000 for the Navy Tender) break free at once under the law above and are swallowed
-  within seconds (mission 11's SS Harvester) to about a minute, before an approaching player can tow them; how the original keeps
-  them out is unknown (#351, #355).
+  hole's rim that way until the player comes to tow them (inferred from the scripts, PROVISIONAL). The light `_Feather` hulls they
+  use (Mass 2000-4000) are below the fitted range: a retail save of mission 11, 26 s in, shows the pinned SS Harvester (Mass 2000,
+  11.6 units inside a Small hole's rim) with no stored pull speed at all, while the law gives it 4.4 units/s², over the 3.0 break-free
+  line. Its full-depth pull is therefore under 9.35 (law: 13.6). Remake: the law uses a Mass of at least 4000 (the Cutter, the
+  lightest measured class), which puts the Harvester at 2.2 units/s²: it creeps and is towed out. PROVISIONAL, an upper bound only.
+  Mission 4's St. Christopher (Mass 4000, 1.8 units/s² 9 units inside a Medium hole's rim) is unchanged: released, it creeps and
+  breaks free after about 80 s, so the player must reach it in time (the mission has a "Tender Lost" rule).
 * Unknown: strip UV mapping/blend (ours: additive, v = 0.5 per segment), the funnel mesh
   (not drawn: the reference video shows only the glow, beams and ribbons).
 
