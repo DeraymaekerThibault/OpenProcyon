@@ -919,8 +919,8 @@ fn wants_lists_what_open_rules_wait_for_the_player_to_do() {
 }
 
 /// "Player0 Group" is every ship the human owns, even where a TWT group named after the human holds only some of them (#352). Mission 5:
-/// the command ship is in TWT group "Jim", TWT group "Player" holds its two escorts, and the warning shot rule asks whether "Player0
-/// Group" is attacking the boats and the command ship has fired.
+/// TWT group "Player" is the starting two ships; the RLS Superior (TWT group "Jim") is handed to the player as command ship by a rule
+/// mid-mission, and the warning shot rule asks whether "Player0 Group" is attacking the boats once that command ship has fired.
 #[test]
 fn the_player_group_is_every_ship_the_human_owns() {
     let data = serde_json::json!({"rules": [

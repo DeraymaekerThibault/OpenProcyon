@@ -548,8 +548,8 @@ impl Script {
                 u.groups.extend(g.iter().cloned());
             }
             // "Player0 Group" (aliased to the human's name) is the human's fleet: every ship the human owns, even where a TWT group
-            // of the same name shadows the owner. Mission 5's command ship is TWT group "Jim", owned by "Player", and the TWT group
-            // "Player" holds only its two escorts; without this the warning shot by the command ship never counted (#352).
+            // of the same name shadows the owner. Mission 5's TWT group "Player" is the starting Sea Sparrow and Comet; a rule later hands
+            // the RLS Superior (TWT group "Jim") to the player as fleet primary. Without this its warning shot never counted (#352).
             if u.owner == self.player && !u.groups.contains(&self.player) {
                 u.groups.push(self.player.clone());
             }
