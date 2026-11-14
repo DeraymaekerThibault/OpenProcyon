@@ -1455,3 +1455,41 @@ fn lob_cursor_sprites_follow_weapon_and_solution() {
     let b = LobAimed { kind: 0, solution: false, ..a };
     assert_eq!(b.cursor(), "Cursor_PrimaryShip_SetLobTarget_GravCharge_HAS_NO_FIRING_SOLUTION");
 }
+
+#[test]
+#[ignore = "needs imported assets"]
+fn a_fire_that_burns_a_floored_section_out_goes_out() {
+    // Mission 4's stranded tender (#351): the hull floor props the burnt section back up, which must not keep the fire alive.
+    let lib = Library::load(assets_dir());
+    let c = lib.index("Ship_Navy_Cutter");
+    let mut hp = Health::new(&lib.classes[c]);
+    hp.sections[0] = 1.0;
+    let mut app = App::new();
+    app.init_resource::<Time>().add_systems(Update, super::damage::fires);
+    let fire = super::damage::Fire { sec: 0, intensity: 50.0, state: 0, t: 0.0, fx: None };
+    let ms = crate::campaign::MissionShip { invuln: 0.5, ..Default::default() };
+    let ship = Ship {
+        class: c,
+        side: Side::Player,
+        heading: 0.0,
+        speed: 0.0,
+        ang_vel: 0.0,
+        order: 0,
+        waypoints: vec![],
+        goal: None,
+        cap: 1.0,
+        throttle: None,
+        sail_energy: 1.0,
+        crew_speed: 1.0,
+        crew_turn: 1.0,
+        net: 1.0,
+        avoid: 1.0,
+    };
+    let e = app.world_mut().spawn((Transform::default(), ship, hp, super::damage::Fires { list: vec![fire], tick: 0.0 }, ms)).id();
+    app.insert_resource(lib);
+    for _ in 0..4 {
+        app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs_f32(super::damage::FIRE_TICK));
+        app.update();
+    }
+    assert!(app.world().get::<super::damage::Fires>(e).unwrap().list.is_empty(), "the fire burnt out and was removed");
+}
