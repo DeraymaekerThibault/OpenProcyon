@@ -264,6 +264,8 @@ pub fn fires(
                     info!("{} of {} burnt out", sec.label, class.name);
                 }
             }
+            // A section burnt to nothing puts its fire out even if the hull floor ('Invulnerable Percent') then props it back up.
+            let burnt: Vec<bool> = hp.sections.iter().map(|&s| s <= 0.0).collect();
             super::shells::floor_hull(class, &mut hp, (core, &secs), mission.map_or(0.0, |m| m.invuln));
             // Decoded: a fire changes state only on these ticks. One that is out (no strength, or its section gone) stops emitting
             // on the tick that finds it, is cut loose from the ship on the next and deleted on the one after; a burning fire doubles.
@@ -282,7 +284,7 @@ pub fn fires(
                             });
                         }
                     }
-                    _ if f.intensity <= 0.0 || hp.sections[f.sec] <= 0.0 => {
+                    _ if f.intensity <= 0.0 || burnt[f.sec] => {
                         f.state = 1;
                         if let Some(Ok(mut x)) = f.fx.map(|e| fxq.get_mut(e)) {
                             x.emitting = false;
