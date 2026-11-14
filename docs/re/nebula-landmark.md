@@ -72,7 +72,7 @@ Each nebula keeps, from its `Terrain_Nebula` state: centre, radius,
   damage and meteors used heavy-cannon damage. For cloth, weather wind is 5–7 damage versus lightning's 15–40; for wood, meteors are 5–10.
   Hit selection now follows the executable evidence below rather than guaranteed per-ship hits. Recharge floors (3 s lightning / 2 s meteors),
   endpoint sampling, wind force and membership/trap details remain provisional; critical/fire handling retains the existing environmental-hit limitations.
-  The mission 3 `storm-m3-damage` smoke uses the normal 45% protection from its retail trigger rule (not forced invulnerability)
+  The mission 3 `storm-m3-damage` smoke uses the 45% hull floor (`Invulnerable Percent` 0.45) from its retail trigger rule (not forced invulnerability)
   and verifies carriage, release and survival.
 
 ### Weather hit-selection follow-up

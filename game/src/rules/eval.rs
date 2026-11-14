@@ -547,13 +547,19 @@ impl Script {
             if let Some(g) = self.groups.get(&u.id) {
                 u.groups.extend(g.iter().cloned());
             }
+            // "Player0 Group" (aliased to the human's name) is the human's fleet: every ship the human owns, even where a TWT group
+            // of the same name shadows the owner. Mission 5's TWT group "Player" is the starting Sea Sparrow and Comet; a rule later hands
+            // the RLS Superior (TWT group "Jim") to the player as fleet primary. Without this its warning shot never counted (#352).
+            if u.owner == self.player && !u.groups.contains(&self.player) {
+                u.groups.push(self.player.clone());
+            }
         }
     }
     /// Whether a unit (TWT id, owner, name; `primary` for the human's command ship) answers to a rule spec, as `matches` does.
     pub fn answers(&self, id: i64, owner: &str, name: &str, primary: bool, spec: &str) -> bool {
         match spec.split_once(',') {
             Some((_, unit)) => name == unit || (unit == "HUMAN CONTROLLED COMMAND SHIP" && primary),
-            None => (!self.named_group(owner) && owner == spec) || self.groups.get(&id).is_some_and(|g| g.iter().any(|g| g == spec)),
+            None => ((!self.named_group(owner) || owner == self.player) && owner == spec) || self.groups.get(&id).is_some_and(|g| g.iter().any(|g| g == spec)),
         }
     }
     /// Talking-head sprite of the line being spoken: the TWT speech event's FaceTexture (media `face`), if exported.
@@ -1226,10 +1232,13 @@ impl Script {
                 }
             }
             "Tow Ship" => self.tow_specs.push((s(a, "Docking Group").into(), s(a, "Target to Tow").into())),
+            // Either group may be the tower: mission 4's "pirated tender safe" and mission 11's "Player Saves Civ Galleon" name the towed
+            // ship first and the player second (#351, #355).
             "Break Tow" => {
-                let (x, y) = (ids(w, s(a, "TowerGroupA")), ids(w, s(a, "TowerGroupB")));
-                self.tows.retain(|t| !(x.contains(&t.0) && y.contains(&t.1)));
-                self.tow_specs.retain(|p| !(p.0 == s(a, "TowerGroupA") && p.1 == s(a, "TowerGroupB")));
+                let (ga, gb) = (s(a, "TowerGroupA"), s(a, "TowerGroupB"));
+                let (x, y) = (ids(w, ga), ids(w, gb));
+                self.tows.retain(|t| !((x.contains(&t.0) && y.contains(&t.1)) || (y.contains(&t.0) && x.contains(&t.1))));
+                self.tow_specs.retain(|p| !((p.0 == ga && p.1 == gb) || (p.0 == gb && p.1 == ga)));
             }
             "NIS Start" => {
                 self.nis = true;

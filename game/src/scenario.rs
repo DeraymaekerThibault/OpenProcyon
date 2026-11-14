@@ -594,6 +594,11 @@ pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Libra
             let Some(class) = o["type"].as_str().filter(|t| t.starts_with("Base_") || t.starts_with("Island_")).and_then(|t| lib.classes.iter().position(|c| c.name == t)) else {
                 continue;
             };
+            // PROVISIONAL: a gunless base (Convoy Raid's pirate stockade) stays scenery in skirmish, as before it had a class: whether the
+            // original lets skirmish fleets shoot or board it is not observed. Missions use its vitalToMission section (mission 6).
+            if lib.classes[class].mounts.is_empty() {
+                continue;
+            }
             let island = lib.classes[class].name.starts_with("Island_");
             let owner = o["player"].as_u64().and_then(|i| players.get(i as usize)).and_then(|p| p["name"].as_str()).and_then(faction);
             let Some(side) = (if island {
