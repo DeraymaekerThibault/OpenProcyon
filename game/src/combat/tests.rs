@@ -1,5 +1,37 @@
 use super::*;
 
+/// #353: mission 6's stockade gate has no guns, only a vitalToMission section, and the rules wait for that section's damage to reach 1.
+/// The importer must export it as a class (an attackable base), and shooting the section down must read as full mission damage.
+#[test]
+#[ignore = "needs imported assets"]
+fn gunless_stockade_is_a_base_whose_mission_section_can_be_destroyed() {
+    let lib = Library::load(assets_dir());
+    let class = &lib.classes[lib.index("Base_PirateStockade")];
+    assert!(class.mounts.is_empty());
+    assert!(class.sections.iter().any(|s| s.mission), "the gate's Camp_wood section is vitalToMission");
+    let mut hp = Health::new(class);
+    assert_eq!(base_mission_damage(class, &hp), 0.0);
+    // The aim point lies on the gate's mesh, not in the air above its bounding box (the shells flew over it).
+    let aim = hit_test::base_aim_point(class, &hp, None).expect("a live mission section is something to aim at");
+    let gate = class.sections.iter().find(|s| s.mission).unwrap();
+    assert!(hit_test::seg_mesh(aim + Vec3::Y * 0.5, aim - Vec3::Y * 0.5, gate).is_some(), "aim {aim} is on the gate");
+    // Mission 2's compact gun towers keep their roof-centre aim (docs/re/gunnery.md#gun-tower-aim-point).
+    let camp = &lib.classes[lib.index("Base_SmugglersCamp")];
+    let camp_hp = Health::new(camp);
+    let tower = camp.sections.iter().find(|s| s.mission).unwrap();
+    let roof = Vec3::new((tower.min.x + tower.max.x) * 0.5, tower.max.y, (tower.min.z + tower.max.z) * 0.5);
+    let near = camp.sections.iter().filter(|s| s.mission).map(|s| Vec3::new((s.min.x + s.max.x) * 0.5, s.max.y, (s.min.z + s.max.z) * 0.5)).collect::<Vec<_>>();
+    let got = hit_test::base_aim_point(camp, &camp_hp, None).unwrap();
+    assert!(near.iter().any(|r| r.distance(got) < 2.0), "tower aim {got} stays at a roof centre (first {roof})");
+    for (s, h) in class.sections.iter().zip(hp.sections.iter_mut()) {
+        if s.mission {
+            *h = 0.0;
+        }
+    }
+    assert_eq!(base_mission_damage(class, &hp), 1.0);
+    assert!(hit_test::base_aim_point(class, &hp, None).is_none());
+}
+
 /// Gunners take 10 x gunnery seconds off TimeBetweenBursts (docs/re/gunnery.md#gunners): a gunnery-8.5 crew fires the
 /// 12 s heavy cannon every 3.5 s; the cut never goes below zero and leaves in-burst spacing alone.
 #[test]
@@ -725,6 +757,41 @@ fn ship_hit_rules() {
     let core = hp.core;
     let out = apply_ship_hit(class, &mut hp, stern, sure_fire, 0.0, true, &mut rng);
     assert!(!out.lost && hp.core < core);
+    // Partial invulnerability is a hull floor (#351, mission 4's towed tender at 0.1): full damage until the core reaches that share.
+    let mut hp = Health::new(class);
+    hp.sections[stern] = 0.0;
+    let fresh = apply_ship_hit(class, &mut hp, stern, sure_fire, 0.1, true, &mut rng);
+    assert!(fresh.fire.is_none() && hp.core < class.core_hp, "a partial value does not shield the core");
+    hp.core = 0.12 * class.core_hp;
+    for _ in 0..50 {
+        apply_ship_hit(class, &mut hp, stern, sure_fire, 0.1, true, &mut rng);
+    }
+    assert_eq!(hp.core, 0.1 * class.core_hp, "the core stops at the floor");
+    hp.core = 0.05 * class.core_hp;
+    apply_ship_hit(class, &mut hp, stern, sure_fire, 0.1, true, &mut rng);
+    assert_eq!(hp.core, 0.05 * class.core_hp, "a core already under the floor is not healed and loses no more");
+    // The floor holds every section too: a protected ship keeps its sails, helm and guns (review of #358).
+    let mut hp = Health::new(class);
+    for _ in 0..200 {
+        apply_ship_hit(class, &mut hp, stern, sure_fire, 0.1, true, &mut rng);
+    }
+    for (h, sec) in hp.sections.iter().zip(&class.sections) {
+        assert!(*h >= 0.1 * sec.hp - 1e-3, "{} fell below the floor: {h} of {}", sec.label, sec.hp);
+    }
+    // Fires use the same floor: at 1.0 a burn takes nothing, at a partial value it stops at the share.
+    let fresh = Health::new(class);
+    let before = (fresh.core, fresh.sections.clone());
+    let wrecked = || {
+        let mut h = Health::new(class);
+        h.sections.iter_mut().for_each(|s| *s = 0.0);
+        h.core = 0.0;
+        h
+    };
+    let (mut burnt, mut full) = (wrecked(), wrecked());
+    super::shells::floor_hull(class, &mut full, (before.0, &before.1), 1.0);
+    assert_eq!((full.core, &full.sections), (fresh.core, &fresh.sections), "1.0 blocks fire damage");
+    super::shells::floor_hull(class, &mut burnt, (before.0, &before.1), 0.45);
+    assert!(burnt.sections.iter().zip(&class.sections).all(|(h, s)| (*h - 0.45 * s.hp).abs() < 1e-3) && burnt.core == 0.45 * class.core_hp);
 }
 
 #[test]

@@ -224,11 +224,11 @@ pub fn fires(
     mut commands: Commands,
     time: Res<Time>,
     lib: Res<Library>,
-    mut ships: Query<(Entity, &Transform, &Ship, &mut Health, &mut Fires, Option<&crate::crew_arms::CrewPosts>)>,
+    mut ships: Query<(Entity, &Transform, &Ship, &mut Health, &mut Fires, Option<&crate::crew_arms::CrewPosts>, Option<&crate::campaign::MissionShip>)>,
     mut fxq: Query<&mut fx::Fx>,
 ) {
     let dt = time.delta_secs();
-    for (me, _, ship, mut hp, mut fires, posts) in &mut ships {
+    for (me, _, ship, mut hp, mut fires, posts, mission) in &mut ships {
         let fires = &mut *fires;
         if hp.destroyed {
             for f in fires.list.drain(..) {
@@ -252,6 +252,7 @@ pub fn fires(
                 f.intensity -= used;
                 crew -= used;
             }
+            let (core, secs) = (hp.core, hp.sections.clone());
             for f in fires.list.iter().filter(|f| f.state == 0) {
                 let was = hp.sections[f.sec];
                 hp.sections[f.sec] = (was - f.intensity).max(0.0);
@@ -263,6 +264,7 @@ pub fn fires(
                     info!("{} of {} burnt out", sec.label, class.name);
                 }
             }
+            super::shells::floor_hull(class, &mut hp, (core, &secs), mission.map_or(0.0, |m| m.invuln));
             // Decoded: a fire changes state only on these ticks. One that is out (no strength, or its section gone) stops emitting
             // on the tick that finds it, is cut loose from the ship on the next and deleted on the one after; a burning fire doubles.
             for f in &mut fires.list {

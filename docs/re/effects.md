@@ -410,6 +410,11 @@ core: run by fx/) plus a `Vortex` primitive, implemented in `game/src/blackhole.
   Remake (`blackhole.rs`): exactly the law above for every free, undocked ship, with A = 1330 × length / Mass × Magnitude /
   9000, D = R/4, the break-free threshold 3.0 units/s² and the 1.1 s kill inside R/4, credited to nobody in the Game Summary.
   The vortex's KILL_RADIUS only ends its ribbon points. Computer captains keep out of the radius (movement.md).
+  A ship the rules pinned ('Set Group/Unit Movable' FALSE) is neither pulled nor destroyed: missions 4 and 11 strand ships at a
+  hole's rim that way until the player comes to tow them (inferred from the scripts, PROVISIONAL). Once the rules unpin them, the
+  light `_Feather` hulls (Mass 4000, against 20000 for the Navy Tender) break free at once under the law above and are swallowed
+  within seconds (mission 11's SS Harvester) to about a minute, before an approaching player can tow them; how the original keeps
+  them out is unknown (#351, #355).
 * Unknown: strip UV mapping/blend (ours: additive, v = 0.5 per segment), the funnel mesh
   (not drawn: the reference video shows only the glow, beams and ribbons).
 

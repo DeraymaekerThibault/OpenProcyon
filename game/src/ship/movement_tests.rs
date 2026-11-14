@@ -204,6 +204,41 @@ fn all_layouts_custom_and_rotated_following_preserve_altitude_and_limits() {
 
 #[test]
 #[ignore = "needs imported assets"]
+fn a_replacement_command_ship_takes_over_the_command_cap_not_its_own() {
+    // #356: a ship a rule had stopped (cap 0) became primary after the flagship was captured, and the player could not move.
+    let (mut w, ids) = fleet_world();
+    w.get_mut::<Ship>(ids[1]).unwrap().cap = 0.0;
+    // A rule capping the captured flagship (now the enemy's) does not pass its 0 on (review of #358).
+    w.get_mut::<Ship>(ids[0]).unwrap().cap = 0.0;
+    w.get_mut::<FleetMember>(ids[0]).unwrap().0 = "Enemy".into(); // captured
+    reconcile_fleets(&mut w);
+    assert_eq!(w.resource::<Fleets>().primary(), Some(ids[1]));
+    assert_eq!(w.get::<Ship>(ids[1]).unwrap().cap, 1.0);
+    // A cap the script put on the command ship (a cutscene slowdown) carries over to the replacement.
+    w.get_mut::<Ship>(ids[1]).unwrap().cap = 0.25;
+    w.get_mut::<Ship>(ids[2]).unwrap().cap = 0.0;
+    w.get_mut::<Health>(ids[1]).unwrap().destroyed = true;
+    reconcile_fleets(&mut w);
+    assert_eq!(w.resource::<Fleets>().primary(), Some(ids[2]));
+    assert_eq!(w.get::<Ship>(ids[2]).unwrap().cap, 0.25);
+    // A despawned command ship leaves no cap to inherit: the replacement can move at full command.
+    w.get_mut::<Ship>(ids[3]).unwrap().cap = 0.0;
+    w.despawn(ids[2]);
+    reconcile_fleets(&mut w);
+    assert_eq!(w.resource::<Fleets>().primary(), Some(ids[3]));
+    assert_eq!(w.get::<Ship>(ids[3]).unwrap().cap, 1.0);
+    // A sunk command ship stopped by an NIS (cap 0) never strands its replacement either.
+    let (mut w, ids) = fleet_world();
+    w.get_mut::<Ship>(ids[0]).unwrap().cap = 0.0;
+    w.get_mut::<Ship>(ids[1]).unwrap().cap = 0.0;
+    w.get_mut::<Health>(ids[0]).unwrap().destroyed = true;
+    reconcile_fleets(&mut w);
+    assert_eq!(w.resource::<Fleets>().primary(), Some(ids[1]));
+    assert_eq!(w.get::<Ship>(ids[1]).unwrap().cap, 1.0);
+}
+
+#[test]
+#[ignore = "needs imported assets"]
 fn destruction_despawn_empty_and_scenario_reset_clear_stale_fleet_state() {
     let (mut w, ids) = fleet_world();
     w.resource_mut::<Fleets>().selected = Some(ids[1]);

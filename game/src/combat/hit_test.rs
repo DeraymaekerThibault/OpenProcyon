@@ -39,7 +39,15 @@ pub(super) fn base_aim_point(c: &Class, hp: &Health, clicked: Option<Vec3>) -> O
     {
         return Some(p);
     }
-    let roof = |s: &Section| Vec3::new((s.min.x + s.max.x) * 0.5, s.max.y, (s.min.z + s.max.z) * 0.5);
+    // The roof: the box's top centre dropped onto the mesh below it. A compact tower's roof is that point; a sprawling section (mission 6's
+    // stockade gate, #353) can have only air there, and shells aimed at air fly over. With no mesh under it, the nearest triangle centre.
+    let roof = |s: &Section| {
+        let top = Vec3::new((s.min.x + s.max.x) * 0.5, s.max.y, (s.min.z + s.max.z) * 0.5);
+        let (from, to) = (top + Vec3::Y, top.with_y(s.min.y - 1.0));
+        seg_mesh(from, to, s)
+            .map(|t| from.lerp(to, t))
+            .unwrap_or_else(|| s.tris.iter().map(|[a, b, c]| (*a + *b + *c) / 3.0).min_by(|x, y| x.distance_squared(top).total_cmp(&y.distance_squared(top))).unwrap_or(top))
+    };
     let from = clicked.unwrap_or(c.centre);
     live().map(roof).min_by(|a, b| a.distance_squared(from).total_cmp(&b.distance_squared(from)))
 }

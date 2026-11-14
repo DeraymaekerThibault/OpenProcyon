@@ -234,7 +234,9 @@ Owner playtest of mission 2 (two island guns): most player shells hit the island
 collision mesh: the remake aimed at the centre of the tower's bounding box, which is inside the tower body and behind terrain from most
 approaches (flight plane at the tower's mid height; from 50 units out, only 5 of 72 compass bearings had a clear line to the centre of tower 2,
 31 of 72 for tower 1; the roof was clear from 48 and 34, any face from 61 and 56). Now the aim is the clicked point on the tower mesh
-(what the original does), and the roof centre when no click is available (computer-less fallback, PROVISIONAL). The remaining blocked
+(what the original does), and the roof centre when no click is available (computer-less fallback, PROVISIONAL): the top centre of the
+section's box dropped straight onto its mesh, or the nearest triangle centre when no mesh lies below it. Mission 6's stockade gate (#353)
+is a sprawling section whose box top centre is air; aimed there, every shell flew over it. The remaining blocked
 bearings are real terrain occlusion, which the original's swept collision also applies. Remake: `combat::hit_test::base_aim_point`.
 
 Ships take the same splinter/rock rule, and a destroyed ship section also bursts into one `ShipExplosion_Medium` at its place. Hull scars

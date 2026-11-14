@@ -51,9 +51,11 @@ explicitly listed below; unsupported ones are logged once (`unsupported ...`) an
   speech played / not yet played, Is Group In Volume / Enter Volume (polygon test), Is Group A attacking Group B, hit counts (by anyone or by a
   player), group member counts, damage fraction, mission-essential ships, unit flag texture (original group membership), group distance, docked.
 - **Actions**: paths (with Find Closest Point, per-ship 35-unit lateral offsets as a stand-in for formations), max throttle (`Ship.cap`), AI stance,
-  owner changes, visibility (hidden ships cannot be targeted or hit), vulnerability (`Invulnerable Percent` scales damage; 1.0 also blocks fires),
+  owner changes, visibility (hidden ships cannot be targeted or hit), vulnerability (`Invulnerable Percent` is a hull floor: full damage, but hits and fires leave the core and every section at least that share of their hit points, so sails, helm and guns survive;
+  1.0 blocks all damage and fires. PROVISIONAL, inferred from the values the campaign uses, e.g. mission 4's towed RLS Bachanalia at 0.1
+  after an 80% damage action, the player at 0.1 through scripted chases and 0.45 through mission 3's storm),
   flag texture and banner tint, attack orders, Clear all AI commands, Damage by percent, hold position/fire, reset hit counts, alliances (a
-  hostility set between players; default: only the pirate schooner is hostile), towing (Providence trails Warrior) / Break Tow, objective points and
+  hostility set between players; default: only the pirate schooner is hostile), towing (Providence trails Warrior) / Break Tow (either group may be the tower: missions 4 and 11 name the towed ship first), objective points and
   tasks (HUD text), speech queue with subtitles (one line at a time, sequential), music with fade in/out, NIS bars + camera
   (attach / path flight / focus), Focus Camera On Group, victory points, End Game / Goto Next Level (end overlay).
 - **Hostility drives combat**: each frame `Ship.side` = Enemy iff the unit's owner is hostile to the player's owner; non-player units pick targets
@@ -244,7 +246,12 @@ Normal-timeline pickup/rescue/towing continuation still needs owner playtesting.
 
 ## Missions 2-13 (first pass, untested in play)
 `--mission N` loads `maps/missionNN/mission.json` through the same rule interpreter; only mission 1 has the scripted opening NIS (`briefing.rs`).
-Rules call the human group "Player0 Group"; `Script::new` rewrites it to the TWT's player name. A mission with no primary ship (9, 13)
+Rules call the human group "Player0 Group"; `Script::new` rewrites it to the TWT's player name. That group is every ship the human
+owns, even when a TWT group of the same name lists only some of them. Mission 5 starts with the RLS Sea Sparrow (primary) and the RLS
+Comet in TWT group "Player"; the RLS Superior (TWT group "Jim", placed with owner `NO PLAYER`) is handed to the player and made fleet
+primary by a rule partway in, so it is the human's command ship without being in TWT group "Player". The warning shot ("Is Group A
+attacking Group B" from "Player0 Group") is fired by that command ship. PROVISIONAL:
+read from mission 5's rules, which only complete this way. A mission with no primary ship (9, 13)
 gets the player group's first ship, else a stand-in cutter. Hulls without a class (`*_Wrecked`) are skipped.
 
 Primary-ship handoffs use both `Set Fleet Primary Ship` and `Set Group/Unit AI Captain` with `Captain_Human`.
@@ -338,4 +345,6 @@ light and voice-box positions (measured on the art), which side the real game de
 `TalkingHeadLocation` option, per-line portrait expression beyond the data's `face`, moving the gameplay subtitle onto the speech-event bar.
 
 ## Island gun towers
-Bases whose WOT places guns (`Base_SmugglersCamp`, `Base_Grant`, ...) export as `assets/ships/Base_*/` (`tools/export_bases.py`, no hull model; the scenery GLB is drawn) and become `combat::ArmedBase` + `Health` + guns when a rule sets them up. `combat::base_fire` shoots the nearest visible ship the base owner is hostile to (neutral owners such as mission 2's "NO PLAYER" camp stay quiet until a rule changes the owner); shells damage the base sections, and the rules' "Vital Section damage" reads the mean damage of the `vitalToMission` sections (PROVISIONAL). Not done: AI stance / attack orders for bases, tower collapse visuals, fires on bases.
+Bases whose WOT places guns (`Base_SmugglersCamp`, `Base_Grant`, ...), and gunless bases with a `vitalToMission` section (`Base_PirateStockade`, whose
+`Camp_wood` gate mission 6 must shoot down), export as `assets/ships/Base_*/` (`tools/export_bases.py`, no hull model; the scenery GLB is drawn) and become `combat::ArmedBase` + `Health` + guns when a rule sets them up. `combat::base_fire` shoots the nearest visible ship the base owner is hostile to (neutral owners such as mission 2's "NO PLAYER" camp stay quiet until a rule changes the owner); shells damage the base sections, and the rules' "Vital Section damage" reads the mean damage of the `vitalToMission` sections (PROVISIONAL). A skirmish map's gunless base (Convoy Raid's stockade) stays scenery (PROVISIONAL: not observed whether skirmish fleets
+can shoot or board it). Not done: AI stance / attack orders for bases, tower collapse visuals, fires on bases.

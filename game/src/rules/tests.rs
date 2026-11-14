@@ -918,6 +918,56 @@ fn wants_lists_what_open_rules_wait_for_the_player_to_do() {
     assert_eq!(sc.wants(&w), vec![Want::Hit(w[1].e)]);
 }
 
+/// "Player0 Group" is every ship the human owns, even where a TWT group named after the human holds only some of them (#352). Mission 5:
+/// TWT group "Player" is the starting two ships; the RLS Superior (TWT group "Jim") is handed to the player as command ship by a rule
+/// mid-mission, and the warning shot rule asks whether "Player0 Group" is attacking the boats once that command ship has fired.
+#[test]
+fn the_player_group_is_every_ship_the_human_owns() {
+    let data = serde_json::json!({"rules": [
+        {"name": "Warning Shot", "conditions": [
+            {"Type": "Is Group A attacking Group B", "GroupA Name": PLAYER, "GroupB Name": "Boats"},
+            {"Type": "Group/Unit Fired X Shots", "Group/Unit Name": "Player0 Group,HUMAN CONTROLLED COMMAND SHIP", "Number Of Rounds Fired": 0, "Equivalence": "Greater Than"}],
+         "actions": [{"Type": "Set Flag Action", "Flag Name": "shot", "Boolean Value": "TRUE"}]},
+    ], "ships": [], "volumes": {}, "environment": {},
+       "player_start": {"name": "Player"}, "groups": {"Player": [192, 193], "Jim": [195], "Boats": [197]}});
+    let mut sc = Script::new(&data, Value::Null);
+    let at = |name: &str, owner: &str, id: i64, n: u32| {
+        let mut u = unit(name, owner, Vec3::ZERO);
+        (u.id, u.e) = (id, Entity::from_raw_u32(n).unwrap());
+        u
+    };
+    let mut w = vec![at("RLS Comet", "Player", 195, 1), at("Sea Sparrow", "Player", 192, 2), at("Boat", "Fishers", 197, 3), at("Other", "Fishers", 300, 4)];
+    sc.tag(&mut w);
+    let ids = |spec: &str| members(&w, spec).iter().map(|u| u.id).collect::<Vec<_>>();
+    assert_eq!(ids("Player"), vec![195, 192], "the command ship of TWT group Jim belongs to the human's group");
+    assert_eq!(ids("Jim"), vec![195]);
+    assert_eq!(ids("Fishers"), vec![197, 300], "an owner without a group of its name still selects by owner");
+    assert!(sc.answers(195, "Player", "RLS Comet", true, "Player"));
+    assert!(!sc.answers(300, "Fishers", "Other", false, "Player"));
+    sc.record_fire(w[0].e, Some(w[2].e));
+    sc.step(&w, 0.1, false);
+    assert_eq!(sc.flags.get("shot"), Some(&true), "the command ship's shot at the boats is the group's attack");
+}
+
+/// Break Tow ends a tow whichever group is named first: mission 4 and 11 name the towed ship as TowerGroupA and the player as
+/// TowerGroupB, and the player stayed hitched to the tender, unable to take the next tow (#351, #355).
+#[test]
+fn break_tow_matches_either_group_order() {
+    let data = serde_json::json!({"rules": [
+        {"name": "safe", "conditions": [{"Type": "Flag Condition", "Flag Name": "go", "Boolean Value": "TRUE"}],
+         "actions": [{"Type": "Break Tow", "TowerGroupA": "wounded Tender", "TowerGroupB": PLAYER}]},
+    ], "ships": [], "volumes": {}, "environment": {}});
+    let mut sc = Script::new(&data, Value::Null);
+    let (mut me, mut tender) = (unit("RLS Comet", PLAYER, Vec3::ZERO), unit("RLS Bachanalia", "tender side", Vec3::ZERO));
+    (me.e, tender.e) = (Entity::from_raw_u32(1).unwrap(), Entity::from_raw_u32(2).unwrap());
+    tender.groups = vec!["wounded Tender".into()];
+    let w = vec![me, tender];
+    sc.set_tow(w[0].e, w[1].e, true);
+    sc.flags.insert("go".into(), true);
+    sc.step(&w, 0.1, false);
+    assert!(sc.tows().is_empty(), "the player's tow of the tender is broken");
+}
+
 /// A kill is an event: a repeating rule scores once per kill, by the kind of object destroyed (mission 1's rocks, mission 3's ships).
 #[test]
 fn killing_an_object_scores_once_per_kill_and_by_kind() {
