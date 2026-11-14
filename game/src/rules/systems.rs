@@ -858,9 +858,7 @@ fn task_towee<'a>(t: &super::eval::Task, w: &'a [Unit], player: Entity) -> Optio
     }
     let candidates = || w.iter().filter(|u| u.alive && u.e != player && !u.name.is_empty());
     let stem = |u: &&Unit| u.name.rsplit(' ').next().and_then(|w| w.get(..6)).is_some_and(|w| t.text.contains(w));
-    name.and_then(|n| candidates().find(|u| u.name.ends_with(n)))
-        .or_else(|| candidates().find(|u| t.text.contains(u.name.as_str())))
-        .or_else(|| candidates().find(stem))
+    name.and_then(|n| candidates().find(|u| u.name.ends_with(n))).or_else(|| candidates().find(|u| t.text.contains(u.name.as_str()))).or_else(|| candidates().find(stem))
 }
 
 fn autopilot_tow(sc: &Script, w: &[Unit], extra: &mut Extra) {
