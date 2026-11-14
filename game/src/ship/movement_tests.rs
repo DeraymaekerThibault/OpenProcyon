@@ -208,6 +208,8 @@ fn a_replacement_command_ship_takes_over_the_command_cap_not_its_own() {
     // #356: a ship a rule had stopped (cap 0) became primary after the flagship was captured, and the player could not move.
     let (mut w, ids) = fleet_world();
     w.get_mut::<Ship>(ids[1]).unwrap().cap = 0.0;
+    // A rule capping the captured flagship (now the enemy's) does not pass its 0 on (review of #358).
+    w.get_mut::<Ship>(ids[0]).unwrap().cap = 0.0;
     w.get_mut::<FleetMember>(ids[0]).unwrap().0 = "Enemy".into(); // captured
     reconcile_fleets(&mut w);
     assert_eq!(w.resource::<Fleets>().primary(), Some(ids[1]));
@@ -225,6 +227,14 @@ fn a_replacement_command_ship_takes_over_the_command_cap_not_its_own() {
     reconcile_fleets(&mut w);
     assert_eq!(w.resource::<Fleets>().primary(), Some(ids[3]));
     assert_eq!(w.get::<Ship>(ids[3]).unwrap().cap, 1.0);
+    // A sunk command ship stopped by an NIS (cap 0) never strands its replacement either.
+    let (mut w, ids) = fleet_world();
+    w.get_mut::<Ship>(ids[0]).unwrap().cap = 0.0;
+    w.get_mut::<Ship>(ids[1]).unwrap().cap = 0.0;
+    w.get_mut::<Health>(ids[0]).unwrap().destroyed = true;
+    reconcile_fleets(&mut w);
+    assert_eq!(w.resource::<Fleets>().primary(), Some(ids[1]));
+    assert_eq!(w.get::<Ship>(ids[1]).unwrap().cap, 1.0);
 }
 
 #[test]

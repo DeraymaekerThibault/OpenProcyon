@@ -572,8 +572,11 @@ pub fn reconcile_fleets(world: &mut World) {
             // The script's throttle cap on the command ship ("HUMAN CONTROLLED COMMAND SHIP") belongs to the command, not the hull: the
             // replacement takes it over, instead of keeping whatever cap a rule set on it before (a ship captured from a capped enemy
             // group, a stationary escort), which could leave the player with a ship that cannot move (#356). PROVISIONAL: the
-            // original's handoff of the cap after a capture or loss has not been observed.
-            let cap = command.and_then(|e| world.get::<Ship>(e)).map_or(1.0, |s| s.cap);
+            // original's handoff of the cap after a capture or loss has not been observed. Only a command ship that is still the human's
+            // (sunk, not captured) hands its cap on, and never a 0: a captured ship's cap is the new owner's rules', and a 0 (an NIS stop)
+            // would strand the player again. Otherwise the replacement gets full throttle.
+            let owner = |e: Entity| world.get::<campaign::MissionShip>(e).map(|m| m.owner.clone()).or_else(|| world.get::<FleetMember>(e).map(|f| f.0.clone()));
+            let cap = command.filter(|e| owner(*e).as_deref() == Some(local.as_str())).and_then(|e| world.get::<Ship>(e)).map(|s| s.cap).filter(|c| *c > 0.0).unwrap_or(1.0);
             if let Some(e) = command {
                 world.entity_mut(e).remove::<PlayerShip>();
             }
