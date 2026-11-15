@@ -87,6 +87,18 @@ pub(super) fn drive(
             .collect();
         autopilot(&mission.script, world, &mission.data, rocks, &base_ids, &boats, ships, target, &mortars, &sight, lib, &mut extra.pilot);
     }
+    // A new target, the fleet bar's attack order, as a player would give it: the escorts join the fight instead of trailing in formation
+    // (`ship::fleet_help` ignores a target their captains may not attack). Not while running (cease fire above).
+    let aim = target.0.filter(|_| !flee);
+    if aim != extra.pilot.helped {
+        extra.pilot.helped = aim;
+        if aim.is_some() {
+            commands.queue(|w: &mut World| {
+                let owner = w.resource::<crate::ship::Fleets>().local.clone();
+                crate::ship::fleet_help(w, &owner, true);
+            });
+        }
+    }
 }
 
 /// How far ahead the dev autopilot sets its waypoint while leaving a volume (PROVISIONAL).
@@ -202,6 +214,8 @@ pub(super) struct State {
     intent: &'static str,
     /// Route cells: whether a hull there touches land (filled as the planner asks).
     blocked: std::collections::HashMap<(i32, i32), bool>,
+    /// The target the fleet was last ordered to attack.
+    helped: Option<Entity>,
     /// The planned route: the goal's cell and the path to it.
     route: Option<((i32, i32), Vec<Vec3>)>,
 }
@@ -213,6 +227,8 @@ const HULL_MARGIN: f32 = 5.0;
 const MAX_EXPAND: usize = 30_000;
 const REPLAN_CELLS: i32 = 3;
 const WEDGED_CELLS: i32 = 3;
+/// Beyond this distance to its goal the bot sails at Emergency Speed (PROVISIONAL bot tuning).
+const EMERGENCY_DIST: f32 = 300.0;
 
 fn cell_of(p: Vec3) -> (i32, i32) {
     ((p.x / CELL).floor() as i32, (p.z / CELL).floor() as i32)
@@ -753,7 +769,9 @@ fn autopilot(
         } else if g.distance(p.pos) > 60.0 || unrouted.is_some_and(|u| u.distance(p.pos) > 60.0) || foe.is_none() {
             // Near the goal itself (not a route point on the way, mission 6's shore) the bot creeps instead (order 1).
             s.ship.waypoints = vec![g];
-            s.ship.order = 2;
+            // Emergency Speed while the goal is far (a human's "+"; the computer captains run in at it too), Ahead Full for the last stretch
+            // so the slower Emergency turn does not overshoot it.
+            s.ship.order = if unrouted.is_some_and(|u| u.distance(p.pos) > EMERGENCY_DIST) { 3 } else { 2 };
             s.ship.goal = None;
             s.ship.throttle = None; // a move order releases a manual throttle (the opening NIS leaves it at 0)
         } else {
