@@ -114,7 +114,8 @@ pub fn overlay(base: &Path, mods: &[PathBuf]) -> PathBuf {
     if mods.is_empty() {
         return base.to_path_buf();
     }
-    let root = base.join("../local/overlay");
+    // PROCYON_OVERLAY: a launch of its own (tools/autoplay.py --jobs) so parallel runs do not rebuild each other's tree.
+    let root = std::env::var_os("PROCYON_OVERLAY").map_or_else(|| base.join("../local/overlay"), PathBuf::from);
     let _ = std::fs::remove_dir_all(&root);
     let mut files = vec![];
     walk(base, Path::new(""), &mut files);

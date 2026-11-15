@@ -95,6 +95,8 @@ def main():
 
         def run(n):
             log = out / f"mission{n:02}.log"
+            # Each run builds its own asset overlay (game/src/modding.rs); parallel runs sharing local/overlay broke each other.
+            menv = {**env, "PROCYON_OVERLAY": str(Path(xdg) / f"overlay{n}")}
             cmd = [*wrap, str(GAME), "--mission", str(n), "--script", "mission", "--speed", str(args.speed),
                    "--shot", str(out / f"mission{n:02}.png"), "--shot-frame", "1000000000", "--late-frame", "0"]  # fmt: skip
             print(f"mission {n} ...", flush=True)
@@ -104,7 +106,7 @@ def main():
                     code = subprocess.run(
                         cmd,
                         cwd=REPO / "game",
-                        env=env,
+                        env=menv,
                         stdout=f,
                         stderr=subprocess.STDOUT,
                         timeout=args.limit * 1.5 + 120,
