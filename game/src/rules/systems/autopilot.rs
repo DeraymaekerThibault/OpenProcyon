@@ -308,7 +308,11 @@ fn route(st: &mut State, land: &[&crate::collision::Obstacle], hull: f32, from: 
         info!("autopilot route to {goal:.0}: {}", path.as_ref().map_or("none found".into(), |p| format!("{} points", p.len())));
         st.route = Some((gc, path.unwrap_or_default())); // a failed plan is kept too, not retried every frame
     }
-    let Some((_, path)) = st.route.take().filter(|(_, p)| !p.is_empty()) else { return goal };
+    let Some((cell, path)) = st.route.take() else { return goal };
+    if path.is_empty() {
+        st.route = Some((cell, path)); // the failed plan stays, or every tick would search again
+        return goal;
+    }
     let next = path.iter().rev().find(|q| line_clear(&mut st.blocked, land, hull, from, **q)).copied().unwrap_or(path[0]);
     st.route = Some((gc, path));
     next
@@ -852,6 +856,17 @@ mod tests {
         let mut st = State::default();
         assert_eq!(route(&mut st, &[], 15.0, from, goal), goal);
         assert!(st.route.is_none());
+        // A goal no route reaches (walled in on every side): steer for it, and keep the failed plan instead of searching every tick.
+        let mut st = State::default();
+        let gc = cell_of(goal);
+        // Arriving within two cells counts, so the wall is the ring three cells out.
+        for (dx, dz) in (-3..=3).flat_map(|x| (-3..=3).map(move |z| (x, z))).filter(|(x, z): &(i32, i32)| x.abs().max(z.abs()) == 3) {
+            st.blocked.insert((gc.0 + dx, gc.1 + dz), true);
+        }
+        for _ in 0..2 {
+            assert_eq!(route(&mut st, &[], 15.0, from, goal), goal);
+            assert!(st.route.as_ref().is_some_and(|(c, p)| *c == gc && p.is_empty()), "the failed plan is remembered");
+        }
     }
 
     /// #353: the stockade gate and the pirates moored round the island are hidden from most sides; the autopilot picks the nearest
