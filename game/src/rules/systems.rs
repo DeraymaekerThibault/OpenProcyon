@@ -119,19 +119,18 @@ pub fn plugin(app: &mut App) {
         .init_resource::<RuleInput>()
         .add_systems(
             FixedUpdate,
-            (update.in_set(crate::BattleSet::Rules), (mission_ai, leash_player).chain().in_set(crate::BattleSet::Ai))
+            (
+                crate::briefing::autoplay_skip.in_set(crate::BattleSet::Commands),
+                crate::smoke::autoplay_end.in_set(crate::BattleSet::Outcome),
+                update.in_set(crate::BattleSet::Rules),
+                (mission_ai, leash_player).chain().in_set(crate::BattleSet::Ai),
+            )
                 .run_if(in_state(Screen::Battle))
                 .run_if(resource_exists::<Mission>),
         )
         .add_systems(
             Update,
-            (
-                capture_input.before(crate::briefing::update),
-                crate::smoke::screenshot_hooks,
-                crate::smoke::autoplay_end,
-                presentation.after(nis_camera),
-                (ui, music, nis_camera.after(crate::camera)),
-            )
+            (capture_input.before(crate::briefing::update), crate::smoke::screenshot_hooks, presentation.after(nis_camera), (ui, music, nis_camera.after(crate::camera)))
                 .run_if(in_state(Screen::Battle))
                 .run_if(resource_exists::<Mission>),
         );

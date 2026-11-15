@@ -156,6 +156,11 @@ pub fn screenshot_hooks(mut commands: Commands, time: Res<Time>, mission: Res<Mi
 const STUCK_NIS: f32 = 600.0; // mission 13's credits roll runs ~303 s
 const STUCK_RANGE: f32 = 50.0;
 
+/// Whether this is an unattended autoplay run (`PROCYON_AUTOPLAY` set).
+pub fn autoplay() -> bool {
+    std::env::var_os("PROCYON_AUTOPLAY").is_some()
+}
+
 /// PROCYON_AUTOPLAY=<game seconds> (with `--script mission`, see tools/autoplay.py): when the mission ends, an NIS runs past
 /// `STUCK_NIS`, the player's ship stops getting anywhere or the time limit passes, log one `autoplay end` line (outcome and the rules that never fired) and quit.
 pub fn autoplay_end(
