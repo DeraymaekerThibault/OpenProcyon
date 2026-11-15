@@ -109,13 +109,30 @@ fn read(p: &Path) -> Option<Value> {
     crate::data::try_json(p)
 }
 
+/// Marks a `PROCYON_OVERLAY` folder as one the game built, and so may delete and rebuild (#136).
+const OVERLAY_MARK: &str = ".openprocyon-overlay";
+
+/// True when the game may delete `dir` to rebuild an overlay there: missing, empty, or marked as an overlay it built earlier.
+fn disposable(dir: &Path) -> bool {
+    dir.join(OVERLAY_MARK).exists() || std::fs::read_dir(dir).map_or(true, |mut d| d.next().is_none())
+}
+
 /// Builds the overlay and returns its root; with no mods returns `base` unchanged.
 pub fn overlay(base: &Path, mods: &[PathBuf]) -> PathBuf {
     if mods.is_empty() {
         return base.to_path_buf();
     }
-    let root = base.join("../local/overlay");
+    // PROCYON_OVERLAY: a launch of its own (tools/autoplay.py --jobs) so parallel runs do not rebuild each other's tree.
+    let own = std::env::var_os("PROCYON_OVERLAY").map(PathBuf::from);
+    if let Some(dir) = &own {
+        assert!(disposable(dir), "PROCYON_OVERLAY {} holds files that are not an overlay; refusing to delete it", dir.display());
+    }
+    let root = own.clone().unwrap_or_else(|| base.join("../local/overlay"));
     let _ = std::fs::remove_dir_all(&root);
+    if own.is_some() {
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join(OVERLAY_MARK), "").unwrap();
+    }
     let mut files = vec![];
     walk(base, Path::new(""), &mut files);
     for rel in &files {
@@ -181,6 +198,20 @@ pub fn overlay(base: &Path, mods: &[PathBuf]) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn only_an_empty_or_marked_folder_may_be_rebuilt_as_an_overlay() {
+        let dir = std::env::temp_dir().join(format!("procyon_overlay_guard_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(disposable(&dir), "a missing folder");
+        std::fs::create_dir_all(&dir).unwrap();
+        assert!(disposable(&dir), "an empty folder");
+        std::fs::write(dir.join("notes.txt"), "mine").unwrap();
+        assert!(!disposable(&dir), "somebody's files are never deleted");
+        std::fs::write(dir.join(OVERLAY_MARK), "").unwrap();
+        assert!(disposable(&dir), "an overlay the game built");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     #[test]
     fn extends_sees_a_sibling_mod_file_whatever_the_directory_order() {
         let dir = std::env::temp_dir().join(format!("procyon-mod-test-{}", std::process::id()));
