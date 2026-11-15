@@ -78,6 +78,8 @@ struct Extra<'w, 's> {
     land: Query<'w, 's, (&'static crate::collision::Obstacle, Option<&'static Visibility>), (Without<Ship>, Without<Asteroid>, Without<crate::environment::SpaceAnimal>)>,
     /// Whether the dev autopilot last ordered its fleet to run (formation held, cease fire).
     fleet_fleeing: Local<'s, bool>,
+    /// The dev autopilot's memory between frames.
+    pilot: Local<'s, autopilot::State>,
     board: MessageWriter<'w, crate::boarding::BoardMsg>,
     captured: MessageReader<'w, 's, crate::boarding::Captured>,
     asteroids: MessageWriter<'w, crate::combat::AsteroidSetup>,

@@ -85,7 +85,7 @@ pub(super) fn drive(
                 Some((e, p, tf.to_matrix().inverse().transform_point3(p)))
             })
             .collect();
-        autopilot(&mission.script, world, &mission.data, rocks, &base_ids, &boats, ships, target, &mortars, &sight);
+        autopilot(&mission.script, world, &mission.data, rocks, &base_ids, &boats, ships, target, &mortars, &sight, &mut extra.pilot);
     }
 }
 
@@ -190,6 +190,18 @@ fn flee_task(text: &str) -> bool {
 /// `--script mission`: for any active task named `Tow<name>` (mission 2's `TowCoventry`), orders a tow of the ship whose name ends with
 /// `<name>` (as the menu's Tow would) unless the player already tows or is on the way; once linked, the autopilot sails for the objective point.
 /// The bot's progress check: where the ship was at the last check, and a detour it is on.
+/// The bot's memory between frames (one per `update` system, so it starts fresh with each app).
+#[derive(Default)]
+pub(super) struct State {
+    stuck: Option<Stuck>,
+    /// (last call, since when, the damage then) for the tower hold.
+    tower_stall: Option<(f32, f32, f32)>,
+    /// The game minute last logged.
+    minute: u32,
+    /// What the bot did last frame (`autopilot` logs a change).
+    intent: &'static str,
+}
+
 #[derive(Default)]
 struct Stuck {
     since: f32,
@@ -200,8 +212,6 @@ struct Stuck {
     tries: u32,
     best: f32,
 }
-
-static STUCK: std::sync::Mutex<Option<Stuck>> = std::sync::Mutex::new(None);
 
 /// PROVISIONAL bot tuning: a ship heading for a goal farther than STUCK_GOAL that moved less than STUCK_MOVE in STUCK_SECS is
 /// pressed against land (missions 2 and 3 wedge on islands). Under 1 unit/s: mission 11's flagship sails at 2.1, and the old 40 units read
@@ -224,12 +234,9 @@ const HOLD_STALL_SECS: f32 = 30.0;
 const SPOT_REACHED: f32 = 20.0;
 const TOWER_ROUND: f32 = 1.0;
 
-/// (last call, since when, the damage then) for the tower hold.
-static TOWER_STALL: std::sync::Mutex<Option<(f32, f32, f32)>> = std::sync::Mutex::new(None);
-
 /// True once a hold has gone HOLD_STALL_SECS without the target's damage changing; a gap in the calls (the hold was left) starts over.
-fn hold_stalled(time: f32, damage: f32, cell: &std::sync::Mutex<Option<(f32, f32, f32)>>) -> bool {
-    let mut lock = cell.lock().unwrap_or_else(|e| e.into_inner());
+fn hold_stalled(time: f32, damage: f32, cell: &mut Option<(f32, f32, f32)>) -> bool {
+    let lock = cell;
     let (last, since, then) = lock.get_or_insert((time, time, damage));
     if time < *last || time - *last > 2.0 || (damage - *then).abs() > 1e-4 {
         (*since, *then) = (time, damage);
@@ -243,16 +250,16 @@ fn hold_stalled(time: f32, damage: f32, cell: &std::sync::Mutex<Option<(f32, f32
 }
 
 /// Sends the bot to `d` for DETOUR_SECS, whatever its goal.
-fn start_detour(time: f32, d: Vec3, cell: &std::sync::Mutex<Option<Stuck>>) {
-    let mut lock = cell.lock().unwrap_or_else(|e| e.into_inner());
+fn start_detour(time: f32, d: Vec3, cell: &mut Option<Stuck>) {
+    let lock = cell;
     let st = lock.get_or_insert_with(|| Stuck { since: time, at: d, side: 1.0, best: f32::MAX, ..default() });
     st.detour = Some((time + DETOUR_SECS, d));
     info!("autopilot hold stalled; detour to {d:.0}");
 }
 
 /// A detour point while the ship is wedged on its way to `goal`, else None (the goal stands).
-fn unstick(time: f32, pos: Vec3, goal: Option<Vec3>, cell: &std::sync::Mutex<Option<Stuck>>) -> Option<Vec3> {
-    let mut lock = cell.lock().unwrap_or_else(|e| e.into_inner());
+fn unstick(time: f32, pos: Vec3, goal: Option<Vec3>, cell: &mut Option<Stuck>) -> Option<Vec3> {
+    let lock = cell;
     let st = lock.get_or_insert_with(|| Stuck { since: time, at: pos, side: 1.0, best: f32::MAX, ..default() });
     // A new run (game time went back) starts over.
     if time < st.since {
@@ -387,6 +394,7 @@ fn autopilot(
     target: &mut Target,
     mortars: &[Mortar],
     sight: &Sight,
+    st: &mut State,
 ) {
     /// Distance the dev autopilot stops from a live gun tower, bow on it (PROVISIONAL; the retail test fires from 100 units).
     const TOWER_HOLD: f32 = 110.0;
@@ -477,10 +485,14 @@ fn autopilot(
     let tower = tower.filter(|_| !flee);
     // A tower or gate the island hides from here, with the nearest open-water spot that sees it.
     let tower_spot = tower.filter(|t| !sight.clear(p.pos + Vec3::Y * GUN_HEIGHT, t.1)).and_then(|t| sight.firing_spot(t.1, p.pos, TOWER_HOLD - 15.0).map(|s| (t, s)));
+    // What the bot is doing this frame, logged when it changes.
+    let intent;
     let goal = if let (true, Some((e, tf, _))) = (shoot_rocks, rock.filter(|r| r.1.translation.distance(p.pos) < 400.0)) {
+        intent = "shoot a rock";
         target.0 = Some(e);
         Some(tf.translation)
     } else if let Some((at, range, covered)) = lob {
+        intent = "mortar a volume";
         // In reach: hold; with no mount covering the point, bow on it (gunnery drops a shot outside the mount's arc).
         let d = at.distance(p.pos);
         let stopped = ships.iter().find(|s| s.primary).is_some_and(|s| s.ship.speed.abs() < 0.1);
@@ -492,15 +504,18 @@ fn autopilot(
         Want::Leave(at) => Some(*at),
         _ => None,
     }) {
+        intent = "leave a volume";
         // Out of the volume, straight away from its centre (mission 11: dragging the galleon clear of the black hole).
         Some(p.pos + (p.pos - from).normalize_or(Vec3::X) * LEAVE_STEP)
     } else if let Some(foe) = kidnapper.filter(|_| !flee).or(foe.filter(|f| f.pos.distance(p.pos) < 700.0)) {
+        intent = "fight a ship";
         target.0 = Some(foe.e);
         // A ship moored behind an island (mission 6's pirates round the stockade) is not shot through it: sail round to a spot that
         // sees it once close; farther out, straight at it.
         let hidden = foe.pos.distance(p.pos) < FOE_SIGHT_RANGE && !sight.clear(p.pos + Vec3::Y * GUN_HEIGHT, foe.pos + Vec3::Y * GUN_HEIGHT);
         Some(hidden.then(|| sight.firing_spot(foe.pos + Vec3::Y * GUN_HEIGHT, p.pos, FOE_SPOT)).flatten().unwrap_or(foe.pos))
     } else if let Some(((e, at, local), spot)) = tower_spot {
+        intent = "shoot a base from a firing spot";
         // The tower or gate is behind the island from here: sail to the nearest open-water spot that sees it (#353). Once there, stop and
         // turn a gun onto it: creeping forward (order 1) from the spot slid the hull along the island and the guns never bore.
         target.0 = Some(e);
@@ -510,6 +525,7 @@ fn autopilot(
         }
         Some(if face.is_some() { p.pos } else { spot })
     } else if let Some((e, at, local)) = tower {
+        intent = "shoot a base";
         // Aim at the tower being approached, as a click on it would: without a click point the guns pick the tower nearest the
         // island centre, which can be the other one, out of the Lancer's arc or range.
         target.0 = Some(e);
@@ -527,17 +543,20 @@ fn autopilot(
             face = Some(tower_face((-(at.x - p.pos.x)).atan2(-(at.z - p.pos.z)), &sight.guns));
             // A hold that lands no hit (hull pinned on the island with the tower out of the gun's reach) moves round the tower.
             let damage = w.iter().find(|u| u.e == e).map_or(0.0, |u| u.damage);
-            if hold_stalled(sc.time, damage, &TOWER_STALL) {
+            if hold_stalled(sc.time, damage, &mut st.tower_stall) {
                 let round = Quat::from_rotation_y(TOWER_ROUND) * off.normalize_or(Vec3::X);
-                start_detour(sc.time, at + round * TOWER_HOLD * 1.3, &STUCK);
+                start_detour(sc.time, at + round * TOWER_HOLD * 1.3, &mut st.stuck);
             }
         }
         Some(if face.is_some() { p.pos } else { at + off.normalize_or(Vec3::X) * TOWER_HOLD })
     } else if let Some((at, _)) = lifeboats.iter().filter(|b| sc.hostile(b.1, &p.owner) && b.0.distance(p.pos) < 1500.0).nearest_to(p.pos, |b| b.0) {
+        intent = "collect a lifeboat";
         Some(*at) // touching an enemy lifeboat collects it (mission 2's PickUpLifeboats counts it as a capture)
     } else if dock {
+        intent = "dock with the tender";
         w.iter().find(|u| u.name == "RLS Bounty").map(|u| u.pos)
     } else {
+        intent = "objective point, then what the rules wait for";
         // No objective point (mission 8's "Dock with Mining Camp"): sail for what the rules wait for the player to dock with.
         // An objective point already reached that nothing answers (mission 5's "Dock @ Elzrand" waits for a warning shot) gives way
         // to what the rules want.
@@ -563,10 +582,12 @@ fn autopilot(
     {
         target.0 = Some(u.e);
     }
+    if std::mem::replace(&mut st.intent, intent) != intent {
+        info!("autopilot intent: {intent} (target {:?}, goal {:.0?})", target.0.and_then(|e| w.iter().find(|u| u.e == e)).map(|u| u.name.as_str()), goal);
+    }
     // Once a game minute: what the bot is after, for reading a stalled autoplay log (#68).
-    static LOGGED_MINUTE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
     let minute = (sc.time / 60.0) as u32;
-    if LOGGED_MINUTE.swap(minute, std::sync::atomic::Ordering::Relaxed) != minute {
+    if std::mem::replace(&mut st.minute, minute) != minute {
         let helm = ships
             .iter()
             .find(|s| s.primary)
@@ -600,7 +621,7 @@ fn autopilot(
             s.mission.invuln = 1.0;
         }
     }
-    let detour = unstick(sc.time, p.pos, goal.filter(|_| face.is_none()), &STUCK);
+    let detour = unstick(sc.time, p.pos, goal.filter(|_| face.is_none()), &mut st.stuck);
     if detour.is_some() {
         face = None;
     }
@@ -631,40 +652,40 @@ mod tests {
 
     #[test]
     fn a_wedged_bot_backs_off_sideways_then_resumes_its_goal() {
-        let cell = std::sync::Mutex::new(None);
+        let mut cell = None;
         let goal = Some(Vec3::new(1000.0, 0.0, 0.0));
         let at = Vec3::ZERO;
         // Moving: no detour.
-        assert_eq!(unstick(0.0, at, goal, &cell), None);
-        assert_eq!(unstick(10.0, Vec3::new(100.0, 0.0, 0.0), goal, &cell), None);
+        assert_eq!(unstick(0.0, at, goal, &mut cell), None);
+        assert_eq!(unstick(10.0, Vec3::new(100.0, 0.0, 0.0), goal, &mut cell), None);
         // Pinned in place past STUCK_SECS: a detour behind and to one side of the course.
         let pinned = Vec3::new(100.0, 0.0, 0.0);
-        assert_eq!(unstick(25.0, pinned, goal, &cell), None);
-        let d = unstick(31.0, pinned, goal, &cell).expect("detour");
+        assert_eq!(unstick(25.0, pinned, goal, &mut cell), None);
+        let d = unstick(31.0, pinned, goal, &mut cell).expect("detour");
         assert!(d.x < pinned.x && d.z.abs() > 100.0, "{d:?}");
         // Kept until it runs out, then the goal stands again.
-        assert_eq!(unstick(35.0, pinned, goal, &cell), Some(d));
+        assert_eq!(unstick(35.0, pinned, goal, &mut cell), Some(d));
         let over = 31.0 + DETOUR_STEP / DETOUR_SPEED + 1.0;
-        assert_eq!(unstick(over, pinned, goal, &cell), None);
+        assert_eq!(unstick(over, pinned, goal, &mut cell), None);
         // Wedged again no nearer the goal: the same side, a longer step; after MAX_TRIES the other side.
         let mut t = over + STUCK_SECS + 1.0;
-        let d2 = unstick(t, pinned, goal, &cell).expect("second detour");
+        let d2 = unstick(t, pinned, goal, &mut cell).expect("second detour");
         assert!(d2.z * d.z > 0.0 && d2.distance(pinned) > d.distance(pinned), "{d:?} {d2:?}");
         let mut last = d2;
         for _ in 2..=MAX_TRIES {
             t += 10_000.0 / DETOUR_SPEED;
-            assert_eq!(unstick(t, pinned, goal, &cell), None, "the detour ran out");
+            assert_eq!(unstick(t, pinned, goal, &mut cell), None, "the detour ran out");
             t += STUCK_SECS + 1.0;
-            last = unstick(t, pinned, goal, &cell).expect("another detour");
+            last = unstick(t, pinned, goal, &mut cell).expect("another detour");
         }
         assert!(last.z * d.z < 0.0 && (last.distance(pinned) - d.distance(pinned)).abs() < 1.0, "{d:?} {last:?}");
         // A near goal never counts as wedged.
-        let cell = std::sync::Mutex::new(None);
-        assert_eq!(unstick(0.0, at, Some(Vec3::new(100.0, 0.0, 0.0)), &cell), None);
-        assert_eq!(unstick(60.0, at, Some(Vec3::new(100.0, 0.0, 0.0)), &cell), None);
+        let mut cell = None;
+        assert_eq!(unstick(0.0, at, Some(Vec3::new(100.0, 0.0, 0.0)), &mut cell), None);
+        assert_eq!(unstick(60.0, at, Some(Vec3::new(100.0, 0.0, 0.0)), &mut cell), None);
         // A tower hold stalls only when the target's damage stays put for HOLD_STALL_SECS of continuous holding.
-        let hold = std::sync::Mutex::new(None);
-        let ticks = |from: f32, to: f32, damage: f32| (0..=((to - from) as i32)).any(|i| hold_stalled(from + i as f32, damage, &hold));
+        let mut hold = None;
+        let mut ticks = |from: f32, to: f32, damage: f32| (0..=((to - from) as i32)).any(|i| hold_stalled(from + i as f32, damage, &mut hold));
         assert!(!ticks(0.0, 20.0, 0.5));
         assert!(!ticks(21.0, 45.0, 0.6), "damage rising restarts the clock");
         assert!(ticks(46.0, 60.0, 0.6));
