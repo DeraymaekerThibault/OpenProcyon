@@ -581,7 +581,7 @@ fn update(
             }
         }
         autopilot_dock(&mission.script, &world, &mission.data, &mut extra);
-        autopilot_tow(&mission.script, &world, &mut extra);
+        autopilot_tow(&mission.script, &world, &mission.data, &mut extra);
         // While running, the fleet follows in formation with cease fire, as a player would order from the fleet bar: left to their
         // own captains the escorts stay and fight a battle they cannot win (mission 3's ambush). Released when the run ends.
         let flee = fleeing(&mission.script);
@@ -759,11 +759,12 @@ struct Stuck {
 static STUCK: std::sync::Mutex<Option<Stuck>> = std::sync::Mutex::new(None);
 
 /// PROVISIONAL bot tuning: a ship heading for a goal farther than STUCK_GOAL that moved less than STUCK_MOVE in STUCK_SECS is
-/// pressed against land (missions 2 and 3 wedge on islands). It backs off to one side, DETOUR_STEP further each time it wedges again
+/// pressed against land (missions 2 and 3 wedge on islands). Under 1 unit/s: mission 11's flagship sails at 2.1, and the old 40 units read
+/// every turn as wedged, sending it off on detours away from "Pursue Silver 2". It backs off to one side, DETOUR_STEP further each time it wedges again
 /// without getting PROGRESS nearer the goal, so it works along an island chain; after MAX_TRIES it tries the other side. A detour
 /// lasts until reached or its length at DETOUR_SPEED units a second has passed.
 const STUCK_SECS: f32 = 20.0;
-const STUCK_MOVE: f32 = 40.0;
+const STUCK_MOVE: f32 = 20.0;
 const STUCK_GOAL: f32 = 150.0;
 const DETOUR_STEP: f32 = 250.0;
 const DETOUR_SPEED: f32 = 4.0;
@@ -861,7 +862,7 @@ fn task_towee<'a>(t: &super::eval::Task, w: &'a [Unit], player: Entity) -> Optio
     name.and_then(|n| candidates().find(|u| u.name.ends_with(n))).or_else(|| candidates().find(|u| t.text.contains(u.name.as_str()))).or_else(|| candidates().find(stem))
 }
 
-fn autopilot_tow(sc: &Script, w: &[Unit], extra: &mut Extra) {
+fn autopilot_tow(sc: &Script, w: &[Unit], data: &Value, extra: &mut Extra) {
     let Some(p) = w.iter().find(|u| u.primary && u.alive) else { return };
     if sc.nis || !extra.towing_player.is_empty() || !extra.docking_player.is_empty() || sc.tows().iter().any(|t| t.0 == p.e) {
         return;
@@ -870,7 +871,12 @@ fn autopilot_tow(sc: &Script, w: &[Unit], extra: &mut Extra) {
         extra.dock.write(DockMsg::TowStart { tower: None, towee: towee.e });
         return;
     }
-    // Otherwise a visible ship an unfired rule waits for the player to tow (mission 11's SS Harvester at the black hole).
+    // Otherwise a visible ship an unfired rule waits for the player to tow (mission 11's SS Harvester at the black hole), once the
+    // objective point is reached or there is none: like `wants`, it never outranks the point. Mission 11's tow rule has no gate, and
+    // sailing for the Harvester straight after Cydonia skipped the pirate trap that starts the ambush.
+    if objective_at(sc, data).is_some_and(|at| at.distance(p.pos) > POINT_REACHED) {
+        return;
+    }
     let towee = sc
         .wants(w)
         .into_iter()
@@ -1152,10 +1158,10 @@ fn autopilot(
         let helm = ships
             .iter()
             .find(|s| s.primary)
-            .map(|s| (s.ship.order, s.ship.waypoints.len(), s.ship.throttle, s.ship.speed, s.ship.cap, s.ship.heading, face, mortars.len(), target.2.shot));
-        let target_damage = target.0.and_then(|e| w.iter().find(|u| u.e == e)).map(|u| u.damage);
+            .map(|s| (s.ship.order, s.ship.waypoints.first().map(|w| w.round()), s.ship.throttle, s.ship.speed, s.ship.cap, s.ship.heading, face, mortars.len(), target.2.shot));
+        let target_damage = target.0.and_then(|e| w.iter().find(|u| u.e == e)).map(|u| (u.name.as_str(), u.damage));
         info!(
-            "autopilot t={:.0} pos={:.0} goal={:.0?} target={:?} damage={:.2?} helm(order,wps,throttle,speed,cap,heading,face,mortar,shot)={:?} wants={:?}",
+            "autopilot t={:.0} pos={:.0} goal={:.0?} target={:?} target_name_damage={:?} helm(order,wp,throttle,speed,cap,heading,face,mortar,shot)={:?} wants={:?}",
             sc.time,
             p.pos,
             goal,

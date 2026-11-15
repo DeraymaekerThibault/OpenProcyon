@@ -790,8 +790,10 @@ impl Script {
             for c in &r.conds {
                 match s(c, "Type") {
                     "Enter Volume" | "Is Group In Volume" if player_in(s(c, "Group Name")) => {
+                        // The nearest point inside, not the centroid: mission 11's "Pursue Silver 1" is a bent band whose centroid lies
+                        // outside it, and the bot circled there.
                         let vol = self.volume(s(c, "Volume Name"));
-                        if let Some(m) = vol.centroid().filter(|_| !in_volume(vol, p.pos)) {
+                        if let Some(m) = vol.near_inside(Vec2::new(p.pos.x, -p.pos.z)).filter(|_| !in_volume(vol, p.pos)) {
                             out.push(Want::Reach(Vec3::new(m.x, 0.0, -m.y)));
                         }
                     }
