@@ -63,10 +63,27 @@ pub fn base_mission_damage(class: &Class, hp: &Health) -> f32 {
     let v: Vec<f32> = class.sections.iter().zip(&hp.sections).filter(|(c, _)| c.mission).map(|(c, h)| 1.0 - h / c.hp.max(1.0)).collect();
     if v.is_empty() { 0.0 } else { (v.iter().sum::<f32>() / v.len() as f32).clamp(0.0, 1.0) }
 }
-/// World position of the live mission section of a base nearest `from` (None when every vital section is destroyed): where a gun must point.
-pub fn live_tower_point(class: &Class, hp: &Health, tf: &Transform, from: Vec3) -> Option<Vec3> {
-    let local = tf.to_matrix().inverse().transform_point3(from);
-    hit_test::base_aim_point(class, hp, Some(local)).map(|p| tf.transform_point(p))
+/// Where the dev autopilot clicks on a base, in world space (None when every vital section is destroyed): of the live mission sections'
+/// surface points (triangle centres) that `visible` passes, the one nearest its section's middle, so a near miss either way still lands on
+/// it; with none visible, the roof (`hit_test::base_aim_point`), and the autopilot looks for a firing spot. Aiming at the roof sent mission
+/// 6's cannons over its 40-unit gate, and the nearest point to the ship put mission 2's shells into the island in front of its towers (#353).
+/// At most `TESTS` points are tried, spread over the candidates from the middle outward.
+pub fn live_tower_point(class: &Class, hp: &Health, tf: &Transform, visible: impl Fn(Vec3) -> bool) -> Option<Vec3> {
+    const TESTS: usize = 64;
+    let live: Vec<&crate::data::Section> = class.sections.iter().zip(&hp.sections).filter(|(s, h)| s.mission && **h > 0.0).map(|(s, _)| s).collect();
+    let mut points: Vec<(f32, Vec3)> = live
+        .iter()
+        .flat_map(|s| {
+            let mid = (s.min + s.max) * 0.5;
+            s.tris.iter().map(move |[a, b, c]| {
+                let p = (*a + *b + *c) / 3.0;
+                (p.distance_squared(mid), p)
+            })
+        })
+        .collect();
+    points.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let step = points.len().div_ceil(TESTS).max(1);
+    points.iter().step_by(step).map(|(_, p)| tf.transform_point(*p)).find(|p| visible(*p)).or_else(|| hit_test::base_aim_point(class, hp, None).map(|p| tf.transform_point(p)))
 }
 /// A shell struck `victim` (counted even when the victim is invulnerable); fed to the mission rules.
 #[derive(Message)]

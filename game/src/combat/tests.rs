@@ -23,6 +23,14 @@ fn gunless_stockade_is_a_base_whose_mission_section_can_be_destroyed() {
     let near = camp.sections.iter().filter(|s| s.mission).map(|s| Vec3::new((s.min.x + s.max.x) * 0.5, s.max.y, (s.min.z + s.max.z) * 0.5)).collect::<Vec<_>>();
     let got = hit_test::base_aim_point(camp, &camp_hp, None).unwrap();
     assert!(near.iter().any(|r| r.distance(got) < 2.0), "tower aim {got} stays at a roof centre (first {roof})");
+    // The dev autopilot clicks a point of the gate its guns can see, nearest the gate's middle: the roof is 40 units up and cannons aimed
+    // there sent every shot over the wall in mission 6 (#353); the nearest point to the ship can lie behind the island (mission 2's towers).
+    let live_point = |visible: &dyn Fn(Vec3) -> bool| crate::combat::live_tower_point(class, &hp, &Transform::default(), visible).unwrap();
+    let mid = (gate.min + gate.max) * 0.5;
+    let click = live_point(&|_| true);
+    assert!(click.y < aim.y && click.distance(mid) < aim.distance(mid), "click {click} is nearer the gate's middle {mid} than the roof aim {aim}");
+    assert!(live_point(&|p: Vec3| p.y < 5.0).y < 5.0, "only what the guns see");
+    assert_eq!(live_point(&|_| false), aim, "nothing in sight: the roof, and the bot looks for a firing spot");
     for (s, h) in class.sections.iter().zip(hp.sections.iter_mut()) {
         if s.mission {
             *h = 0.0;
@@ -134,10 +142,11 @@ fn island_gun_towers_load_and_mission_damage_follows_their_vital_sections() {
     let point = base_aim_point(class, &hp, Some(class.mounts[0].pos)).unwrap();
     let ray = Ray3d::new(point + Vec3::Y * 20.0, Dir3::NEG_Y);
     assert!(base_ray_hit(class, &hp, &Transform::default(), ray).is_some());
-    // The world-space aim point follows the base's placement (the dev autopilot steers at it).
+    // The dev autopilot's click follows the base's placement and lies on a live tower, so gunnery takes it as the aim point.
     let tf = Transform::from_xyz(500.0, 0.0, -300.0).with_rotation(Quat::from_rotation_y(1.0));
-    let world = crate::combat::live_tower_point(class, &hp, &tf, tf.transform_point(class.mounts[0].pos)).unwrap();
-    assert!(world.distance(tf.transform_point(point)) < 1e-3);
+    let world = crate::combat::live_tower_point(class, &hp, &tf, |_| true).unwrap();
+    let local = tf.to_matrix().inverse().transform_point3(world);
+    assert_eq!(base_aim_point(class, &hp, Some(local)), Some(local));
     for (s, c) in hp.sections.iter_mut().zip(&class.sections) {
         if c.mission {
             *s = 0.0;
@@ -145,7 +154,7 @@ fn island_gun_towers_load_and_mission_damage_follows_their_vital_sections() {
     }
     assert_eq!(base_mission_damage(class, &hp), 1.0);
     assert!(base_aim_point(class, &hp, Some(point)).is_none());
-    assert!(crate::combat::live_tower_point(class, &hp, &Transform::default(), point).is_none(), "no live tower left to steer at");
+    assert!(crate::combat::live_tower_point(class, &hp, &Transform::default(), |_| true).is_none(), "no live tower left to steer at");
     assert!(base_ray_hit(class, &hp, &Transform::default(), ray).is_none(), "destroyed towers are no longer attack targets");
 }
 
