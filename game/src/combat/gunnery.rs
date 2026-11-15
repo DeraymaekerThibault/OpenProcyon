@@ -277,7 +277,8 @@ pub(super) fn fire(
         })
         .collect();
     let mut seen: Vec<Contact> = Vec::with_capacity(contacts.len()); // reused: refilled per shooter
-    for (me, tf, ship, mut states, health, mission, primary, pilot, cloak, posts) in &mut shooters {
+    // In entity order: every shooter draws from the shared `Rng`, and the query's own order can differ from launch to launch.
+    for (me, tf, ship, mut states, health, mission, primary, pilot, cloak, posts) in shooters.iter_mut().sort::<Entity>() {
         if health.destroyed {
             continue;
         }
@@ -563,7 +564,7 @@ pub(super) fn base_fire(
     (globals, sensors): (Query<&GlobalTransform, With<GunPart>>, Res<crate::environment::Sensors>),
 ) {
     let dt = time.delta_secs();
-    for (me, tf, base, armed, health, mut states, skirmish_side, island) in &mut bases {
+    for (me, tf, base, armed, health, mut states, skirmish_side, island) in bases.iter_mut().sort::<Entity>() {
         let class = &lib.classes[armed.class];
         let volcano = class.name.starts_with("Island_Volcano");
         // The nearest visible hostile ship in sight, with its side.
