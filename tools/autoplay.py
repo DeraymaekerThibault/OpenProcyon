@@ -56,7 +56,7 @@ def main():
         "--jobs",
         type=int,
         default=1,
-        help="missions run at once (results do not depend on it)",
+        help="missions run at once, each in its own window; the GPU is shared, so past 2-3 runs each one just slows down",
     )
     ap.add_argument(
         "--mortal",
