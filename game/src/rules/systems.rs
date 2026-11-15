@@ -617,7 +617,9 @@ fn update(
                     )
                 })
                 .unwrap_or_default();
-            autopilot(&mission.script, &world, &plan, &base_ids, &boats, &mut ships, &mut target, &mortars);
+            let battery =
+                ships.iter().find(|s| s.primary).and_then(|s| Some(player_battery(&lib, s.ship.class, s.health, extra.player_guns.get(s.entity).ok()?))).unwrap_or_default();
+            autopilot(&mission.script, &world, &plan, &base_ids, &boats, &mut ships, &mut target, &mortars, &battery, &lib);
         }
     }
 }
@@ -627,6 +629,68 @@ pub static BOT_NOTE: std::sync::Mutex<String> = std::sync::Mutex::new(String::ne
 
 /// How far ahead the dev autopilot sets its waypoint while leaving a volume (PROVISIONAL).
 const LEAVE_STEP: f32 = 400.0;
+/// The player's flagship's direct-fire guns as the standoff sees them: those that can target a ship, and those that can also target a
+/// base (torpedoes cannot; lob guns, mines, harpoons and point defence never aim at a hull), with the ship's radius.
+#[derive(Default)]
+struct Battery {
+    ships: Vec<standoff::Gun>,
+    bases: Vec<standoff::Gun>,
+    radius: f32,
+}
+
+fn player_battery(lib: &Library, class: usize, health: &Health, guns: &crate::combat::GunStates) -> Battery {
+    use crate::combat::Payload;
+    let c = &lib.classes[class];
+    let mut b = Battery { radius: c.radius, ..Battery::default() };
+    for (i, m) in c.mounts.iter().enumerate() {
+        let Some(g) = lib.guns.get(guns.gun(i)) else { continue };
+        let bullet = &lib.bullets[&g.bullet];
+        let dead = m.parent.is_some_and(|p| health.sections.get(p).is_some_and(|h| *h <= 0.0));
+        if dead || g.point_defense || g.lob.is_some() || g.muzzle <= 0.0 || guns.gun(i).contains("Harpoon") || matches!(bullet.payload, Payload::Mine { .. }) {
+            continue;
+        }
+        // Damage per second: shots per burst cycle times the bullet's mean damage over the materials.
+        let mean = bullet.damage.values().map(|d| (d[0] + d[1]) / 2.0).sum::<f32>() / bullet.damage.len().max(1) as f32;
+        let gun = standoff::Gun { rot: m.rot, arc: m.arc, range: g.range, weight: g.burst.max(1) as f32 / g.burst_cycle().max(0.1) * mean.max(1.0) };
+        b.ships.push(gun);
+        if g.bullet != crate::combat::TORPEDO_BULLET {
+            b.bases.push(gun);
+        }
+    }
+    b
+}
+
+/// The place `guns` bear on `at` from, as a waypoint a short way along the heading that holds it (`standoff::heading`), or None while
+/// the target is still far (sail at it) or no gun bears anywhere. Logs the choice once per target.
+#[allow(clippy::too_many_arguments)]
+fn hold_standoff(guns: &[standoff::Gun], radius: f32, from: Vec3, heading: f32, at: Vec3, target: Entity, time: f32, w: &[Unit]) -> Option<Vec3> {
+    static LAST: std::sync::Mutex<Option<(Entity, f32)>> = std::sync::Mutex::new(None);
+    if guns.is_empty() {
+        return None;
+    }
+    let to = (at - from).with_y(0.0);
+    let now = (-to.x).atan2(-to.z) - heading;
+    let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
+    let near = last.filter(|l| l.0 == target).map_or(now, |l| l.1);
+    let solution = standoff::solve(guns, 2.0 * radius + 10.0, near)?;
+    if last.map(|l| l.0) != Some(target) {
+        let name = w.iter().find(|u| u.e == target).map_or_else(|| format!("{target:?}"), |u| format!("{}/{}", u.owner, u.name));
+        info!(
+            "autoplay standoff t={time:.0} target={name} bearing={:.0}deg range={:.0} weight={:.1}/{:.1}",
+            solution.bearing.to_degrees(),
+            solution.range,
+            solution.weight,
+            solution.total
+        );
+    }
+    *last = Some((target, solution.bearing));
+    if to.length() > solution.range * 1.8 + 60.0 {
+        return None;
+    }
+    let h = standoff::heading(&solution, to);
+    Some(from + Vec3::new(-h.sin(), 0.0, -h.cos()) * 200.0)
+}
+
 /// One of the player's mortar mounts as the dev autopilot sees it: its bank, maximum range, world rotation and arc (radians).
 struct Mortar {
     bank: usize,
@@ -675,39 +739,6 @@ const DETOUR_STEP: f32 = 250.0;
 const DETOUR_SPEED: f32 = 4.0;
 const PROGRESS: f32 = 200.0;
 const MAX_TRIES: u32 = 4;
-/// How long a stalled tower hold sails for its new hold point.
-const DETOUR_SECS: f32 = 30.0;
-
-/// PROVISIONAL bot tuning: a tower hold whose target's damage has not changed for HOLD_STALL_SECS moves TOWER_ROUND radians round it.
-const HOLD_STALL_SECS: f32 = 30.0;
-const TOWER_ROUND: f32 = 1.0;
-
-/// (last call, since when, the damage then) for the tower hold.
-static TOWER_STALL: std::sync::Mutex<Option<(f32, f32, f32)>> = std::sync::Mutex::new(None);
-
-/// True once a hold has gone HOLD_STALL_SECS without the target's damage changing; a gap in the calls (the hold was left) starts over.
-fn hold_stalled(time: f32, damage: f32, cell: &std::sync::Mutex<Option<(f32, f32, f32)>>) -> bool {
-    let mut lock = cell.lock().unwrap_or_else(|e| e.into_inner());
-    let (last, since, then) = lock.get_or_insert((time, time, damage));
-    if time < *last || time - *last > 2.0 || (damage - *then).abs() > 1e-4 {
-        (*since, *then) = (time, damage);
-    }
-    *last = time;
-    if time - *since >= HOLD_STALL_SECS {
-        *since = time;
-        return true;
-    }
-    false
-}
-
-/// Sends the bot to `d` for DETOUR_SECS, whatever its goal.
-fn start_detour(time: f32, d: Vec3, cell: &std::sync::Mutex<Option<Stuck>>) {
-    let mut lock = cell.lock().unwrap_or_else(|e| e.into_inner());
-    let st = lock.get_or_insert_with(|| Stuck { since: time, at: d, side: 1.0, best: f32::MAX, ..default() });
-    st.detour = Some((time + DETOUR_SECS, d));
-    info!("autopilot hold stalled; detour to {d:.0}");
-}
-
 /// A detour point while the ship is wedged on its way to `goal`, else None (the goal stands).
 fn unstick(time: f32, pos: Vec3, goal: Option<Vec3>, cell: &std::sync::Mutex<Option<Stuck>>) -> Option<Vec3> {
     let mut lock = cell.lock().unwrap_or_else(|e| e.into_inner());
@@ -922,6 +953,10 @@ struct Gunnery {
     shots: (u32, u32),
     hits: (u32, u32),
     damage: (f32, f32),
+    /// Seconds the target has sat where some gun bears (`standoff::bearing_weight`), the bursts and hits then, and whether it was flagged.
+    covered: f32,
+    cov0: Option<(u32, u32)>,
+    flagged: bool,
 }
 static GUNNERY: std::sync::Mutex<Vec<(Entity, Gunnery)>> = std::sync::Mutex::new(Vec::new());
 
@@ -950,7 +985,7 @@ pub fn gunnery_lines() -> Vec<String> {
 }
 
 /// Notes one frame of the player's ship engaging `e`.
-fn note_gunnery(sc: &Script, w: &[Unit], p: &Unit, heading: f32, e: Entity) {
+fn note_gunnery(sc: &Script, w: &[Unit], p: &Unit, heading: f32, e: Entity, guns: &[standoff::Gun]) {
     let Some(u) = w.iter().find(|u| u.e == e) else { return };
     // The flagship's own bursts aimed at this target and bullets that hit it (not the fleet's: `hits_by` counts every ship of the owner).
     let (shots, hits) = (sc.bursts_at.get(&(p.e, e)).copied().unwrap_or(0), sc.hits_from.get(&(p.e, e)).copied().unwrap_or(0));
@@ -972,15 +1007,41 @@ fn note_gunnery(sc: &Script, w: &[Unit], p: &Unit, heading: f32, e: Entity) {
                 shots: (shots, shots),
                 hits: (hits, hits),
                 damage: (u.damage, u.damage),
+                covered: 0.0,
+                cov0: None,
+                flagged: false,
             },
         ));
     }
     if let Some((_, g)) = lock.iter_mut().find(|x| x.0 == e) {
         let d = off.length();
+        let dt = (sc.time - g.last).clamp(0.0, 1.0);
         (g.last, g.samples, g.range_sum, g.range_min, g.bearing_sum, g.shots.1, g.hits.1, g.damage.1) =
             (sc.time, g.samples + 1, g.range_sum + d, g.range_min.min(d), g.bearing_sum + bearing.abs(), shots, hits, u.damage);
+        // Engine-bug candidates (`autoplay gunnery suspect`): the target sat in some gun's arc and range for 30 s and either no gun
+        // fired, or guns fired and nothing hit. Counted with the engine's own engage test.
+        if standoff::bearing_weight(guns, bearing, Vec2::new(off.x, off.z).length()) > 0.0 {
+            g.covered += dt;
+            let (b0, h0) = *g.cov0.get_or_insert((shots, hits));
+            if g.covered >= SUSPECT_SECS && !g.flagged && (shots == b0 || hits == h0) {
+                g.flagged = true;
+                info!(
+                    "autoplay gunnery suspect target={} reason={} covered={:.0}s bearing={:.0}deg range={d:.0} bursts={} hits={} damage={:.2}",
+                    g.name,
+                    if shots == b0 { "no bursts" } else { "bursts without hits" },
+                    g.covered,
+                    bearing.to_degrees(),
+                    shots - b0,
+                    hits - h0,
+                    u.damage
+                );
+            }
+        }
     }
 }
+
+/// Seconds a target must sit within a gun's arc and range, with no burst or no hit, to be flagged (PROVISIONAL).
+const SUSPECT_SECS: f32 = 30.0;
 
 /// Distance from `at` to the segment `a`-`b`, on the sea plane.
 fn lane_distance(a: Vec3, b: Vec3, at: Vec3) -> f32 {
@@ -1055,15 +1116,14 @@ fn autopilot(
     ships: &mut Query<RuleShip>,
     target: &mut Target,
     mortars: &[Mortar],
+    battery: &Battery,
+    lib: &Library,
 ) {
-    /// Distance the dev autopilot stops from a live gun tower, bow on it (PROVISIONAL; the retail test fires from 100 units).
-    const TOWER_HOLD: f32 = 110.0;
-    /// Closest the autopilot lets itself creep to a gun tower before backing out (PROVISIONAL).
-    const TOWER_MIN: f32 = 70.0;
     if sc.nis || sc.ended.is_some() {
         return;
     }
     let Some(p) = w.iter().find(|u| u.primary && u.alive) else { return };
+    let heading = ships.iter().find(|s| s.primary).map_or(0.0, |s| s.ship.heading);
     let ignored = ignored_targets(sc.time);
     let needed = sc.needed_alive(w, p);
     let wanted: Vec<&Wanted> = plan.iter().filter(|x| !matches!(x.want, Want::Hit(e) if ignored.contains(&e))).collect();
@@ -1185,7 +1245,9 @@ fn autopilot(
         Some(Pick::Foe(e, at)) => {
             target.0 = Some(e);
             engaged = true;
-            Some(at)
+            // Click on the hull where the line of fire meets it, as a player does (view.rs sets the same field).
+            target.1 = ships.get(e).ok().and_then(|s| crate::combat::click_point(&lib.classes[s.ship.class], s.transform, p.pos + Vec3::Y * 3.0));
+            Some(hold_standoff(&battery.ships, battery.radius, p.pos, heading, at, e, sc.time, w).unwrap_or(at))
         }
         Some(Pick::Lob) => lob.map(|(at, range, covered)| {
             // In reach: hold; with no mount covering the point, bow on it (gunnery drops a shot outside the mount's arc).
@@ -1200,27 +1262,13 @@ fn autopilot(
         Some(Pick::Away(from)) => Some(p.pos + (p.pos - from).normalize_or(Vec3::X) * LEAVE_STEP),
         Some(Pick::Tower(e, at, local)) => {
             // Aim at the tower being approached, as a click on it would: without a click point the guns pick the tower nearest the
-            // island centre, which can be the other one, out of the Lancer's arc or range.
+            // island centre, which can be the other one, out of the Lancer's arc or range. The ship holds where the guns that can
+            // target a tower bear (`standoff`).
             target.0 = Some(e);
             target.1 = Some(local);
             engaged = true;
-            // Straight at the live tower, then hold with the bow on it: only the front gun can target towers, and the ship keeps its heading.
-            // Holding creeps forward (order 1), so a ship that closes inside `TOWER_MIN` (roof too steep above, hull against the island)
-            // sails back out to the hold distance before it turns bow-on again.
             let at = at.with_y(0.0);
-            let off = p.pos - at;
-            let d = off.length();
-            let backing_out = ships.iter().find(|s| s.primary).is_some_and(|s| !s.ship.waypoints.is_empty());
-            if (TOWER_MIN..=TOWER_HOLD).contains(&d) && (!backing_out || d >= TOWER_HOLD - 15.0) {
-                face = Some((-(at.x - p.pos.x)).atan2(-(at.z - p.pos.z))); // heading 0 faces -Z, rotating about +Y
-                // A hold that lands no hit (hull pinned on the island with the tower out of the gun's reach) moves round the tower.
-                let damage = w.iter().find(|u| u.e == e).map_or(0.0, |u| u.damage);
-                if hold_stalled(sc.time, damage, &TOWER_STALL) {
-                    let round = Quat::from_rotation_y(TOWER_ROUND) * off.normalize_or(Vec3::X);
-                    start_detour(sc.time, at + round * TOWER_HOLD * 1.3, &STUCK);
-                }
-            }
-            Some(if face.is_some() { p.pos } else { at + off.normalize_or(Vec3::X) * TOWER_HOLD })
+            Some(hold_standoff(&battery.bases, battery.radius, p.pos, heading, at, e, sc.time, w).unwrap_or(at))
         }
         Some(Pick::At(at) | Pick::Go(at)) => Some(at),
         // Still nowhere to go (mission 10's "Defend Merchant Fleet"): stay with the nearest friendly ship outside the player's fleet.
@@ -1247,7 +1295,7 @@ fn autopilot(
         },
     );
     if let (true, Some(e), Some(s)) = (engaged, target.0, ships.iter().find(|s| s.primary)) {
-        note_gunnery(sc, w, p, s.ship.heading, e);
+        note_gunnery(sc, w, p, s.ship.heading, e, if bases.iter().any(|b| b.0 == e) { &battery.bases } else { &battery.ships });
     }
     // Once a game second: the same facts, kept for the stall report (`smoke::autoplay_end`). Names are looked up here, not at the end.
     static NOTED_SECOND: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(u32::MAX);
@@ -1750,13 +1798,6 @@ mod ai_tests {
         let cell = std::sync::Mutex::new(None);
         assert_eq!(unstick(0.0, at, Some(Vec3::new(100.0, 0.0, 0.0)), &cell), None);
         assert_eq!(unstick(60.0, at, Some(Vec3::new(100.0, 0.0, 0.0)), &cell), None);
-        // A tower hold stalls only when the target's damage stays put for HOLD_STALL_SECS of continuous holding.
-        let hold = std::sync::Mutex::new(None);
-        let ticks = |from: f32, to: f32, damage: f32| (0..=((to - from) as i32)).any(|i| hold_stalled(from + i as f32, damage, &hold));
-        assert!(!ticks(0.0, 20.0, 0.5));
-        assert!(!ticks(21.0, 45.0, 0.6), "damage rising restarts the clock");
-        assert!(ticks(46.0, 60.0, 0.6));
-        assert!(!ticks(100.0, 120.0, 0.6), "leaving the hold starts over");
     }
 
     #[test]

@@ -21,6 +21,19 @@ Git Bash (`GIT_BASH=<path>` if it is not in the default place), and the screensh
    relation to it (inside/outside a volume and how far, the nearest pair distance against the threshold), then the player's position and
    what the bot was pursuing (goal, target, wants). Read it to tell a bot gap (the bot never went where the condition asks) from an
    engine bug (the bot is inside the volume, in range, and the condition is still false).
+   The bot takes its objectives from the rule graph (`game/src/rules/plan.rs`), not from names or task texts: a rule enables another
+   when it sets a flag, starts a timer, plays a speech event, reveals a group or makes it dockable that the other's gate reads; chaining
+   back from the rules that win marks rules `critical` (with their hops to the win), from the rules that lose `hazard`, the rest
+   `optional` (re-chained each frame, skipping gates already met). `Script::plan` turns the world conditions of open critical rules into
+   wants (optional ones only when no critical rule wants anything, hazard ones never), except that a want at the objective point while a
+   task is open counts as critical (mission 11's tow of the galleon). Hazard rules give groups to protect and volumes to avoid, and
+   groups that scoring rules count are protected too (`autoplay hazards`). Units an unfired story rule needs afloat are not attacked for
+   an optional reason. A blocked line shows `role=critical dist=N` and marks conditions the bot has no plan for with `no-plan`; a target
+   held 60 s with no damage change is logged once (`autoplay target stalled`) and left alone for a while.
+   Aiming: the bot holds its ship where the guns that can target the foe bear (`game/src/rules/standoff.rs`, from the flagship's mounts,
+   with the engine's own engage test `combat::mount_engages`): `autoplay standoff` logs the bearing, range and weight chosen per target,
+   `autoplay gunnery` the bursts, hits, range and bearing off the bow per target, and `autoplay gunnery suspect` flags a target that sat
+   inside a gun's arc and range for 30 s with no burst, or bursts and no hit: engine-bug candidates, not bot gaps.
    `make battles [ARGS=ambush]` (`tools/battle_check.py`, part of `make check` when assets are imported) plays short skirmishes with
    fixed fleets at 16x and fails when one stops behaving like a battle: a side never fires or hits, a computer ship parks, a ship
    grinds on scenery, or the game panics. The game writes one `battle report {json}` line (`PROCYON_REPORT=<game s>`,

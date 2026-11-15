@@ -6,6 +6,7 @@
 mod eval;
 mod plan;
 pub mod skirmish;
+pub mod standoff;
 mod systems;
 #[cfg(test)]
 mod tests;

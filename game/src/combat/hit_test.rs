@@ -22,6 +22,19 @@ pub fn ray_hit(c: &Class, tf: &Transform, ray: Ray3d) -> Option<f32> {
     c.sections.iter().filter_map(|s| seg_mesh(o, o + d * 1000.0, s)).map(|t| t * 1000.0).reduce(f32::min)
 }
 
+/// The spot on a ship's hull a player would click to hit it from `from`: the first surface the line of fire to the ship's centre meets,
+/// else the nearest to it among lines a little above and below (`ray_hit` is the click test). In the ship's frame, as `Target.1` keeps it.
+/// The default aim point (the class centre) sits in a gap between the hull meshes for some classes, where a shell flies through the
+/// ship untouched: 24 to 100 % of the lines of fire cross a mesh, by class.
+pub fn click_point(c: &Class, tf: &Transform, from: Vec3) -> Option<Vec3> {
+    let centre = tf.transform_point(c.centre);
+    [0.0f32, -1.0, 1.0, -2.0, 2.0, -3.0, 3.0].into_iter().find_map(|dy| {
+        let dir = Dir3::new((centre + Vec3::Y * dy - from).try_normalize()?).ok()?;
+        let t = ray_hit(c, tf, Ray3d::new(from, dir))?;
+        Some(tf.to_matrix().inverse().transform_point3(from + *dir * t))
+    })
+}
+
 /// Only live mission sections (gun towers) are attackable; the island terrain is not a target.
 pub fn base_ray_hit(c: &Class, hp: &Health, tf: &Transform, ray: Ray3d) -> Option<f32> {
     let inv = tf.to_matrix().inverse();

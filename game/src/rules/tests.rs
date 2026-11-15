@@ -1390,3 +1390,31 @@ fn groups_that_scoring_rules_count_are_protected() {
     assert_eq!(sc.protected_units(&w, &me).iter().map(|u| u.e).collect::<Vec<_>>(), [id(2)]);
     assert!(sc.hazards_text().contains("protect_score=[\"Convoy\"]"), "{}", sc.hazards_text());
 }
+
+/// The default aim point (the class centre) can sit in a gap between a hull's meshes, so shells aimed at it fly through the ship; the click
+/// point the bot sets (`combat::click_point`, what a player's click records) is on a surface the line of fire meets, so a shell along that
+/// line registers from every bearing.
+#[test]
+#[ignore = "needs imported assets"]
+fn a_clicked_hull_point_registers_from_every_bearing_where_the_class_centre_does_not() {
+    let lib = crate::combat::Library::load(crate::assets_dir());
+    let (mut centre_total, mut click_total, mut n_total) = (0, 0, 0);
+    for class in ["Ship_Pirate_Sloop", "Ship_Navy_Sloop", "Ship_Navy_Cutter", "Ship_Navy_FastFrigate", "Ship_Navy_ManOWar", "Ship_Navy_Frigate", "Ship_Pirate_Carrack"] {
+        let c = &lib.classes[lib.index(class)];
+        let health = crate::Health::new(c);
+        let tf = Transform::IDENTITY;
+        let (mut by_centre, mut by_click) = (0, 0);
+        for k in 0..72 {
+            let ang = k as f32 * 5.0f32.to_radians();
+            let from = Vec3::new(ang.sin(), 0.0, ang.cos()) * 60.0 + Vec3::Y * 3.0;
+            let fires = |aim: Vec3| crate::combat::ship_segment_hit(c, &health, from, from + (aim - from) * 1.5).is_some();
+            by_centre += fires(c.centre) as u32;
+            if let Some(local) = crate::combat::click_point(c, &tf, from) {
+                by_click += fires(local) as u32;
+            }
+        }
+        assert!(by_click >= 68, "{class}: {by_click}/72 lines of fire register on the clicked point");
+        (centre_total, click_total, n_total) = (centre_total + by_centre, click_total + by_click, n_total + 72);
+    }
+    assert!(click_total > centre_total, "the click ({click_total}/{n_total}) beats the class centre ({centre_total}/{n_total})");
+}

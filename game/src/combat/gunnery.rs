@@ -665,12 +665,13 @@ fn aim_turret(
         let local = mount_rot.inverse() * dir;
         let yaw = (-local.x).atan2(-local.z);
         want_yaw = yaw.clamp(-half_arc, half_arc);
-        let in_range = Vec2::new(to_target.x, to_target.z).length() <= gun.range[2];
+        let horizontal = Vec2::new(to_target.x, to_target.z).length();
+        let in_range = horizontal <= gun.range[2];
         want_pitch = None; // hold elevation until the base is on target
         if (state.yaw - want_yaw).abs() < TOLERANCE && in_range {
             want_pitch = Some(local.y.clamp(-1.0, 1.0).asin().clamp(gun.pitch_limits[0], gun.pitch_limits[1]));
         }
-        if in_range && yaw.abs() <= half_arc {
+        if mount_engages(mount.arc, local, horizontal, gun.range[2]) {
             engaged = Some((dir, to_target.length()));
         }
     }
@@ -688,6 +689,13 @@ fn aim_turret(
         part.rotation = Quat::from_rotation_x(state.pitch);
     }
     engaged
+}
+
+/// The engine's engage test for one mount: the target's horizontal distance within the gun's maximum range and the firing direction, in
+/// the mount's frame (`mount_rot.inverse() * dir`), within half the mount's arc. `aim_turret` fires on it and the dev autopilot's
+/// standoff (`rules::standoff`) places the ship by it, so the two cannot disagree.
+pub fn mount_engages(arc: f32, local_dir: Vec3, horizontal: f32, max_range: f32) -> bool {
+    horizontal <= max_range && (-local_dir.x).atan2(-local_dir.z).abs() <= arc / 2.0
 }
 
 /// A burst's deviation angle, drawn once per burst: the range band's deviation * 0.5, uniform in +-that, times `accuracy`.

@@ -63,8 +63,8 @@ explicitly listed below; unsupported ones are logged once (`unsupported ...`) an
   retail `Jim Arriving @ Start of Mission` path from his placed position (rule 1), which is the arrival animation.
 - **Asteroids**: retail group membership selects the 24 belt rocks and 20 Montressor rocks. Ordinary asteroids use WOT HP/radii, tumble at rule-specified speeds, and recursively split into smaller rocks with flash/smoke/sparks. Red ships' belt attack order also selects the fragments. Sphere shooting and Stone damage rolls remain; fragment velocity/group inheritance and collision response are partly provisional. See [asteroids.md](asteroids.md).
 - **Docking**: left-click RLS Bounty or use the right-click menu (`D` is a dev shortcut) once it is in sight (docs/re/docking-and-orders.md); no refit/torpedo resupply yet.
-- Smoke test: `--script mission` autopilots the player along the objectives (follows the point, shoots hostiles/asteroids, docks). `PROCYON_AUTOKILL=1`
-  also sinks the pirate when close, to reach the ending in a test.
+- Smoke test: `--script mission` autopilots the player along the objectives (follows what the rule graph asks: the critical rules' wants, then the point; shoots, tows, docks). The old `PROCYON_AUTOKILL=1`
+  shortcut (it sank a pirate by unit name) is gone; the runs below that used it are historical.
 
 PROVISIONAL in the interpreter: condition combination (AND only; no OR seen in this mission), Enter Volume is level-triggered for run-once rules
 (edge only for repeating ones), 'attacking' = attack order or fired at the group in the last 6 s, damage fraction = max(core loss, mean section loss),
