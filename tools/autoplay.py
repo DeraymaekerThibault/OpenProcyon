@@ -1,10 +1,10 @@
 """Autoplay: run campaign missions unattended and summarise what broke (#68).
-usage: python3 -m tools.autoplay [MISSION ...] [--speed N] [--limit SECONDS] [--mortal]   (default: missions 1-13, speed 8, limit 3600)
+usage: python3 -m tools.autoplay [MISSION ...] [--speed N] [--jobs N] [--limit SECONDS] [--mortal]   (default: missions 1-13, speed 16, limit 3600)
 Each mission runs the release game with the `--script mission` autopilot steering the player's ship (PROCYON_AUTOPLAY in
 game/src/smoke/mod.rs ends the run). The player's fleet is invulnerable (PROCYON_AUTOINVULN) unless --mortal is given: the
 bot has no tactics, and the goal is to reach every rule, not to win fights. Logs go to local/autoplay/missionNN.log; the table lists the outcome, the game time
 reached, peak entity/particle counts, the slowest frame and how many rules never fired (listed in the log's last line).
-Needs a display, or Xvfb + Mesa like tools/shot.sh. The effective speed is capped by the frame rate (0.1 game s per frame)."""
+Needs a display, or Xvfb + Mesa like tools/shot.sh. The effective speed is capped by the frame rate (a frame advances at most speed/60 game s)."""
 
 import argparse
 import json
@@ -13,6 +13,7 @@ import re
 import subprocess
 import sys
 import tempfile
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
@@ -44,12 +45,18 @@ def main():
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     ap.add_argument("missions", nargs="*", type=int, default=list(range(1, 14)))
-    ap.add_argument("--speed", type=float, default=8)
+    ap.add_argument("--speed", type=float, default=16)
     ap.add_argument(
         "--limit",
         type=float,
         default=3600,
         help="game seconds before giving up on a mission",
+    )
+    ap.add_argument(
+        "--jobs",
+        type=int,
+        default=1,
+        help="missions run at once (results do not depend on it)",
     )
     ap.add_argument(
         "--mortal",
@@ -69,7 +76,6 @@ def main():
         or os.environ.get("WAYLAND_DISPLAY")
         else ["xvfb-run", "-a", "-s", "-screen 0 1280x720x24"]
     )
-    rows = []
     with tempfile.TemporaryDirectory() as xdg:
         # A scratch XDG_DATA_HOME: default key bindings, master volume 0 (other options default) and no saves of the player's;
         # X11, since some Wayland sessions render black.
@@ -86,7 +92,8 @@ def main():
             env["PROCYON_AUTOINVULN"] = "1"
         if wrap:
             env["WGPU_BACKEND"] = "vulkan"
-        for n in args.missions:
+
+        def run(n):
             log = out / f"mission{n:02}.log"
             cmd = [*wrap, str(GAME), "--mission", str(n), "--script", "mission", "--speed", str(args.speed),
                    "--shot", str(out / f"mission{n:02}.png"), "--shot-frame", "1000000000", "--late-frame", "0"]  # fmt: skip
@@ -104,9 +111,10 @@ def main():
                     ).returncode
                 except subprocess.TimeoutExpired:
                     code = "timeout"
-            rows.append(
-                (n, *summarise(ANSI.sub("", log.read_text(errors="replace")), code))
-            )
+            return (n, *summarise(ANSI.sub("", log.read_text(errors="replace")), code))
+
+        with ThreadPoolExecutor(args.jobs) as pool:
+            rows = list(pool.map(run, args.missions))
     print(
         f"\n{'mission':>7}  {'outcome':<13} {'game s':>6}  {'worst ms':>8}  {'entities':>8}  {'particles':>9}  {'never fired':>11}"
     )
