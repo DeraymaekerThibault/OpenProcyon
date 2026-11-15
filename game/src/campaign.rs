@@ -345,13 +345,12 @@ pub fn spawn(commands: &mut Commands, assets: &AssetServer, lib: &Library, fxl: 
             commands.entity(*e).insert(MissionBase { id: o["id"].as_i64().unwrap_or(-1), owner: String::new() });
             continue;
         }
-        let Some((_, owner, combat, gunnery)) = islands.iter().find(|(i, ..)| Some(*i) == o["id"].as_i64()) else {
-            // A dockable base no rule sets up (mission 5's Grant, 7's Regina, 8's Mining Camp) is still a rules unit: the rules address it by
-            // its TWT group for docking, owner and dockable changes. Without this a dock with it never satisfied 'Group/Unit Docked'.
-            if o["type"].as_str().is_some_and(|t| t.starts_with("Base_")) {
-                commands.entity(*e).insert(MissionBase { id: o["id"].as_i64().unwrap_or(-1), owner: String::new() });
-                continue;
-            }
+        let setup = islands.iter().find(|(i, ..)| Some(*i) == o["id"].as_i64()).map(|(_, o, c, g)| (o.clone(), *c, *g));
+        // A base no rule sets up (mission 5's Grant and pirate base, 7's Regina, 8's Mining Camp) is still a rules unit with its class's guns
+        // and hit points: the rules address it by its TWT group for docking, owner and dockable changes, and mission 5's pirate base must be
+        // destroyed. With no owner until a rule gives one it shoots nobody. PROVISIONAL: default gunnery (no skill level).
+        let unset_base = || (String::new(), 0, crate::combat::IslandGunnery { accuracy: 1.0, silent: false, neutral: false });
+        let Some((owner, combat, gunnery)) = setup.or_else(|| o["type"].as_str().is_some_and(|t| t.starts_with("Base_")).then(unset_base)) else {
             // Most volcanoes have no setup rule; they still fire (docs/re/volcanoes.md).
             if let Some(class) = o["type"].as_str().filter(|t| t.starts_with("Island_Volcano")).and_then(|t| lib.classes.iter().position(|c| c.name == t)) {
                 commands.entity(*e).insert(MissionBase { id: o["id"].as_i64().unwrap_or(-1), owner: String::new() });
@@ -366,9 +365,9 @@ pub fn spawn(commands: &mut Commands, assets: &AssetServer, lib: &Library, fxl: 
             }
             continue;
         };
-        commands.entity(*e).insert(MissionBase { id: o["id"].as_i64().unwrap_or(-1), owner: owner.clone() });
+        commands.entity(*e).insert(MissionBase { id: o["id"].as_i64().unwrap_or(-1), owner });
         // Bases are boarded only once a rule sets them Boardable (their 'Combat Strength' is what the boarders must wear down).
-        commands.entity(*e).insert(crate::boarding::Boardable::base(o["type"].as_str().unwrap_or_default(), *combat, false));
+        commands.entity(*e).insert(crate::boarding::Boardable::base(o["type"].as_str().unwrap_or_default(), combat, false));
         // Island gun towers: a `Base_*` class with mounts makes the base a shooter and a target (combat::base_fire).
         if let Some(class) = lib.classes.iter().position(|c| Some(c.name.as_str()) == o["type"].as_str()) {
             let states = crate::combat::spawn_guns(commands, assets, lib, *e, class);
@@ -377,7 +376,7 @@ pub fn spawn(commands: &mut Commands, assets: &AssetServer, lib: &Library, fxl: 
                 crate::combat::Health::new(&lib.classes[class]),
                 states,
                 crate::combat::DamageFx::new(&lib.classes[class]),
-                *gunnery,
+                gunnery,
             ));
         }
     }
@@ -456,7 +455,7 @@ mod tests {
     use super::*;
 
     /// Mission 5's Waystation Grant has no 'Setup Island' rule. It must still be a rules unit, or docking there never satisfies the
-    /// opening 'Group/Unit Docked' condition and the mission cannot advance (found by autoplay, #68).
+    /// opening 'Group/Unit Docked' condition and the mission cannot advance (found by autoplay, #68). Its pirate base has none either (#352).
     #[test]
     #[ignore = "needs imported assets"]
     fn a_base_without_a_setup_rule_is_a_dock_target_of_the_rules() {
@@ -469,9 +468,10 @@ mod tests {
             .init_asset::<StandardMaterial>();
         app.insert_resource(Library::load(assets_dir())).init_resource::<crate::fx::FxLib>().init_resource::<crate::ship::Fleets>();
         let map: Value = serde_json::from_slice(&std::fs::read(assets_dir().join("maps/mission05/map.json")).unwrap()).unwrap();
-        let objects: Vec<Value> = map["objects"].as_array().unwrap().iter().filter(|o| o["type"] == "Base_Grant").cloned().collect();
+        let objects: Vec<Value> = map["objects"].as_array().unwrap().iter().filter(|o| o["type"] == "Base_Grant" || o["type"] == "Base_Pirate").cloned().collect();
         let bases: Vec<(Entity, Value)> = objects.into_iter().map(|o| (app.world_mut().spawn(Transform::default()).id(), o)).collect();
         let grant = bases.iter().find(|(_, o)| o["type"] == "Base_Grant").unwrap().0;
+        let pirate = bases.iter().find(|(_, o)| o["type"] == "Base_Pirate").unwrap().0;
         app.world_mut()
             .run_system_once(move |mut commands: Commands, assets: Res<AssetServer>, lib: Res<Library>, fxl: Res<crate::fx::FxLib>| {
                 spawn(&mut commands, &assets, &lib, &fxl, "mission05", &bases)
@@ -484,6 +484,9 @@ mod tests {
         let mut w = vec![player, base.unit(grant, &Transform::default(), 0.0)];
         mission.script.tag(&mut w);
         assert!(mission.script.dock_targets(&w).contains(&grant), "the opening dock rule waits for Grant");
+        // The pirate base has no setup rule either, and the mission is won by destroying its mission section: it needs its guns and hit points.
+        assert!(app.world().get::<crate::combat::ArmedBase>(pirate).is_some() && app.world().get::<crate::combat::Health>(pirate).is_some());
+        assert_eq!(app.world().get::<MissionBase>(pirate).unwrap().owner, "", "no owner until 'Set Player Owners & AI'");
     }
 
     #[test]
