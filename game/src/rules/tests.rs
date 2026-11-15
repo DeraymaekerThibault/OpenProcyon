@@ -893,7 +893,11 @@ fn wants_lists_what_open_rules_wait_for_the_player_to_do() {
     blockader.e = Entity::from_raw_u32(7).unwrap();
     let shoot = blockader.e;
     let w = vec![unit("RLS Comet", PLAYER, Vec3::ZERO), blockader];
-    assert_eq!(sc.wants(&w), vec![Want::Reach(Vec3::new(150.0, 0.0, -150.0)), Want::Hit(shoot)]);
+    // The volume's nearest corner (100, 100), 15 units in toward its centre.
+    let corner = 100.0 + 15.0 / 2f32.sqrt();
+    let got = sc.wants(&w);
+    assert!(matches!(got[0], Want::Reach(v) if v.distance(Vec3::new(corner, 0.0, -corner)) < 1e-3), "{got:?}");
+    assert_eq!(got[1..], [Want::Hit(shoot)]);
     // Mission 9's mortar target and mission 11's tow out of the black hole.
     let data2 = serde_json::json!({"rules": [
         {"name": "Ignite", "conditions": [{"Type": "Mission 9 - If Mortar explodes within Area", "Volume Name": "Search"}], "actions": [{"Type": "Start Timer", "Timer Name": "t"}]},
