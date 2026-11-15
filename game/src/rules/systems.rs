@@ -600,15 +600,6 @@ fn update(
         // A ship that is docking or sailing to a tow steers itself (docking.rs); steering it as well would fight the approach.
         if extra.docking_player.is_empty() && extra.towing_player.is_empty() {
             let from = world.iter().find(|u| u.primary).map_or(Vec3::ZERO, |u| u.pos);
-            // Armed bases that still have a live mission section, with the world and base-local position of the one nearest the player.
-            let base_ids: Vec<(Entity, Vec3, Vec3)> = extra
-                .bases
-                .iter()
-                .filter_map(|(e, _, tf, armed)| {
-                    let p = armed.and_then(|(a, h)| crate::combat::live_tower_point(&lib.classes[a.class], h, tf, from))?;
-                    Some((e, p, tf.to_matrix().inverse().transform_point3(p)))
-                })
-                .collect();
             let boats: Vec<(Vec3, &str)> = extra.lifeboats.iter().map(|(tf, b)| (tf.translation, b.owner.as_str())).collect();
             // The player's mortar mounts (mission 9's StarHammer carries Star and Nova mortars on different arcs).
             let mortars: Vec<Mortar> = ships
@@ -639,6 +630,17 @@ fn update(
                 })
                 .unwrap_or_default();
             let sight = Sight { guns, land: extra.land.iter().filter(|(_, v)| *v != Some(&Visibility::Hidden)).map(|(o, _)| o).collect() };
+            // Armed bases that still have a live mission section, with the world and base-local point the player's guns aim at: one they
+            // can see past the islands from here (`combat::live_tower_point`).
+            let gun = from + Vec3::Y * GUN_HEIGHT;
+            let base_ids: Vec<(Entity, Vec3, Vec3)> = extra
+                .bases
+                .iter()
+                .filter_map(|(e, _, tf, armed)| {
+                    let p = armed.and_then(|(a, h)| crate::combat::live_tower_point(&lib.classes[a.class], h, tf, |p| sight.clear(gun, p)))?;
+                    Some((e, p, tf.to_matrix().inverse().transform_point3(p)))
+                })
+                .collect();
             autopilot(&mission.script, &world, &mission.data, &rocks, &base_ids, &boats, &mut ships, &mut target, &mortars, &sight);
         }
     }
@@ -775,6 +777,8 @@ const DETOUR_SECS: f32 = 30.0;
 
 /// PROVISIONAL bot tuning: a tower hold whose target's damage has not changed for HOLD_STALL_SECS moves TOWER_ROUND radians round it.
 const HOLD_STALL_SECS: f32 = 30.0;
+/// A tower hold or firing spot this close counts as reached: stop and turn a gun on (PROVISIONAL).
+const SPOT_REACHED: f32 = 20.0;
 const TOWER_ROUND: f32 = 1.0;
 
 /// (last call, since when, the damage then) for the tower hold.
@@ -1093,11 +1097,15 @@ fn autopilot(
         // sees it once close; farther out, straight at it.
         let hidden = foe.pos.distance(p.pos) < FOE_SIGHT_RANGE && !sight.clear(p.pos + Vec3::Y * GUN_HEIGHT, foe.pos + Vec3::Y * GUN_HEIGHT);
         Some(hidden.then(|| sight.firing_spot(foe.pos + Vec3::Y * GUN_HEIGHT, p.pos, FOE_SPOT)).flatten().unwrap_or(foe.pos))
-    } else if let Some(((e, _, local), spot)) = tower_spot {
-        // The tower or gate is behind the island from here: sail to the nearest open-water spot that sees it (#353).
+    } else if let Some(((e, at, local), spot)) = tower_spot {
+        // The tower or gate is behind the island from here: sail to the nearest open-water spot that sees it (#353). Once there, stop and
+        // turn a gun onto it: creeping forward (order 1) from the spot slid the hull along the island and the guns never bore.
         target.0 = Some(e);
         target.1 = Some(local);
-        Some(spot)
+        if spot.distance(p.pos) < SPOT_REACHED {
+            face = Some(tower_face((-(at.x - p.pos.x)).atan2(-(at.z - p.pos.z)), &sight.guns));
+        }
+        Some(if face.is_some() { p.pos } else { spot })
     } else if let Some((e, at, local)) = tower {
         // Aim at the tower being approached, as a click on it would: without a click point the guns pick the tower nearest the
         // island centre, which can be the other one, out of the Lancer's arc or range.
@@ -1110,7 +1118,8 @@ fn autopilot(
         let off = p.pos - at;
         let d = off.length();
         let backing_out = ships.iter().find(|s| s.primary).is_some_and(|s| !s.ship.waypoints.is_empty());
-        if (TOWER_MIN..=TOWER_HOLD).contains(&d) && (!backing_out || d >= TOWER_HOLD - 15.0) {
+        // Up to SPOT_REACHED beyond the hold distance counts: a hull pinned on the island just outside it never closed the gap (#353).
+        if (TOWER_MIN..=TOWER_HOLD + SPOT_REACHED).contains(&d) && (!backing_out || d >= TOWER_HOLD - 15.0) {
             // Heading 0 faces -Z, rotating about +Y; turned so a gun that can hit bases bears.
             face = Some(tower_face((-(at.x - p.pos.x)).atan2(-(at.z - p.pos.z)), &sight.guns));
             // A hold that lands no hit (hull pinned on the island with the tower out of the gun's reach) moves round the tower.
