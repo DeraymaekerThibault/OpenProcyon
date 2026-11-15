@@ -81,6 +81,73 @@ pub(crate) fn halt_arrival(mission: Option<Res<Mission>>, mut ships: Query<&mut 
     }
 }
 
+/// Scripts (`--script`) that skip the mission 1 opening instead of playing it.
+fn scripted_skip(cfg: &crate::Config) -> bool {
+    cfg.script.as_deref().is_some_and(|s| matches!(s, "briefing-skip" | "mission" | "asteroid") || s.starts_with("dock") || s.starts_with("lifeboat"))
+}
+
+/// Game seconds an unattended autoplay run plays of the opening before skipping it (about what 60 rendered frames were).
+const AUTOPLAY_SKIP_AT: f32 = 11.0;
+
+/// Autoplay skips the opening on a fixed tick, not on a rendered frame: how many ticks 60 frames hold depends on the machine's
+/// frame times, which made two runs of one mission diverge from the first rule on.
+pub fn autoplay_skip(
+    mut commands: Commands,
+    mut mission: Option<ResMut<Mission>>,
+    time: Res<Time>,
+    cfg: Res<crate::Config>,
+    mut elapsed: Local<f32>,
+    ui: Query<Entity, With<BriefingUi>>,
+    voices: Query<Entity, With<Voice>>,
+    mut ships: Query<(&mut Transform, &MissionShip, &mut crate::Ship, Has<crate::PlayerShip>), Without<Camera3d>>,
+    mut objectives: Query<&mut Visibility, (With<ObjectiveText>, Without<Portrait>)>,
+) {
+    if !crate::smoke::autoplay() || !scripted_skip(&cfg) {
+        return;
+    }
+    let Some(ref mut mission) = mission else { return };
+    let mission = &mut **mission;
+    if mission.opening.is_none() {
+        return;
+    }
+    *elapsed += time.delta_secs();
+    if *elapsed >= AUTOPLAY_SKIP_AT {
+        mission.opening = None;
+        finish(&mut commands, mission, true, &ui, &voices, &mut ships, &mut objectives);
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn finish(
+    commands: &mut Commands,
+    mission: &mut Mission,
+    skip: bool,
+    ui: &Query<Entity, With<BriefingUi>>,
+    voices: &Query<Entity, With<Voice>>,
+    ships: &mut Query<(&mut Transform, &MissionShip, &mut crate::Ship, Has<crate::PlayerShip>), Without<Camera3d>>,
+    objectives: &mut Query<&mut Visibility, (With<ObjectiveText>, Without<Portrait>)>,
+) {
+    for e in ui.iter().chain(voices.iter()) {
+        commands.entity(e).despawn();
+    }
+    // Skipping must leave the player where the arrival path ends.
+    for (mut tf, _, mut sh, primary) in ships {
+        if let (true, Some(&end)) = (primary, sh.waypoints.last()) {
+            tf.translation = end;
+            sh.waypoints.clear();
+            sh.speed = 0.0;
+            sh.order = 0;
+        }
+    }
+    // Rules 'END Opening NIS' (music, command-ship focus at 60 / 10 degrees, throttle) run in rules.rs once these are marked played.
+    let names: Vec<String> = mission.data["opening_speech"].as_array().expect("opening speech export").iter().map(|c| c["name"].as_str().unwrap().to_string()).collect();
+    mission.script.played.extend(names);
+    for mut vis in objectives {
+        *vis = Visibility::Inherited;
+    }
+    info!("Mission 1 briefing complete{}", if skip { " (skipped)" } else { "" });
+}
+
 pub fn update(
     mut commands: Commands,
     mut mission: Option<ResMut<Mission>>,
@@ -106,27 +173,9 @@ pub fn update(
     if binds.just_pressed(&keys, crate::bindings::Act::SkipSpeech) {
         opening.elapsed = next_cue_start(opening.elapsed, cues);
     }
-    let skip =
-        cfg.script.as_deref().is_some_and(|s| matches!(s, "briefing-skip" | "mission" | "asteroid") || s.starts_with("dock") || s.starts_with("lifeboat")) && cfg.frame == 60;
+    let skip = scripted_skip(&cfg) && !crate::smoke::autoplay() && cfg.frame == 60;
     if skip || opening.elapsed >= end {
-        for e in ui.iter().chain(voices.iter()) {
-            commands.entity(e).despawn();
-        }
-        // Skipping must leave the player where the arrival path ends.
-        for (mut tf, _, mut sh, primary) in &mut ships {
-            if let (true, Some(&end)) = (primary, sh.waypoints.last()) {
-                tf.translation = end;
-                sh.waypoints.clear();
-                sh.speed = 0.0;
-                sh.order = 0;
-            }
-        }
-        // Rules 'END Opening NIS' (music, command-ship focus at 60 / 10 degrees, throttle) run in rules.rs once these are marked played.
-        mission.script.played.extend(cues.iter().map(|c| c["name"].as_str().unwrap().to_string()));
-        for mut vis in &mut objectives {
-            *vis = Visibility::Inherited;
-        }
-        info!("Mission 1 briefing complete{}", if skip { " (skipped)" } else { "" });
+        finish(&mut commands, mission, skip, &ui, &voices, &mut ships, &mut objectives);
         return;
     }
     for mut vis in &mut objectives {
