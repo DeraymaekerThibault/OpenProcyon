@@ -366,11 +366,16 @@ fn set_time_scale(vtime: &mut Time<Virtual>, speed: f32) {
     vtime.set_max_delta(std::time::Duration::from_secs_f32(max_frame_step(speed)));
 }
 
-/// Most game time one frame may advance. Fast-forward needs `speed` / frame rate per frame: 0.1 s capped 16x at 160 fps, so a
-/// 16x autoplay ran at the ~6x its frames allowed; the cap now grows with the speed (60 fps worth of it). The simulation is fixed
-/// ticks, so a larger step is more ticks per frame, not a coarser simulation.
+/// Most game time one frame may advance: 0.1 s while fast-forwarding, so a slow frame does not turn into a long catch-up (a 16x
+/// battle stays smooth). An unattended autoplay run (`PROCYON_AUTOPLAY`, tools/autoplay.py) only wants game time per second: there
+/// the step grows with the speed (60 fps worth of it; 0.1 s held 16x to ~6x), since the simulation is fixed ticks and a larger
+/// step is more ticks per frame, not a coarser simulation.
 fn max_frame_step(speed: f32) -> f32 {
-    if speed > 1.0 { (speed / 60.0).max(0.1) } else { 0.25 }
+    match speed > 1.0 {
+        true if std::env::var_os("PROCYON_AUTOPLAY").is_some() => (speed / 60.0).max(0.1),
+        true => 0.1,
+        false => 0.25,
+    }
 }
 
 /// Fastest speed of the HUD speed buttons when `data/hud/speed.json` gives no `max`.

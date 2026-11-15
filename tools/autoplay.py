@@ -4,7 +4,7 @@ Each mission runs the release game with the `--script mission` autopilot steerin
 game/src/smoke/mod.rs ends the run). The player's fleet is invulnerable (PROCYON_AUTOINVULN) unless --mortal is given: the
 bot has no tactics, and the goal is to reach every rule, not to win fights. Logs go to local/autoplay/missionNN.log; the table lists the outcome, the game time
 reached, peak entity/particle counts, the slowest frame and how many rules never fired (listed in the log's last line).
-Needs a display, or Xvfb + Mesa like tools/shot.sh. The effective speed is capped by the frame rate (a frame advances at most speed/60 game s)."""
+Needs a display, or Xvfb + Mesa like tools/shot.sh. The effective speed is capped by the frame rate (an autoplay frame advances at most speed/60 game s)."""
 
 import argparse
 import json
