@@ -85,7 +85,7 @@ pub(super) fn drive(
                 Some((e, p, tf.to_matrix().inverse().transform_point3(p)))
             })
             .collect();
-        autopilot(&mission.script, world, &mission.data, rocks, &base_ids, &boats, ships, target, &mortars, &sight, &mut extra.pilot);
+        autopilot(&mission.script, world, &mission.data, rocks, &base_ids, &boats, ships, target, &mortars, &sight, lib, &mut extra.pilot);
     }
 }
 
@@ -200,6 +200,113 @@ pub(super) struct State {
     minute: u32,
     /// What the bot did last frame (`autopilot` logs a change).
     intent: &'static str,
+    /// Route cells: whether a hull there touches land (filled as the planner asks).
+    blocked: std::collections::HashMap<(i32, i32), bool>,
+    /// The planned route: the goal's cell and the path to it.
+    route: Option<((i32, i32), Vec<Vec3>)>,
+}
+
+/// Route grid cell size (units), hull clearance added to the ship's radius, the planner's cell budget and how far (cells) the goal may move
+/// before a new plan. PROVISIONAL bot tuning.
+const CELL: f32 = 20.0;
+const HULL_MARGIN: f32 = 5.0;
+const MAX_EXPAND: usize = 30_000;
+const REPLAN_CELLS: i32 = 3;
+const WEDGED_CELLS: i32 = 3;
+
+fn cell_of(p: Vec3) -> (i32, i32) {
+    ((p.x / CELL).floor() as i32, (p.z / CELL).floor() as i32)
+}
+
+fn cell_centre(c: (i32, i32)) -> Vec3 {
+    Vec3::new((c.0 as f32 + 0.5) * CELL, 0.0, (c.1 as f32 + 0.5) * CELL)
+}
+
+/// Whether a hull of radius `hull` in cell `c` touches land (the sailing contact test, `collision::touches`).
+fn blocked(memo: &mut std::collections::HashMap<(i32, i32), bool>, land: &[&crate::collision::Obstacle], hull: f32, c: (i32, i32)) -> bool {
+    *memo.entry(c).or_insert_with(|| {
+        let bounds = [Vec3::new(-hull, -2.0, -hull), Vec3::new(hull, 6.0, hull)];
+        crate::collision::touches(bounds, &Transform::from_translation(cell_centre(c)), land)
+    })
+}
+
+/// Whether the straight course from `a` to `b` stays off land, past the ship's own cell (it may lie against the shore).
+fn line_clear(memo: &mut std::collections::HashMap<(i32, i32), bool>, land: &[&crate::collision::Obstacle], hull: f32, a: Vec3, b: Vec3) -> bool {
+    let len = a.with_y(0.0).distance(b.with_y(0.0));
+    let steps = (len / (CELL * 0.5)).ceil() as i32;
+    (2..steps).all(|i| !blocked(memo, land, hull, cell_of(a.lerp(b, i as f32 / steps as f32))))
+}
+
+/// A* over the route cells from `from` to `to` (8 neighbours). The start cell may touch land (a ship against the shore) and arriving within
+/// two cells of the goal is enough (a base stands on land). None when the budget runs out.
+fn plan(memo: &mut std::collections::HashMap<(i32, i32), bool>, land: &[&crate::collision::Obstacle], hull: f32, from: Vec3, to: Vec3) -> Option<Vec<Vec3>> {
+    use std::cmp::Reverse;
+    let (start, goal) = (cell_of(from), cell_of(to));
+    let near = |c: (i32, i32), e: (i32, i32)| (c.0 - e.0).abs() <= 2 && (c.1 - e.1).abs() <= 2;
+    let h = |c: (i32, i32)| (((c.0 - goal.0).pow(2) + (c.1 - goal.1).pow(2)) as f32).sqrt();
+    let mut open = std::collections::BinaryHeap::new();
+    let mut came: std::collections::HashMap<(i32, i32), ((i32, i32), f32)> = std::collections::HashMap::from([(start, (start, 0.0))]);
+    open.push((Reverse((h(start) * 1000.0) as i64), start));
+    let mut expanded = 0;
+    while let Some((_, c)) = open.pop() {
+        if near(c, goal) {
+            let mut path = vec![to];
+            let mut k = c;
+            while k != start {
+                path.push(cell_centre(k));
+                k = came[&k].0;
+            }
+            path.reverse();
+            return Some(path);
+        }
+        expanded += 1;
+        if expanded > MAX_EXPAND {
+            return None;
+        }
+        let g = came[&c].1;
+        for (dx, dz) in [(1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (1, -1), (-1, 1), (-1, -1)] {
+            let n = (c.0 + dx, c.1 + dz);
+            if blocked(memo, land, hull, n) {
+                continue;
+            }
+            let ng = g + if dx != 0 && dz != 0 { std::f32::consts::SQRT_2 } else { 1.0 };
+            if came.get(&n).is_none_or(|(_, old)| ng < *old) {
+                came.insert(n, (c, ng));
+                open.push((Reverse(((ng + h(n)) * 1000.0) as i64), n));
+            }
+        }
+    }
+    None
+}
+
+/// Where to steer for `goal`: the goal itself when the straight course is clear, else the farthest point of the planned route the ship can
+/// sail to in a straight line (the plan is kept until the goal moves `REPLAN_CELLS`). No route found: the goal (`unstick` takes over).
+fn route(st: &mut State, land: &[&crate::collision::Obstacle], hull: f32, from: Vec3, goal: Vec3) -> Vec3 {
+    if line_clear(&mut st.blocked, land, hull, from, goal) {
+        st.route = None;
+        return goal;
+    }
+    let gc = cell_of(goal);
+    if st.route.as_ref().is_none_or(|(c, _)| (c.0 - gc.0).abs() > REPLAN_CELLS || (c.1 - gc.1).abs() > REPLAN_CELLS) {
+        let path = plan(&mut st.blocked, land, hull, from, goal);
+        info!("autopilot route to {goal:.0}: {}", path.as_ref().map_or("none found".into(), |p| format!("{} points", p.len())));
+        st.route = Some((gc, path.unwrap_or_default())); // a failed plan is kept too, not retried every frame
+    }
+    let Some((_, path)) = st.route.take().filter(|(_, p)| !p.is_empty()) else { return goal };
+    let next = path.iter().rev().find(|q| line_clear(&mut st.blocked, land, hull, from, **q)).copied().unwrap_or(path[0]);
+    st.route = Some((gc, path));
+    next
+}
+
+/// The ship wedged at `at` steering for `toward`: the next WEDGED_CELLS cells that way count as land from now on, and the route is planned
+/// again. A gap the grid thinks open but the ship cannot pass (a tow behind it, a shore the hull box misses) was otherwise planned through
+/// again after every detour (mission 11).
+fn wedged(st: &mut State, at: Vec3, toward: Vec3) {
+    let dir = (toward - at).with_y(0.0).normalize_or_zero();
+    for i in 1..=WEDGED_CELLS {
+        st.blocked.insert(cell_of(at + dir * CELL * i as f32), true);
+    }
+    st.route = None;
 }
 
 #[derive(Default)]
@@ -394,6 +501,7 @@ fn autopilot(
     target: &mut Target,
     mortars: &[Mortar],
     sight: &Sight,
+    lib: &Library,
     st: &mut State,
 ) {
     /// Distance the dev autopilot stops from a live gun tower, bow on it (PROVISIONAL; the retail test fires from 100 units).
@@ -621,7 +729,15 @@ fn autopilot(
             s.mission.invuln = 1.0;
         }
     }
+    // Round the islands rather than into them (a human plans their own route; the original has no planner for ships).
+    let hull = ships.iter().find(|s| s.primary).map_or(10.0, |s| lib.classes[s.ship.class].radius) + HULL_MARGIN;
+    let unrouted = goal;
+    let goal = if face.is_none() { goal.map(|g| route(st, &sight.land, hull, p.pos, g)) } else { goal };
+    let before = st.stuck.as_ref().and_then(|s| s.detour.map(|d| d.1));
     let detour = unstick(sc.time, p.pos, goal.filter(|_| face.is_none()), &mut st.stuck);
+    if let (Some(_), Some(g)) = (detour.filter(|d| Some(*d) != before), goal) {
+        wedged(st, p.pos, g);
+    }
     if detour.is_some() {
         face = None;
     }
@@ -634,7 +750,8 @@ fn autopilot(
             s.ship.goal = Some(h);
             s.ship.order = 1;
             s.ship.throttle = None;
-        } else if g.distance(p.pos) > 60.0 || foe.is_none() {
+        } else if g.distance(p.pos) > 60.0 || unrouted.is_some_and(|u| u.distance(p.pos) > 60.0) || foe.is_none() {
+            // Near the goal itself (not a route point on the way, mission 6's shore) the bot creeps instead (order 1).
             s.ship.waypoints = vec![g];
             s.ship.order = 2;
             s.ship.goal = None;
@@ -690,6 +807,33 @@ mod tests {
         assert!(!ticks(21.0, 45.0, 0.6), "damage rising restarts the clock");
         assert!(ticks(46.0, 60.0, 0.6));
         assert!(!ticks(100.0, 120.0, 0.6), "leaving the hold starts over");
+    }
+
+    #[test]
+    fn the_bot_routes_round_an_island_instead_of_into_it() {
+        // A wall of land from z = -200 to 200 at x = 50, between the ship at the origin and its goal at x = 150.
+        let (a, b, c, d) = (Vec3::new(50.0, -20.0, -200.0), Vec3::new(50.0, 60.0, -200.0), Vec3::new(50.0, 60.0, 200.0), Vec3::new(50.0, -20.0, 200.0));
+        let (w1, w2) = (crate::collision::Obstacle::from_triangles(&[[a, b, c]]), crate::collision::Obstacle::from_triangles(&[[a, c, d]]));
+        let land = [&w1, &w2];
+        let (from, goal) = (Vec3::ZERO, Vec3::new(150.0, 0.0, 0.0));
+        let mut st = State::default();
+        let next = route(&mut st, &land, 15.0, from, goal);
+        assert!(next.z.abs() > 200.0, "steers for the wall's end, not through it: {next}");
+        let (_, path) = st.route.clone().unwrap();
+        assert_eq!(*path.last().unwrap(), goal);
+        assert!(path.windows(2).all(|p| line_clear(&mut st.blocked, &land, 15.0, p[0], p[1])), "every leg is clear");
+        // Wedged on the way round: the cells it was steering into are closed and the next plan keeps out of them.
+        let at = Vec3::new(30.0, 0.0, next.z.signum() * 180.0);
+        let closed: Vec<_> = (1..=WEDGED_CELLS).map(|i| cell_of(at + (next - at).with_y(0.0).normalize() * CELL * i as f32)).collect();
+        wedged(&mut st, at, next);
+        assert!(st.route.is_none(), "a new plan");
+        route(&mut st, &land, 15.0, at, goal);
+        let (_, path) = st.route.clone().unwrap();
+        assert!(!path.is_empty() && path.iter().all(|q| !closed.contains(&cell_of(*q))), "{closed:?} {path:?}");
+        // Open water: straight at the goal, no plan.
+        let mut st = State::default();
+        assert_eq!(route(&mut st, &[], 15.0, from, goal), goal);
+        assert!(st.route.is_none());
     }
 
     /// #353: the stockade gate and the pirates moored round the island are hidden from most sides; the autopilot picks the nearest
