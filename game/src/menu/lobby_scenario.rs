@@ -2,8 +2,10 @@
 //! model the lobby's pull-downs and Launch button use. The `--ship/--allies/--enemies` shortcut skips the lobby, so allied
 //! computer slots, full lobbies and big budgets never reached a test through it.
 //!
-//! Spec: `map=border_dispute;points=1000;limit=10;slots=human,7*computer`
+//! Spec: `map=border_dispute;points=1000;limit=10;slots=human,7*computer` (optionally `;seed=3`)
 //! - `map`: skirmish map id. `points`: victory points (50-1000, steps of 10). `limit`: fleet size (1-10).
+//! - `seed`: varies the fleets the computers draw (default 0). The game is deterministic, so runs of one spec are identical;
+//!   several seeds give several samples.
 //! - `slots`: the lobby rows in order, `human`, `computer`, `open` or `closed`; `N*kind` repeats. The first row is always the
 //!   human's. Rows left out stay as the lobby opens them. Computers take the team and fleet type the lobby gives them.
 use super::*;
@@ -22,11 +24,12 @@ pub struct LobbyScenario {
     pub points: u32,
     pub limit: usize,
     pub slots: Vec<SlotSpec>,
+    pub seed: u64,
 }
 
 impl LobbyScenario {
     pub fn parse(spec: &str) -> Result<Self, String> {
-        let (mut map, mut points, mut limit, mut slots) = (None, VICTORY_LIMIT.default, FLEET_SIZE.default as usize, vec![]);
+        let (mut map, mut points, mut limit, mut slots, mut seed) = (None, VICTORY_LIMIT.default, FLEET_SIZE.default as usize, vec![], 0);
         for part in spec.split(';').map(str::trim).filter(|p| !p.is_empty()) {
             let (key, value) = part.split_once('=').ok_or_else(|| format!("lobby spec part {part:?} is not key=value"))?;
             let number = |what: &str| value.trim().parse::<u32>().map_err(|_| format!("lobby spec {what} {value:?} is not a number"));
@@ -34,6 +37,7 @@ impl LobbyScenario {
                 "map" => map = Some(value.trim().to_string()),
                 "points" => points = number("points")?,
                 "limit" => limit = number("limit")? as usize,
+                "seed" => seed = u64::from(number("seed")?),
                 "slots" => {
                     for item in value.split(',').map(str::trim).filter(|i| !i.is_empty()) {
                         let (count, kind) = item
@@ -49,7 +53,7 @@ impl LobbyScenario {
                         slots.extend(std::iter::repeat_n(kind, count));
                     }
                 }
-                other => return Err(format!("lobby spec key {other:?}: expected map, points, limit or slots")),
+                other => return Err(format!("lobby spec key {other:?}: expected map, points, limit, seed or slots")),
             }
         }
         let map = map.ok_or("lobby spec needs map=<id>")?;
@@ -62,7 +66,7 @@ impl LobbyScenario {
         if !(FLEET_SIZE.min as usize..=FLEET_SIZE.max as usize).contains(&limit) {
             return Err(format!("lobby spec limit {limit}: {}-{}", FLEET_SIZE.min, FLEET_SIZE.max));
         }
-        Ok(Self { map, points, limit, slots })
+        Ok(Self { map, points, limit, slots, seed })
     }
 
     /// Sets the lobby up like a player would: pick the map, move the sliders, turn rows into computers, Auto Assign the human's
@@ -74,6 +78,7 @@ impl LobbyScenario {
         sk.load_map();
         sk.victory_limit = self.points;
         sk.fleet_size = self.limit;
+        sk.draw = self.seed;
         if self.slots.len() > sk.slots.len() {
             return Err(format!("lobby scenario: {} rows asked, but {} has {}", self.slots.len(), self.map, sk.slots.len()));
         }
@@ -113,6 +118,8 @@ mod tests {
         assert_eq!(s.slots.len(), 8);
         assert_eq!(s.slots[0], SlotSpec::Human);
         assert!(s.slots[1..].iter().all(|k| *k == SlotSpec::Computer));
+        assert_eq!(s.seed, 0);
+        assert_eq!(LobbyScenario::parse("map=border_dispute;seed=3;slots=human,computer").unwrap().seed, 3);
     }
 
     #[test]
@@ -132,6 +139,20 @@ mod tests {
             let err = LobbyScenario::parse(spec).unwrap_err();
             assert!(err.contains(needle), "{spec:?}: {err}");
         }
+    }
+
+    #[test]
+    #[ignore = "needs imported assets"]
+    fn a_seed_changes_the_computers_fleet_draw() {
+        let lib = Library::load(crate::assets_dir());
+        let fleet = |spec: &str| {
+            let mut sk = crate::menu::tests::skirmish("border_dispute");
+            LobbyScenario::parse(spec).unwrap().apply(&mut sk, &lib).unwrap();
+            sk.plan(&lib).into_iter().filter(|g| !g.human).map(|g| g.ships.iter().map(|s| s.0.clone()).collect::<Vec<_>>()).collect::<Vec<_>>()
+        };
+        let base = "map=border_dispute;points=1000;limit=10;slots=human,7*computer";
+        assert_eq!(fleet(base), fleet(&format!("{base};seed=0")), "seed 0 is the usual draw");
+        assert_ne!(fleet(base), fleet(&format!("{base};seed=1")));
     }
 
     #[test]

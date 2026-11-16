@@ -218,6 +218,8 @@ pub struct Skirmish {
     pub selected: usize,
     pub historical: bool,
     pub fleet_size: usize,
+    /// Varies the computers' fleet draw (0 = the usual one): lobby scenarios set it so repeated runs are different samples.
+    pub draw: u64,
     /// Victory points a fleet may cost (the setup's Victory Limit; ships spend their 'Victory Point Cost').
     pub victory_limit: u32,
     pub map_json: Value,
@@ -717,7 +719,7 @@ impl Skirmish {
                 } else if s.fleet.is_empty() {
                     // A computer builds its fleet with the same routine as Auto Assign, inside the same budget.
                     let mut c = s.clone();
-                    auto_build(&mut c, self.victory_limit, self.fleet_size, lib, s.player as u64 + 1, true);
+                    auto_build(&mut c, self.victory_limit, self.fleet_size, lib, s.player as u64 + 1 + self.draw * 101, true);
                     computer_build = Some((c.weapons.clone(), c.crew.clone()));
                     (c.fleet.iter().map(|n| (n.clone(), None, None)).collect(), vec![])
                 } else {
