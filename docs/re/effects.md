@@ -348,6 +348,8 @@ to `models/debris/` and `sections[].debris` = {model, pivot}.
   that burnt 1.0 took nothing, eight times of eight; the stock crew's capacity of 3.5 held every fire at 1-2. Fires on a destroyed
   section die.
   A dead fire stops emitting after 3 s and is removed after 5 more. Burning fires then double in intensity.
+- Nebula meteor, lightning and wind hits carry no attacker either, so on the human's own ships they take the difficulty factor like
+  fires (Easy × 0.25, Normal × 0.5, Hard × 1) and on other ships none. Read from the original's code, not yet measured.
 - Scripted damage ("Damage Group/Unit by X percent", a fraction 0.4-0.6 in missions 1 and 3 and `locusts`). Read from the original's
   code, not yet measured: every section in order takes one hit of round(its current hit points × fraction) through the ordinary
   hit routine (spill into the neighbours of a section left at 0, core bleed through dead vital sections, the human's ships taking

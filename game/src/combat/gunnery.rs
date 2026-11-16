@@ -514,6 +514,7 @@ pub(super) fn launch_shell(
                 base: shot.base,
                 ricochet: shot.ricochet,
                 mine_scan: Default::default(),
+                lost_target: false,
             },
             Transient,
             stf,
@@ -642,8 +643,7 @@ pub(super) fn base_fire(
 /// Turns a turret toward `aim_at` (docs/re/gunnery.md): the base always turns toward the target at the gun's yaw speed, clamped to
 /// the mount's half-arc, whatever the range; the barrel only elevates once the base is within 1 degree and the target is within
 /// range. Lead as the original does: aim point += target velocity * (distance / muzzle speed), one step, no gravity term (torpedo
-/// lead is straight interception, not the original's homing). PROVISIONAL: with no target the gun returns to rest; the original's
-/// idle behaviour is unknown. Returns the firing direction and distance while the target is in range and arc.
+/// lead is straight interception, not the original's homing). With no target a direct-fire gun stays where it was. Returns the firing direction and distance while the target is in range and arc.
 #[allow(clippy::too_many_arguments)]
 fn aim_turret(
     state: &mut GunState,
@@ -675,6 +675,12 @@ fn aim_turret(
         if in_range && yaw.abs() <= half_arc {
             engaged = Some((dir, to_target.length()));
         }
+    }
+    // Read from the original's code: a direct-fire gun with no target never runs its tracking, so it stays where it was (also under hold
+    // fire); a lob gun keeps tracking its stored ground point and returns to rest here.
+    if aim_at.is_none() && gun.lob.is_none() {
+        want_yaw = state.yaw;
+        want_pitch = None;
     }
     let yaw_step = (want_yaw - state.yaw).clamp(-gun.yaw_speed * dt, gun.yaw_speed * dt);
     state.yaw = (state.yaw + yaw_step).clamp(-half_arc.max(0.0), half_arc);

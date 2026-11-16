@@ -54,6 +54,7 @@ pub fn shoot(mut commands: Commands, lib: Res<Library>, fxl: Res<FxLib>, mut msg
                     base: false,
                     ricochet: m.ricochet,
                     mine_scan: Default::default(),
+                    lost_target: false,
                 },
                 Transient,
                 stf,
@@ -278,7 +279,10 @@ pub fn strikes(lib: Res<Library>, mut rng: ResMut<Rng>, mut msgs: MessageReader<
         let Some(section) = class.sections.get(k).filter(|_| k < hp.sections.len()) else { continue };
         let key = material_key(&section.material);
         let Some(damage) = m.damage.get(key) else { continue };
-        apply_ship_hit(class, &mut hp, k, *damage, ms.map_or(0.0, |m| m.invuln), false, &mut rng);
+        // The hit carries no attacker, so only the human's own ships take the difficulty factor (as fires do).
+        let f = super::shells::side_damage_scale(Side::Enemy, ship.side, crate::menu::difficulty(), false);
+        let damage = [damage[0] * f, damage[1] * f, damage[2], damage[3], damage[4]];
+        apply_ship_hit(class, &mut hp, k, damage, ms.map_or(0.0, |m| m.invuln), false, &mut rng);
     }
 }
 
@@ -401,7 +405,7 @@ mod tests {
         let core = hp.core;
         let ship = Ship {
             class,
-            side: crate::Side::Player,
+            side: crate::Side::Enemy,
             heading: 0.0,
             speed: 0.0,
             ang_vel: 0.0,
@@ -435,6 +439,19 @@ mod tests {
         app.world_mut().write_message(Strike { victim: e, damage: tables["meteor"].clone(), section: k });
         app.update();
         assert_eq!(app.world().get::<Health>(e).unwrap().sections[k], after);
+        // The hit carries no attacker: the human's own ship takes the difficulty factor, a computer ship does not.
+        let mine = app.world().get::<Ship>(e).unwrap().clone();
+        let mine = Ship { side: crate::Side::Player, ..mine };
+        let h2 = Health::new(&app.world().resource::<Library>().classes[mine.class]);
+        let before2 = h2.sections[k];
+        let p = app.world_mut().spawn((Transform::default(), mine, h2)).id();
+        for _ in 0..3 {
+            app.world_mut().write_message(Strike { victim: p, damage: tables["wind"].clone(), section: k });
+        }
+        app.update();
+        let f = super::super::shells::side_damage_scale(crate::Side::Enemy, crate::Side::Player, crate::menu::difficulty(), false);
+        let lost = before2 - app.world().get::<Health>(p).unwrap().sections[k];
+        assert!(f < 1.0 && lost <= 21.0 * f + 3.0, "the human's ship takes the difficulty factor ({lost} lost, factor {f})");
     }
 
     #[test]

@@ -56,6 +56,7 @@ pub(super) fn arm(mut commands: Commands, assets: Res<AssetServer>, lib: Res<Lib
                 base: false,
                 ricochet: 0.0,
                 mine_scan: Default::default(),
+                lost_target: false,
             },
             Transient,
         ));
