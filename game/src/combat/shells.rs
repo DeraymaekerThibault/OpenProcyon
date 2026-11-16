@@ -33,6 +33,10 @@ impl Shell {
     pub fn bullet(&self) -> &str {
         &self.bullet
     }
+    /// Its bullet type and velocity (Bevy axes), for the battle trace.
+    pub fn class_and_velocity(&self) -> (&str, Vec3) {
+        (&self.bullet, self.vel)
+    }
 }
 
 /// Core damage of one hit on a destroyed vital section: `roll` x (sum of core% over destroyed vital sections) / 100.

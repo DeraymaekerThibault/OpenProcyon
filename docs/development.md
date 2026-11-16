@@ -20,6 +20,10 @@ Git Bash (`GIT_BASH=<path>` if it is not in the default place), and the screensh
    grinds on scenery, or the game panics. The game writes one `battle report {json}` line (`PROCYON_REPORT=<game s>`,
    `smoke/report.rs`); read it before adding print statements. When a change touches targeting, steering or what counts as a
    base/ship, add or tighten a scenario there rather than relying on a long manual run.
+   `PROCYON_TRACE=<file.csv>` (`smoke/trace.rs`) logs every ship (position, velocity, heading, section hit points) and every shell
+   once per simulation step, in game axes: the table to lay beside a measurement of the original when a battle plays out
+   differently (how close ships come, how often they fire and hit). Stage the same start points with a small mod that replaces
+   the map's `map.json`.
    Two kinds of scenario: a map with the `--ship/--allies/--enemies` shortcut (the human's own fleet; no lobby), and a lobby
    scenario (`--lobby "map=border_dispute;points=1000;limit=10;slots=human,7*computer"`, `menu/lobby_scenario.rs`) that sets the
    skirmish lobby up through the same model as its pull-downs, Auto Assign and Launch button. Only lobby scenarios play allied
