@@ -30,7 +30,7 @@ Source: observed behaviour of the original game, WOT collision definitions and t
   rammed by an enemy Man-O-War at 9 units/s loses 144; the Man-O-War 14.4.
 - **Ship against rock:** pushed apart by mass, the ship's speed and turn untouched; the rock is shoved away from the ship at
   0.25 x the offset between their centres per second. Every tick both take 0.0002 x the rock's mass x the closing speed (the
-  ship's not scaled by difficulty, no cooldown, no ally test); the rock breaks at 0.
+  human's own ship takes the difficulty factor like any hit, no cooldown, no ally test); the rock breaks at 0.
 - **Spill (every hit, shells too):** a hit that leaves its section at 0 hit points (already dead or not) passes 0.4 x its damage
   on to each of the section's neighbours (the WOT section's `adjacent` list), and on again from any neighbour left at 0, each
   section at most once per hit. Base parts (towers, defence rings) take shells through the same routine, so they spill too.

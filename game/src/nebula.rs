@@ -540,12 +540,38 @@ pub fn spawn(commands: &mut Commands, assets: &AssetServer, fxl: &fx::FxLib, map
     }
 }
 
+/// A ship inside a nebula whose cloud drains is slowed by how deep it is. Read from the original's code: the multiplier on top speed and
+/// thrust is the 3-D distance to the cloud's centre over its radius, clamped to 0..1 (0 at the centre, 1 at the rim), instant and with
+/// no recovery time; the deepest nebula counts. Not modelled: the hulls the original exempts.
+pub fn depth_factor(distance: f32, radius: f32) -> f32 {
+    if radius > 0.0 { (distance / radius).clamp(0.0, 1.0) } else { 1.0 }
+}
+
+fn slowdown(storms: Option<Res<Storms>>, shift: Res<StormShift>, mut ships: Query<(&mut crate::Ship, &Transform)>) {
+    let Some(storms) = storms else { return };
+    for (mut ship, tf) in &mut ships {
+        let mut q = 1.0f32;
+        for n in storms.0.as_array().into_iter().flatten() {
+            let Some(p) = n["cloud"]["points"].get(0).filter(|_| n["cloud"]["drain"] == true) else { continue };
+            let offset = shift.0.get(n["name"].as_str().unwrap_or_default()).copied().unwrap_or_default().0;
+            if !crate::rules::in_game_volume(&n["polygon"], tf.translation.x - offset.x, -(tf.translation.z - offset.z)) {
+                continue;
+            }
+            let radius = p["magnitude"].as_f64().unwrap_or(0.0) as f32;
+            q = q.min(depth_factor(tf.translation.distance(game_to_bevy(&p["pos"]) + offset), radius));
+        }
+        if ship.sail_energy != q {
+            ship.sail_energy = q;
+        }
+    }
+}
+
 pub fn plugin(app: &mut App) {
     app.add_message::<MeteorRoute>()
         .init_resource::<MeteorPlans>()
         .init_resource::<StormShift>()
         .add_systems(Update, update.run_if(in_state(crate::menu::Screen::Battle)))
-        .add_systems(FixedUpdate, (route_meteors, move_meteors, storms).chain().in_set(crate::BattleSet::Forces).run_if(in_state(crate::menu::Screen::Battle)));
+        .add_systems(FixedUpdate, (route_meteors, move_meteors, storms, slowdown).chain().in_set(crate::BattleSet::Forces).run_if(in_state(crate::menu::Screen::Battle)));
 }
 
 fn update(
@@ -638,6 +664,13 @@ mod tests {
         assert!((r - 100.0 * 2f32.sqrt()).abs() < 1e-3);
     }
 
+    #[test]
+    fn nebula_slowdown_is_distance_over_radius_zero_at_the_centre() {
+        assert_eq!(depth_factor(0.0, 500.0), 0.0);
+        assert_eq!(depth_factor(250.0, 500.0), 0.5);
+        assert_eq!(depth_factor(700.0, 500.0), 1.0);
+        assert_eq!(depth_factor(10.0, 0.0), 1.0);
+    }
     #[test]
     #[ignore = "needs imported assets"]
     fn thirty_seconds_in_a_storm_does_not_guarantee_lightning_damage() {
