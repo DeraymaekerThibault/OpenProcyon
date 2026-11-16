@@ -538,7 +538,7 @@ impl FleetPilot {
 
 /// Native layout construction in game axes, converted to leader-local Bevy coordinates.
 /// R is the largest member's bounding-sphere radius: the retail Diamond slot sat R + 30 = 46.7 from a Man-O-War leader, whose WOT sphere
-/// radius is 17 (docs/re/fleet-controls.md). PROVISIONAL: stable roster assignment replaces native size/cost assignment.
+/// radius is 17 (docs/re/fleet-controls.md). The swap pass over the result is `swap_slots`.
 pub fn formation_slots(kind: Formation, radii: &[f32]) -> Vec<Vec3> {
     let r = radii.iter().copied().fold(0.0, f32::max);
     let mut slots = vec![Vec3::ZERO; radii.len()];
@@ -559,6 +559,51 @@ pub fn formation_slots(kind: Formation, radii: &[f32]) -> Vec<Vec3> {
         };
         slots[i] = slots[parent] + delta;
     }
+    slots
+}
+
+/// Read from the original's code (not yet measured): after a layout the slots are given a single swap pass, so ships that are already
+/// closer to another slot take that one. Not for Custom and Column. `ships` is each member's position in the leader's frame and the
+/// angle between its heading and the leader's. For each slot i from 1, the member that fits its point best (lowest index on a tie,
+/// the leader included) swaps its own slot with slot i when it fits that point strictly better than its own. Fit is 50 falling to 0
+/// over an angle of 0..pi, plus 50 falling to 0 over a distance of 0..500 units.
+pub fn swap_slots(slots: &mut [Vec3], ships: &[(Vec3, f32)]) {
+    let fit = |m: usize, p: Vec3| {
+        let (pos, angle) = ships[m];
+        50.0 * (1.0 - (angle / std::f32::consts::PI).clamp(0.0, 1.0)) + 50.0 * (1.0 - (pos.distance(p) / 500.0).clamp(0.0, 1.0))
+    };
+    for i in 1..slots.len().min(ships.len()) {
+        let a = slots[i];
+        let mut j = 0;
+        for m in 1..ships.len() {
+            if fit(m, a) > fit(j, a) {
+                j = m;
+            }
+        }
+        if fit(j, a) > fit(j, slots[j]) {
+            slots[i] = slots[j];
+            slots[j] = a;
+        }
+    }
+}
+
+/// The slots of a fleet's formation: the layout, then the swap pass from where the ships are now.
+fn laid_out_slots(world: &World, fleet: &Fleet) -> Vec<Vec3> {
+    let radii: Vec<_> = fleet.members.iter().map(|e| world.get::<Ship>(*e).map_or(0.0, |s| world.resource::<Library>().classes[s.class].sphere.1)).collect();
+    let mut slots = formation_slots(fleet.formation, &radii);
+    if matches!(fleet.formation, Formation::None | Formation::Custom | Formation::Column) {
+        return slots;
+    }
+    let Some(leader) = fleet.members.first().and_then(|e| world.get::<Transform>(*e)).copied() else { return slots };
+    let ships: Vec<_> = fleet
+        .members
+        .iter()
+        .map(|e| {
+            let t = world.get::<Transform>(*e).copied().unwrap_or(leader);
+            ((leader.rotation.inverse() * (t.translation - leader.translation)).with_y(0.0), (leader.rotation.inverse() * t.rotation * Vec3::NEG_Z).angle_between(Vec3::NEG_Z))
+        })
+        .collect();
+    swap_slots(&mut slots, &ships);
     slots
 }
 
@@ -660,8 +705,7 @@ pub fn set_formation(world: &mut World, owner: &str, kind: Option<Formation>, ho
     }) else {
         return;
     };
-    let radii: Vec<_> = fleet.members.iter().map(|e| world.get::<Ship>(*e).map_or(0.0, |s| world.resource::<Library>().classes[s.class].sphere.1)).collect();
-    let slots = formation_slots(fleet.formation, &radii);
+    let slots = laid_out_slots(world, &fleet);
     let leader = fleet.members.first().and_then(|e| world.get::<Transform>(*e)).copied().unwrap_or_default();
     for (i, e) in fleet.members.iter().enumerate().skip(1) {
         let custom = world.get::<Transform>(*e).map_or(Vec3::ZERO, |t| leader.rotation.inverse() * (t.translation - leader.translation)).with_y(0.0);
@@ -745,8 +789,7 @@ pub fn promote(world: &mut World, candidate: Entity, scripted: bool) -> bool {
         fleets.selected = Some(candidate);
         fleets.groups.get(&owner).unwrap().clone()
     };
-    let radii: Vec<_> = f.members.iter().map(|e| world.get::<Ship>(*e).map_or(0.0, |s| world.resource::<Library>().classes[s.class].sphere.1)).collect();
-    let slots = formation_slots(f.formation, &radii);
+    let slots = laid_out_slots(world, &f);
     for (i, e) in f.members.iter().enumerate().skip(1) {
         if f.formation != Formation::Custom
             && let Some(mut p) = world.get_mut::<FleetPilot>(*e)
