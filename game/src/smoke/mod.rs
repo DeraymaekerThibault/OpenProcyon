@@ -3,6 +3,7 @@ mod fleet;
 mod lifeboats;
 mod report;
 mod shells;
+mod trace;
 pub use fleet::fleet_smoke;
 
 use crate::{Config, campaign::Mission, rules::RuleShip};
@@ -61,6 +62,7 @@ scripts! {
 
 pub fn plugin(app: &mut App) {
     report::plugin(app);
+    trace::plugin(app);
     app.add_systems(PreUpdate, fleet::fleet_smoke.after(bevy::ui::UiSystems::Focus).before(crate::panels::hud_input))
         .add_systems(PreUpdate, lifeboats::smoke.after(bevy::ui::UiSystems::Focus))
         .add_systems(Update, (shells::shells, animals));

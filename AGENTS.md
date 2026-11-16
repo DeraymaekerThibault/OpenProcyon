@@ -68,6 +68,9 @@ files to `content/`, or anything that publishes (pushing tags, releases).
 - `tools/check.sh` (`make check`) is the single validation gate: ruff format/lint (`ruff.toml`), rustfmt, clippy `-D warnings`, Rust tests
   (asset-free tests always run; ignored asset tests also run when assets are imported), Python tests including the hygiene rules. `make fmt` formats both languages. Run it before every commit; do not add
   parallel wrappers.
+- Where the engine stands against the original is tracked in GitHub issues, not in a file: the pinned scorecard (#377) lists parity rows
+  (label `parity`), each one situation compared with the original on a few numbers. Fidelity work starts from the worst row; a fix
+  that changes battle behaviour says which row it moves. `PROCYON_TRACE` (`docs/development.md`) produces this engine's column.
 - Non-trivial changes need a regression test; ECS/UI changes also need a runtime smoke test (a `--script` or screenshot run).
 - Add behaviour to the module that owns it (`docs/development.md`), not a parallel implementation. Keep asset paths and JSON
   layouts stable; mods reference them.
