@@ -294,8 +294,11 @@ Run-in slow-down: four run-ins slowed 48-64 units from their target whatever the
 more than 11.25° off the bow, which the broadside aim point is once the ship nears its target.
 
 ## Computer captains: decisions and attack (read from the original's code, 2026-10-31)
-Static analysis of the original's captain AI, written as rules. Every computer ship thinks twice a second; nothing in it depends on
-the difficulty setting.
+Static analysis of the original's captain AI, written as rules. Nothing in it depends on the difficulty setting.
+- **When a captain thinks (measured, 2026-11-16):** once 0.5 s has passed since its last think. With the 0.033 s step that is every
+  16th step, 0.528 s (five ships, 85 thinks each, all 0.528 s). The clock restarts at each think, so no remainder carries over.
+  A new captain first waits 0.05 s × (its spawn number mod 10), one count for all sides, and thinks one full period after that
+  wait; between thinks a ship keeps the course, speed order and target of its last think. Guns decide every step.
 - **What to do, in order:** with at least two damage sections at or below half their hit points, dock for repair
   ([docking-and-orders.md](docking-and-orders.md)); else choose a target and attack it; with no target, explore (Aggressive ships, which
   every skirmish computer ship is) or stop and hold. There is no fleeing or retreat.

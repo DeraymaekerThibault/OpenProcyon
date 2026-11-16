@@ -666,7 +666,6 @@ fn ships_lean_into_turns_except_at_emergency_speed() {
 #[test]
 #[ignore = "needs imported assets"]
 fn allied_computer_ships_hunt_the_enemy_base_the_humans_fleet_waits() {
-    use bevy::ecs::system::RunSystemOnce;
     let (mut w, ids) = fleet_world();
     w.despawn(ids[5]);
     let class = w.resource::<Library>().index("Base_SmugglersCamp");
@@ -690,7 +689,12 @@ fn allied_computer_ships_hunt_the_enemy_base_the_humans_fleet_waits() {
     w.init_resource::<crate::environment::Sensors>();
     w.init_resource::<CaptainTargets>();
     w.init_resource::<Time>();
-    w.run_system_once(ai).unwrap();
+    // A captain first thinks one period (plus its start delay) after it appears, so run the system at 0 s and again at 1 s.
+    let captains = w.register_system(ai);
+    w.run_system(captains).unwrap();
+    assert_eq!(w.get::<Ship>(ids[4]).unwrap().order, 0, "no captain has thought yet");
+    w.resource_mut::<Time>().advance_by(std::time::Duration::from_secs(1));
+    w.run_system(captains).unwrap();
     assert!(w.get::<Ship>(ids[4]).unwrap().order > 0, "the ally sets off for the enemy base");
     assert_eq!(w.get::<Ship>(ids[1]).unwrap().order, 0, "the human's own ship waits for orders");
 }
