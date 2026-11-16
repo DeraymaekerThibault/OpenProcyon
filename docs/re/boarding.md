@@ -94,9 +94,14 @@ human's command ship) runs it every tick against its current target, without any
   only grapples a target that has fired at it. Neither is observed directly.
 - Remake: `boarding::ai_boarding` (skirmish enemies their captain's target, `ship::CaptainTargets`; mission ships the rules' target, the
   player's other ships their pilot's target); the line-of-fire skip is not modelled.
-**The grapple line.** A harpoon hit links the two ships; the link remembers the centre distance at that moment. The link itself
-does not tow or slow either ship. Each frame it is let go (rope-break sound `rope_break_placeholder` at the midpoint) when:
-- the ships' centres are more than **2** units further apart than when the hook bit;
+**The grapple line.** A harpoon hit links the two ships; the link remembers the centre distance at that moment and uses it as the rope's length.
+Each tick, if the centres are further apart than the length, the rope pulls **both hulls toward each other by the excess, split by
+mass** (the lighter one moves more; positions only, no velocity change) — read from the original's code, and in play the excess
+after the ships' own move never exceeded one tick of their relative motion (0.07 units). A ship cannot sail away from a bitten
+grapple: it is held at the length. Order within a tick: the rope's break test and reel, then this pull, then the ships' physics, so
+the break test sees the stretch from the last tick's motion, before the pull. Each frame it is let go (rope-break sound `rope_break_placeholder` at the midpoint) when:
+- the ships' centres are more than **2** units further apart than when the hook bit (checked before the pull, so only a one-tick
+  jump of that size does it: a relative speed of about 60 units/s);
 - the two players become allied;
 - the partner crosses to the other side of the hull: at the hit each end records whether the other ship lay mostly ahead/astern
   or abeam, and on which side, and the link breaks when that side changes.

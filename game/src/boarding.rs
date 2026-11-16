@@ -36,8 +36,6 @@ const GRAPPLE_SLACK: f32 = 2.0;
 /// While a boarding is registered on the grapple the line is reeled in at this speed, down to this centre distance.
 const REEL_SPEED: f32 = 3.0;
 const REEL_MIN: f32 = 12.0;
-/// PROVISIONAL: how quickly the reel brings the ships' closing speed to `REEL_SPEED` (1/s); the original's rope physics is not ported.
-const REEL_RATE: f32 = 2.0;
 
 /// WOT 'Crew Skill Level'. The per-man combat ability is the generic crew's (Crew_General_*: 1, 3, 4 of 10).
 /// PROVISIONAL: 'Players' (the campaign roster) uses Average, and generic crews get no leadership bonus (named crews do).
@@ -271,12 +269,14 @@ pub struct Grapple {
     flight: f32,
     /// Centre distance when the hook bit (0 until then).
     span: f32,
+    /// Rope length: the distance at the hit, shortened while a boarding reels (0 until the hook bit).
+    length: f32,
     /// Per end (grappler, target): the hull axis the other ship lay along when the hook bit, pointing toward it.
     sides: [Vec3; 2],
 }
 impl Grapple {
     fn new(target: Entity, flight: f32) -> Self {
-        Grapple { target, flight, span: 0.0, sides: [Vec3::ZERO; 2] }
+        Grapple { target, flight, span: 0.0, length: 0.0, sides: [Vec3::ZERO; 2] }
     }
 }
 
@@ -392,7 +392,7 @@ fn ropes(
         }
         let from = harpoons(&lib, ship, health, guns).next().map_or(tf.translation, |(m, _)| tf.transform_point(m.pos));
         let to = tb.into_iter().flat_map(|b| &b.points).map(|p| ttf.transform_point(*p)).nearest_to(from, |a| *a).unwrap_or(ttf.translation);
-        out.0.push((from, to, (g.span - tf.translation.distance(ttf.translation)).max(0.0)));
+        out.0.push((from, to, (g.length - tf.translation.distance(ttf.translation)).max(0.0)));
     }
     for &(tower, towee) in mission.as_deref().map_or(&[][..], |m| m.script.tows()) {
         if let (Ok((a, ta, ..)), Ok((b, tb, ..))) = (ships.get(tower), ships.get(towee)) {
@@ -641,9 +641,11 @@ fn grapple_orders(
     }
 }
 
-/// A bitten grapple does not tow: the ships sail freely and the line snaps when their centres get `GRAPPLE_SLACK` further apart than
-/// when the hook bit. Only while a boarding is registered on the pair is the line reeled in (`REEL_SPEED`, down to `REEL_MIN`), so a
-/// ship that pulls away hard enough still breaks free. A grapple on a destroyed or vanished ship is let go.
+/// A bitten grapple is a rope of the length the ships were apart when the hook bit (read from the original's code and checked in play).
+/// Each tick, if the centres are further apart than that, both hulls are moved toward each other along the line by the excess, split
+/// by mass (the lighter one moves more), positions only. The line snaps when the centres were already `GRAPPLE_SLACK` further apart
+/// than at the hit before that pull, which takes a relative speed of about 60 units/s. While a boarding is registered on the pair the
+/// length is set to the centre distance less `REEL_SPEED` x the tick, down to `REEL_MIN`. A grapple on a destroyed or vanished ship is let go.
 /// It also snaps when either ship's partner crosses to the other side of the hull it was grappled on.
 /// PROVISIONAL: the original also lets go when the ships become allied.
 fn winch(
@@ -653,14 +655,14 @@ fn winch(
     mut sfx: MessageWriter<Sfx>,
     mut hooks: Query<(Entity, &mut Grapple)>,
     fighters: Query<(Entity, &Boarding)>,
-    mut ships: Query<(&mut Ship, &Transform, &mut Drift, &Health)>,
+    mut ships: Query<(&Ship, &mut Transform, &Health)>,
 ) {
     let dt = time.delta_secs();
     for (e, mut g) in &mut hooks {
         if g.flight > 0.0 {
             continue;
         }
-        let Ok([(mut a, atf, mut da, ha), (mut b, btf, mut db, hb)]) = ships.get_many_mut([e, g.target]) else {
+        let Ok([(a, mut atf, ha), (b, mut btf, hb)]) = ships.get_many_mut([e, g.target]) else {
             commands.entity(e).remove::<Grapple>();
             continue;
         };
@@ -672,32 +674,27 @@ fn winch(
         let distance = axis.length();
         if g.span <= 0.0 {
             g.span = distance;
-            g.sides = [side_of(atf, btf.translation), side_of(btf, atf.translation)];
+            g.length = distance;
+            g.sides = [side_of(&atf, btf.translation), side_of(&btf, atf.translation)];
         }
         // PROVISIONAL: the axis is the nearer of bow-stern and beam; the original picks it from the hull's proportions.
         let crossed = |tf: &Transform, other: Vec3, side: Vec3| (tf.rotation * side).dot(other - tf.translation) <= 0.0;
-        if distance > g.span + GRAPPLE_SLACK || crossed(atf, btf.translation, g.sides[0]) || crossed(btf, atf.translation, g.sides[1]) {
+        if distance > g.span + GRAPPLE_SLACK || crossed(&atf, btf.translation, g.sides[0]) || crossed(&btf, atf.translation, g.sides[1]) {
             info!("grapple: {e} loses {} (centres {distance:.1} apart, bit at {:.1})", g.target, g.span);
             sfx.write(Sfx { name: "rope_break_placeholder".into(), at: Some(atf.translation.lerp(btf.translation, 0.5)), vol: 1.0, max: 600.0 });
             commands.entity(e).remove::<Grapple>();
             continue;
         }
         let boarding = fighters.iter().any(|(f, fight)| (f == e && fight.target == g.target) || (f == g.target && fight.target == e));
-        if !boarding || distance <= REEL_MIN {
-            continue;
+        if boarding && distance > REEL_MIN {
+            g.length = (distance - REEL_SPEED * dt).max(REEL_MIN);
         }
-        // Bring the closing speed along the line up to the reel's, mass-weighted (momentum kept).
-        let (ca, cb) = (&lib.classes[a.class], &lib.classes[b.class]);
-        let n = axis / distance.max(1e-3);
-        let (va, vb) = (atf.rotation * Vec3::NEG_Z * a.speed + da.0, btf.rotation * Vec3::NEG_Z * b.speed + db.0);
-        let opening = (vb - va).dot(n);
-        if opening <= -REEL_SPEED {
-            continue;
+        if distance > g.length && distance > 1e-3 {
+            let (ma, mb) = (lib.classes[a.class].phys.mass, lib.classes[b.class].phys.mass);
+            let pull = axis / distance * (distance - g.length);
+            atf.translation += pull * (mb / (ma + mb));
+            btf.translation -= pull * (ma / (ma + mb));
         }
-        let dv = n * (-REEL_SPEED - opening) * (1.0 - (-REEL_RATE * dt).exp());
-        let (ia, ib) = (1.0 / ca.phys.mass, 1.0 / cb.phys.mass);
-        crate::collision::set_velocity(&mut a, &mut da, va - dv * (ia / (ia + ib)));
-        crate::collision::set_velocity(&mut b, &mut db, vb + dv * (ib / (ia + ib)));
     }
 }
 

@@ -263,21 +263,32 @@ fn boarding_needs_a_grapple_and_ends_when_the_ships_drift_apart() {
 
 #[test]
 #[ignore = "needs imported assets"]
-fn a_grapple_does_not_hold_the_ships_and_snaps_when_they_pull_apart() {
+fn a_grapple_is_a_rope_that_pulls_both_hulls_back_and_snaps_only_past_a_jump_or_a_crossed_side() {
     let mut app = app();
     let me = spawn(&mut app, "Ship_Navy_Cutter", Side::Player, Vec3::ZERO, Skill::Average);
     app.world_mut().entity_mut(me).insert(PlayerShip);
     let foe = spawn(&mut app, "Ship_Pirate_Schooner", Side::Enemy, Vec3::new(0.0, 0.0, -40.0), Skill::Average);
     app.world_mut().entity_mut(foe).insert(Grapple::new(me, 0.0));
     tick(&mut app, 0.1);
-    app.world_mut().get_mut::<Ship>(me).unwrap().speed = 4.0; // we sail on, bow (-Z) toward the schooner's side
-    tick(&mut app, 0.1);
-    assert!(app.world().get::<Ship>(me).unwrap().speed > 3.9, "the grapple neither stops nor drags us");
-    app.world_mut().get_mut::<Ship>(me).unwrap().speed = -4.0; // and away again
+    let apart = |app: &App| app.world().get::<Transform>(me).unwrap().translation.distance(app.world().get::<Transform>(foe).unwrap().translation);
+    let (m_me, m_foe) = {
+        let lib = app.world().resource::<Library>();
+        (lib.classes[app.world().get::<Ship>(me).unwrap().class].phys.mass, lib.classes[app.world().get::<Ship>(foe).unwrap().class].phys.mass)
+    };
+    app.world_mut().get_mut::<Ship>(me).unwrap().speed = -4.0; // we sail away from the schooner
+    let start = (app.world().get::<Transform>(me).unwrap().translation, app.world().get::<Transform>(foe).unwrap().translation);
     for _ in 0..20 {
         tick(&mut app, 0.1);
     }
-    assert!(app.world().get::<Grapple>(foe).is_none(), "pulled more than 2 units past its length: the line snapped");
+    assert!(app.world().get::<Grapple>(foe).is_some(), "sailing away at 4 units/s does not snap the rope");
+    assert!((apart(&app) - 40.0).abs() < 2.0, "the rope holds the centres at the length it bit at, not {}", apart(&app));
+    let moved = (app.world().get::<Transform>(me).unwrap().translation.distance(start.0), app.world().get::<Transform>(foe).unwrap().translation.distance(start.1));
+    assert!((moved.0 < moved.1) == (m_me > m_foe), "the heavier hull gives way less ({moved:?}, masses {m_me} and {m_foe})");
+    // A jump of more than 2 units past the rope's length in one tick snaps it.
+    app.world_mut().get_mut::<Ship>(me).unwrap().speed = 0.0;
+    app.world_mut().get_mut::<Transform>(me).unwrap().translation += Vec3::Z * 30.0;
+    tick(&mut app, 0.1);
+    assert!(app.world().get::<Grapple>(foe).is_none(), "carried 2 units further than the rope in one tick: the line snapped");
     // Grappled on our bow, the schooner circles round to our stern: the line snaps.
     app.world_mut().get_mut::<Ship>(me).unwrap().speed = 0.0;
     app.world_mut().get_mut::<Transform>(me).unwrap().translation = Vec3::ZERO;
