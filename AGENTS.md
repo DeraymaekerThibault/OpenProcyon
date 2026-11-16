@@ -68,9 +68,14 @@ files to `content/`, or anything that publishes (pushing tags, releases).
 - `tools/check.sh` (`make check`) is the single validation gate: ruff format/lint (`ruff.toml`), rustfmt, clippy `-D warnings`, Rust tests
   (asset-free tests always run; ignored asset tests also run when assets are imported), Python tests including the hygiene rules. `make fmt` formats both languages. Run it before every commit; do not add
   parallel wrappers. While iterating, `tools/check.sh --fast` skips the startup smoke and the battle check.
-- Where the engine stands against the original is tracked in GitHub issues, not in a file: the pinned scorecard (#377) lists parity rows
-  (label `parity`), each one situation compared with the original on a few numbers. Fidelity work starts from the worst row; a fix
-  that changes battle behaviour says which row it moves. `PROCYON_TRACE` (`docs/development.md`) produces this engine's column.
+- Where the engine stands against the original is tracked in one place: the project board "OpenProcyon fidelity: every rule of the
+  original" (one row per rule of the original's battle simulation, with its stage: unknown, read, confirmed, specced, built, tested,
+  and whether it differs here). Fidelity work starts from the board. Do not create another overview: no new tracking issue,
+  scorecard, roadmap or status file. Open an issue when work on a row is picked up, not for every finding.
+- Know a system's rules before fixing in it: a fix built on a rule or an order that later turns out wrong is redone. A difference
+  that is confirmed, small and independent of unknown rules may be fixed at once. Never tune a number to make a battle come out alike.
+- Whole-battle comparison (the parity rows listed in #377, label `parity`) is a smoke test that finds rules nobody knew to look for;
+  a difference it shows becomes a row on the board, not more runs. `PROCYON_TRACE` (`docs/development.md`) produces this engine's column.
 - Non-trivial changes need a regression test; ECS/UI changes also need a runtime smoke test (a `--script` or screenshot run).
 - Add behaviour to the module that owns it (`docs/development.md`), not a parallel implementation. Keep asset paths and JSON
   layouts stable; mods reference them.

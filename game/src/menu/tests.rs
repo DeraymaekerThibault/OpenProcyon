@@ -113,6 +113,7 @@ pub(super) fn skirmish(id: &str) -> Skirmish {
         selected: 0,
         historical: false,
         fleet_size: 5,
+        draw: 0,
         victory_limit: 300,
         map_json: Value::Null,
         error: None,
