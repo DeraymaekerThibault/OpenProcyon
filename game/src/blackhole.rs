@@ -24,11 +24,11 @@ pub const MIN_PULL_MASS: f32 = 4000.0;
 /// The pull is turned this far off the line to the centre (clockwise seen from above): sideways / inward = 0.27, the same in
 /// every measured creep and fall, whatever the ship's heading.
 const DRIFT_SWIRL: f32 = 0.27;
-/// A resting ship breaks free of its rest snap and falls once one tick of pull (at 30 Hz) outruns the integrator's snap of speeds
+/// A ship breaks free of the snap and is carried off once one tick of pull (at 30 Hz) outruns the integrator's snap of speeds
 /// under 0.1 to zero: pull >= 0.1 x 30 = 3.0 units/s² (decoded; both retail Cutter runs broke free at 2.9-3.0, a Frigate and a
 /// Man-O-War never reach it on the Small hole).
 const BREAK_FREE: f32 = 3.0;
-/// Seconds a ship that is not under way survives inside the hole's core (measured ~1.1 s for a Cutter and a Frigate). The original's
+/// Seconds a ship survives inside the hole's core (measured ~1.1 s for a Cutter and a Frigate). The original's
 /// code kills at once inside the core; the delay is probably its destruction sequence. PROVISIONAL.
 pub const KILL_DELAY: f32 = 1.1;
 
@@ -44,7 +44,7 @@ pub struct Pull {
 pub struct Swallowed;
 
 /// A ship's state inside a hole's radius: its own velocity once it broke free of the rest snap, and how long it has been in the
-/// core while not under way.
+/// core.
 #[derive(Component, Default, Debug, Clone, Copy)]
 pub struct Caught {
     pub free: bool,
@@ -242,10 +242,11 @@ pub fn spawn(commands: &mut Commands, lib: &fx::FxLib, terrain: &str, pos: Vec3)
     fx::spawn(commands, lib, &format!("BlackHoleRibbons_{kind}"), Some(e), Transform::IDENTITY, Transform::from_translation(pos), false);
 }
 
-/// Black-hole pull (docs/re/effects.md "Black holes"). It acts only on ships that are not under way (engine speed 0); a ship under
-/// orders feels nothing. A resting ship's rest snap cancels the pull every engine tick, so it only creeps in at one tick's worth of
-/// acceleration; once the pull reaches `BREAK_FREE` it falls freely, its velocity following v' = a - k v with the hull's own rate
-/// k = MaxThrust / (MaxSpeed x Mass). In the core the pull stops and a ship not under way is destroyed after `KILL_DELAY`.
+/// Black-hole pull (docs/re/effects.md "Black holes"). It acts on every ship, under way or not: the pull feeds a velocity of its own
+/// beside the engine's. Speeds under 0.1 of that velocity are snapped to zero every engine tick, so a weak pull only creeps the ship
+/// in at one tick's worth of acceleration; once the pull reaches `BREAK_FREE` the ship is carried off, that velocity following
+/// v' = a - k v with the hull's own rate k = MaxThrust / (MaxSpeed x Mass). In the core the pull stops and the ship is destroyed
+/// after `KILL_DELAY`.
 /// Docked and destroyed ships are left alone, and so are ships the rules pinned in place ('Set Group/Unit Movable' FALSE): the ships
 /// stranded in mission 4's Vanov hole and mission 11's SS Harvester wait there to be towed out (their light hulls feel the pull of
 /// `MIN_PULL_MASS`, #351, #355). The rules unpin them once the player comes for them.
@@ -289,7 +290,7 @@ pub fn pull(
             continue;
         };
         let rate = class.phys.thrust / (class.phys.max_speed * class.phys.mass);
-        let (step, killed) = caught.step(ship.speed == 0.0, accel, in_core, rate, dt);
+        let (step, killed) = caught.step(accel, in_core, rate, dt);
         tf.translation += step;
         if killed {
             health.core = 0.0; // combat::deaths sinks it next
@@ -299,15 +300,10 @@ pub fn pull(
 }
 
 impl Caught {
-    /// One frame for a ship that is `resting` (engine speed 0) or under way, pulled by `accel` (units/s²) and with hull rate `rate`
-    /// (1/s): its displacement, and whether the hole destroys it now.
-    pub fn step(&mut self, resting: bool, accel: Vec3, in_core: bool, rate: f32, dt: f32) -> (Vec3, bool) {
-        self.inside = if in_core && resting { self.inside + dt } else { 0.0 };
-        if !resting {
-            // Under way the engine owns the motion: no pull, and a fall ends.
-            (self.free, self.velocity) = (false, Vec3::ZERO);
-            return (Vec3::ZERO, false);
-        }
+    /// One frame for a ship pulled by `accel` (units/s²) with hull rate `rate` (1/s): the displacement the hole adds to whatever the
+    /// engine does, and whether the hole destroys it now.
+    pub fn step(&mut self, accel: Vec3, in_core: bool, rate: f32, dt: f32) -> (Vec3, bool) {
+        self.inside = if in_core { self.inside + dt } else { 0.0 };
         if !self.free && accel.length() >= BREAK_FREE {
             self.free = true;
             self.velocity = accel * TICK;
@@ -408,7 +404,7 @@ mod tests {
         for _ in 0..(secs * 30.0).round() as usize {
             let d = pos.length();
             let a = pull_dir(Vec3::ZERO, pos) * pull.accel(d, hull.0, hull.1);
-            pos += c.step(true, a, d <= pull.core(), CUTTER_RATE, TICK).0;
+            pos += c.step(a, d <= pull.core(), CUTTER_RATE, TICK).0;
         }
         (distance - pos.length(), c)
     }
@@ -451,13 +447,18 @@ mod tests {
     }
 
     #[test]
-    fn a_ship_under_way_feels_no_pull_and_survives_the_core() {
-        let mut c = Caught { free: true, velocity: Vec3::X, inside: 0.0 };
-        for _ in 0..17 * 30 {
-            let (step, killed) = c.step(false, Vec3::new(-4.5, 0.0, 0.0), true, CUTTER_RATE, TICK);
-            assert_eq!((step, killed), (Vec3::ZERO, false));
+    fn a_ship_under_way_is_carried_off_like_a_resting_one() {
+        // retail: a Cutter at Ahead Full was pushed toward the centre at 2.1-2.4 units/s once inside ~117 units (terminal A / k
+        // = 2.42), and crept at one tick of pull (0.05 units/s at 132 units) before that; it was destroyed at R/4.
+        let pull = small();
+        let at = |d: f32| pull_dir(Vec3::ZERO, Vec3::new(d, 0.0, 0.0)) * pull.accel(d, CUTTER.0, CUTTER.1);
+        let mut c = Caught::default();
+        let (creep, _) = c.step(at(132.0), false, CUTTER_RATE, TICK);
+        assert!(!c.free && (creep.length() / TICK - 0.05).abs() < 0.01, "creep {} units/s", creep.length() / TICK);
+        for _ in 0..90 {
+            c.step(at(90.0), false, CUTTER_RATE, TICK);
         }
-        assert!(!c.free && c.velocity == Vec3::ZERO, "getting under way ends a fall");
+        assert!(c.free && (c.velocity.length() - 2.42).abs() < 0.05, "drift {}", c.velocity.length());
     }
 
     #[test]
@@ -468,30 +469,30 @@ mod tests {
         let a = pull_dir(Vec3::ZERO, Vec3::new(90.0, 0.0, 0.0)) * pull.accel(90.0, CUTTER.0, CUTTER.1);
         let mut c = Caught::default();
         for _ in 0..300 {
-            c.step(true, a, false, CUTTER_RATE, TICK);
+            c.step(a, false, CUTTER_RATE, TICK);
         }
         assert!(c.free);
         assert!((c.velocity.length() - 2.42).abs() < 0.03, "terminal speed {}", c.velocity.length());
         // inside the core the pull stops and the speed decays at the hull rate
         let v0 = c.velocity.length();
-        c.step(true, Vec3::ZERO, true, CUTTER_RATE, 0.5);
+        c.step(Vec3::ZERO, true, CUTTER_RATE, 0.5);
         assert!((c.velocity.length() - v0 * (-CUTTER_RATE * 0.5).exp()).abs() < 1e-4);
     }
 
     #[test]
-    fn the_core_destroys_a_resting_ship_after_1_1_s() {
+    fn the_core_destroys_a_ship_after_1_1_s() {
         let mut c = Caught::default();
         let mut killed_at = None;
         for i in 1..=60 {
-            if c.step(true, Vec3::ZERO, true, CUTTER_RATE, TICK).1 {
+            if c.step(Vec3::ZERO, true, CUTTER_RATE, TICK).1 {
                 killed_at = Some(i as f32 * TICK);
                 break;
             }
         }
         assert!(killed_at.is_some_and(|t| (t - KILL_DELAY).abs() < 0.05), "{killed_at:?}");
-        // leaving the core or getting under way resets the clock
+        // leaving the core resets the clock
         let mut c = Caught { inside: 1.0, ..default() };
-        c.step(false, Vec3::ZERO, true, CUTTER_RATE, TICK);
+        c.step(Vec3::ZERO, false, CUTTER_RATE, TICK);
         assert_eq!(c.inside, 0.0);
     }
 
