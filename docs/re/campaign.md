@@ -77,7 +77,7 @@ camera smoothing/path speeds, music volume scale (0.5 x script volume), speech w
 Mission 1 now exports `environment` alongside its ships/rules: animal IDs, their named groups, world point sets, nebula setup and whale sound/collision settings.
 `game/src/environment.rs` renders the retail `OvalNebula` mesh at Clarke's exported point (magnitude/radius ~381), using Nebula.eft's additive blend and initial tint,
 and plays the retail `Ambience_Nebula` loop with provisional distance gain. Lightning, meteors and rotational winds are off in this mission and are not added.
-Nebula energy drain is separate from permanent sail damage: PROVISIONAL 0.12/s down to 25% sail energy, recovering 0.08/s outside the polygon.
+Nebula slow-down is separate from permanent sail damage: inside a nebula whose cloud drains, top speed and thrust are multiplied by the 3-D distance to the cloud's centre over its radius (0 at the centre, 1 at the rim), instantly, the deepest nebula counting (read from the original's code, not yet measured; docs/re/nebula-landmark.md).
 Movement and the sail-power gauge use that value. PROVISIONAL sensor occlusion blocks lines crossing Clarke's polygon, except within 40 units;
 selection, ship targeting/AI, radar contacts, labels and reticles share this check. The cloud currently has no retail mesh shifting/edge-fade shader.
 

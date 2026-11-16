@@ -287,7 +287,7 @@ pub fn strikes(lib: Res<Library>, mut rng: ResMut<Rng>, mut msgs: MessageReader<
 }
 
 /// Contact damage (collision.rs `Ram`, read from the original's code): one hit on the victim's section nearest the contact,
-/// through the normal hit path, scaled by side and difficulty as shells are when a ship rammed it (rocks are not scaled).
+/// through the normal hit path, scaled by side and difficulty as shells are when a ship rammed it (a rock counts as a computer attacker).
 /// The collision sound (collision.rs) is the only sound of a ram; the original plays no Damage_ file for it.
 pub fn ram_damage(
     lib: Res<Library>,
@@ -302,7 +302,8 @@ pub fn ram_damage(
             continue;
         }
         let class = &lib.classes[ship.class];
-        let scale = rammer.map_or(1.0, |side| super::shells::side_damage_scale(side, ship.side, crate::menu::difficulty(), false));
+        // A rock carries no attacker: read from the original's code, the human's own ships still take the difficulty factor from it.
+        let scale = super::shells::side_damage_scale(rammer.unwrap_or(Side::Enemy), ship.side, crate::menu::difficulty(), false);
         let Some(k) = crate::collision::nearest_section(class, tf, r.at).filter(|k| *k < hp.sections.len()) else { continue };
         let d = r.damage * scale;
         apply_ship_hit(class, &mut hp, k, [d, d, 0.0, 0.0, 0.0], ms.map_or(0.0, |m| m.invuln), false, &mut rng);
