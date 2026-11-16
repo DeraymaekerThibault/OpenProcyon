@@ -525,9 +525,7 @@ mod level_tests {
 mod fire_tests {
     use super::*;
 
-    /// A fire whose section is gone stops on the 6 s tick that finds it, is cut loose on the next and deleted on the one after.
     #[test]
-    #[ignore = "needs imported assets"]
     fn a_fire_on_the_humans_ship_takes_the_difficulty_factor_and_whole_hit_points() {
         assert_eq!(fire_damage(1.0, true, 1), 0.0, "measured on the original: a 1.0 fire takes nothing on Normal");
         assert_eq!([0, 1, 2].map(|d| fire_damage(8.0, true, d)), [2.0, 4.0, 8.0]);
@@ -536,7 +534,9 @@ mod fire_tests {
         assert_eq!(fire_damage(0.5, false, 1), 0.0, "whole hit points");
     }
 
+    /// A fire whose section is gone stops on the 6 s tick that finds it, is cut loose on the next and deleted on the one after.
     #[test]
+    #[ignore = "needs imported assets"]
     fn a_dead_fire_changes_state_only_on_the_six_second_ticks() {
         let lib = Library::load(crate::assets_dir());
         let class = lib.index("Ship_Navy_Cutter");
