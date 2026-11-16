@@ -513,6 +513,7 @@ pub(super) fn launch_shell(
                 harmless: shot.harmless,
                 base: shot.base,
                 ricochet: shot.ricochet,
+                mine_scan: Default::default(),
             },
             Transient,
             stf,

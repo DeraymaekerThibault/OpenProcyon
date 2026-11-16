@@ -202,6 +202,12 @@ time of 10 s and a no-laying time of 20 s (retail saves: `LAYMINESMAXTIME` 10, `
   50-unit thresholds, and that the human player's minelayers run it too, are not yet observed in play.
 - Remake: `combat::gunnery::MineLaying`; mine guns never aim at a target.
 
+### Mine target pick
+Read from the original's code (the 5 s constant read from its data; not yet measured in play): a mine does not look for a target every
+frame. It picks the nearest hostile ship in sight only every 5 s, the first time 5 s after it was laid, keeps chasing that ship in
+between while it is alive and not cloaked, and coasts to rest when it has none. A ship that sails into sight is therefore noticed
+up to 5 s late, and one that leaves sight is still chased until the next pick.
+
 ### Placed minefields
 Border Dispute (186 mines) and Red Rover (135) place `Bullet_StarMine_Med` world objects in the map. The script's `Set Group/Unit Owner` hands each
 field (a group of object ids) to a player; the mines then fight for that player's side with the same homing as a laid mine (sight 50,

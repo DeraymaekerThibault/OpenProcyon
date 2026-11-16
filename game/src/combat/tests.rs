@@ -1204,6 +1204,7 @@ fn shell_into_a_hull_damages_it_and_reports_the_hit() {
         harmless: false,
         base: false,
         ricochet: -1000.0,
+        mine_scan: Default::default(),
     };
     let id = app.world_mut().spawn((shell, Transform::from_translation(at))).id();
     app.insert_resource(lib);
@@ -1283,6 +1284,7 @@ fn land_in_the_way_stops_a_shell_before_the_hull() {
         harmless: false,
         base: false,
         ricochet: -1000.0,
+        mine_scan: Default::default(),
     };
     let id = app.world_mut().spawn((shell, Transform::from_translation(at))).id();
     // A wall of land across the line of fire, 20 units in front of the hull.
@@ -1358,6 +1360,78 @@ fn a_map_mine_rests_where_the_map_put_it_and_fights_for_no_one_until_given_an_ow
     assert_eq!((shell.vel, shell.aim), (Vec3::ZERO, Some(at)));
     assert_eq!(shell.side, crate::scenario::HOSTILE_TO_ALL, "hostile to every ship until the script names an owner");
     assert!(matches!(shell.payload, Payload::Mine { sight, .. } if sight == 50.0));
+}
+
+/// Read from the original's code: a mine picks its target only every 5 s, the first time 5 s after it was laid.
+#[test]
+#[ignore = "needs imported assets"]
+fn a_mine_picks_its_target_five_seconds_after_it_is_laid() {
+    let mut app = App::new();
+    let lib = Library::load(assets_dir());
+    let c = lib.index("Ship_Navy_Cutter");
+    app.add_plugins((TaskPoolPlugin::default(), AssetPlugin::default()))
+        .init_resource::<Time>()
+        .init_resource::<FxLib>()
+        .insert_resource(Rng(7))
+        .add_message::<Sfx>()
+        .add_message::<Hit>()
+        .add_message::<Destroyed>()
+        .add_message::<Detonate>()
+        .add_message::<Shoot>()
+        .add_message::<crate::decals::Scar>()
+        .add_systems(Update, shells);
+    let ship = Ship {
+        class: c,
+        side: Side::Enemy,
+        heading: 0.0,
+        speed: 0.0,
+        ang_vel: 0.0,
+        order: 0,
+        waypoints: vec![],
+        goal: None,
+        cap: 1.0,
+        throttle: None,
+        sail_energy: 1.0,
+        crew_speed: 1.0,
+        crew_turn: 1.0,
+        net: 1.0,
+        avoid: 1.0,
+    };
+    app.world_mut().spawn((Transform::from_translation(Vec3::new(30.0, 0.0, 0.0)), ship, Health::new(&lib.classes[c]), Fires::default()));
+    let shooter = app.world_mut().spawn_empty().id();
+    let bullet = "Bullet_StarMine_Med".to_string();
+    let shell = Shell {
+        vel: Vec3::ZERO,
+        age: 0.0,
+        lifetime: 1000.0,
+        gravity: 0.0,
+        bullet: bullet.clone(),
+        side: Side::Player,
+        shooter,
+        target: None,
+        angular_velocity: 0.0,
+        payload: lib.bullets[&bullet].payload,
+        aim: None,
+        pd: false,
+        hp: 20.0,
+        harmless: false,
+        base: false,
+        ricochet: -1000.0,
+        mine_scan: Default::default(),
+    };
+    let id = app.world_mut().spawn((shell, Transform::default())).id();
+    app.insert_resource(lib);
+    for _ in 0..4 {
+        app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs_f32(1.0));
+        app.update();
+    }
+    assert_eq!(app.world().get::<Shell>(id).unwrap().vel, Vec3::ZERO, "a ship in sight at 4 s is not yet noticed");
+    for _ in 0..3 {
+        app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs_f32(1.0));
+        app.update();
+    }
+    let vel = app.world().get::<Shell>(id).map(|s| s.vel);
+    assert!(vel.is_none_or(|v| v.x > 0.0), "after the first pick at 5 s it heads for the ship");
 }
 
 #[test]
