@@ -375,11 +375,14 @@ core: run by fx/) plus a `Vortex` primitive, implemented in `game/src/blackhole.
     nothing outside the radius (a Cutter at 2.6 radii and a Man-O-War at 1.4 radii for 6 minutes did not move) and nothing
     inside R/4. The ramp D fits 36-38 units, about R/4 (the remake uses D = R/4). The pull points at the centre turned about
     15° to one side (clockwise seen from above): sideways / inward = 0.27 in every log, whatever the ship's heading.
-  - **Only ships that are not under way.** The pull acts only while the ship's own speed is zero (All Stop, or idle). A
-    Man-O-War driven from 48 to 17 units moved exactly at its own speed throughout and was still afloat 17 s after passing
-    R/4. A ship crossing the radius under way feels nothing.
-  - **Resting ships creep.** At rest the engine snaps the velocity back to zero every tick, so the pull is cancelled each
-    tick and the ship only creeps in at one tick's worth of it, about a × 0.033 units/s: Cutter 0.091 units/s at 23 units
+  - **Ships under way too (measured 2026-11-16).** The pull acts on every ship, moving or not. A Cutter at Ahead Full, on a
+    straight course that would have passed 80 units from the centre, was pushed toward the centre at 2.1-2.4 units/s once
+    inside ~117 units (the same A / k as a resting Cutter's fall), crept at one tick's worth of pull further out (0.05 units/s
+    at 132 units), and was destroyed at 36 units still under way. An earlier Man-O-War driven from 48 to 17 units seemed
+    unaffected because its pull (about 1 units/s²) stays below the break-free threshold: it only adds a creep of 0.033 units/s
+    to the ship's own 4.7.
+  - **Weak pull only creeps.** The pull drives a velocity of its own beside the engine's, and speeds under 0.1 of it are snapped
+    back to zero every tick, so a weak pull is cancelled each tick and the ship only creeps in at one tick's worth of it, about a × 0.033 units/s: Cutter 0.091 units/s at 23 units
     inside the edge, Frigate 0.040 and Man-O-War 0.033 at full depth (the Man-O-War the same at 105 and 48 units).
   - **Breaking free.** A ship that breaks free of the snap falls freely: its velocity follows v' = a − k v with the hull's
     own rate k = MaxThrust / (MaxSpeed × Mass) (Cutter 1.862/s), so it settles at A / k (Cutter 2.42 units/s, measured
@@ -392,10 +395,9 @@ core: run by fx/) plus a `Vortex` primitive, implemented in `game/src/blackhole.
     hull length (collision box MaxExtents.y − MinExtents.y: 13.5, 18, 31) gives 1333, 1344-1400 and 1290-1342, so
     A ≈ 1330 × length / Mass fits all three within ~4 % (1/√Mass does not). PROVISIONAL: three classes only. The scaling
     with Magnitude (A × Magnitude / 9000) is PROVISIONAL too: only the Small hole was measured.
-  - **Kill.** A ship that is not under way is destroyed about 1.1 s after it comes inside R/4 (Cutter at 35.3 units, Frigate
+  - **Kill.** A ship, under way or not, is destroyed about 1.1 s after it comes inside R/4 (Cutter at 35.3 units, Frigate
     at 32.4; the pull ends at 36.5 ± 0.5). The hull then breaks up where it is (the distances logged earlier, 33.6 and ~21
-    units, were where the wreck stopped). Not measured (PROVISIONAL): a ship that stops inside R/4 after an order; the remake
-    starts its 1.1 s once it is at rest there.
+    units, were where the wreck stopped).
   - Destruction by the hole credits no kill: the Game Summary showed the computer with 0 Ships Sunk, and our Damage Taken only
     counted the earlier gunfire.
   - **Decoded from the original's logic.** Per tick, for anything overlapping the hole: nothing beyond R; pull between R/4 and R
@@ -404,8 +406,8 @@ core: run by fx/) plus a `Vortex` primitive, implemented in `game/src/blackhole.
     15 degrees clockwise seen from above. The pull is an acceleration, 0.15 x hull length x Magnitude / Mass (hull term fitted,
     PROVISIONAL; matches the three measured classes within 2 %). Why a resting ship creeps then falls: speeds under 0.1 are snapped
     to 0 each tick, so a resting ship only creeps until one tick of pull (at 30 Hz) reaches 0.1, i.e. pull 3.0. Medium hole: only
-    the Cutter breaks free (7.5); Large: Cutter 12.5 and Frigate 3.4, the Man-O-War (2.9) never. Not decoded: why ships under way
-    feel nothing; the 1.1 s lag is probably the destruction sequence. The Star mortar blast pushes through the same acceleration
+    the Cutter breaks free (7.5); Large: Cutter 12.5 and Frigate 3.4, the Man-O-War (2.9) never. Nothing in the pull or the
+    kill looks at whether the ship is under way. The 1.1 s lag is probably the destruction sequence. The Star mortar blast pushes through the same acceleration
     helper (a = 0.148 x 12000 x hull length / Mass for up to ~2.7 s; displacement PROVISIONAL, likely under a few units).
   Remake (`blackhole.rs`): exactly the law above for every free, undocked ship, with A = 1330 × length / Mass × Magnitude /
   9000, D = R/4, the break-free threshold 3.0 units/s² and the 1.1 s kill inside R/4, credited to nobody in the Game Summary.
