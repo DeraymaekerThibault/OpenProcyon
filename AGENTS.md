@@ -67,7 +67,7 @@ files to `content/`, or anything that publishes (pushing tags, releases).
 
 - `tools/check.sh` (`make check`) is the single validation gate: ruff format/lint (`ruff.toml`), rustfmt, clippy `-D warnings`, Rust tests
   (asset-free tests always run; ignored asset tests also run when assets are imported), Python tests including the hygiene rules. `make fmt` formats both languages. Run it before every commit; do not add
-  parallel wrappers.
+  parallel wrappers. While iterating, `tools/check.sh --fast` skips the startup smoke and the battle check.
 - Where the engine stands against the original is tracked in one place: the project board "OpenProcyon fidelity: every rule of the
   original" (one row per rule of the original's battle simulation, with its stage: unknown, read, confirmed, specced, built, tested,
   and whether it differs here). Fidelity work starts from the board. Do not create another overview: no new tracking issue,

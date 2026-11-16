@@ -10,7 +10,7 @@ endif
 
 help:
 	$(info make run [ARGS="--mission 1"]     Run the game from the repository root)
-	$(info make check                        Format check, strict Clippy, Rust + Python tests)
+	$(info make check [ARGS=--fast]          Format check, strict Clippy, Rust + Python tests (--fast: no startup smoke or battle check))
 	$(info make fmt                          Format Rust and Python source)
 	$(info make test-python                  Fast parser/exporter tests (no Rust build))
 	$(info make shot OUT=local/ui.png [ARGS="--shot-frame 80 --late-frame 0"])
@@ -23,7 +23,7 @@ run:
 	cargo run --release --manifest-path game/Cargo.toml -- $(ARGS)
 
 check:
-	$(SH) tools/check.sh
+	$(SH) tools/check.sh $(ARGS)
 
 fmt:
 	cargo fmt --manifest-path game/Cargo.toml
