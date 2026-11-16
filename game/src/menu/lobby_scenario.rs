@@ -2,10 +2,12 @@
 //! model the lobby's pull-downs and Launch button use. The `--ship/--allies/--enemies` shortcut skips the lobby, so allied
 //! computer slots, full lobbies and big budgets never reached a test through it.
 //!
-//! Spec: `map=border_dispute;points=1000;limit=10;slots=human,7*computer` (optionally `;seed=3`)
+//! Spec: `map=border_dispute;points=1000;limit=10;slots=human,7*computer` (optionally `;seed=3`, `;fleet=Ship_Navy_ManOWar`)
 //! - `map`: skirmish map id. `points`: victory points (50-1000, steps of 10). `limit`: fleet size (1-10).
 //! - `seed`: varies the fleets the computers draw (default 0). The game is deterministic, so runs of one spec are identical;
 //!   several seeds give several samples.
+//! - `fleet`: the human's fleet, ship classes separated by `+` (`Ship_Navy_ManOWar` or `Ship_Navy_Cutter+Ship_Navy_Cutter`), instead
+//!   of Auto Assign's. Not checked against the budget here: the lobby's own launch check still applies.
 //! - `slots`: the lobby rows in order, `human`, `computer`, `open` or `closed`; `N*kind` repeats. The first row is always the
 //!   human's. Rows left out stay as the lobby opens them. Computers take the team and fleet type the lobby gives them.
 use super::*;
@@ -25,11 +27,12 @@ pub struct LobbyScenario {
     pub limit: usize,
     pub slots: Vec<SlotSpec>,
     pub seed: u64,
+    pub fleet: Vec<String>,
 }
 
 impl LobbyScenario {
     pub fn parse(spec: &str) -> Result<Self, String> {
-        let (mut map, mut points, mut limit, mut slots, mut seed) = (None, VICTORY_LIMIT.default, FLEET_SIZE.default as usize, vec![], 0);
+        let (mut map, mut points, mut limit, mut slots, mut seed, mut fleet) = (None, VICTORY_LIMIT.default, FLEET_SIZE.default as usize, vec![], 0, vec![]);
         for part in spec.split(';').map(str::trim).filter(|p| !p.is_empty()) {
             let (key, value) = part.split_once('=').ok_or_else(|| format!("lobby spec part {part:?} is not key=value"))?;
             let number = |what: &str| value.trim().parse::<u32>().map_err(|_| format!("lobby spec {what} {value:?} is not a number"));
@@ -38,6 +41,7 @@ impl LobbyScenario {
                 "points" => points = number("points")?,
                 "limit" => limit = number("limit")? as usize,
                 "seed" => seed = u64::from(number("seed")?),
+                "fleet" => fleet = value.split('+').map(|c| c.trim().to_string()).filter(|c| !c.is_empty()).collect(),
                 "slots" => {
                     for item in value.split(',').map(str::trim).filter(|i| !i.is_empty()) {
                         let (count, kind) = item
@@ -53,7 +57,7 @@ impl LobbyScenario {
                         slots.extend(std::iter::repeat_n(kind, count));
                     }
                 }
-                other => return Err(format!("lobby spec key {other:?}: expected map, points, limit, seed or slots")),
+                other => return Err(format!("lobby spec key {other:?}: expected map, points, limit, seed, fleet or slots")),
             }
         }
         let map = map.ok_or("lobby spec needs map=<id>")?;
@@ -66,7 +70,7 @@ impl LobbyScenario {
         if !(FLEET_SIZE.min as usize..=FLEET_SIZE.max as usize).contains(&limit) {
             return Err(format!("lobby spec limit {limit}: {}-{}", FLEET_SIZE.min, FLEET_SIZE.max));
         }
-        Ok(Self { map, points, limit, slots, seed })
+        Ok(Self { map, points, limit, slots, seed, fleet })
     }
 
     /// Sets the lobby up like a player would: pick the map, move the sliders, turn rows into computers, Auto Assign the human's
@@ -97,7 +101,16 @@ impl LobbyScenario {
                 let i = sk.slots.iter().position(|s| s.kind == Kind::Human).unwrap_or(0);
                 sk.choose(Cell::Fleet(i), Choice::Fleet(0));
             }
-            crate::menu::auto_assign(sk, lib);
+            if self.fleet.is_empty() {
+                crate::menu::auto_assign(sk, lib);
+            } else if let Some(i) = sk.slots.iter().position(|s| s.kind == Kind::Human) {
+                for class in &self.fleet {
+                    if !lib.classes.iter().any(|c| &c.name == class) {
+                        return Err(format!("lobby scenario: no ship class {class:?}"));
+                    }
+                    sk.slots[i].push_ship(class);
+                }
+            }
         }
         sk.map = None;
         match sk.launch_error() {
@@ -120,6 +133,9 @@ mod tests {
         assert!(s.slots[1..].iter().all(|k| *k == SlotSpec::Computer));
         assert_eq!(s.seed, 0);
         assert_eq!(LobbyScenario::parse("map=border_dispute;seed=3;slots=human,computer").unwrap().seed, 3);
+        assert!(s.fleet.is_empty());
+        let f = LobbyScenario::parse("map=a;fleet=Ship_Navy_Cutter + Ship_Navy_ManOWar;slots=human,computer").unwrap();
+        assert_eq!(f.fleet, ["Ship_Navy_Cutter", "Ship_Navy_ManOWar"]);
     }
 
     #[test]
