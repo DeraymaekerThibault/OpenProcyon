@@ -698,3 +698,22 @@ fn allied_computer_ships_hunt_the_enemy_base_the_humans_fleet_waits() {
     assert!(w.get::<Ship>(ids[4]).unwrap().order > 0, "the ally sets off for the enemy base");
     assert_eq!(w.get::<Ship>(ids[1]).unwrap().order, 0, "the human's own ship waits for orders");
 }
+
+#[test]
+fn a_formation_swap_pass_gives_ships_the_slot_nearest_them_and_leaves_fitting_ones() {
+    let slots = formation_slots(Formation::Diamond, &[10.0, 10.0, 10.0]);
+    let on = |p: Vec3| (p, 0.0);
+    // Each ship on its own slot, all heading with the leader: nothing moves.
+    let mut s = slots.clone();
+    swap_slots(&mut s, &[on(Vec3::ZERO), on(slots[1]), on(slots[2])]);
+    assert_eq!(s, slots);
+    // The second and third ships are on each other's slots: they trade.
+    let mut s = slots.clone();
+    swap_slots(&mut s, &[on(Vec3::ZERO), on(slots[2]), on(slots[1])]);
+    assert_eq!((s[1], s[2]), (slots[2], slots[1]));
+    // Equal fits never swap: both ships at the same spot keep their own slots.
+    let mut s = slots.clone();
+    let mid = (slots[1] + slots[2]) / 2.0;
+    swap_slots(&mut s, &[on(Vec3::ZERO), on(mid), on(mid)]);
+    assert_eq!(s, slots);
+}
