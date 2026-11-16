@@ -217,6 +217,19 @@ pub fn damage_fx(
     }
 }
 
+/// The rules' "Damage Group/Unit by X percent" (read from the original's code, not yet measured): every section in order is hit once for
+/// round(its current hit points x `fraction`) through the normal hit routine (spill into neighbours of a section left at 0, core bleed
+/// through dead vital sections, the human's ships taking the difficulty factor: the hit carries no attacker, so computer ships take
+/// none). The core is never scaled directly: a fraction below 1 leaves it whole unless vital sections die.
+pub fn fraction_hit(class: &Class, hp: &mut Health, fraction: f32, victim: Side, invuln: f32) {
+    let scale = super::shells::side_damage_scale(Side::Enemy, victim, crate::menu::difficulty(), false);
+    let mut rng = Rng::default();
+    for k in 0..hp.sections.len() {
+        let d = (hp.sections[k].round_ties_even() * fraction * scale).round_ties_even();
+        super::shells::apply_ship_hit(class, hp, k, [d, d, 0.0, 0.0, 0.0], invuln, false, &mut rng);
+    }
+}
+
 /// What a burning fire takes from its section on a fire tick. In the original a fire hurts its section through the ordinary hit
 /// routine, which scales by the victim's owner: on the human player's own ships by the incoming difficulty factor (Easy x0.25,
 /// Normal x0.5, Hard x1), on any other ship not at all (a fire has no attacker, and only the player's own hits are scaled up).
@@ -535,6 +548,23 @@ mod fire_tests {
     }
 
     /// A fire whose section is gone stops on the 6 s tick that finds it, is cut loose on the next and deleted on the one after.
+    #[test]
+    #[ignore = "needs imported assets"]
+    fn the_scripted_percent_hit_takes_sections_through_the_hit_routine_and_leaves_the_core() {
+        let lib = Library::load(crate::assets_dir());
+        let class = &lib.classes[lib.index("Ship_Navy_Cutter")];
+        let lost = |victim: Side, p: f32| {
+            let mut hp = Health::new(class);
+            fraction_hit(class, &mut hp, p, victim, 0.0);
+            (class.sections.iter().map(|s| s.hp).sum::<f32>() - hp.sections.iter().sum::<f32>(), hp.core)
+        };
+        let (enemy, core) = lost(Side::Enemy, 0.5);
+        assert_eq!(core, class.core_hp, "half of every section leaves the core whole");
+        assert!(enemy > 0.0);
+        assert!(lost(Side::Player, 0.5).0 < enemy, "the human's ship takes the difficulty factor, computer ships do not");
+        assert!(lost(Side::Enemy, 1.0).1 <= 0.0, "every section hit for all its hit points takes the core down through the vital ones");
+    }
+
     #[test]
     #[ignore = "needs imported assets"]
     fn a_dead_fire_changes_state_only_on_the_six_second_ticks() {
