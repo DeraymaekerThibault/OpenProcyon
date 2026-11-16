@@ -27,7 +27,17 @@ pub struct Shell {
     pub(super) base: bool,
     /// The firing gun's ricochet factor for the range band it was fired in (`ricochet_chance`).
     pub(super) ricochet: f32,
+    /// A mine's last target pick (`MINE_RESCAN`).
+    pub(super) mine_scan: MineScan,
 }
+/// When a mine last picked a target (its age then) and whom.
+#[derive(Clone, Copy, Default)]
+pub(super) struct MineScan {
+    at: f32,
+    prey: Option<Entity>,
+}
+/// Seconds between a mine's target picks.
+const MINE_RESCAN: f32 = 5.0;
 impl Shell {
     /// The bullet type it is (`BulletDef` key, e.g. `Bullet_CannonBall_Heavy`).
     pub fn bullet(&self) -> &str {
@@ -349,13 +359,20 @@ pub(super) fn shells(
         // Mines (MineAI sight, MinePhysics max speed): home on the nearest hostile ship in sight, else coast to rest at the drop point.
         // PROVISIONAL: the original's mine steering/drag is unknown.
         if let Payload::Mine { sight, speed } = s.payload {
-            let prey = ships
-                .iter()
-                .filter(|(_, t, sh, h, _, m, _)| {
-                    !h.destroyed && sh.side != s.side && m.is_none_or(|m| m.visible) && t.translation.distance(p0) < sight + lib.classes[sh.class].radius
-                })
-                .map(|(_, t, ..)| t.translation)
-                .nearest_to(p0, |a| *a);
+            // Read from the original's code: a mine picks its target only every MINE_RESCAN seconds, the first time that long after it was
+            // laid, and between picks keeps chasing the stored one while it is alive and not cloaked.
+            if s.age - s.mine_scan.at > MINE_RESCAN {
+                s.mine_scan.at = s.age;
+                s.mine_scan.prey = ships
+                    .iter()
+                    .filter(|(_, t, sh, h, _, m, _)| {
+                        !h.destroyed && sh.side != s.side && m.is_none_or(|m| m.visible) && t.translation.distance(p0) < sight + lib.classes[sh.class].radius
+                    })
+                    .map(|(se, t, ..)| (se, t.translation))
+                    .nearest_to(p0, |a| a.1)
+                    .map(|a| a.0);
+            }
+            let prey = s.mine_scan.prey.and_then(|c| ships.get(c).ok()).filter(|(_, _, _, h, _, m, _)| !h.destroyed && m.is_none_or(|m| m.visible)).map(|(_, t, ..)| t.translation);
             s.vel = match prey {
                 Some(p) => s.vel.lerp((p - p0).normalize_or_zero() * speed, (3.0 * dt).min(1.0)),
                 None if s.aim.is_none_or(|a| a.distance(p0) < 2.0) || s.age > 3.0 => s.vel * (-1.5 * dt).exp(),

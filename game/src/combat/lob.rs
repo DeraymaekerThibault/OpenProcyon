@@ -53,6 +53,7 @@ pub fn shoot(mut commands: Commands, lib: Res<Library>, fxl: Res<FxLib>, mut msg
                     harmless: false,
                     base: false,
                     ricochet: m.ricochet,
+                    mine_scan: Default::default(),
                 },
                 Transient,
                 stf,
