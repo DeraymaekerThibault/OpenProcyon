@@ -45,6 +45,16 @@ fn a_rear_attacker_opens_to_r_and_closes_again() {
 }
 
 #[test]
+fn the_guns_astern_routine_measures_to_the_aim_point_without_the_targets_size() {
+    // Attacker radius 10 at 100 units from the target's centre; the nearest section of the target sits 20 units toward it.
+    let (pos, aim) = (Vec3::new(0.0, 0.0, 100.0), Vec3::new(0.0, 0.0, 20.0));
+    for foe_radius in [15.0, 60.0] {
+        assert_eq!(range_gap(Routine::Rear, pos, 10.0, FOE, foe_radius, aim), 70.0, "a bigger target does not push it out");
+    }
+    assert_eq!(range_gap(Routine::Frontal, pos, 10.0, FOE, 60.0, aim), 30.0, "frontal: the gap between the hulls");
+}
+
+#[test]
 fn full_throttle_within_eleven_degrees_of_the_bow_else_the_ships_minimum() {
     let e = Entity::from_raw_u32(7).unwrap();
     let pos = Vec3::ZERO;

@@ -321,7 +321,9 @@ the difficulty setting.
 - **Frontal:** straight at the target until the gap between the hulls is R, then turn the line of sight 90° toward the side the target bears on
   (to port when it is on the port bow, to starboard when on the starboard bow or dead ahead) and sail that fixed direction (R ahead)
   for up to 15 s or until out of range, then charge again (or break off again, with a new direction, if still inside R). The ship so
-  turns toward its target and swings round it on that side. **Rear:** inside R run straight away to R, outside it come straight back.
+  turns toward its target and swings round it on that side. **Rear:** inside R run straight away to R, outside it come straight back. Its distance is
+  measured from its own hull (centre minus its own radius) to the aim point on the target, the target's size not counted, so it
+  holds the same distance from a small and a large target.
   **Ram:** straight at it, full throttle within 5° of the bow.
 - **Throttle:** full while the next course point is within 11.25° of the bow, else the ship's own minimum, 0.65-0.75 of full (drawn
   per ship). That minimum is a floor under every slow-down but the collision avoider's, so nothing else slows an attacker near its
