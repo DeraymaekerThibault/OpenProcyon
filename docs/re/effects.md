@@ -348,6 +348,12 @@ to `models/debris/` and `sections[].debris` = {model, pivot}.
   that burnt 1.0 took nothing, eight times of eight; the stock crew's capacity of 3.5 held every fire at 1-2. Fires on a destroyed
   section die.
   A dead fire stops emitting after 3 s and is removed after 5 more. Burning fires then double in intensity.
+- Scripted damage ("Damage Group/Unit by X percent", a fraction 0.4-0.6 in missions 1 and 3 and `locusts`). Read from the original's
+  code, not yet measured: every section in order takes one hit of round(its current hit points × fraction) through the ordinary
+  hit routine (spill into the neighbours of a section left at 0, core bleed through dead vital sections, the human's ships taking
+  the difficulty factor and computer ships none, since the hit carries no attacker). The core is never scaled directly, so a
+  fraction below 1 leaves it whole and a ship dies only when its vital sections do. Sections are hit in order with their
+  hit points re-read each time, so spill from one lowers what the next loses.
 - Effect FireOnShip, its rate/length multipliers = intensity / 20 clamped to [0.1, 1].
 - Measured (retail saves of our default-crewed Navy Cutter under fire, Easy, 2026-10): fires start at powers of two (1-64
   seen) and untouched ones double exactly every tick (4 -> 64 in four ticks); the strongest fire grew 11.2 -> 273.8 over five

@@ -465,7 +465,7 @@ fn update(
                     }
                 });
             }
-            Fx::Damage(u, p) => each_ship(&mut ships, u, |s| s.health.scale(1.0 - p)),
+            Fx::Damage(u, p) => each_ship(&mut ships, u, |s| crate::combat::fraction_hit(&lib.classes[s.ship.class], &mut s.health, p, s.ship.side, s.mission.invuln)),
             Fx::Hold(u, on) => {
                 each_dragon(&mut extra.dragons, &u, |d| d.hold = on);
                 if on {
