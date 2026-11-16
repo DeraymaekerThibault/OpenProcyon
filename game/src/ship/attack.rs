@@ -87,6 +87,15 @@ pub fn aim(sections: &[crate::data::Section], hp: &[f32], tf: &Transform, from: 
 /// A Frontal attacker's break-off: (game time it started, direction).
 pub type Breakoff = Option<(f32, Vec3)>;
 
+/// The distance a routine compares with the attack range R. The guns-astern routine measures from its own hull (centre minus its own
+/// radius) to the aim point on the target, the target's size not counted; the others use the gap between the two hulls' spheres.
+pub fn range_gap(routine: Routine, pos: Vec3, own_radius: f32, foe_pos: Vec3, foe_radius: f32, aim: Vec3) -> f32 {
+    match routine {
+        Routine::Rear => (aim - pos).with_y(0.0).length() - own_radius,
+        _ => (foe_pos - pos).with_y(0.0).length() - own_radius - foe_radius,
+    }
+}
+
 /// The course (aim points) of one think. `gap`: distance between the two hulls' spheres; `r`: the attack range; `now`: game seconds.
 #[allow(clippy::too_many_arguments)]
 pub fn course(routine: Routine, pos: Vec3, heading: f32, foe: Vec3, gap: f32, r: f32, now: f32, breakoff: &mut Breakoff) -> Vec<Vec3> {
