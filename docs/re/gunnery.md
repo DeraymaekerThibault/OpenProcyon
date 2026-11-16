@@ -183,6 +183,14 @@ particles and the authored EFT brightness/size/rectangle curves are unchanged. T
   with an enemy Carrack 40 units away for over a minute; the Game Summary shows 0 Damage Inflicted for us both times. So the
   command ship's direct-fire guns need a clicked target or panic fire (point defence not checked).
 
+## Read from the original's code, not yet measured in play (2026-11)
+- **Idle guns.** A direct-fire gun with no target never runs its tracking, so it stays where it was; hold fire (a fleet order or a script)
+  freezes the turrets the same way, it does not swing them back to rest. A lob gun keeps tracking its stored ground point.
+- **Torpedo that loses its target** (destroyed, released or fully cloaked): it cuts its thrust and slows to rest, and can still hit;
+  one launched with no target is not affected.
+- **Energy net on a ship that is cloaking or cloaked** orders it to decloak.
+- **Ignition.** One ship, the mission 9 lifeboat, never catches fire.
+
 ## Panic button
 - The hotkey/HUD button works only while the player ship is not disabled. It is sent like any order (so it works in multiplayer).
 - Every qualifying gun bank (some gun classes are skipped; which is unknown) switches to fire-when-possible in panic mode: each

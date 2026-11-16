@@ -919,7 +919,7 @@ fn torpedo_guidance_launch_coast_and_moving_target_intercept() {
     let target_rotation = Quat::from_rotation_y(-std::f32::consts::FRAC_PI_2);
     let mut target = Vec3::new(15.0, target_class.homing_point.y, -80.0);
     let target_velocity = Vec3::X * 4.0;
-    p = guide_torpedo(p, &mut v, &mut spin, 0.0, Some((target, target_velocity)), physics, 0.5);
+    p = guide_torpedo(p, &mut v, &mut spin, 0.0, Some((target, target_velocity)), true, physics, 0.5);
     assert_eq!(p.x, 0.0, "no steering during launch coast");
     assert_eq!(p.y, 0.0);
     let mut closest = f32::INFINITY;
@@ -928,7 +928,7 @@ fn torpedo_guidance_launch_coast_and_moving_target_intercept() {
         let dt = 1.0 / 60.0;
         target += target_velocity * dt;
         let previous = p;
-        p = guide_torpedo(p, &mut v, &mut spin, 0.5 + i as f32 * dt, Some((target, target_velocity)), physics, dt);
+        p = guide_torpedo(p, &mut v, &mut spin, 0.5 + i as f32 * dt, Some((target, target_velocity)), true, physics, dt);
         let inverse = Transform::from_translation(target - target_rotation * target_class.homing_point).with_rotation(target_rotation).to_matrix().inverse();
         hit |= target_class.sections.iter().any(|s| seg_mesh(inverse.transform_point3(previous), inverse.transform_point3(p), s).is_some());
         closest = closest.min(p.distance(target));
@@ -936,8 +936,14 @@ fn torpedo_guidance_launch_coast_and_moving_target_intercept() {
     }
     assert!(hit, "torpedo must intersect the moving target's authored hull; closest homing-point distance: {closest}");
     let old_y = p.y;
-    let next = guide_torpedo(p, &mut v, &mut spin, 16.0, None, physics, 0.1);
+    let next = guide_torpedo(p, &mut v, &mut spin, 16.0, None, true, physics, 0.1);
     assert_eq!(next.y, old_y, "lost target must stop altitude tracking");
+    // Read from the original's code: a torpedo that lost its target cuts its thrust and slows to rest.
+    let before = v.with_y(0.0).length();
+    for i in 0..600 {
+        guide_torpedo(p, &mut v, &mut spin, 20.0 + i as f32 * 0.1, None, false, physics, 0.1);
+    }
+    assert!(before > 1.0 && v.with_y(0.0).length() < before * 0.01, "thrustless torpedo comes to rest ({before} -> {})", v.length());
 }
 
 #[test]
@@ -1205,6 +1211,7 @@ fn shell_into_a_hull_damages_it_and_reports_the_hit() {
         base: false,
         ricochet: -1000.0,
         mine_scan: Default::default(),
+        lost_target: false,
     };
     let id = app.world_mut().spawn((shell, Transform::from_translation(at))).id();
     app.insert_resource(lib);
@@ -1285,6 +1292,7 @@ fn land_in_the_way_stops_a_shell_before_the_hull() {
         base: false,
         ricochet: -1000.0,
         mine_scan: Default::default(),
+        lost_target: false,
     };
     let id = app.world_mut().spawn((shell, Transform::from_translation(at))).id();
     // A wall of land across the line of fire, 20 units in front of the hull.
@@ -1418,6 +1426,7 @@ fn a_mine_picks_its_target_five_seconds_after_it_is_laid() {
         base: false,
         ricochet: -1000.0,
         mine_scan: Default::default(),
+        lost_target: false,
     };
     let id = app.world_mut().spawn((shell, Transform::default())).id();
     app.insert_resource(lib);

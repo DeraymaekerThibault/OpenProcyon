@@ -29,6 +29,8 @@ pub struct Shell {
     pub(super) ricochet: f32,
     /// A mine's last target pick (`MINE_RESCAN`).
     pub(super) mine_scan: MineScan,
+    /// A torpedo whose target was destroyed, released or cloaked: it cuts its thrust and slows to rest (read from the original's code).
+    pub(super) lost_target: bool,
 }
 /// When a mine last picked a target (its age then) and whom.
 #[derive(Clone, Copy, Default)]
@@ -63,7 +65,16 @@ pub(super) fn wear_down(threat_hp: &mut f32, bolt_hp: f32) -> bool {
     *threat_hp <= 0.0
 }
 
-pub(super) fn guide_torpedo(mut position: Vec3, velocity: &mut Vec3, spin: &mut f32, age: f32, target: Option<(Vec3, Vec3)>, physics: &crate::data::Physics, dt: f32) -> Vec3 {
+pub(super) fn guide_torpedo(
+    mut position: Vec3,
+    velocity: &mut Vec3,
+    spin: &mut f32,
+    age: f32,
+    target: Option<(Vec3, Vec3)>,
+    thrust: bool,
+    physics: &crate::data::Physics,
+    dt: f32,
+) -> Vec3 {
     let steps = (dt * 60.0).ceil().max(1.0) as usize;
     let h = dt / steps as f32;
     for i in 0..steps {
@@ -91,7 +102,7 @@ pub(super) fn guide_torpedo(mut position: Vec3, velocity: &mut Vec3, spin: &mut 
         acceleration -= spin.signum() * *spin * *spin * physics.rot_friction;
         *spin += acceleration.clamp(-60.0, 60.0) * h;
         heading += *spin * h;
-        let speed = crate::approach_speed(speed, physics.max_speed, physics.thrust / physics.mass / physics.max_speed, h);
+        let speed = crate::approach_speed(speed, if thrust { physics.max_speed } else { 0.0 }, physics.thrust / physics.mass / physics.max_speed, h);
         *velocity = Vec3::new(-heading.sin(), 0.0, -heading.cos()) * speed;
         position += *velocity * h;
     }
@@ -394,11 +405,12 @@ pub(super) fn shells(
                 })
                 .or_else(|| s.target.and_then(|target| animals.get(target).ok()).filter(|(_, _, animal)| animal.visible).map(|(_, tf, animal)| (tf.translation, animal.velocity)));
             if target.is_none() {
+                s.lost_target |= s.target.is_some();
                 s.target = None;
             }
             let mut velocity = s.vel;
             let mut spin = s.angular_velocity;
-            let position = guide_torpedo(p0, &mut velocity, &mut spin, s.age, target, physics, dt);
+            let position = guide_torpedo(p0, &mut velocity, &mut spin, s.age, target, !s.lost_target, physics, dt);
             s.vel = velocity;
             s.angular_velocity = spin;
             position
@@ -641,6 +653,10 @@ fn hit_ship(
     hits.write(Hit { shooter: s.shooter, victim: se });
     if let Some((duration, dissipated)) = bd.net {
         commands.entity(se).queue(move |mut w: EntityWorldMut| {
+            // Read from the original's code: a net hit orders a cloaking or cloaked ship to decloak.
+            if let Some(mut c) = w.get_mut::<crate::cloak::Cloak>() {
+                c.stop();
+            }
             if let Some(mut n) = w.get_mut::<status::Netted>() {
                 n.0.push((duration, dissipated));
             } else {
@@ -652,7 +668,8 @@ fn hit_ship(
         info!("Torpedo hit {} ({}){}", class.name, sec.label, if invuln >= 1.0 { " [training: invulnerable]" } else { "" });
     }
     // Decoded: no check for an existing fire on the section, so one section can burn several fires.
-    let outcome = apply_ship_hit(class, hp, k, damage, invuln, true, rng);
+    // Read from the original's code: this one ship, a lifeboat of mission 9, never catches fire.
+    let outcome = apply_ship_hit(class, hp, k, damage, invuln, class.name != "Ship_Navy_Lifeboat_Mission9", rng);
     if let (Some(size), true) = (bd.decal, invuln < 1.0) {
         let inv = stf.to_matrix().inverse();
         let material = if sec.material.contains("Cloth") { "Cloth" } else { key };
