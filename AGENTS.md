@@ -67,7 +67,7 @@ files to `content/`, or anything that publishes (pushing tags, releases).
 
 - `tools/check.sh` (`make check`) is the single validation gate: ruff format/lint (`ruff.toml`), rustfmt, clippy `-D warnings`, Rust tests
   (asset-free tests always run; ignored asset tests also run when assets are imported), Python tests including the hygiene rules. `make fmt` formats both languages. Run it before every commit; do not add
-  parallel wrappers.
+  parallel wrappers. While iterating, `tools/check.sh --fast` skips the startup smoke and the battle check.
 - Where the engine stands against the original is tracked in GitHub issues, not in a file: the pinned scorecard (#377) lists parity rows
   (label `parity`), each one situation compared with the original on a few numbers. Fidelity work starts from the worst row; a fix
   that changes battle behaviour says which row it moves. `PROCYON_TRACE` (`docs/development.md`) produces this engine's column.
