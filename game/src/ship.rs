@@ -154,6 +154,35 @@ pub fn hole_list(
     out
 }
 
+/// Seconds that must pass between two thinks of a captain. With the 0.033 s step that is every 16th step (0.528 s): 15 steps are
+/// 0.495 s, not enough (measured on the original: 0.528 s between thinks, every ship, every time).
+pub const THINK_SECS: f32 = 0.5;
+/// A captain's think clock, as in the original: while the start delay runs the clock is held at now, so the first think comes one
+/// full period after the delay; after each think the clock restarts from now (the remainder is dropped, not carried over).
+/// The start delay is 0.05 s x (the ship's spawn number mod 10), one count for all sides.
+#[derive(Clone, Copy)]
+pub struct ThinkClock {
+    born: f32,
+    delay: f32,
+    last: f32,
+}
+impl ThinkClock {
+    pub fn new(now: f32, spawn_number: usize) -> Self {
+        ThinkClock { born: now, delay: 0.05 * (spawn_number % 10) as f32, last: now }
+    }
+    /// Seconds since the last think when the captain thinks at `now`, else None.
+    pub fn due(&mut self, now: f32) -> Option<f32> {
+        if now - self.born < self.delay {
+            self.last = now;
+        }
+        let since = now - self.last;
+        (since >= THINK_SECS).then(|| {
+            self.last = now;
+            since
+        })
+    }
+}
+
 /// Seconds a computer captain keeps its target before choosing again (the original's target-selection timer).
 pub const RESELECT_SECS: f32 = 6.0;
 /// Each skirmish captain's current target and how long it has held it: the original's target selection takes the nearest hostile
@@ -188,6 +217,7 @@ pub fn ai(
     holes: Query<(&Transform, &crate::blackhole::Pull), Without<Ship>>,
     storms: (Option<Res<crate::nebula::Storms>>, Option<Res<crate::nebula::StormShift>>),
     (mut explore, mut breakoffs): (Local<Explore>, Local<std::collections::HashMap<Entity, attack::Breakoff>>),
+    (mut clocks, mut spawned): (Local<std::collections::HashMap<Entity, ThinkClock>>, Local<usize>),
     (time, mut targets): (Res<Time>, ResMut<CaptainTargets>),
     (lib, fleets): (Res<combat::Library>, Res<Fleets>),
     bases: Query<(Entity, &Transform, &combat::BaseSide, &Health, &combat::ArmedBase)>,
@@ -199,7 +229,6 @@ pub fn ai(
     // A skirmish map's script steers its own ships (Convoy Raid's convoys keep to their routes, a stolen convoy idles); hidden ones
     // wait for the script to reveal them. PROVISIONAL: the stance is all the captain looks at.
     let left_to_script = |e: Entity| scripted.get(e).is_ok_and(|m| !m.visible || matches!(m.stance, crate::rules::Stance::Persistent | crate::rules::Stance::Dummy));
-    let dt = time.delta_secs();
     let holes = hole_list(&holes, storms.0.as_deref(), storms.1.as_deref());
     let now = time.elapsed_secs();
     // (entity, position, side, afloat, radius, fleet, the aim point seen from a position)
@@ -208,7 +237,14 @@ pub fn ai(
         .map(|(e, t, s, h, _, _, m, _)| (e, t.translation, s.side, !h.destroyed, lib.classes[s.class].radius, m.map(|m| m.0.clone()), (*t, s.class, h.sections.clone())))
         .collect();
     breakoffs.retain(|e, _| snap.iter().any(|f| f.0 == *e));
+    clocks.retain(|e, _| snap.iter().any(|f| f.0 == *e));
     for (e, tf, mut s, h, me, pilot, member, guns) in &mut ships {
+        // Between thinks the ship keeps the course, speed order and target of its last think.
+        let clock = clocks.entry(e).or_insert_with(|| {
+            *spawned += 1;
+            ThinkClock::new(now, *spawned - 1)
+        });
+        let Some(dt) = clock.due(now) else { continue };
         // The human's own fleet waits for orders; allied computer fleets share the human's side but hunt like any computer.
         let human = s.side == Side::Player && member.is_none_or(|m| m.0 == fleets.local);
         if busy.contains(e) || left_to_script(e) {
@@ -907,5 +943,31 @@ mod slot_plan_tests {
         // a leader that turned away since the plan: the carried-along point is off the real slot
         let real = Vec3::new(1.0, 0.0, 4.5);
         assert!(plan.goal().distance(real) > 1.0);
+    }
+}
+
+#[cfg(test)]
+mod think_clock_tests {
+    use super::*;
+    /// Step numbers (0.033 s each) on which a captain with this spawn number thinks, over the first two seconds.
+    fn thinks(spawn_number: usize) -> Vec<usize> {
+        let mut c = ThinkClock::new(0.0, spawn_number);
+        (1..=60).filter(|k| c.due(*k as f32 * 0.033).is_some()).collect()
+    }
+    #[test]
+    fn a_captain_thinks_every_sixteenth_step() {
+        assert_eq!(thinks(0), [16, 32, 48]); // 0.528 s apart, as measured on the original; 15 steps (0.495 s) are not enough
+    }
+    #[test]
+    fn the_start_delay_shifts_the_first_think_and_not_the_period() {
+        // Spawn number 4: 0.2 s delay, held through step 6 (0.198 s), so the first think is 16 steps after that.
+        assert_eq!(thinks(4), [22, 38, 54]);
+        assert_eq!(thinks(14), thinks(4)); // the delay repeats every ten ships
+    }
+    #[test]
+    fn a_think_reports_the_time_since_the_last_one() {
+        let mut c = ThinkClock::new(0.0, 0);
+        let since = (1..=16).find_map(|k| c.due(k as f32 * 0.033)).unwrap();
+        assert!((since - 0.528).abs() < 1e-4);
     }
 }
