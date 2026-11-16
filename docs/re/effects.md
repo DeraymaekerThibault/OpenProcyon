@@ -342,7 +342,11 @@ to `models/debris/` and `sections[].debris` = {model, pivot}.
   the captain and first-mate posts get the same captain/first-mate leadership bonuses as damage control (+0.1 / +0.05
   above a per-ship threshold), each member clamped to 0..1. A gunner, engineer or rigger post with nobody in it counts
   the first-mate post's members instead; other empty posts add nothing. A default Cutter (12 hands rated 1) gets 1.2. Each burning fire then damages its section by its
-  intensity (a damage potential with lower = upper = intensity, no criticals). Fires on a destroyed section die.
+  intensity (a damage potential with lower = upper = intensity, no criticals), through the ordinary hit routine: on the human
+  player's own ships it takes the incoming difficulty factor (Easy × 0.25, Normal × 0.5, Hard × 1), on other ships none (a fire
+  has no attacker), and the result is rounded to whole hit points. Measured (2026-11-16, Normal, the player's Man-O-War): a fire
+  that burnt 1.0 took nothing, eight times of eight; the stock crew's capacity of 3.5 held every fire at 1-2. Fires on a destroyed
+  section die.
   A dead fire stops emitting after 3 s and is removed after 5 more. Burning fires then double in intensity.
 - Effect FireOnShip, its rate/length multipliers = intensity / 20 clamped to [0.1, 1].
 - Measured (retail saves of our default-crewed Navy Cutter under fire, Easy, 2026-10): fires start at powers of two (1-64

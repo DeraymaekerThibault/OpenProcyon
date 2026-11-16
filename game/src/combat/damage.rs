@@ -217,6 +217,16 @@ pub fn damage_fx(
     }
 }
 
+/// What a burning fire takes from its section on a fire tick. In the original a fire hurts its section through the ordinary hit
+/// routine, which scales by the victim's owner: on the human player's own ships by the incoming difficulty factor (Easy x0.25,
+/// Normal x0.5, Hard x1), on any other ship not at all (a fire has no attacker, and only the player's own hits are scaled up).
+/// Hit points are whole numbers, rounded to the nearest (half to even): a fire of 1.0 takes nothing on Normal (measured on the
+/// original: eight times of eight).
+pub fn fire_damage(intensity: f32, humans_own_ship: bool, difficulty: u8) -> f32 {
+    let scale = if humans_own_ship { [0.25, 0.5, 1.0][difficulty.min(2) as usize] } else { 1.0 };
+    (intensity * scale).round_ties_even()
+}
+
 /// Fire update every FIRE_TICK s, in the original's order: crew puts out the strongest fires first, burning fires damage
 /// their section by their intensity, fires on destroyed sections die, dead fires fade out (3 s) then go (5 s), burning
 /// fires double. Effect size follows intensity (full at 20, floor 10%).
@@ -224,11 +234,22 @@ pub fn fires(
     mut commands: Commands,
     time: Res<Time>,
     lib: Res<Library>,
-    mut ships: Query<(Entity, &Transform, &Ship, &mut Health, &mut Fires, Option<&crate::crew_arms::CrewPosts>, Option<&crate::campaign::MissionShip>)>,
+    mut ships: Query<(
+        Entity,
+        &Transform,
+        &Ship,
+        &mut Health,
+        &mut Fires,
+        Option<&crate::crew_arms::CrewPosts>,
+        Option<&crate::campaign::MissionShip>,
+        Option<&crate::ship::FleetMember>,
+    )>,
     mut fxq: Query<&mut fx::Fx>,
+    fleets: Option<Res<crate::ship::Fleets>>,
 ) {
     let dt = time.delta_secs();
-    for (me, _, ship, mut hp, mut fires, posts, mission) in &mut ships {
+    for (me, _, ship, mut hp, mut fires, posts, mission, member) in &mut ships {
+        let humans = ship.side == Side::Player && member.is_none_or(|m| fleets.as_ref().is_none_or(|f| m.0 == f.local));
         let fires = &mut *fires;
         if hp.destroyed {
             for f in fires.list.drain(..) {
@@ -254,12 +275,13 @@ pub fn fires(
             }
             let (core, secs) = (hp.core, hp.sections.clone());
             for f in fires.list.iter().filter(|f| f.state == 0) {
+                let burn = fire_damage(f.intensity, humans, crate::menu::difficulty());
                 let was = hp.sections[f.sec];
-                hp.sections[f.sec] = (was - f.intensity).max(0.0);
+                hp.sections[f.sec] = (was - burn).max(0.0);
                 if was > 0.0 && hp.sections[f.sec] == 0.0 {
                     let sec = &class.sections[f.sec];
                     if sec.vital {
-                        hp.core -= core_bleed(class, &hp, f.intensity); // fire goes through the same damage path
+                        hp.core -= core_bleed(class, &hp, burn); // fire goes through the same damage path
                     }
                     info!("{} of {} burnt out", sec.label, class.name);
                 }
@@ -506,6 +528,15 @@ mod fire_tests {
     /// A fire whose section is gone stops on the 6 s tick that finds it, is cut loose on the next and deleted on the one after.
     #[test]
     #[ignore = "needs imported assets"]
+    fn a_fire_on_the_humans_ship_takes_the_difficulty_factor_and_whole_hit_points() {
+        assert_eq!(fire_damage(1.0, true, 1), 0.0, "measured on the original: a 1.0 fire takes nothing on Normal");
+        assert_eq!([0, 1, 2].map(|d| fire_damage(8.0, true, d)), [2.0, 4.0, 8.0]);
+        assert_eq!(fire_damage(5.0, true, 1), 2.0, "half to even");
+        assert_eq!(fire_damage(8.0, false, 1), 8.0, "other ships: not scaled");
+        assert_eq!(fire_damage(0.5, false, 1), 0.0, "whole hit points");
+    }
+
+    #[test]
     fn a_dead_fire_changes_state_only_on_the_six_second_ticks() {
         let lib = Library::load(crate::assets_dir());
         let class = lib.index("Ship_Navy_Cutter");
