@@ -11,7 +11,7 @@ use super::lib::{Curve, FxLib, Prim, conv};
 use super::{Fx, FxRng, P};
 
 /// Engine tick (retail constant 0.033): particles spawn and advance once per tick; velocities are stored per second.
-pub(super) const TICK: f32 = 1.0 / 30.0;
+pub(super) use crate::TICK_SECS as TICK;
 /// Movement infos (attractor etc.) only run once at least this much time has passed (retail constant 0.1).
 pub(super) const MOVE_STEP: f32 = 0.1;
 

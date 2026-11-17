@@ -106,7 +106,7 @@ the break test sees the stretch from the last tick's motion, before the pull. Ea
 - the partner crosses to the other side of the hull: at the hit each end records whether the other ship lay mostly ahead/astern
   or abeam, and on which side, and the link breaks when that side changes.
 Once a boarding fight is registered on the pair (the grapple's "boarding" mark, §3), the line is **reeled in**: each AI tick
-(1/30 s) its length becomes the current centre distance minus 0.1 (**3 units/s**), while it is longer than **12**. A computer
+(0.033 s) its length becomes the current centre distance minus 0.1 (**about 3.03 units/s**), while it is longer than **12**. A computer
 captain's fight registered out of range is dropped by the range test but its mark keeps reeling **[?]**, which would explain how
 grapple passes end with the hulls together (retail run: a Barque closed to 12-18 units on its passes before capturing us).
 The line is drawn with the `Rope` effect: a 40-segment chain (each point mass 1, segment rest length = the gap at the hit / 40) whose

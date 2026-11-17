@@ -267,7 +267,7 @@ Static analysis of the original's AI, written as rules; it explains the island b
   So computer ships give way to the human's moving ships, the slower of two computer ships stops, and a moving ship never stops for land.
 - **Inside a black hole or nebula:** straight out to 2r beyond its rim. **Wedged** (read from the original's code): when the same obstacle has been
   found on more than ten thinks in a row (about 5.5 s), the ship overlaps its bounding sphere (gap under 1 unit) and it barely moves (under
-  0.1 units per 1/30 s), the avoider drops the detour and turns the ship in place toward the side of the smaller clear turn (a tie, or no
+  0.1 units per 0.033 s), the avoider drops the detour and turns the ship in place toward the side of the smaller clear turn (a tie, or no
   clear side: the original's sign convention). The turn runs at a fixed sqrt(MaxAngularAcceleration / RotationalFriction) / 3 rad/s (a
   Carrack 5.7°/s), whatever the speed, rudder, crew or damage; meanwhile nothing else moves the ship and its speed and throttle are kept.
   It ends on the first think where any condition fails. Retail saves never caught a ship in it: a last resort, since a moving ship's

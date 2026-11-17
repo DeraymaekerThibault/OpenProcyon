@@ -75,7 +75,8 @@ not per player). *Measured:* five captains, every think gap 0.528 s, 85 gaps eac
 | Think timer | ships 0.5 s = 16 ticks (0.528 s); start delay 0.05 s x (n mod 10); last think reset to now | computer captains' decisions (target, course, speed order) run on this timer with the same delay and reset, and hold between thinks. The helm still computes the rudder from the held course every tick instead of holding the rudder value itself (the turn boost keeps the simulated circles equal). Docks, tow, boarding and dragons run every tick (provisional) |
 | Mission rules (single player) | once per frame, after the last tick | same, also while paused |
 | Frame catch-up | 10 frames, then drop | same up to 5x; above 5x at most 0.1 s per call (speeds above 5x are the remake's own) |
-| Contact rate constant | 0.033 | same |
+| Contact rate constant | 0.033 | same (`TICK_SECS` in `lib.rs`, the one tick length in seconds for every per-tick rule) |
+| Other per-tick rules | tick length 0.033 s | the black hole's one-tick pull on a resting ship, the grapple reel-in (0.1 per tick), the computer's harpoon and boarding chances per tick, and the effect, wake, nebula and black-hole visual ticks (particle motion and age, trail points) all use `TICK_SECS` instead of 1/30 s. Their visual ticks still run from frame time, so only their rate was corrected. Remaining 1/30 s: none in game rules; the 30 Hz sampling of skeleton animation clips is the importer's own choice |
 
 ## Random numbers
 

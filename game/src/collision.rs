@@ -442,8 +442,7 @@ const RAM_FACTOR: f32 = 0.0004;
 const RAM_COOLDOWN: f32 = 3.5;
 /// Ship-against-rock damage, to both, every physics tick (0.033 s) in contact: this x the rock's mass x the closing speed.
 const ROCK_FACTOR: f32 = 0.0002;
-/// The original's physics tick (0.033 s, not 1/30), which its contact rates are written for.
-const TICK: f32 = 0.033;
+use crate::TICK_SECS as TICK;
 
 /// Damage a rock and a ship do each other over `dt` seconds of contact: the rate is written per tick of `TICK` seconds.
 fn rock_hurt(rock_mass: f32, closing_speed: f32, dt: f32) -> f32 {

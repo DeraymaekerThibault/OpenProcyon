@@ -34,7 +34,8 @@ const HARPOON_SPEED: f32 = 45.0;
 /// A grapple snaps when the ships' centres get this much further apart than when the hook bit.
 const GRAPPLE_SLACK: f32 = 2.0;
 /// While a boarding is registered on the grapple the line is reeled in at this speed, down to this centre distance.
-const REEL_SPEED: f32 = 3.0;
+/// Line shortened per tick (0.033 s) while reeling in.
+const REEL_PER_TICK: f32 = 0.1;
 const REEL_MIN: f32 = 12.0;
 
 /// WOT 'Crew Skill Level'. The per-man combat ability is the generic crew's (Crew_General_*: 1, 3, 4 of 10).
@@ -660,11 +661,16 @@ fn hook_flight(
     }
 }
 
+/// The line length after reeling in for `dt` seconds: 0.1 less per tick of 0.033 s, not below `REEL_MIN`.
+fn reeled(distance: f32, dt: f32) -> f32 {
+    (distance - REEL_PER_TICK * dt / crate::TICK_SECS).max(REEL_MIN)
+}
+
 /// A bitten grapple is a rope of the length the ships were apart when the hook bit (read from the original's code and checked in play).
 /// Each tick, if the centres are further apart than that, both hulls are moved toward each other along the line by the excess, split
 /// by mass (the lighter one moves more), positions only. The line snaps when the centres were already `GRAPPLE_SLACK` further apart
 /// than at the hit before that pull, which takes a relative speed of about 60 units/s. While a boarding is registered on the pair the
-/// length is set to the centre distance less `REEL_SPEED` x the tick, down to `REEL_MIN`. A grapple on a destroyed or vanished ship is let go.
+/// length is set to the centre distance less `REEL_PER_TICK`, down to `REEL_MIN`. A grapple on a destroyed or vanished ship is let go.
 /// It also snaps when either ship's partner crosses to the other side of the hull it was grappled on.
 /// It is also let go when the two players become allied (here: no longer hostile, as the boarding fight's own test reads it).
 /// The break test and the reel-in are the mission tick (`winch_upkeep`); the pull itself is the link keeper's (`winch_pull`).
@@ -716,7 +722,7 @@ fn winch_upkeep(
         }
         let boarding = fighters.iter().any(|(f, fight)| (f == e && fight.target == g.target) || (f == g.target && fight.target == e));
         if boarding && distance > REEL_MIN {
-            g.length = (distance - REEL_SPEED * dt).max(REEL_MIN);
+            g.length = reeled(distance, dt);
         }
     }
 }
@@ -739,14 +745,14 @@ fn winch_pull(lib: Res<Library>, hooks: Query<(Entity, &Grapple)>, mut ships: Qu
     }
 }
 
-/// Chance per retail AI tick (1/30 s) that a computer captain fires its harpoons at its target, and that a grappled one sends its
+/// Chance per tick (0.033 s) that a computer captain fires its harpoons at its target, and that a grappled one sends its
 /// boarders; boarding also needs an attacking strength above `AI_MIN_ATTACK` (docs/re/boarding.md §5).
 const AI_HARPOON_CHANCE: f32 = 0.05;
 const AI_BOARD_CHANCE: f32 = 0.2;
 const AI_MIN_ATTACK: i32 = 10;
-/// A chance per 1/30 s tick turned into one for a frame of `dt` seconds.
+/// A chance per tick (0.033 s) turned into one for a frame of `dt` seconds.
 fn per_tick(chance: f32, dt: f32) -> f32 {
-    1.0 - (1.0 - chance).powf(dt * 30.0)
+    1.0 - (1.0 - chance).powf(dt / crate::TICK_SECS)
 }
 
 /// The original's grapple-and-board routine, run by every AI-steered ship (not the player's command ship) against its current

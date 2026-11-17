@@ -355,7 +355,7 @@ fn ai_harpoons_bear_by_arc_and_long_range() {
     assert!(bears("Ship_Pirate_Barque", Vec3::X * 40.0) && bears("Ship_Pirate_Barque", Vec3::NEG_X * 40.0));
     assert!(!bears("Ship_Pirate_Barque", Vec3::X * 55.7) && !bears("Ship_Pirate_Barque", Vec3::NEG_Z * 40.0));
     assert!(!bears("Ship_Pirate_Carrack", Vec3::X * 30.0) && bears("Ship_Pirate_Carrack", Vec3::NEG_Z * 30.0));
-    assert!((per_tick(AI_BOARD_CHANCE, 1.0 / 30.0) - 0.2).abs() < 1e-5 && (per_tick(AI_BOARD_CHANCE, 2.0 / 30.0) - 0.36).abs() < 1e-5);
+    assert!((per_tick(AI_BOARD_CHANCE, crate::TICK_SECS) - 0.2).abs() < 1e-5 && (per_tick(AI_BOARD_CHANCE, 2.0 * crate::TICK_SECS) - 0.36).abs() < 1e-5);
 }
 
 #[test]
@@ -400,4 +400,11 @@ fn island_gunners_aim_by_the_generic_crews_gunnery() {
     assert!((Skill::Green.gunnery_vs_average() - 0.76 / 0.52).abs() < 1e-5);
     assert_eq!(Skill::Average.gunnery_vs_average(), 1.0);
     assert!((Skill::Elite.gunnery_vs_average() - 0.36 / 0.52).abs() < 1e-5);
+}
+
+#[test]
+fn the_reel_takes_a_tenth_of_a_unit_per_0_033_s_tick() {
+    assert!((reeled(50.0, crate::TICK_SECS) - 49.9).abs() < 1e-5);
+    assert!((reeled(50.0, 2.0 * crate::TICK_SECS) - 49.8).abs() < 1e-5);
+    assert_eq!(reeled(12.05, 1.0), REEL_MIN);
 }

@@ -16,7 +16,7 @@ use crate::combat::{PathMode, follow_path};
 use crate::{Scenario, assets_dir, fx, game_to_bevy};
 use std::collections::HashMap;
 
-const TICK: f32 = 1.0 / 30.0;
+use crate::TICK_SECS as TICK;
 const SIZE: f32 = 1.0; // mesh units -> world units per unit of magnitude
 const MAX_NEIGHBOURS: usize = 5;
 

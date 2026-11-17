@@ -11,7 +11,7 @@ use bevy::prelude::*;
 use crate::docking::Docker;
 use crate::{Health, Scenario, Ship, assets_dir, fx};
 
-const TICK: f32 = 1.0 / 30.0;
+use crate::TICK_SECS as TICK;
 const SEG_LIFE: i32 = 300; // trail segment lifetime in ticks
 const SEG_EVERY: i32 = 15; // ticks between trail segments
 /// Full-depth pull of a Magnitude 9000 hole = CLASS_GAIN x hull length / Mass (units/s²). Fits the Small hole's measured Cutter
@@ -444,6 +444,14 @@ mod tests {
         // a Man-O-War resting 200 s never broke free and stays alive
         let (_, c) = rest(MAN_O_WAR, 105.0, 200.0);
         assert!(!c.free && c.inside == 0.0);
+    }
+
+    #[test]
+    fn a_resting_ship_moves_one_tick_of_pull_per_tick_of_0_033_s() {
+        // the snap leaves a x 0.033 per tick as a velocity, moved for 0.033 s: a x 0.033 x 0.033 units per tick
+        let mut c = Caught::default();
+        let (step, _) = c.step(Vec3::new(1.0, 0.0, 0.0), false, CUTTER_RATE, crate::TICK_SECS);
+        assert!((step.x - 0.033 * 0.033).abs() < 1e-9, "{}", step.x);
     }
 
     #[test]
