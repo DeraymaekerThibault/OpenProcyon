@@ -606,6 +606,10 @@ impl Script {
     pub fn dock_time(&self, docker: Entity) -> Option<f32> {
         self.dock_times.get(&docker).copied()
     }
+    /// The dock routine stores the longer of the dock time and the repair time back, so the ship's later dockings keep it.
+    pub fn keep_dock_time(&mut self, docker: Entity, secs: f32) {
+        self.dock_times.insert(docker, secs);
+    }
     /// Dev shortcut (`--script dock*`): mission 1 as it stands after the nebula battle, heading for the weapons tender (Objective 4).
     /// Every story rule before "Player Reaches Tender", the earlier objectives and the black-flag rules count as fired; their end state
     /// (flags, task, objective point) is applied. The tender volume, Objective 5 and the dock rules then run normally.

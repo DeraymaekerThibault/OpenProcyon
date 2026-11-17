@@ -401,6 +401,7 @@ fn cranes_run_while_a_ship_is_docked_and_stop_on_their_end_pose() {
         timer: 0.0,
         duration: 0.0,
         repair_secs: 0.0,
+        chosen: false,
         healed: false,
         full: false,
         start: Vec3::ZERO,
@@ -450,6 +451,7 @@ fn docked_hold_is_applied_before_movement_in_the_same_tick() {
         timer: 0.0,
         duration: 10.0,
         repair_secs: 0.0,
+        chosen: false,
         healed: false,
         full: false,
         start: Vec3::ZERO,
@@ -468,4 +470,51 @@ fn docked_hold_is_applied_before_movement_in_the_same_tick() {
     app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(Duration::from_millis(34)));
     app.update();
     assert_eq!(app.world().resource::<Seen>().0, Some(Vec3::new(3.0, 0.0, 5.0)));
+}
+
+#[test]
+fn the_longer_dock_time_is_kept_for_later_dockings() {
+    // First docking at a repairing dock: the 15 s repair effect beats the 5 s default and is kept.
+    let first = dock_duration(None, None, 15.0);
+    assert_eq!(first, 15.0);
+    // A later docking with nothing to repair (effect 0) still lasts the kept 15 s.
+    assert_eq!(dock_duration(None, Some(first), 0.0), 15.0);
+    // A rule's dock time replaces the kept one, and the repair time still raises it.
+    assert_eq!(dock_duration(Some(8.0), Some(first), 0.0), 8.0);
+    assert_eq!(dock_duration(Some(8.0), Some(first), 25.0), 25.0);
+    assert_eq!(dock_duration(None, None, 0.0), MIN_DOCK_SECS);
+}
+
+#[test]
+fn computer_ships_pick_the_dock_with_the_smallest_surface_gap() {
+    let mut world = World::new();
+    let (big, small) = (world.spawn_empty().id(), world.spawn_empty().id());
+    let own = (Vec3::ZERO, 10.0);
+    // Centres 100 and 80 apart: by centre the small dock is nearer, but the big one's 70 radius leaves a gap of 20 against 60.
+    let docks = [(big, (Vec3::new(100.0, 0.0, 0.0), 70.0)), (small, (Vec3::new(0.0, 0.0, 80.0), 10.0))];
+    assert_eq!(nearest_dock(own, docks), Some(big));
+    assert_eq!(nearest_dock(own, []), None);
+}
+
+#[test]
+fn only_a_ships_own_pick_is_replaced_before_it_docks() {
+    let mut world = World::new();
+    let dockee = world.spawn_empty().id();
+    let docker = |chosen, phase| Docker {
+        dockee,
+        point: None,
+        phase,
+        final_leg: false,
+        timer: 0.0,
+        duration: 0.0,
+        repair_secs: 0.0,
+        chosen,
+        healed: false,
+        full: false,
+        start: Vec3::ZERO,
+        offset: Vec3::ZERO,
+    };
+    assert!(docker(true, Phase::Wait).retargets() && docker(true, Phase::Approach).retargets());
+    assert!(!docker(true, Phase::Docked).retargets() && !docker(true, Phase::Away).retargets());
+    assert!(!docker(false, Phase::Approach).retargets(), "an ordered dock is not replaced");
 }

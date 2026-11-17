@@ -282,5 +282,6 @@ has any (PROVISIONAL: two observations, rule inferred).
 
 The line is white, centred on the window at about mid-height, and stayed up for 13 s (1 frame/s footage) before the Game Summary opened;
 the code waits 10 s from the end rule, which runs within a second of the sinking. The battle keeps running under it. The remake follows
-the code: the rule's message, else Game Won / Game Lost by the winners, and the summary 10 s later (its rules run every frame, not once
-a second).
+the code: the rule's message, else Game Won / Game Lost by the winners, and the summary 10 s later. The end rules are tested once the game clock
+is more than 1 s past the last pass (counted from the battle's start; the original's starting value is not read, PROVISIONAL), so a battle ends up to a second after
+its cause. A "Team X has no ships" test naming a team the map does not have reads true.

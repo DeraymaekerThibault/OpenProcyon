@@ -25,6 +25,10 @@ pub struct Sensors {
     primary: Option<Entity>,
 }
 impl Sensors {
+    /// The collision sphere (centre, radius) of a ship or base, as the sight test sees it.
+    pub fn sphere(&self, e: Entity) -> Option<(Vec3, f32)> {
+        self.objects.get(&e).map(|o| o.sphere)
+    }
     /// Any live member of the observer's group can supply sight, using collision surface distance.
     pub fn in_sight(&self, observer: Entity, target: Entity, mission: Option<&Mission>) -> bool {
         let (Some(from), Some(to)) = (self.objects.get(&observer), self.objects.get(&target)) else { return false };
