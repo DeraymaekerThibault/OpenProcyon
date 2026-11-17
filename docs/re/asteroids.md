@@ -45,9 +45,17 @@ Skirmish maps move their belts too (see "Skirmish maps" below).
   other. Rock against island, base or armed rock: pushed out only; rock against wreck, whale or moon: pushed apart by mass only.
 - **A ship that touches a belt rock drops it from the belt for good**: its waypoints are cleared and it flies away from the ship at
   0.25 x the centres' distance per second.
-- Remake: `combat::asteroid` (`rock_path`, `closest_point`, `follow_path`), `collision::sail`. PROVISIONAL: the rock moves on straight
-  legs at its speed (the few-tick turn, the crossing-line arrival and the random start direction are not modelled), the side-test signs
-  of the offset are inferred, and a rock pushed off its belt slows with the contact drift instead of keeping its speed.
+- Remake: `combat::asteroid` (`rock_path`, `closest_point`, `crossed`, `control`, `physics`, `knock_off`), `collision::sail`. Each tick a
+  belt rock runs the controller (advance a point when crossed, aim the push at the current point) then the physics step (position
+  moves by the old velocity, velocity gains acceleration x push x dt, then is cut to the speed cap). The acceleration is the object
+  definition's own (exported as `acceleration`; 150 Huge/Large, 100 Med/Darkmatter, 500 Small). Arrival is the crossing test above,
+  horizontal only; `to end` never reaches its last point, so the rock hovers there; `teleport loop` jumps the rock to the first
+  point and keeps its velocity; `loop` flies straight back. A ship touching a rock clears its waypoints and sets its velocity and
+  speed cap to 0.25 x the centre offset (3-D, rock minus ship), push away from the ship, so it keeps that speed; the contact drift is
+  no longer used for rocks. PROVISIONAL: the random start direction comes from the remake's own random stream, the side-test signs
+  of the offset are inferred, the controller-before-physics order within a tick is assumed, a collinear interior point is treated
+  as an ordinary crossing line (the original has no bisector there), and `end to end` (unused by the retail data) mirrors the side
+  test when travelling back. The nebula's meteor emitters still use the old straight-leg follower.
 
 ## Authored strength and breakup
 
@@ -98,7 +106,7 @@ Both effects are now exported into `assets/fx` and spawned through the existing 
 
 `collision.rs` rebuilds changed asteroid obstacles before ship movement. Tumbling box obstacles use transformed 3D faces, and broad-phase bounds include all eight transformed corners. Child rocks gain collision at spawn and lose it on despawn. Ship contacts now use finite rock mass and relative velocity, with a separate required `collision::Drift` component for collision motion; substeps translate the collider along with the rock. Explicit rule setup clears contact drift, but path ticks preserve it, and breakup includes it in the provisional parent-velocity inheritance. The planar inelastic contact response is shared with ships, not a recovered retail asteroid formula; collision damage and torque remain unimplemented; the original has no rock/rock response (above). See [collision.md](collision.md).
 
-Regression tests cover retail HP and asset dependencies, invalid/cyclic definitions, group membership/setup, tumble intervals without centre drift, path velocity/stopping, one-shot death, recursive 2-medium → 6-small breakup/termination, target cleanup, effects, child colliders and rotated/translated collision bounds. `--script asteroid` skips the opening, frames a large belt rock at frame 90 and destroys it at frame 180. Runtime screenshot: `local/asteroid-breakup.png` (frame 195) shows the two children and flash/sparks; no ECS query conflict occurred.
+Regression tests cover retail HP and asset dependencies, invalid/cyclic definitions, group membership/setup, tumble intervals without centre drift, path acceleration, crossing-line arrival, follow modes, ship-contact fly-away, one-shot death, recursive 2-medium → 6-small breakup/termination, target cleanup, effects, child colliders and rotated/translated collision bounds. `--script asteroid` skips the opening, frames a large belt rock at frame 90 and destroys it at frame 180. Runtime screenshot: `local/asteroid-breakup.png` (frame 195) shows the two children and flash/sparks; no ECS query conflict occurred.
 
 Explicitly provisional: moving-parent fragment velocity, the collision-size field interpreted as spawn-offset radius, initial child orientation, inherited named group membership, effect scale/sound pool, retail rotation multiplication order, waypoint path controller and exact engine PRNG sequencing (the runtime reuses combat's random stream). Full Mission 1 progression with the original lower HP and new collisions remains unverified; missions 2–13 remain first-pass, not validated gameplay.
 

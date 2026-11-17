@@ -43,6 +43,7 @@ def definition(text):
         hp=number("Max Hit Points", "Int"),
         mass=number("Mass", "Float"),
         radius=number("Radius", "Float"),
+        acceleration=number("Acceleration", "Float"),
         children=[string(f"WorldObject To Create Upon Death {i}") for i in range(10)],
         effect=string("ExplosionEffect"),
     )
