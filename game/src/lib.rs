@@ -364,6 +364,12 @@ pub(crate) fn tick_start(mut commands: Commands, removed: Query<Entity, With<Rem
     }
 }
 
+/// Single-player rules (mission and skirmish scripts): evaluated once per frame, after the last tick of that frame and also while the
+/// game is paused (docs/re/tick.md). At 2x and 5x they run a half or a fifth as often as ticks. Their `Res<Time>` is the frame's
+/// game-time advance, so a script timer still adds up to the ticks' time.
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct FrameRules;
+
 /// Ordered shared simulation stages; input and presentation stay on the frame schedules.
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BattleSet {

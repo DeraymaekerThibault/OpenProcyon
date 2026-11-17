@@ -377,3 +377,25 @@ fn a_mover_below_the_floor_is_queued_after_its_step_and_removed_next_tick() {
     frame(&mut app, 33);
     assert!(app.world().get_entity(e).is_err(), "destroyed at the start of the next tick");
 }
+
+#[derive(Resource, Default)]
+struct Order(Vec<&'static str>);
+
+/// docs/re/tick.md: single-player rules run once per frame, after the last tick of that frame (a half or a fifth as often as ticks at
+/// 2x and 5x), and also while paused when no tick runs.
+#[test]
+fn single_player_rules_run_once_per_frame_after_the_last_tick_and_while_paused() {
+    let mut app = clock();
+    app.init_resource::<Order>()
+        .add_systems(FixedUpdate, |mut o: ResMut<Order>| o.0.push("tick"))
+        .add_systems(Update, (|mut o: ResMut<Order>| o.0.push("rules")).in_set(FrameRules));
+    let take = |app: &mut App| std::mem::take(&mut app.world_mut().resource_mut::<Order>().0);
+    frame(&mut app, 66); // two ticks of real time at 1x
+    assert_eq!(take(&mut app), ["tick", "tick", "rules"]);
+    set_time_scale(&mut app.world_mut().resource_mut::<Time<Virtual>>(), 5.0);
+    frame(&mut app, 33); // 5x: five ticks, one rules evaluation
+    assert_eq!(take(&mut app), ["tick", "tick", "tick", "tick", "tick", "rules"]);
+    app.world_mut().resource_mut::<Time<Virtual>>().pause();
+    frame(&mut app, 100);
+    assert_eq!(take(&mut app), ["rules"], "paused: no tick, rules still run");
+}

@@ -125,7 +125,6 @@ pub fn plugin(app: &mut App) {
             (
                 crate::briefing::autoplay_skip.in_set(crate::BattleSet::Commands),
                 crate::smoke::autoplay_end.in_set(crate::BattleSet::Outcome),
-                update.in_set(crate::BattleSet::Rules),
                 (mission_ai, leash_player).chain().in_set(crate::BattleSet::Ai),
             )
                 .run_if(in_state(Screen::Battle))
@@ -133,7 +132,13 @@ pub fn plugin(app: &mut App) {
         )
         .add_systems(
             Update,
-            (capture_input.before(crate::briefing::update), crate::smoke::screenshot_hooks, presentation.after(nis_camera), (ui, music, nis_camera.after(crate::camera)))
+            (
+                capture_input.before(crate::briefing::update),
+                update.after(capture_input).in_set(crate::FrameRules).run_if(crate::menu::overlay_closed),
+                crate::smoke::screenshot_hooks,
+                presentation.after(nis_camera),
+                (ui, music, nis_camera.after(crate::camera)),
+            )
                 .run_if(in_state(Screen::Battle))
                 .run_if(resource_exists::<Mission>),
         );
