@@ -560,13 +560,20 @@ pub(super) fn base_fire(
     mut sfx: MessageWriter<Sfx>,
     mut fired: MessageWriter<Fired>,
     campaign: Option<Res<crate::campaign::Mission>>,
-    mut bases: Query<(Entity, &Transform, &crate::campaign::MissionBase, &ArmedBase, &Health, &mut GunStates, Option<&BaseSide>, Option<&IslandGunnery>), Without<GunPart>>,
+    mut bases: Query<
+        (Entity, &Transform, &crate::campaign::MissionBase, &ArmedBase, &Health, &mut GunStates, Option<&BaseSide>, Option<&IslandGunnery>, Option<&Visibility>),
+        Without<GunPart>,
+    >,
     ships: Query<(&Transform, &Ship, &Health, Option<&crate::campaign::MissionShip>, Entity, Option<&crate::ship::FleetPilot>)>,
     mut parts: Query<&mut Transform, (With<GunPart>, Without<Ship>)>,
     (globals, sensors): (Query<&GlobalTransform, With<GunPart>>, Res<crate::environment::Sensors>),
 ) {
     let dt = time.delta_secs();
-    for (me, tf, base, armed, health, mut states, skirmish_side, island) in bases.iter_mut().sort::<Entity>() {
+    for (me, tf, base, armed, health, mut states, skirmish_side, island, visibility) in bases.iter_mut().sort::<Entity>() {
+        // A base a rule has hidden (mission 11's armed asteroids until a speech line) does not fire. PROVISIONAL: the original's rule for a hidden island's guns is not read.
+        if visibility.is_some_and(|v| *v == Visibility::Hidden) {
+            continue;
+        }
         let class = &lib.classes[armed.class];
         let volcano = class.name.starts_with("Island_Volcano");
         // The nearest visible hostile ship in sight, with its side.

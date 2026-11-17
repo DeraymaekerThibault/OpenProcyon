@@ -485,7 +485,7 @@ def base_safe_physics(root, ship):
     try:
         return export_physics(root, ship)["properties"]
     except ValueError:
-        if not ship.startswith(("Base_", "Island_")):
+        if not ship.startswith(("Base_", "Island_", "Asteroid_")):
             raise
         zero = {"value": 0.0}
         return dict.fromkeys(

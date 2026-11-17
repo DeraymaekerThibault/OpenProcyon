@@ -422,6 +422,9 @@ fn update(
             }
             Fx::Visible(u, v) => {
                 for e in u {
+                    if extra.bases.contains(e) {
+                        commands.entity(e).insert(if v { Visibility::Inherited } else { Visibility::Hidden });
+                    }
                     if let Ok((_, mut animal, _, mut vis)) = animals.get_mut(e) {
                         animal.visible = v;
                         *vis = if v { Visibility::Inherited } else { Visibility::Hidden };
