@@ -446,7 +446,9 @@ mod tests {
 
     #[test]
     fn a_sub_wants_the_cloak_only_while_a_gun_is_free_to_fire() {
-        let some = |v: &[bool]| v.iter().copied();
+        fn some(v: &[bool]) -> impl Iterator<Item = bool> + '_ {
+            v.iter().copied()
+        }
         assert!(wants_cloak(State::Off, some(&[false])), "out of the cloak every gun is free");
         assert!(!wants_cloak(State::Off, some(&[])), "no gun at all");
         for s in [State::Cloaking, State::Full, State::Decloaking] {
