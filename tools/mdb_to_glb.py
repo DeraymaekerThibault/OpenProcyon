@@ -22,6 +22,7 @@ from PIL import Image
 from tools.gamefs import ci_file, ci_files
 from tools.mdb import normal, parse
 from tools.msb import parse as parse_msb
+from tools.msb import parse_scene
 from tools.skin import build as build_skin
 
 
@@ -80,22 +81,40 @@ def pad4(b, fill=b"\0"):
     return b + fill * (-len(b) % 4)
 
 
-def convert(root, scene, model=0, files=None, skin=None):
-    """files: explicit MDB paths (e.g. one gun layer); default is every <scene>_Layer*.mdb plus MSB hardpoints.
+def layer_offsets(root, scene):
+    """Where each mesh layer of a scenery scene sits relative to the object's origin, in the MDB-vertex frame: the layer node's
+    position minus its pivot. {lower-case layer name: (x, y, z)}; empty when the scene has no MSB."""
+    try:
+        data = ci_file(Path(root) / "BD_MeshScenes", f"{scene}.msb").read_bytes()
+    except FileNotFoundError:
+        return {}
+    return {
+        m["name"].lower(): tuple(
+            a - b for a, b in zip(m["pos"], m["pivot"], strict=True)
+        )
+        for m in parse_scene(data)["meshes"]
+    }
+
+
+def scene_files(root, scene):
+    """The scene's own layer MDBs, in layer order (no damage variants)."""
+    root = Path(root)
+    files = sorted(
+        ci_files(root / "BD_Meshes", f"{scene}_Layer*.mdb"),
+        key=lambda p: int(re.search(r"Layer(\d+)", p.name, re.IGNORECASE).group(1)),
+    )
+    return files or scene_layers(root, scene)
+
+
+def convert(root, scene, model=0, files=None, skin=None, offsets=False):
+    """offsets: place each layer at its MSB node's position minus pivot (scenery: islands and bases), as a node translation.
+    files: explicit MDB paths (e.g. one gun layer); default is every <scene>_Layer*.mdb plus MSB hardpoints.
     model: the detail level (index into the MDB's models), or a function of the layer's file stem.
     skin: the MSB scene holding the skeleton and clip of a skinned animal mesh (tools/skin.py)."""
     root = Path(root)
     explicit = files is not None
-    files = (
-        files
-        if explicit
-        else sorted(
-            ci_files(root / "BD_Meshes", f"{scene}_Layer*.mdb"),
-            key=lambda p: int(re.search(r"Layer(\d+)", p.name, re.IGNORECASE).group(1)),
-        )
-    )
-    if not files and not explicit:
-        files = scene_layers(root, scene)
+    files = files if explicit else scene_files(root, scene)
+    shifts = layer_offsets(root, scene) if offsets else {}
     if not files:
         raise FileNotFoundError(f"no {scene}_Layer*.mdb under {root / 'BD_Meshes'}")
     if not explicit:
@@ -242,6 +261,8 @@ def convert(root, scene, model=0, files=None, skin=None):
         meshes.append({"name": f.stem, "primitives": prims})
         mesh_node = len(nodes)
         nodes.append({"name": f.stem, "mesh": len(meshes) - 1})
+        if any(shifts.get(f.stem.lower(), ())):
+            nodes[-1]["translation"] = list(to_gltf(shifts[f.stem.lower()]))
         skinned = skin and build_skin(
             root, skin, raw, len(m.vertices), add_view, accessors, nodes
         )
