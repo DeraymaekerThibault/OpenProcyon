@@ -198,10 +198,16 @@ fn spotted(
     }
 }
 
+/// Whether a computer sub's cloak routine wants to be cloaked: some gun is free to fire. Out of the cloak every gun is free; from the
+/// first moment of cloaking until the decloak is over only the guns that may fire while cloaked are (`cloak_fire` per gun).
+fn wants_cloak(state: State, mut cloak_fire: impl Iterator<Item = bool>) -> bool {
+    cloak_fire.any(|f| state == State::Off || f)
+}
+
 /// Computer submarines (twice a second per ship, staggered; not the player's, and not when the rules cleared 'AI Can Override'): no
-/// hostile in scan range decloaks; a fully cloaked ship that a hostile is targeting decloaks; otherwise a ship with guns starts a
-/// cloak (the start itself is gated). The original's "reveal when close" branch reads a bogus range and so never fires; it is left out.
-/// A sub without a cloak-firing gun therefore flickers. PROVISIONAL: "hostile" is any other team; the hunt routine is not decoded.
+/// hostile in scan range decloaks; a fully cloaked ship that a hostile is targeting decloaks; otherwise a ship with a gun free to fire starts a
+/// cloak (the start itself is gated) and one without is ordered out again (see `wants_cloak`). The original's "reveal when close" branch reads a bogus range and so never fires; it is left out.
+/// A sub without a cloak-firing gun therefore flickers (cloaks, is ordered out half a second later). PROVISIONAL: "hostile" is any other team; the hunt routine is not decoded.
 fn ai(
     time: Res<Time>,
     lib: Res<Library>,
@@ -226,8 +232,10 @@ fn ai(
         let targeted = targets.as_deref().is_some_and(|t| hostile.iter().any(|h| t.of(*h) == Some(e)));
         if hostile.is_empty() || (c.state == State::Full && targeted) {
             c.stop();
-        } else if c.state != State::Full && !class.mounts.is_empty() {
+        } else if wants_cloak(c.state, class.mounts.iter().map(|m| lib.guns[&m.gun].cloak_fire)) {
             c.start(ship.side);
+        } else {
+            c.stop();
         }
     }
 }
@@ -436,6 +444,18 @@ mod tests {
         assert_eq!(c.dive(), None, "a fully cloaked ship keeps its height");
     }
 
+    #[test]
+    fn a_sub_wants_the_cloak_only_while_a_gun_is_free_to_fire() {
+        fn some(v: &[bool]) -> impl Iterator<Item = bool> + '_ {
+            v.iter().copied()
+        }
+        assert!(wants_cloak(State::Off, some(&[false])), "out of the cloak every gun is free");
+        assert!(!wants_cloak(State::Off, some(&[])), "no gun at all");
+        for s in [State::Cloaking, State::Full, State::Decloaking] {
+            assert!(!wants_cloak(s, some(&[false, false])), "non-cloak guns are held");
+            assert!(wants_cloak(s, some(&[false, true])), "a torpedo launcher is never held");
+        }
+    }
     #[test]
     fn a_new_cloak_keeps_only_the_own_team_in_the_list() {
         let mut c = Cloak { idle: IDLE_GATE, knows: vec![Side::Player, Side::Enemy], ..default() };

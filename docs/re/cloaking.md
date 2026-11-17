@@ -56,7 +56,7 @@ A flagged-section counter also forces a stop and blocks a start; its meaning (pr
 ## Computer submarines
 Twice a second per ship (staggered), for computer ships whose rules have not cleared `AI Can Override` (false skips the routine, so the
 rule's state sticks): no hostile contact within its scan range (any other team, lifeboats excluded) decloaks it; fully cloaked with a
-hostile targeting it decloaks it; otherwise a ship with guns starts a cloak when the gate allows. The original's "reveal when a hostile
+hostile targeting it decloaks it; otherwise a ship with a gun free to fire starts a cloak when the gate allows. Out of the cloak every gun is free; while cloaking, cloaked or decloaking only the guns that may fire while cloaked are, so with none of those the routine orders the ship out again. The original's "reveal when a hostile
 is within 1.5 x range" branch reads an unrelated field (about zero), so it never fires and is left out. A sub with no cloak-firing gun
 flickers (cloaks, is ordered back out half a second later, waits the 5 s gate). The hunt routine for lobbing guns is not decoded.
 

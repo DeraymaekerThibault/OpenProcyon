@@ -346,7 +346,7 @@ pub fn ai(
         let gap = attack::range_gap(routine, tf.translation, class.radius, foe_pos, foe_radius, foe_aim);
         let at = if routine == attack::Routine::Ram { foe_pos } else { foe_aim };
         let course = attack::course(routine, tf.translation, s.heading, at, gap, r, now, breakoffs.entry(e).or_default());
-        s.throttle = attack::throttle(e, tf.translation, s.heading, course[0]);
+        s.throttle = attack::throttle(routine, e, tf.translation, s.heading, course[0]);
         (s.waypoints, s.goal, s.order) = (course, None, 3);
     }
 }
