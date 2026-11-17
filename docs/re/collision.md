@@ -95,8 +95,10 @@ as the unit vector): start (-467.6, -1262.5) facing (-0.159, 0.987) ends at (-46
 (0.160, -0.987) ends at (-541.17, -1271.78); island 6, Man-O-War start (318.3, -184.4) facing (-0.447, 0.894) ends at (322.87, -178.26).
 These are test vectors for the rule; they need the imported island meshes.
 
-**What differs here.** The remake tests ship boxes against the layer's triangles clipped to the ship's height and applies no node pivot to
-island meshes, so ships hold a few units off the shore where the original holds 15 to 25 and islands with a pivot offset sit lower than
+**Remake status.** Built: `collision/tree.rs` (the rule as pure functions), the layer offset applied to the rendered mesh, the shell triangles and the tree, and the tree exported per mesh layer by `tools/export_collision.py`. Ships touch islands and bases by the tree; the collision avoider, course preview and shells still use triangles. The push runs once per physics substep rather than once per 1/30 s tick. The 12 test vectors above reproduce to 0.01 u iterating the push once per tick; four of them also through the game's own scheduler.
+
+**What differed before.** The remake tested ship boxes against the layer's triangles clipped to the ship's height and applied no node pivot to
+island meshes, so ships held a few units off the shore where the original holds 15 to 25 and islands with a pivot offset sat lower than
 the original's (by 7.05 u on island 8). Not measured: rotated islands, bases and other multi-layer scenery, armed asteroids (same
 detection, different shape), a ship that is tilted or not at the water level, ships starting completely inside an island.
 

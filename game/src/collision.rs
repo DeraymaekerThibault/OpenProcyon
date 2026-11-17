@@ -2,11 +2,33 @@
 use bevy::prelude::*;
 use std::collections::HashMap;
 
+/// One mesh layer's tree in the layer's own frame (`Shapes::obstacle` places it), with the layer's offset from the object's origin.
+struct Layer {
+    offset: Vec3,
+    nodes: Vec<tree::BoxNode>,
+}
 struct Shape {
+    layers: Vec<Layer>,
     min: [f32; 3],
     max: [f32; 3],
     vertices: Vec<[f32; 3]>,
     indices: Vec<[usize; 3]>,
+}
+fn layer(l: &serde_json::Value, name: &str) -> Layer {
+    let vec = |v: &serde_json::Value| Vec3::from_array(serde_json::from_value(v.clone()).expect("Invalid collision tree vector"));
+    let nodes = l["nodes"]
+        .as_array()
+        .expect("Collision tree nodes")
+        .iter()
+        .map(|n| tree::BoxNode {
+            // exported with 4 decimals: restore unit length
+            b: tree::Box3 { centre: vec(&n["c"]), axes: [0, 1, 2].map(|i| vec(&n["a"][i]).normalize()), half: vec(&n["h"]) },
+            level: n["l"].as_u64().expect("Collision tree level") as u32,
+            kids: n["k"].as_array().map_or_else(Vec::new, |k| k.iter().map(|i| i.as_u64().expect("Collision tree child") as usize).collect()),
+        })
+        .collect::<Vec<_>>();
+    assert!(nodes.iter().all(|n| n.kids.iter().all(|k| *k < nodes.len()) && n.b.half.min_element() >= 0.0), "Invalid collision tree: {name}");
+    Layer { offset: vec(&l["offset"]), nodes }
 }
 #[derive(Resource)]
 pub struct Shapes(HashMap<String, Shape>);
@@ -21,6 +43,7 @@ impl FromWorld for Shapes {
                 .iter()
                 .map(|(name, s)| {
                     let shape = Shape {
+                        layers: s["layers"].as_array().map_or_else(Vec::new, |l| l.iter().map(|l| layer(l, name)).collect()),
                         min: array(&s["min"]),
                         max: array(&s["max"]),
                         vertices: s["vertices"].as_array().map_or_else(Vec::new, |v| v.iter().map(array).collect()),
@@ -74,6 +97,8 @@ struct Triangle {
 pub struct Obstacle {
     body: BoxBody,
     triangles: Vec<Triangle>,
+    /// Per mesh layer, the tree of boxes a ship touches (world space); empty for scenery without one, which ships touch by triangles.
+    tree: Vec<Vec<tree::BoxNode>>,
 }
 impl Obstacle {
     /// shortcut: scenery without exported collision spheres uses its world bounds; replace when native sphere export is decoded.
@@ -109,7 +134,7 @@ impl Obstacle {
         let all: Vec<Vec3> = tris.iter().flatten().copied().collect();
         let bounds = Bounds::points(&all);
         let triangles = tris.iter().map(|t| Triangle { points: *t, bounds: Bounds::points(t) }).collect();
-        Obstacle { body: BoxBody { points: vec![bounds.min, bounds.max], bounds }, triangles }
+        Obstacle { body: BoxBody { points: vec![bounds.min, bounds.max], bounds }, triangles, tree: vec![] }
     }
     /// Fraction along the segment `a`-`b` where it first meets a triangle (the original sweeps every projectile's step this way).
     pub fn segment_hit(&self, a: Vec3, b: Vec3) -> Option<f32> {
@@ -144,6 +169,9 @@ impl Obstacle {
         }
         self.body.bounds.min += delta;
         self.body.bounds.max += delta;
+        for node in self.tree.iter_mut().flatten() {
+            node.shifted(delta);
+        }
         for triangle in &mut self.triangles {
             for p in &mut triangle.points {
                 *p += delta;
@@ -172,7 +200,25 @@ impl Shapes {
                 Triangle { bounds: Bounds::points(&points), points }
             })
             .collect();
-        Some(Obstacle { body: box_body([Vec3::from_array(s.min), Vec3::from_array(s.max)], tf), triangles })
+        // Ships touch land by its box tree; a rock moves, so it keeps its triangles (docs/re/collision.md).
+        let tree = if name.starts_with("Asteroid") {
+            vec![]
+        } else {
+            s.layers
+                .iter()
+                .map(|l| {
+                    l.nodes
+                        .iter()
+                        .map(|n| tree::BoxNode {
+                            b: tree::Box3 { centre: tf.transform_point(n.b.centre + l.offset), axes: n.b.axes.map(|a| tf.rotation * a), half: n.b.half * tf.scale.abs() },
+                            level: n.level,
+                            kids: n.kids.clone(),
+                        })
+                        .collect()
+                })
+                .collect()
+        };
+        Some(Obstacle { body: box_body([Vec3::from_array(s.min), Vec3::from_array(s.max)], tf), triangles, tree })
     }
 }
 
@@ -587,6 +633,15 @@ pub fn sail(
                 if visible == Some(&Visibility::Hidden) || ghost(oe) || docker.is_some_and(|d| d.ignores_collision(oe)) {
                     continue;
                 }
+                if !obstacle.tree.is_empty() {
+                    // The original (read from its code): the ship's box against the mesh's box tree, one push out along the
+                    // horizontal normal per tick, no iteration (docs/re/collision.md). Here once per substep.
+                    let ship = tree::Box3::placed(class.collision_bounds, &tf);
+                    if let Some(push) = tree::land_push(&obstacle.tree, &ship) {
+                        tf.translation += push;
+                    }
+                    continue;
+                }
                 // Rebuild after each correction: adjacent faces must not use a stale box.
                 for _ in 0..3 {
                     let body = box_body(class.collision_bounds, &tf);
@@ -737,3 +792,4 @@ pub fn sail(
 mod avoid;
 #[cfg(test)]
 mod tests;
+pub mod tree;

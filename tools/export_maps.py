@@ -228,7 +228,7 @@ def ship_name(text, names):
 def convert_scene(root, scene):
     """Some scenery uses MSB node mesh names instead of <scene>_Layer*.mdb."""
     try:
-        return convert(root, scene)
+        return convert(root, scene, offsets=True)
     except FileNotFoundError:
         nodes = parse_msb(
             ci_file(Path(root) / "BD_MeshScenes", f"{scene}.msb").read_bytes()
@@ -246,7 +246,7 @@ def convert_scene(root, scene):
             )
         if not files:
             raise FileNotFoundError(f"no layer meshes in MSB for {scene}") from None
-        return convert(root, scene, files=files)
+        return convert(root, scene, files=files, offsets=True)
 
 
 def tiles(root, name):

@@ -1,7 +1,18 @@
 """Export WOT collision boxes and converted scenery triangles to data/collision.json.
 
 usage: python3 -m tools.export_collision <game_root> <assets_dir>
-Triangles come from each layer's collision detail level (MeshDetailSettings 'Collision LOD Level Index').
+Triangles come from each layer's collision detail level (MeshDetailSettings 'Collision LOD Level Index'), placed where the layer
+is drawn (its scene node's position minus pivot).
+
+Entries with OBBTree detection (islands, bases) also carry the mesh files' tree of oriented boxes, for ships touching land:
+  "layers": [{"offset": [x, y, z],   # where the layer sits relative to the object's origin (already in the triangles above)
+              "nodes": [{"c": [x, y, z],            # box centre, in the layer's frame
+                         "a": [[x, y, z] x 3],      # the three unit axes
+                         "h": [hx, hy, hz],         # half extents along those axes
+                         "l": level,                # root = 0
+                         "k": [child node indices], # at most two
+                         "t": [triangle indices]}]}]  # nodes are in pre-order, node 0 is the root
+All vectors are in remake axes (x, up, -y of the game frame), like the triangles.
 """
 
 import json
@@ -11,7 +22,8 @@ from pathlib import Path
 
 from tools.export_mesh_detail import collision_lods
 from tools.gamefs import ci_file
-from tools.mdb_to_glb import convert
+from tools.mdb import box_tree, parse
+from tools.mdb_to_glb import convert, layer_offsets, scene_files
 from tools.pack_data import rnd
 from tools.wot import fields, parse_text, properties, records
 
@@ -70,10 +82,19 @@ def triangles(blob):
         ]
 
     out = []
-    for mesh in doc["meshes"]:
-        for p in mesh["primitives"]:
+    # Mesh nodes may carry a translation (the layer offset); without nodes every mesh sits at the origin.
+    placed = [
+        (n["mesh"], n.get("translation", [0, 0, 0]))
+        for n in doc.get("nodes", [])
+        if "mesh" in n
+    ] or [(i, [0, 0, 0]) for i in range(len(doc["meshes"]))]
+    for mesh_index, shift in placed:
+        for p in doc["meshes"][mesh_index]["primitives"]:
             assert p.get("mode", 4) == 4
-            verts = accessor(p["attributes"]["POSITION"])
+            verts = [
+                tuple(c + d for c, d in zip(v, shift, strict=True))
+                for v in accessor(p["attributes"]["POSITION"])
+            ]
             indices = [v[0] for v in accessor(p["indices"])]
             out.extend(
                 [
@@ -84,10 +105,51 @@ def triangles(blob):
     return out
 
 
+def bevy(v):
+    """Game axes (x, y, z up) to remake axes: the rotation (x, y, z) -> (x, z, -y)."""
+    return [v[0], v[2], -v[1]]
+
+
+def flat_tree(root_node):
+    """The nested tree from `tools.mdb.box_tree` as the flat pre-order node list of the collision data, in remake axes."""
+    nodes = []
+
+    def add(n):
+        i = len(nodes)
+        nodes.append(
+            {
+                "c": bevy(n["centre"]),
+                "a": [bevy(a) for a in n["axes"]],
+                "h": list(n["half"]),
+                "l": n["level"],
+                "k": [],
+                "t": n["tris"],
+            }
+        )
+        nodes[i]["k"] = [add(c) for c in n["children"]]
+        return i
+
+    add(root_node)
+    return nodes
+
+
+def layers(root, scene):
+    """Box tree and offset of each of the scene's own layers that has a tree."""
+    shifts = layer_offsets(root, scene)
+    out = []
+    for f in scene_files(root, scene):
+        tree = box_tree(parse(f.read_bytes()).trailing)
+        if tree:
+            off = shifts.get(f.stem.lower(), (0.0, 0.0, 0.0))
+            out.append({"offset": bevy(off), "nodes": flat_tree(tree)})
+    return out
+
+
 def export(root, assets):
     root, assets = Path(root), Path(assets)
     scenes = {}
-    for f in (assets / "maps").glob("*.json"):
+    # maps/<id>.json right after the map export, maps/<id>/map.json once the import has regrouped the folders
+    for f in [*(assets / "maps").glob("*.json"), *(assets / "maps").glob("*/map.json")]:
         m = json.loads(f.read_text())
         if isinstance(m, dict):
             scenes.update({o["type"]: o["scene"] for o in m.get("objects", [])})
@@ -101,7 +163,7 @@ def export(root, assets):
         if not d:
             continue
         if d["detection"] == "OBBTree":
-            tris = triangles(convert(root, scenes[typ], model=lod))
+            tris = triangles(convert(root, scenes[typ], model=lod, offsets=True))
             points = list(dict.fromkeys(tuple(p) for t in tris for p in t))
             if not points:
                 raise ValueError(f"Empty collision mesh: {typ}")
@@ -110,6 +172,7 @@ def export(root, assets):
             d["indices"] = [[lookup[tuple(p)] for p in t] for t in tris]
             d["min"] = [min(p[i] for p in points) for i in range(3)]
             d["max"] = [max(p[i] for p in points) for i in range(3)]
+            d["layers"] = layers(root, scenes[typ])
         if "min" not in d:
             raise ValueError(f"No collision box: {typ}")
         out[typ] = d
