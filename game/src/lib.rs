@@ -332,17 +332,25 @@ pub fn queue_removal(commands: &mut Commands, e: Entity) {
     commands.entity(e).try_insert(Removed);
 }
 
-/// Start of a tick: destroy what was queued for removal last tick.
-pub(crate) fn tick_start(mut commands: Commands, removed: Query<Entity, With<Removed>>) {
+/// Created during a tick: the object joins at the start of the next tick and is neither moved nor tested before then.
+/// Movement systems of such objects (shells, blasts, wells) leave `With<Joining>` out.
+#[derive(Component)]
+pub struct Joining;
+
+/// Start of a tick: destroy what was queued for removal last tick, and let what was created last tick join.
+pub(crate) fn tick_start(mut commands: Commands, removed: Query<Entity, With<Removed>>, joining: Query<Entity, With<Joining>>) {
     for e in &removed {
         commands.entity(e).try_despawn();
+    }
+    for e in &joining {
+        commands.entity(e).try_remove::<Joining>();
     }
 }
 
 /// Ordered shared simulation stages; input and presentation stay on the frame schedules.
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BattleSet {
-    /// Removals queued last tick are applied before anything else of the tick.
+    /// Removals queued last tick are applied and new objects join, before anything else of the tick.
     Tick,
     Commands,
     Sense,

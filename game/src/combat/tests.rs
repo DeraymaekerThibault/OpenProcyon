@@ -1585,3 +1585,64 @@ fn a_fire_that_burns_a_floored_section_out_goes_out() {
     }
     assert!(app.world().get::<super::damage::Fires>(e).unwrap().list.is_empty(), "the fire burnt out and was removed");
 }
+
+#[derive(Resource)]
+struct Spawn(Option<Shell>);
+
+/// Creates the staged shell inside the tick, after the tick's start, as a gun would.
+fn spawn_once(mut commands: Commands, mut staged: ResMut<Spawn>) {
+    if let Some(shell) = staged.0.take() {
+        commands.spawn((shell, Transform::from_translation(Vec3::Y * 500.0), crate::Joining));
+    }
+}
+
+/// A shell created in a tick joins at the start of the next one: it does not move in its creation tick, and flies one step in the next.
+#[test]
+#[ignore = "needs imported assets"]
+fn a_new_shell_first_moves_in_the_tick_after_it_was_created() {
+    let mut app = App::new();
+    let lib = Library::load(assets_dir());
+    app.add_plugins((TaskPoolPlugin::default(), AssetPlugin::default()))
+        .init_resource::<Time>()
+        .init_resource::<FxLib>()
+        .insert_resource(Rng(7))
+        .add_message::<Sfx>()
+        .add_message::<Hit>()
+        .add_message::<Destroyed>()
+        .add_message::<Detonate>()
+        .add_message::<Shoot>()
+        .add_message::<crate::decals::Scar>()
+        .insert_resource(Spawn(None))
+        .add_systems(Update, (crate::tick_start, spawn_once, shells).chain());
+    let bullet = lib.guns["Gun_CannonBall_Heavy"].bullet.clone();
+    let shell = Shell {
+        vel: Vec3::new(0.0, 0.0, -100.0),
+        age: 0.0,
+        lifetime: 5.0,
+        gravity: 0.0,
+        bullet: bullet.clone(),
+        side: Side::Player,
+        shooter: Entity::PLACEHOLDER,
+        target: None,
+        angular_velocity: 0.0,
+        payload: lib.bullets[&bullet].payload,
+        aim: None,
+        pd: false,
+        hp: 1.0,
+        harmless: false,
+        base: false,
+        ricochet: -1000.0,
+        mine_scan: Default::default(),
+        lost_target: false,
+    };
+    app.insert_resource(lib);
+    app.world_mut().resource_mut::<Spawn>().0 = Some(shell);
+    let mut tick = |app: &mut App| {
+        app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs_f32(0.033));
+        app.update();
+        app.world_mut().query_filtered::<&Transform, With<Shell>>().single(app.world()).unwrap().translation
+    };
+    assert_eq!(tick(&mut app), Vec3::Y * 500.0, "tick of creation: the shell has not moved");
+    let z = tick(&mut app).z;
+    assert!((z + 3.3).abs() < 1e-3, "next tick: one step of 0.033 s at 100 units/s, got {z}");
+}

@@ -332,3 +332,29 @@ fn removal_is_queued_and_applied_at_the_start_of_the_next_tick() {
     frame(&mut app, 33);
     assert_eq!(app.world().resource::<Presence>().0, [("start", true), ("end", true), ("start", false), ("end", false)]);
 }
+
+#[derive(Component)]
+struct Mover(f32);
+
+/// docs/re/tick.md: an object created during a tick joins at the start of the next tick and moves in it (not in the tick of its creation).
+#[test]
+fn a_new_object_joins_at_the_start_of_the_next_tick_and_moves_in_it() {
+    let mut app = clock();
+    app.init_resource::<Presence>().add_systems(
+        FixedUpdate,
+        (
+            (|mut commands: Commands, mut done: Local<bool>| {
+                if !std::mem::replace(&mut *done, true) {
+                    commands.spawn((Mover(0.0), Joining));
+                }
+            })
+            .in_set(BattleSet::Combat),
+            (|mut q: Query<&mut Mover, Without<Joining>>| q.iter_mut().for_each(|mut m| m.0 += 1.0)).in_set(BattleSet::Simulate),
+        ),
+    );
+    for tick in 1..=3 {
+        frame(&mut app, 33);
+        let moved: Vec<f32> = app.world_mut().query::<&Mover>().iter(app.world()).map(|m| m.0).collect();
+        assert_eq!(moved, [(tick - 1) as f32], "tick {tick}: created in tick 1, first moved in tick 2");
+    }
+}

@@ -57,6 +57,7 @@ pub fn shoot(mut commands: Commands, lib: Res<Library>, fxl: Res<FxLib>, mut msg
                     lost_target: false,
                 },
                 Transient,
+                crate::Joining,
                 stf,
                 Visibility::default(),
             ))
@@ -131,10 +132,11 @@ pub fn detonate(
                     Transform::from_translation(d.at),
                     Transient,
                     crate::Scenario,
+                    crate::Joining,
                 ));
             }
             Payload::Grav { radius, duration, magnitude } => {
-                commands.spawn((GravWell { radius, magnitude, left: duration }, Transform::from_translation(d.at), Transient, crate::Scenario));
+                commands.spawn((GravWell { radius, magnitude, left: duration }, Transform::from_translation(d.at), Transient, crate::Scenario, crate::Joining));
             }
             // A Nova splits in flight (`split_nova`); one that lands or strikes first is just spent.
             Payload::Nova | Payload::Shell | Payload::Mine { .. } => {}
@@ -163,7 +165,7 @@ pub fn blasts(
     fxl: Res<FxLib>,
     mut rng: ResMut<Rng>,
     (mut hits, mut destroyed, mut splashes): (MessageWriter<Hit>, MessageWriter<Destroyed>, MessageWriter<super::Splashed>),
-    q: Query<(Entity, &mut Blast, &Transform), (Without<Ship>, Without<Shell>)>,
+    q: Query<(Entity, &mut Blast, &Transform), (Without<Ship>, Without<Shell>, Without<crate::Joining>)>,
     mut ships: Query<(Entity, &Transform, &Ship, &mut Health, Option<&crate::campaign::MissionShip>), Without<crate::lifeboats::Lifeboat>>,
     mut bases: Query<(Entity, &Transform, &ArmedBase, &mut Health), (Without<Ship>, Without<Blast>)>,
     mut rocks: Query<(Entity, &Transform, &mut Asteroid), (Without<Ship>, Without<Blast>)>,
@@ -251,7 +253,7 @@ pub fn blasts(
 }
 
 /// Wells expire after their duration; the pull on ships is `blackhole::pull`.
-pub fn grav_wells(mut commands: Commands, time: Res<Time>, mut wells: Query<(Entity, &mut GravWell)>) {
+pub fn grav_wells(mut commands: Commands, time: Res<Time>, mut wells: Query<(Entity, &mut GravWell), Without<crate::Joining>>) {
     for (e, mut w) in &mut wells {
         w.left -= time.delta_secs();
         if w.left <= 0.0 {

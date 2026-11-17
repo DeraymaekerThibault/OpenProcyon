@@ -330,7 +330,7 @@ pub(super) fn shells(
     animals: Query<(Entity, &Transform, &crate::environment::SpaceAnimal), Without<Shell>>,
     mut bases: Query<(Entity, &Transform, &ArmedBase, &mut Health, &crate::campaign::MissionBase, Option<&BaseSide>), (Without<Shell>, Without<Ship>)>,
     campaign: Option<Res<crate::campaign::Mission>>,
-    mut q: Query<(Entity, &mut Shell, &mut Transform), Without<Ship>>,
+    mut q: Query<(Entity, &mut Shell, &mut Transform), (Without<Ship>, Without<crate::Joining>)>,
     // Shells pass through lifeboats (no weapon-vs-lifeboat response is registered in the original; PROVISIONAL, docs/re/lifeboats.md §2.4).
     mut ships: ShipTargets,
     mut detonate: MessageWriter<Detonate>,
