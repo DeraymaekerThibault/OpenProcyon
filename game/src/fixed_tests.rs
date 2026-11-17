@@ -35,11 +35,13 @@ fn fixed_clock_preserves_pause_speed_and_catch_up_caps() {
     set_time_scale(&mut app.world_mut().resource_mut::<Time<Virtual>>(), 8.0);
     frame(&mut app, 5); // 40 ms virtual, not eight input polls.
     assert_eq!(app.world().resource::<Ticks>().0.len(), 4);
-    frame(&mut app, 1000); // Existing fast-forward catch-up limit: 100 ms virtual.
+    // Catch-up limit: 10 frames of 8 ticks each, then the rest of the second is dropped.
+    frame(&mut app, 1000);
     let time = app.world().resource::<Time<Virtual>>();
     assert_eq!(time.delta(), time.max_delta());
-    assert!((time.delta_secs() - 0.1).abs() < 1e-6);
-    assert_eq!(app.world().resource::<Ticks>().0.len(), 7);
+    assert_eq!(app.world().resource::<Ticks>().0.len(), 4 + 80);
+    frame(&mut app, 1); // the dropped backlog does not run later
+    assert_eq!(app.world().resource::<Ticks>().0.len(), 4 + 80);
     assert!(app.world().resource::<Ticks>().0.iter().all(|dt| *dt == BATTLE_TICK));
 }
 

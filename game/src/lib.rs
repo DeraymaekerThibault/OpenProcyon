@@ -411,17 +411,14 @@ fn set_time_scale(vtime: &mut Time<Virtual>, speed: f32) {
     vtime.set_max_delta(std::time::Duration::from_secs_f32(max_frame_step(speed)));
 }
 
-/// Most game time one frame may advance: 0.1 s while fast-forwarding, so a slow frame does not turn into a long catch-up (a 16x
-/// battle stays smooth). An unattended autoplay run (`PROCYON_AUTOPLAY`, tools/autoplay.py) only wants game time per second: there
-/// the step grows with the speed (60 fps worth of it; 0.1 s held 16x to ~6x), since the simulation is fixed ticks and a larger
-/// step is more ticks per frame, not a coarser simulation.
+/// Most game time one call may advance: 10 frames of `speed` ticks each (docs/re/tick.md). Real time beyond that is dropped, not
+/// carried as a backlog, so a slow machine runs slower than real time instead of catching up in ever longer bursts.
 fn max_frame_step(speed: f32) -> f32 {
-    match speed > 1.0 {
-        true if std::env::var_os("PROCYON_AUTOPLAY").is_some() => (speed / 60.0).max(0.1),
-        true => 0.1,
-        false => 0.25,
-    }
+    MAX_CATCH_UP_FRAMES as f32 * BATTLE_TICK.as_secs_f32() * speed
 }
+
+/// Frames the simulation may run in one call before the backlog is dropped.
+const MAX_CATCH_UP_FRAMES: u32 = 10;
 
 /// Fastest speed of the HUD speed buttons when `data/hud/speed.json` gives no `max`.
 pub const MAX_GAME_SPEED: f32 = 16.0;
