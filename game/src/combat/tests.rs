@@ -1646,3 +1646,21 @@ fn a_new_shell_first_moves_in_the_tick_after_it_was_created() {
     let z = tick(&mut app).z;
     assert!((z + 3.3).abs() < 1e-3, "next tick: one step of 0.033 s at 100 units/s, got {z}");
 }
+
+/// The rejection list holds a shell's firer for its first second: the list is emptied on the first tick whose age is 1.0 s or more,
+/// which with 0.033 s ticks is the 31st (1.023 s), and again every 31 ticks after that.
+#[test]
+fn a_shell_cannot_touch_its_firer_until_its_31st_tick() {
+    let mut age = 0.0_f32;
+    let mut first = None;
+    for tick in 1..=40 {
+        age += 0.033;
+        if !shells::firer_exempt(age) {
+            first = Some(tick);
+            break;
+        }
+    }
+    assert_eq!(first, Some(31));
+    assert!(shells::firer_exempt(30.0 * 0.033));
+    assert!(!shells::firer_exempt(31.0 * 0.033));
+}

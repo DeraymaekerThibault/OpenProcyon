@@ -296,10 +296,21 @@ type ShipTargets<'w, 's> = Query<
     Without<crate::lifeboats::Lifeboat>,
 >;
 
-fn nearest_ship_hit(ships: &ShipTargets, lib: &Library, side: Side, p0: Vec3, p1: Vec3) -> Option<(Entity, f32, usize, Vec3)> {
+/// How long a shell's rejection list holds its firer, and the period at which the list is emptied again: the list is checked every
+/// tick and emptied on the first tick whose age since the last reset is 1.0 s or more (31 ticks of 0.033 s, so 1.023 s).
+pub(super) const REJECTION_RESET: f32 = 1.0;
+
+/// Whether a shell of age `age` (the sum of its ticks) still cannot touch its firer. Only the firer is on the list, and the first
+/// reset empties it for good, so the exemption is the shell's first second; after that the firer is struck like any other object.
+pub(super) fn firer_exempt(age: f32) -> bool {
+    age < REJECTION_RESET
+}
+
+/// The nearest ship the segment `p0..p1` strikes. `skip` is what the shell's rejection list rules out.
+fn nearest_ship_hit(ships: &ShipTargets, lib: &Library, skip: impl Fn(Entity, Side) -> bool, p0: Vec3, p1: Vec3) -> Option<(Entity, f32, usize, Vec3)> {
     let mut best: Option<(Entity, f32, usize, Vec3)> = None;
     for (entity, tf, ship, hp, _, mission, _) in ships.iter() {
-        if hp.destroyed || ship.side == side || mission.is_some_and(|m| !m.visible) {
+        if hp.destroyed || skip(entity, ship.side) || mission.is_some_and(|m| !m.visible) {
             continue;
         }
         let class = &lib.classes[ship.class];
@@ -435,10 +446,11 @@ pub(super) fn shells(
             }
             continue;
         }
+        let exempt = firer_exempt(s.age).then_some(s.shooter);
         // Islands and bases (read from the original's code): every projectile's step is swept against their collision triangles, so
-        // nothing beyond the first land it meets can be hit; an island's or base's own shots leave it freely (the original exempts
-        // the firer). A gun tower's section a hair past the surface still counts.
-        let ground = land.iter().filter(|(oe, _, v)| *oe != s.shooter && *v != Some(&Visibility::Hidden)).filter_map(|(_, o, _)| o.segment_hit(p0, p1)).min_by(f32::total_cmp);
+        // nothing beyond the first land it meets can be hit; an island's or base's own shots leave it freely for the first
+        // second (the firer is on the shell's rejection list). A gun tower's section a hair past the surface still counts.
+        let ground = land.iter().filter(|(oe, _, v)| exempt != Some(*oe) && *v != Some(&Visibility::Hidden)).filter_map(|(_, o, _)| o.segment_hit(p0, p1)).min_by(f32::total_cmp);
         let p1 = ground.map_or(p1, |t| p0.lerp(p1, (t + 0.5 / p0.distance(p1).max(1e-3)).min(1.0)));
         // Lob shells burst where they come down through the height they were aimed at.
         if let Some(a) = s.aim.filter(|a| !matches!(s.payload, Payload::Mine { .. }) && s.vel.y < 0.0 && p1.y <= a.y) {
@@ -447,7 +459,11 @@ pub(super) fn shells(
             crate::queue_removal(&mut commands, e);
             continue;
         }
-        let hit = nearest_ship_hit(&ships, &lib, s.side, p0, p1);
+        // Read from the original's code: a shell has no side test against ships; only its rejection list, which holds the firer for the
+        // first second, keeps it off a hull. Allied hulls are struck like enemy ones. PROVISIONAL: a mine still passes its own side
+        // (the original bounces it off allied hulls, which is not ported).
+        let mine = matches!(s.payload, Payload::Mine { .. });
+        let hit = nearest_ship_hit(&ships, &lib, |ship, side| exempt == Some(ship) || (mine && side == s.side), p0, p1);
         let best = hit.map(|(_, t, section, at)| (t, section, at));
         let best_ship = hit.map(|(entity, ..)| entity);
         let rock = rocks
@@ -457,7 +473,7 @@ pub(super) fn shells(
             .min_by(|a, b| a.0.total_cmp(&b.0));
         let animal = animals
             .iter()
-            .filter(|(ae, _, a)| a.visible && !a.dead && *ae != s.shooter)
+            .filter(|(ae, _, a)| a.visible && !a.dead && exempt != Some(*ae))
             .filter_map(|(ae, atf, a)| seg_sphere(p0, p1, atf.translation, a.radius).map(|t| (t, ae)))
             .min_by(|a, b| a.0.total_cmp(&b.0));
         if let Some((t, ae)) = animal.filter(|a| best.as_ref().is_none_or(|b| a.0 < b.0) && rock.is_none_or(|r| a.0 < r.0)) {

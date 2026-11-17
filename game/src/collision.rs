@@ -369,6 +369,12 @@ pub fn clear_prefix(bounds: [Vec3; 2], path: &[Transform], scenery: &[&Obstacle]
     path.iter().position(|tf| touches(bounds, tf, scenery)).unwrap_or(path.len())
 }
 
+/// How far ship box `a` moves away from ship box `b` in full (the other moves the opposite way, by mass): depth x |cos| along the
+/// horizontal part of the least-penetration normal, none when the boxes do not touch.
+fn hull_push(a: &tree::Box3, b: &tree::Box3) -> Option<Vec3> {
+    tree::overlap(b, a).map(tree::push)
+}
+
 fn forward(ship: &crate::Ship) -> Vec3 {
     Vec3::new(-ship.heading.sin(), 0.0, -ship.heading.cos())
 }
@@ -745,7 +751,12 @@ pub fn sail(
         if !ba.bounds.overlaps(bb.bounds) {
             continue;
         }
-        let Some(push) = contact(&ba.points, &bb.points) else { continue };
+        // The original (read from its code): the two boxes' 3-D separating-axis test, the least-penetration axis as the normal; the
+        // pair is pushed apart along its horizontal part by depth x |cos| (a tilted or vertical normal moves the hulls less).
+        let Some(push) = hull_push(&tree::Box3::placed(ca.collision_bounds, &ta), &tree::Box3::placed(cb.collision_bounds, &tb)) else { continue };
+        if push == Vec3::ZERO {
+            continue;
+        }
         let normal = push.normalize();
         let point = contact_point(&ba.points, &bb.points, normal);
         let fixed = |body: ContactBody, pin: bool| if pin { ContactBody { inverse_mass: 0.0, inverse_inertia: 0.0, ..body } } else { body };
@@ -758,7 +769,6 @@ pub fn sail(
         // The original (read from its code): pushed apart by mass, the heavier hull moving less; no bounce, both keep their
         // velocity. Each gets a yaw kick at the contact point from 0.1 x its mass x its change to the pair's common velocity
         // per 0.033 s, over a box's inertia (the own mass cancels: a light ship swings, a heavy one hardly turns).
-        let push = push.with_y(0.0);
         ta.translation += push * (a_body.inverse_mass / total);
         tb.translation -= push * (b_body.inverse_mass / total);
         let (ma, mb) = (ca.phys.mass, cb.phys.mass);
