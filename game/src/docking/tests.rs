@@ -126,8 +126,7 @@ fn coventry_docks_and_repairs_at_norville_on_the_flight_plane() {
         if app.world().get::<Docker>(me).is_some_and(Docker::is_docked) {
             assert!(app.world().get::<Transform>(me).unwrap().translation.y.abs() < 0.01);
             tick(&mut app, 6.0);
-            // The heal never touches the core hit points.
-            assert_eq!(app.world().get::<Health>(me).unwrap().core, full * 0.25);
+            assert_eq!(app.world().get::<Health>(me).unwrap().core, full);
             return;
         }
     }
@@ -300,7 +299,7 @@ fn player_docks_repairs_and_leaves_its_slot_free() {
     tick(&mut app, 0.1);
     assert!(app.world().get::<Docker>(me).is_none(), "human ship is free once clear");
     let h = app.world().get::<Health>(me).unwrap();
-    assert_eq!(h.core, full.core * 0.2, "the heal leaves the core hit points as they are");
+    assert_eq!(h.core, full.core);
     assert_eq!(h.sections, full.sections);
     assert!(app.world().get::<Dockable>(dockee).unwrap().nearest_free(&Transform::default(), Vec3::ZERO).is_some(), "slot freed");
     let position = app.world().get::<Transform>(me).unwrap().translation;

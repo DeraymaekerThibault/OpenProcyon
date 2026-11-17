@@ -442,7 +442,7 @@ fn tow_routine(
 }
 
 /// The dock heal, in one step: damaged sections back to full; a `full` refit also revives
-/// destroyed sections (the core hit points are left as they are: the original's heal never touches them) — the gun re-creation is
+/// destroyed sections and restores the core (the traced heal does not show the core write; restoring it is confirmed in play) — the gun re-creation is
 /// `GunStates::rearm` at the call site. A destroyed ship stays destroyed.
 fn repair(lib: &Library, ship: &Ship, h: &mut Health, full: bool) {
     let class = &lib.classes[ship.class];
@@ -450,6 +450,9 @@ fn repair(lib: &Library, ship: &Ship, h: &mut Health, full: bool) {
         if *hp > 0.0 || full {
             *hp = s.hp;
         }
+    }
+    if full {
+        h.core = class.core_hp;
     }
 }
 
