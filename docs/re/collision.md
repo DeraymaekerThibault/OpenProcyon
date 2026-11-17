@@ -51,7 +51,7 @@ Remake: `collision::sail` (the old impulse response for land is gone; ships and 
 
 ## Ships against land: the box tree (read from the original's code and measured on retail, 2026-11-17)
 
-Replaces the triangle test as the rule for a ship touching an island or base. Checked against 16 staged runs (2 islands, 2 ships,
+Replaces the triangle test as the rule for a ship touching an island or base. Checked against 16 runs of the original (2 islands, 2 ships,
 2443 logged ticks): 2441 ticks reproduced to within 0.05 u (median 0.000, 95th percentile 0.01), including a ship that bounced in a
 cycle for 150 ticks. Nothing in it is fitted.
 
