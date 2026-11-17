@@ -588,6 +588,10 @@ impl Script {
             self.docked.remove(&(docker, dockee));
         }
     }
+    /// Whether `docker` is registered as docked with `dockee` (what the rules' docked condition reads).
+    pub fn is_docked(&self, docker: Entity, dockee: Entity) -> bool {
+        self.docked.contains(&(docker, dockee))
+    }
     /// The ship `tower` is towing (the first link), if any.
     pub fn towee_of(&self, tower: Entity) -> Option<Entity> {
         self.tows.iter().find(|t| t.0 == tower).map(|t| t.1)

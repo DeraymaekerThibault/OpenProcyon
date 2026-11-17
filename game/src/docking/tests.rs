@@ -126,7 +126,8 @@ fn coventry_docks_and_repairs_at_norville_on_the_flight_plane() {
         if app.world().get::<Docker>(me).is_some_and(Docker::is_docked) {
             assert!(app.world().get::<Transform>(me).unwrap().translation.y.abs() < 0.01);
             tick(&mut app, 6.0);
-            assert_eq!(app.world().get::<Health>(me).unwrap().core, full);
+            // The heal never touches the core hit points.
+            assert_eq!(app.world().get::<Health>(me).unwrap().core, full * 0.25);
             return;
         }
     }
@@ -299,7 +300,7 @@ fn player_docks_repairs_and_leaves_its_slot_free() {
     tick(&mut app, 0.1);
     assert!(app.world().get::<Docker>(me).is_none(), "human ship is free once clear");
     let h = app.world().get::<Health>(me).unwrap();
-    assert_eq!(h.core, full.core);
+    assert_eq!(h.core, full.core * 0.2, "the heal leaves the core hit points as they are");
     assert_eq!(h.sections, full.sections);
     assert!(app.world().get::<Dockable>(dockee).unwrap().nearest_free(&Transform::default(), Vec3::ZERO).is_some(), "slot freed");
     let position = app.world().get::<Transform>(me).unwrap().translation;
@@ -517,4 +518,30 @@ fn only_a_ships_own_pick_is_replaced_before_it_docks() {
     assert!(docker(true, Phase::Wait).retargets() && docker(true, Phase::Approach).retargets());
     assert!(!docker(true, Phase::Docked).retargets() && !docker(true, Phase::Away).retargets());
     assert!(!docker(false, Phase::Approach).retargets(), "an ordered dock is not replaced");
+}
+
+/// The rules' docked relation is registered for a ship dockee only: the original never registers a base or an island.
+#[test]
+#[ignore = "needs imported assets"]
+fn only_a_ship_dockee_is_registered_as_docked_in_the_rules() {
+    for base in [false, true] {
+        let (mut app, lib) = app();
+        app.insert_resource(crate::campaign::load_id("mission10"));
+        let mut dockee = app.world_mut().spawn((Transform::from_xyz(100.0, 0.0, 0.0), Dockable::new(vec![point(-20.0)], true)));
+        if !base {
+            let (s, h) = ship(&lib, "Ship_Navy_Cutter", Side::Player);
+            dockee.insert((s, h));
+        }
+        let dockee = dockee.id();
+        let (s, h) = ship(&lib, "Ship_Navy_Cutter", Side::Player);
+        let me = app.world_mut().spawn((Transform::from_xyz(60.0, 0.0, 90.0), s, h)).id();
+        app.world_mut().resource_mut::<Messages<DockMsg>>().write(DockMsg::Dock { docker: Some(me), dockee });
+        tick(&mut app, 0.1);
+        tick(&mut app, 0.1);
+        app.world_mut().get_mut::<Transform>(me).unwrap().translation = Vec3::new(80.0, 0.0, 2.0);
+        tick(&mut app, 0.1);
+        assert!(app.world().get::<Docker>(me).unwrap().is_docked());
+        let registered = app.world().resource::<crate::campaign::Mission>().script.is_docked(me, dockee);
+        assert_eq!(registered, !base, "base: {base}");
+    }
 }

@@ -109,7 +109,7 @@ crew data's 1-10 values divided by 10.
 | Repair timing | `docking.rs::repair` restores `dt/repair_secs` per frame over 4/10/20/30 s | one-step heal at Repair Time; hull unchanged until then |
 | Dock duration | `max(5 s, repair_secs)` (4 → 5 s) | `max(dock time, Repair Effect Time)` (7/15/25/35 s) |
 | Destroyed sections/guns | gradual refill revives sections with hp 0; no gun re-creation | campaign tender / any base: revive + recreate guns; skirmish tender: no |
-| Core hp | restored with sections | unresolved [?] (not seen in the heal) |
+| Core hp | restored with sections | not touched: neither heal routine writes the core (the remake now leaves it as it is) |
 | `IsCampaign` | not represented | selects the heal mode |
 | Scaffold effect | one effect at ship centre | per-section jobs unless (campaign ship / base) → one effect |
 | Crew passive repair | none | every 12 s: one damaged sail +3 (sometimes +6); hulls not repaired (measured) |
@@ -119,7 +119,7 @@ crew data's 1-10 values divided by 10.
 
 1. **Do not add ammunition or a Mission 1 resupply step.** Record the finding; adjust the backlog item M1-03 at merge (it is repair/refit semantics + lifeboats, not resupply).
 2. **Dock timing** (`docking.rs`): export/keep both hud.hdt times per size class (Repair Time, Repair Effect Time). Duration = `max(rule dock time or 5 s, Effect Time)`; heal at `Repair Time`, single step.
-3. **Heal mode**: add `is_campaign` (mission vs skirmish) to the shared state; `full = dockee is base/island || is_campaign`. Partial: set sections with hp > 0 to max. Full: all sections to max (revive destroyed), core hp to max (PROVISIONAL, mark it), then reset every gun state of the docker (cooldown, burst, timers) and make mounts alive again.
+3. **Heal mode**: add `is_campaign` (mission vs skirmish) to the shared state; `full = dockee is base/island || is_campaign`. Partial: set sections with hp > 0 to max. Full: all sections to max (revive destroyed); the core hit points are left alone (the heal never writes them; the remake used to restore them), then reset every gun state of the docker (cooldown, burst, timers) and make mounts alive again.
 4. **Keep the scaffold effect** as is (one effect, PROVISIONAL); extend only if per-section jobs are wanted later.
 5. **Tests** (pure): partial vs full, instant heal at Repair Time not before, dock duration per class, base always full, gun state reset.
 6. **Mission 1 verification** (no new mission rules): confirm the volume rule drops invulnerability before docking and the dock hooks fire (see §7).
@@ -139,7 +139,7 @@ crew data's 1-10 values divided by 10.
 
 ## 8. Unresolved questions
 
-1. Whether the core damage-section hit points are restored by the heal.
+1. Whether anything else (outside the heal) ever restores the core hit points; the heal itself does not.
 2. What a `Munnitions` critical hit does, and any non-obvious users of the critical counters.
 3. The exact HUD consumers of the weapon-bank state sprites and the meaning of the HUD bytes cleared on heal.
 4. The application of an arms profile (`GunBank %02i`) to ships at mission/battle start, the points spending rules, and how the screens pause the game.

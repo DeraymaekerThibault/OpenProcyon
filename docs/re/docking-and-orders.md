@@ -182,7 +182,7 @@ addressed by rules (`MissionBase`); left-click / menu dock gated by the sight te
 variants (any friendly ship gets the friendly menu), retail icons/backgrounds/slot offsets and menu sounds, Focus / Stop / Dock live and the
 rest greyed; context cursors. Camera: right-drag still rotates, a short right click opens the menu.
 PROVISIONAL in the remake: dock-point yaw sign, docked ships keeping station on a moving dockee, one repair effect at the ship centre, sight test by centre
-distance minus our hull radii and the player's ship only (no group), the relation is also registered for base dockees.
+distance minus our hull radii and the player's ship only (no group). The docked relation is registered for ship dockees only; a base or island dockee is never registered (remake matches).
 Verified in Mission 1 (`--mission 1 --script dock|dock-click|dock-menu`: `Script::skip_to_tender` jumps to Objective 4 and puts the player,
 half damaged, next to RLS Bounty; `dock` sends the order like the D key, `dock-click` / `dock-menu` drive the real left click / right-click
 menu with synthetic mouse input): order accepted, approach ends on a dock point, Docked, repair to full, "Jim Has Docked With Tender" →
