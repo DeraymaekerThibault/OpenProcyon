@@ -1664,3 +1664,25 @@ fn a_shell_cannot_touch_its_firer_until_its_31st_tick() {
     assert!(shells::firer_exempt(30.0 * 0.033));
     assert!(!shells::firer_exempt(31.0 * 0.033));
 }
+
+#[test]
+fn a_shell_roll_is_a_whole_number_inside_its_range() {
+    let mut rng = Rng::new(3);
+    let rolls: Vec<f32> = (0..200).map(|_| damage_roll(14.5, 20.4, &mut rng)).collect();
+    assert!(rolls.iter().all(|r| r.fract() == 0.0 && (14.0..=20.0).contains(r)));
+    assert!(rolls.iter().any(|r| *r != rolls[0]), "still random");
+}
+
+#[test]
+fn a_torpedo_steps_its_height_by_a_fixed_amount_per_tick() {
+    assert_eq!(torpedo_height_step(0.0, 1.0), 0.025);
+    assert_eq!(torpedo_height_step(0.0, -1.0), -0.025);
+    assert_eq!(torpedo_height_step(1.0, 1.04), 1.0, "within 0.05 of the target: no step");
+    assert_eq!(torpedo_height_step(3.0, 10.0), 3.0, "bounded to +/-3");
+    assert_eq!(torpedo_height_step(-3.0, -10.0), -3.0);
+    let mut y = 0.0;
+    for _ in 0..40 {
+        y = torpedo_height_step(y, 5.0);
+    }
+    assert!((y - 1.0).abs() < 1e-4, "40 ticks climb one unit: {y}");
+}
