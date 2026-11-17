@@ -14,8 +14,12 @@ crewed/player ships) the lead is only applied while the target is turning and ad
 
 ## Deviation (run once per burst, or per shot if CalculateAccuracyDeviationDuringBurst)
 - Band by distance: <= EffectiveRange -> Effective deviation, <= LongRange -> Long, else Maximum.
-- Half of it, times an accuracy factor: 0.5 for plain AI ships (0.8 or a per-ship value for some ship flags);
-  crewed ships use 1 - 0.8 * gunnery skill (+0.1 / +0.05 random bonuses, clamped to [0,1]); NIS mode uses 0.1 (the deviation is scaled, not removed).
+- Half of it, times an accuracy factor that depends on what the gun sits on. **Every ship, computer or not, uses its crew**:
+  1 - 0.8 x the gunnery of the gunner in the gun's own bank slot, after the ship's leadership bonuses (+0.1 / +0.05, drawn once
+  per ship from the captain's and first mate's Leadership, [crew.md](crew.md)) and clamped to [0, 1]. A slot nobody holds is a
+  rating-1 hand (0.1, so a factor of 0.92 before bonuses). The flat 0.5 belongs to objects that are neither ships, bases nor dragons;
+  a base reads a per-base value (the mission's gunnery level for its guns, `IslandGunnery`), a dragon's breath 0.8 (the remake gives
+  dragon breath no spread yet). NIS mode uses 0.1 (the deviation is scaled, not removed).
 - The final angle is uniform in [-a, +a].
 - Remake: the cinematic factor is 0.1. The gun's `CalculateAccuracyDeviationDuringBurst` flag (set on a few retail guns) makes the angle be
   drawn for every shot instead of once per burst (`GunDef::dev_per_shot`; the exporter writes the flag, so re-import assets).
@@ -25,7 +29,9 @@ Per muzzle the angle is applied twice to the muzzle orientation, about two axes,
 (so yaw and pitch error have the same magnitude). Speed is MuzzleSpeed.
 
 ## In the remake (`combat/`)
-Lead and deviation follow the above. PROVISIONAL: factor 0.5 for every ship (no crews); the two rotation axes
+Lead and deviation follow the above. Ships use the crew rule above: named crew (skirmish, campaign outfit) or, for a placed ship
+off the player's side, its level's generic crew in every slot (3 / 6 / 8 of 10); the player's side with no crew record at all keeps
+the campaign roster's best gunner (human fleet) or a rating-1 hand. PROVISIONAL: the two rotation axes
 taken as world up and the muzzle's right. No shell inherits the shooter's velocity (measured, see below), so the lead uses
 the target's velocity alone.
 Measured in an earlier scripted skirmish: hit rate 4% before, 60% after (not remeasured after the changes below).
@@ -70,9 +76,12 @@ ballistic arc and attributed to the ship it started from.
 - Earlier measurement (Navy Man-O-War, nine gunners of 7-9, one gun's hits every 3.5-3.9 s) was read as a cannon crew effect; it more likely
   was several heavy guns hitting in turn, since the schooner's medium-cannon spacing shows no crew effect. Retail check still open: a torpedo
   ship with gunnery 0 vs 9 should show about 35 s vs about 26 s between torpedoes; a cannon ship no difference.
-- Each gun reads the gunner of its own bank (bank index, shared by the bank's guns); the remake's slots follow the weapon banks including
-  fixed ones. PROVISIONAL: the original may also count point-defence banks in that index. The ship's leadership bonus ([crew.md](crew.md))
-  applies to accuracy only, not to reload.
+- Each gun reads the gunner of its own bank, for accuracy (every ship) and for the torpedo reload: the bank index is the order in which
+  banks first appear in the ship's gun list, shared by all the bank's guns. The original counts point-defence banks in that index (a
+  class's gunner slots equal its bank count: Navy Cutter 5, Navy Man-O-War 10), while the remake's slots follow the banks the crew
+  screen lists, which skip point defence. The two agree unless a point-defence bank comes before a listed one (most Navy hulls, e.g.
+  the Cutter's fourth bank); whether the retail crew screen shifts its slots there is not known, so the remake keeps the screen's
+  order. PROVISIONAL. The ship's leadership bonus ([crew.md](crew.md)) applies to accuracy only, not to reload.
 
 ## Lob shells
 Measured on the running original game (2026-10): a Navy Man-O-War's bow Star Mortar fired at open etherium in a

@@ -71,9 +71,14 @@ crew data's 1-10 values divided by 10.
   +7 (sometimes +8) on almost every tick; eight riggers averaging Rigging 8.25: the sail +21 (seven successes) per tick.
   Every one of 49 logged repairs went to the most damaged section of its group. Computer ships mended reinforced wood +5
   and iron +2 per tick, one crew value c = 0.75 fitting both.
-- PROVISIONAL in the engine: the leadership bonus thresholds are not known (bonuses not modelled); computer crews use 0.75
-  for every slot; the player's empty slots count as generic hands (0.1); the order of materials past Iron in the factor
-  table is assumed.
+- Computer ships repair with their own crew like every ship: a skirmish ship with the named crew it was bought with (empty slots
+  are rating-1 hands), a placed ship with its `Crew Skill Level`'s generic crew (every slot one crewman rated 3 / 6 / 8). The
+  measured +5 and +2 fit a mean engineering value c between 0.746 and 0.895 (floor(6.7 c) = 5 and floor(3.3 c) = 2); the measured
+  ships' crews were not logged. A single rating-7 engineer, the rating computer fleets almost always hire ([crew.md](crew.md)), reaches
+  it with either leadership bonus (0.75 to 0.85), not without one (4 and 2). So the old flat 0.75 is gone; it was a fit to this
+  number, not a rule.
+- PROVISIONAL in the engine: the order of materials past Iron in the factor table is assumed; the leadership draw is a fixed
+  per-ship pseudo-random value, not the original's generator; the player's side without a crew record counts rating-1 hands.
 
 ### 3.5 Arms and crew
 - Rule action `Open Crew and Arms Screens` opens the Crew and Arms screens through the HUD; no state is changed by the rule itself. [C] Used in missions 3 (END NIS1), 5 (Player Undocks @ Grant), 7 (Docking), 9 (End NIS1), 11 (END NIS0); **not in mission 1 or 2**.

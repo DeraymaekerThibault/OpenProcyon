@@ -45,8 +45,10 @@ riggers' Rigging; Strength = Combat. Leadership and Gunnery show on no bar.
 ## Remake
 - `Ship::crew_speed` / `crew_turn` = mean over the post's slots of `crew_arms::skill_factor` (the per-crewman line above / 1.125,
   empty slots 1) for ships with campaign posts.
-- Gunners: accuracy `1 - 0.8 x gunnery` as before, and reload shortened by 10 x gunnery seconds on the player's ships
-  ([gunnery.md](gunnery.md#gunners), measured).
+- Gunners: every ship's burst spread factor is `1 - 0.8 x gunnery` of the gun's own bank slot (a rating-1 hand when empty), and
+  reload shortens by 10 x gunnery seconds on the player's ships ([gunnery.md](gunnery.md#gunners), measured).
+- Computer ships use their crew for damage control, fire-fighting and gunnery (no flat stand-in): skirmish ships their bought crew,
+  placed ships the generic crew of their level in every slot, with the usual leadership draw.
 
 ## Saved crew factors
 Saves made mid-battle store per ship an engineer and a navigator factor. Measured (headless skirmishes, 2026-10):

@@ -37,6 +37,9 @@ pub fn accuracy(points: Option<&CampaignPoints>) -> f32 {
     points.and_then(|p| best(p, "gunnery")).map_or(0.5, |g| 1.0 - 0.8 * g)
 }
 
+/// The skill of a rating-1 hand (the default crewman, and what an empty slot holds), on the 0..1 scale.
+pub const DEFAULT_HAND: f32 = 0.1;
+
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ShipFit {
     pub crew: [Vec<String>; 8],
@@ -112,7 +115,7 @@ impl CrewPosts {
     }
     /// Gunnery of the gunner in slot `slot` (the order of the ship's selectable banks); a generic hand (0.1) when the slot is empty or hidden.
     pub fn gunner_skill(&self, slot: Option<usize>) -> f32 {
-        slot.and_then(|k| self.0[0].get(k)).and_then(|id| ability(id, "gunnery")).unwrap_or(0.1)
+        slot.and_then(|k| self.0[0].get(k)).and_then(|id| ability(id, "gunnery")).unwrap_or(DEFAULT_HAND)
     }
     /// (top-speed, rudder-torque) factors: engineers' engineering and the helmsman's navigation (docs/re/crew.md).
     pub fn handling(&self, caps: &[u32; 8]) -> (f32, f32) {
@@ -140,6 +143,29 @@ impl CrewPosts {
     pub fn combat(&self, role: usize, generic: f32) -> Vec<f32> {
         self.0[role].iter().map(|c| ability(c, "combat").unwrap_or(generic)).collect()
     }
+}
+
+/// The generic crew of a placed ship's `Crew Skill Level` (docs/re/crew.md): one crewman, rated 3 / 6 / 8 in every skill, sits in
+/// every slot of every post (so no stand-in is needed, and the captain's and first mate's Leadership draw the bonuses like any
+/// crew's). `Players` (the campaign roster) only marks the player's own ships, which take their posts from the outfit;
+/// PROVISIONAL: it reads as Average here, as everywhere else.
+pub fn generic_posts(skill: crate::boarding::Skill, caps: &[u32; 8]) -> CrewPosts {
+    use crate::boarding::Skill;
+    let id = match skill {
+        Skill::Green => "Crew_General_Navy_Green",
+        Skill::Elite => "Crew_General_Navy_Elite",
+        Skill::Average | Skill::Players => "Crew_General_Navy_Average",
+    };
+    CrewPosts(std::array::from_fn(|r| vec![id.to_string(); caps[r] as usize]))
+}
+
+/// The crew a ship fights with when it has no posts of its own: a ship off the player's side carries its level's generic crew.
+/// `None` for the player's side (default hands, or the campaign roster, which the caller knows).
+pub fn fallback_posts(ship: &crate::Ship, boarding: Option<&crate::boarding::Boardable>, class_name: &str) -> Option<CrewPosts> {
+    if ship.side == crate::Side::Player {
+        return None;
+    }
+    Some(generic_posts(boarding?.skill, &crate::boarding::counts(class_name)))
 }
 
 /// Leadership (docs/re/crew.md): each ship draws two chances in [0, 1) once; every crewman but the captain and first mate gains 0.1

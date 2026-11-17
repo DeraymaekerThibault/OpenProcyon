@@ -214,6 +214,7 @@ pub(super) fn fire(
         Option<&crate::ship::FleetPilot>,
         Option<&crate::cloak::Cloak>,
         Option<&crate::crew_arms::CrewPosts>,
+        Option<&crate::boarding::Boardable>,
     )>,
     others: Query<(Entity, &Transform, &Ship, &Health, Has<PlayerShip>, Option<&crate::campaign::MissionShip>, Option<&crate::cloak::Cloak>)>,
     mut parts: Query<&mut Transform, (With<GunPart>, Without<Ship>)>,
@@ -278,7 +279,7 @@ pub(super) fn fire(
         .collect();
     let mut seen: Vec<Contact> = Vec::with_capacity(contacts.len()); // reused: refilled per shooter
     // In entity order: every shooter draws from the shared `Rng`, and the query's own order can differ from launch to launch.
-    for (me, tf, ship, mut states, health, mission, primary, pilot, cloak, posts) in shooters.iter_mut().sort::<Entity>() {
+    for (me, tf, ship, mut states, health, mission, primary, pilot, cloak, posts, boarding) in shooters.iter_mut().sort::<Entity>() {
         if health.destroyed {
             continue;
         }
@@ -286,6 +287,7 @@ pub(super) fn fire(
         seen.extend(contacts.iter().map(|c| Contact { visible: c.visible && sensors.in_sight(me, c.entity, campaign.as_deref()), ..*c }));
         let cloaked_now = cloak.as_ref().is_some_and(|c| c.holds_fire());
         let class = &lib.classes[ship.class];
+        let generic = posts.is_none().then(|| crate::crew_arms::fallback_posts(ship, boarding, &class.name)).flatten();
         // Player's command ship: only the clicked target (retail: direct-fire guns need an enemy click or panic fire). Its other
         // ships: the nearest living enemy. Enemies: their captain's target.
         // Mission ships other than the player's fire at the target the rules' AI chose (rules::mission_ai). Skirmish ships carry
@@ -370,17 +372,22 @@ pub(super) fn fire(
                 state.burst_left = 0;
                 continue;
             }
-            // Accuracy factor: 0.1 in a cinematic; else 0.5 for the plain AI, and crewed ships use 1 - 0.8 * gunnery skill (the campaign
-            // roster's best gunner for the human fleet).
+            // Accuracy factor: 0.1 in a cinematic; else every ship, computer or not, uses 1 - 0.8 x the gunnery of the gunner in the gun's
+            // own bank slot (+ the ship's leadership bonus). A slot nobody was put in holds a rating-1 hand. A placed computer ship's
+            // gunners are its level's generic crew, in every slot. Only the player's side without any crew record falls back: the
+            // campaign roster's best gunner for the human fleet, else a rating-1 hand.
             let factor = || {
                 if nis_aim {
                     return 0.1;
                 }
                 let human = campaign.as_deref().is_some_and(|c| mission.is_some_and(|ms| ms.owner == c.script.player()));
-                if human {
-                    posts.map_or(crewed, |p| p.skill(0, "gunnery").map_or(0.5, |skill| 1.0 - 0.8 * (skill + crate::crew_arms::leadership_bonus(me, p)).min(1.0)))
-                } else {
-                    0.5
+                match posts.or(generic.as_ref()) {
+                    Some(p) => {
+                        let slot = if generic.is_some() { Some(0) } else { crate::crew_arms::weapon_banks(&lib, class).iter().position(|(b, _)| *b == mount.bank) };
+                        gunner_accuracy(p.gunner_skill(slot) + crate::crew_arms::leadership_bonus(me, p))
+                    }
+                    None if human => crewed,
+                    None => gunner_accuracy(crate::crew_arms::DEFAULT_HAND),
                 }
             };
             if state.burst_left == 0 && state.cooldown <= 0.0 && state.aligned {
@@ -719,6 +726,12 @@ fn aim_turret(
         part.rotation = Quat::from_rotation_x(state.pitch);
     }
     engaged
+}
+
+/// The factor on a gun's burst spread from its gunner's skill (0..1, leadership bonus included): 1 - 0.8 x skill, so a
+/// rating-10 gunner leaves a fifth of the spread and a rating-1 hand 0.92.
+pub(super) fn gunner_accuracy(skill: f32) -> f32 {
+    1.0 - 0.8 * skill.clamp(0.0, 1.0)
 }
 
 /// A burst's deviation angle, drawn once per burst (once per shot for a gun with `dev_per_shot`): the range band's deviation * 0.5, uniform in +-that, times `accuracy`.
