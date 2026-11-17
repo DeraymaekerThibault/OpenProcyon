@@ -750,3 +750,20 @@ fn island_contact_through_the_game_scheduler() {
         assert!(error <= 0.05, "{name} on {kind}: {error}");
     }
 }
+
+/// Two ship boxes whose shallowest axis is steep: B (half extents 0.5, turned 45 degrees about the bow axis) sits up and to the
+/// starboard of A (half extents 1). The shallowest axis is the diagonal (0.707, 0.707, 0); depth 1.2 sqrt 2 - (sqrt 2 + 0.5) = 0.2171,
+/// so A is pushed 0.2171 x cos 45 = 0.1535 along -x (the horizontal part of the normal), not the whole depth.
+#[test]
+fn a_ship_pair_is_pushed_apart_by_depth_times_cosine_along_the_horizontal_normal() {
+    let a = tree::Box3 { centre: Vec3::ZERO, axes: [Vec3::X, Vec3::Y, Vec3::Z], half: Vec3::ONE };
+    let h = std::f32::consts::FRAC_1_SQRT_2;
+    let b = tree::Box3 { centre: Vec3::new(1.2, 1.2, 0.0), axes: [Vec3::new(h, h, 0.0), Vec3::new(-h, h, 0.0), Vec3::Z], half: Vec3::splat(0.5) };
+    near(hull_push(&a, &b).unwrap(), Vec3::new(-0.1535, 0.0, 0.0));
+    near(hull_push(&b, &a).unwrap(), Vec3::new(0.1535, 0.0, 0.0));
+    // flat normals lose nothing: side by side along x, overlap 0.5
+    let c = tree::Box3 { centre: Vec3::new(1.5, 0.0, 0.0), axes: [Vec3::X, Vec3::Y, Vec3::Z], half: Vec3::ONE };
+    near(hull_push(&a, &c).unwrap(), Vec3::new(-0.5, 0.0, 0.0));
+    // a separated pair has no push
+    assert!(hull_push(&a, &tree::Box3 { centre: Vec3::new(2.5, 0.0, 0.0), ..c }).is_none());
+}

@@ -17,8 +17,11 @@ Source: observed behaviour of the original game, WOT collision definitions and t
 - **Contact shapes:** ship against ship tests the two physics boxes (the WOT `MinExtents` / `MaxExtents`, no padding) once their
   collision spheres overlap, by separating axes (the box faces and the cross products of their edges); the axis of least
   penetration is the normal and the contact point is the centre of the touching corners.
-- **Ship against ship**, checked every physics tick (1/30 s) while the hulls overlap: the two are pushed apart along the contact
-  normal in proportion to the other's mass (the heavier one moves less; an idle ship is no exception). Neither ship's velocity
+- **Ship against ship**, checked every physics tick (1/30 s) while the hulls overlap: the two are pushed apart in proportion to the other's mass (the heavier one moves less; an idle ship is no exception). The contact normal is
+  the box test's own 3-D axis, but the push is horizontal: the depth times |cos| of the angle between that axis and its horizontal
+  part, applied along the horizontal part (a steep or vertical axis moves the hulls little or not at all; flat axes lose nothing).
+  The same rule as for land below (confirmed there on retail; for ship pairs read from the code, with only flat normals measured
+  on retail). Neither ship's velocity
   changes: no bounce, restitution or friction. Each gets a yaw kick at the contact point: a force of 0.1 x its mass x the
   difference between its velocity and the pair's mass-weighted common velocity, per tick, over its box inertia (mass x (width² +
   length²) / 12, width and length twice the box's starboard and forward extents), at the contact point taken at deck height; the
@@ -41,6 +44,24 @@ Source: observed behaviour of the original game, WOT collision definitions and t
 - Remake: `collision::sail`, `combat::lob::ram_damage`, `combat::shells::apply_ship_hit` and `apply_base_hit` (spill). PROVISIONAL:
   a rock touch plays the ship's collision sound (the rock's own impact sound is not read); shells on bases take no difficulty factor
   (the original applies one on the same routine, but its value for bases is not measured).
+
+## A shell's rejection list (read from the original's code; the reset timing measured on retail, 2026-11)
+
+Every object carries a list of objects it ignores in collisions; either side's list can skip a pair for every kind of response. A
+shell's list is created holding **only its firer**, so a shell cannot hit the ship that fired it, and nothing else is spared: there is
+no side test for shells against ships, so shells strike allied hulls like enemy ones (friendly fire; the remake used to skip every
+ship of the shooter's side). The list is checked on every tick of the shell and **emptied on the first tick whose time since
+creation (or since the last reset) is 1.0 s or more**: with 0.033 s ticks that is the 31st tick, 1.023 s, and every 31 ticks after
+(226 consecutive gaps of 1.023 s measured). From then on the firer is struck like any other object, so a lob that falls back on its own
+ship after a second hits it.
+A shell that hits something it does not ricochet from is put on a list that rejects everything ("spent"); the next reset also revives
+it. Remake: `combat::shells::firer_exempt` (the firer is exempt while the shell's age is under 1.0 s, for ships, islands and bases and
+animals; the first reset leaves the list empty for good, so no timer beyond the age is needed). PROVISIONAL / not built: the "spent"
+revival (a shell that ricochets off a rock, wreck or whale stays inert until the next reset; the remake consumes it or lets it pass),
+gravity charges below the water, the forced bounce of mines off allied hulls (the remake's mines still ignore their own side's
+ships), and the side test the remake keeps for bases (whether a shell can strike a base of its own side was not separated from the
+neutral-island handling). Which tick of the original's step a shell is born in relative to its first reset was not measured; the remake
+counts ticks from the one after the shot.
 
 ## Land and bases (read from the original's code, 2026-10-31)
 
