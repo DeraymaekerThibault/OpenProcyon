@@ -455,7 +455,7 @@ fn a_broadside_attacker_circles_an_idle_ship_on_its_turning_circle() {
             let gap = tf.translation.length() - class.radius;
             let at = attack::aim(cutter, &cutter_hp, &Transform::IDENTITY, tf.translation, false);
             let course = attack::course(routine, tf.translation, ship.heading, at, gap, range[0], i as f32 * dt, &mut None);
-            let throttle = attack::throttle(e, tf.translation, ship.heading, course[0]).map(|_| 2.0 * min_throttle);
+            let throttle = attack::throttle(routine, e, tf.translation, ship.heading, course[0]).map(|_| 2.0 * min_throttle);
             (ship.throttle, ship.waypoints, ship.goal, ship.order) = (throttle, course, None, 3);
             helm_step(&mut ship, &mut tf, class, &h, dt, true);
             if i as f32 * dt > 120.0 {

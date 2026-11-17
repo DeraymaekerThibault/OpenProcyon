@@ -9,6 +9,8 @@ use crate::data::Class;
 
 /// Retail follower: full throttle while the next course point is within this angle of the bow, else the minimum throttle.
 const FULL_THROTTLE_ARC: f32 = 11.25 * std::f32::consts::PI / 180.0;
+/// A ram's own full-throttle window: the target's centre within this angle of the bow (5 degrees), narrower than the other attacks'.
+const RAM_FULL_THROTTLE_ARC: f32 = 5.0 * std::f32::consts::PI / 180.0;
 /// Frontal attack: longest leg sailed at right angles to the line of sight before charging again (s).
 const FRONTAL_LEG: f32 = 15.0;
 
@@ -127,10 +129,11 @@ pub fn course(routine: Routine, pos: Vec3, heading: f32, foe: Vec3, gap: f32, r:
 }
 
 /// The follower's throttle toward `point` as a fraction of Ahead Full (`Ship::throttle`): full (Emergency) within 11.25° of the bow,
-/// else the ship's minimum, 0.65-0.75 of full drawn once per ship.
-pub fn throttle(e: Entity, pos: Vec3, heading: f32, point: Vec3) -> Option<f32> {
+/// else the ship's minimum, 0.65-0.75 of full drawn once per ship. A `Ram` has a narrower window: 5° of the bow.
+pub fn throttle(routine: Routine, e: Entity, pos: Vec3, heading: f32, point: Vec3) -> Option<f32> {
     let d = point - pos;
-    if crate::ship::angdiff((-d.x).atan2(-d.z), heading).abs() <= FULL_THROTTLE_ARC {
+    let arc = if routine == Routine::Ram { RAM_FULL_THROTTLE_ARC } else { FULL_THROTTLE_ARC };
+    if crate::ship::angdiff((-d.x).atan2(-d.z), heading).abs() <= arc {
         return None;
     }
     // ponytail: a fixed per-ship draw from the entity, not the original's random generator.

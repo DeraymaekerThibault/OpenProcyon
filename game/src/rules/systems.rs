@@ -755,7 +755,7 @@ fn mission_ai(
         if let (Some((foe, fp)), false) = (chase, ms.stance == Stance::Dummy) {
             let (goal, order, throttle) = if ms.ram && ordered.is_some() {
                 let d = fp - tf.translation;
-                ((-d.x).atan2(-d.z), 3, None)
+                ((-d.x).atan2(-d.z), 3, crate::ship::attack::throttle(crate::ship::attack::Routine::Ram, e, tf.translation, ship.heading, fp))
             } else if let Some(away) = crate::ship::flee(&holes, tf.translation) {
                 (away, 3, None)
             } else {
@@ -770,7 +770,7 @@ fn mission_ai(
                         };
                         let course = crate::ship::attack::course(routine, tf.translation, ship.heading, at, gap, range[0], time.elapsed_secs(), breakoffs.entry(e).or_default());
                         let d = course[0] - tf.translation;
-                        ((-d.x).atan2(-d.z), 3, crate::ship::attack::throttle(e, tf.translation, ship.heading, course[0]))
+                        ((-d.x).atan2(-d.z), 3, crate::ship::attack::throttle(routine, e, tf.translation, ship.heading, course[0]))
                     }
                     None => (ship.heading, 0, None),
                 }

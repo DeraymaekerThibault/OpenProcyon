@@ -332,7 +332,7 @@ Static analysis of the original's captain AI, written as rules. Nothing in it de
   turns toward its target and swings round it on that side. **Rear:** inside R run straight away to R, outside it come straight back. Its distance is
   measured from its own hull (centre minus its own radius) to the aim point on the target, the target's size not counted, so it
   holds the same distance from a small and a large target.
-  **Ram:** straight at it, full throttle within 5° of the bow.
+  **Ram:** straight at it, full throttle within 5° of the bow (the other attacks' window is 11.25°; a ram steers by its own 5° test, also under the ram order). Remake: `attack::throttle` takes the routine. PROVISIONAL: whether the follower's 11.25° rule still lifts a ram's throttle between 5° and 11.25° is unread (the remake gives the minimum there), as is the lower bound of the ram's angle test.
 - **Throttle:** full while the next course point is within 11.25° of the bow, else the ship's own minimum, 0.65-0.75 of full (drawn
   per ship). That minimum is a floor under every slow-down but the collision avoider's, so nothing else slows an attacker near its
   course points.
