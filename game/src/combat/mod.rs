@@ -299,7 +299,6 @@ fn setup(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut mats: Res
 /// its `destructFx` start.
 #[derive(Component)]
 pub struct Sinking {
-    start: Transform,
     elapsed: f32,
     /// Section mesh nodes: (node, section, rest pose, burst done); filled on the first breakup frame.
     nodes: Option<Vec<(Entity, usize, Transform, bool)>>,
@@ -315,8 +314,16 @@ fn breakup_clip<'a>(lib: &'a Library, class: &crate::data::Class) -> Option<&'a 
 }
 
 impl Sinking {
-    fn new(start: Transform) -> Self {
-        Sinking { start, elapsed: 0.0, nodes: None }
+    pub(crate) fn new() -> Self {
+        Sinking { elapsed: 0.0, nodes: None }
+    }
+
+    /// What the dying hull's drive sees (docs/re/effects.md "Death drive"): from `CLIP_DELAY` after the kill every section is at 0 HP,
+    /// so the speed and turning losses sit at their 0.9 cap and thrust, top speed and rudder torque are 0.1 of normal. Before that the
+    /// ship still has the sections it died with. The stored `Health` is left alone: crew speech, damage looks and statistics keep
+    /// reading what the hull really lost.
+    pub fn drive_health(&self, h: &Health) -> Option<Health> {
+        (self.elapsed >= CLIP_DELAY).then(|| Health { sections: vec![0.0; h.sections.len()], core: h.core, destroyed: true })
     }
 }
 
@@ -326,17 +333,17 @@ fn hide_time(d: &crate::data::Destruct) -> f32 {
     if d.fx.is_some() { d.start } else { d.end }
 }
 
-/// Gameplay death is immediate; the presentation breaks the hull up for a few seconds, then removes it.
-fn deaths(mut commands: Commands, lib: Res<Library>, mut lost: MessageWriter<crate::lifeboats::ShipLost>, mut ships: Query<(Entity, &Transform, &mut Ship, &mut Health)>) {
-    for (e, tf, mut ship, mut hp) in &mut ships {
+/// Gameplay death is immediate (`destroyed`: not a target, no collision, not alive for the rules); the hull keeps its speed and
+/// heading and is steered on by the computer (`collision::tick` drives it while `Sinking`), while the presentation breaks it up for a
+/// few seconds, then removes it.
+fn deaths(mut commands: Commands, lib: Res<Library>, mut lost: MessageWriter<crate::lifeboats::ShipLost>, mut ships: Query<(Entity, &Ship, &mut Health)>) {
+    for (e, ship, mut hp) in &mut ships {
         if hp.destroyed || hp.core > 0.0 {
             continue;
         }
         hp.destroyed = true;
-        ship.speed = 0.0;
-        ship.ang_vel = 0.0;
         lost.write(crate::lifeboats::ShipLost(e));
-        commands.entity(e).insert(Sinking::new(*tf));
+        commands.entity(e).insert(Sinking::new());
         info!("{} destroyed", lib.classes[ship.class].name);
     }
 }
@@ -350,15 +357,14 @@ fn breakup(
     mut sfx: MessageWriter<Sfx>,
     time: Res<Time>,
     children: Query<&Children>,
-    mut ships: Query<(Entity, &mut Transform, &Ship, &mut Visibility, &mut Sinking)>,
+    mut ships: Query<(Entity, &Transform, &Ship, &mut Visibility, &mut Sinking)>,
     mut nodes: Query<(&Name, &mut Transform, &mut Visibility), Without<Ship>>,
 ) {
-    for (e, mut tf, ship, mut vis, mut sinking) in &mut ships {
+    for (e, tf, ship, mut vis, mut sinking) in &mut ships {
         let class = &lib.classes[ship.class];
         let clip = breakup_clip(&lib, class);
         sinking.elapsed += time.delta_secs();
         let t = (sinking.elapsed - CLIP_DELAY).max(0.0);
-        *tf = sinking.start;
         if sinking.nodes.is_none() {
             // PROVISIONAL death sound pool; visual randomness must not perturb combat rolls.
             let at = tf.translation;

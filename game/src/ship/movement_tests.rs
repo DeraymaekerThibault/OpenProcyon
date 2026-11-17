@@ -777,3 +777,47 @@ fn a_held_ship_is_released_by_move_dock_tow_and_board_orders_only() {
     queue.apply(&mut w);
     assert!(w.get::<HoldPosition>(e).is_none());
 }
+
+/// A dying Navy Cutter's drive (docs/re/effects.md "Death drive"): with every section at 0 HP and the computer's full throttle it
+/// settles at 0.1 x MaxSpeed x crew factor (retail: 0.90 against 0.1 x 8.06 x 1.125 = 0.906), and a fast hull slows to that speed
+/// through the ordinary drag law instead of stopping.
+#[test]
+#[ignore = "needs imported assets"]
+fn dying_cutter_drifts_at_a_tenth_of_max_speed_and_a_fast_one_decays_to_it() {
+    let lib = combat::Library::load(crate::assets_dir());
+    let ci = lib.index("Ship_Navy_Cutter");
+    let class = &lib.classes[ci];
+    let wreck = Health { sections: vec![0.0; class.sections.len()], core: 0.0, destroyed: true };
+    let dt = 0.0344;
+    let ship = |speed| Ship {
+        class: ci,
+        side: Side::Player,
+        heading: 0.0,
+        speed,
+        ang_vel: 0.0,
+        order: 3,
+        waypoints: vec![],
+        goal: None,
+        cap: 1.0,
+        throttle: Some(1.0 / FULL_SPEED), // the computer's throttle 1.0
+        sail_energy: 1.0,
+        crew_speed: 1.125,
+        crew_turn: 1.125,
+        net: 1.0,
+        avoid: 1.0,
+    };
+    let expected = 0.1 * class.phys.max_speed * 1.125;
+    let (mut slow, mut fast) = (ship(0.0), ship(9.0));
+    let (mut tf_slow, mut tf_fast) = (Transform::default(), Transform::default());
+    let mut previous = fast.speed;
+    for i in 0..(20.0 / dt) as usize {
+        helm_step(&mut slow, &mut tf_slow, class, &wreck, dt, true);
+        helm_step(&mut fast, &mut tf_fast, class, &wreck, dt, true);
+        assert!(fast.speed <= previous + 1e-6, "a fast hull only slows (tick {i})");
+        assert!(fast.speed >= expected - 1e-3, "it never undershoots the drift speed");
+        previous = fast.speed;
+    }
+    assert!((slow.speed - expected).abs() < 0.01, "from rest {} vs {expected}", slow.speed);
+    assert!((fast.speed - expected).abs() < 0.01, "from 9 u/s {} vs {expected}", fast.speed);
+    assert!((expected - 0.906).abs() < 0.01 && (slow.speed - 0.90).abs() < 0.02, "retail measured 0.90: {}", slow.speed);
+}

@@ -233,6 +233,7 @@ pub fn ai(
     (lib, fleets): (Res<combat::Library>, Res<Fleets>),
     bases: Query<(Entity, &Transform, &combat::BaseSide, &Health, &combat::ArmedBase)>,
     scripted: Query<&campaign::MissionShip>,
+    dying: Query<(), With<combat::Sinking>>,
 ) {
     if mission.is_some() {
         return;
@@ -257,7 +258,9 @@ pub fn ai(
         });
         let Some(dt) = clock.due(now) else { continue };
         // The human's own fleet waits for orders; allied computer fleets share the human's side but hunt like any computer.
-        let human = s.side == Side::Player && member.is_none_or(|m| m.0 == fleets.local);
+        // A ship that was just sunk has left its fleet and is computer-run, whoever steered it (docs/re/effects.md "Death drive").
+        let sinking = dying.contains(e);
+        let human = !sinking && s.side == Side::Player && member.is_none_or(|m| m.0 == fleets.local);
         if busy.contains(e) || left_to_script(e) {
             continue;
         }
@@ -269,8 +272,8 @@ pub fn ai(
             s.goal = None;
             continue;
         }
-        if h.destroyed
-            || (me && (cfg.shot.is_none() || cfg.script.as_deref() == Some("fleet")))
+        if (h.destroyed && !sinking)
+            || (me && !sinking && (cfg.shot.is_none() || cfg.script.as_deref() == Some("fleet")))
             || matches!(cfg.script.as_deref(), Some("fxtest") | Some("damage") | Some("course") | Some("speedtest"))
         {
             continue;
@@ -298,8 +301,9 @@ pub fn ai(
         // Nothing found: a fleet mate's target, else an allied ship's (same side, another fleet).
         if chosen.is_none() && !human && explicit.is_none() {
             let fleet = member.map(|m| m.0.as_str());
-            let adopt =
-                |same_fleet: bool| snap.iter().filter(|f| f.0 != e && f.2 == s.side && (f.5.as_deref() == fleet) == same_fleet).find_map(|f| targets.of(f.0).filter(|t| valid(*t)));
+            let adopt = |same_fleet: bool| {
+                snap.iter().filter(|f| f.0 != e && f.3 && f.2 == s.side && (f.5.as_deref() == fleet) == same_fleet).find_map(|f| targets.of(f.0).filter(|t| valid(*t)))
+            };
             chosen = adopt(true).or_else(|| adopt(false)).map(|t| (t, false));
         }
         match chosen {
