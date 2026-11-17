@@ -29,7 +29,8 @@ Source: observed behaviour of the original game, WOT collision definitions and t
 - **Ram damage:** a ship takes 0.0004 x the *other* ship's mass x the closing speed, on its one section nearest the contact,
   through the normal hit path. At most once per
   3.5 s per ship, no speed threshold, no material or ram-bow factor. None between allies. Scaled by side and difficulty like
-  shells (Easy: the human's ships x0.25, computer ships rammed by the human's x3; Normal x0.5 / x2; Hard x1). Example: a Cutter
+  shells (Easy: the human's ships x0.25, computer ships rammed by the human's x3; Normal x0.5 / x2; Hard x1). The factor follows who
+  owns the struck ship (the human's fleet) and the rammer, not the side: an allied computer ship rammed by an enemy takes x1. Example: a Cutter
   rammed by an enemy Man-O-War at 9 units/s loses 144; the Man-O-War 14.4.
 - **Ship against rock:** pushed apart by mass, the ship's speed and turn untouched; the rock is shoved away from the ship at
   0.25 x the offset between their centres per second. Every tick both take 0.0002 x the rock's mass x the closing speed (the
@@ -41,7 +42,8 @@ Source: observed behaviour of the original game, WOT collision definitions and t
   nearest the contact plays `Ship_Collision_Wood` or `_Metal` by material (cloth, stone and others are silent), heard to 700 units.
   A damaging ram plays the struck section's `Damage_<material>` sound at the contact (once when both struck sections share a
   material). Lifeboats pass through ships.
-- Remake: `collision::sail`, `combat::lob::ram_damage`, `combat::shells::apply_ship_hit` and `apply_base_hit` (spill). PROVISIONAL:
+- Remake: the ram factor follows ownership (`ram_scale`); a damaging ram plays the struck section's `Damage_<material>` sound once
+  per shared material, with the shell hit's per-material pool. `collision::sail`, `combat::lob::ram_damage`, `combat::shells::apply_ship_hit` and `apply_base_hit` (spill). PROVISIONAL:
   a rock touch plays the ship's collision sound (the rock's own impact sound is not read); shells on bases take no difficulty factor
   (the original applies one on the same routine, but its value for bases is not measured).
 
