@@ -17,7 +17,7 @@ Source: observed behaviour of the original game, WOT collision definitions and t
 - **Contact shapes:** ship against ship tests the two physics boxes (the WOT `MinExtents` / `MaxExtents`, no padding) once their
   collision spheres overlap, by separating axes (the box faces and the cross products of their edges); the axis of least
   penetration is the normal and the contact point is the centre of the touching corners.
-- **Ship against ship**, checked every physics tick (1/30 s) while the hulls overlap: the two are pushed apart in proportion to the other's mass (the heavier one moves less; an idle ship is no exception). The contact normal is
+- **Ship against ship**, checked every physics tick (0.033 s) while the hulls overlap: the two are pushed apart in proportion to the other's mass (the heavier one moves less; an idle ship is no exception). The contact normal is
   the box test's own 3-D axis, but the push is horizontal: the depth times |cos| of the angle between that axis and its horizontal
   part, applied along the horizontal part (a steep or vertical axis moves the hulls little or not at all; flat axes lose nothing).
   The same rule as for land below (confirmed there on retail; for ship pairs read from the code, with only flat normals measured

@@ -321,6 +321,8 @@ fn setup(mut commands: Commands, cfg: Res<Config>, mut vtime: ResMut<Time<Virtua
 
 /// Retail tick documented in docs/re/gunnery.md and docs/re/effects.md.
 pub const BATTLE_TICK: std::time::Duration = std::time::Duration::from_millis(33);
+/// The same tick in seconds, for rules the original writes per tick (rates, pulls, chances): one tick is 0.033 s, not 1/30 s.
+pub const TICK_SECS: f32 = 0.033;
 
 /// Queued for removal: the object is destroyed at the start of the next tick and, until then, still takes part in the logic of
 /// the tick it was queued in (the original's deferred removal, docs/re/tick.md).

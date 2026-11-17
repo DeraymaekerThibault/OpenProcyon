@@ -442,3 +442,8 @@ fn mission_tick_runs_between_rules_and_forces() {
     frame(&mut app, 33);
     assert_eq!(app.world().resource::<Order>().0, ["rules", "mission", "forces", "move", "decide"]);
 }
+
+#[test]
+fn per_tick_rules_use_the_battle_step_length() {
+    assert_eq!(crate::TICK_SECS, BATTLE_TICK.as_secs_f32());
+}
