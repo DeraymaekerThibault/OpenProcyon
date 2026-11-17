@@ -171,6 +171,11 @@ pub(super) struct AimTarget {
     pub(super) velocity: Vec3,
 }
 
+/// The line-of-fire hold covers the attack routine's guns: point-defence and mine-laying guns are fired by their own routines.
+pub(super) fn held_by_line(blocked: bool, gun: &crate::data::GunDef, mine: bool) -> bool {
+    blocked && !gun.point_defense && !mine
+}
+
 /// Panic fire skips lobbing, point-defence and mine-laying guns (they are left to their own routines); every other gun,
 /// torpedo launchers included, fires. `mine` is whether the gun lays mines.
 pub(super) fn panic_fires(gun: &crate::data::GunDef, mine: bool) -> bool {
@@ -259,7 +264,7 @@ pub(super) fn fire(
     )>,
     others: Query<(Entity, &Transform, &Ship, &Health, Has<PlayerShip>, Option<&crate::campaign::MissionShip>, Option<&crate::cloak::Cloak>)>,
     mut parts: Query<&mut Transform, (With<GunPart>, Without<Ship>)>,
-    (globals, threats, points, sensors, captains, mut mine_laying, mut ground): (
+    (globals, threats, points, sensors, captains, mut mine_laying, mut ground, scenery): (
         Query<&GlobalTransform, With<GunPart>>,
         Query<(Entity, &Transform, &Shell), (Without<GunPart>, Without<Ship>)>,
         Option<Res<crate::campaign::CampaignPoints>>,
@@ -267,6 +272,7 @@ pub(super) fn fire(
         Option<Res<crate::ship::CaptainTargets>>,
         Local<bevy::platform::collections::HashMap<Entity, MineLaying>>,
         Local<bevy::platform::collections::HashMap<Entity, GroundAim>>,
+        Query<(Entity, &crate::collision::Obstacle, Option<&Visibility>, Has<Asteroid>), (Without<Ship>, Without<GunPart>)>,
     ),
 ) {
     // The human fleet's gunners in a campaign: the roster's best gunner (crew_arms.rs); everyone else the plain-AI factor.
@@ -362,6 +368,31 @@ pub(super) fn fire(
             }
         };
         let ship_target = ship_target.filter(|t| sensors.in_sight(me, t.entity, campaign.as_deref()));
+        // A computer captain holds fire while a friendly ship or scenery is on the line to the aim point (docs/re/gunnery.md).
+        let line_blocked = !primary
+            && ship_target.is_some_and(|t| {
+                let (start, end) = (tf.translation, t.position);
+                fn who<'a>(s: &Ship, m: Option<&'a crate::campaign::MissionShip>) -> (Option<&'a str>, Option<Side>) {
+                    (m.map(|m| m.owner.as_str()), Some(s.side))
+                }
+                let me_is_boat = class.is_lifeboat;
+                let friends = others.iter().filter(|o| o.0 != me).filter_map(|(_, otf, os, _, _, om, _)| {
+                    let oc = &lib.classes[os.class];
+                    let friendly = me_is_boat || oc.is_lifeboat || crate::boarding::allied_pair(campaign.as_deref(), who(ship, mission), who(os, om));
+                    friendly.then(|| (otf.transform_point(oc.sphere.0), oc.sphere.1))
+                });
+                crate::line_of_fire::friend_in_line(start, end, friends)
+                    || crate::line_of_fire::scenery_in_line(
+                        start,
+                        end,
+                        class.radius,
+                        scenery.iter().filter(|(_, _, v, _)| *v != Some(&Visibility::Hidden)).map(|(e, o, _, rock)| crate::line_of_fire::Scenery {
+                            sphere: o.sphere(),
+                            mesh: (!rock).then_some(o),
+                            target: e == t.entity,
+                        }),
+                    )
+            });
         let is_mine = |gun: &str| matches!(lib.bullets[&lib.guns[gun].bullet].payload, Payload::Mine { .. });
         let laying = states.0.iter().any(|s| is_mine(&s.gun)) && {
             let hostile = contacts.iter().any(|c| c.side != ship.side && c.visible);
@@ -385,7 +416,7 @@ pub(super) fn fire(
             Some(t) => {
                 let aim = ground.entry(me).or_default();
                 aim.since += dt;
-                if aim.since >= GROUND_THINK {
+                if aim.since >= GROUND_THINK && !line_blocked {
                     aim.since = 0.0;
                     let base = objects.get(t.entity).is_ok_and(|o| o.3.is_some());
                     if let Some(point) = ground_point(tf.translation, &t, base, &mut rng) {
@@ -442,6 +473,12 @@ pub(super) fn fire(
             // Guns that cannot fire while cloaked hold from the first moment of cloaking until the decloak is over; torpedoes and the
             // light Gattling are never held, and firing does not touch the cloak.
             if cloaked_now && !gun.cloak_fire {
+                state.burst_left = 0;
+                continue;
+            }
+            // Line-of-fire hold: the guns keep tracking but the attack routine's guns do not fire; point defence and mine laying
+            // have their own routines.
+            if held_by_line(line_blocked, gun, is_mine(&state.gun)) {
                 state.burst_left = 0;
                 continue;
             }
@@ -900,6 +937,16 @@ mod target_tests {
         });
         g.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
         crate::data::gun_def(&g)
+    }
+
+    #[test]
+    fn the_line_of_fire_hold_spares_point_defence_and_mine_guns() {
+        let pd = gun(serde_json::json!({ "Is PointDefense Gun": true }));
+        let plain = gun(serde_json::json!({}));
+        assert!(held_by_line(true, &plain, false));
+        assert!(!held_by_line(true, &pd, false));
+        assert!(!held_by_line(true, &plain, true));
+        assert!(!held_by_line(false, &plain, false));
     }
 
     #[test]

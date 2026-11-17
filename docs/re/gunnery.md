@@ -221,6 +221,23 @@ particles and the authored EFT brightness/size/rectangle curves are unchanged. T
 - **Energy net on a ship that is cloaking or cloaked** orders it to decloak.
 - **Ignition.** One ship, the mission 9 lifeboat, never catches fire.
 
+## Line of fire (computer captains)
+Read from the original's code, not yet measured in play. A computer-run ship (never the human's command ship) fires nothing in a
+think while the straight segment from its centre to the aim point is blocked: no bank fire, no ground-fire point, no harpoon roll.
+Every attack routine's firing step has the test (simple, ram, broadside, frontal, rear, formation, dock for repairs) and so does the
+harpoon decision.
+- **Friend in the line:** the segment (parameter 0 to 1) crosses the bounding sphere of any other ship that is friendly: a lifeboat class on
+  either side, or an allied ship. The sphere's own radius, no margin. Dead and cloaked ships block too. A segment lying wholly inside a
+  sphere does not cross it and does not block.
+- **Scenery in the line:** islands and bases are tested against their collision triangles; any other obstacle by its bounding sphere,
+  blocking when the segment crosses it or an end lies inside it. Only candidates whose surface distance from the ship is at most the
+  segment length are tested, and the aimed-at object never blocks its own shot.
+- Remake: `line_of_fire.rs` (pure predicates, unit-tested), applied in `combat::gunnery::fire` (every gun of a computer ship except point-defence and mine-laying guns holds, as those have their own routines; turrets
+  keep tracking; no new ground-fire points) and `boarding::ai_boarding` (harpoon roll skipped). Allied = same side, or allied mission
+  players, and not hostile. PROVISIONAL: the aim point (the target's aim point for every routine; the original's broadside, frontal
+  and rear runs use their own points), asteroids and other non-mesh obstacles by their bounds sphere, bases tested only if they carry
+  a collision mesh, and the segment starts at the hull centre.
+
 ## Panic button
 - The hotkey/HUD button works only while the player ship is not disabled. It is sent like any order (so it works in multiplayer).
 - Every qualifying gun bank (some gun classes are skipped; which is unknown) switches to fire-when-possible in panic mode: each
