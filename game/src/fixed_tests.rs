@@ -428,3 +428,17 @@ fn a_decision_acts_in_the_next_ticks_movement() {
     frame(&mut app, 33);
     assert_ne!(app.world().get::<Ship>(e).unwrap().heading, 0.0, "acts in the movement of tick 2");
 }
+
+/// docs/re/tick.md: the mission tick (boarding fights, link break and reel) runs after the rules and before the forces and movement.
+#[test]
+fn mission_tick_runs_between_rules_and_forces() {
+    #[derive(Resource, Default)]
+    struct Order(Vec<&'static str>);
+    let mut app = clock();
+    app.init_resource::<Order>();
+    for (set, name) in [(BattleSet::Forces, "forces"), (BattleSet::MissionTick, "mission"), (BattleSet::Rules, "rules"), (BattleSet::Simulate, "move"), (BattleSet::Ai, "decide")] {
+        app.add_systems(FixedUpdate, (move |mut o: ResMut<Order>| o.0.push(name)).in_set(set));
+    }
+    frame(&mut app, 33);
+    assert_eq!(app.world().resource::<Order>().0, ["rules", "mission", "forces", "move", "decide"]);
+}

@@ -377,9 +377,9 @@ pub enum BattleSet {
     Tick,
     Commands,
     Rules,
-    /// Player orders and the docking, boarding and dragon routines. They mix commands with direct motion of what they handle, so they stay
-    /// before movement (PROVISIONAL: not yet split into command and decision parts).
-    Orders,
+    /// Step 6 of the original's tick, the mission tick: boarding fights are resolved and links (grapples, tows) test whether they break
+    /// and reel in. Skipped while the mission is frozen. No position is written here.
+    MissionTick,
     Forces,
     Simulate,
     /// Sensor snapshot of the positions after movement and collision, for the decisions below.
@@ -400,7 +400,7 @@ fn battle_schedule(app: &mut App) {
             BattleSet::Tick,
             BattleSet::Commands,
             BattleSet::Rules,
-            BattleSet::Orders,
+            BattleSet::MissionTick,
             BattleSet::Forces,
             BattleSet::Simulate,
             BattleSet::Sense,

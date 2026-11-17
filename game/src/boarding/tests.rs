@@ -79,7 +79,7 @@ fn drive(time: Res<Time>, mut ships: Query<(&Ship, &mut Transform, &Drift)>) {
 fn computer_captain_grapples_and_boards_its_target() {
     for (attack, boards) in [(None, true), (Some(AI_MIN_ATTACK), false)] {
         let mut app = app();
-        app.add_message::<crate::combat::Fired>().add_systems(Update, ai_boarding.after(winch).before(fights));
+        app.add_message::<crate::combat::Fired>().add_systems(Update, ai_boarding.after(winch_pull).before(fights));
         let me = spawn(&mut app, "Ship_Navy_Cutter", Side::Player, Vec3::ZERO, Skill::Elite);
         app.world_mut().entity_mut(me).insert(PlayerShip);
         let foe = spawn(&mut app, "Ship_Pirate_Barque", Side::Enemy, Vec3::new(40.0, 0.0, 0.0), Skill::Elite);
@@ -114,7 +114,7 @@ fn app() -> App {
         .init_resource::<Got>()
         .insert_resource(Library::load(assets_dir()))
         .insert_resource(Rng::new(7))
-        .add_systems(Update, (handle_messages, set_flags, grapple_orders, winch, drive, fights, settled, status, collect).chain());
+        .add_systems(Update, (handle_messages, set_flags, grapple_orders, hook_flight, winch_upkeep, winch_pull, drive, fights, settled, status, collect).chain());
     app
 }
 fn tick(app: &mut App, secs: f32) {

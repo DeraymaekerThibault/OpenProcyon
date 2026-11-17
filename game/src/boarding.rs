@@ -355,14 +355,26 @@ pub fn plugin(app: &mut App) {
         .add_message::<Settled>()
         .init_resource::<BoardStatus>()
         .init_resource::<Ropes>()
+        // Orders only record an order (step 3); fights and the rope's break and reel test are the mission tick (6); the rope's pull is the
+        // link keeper (7.1); the computer's decision to board runs after collision (8).
         .add_systems(
             FixedUpdate,
-            (handle_messages, set_flags, grapple_orders, winch, ai_boarding, fights, settled)
+            (handle_messages, set_flags, grapple_orders)
                 .chain()
-                .in_set(crate::BattleSet::Orders)
+                .in_set(crate::BattleSet::Commands)
                 .run_if(in_state(crate::menu::Screen::Battle))
                 .run_if(crate::menu::overlay_closed),
         )
+        .add_systems(
+            FixedUpdate,
+            (hook_flight, winch_upkeep, fights, settled)
+                .chain()
+                .in_set(crate::BattleSet::MissionTick)
+                .run_if(in_state(crate::menu::Screen::Battle))
+                .run_if(crate::menu::overlay_closed),
+        )
+        .add_systems(FixedUpdate, winch_pull.in_set(crate::BattleSet::Forces).run_if(in_state(crate::menu::Screen::Battle)).run_if(crate::menu::overlay_closed))
+        .add_systems(FixedUpdate, ai_boarding.in_set(crate::BattleSet::Ai).run_if(in_state(crate::menu::Screen::Battle)).run_if(crate::menu::overlay_closed))
         .add_systems(
             Update,
             (dev_board, cancel_grapple_order, status, ropes).chain().before(crate::input).run_if(in_state(crate::menu::Screen::Battle)).run_if(crate::menu::overlay_closed),
@@ -596,15 +608,10 @@ fn cancel_grapple_order(keys: Res<ButtonInput<KeyCode>>, mut commands: Commands,
 /// The Grapple order: close to harpoon range, stop, fire; the hook bites after its flight.
 fn grapple_orders(
     mut commands: Commands,
-    time: Res<Time>,
     lib: Res<Library>,
-    assets: Option<Res<AssetServer>>,
-    mut rng: ResMut<Rng>,
     mut sfx: MessageWriter<Sfx>,
     mut orders: Query<(Entity, &GrappleOrder, &mut Ship, &Transform, &Health)>,
-    mut hooks: Query<(Entity, &mut Grapple, &Transform)>,
     others: Query<(&Transform, &Ship, &Health), Without<GrappleOrder>>,
-    player: Query<Entity, With<PlayerShip>>,
 ) {
     for (e, order, mut ship, tf, health) in &mut orders {
         let Ok((ttf, tship, thealth)) = others.get(order.0) else {
@@ -625,6 +632,18 @@ fn grapple_orders(
             ship.order = 2;
         }
     }
+}
+
+/// A fired hook's flight runs out in the mission tick; when it ends the hook bites.
+fn hook_flight(
+    mut commands: Commands,
+    time: Res<Time>,
+    assets: Option<Res<AssetServer>>,
+    mut rng: ResMut<Rng>,
+    mut sfx: MessageWriter<Sfx>,
+    mut hooks: Query<(Entity, &mut Grapple, &Transform)>,
+    player: Query<Entity, With<PlayerShip>>,
+) {
     let dt = time.delta_secs();
     for (e, mut g, tf) in &mut hooks {
         if g.flight <= 0.0 {
@@ -648,21 +667,21 @@ fn grapple_orders(
 /// length is set to the centre distance less `REEL_SPEED` x the tick, down to `REEL_MIN`. A grapple on a destroyed or vanished ship is let go.
 /// It also snaps when either ship's partner crosses to the other side of the hull it was grappled on.
 /// PROVISIONAL: the original also lets go when the ships become allied.
-fn winch(
+/// The break test and the reel-in are the mission tick (`winch_upkeep`); the pull itself is the link keeper's (`winch_pull`).
+fn winch_upkeep(
     mut commands: Commands,
     time: Res<Time>,
-    lib: Res<Library>,
     mut sfx: MessageWriter<Sfx>,
     mut hooks: Query<(Entity, &mut Grapple)>,
     fighters: Query<(Entity, &Boarding)>,
-    mut ships: Query<(&Ship, &mut Transform, &Health)>,
+    ships: Query<(&Transform, &Health), With<Ship>>,
 ) {
     let dt = time.delta_secs();
     for (e, mut g) in &mut hooks {
         if g.flight > 0.0 {
             continue;
         }
-        let Ok([(a, mut atf, ha), (b, mut btf, hb)]) = ships.get_many_mut([e, g.target]) else {
+        let Ok([(atf, ha), (btf, hb)]) = ships.get_many([e, g.target]) else {
             commands.entity(e).remove::<Grapple>();
             continue;
         };
@@ -675,11 +694,11 @@ fn winch(
         if g.span <= 0.0 {
             g.span = distance;
             g.length = distance;
-            g.sides = [side_of(&atf, btf.translation), side_of(&btf, atf.translation)];
+            g.sides = [side_of(atf, btf.translation), side_of(btf, atf.translation)];
         }
         // PROVISIONAL: the axis is the nearer of bow-stern and beam; the original picks it from the hull's proportions.
         let crossed = |tf: &Transform, other: Vec3, side: Vec3| (tf.rotation * side).dot(other - tf.translation) <= 0.0;
-        if distance > g.span + GRAPPLE_SLACK || crossed(&atf, btf.translation, g.sides[0]) || crossed(&btf, atf.translation, g.sides[1]) {
+        if distance > g.span + GRAPPLE_SLACK || crossed(atf, btf.translation, g.sides[0]) || crossed(btf, atf.translation, g.sides[1]) {
             info!("grapple: {e} loses {} (centres {distance:.1} apart, bit at {:.1})", g.target, g.span);
             sfx.write(Sfx { name: "rope_break_placeholder".into(), at: Some(atf.translation.lerp(btf.translation, 0.5)), vol: 1.0, max: 600.0 });
             commands.entity(e).remove::<Grapple>();
@@ -689,6 +708,18 @@ fn winch(
         if boarding && distance > REEL_MIN {
             g.length = (distance - REEL_SPEED * dt).max(REEL_MIN);
         }
+    }
+}
+
+/// The link keeper's pull (step 7.1): a bitten grapple's hulls are moved toward each other by the excess over the rope's length, split by mass.
+fn winch_pull(lib: Res<Library>, hooks: Query<(Entity, &Grapple)>, mut ships: Query<(&Ship, &mut Transform)>) {
+    for (e, g) in &hooks {
+        if g.flight > 0.0 || g.span <= 0.0 {
+            continue;
+        }
+        let Ok([(a, mut atf), (b, mut btf)]) = ships.get_many_mut([e, g.target]) else { continue };
+        let axis = (btf.translation - atf.translation).with_y(0.0);
+        let distance = axis.length();
         if distance > g.length && distance > 1e-3 {
             let (ma, mb) = (lib.classes[a.class].phys.mass, lib.classes[b.class].phys.mass);
             let pull = axis / distance * (distance - g.length);
