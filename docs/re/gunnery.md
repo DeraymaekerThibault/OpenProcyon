@@ -134,6 +134,24 @@ skirmish, the shell position sampled about 30 times a second.
   ribbons 200 / 400 / 800, the gravity charge impact 20 for its radius-10 ring). Remake: particles of this effect that pass 200 units
   from the burst are removed (`fx::Effect::bound`). PROVISIONAL (owner's choice): no retail code that removes them was found.
 
+## Who each gun shoots at, and lob aim points of computer ships (read from the original's code)
+- **Panic fire** (the player's button, refused while the ship is docked) goes through every gun bank in two passes. First pass: banks
+  whose guns are not lobbing, not point-defence, not mine-laying and not torpedo launchers. Second pass: torpedo-launcher banks. So
+  every class fires except lob, point-defence and mine guns, which keep their own routines. Each gun that fires then finds its own
+  target: the nearest hostile ship in sight within its maximum range, and keeps it. The finder was read testing range, not mount arc.
+  Remake: `gunnery::panic_fires` (the class rule) and `panic_target` (nearest, PROVISIONAL: it also requires the mount arc, and falls
+  back to the ship's own target when nothing qualifies; the original's pending request also lapses after 2 s, not modelled).
+- A gun's own target choice happens only in panic fire; the "fire at will" state is set by the point-defence routine alone (which
+  picks incoming torpedoes and mines, as above). Every other gun fires at the ship's target.
+- **Computer ships' lob guns** (star mortars, nova mortars, gravity charges: the guns flagged as lobbing) do not aim at the target
+  itself. About every think (0.5 s, PROVISIONAL) a ship that has a target computes one ground point: a base is taken as it stands;
+  any other target gives its position + its velocity x k (k uniform 5..10 s) + a flat random offset of length uniform 0..(|velocity| x k).
+  The point is adopted only if it is farther from the shooter than a distance drawn uniformly from 50..70; otherwise the guns keep
+  their previous point. Each lob bank then aims at that point plus a fresh random offset of at most one unit (flat), on the flight
+  plane. Non-lob banks are unaffected. Remake: `gunnery::ground_point`, `bank_point`, `GroundAim`. PROVISIONAL: a lob gun that has
+  never had a point stays idle (the original leaves it aimed at the map origin); the original also skips the think when a friendly
+  ship is in the line of fire or scenery is in the way (not modelled).
+
 ## Playtest fixes: arcs and torpedoes
 
 - Fixed a runtime units bug: mount arcs were converted from degrees to radians in the loader, then converted again
