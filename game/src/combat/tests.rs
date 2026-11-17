@@ -1765,3 +1765,30 @@ fn a_torpedo_steps_its_height_by_a_fixed_amount_per_tick() {
     }
     assert!((y - 1.0).abs() < 1e-4, "40 ticks climb one unit: {y}");
 }
+
+/// A hull that has been dying for `secs` seconds.
+fn dying_for(secs: f32) -> Sinking {
+    let mut s = Sinking::new();
+    s.elapsed = secs;
+    s
+}
+
+#[test]
+fn dying_drive_is_capped_at_a_tenth_from_the_clip_start() {
+    let h = Health { sections: vec![5.0, 0.0, 7.0], core: 0.0, destroyed: true };
+    assert!(dying_for(CLIP_DELAY - 0.01).drive_health(&h).is_none(), "the sections die 0.14 s after the kill, not at once");
+    let wreck = dying_for(CLIP_DELAY).drive_health(&h).unwrap();
+    assert_eq!(wreck.sections, vec![0.0; 3]);
+    assert_eq!(h.sections, vec![5.0, 0.0, 7.0], "the stored health is not touched");
+}
+
+#[test]
+#[ignore = "needs imported assets"]
+fn wrecked_hull_keeps_a_tenth_of_speed_and_turning() {
+    let lib = Library::load(assets_dir());
+    let class = &lib.classes[lib.index("Ship_Navy_Cutter")];
+    let h = Health { sections: vec![1.0; class.sections.len()], core: 0.0, destroyed: true };
+    let wreck = dying_for(CLIP_DELAY).drive_health(&h).unwrap();
+    assert!((speed_factor(class, &wreck) - 0.1).abs() < 1e-6, "speed {}", speed_factor(class, &wreck));
+    assert!((turn_factor(class, &wreck) - 0.1).abs() < 1e-6, "turn {}", turn_factor(class, &wreck));
+}

@@ -767,3 +767,53 @@ fn a_ship_pair_is_pushed_apart_by_depth_times_cosine_along_the_horizontal_normal
     // a separated pair has no push
     assert!(hull_push(&a, &tree::Box3 { centre: Vec3::new(2.5, 0.0, 0.0), ..c }).is_none());
 }
+
+/// A destroyed ship that is still breaking up keeps sailing but touches nothing: it passes through a live ship that is in its way,
+/// and neither is pushed.
+#[test]
+#[ignore = "needs imported assets"]
+fn dying_ship_sails_on_and_collides_with_nothing() {
+    let mut lib = crate::Library::load(crate::assets_dir());
+    let class = lib.index("Ship_Navy_Cutter");
+    lib.classes[class].collision_bounds = [Vec3::new(-1.0, -1.0, -3.0), Vec3::new(1.0, 1.0, 3.0)];
+    let mut app = App::new();
+    let mut time = Time::<()>::default();
+    time.advance_by(std::time::Duration::from_millis(33));
+    app.insert_resource(time).insert_resource(lib).add_systems(Update, sail);
+    let ship = crate::Ship {
+        class,
+        side: crate::Side::Player,
+        heading: 0.0,
+        speed: 5.0,
+        ang_vel: 0.0,
+        order: 3,
+        waypoints: vec![],
+        goal: None,
+        cap: 1.0,
+        throttle: Some(1.0),
+        sail_energy: 1.0,
+        crew_speed: 1.0,
+        crew_turn: 1.0,
+        net: 1.0,
+        avoid: 1.0,
+    };
+    let health = crate::Health::new(&app.world().resource::<crate::Library>().classes[class]);
+    let mut dead = crate::Health::new(&app.world().resource::<crate::Library>().classes[class]);
+    (dead.destroyed, dead.core) = (true, 0.0);
+    let sinking = crate::combat::Sinking::new();
+    let wreck = app.world_mut().spawn((ship.clone(), dead, Transform::from_xyz(0.0, 0.0, 3.0), Drift::default(), sinking)).id();
+    let still = crate::Ship { speed: 0.0, order: 0, ..ship };
+    let other = app.world_mut().spawn((still, health, Transform::from_xyz(0.0, 0.0, 0.0), Drift::default())).id();
+    for _ in 0..3 {
+        app.update();
+    }
+    let (w, o) = (app.world().get::<Transform>(wreck).unwrap(), app.world().get::<Transform>(other).unwrap());
+    assert!(w.translation.z < 3.0 - 0.3, "the wreck sails on towards the other ship: {}", w.translation.z);
+    assert_eq!(o.translation, Vec3::ZERO, "nothing pushes the live ship");
+    for _ in 0..40 {
+        app.update();
+    }
+    let w = app.world().get::<Transform>(wreck).unwrap();
+    assert!(w.translation.z < -3.0, "it passed through: {}", w.translation.z);
+    assert_eq!(app.world().get::<Transform>(other).unwrap().translation, Vec3::ZERO);
+}

@@ -261,7 +261,8 @@ goes with its section (it hangs on the stern layer).
 Retail (headless run, our Navy Cutter sunk by a computer Sloop, frames every ~0.18 s): there is no sinking dive. The hull blows
 apart where it is: the class `Explosion Effect Name` (fireballs, white flash, smoke) plays at once, the sections fly off as separate
 pieces (planks, the stern with its wings, the masts), each piece bursts in its own fireball within the next ~3 s, then only smoke
-remains. The ship's physics object does not move at all through this; it is purely presentation.
+remains. The hull itself is not frozen: it keeps drifting on under the computer's helm (see "Death drive" below); the break-up
+clip only moves the section meshes.
 
 The timeline is data, in two parts. Each ship's mesh scene carries one clip `ANIMATION00` (2-20 s) that moves the section layers
 rigidly (translation up to 17 units, rotation up to 8.5 rad; values are offsets from the rest pose). It starts 0.14 s after the
@@ -272,6 +273,29 @@ carries `destructFx = { effect start end ( a b c ) }`, e.g. the Cutter's bow `Fi
 own frame read in the order first, third, second (game x, y, z), not a velocity. Sections with `none` and start 0 stay until `end`
 (PROVISIONAL; the earlier frames show the mid hulls drifting away, and a hide at start 0 would remove them at once). A mast that broke off earlier in the fight keeps
 tumbling away for 6+ s: see "Section debris" below.
+
+### Death drive (what a dead hull does until it is removed)
+Measured on a Navy Cutter (sunk by gunfire and in black holes) and read from the original's code; the speed and turning caps were
+checked against the code, the choice of throttle and rudder is PROVISIONAL.
+1. At the kill the ship leaves its fleet and is computer-run, also when a human steered it. Its captain is not stopped by death: it
+   keeps thinking every 0.5 s and steering as in battle (an idle ship with no target explores at full throttle; the Cutter run showed
+   throttle 1.0 and a hard rudder from the first think, 0.5 s after the kill).
+2. 0.14 s after the kill (the moment the break-apart clip starts) every section is at 0 HP. The speed and turning loss terms
+   (dead share of the sections that carry the flag, capped at 0.9) are therefore both at the cap, so thrust, top speed and rudder
+   torque are 0.1 of normal. A dead hull keeps 10 % of its drive; it does not stop.
+3. Drift speed = throttle x 0.1 x MaxSpeed x engineer factor, reached through the normal drag law (rate thrust / (mass x
+   MaxSpeed)) from the speed at death: a fast hull slows down to it, a hull at rest picks up to it. Cutter: 0.1 x 8.06 x 1.125 =
+   0.906 u/s against 0.90 measured; Frigate about 0.65 against 0.1 x 5.83 (the engineer factor there is not closed).
+   The yaw is the ordinary turning law with the 0.1 torque (about 3 deg/s on the Cutter).
+4. From the destruction start the dying ship collides with nothing (ships, land, rocks); it also ignores the avoider.
+5. It is removed when its destruct effects end (the end of the break-apart clip). The roll (about 3.5 deg/s, 7.9 deg at the end) is
+   the clip's, not the physics'; it is not modelled by the helm (PROVISIONAL: the clip's root channel is not applied to the ship).
+
+Implementation: `Health.destroyed` is set at once and every consumer keeps reading it (not a target, not alive for victory, rules,
+fire, collision). A `Sinking` hull is still integrated by `collision::sail` (speed and heading are kept at the kill; the old stop
+is gone), steered by `ship::ai` as a computer ship, and driven with a copy of its health whose sections are all 0 once 0.14 s have
+passed (`Sinking::drive_health`; the stored health, crew speech and damage looks are untouched). PROVISIONAL: campaign missions
+have no captain loop (`ai` returns early there), so a dead mission ship holds its last throttle, rudder and course.
 
 Implementation (`combat/mod.rs`, `clips.rs`): death marks Health destroyed and reports ShipLost at once, plays the class explosion
 and the death sound, then plays the clip on the section mesh nodes (normal and damaged variants), hides and bursts each section as

@@ -465,11 +465,12 @@ pub fn sail(
     currents: Query<&crate::environment::Current>,
     mut rams: Option<ResMut<Messages<Ram>>>,
     captains: Query<&crate::campaign::MissionShip>,
-    (fleets, members, mut avoiders, mut rammed): (
+    (fleets, members, mut avoiders, mut rammed, dying): (
         Option<Res<crate::ship::Fleets>>,
         Query<&crate::ship::FleetMember>,
         Local<HashMap<Entity, avoid::Avoid>>,
         Local<HashMap<Entity, f32>>,
+        Query<&crate::combat::Sinking>,
     ),
 ) {
     let now = time.elapsed_secs();
@@ -606,7 +607,10 @@ pub fn sail(
         obstacle.translate(delta);
     }
     for (e, mut s, mut tf, health, mut drift, docker) in &mut ships {
-        if health.destroyed {
+        // A destroyed hull still sails while it breaks up (docs/re/effects.md "Death drive"): the computer steers it with the
+        // wrecked drive; once the break-up is over it no longer moves.
+        let sinking = dying.get(e).ok();
+        if health.destroyed && sinking.is_none() {
             continue;
         }
         if docker.is_some_and(crate::docking::Docker::gliding) {
@@ -619,14 +623,20 @@ pub fn sail(
             continue;
         }
         let class = &lib.classes[s.class];
-        if let Some(dir) = avoiders.get(&e).and_then(|a| a.stuck) {
+        if let Some(dir) = avoiders.get(&e).and_then(|a| a.stuck).filter(|_| sinking.is_none()) {
             // The original's unstick: a fixed turn in place, sqrt(MaxAngularAcceleration / RotationalFriction) / 3 rad/s, whatever
             // the speed, rudder or crew; the ship keeps its speed but does not move until it is free.
             s.heading += dir * (class.phys.max_ang_acc / class.phys.rot_friction.max(1e-3)).sqrt() / 3.0 * substep;
             tf.rotation = Quat::from_rotation_y(s.heading);
+        } else if let Some(wreck) = sinking.and_then(|k| k.drive_health(health)) {
+            crate::ship::helm_step(&mut s, &mut tf, class, &wreck, substep, true);
+            tf.rotation = Quat::from_rotation_y(s.heading); // the roll of a sinking hull is the break-up clip's, not the helm's
         } else {
-            let ai = !humans(e, s.side);
+            let ai = sinking.is_some() || !humans(e, s.side);
             crate::ship::helm_step(&mut s, &mut tf, class, health, substep, ai);
+            if sinking.is_some() {
+                tf.rotation = Quat::from_rotation_y(s.heading);
+            }
         }
         // Etherium currents push along their path (environment.rs); force / mass, as for thrust.
         for c in &currents {
