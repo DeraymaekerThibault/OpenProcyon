@@ -99,6 +99,8 @@ pub struct AsteroidDef {
     pub hp: f32,
     pub mass: f32,
     pub radius: f32,
+    /// Metres per second per second: the push a belt rock's controller applies (the object definition's `Acceleration`).
+    pub acceleration: f32,
     pub children: Vec<String>,
     pub effect: String,
 }
@@ -113,14 +115,25 @@ impl FromWorld for AsteroidDefs {
             .iter()
             .map(|(name, d)| {
                 let num = |key: &str| {
-                    let v = d[key].as_f64().expect("Asteroid number") as f32;
+                    let v = d[key].as_f64().unwrap_or_else(|| panic!("Asteroid number {name}: {key} (re-run the asset importer)")) as f32;
                     assert!(v.is_finite() && v > 0.0, "Invalid asteroid {name}: {key}");
                     v
                 };
                 let text = |key: &str| d[key].as_str().expect("Asteroid string").to_string();
                 let children: Vec<_> = d["children"].as_array().expect("Asteroid children").iter().map(|v| v.as_str().expect("Asteroid child").to_string()).collect();
                 assert_eq!(children.len(), 10, "Asteroid death slots: {name}");
-                (name.clone(), AsteroidDef { scene: text("scene"), hp: num("hp"), mass: num("mass"), radius: num("radius"), children, effect: text("effect") })
+                (
+                    name.clone(),
+                    AsteroidDef {
+                        scene: text("scene"),
+                        hp: num("hp"),
+                        mass: num("mass"),
+                        radius: num("radius"),
+                        acceleration: num("acceleration"),
+                        children,
+                        effect: text("effect"),
+                    },
+                )
             })
             .collect();
         fn visit(name: &str, defs: &HashMap<String, AsteroidDef>, ancestors: &mut Vec<String>) {

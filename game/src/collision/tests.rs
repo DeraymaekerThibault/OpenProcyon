@@ -391,7 +391,7 @@ fn ship_rock_contact(mass: f32) -> (Vec3, Vec3, Vec3, f32) {
     app.update();
     let ship = app.world().get::<crate::Ship>(a).unwrap();
     let va = forward(ship) * ship.speed + app.world().get::<Drift>(a).unwrap().0;
-    let drift = app.world().get::<Drift>(b).unwrap().0;
+    let drift = app.world().get::<crate::combat::Asteroid>(b).unwrap().velocity;
     let position = app.world().get::<Transform>(b).unwrap().translation;
     let obstacle = app.world().get::<Obstacle>(b).unwrap();
     assert!((obstacle.body.bounds.min - (position - Vec3::ONE)).length() < 1e-5, "rock collider follows contact movement");

@@ -15,6 +15,7 @@ Mesh Scene Name String 'AsteroidLarge'
 Max Hit Points Int 50
 Mass Float 40000
 Radius Float 15
+Acceleration Float 150
 ExplosionEffect String 'ShipExplosion_Medium'
 """ + "\n".join(
             f"WorldObject To Create Upon Death {i} String '{'Asteroid_Med' if i == 2 else ''}'"
@@ -22,6 +23,7 @@ ExplosionEffect String 'ShipExplosion_Medium'
         )
         d = definition(text)
         self.assertEqual((d["hp"], d["mass"], d["radius"]), (50, 40000, 15))
+        self.assertEqual(d["acceleration"], 150)
         self.assertEqual(d["children"][2], "Asteroid_Med")
         self.assertEqual(d["children"][:2], ["", ""])
         self.assertEqual(definition("FactoryType String 'OtherFactory'\n" + text), d)
