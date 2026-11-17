@@ -692,3 +692,14 @@ fn island_contact_through_the_game_scheduler() {
         assert!(error <= 0.05, "{name} on {kind}: {error}");
     }
 }
+
+/// docs/re/tick.md: contact rates are written per 0.033 s tick, not per 1/30 s: one tick of contact does exactly rate x mass x speed.
+#[test]
+fn contact_damage_rate_is_per_0_033_s() {
+    assert_eq!(TICK, 0.033);
+    let (mass, closing) = (500.0, 12.0);
+    assert!((rock_hurt(mass, closing, 0.033) - ROCK_FACTOR * mass * closing).abs() < 1e-5, "a 0.033 s tick takes the whole rate");
+    assert!((rock_hurt(mass, closing, 0.0165) - ROCK_FACTOR * mass * closing / 2.0).abs() < 1e-5, "a half tick takes half");
+    // Over one second the rate adds up to 1 / 0.033 ticks (30.30), not 30.
+    assert!((rock_hurt(mass, closing, 1.0) / (ROCK_FACTOR * mass * closing) - 1.0 / 0.033).abs() < 1e-3);
+}

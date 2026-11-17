@@ -434,10 +434,15 @@ pub struct Ram {
 /// Ship-against-ship damage: this x the other ship's mass x the closing speed, at most once per `RAM_COOLDOWN` s per ship.
 const RAM_FACTOR: f32 = 0.0004;
 const RAM_COOLDOWN: f32 = 3.5;
-/// Ship-against-rock damage, to both, every physics tick (1/30 s) in contact: this x the rock's mass x the closing speed.
+/// Ship-against-rock damage, to both, every physics tick (0.033 s) in contact: this x the rock's mass x the closing speed.
 const ROCK_FACTOR: f32 = 0.0002;
-/// The original's physics tick, which its contact rates are written for.
-const TICK: f32 = 1.0 / 30.0;
+/// The original's physics tick (0.033 s, not 1/30), which its contact rates are written for.
+const TICK: f32 = 0.033;
+
+/// Damage a rock and a ship do each other over `dt` seconds of contact: the rate is written per tick of `TICK` seconds.
+fn rock_hurt(rock_mass: f32, closing_speed: f32, dt: f32) -> f32 {
+    ROCK_FACTOR * rock_mass * closing_speed * dt / TICK
+}
 
 pub fn sail(
     time: Res<Time>,
@@ -480,7 +485,7 @@ pub fn sail(
     let pinned = |e: Entity| stopped.contains(&e) || flags.get(e).is_ok_and(|f| f.0);
     let ghost = |e: Entity| flags.get(e).is_ok_and(|f| f.1);
     let dt = time.delta_secs();
-    // The original's collision sound: a 7 % chance per touching pair each 1/30 s tick; a coin picks one of the two hulls, and its
+    // The original's collision sound: a 7 % chance per touching pair each 0.033 s tick; a coin picks one of the two hulls, and its
     // section nearest the contact sounds wood or metal (cloth, stone and the rest are silent), heard out to 700 units.
     let mut bump = |classes: [(&crate::data::Class, &Transform); 2], at: Vec3, dt: f32| {
         let (Some(rng), Some(sfx)) = (rng.as_mut(), sfx.as_mut()) else { return };
@@ -683,7 +688,7 @@ pub fn sail(
                     // ...and dropped from its belt for good: the original clears its waypoints on every touching tick.
                     rock.path.clear();
                     rock.velocity = Vec3::ZERO;
-                    let hurt = ROCK_FACTOR * rock.mass * (a.velocity - b.velocity).length() * substep / TICK;
+                    let hurt = rock_hurt(rock.mass, (a.velocity - b.velocity).length(), substep);
                     rock.hp -= hurt;
                     if let Some(r) = rams.as_mut().filter(|_| hurt > 0.0) {
                         r.write(Ram { a: e, b: rock_e, damage: hurt, at: contact.point });
@@ -754,7 +759,7 @@ pub fn sail(
                 }
                 // The original (read from its code): pushed apart by mass, the heavier hull moving less; no bounce, both keep their
                 // velocity. Each gets a yaw kick at the contact point from 0.1 x its mass x its change to the pair's common velocity
-                // per 1/30 s, over a box's inertia (the own mass cancels: a light ship swings, a heavy one hardly turns).
+                // per 0.033 s, over a box's inertia (the own mass cancels: a light ship swings, a heavy one hardly turns).
                 let push = push.with_y(0.0);
                 ta.translation += push * (a_body.inverse_mass / total);
                 tb.translation -= push * (b_body.inverse_mass / total);
