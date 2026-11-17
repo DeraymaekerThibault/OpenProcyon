@@ -55,23 +55,37 @@ guns have 0 and think every tick. Because 15 ticks make 0.495 s, **a 0.5 s perio
 0.05 s x (n mod 10) where n counts the objects of that class created so far in the battle (one counter per class for the whole world,
 not per player). *Measured:* five captains, every think gap 0.528 s, 85 gaps each.
 
-## What the remake does now (differences, to be built from here)
+## What the remake does now
 
 | Rule | Original | Remake |
 |---|---|---|
-| Game clock | double sum of 0.033f | fixed 33 ms steps |
-| Removal | queued, destroyed at the start of the next tick, still runs per-object logic once | same tick, end of tick |
-| New objects | join at the start of the next tick and move in it | appear when spawned |
-| Out of map | tested after integration, queued; floor z = -130 | not tested the same way |
-| Collision | one pass after all movement | ships integrate and resolve one by one |
+| Game clock | double sum of 0.033f | fixed 33 ms steps (about 2e-10 s per tick apart; not changed) |
+| Removal | queued, destroyed at the start of the next tick, still runs per-object logic once | same for shells, blasts, wells, asteroids and lifeboats; a sunk ship is flagged destroyed at once and its entity stays |
+| New objects | join at the start of the next tick and move in it | same |
+| Out of map | tested after integration, queued; floor z = -130 | same for asteroids and shells |
+| Collision | one pass after all movement | same |
 | Decisions | after movement and collision | captains, mission AI and fleet following after movement and collision, before ship upkeep; docking, boarding and dragon routines still before movement (they mix commands with direct motion) |
-| Mission rules (single player) | once per frame, after the last tick | every tick, before decisions |
-| Frame catch-up | 10 frames, then drop | about 7 ticks at 1x, 3 above |
-| Contact rate constant | 0.033 | 1/30 |
+| Mission rules (single player) | once per frame, after the last tick | same, also while paused |
+| Frame catch-up | 10 frames, then drop | same up to 5x; above 5x at most 0.1 s per call (speeds above 5x are the remake's own) |
+| Contact rate constant | 0.033 | same |
+
+## Random numbers
+
+There are two generators, both the 32-bit linear one (state x 1664525 + 1013904223):
+
+- The **battle generator** belongs to the world. It starts from a seed stored with the map, and every roll that changes the battle takes the next value: gun
+  scatter, ricochet, damage, fire, lifeboats, boarding, asteroids, captains. A few draws that only look cosmetic also take from it (nebula lightning points,
+  ship debris, the choice of a move acknowledgement), so leaving them out would shift every later battle roll.
+- The **program generator** starts from the clock when the program starts and serves effects, particles, decals, wakes, camera, sounds and spoken lines,
+  and also the composition of computer fleets (hulls, guns, style, names).
+
+So a cosmetic draw never changes a battle roll except through the few listed above. The remake keeps a combat generator and a separate effects generator,
+which is the same split; its generator and seeding differ, so the sequences are not the original's. *Read from code only.*
 
 ## Unmeasured
 
-- Removal one tick late, the join-at-start rule and the out-of-map test are read from code only.
+- The out-of-map test is read from code only. *Measured:* removal one tick late (457 of 460 shells were queued in their last tick in the world and gone the next)
+  and join-at-start (451 of 451 new shells joined in the next tick and had already moved one step there). That a queued object runs its own logic once more is not measured.
 - Whether a decision made in step 8 differs observably from one made before the step: both see the previous tick's positions and act in the next integration, so the
   difference is only what else the decision sees (commands of the next tick; in single player at 1x, the rules). At most one tick.
   The remake now takes captain decisions after movement; the routines that mix commands with direct motion are not yet split.
