@@ -3,7 +3,7 @@ use std::time::Duration;
 
 #[test]
 #[ignore = "needs imported assets"]
-fn skirmish_dock_lights_show_on_every_base() {
+fn skirmish_dock_lights_show_on_friendly_bases_only() {
     let mut app = App::new();
     app.init_resource::<FxLib>().add_systems(Update, markers);
     let point = DockPoint { pos: Vec3::Z * 3.0, fwd: Vec3::NEG_Z };
@@ -14,7 +14,7 @@ fn skirmish_dock_lights_show_on_every_base() {
     let (own, enemy) = (base(Side::Player), base(Side::Enemy));
     app.update();
     assert!(!app.world().get::<Dockable>(own).unwrap().markers.is_empty(), "our base shows its dock lights");
-    assert!(!app.world().get::<Dockable>(enemy).unwrap().markers.is_empty(), "no rule owns the enemy base either: it shows its lights");
+    assert!(app.world().get::<Dockable>(enemy).unwrap().markers.is_empty(), "the enemy base shows none");
 }
 
 #[test]
@@ -517,10 +517,4 @@ fn only_a_ships_own_pick_is_replaced_before_it_docks() {
     assert!(docker(true, Phase::Wait).retargets() && docker(true, Phase::Approach).retargets());
     assert!(!docker(true, Phase::Docked).retargets() && !docker(true, Phase::Away).retargets());
     assert!(!docker(false, Phase::Approach).retargets(), "an ordered dock is not replaced");
-}
-
-#[test]
-fn skirmish_bases_are_dockable_by_every_side() {
-    let base = MissionBase { id: 1, owner: "b".into() };
-    assert!(!dock_barred(None, Some(&base)), "no rule owns a skirmish base: nothing bars the player from it");
 }

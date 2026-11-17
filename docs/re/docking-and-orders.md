@@ -143,9 +143,9 @@ model geometry: every base's dock points now lie within about 25 units of the mo
 updating.
 
 In the remake every map object and ship type with exported dock points gets them when it spawns, on every map type
-(skirmish, historical and campaign). Bases no rule assigns an owner to (all skirmish bases) are dockable by every side **[PROVISIONAL]**: in a skirmish the human may
-dock at an enemy-side base too (and its dock lights show); only a mission rule can make a base hostile to the player's owner and bar the dock. Attacking such a
-base is unchanged.
+(skirmish, historical and campaign). A base hostile to the docker is not dockable, in a skirmish too
+(an enemy-side skirmish base shows no dock lights and refuses the dock; seen in play). How the original's dock test reaches that for bases no
+rule assigns an owner to is not read.
 
 ## 5. Not reversed yet
 Boarding fight / grapple mechanics (reversed, see [boarding.md](boarding.md)), where `ShipStatus_Icon_Docking_*` (animated docking status icon) is drawn, cloak effect,

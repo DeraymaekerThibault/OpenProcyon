@@ -755,11 +755,11 @@ fn markers(
     mut commands: Commands,
     fxl: Option<Res<FxLib>>,
     mission: Option<Res<Mission>>,
-    mut q: Query<(Entity, &Transform, &mut Dockable, Option<&Health>, Option<&MissionBase>)>,
+    mut q: Query<(Entity, &Transform, &mut Dockable, Option<&Health>, Option<&MissionBase>, Option<&crate::combat::BaseSide>)>,
 ) {
     let Some(fxl) = fxl else { return };
-    for (e, tf, mut dk, h, base) in &mut q {
-        let on = dk.enabled && !h.is_some_and(|h| h.destroyed) && !dock_barred(mission.as_deref(), base);
+    for (e, tf, mut dk, h, base, side) in &mut q {
+        let on = dk.enabled && !h.is_some_and(|h| h.destroyed) && !hostile_base(mission.as_deref(), base, side);
         if on && dk.markers.is_empty() {
             dk.markers = (0..dk.points.len())
                 .filter_map(|i| {
@@ -857,26 +857,19 @@ fn hostile_base(mission: Option<&Mission>, base: Option<&MissionBase>, side: Opt
         None => side.is_some_and(|s| s.0 != Side::Player),
     }
 }
-/// A base the player may not dock with: only a mission rule can make a base hostile to the player's owner. In a skirmish nothing
-/// owns the bases, so every side may dock at every base (PROVISIONAL: read from the original's friend test, not seen in play).
-fn dock_barred(mission: Option<&Mission>, base: Option<&MissionBase>) -> bool {
-    hostile_base(mission, base, None)
-}
 impl Dockees<'_, '_> {
     fn base_hostile(&self, e: Entity, base: Option<&MissionBase>) -> bool {
         hostile_base(self.mission.as_deref(), base, self.sides.get(e).ok())
     }
     pub fn can_dock(&self, actor: Entity, dockee: Entity) -> bool {
         let Ok((_, _, d, ship, base)) = self.q.get(dockee) else { return false };
-        d.enabled && !dock_barred(self.mission.as_deref(), base) && ship.is_none_or(|s| s.side == Side::Player) && self.sensors.in_sight(actor, dockee, self.mission.as_deref())
+        d.enabled && !self.base_hostile(dockee, base) && ship.is_none_or(|s| s.side == Side::Player) && self.sensors.in_sight(actor, dockee, self.mission.as_deref())
     }
     /// Dockable ally under the ray, with whether the selected ship's group has sight (no separate dock range).
     pub fn under(&self, ray: Ray3d, actor: Entity) -> Option<(Entity, bool)> {
         self.q
             .iter()
-            .filter(|(e, _, _, ship, base)| {
-                ship.is_none_or(|s| s.side == Side::Player) && !dock_barred(self.mission.as_deref(), *base) && self.sensors.player_sees(*e, self.mission.as_deref())
-            })
+            .filter(|(e, _, _, ship, base)| ship.is_none_or(|s| s.side == Side::Player) && !self.base_hostile(*e, *base) && self.sensors.player_sees(*e, self.mission.as_deref()))
             .filter_map(|(e, tf, d, ship, _)| {
                 // Islands hover on their collision hull: dock points sit far offshore, so a dock-point sphere swallowed nearby waypoint clicks.
                 let t = match (ship, self.hulls.get(e)) {
