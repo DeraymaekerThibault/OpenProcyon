@@ -781,12 +781,24 @@ fn mission_ai(
             ship.goal = Some(goal);
             ship.order = order;
             ship.throttle = throttle;
-        } else if ms.stop_at_end && ms.looping.is_none() && ship.waypoints.len() <= 1 {
-            // Retail takes the last point of a 'to end' path within 2 x the ship's radius, then cuts throttle to 0.
+        } else if ms.stop_at_end && ms.looping.is_none() {
+            // Retail path end (docs/re/movement.md): throttle holds the speed fraction while turned off the point, else full; the last point
+            // of the path counts as reached inside 2 x the ship's radius, then the throttle is 0.
             // PROVISIONAL: `class.radius` stands in for the original's radius field. A finished chase (remake AI) likewise waits for orders.
-            if ship.waypoints.first().is_some_and(|p| p.distance(tf.translation) >= 2.0 * lib.classes[ship.class].radius) {
-                continue;
+            let class = &lib.classes[ship.class];
+            if let Some(&wp) = ship.waypoints.first() {
+                let last = ship.waypoints.len() == 1;
+                let to_last = ship.waypoints.last().map_or(0.0, |p| p.distance(tf.translation));
+                if !(last && to_last < 2.0 * class.radius) {
+                    let top = crate::ship::max_speed(&ship, class, h);
+                    let fraction = if top > 0.001 { (ship.speed.abs() / top).clamp(0.0, 1.0) } else { 0.0 };
+                    let d = wp - tf.translation;
+                    let error = crate::ship::angdiff((-d.x).atan2(-d.z), ship.heading);
+                    ship.throttle = Some(crate::ship::path_end::throttle(fraction, error, to_last, class.radius, false));
+                    continue;
+                }
             }
+            ship.throttle = None;
             ship.waypoints.clear();
             ms.stop_at_end = false;
             ship.order = 0;
@@ -1252,6 +1264,7 @@ mod ai_tests {
         };
         let done = app.world_mut().spawn((ship.clone(), health(), Transform::default(), ms(true, None))).id();
         let en_route = app.world_mut().spawn((Ship { waypoints: vec![Vec3::new(0.0, 0.0, -500.0)], ..ship }, health(), Transform::default(), ms(true, None))).id();
+        let turning = app.world_mut().spawn((Ship { waypoints: vec![Vec3::new(0.0, 0.0, 500.0)], ..ship }, health(), Transform::default(), ms(true, None))).id();
         let looping = app.world_mut().spawn((ship.clone(), health(), Transform::default(), ms(true, Some(vec![Vec3::new(0.0, 0.0, -500.0)])))).id();
         let near = app.world_mut().spawn((Ship { waypoints: vec![Vec3::new(0.0, 0.0, -1.0)], ..ship }, health(), Transform::default(), ms(true, None))).id();
         let foe = app
@@ -1280,6 +1293,9 @@ mod ai_tests {
         assert_eq!(order(done), 0, "finished route stops");
         assert!(!app.world().get::<MissionShip>(done).unwrap().stop_at_end);
         assert_eq!(order(en_route), 2, "still on its path");
+        assert_eq!(app.world().get::<Ship>(en_route).unwrap().throttle, Some(1.0), "aligned with its point: full throttle");
+        let held = app.world().get::<Ship>(turning).unwrap().throttle.unwrap();
+        assert!(held > 0.0 && held < 1.0, "turned off its point: the speed fraction is held, not full ({held})");
         assert_eq!(order(near), 0, "last point within 2 x radius counts as reached");
         assert!(app.world().get::<Ship>(near).unwrap().waypoints.is_empty());
         assert_eq!(order(looping), 2, "loops restart instead");
