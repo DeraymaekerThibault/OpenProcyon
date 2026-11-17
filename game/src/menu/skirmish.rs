@@ -346,6 +346,29 @@ fn computer_hull(class: &crate::data::Class) -> bool {
     !class.mounts.is_empty() && class.phys.max_speed > 1.0 && !class.name.contains("Tender") && !class.name.contains("Tug")
 }
 
+/// The guns a computer's swap draws from, by the stock gun's mount size (retail pools: 4 light, 3 medium and 8 heavy entries; a gun
+/// listed twice has double weight). Other mounts (two-deck, point defence, mines, torpedoes, special) are never swapped.
+fn swap_pool(mount: &str) -> &'static [&'static str] {
+    if mount.starts_with("Light") {
+        &["Gun_CannonBall_Light", "Gun_Gattling_Light", "Gun_Carronade_Light", "Gun_Plasma_Light"]
+    } else if mount.starts_with("Medium") {
+        &["Gun_CannonBall_Med", "Gun_Carronade_Med", "Gun_Plasma_Med"]
+    } else if mount.starts_with("Heavy") {
+        &[
+            "Gun_CannonBall_Heavy",
+            "Gun_CannonBall_Heavy",
+            "Gun_Carronade_Heavy",
+            "Gun_Carronade_Heavy",
+            "Gun_Plasma_Heavy",
+            "Gun_Plasma_Heavy",
+            "Gun_ArcturianFire_Heavy",
+            "Gun_StarMortar",
+        ]
+    } else {
+        &[]
+    }
+}
+
 pub fn auto_build(slot: &mut Slot, limit: u32, fleet_size: usize, lib: &Library, salt: u64, armed_only: bool) {
     let next = |seed: &mut u64| {
         *seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
@@ -373,26 +396,23 @@ pub fn auto_build(slot: &mut Slot, limit: u32, fleet_size: usize, lib: &Library,
     for ship in first_new..slot.fleet.len() {
         let class = &lib.classes[lib.index(&slot.fleet[ship])];
         for (bank, first) in crate::crew_arms::selectable_banks(lib, class) {
-            if next(&mut seed) & 1 == 0 {
-                continue;
-            }
             let stock = &class.mounts[first].gun;
-            let budget = left(slot);
-            let stock_cost = i64::from(crate::crew_arms::bank_cost(lib, class, bank, stock).unwrap_or(0));
-            let mut guns: Vec<&String> = lib
-                .guns
-                .keys()
-                .filter(|g| allowed.as_ref().is_none_or(|a| a.contains(*g)))
-                .filter(|g| *g != stock && crate::crew_arms::bank_compatible(lib, class, bank, g))
-                .filter(|g| crate::crew_arms::bank_cost(lib, class, bank, g).is_some_and(|c| i64::from(c) - stock_cost <= budget))
-                .collect();
-            guns.sort();
-            if guns.is_empty() {
+            let Some(mount) = lib.guns.get(stock).and_then(|g| g.mount_type.as_deref()) else { continue };
+            // Retail: every light, medium or heavy bank gets exactly one draw from its mount size's pool (no coin flip); the draw may
+            // be the stock gun. Guns barred for the hull's race are redrawn, which is a uniform pick among the others.
+            let pool: Vec<&str> =
+                swap_pool(mount).iter().copied().filter(|g| allowed.as_ref().is_none_or(|a| a.contains(*g)) && crate::crew_arms::bank_compatible(lib, class, bank, g)).collect();
+            if pool.is_empty() {
                 continue;
             }
-            let gun = guns[next(&mut seed) as usize % guns.len()].clone();
+            let gun = pool[next(&mut seed) as usize % pool.len()];
+            let stock_cost = i64::from(crate::crew_arms::bank_cost(lib, class, bank, stock).unwrap_or(0));
+            // Kept only if points remain after the swap.
+            if gun == stock || !crate::crew_arms::bank_cost(lib, class, bank, gun).is_some_and(|c| left(slot) - (i64::from(c) - stock_cost) > 0) {
+                continue;
+            }
             slot.weapons.resize_with(slot.fleet.len(), Default::default);
-            slot.weapons[ship].insert(bank, gun);
+            slot.weapons[ship].insert(bank, gun.to_string());
         }
     }
     // Computer crews come from the Navy roster whatever the race (retail saves); the human's from their own race.
@@ -831,7 +851,18 @@ pub fn flag_icon(race: u8, flag: u8) -> usize {
 
 #[cfg(test)]
 mod ai_weapon_tests {
-    use super::allowed_guns;
+    use super::{allowed_guns, swap_pool};
+    #[test]
+    fn swap_pools_by_mount_size() {
+        assert_eq!(swap_pool("Light Mount").len(), 4);
+        assert_eq!(swap_pool("Medium Mount").len(), 3);
+        let heavy = swap_pool("Heavy Mount");
+        assert_eq!(heavy.len(), 8);
+        let count = |g: &str| heavy.iter().filter(|x| **x == g).count();
+        assert_eq!((count("Gun_CannonBall_Heavy"), count("Gun_Carronade_Heavy"), count("Gun_Plasma_Heavy"), count("Gun_StarMortar")), (2, 2, 2, 1));
+        assert!(swap_pool("Non-Selectable Light Mount").is_empty());
+        assert!(swap_pool("Non-Selectable Special Mount").is_empty());
+    }
     #[test]
     fn only_guns_switched_on_are_allowed() {
         let list = serde_json::json!({"Gun_A": true, "Gun_B": false});

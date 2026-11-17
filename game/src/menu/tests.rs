@@ -428,6 +428,29 @@ fn computer_fleets_use_auto_assign_inside_the_victory_limit() {
 }
 #[test]
 #[ignore = "needs imported assets"]
+fn computer_swaps_stay_in_the_banks_mount_pool_and_the_race_rule() {
+    let lib = Library::load(assets_dir());
+    let mut swaps = 0;
+    for salt in 0..40 {
+        let mut slot = skirmish::Slot { race: 3, ..skirmish("diablo_straight").slots[1].clone() };
+        skirmish::auto_build(&mut slot, 1000, 10, &lib, salt, true);
+        for (ship, fit) in slot.weapons.iter().enumerate() {
+            let class = &lib.classes[lib.index(&slot.fleet[ship])];
+            for (bank, gun) in fit {
+                swaps += 1;
+                let first = class.mounts.iter().position(|m| m.bank == *bank).unwrap();
+                let mount = lib.guns[&class.mounts[first].gun].mount_type.clone().unwrap();
+                assert_eq!(lib.guns[gun].mount_type.as_deref(), Some(mount.as_str()), "{gun} in a {mount} bank");
+                assert_ne!(lib.guns[gun].exclusion.as_deref(), Some("Procyon"), "no carronade for a Procyon hull: {gun}");
+                assert_ne!(*gun, class.mounts[first].gun, "a draw equal to stock is no swap");
+            }
+        }
+        assert!(slot.spent(&lib) <= 1000, "swaps keep points positive");
+    }
+    assert!(swaps > 0);
+}
+#[test]
+#[ignore = "needs imported assets"]
 fn slot_bar_shows_five_slots_and_follows_the_picked_one() {
     let lib = Library::load(assets_dir());
     let mut sk = skirmish("diablo_straight");
