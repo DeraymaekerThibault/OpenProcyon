@@ -1004,6 +1004,85 @@ fn crew_damage_control_follows_riggers_and_engineers() {
     assert_eq!(nearly, full);
 }
 
+/// Computer ships mended reinforced wood by 5 and iron by 2 per tick in the retail 1-vs-1 runs (their crew was not logged).
+/// The hull step is floor(10 x c x material factor) with c the mean engineering, leadership bonus included: that is 5 and 2
+/// for any c from 0.746 to 0.895, which a rating-7 engineer (the rating the computer fleets almost always hire) reaches with
+/// either leadership bonus, and which neither a rating-9 engineer with bonuses (c = 1, 6 and 3) nor a rating-7 one without any
+/// (4 and 2) gives.
+#[test]
+#[ignore = "needs imported assets"]
+fn computer_engineers_reproduce_the_measured_hull_repair() {
+    let lib = Library::load(assets_dir());
+    let class = &lib.classes[lib.index("Ship_Pirate_Barque")];
+    let find = |m: &str| class.sections.iter().position(|s| s.material.to_lowercase().contains(m)).unwrap();
+    let (reinforced, iron) = (find("reinforced"), find("iron"));
+    let step = |c: f32, sec: usize| {
+        let mut hp: Vec<f32> = class.sections.iter().map(|s| s.hp).collect();
+        hp[sec] -= 60.0;
+        let before = hp[sec];
+        damage_control(class, &mut hp, &[c], &[], &mut || 0.0);
+        hp[sec] - before
+    };
+    for c in [0.75, 0.8, 0.85] {
+        assert_eq!((step(c, reinforced), step(c, iron)), (5.0, 2.0), "engineer value {c}");
+    }
+    assert_eq!((step(0.7, reinforced), step(0.7, iron)), (4.0, 2.0), "rating 7, no bonus");
+    assert_eq!((step(1.0, reinforced), step(1.0, iron)), (6.0, 3.0), "rating 9 with bonuses");
+}
+
+/// A placed computer ship repairs with its level's generic crew (every slot one crewman rated 3 / 6 / 8), a skirmish computer
+/// ship with the crew it was bought, an empty slot a rating-1 hand: nothing is the old flat 0.75 any more.
+#[test]
+#[ignore = "needs imported assets"]
+fn computer_ships_use_their_own_crew_for_repair() {
+    use crate::boarding::{Boardable, Skill};
+    let lib = Library::load(assets_dir());
+    let c = lib.index("Ship_Pirate_Barque");
+    let class = &lib.classes[c];
+    let ship = |side| Ship {
+        class: c,
+        side,
+        heading: 0.0,
+        speed: 0.0,
+        ang_vel: 0.0,
+        order: 0,
+        waypoints: vec![],
+        goal: None,
+        cap: 1.0,
+        throttle: None,
+        sail_energy: 1.0,
+        crew_speed: 1.0,
+        crew_turn: 1.0,
+        net: 1.0,
+        avoid: 1.0,
+    };
+    let slots = |skill: Skill, role: usize| {
+        let foe = ship(Side::Enemy);
+        let boardable = Boardable::ship(&class.name, skill, true);
+        let generic = crate::crew_arms::fallback_posts(&foe, Some(&boardable), &class.name);
+        damage::crew_slots(Entity::PLACEHOLDER, class, generic.as_ref(), role, "engineering")
+    };
+    let (green, elite) = (slots(Skill::Green, 4), slots(Skill::Elite, 5));
+    assert!(!green.is_empty() && green.iter().all(|v| (0.3..=0.45).contains(v)), "green engineers {green:?}");
+    assert!(!elite.is_empty() && elite.iter().all(|v| (0.8..=1.0).contains(v)), "elite riggers {elite:?}");
+    // The player's side keeps its own rule: no crew record, no generic crew.
+    let boardable = Boardable::ship(&class.name, Skill::Elite, true);
+    assert!(crate::crew_arms::fallback_posts(&ship(Side::Player), Some(&boardable), &class.name).is_none());
+    // A computer ship without a crew record carries rating-1 hands in every slot.
+    let none = damage::crew_slots(Entity::PLACEHOLDER, class, None, 4, "engineering");
+    assert!(none.iter().all(|v| (*v - 0.1).abs() < 1e-6));
+}
+
+/// The gunner's skill sets the spread factor of every ship, computer or not: 1 - 0.8 x skill (docs/re/gunnery.md#gunners).
+#[test]
+fn spread_factor_follows_the_gunners_skill() {
+    use gunnery::gunner_accuracy;
+    assert!((gunner_accuracy(crate::crew_arms::DEFAULT_HAND) - 0.92).abs() < 1e-6, "a rating-1 hand");
+    assert!((gunner_accuracy(0.7) - 0.44).abs() < 1e-6);
+    assert!((gunner_accuracy(0.9) - 0.28).abs() < 1e-6);
+    assert!((gunner_accuracy(1.3) - 0.2).abs() < 1e-6, "skill plus bonus is clamped to 1");
+}
+
 /// Retail fire-fighting (docs/re/effects.md#fire): each tick the crew puts out the sum of every member's leadership; an
 /// unmanned gunner, engineer or rigger post counts the first mates again; other empty posts add nothing.
 #[test]

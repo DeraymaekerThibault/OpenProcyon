@@ -362,9 +362,8 @@ to `models/debris/` and `sections[].debris` = {model, pivot}.
   ticks, which fits 2 x (intensity - c) with c = 1.36 per tick (another fire lost 1.1 in one tick), against 1.2 from the
   crew rule above. Fires kill: that Cutter burnt to 0 HP on every section. A section can carry several fires at once
   (five on one section in one save).
-- Remake (`combat::damage::fire_fighting`): the crew rule above, with the same crew slots as damage control (computer
-  crews 0.75 per slot, the player's empty slots generic hands at 0.1). PROVISIONAL: the leadership bonuses are not
-  modelled (thresholds unknown, as for damage control); at most one fire per section (retail allows several).
+- Remake (`combat::damage::fire_fighting`): the crew rule above, with the same crew slots as damage control (every ship its
+  own crew: bought or generic, empty slots rating-1 hands at 0.1, leadership bonuses as in crew.md). PROVISIONAL: at most one fire per section (retail allows several).
 
 ## Black holes (Vortex primitive, spawn, point update; Trail)
 Terrain_BlackHole_* WOTs name a render mesh, a radius, `Magnitude` (the pull, below), an ambient sound and a
