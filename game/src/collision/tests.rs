@@ -128,7 +128,7 @@ fn ecs_ship_contact_and_static_wall_do_not_pass_through() {
     lib.classes[class].collision_bounds = [Vec3::new(-1.0, -1.0, -3.0), Vec3::new(1.0, 1.0, 3.0)];
     let mut app = App::new();
     let mut time = Time::<()>::default();
-    time.advance_by(std::time::Duration::from_secs_f32(0.1));
+    time.advance_by(std::time::Duration::from_millis(33));
     app.insert_resource(time).insert_resource(lib).add_systems(Update, sail);
     let ship = crate::Ship {
         class,
@@ -152,7 +152,7 @@ fn ecs_ship_contact_and_static_wall_do_not_pass_through() {
     let h2 = health();
     let a = app.world_mut().spawn((ship.clone(), h1, Transform::from_xyz(0.0, 0.0, 4.0), Drift::default())).id();
     let b = app.world_mut().spawn((crate::Ship { heading: std::f32::consts::PI, ..ship }, h2, Transform::from_xyz(0.0, 0.0, -4.0), Drift::default())).id();
-    for _ in 0..20 {
+    for _ in 0..60 {
         app.update();
     }
     assert!(app.world().get::<Transform>(a).unwrap().translation.z > app.world().get::<Transform>(b).unwrap().translation.z, "ships cannot swap sides");
@@ -163,7 +163,7 @@ fn ecs_ship_contact_and_static_wall_do_not_pass_through() {
         triangles: vec![Triangle { points: wall, bounds: Bounds::points(&wall) }],
         tree: vec![],
     });
-    for _ in 0..100 {
+    for _ in 0..300 {
         app.update();
     }
     assert!(app.world().get::<Transform>(a).unwrap().translation.z >= -2.001, "bow must remain on this side of the wall");
@@ -238,7 +238,7 @@ fn ai_ship_slows_for_an_island_in_its_way_creeps_round_it_and_picks_up_speed_aga
     let health = crate::Health::new(&lib.classes[class]);
     let mut app = App::new();
     let mut time = Time::<()>::default();
-    time.advance_by(std::time::Duration::from_secs_f32(0.1));
+    time.advance_by(std::time::Duration::from_millis(33));
     app.insert_resource(time).insert_resource(lib).add_systems(Update, sail);
     let wall = [Vec3::new(-45.0, -2.0, -200.0), Vec3::new(45.0, -2.0, -200.0), Vec3::new(0.0, 2.0, -200.0)];
     app.world_mut().spawn(Obstacle {
@@ -265,7 +265,7 @@ fn ai_ship_slows_for_an_island_in_its_way_creeps_round_it_and_picks_up_speed_aga
     };
     let e = app.world_mut().spawn((ship, health, Transform::default(), Drift::default())).id();
     let (mut cruise, mut slowest, mut passed_at) = (0.0f32, f32::INFINITY, None);
-    for frame in 0..1200 {
+    for frame in 0..3636 {
         app.world_mut().get_mut::<crate::Ship>(e).unwrap().goal = Some(0.0); // the captain keeps asking for the straight line
         app.update();
         let (speed, z) = (app.world().get::<crate::Ship>(e).unwrap().speed, app.world().get::<Transform>(e).unwrap().translation.z);
@@ -532,6 +532,64 @@ fn impulse_conserves_momentum_and_leaves_separating_contacts_alone() {
     assert_eq!(impulse(&ContactBody { velocity: Vec3::X, inverse_mass: 1.0, ..fixed_body() }, &b_body, Vec3::X), Vec3::ZERO);
 }
 
+/// docs/re/tick.md: contact rates are written per 0.033 s tick, not per 1/30 s: one tick of contact does exactly rate x mass x speed.
+#[test]
+fn contact_damage_rate_is_per_0_033_s() {
+    assert_eq!(TICK, 0.033);
+    let (mass, closing) = (500.0, 12.0);
+    assert!((rock_hurt(mass, closing, 0.033) - ROCK_FACTOR * mass * closing).abs() < 1e-5, "a 0.033 s tick takes the whole rate");
+    assert!((rock_hurt(mass, closing, 0.0165) - ROCK_FACTOR * mass * closing / 2.0).abs() < 1e-5, "a half tick takes half");
+    // Over one second the rate adds up to 1 / 0.033 ticks (30.30), not 30.
+    assert!((rock_hurt(mass, closing, 1.0) / (ROCK_FACTOR * mass * closing) - 1.0 / 0.033).abs() < 1e-3);
+}
+
+/// docs/re/tick.md: everything integrates, then one collision pass; an overlapping pair responds at most once per tick, and a
+/// ship touching a rock takes one tick's rate (rate x mass x closing speed per 0.033 s) from the rock, not several fractions.
+#[test]
+#[ignore = "needs imported assets"]
+fn a_ship_and_a_rock_respond_once_per_tick_with_one_ticks_rate() {
+    let mut lib = crate::Library::load(crate::assets_dir());
+    let class = lib.index("Ship_Navy_Cutter");
+    lib.classes[class].phys.thrust = 0.0;
+    lib.classes[class].collision_bounds = [Vec3::splat(-1.0), Vec3::splat(1.0)];
+    let health = crate::Health::new(&lib.classes[class]);
+    let mut defs = crate::data::AsteroidDefs::from_world(&mut World::new());
+    let mass = 40000.0;
+    defs.0.get_mut("Asteroid_Small").unwrap().mass = mass;
+    let rock = crate::combat::Asteroid::new("Asteroid_Small", "rocks", &defs).unwrap();
+    let hp = rock.hp;
+    let mut app = App::new();
+    let mut time = Time::<()>::default();
+    time.advance_by(crate::BATTLE_TICK);
+    app.insert_resource(time).insert_resource(lib).add_message::<Ram>().add_systems(Update, sail);
+    let ship = crate::Ship {
+        class,
+        side: crate::Side::Player,
+        heading: 0.0,
+        speed: 10.0,
+        ang_vel: 0.0,
+        order: 0,
+        waypoints: vec![],
+        goal: None,
+        cap: 1.0,
+        throttle: None,
+        sail_energy: 1.0,
+        crew_speed: 1.0,
+        crew_turn: 1.0,
+        net: 1.0,
+        avoid: 1.0,
+    };
+    let a = app.world_mut().spawn((ship, health, Transform::from_xyz(0.0, 0.0, 1.5), Drift::default())).id();
+    let body = box_body([Vec3::splat(-1.0), Vec3::splat(1.0)], &Transform::default());
+    let b = app.world_mut().spawn((rock, Transform::default(), Drift::default(), Obstacle { body, triangles: vec![], tree: vec![] })).id();
+    app.update();
+    let rams: Vec<_> = app.world_mut().resource_mut::<Messages<Ram>>().drain().collect();
+    assert_eq!(rams.len(), 1, "one response for the pair in one tick");
+    let lost = hp - app.world().get::<crate::combat::Asteroid>(b).unwrap().hp;
+    let speed = app.world().get::<crate::Ship>(a).unwrap().speed;
+    assert!((lost - ROCK_FACTOR * mass * speed).abs() < 0.02 * lost, "one tick takes rate x mass x closing speed: lost {lost}, speed {speed}");
+}
+
 fn shape_with_tree(offset: Vec3) -> Shapes {
     let node = tree::BoxNode { b: tree::Box3 { centre: Vec3::ZERO, axes: [Vec3::X, Vec3::Y, Vec3::Z], half: Vec3::splat(5.0) }, level: 0, kids: vec![] };
     let shape = Shape { layers: vec![Layer { offset, nodes: vec![node] }], min: [-5.0; 3], max: [5.0; 3], vertices: vec![], indices: vec![] };
@@ -691,15 +749,4 @@ fn island_contact_through_the_game_scheduler() {
         println!("scheduler {name} on {kind} from {start:?}: ({:.2}, {:.2}) expected {rest:?}, error {error:.3}", t.x, -t.z);
         assert!(error <= 0.05, "{name} on {kind}: {error}");
     }
-}
-
-/// docs/re/tick.md: contact rates are written per 0.033 s tick, not per 1/30 s: one tick of contact does exactly rate x mass x speed.
-#[test]
-fn contact_damage_rate_is_per_0_033_s() {
-    assert_eq!(TICK, 0.033);
-    let (mass, closing) = (500.0, 12.0);
-    assert!((rock_hurt(mass, closing, 0.033) - ROCK_FACTOR * mass * closing).abs() < 1e-5, "a 0.033 s tick takes the whole rate");
-    assert!((rock_hurt(mass, closing, 0.0165) - ROCK_FACTOR * mass * closing / 2.0).abs() < 1e-5, "a half tick takes half");
-    // Over one second the rate adds up to 1 / 0.033 ticks (30.30), not 30.
-    assert!((rock_hurt(mass, closing, 1.0) / (ROCK_FACTOR * mass * closing) - 1.0 / 0.033).abs() < 1e-3);
 }

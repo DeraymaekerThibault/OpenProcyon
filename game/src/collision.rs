@@ -588,206 +588,202 @@ pub fn sail(
             }
         }
     }
-    // shortcut: small adaptive steps instead of continuous OBB sweeps; upgrade if speeds exceed retail orders.
-    let fastest = ships.iter().map(|(_, s, _, _, d, _)| s.speed.abs() + d.0.length() + 5.0).chain(rocks.iter().map(|(_, _, _, _, d, _)| d.0.length())).fold(0.0, f32::max);
-    let steps = (fastest * dt / 0.5).max(dt * 60.0).ceil().clamp(1.0, 32.0) as usize; // cap: a runaway drift must not freeze the frame
-    let substep = dt / steps as f32;
-    for _ in 0..steps {
-        for (_, rock, mut tf, mut obstacle, drift, visible) in &mut rocks {
-            if rock.hp <= 0.0 || visible == Some(&Visibility::Hidden) || drift.0 == Vec3::ZERO {
+    // One tick (docs/re/tick.md): everything integrates one step of `dt`, then cables pull and one collision pass runs over the new
+    // positions. Each overlapping pair responds at most once. The earlier small substeps are gone: a runaway drift may now cross a
+    // thin hull within a tick, as it does in the original.
+    let substep = dt;
+    for (_, rock, mut tf, mut obstacle, drift, visible) in &mut rocks {
+        if rock.hp <= 0.0 || visible == Some(&Visibility::Hidden) || drift.0 == Vec3::ZERO {
+            continue;
+        }
+        let delta = drift.0 * substep;
+        tf.translation += delta;
+        obstacle.translate(delta);
+    }
+    for (e, mut s, mut tf, health, mut drift, docker) in &mut ships {
+        if health.destroyed {
+            continue;
+        }
+        if docker.is_some_and(crate::docking::Docker::gliding) {
+            drift.0 = Vec3::ZERO;
+            continue;
+        }
+        if docker.is_some_and(crate::docking::Docker::is_docked) || pinned(e) {
+            s.speed = 0.0;
+            drift.0 = Vec3::ZERO;
+            continue;
+        }
+        let class = &lib.classes[s.class];
+        if let Some(dir) = avoiders.get(&e).and_then(|a| a.stuck) {
+            // The original's unstick: a fixed turn in place, sqrt(MaxAngularAcceleration / RotationalFriction) / 3 rad/s, whatever
+            // the speed, rudder or crew; the ship keeps its speed but does not move until it is free.
+            s.heading += dir * (class.phys.max_ang_acc / class.phys.rot_friction.max(1e-3)).sqrt() / 3.0 * substep;
+            tf.rotation = Quat::from_rotation_y(s.heading);
+        } else {
+            let ai = !humans(e, s.side);
+            crate::ship::helm_step(&mut s, &mut tf, class, health, substep, ai);
+        }
+        // Etherium currents push along their path (environment.rs); force / mass, as for thrust.
+        for c in &currents {
+            drift.0 += c.force(tf.translation) / class.phys.mass * substep;
+        }
+        // PROVISIONAL lateral damping; the original has lateral drag but its full mapping is not recovered.
+        drift.0 *= (-2.0 * substep).exp();
+        tf.translation += drift.0 * substep;
+    }
+    // Slack cables only pull, never push; both hulls remain independently simulated.
+    for (&(tower, towee), &length) in cables.iter() {
+        let Ok([(_, mut a, mut ta, ha, mut da, _), (_, mut b, mut tb, hb, mut db, _)]) = ships.get_many_mut([tower, towee]) else { continue };
+        if ha.destroyed || hb.destroyed {
+            continue;
+        }
+        let ca = &lib.classes[a.class];
+        let cb = &lib.classes[b.class];
+        let p = ta.transform_point(ca.tow_points[0]);
+        let q = tb.transform_point(cb.tow_points[1]);
+        let separation = (p - q).with_y(0.0);
+        let distance = separation.length();
+        if distance <= length || distance < 0.001 {
+            continue;
+        }
+        let normal = -separation / distance;
+        let ba = ship_body(&a, &ta, &da, ca, p);
+        let bb = ship_body(&b, &tb, &db, cb, q);
+        let j = impulse(&ba, &bb, normal);
+        let error = separation * ((distance - length) / distance);
+        ta.translation -= error * (ba.inverse_mass / (ba.inverse_mass + bb.inverse_mass));
+        tb.translation += error * (bb.inverse_mass / (ba.inverse_mass + bb.inverse_mass));
+        apply_impulse(&mut a, &mut da, &ba, j);
+        apply_impulse(&mut b, &mut db, &bb, -j);
+    }
+    // The collision pass, after every object has moved: ships against the land and rocks, then ship against ship.
+    for (e, s, mut tf, health, drift, docker) in &mut ships {
+        if health.destroyed || ghost(e) || docker.is_some_and(|d| d.gliding() || d.is_docked()) || pinned(e) {
+            continue;
+        }
+        let class = &lib.classes[s.class];
+        for (oe, obstacle, visible) in &obstacles {
+            if visible == Some(&Visibility::Hidden) || ghost(oe) || docker.is_some_and(|d| d.ignores_collision(oe)) {
                 continue;
             }
-            let delta = drift.0 * substep;
-            tf.translation += delta;
+            if !obstacle.tree.is_empty() {
+                // The original (read from its code): the ship's box against the mesh's box tree, one push out along the
+                // horizontal normal per tick, no iteration (docs/re/collision.md).
+                let ship = tree::Box3::placed(class.collision_bounds, &tf);
+                if let Some(push) = tree::land_push(&obstacle.tree, &ship) {
+                    tf.translation += push;
+                }
+                continue;
+            }
+            // Rebuild after each correction: adjacent faces must not use a stale box.
+            for _ in 0..3 {
+                let body = box_body(class.collision_bounds, &tf);
+                let contacts = static_contacts(&body, obstacle);
+                let Some(contact) = closest_contact(contacts) else { break };
+                // The original (read from its code): land and bases only push the hull out along the horizontal normal; speed,
+                // turn, damage and sound are untouched, so a ship slides along the shore and can still turn free.
+                tf.translation += contact.push.with_y(0.0);
+            }
+        }
+        // PROVISIONAL: native asteroid restitution/inertia remain unresolved.
+        // shortcut: share the planar ship solver for rocks; upgrade when native asteroid response is decoded.
+        for (rock_e, mut rock, mut rock_tf, mut obstacle, mut rock_drift, visible) in &mut rocks {
+            if rock.hp <= 0.0 || visible == Some(&Visibility::Hidden) {
+                continue;
+            }
+            // One response per pair and tick.
+            let body = box_body(class.collision_bounds, &tf);
+            let Some(contact) = closest_contact(static_contacts(&body, &obstacle)) else { continue };
+            let a = ship_body(&s, &tf, &drift, class, contact.point);
+            let size = obstacle.body.bounds.max - obstacle.body.bounds.min;
+            let b = ContactBody {
+                velocity: rock.velocity + rock_drift.0,
+                spin: rock.angular_velocity().y,
+                inverse_mass: 1.0 / rock.mass,
+                inverse_inertia: 12.0 / (rock.mass * (size.x * size.x + size.z * size.z).max(0.001)),
+                arm: (contact.point - rock_tf.translation).with_y(0.0),
+            };
+            // The original: pushed apart by mass, the ship's speed and turn untouched, the rock shoved away from the ship
+            // (0.25 x the centres' offset per second), and both damaged every tick by the rock's mass x the closing speed.
+            let push = contact.push.with_y(0.0);
+            tf.translation += push * (a.inverse_mass / (a.inverse_mass + b.inverse_mass));
+            let delta = -push * (b.inverse_mass / (a.inverse_mass + b.inverse_mass));
+            rock_tf.translation += delta;
             obstacle.translate(delta);
-        }
-        for (e, mut s, mut tf, health, mut drift, docker) in &mut ships {
-            if health.destroyed {
-                continue;
-            }
-            if docker.is_some_and(crate::docking::Docker::gliding) {
-                drift.0 = Vec3::ZERO;
-                continue;
-            }
-            if docker.is_some_and(crate::docking::Docker::is_docked) || pinned(e) {
-                s.speed = 0.0;
-                drift.0 = Vec3::ZERO;
-                continue;
-            }
-            let class = &lib.classes[s.class];
-            if let Some(dir) = avoiders.get(&e).and_then(|a| a.stuck) {
-                // The original's unstick: a fixed turn in place, sqrt(MaxAngularAcceleration / RotationalFriction) / 3 rad/s, whatever
-                // the speed, rudder or crew; the ship keeps its speed but does not move until it is free.
-                s.heading += dir * (class.phys.max_ang_acc / class.phys.rot_friction.max(1e-3)).sqrt() / 3.0 * substep;
-                tf.rotation = Quat::from_rotation_y(s.heading);
-            } else {
-                let ai = !humans(e, s.side);
-                crate::ship::helm_step(&mut s, &mut tf, class, health, substep, ai);
-            }
-            // Etherium currents push along their path (environment.rs); force / mass, as for thrust.
-            for c in &currents {
-                drift.0 += c.force(tf.translation) / class.phys.mass * substep;
-            }
-            // PROVISIONAL lateral damping; the original has lateral drag but its full mapping is not recovered.
-            drift.0 *= (-2.0 * substep).exp();
-            tf.translation += drift.0 * substep;
-            if ghost(e) {
-                continue;
-            }
-            for (oe, obstacle, visible) in &obstacles {
-                if visible == Some(&Visibility::Hidden) || ghost(oe) || docker.is_some_and(|d| d.ignores_collision(oe)) {
-                    continue;
-                }
-                if !obstacle.tree.is_empty() {
-                    // The original (read from its code): the ship's box against the mesh's box tree, one push out along the
-                    // horizontal normal per tick, no iteration (docs/re/collision.md). Here once per substep.
-                    let ship = tree::Box3::placed(class.collision_bounds, &tf);
-                    if let Some(push) = tree::land_push(&obstacle.tree, &ship) {
-                        tf.translation += push;
-                    }
-                    continue;
-                }
-                // Rebuild after each correction: adjacent faces must not use a stale box.
-                for _ in 0..3 {
-                    let body = box_body(class.collision_bounds, &tf);
-                    let contacts = static_contacts(&body, obstacle);
-                    let Some(contact) = closest_contact(contacts) else { break };
-                    // The original (read from its code): land and bases only push the hull out along the horizontal normal; speed,
-                    // turn, damage and sound are untouched, so a ship slides along the shore and can still turn free.
-                    tf.translation += contact.push.with_y(0.0);
-                }
-            }
-            // PROVISIONAL: native asteroid restitution/inertia remain unresolved.
-            // shortcut: share the planar ship solver for rocks; upgrade when native asteroid response is decoded.
-            for (rock_e, mut rock, mut rock_tf, mut obstacle, mut rock_drift, visible) in &mut rocks {
-                if rock.hp <= 0.0 || visible == Some(&Visibility::Hidden) {
-                    continue;
-                }
-                for _ in 0..3 {
-                    let body = box_body(class.collision_bounds, &tf);
-                    let Some(contact) = closest_contact(static_contacts(&body, &obstacle)) else { break };
-                    let a = ship_body(&s, &tf, &drift, class, contact.point);
-                    let size = obstacle.body.bounds.max - obstacle.body.bounds.min;
-                    let b = ContactBody {
-                        velocity: rock.velocity + rock_drift.0,
-                        spin: rock.angular_velocity().y,
-                        inverse_mass: 1.0 / rock.mass,
-                        inverse_inertia: 12.0 / (rock.mass * (size.x * size.x + size.z * size.z).max(0.001)),
-                        arm: (contact.point - rock_tf.translation).with_y(0.0),
-                    };
-                    // The original: pushed apart by mass, the ship's speed and turn untouched, the rock shoved away from the ship
-                    // (0.25 x the centres' offset per second), and both damaged every tick by the rock's mass x the closing speed.
-                    let push = contact.push.with_y(0.0);
-                    tf.translation += push * (a.inverse_mass / (a.inverse_mass + b.inverse_mass));
-                    let delta = -push * (b.inverse_mass / (a.inverse_mass + b.inverse_mass));
-                    rock_tf.translation += delta;
-                    obstacle.translate(delta);
-                    // ponytail: a rock touch sounds like a ship touch on the ship's side (the rock's own impact sound is not read).
-                    bump([(class, &*tf), (class, &*tf)], contact.point, substep);
-                    rock_drift.0 = (rock_tf.translation - tf.translation).with_y(0.0) * 0.25;
-                    // ...and dropped from its belt for good: the original clears its waypoints on every touching tick.
-                    rock.path.clear();
-                    rock.velocity = Vec3::ZERO;
-                    let hurt = rock_hurt(rock.mass, (a.velocity - b.velocity).length(), substep);
-                    rock.hp -= hurt;
-                    if let Some(r) = rams.as_mut().filter(|_| hurt > 0.0) {
-                        r.write(Ram { a: e, b: rock_e, damage: hurt, at: contact.point });
-                    }
-                    if rock.hp <= 0.0 {
-                        break;
-                    }
-                }
+            // ponytail: a rock touch sounds like a ship touch on the ship's side (the rock's own impact sound is not read).
+            bump([(class, &*tf), (class, &*tf)], contact.point, substep);
+            rock_drift.0 = (rock_tf.translation - tf.translation).with_y(0.0) * 0.25;
+            // ...and dropped from its belt for good: the original clears its waypoints on every touching tick.
+            rock.path.clear();
+            rock.velocity = Vec3::ZERO;
+            let hurt = rock_hurt(rock.mass, (a.velocity - b.velocity).length(), substep);
+            rock.hp -= hurt;
+            if let Some(r) = rams.as_mut().filter(|_| hurt > 0.0) {
+                r.write(Ram { a: e, b: rock_e, damage: hurt, at: contact.point });
             }
         }
-        // Slack cables only pull, never push; both hulls remain independently simulated.
-        for (&(tower, towee), &length) in cables.iter() {
-            let Ok([(_, mut a, mut ta, ha, mut da, _), (_, mut b, mut tb, hb, mut db, _)]) = ships.get_many_mut([tower, towee]) else { continue };
-            if ha.destroyed || hb.destroyed {
-                continue;
-            }
-            let ca = &lib.classes[a.class];
-            let cb = &lib.classes[b.class];
-            let p = ta.transform_point(ca.tow_points[0]);
-            let q = tb.transform_point(cb.tow_points[1]);
-            let separation = (p - q).with_y(0.0);
-            let distance = separation.length();
-            if distance <= length || distance < 0.001 {
-                continue;
-            }
-            let normal = -separation / distance;
-            let ba = ship_body(&a, &ta, &da, ca, p);
-            let bb = ship_body(&b, &tb, &db, cb, q);
-            let j = impulse(&ba, &bb, normal);
-            let error = separation * ((distance - length) / distance);
-            ta.translation -= error * (ba.inverse_mass / (ba.inverse_mass + bb.inverse_mass));
-            tb.translation += error * (bb.inverse_mass / (ba.inverse_mass + bb.inverse_mass));
-            apply_impulse(&mut a, &mut da, &ba, j);
-            apply_impulse(&mut b, &mut db, &bb, -j);
+    }
+    // One pass over all pairs: an overlapping pair responds once per tick; a formation overlap settles over several ticks.
+    let mut pairs = ships.iter_combinations_mut();
+    while let Some([(ea, mut a, mut ta, ha, da, docka), (eb, mut b, mut tb, hb, db, dockb)]) = pairs.fetch_next() {
+        // In the original a ship hitting a lifeboat has no response: lifeboats pass through ships and each other (they still touch for pickup).
+        if ha.destroyed
+            || hb.destroyed
+            || ghost(ea)
+            || ghost(eb)
+            || boats.contains(ea)
+            || boats.contains(eb)
+            || docka.is_some_and(|d| d.ignores_collision(eb))
+            || dockb.is_some_and(|d| d.ignores_collision(ea))
+        {
+            continue;
         }
-        // Two passes also settle small initial formation overlaps without moving destroyed ships.
-        for _ in 0..2 {
-            let mut pairs = ships.iter_combinations_mut();
-            while let Some([(ea, mut a, mut ta, ha, da, docka), (eb, mut b, mut tb, hb, db, dockb)]) = pairs.fetch_next() {
-                // In the original a ship hitting a lifeboat has no response: lifeboats pass through ships and each other (they still touch for pickup).
-                if ha.destroyed
-                    || hb.destroyed
-                    || ghost(ea)
-                    || ghost(eb)
-                    || boats.contains(ea)
-                    || boats.contains(eb)
-                    || docka.is_some_and(|d| d.ignores_collision(eb))
-                    || dockb.is_some_and(|d| d.ignores_collision(ea))
-                {
-                    continue;
-                }
-                let ca = &lib.classes[a.class];
-                let cb = &lib.classes[b.class];
-                let ba = box_body(ca.collision_bounds, &ta);
-                let bb = box_body(cb.collision_bounds, &tb);
-                if !ba.bounds.overlaps(bb.bounds) {
-                    continue;
-                }
-                let Some(push) = contact(&ba.points, &bb.points) else { continue };
-                let normal = push.normalize();
-                let point = contact_point(&ba.points, &bb.points, normal);
-                let fixed = |body: ContactBody, pin: bool| if pin { ContactBody { inverse_mass: 0.0, inverse_inertia: 0.0, ..body } } else { body };
-                let a_body = fixed(ship_body(&a, &ta, &da, ca, point), pinned(ea));
-                let b_body = fixed(ship_body(&b, &tb, &db, cb, point), pinned(eb));
-                let total = a_body.inverse_mass + b_body.inverse_mass;
-                if total <= 0.0 {
-                    continue;
-                }
-                // The original (read from its code): pushed apart by mass, the heavier hull moving less; no bounce, both keep their
-                // velocity. Each gets a yaw kick at the contact point from 0.1 x its mass x its change to the pair's common velocity
-                // per 0.033 s, over a box's inertia (the own mass cancels: a light ship swings, a heavy one hardly turns).
-                let push = push.with_y(0.0);
-                ta.translation += push * (a_body.inverse_mass / total);
-                tb.translation -= push * (b_body.inverse_mass / total);
-                let (ma, mb) = (ca.phys.mass, cb.phys.mass);
-                let common = (a_body.velocity * ma + b_body.velocity * mb) / (ma + mb);
-                let kick = |body: &ContactBody, size: Vec3, dir: Vec3| {
-                    let force = dir * 0.1 * (common - body.velocity).length() / TICK; // per unit of own mass
-                    (body.arm.cross(force).y * 12.0 / (size.x * size.x + size.z * size.z).max(1e-3)).clamp(-60.0, 60.0) * substep
-                };
-                // The box inertia's width and length: twice the collision box's starboard and forward extents.
-                let size = |c: &crate::data::Class| Vec3::new(2.0 * c.collision_bounds[1].x, 0.0, -2.0 * c.collision_bounds[0].z);
-                if !pinned(ea) {
-                    a.ang_vel += kick(&a_body, size(ca), normal);
-                }
-                if !pinned(eb) {
-                    b.ang_vel += kick(&b_body, size(cb), -normal);
-                }
-                bump([(ca, &*ta), (cb, &*tb)], point, substep);
-                // Ram damage: the other ship's mass x the closing speed on the section nearest the contact, at most once per 3.5 s
-                // per ship, never between allies.
-                let closing = (a_body.velocity - b_body.velocity).length();
-                for (victim, other, m, side, other_side) in [(ea, eb, mb, a.side, b.side), (eb, ea, ma, b.side, a.side)] {
-                    if side != other_side && !rammed.contains_key(&victim) && closing > 0.0 {
-                        rammed.insert(victim, now + RAM_COOLDOWN);
-                        if let Some(r) = rams.as_mut() {
-                            r.write(Ram { a: victim, b: other, damage: RAM_FACTOR * m * closing, at: point });
-                        }
-                    }
+        let ca = &lib.classes[a.class];
+        let cb = &lib.classes[b.class];
+        let ba = box_body(ca.collision_bounds, &ta);
+        let bb = box_body(cb.collision_bounds, &tb);
+        if !ba.bounds.overlaps(bb.bounds) {
+            continue;
+        }
+        let Some(push) = contact(&ba.points, &bb.points) else { continue };
+        let normal = push.normalize();
+        let point = contact_point(&ba.points, &bb.points, normal);
+        let fixed = |body: ContactBody, pin: bool| if pin { ContactBody { inverse_mass: 0.0, inverse_inertia: 0.0, ..body } } else { body };
+        let a_body = fixed(ship_body(&a, &ta, &da, ca, point), pinned(ea));
+        let b_body = fixed(ship_body(&b, &tb, &db, cb, point), pinned(eb));
+        let total = a_body.inverse_mass + b_body.inverse_mass;
+        if total <= 0.0 {
+            continue;
+        }
+        // The original (read from its code): pushed apart by mass, the heavier hull moving less; no bounce, both keep their
+        // velocity. Each gets a yaw kick at the contact point from 0.1 x its mass x its change to the pair's common velocity
+        // per 0.033 s, over a box's inertia (the own mass cancels: a light ship swings, a heavy one hardly turns).
+        let push = push.with_y(0.0);
+        ta.translation += push * (a_body.inverse_mass / total);
+        tb.translation -= push * (b_body.inverse_mass / total);
+        let (ma, mb) = (ca.phys.mass, cb.phys.mass);
+        let common = (a_body.velocity * ma + b_body.velocity * mb) / (ma + mb);
+        let kick = |body: &ContactBody, size: Vec3, dir: Vec3| {
+            let force = dir * 0.1 * (common - body.velocity).length() / TICK; // per unit of own mass
+            (body.arm.cross(force).y * 12.0 / (size.x * size.x + size.z * size.z).max(1e-3)).clamp(-60.0, 60.0) * substep
+        };
+        // The box inertia's width and length: twice the collision box's starboard and forward extents.
+        let size = |c: &crate::data::Class| Vec3::new(2.0 * c.collision_bounds[1].x, 0.0, -2.0 * c.collision_bounds[0].z);
+        if !pinned(ea) {
+            a.ang_vel += kick(&a_body, size(ca), normal);
+        }
+        if !pinned(eb) {
+            b.ang_vel += kick(&b_body, size(cb), -normal);
+        }
+        bump([(ca, &*ta), (cb, &*tb)], point, substep);
+        // Ram damage: the other ship's mass x the closing speed on the section nearest the contact, at most once per 3.5 s
+        // per ship, never between allies.
+        let closing = (a_body.velocity - b_body.velocity).length();
+        for (victim, other, m, side, other_side) in [(ea, eb, mb, a.side, b.side), (eb, ea, ma, b.side, a.side)] {
+            if side != other_side && !rammed.contains_key(&victim) && closing > 0.0 {
+                rammed.insert(victim, now + RAM_COOLDOWN);
+                if let Some(r) = rams.as_mut() {
+                    r.write(Ram { a: victim, b: other, damage: RAM_FACTOR * m * closing, at: point });
                 }
             }
         }
