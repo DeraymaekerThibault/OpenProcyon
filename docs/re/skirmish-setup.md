@@ -157,6 +157,16 @@ skill can read N/A). Dragging one onto a post spends its cost (a 9-point captain
   lancers 4 of 4, energy nets 4 of 4, gravity charge 1 of 1) and kept where the budget was spent (a two-ship fleet kept its lancers). Banks of stock cannons,
   carronades and Gattlings were swapped about half the time; two-deck banks, point-defence lancers, mines and torpedoes were never touched. The remake's
   default list is exactly that set (`RETAIL_COMPUTER_GUNS`, overridable by `data/ai/weapons.json`); PROVISIONAL: a gun that never showed up may still be allowed.
+  Remake swap rule (read from the original's build routine, not yet checked against a single measured value): every light, medium or heavy
+  bank gets exactly one random pick, no coin flip, from its mount size's pool: light {Cannon, Gattling, Carronade, Plasma}, medium {Cannon,
+  Carronade, Plasma}, heavy {Cannon x2, Carronade x2, Plasma x2, Fire Launcher, Star Mortar} (a listed-twice gun weighs double). The pick may
+  equal the stock gun (no change); a gun barred for the hull's race (carronade for Procyon, plasma for Pirate) is redrawn; the swap is kept only
+  if points remain afterwards. Two-deck, point-defence, mine, torpedo and special banks are never touched. The original runs this only for
+  fleets of its first three build styles; the remake has no styles and runs it for every fleet (and for Auto Assign).
+- Not built: the per-hull price window (the original's hull cost limit is a window around the batch's average, with a floor of 22, not
+  "half the points left"; the remake keeps its half-of-what-is-left cap until the style and batch rolls exist). Computer crews never use
+  crewmen rated above 7 in the post's skill except gunners, because the original picks the first crewman rated 7 or less (10 for the two best
+  gun banks); there is no list of excluded story characters, so none is built.
 - Launch Game is greyed until a computer opponent is in and (open maps) a fleet is assembled; I'm Ready is always greyed in single player
   (measured: fresh lobby, lobby with a computer and no fleet, and with a fleet).
 - Every scrollbar (maps, ships, crew / weapons) shares one drag rule (`menu::scroll_drag`): press the track or thumb and drag. What a drag
