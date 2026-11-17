@@ -1637,7 +1637,7 @@ fn a_new_shell_first_moves_in_the_tick_after_it_was_created() {
     };
     app.insert_resource(lib);
     app.world_mut().resource_mut::<Spawn>().0 = Some(shell);
-    let mut tick = |app: &mut App| {
+    let tick = |app: &mut App| {
         app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs_f32(0.033));
         app.update();
         app.world_mut().query_filtered::<&Transform, With<Shell>>().single(app.world()).unwrap().translation
