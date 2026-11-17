@@ -5,12 +5,12 @@ Source: observed behaviour of the original game, WOT collision definitions and t
 ## Recovered
 
 - Ship WOTs select `BoundingRenderEntity` detection and `Ship` response, with explicit `MinExtents` / `MaxExtents`. These are distinct from damage-section bounds and the large broad-phase sphere (which includes sails). Cutter's box in game axes is (-2.25, -7, -1.5) to (2.25, 6.5, 2); its sphere is radius 12 centred at (0, 0, 5.5).
-- Islands and most bases select `OBBTree` detection and `Static Object` response, deriving their bounds from the render mesh. This is triangle collision, not one enormous sphere around the island.
+- Islands and most bases select `OBBTree` detection and `Static Object` response, deriving their bounds from the render mesh. A ship touches the mesh's tree of oriented boxes, not its triangles and not one enormous sphere (see "Ships against land: the box tree" below); shells are tested against the triangles.
 - Unarmed asteroids select `BoundingRenderEntity` / `Asteroid` with authored boxes; armed asteroids select `OBBTree` / `Static Object`.
 - Dock buoys select `Null` detection/response; Base_Cresentia has no collision entity. Neither should block ships.
 - External pushes on a ship are divided by its WOT mass and accumulated as acceleration, which the physics step integrates into velocity. This confirms inverse-mass impulse/force handling, not its caller's complete impulse formula.
 - Helper uses a contact point's displacement from the transformed centre of mass and collision-box dimensions to accumulate angular acceleration, clamped to ±60. The exact torque/sign relationship is not recovered well enough to port.
-- Debug strings include `Collision LOD Level Index` and `Valid Collision Triangle Indices`. The exact collision LOD, triangle rejection rules, response dispatcher, restitution, sound trigger and damage calculation remain unresolved.
+- Debug strings include `Collision LOD Level Index` and `Valid Collision Triangle Indices`. The ship-against-land rule is now recovered and measured (below); the collision LOD for shells, restitution, sound trigger and damage calculation remain unresolved.
 
 ## Ships and rocks (read from the original's code, 2026-10-31)
 
@@ -48,6 +48,57 @@ Contact with an island or a base pushes the ship's hull straight out along the h
 throttle and turn are untouched, it takes no damage and makes no sound. A ship pressing into a shore therefore keeps its (avoider-
 capped) speed and slides along it; one wedged bow-first is freed by the avoider's turn in place ([movement.md](movement.md)).
 Remake: `collision::sail` (the old impulse response for land is gone; ships and rocks keep it until their rules are ported).
+
+## Ships against land: the box tree (read from the original's code and measured on retail, 2026-11-17)
+
+Replaces the triangle test as the rule for a ship touching an island or base. Checked against 16 staged runs (2 islands, 2 ships,
+2443 logged ticks): 2441 ticks reproduced to within 0.05 u (median 0.000, 95th percentile 0.01), including a ship that bounced in a
+cycle for 150 ticks. Nothing in it is fitted.
+
+**The tree.** Every mesh layer of an island or base carries, in its mesh file, a binary tree of oriented boxes. Each node has: a centre,
+three perpendicular unit axes, three half extents along them, its level (the root is 0), up to two children, and (leaves) a list of
+triangle indices. The root box encloses the whole layer; a child box encloses part of its parent. Island 8 of the Diablo Strait has 47 boxes
+on levels 0 to 5, 24 of them leaves (8 on level 4, 16 on level 5) with half extents of 15 to 22 u around a 139 u wide island; island 6 has
+the same depth. The deepest level the contact test is allowed to use is 6, so on these islands the leaves are the contact surface.
+
+**Where the tree is.** The tree lives in the mesh's own frame. The mesh layer sits at the island object's position plus an offset of
+(scene node position - scene node pivot) in the island's frame. Island 8: node position z +0.45, pivot z -6.6, so the whole tree is 7.05 u
+above the object's origin (the fit to the measurements gives 7.05 to within 0.02, and the arithmetic gives exactly 7.05). Island 6: node 0, pivot 0, no offset. Of the retail
+scenes' 80 island layers and 250 base layers, 15 and 49 have a non-zero offset (none of the 12 asteroid layers). Islands tested had no rotation; the object's rotation applies to the
+tree the same way it does to the render (unmeasured).
+
+**The ship's box.** The ship's physics box (its `MinExtents` / `MaxExtents`, game axes: x starboard, y bow, z up) at the ship's position and
+heading, centred at the middle of the extents. Man-O-War (-3, -17, -3) to (3, 14, 6); Cutter (-2.25, -7, -1.5) to (2.25, 6.5, 2). The ship's
+height above the water is 0 and it does not tilt in these runs.
+
+**One test per tick** (after every object has moved):
+1. For a node, test the two boxes on 15 axes: the node's three axes, the ship's three, and the nine cross products of one of each. A cross
+   product whose squared length is below 0.1 (the two edges nearly parallel) is skipped; the others are normalised. On each axis the gap is
+   |centre difference . axis| minus both boxes' extents along it. A gap above 0 on any axis means no contact for this node and its subtree.
+   Otherwise the node's own result is the axis with the largest (shallowest) gap; its depth is minus that gap, and the axis points from the
+   box towards the ship.
+2. A leaf, or a node on level 6, that overlaps reports its own result. An inner node that overlaps tests both children and reports nothing
+   when neither child reports a contact. When one child reports: that child's result replaces the node's own if it is shallower, otherwise the
+   node's own stands. When both report: the two vectors (depth x axis) are added; the sum, with depth equal to its length, replaces the node's
+   own result if it is shallower, otherwise the node's own stands.
+3. The contact is the root's result (a layer with several mesh entries adds their depth x axis vectors; only single-entry islands were
+   measured). Its normal is the unit direction, its depth the length.
+4. Response: the ship is moved by depth x |cos| along the horizontal part of the normal (normalised), away from the island, where cos is the
+   angle between that horizontal direction and the full normal. The island does not move. Speed, heading and angular velocity are untouched
+   (as above). This runs once per tick while a contact is reported; it is not iterated within a tick and not damped, so a ship that one push
+   throws into another box is pushed back next tick and can bounce from side to side (island 6: a cycle of about 15 u that the original and this rule traced identically for 150 ticks).
+
+**Why it matters.** Leaf boxes reach well beyond the shore, and the push has a large vertical component for a ship level with a tall box.
+A ship started with its centre on the coast of island 8 ended 17.6 and 24.5 u from the coast beam-on and 19.1 u bow-on; a triangle contact
+gives about 3 and 14 u (half the beam, the bow length). One-tick pushes from slightly overlapping starts, Man-O-War on island 8 (heading
+as the unit vector): start (-467.6, -1262.5) facing (-0.159, 0.987) ends at (-463.160, -1256.323); Cutter start (-537.6, -1278.9) facing
+(0.160, -0.987) ends at (-541.17, -1271.78); island 6, Man-O-War start (318.3, -184.4) facing (-0.447, 0.894) ends at (322.87, -178.26).
+These are test vectors for the rule; they need the imported island meshes.
+
+**What differs here.** The remake tests ship boxes against the layer's triangles clipped to the ship's height and applies no node pivot to
+island meshes, so ships hold a few units off the shore where the original holds 15 to 25 and islands with a pivot offset sit lower than
+the original's (by 7.05 u on island 8). Not measured: rotated islands, bases and other multi-layer scenery, armed asteroids (same
+detection, different shape), a ship that is tilted or not at the water level, ships starting completely inside an island.
 
 ## Measured on retail (2026-10, one glancing ram between our own ships)
 
