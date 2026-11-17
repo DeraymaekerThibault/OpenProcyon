@@ -1008,6 +1008,24 @@ mod think_clock_tests {
         assert_eq!(thinks(14), thinks(4)); // the delay repeats every ten ships
     }
     #[test]
+    fn start_delays_are_005_times_the_spawn_number_and_wrap_at_ten() {
+        for n in 0..25 {
+            let c = ThinkClock::new(0.0, n);
+            assert!((c.delay - 0.05 * (n % 10) as f32).abs() < 1e-6, "ship {n}");
+        }
+        assert_eq!(ThinkClock::new(0.0, 9).delay, 0.05 * 9.0); // 0.45 s for the tenth ship, then 0 again
+        assert_eq!(ThinkClock::new(0.0, 10).delay, 0.0);
+    }
+    #[test]
+    fn the_clock_restarts_at_each_think_without_carrying_a_remainder() {
+        let mut c = ThinkClock::new(0.0, 0);
+        let first = (1..=40).find(|k| c.due(*k as f32 * 0.033).is_some()).unwrap();
+        assert_eq!(first, 16);
+        // Ticks 17..=31 are not due: the next think is 16 ticks after the last, not 0.5 s after the last's nominal time.
+        assert!((17..=31).all(|k| c.due(k as f32 * 0.033).is_none()));
+        assert!(c.due(32.0 * 0.033).is_some());
+    }
+    #[test]
     fn a_think_reports_the_time_since_the_last_one() {
         let mut c = ThinkClock::new(0.0, 0);
         let since = (1..=16).find_map(|k| c.due(k as f32 * 0.033)).unwrap();

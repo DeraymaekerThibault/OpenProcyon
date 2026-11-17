@@ -72,6 +72,7 @@ not per player). *Measured:* five captains, every think gap 0.528 s, 85 gaps eac
 | Out of map | tested after integration, queued; floor z = -130 | same for asteroids and shells |
 | Collision | one pass after all movement | same |
 | Decisions | after movement and collision | captains, mission AI and fleet following after movement and collision, before ship upkeep; also the dock routine, repair and tow decisions, computer boarding and dragon decisions. Orders (dock, tow, board, grapple) only record an order in the command step. Boarding fights and the rope break/reel test run in their own mission-tick step before the forces; the rope pull and the docked hold are forces; the dock glide and dragon flight are movement; the dock heal is ship upkeep |
+| Think timer | ships 0.5 s = 16 ticks (0.528 s); start delay 0.05 s x (n mod 10); last think reset to now | computer captains' decisions (target, course, speed order) run on this timer with the same delay and reset, and hold between thinks. The helm still computes the rudder from the held course every tick instead of holding the rudder value itself (the turn boost keeps the simulated circles equal). Docks, tow, boarding and dragons run every tick (provisional) |
 | Mission rules (single player) | once per frame, after the last tick | same, also while paused |
 | Frame catch-up | 10 frames, then drop | same up to 5x; above 5x at most 0.1 s per call (speeds above 5x are the remake's own) |
 | Contact rate constant | 0.033 | same |
