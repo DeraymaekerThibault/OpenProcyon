@@ -342,6 +342,7 @@ def export(root, ship, outdir):
                 gun_defs[gun] = (
                     {k: g[k] for k in GUN_KEYS}
                     | {k: g.get(k) for k in GUN_SOUND_KEYS}
+                    | {"CalculateAccuracyDeviationDuringBurst": bool(g.get("CalculateAccuracyDeviationDuringBurst", False))}
                     | {"visual": gun_visual(root, gun, outdir)}
                 )
             b = gun_defs[gun]["BulletTypeName_Primary"]
