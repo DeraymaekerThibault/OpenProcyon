@@ -181,7 +181,7 @@ pub fn blasts(
             (r >= before && r < now && r < max).then(|| (1.0 - r / max).max(0.1))
         };
         let Some(bd) = lib.bullets.get(&b.bullet) else {
-            commands.entity(e).despawn();
+            crate::queue_removal(&mut commands, e);
             continue;
         };
         let by = b.shooter.unwrap_or(e);
@@ -241,11 +241,11 @@ pub fn blasts(
                 if let Some(pd) = lib.bullets.get(&shell.bullet) {
                     hit_fx(&mut commands, &fxl, pd, ptf.translation, shell.vel, None, Surface::default());
                 }
-                commands.entity(pe).despawn();
+                crate::queue_removal(&mut commands, pe);
             }
         }
         if b.age >= b.duration {
-            commands.entity(e).despawn();
+            crate::queue_removal(&mut commands, e);
         }
     }
 }
@@ -255,7 +255,7 @@ pub fn grav_wells(mut commands: Commands, time: Res<Time>, mut wells: Query<(Ent
     for (e, mut w) in &mut wells {
         w.left -= time.delta_secs();
         if w.left <= 0.0 {
-            commands.entity(e).despawn();
+            crate::queue_removal(&mut commands, e);
         }
     }
 }

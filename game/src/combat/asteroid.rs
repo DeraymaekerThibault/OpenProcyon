@@ -258,7 +258,7 @@ pub fn asteroid_deaths(
             target.0 = None;
             target.1 = None;
         }
-        commands.entity(death.victim).despawn();
+        crate::queue_removal(&mut commands, death.victim);
     }
 }
 
@@ -416,7 +416,7 @@ mod tests {
             .add_message::<Shoot>()
             .add_message::<Strike>()
             .add_message::<Sfx>()
-            .add_systems(Update, asteroid_deaths);
+            .add_systems(Update, (crate::tick_start, asteroid_deaths).chain());
         let shooter = app.world_mut().spawn_empty().id();
         let rock = Asteroid::new("Asteroid_Large", "Asteroid Belt", app.world().resource::<AsteroidDefs>()).unwrap();
         let parent = app.world_mut().spawn((rock, Transform::default())).id();
@@ -428,6 +428,7 @@ mod tests {
         assert!(!rock.damage(1000.0), "multiple shells must not repeat death");
         app.world_mut().write_message(Destroyed { by: shooter, victim: parent });
         app.update();
+        app.update(); // removal is applied at the start of the next tick
         assert!(app.world().get_entity(parent).is_err());
         assert_eq!(app.world().resource::<Target>().0, None);
         let children: Vec<_> = app
@@ -452,6 +453,7 @@ mod tests {
             app.world_mut().write_message(Destroyed { by: shooter, victim: child });
         }
         app.update();
+        app.update(); // the dead mediums are destroyed at the start of this tick
         let small: Vec<_> = app
             .world_mut()
             .query::<(Entity, &Asteroid)>()
@@ -466,6 +468,7 @@ mod tests {
             assert!(app.world_mut().get_mut::<Asteroid>(child).unwrap().damage(10.0));
             app.world_mut().write_message(Destroyed { by: shooter, victim: child });
         }
+        app.update();
         app.update();
         assert_eq!(app.world_mut().query::<&Asteroid>().iter(app.world()).count(), 0);
         assert_eq!(app.world_mut().query::<&crate::collision::Obstacle>().iter(app.world()).count(), 0);

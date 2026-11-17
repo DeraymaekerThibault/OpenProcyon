@@ -305,3 +305,30 @@ fn a_childs_global_transform_on_the_tick_follows_the_simulation_pose() {
         assert!(seen.distance(want) < 1e-4, "tick {i}: the muzzle was at {seen:?}, the simulation pose puts it at {want:?}");
     }
 }
+
+#[derive(Resource, Default)]
+struct Presence(Vec<(&'static str, bool)>);
+
+/// docs/re/tick.md: an object queued for removal in a tick still takes part in that tick's per-object logic and is destroyed at
+/// the start of the next tick, before anything else of it runs.
+#[test]
+fn removal_is_queued_and_applied_at_the_start_of_the_next_tick() {
+    let mut app = clock();
+    let victim = app.world_mut().spawn_empty().id();
+    app.init_resource::<Presence>().add_systems(
+        FixedUpdate,
+        (
+            (move |mut p: ResMut<Presence>, q: Query<Entity>| p.0.push(("start", q.contains(victim)))).in_set(BattleSet::Commands),
+            (move |mut commands: Commands, mut done: Local<bool>| {
+                if !std::mem::replace(&mut *done, true) {
+                    queue_removal(&mut commands, victim);
+                }
+            })
+            .in_set(BattleSet::Simulate),
+            (move |mut p: ResMut<Presence>, q: Query<Entity>| p.0.push(("end", q.contains(victim)))).in_set(BattleSet::Outcome),
+        ),
+    );
+    frame(&mut app, 33);
+    frame(&mut app, 33);
+    assert_eq!(app.world().resource::<Presence>().0, [("start", true), ("end", true), ("start", false), ("end", false)]);
+}

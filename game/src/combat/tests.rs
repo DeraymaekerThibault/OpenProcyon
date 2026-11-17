@@ -271,7 +271,7 @@ fn hostile_island_towers_shoot_the_player_and_neutral_ones_do_not() {
     for e in old_shells {
         app.world_mut().despawn(e);
     }
-    app.insert_resource(Target::default()).add_systems(Update, (fire.after(base_fire), shells.after(fire)));
+    app.insert_resource(Target::default()).add_systems(Update, (crate::tick_start.before(fire), fire.after(base_fire), shells.after(fire)));
     let mut lancer_fired = false;
     for mount in &lib.classes[class].mounts {
         let tower = mount.parent.unwrap();
@@ -492,7 +492,7 @@ fn the_command_ship_holds_fire_until_an_enemy_is_clicked() {
         .insert_resource(Target::default())
         .init_resource::<crate::environment::Sensors>()
         .add_systems(PreUpdate, crate::environment::refresh_sensors)
-        .add_systems(Update, (fire, shells.after(fire)));
+        .add_systems(Update, (crate::tick_start.before(fire), fire, shells.after(fire)));
     let assets = app.world().resource::<AssetServer>().clone();
     let lib = Library::load(assets_dir());
     let c = lib.index("Ship_Navy_Frigate");
@@ -558,7 +558,7 @@ fn a_skirmish_computer_ship_with_a_map_script_fires_at_its_captains_target() {
         .init_resource::<crate::ship::CaptainTargets>()
         .init_resource::<crate::environment::Sensors>()
         .add_systems(PreUpdate, crate::environment::refresh_sensors)
-        .add_systems(Update, (fire, shells.after(fire)));
+        .add_systems(Update, (crate::tick_start.before(fire), fire, shells.after(fire)));
     let assets = app.world().resource::<AssetServer>().clone();
     let lib = Library::load(assets_dir());
     let c = lib.index("Ship_Navy_Frigate");
@@ -621,7 +621,7 @@ fn the_command_ship_damages_a_clicked_hostile_skirmish_base() {
         .insert_resource(Target::default())
         .init_resource::<crate::environment::Sensors>()
         .add_systems(PreUpdate, crate::environment::refresh_sensors)
-        .add_systems(Update, (fire, shells.after(fire)));
+        .add_systems(Update, (crate::tick_start.before(fire), fire, shells.after(fire)));
     let assets = app.world().resource::<AssetServer>().clone();
     let lib = Library::load(assets_dir());
     let c = lib.index("Ship_Navy_Frigate");
@@ -695,7 +695,7 @@ fn a_destroyed_base_part_blasts() {
         .init_resource::<crate::environment::Sensors>()
         .add_systems(PreUpdate, crate::environment::refresh_sensors)
         .init_resource::<Blasts>()
-        .add_systems(Update, (fire, shells.after(fire), damage_fx.after(shells), count_blasts.after(damage_fx)));
+        .add_systems(Update, (crate::tick_start.before(fire), fire, shells.after(fire), damage_fx.after(shells), count_blasts.after(damage_fx)));
     let assets = app.world().resource::<AssetServer>().clone();
     let lib = Library::load(assets_dir());
     let c = lib.index("Ship_Navy_Frigate");
@@ -1166,7 +1166,7 @@ fn shell_into_a_hull_damages_it_and_reports_the_hit() {
         .add_message::<Detonate>()
         .add_message::<Shoot>()
         .add_message::<crate::decals::Scar>()
-        .add_systems(Update, shells);
+        .add_systems(Update, (crate::tick_start, shells).chain());
     let ship = Ship {
         class: c,
         side: Side::Enemy,
@@ -1247,7 +1247,7 @@ fn land_in_the_way_stops_a_shell_before_the_hull() {
         .add_message::<Detonate>()
         .add_message::<Shoot>()
         .add_message::<crate::decals::Scar>()
-        .add_systems(Update, shells);
+        .add_systems(Update, (crate::tick_start, shells).chain());
     let ship = Ship {
         class: c,
         side: Side::Enemy,
@@ -1387,7 +1387,7 @@ fn a_mine_picks_its_target_five_seconds_after_it_is_laid() {
         .add_message::<Detonate>()
         .add_message::<Shoot>()
         .add_message::<crate::decals::Scar>()
-        .add_systems(Update, shells);
+        .add_systems(Update, (crate::tick_start, shells).chain());
     let ship = Ship {
         class: c,
         side: Side::Enemy,

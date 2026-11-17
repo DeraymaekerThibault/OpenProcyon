@@ -322,9 +322,28 @@ fn setup(mut commands: Commands, cfg: Res<Config>, mut vtime: ResMut<Time<Virtua
 /// Retail tick documented in docs/re/gunnery.md and docs/re/effects.md.
 pub const BATTLE_TICK: std::time::Duration = std::time::Duration::from_millis(33);
 
+/// Queued for removal: the object is destroyed at the start of the next tick and, until then, still takes part in the logic of
+/// the tick it was queued in (the original's deferred removal, docs/re/tick.md).
+#[derive(Component)]
+pub struct Removed;
+
+/// Queues `e` for removal at the start of the next tick. Safe to call twice, or for an entity already gone.
+pub fn queue_removal(commands: &mut Commands, e: Entity) {
+    commands.entity(e).try_insert(Removed);
+}
+
+/// Start of a tick: destroy what was queued for removal last tick.
+pub(crate) fn tick_start(mut commands: Commands, removed: Query<Entity, With<Removed>>) {
+    for e in &removed {
+        commands.entity(e).try_despawn();
+    }
+}
+
 /// Ordered shared simulation stages; input and presentation stay on the frame schedules.
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BattleSet {
+    /// Removals queued last tick are applied before anything else of the tick.
+    Tick,
     Commands,
     Sense,
     Rules,
@@ -339,9 +358,10 @@ pub enum BattleSet {
 }
 
 fn battle_schedule(app: &mut App) {
-    app.insert_resource(Time::<Fixed>::from_duration(BATTLE_TICK)).configure_sets(
+    app.insert_resource(Time::<Fixed>::from_duration(BATTLE_TICK)).add_systems(FixedUpdate, tick_start.in_set(BattleSet::Tick)).configure_sets(
         FixedUpdate,
         (
+            BattleSet::Tick,
             BattleSet::Commands,
             BattleSet::Sense,
             BattleSet::Rules,

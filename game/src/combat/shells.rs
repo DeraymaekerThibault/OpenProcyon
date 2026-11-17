@@ -364,7 +364,7 @@ pub(super) fn shells(
                 let (bullet, side, shooter, target, gravity, aim, ricochet) = (lob::NOVA_SECONDARY.into(), s.side, s.shooter, s.target, s.gravity, s.aim, s.ricochet);
                 shoot.write(Shoot { bullet, from: p0, vel, side, shooter, target, gravity, aim, ricochet });
             }
-            commands.entity(e).despawn();
+            crate::queue_removal(&mut commands, e);
             continue;
         }
         // Mines (MineAI sight, MinePhysics max speed): home on the nearest hostile ship in sight, else coast to rest at the drop point.
@@ -423,11 +423,11 @@ pub(super) fn shells(
         if s.pd
             && let Some(&(te, tp, _)) = threats.iter().find(|t| t.2 != s.side && !downed.contains(&t.0) && segment_distance(t.1, p0, p1) < 2.5)
         {
-            commands.entity(e).despawn();
+            crate::queue_removal(&mut commands, e);
             let at = Transform::from_translation(tp);
             if wear_down(threat_hp.entry(te).or_insert(1.0), s.hp) {
                 downed.push(te);
-                commands.entity(te).despawn();
+                crate::queue_removal(&mut commands, te);
                 fx::spawn(&mut commands, &fxl, "Explosion_Light", None, at, at, true);
                 sfx.write(Sfx { name: "Explosion_Med01".to_string(), at: Some(tp), vol: 0.8, max: 600.0 });
             } else if let Some(fx_name) = &bd.hit_fx {
@@ -444,7 +444,7 @@ pub(super) fn shells(
         if let Some(a) = s.aim.filter(|a| !matches!(s.payload, Payload::Mine { .. }) && s.vel.y < 0.0 && p1.y <= a.y) {
             let t = if (p0.y - p1.y).abs() > 1e-4 { ((p0.y - a.y) / (p0.y - p1.y)).clamp(0.0, 1.0) } else { 1.0 };
             detonate.write(Detonate { bullet: s.bullet.clone(), at: p0.lerp(p1, t), shooter: Some(s.shooter), owner: Some((s.side, s.base)) });
-            commands.entity(e).despawn();
+            crate::queue_removal(&mut commands, e);
             continue;
         }
         let hit = nearest_ship_hit(&ships, &lib, s.side, p0, p1);
@@ -472,7 +472,7 @@ pub(super) fn shells(
                 d.hurt(rng.range(lo, hi).round() * side_damage_scale(s.side, Side::Enemy, crate::menu::difficulty(), s.base));
             }
             hit_fx(&mut commands, &fxl, bd, p0 + (p1 - p0) * t, s.vel, None, Surface::default());
-            commands.entity(e).despawn();
+            crate::queue_removal(&mut commands, e);
             continue;
         }
         if let Some((t, re)) = rock.filter(|r| best.as_ref().is_none_or(|b| r.0 < b.0)) {
@@ -487,7 +487,7 @@ pub(super) fn shells(
                 }
             }
             hit_fx(&mut commands, &fxl, bd, at, s.vel, None, Surface::default());
-            commands.entity(e).despawn();
+            crate::queue_removal(&mut commands, e);
             continue;
         }
         // Island gun towers: hit only by the side the base's owner is hostile to (neutral islands let shells pass).
@@ -547,7 +547,7 @@ pub(super) fn shells(
             if matches!(s.payload, Payload::Blast { .. }) {
                 detonate.write(Detonate { bullet: s.bullet.clone(), at, shooter: Some(s.shooter), owner: Some((s.side, s.base)) });
             }
-            commands.entity(e).despawn();
+            crate::queue_removal(&mut commands, e);
             continue;
         }
         // A shell striking a hull section may glance off it unharmed (all shells, bursting ones too).
@@ -580,7 +580,7 @@ pub(super) fn shells(
             } else if !matches!(s.payload, Payload::Nova) {
                 detonate.write(Detonate { bullet: s.bullet.clone(), at, shooter: Some(s.shooter), owner: Some((s.side, s.base)) });
             }
-            commands.entity(e).despawn();
+            crate::queue_removal(&mut commands, e);
             continue;
         }
         if let (Some((_, k, at)), Some(si)) = (best, best_ship) {
@@ -591,7 +591,7 @@ pub(super) fn shells(
             if matches!(s.payload, Payload::Blast { .. }) {
                 detonate.write(Detonate { bullet: s.bullet.clone(), at, shooter: Some(s.shooter), owner: Some((s.side, s.base)) });
             }
-            commands.entity(e).despawn();
+            crate::queue_removal(&mut commands, e);
         } else if let Some(t) = ground {
             // Land: the shot is spent with its impact; explosive and lobbed shells burst there. PROVISIONAL (not decoded): the
             // island hit effect the original shows half the time near the player, and how a section hit ricochets.
@@ -602,9 +602,9 @@ pub(super) fn shells(
                 sfx.write_batch(bd.impact_sound("Stone", at, &mut rng));
                 hit_fx(&mut commands, &fxl, bd, at, s.vel, None, Surface::default());
             }
-            commands.entity(e).despawn();
+            crate::queue_removal(&mut commands, e);
         } else if s.age > s.lifetime || p1.y < -300.0 {
-            commands.entity(e).despawn();
+            crate::queue_removal(&mut commands, e);
         } else {
             tf.translation = p1;
             tf.look_to(s.vel, Vec3::Y);
