@@ -358,3 +358,20 @@ fn a_new_object_joins_at_the_start_of_the_next_tick_and_moves_in_it() {
         assert_eq!(moved, [(tick - 1) as f32], "tick {tick}: created in tick 1, first moved in tick 2");
     }
 }
+
+/// docs/re/tick.md: a mover that ends a step below z = -130 is queued for removal, and destroyed at the start of the next tick.
+#[test]
+fn a_mover_below_the_floor_is_queued_after_its_step_and_removed_next_tick() {
+    let mut app = clock();
+    app.init_resource::<data::AsteroidDefs>();
+    let rock = combat::Asteroid::new("Asteroid_Large", "Asteroid Belt", app.world().resource::<data::AsteroidDefs>()).unwrap();
+    let e = app.world_mut().spawn((rock, Transform::from_xyz(0.0, MAP_FLOOR + 0.1, 0.0))).id();
+    app.add_systems(
+        FixedUpdate,
+        ((move |mut q: Query<&mut Transform>| q.get_mut(e).iter_mut().for_each(|t| t.translation.y -= 0.2)).in_set(BattleSet::Forces), out_of_map.in_set(BattleSet::Simulate)),
+    );
+    frame(&mut app, 33);
+    assert!(app.world().get::<Removed>(e).is_some(), "past the floor after its step: queued");
+    frame(&mut app, 33);
+    assert!(app.world().get_entity(e).is_err(), "destroyed at the start of the next tick");
+}

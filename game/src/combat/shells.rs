@@ -603,11 +603,15 @@ pub(super) fn shells(
                 hit_fx(&mut commands, &fxl, bd, at, s.vel, None, Surface::default());
             }
             crate::queue_removal(&mut commands, e);
-        } else if s.age > s.lifetime || p1.y < -300.0 {
+        } else if s.age > s.lifetime {
             crate::queue_removal(&mut commands, e);
         } else {
             tf.translation = p1;
             tf.look_to(s.vel, Vec3::Y);
+            // The out-of-map test follows the step, so a shell that fell through the floor is queued with its new position.
+            if crate::below_floor(p1) {
+                crate::queue_removal(&mut commands, e);
+            }
         }
     }
     // Torpedoes and mines keep the wear from point-defence bolts that did not finish them this frame.

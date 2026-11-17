@@ -266,7 +266,7 @@ pub fn run(view: fn(&mut App), setup_view: fn(&mut App)) {
                 ship::reconcile_fleets.in_set(BattleSet::Commands),
                 ai.in_set(BattleSet::Ai),
                 ship::fleet_follow.in_set(BattleSet::Fleet),
-                (briefing::halt_arrival, blackhole::pull, sail).chain().in_set(BattleSet::Simulate),
+                (briefing::halt_arrival, blackhole::pull, sail, out_of_map).chain().in_set(BattleSet::Simulate),
                 outcome.in_set(BattleSet::Outcome),
             )
                 .run_if(in_state(menu::Screen::Battle))
@@ -336,6 +336,23 @@ pub fn queue_removal(commands: &mut Commands, e: Entity) {
 /// Movement systems of such objects (shells, blasts, wells) leave `With<Joining>` out.
 #[derive(Component)]
 pub struct Joining;
+
+/// Height below which a moving object has left the map (docs/re/tick.md).
+pub const MAP_FLOOR: f32 = -130.0;
+
+/// Whether `p` (Bevy axes, y up) is below the map's floor.
+pub fn below_floor(p: Vec3) -> bool {
+    p.y < MAP_FLOOR
+}
+
+/// After the movement of a tick: moving objects that ended below the floor are queued for removal. Shells test their own step.
+fn out_of_map(mut commands: Commands, movers: Query<(Entity, &Transform), (With<combat::Asteroid>, Without<Removed>)>) {
+    for (e, tf) in &movers {
+        if below_floor(tf.translation) {
+            queue_removal(&mut commands, e);
+        }
+    }
+}
 
 /// Start of a tick: destroy what was queued for removal last tick, and let what was created last tick join.
 pub(crate) fn tick_start(mut commands: Commands, removed: Query<Entity, With<Removed>>, joining: Query<Entity, With<Joining>>) {
