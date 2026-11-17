@@ -21,7 +21,7 @@ fn skirmish_dock_lights_show_on_friendly_bases_only() {
 #[ignore = "needs imported assets"]
 fn mission_two_base_docking_from_the_far_side_reaches_the_dock_round_the_island() {
     let (mut app, lib) = app();
-    app.init_resource::<crate::collision::Shapes>().add_systems(Update, crate::collision::sail.after(routine));
+    app.init_resource::<crate::collision::Shapes>().add_systems(Update, crate::collision::sail.after(docked_hold).before(dock_glide));
     let map: Value = serde_json::from_slice(&std::fs::read(assets_dir().join("maps/mission02/map.json")).unwrap()).unwrap();
     let docks = load_docks();
     let mut dockee = None;
@@ -64,7 +64,7 @@ fn mission_two_base_docking_from_the_far_side_reaches_the_dock_round_the_island(
 /// within `secs` from `start` (Bevy frame).
 fn docks_at_island(map: &str, island: &str, class: &str, start: Vec3, secs: u32) -> bool {
     let (mut app, lib) = app();
-    app.init_resource::<crate::collision::Shapes>().add_systems(Update, crate::collision::sail.after(routine));
+    app.init_resource::<crate::collision::Shapes>().add_systems(Update, crate::collision::sail.after(docked_hold).before(dock_glide));
     let map: Value = serde_json::from_slice(&std::fs::read(assets_dir().join(format!("maps/{map}/map.json"))).unwrap()).unwrap();
     let docks = load_docks();
     let mut dockee = None;
@@ -102,7 +102,7 @@ fn a_computer_ship_docks_at_border_disputes_centre_island_from_the_south_east() 
 #[ignore = "needs imported assets"]
 fn coventry_docks_and_repairs_at_norville_on_the_flight_plane() {
     let (mut app, lib) = app();
-    app.init_resource::<crate::collision::Shapes>().add_systems(Update, crate::collision::sail.after(routine));
+    app.init_resource::<crate::collision::Shapes>().add_systems(Update, crate::collision::sail.after(docked_hold).before(dock_glide));
     let map: Value = serde_json::from_slice(&std::fs::read(assets_dir().join("maps/mission02/map.json")).unwrap()).unwrap();
     let mission: Value = serde_json::from_slice(&std::fs::read(assets_dir().join("maps/mission02/mission.json")).unwrap()).unwrap();
     let kind = "Base_Safetytown";
@@ -211,7 +211,7 @@ fn app() -> (App, Library) {
         .insert_resource(Time::<()>::default())
         .init_resource::<ButtonInput<KeyCode>>()
         .insert_resource(Library::load(assets_dir()))
-        .add_systems(Update, (handle_messages, routine).chain());
+        .add_systems(Update, (handle_messages, docked_hold, dock_glide, routine, docked_repair).chain());
     (app, lib)
 }
 fn tick(app: &mut App, secs: f32) {
@@ -430,4 +430,42 @@ fn cranes_run_while_a_ship_is_docked_and_stop_on_their_end_pose() {
     step(&mut app, 1.0);
     step(&mut app, 1.0);
     assert!((x(&app) - 5.0).abs() < 1e-4, "stopped on the end pose: {}", x(&app));
+}
+
+/// docs/re/tick.md step 7.1: the link keeper holds a docked ship to its dock before the movement step, so what movement sees already
+/// follows a dockee that moved this tick (the dock decision only arms it).
+#[test]
+fn docked_hold_is_applied_before_movement_in_the_same_tick() {
+    #[derive(Resource, Default)]
+    struct Seen(Option<Vec3>);
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins).add_plugins(crate::battle_schedule).insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(Duration::ZERO));
+    app.init_resource::<Seen>();
+    let dockee = app.world_mut().spawn(Transform::default()).id();
+    let docker = Docker {
+        dockee,
+        point: Some(0),
+        phase: Phase::Docked,
+        final_leg: false,
+        timer: 0.0,
+        duration: 10.0,
+        repair_secs: 0.0,
+        healed: false,
+        full: false,
+        start: Vec3::ZERO,
+        offset: Vec3::new(0.0, 0.0, 5.0),
+    };
+    let ship = app.world_mut().spawn((docker, Transform::from_xyz(0.0, 0.0, 5.0))).id();
+    app.add_systems(
+        FixedUpdate,
+        (
+            (move |mut q: Query<&mut Transform, Without<Docker>>| q.iter_mut().for_each(|mut t| t.translation.x += 3.0)).in_set(crate::BattleSet::Commands),
+            docked_hold.in_set(crate::BattleSet::Forces),
+            (move |q: Query<&Transform, With<Docker>>, mut seen: ResMut<Seen>| seen.0 = q.get(ship).ok().map(|t| t.translation)).in_set(crate::BattleSet::Simulate),
+        ),
+    );
+    app.update();
+    app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(Duration::from_millis(34)));
+    app.update();
+    assert_eq!(app.world().resource::<Seen>().0, Some(Vec3::new(3.0, 0.0, 5.0)));
 }

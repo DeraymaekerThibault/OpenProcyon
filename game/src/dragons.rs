@@ -30,6 +30,9 @@ pub struct Dragon {
     pass: Option<Vec3>,
     pass_start: f32,
     cooldown: f32,
+    /// What the last decision asked of the movement: velocity to fly and, when set, the heading to turn toward.
+    drive: Vec3,
+    face: Option<f32>,
     roar_in: f32,
     roars: usize,
 }
@@ -45,7 +48,9 @@ impl Dragon {
 }
 
 pub fn plugin(app: &mut App) {
-    app.add_systems(FixedUpdate, think.in_set(crate::BattleSet::Orders).run_if(in_state(crate::menu::Screen::Battle)));
+    // The dragon's decisions run after collision (step 8) and only set how it steers; the ship movement code moves it (step 7.2) next tick.
+    app.add_systems(FixedUpdate, think.in_set(crate::BattleSet::Ai).run_if(in_state(crate::menu::Screen::Battle)))
+        .add_systems(FixedUpdate, fly.in_set(crate::BattleSet::Simulate).run_if(in_state(crate::menu::Screen::Battle)));
 }
 
 pub fn spawn(commands: &mut Commands, assets: &AssetServer, data: &Value) {
@@ -78,6 +83,8 @@ pub fn spawn(commands: &mut Commands, assets: &AssetServer, data: &Value) {
                 pass: None,
                 pass_start: 0.0,
                 cooldown: 0.0,
+                drive: Vec3::ZERO,
+                face: None,
                 roar_in: 4.0 + (id.rem_euclid(5)) as f32,
                 roars: id.max(0) as usize,
             },
@@ -104,13 +111,27 @@ fn breath_dir(d: Vec3, s: f32) -> Vec3 {
     Vec3::new(d.x, 0.0, d.z).normalize_or_zero() * theta.cos() + Vec3::Y * theta.sin()
 }
 
+/// Movement (step 7.2): a dragon is integrated like a ship; its decision only set the velocity and the heading to turn toward.
+fn fly(time: Res<Time>, mut dragons: Query<(&Dragon, &SpaceAnimal, &mut Transform)>) {
+    let dt = time.delta_secs();
+    for (d, animal, mut tf) in &mut dragons {
+        if animal.dead || !animal.visible {
+            continue;
+        }
+        tf.translation += d.drive * dt;
+        if let Some(heading) = d.face {
+            tf.rotation = tf.rotation.slerp(Quat::from_rotation_y(heading), 1.0 - (-3.0 * dt).exp());
+        }
+    }
+}
+
 fn think(
     time: Res<Time>,
     mission: Option<Res<Mission>>,
     skirmish: Option<Res<crate::rules::skirmish::SkirmishScript>>,
     fxl: Option<Res<crate::fx::FxLib>>,
     mut commands: Commands,
-    mut dragons: Query<(Entity, &mut Dragon, &mut SpaceAnimal, &mut Transform, &mut Visibility), Without<Ship>>,
+    mut dragons: Query<(Entity, &mut Dragon, &mut SpaceAnimal, &Transform, &mut Visibility), Without<Ship>>,
     ships: Query<(Entity, &Transform, &Ship, &Health, Option<&MissionShip>, Has<crate::PlayerShip>)>,
     mut sfx: MessageWriter<crate::audio::Sfx>,
     mut shoot: MessageWriter<crate::combat::Shoot>,
@@ -128,7 +149,7 @@ fn think(
     let num = |v: &Value, d: f32| v.as_f64().map_or(d, |x| x as f32);
     let (muzzle, reload, range) = (num(&gun["muzzle"], 40.0), num(&gun["reload"], 10.0), num(&gun["range"][2], 60.0));
     let bullet = gun["bullet"].as_str().unwrap_or("Bullet_DragonBreath").to_string();
-    for (e, mut d, mut animal, mut tf, mut vis) in &mut dragons {
+    for (e, mut d, mut animal, tf, mut vis) in &mut dragons {
         if animal.dead || !animal.visible {
             animal.paused = false;
             continue;
@@ -211,17 +232,17 @@ fn think(
             None
         };
         animal.paused = goal.is_some();
+        (d.drive, d.face) = (Vec3::ZERO, None);
         if let Some(g) = goal {
             let delta = (g - tf.translation).with_y(0.0);
             let dist = delta.length();
             let speed = if dist < 2.0 { 0.0 } else { max_speed.min(dist / dt.max(1e-3)) };
             let dir = delta.normalize_or_zero();
-            tf.translation += dir * speed * dt;
             animal.velocity = dir * speed;
+            d.drive = dir * speed;
             let face = attacking.filter(|_| d.pass.is_none()).map_or(dir, |t| (t.1 - tf.translation).with_y(0.0).normalize_or(dir));
             if face.length_squared() > 0.5 {
-                let heading = (-face.x).atan2(-face.z);
-                tf.rotation = tf.rotation.slerp(Quat::from_rotation_y(heading), 1.0 - (-3.0 * dt).exp());
+                d.face = Some((-face.x).atan2(-face.z));
             }
         }
         // Breath: in range and roughly facing.
@@ -279,6 +300,8 @@ mod tests {
             pass: None,
             pass_start: 0.0,
             cooldown: 0.0,
+            drive: Vec3::ZERO,
+            face: None,
             roar_in: 0.0,
             roars: 0,
         };
@@ -292,5 +315,46 @@ mod tests {
         d.hurt(1000.0);
         assert_eq!(d.hp, 0.0);
         assert!(d.flees());
+    }
+}
+
+#[cfg(test)]
+mod fly_tests {
+    use super::*;
+    use std::time::Duration;
+
+    /// docs/re/tick.md: a dragon decision (after collision) only stores how to steer; the movement of the next tick applies it.
+    #[test]
+    fn a_decision_moves_the_dragon_in_the_next_ticks_movement() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins).add_plugins(crate::battle_schedule).insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(Duration::ZERO));
+        let dragon = Dragon {
+            stance: Stance::Aggressive,
+            threshold: 1.0,
+            border: None,
+            home: None,
+            attack: vec![],
+            hold: false,
+            hp: 500.0,
+            max_hp: 500.0,
+            target: None,
+            pass: None,
+            pass_start: 0.0,
+            cooldown: 0.0,
+            drive: Vec3::ZERO,
+            face: None,
+            roar_in: 0.0,
+            roars: 0,
+        };
+        let e = app.world_mut().spawn((dragon, SpaceAnimal::new("Dragons", 9.0, Vec3::ZERO, 0, true), Transform::default())).id();
+        // Stand-in for `think`: the decision, in the decision step.
+        app.add_systems(FixedUpdate, (|mut q: Query<&mut Dragon>| q.iter_mut().for_each(|mut d| d.drive = Vec3::new(6.0, 0.0, 0.0))).in_set(crate::BattleSet::Ai));
+        app.add_systems(FixedUpdate, fly.in_set(crate::BattleSet::Simulate));
+        app.update();
+        app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(Duration::from_millis(33)));
+        app.update();
+        assert_eq!(app.world().get::<Transform>(e).unwrap().translation.x, 0.0, "the tick that decided has already moved");
+        app.update();
+        assert!(app.world().get::<Transform>(e).unwrap().translation.x > 0.0, "the next tick moves it");
     }
 }

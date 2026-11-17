@@ -34,16 +34,23 @@ needed the backlog is dropped (the game then simply runs slower than real time).
 5. **Objects queued for removal are destroyed now** (died, left the map, were replaced). Removal is therefore always one tick after
    it was decided; in between, the object still takes part in step 8.
 6. **Mission tick** (grapple and boarding upkeep, per-player clocks; multiplayer rules). Skipped when the mission is frozen.
+   Boarding fights are resolved here, every tick, each fight on its own timer. Then the rope upkeep: grapple and tow links test whether they
+   break and reel in. No position is written in this step.
 7. **Physics, in three parts:**
    1. Field effects push first, each in its registration order: black hole, ether current, nebula, mortar and gravity wells, timed shells, grappled objects.
+      One link keeper pulls the two ends of every link together every tick, weighted by mass for grapples. A docked ship is held to its dock by the
+      same kind of link, not by its AI. Towing uses it too.
    2. Every moving object integrates one step of 0.033 s, in the order objects were registered (creation order until the first removal;
-      removal moves the last object into the freed place). A mover is re-placed in the scene and the spatial cells. If it ended
+      removal moves the last object into the freed place). The dock's final glide, moving away and turning in place write position and
+      heading here, as part of the ship's own movement; animals such as dragons move as ships (their AI only sets throttle and turn). A mover is re-placed in the scene and the spatial cells. If it ended
       outside the map box (x, y outside the map's limits, or z below -130) it is queued for removal (step 5 of the next tick).
    3. **One collision pass** over the positions after *all* objects have moved (`docs/re/collision.md`). Each overlapping pair
       responds at most once per tick, a response moves the objects at once and is not integrated again until the next tick.
 8. **Per-object logic, in object order (creation order):** the object's decision part, then its own upkeep. For a ship the decision
    is the captain's think, which runs only when it is due (every 16 ticks, see below), then ship upkeep (fire, destruct sequence,
-   effects, passive repair, refit timers). Guns think every tick. These run after movement and collision, and what they decide acts in the next tick's integration.
+   effects, passive repair, refit timers). Guns think every tick. The dock routine's decisions (pick a point, approach, phases, the end of the dock time
+   and release), the tow decision, a computer ship starting a boarding and the dragon's decisions (target, route) are decisions of this step. Repair while docked is
+   healed by a per-tick upkeep that the dock decision arms. These run after movement and collision, and what they decide acts in the next tick's integration.
 9. Sound.
 
 ### The think timer
@@ -64,7 +71,7 @@ not per player). *Measured:* five captains, every think gap 0.528 s, 85 gaps eac
 | New objects | join at the start of the next tick and move in it | same |
 | Out of map | tested after integration, queued; floor z = -130 | same for asteroids and shells |
 | Collision | one pass after all movement | same |
-| Decisions | after movement and collision | captains, mission AI and fleet following after movement and collision, before ship upkeep; docking, boarding and dragon routines still before movement (they mix commands with direct motion) |
+| Decisions | after movement and collision | captains, mission AI and fleet following after movement and collision, before ship upkeep; also the dock routine, repair and tow decisions, computer boarding and dragon decisions. Orders (dock, tow, board, grapple) only record an order in the command step. Boarding fights and the rope break/reel test run in their own mission-tick step before the forces; the rope pull and the docked hold are forces; the dock glide and dragon flight are movement; the dock heal is ship upkeep |
 | Mission rules (single player) | once per frame, after the last tick | same, also while paused |
 | Frame catch-up | 10 frames, then drop | same up to 5x; above 5x at most 0.1 s per call (speeds above 5x are the remake's own) |
 | Contact rate constant | 0.033 | same |
@@ -88,5 +95,8 @@ which is the same split; its generator and seeding differ, so the sequences are 
   and join-at-start (451 of 451 new shells joined in the next tick and had already moved one step there). That a queued object runs its own logic once more is not measured.
 - Whether a decision made in step 8 differs observably from one made before the step: both see the previous tick's positions and act in the next integration, so the
   difference is only what else the decision sees (commands of the next tick; in single player at 1x, the rules). At most one tick.
-  The remake now takes captain decisions after movement; the routines that mix commands with direct motion are not yet split.
+  The remake now takes captain decisions after movement, and the docking, boarding and dragon routines are split by step. Still provisional: the dock
+  routine and the dragon run every tick, not on the think timer.
+- A dock ends up to 16 ticks after its dock time in the original, because the end test runs on the think; the remake ends it on the first tick past the time.
+- The remake has no tow pull: the original's link keeper also pulls a towed ship; here a tow is only registered in the rules.
 - Weather drift and spinning scenery update inside step 6 and are cosmetic.
