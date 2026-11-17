@@ -143,7 +143,22 @@ In the remake every map object and ship type with exported dock points gets them
 
 ## 5. Not reversed yet
 Boarding fight / grapple mechanics (reversed, see [boarding.md](boarding.md)), where `ShipStatus_Icon_Docking_*` (animated docking status icon) is drawn, cloak effect,
-hold-position semantics, waypoint-mode click behaviour, and what the two `RepairVitalSection` rule actions do per section.
+waypoint-mode click behaviour, and what the two `RepairVitalSection` rule actions do per section.
+
+## Hold and Stop orders
+
+Read from the original's code (not yet checked against a staged run, so PROVISIONAL in the details below).
+- **Hold position** (the toggle, not a stance): setting it zeroes rudder and throttle and ends the current order; while it is on,
+  the ship neither steers nor follows a path. Move, dock, tow and board orders clear it; attack orders, Stop, panic and bank attacks
+  do not (a held ship ordered to attack stays put and fires). Remake: the Hold item halts the ship (course, heading goal, order,
+  a captain's destination) and a held ship is halted every frame, the player's too, so nothing steers it; the marker is cleared by a
+  move click (single or plotted path), and by the menu's Dock, Tow start and Board start. Whether a grapple-attack order clears it
+  is not stated; the remake leaves it. Mission-script moves do not clear it here (not read).
+- **Stop** (cancel actions): ends the current order and activity, so path, throttle and rudder go to zero and a dock or tow approach
+  is cancelled. It does not change a hold, the formation hold, hold fire or a grapple order. Remake: Stop halts the ship, ends a
+  captain's destination and target and cancels the dock/tow approach; it no longer clears the formation hold or the grapple order.
+  There is no boarding approach to cancel (a boarding fight is registered at once), so a fight under way is untouched.
+  The original also clears a hold when the ended order was a move, dock, tow or board; a held ship has none of these here.
 
 ## Mission 2 base approach
 
@@ -183,7 +198,7 @@ Runtime smoke: `--mission 1 --script dock-click --shot-frame 180 --late-frame 0`
 Repair scaffold morphs are now rendered from six converted endpoints by the existing FX module, using each EFT's deploy/hold/retract
 weight curve. Ironclad effects deliberately hold at fractional weights (0.5/0.6). GPU dock smoke reaches the repair phase and shows
 scaffolding in `local/feedback-scaffold.png`; effect children and handles follow the existing FX/scenario cleanup.
-Board and Grapple items: done (boarding.rs). Not done: cloak/hold items, path planning, the base dock-part hover rule, repair-effect fade distance. `Repair Vital Section`
+Board and Grapple items: done (boarding.rs). Not done: cloak item, path planning, the base dock-part hover rule, repair-effect fade distance. `Repair Vital Section`
 is not done: no mission in the exported data uses that rule action and the doc has no per-section semantics for it.
 
 ## Original plan
