@@ -137,7 +137,7 @@ Island `Combat Strength`; fight effect on the target's boarding nodes, fight sou
 PROVISIONAL: no leadership bonus for generic crews (ships with named crew get it) and no per-man crews (generic crew values); `Players` = Average; the harpoon is not a projectile (the order closes to
 100 units, stops and the hook bites after distance / 45 s) and harpoon guns no longer fire at will; one grapple per ship; the grapple line as
 above (no tow, snaps 2 units past its bite distance, reels in at 3 u/s to 12 while a fight is registered; the reel acts on the ships'
-velocities at a rate of our choosing, the allied break is not modelled and the side test takes the nearer of the bow-stern and beam axes); a Board order on a grappled ship waits for
+velocities at a rate of our choosing, "allied" is read as "no longer hostile" and the side test takes the nearer of the bow-stern and beam axes); a Board order on a grappled ship waits for
 the hulls to close instead of failing at once, and the fight effect, crew lines and HUD status start only when the crews meet; the rope is a
 sagging ribbon, not a simulated chain (`classic/ropes.rs`);
 computer ships grapple and board their target on their own (§5, `ai_boarding`; reach and attacked-first gate PROVISIONAL); bases are boarded only by AI ships (a hostile non-Dummy mission ship in reach of a base whose rules made it Boardable), not from the menu; status bar

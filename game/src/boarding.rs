@@ -666,7 +666,7 @@ fn hook_flight(
 /// than at the hit before that pull, which takes a relative speed of about 60 units/s. While a boarding is registered on the pair the
 /// length is set to the centre distance less `REEL_SPEED` x the tick, down to `REEL_MIN`. A grapple on a destroyed or vanished ship is let go.
 /// It also snaps when either ship's partner crosses to the other side of the hull it was grappled on.
-/// PROVISIONAL: the original also lets go when the ships become allied.
+/// It is also let go when the two players become allied (here: no longer hostile, as the boarding fight's own test reads it).
 /// The break test and the reel-in are the mission tick (`winch_upkeep`); the pull itself is the link keeper's (`winch_pull`).
 fn winch_upkeep(
     mut commands: Commands,
@@ -675,6 +675,8 @@ fn winch_upkeep(
     mut hooks: Query<(Entity, &mut Grapple)>,
     fighters: Query<(Entity, &Boarding)>,
     ships: Query<(&Transform, &Health), With<Ship>>,
+    mission: Option<Res<Mission>>,
+    sides: Query<(&Ship, Option<&MissionShip>)>,
 ) {
     let dt = time.delta_secs();
     for (e, mut g) in &mut hooks {
@@ -686,6 +688,14 @@ fn winch_upkeep(
             continue;
         };
         if ha.destroyed || hb.destroyed {
+            commands.entity(e).remove::<Grapple>();
+            continue;
+        }
+        let who = |x: Entity| sides.get(x).ok().map(|(sh, ms)| (ms.map(|m| m.owner.as_str()), Some(sh.side)));
+        if let (Some(a), Some(b)) = (who(e), who(g.target))
+            && !hostile_pair(mission.as_deref(), a, b)
+        {
+            info!("grapple: {e} lets go of {} (the players became allied)", g.target);
             commands.entity(e).remove::<Grapple>();
             continue;
         }

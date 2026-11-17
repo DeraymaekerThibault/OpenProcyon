@@ -301,6 +301,29 @@ fn a_grapple_is_a_rope_that_pulls_both_hulls_back_and_snaps_only_past_a_jump_or_
     assert!(app.world().get::<Grapple>(foe).is_none(), "crossed to the other side of our hull: the line snapped");
 }
 
+/// Both players becoming allied lets the line go, whichever end holds it.
+#[test]
+#[ignore = "needs imported assets"]
+fn becoming_allied_releases_the_grapple() {
+    let mut app = app();
+    let me = spawn(&mut app, "Ship_Navy_Cutter", Side::Player, Vec3::ZERO, Skill::Average);
+    let foe = spawn(&mut app, "Ship_Pirate_Schooner", Side::Enemy, Vec3::new(0.0, 0.0, -40.0), Skill::Average);
+    app.world_mut().entity_mut(foe).insert(Grapple::new(me, 0.0));
+    tick(&mut app, 0.1);
+    assert!(app.world().get::<Grapple>(foe).is_some(), "hostile ships stay grappled");
+    app.world_mut().get_mut::<Ship>(foe).unwrap().side = Side::Player;
+    tick(&mut app, 0.1);
+    assert!(app.world().get::<Grapple>(foe).is_none(), "allied now: the line is let go");
+    // The other direction: the hook is on our ship.
+    app.world_mut().get_mut::<Ship>(foe).unwrap().side = Side::Enemy;
+    app.world_mut().entity_mut(me).insert(Grapple::new(foe, 0.0));
+    tick(&mut app, 0.1);
+    assert!(app.world().get::<Grapple>(me).is_some());
+    app.world_mut().get_mut::<Ship>(foe).unwrap().side = Side::Player;
+    tick(&mut app, 0.1);
+    assert!(app.world().get::<Grapple>(me).is_none(), "allied: released from the other end too");
+}
+
 /// The computer's harpoon test against the retail runs (docs/re/boarding.md §5): a Barque's beam harpoons reach a ship on its
 /// beam inside 45 units but not at the 55.7-unit circle it held round an idle Cutter; a Carrack's bow-facing harpoons never
 /// bear on a ship it circles on its beam.
