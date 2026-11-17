@@ -461,6 +461,13 @@ fn hostile_pair(mission: Option<&Mission>, a: (Option<&str>, Option<Side>), b: (
     }
     matches!((a.1, b.1), (Some(x), Some(y)) if x != y)
 }
+/// Whether two ships are allied (same side or allied players) and not hostile; the line-of-fire hold treats such ships as friends.
+pub(crate) fn allied_pair(mission: Option<&Mission>, a: (Option<&str>, Option<Side>), b: (Option<&str>, Option<Side>)) -> bool {
+    if let (Some(m), Some(x), Some(y)) = (mission, a.0, b.0) {
+        return m.script.allied(x, y);
+    }
+    matches!((a.1, b.1), (Some(x), Some(y)) if x == y)
+}
 fn owner_of<'a>(ms: Option<&'a MissionShip>, mb: Option<&'a MissionBase>) -> Option<&'a str> {
     ms.map(|m| m.owner.as_str()).or_else(|| mb.map(|m| m.owner.as_str()))
 }
@@ -479,11 +486,39 @@ pub struct Boarders<'w, 's> {
     mission: Option<Res<'w, Mission>>,
 }
 impl Boarders<'_, '_> {
+    fn who(&self, e: Entity) -> (Option<&str>, Option<Side>) {
+        (self.owners.get(e).ok().and_then(|(ms, mb)| owner_of(ms, mb)), self.ships.get(e).ok().map(|s| s.0.side).or_else(|| self.base_sides.get(e).ok().map(|b| b.0)))
+    }
     pub fn hostile(&self, a: Entity, b: Entity) -> bool {
-        let who = |e: Entity| {
-            (self.owners.get(e).ok().and_then(|(ms, mb)| owner_of(ms, mb)), self.ships.get(e).ok().map(|s| s.0.side).or_else(|| self.base_sides.get(e).ok().map(|b| b.0)))
-        };
-        hostile_pair(self.mission.as_deref(), who(a), who(b))
+        hostile_pair(self.mission.as_deref(), self.who(a), self.who(b))
+    }
+    /// Whether `a`'s line of fire to `end` is held for a friendly ship or scenery (line_of_fire.rs); `target` is exempt from the scenery test.
+    pub fn line_blocked(
+        &self,
+        a: Entity,
+        end: Vec3,
+        target: Entity,
+        ships: &Query<(Entity, &Transform, &Ship)>,
+        scenery: &Query<(Entity, &crate::collision::Obstacle, Option<&Visibility>, Has<crate::combat::Asteroid>), (Without<Ship>, Without<crate::combat::GunPart>)>,
+    ) -> bool {
+        let Ok((_, tf, ship)) = ships.get(a) else { return false };
+        let class = &self.lib.classes[ship.class];
+        let friends = ships.iter().filter(|o| o.0 != a).filter_map(|(e, otf, os)| {
+            let oc = &self.lib.classes[os.class];
+            let friendly = class.is_lifeboat || oc.is_lifeboat || allied_pair(self.mission.as_deref(), self.who(a), self.who(e));
+            friendly.then(|| (otf.transform_point(oc.sphere.0), oc.sphere.1))
+        });
+        crate::line_of_fire::friend_in_line(tf.translation, end, friends)
+            || crate::line_of_fire::scenery_in_line(
+                tf.translation,
+                end,
+                class.radius,
+                scenery.iter().filter(|(_, _, v, _)| *v != Some(&Visibility::Hidden)).map(|(e, o, _, rock)| crate::line_of_fire::Scenery {
+                    sphere: o.sphere(),
+                    mesh: (!rock).then_some(o),
+                    target: e == target,
+                }),
+            )
     }
     pub fn grappled(&self, a: Entity, b: Entity) -> bool {
         self.grapples.iter().any(|(e, g)| g.flight <= 0.0 && ((e == a && g.target == b) || (e == b && g.target == a)))
@@ -757,8 +792,8 @@ fn per_tick(chance: f32, dt: f32) -> f32 {
 
 /// The original's grapple-and-board routine, run by every AI-steered ship (not the player's command ship) against its current
 /// target: with a free harpoon whose arc covers the target in harpoon range it fires at a 5 % chance per tick; once the grapple holds (or, at a
-/// base, a boarding point is in reach) it boards at 20 % per tick if its boarding party is strong enough. PROVISIONAL: the
-/// original also skips the harpoon while a friendly ship or scenery is in the line of fire; and only a ship its target has fired
+/// base, a boarding point is in reach) it boards at 20 % per tick if its boarding party is strong enough. It skips the harpoon (no
+/// roll) while a friendly ship or scenery is on the line to the target (line_of_fire.rs). PROVISIONAL: only a ship its target has fired
 /// at grapples (a retail Barque left an idle target alone and grappled ~17 s after being attacked).
 #[allow(clippy::type_complexity)]
 fn ai_boarding(
@@ -772,6 +807,8 @@ fn ai_boarding(
     ships: Query<(Entity, &Ship, &Transform, &Health, Option<&crate::combat::GunStates>, &Boardable, Option<&MissionShip>, Option<&crate::ship::FleetPilot>), Without<PlayerShip>>,
     bases: Query<Entity, With<MissionBase>>,
     targets: Query<(&Transform, &Ship)>,
+    all_ships: Query<(Entity, &Transform, &Ship)>,
+    scenery: Query<(Entity, &crate::collision::Obstacle, Option<&Visibility>, Has<crate::combat::Asteroid>), (Without<Ship>, Without<crate::combat::GunPart>)>,
     (mut fired, mut attacked, captains): (MessageReader<crate::combat::Fired>, Local<std::collections::HashSet<(Entity, Entity)>>, Option<Res<crate::ship::CaptainTargets>>),
 ) {
     attacked.extend(fired.read().filter_map(|f| f.target.map(|t| (f.shooter, t))));
@@ -792,7 +829,12 @@ fn ai_boarding(
             && let Ok((ttf, tship)) = targets.get(t)
         {
             let surface = tf.translation.distance(ttf.translation) - lib.classes[ship.class].radius - lib.classes[tship.class].radius;
-            if attacked.contains(&(t, e)) && boarders.can_grapple(e) && harpoon_bears(&lib, ship, health, guns, tf, ttf.translation) && rng.f() < per_tick(AI_HARPOON_CHANCE, dt) {
+            if attacked.contains(&(t, e))
+                && boarders.can_grapple(e)
+                && harpoon_bears(&lib, ship, health, guns, tf, ttf.translation)
+                && !boarders.line_blocked(e, ttf.translation, t, &all_ships, &scenery)
+                && rng.f() < per_tick(AI_HARPOON_CHANCE, dt)
+            {
                 commands.entity(e).insert(Grapple::new(t, (surface.max(0.0) / HARPOON_SPEED).max(0.1)));
                 sfx.write(Sfx { name: "Weapon_GrapHarpoon_Fire".into(), at: Some(tf.translation), vol: 0.7, max: 600.0 });
             }

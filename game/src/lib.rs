@@ -26,6 +26,7 @@ pub mod flag;
 pub mod fx;
 pub mod interpolate;
 pub mod lifeboats;
+pub mod line_of_fire;
 pub mod logging;
 pub mod menu;
 pub mod modding;
