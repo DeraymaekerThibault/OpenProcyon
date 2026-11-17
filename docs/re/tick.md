@@ -64,7 +64,7 @@ not per player). *Measured:* five captains, every think gap 0.528 s, 85 gaps eac
 | New objects | join at the start of the next tick and move in it | appear when spawned |
 | Out of map | tested after integration, queued; floor z = -130 | not tested the same way |
 | Collision | one pass after all movement | ships integrate and resolve one by one |
-| Decisions | after movement and collision | before movement |
+| Decisions | after movement and collision | captains, mission AI and fleet following after movement and collision, before ship upkeep; docking, boarding and dragon routines still before movement (they mix commands with direct motion) |
 | Mission rules (single player) | once per frame, after the last tick | every tick, before decisions |
 | Frame catch-up | 10 frames, then drop | about 7 ticks at 1x, 3 above |
 | Contact rate constant | 0.033 | 1/30 |
@@ -74,4 +74,5 @@ not per player). *Measured:* five captains, every think gap 0.528 s, 85 gaps eac
 - Removal one tick late, the join-at-start rule and the out-of-map test are read from code only.
 - Whether a decision made in step 8 differs observably from one made before the step: both see the previous tick's positions and act in the next integration, so the
   difference is only what else the decision sees (commands of the next tick; in single player at 1x, the rules). At most one tick.
+  The remake now takes captain decisions after movement; the routines that mix commands with direct motion are not yet split.
 - Weather drift and spinning scenery update inside step 6 and are cosmetic.

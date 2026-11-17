@@ -406,3 +406,25 @@ fn single_player_rules_run_once_per_frame_after_the_last_tick_and_while_paused()
     frame(&mut app, 100);
     assert_eq!(take(&mut app), ["rules"], "paused: no tick, rules still run");
 }
+
+/// docs/re/tick.md step 8: a decision (here a captain choosing a heading) is made after movement and collision, so it does not turn the
+/// ship in the tick it is made, only in the next tick's integration.
+#[test]
+fn a_decision_acts_in_the_next_ticks_movement() {
+    let (mut app, e) = moving_ship();
+    app.world_mut().get_mut::<Ship>(e).unwrap().goal = None;
+    app.add_systems(
+        FixedUpdate,
+        (|mut q: Query<&mut Ship>, mut done: Local<bool>| {
+            if !std::mem::replace(&mut *done, true) {
+                q.iter_mut().for_each(|mut s| s.goal = Some(1.0));
+            }
+        })
+        .in_set(BattleSet::Ai),
+    );
+    frame(&mut app, 33);
+    let first = app.world().get::<Ship>(e).unwrap().heading;
+    assert_eq!(first, 0.0, "decided in tick 1, after the movement of tick 1");
+    frame(&mut app, 33);
+    assert_ne!(app.world().get::<Ship>(e).unwrap().heading, 0.0, "acts in the movement of tick 2");
+}
