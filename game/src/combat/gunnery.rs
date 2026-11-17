@@ -146,9 +146,6 @@ pub(super) fn lob_velocity(d: Vec3, angle: f32, g: f32) -> Option<Vec3> {
     Some((flat * angle.cos() + Vec3::Y * angle.sin()) * speed)
 }
 
-/// Panic fire: the nearest visible enemy ship within this gun's maximum range and mount arc.
-/// Retail: each gun finds its own target and fires when possible. PROVISIONAL: nearest-first choice, no gun-class
-/// category filter (the original skips some gun classes; which is unknown), ships only.
 /// A ship a gun may shoot at, from this frame's snapshot.
 #[derive(Clone, Copy)]
 pub(super) struct Contact {
@@ -174,6 +171,14 @@ pub(super) struct AimTarget {
     pub(super) velocity: Vec3,
 }
 
+/// Panic fire skips lobbing, point-defence and mine-laying guns (they are left to their own routines); every other gun,
+/// torpedo launchers included, fires. `mine` is whether the gun lays mines.
+pub(super) fn panic_fires(gun: &crate::data::GunDef, mine: bool) -> bool {
+    gun.lob.is_none() && !gun.point_defense && !mine
+}
+
+/// Panic fire: the nearest visible enemy ship within this gun's maximum range and mount arc. Each gun finds its own target.
+/// PROVISIONAL: the arc test (the original's finder was read testing range only), ships only.
 pub(super) fn panic_target(contacts: &[Contact], tf: &Transform, mount: &crate::data::Mount, gun: &crate::data::GunDef) -> Option<AimTarget> {
     let origin = tf.transform_point(mount.pos);
     let to_mount = (tf.rotation * mount.rot).inverse();
@@ -183,6 +188,42 @@ pub(super) fn panic_target(contacts: &[Contact], tf: &Transform, mount: &crate::
         Vec2::new(offset.x, offset.z).length() <= gun.range[2] && (-local.x).atan2(-local.z).abs() <= mount.arc / 2.0
     });
     crate::nearest(in_arc, origin, |c| c.aim_point).map(Contact::aim)
+}
+
+/// How often a computer ship picks new ground-fire points for its lob guns: the ship AI's think period, in seconds. PROVISIONAL.
+const GROUND_THINK: f32 = 0.5;
+
+/// A computer ship's lob-gun aim points, one per bank, renewed every `GROUND_THINK` seconds.
+pub(super) struct GroundAim {
+    since: f32,
+    banks: Vec<(usize, Vec3)>,
+}
+impl Default for GroundAim {
+    fn default() -> Self {
+        GroundAim { since: GROUND_THINK, banks: Vec::new() }
+    }
+}
+
+/// The ground point a computer ship's lob guns lead towards (flat distances, world units).
+/// A base is aimed at as it stands. Any other target: its position plus its velocity times k seconds (k uniform in 5..10), plus a
+/// flat random offset of up to that same lead distance. The point is used only when it lies farther than a distance drawn
+/// uniformly from 50..70 from the shooter; otherwise None and the guns keep their old point.
+pub(super) fn ground_point(own: Vec3, target: &AimTarget, base: bool, rng: &mut Rng) -> Option<Vec3> {
+    let point = if base {
+        target.position
+    } else {
+        let lead = target.velocity * rng.range(5.0, 10.0);
+        let flat = rng.direction().with_y(0.0).normalize_or_zero();
+        target.position + lead + flat * rng.range(0.0, lead.length())
+    };
+    let gate = rng.range(50.0, 70.0);
+    (Vec2::new(point.x - own.x, point.z - own.z).length() > gate).then_some(point)
+}
+
+/// One aim point for a lob bank: the ground point moved by a fresh random flat offset of at most one unit, on the flight plane.
+pub(super) fn bank_point(point: Vec3, rng: &mut Rng) -> Vec3 {
+    let d = rng.direction();
+    Vec3::new(point.x + d.x, 0.0, point.z + d.z)
 }
 
 /// Aims every mount at the chosen target (base yaw, barrel pitch at the gun's rotation speeds) and fires aligned, loaded guns
@@ -218,13 +259,14 @@ pub(super) fn fire(
     )>,
     others: Query<(Entity, &Transform, &Ship, &Health, Has<PlayerShip>, Option<&crate::campaign::MissionShip>, Option<&crate::cloak::Cloak>)>,
     mut parts: Query<&mut Transform, (With<GunPart>, Without<Ship>)>,
-    (globals, threats, points, sensors, captains, mut mine_laying): (
+    (globals, threats, points, sensors, captains, mut mine_laying, mut ground): (
         Query<&GlobalTransform, With<GunPart>>,
         Query<(Entity, &Transform, &Shell), (Without<GunPart>, Without<Ship>)>,
         Option<Res<crate::campaign::CampaignPoints>>,
         Res<crate::environment::Sensors>,
         Option<Res<crate::ship::CaptainTargets>>,
         Local<bevy::platform::collections::HashMap<Entity, MineLaying>>,
+        Local<bevy::platform::collections::HashMap<Entity, GroundAim>>,
     ),
 ) {
     // The human fleet's gunners in a campaign: the roster's best gunner (crew_arms.rs); everyone else the plain-AI factor.
@@ -281,6 +323,7 @@ pub(super) fn fire(
     // In entity order: every shooter draws from the shared `Rng`, and the query's own order can differ from launch to launch.
     for (me, tf, ship, mut states, health, mission, primary, pilot, cloak, posts, boarding) in shooters.iter_mut().sort::<Entity>() {
         if health.destroyed {
+            ground.remove(&me);
             continue;
         }
         seen.clear();
@@ -325,6 +368,33 @@ pub(super) fn fire(
             let nearest = seen.iter().filter(|c| c.side != ship.side && c.visible).map(|c| c.aim_point.distance(tf.translation)).fold(f32::MAX, f32::min);
             mine_laying.entry(me).or_default().step(dt, hostile, ship.speed.abs(), nearest)
         };
+        // Computer ships' lob guns aim at ground points (see `ground_point`), renewed at the AI's think rate; with no target the
+        // points are dropped.
+        let lob_banks: Vec<usize> = if primary || ship_target.is_none() {
+            Vec::new()
+        } else {
+            let mut banks: Vec<usize> = class.mounts.iter().zip(states.0.iter()).filter(|(_, s)| lib.guns[&s.gun].lob.is_some() && !is_mine(&s.gun)).map(|(m, _)| m.bank).collect();
+            banks.sort_unstable();
+            banks.dedup();
+            banks
+        };
+        match ship_target.filter(|_| !lob_banks.is_empty()) {
+            None => {
+                ground.remove(&me);
+            }
+            Some(t) => {
+                let aim = ground.entry(me).or_default();
+                aim.since += dt;
+                if aim.since >= GROUND_THINK {
+                    aim.since = 0.0;
+                    let base = objects.get(t.entity).is_ok_and(|o| o.3.is_some());
+                    if let Some(point) = ground_point(tf.translation, &t, base, &mut rng) {
+                        aim.banks = lob_banks.iter().map(|b| (*b, bank_point(point, &mut rng))).collect();
+                    }
+                }
+            }
+        }
+        let ground_banks: Vec<(usize, Vec3)> = ground.get(&me).map(|g| g.banks.clone()).unwrap_or_default();
         let pending = if primary { target.2.shot } else { None };
         let (mut shot_fired, mut shot_engaged) = (false, false);
         for (mount, state) in class.mounts.iter().zip(states.0.iter_mut()) {
@@ -345,7 +415,10 @@ pub(super) fn fire(
                     |(threat, _)| threat.position,
                 )
                 .map(|(threat, _)| *threat),
-                (false, _) if primary && target.2.panic => panic_target(&seen, tf, mount, gun).or(ship_target),
+                (false, _) if primary && target.2.panic && panic_fires(gun, is_mine(&state.gun)) => panic_target(&seen, tf, mount, gun).or(ship_target),
+                (false, _) if !primary && gun.lob.is_some() => {
+                    ground_banks.iter().find(|b| b.0 == mount.bank).map(|b| AimTarget { entity: Entity::PLACEHOLDER, position: b.1, velocity: Vec3::ZERO })
+                }
                 (false, _) => ship_target,
                 (true, Some((bank, point))) if bank == mount.bank => Some(AimTarget { entity: Entity::PLACEHOLDER, position: point, velocity: Vec3::ZERO }),
                 _ => None,
@@ -809,5 +882,78 @@ mod deviation_tests {
         let draws: Vec<f32> = (0..200).map(|_| burst_deviation(&g, 50.0, 0.1, &mut rng)).collect();
         assert!(draws.iter().all(|d| d.abs() <= 0.01 + 1e-6));
         assert!(draws.iter().any(|d| d.abs() > 0.005), "scaled, not removed");
+    }
+}
+
+#[cfg(test)]
+mod target_tests {
+    use super::*;
+
+    fn gun(extra: serde_json::Value) -> GunDef {
+        let mut g = serde_json::json!({
+            "BulletsPerBurst": 1, "BulletAffectedByGravity": false, "BulletTypeName_Primary": "Bullet_X",
+            "EffectiveRange_Range": 100.0, "LongRange_Range": 200.0, "MaximumRange_Range": 300.0,
+            "EffectiveRange_AccuracyDeviation": 0.2, "LongRange_AccuracyDeviation": 0.4, "MaximumRange_AccuracyDeviation": 0.8,
+            "MuzzleSpeed": 100.0, "TimeBetweenBursts": 5.0, "DuringBurstReloadTime": 0.1, "HorizontalRotationSpeed": 1.0,
+            "VerticalRotationSpeed": 1.0, "VerticalMinAngle": 0.0, "VerticalMaxAngle": 1.0,
+            "visual": { "muzzles": [], "pivot": [0.0, 0.0, 0.0] },
+        });
+        g.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        crate::data::gun_def(&g)
+    }
+
+    #[test]
+    fn panic_skips_lob_point_defence_and_mine_guns_only() {
+        assert!(panic_fires(&gun(serde_json::json!({})), false));
+        assert!(panic_fires(&gun(serde_json::json!({ "Is TorpedoLauncher Gun": true })), false), "torpedo launchers fire in the second pass");
+        assert!(!panic_fires(&gun(serde_json::json!({ "Is Lobbing Gun": true, "LobAngle": 0.785 })), false));
+        assert!(!panic_fires(&gun(serde_json::json!({ "Is PointDefense Gun": true })), false));
+        assert!(!panic_fires(&gun(serde_json::json!({})), true));
+    }
+
+    fn mover(velocity: Vec3) -> AimTarget {
+        AimTarget { entity: Entity::PLACEHOLDER, position: Vec3::new(500.0, 3.0, 0.0), velocity }
+    }
+
+    #[test]
+    fn a_ship_target_is_led_by_five_to_ten_seconds_with_a_spread_up_to_the_lead() {
+        let v = Vec3::new(0.0, 0.0, 4.0);
+        let mut rng = Rng(11);
+        let mut far = 0.0f32;
+        for _ in 0..300 {
+            let p = ground_point(Vec3::ZERO, &mover(v), false, &mut rng).expect("500 units away is past any gate");
+            let off = p - mover(v).position;
+            // The lead is 20..40 along the course; the spread adds at most the same again (|v| x k, at most 40).
+            assert!(off.length() <= 2.0 * 40.0 + 1e-3, "{off}");
+            far = far.max(off.length());
+        }
+        assert!(far > 40.0, "the spread is not zero");
+    }
+
+    #[test]
+    fn a_base_is_aimed_at_where_it_stands() {
+        let mut rng = Rng(3);
+        let t = mover(Vec3::ZERO);
+        assert_eq!(ground_point(Vec3::ZERO, &t, true, &mut rng), Some(t.position));
+    }
+
+    #[test]
+    fn no_ground_point_inside_the_fifty_to_seventy_gate() {
+        let mut rng = Rng(5);
+        let t = AimTarget { position: Vec3::new(49.0, 0.0, 0.0), ..mover(Vec3::ZERO) };
+        assert!((0..50).all(|_| ground_point(Vec3::ZERO, &t, true, &mut rng).is_none()), "49 units is always inside the gate");
+        let t = AimTarget { position: Vec3::new(71.0, 0.0, 0.0), ..t };
+        assert!((0..50).all(|_| ground_point(Vec3::ZERO, &t, true, &mut rng).is_some()), "71 units is always outside it");
+    }
+
+    #[test]
+    fn a_bank_point_is_on_the_flight_plane_within_one_unit_of_the_ground_point() {
+        let mut rng = Rng(9);
+        let g = Vec3::new(10.0, 7.0, -20.0);
+        for _ in 0..100 {
+            let p = bank_point(g, &mut rng);
+            assert_eq!(p.y, 0.0);
+            assert!(Vec2::new(p.x - g.x, p.z - g.z).length() <= 1.0 + 1e-5);
+        }
     }
 }
