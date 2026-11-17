@@ -171,6 +171,11 @@ pub(super) struct AimTarget {
     pub(super) velocity: Vec3,
 }
 
+/// The line-of-fire hold covers the attack routine's guns: point-defence and mine-laying guns are fired by their own routines.
+pub(super) fn held_by_line(blocked: bool, gun: &crate::data::GunDef, mine: bool) -> bool {
+    blocked && !gun.point_defense && !mine
+}
+
 /// Panic fire skips lobbing, point-defence and mine-laying guns (they are left to their own routines); every other gun,
 /// torpedo launchers included, fires. `mine` is whether the gun lays mines.
 pub(super) fn panic_fires(gun: &crate::data::GunDef, mine: bool) -> bool {
@@ -471,8 +476,9 @@ pub(super) fn fire(
                 state.burst_left = 0;
                 continue;
             }
-            // Line-of-fire hold: the guns keep tracking but nothing fires.
-            if line_blocked {
+            // Line-of-fire hold: the guns keep tracking but the attack routine's guns do not fire; point defence and mine laying
+            // have their own routines.
+            if held_by_line(line_blocked, gun, is_mine(&state.gun)) {
                 state.burst_left = 0;
                 continue;
             }
@@ -931,6 +937,16 @@ mod target_tests {
         });
         g.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
         crate::data::gun_def(&g)
+    }
+
+    #[test]
+    fn the_line_of_fire_hold_spares_point_defence_and_mine_guns() {
+        let pd = gun(serde_json::json!({ "Is PointDefense Gun": true }));
+        let plain = gun(serde_json::json!({}));
+        assert!(held_by_line(true, &plain, false));
+        assert!(!held_by_line(true, &pd, false));
+        assert!(!held_by_line(true, &plain, true));
+        assert!(!held_by_line(false, &plain, false));
     }
 
     #[test]

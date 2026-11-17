@@ -232,11 +232,11 @@ harpoon decision.
 - **Scenery in the line:** islands and bases are tested against their collision triangles; any other obstacle by its bounding sphere,
   blocking when the segment crosses it or an end lies inside it. Only candidates whose surface distance from the ship is at most the
   segment length are tested, and the aimed-at object never blocks its own shot.
-- Remake: `line_of_fire.rs` (pure predicates, unit-tested), applied in `combat::gunnery::fire` (all of a computer ship's guns hold, turrets
+- Remake: `line_of_fire.rs` (pure predicates, unit-tested), applied in `combat::gunnery::fire` (every gun of a computer ship except point-defence and mine-laying guns holds, as those have their own routines; turrets
   keep tracking; no new ground-fire points) and `boarding::ai_boarding` (harpoon roll skipped). Allied = same side, or allied mission
   players, and not hostile. PROVISIONAL: the aim point (the target's aim point for every routine; the original's broadside, frontal
   and rear runs use their own points), asteroids and other non-mesh obstacles by their bounds sphere, bases tested only if they carry
-  a collision mesh, mine and point-defence guns held too, and the segment starts at the hull centre.
+  a collision mesh, and the segment starts at the hull centre.
 
 ## Panic button
 - The hotkey/HUD button works only while the player ship is not disabled. It is sent like any order (so it works in multiplayer).
