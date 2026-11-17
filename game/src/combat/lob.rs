@@ -418,7 +418,8 @@ mod tests {
             let d = (1.0 - r / radius).max(0.1);
             let lost = sec.hp - hp[k];
             if r < radius {
-                assert!(lost >= lo * d - 1e-3 && lost <= hi * d + 1e-3, "{}: lost {lost} at {r}, want {lo}-{hi} x {d}", sec.label);
+                // The roll is rounded to whole hit points after scaling (shells.rs damage_roll), so allow half a point either way.
+                assert!(lost >= (lo * d).round() - 1e-3 && lost <= (hi * d).round() + 1e-3, "{}: lost {lost} at {r}, want {lo}-{hi} x {d}", sec.label);
             } else {
                 assert_eq!(lost, 0.0, "{} is out of reach", sec.label);
             }
