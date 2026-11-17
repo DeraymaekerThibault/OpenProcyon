@@ -721,3 +721,59 @@ fn a_formation_swap_pass_gives_ships_the_slot_nearest_them_and_leaves_fitting_on
     swap_slots(&mut s, &[on(Vec3::ZERO), on(mid), on(mid)]);
     assert_eq!(s, slots);
 }
+
+fn plain_ship() -> Ship {
+    Ship {
+        class: 0,
+        side: Side::Player,
+        heading: 0.0,
+        speed: 5.0,
+        ang_vel: 0.0,
+        order: 3,
+        waypoints: vec![Vec3::new(10.0, 0.0, -50.0)],
+        goal: Some(1.0),
+        cap: 1.0,
+        throttle: Some(0.5),
+        sail_energy: 1.0,
+        crew_speed: 1.0,
+        crew_turn: 1.0,
+        net: 1.0,
+        avoid: 1.0,
+    }
+}
+
+#[test]
+fn hold_and_stop_zero_the_controls_and_end_the_course() {
+    let mut s = plain_ship();
+    s.stand_still();
+    assert_eq!((s.order, s.ordered()), (0, 0.0));
+    assert!(s.waypoints.is_empty() && s.goal.is_none(), "no leftover course for the helm to steer to");
+}
+
+#[test]
+fn hold_ends_a_captains_destination_but_keeps_its_target_and_formation_hold() {
+    let target = Entity::from_raw_u32(7).unwrap();
+    let mut p = FleetPilot { hold: true, target: Some(target), destination: Some(Vec3::X), hold_fire: true, ..default() };
+    p.hold_position();
+    assert_eq!((p.destination, p.target, p.hold, p.hold_fire), (None, Some(target), true, true));
+}
+
+#[test]
+fn stop_leaves_formation_hold_and_hold_fire_alone() {
+    let target = Entity::from_raw_u32(7).unwrap();
+    let mut p = FleetPilot { hold: true, target: Some(target), destination: Some(Vec3::X), hold_fire: true, ..default() };
+    p.cancel_actions();
+    assert_eq!((p.destination, p.target, p.hold, p.hold_fire), (None, None, true, true));
+}
+
+#[test]
+fn a_held_ship_is_released_by_move_dock_tow_and_board_orders_only() {
+    let mut w = World::new();
+    let e = w.spawn(HoldPosition).id();
+    // An attack order (or Stop) never calls `release_hold`; the order clicks that clear a hold all do.
+    assert!(w.get::<HoldPosition>(e).is_some());
+    let mut queue = bevy::ecs::world::CommandQueue::default();
+    release_hold(&mut Commands::new(&mut queue, &w), e);
+    queue.apply(&mut w);
+    assert!(w.get::<HoldPosition>(e).is_none());
+}

@@ -189,6 +189,7 @@ pub fn input(
                 match pointer.plot.pressed(p) {
                     Some(true) => {
                         docks.cancel_as(actor);
+                        ship::release_hold(&mut commands, actor);
                         commit_plot(&mut ship, &mut pointer.plot);
                     }
                     Some(false) => pointer.plot.pending.clear(),
@@ -198,7 +199,7 @@ pub fn input(
             }
             // A move order cancels a dock routine in progress and gives control back (original behaviour).
             docks.cancel_as(actor);
-            commands.entity(actor).remove::<ship::HoldPosition>();
+            ship::release_hold(&mut commands, actor);
             if !direct {
                 if let Some(pilot) = pilot.as_mut() {
                     pilot.move_to(p);

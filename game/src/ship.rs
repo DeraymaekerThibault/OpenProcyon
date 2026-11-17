@@ -64,6 +64,12 @@ impl Ship {
         self.order = 0;
     }
 
+    /// The Hold and Stop orders' effect on the controls: rudder and throttle to zero, the current order and course end. A held ship
+    /// does not steer or follow a path (`HoldPosition` is the marker); neither order touches the formation hold.
+    pub fn stand_still(&mut self) {
+        self.halt();
+    }
+
     /// The commanded share of Ahead Full: 0 at All Stop (or a throttle of 0), otherwise the throttle or the order's fraction.
     pub fn ordered(&self) -> f32 {
         if self.order == 0 { 0.0 } else { self.throttle.unwrap_or(ORDERS[self.order].1) }
@@ -76,6 +82,11 @@ pub struct PlayerShip;
 /// 'AI_LOCK_POSITION' (right-click menu Hold): the ship's captain keeps it where it is; it still fires.
 #[derive(Component)]
 pub struct HoldPosition;
+
+/// A move, dock, tow or board order ends a hold (any other order, an attack among them, leaves it).
+pub fn release_hold(commands: &mut Commands, e: Entity) {
+    commands.entity(e).remove::<HoldPosition>();
+}
 
 /// The name on a ship's banner (a mission ship's comes from `MissionShip`; otherwise the class name is shown).
 #[derive(Component)]
@@ -513,6 +524,19 @@ pub struct SlotPlan {
     pub age: f32,
 }
 
+impl FleetPilot {
+    /// Hold: the captain's own destination ends with the order.
+    pub fn hold_position(&mut self) {
+        self.destination = None;
+    }
+
+    /// Stop: the destination and the target end; the formation hold and hold fire stay.
+    pub fn cancel_actions(&mut self) {
+        self.destination = None;
+        self.target = None;
+    }
+}
+
 impl SlotPlan {
     pub fn goal(&self) -> Vec3 {
         self.point + self.velocity * self.age
@@ -866,9 +890,7 @@ pub fn fleet_follow(world: &mut World) {
     let busy: std::collections::HashSet<_> = world.query_filtered::<Entity, CaptainBusy>().iter(world).collect();
     let held: std::collections::HashSet<_> = world.query_filtered::<Entity, With<HoldPosition>>().iter(world).collect();
     for e in &held {
-        if world.get::<PlayerShip>(*e).is_none()
-            && let Some(mut s) = world.get_mut::<Ship>(*e)
-        {
+        if let Some(mut s) = world.get_mut::<Ship>(*e) {
             s.halt();
         }
     }

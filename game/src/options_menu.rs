@@ -254,23 +254,24 @@ fn menu(
                 "HUD_Options_Focus"
             }
             Some(Act::Stop) => {
-                player.1.order = 0;
-                player.1.waypoints.clear();
-                commands.entity(actor).insert(player.1.clone()).remove::<crate::boarding::GrappleOrder>();
+                player.1.stand_still();
+                commands.entity(actor).insert(player.1.clone());
                 commands.queue(move |w: &mut World| {
                     if let Some(mut p) = w.get_mut::<crate::ship::FleetPilot>(actor) {
-                        p.hold = false;
-                        p.destination = None;
-                        p.target = None;
+                        p.cancel_actions();
                     }
                 });
                 docks.cancel_as(actor);
                 "HUD_Options_Stop"
             }
             Some(Act::HoldOn) => {
-                player.1.order = 0;
-                player.1.waypoints.clear();
+                player.1.stand_still();
                 commands.entity(actor).insert((player.1.clone(), crate::ship::HoldPosition));
+                commands.queue(move |w: &mut World| {
+                    if let Some(mut p) = w.get_mut::<crate::ship::FleetPilot>(actor) {
+                        p.hold_position();
+                    }
+                });
                 "HUD_Options_Select"
             }
             Some(Act::HoldOff) => {
@@ -292,6 +293,7 @@ fn menu(
                 if on { "HUD_Options_CloakStart" } else { "HUD_Options_CloakStop" }
             }
             Some(Act::BoardStart) => {
+                crate::ship::release_hold(&mut commands, actor);
                 board.write(BoardMsg::Board { boarder: Some(actor), target: open.target });
                 "HUD_Options_BoardStart"
             }
@@ -308,10 +310,12 @@ fn menu(
                 "HUD_Options_GrappleStop"
             }
             Some(Act::Dock) if docks.can_dock(actor, open.target) => {
+                crate::ship::release_hold(&mut commands, actor);
                 docks.dock_as(actor, open.target);
                 "HUD_Options_Dock"
             }
             Some(Act::TowStart) => {
+                crate::ship::release_hold(&mut commands, actor);
                 docks.tow_as(actor, open.target);
                 "HUD_Options_TowStart"
             }
