@@ -15,8 +15,8 @@ const SAME_LIMIT: u32 = 5;
 const WAIT: f32 = 4.0;
 /// Stuck: the same obstacle for more than this many thinks while overlapping its sphere (gap under 1 unit) and barely moving.
 const STUCK_THINKS: u32 = 10;
-/// "Barely moving": the original tests the last position change per physics tick (1/30 s) under 0.1 units. PROVISIONAL: read as speed.
-const STUCK_SPEED: f32 = 3.0;
+/// "Barely moving": the original tests the last position change per physics tick (0.033 s) under 0.1 units. PROVISIONAL: read as speed.
+const STUCK_SPEED: f32 = 0.1 / 0.033;
 /// Priority a moving ship of the human's gets on top of its speed: computer ships give way to it.
 pub(super) const HUMAN_PRIORITY: f32 = 50.0;
 

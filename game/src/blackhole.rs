@@ -255,7 +255,7 @@ pub fn pull(
     time: Res<Time>,
     lib: Res<crate::combat::Library>,
     holes: Query<(&Transform, &Pull), Without<Ship>>,
-    wells: Query<(&Transform, &crate::combat::lob::GravWell), Without<Ship>>,
+    wells: Query<(&Transform, &crate::combat::lob::GravWell), (Without<Ship>, Without<crate::Joining>)>,
     mut ships: Query<(Entity, &Ship, &mut Transform, &mut Health, Option<&Docker>, Option<&mut Caught>, Option<&mut crate::cloak::Cloak>, Has<crate::collision::Pinned>)>,
 ) {
     let dt = time.delta_secs();

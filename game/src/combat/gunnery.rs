@@ -517,6 +517,7 @@ pub(super) fn launch_shell(
                 lost_target: false,
             },
             Transient,
+            crate::Joining,
             stf,
         ))
         .id();

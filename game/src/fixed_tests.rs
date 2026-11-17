@@ -35,11 +35,19 @@ fn fixed_clock_preserves_pause_speed_and_catch_up_caps() {
     set_time_scale(&mut app.world_mut().resource_mut::<Time<Virtual>>(), 8.0);
     frame(&mut app, 5); // 40 ms virtual, not eight input polls.
     assert_eq!(app.world().resource::<Ticks>().0.len(), 4);
-    frame(&mut app, 1000); // Existing fast-forward catch-up limit: 100 ms virtual.
+    // Catch-up limit: 10 frames of 5 ticks each (5x, the original's fastest), then the rest of the second is dropped.
+    set_time_scale(&mut app.world_mut().resource_mut::<Time<Virtual>>(), 5.0);
+    frame(&mut app, 1000);
     let time = app.world().resource::<Time<Virtual>>();
     assert_eq!(time.delta(), time.max_delta());
-    assert!((time.delta_secs() - 0.1).abs() < 1e-6);
-    assert_eq!(app.world().resource::<Ticks>().0.len(), 7);
+    assert_eq!(app.world().resource::<Ticks>().0.len(), 4 + 50);
+    frame(&mut app, 1); // the dropped backlog does not run later
+    assert_eq!(app.world().resource::<Ticks>().0.len(), 4 + 50);
+    // Above 5x the cap is 0.1 s of game time per call (3 ticks, plus at most one carried), so 16x stays smooth.
+    set_time_scale(&mut app.world_mut().resource_mut::<Time<Virtual>>(), 16.0);
+    frame(&mut app, 1000);
+    let n = app.world().resource::<Ticks>().0.len() - 54;
+    assert!((3..=4).contains(&n), "16x slow frame ran {n} ticks");
     assert!(app.world().resource::<Ticks>().0.iter().all(|dt| *dt == BATTLE_TICK));
 }
 
@@ -304,4 +312,97 @@ fn a_childs_global_transform_on_the_tick_follows_the_simulation_pose() {
         let want = pose.transform_point(offset);
         assert!(seen.distance(want) < 1e-4, "tick {i}: the muzzle was at {seen:?}, the simulation pose puts it at {want:?}");
     }
+}
+
+#[derive(Resource, Default)]
+struct Presence(Vec<(&'static str, bool)>);
+
+/// docs/re/tick.md: an object queued for removal in a tick still takes part in that tick's per-object logic and is destroyed at
+/// the start of the next tick, before anything else of it runs.
+#[test]
+fn removal_is_queued_and_applied_at_the_start_of_the_next_tick() {
+    let mut app = clock();
+    let victim = app.world_mut().spawn_empty().id();
+    app.init_resource::<Presence>().add_systems(
+        FixedUpdate,
+        (
+            (move |mut p: ResMut<Presence>, q: Query<Entity>| p.0.push(("start", q.contains(victim)))).in_set(BattleSet::Commands),
+            (move |mut commands: Commands, mut done: Local<bool>| {
+                if !std::mem::replace(&mut *done, true) {
+                    queue_removal(&mut commands, victim);
+                }
+            })
+            .in_set(BattleSet::Simulate),
+            (move |mut p: ResMut<Presence>, q: Query<Entity>| p.0.push(("end", q.contains(victim)))).in_set(BattleSet::Outcome),
+        ),
+    );
+    frame(&mut app, 33);
+    frame(&mut app, 33);
+    assert_eq!(app.world().resource::<Presence>().0, [("start", true), ("end", true), ("start", false), ("end", false)]);
+}
+
+#[derive(Component)]
+struct Mover(f32);
+
+/// docs/re/tick.md: an object created during a tick joins at the start of the next tick and moves in it (not in the tick of its creation).
+#[test]
+fn a_new_object_joins_at_the_start_of_the_next_tick_and_moves_in_it() {
+    let mut app = clock();
+    app.init_resource::<Presence>().add_systems(
+        FixedUpdate,
+        (
+            (|mut commands: Commands, mut done: Local<bool>| {
+                if !std::mem::replace(&mut *done, true) {
+                    commands.spawn((Mover(0.0), Joining));
+                }
+            })
+            .in_set(BattleSet::Combat),
+            (|mut q: Query<&mut Mover, Without<Joining>>| q.iter_mut().for_each(|mut m| m.0 += 1.0)).in_set(BattleSet::Simulate),
+        ),
+    );
+    for tick in 1..=3 {
+        frame(&mut app, 33);
+        let moved: Vec<f32> = app.world_mut().query::<&Mover>().iter(app.world()).map(|m| m.0).collect();
+        assert_eq!(moved, [(tick - 1) as f32], "tick {tick}: created in tick 1, first moved in tick 2");
+    }
+}
+
+/// docs/re/tick.md: a mover that ends a step below z = -130 is queued for removal, and destroyed at the start of the next tick.
+#[test]
+#[ignore = "needs imported assets"]
+fn a_mover_below_the_floor_is_queued_after_its_step_and_removed_next_tick() {
+    let mut app = clock();
+    app.init_resource::<data::AsteroidDefs>();
+    let rock = combat::Asteroid::new("Asteroid_Large", "Asteroid Belt", app.world().resource::<data::AsteroidDefs>()).unwrap();
+    let e = app.world_mut().spawn((rock, Transform::from_xyz(0.0, MAP_FLOOR + 0.1, 0.0))).id();
+    app.add_systems(
+        FixedUpdate,
+        ((move |mut q: Query<&mut Transform>| q.get_mut(e).iter_mut().for_each(|t| t.translation.y -= 0.2)).in_set(BattleSet::Forces), out_of_map.in_set(BattleSet::Simulate)),
+    );
+    frame(&mut app, 33);
+    assert!(app.world().get::<Removed>(e).is_some(), "past the floor after its step: queued");
+    frame(&mut app, 33);
+    assert!(app.world().get_entity(e).is_err(), "destroyed at the start of the next tick");
+}
+
+#[derive(Resource, Default)]
+struct Order(Vec<&'static str>);
+
+/// docs/re/tick.md: single-player rules run once per frame, after the last tick of that frame (a half or a fifth as often as ticks at
+/// 2x and 5x), and also while paused when no tick runs.
+#[test]
+fn single_player_rules_run_once_per_frame_after_the_last_tick_and_while_paused() {
+    let mut app = clock();
+    app.init_resource::<Order>()
+        .add_systems(FixedUpdate, |mut o: ResMut<Order>| o.0.push("tick"))
+        .add_systems(Update, (|mut o: ResMut<Order>| o.0.push("rules")).in_set(FrameRules));
+    let take = |app: &mut App| std::mem::take(&mut app.world_mut().resource_mut::<Order>().0);
+    frame(&mut app, 66); // two ticks of real time at 1x
+    assert_eq!(take(&mut app), ["tick", "tick", "rules"]);
+    set_time_scale(&mut app.world_mut().resource_mut::<Time<Virtual>>(), 5.0);
+    frame(&mut app, 33); // 5x: five ticks, one rules evaluation
+    assert_eq!(take(&mut app), ["tick", "tick", "tick", "tick", "tick", "rules"]);
+    app.world_mut().resource_mut::<Time<Virtual>>().pause();
+    frame(&mut app, 100);
+    assert_eq!(take(&mut app), ["rules"], "paused: no tick, rules still run");
 }
