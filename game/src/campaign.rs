@@ -489,6 +489,35 @@ mod tests {
         assert_eq!(app.world().get::<MissionBase>(pirate).unwrap().owner, "", "no owner until 'Set Player Owners & AI'");
     }
 
+    /// Mission 11's pirate asteroids are island objects with guns and hit points (read from the original's data), owned by their own player.
+    #[test]
+    #[ignore = "needs imported assets"]
+    fn mission_11_armed_asteroids_become_armed_bases_owned_by_the_armed_asteroids_player() {
+        use bevy::ecs::system::RunSystemOnce;
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, bevy::asset::AssetPlugin::default()))
+            .init_asset::<bevy::world_serialization::WorldAsset>()
+            .init_asset::<Mesh>()
+            .init_asset::<Image>()
+            .init_asset::<StandardMaterial>();
+        app.insert_resource(Library::load(assets_dir())).init_resource::<crate::fx::FxLib>().init_resource::<crate::ship::Fleets>();
+        let map: Value = serde_json::from_slice(&std::fs::read(assets_dir().join("maps/mission11/map.json")).unwrap()).unwrap();
+        let objects: Vec<Value> = map["objects"].as_array().unwrap().iter().filter(|o| o["type"].as_str().is_some_and(|t| t.ends_with("_Armed"))).cloned().collect();
+        assert_eq!(objects.len(), 32);
+        let bases: Vec<(Entity, Value)> = objects.into_iter().map(|o| (app.world_mut().spawn(Transform::default()).id(), o)).collect();
+        let ids: Vec<Entity> = bases.iter().map(|b| b.0).collect();
+        app.world_mut()
+            .run_system_once(move |mut commands: Commands, assets: Res<AssetServer>, lib: Res<Library>, fxl: Res<crate::fx::FxLib>| {
+                spawn(&mut commands, &assets, &lib, &fxl, "mission11", &bases)
+            })
+            .unwrap();
+        for e in ids {
+            let base = app.world().get::<MissionBase>(e).expect("an armed asteroid is a MissionBase");
+            assert_eq!(base.owner, "Armed Asteroids");
+            assert!(app.world().get::<crate::combat::ArmedBase>(e).is_some() && app.world().get::<crate::combat::Health>(e).is_some());
+        }
+    }
+
     #[test]
     fn victory_points_accumulate_across_missions_without_double_counting() {
         let mut points = CampaignPoints::default();

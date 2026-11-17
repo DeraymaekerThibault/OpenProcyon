@@ -589,9 +589,14 @@ pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Libra
         // The map script's Setup Island 'Combat Strength' is what boarders must wear down (retail: it seeds the base's strength).
         let strengths = data::try_json(&crate::assets_dir().join(format!("maps/{map_id}/script.json"))).map(|s| setup_strengths(&s)).unwrap_or_default();
         // Bases fight for the side whose fleet type is theirs; a base no fleet claims stays neutral (and silent). Armed islands (the
-        // volcanoes) belong to nobody: they fire on every ship and cannot be boarded.
+        // volcanoes) belong to nobody: they fire on every ship and cannot be boarded. The armed asteroids (Convoy Raid's belong to the
+        // pirate base's player) fight for their object's owner like a base.
         for (e, o) in &bases {
-            let Some(class) = o["type"].as_str().filter(|t| t.starts_with("Base_") || t.starts_with("Island_")).and_then(|t| lib.classes.iter().position(|c| c.name == t)) else {
+            let Some(class) = o["type"]
+                .as_str()
+                .filter(|t| t.starts_with("Base_") || t.starts_with("Island_") || (t.starts_with("Asteroid_") && t.ends_with("_Armed")))
+                .and_then(|t| lib.classes.iter().position(|c| c.name == t))
+            else {
                 continue;
             };
             // PROVISIONAL: a gunless base (Convoy Raid's pirate stockade) stays scenery in skirmish, as before it had a class: whether the

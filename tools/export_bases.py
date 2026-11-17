@@ -1,5 +1,5 @@
-"""Armed bases and islands: assets/ships/<Base_*|Island_*>/{ship.json,geometry.json} for every Base_*/Island_* world object that places guns
-(island gun towers, the volcanoes).
+"""Armed bases and islands: assets/ships/<Base_*|Island_*|Asteroid_*_Armed>/{ship.json,geometry.json} for every Base_*/Island_*/Asteroid_*_Armed world object that places guns
+(island gun towers, the volcanoes, the pirate asteroids of mission 11 and Convoy Raid; those are island objects in the original).
 Same layout as a ship (pack_data/pack_layout) so the game loads it as a class; no model.glb: the base's visual is its map scenery GLB (models/bases).
 New gun/bullet definitions are merged into data/weapons. usage: python3 -m tools.export_bases <game_root> <assets_dir>
 """
@@ -22,7 +22,7 @@ def export_bases(root, assets):
     )
     wots = [
         w
-        for pattern in ("Base_*.wot", "Island_*.wot")
+        for pattern in ("Base_*.wot", "Island_*.wot", "Asteroid_*_Armed.wot")
         for w in ci_files(Path(root) / "WorldObjects", pattern)
     ]
     for wot in wots:
