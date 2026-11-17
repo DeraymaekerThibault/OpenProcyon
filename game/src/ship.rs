@@ -340,7 +340,7 @@ pub fn ai(
     }
 }
 
-fn max_speed(ship: &Ship, class: &combat::Class, health: &Health) -> f32 {
+pub fn max_speed(ship: &Ship, class: &combat::Class, health: &Health) -> f32 {
     full_speed(class) * combat::speed_factor(class, health) * ship.cap * ship.sail_energy * ship.crew_speed * ship.net
 }
 
@@ -943,6 +943,7 @@ pub fn fleet_follow(world: &mut World) {
 pub mod attack;
 #[cfg(test)]
 pub mod movement_tests;
+pub mod path_end;
 
 #[cfg(test)]
 mod steer_round_tests {

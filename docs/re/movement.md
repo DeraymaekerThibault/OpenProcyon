@@ -126,9 +126,14 @@ Follow-up (waypoint test = clamped linear interpolation):
   In arrive the throttle ramps 1.0 → 0.1 between 2R and R from the last point while the path is live, and is 0 once it is done; then clamped 0..1.
 - The last point of a `to end` path counts as reached inside 2·R (R = entity →, a per-ship radius; also maxed over groups);
   intermediate points use a passing (bisector-angle) test instead.
-- Remake: `rules::mission_ai` drops the last point inside 2 × `class.radius` (PROVISIONAL stand-in for R) and sets All Stop; the existing
-  drag then brakes the ship. The turn-state throttle hold is not modelled. A finished remake chase stops the same way (not retail-derived).
-  The human's own move orders still coast on (`ship.rs`); the command ship is halted during the opening briefing (`briefing.rs`).
+- Remake: scripted and mission-AI ships on a `to end` path (not looping) take the throttle rule from `ship::path_end`: aligned within
+  pi/16 of the current point, full throttle; turned further off, the current speed fraction held (floor 0.1). The arrive ramp (1.0 at 2R
+  falling to 0.1 at R) is built, but the stopping-distance helper returns its cancelling result (zero), so arrive starts only when the
+  path ends: the last point is taken inside 2 × `class.radius` (PROVISIONAL stand-in for R) and the throttle goes to 0 (All Stop, the
+  existing drag brakes the ship). Not built: the passing (bisector-angle) test for intermediate points (the remake takes them about
+  3 s of travel early), and any brake on computer-captain explore and attack courses (they are not `to end` paths: the attack routines
+  carry their own measured throttle). A finished remake chase stops the same way (not retail-derived). The human's own move orders still
+  coast on (`ship.rs`); the command ship is halted during the opening briefing (`briefing.rs`).
 
 ## Computer captains (measured, 2026-10)
 Headless retail skirmishes, one computer ship against our idle or fleeing Navy Cutter / Man-O-War, every ship logged at ~30 Hz.
