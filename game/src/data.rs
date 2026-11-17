@@ -165,6 +165,8 @@ pub struct GunDef {
     pub reload: f32,
     pub burst: u32,
     pub burst_reload: f32,
+    /// WOT `CalculateAccuracyDeviationDuringBurst`: the deviation angle is drawn for every shot, not once per burst.
+    pub dev_per_shot: bool,
     pub range: [f32; 3], // effective, long, maximum
     /// Per range band (effective, long, maximum): the ricochet factor a shell of this gun takes when fired (0 when absent).
     pub ricochet: [f32; 3],
@@ -394,6 +396,7 @@ pub fn gun_def(g: &Value) -> GunDef {
         reload: num(&g["TimeBetweenBursts"]),
         burst: g["BulletsPerBurst"].as_u64().unwrap() as u32,
         burst_reload: num(&g["DuringBurstReloadTime"]),
+        dev_per_shot: g["CalculateAccuracyDeviationDuringBurst"].as_bool().unwrap_or(false),
         range: [num(&g["EffectiveRange_Range"]), num(&g["LongRange_Range"]), num(&g["MaximumRange_Range"])],
         ricochet: ["EffectiveRange", "LongRange", "MaximumRange"].map(|b| g[format!("{b}_RicochetFactor")].as_f64().unwrap_or(0.0) as f32),
         deviation: [num(&g["EffectiveRange_AccuracyDeviation"]), num(&g["LongRange_AccuracyDeviation"]), num(&g["MaximumRange_AccuracyDeviation"])],

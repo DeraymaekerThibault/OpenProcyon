@@ -15,8 +15,10 @@ crewed/player ships) the lead is only applied while the target is turning and ad
 ## Deviation (run once per burst, or per shot if CalculateAccuracyDeviationDuringBurst)
 - Band by distance: <= EffectiveRange -> Effective deviation, <= LongRange -> Long, else Maximum.
 - Half of it, times an accuracy factor: 0.5 for plain AI ships (0.8 or a per-ship value for some ship flags);
-  crewed ships use 1 - 0.8 * gunnery skill (+0.1 / +0.05 random bonuses, clamped to [0,1]); NIS mode uses 0.1.
+  crewed ships use 1 - 0.8 * gunnery skill (+0.1 / +0.05 random bonuses, clamped to [0,1]); NIS mode uses 0.1 (the deviation is scaled, not removed).
 - The final angle is uniform in [-a, +a].
+- Remake: the cinematic factor is 0.1. The gun's `CalculateAccuracyDeviationDuringBurst` flag (set on a few retail guns) makes the angle be
+  drawn for every shot instead of once per burst (`GunDef::dev_per_shot`; the exporter writes the flag, so re-import assets).
 
 ## Firing
 Per muzzle the angle is applied twice to the muzzle orientation, about two axes, each with a random sign

@@ -121,6 +121,21 @@ pub(super) struct ShipHit {
 /// Player shells on computer ships: Easy x3, Normal x2, Hard x1; computer shells on the player's: x0.25, x0.5, x1.
 /// Our base's guns on a computer ship hit at x1 on Normal (retail HP log of a Minelayer sunk by the base alone), so the outgoing
 /// factor is the player's ships' only. PROVISIONAL: computer-vs-computer, allied and hostile-base-on-player hits are not measured.
+/// The `Damage_` sound pool of a section material (`material_key`), None where the original has none.
+pub(super) fn damage_pool(key: &str) -> Option<&'static str> {
+    match key {
+        "Wood" | "Reinforced" => Some("Wood"),
+        "Iron" => Some("Metal"),
+        "Cloth" => Some("Sail"),
+        "Stone" => Some("Stone"),
+        _ => None,
+    }
+}
+
+pub(super) fn damage_sfx(pool: &str, at: Vec3, rng: &mut Rng) -> Sfx {
+    Sfx { name: format!("Damage_{pool}0{}", rng.variant(5)), at: Some(at), vol: 1.0, max: 600.0 }
+}
+
 pub(super) fn side_damage_scale(shooter: Side, victim: Side, difficulty: u8, base: bool) -> f32 {
     let d = difficulty.min(2) as usize;
     let (out, inc) = ([3.0, 2.0, 1.0][d], [0.25, 0.5, 1.0][d]);
@@ -718,15 +733,8 @@ fn hit_ship(
     sfx.write_batch(bd.impact_sound(key, at, rng));
     if outcome.lost {
         // Retail pool per section material (Damage_<Wood|Metal|Sail|Stone>01-05, 600 units). PROVISIONAL: played on section loss.
-        let pool = match key {
-            "Wood" | "Reinforced" => Some("Wood"),
-            "Iron" => Some("Metal"),
-            "Cloth" => Some("Sail"),
-            "Stone" => Some("Stone"),
-            _ => None,
-        };
-        if let Some(p) = pool {
-            sfx.write(Sfx { name: format!("Damage_{p}0{}", rng.variant(5)), at: Some(at), vol: 1.0, max: 600.0 });
+        if let Some(p) = damage_pool(key) {
+            sfx.write(damage_sfx(p, at, rng));
         }
         info!("{} of {} destroyed", sec.label, class.name);
     }

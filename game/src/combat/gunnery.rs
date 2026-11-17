@@ -17,7 +17,7 @@ pub(super) struct GunState {
     pub(super) pitch: f32,
     pub(super) aligned: bool,
     pub(super) in_range: bool, // a target is within range and the mount's arc (weapon bar: green outline)
-    pub(super) dev: f32,       // this burst's deviation angle, drawn once when the burst starts (retail: once per burst)
+    pub(super) dev: f32,       // the burst's deviation angle, drawn when the burst starts (every shot for a `dev_per_shot` gun)
 }
 /// Marks the entities of a gun's visual hierarchy (root, base, barrel, muzzle points).
 #[derive(Component)]
@@ -370,6 +370,19 @@ pub(super) fn fire(
                 state.burst_left = 0;
                 continue;
             }
+            // Accuracy factor: 0.1 in a cinematic; else 0.5 for the plain AI, and crewed ships use 1 - 0.8 * gunnery skill (the campaign
+            // roster's best gunner for the human fleet).
+            let factor = || {
+                if nis_aim {
+                    return 0.1;
+                }
+                let human = campaign.as_deref().is_some_and(|c| mission.is_some_and(|ms| ms.owner == c.script.player()));
+                if human {
+                    posts.map_or(crewed, |p| p.skill(0, "gunnery").map_or(0.5, |skill| 1.0 - 0.8 * (skill + crate::crew_arms::leadership_bonus(me, p)).min(1.0)))
+                } else {
+                    0.5
+                }
+            };
             if state.burst_left == 0 && state.cooldown <= 0.0 && state.aligned {
                 state.burst_left = gun.burst;
                 shot_fired |= on_shot;
@@ -381,19 +394,16 @@ pub(super) fn fire(
                 let cut = if gun.torpedo_launcher { gunner_reload_cut(ship, posts, points.as_deref(), &lib, mount.bank) } else { 0.0 };
                 state.cooldown = gun.burst_cycle_cut(cut);
                 state.burst_timer = 0.0;
-                // Accuracy factor: 0.5 for the plain AI; crewed ships use 1 - 0.8 * gunnery skill (the campaign roster's best gunner for
-                // the human fleet).
-                let human = campaign.as_deref().is_some_and(|c| mission.is_some_and(|ms| ms.owner == c.script.player()));
-                let factor = if human {
-                    posts.map_or(crewed, |p| p.skill(0, "gunnery").map_or(0.5, |skill| 1.0 - 0.8 * (skill + crate::crew_arms::leadership_bonus(me, p)).min(1.0)))
-                } else {
-                    0.5
-                };
-                state.dev = if nis_aim { 0.0 } else { burst_deviation(gun, distance, factor, &mut rng) };
+                if !gun.dev_per_shot {
+                    state.dev = burst_deviation(gun, distance, factor(), &mut rng);
+                }
             }
             if state.burst_left > 0 && state.burst_timer <= 0.0 {
                 state.burst_left -= 1;
                 state.burst_timer = gun.burst_reload;
+                if gun.dev_per_shot {
+                    state.dev = burst_deviation(gun, distance, factor(), &mut rng);
+                }
                 let turn = burst_turn(aim_dir, state.dev, &mut rng);
                 let dir = turn * aim_dir;
                 let muzzle = state.muzzles[state.next_muzzle % state.muzzles.len()];
@@ -621,11 +631,16 @@ pub(super) fn base_fire(
                 state.cooldown = gun.burst_cycle();
                 state.burst_timer = 0.0;
                 volcano_cycle = volcano.then_some(state.cooldown);
-                state.dev = burst_deviation(gun, distance, island.map_or(0.5, |i| i.accuracy), &mut rng);
+                if !gun.dev_per_shot {
+                    state.dev = burst_deviation(gun, distance, island.map_or(0.5, |i| i.accuracy), &mut rng);
+                }
             }
             if state.burst_left > 0 && state.burst_timer <= 0.0 {
                 state.burst_left -= 1;
                 state.burst_timer = gun.burst_reload;
+                if gun.dev_per_shot {
+                    state.dev = burst_deviation(gun, distance, island.map_or(0.5, |i| i.accuracy), &mut rng);
+                }
                 let turn = burst_turn(aim_dir, state.dev, &mut rng);
                 let muzzle = state.muzzles[state.next_muzzle % state.muzzles.len()];
                 state.next_muzzle += 1;
@@ -706,7 +721,7 @@ fn aim_turret(
     engaged
 }
 
-/// A burst's deviation angle, drawn once per burst: the range band's deviation * 0.5, uniform in +-that, times `accuracy`.
+/// A burst's deviation angle, drawn once per burst (once per shot for a gun with `dev_per_shot`): the range band's deviation * 0.5, uniform in +-that, times `accuracy`.
 fn burst_deviation(gun: &GunDef, distance: f32, accuracy: f32, rng: &mut Rng) -> f32 {
     (rng.f() * 2.0 - 1.0) * band(gun, distance, gun.deviation) * 0.5 * accuracy
 }
@@ -749,4 +764,37 @@ pub(super) fn gunner_reload_cut(ship: &Ship, posts: Option<&crate::crew_arms::Cr
         None => points.and_then(|p| crate::crew_arms::best(p, "gunnery")).unwrap_or(0.1),
     };
     10.0 * gunnery
+}
+
+#[cfg(test)]
+mod deviation_tests {
+    use super::*;
+
+    fn gun(per_shot: bool) -> GunDef {
+        crate::data::gun_def(&serde_json::json!({
+            "BulletsPerBurst": 3, "BulletAffectedByGravity": false, "BulletTypeName_Primary": "Bullet_X",
+            "EffectiveRange_Range": 100.0, "LongRange_Range": 200.0, "MaximumRange_Range": 300.0,
+            "EffectiveRange_AccuracyDeviation": 0.2, "LongRange_AccuracyDeviation": 0.4, "MaximumRange_AccuracyDeviation": 0.8,
+            "CalculateAccuracyDeviationDuringBurst": per_shot,
+            "MuzzleSpeed": 100.0, "TimeBetweenBursts": 5.0, "DuringBurstReloadTime": 0.1, "HorizontalRotationSpeed": 1.0,
+            "VerticalRotationSpeed": 1.0, "VerticalMinAngle": 0.0, "VerticalMaxAngle": 1.0,
+            "visual": { "muzzles": [], "pivot": [0.0, 0.0, 0.0] },
+        }))
+    }
+
+    #[test]
+    fn the_gun_flag_chooses_between_one_deviation_per_burst_and_one_per_shot() {
+        assert!(gun(true).dev_per_shot);
+        assert!(!gun(false).dev_per_shot);
+    }
+
+    #[test]
+    fn a_cinematic_deviation_is_a_tenth_of_the_band_half_angle_not_zero() {
+        // Effective band 0.2: half 0.1, times the cinematic factor 0.1 -> at most 0.01 rad either way, and not always 0.
+        let g = gun(false);
+        let mut rng = Rng(5);
+        let draws: Vec<f32> = (0..200).map(|_| burst_deviation(&g, 50.0, 0.1, &mut rng)).collect();
+        assert!(draws.iter().all(|d| d.abs() <= 0.01 + 1e-6));
+        assert!(draws.iter().any(|d| d.abs() > 0.005), "scaled, not removed");
+    }
 }
