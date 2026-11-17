@@ -149,7 +149,8 @@ impl Victory {
                 }
                 Cond::NoTeamHasShips => alive_sides.is_empty(),
                 Cond::NoHumanShips => !human_alive,
-                Cond::TeamHasNoShips(team) => self.teams.iter().any(|t| &t.0 == team) && !team_has_ships(team),
+                // A team name no map team has reads true, as in the original.
+                Cond::TeamHasNoShips(team) => !team_has_ships(team),
                 // ponytail: a battle with one side only (a test or dev run) never completes.
                 Cond::SkirmishComplete => self.sides >= 2 && (alive_teams.len() <= 1 || !human_alive),
                 Cond::TeamComplete => self.sides >= 2 && alive_teams.len() == 1,
@@ -366,6 +367,15 @@ mod tests {
         assert_eq!(run(mercy(Side::Player, true, far), pirates(false, false, true)), None, "one group still afloat");
         assert_eq!(run(mercy(Side::Player, true, far), pirates(false, false, false)), Some(Outcome::Victory));
         assert_eq!(run(mercy(Side::Player, false, far), pirates(true, true, true)), Some(Outcome::Defeat), "the Mercy sank");
+    }
+
+    #[test]
+    fn a_team_no_map_names_has_no_ships() {
+        let rule = |team: &str| json!({"victory": [{"name": "x", "winner": NAVY, "if": [{"Type": "Team X has no ships", "Team Name": team}]}]});
+        let fleets = [ship(Side::Player, true), ship(Side(1), false)];
+        let at = |team: &str| Victory::from_map(&rule(team), teams()).unwrap().decide(&state(&fleets, &[]));
+        assert_eq!(at("NOBODY"), Some(Outcome::Victory), "an unknown team name reads true");
+        assert_eq!(at(PROC), None, "a team with ships afloat reads false");
     }
 
     #[test]

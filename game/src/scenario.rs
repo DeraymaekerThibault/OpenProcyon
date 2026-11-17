@@ -139,7 +139,7 @@ pub struct EndMessage(pub Option<String>);
 pub struct EndLine(pub Option<String>);
 
 /// Seconds the end line shows before the Game Summary opens (read from the original's code: 10 s after the end rule fires; the
-/// rules run once a second, and a 1 frame/s recording saw about 13 s from the sinking). ponytail: our rules run every frame.
+/// rules run once a second, and a 1 frame/s recording saw about 13 s from the sinking).
 pub const END_LINE_SECS: f32 = 10.0;
 
 /// Battle start: the front end's choice (map, fleets) if any, else the command line.
@@ -787,7 +787,33 @@ fn end_line_id(outcome: Outcome, message: Option<&str>) -> Option<String> {
     (outcome != Outcome::Playing).then(|| message.map_or_else(|| format!("IDGS_TPINGAMEMESSAGE_GAME_{}", if outcome == Outcome::Victory { "WON" } else { "LOST" }), str::to_string))
 }
 
+/// How often the original tests the battle's end rules: a pass runs once the game clock is more than this many seconds past the last pass.
+pub const RULE_PASS_SECS: f32 = 1.0;
+
+/// The rule-pass timer of one battle (game seconds since it began, and the clock at the last pass; the first pass is the first
+/// frame more than a second in. PROVISIONAL: the original's starting value of the last-pass time was not read).
+#[derive(Default)]
+pub struct RulePass {
+    clock: f32,
+    last: f32,
+}
+impl RulePass {
+    /// Advances the clock by `dt`; true when the rules are tested this frame.
+    pub fn due(&mut self, dt: f32) -> bool {
+        self.clock += dt;
+        let due = self.clock - self.last > RULE_PASS_SECS;
+        if due {
+            self.last = self.clock;
+        }
+        due
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 pub fn outcome(
+    time: Res<Time>,
+    fresh: Query<(), Added<Scenario>>,
+    mut pass: Local<RulePass>,
     mut out: ResMut<Outcome>,
     mut message: ResMut<EndMessage>,
     mut line: ResMut<EndLine>,
@@ -802,6 +828,13 @@ pub fn outcome(
     // missions end through their own rules; a decided battle stays decided (the end flow despawns ships, which must not turn a
     // victory into a defeat)
     if campaign::is_mission(cfg.map.as_deref()) || *out != Outcome::Playing {
+        return;
+    }
+    // The original tests its end rules once a second of game time, so a battle ends up to a second after the cause.
+    if !fresh.is_empty() {
+        *pass = RulePass::default();
+    }
+    if !pass.due(time.delta_secs()) {
         return;
     }
     let mut end_message = None;
@@ -871,6 +904,22 @@ mod ambient_tests {
         assert_eq!(a("PlayEffect", "volcanoSparks"), Some("volcanoSparks"));
         assert_eq!(a("VolcanoSmoke", ""), Some("VolcanoSmoke"));
         assert_eq!(a("PlayEffect", ""), None, "older imports name none");
+    }
+}
+
+#[cfg(test)]
+mod rule_pass_tests {
+    use super::*;
+    #[test]
+    fn end_rules_are_tested_once_a_second_of_game_time() {
+        let mut pass = RulePass::default();
+        let ticks: Vec<usize> = (1..=100).filter(|_| pass.due(0.033)).collect();
+        // 0.033 s ticks: a pass needs the clock more than 1.0 s past the last one, so every 31st tick (1.023 s).
+        assert_eq!(ticks.len(), 3);
+        let mut pass = RulePass::default();
+        assert!(!pass.due(0.5) && !pass.due(0.5), "exactly one second is not more than one second");
+        assert!(pass.due(0.01));
+        assert!(!pass.due(0.5) && pass.due(0.51));
     }
 }
 
@@ -1017,7 +1066,7 @@ mod rotation_tests {
     fn decided_outcome_is_final() {
         use bevy::ecs::system::RunSystemOnce;
         let mut app = App::new();
-        app.insert_resource(Outcome::Victory).init_resource::<EndMessage>().init_resource::<EndLine>().insert_resource(Config {
+        app.init_resource::<Time>().insert_resource(Outcome::Victory).init_resource::<EndMessage>().init_resource::<EndLine>().insert_resource(Config {
             groups: vec![],
             player: "Ship_Navy_Cutter".into(),
             allies: vec![],

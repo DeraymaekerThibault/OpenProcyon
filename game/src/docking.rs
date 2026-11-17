@@ -134,6 +134,11 @@ pub enum DockMsg {
         docker: Option<Entity>,
         dockee: Entity,
     },
+    /// A computer ship's own choice of a repair dock (it may be replaced by a nearer one until the ship is docked).
+    Repair {
+        docker: Option<Entity>,
+        dockee: Entity,
+    },
     Enabled(Entity, bool),
     Repairs(Entity, bool),
     /// Abort the player's approach (X, Stop).
@@ -160,6 +165,21 @@ pub fn tow_in_range(here: Vec3, there: Vec3, r_tower: f32, r_towee: f32) -> bool
     (here - there).with_y(0.0).length() - r_tower - r_towee < TOW_RANGE
 }
 
+/// A ship's own dock time, kept between dockings in a skirmish (a mission keeps it in its rule state, where 'Set Dock Time' sets it).
+#[derive(Component)]
+struct DockTime(f32);
+
+/// The docked time: the larger of the ship's dock time (a rule's, else the one kept from an earlier docking, else the default) and the
+/// repair effect time.
+fn dock_duration(rule: Option<f32>, kept: Option<f32>, effect: f32) -> f32 {
+    rule.or(kept).unwrap_or(MIN_DOCK_SECS).max(effect)
+}
+
+/// The dock a computer ship picks for repair: the nearest by surface gap (centre distance minus both radii) over (object, sphere) pairs.
+fn nearest_dock(own: (Vec3, f32), docks: impl IntoIterator<Item = (Entity, (Vec3, f32))>) -> Option<Entity> {
+    docks.into_iter().min_by(|a, b| crate::lifeboats::surface_distance(own, a.1).total_cmp(&crate::lifeboats::surface_distance(own, b.1))).map(|d| d.0)
+}
+
 /// The retail dock phases: waiting to dock, approach (+ pre-docked), docked, moving away, turning to return, returning.
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum Phase {
@@ -183,6 +203,8 @@ pub struct Docker {
     timer: f32,
     duration: f32,
     repair_secs: f32,
+    /// The dock was picked by the ship itself for repair (not ordered by the player or a rule), so a nearer dock may replace it until docked.
+    chosen: bool,
     /// The one-step heal has happened (it lands at Repair Time; the scaffold plays on until the dock duration ends).
     healed: bool,
     /// Full refit (revive destroyed sections and re-create every gun): the dockee is a base, or this is a campaign world.
@@ -206,6 +228,10 @@ impl Docker {
     /// Sails under the collision avoider: waiting for a point, the approach leg and the leg back.
     pub fn avoids(&self) -> bool {
         matches!(self.phase, Phase::Wait | Phase::Return) || (self.phase == Phase::Approach && !self.final_leg)
+    }
+    /// A dock the ship chose itself for repair and has not yet docked at: a nearer dock replaces it.
+    fn retargets(&self) -> bool {
+        self.chosen && matches!(self.phase, Phase::Wait | Phase::Approach)
     }
     pub fn ignores_collision(&self, other: Entity) -> bool {
         // PROVISIONAL: allow docking contact until the retail collision rejection list is decoded.
@@ -319,7 +345,8 @@ fn handle_messages(
                     m.script.break_tows(tower);
                 }
             }
-            DockMsg::Dock { docker, dockee } => {
+            DockMsg::Dock { docker, dockee } | DockMsg::Repair { docker, dockee } => {
+                let chosen = matches!(*m, DockMsg::Repair { .. });
                 let Some(docker) = docker.or_else(|| player.single().ok()) else { continue };
                 if docker == dockee || dockers.get(docker).is_ok_and(|d| d.dockee == dockee) || !dockables.get(dockee).is_ok_and(|d| d.enabled) {
                     continue;
@@ -340,6 +367,7 @@ fn handle_messages(
                     timer: 0.0,
                     duration: 0.0,
                     repair_secs: 0.0,
+                    chosen,
                     healed: false,
                     full: false,
                     start,
@@ -549,14 +577,14 @@ fn routine(
     mut commands: Commands,
     mut sfx: MessageWriter<Sfx>,
     mut mission: Option<ResMut<Mission>>,
-    mut dockers: Query<(Entity, &Transform, &mut Ship, &Health, &mut Docker, Has<PlayerShip>)>,
+    mut dockers: Query<(Entity, &Transform, &mut Ship, &Health, &mut Docker, Has<PlayerShip>, Option<&DockTime>)>,
     mut dockees: Query<(&Transform, &mut Dockable, Option<&Ship>, Option<&Health>), Without<Docker>>,
 ) {
     let dt = time.delta_secs();
     let positions: Vec<(Entity, Vec3)> = dockers.iter().map(|(e, tf, ..)| (e, tf.translation)).collect();
     let pos_of = |e: Entity| positions.iter().find(|w| w.0 == e).map(|w| w.1);
     let mut bumped = vec![];
-    for (e, tf, mut ship, health, mut docker, human) in &mut dockers {
+    for (e, tf, mut ship, health, mut docker, human, kept) in &mut dockers {
         let gone = |m: &mut Option<ResMut<Mission>>, dockable: &mut Dockable, docker: &Docker| {
             dockable.release(e);
             if let Some(m) = m.as_mut() {
@@ -622,7 +650,14 @@ fn routine(
                     docker.healed = false;
                     // Campaign worlds (IsCampaign) and every base give the full refit; a skirmish tender only tops up.
                     docker.full = base || mission.is_some();
-                    docker.duration = mission.as_ref().and_then(|m| m.script.dock_time(e)).unwrap_or(MIN_DOCK_SECS).max(effect);
+                    // The ship's dock time (5 s unless 'Set Dock Time' changed it) becomes the longer of itself and the repair time, and stays
+                    // that long for its later dockings.
+                    docker.duration = dock_duration(mission.as_ref().and_then(|m| m.script.dock_time(e)), kept.map(|k| k.0), effect);
+                    if let Some(m) = mission.as_mut() {
+                        m.script.keep_dock_time(e, docker.duration);
+                    } else {
+                        commands.entity(e).insert(DockTime(docker.duration));
+                    }
                     docker.offset = dockee_tf.compute_affine().inverse().transform_point3(here);
                     info!("docking: {e} docked with {} for {:.1} s (repair {:.1} s)", docker.dockee, docker.duration, docker.repair_secs);
                     ship.halt();
@@ -706,7 +741,7 @@ fn routine(
     }
     // A ship whose point was taken over goes back to waiting.
     for bumped_ship in bumped {
-        if let Ok((.., mut docker, _)) = dockers.get_mut(bumped_ship) {
+        if let Ok((_, _, _, _, mut docker, ..)) = dockers.get_mut(bumped_ship) {
             docker.point = None;
             docker.phase = Phase::Wait;
         }
@@ -720,11 +755,11 @@ fn markers(
     mut commands: Commands,
     fxl: Option<Res<FxLib>>,
     mission: Option<Res<Mission>>,
-    mut q: Query<(Entity, &Transform, &mut Dockable, Option<&Health>, Option<&MissionBase>, Option<&crate::combat::BaseSide>)>,
+    mut q: Query<(Entity, &Transform, &mut Dockable, Option<&Health>, Option<&MissionBase>)>,
 ) {
     let Some(fxl) = fxl else { return };
-    for (e, tf, mut dk, h, base, side) in &mut q {
-        let on = dk.enabled && !h.is_some_and(|h| h.destroyed) && !hostile_base(mission.as_deref(), base, side);
+    for (e, tf, mut dk, h, base) in &mut q {
+        let on = dk.enabled && !h.is_some_and(|h| h.destroyed) && !dock_barred(mission.as_deref(), base);
         if on && dk.markers.is_empty() {
             dk.markers = (0..dk.points.len())
                 .filter_map(|i| {
@@ -754,17 +789,23 @@ pub fn needs_repair(lib: &Library, ship: &Ship, h: &Health) -> bool {
 
 /// Computer ships that need repair sail for the nearest friendly dock that repairs (docs/re/docking-and-orders.md, AI repair).
 /// Persistent captains never decide this (scripted convoys keep their route: mission 10's damaged merchants), and in a campaign the
-/// dock must be within the ship's sight range; skirmish has no limit. PROVISIONAL: centre distance, and the nearest dock is taken.
+/// dock must be within the ship's sight range; skirmish has no limit. The nearest dock by surface gap (centre distance minus both
+/// collision radii) is picked at every think while the ship has not yet docked, so a nearer dock replaces an earlier pick; once docked
+/// the routine runs to its end.
 #[allow(clippy::type_complexity)]
 fn ai_repair_dock(
     lib: Res<Library>,
     mission: Option<Res<Mission>>,
     mut msg: MessageWriter<DockMsg>,
-    ships: Query<(Entity, &Ship, &Health, &Transform, Option<&crate::campaign::MissionShip>), (Without<PlayerShip>, Without<Docker>)>,
+    sensors: Option<Res<crate::environment::Sensors>>,
+    ships: Query<(Entity, &Ship, &Health, &Transform, Option<&crate::campaign::MissionShip>, Option<&Docker>), Without<PlayerShip>>,
     docks: Query<(Entity, &Transform, &Dockable, Option<&Ship>, Option<&crate::campaign::MissionShip>, Option<&MissionBase>)>,
 ) {
     let script = mission.as_deref().map(|m| &m.script);
-    for (e, ship, h, tf, ms) in &ships {
+    for (e, ship, h, tf, ms, docking) in &ships {
+        if docking.is_some_and(|d| !d.retargets()) {
+            continue;
+        }
         // Computer players only: skirmish enemies, and mission ships the human does not own; scripted dummies never decide.
         let computer = match (ms, script) {
             (Some(m), Some(sc)) => m.owner != sc.player() && !matches!(m.stance, crate::rules::Stance::Dummy | crate::rules::Stance::Persistent),
@@ -782,10 +823,14 @@ fn ai_repair_dock(
             .filter(|(d, _, dk, dship, dms, base)| *d != e && dk.enabled && dk.repairs && friendly(*dship, dms.map(|m| m.owner.as_str()).or(base.map(|b| b.owner.as_str()))));
         let reach = if script.is_some() { lib.classes[ship.class].sight } else { f32::INFINITY };
         let candidates = candidates.filter(|d| d.1.translation.distance(tf.translation) <= reach);
-        let nearest = crate::nearest(candidates, tf.translation, |d| d.1.translation);
-        if let Some((dockee, ..)) = nearest {
+        let sphere = |e: Entity, tf: &Transform| sensors.as_ref().and_then(|s| s.sphere(e)).unwrap_or((tf.translation, 0.0));
+        let own = sphere(e, tf);
+        let nearest = nearest_dock(own, candidates.map(|d| (d.0, sphere(d.0, d.1))));
+        if let Some(dockee) = nearest
+            && docking.is_none_or(|d| d.dockee != dockee)
+        {
             info!("docking: {e} needs repair, sails for {dockee}");
-            msg.write(DockMsg::Dock { docker: Some(e), dockee });
+            msg.write(DockMsg::Repair { docker: Some(e), dockee });
         }
     }
 }
@@ -812,19 +857,26 @@ fn hostile_base(mission: Option<&Mission>, base: Option<&MissionBase>, side: Opt
         None => side.is_some_and(|s| s.0 != Side::Player),
     }
 }
+/// A base the player may not dock with: only a mission rule can make a base hostile to the player's owner. In a skirmish nothing
+/// owns the bases, so every side may dock at every base (PROVISIONAL: read from the original's friend test, not seen in play).
+fn dock_barred(mission: Option<&Mission>, base: Option<&MissionBase>) -> bool {
+    hostile_base(mission, base, None)
+}
 impl Dockees<'_, '_> {
     fn base_hostile(&self, e: Entity, base: Option<&MissionBase>) -> bool {
         hostile_base(self.mission.as_deref(), base, self.sides.get(e).ok())
     }
     pub fn can_dock(&self, actor: Entity, dockee: Entity) -> bool {
         let Ok((_, _, d, ship, base)) = self.q.get(dockee) else { return false };
-        d.enabled && !self.base_hostile(dockee, base) && ship.is_none_or(|s| s.side == Side::Player) && self.sensors.in_sight(actor, dockee, self.mission.as_deref())
+        d.enabled && !dock_barred(self.mission.as_deref(), base) && ship.is_none_or(|s| s.side == Side::Player) && self.sensors.in_sight(actor, dockee, self.mission.as_deref())
     }
     /// Dockable ally under the ray, with whether the selected ship's group has sight (no separate dock range).
     pub fn under(&self, ray: Ray3d, actor: Entity) -> Option<(Entity, bool)> {
         self.q
             .iter()
-            .filter(|(e, _, _, ship, base)| ship.is_none_or(|s| s.side == Side::Player) && !self.base_hostile(*e, *base) && self.sensors.player_sees(*e, self.mission.as_deref()))
+            .filter(|(e, _, _, ship, base)| {
+                ship.is_none_or(|s| s.side == Side::Player) && !dock_barred(self.mission.as_deref(), *base) && self.sensors.player_sees(*e, self.mission.as_deref())
+            })
             .filter_map(|(e, tf, d, ship, _)| {
                 // Islands hover on their collision hull: dock points sit far offshore, so a dock-point sphere swallowed nearby waypoint clicks.
                 let t = match (ship, self.hulls.get(e)) {
