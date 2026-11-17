@@ -161,7 +161,8 @@ targets use their world position. Inside 100 units it adds a speed-based lead be
 . It also adjusts altitude in small steps, subject to height bounds. Exact phase timers, steering/propulsion integration,
 and target invalidation still need a complete specification for exact fidelity. Follow-up work established the turn
 controller's saturation at 20 degrees, altitude steps of 0.025 with a +/-3-unit bound, and the 0.5-second initial phase. Runtime now
-uses these findings with substepped planar integration and approximate 0.5-unit/s height adjustment. Invalid/destroyed/hidden targets
+uses these findings with substepped planar integration. Remake: the height step is built as read: once per battle tick a homing
+torpedo moves 0.025 toward the target's height when they differ by more than 0.05, bounded to +/-3 units. Invalid/destroyed/hidden targets
 stop tracking rather than being reacquired. A regression intersects the authored schooner hull moving sideways at 4 units/s;
 GPU Mission 1 smoke logs homing hits on the moving, invulnerable training fleet.
 
@@ -306,3 +307,11 @@ Source: static reading of the original; **[?]** = inferred, not seen in play. Re
   small flat meshes (per weapon, plus a "no firing solution" twin) on the ground point each frame, and removes it with the mode: no marker while shells fly.
   Data: `LobIcon WorldSpace Radius` 10, `Z Plane Offset: LobIcon` -3; the draw call ignores both, so size and height are PROVISIONAL (remake: the mesh's own size, on the sea plane).
 - **Sounds**: `HUD_LobWeapon_Accept` / `_Reject` on the click for gravity charges only (solution / none); star and nova clicks play neither [? looks odd, confirm in play].
+
+### Section damage roll
+
+One shell hit on a section rolls uniformly between the bullet's low and high value for the section's material (after the
+difficulty factor has scaled both) and rounds the roll to a whole number of hit points; a light carronade takes about 17 at Normal.
+Remake: the section roll is rounded to the nearest whole number. PROVISIONAL: the original's rounding mode is not confirmed
+(nearest assumed; exact halves are measure-zero for a continuous roll). The spill to neighbours still reuses the rounded roll
+x 0.4 rather than a fresh rounded roll per level, and base parts and lob blasts still take unrounded rolls.

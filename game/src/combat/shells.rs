@@ -65,6 +65,12 @@ pub(super) fn wear_down(threat_hp: &mut f32, bolt_hp: f32) -> bool {
     *threat_hp <= 0.0
 }
 
+/// One tick's altitude adjustment of a homing torpedo at height `y` toward a target at `target_y`.
+pub(super) fn torpedo_height_step(y: f32, target_y: f32) -> f32 {
+    let dz = target_y - y;
+    if dz.abs() > 0.05 { (y + 0.025 * dz.signum()).clamp(-3.0, 3.0) } else { y }
+}
+
 pub(super) fn guide_torpedo(
     mut position: Vec3,
     velocity: &mut Vec3,
@@ -89,9 +95,11 @@ pub(super) fn guide_torpedo(
             let delta = aim - position;
             let want = (-delta.x).atan2(-delta.z);
             rudder = (crate::angdiff(want, heading) / 20.0f32.to_radians()).clamp(-1.0, 1.0);
-            // Native height adjustment is 0.025 every ~0.05 s, bounded to +/-3 units.
-            let height = (point.y - position.y).clamp(-0.5 * h, 0.5 * h);
-            position.y = (position.y + height).clamp(-3.0, 3.0);
+            // Read from the original's code: once per tick, a homing torpedo steps its height 0.025 toward the target's when the two
+            // differ by more than 0.05, bounded to +/-3 units.
+            if i == 0 {
+                position.y = torpedo_height_step(position.y, point.y);
+            }
         }
         let mut acceleration = rudder * physics.max_ang_acc * (1.0 - 1.0 / (0.1 * speed + 1.0));
         if speed > 0.67 * physics.max_speed {
@@ -167,12 +175,19 @@ pub(super) fn floor_hull(class: &Class, hp: &mut Health, before: (f32, &[f32]), 
     }
 }
 
+/// One section roll: uniform in `lo..hi`, rounded to a whole number of hit points.
+pub(super) fn damage_roll(lo: f32, hi: f32, rng: &mut Rng) -> f32 {
+    rng.range(lo, hi).round()
+}
+
 pub(super) fn apply_ship_hit(class: &Class, hp: &mut Health, k: usize, damage: [f32; 5], invuln: f32, fire_free: bool, rng: &mut Rng) -> ShipHit {
     let [lo, hi, _crit, fire_p, fire_str] = damage;
     let protected = invuln >= 1.0;
     let scale = if protected { 0.0 } else { 1.0 };
     let (was, core, secs) = (hp.sections[k], hp.core, hp.sections.clone());
-    let roll = rng.range(lo, hi);
+    // Read from the original's code: the roll is rounded to a whole number (nearest; the rounding mode is not confirmed), after the
+    // difficulty factor has scaled `lo` and `hi`.
+    let roll = damage_roll(lo, hi, rng);
     hp.sections[k] = (was - scale * roll).max(0.0);
     // Retail ignition roll per hit: chance > 0 and roll <= chance starts a fire of the bullet's initial strength.
     let fire = (!protected && fire_p > 0.0 && rng.f() <= fire_p && hp.sections[k] > 0.0 && fire_free).then_some(fire_str);
