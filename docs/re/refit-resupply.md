@@ -109,7 +109,7 @@ crew data's 1-10 values divided by 10.
 | Repair timing | `docking.rs::repair` restores `dt/repair_secs` per frame over 4/10/20/30 s | one-step heal at Repair Time; hull unchanged until then |
 | Dock duration | `max(5 s, repair_secs)` (4 → 5 s) | `max(dock time, Repair Effect Time)` (7/15/25/35 s) |
 | Destroyed sections/guns | gradual refill revives sections with hp 0; no gun re-creation | campaign tender / any base: revive + recreate guns; skirmish tender: no |
-| Core hp | restored with sections | unresolved [?] (not seen in the heal) |
+| Core hp | restored with sections | restored by a full heal (seen in play; the traced heal routine does not show the write) |
 | `IsCampaign` | not represented | selects the heal mode |
 | Scaffold effect | one effect at ship centre | per-section jobs unless (campaign ship / base) → one effect |
 | Crew passive repair | none | every 12 s: one damaged sail +3 (sometimes +6); hulls not repaired (measured) |
@@ -139,7 +139,7 @@ crew data's 1-10 values divided by 10.
 
 ## 8. Unresolved questions
 
-1. Whether the core damage-section hit points are restored by the heal.
+1. Where the original restores the core hit points on a full heal (seen in play, the write is not in the traced heal routine).
 2. What a `Munnitions` critical hit does, and any non-obvious users of the critical counters.
 3. The exact HUD consumers of the weapon-bank state sprites and the meaning of the HUD bytes cleared on heal.
 4. The application of an arms profile (`GunBank %02i`) to ships at mission/battle start, the points spending rules, and how the screens pause the game.
