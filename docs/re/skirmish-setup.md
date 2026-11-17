@@ -162,9 +162,24 @@ skill can read N/A). Dragging one onto a post spends its cost (a 9-point captain
   Carronade, Plasma}, heavy {Cannon x2, Carronade x2, Plasma x2, Fire Launcher, Star Mortar} (a listed-twice gun weighs double). The pick may
   equal the stock gun (no change); a gun barred for the hull's race (carronade for Procyon, plasma for Pirate) is redrawn; the swap is kept only
   if points remain afterwards. Two-deck, point-defence, mine, torpedo and special banks are never touched. The original runs this only for
-  fleets of its first three build styles; the remake has no styles and runs it for every fleet (and for Auto Assign).
-- Not built: the per-hull price window (the original's hull cost limit is a window around the batch's average, with a floor of 22, not
-  "half the points left"; the remake keeps its half-of-what-is-left cap until the style and batch rolls exist). Computer crews never use
+  fleets of its first three build styles (the remake: computer fleets of styles 0-2, and the player's Auto Assign).
+- Computer fleet build (read from the original's build routine, not yet checked against a measured value; built in `auto_build`): one draw
+  rolls a style from a list: style 0 six entries, styles 2, 1 and 5 one each, style 4 added when points / free slots is under 30 with more
+  than 6 slots, style 3 added at 600+ points with 4+ slots (300 points, 5 slots: 6/9 style 0, 1/9 each for 1, 2, 5). Styles 0-2 buy hulls in up
+  to five batches while points remain. A batch takes shares of the points left: style 0 A = 0.5 + 0.2u and B = 0.1 + 0.2v, style 1 A = 0.45 + 0.1u
+  and B = 0.2 + 0.2v, style 2 A = 0.6 + 0.2u and B = 0 (u, v fractions). With Ai = ceil(P*A), Bi = ceil(P*B), R = P - Ai - Bi, m = ceil(0.2 % of P):
+  hull count T = round(1.5 |Gaussian|) + m, capped by the free slots, never below m. Each hull's price window: average = Ai / T (whole
+  number), low = round(0.5 avg), high = round(1.5 avg), room = points now left - R - Ai; low is capped by the room, high by the room but never
+  below 22 and never above the points left. Hulls are bought while less than Ai is spent and fewer than T are in; a failed pick or purchase ends
+  the batch. After the batch, its new ships get their weapon swaps while more than R is left, then crew (which empties the points on the first
+  new ship's posts, so later batches usually find nothing to buy). Style 3: a few big hulls (price x race multiplier 1.57 Navy, 1.72 Pirate,
+  1.42 Procyon within 225-460), then up to 35 % of the limit in mid hulls (95-225), each crewed on purchase, no swaps. Style 4: hulls of plain
+  price up to 45 until the fleet is full, no crew until the last pass. Style 5: hulls of scaled price up to 460 until full, each crewed on
+  purchase. Weapon swaps run only in styles 0-2; the last pass crews every ship with what is left. The player's Auto Assign is unchanged
+  (random hulls that fit, then swaps, then crew). PROVISIONAL: the style list's weight for style 0, rounding of halves, the hull list order, and
+  the exclusion of tenders, tugs and barges, which stays by class name rather than the original's exact list. The rolls draw from the remake's
+  own per-fleet random stream, one draw per original draw (the original's single shared generator is not copied); the fleet is still built
+  at launch, not when its slot is added. Crew pick below stays the remake's provisional one. Computer crews never use
   crewmen rated above 7 in the post's skill except gunners, because the original picks the first crewman rated 7 or less (10 for the two best
   gun banks); there is no list of excluded story characters, so none is built.
 - Launch Game is greyed until a computer opponent is in and (open maps) a fleet is assembled; I'm Ready is always greyed in single player

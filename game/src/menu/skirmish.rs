@@ -303,11 +303,9 @@ pub fn offered(lib: &Library, race: u8) -> Vec<usize> {
 
 /// Auto Assign. Measured on the original (docs/re/skirmish-setup.md): it fills the fleet with hulls that fit the points still left,
 /// mixing classes (300 points / 5 ships gave a Heavy Scout, a Heavy Escort and three Warsloops; 50 points two Torpedo Boats). Hulls it
-/// adds itself also get weapon swaps (a hand-added ship only gets crew), and the points that remain buy named crew. The choice among
-/// affordable hulls and weapons looked random: PROVISIONAL, here a fixed pseudo-random pick (a coin flip per bank) so the result
-/// repeats; crew go to the posts in order, best skill first. Computers use it too with `armed_only` (no tenders or tugs), following
-/// retail battle saves: hulls for about half the budget, each at most half the points left, all hulls and weapon swaps before any crew,
-/// then Navy-roster crew ship by ship until the points run out (25 of 27 fleets spent the budget to the point).
+/// adds itself also get weapon swaps (a hand-added ship only gets crew), and the points that remain buy named crew. The player's own
+/// Auto Assign is PROVISIONAL (random hulls that fit). Computers follow the original's fleet build: a style roll, then that style's hull
+/// batches or fills, weapon swaps (styles 0-2 only) and crew (`Build`, docs/re/skirmish-setup.md).
 /// The guns computer captains may fit (`data/ai/weapons.json`, `{gun: true|false}`, merged key by key across mods). No file: the guns
 /// retail computers were seen to fit (`RETAIL_COMPUTER_GUNS`).
 fn computer_guns() -> Option<std::collections::HashSet<String>> {
@@ -369,64 +367,151 @@ fn swap_pool(mount: &str) -> &'static [&'static str] {
     }
 }
 
-pub fn auto_build(slot: &mut Slot, limit: u32, fleet_size: usize, lib: &Library, salt: u64, armed_only: bool) {
-    let next = |seed: &mut u64| {
-        *seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
-        *seed >> 33
-    };
-    let allowed = if armed_only { computer_guns() } else { None };
-    let mut seed = u64::from(limit) * 31 + fleet_size as u64 * 7 + 1 + salt * 977;
-    let left = |slot: &Slot| i64::from(limit) - slot.spent(lib);
-    let first_new = slot.fleet.len();
-    // Computers (27 fleets in retail battle saves at 300-1000 points, docs/re/skirmish-setup.md) spend about half the budget on hulls
-    // (mostly 43-59 %), each costing at most half the points still left; the ship count follows (1-3 at 300 points, 3-8 at 1000), cheap
-    // boats filling the end. PROVISIONAL: the share is drawn at random from 40-60 %.
-    let mut hull_room = if armed_only { i64::from(limit) * (40 + (next(&mut seed) % 21) as i64) / 100 } else { i64::MAX };
-    while slot.fleet.len() < fleet_size {
-        let budget = if armed_only { (left(slot) / 2).min(hull_room) } else { left(slot) };
-        let fits: Vec<usize> =
-            offered(lib, slot.race).into_iter().filter(|&c| i64::from(lib.classes[c].points) <= budget && (!armed_only || computer_hull(&lib.classes[c]))).collect();
-        if fits.is_empty() {
-            break;
-        }
-        let pick = fits[next(&mut seed) as usize % fits.len()];
-        hull_room -= i64::from(lib.classes[pick].points);
-        slot.push_ship(&lib.classes[pick].name);
+/// The style roll's list (computer fleets): index drawn uniformly. Style 0 has six entries, 2, 1 and 5 one each; style 4 (cheap boats up to the
+/// limit) joins when the points per free slot are under 30 and there are more than 6 slots; style 3 (a few big hulls) joins at 600+ points
+/// with 4+ slots. The six-entry weight of style 0 is read from the original's list builder, not seen run (PROVISIONAL).
+pub(super) fn style_list(points: i64, slots: i64) -> Vec<u8> {
+    let mut list = vec![0, 0, 0, 0, 0, 0, 2, 1];
+    if slots > 0 && points / slots < 30 && slots > 6 {
+        list.push(4);
     }
-    for ship in first_new..slot.fleet.len() {
-        let class = &lib.classes[lib.index(&slot.fleet[ship])];
+    if points >= 600 && slots >= 4 {
+        list.push(3);
+    }
+    list.push(5);
+    list
+}
+
+/// Fractions (A, B) of the points left that a batch of styles 0-2 spends on hulls; `u` and `v` are the two fractional draws (style 2 draws one).
+pub(super) fn batch_fractions(style: u8, u: f64, v: f64) -> (f64, f64) {
+    match style {
+        0 => (0.5 + 0.2 * u, 0.1 + 0.2 * v),
+        1 => (0.45 + 0.1 * u, 0.2 + 0.2 * v),
+        _ => (0.6 + 0.2 * u, 0.0),
+    }
+}
+
+/// Hulls a batch tries to buy: |Gaussian| rounded (1.5 x), plus a minimum `m` (0.2 % of the points, at least 1), capped by the free slots but
+/// never below `m`.
+pub(super) fn hull_count(u1: f64, u2: f64, m: i64, slots: i64) -> i64 {
+    let z = ((-2.0 * u1.ln()).sqrt() * (std::f64::consts::TAU * u2).cos()).abs();
+    let n = (1.5 * z).round() as i64;
+    (n.saturating_add(m)).min(slots).max(m)
+}
+
+/// A batch's per-hull price window (lowest, highest): around the batch's average hull price `avg`, but never above what is left of the
+/// batch's allowance `room` (the second share B minus what this batch already spent) except that every hull may cost at least 22, and never
+/// above the points `cur` left.
+pub(super) fn price_window(avg: i64, room: i64, cur: i64) -> (i64, i64) {
+    let lo = (0.5 * avg as f64).round() as i64;
+    let hi = (1.5 * avg as f64).round() as i64;
+    let room = room.max(0);
+    (lo.min(room), hi.min(room).max(HULL_PRICE_FLOOR).min(cur))
+}
+/// Every hull of a styles 0-2 batch may cost at least this much.
+pub(super) const HULL_PRICE_FLOOR: i64 = 22;
+
+/// Selection multiplier of styles 3 and 5 (the hull's price is only scaled in the choice; the points paid are the plain price).
+fn race_multiplier(race: u8) -> f64 {
+    match race {
+        0 => 1.57,
+        2 => 1.72,
+        3 => 1.42,
+        _ => 1.0,
+    }
+}
+
+/// One fleet being built: the slot, the fleet random stream (one draw per random choice, in the order the rules list them) and the
+/// rules that decide what is allowed.
+struct Build<'a> {
+    slot: &'a mut Slot,
+    lib: &'a Library,
+    seed: u64,
+    limit: u32,
+    fleet_size: usize,
+    armed_only: bool,
+    allowed: Option<std::collections::HashSet<String>>,
+}
+
+impl Build<'_> {
+    fn draw(&mut self) -> u64 {
+        self.seed = self.seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        self.seed >> 33
+    }
+    /// A draw as a fraction in [0, 1).
+    fn fraction(&mut self) -> f64 {
+        self.draw() as f64 / 2_147_483_648.0
+    }
+    fn left(&self) -> i64 {
+        i64::from(self.limit) - self.slot.spent(self.lib)
+    }
+    /// One hull of the slot's race at random among those whose price (times `mult`) lies in [lo, hi]; no draw when none does.
+    fn pick(&mut self, lo: f64, hi: f64, mult: f64) -> Option<usize> {
+        let lib = self.lib;
+        let fits: Vec<usize> = offered(lib, self.slot.race)
+            .into_iter()
+            .filter(|&c| (!self.armed_only || computer_hull(&lib.classes[c])) && (lo..=hi).contains(&(f64::from(lib.classes[c].points) * mult)))
+            .collect();
+        if fits.is_empty() {
+            return None;
+        }
+        Some(fits[self.draw() as usize % fits.len()])
+    }
+    /// Buys the hull for its plain price; refused when it costs more than is left or the fleet is full.
+    fn add(&mut self, class: usize) -> bool {
+        if i64::from(self.lib.classes[class].points) > self.left() || self.slot.fleet.len() >= self.fleet_size {
+            return false;
+        }
+        self.slot.push_ship(&self.lib.classes[class].name);
+        // The original draws the new ship's name here; the remake names ships by pool order, so the draw is only kept for the stream's order.
+        self.draw();
+        true
+    }
+    /// Pick a hull in the window and buy it. False when none is found or it is refused (the loops stop then).
+    fn buy(&mut self, lo: f64, hi: f64, mult: f64) -> bool {
+        self.pick(lo, hi, mult).is_some_and(|c| self.add(c))
+    }
+    /// Weapon swaps of one ship: every light, medium or heavy bank gets exactly one draw from its mount size's pool.
+    fn swap_ship(&mut self, ship: usize) {
+        let lib = self.lib;
+        let class = &lib.classes[lib.index(&self.slot.fleet[ship])];
         for (bank, first) in crate::crew_arms::selectable_banks(lib, class) {
             let stock = &class.mounts[first].gun;
             let Some(mount) = lib.guns.get(stock).and_then(|g| g.mount_type.as_deref()) else { continue };
             // Retail: every light, medium or heavy bank gets exactly one draw from its mount size's pool (no coin flip); the draw may
             // be the stock gun. Guns barred for the hull's race are redrawn, which is a uniform pick among the others.
-            let pool: Vec<&str> =
-                swap_pool(mount).iter().copied().filter(|g| allowed.as_ref().is_none_or(|a| a.contains(*g)) && crate::crew_arms::bank_compatible(lib, class, bank, g)).collect();
+            let pool: Vec<&str> = swap_pool(mount)
+                .iter()
+                .copied()
+                .filter(|g| self.allowed.as_ref().is_none_or(|a| a.contains(*g)) && crate::crew_arms::bank_compatible(lib, class, bank, g))
+                .collect();
             if pool.is_empty() {
                 continue;
             }
-            let gun = pool[next(&mut seed) as usize % pool.len()];
+            let gun = pool[self.draw() as usize % pool.len()];
             let stock_cost = i64::from(crate::crew_arms::bank_cost(lib, class, bank, stock).unwrap_or(0));
             // Kept only if points remain after the swap.
-            if gun == stock || !crate::crew_arms::bank_cost(lib, class, bank, gun).is_some_and(|c| left(slot) - (i64::from(c) - stock_cost) > 0) {
+            if gun == stock || !crate::crew_arms::bank_cost(lib, class, bank, gun).is_some_and(|c| self.left() - (i64::from(c) - stock_cost) > 0) {
                 continue;
             }
-            slot.weapons.resize_with(slot.fleet.len(), Default::default);
-            slot.weapons[ship].insert(bank, gun.to_string());
+            self.slot.weapons.resize_with(self.slot.fleet.len(), Default::default);
+            self.slot.weapons[ship].insert(bank, gun.to_string());
         }
     }
-    // Computer crews come from the Navy roster whatever the race (retail saves); the human's from their own race.
-    let name = if armed_only { "Navy" } else { RACES.iter().find(|r| r.0 == slot.race).map_or("Navy", |r| r.1) };
-    for ship in 0..slot.fleet.len() {
-        let class = &lib.classes[lib.index(&slot.fleet[ship])];
+    /// Crew for one ship's posts, in post order, while points last.
+    fn crew_ship(&mut self, ship: usize) {
+        // Computer crews come from the Navy roster whatever the race (retail saves); the human's from their own race.
+        let name = if self.armed_only { "Navy" } else { RACES.iter().find(|r| r.0 == self.slot.race).map_or("Navy", |r| r.1) };
+        let class = &self.lib.classes[self.lib.index(&self.slot.fleet[ship])];
         let caps = crate::boarding::counts(&class.name);
         for (role, &cap) in caps.iter().enumerate() {
-            while slot.crew_mut(ship)[role].len() < cap as usize {
-                let budget = left(slot);
-                let used: Vec<String> = slot.crew.iter().flatten().flatten().cloned().collect();
+            while self.slot.crew_mut(ship)[role].len() < cap as usize {
+                let budget = self.left();
+                let used: Vec<String> = self.slot.crew.iter().flatten().flatten().cloned().collect();
                 let skill = crate::crew_arms::post_skill_name(role);
                 // Computers: 257 of 319 retail picks were rated exactly 7 in the post's skill and the 8-9s were all gunners, so they take
                 // the best gunner and otherwise the crewman nearest 7. PROVISIONAL: the original's pick is not recovered.
+                let armed_only = self.armed_only;
                 let score = |id: &String| {
                     let a = crate::crew_arms::ability(id, skill).unwrap_or(0.0);
                     if armed_only && skill != "gunnery" { -(a - 0.7).abs() } else { a }
@@ -436,9 +521,119 @@ pub fn auto_build(slot: &mut Slot, limit: u32, fleet_size: usize, lib: &Library,
                     .filter(|id| !used.contains(id) && i64::from(crate::crew_arms::crew_points(id)) <= budget)
                     .max_by(|a, b| score(a).total_cmp(&score(b)).then_with(|| b.cmp(a)));
                 let Some(id) = best else { break };
-                slot.crew_mut(ship)[role].push(id);
+                self.slot.crew_mut(ship)[role].push(id);
             }
         }
+    }
+    /// Styles 0-2: up to five batches, each a share A of the points left for a few hulls priced in a window around their average, with
+    /// a second share B as the room each hull may use. Each batch's new ships get their weapon swaps while more than the unspent rest R
+    /// is left, then crew (which spends everything left on the first new ship's posts).
+    fn batches(&mut self, style: u8) {
+        for _ in 0..5 {
+            let p = self.left();
+            if p <= 0 {
+                break;
+            }
+            let u = self.fraction();
+            let v = if style == 2 { 0.0 } else { self.fraction() };
+            let (a, b) = batch_fractions(style, u, v);
+            let ai = (p as f64 * a).ceil() as i64;
+            let bi = (p as f64 * b).ceil() as i64;
+            let r = p - ai - bi;
+            let m = ((p as f64 * 0.002).ceil() as i64).max(1);
+            let slots = self.fleet_size as i64 - self.slot.fleet.len() as i64;
+            let (u1, u2) = (self.fraction(), self.fraction());
+            let t = hull_count(u1, u2, m, slots);
+            let avg = ai / t.max(1);
+            let first_new = self.slot.fleet.len();
+            let mut added = 0;
+            while added < t && self.left() > (p - ai).max(0) {
+                let cur = self.left();
+                let (lo, hi) = price_window(avg, cur - r - ai, cur);
+                if !self.buy(lo as f64, hi as f64, 1.0) {
+                    break;
+                }
+                added += 1;
+            }
+            for ship in first_new..self.slot.fleet.len() {
+                if self.left() > r.max(0) {
+                    self.swap_ship(ship);
+                }
+            }
+            for ship in first_new..self.slot.fleet.len() {
+                if self.left() > 0 {
+                    self.crew_ship(ship);
+                }
+            }
+        }
+    }
+    /// Style 3: a few big hulls (225-460 by the race's scaled price), then mid-size ones (95-225), each crewed as it is bought.
+    fn big_hulls(&mut self, points: i64) {
+        let l = self.fleet_size as f64;
+        let a = (0.1 * l).ceil() as usize;
+        let b = (0.35 * l).floor() as usize;
+        let k = (0.33 * points as f64).floor() as i64;
+        let mult = race_multiplier(self.slot.race);
+        while self.slot.fleet.len() < a && self.left() > (points - k).max(0) {
+            if !self.buy(225.0, self.left().min(460) as f64, mult) {
+                break;
+            }
+            self.crew_ship(self.slot.fleet.len() - 1);
+        }
+        for _ in 0..b {
+            if self.left() <= (points - 3 * k).max(0) || !self.buy(95.0, self.left().min(225) as f64, mult) {
+                break;
+            }
+            self.crew_ship(self.slot.fleet.len() - 1);
+        }
+    }
+    /// Styles 4 and 5: fill to the fleet limit while points last, cheap boats only (4, plain price up to 45) or any hull (5, scaled price
+    /// up to 460, each crewed as it is bought).
+    fn fill(&mut self, style: u8) {
+        let mult = if style == 5 { race_multiplier(self.slot.race) } else { 1.0 };
+        let cap = if style == 5 { 460 } else { 45 };
+        while self.left() > 0 && self.slot.fleet.len() < self.fleet_size {
+            if !self.buy(0.0, self.left().min(cap) as f64, mult) {
+                break;
+            }
+            if style == 5 {
+                self.crew_ship(self.slot.fleet.len() - 1);
+            }
+        }
+    }
+}
+
+pub fn auto_build(slot: &mut Slot, limit: u32, fleet_size: usize, lib: &Library, salt: u64, armed_only: bool) {
+    let allowed = if armed_only { computer_guns() } else { None };
+    let seed = u64::from(limit) * 31 + fleet_size as u64 * 7 + 1 + salt * 977;
+    let first_new = slot.fleet.len();
+    let mut b = Build { slot, lib, seed, limit, fleet_size, armed_only, allowed };
+    if armed_only {
+        // Computers (source: the original's fleet build, docs/re/skirmish-setup.md): a style is rolled first, then hulls are bought by
+        // that style's rules; the style decides which later passes run (swaps only in styles 0-2).
+        let slots = fleet_size.saturating_sub(first_new) as i64;
+        let list = style_list(i64::from(limit), slots);
+        let style = list[b.draw() as usize % list.len()];
+        match style {
+            0..=2 => b.batches(style),
+            3 => b.big_hulls(i64::from(limit)),
+            _ => b.fill(style),
+        }
+    } else {
+        // Player Auto Assign: PROVISIONAL, plain random hulls that fit, then swaps, then crew (the original runs the computer's rules).
+        while b.slot.fleet.len() < fleet_size {
+            let budget = b.left();
+            if !b.buy(0.0, budget as f64, 1.0) {
+                break;
+            }
+        }
+        for ship in first_new..b.slot.fleet.len() {
+            b.swap_ship(ship);
+        }
+    }
+    // Last pass: any crewman still affordable goes onto the posts left, ship by ship.
+    for ship in 0..b.slot.fleet.len() {
+        b.crew_ship(ship);
     }
 }
 
