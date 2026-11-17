@@ -376,13 +376,18 @@ pub enum BattleSet {
     /// Removals queued last tick are applied and new objects join, before anything else of the tick.
     Tick,
     Commands,
-    Sense,
     Rules,
-    Ai,
-    Fleet,
+    /// Player orders and the docking, boarding and dragon routines. They mix commands with direct motion of what they handle, so they stay
+    /// before movement (PROVISIONAL: not yet split into command and decision parts).
     Orders,
     Forces,
     Simulate,
+    /// Sensor snapshot of the positions after movement and collision, for the decisions below.
+    Sense,
+    /// Per-object decisions (captains, mission AI) run after movement and collision; what they decide acts in the next tick's integration.
+    Ai,
+    Fleet,
+    /// Ship upkeep (fire, deaths, repair) and shells, after the object's decision.
     Combat,
     Cleanup,
     Outcome,
@@ -394,13 +399,13 @@ fn battle_schedule(app: &mut App) {
         (
             BattleSet::Tick,
             BattleSet::Commands,
-            BattleSet::Sense,
             BattleSet::Rules,
-            BattleSet::Ai,
-            BattleSet::Fleet,
             BattleSet::Orders,
             BattleSet::Forces,
             BattleSet::Simulate,
+            BattleSet::Sense,
+            BattleSet::Ai,
+            BattleSet::Fleet,
             BattleSet::Combat,
             BattleSet::Cleanup,
             BattleSet::Outcome,
