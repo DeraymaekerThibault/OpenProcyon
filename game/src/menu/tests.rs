@@ -678,3 +678,20 @@ fn computer_hull_price_window_has_a_floor_of_22() {
     assert_eq!(price_window(100, -5, 1000), (0, 22));
     assert_eq!(price_window(100, 1000, 15), (50, 15), "never above the points left");
 }
+#[test]
+#[ignore = "needs imported assets"]
+fn every_computer_roll_builds_a_fleet() {
+    let lib = Library::load(assets_dir());
+    for limit in [300, 340] {
+        let mut spent = vec![];
+        for salt in 0..20 {
+            let mut slot = skirmish::Slot { race: 0, ..skirmish("diablo_straight").slots[1].clone() };
+            (slot.fleet, slot.weapons, slot.names, slot.crew) = Default::default();
+            skirmish::auto_build(&mut slot, limit, 5, &lib, salt * 7 + 1, true);
+            assert!(!slot.fleet.is_empty(), "limit {limit} salt {salt}: no ships");
+            spent.push(slot.spent(&lib));
+        }
+        eprintln!("limit {limit}: {spent:?}");
+        assert!(spent.iter().filter(|&&p| p > i64::from(limit) - 10).count() >= 10, "most fleets spend the budget to the point: {spent:?}");
+    }
+}

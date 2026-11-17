@@ -169,7 +169,7 @@ skill can read N/A). Dragging one onto a post spends its cost (a 9-point captain
   to five batches while points remain. A batch takes shares of the points left: style 0 A = 0.5 + 0.2u and B = 0.1 + 0.2v, style 1 A = 0.45 + 0.1u
   and B = 0.2 + 0.2v, style 2 A = 0.6 + 0.2u and B = 0 (u, v fractions). With Ai = ceil(P*A), Bi = ceil(P*B), R = P - Ai - Bi, m = ceil(0.2 % of P):
   hull count T = round(1.5 |Gaussian|) + m, capped by the free slots, never below m. Each hull's price window: average = Ai / T (whole
-  number), low = round(0.5 avg), high = round(1.5 avg), room = points now left - R - Ai; low is capped by the room, high by the room but never
+  number), low = round(0.5 avg), high = round(1.5 avg), room = points now left - R - Bi (the batch's first share minus what it has spent); low is capped by the room, high by the room but never
   below 22 and never above the points left. Hulls are bought while less than Ai is spent and fewer than T are in; a failed pick or purchase ends
   the batch. After the batch, its new ships get their weapon swaps while more than R is left, then crew (which empties the points on the first
   new ship's posts, so later batches usually find nothing to buy). Style 3: a few big hulls (price x race multiplier 1.57 Navy, 1.72 Pirate,

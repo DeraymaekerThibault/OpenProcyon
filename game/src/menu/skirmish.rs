@@ -400,8 +400,8 @@ pub(super) fn hull_count(u1: f64, u2: f64, m: i64, slots: i64) -> i64 {
 }
 
 /// A batch's per-hull price window (lowest, highest): around the batch's average hull price `avg`, but never above what is left of the
-/// batch's allowance `room` (the second share B minus what this batch already spent) except that every hull may cost at least 22, and never
-/// above the points `cur` left.
+/// batch's hull allowance `room` (its first share A minus what this batch already spent: points left - R - B) except that every hull may
+/// cost at least 22, and never above the points `cur` left.
 pub(super) fn price_window(avg: i64, room: i64, cur: i64) -> (i64, i64) {
     let lo = (0.5 * avg as f64).round() as i64;
     let hi = (1.5 * avg as f64).round() as i64;
@@ -549,7 +549,7 @@ impl Build<'_> {
             let mut added = 0;
             while added < t && self.left() > (p - ai).max(0) {
                 let cur = self.left();
-                let (lo, hi) = price_window(avg, cur - r - ai, cur);
+                let (lo, hi) = price_window(avg, cur - r - bi, cur);
                 if !self.buy(lo as f64, hi as f64, 1.0) {
                     break;
                 }
