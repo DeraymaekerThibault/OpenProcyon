@@ -417,11 +417,20 @@ fn set_time_scale(vtime: &mut Time<Virtual>, speed: f32) {
     vtime.set_max_delta(std::time::Duration::from_secs_f32(max_frame_step(speed)));
 }
 
-/// Most game time one call may advance: 10 frames of `speed` ticks each (docs/re/tick.md). Real time beyond that is dropped, not
-/// carried as a backlog, so a slow machine runs slower than real time instead of catching up in ever longer bursts.
+/// Most game time one call may advance. At the original's speeds (up to 5x): 10 frames of `speed` ticks each, real time beyond
+/// that is dropped (docs/re/tick.md). Above 5x, which the original does not have: 0.1 s (about 3 ticks) so a 16x battle stays
+/// smooth instead of turning one slow frame into a long burst. An unattended autoplay run (`PROCYON_AUTOPLAY`) only wants game
+/// time per second, so there the step grows with the speed (60 fps worth of it).
 fn max_frame_step(speed: f32) -> f32 {
-    MAX_CATCH_UP_FRAMES as f32 * BATTLE_TICK.as_secs_f32() * speed
+    match speed > MAX_RETAIL_SPEED {
+        true if std::env::var_os("PROCYON_AUTOPLAY").is_some() => (speed / 60.0).max(0.1),
+        true => 0.1,
+        false => MAX_CATCH_UP_FRAMES as f32 * BATTLE_TICK.as_secs_f32() * speed,
+    }
 }
+
+/// Fastest speed setting the original has.
+const MAX_RETAIL_SPEED: f32 = 5.0;
 
 /// Frames the simulation may run in one call before the backlog is dropped.
 const MAX_CATCH_UP_FRAMES: u32 = 10;

@@ -346,7 +346,8 @@ fn time_scale_preserves_virtual_catch_up_caps() {
         app.world().resource::<Time<Virtual>>().delta_secs()
     };
     assert!((step(4.0, 0.01) - 0.04).abs() < 1e-4); // fast frame: full 4x
-    assert!((step(16.0, 1.0 / 60.0) - 16.0 / 60.0).abs() < 1e-4); // vsync frame: a full 16x
+    assert!((step(16.0, 1.0 / 60.0) - 0.1).abs() < 1e-4); // vsync frame at 16x: capped at 0.1 s
+    assert!((step(16.0, 1.0) - 0.1).abs() < 1e-4); // above 5x a slow frame is capped at 0.1 s (about 3 ticks)
     // docs/re/tick.md: at most 10 frames of `speed` ticks of 0.033 s per call; a longer stall drops the rest.
     assert!((step(1.0, 1.0) - 0.33).abs() < 1e-4);
     assert!((step(2.0, 1.0) - 0.66).abs() < 1e-4);

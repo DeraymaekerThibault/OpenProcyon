@@ -35,13 +35,19 @@ fn fixed_clock_preserves_pause_speed_and_catch_up_caps() {
     set_time_scale(&mut app.world_mut().resource_mut::<Time<Virtual>>(), 8.0);
     frame(&mut app, 5); // 40 ms virtual, not eight input polls.
     assert_eq!(app.world().resource::<Ticks>().0.len(), 4);
-    // Catch-up limit: 10 frames of 8 ticks each, then the rest of the second is dropped.
+    // Catch-up limit: 10 frames of 5 ticks each (5x, the original's fastest), then the rest of the second is dropped.
+    set_time_scale(&mut app.world_mut().resource_mut::<Time<Virtual>>(), 5.0);
     frame(&mut app, 1000);
     let time = app.world().resource::<Time<Virtual>>();
     assert_eq!(time.delta(), time.max_delta());
-    assert_eq!(app.world().resource::<Ticks>().0.len(), 4 + 80);
+    assert_eq!(app.world().resource::<Ticks>().0.len(), 4 + 50);
     frame(&mut app, 1); // the dropped backlog does not run later
-    assert_eq!(app.world().resource::<Ticks>().0.len(), 4 + 80);
+    assert_eq!(app.world().resource::<Ticks>().0.len(), 4 + 50);
+    // Above 5x the cap is 0.1 s of game time per call (3 ticks, plus at most one carried), so 16x stays smooth.
+    set_time_scale(&mut app.world_mut().resource_mut::<Time<Virtual>>(), 16.0);
+    frame(&mut app, 1000);
+    let n = app.world().resource::<Ticks>().0.len() - 54;
+    assert!((3..=4).contains(&n), "16x slow frame ran {n} ticks");
     assert!(app.world().resource::<Ticks>().0.iter().all(|dt| *dt == BATTLE_TICK));
 }
 
