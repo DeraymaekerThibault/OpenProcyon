@@ -16,8 +16,10 @@ pub(super) struct GunState {
     pub(super) yaw: f32,
     pub(super) pitch: f32,
     pub(super) aligned: bool,
-    pub(super) in_range: bool, // a target is within range and the mount's arc (weapon bar: green outline)
-    pub(super) dev: f32,       // the burst's deviation angle, drawn when the burst starts (every shot for a `dev_per_shot` gun)
+    pub(super) was_aligned: bool,     // `aligned` as it stood before this step's turning (same test)
+    pub(super) lob_wait: Option<f32>, // a clicked lob order's remaining fixed delay, set on the first step the order is seen
+    pub(super) in_range: bool,        // a target is within range and the mount's arc (weapon bar: green outline)
+    pub(super) dev: f32,              // the burst's deviation angle, drawn when the burst starts (every shot for a `dev_per_shot` gun)
 }
 /// Marks the entities of a gun's visual hierarchy (root, base, barrel, muzzle points).
 #[derive(Component)]
@@ -78,6 +80,8 @@ pub(super) fn spawn_gun(commands: &mut Commands, assets: &AssetServer, lib: &Lib
         yaw: 0.0,
         pitch: 0.0,
         aligned: false,
+        was_aligned: false,
+        lob_wait: None,
         in_range: false,
         dev: 0.0,
     }
@@ -500,7 +504,14 @@ pub(super) fn fire(
                     None => gunner_accuracy(crate::crew_arms::DEFAULT_HAND),
                 }
             };
-            if state.burst_left == 0 && state.cooldown <= 0.0 && state.aligned {
+            // A clicked lob order shoots a fixed time after the click (docs/re/gunnery.md#lob-shells), not at first alignment.
+            let lob_ready = if on_shot && gun.lob.is_some() {
+                lob_order_ready(&mut state.lob_wait, state.was_aligned, dt)
+            } else {
+                state.lob_wait = None;
+                true
+            };
+            if state.burst_left == 0 && state.cooldown <= 0.0 && state.aligned && lob_ready {
                 state.burst_left = gun.burst;
                 shot_fired |= on_shot;
                 if !gun.point_defense {
@@ -780,6 +791,18 @@ pub(super) fn base_fire(
     }
 }
 
+/// Delay of a clicked lob order when the mount already pointed at the point, and when it had to turn (seconds, fixed).
+const LOB_AIMED_DELAY: f32 = 0.08;
+const LOB_TURN_DELAY: f32 = 0.65;
+
+/// Steps a lob order's delay: the first step the order is seen sets it (aimed already or not, by the alignment test before that
+/// step's turning); true once it has run out.
+fn lob_order_ready(wait: &mut Option<f32>, aimed: bool, dt: f32) -> bool {
+    let left = wait.get_or_insert(if aimed { LOB_AIMED_DELAY } else { LOB_TURN_DELAY });
+    *left -= dt;
+    *left <= 0.0
+}
+
 /// Turns a turret toward `aim_at` (docs/re/gunnery.md): the base always turns toward the target at the gun's yaw speed, clamped to
 /// the mount's half-arc, whatever the range; the barrel only elevates once the base is within 1 degree and the target is within
 /// range. Lead as the original does: aim point += target velocity * (distance / muzzle speed), one step, no gravity term (torpedo
@@ -822,6 +845,8 @@ fn aim_turret(
         want_yaw = state.yaw;
         want_pitch = None;
     }
+    // The test that decides "already aimed" for a lob order: the same alignment test, taken before this step's turning.
+    state.was_aligned = engaged.is_some() && (state.yaw - want_yaw).abs() < TOLERANCE && want_pitch.is_some_and(|p| (state.pitch - p).abs() < TOLERANCE);
     let yaw_step = (want_yaw - state.yaw).clamp(-gun.yaw_speed * dt, gun.yaw_speed * dt);
     state.yaw = (state.yaw + yaw_step).clamp(-half_arc.max(0.0), half_arc);
     if let Some(pitch) = want_pitch {
@@ -937,6 +962,23 @@ mod target_tests {
         });
         g.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
         crate::data::gun_def(&g)
+    }
+
+    #[test]
+    fn a_lob_order_shoots_after_its_fixed_delay() {
+        let dt = 1.0 / 60.0;
+        let fire_time = |aimed: bool| {
+            let (mut wait, mut t) = (None, 0.0);
+            loop {
+                t += dt;
+                if lob_order_ready(&mut wait, aimed, dt) {
+                    return t;
+                }
+            }
+        };
+        let (aimed, turned) = (fire_time(true), fire_time(false));
+        assert!(aimed >= 0.08 - 1e-4 && aimed < 0.08 + dt + 1e-4, "{aimed}");
+        assert!(turned >= 0.65 - 1e-4 && turned < 0.65 + dt + 1e-4, "{turned}");
     }
 
     #[test]

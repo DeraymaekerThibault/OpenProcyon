@@ -843,6 +843,8 @@ fn bank_recharge_follows_the_slowest_live_gun() {
         yaw: 0.0,
         pitch: 0.0,
         aligned: false,
+        was_aligned: false,
+        lob_wait: None,
         in_range: false,
         dev: 0.0,
     };
