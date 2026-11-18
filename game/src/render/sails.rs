@@ -734,7 +734,8 @@ mod tests {
             let off = v["byteOffset"].as_u64().unwrap_or(0) as usize + a["byteOffset"].as_u64().unwrap_or(0) as usize;
             bin[off..off + a["count"].as_u64().unwrap() as usize * width].to_vec()
         };
-        let f3 = |b: Vec<u8>| -> Vec<[f32; 3]> { b.chunks_exact(12).map(|c| std::array::from_fn(|i| f32::from_le_bytes(c[4 * i..4 * i + 4].try_into().unwrap()))).collect() };
+        let f3 =
+            |b: Vec<u8>| -> Vec<[f32; 3]> { b.as_chunks::<12>().0.iter().map(|c| std::array::from_fn(|i| f32::from_le_bytes(c[4 * i..4 * i + 4].try_into().unwrap()))).collect() };
         let mut out = vec![];
         for mesh in doc["meshes"].as_array().unwrap() {
             for p in mesh["primitives"].as_array().unwrap() {
@@ -748,11 +749,11 @@ mod tests {
                 let wide = doc["accessors"][ia]["componentType"].as_u64() == Some(5125);
                 let raw = read(ia, if wide { 4 } else { 2 });
                 let idx: Vec<usize> = if wide {
-                    raw.chunks_exact(4).map(|c| u32::from_le_bytes(c.try_into().unwrap()) as usize).collect()
+                    raw.as_chunks::<4>().0.iter().map(|c| u32::from_le_bytes(*c) as usize).collect()
                 } else {
-                    raw.chunks_exact(2).map(|c| u16::from_le_bytes(c.try_into().unwrap()) as usize).collect()
+                    raw.as_chunks::<2>().0.iter().map(|c| u16::from_le_bytes(*c) as usize).collect()
                 };
-                out.push((name, pos, nor, idx.chunks_exact(3).map(|t| [t[0], t[1], t[2]]).collect()));
+                out.push((name, pos, nor, idx.as_chunks::<3>().0.to_vec()));
             }
         }
         out
