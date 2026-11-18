@@ -5,7 +5,7 @@
 // that churns slowly, tinted between a thin and a dense colour, the dense cores past 1 so they bloom. A storm's bolt lights the gas
 // around it from inside for a moment (a point-light term in the march). With the camera outside, only the near side of the shell
 // marches (from the cloud's front to its back); with the camera inside, the far wall marches from the camera, so the gas fills the
-// view gently (`inside` caps it).
+// view gently (`inside` caps it), and a short fine march streams wisps past the camera.
 import bevy_pbr::render::{
     forward_io::{VertexOutput, FragmentOutput},
     pbr_fragment::pbr_input_from_standard_material,
@@ -118,6 +118,15 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
         light = light / (vec3<f32>(1.0) + 0.5 * light);
         if inside_cam {
             light = light * nebula.low.w;
+            // wisps drifting past the camera: a short march through the first few dozen units, at finer, faster noise, so the
+            // gas close by streams while the cloud beyond churns slowly
+            let near_len = min(40.0, t1);
+            var wisps = 0.0;
+            for (var j = 0; j < 4; j = j + 1) {
+                let x = eye + dir * ((f32(j) + jitter) * near_len * 0.25);
+                wisps += gas((x - c) / axes * 7.0, clock * 4.0);
+            }
+            light += nebula.low.rgb * vcol * (wisps * 0.25) * near_len / 40.0 * 0.35 * nebula.look.x;
         }
     }
     var out: FragmentOutput;

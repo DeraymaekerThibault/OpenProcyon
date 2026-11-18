@@ -136,6 +136,11 @@ fn shooting_star(dir: vec3<f32>) -> f32 {
     return sky.shoot.y * line * (1.0 - u / 0.14) * sin(3.14159 * t / life);
 }
 
+// 0 with the camera inside a hole's shadow sphere or right beside it, 1 from two and a half core radii out
+fn camera_clear(distance: f32, core: f32) -> f32 {
+    return smoothstep(1.2 * core, 2.5 * core, distance);
+}
+
 // the view ray bent around the black holes (xyz), how much it bent (w, radians)
 fn lensed(d: vec3<f32>) -> vec4<f32> {
     var dir = d;
@@ -155,7 +160,8 @@ fn lensed(d: vec3<f32>) -> vec4<f32> {
         let perp = to_c - dir * along;
         let b = max(length(perp), 1e-3);
         let reach = sky.hole_reach[i].x;
-        let fade = 1.0 - smoothstep(0.35 * reach, reach, b);
+        // a camera at the hole (a cutscene flying in, a ship at the core's edge) sees no bending: it would fill the screen
+        let fade = (1.0 - smoothstep(0.35 * reach, reach, b)) * camera_clear(length(to_c), h.w);
         let ratio = h.w / b;
         // falls off with the square of the distance: a ring at the horizon, a gentle bend across the rest of the pull circle
         let bend = min(sky.lens.y * ratio * ratio, 1.4) * fade;
@@ -179,7 +185,7 @@ fn hole_shadow(d: vec3<f32>) -> f32 {
         let along = dot(to_c, d);
         if along > 0.0 {
             let b = length(to_c - d * along);
-            s = max(s, 1.0 - smoothstep(h.w * 0.9, h.w * 1.05, b));
+            s = max(s, (1.0 - smoothstep(h.w * 0.9, h.w * 1.05, b)) * camera_clear(length(to_c), h.w));
         }
     }
     return s;

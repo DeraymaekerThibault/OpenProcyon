@@ -117,7 +117,7 @@ pub type HoleMaterial = ExtendedMaterial<StandardMaterial, HoleGlow>;
 
 pub fn plugin(app: &mut App, look: &Look) {
     if look.black_holes.is_some() {
-        app.add_plugins(MaterialPlugin::<HoleMaterial>::default()).add_systems(Update, (spawn_discs, update_discs, flash_on_swallow).chain());
+        app.add_plugins(MaterialPlugin::<HoleMaterial>::default()).add_systems(Update, (spawn_discs, update_discs, flash_on_swallow, ribbon_gain).chain());
     }
 }
 
@@ -165,6 +165,20 @@ fn spawn_discs(
             flat,
             bevy::light::NotShadowCaster,
         ));
+    }
+}
+
+/// The hole's own infall ribbons (`blackhole.rs` draws them with a plain additive StandardMaterial, which `fx_gain` does not
+/// reach) get the profile's `fx_gain` too, so they pass the bloom threshold like every other additive effect. Once per material.
+fn ribbon_gain(
+    look: Res<Look>,
+    holes: Query<&MeshMaterial3d<StandardMaterial>, (With<BlackHole>, Added<MeshMaterial3d<StandardMaterial>>)>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    for mat in &holes {
+        if let Some(mut m) = materials.get_mut(&mat.0) {
+            m.base_color = Color::linear_rgb(look.fx_gain, look.fx_gain, look.fx_gain);
+        }
     }
 }
 
@@ -258,6 +272,23 @@ mod tests {
         none.add_plugins(MinimalPlugins).insert_resource(Look::parse(&json!({})));
         super::plugin(&mut none, &Look::parse(&json!({})));
         assert!(none.world().get_resource::<Assets<HoleMaterial>>().is_none(), "classic never sees it");
+    }
+
+    #[test]
+    fn the_holes_own_ribbons_get_the_fx_gain() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, AssetPlugin::default()))
+            .init_asset::<StandardMaterial>()
+            .insert_resource(Look::parse(&json!({"black_holes": {}, "fx_gain": 1.6})))
+            .add_systems(Update, ribbon_gain);
+        let mat = app.world_mut().resource_mut::<Assets<StandardMaterial>>().add(StandardMaterial { alpha_mode: AlphaMode::Add, unlit: true, ..default() });
+        let other = app.world_mut().resource_mut::<Assets<StandardMaterial>>().add(StandardMaterial::default());
+        app.world_mut().spawn((BlackHole::default(), MeshMaterial3d(mat.clone())));
+        app.world_mut().spawn(MeshMaterial3d(other.clone()));
+        app.update();
+        let mats = app.world().resource::<Assets<StandardMaterial>>();
+        assert_eq!(mats.get(&mat).unwrap().base_color.to_linear().red, 1.6);
+        assert_eq!(mats.get(&other).unwrap().base_color, Color::WHITE, "only the hole's ribbons");
     }
 
     #[test]
