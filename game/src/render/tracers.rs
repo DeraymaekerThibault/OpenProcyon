@@ -98,7 +98,7 @@ impl Tracers {
 pub struct TracerUniform {
     /// rgb: white-hot core colour, a: brightness
     pub core: Vec4,
-    /// x: clock
+    /// Unused: the clock is the frame data's (`frame.rs`).
     pub params: Vec4,
 }
 
@@ -205,7 +205,7 @@ fn tracers(
     });
     let Some((_, cam)) = cams.iter().filter(|(c, _)| c.is_active).min_by_key(|(c, _)| c.order) else { return };
     let mut target = target;
-    let Some((mesh, mat, mut vis)) = target.iter_mut().next() else {
+    let Some((mesh, _, mut vis)) = target.iter_mut().next() else {
         // the mesh goes with each battle (Scenario); a new one for the next
         let material = materials.add(TracerMaterial {
             base: super::kit::additive_base(None),
@@ -228,10 +228,8 @@ fn tracers(
     for s in streaks.0.values() {
         ribbon(batch, s, now, cam);
     }
+    // the shader's clock is the frame data's: the material is never written after it is made
     vis.set_if_neq(batch.upload(&mut meshes, &mesh.0));
-    if let Some(mut m) = materials.get_mut(&mat.0) {
-        m.extension.u.params.x = now;
-    }
 }
 
 /// Farther than a shell flies between two frames: the path starts over rather than draw a line across the map.

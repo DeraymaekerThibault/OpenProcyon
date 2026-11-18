@@ -8,12 +8,11 @@ import bevy_pbr::render::{
     mesh_view_bindings::view,
 };
 
+// the battle clock and the sun (game/src/render/frame.rs)
+import openprocyon::render::frame::frame;
+
 struct Smoke {
-    // xyz: direction the sunlight travels, w: clock
-    sun: vec4<f32>,
-    // rgb: sunlight colour
-    light: vec4<f32>,
-    // rgb: the shadowed side's colour
+    // rgb: the shadowed side's colour (the sun and the clock are frame.sun, frame.sun_color and frame.clock)
     shade: vec4<f32>,
 }
 
@@ -39,7 +38,7 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
     let q = vec2<f32>(u, v) * 2.0 - 1.0;
     let age = clamp(in.color.a, 0.0, 1.0);
     let s = seed * 5.17;
-    let clock = smoke.sun.w;
+    let clock = frame.clock.y;
 
     // ragged edge that curls slowly
     let p = q * 1.8 + vec2<f32>(s, s * 0.7);
@@ -53,8 +52,8 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
     let up = view.world_from_view[1].xyz;
     let back = view.world_from_view[2].xyz;
     let normal = normalize(right * q.x + up * q.y + back * (z + 0.3));
-    let lit = clamp(dot(normal, -smoke.sun.xyz) * 0.6 + 0.4, 0.0, 1.0);
-    let rgb = in.color.rgb * mix(smoke.shade.rgb + vec3<f32>(0.08), smoke.light.rgb, lit) * (0.85 + 0.3 * n);
+    let lit = clamp(dot(normal, -frame.sun.xyz) * 0.6 + 0.4, 0.0, 1.0);
+    let rgb = in.color.rgb * mix(smoke.shade.rgb + vec3<f32>(0.08), frame.sun_color.rgb, lit) * (0.85 + 0.3 * n);
 
     let alpha = shape * smoothstep(0.0, 0.06, age) * pow(1.0 - age, 1.3) * 0.75;
     var out: FragmentOutput;

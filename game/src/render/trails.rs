@@ -99,7 +99,7 @@ pub fn parse_wakes(v: &Value) -> Option<Wakes> {
 pub struct PlumeUniform {
     pub core: Vec4,
     pub edge: Vec4,
-    /// x: brightness, y: thrust, z: clock, w: seed
+    /// x: brightness, y: thrust (written only when it moves), z: unused (the clock is the frame data's), w: seed
     pub params: Vec4,
 }
 
@@ -183,7 +183,13 @@ struct Plume {
     thrust: f32,
     clock: f32,
     seed: f32,
+    /// The thrust its material was last given: the shader's clock is the frame data's, so the material is only written when the
+    /// thrust has moved by more than `THRUST_STEP` (never at a steady speed).
+    shown: f32,
 }
+
+/// How far a plume's thrust moves before its material is written again (smaller than a glow change anyone could see).
+const THRUST_STEP: f32 = 0.004;
 
 const RINGS: usize = 16;
 const AROUND: usize = 20;
@@ -251,7 +257,7 @@ fn plumes(
                 Mesh3d(mesh.clone()),
                 MeshMaterial3d(material),
                 Transform { rotation: local.rotation.inverse(), scale: Vec3::ZERO, ..default() },
-                Plume { length: class.length * e.length * l, width: class.length * e.width * w, thrust: 0.0, clock: 0.0, seed },
+                Plume { length: class.length * e.length * l, width: class.length * e.width * w, thrust: 0.0, clock: 0.0, seed, shown: 0.0 },
                 NotShadowCaster,
             );
             commands.entity(engine).queue_silenced(move |mut fx: EntityWorldMut| {
@@ -282,9 +288,11 @@ fn plume_motion(
         p.clock += dt;
         tf.scale = plume_scale(&p, p.thrust);
         vis.set_if_neq(if p.thrust < 0.02 { Visibility::Hidden } else { Visibility::Inherited });
-        if let Some(mut m) = materials.get_mut(&mat.0) {
+        if (p.thrust - p.shown).abs() > THRUST_STEP
+            && let Some(mut m) = materials.get_mut(&mat.0)
+        {
             m.extension.u.params.y = p.thrust;
-            m.extension.u.params.z = p.clock;
+            p.shown = p.thrust;
         }
     }
 }
@@ -450,7 +458,7 @@ mod tests {
 
     #[test]
     fn a_plume_grows_with_thrust_and_trails_astern() {
-        let p = Plume { length: 10.0, width: 1.0, thrust: 0.0, clock: 0.0, seed: 0.0 };
+        let p = Plume { length: 10.0, width: 1.0, thrust: 0.0, clock: 0.0, seed: 0.0, shown: 0.0 };
         assert!(plume_scale(&p, 0.0).z < plume_scale(&p, 1.0).z);
         assert_eq!(plume_scale(&p, 1.0), Vec3::new(1.0, 1.0, 10.0), "no flicker at clock 0 and seed 0");
         let m = plume_mesh();

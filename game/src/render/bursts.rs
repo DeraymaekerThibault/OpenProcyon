@@ -211,7 +211,7 @@ impl Particles {
 
 #[derive(Clone, Copy, Default, Debug, ShaderType)]
 pub struct BurstUniform {
-    /// x: clock
+    /// Unused: the clock is the frame data's (`frame.rs`). Kept so a glow shader has a uniform of its own to grow into.
     pub params: Vec4,
 }
 
@@ -243,11 +243,7 @@ pub type BurstMaterial = ExtendedMaterial<StandardMaterial, BurstGlow>;
 
 #[derive(Clone, Copy, Default, Debug, ShaderType)]
 pub struct SmokeUniform {
-    /// xyz: direction the sunlight travels (world), w: clock
-    pub sun: Vec4,
-    /// rgb: sunlight colour on the smoke
-    pub light: Vec4,
-    /// rgb: shadowed side's colour (the sky's)
+    /// rgb: the shadowed side's colour (the sky's, from the ambient light); the sun and the clock are the frame data's (`frame.rs`)
     pub shade: Vec4,
 }
 
@@ -424,7 +420,6 @@ fn draw(
     mut parts: ResMut<Particles>,
     cams: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
     hosts: Query<&GlobalTransform>,
-    sun: Query<(&DirectionalLight, &GlobalTransform)>,
     ambient: Res<GlobalAmbientLight>,
     mut glows: Query<(&Mesh3d, &MeshMaterial3d<BurstMaterial>, &mut Visibility), (With<Glows>, Without<Smokes>)>,
     mut smokes: Query<(&Mesh3d, &MeshMaterial3d<SmokeMaterial>, &mut Visibility), (With<Smokes>, Without<Glows>)>,
@@ -471,18 +466,16 @@ fn draw(
     if let Some(m) = b.motes {
         motes(glow, &m, eye, now, cam);
     }
-    let (gm, gmat, mut gvis) = glows.single_mut().expect("one glow mesh");
+    let (gm, _, mut gvis) = glows.single_mut().expect("one glow mesh");
     gvis.set_if_neq(glow.upload(&mut meshes, &gm.0));
-    if let Some(mut m) = glow_mats.get_mut(&gmat.0) {
-        m.extension.u.params.x = now;
-    }
     let (sm, smat, mut svis) = smokes.single_mut().expect("one smoke mesh");
     svis.set_if_neq(smoke.upload(&mut meshes, &sm.0));
-    if let Some(mut m) = smoke_mats.get_mut(&smat.0) {
-        let (dir, light) = sun.iter().next().map_or((Vec3::NEG_Y, Vec3::ONE), |(l, t)| (t.forward().as_vec3(), l.color.to_linear().to_vec3()));
-        m.extension.u.sun = dir.extend(now);
-        m.extension.u.light = light.extend(1.0);
-        m.extension.u.shade = (ambient.color.to_linear().to_vec3() * 0.35).extend(1.0);
+    // the clock and the sun are the frame data's; only the sky's colour on the shadowed side is the smoke's own, and it rarely changes
+    let shade = (ambient.color.to_linear().to_vec3() * 0.35).extend(1.0);
+    if smoke_mats.get(&smat.0).is_some_and(|m| m.extension.u.shade != shade)
+        && let Some(mut m) = smoke_mats.get_mut(&smat.0)
+    {
+        m.extension.u.shade = shade;
     }
     parts.shake *= (1.0 - time.delta_secs() * 4.0).max(0.0);
 }

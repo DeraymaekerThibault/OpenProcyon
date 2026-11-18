@@ -791,12 +791,12 @@ fn sail_motion(
     look: Res<Look>,
     lib: Option<Res<crate::combat::Library>>,
     ships: Query<&crate::Ship>,
-    suns: Query<&GlobalTransform, With<DirectionalLight>>,
+    frame: Res<super::frame::Frame>,
     mut sails: Query<(&mut Sail, &MeshMaterial3d<SailMaterial>)>,
     mut materials: ResMut<Assets<SailMaterial>>,
 ) {
     let (Some(s), Some(lib)) = (&look.sails, lib) else { return };
-    let sun = suns.iter().next().map_or(Vec3::NEG_Y, |g| g.forward().as_vec3());
+    let sun = frame.sun().map_or(Vec3::NEG_Y, |(travel, _)| travel);
     let dt = time.delta_secs();
     for (mut sail, mat) in &mut sails {
         let share = sail.ship.and_then(|e| ships.get(e).ok()).map_or(0.0, |sh| (sh.speed.abs() / crate::ship::full_speed(&lib.classes[sh.class]).max(1e-3)).clamp(0.0, 1.0));

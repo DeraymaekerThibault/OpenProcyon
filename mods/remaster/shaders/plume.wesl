@@ -10,12 +10,15 @@ import bevy_pbr::render::{
     mesh_view_bindings::view,
 };
 
+// the battle clock (game/src/render/frame.rs)
+import openprocyon::render::frame::frame;
+
 struct Plume {
     // rgb: the hot core colour (linear, may exceed 1)
     core: vec4<f32>,
     // rgb: the flame colour, w: 1 for the inner core layer
     edge: vec4<f32>,
-    // x: brightness, y: thrust (0..1, smoothed), z: clock, w: seed
+    // x: brightness, y: thrust (0..1, smoothed), z: unused (the clock is frame.clock), w: seed
     params: vec4<f32>,
 }
 
@@ -42,7 +45,7 @@ fn noise(p: vec2<f32>, period: f32) -> f32 {
 @fragment
 fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> FragmentOutput {
     let thrust = plume.params.y;
-    let clock = plume.params.z;
+    let clock = frame.clock.y;
     let seed = plume.params.w;
     let inner = plume.edge.w;
     let v = in.uv.y;

@@ -8,10 +8,13 @@
 // Vertex colour: rgb the bullet's colour, a how much of a gone shell's streak is left.
 import bevy_pbr::render::forward_io::{VertexOutput, FragmentOutput};
 
+// the battle clock and the sun (game/src/render/frame.rs)
+import openprocyon::render::frame::frame;
+
 struct Tracer {
     // rgb: white-hot core colour, a: brightness
     core: vec4<f32>,
-    // x: clock
+    // unused: the clock is frame.clock
     params: vec4<f32>,
 }
 
@@ -32,7 +35,7 @@ fn noise(p: vec2<f32>) -> f32 {
 fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> FragmentOutput {
     let colour = in.color.rgb;
     let left = in.color.a;
-    let clock = tracer.params.x;
+    let clock = frame.clock.y;
     // out of step from shell to shell
     let seed = fract(dot(floor(in.world_position.xyz * 0.05), vec3<f32>(0.131, 0.217, 0.173))) * 50.0;
     var light: vec3<f32>;

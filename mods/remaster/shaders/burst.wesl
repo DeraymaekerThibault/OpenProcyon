@@ -5,8 +5,11 @@
 // Kinds: 0 flash, 1 spark (u runs tail to head), 2 ember, 3 fireball, 4 shockwave ring (flat), 5 hull scorch, 6 dust.
 import bevy_pbr::render::forward_io::{VertexOutput, FragmentOutput};
 
+// the battle clock and the sun (game/src/render/frame.rs)
+import openprocyon::render::frame::frame;
+
 struct Burst {
-    // x: clock
+    // unused: the clock is frame.clock
     params: vec4<f32>,
 }
 
@@ -43,7 +46,7 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
     let d = length(q);
     let age = clamp(in.color.a, 0.0, 1.0);
     let colour = in.color.rgb;
-    let clock = burst.params.x;
+    let clock = frame.clock.y;
     let s = seed * 7.31;
     var light = vec3<f32>(0.0);
 

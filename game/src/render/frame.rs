@@ -41,7 +41,8 @@ const CLOCK: usize = 0;
 const SUN: usize = 1;
 const SUN_COLOR: usize = 2;
 const CAMERA: usize = 3;
-const BOLT_AT: usize = 4;
+/// The row of the last bolt (where it struck, w real seconds since it).
+pub const BOLT_AT: usize = 4;
 const BOLT_FROM: usize = 5;
 const BOLT_TO: usize = 6;
 const HOLES_INFO: usize = 7;
@@ -73,6 +74,16 @@ impl Frame {
     /// The battle camera's position as last gathered.
     pub fn camera(&self) -> Vec3 {
         self.rows[CAMERA].truncate()
+    }
+
+    /// The sun as last gathered: the direction its light travels and its colour (linear), or None on a map without one.
+    pub fn sun(&self) -> Option<(Vec3, Vec3)> {
+        (self.rows[SUN].w > 0.0).then(|| (self.rows[SUN].truncate(), self.rows[SUN_COLOR].truncate()))
+    }
+
+    /// The storm's last bolt: where it struck, its segment's ends, and real seconds since it (very large: none yet).
+    pub fn bolt(&self) -> (Vec3, Vec3, Vec3, f32) {
+        (self.rows[BOLT_AT].truncate(), self.rows[BOLT_FROM].truncate(), self.rows[BOLT_TO].truncate(), self.rows[BOLT_AT].w)
     }
 
     /// The black holes as the sky bends round them: up to `MAX_HOLES` of (where the sky bends, shadow radius, pull radius, kill
@@ -217,6 +228,16 @@ mod tests {
         let rows = buffer(&app);
         assert!(rows[BOLT_AT].w >= NEVER);
         assert_eq!(rows[HOLES_INFO].x, 0.0, "without the `black_holes` block nothing bends");
+    }
+
+    #[test]
+    fn the_sun_and_the_bolt_are_read_back_as_gathered() {
+        let mut f = Frame::default();
+        assert_eq!(f.sun(), None, "a map without a sun");
+        assert!(f.bolt().3 >= NEVER, "no bolt yet");
+        f.rows[SUN] = Vec3::NEG_Y.extend(2.0);
+        f.rows[SUN_COLOR] = Vec3::new(1.0, 0.9, 0.8).extend(80.0);
+        assert_eq!(f.sun(), Some((Vec3::NEG_Y, Vec3::new(1.0, 0.9, 0.8))));
     }
 
     #[test]

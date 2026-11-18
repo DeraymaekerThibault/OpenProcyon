@@ -21,10 +21,11 @@ use bevy::render::render_resource::{AsBindGroup, CompareFunction, RenderPipeline
 use bevy::shader::ShaderRef;
 use serde_json::Value;
 
+use super::frame::Frame;
 use super::volnoise::NoiseVolume;
 use super::{Look, num, rgb};
 use crate::fx::EffectMaterial;
-use crate::nebula::{Cloud, StormFlash};
+use crate::nebula::Cloud;
 
 pub const SHADER: &str = "shaders/nebula.wesl";
 
@@ -300,7 +301,7 @@ fn spawn_volumes(
     mut commands: Commands,
     look: Res<Look>,
     time: Res<Time>,
-    bolt: Res<Bolt>,
+    frame: Res<Frame>,
     noise: Option<Res<NoiseVolume>>,
     clouds: Query<(Entity, &Cloud, &GlobalTransform), Without<VolumeProxyOf>>,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -308,6 +309,7 @@ fn spawn_volumes(
     mut cube: Local<Option<Handle<Mesh>>>,
 ) {
     let (Some(n), Some(noise)) = (&look.nebulae, noise) else { return };
+    let bolt = Bolt::of(&frame);
     for (e, cloud, at) in &clouds {
         let Some(rule) = n.find(cloud.effect()).filter(|r| r.replace) else { continue };
         let mesh = cube.get_or_insert_with(|| meshes.add(Cuboid::new(1.0, 1.0, 1.0))).clone();
@@ -338,21 +340,20 @@ fn spawn_volumes(
 pub struct VolumeProxyOf;
 
 /// The sun: the first directional light's direction toward it, and its colour.
-fn sun_of(suns: &Query<(&DirectionalLight, &GlobalTransform)>) -> SunLight {
-    suns.iter().next().map_or_else(SunLight::default, |(l, t)| SunLight { toward: -t.forward().as_vec3(), color: l.color.to_linear().to_vec3() })
+fn sun_of(frame: &Frame) -> SunLight {
+    frame.sun().map_or_else(SunLight::default, |(travel, color)| SunLight { toward: -travel, color })
 }
 
 fn update_volumes(
     look: Res<Look>,
     time: Res<Time>,
-    bolt: Res<Bolt>,
-    suns: Query<(&DirectionalLight, &GlobalTransform)>,
+    frame: Res<Frame>,
     clouds: Query<(&Cloud, &GlobalTransform, &Children)>,
     proxies: Query<&MeshMaterial3d<VolumeMaterial>, With<VolumeProxy>>,
     mut materials: ResMut<Assets<VolumeMaterial>>,
 ) {
     let Some(n) = &look.nebulae else { return };
-    let sun = sun_of(&suns);
+    let (sun, bolt) = (sun_of(&frame), Bolt::of(&frame));
     for (cloud, at, children) in &clouds {
         let Some(rule) = n.find(cloud.effect()).filter(|r| r.replace) else { continue };
         for mat in children.iter().filter_map(|c| proxies.get(c).ok()) {
@@ -366,8 +367,7 @@ fn update_volumes(
 pub fn plugin(app: &mut App, look: &Look) {
     if look.nebulae.is_some() {
         app.add_plugins((MaterialPlugin::<NebulaMaterial>::default(), MaterialPlugin::<VolumeMaterial>::default()))
-            .init_resource::<Bolt>()
-            .add_systems(Update, (bolts, hide_shells, spawn_volumes, update_volumes, restyle, update).chain());
+            .add_systems(Update, (hide_shells, spawn_volumes, update_volumes, restyle, update).chain());
     }
 }
 
@@ -379,8 +379,9 @@ pub struct ShellHidden;
 #[derive(Component)]
 pub struct Volumetric;
 
-/// The last bolt of storm lightning: where, and how much of its light is left (1 at the strike, 0 when out).
-#[derive(Resource, Default)]
+/// The last bolt of storm lightning (from the frame data, `frame.rs`): where, and how much of its light is left (1 at the strike,
+/// 0 when out).
+#[derive(Default)]
 struct Bolt {
     at: Vec3,
     /// The bolt's segment (both ends equal for sheet lightning, a point of light).
@@ -389,10 +390,10 @@ struct Bolt {
     left: f32,
 }
 
-fn bolts(time: Res<Time<Real>>, mut flashes: MessageReader<StormFlash>, mut bolt: ResMut<Bolt>) {
-    bolt.left = (bolt.left - time.delta_secs() / FLASH_SECONDS).max(0.0);
-    for f in flashes.read() {
-        *bolt = Bolt { at: f.at, from: f.from, to: f.to, left: 1.0 };
+impl Bolt {
+    fn of(frame: &Frame) -> Bolt {
+        let (at, from, to, since) = frame.bolt();
+        Bolt { at, from, to, left: (1.0 - since / FLASH_SECONDS).max(0.0) }
     }
 }
 
@@ -426,12 +427,13 @@ fn restyle(
     mut commands: Commands,
     look: Res<Look>,
     time: Res<Time>,
-    bolt: Res<Bolt>,
+    frame: Res<Frame>,
     clouds: Query<(Entity, &Cloud, &GlobalTransform, &MeshMaterial3d<EffectMaterial>), Without<Volumetric>>,
     retail: Res<Assets<EffectMaterial>>,
     mut materials: ResMut<Assets<NebulaMaterial>>,
 ) {
     let Some(n) = &look.nebulae else { return };
+    let bolt = Bolt::of(&frame);
     for (e, cloud, at, mat) in &clouds {
         let Some(rule) = n.find(cloud.effect()).filter(|r| !r.replace) else { continue };
         let Some(old) = retail.get(&mat.0) else { continue };
@@ -445,11 +447,12 @@ fn restyle(
 fn update(
     look: Res<Look>,
     time: Res<Time>,
-    bolt: Res<Bolt>,
+    frame: Res<Frame>,
     clouds: Query<(&Cloud, &GlobalTransform, &MeshMaterial3d<NebulaMaterial>)>,
     mut materials: ResMut<Assets<NebulaMaterial>>,
 ) {
     let Some(n) = &look.nebulae else { return };
+    let bolt = Bolt::of(&frame);
     for (cloud, at, mat) in &clouds {
         let (Some(rule), Some(mut m)) = (n.find(cloud.effect()), materials.get_mut(&mat.0)) else { continue };
         m.extension.u = rule.uniform(at.translation(), cloud.radius(), time.elapsed_secs(), &bolt);
@@ -460,6 +463,18 @@ fn update(
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn a_bolts_light_fades_over_its_seconds_from_the_frame_data() {
+        let mut frame = Frame::default();
+        assert_eq!(Bolt::of(&frame).left, 0.0, "none yet");
+        frame.rows[super::super::frame::BOLT_AT] = Vec3::X.extend(0.0);
+        assert_eq!(Bolt::of(&frame).left, 1.0, "struck just now");
+        frame.rows[super::super::frame::BOLT_AT].w = FLASH_SECONDS * 0.5;
+        assert_eq!((Bolt::of(&frame).at, Bolt::of(&frame).left), (Vec3::X, 0.5));
+        frame.rows[super::super::frame::BOLT_AT].w = FLASH_SECONDS * 2.0;
+        assert_eq!(Bolt::of(&frame).left, 0.0, "out");
+    }
 
     #[test]
     fn absent_without_the_key_and_a_rule_needs_its_match() {
@@ -502,7 +517,7 @@ mod tests {
             .init_asset::<Mesh>()
             .init_asset::<EffectMaterial>()
             .init_asset::<NebulaMaterial>()
-            .init_resource::<Bolt>()
+            .init_resource::<Frame>()
             .insert_resource(Look::parse(&json!({"nebulae": {"rules": [{"match": "Nebula"}]}})))
             .add_systems(Update, restyle);
         let (mesh, retail) = {
@@ -539,7 +554,7 @@ mod tests {
             .init_asset::<Mesh>()
             .init_asset::<EffectMaterial>()
             .init_asset::<NebulaMaterial>()
-            .init_resource::<Bolt>()
+            .init_resource::<Frame>()
             .insert_resource(Look::parse(&json!({"nebulae": {"rules": [{"match": "Nebula", "replace": true}, {"match": "Meteor"}]}})))
             .add_systems(Update, (hide_shells, restyle).chain());
         let retail = app.world_mut().resource_mut::<Assets<EffectMaterial>>().add(crate::fx::additive_material(Handle::default()));
@@ -562,7 +577,7 @@ mod tests {
             .init_asset::<Mesh>()
             .init_asset::<Image>()
             .init_asset::<VolumeMaterial>()
-            .init_resource::<Bolt>()
+            .init_resource::<Frame>()
             .insert_resource(Look::parse(&look))
             .add_systems(Startup, crate::render::volnoise::bake)
             .add_systems(Update, (spawn_volumes, update_volumes).chain());
