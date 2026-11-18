@@ -17,9 +17,7 @@
 use bevy::mesh::MeshVertexBufferLayoutRef;
 use bevy::pbr::{ExtendedMaterial, MaterialExtension, MaterialExtensionKey, MaterialExtensionPipeline};
 use bevy::prelude::*;
-use bevy::render::render_resource::{
-    AsBindGroup, BlendComponent, BlendFactor, BlendOperation, BlendState, CompareFunction, RenderPipelineDescriptor, ShaderType, SpecializedMeshPipelineError,
-};
+use bevy::render::render_resource::{AsBindGroup, CompareFunction, RenderPipelineDescriptor, ShaderType, SpecializedMeshPipelineError};
 use bevy::shader::ShaderRef;
 use serde_json::Value;
 
@@ -178,16 +176,7 @@ impl MaterialExtension for NebulaGlow {
         _: &MeshVertexBufferLayoutRef,
         _: MaterialExtensionKey<Self>,
     ) -> Result<(), SpecializedMeshPipelineError> {
-        // retail ONE/ONE: light is only ever added
-        let component = BlendComponent { src_factor: BlendFactor::One, dst_factor: BlendFactor::One, operation: BlendOperation::Add };
-        if let Some(fragment) = descriptor.fragment.as_mut() {
-            for target in fragment.targets.iter_mut().flatten() {
-                target.blend = Some(BlendState { color: component, alpha: component });
-            }
-        }
-        if let Some(depth) = descriptor.depth_stencil.as_mut() {
-            depth.bias.constant = 0;
-        }
+        super::kit::additive(descriptor);
         Ok(())
     }
 }
@@ -442,7 +431,7 @@ fn restyle(
         let Some(old) = retail.get(&mat.0) else { continue };
         let base = StandardMaterial { base_color: Color::WHITE, base_color_texture: old.base.base_color_texture.clone(), ..old.base.clone() };
         let handle = materials.add(NebulaMaterial { base, extension: NebulaGlow { u: rule.uniform(at.translation(), cloud.radius(), time.elapsed_secs(), &bolt) } });
-        commands.entity(e).try_remove::<MeshMaterial3d<EffectMaterial>>().try_insert((MeshMaterial3d(handle), Volumetric));
+        super::kit::swap::<EffectMaterial, _>(&mut commands, e, handle).try_insert(Volumetric);
     }
 }
 

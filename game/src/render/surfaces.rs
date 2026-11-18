@@ -178,7 +178,7 @@ pub(super) fn surfaces(
             })
             .clone();
         let ship = parents.iter_ancestors(e).find(|a| ships.contains(*a));
-        commands.entity(e).try_remove::<MeshMaterial3d<StandardMaterial>>().try_insert((MeshMaterial3d(styled.clone()), Restyled { original: mat.0.clone(), styled, ship }));
+        super::kit::swap::<StandardMaterial, _>(&mut commands, e, styled.clone()).try_insert(Restyled { original: mat.0.clone(), styled, ship });
     }
 }
 
@@ -188,9 +188,9 @@ pub(super) fn cloaked<M: Material>(mut commands: Commands, cloaks: Query<&crate:
     for (e, r, styled) in &meshes {
         let faded = r.ship.and_then(|s| cloaks.get(s).ok()).is_some_and(|c| c.alpha_for(crate::Side::Player) < 1.0);
         if faded && styled {
-            commands.entity(e).try_remove::<MeshMaterial3d<M>>().try_insert(MeshMaterial3d(r.original.clone()));
+            super::kit::swap::<M, _>(&mut commands, e, r.original.clone());
         } else if !faded && !styled {
-            commands.entity(e).try_remove::<MeshMaterial3d<StandardMaterial>>().try_insert(MeshMaterial3d(r.styled.clone()));
+            super::kit::swap::<StandardMaterial, _>(&mut commands, e, r.styled.clone());
         }
     }
 }

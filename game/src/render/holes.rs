@@ -184,9 +184,7 @@ impl MaterialExtension for HoleGlow {
         _: MaterialExtensionKey<Self>,
     ) -> Result<(), SpecializedMeshPipelineError> {
         // under the ships: no depth write, and the ships' own depth keeps them in front
-        if let Some(depth) = descriptor.depth_stencil.as_mut() {
-            depth.depth_write_enabled = Some(false);
-        }
+        super::kit::no_depth_write(descriptor);
         Ok(())
     }
 }
@@ -274,7 +272,7 @@ impl MaterialExtension for RibbonGlow {
         _: &MeshVertexBufferLayoutRef,
         _: MaterialExtensionKey<Self>,
     ) -> Result<(), SpecializedMeshPipelineError> {
-        super::trails::additive(descriptor);
+        super::kit::additive(descriptor);
         Ok(())
     }
 }
@@ -308,8 +306,8 @@ fn restyle_ribbons(
     let Some(b) = look.black_holes.as_ref().filter(|b| b.replace) else { return };
     for (e, pull, at) in &holes {
         let handle = materials
-            .add(RibbonMaterial { base: super::trails::additive_base(None), extension: RibbonGlow { u: b.ribbon(at.translation(), pull, look.fx_gain, time.elapsed_secs()) } });
-        commands.entity(e).try_remove::<MeshMaterial3d<StandardMaterial>>().try_insert((MeshMaterial3d(handle), RibbonStyled));
+            .add(RibbonMaterial { base: super::kit::additive_base(None), extension: RibbonGlow { u: b.ribbon(at.translation(), pull, look.fx_gain, time.elapsed_secs()) } });
+        super::kit::swap::<StandardMaterial, _>(&mut commands, e, handle).try_insert(RibbonStyled);
     }
 }
 

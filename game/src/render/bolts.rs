@@ -82,7 +82,7 @@ impl MaterialExtension for BoltGlow {
         _: &MeshVertexBufferLayoutRef,
         _: MaterialExtensionKey<Self>,
     ) -> Result<(), SpecializedMeshPipelineError> {
-        super::trails::additive(descriptor);
+        super::kit::additive(descriptor);
         Ok(())
     }
 }
@@ -238,7 +238,7 @@ fn draw(
     let Some((mesh, mut vis)) = target.iter_mut().next() else {
         // the mesh goes with each battle (Scenario); a new one for the next
         let material = materials.add(BoltMaterial {
-            base: super::trails::additive_base(None),
+            base: super::kit::additive_base(None),
             extension: BoltGlow { u: BoltUniform { core: b.core.extend(b.brightness), params: Vec4::new(1.0 / b.glow, 0.0, 0.0, 0.0) } },
         });
         commands.spawn((

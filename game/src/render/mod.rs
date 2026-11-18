@@ -5,6 +5,7 @@
 //!
 //! - here: the camera (HDR, bloom, tonemapping, grading, SMAA, ambient occlusion), sun shadows, and the baked HD sky
 //!   (`view::hd_sky`) as image-based light standing in for the flat ambient light;
+//! - `kit.rs`: what every block repeats: swapping a retail material for the block's, additive (ONE/ONE) drawing, no depth write;
 //! - `lights.rs`: point lights the profile puts on effects (flashes fade, fires and engines flicker);
 //! - `materials.rs`: brighter additive effects and shells for the bloom, smoke lit by the scene, shadow rules for effects;
 //! - `sails.rs`: sail materials with a shader (`shaders/sail.wesl`) and cloth that bellies out with the ship's speed;
@@ -37,6 +38,7 @@ mod bolts;
 mod bursts;
 mod currents;
 mod holes;
+mod kit;
 mod lights;
 mod materials;
 mod nebulae;

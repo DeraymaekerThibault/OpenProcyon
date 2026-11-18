@@ -118,7 +118,7 @@ impl MaterialExtension for TracerGlow {
         _: &MeshVertexBufferLayoutRef,
         _: MaterialExtensionKey<Self>,
     ) -> Result<(), SpecializedMeshPipelineError> {
-        super::trails::additive(descriptor);
+        super::kit::additive(descriptor);
         Ok(())
     }
 }
@@ -205,7 +205,7 @@ fn tracers(
     let Some((mesh, mat, mut vis)) = target.iter_mut().next() else {
         // the mesh goes with each battle (Scenario); a new one for the next
         let material = materials
-            .add(TracerMaterial { base: super::trails::additive_base(None), extension: TracerGlow { u: TracerUniform { core: t.core.extend(t.brightness), params: Vec4::ZERO } } });
+            .add(TracerMaterial { base: super::kit::additive_base(None), extension: TracerGlow { u: TracerUniform { core: t.core.extend(t.brightness), params: Vec4::ZERO } } });
         commands.spawn((
             crate::Scenario,
             TracerMesh,

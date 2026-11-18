@@ -239,9 +239,9 @@ pub(super) fn sails(
         let ship = parents.iter_ancestors(e).find(|a| ships.contains(*a));
         // a ship that starts stopped starts with its sails folded
         let furl = ship.and_then(|e| ships.get(e).ok()).map_or(0.0, |sh| f32::from(u8::from(sh.ordered() == 0.0)));
-        let mut entity = commands.entity(e);
         let restyled = Restyled { original: mat.0.clone(), styled: handle.clone(), ship };
-        entity.try_remove::<MeshMaterial3d<StandardMaterial>>().try_insert((MeshMaterial3d(handle), Sail { ship, wind: 0.0, clock: 0.0, phase, furl }, restyled));
+        let mut entity = super::kit::swap::<StandardMaterial, _>(&mut commands, e, handle);
+        entity.try_insert((Sail { ship, wind: 0.0, clock: 0.0, phase, furl }, restyled));
         if !s.opaque {
             entity.try_insert(NotShadowCaster);
         }

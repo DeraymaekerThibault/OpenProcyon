@@ -385,9 +385,7 @@ impl MaterialExtension for SkyGlow {
         _: MaterialExtensionKey<Self>,
     ) -> Result<(), SpecializedMeshPipelineError> {
         // behind everything: the depth test does that, so the dome writes none
-        if let Some(depth) = descriptor.depth_stencil.as_mut() {
-            depth.depth_write_enabled = Some(false);
-        }
+        super::kit::no_depth_write(descriptor);
         Ok(())
     }
 }

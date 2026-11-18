@@ -245,8 +245,8 @@ fn restyle(
                 h
             }
         };
-        let mut entity = commands.entity(e);
-        entity.try_remove::<MeshMaterial3d<StandardMaterial>>().try_insert((MeshMaterial3d(styled.clone()), Restyled { original: mat.0.clone(), styled, ship }));
+        let mut entity = super::kit::swap::<StandardMaterial, _>(&mut commands, e, styled.clone());
+        entity.try_insert(Restyled { original: mat.0.clone(), styled, ship });
         if !rule.shadows {
             entity.try_insert(NotShadowCaster);
         }

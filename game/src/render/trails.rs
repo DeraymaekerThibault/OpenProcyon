@@ -10,11 +10,12 @@ use bevy::light::NotShadowCaster;
 use bevy::mesh::{Indices, MeshVertexBufferLayoutRef, PrimitiveTopology, VertexAttributeValues};
 use bevy::pbr::{ExtendedMaterial, MaterialExtension, MaterialExtensionKey, MaterialExtensionPipeline};
 use bevy::prelude::*;
-use bevy::render::render_resource::{AsBindGroup, BlendComponent, BlendFactor, BlendOperation, BlendState, RenderPipelineDescriptor, ShaderType, SpecializedMeshPipelineError};
+use bevy::render::render_resource::{AsBindGroup, RenderPipelineDescriptor, ShaderType, SpecializedMeshPipelineError};
 use bevy::shader::ShaderRef;
 use serde_json::Value;
 use std::collections::HashMap;
 
+use super::kit::{additive, additive_base};
 use super::{Look, num, rgb};
 use crate::fx::{EffectMaterial, Fx};
 
@@ -92,32 +93,6 @@ pub fn parse_wakes(v: &Value) -> Option<Wakes> {
         },
         height: num(&v["height"], 0.58),
     })
-}
-
-/// ONE/ONE blending like the retail additive effects (fx::RetailAdd): the shaders write unpremultiplied light.
-pub(super) fn additive(descriptor: &mut RenderPipelineDescriptor) {
-    let component = BlendComponent { src_factor: BlendFactor::One, dst_factor: BlendFactor::One, operation: BlendOperation::Add };
-    if let Some(fragment) = descriptor.fragment.as_mut() {
-        for target in fragment.targets.iter_mut().flatten() {
-            target.blend = Some(BlendState { color: component, alpha: component });
-        }
-    }
-    if let Some(depth) = descriptor.depth_stencil.as_mut() {
-        depth.bias.constant = 0;
-    }
-}
-
-/// Unlit, two-sided, drawn after the scene's blended meshes like the retail additive effects.
-pub(super) fn additive_base(texture: Option<Handle<Image>>) -> StandardMaterial {
-    StandardMaterial {
-        base_color_texture: texture,
-        unlit: true,
-        cull_mode: None,
-        double_sided: true,
-        alpha_mode: AlphaMode::Blend,
-        depth_bias: crate::fx::ADDITIVE_SORT_BIAS,
-        ..default()
-    }
 }
 
 #[derive(Clone, Copy, Default, Debug, ShaderType)]
@@ -335,6 +310,7 @@ fn wakes(
             base: additive_base(texture),
             extension: WakeGlow { u: WakeUniform { tint: tint.extend(w.brightness), hot: w.hot.extend(0.0), params: Vec4::new(1.0, 0.0, w.core, 0.0) } },
         });
+        // the wake's ribbon stops drawing; its tubes draw instead
         commands.entity(e).try_remove::<MeshMaterial3d<EffectMaterial>>();
         let tube = meshes.add(Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default()));
         commands.spawn((

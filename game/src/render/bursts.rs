@@ -231,7 +231,7 @@ impl MaterialExtension for BurstGlow {
         _: &MeshVertexBufferLayoutRef,
         _: MaterialExtensionKey<Self>,
     ) -> Result<(), SpecializedMeshPipelineError> {
-        super::trails::additive(descriptor);
+        super::kit::additive(descriptor);
         Ok(())
     }
 }
@@ -435,7 +435,7 @@ fn draw(
         let mesh = |meshes: &mut Assets<Mesh>| Mesh3d(meshes.add(Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default())));
         let common = || (crate::Scenario, Transform::default(), Visibility::Hidden, NoFrustumCulling, NotShadowCaster);
         if glows.is_empty() {
-            let m = glow_mats.add(BurstMaterial { base: super::trails::additive_base(None), extension: BurstGlow::default() });
+            let m = glow_mats.add(BurstMaterial { base: super::kit::additive_base(None), extension: BurstGlow::default() });
             commands.spawn((Glows, mesh(&mut meshes), MeshMaterial3d(m), common()));
         }
         if smokes.is_empty() {
