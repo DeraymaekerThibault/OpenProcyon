@@ -95,6 +95,9 @@ pub struct Look {
     pub bolts: Option<bolts::Bolts>,
     /// Etherium currents drawn as flowing streaks and sparkles (`shaders/current.wesl`).
     pub currents: Option<currents::Currents>,
+    /// Retail effects (lower-cased fragments of the effect's file name) whose quads are not drawn, for a mod that draws its own:
+    /// the effect keeps running (particles, timers, lights, sounds), only its drawing goes (`replace.rs`).
+    pub hide_effects: Vec<String>,
     /// Darkened screen corners (Bevy `Vignette` intensity; 0 = none).
     pub vignette: f32,
     /// Colour fringing at rest and how much a big blast's jolt adds.
@@ -166,6 +169,7 @@ impl Look {
             nebulae: nebulae::parse(&v["nebulae"]),
             bolts: bolts::parse(&v["nebulae"]["bolt"]),
             currents: currents::parse(&v["currents"]),
+            hide_effects: names(&v["hide_effects"], &[]).into_iter().filter(|n| !n.is_empty()).collect(),
             vignette: num(&cam["vignette"], 0.0),
             aberration: num(&cam["aberration"], 0.0),
             aberration_pulse: num(&cam["aberration_pulse"], 0.0),
@@ -380,6 +384,7 @@ mod tests {
         let look = Look::parse(&serde_json::json!({}));
         assert_eq!((look.bloom, look.fx_gain, look.sky_light, look.shadows, look.smaa, look.lit_smoke), (0.15, 1.0, 0.0, false, true, false));
         assert!(look.sky.is_none());
+        assert!(look.hide_effects.is_empty());
         assert!(look.lights.is_empty() && look.sails.is_none() && look.engines.is_none() && look.wakes.is_none());
         assert!(
             look.tracers.is_none()

@@ -3,8 +3,10 @@
 //! vortex trail); only its quads are not drawn (`fx::HiddenFx`, honoured by the particle batcher), so the profile can draw its own
 //! instead of stacking on the retail look. The cloud shell is hidden in `nebulae.rs`.
 //!
-//! Which effects: the retail glow, beam and ribbon layers of a hole (`BlackHoleRibbons_*`) when `black_holes.replace`, and the retail
-//! `Lightning` sprite of a storm bolt when a `SolarStorm` rule replaces. Nothing here writes to the simulation.
+//! Which effects: the retail glow, beam and ribbon layers of a hole (`BlackHoleRibbons_*`) when `black_holes.replace`, the retail
+//! `Lightning` sprite of a storm bolt when a `SolarStorm` rule replaces, and any effect whose name contains a fragment of the
+//! profile's `hide_effects` (for a mod that draws its own with a `materials` rule or another block). Nothing here writes to the
+//! simulation.
 
 use bevy::prelude::*;
 
@@ -13,12 +15,14 @@ use crate::fx::{EffectStarted, FxLib, HiddenFx};
 
 /// Whether an effect (by its file name) is drawn by the profile instead, given the profile.
 pub fn replaced(look: &Look, effect: &str) -> bool {
-    (look.black_holes.as_ref().is_some_and(|b| b.replace) && effect.starts_with("BlackHoleRibbons_"))
+    let lower = effect.to_lowercase();
+    look.hide_effects.iter().any(|h| lower.contains(h.as_str()))
+        || (look.black_holes.as_ref().is_some_and(|b| b.replace) && effect.starts_with("BlackHoleRibbons_"))
         || (effect == "Lightning" && look.bolts.is_some() && look.nebulae.as_ref().is_some_and(|n| n.replaces_storms()))
 }
 
 pub fn plugin(app: &mut App, look: &Look) {
-    if ["BlackHoleRibbons_Small", "Lightning"].iter().any(|n| replaced(look, n)) {
+    if !look.hide_effects.is_empty() || ["BlackHoleRibbons_Small", "Lightning"].iter().any(|n| replaced(look, n)) {
         app.add_systems(Update, hide_replaced);
     }
 }
@@ -62,6 +66,21 @@ mod tests {
             assert_eq!(replaced(look, "Lightning"), bolt);
             assert!(!replaced(look, "Explosion_Light") && !replaced(look, "MeteorStorm"), "nothing else is hidden");
         }
+    }
+
+    #[test]
+    fn hide_effects_hides_any_effect_by_a_fragment_of_its_name() {
+        let look = Look::parse(&json!({"hide_effects": ["explosion_", "MeteorStorm", ""]}));
+        assert_eq!(look.hide_effects, ["explosion_", "meteorstorm"], "lower case, empty fragments dropped");
+        assert!(replaced(&look, "Explosion_Light") && replaced(&look, "MeteorStorm"), "not case-sensitive");
+        assert!(!replaced(&look, "Lightning") && !replaced(&look, "BlackHoleRibbons_Large"), "nothing it does not name");
+        let mut app = app(look);
+        let (boom, bolt) = (app.world_mut().spawn(Transform::default()).id(), app.world_mut().spawn(Transform::default()).id());
+        let started = |entity, effect| EffectStarted { entity, effect, at: Vec3::ZERO, forward: Vec3::Z, shell: None, host: None };
+        app.world_mut().resource_mut::<Messages<EffectStarted>>().write(started(boom, 2));
+        app.world_mut().resource_mut::<Messages<EffectStarted>>().write(started(bolt, 1));
+        app.update();
+        assert!(app.world().entity(boom).contains::<HiddenFx>() && !app.world().entity(bolt).contains::<HiddenFx>());
     }
 
     fn app(look: Look) -> App {
