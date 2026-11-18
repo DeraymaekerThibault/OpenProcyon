@@ -41,7 +41,8 @@ fn current_m3(world: &mut World, frame: u32) {
         let children = world.get::<Children>(currents[0]).unwrap();
         assert_eq!(children.len(), 2);
         for child in children.iter() {
-            let h = world.get::<MeshMaterial3d<crate::fx::EffectMaterial>>(child).unwrap();
+            // a render profile with the `currents` block swaps the retail material (and keeps the scroll itself)
+            let Some(h) = world.get::<MeshMaterial3d<crate::fx::EffectMaterial>>(child) else { continue };
             let material = world.resource::<Assets<crate::fx::EffectMaterial>>().get(&h.0).unwrap();
             assert!(material.base.uv_transform.translation.y < 0.0);
         }
