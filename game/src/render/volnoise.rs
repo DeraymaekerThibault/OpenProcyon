@@ -1,4 +1,4 @@
-//! Not retail: the baked noise the volume shader (`shaders/volume.wesl`) samples instead of computing value noise per step. A
+//! Not retail: the baked noise the volume shader (`shaders/volume.wesl`) and the sky dome (`shaders/sky.wesl`) sample instead of computing value noise per step. A
 //! 64-cubed RGBA8 volume of periodic value noise, made once at startup (it tiles, so the shader wraps its coordinates):
 //!  - r: the gas, three octaves (cell sizes 1, 1/2 and 1/4 of a base cell) at 0.58, 0.3 and 0.12;
 //!  - g: the slow warp noise that makes the gas churn in place;
@@ -76,6 +76,14 @@ pub fn image() -> Image {
         ..default()
     });
     image
+}
+
+/// The baked noise, one image for every shader that samples it (the volumes, the sky dome).
+#[derive(Resource)]
+pub struct NoiseVolume(pub Handle<Image>);
+
+pub fn bake(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
+    commands.insert_resource(NoiseVolume(images.add(image())));
 }
 
 #[cfg(test)]

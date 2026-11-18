@@ -168,8 +168,10 @@ fn fragment(in: VertexOutput) -> FragmentOutput {
         // nothing pops in right at the lens
         let near = smoothstep(0.0, radius * 0.04, t);
         // a storm wheels: the gas is sampled turned back by how far it has gone round, in two phases blended
-        var g = sample(q, clock);
-        if vol.storm.x != 0.0 {
+        var g: vec3<f32>;
+        if vol.storm.x == 0.0 {
+            g = sample(q, clock);
+        } else {
             let period = 8.0;
             let pa = fract(vol.params.x / period);
             let pb = fract(vol.params.x / period + 0.5);
@@ -232,10 +234,11 @@ fn fragment(in: VertexOutput) -> FragmentOutput {
         }
     }
 
-    // never a wall: one cloud reaches `max_opacity` at most, and less where the ray ended on a hull
-    let cap = select(vol.low.w, vol.low.w * 0.6, hit_scene) * vol.params.w;
+    // never a wall: one cloud reaches `max_opacity` at most, and less where the ray ended on a hull; the mission's fadeout then
+    // scales light and cover alike (premultiplied), so a fading cloud thins out instead of turning into a dark smudge
+    let cap = select(vol.low.w, vol.low.w * 0.6, hit_scene);
     let alpha = 1.0 - tr;
-    let k = min(1.0, cap / max(alpha, 1.0e-4));
-    out.color = vec4<f32>(light * k * vol.params.w, alpha * k);
+    let k = min(1.0, cap / max(alpha, 1.0e-4)) * vol.params.w;
+    out.color = vec4<f32>(light * k, alpha * k);
     return out;
 }

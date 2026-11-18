@@ -261,6 +261,10 @@ pub fn plugin(app: &mut App) {
     nebulae::plugin(app, &look);
     bolts::plugin(app, &look);
     currents::plugin(app, &look);
+    // one baked noise volume for every block that samples it
+    if look.sky.is_some() || look.nebulae.is_some() {
+        app.add_systems(Startup, volnoise::bake);
+    }
     app.insert_resource(look.flags).insert_resource(look).add_systems(Update, (camera, sun, sky_light));
 }
 

@@ -368,6 +368,10 @@ pub struct SkyGlow {
     #[texture(103, dimension = "cube")]
     #[sampler(104)]
     pub stars: Option<Handle<Image>>,
+    /// The baked tiling noise (`volnoise.rs`: r three octaves, g warp), so the wisps cost a texture read, not value noise per pixel.
+    #[texture(105, dimension = "3d")]
+    #[sampler(106)]
+    pub noise: Option<Handle<Image>>,
 }
 
 impl MaterialExtension for SkyGlow {
@@ -412,6 +416,16 @@ fn sky_name(cube: &str) -> &str {
     file.strip_suffix("_cube.png").unwrap_or(file)
 }
 
+/// Whether a loaded image is (now) a cube map. Borrows it mutably only while it still is a stack of faces: a mutable borrow
+/// marks the image changed, and Bevy then uploads it to the GPU again.
+fn ready(h: &Handle<Image>, images: &mut Assets<Image>) -> bool {
+    match images.get(h) {
+        None => false,
+        Some(i) if i.texture_descriptor.size.depth_or_array_layers == 6 => true,
+        Some(_) => images.get_mut(h).is_some_and(|mut i| crate::view::as_cube(&mut i)),
+    }
+}
+
 /// The stars image a sky is waiting for.
 #[derive(Component)]
 pub(super) struct StarsImage(pub(super) Handle<Image>);
@@ -450,6 +464,7 @@ fn dome(
     time: Res<Time>,
     assets: Res<AssetServer>,
     events: Res<SkyEvents>,
+    noise: Option<Res<super::volnoise::NoiseVolume>>,
     cams: Query<&GlobalTransform, With<Camera3d>>,
     holes: Query<(&GlobalTransform, &crate::blackhole::Pull), With<crate::blackhole::BlackHole>>,
     skies: Query<(Entity, &HdSky, Option<&StarsImage>), With<Sky>>,
@@ -495,13 +510,15 @@ fn dome(
             }
             None => None,
         };
-        let ready = |h: &Handle<Image>, images: &mut Assets<Image>| images.get_mut(h).is_some_and(|mut i| crate::view::as_cube(&mut i));
+        // a stars cube that does not load (a broken file) leaves the dome without stars instead of without a dome
+        let stars_handle = stars_handle.filter(|h| !assets.load_state(h).is_failed());
         if !ready(&hd.0, &mut images) || stars_handle.as_ref().is_some_and(|h| !ready(h, &mut images)) {
             continue;
         }
+        let Some(noise) = noise.as_ref() else { continue };
         let uniform = sky.uniform(real.elapsed_secs(), time.elapsed_secs(), time.delta_secs());
         let base = StandardMaterial { unlit: true, cull_mode: None, double_sided: true, alpha_mode: AlphaMode::Premultiplied, depth_bias: SORT_BIAS, ..default() };
-        let material = materials.add(SkyMaterial { base, extension: SkyGlow { u: uniform, cube: Some(hd.0.clone()), stars: stars_handle } });
+        let material = materials.add(SkyMaterial { base, extension: SkyGlow { u: uniform, cube: Some(hd.0.clone()), stars: stars_handle, noise: Some(noise.0.clone()) } });
         commands.entity(e).with_child((
             Dome(sky),
             Mesh3d(meshes.add(Sphere::new(1.0).mesh().uv(48, 24))),
@@ -571,6 +588,38 @@ mod tests {
         assert_eq!(s.sheet.map(|x| x.every), Some(30.0));
         assert_eq!((s.layers[0].opacity, s.layers[0].distance, s.stars.map(|t| t.twinkle)), (0.8, 3000.0, Some(0.3)), "objects merge key by key");
         assert_eq!(d.for_sky("skybox_16").base.map(|b| b.breath), Some(0.2), "keys are not case-sensitive");
+    }
+
+    #[test]
+    fn a_cube_that_is_ready_is_not_touched_again() {
+        use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, AssetPlugin::default())).init_asset::<Image>();
+        let faces = Image::new_fill(
+            Extent3d { width: 4, height: 24, depth_or_array_layers: 1 },
+            TextureDimension::D2,
+            &[0, 0, 0, 255],
+            TextureFormat::Rgba8UnormSrgb,
+            bevy::asset::RenderAssetUsages::default(),
+        );
+        let h = app.world_mut().resource_mut::<Assets<Image>>().add(faces);
+        app.update();
+        let modified = |app: &mut App| {
+            let msgs = app.world_mut().resource_mut::<Messages<AssetEvent<Image>>>();
+            let mut reader = msgs.get_cursor();
+            reader.read(&msgs).filter(|e| matches!(e, AssetEvent::Modified { .. })).count()
+        };
+        let before = modified(&mut app);
+        assert!(ready(&h, &mut app.world_mut().resource_mut::<Assets<Image>>()), "six stacked faces become a cube");
+        app.update();
+        let converted = modified(&mut app);
+        assert!(converted > before, "the conversion is an upload");
+        for _ in 0..3 {
+            assert!(ready(&h, &mut app.world_mut().resource_mut::<Assets<Image>>()));
+            app.update();
+        }
+        assert_eq!(modified(&mut app), converted, "a ready cube is never borrowed mutably again, so never uploaded again");
+        assert!(!ready(&Handle::default(), &mut app.world_mut().resource_mut::<Assets<Image>>()), "not loaded, not ready");
     }
 
     #[test]

@@ -23,6 +23,7 @@ use bevy::render::render_resource::{
 use bevy::shader::ShaderRef;
 use serde_json::Value;
 
+use super::volnoise::NoiseVolume;
 use super::{Look, num, rgb};
 use crate::fx::EffectMaterial;
 use crate::nebula::{Cloud, StormFlash};
@@ -239,14 +240,6 @@ pub struct VolumeGas {
     pub noise: Handle<Image>,
 }
 
-/// The baked noise volume the clouds march through.
-#[derive(Resource)]
-struct NoiseVolume(Handle<Image>);
-
-fn bake_noise(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
-    commands.insert_resource(NoiseVolume(images.add(super::volnoise::image())));
-}
-
 impl MaterialExtension for VolumeGas {
     fn fragment_shader() -> ShaderRef {
         VOLUME_SHADER.into()
@@ -379,7 +372,6 @@ pub fn plugin(app: &mut App, look: &Look) {
     if look.nebulae.is_some() {
         app.add_plugins((MaterialPlugin::<NebulaMaterial>::default(), MaterialPlugin::<VolumeMaterial>::default()))
             .init_resource::<Bolt>()
-            .add_systems(Startup, bake_noise)
             .add_systems(Update, (bolts, hide_shells, spawn_volumes, update_volumes, restyle, update).chain());
     }
 }
@@ -576,7 +568,7 @@ mod tests {
             .init_asset::<VolumeMaterial>()
             .init_resource::<Bolt>()
             .insert_resource(Look::parse(&look))
-            .add_systems(Startup, bake_noise)
+            .add_systems(Startup, crate::render::volnoise::bake)
             .add_systems(Update, (spawn_volumes, update_volumes).chain());
         app
     }

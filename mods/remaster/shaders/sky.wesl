@@ -63,6 +63,10 @@ struct Sky {
 @group(constants::MATERIAL_BIND_GROUP) @binding(102) var sky_sampler: sampler;
 @group(constants::MATERIAL_BIND_GROUP) @binding(103) var star_cube: texture_cube<f32>;
 @group(constants::MATERIAL_BIND_GROUP) @binding(104) var star_sampler: sampler;
+// the baked tiling noise (game/src/render/volnoise.rs): r the gas (three octaves), g the warp, b a third field; CELLS cells a tile
+@group(constants::MATERIAL_BIND_GROUP) @binding(105) var noise_tex: texture_3d<f32>;
+@group(constants::MATERIAL_BIND_GROUP) @binding(106) var noise_samp: sampler;
+const CELLS: f32 = 8.0;
 
 fn hash3(p: vec3<f32>) -> f32 {
     return fract(sin(dot(p, vec3<f32>(127.1, 311.7, 74.7))) * 43758.5453);
@@ -72,19 +76,9 @@ fn hash1(n: f32) -> f32 {
     return fract(sin(n * 12.9898 + 4.1414) * 43758.5453);
 }
 
-// value noise, 0..1
-fn noise3(p: vec3<f32>) -> f32 {
-    let i = floor(p);
-    let f = fract(p);
-    let u = f * f * (3.0 - 2.0 * f);
-    let a = mix(mix(hash3(i), hash3(i + vec3<f32>(1.0, 0.0, 0.0)), u.x), mix(hash3(i + vec3<f32>(0.0, 1.0, 0.0)), hash3(i + vec3<f32>(1.0, 1.0, 0.0)), u.x), u.y);
-    let b = mix(mix(hash3(i + vec3<f32>(0.0, 0.0, 1.0)), hash3(i + vec3<f32>(1.0, 0.0, 1.0)), u.x), mix(hash3(i + vec3<f32>(0.0, 1.0, 1.0)), hash3(i + vec3<f32>(1.0, 1.0, 1.0)), u.x), u.y);
-    return mix(a, b, u.z);
-}
-
-// three octaves, 0..1 (about)
-fn fbm3(p: vec3<f32>) -> f32 {
-    return 0.55 * noise3(p) + 0.3 * noise3(p * 2.03 + vec3<f32>(5.2, 1.3, 8.1)) + 0.15 * noise3(p * 4.1 + vec3<f32>(2.7, 9.2, 3.3));
+// the baked noise at `p` (in cells): one read where value noise would cost eight hashes an octave
+fn bake(p: vec3<f32>) -> vec4<f32> {
+    return textureSampleLevel(noise_tex, noise_samp, p / CELLS, 0.0);
 }
 
 // the cube is left-handed: the baker lays the sky out for the ray with z negated, as Bevy's own skybox samples
@@ -209,7 +203,7 @@ fn fragment(in: VertexOutput) -> FragmentOutput {
         let p0 = fract(t);
         let p1 = fract(t + 0.5);
         let w = 1.0 - abs(2.0 * p0 - 1.0);
-        let flow = vec3<f32>(noise3(dir * 3.0 + vec3<f32>(0.0, 0.0, 1.7)), noise3(dir * 3.0 + vec3<f32>(4.1, 0.0, 0.0)), noise3(dir * 3.0 + vec3<f32>(0.0, 8.3, 0.0))) - vec3<f32>(0.5);
+        let flow = bake(dir * 3.0 + vec3<f32>(0.0, 0.0, 1.7)).rgb - vec3<f32>(0.5);
         let c0 = sample_sky(normalize(dir + flow * sky.base.x * p0 * 2.0));
         let c1 = sample_sky(normalize(dir + flow * sky.base.x * p1 * 2.0));
         var col = mix(c1, c0, w);
@@ -242,8 +236,8 @@ fn fragment(in: VertexOutput) -> FragmentOutput {
         if l.b.x > 0.0 {
             // wisps: noise on the lookup point, its domain warped slowly so the patches churn in place
             let n = q * l.b.x + vec3<f32>(f32(i) * 7.3);
-            let warp = vec3<f32>(noise3(n * 0.7 + vec3<f32>(clock * 0.011, 0.0, 0.0)), noise3(n * 0.7 + vec3<f32>(0.0, clock * 0.013, 3.1)), noise3(n * 0.7 + vec3<f32>(5.7, 1.9, clock * 0.009))) - vec3<f32>(0.5);
-            let f = fbm3(n + warp * 1.6 + vec3<f32>(0.0, 0.0, clock * 0.006));
+            let warp = bake(n * 0.7 + vec3<f32>(clock * 0.011, clock * 0.013, clock * 0.009)).rgb - vec3<f32>(0.5);
+            let f = bake(n + warp * 1.6 + vec3<f32>(0.0, 0.0, clock * 0.006)).r;
             keep = keep * smoothstep(0.32, 0.68, f);
         }
         let a = keep * l.a.x;

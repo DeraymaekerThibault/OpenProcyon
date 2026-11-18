@@ -47,6 +47,8 @@ pub struct BlackHoles {
     pub replace: bool,
     /// With `replace`: brightness of the infall ribbons (the thin streaking strips), times `fx_gain`.
     pub ribbons: f32,
+    /// With `replace`: the infall ribbons' cooler colour (linear); they run hotter toward the core.
+    pub ribbon_color: Vec3,
     /// The whirlpool (`funnel.depth`): how deep under the hole's plane the funnel sinks at its throat, a share of the radius
     /// (0 = a flat disc in the plane). The bent sky and the hole's shadow are centred down there too, so the plane the ships
     /// sail stays unbent and the hole reads as a maelstrom to keep out of, not a sphere in the battle.
@@ -138,6 +140,7 @@ pub fn parse(v: &Value) -> Option<BlackHoles> {
             drop: num(&v["drop"], 0.02).clamp(0.0, 0.5),
             replace: v["replace"].as_bool().unwrap_or(false),
             ribbons: num(&v["ribbons"], 1.0).clamp(0.0, 8.0),
+            ribbon_color: rgb(&v["ribbon_color"]).unwrap_or(Vec3::new(1.0, 0.38, 0.12)).max(Vec3::ZERO),
             depth: num(&v["funnel"]["depth"], 0.0).clamp(0.0, 3.0),
             throat: num(&v["funnel"]["throat"], 0.06).clamp(0.01, 0.5),
             rim: rgb(&v["funnel"]["rim"]).unwrap_or(Vec3::new(0.3, 0.18, 0.65)).max(Vec3::ZERO),
@@ -287,7 +290,7 @@ impl BlackHoles {
         RibbonUniform {
             centre: centre.extend(pull.radius),
             shape: Vec4::new(pull.core(), self.ribbons * gain, self.depth * pull.radius, self.throat * pull.radius),
-            color: Vec3::new(1.0, 0.38, 0.12).extend(0.0),
+            color: self.ribbon_color.extend(0.0),
             params: Vec4::new(clock, 0.0, 0.0, 0.0),
         }
     }
@@ -510,6 +513,15 @@ mod tests {
         assert_eq!(deep, at - Vec3::Y * pull.radius);
         assert_eq!(parse(&json!({})).unwrap().shadow_core(&pull), pull.core());
         assert!(parse(&json!({"funnel": {"depth": 1.0}})).unwrap().shadow_core(&pull) < pull.core() * 0.5);
+    }
+
+    #[test]
+    fn the_ribbons_colour_comes_from_the_profile() {
+        let pull = Pull::for_terrain("Terrain_BlackHole_Med").unwrap();
+        let default = parse(&json!({})).unwrap().ribbon(Vec3::ZERO, &pull, 1.0, 0.0);
+        assert_eq!(default.color, Vec4::new(1.0, 0.38, 0.12, 0.0));
+        let own = parse(&json!({"ribbon_color": [0.2, 0.5, 1.0]})).unwrap().ribbon(Vec3::ZERO, &pull, 1.0, 0.0);
+        assert_eq!(own.color, Vec4::new(0.2, 0.5, 1.0, 0.0));
     }
 
     #[test]
