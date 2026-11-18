@@ -817,3 +817,25 @@ fn dying_ship_sails_on_and_collides_with_nothing() {
     assert!(w.translation.z < -3.0, "it passed through: {}", w.translation.z);
     assert_eq!(app.world().get::<Transform>(other).unwrap().translation, Vec3::ZERO);
 }
+
+fn axis_box(centre: Vec3, half: Vec3) -> tree::Box3 {
+    tree::Box3 { centre, axes: [Vec3::X, Vec3::Y, Vec3::Z], half }
+}
+#[test]
+fn ship_boxes_touching_on_a_side_face_meet_at_the_average_of_the_edge_hits() {
+    // A = [-1,1]^3. B = x [0.5,2.5], y [-0.3,0.7], z [-0.15,0.35]. B's four x-edges cross A's x = 1 plane (t = 0.25, the nearest
+    // hit to the middle) at the corners (1, -0.3|0.7, -0.15|0.35), inside both boxes; their ends lie in A, so no second hit.
+    // B's other edges and all of A's edges have their nearest hit outside the other box. Average: (1, 0.2, 0.1).
+    let a = axis_box(Vec3::ZERO, Vec3::ONE);
+    let b = axis_box(Vec3::new(1.5, 0.2, 0.1), Vec3::new(1.0, 0.5, 0.25));
+    near(box_contact_point(&a, &b).unwrap(), Vec3::new(1.0, 0.2, 0.1));
+    near(box_contact_point(&b, &a).unwrap(), Vec3::new(1.0, 0.2, 0.1));
+}
+#[test]
+fn a_box_wholly_inside_another_has_no_contact_point_though_the_axes_overlap() {
+    let big = axis_box(Vec3::ZERO, Vec3::splat(5.0));
+    let small = axis_box(Vec3::new(0.3, 0.1, -0.2), Vec3::splat(0.5));
+    assert!(hull_push(&small, &big).is_some());
+    assert!(box_contact_point(&big, &small).is_none());
+    assert!(box_contact_point(&small, &big).is_none());
+}

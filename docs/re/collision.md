@@ -16,7 +16,16 @@ Source: observed behaviour of the original game, WOT collision definitions and t
 
 - **Contact shapes:** ship against ship tests the two physics boxes (the WOT `MinExtents` / `MaxExtents`, no padding) once their
   collision spheres overlap, by separating axes (the box faces and the cross products of their edges); the axis of least
-  penetration is the normal and the contact point is the centre of the touching corners.
+  penetration is the normal; the contact point is found separately (see "Contact point").
+- **Contact point** (ship against ship; read from the code, not yet checked on the original): two passes, each with one box as the
+  face box and the other as the edge box, then swapped. Each of the edge box's 12 edges is taken as a whole line (parameter 0 at
+  one corner, 1 at the other, not limited to that range) and cut by the planes of the face box's six faces; a plane is skipped when
+  the edge, corner to corner, is nearly parallel to it (|dot(unit normal, edge vector)| < 0.0001). The edge's hits are ordered by
+  distance of the parameter from 0.5 (ties unspecified). The nearest hit counts only if it lies inside both boxes, each tested in
+  its own frame against its extents widened by 0.1 on every side. If it counted and neither corner of the edge lies inside the
+  face box (same widened test), the second-nearest hit counts too, untested. The contact point is the plain average of all counted
+  points of both passes. When none counts the pair has no contact that tick (no push, no yaw kick, no ram damage), even though the
+  separating-axis test overlaps, e.g. one box wholly inside the other. The push depth and normal still come from the axis test.
 - **Ship against ship**, checked every physics tick (0.033 s) while the hulls overlap: the two are pushed apart in proportion to the other's mass (the heavier one moves less; an idle ship is no exception). The contact normal is
   the box test's own 3-D axis, but the push is horizontal: the depth times |cos| of the angle between that axis and its horizontal
   part, applied along the horizontal part (a steep or vertical axis moves the hulls little or not at all; flat axes lose nothing).
