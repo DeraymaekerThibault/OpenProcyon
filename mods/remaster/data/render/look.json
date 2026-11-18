@@ -82,6 +82,13 @@
   },
   "lights": [
     {
+      "effects": "Lightning",
+      "color": [0.65, 0.8, 1.0],
+      "lumens": 1500000000.0,
+      "range": 260,
+      "seconds": 0.25
+    },
+    {
       "effects": "Explosion_Huge",
       "color": [
         1.0,
@@ -638,6 +645,11 @@
   },
   "bursts": {
     "effects": [
+      {
+        "match": "Lightning",
+        "flash": {"size": 6, "color": [0.7, 0.85, 1.0], "seconds": 0.12},
+        "sparks": {"count": 24, "speed": 40, "size": 0.1, "seconds": 0.5, "spread": 180, "color": [0.65, 0.8, 1.0]}
+      },
       {
         "match": "Explosion_Huge",
         "shake": 1.6,
