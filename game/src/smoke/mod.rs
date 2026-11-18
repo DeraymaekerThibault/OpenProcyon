@@ -57,7 +57,7 @@ scripts! {
     MapInfo => "map-info", MenuSelected => "menu-selected", MenuFriendly => "menu-friendly", MenuEnemy => "menu-enemy", ModsBake => "mods-bake",
     Mission => "mission", Pause => "pause", PauseRestart => "pause-restart", Quick => "quick",
     Restart => "restart", Shells => "shells", Sight => "sight", Speedtest => "speedtest",
-    StormM3 => "storm-m3", StormM3Damage => "storm-m3-damage", Talk => "talk", Target => "target", Victory => "victory",
+    StormFlash => "stormflash", StormM3 => "storm-m3", StormM3Damage => "storm-m3-damage", Talk => "talk", Target => "target", Victory => "victory",
 }
 
 pub fn plugin(app: &mut App) {
@@ -65,7 +65,7 @@ pub fn plugin(app: &mut App) {
     trace::plugin(app);
     app.add_systems(PreUpdate, fleet::fleet_smoke.after(bevy::ui::UiSystems::Focus).before(crate::panels::hud_input))
         .add_systems(PreUpdate, lifeboats::smoke.after(bevy::ui::UiSystems::Focus))
-        .add_systems(Update, (shells::shells, animals));
+        .add_systems(Update, (shells::shells, animals, stormflash));
 }
 
 /// `--script animals --map dragons_nest --shot <png> --shot-frame N`: from frame 20 the first space animal (a dragon here, a
@@ -200,4 +200,22 @@ pub fn autoplay_end(
     info!("autoplay state point={point:?} tasks={:?}", sc.tasks_text());
     info!("autoplay end outcome={outcome:?} time={:.0} never_fired={:?}", sc.time, sc.never_fired());
     std::process::exit(0);
+}
+
+/// `--script stormflash`: a bolt of lightning (the effect and the `StormFlash` message) over the first cloud or storm every
+/// 40 frames, to look at what the render profile does with it. Presentation only: no damage, no timers.
+fn stormflash(
+    cfg: Res<Config>,
+    mut commands: Commands,
+    fxl: Option<Res<crate::fx::FxLib>>,
+    clouds: Query<&GlobalTransform, With<crate::nebula::Cloud>>,
+    mut flashes: MessageWriter<crate::nebula::StormFlash>,
+) {
+    if cfg.script.as_deref() != Some("stormflash") || cfg.frame % 40 != 5 {
+        return;
+    }
+    let (Some(fxl), Some(at)) = (fxl, clouds.iter().next().map(|c| c.translation())) else { return };
+    let t = Transform::from_translation(at);
+    crate::fx::spawn(&mut commands, &fxl, "Lightning", None, t, t, true);
+    flashes.write(crate::nebula::StormFlash { at });
 }
