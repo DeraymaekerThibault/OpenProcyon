@@ -57,7 +57,7 @@ scripts! {
     MapInfo => "map-info", MenuSelected => "menu-selected", MenuFriendly => "menu-friendly", MenuEnemy => "menu-enemy", ModsBake => "mods-bake",
     Mission => "mission", Pause => "pause", PauseRestart => "pause-restart", Quick => "quick",
     Restart => "restart", Shells => "shells", Sight => "sight", Speedtest => "speedtest",
-    StormFlash => "stormflash", StormM3 => "storm-m3", StormM3Damage => "storm-m3-damage", Talk => "talk", Target => "target", Victory => "victory",
+    AllStop => "allstop", StormFlash => "stormflash", StormM3 => "storm-m3", StormM3Damage => "storm-m3-damage", Talk => "talk", Target => "target", Victory => "victory",
 }
 
 pub fn plugin(app: &mut App) {
@@ -65,7 +65,7 @@ pub fn plugin(app: &mut App) {
     trace::plugin(app);
     app.add_systems(PreUpdate, fleet::fleet_smoke.after(bevy::ui::UiSystems::Focus).before(crate::panels::hud_input))
         .add_systems(PreUpdate, lifeboats::smoke.after(bevy::ui::UiSystems::Focus))
-        .add_systems(Update, (shells::shells, animals, stormflash));
+        .add_systems(Update, (shells::shells, animals, stormflash, allstop));
 }
 
 /// `--script animals --map dragons_nest --shot <png> --shot-frame N`: from frame 20 the first space animal (a dragon here, a
@@ -218,4 +218,15 @@ fn stormflash(
     let t = Transform::from_translation(at);
     crate::fx::spawn(&mut commands, &fxl, "Lightning", None, t, t, true);
     flashes.write(crate::nebula::StormFlash { at });
+}
+
+/// `--script allstop`: the player's ship is held at All Stop from frame `--shot-frame / 2` on (open sails before, then the crew
+/// furls them), to look at how a render profile folds the sails.
+fn allstop(cfg: Res<Config>, mut ships: Query<&mut crate::Ship, With<crate::ship::PlayerShip>>) {
+    if cfg.script.as_deref() != Some("allstop") || cfg.frame < cfg.shot_frame / 2 {
+        return;
+    }
+    for mut ship in &mut ships {
+        ship.halt();
+    }
 }
