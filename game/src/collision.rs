@@ -375,6 +375,44 @@ fn hull_push(a: &tree::Box3, b: &tree::Box3) -> Option<Vec3> {
     tree::overlap(b, a).map(tree::push)
 }
 
+/// Where two ship boxes touch, or `None` when no edge of one crosses a face plane of the other inside both boxes (the pair then
+/// has no contact this tick, even if the separating-axis test overlaps). Two passes (face box, edge box; then swapped): each edge's
+/// whole line is cut by the face box's six planes and the hit nearest the edge's middle counts when it lies inside both boxes
+/// widened by 0.1; if neither end of the edge is inside the face box the second-nearest hit counts too. The point is the plain
+/// average of everything that counted. Ties between equally near hits are taken in plane order (the original leaves them open).
+fn box_contact_point(a: &tree::Box3, b: &tree::Box3) -> Option<Vec3> {
+    const WIDEN: f32 = 0.1;
+    let inside = |bx: &tree::Box3, p: Vec3| (0..3).all(|i| bx.axes[i].dot(p - bx.centre).abs() <= bx.half[i] + WIDEN);
+    let corner = |bx: &tree::Box3, k: usize| bx.centre + (0..3).map(|i| bx.axes[i] * bx.half[i] * if k >> i & 1 == 1 { 1.0 } else { -1.0 }).sum::<Vec3>();
+    let (mut sum, mut n) = (Vec3::ZERO, 0u32);
+    for (face, edge) in [(a, b), (b, a)] {
+        for k in 0..8usize {
+            for axis in (0..3).filter(|i| k >> i & 1 == 0) {
+                let (p0, p1) = (corner(edge, k), corner(edge, k | 1 << axis));
+                let v = p1 - p0;
+                let mut hits: Vec<f32> = (0..3)
+                    .flat_map(|i| [-1.0, 1.0].map(|s| (i, s)))
+                    .filter(|&(i, _)| face.axes[i].dot(v).abs() >= 0.0001)
+                    .map(|(i, s)| face.axes[i].dot(face.centre + face.axes[i] * (s * face.half[i]) - p0) / face.axes[i].dot(v))
+                    .collect();
+                hits.sort_by(|x, y| (x - 0.5).abs().total_cmp(&(y - 0.5).abs()));
+                let at = |t: f32| p0 + v * t;
+                let Some(&first) = hits.first() else { continue };
+                if !(inside(face, at(first)) && inside(edge, at(first))) {
+                    continue;
+                }
+                sum += at(first);
+                n += 1;
+                if let Some(&second) = hits.get(1).filter(|_| !inside(face, p0) && !inside(face, p1)) {
+                    sum += at(second);
+                    n += 1;
+                }
+            }
+        }
+    }
+    (n > 0).then(|| sum / n as f32)
+}
+
 fn forward(ship: &crate::Ship) -> Vec3 {
     Vec3::new(-ship.heading.sin(), 0.0, -ship.heading.cos())
 }
@@ -761,12 +799,14 @@ pub fn sail(
         }
         // The original (read from its code): the two boxes' 3-D separating-axis test, the least-penetration axis as the normal; the
         // pair is pushed apart along its horizontal part by depth x |cos| (a tilted or vertical normal moves the hulls less).
-        let Some(push) = hull_push(&tree::Box3::placed(ca.collision_bounds, &ta), &tree::Box3::placed(cb.collision_bounds, &tb)) else { continue };
+        let (xa, xb) = (tree::Box3::placed(ca.collision_bounds, &ta), tree::Box3::placed(cb.collision_bounds, &tb));
+        let Some(push) = hull_push(&xa, &xb) else { continue };
         if push == Vec3::ZERO {
             continue;
         }
         let normal = push.normalize();
-        let point = contact_point(&ba.points, &bb.points, normal);
+        // Also read from the code: no edge crossing inside both boxes means no contact, whatever the axis test says.
+        let Some(point) = box_contact_point(&xa, &xb) else { continue };
         let fixed = |body: ContactBody, pin: bool| if pin { ContactBody { inverse_mass: 0.0, inverse_inertia: 0.0, ..body } } else { body };
         let a_body = fixed(ship_body(&a, &ta, &da, ca, point), pinned(ea));
         let b_body = fixed(ship_body(&b, &tb, &db, cb, point), pinned(eb));
