@@ -72,14 +72,16 @@ fn fragment(in: VertexOutput) -> FragmentOutput {
         // the light falls off fast outward
         let fall = pow(1.0 - share, 2.4);
         // arms: constant along a log spiral, sharpened; the turning (clockwise: the pattern's angle decreases) is rigid
-        let arms = 11.0;
+        // tightly wound (a pitch of about 12 degrees), so the arms read as streaks wrapping round the hole, not spokes
+        let arms = 9.0;
+        let winding = arms / 0.21;
         let turn = hole.disc.z * t * 6.2831853;
-        let u = screen_angle * arms + 5.0 * log(max(rho, 1.0)) + turn * arms;
-        let band = pow(0.5 + 0.5 * sin(u), 6.0);
+        let u = screen_angle * arms + winding * log(max(rho, 1.0)) + turn * arms;
+        let band = pow(0.5 + 0.5 * sin(u), 10.0);
         // fine grain along the arms, periodic in the angle (no seam where atan2 wraps), turning with them
         let turned = screen_angle + turn;
         let grain = noise2(vec2<f32>(cos(turned), sin(turned)) * 9.0 + vec2<f32>(rho / max(core, 1.0) * 7.0));
-        let fine = 0.5 + 0.5 * sin(u * 3.1 + grain * 6.0);
+        let fine = 0.5 + 0.5 * sin(u * 2.3 + grain * 4.0);
         let streaks = mix(0.06, 1.0, band) * (0.55 + 0.9 * grain) * (0.7 + 0.5 * fine);
         // the side moving toward the camera is brighter
         let tangent = normalize(vec3<f32>(-rel.z, 0.0, rel.x));
