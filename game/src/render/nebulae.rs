@@ -79,6 +79,8 @@ pub struct Rule {
     pub light_steps: f32,
     /// Replacing rules only: how strongly the sun lights the gas.
     pub sun: f32,
+    /// Replacing rules only: HDR emission from dense pockets, separate from the veil's opacity.
+    pub core_glow: f32,
     /// Replacing rules only: a second hue the gas drifts into across the cloud (large patches), and how far (0..1), so a cloud
     /// is not one flat colour.
     pub color_alt: Vec3,
@@ -116,6 +118,7 @@ pub fn parse(v: &Value) -> Option<Nebulae> {
                             max_opacity: num(&r["max_opacity"], 0.6).clamp(0.05, 1.0),
                             light_steps: num(&r["light_steps"], 2.0).clamp(0.0, 3.0).round(),
                             sun: num(&r["sun"], 1.0).clamp(0.0, 4.0),
+                            core_glow: num(&r["core_glow"], 0.0).clamp(0.0, 12.0),
                             color_alt: rgb(&r["color_alt"]).unwrap_or(Vec3::ONE).max(Vec3::ZERO),
                             variation: num(&r["variation"], 0.0).clamp(0.0, 1.0),
                             swirl: num(&r["swirl"], 0.0).clamp(-1.0, 1.0),
@@ -219,7 +222,7 @@ pub struct VolumeUniform {
     pub params: Vec4,
     /// x: swirl, y: filaments, z: flicker, w: hue variation
     pub storm: Vec4,
-    /// rgb: the second hue
+    /// rgb: the second hue; w: HDR core glow
     pub alt: Vec4,
 }
 
@@ -292,7 +295,7 @@ impl Rule {
             flash_to: bolt.to.extend(0.0),
             params: Vec4::new(clock, reach, self.flash, cloud.fade()),
             storm: Vec4::new(self.swirl, self.filaments, self.flicker, self.variation),
-            alt: self.color_alt.extend(0.0),
+            alt: self.color_alt.extend(self.core_glow),
         }
     }
 }
@@ -612,9 +615,12 @@ mod tests {
 
     #[test]
     fn volume_keys_have_defaults_and_clamp() {
-        let r = &parse(&json!({"rules": [{"match": "n"}, {"match": "s", "absorption": 99, "dust": -1, "max_opacity": 5, "light_steps": 9, "sun": 50}]})).unwrap().rules;
+        let r = &parse(&json!({"rules": [{"match": "n"}, {"match": "s", "absorption": 99, "dust": -1, "max_opacity": 5, "light_steps": 9, "sun": 50, "core_glow": 300}]}))
+            .unwrap()
+            .rules;
         assert_eq!((r[0].absorption, r[0].dust, r[0].max_opacity, r[0].light_steps, r[0].sun), (3.0, 0.6, 0.6, 2.0, 1.0));
         assert_eq!((r[1].absorption, r[1].dust, r[1].max_opacity, r[1].light_steps, r[1].sun), (20.0, 0.0, 1.0, 3.0, 4.0));
+        assert_eq!((r[0].core_glow, r[1].core_glow), (0.0, 12.0), "older profiles get no extra core emission");
     }
 
     #[test]
@@ -646,13 +652,14 @@ mod tests {
 
     #[test]
     fn the_volume_follows_the_retail_breath_the_sun_and_the_bolt() {
-        let rule = &parse(&json!({"rules": [{"match": "n", "steps": 12, "max_opacity": 0.5, "sun": 2}]})).unwrap().rules[0];
+        let rule = &parse(&json!({"rules": [{"match": "n", "steps": 12, "max_opacity": 0.5, "sun": 2, "core_glow": 6}]})).unwrap().rules[0];
         let cloud = Cloud::for_tests("Nebula", 200.0);
         let sun = SunLight { toward: Vec3::new(0.0, 3.0, 0.0), color: Vec3::new(2.0, 1.0, 1.0) };
         let u = rule.volume(&cloud, Vec3::new(1.0, 2.0, 3.0), 5.0, &Bolt { at: Vec3::X, from: Vec3::X, to: Vec3::X * 3.0, left: 0.5, ..default() }, sun);
         assert_eq!(u.axes, (AXES * cloud.breath()).extend(12.0));
         assert_eq!((u.sun, u.sun_color.truncate()), (Vec4::new(0.0, 1.0, 0.0, 2.0), Vec3::new(1.0, 0.5, 0.5)), "a unit direction and a colour normalised to its brightest channel");
         assert_eq!((u.low.w, u.flash.w, u.params.x, u.params.w), (0.5, 0.25, 5.0, 1.0));
+        assert_eq!(u.alt, Vec3::ONE.extend(6.0), "core emission reaches the shader independently of opacity, flash and hue");
         assert_eq!((u.flash.truncate(), u.flash_to.truncate()), (Vec3::X, Vec3::X * 3.0), "the volume is lit along the whole bolt");
     }
 }

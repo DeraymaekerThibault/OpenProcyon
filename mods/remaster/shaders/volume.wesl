@@ -6,7 +6,8 @@
 // Dense gas then hides what is behind it, thin gas glows, dust lanes stay dark. The march ends at the scene's depth (the depth
 // prepass), so gas lies in front of a ship only by its real distance. The gas is lit by the sun with a cheap self-shadow (a few
 // steps toward the sun), coloured between a thin and a dense colour and tinted by the retail colour loop; a bolt of storm lightning
-// lights it from inside for a moment, along its whole length. A cloud's colour drifts into a second hue in large patches
+// lights it from inside for a moment, along its whole length. Optional HDR emission makes dense pockets bloom independently
+// of the veil's opacity, still occluded by the dust in front. A cloud's colour drifts into a second hue in large patches
 // (`variation`), so it is not one flat wash. A solar storm is not a quiet cloud: its gas wheels round the centre like a cyclone
 // (`swirl`, faster near the centre; two phases of the turn are blended so the gas never winds up), the edges of its billows burn
 // as hot plasma filaments (`filaments`), and lightning keeps flickering deep inside it (`flicker`).
@@ -41,7 +42,7 @@ struct Volume {
     params: vec4<f32>,
     // x: swirl (turns a second near the centre), y: filaments, z: flicker, w: hue variation
     storm: vec4<f32>,
-    // rgb: the second hue
+    // rgb: the second hue, w: HDR core glow
     alt: vec4<f32>,
 }
 
@@ -141,7 +142,7 @@ fn fragment(in: VertexOutput) -> FragmentOutput {
 
     // fewer steps on a short chord, a different start per pixel so the steps do not band
     let len = t1 - t0;
-    let steps = clamp(len / (radius * 0.05), 4.0, vol.axes.w);
+    let steps = ceil(clamp(len / (radius * 0.05), 4.0, vol.axes.w));
     let dt = len / steps;
     let jitter = fract(52.9829189 * fract(dot(in.position.xy, vec2<f32>(0.06711056, 0.00583715))));
     let clock = vol.params.x * vol.look.z;
@@ -157,6 +158,7 @@ fn fragment(in: VertexOutput) -> FragmentOutput {
     let reach = max(vol.params.y, 1.0);
 
     var light = vec3<f32>(0.0);
+    var core_light = vec3<f32>(0.0);
     var tr = 1.0;
     for (var i = 0; i < 24; i = i + 1) {
         if f32(i) >= steps {
@@ -201,10 +203,12 @@ fn fragment(in: VertexOutput) -> FragmentOutput {
             }
             let shade = exp(-toward * vol.look.w * 0.5);
             var base = mix(vol.low.rgb, vol.high.rgb, smoothstep(0.35, 1.0, dens));
+            var core_color = mix(vol.low.rgb, vol.high.rgb, 0.38);
             // the second hue, in large patches
             if vol.storm.w > 0.0 {
                 let hue = smoothstep(0.35, 0.65, bake(q * vol.look.y * 0.22 + vec3<f32>(11.0, 3.0, 7.0)).g);
                 base = mix(base, vol.alt.rgb * (0.35 + 0.9 * smoothstep(0.35, 1.0, dens)), hue * vol.storm.w);
+                core_color = mix(core_color, vol.alt.rgb, hue * vol.storm.w);
             }
             // dense cores glow hotter
             base += vol.high.rgb * 0.5 * dens * dens * dens;
@@ -230,9 +234,19 @@ fn fragment(in: VertexOutput) -> FragmentOutput {
                 emitted += vec3<f32>(0.75, 0.85, 1.0) * vol.storm.z * pow(smoothstep(0.45, 0.8, pulse), 2.0) * edge;
             }
             let tau = dens * sigma * dt * share;
-            let step_light = 1.0 - exp(-tau);
-            light += tr * emitted * step_light;
-            tr *= exp(-tau);
+            let step_tr = exp(-tau);
+            let weight = tr * (1.0 - step_tr);
+            light += emitted * weight;
+            if vol.alt.w > 0.0 && dens > 0.28 {
+                // Break up the pocket with finer knots of the same warped noise instead of blooming as one smooth blob.
+                let fine = raw(q * 2.35 + vec3<f32>(2.4, 0.7, 1.8), w * 0.7, clock * 1.4);
+                let knots = smoothstep(0.37, 0.72, fine);
+                let core = smoothstep(0.33, 0.74, dens) * (0.5 + 0.5 * knots);
+                let hot = mix(core_color, vol.high.rgb, 0.22 * knots);
+                // The same transmittance keeps intervening dust and folds dark.
+                core_light += hot * (vol.alt.w * core * core * weight);
+            }
+            tr *= step_tr;
         }
         tr *= exp(-tau_dust);
         if tr < 0.02 {
@@ -245,6 +259,7 @@ fn fragment(in: VertexOutput) -> FragmentOutput {
     let cap = select(vol.low.w, vol.low.w * 0.6, hit_scene);
     let alpha = 1.0 - tr;
     let k = min(1.0, cap / max(alpha, 1.0e-4)) * vol.params.w;
-    out.color = vec4<f32>(light * k, alpha * k);
+    let glow = core_light * select(1.0, 0.35, hit_scene) * share * vol.params.w;
+    out.color = vec4<f32>(light * k + glow, alpha * k);
     return out;
 }

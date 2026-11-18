@@ -48,7 +48,7 @@ scripts! {
     Cloak => "cloak", Course => "course", CurrentM3 => "current-m3", Damage => "damage", Defeat => "defeat",
     Dock => "dock", DockClick => "dock-click", DockMenu => "dock-menu",
     Fleet => "fleet", FleetPrimary => "fleet-primary", FleetCrew => "fleet-crew", FleetArms => "fleet-arms", FleetProfile => "fleet-profile", FleetProfileCrew => "fleet-profile-crew", FleetProfileArms => "fleet-profile-arms", FleetShips => "fleet-ships",
-    Fire => "fire", FxTest => "fxtest", HuntM3 => "hunt-m3",
+    Fire => "fire", FxTest => "fxtest", HuntM3 => "hunt-m3", Impacts => "impacts",
     Ingame => "ingame", IngameLoad => "ingame-load", IngameDoLoad => "ingame-do-load", IngameQuit => "ingame-quit",
     IngameSave => "ingame-save", IngameOptions => "ingame-options", IngameControls => "ingame-controls",
     LifeboatM1 => "lifeboat-m1", LifeboatM1Fallback => "lifeboat-m1-fallback",
@@ -65,7 +65,29 @@ pub fn plugin(app: &mut App) {
     trace::plugin(app);
     app.add_systems(PreUpdate, fleet::fleet_smoke.after(bevy::ui::UiSystems::Focus).before(crate::panels::hud_input))
         .add_systems(PreUpdate, lifeboats::smoke.after(bevy::ui::UiSystems::Focus))
-        .add_systems(Update, (shells::shells, animals, stormflash, allstop, fire));
+        .add_systems(Update, (shells::shells, animals, stormflash, allstop, fire, impacts));
+}
+
+/// `--script impacts`: the same shot effect against all three materials, spaced around the player for a screenshot.
+fn impacts(
+    mut commands: Commands,
+    cfg: Res<Config>,
+    player: Query<(Entity, &Transform, &crate::Ship), With<crate::PlayerShip>>,
+    lib: Res<crate::combat::Library>,
+    fx: Res<crate::fx::FxLib>,
+    mut done: Local<bool>,
+) {
+    if cfg.script != Some(Script::Impacts) || *done || cfg.frame < cfg.shot_frame.saturating_sub(12).max(30) {
+        return;
+    }
+    let Ok((e, tf, ship)) = player.single() else { return };
+    let [lo, hi] = lib.classes[ship.class].collision_bounds;
+    for (material, offset) in [("Wood", Vec3::new(0.25, 0.4, 0.29)), ("Iron", Vec3::new(0.27, 0.45, -0.26)), ("Cloth", Vec3::new(0.05, 0.95, -0.03))] {
+        let local = Transform::from_translation(lo.lerp(hi, 0.5) + (hi - lo) * offset);
+        let origin = crate::fx::Origin { forward: Some(Vec3::new(0.6, 1.0, 0.0).normalize()), host: Some(e), material: Some(material), ..default() };
+        crate::fx::spawn_with(&mut commands, &fx, "CannonBall_Med_Impact", Some(e), local, *tf * local, true, origin);
+    }
+    *done = true;
 }
 
 /// `--script fire`: light one attached fire for a screenshot, then stop it with smoke still in the air. Visual only.

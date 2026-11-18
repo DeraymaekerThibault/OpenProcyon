@@ -1,6 +1,6 @@
 // Not retail: smoke puffs of the render profile (game/src/render/bursts.rs; contract: `SmokeUniform` and `Built::quad`
-// there, our own work under the project licence). Alpha-blended camera-facing quads, sorted far to near:
-// uv.x = 7 * 4 + u, uv.y = seed * 2 + v, vertex colour rgb the smoke's colour, a its age as a share of its life.
+// there, our own work under the project licence). Alpha-blended quads, sorted far to near:
+// uv.x = kind * 4 + u (7 smoke, 9 splinter, 10 fiber), uv.y = seed * 2 + v, vertex colour rgb = colour, a = age share.
 // Each puff is shaded as a soft ball: lit on the sun's side, the sky's colour on the other, with ragged, curling edges;
 // it thins out as it spreads.
 import bevy_pbr::render::{
@@ -39,6 +39,24 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
     let age = clamp(in.color.a, 0.0, 1.0);
     let s = seed * 5.17;
     let clock = frame.clock.y;
+    if kind > 8.5 {
+        var mask: f32;
+        var shade: f32;
+        if kind < 9.5 {
+            // Uneven wedge with a bright cut face and a darker side as it tumbles.
+            let edge = (0.85 - u * 0.74) * (0.8 + 0.2 * noise(vec2<f32>(u * 5.0, s)));
+            mask = (1.0 - smoothstep(edge - 0.13, edge, abs(q.y - 0.12 * q.x))) * smoothstep(0.0, 0.07, u) * (1.0 - smoothstep(0.94, 1.0, u));
+            shade = (0.73 + 0.27 * sin(s + 14.0 * age)) * mix(0.72, 1.0, smoothstep(-0.2, 0.2, q.y));
+        } else {
+            // A narrow curling strand rather than a luminous trail: easy to distinguish from a spark.
+            let curl = 0.50 * sin(3.4 * q.x + s + 4.5 * age);
+            mask = (1.0 - smoothstep(0.18, 0.41, abs(q.y - curl))) * smoothstep(0.0, 0.15, u) * (1.0 - smoothstep(0.82, 1.0, u));
+            shade = 0.88 + 0.12 * sin(s + 12.0 * age);
+        }
+        var out: FragmentOutput;
+        out.color = vec4<f32>(in.color.rgb * shade, mask * (1.0 - smoothstep(0.48, 1.0, age)));
+        return out;
+    }
 
     // ragged edge that curls slowly
     let p = q * 1.8 + vec2<f32>(s, s * 0.7);

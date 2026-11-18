@@ -76,7 +76,7 @@ mod tests {
         assert!(!replaced(&look, "Lightning") && !replaced(&look, "BlackHoleRibbons_Large"), "nothing it does not name");
         let mut app = app(look);
         let (boom, bolt) = (app.world_mut().spawn(Transform::default()).id(), app.world_mut().spawn(Transform::default()).id());
-        let started = |entity, effect| EffectStarted { entity, effect, at: Vec3::ZERO, forward: Vec3::Z, shell: None, host: None };
+        let started = |entity, effect| EffectStarted { entity, effect, at: Vec3::ZERO, forward: Vec3::Z, shell: None, host: None, material: None };
         app.world_mut().resource_mut::<Messages<EffectStarted>>().write(started(boom, 2));
         app.world_mut().resource_mut::<Messages<EffectStarted>>().write(started(bolt, 1));
         app.update();
@@ -97,7 +97,7 @@ mod tests {
     fn a_replaced_effect_is_marked_hidden_and_keeps_its_components() {
         let mut app = app(Look::parse(&json!({"black_holes": {"replace": true}})));
         let (ribbons, other) = (app.world_mut().spawn(Transform::default()).id(), app.world_mut().spawn(Transform::default()).id());
-        let started = |entity, effect| EffectStarted { entity, effect, at: Vec3::ZERO, forward: Vec3::Z, shell: None, host: None };
+        let started = |entity, effect| EffectStarted { entity, effect, at: Vec3::ZERO, forward: Vec3::Z, shell: None, host: None, material: None };
         app.world_mut().resource_mut::<Messages<EffectStarted>>().write(started(ribbons, 0));
         app.world_mut().resource_mut::<Messages<EffectStarted>>().write(started(other, 2));
         app.update();

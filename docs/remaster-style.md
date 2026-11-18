@@ -40,7 +40,8 @@ Springfield), https://history.siggraph.org/learning/creating-3d-painterly-enviro
    and absorption, lit by the sun, ending at the depth of the hulls and islands inside it), so it has depth and dark lanes.
    It may thicken the view but never hide a ship: one cloud's opacity is capped (`max_opacity`, lower where the ray ends on a
    hull). A lightning strike is a short arc cut from its actual path, ending at the impact if it hits a ship. Its light falls off
-   locally, and sky events light the gas, never the stars.
+   locally, and sky events light the gas, never the stars. Quiet nebulae get their glow from dense pockets inside the gas,
+   not a brighter veil over the whole cloud. Leave dark lanes between them and keep the glow low over ships.
    The dangerous parts of the world must read at least as clearly as in classic: a black hole's black horizon is exactly its
    kill core and carries a thin ring that stays visible at any zoom, with the pull radius faintly outlined; a current shows
    which way it flows at a glance. Navy solar sails fold like a hand fan, canvas like a roller blind.
@@ -83,6 +84,11 @@ Springfield), https://history.siggraph.org/learning/creating-3d-painterly-enviro
 
 ## Notes on `look.json`
 
+- **PROVISIONAL — lighting playtest pass:** slightly dimmer backdrop and sky fill, a weaker silhouette rim, reduced shell
+  and tracer gain, 55% of original flight particles, and weaker, shorter-reach muzzle/impact lights. Sun, exposure and bloom
+  stay unchanged; major explosion lights keep their reach. Judge in motion on bright blue skies as well as Red Rover:
+  shadowed hulls must remain readable, powder shot should not look like little suns, and energy weapons should stay distinct.
+
 - Light space with a directional key and restrained fill, not a daylight wash. Keep the map's colour and ship silhouettes,
   with and without HD skies, and reserve the strongest bloom for weapons and other bright effects. A low, cool ambient
   floor keeps shadowed hull detail from disappearing on maps with dark or strongly tinted ambient light.
@@ -91,9 +97,10 @@ Springfield), https://history.siggraph.org/learning/creating-3d-painterly-enviro
   a salvo doesn't bleach the whole ship; reserve a wider reach for a ship breaking apart.
 - Fire must read from the flame, not the spill: an anchored yellow-white base, distinct orange tips, and smoke that starts
   above the base and keeps drifting after the fire goes out. Check at normal battle zoom, not just in a close-up.
-
-- `bursts.effects` lists `Lancer` and `Plasma` before `_Impact` / `_Muzzle` on purpose: the first matching rule wins, so the
-  energy weapons' own entries (no smoke) take their impact and muzzle effects before the generic rules do.
+- Impact debris should distinguish surfaces without hiding the weapon flash: a wide, short cloud of wood splinters and dust,
+  a tight fast spray from metal, and pale curling threads from sailcloth. Let heavy ordnance keep its own larger effects.
+- `bursts.effects` lists `Lancer` and `Plasma` before `_Impact` / `_Muzzle` on purpose: the first matching rule wins, so energy
+  weapons keep their own flashes and muzzle particles. Only impacts with a known, configured surface substitute its debris.
 - `sun.shadow_distance` is the biggest cost of the look: the four cascades redraw every island mesh, so on busy maps (`border_dispute`,
   3700 entities) 2500 units cost 20 ms a frame and 800 cost 14 ms (`red_rover` 17.5 -> 12 ms). The battle camera never looks further
   than a few hundred units, so keep it near 800; removing the `surfaces` block gave the same saving, so the two multiply.

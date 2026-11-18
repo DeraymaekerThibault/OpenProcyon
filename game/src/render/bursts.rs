@@ -41,6 +41,18 @@ pub enum Kind {
     Mote = 6,
     Smoke = 7,
     Flame = 8,
+    Splinter = 9,
+    Fiber = 10,
+}
+
+impl Kind {
+    fn is_blended(self) -> bool {
+        matches!(self, Self::Smoke | Self::Splinter | Self::Fiber)
+    }
+
+    fn is_impact_debris(self) -> bool {
+        matches!(self, Self::Spark | Self::Ember | Self::Smoke | Self::Splinter | Self::Fiber)
+    }
 }
 
 /// One part of a rule: how many particles, their colour (linear), size (world units), life (seconds), launch speed,
@@ -76,6 +88,8 @@ pub struct Rule {
     pub matching: String,
     pub parts: Vec<(Kind, Part)>,
     flame: Option<FlameSource>,
+    /// A material match takes over debris, but leaves the weapon's flash and other parts alone.
+    surface_debris: bool,
     /// Seconds between throws while the effect lives; 0 = once, when it starts.
     pub every: f32,
     /// Camera jolt, fading with distance.
@@ -105,15 +119,22 @@ impl FlameSource {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+struct SurfaceDebris {
+    matching: Vec<String>,
+    parts: Vec<(Kind, Part)>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct Bursts {
     pub rules: Vec<Rule>,
+    impact_materials: Vec<SurfaceDebris>,
     /// Glow left where a shell scars a hull.
     pub scorch: Option<Part>,
     /// Ether dust around the camera: `count` specks within `speed` units (the box's half size), drifting.
     pub motes: Option<Part>,
 }
 
-const KINDS: [(&str, Kind); 7] = [
+const KINDS: [(&str, Kind); 9] = [
     ("flash", Kind::Flash),
     ("sparks", Kind::Spark),
     ("embers", Kind::Ember),
@@ -121,6 +142,8 @@ const KINDS: [(&str, Kind); 7] = [
     ("ring", Kind::Ring),
     ("smoke", Kind::Smoke),
     ("scorch", Kind::Scorch),
+    ("splinters", Kind::Splinter),
+    ("fibers", Kind::Fiber),
 ];
 
 fn defaults(kind: Kind) -> Part {
@@ -135,6 +158,8 @@ fn defaults(kind: Kind) -> Part {
         Kind::Scorch => Part { color: Vec3::new(1.0, 0.35, 0.08), size: 1.0, seconds: 6.0, ..p },
         Kind::Mote => Part { count: 300, color: Vec3::new(0.6, 0.7, 1.0), size: 0.12, seconds: 1.0, speed: 120.0, ..p },
         Kind::Flame => unreachable!("a flame is not a particle part"),
+        Kind::Splinter => Part { count: 10, color: Vec3::new(0.72, 0.45, 0.21), size: 0.55, seconds: 0.65, speed: 16.0, spread: 66.0, drag: 2.2, ..p },
+        Kind::Fiber => Part { count: 8, color: Vec3::new(0.84, 0.81, 0.72), size: 0.65, seconds: 0.95, speed: 10.0, spread: 75.0, drag: 3.6, rise: 0.3 },
     }
 }
 
@@ -154,8 +179,21 @@ pub fn parse(v: &Value) -> Option<Bursts> {
                     matching: r["match"].as_str()?.to_lowercase(),
                     parts: KINDS.iter().filter_map(|&(key, kind)| Some((kind, part(&r[key], defaults(kind))?))).collect(),
                     flame: FlameSource::parse(&r["flame"]),
+                    surface_debris: r["surface_debris"].as_bool().unwrap_or(false),
                     every: num(&r["every"], 0.0),
                     shake: num(&r["shake"], 0.0),
+                })
+            })
+            .collect(),
+        impact_materials: v["impact_materials"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|r| {
+                let matching = super::names(&r["match"], &[]);
+                (!matching.is_empty()).then(|| SurfaceDebris {
+                    matching,
+                    parts: KINDS.iter().filter(|(_, k)| k.is_impact_debris()).filter_map(|&(key, kind)| Some((kind, part(&r[key], defaults(kind))?))).collect(),
                 })
             })
             .collect(),
@@ -165,6 +203,11 @@ pub fn parse(v: &Value) -> Option<Bursts> {
 }
 
 impl Bursts {
+    fn surface_debris(&self, rule: &Rule, material: Option<&str>) -> Option<&[(Kind, Part)]> {
+        let material = material.filter(|_| rule.surface_debris)?;
+        self.impact_materials.iter().find(|r| r.matching.iter().any(|key| key.eq_ignore_ascii_case(material))).map(|r| r.parts.as_slice())
+    }
+
     pub fn rule(&self, effect: &str) -> Option<usize> {
         let n = effect.to_lowercase();
         self.rules.iter().position(|r| n.contains(r.matching.as_str()))
@@ -341,7 +384,12 @@ fn start(
         let Some(r) = b.rule(name) else { continue };
         let rule = &b.rules[r];
         let scale = effects.get(m.entity).map_or(1.0, |fx| FlameSource::strength(fx).sqrt());
-        throw_parts(&mut parts, rule, m.at, m.forward, now, scale);
+        let debris = b.surface_debris(rule, m.material);
+        throw_parts(&mut parts, rule, m.at, m.forward, now, scale, debris);
+        if debris.is_some() {
+            // The profile supplies both the weapon flash and the material debris. Don't layer the retail impact sprite over them.
+            commands.entity(m.entity).try_insert(HiddenFx);
+        }
         if let Some(flame) = rule.flame {
             // Only replace the drawing when this shader block is active. The original effect still controls the lifetime.
             commands.entity(m.entity).try_insert((flame, HiddenFx));
@@ -369,14 +417,20 @@ fn emitters(time: Res<Time>, look: Res<Look>, mut parts: ResMut<Particles>, mut 
         if !f.emitting {
             continue;
         }
-        throw_parts(&mut parts, rule, gt.translation(), Vec3::Y, now, FlameSource::strength(f).sqrt());
+        throw_parts(&mut parts, rule, gt.translation(), Vec3::Y, now, FlameSource::strength(f).sqrt(), None);
     }
 }
 
-fn throw_parts(parts: &mut Particles, rule: &Rule, at: Vec3, forward: Vec3, now: f32, scale: f32) {
+fn throw_parts(parts: &mut Particles, rule: &Rule, at: Vec3, forward: Vec3, now: f32, scale: f32, debris: Option<&[(Kind, Part)]>) {
     for (kind, p) in &rule.parts {
+        if debris.is_some() && kind.is_impact_debris() {
+            continue;
+        }
         let lift = if *kind == Kind::Smoke { rule.flame.map_or(0.0, |f| f.height * 0.8 * scale) } else { 0.0 };
         parts.throw(*kind, p, at + Vec3::Y * lift, forward, now, None);
+    }
+    for (kind, p) in debris.into_iter().flatten() {
+        parts.throw(*kind, p, at, forward, now, None);
     }
 }
 
@@ -439,6 +493,14 @@ fn place(b: &mut QuadBatch, p: &Particle, at: Vec3, t: f32, cam: &GlobalTransfor
             let along = vel * 0.04 + vel.normalize_or(Vec3::Y) * p.size;
             let side = along.cross(to_cam).normalize_or(right) * p.size;
             quad(b, p.kind, centre - along * 0.5, along * 0.5, side, to_cam, p.color, age, p.seed);
+        }
+        Kind::Splinter | Kind::Fiber => {
+            let seed = p.seed as f32;
+            let (sn, cs) = (seed * 2.4 + t * (5.0 + seed % 7.0)).sin_cos();
+            let along = right * cs + up * sn;
+            let side = up * cs - right * sn;
+            let width = if p.kind == Kind::Splinter { 0.35 } else { 0.28 };
+            quad(b, p.kind, centre, along * s, side * s * width, back, p.color, age, p.seed);
         }
         Kind::Ring => {
             let r = p.size + offset.length();
@@ -503,7 +565,7 @@ fn draw(
     let mut smoky: Vec<(f32, &Particle, Vec3)> = vec![];
     for p in &parts.list {
         let at = p.host.and_then(|h| hosts.get(h).ok()).map_or(p.from, |h| h.transform_point(p.from));
-        if p.kind == Kind::Smoke {
+        if p.kind.is_blended() {
             smoky.push((eye.distance_squared(at + p.motion(now - p.born).0), p, at));
         } else {
             place(glow, p, at, now - p.born, cam);
@@ -683,10 +745,15 @@ mod tests {
         world.init_resource::<Messages<EffectStarted>>();
         world.init_resource::<Particles>();
         world.insert_resource(Time::<()>::default());
-        world.insert_resource(FxLib::with_names(&["Gun_Muzzle_Flash", "Gun_Impact", "Boarding_Fight"]));
+        world.insert_resource(FxLib::with_names(&["Gun_Muzzle_Flash", "Gun_Impact", "Boarding_Fight", "Special"]));
         world.insert_resource(Look::parse(&serde_json::json!({"bursts": {"effects": [
             {"match": "muzzle", "sparks": {"count": 60, "spread": 20}},
-            {"match": "_impact", "sparks": {"count": 60, "spread": 30}},
+            {"match": "_impact", "surface_debris": true, "sparks": {"count": 60, "spread": 30}},
+            {"match": "special", "sparks": {"count": 1}},
+        ], "impact_materials": [
+            {"match": ["Wood", "Reinforced"], "splinters": {"count": 2}, "smoke": {"count": 1}},
+            {"match": ["Iron"], "sparks": {"count": 3, "spread": 27}},
+            {"match": ["Cloth"], "fibers": {"count": 4}}
         ]}})));
         world
             .run_system_once(move |mut commands: Commands, lib: Res<FxLib>| {
@@ -707,7 +774,7 @@ mod tests {
     fn a_muzzle_flash_throws_along_the_shot_not_its_mounts_axes() {
         let mount = Transform::from_xyz(5.0, 0.0, 0.0).looking_to(Vec3::NEG_Z, Vec3::Y);
         let shot = Vec3::new(1.0, 0.2, 0.0).normalize();
-        let origin = crate::fx::Origin { forward: Some(shot), shell: Some(Entity::from_raw_u32(7).unwrap()), host: None };
+        let origin = crate::fx::Origin { forward: Some(shot), shell: Some(Entity::from_raw_u32(7).unwrap()), ..default() };
         let list = thrown(vec![("Gun_Muzzle_Flash", mount, origin)]);
         assert_eq!(list.len(), 60);
         assert!(inside(&list, shot, 20.0), "inside the cone about the shot's velocity");
@@ -720,11 +787,29 @@ mod tests {
         let normal = Vec3::new(0.0, 1.0, 0.5).normalize();
         // the effect node faces back along the flight, 90 degrees from the surface normal here
         let node = Transform::from_xyz(0.0, 3.0, 0.0).looking_to(Vec3::X, Vec3::Y);
-        let origin = crate::fx::Origin { forward: Some(normal), shell: None, host: Some(Entity::from_raw_u32(9).unwrap()) };
+        let origin = crate::fx::Origin { forward: Some(normal), host: Some(Entity::from_raw_u32(9).unwrap()), ..default() };
         let list = thrown(vec![("Gun_Impact", node, origin)]);
         assert_eq!(list.len(), 60);
         assert!(inside(&list, normal, 30.0));
         assert!(!inside(&list, Vec3::X, 30.0));
+    }
+
+    #[test]
+    fn material_debris_replaces_generic_particles_only_for_opted_in_hits() {
+        let tf = Transform::from_xyz(1.0, 0.0, 1.0);
+        let launch = |name, material| thrown(vec![(name, tf, crate::fx::Origin { material, forward: Some(Vec3::X), ..default() })]);
+        for (material, kind, count) in [("Wood", Kind::Splinter, 2), ("Reinforced", Kind::Splinter, 2), ("Iron", Kind::Spark, 3), ("Cloth", Kind::Fiber, 4)] {
+            let list = launch("Gun_Impact", Some(material));
+            assert_eq!(list.len(), count + usize::from(kind == Kind::Splinter));
+            assert_eq!(list.iter().filter(|p| p.kind == kind).count(), count);
+            assert!(list.iter().all(|p| p.from == tf.translation));
+            if kind == Kind::Spark {
+                assert!(inside(&list, Vec3::X, 27.0));
+            }
+        }
+        assert_eq!(launch("Gun_Impact", Some("Stone")).len(), 60, "unconfigured materials keep the generic burst");
+        assert_eq!(launch("Gun_Muzzle_Flash", None).len(), 60, "muzzle flashes are unaffected");
+        assert_eq!(launch("Special", Some("Wood"))[0].kind, Kind::Spark, "a weapon can retain its own burst");
     }
 
     #[test]

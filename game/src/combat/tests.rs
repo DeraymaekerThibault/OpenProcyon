@@ -1237,7 +1237,7 @@ fn shell_into_a_hull_damages_it_and_reports_the_hit() {
     let c = lib.index("Ship_Navy_Torpedo");
     app.add_plugins((TaskPoolPlugin::default(), AssetPlugin::default()))
         .init_resource::<Time>()
-        .init_resource::<FxLib>()
+        .add_message::<crate::fx::EffectStarted>()
         .insert_resource(Rng(7))
         .add_message::<Sfx>()
         .add_message::<Hit>()
@@ -1270,6 +1270,8 @@ fn shell_into_a_hull_damages_it_and_reports_the_hit() {
     let [ta, tb, tc] = lib.classes[c].sections.iter().find(|s| s.vital).unwrap().tris[0];
     let normal = (tb - ta).cross(tc - ta).normalize();
     let farther_ship = app.world().get::<Ship>(target).unwrap().clone();
+    let impact = lib.bullets[&bullet].hit_fx.as_deref().expect("the heavy cannonball has an impact effect");
+    app.insert_resource(FxLib::with_names(&[impact]));
     let farther = app.world_mut().spawn((Transform::from_translation(-normal * 100.0), farther_ship, Health::new(&lib.classes[c]), Fires::default())).id();
     let at = (ta + tb + tc) / 3.0 + normal * 40.0;
     let shell = Shell {
@@ -1296,17 +1298,21 @@ fn shell_into_a_hull_damages_it_and_reports_the_hit() {
     app.insert_resource(lib);
     let full: f32 = app.world().get::<Health>(target).unwrap().sections.iter().sum();
     let mut hit = false;
+    let mut impacted_material = None;
     for _ in 0..20 {
         // One segment crosses both hulls, so the nearest collision must win.
         app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs_f32(1.0));
         app.update();
         hit |= app.world().resource::<Messages<Hit>>().iter_current_update_messages().any(|h| h.victim == target);
+        impacted_material = impacted_material
+            .or_else(|| app.world().resource::<Messages<crate::fx::EffectStarted>>().iter_current_update_messages().find_map(|fx| fx.material.filter(|_| fx.host == Some(target))));
     }
     let left: f32 = app.world().get::<Health>(target).unwrap().sections.iter().sum();
     assert!(left < full, "the hull took damage ({left} of {full})");
     assert_eq!(app.world().get::<Health>(farther).unwrap().sections.iter().sum::<f32>(), full, "the farther ship must not be hit");
     assert!(app.world().get_entity(id).is_err(), "the shell is spent");
     assert!(hit, "a Hit names the ship");
+    assert!(impacted_material.is_some_and(|key| MATERIALS.contains(&key)), "the hit effect carries a material from the real collision");
 }
 
 /// The original sweeps every shot against islands: land between the gun and the hull takes the shot instead.

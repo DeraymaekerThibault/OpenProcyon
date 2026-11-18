@@ -164,6 +164,8 @@ pub struct EffectStarted {
     pub shell: Option<Entity>,
     /// The ship or base an impact struck.
     pub host: Option<Entity>,
+    /// The combat material key of the section struck, for presentation only.
+    pub material: Option<&'static str>,
 }
 
 /// What a caller knows about the effect it starts, beyond its pose: it fills the `EffectStarted` message.
@@ -173,6 +175,7 @@ pub struct Origin {
     pub forward: Option<Vec3>,
     pub shell: Option<Entity>,
     pub host: Option<Entity>,
+    pub material: Option<&'static str>,
 }
 
 /// Starts effect `name` at world transform `world` (so the first frame is right), optionally as a child of `parent`
@@ -208,8 +211,15 @@ pub fn spawn_with(commands: &mut Commands, lib: &FxLib, name: &str, parent: Opti
         e.insert(Transient);
     }
     let entity = e.id();
-    let started =
-        EffectStarted { entity, effect: eff, at: world.translation, forward: origin.forward.unwrap_or_else(|| world.forward().as_vec3()), shell: origin.shell, host: origin.host };
+    let started = EffectStarted {
+        entity,
+        effect: eff,
+        at: world.translation,
+        forward: origin.forward.unwrap_or_else(|| world.forward().as_vec3()),
+        shell: origin.shell,
+        host: origin.host,
+        material: origin.material,
+    };
     commands.queue(move |world: &mut World| {
         // no message store (a test world without the plugin): nobody listens
         if let Some(mut messages) = world.get_resource_mut::<Messages<EffectStarted>>() {
@@ -234,15 +244,17 @@ mod tests {
         let made = world
             .run_system_once(move |mut commands: Commands, lib: Res<FxLib>| {
                 let plain = spawn(&mut commands, &lib, "B", None, node, node, true).unwrap();
-                let told = spawn_with(&mut commands, &lib, "A", None, node, node, true, Origin { forward: Some(Vec3::Y), shell: Some(shell), host: Some(host) }).unwrap();
+                let told =
+                    spawn_with(&mut commands, &lib, "A", None, node, node, true, Origin { forward: Some(Vec3::Y), shell: Some(shell), host: Some(host), material: Some("Iron") })
+                        .unwrap();
                 assert!(spawn(&mut commands, &lib, "Unknown", None, node, node, true).is_none());
                 (plain, told)
             })
             .unwrap();
         let sent: Vec<_> = world.resource_mut::<Messages<EffectStarted>>().drain().collect();
         assert_eq!(sent.len(), 2, "one per effect started, none for an unknown name");
-        let plain = EffectStarted { entity: made.0, effect: 1, at: node.translation, forward: node.forward().as_vec3(), shell: None, host: None };
+        let plain = EffectStarted { entity: made.0, effect: 1, at: node.translation, forward: node.forward().as_vec3(), shell: None, host: None, material: None };
         assert_eq!(sent[0], plain, "no shell: the node's own forward");
-        assert_eq!(sent[1], EffectStarted { entity: made.1, effect: 0, forward: Vec3::Y, shell: Some(shell), host: Some(host), ..plain });
+        assert_eq!(sent[1], EffectStarted { entity: made.1, effect: 0, forward: Vec3::Y, shell: Some(shell), host: Some(host), material: Some("Iron"), ..plain });
     }
 }

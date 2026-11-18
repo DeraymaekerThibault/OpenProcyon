@@ -54,6 +54,25 @@ class Evaluate(unittest.TestCase):
             ["player never fired", "side1 never fired"],
         )
 
+    def test_engagement_does_not_require_an_uncommanded_human_to_fire(self):
+        r = report(player_bursts=0)
+        r["sides"]["player"]["hits"] = 0
+        self.assertEqual(evaluate(r, {"engage"}), [])
+        for name in ("ambush", "bayles_stand"):
+            scenario = next(s for s in SCENARIOS if s.name == name)
+            self.assertIn("engage", scenario.expect)
+            self.assertNotIn("fight", scenario.expect)
+
+    def test_engagement_still_requires_computer_fire_hits_and_promptness(self):
+        self.assertEqual(
+            evaluate(report(side1_bursts=0), {"engage"}), ["side1 never fired"]
+        )
+        self.assertEqual(evaluate(report(hits=0), {"engage"}), ["side1 never hit"])
+        self.assertEqual(
+            evaluate(report(first=95.0), {"engage"}),
+            ["the computer first fired at 95 s"],
+        )
+
     def test_a_parked_computer_fails_the_patrol(self):
         # The armed-volcano regression: the computer parked off a volcano and sailed nowhere.
         self.assertEqual(
