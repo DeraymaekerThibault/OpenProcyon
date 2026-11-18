@@ -4,7 +4,8 @@
 //! stretch and its ship's speed (see `SailGlowUniform` for the contract); with `billow` the mesh is cut finer and bellies
 //! out between its edges, more with speed; with `furl` each sail folds up to its top edge (the yard) while its ship is
 //! ordered to All Stop, as the film's solar sails fold away. With `fan` a Navy sail does not fold like a roller blind but
-//! like a hand fan: its ribs swing together about the pivot where they meet, and the cloth between them pleats.
+//! like a hand fan: its ribs swing in from both sides onto the middle rib, about the middle of its straight edge, and the cloth
+//! between them pleats.
 
 use bevy::asset::RenderAssetUsages;
 use bevy::gltf::GltfMaterialName;
@@ -183,7 +184,7 @@ struct FanPoint {
     e1: Vec3,
     e2: Vec3,
     n: Vec3,
-    /// Angle about the pivot from e1, the edge angle the fan closes onto, and this point's place across the span (0..1).
+    /// Angle about the pivot from e1, the angle the fan closes onto (its middle rib), and this point's place across the span (0..1).
     angle: f32,
     closed: f32,
     span: f32,
@@ -369,7 +370,10 @@ struct FanSail {
 }
 
 impl FanSail {
-    /// The sail's vertices (position, normal) -> its fan, or None for a sail with no area or length to fold.
+    /// The sail's vertices (position, normal) -> its fan, or None for a sail with no area or length to fold. A Navy fan sail is a
+    /// half disc: its straight edge (the yard under the main sail, the spar beside a side sail) is the diameter, the two
+    /// vertices farthest apart, and the ribs meet at its middle. The fan closes from both sides onto its middle rib: the main
+    /// sail folds up against the mast, the side sails close to a horizontal line.
     fn new(verts: &[(Vec3, Vec3)]) -> Option<FanSail> {
         if verts.len() < 3 {
             return None;
@@ -379,50 +383,28 @@ impl FanSail {
             return None;
         }
         let centre = verts.iter().map(|v| v.0).sum::<Vec3>() / verts.len() as f32;
-        // the sail's plane: a horizontal axis across it and the other one up it (or along it, for a flat sail)
-        let b1 = if n.cross(Vec3::Y).length() > 1e-3 { n.cross(Vec3::Y).normalize() } else { Vec3::X };
-        let b2 = n.cross(b1);
-        let (mut cxx, mut cyy, mut cxy) = (0.0, 0.0, 0.0);
-        for (q, _) in verts {
-            let (x, y) = ((*q - centre).dot(b1), (*q - centre).dot(b2));
-            (cxx, cyy, cxy) = (cxx + x * x, cyy + y * y, cxy + x * y);
+        let flat = |q: Vec3| q - n * (q - centre).dot(n);
+        let (mut a, mut b, mut far) = (centre, centre, 0.0);
+        for (i, (p, _)) in verts.iter().enumerate() {
+            for (q, _) in &verts[i + 1..] {
+                let d = flat(*p).distance_squared(flat(*q));
+                if d > far {
+                    (a, b, far) = (*p, *q, d);
+                }
+            }
         }
-        let theta = 0.5 * (2.0 * cxy).atan2(cxx - cyy);
-        let axis = b1 * theta.cos() + b2 * theta.sin();
-        let side = n.cross(axis);
-        let t = |q: Vec3| (q - centre).dot(axis);
-        let (lo, hi) = verts.iter().fold((f32::MAX, f32::MIN), |(lo, hi), (q, _)| (lo.min(t(*q)), hi.max(t(*q))));
-        let length = hi - lo;
-        if length < 1e-4 {
-            return None;
-        }
-        // the width of each end, over the outer fifth of the sail's length
-        let width = |from_hi: bool| {
-            let ends: Vec<f32> =
-                verts.iter().filter(|(q, _)| if from_hi { t(*q) > hi - 0.2 * length } else { t(*q) < lo + 0.2 * length }).map(|(q, _)| (*q - centre).dot(side)).collect();
-            ends.iter().fold(f32::MIN, |a, &b| a.max(b)) - ends.iter().fold(f32::MAX, |a, &b| a.min(b))
-        };
-        let extreme = |from_hi: bool| {
-            let key = |q: &Vec3| if from_hi { t(*q) } else { -t(*q) };
-            verts.iter().map(|v| v.0).max_by(|a, b| key(a).total_cmp(&key(b))).unwrap()
-        };
-        let (w_lo, w_hi) = (width(false), width(true));
-        let pivot_hi = if (w_lo - w_hi).abs() <= 0.15 * w_lo.max(w_hi) { extreme(true).y >= extreme(false).y } else { w_hi < w_lo };
-        let pivot = extreme(pivot_hi);
-        let into = (centre - pivot) - n * (centre - pivot).dot(n);
-        let e1 = into.try_normalize()?;
+        let pivot = (a + b) * 0.5;
+        // the middle rib points from the pivot into the sail, square to the straight edge
+        let edge = flat(b) - flat(a);
+        let into = flat(centre) - flat(pivot);
+        let e1 = (into - edge * into.dot(edge) / edge.length_squared().max(1e-8)).try_normalize()?;
         let e2 = n.cross(e1);
         let angle = |q: Vec3| (q - pivot).dot(e2).atan2((q - pivot).dot(e1));
         let (min, max) = verts.iter().filter(|(q, _)| (*q - pivot).length() > 1e-4).fold((f32::MAX, f32::MIN), |(lo, hi), (q, _)| (lo.min(angle(*q)), hi.max(angle(*q))));
         if max - min < 1e-3 {
             return None;
         }
-        // the fan closes against the edge nearest the yard: the upper one
-        let high = |edge: f32| {
-            let on: Vec<f32> = verts.iter().filter(|(q, _)| (angle(*q) - edge).abs() < 0.1 * (max - min) && (*q - pivot).length() > 1e-4).map(|(q, _)| q.y).collect();
-            on.iter().sum::<f32>() / on.len().max(1) as f32
-        };
-        let closed = if high(max) > high(min) { max } else { min };
+        let closed = 0.5 * (min + max);
         let rim = verts.iter().map(|(q, _)| (*q - pivot).length()).fold(1e-4, f32::max);
         Some(FanSail { pivot, e1, e2, n, min, max, closed, rim })
     }
@@ -603,33 +585,52 @@ mod tests {
         assert_eq!(parse(&serde_json::json!({})).unwrap().furl, 0.0, "classic unless asked");
     }
 
-    /// A fan of three ribs from the origin: rib ends at 0, 0.5 and 1.0 radians, 10 long.
+    /// A half disc of radius 10 standing on its straight edge (the yard, along x), ribs every 45 degrees from the centre.
     fn fan_mesh() -> Mesh {
         let mut m = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
-        let end = |a: f32| [10.0 * f32::cos(a), 10.0 * f32::sin(a), 0.0];
-        m.insert_attribute(Mesh::ATTRIBUTE_POSITION, vec![[0.0, 0.0, 0.0], end(0.0), end(0.5), end(1.0)]);
-        m.insert_attribute(Mesh::ATTRIBUTE_NORMAL, vec![[0.0, 0.0, 1.0]; 4]);
-        m.insert_attribute(Mesh::ATTRIBUTE_UV_0, vec![[0.0, 0.0], [1.0, 0.0], [1.0, 0.5], [1.0, 1.0]]);
-        m.insert_indices(Indices::U32(vec![0, 1, 2, 0, 2, 3]));
+        let rib = |k: usize| {
+            let a = std::f32::consts::PI * k as f32 / 4.0;
+            [10.0 * a.cos(), 10.0 * a.sin(), 0.0]
+        };
+        let mut pos = vec![[0.0, 0.0, 0.0]];
+        pos.extend((0..=4).map(rib));
+        m.insert_attribute(Mesh::ATTRIBUTE_POSITION, pos);
+        m.insert_attribute(Mesh::ATTRIBUTE_NORMAL, vec![[0.0, 0.0, 1.0]; 6]);
+        m.insert_attribute(Mesh::ATTRIBUTE_UV_0, vec![[0.5, 0.0], [1.0, 0.0], [0.85, 0.85], [0.5, 1.0], [0.15, 0.85], [0.0, 0.0]]);
+        m.insert_indices(Indices::U32(vec![0, 1, 2, 0, 2, 3, 0, 3, 4, 0, 4, 5]));
         m
     }
 
     #[test]
-    fn a_fan_sail_closes_onto_its_edge_keeping_every_ribs_length() {
+    fn a_fan_sail_folds_from_both_sides_onto_its_middle_rib_keeping_every_ribs_length() {
         let fan = Fan { matching: vec![], races: vec![], pleats: 4.0, depth: 0.0 };
         let (_, b) = subdivide(&fan_mesh(), Some(&fan)).unwrap();
         assert_eq!(b.fan.len(), b.rest.len());
         let pivot = Vec3::ZERO;
         for (rest, pt) in b.rest.iter().zip(&b.fan) {
             let pt = pt.expect("a real fan");
+            assert!((pt.pivot - pivot).length() < 1e-3, "the ribs meet in the middle of the straight edge: {}", pt.pivot);
             assert!((fanned(&pt, 0.0, 4.0, 0.0) - *rest).length() < 1e-3, "open is unchanged: {rest}");
             let shut = fanned(&pt, 1.0, 4.0, 0.0);
             assert!((shut.distance(pivot) - rest.distance(pivot)).abs() < 1e-3, "the rib keeps its length: {rest} -> {shut}");
-            // the upper edge: the rib at 1.0 radian
-            let along = Vec3::new(f32::cos(1.0), f32::sin(1.0), 0.0);
-            assert!(shut.cross(along).length() < 1e-3, "{shut} is not on the closed edge");
+            assert!(shut.x.abs() < 1e-3 && shut.y >= -1e-3, "{rest} folds up onto the mast, not {shut}");
             let half = fanned(&pt, 0.5, 4.0, 0.0);
             assert!((half.distance(pivot) - rest.distance(pivot)).abs() < 1e-3);
+        }
+    }
+
+    #[test]
+    fn a_side_fan_standing_on_a_vertical_edge_closes_to_horizontal() {
+        // the same half disc turned so its straight edge is upright and it opens outward along +x
+        let mut m = fan_mesh();
+        if let Some(VertexAttributeValues::Float32x3(pos)) = m.attribute_mut(Mesh::ATTRIBUTE_POSITION) {
+            pos.iter_mut().for_each(|p| *p = [p[1], -p[0], 0.0]);
+        }
+        let fan = Fan { matching: vec![], races: vec![], pleats: 4.0, depth: 0.0 };
+        let (_, b) = subdivide(&m, Some(&fan)).unwrap();
+        for pt in b.fan.iter().flatten() {
+            let shut = fanned(pt, 1.0, 4.0, 0.0);
+            assert!(shut.y.abs() < 1e-3 && shut.x >= -1e-3, "closed flat along the spar: {shut}");
         }
     }
 
