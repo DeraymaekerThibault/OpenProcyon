@@ -3,7 +3,8 @@
 //! `shaders/sail.wesl`, which the mod ships. The engine feeds it the profile's numbers, the sun, the sail's UV
 //! stretch and its ship's speed (see `SailGlowUniform` for the contract); with `billow` the mesh is cut finer and bellies
 //! out between its edges, more with speed; with `furl` each sail folds up to its top edge (the yard) while its ship is
-//! ordered to All Stop, as the film's solar sails fold away.
+//! ordered to All Stop, as the film's solar sails fold away. With `fan` a Navy sail does not fold like a roller blind but
+//! like a hand fan: its ribs swing together about the pivot where they meet, and the cloth between them pleats.
 
 use bevy::asset::RenderAssetUsages;
 use bevy::gltf::GltfMaterialName;
@@ -47,6 +48,28 @@ pub struct Sails {
     pub opaque: bool,
     /// Share of a sail's height folded away while its ship is ordered to stop; 0 = never, as in classic.
     pub furl: f32,
+    /// Sails that fold like a hand fan instead of a roller blind.
+    pub fan: Option<Fan>,
+}
+
+/// The `fan` part of the `sails` block.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Fan {
+    /// glTF material name fragments (lower case) of the sails that fan; none by default.
+    pub matching: Vec<String>,
+    /// Ship races (lower case) whose sails all fan (the Navy's sail materials share names with other fleets' canvas).
+    pub races: Vec<String>,
+    /// Ribs the cloth pleats into.
+    pub pleats: f32,
+    /// How far the pleats zig-zag out of the sail's plane, a share of the sail's size.
+    pub depth: f32,
+}
+
+impl Fan {
+    fn applies(&self, material: &GltfMaterialName, race: Option<&str>) -> bool {
+        let n = material.0.to_lowercase();
+        self.matching.iter().any(|m| n.contains(m)) || race.is_some_and(|r| self.races.iter().any(|x| x.eq_ignore_ascii_case(r)))
+    }
 }
 
 impl Sails {
@@ -78,6 +101,12 @@ pub fn parse(s: &Value) -> Option<Sails> {
         billow: num(&s["billow"], 0.0),
         opaque: s["opaque"].as_bool().unwrap_or(false),
         furl: num(&s["furl"], 0.0).clamp(0.0, 1.0),
+        fan: s["fan"].is_object().then(|| Fan {
+            matching: names(&s["fan"]["match"], &[]),
+            races: names(&s["fan"]["races"], &["navy"]),
+            pleats: num(&s["fan"]["pleats"], 6.0).clamp(1.0, 24.0),
+            depth: num(&s["fan"]["depth"], 0.02).clamp(0.0, 0.2),
+        }),
     })
 }
 
@@ -140,6 +169,29 @@ struct Billow {
     /// Height (mesh up, +Y) of the top edge of the sail each vertex belongs to; one mesh holds several sails.
     top: Vec<f32>,
     size: f32,
+    /// For a fan sail, each vertex's place in its fan (None where the sail is too small to have one); empty otherwise.
+    fan: Vec<Option<FanPoint>>,
+    pleats: f32,
+    depth: f32,
+}
+
+/// One vertex of a fan sail: where it sits about the fan's pivot, in the sail's plane.
+#[derive(Clone, Copy, Debug)]
+struct FanPoint {
+    pivot: Vec3,
+    /// The plane's axes (e1 points from the pivot into the sail) and normal.
+    e1: Vec3,
+    e2: Vec3,
+    n: Vec3,
+    /// Angle about the pivot from e1, the edge angle the fan closes onto, and this point's place across the span (0..1).
+    angle: f32,
+    closed: f32,
+    span: f32,
+    radius: f32,
+    /// This radius over the sail's longest rib (pleats are deepest at the rim).
+    rim: f32,
+    /// Offset out of the plane at rest (kept).
+    height: f32,
 }
 
 /// Materials named like retail sail textures ("sail.tga", "square sails orange.tga") become sail materials, one per sail
@@ -150,6 +202,7 @@ pub(super) fn sails(
     new: Query<(Entity, &GltfMaterialName, &MeshMaterial3d<StandardMaterial>, &Mesh3d), (Added<MeshMaterial3d<StandardMaterial>>, Without<Restyled<SailMaterial>>)>,
     parents: Query<&ChildOf>,
     ships: Query<&crate::Ship>,
+    lib: Option<Res<crate::combat::Library>>,
     standard: Res<Assets<StandardMaterial>>,
     mut sail_mats: ResMut<Assets<SailMaterial>>,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -191,7 +244,10 @@ pub(super) fn sails(
             entity.try_insert(NotShadowCaster);
         }
         if (s.billow > 0.0 || s.furl > 0.0)
-            && let Some((fine, billow)) = meshes.get(&mesh.0).and_then(subdivide)
+            && let Some((fine, billow)) = meshes.get(&mesh.0).and_then(|m| {
+                let race = ship.and_then(|e| ships.get(e).ok()).and_then(|sh| lib.as_ref().map(|l| l.classes[sh.class].race.as_str()));
+                subdivide(m, s.fan.as_ref().filter(|f| f.applies(name, race)))
+            })
         {
             entity.try_insert((Mesh3d(meshes.add(fine)), billow));
         }
@@ -230,7 +286,7 @@ fn uv_world_scale(mesh: &Mesh) -> Option<Vec2> {
 }
 
 /// The sail mesh cut so no triangle edge is longer than about a 14th of the sail, keeping position, normal and UV.
-fn subdivide(mesh: &Mesh) -> Option<(Mesh, Billow)> {
+fn subdivide(mesh: &Mesh, fan: Option<&Fan>) -> Option<(Mesh, Billow)> {
     let Some(VertexAttributeValues::Float32x3(pos)) = mesh.attribute(Mesh::ATTRIBUTE_POSITION) else { return None };
     let Some(VertexAttributeValues::Float32x3(nor)) = mesh.attribute(Mesh::ATTRIBUTE_NORMAL) else { return None };
     let Some(VertexAttributeValues::Float32x2(uv)) = mesh.attribute(Mesh::ATTRIBUTE_UV_0) else { return None };
@@ -249,7 +305,7 @@ fn subdivide(mesh: &Mesh) -> Option<(Mesh, Billow)> {
     for &i in &used {
         top[sail[i]] = top[sail[i]].max(p(i).y);
     }
-    let (mut out_p, mut out_n, mut out_uv, mut pin, mut idx, mut out_top) = (vec![], vec![], vec![], vec![], vec![], vec![]);
+    let (mut out_p, mut out_n, mut out_uv, mut pin, mut idx, mut out_top, mut out_sail) = (vec![], vec![], vec![], vec![], vec![], vec![], vec![]);
     for [a, b, c] in tris {
         let edge = p(a).distance(p(b)).max(p(b).distance(p(c))).max(p(c).distance(p(a)));
         let n = ((edge / (size / 14.0)).ceil() as usize).clamp(1, 12);
@@ -267,6 +323,7 @@ fn subdivide(mesh: &Mesh) -> Option<(Mesh, Billow)> {
                 let s = (t - ulo) / uspan;
                 pin.push((16.0 * s.x * (1.0 - s.x) * s.y * (1.0 - s.y)).clamp(0.0, 1.0).sqrt());
                 out_top.push(top[sail[a]]);
+                out_sail.push(sail[a]);
             }
         }
         for i in 0..n {
@@ -283,7 +340,120 @@ fn subdivide(mesh: &Mesh) -> Option<(Mesh, Billow)> {
     fine.insert_attribute(Mesh::ATTRIBUTE_NORMAL, out_n.iter().map(|v| v.to_array()).collect::<Vec<_>>());
     fine.insert_attribute(Mesh::ATTRIBUTE_UV_0, out_uv);
     fine.insert_indices(Indices::U32(idx));
-    Some((fine, Billow { rest: out_p, normal: out_n, pin, top: out_top, size }))
+    let fans = fan.map(|_| {
+        let mut sails: std::collections::HashMap<usize, Option<FanSail>> = std::collections::HashMap::new();
+        for &i in &used {
+            sails.entry(sail[i]).or_insert(None);
+        }
+        let roots: Vec<usize> = sails.keys().copied().collect();
+        for root in roots {
+            let verts: Vec<(Vec3, Vec3)> = used.iter().filter(|&&i| sail[i] == root).map(|&i| (p(i), Vec3::from(nor[i]))).collect();
+            sails.insert(root, FanSail::new(&verts));
+        }
+        out_p.iter().zip(&out_sail).map(|(&q, root)| sails[root].as_ref().map(|f| f.point(q))).collect::<Vec<_>>()
+    });
+    let (pleats, depth) = fan.map_or((0.0, 0.0), |f| (f.pleats, f.depth));
+    Some((fine, Billow { rest: out_p, normal: out_n, pin, top: out_top, size, fan: fans.unwrap_or_default(), pleats, depth }))
+}
+
+/// The fan a sail makes: its pivot (where the ribs meet), plane and span.
+struct FanSail {
+    pivot: Vec3,
+    e1: Vec3,
+    e2: Vec3,
+    n: Vec3,
+    min: f32,
+    max: f32,
+    closed: f32,
+    rim: f32,
+}
+
+impl FanSail {
+    /// The sail's vertices (position, normal) -> its fan, or None for a sail with no area or length to fold.
+    fn new(verts: &[(Vec3, Vec3)]) -> Option<FanSail> {
+        if verts.len() < 3 {
+            return None;
+        }
+        let n = verts.iter().map(|v| v.1).sum::<Vec3>().normalize_or_zero();
+        if n == Vec3::ZERO {
+            return None;
+        }
+        let centre = verts.iter().map(|v| v.0).sum::<Vec3>() / verts.len() as f32;
+        // the sail's plane: a horizontal axis across it and the other one up it (or along it, for a flat sail)
+        let b1 = if n.cross(Vec3::Y).length() > 1e-3 { n.cross(Vec3::Y).normalize() } else { Vec3::X };
+        let b2 = n.cross(b1);
+        let (mut cxx, mut cyy, mut cxy) = (0.0, 0.0, 0.0);
+        for (q, _) in verts {
+            let (x, y) = ((*q - centre).dot(b1), (*q - centre).dot(b2));
+            (cxx, cyy, cxy) = (cxx + x * x, cyy + y * y, cxy + x * y);
+        }
+        let theta = 0.5 * (2.0 * cxy).atan2(cxx - cyy);
+        let axis = b1 * theta.cos() + b2 * theta.sin();
+        let side = n.cross(axis);
+        let t = |q: Vec3| (q - centre).dot(axis);
+        let (lo, hi) = verts.iter().fold((f32::MAX, f32::MIN), |(lo, hi), (q, _)| (lo.min(t(*q)), hi.max(t(*q))));
+        let length = hi - lo;
+        if length < 1e-4 {
+            return None;
+        }
+        // the width of each end, over the outer fifth of the sail's length
+        let width = |from_hi: bool| {
+            let ends: Vec<f32> =
+                verts.iter().filter(|(q, _)| if from_hi { t(*q) > hi - 0.2 * length } else { t(*q) < lo + 0.2 * length }).map(|(q, _)| (*q - centre).dot(side)).collect();
+            ends.iter().fold(f32::MIN, |a, &b| a.max(b)) - ends.iter().fold(f32::MAX, |a, &b| a.min(b))
+        };
+        let extreme = |from_hi: bool| {
+            let key = |q: &Vec3| if from_hi { t(*q) } else { -t(*q) };
+            verts.iter().map(|v| v.0).max_by(|a, b| key(a).total_cmp(&key(b))).unwrap()
+        };
+        let (w_lo, w_hi) = (width(false), width(true));
+        let pivot_hi = if (w_lo - w_hi).abs() <= 0.15 * w_lo.max(w_hi) { extreme(true).y >= extreme(false).y } else { w_hi < w_lo };
+        let pivot = extreme(pivot_hi);
+        let into = (centre - pivot) - n * (centre - pivot).dot(n);
+        let e1 = into.try_normalize()?;
+        let e2 = n.cross(e1);
+        let angle = |q: Vec3| (q - pivot).dot(e2).atan2((q - pivot).dot(e1));
+        let (min, max) = verts.iter().filter(|(q, _)| (*q - pivot).length() > 1e-4).fold((f32::MAX, f32::MIN), |(lo, hi), (q, _)| (lo.min(angle(*q)), hi.max(angle(*q))));
+        if max - min < 1e-3 {
+            return None;
+        }
+        // the fan closes against the edge nearest the yard: the upper one
+        let high = |edge: f32| {
+            let on: Vec<f32> = verts.iter().filter(|(q, _)| (angle(*q) - edge).abs() < 0.1 * (max - min) && (*q - pivot).length() > 1e-4).map(|(q, _)| q.y).collect();
+            on.iter().sum::<f32>() / on.len().max(1) as f32
+        };
+        let closed = if high(max) > high(min) { max } else { min };
+        let rim = verts.iter().map(|(q, _)| (*q - pivot).length()).fold(1e-4, f32::max);
+        Some(FanSail { pivot, e1, e2, n, min, max, closed, rim })
+    }
+
+    fn point(&self, q: Vec3) -> FanPoint {
+        let d = q - self.pivot;
+        let radius = d.dot(self.e1).hypot(d.dot(self.e2));
+        let angle = if radius > 1e-4 { d.dot(self.e2).atan2(d.dot(self.e1)) } else { self.closed };
+        FanPoint {
+            pivot: self.pivot,
+            e1: self.e1,
+            e2: self.e2,
+            n: self.n,
+            angle,
+            closed: self.closed,
+            span: ((angle - self.min) / (self.max - self.min)).clamp(0.0, 1.0),
+            radius,
+            rim: radius / self.rim,
+            height: d.dot(self.n),
+        }
+    }
+}
+
+/// A fan sail point folded `amount` (0 open, 1 shut) about its pivot: the angle closes onto the edge, the radius stays, and
+/// the cloth between the ribs zig-zags out of the plane (`pleats` ribs, `depth` units at the rim) as it closes.
+fn fanned(p: &FanPoint, amount: f32, pleats: f32, depth: f32) -> Vec3 {
+    let angle = p.closed + (p.angle - p.closed) * (1.0 - amount);
+    let wave = (p.span * pleats).fract();
+    let tri = 4.0 * (wave - 0.5).abs() - 1.0;
+    let out = p.height + depth * amount * p.rim * tri;
+    p.pivot + p.e1 * (p.radius * angle.cos()) + p.e2 * (p.radius * angle.sin()) + p.n * out
 }
 
 /// Which sail each vertex belongs to (a representative vertex index): triangles joined by shared or coincident corners.
@@ -361,8 +531,11 @@ fn billow(look: Res<Look>, sails: Query<(&Billow, &Sail, &Mesh3d)>, mut meshes: 
         let amp = s.billow * b.size * (1.0 - f);
         let pos: Vec<[f32; 3]> = (0..b.rest.len())
             .map(|i| {
-                let p = b.rest[i] + b.normal[i] * amp * b.pin[i] * belly(b.rest[i], b.size, sail.phase, sail.clock, sail.wind);
-                furled(p, b.top[i], s.furl * f).to_array()
+                let billow = b.normal[i] * amp * b.pin[i] * belly(b.rest[i], b.size, sail.phase, sail.clock, sail.wind);
+                match b.fan.get(i).copied().flatten() {
+                    Some(pt) => (fanned(&pt, s.furl * f, b.pleats, b.depth * b.size) + billow).to_array(),
+                    None => furled(b.rest[i] + billow, b.top[i], s.furl * f).to_array(),
+                }
             })
             .collect();
         m.insert_attribute(Mesh::ATTRIBUTE_POSITION, pos);
@@ -398,7 +571,7 @@ mod tests {
 
     #[test]
     fn a_sail_quad_is_cut_finely_with_its_edges_pinned() {
-        let (fine, b) = subdivide(&quad(10.0, 10.0)).unwrap();
+        let (fine, b) = subdivide(&quad(10.0, 10.0), None).unwrap();
         let tris = fine.indices().unwrap().len() / 3;
         assert!(tris >= 2 * 10 * 10, "two triangles become many: {tris}");
         assert!(fine.indices().unwrap().iter().all(|i| i < b.rest.len()));
@@ -421,13 +594,67 @@ mod tests {
         two.insert_attribute(Mesh::ATTRIBUTE_NORMAL, vec![[0.0, 0.0, 1.0]; 8]);
         two.insert_attribute(Mesh::ATTRIBUTE_UV_0, [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]].repeat(2));
         two.insert_indices(Indices::U32(vec![0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7]));
-        let (_, b) = subdivide(&two).unwrap();
+        let (_, b) = subdivide(&two, None).unwrap();
         for (p, top) in b.rest.iter().zip(&b.top) {
             assert_eq!(*top, if p.y >= 20.0 { 25.0 } else { 10.0 }, "{p}");
             let f = furled(*p, *top, 0.9);
             assert!((top - f.y - 0.1 * (top - p.y)).abs() < 1e-4 && f.x == p.x && f.z == p.z, "{p} -> {f}");
         }
         assert_eq!(parse(&serde_json::json!({})).unwrap().furl, 0.0, "classic unless asked");
+    }
+
+    /// A fan of three ribs from the origin: rib ends at 0, 0.5 and 1.0 radians, 10 long.
+    fn fan_mesh() -> Mesh {
+        let mut m = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
+        let end = |a: f32| [10.0 * f32::cos(a), 10.0 * f32::sin(a), 0.0];
+        m.insert_attribute(Mesh::ATTRIBUTE_POSITION, vec![[0.0, 0.0, 0.0], end(0.0), end(0.5), end(1.0)]);
+        m.insert_attribute(Mesh::ATTRIBUTE_NORMAL, vec![[0.0, 0.0, 1.0]; 4]);
+        m.insert_attribute(Mesh::ATTRIBUTE_UV_0, vec![[0.0, 0.0], [1.0, 0.0], [1.0, 0.5], [1.0, 1.0]]);
+        m.insert_indices(Indices::U32(vec![0, 1, 2, 0, 2, 3]));
+        m
+    }
+
+    #[test]
+    fn a_fan_sail_closes_onto_its_edge_keeping_every_ribs_length() {
+        let fan = Fan { matching: vec![], races: vec![], pleats: 4.0, depth: 0.0 };
+        let (_, b) = subdivide(&fan_mesh(), Some(&fan)).unwrap();
+        assert_eq!(b.fan.len(), b.rest.len());
+        let pivot = Vec3::ZERO;
+        for (rest, pt) in b.rest.iter().zip(&b.fan) {
+            let pt = pt.expect("a real fan");
+            assert!((fanned(&pt, 0.0, 4.0, 0.0) - *rest).length() < 1e-3, "open is unchanged: {rest}");
+            let shut = fanned(&pt, 1.0, 4.0, 0.0);
+            assert!((shut.distance(pivot) - rest.distance(pivot)).abs() < 1e-3, "the rib keeps its length: {rest} -> {shut}");
+            // the upper edge: the rib at 1.0 radian
+            let along = Vec3::new(f32::cos(1.0), f32::sin(1.0), 0.0);
+            assert!(shut.cross(along).length() < 1e-3, "{shut} is not on the closed edge");
+            let half = fanned(&pt, 0.5, 4.0, 0.0);
+            assert!((half.distance(pivot) - rest.distance(pivot)).abs() < 1e-3);
+        }
+    }
+
+    #[test]
+    fn a_fan_pleats_out_of_its_plane_only_while_it_is_closing() {
+        let fan = Fan { matching: vec![], races: vec![], pleats: 4.0, depth: 0.1 };
+        let (_, b) = subdivide(&fan_mesh(), Some(&fan)).unwrap();
+        let depth = b.depth * b.size;
+        assert!(depth > 0.0);
+        let open = b.fan.iter().flatten().map(|pt| fanned(pt, 0.0, 4.0, depth).z.abs()).fold(0.0, f32::max);
+        let shut = b.fan.iter().flatten().map(|pt| fanned(pt, 1.0, 4.0, depth).z.abs()).fold(0.0, f32::max);
+        assert!(open < 1e-4 && shut > 0.01, "open {open}, shut {shut}");
+    }
+
+    #[test]
+    fn fan_rules_match_by_material_or_race_and_stay_off_without_the_key() {
+        let s = parse(&serde_json::json!({"fan": {"match": ["gold"], "pleats": 99}})).unwrap();
+        let fan = s.fan.unwrap();
+        assert_eq!(fan.pleats, 24.0, "clamped");
+        let name = |n: &str| GltfMaterialName(n.into());
+        assert!(fan.applies(&name("gold sails.tga"), None) && fan.applies(&name("sail.tga"), Some("Navy")) && !fan.applies(&name("sail.tga"), Some("Pirate")));
+        assert!(parse(&serde_json::json!({})).unwrap().fan.is_none());
+        // a sail that does not fan keeps the roller-blind fold
+        let (_, b) = subdivide(&quad(10.0, 10.0), None).unwrap();
+        assert!(b.fan.is_empty());
     }
 
     #[test]

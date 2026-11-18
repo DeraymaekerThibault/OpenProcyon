@@ -69,6 +69,7 @@
     "transmission": 0.1,
     "billow": 0.035,
     "furl": 0.9,
+    "fan": {"races": ["Navy"], "pleats": 7, "depth": 0.03},
     "opaque": true,
     "line": 0.04,
     "fill": 0.15,
