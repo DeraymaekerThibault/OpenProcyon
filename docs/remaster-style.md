@@ -31,7 +31,14 @@ Springfield), https://history.siggraph.org/learning/creating-3d-painterly-enviro
 3. **Drama**: explosions with a fireball that cools as it swells, a shockwave ring, sparks, floating embers and dark
    smoke. Burning ships throw embers and a smoke column. Big blasts jolt the camera.
 4. **Finish**: a gentle vignette, and a hint of colour fringing on big blasts only.
-5. **Cost**: a steady 60 fps on a mid-range GPU (RX 6700 XT) in a full battle. Measure with `PROCYON_PROFILE=1`
+5. **Space**: skies, nebulae, black holes and Etherium currents are alive through relative motion and change, never through
+   a rigid turn of the picture: layers of gas that slide against each other as the camera moves, gas that churns in place
+   (domain-warped noise), a breath in the bright cores, and events that light it (a storm's bolt, a big blast, a swallowed
+   ship). None of it may veil a ship: clouds and currents only add light, and the sky's events light the gas, never the stars.
+   The dangerous parts of the world must read at least as clearly as in classic: a black hole's black horizon is exactly its
+   kill core and carries a thin ring that stays visible at any zoom, with the pull radius faintly outlined; a current shows
+   which way it flows at a glance. Navy solar sails fold like a hand fan, canvas like a roller blind.
+6. **Cost**: a steady 60 fps on a mid-range GPU (RX 6700 XT) in a full battle. Measure with `PROCYON_PROFILE=1`
    (it logs `frame_ms`).
 
 ## Tried and dropped
@@ -47,6 +54,8 @@ Springfield), https://history.siggraph.org/learning/creating-3d-painterly-enviro
 - **Rigid sky drift** (`sky_drift`: the whole baked sky turning at 0.6 degrees a minute): nobody sees 9 degrees in a battle, and
   when seen, every star and cloud moving together reads as the camera rolling. Replaced by the `sky` dome: relative motion
   (parallax, a current) instead of rotation.
+- **Screen-space lensing of ships and effects behind a black hole** and **motes riding a current**: not built (optional in the
+  plan); the hole bends only the sky behind it, which is almost always what the camera sees there.
 - **Warm or contrasty colour grading**: colours turned red and too dark, so grading stays neutral.
 
 ## Rules
