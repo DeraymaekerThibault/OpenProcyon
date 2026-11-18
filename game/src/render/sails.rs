@@ -6,14 +6,22 @@
 //! ordered to All Stop, as the film's solar sails fold away. With `fan` a Navy sail does not fold like a roller blind but
 //! like a hand fan: its ribs swing in from both sides and up onto the mast while its hub slides onto the mast, so the shut sail
 //! lies against it (side sails close flat), and the cloth between the ribs pleats.
+//!
+//! The bellying and folding run on the GPU: the engine's vertex stage (`sail_vertex.wesl`, `sail_prepass.wesl` for depth and shadows,
+//! both through `sail_fold.wesl`) moves the cut mesh from per-vertex data baked once into a storage buffer of the sail's material
+//! (`fold_data`), so the mesh is never rebuilt (on the CPU that cost about 1 to 1.7 ms a ship a frame). `belly`, `furled` and
+//! `fanned` here are the reference the shader repeats, and give the sail's bounds.
 
 use bevy::asset::RenderAssetUsages;
+use bevy::camera::primitives::Aabb;
+use bevy::camera::visibility::NoAutoAabb;
 use bevy::gltf::GltfMaterialName;
 use bevy::light::NotShadowCaster;
 use bevy::mesh::{Indices, PrimitiveTopology, VertexAttributeValues};
 use bevy::pbr::{ExtendedMaterial, MaterialExtension};
 use bevy::prelude::*;
 use bevy::render::render_resource::{AsBindGroup, ShaderType};
+use bevy::render::storage::ShaderBuffer;
 use bevy::shader::ShaderRef;
 use serde_json::Value;
 
@@ -111,9 +119,16 @@ pub fn parse(s: &Value) -> Option<Sails> {
     })
 }
 
+/// The engine's vertex stages of a sail (they move the mesh the engine cut; the mod's shader only draws the cloth).
+const VERTEX_SHADER: &str = "embedded://openprocyon/render/sail_vertex.wesl";
+const PREPASS_SHADER: &str = "embedded://openprocyon/render/sail_prepass.wesl";
+
 pub fn plugin(app: &mut App, look: &Look) {
     if look.sails.is_some() {
-        app.add_plugins(MaterialPlugin::<SailMaterial>::default()).add_systems(Update, (sails, sail_motion, billow, super::surfaces::cloaked::<SailMaterial>).chain());
+        bevy::shader::load_shader_library!(app, "sail_fold.wesl");
+        bevy::asset::embedded_asset!(app, "sail_vertex.wesl");
+        bevy::asset::embedded_asset!(app, "sail_prepass.wesl");
+        app.add_plugins(MaterialPlugin::<SailMaterial>::default()).add_systems(Update, (sails, sail_motion, super::surfaces::cloaked::<SailMaterial>).chain());
     }
 }
 
@@ -131,6 +146,11 @@ pub struct SailGlowUniform {
     pub motion: Vec4,
     /// xy: pattern cells per UV unit along u and v
     pub pattern: Vec4,
+    /// For the engine's vertex stage (`sail_fold.wesl`): x how far the cloth bellies (mesh units, eased out while folding), y how far
+    /// it is folded (0 open .. `furl`), z pleats, w pleat depth (mesh units). A sail shader may ignore it.
+    pub fold: Vec4,
+    /// x: the sail's size (mesh units), y: 1 when `fold_data` holds the sail's fold data (else the mesh is drawn as it is)
+    pub shape: Vec4,
 }
 
 /// The sail extension; see `SailGlowUniform`.
@@ -141,11 +161,20 @@ pub struct SailGlow {
     /// The frame data (`frame.rs`) at `@binding(99)`.
     #[storage(99, read_only)]
     pub frame: super::frame::FrameBinding,
+    /// The sail's fold data (`fold_data`), read by the vertex stages at `@binding(101)`.
+    #[storage(101, read_only)]
+    pub fold: Handle<ShaderBuffer>,
 }
 
 impl MaterialExtension for SailGlow {
     fn fragment_shader() -> ShaderRef {
         SHADER.into()
+    }
+    fn vertex_shader() -> ShaderRef {
+        VERTEX_SHADER.into()
+    }
+    fn prepass_vertex_shader() -> ShaderRef {
+        PREPASS_SHADER.into()
     }
 }
 
@@ -159,12 +188,23 @@ struct Sail {
     wind: f32,
     clock: f32,
     phase: f32,
-    /// 0 = set, 1 = furled (eased in `billow`).
+    /// 0 = set, 1 = furled (eased in `fold`).
     furl: f32,
+    /// The cut sail's size, pleats and pleat depth (shares of the size); size 0 = not cut, drawn as it is.
+    size: f32,
+    pleats: f32,
+    depth: f32,
+}
+
+impl Sail {
+    /// The vertex stage's `fold` numbers now: the bulge eased out as the sail folds, and how far it is folded.
+    fn fold(&self, s: &Sails) -> Vec4 {
+        let f = self.furl * self.furl * (3.0 - 2.0 * self.furl); // smoothstep
+        Vec4::new(s.billow * self.size * (1.0 - f), s.furl * f, self.pleats, self.depth * self.size)
+    }
 }
 
 /// A sail cut into a finer mesh of its own, with the rest shape it bellies out from and folds up from.
-#[derive(Component)]
 struct Billow {
     rest: Vec<Vec3>,
     normal: Vec<Vec3>,
@@ -211,6 +251,7 @@ pub(super) fn sails(
     standard: Res<Assets<StandardMaterial>>,
     mut sail_mats: ResMut<Assets<SailMaterial>>,
     mut meshes: ResMut<Assets<Mesh>>,
+    mut buffers: ResMut<Assets<ShaderBuffer>>,
 ) {
     let Some(s) = &look.sails else { return };
     for (e, name, mat, mesh) in &new {
@@ -236,16 +277,19 @@ pub(super) fn sails(
                     sun: Vec4::new(0.0, -1.0, 0.0, s.backlit),
                     motion: Vec4::new(0.0, phase, 0.0, 0.0),
                     pattern: cells.extend(0.0).extend(0.0),
+                    ..default()
                 },
                 frame: default(),
+                fold: buffers.add(ShaderBuffer::new(vec![Vec4::ZERO], RenderAssetUsages::RENDER_WORLD)),
             },
         });
         let ship = parents.iter_ancestors(e).find(|a| ships.contains(*a));
         // a ship that starts stopped starts with its sails folded
         let furl = ship.and_then(|e| ships.get(e).ok()).map_or(0.0, |sh| f32::from(u8::from(sh.ordered() == 0.0)));
         let restyled = Restyled { original: mat.0.clone(), styled: handle.clone(), ship };
-        let mut entity = super::kit::swap::<StandardMaterial, _>(&mut commands, e, handle);
-        entity.try_insert((Sail { ship, wind: 0.0, clock: 0.0, phase, furl }, restyled));
+        let mut entity = super::kit::swap::<StandardMaterial, _>(&mut commands, e, handle.clone());
+        entity.try_insert(restyled);
+        let mut sail = Sail { ship, wind: 0.0, clock: 0.0, phase, furl, size: 0.0, pleats: 0.0, depth: 0.0 };
         if !s.opaque {
             entity.try_insert(NotShadowCaster);
         }
@@ -271,9 +315,99 @@ pub(super) fn sails(
         if (s.billow > 0.0 || s.furl > 0.0)
             && let Some((fine, billow)) = meshes.get(&mesh.0).and_then(|m| subdivide(m, fan, &mast))
         {
-            entity.try_insert((Mesh3d(meshes.add(fine)), billow));
+            // the fold data goes to the GPU once; the bounds hold the sail open, bellied and shut, so culling never cuts it off
+            let data = fold_data(&billow, &triangles(&fine, billow.rest.len()));
+            let bounds = fold_bounds(&billow, s);
+            if let Some(mut m) = sail_mats.get_mut(&handle) {
+                m.extension.fold = buffers.add(ShaderBuffer::new(data, RenderAssetUsages::RENDER_WORLD));
+                m.extension.u.shape = Vec4::new(billow.size, 1.0, 0.0, 0.0);
+            }
+            (sail.size, sail.pleats, sail.depth) = (billow.size, billow.pleats, billow.depth);
+            // shaded by the cut cloth's own facets at rest (the fold data keeps the retail normal the cloth bellies along)
+            let mut fine = fine;
+            fine.compute_smooth_normals();
+            entity.try_insert((Mesh3d(meshes.add(fine)), bounds, NoAutoAabb));
+        }
+        entity.try_insert(sail);
+    }
+}
+
+/// Rows a vertex takes in `fold_data` (`ROWS` in sail_fold.wesl).
+const FOLD_ROWS: usize = 5;
+
+/// The gradient of a scalar over each vertex's triangles (area-weighted), in mesh units: how fast `f` changes along the surface.
+/// Triangles with a vertex `f` has no value for are left out.
+fn gradients(pos: &[Vec3], tris: &[[usize; 3]], f: impl Fn(usize) -> Option<f32>) -> Vec<Vec3> {
+    let (mut sum, mut weight) = (vec![Vec3::ZERO; pos.len()], vec![0.0f32; pos.len()]);
+    for &[a, b, c] in tris {
+        let (Some(fa), Some(fb), Some(fc)) = (f(a), f(b), f(c)) else { continue };
+        let (e1, e2) = (pos[b] - pos[a], pos[c] - pos[a]);
+        let n = e1.cross(e2);
+        let n2 = n.length_squared();
+        if n2 < 1e-12 {
+            continue;
+        }
+        // in the triangle's plane, grad . e1 = fb - fa and grad . e2 = fc - fa
+        let g = ((fb - fa) * e2.cross(n) + (fc - fa) * n.cross(e1)) / n2;
+        let area = n2.sqrt();
+        for i in [a, b, c] {
+            sum[i] += g * area;
+            weight[i] += area;
         }
     }
+    sum.iter().zip(&weight).map(|(g, w)| if *w > 0.0 { *g / *w } else { Vec3::ZERO }).collect()
+}
+
+/// What the vertex stage reads to belly and fold the cut sail (layout in sail_fold.wesl): a header with the number of fans, each
+/// fan (pivot, plane normal, where its pivot goes when shut), then `FOLD_ROWS` rows a vertex. The cut mesh's patches each come
+/// from one retail triangle, so a triangle never mixes two fans.
+fn fold_data(b: &Billow, tris: &[[usize; 3]]) -> Vec<Vec4> {
+    let point = |i: usize| b.fan.get(i).copied().flatten();
+    let mut fans: Vec<(Vec3, Vec3, Vec3)> = vec![];
+    let fan_of: Vec<Option<usize>> = (0..b.rest.len())
+        .map(|i| {
+            let p = point(i)?;
+            let key = (p.pivot, p.n, p.to_mast);
+            Some(fans.iter().position(|f| *f == key).unwrap_or_else(|| {
+                fans.push(key);
+                fans.len() - 1
+            }))
+        })
+        .collect();
+    let pin = gradients(&b.rest, tris, |i| Some(b.pin[i]));
+    let span = gradients(&b.rest, tris, |i| point(i).map(|p| p.span));
+    let mut out = Vec::with_capacity(1 + 3 * fans.len() + FOLD_ROWS * b.rest.len());
+    out.push(Vec4::new(fans.len() as f32, 0.0, 0.0, 0.0));
+    for (pivot, n, to_mast) in &fans {
+        out.extend([pivot.extend(0.0), n.extend(0.0), to_mast.extend(0.0)]);
+    }
+    for i in 0..b.rest.len() {
+        let p = point(i);
+        out.extend([
+            Vec4::new(b.pin[i], b.top[i], p.map_or(0.0, |p| p.span), p.map_or(0.0, |p| p.rim)),
+            pin[i].extend(if p.is_some() { 1.0 } else { 0.0 }),
+            span[i].extend(fan_of[i].map_or(0.0, |f| f as f32)),
+            Vec4::from(p.map_or(Quat::IDENTITY, |p| p.shut)),
+            b.normal[i].extend(0.0),
+        ]);
+    }
+    out
+}
+
+/// Bounds holding the sail in every shape it takes: at rest, bellied out as far as it goes either way, and shut.
+fn fold_bounds(b: &Billow, s: &Sails) -> Aabb {
+    let bulge = s.billow * b.size * BELLY_MAX;
+    let (mut lo, mut hi) = (Vec3::MAX, Vec3::MIN);
+    for i in 0..b.rest.len() {
+        let shut = match b.fan.get(i).copied().flatten() {
+            Some(p) => fanned(&p, s.furl, b.pleats, b.depth * b.size),
+            None => furled(b.rest[i], b.top[i], s.furl),
+        };
+        for q in [b.rest[i] + b.normal[i] * bulge, b.rest[i] - b.normal[i] * bulge, shut] {
+            (lo, hi) = (lo.min(q), hi.max(q));
+        }
+    }
+    Aabb::from_min_max(lo, hi)
 }
 
 /// The mesh's triangles as vertex index triples.
@@ -631,12 +765,24 @@ fn furled(p: Vec3, top: f32, amount: f32) -> Vec3 {
     Vec3::new(p.x, top - (top - p.y) * (1.0 - amount), p.z)
 }
 
+/// The most `belly` gives (full wind, both waves at their crest): the sail's bounds allow for it.
+const BELLY_MAX: f32 = 0.65 + 0.25 + 0.12;
+
 /// How far (a share of the sail size) a sail point bellies out at the sail's clock: a slow breath plus ripples running
-/// across it; with little wind the cloth hangs slacker.
+/// across it; with little wind the cloth hangs slacker. The reference `sail_fold.wesl` repeats (with its gradient, `belly_slope`).
+#[cfg(test)]
 fn belly(rest: Vec3, size: f32, phase: f32, clock: f32, wind: f32) -> f32 {
     let k = 6.0 / size;
     let shape = 0.65 + 0.25 * (1.1 * clock + phase).sin() + 0.12 * (3.3 * clock - k * (rest.y + 0.6 * rest.x) + phase).sin();
     shape * (0.3 + 0.7 * wind)
+}
+
+/// The gradient of `belly` along the rest position, as `sail_fold.wesl` works it out for the bellied cloth's normal.
+#[cfg(test)]
+fn belly_slope(rest: Vec3, size: f32, phase: f32, clock: f32, wind: f32) -> Vec3 {
+    let k = 6.0 / size;
+    let arg = 3.3 * clock - k * (rest.y + 0.6 * rest.x) + phase;
+    (0.3 + 0.7 * wind) * 0.12 * arg.cos() * -k * Vec3::new(0.6, 1.0, 0.0)
 }
 
 /// Each sail follows its ship's speed: the share of full speed (smoothed), a clock that runs faster with it, the sun.
@@ -662,28 +808,8 @@ fn sail_motion(
         if let Some(mut m) = materials.get_mut(&mat.0) {
             m.extension.u.motion = Vec4::new(sail.wind, sail.phase, sail.clock, 0.0);
             m.extension.u.sun = sun.extend(s.backlit);
+            m.extension.u.fold = sail.fold(s);
         }
-    }
-}
-
-fn billow(look: Res<Look>, sails: Query<(&Billow, &Sail, &Mesh3d)>, mut meshes: ResMut<Assets<Mesh>>) {
-    let Some(s) = &look.sails else { return };
-    for (b, sail, mesh) in &sails {
-        let Some(mut m) = meshes.get_mut(&mesh.0) else { continue };
-        let f = sail.furl * sail.furl * (3.0 - 2.0 * sail.furl); // smoothstep
-        let amp = s.billow * b.size * (1.0 - f);
-        let pos: Vec<[f32; 3]> = (0..b.rest.len())
-            .map(|i| {
-                let billow = b.normal[i] * amp * b.pin[i] * belly(b.rest[i], b.size, sail.phase, sail.clock, sail.wind);
-                match b.fan.get(i).copied().flatten() {
-                    // `furl` of the way shut: a slim bundle on the mast, fanning out a little toward its tip (all the way, it vanishes)
-                    Some(pt) => (fanned(&pt, s.furl * f, b.pleats, b.depth * b.size) + billow).to_array(),
-                    None => furled(b.rest[i] + billow, b.top[i], s.furl * f).to_array(),
-                }
-            })
-            .collect();
-        m.insert_attribute(Mesh::ATTRIBUTE_POSITION, pos);
-        m.compute_smooth_normals();
     }
 }
 
@@ -871,6 +997,92 @@ mod tests {
             let shut = fanned(pt, 1.0, 4.0, 0.0);
             assert!(shut.y.abs() < 1e-3 && shut.x >= -1e-3, "closed flat along the spar: {shut}");
         }
+    }
+
+    #[test]
+    fn the_belly_never_passes_its_bound_and_its_slope_is_the_shaders() {
+        let (size, phase, wind) = (12.0, 0.7, 1.0);
+        for i in 0..400 {
+            let (clock, p) = (i as f32 * 0.37, Vec3::new((i % 17) as f32 * 0.6, (i % 23) as f32 * 0.5, 0.0));
+            assert!(belly(p, size, phase, clock, wind) <= BELLY_MAX + 1e-6);
+            let e = 1e-3;
+            let fd = Vec3::new(
+                belly(p + Vec3::X * e, size, phase, clock, wind) - belly(p - Vec3::X * e, size, phase, clock, wind),
+                belly(p + Vec3::Y * e, size, phase, clock, wind) - belly(p - Vec3::Y * e, size, phase, clock, wind),
+                0.0,
+            ) / (2.0 * e);
+            assert!((fd - belly_slope(p, size, phase, clock, wind)).length() < 2e-3, "{fd} vs {}", belly_slope(p, size, phase, clock, wind));
+        }
+    }
+
+    #[test]
+    fn gradients_are_exact_for_a_plane_ramp() {
+        let (fine, b) = subdivide(&quad(10.0, 10.0), None, &[]).unwrap();
+        let g = gradients(&b.rest, &triangles(&fine, b.rest.len()), |i| Some(2.0 * b.rest[i].x - 3.0 * b.rest[i].y));
+        assert!(g.iter().all(|g| (*g - Vec3::new(2.0, -3.0, 0.0)).length() < 1e-3));
+        let none = gradients(&b.rest, &triangles(&fine, b.rest.len()), |_| None);
+        assert!(none.iter().all(|g| *g == Vec3::ZERO), "no values, no slope");
+    }
+
+    #[test]
+    fn the_fold_data_is_laid_out_as_the_vertex_stage_reads_it() {
+        // a roller sail: no fans, five rows a vertex
+        let (fine, b) = subdivide(&quad(10.0, 10.0), None, &[]).unwrap();
+        let d = fold_data(&b, &triangles(&fine, b.rest.len()));
+        assert_eq!(d.len(), 1 + FOLD_ROWS * b.rest.len());
+        assert_eq!(d[0].x, 0.0);
+        for i in 0..b.rest.len() {
+            let r = &d[1 + FOLD_ROWS * i..1 + FOLD_ROWS * (i + 1)];
+            assert_eq!((r[0].x, r[0].y, r[1].w), (b.pin[i], b.top[i], 0.0), "pin, top, not a fan");
+            assert_eq!(r[3], Vec4::from(Quat::IDENTITY));
+            assert_eq!(r[4], b.normal[i].extend(0.0), "the rest normal, for the passes that get none");
+        }
+        // a fan: its table first, then each point's span, rim, fan and turn
+        let fan = Fan { matching: vec![], races: vec![], pleats: 6.0, depth: 0.02 };
+        let (fine, b) = subdivide(&fan_mesh(), Some(&fan), &[]).unwrap();
+        let d = fold_data(&b, &triangles(&fine, b.rest.len()));
+        let fans = d[0].x as usize;
+        assert!(fans >= 1);
+        assert_eq!(d.len(), 1 + 3 * fans + FOLD_ROWS * b.rest.len());
+        for (i, p) in b.fan.iter().enumerate() {
+            let r = &d[1 + 3 * fans + FOLD_ROWS * i..];
+            let Some(p) = p else { continue };
+            let f = r[2].w as usize;
+            assert_eq!((r[0].z, r[0].w, r[1].w), (p.span, p.rim, 1.0));
+            assert_eq!((d[1 + 3 * f].truncate(), d[2 + 3 * f].truncate(), d[3 + 3 * f].truncate()), (p.pivot, p.n, p.to_mast), "its fan's row");
+            assert_eq!(r[3], Vec4::from(p.shut));
+        }
+    }
+
+    #[test]
+    fn the_bounds_hold_the_sail_open_bellied_and_shut() {
+        let s = parse(&serde_json::json!({"billow": 0.04, "furl": 0.9, "fan": {}})).unwrap();
+        let fan = s.fan.clone().unwrap();
+        for (mesh, fan) in [(quad(10.0, 10.0), None), (fan_mesh(), Some(&fan))] {
+            let (_, b) = subdivide(&mesh, fan, &[]).unwrap();
+            let bounds = fold_bounds(&b, &s);
+            let (lo, hi) = (Vec3::from(bounds.min()), Vec3::from(bounds.max()));
+            let inside = |q: Vec3| q.cmpge(lo - 1e-4).all() && q.cmple(hi + 1e-4).all();
+            for i in 0..b.rest.len() {
+                for a in [0.0, 0.3, 0.6, 0.9] {
+                    let q = match b.fan.get(i).copied().flatten() {
+                        Some(p) => fanned(&p, a, b.pleats, b.depth * b.size),
+                        None => furled(b.rest[i], b.top[i], a),
+                    };
+                    assert!(inside(q), "{q} at fold {a} outside {lo}..{hi}");
+                }
+                assert!(inside(b.rest[i] + b.normal[i] * s.billow * b.size * BELLY_MAX));
+            }
+        }
+    }
+
+    #[test]
+    fn a_sail_eases_its_bulge_out_as_it_folds() {
+        let s = parse(&serde_json::json!({"billow": 0.04, "furl": 0.9})).unwrap();
+        let mut sail = Sail { ship: None, wind: 0.0, clock: 0.0, phase: 0.0, furl: 0.0, size: 10.0, pleats: 6.0, depth: 0.02 };
+        assert!(sail.fold(&s).abs_diff_eq(Vec4::new(0.4, 0.0, 6.0, 0.2), 1e-6), "open: the full bulge, not folded");
+        sail.furl = 1.0;
+        assert!(sail.fold(&s).abs_diff_eq(Vec4::new(0.0, 0.9, 6.0, 0.2), 1e-6), "shut: no bulge, folded by `furl`");
     }
 
     #[test]
