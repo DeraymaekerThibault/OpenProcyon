@@ -68,3 +68,6 @@ Springfield), https://history.siggraph.org/learning/creating-3d-painterly-enviro
 
 - `bursts.effects` lists `Lancer` and `Plasma` before `_Impact` / `_Muzzle` on purpose: the first matching rule wins, so the
   energy weapons' own entries (no smoke) take their impact and muzzle effects before the generic rules do.
+- `sun.shadow_distance` is the biggest cost of the look: the four cascades redraw every island mesh, so on busy maps (`border_dispute`,
+  3700 entities) 2500 units cost 20 ms a frame and 800 cost 14 ms (`red_rover` 17.5 -> 12 ms). The battle camera never looks further
+  than a few hundred units, so keep it near 800; removing the `surfaces` block gave the same saving, so the two multiply.

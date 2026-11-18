@@ -60,7 +60,7 @@
   "ambient": 0.4,
   "sun": {
     "shadows": true,
-    "shadow_distance": 2500,
+    "shadow_distance": 800,
     "color": [
       1.0,
       0.93,
