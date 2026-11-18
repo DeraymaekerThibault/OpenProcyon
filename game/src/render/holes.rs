@@ -42,6 +42,8 @@ pub struct BlackHoles {
     /// The retail glow, beam and ribbon layers are hidden (the hole keeps pulling and its trail keeps running) and the profile
     /// draws the hole (`replace.rs`).
     pub replace: bool,
+    /// With `replace`: brightness of the infall ribbons (the thin streaking strips), times `fx_gain`.
+    pub ribbons: f32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -74,6 +76,7 @@ pub fn parse(v: &Value) -> Option<BlackHoles> {
             glow: num(&v["glow"], 0.4).max(0.0),
             drop: num(&v["drop"], 0.02).clamp(0.0, 0.5),
             replace: v["replace"].as_bool().unwrap_or(false),
+            ribbons: num(&v["ribbons"], 1.0).clamp(0.0, 8.0),
         }
     })
 }
@@ -121,7 +124,8 @@ pub type HoleMaterial = ExtendedMaterial<StandardMaterial, HoleGlow>;
 
 pub fn plugin(app: &mut App, look: &Look) {
     if look.black_holes.is_some() {
-        app.add_plugins(MaterialPlugin::<HoleMaterial>::default()).add_systems(Update, (spawn_discs, update_discs, flash_on_swallow, ribbon_gain).chain());
+        app.add_plugins((MaterialPlugin::<HoleMaterial>::default(), MaterialPlugin::<RibbonMaterial>::default()))
+            .add_systems(Update, (spawn_discs, update_discs, flash_on_swallow, ribbon_gain, restyle_ribbons, update_ribbons).chain());
     }
 }
 
@@ -144,6 +148,90 @@ impl BlackHoles {
             disc: Vec4::new(self.disc.inner * r, self.disc.outer * r, self.disc.spin, self.disc.brightness),
             color: self.disc.color.extend(0.0),
             params: Vec4::new(clock, flash, self.glow, 0.0),
+        }
+    }
+}
+
+pub const RIBBON_SHADER: &str = "shaders/ribbon.wesl";
+
+/// What the ribbon shader gets at `@group(MATERIAL_BIND_GROUP) @binding(100)`.
+#[derive(Clone, Copy, Default, Debug, PartialEq, ShaderType)]
+pub struct RibbonUniform {
+    /// xyz: the hole's centre (world), w: the pull radius
+    pub centre: Vec4,
+    /// x: the kill core's radius, y: brightness
+    pub shape: Vec4,
+    /// rgb: the cooler colour
+    pub color: Vec4,
+    /// x: clock (battle seconds)
+    pub params: Vec4,
+}
+
+#[derive(Asset, AsBindGroup, TypePath, Clone, Default)]
+pub struct RibbonGlow {
+    #[uniform(100)]
+    pub u: RibbonUniform,
+}
+
+impl MaterialExtension for RibbonGlow {
+    fn fragment_shader() -> ShaderRef {
+        RIBBON_SHADER.into()
+    }
+    fn specialize(
+        _: &MaterialExtensionPipeline,
+        descriptor: &mut RenderPipelineDescriptor,
+        _: &MeshVertexBufferLayoutRef,
+        _: MaterialExtensionKey<Self>,
+    ) -> Result<(), SpecializedMeshPipelineError> {
+        super::trails::additive(descriptor);
+        Ok(())
+    }
+}
+
+pub type RibbonMaterial = ExtendedMaterial<StandardMaterial, RibbonGlow>;
+
+/// A hole whose infall ribbons have the profile's material.
+#[derive(Component)]
+pub struct RibbonStyled;
+
+impl BlackHoles {
+    fn ribbon(&self, centre: Vec3, pull: &Pull, gain: f32, clock: f32) -> RibbonUniform {
+        RibbonUniform {
+            centre: centre.extend(pull.radius),
+            shape: Vec4::new(pull.core(), self.ribbons * gain, 0.0, 0.0),
+            color: Vec3::new(1.0, 0.38, 0.12).extend(0.0),
+            params: Vec4::new(clock, 0.0, 0.0, 0.0),
+        }
+    }
+}
+
+/// With `replace`, the hole's own vortex strips (the retail geometry, blackhole.rs) swap their broad soft additive material for the
+/// thin, streaking infall one (`shaders/ribbon.wesl`), once. Without it they only get the `fx_gain` (`ribbon_gain`).
+fn restyle_ribbons(
+    mut commands: Commands,
+    look: Res<Look>,
+    time: Res<Time>,
+    holes: Query<(Entity, &Pull, &GlobalTransform), (With<BlackHole>, With<MeshMaterial3d<StandardMaterial>>, Without<RibbonStyled>)>,
+    mut materials: ResMut<Assets<RibbonMaterial>>,
+) {
+    let Some(b) = look.black_holes.as_ref().filter(|b| b.replace) else { return };
+    for (e, pull, at) in &holes {
+        let handle = materials
+            .add(RibbonMaterial { base: super::trails::additive_base(None), extension: RibbonGlow { u: b.ribbon(at.translation(), pull, look.fx_gain, time.elapsed_secs()) } });
+        commands.entity(e).try_remove::<MeshMaterial3d<StandardMaterial>>().try_insert((MeshMaterial3d(handle), RibbonStyled));
+    }
+}
+
+fn update_ribbons(
+    look: Res<Look>,
+    time: Res<Time>,
+    holes: Query<(&Pull, &GlobalTransform, &MeshMaterial3d<RibbonMaterial>), With<BlackHole>>,
+    mut materials: ResMut<Assets<RibbonMaterial>>,
+) {
+    let Some(b) = &look.black_holes else { return };
+    for (pull, at, mat) in &holes {
+        if let Some(mut m) = materials.get_mut(&mat.0) {
+            m.extension.u = b.ribbon(at.translation(), pull, look.fx_gain, time.elapsed_secs());
         }
     }
 }
@@ -179,6 +267,9 @@ fn ribbon_gain(
     holes: Query<&MeshMaterial3d<StandardMaterial>, (With<BlackHole>, Added<MeshMaterial3d<StandardMaterial>>)>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
+    if look.black_holes.as_ref().is_some_and(|b| b.replace) {
+        return;
+    }
     for mat in &holes {
         if let Some(mut m) = materials.get_mut(&mat.0) {
             m.base_color = Color::linear_rgb(look.fx_gain, look.fx_gain, look.fx_gain);
@@ -308,5 +399,53 @@ mod tests {
         app.update();
         let flash = app.world_mut().query::<(&ChildOf, &HoleDisc)>().iter(app.world()).find(|(p, _)| p.parent() == hole).map(|(_, d)| d.flash).unwrap();
         assert!(flash > 0.9, "{flash}");
+    }
+
+    #[test]
+    fn ribbons_default_to_full_brightness_and_are_clamped() {
+        assert_eq!(parse(&json!({})).unwrap().ribbons, 1.0);
+        assert_eq!(parse(&json!({"ribbons": 99})).unwrap().ribbons, 8.0);
+    }
+
+    fn ribbon_app(look: serde_json::Value) -> (App, Entity) {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, AssetPlugin::default()))
+            .init_asset::<Shader>()
+            .init_asset::<StandardMaterial>()
+            .init_asset::<Image>()
+            .init_asset::<RibbonMaterial>()
+            .insert_resource(Look::parse(&look))
+            .add_systems(Update, (ribbon_gain, restyle_ribbons, update_ribbons).chain());
+        let mat = app.world_mut().resource_mut::<Assets<StandardMaterial>>().add(StandardMaterial { alpha_mode: AlphaMode::Add, unlit: true, ..default() });
+        let pull = Pull::for_terrain("Terrain_BlackHole_Small").unwrap();
+        let hole = app.world_mut().spawn((BlackHole::default(), pull, GlobalTransform::from_xyz(7.0, 0.0, 0.0), MeshMaterial3d(mat))).id();
+        (app, hole)
+    }
+
+    #[test]
+    fn with_replace_the_vortex_strips_swap_to_the_thin_material_once_and_keep_their_mesh() {
+        let (mut app, hole) = ribbon_app(json!({"black_holes": {"replace": true, "ribbons": 2}, "fx_gain": 1.5}));
+        for _ in 0..3 {
+            app.update();
+        }
+        let e = app.world().entity(hole);
+        assert!(e.contains::<RibbonStyled>() && e.contains::<MeshMaterial3d<RibbonMaterial>>() && !e.contains::<MeshMaterial3d<StandardMaterial>>());
+        assert!(e.contains::<BlackHole>(), "the hole and its trail sim are untouched");
+        let mats = app.world().resource::<Assets<RibbonMaterial>>();
+        assert_eq!(mats.len(), 1, "once");
+        let u = mats.iter().next().unwrap().1.extension.u;
+        assert_eq!((u.centre, u.shape.x, u.shape.y), (Vec4::new(7.0, 0.0, 0.0, 145.0), 145.0 / 4.0, 3.0), "the kill core and brightness times fx_gain");
+    }
+
+    #[test]
+    fn without_replace_the_strips_keep_the_retail_material_with_only_the_gain() {
+        let (mut app, hole) = ribbon_app(json!({"black_holes": {}, "fx_gain": 1.5}));
+        for _ in 0..3 {
+            app.update();
+        }
+        let e = app.world().entity(hole);
+        assert!(!e.contains::<RibbonStyled>() && e.contains::<MeshMaterial3d<StandardMaterial>>());
+        let mat = e.get::<MeshMaterial3d<StandardMaterial>>().unwrap();
+        assert_eq!(app.world().resource::<Assets<StandardMaterial>>().get(&mat.0).unwrap().base_color.to_linear().red, 1.5);
     }
 }

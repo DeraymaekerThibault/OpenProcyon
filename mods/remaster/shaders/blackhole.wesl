@@ -1,10 +1,12 @@
 // Not retail: a black hole of the render profile (game/src/render/holes.rs; contract: `HoleUniform` there, our own work under
 // the project licence). Premultiplied-blended on a flat disc of the pull radius lying in the hole's plane, depth-tested (so a
 // hull in the plane draws over it) and never written. The bent sky and the round shadow are the sky dome's (sky.wesl).
-//  - Inside the horizon (the kill core by default): black. A thin bright ring marks its edge, never thinner than a pixel and a half.
-//  - A hot accretion disc, a log-spiral of bright bands turning clockwise seen from above (the way the pull swirls), brighter on
-//    the approaching side, white-gold inside and cooler outward, past 1 so it blooms.
-//  - A warm halo and a faint outline at the pull radius (so the zone of danger stays readable), and a flash when a ship is swallowed.
+//  - Inside the horizon (the kill core by default): black. A thin, sharp photon ring marks its edge, never thinner than a pixel and a half.
+//  - A thin, crisp accretion disc just outside it: a hot white-gold inner edge cooling to orange and red, fine bright arms on a log
+//    spiral turning clockwise seen from above (the way the pull swirls), brighter on the side that moves toward the camera, past 1 so
+//    it blooms. No broad soft band: the light falls off fast with radius and the outer edge is cut.
+//  - A tight warm halo on the horizon, a faint outline at the pull radius (so the zone of danger stays readable), and a flash when
+//    a ship is swallowed.
 import bevy_pbr::render::{
     forward_io::{VertexOutput, FragmentOutput},
     mesh_view_bindings::view,
@@ -49,52 +51,48 @@ fn fragment(in: VertexOutput) -> FragmentOutput {
     let rho = length(vec2<f32>(rel.x, rel.z));
     let px = max(fwidth(rho), 1e-4);
 
-    // the disc's own edge: everything fades out toward the pull radius
-    let edge = 1.0 - smoothstep(0.8 * radius, radius, rho);
-    var alpha = 0.0;
-    var light = vec3<f32>(0.0);
-
-    // the horizon: black, with a bright ring on its edge
+    // the horizon: black
     let horizon = hole.shape.x;
     let inside = 1.0 - smoothstep(horizon - px, horizon + px, rho);
-    light = light * (1.0 - inside);
-    alpha = max(alpha, inside);
 
+    // the photon ring: thin and sharp on the horizon's edge
     let ring_w = max(hole.shape.z, 1.5 * px);
     let ring = exp(-pow((rho - horizon) / ring_w, 2.0));
-    let ring_light = vec3<f32>(1.0, 0.82, 0.55) * ring * (2.0 + 5.0 * flash) * hole.disc.w;
+    let ring_light = vec3<f32>(1.0, 0.86, 0.6) * ring * (1.2 + 5.0 * flash) * hole.disc.w;
 
-    // the accretion disc: a log-spiral of bands turning clockwise seen from above (screen right = +x, screen up = -z)
+    // the accretion disc: a log-spiral of fine bright arms turning clockwise seen from above (screen right = +x, screen up = -z)
     let screen_angle = atan2(-rel.z, rel.x);
     var disc_light = vec3<f32>(0.0);
-    var disc_a = 0.0;
     let d_in = hole.disc.x;
     let d_out = hole.disc.y;
-    if rho > d_in * 0.8 && rho < d_out * 1.1 {
+    if rho > d_in - 2.0 * px && rho < d_out {
         let share = clamp((rho - d_in) / max(d_out - d_in, 1e-3), 0.0, 1.0);
-        let profile = smoothstep(0.0, 0.12, share) * (1.0 - smoothstep(0.55, 1.0, share));
-        let arms = 3.0;
-        // bands: constant along a log spiral; the turning (clockwise: the pattern's angle decreases) is rigid
-        let u = screen_angle * arms + 3.2 * log(max(rho, 1.0)) + hole.disc.z * t * 6.2831853 * arms;
-        let band = 0.5 + 0.5 * sin(u);
-        // the grain turns with the bands; periodic in the angle, so there is no seam where atan2 wraps
-        let turned = screen_angle + hole.disc.z * t * 6.2831853;
-        let grain = noise2(vec2<f32>(cos(turned), sin(turned)) * 5.0 + vec2<f32>(rho / max(core, 1.0) * 4.0));
-        let streaks = pow(band, 1.5) * (0.55 + 0.9 * grain);
+        // a hard inner edge and a cut outer one: thin and crisp, not a blur
+        let edge = smoothstep(0.0, 1.5 * px, rho - d_in) * (1.0 - smoothstep(0.82, 1.0, share));
+        // the light falls off fast outward
+        let fall = pow(1.0 - share, 2.4);
+        // arms: constant along a log spiral, sharpened; the turning (clockwise: the pattern's angle decreases) is rigid
+        let arms = 11.0;
+        let turn = hole.disc.z * t * 6.2831853;
+        let u = screen_angle * arms + 5.0 * log(max(rho, 1.0)) + turn * arms;
+        let band = pow(0.5 + 0.5 * sin(u), 6.0);
+        // fine grain along the arms, periodic in the angle (no seam where atan2 wraps), turning with them
+        let turned = screen_angle + turn;
+        let grain = noise2(vec2<f32>(cos(turned), sin(turned)) * 9.0 + vec2<f32>(rho / max(core, 1.0) * 7.0));
+        let fine = 0.5 + 0.5 * sin(u * 3.1 + grain * 6.0);
+        let streaks = mix(0.06, 1.0, band) * (0.55 + 0.9 * grain) * (0.7 + 0.5 * fine);
         // the side moving toward the camera is brighter
         let tangent = normalize(vec3<f32>(-rel.z, 0.0, rel.x));
         let toward_cam = normalize(vec3<f32>(eye.x - p.x, 0.0, eye.z - p.z));
-        let doppler = 1.0 + 0.6 * dot(tangent, toward_cam);
-        let heat = 1.0 - smoothstep(0.0, 0.8, share);
-        let hot = mix(hole.color.rgb, vec3<f32>(1.0, 0.92, 0.7), 0.85);
-        let col = mix(hole.color.rgb, hot, heat);
-        let inner_boost = 1.0 + 1.6 * heat;
-        disc_a = profile * edge;
-        disc_light = col * streaks * doppler * inner_boost * hole.disc.w * (1.0 + 2.0 * flash) * disc_a;
+        let doppler = 1.0 + 0.8 * dot(tangent, toward_cam);
+        // white-gold at the inner edge, orange, then red
+        let gold = vec3<f32>(1.0, 0.9, 0.6);
+        let col = mix(mix(gold, hole.color.rgb, smoothstep(0.0, 0.3, share)), hole.color.rgb * vec3<f32>(1.0, 0.35, 0.15), smoothstep(0.3, 1.0, share));
+        disc_light = col * streaks * doppler * (0.15 + 3.2 * fall) * hole.disc.w * (1.0 + 2.0 * flash) * edge;
     }
 
-    // a warm halo hugging the horizon, and the faint outline of the pull radius
-    let halo = exp(-max(rho - horizon, 0.0) / (0.12 * radius)) * (1.0 - inside) * hole.params.z;
+    // a tight warm halo hugging the horizon, and the faint outline of the pull radius
+    let halo = exp(-max(rho - horizon, 0.0) / (0.05 * radius)) * (1.0 - inside) * hole.params.z;
     let halo_light = hole.color.rgb * halo * 0.6;
     let outline = exp(-pow((rho - radius * 0.97) / max(1.5 * px, 0.004 * radius), 2.0));
     let outline_light = vec3<f32>(0.5, 0.6, 0.9) * outline * 0.25;
@@ -102,6 +100,6 @@ fn fragment(in: VertexOutput) -> FragmentOutput {
     let emission = (ring_light + disc_light + halo_light) * (1.0 - smoothstep(0.9 * radius, radius, rho)) + outline_light;
     var out: FragmentOutput;
     // light is added; alpha only blacks out the horizon (and a little under the ring), so the disc veils nothing but the core
-    out.color = vec4<f32>(light + emission, clamp(max(alpha, ring * 0.5), 0.0, 1.0));
+    out.color = vec4<f32>(emission, clamp(max(inside, ring * 0.5), 0.0, 1.0));
     return out;
 }

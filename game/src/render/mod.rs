@@ -206,6 +206,12 @@ impl Look {
         if self.black_holes.is_some() && !has_shader(root, "black_holes", holes::SHADER) {
             self.black_holes = None;
         }
+        if let Some(b) = self.black_holes.as_mut()
+            && b.replace
+            && !has_shader(root, "black_holes", holes::RIBBON_SHADER)
+        {
+            b.replace = false;
+        }
         if self.currents.is_some() && !has_shader(root, "currents", currents::SHADER) {
             self.currents = None;
         }
@@ -441,6 +447,18 @@ mod tests {
         assert!(!look.nebulae.as_ref().unwrap().rules[0].replace, "no volume shader: the retail shell keeps drawing");
         std::fs::write(root.join(nebulae::VOLUME_SHADER), "").unwrap();
         assert!(Look::parse(&profile).with_shaders(&root).nebulae.unwrap().rules[0].replace);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_replaced_black_hole_needs_the_ribbon_shader_or_the_retail_layers_stay() {
+        let root = std::env::temp_dir().join(format!("procyon-render-hole-{}", std::process::id()));
+        std::fs::create_dir_all(root.join("shaders")).unwrap();
+        std::fs::write(root.join(holes::SHADER), "").unwrap();
+        let profile = serde_json::json!({"black_holes": {"replace": true}});
+        assert!(!Look::parse(&profile).with_shaders(&root).black_holes.unwrap().replace, "no ribbon shader: nothing is hidden");
+        std::fs::write(root.join(holes::RIBBON_SHADER), "").unwrap();
+        assert!(Look::parse(&profile).with_shaders(&root).black_holes.unwrap().replace);
         std::fs::remove_dir_all(root).unwrap();
     }
 }

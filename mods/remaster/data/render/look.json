@@ -43,11 +43,13 @@
     }
   },
   "black_holes": {
+    "replace": true,
     "horizon": 0.25,
-    "ring": 0.012,
+    "ring": 0.006,
     "lensing": 0.8,
-    "disc": {"color": [1.0, 0.45, 0.12], "inner": 0.3, "outer": 0.62, "spin": 0.08, "brightness": 2.0},
-    "glow": 0.4,
+    "disc": {"color": [1.0, 0.45, 0.12], "inner": 0.27, "outer": 0.46, "spin": 0.08, "brightness": 1.8},
+    "glow": 0.15,
+    "ribbons": 1.0,
     "drop": 0.02
   },
   "nebulae": {
