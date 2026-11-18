@@ -154,6 +154,13 @@ fn shift_params(chunk: &Value) -> Shift {
     }
 }
 
+/// A bolt of storm lightning struck, or sheet lightning flickered, at this world position. Presentation input only (data, no
+/// reader in the simulation): the render profile lights the sky and the cloud with it.
+#[derive(Message, Clone, Copy, Debug, PartialEq)]
+pub struct StormFlash {
+    pub at: Vec3,
+}
+
 /// A rule's route for the nebula group of this name (rules.rs writes these once per mission setup).
 #[derive(Message)]
 pub enum MeteorRoute {
@@ -328,6 +335,7 @@ fn storms(
     mut ships: Query<(Entity, &mut Transform, &crate::Ship, &crate::combat::Health, &mut crate::collision::Drift, Option<&crate::campaign::MissionShip>)>,
     mut strike: MessageWriter<crate::combat::Strike>,
     mut sfx: MessageWriter<crate::audio::Sfx>,
+    mut flashes: MessageWriter<StormFlash>,
     mut timers: Local<HashMap<(String, u8), f32>>,
     mut seed: Local<u32>,
 ) {
@@ -405,6 +413,7 @@ fn storms(
                         let at = a.lerp(b, t);
                         strike.write(crate::combat::Strike { victim, damage: damage.0["lightning"].clone(), section });
                         sfx.write(crate::audio::Sfx { name: format!("Solar_Storm_Lightning_ShipImpact0{}", 1 + (rnd() * 6.0) as u32), at: Some(at), vol: 1.0, max: 800.0 });
+                        flashes.write(StormFlash { at });
                         if let Some(fxl) = fxl.as_deref() {
                             let tf = Transform::from_translation(at);
                             fx::spawn(&mut commands, fxl, "Lightning", None, tf, tf, true);
@@ -420,6 +429,7 @@ fn storms(
             let r = rnd();
             if r < dt * 0.4 {
                 sfx.write(crate::audio::Sfx { name: format!("Solar_Storm_Lightning0{}", 1 + (rnd() * 8.0) as u32 % 8), at: Some(c), vol: 0.8, max: 1500.0 });
+                flashes.write(StormFlash { at: c });
             }
         }
     }
@@ -568,6 +578,7 @@ fn slowdown(storms: Option<Res<Storms>>, shift: Res<StormShift>, mut ships: Quer
 
 pub fn plugin(app: &mut App) {
     app.add_message::<MeteorRoute>()
+        .add_message::<StormFlash>()
         .init_resource::<MeteorPlans>()
         .init_resource::<StormShift>()
         .add_systems(Update, update.run_if(in_state(crate::menu::Screen::Battle)))
@@ -709,6 +720,7 @@ mod tests {
             }])))
             .add_message::<crate::combat::Strike>()
             .add_message::<crate::audio::Sfx>()
+            .add_message::<StormFlash>()
             .add_systems(Update, (storms, no_hits).chain());
         app.world_mut().spawn((ship, hp, Transform::from_xyz(300.0, 0.0, 0.0), crate::collision::Drift::default()));
         for _ in 0..300 {

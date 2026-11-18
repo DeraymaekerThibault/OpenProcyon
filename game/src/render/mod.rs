@@ -353,7 +353,7 @@ mod tests {
         assert_eq!(look.materials.as_ref().map(|m| (m.rules.len(), m.find("hull.tga"), m.find("water"))), Some((1, Some(0), None)));
         assert!(look.lights.iter().any(|l| "Explosion_Medium".contains(&l.effects)));
         assert!(look.sails.is_some() && look.engines.is_some() && look.wakes.is_some());
-        assert_eq!((look.bloom_threshold, look.sky_light, look.sky.as_ref().map(|s| s.distance), look.flags.wind), (1.0, 600.0, Some(900.0), true));
+        assert_eq!((look.bloom_threshold, look.sky_light, look.sky.as_ref().map(|s| s.layers[0].distance), look.flags.wind), (1.0, 600.0, Some(900.0), true));
     }
 
     #[test]
