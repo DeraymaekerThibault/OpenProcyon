@@ -14,6 +14,7 @@
 //! - `sky.rs`: a dome over the baked sky with a near layer of gas that slides against it (`shaders/sky.wesl`);
 //! - `holes.rs`: black holes as a horizon, a bent sky and a spinning accretion disc (`shaders/blackhole.wesl`);
 //! - `nebulae.rs`: nebula clouds and solar storms as churning, glowing gas inside their retail shell (`shaders/nebula.wesl`);
+//! - `currents.rs`: Etherium currents as flowing streaks and sparkles (`shaders/current.wesl`);
 //! - `rules.rs`: the generic `materials` block, any shader of the mod on any matched retail material, one uniform for all;
 //! - `bursts.rs`: sparks, embers, fireballs, shockwaves and smoke thrown by retail effects, glowing hull scars, ether dust
 //!   and the camera jolt with its colour fringing (`shaders/burst.wesl`, `shaders/smoke.wesl`).
@@ -31,6 +32,7 @@ use serde_json::Value;
 
 pub(crate) mod batch;
 mod bursts;
+mod currents;
 mod holes;
 mod lights;
 mod materials;
@@ -84,6 +86,8 @@ pub struct Look {
     pub black_holes: Option<holes::BlackHoles>,
     /// Nebula clouds and solar storms drawn as glowing, churning gas inside the retail shell (`shaders/nebula.wesl`).
     pub nebulae: Option<nebulae::Nebulae>,
+    /// Etherium currents drawn as flowing streaks and sparkles (`shaders/current.wesl`).
+    pub currents: Option<currents::Currents>,
     /// Darkened screen corners (Bevy `Vignette` intensity; 0 = none).
     pub vignette: f32,
     /// Colour fringing at rest and how much a big blast's jolt adds.
@@ -153,6 +157,7 @@ impl Look {
             materials: rules::parse(&v["materials"]),
             black_holes: holes::parse(&v["black_holes"]),
             nebulae: nebulae::parse(&v["nebulae"]),
+            currents: currents::parse(&v["currents"]),
             vignette: num(&cam["vignette"], 0.0),
             aberration: num(&cam["aberration"], 0.0),
             aberration_pulse: num(&cam["aberration_pulse"], 0.0),
@@ -195,6 +200,9 @@ impl Look {
         if self.black_holes.is_some() && !has_shader(root, "black_holes", holes::SHADER) {
             self.black_holes = None;
         }
+        if self.currents.is_some() && !has_shader(root, "currents", currents::SHADER) {
+            self.currents = None;
+        }
         if self.nebulae.is_some() && !has_shader(root, "nebulae", nebulae::SHADER) {
             self.nebulae = None;
         }
@@ -227,6 +235,7 @@ pub fn plugin(app: &mut App) {
     sky::plugin(app, &look);
     holes::plugin(app, &look);
     nebulae::plugin(app, &look);
+    currents::plugin(app, &look);
     app.insert_resource(look.flags).insert_resource(look).add_systems(Update, (camera, sun, sky_light));
 }
 
@@ -339,7 +348,15 @@ mod tests {
         assert_eq!((look.bloom, look.fx_gain, look.sky_light, look.shadows, look.smaa, look.lit_smoke), (0.15, 1.0, 0.0, false, true, false));
         assert!(look.sky.is_none());
         assert!(look.lights.is_empty() && look.sails.is_none() && look.engines.is_none() && look.wakes.is_none());
-        assert!(look.tracers.is_none() && look.surfaces.is_none() && look.bursts.is_none() && look.materials.is_none() && look.black_holes.is_none() && look.nebulae.is_none());
+        assert!(
+            look.tracers.is_none()
+                && look.surfaces.is_none()
+                && look.bursts.is_none()
+                && look.materials.is_none()
+                && look.black_holes.is_none()
+                && look.nebulae.is_none()
+                && look.currents.is_none()
+        );
         assert_eq!((look.vignette, look.aberration_pulse, look.contact_shadows, look.sun_color, look.sun_intensity), (0.0, 0.0, false, Vec3::ONE, 1.0));
         assert_eq!(look.flags, crate::flag::Cloth::default());
         let look = Look::parse(&serde_json::json!({
@@ -366,9 +383,10 @@ mod tests {
             "engines": {"colors": {"Navy": [0.3, 0.6, 1.0]}}, "wakes": {"planes": [0, 60, -60]},
             "tracers": {"bullets": [{"match": "Lancer", "color": [0.4, 0.7, 1]}]}, "surfaces": {"rules": [{"match": ["metal"], "metallic": 0.8}]},
             "materials": {"rules": [{"match": ["hull"], "shader": "shaders/hull.wesl", "params": [1, 2, 3, 4]}], "skip": ["water"]},
-            "black_holes": {"lensing": 2}, "nebulae": {"rules": [{"match": "Nebula"}]},
+            "black_holes": {"lensing": 2}, "nebulae": {"rules": [{"match": "Nebula"}]}, "currents": {"core": 2},
         }));
         assert_eq!(look.nebulae.as_ref().map(|n| n.rules.len()), Some(1));
+        assert_eq!(look.currents.as_ref().map(|c| c.core), Some(2.0));
         assert_eq!(look.black_holes.as_ref().map(|b| b.lensing), Some(2.0));
         assert!(look.tracers.is_some() && look.surfaces.is_some());
         assert_eq!(look.materials.as_ref().map(|m| (m.rules.len(), m.find("hull.tga"), m.find("water"))), Some((1, Some(0), None)));

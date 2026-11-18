@@ -424,7 +424,7 @@ impl Current {
 }
 
 #[derive(Component)]
-struct CurrentRibbon(f32);
+pub struct CurrentRibbon(pub f32);
 
 /// RiverPrimitive consumes a whole point path and width, not a particle emitter.
 fn current_mesh(path: &[Vec3]) -> Mesh {
