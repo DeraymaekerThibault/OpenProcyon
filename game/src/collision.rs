@@ -474,6 +474,12 @@ pub fn sail(
     ),
 ) {
     let now = time.elapsed_secs();
+    // The ram clock starts at creation: a new ship cannot be rammed for its first `RAM_COOLDOWN` s.
+    for (ship, new, ..) in ships.iter_mut() {
+        if new.is_added() {
+            rammed.insert(ship, now + RAM_COOLDOWN);
+        }
+    }
     rammed.retain(|_, until| *until > now);
     let cinematic = mission.as_deref().is_some_and(|m| m.script.nis && m.opening.is_none());
     // PROVISIONAL: stop ordinary helm/combat motion in NIS, but retain authored routes (e.g. Exile's retreat).

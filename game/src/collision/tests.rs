@@ -817,3 +817,59 @@ fn dying_ship_sails_on_and_collides_with_nothing() {
     assert!(w.translation.z < -3.0, "it passed through: {}", w.translation.z);
     assert_eq!(app.world().get::<Transform>(other).unwrap().translation, Vec3::ZERO);
 }
+
+/// A ship's ram clock starts when it is created: two enemy ships in contact take no ram damage in their first 3.5 s, and do after.
+#[test]
+#[ignore = "needs imported assets"]
+fn a_new_ship_cannot_be_rammed_for_its_first_3_5_s() {
+    let mut lib = crate::Library::load(crate::assets_dir());
+    let a = lib.index("Ship_Navy_Cutter");
+    let b = lib.index("Ship_Navy_Tug");
+    for index in [a, b] {
+        lib.classes[index].phys.thrust = 0.0;
+        lib.classes[index].collision_bounds = [Vec3::splat(-1.0), Vec3::splat(1.0)];
+    }
+    let ha = crate::Health::new(&lib.classes[a]);
+    let hb = crate::Health::new(&lib.classes[b]);
+    let mut app = App::new();
+    let mut time = Time::<()>::default();
+    time.advance_by(std::time::Duration::from_secs_f32(0.1));
+    app.insert_resource(time).insert_resource(lib).add_message::<Ram>().add_systems(Update, sail);
+    let ship = crate::Ship {
+        class: a,
+        side: crate::Side::Player,
+        heading: 0.0,
+        speed: 10.0,
+        ang_vel: 0.0,
+        order: 0,
+        waypoints: vec![],
+        goal: None,
+        cap: 1.0,
+        throttle: None,
+        sail_energy: 1.0,
+        crew_speed: 1.0,
+        crew_turn: 1.0,
+        net: 1.0,
+        avoid: 1.0,
+    };
+    let ea = app.world_mut().spawn((ship.clone(), ha, Transform::from_xyz(0.0, 0.0, 1.5), Drift::default())).id();
+    let eb = app.world_mut().spawn((crate::Ship { class: b, side: crate::Side::Enemy, speed: 0.0, ..ship }, hb, Transform::default(), Drift::default())).id();
+    let rams = |app: &mut App| app.world_mut().resource_mut::<Messages<Ram>>().drain().count();
+    let overlap = |app: &mut App| {
+        app.world_mut().get_mut::<Transform>(ea).unwrap().translation = Vec3::new(0.0, 0.0, 1.5);
+        app.world_mut().get_mut::<Transform>(eb).unwrap().translation = Vec3::ZERO;
+        app.world_mut().get_mut::<crate::Ship>(ea).unwrap().speed = 10.0;
+    };
+    app.update();
+    assert_eq!(rams(&mut app), 0, "no ram damage 0.1 s after creation");
+    app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs_f32(3.0));
+    app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs_f32(0.07));
+    overlap(&mut app);
+    app.update();
+    assert_eq!(rams(&mut app), 0, "still none 3.17 s after creation");
+    app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs_f32(0.4));
+    app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs_f32(0.1));
+    overlap(&mut app);
+    app.update();
+    assert!(rams(&mut app) > 0, "the same contact rams after 3.5 s");
+}
