@@ -12,6 +12,7 @@
 //! - `tracers.rs`: streaks of light behind shells in flight (`shaders/tracer.wesl`);
 //! - `surfaces.rs`: relief, roughness and metal for the retail models' textured materials (`shaders/surface.wesl`);
 //! - `sky.rs`: a dome over the baked sky with a near layer of gas that slides against it (`shaders/sky.wesl`);
+//! - `holes.rs`: black holes as a horizon, a bent sky and a spinning accretion disc (`shaders/blackhole.wesl`);
 //! - `rules.rs`: the generic `materials` block, any shader of the mod on any matched retail material, one uniform for all;
 //! - `bursts.rs`: sparks, embers, fireballs, shockwaves and smoke thrown by retail effects, glowing hull scars, ether dust
 //!   and the camera jolt with its colour fringing (`shaders/burst.wesl`, `shaders/smoke.wesl`).
@@ -29,6 +30,7 @@ use serde_json::Value;
 
 pub(crate) mod batch;
 mod bursts;
+mod holes;
 mod lights;
 mod materials;
 mod rules;
@@ -76,6 +78,8 @@ pub struct Look {
     pub surfaces: Option<surfaces::Surfaces>,
     pub bursts: Option<bursts::Bursts>,
     pub materials: Option<rules::Materials>,
+    /// Black holes drawn as a horizon, lensed sky and accretion disc (`shaders/blackhole.wesl`); none = the retail ribbons only.
+    pub black_holes: Option<holes::BlackHoles>,
     /// Darkened screen corners (Bevy `Vignette` intensity; 0 = none).
     pub vignette: f32,
     /// Colour fringing at rest and how much a big blast's jolt adds.
@@ -143,6 +147,7 @@ impl Look {
             surfaces: surfaces::parse(&v["surfaces"]),
             bursts: bursts::parse(&v["bursts"]),
             materials: rules::parse(&v["materials"]),
+            black_holes: holes::parse(&v["black_holes"]),
             vignette: num(&cam["vignette"], 0.0),
             aberration: num(&cam["aberration"], 0.0),
             aberration_pulse: num(&cam["aberration_pulse"], 0.0),
@@ -182,6 +187,9 @@ impl Look {
         if self.sky.is_some() && !has_shader(root, "sky", sky::SHADER) {
             self.sky = None;
         }
+        if self.black_holes.is_some() && !has_shader(root, "black_holes", holes::SHADER) {
+            self.black_holes = None;
+        }
         self.materials = self.materials.and_then(|m| m.with_shaders(root));
         self
     }
@@ -209,6 +217,7 @@ pub fn plugin(app: &mut App) {
     bursts::plugin(app, &look);
     rules::plugin(app, &look);
     sky::plugin(app, &look);
+    holes::plugin(app, &look);
     app.insert_resource(look.flags).insert_resource(look).add_systems(Update, (camera, sun, sky_light));
 }
 
@@ -321,7 +330,7 @@ mod tests {
         assert_eq!((look.bloom, look.fx_gain, look.sky_light, look.shadows, look.smaa, look.lit_smoke), (0.15, 1.0, 0.0, false, true, false));
         assert!(look.sky.is_none());
         assert!(look.lights.is_empty() && look.sails.is_none() && look.engines.is_none() && look.wakes.is_none());
-        assert!(look.tracers.is_none() && look.surfaces.is_none() && look.bursts.is_none() && look.materials.is_none());
+        assert!(look.tracers.is_none() && look.surfaces.is_none() && look.bursts.is_none() && look.materials.is_none() && look.black_holes.is_none());
         assert_eq!((look.vignette, look.aberration_pulse, look.contact_shadows, look.sun_color, look.sun_intensity), (0.0, 0.0, false, Vec3::ONE, 1.0));
         assert_eq!(look.flags, crate::flag::Cloth::default());
         let look = Look::parse(&serde_json::json!({
@@ -348,7 +357,9 @@ mod tests {
             "engines": {"colors": {"Navy": [0.3, 0.6, 1.0]}}, "wakes": {"planes": [0, 60, -60]},
             "tracers": {"bullets": [{"match": "Lancer", "color": [0.4, 0.7, 1]}]}, "surfaces": {"rules": [{"match": ["metal"], "metallic": 0.8}]},
             "materials": {"rules": [{"match": ["hull"], "shader": "shaders/hull.wesl", "params": [1, 2, 3, 4]}], "skip": ["water"]},
+            "black_holes": {"lensing": 2},
         }));
+        assert_eq!(look.black_holes.as_ref().map(|b| b.lensing), Some(2.0));
         assert!(look.tracers.is_some() && look.surfaces.is_some());
         assert_eq!(look.materials.as_ref().map(|m| (m.rules.len(), m.find("hull.tga"), m.find("water"))), Some((1, Some(0), None)));
         assert!(look.lights.iter().any(|l| "Explosion_Medium".contains(&l.effects)));

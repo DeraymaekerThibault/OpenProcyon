@@ -385,7 +385,7 @@ fn sky_name(cube: &str) -> &str {
 
 /// The stars image a sky is waiting for.
 #[derive(Component)]
-struct StarsImage(Handle<Image>);
+pub(super) struct StarsImage(pub(super) Handle<Image>);
 
 /// Reads what happened in the battle that lights the sky: a storm's bolt, a big explosion.
 fn sky_events(

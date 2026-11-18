@@ -42,6 +42,14 @@
       "gain": 16
     }
   },
+  "black_holes": {
+    "horizon": 0.25,
+    "ring": 0.012,
+    "lensing": 1.0,
+    "disc": {"color": [1.0, 0.45, 0.12], "inner": 0.3, "outer": 0.62, "spin": 0.08, "brightness": 2.0},
+    "glow": 0.4,
+    "drop": 0.02
+  },
   "ambient": 0.4,
   "sun": {
     "shadows": true,
