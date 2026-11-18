@@ -28,7 +28,8 @@ Source: observed behaviour of the original game, WOT collision definitions and t
   angular acceleration is capped at ±60. Its own mass cancels, so a Man-O-War barely turns and a Cutter swings.
 - **Ram damage:** a ship takes 0.0004 x the *other* ship's mass x the closing speed, on its one section nearest the contact,
   through the normal hit path. At most once per
-  3.5 s per ship, no speed threshold, no material or ram-bow factor. None between allies. Scaled by side and difficulty like
+  3.5 s per ship (the clock starts when the ship is created, so there is no ram damage in a ship's first 3.5 s; only rams restart
+  it), no speed threshold, no material or ram-bow factor. None between allies. Scaled by side and difficulty like
   shells (Easy: the human's ships x0.25, computer ships rammed by the human's x3; Normal x0.5 / x2; Hard x1). The factor follows who
   owns the struck ship (the human's fleet) and the rammer, not the side: an allied computer ship rammed by an enemy takes x1. Example: a Cutter
   rammed by an enemy Man-O-War at 9 units/s loses 144; the Man-O-War 14.4.
