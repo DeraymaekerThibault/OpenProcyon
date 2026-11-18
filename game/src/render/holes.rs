@@ -2,7 +2,9 @@
 //! look is only its additive ribbons (`blackhole.rs`); this puts a flat disc of the pull's radius in the hole's plane, just under
 //! the ships: a black horizon exactly as wide as the kill core (`Pull::core`), a thin bright ring on its edge that marks the kill
 //! zone at any zoom, a hot accretion disc that turns the way the pull swirls (clockwise seen from above), the faint outline of
-//! the pull radius, and a flash when a ship is swallowed. The retail ribbons stay on top as the infalling streams. All sizes are
+//! the pull radius, and a flash when a ship is swallowed. Without `replace` the retail ribbons stay on top as the infalling streams; with
+//! it the retail glow and beam layers are hidden (`replace.rs`) and the hole's own vortex strips are restyled as thin, hot infall
+//! threads (`shaders/ribbon.wesl`). The disc is thin and crisp (hard inner edge, fine arms, sharp photon ring). All sizes are
 //! shares of the pull radius, so the three hole sizes scale together.
 //!
 //! The bending of the sky (`lensing`) and the hole's round shadow are drawn by the sky dome (`sky.rs` reads the holes), so they

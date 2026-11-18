@@ -6,6 +6,12 @@
 //! (`nebula::StormFlash`) lights the gas around it for a moment from inside. With the camera inside the cloud the far wall
 //! of the shell is marched from the camera, so the gas fills the screen gently (`inside` caps it).
 //!
+//!
+//! With `replace` (`replace.rs` hides the retail shell) the cloud is a volume instead (`shaders/volume.wesl`): a proxy box child of the
+//! `Cloud`, drawn on its back faces, ray-marches the cloud's ellipsoid with emission and absorption, composited premultiplied, ending
+//! at the depth prepass, lit by the sun with a cheap self-shadow, tinted by the retail colour loop (`Cloud::colour`) and sized by the
+//! retail breath (`Cloud::breath`), against a baked tiling noise (`volnoise.rs`). A bolt lights it along its whole segment.
+//!
 //! Only reads `nebula::Cloud`; nothing here changes what a cloud does.
 
 use bevy::mesh::MeshVertexBufferLayoutRef;

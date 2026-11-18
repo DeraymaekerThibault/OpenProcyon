@@ -13,7 +13,9 @@
 //! - `surfaces.rs`: relief, roughness and metal for the retail models' textured materials (`shaders/surface.wesl`);
 //! - `sky.rs`: a dome over the baked sky with a near layer of gas that slides against it (`shaders/sky.wesl`);
 //! - `holes.rs`: black holes as a horizon, a bent sky and a spinning accretion disc (`shaders/blackhole.wesl`);
-//! - `nebulae.rs`: nebula clouds and solar storms as churning, glowing gas inside their retail shell (`shaders/nebula.wesl`);
+//! - `nebulae.rs`: nebula clouds and solar storms as churning, glowing gas inside their retail shell (`shaders/nebula.wesl`), or with
+//!   `replace` as volumes (`shaders/volume.wesl`, `volnoise.rs`); `bolts.rs`: storm bolts as jagged ribbons (`shaders/bolt.wesl`);
+//!   `replace.rs`: hides the retail drawing of what the profile replaces;
 //! - `currents.rs`: Etherium currents as flowing streaks and sparkles (`shaders/current.wesl`);
 //! - `rules.rs`: the generic `materials` block, any shader of the mod on any matched retail material, one uniform for all;
 //! - `bursts.rs`: sparks, embers, fireballs, shockwaves and smoke thrown by retail effects, glowing hull scars, ether dust
