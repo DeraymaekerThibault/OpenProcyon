@@ -11,6 +11,10 @@
 // Stars: a separate cube of point stars (16-bit linear light over the gain, bound at 103), each twinkling on a phase and rate
 // of its own, the bright ones deeper; the brightest stay above 1 so they bloom. Added as light (the dome is drawn
 // premultiplied: rgb is what is added, a how much of the picture behind is kept back).
+// Black holes: every lookup (far sky, near gas, stars) goes along the view ray bent around each hole, toward its centre by
+// lensing * core / b (b: the ray's closest approach), fading out by the pull radius, so the clouds and stars smear into an
+// Einstein ring seamlessly; inside the core the sky is black (a round shadow at any camera angle). Drawn here, behind every
+// ship and the hole's own disc (render/holes.rs), so the bending never covers anything in the battle.
 import bevy_pbr::render::{
     forward_io::{VertexOutput, FragmentOutput},
     mesh_view_bindings::view,
@@ -46,6 +50,12 @@ struct Sky {
     sheet: vec4<f32>,
     sheet_color: vec4<f32>,
     layers: array<Layer, 3>,
+    // x: black holes (0 = none), y: lensing strength
+    lens: vec4<f32>,
+    // per hole, xyz: centre (world), w: kill core radius
+    holes: array<vec4<f32>, 4>,
+    // per hole, x: pull radius
+    hole_reach: array<vec4<f32>, 4>,
 }
 
 @group(constants::MATERIAL_BIND_GROUP) @binding(100) var<uniform> sky: Sky;
@@ -126,9 +136,60 @@ fn shooting_star(dir: vec3<f32>) -> f32 {
     return sky.shoot.y * line * (1.0 - u / 0.14) * sin(3.14159 * t / life);
 }
 
+// the view ray bent around the black holes (xyz), how much it bent (w, radians)
+fn lensed(d: vec3<f32>) -> vec4<f32> {
+    var dir = d;
+    var total = 0.0;
+    let eye = view.world_position;
+    let count = i32(sky.lens.x);
+    for (var i = 0; i < 4; i = i + 1) {
+        if i >= count {
+            break;
+        }
+        let h = sky.holes[i];
+        let to_c = h.xyz - eye;
+        let along = dot(to_c, dir);
+        if along <= 0.0 {
+            continue;
+        }
+        let perp = to_c - dir * along;
+        let b = max(length(perp), 1e-3);
+        let reach = sky.hole_reach[i].x;
+        let fade = 1.0 - smoothstep(0.35 * reach, reach, b);
+        let bend = min(sky.lens.y * h.w / b, 1.4) * fade;
+        dir = normalize(dir * cos(bend) + (perp / b) * sin(bend));
+        total += bend;
+    }
+    return vec4<f32>(dir, total);
+}
+
+// how deep the view ray is in a black hole's shadow (0 outside, 1 inside): round at any camera angle, a little past the core
+// (the photon sphere), on the unbent ray
+fn hole_shadow(d: vec3<f32>) -> f32 {
+    var s = 0.0;
+    let count = i32(sky.lens.x);
+    for (var i = 0; i < 4; i = i + 1) {
+        if i >= count {
+            break;
+        }
+        let h = sky.holes[i];
+        let to_c = h.xyz - view.world_position;
+        let along = dot(to_c, d);
+        if along > 0.0 {
+            let b = length(to_c - d * along);
+            s = max(s, 1.0 - smoothstep(h.w * 0.9, h.w * 1.05, b));
+        }
+    }
+    return s;
+}
+
 @fragment
 fn fragment(in: VertexOutput) -> FragmentOutput {
-    let dir = normalize(in.world_position.xyz - view.world_position);
+    let straight = normalize(in.world_position.xyz - view.world_position);
+    let bent = lensed(straight);
+    let dir = bent.xyz;
+    // 1 in a hole's shadow, fading at its edge
+    let shadow = hole_shadow(straight);
     let clock = sky.clock.x;
     let lit = vec3<f32>(1.0) + event_light(dir);
     var rgb = vec3<f32>(0.0);
@@ -150,6 +211,11 @@ fn fragment(in: VertexOutput) -> FragmentOutput {
         col = col * (vec3<f32>(1.0) + sky.base.z * breath * core * sky.base_tint.xyz);
         rgb = col * lit;
         alpha = 1.0;
+    } else if bent.w > 0.0 {
+        // no redrawn far sky: the bent part of it is drawn here, fading in with the bend, so nothing shows a seam
+        let a = smoothstep(0.0, 0.03, bent.w);
+        rgb = sample_sky(dir) * lit * a;
+        alpha = a;
     }
 
     let count = i32(sky.info.x);
@@ -193,7 +259,9 @@ fn fragment(in: VertexOutput) -> FragmentOutput {
     }
     stars += vec3<f32>(0.85, 0.92, 1.0) * shooting_star(dir);
 
+    // the shadow: black, and nothing of the sky behind it
+    let keep = 1.0 - shadow;
     var out: FragmentOutput;
-    out.color = vec4<f32>(rgb + stars, alpha);
+    out.color = vec4<f32>((rgb + stars) * keep, alpha * keep + shadow);
     return out;
 }

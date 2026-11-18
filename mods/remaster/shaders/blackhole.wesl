@@ -1,10 +1,7 @@
 // Not retail: a black hole of the render profile (game/src/render/holes.rs; contract: `HoleUniform` there, our own work under
 // the project licence). Premultiplied-blended on a flat disc of the pull radius lying in the hole's plane, depth-tested (so a
-// hull in the plane draws over it) and never written.
+// hull in the plane draws over it) and never written. The bent sky and the round shadow are the sky dome's (sky.wesl).
 //  - Inside the horizon (the kill core by default): black. A thin bright ring marks its edge, never thinner than a pixel and a half.
-//  - Outside it the baked sky behind the hole is redrawn bent toward the centre by lensing * core / b (b: the view ray's closest
-//    approach), fading to nothing at the pull radius so there is no visible edge. The camera looks down, so what lies behind a hole
-//    is almost always sky; ships behind it are not bent.
 //  - A hot accretion disc, a log-spiral of bright bands turning clockwise seen from above (the way the pull swirls), brighter on
 //    the approaching side, white-gold inside and cooler outward, past 1 so it blooms.
 //  - A warm halo and a faint outline at the pull radius (so the zone of danger stays readable), and a flash when a ship is swallowed.
@@ -26,11 +23,6 @@ struct Hole {
 }
 
 @group(constants::MATERIAL_BIND_GROUP) @binding(100) var<uniform> hole: Hole;
-@group(constants::MATERIAL_BIND_GROUP) @binding(101) var sky_cube: texture_cube<f32>;
-@group(constants::MATERIAL_BIND_GROUP) @binding(102) var sky_sampler: sampler;
-@group(constants::MATERIAL_BIND_GROUP) @binding(103) var star_cube: texture_cube<f32>;
-@group(constants::MATERIAL_BIND_GROUP) @binding(104) var star_sampler: sampler;
-
 fn hash2(p: vec2<f32>) -> f32 {
     return fract(sin(dot(p, vec2<f32>(127.1, 311.7))) * 43758.5453);
 }
@@ -40,16 +32,6 @@ fn noise2(p: vec2<f32>) -> f32 {
     let f = fract(p);
     let u = f * f * (3.0 - 2.0 * f);
     return mix(mix(hash2(i), hash2(i + vec2<f32>(1.0, 0.0)), u.x), mix(hash2(i + vec2<f32>(0.0, 1.0)), hash2(i + vec2<f32>(1.0, 1.0)), u.x), u.y);
-}
-
-// the sky behind a ray (cubes are left-handed: z negated, as Bevy's own skybox samples)
-fn background(d: vec3<f32>) -> vec3<f32> {
-    let sd = d * vec3<f32>(1.0, 1.0, -1.0);
-    var c = textureSampleLevel(sky_cube, sky_sampler, sd, 0.0).rgb;
-    if hole.params.w > 0.0 {
-        c += textureSampleLevel(star_cube, star_sampler, sd, 0.0).rgb * hole.params.w;
-    }
-    return c;
 }
 
 @fragment
@@ -67,22 +49,10 @@ fn fragment(in: VertexOutput) -> FragmentOutput {
     let rho = length(vec2<f32>(rel.x, rel.z));
     let px = max(fwidth(rho), 1e-4);
 
-    // lensing: the ray's closest approach to the centre, and the sky seen along the ray bent toward it
-    let dir = normalize(p - eye);
-    let to_c = c - eye;
-    let perp = to_c - dir * dot(to_c, dir);
-    let b = max(length(perp), 1e-3);
-    let fade = 1.0 - smoothstep(0.45 * radius, radius, b);
-    let bend = min(hole.shape.w * core / b, 1.2) * fade;
-    var sky = vec3<f32>(0.0);
-    if hole.shape.w > 0.0 {
-        let toward = perp / b;
-        sky = background(normalize(dir * cos(bend) + toward * sin(bend)));
-    }
-    // the edge of the disc: the lensed sky stands in for the plain one, fading out toward the pull radius
+    // the disc's own edge: everything fades out toward the pull radius
     let edge = 1.0 - smoothstep(0.8 * radius, radius, rho);
-    var alpha = edge * select(0.0, 1.0, hole.shape.w > 0.0);
-    var light = sky * alpha;
+    var alpha = 0.0;
+    var light = vec3<f32>(0.0);
 
     // the horizon: black, with a bright ring on its edge
     let horizon = hole.shape.x;
@@ -129,6 +99,7 @@ fn fragment(in: VertexOutput) -> FragmentOutput {
 
     let emission = (ring_light + disc_light + halo_light) * (1.0 - smoothstep(0.9 * radius, radius, rho)) + outline_light;
     var out: FragmentOutput;
-    out.color = vec4<f32>(light * (1.0 - disc_a * 0.5) + emission, clamp(max(alpha, ring + halo * 0.5 + outline * 0.15), 0.0, 1.0));
+    // light is added; alpha only blacks out the horizon (and a little under the ring), so the disc veils nothing but the core
+    out.color = vec4<f32>(light + emission, clamp(max(alpha, ring * 0.5), 0.0, 1.0));
     return out;
 }

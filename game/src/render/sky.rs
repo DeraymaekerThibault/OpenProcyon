@@ -34,6 +34,9 @@ const DOME_SCALE: f32 = 0.98;
 /// Most near layers a sky draws (fixed arrays in the uniform).
 pub const MAX_LAYERS: usize = 3;
 
+/// Most black holes the dome bends the sky around (retail maps have one).
+pub const MAX_HOLES: usize = 4;
+
 /// The `sky` block.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SkyDome {
@@ -273,6 +276,25 @@ pub struct SkyUniform {
     pub sheet: Vec4,
     pub sheet_color: Vec4,
     pub layers: [LayerUniform; MAX_LAYERS],
+    /// x: black holes in `holes` (0 = none), y: lensing strength (`black_holes.lensing`)
+    pub lens: Vec4,
+    /// Per hole, xyz: centre (world), w: the kill core's radius (the shadow)
+    pub holes: [Vec4; MAX_HOLES],
+    /// Per hole, x: the pull radius (the bending fades out by it)
+    pub hole_reach: [Vec4; MAX_HOLES],
+}
+
+/// The black holes' part of the uniform: up to `MAX_HOLES` (centre, core, radius), bent with `lensing`.
+fn lens_uniform(holes: impl Iterator<Item = (Vec3, f32, f32)>, lensing: f32) -> (Vec4, [Vec4; MAX_HOLES], [Vec4; MAX_HOLES]) {
+    let (mut at, mut reach, mut n) = ([Vec4::ZERO; MAX_HOLES], [Vec4::ZERO; MAX_HOLES], 0);
+    if lensing > 0.0 {
+        for (c, core, radius) in holes.take(MAX_HOLES) {
+            at[n] = c.extend(core);
+            reach[n] = Vec4::new(radius, 0.0, 0.0, 0.0);
+            n += 1;
+        }
+    }
+    (Vec4::new(n as f32, lensing, 0.0, 0.0), at, reach)
 }
 
 impl SkyDome {
@@ -422,6 +444,7 @@ fn dome(
     assets: Res<AssetServer>,
     events: Res<SkyEvents>,
     cams: Query<&GlobalTransform, With<Camera3d>>,
+    holes: Query<(&GlobalTransform, &crate::blackhole::Pull), With<crate::blackhole::BlackHole>>,
     skies: Query<(Entity, &HdSky, Option<&StarsImage>), With<Sky>>,
     domes: Query<(&ChildOf, &MeshMaterial3d<SkyMaterial>, &Dome)>,
     mut images: ResMut<Assets<Image>>,
@@ -432,9 +455,13 @@ fn dome(
     let eye = cams.iter().next().map_or(Vec3::ZERO, |c| c.translation());
     let (flash, flash_dir) = events.flash.uniform(eye);
     let (warm, warm_dir) = events.warm.uniform(eye);
+    // black holes bend the whole sky behind them here, clouds and stars with it, and always behind the ships (render/holes.rs draws the disc)
+    let lensing = look.black_holes.as_ref().map_or(0.0, |b| b.lensing);
+    let (lens, hole_at, hole_reach) = lens_uniform(holes.iter().map(|(g, p)| (g.translation(), p.core(), p.radius)), lensing);
     for (_, mat, cfg) in &domes {
         if let Some(mut m) = materials.get_mut(&mat.0) {
-            m.extension.u = SkyUniform { flash, flash_dir, warm, warm_dir, ..cfg.0.uniform(real.elapsed_secs(), time.elapsed_secs(), time.delta_secs()) };
+            m.extension.u =
+                SkyUniform { flash, flash_dir, warm, warm_dir, lens, holes: hole_at, hole_reach, ..cfg.0.uniform(real.elapsed_secs(), time.elapsed_secs(), time.delta_secs()) };
         }
     }
     for (e, hd, stars) in &skies {
@@ -490,6 +517,16 @@ mod tests {
         let d = parse(&json!({})).unwrap();
         assert!(d.layers.is_empty() && d.base.is_none() && d.sheet.is_none() && d.events.is_empty());
         assert_eq!(d.shooting_every, 0.0);
+    }
+
+    #[test]
+    fn holes_bend_the_sky_only_with_lensing_and_at_most_max_holes() {
+        let many = (0..6).map(|i| (Vec3::splat(i as f32), 36.0, 145.0));
+        let (lens, at, reach) = lens_uniform(many, 1.5);
+        assert_eq!(lens, Vec4::new(MAX_HOLES as f32, 1.5, 0.0, 0.0));
+        assert_eq!((at[1], reach[1].x), (Vec4::new(1.0, 1.0, 1.0, 36.0), 145.0));
+        let (lens, ..) = lens_uniform(std::iter::once((Vec3::ZERO, 36.0, 145.0)), 0.0);
+        assert_eq!(lens.x, 0.0, "no lensing, no holes in the sky");
     }
 
     #[test]

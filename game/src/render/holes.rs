@@ -1,13 +1,14 @@
 //! Not retail: black holes of the render profile (`black_holes` block, drawn with the mod's `shaders/blackhole.wesl`). The retail
-//! look is only its additive ribbons (`blackhole.rs`); this puts a flat disc of the pull's radius in the hole's plane, blended
-//! over everything behind it and just under the ships: a black horizon exactly as wide as the kill core (`Pull::core`), a thin
-//! bright ring on its edge that marks the kill zone at any zoom, the baked sky bent around it (lensing of the sky cube, and of
-//! the stars cube when the sky has one), a hot accretion disc that turns the way the pull swirls (clockwise seen from above),
-//! and a flash when a ship is swallowed. The retail ribbons stay on top as the infalling streams. All sizes are shares of the
-//! pull radius, so the three hole sizes scale together.
+//! look is only its additive ribbons (`blackhole.rs`); this puts a flat disc of the pull's radius in the hole's plane, just under
+//! the ships: a black horizon exactly as wide as the kill core (`Pull::core`), a thin bright ring on its edge that marks the kill
+//! zone at any zoom, a hot accretion disc that turns the way the pull swirls (clockwise seen from above), the faint outline of
+//! the pull radius, and a flash when a ship is swallowed. The retail ribbons stay on top as the infalling streams. All sizes are
+//! shares of the pull radius, so the three hole sizes scale together.
+//!
+//! The bending of the sky (`lensing`) and the hole's round shadow are drawn by the sky dome (`sky.rs` reads the holes), so they
+//! bend the clouds and stars too and always stay behind the ships; with no dome there is no bending.
 //!
 //! Only reads `blackhole::BlackHole`, `blackhole::Pull` and `blackhole::Swallowed`; nothing here changes what the hole does.
-//! The disc does not bend ships behind the hole: the camera looks down, so what lies behind a hole is almost always sky.
 
 use bevy::mesh::MeshVertexBufferLayoutRef;
 use bevy::pbr::{ExtendedMaterial, MaterialExtension, MaterialExtensionKey, MaterialExtensionPipeline};
@@ -18,7 +19,6 @@ use serde_json::Value;
 
 use super::{Look, num, rgb};
 use crate::blackhole::{BlackHole, Pull, Swallowed};
-use crate::view::{HdSky, Sky};
 
 pub const SHADER: &str = "shaders/blackhole.wesl";
 
@@ -32,7 +32,7 @@ pub struct BlackHoles {
     pub horizon: f32,
     /// Thickness of the bright ring on the horizon's edge (never thinner than a pixel and a half on screen).
     pub ring: f32,
-    /// How hard the hole bends the sky behind it (1 = a radian at the horizon's edge).
+    /// How hard the hole bends the sky behind it (1 = a radian at the horizon's edge); drawn by the sky dome.
     pub lensing: f32,
     pub disc: Disc,
     /// Warm halo just outside the horizon, strength.
@@ -79,13 +79,13 @@ pub fn parse(v: &Value) -> Option<BlackHoles> {
 pub struct HoleUniform {
     /// xyz: the hole's centre (world), w: the pull radius
     pub centre: Vec4,
-    /// x: horizon radius (world units), y: the kill core's radius, z: ring thickness (world units), w: lensing strength (0 = none)
+    /// x: horizon radius (world units), y: the kill core's radius, z: ring thickness (world units)
     pub shape: Vec4,
     /// x: disc inner radius, y: outer radius (world units), z: spin (turns a second), w: brightness
     pub disc: Vec4,
     /// rgb: the disc's cooler colour
     pub color: Vec4,
-    /// x: clock (battle seconds), y: swallow flash 0..1, z: glow, w: the stars cube's decode gain (0 = no stars cube)
+    /// x: clock (battle seconds), y: swallow flash 0..1, z: glow
     pub params: Vec4,
 }
 
@@ -93,12 +93,6 @@ pub struct HoleUniform {
 pub struct HoleGlow {
     #[uniform(100)]
     pub u: HoleUniform,
-    #[texture(101, dimension = "cube")]
-    #[sampler(102)]
-    pub cube: Option<Handle<Image>>,
-    #[texture(103, dimension = "cube")]
-    #[sampler(104)]
-    pub stars: Option<Handle<Image>>,
 }
 
 impl MaterialExtension for HoleGlow {
@@ -111,7 +105,7 @@ impl MaterialExtension for HoleGlow {
         _: &MeshVertexBufferLayoutRef,
         _: MaterialExtensionKey<Self>,
     ) -> Result<(), SpecializedMeshPipelineError> {
-        // a veil over the sky, never over the ships: no depth write, and the ships' own depth keeps them in front
+        // under the ships: no depth write, and the ships' own depth keeps them in front
         if let Some(depth) = descriptor.depth_stencil.as_mut() {
             depth.depth_write_enabled = Some(false);
         }
@@ -123,7 +117,7 @@ pub type HoleMaterial = ExtendedMaterial<StandardMaterial, HoleGlow>;
 
 pub fn plugin(app: &mut App, look: &Look) {
     if look.black_holes.is_some() {
-        app.add_plugins(MaterialPlugin::<HoleMaterial>::default()).add_systems(Update, (spawn_discs, update_discs, flash_on_swallow, sky_cube).chain());
+        app.add_plugins(MaterialPlugin::<HoleMaterial>::default()).add_systems(Update, (spawn_discs, update_discs, flash_on_swallow).chain());
     }
 }
 
@@ -138,20 +132,19 @@ pub struct HoleDisc {
 }
 
 impl BlackHoles {
-    fn uniform(&self, centre: Vec3, pull: &Pull, clock: f32, flash: f32, gain: f32, lens: bool) -> HoleUniform {
+    fn uniform(&self, centre: Vec3, pull: &Pull, clock: f32, flash: f32) -> HoleUniform {
         let r = pull.radius;
         HoleUniform {
             centre: centre.extend(r),
-            shape: Vec4::new(self.horizon * r, pull.core(), self.ring * r, if lens { self.lensing } else { 0.0 }),
+            shape: Vec4::new(self.horizon * r, pull.core(), self.ring * r, 0.0),
             disc: Vec4::new(self.disc.inner * r, self.disc.outer * r, self.disc.spin, self.disc.brightness),
             color: self.disc.color.extend(0.0),
-            params: Vec4::new(clock, flash, self.glow, gain),
+            params: Vec4::new(clock, flash, self.glow, 0.0),
         }
     }
 }
 
-/// Gives every hole its disc, once. The sky cubes are filled in by `sky_cube` when the baked sky is ready (a hole drawn before
-/// that bends nothing).
+/// Gives every hole its disc, once.
 fn spawn_discs(
     mut commands: Commands,
     look: Res<Look>,
@@ -163,8 +156,7 @@ fn spawn_discs(
     let Some(b) = &look.black_holes else { return };
     for (e, pull, at) in &holes {
         let base = StandardMaterial { unlit: true, cull_mode: None, double_sided: true, alpha_mode: AlphaMode::Premultiplied, ..default() };
-        let material =
-            materials.add(HoleMaterial { base, extension: HoleGlow { u: b.uniform(at.translation(), pull, time.elapsed_secs(), 0.0, 0.0, false), cube: None, stars: None } });
+        let material = materials.add(HoleMaterial { base, extension: HoleGlow { u: b.uniform(at.translation(), pull, time.elapsed_secs(), 0.0) } });
         let flat = Transform::from_xyz(0.0, -b.drop * pull.radius, 0.0).with_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2));
         commands.entity(e).insert(HoleLook).with_child((
             HoleDisc { flash: 0.0 },
@@ -189,8 +181,7 @@ fn update_discs(
         let Ok((pull, at)) = holes.get(parent.parent()) else { continue };
         disc.flash = (disc.flash - time.delta_secs() / FLASH_SECONDS).max(0.0);
         let Some(mut m) = materials.get_mut(&mat.0) else { continue };
-        let (gain, lens) = (m.extension.u.params.w, m.extension.cube.is_some());
-        m.extension.u = b.uniform(at.translation(), pull, time.elapsed_secs(), disc.flash * disc.flash, gain, lens);
+        m.extension.u = b.uniform(at.translation(), pull, time.elapsed_secs(), disc.flash * disc.flash);
     }
 }
 
@@ -203,34 +194,6 @@ fn flash_on_swallow(new: Query<&GlobalTransform, Added<Swallowed>>, holes: Query
             if Vec2::new(d.x, d.z).length() <= pull.radius {
                 disc.flash = 1.0;
             }
-        }
-    }
-}
-
-/// Binds the baked sky (and its stars) to discs that have none yet, once the images are cubes.
-fn sky_cube(
-    look: Res<Look>,
-    skies: Query<(&HdSky, Option<&super::sky::StarsImage>), With<Sky>>,
-    discs: Query<&MeshMaterial3d<HoleMaterial>, With<HoleDisc>>,
-    mut images: ResMut<Assets<Image>>,
-    mut materials: ResMut<Assets<HoleMaterial>>,
-) {
-    let Some((hd, stars)) = skies.iter().next() else { return };
-    let gain = look.sky.as_ref().and_then(|s| s.stars).map_or(16.0, |t| t.gain);
-    let ready = |h: &Handle<Image>, images: &mut Assets<Image>| images.get_mut(h).is_some_and(|mut i| crate::view::as_cube(&mut i));
-    for mat in &discs {
-        let Some(m) = materials.get(&mat.0) else { continue };
-        if m.extension.cube.as_ref() == Some(&hd.0) {
-            continue;
-        }
-        let stars_handle = stars.map(|s| s.0.clone());
-        if !ready(&hd.0, &mut images) || stars_handle.as_ref().is_some_and(|h| !ready(h, &mut images)) {
-            continue;
-        }
-        if let Some(mut m) = materials.get_mut(&mat.0) {
-            m.extension.cube = Some(hd.0.clone());
-            m.extension.u.params.w = if stars_handle.is_some() { gain } else { 0.0 };
-            m.extension.stars = stars_handle;
         }
     }
 }
@@ -259,9 +222,8 @@ mod tests {
     #[test]
     fn sizes_scale_with_the_pull_radius() {
         let b = parse(&json!({})).unwrap();
-        let small = b.uniform(Vec3::ZERO, &Pull::for_terrain("Terrain_BlackHole_Small").unwrap(), 0.0, 0.0, 0.0, true);
-        let big = b.uniform(Vec3::ZERO, &Pull::for_terrain("Terrain_BlackHole_Big").unwrap(), 0.0, 0.0, 0.0, false);
-        assert_eq!(big.shape.w, 0.0, "no sky to bend, no lensing");
+        let small = b.uniform(Vec3::ZERO, &Pull::for_terrain("Terrain_BlackHole_Small").unwrap(), 0.0, 0.0);
+        let big = b.uniform(Vec3::ZERO, &Pull::for_terrain("Terrain_BlackHole_Big").unwrap(), 0.0, 0.0);
         assert_eq!(small.shape.x, small.shape.y, "the horizon is the core of a small hole");
         assert_eq!(big.shape.x, big.shape.y, "and of a big one");
         assert!(big.disc.y / small.disc.y > 4.0 && big.centre.w == 625.0);
