@@ -19,6 +19,8 @@ import bevy_pbr::render::{
     forward_io::{VertexOutput, FragmentOutput},
     mesh_view_bindings::view,
 };
+// the clock, the storm's last bolt and the black holes (game/src/render/frame.rs)
+import openprocyon::render::frame::frame;
 
 struct Layer {
     // x: opacity, y: threshold, z: softness, w: distance
@@ -30,8 +32,6 @@ struct Layer {
 }
 
 struct Sky {
-    // x: real seconds (not wrapped), y: battle seconds, z: frame delta
-    clock: vec4<f32>,
     // x: brightness (0 = none), y: twinkle depth, z: twinkles a second, w: gain
     stars: vec4<f32>,
     // x: layer count, y: 1 when the far sky is redrawn
@@ -39,9 +39,10 @@ struct Sky {
     // x: flow (radians), y: flow cycle seconds, z: breath depth, w: breath seconds
     base: vec4<f32>,
     base_tint: vec4<f32>,
-    // rgb: storm flash colour times what is left; xyz of flash_dir: its world direction
+    // rgb: a storm flash's colour times its strength, w: seconds it lasts (the bolt is the frame's)
     flash: vec4<f32>,
-    flash_dir: vec4<f32>,
+    // x: distance from the camera at which a flash lights the gas at half strength (0: no falloff)
+    flash_reach: vec4<f32>,
     warm: vec4<f32>,
     warm_dir: vec4<f32>,
     // x: shooting star slot seconds (0 = none), y: brightness
@@ -50,12 +51,6 @@ struct Sky {
     sheet: vec4<f32>,
     sheet_color: vec4<f32>,
     layers: array<Layer, 3>,
-    // x: black holes (0 = none), y: lensing strength
-    lens: vec4<f32>,
-    // per hole, xyz: centre (world), w: kill core radius
-    holes: array<vec4<f32>, 4>,
-    // per hole, x: pull radius
-    hole_reach: array<vec4<f32>, 4>,
 }
 
 @group(constants::MATERIAL_BIND_GROUP) @binding(100) var<uniform> sky: Sky;
@@ -89,11 +84,22 @@ fn sample_sky(d: vec3<f32>) -> vec3<f32> {
 // the light the events put on the gas: a soft lobe around each direction, in its colour
 fn event_light(dir: vec3<f32>) -> vec3<f32> {
     var l = vec3<f32>(0.0);
-    l += sky.flash.rgb * pow(max(dot(dir, sky.flash_dir.xyz), 0.0), 3.0);
+    // the storm's last bolt: a quadratic fade over the flash's seconds, weaker the farther the storm
+    let left = max(1.0 - frame.bolt_at.w / max(sky.flash.w, 0.01), 0.0);
+    if left > 0.0 {
+        let to_bolt = frame.bolt_at.xyz - view.world_position;
+        let reach = sky.flash_reach.x;
+        var far = 1.0;
+        if reach > 0.0 {
+            let r = length(to_bolt) / reach;
+            far = 1.0 / (1.0 + r * r);
+        }
+        l += sky.flash.rgb * (left * left * far) * pow(max(dot(dir, normalize(to_bolt)), 0.0), 3.0);
+    }
     l += sky.warm.rgb * pow(max(dot(dir, sky.warm_dir.xyz), 0.0), 2.0);
     if sky.sheet.x > 0.0 {
-        let slot = floor(sky.clock.x / sky.sheet.x);
-        let at = (sky.clock.x - slot * sky.sheet.x) - hash1(slot) * sky.sheet.x * 0.9;
+        let slot = floor(frame.clock.x / sky.sheet.x);
+        let at = (frame.clock.x - slot * sky.sheet.x) - hash1(slot) * sky.sheet.x * 0.9;
         if at > 0.0 {
             let d = normalize(vec3<f32>(hash1(slot + 1.0), hash1(slot + 2.0), hash1(slot + 3.0)) - vec3<f32>(0.5));
             // two quick flickers, then out
@@ -109,9 +115,9 @@ fn shooting_star(dir: vec3<f32>) -> f32 {
     if sky.shoot.x <= 0.0 {
         return 0.0;
     }
-    let slot = floor(sky.clock.x / sky.shoot.x);
+    let slot = floor(frame.clock.x / sky.shoot.x);
     let life = 1.4;
-    let t = (sky.clock.x - slot * sky.shoot.x) - hash1(slot + 11.0) * max(sky.shoot.x - life, 1.0);
+    let t = (frame.clock.x - slot * sky.shoot.x) - hash1(slot + 11.0) * max(sky.shoot.x - life, 1.0);
     if t < 0.0 || t > life {
         return 0.0;
     }
@@ -140,12 +146,12 @@ fn lensed(d: vec3<f32>) -> vec4<f32> {
     var dir = d;
     var total = 0.0;
     let eye = view.world_position;
-    let count = i32(sky.lens.x);
+    let count = i32(frame.holes_info.x);
     for (var i = 0; i < 4; i = i + 1) {
         if i >= count {
             break;
         }
-        let h = sky.holes[i];
+        let h = frame.holes[i];
         let to_c = h.xyz - eye;
         let along = dot(to_c, dir);
         if along <= 0.0 {
@@ -153,12 +159,12 @@ fn lensed(d: vec3<f32>) -> vec4<f32> {
         }
         let perp = to_c - dir * along;
         let b = max(length(perp), 1e-3);
-        let reach = sky.hole_reach[i].x;
+        let reach = frame.hole_reach[i].x;
         // a camera at the hole (a cutscene flying in, a ship at the core's edge) sees no bending: it would fill the screen
         let fade = (1.0 - smoothstep(0.35 * reach, reach, b)) * camera_clear(length(to_c), h.w);
         let ratio = h.w / b;
         // falls off with the square of the distance: a ring at the horizon, a gentle bend across the rest of the pull circle
-        let bend = min(sky.lens.y * ratio * ratio, 1.4) * fade;
+        let bend = min(frame.holes_info.y * ratio * ratio, 1.4) * fade;
         dir = normalize(dir * cos(bend) + (perp / b) * sin(bend));
         total += bend;
     }
@@ -169,12 +175,12 @@ fn lensed(d: vec3<f32>) -> vec4<f32> {
 // (the photon sphere), on the unbent ray
 fn hole_shadow(d: vec3<f32>) -> f32 {
     var s = 0.0;
-    let count = i32(sky.lens.x);
+    let count = i32(frame.holes_info.x);
     for (var i = 0; i < 4; i = i + 1) {
         if i >= count {
             break;
         }
-        let h = sky.holes[i];
+        let h = frame.holes[i];
         let to_c = h.xyz - view.world_position;
         let along = dot(to_c, d);
         if along > 0.0 {
@@ -192,7 +198,7 @@ fn fragment(in: VertexOutput) -> FragmentOutput {
     let dir = bent.xyz;
     // 1 in a hole's shadow, fading at its edge
     let shadow = hole_shadow(straight);
-    let clock = sky.clock.x;
+    let clock = frame.clock.x;
     let lit = vec3<f32>(1.0) + event_light(dir);
     var rgb = vec3<f32>(0.0);
     var alpha = 0.0;
@@ -227,7 +233,7 @@ fn fragment(in: VertexOutput) -> FragmentOutput {
         }
         let l = sky.layers[i];
         // a point on the layer, moved by the camera and carried by the current
-        let p = dir * l.a.w + view.world_position - l.c.xyz * sky.clock.y;
+        let p = dir * l.a.w + view.world_position - l.c.xyz * frame.clock.y;
         // turned and mirrored, so the layer is not the sky's own picture laid over itself
         let q = normalize(p).zxy * vec3<f32>(1.0, -1.0, 1.0);
         let gas = textureSampleLevel(sky_cube, sky_sampler, q, 0.0).rgb * l.b.yzw;

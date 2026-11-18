@@ -9,16 +9,16 @@ import bevy_pbr::render::{
     mesh_functions,
     view_transformations::position_world_to_clip,
 };
+// the battle clock (game/src/render/frame.rs)
+import openprocyon::render::frame::frame;
 
 struct Ribbon {
     // xyz: the hole's centre (world), w: the pull radius
     centre: vec4<f32>,
     // x: the kill core's radius, y: brightness, z: the whirlpool's depth, w: its throat radius (world units)
     shape: vec4<f32>,
-    // rgb: the cooler colour
+    // rgb: the cooler colour (the clock is frame.clock)
     color: vec4<f32>,
-    // x: clock
-    params: vec4<f32>,
 }
 
 @group(constants::MATERIAL_BIND_GROUP) @binding(100) var<uniform> ribbon: Ribbon;
@@ -74,7 +74,7 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
     let rho = length(vec2<f32>(rel.x, rel.z));
     let radius = ribbon.centre.w;
     let core = ribbon.shape.x;
-    let t = ribbon.params.x;
+    let t = frame.clock.y;
     // a thin bright thread with a faint fringe, broken into streaks that run along the strip
     let thread = exp(-across * across * 38.0);
     let fringe = pow(max(1.0 - across, 0.0), 4.0) * 0.18;

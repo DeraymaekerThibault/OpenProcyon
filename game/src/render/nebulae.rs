@@ -164,6 +164,9 @@ pub struct NebulaUniform {
 pub struct NebulaGlow {
     #[uniform(100)]
     pub u: NebulaUniform,
+    /// The frame data (`frame.rs`) at `@binding(99)`.
+    #[storage(99, read_only)]
+    pub frame: super::frame::FrameBinding,
 }
 
 impl MaterialExtension for NebulaGlow {
@@ -223,6 +226,9 @@ pub struct VolumeUniform {
 pub struct VolumeGas {
     #[uniform(100)]
     pub u: VolumeUniform,
+    /// The frame data (`frame.rs`) at `@binding(99)`.
+    #[storage(99, read_only)]
+    pub frame: super::frame::FrameBinding,
     /// The baked noise (`volnoise.rs`), one for every cloud.
     #[texture(101, dimension = "3d")]
     #[sampler(102)]
@@ -310,7 +316,7 @@ fn spawn_volumes(
             StandardMaterial { unlit: true, cull_mode: Some(bevy::render::render_resource::Face::Front), double_sided: false, alpha_mode: AlphaMode::Premultiplied, ..default() };
         let material = materials.add(VolumeMaterial {
             base,
-            extension: VolumeGas { u: rule.volume(cloud, at.translation(), time.elapsed_secs(), &bolt, SunLight::default()), noise: noise.0.clone() },
+            extension: VolumeGas { u: rule.volume(cloud, at.translation(), time.elapsed_secs(), &bolt, SunLight::default()), noise: noise.0.clone(), frame: default() },
         });
         let size = AXES * 2.0 * cloud.radius() * BOX_MARGIN;
         commands.entity(e).insert(VolumeProxyOf).with_child((
@@ -430,7 +436,8 @@ fn restyle(
         let Some(rule) = n.find(cloud.effect()).filter(|r| !r.replace) else { continue };
         let Some(old) = retail.get(&mat.0) else { continue };
         let base = StandardMaterial { base_color: Color::WHITE, base_color_texture: old.base.base_color_texture.clone(), ..old.base.clone() };
-        let handle = materials.add(NebulaMaterial { base, extension: NebulaGlow { u: rule.uniform(at.translation(), cloud.radius(), time.elapsed_secs(), &bolt) } });
+        let handle =
+            materials.add(NebulaMaterial { base, extension: NebulaGlow { u: rule.uniform(at.translation(), cloud.radius(), time.elapsed_secs(), &bolt), frame: default() } });
         super::kit::swap::<EffectMaterial, _>(&mut commands, e, handle).try_insert(Volumetric);
     }
 }

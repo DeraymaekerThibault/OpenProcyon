@@ -138,6 +138,9 @@ pub struct SailGlowUniform {
 pub struct SailGlow {
     #[uniform(100)]
     pub u: SailGlowUniform,
+    /// The frame data (`frame.rs`) at `@binding(99)`.
+    #[storage(99, read_only)]
+    pub frame: super::frame::FrameBinding,
 }
 
 impl MaterialExtension for SailGlow {
@@ -234,6 +237,7 @@ pub(super) fn sails(
                     motion: Vec4::new(0.0, phase, 0.0, 0.0),
                     pattern: cells.extend(0.0).extend(0.0),
                 },
+                frame: default(),
             },
         });
         let ship = parents.iter_ancestors(e).find(|a| ships.contains(*a));

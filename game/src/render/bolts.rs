@@ -70,6 +70,9 @@ pub struct BoltUniform {
 pub struct BoltGlow {
     #[uniform(100)]
     pub u: BoltUniform,
+    /// The frame data (`frame.rs`) at `@binding(99)`.
+    #[storage(99, read_only)]
+    pub frame: super::frame::FrameBinding,
 }
 
 impl MaterialExtension for BoltGlow {
@@ -239,7 +242,7 @@ fn draw(
         // the mesh goes with each battle (Scenario); a new one for the next
         let material = materials.add(BoltMaterial {
             base: super::kit::additive_base(None),
-            extension: BoltGlow { u: BoltUniform { core: b.core.extend(b.brightness), params: Vec4::new(1.0 / b.glow, 0.0, 0.0, 0.0) } },
+            extension: BoltGlow { u: BoltUniform { core: b.core.extend(b.brightness), params: Vec4::new(1.0 / b.glow, 0.0, 0.0, 0.0) }, frame: default() },
         });
         commands.spawn((
             crate::Scenario,

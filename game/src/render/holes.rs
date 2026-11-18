@@ -159,7 +159,7 @@ pub struct HoleUniform {
     pub disc: Vec4,
     /// rgb: the disc's cooler colour
     pub color: Vec4,
-    /// x: clock (battle seconds), y: swallow flash 0..1, z: glow
+    /// x: swallow flash 0..1, y: glow (the clock is the frame data's, `frame.rs`)
     pub params: Vec4,
     /// x: the funnel's depth, y: its throat radius, z: how far under the plane its rim lies (world units; x = 0: flat)
     pub funnel: Vec4,
@@ -171,6 +171,9 @@ pub struct HoleUniform {
 pub struct HoleGlow {
     #[uniform(100)]
     pub u: HoleUniform,
+    /// The frame data (`frame.rs`) at `@binding(99)`.
+    #[storage(99, read_only)]
+    pub frame: super::frame::FrameBinding,
 }
 
 impl MaterialExtension for HoleGlow {
@@ -206,17 +209,19 @@ pub struct HoleLook;
 #[derive(Component)]
 pub struct HoleDisc {
     flash: f32,
+    /// The flash the material was last given, so a quiet disc is never touched.
+    shown: f32,
 }
 
 impl BlackHoles {
-    fn uniform(&self, centre: Vec3, pull: &Pull, clock: f32, flash: f32) -> HoleUniform {
+    fn uniform(&self, centre: Vec3, pull: &Pull, flash: f32) -> HoleUniform {
         let r = pull.radius;
         HoleUniform {
             centre: centre.extend(r),
             shape: Vec4::new(self.horizon * r, pull.core(), self.ring * r, 0.0),
             disc: Vec4::new(self.disc.inner * r, self.disc.outer * r, self.disc.spin, self.disc.brightness),
             color: self.disc.color.extend(0.0),
-            params: Vec4::new(clock, flash, self.glow, 0.0),
+            params: Vec4::new(flash, self.glow, 0.0, 0.0),
             funnel: Vec4::new(self.depth * r, self.throat * r, self.drop * r, 0.0),
             rim: self.rim.extend(0.0),
         }
@@ -246,16 +251,17 @@ pub struct RibbonUniform {
     pub centre: Vec4,
     /// x: the kill core's radius, y: brightness, z: the whirlpool's depth, w: its throat radius (world units)
     pub shape: Vec4,
-    /// rgb: the cooler colour
+    /// rgb: the cooler colour (the clock is the frame data's, `frame.rs`)
     pub color: Vec4,
-    /// x: clock (battle seconds)
-    pub params: Vec4,
 }
 
 #[derive(Asset, AsBindGroup, TypePath, Clone, Default)]
 pub struct RibbonGlow {
     #[uniform(100)]
     pub u: RibbonUniform,
+    /// The frame data (`frame.rs`) at `@binding(99)`.
+    #[storage(99, read_only)]
+    pub frame: super::frame::FrameBinding,
 }
 
 impl MaterialExtension for RibbonGlow {
@@ -284,12 +290,11 @@ pub type RibbonMaterial = ExtendedMaterial<StandardMaterial, RibbonGlow>;
 pub struct RibbonStyled;
 
 impl BlackHoles {
-    fn ribbon(&self, centre: Vec3, pull: &Pull, gain: f32, clock: f32) -> RibbonUniform {
+    fn ribbon(&self, centre: Vec3, pull: &Pull, gain: f32) -> RibbonUniform {
         RibbonUniform {
             centre: centre.extend(pull.radius),
             shape: Vec4::new(pull.core(), self.ribbons * gain, self.depth * pull.radius, self.throat * pull.radius),
             color: self.ribbon_color.extend(0.0),
-            params: Vec4::new(clock, 0.0, 0.0, 0.0),
         }
     }
 }
@@ -299,28 +304,27 @@ impl BlackHoles {
 fn restyle_ribbons(
     mut commands: Commands,
     look: Res<Look>,
-    time: Res<Time>,
     holes: Query<(Entity, &Pull, &GlobalTransform), (With<BlackHole>, With<MeshMaterial3d<StandardMaterial>>, Without<RibbonStyled>)>,
     mut materials: ResMut<Assets<RibbonMaterial>>,
 ) {
     let Some(b) = look.black_holes.as_ref().filter(|b| b.replace) else { return };
     for (e, pull, at) in &holes {
-        let handle = materials
-            .add(RibbonMaterial { base: super::kit::additive_base(None), extension: RibbonGlow { u: b.ribbon(at.translation(), pull, look.fx_gain, time.elapsed_secs()) } });
+        let handle =
+            materials.add(RibbonMaterial { base: super::kit::additive_base(None), extension: RibbonGlow { u: b.ribbon(at.translation(), pull, look.fx_gain), frame: default() } });
         super::kit::swap::<StandardMaterial, _>(&mut commands, e, handle).try_insert(RibbonStyled);
     }
 }
 
+/// Follows a hole that moves (the clock is the frame data's, so a hole that stays put never touches its material).
 fn update_ribbons(
     look: Res<Look>,
-    time: Res<Time>,
-    holes: Query<(&Pull, &GlobalTransform, &MeshMaterial3d<RibbonMaterial>), With<BlackHole>>,
+    holes: Query<(&Pull, &GlobalTransform, &MeshMaterial3d<RibbonMaterial>), (With<BlackHole>, Changed<GlobalTransform>)>,
     mut materials: ResMut<Assets<RibbonMaterial>>,
 ) {
     let Some(b) = &look.black_holes else { return };
     for (pull, at, mat) in &holes {
         if let Some(mut m) = materials.get_mut(&mat.0) {
-            m.extension.u = b.ribbon(at.translation(), pull, look.fx_gain, time.elapsed_secs());
+            m.extension.u = b.ribbon(at.translation(), pull, look.fx_gain);
         }
     }
 }
@@ -329,7 +333,6 @@ fn update_ribbons(
 fn spawn_discs(
     mut commands: Commands,
     look: Res<Look>,
-    time: Res<Time>,
     holes: Query<(Entity, &Pull, &GlobalTransform), (With<BlackHole>, Without<HoleLook>)>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<HoleMaterial>>,
@@ -337,14 +340,14 @@ fn spawn_discs(
     let Some(b) = &look.black_holes else { return };
     for (e, pull, at) in &holes {
         let base = StandardMaterial { unlit: true, cull_mode: None, double_sided: true, alpha_mode: AlphaMode::Premultiplied, ..default() };
-        let material = materials.add(HoleMaterial { base, extension: HoleGlow { u: b.uniform(at.translation(), pull, time.elapsed_secs(), 0.0) } });
+        let material = materials.add(HoleMaterial { base, extension: HoleGlow { u: b.uniform(at.translation(), pull, 0.0), frame: default() } });
         let (mesh, tf) = if b.depth > 0.0 {
             (funnel_mesh(pull.radius, b.depth, b.throat), Transform::from_xyz(0.0, -b.drop * pull.radius, 0.0))
         } else {
             let flat = Transform::from_xyz(0.0, -b.drop * pull.radius, 0.0).with_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2));
             (Circle::new(pull.radius).mesh().resolution(64).build(), flat)
         };
-        commands.entity(e).insert(HoleLook).with_child((HoleDisc { flash: 0.0 }, Mesh3d(meshes.add(mesh)), MeshMaterial3d(material), tf, bevy::light::NotShadowCaster));
+        commands.entity(e).insert(HoleLook).with_child((HoleDisc { flash: 0.0, shown: 0.0 }, Mesh3d(meshes.add(mesh)), MeshMaterial3d(material), tf, bevy::light::NotShadowCaster));
     }
 }
 
@@ -365,20 +368,26 @@ fn ribbon_gain(
     }
 }
 
-/// Moves the clock and the flash on and follows the hole.
+/// Moves the flash on and follows the hole; the clock is the frame data's, so the material is only touched while a flash fades
+/// (and once more to put it out) or the hole moves.
 fn update_discs(
     look: Res<Look>,
     time: Res<Time>,
-    holes: Query<(&Pull, &GlobalTransform)>,
+    holes: Query<(Ref<GlobalTransform>, &Pull)>,
     mut discs: Query<(&ChildOf, &mut HoleDisc, &MeshMaterial3d<HoleMaterial>)>,
     mut materials: ResMut<Assets<HoleMaterial>>,
 ) {
     let Some(b) = &look.black_holes else { return };
     for (parent, mut disc, mat) in &mut discs {
-        let Ok((pull, at)) = holes.get(parent.parent()) else { continue };
+        let Ok((at, pull)) = holes.get(parent.parent()) else { continue };
         disc.flash = (disc.flash - time.delta_secs() / FLASH_SECONDS).max(0.0);
+        let flash = disc.flash * disc.flash;
+        if flash == disc.shown && !at.is_changed() {
+            continue;
+        }
         let Some(mut m) = materials.get_mut(&mat.0) else { continue };
-        m.extension.u = b.uniform(at.translation(), pull, time.elapsed_secs(), disc.flash * disc.flash);
+        m.extension.u = b.uniform(at.translation(), pull, flash);
+        disc.shown = flash;
     }
 }
 
@@ -420,8 +429,8 @@ mod tests {
     #[test]
     fn sizes_scale_with_the_pull_radius() {
         let b = parse(&json!({})).unwrap();
-        let small = b.uniform(Vec3::ZERO, &Pull::for_terrain("Terrain_BlackHole_Small").unwrap(), 0.0, 0.0);
-        let big = b.uniform(Vec3::ZERO, &Pull::for_terrain("Terrain_BlackHole_Big").unwrap(), 0.0, 0.0);
+        let small = b.uniform(Vec3::ZERO, &Pull::for_terrain("Terrain_BlackHole_Small").unwrap(), 0.0);
+        let big = b.uniform(Vec3::ZERO, &Pull::for_terrain("Terrain_BlackHole_Big").unwrap(), 0.0);
         assert_eq!(small.shape.x, small.shape.y, "the horizon is the core of a small hole");
         assert_eq!(big.shape.x, big.shape.y, "and of a big one");
         assert!(big.disc.y / small.disc.y > 4.0 && big.centre.w == 625.0);
@@ -516,9 +525,9 @@ mod tests {
     #[test]
     fn the_ribbons_colour_comes_from_the_profile() {
         let pull = Pull::for_terrain("Terrain_BlackHole_Med").unwrap();
-        let default = parse(&json!({})).unwrap().ribbon(Vec3::ZERO, &pull, 1.0, 0.0);
+        let default = parse(&json!({})).unwrap().ribbon(Vec3::ZERO, &pull, 1.0);
         assert_eq!(default.color, Vec4::new(1.0, 0.38, 0.12, 0.0));
-        let own = parse(&json!({"ribbon_color": [0.2, 0.5, 1.0]})).unwrap().ribbon(Vec3::ZERO, &pull, 1.0, 0.0);
+        let own = parse(&json!({"ribbon_color": [0.2, 0.5, 1.0]})).unwrap().ribbon(Vec3::ZERO, &pull, 1.0);
         assert_eq!(own.color, Vec4::new(0.2, 0.5, 1.0, 0.0));
     }
 

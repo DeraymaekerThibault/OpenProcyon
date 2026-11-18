@@ -107,6 +107,9 @@ pub struct PlumeUniform {
 pub struct PlumeGlow {
     #[uniform(100)]
     pub u: PlumeUniform,
+    /// The frame data (`frame.rs`) at `@binding(99)`.
+    #[storage(99, read_only)]
+    pub frame: super::frame::FrameBinding,
 }
 
 impl MaterialExtension for PlumeGlow {
@@ -139,6 +142,9 @@ pub struct WakeUniform {
 pub struct WakeGlow {
     #[uniform(100)]
     pub u: WakeUniform,
+    /// The frame data (`frame.rs`) at `@binding(99)`.
+    #[storage(99, read_only)]
+    pub frame: super::frame::FrameBinding,
 }
 
 impl MaterialExtension for WakeGlow {
@@ -237,6 +243,7 @@ fn plumes(
                 base: additive_base(None),
                 extension: PlumeGlow {
                     u: PlumeUniform { core: e.core.extend(0.0), edge: edge.extend(if inner { 1.0 } else { 0.0 }), params: Vec4::new(e.brightness, 0.0, 0.0, seed + l) },
+                    frame: default(),
                 },
             });
             // the engine's own rotation is undone, so the plume trails straight astern of the ship
@@ -308,7 +315,7 @@ fn wakes(
         let texture = effect.get(&old.0).and_then(|m| m.base.base_color_texture.clone());
         let material = materials.add(WakeMaterial {
             base: additive_base(texture),
-            extension: WakeGlow { u: WakeUniform { tint: tint.extend(w.brightness), hot: w.hot.extend(0.0), params: Vec4::new(1.0, 0.0, w.core, 0.0) } },
+            extension: WakeGlow { u: WakeUniform { tint: tint.extend(w.brightness), hot: w.hot.extend(0.0), params: Vec4::new(1.0, 0.0, w.core, 0.0) }, frame: default() },
         });
         // the wake's ribbon stops drawing; its tubes draw instead
         commands.entity(e).try_remove::<MeshMaterial3d<EffectMaterial>>();

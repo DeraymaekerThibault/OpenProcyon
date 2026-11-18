@@ -154,6 +154,9 @@ impl From<&RuleShader> for RuleKey {
 pub struct RuleShader {
     #[uniform(100)]
     pub u: RuleUniform,
+    /// The frame data (`frame.rs`) at `@binding(99)`.
+    #[storage(99, read_only)]
+    pub frame: super::frame::FrameBinding,
     /// Index into `SHADERS`.
     pub slot: u32,
 }
@@ -214,7 +217,7 @@ fn style(rule: &Rule, retail: &StandardMaterial, slot: u32) -> RuleMaterial {
         base.alpha_mode = AlphaMode::Opaque;
         base.base_color = base.base_color.with_alpha(1.0);
     }
-    ExtendedMaterial { base, extension: RuleShader { u: RuleUniform { params: rule.params, params2: rule.params2, ..default() }, slot } }
+    ExtendedMaterial { base, extension: RuleShader { u: RuleUniform { params: rule.params, params2: rule.params2, ..default() }, frame: default(), slot } }
 }
 
 /// Materials a rule matches get its material, one per retail material, rule and ship.

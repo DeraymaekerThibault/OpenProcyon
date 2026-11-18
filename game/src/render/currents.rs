@@ -56,16 +56,16 @@ pub struct CurrentUniform {
     pub look: Vec4,
     /// rgb: colour, w: share of the retail texture kept
     pub color: Vec4,
-    /// x: clock (battle seconds), y: this strip's retail scroll speed (texture heights a second), z: pulse strength
+    /// x: this strip's retail scroll speed (texture heights a second), y: pulse strength (the clock is the frame data's)
     pub params: Vec4,
 }
 
 impl Currents {
-    fn uniform(&self, clock: f32, speed: f32) -> CurrentUniform {
+    fn uniform(&self, speed: f32) -> CurrentUniform {
         CurrentUniform {
             look: Vec4::new(self.brightness, self.streaks, self.sparkle, self.core),
             color: self.color.extend(self.texture),
-            params: Vec4::new(clock, speed, self.pulse, 0.0),
+            params: Vec4::new(speed, self.pulse, 0.0, 0.0),
         }
     }
 }
@@ -74,6 +74,9 @@ impl Currents {
 pub struct CurrentGlow {
     #[uniform(100)]
     pub u: CurrentUniform,
+    /// The frame data (`frame.rs`) at `@binding(99)`.
+    #[storage(99, read_only)]
+    pub frame: super::frame::FrameBinding,
 }
 
 impl MaterialExtension for CurrentGlow {
@@ -95,15 +98,15 @@ pub type CurrentMaterial = ExtendedMaterial<StandardMaterial, CurrentGlow>;
 
 pub fn plugin(app: &mut App, look: &Look) {
     if look.currents.is_some() {
-        app.add_plugins(MaterialPlugin::<CurrentMaterial>::default()).add_systems(Update, (restyle, flow).chain());
+        app.add_plugins(MaterialPlugin::<CurrentMaterial>::default()).add_systems(Update, restyle);
     }
 }
 
-/// Swaps the retail material of each current strip, once, keeping its mesh.
+/// Swaps the retail material of each current strip, once, keeping its mesh. The shader scrolls the retail texture itself with the
+/// frame clock (`frame.rs`), so the material is never touched again (`environment::flow_currents` only scrolls its own).
 fn restyle(
     mut commands: Commands,
     look: Res<Look>,
-    time: Res<Time>,
     strips: Query<(Entity, &CurrentRibbon, &MeshMaterial3d<EffectMaterial>)>,
     retail: Res<Assets<EffectMaterial>>,
     mut materials: ResMut<Assets<CurrentMaterial>>,
@@ -111,19 +114,9 @@ fn restyle(
     let Some(c) = &look.currents else { return };
     for (e, ribbon, mat) in &strips {
         let Some(old) = retail.get(&mat.0) else { continue };
-        let handle = materials.add(CurrentMaterial { base: old.base.clone(), extension: CurrentGlow { u: c.uniform(time.elapsed_secs(), ribbon.0) } });
+        let base = StandardMaterial { uv_transform: default(), ..old.base.clone() };
+        let handle = materials.add(CurrentMaterial { base, extension: CurrentGlow { u: c.uniform(ribbon.0), frame: default() } });
         super::kit::swap::<EffectMaterial, _>(&mut commands, e, handle);
-    }
-}
-
-/// The retail scroll (`environment::flow_currents` only knows its own material) and the shader's clock.
-fn flow(look: Res<Look>, time: Res<Time>, strips: Query<(&CurrentRibbon, &MeshMaterial3d<CurrentMaterial>)>, mut materials: ResMut<Assets<CurrentMaterial>>) {
-    let Some(c) = &look.currents else { return };
-    for (ribbon, mat) in &strips {
-        if let Some(mut m) = materials.get_mut(&mat.0) {
-            m.base.uv_transform.translation.y = -(time.elapsed_secs() * ribbon.0).fract();
-            m.extension.u = c.uniform(time.elapsed_secs(), ribbon.0);
-        }
     }
 }
 
@@ -139,11 +132,11 @@ mod tests {
         assert!(c.brightness > 0.0 && c.texture <= 1.0);
         let c = parse(&json!({"streaks": 999, "texture": 4, "brightness": -1})).unwrap();
         assert_eq!((c.streaks, c.texture, c.brightness), (60.0, 1.0, 0.0));
-        assert_eq!(c.uniform(3.0, 0.25).params, Vec4::new(3.0, 0.25, c.pulse, 0.0));
+        assert_eq!(c.uniform(0.25).params, Vec4::new(0.25, c.pulse, 0.0, 0.0));
     }
 
     #[test]
-    fn a_strip_swaps_its_material_once_keeping_its_mesh_and_the_retail_scroll() {
+    fn a_strip_swaps_its_material_once_keeping_its_mesh_and_the_shader_scrolls_it() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, AssetPlugin::default()))
             .init_asset::<Shader>()
@@ -152,7 +145,7 @@ mod tests {
             .init_asset::<EffectMaterial>()
             .init_asset::<CurrentMaterial>()
             .insert_resource(Look::parse(&json!({"currents": {}})))
-            .add_systems(Update, (restyle, flow).chain());
+            .add_systems(Update, restyle);
         let mesh = app.world_mut().resource_mut::<Assets<Mesh>>().add(Mesh::from(Cuboid::default()));
         let retail = app.world_mut().resource_mut::<Assets<EffectMaterial>>().add(crate::fx::additive_material(Handle::default()));
         let strip = app.world_mut().spawn((CurrentRibbon(0.25), Mesh3d(mesh.clone()), MeshMaterial3d(retail))).id();
@@ -163,6 +156,7 @@ mod tests {
         assert_eq!(w.entity(strip).get::<Mesh3d>().map(|m| m.0.id()), Some(mesh.id()));
         assert_eq!(w.resource::<Assets<CurrentMaterial>>().len(), 1, "once");
         let (_, m) = w.resource::<Assets<CurrentMaterial>>().iter().next().unwrap();
-        assert!((-1.0..=0.0).contains(&m.base.uv_transform.translation.y), "the retail scroll, downstream");
+        assert_eq!(m.base.uv_transform, default(), "no scroll in the material: the shader scrolls by the frame clock");
+        assert_eq!(m.extension.u.params.x, 0.25, "at the strip's own retail speed");
     }
 }

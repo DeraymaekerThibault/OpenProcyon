@@ -34,9 +34,6 @@ const DOME_SCALE: f32 = 0.98;
 /// Most near layers a sky draws (fixed arrays in the uniform).
 pub const MAX_LAYERS: usize = 3;
 
-/// Most black holes the dome bends the sky around (retail maps have one).
-pub const MAX_HOLES: usize = 4;
-
 /// The `sky` block.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SkyDome {
@@ -256,8 +253,6 @@ pub struct LayerUniform {
 
 #[derive(Clone, Copy, Default, Debug, PartialEq, ShaderType)]
 pub struct SkyUniform {
-    /// x: real seconds since start (not wrapped), y: battle seconds, z: this frame's delta
-    pub clock: Vec4,
     /// x: brightness (0 = no stars), y: twinkle depth, z: twinkles a second, w: gain
     pub stars: Vec4,
     /// x: number of near layers, y: 1 when the far sky is redrawn
@@ -266,10 +261,10 @@ pub struct SkyUniform {
     pub base: Vec4,
     /// xyz: the breath's colour bias
     pub base_tint: Vec4,
-    /// rgb: a storm flash's colour times what is left of it (0 when none)
+    /// rgb: a storm flash's colour times its strength, w: seconds it lasts (the bolt itself is in the frame data)
     pub flash: Vec4,
-    /// xyz: world direction of the storm flash from the camera
-    pub flash_dir: Vec4,
+    /// x: distance from the camera at which a flash lights the gas at half strength (0 = no falloff)
+    pub flash_reach: Vec4,
     /// rgb: an explosion's warmth times what is left of it
     pub warm: Vec4,
     /// xyz: world direction of the explosion
@@ -280,40 +275,22 @@ pub struct SkyUniform {
     pub sheet: Vec4,
     pub sheet_color: Vec4,
     pub layers: [LayerUniform; MAX_LAYERS],
-    /// x: black holes in `holes` (0 = none), y: lensing strength (`black_holes.lensing`)
-    pub lens: Vec4,
-    /// Per hole, xyz: centre (world), w: the kill core's radius (the shadow)
-    pub holes: [Vec4; MAX_HOLES],
-    /// Per hole, x: the pull radius (the bending fades out by it)
-    pub hole_reach: [Vec4; MAX_HOLES],
-}
-
-/// The black holes' part of the uniform: up to `MAX_HOLES` (centre, core, radius), bent with `lensing`.
-fn lens_uniform(holes: impl Iterator<Item = (Vec3, f32, f32)>, lensing: f32) -> (Vec4, [Vec4; MAX_HOLES], [Vec4; MAX_HOLES]) {
-    let (mut at, mut reach, mut n) = ([Vec4::ZERO; MAX_HOLES], [Vec4::ZERO; MAX_HOLES], 0);
-    if lensing > 0.0 {
-        for (c, core, radius) in holes.take(MAX_HOLES) {
-            at[n] = c.extend(core);
-            reach[n] = Vec4::new(radius, 0.0, 0.0, 0.0);
-            n += 1;
-        }
-    }
-    (Vec4::new(n as f32, lensing, 0.0, 0.0), at, reach)
 }
 
 impl SkyDome {
-    fn uniform(&self, real: f32, battle: f32, delta: f32) -> SkyUniform {
+    fn uniform(&self) -> SkyUniform {
         let mut layers = [LayerUniform::default(); MAX_LAYERS];
         for (u, l) in layers.iter_mut().zip(&self.layers) {
             *u = LayerUniform { a: Vec4::new(l.opacity, l.threshold, l.softness, l.distance), b: Vec4::new(l.scale, l.tint.x, l.tint.y, l.tint.z), c: l.drift.extend(0.0) };
         }
         let (base, base_tint) = self.base.map_or((Vec4::ZERO, Vec4::ZERO), |b| (Vec4::new(b.flow, b.cycle, b.breath, b.period), b.tint.extend(0.0)));
         SkyUniform {
-            clock: Vec4::new(real, battle, delta, 0.0),
             stars: self.stars.map_or(Vec4::ZERO, |t| Vec4::new(t.brightness, t.twinkle, t.speed, t.gain)),
             info: Vec4::new(self.layers.len().min(MAX_LAYERS) as f32, if self.base.is_some() { 1.0 } else { 0.0 }, 0.0, 0.0),
             base,
             base_tint,
+            flash: (self.flash.color * self.flash.strength).extend(self.flash.seconds),
+            flash_reach: Vec4::new(self.flash.reach, 0.0, 0.0, 0.0),
             shoot: Vec4::new(self.shooting_every, self.shooting_brightness, 0.0, 0.0),
             sheet: self.sheet.map_or(Vec4::ZERO, |s| Vec4::new(s.every, s.strength, 0.0, 0.0)),
             sheet_color: self.sheet.map_or(Vec4::ZERO, |s| s.color.extend(0.0)),
@@ -323,7 +300,7 @@ impl SkyDome {
     }
 }
 
-/// A bolt's flash or an explosion's warmth, fading out: where, in what colour, how much is left. Render-side only.
+/// An explosion's warmth, fading out: where, in what colour, how much is left. Render-side only.
 #[derive(Default, Clone, Copy, Debug, PartialEq)]
 struct Pulse {
     at: Vec3,
@@ -331,30 +308,27 @@ struct Pulse {
     /// 1 at the start, 0 when gone.
     left: f32,
     seconds: f32,
-    /// Half strength this far from the camera (0 = the same at any distance).
-    reach: f32,
 }
 
 impl Pulse {
-    fn set(&mut self, at: Vec3, color: Vec3, seconds: f32, reach: f32) {
-        *self = Pulse { at, color, left: 1.0, seconds, reach };
+    fn set(&mut self, at: Vec3, color: Vec3, seconds: f32) {
+        *self = Pulse { at, color, left: 1.0, seconds };
     }
     fn step(&mut self, delta: f32) {
         if self.left > 0.0 {
             self.left = (self.left - delta / self.seconds.max(0.01)).max(0.0);
         }
     }
-    /// The colour times the quadratic fade and the falloff with distance, and the direction from `eye`.
+    /// The colour times the quadratic fade, and the direction from `eye`.
     fn uniform(&self, eye: Vec3) -> (Vec4, Vec4) {
-        let far = if self.reach > 0.0 { 1.0 / (1.0 + (self.at.distance(eye) / self.reach).powi(2)) } else { 1.0 };
-        let k = self.left * self.left * far;
+        let k = self.left * self.left;
         ((self.color * k).extend(0.0), (self.at - eye).normalize_or_zero().extend(0.0))
     }
 }
 
+/// An explosion's warmth on the gas (a storm's flash comes from the frame data, `frame.rs`).
 #[derive(Resource, Default)]
 struct SkyEvents {
-    flash: Pulse,
     warm: Pulse,
 }
 
@@ -362,6 +336,9 @@ struct SkyEvents {
 pub struct SkyGlow {
     #[uniform(100)]
     pub u: SkyUniform,
+    /// The frame data (`frame.rs`) at `@binding(99)`.
+    #[storage(99, read_only)]
+    pub frame: super::frame::FrameBinding,
     #[texture(101, dimension = "cube")]
     #[sampler(102)]
     pub cube: Option<Handle<Image>>,
@@ -433,22 +410,17 @@ fn sky_events(
     look: Res<Look>,
     time: Res<Time<Real>>,
     lib: Option<Res<crate::fx::FxLib>>,
-    mut flashes: MessageReader<crate::nebula::StormFlash>,
     mut started: MessageReader<crate::fx::EffectStarted>,
     mut events: ResMut<SkyEvents>,
     mut table: Local<Option<std::collections::HashMap<usize, SkyEvent>>>,
 ) {
     let Some(sky) = &look.sky else { return };
-    events.flash.step(time.delta_secs());
     events.warm.step(time.delta_secs());
-    for f in flashes.read() {
-        events.flash.set(f.at, sky.flash.color * sky.flash.strength, sky.flash.seconds, sky.flash.reach);
-    }
     let Some(lib) = lib else { return };
     let table = table.get_or_insert_with(|| lib.names().filter_map(|(n, i)| Some((i, sky.events.iter().find(|e| n.contains(&e.effect))?.clone()))).collect());
     for m in started.read() {
         if let Some(e) = table.get(&m.effect) {
-            events.warm.set(m.at, e.color * e.strength, e.seconds, 0.0);
+            events.warm.set(m.at, e.color * e.strength, e.seconds);
         }
     }
 }
@@ -458,13 +430,11 @@ fn sky_events(
 fn dome(
     mut commands: Commands,
     look: Res<Look>,
-    real: Res<Time<Real>>,
-    time: Res<Time>,
     assets: Res<AssetServer>,
     events: Res<SkyEvents>,
+    frame: Res<super::frame::Frame>,
     noise: Option<Res<super::volnoise::NoiseVolume>>,
-    cams: Query<&GlobalTransform, With<Camera3d>>,
-    holes: Query<(&GlobalTransform, &crate::blackhole::Pull), With<crate::blackhole::BlackHole>>,
+    mut warming: Local<bool>,
     skies: Query<(Entity, &HdSky, Option<&StarsImage>), With<Sky>>,
     domes: Query<(&ChildOf, &MeshMaterial3d<SkyMaterial>, &Dome)>,
     mut images: ResMut<Assets<Image>>,
@@ -472,21 +442,18 @@ fn dome(
     mut materials: ResMut<Assets<SkyMaterial>>,
 ) {
     let Some(block) = &look.sky else { return };
-    let eye = cams.iter().next().map_or(Vec3::ZERO, |c| c.translation());
-    let (flash, flash_dir) = events.flash.uniform(eye);
-    let (warm, warm_dir) = events.warm.uniform(eye);
-    // black holes bend the whole sky behind them here, clouds and stars with it, and always behind the ships (render/holes.rs draws the disc)
-    let lensing = look.black_holes.as_ref().map_or(0.0, |b| b.lensing);
-    // centred at the bottom of the whirlpool's throat, under the plane the ships sail
-    let at = |g: &GlobalTransform, p: &crate::blackhole::Pull| look.black_holes.as_ref().map_or(g.translation(), |b| b.singularity(g.translation(), p));
-    let core = |p: &crate::blackhole::Pull| look.black_holes.as_ref().map_or(p.core(), |b| b.shadow_core(p));
-    let (lens, hole_at, hole_reach) = lens_uniform(holes.iter().map(|(g, p)| (at(g, p), core(p), p.radius)), lensing);
-    for (_, mat, cfg) in &domes {
-        if let Some(mut m) = materials.get_mut(&mat.0) {
-            m.extension.u =
-                SkyUniform { flash, flash_dir, warm, warm_dir, lens, holes: hole_at, hole_reach, ..cfg.0.uniform(real.elapsed_secs(), time.elapsed_secs(), time.delta_secs()) };
+    // the clock, a storm's flash and the black holes the shader bends the sky round come from the frame data (`frame.rs`); the
+    // material is only touched while an explosion's warmth fades on the gas, and once more to put it out
+    let warm_now = events.warm.left > 0.0;
+    if warm_now || *warming {
+        let (warm, warm_dir) = events.warm.uniform(frame.camera());
+        for (_, mat, cfg) in &domes {
+            if let Some(mut m) = materials.get_mut(&mat.0) {
+                m.extension.u = SkyUniform { warm, warm_dir, ..cfg.0.uniform() };
+            }
         }
     }
+    *warming = warm_now;
     for (e, hd, stars) in &skies {
         if domes.iter().any(|(p, ..)| p.parent() == e) {
             continue;
@@ -514,9 +481,10 @@ fn dome(
             continue;
         }
         let Some(noise) = noise.as_ref() else { continue };
-        let uniform = sky.uniform(real.elapsed_secs(), time.elapsed_secs(), time.delta_secs());
+        let uniform = sky.uniform();
         let base = StandardMaterial { unlit: true, cull_mode: None, double_sided: true, alpha_mode: AlphaMode::Premultiplied, depth_bias: SORT_BIAS, ..default() };
-        let material = materials.add(SkyMaterial { base, extension: SkyGlow { u: uniform, cube: Some(hd.0.clone()), stars: stars_handle, noise: Some(noise.0.clone()) } });
+        let material =
+            materials.add(SkyMaterial { base, extension: SkyGlow { u: uniform, cube: Some(hd.0.clone()), stars: stars_handle, noise: Some(noise.0.clone()), frame: default() } });
         commands.entity(e).with_child((
             Dome(sky),
             Mesh3d(meshes.add(Sphere::new(1.0).mesh().uv(48, 24))),
@@ -545,16 +513,6 @@ mod tests {
     }
 
     #[test]
-    fn holes_bend_the_sky_only_with_lensing_and_at_most_max_holes() {
-        let many = (0..6).map(|i| (Vec3::splat(i as f32), 36.0, 145.0));
-        let (lens, at, reach) = lens_uniform(many, 1.5);
-        assert_eq!(lens, Vec4::new(MAX_HOLES as f32, 1.5, 0.0, 0.0));
-        assert_eq!((at[1], reach[1].x), (Vec4::new(1.0, 1.0, 1.0, 36.0), 145.0));
-        let (lens, ..) = lens_uniform(std::iter::once((Vec3::ZERO, 36.0, 145.0)), 0.0);
-        assert_eq!(lens.x, 0.0, "no lensing, no holes in the sky");
-    }
-
-    #[test]
     fn the_current_is_given_in_game_axes() {
         let d = parse(&json!({"near": {"drift": [1.0, 2.0, 3.0], "opacity": 4.0}})).unwrap();
         assert_eq!(d.layers[0].drift, Vec3::new(1.0, 3.0, -2.0), "x starboard, y forward, z up become Bevy's x, y up, -z forward");
@@ -568,7 +526,7 @@ mod tests {
         let many = parse(&json!({"near": [{"distance": 6000, "scale": 1}, {"distance": 1500, "tint": [1, 0.5, 0.2]}, {}, {}, {}]})).unwrap();
         assert_eq!(many.layers.len(), MAX_LAYERS);
         assert_eq!((many.layers[0].distance, many.layers[1].distance, many.layers[1].tint), (6000.0, 1500.0, Vec3::new(1.0, 0.5, 0.2)));
-        let u = many.uniform(0.0, 0.0, 0.0);
+        let u = many.uniform();
         assert_eq!((u.info.x, u.layers[1].a.w, u.layers[0].b.x), (3.0, 1500.0, 1.0));
         assert!(parse(&json!({"near": [{"opacity": 0}]})).unwrap().layers.is_empty(), "a layer of no strength draws nothing");
     }
@@ -628,7 +586,7 @@ mod tests {
     #[test]
     fn a_flash_fades_to_nothing() {
         let mut p = Pulse::default();
-        p.set(Vec3::X * 100.0, Vec3::ONE, 0.4, 0.0);
+        p.set(Vec3::X * 100.0, Vec3::ONE, 0.4);
         assert_eq!(p.uniform(Vec3::ZERO).0, Vec4::new(1.0, 1.0, 1.0, 0.0));
         assert_eq!(p.uniform(Vec3::ZERO).1.truncate(), Vec3::X);
         for _ in 0..10 {
@@ -639,19 +597,10 @@ mod tests {
     }
 
     #[test]
-    fn a_far_storm_barely_flashes() {
-        let mut p = Pulse::default();
-        p.set(Vec3::X * 1000.0, Vec3::ONE, 0.4, 1000.0);
-        assert_eq!(p.uniform(Vec3::ZERO).0.x, 0.5, "half at the reach");
-        assert!(p.uniform(Vec3::X * 990.0).0.x > 0.99, "full beside it");
-        assert!(p.uniform(Vec3::NEG_X * 4000.0).0.x < 0.05, "a storm across the map barely flickers");
-    }
-
-    #[test]
-    fn the_clock_is_not_wrapped() {
-        // the retired sky_drift wrapped at the hour and the sky snapped back
-        let u = parse(&json!({})).unwrap().uniform(7200.5, 12.0, 0.016);
-        assert_eq!(u.clock, Vec4::new(7200.5, 12.0, 0.016, 0.0));
+    fn the_flash_is_configured_here_and_struck_in_the_frame_data() {
+        let u = parse(&json!({"flash": {"color": [1, 0.5, 0.25], "strength": 2, "seconds": 0.5, "reach": 900}})).unwrap().uniform();
+        assert_eq!((u.flash, u.flash_reach.x), (Vec4::new(2.0, 1.0, 0.5, 0.5), 900.0));
+        assert_eq!(u.warm, Vec4::ZERO, "no explosion, no warmth");
     }
 
     #[test]
@@ -661,8 +610,8 @@ mod tests {
         let t = d.stars.unwrap();
         assert_eq!((t.brightness, t.twinkle, t.gain), (1.0, 1.0, 16.0));
         assert!(parse(&json!({"near": {}})).unwrap().stars.is_none());
-        assert_eq!(d.uniform(0.0, 0.0, 0.0).stars, Vec4::new(1.0, 1.0, 2.5, 16.0));
-        assert_eq!(parse(&json!({"near": {}})).unwrap().uniform(0.0, 0.0, 0.0).stars, Vec4::ZERO);
+        assert_eq!(d.uniform().stars, Vec4::new(1.0, 1.0, 2.5, 16.0));
+        assert_eq!(parse(&json!({"near": {}})).unwrap().uniform().stars, Vec4::ZERO);
     }
 
     #[test]

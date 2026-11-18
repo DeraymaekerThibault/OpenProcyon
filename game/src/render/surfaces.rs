@@ -95,6 +95,9 @@ pub struct SurfaceUniform {
 pub struct SurfaceDetail {
     #[uniform(100)]
     pub u: SurfaceUniform,
+    /// The frame data (`frame.rs`) at `@binding(99)`.
+    #[storage(99, read_only)]
+    pub frame: super::frame::FrameBinding,
     /// The baked surface map (linear RGBA: u and v slope, crevice, height; see `tools/bake_surfaces.py`).
     #[texture(101)]
     #[sampler(102)]
@@ -174,7 +177,7 @@ pub(super) fn surfaces(
                     info_once!("surfaces: drawing with baked surface maps");
                 }
                 let params = Vec4::new(surface.bump, surface.cavity, surface.gloss, if map.is_some() { 1.0 } else { 0.0 });
-                surface_mats.add(SurfaceMaterial { base, extension: SurfaceDetail { u: SurfaceUniform { params, rim: s.rim }, map } })
+                surface_mats.add(SurfaceMaterial { base, extension: SurfaceDetail { u: SurfaceUniform { params, rim: s.rim }, frame: default(), map } })
             })
             .clone();
         let ship = parents.iter_ancestors(e).find(|a| ships.contains(*a));

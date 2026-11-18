@@ -11,6 +11,8 @@ import bevy_pbr::render::{
     forward_io::{VertexOutput, FragmentOutput},
     mesh_view_bindings::view,
 };
+// the battle clock (game/src/render/frame.rs)
+import openprocyon::render::frame::frame;
 
 struct Hole {
     // xyz: centre (world), w: pull radius
@@ -21,7 +23,7 @@ struct Hole {
     disc: vec4<f32>,
     // rgb: the hot colour (toward the core)
     color: vec4<f32>,
-    // x: clock, y: swallow flash 0..1, z: glow
+    // x: swallow flash 0..1, y: glow (the clock is frame.clock)
     params: vec4<f32>,
     // x: funnel depth, y: throat radius, z: how far under the plane the rim lies (world units)
     funnel: vec4<f32>,
@@ -48,8 +50,8 @@ fn fragment(in: VertexOutput) -> FragmentOutput {
     let c = hole.centre.xyz;
     let radius = hole.centre.w;
     let lip = hole.shape.x;
-    let flash = hole.params.y;
-    let t = hole.params.x;
+    let flash = hole.params.x;
+    let t = frame.clock.y;
     let bright = hole.disc.w;
 
     let rel = p - c;
@@ -87,7 +89,7 @@ fn fragment(in: VertexOutput) -> FragmentOutput {
     let ring = exp(-pow((rho - lip) / ring_w, 2.0));
     light += vec3<f32>(1.0, 0.88, 0.62) * ring * (1.4 + 5.0 * flash) * bright;
     // a warm glow hugging the lip, outside it
-    light += hole.color.rgb * exp(-max(rho - lip, 0.0) / (0.06 * radius)) * (1.0 - fall) * hole.params.z;
+    light += hole.color.rgb * exp(-max(rho - lip, 0.0) / (0.06 * radius)) * (1.0 - fall) * hole.params.y;
     light *= 1.0 + 2.0 * flash;
 
     // the rim fades in from nothing: no hard edge at the pull radius

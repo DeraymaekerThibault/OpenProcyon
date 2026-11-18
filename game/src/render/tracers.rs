@@ -106,6 +106,9 @@ pub struct TracerUniform {
 pub struct TracerGlow {
     #[uniform(100)]
     pub u: TracerUniform,
+    /// The frame data (`frame.rs`) at `@binding(99)`.
+    #[storage(99, read_only)]
+    pub frame: super::frame::FrameBinding,
 }
 
 impl MaterialExtension for TracerGlow {
@@ -204,8 +207,10 @@ fn tracers(
     let mut target = target;
     let Some((mesh, mat, mut vis)) = target.iter_mut().next() else {
         // the mesh goes with each battle (Scenario); a new one for the next
-        let material = materials
-            .add(TracerMaterial { base: super::kit::additive_base(None), extension: TracerGlow { u: TracerUniform { core: t.core.extend(t.brightness), params: Vec4::ZERO } } });
+        let material = materials.add(TracerMaterial {
+            base: super::kit::additive_base(None),
+            extension: TracerGlow { u: TracerUniform { core: t.core.extend(t.brightness), params: Vec4::ZERO }, frame: default() },
+        });
         commands.spawn((
             crate::Scenario,
             TracerMesh,

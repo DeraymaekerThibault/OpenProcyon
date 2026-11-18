@@ -3,18 +3,20 @@
 // u 0..1 across, v along the path in the direction the force pushes (increasing downstream, like the retail scroll).
 // Flowing noise streaks stretched along v with soft edges across; sparkles riding downstream faster than the streaks; slow pulses
 // running down the current, so the flow direction reads at a glance; a core along the middle past 1 so it blooms. The retail
-// texture, scrolled by the engine through the material's uv_transform, stays underneath in part.
+// texture stays underneath in part, scrolled here at the strip's retail speed by the frame clock, as the retail game scrolls it.
 import bevy_pbr::render::{
     forward_io::{VertexOutput, FragmentOutput},
     pbr_fragment::pbr_input_from_standard_material,
 };
+// the battle clock (game/src/render/frame.rs)
+import openprocyon::render::frame::frame;
 
 struct Current {
     // x: brightness, y: streaks across, z: sparkle, w: core
     look: vec4<f32>,
     // rgb: colour, w: share of the retail texture kept
     color: vec4<f32>,
-    // x: clock, y: the strip's scroll speed (texture heights a second), z: pulse strength
+    // x: the strip's scroll speed (texture heights a second), y: pulse strength
     params: vec4<f32>,
 }
 
@@ -33,12 +35,15 @@ fn noise2(p: vec2<f32>) -> f32 {
 
 @fragment
 fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> FragmentOutput {
-    let input = pbr_input_from_standard_material(in, is_front);
+    // the retail scroll: the texture slides back along v at the strip's speed (environment.rs `flow_currents`)
+    var scrolled = in;
+    scrolled.uv.y = in.uv.y - fract(frame.clock.y * current.params.x);
+    let input = pbr_input_from_standard_material(scrolled, is_front);
     let tex = input.material.base_color.rgb * current.color.w;
 
     let u = in.uv.x;
     let v = in.uv.y;
-    let flow = current.params.x * current.params.y;
+    let flow = frame.clock.y * current.params.x;
     // soft edges across the strip
     let across = sin(3.14159265 * clamp(u, 0.0, 1.0));
     let edge = across * across;
@@ -53,10 +58,10 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
     let cell = floor(sp);
     let local = fract(sp) - vec2<f32>(0.5);
     let on = step(0.93, hash2(cell));
-    let sparkle = on * smoothstep(0.35, 0.0, length(local)) * (0.6 + 0.4 * sin(current.params.x * 7.0 + hash2(cell + vec2<f32>(3.0)) * 6.28));
+    let sparkle = on * smoothstep(0.35, 0.0, length(local)) * (0.6 + 0.4 * sin(frame.clock.y * 7.0 + hash2(cell + vec2<f32>(3.0)) * 6.28));
 
     // slow pulses running down the current
-    let pulse = pow(0.5 + 0.5 * sin((v - flow * 2.6) * 6.2831853 * 0.8), 6.0) * current.params.z;
+    let pulse = pow(0.5 + 0.5 * sin((v - flow * 2.6) * 6.2831853 * 0.8), 6.0) * current.params.y;
 
     // the core along the middle
     let mid = (u - 0.5) / 0.22;

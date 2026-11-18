@@ -5,6 +5,7 @@
 //!
 //! - here: the camera (HDR, bloom, tonemapping, grading, SMAA, ambient occlusion), sun shadows, and the baked HD sky
 //!   (`view::hd_sky`) as image-based light standing in for the flat ambient light;
+//! - `frame.rs`: the frame data every mod shader can read at `@binding(99)` (clock, sun, camera, the storm's last bolt, black holes);
 //! - `kit.rs`: what every block repeats: swapping a retail material for the block's, additive (ONE/ONE) drawing, no depth write;
 //! - `lights.rs`: point lights the profile puts on effects (flashes fade, fires and engines flicker);
 //! - `materials.rs`: brighter additive effects and shells for the bloom, smoke lit by the scene, shadow rules for effects;
@@ -37,6 +38,7 @@ pub(crate) mod batch;
 mod bolts;
 mod bursts;
 mod currents;
+mod frame;
 mod holes;
 mod kit;
 mod lights;
@@ -253,6 +255,7 @@ pub fn plugin(app: &mut App) {
     let root = crate::assets_dir();
     let Some(v) = crate::data::try_json(&root.join(PROFILE)) else { return };
     let look = Look::parse(&v).with_shaders(root);
+    frame::plugin(app);
     lights::plugin(app);
     materials::plugin(app);
     sails::plugin(app, &look);

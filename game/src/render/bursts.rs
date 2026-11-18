@@ -219,6 +219,9 @@ pub struct BurstUniform {
 pub struct BurstGlow {
     #[uniform(100)]
     pub u: BurstUniform,
+    /// The frame data (`frame.rs`) at `@binding(99)`.
+    #[storage(99, read_only)]
+    pub frame: super::frame::FrameBinding,
 }
 
 impl MaterialExtension for BurstGlow {
@@ -252,6 +255,9 @@ pub struct SmokeUniform {
 pub struct SmokeShade {
     #[uniform(100)]
     pub u: SmokeUniform,
+    /// The frame data (`frame.rs`) at `@binding(99)`.
+    #[storage(99, read_only)]
+    pub frame: super::frame::FrameBinding,
 }
 
 impl MaterialExtension for SmokeShade {
