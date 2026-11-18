@@ -307,7 +307,7 @@ fn subdivide(mesh: &Mesh, fan: Option<&Fan>) -> Option<(Mesh, Billow)> {
         top[sail[i]] = top[sail[i]].max(p(i).y);
     }
     let (mut out_p, mut out_n, mut out_uv, mut pin, mut idx, mut out_top, mut out_sail) = (vec![], vec![], vec![], vec![], vec![], vec![], vec![]);
-    for [a, b, c] in tris {
+    for &[a, b, c] in &tris {
         let edge = p(a).distance(p(b)).max(p(b).distance(p(c))).max(p(c).distance(p(a)));
         let n = ((edge / (size / 14.0)).ceil() as usize).clamp(1, 12);
         let first = out_p.len() as u32;
@@ -324,7 +324,7 @@ fn subdivide(mesh: &Mesh, fan: Option<&Fan>) -> Option<(Mesh, Billow)> {
                 let s = (t - ulo) / uspan;
                 pin.push((16.0 * s.x * (1.0 - s.x) * s.y * (1.0 - s.y)).clamp(0.0, 1.0).sqrt());
                 out_top.push(top[sail[a]]);
-                out_sail.push(sail[a]);
+                out_sail.push(a);
             }
         }
         for i in 0..n {
@@ -342,16 +342,17 @@ fn subdivide(mesh: &Mesh, fan: Option<&Fan>) -> Option<(Mesh, Billow)> {
     fine.insert_attribute(Mesh::ATTRIBUTE_UV_0, out_uv);
     fine.insert_indices(Indices::U32(idx));
     let fans = fan.map(|_| {
+        let groups = fan_groups(pos, &tris);
         let mut sails: std::collections::HashMap<usize, Option<FanSail>> = std::collections::HashMap::new();
         for &i in &used {
-            sails.entry(sail[i]).or_insert(None);
+            if let Some((root, hub)) = groups[i] {
+                sails.entry(root).or_insert_with(|| {
+                    let verts: Vec<(Vec3, Vec3)> = used.iter().filter(|&&j| groups[j].is_some_and(|g| g.0 == root)).map(|&j| (p(j), Vec3::from(nor[j]))).collect();
+                    FanSail::new(&verts, hub)
+                });
+            }
         }
-        let roots: Vec<usize> = sails.keys().copied().collect();
-        for root in roots {
-            let verts: Vec<(Vec3, Vec3)> = used.iter().filter(|&&i| sail[i] == root).map(|&i| (p(i), Vec3::from(nor[i]))).collect();
-            sails.insert(root, FanSail::new(&verts));
-        }
-        out_p.iter().zip(&out_sail).map(|(&q, root)| sails[root].as_ref().map(|f| f.point(q))).collect::<Vec<_>>()
+        out_p.iter().zip(&out_sail).map(|(&q, &src)| groups[src].and_then(|(root, _)| sails[&root].as_ref()).map(|f| f.point(q))).collect::<Vec<_>>()
     });
     let (pleats, depth) = fan.map_or((0.0, 0.0), |f| (f.pleats, f.depth));
     Some((fine, Billow { rest: out_p, normal: out_n, pin, top: out_top, size, fan: fans.unwrap_or_default(), pleats, depth }))
@@ -369,12 +370,73 @@ struct FanSail {
     rim: f32,
 }
 
+/// Triangles that meet at one point for it to be the hub of a fan (the ribs' meeting point).
+const HUB_MIN: usize = 8;
+
+/// The fans of a sail mesh: for each vertex, the fan it belongs to (a representative vertex) and the fan's hub, or None for cloth
+/// that is not a fan. The retail fans are cut into wedges that share only their hub position, so wedges are joined through it
+/// (and through shared vertices); other coincident vertices do not join, so two fans that touch stay two.
+fn fan_groups(pos: &[[f32; 3]], tris: &[[usize; 3]]) -> Vec<Option<(usize, Vec3)>> {
+    let key = |i: usize| pos[i].map(|c| (c * 1000.0).round() as i64);
+    let mut valence: std::collections::HashMap<[i64; 3], usize> = std::collections::HashMap::new();
+    for t in tris {
+        for &i in t {
+            *valence.entry(key(i)).or_default() += 1;
+        }
+    }
+    let mut parent: Vec<usize> = (0..pos.len()).collect();
+    fn root(parent: &mut [usize], mut i: usize) -> usize {
+        while parent[i] != i {
+            parent[i] = parent[parent[i]];
+            i = parent[i];
+        }
+        i
+    }
+    fn join(parent: &mut [usize], a: usize, b: usize) {
+        let (ra, rb) = (root(parent, a), root(parent, b));
+        parent[ra] = rb;
+    }
+    let mut first_at_hub: std::collections::HashMap<[i64; 3], usize> = std::collections::HashMap::new();
+    for t in tris {
+        join(&mut parent, t[0], t[1]);
+        join(&mut parent, t[1], t[2]);
+        for &i in t {
+            if valence[&key(i)] >= HUB_MIN {
+                let first = *first_at_hub.entry(key(i)).or_insert(i);
+                join(&mut parent, i, first);
+            }
+        }
+    }
+    // each group's hub: the most-met position in it
+    let mut best: std::collections::HashMap<usize, (usize, usize)> = std::collections::HashMap::new();
+    for t in tris {
+        for &i in t {
+            let v = valence[&key(i)];
+            if v >= HUB_MIN {
+                let r = root(&mut parent, i);
+                let e = best.entry(r).or_insert((i, v));
+                if v > e.1 {
+                    *e = (i, v);
+                }
+            }
+        }
+    }
+    let mut out = vec![None; pos.len()];
+    for t in tris {
+        for &i in t {
+            let r = root(&mut parent, i);
+            out[i] = best.get(&r).map(|&(h, _)| (r, Vec3::from(pos[h])));
+        }
+    }
+    out
+}
+
 impl FanSail {
-    /// The sail's vertices (position, normal) -> its fan, or None for a sail with no area or length to fold. A Navy fan sail is a
-    /// half disc: its straight edge (the yard under the main sail, the spar beside a side sail) is the diameter, the two
-    /// vertices farthest apart, and the ribs meet at its middle. The fan closes from both sides onto its middle rib: the main
-    /// sail folds up against the mast, the side sails close to a horizontal line.
-    fn new(verts: &[(Vec3, Vec3)]) -> Option<FanSail> {
+    /// The fan's vertices (position, normal) and its hub -> the fan, or None for a sail with no area or length to fold. A Navy
+    /// fan sail is a half disc: its straight edge (the yard under the main sail, the spar beside a side sail) is the diameter,
+    /// the two vertices farthest apart, and the ribs meet at the hub in its middle. The fan closes from both sides onto its
+    /// middle rib: the main sail folds up against the mast, the side sails close to a horizontal line.
+    fn new(verts: &[(Vec3, Vec3)], hub: Vec3) -> Option<FanSail> {
         if verts.len() < 3 {
             return None;
         }
@@ -385,6 +447,7 @@ impl FanSail {
         let centre = verts.iter().map(|v| v.0).sum::<Vec3>() / verts.len() as f32;
         let flat = |q: Vec3| q - n * (q - centre).dot(n);
         let (mut a, mut b, mut far) = (centre, centre, 0.0);
+        // the straight edge: the two vertices farthest apart in the sail's plane
         for (i, (p, _)) in verts.iter().enumerate() {
             for (q, _) in &verts[i + 1..] {
                 let d = flat(*p).distance_squared(flat(*q));
@@ -393,7 +456,7 @@ impl FanSail {
                 }
             }
         }
-        let pivot = (a + b) * 0.5;
+        let pivot = hub;
         // the middle rib points from the pivot into the sail, square to the straight edge
         let edge = flat(b) - flat(a);
         let into = flat(centre) - flat(pivot);
@@ -401,7 +464,8 @@ impl FanSail {
         let e2 = n.cross(e1);
         let angle = |q: Vec3| (q - pivot).dot(e2).atan2((q - pivot).dot(e1));
         let (min, max) = verts.iter().filter(|(q, _)| (*q - pivot).length() > 1e-4).fold((f32::MAX, f32::MIN), |(lo, hi), (q, _)| (lo.min(angle(*q)), hi.max(angle(*q))));
-        if max - min < 1e-3 {
+        // a real fan is about a half disc about its hub; wider is cloth of another shape (jibs, pennants): it keeps the roller fold
+        if max - min < 1e-3 || max - min > 190f32.to_radians() {
             return None;
         }
         let closed = 0.5 * (min + max);
@@ -585,19 +649,19 @@ mod tests {
         assert_eq!(parse(&serde_json::json!({})).unwrap().furl, 0.0, "classic unless asked");
     }
 
-    /// A half disc of radius 10 standing on its straight edge (the yard, along x), ribs every 45 degrees from the centre.
+    /// A half disc of radius 10 standing on its straight edge (the yard, along x), ribs every 22.5 degrees from the centre.
     fn fan_mesh() -> Mesh {
         let mut m = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
         let rib = |k: usize| {
-            let a = std::f32::consts::PI * k as f32 / 4.0;
+            let a = std::f32::consts::PI * k as f32 / 8.0;
             [10.0 * a.cos(), 10.0 * a.sin(), 0.0]
         };
         let mut pos = vec![[0.0, 0.0, 0.0]];
-        pos.extend((0..=4).map(rib));
+        pos.extend((0..=8).map(rib));
         m.insert_attribute(Mesh::ATTRIBUTE_POSITION, pos);
-        m.insert_attribute(Mesh::ATTRIBUTE_NORMAL, vec![[0.0, 0.0, 1.0]; 6]);
-        m.insert_attribute(Mesh::ATTRIBUTE_UV_0, vec![[0.5, 0.0], [1.0, 0.0], [0.85, 0.85], [0.5, 1.0], [0.15, 0.85], [0.0, 0.0]]);
-        m.insert_indices(Indices::U32(vec![0, 1, 2, 0, 2, 3, 0, 3, 4, 0, 4, 5]));
+        m.insert_attribute(Mesh::ATTRIBUTE_NORMAL, vec![[0.0, 0.0, 1.0]; 10]);
+        m.insert_attribute(Mesh::ATTRIBUTE_UV_0, (0..10).map(|i| [i as f32 / 10.0, 0.5 * (i % 2) as f32]).collect::<Vec<_>>());
+        m.insert_indices(Indices::U32((1..9).flat_map(|k| [0, k, k + 1]).collect()));
         m
     }
 
@@ -656,6 +720,85 @@ mod tests {
         // a sail that does not fan keeps the roller-blind fold
         let (_, b) = subdivide(&quad(10.0, 10.0), None).unwrap();
         assert!(b.fan.is_empty());
+    }
+
+    /// Every sail primitive (material name contains "sail") of a ship GLB: positions, normals and triangles.
+    fn glb_sails(bytes: &[u8]) -> Vec<(String, Vec<[f32; 3]>, Vec<[f32; 3]>, Vec<[usize; 3]>)> {
+        let json_len = u32::from_le_bytes(bytes[12..16].try_into().unwrap()) as usize;
+        let doc: Value = serde_json::from_slice(&bytes[20..20 + json_len]).unwrap();
+        let bin_at = 20 + json_len + 8;
+        let bin = &bytes[bin_at..];
+        let read = |acc: usize, width: usize| -> Vec<u8> {
+            let a = &doc["accessors"][acc];
+            let v = &doc["bufferViews"][a["bufferView"].as_u64().unwrap() as usize];
+            let off = v["byteOffset"].as_u64().unwrap_or(0) as usize + a["byteOffset"].as_u64().unwrap_or(0) as usize;
+            bin[off..off + a["count"].as_u64().unwrap() as usize * width].to_vec()
+        };
+        let f3 = |b: Vec<u8>| -> Vec<[f32; 3]> { b.chunks_exact(12).map(|c| std::array::from_fn(|i| f32::from_le_bytes(c[4 * i..4 * i + 4].try_into().unwrap()))).collect() };
+        let mut out = vec![];
+        for mesh in doc["meshes"].as_array().unwrap() {
+            for p in mesh["primitives"].as_array().unwrap() {
+                let name = doc["materials"][p["material"].as_u64().unwrap_or(0) as usize]["name"].as_str().unwrap_or("").to_string();
+                if !name.to_lowercase().contains("sail") {
+                    continue;
+                }
+                let pos = f3(read(p["attributes"]["POSITION"].as_u64().unwrap() as usize, 12));
+                let nor = f3(read(p["attributes"]["NORMAL"].as_u64().unwrap() as usize, 12));
+                let ia = p["indices"].as_u64().unwrap() as usize;
+                let wide = doc["accessors"][ia]["componentType"].as_u64() == Some(5125);
+                let raw = read(ia, if wide { 4 } else { 2 });
+                let idx: Vec<usize> = if wide {
+                    raw.chunks_exact(4).map(|c| u32::from_le_bytes(c.try_into().unwrap()) as usize).collect()
+                } else {
+                    raw.chunks_exact(2).map(|c| u16::from_le_bytes(c.try_into().unwrap()) as usize).collect()
+                };
+                out.push((name, pos, nor, idx.chunks_exact(3).map(|t| [t[0], t[1], t[2]]).collect()));
+            }
+        }
+        out
+    }
+
+    #[test]
+    #[ignore = "needs imported assets"]
+    fn every_navy_sail_is_one_connected_fan() {
+        let (mut fans, mut main_fans) = (0, 0);
+        for dir in std::fs::read_dir(crate::assets_dir().join("ships")).unwrap().flatten() {
+            let ship: Value = crate::data::read_json(&dir.path().join("ship.json"));
+            if ship["race"] != "Navy" {
+                continue;
+            }
+            let Ok(bytes) = std::fs::read(dir.path().join("model.glb")) else { continue };
+            for (name, pos, nor, tris) in glb_sails(&bytes) {
+                let groups = fan_groups(&pos, &tris);
+                let mut by: std::collections::BTreeMap<usize, (Vec3, Vec<(Vec3, Vec3)>)> = Default::default();
+                let mut scraps = 0;
+                for t in &tris {
+                    for &i in t {
+                        match groups[i] {
+                            Some((k, hub)) => {
+                                let g = by.entry(k).or_insert((hub, vec![]));
+                                if !g.1.iter().any(|v| v.0 == Vec3::from(pos[i])) {
+                                    g.1.push((Vec3::from(pos[i]), Vec3::from(nor[i])));
+                                }
+                            }
+                            None => scraps += 1,
+                        }
+                    }
+                }
+                println!("{:?} {name}: {} fans, {scraps} corners of non-fan cloth (roller-blind fold)", dir.file_name(), by.len());
+                for (k, (hub, vs)) in &by {
+                    match FanSail::new(vs, *hub) {
+                        Some(f) => {
+                            fans += 1;
+                            main_fans += usize::from(vs.len() >= 80);
+                            println!("   #{k}: {} verts, hub {:.2?}, span {:.0}..{:.0} deg, rim {:.2}", vs.len(), f.pivot, f.min.to_degrees(), f.max.to_degrees(), f.rim);
+                        }
+                        None => println!("   #{k}: {} verts, not a half disc: roller-blind fold", vs.len()),
+                    }
+                }
+            }
+        }
+        assert!(fans > 20 && main_fans > 20, "{fans} fans, {main_fans} big ones");
     }
 
     #[test]
