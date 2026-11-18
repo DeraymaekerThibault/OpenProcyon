@@ -438,6 +438,8 @@ fn storms(
 #[derive(Component)]
 pub struct Cloud {
     sim: Sim,
+    /// The effect that made this cloud ("Nebula", "SolarStorm").
+    effect: String,
     radius: f32,
     age: f32,
     acc: f32,
@@ -450,6 +452,37 @@ pub struct Cloud {
     /// The nebula's group (its setup name): clouds travel that group's route like the meteor emitters ('nebula ride').
     route: MeteorEmitter,
     origin: Vec3,
+}
+
+impl Cloud {
+    /// The effect that made the cloud ("Nebula", "SolarStorm"). Read-only, for the render profile.
+    pub fn effect(&self) -> &str {
+        &self.effect
+    }
+    /// The cloud's radius (the point set's magnitude), world units.
+    pub fn radius(&self) -> f32 {
+        self.radius
+    }
+
+    /// An empty cloud of this effect and radius, for tests of code that reads one.
+    #[cfg(test)]
+    pub fn for_tests(effect: &str, radius: f32) -> Cloud {
+        Cloud {
+            sim: Sim::new(&[], Shift::default(), 1),
+            effect: effect.into(),
+            radius,
+            age: 0.0,
+            acc: 0.0,
+            colours: Default::default(),
+            uv: vec![],
+            idx: vec![],
+            sound_distance: 0.0,
+            mesh: None,
+            model: String::new(),
+            route: MeteorEmitter { group: String::new(), next: 0, forward: true, started: false },
+            origin: Vec3::ZERO,
+        }
+    }
 }
 
 /// Linear over the keys, repeating with the last key's time (the effect's colour loops start 0, end = last key).
@@ -468,6 +501,7 @@ fn spawn_one(commands: &mut Commands, assets: &AssetServer, effect: &str, mesh_n
         Scenario,
         Cloud {
             sim: Sim::new(&base, shift_params(&chunk["MeshChunk"]), seed),
+            effect: effect.to_string(),
             radius,
             age: 0.0,
             acc: 0.0,
