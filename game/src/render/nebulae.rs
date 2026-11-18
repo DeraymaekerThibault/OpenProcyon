@@ -197,8 +197,10 @@ pub struct VolumeUniform {
     pub sun: Vec4,
     /// rgb: the sun's colour, w: share of the gas kept with the camera inside
     pub sun_color: Vec4,
-    /// xyz: where the last bolt struck, w: how much of its light is left
+    /// xyz: one end of the last bolt, w: how much of its light is left
     pub flash: Vec4,
+    /// xyz: its other end
+    pub flash_to: Vec4,
     /// x: clock, y: a bolt's reach (world units), z: a bolt's brightness, w: the mission's fadeout factor
     pub params: Vec4,
 }
@@ -272,7 +274,8 @@ impl Rule {
             tint: cloud.colour().extend(self.light_steps),
             sun: sun.toward.normalize_or(Vec3::Y).extend(self.sun),
             sun_color: colour.extend(self.inside),
-            flash: bolt.at.extend(bolt.left * bolt.left),
+            flash: bolt.from.extend(bolt.left * bolt.left),
+            flash_to: bolt.to.extend(0.0),
             params: Vec4::new(clock, self.flash_reach * radius, self.flash, cloud.fade()),
         }
     }
@@ -367,13 +370,16 @@ pub struct Volumetric;
 #[derive(Resource, Default)]
 struct Bolt {
     at: Vec3,
+    /// The bolt's segment (both ends equal for sheet lightning, a point of light).
+    from: Vec3,
+    to: Vec3,
     left: f32,
 }
 
 fn bolts(time: Res<Time<Real>>, mut flashes: MessageReader<StormFlash>, mut bolt: ResMut<Bolt>) {
     bolt.left = (bolt.left - time.delta_secs() / FLASH_SECONDS).max(0.0);
     for f in flashes.read() {
-        *bolt = Bolt { at: f.at, left: 1.0 };
+        *bolt = Bolt { at: f.at, from: f.from, to: f.to, left: 1.0 };
     }
 }
 
@@ -466,7 +472,7 @@ mod tests {
     #[test]
     fn the_uniform_carries_the_boxes_axes_and_a_fading_bolt() {
         let rule = &parse(&json!({"rules": [{"match": "n", "steps": 20}]})).unwrap().rules[0];
-        let bolt = Bolt { at: Vec3::new(1.0, 2.0, 3.0), left: 0.5 };
+        let bolt = Bolt { at: Vec3::new(1.0, 2.0, 3.0), left: 0.5, ..default() };
         let u = rule.uniform(Vec3::new(10.0, 0.0, 0.0), 300.0, 4.0, &bolt);
         assert_eq!((u.centre, u.axes), (Vec4::new(10.0, 0.0, 0.0, 300.0), Vec4::new(1.0, 0.7, 0.99, 20.0)));
         assert_eq!(u.flash, Vec4::new(1.0, 2.0, 3.0, 0.25));
@@ -588,9 +594,10 @@ mod tests {
         let rule = &parse(&json!({"rules": [{"match": "n", "steps": 12, "max_opacity": 0.5, "sun": 2}]})).unwrap().rules[0];
         let cloud = Cloud::for_tests("Nebula", 200.0);
         let sun = SunLight { toward: Vec3::new(0.0, 3.0, 0.0), color: Vec3::new(2.0, 1.0, 1.0) };
-        let u = rule.volume(&cloud, Vec3::new(1.0, 2.0, 3.0), 5.0, &Bolt { at: Vec3::X, left: 0.5 }, sun);
+        let u = rule.volume(&cloud, Vec3::new(1.0, 2.0, 3.0), 5.0, &Bolt { at: Vec3::X, from: Vec3::X, to: Vec3::X * 3.0, left: 0.5 }, sun);
         assert_eq!(u.axes, (AXES * cloud.breath()).extend(12.0));
         assert_eq!((u.sun, u.sun_color.truncate()), (Vec4::new(0.0, 1.0, 0.0, 2.0), Vec3::new(1.0, 0.5, 0.5)), "a unit direction and a colour normalised to its brightest channel");
         assert_eq!((u.low.w, u.flash.w, u.params.x, u.params.w), (0.5, 0.25, 5.0, 1.0));
+        assert_eq!((u.flash.truncate(), u.flash_to.truncate()), (Vec3::X, Vec3::X * 3.0), "the volume is lit along the whole bolt");
     }
 }

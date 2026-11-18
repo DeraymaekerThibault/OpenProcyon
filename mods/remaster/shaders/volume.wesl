@@ -6,7 +6,7 @@
 // Dense gas then hides what is behind it, thin gas glows, dust lanes stay dark. The march ends at the scene's depth (the depth
 // prepass), so gas lies in front of a ship only by its real distance. The gas is lit by the sun with a cheap self-shadow (a few
 // steps toward the sun), coloured between a thin and a dense colour and tinted by the retail colour loop; a bolt of storm lightning
-// lights it from inside for a moment.
+// lights it from inside for a moment, along its whole length.
 import bevy_pbr::render::{
     forward_io::{VertexOutput, FragmentOutput},
     mesh_view_bindings::view,
@@ -30,8 +30,10 @@ struct Volume {
     sun: vec4<f32>,
     // rgb: sun colour, w: share of the gas kept with the camera inside
     sun_color: vec4<f32>,
-    // xyz: the last bolt, w: what is left of its light
+    // xyz: one end of the last bolt, w: what is left of its light
     flash: vec4<f32>,
+    // xyz: its other end
+    flash_to: vec4<f32>,
     // x: clock, y: a bolt's reach (world units), z: a bolt's brightness, w: the mission's fadeout factor
     params: vec4<f32>,
 }
@@ -153,7 +155,9 @@ fn fragment(in: VertexOutput) -> FragmentOutput {
             let lit = 0.3 + vol.sun.w * vol.sun_color.rgb * shade * phase;
             var emitted = base * vol.tint.rgb * lit * vol.look.x;
             // a bolt lights the gas around it from inside
-            let fd = length(x - vol.flash.xyz) / max(vol.params.y, 1.0);
+            let ab = vol.flash_to.xyz - vol.flash.xyz;
+            let along = clamp(dot(x - vol.flash.xyz, ab) / max(dot(ab, ab), 0.001), 0.0, 1.0);
+            let fd = length(x - (vol.flash.xyz + ab * along)) / max(vol.params.y, 1.0);
             emitted += vol.params.z * vol.flash.w * exp(-fd * fd * 2.5) * vec3<f32>(0.7, 0.85, 1.0);
             let tau = dens * sigma * dt * share;
             let step_light = 1.0 - exp(-tau);

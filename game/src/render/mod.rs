@@ -31,6 +31,7 @@ use bevy::render::view::{ColorGrading, ColorGradingGlobal, ColorGradingSection};
 use serde_json::Value;
 
 pub(crate) mod batch;
+mod bolts;
 mod bursts;
 mod currents;
 mod holes;
@@ -88,6 +89,8 @@ pub struct Look {
     pub black_holes: Option<holes::BlackHoles>,
     /// Nebula clouds and solar storms drawn as glowing, churning gas inside the retail shell (`shaders/nebula.wesl`).
     pub nebulae: Option<nebulae::Nebulae>,
+    /// The bolts of storm lightning drawn as jagged, branching ribbons (`nebulae.bolt`, `shaders/bolt.wesl`); none = the retail sprite only.
+    pub bolts: Option<bolts::Bolts>,
     /// Etherium currents drawn as flowing streaks and sparkles (`shaders/current.wesl`).
     pub currents: Option<currents::Currents>,
     /// Darkened screen corners (Bevy `Vignette` intensity; 0 = none).
@@ -159,6 +162,7 @@ impl Look {
             materials: rules::parse(&v["materials"]),
             black_holes: holes::parse(&v["black_holes"]),
             nebulae: nebulae::parse(&v["nebulae"]),
+            bolts: bolts::parse(&v["nebulae"]["bolt"]),
             currents: currents::parse(&v["currents"]),
             vignette: num(&cam["vignette"], 0.0),
             aberration: num(&cam["aberration"], 0.0),
@@ -208,6 +212,9 @@ impl Look {
         if self.nebulae.is_some() && !has_shader(root, "nebulae", nebulae::SHADER) {
             self.nebulae = None;
         }
+        if self.bolts.is_some() && !has_shader(root, "nebulae.bolt", bolts::SHADER) {
+            self.bolts = None;
+        }
         if let Some(n) = self.nebulae.as_mut()
             && n.rules.iter().any(|r| r.replace)
             && !has_shader(root, "nebulae", nebulae::VOLUME_SHADER)
@@ -244,6 +251,7 @@ pub fn plugin(app: &mut App) {
     holes::plugin(app, &look);
     replace::plugin(app, &look);
     nebulae::plugin(app, &look);
+    bolts::plugin(app, &look);
     currents::plugin(app, &look);
     app.insert_resource(look.flags).insert_resource(look).add_systems(Update, (camera, sun, sky_light));
 }
@@ -368,6 +376,7 @@ mod tests {
                 && look.materials.is_none()
                 && look.black_holes.is_none()
                 && look.nebulae.is_none()
+                && look.bolts.is_none()
                 && look.currents.is_none()
         );
         assert_eq!((look.vignette, look.aberration_pulse, look.contact_shadows, look.sun_color, look.sun_intensity), (0.0, 0.0, false, Vec3::ONE, 1.0));

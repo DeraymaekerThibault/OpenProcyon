@@ -14,7 +14,7 @@ use crate::fx::{EffectStarted, FxLib, HiddenFx};
 /// Whether an effect (by its file name) is drawn by the profile instead, given the profile.
 pub fn replaced(look: &Look, effect: &str) -> bool {
     (look.black_holes.as_ref().is_some_and(|b| b.replace) && effect.starts_with("BlackHoleRibbons_"))
-        || (effect == "Lightning" && look.nebulae.as_ref().is_some_and(|n| n.replaces_storms()))
+        || (effect == "Lightning" && look.bolts.is_some() && look.nebulae.as_ref().is_some_and(|n| n.replaces_storms()))
 }
 
 pub fn plugin(app: &mut App, look: &Look) {
@@ -51,10 +51,13 @@ mod tests {
     fn only_replacing_blocks_hide_their_own_effects() {
         let classic = Look::parse(&json!({}));
         let holes = Look::parse(&json!({"black_holes": {"replace": true}}));
-        let storms = Look::parse(&json!({"nebulae": {"rules": [{"match": "SolarStorm", "replace": true}]}}));
+        let storms = Look::parse(&json!({"nebulae": {"bolt": {}, "rules": [{"match": "SolarStorm", "replace": true}]}}));
+        let boltless = Look::parse(&json!({"nebulae": {"rules": [{"match": "SolarStorm", "replace": true}]}}));
         let clouds = Look::parse(&json!({"nebulae": {"replace": true, "rules": [{"match": "Nebula"}]}}));
         let stacked = Look::parse(&json!({"black_holes": {}, "nebulae": {"rules": [{"match": "SolarStorm"}]}}));
-        for (look, ribbons, bolt) in [(&classic, false, false), (&holes, true, false), (&storms, false, true), (&clouds, false, false), (&stacked, false, false)] {
+        for (look, ribbons, bolt) in
+            [(&classic, false, false), (&holes, true, false), (&storms, false, true), (&boltless, false, false), (&clouds, false, false), (&stacked, false, false)]
+        {
             assert_eq!(replaced(look, "BlackHoleRibbons_Large"), ribbons);
             assert_eq!(replaced(look, "Lightning"), bolt);
             assert!(!replaced(look, "Explosion_Light") && !replaced(look, "MeteorStorm"), "nothing else is hidden");

@@ -154,11 +154,17 @@ fn shift_params(chunk: &Value) -> Shift {
     }
 }
 
-/// A bolt of storm lightning struck, or sheet lightning flickered, at this world position. Presentation input only (data, no
-/// reader in the simulation): the render profile lights the sky and the cloud with it.
+/// A bolt of storm lightning, or sheet lightning flickering, at this world position. Presentation input only (data, no reader in the
+/// simulation): the render profile lights the sky and the cloud with it and draws the bolt along its segment.
 #[derive(Message, Clone, Copy, Debug, PartialEq)]
 pub struct StormFlash {
+    /// Where it struck (a ship's hull), else the middle of the bolt or, for sheet lightning, the storm's centre.
     pub at: Vec3,
+    /// The bolt's segment, storm-wide and random (`storms()`); equal ends (sheet lightning) mean no bolt to draw.
+    pub from: Vec3,
+    pub to: Vec3,
+    /// The bolt struck a ship (PROVISIONAL: a bolt that finds none is announced too, so the render profile can draw it).
+    pub hit: bool,
 }
 
 /// A rule's route for the nebula group of this name (rules.rs writes these once per mission setup).
@@ -413,11 +419,13 @@ fn storms(
                         let at = a.lerp(b, t);
                         strike.write(crate::combat::Strike { victim, damage: damage.0["lightning"].clone(), section });
                         sfx.write(crate::audio::Sfx { name: format!("Solar_Storm_Lightning_ShipImpact0{}", 1 + (rnd() * 6.0) as u32), at: Some(at), vol: 1.0, max: 800.0 });
-                        flashes.write(StormFlash { at });
+                        flashes.write(StormFlash { at, from: a, to: b, hit: true });
                         if let Some(fxl) = fxl.as_deref() {
                             let tf = Transform::from_translation(at);
                             fx::spawn(&mut commands, fxl, "Lightning", None, tf, tf, true);
                         }
+                    } else {
+                        flashes.write(StormFlash { at: a.lerp(b, 0.5), from: a, to: b, hit: false });
                     }
                 }
             }
@@ -429,7 +437,7 @@ fn storms(
             let r = rnd();
             if r < dt * 0.4 {
                 sfx.write(crate::audio::Sfx { name: format!("Solar_Storm_Lightning0{}", 1 + (rnd() * 8.0) as u32 % 8), at: Some(c), vol: 0.8, max: 1500.0 });
-                flashes.write(StormFlash { at: c });
+                flashes.write(StormFlash { at: c, from: c, to: c, hit: false });
             }
         }
     }
@@ -737,6 +745,37 @@ mod tests {
         assert_eq!(depth_factor(700.0, 500.0), 1.0);
         assert_eq!(depth_factor(10.0, 0.0), 1.0);
     }
+    #[test]
+    #[ignore = "needs imported assets"]
+    fn a_bolt_that_finds_no_ship_is_announced_with_its_segment_and_changes_nothing_else() {
+        let lib = crate::combat::Library::load(assets_dir());
+        let mut app = App::new();
+        app.insert_resource(lib)
+            .init_resource::<Time>()
+            .init_resource::<StormShift>()
+            .insert_resource(WeatherDamage(serde_json::from_value(crate::data::read_json(&assets_dir().join("data/nebula.json"))).unwrap()))
+            .insert_resource(Storms(serde_json::json!([{
+                "name":"test storm", "polygon":[[-1000.0,-1000.0],[1000.0,-1000.0],[1000.0,1000.0],[-1000.0,1000.0]],
+                "storm":{"lightning":true,"lightning_recharge":3.0,"winds":false,"points":[{"pos":[0.0,0.0,0.0],"magnitude":1000.0}]},
+                "meteors":{"on":false}
+            }])))
+            .add_message::<crate::combat::Strike>()
+            .add_message::<crate::audio::Sfx>()
+            .add_message::<StormFlash>()
+            .add_systems(Update, storms);
+        let mut bolts = vec![];
+        for _ in 0..300 {
+            app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs_f32(0.1));
+            app.update();
+            bolts.extend(app.world_mut().resource_mut::<Messages<StormFlash>>().drain());
+        }
+        let bolts: Vec<_> = bolts.into_iter().filter(|f| f.from != f.to).collect();
+        assert!(!bolts.is_empty(), "thirty seconds of storm with no ship: bolts still come");
+        for f in &bolts {
+            assert!(!f.hit && f.at == f.from.lerp(f.to, 0.5) && f.from.distance(f.to) >= LIGHTNING_MIN_LENGTH, "{f:?}");
+        }
+    }
+
     #[test]
     #[ignore = "needs imported assets"]
     fn thirty_seconds_in_a_storm_does_not_guarantee_lightning_damage() {

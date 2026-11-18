@@ -217,7 +217,7 @@ fn stormflash(
     let (Some(fxl), Some(at)) = (fxl, clouds.iter().next().map(|c| c.translation())) else { return };
     let t = Transform::from_translation(at);
     crate::fx::spawn(&mut commands, &fxl, "Lightning", None, t, t, true);
-    flashes.write(crate::nebula::StormFlash { at });
+    flashes.write(crate::nebula::StormFlash { at, from: at + Vec3::new(-150.0, 120.0, -60.0), to: at + Vec3::new(150.0, -60.0, 70.0), hit: true });
 }
 
 /// `--script allstop`: the player's ship is held at All Stop from frame `--shot-frame / 2` on (open sails before, then the crew
