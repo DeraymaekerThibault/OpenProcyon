@@ -245,7 +245,9 @@ scroll offset and segment index enter the texture coordinates (the draw code was
 ## Damage mesh swap (setup, on destruction)
 A swappable damage section whose layer mesh is "<A>_<B>" gets the swap mesh "<A>Damage_<B>" (split at the first '_').
 When the section is destroyed the layer's mesh is exchanged for it. Extra Damage_ layers beyond the section count (the
-cutter has Damage_Layer7-10) are not referenced by this rule. Destruction also spawns the section's debrisMeshScene
+cutter has Damage_Layer7-10) are not referenced by this rule. A section with `swappable=0` in its WOT record keeps its mesh when
+destroyed: Station Montgomery's island (a 10 HP section named "undamagable", whose damage mesh is nearly empty), the volcano and
+pirate-asteroid rocks, lifeboats, barges and the Amelia escort. Destruction also spawns the section's debrisMeshScene
 (remake: see "Section debris").
 
 The exchange is done on the section's own mesh node (the node's alternate mesh replaces the current one); the section's children

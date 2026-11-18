@@ -426,6 +426,8 @@ def export(root, ship, outdir):
                 vital_speed=a["vitalToMaxVelocity"] == "1",
                 vital_turn=a["vitalToManeuverability"] == "1",
                 vital_mission=a.get("vitalToMission") == "1",
+                # Only a swappable section shows its "<A>Damage_<B>" mesh when destroyed (Station Montgomery's island is not).
+                swappable=a.get("swappable", "1") == "1",
                 core_pct=float(a.get("vitalSectionCoreDamagePercent", 0)),
                 # Neighbouring sections (layer names) a destroyed section passes damage on to.
                 adjacent=[x for x in a.get("adjacent", "").split("+") if x],

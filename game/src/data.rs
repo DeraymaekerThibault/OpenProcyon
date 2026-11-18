@@ -266,6 +266,8 @@ pub struct Section {
     pub speed: bool,   // vitalToMaxVelocity
     pub turn: bool,    // vitalToManeuverability
     pub mission: bool, // vitalToMission (bases: what the mission's 'Vital Section damage' rules watch)
+    /// WOT `swappable`: a destroyed section shows its "<A>Damage_<B>" mesh (and drops its guns). Station Montgomery's island is not.
+    pub swappable: bool,
     pub tris: Vec<[Vec3; 3]>,
     /// How the section breaks away when the ship is destroyed (WOT `destructFx`); None for imports that predate it.
     pub destruct: Option<Destruct>,
