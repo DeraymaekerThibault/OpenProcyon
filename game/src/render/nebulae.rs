@@ -79,6 +79,15 @@ pub struct Rule {
     pub light_steps: f32,
     /// Replacing rules only: how strongly the sun lights the gas.
     pub sun: f32,
+    /// Replacing rules only: a second hue the gas drifts into across the cloud (large patches), and how far (0..1), so a cloud
+    /// is not one flat colour.
+    pub color_alt: Vec3,
+    pub variation: f32,
+    /// Replacing rules only, for storms: how fast the gas wheels round the centre like a cyclone (turns a second near the
+    /// centre, slower outward), how bright the hot plasma filaments are, and how bright the flickers of lightning inside it.
+    pub swirl: f32,
+    pub filaments: f32,
+    pub flicker: f32,
 }
 
 pub fn parse(v: &Value) -> Option<Nebulae> {
@@ -107,6 +116,11 @@ pub fn parse(v: &Value) -> Option<Nebulae> {
                             max_opacity: num(&r["max_opacity"], 0.6).clamp(0.05, 1.0),
                             light_steps: num(&r["light_steps"], 2.0).clamp(0.0, 3.0).round(),
                             sun: num(&r["sun"], 1.0).clamp(0.0, 4.0),
+                            color_alt: rgb(&r["color_alt"]).unwrap_or(Vec3::ONE).max(Vec3::ZERO),
+                            variation: num(&r["variation"], 0.0).clamp(0.0, 1.0),
+                            swirl: num(&r["swirl"], 0.0).clamp(-1.0, 1.0),
+                            filaments: num(&r["filaments"], 0.0).clamp(0.0, 8.0),
+                            flicker: num(&r["flicker"], 0.0).clamp(0.0, 8.0),
                         })
                     })
                     .collect()
@@ -209,6 +223,10 @@ pub struct VolumeUniform {
     pub flash_to: Vec4,
     /// x: clock, y: a bolt's reach (world units), z: a bolt's brightness, w: the mission's fadeout factor
     pub params: Vec4,
+    /// x: swirl, y: filaments, z: flicker, w: hue variation
+    pub storm: Vec4,
+    /// rgb: the second hue
+    pub alt: Vec4,
 }
 
 #[derive(Asset, AsBindGroup, TypePath, Clone, Default)]
@@ -283,6 +301,8 @@ impl Rule {
             flash: bolt.from.extend(bolt.left * bolt.left),
             flash_to: bolt.to.extend(0.0),
             params: Vec4::new(clock, self.flash_reach * radius, self.flash, cloud.fade()),
+            storm: Vec4::new(self.swirl, self.filaments, self.flicker, self.variation),
+            alt: self.color_alt.extend(0.0),
         }
     }
 }

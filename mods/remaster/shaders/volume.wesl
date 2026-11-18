@@ -6,7 +6,10 @@
 // Dense gas then hides what is behind it, thin gas glows, dust lanes stay dark. The march ends at the scene's depth (the depth
 // prepass), so gas lies in front of a ship only by its real distance. The gas is lit by the sun with a cheap self-shadow (a few
 // steps toward the sun), coloured between a thin and a dense colour and tinted by the retail colour loop; a bolt of storm lightning
-// lights it from inside for a moment, along its whole length.
+// lights it from inside for a moment, along its whole length. A cloud's colour drifts into a second hue in large patches
+// (`variation`), so it is not one flat wash. A solar storm is not a quiet cloud: its gas wheels round the centre like a cyclone
+// (`swirl`, faster near the centre; two phases of the turn are blended so the gas never winds up), the edges of its billows burn
+// as hot plasma filaments (`filaments`), and lightning keeps flickering deep inside it (`flicker`).
 import bevy_pbr::render::{
     forward_io::{VertexOutput, FragmentOutput},
     mesh_view_bindings::view,
@@ -36,6 +39,10 @@ struct Volume {
     flash_to: vec4<f32>,
     // x: clock, y: a bolt's reach (world units), z: a bolt's brightness, w: the mission's fadeout factor
     params: vec4<f32>,
+    // x: swirl (turns a second near the centre), y: filaments, z: flicker, w: hue variation
+    storm: vec4<f32>,
+    // rgb: the second hue
+    alt: vec4<f32>,
 }
 
 @group(constants::MATERIAL_BIND_GROUP) @binding(100) var<uniform> vol: Volume;
@@ -58,9 +65,34 @@ fn bend(p: vec3<f32>, w: f32, t: f32) -> vec3<f32> {
     return p + vec3<f32>(w * 1.9, -w * 1.4, w * 1.7) + vec3<f32>(0.0, t * 0.5, 0.0);
 }
 
-// gas density 0..1 at a point of the cloud's unit space, `w` the warp there
+// the raw noise the gas is made of, at a point of the cloud's unit space, `w` the warp there
+fn raw(q: vec3<f32>, w: f32, t: f32) -> f32 {
+    return bake(bend(q * vol.look.y, w, t)).r;
+}
+
+// gas density 0..1
 fn gas(q: vec3<f32>, w: f32, t: f32) -> f32 {
-    return smoothstep(0.36, 0.78, bake(bend(q * vol.look.y, w, t)).r);
+    return smoothstep(0.36, 0.78, raw(q, w, t));
+}
+
+// a point turned about the cloud's vertical axis
+fn spin(q: vec3<f32>, a: f32) -> vec3<f32> {
+    let c = cos(a);
+    let s = sin(a);
+    return vec3<f32>(c * q.x - s * q.z, q.y, s * q.x + c * q.z);
+}
+
+// the gas at a point: x density, y the hot filaments on the edges of the billows, z the warp
+fn sample(q: vec3<f32>, clock: f32) -> vec3<f32> {
+    let w = warp(q * vol.look.y, clock);
+    let n = raw(q, w, clock);
+    // the filaments are finer than the billows: thin bright seams where a finer noise crosses its middle
+    var fil = 0.0;
+    if vol.storm.y > 0.0 {
+        let n2 = raw(q * 2.6 + vec3<f32>(3.3, 1.1, 5.7), w * 1.5, clock * 1.7);
+        fil = pow(max(1.0 - abs(n2 - 0.5) * 7.0, 0.0), 3.0) * smoothstep(0.3, 0.6, n);
+    }
+    return vec3<f32>(smoothstep(0.36, 0.78, n), fil, w);
 }
 
 fn edge_of(q: vec3<f32>) -> f32 {
@@ -135,8 +167,19 @@ fn fragment(in: VertexOutput) -> FragmentOutput {
         }
         // nothing pops in right at the lens
         let near = smoothstep(0.0, radius * 0.04, t);
-        let w = warp(q * vol.look.y, clock);
-        let dens = gas(q, w, clock) * edge * near;
+        // a storm wheels: the gas is sampled turned back by how far it has gone round, in two phases blended
+        var g = sample(q, clock);
+        if vol.storm.x != 0.0 {
+            let period = 8.0;
+            let pa = fract(vol.params.x / period);
+            let pb = fract(vol.params.x / period + 0.5);
+            let rate = vol.storm.x * 6.2831853 * period / (0.4 + 1.6 * length(q.xz));
+            let ga = sample(spin(q, -(pa - 0.5) * rate), clock);
+            let gb = sample(spin(q, -(pb - 0.5) * rate), clock);
+            g = mix(gb, ga, 1.0 - abs(2.0 * pa - 1.0));
+        }
+        let w = g.z;
+        let dens = g.x * edge * near;
         // dust: dark folds, extinction without light
         let dust = smoothstep(0.5, 0.85, bake(q * vol.look.y * 0.55 + vec3<f32>(5.1, clock * 0.3, 1.7)).b) * edge * near * vol.high.w;
         var tau_dust = dust * sigma * dt * 1.4;
@@ -151,7 +194,14 @@ fn fragment(in: VertexOutput) -> FragmentOutput {
                 toward += gas(qs, w, clock) * edge_of(qs);
             }
             let shade = exp(-toward * vol.look.w * 0.5);
-            let base = mix(vol.low.rgb, vol.high.rgb, smoothstep(0.35, 1.0, dens));
+            var base = mix(vol.low.rgb, vol.high.rgb, smoothstep(0.35, 1.0, dens));
+            // the second hue, in large patches
+            if vol.storm.w > 0.0 {
+                let hue = smoothstep(0.35, 0.65, bake(q * vol.look.y * 0.22 + vec3<f32>(11.0, 3.0, 7.0)).g);
+                base = mix(base, vol.alt.rgb * (0.35 + 0.9 * smoothstep(0.35, 1.0, dens)), hue * vol.storm.w);
+            }
+            // dense cores glow hotter
+            base += vol.high.rgb * 0.5 * dens * dens * dens;
             let lit = 0.3 + vol.sun.w * vol.sun_color.rgb * shade * phase;
             var emitted = base * vol.tint.rgb * lit * vol.look.x;
             // a bolt lights the gas around it from inside
@@ -159,6 +209,18 @@ fn fragment(in: VertexOutput) -> FragmentOutput {
             let along = clamp(dot(x - vol.flash.xyz, ab) / max(dot(ab, ab), 0.001), 0.0, 1.0);
             let fd = length(x - (vol.flash.xyz + ab * along)) / max(vol.params.y, 1.0);
             emitted += vol.params.z * vol.flash.w * exp(-fd * fd * 2.5) * vec3<f32>(0.7, 0.85, 1.0);
+            // hot plasma burning along the edges of the billows
+            emitted += vol.high.rgb * vec3<f32>(1.3, 1.0, 0.7) * vol.storm.y * g.y * edge;
+            // lightning flickering deep inside: patches that light up and die out a few times a second
+            if vol.storm.z > 0.0 {
+                let tf = vol.params.x * 2.3;
+                let k0 = floor(tf);
+                let at0 = bake(q * 0.9 + vec3<f32>(k0 * 3.7, k0 * 1.3, 0.0)).b;
+                let at1 = bake(q * 0.9 + vec3<f32>((k0 + 1.0) * 3.7, (k0 + 1.0) * 1.3, 0.0)).b;
+                let f = fract(tf);
+                let pulse = select(at1 * smoothstep(0.7, 1.0, f), at0 * (1.0 - smoothstep(0.0, 0.5, f)), f < 0.5);
+                emitted += vec3<f32>(0.75, 0.85, 1.0) * vol.storm.z * pow(smoothstep(0.45, 0.8, pulse), 2.0) * edge;
+            }
             let tau = dens * sigma * dt * share;
             let step_light = 1.0 - exp(-tau);
             light += tr * emitted * step_light;

@@ -12,7 +12,8 @@
 //!
 //! Only reads `blackhole::BlackHole`, `blackhole::Pull` and `blackhole::Swallowed`; nothing here changes what the hole does.
 
-use bevy::mesh::MeshVertexBufferLayoutRef;
+use bevy::asset::RenderAssetUsages;
+use bevy::mesh::{Indices, MeshVertexBufferLayoutRef, PrimitiveTopology};
 use bevy::pbr::{ExtendedMaterial, MaterialExtension, MaterialExtensionKey, MaterialExtensionPipeline};
 use bevy::prelude::*;
 use bevy::render::render_resource::{AsBindGroup, RenderPipelineDescriptor, ShaderType, SpecializedMeshPipelineError};
@@ -46,6 +47,64 @@ pub struct BlackHoles {
     pub replace: bool,
     /// With `replace`: brightness of the infall ribbons (the thin streaking strips), times `fx_gain`.
     pub ribbons: f32,
+    /// The whirlpool (`funnel.depth`): how deep under the hole's plane the funnel sinks at its throat, a share of the radius
+    /// (0 = a flat disc in the plane). The bent sky and the hole's shadow are centred down there too, so the plane the ships
+    /// sail stays unbent and the hole reads as a maelstrom to keep out of, not a sphere in the battle.
+    pub depth: f32,
+    /// The funnel's throat radius, a share of the radius.
+    pub throat: f32,
+    /// Colour of the whirlpool's outer water, faint at the pull radius (linear).
+    pub rim: Vec3,
+}
+
+/// How far down (0..1 of the depth) the whirlpool's funnel is at `share` of the pull radius: a gravity well, nearly flat at the
+/// rim and plunging toward the throat (1 / r), all the way down inside the throat. `shaders/blackhole.wesl` and `ribbon.wesl`
+/// repeat it.
+pub fn funnel_drop(share: f32, throat: f32) -> f32 {
+    if share <= throat {
+        return 1.0;
+    }
+    ((1.0 / share - 1.0) / (1.0 / throat - 1.0)).clamp(0.0, 1.0)
+}
+
+/// The whirlpool's funnel around the hole's centre, in the hole's frame (y up): rings from the pull radius in to the throat,
+/// spaced on a log scale so the steep part near the core is fine, and a cap closing the throat.
+fn funnel_mesh(radius: f32, depth: f32, throat: f32) -> Mesh {
+    const RINGS: usize = 56;
+    const SEGS: usize = 128;
+    let height = |share: f32| -depth * radius * funnel_drop(share, throat);
+    let (mut pos, mut nor, mut uv, mut idx) = (vec![], vec![], vec![], Vec::<u32>::new());
+    for i in 0..RINGS {
+        let share = throat.powf(i as f32 / (RINGS - 1) as f32);
+        let e = share * 0.01;
+        let slope = (height(share + e) - height(share - e)) / (2.0 * e * radius);
+        for j in 0..=SEGS {
+            let a = j as f32 / SEGS as f32 * std::f32::consts::TAU;
+            let (sin, cos) = a.sin_cos();
+            pos.push([radius * share * cos, height(share), radius * share * sin]);
+            nor.push(Vec3::new(-slope * cos, 1.0, -slope * sin).normalize().to_array());
+            uv.push([j as f32 / SEGS as f32, i as f32 / (RINGS - 1) as f32]);
+        }
+    }
+    for i in 0..RINGS - 1 {
+        for j in 0..SEGS {
+            let (a, b) = ((i * (SEGS + 1) + j) as u32, ((i + 1) * (SEGS + 1) + j) as u32);
+            idx.extend([a, b, a + 1, a + 1, b, b + 1]);
+        }
+    }
+    let centre = pos.len() as u32;
+    pos.push([0.0, height(0.0), 0.0]);
+    nor.push([0.0, 1.0, 0.0]);
+    uv.push([0.5, 1.0]);
+    let last = ((RINGS - 1) * (SEGS + 1)) as u32;
+    for j in 0..SEGS as u32 {
+        idx.extend([last + j, centre, last + j + 1]);
+    }
+    Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default())
+        .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, pos)
+        .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, nor)
+        .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, uv)
+        .with_inserted_indices(Indices::U32(idx))
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -79,6 +138,9 @@ pub fn parse(v: &Value) -> Option<BlackHoles> {
             drop: num(&v["drop"], 0.02).clamp(0.0, 0.5),
             replace: v["replace"].as_bool().unwrap_or(false),
             ribbons: num(&v["ribbons"], 1.0).clamp(0.0, 8.0),
+            depth: num(&v["funnel"]["depth"], 0.0).clamp(0.0, 3.0),
+            throat: num(&v["funnel"]["throat"], 0.06).clamp(0.01, 0.5),
+            rim: rgb(&v["funnel"]["rim"]).unwrap_or(Vec3::new(0.3, 0.18, 0.65)).max(Vec3::ZERO),
         }
     })
 }
@@ -96,6 +158,10 @@ pub struct HoleUniform {
     pub color: Vec4,
     /// x: clock (battle seconds), y: swallow flash 0..1, z: glow
     pub params: Vec4,
+    /// x: the funnel's depth, y: its throat radius, z: how far under the plane its rim lies (world units; x = 0: flat)
+    pub funnel: Vec4,
+    /// rgb: the outer water's colour
+    pub rim: Vec4,
 }
 
 #[derive(Asset, AsBindGroup, TypePath, Clone, Default)]
@@ -150,7 +216,23 @@ impl BlackHoles {
             disc: Vec4::new(self.disc.inner * r, self.disc.outer * r, self.disc.spin, self.disc.brightness),
             color: self.disc.color.extend(0.0),
             params: Vec4::new(clock, flash, self.glow, 0.0),
+            funnel: Vec4::new(self.depth * r, self.throat * r, self.drop * r, 0.0),
+            rim: self.rim.extend(0.0),
         }
+    }
+
+    /// Where the hole's bent sky and shadow are centred: down at the bottom of the whirlpool's throat (the hole itself when flat).
+    pub fn singularity(&self, centre: Vec3, pull: &Pull) -> Vec3 {
+        if self.depth <= 0.0 {
+            return centre;
+        }
+        centre - Vec3::Y * ((self.depth + self.drop) * pull.radius)
+    }
+
+    /// The radius of the hole's round shadow and of the bending around it: the kill core for a flat hole, the throat for a
+    /// whirlpool (whose throat is already black, so the shadow is only the point everything falls toward).
+    pub fn shadow_core(&self, pull: &Pull) -> f32 {
+        if self.depth > 0.0 { self.throat * pull.radius } else { pull.core() }
     }
 }
 
@@ -161,7 +243,7 @@ pub const RIBBON_SHADER: &str = "shaders/ribbon.wesl";
 pub struct RibbonUniform {
     /// xyz: the hole's centre (world), w: the pull radius
     pub centre: Vec4,
-    /// x: the kill core's radius, y: brightness
+    /// x: the kill core's radius, y: brightness, z: the whirlpool's depth, w: its throat radius (world units)
     pub shape: Vec4,
     /// rgb: the cooler colour
     pub color: Vec4,
@@ -177,6 +259,10 @@ pub struct RibbonGlow {
 
 impl MaterialExtension for RibbonGlow {
     fn fragment_shader() -> ShaderRef {
+        RIBBON_SHADER.into()
+    }
+    // the strips sink along the whirlpool's funnel
+    fn vertex_shader() -> ShaderRef {
         RIBBON_SHADER.into()
     }
     fn specialize(
@@ -200,7 +286,7 @@ impl BlackHoles {
     fn ribbon(&self, centre: Vec3, pull: &Pull, gain: f32, clock: f32) -> RibbonUniform {
         RibbonUniform {
             centre: centre.extend(pull.radius),
-            shape: Vec4::new(pull.core(), self.ribbons * gain, 0.0, 0.0),
+            shape: Vec4::new(pull.core(), self.ribbons * gain, self.depth * pull.radius, self.throat * pull.radius),
             color: Vec3::new(1.0, 0.38, 0.12).extend(0.0),
             params: Vec4::new(clock, 0.0, 0.0, 0.0),
         }
@@ -251,14 +337,13 @@ fn spawn_discs(
     for (e, pull, at) in &holes {
         let base = StandardMaterial { unlit: true, cull_mode: None, double_sided: true, alpha_mode: AlphaMode::Premultiplied, ..default() };
         let material = materials.add(HoleMaterial { base, extension: HoleGlow { u: b.uniform(at.translation(), pull, time.elapsed_secs(), 0.0) } });
-        let flat = Transform::from_xyz(0.0, -b.drop * pull.radius, 0.0).with_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2));
-        commands.entity(e).insert(HoleLook).with_child((
-            HoleDisc { flash: 0.0 },
-            Mesh3d(meshes.add(Circle::new(pull.radius).mesh().resolution(64))),
-            MeshMaterial3d(material),
-            flat,
-            bevy::light::NotShadowCaster,
-        ));
+        let (mesh, tf) = if b.depth > 0.0 {
+            (funnel_mesh(pull.radius, b.depth, b.throat), Transform::from_xyz(0.0, -b.drop * pull.radius, 0.0))
+        } else {
+            let flat = Transform::from_xyz(0.0, -b.drop * pull.radius, 0.0).with_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2));
+            (Circle::new(pull.radius).mesh().resolution(64).build(), flat)
+        };
+        commands.entity(e).insert(HoleLook).with_child((HoleDisc { flash: 0.0 }, Mesh3d(meshes.add(mesh)), MeshMaterial3d(material), tf, bevy::light::NotShadowCaster));
     }
 }
 
@@ -401,6 +486,30 @@ mod tests {
         app.update();
         let flash = app.world_mut().query::<(&ChildOf, &HoleDisc)>().iter(app.world()).find(|(p, _)| p.parent() == hole).map(|(_, d)| d.flash).unwrap();
         assert!(flash > 0.9, "{flash}");
+    }
+
+    #[test]
+    fn the_whirlpool_is_flat_at_the_rim_and_all_the_way_down_in_the_throat() {
+        assert_eq!(funnel_drop(1.0, 0.06), 0.0);
+        assert_eq!(funnel_drop(0.06, 0.06), 1.0);
+        assert_eq!(funnel_drop(0.01, 0.06), 1.0);
+        let (outer, core) = (funnel_drop(0.6, 0.06), funnel_drop(0.25, 0.06));
+        assert!(outer < 0.05 && core > 3.0 * outer && core < 0.5, "nearly flat out where ships sail, plunging only near the core: {outer} {core}");
+        let m = funnel_mesh(100.0, 1.2, 0.06);
+        let Some(bevy::mesh::VertexAttributeValues::Float32x3(p)) = m.attribute(Mesh::ATTRIBUTE_POSITION) else { panic!() };
+        assert!(p.iter().all(|q| q[1] <= 0.0 && q[1] >= -120.0 - 1e-3), "never above the plane, never below the throat");
+        assert!(p.iter().map(|q| q[0].hypot(q[2])).fold(0.0, f32::max) <= 100.0 + 1e-3);
+    }
+
+    #[test]
+    fn the_sky_bends_around_the_bottom_of_the_throat_and_flat_holes_stay_in_the_plane() {
+        let pull = Pull::for_terrain("Terrain_BlackHole_Med").unwrap();
+        let at = Vec3::new(10.0, 0.0, 20.0);
+        assert_eq!(parse(&json!({"drop": 0.0})).unwrap().singularity(at, &pull), at);
+        let deep = parse(&json!({"drop": 0.0, "funnel": {"depth": 1.0}})).unwrap().singularity(at, &pull);
+        assert_eq!(deep, at - Vec3::Y * pull.radius);
+        assert_eq!(parse(&json!({})).unwrap().shadow_core(&pull), pull.core());
+        assert!(parse(&json!({"funnel": {"depth": 1.0}})).unwrap().shadow_core(&pull) < pull.core() * 0.5);
     }
 
     #[test]

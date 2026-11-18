@@ -109,6 +109,9 @@ pub struct Flash {
     pub color: Vec3,
     pub strength: f32,
     pub seconds: f32,
+    /// Distance (world units) from the camera at which a flash lights the gas at half strength; a storm far off barely
+    /// flickers (0 = no falloff).
+    pub reach: f32,
 }
 
 /// An explosion that warms the near gas on its side.
@@ -200,6 +203,7 @@ pub fn parse(v: &Value) -> Option<SkyDome> {
             color: rgb(&v["flash"]["color"]).unwrap_or(Vec3::new(0.65, 0.78, 1.0)).max(Vec3::ZERO),
             strength: num(&v["flash"]["strength"], 1.5).max(0.0),
             seconds: num(&v["flash"]["seconds"], 0.4).max(0.05),
+            reach: num(&v["flash"]["reach"], 1200.0).max(0.0),
         },
         events: v["events"]
             .as_array()
@@ -327,20 +331,23 @@ struct Pulse {
     /// 1 at the start, 0 when gone.
     left: f32,
     seconds: f32,
+    /// Half strength this far from the camera (0 = the same at any distance).
+    reach: f32,
 }
 
 impl Pulse {
-    fn set(&mut self, at: Vec3, color: Vec3, seconds: f32) {
-        *self = Pulse { at, color, left: 1.0, seconds };
+    fn set(&mut self, at: Vec3, color: Vec3, seconds: f32, reach: f32) {
+        *self = Pulse { at, color, left: 1.0, seconds, reach };
     }
     fn step(&mut self, delta: f32) {
         if self.left > 0.0 {
             self.left = (self.left - delta / self.seconds.max(0.01)).max(0.0);
         }
     }
-    /// The colour times the quadratic fade, and the direction from `eye`.
+    /// The colour times the quadratic fade and the falloff with distance, and the direction from `eye`.
     fn uniform(&self, eye: Vec3) -> (Vec4, Vec4) {
-        let k = self.left * self.left;
+        let far = if self.reach > 0.0 { 1.0 / (1.0 + (self.at.distance(eye) / self.reach).powi(2)) } else { 1.0 };
+        let k = self.left * self.left * far;
         ((self.color * k).extend(0.0), (self.at - eye).normalize_or_zero().extend(0.0))
     }
 }
@@ -423,13 +430,13 @@ fn sky_events(
     events.flash.step(time.delta_secs());
     events.warm.step(time.delta_secs());
     for f in flashes.read() {
-        events.flash.set(f.at, sky.flash.color * sky.flash.strength, sky.flash.seconds);
+        events.flash.set(f.at, sky.flash.color * sky.flash.strength, sky.flash.seconds, sky.flash.reach);
     }
     let Some(lib) = lib else { return };
     let table = table.get_or_insert_with(|| lib.names().filter_map(|(n, i)| Some((i, sky.events.iter().find(|e| n.contains(&e.effect))?.clone()))).collect());
     for m in started.read() {
         if let Some(e) = table.get(&m.effect) {
-            events.warm.set(m.at, e.color * e.strength, e.seconds);
+            events.warm.set(m.at, e.color * e.strength, e.seconds, 0.0);
         }
     }
 }
@@ -457,7 +464,10 @@ fn dome(
     let (warm, warm_dir) = events.warm.uniform(eye);
     // black holes bend the whole sky behind them here, clouds and stars with it, and always behind the ships (render/holes.rs draws the disc)
     let lensing = look.black_holes.as_ref().map_or(0.0, |b| b.lensing);
-    let (lens, hole_at, hole_reach) = lens_uniform(holes.iter().map(|(g, p)| (g.translation(), p.core(), p.radius)), lensing);
+    // centred at the bottom of the whirlpool's throat, under the plane the ships sail
+    let at = |g: &GlobalTransform, p: &crate::blackhole::Pull| look.black_holes.as_ref().map_or(g.translation(), |b| b.singularity(g.translation(), p));
+    let core = |p: &crate::blackhole::Pull| look.black_holes.as_ref().map_or(p.core(), |b| b.shadow_core(p));
+    let (lens, hole_at, hole_reach) = lens_uniform(holes.iter().map(|(g, p)| (at(g, p), core(p), p.radius)), lensing);
     for (_, mat, cfg) in &domes {
         if let Some(mut m) = materials.get_mut(&mat.0) {
             m.extension.u =
@@ -571,7 +581,7 @@ mod tests {
     #[test]
     fn a_flash_fades_to_nothing() {
         let mut p = Pulse::default();
-        p.set(Vec3::X * 100.0, Vec3::ONE, 0.4);
+        p.set(Vec3::X * 100.0, Vec3::ONE, 0.4, 0.0);
         assert_eq!(p.uniform(Vec3::ZERO).0, Vec4::new(1.0, 1.0, 1.0, 0.0));
         assert_eq!(p.uniform(Vec3::ZERO).1.truncate(), Vec3::X);
         for _ in 0..10 {
@@ -579,6 +589,15 @@ mod tests {
         }
         assert_eq!(p.left, 0.0);
         assert_eq!(p.uniform(Vec3::ZERO).0, Vec4::ZERO);
+    }
+
+    #[test]
+    fn a_far_storm_barely_flashes() {
+        let mut p = Pulse::default();
+        p.set(Vec3::X * 1000.0, Vec3::ONE, 0.4, 1000.0);
+        assert_eq!(p.uniform(Vec3::ZERO).0.x, 0.5, "half at the reach");
+        assert!(p.uniform(Vec3::X * 990.0).0.x > 0.99, "full beside it");
+        assert!(p.uniform(Vec3::NEG_X * 4000.0).0.x < 0.05, "a storm across the map barely flickers");
     }
 
     #[test]
