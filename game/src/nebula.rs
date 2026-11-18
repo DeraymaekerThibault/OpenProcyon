@@ -452,6 +452,8 @@ pub struct Cloud {
     /// The nebula's group (its setup name): clouds travel that group's route like the meteor emitters ('nebula ride').
     route: MeteorEmitter,
     origin: Vec3,
+    /// 'Set Nebula Fadeout Distance' factor of the last frame (1 = not faded).
+    fade: f32,
 }
 
 impl Cloud {
@@ -462,6 +464,18 @@ impl Cloud {
     /// Seconds the cloud's sim has run (its colour loop's clock). Read-only, for tests and the render profile.
     pub fn age(&self) -> f32 {
         self.age
+    }
+    /// The shell's mean vertex scale (1 = the mesh as authored): how far the cloud has swollen or shrunk. Read-only, for the render profile.
+    pub fn breath(&self) -> f32 {
+        if self.sim.v.is_empty() { 1.0 } else { self.sim.v.iter().map(|v| v.scale).sum::<f32>() / self.sim.v.len() as f32 }
+    }
+    /// The retail colour loop at the cloud's age, rgb (1 = the texture's own colour). Read-only, for the render profile.
+    pub fn colour(&self) -> Vec3 {
+        Vec3::from([0, 1, 2].map(|i| looped(&self.colours[i], self.age)))
+    }
+    /// How much of the cloud the mission's fadeout distance leaves (1 = all). Read-only, for the render profile.
+    pub fn fade(&self) -> f32 {
+        self.fade
     }
     /// The cloud's radius (the point set's magnitude), world units.
     pub fn radius(&self) -> f32 {
@@ -485,6 +499,7 @@ impl Cloud {
             model: String::new(),
             route: MeteorEmitter { group: String::new(), next: 0, forward: true, started: false },
             origin: Vec3::ZERO,
+            fade: 1.0,
         }
     }
 }
@@ -517,6 +532,7 @@ fn spawn_one(commands: &mut Commands, assets: &AssetServer, effect: &str, mesh_n
             model: crate::data::model(&format!("{mesh_name}.glb")),
             route: MeteorEmitter { group: group.into(), next: 0, forward: true, started: false },
             origin: pos,
+            fade: 1.0,
         },
         Transform::from_translation(pos),
         Visibility::default(),
@@ -650,6 +666,7 @@ fn update(
         let centre = gt.translation();
         // 'Set Nebula Fadeout Distance': clouds fade out over that distance beyond it (PROVISIONAL linear ramp).
         let fade = mission.as_ref().and_then(|m| m.script.nebula_fade).map_or(1.0, |d| (1.0 - ((cam.distance(centre) - c.radius) - d) / d.max(1.0)).clamp(0.0, 1.0));
+        c.fade = fade;
         let rgb = [0, 1, 2].map(|i| looped(&c.colours[i], c.age) * fade);
         let (mut pos, mut uv, mut col) = (vec![], vec![], vec![]);
         for i in 0..c.sim.v.len() {

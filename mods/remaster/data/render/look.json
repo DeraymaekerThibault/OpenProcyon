@@ -53,7 +53,7 @@
   "nebulae": {
     "rules": [
       {"match": "SolarStorm", "density": 1.6, "steps": 16, "scale": 2.8, "churn": 0.06, "color_low": [0.5, 0.12, 0.04], "color_high": [1.0, 0.7, 0.25], "shell": 0.3, "inside": 0.4, "flash": 6.0, "flash_reach": 0.5},
-      {"match": "Nebula", "density": 1.0, "steps": 16, "scale": 2.2, "churn": 0.02, "color_low": [0.25, 0.1, 0.5], "color_high": [1.0, 0.8, 1.0], "shell": 0.3, "inside": 0.4, "flash": 3.0, "flash_reach": 0.5}
+      {"match": "Nebula", "replace": true, "density": 1.1, "absorption": 3.0, "dust": 0.8, "max_opacity": 0.6, "steps": 20, "light_steps": 2, "sun": 1.0, "scale": 2.2, "churn": 0.02, "color_low": [0.22, 0.1, 0.5], "color_high": [1.0, 0.75, 1.0], "inside": 0.5, "flash": 3.0, "flash_reach": 0.5}
     ]
   },
   "currents": {"brightness": 0.85, "streaks": 10, "sparkle": 1.0, "core": 1.2, "texture": 0.3, "color": [0.45, 0.8, 1.0], "pulse": 0.7},

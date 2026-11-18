@@ -44,6 +44,7 @@ mod sky;
 mod surfaces;
 mod tracers;
 mod trails;
+mod volnoise;
 
 /// The render profile's asset path.
 pub const PROFILE: &str = "data/render/look.json";
@@ -207,6 +208,12 @@ impl Look {
         if self.nebulae.is_some() && !has_shader(root, "nebulae", nebulae::SHADER) {
             self.nebulae = None;
         }
+        if let Some(n) = self.nebulae.as_mut()
+            && n.rules.iter().any(|r| r.replace)
+            && !has_shader(root, "nebulae", nebulae::VOLUME_SHADER)
+        {
+            n.rules.iter_mut().for_each(|r| r.replace = false);
+        }
         self.materials = self.materials.and_then(|m| m.with_shaders(root));
         self
     }
@@ -274,6 +281,10 @@ fn camera(mut commands: Commands, look: Res<Look>, cams: Query<Entity, (With<Cam
         }
         if look.contact_shadows {
             e.insert(bevy::pbr::ContactShadows::default());
+        }
+        // the volumes of replaced clouds end their rays at the scene's depth
+        if look.nebulae.as_ref().is_some_and(|n| n.rules.iter().any(|r| r.replace)) {
+            e.insert(bevy::core_pipeline::prepass::DepthPrepass);
         }
     }
 }
@@ -408,6 +419,19 @@ mod tests {
         assert!(look.sails.is_some() && look.engines.is_none() && look.wakes.is_none(), "only the block whose shader is there");
         assert!(look.tracers.is_none() && look.surfaces.is_none() && look.bursts.is_none());
         assert_eq!(look.fx_gain, 2.0, "blocks without shaders are unaffected");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn replacing_needs_the_volume_shader_or_the_retail_cloud_stays() {
+        let root = std::env::temp_dir().join(format!("procyon-render-volume-{}", std::process::id()));
+        std::fs::create_dir_all(root.join("shaders")).unwrap();
+        std::fs::write(root.join(nebulae::SHADER), "").unwrap();
+        let profile = serde_json::json!({"nebulae": {"replace": true, "rules": [{"match": "Nebula"}]}});
+        let look = Look::parse(&profile).with_shaders(&root);
+        assert!(!look.nebulae.as_ref().unwrap().rules[0].replace, "no volume shader: the retail shell keeps drawing");
+        std::fs::write(root.join(nebulae::VOLUME_SHADER), "").unwrap();
+        assert!(Look::parse(&profile).with_shaders(&root).nebulae.unwrap().rules[0].replace);
         std::fs::remove_dir_all(root).unwrap();
     }
 }
