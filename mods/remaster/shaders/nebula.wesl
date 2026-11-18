@@ -53,7 +53,7 @@ fn gas(q: vec3<f32>, t: f32) -> f32 {
     let w = vec3<f32>(noise3(p * 0.8 + vec3<f32>(t * 0.9, 0.0, 3.1)), noise3(p * 0.8 + vec3<f32>(7.7, t * 1.1, 0.0)), noise3(p * 0.8 + vec3<f32>(0.0, 5.3, t * 0.8))) - vec3<f32>(0.5);
     let r = p + w * 1.8 + vec3<f32>(0.0, t * 0.5, 0.0);
     let n = 0.58 * noise3(r) + 0.3 * noise3(r * 2.1 + vec3<f32>(3.3, 1.7, 9.1)) + 0.12 * noise3(r * 4.3 + vec3<f32>(8.2, 4.4, 2.0));
-    return smoothstep(0.3, 0.8, n);
+    return smoothstep(0.42, 0.85, n);
 }
 
 @fragment
@@ -113,7 +113,9 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
             col += nebula.high.w * nebula.flash.w * exp(-fd * fd * 2.5) * vec3<f32>(0.7, 0.85, 1.0);
             acc += col * dens * dt / radius;
         }
-        light = acc * nebula.look.x * vcol * 6.0;
+        light = acc * nebula.look.x * vcol * 2.2;
+        // soft shoulder: thin gas adds a little, only the dense cores climb past 1 to bloom
+        light = light / (vec3<f32>(1.0) + 0.5 * light);
         if inside_cam {
             light = light * nebula.low.w;
         }
