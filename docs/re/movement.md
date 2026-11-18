@@ -18,7 +18,13 @@ Consequence for the cutter (full rudder) at the measured order speeds: about 12.
 
 ## Linear motion
 - Drag is linear (not quadratic) with rate `(MaxThrust/Mass)/MaxSpeed`; terminal speed = throttle × current max speed.
-- Lateral/vertical velocity is damped separately (constants 0.5 and 0.3).
+- Lateral/vertical velocity is damped separately (read from the original's code, not measured): the ship's own velocity is split
+  along its forward, starboard and up axes. Each tick the starboard part is reduced by 0.5 of itself and the up part by 0.3 of
+  itself (an acceleration of -0.5 x part / tick length, resp. -0.3 x, added to the thrust and the forward drag); a part slower than
+  0.01 units/s is left alone (the forward drag has the same 0.01 dead zone). Pushes from collisions, fields and currents are a
+  separate velocity and are not damped by this. Not built here: a ship's velocity here always lies along its heading, so the only
+  sideways part this would act on is the skid while turning (about speed x turn rate x tick length, ~0.05 units/s at 5 units/s
+  and 0.3 rad/s), too small to matter yet.
 
 ## Measured on the running original (Navy Cutter, skirmish, no crew)
 Sampled ~60 times a second from the running retail game (Steam/Proton) while issuing each order; the game itself updates
