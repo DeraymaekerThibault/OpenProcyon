@@ -364,7 +364,7 @@ pub fn swap_meshes(
         // The damaged mesh carries its own wrecked mounts, so the guns the section carried go with the intact mesh. PROVISIONAL: no
         // retail code that hides them was found; the original keeps them as children of the section's node.
         for (mount, state) in class.mounts.iter().zip(guns.iter().flat_map(|g| g.0.iter())) {
-            let want = if mount.parent.is_some_and(|p| h.sections[p] <= 0.0) { Visibility::Hidden } else { Visibility::Inherited };
+            let want = if mount.parent.is_some_and(|p| class.sections[p].swappable && h.sections[p] <= 0.0) { Visibility::Hidden } else { Visibility::Inherited };
             if let Ok(mut v) = gun_roots.get_mut(state.root) {
                 v.set_if_neq(want);
             }
@@ -380,8 +380,8 @@ pub fn swap_meshes(
                 Some((a, b)) => (format!("{a}_{b}"), true),
                 None => (n.to_string(), false),
             };
-            // A damaged mesh of a layer that is no section can never be shown (it would sit on top of the intact one).
-            let want = match class.sections.iter().position(|s| s.layer.eq_ignore_ascii_case(&base)) {
+            // A damaged mesh of a layer that is no swappable section can never be shown (it would sit on top of the intact one).
+            let want = match class.sections.iter().position(|s| s.swappable && s.layer.eq_ignore_ascii_case(&base)) {
                 Some(i) if (h.sections[i] <= 0.0) == damaged => Visibility::Inherited,
                 None if !damaged => continue,
                 _ => Visibility::Hidden,
@@ -469,8 +469,9 @@ mod swap_tests {
     #[ignore = "needs imported assets"]
     fn guns_of_a_destroyed_section_are_hidden_with_its_intact_mesh() {
         let lib = Library::load(crate::assets_dir());
-        let class = lib.classes.iter().position(|c| c.mounts.iter().any(|m| m.parent.is_some())).expect("a class with a mounted section");
-        let lost = lib.classes[class].mounts.iter().find_map(|m| m.parent).unwrap();
+        let swapped = |c: &crate::data::Class| c.mounts.iter().find_map(|m| m.parent.filter(|p| c.sections[*p].swappable));
+        let class = lib.classes.iter().position(|c| swapped(c).is_some()).expect("a class with a mounted swappable section");
+        let lost = swapped(&lib.classes[class]).unwrap();
         let mut app = App::new();
         app.insert_resource(Library::load(crate::assets_dir())).add_systems(Update, swap_meshes);
         let mut hp = Health::new(&lib.classes[class]);
@@ -522,6 +523,26 @@ mod swap_tests {
         assert_eq!([vis(&app, other), vis(&app, other_hurt)], [Visibility::Inherited, Visibility::Hidden]);
         assert_eq!(vis(&app, stray), Visibility::Hidden);
         assert_eq!(vis(&app, hurt_primitive), Visibility::Inherited, "a damaged layer's primitives are never hidden on their own");
+    }
+
+    #[test]
+    #[ignore = "needs imported assets"]
+    fn a_destroyed_unswappable_section_keeps_its_mesh() {
+        // Station Montgomery's island is a 10 HP section with swappable=0: shot down, the island stays.
+        let lib = Library::load(crate::assets_dir());
+        let class = lib.index("Base_Montgomery");
+        let island = lib.classes[class].sections.iter().position(|s| s.layer == "WayStationMontgomery_Layer1").unwrap();
+        assert!(!lib.classes[class].sections[island].swappable, "re-run the asset importer");
+        let mut app = App::new();
+        app.insert_resource(Library::load(crate::assets_dir())).add_systems(Update, swap_meshes);
+        let mut hp = Health::new(&lib.classes[class]);
+        hp.sections[island] = 0.0;
+        let base = app.world_mut().spawn((ArmedBase { class }, hp)).id();
+        let [whole, hurt] =
+            ["WayStationMontgomery_Layer1", "WayStationMontgomeryDamage_Layer1"].map(|n| app.world_mut().spawn((Name::new(n), Visibility::default(), ChildOf(base))).id());
+        app.update();
+        let vis = |e| *app.world().get::<Visibility>(e).unwrap();
+        assert_eq!([vis(whole), vis(hurt)], [Visibility::Inherited, Visibility::Hidden]);
     }
 }
 
