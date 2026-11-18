@@ -854,7 +854,7 @@ fn a_new_ship_cannot_be_rammed_for_its_first_3_5_s() {
     };
     let ea = app.world_mut().spawn((ship.clone(), ha, Transform::from_xyz(0.0, 0.0, 1.5), Drift::default())).id();
     let eb = app.world_mut().spawn((crate::Ship { class: b, side: crate::Side::Enemy, speed: 0.0, ..ship }, hb, Transform::default(), Drift::default())).id();
-    let mut rams = |app: &mut App| app.world_mut().resource_mut::<Messages<Ram>>().drain().count();
+    let rams = |app: &mut App| app.world_mut().resource_mut::<Messages<Ram>>().drain().count();
     let overlap = |app: &mut App| {
         app.world_mut().get_mut::<Transform>(ea).unwrap().translation = Vec3::new(0.0, 0.0, 1.5);
         app.world_mut().get_mut::<Transform>(eb).unwrap().translation = Vec3::ZERO;
