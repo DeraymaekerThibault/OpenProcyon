@@ -37,6 +37,7 @@ mod holes;
 mod lights;
 mod materials;
 mod nebulae;
+mod replace;
 mod rules;
 pub(crate) mod sails;
 mod sky;
@@ -234,6 +235,7 @@ pub fn plugin(app: &mut App) {
     rules::plugin(app, &look);
     sky::plugin(app, &look);
     holes::plugin(app, &look);
+    replace::plugin(app, &look);
     nebulae::plugin(app, &look);
     currents::plugin(app, &look);
     app.insert_resource(look.flags).insert_resource(look).add_systems(Update, (camera, sun, sky_light));

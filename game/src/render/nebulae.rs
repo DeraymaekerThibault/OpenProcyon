@@ -59,9 +59,12 @@ pub struct Rule {
     /// How bright a bolt's light is in the gas, and how far it reaches (a share of the radius).
     pub flash: f32,
     pub flash_reach: f32,
+    /// The retail shell is hidden (the cloud keeps running) and the profile draws the cloud itself (`replace.rs`).
+    pub replace: bool,
 }
 
 pub fn parse(v: &Value) -> Option<Nebulae> {
+    let all = v["replace"].as_bool().unwrap_or(false);
     v.is_object().then(|| Nebulae {
         rules: v["rules"]
             .as_array()
@@ -80,6 +83,7 @@ pub fn parse(v: &Value) -> Option<Nebulae> {
                             inside: num(&r["inside"], 0.6).clamp(0.0, 1.0),
                             flash: num(&r["flash"], 3.0).max(0.0),
                             flash_reach: num(&r["flash_reach"], 0.5).clamp(0.05, 2.0),
+                            replace: r["replace"].as_bool().unwrap_or(all),
                         })
                     })
                     .collect()
@@ -89,6 +93,11 @@ pub fn parse(v: &Value) -> Option<Nebulae> {
 }
 
 impl Nebulae {
+    /// Whether a rule for a solar storm replaces the retail look (its bolts are then drawn by the profile).
+    pub fn replaces_storms(&self) -> bool {
+        self.rules.iter().any(|r| r.replace && "solarstorm".contains(&r.matching))
+    }
+
     /// The rule for a cloud made by the effect `effect`, if any.
     pub fn find(&self, effect: &str) -> Option<&Rule> {
         let e = effect.to_lowercase();
@@ -149,9 +158,13 @@ pub type NebulaMaterial = ExtendedMaterial<StandardMaterial, NebulaGlow>;
 
 pub fn plugin(app: &mut App, look: &Look) {
     if look.nebulae.is_some() {
-        app.add_plugins(MaterialPlugin::<NebulaMaterial>::default()).init_resource::<Bolt>().add_systems(Update, (bolts, restyle, update).chain());
+        app.add_plugins(MaterialPlugin::<NebulaMaterial>::default()).init_resource::<Bolt>().add_systems(Update, (bolts, hide_shells, restyle, update).chain());
     }
 }
+
+/// A cloud whose retail shell is hidden because the profile replaces it.
+#[derive(Component)]
+pub struct ShellHidden;
 
 /// A cloud that has the volume material.
 #[derive(Component)]
@@ -185,6 +198,16 @@ impl Rule {
     }
 }
 
+/// Hides the retail shell of every cloud a replacing rule matches (the cloud keeps running: nothing but its visibility changes).
+fn hide_shells(mut commands: Commands, look: Res<Look>, clouds: Query<(Entity, &Cloud), Without<ShellHidden>>) {
+    let Some(n) = &look.nebulae else { return };
+    for (e, cloud) in &clouds {
+        if n.find(cloud.effect()).is_some_and(|r| r.replace) {
+            commands.entity(e).try_insert((Visibility::Hidden, ShellHidden));
+        }
+    }
+}
+
 /// Swaps the retail material of every cloud a rule matches, once, keeping its mesh (which still carries the retail colour loop
 /// and the edge fade in its vertex colours) and its texture.
 fn restyle(
@@ -198,7 +221,7 @@ fn restyle(
 ) {
     let Some(n) = &look.nebulae else { return };
     for (e, cloud, at, mat) in &clouds {
-        let Some(rule) = n.find(cloud.effect()) else { continue };
+        let Some(rule) = n.find(cloud.effect()).filter(|r| !r.replace) else { continue };
         let Some(old) = retail.get(&mat.0) else { continue };
         let base = StandardMaterial { base_color: Color::WHITE, base_color_texture: old.base.base_color_texture.clone(), ..old.base.clone() };
         let handle = materials.add(NebulaMaterial { base, extension: NebulaGlow { u: rule.uniform(at.translation(), cloud.radius(), time.elapsed_secs(), &bolt) } });
@@ -283,5 +306,38 @@ mod tests {
         assert_eq!(w.entity(a).get::<Mesh3d>().map(|m| m.0.id()), Some(mesh.id()), "the mesh, with its vertex colours, is kept");
         assert!(w.entity(b).contains::<MeshMaterial3d<EffectMaterial>>() && !w.entity(b).contains::<Volumetric>());
         assert_eq!(w.resource::<Assets<NebulaMaterial>>().len(), 1, "once");
+    }
+
+    #[test]
+    fn replace_is_per_rule_or_for_the_block_and_off_by_default() {
+        assert!(!parse(&json!({"rules": [{"match": "n"}]})).unwrap().rules[0].replace);
+        let n = parse(&json!({"replace": true, "rules": [{"match": "Nebula"}, {"match": "SolarStorm", "replace": false}]})).unwrap();
+        assert_eq!((n.rules[0].replace, n.rules[1].replace), (true, false));
+        assert!(!n.replaces_storms(), "the storm rule opted out");
+        assert!(parse(&json!({"rules": [{"match": "SolarStorm", "replace": true}]})).unwrap().replaces_storms());
+    }
+
+    #[test]
+    fn a_replacing_rule_hides_the_shell_and_keeps_the_cloud_and_its_material() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, AssetPlugin::default()))
+            .init_asset::<Shader>()
+            .init_asset::<StandardMaterial>()
+            .init_asset::<Mesh>()
+            .init_asset::<EffectMaterial>()
+            .init_asset::<NebulaMaterial>()
+            .init_resource::<Bolt>()
+            .insert_resource(Look::parse(&json!({"nebulae": {"rules": [{"match": "Nebula", "replace": true}, {"match": "Meteor"}]}})))
+            .add_systems(Update, (hide_shells, restyle).chain());
+        let retail = app.world_mut().resource_mut::<Assets<EffectMaterial>>().add(crate::fx::additive_material(Handle::default()));
+        let mut spawn =
+            |effect: &str| app.world_mut().spawn((Cloud::for_tests(effect, 100.0), GlobalTransform::default(), Visibility::default(), MeshMaterial3d(retail.clone()))).id();
+        let (replaced, plain) = (spawn("Nebula"), spawn("MeteorStorm"));
+        app.update();
+        let w = app.world();
+        assert_eq!(w.entity(replaced).get::<Visibility>(), Some(&Visibility::Hidden));
+        assert!(w.entity(replaced).contains::<Cloud>() && w.entity(replaced).contains::<MeshMaterial3d<EffectMaterial>>(), "nothing is removed from it");
+        assert_eq!(w.entity(plain).get::<Visibility>(), Some(&Visibility::Inherited));
+        assert!(w.entity(plain).contains::<Volumetric>(), "a rule without replace still restyles the shell");
     }
 }

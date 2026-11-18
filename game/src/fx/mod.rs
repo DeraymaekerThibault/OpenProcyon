@@ -99,6 +99,11 @@ struct PrimState {
     parts: Vec<P>,
 }
 
+/// On an effect a render profile replaces with its own drawing: it keeps running (particles, timers, lights, sounds) but its quads
+/// are not drawn. Presentation only: `render/replace.rs` puts it on.
+#[derive(Component, Default)]
+pub struct HiddenFx;
+
 /// A running effect. Everlasting effects (engines) never finish; others despawn when done and empty.
 #[derive(Component)]
 pub struct Fx {

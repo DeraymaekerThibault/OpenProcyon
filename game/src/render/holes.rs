@@ -39,6 +39,9 @@ pub struct BlackHoles {
     pub glow: f32,
     /// How far under the hole's plane the disc lies, a share of the radius, so hulls in the plane draw over it.
     pub drop: f32,
+    /// The retail glow, beam and ribbon layers are hidden (the hole keeps pulling and its trail keeps running) and the profile
+    /// draws the hole (`replace.rs`).
+    pub replace: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -70,6 +73,7 @@ pub fn parse(v: &Value) -> Option<BlackHoles> {
             },
             glow: num(&v["glow"], 0.4).max(0.0),
             drop: num(&v["drop"], 0.02).clamp(0.0, 0.5),
+            replace: v["replace"].as_bool().unwrap_or(false),
         }
     })
 }
@@ -223,6 +227,7 @@ mod tests {
         let b = parse(&json!({})).unwrap();
         let pull = Pull::for_terrain("Terrain_BlackHole_Med").unwrap();
         assert_eq!(b.horizon, pull.core() / pull.radius, "the black area is the kill zone");
+        assert!(!b.replace && parse(&json!({"replace": true})).unwrap().replace);
         assert!(b.disc.inner > b.horizon && b.disc.outer > b.disc.inner && b.disc.outer <= 1.0);
     }
 

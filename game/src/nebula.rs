@@ -459,6 +459,10 @@ impl Cloud {
     pub fn effect(&self) -> &str {
         &self.effect
     }
+    /// Seconds the cloud's sim has run (its colour loop's clock). Read-only, for tests and the render profile.
+    pub fn age(&self) -> f32 {
+        self.age
+    }
     /// The cloud's radius (the point set's magnitude), world units.
     pub fn radius(&self) -> f32 {
         self.radius
@@ -828,5 +832,27 @@ mod tests {
     fn colour_curve_loops_with_the_last_key() {
         let c = [(0.0, 0.8), (1.0, 0.9), (2.5, 1.0), (3.7, 0.8)];
         assert!((looped(&c, 0.0) - 0.8).abs() < 1e-6 && (looped(&c, 3.7 + 2.5) - 1.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn a_cloud_whose_shell_the_profile_hides_keeps_running() {
+        use std::time::Duration;
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, AssetPlugin::default()))
+            .init_asset::<Mesh>()
+            .init_asset::<fx::EffectMaterial>()
+            .init_asset::<StandardMaterial>()
+            .init_asset::<Image>()
+            .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(Duration::from_millis(100)))
+            .add_systems(Update, update);
+        app.world_mut().spawn((Camera3d::default(), GlobalTransform::default()));
+        let shown = app.world_mut().spawn((Cloud::for_tests("Nebula", 100.0), GlobalTransform::default(), Visibility::default())).id();
+        let hidden = app.world_mut().spawn((Cloud::for_tests("Nebula", 100.0), GlobalTransform::default(), Visibility::Hidden)).id();
+        for _ in 0..12 {
+            app.update();
+        }
+        let age = |e: Entity| app.world().entity(e).get::<Cloud>().unwrap().age();
+        assert!(age(shown) > 0.5, "the sim runs ({})", age(shown));
+        assert_eq!(age(hidden), age(shown), "hidden or not, the same ticks");
     }
 }
