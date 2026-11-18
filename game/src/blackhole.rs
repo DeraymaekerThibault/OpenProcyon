@@ -125,7 +125,7 @@ struct Point {
     segs: Vec<Seg>,
 }
 
-#[derive(Component)]
+#[derive(Component, Default)]
 pub struct BlackHole {
     p: Params,
     pts: Vec<Point>,

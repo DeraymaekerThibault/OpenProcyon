@@ -294,6 +294,7 @@ fn spill(class: &Class, hp: &mut Health, k: usize, damage: f32, seen: &mut Vec<u
 pub(super) struct Surface {
     pub body: Option<Entity>,
     pub normal: Option<Vec3>,
+    pub material: Option<&'static str>,
 }
 
 /// The bullet's impact effect at `at`, facing back along its flight. On a ship (`host`) it is attached to the hull, so it rides along
@@ -301,7 +302,7 @@ pub(super) struct Surface {
 pub(super) fn hit_fx(commands: &mut Commands, fxl: &FxLib, bd: &BulletDef, at: Vec3, vel: Vec3, host: Option<(Entity, &Transform)>, struck: Surface) {
     if let Some(n) = &bd.hit_fx {
         let t = Transform::from_translation(at).looking_to(-vel, Vec3::Y);
-        let origin = fx::Origin { forward: struck.normal, shell: None, host: struck.body.or(host.map(|h| h.0)) };
+        let origin = fx::Origin { forward: struck.normal, host: struck.body.or(host.map(|h| h.0)), material: struck.material, ..default() };
         spawn_on(commands, fxl, n, t, host, origin);
     }
 }
@@ -582,7 +583,7 @@ pub(super) fn shells(
             let fallen = apply_base_hit(class, &mut hp, k, rng.range(lo, hi));
             sfx.write_batch(bd.impact_sound(key, at, &mut rng));
             base_parts_burst(&mut commands, &fxl, class, btf, fallen);
-            hit_fx(&mut commands, &fxl, bd, at, s.vel, None, Surface { body: Some(be), normal });
+            hit_fx(&mut commands, &fxl, bd, at, s.vel, None, Surface { body: Some(be), normal, material: Some(key) });
             // Decoded: a struck wood section splinters and a stone one throws chunks, half the time (the original also needs the
             // hit within 300 of the camera; not gated here, far hits are unseen anyway).
             if let Some(name) = splinter_fx(key, hi).filter(|_| rng.f() < 0.5) {
@@ -632,8 +633,9 @@ pub(super) fn shells(
         if let (Some((_, k, at)), Some(si)) = (best, best_ship) {
             let (se, stf, ship, mut hp, mut fires, mission, _) = ships.get_mut(si).unwrap();
             let target = ShipTarget { entity: se, transform: stf, side: ship.side, class: &lib.classes[ship.class], invuln: mission.map_or(0.0, |m| m.invuln) };
+            let surface = Surface { body: Some(se), normal: hull_normal, material: Some(material_key(&target.class.sections[k].material)) };
             hit_ship(&mut commands, &fxl, &mut rng, (&mut sfx, &mut hits, &mut scars), bd, &s, target, &mut hp, &mut fires, k, at);
-            hit_fx(&mut commands, &fxl, bd, at, s.vel, Some((se, stf)), Surface { body: Some(se), normal: hull_normal });
+            hit_fx(&mut commands, &fxl, bd, at, s.vel, Some((se, stf)), surface);
             if matches!(s.payload, Payload::Blast { .. }) {
                 detonate.write(Detonate { bullet: s.bullet.clone(), at, shooter: Some(s.shooter), owner: Some((s.side, s.base)) });
             }

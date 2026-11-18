@@ -670,7 +670,7 @@ pub(super) fn launch_shell(
             Transform::default(),
             mg.compute_transform(),
             false,
-            fx::Origin { forward: Some(stf.forward().as_vec3()), shell: Some(shell), host: None },
+            fx::Origin { forward: Some(stf.forward().as_vec3()), shell: Some(shell), ..default() },
         );
     }
 }

@@ -10,11 +10,12 @@ use bevy::light::NotShadowCaster;
 use bevy::mesh::{Indices, MeshVertexBufferLayoutRef, PrimitiveTopology, VertexAttributeValues};
 use bevy::pbr::{ExtendedMaterial, MaterialExtension, MaterialExtensionKey, MaterialExtensionPipeline};
 use bevy::prelude::*;
-use bevy::render::render_resource::{AsBindGroup, BlendComponent, BlendFactor, BlendOperation, BlendState, RenderPipelineDescriptor, ShaderType, SpecializedMeshPipelineError};
+use bevy::render::render_resource::{AsBindGroup, RenderPipelineDescriptor, ShaderType, SpecializedMeshPipelineError};
 use bevy::shader::ShaderRef;
 use serde_json::Value;
 use std::collections::HashMap;
 
+use super::kit::{additive, additive_base};
 use super::{Look, num, rgb};
 use crate::fx::{EffectMaterial, Fx};
 
@@ -94,37 +95,11 @@ pub fn parse_wakes(v: &Value) -> Option<Wakes> {
     })
 }
 
-/// ONE/ONE blending like the retail additive effects (fx::RetailAdd): the shaders write unpremultiplied light.
-pub(super) fn additive(descriptor: &mut RenderPipelineDescriptor) {
-    let component = BlendComponent { src_factor: BlendFactor::One, dst_factor: BlendFactor::One, operation: BlendOperation::Add };
-    if let Some(fragment) = descriptor.fragment.as_mut() {
-        for target in fragment.targets.iter_mut().flatten() {
-            target.blend = Some(BlendState { color: component, alpha: component });
-        }
-    }
-    if let Some(depth) = descriptor.depth_stencil.as_mut() {
-        depth.bias.constant = 0;
-    }
-}
-
-/// Unlit, two-sided, drawn after the scene's blended meshes like the retail additive effects.
-pub(super) fn additive_base(texture: Option<Handle<Image>>) -> StandardMaterial {
-    StandardMaterial {
-        base_color_texture: texture,
-        unlit: true,
-        cull_mode: None,
-        double_sided: true,
-        alpha_mode: AlphaMode::Blend,
-        depth_bias: crate::fx::ADDITIVE_SORT_BIAS,
-        ..default()
-    }
-}
-
 #[derive(Clone, Copy, Default, Debug, ShaderType)]
 pub struct PlumeUniform {
     pub core: Vec4,
     pub edge: Vec4,
-    /// x: brightness, y: thrust, z: clock, w: seed
+    /// x: brightness, y: thrust (written only when it moves), z: unused (the clock is the frame data's), w: seed
     pub params: Vec4,
 }
 
@@ -132,6 +107,9 @@ pub struct PlumeUniform {
 pub struct PlumeGlow {
     #[uniform(100)]
     pub u: PlumeUniform,
+    /// The frame data (`frame.rs`) at `@binding(99)`.
+    #[storage(99, read_only)]
+    pub frame: super::frame::FrameBinding,
 }
 
 impl MaterialExtension for PlumeGlow {
@@ -164,6 +142,9 @@ pub struct WakeUniform {
 pub struct WakeGlow {
     #[uniform(100)]
     pub u: WakeUniform,
+    /// The frame data (`frame.rs`) at `@binding(99)`.
+    #[storage(99, read_only)]
+    pub frame: super::frame::FrameBinding,
 }
 
 impl MaterialExtension for WakeGlow {
@@ -202,7 +183,13 @@ struct Plume {
     thrust: f32,
     clock: f32,
     seed: f32,
+    /// The thrust its material was last given: the shader's clock is the frame data's, so the material is only written when the
+    /// thrust has moved by more than `THRUST_STEP` (never at a steady speed).
+    shown: f32,
 }
+
+/// How far a plume's thrust moves before its material is written again (smaller than a glow change anyone could see).
+const THRUST_STEP: f32 = 0.004;
 
 const RINGS: usize = 16;
 const AROUND: usize = 20;
@@ -262,6 +249,7 @@ fn plumes(
                 base: additive_base(None),
                 extension: PlumeGlow {
                     u: PlumeUniform { core: e.core.extend(0.0), edge: edge.extend(if inner { 1.0 } else { 0.0 }), params: Vec4::new(e.brightness, 0.0, 0.0, seed + l) },
+                    frame: default(),
                 },
             });
             // the engine's own rotation is undone, so the plume trails straight astern of the ship
@@ -269,7 +257,7 @@ fn plumes(
                 Mesh3d(mesh.clone()),
                 MeshMaterial3d(material),
                 Transform { rotation: local.rotation.inverse(), scale: Vec3::ZERO, ..default() },
-                Plume { length: class.length * e.length * l, width: class.length * e.width * w, thrust: 0.0, clock: 0.0, seed },
+                Plume { length: class.length * e.length * l, width: class.length * e.width * w, thrust: 0.0, clock: 0.0, seed, shown: 0.0 },
                 NotShadowCaster,
             );
             commands.entity(engine).queue_silenced(move |mut fx: EntityWorldMut| {
@@ -300,9 +288,11 @@ fn plume_motion(
         p.clock += dt;
         tf.scale = plume_scale(&p, p.thrust);
         vis.set_if_neq(if p.thrust < 0.02 { Visibility::Hidden } else { Visibility::Inherited });
-        if let Some(mut m) = materials.get_mut(&mat.0) {
+        if (p.thrust - p.shown).abs() > THRUST_STEP
+            && let Some(mut m) = materials.get_mut(&mat.0)
+        {
             m.extension.u.params.y = p.thrust;
-            m.extension.u.params.z = p.clock;
+            p.shown = p.thrust;
         }
     }
 }
@@ -333,8 +323,9 @@ fn wakes(
         let texture = effect.get(&old.0).and_then(|m| m.base.base_color_texture.clone());
         let material = materials.add(WakeMaterial {
             base: additive_base(texture),
-            extension: WakeGlow { u: WakeUniform { tint: tint.extend(w.brightness), hot: w.hot.extend(0.0), params: Vec4::new(1.0, 0.0, w.core, 0.0) } },
+            extension: WakeGlow { u: WakeUniform { tint: tint.extend(w.brightness), hot: w.hot.extend(0.0), params: Vec4::new(1.0, 0.0, w.core, 0.0) }, frame: default() },
         });
+        // the wake's ribbon stops drawing; its tubes draw instead
         commands.entity(e).try_remove::<MeshMaterial3d<EffectMaterial>>();
         let tube = meshes.add(Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default()));
         commands.spawn((
@@ -467,7 +458,7 @@ mod tests {
 
     #[test]
     fn a_plume_grows_with_thrust_and_trails_astern() {
-        let p = Plume { length: 10.0, width: 1.0, thrust: 0.0, clock: 0.0, seed: 0.0 };
+        let p = Plume { length: 10.0, width: 1.0, thrust: 0.0, clock: 0.0, seed: 0.0, shown: 0.0 };
         assert!(plume_scale(&p, 0.0).z < plume_scale(&p, 1.0).z);
         assert_eq!(plume_scale(&p, 1.0), Vec3::new(1.0, 1.0, 10.0), "no flicker at clock 0 and seed 0");
         let m = plume_mesh();

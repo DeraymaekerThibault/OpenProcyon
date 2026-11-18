@@ -2,23 +2,28 @@
 //! A flash fades out quadratically over `seconds`; a steady light (`seconds` 0) lives as long as its effect and may flicker.
 //! Effect lights are not occluded (no shadow maps unless `shadows`), so a point light on a gun lights the deck behind it and the
 //! hull around it. A light on a ship's engine exhaust follows the engine's thrust, so a ship at All Stop sheds no engine light.
+//! A replaced ship flame's light follows its burn strength and goes out when it stops emitting.
 //! `cone` makes a light a spot light facing along the shot (the shot's direction the effect message carries) and `offset` moves it that far ahead of the effect, off the barrel and its hull.
 
 use bevy::prelude::*;
 use serde_json::Value;
 use std::collections::HashMap;
 
-use super::{Look, num, rgb};
-use crate::fx::{EffectStarted, FxLib};
+use super::{Look, bursts::FlameSource, num, rgb};
+use crate::fx::{EffectStarted, Fx, FxLib};
 
 /// A point light the profile gives every effect whose file name contains `effects`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct EffectLight {
     pub effects: String,
+    /// An optional second fragment, e.g. `_Impact` to exclude the same weapon's muzzle and trail effects.
+    pub also_matches: String,
     pub color: Color,
     /// Peak intensity in lumens.
     pub lumens: f32,
     pub range: f32,
+    /// Apparent source radius in world units, for broader specular highlights.
+    pub radius: f32,
     /// How long it fades out (quadratically); 0 = steady for as long as the effect lives.
     pub seconds: f32,
     /// Share of the intensity that flickers (fires).
@@ -39,9 +44,11 @@ pub fn parse(v: &Value) -> Vec<EffectLight> {
         .filter_map(|l| {
             Some(EffectLight {
                 effects: l["effects"].as_str()?.to_string(),
+                also_matches: l["also_matches"].as_str().unwrap_or_default().to_string(),
                 color: rgb(&l["color"]).map_or(Color::WHITE, |c| Color::linear_rgb(c.x, c.y, c.z)),
                 lumens: num(&l["lumens"], 1e6),
                 range: num(&l["range"], 100.0),
+                radius: num(&l["radius"], 0.0).max(0.0),
                 seconds: num(&l["seconds"], 0.3),
                 flicker: num(&l["flicker"], 0.0),
                 cone: num(&l["cone"], 0.0).clamp(0.0, 170.0),
@@ -54,7 +61,7 @@ pub fn parse(v: &Value) -> Vec<EffectLight> {
 
 /// The light for one effect file name: the first entry whose `effects` it contains.
 pub fn light_for<'a>(lights: &'a [EffectLight], name: &str) -> Option<&'a EffectLight> {
-    lights.iter().find(|l| name.contains(&l.effects))
+    lights.iter().find(|l| name.contains(&l.effects) && name.contains(&l.also_matches))
 }
 
 pub fn plugin(app: &mut App) {
@@ -100,6 +107,7 @@ fn effect_lights(
                     color: l.color,
                     intensity: l.lumens,
                     range: l.range,
+                    radius: l.radius,
                     shadow_maps_enabled: l.shadows,
                     outer_angle: outer,
                     inner_angle: outer * 0.5,
@@ -107,7 +115,7 @@ fn effect_lights(
                 });
             }
         }
-        let point = PointLight { color: l.color, intensity: l.lumens, range: l.range, shadow_maps_enabled: l.shadows, ..default() };
+        let point = PointLight { color: l.color, intensity: l.lumens, range: l.range, radius: l.radius, shadow_maps_enabled: l.shadows, ..default() };
         // short effects can be gone by the time commands apply
         commands.entity(e).queue_silenced(move |mut fx: EntityWorldMut| match spot {
             Some(spot) => {
@@ -139,26 +147,31 @@ fn glow_at(g: &EffectGlow) -> Option<f32> {
 fn fade_lights(
     mut commands: Commands,
     time: Res<Time>,
-    engines: Query<(&crate::combat::Engine, Option<&crate::fx::Fx>)>,
+    engines: Query<(&crate::combat::Engine, Option<&Fx>)>,
+    flames: Query<&Fx, With<FlameSource>>,
     mut lights: Query<(Entity, &mut EffectGlow, Option<&ChildOf>, Option<&mut PointLight>, Option<&mut SpotLight>)>,
 ) {
     for (e, mut glow, parent, point, spot) in &mut lights {
         // the plume's rule (render/trails.rs): an exhaust that is not emitting has no thrust; a new light starts at it, no fade-in
-        if let Some((engine, fx)) = parent.and_then(|p| engines.get(p.parent()).ok()) {
+        let parent = parent.map(ChildOf::parent);
+        if let Some((engine, fx)) = parent.and_then(|p| engines.get(p).ok()) {
             let target = if fx.is_none_or(|f| f.emitting) { engine.thrust() } else { 0.0 };
             glow.thrust = Some(glow.thrust.map_or(target, |t| t + (target - t) * (time.delta_secs() * 2.5).min(1.0)));
-        } else if glow.seconds <= 0.0 && glow.flicker <= 0.0 {
+        }
+        let flame = parent.and_then(|p| flames.get(p).ok()).map(FlameSource::strength);
+        if glow.thrust.is_none() && glow.seconds <= 0.0 && glow.flicker <= 0.0 && flame.is_none() {
             continue;
         }
+        let flame = flame.unwrap_or(1.0);
         // a flash's age starts at 0; a steady light's offset only decorrelates its flicker
         glow.age += time.delta_secs();
         match glow_at(&glow) {
             Some(i) => {
                 if let Some(mut p) = point {
-                    p.intensity = i;
+                    p.intensity = i * flame;
                 }
                 if let Some(mut s) = spot {
-                    s.intensity = i;
+                    s.intensity = i * flame;
                 }
             }
             None => commands.entity(e).despawn(),
@@ -181,22 +194,44 @@ mod tests {
     }
 
     #[test]
+    fn a_weapon_rule_can_match_impacts_without_lighting_its_flight_effect() {
+        let lights = parse(&serde_json::json!([
+            {"effects": "Plasma", "also_matches": "_Impact", "color": [0.5, 1, 0.45]},
+            {"effects": "_Impact", "color": [1, 0.65, 0.35]}
+        ]));
+        assert_eq!(light_for(&lights, "Plasma_Heavy_Impact").map(|l| l.color), Some(Color::linear_rgb(0.5, 1.0, 0.45)));
+        assert_eq!(light_for(&lights, "Cannon_Impact").map(|l| l.color), Some(Color::linear_rgb(1.0, 0.65, 0.35)));
+        assert!(light_for(&lights, "Plasma_Heavy_Trail").is_none());
+    }
+
+    #[test]
     fn a_started_effect_gets_the_light_of_its_file_name() {
         use bevy::ecs::system::RunSystemOnce;
         let mut world = World::new();
         world.init_resource::<Messages<EffectStarted>>();
-        world.insert_resource(FxLib::with_names(&["Gun_Muzzle_Flash", "NavyEngine_Heavy"]));
-        world.insert_resource(Look::parse(&serde_json::json!({"lights": [{"effects": "Muzzle", "lumens": 5.0, "seconds": 0.2}]})));
-        let (flash, engine) = world
+        world.insert_resource(FxLib::with_names(&["Gun_Muzzle_Flash", "Gun_Impact", "NavyEngine_Heavy"]));
+        world.insert_resource(Look::parse(&serde_json::json!({"lights": [
+            {"effects": "Muzzle", "lumens": 5.0, "seconds": 0.2, "radius": 1.0, "cone": 75},
+            {"effects": "Impact", "radius": 2.0, "offset": 1.5}
+        ]})));
+        let (flash, impact, engine) = world
             .run_system_once(|mut commands: Commands, lib: Res<FxLib>| {
                 let at = Transform::from_xyz(1.0, 2.0, 3.0);
                 let flash = crate::fx::spawn(&mut commands, &lib, "Gun_Muzzle_Flash", None, at, at, true).unwrap();
-                (flash, crate::fx::spawn(&mut commands, &lib, "NavyEngine_Heavy", None, at, at, false).unwrap())
+                let rotated = at.looking_to(Vec3::X, Vec3::Y);
+                let hit =
+                    crate::fx::spawn_with(&mut commands, &lib, "Gun_Impact", None, rotated, rotated, true, crate::fx::Origin { forward: Some(Vec3::Y), ..default() }).unwrap();
+                (flash, hit, crate::fx::spawn(&mut commands, &lib, "NavyEngine_Heavy", None, at, at, false).unwrap())
             })
             .unwrap();
         world.run_system_once(effect_lights).unwrap();
-        let light = world.get::<Children>(flash).and_then(|c| c.iter().find_map(|c| world.get::<EffectGlow>(c))).expect("the flash carries its light");
+        let muzzle = world.get::<Children>(flash).unwrap()[0];
+        let light = world.get::<EffectGlow>(muzzle).unwrap();
         assert_eq!((light.peak, light.seconds, light.age), (5.0, 0.2, 0.0));
+        assert_eq!(world.get::<SpotLight>(muzzle).unwrap().radius, 1.0);
+        let hit = world.get::<Children>(impact).unwrap()[0];
+        assert_eq!(world.get::<PointLight>(hit).unwrap().radius, 2.0);
+        assert_eq!(world.get::<Transform>(hit).unwrap().translation, Vec3::Y * 1.5, "lift the light along the surface normal, not the shot");
         assert!(world.get::<Children>(engine).is_none(), "no rule, no light");
     }
 
@@ -226,6 +261,29 @@ mod tests {
         assert!(world.get_entity(flash).is_err(), "gone once faded");
         assert_eq!(world.get::<PointLight>(steady).unwrap().intensity, 100.0);
         assert!(world.get_entity(fire).is_ok(), "a fire's light lasts as long as the fire");
+    }
+
+    #[test]
+    fn a_replaced_fire_light_follows_the_burn_and_goes_dark_before_its_source_despawns() {
+        let mut world = World::new();
+        world.insert_resource(Time::<()>::default());
+        world.insert_resource(FxLib::with_names(&["FireOnShip"]));
+        let fire = world
+            .run_system_once(|mut c: Commands, lib: Res<FxLib>| {
+                let at = Transform::default();
+                crate::fx::spawn(&mut c, &lib, "FireOnShip", None, at, at, false).unwrap()
+            })
+            .unwrap();
+        world.entity_mut(fire).insert(FlameSource::parse(&serde_json::json!({})).unwrap());
+        let glow = EffectGlow { peak: 100.0, seconds: 0.0, age: 0.0, flicker: 0.0, thrust: None };
+        let light = world.spawn((glow, PointLight { intensity: 100.0, ..default() }, ChildOf(fire))).id();
+        for (rate, emitting, want) in [(0.2, true, 20.0), (1.0, true, 100.0), (1.0, false, 0.0)] {
+            let mut fx = world.get_mut::<Fx>(fire).unwrap();
+            fx.rate_scale = rate;
+            fx.emitting = emitting;
+            world.run_system_once(fade_lights).unwrap();
+            assert_eq!(world.get::<PointLight>(light).unwrap().intensity, want);
+        }
     }
 
     #[test]

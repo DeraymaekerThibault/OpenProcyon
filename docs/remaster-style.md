@@ -31,7 +31,21 @@ Springfield), https://history.siggraph.org/learning/creating-3d-painterly-enviro
 3. **Drama**: explosions with a fireball that cools as it swells, a shockwave ring, sparks, floating embers and dark
    smoke. Burning ships throw embers and a smoke column. Big blasts jolt the camera.
 4. **Finish**: a gentle vignette, and a hint of colour fringing on big blasts only.
-5. **Cost**: a steady 60 fps on a mid-range GPU (RX 6700 XT) in a full battle. Measure with `PROCYON_PROFILE=1`
+5. **Space**: skies, nebulae, black holes and Etherium currents are alive through relative motion and change, never through
+   a rigid turn of the picture: layers of gas that slide against each other as the camera moves, gas that churns in place
+   (domain-warped noise), a breath in the bright cores, and events that light it (a storm's bolt, a big blast, a swallowed
+   ship). **Replace, don't stack**: when the profile draws a nebula, a storm or a black hole itself (`replace`), the retail
+   drawing of it is hidden (its simulation keeps running), never drawn underneath with ours on top: gas that only adds light
+   on the retail shell reads as a flat wash, and retail glows and beams contradict a redesigned hole. Gas is a volume (emission
+   and absorption, lit by the sun, ending at the depth of the hulls and islands inside it), so it has depth and dark lanes.
+   It may thicken the view but never hide a ship: one cloud's opacity is capped (`max_opacity`, lower where the ray ends on a
+   hull). A lightning strike is a short arc cut from its actual path, ending at the impact if it hits a ship. Its light falls off
+   locally, and sky events light the gas, never the stars. Quiet nebulae get their glow from dense pockets inside the gas,
+   not a brighter veil over the whole cloud. Leave dark lanes between them and keep the glow low over ships.
+   The dangerous parts of the world must read at least as clearly as in classic: a black hole's black horizon is exactly its
+   kill core and carries a thin ring that stays visible at any zoom, with the pull radius faintly outlined; a current shows
+   which way it flows at a glance. Navy solar sails fold like a hand fan, canvas like a roller blind.
+6. **Cost**: a steady 60 fps on a mid-range GPU (RX 6700 XT) in a full battle. Measure with `PROCYON_PROFILE=1`
    (it logs `frame_ms`).
 
 ## Tried and dropped
@@ -47,7 +61,20 @@ Springfield), https://history.siggraph.org/learning/creating-3d-painterly-enviro
 - **Rigid sky drift** (`sky_drift`: the whole baked sky turning at 0.6 degrees a minute): nobody sees 9 degrees in a battle, and
   when seen, every star and cloud moving together reads as the camera rolling. Replaced by the `sky` dome: relative motion
   (parallax, a current) instead of rotation.
+- **Screen-space lensing of ships and effects behind a black hole** and **motes riding a current**: not built (optional in the
+  plan); the hole bends only the sky behind it, which is almost always what the camera sees there.
+- **Additive gas on the retail nebula shell, and the retail black-hole layers left under ours** (the first `nebulae` and
+  `black_holes` blocks): additive-only light cannot show dark dust, silhouettes or self-shadow, so the clouds read as a flat
+  lilac wash or, dimmed, a faint haze; the march ran only where the shifting retail shell had fragments, so a cloud's edge
+  was the shell's polygon silhouette and a close camera met a flat textured wall; and the retail pink cone, blue beams and glow
+  blobs sat in the black kill zone of the new hole. Replaced by `replace`: the retail drawing is hidden, the cloud is a proxy
+  box marched as a volume (premultiplied, ending at the depth prepass), and the hole is drawn from scratch.
+- **The lensed far side of the accretion disc** (the hump arching over the shadow): not built (optional in the plan); the disc is
+  a thin flat ring and the sky behind the hole bends, which carries the sense of weight at the game's camera angles.
 - **Warm or contrasty colour grading**: colours turned red and too dark, so grading stays neutral.
+- **Clock-driven lightning**: free-running sky flashes and rapid white pulses in storm gas made faraway storms feel as close as
+  nearby ones. The bundled profile now uses the storm's own events for lightning; distant clouds keep their moving plasma seams
+  without washing the view in light.
 
 ## Rules
 - The engine (`game/src/render/`) gets only the building blocks: profile settings, uniforms, docs, tests. The look lives in
@@ -57,5 +84,23 @@ Springfield), https://history.siggraph.org/learning/creating-3d-painterly-enviro
 
 ## Notes on `look.json`
 
-- `bursts.effects` lists `Lancer` and `Plasma` before `_Impact` / `_Muzzle` on purpose: the first matching rule wins, so the
-  energy weapons' own entries (no smoke) take their impact and muzzle effects before the generic rules do.
+- **PROVISIONAL — lighting playtest pass:** slightly dimmer backdrop and sky fill, a weaker silhouette rim, reduced shell
+  and tracer gain, 55% of original flight particles, and weaker, shorter-reach muzzle/impact lights. Sun, exposure and bloom
+  stay unchanged; major explosion lights keep their reach. Judge in motion on bright blue skies as well as Red Rover:
+  shadowed hulls must remain readable, powder shot should not look like little suns, and energy weapons should stay distinct.
+
+- Light space with a directional key and restrained fill, not a daylight wash. Keep the map's colour and ship silhouettes,
+  with and without HD skies, and reserve the strongest bloom for weapons and other bright effects. A low, cool ambient
+  floor keeps shadowed hull detail from disappearing on maps with dark or strongly tinted ambient light.
+- Weapon lights should agree with the effects: cold blue for lancers, green for plasma, warm gold for powder.
+  Keep muzzle lights pointed down the barrel and lift impact lights just off the hit surface. Keep the spill local so
+  a salvo doesn't bleach the whole ship; reserve a wider reach for a ship breaking apart.
+- Fire must read from the flame, not the spill: an anchored yellow-white base, distinct orange tips, and smoke that starts
+  above the base and keeps drifting after the fire goes out. Check at normal battle zoom, not just in a close-up.
+- Impact debris should distinguish surfaces without hiding the weapon flash: a wide, short cloud of wood splinters and dust,
+  a tight fast spray from metal, and pale curling threads from sailcloth. Let heavy ordnance keep its own larger effects.
+- `bursts.effects` lists `Lancer` and `Plasma` before `_Impact` / `_Muzzle` on purpose: the first matching rule wins, so energy
+  weapons keep their own flashes and muzzle particles. Only impacts with a known, configured surface substitute its debris.
+- `sun.shadow_distance` is the biggest cost of the look: the four cascades redraw every island mesh, so on busy maps (`border_dispute`,
+  3700 entities) 2500 units cost 20 ms a frame and 800 cost 14 ms (`red_rover` 17.5 -> 12 ms). The battle camera never looks further
+  than a few hundred units, so keep it near 800; removing the `surfaces` block gave the same saving, so the two multiply.

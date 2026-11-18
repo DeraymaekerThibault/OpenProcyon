@@ -1,7 +1,8 @@
 //! Not retail: burst particles of the render profile (part of render/mod.rs's look), drawn on top of the retail effects.
 //! When a retail effect starts whose name contains a rule's `match` (`bursts.effects`: muzzle flashes, impacts,
 //! explosions), the rule's parts are thrown from the effect's pose: a flash, sparks, embers, a fireball, a shockwave ring,
-//! smoke; a rule with `every` keeps throwing them while the effect lives (fires on a burning ship), and `shake` jolts the
+//! smoke; a rule with `every` keeps throwing them while the effect lives (fires on a burning ship). A `flame` replaces
+//! the source's drawing with a continuous flame anchored to its transform. `shake` jolts the
 //! camera. A hull struck by a shell glows where it was scarred and cools (`bursts.scorch`), and specks of ether dust
 //! drift around the camera (`bursts.motes`). The jolt also flares the colour fringing (`camera.aberration_pulse`). Particles move on rails (launched, slowed by drag, smoke rising), so the
 //! CPU only places camera-facing quads each frame: every glowing kind in one additive mesh (`shaders/burst.wesl`), the
@@ -20,7 +21,7 @@ use serde_json::Value;
 
 use super::batch::QuadBatch;
 use super::{Look, num, rgb};
-use crate::fx::{EffectStarted, Fx, FxLib};
+use crate::fx::{EffectStarted, Fx, FxLib, HiddenFx};
 
 pub const SHADER: &str = "shaders/burst.wesl";
 pub const SMOKE_SHADER: &str = "shaders/smoke.wesl";
@@ -39,6 +40,19 @@ pub enum Kind {
     Scorch = 5,
     Mote = 6,
     Smoke = 7,
+    Flame = 8,
+    Splinter = 9,
+    Fiber = 10,
+}
+
+impl Kind {
+    fn is_blended(self) -> bool {
+        matches!(self, Self::Smoke | Self::Splinter | Self::Fiber)
+    }
+
+    fn is_impact_debris(self) -> bool {
+        matches!(self, Self::Spark | Self::Ember | Self::Smoke | Self::Splinter | Self::Fiber)
+    }
 }
 
 /// One part of a rule: how many particles, their colour (linear), size (world units), life (seconds), launch speed,
@@ -73,22 +87,54 @@ fn part(v: &Value, d: Part) -> Option<Part> {
 pub struct Rule {
     pub matching: String,
     pub parts: Vec<(Kind, Part)>,
+    flame: Option<FlameSource>,
+    /// A material match takes over debris, but leaves the weapon's flash and other parts alone.
+    surface_debris: bool,
     /// Seconds between throws while the effect lives; 0 = once, when it starts.
     pub every: f32,
     /// Camera jolt, fading with distance.
     pub shake: f32,
 }
 
+/// A continuous flame at the effect's own origin, independent of the detached smoke and embers.
+#[derive(Component, Clone, Copy, Debug, PartialEq)]
+pub(super) struct FlameSource {
+    width: f32,
+    height: f32,
+    brightness: f32,
+}
+
+impl FlameSource {
+    pub(super) fn parse(v: &Value) -> Option<Self> {
+        let width = num(&v["width"], 3.0);
+        let height = num(&v["height"], 5.0);
+        let brightness = num(&v["brightness"], 2.0);
+        (v.is_object() && width > 0.0 && height > 0.0 && brightness > 0.0).then_some(Self { width, height, brightness })
+    }
+
+    /// Fire strength already drives the retail emitter rate. Shrink both the flame footprint and its light when it weakens.
+    pub(super) fn strength(fx: &Fx) -> f32 {
+        if fx.emitting { fx.rate_scale.clamp(0.0, 1.0) } else { 0.0 }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct SurfaceDebris {
+    matching: Vec<String>,
+    parts: Vec<(Kind, Part)>,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Bursts {
     pub rules: Vec<Rule>,
+    impact_materials: Vec<SurfaceDebris>,
     /// Glow left where a shell scars a hull.
     pub scorch: Option<Part>,
     /// Ether dust around the camera: `count` specks within `speed` units (the box's half size), drifting.
     pub motes: Option<Part>,
 }
 
-const KINDS: [(&str, Kind); 7] = [
+const KINDS: [(&str, Kind); 9] = [
     ("flash", Kind::Flash),
     ("sparks", Kind::Spark),
     ("embers", Kind::Ember),
@@ -96,6 +142,8 @@ const KINDS: [(&str, Kind); 7] = [
     ("ring", Kind::Ring),
     ("smoke", Kind::Smoke),
     ("scorch", Kind::Scorch),
+    ("splinters", Kind::Splinter),
+    ("fibers", Kind::Fiber),
 ];
 
 fn defaults(kind: Kind) -> Part {
@@ -109,6 +157,9 @@ fn defaults(kind: Kind) -> Part {
         Kind::Smoke => Part { count: 6, color: Vec3::splat(0.45), size: 1.5, seconds: 2.5, speed: 3.0, spread: 40.0, drag: 1.5, rise: 0.6 },
         Kind::Scorch => Part { color: Vec3::new(1.0, 0.35, 0.08), size: 1.0, seconds: 6.0, ..p },
         Kind::Mote => Part { count: 300, color: Vec3::new(0.6, 0.7, 1.0), size: 0.12, seconds: 1.0, speed: 120.0, ..p },
+        Kind::Flame => unreachable!("a flame is not a particle part"),
+        Kind::Splinter => Part { count: 10, color: Vec3::new(0.72, 0.45, 0.21), size: 0.55, seconds: 0.65, speed: 16.0, spread: 66.0, drag: 2.2, ..p },
+        Kind::Fiber => Part { count: 8, color: Vec3::new(0.84, 0.81, 0.72), size: 0.65, seconds: 0.95, speed: 10.0, spread: 75.0, drag: 3.6, rise: 0.3 },
     }
 }
 
@@ -127,8 +178,22 @@ pub fn parse(v: &Value) -> Option<Bursts> {
                 Some(Rule {
                     matching: r["match"].as_str()?.to_lowercase(),
                     parts: KINDS.iter().filter_map(|&(key, kind)| Some((kind, part(&r[key], defaults(kind))?))).collect(),
+                    flame: FlameSource::parse(&r["flame"]),
+                    surface_debris: r["surface_debris"].as_bool().unwrap_or(false),
                     every: num(&r["every"], 0.0),
                     shake: num(&r["shake"], 0.0),
+                })
+            })
+            .collect(),
+        impact_materials: v["impact_materials"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|r| {
+                let matching = super::names(&r["match"], &[]);
+                (!matching.is_empty()).then(|| SurfaceDebris {
+                    matching,
+                    parts: KINDS.iter().filter(|(_, k)| k.is_impact_debris()).filter_map(|&(key, kind)| Some((kind, part(&r[key], defaults(kind))?))).collect(),
                 })
             })
             .collect(),
@@ -138,6 +203,11 @@ pub fn parse(v: &Value) -> Option<Bursts> {
 }
 
 impl Bursts {
+    fn surface_debris(&self, rule: &Rule, material: Option<&str>) -> Option<&[(Kind, Part)]> {
+        let material = material.filter(|_| rule.surface_debris)?;
+        self.impact_materials.iter().find(|r| r.matching.iter().any(|key| key.eq_ignore_ascii_case(material))).map(|r| r.parts.as_slice())
+    }
+
     pub fn rule(&self, effect: &str) -> Option<usize> {
         let n = effect.to_lowercase();
         self.rules.iter().position(|r| n.contains(r.matching.as_str()))
@@ -211,7 +281,7 @@ impl Particles {
 
 #[derive(Clone, Copy, Default, Debug, ShaderType)]
 pub struct BurstUniform {
-    /// x: clock
+    /// Unused: the clock is the frame data's (`frame.rs`). Kept so a glow shader has a uniform of its own to grow into.
     pub params: Vec4,
 }
 
@@ -219,6 +289,9 @@ pub struct BurstUniform {
 pub struct BurstGlow {
     #[uniform(100)]
     pub u: BurstUniform,
+    /// The frame data (`frame.rs`) at `@binding(99)`.
+    #[storage(99, read_only)]
+    pub frame: super::frame::FrameBinding,
 }
 
 impl MaterialExtension for BurstGlow {
@@ -231,7 +304,7 @@ impl MaterialExtension for BurstGlow {
         _: &MeshVertexBufferLayoutRef,
         _: MaterialExtensionKey<Self>,
     ) -> Result<(), SpecializedMeshPipelineError> {
-        super::trails::additive(descriptor);
+        super::kit::additive(descriptor);
         Ok(())
     }
 }
@@ -240,11 +313,7 @@ pub type BurstMaterial = ExtendedMaterial<StandardMaterial, BurstGlow>;
 
 #[derive(Clone, Copy, Default, Debug, ShaderType)]
 pub struct SmokeUniform {
-    /// xyz: direction the sunlight travels (world), w: clock
-    pub sun: Vec4,
-    /// rgb: sunlight colour on the smoke
-    pub light: Vec4,
-    /// rgb: shadowed side's colour (the sky's)
+    /// rgb: the shadowed side's colour (the sky's, from the ambient light); the sun and the clock are the frame data's (`frame.rs`)
     pub shade: Vec4,
 }
 
@@ -252,6 +321,9 @@ pub struct SmokeUniform {
 pub struct SmokeShade {
     #[uniform(100)]
     pub u: SmokeUniform,
+    /// The frame data (`frame.rs`) at `@binding(99)`.
+    #[storage(99, read_only)]
+    pub frame: super::frame::FrameBinding,
 }
 
 impl MaterialExtension for SmokeShade {
@@ -293,6 +365,7 @@ fn start(
     mut parts: ResMut<Particles>,
     mut started: MessageReader<EffectStarted>,
     cams: Query<&GlobalTransform, With<Camera3d>>,
+    effects: Query<&Fx>,
     mut names: Local<Vec<String>>,
 ) {
     let (Some(b), Some(lib)) = (&look.bursts, lib) else { return };
@@ -310,8 +383,16 @@ fn start(
         let Some(name) = names.get(m.effect) else { continue };
         let Some(r) = b.rule(name) else { continue };
         let rule = &b.rules[r];
-        for (kind, p) in &rule.parts {
-            parts.throw(*kind, p, m.at, m.forward, now, None);
+        let scale = effects.get(m.entity).map_or(1.0, |fx| FlameSource::strength(fx).sqrt());
+        let debris = b.surface_debris(rule, m.material);
+        throw_parts(&mut parts, rule, m.at, m.forward, now, scale, debris);
+        if debris.is_some() {
+            // The profile supplies both the weapon flash and the material debris. Don't layer the retail impact sprite over them.
+            commands.entity(m.entity).try_insert(HiddenFx);
+        }
+        if let Some(flame) = rule.flame {
+            // Only replace the drawing when this shader block is active. The original effect still controls the lifetime.
+            commands.entity(m.entity).try_insert((flame, HiddenFx));
         }
         if rule.shake > 0.0 {
             let d = eye.map_or(0.0, |c| c.distance(m.at));
@@ -336,9 +417,20 @@ fn emitters(time: Res<Time>, look: Res<Look>, mut parts: ResMut<Particles>, mut 
         if !f.emitting {
             continue;
         }
-        for (kind, p) in &rule.parts {
-            parts.throw(*kind, p, gt.translation(), Vec3::Y, now, None);
+        throw_parts(&mut parts, rule, gt.translation(), Vec3::Y, now, FlameSource::strength(f).sqrt(), None);
+    }
+}
+
+fn throw_parts(parts: &mut Particles, rule: &Rule, at: Vec3, forward: Vec3, now: f32, scale: f32, debris: Option<&[(Kind, Part)]>) {
+    for (kind, p) in &rule.parts {
+        if debris.is_some() && kind.is_impact_debris() {
+            continue;
         }
+        let lift = if *kind == Kind::Smoke { rule.flame.map_or(0.0, |f| f.height * 0.8 * scale) } else { 0.0 };
+        parts.throw(*kind, p, at + Vec3::Y * lift, forward, now, None);
+    }
+    for (kind, p) in debris.into_iter().flatten() {
+        parts.throw(*kind, p, at, forward, now, None);
     }
 }
 
@@ -402,12 +494,33 @@ fn place(b: &mut QuadBatch, p: &Particle, at: Vec3, t: f32, cam: &GlobalTransfor
             let side = along.cross(to_cam).normalize_or(right) * p.size;
             quad(b, p.kind, centre - along * 0.5, along * 0.5, side, to_cam, p.color, age, p.seed);
         }
+        Kind::Splinter | Kind::Fiber => {
+            let seed = p.seed as f32;
+            let (sn, cs) = (seed * 2.4 + t * (5.0 + seed % 7.0)).sin_cos();
+            let along = right * cs + up * sn;
+            let side = up * cs - right * sn;
+            let width = if p.kind == Kind::Splinter { 0.35 } else { 0.28 };
+            quad(b, p.kind, centre, along * s, side * s * width, back, p.color, age, p.seed);
+        }
         Kind::Ring => {
             let r = p.size + offset.length();
             quad(b, p.kind, at, Vec3::X * r, Vec3::Z * r, Vec3::Y, p.color, age, p.seed);
         }
         _ => quad(b, p.kind, centre + back * s * 0.3, right * s, up * s, back, p.color, age, p.seed),
     }
+}
+
+/// One depth-tested billboard per source. Its bottom stays at the hit while the shader animates the tongues on it.
+fn flame_quad(b: &mut QuadBatch, f: &FlameSource, strength: f32, at: Vec3, cam: &GlobalTransform, seed: u32) {
+    if strength <= 0.0 {
+        return;
+    }
+    let size = strength.sqrt();
+    let a = cam.right().as_vec3() * (0.5 * f.width * size);
+    let h = cam.up().as_vec3() * (0.5 * f.height * size);
+    let back = cam.back().as_vec3();
+    // Small depth bias keeps a base exactly on the hit surface from clipping into the planks.
+    quad(b, Kind::Flame, at + h + back * 0.25, a, h, back, Vec3::splat(f.brightness), 0.0, seed);
 }
 
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
@@ -418,7 +531,7 @@ fn draw(
     mut parts: ResMut<Particles>,
     cams: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
     hosts: Query<&GlobalTransform>,
-    sun: Query<(&DirectionalLight, &GlobalTransform)>,
+    flames: Query<(Entity, &FlameSource, &Fx, &GlobalTransform)>,
     ambient: Res<GlobalAmbientLight>,
     mut glows: Query<(&Mesh3d, &MeshMaterial3d<BurstMaterial>, &mut Visibility), (With<Glows>, Without<Smokes>)>,
     mut smokes: Query<(&Mesh3d, &MeshMaterial3d<SmokeMaterial>, &mut Visibility), (With<Smokes>, Without<Glows>)>,
@@ -435,7 +548,7 @@ fn draw(
         let mesh = |meshes: &mut Assets<Mesh>| Mesh3d(meshes.add(Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default())));
         let common = || (crate::Scenario, Transform::default(), Visibility::Hidden, NoFrustumCulling, NotShadowCaster);
         if glows.is_empty() {
-            let m = glow_mats.add(BurstMaterial { base: super::trails::additive_base(None), extension: BurstGlow::default() });
+            let m = glow_mats.add(BurstMaterial { base: super::kit::additive_base(None), extension: BurstGlow::default() });
             commands.spawn((Glows, mesh(&mut meshes), MeshMaterial3d(m), common()));
         }
         if smokes.is_empty() {
@@ -452,7 +565,7 @@ fn draw(
     let mut smoky: Vec<(f32, &Particle, Vec3)> = vec![];
     for p in &parts.list {
         let at = p.host.and_then(|h| hosts.get(h).ok()).map_or(p.from, |h| h.transform_point(p.from));
-        if p.kind == Kind::Smoke {
+        if p.kind.is_blended() {
             smoky.push((eye.distance_squared(at + p.motion(now - p.born).0), p, at));
         } else {
             place(glow, p, at, now - p.born, cam);
@@ -462,21 +575,22 @@ fn draw(
     for (_, p, at) in smoky {
         place(smoke, p, at, now - p.born, cam);
     }
+    for (e, f, fx, gt) in &flames {
+        flame_quad(glow, f, FlameSource::strength(fx), gt.translation(), cam, e.index().index() % 64);
+    }
     if let Some(m) = b.motes {
         motes(glow, &m, eye, now, cam);
     }
-    let (gm, gmat, mut gvis) = glows.single_mut().expect("one glow mesh");
+    let (gm, _, mut gvis) = glows.single_mut().expect("one glow mesh");
     gvis.set_if_neq(glow.upload(&mut meshes, &gm.0));
-    if let Some(mut m) = glow_mats.get_mut(&gmat.0) {
-        m.extension.u.params.x = now;
-    }
     let (sm, smat, mut svis) = smokes.single_mut().expect("one smoke mesh");
     svis.set_if_neq(smoke.upload(&mut meshes, &sm.0));
-    if let Some(mut m) = smoke_mats.get_mut(&smat.0) {
-        let (dir, light) = sun.iter().next().map_or((Vec3::NEG_Y, Vec3::ONE), |(l, t)| (t.forward().as_vec3(), l.color.to_linear().to_vec3()));
-        m.extension.u.sun = dir.extend(now);
-        m.extension.u.light = light.extend(1.0);
-        m.extension.u.shade = (ambient.color.to_linear().to_vec3() * 0.35).extend(1.0);
+    // the clock and the sun are the frame data's; only the sky's colour on the shadowed side is the smoke's own, and it rarely changes
+    let shade = (ambient.color.to_linear().to_vec3() * 0.35).extend(1.0);
+    if smoke_mats.get(&smat.0).is_some_and(|m| m.extension.u.shade != shade)
+        && let Some(mut m) = smoke_mats.get_mut(&smat.0)
+    {
+        m.extension.u.shade = shade;
     }
     parts.shake *= (1.0 - time.delta_secs() * 4.0).max(0.0);
 }
@@ -565,6 +679,49 @@ mod tests {
     }
 
     #[test]
+    fn a_flame_replaces_the_sprite_stays_at_the_source_and_leaves_smoke_when_extinguished() {
+        use bevy::ecs::system::RunSystemOnce;
+        use serde_json::json;
+        let mut world = World::new();
+        world.init_resource::<Messages<EffectStarted>>();
+        world.init_resource::<Particles>();
+        world.insert_resource(Time::<()>::default());
+        world.insert_resource(FxLib::with_names(&["FireOnShip"]));
+        world.insert_resource(Look::parse(&json!({"bursts": {"effects": [
+            {"match": "FireOnShip", "flame": {"width": 4, "height": 5}, "smoke": {"count": 1}, "every": 0.25}
+        ]}})));
+        let fire = world
+            .run_system_once(|mut c: Commands, lib: Res<FxLib>| {
+                let host = c.spawn(Transform::default()).id();
+                let at = Transform::from_xyz(1.0, 2.0, 3.0);
+                crate::fx::spawn(&mut c, &lib, "FireOnShip", Some(host), at, at, false).unwrap()
+            })
+            .unwrap();
+        world.run_system_once(start).unwrap();
+        assert!(world.get::<HiddenFx>(fire).is_some());
+        let f = *world.get::<FlameSource>(fire).unwrap();
+        let parts = &world.resource::<Particles>().list;
+        assert_eq!(parts[0].from, Vec3::new(1.0, 6.0, 3.0), "smoke starts above the visible flame base");
+        assert!(parts[0].host.is_none(), "released smoke drifts free");
+
+        let mut b = QuadBatch::with_normals();
+        let cam = GlobalTransform::IDENTITY;
+        let moved = Vec3::new(9.0, 3.0, 4.0);
+        flame_quad(&mut b, &f, FlameSource::strength(world.get::<Fx>(fire).unwrap()), moved, &cam, 2);
+        assert_eq!(b.pos[0], [7.0, 3.0, 4.25]);
+        assert_eq!(b.pos[2], [7.0, 8.0, 4.25]);
+        assert_eq!(b.uv[0], [32.0, 4.0]);
+        world.get_mut::<Fx>(fire).unwrap().emitting = false;
+        world.resource_mut::<Time>().advance_by(std::time::Duration::from_secs_f32(0.5));
+        world.run_system_once(emitters).unwrap();
+        b.clear();
+        flame_quad(&mut b, &f, FlameSource::strength(world.get::<Fx>(fire).unwrap()), moved, &cam, 2);
+        assert!(b.is_empty());
+        assert_eq!(world.resource::<Particles>().list.len(), 1, "no new smoke, but the detached puff remains");
+        assert!(FlameSource::parse(&json!({"height": 0})).is_none(), "a disabled flame leaves the original drawing alone");
+    }
+
+    #[test]
     fn particles_slow_with_drag_rise_and_stay_in_their_cone() {
         let mut ps = Particles::default();
         let p = Part { count: 200, speed: 10.0, spread: 30f32.to_radians(), drag: 2.0, rise: 1.0, ..defaults(Kind::Spark) };
@@ -588,10 +745,15 @@ mod tests {
         world.init_resource::<Messages<EffectStarted>>();
         world.init_resource::<Particles>();
         world.insert_resource(Time::<()>::default());
-        world.insert_resource(FxLib::with_names(&["Gun_Muzzle_Flash", "Gun_Impact", "Boarding_Fight"]));
+        world.insert_resource(FxLib::with_names(&["Gun_Muzzle_Flash", "Gun_Impact", "Boarding_Fight", "Special"]));
         world.insert_resource(Look::parse(&serde_json::json!({"bursts": {"effects": [
             {"match": "muzzle", "sparks": {"count": 60, "spread": 20}},
-            {"match": "_impact", "sparks": {"count": 60, "spread": 30}},
+            {"match": "_impact", "surface_debris": true, "sparks": {"count": 60, "spread": 30}},
+            {"match": "special", "sparks": {"count": 1}},
+        ], "impact_materials": [
+            {"match": ["Wood", "Reinforced"], "splinters": {"count": 2}, "smoke": {"count": 1}},
+            {"match": ["Iron"], "sparks": {"count": 3, "spread": 27}},
+            {"match": ["Cloth"], "fibers": {"count": 4}}
         ]}})));
         world
             .run_system_once(move |mut commands: Commands, lib: Res<FxLib>| {
@@ -612,7 +774,7 @@ mod tests {
     fn a_muzzle_flash_throws_along_the_shot_not_its_mounts_axes() {
         let mount = Transform::from_xyz(5.0, 0.0, 0.0).looking_to(Vec3::NEG_Z, Vec3::Y);
         let shot = Vec3::new(1.0, 0.2, 0.0).normalize();
-        let origin = crate::fx::Origin { forward: Some(shot), shell: Some(Entity::from_raw_u32(7).unwrap()), host: None };
+        let origin = crate::fx::Origin { forward: Some(shot), shell: Some(Entity::from_raw_u32(7).unwrap()), ..default() };
         let list = thrown(vec![("Gun_Muzzle_Flash", mount, origin)]);
         assert_eq!(list.len(), 60);
         assert!(inside(&list, shot, 20.0), "inside the cone about the shot's velocity");
@@ -625,11 +787,29 @@ mod tests {
         let normal = Vec3::new(0.0, 1.0, 0.5).normalize();
         // the effect node faces back along the flight, 90 degrees from the surface normal here
         let node = Transform::from_xyz(0.0, 3.0, 0.0).looking_to(Vec3::X, Vec3::Y);
-        let origin = crate::fx::Origin { forward: Some(normal), shell: None, host: Some(Entity::from_raw_u32(9).unwrap()) };
+        let origin = crate::fx::Origin { forward: Some(normal), host: Some(Entity::from_raw_u32(9).unwrap()), ..default() };
         let list = thrown(vec![("Gun_Impact", node, origin)]);
         assert_eq!(list.len(), 60);
         assert!(inside(&list, normal, 30.0));
         assert!(!inside(&list, Vec3::X, 30.0));
+    }
+
+    #[test]
+    fn material_debris_replaces_generic_particles_only_for_opted_in_hits() {
+        let tf = Transform::from_xyz(1.0, 0.0, 1.0);
+        let launch = |name, material| thrown(vec![(name, tf, crate::fx::Origin { material, forward: Some(Vec3::X), ..default() })]);
+        for (material, kind, count) in [("Wood", Kind::Splinter, 2), ("Reinforced", Kind::Splinter, 2), ("Iron", Kind::Spark, 3), ("Cloth", Kind::Fiber, 4)] {
+            let list = launch("Gun_Impact", Some(material));
+            assert_eq!(list.len(), count + usize::from(kind == Kind::Splinter));
+            assert_eq!(list.iter().filter(|p| p.kind == kind).count(), count);
+            assert!(list.iter().all(|p| p.from == tf.translation));
+            if kind == Kind::Spark {
+                assert!(inside(&list, Vec3::X, 27.0));
+            }
+        }
+        assert_eq!(launch("Gun_Impact", Some("Stone")).len(), 60, "unconfigured materials keep the generic burst");
+        assert_eq!(launch("Gun_Muzzle_Flash", None).len(), 60, "muzzle flashes are unaffected");
+        assert_eq!(launch("Special", Some("Wood"))[0].kind, Kind::Spark, "a weapon can retain its own burst");
     }
 
     #[test]

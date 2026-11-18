@@ -58,13 +58,14 @@ def lobby(name, spec, seconds, expect):
     return Scenario(name, ["--lobby", spec], seconds, expect)
 
 
-# Expectations. "fight": both sides fire and hit, the computer's first burst within 60 s. "patrol": every computer-commanded ship
+# Expectations. "fight": both sides fire and hit, the computer's first burst within 60 s. "engage": the same for side1 only
+# (the human fleet receives no orders, so its firing is not guaranteed). "patrol": every computer-commanded ship
 # (allied computer fleets included, the human's own fleet excluded) that is still afloat sails at least 300 units. "fire": every side fires within FIRE_BY
 # s, and on a side with computer ships one of them fires. "budget": every computer fleet spends most of its victory points.
 # Every scenario also checks for panics, grinding and stutter ("no-stutter" skips the last, only with an open issue).
 SCENARIOS = [
-    shortcut("ambush", "ambush", 120, {"fight"}),  # starts 514 apart among 22 islands
-    shortcut("bayles_stand", "bayles_stand", 120, {"fight"}),  # starts 464 apart
+    shortcut("ambush", "ambush", 120, {"engage"}),  # starts 514 apart among 22 islands
+    shortcut("bayles_stand", "bayles_stand", 120, {"engage"}),  # starts 464 apart
     shortcut(
         "diablo_strait", "diablo_straight", 120, {"patrol"}
     ),  # armed volcanoes, starts 861 apart
@@ -90,8 +91,8 @@ def evaluate(report, expect):
     """The failed expectations of one battle report (empty when it passes)."""
     fails = []
     sides = report["sides"]
-    if "fight" in expect:
-        for name in ("player", "side1"):
+    if "fight" in expect or "engage" in expect:
+        for name in ("player", "side1") if "fight" in expect else ("side1",):
             line = sides.get(name, {})
             if not line.get("bursts"):
                 fails.append(f"{name} never fired")
