@@ -97,7 +97,9 @@ skirmish, the shell position sampled about 30 times a second.
   MuzzleSpeed is not the launch speed (at 45° it would carry √2 × 350 = 495 units). Whether it caps the speed is not
   observed. The measured elevations
   (44-50°) scatter around LobAngle; the cause is unknown (PROVISIONAL: the remake fires at exactly LobAngle).
-- The gun fires as soon as it is aimed (0.08 s after the click when already pointing that way, 0.65 s after a turn).
+- The gun fires as soon as it is aimed (0.08 s after the click when already pointing that way, 0.65 s after a turn, fixed however far it turns).
+  Remake: "already pointing" is the gun's ordinary aligned test (base within 1° of the aim and barrel within 1° of its elevation), taken before
+  the first step's turning.
 - A shell that hits nothing bursts where it reaches the flight plane.
 - Look: in flight a small pink-white spark with a short trail. On impact a white flash with long rays, then about a second
   later a wide flat pink-orange ring spreading over the flight plane (blast MaxRadius 60 over Duration 3 in the bullet
