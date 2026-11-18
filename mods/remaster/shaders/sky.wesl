@@ -156,7 +156,9 @@ fn lensed(d: vec3<f32>) -> vec4<f32> {
         let b = max(length(perp), 1e-3);
         let reach = sky.hole_reach[i].x;
         let fade = 1.0 - smoothstep(0.35 * reach, reach, b);
-        let bend = min(sky.lens.y * h.w / b, 1.4) * fade;
+        let ratio = h.w / b;
+        // falls off with the square of the distance: a ring at the horizon, a gentle bend across the rest of the pull circle
+        let bend = min(sky.lens.y * ratio * ratio, 1.4) * fade;
         dir = normalize(dir * cos(bend) + (perp / b) * sin(bend));
         total += bend;
     }

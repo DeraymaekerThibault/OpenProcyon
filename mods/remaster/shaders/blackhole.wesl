@@ -77,7 +77,9 @@ fn fragment(in: VertexOutput) -> FragmentOutput {
         // bands: constant along a log spiral; the turning (clockwise: the pattern's angle decreases) is rigid
         let u = screen_angle * arms + 3.2 * log(max(rho, 1.0)) + hole.disc.z * t * 6.2831853 * arms;
         let band = 0.5 + 0.5 * sin(u);
-        let grain = noise2(vec2<f32>(u * 1.7, rho / max(core, 1.0) * 6.0));
+        // the grain turns with the bands; periodic in the angle, so there is no seam where atan2 wraps
+        let turned = screen_angle + hole.disc.z * t * 6.2831853;
+        let grain = noise2(vec2<f32>(cos(turned), sin(turned)) * 5.0 + vec2<f32>(rho / max(core, 1.0) * 4.0));
         let streaks = pow(band, 1.5) * (0.55 + 0.9 * grain);
         // the side moving toward the camera is brighter
         let tangent = normalize(vec3<f32>(-rel.z, 0.0, rel.x));
