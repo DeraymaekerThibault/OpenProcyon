@@ -1,6 +1,6 @@
 //! Not retail: the bolts of storm lightning of the render profile (`nebulae.bolt`, drawn with the mod's `shaders/bolt.wesl`). The
-//! retail game shows a bolt as a sprite where it strikes; this draws the bolt itself: the storm-wide random segment
-//! `nebula::StormFlash` carries (`from`, `to`), as a jagged, branching ribbon facing the camera, a white-hot thread in a coloured
+//! retail game shows a bolt as a sprite where it strikes; this draws a jagged, branching ribbon facing the camera along
+//! the segment `nebula::StormFlash` carries (optionally shortened for display), a white-hot thread in a coloured
 //! glow, past 1 so it blooms, flickering and fading over `seconds`. When a `SolarStorm` rule replaces the retail look (`replace`), the
 //! retail `Lightning` sprite is hidden (`replace.rs`) so the two do not stack. The bolt's light in the storm volume and the sky is the
 //! nebula's and the sky's business (they read the same message). All bolts live in one mesh, rebuilt each frame.
@@ -29,6 +29,8 @@ pub struct Bolts {
     /// The glow's colour (linear) and the white-hot thread's.
     pub color: Vec3,
     pub core: Vec3,
+    /// Maximum span in world units (0 = use the entire simulation segment).
+    pub max_length: f32,
     /// The thread's width (world units); the ribbon is `glow` times as wide, the glow fading out to its edge.
     pub width: f32,
     pub glow: f32,
@@ -48,6 +50,7 @@ pub fn parse(v: &Value) -> Option<Bolts> {
     v.is_object().then(|| Bolts {
         color: rgb(&v["color"]).unwrap_or(Vec3::new(0.45, 0.6, 1.0)).max(Vec3::ZERO),
         core: rgb(&v["core"]).unwrap_or(Vec3::new(1.0, 0.97, 0.9)).max(Vec3::ZERO),
+        max_length: num(&v["max_length"], 0.0).max(0.0),
         width: num(&v["width"], 2.5).clamp(0.05, 50.0),
         glow: num(&v["glow"], 6.0).clamp(1.0, 30.0),
         brightness: num(&v["brightness"], 3.0).max(0.0),
@@ -56,6 +59,24 @@ pub fn parse(v: &Value) -> Option<Bolts> {
         jitter: num(&v["jitter"], 0.12).clamp(0.0, 0.5),
         branches: num(&v["branches"], 3.0).clamp(0.0, 8.0) as usize,
     })
+}
+
+/// The visible segment, shared by the ribbon and the light it throws into the gas. A hit ends at the impact;
+/// a miss is shortened symmetrically so it still lights the spot the event was sent from.
+pub(super) fn display_segment(f: &StormFlash, max_length: f32) -> (Vec3, Vec3) {
+    let span = f.to - f.from;
+    let length = span.length();
+    if max_length <= 0.0 || length <= 1e-3 {
+        return (f.from, f.to);
+    }
+    let dir = span / length;
+    if f.hit {
+        (f.at - dir * max_length.min(f.from.distance(f.at)), f.at)
+    } else {
+        let half = dir * (0.5 * length.min(max_length));
+        let centre = f.from.lerp(f.to, 0.5);
+        (centre - half, centre + half)
+    }
 }
 
 #[derive(Clone, Copy, Default, Debug, ShaderType)]
@@ -149,9 +170,10 @@ struct Bolt {
 impl Bolt {
     fn new(f: &StormFlash, b: &Bolts, seed: u32) -> Bolt {
         let mut rng = Rng(seed | 1);
-        let main = jagged(f.from, f.to, b.segments, b.jitter, &mut rng);
-        let len = f.from.distance(f.to);
-        let dir = (f.to - f.from).normalize_or(Vec3::Y);
+        let (from, to) = display_segment(f, b.max_length);
+        let main = jagged(from, to, b.segments, b.jitter, &mut rng);
+        let len = from.distance(to);
+        let dir = (to - from).normalize_or(Vec3::Y);
         let mut branches = vec![];
         for _ in 0..b.branches {
             // off the middle of the path, leaning away from it, about a quarter as long
@@ -188,7 +210,8 @@ struct BoltMesh;
 fn strike(look: Res<Look>, mut flashes: MessageReader<StormFlash>, mut live: ResMut<Live>) {
     let Some(b) = &look.bolts else { return };
     for f in flashes.read() {
-        if f.from.distance(f.to) > 1.0 {
+        let (from, to) = display_segment(f, b.max_length);
+        if from.distance_squared(to) > 1.0 {
             live.made = live.made.wrapping_add(1);
             let seed = f.at.x.to_bits() ^ f.at.z.to_bits().rotate_left(13) ^ live.made.wrapping_mul(0x9e37_79b1);
             live.bolts.push(Bolt::new(f, b, seed));
@@ -260,10 +283,10 @@ fn draw(
     batch.clear();
     let eye = cam.translation();
     for bolt in &live.bolts {
-        let colour = b.color.extend(bolt.glow(b.seconds)).to_array();
-        ribbon(batch, &bolt.main, b.width * b.glow * 0.5, eye, colour);
+        let glow = bolt.glow(b.seconds);
+        ribbon(batch, &bolt.main, b.width * b.glow * 0.5, eye, b.color.extend(glow).to_array());
         for branch in &bolt.branches {
-            ribbon(batch, branch, b.width * b.glow * 0.25, eye, colour);
+            ribbon(batch, branch, b.width * b.glow * 0.25, eye, b.color.extend(glow * 0.6).to_array());
         }
     }
     vis.set_if_neq(batch.upload(&mut meshes, &mesh.0));
@@ -281,6 +304,23 @@ mod tests {
         assert_eq!((b.segments, b.branches, b.seconds), (16, 3, 0.45));
         let b = parse(&json!({"segments": 20, "branches": 99, "width": 0, "seconds": 0})).unwrap();
         assert_eq!((b.segments, b.branches, b.width, b.seconds), (32, 8, 0.05, 0.05), "segments round up to a power of two");
+    }
+
+    #[test]
+    fn a_capped_bolt_stays_centred_on_a_miss_and_ends_at_a_hit() {
+        let b = parse(&json!({"max_length": 120})).unwrap();
+        let f = StormFlash { at: Vec3::X * 200.0, from: Vec3::ZERO, to: Vec3::X * 400.0, hit: false };
+        assert_eq!(display_segment(&f, 0.0), (f.from, f.to));
+        assert_eq!(display_segment(&f, 500.0), (f.from, f.to));
+        let bolt = Bolt::new(&f, &b, 42);
+        assert_eq!((bolt.main[0], *bolt.main.last().unwrap()), (Vec3::X * 140.0, Vec3::X * 260.0));
+        let hit = StormFlash { at: Vec3::X * 150.0, hit: true, ..f };
+        let bolt = Bolt::new(&hit, &b, 42);
+        assert_eq!((bolt.main[0], *bolt.main.last().unwrap()), (Vec3::X * 30.0, hit.at));
+        let near = StormFlash { at: Vec3::X * 15.0, ..hit };
+        assert_eq!(display_segment(&near, b.max_length), (near.from, near.at));
+        let sheet = StormFlash { at: f.at, from: f.at, to: f.at, hit: false };
+        assert_eq!(display_segment(&sheet, b.max_length), (sheet.at, sheet.at));
     }
 
     #[test]

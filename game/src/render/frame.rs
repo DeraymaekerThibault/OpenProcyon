@@ -81,7 +81,7 @@ impl Frame {
         (self.rows[SUN].w > 0.0).then(|| (self.rows[SUN].truncate(), self.rows[SUN_COLOR].truncate()))
     }
 
-    /// The storm's last bolt: where it struck, its segment's ends, and real seconds since it (very large: none yet).
+    /// The storm's last bolt: where it struck, the displayed segment's ends, and real seconds since it (very large: none yet).
     pub fn bolt(&self) -> (Vec3, Vec3, Vec3, f32) {
         (self.rows[BOLT_AT].truncate(), self.rows[BOLT_FROM].truncate(), self.rows[BOLT_TO].truncate(), self.rows[BOLT_AT].w)
     }
@@ -143,10 +143,11 @@ fn gather(
         frame.rows[CAMERA] = eye.extend(0.0);
     }
     for f in bolts.read() {
+        let (from, to) = super::bolts::display_segment(f, look.bolts.as_ref().map_or(0.0, |b| b.max_length));
         frame.bolt = Some(now);
         frame.rows[BOLT_AT] = f.at.extend(0.0);
-        frame.rows[BOLT_FROM] = f.from.extend(if f.hit { 1.0 } else { 0.0 });
-        frame.rows[BOLT_TO] = f.to.extend(0.0);
+        frame.rows[BOLT_FROM] = from.extend(if f.hit { 1.0 } else { 0.0 });
+        frame.rows[BOLT_TO] = to.extend(0.0);
     }
     frame.rows[BOLT_AT].w = frame.bolt.map_or(NEVER, |t| now - t);
     let b = look.black_holes.as_ref();
@@ -218,6 +219,16 @@ mod tests {
         assert_eq!(rows[HOLES_INFO], Vec4::new(1.0, 1.5, 0.0, 0.0));
         assert_eq!((rows[HOLES].truncate(), rows[HOLES].w), (Vec3::new(100.0, 0.0, 0.0), hole.core()), "a flat hole bends the sky at itself, round its kill core");
         assert_eq!(rows[HOLE_REACH], Vec4::new(hole.radius, hole.core(), 0.0, 0.0));
+    }
+
+    #[test]
+    fn gas_lighting_uses_the_same_shortened_segment_as_the_ribbon() {
+        let mut app = app(json!({"nebulae": {"bolt": {"max_length": 120}}}));
+        let f = StormFlash { at: Vec3::X * 200.0, from: Vec3::ZERO, to: Vec3::X * 400.0, hit: true };
+        app.world_mut().resource_mut::<Messages<StormFlash>>().write(f);
+        app.update();
+        let (at, from, to, _) = app.world().resource::<Frame>().bolt();
+        assert_eq!((at, from, to), (Vec3::X * 200.0, Vec3::X * 80.0, Vec3::X * 200.0));
     }
 
     #[test]

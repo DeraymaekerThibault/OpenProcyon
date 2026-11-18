@@ -48,7 +48,7 @@ scripts! {
     Cloak => "cloak", Course => "course", CurrentM3 => "current-m3", Damage => "damage", Defeat => "defeat",
     Dock => "dock", DockClick => "dock-click", DockMenu => "dock-menu",
     Fleet => "fleet", FleetPrimary => "fleet-primary", FleetCrew => "fleet-crew", FleetArms => "fleet-arms", FleetProfile => "fleet-profile", FleetProfileCrew => "fleet-profile-crew", FleetProfileArms => "fleet-profile-arms", FleetShips => "fleet-ships",
-    FxTest => "fxtest", HuntM3 => "hunt-m3",
+    Fire => "fire", FxTest => "fxtest", HuntM3 => "hunt-m3",
     Ingame => "ingame", IngameLoad => "ingame-load", IngameDoLoad => "ingame-do-load", IngameQuit => "ingame-quit",
     IngameSave => "ingame-save", IngameOptions => "ingame-options", IngameControls => "ingame-controls",
     LifeboatM1 => "lifeboat-m1", LifeboatM1Fallback => "lifeboat-m1-fallback",
@@ -65,7 +65,34 @@ pub fn plugin(app: &mut App) {
     trace::plugin(app);
     app.add_systems(PreUpdate, fleet::fleet_smoke.after(bevy::ui::UiSystems::Focus).before(crate::panels::hud_input))
         .add_systems(PreUpdate, lifeboats::smoke.after(bevy::ui::UiSystems::Focus))
-        .add_systems(Update, (shells::shells, animals, stormflash, allstop));
+        .add_systems(Update, (shells::shells, animals, stormflash, allstop, fire));
+}
+
+/// `--script fire`: light one attached fire for a screenshot, then stop it with smoke still in the air. Visual only.
+fn fire(
+    mut commands: Commands,
+    cfg: Res<Config>,
+    player: Query<(Entity, &Transform, &crate::Ship), With<crate::PlayerShip>>,
+    lib: Res<crate::combat::Library>,
+    fx: Res<crate::fx::FxLib>,
+    mut live: Query<&mut crate::fx::Fx>,
+    mut source: Local<Option<Entity>>,
+) {
+    if cfg.script != Some(Script::Fire) || cfg.frame < 30 {
+        return;
+    }
+    // Use thresholds: the screenshot counter can advance before or after this system in a frame.
+    if cfg.frame >= 210 {
+        if let Some(mut f) = source.take().and_then(|e| live.get_mut(e).ok()) {
+            f.emitting = false;
+        }
+    } else if source.is_none() {
+        let Ok((e, tf, ship)) = player.single() else { return };
+        let [lo, hi] = lib.classes[ship.class].collision_bounds;
+        let at = lo.lerp(hi, 0.5) + (hi - lo) * Vec3::new(0.25, 0.4, 0.15);
+        let local = Transform::from_translation(at);
+        *source = crate::fx::spawn(&mut commands, &fx, "FireOnShip", Some(e), local, *tf * local, false);
+    }
 }
 
 /// `--script animals --map dragons_nest --shot <png> --shot-frame N`: from frame 20 the first space animal (a dragon here, a

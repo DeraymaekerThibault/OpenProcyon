@@ -38,6 +38,7 @@ struct Sky {
     info: vec4<f32>,
     // x: flow (radians), y: flow cycle seconds, z: breath depth, w: breath seconds
     base: vec4<f32>,
+    // xyz: the breath's colour bias, w: far backdrop brightness minus 1
     base_tint: vec4<f32>,
     // rgb: a storm flash's colour times its strength, w: seconds it lasts (the bolt is the frame's)
     flash: vec4<f32>,
@@ -88,13 +89,13 @@ fn event_light(dir: vec3<f32>) -> vec3<f32> {
     let left = max(1.0 - frame.bolt_at.w / max(sky.flash.w, 0.01), 0.0);
     if left > 0.0 {
         let to_bolt = frame.bolt_at.xyz - view.world_position;
+        let distance = max(length(to_bolt), 0.001);
         let reach = sky.flash_reach.x;
-        var far = 1.0;
+        var local = 1.0;
         if reach > 0.0 {
-            let r = length(to_bolt) / reach;
-            far = 1.0 / (1.0 + r * r);
+            local = 1.0 - smoothstep(0.0, 2.0 * reach, distance);
         }
-        l += sky.flash.rgb * (left * left * far) * pow(max(dot(dir, normalize(to_bolt)), 0.0), 3.0);
+        l += sky.flash.rgb * (left * left * local) * pow(max(dot(dir, to_bolt / distance), 0.0), 8.0);
     }
     l += sky.warm.rgb * pow(max(dot(dir, sky.warm_dir.xyz), 0.0), 2.0);
     if sky.sheet.x > 0.0 {
@@ -217,7 +218,7 @@ fn fragment(in: VertexOutput) -> FragmentOutput {
         let core = smoothstep(0.35, 1.2, dot(col, vec3<f32>(0.3333)));
         let breath = sin(clock * 6.2831853 / sky.base.w);
         col = col * (vec3<f32>(1.0) + sky.base.z * breath * core * sky.base_tint.xyz);
-        rgb = col * lit;
+        rgb = col * lit * (1.0 + sky.base_tint.w);
         alpha = 1.0;
     } else if bent.w > 0.0 {
         // no redrawn far sky: the bent part of it is drawn here, fading in with the bend, so nothing shows a seam

@@ -20,7 +20,9 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
     let thread = exp(-x * x * 1.6);
     let glow = pow(max(1.0 - across, 0.0), 2.2);
     let light = bolt.core.rgb * thread * 1.6 + in.color.rgb * glow * 0.9;
+    // Soften the cut ends of the ribbon, especially the tips of the branches.
+    let ends = smoothstep(0.0, 0.035, in.uv.y) * (1.0 - smoothstep(0.95, 1.0, in.uv.y));
     var out: FragmentOutput;
-    out.color = vec4<f32>(light * bolt.core.a * in.color.a, 1.0);
+    out.color = vec4<f32>(light * bolt.core.a * in.color.a * ends, 1.0);
     return out;
 }

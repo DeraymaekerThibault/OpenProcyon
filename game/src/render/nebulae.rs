@@ -278,6 +278,7 @@ impl Rule {
     fn volume(&self, cloud: &Cloud, centre: Vec3, clock: f32, bolt: &Bolt, sun: SunLight) -> VolumeUniform {
         let radius = cloud.radius();
         let colour = sun.color / sun.color.max_element().max(1e-3);
+        let reach = self.flash_reach * radius;
         VolumeUniform {
             centre: centre.extend(radius),
             axes: (AXES * cloud.breath().clamp(0.8, 1.2)).extend(self.steps),
@@ -287,9 +288,9 @@ impl Rule {
             tint: cloud.colour().extend(self.light_steps),
             sun: sun.toward.normalize_or(Vec3::Y).extend(self.sun),
             sun_color: colour.extend(self.inside),
-            flash: bolt.from.extend(bolt.left * bolt.left),
+            flash: bolt.from.extend(bolt.light(reach)),
             flash_to: bolt.to.extend(0.0),
-            params: Vec4::new(clock, self.flash_reach * radius, self.flash, cloud.fade()),
+            params: Vec4::new(clock, reach, self.flash, cloud.fade()),
             storm: Vec4::new(self.swirl, self.filaments, self.flicker, self.variation),
             alt: self.color_alt.extend(0.0),
         }
@@ -387,13 +388,26 @@ struct Bolt {
     /// The bolt's segment (both ends equal for sheet lightning, a point of light).
     from: Vec3,
     to: Vec3,
+    eye: Vec3,
     left: f32,
 }
 
 impl Bolt {
     fn of(frame: &Frame) -> Bolt {
         let (at, from, to, since) = frame.bolt();
-        Bolt { at, from, to, left: (1.0 - since / FLASH_SECONDS).max(0.0) }
+        Bolt { at, from, to, eye: frame.camera(), left: (1.0 - since / FLASH_SECONDS).max(0.0) }
+    }
+
+    /// Full light close to either a bolt or a sheet flash; none at three times its reach through the gas.
+    fn light(&self, reach: f32) -> f32 {
+        if self.left <= 0.0 {
+            return 0.0;
+        }
+        let span = self.to - self.from;
+        let along = ((self.eye - self.from).dot(span) / span.length_squared().max(1e-3)).clamp(0.0, 1.0);
+        let distance = self.eye.distance(self.from + span * along);
+        let t = ((distance / reach.max(1.0) - 1.0) * 0.5).clamp(0.0, 1.0);
+        self.left * self.left * (1.0 - t * t * (3.0 - 2.0 * t))
     }
 }
 
@@ -405,7 +419,7 @@ impl Rule {
             look: Vec4::new(self.density, self.scale, self.churn, self.shell),
             low: self.color_low.extend(self.inside),
             high: self.color_high.extend(self.flash),
-            flash: bolt.at.extend(bolt.left * bolt.left),
+            flash: bolt.at.extend(bolt.light(self.flash_reach * radius)),
             params: Vec4::new(clock, self.flash_reach * radius, 0.0, 0.0),
         }
     }
@@ -463,6 +477,18 @@ fn update(
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn flash_light_fades_smoothly_with_distance_to_the_visible_bolt() {
+        let mut bolt = Bolt { from: Vec3::X * -100.0, to: Vec3::X * 100.0, eye: Vec3::X * 150.0, left: 0.5, ..default() };
+        assert_eq!(bolt.light(50.0), 0.25, "near the end of the bolt, not its midpoint");
+        bolt.eye.x = 200.0;
+        assert_eq!(bolt.light(50.0), 0.125, "halfway through the distance fade");
+        bolt.eye.x = 250.0;
+        assert_eq!(bolt.light(50.0), 0.0, "a distant flash contributes no light");
+        let sheet = Bolt { eye: Vec3::X * 150.0, left: 1.0, ..default() };
+        assert_eq!(sheet.light(50.0), 0.0, "a sheet flash is a point, with the same falloff");
+    }
 
     #[test]
     fn a_bolts_light_fades_over_its_seconds_from_the_frame_data() {
@@ -623,7 +649,7 @@ mod tests {
         let rule = &parse(&json!({"rules": [{"match": "n", "steps": 12, "max_opacity": 0.5, "sun": 2}]})).unwrap().rules[0];
         let cloud = Cloud::for_tests("Nebula", 200.0);
         let sun = SunLight { toward: Vec3::new(0.0, 3.0, 0.0), color: Vec3::new(2.0, 1.0, 1.0) };
-        let u = rule.volume(&cloud, Vec3::new(1.0, 2.0, 3.0), 5.0, &Bolt { at: Vec3::X, from: Vec3::X, to: Vec3::X * 3.0, left: 0.5 }, sun);
+        let u = rule.volume(&cloud, Vec3::new(1.0, 2.0, 3.0), 5.0, &Bolt { at: Vec3::X, from: Vec3::X, to: Vec3::X * 3.0, left: 0.5, ..default() }, sun);
         assert_eq!(u.axes, (AXES * cloud.breath()).extend(12.0));
         assert_eq!((u.sun, u.sun_color.truncate()), (Vec4::new(0.0, 1.0, 0.0, 2.0), Vec3::new(1.0, 0.5, 0.5)), "a unit direction and a colour normalised to its brightest channel");
         assert_eq!((u.low.w, u.flash.w, u.params.x, u.params.w), (0.5, 0.25, 5.0, 1.0));

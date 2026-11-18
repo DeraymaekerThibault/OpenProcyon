@@ -151,6 +151,10 @@ fn fragment(in: VertexOutput) -> FragmentOutput {
     let sigma = vol.look.w / radius;
     let share = select(1.0, vol.sun_color.w, inside_cam);
     let phase = 0.65 + 0.9 * pow(max(dot(dir, sun), 0.0), 4.0);
+    let flash = vol.params.z * vol.flash.w;
+    let ab = vol.flash_to.xyz - vol.flash.xyz;
+    let inv_ab2 = 1.0 / max(dot(ab, ab), 0.001);
+    let reach = max(vol.params.y, 1.0);
 
     var light = vec3<f32>(0.0);
     var tr = 1.0;
@@ -207,10 +211,12 @@ fn fragment(in: VertexOutput) -> FragmentOutput {
             let lit = 0.3 + vol.sun.w * vol.sun_color.rgb * shade * phase;
             var emitted = base * vol.tint.rgb * lit * vol.look.x;
             // a bolt lights the gas around it from inside
-            let ab = vol.flash_to.xyz - vol.flash.xyz;
-            let along = clamp(dot(x - vol.flash.xyz, ab) / max(dot(ab, ab), 0.001), 0.0, 1.0);
-            let fd = length(x - (vol.flash.xyz + ab * along)) / max(vol.params.y, 1.0);
-            emitted += vol.params.z * vol.flash.w * exp(-fd * fd * 2.5) * vec3<f32>(0.7, 0.85, 1.0);
+            if flash > 0.0 {
+                let from_start = x - vol.flash.xyz;
+                let along = clamp(dot(from_start, ab) * inv_ab2, 0.0, 1.0);
+                let offset = (from_start - ab * along) / reach;
+                emitted += flash * exp(-dot(offset, offset) * 2.5) * vec3<f32>(0.7, 0.85, 1.0);
+            }
             // hot plasma burning along the edges of the billows
             emitted += vol.high.rgb * vec3<f32>(1.3, 1.0, 0.7) * vol.storm.y * g.y * edge;
             // lightning flickering deep inside: patches that light up and die out a few times a second

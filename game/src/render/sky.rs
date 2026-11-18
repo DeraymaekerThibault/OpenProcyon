@@ -88,6 +88,8 @@ pub struct Stars {
 /// The `base` part: two samples of the sky cross-fade along a slow noise flow, and the bright cores breathe.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Base {
+    /// Brightness of the far backdrop, independent of the star layer and scene lighting.
+    pub brightness: f32,
     /// How far the lookup is pushed along the flow (radians at the end of a cycle).
     pub flow: f32,
     /// Seconds a flow cycle lasts.
@@ -189,6 +191,7 @@ pub fn parse(v: &Value) -> Option<SkyDome> {
         base: v["base"].is_object().then(|| {
             let b = &v["base"];
             Base {
+                brightness: num(&b["brightness"], 1.0).max(0.0),
                 flow: num(&b["flow"], 0.02).clamp(0.0, 0.2),
                 cycle: num(&b["cycle"], 30.0).max(1.0),
                 breath: num(&b["breath"], 0.05).clamp(0.0, 1.0),
@@ -259,7 +262,7 @@ pub struct SkyUniform {
     pub info: Vec4,
     /// x: flow (radians), y: flow cycle seconds, z: breath depth, w: breath seconds
     pub base: Vec4,
-    /// xyz: the breath's colour bias
+    /// xyz: the breath's colour bias, w: the far backdrop's brightness minus 1 (0 leaves it unchanged)
     pub base_tint: Vec4,
     /// rgb: a storm flash's colour times its strength, w: seconds it lasts (the bolt itself is in the frame data)
     pub flash: Vec4,
@@ -283,7 +286,7 @@ impl SkyDome {
         for (u, l) in layers.iter_mut().zip(&self.layers) {
             *u = LayerUniform { a: Vec4::new(l.opacity, l.threshold, l.softness, l.distance), b: Vec4::new(l.scale, l.tint.x, l.tint.y, l.tint.z), c: l.drift.extend(0.0) };
         }
-        let (base, base_tint) = self.base.map_or((Vec4::ZERO, Vec4::ZERO), |b| (Vec4::new(b.flow, b.cycle, b.breath, b.period), b.tint.extend(0.0)));
+        let (base, base_tint) = self.base.map_or((Vec4::ZERO, Vec4::ZERO), |b| (Vec4::new(b.flow, b.cycle, b.breath, b.period), b.tint.extend(b.brightness - 1.0)));
         SkyUniform {
             stars: self.stars.map_or(Vec4::ZERO, |t| Vec4::new(t.brightness, t.twinkle, t.speed, t.gain)),
             info: Vec4::new(self.layers.len().min(MAX_LAYERS) as f32, if self.base.is_some() { 1.0 } else { 0.0 }, 0.0, 0.0),
@@ -594,6 +597,14 @@ mod tests {
         }
         assert_eq!(p.left, 0.0);
         assert_eq!(p.uniform(Vec3::ZERO).0, Vec4::ZERO);
+    }
+
+    #[test]
+    fn backdrop_brightness_defaults_to_neutral_and_is_independent_of_stars() {
+        let sky = parse(&json!({"base": {"brightness": 0.7}, "stars": {"brightness": 1.2}, "skies": {"skybox_16": {"base": {"breath": 0.2}}}})).unwrap();
+        let u = sky.for_sky("skybox_16").uniform();
+        assert_eq!((1.0 + u.base_tint.w, u.stars.x), (0.7, 1.2), "per-sky accents keep the default brightness unless they override it");
+        assert_eq!(parse(&json!({"base": {}})).unwrap().uniform().base_tint.w, 0.0);
     }
 
     #[test]
