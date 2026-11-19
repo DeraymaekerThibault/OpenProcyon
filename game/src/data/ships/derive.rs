@@ -216,6 +216,7 @@ pub(super) fn complete(j: &mut ShipDoc, facts: &Facts, root: &Path) {
                     vital_speed: sail,
                     vital_turn: false,
                     vital_mission: false,
+                    swappable: true,
                     destruct: Some(DestructDoc { fx: Some("Final_Ship_Chunk".into()), start: 1.2 + 0.2 * i as f64, end: 1.4 + 0.2 * i as f64, point: centre }),
                     debris: None,
                     debris_fx: None,

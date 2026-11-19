@@ -41,7 +41,7 @@ pub fn blend(previous: &Transform, current: &Transform, t: f32) -> Transform {
 }
 
 /// New tracked entities start still: drawn where they spawned, with no motion to blend from.
-fn attach(mut commands: Commands, new: Query<(Entity, &Transform), (Tracked, Without<Interp>, Without<crate::combat::Sinking>)>) {
+fn attach(mut commands: Commands, new: Query<(Entity, &Transform), (Tracked, Without<Interp>)>) {
     for (e, tf) in &new {
         commands.entity(e).insert(Interp::new(*tf));
     }
@@ -70,7 +70,7 @@ fn record(mut q: Query<(&Transform, &mut Interp)>) {
 
 /// After the fixed loop: draw between the last two simulation poses. While virtual time is paused no tick runs and the
 /// overstep stays where it was, which holds the pose.
-fn draw(fixed: Res<Time<Fixed>>, mut q: Query<(&mut Transform, &mut Interp), Without<crate::combat::Sinking>>) {
+fn draw(fixed: Res<Time<Fixed>>, mut q: Query<(&mut Transform, &mut Interp)>) {
     let t = fixed.overstep_fraction();
     for (mut tf, mut it) in &mut q {
         let current = *tf;

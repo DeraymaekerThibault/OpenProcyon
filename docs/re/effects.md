@@ -245,7 +245,9 @@ scroll offset and segment index enter the texture coordinates (the draw code was
 ## Damage mesh swap (setup, on destruction)
 A swappable damage section whose layer mesh is "<A>_<B>" gets the swap mesh "<A>Damage_<B>" (split at the first '_').
 When the section is destroyed the layer's mesh is exchanged for it. Extra Damage_ layers beyond the section count (the
-cutter has Damage_Layer7-10) are not referenced by this rule. Destruction also spawns the section's debrisMeshScene
+cutter has Damage_Layer7-10) are not referenced by this rule. A section with `swappable=0` in its WOT record keeps its mesh when
+destroyed: Station Montgomery's island (a 10 HP section named "undamagable", whose damage mesh is nearly empty), the volcano and
+pirate-asteroid rocks, lifeboats, barges and the Amelia escort. Destruction also spawns the section's debrisMeshScene
 (remake: see "Section debris").
 
 The exchange is done on the section's own mesh node (the node's alternate mesh replaces the current one); the section's children
@@ -261,7 +263,8 @@ goes with its section (it hangs on the stern layer).
 Retail (headless run, our Navy Cutter sunk by a computer Sloop, frames every ~0.18 s): there is no sinking dive. The hull blows
 apart where it is: the class `Explosion Effect Name` (fireballs, white flash, smoke) plays at once, the sections fly off as separate
 pieces (planks, the stern with its wings, the masts), each piece bursts in its own fireball within the next ~3 s, then only smoke
-remains. The ship's physics object does not move at all through this; it is purely presentation.
+remains. The hull itself is not frozen: it keeps drifting on under the computer's helm (see "Death drive" below); the break-up
+clip only moves the section meshes.
 
 The timeline is data, in two parts. Each ship's mesh scene carries one clip `ANIMATION00` (2-20 s) that moves the section layers
 rigidly (translation up to 17 units, rotation up to 8.5 rad; values are offsets from the rest pose). It starts 0.14 s after the
@@ -272,6 +275,29 @@ carries `destructFx = { effect start end ( a b c ) }`, e.g. the Cutter's bow `Fi
 own frame read in the order first, third, second (game x, y, z), not a velocity. Sections with `none` and start 0 stay until `end`
 (PROVISIONAL; the earlier frames show the mid hulls drifting away, and a hide at start 0 would remove them at once). A mast that broke off earlier in the fight keeps
 tumbling away for 6+ s: see "Section debris" below.
+
+### Death drive (what a dead hull does until it is removed)
+Measured on a Navy Cutter (sunk by gunfire and in black holes) and read from the original's code; the speed and turning caps were
+checked against the code, the choice of throttle and rudder is PROVISIONAL.
+1. At the kill the ship leaves its fleet and is computer-run, also when a human steered it. Its captain is not stopped by death: it
+   keeps thinking every 0.5 s and steering as in battle (an idle ship with no target explores at full throttle; the Cutter run showed
+   throttle 1.0 and a hard rudder from the first think, 0.5 s after the kill).
+2. 0.14 s after the kill (the moment the break-apart clip starts) every section is at 0 HP. The speed and turning loss terms
+   (dead share of the sections that carry the flag, capped at 0.9) are therefore both at the cap, so thrust, top speed and rudder
+   torque are 0.1 of normal. A dead hull keeps 10 % of its drive; it does not stop.
+3. Drift speed = throttle x 0.1 x MaxSpeed x engineer factor, reached through the normal drag law (rate thrust / (mass x
+   MaxSpeed)) from the speed at death: a fast hull slows down to it, a hull at rest picks up to it. Cutter: 0.1 x 8.06 x 1.125 =
+   0.906 u/s against 0.90 measured; Frigate about 0.65 against 0.1 x 5.83 (the engineer factor there is not closed).
+   The yaw is the ordinary turning law with the 0.1 torque (about 3 deg/s on the Cutter).
+4. From the destruction start the dying ship collides with nothing (ships, land, rocks); it also ignores the avoider.
+5. It is removed when its destruct effects end (the end of the break-apart clip). The roll (about 3.5 deg/s, 7.9 deg at the end) is
+   the clip's, not the physics'; it is not modelled by the helm (PROVISIONAL: the clip's root channel is not applied to the ship).
+
+Implementation: `Health.destroyed` is set at once and every consumer keeps reading it (not a target, not alive for victory, rules,
+fire, collision). A `Sinking` hull is still integrated by `collision::sail` (speed and heading are kept at the kill; the old stop
+is gone), steered by `ship::ai` as a computer ship, and driven with a copy of its health whose sections are all 0 once 0.14 s have
+passed (`Sinking::drive_health`; the stored health, crew speech and damage looks are untouched). PROVISIONAL: campaign missions
+have no captain loop (`ai` returns early there), so a dead mission ship holds its last throttle, rudder and course.
 
 Implementation (`combat/mod.rs`, `clips.rs`): death marks Health destroyed and reports ShipLost at once, plays the class explosion
 and the death sound, then plays the clip on the section mesh nodes (normal and damaged variants), hides and bursts each section as
@@ -342,17 +368,28 @@ to `models/debris/` and `sections[].debris` = {model, pivot}.
   the captain and first-mate posts get the same captain/first-mate leadership bonuses as damage control (+0.1 / +0.05
   above a per-ship threshold), each member clamped to 0..1. A gunner, engineer or rigger post with nobody in it counts
   the first-mate post's members instead; other empty posts add nothing. A default Cutter (12 hands rated 1) gets 1.2. Each burning fire then damages its section by its
-  intensity (a damage potential with lower = upper = intensity, no criticals). Fires on a destroyed section die.
+  intensity (a damage potential with lower = upper = intensity, no criticals), through the ordinary hit routine: on the human
+  player's own ships it takes the incoming difficulty factor (Easy × 0.25, Normal × 0.5, Hard × 1), on other ships none (a fire
+  has no attacker), and the result is rounded to whole hit points. Measured (2026-11-16, Normal, the player's Man-O-War): a fire
+  that burnt 1.0 took nothing, eight times of eight; the stock crew's capacity of 3.5 held every fire at 1-2. Fires on a destroyed
+  section die.
   A dead fire stops emitting after 3 s and is removed after 5 more. Burning fires then double in intensity.
+- Nebula meteor, lightning and wind hits carry no attacker either, so on the human's own ships they take the difficulty factor like
+  fires (Easy × 0.25, Normal × 0.5, Hard × 1) and on other ships none. Read from the original's code, not yet measured.
+- Scripted damage ("Damage Group/Unit by X percent", a fraction 0.4-0.6 in missions 1 and 3 and `locusts`). Read from the original's
+  code, not yet measured: every section in order takes one hit of round(its current hit points × fraction) through the ordinary
+  hit routine (spill into the neighbours of a section left at 0, core bleed through dead vital sections, the human's ships taking
+  the difficulty factor and computer ships none, since the hit carries no attacker). The core is never scaled directly, so a
+  fraction below 1 leaves it whole and a ship dies only when its vital sections do. Sections are hit in order with their
+  hit points re-read each time, so spill from one lowers what the next loses.
 - Effect FireOnShip, its rate/length multipliers = intensity / 20 clamped to [0.1, 1].
 - Measured (retail saves of our default-crewed Navy Cutter under fire, Easy, 2026-10): fires start at powers of two (1-64
   seen) and untouched ones double exactly every tick (4 -> 64 in four ticks); the strongest fire grew 11.2 -> 273.8 over five
   ticks, which fits 2 x (intensity - c) with c = 1.36 per tick (another fire lost 1.1 in one tick), against 1.2 from the
   crew rule above. Fires kill: that Cutter burnt to 0 HP on every section. A section can carry several fires at once
   (five on one section in one save).
-- Remake (`combat::damage::fire_fighting`): the crew rule above, with the same crew slots as damage control (computer
-  crews 0.75 per slot, the player's empty slots generic hands at 0.1). PROVISIONAL: the leadership bonuses are not
-  modelled (thresholds unknown, as for damage control); at most one fire per section (retail allows several).
+- Remake (`combat::damage::fire_fighting`): the crew rule above, with the same crew slots as damage control (every ship its
+  own crew: bought or generic, empty slots rating-1 hands at 0.1, leadership bonuses as in crew.md). PROVISIONAL: at most one fire per section (retail allows several).
 
 ## Black holes (Vortex primitive, spawn, point update; Trail)
 Terrain_BlackHole_* WOTs name a render mesh, a radius, `Magnitude` (the pull, below), an ambient sound and a
@@ -375,11 +412,14 @@ core: run by fx/) plus a `Vortex` primitive, implemented in `game/src/blackhole.
     nothing outside the radius (a Cutter at 2.6 radii and a Man-O-War at 1.4 radii for 6 minutes did not move) and nothing
     inside R/4. The ramp D fits 36-38 units, about R/4 (the remake uses D = R/4). The pull points at the centre turned about
     15° to one side (clockwise seen from above): sideways / inward = 0.27 in every log, whatever the ship's heading.
-  - **Only ships that are not under way.** The pull acts only while the ship's own speed is zero (All Stop, or idle). A
-    Man-O-War driven from 48 to 17 units moved exactly at its own speed throughout and was still afloat 17 s after passing
-    R/4. A ship crossing the radius under way feels nothing.
-  - **Resting ships creep.** At rest the engine snaps the velocity back to zero every tick, so the pull is cancelled each
-    tick and the ship only creeps in at one tick's worth of it, about a × 0.033 units/s: Cutter 0.091 units/s at 23 units
+  - **Ships under way too (measured 2026-11-16).** The pull acts on every ship, moving or not. A Cutter at Ahead Full, on a
+    straight course that would have passed 80 units from the centre, was pushed toward the centre at 2.1-2.4 units/s once
+    inside ~117 units (the same A / k as a resting Cutter's fall), crept at one tick's worth of pull further out (0.05 units/s
+    at 132 units), and was destroyed at 36 units still under way. An earlier Man-O-War driven from 48 to 17 units seemed
+    unaffected because its pull (about 1 units/s²) stays below the break-free threshold: it only adds a creep of 0.033 units/s
+    to the ship's own 4.7.
+  - **Weak pull only creeps.** The pull drives a velocity of its own beside the engine's, and speeds under 0.1 of it are snapped
+    back to zero every tick, so a weak pull is cancelled each tick and the ship only creeps in at one tick's worth of it, about a × 0.033 units/s: Cutter 0.091 units/s at 23 units
     inside the edge, Frigate 0.040 and Man-O-War 0.033 at full depth (the Man-O-War the same at 105 and 48 units).
   - **Breaking free.** A ship that breaks free of the snap falls freely: its velocity follows v' = a − k v with the hull's
     own rate k = MaxThrust / (MaxSpeed × Mass) (Cutter 1.862/s), so it settles at A / k (Cutter 2.42 units/s, measured
@@ -392,10 +432,9 @@ core: run by fx/) plus a `Vortex` primitive, implemented in `game/src/blackhole.
     hull length (collision box MaxExtents.y − MinExtents.y: 13.5, 18, 31) gives 1333, 1344-1400 and 1290-1342, so
     A ≈ 1330 × length / Mass fits all three within ~4 % (1/√Mass does not). PROVISIONAL: three classes only. The scaling
     with Magnitude (A × Magnitude / 9000) is PROVISIONAL too: only the Small hole was measured.
-  - **Kill.** A ship that is not under way is destroyed about 1.1 s after it comes inside R/4 (Cutter at 35.3 units, Frigate
+  - **Kill.** A ship, under way or not, is destroyed about 1.1 s after it comes inside R/4 (Cutter at 35.3 units, Frigate
     at 32.4; the pull ends at 36.5 ± 0.5). The hull then breaks up where it is (the distances logged earlier, 33.6 and ~21
-    units, were where the wreck stopped). Not measured (PROVISIONAL): a ship that stops inside R/4 after an order; the remake
-    starts its 1.1 s once it is at rest there.
+    units, were where the wreck stopped).
   - Destruction by the hole credits no kill: the Game Summary showed the computer with 0 Ships Sunk, and our Damage Taken only
     counted the earlier gunfire.
   - **Decoded from the original's logic.** Per tick, for anything overlapping the hole: nothing beyond R; pull between R/4 and R
@@ -404,12 +443,20 @@ core: run by fx/) plus a `Vortex` primitive, implemented in `game/src/blackhole.
     15 degrees clockwise seen from above. The pull is an acceleration, 0.15 x hull length x Magnitude / Mass (hull term fitted,
     PROVISIONAL; matches the three measured classes within 2 %). Why a resting ship creeps then falls: speeds under 0.1 are snapped
     to 0 each tick, so a resting ship only creeps until one tick of pull (at 30 Hz) reaches 0.1, i.e. pull 3.0. Medium hole: only
-    the Cutter breaks free (7.5); Large: Cutter 12.5 and Frigate 3.4, the Man-O-War (2.9) never. Not decoded: why ships under way
-    feel nothing; the 1.1 s lag is probably the destruction sequence. The Star mortar blast pushes through the same acceleration
+    the Cutter breaks free (7.5); Large: Cutter 12.5 and Frigate 3.4, the Man-O-War (2.9) never. Nothing in the pull or the
+    kill looks at whether the ship is under way. The 1.1 s lag is probably the destruction sequence. The Star mortar blast pushes through the same acceleration
     helper (a = 0.148 x 12000 x hull length / Mass for up to ~2.7 s; displacement PROVISIONAL, likely under a few units).
   Remake (`blackhole.rs`): exactly the law above for every free, undocked ship, with A = 1330 × length / Mass × Magnitude /
   9000, D = R/4, the break-free threshold 3.0 units/s² and the 1.1 s kill inside R/4, credited to nobody in the Game Summary.
   The vortex's KILL_RADIUS only ends its ribbon points. Computer captains keep out of the radius (movement.md).
+  A ship the rules pinned ('Set Group/Unit Movable' FALSE) is neither pulled nor destroyed: missions 4 and 11 strand ships at a
+  hole's rim that way until the player comes to tow them (inferred from the scripts, PROVISIONAL). The light `_Feather` hulls they
+  use (Mass 2000-4000) are below the fitted range: a retail save of mission 11, 26 s in, shows the pinned SS Harvester (Mass 2000,
+  11.6 units inside a Small hole's rim) with no stored pull speed at all, while the law gives it 4.4 units/s², over the 3.0 break-free
+  line. Its full-depth pull is therefore under 9.35 (law: 13.6). Remake: the law uses a Mass of at least 4000 (the Cutter, the
+  lightest measured class), which puts the Harvester at 2.2 units/s²: it creeps and is towed out. PROVISIONAL, an upper bound only.
+  Mission 4's St. Christopher (Mass 4000, 1.8 units/s² 9 units inside a Medium hole's rim) is unchanged: released, it creeps and
+  breaks free after about 80 s, so the player must reach it in time (the mission has a "Tender Lost" rule).
 * Unknown: strip UV mapping/blend (ours: additive, v = 0.5 per segment), the funnel mesh
   (not drawn: the reference video shows only the glow, beams and ribbons).
 

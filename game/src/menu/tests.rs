@@ -113,6 +113,7 @@ pub(super) fn skirmish(id: &str) -> Skirmish {
         selected: 0,
         historical: false,
         fleet_size: 5,
+        draw: 0,
         victory_limit: 300,
         map_json: Value::Null,
         error: None,
@@ -404,7 +405,9 @@ fn computer_fleets_use_auto_assign_inside_the_victory_limit() {
         (g.ships.len(), ships)
     };
     let (n, points) = cost(&sk);
-    assert!(n >= 1 && (120..=180).contains(&points), "retail: hulls take 40-60 % of the 300 points: {n} ships cost {points}");
+    // The share depends on the rolled style (the original's batches take 10-40 % up to 80 % of the points left, cheap fills and big-hull styles
+    // differ), so only the hard limits hold for every roll.
+    assert!((1..=5).contains(&n) && points <= 300, "{n} ships cost {points}");
     let plan = sk.plan(&lib);
     let crew: Vec<&String> = plan[1].crew.iter().flatten().flatten().collect();
     assert!(crew.iter().all(|id| id.contains("_Navy_")), "computer crews come from the Navy roster: {crew:?}");
@@ -416,7 +419,7 @@ fn computer_fleets_use_auto_assign_inside_the_victory_limit() {
     // Retail at 1000 points / limit 10 fielded 3-8 ships, not the 1-3 seen at 300.
     (sk.victory_limit, sk.fleet_size) = (1000, 10);
     let (n, points) = cost(&sk);
-    assert!(n >= 3 && (400..=600).contains(&points), "1000 points: {n} ships cost {points}");
+    assert!((3..=10).contains(&n) && points <= 1000, "1000 points: {n} ships cost {points}");
     assert!(
         sk.plan(&lib)[1].ships.iter().all(|s| !s.0.contains("Tender") && !s.0.contains("Tug") && !s.0.contains("Barge")),
         "retail computers never field support ships or barges"
@@ -424,6 +427,29 @@ fn computer_fleets_use_auto_assign_inside_the_victory_limit() {
     let swapped: Vec<String> = sk.plan(&lib)[1].weapons.iter().flat_map(|w| w.values().cloned()).collect();
     assert!(!swapped.is_empty(), "a big budget buys some swaps");
     assert!(swapped.iter().all(|g| super::skirmish::RETAIL_COMPUTER_GUNS.contains(&g.as_str())), "{swapped:?}");
+}
+#[test]
+#[ignore = "needs imported assets"]
+fn computer_swaps_stay_in_the_banks_mount_pool_and_the_race_rule() {
+    let lib = Library::load(assets_dir());
+    let mut swaps = 0;
+    for salt in 0..40 {
+        let mut slot = skirmish::Slot { race: 3, ..skirmish("diablo_straight").slots[1].clone() };
+        skirmish::auto_build(&mut slot, 1000, 10, &lib, salt, true);
+        for (ship, fit) in slot.weapons.iter().enumerate() {
+            let class = &lib.classes[lib.index(&slot.fleet[ship])];
+            for (bank, gun) in fit {
+                swaps += 1;
+                let first = class.mounts.iter().position(|m| m.bank == *bank).unwrap();
+                let mount = lib.guns[&class.mounts[first].gun].mount_type.clone().unwrap();
+                assert_eq!(lib.guns[gun].mount_type.as_deref(), Some(mount.as_str()), "{gun} in a {mount} bank");
+                assert_ne!(lib.guns[gun].exclusion.as_deref(), Some("Procyon"), "no carronade for a Procyon hull: {gun}");
+                assert_ne!(*gun, class.mounts[first].gun, "a draw equal to stock is no swap");
+            }
+        }
+        assert!(slot.spent(&lib) <= 1000, "swaps keep points positive");
+    }
+    assert!(swaps > 0);
 }
 #[test]
 #[ignore = "needs imported assets"]
@@ -604,4 +630,68 @@ fn a_hull_over_the_points_left_is_refused_with_a_reason() {
     assert_eq!(sk.error, None, "picking another hull clears the message");
     apply(&mut sk, &lib, &Action::AddShip);
     assert_eq!(sk.human().unwrap().fleet.len(), 1, "an affordable hull is added");
+}
+#[test]
+fn computer_style_roll_odds_follow_points_and_slots() {
+    use skirmish::style_list;
+    let count = |l: &[u8], s: u8| l.iter().filter(|&&x| x == s).count();
+    let l = style_list(300, 5);
+    assert_eq!(l.len(), 9, "300 points, 5 slots: styles 3 and 4 are absent");
+    assert_eq!([0, 1, 2, 3, 4, 5].map(|s| count(&l, s)), [6, 1, 1, 0, 0, 1]);
+    let l = style_list(200, 7);
+    assert_eq!(count(&l, 4), 1, "under 30 points per slot with more than 6 slots allows style 4");
+    assert_eq!(count(&style_list(200, 6), 4), 0, "needs more than 6 slots");
+    assert_eq!(count(&style_list(210, 7), 4), 0, "30 points per slot is not under 30");
+    let l = style_list(600, 4);
+    assert_eq!((count(&l, 3), l.len()), (1, 10), "600 points and 4 slots allow style 3");
+    assert_eq!(style_list(1000, 10).len(), 10, "style 3 joins and 100 points per slot keeps 4 out");
+    assert_eq!(style_list(600, 21).len(), 11, "both 3 and 4 can join (under 30 per slot, more than 6 slots)");
+    assert_eq!(count(&style_list(599, 10), 3), 0);
+}
+
+#[test]
+fn computer_batch_fractions_and_hull_count() {
+    use skirmish::{batch_fractions, hull_count};
+    assert_eq!(batch_fractions(0, 0.0, 0.0), (0.5, 0.1));
+    let (a, b) = batch_fractions(0, 1.0, 1.0);
+    assert!((a - 0.7).abs() < 1e-9 && (b - 0.3).abs() < 1e-9);
+    let (a, b) = batch_fractions(1, 0.5, 0.5);
+    assert!((a - 0.5).abs() < 1e-9 && (b - 0.3).abs() < 1e-9);
+    let (a, b) = batch_fractions(2, 0.5, 0.0);
+    assert!((a - 0.7).abs() < 1e-9 && b == 0.0, "style 2 has no second share");
+    // u2 = 0.25 makes the cosine zero: no extra hulls beyond the minimum m.
+    assert_eq!(hull_count(0.5, 0.25, 1, 5), 1);
+    // u2 = 0: z = sqrt(-2 ln 0.1) = 2.146, 1.5 z = 3.2 -> 3, plus m = 1.
+    assert_eq!(hull_count(0.1, 0.0, 1, 5), 4);
+    assert_eq!(hull_count(0.1, 0.0, 1, 2), 2, "capped by the free slots");
+    assert_eq!(hull_count(0.1, 0.0, 3, 2), 3, "but never below the minimum");
+}
+
+#[test]
+fn computer_hull_price_window_has_a_floor_of_22() {
+    use skirmish::price_window;
+    assert_eq!(price_window(100, 1000, 1000), (50, 150));
+    assert_eq!(price_window(100, 60, 1000), (50, 60), "the batch's room caps the high end");
+    assert_eq!(price_window(100, 30, 1000), (30, 30), "and the low end");
+    assert_eq!(price_window(10, 1000, 1000), (5, 22), "an average of 10 still allows 22");
+    assert_eq!(price_window(100, 0, 1000), (0, 22), "no room left: hulls up to 22");
+    assert_eq!(price_window(100, -5, 1000), (0, 22));
+    assert_eq!(price_window(100, 1000, 15), (50, 15), "never above the points left");
+}
+#[test]
+#[ignore = "needs imported assets"]
+fn every_computer_roll_builds_a_fleet() {
+    let lib = Library::load(assets_dir());
+    for limit in [300, 340] {
+        let mut spent = vec![];
+        for salt in 0..20 {
+            let mut slot = skirmish::Slot { race: 0, ..skirmish("diablo_straight").slots[1].clone() };
+            (slot.fleet, slot.weapons, slot.names, slot.crew) = Default::default();
+            skirmish::auto_build(&mut slot, limit, 5, &lib, salt * 7 + 1, true);
+            assert!(!slot.fleet.is_empty(), "limit {limit} salt {salt}: no ships");
+            spent.push(slot.spent(&lib));
+        }
+        eprintln!("limit {limit}: {spent:?}");
+        assert!(spent.iter().filter(|&&p| p > i64::from(limit) - 10).count() >= 10, "most fleets spend the budget to the point: {spent:?}");
+    }
 }

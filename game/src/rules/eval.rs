@@ -103,6 +103,8 @@ pub enum Fx {
     Throttle(Vec<Entity>, f32),
     /// 'Dock Ships': dockers, then the dockee group's units (the first with a free dock point is used).
     Dock(Vec<Entity>, Vec<Entity>),
+    /// 'Tow Ship' (tower, towee): linked at once when in tow range, else the tower sails over first (docking.rs `Tower`).
+    Tow(Entity, Entity),
     Dockable(Vec<Entity>, bool),
     Boardable(Vec<Entity>, bool),
     /// 'Set Lifeboat Creation State': the ships' Create Lifeboats flag (lifeboats.rs reads it when they are destroyed).
@@ -547,13 +549,19 @@ impl Script {
             if let Some(g) = self.groups.get(&u.id) {
                 u.groups.extend(g.iter().cloned());
             }
+            // "Player0 Group" (aliased to the human's name) is the human's fleet: every ship the human owns, even where a TWT group
+            // of the same name shadows the owner. Mission 5's TWT group "Player" is the starting Sea Sparrow and Comet; a rule later hands
+            // the RLS Superior (TWT group "Jim") to the player as fleet primary. Without this its warning shot never counted (#352).
+            if u.owner == self.player && !u.groups.contains(&self.player) {
+                u.groups.push(self.player.clone());
+            }
         }
     }
     /// Whether a unit (TWT id, owner, name; `primary` for the human's command ship) answers to a rule spec, as `matches` does.
     pub fn answers(&self, id: i64, owner: &str, name: &str, primary: bool, spec: &str) -> bool {
         match spec.split_once(',') {
             Some((_, unit)) => name == unit || (unit == "HUMAN CONTROLLED COMMAND SHIP" && primary),
-            None => (!self.named_group(owner) && owner == spec) || self.groups.get(&id).is_some_and(|g| g.iter().any(|g| g == spec)),
+            None => ((!self.named_group(owner) || owner == self.player) && owner == spec) || self.groups.get(&id).is_some_and(|g| g.iter().any(|g| g == spec)),
         }
     }
     /// Talking-head sprite of the line being spoken: the TWT speech event's FaceTexture (media `face`), if exported.
@@ -580,6 +588,10 @@ impl Script {
             self.docked.remove(&(docker, dockee));
         }
     }
+    /// Whether `docker` is registered as docked with `dockee` (what the rules' docked condition reads).
+    pub fn is_docked(&self, docker: Entity, dockee: Entity) -> bool {
+        self.docked.contains(&(docker, dockee))
+    }
     /// The ship `tower` is towing (the first link), if any.
     pub fn towee_of(&self, tower: Entity) -> Option<Entity> {
         self.tows.iter().find(|t| t.0 == tower).map(|t| t.1)
@@ -597,6 +609,10 @@ impl Script {
     }
     pub fn dock_time(&self, docker: Entity) -> Option<f32> {
         self.dock_times.get(&docker).copied()
+    }
+    /// The dock routine stores the longer of the dock time and the repair time back, so the ship's later dockings keep it.
+    pub fn keep_dock_time(&mut self, docker: Entity, secs: f32) {
+        self.dock_times.insert(docker, secs);
     }
     /// Dev shortcut (`--script dock*`): mission 1 as it stands after the nebula battle, heading for the weapons tender (Objective 4).
     /// Every story rule before "Player Reaches Tender", the earlier objectives and the black-flag rules count as fired; their end state
@@ -782,8 +798,10 @@ impl Script {
             for c in &r.conds {
                 match s(c, "Type") {
                     "Enter Volume" | "Is Group In Volume" if player_in(s(c, "Group Name")) => {
+                        // The nearest point inside, not the centroid: mission 11's "Pursue Silver 1" is a bent band whose centroid lies
+                        // outside it, and the bot circled there.
                         let vol = self.volume(s(c, "Volume Name"));
-                        if let Some(m) = vol.centroid().filter(|_| !in_volume(vol, p.pos)) {
+                        if let Some(m) = vol.near_inside(Vec2::new(p.pos.x, -p.pos.z)).filter(|_| !in_volume(vol, p.pos)) {
                             out.push(Want::Reach(Vec3::new(m.x, 0.0, -m.y)));
                         }
                     }
@@ -1226,10 +1244,13 @@ impl Script {
                 }
             }
             "Tow Ship" => self.tow_specs.push((s(a, "Docking Group").into(), s(a, "Target to Tow").into())),
+            // Either group may be the tower: mission 4's "pirated tender safe" and mission 11's "Player Saves Civ Galleon" name the towed
+            // ship first and the player second (#351, #355).
             "Break Tow" => {
-                let (x, y) = (ids(w, s(a, "TowerGroupA")), ids(w, s(a, "TowerGroupB")));
-                self.tows.retain(|t| !(x.contains(&t.0) && y.contains(&t.1)));
-                self.tow_specs.retain(|p| !(p.0 == s(a, "TowerGroupA") && p.1 == s(a, "TowerGroupB")));
+                let (ga, gb) = (s(a, "TowerGroupA"), s(a, "TowerGroupB"));
+                let (x, y) = (ids(w, ga), ids(w, gb));
+                self.tows.retain(|t| !((x.contains(&t.0) && y.contains(&t.1)) || (y.contains(&t.0) && x.contains(&t.1))));
+                self.tow_specs.retain(|p| !((p.0 == ga && p.1 == gb) || (p.0 == gb && p.1 == ga)));
             }
             "NIS Start" => {
                 self.nis = true;
@@ -1428,9 +1449,11 @@ impl Script {
         self.cam.attach_e = first(self.cam.attach.as_ref().map(|a| a.0.as_str()));
         self.cam.focus_e = first(self.cam.focus_unit.as_deref());
         self.point_pos = self.point_on.as_deref().and_then(|sp| members(&w, sp).into_iter().find(|u| u.alive)).map(|u| u.pos);
+        // A tow ends when either ship is destroyed (mission 10: the Plunder sunk with the SS Spirit of the West in tow).
+        self.tows.retain(|t| [t.0, t.1].iter().all(|e| w.iter().any(|u| u.e == *e && u.alive)));
         for (tower, towed) in std::mem::take(&mut self.tow_specs) {
             if let (Some(a), Some(bb)) = (ids(&w, &tower).first(), ids(&w, &towed).first()) {
-                self.tows.push((*a, *bb));
+                out.push(Fx::Tow(*a, *bb));
             } else {
                 self.tow_specs.push((tower, towed));
             }

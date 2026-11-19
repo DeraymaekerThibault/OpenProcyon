@@ -16,7 +16,7 @@ use crate::combat::{PathMode, follow_path};
 use crate::{Scenario, assets_dir, fx, game_to_bevy};
 use std::collections::HashMap;
 
-const TICK: f32 = 1.0 / 30.0;
+use crate::TICK_SECS as TICK;
 const SIZE: f32 = 1.0; // mesh units -> world units per unit of magnitude
 const MAX_NEIGHBOURS: usize = 5;
 
@@ -152,6 +152,19 @@ fn shift_params(chunk: &Value) -> Shift {
         neighbour_dist: g("CHUNK_DATA_NEIBOURS_MIN_DISTANCE_SQUARED"),
         spin: g("CHUNK_DATA_TEXTURE_SPIN_RATE") * m,
     }
+}
+
+/// A bolt of storm lightning, or sheet lightning flickering, at this world position. Presentation input only (data, no reader in the
+/// simulation): the render profile lights the sky and the cloud with it and draws the bolt along its segment.
+#[derive(Message, Clone, Copy, Debug, PartialEq)]
+pub struct StormFlash {
+    /// Where it struck (a ship's hull), else the middle of the bolt or, for sheet lightning, the storm's centre.
+    pub at: Vec3,
+    /// The bolt's segment, storm-wide and random (`storms()`); equal ends (sheet lightning) mean no bolt to draw.
+    pub from: Vec3,
+    pub to: Vec3,
+    /// The bolt struck a ship (PROVISIONAL: a bolt that finds none is announced too, so the render profile can draw it).
+    pub hit: bool,
 }
 
 /// A rule's route for the nebula group of this name (rules.rs writes these once per mission setup).
@@ -328,6 +341,7 @@ fn storms(
     mut ships: Query<(Entity, &mut Transform, &crate::Ship, &crate::combat::Health, &mut crate::collision::Drift, Option<&crate::campaign::MissionShip>)>,
     mut strike: MessageWriter<crate::combat::Strike>,
     mut sfx: MessageWriter<crate::audio::Sfx>,
+    mut flashes: MessageWriter<StormFlash>,
     mut timers: Local<HashMap<(String, u8), f32>>,
     mut seed: Local<u32>,
 ) {
@@ -405,10 +419,13 @@ fn storms(
                         let at = a.lerp(b, t);
                         strike.write(crate::combat::Strike { victim, damage: damage.0["lightning"].clone(), section });
                         sfx.write(crate::audio::Sfx { name: format!("Solar_Storm_Lightning_ShipImpact0{}", 1 + (rnd() * 6.0) as u32), at: Some(at), vol: 1.0, max: 800.0 });
+                        flashes.write(StormFlash { at, from: a, to: b, hit: true });
                         if let Some(fxl) = fxl.as_deref() {
                             let tf = Transform::from_translation(at);
                             fx::spawn(&mut commands, fxl, "Lightning", None, tf, tf, true);
                         }
+                    } else {
+                        flashes.write(StormFlash { at: a.lerp(b, 0.5), from: a, to: b, hit: false });
                     }
                 }
             }
@@ -420,6 +437,7 @@ fn storms(
             let r = rnd();
             if r < dt * 0.4 {
                 sfx.write(crate::audio::Sfx { name: format!("Solar_Storm_Lightning0{}", 1 + (rnd() * 8.0) as u32 % 8), at: Some(c), vol: 0.8, max: 1500.0 });
+                flashes.write(StormFlash { at: c, from: c, to: c, hit: false });
             }
         }
     }
@@ -428,6 +446,8 @@ fn storms(
 #[derive(Component)]
 pub struct Cloud {
     sim: Sim,
+    /// The effect that made this cloud ("Nebula", "SolarStorm").
+    effect: String,
     radius: f32,
     age: f32,
     acc: f32,
@@ -440,6 +460,56 @@ pub struct Cloud {
     /// The nebula's group (its setup name): clouds travel that group's route like the meteor emitters ('nebula ride').
     route: MeteorEmitter,
     origin: Vec3,
+    /// 'Set Nebula Fadeout Distance' factor of the last frame (1 = not faded).
+    fade: f32,
+}
+
+impl Cloud {
+    /// The effect that made the cloud ("Nebula", "SolarStorm"). Read-only, for the render profile.
+    pub fn effect(&self) -> &str {
+        &self.effect
+    }
+    /// Seconds the cloud's sim has run (its colour loop's clock). Read-only, for tests and the render profile.
+    pub fn age(&self) -> f32 {
+        self.age
+    }
+    /// The shell's mean vertex scale (1 = the mesh as authored): how far the cloud has swollen or shrunk. Read-only, for the render profile.
+    pub fn breath(&self) -> f32 {
+        if self.sim.v.is_empty() { 1.0 } else { self.sim.v.iter().map(|v| v.scale).sum::<f32>() / self.sim.v.len() as f32 }
+    }
+    /// The retail colour loop at the cloud's age, rgb (1 = the texture's own colour). Read-only, for the render profile.
+    pub fn colour(&self) -> Vec3 {
+        Vec3::from([0, 1, 2].map(|i| looped(&self.colours[i], self.age)))
+    }
+    /// How much of the cloud the mission's fadeout distance leaves (1 = all). Read-only, for the render profile.
+    pub fn fade(&self) -> f32 {
+        self.fade
+    }
+    /// The cloud's radius (the point set's magnitude), world units.
+    pub fn radius(&self) -> f32 {
+        self.radius
+    }
+
+    /// An empty cloud of this effect and radius, for tests of code that reads one.
+    #[cfg(test)]
+    pub fn for_tests(effect: &str, radius: f32) -> Cloud {
+        Cloud {
+            sim: Sim::new(&[], Shift::default(), 1),
+            effect: effect.into(),
+            radius,
+            age: 0.0,
+            acc: 0.0,
+            colours: Default::default(),
+            uv: vec![],
+            idx: vec![],
+            sound_distance: 0.0,
+            mesh: None,
+            model: String::new(),
+            route: MeteorEmitter { group: String::new(), next: 0, forward: true, started: false },
+            origin: Vec3::ZERO,
+            fade: 1.0,
+        }
+    }
 }
 
 /// Linear over the keys, repeating with the last key's time (the effect's colour loops start 0, end = last key).
@@ -458,6 +528,7 @@ fn spawn_one(commands: &mut Commands, assets: &AssetServer, effect: &str, mesh_n
         Scenario,
         Cloud {
             sim: Sim::new(&base, shift_params(&chunk["MeshChunk"]), seed),
+            effect: effect.to_string(),
             radius,
             age: 0.0,
             acc: 0.0,
@@ -469,6 +540,7 @@ fn spawn_one(commands: &mut Commands, assets: &AssetServer, effect: &str, mesh_n
             model: crate::data::model(&format!("{mesh_name}.glb")),
             route: MeteorEmitter { group: group.into(), next: 0, forward: true, started: false },
             origin: pos,
+            fade: 1.0,
         },
         Transform::from_translation(pos),
         Visibility::default(),
@@ -540,12 +612,39 @@ pub fn spawn(commands: &mut Commands, assets: &AssetServer, fxl: &fx::FxLib, map
     }
 }
 
+/// A ship inside a nebula whose cloud drains is slowed by how deep it is. Read from the original's code: the multiplier on top speed and
+/// thrust is the 3-D distance to the cloud's centre over its radius, clamped to 0..1 (0 at the centre, 1 at the rim), instant and with
+/// no recovery time; the deepest nebula counts. Not modelled: the hulls the original exempts.
+pub fn depth_factor(distance: f32, radius: f32) -> f32 {
+    if radius > 0.0 { (distance / radius).clamp(0.0, 1.0) } else { 1.0 }
+}
+
+fn slowdown(storms: Option<Res<Storms>>, shift: Res<StormShift>, mut ships: Query<(&mut crate::Ship, &Transform)>) {
+    let Some(storms) = storms else { return };
+    for (mut ship, tf) in &mut ships {
+        let mut q = 1.0f32;
+        for n in storms.0.as_array().into_iter().flatten() {
+            let Some(p) = n["cloud"]["points"].get(0).filter(|_| n["cloud"]["drain"] == true) else { continue };
+            let offset = shift.0.get(n["name"].as_str().unwrap_or_default()).copied().unwrap_or_default().0;
+            if !crate::rules::in_game_volume(&n["polygon"], tf.translation.x - offset.x, -(tf.translation.z - offset.z)) {
+                continue;
+            }
+            let radius = p["magnitude"].as_f64().unwrap_or(0.0) as f32;
+            q = q.min(depth_factor(tf.translation.distance(game_to_bevy(&p["pos"]) + offset), radius));
+        }
+        if ship.sail_energy != q {
+            ship.sail_energy = q;
+        }
+    }
+}
+
 pub fn plugin(app: &mut App) {
     app.add_message::<MeteorRoute>()
+        .add_message::<StormFlash>()
         .init_resource::<MeteorPlans>()
         .init_resource::<StormShift>()
         .add_systems(Update, update.run_if(in_state(crate::menu::Screen::Battle)))
-        .add_systems(FixedUpdate, (route_meteors, move_meteors, storms).chain().in_set(crate::BattleSet::Forces).run_if(in_state(crate::menu::Screen::Battle)));
+        .add_systems(FixedUpdate, (route_meteors, move_meteors, storms, slowdown).chain().in_set(crate::BattleSet::Forces).run_if(in_state(crate::menu::Screen::Battle)));
 }
 
 fn update(
@@ -575,6 +674,7 @@ fn update(
         let centre = gt.translation();
         // 'Set Nebula Fadeout Distance': clouds fade out over that distance beyond it (PROVISIONAL linear ramp).
         let fade = mission.as_ref().and_then(|m| m.script.nebula_fade).map_or(1.0, |d| (1.0 - ((cam.distance(centre) - c.radius) - d) / d.max(1.0)).clamp(0.0, 1.0));
+        c.fade = fade;
         let rgb = [0, 1, 2].map(|i| looped(&c.colours[i], c.age) * fade);
         let (mut pos, mut uv, mut col) = (vec![], vec![], vec![]);
         for i in 0..c.sim.v.len() {
@@ -639,6 +739,44 @@ mod tests {
     }
 
     #[test]
+    fn nebula_slowdown_is_distance_over_radius_zero_at_the_centre() {
+        assert_eq!(depth_factor(0.0, 500.0), 0.0);
+        assert_eq!(depth_factor(250.0, 500.0), 0.5);
+        assert_eq!(depth_factor(700.0, 500.0), 1.0);
+        assert_eq!(depth_factor(10.0, 0.0), 1.0);
+    }
+    #[test]
+    #[ignore = "needs imported assets"]
+    fn a_bolt_that_finds_no_ship_is_announced_with_its_segment_and_changes_nothing_else() {
+        let lib = crate::combat::Library::load(assets_dir());
+        let mut app = App::new();
+        app.insert_resource(lib)
+            .init_resource::<Time>()
+            .init_resource::<StormShift>()
+            .insert_resource(WeatherDamage(serde_json::from_value(crate::data::read_json(&assets_dir().join("data/nebula.json"))).unwrap()))
+            .insert_resource(Storms(serde_json::json!([{
+                "name":"test storm", "polygon":[[-1000.0,-1000.0],[1000.0,-1000.0],[1000.0,1000.0],[-1000.0,1000.0]],
+                "storm":{"lightning":true,"lightning_recharge":3.0,"winds":false,"points":[{"pos":[0.0,0.0,0.0],"magnitude":1000.0}]},
+                "meteors":{"on":false}
+            }])))
+            .add_message::<crate::combat::Strike>()
+            .add_message::<crate::audio::Sfx>()
+            .add_message::<StormFlash>()
+            .add_systems(Update, storms);
+        let mut bolts = vec![];
+        for _ in 0..300 {
+            app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs_f32(0.1));
+            app.update();
+            bolts.extend(app.world_mut().resource_mut::<Messages<StormFlash>>().drain());
+        }
+        let bolts: Vec<_> = bolts.into_iter().filter(|f| f.from != f.to).collect();
+        assert!(!bolts.is_empty(), "thirty seconds of storm with no ship: bolts still come");
+        for f in &bolts {
+            assert!(!f.hit && f.at == f.from.lerp(f.to, 0.5) && f.from.distance(f.to) >= LIGHTNING_MIN_LENGTH, "{f:?}");
+        }
+    }
+
+    #[test]
     #[ignore = "needs imported assets"]
     fn thirty_seconds_in_a_storm_does_not_guarantee_lightning_damage() {
         let lib = crate::combat::Library::load(assets_dir());
@@ -676,6 +814,7 @@ mod tests {
             }])))
             .add_message::<crate::combat::Strike>()
             .add_message::<crate::audio::Sfx>()
+            .add_message::<StormFlash>()
             .add_systems(Update, (storms, no_hits).chain());
         app.world_mut().spawn((ship, hp, Transform::from_xyz(300.0, 0.0, 0.0), crate::collision::Drift::default()));
         for _ in 0..300 {
@@ -749,5 +888,27 @@ mod tests {
     fn colour_curve_loops_with_the_last_key() {
         let c = [(0.0, 0.8), (1.0, 0.9), (2.5, 1.0), (3.7, 0.8)];
         assert!((looped(&c, 0.0) - 0.8).abs() < 1e-6 && (looped(&c, 3.7 + 2.5) - 1.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn a_cloud_whose_shell_the_profile_hides_keeps_running() {
+        use std::time::Duration;
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, AssetPlugin::default()))
+            .init_asset::<Mesh>()
+            .init_asset::<fx::EffectMaterial>()
+            .init_asset::<StandardMaterial>()
+            .init_asset::<Image>()
+            .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(Duration::from_millis(100)))
+            .add_systems(Update, update);
+        app.world_mut().spawn((Camera3d::default(), GlobalTransform::default()));
+        let shown = app.world_mut().spawn((Cloud::for_tests("Nebula", 100.0), GlobalTransform::default(), Visibility::default())).id();
+        let hidden = app.world_mut().spawn((Cloud::for_tests("Nebula", 100.0), GlobalTransform::default(), Visibility::Hidden)).id();
+        for _ in 0..12 {
+            app.update();
+        }
+        let age = |e: Entity| app.world().entity(e).get::<Cloud>().unwrap().age();
+        assert!(age(shown) > 0.5, "the sim runs ({})", age(shown));
+        assert_eq!(age(hidden), age(shown), "hidden or not, the same ticks");
     }
 }

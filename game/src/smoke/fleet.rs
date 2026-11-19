@@ -40,8 +40,14 @@ fn current_m3(world: &mut World, frame: u32) {
         assert!(force.dot(b - a) > 0.0, "Mission 3 current flows from the first path point toward the last");
         let children = world.get::<Children>(currents[0]).unwrap();
         assert_eq!(children.len(), 2);
+        let restyled = world.get_resource::<crate::render::Look>().is_some_and(|l| l.currents.is_some());
         for child in children.iter() {
-            let h = world.get::<MeshMaterial3d<crate::fx::EffectMaterial>>(child).unwrap();
+            // a render profile with the `currents` block swaps the retail material and keeps the scroll itself (its unit tests
+            // check that); only then may the retail material be gone
+            let Some(h) = world.get::<MeshMaterial3d<crate::fx::EffectMaterial>>(child) else {
+                assert!(restyled, "a current strip lost its retail material without the `currents` render block");
+                continue;
+            };
             let material = world.resource::<Assets<crate::fx::EffectMaterial>>().get(&h.0).unwrap();
             assert!(material.base.uv_transform.translation.y < 0.0);
         }

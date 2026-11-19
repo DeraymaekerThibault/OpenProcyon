@@ -5,32 +5,37 @@ Source: observed behaviour of the original game, WOT collision definitions and t
 ## Recovered
 
 - Ship WOTs select `BoundingRenderEntity` detection and `Ship` response, with explicit `MinExtents` / `MaxExtents`. These are distinct from damage-section bounds and the large broad-phase sphere (which includes sails). Cutter's box in game axes is (-2.25, -7, -1.5) to (2.25, 6.5, 2); its sphere is radius 12 centred at (0, 0, 5.5).
-- Islands and most bases select `OBBTree` detection and `Static Object` response, deriving their bounds from the render mesh. This is triangle collision, not one enormous sphere around the island.
+- Islands and most bases select `OBBTree` detection and `Static Object` response, deriving their bounds from the render mesh. A ship touches the mesh's tree of oriented boxes, not its triangles and not one enormous sphere (see "Ships against land: the box tree" below); shells are tested against the triangles.
 - Unarmed asteroids select `BoundingRenderEntity` / `Asteroid` with authored boxes; armed asteroids select `OBBTree` / `Static Object`.
 - Dock buoys select `Null` detection/response; Base_Cresentia has no collision entity. Neither should block ships.
 - External pushes on a ship are divided by its WOT mass and accumulated as acceleration, which the physics step integrates into velocity. This confirms inverse-mass impulse/force handling, not its caller's complete impulse formula.
 - Helper uses a contact point's displacement from the transformed centre of mass and collision-box dimensions to accumulate angular acceleration, clamped to ±60. The exact torque/sign relationship is not recovered well enough to port.
-- Debug strings include `Collision LOD Level Index` and `Valid Collision Triangle Indices`. The exact collision LOD, triangle rejection rules, response dispatcher, restitution, sound trigger and damage calculation remain unresolved.
+- Debug strings include `Collision LOD Level Index` and `Valid Collision Triangle Indices`. The ship-against-land rule is now recovered and measured (below); the collision LOD for shells, restitution, sound trigger and damage calculation remain unresolved.
 
 ## Ships and rocks (read from the original's code, 2026-10-31)
 
 - **Contact shapes:** ship against ship tests the two physics boxes (the WOT `MinExtents` / `MaxExtents`, no padding) once their
   collision spheres overlap, by separating axes (the box faces and the cross products of their edges); the axis of least
   penetration is the normal and the contact point is the centre of the touching corners.
-- **Ship against ship**, checked every physics tick (1/30 s) while the hulls overlap: the two are pushed apart along the contact
-  normal in proportion to the other's mass (the heavier one moves less; an idle ship is no exception). Neither ship's velocity
+- **Ship against ship**, checked every physics tick (0.033 s) while the hulls overlap: the two are pushed apart in proportion to the other's mass (the heavier one moves less; an idle ship is no exception). The contact normal is
+  the box test's own 3-D axis, but the push is horizontal: the depth times |cos| of the angle between that axis and its horizontal
+  part, applied along the horizontal part (a steep or vertical axis moves the hulls little or not at all; flat axes lose nothing).
+  The same rule as for land below (confirmed there on retail; for ship pairs read from the code, with only flat normals measured
+  on retail). Neither ship's velocity
   changes: no bounce, restitution or friction. Each gets a yaw kick at the contact point: a force of 0.1 x its mass x the
   difference between its velocity and the pair's mass-weighted common velocity, per tick, over its box inertia (mass x (width² +
   length²) / 12, width and length twice the box's starboard and forward extents), at the contact point taken at deck height; the
   angular acceleration is capped at ±60. Its own mass cancels, so a Man-O-War barely turns and a Cutter swings.
 - **Ram damage:** a ship takes 0.0004 x the *other* ship's mass x the closing speed, on its one section nearest the contact,
   through the normal hit path. At most once per
-  3.5 s per ship, no speed threshold, no material or ram-bow factor. None between allies. Scaled by side and difficulty like
-  shells (Easy: the human's ships x0.25, computer ships rammed by the human's x3; Normal x0.5 / x2; Hard x1). Example: a Cutter
+  3.5 s per ship (the clock starts when the ship is created, so there is no ram damage in a ship's first 3.5 s; only rams restart
+  it), no speed threshold, no material or ram-bow factor. None between allies. Scaled by side and difficulty like
+  shells (Easy: the human's ships x0.25, computer ships rammed by the human's x3; Normal x0.5 / x2; Hard x1). The factor follows who
+  owns the struck ship (the human's fleet) and the rammer, not the side: an allied computer ship rammed by an enemy takes x1. Example: a Cutter
   rammed by an enemy Man-O-War at 9 units/s loses 144; the Man-O-War 14.4.
 - **Ship against rock:** pushed apart by mass, the ship's speed and turn untouched; the rock is shoved away from the ship at
   0.25 x the offset between their centres per second. Every tick both take 0.0002 x the rock's mass x the closing speed (the
-  ship's not scaled by difficulty, no cooldown, no ally test); the rock breaks at 0.
+  human's own ship takes the difficulty factor like any hit, no cooldown, no ally test); the rock breaks at 0.
 - **Spill (every hit, shells too):** a hit that leaves its section at 0 hit points (already dead or not) passes 0.4 x its damage
   on to each of the section's neighbours (the WOT section's `adjacent` list), and on again from any neighbour left at 0, each
   section at most once per hit. Base parts (towers, defence rings) take shells through the same routine, so they spill too.
@@ -38,9 +43,28 @@ Source: observed behaviour of the original game, WOT collision definitions and t
   nearest the contact plays `Ship_Collision_Wood` or `_Metal` by material (cloth, stone and others are silent), heard to 700 units.
   A damaging ram plays the struck section's `Damage_<material>` sound at the contact (once when both struck sections share a
   material). Lifeboats pass through ships.
-- Remake: `collision::sail`, `combat::lob::ram_damage`, `combat::shells::apply_ship_hit` and `apply_base_hit` (spill). PROVISIONAL:
+- Remake: the ram factor follows ownership (`ram_scale`); a damaging ram plays the struck section's `Damage_<material>` sound once
+  per shared material, with the shell hit's per-material pool. `collision::sail`, `combat::lob::ram_damage`, `combat::shells::apply_ship_hit` and `apply_base_hit` (spill). PROVISIONAL:
   a rock touch plays the ship's collision sound (the rock's own impact sound is not read); shells on bases take no difficulty factor
   (the original applies one on the same routine, but its value for bases is not measured).
+
+## A shell's rejection list (read from the original's code; the reset timing measured on retail, 2026-11)
+
+Every object carries a list of objects it ignores in collisions; either side's list can skip a pair for every kind of response. A
+shell's list is created holding **only its firer**, so a shell cannot hit the ship that fired it, and nothing else is spared: there is
+no side test for shells against ships, so shells strike allied hulls like enemy ones (friendly fire; the remake used to skip every
+ship of the shooter's side). The list is checked on every tick of the shell and **emptied on the first tick whose time since
+creation (or since the last reset) is 1.0 s or more**: with 0.033 s ticks that is the 31st tick, 1.023 s, and every 31 ticks after
+(226 consecutive gaps of 1.023 s measured). From then on the firer is struck like any other object, so a lob that falls back on its own
+ship after a second hits it.
+A shell that hits something it does not ricochet from is put on a list that rejects everything ("spent"); the next reset also revives
+it. Remake: `combat::shells::firer_exempt` (the firer is exempt while the shell's age is under 1.0 s, for ships, islands and bases and
+animals; the first reset leaves the list empty for good, so no timer beyond the age is needed). PROVISIONAL / not built: the "spent"
+revival (a shell that ricochets off a rock, wreck or whale stays inert until the next reset; the remake consumes it or lets it pass),
+gravity charges below the water, the forced bounce of mines off allied hulls (the remake's mines still ignore their own side's
+ships), and the side test the remake keeps for bases (whether a shell can strike a base of its own side was not separated from the
+neutral-island handling). Which tick of the original's step a shell is born in relative to its first reset was not measured; the remake
+counts ticks from the one after the shot.
 
 ## Land and bases (read from the original's code, 2026-10-31)
 
@@ -48,6 +72,59 @@ Contact with an island or a base pushes the ship's hull straight out along the h
 throttle and turn are untouched, it takes no damage and makes no sound. A ship pressing into a shore therefore keeps its (avoider-
 capped) speed and slides along it; one wedged bow-first is freed by the avoider's turn in place ([movement.md](movement.md)).
 Remake: `collision::sail` (the old impulse response for land is gone; ships and rocks keep it until their rules are ported).
+
+## Ships against land: the box tree (read from the original's code and measured on retail, 2026-11-17)
+
+Replaces the triangle test as the rule for a ship touching an island or base. Checked against 16 runs of the original (2 islands, 2 ships,
+2443 logged ticks): 2441 ticks reproduced to within 0.05 u (median 0.000, 95th percentile 0.01), including a ship that bounced in a
+cycle for 150 ticks. Nothing in it is fitted.
+
+**The tree.** Every mesh layer of an island or base carries, in its mesh file, a binary tree of oriented boxes. Each node has: a centre,
+three perpendicular unit axes, three half extents along them, its level (the root is 0), up to two children, and (leaves) a list of
+triangle indices. The root box encloses the whole layer; a child box encloses part of its parent. Island 8 of the Diablo Strait has 47 boxes
+on levels 0 to 5, 24 of them leaves (8 on level 4, 16 on level 5) with half extents of 15 to 22 u around a 139 u wide island; island 6 has
+the same depth. The deepest level the contact test is allowed to use is 6, so on these islands the leaves are the contact surface.
+
+**Where the tree is.** The tree lives in the mesh's own frame. The mesh layer sits at the island object's position plus an offset of
+(scene node position - scene node pivot) in the island's frame. Island 8: node position z +0.45, pivot z -6.6, so the whole tree is 7.05 u
+above the object's origin (the fit to the measurements gives 7.05 to within 0.02, and the arithmetic gives exactly 7.05). Island 6: node 0, pivot 0, no offset. Of the retail
+scenes' 80 island layers and 250 base layers, 15 and 49 have a non-zero offset (none of the 12 asteroid layers). Islands tested had no rotation; the object's rotation applies to the
+tree the same way it does to the render (unmeasured).
+
+**The ship's box.** The ship's physics box (its `MinExtents` / `MaxExtents`, game axes: x starboard, y bow, z up) at the ship's position and
+heading, centred at the middle of the extents. Man-O-War (-3, -17, -3) to (3, 14, 6); Cutter (-2.25, -7, -1.5) to (2.25, 6.5, 2). The ship's
+height above the water is 0 and it does not tilt in these runs.
+
+**One test per tick** (after every object has moved):
+1. For a node, test the two boxes on 15 axes: the node's three axes, the ship's three, and the nine cross products of one of each. A cross
+   product whose squared length is below 0.1 (the two edges nearly parallel) is skipped; the others are normalised. On each axis the gap is
+   |centre difference . axis| minus both boxes' extents along it. A gap above 0 on any axis means no contact for this node and its subtree.
+   Otherwise the node's own result is the axis with the largest (shallowest) gap; its depth is minus that gap, and the axis points from the
+   box towards the ship.
+2. A leaf, or a node on level 6, that overlaps reports its own result. An inner node that overlaps tests both children and reports nothing
+   when neither child reports a contact. When one child reports: that child's result replaces the node's own if it is shallower, otherwise the
+   node's own stands. When both report: the two vectors (depth x axis) are added; the sum, with depth equal to its length, replaces the node's
+   own result if it is shallower, otherwise the node's own stands.
+3. The contact is the root's result (a layer with several mesh entries adds their depth x axis vectors; only single-entry islands were
+   measured). Its normal is the unit direction, its depth the length.
+4. Response: the ship is moved by depth x |cos| along the horizontal part of the normal (normalised), away from the island, where cos is the
+   angle between that horizontal direction and the full normal. The island does not move. Speed, heading and angular velocity are untouched
+   (as above). This runs once per tick while a contact is reported; it is not iterated within a tick and not damped, so a ship that one push
+   throws into another box is pushed back next tick and can bounce from side to side (island 6: a cycle of about 15 u that the original and this rule traced identically for 150 ticks).
+
+**Why it matters.** Leaf boxes reach well beyond the shore, and the push has a large vertical component for a ship level with a tall box.
+A ship started with its centre on the coast of island 8 ended 17.6 and 24.5 u from the coast beam-on and 19.1 u bow-on; a triangle contact
+gives about 3 and 14 u (half the beam, the bow length). One-tick pushes from slightly overlapping starts, Man-O-War on island 8 (heading
+as the unit vector): start (-467.6, -1262.5) facing (-0.159, 0.987) ends at (-463.160, -1256.323); Cutter start (-537.6, -1278.9) facing
+(0.160, -0.987) ends at (-541.17, -1271.78); island 6, Man-O-War start (318.3, -184.4) facing (-0.447, 0.894) ends at (322.87, -178.26).
+These are test vectors for the rule; they need the imported island meshes.
+
+**Remake status.** Built: `collision/tree.rs` (the rule as pure functions), the layer offset applied to the rendered mesh, the shell triangles and the tree, and the tree exported per mesh layer by `tools/export_collision.py`. Ships touch islands and bases by the tree; the collision avoider, course preview and shells still use triangles. The push runs once per physics substep rather than once per 1/30 s tick. The 12 test vectors above reproduce to 0.01 u iterating the push once per tick; four of them also through the game's own scheduler.
+
+**What differed before.** The remake tested ship boxes against the layer's triangles clipped to the ship's height and applied no node pivot to
+island meshes, so ships held a few units off the shore where the original holds 15 to 25 and islands with a pivot offset sat lower than
+the original's (by 7.05 u on island 8). Not measured: rotated islands, bases and other multi-layer scenery, armed asteroids (same
+detection, different shape), a ship that is tilted or not at the water level, ships starting completely inside an island.
 
 ## Measured on retail (2026-10, one glancing ram between our own ships)
 

@@ -1,5 +1,5 @@
-"""Armed bases and islands: assets/ships/<Base_*|Island_*>/{ship.json,geometry.json} for every Base_*/Island_* world object that places guns
-(island gun towers, the volcanoes).
+"""Armed bases and islands: assets/ships/<Base_*|Island_*|Asteroid_*_Armed>/{ship.json,geometry.json} for every Base_*/Island_*/Asteroid_*_Armed world object that places guns
+(island gun towers, the volcanoes, the pirate asteroids of mission 11 and Convoy Raid; those are island objects in the original).
 Same layout as a ship (pack_data/pack_layout) so the game loads it as a class; no model.glb: the base's visual is its map scenery GLB (models/bases).
 New gun/bullet definitions are merged into data/weapons. usage: python3 -m tools.export_bases <game_root> <assets_dir>
 """
@@ -22,18 +22,20 @@ def export_bases(root, assets):
     )
     wots = [
         w
-        for pattern in ("Base_*.wot", "Island_*.wot")
+        for pattern in ("Base_*.wot", "Island_*.wot", "Asteroid_*_Armed.wot")
         for w in ci_files(Path(root) / "WorldObjects", pattern)
     ]
     for wot in wots:
         name = wot.stem
         try:
-            if not any(associations(load(root, name), "GunPlacement")):
+            armed = any(associations(load(root, name), "GunPlacement"))
+            # A gunless base with a vitalToMission section is still a rules target: mission 6's stockade gate must be shot down.
+            if not armed and not name.startswith("Base_"):
                 continue
             j = export(root, name, assets)
         except (KeyError, ValueError, FileNotFoundError, StopIteration):
             continue
-        if not j["guns"]:
+        if not j["guns"] and not any(s["vital_mission"] for s in j["sections"]):
             continue
         for k, g in j["gun_defs"].items():
             guns.setdefault(k, g)

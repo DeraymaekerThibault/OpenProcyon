@@ -139,7 +139,7 @@ pub struct EndMessage(pub Option<String>);
 pub struct EndLine(pub Option<String>);
 
 /// Seconds the end line shows before the Game Summary opens (read from the original's code: 10 s after the end rule fires; the
-/// rules run once a second, and a 1 frame/s recording saw about 13 s from the sinking). ponytail: our rules run every frame.
+/// rules run once a second, and a 1 frame/s recording saw about 13 s from the sinking).
 pub const END_LINE_SECS: f32 = 10.0;
 
 /// Battle start: the front end's choice (map, fleets) if any, else the command line.
@@ -589,11 +589,21 @@ pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Libra
         // The map script's Setup Island 'Combat Strength' is what boarders must wear down (retail: it seeds the base's strength).
         let strengths = data::try_json(&crate::assets_dir().join(format!("maps/{map_id}/script.json"))).map(|s| setup_strengths(&s)).unwrap_or_default();
         // Bases fight for the side whose fleet type is theirs; a base no fleet claims stays neutral (and silent). Armed islands (the
-        // volcanoes) belong to nobody: they fire on every ship and cannot be boarded.
+        // volcanoes) belong to nobody: they fire on every ship and cannot be boarded. The armed asteroids (Convoy Raid's belong to the
+        // pirate base's player) fight for their object's owner like a base.
         for (e, o) in &bases {
-            let Some(class) = o["type"].as_str().filter(|t| t.starts_with("Base_") || t.starts_with("Island_")).and_then(|t| lib.classes.iter().position(|c| c.name == t)) else {
+            let Some(class) = o["type"]
+                .as_str()
+                .filter(|t| t.starts_with("Base_") || t.starts_with("Island_") || (t.starts_with("Asteroid_") && t.ends_with("_Armed")))
+                .and_then(|t| lib.classes.iter().position(|c| c.name == t))
+            else {
                 continue;
             };
+            // PROVISIONAL: a gunless base (Convoy Raid's pirate stockade) stays scenery in skirmish, as before it had a class: whether the
+            // original lets skirmish fleets shoot or board it is not observed. Missions use its vitalToMission section (mission 6).
+            if lib.classes[class].mounts.is_empty() {
+                continue;
+            }
             let island = lib.classes[class].name.starts_with("Island_");
             let owner = o["player"].as_u64().and_then(|i| players.get(i as usize)).and_then(|p| p["name"].as_str()).and_then(faction);
             let Some(side) = (if island {
@@ -777,7 +787,33 @@ fn end_line_id(outcome: Outcome, message: Option<&str>) -> Option<String> {
     (outcome != Outcome::Playing).then(|| message.map_or_else(|| format!("IDGS_TPINGAMEMESSAGE_GAME_{}", if outcome == Outcome::Victory { "WON" } else { "LOST" }), str::to_string))
 }
 
+/// How often the original tests the battle's end rules: a pass runs once the game clock is more than this many seconds past the last pass.
+pub const RULE_PASS_SECS: f32 = 1.0;
+
+/// The rule-pass timer of one battle (game seconds since it began, and the clock at the last pass; the first pass is the first
+/// frame more than a second in. PROVISIONAL: the original's starting value of the last-pass time was not read).
+#[derive(Default)]
+pub struct RulePass {
+    clock: f32,
+    last: f32,
+}
+impl RulePass {
+    /// Advances the clock by `dt`; true when the rules are tested this frame.
+    pub fn due(&mut self, dt: f32) -> bool {
+        self.clock += dt;
+        let due = self.clock - self.last > RULE_PASS_SECS;
+        if due {
+            self.last = self.clock;
+        }
+        due
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 pub fn outcome(
+    time: Res<Time>,
+    fresh: Query<(), Added<Scenario>>,
+    mut pass: Local<RulePass>,
     mut out: ResMut<Outcome>,
     mut message: ResMut<EndMessage>,
     mut line: ResMut<EndLine>,
@@ -792,6 +828,13 @@ pub fn outcome(
     // missions end through their own rules; a decided battle stays decided (the end flow despawns ships, which must not turn a
     // victory into a defeat)
     if campaign::is_mission(cfg.map.as_deref()) || *out != Outcome::Playing {
+        return;
+    }
+    // The original tests its end rules once a second of game time, so a battle ends up to a second after the cause.
+    if !fresh.is_empty() {
+        *pass = RulePass::default();
+    }
+    if !pass.due(time.delta_secs()) {
         return;
     }
     let mut end_message = None;
@@ -861,6 +904,22 @@ mod ambient_tests {
         assert_eq!(a("PlayEffect", "volcanoSparks"), Some("volcanoSparks"));
         assert_eq!(a("VolcanoSmoke", ""), Some("VolcanoSmoke"));
         assert_eq!(a("PlayEffect", ""), None, "older imports name none");
+    }
+}
+
+#[cfg(test)]
+mod rule_pass_tests {
+    use super::*;
+    #[test]
+    fn end_rules_are_tested_once_a_second_of_game_time() {
+        let mut pass = RulePass::default();
+        let ticks: Vec<usize> = (1..=100).filter(|_| pass.due(0.033)).collect();
+        // 0.033 s ticks: a pass needs the clock more than 1.0 s past the last one, so every 31st tick (1.023 s).
+        assert_eq!(ticks.len(), 3);
+        let mut pass = RulePass::default();
+        assert!(!pass.due(0.5) && !pass.due(0.5), "exactly one second is not more than one second");
+        assert!(pass.due(0.01));
+        assert!(!pass.due(0.5) && pass.due(0.51));
     }
 }
 
@@ -1007,7 +1066,7 @@ mod rotation_tests {
     fn decided_outcome_is_final() {
         use bevy::ecs::system::RunSystemOnce;
         let mut app = App::new();
-        app.insert_resource(Outcome::Victory).init_resource::<EndMessage>().init_resource::<EndLine>().insert_resource(Config {
+        app.init_resource::<Time>().insert_resource(Outcome::Victory).init_resource::<EndMessage>().init_resource::<EndLine>().insert_resource(Config {
             groups: vec![],
             player: "Ship_Navy_Cutter".into(),
             allies: vec![],

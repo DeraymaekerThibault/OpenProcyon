@@ -99,6 +99,8 @@ pub struct AsteroidDef {
     pub hp: f32,
     pub mass: f32,
     pub radius: f32,
+    /// Metres per second per second: the push a belt rock's controller applies (the object definition's `Acceleration`).
+    pub acceleration: f32,
     pub children: Vec<String>,
     pub effect: String,
 }
@@ -113,14 +115,25 @@ impl FromWorld for AsteroidDefs {
             .iter()
             .map(|(name, d)| {
                 let num = |key: &str| {
-                    let v = d[key].as_f64().expect("Asteroid number") as f32;
+                    let v = d[key].as_f64().unwrap_or_else(|| panic!("Asteroid number {name}: {key} (re-run the asset importer)")) as f32;
                     assert!(v.is_finite() && v > 0.0, "Invalid asteroid {name}: {key}");
                     v
                 };
                 let text = |key: &str| d[key].as_str().expect("Asteroid string").to_string();
                 let children: Vec<_> = d["children"].as_array().expect("Asteroid children").iter().map(|v| v.as_str().expect("Asteroid child").to_string()).collect();
                 assert_eq!(children.len(), 10, "Asteroid death slots: {name}");
-                (name.clone(), AsteroidDef { scene: text("scene"), hp: num("hp"), mass: num("mass"), radius: num("radius"), children, effect: text("effect") })
+                (
+                    name.clone(),
+                    AsteroidDef {
+                        scene: text("scene"),
+                        hp: num("hp"),
+                        mass: num("mass"),
+                        radius: num("radius"),
+                        acceleration: num("acceleration"),
+                        children,
+                        effect: text("effect"),
+                    },
+                )
             })
             .collect();
         fn visit(name: &str, defs: &HashMap<String, AsteroidDef>, ancestors: &mut Vec<String>) {
@@ -152,6 +165,8 @@ pub struct GunDef {
     pub reload: f32,
     pub burst: u32,
     pub burst_reload: f32,
+    /// WOT `CalculateAccuracyDeviationDuringBurst`: the deviation angle is drawn for every shot, not once per burst.
+    pub dev_per_shot: bool,
     pub range: [f32; 3], // effective, long, maximum
     /// Per range band (effective, long, maximum): the ricochet factor a shell of this gun takes when fired (0 when absent).
     pub ricochet: [f32; 3],
@@ -291,6 +306,8 @@ pub struct Section {
     pub speed: bool,   // vitalToMaxVelocity
     pub turn: bool,    // vitalToManeuverability
     pub mission: bool, // vitalToMission (bases: what the mission's 'Vital Section damage' rules watch)
+    /// WOT `swappable`: a destroyed section shows its "<A>Damage_<B>" mesh (and drops its guns). Station Montgomery's island is not.
+    pub swappable: bool,
     pub tris: Vec<[Vec3; 3]>,
     /// How the section breaks away when the ship is destroyed (WOT `destructFx`); None for imports that predate it.
     pub destruct: Option<Destruct>,
@@ -425,6 +442,7 @@ pub fn gun_def(g: &Value) -> GunDef {
         reload: num(&g["TimeBetweenBursts"]),
         burst: g["BulletsPerBurst"].as_u64().unwrap() as u32,
         burst_reload: num(&g["DuringBurstReloadTime"]),
+        dev_per_shot: g["CalculateAccuracyDeviationDuringBurst"].as_bool().unwrap_or(false),
         range: [num(&g["EffectiveRange_Range"]), num(&g["LongRange_Range"]), num(&g["MaximumRange_Range"])],
         ricochet: ["EffectiveRange", "LongRange", "MaximumRange"].map(|b| g[format!("{b}_RicochetFactor")].as_f64().unwrap_or(0.0) as f32),
         deviation: [num(&g["EffectiveRange_AccuracyDeviation"]), num(&g["LongRange_AccuracyDeviation"]), num(&g["MaximumRange_AccuracyDeviation"])],

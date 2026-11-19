@@ -11,20 +11,24 @@ use bevy::prelude::*;
 use crate::docking::Docker;
 use crate::{Health, Scenario, Ship, assets_dir, fx};
 
-const TICK: f32 = 1.0 / 30.0;
+use crate::TICK_SECS as TICK;
 const SEG_LIFE: i32 = 300; // trail segment lifetime in ticks
 const SEG_EVERY: i32 = 15; // ticks between trail segments
 /// Full-depth pull of a Magnitude 9000 hole = CLASS_GAIN x hull length / Mass (units/s²). Fits the Small hole's measured Cutter
 /// 4.50, Frigate 1.21-1.26 and Man-O-War 0.99-1.04 within ~4 %. PROVISIONAL: a candidate law from three classes.
 pub const CLASS_GAIN: f32 = 1330.0;
+/// Hull mass the pull law sees at least: the lightest measured class (the Cutter). A retail mission 11 save shows the pinned SS
+/// Harvester (`_Feather` galleon, Mass 2000) with no stored pull speed 26 s in, so its full-depth pull is under 9.35, not the law's 13.6;
+/// the law is not carried below its fitted range. PROVISIONAL: an upper bound only (a smaller hull term would fit too).
+pub const MIN_PULL_MASS: f32 = 4000.0;
 /// The pull is turned this far off the line to the centre (clockwise seen from above): sideways / inward = 0.27, the same in
 /// every measured creep and fall, whatever the ship's heading.
 const DRIFT_SWIRL: f32 = 0.27;
-/// A resting ship breaks free of its rest snap and falls once one tick of pull (at 30 Hz) outruns the integrator's snap of speeds
+/// A ship breaks free of the snap and is carried off once one tick of pull (at 30 Hz) outruns the integrator's snap of speeds
 /// under 0.1 to zero: pull >= 0.1 x 30 = 3.0 units/s² (decoded; both retail Cutter runs broke free at 2.9-3.0, a Frigate and a
 /// Man-O-War never reach it on the Small hole).
 const BREAK_FREE: f32 = 3.0;
-/// Seconds a ship that is not under way survives inside the hole's core (measured ~1.1 s for a Cutter and a Frigate). The original's
+/// Seconds a ship survives inside the hole's core (measured ~1.1 s for a Cutter and a Frigate). The original's
 /// code kills at once inside the core; the delay is probably its destruction sequence. PROVISIONAL.
 pub const KILL_DELAY: f32 = 1.1;
 
@@ -40,7 +44,7 @@ pub struct Pull {
 pub struct Swallowed;
 
 /// A ship's state inside a hole's radius: its own velocity once it broke free of the rest snap, and how long it has been in the
-/// core while not under way.
+/// core.
 #[derive(Component, Default, Debug, Clone, Copy)]
 pub struct Caught {
     pub free: bool,
@@ -69,7 +73,7 @@ impl Pull {
     /// Full-depth pull (units/s²) on a hull of `length` (collision box, bow to stern) and `mass`. PROVISIONAL: the class law
     /// (`CLASS_GAIN`) and the linear Magnitude scaling (only the Small hole was measured).
     pub fn strength(&self, length: f32, mass: f32) -> f32 {
-        CLASS_GAIN * length / mass.max(1.0) * self.magnitude / 9000.0
+        CLASS_GAIN * length / mass.max(MIN_PULL_MASS) * self.magnitude / 9000.0
     }
 
     /// Pull (units/s²) at `distance`: zero outside the radius and inside the core; in between it rises linearly with the depth
@@ -121,7 +125,7 @@ struct Point {
     segs: Vec<Seg>,
 }
 
-#[derive(Component)]
+#[derive(Component, Default)]
 pub struct BlackHole {
     p: Params,
     pts: Vec<Point>,
@@ -238,22 +242,25 @@ pub fn spawn(commands: &mut Commands, lib: &fx::FxLib, terrain: &str, pos: Vec3)
     fx::spawn(commands, lib, &format!("BlackHoleRibbons_{kind}"), Some(e), Transform::IDENTITY, Transform::from_translation(pos), false);
 }
 
-/// Black-hole pull (docs/re/effects.md "Black holes"). It acts only on ships that are not under way (engine speed 0); a ship under
-/// orders feels nothing. A resting ship's rest snap cancels the pull every engine tick, so it only creeps in at one tick's worth of
-/// acceleration; once the pull reaches `BREAK_FREE` it falls freely, its velocity following v' = a - k v with the hull's own rate
-/// k = MaxThrust / (MaxSpeed x Mass). In the core the pull stops and a ship not under way is destroyed after `KILL_DELAY`.
-/// Docked and destroyed ships are left alone.
+/// Black-hole pull (docs/re/effects.md "Black holes"). It acts on every ship, under way or not: the pull feeds a velocity of its own
+/// beside the engine's. Speeds under 0.1 of that velocity are snapped to zero every engine tick, so a weak pull only creeps the ship
+/// in at one tick's worth of acceleration; once the pull reaches `BREAK_FREE` the ship is carried off, that velocity following
+/// v' = a - k v with the hull's own rate k = MaxThrust / (MaxSpeed x Mass). In the core the pull stops and the ship is destroyed
+/// after `KILL_DELAY`.
+/// Docked and destroyed ships are left alone, and so are ships the rules pinned in place ('Set Group/Unit Movable' FALSE): the ships
+/// stranded in mission 4's Vanov hole and mission 11's SS Harvester wait there to be towed out (their light hulls feel the pull of
+/// `MIN_PULL_MASS`, #351, #355). The rules unpin them once the player comes for them.
 pub fn pull(
     mut commands: Commands,
     time: Res<Time>,
     lib: Res<crate::combat::Library>,
     holes: Query<(&Transform, &Pull), Without<Ship>>,
-    wells: Query<(&Transform, &crate::combat::lob::GravWell), Without<Ship>>,
-    mut ships: Query<(Entity, &Ship, &mut Transform, &mut Health, Option<&Docker>, Option<&mut Caught>, Option<&mut crate::cloak::Cloak>)>,
+    wells: Query<(&Transform, &crate::combat::lob::GravWell), (Without<Ship>, Without<crate::Joining>)>,
+    mut ships: Query<(Entity, &Ship, &mut Transform, &mut Health, Option<&Docker>, Option<&mut Caught>, Option<&mut crate::cloak::Cloak>, Has<crate::collision::Pinned>)>,
 ) {
     let dt = time.delta_secs();
-    for (e, ship, mut tf, mut health, docker, caught, mut cloak) in &mut ships {
-        if health.destroyed || docker.is_some_and(Docker::is_docked) {
+    for (e, ship, mut tf, mut health, docker, caught, mut cloak, pinned) in &mut ships {
+        if health.destroyed || pinned || docker.is_some_and(Docker::is_docked) {
             continue;
         }
         let class = &lib.classes[ship.class];
@@ -274,7 +281,7 @@ pub fn pull(
             {
                 c.stop();
             }
-            accel += to_centre.normalize_or_zero() * CLASS_GAIN * class.length / class.phys.mass.max(1.0) * w.force(to_centre.length()) / 9000.0;
+            accel += to_centre.normalize_or_zero() * CLASS_GAIN * class.length / class.phys.mass.max(MIN_PULL_MASS) * w.force(to_centre.length()) / 9000.0;
         }
         let Some(mut caught) = caught else {
             if in_radius {
@@ -283,7 +290,7 @@ pub fn pull(
             continue;
         };
         let rate = class.phys.thrust / (class.phys.max_speed * class.phys.mass);
-        let (step, killed) = caught.step(ship.speed == 0.0, accel, in_core, rate, dt);
+        let (step, killed) = caught.step(accel, in_core, rate, dt);
         tf.translation += step;
         if killed {
             health.core = 0.0; // combat::deaths sinks it next
@@ -293,15 +300,10 @@ pub fn pull(
 }
 
 impl Caught {
-    /// One frame for a ship that is `resting` (engine speed 0) or under way, pulled by `accel` (units/s²) and with hull rate `rate`
-    /// (1/s): its displacement, and whether the hole destroys it now.
-    pub fn step(&mut self, resting: bool, accel: Vec3, in_core: bool, rate: f32, dt: f32) -> (Vec3, bool) {
-        self.inside = if in_core && resting { self.inside + dt } else { 0.0 };
-        if !resting {
-            // Under way the engine owns the motion: no pull, and a fall ends.
-            (self.free, self.velocity) = (false, Vec3::ZERO);
-            return (Vec3::ZERO, false);
-        }
+    /// One frame for a ship pulled by `accel` (units/s²) with hull rate `rate` (1/s): the displacement the hole adds to whatever the
+    /// engine does, and whether the hole destroys it now.
+    pub fn step(&mut self, accel: Vec3, in_core: bool, rate: f32, dt: f32) -> (Vec3, bool) {
+        self.inside = if in_core { self.inside + dt } else { 0.0 };
         if !self.free && accel.length() >= BREAK_FREE {
             self.free = true;
             self.velocity = accel * TICK;
@@ -402,7 +404,7 @@ mod tests {
         for _ in 0..(secs * 30.0).round() as usize {
             let d = pos.length();
             let a = pull_dir(Vec3::ZERO, pos) * pull.accel(d, hull.0, hull.1);
-            pos += c.step(true, a, d <= pull.core(), CUTTER_RATE, TICK).0;
+            pos += c.step(a, d <= pull.core(), CUTTER_RATE, TICK).0;
         }
         (distance - pos.length(), c)
     }
@@ -445,13 +447,26 @@ mod tests {
     }
 
     #[test]
-    fn a_ship_under_way_feels_no_pull_and_survives_the_core() {
-        let mut c = Caught { free: true, velocity: Vec3::X, inside: 0.0 };
-        for _ in 0..17 * 30 {
-            let (step, killed) = c.step(false, Vec3::new(-4.5, 0.0, 0.0), true, CUTTER_RATE, TICK);
-            assert_eq!((step, killed), (Vec3::ZERO, false));
+    fn a_resting_ship_moves_one_tick_of_pull_per_tick_of_0_033_s() {
+        // the snap leaves a x 0.033 per tick as a velocity, moved for 0.033 s: a x 0.033 x 0.033 units per tick
+        let mut c = Caught::default();
+        let (step, _) = c.step(Vec3::new(1.0, 0.0, 0.0), false, CUTTER_RATE, crate::TICK_SECS);
+        assert!((step.x - 0.033 * 0.033).abs() < 1e-9, "{}", step.x);
+    }
+
+    #[test]
+    fn a_ship_under_way_is_carried_off_like_a_resting_one() {
+        // retail: a Cutter at Ahead Full was pushed toward the centre at 2.1-2.4 units/s once inside ~117 units (terminal A / k
+        // = 2.42), and crept at one tick of pull (0.05 units/s at 132 units) before that; it was destroyed at R/4.
+        let pull = small();
+        let at = |d: f32| pull_dir(Vec3::ZERO, Vec3::new(d, 0.0, 0.0)) * pull.accel(d, CUTTER.0, CUTTER.1);
+        let mut c = Caught::default();
+        let (creep, _) = c.step(at(132.0), false, CUTTER_RATE, TICK);
+        assert!(!c.free && (creep.length() / TICK - 0.05).abs() < 0.01, "creep {} units/s", creep.length() / TICK);
+        for _ in 0..90 {
+            c.step(at(90.0), false, CUTTER_RATE, TICK);
         }
-        assert!(!c.free && c.velocity == Vec3::ZERO, "getting under way ends a fall");
+        assert!(c.free && (c.velocity.length() - 2.42).abs() < 0.05, "drift {}", c.velocity.length());
     }
 
     #[test]
@@ -462,30 +477,30 @@ mod tests {
         let a = pull_dir(Vec3::ZERO, Vec3::new(90.0, 0.0, 0.0)) * pull.accel(90.0, CUTTER.0, CUTTER.1);
         let mut c = Caught::default();
         for _ in 0..300 {
-            c.step(true, a, false, CUTTER_RATE, TICK);
+            c.step(a, false, CUTTER_RATE, TICK);
         }
         assert!(c.free);
         assert!((c.velocity.length() - 2.42).abs() < 0.03, "terminal speed {}", c.velocity.length());
         // inside the core the pull stops and the speed decays at the hull rate
         let v0 = c.velocity.length();
-        c.step(true, Vec3::ZERO, true, CUTTER_RATE, 0.5);
+        c.step(Vec3::ZERO, true, CUTTER_RATE, 0.5);
         assert!((c.velocity.length() - v0 * (-CUTTER_RATE * 0.5).exp()).abs() < 1e-4);
     }
 
     #[test]
-    fn the_core_destroys_a_resting_ship_after_1_1_s() {
+    fn the_core_destroys_a_ship_after_1_1_s() {
         let mut c = Caught::default();
         let mut killed_at = None;
         for i in 1..=60 {
-            if c.step(true, Vec3::ZERO, true, CUTTER_RATE, TICK).1 {
+            if c.step(Vec3::ZERO, true, CUTTER_RATE, TICK).1 {
                 killed_at = Some(i as f32 * TICK);
                 break;
             }
         }
         assert!(killed_at.is_some_and(|t| (t - KILL_DELAY).abs() < 0.05), "{killed_at:?}");
-        // leaving the core or getting under way resets the clock
+        // leaving the core resets the clock
         let mut c = Caught { inside: 1.0, ..default() };
-        c.step(false, Vec3::ZERO, true, CUTTER_RATE, TICK);
+        c.step(Vec3::ZERO, false, CUTTER_RATE, TICK);
         assert_eq!(c.inside, 0.0);
     }
 
@@ -508,6 +523,10 @@ mod tests {
             let a = small().strength(c.length, c.phys.mass);
             assert!((a / measured - 1.0).abs() < 0.05, "{class}: {a} vs {measured}");
         }
+        // Mission 11's pinned SS Harvester (Mass 2000, 11.6 units inside a Small hole's rim) builds no pull speed in retail: one tick
+        // of its pull stays under the 0.1 snap there (a retail save, #355).
+        let h = &lib.classes[lib.index("Ship_Civilian_Galleon_Feather")];
+        assert!(h.phys.mass < MIN_PULL_MASS && small().accel(145.0 - 11.6, h.length, h.phys.mass) < BREAK_FREE);
         let c = &lib.classes[lib.index("Ship_Navy_Cutter")];
         assert!((c.phys.thrust / (c.phys.max_speed * c.phys.mass) - CUTTER_RATE).abs() < 0.01);
     }
@@ -550,6 +569,9 @@ mod tests {
         };
         let gunner = ship(&mut app, "Ship_Pirate_Carrack", Side::Enemy, Vec3::new(300.0, 0.0, 0.0));
         let victim = ship(&mut app, "Ship_Navy_ManOWar", Side::Player, Vec3::new(100.0, 0.0, 0.0));
+        // A ship the rules pinned (mission 4's stranded St. Christopher, #351) waits in the core to be towed out.
+        let stranded = ship(&mut app, "Ship_Navy_Tender", Side::Enemy, Vec3::new(0.0, 0.0, 20.0));
+        app.world_mut().entity_mut(stranded).insert(crate::collision::Pinned);
         app.update(); // stats registers both hulls; the victim is caught
         app.world_mut().write_message(Hit { shooter: gunner, victim });
         app.world_mut().get_mut::<Health>(victim).unwrap().sections[0] -= 50.0; // the Carrack's last hit
@@ -567,6 +589,8 @@ mod tests {
         }
         assert_eq!(app.world().get::<Health>(victim).unwrap().core, 0.0, "after 1.1 s in the core the hull goes");
         assert!(app.world().get::<Swallowed>(victim).is_some());
+        assert!(app.world().get::<Health>(stranded).unwrap().core > 0.0, "a pinned ship is not swallowed");
+        assert_eq!(app.world().get::<Transform>(stranded).unwrap().translation, Vec3::new(0.0, 0.0, 20.0), "nor pulled");
         let far = app.world().get::<Transform>(gunner).unwrap().translation;
         assert_eq!(far, Vec3::new(300.0, 0.0, 0.0), "outside the radius nothing moves");
         // combat::deaths would set `destroyed`; the summary then shows the loss but no kill and no extra damage

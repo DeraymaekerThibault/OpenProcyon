@@ -53,8 +53,11 @@ pub fn shoot(mut commands: Commands, lib: Res<Library>, fxl: Res<FxLib>, mut msg
                     harmless: false,
                     base: false,
                     ricochet: m.ricochet,
+                    mine_scan: Default::default(),
+                    lost_target: false,
                 },
                 Transient,
+                crate::Joining,
                 stf,
                 Visibility::default(),
             ))
@@ -129,10 +132,11 @@ pub fn detonate(
                     Transform::from_translation(d.at),
                     Transient,
                     crate::Scenario,
+                    crate::Joining,
                 ));
             }
             Payload::Grav { radius, duration, magnitude } => {
-                commands.spawn((GravWell { radius, magnitude, left: duration }, Transform::from_translation(d.at), Transient, crate::Scenario));
+                commands.spawn((GravWell { radius, magnitude, left: duration }, Transform::from_translation(d.at), Transient, crate::Scenario, crate::Joining));
             }
             // A Nova splits in flight (`split_nova`); one that lands or strikes first is just spent.
             Payload::Nova | Payload::Shell | Payload::Mine { .. } => {}
@@ -161,7 +165,7 @@ pub fn blasts(
     fxl: Res<FxLib>,
     mut rng: ResMut<Rng>,
     (mut hits, mut destroyed, mut splashes): (MessageWriter<Hit>, MessageWriter<Destroyed>, MessageWriter<super::Splashed>),
-    q: Query<(Entity, &mut Blast, &Transform), (Without<Ship>, Without<Shell>)>,
+    q: Query<(Entity, &mut Blast, &Transform), (Without<Ship>, Without<Shell>, Without<crate::Joining>)>,
     mut ships: Query<(Entity, &Transform, &Ship, &mut Health, Option<&crate::campaign::MissionShip>), Without<crate::lifeboats::Lifeboat>>,
     mut bases: Query<(Entity, &Transform, &ArmedBase, &mut Health), (Without<Ship>, Without<Blast>)>,
     mut rocks: Query<(Entity, &Transform, &mut Asteroid), (Without<Ship>, Without<Blast>)>,
@@ -179,7 +183,7 @@ pub fn blasts(
             (r >= before && r < now && r < max).then(|| (1.0 - r / max).max(0.1))
         };
         let Some(bd) = lib.bullets.get(&b.bullet) else {
-            commands.entity(e).despawn();
+            crate::queue_removal(&mut commands, e);
             continue;
         };
         let by = b.shooter.unwrap_or(e);
@@ -239,21 +243,21 @@ pub fn blasts(
                 if let Some(pd) = lib.bullets.get(&shell.bullet) {
                     hit_fx(&mut commands, &fxl, pd, ptf.translation, shell.vel, None, Surface::default());
                 }
-                commands.entity(pe).despawn();
+                crate::queue_removal(&mut commands, pe);
             }
         }
         if b.age >= b.duration {
-            commands.entity(e).despawn();
+            crate::queue_removal(&mut commands, e);
         }
     }
 }
 
 /// Wells expire after their duration; the pull on ships is `blackhole::pull`.
-pub fn grav_wells(mut commands: Commands, time: Res<Time>, mut wells: Query<(Entity, &mut GravWell)>) {
+pub fn grav_wells(mut commands: Commands, time: Res<Time>, mut wells: Query<(Entity, &mut GravWell), Without<crate::Joining>>) {
     for (e, mut w) in &mut wells {
         w.left -= time.delta_secs();
         if w.left <= 0.0 {
-            commands.entity(e).despawn();
+            crate::queue_removal(&mut commands, e);
         }
     }
 }
@@ -277,35 +281,67 @@ pub fn strikes(lib: Res<Library>, mut rng: ResMut<Rng>, mut msgs: MessageReader<
         let Some(section) = class.sections.get(k).filter(|_| k < hp.sections.len()) else { continue };
         let key = material_key(&section.material);
         let Some(damage) = m.damage.get(key) else { continue };
-        apply_ship_hit(class, &mut hp, k, *damage, ms.map_or(0.0, |m| m.invuln), false, &mut rng);
+        // The hit carries no attacker, so only the human's own ships take the difficulty factor (as fires do).
+        let f = super::shells::side_damage_scale(Side::Enemy, ship.side, crate::menu::difficulty(), false);
+        let damage = [damage[0] * f, damage[1] * f, damage[2], damage[3], damage[4]];
+        apply_ship_hit(class, &mut hp, k, damage, ms.map_or(0.0, |m| m.invuln), false, &mut rng);
     }
 }
 
+/// Difficulty factor of a ram by ownership: the struck ship's owner is the human (incoming factor), else the rammer's is (outgoing).
+fn ram_scale(victim_human: bool, rammer_human: bool, difficulty: u8) -> f32 {
+    let as_side = |h: bool| if h { Side::Player } else { Side::Enemy };
+    super::shells::side_damage_scale(as_side(rammer_human), as_side(victim_human), difficulty, false)
+}
+
 /// Contact damage (collision.rs `Ram`, read from the original's code): one hit on the victim's section nearest the contact,
-/// through the normal hit path, scaled by side and difficulty as shells are when a ship rammed it (rocks are not scaled).
-/// The collision sound (collision.rs) is the only sound of a ram; the original plays no Damage_ file for it.
+/// through the normal hit path. The difficulty factor follows who owns the two ships, not their side: a human-owned victim takes
+/// the incoming factor, else a human-owned rammer gives the outgoing one, else x1 (a rock is a computer attacker; an allied
+/// computer ship is not the human's). A damaging ram also plays the struck section's `Damage_` sound at the contact, but only once
+/// when both ships' struck sections share a sound pool.
+#[allow(clippy::too_many_arguments)]
 pub fn ram_damage(
     lib: Res<Library>,
     mut rng: ResMut<Rng>,
     mut msgs: MessageReader<crate::collision::Ram>,
-    mut ships: Query<(&Ship, &Transform, &mut Health, Option<&crate::campaign::MissionShip>)>,
+    mut ships: Query<(&Ship, &Transform, &mut Health, Option<&crate::campaign::MissionShip>, Option<&crate::ship::FleetMember>)>,
+    fleets: Option<Res<crate::ship::Fleets>>,
+    mut sfx: MessageWriter<crate::audio::Sfx>,
 ) {
+    let human = |s: &Ship, m: Option<&crate::ship::FleetMember>| s.side == Side::Player && m.is_none_or(|m| fleets.as_ref().is_none_or(|f| m.0 == f.local));
+    let mut sounded: Vec<(Entity, Entity, &'static str)> = vec![];
     for r in msgs.read() {
-        let rammer = ships.get(r.b).ok().map(|(s, ..)| s.side);
-        let Ok((ship, tf, mut hp, ms)) = ships.get_mut(r.a) else { continue };
+        let rammer = ships.get(r.b).ok().map(|(s, _, _, _, m)| human(s, m));
+        let Ok((ship, tf, mut hp, ms, member)) = ships.get_mut(r.a) else { continue };
         if hp.destroyed {
             continue;
         }
         let class = &lib.classes[ship.class];
-        let scale = rammer.map_or(1.0, |side| super::shells::side_damage_scale(side, ship.side, crate::menu::difficulty(), false));
+        let scale = ram_scale(human(ship, member), rammer.unwrap_or(false), crate::menu::difficulty());
         let Some(k) = crate::collision::nearest_section(class, tf, r.at).filter(|k| *k < hp.sections.len()) else { continue };
         let d = r.damage * scale;
         apply_ship_hit(class, &mut hp, k, [d, d, 0.0, 0.0, 0.0], ms.map_or(0.0, |m| m.invuln), false, &mut rng);
+        if let Some(pool) = class.sections.get(k).and_then(|s| super::shells::damage_pool(material_key(&s.material))) {
+            if !sounded.contains(&(r.b, r.a, pool)) {
+                sfx.write(super::shells::damage_sfx(pool, r.at, &mut rng));
+            }
+            sounded.push((r.a, r.b, pool));
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_ram_factor_follows_who_owns_the_struck_ship() {
+        // (victim human, rammer human): Easy 0.25 in / 3 out, Normal 0.5 / 2, Hard 1 / 1; computer against computer is x1.
+        for (d, inc, out) in [(0, 0.25, 3.0), (1, 0.5, 2.0), (2, 1.0, 1.0)] {
+            assert_eq!(ram_scale(true, false, d), inc);
+            assert_eq!(ram_scale(false, true, d), out);
+            assert_eq!(ram_scale(false, false, d), 1.0, "an allied computer ship or a rock rams like any computer");
+        }
+    }
+
     #[test]
     fn a_gravity_well_pulls_hardest_at_half_its_radius_and_not_at_the_centre_or_rim() {
         let w = GravWell { radius: 40.0, magnitude: 40000.0, left: 17.0 };
@@ -382,7 +418,8 @@ mod tests {
             let d = (1.0 - r / radius).max(0.1);
             let lost = sec.hp - hp[k];
             if r < radius {
-                assert!(lost >= lo * d - 1e-3 && lost <= hi * d + 1e-3, "{}: lost {lost} at {r}, want {lo}-{hi} x {d}", sec.label);
+                // The roll is rounded to whole hit points after scaling (shells.rs damage_roll), so allow half a point either way.
+                assert!(lost >= (lo * d).round() - 1e-3 && lost <= (hi * d).round() + 1e-3, "{}: lost {lost} at {r}, want {lo}-{hi} x {d}", sec.label);
             } else {
                 assert_eq!(lost, 0.0, "{} is out of reach", sec.label);
             }
@@ -400,7 +437,7 @@ mod tests {
         let core = hp.core;
         let ship = Ship {
             class,
-            side: crate::Side::Player,
+            side: crate::Side::Enemy,
             heading: 0.0,
             speed: 0.0,
             ang_vel: 0.0,
@@ -434,6 +471,19 @@ mod tests {
         app.world_mut().write_message(Strike { victim: e, damage: tables["meteor"].clone(), section: k });
         app.update();
         assert_eq!(app.world().get::<Health>(e).unwrap().sections[k], after);
+        // The hit carries no attacker: the human's own ship takes the difficulty factor, a computer ship does not.
+        let mine = app.world().get::<Ship>(e).unwrap().clone();
+        let mine = Ship { side: crate::Side::Player, ..mine };
+        let h2 = Health::new(&app.world().resource::<Library>().classes[mine.class]);
+        let before2 = h2.sections[k];
+        let p = app.world_mut().spawn((Transform::default(), mine, h2)).id();
+        for _ in 0..3 {
+            app.world_mut().write_message(Strike { victim: p, damage: tables["wind"].clone(), section: k });
+        }
+        app.update();
+        let f = super::super::shells::side_damage_scale(crate::Side::Enemy, crate::Side::Player, crate::menu::difficulty(), false);
+        let lost = before2 - app.world().get::<Health>(p).unwrap().sections[k];
+        assert!(f < 1.0 && lost <= 21.0 * f + 3.0, "the human's ship takes the difficulty factor ({lost} lost, factor {f})");
     }
 
     #[test]
@@ -467,9 +517,11 @@ mod tests {
         let at = (s.min + s.max) * 0.5;
         // A Cutter rammed by an enemy Man-O-War at 9 units/s: 0.0004 x 40000 x 9 = 144 hit points.
         let damage = 0.0004 * lib.classes[mow].phys.mass * 9.0;
-        app.insert_resource(lib).insert_resource(Rng(7)).add_message::<crate::collision::Ram>().add_systems(Update, ram_damage);
+        app.insert_resource(lib).insert_resource(Rng(7)).add_message::<crate::collision::Ram>().add_message::<crate::audio::Sfx>().add_systems(Update, ram_damage);
         app.world_mut().write_message(crate::collision::Ram { a, b, damage, at });
         app.update();
+        let sounds: Vec<String> = app.world_mut().resource_mut::<Messages<crate::audio::Sfx>>().drain().map(|s| s.name).collect();
+        assert!(sounds.len() == 1 && sounds[0].starts_with("Damage_"), "the struck section's own damage sound: {sounds:?}");
         let hp = &app.world().get::<Health>(a).unwrap().sections;
         assert_eq!(hp[0], (full[0] - damage).max(0.0), "the nearest section takes it all");
         // It kills the 120-point bow, which spills 0.4 of the hit to its neighbours only.

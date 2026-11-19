@@ -18,7 +18,13 @@ Consequence for the cutter (full rudder) at the measured order speeds: about 12.
 
 ## Linear motion
 - Drag is linear (not quadratic) with rate `(MaxThrust/Mass)/MaxSpeed`; terminal speed = throttle × current max speed.
-- Lateral/vertical velocity is damped separately (constants 0.5 and 0.3).
+- Lateral/vertical velocity is damped separately (read from the original's code, not measured): the ship's own velocity is split
+  along its forward, starboard and up axes. Each tick the starboard part is reduced by 0.5 of itself and the up part by 0.3 of
+  itself (an acceleration of -0.5 x part / tick length, resp. -0.3 x, added to the thrust and the forward drag); a part slower than
+  0.01 units/s is left alone (the forward drag has the same 0.01 dead zone). Pushes from collisions, fields and currents are a
+  separate velocity and are not damped by this. Not built here: a ship's velocity here always lies along its heading, so the only
+  sideways part this would act on is the skid while turning (about speed x turn rate x tick length, ~0.05 units/s at 5 units/s
+  and 0.3 rad/s), too small to matter yet.
 
 ## Measured on the running original (Navy Cutter, skirmish, no crew)
 Sampled ~60 times a second from the running retail game (Steam/Proton) while issuing each order; the game itself updates
@@ -126,9 +132,14 @@ Follow-up (waypoint test = clamped linear interpolation):
   In arrive the throttle ramps 1.0 → 0.1 between 2R and R from the last point while the path is live, and is 0 once it is done; then clamped 0..1.
 - The last point of a `to end` path counts as reached inside 2·R (R = entity →, a per-ship radius; also maxed over groups);
   intermediate points use a passing (bisector-angle) test instead.
-- Remake: `rules::mission_ai` drops the last point inside 2 × `class.radius` (PROVISIONAL stand-in for R) and sets All Stop; the existing
-  drag then brakes the ship. The turn-state throttle hold is not modelled. A finished remake chase stops the same way (not retail-derived).
-  The human's own move orders still coast on (`ship.rs`); the command ship is halted during the opening briefing (`briefing.rs`).
+- Remake: scripted and mission-AI ships on a `to end` path (not looping) take the throttle rule from `ship::path_end`: aligned within
+  pi/16 of the current point, full throttle; turned further off, the current speed fraction held (floor 0.1). The arrive ramp (1.0 at 2R
+  falling to 0.1 at R) is built, but the stopping-distance helper returns its cancelling result (zero), so arrive starts only when the
+  path ends: the last point is taken inside 2 × `class.radius` (PROVISIONAL stand-in for R) and the throttle goes to 0 (All Stop, the
+  existing drag brakes the ship). Not built: the passing (bisector-angle) test for intermediate points (the remake takes them about
+  3 s of travel early), and any brake on computer-captain explore and attack courses (they are not `to end` paths: the attack routines
+  carry their own measured throttle). A finished remake chase stops the same way (not retail-derived). The human's own move orders still
+  coast on (`ship.rs`); the command ship is halted during the opening briefing (`briefing.rs`).
 
 ## Computer captains (measured, 2026-10)
 Headless retail skirmishes, one computer ship against our idle or fleeing Navy Cutter / Man-O-War, every ship logged at ~30 Hz.
@@ -262,7 +273,7 @@ Static analysis of the original's AI, written as rules; it explains the island b
   So computer ships give way to the human's moving ships, the slower of two computer ships stops, and a moving ship never stops for land.
 - **Inside a black hole or nebula:** straight out to 2r beyond its rim. **Wedged** (read from the original's code): when the same obstacle has been
   found on more than ten thinks in a row (about 5.5 s), the ship overlaps its bounding sphere (gap under 1 unit) and it barely moves (under
-  0.1 units per 1/30 s), the avoider drops the detour and turns the ship in place toward the side of the smaller clear turn (a tie, or no
+  0.1 units per 0.033 s), the avoider drops the detour and turns the ship in place toward the side of the smaller clear turn (a tie, or no
   clear side: the original's sign convention). The turn runs at a fixed sqrt(MaxAngularAcceleration / RotationalFriction) / 3 rad/s (a
   Carrack 5.7°/s), whatever the speed, rudder, crew or damage; meanwhile nothing else moves the ship and its speed and throttle are kept.
   It ends on the first think where any condition fails. Retail saves never caught a ship in it: a last resort, since a moving ship's
@@ -294,8 +305,11 @@ Run-in slow-down: four run-ins slowed 48-64 units from their target whatever the
 more than 11.25° off the bow, which the broadside aim point is once the ship nears its target.
 
 ## Computer captains: decisions and attack (read from the original's code, 2026-10-31)
-Static analysis of the original's captain AI, written as rules. Every computer ship thinks twice a second; nothing in it depends on
-the difficulty setting.
+Static analysis of the original's captain AI, written as rules. Nothing in it depends on the difficulty setting.
+- **When a captain thinks (measured, 2026-11-16):** once 0.5 s has passed since its last think. With the 0.033 s step that is every
+  16th step, 0.528 s (five ships, 85 thinks each, all 0.528 s). The clock restarts at each think, so no remainder carries over.
+  A new captain first waits 0.05 s × (its spawn number mod 10), one count for all sides, and thinks one full period after that
+  wait; between thinks a ship keeps the course, speed order and target of its last think. Guns decide every step.
 - **What to do, in order:** with at least two damage sections at or below half their hit points, dock for repair
   ([docking-and-orders.md](docking-and-orders.md)); else choose a target and attack it; with no target, explore (Aggressive ships, which
   every skirmish computer ship is) or stop and hold. There is no fleeing or retreat.
@@ -321,8 +335,10 @@ the difficulty setting.
 - **Frontal:** straight at the target until the gap between the hulls is R, then turn the line of sight 90° toward the side the target bears on
   (to port when it is on the port bow, to starboard when on the starboard bow or dead ahead) and sail that fixed direction (R ahead)
   for up to 15 s or until out of range, then charge again (or break off again, with a new direction, if still inside R). The ship so
-  turns toward its target and swings round it on that side. **Rear:** inside R run straight away to R, outside it come straight back.
-  **Ram:** straight at it, full throttle within 5° of the bow.
+  turns toward its target and swings round it on that side. **Rear:** inside R run straight away to R, outside it come straight back. Its distance is
+  measured from its own hull (centre minus its own radius) to the aim point on the target, the target's size not counted, so it
+  holds the same distance from a small and a large target.
+  **Ram:** straight at it, full throttle within 5° of the bow (the other attacks' window is 11.25°; a ram steers by its own 5° test, also under the ram order). Remake: `attack::throttle` takes the routine. PROVISIONAL: whether the follower's 11.25° rule still lifts a ram's throttle between 5° and 11.25° is unread (the remake gives the minimum there), as is the lower bound of the ram's angle test.
 - **Throttle:** full while the next course point is within 11.25° of the bow, else the ship's own minimum, 0.65-0.75 of full (drawn
   per ship). That minimum is a floor under every slow-down but the collision avoider's, so nothing else slows an attacker near its
   course points.

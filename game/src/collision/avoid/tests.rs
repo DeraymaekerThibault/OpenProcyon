@@ -9,7 +9,7 @@ fn me(speed: f32) -> Me {
 /// A wall across the course `z` units ahead (heading 0 sails toward -z), `half` units either side of the line, offset by `x`.
 fn wall(z: f32, x: f32, half: f32) -> Obstacle {
     let t = [Vec3::new(x - half, -2.0, -z), Vec3::new(x + half, -2.0, -z), Vec3::new(x, 2.0, -z)];
-    Obstacle { body: BoxBody { points: t.to_vec(), bounds: Bounds::points(&t) }, triangles: vec![Triangle { points: t, bounds: Bounds::points(&t) }] }
+    Obstacle { body: BoxBody { points: t.to_vec(), bounds: Bounds::points(&t) }, triangles: vec![Triangle { points: t, bounds: Bounds::points(&t) }], tree: vec![] }
 }
 fn island(o: &Obstacle) -> Other<'_> {
     let (centre, radius) = o.sphere();

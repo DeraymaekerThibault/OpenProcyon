@@ -43,7 +43,7 @@ impl SkirmishScript {
 }
 
 pub fn plugin(app: &mut App) {
-    app.add_systems(FixedUpdate, run.in_set(crate::BattleSet::Rules).run_if(in_state(crate::menu::Screen::Battle)).run_if(resource_exists::<SkirmishScript>));
+    app.add_systems(Update, run.in_set(crate::FrameRules).run_if(in_state(crate::menu::Screen::Battle)).run_if(resource_exists::<SkirmishScript>));
 }
 
 fn run(
@@ -60,6 +60,7 @@ fn run(
     mut mines: Query<(Entity, &Transform, &mut crate::combat::MapMine, Option<&mut crate::combat::Shell>)>,
     mut commands: Commands,
     fxlib: Option<Res<crate::fx::FxLib>>,
+    lib: Option<Res<crate::data::Library>>,
     event_fx: Query<(Entity, &super::systems::EventFx)>,
 ) {
     let sk = &mut *sk;
@@ -228,8 +229,10 @@ fn run(
             }
             Fx::Damage(units, part) => {
                 for e in &units {
-                    let Ok((_, _, _, mut h, ..)) = ships.get_mut(*e) else { continue };
-                    h.scale(1.0 - part);
+                    let Ok((_, ship, _, mut h, ms, ..)) = ships.get_mut(*e) else { continue };
+                    if let Some(lib) = lib.as_deref() {
+                        crate::combat::fraction_hit(&lib.classes[ship.class], &mut h, part, ship.side, ms.invuln);
+                    }
                 }
             }
             _ => {}

@@ -342,6 +342,11 @@ def export(root, ship, outdir):
                 gun_defs[gun] = (
                     {k: g[k] for k in GUN_KEYS}
                     | {k: g.get(k) for k in GUN_SOUND_KEYS}
+                    | {
+                        "CalculateAccuracyDeviationDuringBurst": bool(
+                            g.get("CalculateAccuracyDeviationDuringBurst", False)
+                        )
+                    }
                     | {"visual": gun_visual(root, gun, outdir)}
                 )
             b = gun_defs[gun]["BulletTypeName_Primary"]
@@ -421,6 +426,8 @@ def export(root, ship, outdir):
                 vital_speed=a["vitalToMaxVelocity"] == "1",
                 vital_turn=a["vitalToManeuverability"] == "1",
                 vital_mission=a.get("vitalToMission") == "1",
+                # Only a swappable section shows its "<A>Damage_<B>" mesh when destroyed (Station Montgomery's island is not).
+                swappable=a.get("swappable", "1") == "1",
                 core_pct=float(a.get("vitalSectionCoreDamagePercent", 0)),
                 # Neighbouring sections (layer names) a destroyed section passes damage on to.
                 adjacent=[x for x in a.get("adjacent", "").split("+") if x],
@@ -485,7 +492,7 @@ def base_safe_physics(root, ship):
     try:
         return export_physics(root, ship)["properties"]
     except ValueError:
-        if not ship.startswith(("Base_", "Island_")):
+        if not ship.startswith(("Base_", "Island_", "Asteroid_")):
             raise
         zero = {"value": 0.0}
         return dict.fromkeys(

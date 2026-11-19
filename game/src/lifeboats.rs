@@ -119,7 +119,7 @@ fn lifeboats(
             continue;
         }
         info!("lifeboat picked up: owner {} by {:?} at {:?} d={d}", owner(l, bm), cm.map(|m| (&m.name, &m.owner)), btf.translation);
-        commands.entity(boat).despawn();
+        crate::queue_removal(&mut commands, boat);
         present.retain(|p| p.0 != Some(boat));
         sfx.write(crate::audio::Sfx::ui(PICKUP_SOUND));
         if let Some(m) = mission.as_mut() {
@@ -146,7 +146,7 @@ mod tests {
             .insert_resource(crate::campaign::load_id(mission))
             .add_message::<ShipLost>()
             .add_message::<crate::audio::Sfx>()
-            .add_systems(Update, lifeboats);
+            .add_systems(Update, (crate::tick_start, lifeboats).chain());
         app
     }
     fn ship(app: &mut App, class: &str, owner: &str, at: Vec3, flag: bool) -> Entity {

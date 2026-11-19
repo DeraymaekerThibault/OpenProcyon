@@ -3,7 +3,7 @@
 Sources: `World/SinglePlayer/Mission*.twt` and `World/*.twt` (rule `*State Init* Setup Nebula`, point sets, polygons), `WorldObjects/Terrain_Nebula.wot`,
 `Effects/Nebula.eft`, `BD_Meshes/OvalNebula_Layer1.mdb`, observed behaviour of the original game and the retail
 `SavedGames/*.twt`. Already in the repo: `tools/export_nebulae.py` (per-map `nebulae`), `assets/fx/Nebula.json`, `assets/models/scenery/OvalNebula.glb`,
-`game/src/nebula.rs` (mesh-shifting renderer), `game/src/environment.rs` (energy drain and sensor occlusion). Uncertain parts are PROVISIONAL.
+`game/src/nebula.rs` (mesh-shifting renderer), `game/src/environment.rs` (sensor occlusion; the slow-down is `nebula::slowdown`). Uncertain parts are PROVISIONAL.
 
 ## 1. How a nebula is defined
 
@@ -62,8 +62,10 @@ Each nebula keeps, from its `Terrain_Nebula` state: centre, radius,
   update copies it into the sail/movement state (the same step that raises crew sail-strength announcements at 25/50/75/100 %).
   So ships slow more the deeper they are; the exact use of the factor (probably a speed/accel multiplier of `1 - factor` or a sail-power
   drain) is PROVISIONAL.
-- **Sail energy drain**: `Nebula Cloud Drain Sail Energy` is a flag only; the drain rate was not found. The current remake rate (0.12/s down to
-  25 %) is a guess; prefer replacing it with the depth-based factor above. `Nebula Occlusion` blocks sensors/line of sight through the polygon
+- **Slow-down** (was "sail energy drain"): the flag only gates the depth factor. While a ship is inside a cloud whose flag is on, its top speed and
+  thrust are multiplied by the 3-D distance to the cloud's centre over its radius, clamped to 0..1 (read from the original's code, not yet measured):
+  half the radius deep halves the speed, the exact centre stops the ship. Instant, no recovery time, the deepest nebula counts. Hulls with a certain
+  class flag are exempt (not modelled; its meaning is unknown). `Nebula Occlusion` blocks sensors/line of sight through the polygon
   (retail AI also treats `TYPEAVOID 'Nebula'` as an area to avoid on path planning; the remake only does the occlusion).
 - **Camera effect**: the world saves `DATA_NEBULA_CAMERA_EFFECT`, `..._FADE_IN_TIMER`, `..._SPIN_TIMER`, `DATA_NEXT_NEBULA_CAMERA_EFFECT`:
   when the camera is inside a nebula the original fades in a full-screen/spinning overlay. Unknown. PROVISIONAL / not done.
@@ -72,7 +74,7 @@ Each nebula keeps, from its `Terrain_Nebula` state: centre, radius,
   damage and meteors used heavy-cannon damage. For cloth, weather wind is 5–7 damage versus lightning's 15–40; for wood, meteors are 5–10.
   Hit selection now follows the executable evidence below rather than guaranteed per-ship hits. Recharge floors (3 s lightning / 2 s meteors),
   endpoint sampling, wind force and membership/trap details remain provisional; critical/fire handling retains the existing environmental-hit limitations.
-  The mission 3 `storm-m3-damage` smoke uses the normal 45% protection from its retail trigger rule (not forced invulnerability)
+  The mission 3 `storm-m3-damage` smoke uses the 45% hull floor (`Invulnerable Percent` 0.45) from its retail trigger rule (not forced invulnerability)
   and verifies carriage, release and survival.
 
 ### Weather hit-selection follow-up

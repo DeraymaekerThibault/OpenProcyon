@@ -204,6 +204,41 @@ fn all_layouts_custom_and_rotated_following_preserve_altitude_and_limits() {
 
 #[test]
 #[ignore = "needs imported assets"]
+fn a_replacement_command_ship_takes_over_the_command_cap_not_its_own() {
+    // #356: a ship a rule had stopped (cap 0) became primary after the flagship was captured, and the player could not move.
+    let (mut w, ids) = fleet_world();
+    w.get_mut::<Ship>(ids[1]).unwrap().cap = 0.0;
+    // A rule capping the captured flagship (now the enemy's) does not pass its 0 on (review of #358).
+    w.get_mut::<Ship>(ids[0]).unwrap().cap = 0.0;
+    w.get_mut::<FleetMember>(ids[0]).unwrap().0 = "Enemy".into(); // captured
+    reconcile_fleets(&mut w);
+    assert_eq!(w.resource::<Fleets>().primary(), Some(ids[1]));
+    assert_eq!(w.get::<Ship>(ids[1]).unwrap().cap, 1.0);
+    // A cap the script put on the command ship (a cutscene slowdown) carries over to the replacement.
+    w.get_mut::<Ship>(ids[1]).unwrap().cap = 0.25;
+    w.get_mut::<Ship>(ids[2]).unwrap().cap = 0.0;
+    w.get_mut::<Health>(ids[1]).unwrap().destroyed = true;
+    reconcile_fleets(&mut w);
+    assert_eq!(w.resource::<Fleets>().primary(), Some(ids[2]));
+    assert_eq!(w.get::<Ship>(ids[2]).unwrap().cap, 0.25);
+    // A despawned command ship leaves no cap to inherit: the replacement can move at full command.
+    w.get_mut::<Ship>(ids[3]).unwrap().cap = 0.0;
+    w.despawn(ids[2]);
+    reconcile_fleets(&mut w);
+    assert_eq!(w.resource::<Fleets>().primary(), Some(ids[3]));
+    assert_eq!(w.get::<Ship>(ids[3]).unwrap().cap, 1.0);
+    // A sunk command ship stopped by an NIS (cap 0) never strands its replacement either.
+    let (mut w, ids) = fleet_world();
+    w.get_mut::<Ship>(ids[0]).unwrap().cap = 0.0;
+    w.get_mut::<Ship>(ids[1]).unwrap().cap = 0.0;
+    w.get_mut::<Health>(ids[0]).unwrap().destroyed = true;
+    reconcile_fleets(&mut w);
+    assert_eq!(w.resource::<Fleets>().primary(), Some(ids[1]));
+    assert_eq!(w.get::<Ship>(ids[1]).unwrap().cap, 1.0);
+}
+
+#[test]
+#[ignore = "needs imported assets"]
 fn destruction_despawn_empty_and_scenario_reset_clear_stale_fleet_state() {
     let (mut w, ids) = fleet_world();
     w.resource_mut::<Fleets>().selected = Some(ids[1]);
@@ -311,8 +346,12 @@ fn time_scale_preserves_virtual_catch_up_caps() {
         app.world().resource::<Time<Virtual>>().delta_secs()
     };
     assert!((step(4.0, 0.01) - 0.04).abs() < 1e-4); // fast frame: full 4x
-    assert!(step(16.0, 1.0 / 60.0) <= 0.1 + 1e-4); // vsync frame: capped
-    assert!((step(1.0, 0.2) - 0.2).abs() < 1e-4); // 1x keeps Bevy's normal 0.25 s hitch clamp
+    assert!((step(16.0, 1.0 / 60.0) - 0.1).abs() < 1e-4); // vsync frame at 16x: capped at 0.1 s
+    assert!((step(16.0, 1.0) - 0.1).abs() < 1e-4); // above 5x a slow frame is capped at 0.1 s (about 3 ticks)
+    // docs/re/tick.md: at most 10 frames of `speed` ticks of 0.033 s per call; a longer stall drops the rest.
+    assert!((step(1.0, 1.0) - 0.33).abs() < 1e-4);
+    assert!((step(2.0, 1.0) - 0.66).abs() < 1e-4);
+    assert!((step(5.0, 10.0) - 1.65).abs() < 1e-4);
 }
 
 #[test]
@@ -416,7 +455,7 @@ fn a_broadside_attacker_circles_an_idle_ship_on_its_turning_circle() {
             let gap = tf.translation.length() - class.radius;
             let at = attack::aim(cutter, &cutter_hp, &Transform::IDENTITY, tf.translation, false);
             let course = attack::course(routine, tf.translation, ship.heading, at, gap, range[0], i as f32 * dt, &mut None);
-            let throttle = attack::throttle(e, tf.translation, ship.heading, course[0]).map(|_| 2.0 * min_throttle);
+            let throttle = attack::throttle(routine, e, tf.translation, ship.heading, course[0]).map(|_| 2.0 * min_throttle);
             (ship.throttle, ship.waypoints, ship.goal, ship.order) = (throttle, course, None, 3);
             helm_step(&mut ship, &mut tf, class, &h, dt, true);
             if i as f32 * dt > 120.0 {
@@ -631,7 +670,6 @@ fn ships_lean_into_turns_except_at_emergency_speed() {
 #[test]
 #[ignore = "needs imported assets"]
 fn allied_computer_ships_hunt_the_enemy_base_the_humans_fleet_waits() {
-    use bevy::ecs::system::RunSystemOnce;
     let (mut w, ids) = fleet_world();
     w.despawn(ids[5]);
     let class = w.resource::<Library>().index("Base_SmugglersCamp");
@@ -655,7 +693,131 @@ fn allied_computer_ships_hunt_the_enemy_base_the_humans_fleet_waits() {
     w.init_resource::<crate::environment::Sensors>();
     w.init_resource::<CaptainTargets>();
     w.init_resource::<Time>();
-    w.run_system_once(ai).unwrap();
+    // A captain first thinks one period (plus its start delay) after it appears, so run the system at 0 s and again at 1 s.
+    let captains = w.register_system(ai);
+    w.run_system(captains).unwrap();
+    assert_eq!(w.get::<Ship>(ids[4]).unwrap().order, 0, "no captain has thought yet");
+    w.resource_mut::<Time>().advance_by(std::time::Duration::from_secs(1));
+    w.run_system(captains).unwrap();
     assert!(w.get::<Ship>(ids[4]).unwrap().order > 0, "the ally sets off for the enemy base");
     assert_eq!(w.get::<Ship>(ids[1]).unwrap().order, 0, "the human's own ship waits for orders");
+}
+
+#[test]
+fn a_formation_swap_pass_gives_ships_the_slot_nearest_them_and_leaves_fitting_ones() {
+    let slots = formation_slots(Formation::Diamond, &[10.0, 10.0, 10.0]);
+    let on = |p: Vec3| (p, 0.0);
+    // Each ship on its own slot, all heading with the leader: nothing moves.
+    let mut s = slots.clone();
+    swap_slots(&mut s, &[on(Vec3::ZERO), on(slots[1]), on(slots[2])]);
+    assert_eq!(s, slots);
+    // The second and third ships are on each other's slots: they trade.
+    let mut s = slots.clone();
+    swap_slots(&mut s, &[on(Vec3::ZERO), on(slots[2]), on(slots[1])]);
+    assert_eq!((s[1], s[2]), (slots[2], slots[1]));
+    // Equal fits never swap: both ships at the same spot keep their own slots.
+    let mut s = slots.clone();
+    let mid = (slots[1] + slots[2]) / 2.0;
+    swap_slots(&mut s, &[on(Vec3::ZERO), on(mid), on(mid)]);
+    assert_eq!(s, slots);
+}
+
+fn plain_ship() -> Ship {
+    Ship {
+        class: 0,
+        side: Side::Player,
+        heading: 0.0,
+        speed: 5.0,
+        ang_vel: 0.0,
+        order: 3,
+        waypoints: vec![Vec3::new(10.0, 0.0, -50.0)],
+        goal: Some(1.0),
+        cap: 1.0,
+        throttle: Some(0.5),
+        sail_energy: 1.0,
+        crew_speed: 1.0,
+        crew_turn: 1.0,
+        net: 1.0,
+        avoid: 1.0,
+    }
+}
+
+#[test]
+fn hold_and_stop_zero_the_controls_and_end_the_course() {
+    let mut s = plain_ship();
+    s.stand_still();
+    assert_eq!((s.order, s.ordered()), (0, 0.0));
+    assert!(s.waypoints.is_empty() && s.goal.is_none(), "no leftover course for the helm to steer to");
+}
+
+#[test]
+fn hold_ends_a_captains_destination_but_keeps_its_target_and_formation_hold() {
+    let target = Entity::from_raw_u32(7).unwrap();
+    let mut p = FleetPilot { hold: true, target: Some(target), destination: Some(Vec3::X), hold_fire: true, ..default() };
+    p.hold_position();
+    assert_eq!((p.destination, p.target, p.hold, p.hold_fire), (None, Some(target), true, true));
+}
+
+#[test]
+fn stop_leaves_formation_hold_and_hold_fire_alone() {
+    let target = Entity::from_raw_u32(7).unwrap();
+    let mut p = FleetPilot { hold: true, target: Some(target), destination: Some(Vec3::X), hold_fire: true, ..default() };
+    p.cancel_actions();
+    assert_eq!((p.destination, p.target, p.hold, p.hold_fire), (None, None, true, true));
+}
+
+#[test]
+fn a_held_ship_is_released_by_move_dock_tow_and_board_orders_only() {
+    let mut w = World::new();
+    let e = w.spawn(HoldPosition).id();
+    // An attack order (or Stop) never calls `release_hold`; the order clicks that clear a hold all do.
+    assert!(w.get::<HoldPosition>(e).is_some());
+    let mut queue = bevy::ecs::world::CommandQueue::default();
+    release_hold(&mut Commands::new(&mut queue, &w), e);
+    queue.apply(&mut w);
+    assert!(w.get::<HoldPosition>(e).is_none());
+}
+
+/// A dying Navy Cutter's drive (docs/re/effects.md "Death drive"): with every section at 0 HP and the computer's full throttle it
+/// settles at 0.1 x MaxSpeed x crew factor (retail: 0.90 against 0.1 x 8.06 x 1.125 = 0.906), and a fast hull slows to that speed
+/// through the ordinary drag law instead of stopping.
+#[test]
+#[ignore = "needs imported assets"]
+fn dying_cutter_drifts_at_a_tenth_of_max_speed_and_a_fast_one_decays_to_it() {
+    let lib = combat::Library::load(crate::assets_dir());
+    let ci = lib.index("Ship_Navy_Cutter");
+    let class = &lib.classes[ci];
+    let wreck = Health { sections: vec![0.0; class.sections.len()], core: 0.0, destroyed: true };
+    let dt = 0.0344;
+    let ship = |speed| Ship {
+        class: ci,
+        side: Side::Player,
+        heading: 0.0,
+        speed,
+        ang_vel: 0.0,
+        order: 3,
+        waypoints: vec![],
+        goal: None,
+        cap: 1.0,
+        throttle: Some(1.0 / FULL_SPEED), // the computer's throttle 1.0
+        sail_energy: 1.0,
+        crew_speed: 1.125,
+        crew_turn: 1.125,
+        net: 1.0,
+        avoid: 1.0,
+    };
+    let expected = 0.1 * class.phys.max_speed * 1.125;
+    let (mut slow, mut fast) = (ship(0.0), ship(9.0));
+    let (mut tf_slow, mut tf_fast) = (Transform::default(), Transform::default());
+    let mut previous = fast.speed;
+    for i in 0..(20.0 / dt) as usize {
+        helm_step(&mut slow, &mut tf_slow, class, &wreck, dt, true);
+        helm_step(&mut fast, &mut tf_fast, class, &wreck, dt, true);
+        assert!(fast.speed <= previous + 1e-6, "a fast hull only slows (tick {i})");
+        assert!(fast.speed >= expected - 1e-3, "it never undershoots the drift speed");
+        previous = fast.speed;
+    }
+    assert!((slow.speed - expected).abs() < 0.01, "from rest {} vs {expected}", slow.speed);
+    assert!((fast.speed - expected).abs() < 0.01, "from 9 u/s {} vs {expected}", fast.speed);
+    assert!((expected - 0.906).abs() < 0.01 && (slow.speed - 0.90).abs() < 0.02, "retail measured 0.90: {}", slow.speed);
 }

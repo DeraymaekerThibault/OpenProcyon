@@ -1,8 +1,12 @@
 #!/bin/sh
-# The validation gate: format, lint, repository hygiene and tests. usage: tools/check.sh
+# The validation gate: format, lint, repository hygiene and tests. usage: tools/check.sh [--fast]
+# --fast is the inner loop while iterating: everything except the startup smoke and the battle check (about 2 minutes of the full
+# run). The gate before a commit is still the full run.
 # Needs ruff (pip install -r requirements-dev.txt); a .venv in the checkout is used when present.
 # Asset-free Rust tests always run; ignored asset tests, the startup smoke and the battle check also run when an import exists.
 set -e
+fast=
+[ "${1:-}" = --fast ] && fast=1
 cd "$(dirname "$0")/.."
 # The checkout's virtualenv first (bin/ on Linux and macOS, Scripts/ on Windows, where python3 may be the Store stub).
 for bin in .venv/bin .venv/Scripts; do [ -d "$bin" ] && PATH="$PWD/$bin:$PATH"; done
@@ -15,6 +19,12 @@ cargo fmt --check
 cargo clippy --release --all-targets -- -D warnings
 if [ "$imported" = 1 ]; then
   cargo test --release -- --include-ignored
+  if [ -n "$fast" ]; then
+    cd ..
+    python3 -m unittest discover -s tests
+    echo "NOTE: --fast: startup smoke and battle check skipped; run tools/check.sh without it before committing." >&2
+    exit 0
+  fi
   # Startup smoke: the unit tests run single systems, so only a real start finds conflicts between systems (Bevy B0001) and
   # startup panics. Runs the menu for 10 s; needs a display or Xvfb (like tools/shot.sh).
   cargo build --release

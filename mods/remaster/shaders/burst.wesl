@@ -2,11 +2,14 @@
 // `Built::quad` there, our own work under the project licence). Drawn additively (ONE/ONE: write unpremultiplied light).
 // Every glowing kind shares one mesh: uv.x = kind * 4 + u, uv.y = seed * 2 + v (u, v 0..1 across the quad), vertex
 // colour rgb the particle's colour, a its age as a share of its life (for ether dust: how faded it is).
-// Kinds: 0 flash, 1 spark (u runs tail to head), 2 ember, 3 fireball, 4 shockwave ring (flat), 5 hull scorch, 6 dust.
+// Kinds: 0 flash, 1 spark (u runs tail to head), 2 ember, 3 fireball, 4 ring, 5 hull scorch, 6 dust, 8 flame (v base to tip).
 import bevy_pbr::render::forward_io::{VertexOutput, FragmentOutput};
 
+// the battle clock and the sun (game/src/render/frame.rs)
+import openprocyon::render::frame::frame;
+
 struct Burst {
-    // x: clock
+    // unused: the clock is frame.clock
     params: vec4<f32>,
 }
 
@@ -33,6 +36,14 @@ fn heat(t: f32) -> vec3<f32> {
     return vec3<f32>(smoothstep(0.0, 0.35, x), smoothstep(0.2, 0.75, x), smoothstep(0.6, 1.0, x)) * (0.3 + 1.2 * x);
 }
 
+// Each tongue narrows and bends as it rises. Keep a broad, joined base while the tips move independently.
+fn tongue(x: f32, y: f32, origin: f32, reach: f32, width: f32, phase: f32) -> f32 {
+    let h = y / reach;
+    let mid = origin + h * (0.16 * sin(phase - 7.0 * y) + 0.11 * sin(1.37 * phase - 12.0 * y));
+    let radius = width * max(1.0 - h, 0.0) + 0.035;
+    return (1.0 - smoothstep(0.5, 1.0, abs(x - mid) / radius)) * (1.0 - smoothstep(0.77, 1.0, h));
+}
+
 @fragment
 fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> FragmentOutput {
     let kind = floor(in.uv.x / 4.0 + 0.001);
@@ -43,7 +54,7 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
     let d = length(q);
     let age = clamp(in.color.a, 0.0, 1.0);
     let colour = in.color.rgb;
-    let clock = burst.params.x;
+    let clock = frame.clock.y;
     let s = seed * 7.31;
     var light = vec3<f32>(0.0);
 
@@ -87,10 +98,21 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
         let t = (1.0 - age) * (0.5 + 0.7 * n);
         let flicker = 0.9 + 0.1 * sin(clock * 9.0 + s);
         light = heat(t * 0.9) * colour * 1.6 * blob * pow(1.0 - age, 1.5) * flicker;
-    } else {
+    } else if kind < 6.5 {
         // ether dust: faint specks twinkling in the light
         let tw = 0.6 + 0.4 * sin(clock * (0.7 + seed * 0.05) + s);
         light = colour * exp(-d * d * 6.0) * 0.35 * tw * (1.0 - age);
+    } else if kind > 7.5 {
+        let t = 8.0 * clock + s;
+        let coal = (1.0 - smoothstep(0.28, 0.81, abs(q.x))) * (1.0 - smoothstep(0.06, 0.27, v));
+        let tall = tongue(q.x, v, -0.07, 0.87 + 0.11 * sin(t), 0.53, t);
+        let left = tongue(q.x, v, -0.39, 0.61 + 0.14 * sin(1.32 * t + 2.2), 0.34, 1.32 * t + 2.2);
+        let right = tongue(q.x, v, 0.35, 0.68 + 0.16 * sin(1.19 * t + 3.6), 0.36, 1.19 * t + 3.6);
+        let body = max(coal, max(tall, max(left, right)));
+        let churn = noise(vec2<f32>(q.x * 4.0 + s, v * 7.0 - clock * 9.0));
+        let hot = clamp(0.43 + 0.52 * (1.0 - v) * body + 0.15 * churn, 0.0, 1.0);
+        let tint = mix(vec3<f32>(1.0, 0.49, 0.19), vec3<f32>(1.0, 0.94, 0.78), coal);
+        light = colour * heat(hot) * tint * body * smoothstep(0.0, 0.055, v) * (0.73 + 0.27 * churn);
     }
 
     var out: FragmentOutput;

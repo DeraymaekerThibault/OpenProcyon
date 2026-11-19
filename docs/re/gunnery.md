@@ -14,16 +14,24 @@ crewed/player ships) the lead is only applied while the target is turning and ad
 
 ## Deviation (run once per burst, or per shot if CalculateAccuracyDeviationDuringBurst)
 - Band by distance: <= EffectiveRange -> Effective deviation, <= LongRange -> Long, else Maximum.
-- Half of it, times an accuracy factor: 0.5 for plain AI ships (0.8 or a per-ship value for some ship flags);
-  crewed ships use 1 - 0.8 * gunnery skill (+0.1 / +0.05 random bonuses, clamped to [0,1]); NIS mode uses 0.1.
+- Half of it, times an accuracy factor that depends on what the gun sits on. **Every ship, computer or not, uses its crew**:
+  1 - 0.8 x the gunnery of the gunner in the gun's own bank slot, after the ship's leadership bonuses (+0.1 / +0.05, drawn once
+  per ship from the captain's and first mate's Leadership, [crew.md](crew.md)) and clamped to [0, 1]. A slot nobody holds is a
+  rating-1 hand (0.1, so a factor of 0.92 before bonuses). The flat 0.5 belongs to objects that are neither ships, bases nor dragons;
+  a base reads a per-base value (the mission's gunnery level for its guns, `IslandGunnery`), a dragon's breath 0.8 (the remake gives
+  dragon breath no spread yet). NIS mode uses 0.1 (the deviation is scaled, not removed).
 - The final angle is uniform in [-a, +a].
+- Remake: the cinematic factor is 0.1. The gun's `CalculateAccuracyDeviationDuringBurst` flag (set on a few retail guns) makes the angle be
+  drawn for every shot instead of once per burst (`GunDef::dev_per_shot`; the exporter writes the flag, so re-import assets).
 
 ## Firing
 Per muzzle the angle is applied twice to the muzzle orientation, about two axes, each with a random sign
 (so yaw and pitch error have the same magnitude). Speed is MuzzleSpeed.
 
 ## In the remake (`combat/`)
-Lead and deviation follow the above. PROVISIONAL: factor 0.5 for every ship (no crews); the two rotation axes
+Lead and deviation follow the above. Ships use the crew rule above: named crew (skirmish, campaign outfit) or, for a placed ship
+off the player's side, its level's generic crew in every slot (3 / 6 / 8 of 10); the player's side with no crew record at all keeps
+the campaign roster's best gunner (human fleet) or a rating-1 hand. PROVISIONAL: the two rotation axes
 taken as world up and the muzzle's right. No shell inherits the shooter's velocity (measured, see below), so the lead uses
 the target's velocity alone.
 Measured in an earlier scripted skirmish: hit rate 4% before, 60% after (not remeasured after the changes below).
@@ -68,9 +76,12 @@ ballistic arc and attributed to the ship it started from.
 - Earlier measurement (Navy Man-O-War, nine gunners of 7-9, one gun's hits every 3.5-3.9 s) was read as a cannon crew effect; it more likely
   was several heavy guns hitting in turn, since the schooner's medium-cannon spacing shows no crew effect. Retail check still open: a torpedo
   ship with gunnery 0 vs 9 should show about 35 s vs about 26 s between torpedoes; a cannon ship no difference.
-- Each gun reads the gunner of its own bank (bank index, shared by the bank's guns); the remake's slots follow the weapon banks including
-  fixed ones. PROVISIONAL: the original may also count point-defence banks in that index. The ship's leadership bonus ([crew.md](crew.md))
-  applies to accuracy only, not to reload.
+- Each gun reads the gunner of its own bank, for accuracy (every ship) and for the torpedo reload: the bank index is the order in which
+  banks first appear in the ship's gun list, shared by all the bank's guns. The original counts point-defence banks in that index (a
+  class's gunner slots equal its bank count: Navy Cutter 5, Navy Man-O-War 10), while the remake's slots follow the banks the crew
+  screen lists, which skip point defence. The two agree unless a point-defence bank comes before a listed one (most Navy hulls, e.g.
+  the Cutter's fourth bank); whether the retail crew screen shifts its slots there is not known, so the remake keeps the screen's
+  order. PROVISIONAL. The ship's leadership bonus ([crew.md](crew.md)) applies to accuracy only, not to reload.
 
 ## Lob shells
 Measured on the running original game (2026-10): a Navy Man-O-War's bow Star Mortar fired at open etherium in a
@@ -86,7 +97,9 @@ skirmish, the shell position sampled about 30 times a second.
   MuzzleSpeed is not the launch speed (at 45° it would carry √2 × 350 = 495 units). Whether it caps the speed is not
   observed. The measured elevations
   (44-50°) scatter around LobAngle; the cause is unknown (PROVISIONAL: the remake fires at exactly LobAngle).
-- The gun fires as soon as it is aimed (0.08 s after the click when already pointing that way, 0.65 s after a turn).
+- The gun fires as soon as it is aimed (0.08 s after the click when already pointing that way, 0.65 s after a turn, fixed however far it turns).
+  Remake: "already pointing" is the gun's ordinary aligned test (base within 1° of the aim and barrel within 1° of its elevation), taken before
+  the first step's turning.
 - A shell that hits nothing bursts where it reaches the flight plane.
 - Look: in flight a small pink-white spark with a short trail. On impact a white flash with long rays, then about a second
   later a wide flat pink-orange ring spreading over the flight plane (blast MaxRadius 60 over Duration 3 in the bullet
@@ -122,6 +135,24 @@ skirmish, the shell position sampled about 30 times a second.
   at 1.5 s). The effect's authored `EffectMaxRadius` is 200 (the other effects that set one use it as their extent: black hole
   ribbons 200 / 400 / 800, the gravity charge impact 20 for its radius-10 ring). Remake: particles of this effect that pass 200 units
   from the burst are removed (`fx::Effect::bound`). PROVISIONAL (owner's choice): no retail code that removes them was found.
+
+## Who each gun shoots at, and lob aim points of computer ships (read from the original's code)
+- **Panic fire** (the player's button, refused while the ship is docked) goes through every gun bank in two passes. First pass: banks
+  whose guns are not lobbing, not point-defence, not mine-laying and not torpedo launchers. Second pass: torpedo-launcher banks. So
+  every class fires except lob, point-defence and mine guns, which keep their own routines. Each gun that fires then finds its own
+  target: the nearest hostile ship in sight within its maximum range, and keeps it. The finder was read testing range, not mount arc.
+  Remake: `gunnery::panic_fires` (the class rule) and `panic_target` (nearest, PROVISIONAL: it also requires the mount arc, and falls
+  back to the ship's own target when nothing qualifies; the original's pending request also lapses after 2 s, not modelled).
+- A gun's own target choice happens only in panic fire; the "fire at will" state is set by the point-defence routine alone (which
+  picks incoming torpedoes and mines, as above). Every other gun fires at the ship's target.
+- **Computer ships' lob guns** (star mortars, nova mortars, gravity charges: the guns flagged as lobbing) do not aim at the target
+  itself. About every think (0.5 s, PROVISIONAL) a ship that has a target computes one ground point: a base is taken as it stands;
+  any other target gives its position + its velocity x k (k uniform 5..10 s) + a flat random offset of length uniform 0..(|velocity| x k).
+  The point is adopted only if it is farther from the shooter than a distance drawn uniformly from 50..70; otherwise the guns keep
+  their previous point. Each lob bank then aims at that point plus a fresh random offset of at most one unit (flat), on the flight
+  plane. Non-lob banks are unaffected. Remake: `gunnery::ground_point`, `bank_point`, `GroundAim`. PROVISIONAL: a lob gun that has
+  never had a point stays idle (the original leaves it aimed at the map origin); the original also skips the think when a friendly
+  ship is in the line of fire or scenery is in the way (not modelled).
 
 ## Playtest fixes: arcs and torpedoes
 
@@ -159,7 +190,8 @@ targets use their world position. Inside 100 units it adds a speed-based lead be
 . It also adjusts altitude in small steps, subject to height bounds. Exact phase timers, steering/propulsion integration,
 and target invalidation still need a complete specification for exact fidelity. Follow-up work established the turn
 controller's saturation at 20 degrees, altitude steps of 0.025 with a +/-3-unit bound, and the 0.5-second initial phase. Runtime now
-uses these findings with substepped planar integration and approximate 0.5-unit/s height adjustment. Invalid/destroyed/hidden targets
+uses these findings with substepped planar integration. Remake: the height step is built as read: once per battle tick a homing
+torpedo moves 0.025 toward the target's height when they differ by more than 0.05, bounded to +/-3 units. Invalid/destroyed/hidden targets
 stop tracking rather than being reacquired. A regression intersects the authored schooner hull moving sideways at 4 units/s;
 GPU Mission 1 smoke logs homing hits on the moving, invulnerable training fleet.
 
@@ -183,6 +215,31 @@ particles and the authored EFT brightness/size/rectangle curves are unchanged. T
   with an enemy Carrack 40 units away for over a minute; the Game Summary shows 0 Damage Inflicted for us both times. So the
   command ship's direct-fire guns need a clicked target or panic fire (point defence not checked).
 
+## Read from the original's code, not yet measured in play (2026-11)
+- **Idle guns.** A direct-fire gun with no target never runs its tracking, so it stays where it was; hold fire (a fleet order or a script)
+  freezes the turrets the same way, it does not swing them back to rest. A lob gun keeps tracking its stored ground point.
+- **Torpedo that loses its target** (destroyed, released or fully cloaked): it cuts its thrust and slows to rest, and can still hit;
+  one launched with no target is not affected.
+- **Energy net on a ship that is cloaking or cloaked** orders it to decloak.
+- **Ignition.** One ship, the mission 9 lifeboat, never catches fire.
+
+## Line of fire (computer captains)
+Read from the original's code, not yet measured in play. A computer-run ship (never the human's command ship) fires nothing in a
+think while the straight segment from its centre to the aim point is blocked: no bank fire, no ground-fire point, no harpoon roll.
+Every attack routine's firing step has the test (simple, ram, broadside, frontal, rear, formation, dock for repairs) and so does the
+harpoon decision.
+- **Friend in the line:** the segment (parameter 0 to 1) crosses the bounding sphere of any other ship that is friendly: a lifeboat class on
+  either side, or an allied ship. The sphere's own radius, no margin. Dead and cloaked ships block too. A segment lying wholly inside a
+  sphere does not cross it and does not block.
+- **Scenery in the line:** islands and bases are tested against their collision triangles; any other obstacle by its bounding sphere,
+  blocking when the segment crosses it or an end lies inside it. Only candidates whose surface distance from the ship is at most the
+  segment length are tested, and the aimed-at object never blocks its own shot.
+- Remake: `line_of_fire.rs` (pure predicates, unit-tested), applied in `combat::gunnery::fire` (every gun of a computer ship except point-defence and mine-laying guns holds, as those have their own routines; turrets
+  keep tracking; no new ground-fire points) and `boarding::ai_boarding` (harpoon roll skipped). Allied = same side, or allied mission
+  players, and not hostile. PROVISIONAL: the aim point (the target's aim point for every routine; the original's broadside, frontal
+  and rear runs use their own points), asteroids and other non-mesh obstacles by their bounds sphere, bases tested only if they carry
+  a collision mesh, and the segment starts at the hull centre.
+
 ## Panic button
 - The hotkey/HUD button works only while the player ship is not disabled. It is sent like any order (so it works in multiplayer).
 - Every qualifying gun bank (some gun classes are skipped; which is unknown) switches to fire-when-possible in panic mode: each
@@ -201,6 +258,12 @@ time of 10 s and a no-laying time of 20 s (retail saves: `LAYMINESMAXTIME` 10, `
   ship appeared), or at once whenever the nearest enemy in sight is closer than 50 units. PROVISIONAL: the 1 unit/s and
   50-unit thresholds, and that the human player's minelayers run it too, are not yet observed in play.
 - Remake: `combat::gunnery::MineLaying`; mine guns never aim at a target.
+
+### Mine target pick
+Read from the original's code (the 5 s constant read from its data; not yet measured in play): a mine does not look for a target every
+frame. It picks the nearest hostile ship in sight only every 5 s, the first time 5 s after it was laid, keeps chasing that ship in
+between while it is alive and not cloaked, and coasts to rest when it has none. A ship that sails into sight is therefore noticed
+up to 5 s late, and one that leaves sight is still chased until the next pick.
 
 ### Placed minefields
 Border Dispute (186 mines) and Red Rover (135) place `Bullet_StarMine_Med` world objects in the map. The script's `Set Group/Unit Owner` hands each
@@ -234,7 +297,9 @@ Owner playtest of mission 2 (two island guns): most player shells hit the island
 collision mesh: the remake aimed at the centre of the tower's bounding box, which is inside the tower body and behind terrain from most
 approaches (flight plane at the tower's mid height; from 50 units out, only 5 of 72 compass bearings had a clear line to the centre of tower 2,
 31 of 72 for tower 1; the roof was clear from 48 and 34, any face from 61 and 56). Now the aim is the clicked point on the tower mesh
-(what the original does), and the roof centre when no click is available (computer-less fallback, PROVISIONAL). The remaining blocked
+(what the original does), and the roof centre when no click is available (computer-less fallback, PROVISIONAL): the top centre of the
+section's box dropped straight onto its mesh, or the nearest triangle centre when no mesh lies below it. Mission 6's stockade gate (#353)
+is a sprawling section whose box top centre is air; aimed there, every shell flew over it. The remaining blocked
 bearings are real terrain occlusion, which the original's swept collision also applies. Remake: `combat::hit_test::base_aim_point`.
 
 Ships take the same splinter/rock rule, and a destroyed ship section also bursts into one `ShipExplosion_Medium` at its place. Hull scars
@@ -288,3 +353,11 @@ Source: static reading of the original; **[?]** = inferred, not seen in play. Re
   small flat meshes (per weapon, plus a "no firing solution" twin) on the ground point each frame, and removes it with the mode: no marker while shells fly.
   Data: `LobIcon WorldSpace Radius` 10, `Z Plane Offset: LobIcon` -3; the draw call ignores both, so size and height are PROVISIONAL (remake: the mesh's own size, on the sea plane).
 - **Sounds**: `HUD_LobWeapon_Accept` / `_Reject` on the click for gravity charges only (solution / none); star and nova clicks play neither [? looks odd, confirm in play].
+
+### Section damage roll
+
+One shell hit on a section rolls uniformly between the bullet's low and high value for the section's material (after the
+difficulty factor has scaled both) and rounds the roll to a whole number of hit points; a light carronade takes about 17 at Normal.
+Remake: the section roll is rounded to the nearest whole number. PROVISIONAL: the original's rounding mode is not confirmed
+(nearest assumed; exact halves are measure-zero for a continuous roll). The spill to neighbours still reuses the rounded roll
+x 0.4 rather than a fresh rounded roll per level, and base parts and lob blasts still take unrounded rolls.

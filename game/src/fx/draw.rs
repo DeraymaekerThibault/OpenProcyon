@@ -67,7 +67,7 @@ pub(super) fn render_fx(
     mut mats: ResMut<Assets<StandardMaterial>>,
     mut additive: ResMut<Assets<EffectMaterial>>,
     cam: Single<&GlobalTransform, With<Camera3d>>,
-    fx: Query<(&Fx, &GlobalTransform)>,
+    fx: Query<(&Fx, &GlobalTransform), Without<super::HiddenFx>>,
     mut vis: Query<&mut Visibility>,
     // the quads of each pooled mesh, kept between frames
     mut batches: Local<HashMap<(usize, Blend), QuadBatch>>,
@@ -222,7 +222,7 @@ mod tests {
 
     #[test]
     fn particle_motion_and_fade_are_sampled_between_ticks() {
-        let p = P { pos: Vec3::X, vel: Vec3::X * 30.0, age: 0.2, life: 1.0 };
+        let p = P { pos: Vec3::X, vel: Vec3::X / TICK, age: 0.2, life: 1.0 };
         let (pos, age) = particle_sample(&p, TICK / 2.0);
         assert!((pos.x - 1.5).abs() < 1e-6);
         assert!((age - (0.2 + TICK / 2.0)).abs() < 1e-6);

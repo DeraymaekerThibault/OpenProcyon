@@ -64,6 +64,12 @@ impl Ship {
         self.order = 0;
     }
 
+    /// The Hold and Stop orders' effect on the controls: rudder and throttle to zero, the current order and course end. A held ship
+    /// does not steer or follow a path (`HoldPosition` is the marker); neither order touches the formation hold.
+    pub fn stand_still(&mut self) {
+        self.halt();
+    }
+
     /// The commanded share of Ahead Full: 0 at All Stop (or a throttle of 0), otherwise the throttle or the order's fraction.
     pub fn ordered(&self) -> f32 {
         if self.order == 0 { 0.0 } else { self.throttle.unwrap_or(ORDERS[self.order].1) }
@@ -76,6 +82,11 @@ pub struct PlayerShip;
 /// 'AI_LOCK_POSITION' (right-click menu Hold): the ship's captain keeps it where it is; it still fires.
 #[derive(Component)]
 pub struct HoldPosition;
+
+/// A move, dock, tow or board order ends a hold (any other order, an attack among them, leaves it).
+pub fn release_hold(commands: &mut Commands, e: Entity) {
+    commands.entity(e).remove::<HoldPosition>();
+}
 
 /// The name on a ship's banner (a mission ship's comes from `MissionShip`; otherwise the class name is shown).
 #[derive(Component)]
@@ -154,6 +165,35 @@ pub fn hole_list(
     out
 }
 
+/// Seconds that must pass between two thinks of a captain. With the 0.033 s step that is every 16th step (0.528 s): 15 steps are
+/// 0.495 s, not enough (measured on the original: 0.528 s between thinks, every ship, every time).
+pub const THINK_SECS: f32 = 0.5;
+/// A captain's think clock, as in the original: while the start delay runs the clock is held at now, so the first think comes one
+/// full period after the delay; after each think the clock restarts from now (the remainder is dropped, not carried over).
+/// The start delay is 0.05 s x (the ship's spawn number mod 10), one count for all sides.
+#[derive(Clone, Copy)]
+pub struct ThinkClock {
+    born: f32,
+    delay: f32,
+    last: f32,
+}
+impl ThinkClock {
+    pub fn new(now: f32, spawn_number: usize) -> Self {
+        ThinkClock { born: now, delay: 0.05 * (spawn_number % 10) as f32, last: now }
+    }
+    /// Seconds since the last think when the captain thinks at `now`, else None.
+    pub fn due(&mut self, now: f32) -> Option<f32> {
+        if now - self.born < self.delay {
+            self.last = now;
+        }
+        let since = now - self.last;
+        (since >= THINK_SECS).then(|| {
+            self.last = now;
+            since
+        })
+    }
+}
+
 /// Seconds a computer captain keeps its target before choosing again (the original's target-selection timer).
 pub const RESELECT_SECS: f32 = 6.0;
 /// Each skirmish captain's current target and how long it has held it: the original's target selection takes the nearest hostile
@@ -188,10 +228,12 @@ pub fn ai(
     holes: Query<(&Transform, &crate::blackhole::Pull), Without<Ship>>,
     storms: (Option<Res<crate::nebula::Storms>>, Option<Res<crate::nebula::StormShift>>),
     (mut explore, mut breakoffs): (Local<Explore>, Local<std::collections::HashMap<Entity, attack::Breakoff>>),
+    (mut clocks, mut spawned): (Local<std::collections::HashMap<Entity, ThinkClock>>, Local<usize>),
     (time, mut targets): (Res<Time>, ResMut<CaptainTargets>),
     (lib, fleets): (Res<combat::Library>, Res<Fleets>),
     bases: Query<(Entity, &Transform, &combat::BaseSide, &Health, &combat::ArmedBase)>,
     scripted: Query<&campaign::MissionShip>,
+    dying: Query<(), With<combat::Sinking>>,
 ) {
     if mission.is_some() {
         return;
@@ -199,7 +241,6 @@ pub fn ai(
     // A skirmish map's script steers its own ships (Convoy Raid's convoys keep to their routes, a stolen convoy idles); hidden ones
     // wait for the script to reveal them. PROVISIONAL: the stance is all the captain looks at.
     let left_to_script = |e: Entity| scripted.get(e).is_ok_and(|m| !m.visible || matches!(m.stance, crate::rules::Stance::Persistent | crate::rules::Stance::Dummy));
-    let dt = time.delta_secs();
     let holes = hole_list(&holes, storms.0.as_deref(), storms.1.as_deref());
     let now = time.elapsed_secs();
     // (entity, position, side, afloat, radius, fleet, the aim point seen from a position)
@@ -208,9 +249,18 @@ pub fn ai(
         .map(|(e, t, s, h, _, _, m, _)| (e, t.translation, s.side, !h.destroyed, lib.classes[s.class].radius, m.map(|m| m.0.clone()), (*t, s.class, h.sections.clone())))
         .collect();
     breakoffs.retain(|e, _| snap.iter().any(|f| f.0 == *e));
+    clocks.retain(|e, _| snap.iter().any(|f| f.0 == *e));
     for (e, tf, mut s, h, me, pilot, member, guns) in &mut ships {
+        // Between thinks the ship keeps the course, speed order and target of its last think.
+        let clock = clocks.entry(e).or_insert_with(|| {
+            *spawned += 1;
+            ThinkClock::new(now, *spawned - 1)
+        });
+        let Some(dt) = clock.due(now) else { continue };
         // The human's own fleet waits for orders; allied computer fleets share the human's side but hunt like any computer.
-        let human = s.side == Side::Player && member.is_none_or(|m| m.0 == fleets.local);
+        // A ship that was just sunk has left its fleet and is computer-run, whoever steered it (docs/re/effects.md "Death drive").
+        let sinking = dying.contains(e);
+        let human = !sinking && s.side == Side::Player && member.is_none_or(|m| m.0 == fleets.local);
         if busy.contains(e) || left_to_script(e) {
             continue;
         }
@@ -222,8 +272,8 @@ pub fn ai(
             s.goal = None;
             continue;
         }
-        if h.destroyed
-            || (me && (cfg.shot.is_none() || cfg.script.as_deref() == Some("fleet")))
+        if (h.destroyed && !sinking)
+            || (me && !sinking && (cfg.shot.is_none() || cfg.script.as_deref() == Some("fleet")))
             || matches!(cfg.script.as_deref(), Some("fxtest") | Some("damage") | Some("course") | Some("speedtest"))
         {
             continue;
@@ -251,8 +301,9 @@ pub fn ai(
         // Nothing found: a fleet mate's target, else an allied ship's (same side, another fleet).
         if chosen.is_none() && !human && explicit.is_none() {
             let fleet = member.map(|m| m.0.as_str());
-            let adopt =
-                |same_fleet: bool| snap.iter().filter(|f| f.0 != e && f.2 == s.side && (f.5.as_deref() == fleet) == same_fleet).find_map(|f| targets.of(f.0).filter(|t| valid(*t)));
+            let adopt = |same_fleet: bool| {
+                snap.iter().filter(|f| f.0 != e && f.3 && f.2 == s.side && (f.5.as_deref() == fleet) == same_fleet).find_map(|f| targets.of(f.0).filter(|t| valid(*t)))
+            };
             chosen = adopt(true).or_else(|| adopt(false)).map(|t| (t, false));
         }
         match chosen {
@@ -296,15 +347,15 @@ pub fn ai(
             continue;
         }
         let r = if foe_base { range[1] } else { range[0] };
-        let gap = (foe_pos - tf.translation).with_y(0.0).length() - class.radius - foe_radius;
+        let gap = attack::range_gap(routine, tf.translation, class.radius, foe_pos, foe_radius, foe_aim);
         let at = if routine == attack::Routine::Ram { foe_pos } else { foe_aim };
         let course = attack::course(routine, tf.translation, s.heading, at, gap, r, now, breakoffs.entry(e).or_default());
-        s.throttle = attack::throttle(e, tf.translation, s.heading, course[0]);
+        s.throttle = attack::throttle(routine, e, tf.translation, s.heading, course[0]);
         (s.waypoints, s.goal, s.order) = (course, None, 3);
     }
 }
 
-fn max_speed(ship: &Ship, class: &combat::Class, health: &Health) -> f32 {
+pub fn max_speed(ship: &Ship, class: &combat::Class, health: &Health) -> f32 {
     full_speed(class) * combat::speed_factor(class, health) * ship.cap * ship.sail_energy * ship.crew_speed * ship.net
 }
 
@@ -477,6 +528,19 @@ pub struct SlotPlan {
     pub age: f32,
 }
 
+impl FleetPilot {
+    /// Hold: the captain's own destination ends with the order.
+    pub fn hold_position(&mut self) {
+        self.destination = None;
+    }
+
+    /// Stop: the destination and the target end; the formation hold and hold fire stay.
+    pub fn cancel_actions(&mut self) {
+        self.destination = None;
+        self.target = None;
+    }
+}
+
 impl SlotPlan {
     pub fn goal(&self) -> Vec3 {
         self.point + self.velocity * self.age
@@ -502,7 +566,7 @@ impl FleetPilot {
 
 /// Native layout construction in game axes, converted to leader-local Bevy coordinates.
 /// R is the largest member's bounding-sphere radius: the retail Diamond slot sat R + 30 = 46.7 from a Man-O-War leader, whose WOT sphere
-/// radius is 17 (docs/re/fleet-controls.md). PROVISIONAL: stable roster assignment replaces native size/cost assignment.
+/// radius is 17 (docs/re/fleet-controls.md). The swap pass over the result is `swap_slots`.
 pub fn formation_slots(kind: Formation, radii: &[f32]) -> Vec<Vec3> {
     let r = radii.iter().copied().fold(0.0, f32::max);
     let mut slots = vec![Vec3::ZERO; radii.len()];
@@ -523,6 +587,51 @@ pub fn formation_slots(kind: Formation, radii: &[f32]) -> Vec<Vec3> {
         };
         slots[i] = slots[parent] + delta;
     }
+    slots
+}
+
+/// Read from the original's code (not yet measured): after a layout the slots are given a single swap pass, so ships that are already
+/// closer to another slot take that one. Not for Custom and Column. `ships` is each member's position in the leader's frame and the
+/// angle between its heading and the leader's. For each slot i from 1, the member that fits its point best (lowest index on a tie,
+/// the leader included) swaps its own slot with slot i when it fits that point strictly better than its own. Fit is 50 falling to 0
+/// over an angle of 0..pi, plus 50 falling to 0 over a distance of 0..500 units.
+pub fn swap_slots(slots: &mut [Vec3], ships: &[(Vec3, f32)]) {
+    let fit = |m: usize, p: Vec3| {
+        let (pos, angle) = ships[m];
+        50.0 * (1.0 - (angle / std::f32::consts::PI).clamp(0.0, 1.0)) + 50.0 * (1.0 - (pos.distance(p) / 500.0).clamp(0.0, 1.0))
+    };
+    for i in 1..slots.len().min(ships.len()) {
+        let a = slots[i];
+        let mut j = 0;
+        for m in 1..ships.len() {
+            if fit(m, a) > fit(j, a) {
+                j = m;
+            }
+        }
+        if fit(j, a) > fit(j, slots[j]) {
+            slots[i] = slots[j];
+            slots[j] = a;
+        }
+    }
+}
+
+/// The slots of a fleet's formation: the layout, then the swap pass from where the ships are now.
+fn laid_out_slots(world: &World, fleet: &Fleet) -> Vec<Vec3> {
+    let radii: Vec<_> = fleet.members.iter().map(|e| world.get::<Ship>(*e).map_or(0.0, |s| world.resource::<Library>().classes[s.class].sphere.1)).collect();
+    let mut slots = formation_slots(fleet.formation, &radii);
+    if matches!(fleet.formation, Formation::None | Formation::Custom | Formation::Column) {
+        return slots;
+    }
+    let Some(leader) = fleet.members.first().and_then(|e| world.get::<Transform>(*e)).copied() else { return slots };
+    let ships: Vec<_> = fleet
+        .members
+        .iter()
+        .map(|e| {
+            let t = world.get::<Transform>(*e).copied().unwrap_or(leader);
+            ((leader.rotation.inverse() * (t.translation - leader.translation)).with_y(0.0), (leader.rotation.inverse() * t.rotation * Vec3::NEG_Z).angle_between(Vec3::NEG_Z))
+        })
+        .collect();
+    swap_slots(&mut slots, &ships);
     slots
 }
 
@@ -569,11 +678,22 @@ pub fn reconcile_fleets(world: &mut World) {
             f.members.insert(0, e);
         }
         if valid.is_none() {
+            // The script's throttle cap on the command ship ("HUMAN CONTROLLED COMMAND SHIP") belongs to the command, not the hull: the
+            // replacement takes it over, instead of keeping whatever cap a rule set on it before (a ship captured from a capped enemy
+            // group, a stationary escort), which could leave the player with a ship that cannot move (#356). PROVISIONAL: the
+            // original's handoff of the cap after a capture or loss has not been observed. Only a command ship that is still the human's
+            // (sunk, not captured) hands its cap on, and never a 0: a captured ship's cap is the new owner's rules', and a 0 (an NIS stop)
+            // would strand the player again. Otherwise the replacement gets full throttle.
+            let owner = |e: Entity| world.get::<campaign::MissionShip>(e).map(|m| m.owner.clone()).or_else(|| world.get::<FleetMember>(e).map(|f| f.0.clone()));
+            let cap = command.filter(|e| owner(*e).as_deref() == Some(local.as_str())).and_then(|e| world.get::<Ship>(e)).map(|s| s.cap).filter(|c| *c > 0.0).unwrap_or(1.0);
             if let Some(e) = command {
                 world.entity_mut(e).remove::<PlayerShip>();
             }
             if let Some(e) = fleets.primary() {
                 let target = world.get::<FleetPilot>(e).and_then(|p| p.target);
+                if let Some(mut s) = world.get_mut::<Ship>(e) {
+                    s.cap = cap;
+                }
                 install_primary(world, e, target);
             }
         }
@@ -613,8 +733,7 @@ pub fn set_formation(world: &mut World, owner: &str, kind: Option<Formation>, ho
     }) else {
         return;
     };
-    let radii: Vec<_> = fleet.members.iter().map(|e| world.get::<Ship>(*e).map_or(0.0, |s| world.resource::<Library>().classes[s.class].sphere.1)).collect();
-    let slots = formation_slots(fleet.formation, &radii);
+    let slots = laid_out_slots(world, &fleet);
     let leader = fleet.members.first().and_then(|e| world.get::<Transform>(*e)).copied().unwrap_or_default();
     for (i, e) in fleet.members.iter().enumerate().skip(1) {
         let custom = world.get::<Transform>(*e).map_or(Vec3::ZERO, |t| leader.rotation.inverse() * (t.translation - leader.translation)).with_y(0.0);
@@ -698,8 +817,7 @@ pub fn promote(world: &mut World, candidate: Entity, scripted: bool) -> bool {
         fleets.selected = Some(candidate);
         fleets.groups.get(&owner).unwrap().clone()
     };
-    let radii: Vec<_> = f.members.iter().map(|e| world.get::<Ship>(*e).map_or(0.0, |s| world.resource::<Library>().classes[s.class].sphere.1)).collect();
-    let slots = formation_slots(f.formation, &radii);
+    let slots = laid_out_slots(world, &f);
     for (i, e) in f.members.iter().enumerate().skip(1) {
         if f.formation != Formation::Custom
             && let Some(mut p) = world.get_mut::<FleetPilot>(*e)
@@ -776,9 +894,7 @@ pub fn fleet_follow(world: &mut World) {
     let busy: std::collections::HashSet<_> = world.query_filtered::<Entity, CaptainBusy>().iter(world).collect();
     let held: std::collections::HashSet<_> = world.query_filtered::<Entity, With<HoldPosition>>().iter(world).collect();
     for e in &held {
-        if world.get::<PlayerShip>(*e).is_none()
-            && let Some(mut s) = world.get_mut::<Ship>(*e)
-        {
+        if let Some(mut s) = world.get_mut::<Ship>(*e) {
             s.halt();
         }
     }
@@ -853,6 +969,7 @@ pub fn fleet_follow(world: &mut World) {
 pub mod attack;
 #[cfg(test)]
 pub mod movement_tests;
+pub mod path_end;
 
 #[cfg(test)]
 mod steer_round_tests {
@@ -896,5 +1013,49 @@ mod slot_plan_tests {
         // a leader that turned away since the plan: the carried-along point is off the real slot
         let real = Vec3::new(1.0, 0.0, 4.5);
         assert!(plan.goal().distance(real) > 1.0);
+    }
+}
+
+#[cfg(test)]
+mod think_clock_tests {
+    use super::*;
+    /// Step numbers (0.033 s each) on which a captain with this spawn number thinks, over the first two seconds.
+    fn thinks(spawn_number: usize) -> Vec<usize> {
+        let mut c = ThinkClock::new(0.0, spawn_number);
+        (1..=60).filter(|k| c.due(*k as f32 * 0.033).is_some()).collect()
+    }
+    #[test]
+    fn a_captain_thinks_every_sixteenth_step() {
+        assert_eq!(thinks(0), [16, 32, 48]); // 0.528 s apart, as measured on the original; 15 steps (0.495 s) are not enough
+    }
+    #[test]
+    fn the_start_delay_shifts_the_first_think_and_not_the_period() {
+        // Spawn number 4: 0.2 s delay, held through step 6 (0.198 s), so the first think is 16 steps after that.
+        assert_eq!(thinks(4), [22, 38, 54]);
+        assert_eq!(thinks(14), thinks(4)); // the delay repeats every ten ships
+    }
+    #[test]
+    fn start_delays_are_005_times_the_spawn_number_and_wrap_at_ten() {
+        for n in 0..25 {
+            let c = ThinkClock::new(0.0, n);
+            assert!((c.delay - 0.05 * (n % 10) as f32).abs() < 1e-6, "ship {n}");
+        }
+        assert_eq!(ThinkClock::new(0.0, 9).delay, 0.05 * 9.0); // 0.45 s for the tenth ship, then 0 again
+        assert_eq!(ThinkClock::new(0.0, 10).delay, 0.0);
+    }
+    #[test]
+    fn the_clock_restarts_at_each_think_without_carrying_a_remainder() {
+        let mut c = ThinkClock::new(0.0, 0);
+        let first = (1..=40).find(|k| c.due(*k as f32 * 0.033).is_some()).unwrap();
+        assert_eq!(first, 16);
+        // Ticks 17..=31 are not due: the next think is 16 ticks after the last, not 0.5 s after the last's nominal time.
+        assert!((17..=31).all(|k| c.due(k as f32 * 0.033).is_none()));
+        assert!(c.due(32.0 * 0.033).is_some());
+    }
+    #[test]
+    fn a_think_reports_the_time_since_the_last_one() {
+        let mut c = ThinkClock::new(0.0, 0);
+        let since = (1..=16).find_map(|k| c.due(k as f32 * 0.033)).unwrap();
+        assert!((since - 0.528).abs() < 1e-4);
     }
 }

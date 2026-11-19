@@ -42,17 +42,15 @@ pub fn fire_fighting(posts: &[Vec<f32>; 8]) -> f32 {
 }
 
 /// The 0..1 `skill` of every slot of post `role`: named crew first, then generic hands up to the class capacity.
-/// PROVISIONAL: computer crews are rated 0.75 (fits the measured computer hull repair, reinforced +5 and iron +2 per tick);
-/// the player's empty slots are generic hands (0.1). Every slot but the captain's and first mate's gains the ship's leadership
-/// bonus (`crew_arms::leadership_bonus`, 0 for a ship without named crew).
-pub fn crew_slots(e: Entity, ship: &Ship, class: &Class, posts: Option<&crate::crew_arms::CrewPosts>, role: usize, skill: &str) -> Vec<f32> {
-    const COMPUTER: f32 = 0.75;
+/// Every ship uses its own crew, computer or not: `posts` is its named crew, or its level's generic crew for a placed ship
+/// (`crew_arms::fallback_posts`); an empty slot is a rating-1 hand (0.1). Every slot but the captain's and first mate's gains the
+/// ship's leadership bonus (`crew_arms::leadership_bonus`, 0 for a ship without crew).
+pub fn crew_slots(e: Entity, class: &Class, posts: Option<&crate::crew_arms::CrewPosts>, role: usize, skill: &str) -> Vec<f32> {
     const GENERIC: f32 = 0.1;
     let cap = crate::boarding::counts(&class.name)[role] as usize;
     let named: Vec<f32> = posts.map(|p| p.0[role].iter().map(|id| crate::crew_arms::ability(id, skill).unwrap_or(GENERIC)).collect()).unwrap_or_default();
-    let fill = if ship.side == crate::Side::Player { GENERIC } else { COMPUTER };
     let bonus = if matches!(role, 1 | 2) { 0.0 } else { posts.map_or(0.0, |p| crate::crew_arms::leadership_bonus(e, p)) };
-    named.iter().copied().chain(std::iter::repeat(fill)).take(cap.max(named.len())).map(|v| (v + bonus).min(1.0)).collect()
+    named.iter().copied().chain(std::iter::repeat(GENERIC)).take(cap.max(named.len())).map(|v| (v + bonus).min(1.0)).collect()
 }
 
 pub fn fire_scale(i: f32) -> f32 {
@@ -217,6 +215,29 @@ pub fn damage_fx(
     }
 }
 
+/// The rules' "Damage Group/Unit by X percent" (read from the original's code, not yet measured): every section in order is hit once for
+/// round(its current hit points x `fraction`) through the normal hit routine (spill into neighbours of a section left at 0, core bleed
+/// through dead vital sections, the human's ships taking the difficulty factor: the hit carries no attacker, so computer ships take
+/// none). The core is never scaled directly: a fraction below 1 leaves it whole unless vital sections die.
+pub fn fraction_hit(class: &Class, hp: &mut Health, fraction: f32, victim: Side, invuln: f32) {
+    let scale = super::shells::side_damage_scale(Side::Enemy, victim, crate::menu::difficulty(), false);
+    let mut rng = Rng::default();
+    for k in 0..hp.sections.len() {
+        let d = (hp.sections[k].round_ties_even() * fraction * scale).round_ties_even();
+        super::shells::apply_ship_hit(class, hp, k, [d, d, 0.0, 0.0, 0.0], invuln, false, &mut rng);
+    }
+}
+
+/// What a burning fire takes from its section on a fire tick. In the original a fire hurts its section through the ordinary hit
+/// routine, which scales by the victim's owner: on the human player's own ships by the incoming difficulty factor (Easy x0.25,
+/// Normal x0.5, Hard x1), on any other ship not at all (a fire has no attacker, and only the player's own hits are scaled up).
+/// Hit points are whole numbers, rounded to the nearest (half to even): a fire of 1.0 takes nothing on Normal (measured on the
+/// original: eight times of eight).
+pub fn fire_damage(intensity: f32, humans_own_ship: bool, difficulty: u8) -> f32 {
+    let scale = if humans_own_ship { [0.25, 0.5, 1.0][difficulty.min(2) as usize] } else { 1.0 };
+    (intensity * scale).round_ties_even()
+}
+
 /// Fire update every FIRE_TICK s, in the original's order: crew puts out the strongest fires first, burning fires damage
 /// their section by their intensity, fires on destroyed sections die, dead fires fade out (3 s) then go (5 s), burning
 /// fires double. Effect size follows intensity (full at 20, floor 10%).
@@ -224,11 +245,23 @@ pub fn fires(
     mut commands: Commands,
     time: Res<Time>,
     lib: Res<Library>,
-    mut ships: Query<(Entity, &Transform, &Ship, &mut Health, &mut Fires, Option<&crate::crew_arms::CrewPosts>)>,
+    mut ships: Query<(
+        Entity,
+        &Transform,
+        &Ship,
+        &mut Health,
+        &mut Fires,
+        Option<&crate::crew_arms::CrewPosts>,
+        Option<&crate::campaign::MissionShip>,
+        Option<&crate::ship::FleetMember>,
+        Option<&crate::boarding::Boardable>,
+    )>,
     mut fxq: Query<&mut fx::Fx>,
+    fleets: Option<Res<crate::ship::Fleets>>,
 ) {
     let dt = time.delta_secs();
-    for (me, _, ship, mut hp, mut fires, posts) in &mut ships {
+    for (me, _, ship, mut hp, mut fires, posts, mission, member, boarding) in &mut ships {
+        let humans = ship.side == Side::Player && member.is_none_or(|m| fleets.as_ref().is_none_or(|f| m.0 == f.local));
         let fires = &mut *fires;
         if hp.destroyed {
             for f in fires.list.drain(..) {
@@ -245,24 +278,31 @@ pub fn fires(
         if tick {
             fires.tick = 0.0;
             let class = &lib.classes[ship.class];
-            let mut crew = fire_fighting(&std::array::from_fn(|role| crew_slots(me, ship, class, posts, role, "leadership")));
+            let generic = posts.is_none().then(|| crate::crew_arms::fallback_posts(ship, boarding, &class.name)).flatten();
+            let posts = posts.or(generic.as_ref());
+            let mut crew = fire_fighting(&std::array::from_fn(|role| crew_slots(me, class, posts, role, "leadership")));
             while crew > 0.0 {
                 let Some(f) = fires.list.iter_mut().filter(|f| f.state == 0 && f.intensity > 0.0).max_by(|a, b| a.intensity.total_cmp(&b.intensity)) else { break };
                 let used = crew.min(f.intensity);
                 f.intensity -= used;
                 crew -= used;
             }
+            let (core, secs) = (hp.core, hp.sections.clone());
             for f in fires.list.iter().filter(|f| f.state == 0) {
+                let burn = fire_damage(f.intensity, humans, crate::menu::difficulty());
                 let was = hp.sections[f.sec];
-                hp.sections[f.sec] = (was - f.intensity).max(0.0);
+                hp.sections[f.sec] = (was - burn).max(0.0);
                 if was > 0.0 && hp.sections[f.sec] == 0.0 {
                     let sec = &class.sections[f.sec];
                     if sec.vital {
-                        hp.core -= core_bleed(class, &hp, f.intensity); // fire goes through the same damage path
+                        hp.core -= core_bleed(class, &hp, burn); // fire goes through the same damage path
                     }
                     info!("{} of {} burnt out", sec.label, class.name);
                 }
             }
+            // A section burnt to nothing puts its fire out even if the hull floor ('Invulnerable Percent') then props it back up.
+            let burnt: Vec<bool> = hp.sections.iter().map(|&s| s <= 0.0).collect();
+            super::shells::floor_hull(class, &mut hp, (core, &secs), mission.map_or(0.0, |m| m.invuln));
             // Decoded: a fire changes state only on these ticks. One that is out (no strength, or its section gone) stops emitting
             // on the tick that finds it, is cut loose from the ship on the next and deleted on the one after; a burning fire doubles.
             for f in &mut fires.list {
@@ -280,7 +320,7 @@ pub fn fires(
                             });
                         }
                     }
-                    _ if f.intensity <= 0.0 || hp.sections[f.sec] <= 0.0 => {
+                    _ if f.intensity <= 0.0 || burnt[f.sec] => {
                         f.state = 1;
                         if let Some(Ok(mut x)) = f.fx.map(|e| fxq.get_mut(e)) {
                             x.emitting = false;
@@ -324,7 +364,7 @@ pub fn swap_meshes(
         // The damaged mesh carries its own wrecked mounts, so the guns the section carried go with the intact mesh. PROVISIONAL: no
         // retail code that hides them was found; the original keeps them as children of the section's node.
         for (mount, state) in class.mounts.iter().zip(guns.iter().flat_map(|g| g.0.iter())) {
-            let want = if mount.parent.is_some_and(|p| h.sections[p] <= 0.0) { Visibility::Hidden } else { Visibility::Inherited };
+            let want = if mount.parent.is_some_and(|p| class.sections[p].swappable && h.sections[p] <= 0.0) { Visibility::Hidden } else { Visibility::Inherited };
             if let Ok(mut v) = gun_roots.get_mut(state.root) {
                 v.set_if_neq(want);
             }
@@ -340,8 +380,8 @@ pub fn swap_meshes(
                 Some((a, b)) => (format!("{a}_{b}"), true),
                 None => (n.to_string(), false),
             };
-            // A damaged mesh of a layer that is no section can never be shown (it would sit on top of the intact one).
-            let want = match class.sections.iter().position(|s| s.layer.eq_ignore_ascii_case(&base)) {
+            // A damaged mesh of a layer that is no swappable section can never be shown (it would sit on top of the intact one).
+            let want = match class.sections.iter().position(|s| s.swappable && s.layer.eq_ignore_ascii_case(&base)) {
                 Some(i) if (h.sections[i] <= 0.0) == damaged => Visibility::Inherited,
                 None if !damaged => continue,
                 _ => Visibility::Hidden,
@@ -400,7 +440,7 @@ pub fn crew_repair(
     time: Res<Time>,
     lib: Res<Library>,
     mut rng: ResMut<Rng>,
-    mut ships: Query<(Entity, &Ship, &mut Health, Option<&crate::crew_arms::CrewPosts>)>,
+    mut ships: Query<(Entity, &Ship, &mut Health, Option<&crate::crew_arms::CrewPosts>, Option<&crate::boarding::Boardable>)>,
     mut acc: Local<f32>,
 ) {
     *acc += time.delta_secs();
@@ -408,12 +448,14 @@ pub fn crew_repair(
         return;
     }
     *acc -= CREW_REPAIR_TICK;
-    for (e, ship, mut h, posts) in &mut ships {
+    for (e, ship, mut h, posts, boarding) in &mut ships {
         if h.destroyed {
             continue;
         }
         let class = &lib.classes[ship.class];
-        let (engineers, riggers) = (crew_slots(e, ship, class, posts, 4, "engineering"), crew_slots(e, ship, class, posts, 5, "rigging"));
+        let generic = posts.is_none().then(|| crate::crew_arms::fallback_posts(ship, boarding, &class.name)).flatten();
+        let posts = posts.or(generic.as_ref());
+        let (engineers, riggers) = (crew_slots(e, class, posts, 4, "engineering"), crew_slots(e, class, posts, 5, "rigging"));
         damage_control(class, &mut h.sections, &engineers, &riggers, &mut || rng.f());
     }
 }
@@ -427,8 +469,9 @@ mod swap_tests {
     #[ignore = "needs imported assets"]
     fn guns_of_a_destroyed_section_are_hidden_with_its_intact_mesh() {
         let lib = Library::load(crate::assets_dir());
-        let class = lib.classes.iter().position(|c| c.mounts.iter().any(|m| m.parent.is_some())).expect("a class with a mounted section");
-        let lost = lib.classes[class].mounts.iter().find_map(|m| m.parent).unwrap();
+        let swapped = |c: &crate::data::Class| c.mounts.iter().find_map(|m| m.parent.filter(|p| c.sections[*p].swappable));
+        let class = lib.classes.iter().position(|c| swapped(c).is_some()).expect("a class with a mounted swappable section");
+        let lost = swapped(&lib.classes[class]).unwrap();
         let mut app = App::new();
         app.insert_resource(Library::load(crate::assets_dir())).add_systems(Update, swap_meshes);
         let mut hp = Health::new(&lib.classes[class]);
@@ -446,6 +489,8 @@ mod swap_tests {
             yaw: 0.0,
             pitch: 0.0,
             aligned: false,
+            was_aligned: false,
+            lob_wait: None,
             in_range: false,
             dev: 0.0,
             beam: Default::default(),
@@ -482,6 +527,26 @@ mod swap_tests {
         assert_eq!(vis(&app, stray), Visibility::Hidden);
         assert_eq!(vis(&app, hurt_primitive), Visibility::Inherited, "a damaged layer's primitives are never hidden on their own");
     }
+
+    #[test]
+    #[ignore = "needs imported assets"]
+    fn a_destroyed_unswappable_section_keeps_its_mesh() {
+        // Station Montgomery's island is a 10 HP section with swappable=0: shot down, the island stays.
+        let lib = Library::load(crate::assets_dir());
+        let class = lib.index("Base_Montgomery");
+        let island = lib.classes[class].sections.iter().position(|s| s.layer == "WayStationMontgomery_Layer1").unwrap();
+        assert!(!lib.classes[class].sections[island].swappable, "re-run the asset importer");
+        let mut app = App::new();
+        app.insert_resource(Library::load(crate::assets_dir())).add_systems(Update, swap_meshes);
+        let mut hp = Health::new(&lib.classes[class]);
+        hp.sections[island] = 0.0;
+        let base = app.world_mut().spawn((ArmedBase { class }, hp)).id();
+        let [whole, hurt] =
+            ["WayStationMontgomery_Layer1", "WayStationMontgomeryDamage_Layer1"].map(|n| app.world_mut().spawn((Name::new(n), Visibility::default(), ChildOf(base))).id());
+        app.update();
+        let vis = |e| *app.world().get::<Visibility>(e).unwrap();
+        assert_eq!([vis(whole), vis(hurt)], [Visibility::Inherited, Visibility::Hidden]);
+    }
 }
 
 #[cfg(test)]
@@ -500,7 +565,33 @@ mod level_tests {
 mod fire_tests {
     use super::*;
 
+    #[test]
+    fn a_fire_on_the_humans_ship_takes_the_difficulty_factor_and_whole_hit_points() {
+        assert_eq!(fire_damage(1.0, true, 1), 0.0, "measured on the original: a 1.0 fire takes nothing on Normal");
+        assert_eq!([0, 1, 2].map(|d| fire_damage(8.0, true, d)), [2.0, 4.0, 8.0]);
+        assert_eq!(fire_damage(5.0, true, 1), 2.0, "half to even");
+        assert_eq!(fire_damage(8.0, false, 1), 8.0, "other ships: not scaled");
+        assert_eq!(fire_damage(0.5, false, 1), 0.0, "whole hit points");
+    }
+
     /// A fire whose section is gone stops on the 6 s tick that finds it, is cut loose on the next and deleted on the one after.
+    #[test]
+    #[ignore = "needs imported assets"]
+    fn the_scripted_percent_hit_takes_sections_through_the_hit_routine_and_leaves_the_core() {
+        let lib = Library::load(crate::assets_dir());
+        let class = &lib.classes[lib.index("Ship_Navy_Cutter")];
+        let lost = |victim: Side, p: f32| {
+            let mut hp = Health::new(class);
+            fraction_hit(class, &mut hp, p, victim, 0.0);
+            (class.sections.iter().map(|s| s.hp).sum::<f32>() - hp.sections.iter().sum::<f32>(), hp.core)
+        };
+        let (enemy, core) = lost(Side::Enemy, 0.5);
+        assert_eq!(core, class.core_hp, "half of every section leaves the core whole");
+        assert!(enemy > 0.0);
+        assert!(lost(Side::Player, 0.5).0 < enemy, "the human's ship takes the difficulty factor, computer ships do not");
+        assert!(lost(Side::Enemy, 1.0).1 <= 0.0, "every section hit for all its hit points takes the core down through the vital ones");
+    }
+
     #[test]
     #[ignore = "needs imported assets"]
     fn a_dead_fire_changes_state_only_on_the_six_second_ticks() {

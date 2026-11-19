@@ -1,6 +1,6 @@
 {
   "camera": {
-    "bloom": 0.12,
+    "bloom": 0.09,
     "bloom_threshold": 1.0,
     "tonemapping": "tony_mc_mapface",
     "saturation": 1.0,
@@ -12,39 +12,68 @@
     "aberration_pulse": 0.015,
     "contact_shadows": true
   },
-  "sky_light": 600,
+  "sky_light": 150,
   "sky": {
-    "near": {
-      "distance": 3000,
-      "opacity": 0.45,
-      "threshold": 0.3,
-      "softness": 0.35,
-      "drift": [
-        1.2,
-        0.5,
-        0.0
-      ]
+    "near": [
+      {"distance": 6000, "opacity": 0.3, "threshold": 0.35, "softness": 0.35, "scale": 2.0, "drift": [0.6, 0.25, 0.0]},
+      {"distance": 1500, "opacity": 0.2, "threshold": 0.45, "softness": 0.3, "scale": 3.2, "drift": [2.4, 1.0, 0.0]}
+    ],
+    "base": {"brightness": 0.60, "flow": 0.02, "cycle": 30, "breath": 0.05, "period": 28},
+    "flash": {"color": [0.65, 0.78, 1.0], "strength": 0.25, "seconds": 0.24, "reach": 240},
+    "events": [
+      {"match": "Explosion_Huge", "color": [1.0, 0.55, 0.25], "strength": 1.2, "seconds": 1.2},
+      {"match": "Explosion_Heavy", "color": [1.0, 0.55, 0.25], "strength": 0.6, "seconds": 1.0}
+    ],
+    "shooting_star": {"every": 150, "brightness": 6},
+    "skies": {
+      "skybox_06": {"base": {"breath": 0.12, "period": 20, "tint": [1.0, 0.65, 0.35]}},
+      "skybox_09": {"base": {"breath": 0.12, "period": 22, "tint": [1.0, 0.65, 0.35]}},
+      "skybox_16": {"base": {"breath": 0.18, "period": 26}},
+      "skybox_14": {"near": [
+        {"distance": 6000, "opacity": 0.3, "threshold": 0.35, "softness": 0.35, "scale": 2.0, "drift": [1.8, 0.8, 0.0]},
+        {"distance": 1500, "opacity": 0.2, "threshold": 0.45, "softness": 0.3, "scale": 3.2, "drift": [6.0, 2.5, 0.0]}
+      ]}
     },
     "stars": {
       "brightness": 1.0,
-      "twinkle": 0.45,
+      "twinkle": 0.3,
       "speed": 2.0,
       "gain": 16
     }
   },
-  "ambient": 0.4,
+  "black_holes": {
+    "replace": true,
+    "horizon": 0.25,
+    "ring": 0.006,
+    "lensing": 0.8,
+    "disc": {"color": [1.0, 0.45, 0.12], "inner": 0.27, "outer": 0.46, "spin": 0.08, "brightness": 1.8},
+    "glow": 0.15,
+    "ribbons": 1.0,
+    "drop": 0.02,
+    "funnel": {"depth": 0.35, "throat": 0.08, "rim": [0.3, 0.18, 0.65]}
+  },
+  "nebulae": {
+    "bolt": {"color": [0.45, 0.6, 1.0], "core": [1.0, 0.97, 0.9], "max_length": 120, "width": 0.9, "glow": 4.0, "brightness": 2.2, "seconds": 0.24, "segments": 16, "jitter": 0.09, "branches": 2},
+    "rules": [
+      {"match": "SolarStorm", "replace": true, "density": 0.75, "absorption": 8.0, "dust": 2.0, "max_opacity": 0.68, "steps": 20, "light_steps": 2, "sun": 0.32, "scale": 3.2, "churn": 0.12, "color_low": [0.1, 0.03, 0.02], "color_high": [1.0, 0.42, 0.08], "color_alt": [0.85, 0.15, 0.3], "variation": 0.4, "swirl": 0.02, "filaments": 4.0, "inside": 0.5, "flash": 1.4, "flash_reach": 0.2},
+      {"match": "Nebula", "replace": true, "density": 1.1, "absorption": 3.0, "dust": 0.8, "max_opacity": 0.6, "steps": 20, "light_steps": 2, "sun": 0.6, "core_glow": 7.0, "scale": 2.2, "churn": 0.02, "color_low": [0.22, 0.1, 0.5], "color_high": [1.0, 0.75, 1.0], "color_alt": [0.15, 0.6, 0.85], "variation": 0.6, "inside": 0.5, "flash": 3.0, "flash_reach": 0.5}
+    ]
+  },
+  "currents": {"brightness": 0.85, "streaks": 10, "sparkle": 1.0, "core": 1.2, "texture": 0.3, "color": [0.45, 0.8, 1.0], "pulse": 0.7},
+  "ambient": 0.55,
+  "ambient_floor": [0.18, 0.24, 0.32],
   "sun": {
     "shadows": true,
-    "shadow_distance": 2500,
+    "shadow_distance": 800,
     "color": [
       1.0,
-      0.93,
-      0.82
+      0.96,
+      0.88
     ],
-    "intensity": 1.1
+    "intensity": 0.78
   },
-  "fx_gain": 1.6,
-  "shell_gain": 2.0,
+  "fx_gain": 1.3,
+  "shell_gain": 1.5,
   "lit_smoke": true,
   "sails": {
     "glow": [
@@ -59,6 +88,7 @@
     "transmission": 0.1,
     "billow": 0.035,
     "furl": 0.9,
+    "fan": {"races": ["Navy"], "pleats": 7, "depth": 0.03},
     "opaque": true,
     "line": 0.04,
     "fill": 0.15,
@@ -82,14 +112,22 @@
   },
   "lights": [
     {
+      "effects": "Lightning",
+      "color": [0.65, 0.8, 1.0],
+      "lumens": 250000000.0,
+      "range": 120,
+      "seconds": 0.18
+    },
+    {
       "effects": "Explosion_Huge",
       "color": [
         1.0,
         0.55,
         0.25
       ],
-      "lumens": 2000000000.0,
-      "range": 900,
+      "lumens": 1200000000.0,
+      "range": 400,
+      "radius": 12,
       "seconds": 2.5
     },
     {
@@ -99,8 +137,9 @@
         0.6,
         0.3
       ],
-      "lumens": 600000000.0,
-      "range": 500,
+      "lumens": 360000000.0,
+      "range": 220,
+      "radius": 6,
       "seconds": 1.6
     },
     {
@@ -110,8 +149,9 @@
         0.6,
         0.3
       ],
-      "lumens": 600000000.0,
-      "range": 500,
+      "lumens": 360000000.0,
+      "range": 220,
+      "radius": 6,
       "seconds": 1.6
     },
     {
@@ -121,10 +161,11 @@
         0.45,
         0.15
       ],
-      "lumens": 150000000.0,
-      "range": 260,
+      "lumens": 45000000.0,
+      "range": 64,
+      "radius": 3,
       "seconds": 0,
-      "flicker": 0.5
+      "flicker": 0.4
     },
     {
       "effects": "FireOnShip",
@@ -133,10 +174,11 @@
         0.45,
         0.15
       ],
-      "lumens": 30000000.0,
-      "range": 90,
+      "lumens": 7000000.0,
+      "range": 26,
+      "radius": 1.5,
       "seconds": 0,
-      "flicker": 0.55
+      "flicker": 0.4
     },
     {
       "effects": "FireStack",
@@ -145,10 +187,27 @@
         0.45,
         0.15
       ],
-      "lumens": 30000000.0,
-      "range": 90,
+      "lumens": 5500000.0,
+      "range": 22,
+      "radius": 1.25,
       "seconds": 0,
-      "flicker": 0.55
+      "flicker": 0.4
+    },
+    {
+      "effects": "Lancer", "also_matches": "_Impact",
+      "color": [0.45, 0.75, 1.0], "lumens": 6300000, "range": 44, "radius": 2, "seconds": 0.22, "offset": 1.5
+    },
+    {
+      "effects": "Plasma", "also_matches": "_Impact",
+      "color": [0.5, 1.0, 0.45], "lumens": 7700000, "range": 52, "radius": 2.5, "seconds": 0.3, "offset": 1.5
+    },
+    {
+      "effects": "Lancer", "also_matches": "_Muzzle",
+      "color": [0.45, 0.75, 1.0], "lumens": 3300000, "range": 40, "radius": 1.25, "seconds": 0.18, "cone": 75, "offset": 2.5
+    },
+    {
+      "effects": "Plasma", "also_matches": "_Muzzle",
+      "color": [0.5, 1.0, 0.45], "lumens": 4200000, "range": 44, "radius": 1.5, "seconds": 0.2, "cone": 75, "offset": 2.5
     },
     {
       "effects": "_Impact",
@@ -157,9 +216,11 @@
         0.65,
         0.35
       ],
-      "lumens": 50000000.0,
-      "range": 140,
-      "seconds": 0.4
+      "lumens": 7000000.0,
+      "range": 48,
+      "radius": 2,
+      "seconds": 0.3,
+      "offset": 1.5
     },
     {
       "effects": "_Muzzle",
@@ -168,9 +229,10 @@
         0.75,
         0.45
       ],
-      "lumens": 10000000.0,
-      "range": 80,
-      "seconds": 0.25,
+      "lumens": 4200000.0,
+      "range": 44,
+      "radius": 1.25,
+      "seconds": 0.2,
       "cone": 75,
       "offset": 2.5
     },
@@ -253,13 +315,13 @@
     ]
   },
   "tracers": {
-    "brightness": 1.5,
+    "brightness": 1.25,
     "core": [
       1.0,
       0.95,
       0.85
     ],
-    "particles": 1.0,
+    "particles": 0.55,
     "default": {
       "color": [
         1.0,
@@ -634,10 +696,22 @@
       0.75,
       1.0
     ],
-    "rim_strength": 0.35
+    "rim_strength": 0.22
   },
   "bursts": {
+    "impact_materials": [
+      {"match": ["Wood", "Reinforced"], "splinters": {"count": 9, "size": 0.82},
+        "smoke": {"count": 2, "color": [0.53, 0.37, 0.24], "size": 1.3, "seconds": 0.95, "speed": 2.5, "spread": 55}},
+      {"match": ["Iron"],
+        "sparks": {"count": 14, "color": [1.0, 0.69, 0.36], "size": 0.15, "seconds": 0.42, "speed": 33, "spread": 27}},
+      {"match": ["Cloth"], "fibers": {"count": 8, "size": 1.0, "speed": 12}}
+    ],
     "effects": [
+      {
+        "match": "Lightning",
+        "flash": {"size": 6, "color": [0.7, 0.85, 1.0], "seconds": 0.12},
+        "sparks": {"count": 24, "speed": 40, "size": 0.1, "seconds": 0.5, "spread": 180, "color": [0.65, 0.8, 1.0]}
+      },
       {
         "match": "Explosion_Huge",
         "shake": 1.6,
@@ -786,6 +860,7 @@
       },
       {
         "match": "Final_Ship_Fire",
+        "flame": {"width": 6.0, "height": 10.0, "brightness": 2.8},
         "every": 0.12,
         "embers": {
           "count": 3,
@@ -802,7 +877,7 @@
         },
         "smoke": {
           "count": 1,
-          "size": 3.5,
+          "size": 2.8,
           "seconds": 5,
           "speed": 1,
           "spread": 30,
@@ -817,6 +892,7 @@
       },
       {
         "match": "FireOnShip",
+        "flame": {"width": 4.0, "height": 6.5, "brightness": 2.6},
         "every": 0.25,
         "embers": {
           "count": 2,
@@ -833,7 +909,7 @@
         },
         "smoke": {
           "count": 1,
-          "size": 1.8,
+          "size": 1.6,
           "seconds": 3.5,
           "speed": 0.5,
           "spread": 30,
@@ -848,6 +924,7 @@
       },
       {
         "match": "FireStack",
+        "flame": {"width": 3.0, "height": 6.0, "brightness": 2.4},
         "every": 0.25,
         "embers": {
           "count": 2,
@@ -964,6 +1041,7 @@
       },
       {
         "match": "Lancer",
+        "surface_debris": true,
         "flash": {
           "size": 2.2,
           "color": [
@@ -988,6 +1066,7 @@
       },
       {
         "match": "Plasma",
+        "surface_debris": true,
         "flash": {
           "size": 2.6,
           "color": [
@@ -1023,6 +1102,7 @@
       },
       {
         "match": "_Impact",
+        "surface_debris": true,
         "flash": {
           "size": 1.8,
           "color": [

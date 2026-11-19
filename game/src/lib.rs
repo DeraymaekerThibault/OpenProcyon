@@ -26,6 +26,7 @@ pub mod flag;
 pub mod fx;
 pub mod interpolate;
 pub mod lifeboats;
+pub mod line_of_fire;
 pub mod logging;
 pub mod menu;
 pub mod modding;
@@ -268,7 +269,7 @@ pub fn run(view: fn(&mut App), setup_view: fn(&mut App)) {
                 ship::reconcile_fleets.in_set(BattleSet::Commands),
                 ai.in_set(BattleSet::Ai),
                 ship::fleet_follow.in_set(BattleSet::Fleet),
-                (briefing::halt_arrival, blackhole::pull, sail).chain().in_set(BattleSet::Simulate),
+                (briefing::halt_arrival, blackhole::pull, sail, out_of_map).chain().in_set(BattleSet::Simulate),
                 outcome.in_set(BattleSet::Outcome),
             )
                 .run_if(in_state(menu::Screen::Battle))
@@ -323,35 +324,93 @@ fn setup(mut commands: Commands, cfg: Res<Config>, mut vtime: ResMut<Time<Virtua
 
 /// Retail tick documented in docs/re/gunnery.md and docs/re/effects.md.
 pub const BATTLE_TICK: std::time::Duration = std::time::Duration::from_millis(33);
+/// The same tick in seconds, for rules the original writes per tick (rates, pulls, chances): one tick is 0.033 s, not 1/30 s.
+pub const TICK_SECS: f32 = 0.033;
+
+/// Queued for removal: the object is destroyed at the start of the next tick and, until then, still takes part in the logic of
+/// the tick it was queued in (the original's deferred removal, docs/re/tick.md).
+#[derive(Component)]
+pub struct Removed;
+
+/// Queues `e` for removal at the start of the next tick. Safe to call twice, or for an entity already gone.
+pub fn queue_removal(commands: &mut Commands, e: Entity) {
+    commands.entity(e).try_insert(Removed);
+}
+
+/// Created during a tick: the object joins at the start of the next tick and is neither moved nor tested before then.
+/// Movement systems of such objects (shells, blasts, wells) leave `With<Joining>` out.
+#[derive(Component)]
+pub struct Joining;
+
+/// Height below which a moving object has left the map (docs/re/tick.md).
+pub const MAP_FLOOR: f32 = -130.0;
+
+/// Whether `p` (Bevy axes, y up) is below the map's floor.
+pub fn below_floor(p: Vec3) -> bool {
+    p.y < MAP_FLOOR
+}
+
+/// After the movement of a tick: moving objects that ended below the floor are queued for removal. Shells test their own step.
+fn out_of_map(mut commands: Commands, movers: Query<(Entity, &Transform), (With<combat::Asteroid>, Without<Removed>)>) {
+    for (e, tf) in &movers {
+        if below_floor(tf.translation) {
+            queue_removal(&mut commands, e);
+        }
+    }
+}
+
+/// Start of a tick: destroy what was queued for removal last tick, and let what was created last tick join.
+pub(crate) fn tick_start(mut commands: Commands, removed: Query<Entity, With<Removed>>, joining: Query<Entity, With<Joining>>) {
+    for e in &removed {
+        commands.entity(e).try_despawn();
+    }
+    for e in &joining {
+        commands.entity(e).try_remove::<Joining>();
+    }
+}
+
+/// Single-player rules (mission and skirmish scripts): evaluated once per frame, after the last tick of that frame and also while the
+/// game is paused (docs/re/tick.md). At 2x and 5x they run a half or a fifth as often as ticks. Their `Res<Time>` is the frame's
+/// game-time advance, so a script timer still adds up to the ticks' time.
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct FrameRules;
 
 /// Ordered shared simulation stages; input and presentation stay on the frame schedules.
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BattleSet {
+    /// Removals queued last tick are applied and new objects join, before anything else of the tick.
+    Tick,
     Commands,
-    Sense,
     Rules,
-    Ai,
-    Fleet,
-    Orders,
+    /// Step 6 of the original's tick, the mission tick: boarding fights are resolved and links (grapples, tows) test whether they break
+    /// and reel in. Skipped while the mission is frozen. No position is written here.
+    MissionTick,
     Forces,
     Simulate,
+    /// Sensor snapshot of the positions after movement and collision, for the decisions below.
+    Sense,
+    /// Per-object decisions (captains, mission AI) run after movement and collision; what they decide acts in the next tick's integration.
+    Ai,
+    Fleet,
+    /// Ship upkeep (fire, deaths, repair) and shells, after the object's decision.
     Combat,
     Cleanup,
     Outcome,
 }
 
 fn battle_schedule(app: &mut App) {
-    app.insert_resource(Time::<Fixed>::from_duration(BATTLE_TICK)).configure_sets(
+    app.insert_resource(Time::<Fixed>::from_duration(BATTLE_TICK)).add_systems(FixedUpdate, tick_start.in_set(BattleSet::Tick)).configure_sets(
         FixedUpdate,
         (
+            BattleSet::Tick,
             BattleSet::Commands,
-            BattleSet::Sense,
             BattleSet::Rules,
-            BattleSet::Ai,
-            BattleSet::Fleet,
-            BattleSet::Orders,
+            BattleSet::MissionTick,
             BattleSet::Forces,
             BattleSet::Simulate,
+            BattleSet::Sense,
+            BattleSet::Ai,
+            BattleSet::Fleet,
             BattleSet::Combat,
             BattleSet::Cleanup,
             BattleSet::Outcome,
@@ -365,8 +424,26 @@ fn battle_schedule(app: &mut App) {
 fn set_time_scale(vtime: &mut Time<Virtual>, speed: f32) {
     let speed = speed.max(0.01);
     vtime.set_relative_speed(speed);
-    vtime.set_max_delta(std::time::Duration::from_secs_f32(if speed > 1.0 { 0.1 } else { 0.25 }));
+    vtime.set_max_delta(std::time::Duration::from_secs_f32(max_frame_step(speed)));
 }
+
+/// Most game time one call may advance. At the original's speeds (up to 5x): 10 frames of `speed` ticks each, real time beyond
+/// that is dropped (docs/re/tick.md). Above 5x, which the original does not have: 0.1 s (about 3 ticks) so a 16x battle stays
+/// smooth instead of turning one slow frame into a long burst. An unattended autoplay run (`PROCYON_AUTOPLAY`) only wants game
+/// time per second, so there the step grows with the speed (60 fps worth of it).
+fn max_frame_step(speed: f32) -> f32 {
+    match speed > MAX_RETAIL_SPEED {
+        true if std::env::var_os("PROCYON_AUTOPLAY").is_some() => (speed / 60.0).max(0.1),
+        true => 0.1,
+        false => MAX_CATCH_UP_FRAMES as f32 * BATTLE_TICK.as_secs_f32() * speed,
+    }
+}
+
+/// Fastest speed setting the original has.
+const MAX_RETAIL_SPEED: f32 = 5.0;
+
+/// Frames the simulation may run in one call before the backlog is dropped.
+const MAX_CATCH_UP_FRAMES: u32 = 10;
 
 /// Fastest speed of the HUD speed buttons when `data/hud/speed.json` gives no `max`.
 pub const MAX_GAME_SPEED: f32 = 16.0;

@@ -3,6 +3,7 @@ mod fleet;
 mod lifeboats;
 mod report;
 mod shells;
+mod trace;
 pub use fleet::fleet_smoke;
 
 use crate::{Config, campaign::Mission, rules::RuleShip};
@@ -47,7 +48,7 @@ scripts! {
     Cloak => "cloak", Course => "course", CurrentM3 => "current-m3", Damage => "damage", Defeat => "defeat",
     Dock => "dock", DockClick => "dock-click", DockMenu => "dock-menu",
     Fleet => "fleet", FleetPrimary => "fleet-primary", FleetCrew => "fleet-crew", FleetArms => "fleet-arms", FleetProfile => "fleet-profile", FleetProfileCrew => "fleet-profile-crew", FleetProfileArms => "fleet-profile-arms", FleetShips => "fleet-ships",
-    FxTest => "fxtest", HuntM3 => "hunt-m3",
+    Fire => "fire", FxTest => "fxtest", HuntM3 => "hunt-m3", Impacts => "impacts",
     Ingame => "ingame", IngameLoad => "ingame-load", IngameDoLoad => "ingame-do-load", IngameQuit => "ingame-quit",
     IngameSave => "ingame-save", IngameOptions => "ingame-options", IngameControls => "ingame-controls",
     LifeboatM1 => "lifeboat-m1", LifeboatM1Fallback => "lifeboat-m1-fallback",
@@ -56,14 +57,64 @@ scripts! {
     MapInfo => "map-info", MenuSelected => "menu-selected", MenuFriendly => "menu-friendly", MenuEnemy => "menu-enemy", ModsBake => "mods-bake",
     Mission => "mission", Pause => "pause", PauseRestart => "pause-restart", Quick => "quick",
     Restart => "restart", Shells => "shells", Sight => "sight", Speedtest => "speedtest",
-    StormM3 => "storm-m3", StormM3Damage => "storm-m3-damage", Talk => "talk", Target => "target", Victory => "victory",
+    AllStop => "allstop", StormFlash => "stormflash", StormM3 => "storm-m3", StormM3Damage => "storm-m3-damage", Talk => "talk", Target => "target", Victory => "victory",
 }
 
 pub fn plugin(app: &mut App) {
     report::plugin(app);
+    trace::plugin(app);
     app.add_systems(PreUpdate, fleet::fleet_smoke.after(bevy::ui::UiSystems::Focus).before(crate::panels::hud_input))
         .add_systems(PreUpdate, lifeboats::smoke.after(bevy::ui::UiSystems::Focus))
-        .add_systems(Update, (shells::shells, animals));
+        .add_systems(Update, (shells::shells, animals, stormflash, allstop, fire, impacts));
+}
+
+/// `--script impacts`: the same shot effect against all three materials, spaced around the player for a screenshot.
+fn impacts(
+    mut commands: Commands,
+    cfg: Res<Config>,
+    player: Query<(Entity, &Transform, &crate::Ship), With<crate::PlayerShip>>,
+    lib: Res<crate::combat::Library>,
+    fx: Res<crate::fx::FxLib>,
+    mut done: Local<bool>,
+) {
+    if cfg.script != Some(Script::Impacts) || *done || cfg.frame < cfg.shot_frame.saturating_sub(12).max(30) {
+        return;
+    }
+    let Ok((e, tf, ship)) = player.single() else { return };
+    let [lo, hi] = lib.classes[ship.class].collision_bounds;
+    for (material, offset) in [("Wood", Vec3::new(0.25, 0.4, 0.29)), ("Iron", Vec3::new(0.27, 0.45, -0.26)), ("Cloth", Vec3::new(0.05, 0.95, -0.03))] {
+        let local = Transform::from_translation(lo.lerp(hi, 0.5) + (hi - lo) * offset);
+        let origin = crate::fx::Origin { forward: Some(Vec3::new(0.6, 1.0, 0.0).normalize()), host: Some(e), material: Some(material), ..default() };
+        crate::fx::spawn_with(&mut commands, &fx, "CannonBall_Med_Impact", Some(e), local, *tf * local, true, origin);
+    }
+    *done = true;
+}
+
+/// `--script fire`: light one attached fire for a screenshot, then stop it with smoke still in the air. Visual only.
+fn fire(
+    mut commands: Commands,
+    cfg: Res<Config>,
+    player: Query<(Entity, &Transform, &crate::Ship), With<crate::PlayerShip>>,
+    lib: Res<crate::combat::Library>,
+    fx: Res<crate::fx::FxLib>,
+    mut live: Query<&mut crate::fx::Fx>,
+    mut source: Local<Option<Entity>>,
+) {
+    if cfg.script != Some(Script::Fire) || cfg.frame < 30 {
+        return;
+    }
+    // Use thresholds: the screenshot counter can advance before or after this system in a frame.
+    if cfg.frame >= 210 {
+        if let Some(mut f) = source.take().and_then(|e| live.get_mut(e).ok()) {
+            f.emitting = false;
+        }
+    } else if source.is_none() {
+        let Ok((e, tf, ship)) = player.single() else { return };
+        let [lo, hi] = lib.classes[ship.class].collision_bounds;
+        let at = lo.lerp(hi, 0.5) + (hi - lo) * Vec3::new(0.25, 0.4, 0.15);
+        let local = Transform::from_translation(at);
+        *source = crate::fx::spawn(&mut commands, &fx, "FireOnShip", Some(e), local, *tf * local, false);
+    }
 }
 
 /// `--script animals --map dragons_nest --shot <png> --shot-frame N`: from frame 20 the first space animal (a dragon here, a
@@ -156,6 +207,11 @@ pub fn screenshot_hooks(mut commands: Commands, time: Res<Time>, mission: Res<Mi
 const STUCK_NIS: f32 = 600.0; // mission 13's credits roll runs ~303 s
 const STUCK_RANGE: f32 = 50.0;
 
+/// Whether this is an unattended autoplay run (`PROCYON_AUTOPLAY` set).
+pub fn autoplay() -> bool {
+    std::env::var_os("PROCYON_AUTOPLAY").is_some()
+}
+
 /// PROCYON_AUTOPLAY=<game seconds> (with `--script mission`, see tools/autoplay.py): when the mission ends, an NIS runs past
 /// `STUCK_NIS`, the player's ship stops getting anywhere or the time limit passes, log one `autoplay end` line (outcome and the rules that never fired) and quit.
 pub fn autoplay_end(
@@ -193,4 +249,33 @@ pub fn autoplay_end(
     info!("autoplay state point={point:?} tasks={:?}", sc.tasks_text());
     info!("autoplay end outcome={outcome:?} time={:.0} never_fired={:?}", sc.time, sc.never_fired());
     std::process::exit(0);
+}
+
+/// `--script stormflash`: a bolt of lightning (the effect and the `StormFlash` message) over the first cloud or storm every
+/// 40 frames, to look at what the render profile does with it. Presentation only: no damage, no timers.
+fn stormflash(
+    cfg: Res<Config>,
+    mut commands: Commands,
+    fxl: Option<Res<crate::fx::FxLib>>,
+    clouds: Query<&GlobalTransform, With<crate::nebula::Cloud>>,
+    mut flashes: MessageWriter<crate::nebula::StormFlash>,
+) {
+    if cfg.script.as_deref() != Some("stormflash") || cfg.frame % 40 != 5 {
+        return;
+    }
+    let (Some(fxl), Some(at)) = (fxl, clouds.iter().next().map(|c| c.translation())) else { return };
+    let t = Transform::from_translation(at);
+    crate::fx::spawn(&mut commands, &fxl, "Lightning", None, t, t, true);
+    flashes.write(crate::nebula::StormFlash { at, from: at + Vec3::new(-150.0, 120.0, -60.0), to: at + Vec3::new(150.0, -60.0, 70.0), hit: true });
+}
+
+/// `--script allstop`: the player's ship is held at All Stop from frame `--shot-frame / 2` on (open sails before, then the crew
+/// furls them), to look at how a render profile folds the sails.
+fn allstop(cfg: Res<Config>, mut ships: Query<&mut crate::Ship, With<crate::ship::PlayerShip>>) {
+    if cfg.script.as_deref() != Some("allstop") || cfg.frame < cfg.shot_frame / 2 {
+        return;
+    }
+    for mut ship in &mut ships {
+        ship.halt();
+    }
 }

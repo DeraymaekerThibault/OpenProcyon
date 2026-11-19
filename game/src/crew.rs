@@ -218,7 +218,9 @@ fn callouts(
     mut last: Local<HashMap<&'static str, f32>>,
     mut n: Local<usize>,
     mut dead: Local<Vec<bool>>,
-    mut rng: ResMut<crate::combat::Rng>,
+    // Its own generator: this runs once per drawn frame, and drawing from the simulation's `combat::Rng` here made shot scatter
+    // depend on the frame rate (two autoplay runs parted at the first callout of a fight, #368).
+    mut rng: Local<crate::combat::Rng>,
 ) {
     let Some(player) = player else { return };
     let (me, tf, ship, hp, docked, boarding, posts) = *player;

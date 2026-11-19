@@ -64,10 +64,27 @@ pub fn base_mission_damage(class: &Class, hp: &Health) -> f32 {
     let v: Vec<f32> = class.sections.iter().zip(&hp.sections).filter(|(c, _)| c.mission).map(|(c, h)| 1.0 - h / c.hp.max(1.0)).collect();
     if v.is_empty() { 0.0 } else { (v.iter().sum::<f32>() / v.len() as f32).clamp(0.0, 1.0) }
 }
-/// World position of the live mission section of a base nearest `from` (None when every vital section is destroyed): where a gun must point.
-pub fn live_tower_point(class: &Class, hp: &Health, tf: &Transform, from: Vec3) -> Option<Vec3> {
-    let local = tf.to_matrix().inverse().transform_point3(from);
-    hit_test::base_aim_point(class, hp, Some(local)).map(|p| tf.transform_point(p))
+/// Where the dev autopilot clicks on a base, in world space (None when every vital section is destroyed): of the live mission sections'
+/// surface points (triangle centres) that `visible` passes, the one nearest its section's middle, so a near miss either way still lands on
+/// it; with none visible, the roof (`hit_test::base_aim_point`), and the autopilot looks for a firing spot. Aiming at the roof sent mission
+/// 6's cannons over its 40-unit gate, and the nearest point to the ship put mission 2's shells into the island in front of its towers (#353).
+/// At most `TESTS` points are tried, spread over the candidates from the middle outward.
+pub fn live_tower_point(class: &Class, hp: &Health, tf: &Transform, visible: impl Fn(Vec3) -> bool) -> Option<Vec3> {
+    const TESTS: usize = 64;
+    let live: Vec<&crate::data::Section> = class.sections.iter().zip(&hp.sections).filter(|(s, h)| s.mission && **h > 0.0).map(|(s, _)| s).collect();
+    let mut points: Vec<(f32, Vec3)> = live
+        .iter()
+        .flat_map(|s| {
+            let mid = (s.min + s.max) * 0.5;
+            s.tris.iter().map(move |[a, b, c]| {
+                let p = (*a + *b + *c) / 3.0;
+                (p.distance_squared(mid), p)
+            })
+        })
+        .collect();
+    points.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let step = points.len().div_ceil(TESTS).max(1);
+    points.iter().step_by(step).map(|(_, p)| tf.transform_point(*p)).find(|p| visible(*p)).or_else(|| hit_test::base_aim_point(class, hp, None).map(|p| tf.transform_point(p)))
 }
 /// A shell struck `victim` (counted even when the victim is invulnerable); fed to the mission rules.
 #[derive(Message)]
@@ -283,7 +300,6 @@ fn setup(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut mats: Res
 /// its `destructFx` start.
 #[derive(Component)]
 pub struct Sinking {
-    start: Transform,
     elapsed: f32,
     /// Section mesh nodes: (node, section, rest pose, burst done); filled on the first breakup frame.
     nodes: Option<Vec<(Entity, usize, Transform, bool)>>,
@@ -299,8 +315,16 @@ fn breakup_clip<'a>(lib: &'a Library, class: &crate::data::Class) -> Option<&'a 
 }
 
 impl Sinking {
-    fn new(start: Transform) -> Self {
-        Sinking { start, elapsed: 0.0, nodes: None }
+    pub(crate) fn new() -> Self {
+        Sinking { elapsed: 0.0, nodes: None }
+    }
+
+    /// What the dying hull's drive sees (docs/re/effects.md "Death drive"): from `CLIP_DELAY` after the kill every section is at 0 HP,
+    /// so the speed and turning losses sit at their 0.9 cap and thrust, top speed and rudder torque are 0.1 of normal. Before that the
+    /// ship still has the sections it died with. The stored `Health` is left alone: crew speech, damage looks and statistics keep
+    /// reading what the hull really lost.
+    pub fn drive_health(&self, h: &Health) -> Option<Health> {
+        (self.elapsed >= CLIP_DELAY).then(|| Health { sections: vec![0.0; h.sections.len()], core: h.core, destroyed: true })
     }
 }
 
@@ -310,17 +334,17 @@ fn hide_time(d: &crate::data::Destruct) -> f32 {
     if d.fx.is_some() { d.start } else { d.end }
 }
 
-/// Gameplay death is immediate; the presentation breaks the hull up for a few seconds, then removes it.
-fn deaths(mut commands: Commands, lib: Res<Library>, mut lost: MessageWriter<crate::lifeboats::ShipLost>, mut ships: Query<(Entity, &Transform, &mut Ship, &mut Health)>) {
-    for (e, tf, mut ship, mut hp) in &mut ships {
+/// Gameplay death is immediate (`destroyed`: not a target, no collision, not alive for the rules); the hull keeps its speed and
+/// heading and is steered on by the computer (`collision::tick` drives it while `Sinking`), while the presentation breaks it up for a
+/// few seconds, then removes it.
+fn deaths(mut commands: Commands, lib: Res<Library>, mut lost: MessageWriter<crate::lifeboats::ShipLost>, mut ships: Query<(Entity, &Ship, &mut Health)>) {
+    for (e, ship, mut hp) in &mut ships {
         if hp.destroyed || hp.core > 0.0 {
             continue;
         }
         hp.destroyed = true;
-        ship.speed = 0.0;
-        ship.ang_vel = 0.0;
         lost.write(crate::lifeboats::ShipLost(e));
-        commands.entity(e).insert(Sinking::new(*tf));
+        commands.entity(e).insert(Sinking::new());
         info!("{} destroyed", lib.classes[ship.class].name);
     }
 }
@@ -334,15 +358,14 @@ fn breakup(
     mut sfx: MessageWriter<Sfx>,
     time: Res<Time>,
     children: Query<&Children>,
-    mut ships: Query<(Entity, &mut Transform, &Ship, &mut Visibility, &mut Sinking)>,
+    mut ships: Query<(Entity, &Transform, &Ship, &mut Visibility, &mut Sinking)>,
     mut nodes: Query<(&Name, &mut Transform, &mut Visibility), Without<Ship>>,
 ) {
-    for (e, mut tf, ship, mut vis, mut sinking) in &mut ships {
+    for (e, tf, ship, mut vis, mut sinking) in &mut ships {
         let class = &lib.classes[ship.class];
         let clip = breakup_clip(&lib, class);
         sinking.elapsed += time.delta_secs();
         let t = (sinking.elapsed - CLIP_DELAY).max(0.0);
-        *tf = sinking.start;
         if sinking.nodes.is_none() {
             // PROVISIONAL death sound pool; visual randomness must not perturb combat rolls.
             let at = tf.translation;

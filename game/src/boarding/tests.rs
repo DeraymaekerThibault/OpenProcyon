@@ -79,7 +79,7 @@ fn drive(time: Res<Time>, mut ships: Query<(&Ship, &mut Transform, &Drift)>) {
 fn computer_captain_grapples_and_boards_its_target() {
     for (attack, boards) in [(None, true), (Some(AI_MIN_ATTACK), false)] {
         let mut app = app();
-        app.add_message::<crate::combat::Fired>().add_systems(Update, ai_boarding.after(winch).before(fights));
+        app.add_message::<crate::combat::Fired>().add_systems(Update, ai_boarding.after(winch_pull).before(fights));
         let me = spawn(&mut app, "Ship_Navy_Cutter", Side::Player, Vec3::ZERO, Skill::Elite);
         app.world_mut().entity_mut(me).insert(PlayerShip);
         let foe = spawn(&mut app, "Ship_Pirate_Barque", Side::Enemy, Vec3::new(40.0, 0.0, 0.0), Skill::Elite);
@@ -90,17 +90,36 @@ fn computer_captain_grapples_and_boards_its_target() {
         for _ in 0..50 {
             tick(&mut app, 0.1);
         }
-        assert!(app.world().get::<Grapple>(foe).is_none(), "an untouched computer ship leaves its target alone");
+        assert!(held(&mut app, foe).is_empty(), "an untouched computer ship leaves its target alone");
         app.world_mut().write_message(crate::combat::Fired { shooter: me, target: Some(foe), bullet: String::new() });
         let (mut grappled, mut boarded) = (false, false);
         for _ in 0..600 {
             tick(&mut app, 0.1);
-            grappled |= app.world().get::<Grapple>(foe).is_some_and(|g| g.target == me);
+            grappled |= held(&mut app, foe).iter().any(|g| g.0 == me);
             boarded |= app.world().get::<Boarding>(foe).is_some_and(|f| f.target() == me);
         }
         assert!(grappled, "the Barque harpooned its target");
         assert_eq!(boarded, boards, "attack {attack:?}: boarding needs an attacking strength above {AI_MIN_ATTACK}");
     }
+}
+fn held(app: &mut App, ship: Entity) -> Vec<(Entity, f32)> {
+    app.world_mut().query::<&Grapple>().iter(app.world()).filter(|g| g.grappler == ship).map(|g| (g.target, g.flight)).collect()
+}
+fn drop_grapples(app: &mut App, ship: Entity) {
+    let hooks: Vec<Entity> = app.world_mut().query::<(Entity, &Grapple)>().iter(app.world()).filter(|(_, g)| g.grappler == ship).map(|(e, _)| e).collect();
+    for h in hooks {
+        app.world_mut().despawn(h);
+    }
+}
+#[test]
+fn the_grapple_limit_counts_the_guns_of_every_bank_whose_first_working_gun_is_a_harpoon() {
+    // (bank, working, harpoon)
+    assert_eq!(bank_limit([(0, true, true), (0, true, true)].into_iter()), 2, "one bank of two harpoon guns");
+    assert_eq!(bank_limit([(0, true, true)].into_iter()), 1, "a single harpoon");
+    assert_eq!(bank_limit([(0, true, false), (0, true, true)].into_iter()), 0, "the first working gun is not a harpoon");
+    assert_eq!(bank_limit([(0, false, false), (0, true, true), (1, true, true)].into_iter()), 3, "a dead first gun is skipped; banks add up");
+    assert_eq!(bank_limit([(0, false, true), (0, true, false)].into_iter()), 0, "a dead harpoon does not count as first working");
+    assert_eq!(bank_limit(std::iter::empty()), 0);
 }
 fn app() -> App {
     let mut app = App::new();
@@ -114,7 +133,7 @@ fn app() -> App {
         .init_resource::<Got>()
         .insert_resource(Library::load(assets_dir()))
         .insert_resource(Rng::new(7))
-        .add_systems(Update, (handle_messages, set_flags, grapple_orders, winch, drive, fights, settled, status, collect).chain());
+        .add_systems(Update, (handle_messages, set_flags, grapple_orders, hook_flight, winch_upkeep, winch_pull, drive, fights, settled, status, collect).chain());
     app
 }
 fn tick(app: &mut App, secs: f32) {
@@ -194,13 +213,13 @@ fn grapple_then_board_captures_the_ship_and_tells_the_rules() {
     assert_eq!(app.world().resource::<BoardStatus>().grapple(foe), (false, true), "the cutter has a harpoon");
     app.world_mut().write_message(BoardMsg::Grapple { grappler: None, target: foe });
     tick(&mut app, 0.1);
-    assert!(app.world().get::<Grapple>(me).is_some_and(|g| g.flight > 0.0), "harpoon in the air");
+    assert!(held(&mut app, me).iter().any(|g| g.1 > 0.0), "harpoon in the air");
     let surface = |app: &App| {
         let lib = app.world().resource::<Library>();
         let r = |e: Entity| lib.classes[app.world().get::<Ship>(e).unwrap().class].radius;
         app.world().get::<Transform>(me).unwrap().translation.distance(app.world().get::<Transform>(foe).unwrap().translation) - r(me) - r(foe)
     };
-    while app.world().get::<Grapple>(me).is_some_and(|g| g.flight > 0.0) {
+    while held(&mut app, me).iter().any(|g| g.1 > 0.0) {
         tick(&mut app, 0.1);
     }
     let bit = surface(&app);
@@ -231,7 +250,7 @@ fn grapple_then_board_captures_the_ship_and_tells_the_rules() {
         .init_resource::<crate::combat::Target>();
     crate::ship::reconcile_fleets(app.world_mut());
     assert_eq!(app.world().resource::<crate::ship::Fleets>().roster(), &[me, foe], "capture joins the captor's own roster");
-    assert!(app.world().get::<Grapple>(me).is_none(), "grapple released");
+    assert!(held(&mut app, me).is_empty(), "grapple released");
     assert_eq!(app.world().resource::<Got>().0, vec![("Player".to_string(), "Enemy".to_string())]);
     assert!(app.world().get::<Boardable>(foe).unwrap().strength.defend > 3, "crewed afresh");
 }
@@ -245,49 +264,83 @@ fn boarding_needs_a_grapple_and_ends_when_the_ships_drift_apart() {
     let foe = spawn(&mut app, "Ship_Pirate_Schooner", Side::Enemy, Vec3::new(0.0, 0.0, -14.0), Skill::Average);
     tick(&mut app, 0.1);
     assert!(!app.world().resource::<BoardStatus>().board(foe).1, "close, but not grappled");
-    app.world_mut().entity_mut(me).insert(Grapple::new(foe, 0.0));
+    app.world_mut().spawn(Grapple::new(me, foe, 0.0));
     tick(&mut app, 0.1);
     assert!(app.world().resource::<BoardStatus>().board(foe).1);
     app.world_mut().write_message(BoardMsg::Board { boarder: None, target: foe });
     tick(&mut app, 0.1);
     assert!(app.world().get::<Boarding>(me).is_some());
     app.world_mut().get_mut::<Ship>(foe).unwrap().speed = 8.0; // sails away faster than the relative-speed limit
-    app.world_mut().entity_mut(me).remove::<Grapple>();
+    drop_grapples(&mut app, me);
     tick(&mut app, 0.1);
     assert!(app.world().get::<Boarding>(me).is_none(), "no grapple, no fight");
     app.world_mut().get_mut::<Boardable>(foe).unwrap().on = false;
-    app.world_mut().entity_mut(me).insert(Grapple::new(foe, 0.0));
+    app.world_mut().spawn(Grapple::new(me, foe, 0.0));
     tick(&mut app, 0.1);
     assert!(!app.world().resource::<BoardStatus>().board(foe).1, "a ship that is not Boardable cannot be boarded");
 }
 
 #[test]
 #[ignore = "needs imported assets"]
-fn a_grapple_does_not_hold_the_ships_and_snaps_when_they_pull_apart() {
+fn a_grapple_is_a_rope_that_pulls_both_hulls_back_and_snaps_only_past_a_jump_or_a_crossed_side() {
     let mut app = app();
     let me = spawn(&mut app, "Ship_Navy_Cutter", Side::Player, Vec3::ZERO, Skill::Average);
     app.world_mut().entity_mut(me).insert(PlayerShip);
     let foe = spawn(&mut app, "Ship_Pirate_Schooner", Side::Enemy, Vec3::new(0.0, 0.0, -40.0), Skill::Average);
-    app.world_mut().entity_mut(foe).insert(Grapple::new(me, 0.0));
+    app.world_mut().spawn(Grapple::new(foe, me, 0.0));
     tick(&mut app, 0.1);
-    app.world_mut().get_mut::<Ship>(me).unwrap().speed = 4.0; // we sail on, bow (-Z) toward the schooner's side
-    tick(&mut app, 0.1);
-    assert!(app.world().get::<Ship>(me).unwrap().speed > 3.9, "the grapple neither stops nor drags us");
-    app.world_mut().get_mut::<Ship>(me).unwrap().speed = -4.0; // and away again
+    let apart = |app: &App| app.world().get::<Transform>(me).unwrap().translation.distance(app.world().get::<Transform>(foe).unwrap().translation);
+    let (m_me, m_foe) = {
+        let lib = app.world().resource::<Library>();
+        (lib.classes[app.world().get::<Ship>(me).unwrap().class].phys.mass, lib.classes[app.world().get::<Ship>(foe).unwrap().class].phys.mass)
+    };
+    app.world_mut().get_mut::<Ship>(me).unwrap().speed = -4.0; // we sail away from the schooner
+    let start = (app.world().get::<Transform>(me).unwrap().translation, app.world().get::<Transform>(foe).unwrap().translation);
     for _ in 0..20 {
         tick(&mut app, 0.1);
     }
-    assert!(app.world().get::<Grapple>(foe).is_none(), "pulled more than 2 units past its length: the line snapped");
+    assert!(!held(&mut app, foe).is_empty(), "sailing away at 4 units/s does not snap the rope");
+    assert!((apart(&app) - 40.0).abs() < 2.0, "the rope holds the centres at the length it bit at, not {}", apart(&app));
+    let moved = (app.world().get::<Transform>(me).unwrap().translation.distance(start.0), app.world().get::<Transform>(foe).unwrap().translation.distance(start.1));
+    assert!((moved.0 < moved.1) == (m_me > m_foe), "the heavier hull gives way less ({moved:?}, masses {m_me} and {m_foe})");
+    // A jump of more than 2 units past the rope's length in one tick snaps it.
+    app.world_mut().get_mut::<Ship>(me).unwrap().speed = 0.0;
+    app.world_mut().get_mut::<Transform>(me).unwrap().translation += Vec3::Z * 30.0;
+    tick(&mut app, 0.1);
+    assert!(held(&mut app, foe).is_empty(), "carried 2 units further than the rope in one tick: the line snapped");
     // Grappled on our bow, the schooner circles round to our stern: the line snaps.
     app.world_mut().get_mut::<Ship>(me).unwrap().speed = 0.0;
     app.world_mut().get_mut::<Transform>(me).unwrap().translation = Vec3::ZERO;
     app.world_mut().get_mut::<Transform>(foe).unwrap().translation = Vec3::new(0.0, 0.0, -30.0);
-    app.world_mut().entity_mut(foe).insert(Grapple::new(me, 0.0));
+    app.world_mut().spawn(Grapple::new(foe, me, 0.0));
     tick(&mut app, 0.1);
-    assert!(app.world().get::<Grapple>(foe).is_some());
+    assert!(!held(&mut app, foe).is_empty());
     app.world_mut().get_mut::<Transform>(foe).unwrap().translation = Vec3::new(5.0, 0.0, 25.0);
     tick(&mut app, 0.1);
-    assert!(app.world().get::<Grapple>(foe).is_none(), "crossed to the other side of our hull: the line snapped");
+    assert!(held(&mut app, foe).is_empty(), "crossed to the other side of our hull: the line snapped");
+}
+
+/// Both players becoming allied lets the line go, whichever end holds it.
+#[test]
+#[ignore = "needs imported assets"]
+fn becoming_allied_releases_the_grapple() {
+    let mut app = app();
+    let me = spawn(&mut app, "Ship_Navy_Cutter", Side::Player, Vec3::ZERO, Skill::Average);
+    let foe = spawn(&mut app, "Ship_Pirate_Schooner", Side::Enemy, Vec3::new(0.0, 0.0, -40.0), Skill::Average);
+    app.world_mut().spawn(Grapple::new(foe, me, 0.0));
+    tick(&mut app, 0.1);
+    assert!(!held(&mut app, foe).is_empty(), "hostile ships stay grappled");
+    app.world_mut().get_mut::<Ship>(foe).unwrap().side = Side::Player;
+    tick(&mut app, 0.1);
+    assert!(held(&mut app, foe).is_empty(), "allied now: the line is let go");
+    // The other direction: the hook is on our ship.
+    app.world_mut().get_mut::<Ship>(foe).unwrap().side = Side::Enemy;
+    app.world_mut().spawn(Grapple::new(me, foe, 0.0));
+    tick(&mut app, 0.1);
+    assert!(!held(&mut app, me).is_empty());
+    app.world_mut().get_mut::<Ship>(foe).unwrap().side = Side::Player;
+    tick(&mut app, 0.1);
+    assert!(held(&mut app, me).is_empty(), "allied: released from the other end too");
 }
 
 /// The computer's harpoon test against the retail runs (docs/re/boarding.md §5): a Barque's beam harpoons reach a ship on its
@@ -321,7 +374,7 @@ fn ai_harpoons_bear_by_arc_and_long_range() {
     assert!(bears("Ship_Pirate_Barque", Vec3::X * 40.0) && bears("Ship_Pirate_Barque", Vec3::NEG_X * 40.0));
     assert!(!bears("Ship_Pirate_Barque", Vec3::X * 55.7) && !bears("Ship_Pirate_Barque", Vec3::NEG_Z * 40.0));
     assert!(!bears("Ship_Pirate_Carrack", Vec3::X * 30.0) && bears("Ship_Pirate_Carrack", Vec3::NEG_Z * 30.0));
-    assert!((per_tick(AI_BOARD_CHANCE, 1.0 / 30.0) - 0.2).abs() < 1e-5 && (per_tick(AI_BOARD_CHANCE, 2.0 / 30.0) - 0.36).abs() < 1e-5);
+    assert!((per_tick(AI_BOARD_CHANCE, crate::TICK_SECS) - 0.2).abs() < 1e-5 && (per_tick(AI_BOARD_CHANCE, 2.0 * crate::TICK_SECS) - 0.36).abs() < 1e-5);
 }
 
 #[test]
@@ -366,4 +419,11 @@ fn island_gunners_aim_by_the_generic_crews_gunnery() {
     assert!((Skill::Green.gunnery_vs_average() - 0.76 / 0.52).abs() < 1e-5);
     assert_eq!(Skill::Average.gunnery_vs_average(), 1.0);
     assert!((Skill::Elite.gunnery_vs_average() - 0.36 / 0.52).abs() < 1e-5);
+}
+
+#[test]
+fn the_reel_takes_a_tenth_of_a_unit_per_0_033_s_tick() {
+    assert!((reeled(50.0, crate::TICK_SECS) - 49.9).abs() < 1e-5);
+    assert!((reeled(50.0, 2.0 * crate::TICK_SECS) - 49.8).abs() < 1e-5);
+    assert_eq!(reeled(12.05, 1.0), REEL_MIN);
 }

@@ -96,7 +96,9 @@ None → waiting to dock → approach → pre-docked → docked → moving away 
   turning, **min(top speed, 8)** once lined up; no avoidance. It is not turned to the dock point's heading at the end.
 - **3 docked (entry)**: stamps the start time, plays `HUD_Options_Dock`; for repairing dockees runs the repair setup (below);
   registers the dock relation (docker, dockee, point index; **not for base dockees**) so rules see "is docked"; the dock
-  duration is `max(dock time (5.0 s default, 'Set Dock Time'), repair time)`.
+  duration is `max(dock time (5.0 s default, 'Set Dock Time'), repair time)`; the result is stored back as the ship's dock time, so later
+  dockings of that ship keep the longer time (the remake keeps it on the ship in a skirmish and in the mission's rule state in a mission, where a later
+  'Set Dock Time' replaces it).
 - **4 docked**: wait for the duration, then release: free the dock slot, remove the relation and clear dock state. AI ships
   go to 5 and then 6/7; the **human ship just stays where it is** (no return trip).
 - **5 moving away**: ship dockees only (bases → 6 at once): target = dock point + node axis × ⅔·(dockee length + docker length), axis
@@ -119,13 +121,17 @@ is **[? not confirmed]**; the rule action `Toggle Island Repair When Docked` fli
 (ships), `DockPoint1/2` or `Dock_Point` with an association name such as `CRANES` (bases/islands), described by WOT `MeshAttributes` entries with `AttributeName 'DockPoint'`.
 
 ### Computer ships docking for repair
-Computer players' ships (not the human's, not ones under explicit orders) decide on their own to dock for repair: once **at
+Computer players' ships (not the human's, not ones under explicit orders, never a Persistent-stance captain) decide on their own to dock for repair: once **at
 least two of their damage sections are at or below half their hit points** (destroyed sections do not count), they pick the
-nearest (by surface gap) friendly dockable ship or island that repairs, at any distance in skirmish, and run the dock routine above on it
+nearest (by surface gap) friendly dockable ship or island that repairs, at any distance in skirmish but only within the ship's sight range in a
+campaign, and run the dock routine above on it
 (read from the code). The choice is re-made every think, so a ship can switch docks on the way; once started the routine runs to its end
 even if repairs are no longer needed, and there is no give-up timer. Overall hull share is not the test, which is why a skirmish computer ship at 80 % hull with its damage
-spread thin never docked ([movement.md](movement.md#computer-captains-measured-2026-10)). Remake: `docking::ai_repair_dock` (PROVISIONAL:
-nearest by centre distance, and the first choice is kept).
+spread thin never docked ([movement.md](movement.md#computer-captains-measured-2026-10)). Remake: `docking::ai_repair_dock` picks the nearest by surface gap (centre distance minus both
+collision radii) at every think while the ship has not yet docked, so a nearer dock replaces its earlier pick; a dock ordered by the player or a rule is not replaced, and
+once docked the routine runs to its end. (The sources say both "can switch tenders mid-approach" and "never abandoned once started"; the remake reads
+"started" as docked.) Mission 10 shows why the stance matters: its convoy is Persistent, and
+without the check the damaged lead merchant left its scripted route for a repair dock, so the convoy never reached the next objective.
 
 ### Dock-point markers
 While an object is dockable every dock point carries an effect on its node; when it stops being dockable they are removed. The
@@ -137,11 +143,28 @@ model geometry: every base's dock points now lie within about 25 units of the mo
 updating.
 
 In the remake every map object and ship type with exported dock points gets them when it spawns, on every map type
-(skirmish, historical and campaign). Bases no rule assigns an owner to (all skirmish bases) are dockable by every side **[PROVISIONAL]**.
+(skirmish, historical and campaign). A base hostile to the docker is not dockable, in a skirmish too
+(an enemy-side skirmish base shows no dock lights and refuses the dock; seen in play). How the original's dock test reaches that for bases no
+rule assigns an owner to is not read.
 
 ## 5. Not reversed yet
 Boarding fight / grapple mechanics (reversed, see [boarding.md](boarding.md)), where `ShipStatus_Icon_Docking_*` (animated docking status icon) is drawn, cloak effect,
-hold-position semantics, waypoint-mode click behaviour, and what the two `RepairVitalSection` rule actions do per section.
+waypoint-mode click behaviour, and what the two `RepairVitalSection` rule actions do per section.
+
+## Hold and Stop orders
+
+Read from the original's code (not yet checked against a staged run, so PROVISIONAL in the details below).
+- **Hold position** (the toggle, not a stance): setting it zeroes rudder and throttle and ends the current order; while it is on,
+  the ship neither steers nor follows a path. Move, dock, tow and board orders clear it; attack orders, Stop, panic and bank attacks
+  do not (a held ship ordered to attack stays put and fires). Remake: the Hold item halts the ship (course, heading goal, order,
+  a captain's destination) and a held ship is halted every frame, the player's too, so nothing steers it; the marker is cleared by a
+  move click (single or plotted path), and by the menu's Dock, Tow start and Board start. Whether a grapple-attack order clears it
+  is not stated; the remake leaves it. Mission-script moves do not clear it here (not read).
+- **Stop** (cancel actions): ends the current order and activity, so path, throttle and rudder go to zero and a dock or tow approach
+  is cancelled. It does not change a hold, the formation hold, hold fire or a grapple order. Remake: Stop halts the ship, ends a
+  captain's destination and target and cancels the dock/tow approach; it no longer clears the formation hold or the grapple order.
+  There is no boarding approach to cancel (a boarding fight is registered at once), so a fight under way is untouched.
+  The original also clears a hold when the ended order was a move, dock, tow or board; a held ship has none of these here.
 
 ## Mission 2 base approach
 
@@ -158,9 +181,8 @@ rules `Dock Ships`, `Set Dock Time`, `Set Group/Unit Dockable`, `Toggle Island R
 addressed by rules (`MissionBase`); left-click / menu dock gated by the sight test (no range constant); `options_menu.rs` with the three
 variants (any friendly ship gets the friendly menu), retail icons/backgrounds/slot offsets and menu sounds, Focus / Stop / Dock live and the
 rest greyed; context cursors. Camera: right-drag still rotates, a short right click opens the menu.
-PROVISIONAL in the remake: dock-point yaw sign, the dock time not stored back on the ship (the original keeps the longer time for later
-dockings), docked ships keeping station on a moving dockee, one repair effect at the ship centre, sight test by centre
-distance minus our hull radii and the player's ship only (no group), the relation is also registered for base dockees.
+PROVISIONAL in the remake: dock-point yaw sign, docked ships keeping station on a moving dockee, one repair effect at the ship centre, sight test by centre
+distance minus our hull radii and the player's ship only (no group). The docked relation is registered for ship dockees only; a base or island dockee is never registered (remake matches).
 Verified in Mission 1 (`--mission 1 --script dock|dock-click|dock-menu`: `Script::skip_to_tender` jumps to Objective 4 and puts the player,
 half damaged, next to RLS Bounty; `dock` sends the order like the D key, `dock-click` / `dock-menu` drive the real left click / right-click
 menu with synthetic mouse input): order accepted, approach ends on a dock point, Docked, repair to full, "Jim Has Docked With Tender" →
@@ -181,7 +203,7 @@ Runtime smoke: `--mission 1 --script dock-click --shot-frame 180 --late-frame 0`
 Repair scaffold morphs are now rendered from six converted endpoints by the existing FX module, using each EFT's deploy/hold/retract
 weight curve. Ironclad effects deliberately hold at fractional weights (0.5/0.6). GPU dock smoke reaches the repair phase and shows
 scaffolding in `local/feedback-scaffold.png`; effect children and handles follow the existing FX/scenario cleanup.
-Board and Grapple items: done (boarding.rs). Not done: cloak/hold items, path planning, the base dock-part hover rule, repair-effect fade distance. `Repair Vital Section`
+Board and Grapple items: done (boarding.rs). Not done: cloak item, path planning, the base dock-part hover rule, repair-effect fade distance. `Repair Vital Section`
 is not done: no mission in the exported data uses that rule action and the doc has no per-section semantics for it.
 
 ## Original plan

@@ -13,7 +13,12 @@ pub struct Asteroid {
     pub mass: f32,
     pub hp: f32,
     pub velocity: Vec3,
+    /// The rock's speed cap: drawn at belt setup, or the speed a fragment or a ship contact gave it (docs/re/asteroids.md).
     pub speed: f32,
+    /// The rock's own acceleration (the object definition's `acceleration`), applied along `thrust`.
+    pub acceleration: f32,
+    /// Direction of the push on the rock each tick: toward its current path point, or away from the ship that touched it.
+    pub thrust: Vec3,
     pub axis: Vec3,
     pub tumble: f32,
     pub path: Vec<Vec3>,
@@ -42,6 +47,8 @@ impl Asteroid {
             hp: d.hp,
             velocity: Vec3::ZERO,
             speed: 0.0,
+            acceleration: d.acceleration,
+            thrust: Vec3::ZERO,
             axis: Vec3::X,
             tumble: 0.0,
             path: vec![],
@@ -138,16 +145,9 @@ pub fn asteroid_motion(
         if rock.hp <= 0.0 {
             continue;
         }
-        if rock.path.get(rock.next).is_some() {
-            let r = &mut *rock;
-            let (velocity, stopped) = follow_path(&mut tf.translation, &r.path, &mut r.next, &mut r.forward, r.mode, r.speed, dt);
-            r.velocity = velocity;
-            if stopped {
-                r.speed = 0.0;
-            }
-        } else {
-            tf.translation += rock.velocity * dt;
-        }
+        let r = &mut *rock;
+        control(&mut tf.translation, &mut r.thrust, &r.path, &mut r.next, &mut r.forward, r.mode);
+        physics(&mut tf.translation, &mut r.velocity, r.thrust, r.acceleration, r.speed, dt);
         // PROVISIONAL world-axis multiplication order; native axis-angle rate is recovered.
         tf.rotation = (Quat::from_axis_angle(rock.axis, rock.tumble * dt) * tf.rotation).normalize();
     }
@@ -184,8 +184,86 @@ pub fn closest_point(path: &[Vec3], at: Vec3) -> usize {
         .unwrap_or(0)
 }
 
-/// Waypoint following shared by asteroid belts and meteor emitters. PROVISIONAL: straight legs replace the native
-/// SpaceObjectAI path controller. Moves `pos` toward `path[*next]` by `speed * dt` and, on reaching it, applies
+/// Has the rock crossed the line through path point `i` across the path (docs/re/asteroids.md)? Horizontal test: the line runs
+/// across the path (perpendicular to the segment at the two ends, along the corner bisector inside) and a point counts as reached
+/// once the rock is on the far side, however far from it. A rock exactly on the point has not crossed. Travelling back (end to
+/// end, PROVISIONAL) mirrors the side. A path of fewer than two points is never reached (the original's distance test has radius 0).
+pub fn crossed(path: &[Vec3], i: usize, at: Vec3, forward: bool) -> bool {
+    let last = path.len().wrapping_sub(1);
+    if path.len() < 2 || i > last {
+        return false;
+    }
+    let flat = |v: Vec3| v.with_y(0.0);
+    let unit = |v: Vec3| flat(v).normalize_or_zero();
+    let along = match i {
+        0 => unit(path[1] - path[0]),
+        _ if i == last => unit(path[last] - path[last - 1]),
+        // Neighbour bisector: the direction out of the previous point plus the direction into the next one, so the test line is
+        // the bisector itself. (A collinear point has no bisector in the original and may never be reached; here the plain
+        // perpendicular line serves: PROVISIONAL.)
+        _ => unit(path[i + 1] - path[i]) - unit(path[i - 1] - path[i]),
+    };
+    let side = flat(at - path[i]);
+    side != Vec3::ZERO && side.dot(if forward { along } else { -along }) >= 0.0
+}
+
+/// The path controller, once per tick (docs/re/asteroids.md): moves on to the next point when the rock has crossed the line through
+/// the current one, applies the follow mode past the last point, and aims the thrust at the current point. `to end` never reaches its
+/// last point, so the rock keeps pushing at it and hovers there. A teleport loop jumps the rock to the first point and keeps its
+/// velocity. An empty path leaves the thrust alone (a rock a ship touched flies away on it).
+pub fn control(pos: &mut Vec3, thrust: &mut Vec3, path: &[Vec3], next: &mut usize, forward: &mut bool, mode: PathMode) {
+    if path.is_empty() {
+        return;
+    }
+    let last = path.len() - 1;
+    *next = (*next).min(last);
+    if !(mode == PathMode::ToEnd && *next == last && *forward) && crossed(path, *next, *pos, *forward) {
+        match (mode, *forward) {
+            (_, true) if *next < last => *next += 1,
+            (PathMode::Loop, true) => *next = 0,
+            (PathMode::Teleport, true) => {
+                *pos = path[0];
+                *next = 0;
+            }
+            // PROVISIONAL (unused by the retail data; the original's end-to-end arithmetic is faulty at the start end).
+            (PathMode::EndToEnd, true) => {
+                *forward = false;
+                *next = last.saturating_sub(1);
+            }
+            (PathMode::EndToEnd, false) if *next > 0 => *next -= 1,
+            (PathMode::EndToEnd, false) => {
+                *forward = true;
+                *next = 1.min(last);
+            }
+            _ => {}
+        }
+    }
+    if let Some(dir) = (path[*next] - *pos).try_normalize() {
+        *thrust = dir;
+    }
+}
+
+/// One physics step of a rock (docs/re/asteroids.md): the position moves by the velocity it had, then the velocity gains
+/// `acceleration x thrust x dt` and is cut back to the speed cap. The push is constant, so there is no slowing on approach.
+pub fn physics(pos: &mut Vec3, velocity: &mut Vec3, thrust: Vec3, acceleration: f32, cap: f32, dt: f32) {
+    *pos += *velocity * dt;
+    *velocity += thrust * (acceleration * dt);
+    *velocity = velocity.clamp_length_max(cap);
+}
+
+/// A ship touching a rock (docs/re/asteroids.md): the rock leaves its belt for good (waypoints cleared) and flies away from the
+/// ship at a quarter of the centre distance per second; that is also its new speed cap, so the push keeps it there.
+pub fn knock_off(rock: &mut Asteroid, rock_centre: Vec3, ship_centre: Vec3) {
+    let away = rock_centre - ship_centre;
+    rock.path.clear();
+    rock.next = 0;
+    rock.velocity = away * 0.25;
+    rock.speed = rock.velocity.length();
+    rock.thrust = away.normalize_or_zero();
+}
+
+/// Waypoint following for the nebula's meteor emitters (belt rocks use `control` and `physics`). PROVISIONAL: straight legs replace the native
+/// path controller. Moves `pos` toward `path[*next]` by `speed * dt` and, on reaching it, applies
 /// `mode` at the path end. Returns the velocity and whether the object has stopped for good (`to end` at the last point).
 /// Callers must pass a non-empty path with `*next` in range.
 pub fn follow_path(pos: &mut Vec3, path: &[Vec3], next: &mut usize, forward: &mut bool, mode: PathMode, speed: f32, dt: f32) -> (Vec3, bool) {
@@ -258,7 +336,7 @@ pub fn asteroid_deaths(
             target.0 = None;
             target.1 = None;
         }
-        commands.entity(death.victim).despawn();
+        crate::queue_removal(&mut commands, death.victim);
     }
 }
 
@@ -341,48 +419,169 @@ mod tests {
         }
     }
 
-    #[test]
-    #[ignore = "needs imported assets"]
-    fn asteroid_path_tracks_velocity_and_stops_at_end() {
-        let mut app = App::new();
-        app.init_resource::<Time>().init_resource::<AsteroidDefs>().insert_resource(Rng(123)).add_message::<AsteroidSetup>().add_systems(Update, asteroid_motion);
-        let rock = Asteroid::new("Asteroid_Med", "rocks", app.world().resource::<AsteroidDefs>()).unwrap();
-        let e = app.world_mut().spawn((rock, Transform::default())).id();
-        app.world_mut().write_message(AsteroidSetup { units: vec![e], speed: [2.0, 2.0], tumble: [0.0, 0.0], path: vec![Vec3::X], closest: true, mode: PathMode::ToEnd });
-        app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs_f32(0.1));
-        app.update();
-        assert_eq!(app.world().get::<Asteroid>(e).unwrap().velocity, Vec3::X * 2.0);
-        for _ in 0..10 {
-            app.update();
+    const DT: f32 = 1.0 / 30.0;
+
+    fn rock(acceleration: f32) -> Asteroid {
+        Asteroid {
+            kind: "Asteroid_Med".into(),
+            group: "rocks".into(),
+            id: -1,
+            radius: 1.0,
+            mass: 20000.0,
+            hp: 30.0,
+            velocity: Vec3::ZERO,
+            speed: 0.0,
+            acceleration,
+            thrust: Vec3::ZERO,
+            axis: Vec3::X,
+            tumble: 0.0,
+            path: vec![],
+            next: 0,
+            mode: PathMode::ToEnd,
+            forward: true,
         }
-        assert_eq!(app.world().get::<Transform>(e).unwrap().translation, Vec3::X);
-        assert_eq!(app.world().get::<Asteroid>(e).unwrap().velocity, Vec3::ZERO);
+    }
+
+    /// One tick of the rock's controller then physics, as `asteroid_motion` runs it.
+    fn tick(r: &mut Asteroid, pos: &mut Vec3) {
+        control(pos, &mut r.thrust, &r.path, &mut r.next, &mut r.forward, r.mode);
+        physics(pos, &mut r.velocity, r.thrust, r.acceleration, r.speed, DT);
     }
 
     #[test]
-    #[ignore = "needs imported assets"]
-    fn asteroid_path_modes_teleport_loop_and_ping_pong() {
-        let run = |mode| {
-            let mut app = App::new();
-            app.init_resource::<Time>().init_resource::<AsteroidDefs>().insert_resource(Rng(1)).add_message::<AsteroidSetup>().add_systems(Update, asteroid_motion);
-            let rock = Asteroid::new("Asteroid_Med", "rocks", app.world().resource::<AsteroidDefs>()).unwrap();
-            let e = app.world_mut().spawn((rock, Transform::default())).id();
-            let path = vec![Vec3::ZERO, Vec3::X * 10.0, Vec3::X * 20.0];
-            app.world_mut().write_message(AsteroidSetup { units: vec![e], speed: [10.0, 10.0], tumble: [0.0, 0.0], path, closest: true, mode });
-            let mut xs = vec![];
-            for _ in 0..40 {
-                app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs_f32(0.1));
-                app.update();
-                xs.push(app.world().get::<Transform>(e).unwrap().translation.x);
+    fn a_rock_accelerates_to_its_speed_cap_and_does_not_slow_on_approach() {
+        // Medium rock: acceleration 100 per second per second is 100/30 per tick; cap 10 is reached on the third tick.
+        let mut r = rock(100.0);
+        (r.speed, r.path) = (10.0, vec![Vec3::X * 1000.0, Vec3::X * 2000.0]);
+        let mut pos = Vec3::ZERO;
+        let mut speeds = vec![];
+        for _ in 0..4 {
+            tick(&mut r, &mut pos);
+            speeds.push(r.velocity.length());
+        }
+        for (got, want) in speeds.iter().zip([100.0 / 30.0, 200.0 / 30.0, 10.0, 10.0]) {
+            assert!((got - want).abs() < 1e-4, "{speeds:?}");
+        }
+        // The position moves by the velocity the rock had at the start of the tick: 0, then 1/9 of a unit.
+        let mut r = rock(100.0);
+        (r.speed, r.path) = (10.0, vec![Vec3::X * 1000.0, Vec3::X * 2000.0]);
+        let mut pos = Vec3::ZERO;
+        tick(&mut r, &mut pos);
+        assert_eq!(pos, Vec3::ZERO);
+        tick(&mut r, &mut pos);
+        assert!((pos.x - 100.0 / 30.0 / 30.0).abs() < 1e-5);
+        // Close to the point it is still at full speed (no braking).
+        let mut r = rock(500.0);
+        (r.speed, r.path, r.velocity) = (10.0, vec![Vec3::X * 100.0, Vec3::X * 200.0], Vec3::X * 10.0);
+        let mut pos = Vec3::X * 99.0;
+        tick(&mut r, &mut pos);
+        assert!((r.velocity.length() - 10.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn a_small_rock_turns_in_a_few_ticks_not_at_once() {
+        // Small: 500/30 = 16.7 per tick against a cap of 5..20: a rock flying +x told to go +z first keeps part of its old velocity.
+        let mut r = rock(100.0);
+        (r.speed, r.velocity, r.path) = (10.0, Vec3::X * 10.0, vec![Vec3::Z * 1000.0, Vec3::Z * 2000.0]);
+        let mut pos = Vec3::ZERO;
+        tick(&mut r, &mut pos);
+        assert!(r.velocity.x > 5.0 && r.velocity.z > 3.0 && r.velocity.length() <= 10.0 + 1e-4, "{:?}", r.velocity);
+    }
+
+    #[test]
+    fn a_point_is_reached_when_the_rock_has_crossed_the_line_through_it() {
+        // Path along +x, then a corner at (100,0,0) turning to +z.
+        let path = [Vec3::ZERO, Vec3::X * 100.0, Vec3::new(100.0, 0.0, 100.0)];
+        // Corner point: the line through it runs along the bisector, direction (1,0,-1) in this frame.
+        assert!(!crossed(&path, 1, Vec3::new(99.0, 0.0, 0.0), true), "short of the line");
+        assert!(crossed(&path, 1, Vec3::new(100.5, 0.0, 0.0), true), "past the line");
+        assert!(crossed(&path, 1, Vec3::new(60.0, 0.0, 60.0), true), "far away on the far side counts");
+        assert!(!crossed(&path, 1, Vec3::new(140.0, 0.0, -60.0), true), "far away on the near side does not");
+        assert!(!crossed(&path, 1, path[1], true), "exactly on the point is not across it");
+        // End points use the line perpendicular to the segment.
+        assert!(!crossed(&path, 2, Vec3::new(100.0, 0.0, 99.0), true));
+        assert!(crossed(&path, 2, Vec3::new(30.0, 0.0, 101.0), true));
+        assert!(crossed(&path, 0, Vec3::new(0.5, 0.0, 40.0), true));
+        // Height is ignored.
+        assert!(crossed(&path, 2, Vec3::new(100.0, 50.0, 101.0), true));
+        // A single point or a missing one is never reached.
+        assert!(!crossed(&path[..1], 0, Vec3::splat(5.0), true) && !crossed(&path, 7, Vec3::splat(5.0), true));
+    }
+
+    #[test]
+    fn crossing_a_point_moves_on_and_a_rock_does_not_need_to_get_within_a_step() {
+        let mut r = rock(100.0);
+        (r.speed, r.path) = (10.0, vec![Vec3::ZERO, Vec3::X * 100.0, Vec3::X * 200.0]);
+        let mut pos = Vec3::new(130.0, 0.0, 40.0); // 40 off the line, past point 1's line
+        r.next = 1;
+        tick(&mut r, &mut pos);
+        assert_eq!(r.next, 2);
+        assert!(r.thrust.x > 0.0 && r.thrust.z < 0.0, "now aimed at the next point");
+    }
+
+    #[test]
+    fn the_follow_modes_at_the_last_point() {
+        let path = vec![Vec3::ZERO, Vec3::X * 100.0, Vec3::X * 200.0];
+        let past_end = Vec3::new(201.0, 0.0, 0.0);
+        // Loop: back to the first point, flying straight there, no jump.
+        let mut r = rock(100.0);
+        (r.speed, r.path, r.next, r.mode) = (10.0, path.clone(), 2, PathMode::Loop);
+        let mut pos = past_end;
+        control(&mut pos, &mut r.thrust, &r.path, &mut r.next, &mut r.forward, r.mode);
+        assert_eq!((r.next, pos), (0, past_end));
+        assert!(r.thrust.x < -0.99);
+        // Teleport loop: the rock jumps to the first point, its velocity is untouched.
+        let mut r = rock(100.0);
+        (r.speed, r.velocity, r.path, r.next, r.mode) = (10.0, Vec3::X * 7.0, path.clone(), 2, PathMode::Teleport);
+        let mut pos = past_end;
+        tick(&mut r, &mut pos);
+        assert_eq!((r.next, r.velocity.x > 6.9), (0, true));
+        assert!(pos.distance(Vec3::X * 7.0 * DT) < 1e-4, "{pos}");
+        // To end: the last point is never reached; the rock keeps pushing at it, so it ends up hovering around it.
+        let mut r = rock(100.0);
+        (r.speed, r.path, r.next, r.mode) = (10.0, path, 2, PathMode::ToEnd);
+        let mut pos = Vec3::new(150.0, 0.0, 0.0);
+        let mut far = 0.0f32;
+        for i in 0..600 {
+            tick(&mut r, &mut pos);
+            assert_eq!(r.next, 2);
+            if i > 300 {
+                far = far.max((pos - Vec3::X * 200.0).length());
             }
-            xs
-        };
-        let tele = run(PathMode::Teleport);
-        assert!(tele.windows(2).any(|w| w[1] < w[0] - 15.0), "jumps back to the first point");
-        assert!(tele.iter().all(|x| *x <= 20.001));
-        let pong = run(PathMode::EndToEnd);
-        assert!(pong.iter().any(|x| *x > 19.0) && pong.windows(2).any(|w| w[1] < w[0]) && pong.windows(2).all(|w| w[0] - w[1] < 1.5), "reverses smoothly");
-        assert!(run(PathMode::ToEnd).iter().all(|x| *x <= 20.001));
+        }
+        assert!(far < 1.0, "hovers within a few ticks of travel of the last point: {far}");
+    }
+
+    #[test]
+    fn a_rock_a_ship_touched_leaves_its_belt_and_keeps_a_quarter_of_the_centre_distance_per_second() {
+        let mut r = rock(100.0);
+        (r.speed, r.velocity, r.path, r.next) = (12.0, Vec3::X * 12.0, vec![Vec3::ZERO, Vec3::X * 500.0], 1);
+        let mut pos = Vec3::new(20.0, 0.0, 0.0);
+        knock_off(&mut r, pos, Vec3::ZERO);
+        assert!(r.path.is_empty());
+        assert!((r.velocity - Vec3::X * 5.0).length() < 1e-5 && (r.speed - 5.0).abs() < 1e-5);
+        for _ in 0..90 {
+            tick(&mut r, &mut pos);
+            assert!((r.velocity - Vec3::X * 5.0).length() < 1e-4, "not slowed: {:?}", r.velocity);
+        }
+        assert!((pos.x - (20.0 + 5.0 * 3.0)).abs() < 0.2, "{pos}");
+        // Centre distance 8 on a diagonal: a quarter of the offset vector.
+        knock_off(&mut r, Vec3::new(0.0, 6.0, 8.0), Vec3::ZERO);
+        assert!((r.velocity - Vec3::new(0.0, 1.5, 2.0)).length() < 1e-5);
+    }
+
+    #[test]
+    fn the_belt_system_runs_controller_then_physics() {
+        let mut app = App::new();
+        app.init_resource::<Time>().insert_resource(Rng(1)).add_message::<AsteroidSetup>().add_systems(Update, asteroid_motion);
+        let mut r = rock(100.0);
+        (r.speed, r.path) = (10.0, vec![Vec3::X * 1000.0, Vec3::X * 2000.0]);
+        let e = app.world_mut().spawn((r, Transform::default())).id();
+        for _ in 0..4 {
+            app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs_f32(DT));
+            app.update();
+        }
+        assert!((app.world().get::<Asteroid>(e).unwrap().velocity - Vec3::X * 10.0).length() < 1e-3);
     }
 
     #[test]
@@ -416,7 +615,7 @@ mod tests {
             .add_message::<Shoot>()
             .add_message::<Strike>()
             .add_message::<Sfx>()
-            .add_systems(Update, asteroid_deaths);
+            .add_systems(Update, (crate::tick_start, asteroid_deaths).chain());
         let shooter = app.world_mut().spawn_empty().id();
         let rock = Asteroid::new("Asteroid_Large", "Asteroid Belt", app.world().resource::<AsteroidDefs>()).unwrap();
         let parent = app.world_mut().spawn((rock, Transform::default())).id();
@@ -428,6 +627,7 @@ mod tests {
         assert!(!rock.damage(1000.0), "multiple shells must not repeat death");
         app.world_mut().write_message(Destroyed { by: shooter, victim: parent });
         app.update();
+        app.update(); // removal is applied at the start of the next tick
         assert!(app.world().get_entity(parent).is_err());
         assert_eq!(app.world().resource::<Target>().0, None);
         let children: Vec<_> = app
@@ -452,6 +652,7 @@ mod tests {
             app.world_mut().write_message(Destroyed { by: shooter, victim: child });
         }
         app.update();
+        app.update(); // the dead mediums are destroyed at the start of this tick
         let small: Vec<_> = app
             .world_mut()
             .query::<(Entity, &Asteroid)>()
@@ -466,6 +667,7 @@ mod tests {
             assert!(app.world_mut().get_mut::<Asteroid>(child).unwrap().damage(10.0));
             app.world_mut().write_message(Destroyed { by: shooter, victim: child });
         }
+        app.update();
         app.update();
         assert_eq!(app.world_mut().query::<&Asteroid>().iter(app.world()).count(), 0);
         assert_eq!(app.world_mut().query::<&crate::collision::Obstacle>().iter(app.world()).count(), 0);

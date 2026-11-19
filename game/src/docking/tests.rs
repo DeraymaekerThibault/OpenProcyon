@@ -21,7 +21,7 @@ fn skirmish_dock_lights_show_on_friendly_bases_only() {
 #[ignore = "needs imported assets"]
 fn mission_two_base_docking_from_the_far_side_reaches_the_dock_round_the_island() {
     let (mut app, lib) = app();
-    app.init_resource::<crate::collision::Shapes>().add_systems(Update, crate::collision::sail.after(routine));
+    app.init_resource::<crate::collision::Shapes>().add_systems(Update, crate::collision::sail.after(docked_hold).before(dock_glide));
     let map: Value = serde_json::from_slice(&std::fs::read(assets_dir().join("maps/mission02/map.json")).unwrap()).unwrap();
     let docks = load_docks();
     let mut dockee = None;
@@ -64,7 +64,7 @@ fn mission_two_base_docking_from_the_far_side_reaches_the_dock_round_the_island(
 /// within `secs` from `start` (Bevy frame).
 fn docks_at_island(map: &str, island: &str, class: &str, start: Vec3, secs: u32) -> bool {
     let (mut app, lib) = app();
-    app.init_resource::<crate::collision::Shapes>().add_systems(Update, crate::collision::sail.after(routine));
+    app.init_resource::<crate::collision::Shapes>().add_systems(Update, crate::collision::sail.after(docked_hold).before(dock_glide));
     let map: Value = serde_json::from_slice(&std::fs::read(assets_dir().join(format!("maps/{map}/map.json"))).unwrap()).unwrap();
     let docks = load_docks();
     let mut dockee = None;
@@ -102,7 +102,7 @@ fn a_computer_ship_docks_at_border_disputes_centre_island_from_the_south_east() 
 #[ignore = "needs imported assets"]
 fn coventry_docks_and_repairs_at_norville_on_the_flight_plane() {
     let (mut app, lib) = app();
-    app.init_resource::<crate::collision::Shapes>().add_systems(Update, crate::collision::sail.after(routine));
+    app.init_resource::<crate::collision::Shapes>().add_systems(Update, crate::collision::sail.after(docked_hold).before(dock_glide));
     let map: Value = serde_json::from_slice(&std::fs::read(assets_dir().join("maps/mission02/map.json")).unwrap()).unwrap();
     let mission: Value = serde_json::from_slice(&std::fs::read(assets_dir().join("maps/mission02/mission.json")).unwrap()).unwrap();
     let kind = "Base_Safetytown";
@@ -175,6 +175,34 @@ fn computer_ship_with_two_half_sections_sails_for_the_nearest_dock() {
     assert!(!needs_repair(&lib, &ship(&lib, "Ship_Pirate_Barque", Side::Enemy).0, &ship(&lib, "Ship_Pirate_Barque", Side::Enemy).1));
 }
 
+/// In a campaign a Persistent captain keeps to its script (mission 10's damaged convoy left its route for repairs), and a dock out of
+/// sight is not considered.
+#[test]
+#[ignore = "needs imported assets"]
+fn campaign_repair_skips_persistent_captains_and_docks_out_of_sight() {
+    use crate::rules::Stance;
+    let (mut app, lib) = app();
+    app.insert_resource(crate::campaign::load_id("mission10")).add_systems(Update, ai_repair_dock.before(handle_messages));
+    let docks = load_docks();
+    let dock = app.world_mut().spawn((Transform::default(), dockable_for(&docks, "Base_Safetytown").unwrap(), MissionBase { id: 1, owner: "merchants".into() })).id();
+    let sight = lib.classes[lib.index("Ship_Pirate_Barque")].sight;
+    let hurt = |app: &mut App, x: f32, stance: Stance| {
+        let (s, mut h) = ship(&lib, "Ship_Pirate_Barque", Side::Enemy);
+        h.sections[0] *= 0.5;
+        h.sections[1] *= 0.5;
+        let ms = crate::campaign::MissionShip { owner: "merchants".into(), stance, visible: true, ..default() };
+        app.world_mut().spawn((Transform::from_xyz(x, 0.0, 0.0), s, h, ms, crate::collision::Drift::default())).id()
+    };
+    let near = hurt(&mut app, 0.5 * sight, Stance::Aggressive);
+    let persistent = hurt(&mut app, 0.5 * sight, Stance::Persistent);
+    let far = hurt(&mut app, 1.5 * sight, Stance::Aggressive);
+    tick(&mut app, 0.1);
+    tick(&mut app, 0.1);
+    assert_eq!(app.world().get::<Docker>(near).map(|d| d.dockee), Some(dock));
+    assert!(app.world().get::<Docker>(persistent).is_none(), "Persistent captains keep their scripted route");
+    assert!(app.world().get::<Docker>(far).is_none(), "campaign docks out of sight are not chosen");
+}
+
 fn app() -> (App, Library) {
     let lib = Library::load(assets_dir());
     let mut app = App::new();
@@ -183,7 +211,7 @@ fn app() -> (App, Library) {
         .insert_resource(Time::<()>::default())
         .init_resource::<ButtonInput<KeyCode>>()
         .insert_resource(Library::load(assets_dir()))
-        .add_systems(Update, (handle_messages, routine).chain());
+        .add_systems(Update, (handle_messages, docked_hold, dock_glide, routine, docked_repair).chain());
     (app, lib)
 }
 fn tick(app: &mut App, secs: f32) {
@@ -373,6 +401,7 @@ fn cranes_run_while_a_ship_is_docked_and_stop_on_their_end_pose() {
         timer: 0.0,
         duration: 0.0,
         repair_secs: 0.0,
+        chosen: false,
         healed: false,
         full: false,
         start: Vec3::ZERO,
@@ -402,4 +431,116 @@ fn cranes_run_while_a_ship_is_docked_and_stop_on_their_end_pose() {
     step(&mut app, 1.0);
     step(&mut app, 1.0);
     assert!((x(&app) - 5.0).abs() < 1e-4, "stopped on the end pose: {}", x(&app));
+}
+
+/// docs/re/tick.md step 7.1: the link keeper holds a docked ship to its dock before the movement step, so what movement sees already
+/// follows a dockee that moved this tick (the dock decision only arms it).
+#[test]
+fn docked_hold_is_applied_before_movement_in_the_same_tick() {
+    #[derive(Resource, Default)]
+    struct Seen(Option<Vec3>);
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins).add_plugins(crate::battle_schedule).insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(Duration::ZERO));
+    app.init_resource::<Seen>();
+    let dockee = app.world_mut().spawn(Transform::default()).id();
+    let docker = Docker {
+        dockee,
+        point: Some(0),
+        phase: Phase::Docked,
+        final_leg: false,
+        timer: 0.0,
+        duration: 10.0,
+        repair_secs: 0.0,
+        chosen: false,
+        healed: false,
+        full: false,
+        start: Vec3::ZERO,
+        offset: Vec3::new(0.0, 0.0, 5.0),
+    };
+    let ship = app.world_mut().spawn((docker, Transform::from_xyz(0.0, 0.0, 5.0))).id();
+    app.add_systems(
+        FixedUpdate,
+        (
+            (move |mut q: Query<&mut Transform, Without<Docker>>| q.iter_mut().for_each(|mut t| t.translation.x += 3.0)).in_set(crate::BattleSet::Commands),
+            docked_hold.in_set(crate::BattleSet::Forces),
+            (move |q: Query<&Transform, With<Docker>>, mut seen: ResMut<Seen>| seen.0 = q.get(ship).ok().map(|t| t.translation)).in_set(crate::BattleSet::Simulate),
+        ),
+    );
+    app.update();
+    app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(Duration::from_millis(34)));
+    app.update();
+    assert_eq!(app.world().resource::<Seen>().0, Some(Vec3::new(3.0, 0.0, 5.0)));
+}
+
+#[test]
+fn the_longer_dock_time_is_kept_for_later_dockings() {
+    // First docking at a repairing dock: the 15 s repair effect beats the 5 s default and is kept.
+    let first = dock_duration(None, None, 15.0);
+    assert_eq!(first, 15.0);
+    // A later docking with nothing to repair (effect 0) still lasts the kept 15 s.
+    assert_eq!(dock_duration(None, Some(first), 0.0), 15.0);
+    // A rule's dock time replaces the kept one, and the repair time still raises it.
+    assert_eq!(dock_duration(Some(8.0), Some(first), 0.0), 8.0);
+    assert_eq!(dock_duration(Some(8.0), Some(first), 25.0), 25.0);
+    assert_eq!(dock_duration(None, None, 0.0), MIN_DOCK_SECS);
+}
+
+#[test]
+fn computer_ships_pick_the_dock_with_the_smallest_surface_gap() {
+    let mut world = World::new();
+    let (big, small) = (world.spawn_empty().id(), world.spawn_empty().id());
+    let own = (Vec3::ZERO, 10.0);
+    // Centres 100 and 80 apart: by centre the small dock is nearer, but the big one's 70 radius leaves a gap of 20 against 60.
+    let docks = [(big, (Vec3::new(100.0, 0.0, 0.0), 70.0)), (small, (Vec3::new(0.0, 0.0, 80.0), 10.0))];
+    assert_eq!(nearest_dock(own, docks), Some(big));
+    assert_eq!(nearest_dock(own, []), None);
+}
+
+#[test]
+fn only_a_ships_own_pick_is_replaced_before_it_docks() {
+    let mut world = World::new();
+    let dockee = world.spawn_empty().id();
+    let docker = |chosen, phase| Docker {
+        dockee,
+        point: None,
+        phase,
+        final_leg: false,
+        timer: 0.0,
+        duration: 0.0,
+        repair_secs: 0.0,
+        chosen,
+        healed: false,
+        full: false,
+        start: Vec3::ZERO,
+        offset: Vec3::ZERO,
+    };
+    assert!(docker(true, Phase::Wait).retargets() && docker(true, Phase::Approach).retargets());
+    assert!(!docker(true, Phase::Docked).retargets() && !docker(true, Phase::Away).retargets());
+    assert!(!docker(false, Phase::Approach).retargets(), "an ordered dock is not replaced");
+}
+
+/// The rules' docked relation is registered for a ship dockee only: the original never registers a base or an island.
+#[test]
+#[ignore = "needs imported assets"]
+fn only_a_ship_dockee_is_registered_as_docked_in_the_rules() {
+    for base in [false, true] {
+        let (mut app, lib) = app();
+        app.insert_resource(crate::campaign::load_id("mission10"));
+        let mut dockee = app.world_mut().spawn((Transform::from_xyz(100.0, 0.0, 0.0), Dockable::new(vec![point(-20.0)], true)));
+        if !base {
+            let (s, h) = ship(&lib, "Ship_Navy_Cutter", Side::Player);
+            dockee.insert((s, h));
+        }
+        let dockee = dockee.id();
+        let (s, h) = ship(&lib, "Ship_Navy_Cutter", Side::Player);
+        let me = app.world_mut().spawn((Transform::from_xyz(60.0, 0.0, 90.0), s, h)).id();
+        app.world_mut().resource_mut::<Messages<DockMsg>>().write(DockMsg::Dock { docker: Some(me), dockee });
+        tick(&mut app, 0.1);
+        tick(&mut app, 0.1);
+        app.world_mut().get_mut::<Transform>(me).unwrap().translation = Vec3::new(80.0, 0.0, 2.0);
+        tick(&mut app, 0.1);
+        assert!(app.world().get::<Docker>(me).unwrap().is_docked());
+        let registered = app.world().resource::<crate::campaign::Mission>().script.is_docked(me, dockee);
+        assert_eq!(registered, !base, "base: {base}");
+    }
 }

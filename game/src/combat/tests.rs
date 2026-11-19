@@ -1,5 +1,45 @@
 use super::*;
 
+/// #353: mission 6's stockade gate has no guns, only a vitalToMission section, and the rules wait for that section's damage to reach 1.
+/// The importer must export it as a class (an attackable base), and shooting the section down must read as full mission damage.
+#[test]
+#[ignore = "needs imported assets"]
+fn gunless_stockade_is_a_base_whose_mission_section_can_be_destroyed() {
+    let lib = Library::load(assets_dir());
+    let class = &lib.classes[lib.index("Base_PirateStockade")];
+    assert!(class.mounts.is_empty());
+    assert!(class.sections.iter().any(|s| s.mission), "the gate's Camp_wood section is vitalToMission");
+    let mut hp = Health::new(class);
+    assert_eq!(base_mission_damage(class, &hp), 0.0);
+    // The aim point lies on the gate's mesh, not in the air above its bounding box (the shells flew over it).
+    let aim = hit_test::base_aim_point(class, &hp, None).expect("a live mission section is something to aim at");
+    let gate = class.sections.iter().find(|s| s.mission).unwrap();
+    assert!(hit_test::seg_mesh(aim + Vec3::Y * 0.5, aim - Vec3::Y * 0.5, gate).is_some(), "aim {aim} is on the gate");
+    // Mission 2's compact gun towers keep their roof-centre aim (docs/re/gunnery.md#gun-tower-aim-point).
+    let camp = &lib.classes[lib.index("Base_SmugglersCamp")];
+    let camp_hp = Health::new(camp);
+    let tower = camp.sections.iter().find(|s| s.mission).unwrap();
+    let roof = Vec3::new((tower.min.x + tower.max.x) * 0.5, tower.max.y, (tower.min.z + tower.max.z) * 0.5);
+    let near = camp.sections.iter().filter(|s| s.mission).map(|s| Vec3::new((s.min.x + s.max.x) * 0.5, s.max.y, (s.min.z + s.max.z) * 0.5)).collect::<Vec<_>>();
+    let got = hit_test::base_aim_point(camp, &camp_hp, None).unwrap();
+    assert!(near.iter().any(|r| r.distance(got) < 2.0), "tower aim {got} stays at a roof centre (first {roof})");
+    // The dev autopilot clicks a point of the gate its guns can see, nearest the gate's middle: the roof is 40 units up and cannons aimed
+    // there sent every shot over the wall in mission 6 (#353); the nearest point to the ship can lie behind the island (mission 2's towers).
+    let live_point = |visible: &dyn Fn(Vec3) -> bool| crate::combat::live_tower_point(class, &hp, &Transform::default(), visible).unwrap();
+    let mid = (gate.min + gate.max) * 0.5;
+    let click = live_point(&|_| true);
+    assert!(click.y < aim.y && click.distance(mid) < aim.distance(mid), "click {click} is nearer the gate's middle {mid} than the roof aim {aim}");
+    assert!(live_point(&|p: Vec3| p.y < 5.0).y < 5.0, "only what the guns see");
+    assert_eq!(live_point(&|_| false), aim, "nothing in sight: the roof, and the bot looks for a firing spot");
+    for (s, h) in class.sections.iter().zip(hp.sections.iter_mut()) {
+        if s.mission {
+            *h = 0.0;
+        }
+    }
+    assert_eq!(base_mission_damage(class, &hp), 1.0);
+    assert!(hit_test::base_aim_point(class, &hp, None).is_none());
+}
+
 /// Gunners take 10 x gunnery seconds off TimeBetweenBursts (docs/re/gunnery.md#gunners): a gunnery-8.5 crew fires the
 /// 12 s heavy cannon every 3.5 s; the cut never goes below zero and leaves in-burst spacing alone.
 #[test]
@@ -102,10 +142,11 @@ fn island_gun_towers_load_and_mission_damage_follows_their_vital_sections() {
     let point = base_aim_point(class, &hp, Some(class.mounts[0].pos)).unwrap();
     let ray = Ray3d::new(point + Vec3::Y * 20.0, Dir3::NEG_Y);
     assert!(base_ray_hit(class, &hp, &Transform::default(), ray).is_some());
-    // The world-space aim point follows the base's placement (the dev autopilot steers at it).
+    // The dev autopilot's click follows the base's placement and lies on a live tower, so gunnery takes it as the aim point.
     let tf = Transform::from_xyz(500.0, 0.0, -300.0).with_rotation(Quat::from_rotation_y(1.0));
-    let world = crate::combat::live_tower_point(class, &hp, &tf, tf.transform_point(class.mounts[0].pos)).unwrap();
-    assert!(world.distance(tf.transform_point(point)) < 1e-3);
+    let world = crate::combat::live_tower_point(class, &hp, &tf, |_| true).unwrap();
+    let local = tf.to_matrix().inverse().transform_point3(world);
+    assert_eq!(base_aim_point(class, &hp, Some(local)), Some(local));
     for (s, c) in hp.sections.iter_mut().zip(&class.sections) {
         if c.mission {
             *s = 0.0;
@@ -113,7 +154,7 @@ fn island_gun_towers_load_and_mission_damage_follows_their_vital_sections() {
     }
     assert_eq!(base_mission_damage(class, &hp), 1.0);
     assert!(base_aim_point(class, &hp, Some(point)).is_none());
-    assert!(crate::combat::live_tower_point(class, &hp, &Transform::default(), point).is_none(), "no live tower left to steer at");
+    assert!(crate::combat::live_tower_point(class, &hp, &Transform::default(), |_| true).is_none(), "no live tower left to steer at");
     assert!(base_ray_hit(class, &hp, &Transform::default(), ray).is_none(), "destroyed towers are no longer attack targets");
 }
 
@@ -230,7 +271,7 @@ fn hostile_island_towers_shoot_the_player_and_neutral_ones_do_not() {
     for e in old_shells {
         app.world_mut().despawn(e);
     }
-    app.insert_resource(Target::default()).add_systems(Update, (fire.after(base_fire), shells.after(fire)));
+    app.insert_resource(Target::default()).add_systems(Update, (crate::tick_start.before(fire), fire.after(base_fire), shells.after(fire)));
     let mut lancer_fired = false;
     for mount in &lib.classes[class].mounts {
         let tower = mount.parent.unwrap();
@@ -451,7 +492,7 @@ fn the_command_ship_holds_fire_until_an_enemy_is_clicked() {
         .insert_resource(Target::default())
         .init_resource::<crate::environment::Sensors>()
         .add_systems(PreUpdate, crate::environment::refresh_sensors)
-        .add_systems(Update, (fire, shells.after(fire)));
+        .add_systems(Update, (crate::tick_start.before(fire), fire, shells.after(fire)));
     let assets = app.world().resource::<AssetServer>().clone();
     let lib = Library::load(assets_dir());
     let c = lib.index("Ship_Navy_Frigate");
@@ -517,7 +558,7 @@ fn a_skirmish_computer_ship_with_a_map_script_fires_at_its_captains_target() {
         .init_resource::<crate::ship::CaptainTargets>()
         .init_resource::<crate::environment::Sensors>()
         .add_systems(PreUpdate, crate::environment::refresh_sensors)
-        .add_systems(Update, (fire, shells.after(fire)));
+        .add_systems(Update, (crate::tick_start.before(fire), fire, shells.after(fire)));
     let assets = app.world().resource::<AssetServer>().clone();
     let lib = Library::load(assets_dir());
     let c = lib.index("Ship_Navy_Frigate");
@@ -580,7 +621,7 @@ fn the_command_ship_damages_a_clicked_hostile_skirmish_base() {
         .insert_resource(Target::default())
         .init_resource::<crate::environment::Sensors>()
         .add_systems(PreUpdate, crate::environment::refresh_sensors)
-        .add_systems(Update, (fire, shells.after(fire)));
+        .add_systems(Update, (crate::tick_start.before(fire), fire, shells.after(fire)));
     let assets = app.world().resource::<AssetServer>().clone();
     let lib = Library::load(assets_dir());
     let c = lib.index("Ship_Navy_Frigate");
@@ -654,7 +695,7 @@ fn a_destroyed_base_part_blasts() {
         .init_resource::<crate::environment::Sensors>()
         .add_systems(PreUpdate, crate::environment::refresh_sensors)
         .init_resource::<Blasts>()
-        .add_systems(Update, (fire, shells.after(fire), damage_fx.after(shells), count_blasts.after(damage_fx)));
+        .add_systems(Update, (crate::tick_start.before(fire), fire, shells.after(fire), damage_fx.after(shells), count_blasts.after(damage_fx)));
     let assets = app.world().resource::<AssetServer>().clone();
     let lib = Library::load(assets_dir());
     let c = lib.index("Ship_Navy_Frigate");
@@ -725,6 +766,41 @@ fn ship_hit_rules() {
     let core = hp.core;
     let out = apply_ship_hit(class, &mut hp, stern, sure_fire, 0.0, true, &mut rng);
     assert!(!out.lost && hp.core < core);
+    // Partial invulnerability is a hull floor (#351, mission 4's towed tender at 0.1): full damage until the core reaches that share.
+    let mut hp = Health::new(class);
+    hp.sections[stern] = 0.0;
+    let fresh = apply_ship_hit(class, &mut hp, stern, sure_fire, 0.1, true, &mut rng);
+    assert!(fresh.fire.is_none() && hp.core < class.core_hp, "a partial value does not shield the core");
+    hp.core = 0.12 * class.core_hp;
+    for _ in 0..50 {
+        apply_ship_hit(class, &mut hp, stern, sure_fire, 0.1, true, &mut rng);
+    }
+    assert_eq!(hp.core, 0.1 * class.core_hp, "the core stops at the floor");
+    hp.core = 0.05 * class.core_hp;
+    apply_ship_hit(class, &mut hp, stern, sure_fire, 0.1, true, &mut rng);
+    assert_eq!(hp.core, 0.05 * class.core_hp, "a core already under the floor is not healed and loses no more");
+    // The floor holds every section too: a protected ship keeps its sails, helm and guns (review of #358).
+    let mut hp = Health::new(class);
+    for _ in 0..200 {
+        apply_ship_hit(class, &mut hp, stern, sure_fire, 0.1, true, &mut rng);
+    }
+    for (h, sec) in hp.sections.iter().zip(&class.sections) {
+        assert!(*h >= 0.1 * sec.hp - 1e-3, "{} fell below the floor: {h} of {}", sec.label, sec.hp);
+    }
+    // Fires use the same floor: at 1.0 a burn takes nothing, at a partial value it stops at the share.
+    let fresh = Health::new(class);
+    let before = (fresh.core, fresh.sections.clone());
+    let wrecked = || {
+        let mut h = Health::new(class);
+        h.sections.iter_mut().for_each(|s| *s = 0.0);
+        h.core = 0.0;
+        h
+    };
+    let (mut burnt, mut full) = (wrecked(), wrecked());
+    super::shells::floor_hull(class, &mut full, (before.0, &before.1), 1.0);
+    assert_eq!((full.core, &full.sections), (fresh.core, &fresh.sections), "1.0 blocks fire damage");
+    super::shells::floor_hull(class, &mut burnt, (before.0, &before.1), 0.45);
+    assert!(burnt.sections.iter().zip(&class.sections).all(|(h, s)| (*h - 0.45 * s.hp).abs() < 1e-3) && burnt.core == 0.45 * class.core_hp);
 }
 
 #[test]
@@ -767,6 +843,8 @@ fn bank_recharge_follows_the_slowest_live_gun() {
         yaw: 0.0,
         pitch: 0.0,
         aligned: false,
+        was_aligned: false,
+        lob_wait: None,
         in_range: false,
         dev: 0.0,
         beam: Default::default(),
@@ -844,7 +922,7 @@ fn torpedo_guidance_launch_coast_and_moving_target_intercept() {
     let target_rotation = Quat::from_rotation_y(-std::f32::consts::FRAC_PI_2);
     let mut target = Vec3::new(15.0, target_class.homing_point.y, -80.0);
     let target_velocity = Vec3::X * 4.0;
-    p = guide_torpedo(p, &mut v, &mut spin, 0.0, Some((target, target_velocity)), physics, 0.5);
+    p = guide_torpedo(p, &mut v, &mut spin, 0.0, Some((target, target_velocity)), true, physics, 0.5);
     assert_eq!(p.x, 0.0, "no steering during launch coast");
     assert_eq!(p.y, 0.0);
     let mut closest = f32::INFINITY;
@@ -853,7 +931,7 @@ fn torpedo_guidance_launch_coast_and_moving_target_intercept() {
         let dt = 1.0 / 60.0;
         target += target_velocity * dt;
         let previous = p;
-        p = guide_torpedo(p, &mut v, &mut spin, 0.5 + i as f32 * dt, Some((target, target_velocity)), physics, dt);
+        p = guide_torpedo(p, &mut v, &mut spin, 0.5 + i as f32 * dt, Some((target, target_velocity)), true, physics, dt);
         let inverse = Transform::from_translation(target - target_rotation * target_class.homing_point).with_rotation(target_rotation).to_matrix().inverse();
         hit |= target_class.sections.iter().any(|s| seg_mesh(inverse.transform_point3(previous), inverse.transform_point3(p), s).is_some());
         closest = closest.min(p.distance(target));
@@ -861,8 +939,14 @@ fn torpedo_guidance_launch_coast_and_moving_target_intercept() {
     }
     assert!(hit, "torpedo must intersect the moving target's authored hull; closest homing-point distance: {closest}");
     let old_y = p.y;
-    let next = guide_torpedo(p, &mut v, &mut spin, 16.0, None, physics, 0.1);
+    let next = guide_torpedo(p, &mut v, &mut spin, 16.0, None, true, physics, 0.1);
     assert_eq!(next.y, old_y, "lost target must stop altitude tracking");
+    // Read from the original's code: a torpedo that lost its target cuts its thrust and slows to rest.
+    let before = v.with_y(0.0).length();
+    for i in 0..600 {
+        guide_torpedo(p, &mut v, &mut spin, 20.0 + i as f32 * 0.1, None, false, physics, 0.1);
+    }
+    assert!(before > 1.0 && v.with_y(0.0).length() < before * 0.01, "thrustless torpedo comes to rest ({before} -> {})", v.length());
 }
 
 #[test]
@@ -921,6 +1005,85 @@ fn crew_damage_control_follows_riggers_and_engineers() {
     nearly[sails[3]] -= 1.0;
     damage_control(class, &mut nearly, &[], &[1.0; 8], &mut always);
     assert_eq!(nearly, full);
+}
+
+/// Computer ships mended reinforced wood by 5 and iron by 2 per tick in the retail 1-vs-1 runs (their crew was not logged).
+/// The hull step is floor(10 x c x material factor) with c the mean engineering, leadership bonus included: that is 5 and 2
+/// for any c from 0.746 to 0.895, which a rating-7 engineer (the rating the computer fleets almost always hire) reaches with
+/// either leadership bonus, and which neither a rating-9 engineer with bonuses (c = 1, 6 and 3) nor a rating-7 one without any
+/// (4 and 2) gives.
+#[test]
+#[ignore = "needs imported assets"]
+fn computer_engineers_reproduce_the_measured_hull_repair() {
+    let lib = Library::load(assets_dir());
+    let class = &lib.classes[lib.index("Ship_Pirate_Barque")];
+    let find = |m: &str| class.sections.iter().position(|s| s.material.to_lowercase().contains(m)).unwrap();
+    let (reinforced, iron) = (find("reinforced"), find("iron"));
+    let step = |c: f32, sec: usize| {
+        let mut hp: Vec<f32> = class.sections.iter().map(|s| s.hp).collect();
+        hp[sec] -= 60.0;
+        let before = hp[sec];
+        damage_control(class, &mut hp, &[c], &[], &mut || 0.0);
+        hp[sec] - before
+    };
+    for c in [0.75, 0.8, 0.85] {
+        assert_eq!((step(c, reinforced), step(c, iron)), (5.0, 2.0), "engineer value {c}");
+    }
+    assert_eq!((step(0.7, reinforced), step(0.7, iron)), (4.0, 2.0), "rating 7, no bonus");
+    assert_eq!((step(1.0, reinforced), step(1.0, iron)), (6.0, 3.0), "rating 9 with bonuses");
+}
+
+/// A placed computer ship repairs with its level's generic crew (every slot one crewman rated 3 / 6 / 8), a skirmish computer
+/// ship with the crew it was bought, an empty slot a rating-1 hand: nothing is the old flat 0.75 any more.
+#[test]
+#[ignore = "needs imported assets"]
+fn computer_ships_use_their_own_crew_for_repair() {
+    use crate::boarding::{Boardable, Skill};
+    let lib = Library::load(assets_dir());
+    let c = lib.index("Ship_Pirate_Barque");
+    let class = &lib.classes[c];
+    let ship = |side| Ship {
+        class: c,
+        side,
+        heading: 0.0,
+        speed: 0.0,
+        ang_vel: 0.0,
+        order: 0,
+        waypoints: vec![],
+        goal: None,
+        cap: 1.0,
+        throttle: None,
+        sail_energy: 1.0,
+        crew_speed: 1.0,
+        crew_turn: 1.0,
+        net: 1.0,
+        avoid: 1.0,
+    };
+    let slots = |skill: Skill, role: usize| {
+        let foe = ship(Side::Enemy);
+        let boardable = Boardable::ship(&class.name, skill, true);
+        let generic = crate::crew_arms::fallback_posts(&foe, Some(&boardable), &class.name);
+        damage::crew_slots(Entity::PLACEHOLDER, class, generic.as_ref(), role, "engineering")
+    };
+    let (green, elite) = (slots(Skill::Green, 4), slots(Skill::Elite, 5));
+    assert!(!green.is_empty() && green.iter().all(|v| (0.3..=0.45).contains(v)), "green engineers {green:?}");
+    assert!(!elite.is_empty() && elite.iter().all(|v| (0.8..=1.0).contains(v)), "elite riggers {elite:?}");
+    // The player's side keeps its own rule: no crew record, no generic crew.
+    let boardable = Boardable::ship(&class.name, Skill::Elite, true);
+    assert!(crate::crew_arms::fallback_posts(&ship(Side::Player), Some(&boardable), &class.name).is_none());
+    // A computer ship without a crew record carries rating-1 hands in every slot.
+    let none = damage::crew_slots(Entity::PLACEHOLDER, class, None, 4, "engineering");
+    assert!(none.iter().all(|v| (*v - 0.1).abs() < 1e-6));
+}
+
+/// The gunner's skill sets the spread factor of every ship, computer or not: 1 - 0.8 x skill (docs/re/gunnery.md#gunners).
+#[test]
+fn spread_factor_follows_the_gunners_skill() {
+    use gunnery::gunner_accuracy;
+    assert!((gunner_accuracy(crate::crew_arms::DEFAULT_HAND) - 0.92).abs() < 1e-6, "a rating-1 hand");
+    assert!((gunner_accuracy(0.7) - 0.44).abs() < 1e-6);
+    assert!((gunner_accuracy(0.9) - 0.28).abs() < 1e-6);
+    assert!((gunner_accuracy(1.3) - 0.2).abs() < 1e-6, "skill plus bonus is clamped to 1");
 }
 
 /// Retail fire-fighting (docs/re/effects.md#fire): each tick the crew puts out the sum of every member's leadership; an
@@ -1077,7 +1240,7 @@ fn shell_into_a_hull_damages_it_and_reports_the_hit() {
     let c = lib.index("Ship_Navy_Torpedo");
     app.add_plugins((TaskPoolPlugin::default(), AssetPlugin::default()))
         .init_resource::<Time>()
-        .init_resource::<FxLib>()
+        .add_message::<crate::fx::EffectStarted>()
         .insert_resource(Rng(7))
         .add_message::<Sfx>()
         .add_message::<Hit>()
@@ -1085,7 +1248,7 @@ fn shell_into_a_hull_damages_it_and_reports_the_hit() {
         .add_message::<Detonate>()
         .add_message::<Shoot>()
         .add_message::<crate::decals::Scar>()
-        .add_systems(Update, shells);
+        .add_systems(Update, (crate::tick_start, shells).chain());
     let ship = Ship {
         class: c,
         side: Side::Enemy,
@@ -1110,6 +1273,8 @@ fn shell_into_a_hull_damages_it_and_reports_the_hit() {
     let [ta, tb, tc] = lib.classes[c].sections.iter().find(|s| s.vital).unwrap().tris[0];
     let normal = (tb - ta).cross(tc - ta).normalize();
     let farther_ship = app.world().get::<Ship>(target).unwrap().clone();
+    let impact = lib.bullets[&bullet].hit_fx.as_deref().expect("the heavy cannonball has an impact effect");
+    app.insert_resource(FxLib::with_names(&[impact]));
     let farther = app.world_mut().spawn((Transform::from_translation(-normal * 100.0), farther_ship, Health::new(&lib.classes[c]), Fires::default())).id();
     let at = (ta + tb + tc) / 3.0 + normal * 40.0;
     let shell = Shell {
@@ -1129,22 +1294,28 @@ fn shell_into_a_hull_damages_it_and_reports_the_hit() {
         harmless: false,
         base: false,
         ricochet: -1000.0,
+        mine_scan: Default::default(),
+        lost_target: false,
     };
     let id = app.world_mut().spawn((shell, Transform::from_translation(at))).id();
     app.insert_resource(lib);
     let full: f32 = app.world().get::<Health>(target).unwrap().sections.iter().sum();
     let mut hit = false;
+    let mut impacted_material = None;
     for _ in 0..20 {
         // One segment crosses both hulls, so the nearest collision must win.
         app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs_f32(1.0));
         app.update();
         hit |= app.world().resource::<Messages<Hit>>().iter_current_update_messages().any(|h| h.victim == target);
+        impacted_material = impacted_material
+            .or_else(|| app.world().resource::<Messages<crate::fx::EffectStarted>>().iter_current_update_messages().find_map(|fx| fx.material.filter(|_| fx.host == Some(target))));
     }
     let left: f32 = app.world().get::<Health>(target).unwrap().sections.iter().sum();
     assert!(left < full, "the hull took damage ({left} of {full})");
     assert_eq!(app.world().get::<Health>(farther).unwrap().sections.iter().sum::<f32>(), full, "the farther ship must not be hit");
     assert!(app.world().get_entity(id).is_err(), "the shell is spent");
     assert!(hit, "a Hit names the ship");
+    assert!(impacted_material.is_some_and(|key| MATERIALS.contains(&key)), "the hit effect carries a material from the real collision");
 }
 
 /// The original sweeps every shot against islands: land between the gun and the hull takes the shot instead.
@@ -1164,7 +1335,7 @@ fn land_in_the_way_stops_a_shell_before_the_hull() {
         .add_message::<Detonate>()
         .add_message::<Shoot>()
         .add_message::<crate::decals::Scar>()
-        .add_systems(Update, shells);
+        .add_systems(Update, (crate::tick_start, shells).chain());
     let ship = Ship {
         class: c,
         side: Side::Enemy,
@@ -1208,6 +1379,8 @@ fn land_in_the_way_stops_a_shell_before_the_hull() {
         harmless: false,
         base: false,
         ricochet: -1000.0,
+        mine_scan: Default::default(),
+        lost_target: false,
     };
     let id = app.world_mut().spawn((shell, Transform::from_translation(at))).id();
     // A wall of land across the line of fire, 20 units in front of the hull.
@@ -1283,6 +1456,79 @@ fn a_map_mine_rests_where_the_map_put_it_and_fights_for_no_one_until_given_an_ow
     assert_eq!((shell.vel, shell.aim), (Vec3::ZERO, Some(at)));
     assert_eq!(shell.side, crate::scenario::HOSTILE_TO_ALL, "hostile to every ship until the script names an owner");
     assert!(matches!(shell.payload, Payload::Mine { sight, .. } if sight == 50.0));
+}
+
+/// Read from the original's code: a mine picks its target only every 5 s, the first time 5 s after it was laid.
+#[test]
+#[ignore = "needs imported assets"]
+fn a_mine_picks_its_target_five_seconds_after_it_is_laid() {
+    let mut app = App::new();
+    let lib = Library::load(assets_dir());
+    let c = lib.index("Ship_Navy_Cutter");
+    app.add_plugins((TaskPoolPlugin::default(), AssetPlugin::default()))
+        .init_resource::<Time>()
+        .init_resource::<FxLib>()
+        .insert_resource(Rng(7))
+        .add_message::<Sfx>()
+        .add_message::<Hit>()
+        .add_message::<Destroyed>()
+        .add_message::<Detonate>()
+        .add_message::<Shoot>()
+        .add_message::<crate::decals::Scar>()
+        .add_systems(Update, (crate::tick_start, shells).chain());
+    let ship = Ship {
+        class: c,
+        side: Side::Enemy,
+        heading: 0.0,
+        speed: 0.0,
+        ang_vel: 0.0,
+        order: 0,
+        waypoints: vec![],
+        goal: None,
+        cap: 1.0,
+        throttle: None,
+        sail_energy: 1.0,
+        crew_speed: 1.0,
+        crew_turn: 1.0,
+        net: 1.0,
+        avoid: 1.0,
+    };
+    app.world_mut().spawn((Transform::from_translation(Vec3::new(30.0, 0.0, 0.0)), ship, Health::new(&lib.classes[c]), Fires::default()));
+    let shooter = app.world_mut().spawn_empty().id();
+    let bullet = "Bullet_StarMine_Med".to_string();
+    let shell = Shell {
+        vel: Vec3::ZERO,
+        age: 0.0,
+        lifetime: 1000.0,
+        gravity: 0.0,
+        bullet: bullet.clone(),
+        side: Side::Player,
+        shooter,
+        target: None,
+        angular_velocity: 0.0,
+        payload: lib.bullets[&bullet].payload,
+        aim: None,
+        pd: false,
+        hp: 20.0,
+        harmless: false,
+        base: false,
+        ricochet: -1000.0,
+        mine_scan: Default::default(),
+        lost_target: false,
+    };
+    let id = app.world_mut().spawn((shell, Transform::default())).id();
+    app.insert_resource(lib);
+    for _ in 0..4 {
+        app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs_f32(1.0));
+        app.update();
+    }
+    assert_eq!(app.world().get::<Shell>(id).unwrap().vel, Vec3::ZERO, "a ship in sight at 4 s is not yet noticed");
+    for _ in 0..3 {
+        app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs_f32(1.0));
+        app.update();
+    }
+    let vel = app.world().get::<Shell>(id).map(|s| s.vel);
+    assert!(vel.is_none_or(|v| v.x > 0.0), "after the first pick at 5 s it heads for the ship");
 }
 
 #[test]
@@ -1388,4 +1634,170 @@ fn lob_cursor_sprites_follow_weapon_and_solution() {
     assert_eq!(a.cursor(), "Cursor_PrimaryShip_SetLobTarget_StarMortar");
     let b = LobAimed { kind: 0, solution: false, ..a };
     assert_eq!(b.cursor(), "Cursor_PrimaryShip_SetLobTarget_GravCharge_HAS_NO_FIRING_SOLUTION");
+}
+
+#[test]
+#[ignore = "needs imported assets"]
+fn a_fire_that_burns_a_floored_section_out_goes_out() {
+    // Mission 4's stranded tender (#351): the hull floor props the burnt section back up, which must not keep the fire alive.
+    let lib = Library::load(assets_dir());
+    let c = lib.index("Ship_Navy_Cutter");
+    let mut hp = Health::new(&lib.classes[c]);
+    hp.sections[0] = 1.0;
+    let mut app = App::new();
+    app.init_resource::<Time>().add_systems(Update, super::damage::fires);
+    let fire = super::damage::Fire { sec: 0, intensity: 50.0, state: 0, t: 0.0, fx: None };
+    let ms = crate::campaign::MissionShip { invuln: 0.5, ..Default::default() };
+    let ship = Ship {
+        class: c,
+        side: Side::Player,
+        heading: 0.0,
+        speed: 0.0,
+        ang_vel: 0.0,
+        order: 0,
+        waypoints: vec![],
+        goal: None,
+        cap: 1.0,
+        throttle: None,
+        sail_energy: 1.0,
+        crew_speed: 1.0,
+        crew_turn: 1.0,
+        net: 1.0,
+        avoid: 1.0,
+    };
+    let e = app.world_mut().spawn((Transform::default(), ship, hp, super::damage::Fires { list: vec![fire], tick: 0.0 }, ms)).id();
+    app.insert_resource(lib);
+    for _ in 0..4 {
+        app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs_f32(super::damage::FIRE_TICK));
+        app.update();
+    }
+    assert!(app.world().get::<super::damage::Fires>(e).unwrap().list.is_empty(), "the fire burnt out and was removed");
+}
+
+#[derive(Resource)]
+struct Spawn(Option<Shell>);
+
+/// Creates the staged shell inside the tick, after the tick's start, as a gun would.
+fn spawn_once(mut commands: Commands, mut staged: ResMut<Spawn>) {
+    if let Some(shell) = staged.0.take() {
+        commands.spawn((shell, Transform::from_translation(Vec3::Y * 500.0), crate::Joining));
+    }
+}
+
+/// A shell created in a tick joins at the start of the next one: it does not move in its creation tick, and flies one step in the next.
+#[test]
+#[ignore = "needs imported assets"]
+fn a_new_shell_first_moves_in_the_tick_after_it_was_created() {
+    let mut app = App::new();
+    let lib = Library::load(assets_dir());
+    app.add_plugins((TaskPoolPlugin::default(), AssetPlugin::default()))
+        .init_resource::<Time>()
+        .init_resource::<FxLib>()
+        .insert_resource(Rng(7))
+        .add_message::<Sfx>()
+        .add_message::<Hit>()
+        .add_message::<Destroyed>()
+        .add_message::<Detonate>()
+        .add_message::<Shoot>()
+        .add_message::<crate::decals::Scar>()
+        .insert_resource(Spawn(None))
+        .add_systems(Update, (crate::tick_start, spawn_once, shells).chain());
+    let bullet = lib.guns["Gun_CannonBall_Heavy"].bullet.clone();
+    let shell = Shell {
+        vel: Vec3::new(0.0, 0.0, -100.0),
+        age: 0.0,
+        lifetime: 5.0,
+        gravity: 0.0,
+        bullet: bullet.clone(),
+        side: Side::Player,
+        shooter: Entity::PLACEHOLDER,
+        target: None,
+        angular_velocity: 0.0,
+        payload: lib.bullets[&bullet].payload,
+        aim: None,
+        pd: false,
+        hp: 1.0,
+        harmless: false,
+        base: false,
+        ricochet: -1000.0,
+        mine_scan: Default::default(),
+        lost_target: false,
+    };
+    app.insert_resource(lib);
+    app.world_mut().resource_mut::<Spawn>().0 = Some(shell);
+    let tick = |app: &mut App| {
+        app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs_f32(0.033));
+        app.update();
+        app.world_mut().query_filtered::<&Transform, With<Shell>>().single(app.world()).unwrap().translation
+    };
+    assert_eq!(tick(&mut app), Vec3::Y * 500.0, "tick of creation: the shell has not moved");
+    let z = tick(&mut app).z;
+    assert!((z + 3.3).abs() < 1e-3, "next tick: one step of 0.033 s at 100 units/s, got {z}");
+}
+
+/// The rejection list holds a shell's firer for its first second: the list is emptied on the first tick whose age is 1.0 s or more,
+/// which with 0.033 s ticks is the 31st (1.023 s), and again every 31 ticks after that.
+#[test]
+fn a_shell_cannot_touch_its_firer_until_its_31st_tick() {
+    let mut age = 0.0_f32;
+    let mut first = None;
+    for tick in 1..=40 {
+        age += 0.033;
+        if !shells::firer_exempt(age) {
+            first = Some(tick);
+            break;
+        }
+    }
+    assert_eq!(first, Some(31));
+    assert!(shells::firer_exempt(30.0 * 0.033));
+    assert!(!shells::firer_exempt(31.0 * 0.033));
+}
+
+#[test]
+fn a_shell_roll_is_a_whole_number_inside_its_range() {
+    let mut rng = Rng::new(3);
+    let rolls: Vec<f32> = (0..200).map(|_| damage_roll(14.5, 20.4, &mut rng)).collect();
+    assert!(rolls.iter().all(|r| r.fract() == 0.0 && (14.0..=20.0).contains(r)));
+    assert!(rolls.iter().any(|r| *r != rolls[0]), "still random");
+}
+
+#[test]
+fn a_torpedo_steps_its_height_by_a_fixed_amount_per_tick() {
+    assert_eq!(torpedo_height_step(0.0, 1.0), 0.025);
+    assert_eq!(torpedo_height_step(0.0, -1.0), -0.025);
+    assert_eq!(torpedo_height_step(1.0, 1.04), 1.0, "within 0.05 of the target: no step");
+    assert_eq!(torpedo_height_step(3.0, 10.0), 3.0, "bounded to +/-3");
+    assert_eq!(torpedo_height_step(-3.0, -10.0), -3.0);
+    let mut y = 0.0;
+    for _ in 0..40 {
+        y = torpedo_height_step(y, 5.0);
+    }
+    assert!((y - 1.0).abs() < 1e-4, "40 ticks climb one unit: {y}");
+}
+
+/// A hull that has been dying for `secs` seconds.
+fn dying_for(secs: f32) -> Sinking {
+    let mut s = Sinking::new();
+    s.elapsed = secs;
+    s
+}
+
+#[test]
+fn dying_drive_is_capped_at_a_tenth_from_the_clip_start() {
+    let h = Health { sections: vec![5.0, 0.0, 7.0], core: 0.0, destroyed: true };
+    assert!(dying_for(CLIP_DELAY - 0.01).drive_health(&h).is_none(), "the sections die 0.14 s after the kill, not at once");
+    let wreck = dying_for(CLIP_DELAY).drive_health(&h).unwrap();
+    assert_eq!(wreck.sections, vec![0.0; 3]);
+    assert_eq!(h.sections, vec![5.0, 0.0, 7.0], "the stored health is not touched");
+}
+
+#[test]
+#[ignore = "needs imported assets"]
+fn wrecked_hull_keeps_a_tenth_of_speed_and_turning() {
+    let lib = Library::load(assets_dir());
+    let class = &lib.classes[lib.index("Ship_Navy_Cutter")];
+    let h = Health { sections: vec![1.0; class.sections.len()], core: 0.0, destroyed: true };
+    let wreck = dying_for(CLIP_DELAY).drive_health(&h).unwrap();
+    assert!((speed_factor(class, &wreck) - 0.1).abs() < 1e-6, "speed {}", speed_factor(class, &wreck));
+    assert!((turn_factor(class, &wreck) - 0.1).abs() < 1e-6, "turn {}", turn_factor(class, &wreck));
 }

@@ -25,6 +25,10 @@ pub struct Sensors {
     primary: Option<Entity>,
 }
 impl Sensors {
+    /// The collision sphere (centre, radius) of a ship or base, as the sight test sees it.
+    pub fn sphere(&self, e: Entity) -> Option<(Vec3, f32)> {
+        self.objects.get(&e).map(|o| o.sphere)
+    }
     /// Any live member of the observer's group can supply sight, using collision surface distance.
     pub fn in_sight(&self, observer: Entity, target: Entity, mission: Option<&Mission>) -> bool {
         let (Some(from), Some(to)) = (self.objects.get(&observer), self.objects.get(&target)) else { return false };
@@ -420,7 +424,7 @@ impl Current {
 }
 
 #[derive(Component)]
-struct CurrentRibbon(f32);
+pub struct CurrentRibbon(pub f32);
 
 /// RiverPrimitive consumes a whole point path and width, not a particle emitter.
 fn current_mesh(path: &[Vec3]) -> Mesh {
@@ -493,27 +497,14 @@ fn flow_currents(time: Res<Time>, mut materials: ResMut<Assets<crate::fx::Effect
     }
 }
 
-/// PROVISIONAL: clouds drain sail energy toward 25%; outside the nebula it recharges. Rates are not yet recovered from the original.
-fn energy_step(energy: f32, inside: bool, dt: f32) -> f32 {
-    (energy + if inside { -0.12 * dt } else { 0.08 * dt }).clamp(0.25, 1.0)
-}
-
 fn update(
     time: Res<Time>,
     mission: Option<Res<Mission>>,
-    mut ships: Query<(&mut Ship, &Transform)>,
     mut animals: Query<(&mut SpaceAnimal, &mut Transform, Has<crate::dragons::Dragon>), Without<Ship>>,
     mut sfx: MessageWriter<crate::audio::Sfx>,
 ) {
     let Some(mission) = mission else { return };
     let dt = time.delta_secs();
-    for (mut ship, tf) in &mut ships {
-        let inside = mission.data["environment"]["nebulae"].as_array().into_iter().flatten().any(|n| {
-            crate::data::wot_flag(&n["Nebula Cloud Energy Drain On/Off"])
-                && crate::rules::in_game_volume(&mission.data["volumes"][n["Polygon Name"].as_str().unwrap_or("")], tf.translation.x, -tf.translation.z)
-        });
-        ship.sail_energy = energy_step(ship.sail_energy, inside, dt);
-    }
     let def = &mission.data["environment"]["whale"];
     for (mut animal, mut tf, dragon) in &mut animals {
         if !animal.visible || animal.paused {
@@ -729,12 +720,6 @@ mod tests {
         assert!(uv.last().unwrap()[1] > uv[0][1], "negative UV scrolling moves the texture downstream, toward the last point");
     }
 
-    #[test]
-    fn nebula_energy_drains_and_recovers_without_permanent_damage() {
-        assert_eq!(energy_step(1.0, true, 100.0), 0.25);
-        assert_eq!(energy_step(0.25, false, 100.0), 1.0);
-        assert!(energy_step(1.0, true, 1.0) < 1.0);
-    }
     #[test]
     fn cloud_blocks_crossing_and_interior_not_exterior_segments() {
         let polygon = serde_json::json!([[0, 0], [10, 0], [10, 10], [0, 10]]);

@@ -111,6 +111,9 @@ struct SectionDoc {
     vital_turn: bool,
     #[serde(default)]
     vital_mission: bool,
+    /// Absent in imports that predate it: every section swapped then.
+    #[serde(default = "yes")]
+    swappable: bool,
     destruct: Option<DestructDoc>,
     debris: Option<DebrisDoc>,
     debris_fx: Option<String>,
@@ -119,6 +122,9 @@ struct SectionDoc {
     adjacent: Vec<String>,
     #[serde(default)]
     criticals: Vec<String>,
+}
+fn yes() -> bool {
+    true
 }
 #[derive(Deserialize)]
 struct DestructDoc {
@@ -222,6 +228,7 @@ fn try_load_class(root: &Path, name: &str, guns: &HashMap<String, GunDef>) -> Re
                 speed: s.vital_speed,
                 turn: s.vital_turn,
                 mission: s.vital_mission,
+                swappable: s.swappable,
                 destruct: s.destruct.as_ref().map(|d| Destruct { fx: d.fx.clone(), start: d.start as f32, end: d.end as f32, point: point(d.point) }),
                 debris: s.debris.as_ref().map(|d| (d.model.clone(), point(d.pivot))),
                 debris_fx: s.debris_fx.clone(),

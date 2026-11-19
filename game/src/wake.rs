@@ -7,8 +7,7 @@ use bevy::prelude::*;
 
 use crate::{Scenario, Ship};
 
-/// Engine tick (retail constant 0.033).
-const TICK: f32 = 1.0 / 30.0;
+use crate::TICK_SECS as TICK;
 /// A segment lives 300 ticks; it fades in over the first 60 and out over the rest.
 const SEG_LIFE: i32 = 300;
 const SEG_EVERY: i32 = 15;

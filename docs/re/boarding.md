@@ -94,14 +94,19 @@ human's command ship) runs it every tick against its current target, without any
   only grapples a target that has fired at it. Neither is observed directly.
 - Remake: `boarding::ai_boarding` (skirmish enemies their captain's target, `ship::CaptainTargets`; mission ships the rules' target, the
   player's other ships their pilot's target); the line-of-fire skip is not modelled.
-**The grapple line.** A harpoon hit links the two ships; the link remembers the centre distance at that moment. The link itself
-does not tow or slow either ship. Each frame it is let go (rope-break sound `rope_break_placeholder` at the midpoint) when:
-- the ships' centres are more than **2** units further apart than when the hook bit;
+**The grapple line.** A harpoon hit links the two ships; the link remembers the centre distance at that moment and uses it as the rope's length.
+Each tick, if the centres are further apart than the length, the rope pulls **both hulls toward each other by the excess, split by
+mass** (the lighter one moves more; positions only, no velocity change) — read from the original's code, and in play the excess
+after the ships' own move never exceeded one tick of their relative motion (0.07 units). A ship cannot sail away from a bitten
+grapple: it is held at the length. Order within a tick: the rope's break test and reel, then this pull, then the ships' physics, so
+the break test sees the stretch from the last tick's motion, before the pull. Each frame it is let go (rope-break sound `rope_break_placeholder` at the midpoint) when:
+- the ships' centres are more than **2** units further apart than when the hook bit (checked before the pull, so only a one-tick
+  jump of that size does it: a relative speed of about 60 units/s);
 - the two players become allied;
 - the partner crosses to the other side of the hull: at the hit each end records whether the other ship lay mostly ahead/astern
   or abeam, and on which side, and the link breaks when that side changes.
 Once a boarding fight is registered on the pair (the grapple's "boarding" mark, §3), the line is **reeled in**: each AI tick
-(1/30 s) its length becomes the current centre distance minus 0.1 (**3 units/s**), while it is longer than **12**. A computer
+(0.033 s) its length becomes the current centre distance minus 0.1 (**about 3.03 units/s**), while it is longer than **12**. A computer
 captain's fight registered out of range is dropped by the range test but its mark keeps reeling **[?]**, which would explain how
 grapple passes end with the hulls together (retail run: a Barque closed to 12-18 units on its passes before capturing us).
 The line is drawn with the `Rope` effect: a 40-segment chain (each point mass 1, segment rest length = the gap at the hit / 40) whose
@@ -130,9 +135,9 @@ the menu slots (Board / Grapple start and stop); range test; capture (new owner 
 `Player Vs Player capture count` / `Team has captured a ship from Group/Unit` / `Set Group/Unit Boardable`; Setup Ship `Boardable` + `Crew Skill Level`, Setup
 Island `Combat Strength`; fight effect on the target's boarding nodes, fight sound, first-mate lines, the status bar and the status icon.
 PROVISIONAL: no leadership bonus for generic crews (ships with named crew get it) and no per-man crews (generic crew values); `Players` = Average; the harpoon is not a projectile (the order closes to
-100 units, stops and the hook bites after distance / 45 s) and harpoon guns no longer fire at will; one grapple per ship; the grapple line as
+100 units, stops and the hook bites after distance / 45 s) and harpoon guns no longer fire at will; a ship holds as many live grapples (flying or bitten) as its limit, counted as in the original (every gun bank whose first working gun fires the grappling harpoon adds all its guns), but at most one per target, which is our choice; the Grapple Stop item lets go of all of the ship's grapples; the grapple line as
 above (no tow, snaps 2 units past its bite distance, reels in at 3 u/s to 12 while a fight is registered; the reel acts on the ships'
-velocities at a rate of our choosing, the allied break is not modelled and the side test takes the nearer of the bow-stern and beam axes); a Board order on a grappled ship waits for
+velocities at a rate of our choosing, "allied" is read as "no longer hostile" and the side test takes the nearer of the bow-stern and beam axes); a Board order on a grappled ship waits for
 the hulls to close instead of failing at once, and the fight effect, crew lines and HUD status start only when the crews meet; the rope is a
 sagging ribbon, not a simulated chain (`classic/ropes.rs`);
 computer ships grapple and board their target on their own (§5, `ai_boarding`; reach and attacked-first gate PROVISIONAL); bases are boarded only by AI ships (a hostile non-Dummy mission ship in reach of a base whose rules made it Boardable), not from the menu; status bar

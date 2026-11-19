@@ -3,7 +3,7 @@
 //! the fight then runs as in the original: one casualty per interval, a coin flip for who takes it, until a side's
 //! strength is gone. The winner captures: the loser's owner changes (mission rules count it) and the grapple is released.
 //! PROVISIONAL: crew skill (generic crew combat ability, no leader bonus, no per-man crews), the harpoon flight (no projectile; the hook
-//! lands after distance / muzzle speed), the winch that pulls grappled hulls together, one grapple per ship, AI boarding of boardable
+//! lands after distance / muzzle speed), the winch that pulls grappled hulls together, AI boarding of boardable
 //! bases (the original has no AI path to the command), first-mate lines picked by meaning, and the boarding status bar placement.
 use crate::Nearest;
 use bevy::ecs::system::SystemParam;
@@ -34,10 +34,9 @@ const HARPOON_SPEED: f32 = 45.0;
 /// A grapple snaps when the ships' centres get this much further apart than when the hook bit.
 const GRAPPLE_SLACK: f32 = 2.0;
 /// While a boarding is registered on the grapple the line is reeled in at this speed, down to this centre distance.
-const REEL_SPEED: f32 = 3.0;
+/// Line shortened per tick (0.033 s) while reeling in.
+const REEL_PER_TICK: f32 = 0.1;
 const REEL_MIN: f32 = 12.0;
-/// PROVISIONAL: how quickly the reel brings the ships' closing speed to `REEL_SPEED` (1/s); the original's rope physics is not ported.
-const REEL_RATE: f32 = 2.0;
 
 /// WOT 'Crew Skill Level'. The per-man combat ability is the generic crew's (Crew_General_*: 1, 3, 4 of 10).
 /// PROVISIONAL: 'Players' (the campaign roster) uses Average, and generic crews get no leadership bonus (named crews do).
@@ -280,19 +279,23 @@ pub fn friendly_share(boarder: &Strength, target: &Strength, target_friendly: bo
     let (mine, theirs) = if target_friendly { (d, a) } else { (a, d) };
     if mine + theirs > 0.0 { mine / (mine + theirs) } else { 0.5 }
 }
-/// A harpoon on its way (`flight` > 0) or the grapple it became: this ship holds `target`.
+/// A harpoon on its way (`flight` > 0) or the grapple it became: `grappler` holds `target`. Each grapple is its own entity, so a ship
+/// with several harpoon banks can hold several (up to `grapple_limit`), at most one on a given target.
 #[derive(Component)]
 pub struct Grapple {
+    grappler: Entity,
     target: Entity,
     flight: f32,
     /// Centre distance when the hook bit (0 until then).
     span: f32,
+    /// Rope length: the distance at the hit, shortened while a boarding reels (0 until the hook bit).
+    length: f32,
     /// Per end (grappler, target): the hull axis the other ship lay along when the hook bit, pointing toward it.
     sides: [Vec3; 2],
 }
 impl Grapple {
-    fn new(target: Entity, flight: f32) -> Self {
-        Grapple { target, flight, span: 0.0, sides: [Vec3::ZERO; 2] }
+    fn new(grappler: Entity, target: Entity, flight: f32) -> Self {
+        Grapple { grappler, target, flight, span: 0.0, length: 0.0, sides: [Vec3::ZERO; 2] }
     }
 }
 
@@ -371,14 +374,26 @@ pub fn plugin(app: &mut App) {
         .add_message::<Settled>()
         .init_resource::<BoardStatus>()
         .init_resource::<Ropes>()
+        // Orders only record an order (step 3); fights and the rope's break and reel test are the mission tick (6); the rope's pull is the
+        // link keeper (7.1); the computer's decision to board runs after collision (8).
         .add_systems(
             FixedUpdate,
-            (handle_messages, set_flags, grapple_orders, winch, ai_boarding, fights, settled)
+            (handle_messages, set_flags, grapple_orders)
                 .chain()
-                .in_set(crate::BattleSet::Orders)
+                .in_set(crate::BattleSet::Commands)
                 .run_if(in_state(crate::menu::Screen::Battle))
                 .run_if(crate::menu::overlay_closed),
         )
+        .add_systems(
+            FixedUpdate,
+            (hook_flight, winch_upkeep, fights, settled)
+                .chain()
+                .in_set(crate::BattleSet::MissionTick)
+                .run_if(in_state(crate::menu::Screen::Battle))
+                .run_if(crate::menu::overlay_closed),
+        )
+        .add_systems(FixedUpdate, winch_pull.in_set(crate::BattleSet::Forces).run_if(in_state(crate::menu::Screen::Battle)).run_if(crate::menu::overlay_closed))
+        .add_systems(FixedUpdate, ai_boarding.in_set(crate::BattleSet::Ai).run_if(in_state(crate::menu::Screen::Battle)).run_if(crate::menu::overlay_closed))
         .add_systems(
             Update,
             (dev_board, cancel_grapple_order, status, ropes).chain().before(crate::input).run_if(in_state(crate::menu::Screen::Battle)).run_if(crate::menu::overlay_closed),
@@ -397,18 +412,18 @@ fn ropes(
     mut out: ResMut<Ropes>,
     lib: Res<Library>,
     mission: Option<Res<Mission>>,
-    hooks: Query<(Entity, &Grapple)>,
+    hooks: Query<&Grapple>,
     ships: Query<(&Ship, &Transform, &Health, Option<&crate::combat::GunStates>, Option<&Boardable>)>,
 ) {
     out.0.clear();
-    for (e, g) in &hooks {
-        let (Ok((ship, tf, health, guns, _)), Ok((_, ttf, _, _, tb))) = (ships.get(e), ships.get(g.target)) else { continue };
+    for g in &hooks {
+        let (Ok((ship, tf, health, guns, _)), Ok((_, ttf, _, _, tb))) = (ships.get(g.grappler), ships.get(g.target)) else { continue };
         if g.flight > 0.0 {
             continue;
         }
         let from = harpoons(&lib, ship, health, guns).next().map_or(tf.translation, |(m, _)| tf.transform_point(m.pos));
         let to = tb.into_iter().flat_map(|b| &b.points).map(|p| ttf.transform_point(*p)).nearest_to(from, |a| *a).unwrap_or(ttf.translation);
-        out.0.push((from, to, (g.span - tf.translation.distance(ttf.translation)).max(0.0)));
+        out.0.push((from, to, (g.length - tf.translation.distance(ttf.translation)).max(0.0)));
     }
     for &(tower, towee) in mission.as_deref().map_or(&[][..], |m| m.script.tows()) {
         if let (Ok((a, ta, ..)), Ok((b, tb, ..))) = (ships.get(tower), ships.get(towee)) {
@@ -445,6 +460,20 @@ fn harpoons<'a>(lib: &'a Library, ship: &Ship, health: &'a Health, guns: Option<
         .map(move |(i, m)| (m, guns.map_or(m.gun.as_str(), |g| g.gun(i))))
         .filter(|(m, gun)| gun.contains("Harpoon") && m.parent.is_none_or(|p| health.sections[p] > 0.0))
 }
+/// How many grapples the ship may hold: every gun bank whose first working gun (the first of its mounts whose section still stands)
+/// fires the grappling harpoon adds all its guns, working or not.
+fn grapple_limit(lib: &Library, ship: &Ship, health: &Health, guns: Option<&crate::combat::GunStates>) -> usize {
+    let mounts = &lib.classes[ship.class].mounts;
+    bank_limit(mounts.iter().enumerate().map(|(i, m)| (m.bank, m.parent.is_none_or(|p| health.sections[p] > 0.0), guns.map_or(m.gun.as_str(), |g| g.gun(i)).contains("Harpoon"))))
+}
+/// `grapple_limit` over (bank, working, fires the harpoon) per gun, in mount order.
+fn bank_limit(guns: impl Iterator<Item = (usize, bool, bool)>) -> usize {
+    let guns: Vec<_> = guns.collect();
+    let mut banks: Vec<usize> = guns.iter().map(|g| g.0).collect();
+    banks.sort_unstable();
+    banks.dedup();
+    banks.into_iter().map(|b| guns.iter().filter(|g| g.0 == b).collect::<Vec<_>>()).filter(|bank| bank.iter().find(|g| g.1).is_some_and(|g| g.2)).map(|bank| bank.len()).sum()
+}
 fn has_harpoon(lib: &Library, ship: &Ship, health: &Health, guns: Option<&crate::combat::GunStates>) -> bool {
     harpoons(lib, ship, health, guns).next().is_some()
 }
@@ -464,6 +493,13 @@ fn hostile_pair(mission: Option<&Mission>, a: (Option<&str>, Option<Side>), b: (
     }
     matches!((a.1, b.1), (Some(x), Some(y)) if x != y)
 }
+/// Whether two ships are allied (same side or allied players) and not hostile; the line-of-fire hold treats such ships as friends.
+pub(crate) fn allied_pair(mission: Option<&Mission>, a: (Option<&str>, Option<Side>), b: (Option<&str>, Option<Side>)) -> bool {
+    if let (Some(m), Some(x), Some(y)) = (mission, a.0, b.0) {
+        return m.script.allied(x, y);
+    }
+    matches!((a.1, b.1), (Some(x), Some(y)) if x == y)
+}
 fn owner_of<'a>(ms: Option<&'a MissionShip>, mb: Option<&'a MissionBase>) -> Option<&'a str> {
     ms.map(|m| m.owner.as_str()).or_else(|| mb.map(|m| m.owner.as_str()))
 }
@@ -482,14 +518,42 @@ pub struct Boarders<'w, 's> {
     mission: Option<Res<'w, Mission>>,
 }
 impl Boarders<'_, '_> {
+    fn who(&self, e: Entity) -> (Option<&str>, Option<Side>) {
+        (self.owners.get(e).ok().and_then(|(ms, mb)| owner_of(ms, mb)), self.ships.get(e).ok().map(|s| s.0.side).or_else(|| self.base_sides.get(e).ok().map(|b| b.0)))
+    }
     pub fn hostile(&self, a: Entity, b: Entity) -> bool {
-        let who = |e: Entity| {
-            (self.owners.get(e).ok().and_then(|(ms, mb)| owner_of(ms, mb)), self.ships.get(e).ok().map(|s| s.0.side).or_else(|| self.base_sides.get(e).ok().map(|b| b.0)))
-        };
-        hostile_pair(self.mission.as_deref(), who(a), who(b))
+        hostile_pair(self.mission.as_deref(), self.who(a), self.who(b))
+    }
+    /// Whether `a`'s line of fire to `end` is held for a friendly ship or scenery (line_of_fire.rs); `target` is exempt from the scenery test.
+    pub fn line_blocked(
+        &self,
+        a: Entity,
+        end: Vec3,
+        target: Entity,
+        ships: &Query<(Entity, &Transform, &Ship)>,
+        scenery: &Query<(Entity, &crate::collision::Obstacle, Option<&Visibility>, Has<crate::combat::Asteroid>), (Without<Ship>, Without<crate::combat::GunPart>)>,
+    ) -> bool {
+        let Ok((_, tf, ship)) = ships.get(a) else { return false };
+        let class = &self.lib.classes[ship.class];
+        let friends = ships.iter().filter(|o| o.0 != a).filter_map(|(e, otf, os)| {
+            let oc = &self.lib.classes[os.class];
+            let friendly = class.is_lifeboat || oc.is_lifeboat || allied_pair(self.mission.as_deref(), self.who(a), self.who(e));
+            friendly.then(|| (otf.transform_point(oc.sphere.0), oc.sphere.1))
+        });
+        crate::line_of_fire::friend_in_line(tf.translation, end, friends)
+            || crate::line_of_fire::scenery_in_line(
+                tf.translation,
+                end,
+                class.radius,
+                scenery.iter().filter(|(_, _, v, _)| *v != Some(&Visibility::Hidden)).map(|(e, o, _, rock)| crate::line_of_fire::Scenery {
+                    sphere: o.sphere(),
+                    mesh: (!rock).then_some(o),
+                    target: e == target,
+                }),
+            )
     }
     pub fn grappled(&self, a: Entity, b: Entity) -> bool {
-        self.grapples.iter().any(|(e, g)| g.flight <= 0.0 && ((e == a && g.target == b) || (e == b && g.target == a)))
+        self.grapples.iter().any(|(_, g)| g.flight <= 0.0 && ((g.grappler == a && g.target == b) || (g.grappler == b && g.target == a)))
     }
     pub fn boarding(&self, boarder: Entity, target: Entity) -> bool {
         self.fighters.iter().any(|(e, f)| e == boarder && f.target == target)
@@ -505,12 +569,14 @@ impl Boarders<'_, '_> {
             && self.hostile(boarder, target)
             && if tb.1.is_some() { self.grappled(boarder, target) } else { in_range(&self.lib, &bb, &tb, &t.points) }
     }
-    /// The ship has a harpoon (a live gun section) and no grapple out.
+    /// The ship has a harpoon (a live gun section) and fewer live grapples (flying or bitten) than its limit.
     pub fn can_grapple(&self, e: Entity) -> bool {
-        self.ships.get(e).is_ok_and(|(s, h, guns)| !h.destroyed && has_harpoon(&self.lib, s, h, guns)) && !self.grapples.contains(e)
+        self.ships.get(e).is_ok_and(|(s, h, guns)| {
+            !h.destroyed && has_harpoon(&self.lib, s, h, guns) && self.grapples.iter().filter(|(_, g)| g.grappler == e).count() < grapple_limit(&self.lib, s, h, guns)
+        })
     }
     pub fn grappling(&self, grappler: Entity, target: Entity) -> bool {
-        self.grapples.iter().any(|(e, g)| e == grappler && g.target == target)
+        self.grapples.iter().any(|(_, g)| g.grappler == grappler && g.target == target)
     }
     pub fn me(&self) -> Option<Entity> {
         self.player.single().ok()
@@ -574,13 +640,16 @@ fn handle_messages(mut msgs: MessageReader<BoardMsg>, mut commands: Commands, as
             }
             BoardMsg::Grapple { grappler, target } => {
                 let Some(g) = grappler.or(me) else { continue };
-                if g != target && boarders.can_grapple(g) && boarders.hostile(g, target) && boarders.ships.contains(target) {
+                if g != target && boarders.can_grapple(g) && !boarders.grappling(g, target) && boarders.hostile(g, target) && boarders.ships.contains(target) {
                     commands.entity(g).insert(GrappleOrder(target));
                 }
             }
             BoardMsg::Ungrapple { grappler } => {
                 let Some(g) = grappler.or(me) else { continue };
-                commands.entity(g).remove::<(GrappleOrder, Grapple)>();
+                commands.entity(g).remove::<GrappleOrder>();
+                for (h, _) in boarders.grapples.iter().filter(|(_, gr)| gr.grappler == g) {
+                    commands.entity(h).despawn();
+                }
                 // A fight needs the grapple: it ends with it.
                 for (e, f) in boarders.fighters.iter().filter(|(e, f)| (*e == g || f.target == g) && boarders.bodies.get(f.target).is_ok_and(|b| b.0.1.is_some())) {
                     end_fight(&mut commands, e, &f.fx);
@@ -612,15 +681,10 @@ fn cancel_grapple_order(keys: Res<ButtonInput<KeyCode>>, mut commands: Commands,
 /// The Grapple order: close to harpoon range, stop, fire; the hook bites after its flight.
 fn grapple_orders(
     mut commands: Commands,
-    time: Res<Time>,
     lib: Res<Library>,
-    assets: Option<Res<AssetServer>>,
-    mut rng: ResMut<Rng>,
     mut sfx: MessageWriter<Sfx>,
     mut orders: Query<(Entity, &GrappleOrder, &mut Ship, &Transform, &Health)>,
-    mut hooks: Query<(Entity, &mut Grapple, &Transform)>,
     others: Query<(&Transform, &Ship, &Health), Without<GrappleOrder>>,
-    player: Query<Entity, With<PlayerShip>>,
 ) {
     for (e, order, mut ship, tf, health) in &mut orders {
         let Ok((ttf, tship, thealth)) = others.get(order.0) else {
@@ -634,18 +698,37 @@ fn grapple_orders(
         let surface = tf.translation.distance(ttf.translation) - lib.classes[ship.class].radius - lib.classes[tship.class].radius;
         if surface <= HARPOON_RANGE {
             ship.halt();
-            commands.entity(e).remove::<GrappleOrder>().insert(Grapple::new(order.0, (surface / HARPOON_SPEED).max(0.1)));
+            commands.entity(e).remove::<GrappleOrder>();
+            commands.spawn(Grapple::new(e, order.0, (surface / HARPOON_SPEED).max(0.1)));
             sfx.write(Sfx { name: "Weapon_GrapHarpoon_Fire".into(), at: Some(tf.translation), vol: 0.7, max: 600.0 });
         } else {
             ship.waypoints = vec![ttf.translation];
             ship.order = 2;
         }
     }
+}
+
+/// A fired hook's flight runs out in the mission tick; when it ends the hook bites.
+fn hook_flight(
+    mut commands: Commands,
+    time: Res<Time>,
+    assets: Option<Res<AssetServer>>,
+    mut rng: ResMut<Rng>,
+    mut sfx: MessageWriter<Sfx>,
+    mut hooks: Query<&mut Grapple>,
+    ships: Query<&Transform>,
+    player: Query<Entity, With<PlayerShip>>,
+) {
     let dt = time.delta_secs();
-    for (e, mut g, tf) in &mut hooks {
+    for mut g in &mut hooks {
         if g.flight <= 0.0 {
             continue;
         }
+        let e = g.grappler;
+        let Ok(tf) = ships.get(e) else {
+            g.flight = 0.0;
+            continue;
+        };
         g.flight -= dt;
         if g.flight <= 0.0 {
             sfx.write(Sfx { name: "Weapon_GrapHarpoon_Impact_Wood".into(), at: Some(tf.translation), vol: 1.0, max: 600.0 });
@@ -657,37 +740,56 @@ fn grapple_orders(
     }
 }
 
-/// A bitten grapple does not tow: the ships sail freely and the line snaps when their centres get `GRAPPLE_SLACK` further apart than
-/// when the hook bit. Only while a boarding is registered on the pair is the line reeled in (`REEL_SPEED`, down to `REEL_MIN`), so a
-/// ship that pulls away hard enough still breaks free. A grapple on a destroyed or vanished ship is let go.
+/// The line length after reeling in for `dt` seconds: 0.1 less per tick of 0.033 s, not below `REEL_MIN`.
+fn reeled(distance: f32, dt: f32) -> f32 {
+    (distance - REEL_PER_TICK * dt / crate::TICK_SECS).max(REEL_MIN)
+}
+
+/// A bitten grapple is a rope of the length the ships were apart when the hook bit (read from the original's code and checked in play).
+/// Each tick, if the centres are further apart than that, both hulls are moved toward each other along the line by the excess, split
+/// by mass (the lighter one moves more), positions only. The line snaps when the centres were already `GRAPPLE_SLACK` further apart
+/// than at the hit before that pull, which takes a relative speed of about 60 units/s. While a boarding is registered on the pair the
+/// length is set to the centre distance less `REEL_PER_TICK`, down to `REEL_MIN`. A grapple on a destroyed or vanished ship is let go.
 /// It also snaps when either ship's partner crosses to the other side of the hull it was grappled on.
-/// PROVISIONAL: the original also lets go when the ships become allied.
-fn winch(
+/// It is also let go when the two players become allied (here: no longer hostile, as the boarding fight's own test reads it).
+/// The break test and the reel-in are the mission tick (`winch_upkeep`); the pull itself is the link keeper's (`winch_pull`).
+fn winch_upkeep(
     mut commands: Commands,
     time: Res<Time>,
-    lib: Res<Library>,
     mut sfx: MessageWriter<Sfx>,
     mut hooks: Query<(Entity, &mut Grapple)>,
     fighters: Query<(Entity, &Boarding)>,
-    mut ships: Query<(&mut Ship, &Transform, &mut Drift, &Health)>,
+    ships: Query<(&Transform, &Health), With<Ship>>,
+    mission: Option<Res<Mission>>,
+    sides: Query<(&Ship, Option<&MissionShip>)>,
 ) {
     let dt = time.delta_secs();
-    for (e, mut g) in &mut hooks {
+    for (hook, mut g) in &mut hooks {
+        let e = g.grappler;
         if g.flight > 0.0 {
             continue;
         }
-        let Ok([(mut a, atf, mut da, ha), (mut b, btf, mut db, hb)]) = ships.get_many_mut([e, g.target]) else {
-            commands.entity(e).remove::<Grapple>();
+        let Ok([(atf, ha), (btf, hb)]) = ships.get_many([e, g.target]) else {
+            commands.entity(hook).despawn();
             continue;
         };
         if ha.destroyed || hb.destroyed {
-            commands.entity(e).remove::<Grapple>();
+            commands.entity(hook).despawn();
+            continue;
+        }
+        let who = |x: Entity| sides.get(x).ok().map(|(sh, ms)| (ms.map(|m| m.owner.as_str()), Some(sh.side)));
+        if let (Some(a), Some(b)) = (who(e), who(g.target))
+            && !hostile_pair(mission.as_deref(), a, b)
+        {
+            info!("grapple: {e} lets go of {} (the players became allied)", g.target);
+            commands.entity(hook).despawn();
             continue;
         }
         let axis = (btf.translation - atf.translation).with_y(0.0);
         let distance = axis.length();
         if g.span <= 0.0 {
             g.span = distance;
+            g.length = distance;
             g.sides = [side_of(atf, btf.translation), side_of(btf, atf.translation)];
         }
         // PROVISIONAL: the axis is the nearer of bow-stern and beam; the original picks it from the hull's proportions.
@@ -695,42 +797,48 @@ fn winch(
         if distance > g.span + GRAPPLE_SLACK || crossed(atf, btf.translation, g.sides[0]) || crossed(btf, atf.translation, g.sides[1]) {
             info!("grapple: {e} loses {} (centres {distance:.1} apart, bit at {:.1})", g.target, g.span);
             sfx.write(Sfx { name: "rope_break_placeholder".into(), at: Some(atf.translation.lerp(btf.translation, 0.5)), vol: 1.0, max: 600.0 });
-            commands.entity(e).remove::<Grapple>();
+            commands.entity(hook).despawn();
             continue;
         }
         let boarding = fighters.iter().any(|(f, fight)| (f == e && fight.target == g.target) || (f == g.target && fight.target == e));
-        if !boarding || distance <= REEL_MIN {
-            continue;
+        if boarding && distance > REEL_MIN {
+            g.length = reeled(distance, dt);
         }
-        // Bring the closing speed along the line up to the reel's, mass-weighted (momentum kept).
-        let (ca, cb) = (&lib.classes[a.class], &lib.classes[b.class]);
-        let n = axis / distance.max(1e-3);
-        let (va, vb) = (atf.rotation * Vec3::NEG_Z * a.speed + da.0, btf.rotation * Vec3::NEG_Z * b.speed + db.0);
-        let opening = (vb - va).dot(n);
-        if opening <= -REEL_SPEED {
-            continue;
-        }
-        let dv = n * (-REEL_SPEED - opening) * (1.0 - (-REEL_RATE * dt).exp());
-        let (ia, ib) = (1.0 / ca.phys.mass, 1.0 / cb.phys.mass);
-        crate::collision::set_velocity(&mut a, &mut da, va - dv * (ia / (ia + ib)));
-        crate::collision::set_velocity(&mut b, &mut db, vb + dv * (ib / (ia + ib)));
     }
 }
 
-/// Chance per retail AI tick (1/30 s) that a computer captain fires its harpoons at its target, and that a grappled one sends its
+/// The link keeper's pull (step 7.1): a bitten grapple's hulls are moved toward each other by the excess over the rope's length, split by mass.
+fn winch_pull(lib: Res<Library>, hooks: Query<&Grapple>, mut ships: Query<(&Ship, &mut Transform)>) {
+    for g in &hooks {
+        if g.flight > 0.0 || g.span <= 0.0 {
+            continue;
+        }
+        let Ok([(a, mut atf), (b, mut btf)]) = ships.get_many_mut([g.grappler, g.target]) else { continue };
+        let axis = (btf.translation - atf.translation).with_y(0.0);
+        let distance = axis.length();
+        if distance > g.length && distance > 1e-3 {
+            let (ma, mb) = (lib.classes[a.class].phys.mass, lib.classes[b.class].phys.mass);
+            let pull = axis / distance * (distance - g.length);
+            atf.translation += pull * (mb / (ma + mb));
+            btf.translation -= pull * (ma / (ma + mb));
+        }
+    }
+}
+
+/// Chance per tick (0.033 s) that a computer captain fires its harpoons at its target, and that a grappled one sends its
 /// boarders; boarding also needs an attacking strength above `AI_MIN_ATTACK` (docs/re/boarding.md §5).
 const AI_HARPOON_CHANCE: f32 = 0.05;
 const AI_BOARD_CHANCE: f32 = 0.2;
 const AI_MIN_ATTACK: i32 = 10;
-/// A chance per 1/30 s tick turned into one for a frame of `dt` seconds.
+/// A chance per tick (0.033 s) turned into one for a frame of `dt` seconds.
 fn per_tick(chance: f32, dt: f32) -> f32 {
-    1.0 - (1.0 - chance).powf(dt * 30.0)
+    1.0 - (1.0 - chance).powf(dt / crate::TICK_SECS)
 }
 
 /// The original's grapple-and-board routine, run by every AI-steered ship (not the player's command ship) against its current
 /// target: with a free harpoon whose arc covers the target in harpoon range it fires at a 5 % chance per tick; once the grapple holds (or, at a
-/// base, a boarding point is in reach) it boards at 20 % per tick if its boarding party is strong enough. PROVISIONAL: the
-/// original also skips the harpoon while a friendly ship or scenery is in the line of fire; and only a ship its target has fired
+/// base, a boarding point is in reach) it boards at 20 % per tick if its boarding party is strong enough. It skips the harpoon (no
+/// roll) while a friendly ship or scenery is on the line to the target (line_of_fire.rs). PROVISIONAL: only a ship its target has fired
 /// at grapples (a retail Barque left an idle target alone and grappled ~17 s after being attacked).
 #[allow(clippy::type_complexity)]
 fn ai_boarding(
@@ -744,6 +852,8 @@ fn ai_boarding(
     ships: Query<(Entity, &Ship, &Transform, &Health, Option<&crate::combat::GunStates>, &Boardable, Option<&MissionShip>, Option<&crate::ship::FleetPilot>), Without<PlayerShip>>,
     bases: Query<Entity, With<MissionBase>>,
     targets: Query<(&Transform, &Ship)>,
+    all_ships: Query<(Entity, &Transform, &Ship)>,
+    scenery: Query<(Entity, &crate::collision::Obstacle, Option<&Visibility>, Has<crate::combat::Asteroid>), (Without<Ship>, Without<crate::combat::GunPart>)>,
     (mut fired, mut attacked, captains): (MessageReader<crate::combat::Fired>, Local<std::collections::HashSet<(Entity, Entity)>>, Option<Res<crate::ship::CaptainTargets>>),
 ) {
     attacked.extend(fired.read().filter_map(|f| f.target.map(|t| (f.shooter, t))));
@@ -764,8 +874,14 @@ fn ai_boarding(
             && let Ok((ttf, tship)) = targets.get(t)
         {
             let surface = tf.translation.distance(ttf.translation) - lib.classes[ship.class].radius - lib.classes[tship.class].radius;
-            if attacked.contains(&(t, e)) && boarders.can_grapple(e) && harpoon_bears(&lib, ship, health, guns, tf, ttf.translation) && rng.f() < per_tick(AI_HARPOON_CHANCE, dt) {
-                commands.entity(e).insert(Grapple::new(t, (surface.max(0.0) / HARPOON_SPEED).max(0.1)));
+            if attacked.contains(&(t, e))
+                && boarders.can_grapple(e)
+                && !boarders.grappling(e, t)
+                && harpoon_bears(&lib, ship, health, guns, tf, ttf.translation)
+                && !boarders.line_blocked(e, ttf.translation, t, &all_ships, &scenery)
+                && rng.f() < per_tick(AI_HARPOON_CHANCE, dt)
+            {
+                commands.spawn(Grapple::new(e, t, (surface.max(0.0) / HARPOON_SPEED).max(0.1)));
                 sfx.write(Sfx { name: "Weapon_GrapHarpoon_Fire".into(), at: Some(tf.translation), vol: 0.7, max: 600.0 });
             }
             if strong && boarders.can_board(e, t) && rng.f() < per_tick(AI_BOARD_CHANCE, dt) {
@@ -812,7 +928,7 @@ fn fights(
             (owner_of(bi.5, bi.6), bi.1.map(|s| s.side).or(bi.7.map(|b| b.0))),
             (owner_of(ti.5, ti.6), ti.1.map(|s| s.side).or(ti.7.map(|b| b.0))),
         );
-        let joined = ti.1.is_none() || grapples.iter().any(|(e, g)| g.flight <= 0.0 && ((e == b && g.target == t) || (e == t && g.target == b)));
+        let joined = ti.1.is_none() || grapples.iter().any(|(_, g)| g.flight <= 0.0 && ((g.grappler == b && g.target == t) || (g.grappler == t && g.target == b)));
         let near = in_range(&lib, &(bi.0, bi.1, bi.2), &(ti.0, ti.1, ti.2), &ti.3.points);
         if !alive(bi.4) || !alive(ti.4) || !hostile || !joined || (f.live && !near) {
             let (surface, rel) =
@@ -879,6 +995,7 @@ fn settled(
     mut captured: MessageWriter<Captured>,
     mut things: Query<(Option<&mut Ship>, Option<&mut MissionShip>, Option<&mut MissionBase>, &mut Boardable, Option<&mut crate::combat::BaseSide>)>,
     members: Query<&crate::ship::FleetMember>,
+    grapples: Query<(Entity, &Grapple)>,
 ) {
     for s in msgs.read() {
         let Ok([(bship, bms, _, bflag, _), (tship, tms, tbase, mut tflag, tside)]) = things.get_many_mut([s.boarder, s.target]) else { continue };
@@ -921,8 +1038,9 @@ fn settled(
                     }
                 }
                 tflag.strength = if is_ship { Strength::ship(tflag.counts, bflag.skill.member()) } else { Strength::base(tflag.strength.full) };
-                commands.entity(s.boarder).remove::<Grapple>();
-                commands.entity(s.target).remove::<Grapple>();
+                for (h, _) in grapples.iter().filter(|(_, g)| g.grappler == s.boarder || g.grappler == s.target) {
+                    commands.entity(h).despawn();
+                }
                 if ours {
                     sfx.write(Sfx::ui("HUD_Options_Dock"));
                     say(&mut commands, assets.as_deref(), if is_ship { "enemy_ship_conquered" } else { "enemy_base_conquered" }, r);
