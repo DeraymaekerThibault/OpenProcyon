@@ -160,11 +160,6 @@ fn defaults(kind: Kind) -> Part {
     }
 }
 
-/// A smoke part with the smoke defaults (tracers' smoke trail).
-pub fn smoke_part(v: &Value) -> Option<Part> {
-    part(v, defaults(Kind::Smoke))
-}
-
 pub fn parse(v: &Value) -> Option<Bursts> {
     v.is_object().then(|| Bursts {
         rules: v["effects"]

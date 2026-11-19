@@ -61,6 +61,7 @@
   },
   "currents": {"brightness": 0.85, "streaks": 10, "sparkle": 1.0, "core": 1.2, "texture": 0.3, "color": [0.45, 0.8, 1.0], "pulse": 0.7},
   "ambient": 0.55,
+  "hide_effects": ["CannonBall_Light_Muzzle", "CannonBall_Medium_Muzzle", "CannonBall_Heavy_Muzzle"],
   "ambient_floor": [0.18, 0.24, 0.32],
   "sun": {
     "shadows": true,
@@ -250,8 +251,8 @@
     }
   ],
   "engines": {
-    "length": 0.45,
-    "width": 0.04,
+    "length": 0.36,
+    "width": 0.038,
     "brightness": 2.2,
     "core": [
       1.0,
@@ -363,20 +364,7 @@
         "seconds": 0.35,
         "head": 1.2,
         "stretch": 2.5,
-        "smoke": {
-          "count": 14,
-          "color": [
-            0.42,
-            0.42,
-            0.4284
-          ],
-          "size": 0.8,
-          "seconds": 1.3,
-          "speed": 1.0,
-          "spread": 60,
-          "drag": 2.0,
-          "rise": 0.3
-        }
+        "smoke": {"color": [0.42, 0.42, 0.4284], "width": 0.64, "widen": 4, "seconds": 1.3, "rise": 0.3}
       },
       {
         "match": "CannonBall",
@@ -389,20 +377,7 @@
         "seconds": 0.3,
         "head": 0.95,
         "stretch": 2.5,
-        "smoke": {
-          "count": 14,
-          "color": [
-            0.42,
-            0.42,
-            0.4284
-          ],
-          "size": 0.6,
-          "seconds": 1.3,
-          "speed": 1.0,
-          "spread": 60,
-          "drag": 2.0,
-          "rise": 0.3
-        }
+        "smoke": {"color": [0.42, 0.42, 0.4284], "width": 0.48, "widen": 4, "seconds": 1.3, "rise": 0.3}
       },
       {
         "match": "Carronade",
@@ -415,20 +390,7 @@
         "seconds": 0.25,
         "head": 1.3,
         "stretch": 2.0,
-        "smoke": {
-          "count": 18,
-          "color": [
-            0.38,
-            0.38,
-            0.3876
-          ],
-          "size": 0.9,
-          "seconds": 1.5,
-          "speed": 1.0,
-          "spread": 60,
-          "drag": 2.0,
-          "rise": 0.3
-        }
+        "smoke": {"color": [0.38, 0.38, 0.3876], "width": 0.72, "widen": 4, "seconds": 1.5, "rise": 0.3}
       },
       {
         "match": "Gattling",
@@ -477,20 +439,7 @@
         "seconds": 0.8,
         "head": 0.0,
         "stretch": 2.0,
-        "smoke": {
-          "count": 22,
-          "color": [
-            0.55,
-            0.55,
-            0.561
-          ],
-          "size": 0.8,
-          "seconds": 1.8,
-          "speed": 0.5,
-          "spread": 60,
-          "drag": 2.0,
-          "rise": 0.3
-        }
+        "smoke": {"color": [0.55, 0.55, 0.561], "width": 0.64, "widen": 4, "seconds": 1.8, "rise": 0.3}
       },
       {
         "match": "Mortar",
@@ -539,20 +488,7 @@
         "seconds": 0.5,
         "head": 1.6,
         "stretch": 1.5,
-        "smoke": {
-          "count": 16,
-          "color": [
-            0.3,
-            0.3,
-            0.306
-          ],
-          "size": 1.0,
-          "seconds": 1.6,
-          "speed": 1.0,
-          "spread": 60,
-          "drag": 2.0,
-          "rise": 0.3
-        }
+        "smoke": {"color": [0.3, 0.3, 0.306], "width": 0.8, "widen": 4, "seconds": 1.6, "rise": 0.3}
       },
       {
         "match": [
@@ -568,20 +504,7 @@
         "seconds": 0.3,
         "head": 1.2,
         "stretch": 2.0,
-        "smoke": {
-          "count": 16,
-          "color": [
-            0.3,
-            0.3,
-            0.306
-          ],
-          "size": 1.0,
-          "seconds": 1.6,
-          "speed": 1.0,
-          "spread": 60,
-          "drag": 2.0,
-          "rise": 0.3
-        }
+        "smoke": {"color": [0.3, 0.3, 0.306], "width": 0.8, "widen": 4, "seconds": 1.6, "rise": 0.3}
       }
     ]
   },

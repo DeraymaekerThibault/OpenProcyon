@@ -4,7 +4,8 @@
 //! into the point where it ended. The bullet's rule (`tracers.bullets`, first whose `match` is in the bullet's name, else
 //! `tracers.default`) gives its colour and size; width 0 draws none. The retail flight effects stay, thinned by
 //! `particles`. All streaks are one mesh, rebuilt each frame through a `QuadBatch`. Contract: `TracerUniform`, and the mesh described at
-//! `ribbon`.
+//! `ribbon`. A bullet's `smoke` is a second ribbon over the same path, kept in the world for its own `seconds` while it
+//! widens, rises and fades (`smoke_strip`), drawn with the alpha-blended smoke shader (`bursts.rs`) in a mesh of its own.
 
 use bevy::mesh::MeshVertexBufferLayoutRef;
 use bevy::pbr::{ExtendedMaterial, MaterialExtension, MaterialExtensionKey, MaterialExtensionPipeline};
@@ -15,7 +16,7 @@ use serde_json::Value;
 use std::collections::{HashMap, VecDeque};
 
 use super::batch::QuadBatch;
-use super::bursts::Part;
+use super::bursts::SmokeMaterial;
 use super::{Look, num, rgb};
 use crate::combat::Shell;
 use crate::fx::{EffectStarted, Fx};
@@ -37,8 +38,7 @@ pub struct Tracers {
 }
 
 /// One bullet type's tracer: colour (linear), streak width, how many seconds of flight it shows, head size (world units),
-/// how much longer than wide the head is drawn along its flight, and smoke left behind (a `bursts` smoke part whose
-/// `count` is puffs per second; needs the `bursts` block).
+/// how much longer than wide the head is drawn along its flight, and the smoke left behind (needs the `bursts` block).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Tracer {
     pub color: Vec3,
@@ -46,7 +46,28 @@ pub struct Tracer {
     pub seconds: f32,
     pub head: f32,
     pub stretch: f32,
-    pub smoke: Option<Part>,
+    pub smoke: Option<Smoke>,
+}
+
+/// The smoke ribbon a shell leaves: colour (linear), width at the shell and how many times wider it ends, seconds it
+/// lasts, and how fast it rises (world units per second).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Smoke {
+    pub color: Vec3,
+    pub width: f32,
+    pub widen: f32,
+    pub seconds: f32,
+    pub rise: f32,
+}
+
+fn smoke(v: &Value) -> Option<Smoke> {
+    v.is_object().then(|| Smoke {
+        color: rgb(&v["color"]).unwrap_or(Vec3::splat(0.45)),
+        width: num(&v["width"], 0.5).max(0.0),
+        widen: num(&v["widen"], 4.0).max(1.0),
+        seconds: num(&v["seconds"], 1.3).max(0.05),
+        rise: num(&v["rise"], 0.3),
+    })
 }
 
 fn tracer(v: &Value, d: Tracer) -> Tracer {
@@ -56,7 +77,7 @@ fn tracer(v: &Value, d: Tracer) -> Tracer {
         seconds: num(&v["seconds"], d.seconds).max(0.01),
         head: num(&v["head"], d.head),
         stretch: num(&v["stretch"], d.stretch).max(0.0),
-        smoke: if v["smoke"].is_null() { d.smoke } else { super::bursts::smoke_part(&v["smoke"]) },
+        smoke: if v["smoke"].is_null() { d.smoke } else { smoke(&v["smoke"]) },
     }
 }
 
@@ -127,16 +148,18 @@ pub type TracerMaterial = ExtendedMaterial<StandardMaterial, TracerGlow>;
 
 pub fn plugin(app: &mut App, look: &Look) {
     if look.tracers.is_some() {
-        app.init_resource::<Streaks>().add_plugins(MaterialPlugin::<TracerMaterial>::default()).add_systems(Update, (thin_flight_fx, tracers));
+        app.init_resource::<Streaks>().add_plugins(MaterialPlugin::<TracerMaterial>::default()).add_systems(Update, (thin_flight_fx, (tracers, smoke_trails).chain()));
     }
 }
 
-/// The path one shell has flown: (point, time) newest last, when the shell was gone, and smoke owed.
+/// The path one shell has flown: (point, time) newest last for the light streak and, longer, for its smoke; when the shell
+/// was gone; a seed that tells its smoke from the next shell's.
 struct Streak {
     tracer: Tracer,
     points: VecDeque<(Vec3, f32)>,
+    trail: VecDeque<(Vec3, f32)>,
     gone: Option<f32>,
-    puffs: f32,
+    seed: u32,
 }
 
 #[derive(Resource, Default)]
@@ -145,6 +168,10 @@ struct Streaks(HashMap<Entity, Streak>);
 /// The one mesh all tracers are drawn into.
 #[derive(Component)]
 struct TracerMesh;
+
+/// The one mesh all smoke ribbons are drawn into.
+#[derive(Component)]
+struct SmokeMesh;
 
 /// The retail flight effect riding on a new shell (the effect is the shell's child) keeps `particles` of its rate.
 fn thin_flight_fx(look: Res<Look>, mut started: MessageReader<EffectStarted>, mut fx: Query<(&mut Fx, &ChildOf)>) {
@@ -170,7 +197,6 @@ fn tracers(
     mut streaks: ResMut<Streaks>,
     // the shell's own Transform: a shell fired this frame (FixedUpdate) has no GlobalTransform yet until propagation
     shells: Query<(Entity, &Shell, &Transform)>,
-    mut smoke: Option<ResMut<super::bursts::Particles>>,
     cams: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
     target: Query<(&Mesh3d, &MeshMaterial3d<TracerMaterial>, &mut Visibility), With<TracerMesh>>,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -179,26 +205,22 @@ fn tracers(
 ) {
     let Some(t) = &look.tracers else { return };
     let now = time.elapsed_secs();
-    let dt = time.delta_secs();
     for (e, shell, tf) in &shells {
         let Some(tracer) = t.of(shell.bullet()) else { continue };
-        let s = streaks.0.entry(e).or_insert_with(|| Streak { tracer, points: VecDeque::new(), gone: None, puffs: 0.0 });
+        let s = streaks.0.entry(e).or_insert_with(|| Streak { tracer, points: VecDeque::new(), trail: VecDeque::new(), gone: None, seed: e.index().index() % 64 });
         record(&mut s.points, tf.translation, now);
-        if let (Some(p), Some(smoke)) = (&tracer.smoke, smoke.as_deref_mut()) {
-            s.puffs += p.count as f32 * dt;
-            let back = s.points.len().checked_sub(2).map_or(Vec3::Y, |i| s.points[i].0 - tf.translation);
-            while s.puffs >= 1.0 {
-                s.puffs -= 1.0;
-                smoke.throw(super::bursts::Kind::Smoke, &super::bursts::Part { count: 1, ..*p }, tf.translation, back, now, None);
-            }
+        if tracer.smoke.is_some() {
+            record(&mut s.trail, tf.translation, now);
         }
     }
     streaks.0.retain(|e, s| {
         if s.gone.is_none() && !shells.contains(*e) {
             s.gone = Some(now);
         }
-        expire(&mut s.points, now - s.tracer.seconds, s.gone.is_none());
-        !s.points.is_empty()
+        let alive = s.gone.is_none();
+        expire(&mut s.points, now - s.tracer.seconds, alive);
+        expire(&mut s.trail, now - s.tracer.smoke.map_or(0.0, |m| m.seconds), alive);
+        !(s.points.is_empty() && s.trail.is_empty())
     });
     let Some((_, cam)) = cams.iter().filter(|(c, _)| c.is_active).min_by_key(|(c, _)| c.order) else { return };
     let mut target = target;
@@ -218,6 +240,75 @@ fn tracers(
     }
     // the shader's clock is the frame data's: the material is never written after it is made
     vis.set_if_neq(batch.upload(&mut meshes, &mesh.0));
+}
+
+/// Rebuilds the smoke mesh: one ribbon per shell that leaves smoke.
+#[allow(clippy::too_many_arguments)]
+fn smoke_trails(
+    mut commands: Commands,
+    time: Res<Time>,
+    look: Res<Look>,
+    streaks: Res<Streaks>,
+    ambient: Res<GlobalAmbientLight>,
+    cams: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
+    mut target: Query<(&Mesh3d, &MeshMaterial3d<SmokeMaterial>, &mut Visibility), With<SmokeMesh>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<SmokeMaterial>>,
+    mut batch: Local<Option<QuadBatch>>,
+) {
+    // the smoke material is the `bursts` block's
+    if look.bursts.is_none() {
+        return;
+    }
+    let Some((_, cam)) = cams.iter().filter(|(c, _)| c.is_active).min_by_key(|(c, _)| c.order) else { return };
+    let Some((mesh, mat, mut vis)) = target.iter_mut().next() else {
+        let base = StandardMaterial { unlit: true, cull_mode: None, double_sided: true, alpha_mode: AlphaMode::Blend, ..default() };
+        let m = materials.add(SmokeMaterial { base, extension: default() });
+        super::kit::spawn_batch_mesh(&mut commands, &mut meshes, m, SmokeMesh);
+        return;
+    };
+    let now = time.elapsed_secs();
+    let batch = batch.get_or_insert_with(QuadBatch::with_normals);
+    batch.clear();
+    for s in streaks.0.values() {
+        smoke_strip(batch, s, now, cam);
+    }
+    vis.set_if_neq(batch.upload(&mut meshes, &mesh.0));
+    // the sky's colour on the shadowed side, as the puffs have it
+    let shade = (ambient.color.to_linear().to_vec3() * 0.35).extend(1.0);
+    if materials.get(&mat.0).is_some_and(|m| m.extension.u.shade != shade)
+        && let Some(mut m) = materials.get_mut(&mat.0)
+    {
+        m.extension.u.shade = shade;
+    }
+}
+
+/// The smoke kind of `shaders/smoke.wesl` that is a ribbon rather than a puff (7 is a puff).
+const SMOKE_RIBBON_KIND: f32 = 11.0;
+
+/// One shell's smoke into the mesh: a strip facing the camera, u across (0..1), colour a the point's age as a share of
+/// `seconds`. Each point stays where the shell was, rises, and the strip widens toward its oldest end. Same vertex
+/// contract as the puffs (uv.x = kind * 4 + u, uv.y = seed * 2 + v).
+fn smoke_strip(b: &mut QuadBatch, s: &Streak, now: f32, cam: &GlobalTransform) {
+    let Some(sm) = s.tracer.smoke else { return };
+    let n = s.trail.len();
+    if n < 2 || sm.width <= 0.0 {
+        return;
+    }
+    let eye = cam.translation();
+    let first = b.pos.len() as u32;
+    for (i, &(p, t)) in s.trail.iter().enumerate() {
+        let age = ((now - t) / sm.seconds).clamp(0.0, 1.0);
+        let at = p + Vec3::Y * sm.rise * (now - t);
+        let along = (s.trail[(i + 1).min(n - 1)].0 - s.trail[i.saturating_sub(1)].0).normalize_or(Vec3::Z);
+        let to_cam = (eye - at).normalize_or(Vec3::Y);
+        let side = along.cross(to_cam).normalize_or(Vec3::X) * (0.5 * sm.width * (1.0 + (sm.widen - 1.0) * age.sqrt()));
+        let col = sm.color.extend(age).to_array();
+        for (end, u) in [(1.0, 0.0), (-1.0, 1.0)] {
+            b.vertex(at + side * end, to_cam, Vec2::new(SMOKE_RIBBON_KIND * 4.0 + u, s.seed as f32 * 2.0 + 0.5), col);
+        }
+    }
+    b.strip(first, (n - 1) as u32);
 }
 
 /// Farther than a shell flies between two frames: the path starts over rather than draw a line across the map.
@@ -322,6 +413,33 @@ mod tests {
     }
 
     #[test]
+    fn smoke_stays_where_the_shell_was_and_widens_and_rises_as_it_ages() {
+        let t = parse(&serde_json::json!({"default": {"smoke": {"width": 1.0, "widen": 5.0, "seconds": 2.0, "rise": 0.5}}})).unwrap();
+        let sm = t.default.smoke.unwrap();
+        assert_eq!((sm.width, sm.widen, sm.seconds, sm.rise), (1.0, 5.0, 2.0, 0.5));
+        assert!(parse(&serde_json::json!({"default": {}})).unwrap().default.smoke.is_none(), "no smoke unless asked");
+        let s = Streak {
+            tracer: t.default,
+            points: VecDeque::new(),
+            trail: [(Vec3::new(0.0, 0.0, 0.0), 0.0), (Vec3::new(0.0, 0.0, -10.0), 1.0), (Vec3::new(0.0, 0.0, -20.0), 2.0)].into(),
+            gone: None,
+            seed: 3,
+        };
+        let cam = GlobalTransform::from(Transform::from_xyz(0.0, 50.0, 0.0).looking_at(Vec3::ZERO, Vec3::NEG_Z));
+        let mut b = QuadBatch::with_normals();
+        smoke_strip(&mut b, &s, 2.0, &cam);
+        assert_eq!((b.pos.len(), b.idx.len()), (6, 12), "three points, two quads");
+        assert!(b.uv.iter().all(|uv| (44.0..=45.0).contains(&uv[0]) && uv[1] == 6.5), "ribbon kind, the shell's seed");
+        assert_eq!((b.col[0][3], b.col[4][3]), (1.0, 0.0), "oldest point fully aged, the shell's own point fresh");
+        let width = |i: usize| (b.pos[i][0] - b.pos[i + 1][0]).abs();
+        assert!((width(0) - 5.0).abs() < 1e-3 && (width(4) - 1.0).abs() < 1e-3, "widens from the shell to the oldest end");
+        assert!((b.pos[0][1] - 1.0).abs() < 1e-3, "the oldest point has risen 0.5/s for 2 s");
+        let mut none = QuadBatch::with_normals();
+        smoke_strip(&mut none, &Streak { trail: s.trail.iter().take(1).copied().collect(), ..s }, 2.0, &cam);
+        assert!(none.is_empty(), "one point is no ribbon");
+    }
+
+    #[test]
     fn only_the_effect_riding_on_a_shell_is_thinned() {
         use bevy::ecs::system::RunSystemOnce;
         let mut world = World::new();
@@ -363,7 +481,7 @@ mod tests {
     #[test]
     fn the_ribbon_faces_the_camera_with_its_head_marked_by_u() {
         let tracer = tracers().default;
-        let s = Streak { tracer, points: [(Vec3::ZERO, 0.0), (Vec3::new(0.0, 0.0, -5.0), 0.1)].into(), gone: None, puffs: 0.0 };
+        let s = Streak { tracer, points: [(Vec3::ZERO, 0.0), (Vec3::new(0.0, 0.0, -5.0), 0.1)].into(), trail: VecDeque::new(), gone: None, seed: 0 };
         let cam = GlobalTransform::from(Transform::from_xyz(0.0, 50.0, 0.0).looking_at(Vec3::ZERO, Vec3::NEG_Z));
         let mut b = QuadBatch::with_normals();
         ribbon(&mut b, &s, 0.1, &cam);
