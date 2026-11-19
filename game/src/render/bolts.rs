@@ -7,10 +7,7 @@
 //!
 //! Only reads `StormFlash`; nothing here changes what a storm does.
 
-use bevy::asset::RenderAssetUsages;
-use bevy::camera::visibility::NoFrustumCulling;
-use bevy::light::NotShadowCaster;
-use bevy::mesh::{MeshVertexBufferLayoutRef, PrimitiveTopology};
+use bevy::mesh::MeshVertexBufferLayoutRef;
 use bevy::pbr::{ExtendedMaterial, MaterialExtension, MaterialExtensionKey, MaterialExtensionPipeline};
 use bevy::prelude::*;
 use bevy::render::render_resource::{AsBindGroup, RenderPipelineDescriptor, ShaderType, SpecializedMeshPipelineError};
@@ -234,11 +231,7 @@ fn ribbon(b: &mut QuadBatch, pts: &[Vec3], half: f32, eye: Vec3, colour: [f32; 4
             b.vertex(p + side * end, to_cam, Vec2::new(u, v), colour);
         }
     }
-    for i in 0..(pts.len() - 1) as u32 {
-        let a = first + 2 * i;
-        b.triangle(a, a + 1, a + 2);
-        b.triangle(a + 1, a + 3, a + 2);
-    }
+    b.strip(first, (pts.len() - 1) as u32);
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -267,16 +260,7 @@ fn draw(
             base: super::kit::additive_base(None),
             extension: BoltGlow { u: BoltUniform { core: b.core.extend(b.brightness), params: Vec4::new(1.0 / b.glow, 0.0, 0.0, 0.0) }, frame: default() },
         });
-        commands.spawn((
-            crate::Scenario,
-            BoltMesh,
-            Mesh3d(meshes.add(Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default()))),
-            MeshMaterial3d(material),
-            Transform::default(),
-            Visibility::Hidden,
-            NoFrustumCulling,
-            NotShadowCaster,
-        ));
+        super::kit::spawn_batch_mesh(&mut commands, &mut meshes, material, BoltMesh);
         return;
     };
     let batch = batch.get_or_insert_with(QuadBatch::with_normals);

@@ -8,10 +8,7 @@
 //! CPU only places camera-facing quads each frame: every glowing kind in one additive mesh (`shaders/burst.wesl`), the
 //! smoke in one blended mesh sorted far to near (`shaders/smoke.wesl`). See `quad` for the vertex contract.
 
-use bevy::asset::RenderAssetUsages;
-use bevy::camera::visibility::NoFrustumCulling;
-use bevy::light::NotShadowCaster;
-use bevy::mesh::{MeshVertexBufferLayoutRef, PrimitiveTopology};
+use bevy::mesh::MeshVertexBufferLayoutRef;
 use bevy::pbr::{ExtendedMaterial, MaterialExtension, MaterialExtensionKey, MaterialExtensionPipeline};
 use bevy::post_process::effect_stack::ChromaticAberration;
 use bevy::prelude::*;
@@ -545,16 +542,14 @@ fn draw(
     let Some((_, cam)) = cams.iter().filter(|(c, _)| c.is_active).min_by_key(|(c, _)| c.order) else { return };
     if glows.is_empty() || smokes.is_empty() {
         // the meshes go with each battle (Scenario); new ones for the next
-        let mesh = |meshes: &mut Assets<Mesh>| Mesh3d(meshes.add(Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default())));
-        let common = || (crate::Scenario, Transform::default(), Visibility::Hidden, NoFrustumCulling, NotShadowCaster);
         if glows.is_empty() {
             let m = glow_mats.add(BurstMaterial { base: super::kit::additive_base(None), extension: BurstGlow::default() });
-            commands.spawn((Glows, mesh(&mut meshes), MeshMaterial3d(m), common()));
+            super::kit::spawn_batch_mesh(&mut commands, &mut meshes, m, Glows);
         }
         if smokes.is_empty() {
             let base = StandardMaterial { unlit: true, cull_mode: None, double_sided: true, alpha_mode: AlphaMode::Blend, ..default() };
             let m = smoke_mats.add(SmokeMaterial { base, extension: SmokeShade::default() });
-            commands.spawn((Smokes, mesh(&mut meshes), MeshMaterial3d(m), common()));
+            super::kit::spawn_batch_mesh(&mut commands, &mut meshes, m, Smokes);
         }
         return;
     }
