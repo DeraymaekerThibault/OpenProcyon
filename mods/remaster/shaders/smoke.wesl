@@ -1,8 +1,9 @@
 // Not retail: smoke puffs of the render profile (game/src/render/bursts.rs; contract: `SmokeUniform` and `Built::quad`
 // there, our own work under the project licence). Alpha-blended quads, sorted far to near:
-// uv.x = kind * 4 + u (7 smoke, 9 splinter, 10 fiber), uv.y = seed * 2 + v, vertex colour rgb = colour, a = age share.
+// uv.x = kind * 4 + u (7 smoke, 9 splinter, 10 fiber, 11 smoke ribbon), uv.y = seed * 2 + v, vertex colour rgb = colour, a = age share.
 // Each puff is shaded as a soft ball: lit on the sun's side, the sky's colour on the other, with ragged, curling edges;
-// it thins out as it spreads.
+// it thins out as it spreads. A ribbon (kind 11: a shell's smoke trail, u across the strip) is the same ball seen as a
+// cylinder: its noise is read from where it hangs in the world, so it curls in place instead of sliding with the strip.
 import bevy_pbr::render::{
     forward_io::{VertexOutput, FragmentOutput},
     mesh_view_bindings::view,
@@ -39,7 +40,7 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
     let age = clamp(in.color.a, 0.0, 1.0);
     let s = seed * 5.17;
     let clock = frame.clock.y;
-    if kind > 8.5 {
+    if kind > 8.5 && kind < 10.5 {
         var mask: f32;
         var shade: f32;
         if kind < 9.5 {
@@ -59,17 +60,23 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
     }
 
     // ragged edge that curls slowly
-    let p = q * 1.8 + vec2<f32>(s, s * 0.7);
+    var p = q * 1.8 + vec2<f32>(s, s * 0.7);
+    var disc = q;
+    if kind > 10.5 {
+        let w = in.world_position.xyz;
+        p = vec2<f32>(w.x + w.y * 0.6, w.z) * 0.9 + q.x * 0.8 + vec2<f32>(s, s * 0.7);
+        disc = vec2<f32>(q.x, 0.0);
+    }
     let n = 0.6 * noise(p + vec2<f32>(clock * 0.15, -age * 1.5)) + 0.4 * noise(p * 2.3 - vec2<f32>(age, clock * 0.1));
-    let d = length(q) + 0.5 * (n - 0.5);
+    let d = length(disc) + 0.5 * (n - 0.5);
     let shape = smoothstep(1.0, 0.25, d);
 
     // a ball's normal in the camera's frame, turned to the world
-    let z = sqrt(max(1.0 - dot(q, q), 0.0));
+    let z = sqrt(max(1.0 - dot(disc, disc), 0.0));
     let right = view.world_from_view[0].xyz;
     let up = view.world_from_view[1].xyz;
     let back = view.world_from_view[2].xyz;
-    let normal = normalize(right * q.x + up * q.y + back * (z + 0.3));
+    let normal = normalize(right * disc.x + up * disc.y + back * (z + 0.3));
     let lit = clamp(dot(normal, -frame.sun.xyz) * 0.6 + 0.4, 0.0, 1.0);
     let rgb = in.color.rgb * mix(smoke.shade.rgb + vec3<f32>(0.08), frame.sun_color.rgb, lit) * (0.85 + 0.3 * n);
 
