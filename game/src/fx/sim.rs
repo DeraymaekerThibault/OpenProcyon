@@ -147,11 +147,7 @@ fn emitter_transform(previous: Transform, current: Transform, remainder: f32, fr
         return current;
     }
     let t = (1.0 - remainder / frame).clamp(0.0, 1.0);
-    Transform {
-        translation: previous.translation.lerp(current.translation, t),
-        rotation: previous.rotation.slerp(current.rotation, t),
-        scale: previous.scale.lerp(current.scale, t),
-    }
+    crate::interpolate::blend(&previous, &current, t)
 }
 
 fn spawn_particle(p: &Prim, t: f32, gt: &GlobalTransform, rng: &mut FxRng, vel_scale: f32) -> P {

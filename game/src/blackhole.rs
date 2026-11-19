@@ -5,7 +5,7 @@
 //! normalisation (unknown). Pull (`Magnitude`) and the core kill: see `pull` below, from retail measurements (docs/re/effects.md).
 use bevy::asset::RenderAssetUsages;
 use bevy::camera::visibility::NoFrustumCulling;
-use bevy::mesh::{Indices, PrimitiveTopology};
+use bevy::mesh::PrimitiveTopology;
 use bevy::prelude::*;
 
 use crate::docking::Docker;
@@ -136,8 +136,7 @@ pub struct BlackHole {
 
 impl BlackHole {
     fn f(&mut self) -> f32 {
-        self.rng = self.rng.wrapping_mul(0x19660d).wrapping_add(0x3c6ef35f);
-        f32::from_bits(self.rng & 0x7fffff | 0x3f800000) - 1.0
+        fx::lcg_unit(&mut self.rng)
     }
     fn jitter(&mut self) -> Vec3 {
         Vec3::new((self.f() * 2.0 - 1.0) * 0.07, (self.f() * 2.0 - 1.0) * 0.07, (self.f() * 2.0 - 1.0) * 0.02)
@@ -375,10 +374,7 @@ pub fn update(
             }
         }
         if let Some(mut mesh) = h.mesh.as_ref().and_then(|m| meshes.get_mut(m)) {
-            mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, pos);
-            mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uv);
-            mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, col);
-            mesh.insert_indices(Indices::U32(idx));
+            fx::set_ribbons(&mut mesh, pos, uv, col, idx);
         }
     }
 }

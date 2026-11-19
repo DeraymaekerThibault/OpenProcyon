@@ -8,7 +8,7 @@
 use bevy::asset::RenderAssetUsages;
 use bevy::audio::Volume;
 use bevy::camera::visibility::NoFrustumCulling;
-use bevy::mesh::{Indices, PrimitiveTopology};
+use bevy::mesh::PrimitiveTopology;
 use bevy::prelude::*;
 use serde_json::Value;
 
@@ -84,8 +84,7 @@ impl Sim {
     }
 
     fn f(&mut self) -> f32 {
-        self.rng = self.rng.wrapping_mul(0x19660d).wrapping_add(0x3c6ef35f);
-        f32::from_bits(self.rng & 0x7fffff | 0x3f800000) - 1.0
+        fx::lcg_unit(&mut self.rng)
     }
     fn range(&mut self, a: f32, b: f32) -> f32 {
         a + (b - a) * self.f()
@@ -689,10 +688,7 @@ fn update(
             col.push([rgb[0] * facing, rgb[1] * facing, rgb[2] * facing, 1.0]);
         }
         if let Some(mut m) = c.mesh.as_ref().and_then(|m| meshes.get_mut(m)) {
-            m.insert_attribute(Mesh::ATTRIBUTE_POSITION, pos);
-            m.insert_attribute(Mesh::ATTRIBUTE_UV_0, uv);
-            m.insert_attribute(Mesh::ATTRIBUTE_COLOR, col);
-            m.insert_indices(Indices::U32(c.idx.clone()));
+            fx::set_ribbons(&mut m, pos, uv, col, c.idx.clone());
         }
         if let Some(mut sink) = sink {
             let distance = (cam.distance(centre) - c.radius).max(0.0);
