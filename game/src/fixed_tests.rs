@@ -146,23 +146,7 @@ fn moving_ship() -> (App, Entity) {
         crew: [0; 8],
         boarding_points: vec![],
     };
-    let ship = Ship {
-        class: 0,
-        side: Side::Player,
-        heading: 0.0,
-        speed: 2.0,
-        ang_vel: 0.0,
-        order: 2,
-        waypoints: vec![],
-        goal: Some(0.5),
-        cap: 1.0,
-        throttle: None,
-        sail_energy: 1.0,
-        crew_speed: 1.0,
-        crew_turn: 1.0,
-        net: 1.0,
-        avoid: 1.0,
-    };
+    let ship = Ship { heading: 0.0, speed: 2.0, order: 2, goal: Some(0.5), ..Ship::new(0, Side::Player) };
     let mut app = clock();
     app.insert_resource(Library { classes: vec![class], guns: default(), bullets: default(), names: default(), clips: default() })
         .add_systems(FixedUpdate, sail.in_set(BattleSet::Simulate));

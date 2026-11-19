@@ -57,6 +57,27 @@ pub struct Ship {
 }
 
 impl Ship {
+    /// A ship at rest: no orders or course, every crew, net and nebula multiplier neutral (1.0). Callers set what differs.
+    pub fn new(class: usize, side: Side) -> Self {
+        Ship {
+            class,
+            side,
+            heading: 0.0,
+            speed: 0.0,
+            ang_vel: 0.0,
+            order: 0,
+            waypoints: vec![],
+            goal: None,
+            cap: 1.0,
+            throttle: None,
+            sail_energy: 1.0,
+            crew_speed: 1.0,
+            crew_turn: 1.0,
+            net: 1.0,
+            avoid: 1.0,
+        }
+    }
+
     /// Drops the course and heading goal and orders a stop (the speed bleeds off on its own).
     pub fn halt(&mut self) {
         self.waypoints.clear();

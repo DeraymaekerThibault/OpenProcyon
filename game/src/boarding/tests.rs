@@ -144,23 +144,7 @@ fn spawn(app: &mut App, class: &str, side: Side, at: Vec3, skill: Skill) -> Enti
     let ci = app.world().resource::<Library>().index(class);
     let c = &app.world().resource::<Library>().classes[ci];
     let health = Health::new(c);
-    let ship = Ship {
-        class: ci,
-        side,
-        heading: 0.0,
-        speed: 0.0,
-        ang_vel: 0.0,
-        order: 0,
-        waypoints: vec![],
-        goal: None,
-        cap: 1.0,
-        throttle: None,
-        sail_energy: 1.0,
-        crew_speed: 1.0,
-        crew_turn: 1.0,
-        net: 1.0,
-        avoid: 1.0,
-    };
+    let ship = Ship { heading: 0.0, ..Ship::new(ci, side) };
     app.world_mut().spawn((Transform::from_translation(at), ship, health, Drift::default(), Boardable::ship(class, skill, true))).id()
 }
 
@@ -352,23 +336,7 @@ fn ai_harpoons_bear_by_arc_and_long_range() {
     let lib = Library::load(assets_dir());
     let bears = |class: &str, at: Vec3| {
         let ci = lib.index(class);
-        let ship = Ship {
-            class: ci,
-            side: Side::Enemy,
-            heading: 0.0,
-            speed: 0.0,
-            ang_vel: 0.0,
-            order: 0,
-            waypoints: vec![],
-            goal: None,
-            cap: 1.0,
-            throttle: None,
-            sail_energy: 1.0,
-            crew_speed: 1.0,
-            crew_turn: 1.0,
-            net: 1.0,
-            avoid: 1.0,
-        };
+        let ship = Ship { heading: 0.0, ..Ship::new(ci, Side::Enemy) };
         harpoon_bears(&lib, &ship, &Health::new(&lib.classes[ci]), None, &Transform::IDENTITY, at)
     };
     assert!(bears("Ship_Pirate_Barque", Vec3::X * 40.0) && bears("Ship_Pirate_Barque", Vec3::NEG_X * 40.0));
@@ -382,23 +350,7 @@ fn ai_harpoons_bear_by_arc_and_long_range() {
 fn base_boarding_needs_a_boarding_point_in_reach_and_a_slow_boarder() {
     let lib = Library::load(assets_dir());
     let ci = lib.index("Ship_Navy_Cutter");
-    let ship = Ship {
-        class: ci,
-        side: Side::Enemy,
-        heading: 0.0,
-        speed: 0.0,
-        ang_vel: 0.0,
-        order: 0,
-        waypoints: vec![],
-        goal: None,
-        cap: 1.0,
-        throttle: None,
-        sail_energy: 1.0,
-        crew_speed: 1.0,
-        crew_turn: 1.0,
-        net: 1.0,
-        avoid: 1.0,
-    };
+    let ship = Ship { heading: 0.0, ..Ship::new(ci, Side::Enemy) };
     let base_tf = Transform::from_xyz(100.0, 0.0, 0.0);
     let point = Vec3::new(-10.0, 0.0, 0.0); // world (90, 0, 0)
     let at = |x: f32| Transform::from_xyz(x, 0.0, 0.0);

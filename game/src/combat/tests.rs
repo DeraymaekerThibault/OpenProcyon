@@ -2,6 +2,31 @@ use super::*;
 
 /// Mission 6's stockade gate has no guns, only a vitalToMission section, and the rules wait for that section's damage to reach 1.
 /// The importer must export it as a class (an attackable base), and shooting the section down must read as full mission damage.
+/// An app with the asset server and the asset types ship and base models load into.
+fn asset_app() -> App {
+    let mut app = App::new();
+    app.add_plugins((TaskPoolPlugin::default(), AssetPlugin::default(), TransformPlugin))
+        .init_asset::<bevy::world_serialization::WorldAsset>()
+        .init_asset::<bevy::prelude::Image>();
+    app
+}
+
+/// `asset_app` plus what `base_fire` reads and writes: sfx and fired messages, time, effects, library, rng, shell look, sensors.
+fn base_fire_app() -> App {
+    let mut app = asset_app();
+    app.add_message::<Sfx>()
+        .add_message::<Fired>()
+        .init_resource::<Time>()
+        .init_resource::<FxLib>()
+        .insert_resource(Library::load(assets_dir()))
+        .insert_resource(Rng::new(7))
+        .insert_resource(Look { mesh: default(), shell: default(), enemy_shell: default() })
+        .init_resource::<crate::environment::Sensors>()
+        .add_systems(PreUpdate, crate::environment::refresh_sensors)
+        .add_systems(Update, base_fire);
+    app
+}
+
 #[test]
 #[ignore = "needs imported assets"]
 fn gunless_stockade_is_a_base_whose_mission_section_can_be_destroyed() {
@@ -186,11 +211,8 @@ fn resting_muzzles_sit_at_their_authored_points() {
 #[test]
 #[ignore = "needs imported assets"]
 fn hostile_island_towers_shoot_the_player_and_neutral_ones_do_not() {
-    let mut app = App::new();
-    app.add_plugins((TaskPoolPlugin::default(), AssetPlugin::default(), TransformPlugin))
-        .init_asset::<bevy::world_serialization::WorldAsset>()
-        .init_asset::<bevy::prelude::Image>()
-        .add_message::<Sfx>()
+    let mut app = asset_app();
+    app.add_message::<Sfx>()
         .add_message::<Fired>()
         .add_message::<Hit>()
         .add_message::<Destroyed>()
@@ -223,23 +245,7 @@ fn hostile_island_towers_shoot_the_player_and_neutral_ones_do_not() {
     let hostile = spawn_base(&mut app, "SmugglerCampEnemy", 0.0);
     spawn_base(&mut app, "NO PLAYER", 40.0);
     let c = lib.index("Ship_Navy_Torpedo");
-    let ship = Ship {
-        class: c,
-        side: Side::Player,
-        heading: 0.0,
-        speed: 0.0,
-        ang_vel: 0.0,
-        order: 0,
-        waypoints: vec![],
-        goal: None,
-        cap: 1.0,
-        throttle: None,
-        sail_energy: 1.0,
-        crew_speed: 1.0,
-        crew_turn: 1.0,
-        net: 1.0,
-        avoid: 1.0,
-    };
+    let ship = Ship { heading: 0.0, ..Ship::new(c, Side::Player) };
     let ms = crate::campaign::MissionShip {
         id: 1,
         name: "p".into(),
@@ -299,20 +305,7 @@ fn hostile_island_towers_shoot_the_player_and_neutral_ones_do_not() {
 #[test]
 #[ignore = "needs imported assets"]
 fn skirmish_bases_shoot_ships_of_other_sides_only() {
-    let mut app = App::new();
-    app.add_plugins((TaskPoolPlugin::default(), AssetPlugin::default(), TransformPlugin))
-        .init_asset::<bevy::world_serialization::WorldAsset>()
-        .init_asset::<bevy::prelude::Image>()
-        .add_message::<Sfx>()
-        .add_message::<Fired>()
-        .init_resource::<Time>()
-        .init_resource::<FxLib>()
-        .insert_resource(Library::load(assets_dir()))
-        .insert_resource(Rng::new(7))
-        .insert_resource(Look { mesh: default(), shell: default(), enemy_shell: default() })
-        .init_resource::<crate::environment::Sensors>()
-        .add_systems(PreUpdate, crate::environment::refresh_sensors)
-        .add_systems(Update, base_fire);
+    let mut app = base_fire_app();
     let assets = app.world().resource::<AssetServer>().clone();
     let lib = Library::load(assets_dir());
     let class = lib.index("Base_SmugglersCamp");
@@ -326,23 +319,7 @@ fn skirmish_bases_shoot_ships_of_other_sides_only() {
     let hostile = spawn_base(&mut app, Side::Enemy, 0.0);
     spawn_base(&mut app, Side::Player, 40.0);
     let c = lib.index("Ship_Navy_Torpedo");
-    let ship = Ship {
-        class: c,
-        side: Side::Player,
-        heading: 0.0,
-        speed: 0.0,
-        ang_vel: 0.0,
-        order: 0,
-        waypoints: vec![],
-        goal: None,
-        cap: 1.0,
-        throttle: None,
-        sail_energy: 1.0,
-        crew_speed: 1.0,
-        crew_turn: 1.0,
-        net: 1.0,
-        avoid: 1.0,
-    };
+    let ship = Ship { heading: 0.0, ..Ship::new(c, Side::Player) };
     app.world_mut().spawn((Transform::from_xyz(0.0, 0.0, -120.0), ship, Health::new(&lib.classes[c]), Fires::default(), PlayerShip));
     for _ in 0..300 {
         app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs_f32(0.05));
@@ -355,20 +332,7 @@ fn skirmish_bases_shoot_ships_of_other_sides_only() {
 #[test]
 #[ignore = "needs imported assets"]
 fn a_volcano_lobs_one_aimed_shell_at_a_time() {
-    let mut app = App::new();
-    app.add_plugins((TaskPoolPlugin::default(), AssetPlugin::default(), TransformPlugin))
-        .init_asset::<bevy::world_serialization::WorldAsset>()
-        .init_asset::<bevy::prelude::Image>()
-        .add_message::<Sfx>()
-        .add_message::<Fired>()
-        .init_resource::<Time>()
-        .init_resource::<FxLib>()
-        .insert_resource(Library::load(assets_dir()))
-        .insert_resource(Rng::new(7))
-        .insert_resource(Look { mesh: default(), shell: default(), enemy_shell: default() })
-        .init_resource::<crate::environment::Sensors>()
-        .add_systems(PreUpdate, crate::environment::refresh_sensors)
-        .add_systems(Update, base_fire);
+    let mut app = base_fire_app();
     let assets = app.world().resource::<AssetServer>().clone();
     let lib = Library::load(assets_dir());
     let class = lib.index("Island_Volcano_01");
@@ -382,23 +346,7 @@ fn a_volcano_lobs_one_aimed_shell_at_a_time() {
     spawn_base(&mut app, Side::Enemy, 0.0);
     spawn_base(&mut app, Side::Player, 40.0);
     let c = lib.index("Ship_Navy_Torpedo");
-    let ship = Ship {
-        class: c,
-        side: Side::Player,
-        heading: 0.0,
-        speed: 0.0,
-        ang_vel: 0.0,
-        order: 0,
-        waypoints: vec![],
-        goal: None,
-        cap: 1.0,
-        throttle: None,
-        sail_energy: 1.0,
-        crew_speed: 1.0,
-        crew_turn: 1.0,
-        net: 1.0,
-        avoid: 1.0,
-    };
+    let ship = Ship { heading: 0.0, ..Ship::new(c, Side::Player) };
     app.world_mut().spawn((Transform::from_xyz(0.0, 0.0, -120.0), ship, Health::new(&lib.classes[c]), Fires::default(), PlayerShip));
     for _ in 0..200 {
         app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs_f32(0.05));
@@ -412,20 +360,7 @@ fn a_volcano_lobs_one_aimed_shell_at_a_time() {
 #[test]
 #[ignore = "needs imported assets"]
 fn a_silent_island_never_fires() {
-    let mut app = App::new();
-    app.add_plugins((TaskPoolPlugin::default(), AssetPlugin::default(), TransformPlugin))
-        .init_asset::<bevy::world_serialization::WorldAsset>()
-        .init_asset::<bevy::prelude::Image>()
-        .add_message::<Sfx>()
-        .add_message::<Fired>()
-        .init_resource::<Time>()
-        .init_resource::<FxLib>()
-        .insert_resource(Library::load(assets_dir()))
-        .insert_resource(Rng::new(7))
-        .insert_resource(Look { mesh: default(), shell: default(), enemy_shell: default() })
-        .init_resource::<crate::environment::Sensors>()
-        .add_systems(PreUpdate, crate::environment::refresh_sensors)
-        .add_systems(Update, base_fire);
+    let mut app = base_fire_app();
     let assets = app.world().resource::<AssetServer>().clone();
     let lib = Library::load(assets_dir());
     let class = lib.index("Island_Volcano_01");
@@ -439,23 +374,7 @@ fn a_silent_island_never_fires() {
     spawn_base(&mut app, Side::Enemy, 0.0, false);
     spawn_base(&mut app, Side::Player, 40.0, true);
     let c = lib.index("Ship_Navy_Torpedo");
-    let ship = Ship {
-        class: c,
-        side: Side::Player,
-        heading: 0.0,
-        speed: 0.0,
-        ang_vel: 0.0,
-        order: 0,
-        waypoints: vec![],
-        goal: None,
-        cap: 1.0,
-        throttle: None,
-        sail_energy: 1.0,
-        crew_speed: 1.0,
-        crew_turn: 1.0,
-        net: 1.0,
-        avoid: 1.0,
-    };
+    let ship = Ship { heading: 0.0, ..Ship::new(c, Side::Player) };
     app.world_mut().spawn((Transform::from_xyz(0.0, 0.0, -120.0), ship, Health::new(&lib.classes[c]), Fires::default(), PlayerShip));
     for _ in 0..200 {
         app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs_f32(0.05));
@@ -473,11 +392,8 @@ fn better_gunners_spread_less() {
 #[test]
 #[ignore = "needs imported assets"]
 fn the_command_ship_holds_fire_until_an_enemy_is_clicked() {
-    let mut app = App::new();
-    app.add_plugins((TaskPoolPlugin::default(), AssetPlugin::default(), TransformPlugin))
-        .init_asset::<bevy::world_serialization::WorldAsset>()
-        .init_asset::<bevy::prelude::Image>()
-        .add_message::<Sfx>()
+    let mut app = asset_app();
+    app.add_message::<Sfx>()
         .add_message::<Fired>()
         .add_message::<Hit>()
         .add_message::<Destroyed>()
@@ -496,23 +412,7 @@ fn the_command_ship_holds_fire_until_an_enemy_is_clicked() {
     let assets = app.world().resource::<AssetServer>().clone();
     let lib = Library::load(assets_dir());
     let c = lib.index("Ship_Navy_Frigate");
-    let ship = |side| Ship {
-        class: c,
-        side,
-        heading: 0.0,
-        speed: 0.0,
-        ang_vel: 0.0,
-        order: 0,
-        waypoints: vec![],
-        goal: None,
-        cap: 1.0,
-        throttle: None,
-        sail_energy: 1.0,
-        crew_speed: 1.0,
-        crew_turn: 1.0,
-        net: 1.0,
-        avoid: 1.0,
-    };
+    let ship = |side| Ship { heading: 0.0, ..Ship::new(c, side) };
     let spawn = |app: &mut App, side, x: f32| {
         let e = app.world_mut().spawn((Transform::from_xyz(x, 0.0, 0.0), ship(side), Health::new(&lib.classes[c]), Fires::default())).id();
         let states = spawn_guns(&mut app.world_mut().commands(), &assets, &lib, e, c);
@@ -538,11 +438,8 @@ fn the_command_ship_holds_fire_until_an_enemy_is_clicked() {
 #[test]
 #[ignore = "needs imported assets"]
 fn a_skirmish_computer_ship_with_a_map_script_fires_at_its_captains_target() {
-    let mut app = App::new();
-    app.add_plugins((TaskPoolPlugin::default(), AssetPlugin::default(), TransformPlugin))
-        .init_asset::<bevy::world_serialization::WorldAsset>()
-        .init_asset::<bevy::prelude::Image>()
-        .add_message::<Sfx>()
+    let mut app = asset_app();
+    app.add_message::<Sfx>()
         .add_message::<Fired>()
         .add_message::<Hit>()
         .add_message::<Destroyed>()
@@ -562,23 +459,7 @@ fn a_skirmish_computer_ship_with_a_map_script_fires_at_its_captains_target() {
     let assets = app.world().resource::<AssetServer>().clone();
     let lib = Library::load(assets_dir());
     let c = lib.index("Ship_Navy_Frigate");
-    let ship = |side| Ship {
-        class: c,
-        side,
-        heading: 0.0,
-        speed: 0.0,
-        ang_vel: 0.0,
-        order: 0,
-        waypoints: vec![],
-        goal: None,
-        cap: 1.0,
-        throttle: None,
-        sail_energy: 1.0,
-        crew_speed: 1.0,
-        crew_turn: 1.0,
-        net: 1.0,
-        avoid: 1.0,
-    };
+    let ship = |side| Ship { heading: 0.0, ..Ship::new(c, side) };
     let spawn = |app: &mut App, side, x: f32| {
         let e = app.world_mut().spawn((Transform::from_xyz(x, 0.0, 0.0), ship(side), Health::new(&lib.classes[c]), Fires::default())).id();
         let states = spawn_guns(&mut app.world_mut().commands(), &assets, &lib, e, c);
@@ -602,11 +483,8 @@ fn a_skirmish_computer_ship_with_a_map_script_fires_at_its_captains_target() {
 #[test]
 #[ignore = "needs imported assets"]
 fn the_command_ship_damages_a_clicked_hostile_skirmish_base() {
-    let mut app = App::new();
-    app.add_plugins((TaskPoolPlugin::default(), AssetPlugin::default(), TransformPlugin))
-        .init_asset::<bevy::world_serialization::WorldAsset>()
-        .init_asset::<bevy::prelude::Image>()
-        .add_message::<Sfx>()
+    let mut app = asset_app();
+    app.add_message::<Sfx>()
         .add_message::<Fired>()
         .add_message::<Hit>()
         .add_message::<Destroyed>()
@@ -625,23 +503,7 @@ fn the_command_ship_damages_a_clicked_hostile_skirmish_base() {
     let assets = app.world().resource::<AssetServer>().clone();
     let lib = Library::load(assets_dir());
     let c = lib.index("Ship_Navy_Frigate");
-    let ship = |side| Ship {
-        class: c,
-        side,
-        heading: 0.0,
-        speed: 0.0,
-        ang_vel: 0.0,
-        order: 0,
-        waypoints: vec![],
-        goal: None,
-        cap: 1.0,
-        throttle: None,
-        sail_energy: 1.0,
-        crew_speed: 1.0,
-        crew_turn: 1.0,
-        net: 1.0,
-        avoid: 1.0,
-    };
+    let ship = |side| Ship { heading: 0.0, ..Ship::new(c, side) };
     let spawn = |app: &mut App, side, x: f32| {
         let e = app.world_mut().spawn((Transform::from_xyz(x, 0.0, 0.0), ship(side), Health::new(&lib.classes[c]), Fires::default())).id();
         let states = spawn_guns(&mut app.world_mut().commands(), &assets, &lib, e, c);
@@ -675,11 +537,8 @@ fn count_blasts(mut sfx: MessageReader<Sfx>, mut n: ResMut<Blasts>) {
 #[test]
 #[ignore = "needs imported assets"]
 fn a_destroyed_base_part_blasts() {
-    let mut app = App::new();
-    app.add_plugins((TaskPoolPlugin::default(), AssetPlugin::default(), TransformPlugin))
-        .init_asset::<bevy::world_serialization::WorldAsset>()
-        .init_asset::<bevy::prelude::Image>()
-        .add_message::<Sfx>()
+    let mut app = asset_app();
+    app.add_message::<Sfx>()
         .add_message::<Fired>()
         .add_message::<Hit>()
         .add_message::<Destroyed>()
@@ -699,23 +558,7 @@ fn a_destroyed_base_part_blasts() {
     let assets = app.world().resource::<AssetServer>().clone();
     let lib = Library::load(assets_dir());
     let c = lib.index("Ship_Navy_Frigate");
-    let ship = |side| Ship {
-        class: c,
-        side,
-        heading: 0.0,
-        speed: 0.0,
-        ang_vel: 0.0,
-        order: 0,
-        waypoints: vec![],
-        goal: None,
-        cap: 1.0,
-        throttle: None,
-        sail_energy: 1.0,
-        crew_speed: 1.0,
-        crew_turn: 1.0,
-        net: 1.0,
-        avoid: 1.0,
-    };
+    let ship = |side| Ship { heading: 0.0, ..Ship::new(c, side) };
     let spawn = |app: &mut App, side, x: f32| {
         let e = app.world_mut().spawn((Transform::from_xyz(x, 0.0, 0.0), ship(side), Health::new(&lib.classes[c]), Fires::default())).id();
         let states = spawn_guns(&mut app.world_mut().commands(), &assets, &lib, e, c);
@@ -1042,23 +885,7 @@ fn computer_ships_use_their_own_crew_for_repair() {
     let lib = Library::load(assets_dir());
     let c = lib.index("Ship_Pirate_Barque");
     let class = &lib.classes[c];
-    let ship = |side| Ship {
-        class: c,
-        side,
-        heading: 0.0,
-        speed: 0.0,
-        ang_vel: 0.0,
-        order: 0,
-        waypoints: vec![],
-        goal: None,
-        cap: 1.0,
-        throttle: None,
-        sail_energy: 1.0,
-        crew_speed: 1.0,
-        crew_turn: 1.0,
-        net: 1.0,
-        avoid: 1.0,
-    };
+    let ship = |side| Ship { heading: 0.0, ..Ship::new(c, side) };
     let slots = |skill: Skill, role: usize| {
         let foe = ship(Side::Enemy);
         let boardable = Boardable::ship(&class.name, skill, true);
@@ -1184,23 +1011,7 @@ fn engine_exhaust_needs_motion_not_just_an_order() {
         .add_systems(Update, engine_rate);
     let lib = Library::load(assets_dir());
     let c = lib.index("Ship_Navy_Torpedo");
-    let ship = Ship {
-        class: c,
-        side: Side::Player,
-        heading: 0.0,
-        speed: 0.0,
-        ang_vel: 0.0,
-        order: 2,
-        waypoints: vec![],
-        goal: None,
-        cap: 1.0,
-        throttle: None,
-        sail_energy: 1.0,
-        crew_speed: 1.0,
-        crew_turn: 1.0,
-        net: 1.0,
-        avoid: 1.0,
-    };
+    let ship = Ship { heading: 0.0, order: 2, ..Ship::new(c, Side::Player) };
     let s = app.world_mut().spawn((Transform::default(), ship, Health::new(&lib.classes[c]))).id();
     let fx = app.world_mut().resource_scope(|world, fxl: Mut<FxLib>| {
         spawn_engines(&mut world.commands(), &fxl, &lib, s, c, Transform::default());
@@ -1249,23 +1060,7 @@ fn shell_into_a_hull_damages_it_and_reports_the_hit() {
         .add_message::<Shoot>()
         .add_message::<crate::decals::Scar>()
         .add_systems(Update, (crate::tick_start, shells).chain());
-    let ship = Ship {
-        class: c,
-        side: Side::Enemy,
-        heading: 0.0,
-        speed: 0.0,
-        ang_vel: 0.0,
-        order: 0,
-        waypoints: vec![],
-        goal: None,
-        cap: 1.0,
-        throttle: None,
-        sail_energy: 1.0,
-        crew_speed: 1.0,
-        crew_turn: 1.0,
-        net: 1.0,
-        avoid: 1.0,
-    };
+    let ship = Ship { heading: 0.0, ..Ship::new(c, Side::Enemy) };
     let target = app.world_mut().spawn((Transform::default(), ship, Health::new(&lib.classes[c]), Fires::default())).id();
     let shooter = app.world_mut().spawn_empty().id();
     let bullet = lib.guns["Gun_CannonBall_Heavy"].bullet.clone();
@@ -1336,23 +1131,7 @@ fn land_in_the_way_stops_a_shell_before_the_hull() {
         .add_message::<Shoot>()
         .add_message::<crate::decals::Scar>()
         .add_systems(Update, (crate::tick_start, shells).chain());
-    let ship = Ship {
-        class: c,
-        side: Side::Enemy,
-        heading: 0.0,
-        speed: 0.0,
-        ang_vel: 0.0,
-        order: 0,
-        waypoints: vec![],
-        goal: None,
-        cap: 1.0,
-        throttle: None,
-        sail_energy: 1.0,
-        crew_speed: 1.0,
-        crew_turn: 1.0,
-        net: 1.0,
-        avoid: 1.0,
-    };
+    let ship = Ship { heading: 0.0, ..Ship::new(c, Side::Enemy) };
     let target = app.world_mut().spawn((Transform::default(), ship, Health::new(&lib.classes[c]), Fires::default())).id();
     let shooter = app.world_mut().spawn_empty().id();
     let bullet = lib.guns["Gun_CannonBall_Heavy"].bullet.clone();
@@ -1476,23 +1255,7 @@ fn a_mine_picks_its_target_five_seconds_after_it_is_laid() {
         .add_message::<Shoot>()
         .add_message::<crate::decals::Scar>()
         .add_systems(Update, (crate::tick_start, shells).chain());
-    let ship = Ship {
-        class: c,
-        side: Side::Enemy,
-        heading: 0.0,
-        speed: 0.0,
-        ang_vel: 0.0,
-        order: 0,
-        waypoints: vec![],
-        goal: None,
-        cap: 1.0,
-        throttle: None,
-        sail_energy: 1.0,
-        crew_speed: 1.0,
-        crew_turn: 1.0,
-        net: 1.0,
-        avoid: 1.0,
-    };
+    let ship = Ship { heading: 0.0, ..Ship::new(c, Side::Enemy) };
     app.world_mut().spawn((Transform::from_translation(Vec3::new(30.0, 0.0, 0.0)), ship, Health::new(&lib.classes[c]), Fires::default()));
     let shooter = app.world_mut().spawn_empty().id();
     let bullet = "Bullet_StarMine_Med".to_string();
@@ -1546,23 +1309,7 @@ fn a_lost_section_plays_the_med_explosion_once_and_no_damage_file() {
         .add_message::<crate::audio::Sfx>()
         .insert_resource(lib)
         .add_systems(Update, damage_fx);
-    let ship = crate::Ship {
-        class,
-        side: Side::Player,
-        heading: 0.0,
-        speed: 0.0,
-        ang_vel: 0.0,
-        order: 0,
-        waypoints: vec![],
-        goal: None,
-        cap: 1.0,
-        throttle: None,
-        sail_energy: 1.0,
-        crew_speed: 1.0,
-        crew_turn: 1.0,
-        net: 1.0,
-        avoid: 1.0,
-    };
+    let ship = crate::Ship { heading: 0.0, ..crate::Ship::new(class, Side::Player) };
     let dfx = DamageFx::new(&app.world().resource::<Library>().classes[class]);
     app.world_mut().spawn((ship, health, dfx, Transform::default()));
     app.update();
@@ -1648,23 +1395,7 @@ fn a_fire_that_burns_a_floored_section_out_goes_out() {
     app.init_resource::<Time>().add_systems(Update, super::damage::fires);
     let fire = super::damage::Fire { sec: 0, intensity: 50.0, state: 0, fx: None };
     let ms = crate::campaign::MissionShip { invuln: 0.5, ..Default::default() };
-    let ship = Ship {
-        class: c,
-        side: Side::Player,
-        heading: 0.0,
-        speed: 0.0,
-        ang_vel: 0.0,
-        order: 0,
-        waypoints: vec![],
-        goal: None,
-        cap: 1.0,
-        throttle: None,
-        sail_energy: 1.0,
-        crew_speed: 1.0,
-        crew_turn: 1.0,
-        net: 1.0,
-        avoid: 1.0,
-    };
+    let ship = Ship { heading: 0.0, ..Ship::new(c, Side::Player) };
     let e = app.world_mut().spawn((Transform::default(), ship, hp, super::damage::Fires { list: vec![fire], tick: 0.0 }, ms)).id();
     app.insert_resource(lib);
     for _ in 0..4 {
