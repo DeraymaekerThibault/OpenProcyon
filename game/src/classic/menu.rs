@@ -24,7 +24,10 @@ use super::widgets::{
 };
 
 pub fn plugin(app: &mut App) {
-    app.add_systems(Update, ((scroll_controls, scroll_saves, scroll_mods).before(BuildMenu), build.in_set(BuildMenu), wheel.after(RunButtons)).run_if(menu_active));
+    app.add_systems(
+        Update,
+        ((scroll_controls, scroll_saves, scroll_mods, scroll_missions).before(BuildMenu), build.in_set(BuildMenu), wheel.after(RunButtons)).run_if(menu_active),
+    );
 }
 
 /// Rebuilds the current screen when the state, the selection or the window size changes.
@@ -69,14 +72,15 @@ fn build(
         _ => None,
     };
     let mods_page = *state.get() == Screen::Mods;
+    let missions_page = *state.get() == Screen::Missions;
     let file = match state.get() {
-        _ if page.is_some() || settings_page.is_some() || mods_page => "",
+        _ if page.is_some() || settings_page.is_some() || mods_page || missions_page => "",
         Screen::Battle if ig.page() == Some(Page::Menu) => "ingamemenu_default",
         Screen::Battle if ig.page() == Some(Page::Summary) => "multiplayer_stats_screen",
         Screen::Battle if ig.page().is_some() => "ingamemenu_load_campaign",
         Screen::Load => "load_campaign_screen",
         Screen::Tutorial => "tutorial_screen",
-        Screen::Options | Screen::Mods | Screen::Controls | Screen::Audio | Screen::Display => unreachable!(),
+        Screen::Options | Screen::Mods | Screen::Missions | Screen::Controls | Screen::Audio | Screen::Display => unreachable!(),
         Screen::Main => "mainmenu",
         Screen::SinglePlayer => "singleplayer_menu",
         Screen::CreateSkirmish => "create_skirmish_game_screen",
@@ -102,6 +106,9 @@ fn build(
                 if mods_page {
                     mods_page_view(&ctx, c, &model.mods);
                 }
+                if missions_page {
+                    missions_page_view(&ctx, c, &model.missions);
+                }
                 if let Some(display) = settings_page {
                     sound_display_page(&ctx, c, display, ingame, strings, settings);
                 }
@@ -111,6 +118,10 @@ fn build(
                 if *state.get() == Screen::Main {
                     // Small corner button: the retail main menu has no Mods entry.
                     ctx.text_button(c, [670.0, 553.0, 780.0, 581.0], "Mods", "BlackChancery16", Action::Goto(Screen::Mods));
+                }
+                if *state.get() == Screen::SinglePlayer {
+                    // Small corner button, like Mods on the main menu: the retail Single Player menu has no Custom Missions entry.
+                    ctx.text_button(c, [620.0, 553.0, 780.0, 581.0], "Custom Missions", "BlackChancery16", Action::Goto(Screen::Missions));
                 }
                 if *state.get() == Screen::Lobby && sk.map_info {
                     map_info_dialog(&ctx, c, sk, strings);
@@ -611,6 +622,47 @@ fn mods_page_view(ctx: &Ctx, c: &mut ChildSpawnerCommands, mods: &crate::menu::M
     }
 }
 
+/// Single Player > Custom Missions (not retail; laid out like the Mods page): the missions mods add, grouped by campaign (mod),
+/// and the picked one's description with Play.
+fn missions_page_view(ctx: &Ctx, c: &mut ChildSpawnerCommands, missions: &crate::menu::MissionList) {
+    use crate::menu::MISSION_ROWS;
+    settings_frame(ctx, c, false, (Page::Options, Screen::SinglePlayer));
+    ctx.text(c, "BlackChancery22", "Custom Missions", 250.0, 300.0, 120.0, true, SETTINGS_GOLD);
+    stretched_window(ctx, c, [48.0, 128.0, 470.0, 478.0]);
+    ctx.fill(c, [52.0, 132.0, 414.0, 20.0], heading());
+    for (label, x, w) in [("Mission", 64.0, 200.0), ("Campaign", 270.0, 190.0)] {
+        ctx.text(c, BODY_FONT, label, x, w, 142.0, false, Color::WHITE);
+    }
+    for (n, m) in missions.list.iter().enumerate().skip(missions.scroll).take(MISSION_ROWS) {
+        let (y, h) = (154.0 + (n - missions.scroll) as f32 * 19.5, 19.5);
+        let fill = BackgroundColor(if missions.picked == Some(n) { picked() } else { Color::NONE });
+        c.spawn((ctx.node(52.0, y, 414.0, h), Interaction::None, Action::PickMission(n), fill)).with_children(|c| {
+            ctx.text(c, BODY_FONT, &m.name, 12.0, 200.0, h / 2.0, false, Color::WHITE);
+            ctx.text(c, BODY_FONT, &m.campaign, 218.0, 190.0, h / 2.0, false, Color::WHITE);
+        });
+    }
+    stretched_window(ctx, c, [490.0, 128.0, 752.0, 478.0]);
+    match missions.picked.and_then(|n| missions.list.get(n).map(|m| (n, m))) {
+        Some((n, m)) => {
+            ctx.text(c, "UniversBold14", &m.name, 506.0, 230.0, 148.0, false, Color::WHITE);
+            let (at, of) = missions.place(n);
+            let lines = [("Campaign", m.campaign.clone()), ("Mission", format!("{at} of {of}")), ("Map", m.id.clone())];
+            for (k, (label, value)) in lines.iter().enumerate() {
+                let cy = 172.0 + k as f32 * 16.0;
+                ctx.text(c, "Univers10", label, 506.0, 60.0, cy, false, Color::WHITE);
+                ctx.text(c, "Univers10", ":", 566.0, 8.0, cy, false, Color::WHITE);
+                ctx.text(c, "Univers10", value, 576.0, 170.0, cy, false, GOLD);
+            }
+            wrapped(ctx, c, "Univers10", &m.description, [506.0, 230.0, 736.0, 430.0]);
+            ctx.text_button(c, [546.0, 440.0, 696.0, 468.0], "Play", "BlackChancery16", Action::PlayMission(n));
+        }
+        None => {
+            let help = "No custom missions. A mission mod adds maps/<id>/mission.json; install it in the mods folder and switch it on                         under Mods (main menu), then start the game again.";
+            wrapped(ctx, c, "Univers10", help, [506.0, 172.0, 736.0, 300.0]);
+        }
+    }
+}
+
 /// Title gold of the Options pages.
 const SETTINGS_GOLD: Color = Color::srgb(1.0, 0.85, 0.2);
 
@@ -979,6 +1031,15 @@ fn scroll_mods(mut wheel: MessageReader<bevy::input::mouse::MouseWheel>, state: 
         let max = mods.rows().len().saturating_sub(crate::menu::MOD_ROWS);
         let next = wheel_step(mods.scroll, dy, max);
         mods.scroll = next;
+    }
+}
+
+/// Mouse wheel scrolls the Custom Missions list.
+fn scroll_missions(mut wheel: MessageReader<bevy::input::mouse::MouseWheel>, state: Res<State<Screen>>, mut missions: ResMut<crate::menu::MissionList>) {
+    let dy: f32 = wheel.read().map(|e| e.y).sum();
+    if dy != 0.0 && *state.get() == Screen::Missions {
+        let max = missions.list.len().saturating_sub(crate::menu::MISSION_ROWS);
+        missions.scroll = wheel_step(missions.scroll, dy, max);
     }
 }
 

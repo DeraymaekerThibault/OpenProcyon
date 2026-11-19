@@ -169,7 +169,8 @@ pub fn run(view: fn(&mut App), setup_view: fn(&mut App)) {
         setup::report_crashes(dir.to_path_buf());
     }
     let installed = modding::installed(bundled_mods_dir().as_deref()).into_iter().filter(|m| m.enabled).map(|m| m.dir);
-    let layers: Vec<PathBuf> = std::iter::once(content_dir()).chain(installed).chain(mods).collect();
+    modding::set_active(installed.chain(mods).collect());
+    let layers: Vec<PathBuf> = std::iter::once(content_dir()).chain(modding::active().iter().cloned()).collect();
     let _ = ASSETS.set(modding::overlay(&base, &layers));
     let arg = |k: &str| args.iter().position(|a| a == k).and_then(|i| args.get(i + 1)).cloned();
     let shot = arg("--shot");
@@ -231,6 +232,7 @@ pub fn run(view: fn(&mut App), setup_view: fn(&mut App)) {
             Some("audio") => menu::Screen::Audio,
             Some("display") => menu::Screen::Display,
             Some("tutorial") => menu::Screen::Tutorial,
+            Some("missions") => menu::Screen::Missions,
             _ if args.iter().any(|a| a == "--menu") || (shot.is_none() && arg("--map").is_none() && arg("--mission").is_none()) => menu::Screen::Main,
             _ => menu::Screen::Battle,
         })

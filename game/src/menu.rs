@@ -5,11 +5,13 @@
 
 #![allow(deprecated)] // shortcut: bevy 0.20 Interaction (deprecated for picking Hovered/Pressed); port when it is removed
 mod lobby_scenario;
+mod missions;
 mod mods;
 mod saves;
 mod settings;
 mod skirmish;
 pub use lobby_scenario::*;
+pub use missions::*;
 pub use mods::*;
 pub use saves::*;
 pub use settings::*;
@@ -38,6 +40,8 @@ pub enum Screen {
     Controls,
     /// Main menu > Tutorial: Basic Training / Full Training (`Tutorial Screen.tst`).
     Tutorial,
+    /// Single Player > Custom Missions: the missions mods add (`MissionList`). Not retail.
+    Missions,
     /// Options > Sound Options (`Audio_Options.tst`) and Display Options (`Display Options Screen.tst`).
     Audio,
     Display,
@@ -90,6 +94,9 @@ pub enum Action {
     Campaign,
     /// Start a tutorial map ("basic_tutorial" or "tutorial"), run by the same rule interpreter as the campaign.
     Tutorial(&'static str),
+    /// Pick custom mission `n` (`MissionList`) for the Custom Missions panel; play it.
+    PickMission(usize),
+    PlayMission(usize),
     OpenLoad,
     Ingame(Option<Page>),
     PickSave(usize),
@@ -277,6 +284,7 @@ pub fn plugin(app: &mut App) {
         .init_resource::<CtrlUi>()
         .insert_resource(Settings::load())
         .insert_resource(ModList::load())
+        .insert_resource(MissionList::load())
         .init_resource::<BakeJob>()
         .add_systems(Update, (apply_settings, poll_bake))
         .add_systems(Last, stop_bake_on_exit)
@@ -298,7 +306,8 @@ pub fn plugin(app: &mut App) {
         .add_systems(PostUpdate, (summary_on_end, esc_menu).chain().run_if(in_state(Screen::Battle)))
         .add_systems(Update, (lobby_scenario, autolaunch).chain().run_if(in_state(Screen::Lobby)))
         .add_systems(Update, fleet_hook.run_if(in_state(Screen::Fleet)))
-        .add_systems(Update, mods_bake_hook.run_if(in_state(Screen::Mods)));
+        .add_systems(Update, mods_bake_hook.run_if(in_state(Screen::Mods)))
+        .add_systems(Update, missions_play_hook.after(BuildMenu).before(RunButtons).run_if(in_state(Screen::Missions)));
 }
 
 #[derive(Component)]
@@ -348,6 +357,7 @@ pub struct MenuModel<'w> {
     pub state: Res<'w, State<Screen>>,
     pub settings: Res<'w, Settings>,
     pub mods: Res<'w, ModList>,
+    pub missions: Res<'w, MissionList>,
     pub stats: Res<'w, crate::stats::GameStats>,
     pub outcome: Res<'w, crate::scenario::Outcome>,
     pub end_message: Res<'w, crate::scenario::EndMessage>,
@@ -475,6 +485,7 @@ impl MenuModel<'_> {
             || self.state.is_changed()
             || self.settings.is_changed()
             || self.mods.is_changed()
+            || self.missions.is_changed()
             || self.stats.is_changed()
     }
     pub fn key(&self, window: &Window) -> MenuKey {
@@ -499,7 +510,7 @@ impl MenuModel<'_> {
                 ui.list.len(),
                 cui.scroll,
                 (cui.capture, &self.binds.rows),
-                (&self.settings, &self.mods),
+                (&self.settings, &self.mods, (self.missions.picked, self.missions.scroll)),
                 (sk.dropdown, sk.name_open),
                 sk.flag_picker,
                 sk.map_scroll,
@@ -526,6 +537,20 @@ fn mods_bake_hook(mut mods: ResMut<ModList>, mut job: ResMut<BakeJob>, cfg: Res<
         *pressed += 1;
         mods.picked = mods.mods.iter().position(|m| m.id == "remaster");
         mods.bake_or_stop(&mut job);
+    }
+}
+
+/// Smoke hook (`--menu missions --script missions-play`): presses the Custom Missions screen's Play button once it is drawn, so the
+/// run starts the first custom mission the way a click does (needs a mission mod switched on or passed with `--mod`).
+fn missions_play_hook(cfg: Res<crate::Config>, mut buttons: Query<(&mut Interaction, &Action)>, mut done: Local<bool>) {
+    if *done || cfg.script != Some(crate::smoke::Script::MissionsPlay) || cfg.frame < 30 {
+        return;
+    }
+    for (mut i, a) in &mut buttons {
+        if matches!(a, Action::PlayMission(_)) {
+            *i = Interaction::Pressed;
+            *done = true;
+        }
     }
 }
 
@@ -837,7 +862,14 @@ fn buttons(
     lib: Res<Library>,
     mut exit: MessageWriter<AppExit>,
     mut cfg: ResMut<crate::Config>,
-    (mut binds, mut cui, mut settings, mut mods, mut bake): (ResMut<Bindings>, ResMut<CtrlUi>, ResMut<Settings>, ResMut<ModList>, ResMut<BakeJob>),
+    (mut binds, mut cui, mut settings, mut mods, mut bake, mut missions): (
+        ResMut<Bindings>,
+        ResMut<CtrlUi>,
+        ResMut<Settings>,
+        ResMut<ModList>,
+        ResMut<BakeJob>,
+        ResMut<MissionList>,
+    ),
     time: Res<Time<Real>>,
     mut clicks: Local<ClickClock>,
 ) {
@@ -893,6 +925,16 @@ fn buttons(
                 cfg.map = Some((*id).into());
                 cfg.ended = None;
                 next.set(Screen::Battle);
+            }
+            Action::PickMission(n) | Action::PlayMission(n) => {
+                missions.picked = Some(*n);
+                let play = matches!(action, Action::PlayMission(_)) || clicks.double(2, *n, time.elapsed_secs_f64());
+                if let Some(id) = missions.id(*n).filter(|_| play) {
+                    sk.map = None;
+                    cfg.map = Some(id.into());
+                    cfg.ended = None;
+                    next.set(Screen::Battle);
+                }
             }
             Action::Launch => launch(&mut sk, &mut next),
             _ => {}
