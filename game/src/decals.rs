@@ -1,4 +1,4 @@
-//! Damage decals (AV-03 on the project board "OpenProcyon fidelity: every rule of the original"): a shell that strikes a hull leaves a scar texture from `BD_DecalTextures`
+//! Damage decals: a shell that strikes a hull leaves a scar texture from `BD_DecalTextures`
 //! (assets/decals, data/decals.json from tools/export_decals.py): the bucket for the struck section's material, the size class of
 //! the bullet's 'Decal Damage Size'. Decoded: every hit that is not a ricochet leaves a scar of 0.25 / 0.5 / 1.0 units, crowded scars merge
 //! (`merge`), at most 150 per ship. PROVISIONAL: the original clips the scar onto the hull triangles; here it is a camera-lit quad
