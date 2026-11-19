@@ -199,11 +199,14 @@ fn plume_mesh() -> Mesh {
     let (mut pos, mut nor, mut uv) = (vec![], vec![], vec![]);
     for i in 0..=RINGS {
         let v = i as f32 / RINGS as f32;
-        let r = (0.5 + 0.5 * (v / 0.15).min(1.0)) * (1.0 - 0.75 * v);
+        // a slight swell past the nozzle (the flame stays close to the port's size), then a steady taper
+        let r = (0.5 + 0.2 * (v / 0.1).min(1.0)) * (1.0 - 0.8 * v);
         for j in 0..=AROUND {
             let a = j as f32 / AROUND as f32 * std::f32::consts::TAU;
             pos.push([r * a.cos(), r * a.sin(), v]);
-            nor.push([a.cos(), a.sin(), 0.0]);
+            // tilted astern so the flame still reads when seen straight down its axis (the shader weighs by facing)
+            let n = Vec3::new(a.cos(), a.sin(), 0.6).normalize();
+            nor.push(n.to_array());
             uv.push([j as f32 / AROUND as f32, v]);
         }
     }

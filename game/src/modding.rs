@@ -26,6 +26,18 @@ fn link(from: &Path, to: &Path) {
     }
 }
 
+static ACTIVE: std::sync::OnceLock<Vec<PathBuf>> = std::sync::OnceLock::new();
+
+/// Records this launch's mod folders (switched-on installed mods, then `--mod` folders, in overlay order). Set once, at startup.
+pub fn set_active(dirs: Vec<PathBuf>) {
+    let _ = ACTIVE.set(dirs);
+}
+
+/// The mod folders overlaid in this launch (empty before `set_active`, as in unit tests).
+pub fn active() -> &'static [PathBuf] {
+    ACTIVE.get().map_or(&[], Vec::as_slice)
+}
+
 /// Objects merge key by key, anything else is replaced.
 pub fn merge(base: &mut Value, over: &Value) {
     match (base, over) {

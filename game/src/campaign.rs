@@ -280,10 +280,72 @@ pub fn is_mission(map: Option<&str>) -> bool {
     map.is_some_and(|m| assets_dir().join(format!("maps/{m}/mission.json")).exists())
 }
 
-/// The mission after `id` ("mission02" -> "mission03"), if it is exported.
+/// The retail campaign's missions "mission01".."mission13": the only ones whose victory points count toward the campaign total.
+pub fn is_campaign(id: &str) -> bool {
+    id.strip_prefix("mission").is_some_and(|n| n.len() == 2 && n.parse::<u32>().is_ok())
+}
+
+/// The mission after `id`, if it is exported: the next retail mission ("mission02" -> "mission03"), or the next custom mission of
+/// the same mod campaign (`custom_missions`).
 pub fn next(id: &str) -> Option<String> {
-    let n: u32 = id.strip_prefix("mission")?.parse().ok()?;
-    Some(format!("mission{:02}", n + 1)).filter(|m| is_mission(Some(m)))
+    if is_campaign(id) {
+        let n: u32 = id["mission".len()..].parse().ok()?;
+        return Some(format!("mission{:02}", n + 1)).filter(|m| is_mission(Some(m)));
+    }
+    next_custom(custom_missions(), id)
+}
+
+/// A mission a mod adds (not retail): its map id, the map's name and description, and the campaign it belongs to (its mod).
+#[derive(Clone, Debug, PartialEq)]
+pub struct CustomMission {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    /// The mod's `name` (folder name when it has none): each mod is one campaign.
+    pub campaign: String,
+}
+
+/// The custom missions of this launch's mods (`modding::active`), read once.
+pub fn custom_missions() -> &'static [CustomMission] {
+    static LIST: std::sync::OnceLock<Vec<CustomMission>> = std::sync::OnceLock::new();
+    LIST.get_or_init(|| custom_missions_in(crate::modding::active(), &assets_dir().join("maps")))
+}
+
+/// Every `maps/<id>/mission.json` in `mods` (in load order), grouped by mod. A mod's missions play in the order of its `mod.json`
+/// `"missions": [ids]` (the rest after, by id). Retail ids (`missionNN`, the tutorials) are left out: a mod's copy replaces the
+/// retail mission in the retail campaign. When two mods add the same id the later one wins, as in the overlay. Names and
+/// descriptions come from the overlaid `maps` root (`map.json` `name`, `description`).
+pub fn custom_missions_in(mods: &[std::path::PathBuf], maps: &std::path::Path) -> Vec<CustomMission> {
+    let mut out: Vec<CustomMission> = vec![];
+    for dir in mods {
+        let meta = crate::data::try_json(&dir.join("mod.json")).unwrap_or_default();
+        let folder = dir.file_name().map_or(String::new(), |f| f.to_string_lossy().into_owned());
+        let campaign = meta["name"].as_str().filter(|s| !s.is_empty()).map_or(folder, String::from);
+        let order = string_list(&meta["missions"]);
+        let mut ids: Vec<String> = std::fs::read_dir(dir.join("maps"))
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter(|e| e.path().join("mission.json").is_file())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|id| !is_campaign(id) && !matches!(id.as_str(), "tutorial" | "basic_tutorial"))
+            .collect();
+        ids.sort_by_key(|id| (order.iter().position(|o| o == id).unwrap_or(usize::MAX), id.clone()));
+        for id in ids {
+            out.retain(|m| m.id != id);
+            let map = crate::data::try_json(&maps.join(&id).join("map.json")).unwrap_or_default();
+            let text = |k: &str| map[k].as_str().unwrap_or_default().to_string();
+            let name = Some(text("name")).filter(|s| !s.is_empty()).unwrap_or_else(|| id.clone());
+            out.push(CustomMission { id, name, description: text("description"), campaign: campaign.clone() });
+        }
+    }
+    out
+}
+
+/// The custom mission after `id` in the same campaign, if any.
+fn next_custom(list: &[CustomMission], id: &str) -> Option<String> {
+    let i = list.iter().position(|m| m.id == id)?;
+    list.get(i + 1).filter(|n| n.campaign == list[i].campaign).map(|n| n.id.clone())
 }
 
 #[cfg(test)]
@@ -576,6 +638,35 @@ mod tests {
         let points = CampaignPoints { total: 27, ..Default::default() };
         points.save_to(path.clone()).unwrap();
         assert_eq!(CampaignPoints::load_from(path).total, 27);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn custom_missions_are_listed_per_mod_in_campaign_order_and_chain_within_their_mod() {
+        let dir = std::env::temp_dir().join(format!("procyon-custom-missions-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let write = |rel: &str, text: &str| {
+            let p = dir.join(rel);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, text).unwrap();
+        };
+        // Saga: a two-mission campaign in mod.json order, plus a retail override and a map with no mission (both left out).
+        write("saga/mod.json", r#"{"name": "Saga", "missions": ["b_second", "a_first"]}"#);
+        for id in ["a_first", "b_second", "mission03", "tutorial"] {
+            write(&format!("saga/maps/{id}/mission.json"), "{}");
+        }
+        write("saga/maps/skirmish_only/map.json", "{}");
+        write("merged/b_second/map.json", r#"{"name": "The Second", "description": "Two."}"#);
+        // Lone: no name, one mission.
+        write("lone/maps/solo/mission.json", "{}");
+        let list = custom_missions_in(&[dir.join("saga"), dir.join("lone")], &dir.join("merged"));
+        let rows: Vec<_> = list.iter().map(|m| (m.id.as_str(), m.name.as_str(), m.campaign.as_str())).collect();
+        assert_eq!(rows, [("b_second", "The Second", "Saga"), ("a_first", "a_first", "Saga"), ("solo", "solo", "lone")]);
+        assert_eq!(list[0].description, "Two.");
+        assert_eq!(next_custom(&list, "b_second").as_deref(), Some("a_first"));
+        assert_eq!(next_custom(&list, "a_first"), None, "the campaign ends at its mod's last mission");
+        assert_eq!(next_custom(&list, "solo"), None);
+        assert!(is_campaign("mission03") && !is_campaign("mission_x") && !is_campaign("mission"));
         std::fs::remove_dir_all(dir).unwrap();
     }
 }

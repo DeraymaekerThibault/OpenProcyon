@@ -168,8 +168,8 @@ fn update(
     let Some(mut mission) = mission else { return };
     let mission = &mut *mission;
     let input = std::mem::take(&mut *input);
-    // Tutorials run the same interpreter but do not count toward the campaign.
-    if mission.id.starts_with("mission") {
+    // Tutorials and mods' custom missions run the same interpreter but do not count toward the retail campaign.
+    if crate::campaign::is_campaign(&mission.id) {
         extra.campaign_points.record(&mission.id, mission.script.score);
     }
     let opening = mission.opening.is_some();
