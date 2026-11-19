@@ -493,6 +493,7 @@ mod swap_tests {
             lob_wait: None,
             in_range: false,
             dev: 0.0,
+            beam: Default::default(),
         };
         let roots: Vec<Entity> = lib.classes[class].mounts.iter().map(|_| app.world_mut().spawn((crate::combat::gunnery::GunPart, Visibility::default())).id()).collect();
         let guns = crate::combat::gunnery::GunStates(roots.iter().map(|r| state(*r)).collect());
