@@ -1,3 +1,5 @@
+use super::fitting::{FitError, family};
+use super::view::{crew_rows, weapon_rows};
 use super::*;
 #[test]
 fn widgets_play_rollover_once_and_select_on_press() {
