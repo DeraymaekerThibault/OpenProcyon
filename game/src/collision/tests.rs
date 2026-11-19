@@ -2,6 +2,16 @@ use super::*;
 fn rect(x: f32, z: f32, yaw: f32) -> BoxBody {
     box_body([Vec3::new(-1.0, -1.0, -3.0), Vec3::new(1.0, 1.0, 3.0)], &Transform::from_xyz(x, 0.0, z).with_rotation(Quat::from_rotation_y(yaw)))
 }
+
+/// An app that runs `sail` over a fixed time step with the given library.
+fn sail_app(lib: crate::Library, step: std::time::Duration) -> App {
+    let mut app = App::new();
+    let mut time = Time::<()>::default();
+    time.advance_by(step);
+    app.insert_resource(time).insert_resource(lib).add_systems(Update, sail);
+    app
+}
+
 #[test]
 #[ignore = "needs imported assets"]
 fn tumbling_asteroid_collision_follows_transform() {
@@ -110,10 +120,7 @@ fn ecs_ship_contact_and_static_wall_do_not_pass_through() {
     let class = lib.index("Ship_Navy_Cutter");
     assert_eq!(lib.classes[class].collision_bounds, [Vec3::new(-2.25, -1.5, -6.5), Vec3::new(2.25, 2.0, 7.0)]);
     lib.classes[class].collision_bounds = [Vec3::new(-1.0, -1.0, -3.0), Vec3::new(1.0, 1.0, 3.0)];
-    let mut app = App::new();
-    let mut time = Time::<()>::default();
-    time.advance_by(std::time::Duration::from_millis(33));
-    app.insert_resource(time).insert_resource(lib).add_systems(Update, sail);
+    let mut app = sail_app(lib, std::time::Duration::from_millis(33));
     let ship = crate::Ship { heading: 0.0, speed: 20.0, order: 2, ..crate::Ship::new(class, crate::Side::Player) };
     let health = || crate::Health::new(&app.world().resource::<crate::Library>().classes[class]);
     let h1 = health();
@@ -142,10 +149,7 @@ fn wall_run(player: bool) -> f32 {
     let class = lib.index("Ship_Navy_Cutter");
     lib.classes[class].collision_bounds = [Vec3::new(-1.0, -1.0, -3.0), Vec3::new(1.0, 1.0, 3.0)];
     let health = crate::Health::new(&lib.classes[class]);
-    let mut app = App::new();
-    let mut time = Time::<()>::default();
-    time.advance_by(std::time::Duration::from_secs_f32(0.1));
-    app.insert_resource(time).insert_resource(lib).add_systems(Update, sail);
+    let mut app = sail_app(lib, std::time::Duration::from_secs_f32(0.1));
     // A 40-wide wall between the ship and its only path marker straight ahead.
     let wall = [Vec3::new(-20.0, -2.0, -30.0), Vec3::new(20.0, -2.0, -30.0), Vec3::new(0.0, 2.0, -30.0)];
     app.world_mut().spawn(Obstacle {
@@ -188,10 +192,7 @@ fn ai_ship_slows_for_an_island_in_its_way_creeps_round_it_and_picks_up_speed_aga
     let lib = crate::Library::load(crate::assets_dir());
     let class = lib.index("Ship_Procyon_Frigate");
     let health = crate::Health::new(&lib.classes[class]);
-    let mut app = App::new();
-    let mut time = Time::<()>::default();
-    time.advance_by(std::time::Duration::from_millis(33));
-    app.insert_resource(time).insert_resource(lib).add_systems(Update, sail);
+    let mut app = sail_app(lib, std::time::Duration::from_millis(33));
     let wall = [Vec3::new(-45.0, -2.0, -200.0), Vec3::new(45.0, -2.0, -200.0), Vec3::new(0.0, 2.0, -200.0)];
     app.world_mut().spawn(Obstacle {
         body: BoxBody { points: wall.to_vec(), bounds: Bounds::points(&wall) },
@@ -242,10 +243,7 @@ fn retail_island_mesh_blocks_a_ship_driven_through_its_centre() {
     let shapes = Shapes::from_world(&mut World::new());
     let island = shapes.obstacle("Island01", &Transform::default()).unwrap();
     assert!(!island.triangles.is_empty());
-    let mut app = App::new();
-    let mut time = Time::<()>::default();
-    time.advance_by(std::time::Duration::from_secs_f32(0.1));
-    app.insert_resource(time).insert_resource(lib).add_systems(Update, sail);
+    let mut app = sail_app(lib, std::time::Duration::from_secs_f32(0.1));
     app.world_mut().spawn(island);
     let ship = crate::Ship { heading: 0.0, speed: 20.0, order: 2, ..crate::Ship::new(class, crate::Side::Player) };
     let e = app.world_mut().spawn((ship, health, Transform::from_xyz(0.0, 0.0, 80.0), Drift::default())).id();
@@ -284,10 +282,7 @@ fn ship_rock_contact(mass: f32) -> (Vec3, Vec3, Vec3, f32) {
     defs.0.get_mut("Asteroid_Small").unwrap().mass = mass;
     let rock = crate::combat::Asteroid::new("Asteroid_Small", "rocks", &defs).unwrap();
     let hp = rock.hp;
-    let mut app = App::new();
-    let mut time = Time::<()>::default();
-    time.advance_by(std::time::Duration::from_secs_f32(0.1));
-    app.insert_resource(time).insert_resource(lib).add_systems(Update, sail);
+    let mut app = sail_app(lib, std::time::Duration::from_secs_f32(0.1));
     let ship = crate::Ship { heading: 0.0, speed: 10.0, ..crate::Ship::new(class, crate::Side::Player) };
     let a = app.world_mut().spawn((ship, health, Transform::from_xyz(0.0, 0.0, 1.5), Drift::default())).id();
     let body = box_body([Vec3::splat(-1.0), Vec3::splat(1.0)], &Transform::default());
@@ -328,10 +323,7 @@ fn ship_contact_pushes_the_hulls_apart_and_keeps_both_speeds() {
         }
         let ha = crate::Health::new(&lib.classes[a]);
         let hb = crate::Health::new(&lib.classes[b]);
-        let mut app = App::new();
-        let mut time = Time::<()>::default();
-        time.advance_by(std::time::Duration::from_secs_f32(0.1));
-        app.insert_resource(time).insert_resource(lib).add_systems(Update, sail);
+        let mut app = sail_app(lib, std::time::Duration::from_secs_f32(0.1));
         let ship = crate::Ship { heading: 0.0, speed: 10.0, ..crate::Ship::new(a, crate::Side::Player) };
         let ea = app.world_mut().spawn((ship.clone(), ha, Transform::from_xyz(0.0, 0.0, 1.5), Drift::default())).id();
         let eb = app.world_mut().spawn((crate::Ship { class: b, speed: 0.0, ..ship }, hb, Transform::default(), Drift::default())).id();
@@ -616,10 +608,7 @@ fn dying_ship_sails_on_and_collides_with_nothing() {
     let mut lib = crate::Library::load(crate::assets_dir());
     let class = lib.index("Ship_Navy_Cutter");
     lib.classes[class].collision_bounds = [Vec3::new(-1.0, -1.0, -3.0), Vec3::new(1.0, 1.0, 3.0)];
-    let mut app = App::new();
-    let mut time = Time::<()>::default();
-    time.advance_by(std::time::Duration::from_millis(33));
-    app.insert_resource(time).insert_resource(lib).add_systems(Update, sail);
+    let mut app = sail_app(lib, std::time::Duration::from_millis(33));
     let ship = crate::Ship { heading: 0.0, speed: 5.0, order: 3, throttle: Some(1.0), ..crate::Ship::new(class, crate::Side::Player) };
     let health = crate::Health::new(&app.world().resource::<crate::Library>().classes[class]);
     let mut dead = crate::Health::new(&app.world().resource::<crate::Library>().classes[class]);
