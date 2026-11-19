@@ -1537,19 +1537,31 @@ mod tests {
         assert!(!bank_compatible(&lib, class, fixed.bank, "Gun_Lancer_Med"));
         assert!(weapon_rows(&lib, class, mount.bank, &mount.gun, &[], false).iter().any(|(_, a)| *a == Action::Upgrade("Gun_Carronade_Med".into())));
     }
-    /// The Hunter mod's beam gun is built into its hull: on a non-selectable mount, so no other ship can fit it and the Hunter cannot swap it.
+    /// A mod gun on a non-selectable mount is built into its ship's hull: no retail ship can fit it.
     #[test]
     #[ignore = "needs imported assets"]
-    fn the_hunter_beam_gun_fits_no_other_ship() {
+    fn a_built_in_mod_gun_fits_no_other_ship() {
         let mut lib = Library::load(crate::assets_dir());
-        let mods: Value = crate::data::try_json(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../mods/hunter/data/weapons/guns.json")).unwrap();
-        lib.guns.insert("Gun_Hunter_Beam".into(), crate::data::gun_def(&mods["Gun_Hunter_Beam"]));
+        let gun = serde_json::json!({
+            "MuzzleSpeed": 5000.0, "TimeBetweenBursts": 9.0, "BulletsPerBurst": 1, "DuringBurstReloadTime": 0.0,
+            "MaximumRange_Range": 380.0, "LongRange_Range": 280.0, "EffectiveRange_Range": 150.0, "BulletAffectedByGravity": false,
+            "HorizontalRotationSpeed": 0.35, "VerticalMinAngle": -0.12, "VerticalMaxAngle": 0.3, "VerticalRotationSpeed": 0.5,
+            "MuzzleFlashEffect": "PlasmaCannon_Heavy_Muzzle", "MaximumRange_AccuracyDeviation": 0.01, "LongRange_AccuracyDeviation": 0.006,
+            "EffectiveRange_AccuracyDeviation": 0.003, "BulletTypeName_Primary": "Bullet_Mod_Beam", "Is PointDefense Gun": false,
+            "Is TorpedoLauncher Gun": false, "SoundName": "Weapon_Mod_Beam", "SoundVolume": 1.0, "SoundMaxDistance": 700.0, "LobAngle": 0.0,
+            "Is Lobbing Gun": false, "Can Be Fired While Cloaked": false, "Victory Point Cost": 16, "Exclusion Race": "None",
+            "Mount Type": "Non-Selectable Heavy Mount", "EffectiveRange_RicochetFactor": -100.0, "LongRange_RicochetFactor": -100.0,
+            "MaximumRange_RicochetFactor": -100.0,
+            "beam": {"charge": 2.0, "duration": 3.0, "tick": 0.25, "ramp": 0.6, "max_power": 2.8, "width": 0.32, "color": [0.45, 1.6, 2.2]},
+            "visual": {"pivot": [0.0, 0.0, 0.4], "muzzles": [[0.0, 4.4, 0.4]]}
+        });
+        lib.guns.insert("Gun_Mod_Beam".into(), crate::data::gun_def(&gun));
         for class in &lib.classes {
             for (bank, _) in weapon_banks(&lib, class) {
-                assert!(!bank_compatible(&lib, class, bank, "Gun_Hunter_Beam"), "{} bank {bank}", class.name);
+                assert!(!bank_compatible(&lib, class, bank, "Gun_Mod_Beam"), "{} bank {bank}", class.name);
             }
         }
-        let beam = &lib.guns["Gun_Hunter_Beam"];
+        let beam = &lib.guns["Gun_Mod_Beam"];
         assert!(beam.mount_type.as_deref().is_some_and(|t| t.contains("Non-Selectable") && t.contains("Heavy")), "fixed, and still counted as a heavy mount");
     }
     #[test]
