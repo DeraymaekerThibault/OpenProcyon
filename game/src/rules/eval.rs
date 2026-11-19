@@ -52,6 +52,27 @@ pub struct Unit {
     pub attack: Vec<String>,
 }
 
+impl Unit {
+    /// A live, visible, unnamed unit with no owner, groups, damage, flag or attack list; callers set what they have.
+    pub fn new(e: Entity, id: i64, pos: Vec3) -> Self {
+        Unit {
+            e,
+            id,
+            name: String::new(),
+            owner: String::new(),
+            owner_is_named_group: false,
+            groups: vec![],
+            pos,
+            alive: true,
+            visible: true,
+            primary: false,
+            damage: 0.0,
+            flag: String::new(),
+            attack: vec![],
+        }
+    }
+}
+
 pub(super) struct Rule {
     pub(super) name: String,
     pub(super) once: bool,

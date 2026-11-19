@@ -67,19 +67,12 @@ fn run(
     let mut world: Vec<Unit> = ships
         .iter()
         .map(|(e, _, tf, h, m, _, primary)| Unit {
-            e,
-            id: m.id,
             name: m.name.clone(),
             owner: m.owner.clone(),
-            owner_is_named_group: false,
-            groups: vec![],
-            pos: tf.translation,
             alive: !h.destroyed,
             visible: m.visible,
             primary,
-            damage: 0.0,
-            flag: String::new(),
-            attack: vec![],
+            ..Unit::new(e, m.id, tf.translation)
         })
         .collect();
     world.extend(animals.iter().map(|(e, a, tf, _)| a.unit(e, tf)));

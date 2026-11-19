@@ -252,6 +252,12 @@ pub(super) fn ricochet_chance(factor: f32, material: &str, angle: f32) -> f32 {
     ((factor + m + angle) / 100.0).clamp(0.0, 1.0)
 }
 
+fn ricochet_sound(sfx: &mut MessageWriter<Sfx>, bd: &BulletDef, key: &str, at: Vec3) {
+    if let Some(name) = bd.ricochet_snd.get(key) {
+        sfx.write(Sfx { name: name.clone(), at: Some(at), vol: 1.0, max: 600.0 });
+    }
+}
+
 /// Rolls a ricochet for shell `s` striking a face with world normal `n` at `at`, `target` the struck body's velocity. On a
 /// ricochet the shell mirrors off the face at 0.6 of its speed, keeps flying and plays its ricochet sound for the material.
 /// PROVISIONAL: the small extra effect the original also plays is not identified; the sound's range is the warning shot's.
@@ -264,9 +270,7 @@ fn ricochet(s: &mut Shell, tf: &mut Transform, bd: &BulletDef, key: &str, at: Ve
     s.vel = (s.vel - 2.0 * s.vel.dot(n) * n) * 0.6;
     tf.translation = at + n * 0.05;
     tf.look_to(s.vel, Vec3::Y);
-    if let Some(name) = bd.ricochet_snd.get(key) {
-        sfx.write(Sfx { name: name.clone(), at: Some(at), vol: 1.0, max: 600.0 });
-    }
+    ricochet_sound(sfx, bd, key, at);
     true
 }
 
@@ -620,9 +624,7 @@ pub(super) fn shells(
                 // A warning shot glances off: the bullet's ricochet sound for the struck material.
                 let material = best_ship.and_then(|si| ships.get(si).ok()).map(|x| lib.classes[x.2.class].sections[k].material.clone()).unwrap_or_default();
                 let key = material_key(&material);
-                if let Some(name) = bd.ricochet_snd.get(key) {
-                    sfx.write(Sfx { name: name.clone(), at: Some(at), vol: 1.0, max: 600.0 });
-                }
+                ricochet_sound(&mut sfx, bd, key, at);
                 hit_fx(&mut commands, &fxl, bd, at, s.vel, None, Surface::default());
             } else if !matches!(s.payload, Payload::Nova) {
                 detonate.write(Detonate { bullet: s.bullet.clone(), at, shooter: Some(s.shooter), owner: Some((s.side, s.base)) });

@@ -15,21 +15,7 @@ pub struct MapMine {
 
 impl MapMine {
     pub fn unit(&self, e: Entity, tf: &Transform) -> crate::rules::Unit {
-        crate::rules::Unit {
-            e,
-            id: self.id,
-            name: self.bullet.clone(),
-            owner: self.owner.clone(),
-            owner_is_named_group: false,
-            groups: vec![],
-            pos: tf.translation,
-            alive: true,
-            visible: true,
-            primary: false,
-            damage: 0.0,
-            flag: String::new(),
-            attack: vec![],
-        }
+        crate::rules::Unit { name: self.bullet.clone(), owner: self.owner.clone(), ..crate::rules::Unit::new(e, self.id, tf.translation) }
     }
 }
 
