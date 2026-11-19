@@ -23,6 +23,23 @@ PROFILE = re.compile(r"profile .*frame_ms=([\d.]+) entities=(\d+) .*particles=(\
 END = re.compile(r'autoplay end outcome="([^"]+)" time=(\d+) never_fired=\[(.*)\]')
 
 
+def display_wrapper():
+    """The command prefix that gives the game a display: none where there is one, else a virtual X server."""
+    if (
+        sys.platform == "win32"
+        or os.environ.get("DISPLAY")
+        or os.environ.get("WAYLAND_DISPLAY")
+    ):
+        return []
+    return ["xvfb-run", "-a", "-s", "-screen 0 1280x720x24"]
+
+
+def silent_data_home(xdg):
+    """Fills a scratch XDG_DATA_HOME with settings that mute the game (default bindings, no saves)."""
+    (Path(xdg) / "openprocyon").mkdir()
+    (Path(xdg) / "openprocyon/settings.json").write_text(json.dumps({"master": 0}))
+
+
 def summarise(log, code):
     """One table row from a run's log text and exit code."""
     peak = [0.0, 0, 0]  # slowest frame (ms, 5 s average), entities, particles
@@ -69,18 +86,11 @@ def main():
     )
     out = REPO / "local/autoplay"
     out.mkdir(parents=True, exist_ok=True)
-    wrap = (
-        []
-        if sys.platform == "win32"
-        or os.environ.get("DISPLAY")
-        or os.environ.get("WAYLAND_DISPLAY")
-        else ["xvfb-run", "-a", "-s", "-screen 0 1280x720x24"]
-    )
+    wrap = display_wrapper()
     with tempfile.TemporaryDirectory() as xdg:
         # A scratch XDG_DATA_HOME: default key bindings, master volume 0 (other options default) and no saves of the player's;
         # X11, since some Wayland sessions render black.
-        (Path(xdg) / "openprocyon").mkdir()
-        (Path(xdg) / "openprocyon/settings.json").write_text(json.dumps({"master": 0}))
+        silent_data_home(xdg)
         env = {
             **os.environ,
             "XDG_DATA_HOME": xdg,

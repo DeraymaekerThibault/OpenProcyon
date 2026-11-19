@@ -552,17 +552,6 @@ fn fan_groups(pos: &[[f32; 3]], tris: &[[usize; 3]]) -> Vec<Option<(usize, Vec3)
         }
     }
     let mut parent: Vec<usize> = (0..pos.len()).collect();
-    fn root(parent: &mut [usize], mut i: usize) -> usize {
-        while parent[i] != i {
-            parent[i] = parent[parent[i]];
-            i = parent[i];
-        }
-        i
-    }
-    fn join(parent: &mut [usize], a: usize, b: usize) {
-        let (ra, rb) = (root(parent, a), root(parent, b));
-        parent[ra] = rb;
-    }
     let mut first_at_hub: std::collections::HashMap<[i64; 3], usize> = std::collections::HashMap::new();
     for t in tris {
         join(&mut parent, t[0], t[1]);
@@ -733,20 +722,22 @@ fn mast_line(mains: &[(Vec3, f32)], mast: &[Vec3]) -> Option<(Vec3, Vec3)> {
     Some((Vec3::new(x, 0.0, z0), Vec3::new(0.0, 1.0, slope).normalize()))
 }
 
+/// Union-find over vertex indices (path halving).
+fn root(parent: &mut [usize], mut i: usize) -> usize {
+    while parent[i] != i {
+        parent[i] = parent[parent[i]];
+        i = parent[i];
+    }
+    i
+}
+fn join(parent: &mut [usize], a: usize, b: usize) {
+    let (ra, rb) = (root(parent, a), root(parent, b));
+    parent[ra] = rb;
+}
+
 /// Which sail each vertex belongs to (a representative vertex index): triangles joined by shared or coincident corners.
 pub(crate) fn sail_of(pos: &[[f32; 3]], tris: &[[usize; 3]]) -> Vec<usize> {
     let mut parent: Vec<usize> = (0..pos.len()).collect();
-    fn root(parent: &mut [usize], mut i: usize) -> usize {
-        while parent[i] != i {
-            parent[i] = parent[parent[i]];
-            i = parent[i];
-        }
-        i
-    }
-    fn join(parent: &mut [usize], a: usize, b: usize) {
-        let (ra, rb) = (root(parent, a), root(parent, b));
-        parent[ra] = rb;
-    }
     let mut seen = std::collections::HashMap::new();
     for (i, v) in pos.iter().enumerate() {
         let key = v.map(|c| (c * 1000.0).round() as i64);

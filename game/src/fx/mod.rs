@@ -65,16 +65,43 @@ pub fn additive_material(texture: Handle<Image>) -> EffectMaterial {
     }
 }
 
+/// One step of the original's 32-bit linear congruential generator, as a float in 0..1.
+pub fn lcg_unit(state: &mut u32) -> f32 {
+    *state = state.wrapping_mul(0x19660d).wrapping_add(0x3c6ef35f);
+    f32::from_bits(*state & 0x7fffff | 0x3f800000) - 1.0
+}
+
+/// Replaces a ribbon mesh's positions, uvs, colours and triangle indices.
+pub fn set_ribbons(
+    mesh: &mut Mesh,
+    pos: impl Into<bevy::mesh::VertexAttributeValues>,
+    uv: impl Into<bevy::mesh::VertexAttributeValues>,
+    col: impl Into<bevy::mesh::VertexAttributeValues>,
+    idx: Vec<u32>,
+) {
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, pos);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uv);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, col);
+    mesh.insert_indices(bevy::mesh::Indices::U32(idx));
+}
+
+/// `set_ribbons` on the mesh `handle` names, except that an empty mesh is not rewritten with nothing (no re-upload, and Bevy warns
+/// "no vertices" otherwise).
+pub fn set_ribbons_unless_still_empty(meshes: &mut Assets<Mesh>, handle: &Handle<Mesh>, pos: Vec<[f32; 3]>, uv: Vec<[f32; 2]>, col: Vec<[f32; 4]>, idx: Vec<u32>) {
+    if (!pos.is_empty() || meshes.get(handle).is_some_and(|m| m.count_vertices() > 0))
+        && let Some(mut m) = meshes.get_mut(handle)
+    {
+        set_ribbons(&mut m, pos, uv, col, idx);
+    }
+}
+
 #[derive(Resource, Default)]
 struct FxTextures(Vec<Handle<Image>>);
 #[derive(Resource)]
 struct FxRng(u64);
 impl FxRng {
     fn f(&mut self) -> f32 {
-        self.0 ^= self.0 << 13;
-        self.0 ^= self.0 >> 7;
-        self.0 ^= self.0 << 17;
-        (self.0 >> 40) as f32 / (1u64 << 24) as f32
+        crate::combat::xorshift_unit(&mut self.0)
     }
     fn sphere(&mut self) -> Vec3 {
         loop {

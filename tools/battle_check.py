@@ -20,6 +20,8 @@ import tempfile
 from pathlib import Path
 from typing import NamedTuple
 
+from tools.autoplay import display_wrapper, silent_data_home
+
 REPO = Path(__file__).resolve().parents[1]
 GAME = (
     Path(os.environ.get("CARGO_TARGET_DIR", REPO / "game/target"))
@@ -175,18 +177,11 @@ def main():
     )
     out = REPO / "local/battle_check"
     out.mkdir(parents=True, exist_ok=True)
-    wrap = (
-        []
-        if sys.platform == "win32"
-        or os.environ.get("DISPLAY")
-        or os.environ.get("WAYLAND_DISPLAY")
-        else ["xvfb-run", "-a", "-s", "-screen 0 1280x720x24"]
-    )
+    wrap = display_wrapper()
     failed = 0
     with tempfile.TemporaryDirectory() as xdg:
         # A scratch XDG_DATA_HOME (default bindings, no saves, silent) and X11, as tools/autoplay.py.
-        (Path(xdg) / "openprocyon").mkdir()
-        (Path(xdg) / "openprocyon/settings.json").write_text(json.dumps({"master": 0}))
+        silent_data_home(xdg)
         env = {**os.environ, "XDG_DATA_HOME": xdg, "WAYLAND_DISPLAY": ""}
         if wrap:
             env["WGPU_BACKEND"] = "vulkan"

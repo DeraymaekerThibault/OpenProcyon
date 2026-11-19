@@ -66,6 +66,15 @@ impl QuadBatch {
         self.idx.extend([a, b, c]);
     }
 
+    /// The quads between `segments + 1` pairs of vertices pushed in a row from index `first`.
+    pub fn strip(&mut self, first: u32, segments: u32) {
+        for i in 0..segments {
+            let a = first + 2 * i;
+            self.triangle(a, a + 1, a + 2);
+            self.triangle(a + 1, a + 3, a + 2);
+        }
+    }
+
     /// One quad around `centre` with half extents `a` and `b`. The uv rectangle spans the quad: its `min` is at the corner
     /// `centre - a - b` and its `max` at `centre + a + b` (so the caller picks the layout: a plain 0..1 texture, an atlas
     /// cell, a kind and seed packed into the coordinates). Every vertex gets `color` and `normal`.

@@ -6,10 +6,7 @@
 //! `particles`. All streaks are one mesh, rebuilt each frame through a `QuadBatch`. Contract: `TracerUniform`, and the mesh described at
 //! `ribbon`.
 
-use bevy::asset::RenderAssetUsages;
-use bevy::camera::visibility::NoFrustumCulling;
-use bevy::light::NotShadowCaster;
-use bevy::mesh::{MeshVertexBufferLayoutRef, PrimitiveTopology};
+use bevy::mesh::MeshVertexBufferLayoutRef;
 use bevy::pbr::{ExtendedMaterial, MaterialExtension, MaterialExtensionKey, MaterialExtensionPipeline};
 use bevy::prelude::*;
 use bevy::render::render_resource::{AsBindGroup, RenderPipelineDescriptor, ShaderType, SpecializedMeshPipelineError};
@@ -211,16 +208,7 @@ fn tracers(
             base: super::kit::additive_base(None),
             extension: TracerGlow { u: TracerUniform { core: t.core.extend(t.brightness), params: Vec4::ZERO }, frame: default() },
         });
-        commands.spawn((
-            crate::Scenario,
-            TracerMesh,
-            Mesh3d(meshes.add(Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default()))),
-            MeshMaterial3d(material),
-            Transform::default(),
-            Visibility::Hidden,
-            NoFrustumCulling,
-            NotShadowCaster,
-        ));
+        super::kit::spawn_batch_mesh(&mut commands, &mut meshes, material, TracerMesh);
         return;
     };
     let batch = batch.get_or_insert_with(QuadBatch::with_normals);
@@ -275,11 +263,7 @@ fn ribbon(b: &mut QuadBatch, s: &Streak, now: f32, cam: &GlobalTransform) {
                 b.vertex(p.0 + side * end, to_cam, Vec2::new(u, v), col);
             }
         }
-        for i in 0..(pts.len() - 1) as u32 {
-            let a = first + 2 * i;
-            b.triangle(a, a + 1, a + 2);
-            b.triangle(a + 1, a + 3, a + 2);
-        }
+        b.strip(first, (pts.len() - 1) as u32);
     }
     if tr.head > 0.0 && s.gone.is_none() {
         let to_cam = (eye - pts[0]).normalize_or(Vec3::Y);

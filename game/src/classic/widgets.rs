@@ -231,26 +231,24 @@ impl Ctx<'_> {
     pub(super) fn fill(&self, c: &mut ChildSpawnerCommands, [x, y, w, h]: [f32; 4], colour: Color) {
         c.spawn((self.node(x, y, w, h), BackgroundColor(colour)));
     }
-    /// UI text in the vector face of a retail font (retail advances for the layout), horizontally centred in [x, x+w] (or left-aligned), vertically centred on `cy`.
-    pub(super) fn text(&self, c: &mut ChildSpawnerCommands, font: &str, s: &str, x: f32, w: f32, cy: f32, centre: bool, tint: Color) {
+    #[allow(clippy::too_many_arguments)]
+    fn text_aligned(&self, c: &mut ChildSpawnerCommands, font: &str, s: &str, x: f32, w: f32, cy: f32, justify: JustifyContent, tint: Color) {
         let Some(f) = self.fonts.0.get(font).or_else(|| self.fonts.0.get("BlackChancery22")) else { return };
         let mut n = self.node(x, cy - f.height / 2.0, w, f.height);
         n.align_items = AlignItems::Center;
-        n.justify_content = if centre { JustifyContent::Center } else { JustifyContent::FlexStart };
+        n.justify_content = justify;
         c.spawn(n).with_children(|c| {
             // The vector text is as wide as it is, not as the retail advances: centre that, not the advance sum.
             c.spawn((f.text(s, self.scale, tint), TextLayout::no_wrap(), Node { flex_shrink: 0.0, ..default() }));
         });
     }
+    /// UI text in the vector face of a retail font (retail advances for the layout), horizontally centred in [x, x+w] (or left-aligned), vertically centred on `cy`.
+    pub(super) fn text(&self, c: &mut ChildSpawnerCommands, font: &str, s: &str, x: f32, w: f32, cy: f32, centre: bool, tint: Color) {
+        self.text_aligned(c, font, s, x, w, cy, if centre { JustifyContent::Center } else { JustifyContent::FlexStart }, tint);
+    }
     /// Like `text`, but the right end of the text sits at `x + w` (price columns).
     pub(super) fn text_end(&self, c: &mut ChildSpawnerCommands, font: &str, s: &str, x: f32, w: f32, cy: f32, tint: Color) {
-        let Some(f) = self.fonts.0.get(font).or_else(|| self.fonts.0.get("BlackChancery22")) else { return };
-        let mut n = self.node(x, cy - f.height / 2.0, w, f.height);
-        n.align_items = AlignItems::Center;
-        n.justify_content = JustifyContent::FlexEnd;
-        c.spawn(n).with_children(|c| {
-            c.spawn((f.text(s, self.scale, tint), TextLayout::no_wrap(), Node { flex_shrink: 0.0, ..default() }));
-        });
+        self.text_aligned(c, font, s, x, w, cy, JustifyContent::FlexEnd, tint);
     }
     /// A drawn text button over `[l, t, r, b]`: a pill in a gold tube rim whose fill follows the cursor (theme.json `button`).
     pub(super) fn text_button(&self, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], label: &str, font: &str, action: impl Bundle) {

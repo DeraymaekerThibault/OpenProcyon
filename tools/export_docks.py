@@ -11,17 +11,14 @@ import json
 import sys
 from pathlib import Path
 
-from tools.export_combat import associations, flat, load, scene_name
-from tools.gamefs import ci_file, ci_files
+from tools.export_combat import associations, flat, load, placed_objects, scene_name
+from tools.gamefs import ci_file
 from tools.msb import parse as parse_msb
 
 
 def export(root, out):
     docks = {}
-    for wot in ci_files(Path(root) / "WorldObjects", "*.wot"):
-        name = wot.stem
-        if not name.startswith(("Ship_", "Base_", "Island_")):
-            continue
+    for name in placed_objects(root):
         try:
             nodes = load(root, name)
             if not any(associations(nodes, "DockPoint")):

@@ -120,6 +120,16 @@ fn toggle(
 }
 
 /// Fills `StarmapContents` while the map is open.
+/// The map's place names the script has not hidden (its own `visible` flag decides where the script says nothing).
+fn push_labels(labels: &mut Vec<MapLabel>, map_text: &serde_json::Value, shown: &std::collections::HashMap<String, bool>) {
+    for text in map_text.as_array().into_iter().flatten() {
+        let name = text["name"].as_str().unwrap_or_default();
+        if shown.get(name).copied().unwrap_or(text["visible"].as_bool().unwrap_or(false)) {
+            labels.push(MapLabel { text: text["text"].as_str().unwrap_or_default().into(), position: crate::game_to_bevy(&text["pos"]) });
+        }
+    }
+}
+
 fn describe(
     mut contents: ResMut<StarmapContents>,
     open: Query<(), With<Starmap>>,
@@ -152,12 +162,7 @@ fn describe(
     }
     if let Some(sk) = skirmish.as_deref().filter(|_| mission.is_none()) {
         // Skirmish (retail, Border Dispute): the map's place names, the human team's objective point and an "Objectives:" panel.
-        for text in sk.map_text.as_array().into_iter().flatten() {
-            let name = text["name"].as_str().unwrap_or_default();
-            if sk.script.map_text.get(name).copied().unwrap_or(text["visible"].as_bool().unwrap_or(false)) {
-                contents.labels.push(MapLabel { text: text["text"].as_str().unwrap_or_default().into(), position: crate::game_to_bevy(&text["pos"]) });
-            }
-        }
+        push_labels(&mut contents.labels, &sk.map_text, &sk.script.map_text);
         if let Some(team) = sk.script.team_of(&fleets.local)
             && let Some((point, task)) = sk.script.team_objective(team)
         {
@@ -174,12 +179,7 @@ fn describe(
     {
         contents.icons.push(MapIcon { kind: MapIconKind::Objective, position, yaw: 0.0 });
     }
-    for text in mission.data["map_text"].as_array().into_iter().flatten() {
-        let name = text["name"].as_str().unwrap_or_default();
-        if mission.script.map_text.get(name).copied().unwrap_or(text["visible"].as_bool().unwrap_or(false)) {
-            contents.labels.push(MapLabel { text: text["text"].as_str().unwrap_or_default().into(), position: crate::game_to_bevy(&text["pos"]) });
-        }
-    }
+    push_labels(&mut contents.labels, &mission.data["map_text"], &mission.script.map_text);
 }
 
 #[cfg(test)]

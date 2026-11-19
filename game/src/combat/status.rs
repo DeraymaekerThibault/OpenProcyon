@@ -91,9 +91,14 @@ pub fn banks(lib: &Library, c: &Class) -> Vec<(usize, usize)> {
     v
 }
 
+/// The states of a bank's guns that still have their mount section.
+fn live_guns<'a>(g: &'a GunStates, c: &'a Class, h: &'a Health, bank: usize) -> impl Iterator<Item = &'a GunState> {
+    c.mounts.iter().zip(&g.0).filter(move |(m, _)| m.bank == bank && m.parent.is_none_or(|p| h.sections[p] > 0.0)).map(|(_, s)| s)
+}
+
 /// Panel frame of a bank: 0 ready and in range / 1 recharging / 2 destroyed / 3 ready, nothing in range.
 pub fn bank_state(g: &GunStates, c: &Class, h: &Health, bank: usize) -> usize {
-    let live: Vec<&GunState> = c.mounts.iter().zip(&g.0).filter(|(m, _)| m.bank == bank && m.parent.is_none_or(|p| h.sections[p] > 0.0)).map(|(_, s)| s).collect();
+    let live: Vec<&GunState> = live_guns(g, c, h, bank).collect();
     if live.is_empty() {
         2
     } else if live.iter().any(|s| s.cooldown > 0.0) {
@@ -107,14 +112,7 @@ pub fn bank_state(g: &GunStates, c: &Class, h: &Health, bank: usize) -> usize {
 
 /// Recharge progress of a bank for the panel's bar: 0 just fired .. 1 loaded (the slowest live gun decides; 0 when no gun is left).
 pub fn bank_recharge(lib: &Library, g: &GunStates, c: &Class, h: &Health, bank: usize) -> f32 {
-    c.mounts
-        .iter()
-        .zip(&g.0)
-        .filter(|(m, _)| m.bank == bank && m.parent.is_none_or(|p| h.sections[p] > 0.0))
-        .map(|(_, s)| if s.cooldown <= 0.0 { 1.0 } else { 1.0 - s.cooldown / lib.guns[&s.gun].reload.max(0.01) })
-        .reduce(f32::min)
-        .unwrap_or(0.0)
-        .clamp(0.0, 1.0)
+    live_guns(g, c, h, bank).map(|s| if s.cooldown <= 0.0 { 1.0 } else { 1.0 - s.cooldown / lib.guns[&s.gun].reload.max(0.01) }).reduce(f32::min).unwrap_or(0.0).clamp(0.0, 1.0)
 }
 
 /// HUD icon name for a gun definition name (e.g. Gun_CannonBall_Med -> WeaponBar_GunIcon_Cannon_Medium).
