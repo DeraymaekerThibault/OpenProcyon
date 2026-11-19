@@ -870,7 +870,7 @@ fn opening_nis_rules_run_in_missions_without_the_scripted_briefing() {
 }
 
 /// The dev autopilot's fallback: an unfired rule whose flag gate holds asks the player to enter its volume or shoot its group; a rule
-/// behind an unmet flag, a fail rule and a speech-only warning ask for nothing (#68: missions 4, 5 and 8 stalled without a point).
+/// behind an unmet flag, a fail rule and a speech-only warning ask for nothing (missions 4, 5 and 8 stalled without a point).
 #[test]
 fn wants_lists_what_open_rules_wait_for_the_player_to_do() {
     let vol = serde_json::json!([[100.0, 100.0], [200.0, 100.0], [200.0, 200.0], [100.0, 200.0]]);
@@ -922,7 +922,7 @@ fn wants_lists_what_open_rules_wait_for_the_player_to_do() {
     assert_eq!(sc.wants(&w), vec![Want::Hit(w[1].e)]);
 }
 
-/// "Player0 Group" is every ship the human owns, even where a TWT group named after the human holds only some of them (#352). Mission 5:
+/// "Player0 Group" is every ship the human owns, even where a TWT group named after the human holds only some of them. Mission 5:
 /// TWT group "Player" is the starting two ships; the RLS Superior (TWT group "Jim") is handed to the player as command ship by a rule
 /// mid-mission, and the warning shot rule asks whether "Player0 Group" is attacking the boats once that command ship has fired.
 #[test]
@@ -954,7 +954,7 @@ fn the_player_group_is_every_ship_the_human_owns() {
 }
 
 /// Break Tow ends a tow whichever group is named first: mission 4 and 11 name the towed ship as TowerGroupA and the player as
-/// TowerGroupB, and the player stayed hitched to the tender, unable to take the next tow (#351, #355).
+/// TowerGroupB, and the player stayed hitched to the tender, unable to take the next tow.
 #[test]
 fn break_tow_matches_either_group_order() {
     let data = serde_json::json!({"rules": [

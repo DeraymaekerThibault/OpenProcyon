@@ -93,7 +93,7 @@ fn docks_at_island(map: &str, island: &str, class: &str, start: Vec3, secs: u32)
 #[test]
 #[ignore = "needs imported assets"]
 fn a_computer_ship_docks_at_border_disputes_centre_island_from_the_south_east() {
-    // Issue #192: from here the remake's approach point fell on the island's land and the ship parked for good. The original puts it
+    // From here the remake's approach point fell on the island's land and the ship parked for good. The original puts it
     // on the dock axis on the ship's side, unchecked, and lets the collision avoider take the ship there.
     assert!(docks_at_island("border_dispute", "Island_Large01", "Ship_Procyon_Sloop", Vec3::new(141.0, 0.0, -173.0), 300));
 }

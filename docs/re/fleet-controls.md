@@ -1,6 +1,6 @@
 # Fleet controls: selection, command ship, ship bar and formations
 
-Scope: UI-01, UI-02 and UI-03 in the [fidelity backlog](../fidelity-backlog.md). Sections 1–3 record original evidence; §4 preserves the pre-implementation audit, §5 the ordered acceptance checklist, and §6 records the shared implementation and checks. **Implemented provisionally, not retail-parity validated.**
+Scope: UI-01, UI-02 and UI-03 of the project board "OpenProcyon fidelity: every rule of the original". Sections 1–3 record original evidence; §4 preserves the pre-implementation audit, §5 the ordered acceptance checklist, and §6 records the shared implementation and checks. **Implemented provisionally, not retail-parity validated.**
 
 ## Evidence and confidence
 

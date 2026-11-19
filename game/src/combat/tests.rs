@@ -1,6 +1,6 @@
 use super::*;
 
-/// #353: mission 6's stockade gate has no guns, only a vitalToMission section, and the rules wait for that section's damage to reach 1.
+/// Mission 6's stockade gate has no guns, only a vitalToMission section, and the rules wait for that section's damage to reach 1.
 /// The importer must export it as a class (an attackable base), and shooting the section down must read as full mission damage.
 #[test]
 #[ignore = "needs imported assets"]
@@ -24,7 +24,7 @@ fn gunless_stockade_is_a_base_whose_mission_section_can_be_destroyed() {
     let got = hit_test::base_aim_point(camp, &camp_hp, None).unwrap();
     assert!(near.iter().any(|r| r.distance(got) < 2.0), "tower aim {got} stays at a roof centre (first {roof})");
     // The dev autopilot clicks a point of the gate its guns can see, nearest the gate's middle: the roof is 40 units up and cannons aimed
-    // there sent every shot over the wall in mission 6 (#353); the nearest point to the ship can lie behind the island (mission 2's towers).
+    // there sent every shot over the wall in mission 6; the nearest point to the ship can lie behind the island (mission 2's towers).
     let live_point = |visible: &dyn Fn(Vec3) -> bool| crate::combat::live_tower_point(class, &hp, &Transform::default(), visible).unwrap();
     let mid = (gate.min + gate.max) * 0.5;
     let click = live_point(&|_| true);
@@ -766,7 +766,7 @@ fn ship_hit_rules() {
     let core = hp.core;
     let out = apply_ship_hit(class, &mut hp, stern, sure_fire, 0.0, true, &mut rng);
     assert!(!out.lost && hp.core < core);
-    // Partial invulnerability is a hull floor (#351, mission 4's towed tender at 0.1): full damage until the core reaches that share.
+    // Partial invulnerability is a hull floor (mission 4's towed tender at 0.1): full damage until the core reaches that share.
     let mut hp = Health::new(class);
     hp.sections[stern] = 0.0;
     let fresh = apply_ship_hit(class, &mut hp, stern, sure_fire, 0.1, true, &mut rng);
@@ -779,7 +779,7 @@ fn ship_hit_rules() {
     hp.core = 0.05 * class.core_hp;
     apply_ship_hit(class, &mut hp, stern, sure_fire, 0.1, true, &mut rng);
     assert_eq!(hp.core, 0.05 * class.core_hp, "a core already under the floor is not healed and loses no more");
-    // The floor holds every section too: a protected ship keeps its sails, helm and guns (review of #358).
+    // The floor holds every section too: a protected ship keeps its sails, helm and guns.
     let mut hp = Health::new(class);
     for _ in 0..200 {
         apply_ship_hit(class, &mut hp, stern, sure_fire, 0.1, true, &mut rng);
@@ -1639,14 +1639,14 @@ fn lob_cursor_sprites_follow_weapon_and_solution() {
 #[test]
 #[ignore = "needs imported assets"]
 fn a_fire_that_burns_a_floored_section_out_goes_out() {
-    // Mission 4's stranded tender (#351): the hull floor props the burnt section back up, which must not keep the fire alive.
+    // Mission 4's stranded tender: the hull floor props the burnt section back up, which must not keep the fire alive.
     let lib = Library::load(assets_dir());
     let c = lib.index("Ship_Navy_Cutter");
     let mut hp = Health::new(&lib.classes[c]);
     hp.sections[0] = 1.0;
     let mut app = App::new();
     app.init_resource::<Time>().add_systems(Update, super::damage::fires);
-    let fire = super::damage::Fire { sec: 0, intensity: 50.0, state: 0, t: 0.0, fx: None };
+    let fire = super::damage::Fire { sec: 0, intensity: 50.0, state: 0, fx: None };
     let ms = crate::campaign::MissionShip { invuln: 0.5, ..Default::default() };
     let ship = Ship {
         class: c,

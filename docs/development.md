@@ -234,12 +234,11 @@ Python dependencies are in `requirements.txt` (the checks add ruff via `requirem
 3. **Fidelity passes:** compare behaviour and screenshots against retail evidence; retain explicit PROVISIONAL labels for guesses.
 4. **Expand playable campaigns:** only after the Mission 1 path works. Exported Missions 2–13 must not be presented as supported gameplay yet.
 
-Keep this list about outcomes, not speculative systems. Use [fidelity-backlog.md](fidelity-backlog.md) as the consolidated original-game gap checklist: pick a stable ID and acceptance scenario before implementing, then update its status and the owning `docs/re/` evidence. Record limitations next to their owning code. Exported assets, visible buttons and accepted/no-op mission rules do not count as implemented behaviour.
+Keep this list about outcomes, not speculative systems. Use the project board "OpenProcyon fidelity: every rule of the original" as the original-game gap checklist: pick the row and an acceptance scenario before implementing, then update its stage and the owning `docs/re/` evidence. Record limitations next to their owning code. Exported assets, visible buttons and accepted/no-op mission rules do not count as implemented behaviour.
 Never publish, upload or attach converted retail content anywhere (issues, CI artifacts, releases).
 
 ## Documentation map
 
-- [fidelity-backlog.md](fidelity-backlog.md): current consolidated fidelity gaps and acceptance criteria.
 - [data-format.md](data-format.md): editable schema and export limits.
 - [modding.md](modding.md): overlays, inheritance and HD art.
 - [re/hud.md](re/hud.md), [re/campaign.md](re/campaign.md), [re/movement.md](re/movement.md), [re/gunnery.md](re/gunnery.md), [re/effects.md](re/effects.md), [re/sound.md](re/sound.md): evidence behind implementation.

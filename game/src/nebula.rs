@@ -469,7 +469,8 @@ impl Cloud {
     pub fn effect(&self) -> &str {
         &self.effect
     }
-    /// Seconds the cloud's sim has run (its colour loop's clock). Read-only, for tests and the render profile.
+    /// Seconds the cloud's sim has run (its colour loop's clock). Read-only, for tests.
+    #[cfg(test)]
     pub fn age(&self) -> f32 {
         self.age
     }

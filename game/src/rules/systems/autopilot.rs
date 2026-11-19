@@ -138,7 +138,7 @@ impl Sight<'_> {
         self.land.iter().all(|o| o.segment_hit(a, b).is_none())
     }
     /// The open-water point `radius` from `target` nearest `from` with a clear shot at `target`; island geometry hides a stockade or a
-    /// moored ship from most sides (#353), so the autopilot sails round to one that sees it.
+    /// moored ship from most sides, so the autopilot sails round to one that sees it.
     fn firing_spot(&self, target: Vec3, from: Vec3, radius: f32) -> Option<Vec3> {
         const BEARINGS: usize = 36;
         (0..BEARINGS)
@@ -159,7 +159,7 @@ fn mount_angle(rot: Quat) -> f32 {
 
 /// The heading that turns the gun nearest the bow (of `guns`, angles off the bow) onto `bow_on`, the heading that points the bow at the
 /// target. Mission 2's sloop holds bow-on with its forward Lancer; mission 6's command ship has only broadside guns and must turn its side
-/// to the stockade gate (#353). No guns: bow-on.
+/// to the stockade gate. No guns: bow-on.
 fn tower_face(bow_on: f32, guns: &[f32]) -> f32 {
     guns.iter().copied().min_by(|a, b| a.abs().total_cmp(&b.abs())).map_or(bow_on, |a| bow_on - a)
 }
@@ -429,7 +429,7 @@ fn unstick(time: f32, pos: Vec3, goal: Option<Vec3>, cell: &mut Option<Stuck>) -
 }
 
 /// The ship a `Tow...` task asks the player to tow: the one the task name ends with, else the named ship its text mentions (mission 4's
-/// "Tow tender to safety" reads "Tow the RLS Bachanalia to the Rally Point.", #351). A task whose text alone starts with "Tow" counts
+/// "Tow tender to safety" reads "Tow the RLS Bachanalia to the Rally Point"). A task whose text alone starts with "Tow" counts
 /// too: mission 4's "MO4 free stuck sloop" reads "Tow the RLS Yorkshire Clear of the Island it has Run Aground On.". The text may
 /// misspell the name (mission 4's "Tow the RLS Indominable ..." for the RLS Indomitable), so the first six letters of the name's last
 /// word are enough.
@@ -644,7 +644,7 @@ fn autopilot(
         Some(hidden.then(|| sight.firing_spot(foe.pos + Vec3::Y * GUN_HEIGHT, p.pos, FOE_SPOT)).flatten().unwrap_or(foe.pos))
     } else if let Some(((e, at, local), spot)) = tower_spot {
         intent = "shoot a base from a firing spot";
-        // The tower or gate is behind the island from here: sail to the nearest open-water spot that sees it (#353). Once there, stop and
+        // The tower or gate is behind the island from here: sail to the nearest open-water spot that sees it. Once there, stop and
         // turn a gun onto it: creeping forward (order 1) from the spot slid the hull along the island and the guns never bore.
         target.0 = Some(e);
         target.1 = Some(local);
@@ -665,7 +665,7 @@ fn autopilot(
         let off = p.pos - at;
         let d = off.length();
         let backing_out = ships.iter().find(|s| s.primary).is_some_and(|s| !s.ship.waypoints.is_empty());
-        // Up to SPOT_REACHED beyond the hold distance counts: a hull pinned on the island just outside it never closed the gap (#353).
+        // Up to SPOT_REACHED beyond the hold distance counts: a hull pinned on the island just outside it never closed the gap.
         if (TOWER_MIN..=TOWER_HOLD + SPOT_REACHED).contains(&d) && (!backing_out || d >= TOWER_HOLD - 15.0) {
             // Heading 0 faces -Z, rotating about +Y; turned so a gun that can hit bases bears.
             face = Some(tower_face((-(at.x - p.pos.x)).atan2(-(at.z - p.pos.z)), &sight.guns));
@@ -713,7 +713,7 @@ fn autopilot(
     if std::mem::replace(&mut st.intent, intent) != intent {
         info!("autopilot intent: {intent} (target {:?}, goal {:.0?})", target.0.and_then(|e| w.iter().find(|u| u.e == e)).map(|u| u.name.as_str()), goal);
     }
-    // Once a game minute: what the bot is after, for reading a stalled autoplay log (#68).
+    // Once a game minute: what the bot is after, for reading a stalled autoplay log.
     let minute = (sc.time / 60.0) as u32;
     if std::mem::replace(&mut st.minute, minute) != minute {
         let helm = ships
@@ -869,7 +869,7 @@ mod tests {
         }
     }
 
-    /// #353: the stockade gate and the pirates moored round the island are hidden from most sides; the autopilot picks the nearest
+    /// The stockade gate and the pirates moored round the island are hidden from most sides; the autopilot picks the nearest
     /// open-water spot with a clear shot instead of firing into the island.
     #[test]
     fn a_target_behind_an_island_is_shot_from_a_spot_that_sees_it() {
@@ -901,7 +901,7 @@ mod tests {
         assert!((mount_angle(port) - FRAC_PI_2).abs() < 1e-5);
         // Mission 2: a forward gun keeps the bow on the tower.
         assert!((tower_face(1.0, &[mount_angle(port), 0.0, mount_angle(starboard)]) - 1.0).abs() < 1e-5);
-        // Mission 6 (#353): broadside guns only, so the side turns to the gate; the gun's world direction is the bow-on heading.
+        // Mission 6: broadside guns only, so the side turns to the gate; the gun's world direction is the bow-on heading.
         let h = tower_face(1.0, &[mount_angle(port), mount_angle(starboard)]);
         let dir = Quat::from_rotation_y(h) * port * Vec3::NEG_Z;
         let want = Quat::from_rotation_y(1.0) * Vec3::NEG_Z;
@@ -929,7 +929,7 @@ mod tests {
         };
         let w = [unit(1, "RLS Sea Sparrow"), unit(2, ""), unit(3, "RLS Bachanalia"), unit(4, "Harvester")];
         let me = w[0].e;
-        // Mission 4 (#351): the task name says "tender", the text names the ship.
+        // Mission 4: the task name says "tender", the text names the ship.
         let m4 = task("Tow tender to safety", "Tow the RLS Bachanalia to the Rally Point.");
         assert_eq!(task_towee(&m4, &w, me).map(|u| u.e), Some(w[2].e));
         assert_eq!(task_towee(&task("TowHarvester", ""), &w, me).map(|u| u.e), Some(w[3].e), "a name suffix still wins");
