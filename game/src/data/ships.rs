@@ -272,22 +272,12 @@ fn try_load_class(root: &Path, name: &str, guns: &HashMap<String, GunDef>) -> Re
         [amn, amx]
     };
     let nodes = glb_json(&model_bytes).map(|(doc, _)| doc);
-    let node_point = |kind: &str| {
-        nodes.as_ref()?["nodes"]
-            .as_array()?
-            .iter()
-            .find(|n| n["extras"]["kind"] == kind)
-            .map(|n| Vec3::new(num(&n["translation"][0]), num(&n["translation"][1]), num(&n["translation"][2])))
-    };
+    let node = |kind: &str| nodes.as_ref()?["nodes"].as_array()?.iter().find(|n| n["extras"]["kind"] == kind);
+    let translation = |n: &Value| Vec3::new(num(&n["translation"][0]), num(&n["translation"][1]), num(&n["translation"][2]));
+    let node_point = |kind: &str| node(kind).map(translation);
     // The cloak's two effect points (MSB 'CloakingEffectPoint' / 'FullyCloakedEffectPoint'): where Cloaking/DeCloaking and the
     // FullyCloaked periscope trail play; the second faces aft (rot_raw is a yaw about the hull's up axis).
-    let effect_point = |kind: &str| {
-        nodes.as_ref()?["nodes"]
-            .as_array()?
-            .iter()
-            .find(|n| n["extras"]["kind"] == kind)
-            .map(|n| (Vec3::new(num(&n["translation"][0]), num(&n["translation"][1]), num(&n["translation"][2])), Quat::from_rotation_y(num(&n["extras"]["rot_raw"][0]))))
-    };
+    let effect_point = |kind: &str| node(kind).map(|n| (translation(n), Quat::from_rotation_y(num(&n["extras"]["rot_raw"][0]))));
     let cloak_points = effect_point("CloakingEffectPoint").zip(effect_point("FullyCloakedEffectPoint")).map(|(a, b)| [a, b]);
     let hull_bound = sections.iter().map(|s| s.min.abs().max(s.max.abs()).length()).fold(0.0, f32::max);
     let centre = if hmn.x <= hmx.x { (hmn + hmx) / 2.0 } else { (amn + amx) / 2.0 };

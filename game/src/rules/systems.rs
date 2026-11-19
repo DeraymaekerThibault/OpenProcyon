@@ -166,19 +166,15 @@ fn units(ships: &Query<RuleShip>, lib: &Library) -> Vec<Unit> {
             let secs =
                 if h.sections.is_empty() { 0.0 } else { h.sections.iter().zip(&class.sections).map(|(x, c)| 1.0 - x / c.hp.max(1.0)).sum::<f32>() / h.sections.len() as f32 };
             Unit {
-                e,
-                id: m.id,
                 name: m.name.clone(),
                 owner: m.owner.clone(),
-                owner_is_named_group: false,
-                groups: vec![],
-                pos: tf.translation,
                 alive: !h.destroyed,
                 visible: m.visible,
                 primary,
                 damage: (1.0 - h.core / class.core_hp).max(secs).clamp(0.0, 1.0),
                 flag: m.flag.clone(),
                 attack: m.attack.clone(),
+                ..Unit::new(e, m.id, tf.translation)
             }
         })
         .collect()
@@ -642,21 +638,7 @@ fn mission_ai(
     let holes = crate::ship::hole_list(&holes, storms.0.as_deref(), storms.1.as_deref());
     let sc = &mission.script;
     // Targets for orders and hostility: ships, then rocks (rocks only answer attack orders, never hostility); tagged with TWT groups.
-    let unit = |e, id, name: &str, owner: &str, pos, alive| Unit {
-        e,
-        id,
-        name: name.into(),
-        owner: owner.into(),
-        owner_is_named_group: false,
-        groups: vec![],
-        pos,
-        alive,
-        visible: alive,
-        primary: false,
-        damage: 0.0,
-        flag: String::new(),
-        attack: vec![],
-    };
+    let unit = |e, id, name: &str, owner: &str, pos, alive| Unit { name: name.into(), owner: owner.into(), alive, visible: alive, ..Unit::new(e, id, pos) };
     // Lifeboats (mission 4's pre-placed ones) are never an enemy or a target, whoever owns them.
     let mut snap: Vec<Unit> =
         ships.iter().filter(|s| !boats.contains(s.0)).map(|(e, _, tf, h, m, _, _)| unit(e, m.id, &m.name, &m.owner, tf.translation, !h.destroyed && m.visible)).collect();

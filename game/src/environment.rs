@@ -297,19 +297,12 @@ impl SpaceAnimal {
     }
     pub fn unit(&self, e: Entity, tf: &Transform) -> Unit {
         Unit {
-            e,
-            id: -1,
             name: self.home.clone(),
             owner: self.owner.clone(),
-            owner_is_named_group: false,
             groups: vec![self.home.clone()],
-            pos: tf.translation,
             alive: !self.dead,
             visible: self.visible,
-            primary: false,
-            damage: 0.0,
-            flag: String::new(),
-            attack: vec![],
+            ..Unit::new(e, -1, tf.translation)
         }
     }
     pub fn follow(&mut self, points: &[Vec3], pos: Vec3, closest: bool, looping: bool) {

@@ -45,21 +45,7 @@ pub struct MissionBase {
 }
 impl MissionBase {
     pub fn unit(&self, e: Entity, tf: &Transform, damage: f32) -> rules::Unit {
-        rules::Unit {
-            e,
-            id: self.id,
-            name: String::new(),
-            owner: self.owner.clone(),
-            owner_is_named_group: false,
-            groups: vec![],
-            pos: tf.translation,
-            alive: true,
-            visible: true,
-            primary: false,
-            damage,
-            flag: String::new(),
-            attack: vec![],
-        }
+        rules::Unit { owner: self.owner.clone(), damage, ..rules::Unit::new(e, self.id, tf.translation) }
     }
 }
 #[derive(Resource, Default)]

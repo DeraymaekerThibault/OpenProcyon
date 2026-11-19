@@ -144,6 +144,14 @@ pub struct Transient;
 /// The player's target and where on it the player clicked (ship-local); the guns aim at that spot, as in the original.
 #[derive(Resource, Default)]
 pub struct Target(pub Option<Entity>, pub Option<Vec3>, pub GroundFire);
+/// One step of a 64-bit xorshift, as a float in 0..1.
+pub fn xorshift_unit(state: &mut u64) -> f32 {
+    *state ^= *state << 13;
+    *state ^= *state >> 7;
+    *state ^= *state << 17;
+    (*state >> 40) as f32 / (1u64 << 24) as f32
+}
+
 #[derive(Resource)]
 pub struct Rng(u64);
 
@@ -169,10 +177,7 @@ impl Rng {
         Vec3::new(self.f() * 2.0 - 1.0, self.f() * 2.0 - 1.0, self.f() * 2.0 - 1.0).try_normalize().unwrap_or(Vec3::X)
     }
     pub fn f(&mut self) -> f32 {
-        self.0 ^= self.0 << 13;
-        self.0 ^= self.0 >> 7;
-        self.0 ^= self.0 << 17;
-        (self.0 >> 40) as f32 / (1u64 << 24) as f32
+        xorshift_unit(&mut self.0)
     }
     /// Uniform in `lo..hi` (a damage or speed range).
     pub fn range(&mut self, lo: f32, hi: f32) -> f32 {
