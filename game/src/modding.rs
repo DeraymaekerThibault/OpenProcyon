@@ -103,7 +103,7 @@ pub fn save_enabled_in(dir: &Path, mods: &[Installed]) {
 }
 
 /// Object files that mods add keys to instead of replacing.
-const MERGED: &[&str] = &["hud/scales.json", "data/weapons/guns.json", "data/weapons/bullets.json", "data/ai/weapons.json", "menu/strings.json"];
+const MERGED: &[&str] = &["hud/scales.json", "data/collision.json", "data/weapons/guns.json", "data/weapons/bullets.json", "data/ai/weapons.json", "menu/strings.json"];
 
 fn read(p: &Path) -> Option<Value> {
     crate::data::try_json(p)
@@ -284,6 +284,19 @@ mod tests {
         assert!(on(&installed_in(&dir, Some(&bundled))).is_empty(), "switching a default mod off is remembered");
         std::fs::write(dir.join("mods.json"), r#"{"enabled": ["plain"]}"#).unwrap();
         assert_eq!(on(&installed_in(&dir, Some(&bundled))), ["plain", "speed"], "an older mods.json without `disabled` keeps the default on");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn collision_shapes_merge_by_type() {
+        let dir = std::env::temp_dir().join(format!("procyon-mod-collision-{}", std::process::id()));
+        let (base, m) = (dir.join("assets"), dir.join("mod"));
+        for d in [base.join("data"), m.join("data")] {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        std::fs::write(base.join("data/collision.json"), r#"{"Island01": {"min": [0, 0, 0], "max": [1, 1, 1]}}"#).unwrap();
+        std::fs::write(m.join("data/collision.json"), r#"{"Island_Ours": {"min": [0, 0, 0], "max": [2, 2, 2]}}"#).unwrap();
+        let c: Value = read(&overlay(&base, &[m]).join("data/collision.json")).unwrap();
+        assert!(c["Island01"].is_object() && c["Island_Ours"].is_object(), "a mod's scenery type is added beside the retail ones");
         std::fs::remove_dir_all(dir).unwrap();
     }
     #[test]
