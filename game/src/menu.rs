@@ -388,6 +388,18 @@ pub struct ScrollTrack {
 #[derive(Resource, Default)]
 pub struct ScrollTo(pub Option<(ScrollKind, usize)>);
 
+/// The track a held mouse button is dragging: the one pressed when the drag began, until the button is let go.
+fn held_track<T: Copy>(mouse: &ButtonInput<MouseButton>, dragging: &mut Option<T>, pressed: Option<T>) -> Option<T> {
+    if !mouse.pressed(MouseButton::Left) {
+        *dragging = None;
+        return None;
+    }
+    if dragging.is_none() {
+        *dragging = pressed;
+    }
+    *dragging
+}
+
 /// Dragging any scrollbar. The menu is rebuilt after every change, so the drag is remembered here rather than in the node.
 fn scroll_drag(
     tracks: Query<(&ScrollTrack, &Interaction, &bevy::ui::RelativeCursorPosition)>,
@@ -397,14 +409,7 @@ fn scroll_drag(
     mut mods: ResMut<ModList>,
     mut dragging: Local<Option<ScrollKind>>,
 ) {
-    if !mouse.pressed(MouseButton::Left) {
-        *dragging = None;
-        return;
-    }
-    if dragging.is_none() {
-        *dragging = tracks.iter().find(|(_, i, _)| **i == Interaction::Pressed).map(|(t, ..)| t.kind);
-    }
-    let Some(kind) = *dragging else { return };
+    let Some(kind) = held_track(&mouse, &mut dragging, tracks.iter().find(|(_, i, _)| **i == Interaction::Pressed).map(|(t, ..)| t.kind)) else { return };
     let Some((t, y)) = tracks.iter().find(|(t, ..)| t.kind == kind).and_then(|(t, _, rel)| rel.normalized.map(|p| (*t, p.y + 0.5))) else { return };
     // The thumb's centre follows the cursor along the room its length leaves.
     let pos = ((y - t.thumb / 2.0) / (1.0 - t.thumb).max(0.01)).clamp(0.0, 1.0);
@@ -435,14 +440,7 @@ fn slider_drag(
     lib: Res<Library>,
     mut dragging: Local<Option<SliderTrack>>,
 ) {
-    if !mouse.pressed(MouseButton::Left) {
-        *dragging = None;
-        return;
-    }
-    if dragging.is_none() {
-        *dragging = tracks.iter().find(|(_, i, _)| **i == Interaction::Pressed).map(|(t, ..)| *t);
-    }
-    let Some(kind) = *dragging else { return };
+    let Some(kind) = held_track(&mouse, &mut dragging, tracks.iter().find(|(_, i, _)| **i == Interaction::Pressed).map(|(t, ..)| *t)) else { return };
     let Some(x) = tracks.iter().find(|(t, ..)| **t == kind).and_then(|(.., rel)| rel.normalized).map(|p| p.x + 0.5) else { return };
     let fraction = (x * SLIDER_TRACK - SLIDER_KNOB / 2.0) / (SLIDER_TRACK - SLIDER_KNOB);
     match kind {
@@ -567,9 +565,13 @@ fn fleet_hook(mut sk: ResMut<Skirmish>, lib: Res<Library>, cfg: Res<crate::Confi
 fn launch(sk: &mut Skirmish, next: &mut NextState<Screen>) {
     sk.error = sk.launch_error();
     if sk.error.is_none() {
-        sk.map = sk.maps.get(sk.selected).map(|m| m.0.clone());
-        next.set(Screen::Battle);
+        start_battle(sk, next);
     }
+}
+
+fn start_battle(sk: &mut Skirmish, next: &mut NextState<Screen>) {
+    sk.map = sk.maps.get(sk.selected).map(|m| m.0.clone());
+    next.set(Screen::Battle);
 }
 
 /// `--lobby <spec>` (`lobby_scenario.rs`, tools/battle_check.py): sets the lobby up from the spec, then presses Launch. A spec the
@@ -599,8 +601,7 @@ fn autolaunch(mut sk: ResMut<Skirmish>, lib: Res<Library>, cfg: Res<crate::Confi
         }
     }
     if sk.launch_error().is_none() {
-        sk.map = sk.maps.get(sk.selected).map(|m| m.0.clone());
-        next.set(Screen::Battle);
+        start_battle(&mut sk, &mut next);
     }
 }
 

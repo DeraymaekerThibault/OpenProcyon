@@ -2,7 +2,7 @@
 //! Segments are laid in world space every 15 engine ticks and then drift on their own; the newest one follows the stern.
 use bevy::asset::RenderAssetUsages;
 use bevy::camera::visibility::NoFrustumCulling;
-use bevy::mesh::{Indices, PrimitiveTopology};
+use bevy::mesh::PrimitiveTopology;
 use bevy::prelude::*;
 
 use crate::{Scenario, Ship};
@@ -74,8 +74,7 @@ impl Trail {
     }
 
     fn rand(&mut self) -> f32 {
-        self.rng = self.rng.wrapping_mul(0x19660d).wrapping_add(0x3c6ef35f);
-        f32::from_bits(self.rng & 0x7fffff | 0x3f800000) - 1.0
+        crate::fx::lcg_unit(&mut self.rng)
     }
 
     /// Per-tick random wobble of an edge: +-0.07 along the horizontal axes, +-0.02 vertically (Bevy axes).
@@ -226,14 +225,7 @@ pub fn update(
             }
         }
         // An empty mesh is only written once, to clear the last frame's wake: rewriting it every frame makes Bevy warn "no vertices".
-        if (!pos.is_empty() || meshes.get(&mesh.0).is_some_and(|m| m.count_vertices() > 0))
-            && let Some(mut m) = meshes.get_mut(&mesh.0)
-        {
-            m.insert_attribute(Mesh::ATTRIBUTE_POSITION, pos);
-            m.insert_attribute(Mesh::ATTRIBUTE_UV_0, uv);
-            m.insert_attribute(Mesh::ATTRIBUTE_COLOR, col);
-            m.insert_indices(Indices::U32(idx));
-        }
+        crate::fx::set_ribbons_unless_still_empty(&mut meshes, &mesh.0, pos, uv, col, idx);
     }
 }
 
