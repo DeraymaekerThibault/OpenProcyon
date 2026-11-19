@@ -36,6 +36,14 @@ def rnd(v, nd=6):
     return v
 
 
+def sections_by_label(j):
+    """A ship's sections by label, without the geometry the game reads from the model."""
+    return {
+        s["label"]: {k: v for k, v in s.items() if k not in ("label", "aabb", "tris")}
+        for s in j["sections"]
+    }
+
+
 def dump(v):
     """indent=2, but number lists stay on one line."""
     return (
@@ -79,12 +87,7 @@ def pack(assets):
         ship["geometry"] = name
         ship["core_hp"] = j["core_hp"]
         ship["physics"] = {k: v["value"] for k, v in j["physics"].items()}
-        ship["sections"] = {
-            s["label"]: {
-                k: v for k, v in s.items() if k not in ("label", "aabb", "tris")
-            }
-            for s in j["sections"]
-        }
+        ship["sections"] = sections_by_label(j)
         ship["guns"] = {
             g["label"]: {k: v for k, v in g.items() if k != "label"} for g in j["guns"]
         }

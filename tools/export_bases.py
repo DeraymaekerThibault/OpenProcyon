@@ -10,7 +10,7 @@ from pathlib import Path
 
 from tools.export_combat import associations, export, load
 from tools.gamefs import ci_files
-from tools.pack_data import dump, rnd
+from tools.pack_data import dump, rnd, sections_by_label
 
 
 def export_bases(root, assets):
@@ -60,12 +60,7 @@ def export_bases(root, assets):
             core_hp=j["core_hp"],
             physics={k: v["value"] for k, v in j["physics"].items()},
         )
-        ship["sections"] = {
-            s["label"]: {
-                k: v for k, v in s.items() if k not in ("label", "aabb", "tris")
-            }
-            for s in j["sections"]
-        }
+        ship["sections"] = sections_by_label(j)
         # The volcanoes name every mount 'default'; the bank (unique per mount) then tells them apart.
         labels = [g["label"] for g in j["guns"]]
         ship["guns"] = {

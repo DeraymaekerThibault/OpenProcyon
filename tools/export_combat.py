@@ -120,6 +120,13 @@ def destruct_record(text):
     )
 
 
+def placed_objects(root):
+    """Names of the ships, bases and islands that have a world object file."""
+    for wot in ci_files(Path(root) / "WorldObjects", "*.wot"):
+        if wot.stem.startswith(("Ship_", "Base_", "Island_")):
+            yield wot.stem
+
+
 def load(root, name):
     nodes, problems = parse_lines(
         read_source_lines(
