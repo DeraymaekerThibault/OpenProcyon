@@ -1,3 +1,5 @@
+use super::ai::{AI_BOARD_CHANCE, AI_MIN_ATTACK};
+use super::grapple::{REEL_MIN, SHIP_RANGE, bank_limit, reeled};
 use super::*;
 
 const SCHOONER: [u32; 8] = [4, 1, 1, 1, 0, 2, 2, 1]; // Ship_Pirate_Schooner 'Max number of ...'
