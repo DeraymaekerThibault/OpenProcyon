@@ -112,11 +112,7 @@ pub fn bank_state(g: &GunStates, c: &Class, h: &Health, bank: usize) -> usize {
 
 /// Recharge progress of a bank for the panel's bar: 0 just fired .. 1 loaded (the slowest live gun decides; 0 when no gun is left).
 pub fn bank_recharge(lib: &Library, g: &GunStates, c: &Class, h: &Health, bank: usize) -> f32 {
-    live_guns(g, c, h, bank)
-        .map(|s| if s.cooldown <= 0.0 { 1.0 } else { 1.0 - s.cooldown / lib.guns[&s.gun].reload.max(0.01) })
-        .reduce(f32::min)
-        .unwrap_or(0.0)
-        .clamp(0.0, 1.0)
+    live_guns(g, c, h, bank).map(|s| if s.cooldown <= 0.0 { 1.0 } else { 1.0 - s.cooldown / lib.guns[&s.gun].reload.max(0.01) }).reduce(f32::min).unwrap_or(0.0).clamp(0.0, 1.0)
 }
 
 /// HUD icon name for a gun definition name (e.g. Gun_CannonBall_Med -> WeaponBar_GunIcon_Cannon_Medium).

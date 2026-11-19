@@ -296,14 +296,7 @@ impl SpaceAnimal {
         }
     }
     pub fn unit(&self, e: Entity, tf: &Transform) -> Unit {
-        Unit {
-            name: self.home.clone(),
-            owner: self.owner.clone(),
-            groups: vec![self.home.clone()],
-            alive: !self.dead,
-            visible: self.visible,
-            ..Unit::new(e, -1, tf.translation)
-        }
+        Unit { name: self.home.clone(), owner: self.owner.clone(), groups: vec![self.home.clone()], alive: !self.dead, visible: self.visible, ..Unit::new(e, -1, tf.translation) }
     }
     pub fn follow(&mut self, points: &[Vec3], pos: Vec3, closest: bool, looping: bool) {
         self.path = points.iter().map(|p| *p + self.offset).collect();
