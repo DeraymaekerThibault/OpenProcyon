@@ -79,6 +79,7 @@ impl Skill {
     }
     /// Gunnery accuracy factor relative to an Average crew (1 - 0.8 x gunnery, as for crewed ships in gunnery.rs); below 1 is better.
     /// Gunnery is the generic crewman's (`Crew_General_*`: 3 / 6 / 8 out of 10). PROVISIONAL: that island gunners use these crews.
+    #[cfg(test)]
     pub fn gunnery_vs_average(self) -> f32 {
         let gunnery = |s| match s {
             Self::Green => 0.3,

@@ -95,7 +95,7 @@ normal-timeline Mission 1 playthrough.
 
 ## Remaining fidelity gaps
 
-Current consolidated checklist: [fidelity-backlog.md](../fidelity-backlog.md). The earlier scaffold gap list is superseded:
+Current status: the project board "OpenProcyon fidelity: every rule of the original". The earlier scaffold gap list is superseded:
 boarding/capture, talking-head portraits, checkpoint saves, independent towing, physical collisions and provisional AI steer-away now exist.
 
 Lifeboat creation, drift and pickup now exist (`docs/re/lifeboats.md`, `lifeboats.rs`). Still incomplete: border zones, player boarding of bases, tender refit/torpedo resupply,

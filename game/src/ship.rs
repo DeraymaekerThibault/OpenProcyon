@@ -147,11 +147,6 @@ pub fn flee(holes: &[(Vec3, f32)], pos: Vec3) -> Option<f32> {
     })
 }
 
-/// Whether `pos` is inside a keep-out area of `hole_list` (where `flee` turns away).
-pub fn in_hole(holes: &[(Vec3, f32)], pos: Vec3) -> bool {
-    holes.iter().any(|(c, r)| Vec2::new(pos.x - c.x, pos.z - c.z).length() < r + HOLE_MARGIN)
-}
-
 /// Areas captains keep out of, as (centre, radius) for `flee`: black holes and damaging nebulae.
 pub fn hole_list(
     holes: &Query<(&Transform, &crate::blackhole::Pull), Without<Ship>>,
@@ -680,7 +675,7 @@ pub fn reconcile_fleets(world: &mut World) {
         if valid.is_none() {
             // The script's throttle cap on the command ship ("HUMAN CONTROLLED COMMAND SHIP") belongs to the command, not the hull: the
             // replacement takes it over, instead of keeping whatever cap a rule set on it before (a ship captured from a capped enemy
-            // group, a stationary escort), which could leave the player with a ship that cannot move (#356). PROVISIONAL: the
+            // group, a stationary escort), which could leave the player with a ship that cannot move. PROVISIONAL: the
             // original's handoff of the cap after a capture or loss has not been observed. Only a command ship that is still the human's
             // (sunk, not captured) hands its cap on, and never a 0: a captured ship's cap is the new owner's rules', and a 0 (an NIS stop)
             // would strand the player again. Otherwise the replacement gets full throttle.

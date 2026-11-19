@@ -74,7 +74,7 @@ struct Extra<'w, 's> {
     lifeboats: Query<'w, 's, (&'static Transform, &'static crate::lifeboats::Lifeboat), (With<Ship>, Without<MissionShip>)>,
     /// The player's guns (the dev autopilot fires mission 9's Star Mortar).
     player_guns: Query<'w, 's, &'static crate::combat::GunStates, With<PlayerShip>>,
-    /// Island and base collision: the dev autopilot's line-of-sight test for a firing position (#353).
+    /// Island and base collision: the dev autopilot's line-of-sight test for a firing position.
     land: Query<'w, 's, (&'static crate::collision::Obstacle, Option<&'static Visibility>), (Without<Ship>, Without<Asteroid>, Without<crate::environment::SpaceAnimal>)>,
     /// Whether the dev autopilot last ordered its fleet to run (formation held, cease fire).
     fleet_fleeing: Local<'s, bool>,

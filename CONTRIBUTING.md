@@ -7,8 +7,7 @@ in your own words. A pull request that breaks them is closed, however good the r
 ## Ways to help
 
 - **Report retail behaviour.** Play the original game and write down what you see as rules and numbers: speeds, ranges, timings,
-  which ship does what and when. Rows marked `PROVISIONAL` in [docs/fidelity-backlog.md](docs/fidelity-backlog.md) and in
-  `docs/re/*.md`, and issues labelled *needs retail measurement*, list what we still guess. Give the source (mission or skirmish
+  which ship does what and when. Items marked `PROVISIONAL` in `docs/re/*.md` and in the code, and issues labelled *needs retail measurement*, list what we still guess. Give the source (mission or skirmish
   map, difficulty, ship, what you did) so someone else can repeat it. Keep your videos and screenshots to yourself: describe
   them, don't upload them.
 - **Play-test campaign missions 2-13.** They load but are largely untested ([docs/re/campaign.md](docs/re/campaign.md)).

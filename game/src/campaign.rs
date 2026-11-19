@@ -455,7 +455,7 @@ mod tests {
     use super::*;
 
     /// Mission 5's Waystation Grant has no 'Setup Island' rule. It must still be a rules unit, or docking there never satisfies the
-    /// opening 'Group/Unit Docked' condition and the mission cannot advance (found by autoplay, #68). Its pirate base has none either (#352).
+    /// opening 'Group/Unit Docked' condition and the mission cannot advance. Its pirate base has none either.
     #[test]
     #[ignore = "needs imported assets"]
     fn a_base_without_a_setup_rule_is_a_dock_target_of_the_rules() {

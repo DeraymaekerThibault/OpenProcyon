@@ -124,10 +124,6 @@ pub struct Fx {
 }
 
 impl Fx {
-    /// Which effect this is (an index into `FxLib::names`).
-    pub fn effect(&self) -> usize {
-        self.eff
-    }
     pub fn particle_count(&self) -> usize {
         self.prims.iter().map(|p| p.parts.len()).sum()
     }

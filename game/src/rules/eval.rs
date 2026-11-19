@@ -551,7 +551,7 @@ impl Script {
             }
             // "Player0 Group" (aliased to the human's name) is the human's fleet: every ship the human owns, even where a TWT group
             // of the same name shadows the owner. Mission 5's TWT group "Player" is the starting Sea Sparrow and Comet; a rule later hands
-            // the RLS Superior (TWT group "Jim") to the player as fleet primary. Without this its warning shot never counted (#352).
+            // the RLS Superior (TWT group "Jim") to the player as fleet primary. Without this its warning shot never counted.
             if u.owner == self.player && !u.groups.contains(&self.player) {
                 u.groups.push(self.player.clone());
             }
@@ -1245,7 +1245,7 @@ impl Script {
             }
             "Tow Ship" => self.tow_specs.push((s(a, "Docking Group").into(), s(a, "Target to Tow").into())),
             // Either group may be the tower: mission 4's "pirated tender safe" and mission 11's "Player Saves Civ Galleon" name the towed
-            // ship first and the player second (#351, #355).
+            // ship first and the player second.
             "Break Tow" => {
                 let (ga, gb) = (s(a, "TowerGroupA"), s(a, "TowerGroupB"));
                 let (x, y) = (ids(w, ga), ids(w, gb));

@@ -102,16 +102,10 @@ fn ship_key(class: &crate::data::Class, mission: &crate::campaign::MissionShip) 
 #[derive(Component, Clone, PartialEq)]
 pub struct CrewPosts(pub [Vec<String>; 8]);
 impl CrewPosts {
+    #[cfg(test)]
     pub fn skill(&self, role: usize, skill: &str) -> Option<f32> {
         let values: Vec<_> = self.0[role].iter().filter_map(|id| ability(id, skill)).collect();
         (!values.is_empty()).then(|| values.iter().sum::<f32>() / values.len() as f32)
-    }
-    /// The post's skill over every slot (capacity `slots`), generic hands counting as 0.1 (default crew are rated 1 of 10).
-    /// PROVISIONAL: the mean with several members per post; measured only on single-slot posts.
-    pub fn post_skill(&self, role: usize, skill: &str, slots: u32) -> f32 {
-        let named: Vec<f32> = self.0[role].iter().map(|id| ability(id, skill).unwrap_or(0.1)).collect();
-        let slots = slots.max(named.len() as u32).max(1);
-        (named.iter().sum::<f32>() + 0.1 * (slots as usize - named.len()) as f32) / slots as f32
     }
     /// Gunnery of the gunner in slot `slot` (the order of the ship's selectable banks); a generic hand (0.1) when the slot is empty or hidden.
     pub fn gunner_skill(&self, slot: Option<usize>) -> f32 {

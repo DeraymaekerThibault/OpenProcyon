@@ -67,7 +67,7 @@ pub fn base_mission_damage(class: &Class, hp: &Health) -> f32 {
 /// Where the dev autopilot clicks on a base, in world space (None when every vital section is destroyed): of the live mission sections'
 /// surface points (triangle centres) that `visible` passes, the one nearest its section's middle, so a near miss either way still lands on
 /// it; with none visible, the roof (`hit_test::base_aim_point`), and the autopilot looks for a firing spot. Aiming at the roof sent mission
-/// 6's cannons over its 40-unit gate, and the nearest point to the ship put mission 2's shells into the island in front of its towers (#353).
+/// 6's cannons over its 40-unit gate, and the nearest point to the ship put mission 2's shells into the island in front of its towers.
 /// At most `TESTS` points are tried, spread over the candidates from the middle outward.
 pub fn live_tower_point(class: &Class, hp: &Health, tf: &Transform, visible: impl Fn(Vec3) -> bool) -> Option<Vec3> {
     const TESTS: usize = 64;

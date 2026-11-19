@@ -109,7 +109,7 @@ fn read(p: &Path) -> Option<Value> {
     crate::data::try_json(p)
 }
 
-/// Marks a `PROCYON_OVERLAY` folder as one the game built, and so may delete and rebuild (#136).
+/// Marks a `PROCYON_OVERLAY` folder as one the game built, and so may delete and rebuild.
 const OVERLAY_MARK: &str = ".openprocyon-overlay";
 
 /// True when the game may delete `dir` to rebuild an overlay there: missing, empty, or marked as an overlay it built earlier.

@@ -131,7 +131,7 @@ Unresolved (impact in brackets):
 6. **Collision/targeting**: lifeboat vs ship: no response; exclude lifeboats from enemy target scans, fleet rosters and ship-lost speech; keep shells from damaging them (provisional).
 7. **Pickup**: each tick per lifeboat: nearest alive non-lifeboat ship by sphere-surface distance; collect when ≤ 0; one collector; remove the lifeboat; update the lifeboat table; play the sound; +2 points iff collector is the local player and not allied with the lifeboat owner (also add to the mission points counter used by `CampaignPoints`).
 8. **Mission wiring**: run Mission 1 and 2 end-to-end (see §7); then 4 (pre-placed boats) and 5-7, 10, 12 smoke.
-9. **Docs/backlog** at merge: update `fidelity-backlog.md` (M1-03, CAM-01, rule table), `campaign.md` "Still missing", `boarding.md` Mission usage line, `scoring-saves.md`; this file stays the evidence record.
+9. **Docs/backlog** at merge: update the project board rows (M1-03, CAM-01), `campaign.md` "Still missing", `boarding.md` Mission usage line, `scoring-saves.md`; this file stays the evidence record.
 
 ## 7. Acceptance scenarios
 

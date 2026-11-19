@@ -249,7 +249,7 @@ pub fn spawn(commands: &mut Commands, lib: &fx::FxLib, terrain: &str, pos: Vec3)
 /// after `KILL_DELAY`.
 /// Docked and destroyed ships are left alone, and so are ships the rules pinned in place ('Set Group/Unit Movable' FALSE): the ships
 /// stranded in mission 4's Vanov hole and mission 11's SS Harvester wait there to be towed out (their light hulls feel the pull of
-/// `MIN_PULL_MASS`, #351, #355). The rules unpin them once the player comes for them.
+/// `MIN_PULL_MASS`). The rules unpin them once the player comes for them.
 pub fn pull(
     mut commands: Commands,
     time: Res<Time>,
@@ -524,7 +524,7 @@ mod tests {
             assert!((a / measured - 1.0).abs() < 0.05, "{class}: {a} vs {measured}");
         }
         // Mission 11's pinned SS Harvester (Mass 2000, 11.6 units inside a Small hole's rim) builds no pull speed in retail: one tick
-        // of its pull stays under the 0.1 snap there (a retail save, #355).
+        // of its pull stays under the 0.1 snap there (a retail save).
         let h = &lib.classes[lib.index("Ship_Civilian_Galleon_Feather")];
         assert!(h.phys.mass < MIN_PULL_MASS && small().accel(145.0 - 11.6, h.length, h.phys.mass) < BREAK_FREE);
         let c = &lib.classes[lib.index("Ship_Navy_Cutter")];
@@ -569,7 +569,7 @@ mod tests {
         };
         let gunner = ship(&mut app, "Ship_Pirate_Carrack", Side::Enemy, Vec3::new(300.0, 0.0, 0.0));
         let victim = ship(&mut app, "Ship_Navy_ManOWar", Side::Player, Vec3::new(100.0, 0.0, 0.0));
-        // A ship the rules pinned (mission 4's stranded St. Christopher, #351) waits in the core to be towed out.
+        // A ship the rules pinned (mission 4's stranded St. Christopher) waits in the core to be towed out.
         let stranded = ship(&mut app, "Ship_Navy_Tender", Side::Enemy, Vec3::new(0.0, 0.0, 20.0));
         app.world_mut().entity_mut(stranded).insert(crate::collision::Pinned);
         app.update(); // stats registers both hulls; the victim is caught

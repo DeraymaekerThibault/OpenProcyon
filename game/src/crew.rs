@@ -219,7 +219,7 @@ fn callouts(
     mut n: Local<usize>,
     mut dead: Local<Vec<bool>>,
     // Its own generator: this runs once per drawn frame, and drawing from the simulation's `combat::Rng` here made shot scatter
-    // depend on the frame rate (two autoplay runs parted at the first callout of a fight, #368).
+    // depend on the frame rate (two autoplay runs parted at the first callout of a fight).
     mut rng: Local<crate::combat::Rng>,
 ) {
     let Some(player) = player else { return };

@@ -22,7 +22,6 @@ pub struct Fire {
     pub sec: usize,
     pub intensity: f32,
     pub state: u8,
-    pub t: f32,
     pub fx: Option<Entity>,
 }
 
@@ -619,7 +618,7 @@ mod fire_tests {
             avoid: 1.0,
         };
         app.insert_resource(lib);
-        let fire = Fire { sec: 0, intensity: 5.0, state: 0, t: 0.0, fx: None };
+        let fire = Fire { sec: 0, intensity: 5.0, state: 0, fx: None };
         let e = app.world_mut().spawn((Transform::default(), ship, hp, Fires { list: vec![fire], tick: 0.0 })).id();
         let states = |app: &App| app.world().get::<Fires>(e).unwrap().list.iter().map(|f| f.state).collect::<Vec<_>>();
         let step = |app: &mut App, secs: f32| {

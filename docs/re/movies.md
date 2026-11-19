@@ -80,5 +80,5 @@ letterbox with black; keep the picture at the original 16:11 active area).
    `SinglePlayer_NIS` before `campaign::load_id("mission01")` (the Mission 1 opening NIS stays in `briefing.rs`); `rules/`/`campaign.rs`: after the last
    campaign mission win (the `PlayEndMovie` flag; export it into `assets/maps/missionNN/mission.json` in `tools/export_campaign.py`) play `TP_endNIS`, then return to the menu.
    Honour a `--no-movies` flag and the retail `Skip Movies` setting.
-4. Docs: after the code lands, update `docs/fidelity-backlog.md` (AV-01) and `docs/re/campaign.md` ("Remaining fidelity gaps").
+4. Docs: after the code lands, update the project board "OpenProcyon fidelity: every rule of the original" and `docs/re/campaign.md` ("Remaining fidelity gaps").
 5. Open RE questions: exact skip inputs, whether the end movie plays before or after the stats screen, what the logo-state probe tests (LoRez choice).
