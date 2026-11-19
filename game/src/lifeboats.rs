@@ -86,21 +86,12 @@ fn lifeboats(
             commands.entity(id).remove::<PlayerShip>().remove::<crate::boarding::Boardable>().insert((
                 Lifeboat { owner: ms.owner.clone() },
                 Ship {
-                    class: lib.index(&boat.name),
-                    side: Side::Player, // never an enemy: the original treats lifeboats as friendly to everyone
                     heading,
-                    speed: 0.0,
-                    ang_vel: 0.0,
                     order: 2,
                     waypoints: vec![tf.translation + to * 10000.0],
-                    goal: None,
-                    cap: 1.0,
                     throttle: Some(throttle),
-                    sail_energy: 1.0,
-                    crew_speed: 1.0,
-                    crew_turn: 1.0,
-                    net: 1.0,
-                    avoid: 1.0,
+                    // Side::Player: never an enemy, the original treats lifeboats as friendly to everyone
+                    ..Ship::new(lib.index(&boat.name), Side::Player)
                 },
             ));
             present.push((None, ms.owner.clone()));
@@ -153,23 +144,7 @@ mod tests {
         let lib = app.world().resource::<Library>();
         let ci = lib.index(class);
         let health = Health::new(&lib.classes[ci]);
-        let s = Ship {
-            class: ci,
-            side: Side::Player,
-            heading: 0.0,
-            speed: 0.0,
-            ang_vel: 0.0,
-            order: 0,
-            waypoints: vec![],
-            goal: None,
-            cap: 1.0,
-            throttle: None,
-            sail_energy: 1.0,
-            crew_speed: 1.0,
-            crew_turn: 1.0,
-            net: 1.0,
-            avoid: 1.0,
-        };
+        let s = Ship { heading: 0.0, ..Ship::new(ci, Side::Player) };
         let ms = MissionShip {
             id: -1,
             name: class.into(),
@@ -259,23 +234,7 @@ mod tests {
         // a ship on top of a boat is not pushed (a ship-lifeboat contact has no response), whichever way round
         let lib = app.world().resource::<Library>();
         let (cutter, boat) = (lib.index("Ship_Navy_Cutter"), lib.index("Ship_Navy_Lifeboat"));
-        let mk = |class| Ship {
-            class,
-            side: Side::Player,
-            heading: 0.0,
-            speed: 0.0,
-            ang_vel: 0.0,
-            order: 0,
-            waypoints: vec![],
-            goal: None,
-            cap: 1.0,
-            throttle: None,
-            sail_energy: 1.0,
-            crew_speed: 1.0,
-            crew_turn: 1.0,
-            net: 1.0,
-            avoid: 1.0,
-        };
+        let mk = |class| Ship { heading: 0.0, ..Ship::new(class, Side::Player) };
         let mut time = Time::<()>::default();
         time.advance_by(std::time::Duration::from_secs_f32(0.1));
         let mut w = App::new();

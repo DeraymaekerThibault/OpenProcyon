@@ -548,23 +548,7 @@ mod tests {
             let ci = lib.index(class);
             let c = &lib.classes[ci];
             let health = Health::new(c);
-            let ship = Ship {
-                class: ci,
-                side,
-                heading: 0.0,
-                speed: 0.0,
-                ang_vel: 0.0,
-                order: 0,
-                waypoints: vec![],
-                goal: None,
-                cap: 1.0,
-                throttle: None,
-                sail_energy: 1.0,
-                crew_speed: 1.0,
-                crew_turn: 1.0,
-                net: 1.0,
-                avoid: 1.0,
-            };
+            let ship = Ship { heading: 0.0, ..Ship::new(ci, side) };
             app.world_mut().spawn((Transform::from_translation(at), ship, health, Drift::default())).id()
         };
         let gunner = ship(&mut app, "Ship_Pirate_Carrack", Side::Enemy, Vec3::new(300.0, 0.0, 0.0));

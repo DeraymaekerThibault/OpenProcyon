@@ -1603,28 +1603,7 @@ mod tests {
         let original_strength = boardable.strength.defend;
         let ship = app
             .world_mut()
-            .spawn((
-                crate::Ship {
-                    class,
-                    side: crate::Side::Player,
-                    heading: 0.0,
-                    speed: 0.0,
-                    ang_vel: 0.0,
-                    order: 0,
-                    waypoints: vec![],
-                    goal: None,
-                    cap: 1.0,
-                    throttle: None,
-                    sail_energy: 1.0,
-                    crew_speed: 1.0,
-                    crew_turn: 1.0,
-                    net: 1.0,
-                    avoid: 1.0,
-                },
-                crate::combat::Health::new(&lib.classes[class]),
-                ms,
-                boardable,
-            ))
+            .spawn((crate::Ship { heading: 0.0, ..crate::Ship::new(class, crate::Side::Player) }, crate::combat::Health::new(&lib.classes[class]), ms, boardable))
             .id();
         let guns = crate::combat::spawn_guns(&mut app.world_mut().commands(), &assets, &lib, ship, class);
         app.world_mut().entity_mut(ship).insert(guns);

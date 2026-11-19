@@ -600,23 +600,7 @@ mod fire_tests {
         app.init_resource::<Time>().add_systems(Update, fires);
         let mut hp = Health::new(&lib.classes[class]);
         hp.sections[0] = 0.0;
-        let ship = crate::Ship {
-            class,
-            side: crate::Side::Enemy,
-            heading: 0.0,
-            speed: 0.0,
-            ang_vel: 0.0,
-            order: 0,
-            waypoints: vec![],
-            goal: None,
-            cap: 1.0,
-            throttle: None,
-            sail_energy: 1.0,
-            crew_speed: 1.0,
-            crew_turn: 1.0,
-            net: 1.0,
-            avoid: 1.0,
-        };
+        let ship = crate::Ship { heading: 0.0, ..crate::Ship::new(class, crate::Side::Enemy) };
         app.insert_resource(lib);
         let fire = Fire { sec: 0, intensity: 5.0, state: 0, fx: None };
         let e = app.world_mut().spawn((Transform::default(), ship, hp, Fires { list: vec![fire], tick: 0.0 })).id();

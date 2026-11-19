@@ -221,26 +221,7 @@ fn tick(app: &mut App, secs: f32) {
 fn ship(lib: &Library, name: &str, side: Side) -> (Ship, Health) {
     let class = lib.index(name);
     let c = &lib.classes[class];
-    (
-        Ship {
-            class,
-            side,
-            heading: 0.0,
-            speed: 3.0,
-            ang_vel: 0.0,
-            order: 2,
-            waypoints: vec![],
-            goal: None,
-            cap: 1.0,
-            throttle: None,
-            sail_energy: 1.0,
-            crew_speed: 1.0,
-            crew_turn: 1.0,
-            net: 1.0,
-            avoid: 1.0,
-        },
-        Health::new(c),
-    )
+    (Ship { heading: 0.0, speed: 3.0, order: 2, ..Ship::new(class, side) }, Health::new(c))
 }
 fn point(x: f32) -> DockPoint {
     DockPoint { pos: Vec3::new(x, 0.0, 0.0), fwd: Vec3::NEG_Z }
