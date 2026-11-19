@@ -50,12 +50,16 @@ GRADS = np.array(
 )
 
 
-def read_glb(path):
-    """(texture as RGB uint8 array, vertex positions, vertex UVs) of a one-mesh sky GLB."""
+def glb_parts(path):
+    """(JSON chunk, binary chunk) of a GLB file."""
     raw = Path(path).read_bytes()
     n = struct.unpack_from("<I", raw, 12)[0]
-    j = json.loads(raw[20 : 20 + n])
-    binary = raw[20 + n + 8 :]
+    return json.loads(raw[20 : 20 + n]), raw[20 + n + 8 :]
+
+
+def read_glb(path):
+    """(texture as RGB uint8 array, vertex positions, vertex UVs) of a one-mesh sky GLB."""
+    j, binary = glb_parts(path)
 
     def view(i):
         bv = j["bufferViews"][i]
@@ -556,6 +560,16 @@ def assemble_job(glb, out, tmp, split_stars):
     return f"{dst.name} ({dst.stat().st_size >> 20} MB{note})"
 
 
+def mod_folder(out, mod):
+    """`out`, or this mod's folder in the user's data directory."""
+    if out is None:
+        d = user_dir()
+        if not d:
+            sys.exit("no XDG_DATA_HOME, HOME or APPDATA for the mod folder: pass --out")
+        out = d / "mods" / mod["id"]
+    return out
+
+
 def default_assets():
     """PROCYON_ASSETS, else this checkout's assets/ (the baker lives in tools/), else the per-user folder."""
     if os.environ.get("PROCYON_ASSETS"):
@@ -591,12 +605,7 @@ def main(argv=None):
     if args.watch_stdin:
         stop_when_stdin_closes()
     assets = args.assets or default_assets()
-    out = args.out
-    if out is None:
-        d = user_dir()
-        if not d:
-            sys.exit("no XDG_DATA_HOME, HOME or APPDATA for the mod folder: pass --out")
-        out = d / "mods" / MOD["id"]
+    out = mod_folder(args.out, MOD)
     glbs = sorted((assets / "models" / "sky").glob("*.glb"))
     if args.skies:
         glbs = [g for g in glbs if g.stem in args.skies]

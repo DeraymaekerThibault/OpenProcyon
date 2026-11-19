@@ -17,15 +17,20 @@ usage: python3 -m tools.bake_surfaces [--assets assets] [--out DIR]
 import argparse
 import io
 import json
-import struct
 import sys
 from pathlib import Path
 
 import numpy as np
 from PIL import Image
 
-from tools.bake_sky import default_assets, progress, replacing, srgb_to_linear
-from tools.import_assets import user_dir
+from tools.bake_sky import (
+    default_assets,
+    glb_parts,
+    mod_folder,
+    progress,
+    replacing,
+    srgb_to_linear,
+)
 
 MOD = {
     "id": "baked-surfaces",
@@ -45,10 +50,7 @@ SCALES = ((0.6, 1.0), (2.0, 1.5), (5.0, 2.0))
 
 def material_images(glb):
     """{material name: RGB uint8 array} of the base colour textures in one GLB."""
-    raw = Path(glb).read_bytes()
-    n = struct.unpack_from("<I", raw, 12)[0]
-    j = json.loads(raw[20 : 20 + n])
-    binary = raw[20 + n + 8 :]
+    j, binary = glb_parts(glb)
     out = {}
     for m in j.get("materials", []):
         t = m.get("pbrMetallicRoughness", {}).get("baseColorTexture")
@@ -106,12 +108,7 @@ def main(argv=None):
     ap.add_argument("--out", type=Path, default=None, help="mod folder to write")
     args = ap.parse_args(argv)
     assets = args.assets or default_assets()
-    out = args.out
-    if out is None:
-        d = user_dir()
-        if not d:
-            sys.exit("no XDG_DATA_HOME, HOME or APPDATA for the mod folder: pass --out")
-        out = d / "mods" / MOD["id"]
+    out = mod_folder(args.out, MOD)
     glbs = sorted((assets / "models").rglob("*.glb")) + sorted(
         (assets / "ships").rglob("*.glb")
     )
