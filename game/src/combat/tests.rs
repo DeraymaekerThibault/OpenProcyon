@@ -2,6 +2,31 @@ use super::*;
 
 /// Mission 6's stockade gate has no guns, only a vitalToMission section, and the rules wait for that section's damage to reach 1.
 /// The importer must export it as a class (an attackable base), and shooting the section down must read as full mission damage.
+/// An app with the asset server and the asset types ship and base models load into.
+fn asset_app() -> App {
+    let mut app = App::new();
+    app.add_plugins((TaskPoolPlugin::default(), AssetPlugin::default(), TransformPlugin))
+        .init_asset::<bevy::world_serialization::WorldAsset>()
+        .init_asset::<bevy::prelude::Image>();
+    app
+}
+
+/// `asset_app` plus what `base_fire` reads and writes: sfx and fired messages, time, effects, library, rng, shell look, sensors.
+fn base_fire_app() -> App {
+    let mut app = asset_app();
+    app.add_message::<Sfx>()
+        .add_message::<Fired>()
+        .init_resource::<Time>()
+        .init_resource::<FxLib>()
+        .insert_resource(Library::load(assets_dir()))
+        .insert_resource(Rng::new(7))
+        .insert_resource(Look { mesh: default(), shell: default(), enemy_shell: default() })
+        .init_resource::<crate::environment::Sensors>()
+        .add_systems(PreUpdate, crate::environment::refresh_sensors)
+        .add_systems(Update, base_fire);
+    app
+}
+
 #[test]
 #[ignore = "needs imported assets"]
 fn gunless_stockade_is_a_base_whose_mission_section_can_be_destroyed() {
@@ -186,11 +211,8 @@ fn resting_muzzles_sit_at_their_authored_points() {
 #[test]
 #[ignore = "needs imported assets"]
 fn hostile_island_towers_shoot_the_player_and_neutral_ones_do_not() {
-    let mut app = App::new();
-    app.add_plugins((TaskPoolPlugin::default(), AssetPlugin::default(), TransformPlugin))
-        .init_asset::<bevy::world_serialization::WorldAsset>()
-        .init_asset::<bevy::prelude::Image>()
-        .add_message::<Sfx>()
+    let mut app = asset_app();
+    app.add_message::<Sfx>()
         .add_message::<Fired>()
         .add_message::<Hit>()
         .add_message::<Destroyed>()
@@ -283,20 +305,7 @@ fn hostile_island_towers_shoot_the_player_and_neutral_ones_do_not() {
 #[test]
 #[ignore = "needs imported assets"]
 fn skirmish_bases_shoot_ships_of_other_sides_only() {
-    let mut app = App::new();
-    app.add_plugins((TaskPoolPlugin::default(), AssetPlugin::default(), TransformPlugin))
-        .init_asset::<bevy::world_serialization::WorldAsset>()
-        .init_asset::<bevy::prelude::Image>()
-        .add_message::<Sfx>()
-        .add_message::<Fired>()
-        .init_resource::<Time>()
-        .init_resource::<FxLib>()
-        .insert_resource(Library::load(assets_dir()))
-        .insert_resource(Rng::new(7))
-        .insert_resource(Look { mesh: default(), shell: default(), enemy_shell: default() })
-        .init_resource::<crate::environment::Sensors>()
-        .add_systems(PreUpdate, crate::environment::refresh_sensors)
-        .add_systems(Update, base_fire);
+    let mut app = base_fire_app();
     let assets = app.world().resource::<AssetServer>().clone();
     let lib = Library::load(assets_dir());
     let class = lib.index("Base_SmugglersCamp");
@@ -323,20 +332,7 @@ fn skirmish_bases_shoot_ships_of_other_sides_only() {
 #[test]
 #[ignore = "needs imported assets"]
 fn a_volcano_lobs_one_aimed_shell_at_a_time() {
-    let mut app = App::new();
-    app.add_plugins((TaskPoolPlugin::default(), AssetPlugin::default(), TransformPlugin))
-        .init_asset::<bevy::world_serialization::WorldAsset>()
-        .init_asset::<bevy::prelude::Image>()
-        .add_message::<Sfx>()
-        .add_message::<Fired>()
-        .init_resource::<Time>()
-        .init_resource::<FxLib>()
-        .insert_resource(Library::load(assets_dir()))
-        .insert_resource(Rng::new(7))
-        .insert_resource(Look { mesh: default(), shell: default(), enemy_shell: default() })
-        .init_resource::<crate::environment::Sensors>()
-        .add_systems(PreUpdate, crate::environment::refresh_sensors)
-        .add_systems(Update, base_fire);
+    let mut app = base_fire_app();
     let assets = app.world().resource::<AssetServer>().clone();
     let lib = Library::load(assets_dir());
     let class = lib.index("Island_Volcano_01");
@@ -364,20 +360,7 @@ fn a_volcano_lobs_one_aimed_shell_at_a_time() {
 #[test]
 #[ignore = "needs imported assets"]
 fn a_silent_island_never_fires() {
-    let mut app = App::new();
-    app.add_plugins((TaskPoolPlugin::default(), AssetPlugin::default(), TransformPlugin))
-        .init_asset::<bevy::world_serialization::WorldAsset>()
-        .init_asset::<bevy::prelude::Image>()
-        .add_message::<Sfx>()
-        .add_message::<Fired>()
-        .init_resource::<Time>()
-        .init_resource::<FxLib>()
-        .insert_resource(Library::load(assets_dir()))
-        .insert_resource(Rng::new(7))
-        .insert_resource(Look { mesh: default(), shell: default(), enemy_shell: default() })
-        .init_resource::<crate::environment::Sensors>()
-        .add_systems(PreUpdate, crate::environment::refresh_sensors)
-        .add_systems(Update, base_fire);
+    let mut app = base_fire_app();
     let assets = app.world().resource::<AssetServer>().clone();
     let lib = Library::load(assets_dir());
     let class = lib.index("Island_Volcano_01");
@@ -409,11 +392,8 @@ fn better_gunners_spread_less() {
 #[test]
 #[ignore = "needs imported assets"]
 fn the_command_ship_holds_fire_until_an_enemy_is_clicked() {
-    let mut app = App::new();
-    app.add_plugins((TaskPoolPlugin::default(), AssetPlugin::default(), TransformPlugin))
-        .init_asset::<bevy::world_serialization::WorldAsset>()
-        .init_asset::<bevy::prelude::Image>()
-        .add_message::<Sfx>()
+    let mut app = asset_app();
+    app.add_message::<Sfx>()
         .add_message::<Fired>()
         .add_message::<Hit>()
         .add_message::<Destroyed>()
@@ -458,11 +438,8 @@ fn the_command_ship_holds_fire_until_an_enemy_is_clicked() {
 #[test]
 #[ignore = "needs imported assets"]
 fn a_skirmish_computer_ship_with_a_map_script_fires_at_its_captains_target() {
-    let mut app = App::new();
-    app.add_plugins((TaskPoolPlugin::default(), AssetPlugin::default(), TransformPlugin))
-        .init_asset::<bevy::world_serialization::WorldAsset>()
-        .init_asset::<bevy::prelude::Image>()
-        .add_message::<Sfx>()
+    let mut app = asset_app();
+    app.add_message::<Sfx>()
         .add_message::<Fired>()
         .add_message::<Hit>()
         .add_message::<Destroyed>()
@@ -506,11 +483,8 @@ fn a_skirmish_computer_ship_with_a_map_script_fires_at_its_captains_target() {
 #[test]
 #[ignore = "needs imported assets"]
 fn the_command_ship_damages_a_clicked_hostile_skirmish_base() {
-    let mut app = App::new();
-    app.add_plugins((TaskPoolPlugin::default(), AssetPlugin::default(), TransformPlugin))
-        .init_asset::<bevy::world_serialization::WorldAsset>()
-        .init_asset::<bevy::prelude::Image>()
-        .add_message::<Sfx>()
+    let mut app = asset_app();
+    app.add_message::<Sfx>()
         .add_message::<Fired>()
         .add_message::<Hit>()
         .add_message::<Destroyed>()
@@ -563,11 +537,8 @@ fn count_blasts(mut sfx: MessageReader<Sfx>, mut n: ResMut<Blasts>) {
 #[test]
 #[ignore = "needs imported assets"]
 fn a_destroyed_base_part_blasts() {
-    let mut app = App::new();
-    app.add_plugins((TaskPoolPlugin::default(), AssetPlugin::default(), TransformPlugin))
-        .init_asset::<bevy::world_serialization::WorldAsset>()
-        .init_asset::<bevy::prelude::Image>()
-        .add_message::<Sfx>()
+    let mut app = asset_app();
+    app.add_message::<Sfx>()
         .add_message::<Fired>()
         .add_message::<Hit>()
         .add_message::<Destroyed>()
