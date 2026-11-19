@@ -6,23 +6,7 @@ pub fn fleet_world() -> (World, [Entity; 6]) {
     let class = &lib.classes[ci];
     let ids = std::array::from_fn(|i| {
         w.spawn((
-            Ship {
-                class: ci,
-                side: if i == 5 { Side::Enemy } else { Side::Player },
-                heading: 0.0,
-                speed: 0.0,
-                ang_vel: 0.0,
-                order: 0,
-                waypoints: vec![],
-                goal: None,
-                cap: 1.0,
-                throttle: None,
-                sail_energy: 1.0,
-                crew_speed: 1.0,
-                crew_turn: 1.0,
-                net: 1.0,
-                avoid: 1.0,
-            },
+            Ship { heading: 0.0, ..Ship::new(ci, if i == 5 { Side::Enemy } else { Side::Player }) },
             Health::new(class),
             Transform::from_xyz(i as f32 * 50.0, 0.0, 0.0),
             FleetMember(
@@ -361,23 +345,7 @@ fn ship_keeps_speed_and_heading_past_last_waypoint() {
     // Not class 0: the sorted ship folders now start with the (immobile) armed bases.
     let ci = lib.index("Ship_Navy_Cutter");
     let class = &lib.classes[ci];
-    let mut ship = Ship {
-        class: ci,
-        side: Side::Player,
-        heading: 0.0,
-        speed: 0.0,
-        ang_vel: 0.0,
-        order: 3,
-        waypoints: vec![Vec3::new(-30.0, 0.0, -80.0)],
-        goal: None,
-        cap: 1.0,
-        throttle: None,
-        sail_energy: 1.0,
-        crew_speed: 1.0,
-        crew_turn: 1.0,
-        net: 1.0,
-        avoid: 1.0,
-    };
+    let mut ship = Ship { heading: 0.0, order: 3, waypoints: vec![Vec3::new(-30.0, 0.0, -80.0)], ..Ship::new(ci, Side::Player) };
     let mut tf = Transform::default();
     let h = Health { sections: vec![1.0; class.sections.len()], core: 1.0, destroyed: false };
     for _ in 0..3000 {
@@ -428,23 +396,7 @@ fn a_broadside_attacker_circles_an_idle_ship_on_its_turning_circle() {
         let class = &lib.classes[ci];
         let h = Health { sections: class.sections.iter().map(|s| s.hp).collect(), core: class.core_hp, destroyed: false };
         let (routine, range) = attack::plan(&lib, class, &h, None).unwrap();
-        let mut ship = Ship {
-            class: ci,
-            side: Side::Enemy,
-            heading: 0.0,
-            speed: 0.0,
-            ang_vel: 0.0,
-            order: 0,
-            waypoints: vec![],
-            goal: None,
-            cap: 1.0,
-            throttle: None,
-            sail_energy: 1.0,
-            crew_speed: COMPUTER_CREW,
-            crew_turn: COMPUTER_CREW,
-            net: 1.0,
-            avoid: 1.0,
-        };
+        let mut ship = Ship { heading: 0.0, crew_speed: COMPUTER_CREW, crew_turn: COMPUTER_CREW, ..Ship::new(ci, Side::Enemy) };
         let mut tf = Transform::from_xyz(30.0, 0.0, 400.0);
         let cutter = &lib.classes[lib.index("Ship_Navy_Cutter")].sections;
         let cutter_hp: Vec<f32> = cutter.iter().map(|s| s.hp).collect();
@@ -485,23 +437,7 @@ fn cutter_matches_measured_retail_movement() {
             step(ship, tf, class, &h, dt);
         }
     };
-    let mut ship = Ship {
-        class: ci,
-        side: Side::Player,
-        heading: 0.0,
-        speed: 0.0,
-        ang_vel: 0.0,
-        order: 1,
-        waypoints: vec![],
-        goal: None,
-        cap: 1.0,
-        throttle: None,
-        sail_energy: 1.0,
-        crew_speed: 1.0,
-        crew_turn: 1.0,
-        net: 1.0,
-        avoid: 1.0,
-    };
+    let mut ship = Ship { heading: 0.0, order: 1, ..Ship::new(ci, Side::Player) };
     let mut tf = Transform::default();
     run(&mut ship, &mut tf, 1.0);
     assert!((ship.speed - 1.95).abs() < 0.1, "Slow from rest after 1 s: {}", ship.speed); // 0.53 s time constant
@@ -545,23 +481,7 @@ fn crewed_cutter_matches_measured_retail_speed_and_turn() {
     assert_eq!(crate::crew_arms::skill_factor(0.1), 1.0, "default hands change nothing");
     for (skill, full, turn) in [(0.5, 5.336, 15.61), (0.9, 6.041, 9.99)] {
         let f = crate::crew_arms::skill_factor(skill);
-        let mut ship = Ship {
-            class: ci,
-            side: Side::Player,
-            heading: 0.0,
-            speed: 0.0,
-            ang_vel: 0.0,
-            order: 2,
-            waypoints: vec![],
-            goal: None,
-            cap: 1.0,
-            throttle: None,
-            sail_energy: 1.0,
-            crew_speed: f,
-            crew_turn: f,
-            net: 1.0,
-            avoid: 1.0,
-        };
+        let mut ship = Ship { heading: 0.0, order: 2, crew_speed: f, crew_turn: f, ..Ship::new(ci, Side::Player) };
         let mut tf = Transform::default();
         for _ in 0..300 {
             step(&mut ship, &mut tf, class, &h, 0.0344);
@@ -584,23 +504,7 @@ fn uncrewed_turns_match_measured_retail() {
         let ci = lib.index(name);
         let class = &lib.classes[ci];
         let h = Health { sections: vec![1.0; class.sections.len()], core: 1.0, destroyed: false };
-        let mut ship = Ship {
-            class: ci,
-            side: Side::Player,
-            heading: 0.0,
-            speed: 0.0,
-            ang_vel: 0.0,
-            order,
-            waypoints: vec![],
-            goal: None,
-            cap: 1.0,
-            throttle: None,
-            sail_energy: 1.0,
-            crew_speed: 1.0,
-            crew_turn: 1.0,
-            net: 1.0,
-            avoid: 1.0,
-        };
+        let mut ship = Ship { heading: 0.0, order, ..Ship::new(ci, Side::Player) };
         let mut tf = Transform::default();
         for _ in 0..1500 {
             step(&mut ship, &mut tf, class, &h, 0.0344);
@@ -638,23 +542,7 @@ fn ships_lean_into_turns_except_at_emergency_speed() {
     let class = &lib.classes[ci];
     let h = Health { sections: vec![1.0; class.sections.len()], core: 1.0, destroyed: false };
     let roll = |order| {
-        let mut ship = Ship {
-            class: ci,
-            side: Side::Player,
-            heading: 0.0,
-            speed: 0.0,
-            ang_vel: 0.0,
-            order,
-            waypoints: vec![Vec3::new(-200.0, 0.0, -10.0)],
-            goal: None,
-            cap: 1.0,
-            throttle: None,
-            sail_energy: 1.0,
-            crew_speed: 1.0,
-            crew_turn: 1.0,
-            net: 1.0,
-            avoid: 1.0,
-        };
+        let mut ship = Ship { heading: 0.0, order, waypoints: vec![Vec3::new(-200.0, 0.0, -10.0)], ..Ship::new(ci, Side::Player) };
         let mut tf = Transform::default();
         for _ in 0..60 {
             step(&mut ship, &mut tf, class, &h, 0.033);
@@ -723,23 +611,7 @@ fn a_formation_swap_pass_gives_ships_the_slot_nearest_them_and_leaves_fitting_on
 }
 
 fn plain_ship() -> Ship {
-    Ship {
-        class: 0,
-        side: Side::Player,
-        heading: 0.0,
-        speed: 5.0,
-        ang_vel: 0.0,
-        order: 3,
-        waypoints: vec![Vec3::new(10.0, 0.0, -50.0)],
-        goal: Some(1.0),
-        cap: 1.0,
-        throttle: Some(0.5),
-        sail_energy: 1.0,
-        crew_speed: 1.0,
-        crew_turn: 1.0,
-        net: 1.0,
-        avoid: 1.0,
-    }
+    Ship { heading: 0.0, speed: 5.0, order: 3, waypoints: vec![Vec3::new(10.0, 0.0, -50.0)], goal: Some(1.0), throttle: Some(0.5), ..Ship::new(0, Side::Player) }
 }
 
 #[test]
@@ -790,22 +662,14 @@ fn dying_cutter_drifts_at_a_tenth_of_max_speed_and_a_fast_one_decays_to_it() {
     let wreck = Health { sections: vec![0.0; class.sections.len()], core: 0.0, destroyed: true };
     let dt = 0.0344;
     let ship = |speed| Ship {
-        class: ci,
-        side: Side::Player,
-        heading: 0.0,
         speed,
-        ang_vel: 0.0,
         order: 3,
-        waypoints: vec![],
-        goal: None,
-        cap: 1.0,
         throttle: Some(1.0 / FULL_SPEED), // the computer's throttle 1.0
-        sail_energy: 1.0,
         crew_speed: 1.125,
         crew_turn: 1.125,
-        net: 1.0,
-        avoid: 1.0,
+        ..Ship::new(ci, Side::Player)
     };
+
     let expected = 0.1 * class.phys.max_speed * 1.125;
     let (mut slow, mut fast) = (ship(0.0), ship(9.0));
     let (mut tf_slow, mut tf_fast) = (Transform::default(), Transform::default());

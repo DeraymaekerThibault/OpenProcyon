@@ -631,26 +631,7 @@ pub fn input_app() -> (App, Entity) {
         .insert_resource(Toggles { weapons: true, names: true })
         .insert_resource(crate::Orbit { yaw: 0.0, pitch: 0.5, dist: 50.0, focus: Some(Entity::PLACEHOLDER) })
         .add_systems(Update, hud_input);
-    app.world_mut().spawn((
-        PlayerShip,
-        Ship {
-            class: 0,
-            side: crate::Side::Player,
-            heading: 0.0,
-            speed: 0.0,
-            ang_vel: 0.0,
-            order: 0,
-            waypoints: vec![],
-            goal: None,
-            cap: 1.0,
-            throttle: None,
-            sail_energy: 1.0,
-            crew_speed: 1.0,
-            crew_turn: 1.0,
-            net: 1.0,
-            avoid: 1.0,
-        },
-    ));
+    app.world_mut().spawn((PlayerShip, Ship { heading: 0.0, ..Ship::new(0, crate::Side::Player) }));
     let root = app.world_mut().spawn((HudRoot, Visibility::Inherited)).id();
     (app, root)
 }

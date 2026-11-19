@@ -370,23 +370,7 @@ mod tests {
     fn a_star_blast_strikes_every_section_once_as_its_ring_passes_and_spares_nobody() {
         let lib = Library::load(crate::assets_dir());
         let class = lib.index("Ship_Navy_Cutter");
-        let ship = Ship {
-            class,
-            side: Side::Enemy,
-            heading: 0.0,
-            speed: 0.0,
-            ang_vel: 0.0,
-            order: 0,
-            waypoints: vec![],
-            goal: None,
-            cap: 1.0,
-            throttle: None,
-            sail_energy: 1.0,
-            crew_speed: 1.0,
-            crew_turn: 1.0,
-            net: 1.0,
-            avoid: 1.0,
-        };
+        let ship = Ship { heading: 0.0, ..Ship::new(class, Side::Enemy) };
         let data = Library::load(crate::assets_dir());
         let c = &data.classes[class];
         let bullet = "Bullet_StarMortar";
@@ -435,23 +419,7 @@ mod tests {
         let hp = Health::new(&lib.classes[class]);
         let before = hp.sections[k];
         let core = hp.core;
-        let ship = Ship {
-            class,
-            side: crate::Side::Enemy,
-            heading: 0.0,
-            speed: 0.0,
-            ang_vel: 0.0,
-            order: 0,
-            waypoints: vec![],
-            goal: None,
-            cap: 1.0,
-            throttle: None,
-            sail_energy: 1.0,
-            crew_speed: 1.0,
-            crew_turn: 1.0,
-            net: 1.0,
-            avoid: 1.0,
-        };
+        let ship = Ship { heading: 0.0, ..Ship::new(class, crate::Side::Enemy) };
         let tables: std::collections::HashMap<String, std::collections::HashMap<String, [f32; 5]>> =
             serde_json::from_value(crate::data::read_json(&crate::assets_dir().join("data/nebula.json"))).unwrap();
         assert_eq!(&tables["wind"]["Cloth"][..2], &[5.0, 7.0]);
@@ -491,23 +459,7 @@ mod tests {
     fn a_ram_hits_only_the_section_nearest_the_contact() {
         let lib = Library::load(crate::assets_dir());
         let mut app = App::new();
-        let ship = |class, side| Ship {
-            class,
-            side,
-            heading: 0.0,
-            speed: 0.0,
-            ang_vel: 0.0,
-            order: 0,
-            waypoints: vec![],
-            goal: None,
-            cap: 1.0,
-            throttle: None,
-            sail_energy: 1.0,
-            crew_speed: 1.0,
-            crew_turn: 1.0,
-            net: 1.0,
-            avoid: 1.0,
-        };
+        let ship = |class, side| Ship { heading: 0.0, ..Ship::new(class, side) };
         let [cutter, mow] = ["Ship_Navy_Cutter", "Ship_Navy_ManOWar"].map(|n| lib.index(n));
         // Two computer sides: no difficulty factor.
         let a = app.world_mut().spawn((ship(cutter, crate::Side(1)), Transform::default(), Health::new(&lib.classes[cutter]))).id();

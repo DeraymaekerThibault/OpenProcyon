@@ -181,23 +181,7 @@ mod tests {
         health.sections[0] -= 1.0; // damaged, so no "mended" clear-out
         app.insert_resource(lib);
         let (a, b) = (app.world_mut().spawn_empty().id(), app.world_mut().spawn_empty().id());
-        let ship = crate::Ship {
-            class,
-            side: crate::Side::Enemy,
-            heading: 0.0,
-            speed: 0.0,
-            ang_vel: 0.0,
-            order: 0,
-            waypoints: vec![],
-            goal: None,
-            cap: 1.0,
-            throttle: None,
-            sail_energy: 1.0,
-            crew_speed: 1.0,
-            crew_turn: 1.0,
-            net: 1.0,
-            avoid: 1.0,
-        };
+        let ship = crate::Ship { heading: 0.0, ..crate::Ship::new(class, crate::Side::Enemy) };
         let e = app.world_mut().spawn((ship, health, Scars(vec![(a, 0, Vec3::ZERO, 0), (b, 1, Vec3::ZERO, 0)]))).id();
         app.update();
         assert!(app.world().get_entity(a).is_ok() && app.world().get_entity(b).is_ok(), "scars on living sections stay");

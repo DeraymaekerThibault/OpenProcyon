@@ -69,23 +69,7 @@ fn nis_stops_helm_and_combat_motion_but_keeps_scripted_routes_and_resumes() {
     let lib = crate::Library::load(crate::assets_dir());
     let class = lib.index("Ship_Navy_Cutter");
     let [primary_health, combat_health, route_health, ally_health] = [0; 4].map(|_| crate::Health::new(&lib.classes[class]));
-    let ship = crate::Ship {
-        class,
-        side: crate::Side::Player,
-        heading: 0.0,
-        speed: 20.0,
-        ang_vel: 0.2,
-        order: 2,
-        waypoints: vec![Vec3::NEG_Z * 500.0],
-        goal: None,
-        cap: 1.0,
-        throttle: None,
-        sail_energy: 1.0,
-        crew_speed: 1.0,
-        crew_turn: 1.0,
-        net: 1.0,
-        avoid: 1.0,
-    };
+    let ship = crate::Ship { heading: 0.0, speed: 20.0, ang_vel: 0.2, order: 2, waypoints: vec![Vec3::NEG_Z * 500.0], ..crate::Ship::new(class, crate::Side::Player) };
     let mut mission = crate::campaign::load_id("mission03");
     mission.script.nis = true;
     let mut time = Time::<()>::default();
@@ -130,23 +114,7 @@ fn ecs_ship_contact_and_static_wall_do_not_pass_through() {
     let mut time = Time::<()>::default();
     time.advance_by(std::time::Duration::from_millis(33));
     app.insert_resource(time).insert_resource(lib).add_systems(Update, sail);
-    let ship = crate::Ship {
-        class,
-        side: crate::Side::Player,
-        heading: 0.0,
-        speed: 20.0,
-        ang_vel: 0.0,
-        order: 2,
-        waypoints: vec![],
-        goal: None,
-        cap: 1.0,
-        throttle: None,
-        sail_energy: 1.0,
-        crew_speed: 1.0,
-        crew_turn: 1.0,
-        net: 1.0,
-        avoid: 1.0,
-    };
+    let ship = crate::Ship { heading: 0.0, speed: 20.0, order: 2, ..crate::Ship::new(class, crate::Side::Player) };
     let health = || crate::Health::new(&app.world().resource::<crate::Library>().classes[class]);
     let h1 = health();
     let h2 = health();
@@ -186,23 +154,7 @@ fn wall_run(player: bool) -> f32 {
         tree: vec![],
     });
     let goal = Vec3::new(0.0, 0.0, -120.0);
-    let ship = crate::Ship {
-        class,
-        side: crate::Side::Player,
-        heading: 0.0,
-        speed: 8.0,
-        ang_vel: 0.0,
-        order: 2,
-        waypoints: vec![goal],
-        goal: None,
-        cap: 1.0,
-        throttle: None,
-        sail_energy: 1.0,
-        crew_speed: 1.0,
-        crew_turn: 1.0,
-        net: 1.0,
-        avoid: 1.0,
-    };
+    let ship = crate::Ship { heading: 0.0, speed: 8.0, order: 2, waypoints: vec![goal], ..crate::Ship::new(class, crate::Side::Player) };
     let e = app.world_mut().spawn((ship, health, Transform::default(), Drift::default())).id();
     if player {
         app.world_mut().entity_mut(e).insert(crate::PlayerShip);
@@ -246,23 +198,7 @@ fn ai_ship_slows_for_an_island_in_its_way_creeps_round_it_and_picks_up_speed_aga
         triangles: vec![Triangle { points: wall, bounds: Bounds::points(&wall) }],
         tree: vec![],
     });
-    let ship = crate::Ship {
-        class,
-        side: crate::Side::Enemy,
-        heading: 0.0,
-        speed: 6.6,
-        ang_vel: 0.0,
-        order: 3,
-        waypoints: vec![],
-        goal: Some(0.0),
-        cap: 1.0,
-        throttle: None,
-        sail_energy: 1.0,
-        crew_speed: 1.0,
-        crew_turn: 1.0,
-        net: 1.0,
-        avoid: 1.0,
-    };
+    let ship = crate::Ship { heading: 0.0, speed: 6.6, order: 3, goal: Some(0.0), ..crate::Ship::new(class, crate::Side::Enemy) };
     let e = app.world_mut().spawn((ship, health, Transform::default(), Drift::default())).id();
     let (mut cruise, mut slowest, mut passed_at) = (0.0f32, f32::INFINITY, None);
     for frame in 0..3636 {
@@ -311,23 +247,7 @@ fn retail_island_mesh_blocks_a_ship_driven_through_its_centre() {
     time.advance_by(std::time::Duration::from_secs_f32(0.1));
     app.insert_resource(time).insert_resource(lib).add_systems(Update, sail);
     app.world_mut().spawn(island);
-    let ship = crate::Ship {
-        class,
-        side: crate::Side::Player,
-        heading: 0.0,
-        speed: 20.0,
-        ang_vel: 0.0,
-        order: 2,
-        waypoints: vec![],
-        goal: None,
-        cap: 1.0,
-        throttle: None,
-        sail_energy: 1.0,
-        crew_speed: 1.0,
-        crew_turn: 1.0,
-        net: 1.0,
-        avoid: 1.0,
-    };
+    let ship = crate::Ship { heading: 0.0, speed: 20.0, order: 2, ..crate::Ship::new(class, crate::Side::Player) };
     let e = app.world_mut().spawn((ship, health, Transform::from_xyz(0.0, 0.0, 80.0), Drift::default())).id();
     for _ in 0..100 {
         app.update();
@@ -368,23 +288,7 @@ fn ship_rock_contact(mass: f32) -> (Vec3, Vec3, Vec3, f32) {
     let mut time = Time::<()>::default();
     time.advance_by(std::time::Duration::from_secs_f32(0.1));
     app.insert_resource(time).insert_resource(lib).add_systems(Update, sail);
-    let ship = crate::Ship {
-        class,
-        side: crate::Side::Player,
-        heading: 0.0,
-        speed: 10.0,
-        ang_vel: 0.0,
-        order: 0,
-        waypoints: vec![],
-        goal: None,
-        cap: 1.0,
-        throttle: None,
-        sail_energy: 1.0,
-        crew_speed: 1.0,
-        crew_turn: 1.0,
-        net: 1.0,
-        avoid: 1.0,
-    };
+    let ship = crate::Ship { heading: 0.0, speed: 10.0, ..crate::Ship::new(class, crate::Side::Player) };
     let a = app.world_mut().spawn((ship, health, Transform::from_xyz(0.0, 0.0, 1.5), Drift::default())).id();
     let body = box_body([Vec3::splat(-1.0), Vec3::splat(1.0)], &Transform::default());
     let b = app.world_mut().spawn((rock, Transform::default(), Drift::default(), Obstacle { body, triangles: vec![], tree: vec![] })).id();
@@ -428,23 +332,7 @@ fn ship_contact_pushes_the_hulls_apart_and_keeps_both_speeds() {
         let mut time = Time::<()>::default();
         time.advance_by(std::time::Duration::from_secs_f32(0.1));
         app.insert_resource(time).insert_resource(lib).add_systems(Update, sail);
-        let ship = crate::Ship {
-            class: a,
-            side: crate::Side::Player,
-            heading: 0.0,
-            speed: 10.0,
-            ang_vel: 0.0,
-            order: 0,
-            waypoints: vec![],
-            goal: None,
-            cap: 1.0,
-            throttle: None,
-            sail_energy: 1.0,
-            crew_speed: 1.0,
-            crew_turn: 1.0,
-            net: 1.0,
-            avoid: 1.0,
-        };
+        let ship = crate::Ship { heading: 0.0, speed: 10.0, ..crate::Ship::new(a, crate::Side::Player) };
         let ea = app.world_mut().spawn((ship.clone(), ha, Transform::from_xyz(0.0, 0.0, 1.5), Drift::default())).id();
         let eb = app.world_mut().spawn((crate::Ship { class: b, speed: 0.0, ..ship }, hb, Transform::default(), Drift::default())).id();
         app.update();
@@ -478,23 +366,7 @@ fn tow_uses_mass_and_independent_hardpoints_and_breaks_without_teleporting() {
     let lib = crate::Library::load(crate::assets_dir());
     let class = lib.index("Ship_Navy_Cutter");
     let health = || crate::Health::new(&lib.classes[class]);
-    let hull = crate::Ship {
-        class,
-        side: crate::Side::Player,
-        heading: 0.0,
-        speed: 10.0,
-        ang_vel: 0.0,
-        order: 2,
-        waypoints: vec![],
-        goal: None,
-        cap: 1.0,
-        throttle: None,
-        sail_energy: 1.0,
-        crew_speed: 1.0,
-        crew_turn: 1.0,
-        net: 1.0,
-        avoid: 1.0,
-    };
+    let hull = crate::Ship { heading: 0.0, speed: 10.0, order: 2, ..crate::Ship::new(class, crate::Side::Player) };
     let mut app = App::new();
     let a = app.world_mut().spawn((hull.clone(), health(), Transform::default(), Drift::default())).id();
     let b = app.world_mut().spawn((crate::Ship { speed: 0.0, order: 0, ..hull }, health(), Transform::from_xyz(3.0, 0.0, 30.0), Drift::default())).id();
@@ -562,23 +434,7 @@ fn a_ship_and_a_rock_respond_once_per_tick_with_one_ticks_rate() {
     let mut time = Time::<()>::default();
     time.advance_by(crate::BATTLE_TICK);
     app.insert_resource(time).insert_resource(lib).add_message::<Ram>().add_systems(Update, sail);
-    let ship = crate::Ship {
-        class,
-        side: crate::Side::Player,
-        heading: 0.0,
-        speed: 10.0,
-        ang_vel: 0.0,
-        order: 0,
-        waypoints: vec![],
-        goal: None,
-        cap: 1.0,
-        throttle: None,
-        sail_energy: 1.0,
-        crew_speed: 1.0,
-        crew_turn: 1.0,
-        net: 1.0,
-        avoid: 1.0,
-    };
+    let ship = crate::Ship { heading: 0.0, speed: 10.0, ..crate::Ship::new(class, crate::Side::Player) };
     let a = app.world_mut().spawn((ship, health, Transform::from_xyz(0.0, 0.0, 1.5), Drift::default())).id();
     let body = box_body([Vec3::splat(-1.0), Vec3::splat(1.0)], &Transform::default());
     let b = app.world_mut().spawn((rock, Transform::default(), Drift::default(), Obstacle { body, triangles: vec![], tree: vec![] })).id();
@@ -721,23 +577,7 @@ fn island_contact_through_the_game_scheduler() {
         app.insert_resource(time).insert_resource(crate::Library::load(crate::assets_dir())).add_systems(Update, sail);
         app.world_mut().spawn(shapes.obstacle(kind, &Transform::from_xyz(ix, 0.0, -iy)).unwrap());
         let tf = game_pose(start[0], start[1], heading[0], heading[1]);
-        let ship = crate::Ship {
-            class,
-            side: crate::Side::Player,
-            heading: tf.rotation.to_euler(EulerRot::YXZ).0,
-            speed: 0.0,
-            ang_vel: 0.0,
-            order: 2,
-            waypoints: vec![],
-            goal: None,
-            cap: 1.0,
-            throttle: Some(0.0),
-            sail_energy: 1.0,
-            crew_speed: 1.0,
-            crew_turn: 1.0,
-            net: 1.0,
-            avoid: 1.0,
-        };
+        let ship = crate::Ship { heading: tf.rotation.to_euler(EulerRot::YXZ).0, order: 2, throttle: Some(0.0), ..crate::Ship::new(class, crate::Side::Player) };
         let e = app.world_mut().spawn((ship, health, tf, Drift::default())).id();
         for _ in 0..200 {
             app.update();
@@ -780,23 +620,7 @@ fn dying_ship_sails_on_and_collides_with_nothing() {
     let mut time = Time::<()>::default();
     time.advance_by(std::time::Duration::from_millis(33));
     app.insert_resource(time).insert_resource(lib).add_systems(Update, sail);
-    let ship = crate::Ship {
-        class,
-        side: crate::Side::Player,
-        heading: 0.0,
-        speed: 5.0,
-        ang_vel: 0.0,
-        order: 3,
-        waypoints: vec![],
-        goal: None,
-        cap: 1.0,
-        throttle: Some(1.0),
-        sail_energy: 1.0,
-        crew_speed: 1.0,
-        crew_turn: 1.0,
-        net: 1.0,
-        avoid: 1.0,
-    };
+    let ship = crate::Ship { heading: 0.0, speed: 5.0, order: 3, throttle: Some(1.0), ..crate::Ship::new(class, crate::Side::Player) };
     let health = crate::Health::new(&app.world().resource::<crate::Library>().classes[class]);
     let mut dead = crate::Health::new(&app.world().resource::<crate::Library>().classes[class]);
     (dead.destroyed, dead.core) = (true, 0.0);
@@ -835,23 +659,7 @@ fn a_new_ship_cannot_be_rammed_for_its_first_3_5_s() {
     let mut time = Time::<()>::default();
     time.advance_by(std::time::Duration::from_secs_f32(0.1));
     app.insert_resource(time).insert_resource(lib).add_message::<Ram>().add_systems(Update, sail);
-    let ship = crate::Ship {
-        class: a,
-        side: crate::Side::Player,
-        heading: 0.0,
-        speed: 10.0,
-        ang_vel: 0.0,
-        order: 0,
-        waypoints: vec![],
-        goal: None,
-        cap: 1.0,
-        throttle: None,
-        sail_energy: 1.0,
-        crew_speed: 1.0,
-        crew_turn: 1.0,
-        net: 1.0,
-        avoid: 1.0,
-    };
+    let ship = crate::Ship { heading: 0.0, speed: 10.0, ..crate::Ship::new(a, crate::Side::Player) };
     let ea = app.world_mut().spawn((ship.clone(), ha, Transform::from_xyz(0.0, 0.0, 1.5), Drift::default())).id();
     let eb = app.world_mut().spawn((crate::Ship { class: b, side: crate::Side::Enemy, speed: 0.0, ..ship }, hb, Transform::default(), Drift::default())).id();
     let rams = |app: &mut App| app.world_mut().resource_mut::<Messages<Ram>>().drain().count();

@@ -1136,23 +1136,7 @@ mod ai_tests {
         let lib = Library::load(crate::assets_dir());
         let class = lib.index("Ship_Navy_Torpedo");
         let mut app = rules_app(mission);
-        let ship = |order| Ship {
-            class,
-            side: Side::Player,
-            heading: 0.0,
-            speed: 0.0,
-            ang_vel: 0.0,
-            order,
-            waypoints: vec![],
-            goal: None,
-            cap: 1.0,
-            throttle: None,
-            sail_energy: 1.0,
-            crew_speed: 1.0,
-            crew_turn: 1.0,
-            net: 1.0,
-            avoid: 1.0,
-        };
+        let ship = |order| Ship { heading: 0.0, order, ..Ship::new(class, Side::Player) };
         let ms = |name: &str| MissionShip { name: name.into(), owner: owner.clone(), visible: true, ..default() };
         app.world_mut().spawn((ship(0), Health::new(&lib.classes[class]), Transform::default(), Visibility::Inherited, PlayerShip, ms("RLS Comet")));
         let boat = app.world_mut().spawn((ship(2), Health::new(&lib.classes[class]), Transform::from_xyz(50.0, 0.0, 0.0), Visibility::Inherited, ms("Longboat"))).id();
@@ -1174,23 +1158,7 @@ mod ai_tests {
         let lib = Library::load(crate::assets_dir());
         let class = lib.index("Ship_Navy_Torpedo");
         let mut app = rules_app(mission);
-        let ship = Ship {
-            class,
-            side: Side::Player,
-            heading: 0.0,
-            speed: 0.0,
-            ang_vel: 0.0,
-            order: 0,
-            waypoints: vec![],
-            goal: None,
-            cap: 1.0,
-            throttle: None,
-            sail_energy: 1.0,
-            crew_speed: 1.0,
-            crew_turn: 1.0,
-            net: 1.0,
-            avoid: 1.0,
-        };
+        let ship = Ship { heading: 0.0, ..Ship::new(class, Side::Player) };
         let player = app
             .world_mut()
             .spawn((
@@ -1225,23 +1193,7 @@ mod ai_tests {
             .init_resource::<crate::environment::Sensors>()
             .add_systems(PreUpdate, crate::environment::refresh_sensors)
             .add_systems(Update, mission_ai);
-        let ship = Ship {
-            class: 0,
-            side: Side::Player,
-            heading: 0.0,
-            speed: 5.0,
-            ang_vel: 0.0,
-            order: 2,
-            waypoints: vec![],
-            goal: None,
-            cap: 1.0,
-            throttle: None,
-            sail_energy: 1.0,
-            crew_speed: 1.0,
-            crew_turn: 1.0,
-            net: 1.0,
-            avoid: 1.0,
-        };
+        let ship = Ship { heading: 0.0, speed: 5.0, order: 2, ..Ship::new(0, Side::Player) };
         let n = lib.classes[0].sections.len();
         let health = || Health { sections: vec![1.0; n], core: 1.0, destroyed: false };
         app.insert_resource(lib);

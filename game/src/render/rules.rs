@@ -372,23 +372,7 @@ mod tests {
     }
 
     fn ship() -> crate::Ship {
-        crate::Ship {
-            class: 0,
-            side: crate::Side::Player,
-            heading: 0.0,
-            speed: 0.0,
-            ang_vel: 0.0,
-            order: 0,
-            waypoints: vec![],
-            goal: None,
-            cap: 1.0,
-            throttle: None,
-            sail_energy: 0.0,
-            crew_speed: 1.0,
-            crew_turn: 1.0,
-            net: 1.0,
-            avoid: 1.0,
-        }
+        crate::Ship { heading: 0.0, sail_energy: 0.0, ..crate::Ship::new(0, crate::Side::Player) }
     }
 
     #[test]

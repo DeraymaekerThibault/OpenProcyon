@@ -356,29 +356,7 @@ mod tests {
             .insert_resource(crate::panels::Toggles { weapons: false, names: false })
             .add_plugins(plugin);
         app.world_mut().spawn((Camera3d::default(), GlobalTransform::default()));
-        let hero = app
-            .world_mut()
-            .spawn((
-                PlayerShip,
-                Ship {
-                    class: 0,
-                    side: crate::Side::Player,
-                    heading: 0.0,
-                    speed: 0.0,
-                    ang_vel: 0.0,
-                    order: 1,
-                    waypoints: vec![],
-                    goal: None,
-                    cap: 1.0,
-                    throttle: None,
-                    sail_energy: 1.0,
-                    crew_speed: 1.0,
-                    crew_turn: 1.0,
-                    net: 1.0,
-                    avoid: 1.0,
-                },
-            ))
-            .id();
+        let hero = app.world_mut().spawn((PlayerShip, Ship { heading: 0.0, order: 1, ..Ship::new(0, crate::Side::Player) })).id();
         app.update();
         app.world_mut().get_mut::<Ship>(hero).unwrap().order = 2;
         app.update();

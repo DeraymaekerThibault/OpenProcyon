@@ -783,23 +783,7 @@ mod tests {
         let lib = crate::combat::Library::load(assets_dir());
         let class = lib.index("Ship_Navy_Sloop");
         let hp = crate::combat::Health::new(&lib.classes[class]);
-        let ship = crate::Ship {
-            class,
-            side: crate::Side::Player,
-            heading: 0.0,
-            speed: 0.0,
-            ang_vel: 0.0,
-            order: 0,
-            waypoints: vec![],
-            goal: None,
-            cap: 1.0,
-            throttle: None,
-            sail_energy: 1.0,
-            crew_speed: 1.0,
-            crew_turn: 1.0,
-            net: 1.0,
-            avoid: 1.0,
-        };
+        let ship = crate::Ship { heading: 0.0, ..crate::Ship::new(class, crate::Side::Player) };
         fn no_hits(mut hits: MessageReader<crate::combat::Strike>) {
             assert_eq!(hits.read().count(), 0, "a random bolt must actually intersect the ship before emitting damage");
         }
