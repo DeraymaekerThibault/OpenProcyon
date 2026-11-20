@@ -153,7 +153,9 @@ pub struct SailGlowUniform {
     pub shape: Vec4,
 }
 
-/// The sail extension; see `SailGlowUniform`.
+/// The sail extension; see `SailGlowUniform`. A cut sail's mesh (`billow` or `furl` on) also carries `uv_b`, the cloth from where
+/// its light gathers: x 0 at a fan's hub .. 1 at its rim, else 0 along the sail's bottom edge .. 1 at its top; y 0..1 across (a
+/// fan's span, else the sail's width).
 #[derive(Asset, AsBindGroup, TypePath, Clone, Default)]
 pub struct SailGlow {
     #[uniform(100)]
@@ -510,6 +512,25 @@ fn subdivide(mesh: &Mesh, fan: Option<&Fan>, mast: &[Vec3]) -> Option<(Mesh, Bil
         fold_lines(&mut sails.values_mut().flatten().collect::<Vec<_>>(), mast);
         out_p.iter().zip(&out_sail).map(|(&q, &src)| groups[src].and_then(|(root, _)| sails[&root].as_ref()).map(|f| f.point(q))).collect::<Vec<_>>()
     });
+    // the sail shader's map of the cloth (`uv_b`): x 0 at a fan's hub .. 1 at its rim, y across its span; on other cloth x 0 at
+    // its sail's bottom edge .. 1 at its top, y across it (along whichever level axis it is wider)
+    let mut bounds: std::collections::HashMap<usize, (Vec3, Vec3)> = std::collections::HashMap::new();
+    for &i in &used {
+        let e = bounds.entry(sail[i]).or_insert((Vec3::MAX, Vec3::MIN));
+        *e = (e.0.min(p(i)), e.1.max(p(i)));
+    }
+    let place: Vec<[f32; 2]> = (0..out_p.len())
+        .map(|i| match fans.as_ref().and_then(|f| f[i]) {
+            Some(f) => [f.rim, f.span],
+            None => {
+                let (lo, hi) = bounds[&sail[out_sail[i]]];
+                let ext = (hi - lo).max(Vec3::splat(1e-4));
+                let r = (out_p[i] - lo) / ext;
+                [r.y, if ext.x >= ext.z { r.x } else { r.z }]
+            }
+        })
+        .collect();
+    fine.insert_attribute(Mesh::ATTRIBUTE_UV_1, place);
     let (pleats, depth) = fan.map_or((0.0, 0.0), |f| (f.pleats, f.depth));
     Some((fine, Billow { rest: out_p, normal: out_n, pin, top: out_top, size, fan: fans.unwrap_or_default(), pleats, depth }))
 }
