@@ -118,6 +118,9 @@ fn spawn_map_objects(
         let tf = scenery_transform(o, game_rotation(&o["rot"]), &docks);
         let e = commands.spawn((Scenario, crate::data::scene(assets, &glb), tf)).id();
         commands.entity(e).insert(crate::clips::SceneLoop(o["scene"].as_str().unwrap_or_default().into()));
+        if let Some(clip) = crate::environment::Clip::scenery(assets, &glb) {
+            commands.entity(e).insert(clip);
+        }
         if let Some(body) = shapes.obstacle(ty, &tf) {
             commands.entity(e).insert(body);
         }

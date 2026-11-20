@@ -203,16 +203,24 @@ fn sensor_smoke(world: &mut World) {
     }
 }
 
-/// The swim or wing-beat clip baked into an animal's model (tools/skin.py, docs/re/effects.md "Animal skeletons").
+/// The swim or wing-beat clip baked into an animal's model (tools/skin.py, docs/re/effects.md "Animal skeletons"), or every glTF
+/// clip of a mod's scenery model (cranes, flags, beacons), all looped together.
 #[derive(Component)]
 pub struct Clip {
-    pub clip: Handle<AnimationClip>,
-    /// The entity holding the clip's player and the graph node playing it, once the model has spawned.
-    player: Option<(Entity, AnimationNodeIndex)>,
+    pub clips: Vec<Handle<AnimationClip>>,
+    /// The entity holding the clips' player and the graph nodes playing them, once the model has spawned.
+    player: Option<(Entity, Vec<AnimationNodeIndex>)>,
 }
 impl Clip {
     pub fn load(assets: &AssetServer, file: &str) -> Self {
-        Clip { clip: assets.load(GltfAssetLabel::Animation(0).from_asset(crate::data::model(file))), player: None }
+        Clip { clips: vec![assets.load(GltfAssetLabel::Animation(0).from_asset(crate::data::model(file)))], player: None }
+    }
+    /// Every clip in a scenery model, or None when it has none (all retail scenery: its clips are `data/animations.json`).
+    pub fn scenery(assets: &AssetServer, file: &str) -> Option<Self> {
+        let path = crate::data::model(file);
+        let bytes = std::fs::read(crate::assets_dir().join(&path)).ok()?;
+        let n = crate::data::glb_json(&bytes)?.0["animations"].as_array().map_or(0, Vec::len);
+        (n > 0).then(|| Clip { clips: (0..n).map(|i| assets.load(GltfAssetLabel::Animation(i).from_asset(path.clone()))).collect(), player: None })
     }
 }
 
@@ -229,12 +237,14 @@ fn play_clips(
     for (e, mut player) in &mut players {
         let Some(owner) = parents.iter_ancestors(e).find(|a| clips.contains(*a)) else { continue };
         let mut clip = clips.get_mut(owner).unwrap();
-        let (graph, node) = AnimationGraph::from_clip(clip.clip.clone());
+        let (graph, nodes) = AnimationGraph::from_clips(clip.clips.iter().cloned());
         let phase = (owner.to_bits().wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 40) as f32 / (1u64 << 24) as f32;
-        let duration = assets.get(&clip.clip).map_or(0.0, |c| c.duration());
-        player.play(node).repeat().seek_to(phase * duration);
+        for (node, h) in nodes.iter().zip(&clip.clips) {
+            let duration = assets.get(h).map_or(0.0, |c| c.duration());
+            player.play(*node).repeat().seek_to(phase * duration);
+        }
         commands.entity(e).insert(AnimationGraphHandle(graphs.add(graph)));
-        clip.player = Some((e, node));
+        clip.player = Some((e, nodes));
     }
 }
 
@@ -242,9 +252,9 @@ fn play_clips(
 /// at 1 while it moves and holds its pose while it does not. PROVISIONAL: the whale's on/off value is read as its speed.
 fn clip_rates(animals: Query<(&Clip, &SpaceAnimal, Has<crate::dragons::Dragon>)>, mut players: Query<&mut AnimationPlayer>) {
     for (clip, animal, dragon) in &animals {
-        let Some((e, node)) = clip.player else { continue };
-        let Ok(mut player) = players.get_mut(e) else { continue };
-        let Some(active) = player.animation_mut(node) else { continue };
+        let Some((e, nodes)) = &clip.player else { continue };
+        let Ok(mut player) = players.get_mut(*e) else { continue };
+        let Some(active) = player.animation_mut(nodes[0]) else { continue };
         let speed = animal.velocity.length();
         let rate = if dragon {
             (0.2 * speed).clamp(0.8, 1.3)
