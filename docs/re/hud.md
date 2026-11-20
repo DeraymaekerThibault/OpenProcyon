@@ -75,5 +75,12 @@ script (`Setup Team Objective`, `tasks`, `map_text`). Still PROVISIONAL: a team 
 ## Ship name banners (retail frame, 2026-11-01)
 A ship's name ribbon is tinted with the colour of the map player that owns it: in a Diablo Strait skirmish our banner is green, the same green as our name in the
 top-right roster (slots 1-3 green, navy blue, teal; `players[].color` in the map file gives all eight). The banner is fully opaque with the camera close to
-the deck (no fade). A rule's banner type ('Banner BlueTeam' ...) still overrides in missions. Not observed: enemy and allied banners in a frame, and what
-`Max Banner Visible World Distance` (150) limits. Remake: `scenario::PlayerColor`, `classic/world_hud.rs` `banner_tint`; the fade we had was a guess.
+the deck. A rule's banner type ('Banner BlueTeam' ...) still overrides in missions. Not observed: enemy and allied banners in a frame.
+
+**When a banner shows** (read from the original's code, 2026-11-20; unchecked against a running game). The profile option "Ship Name Banners" has four
+values: 0 off, 1 "On When Close" (the default profile's value), 2 "On When Far", 3 always on. Every frame each ship's banner is opened or closed: with
+"On When Close" it is open while the straight distance from the camera to the ship's centre is at most `Max Banner Visible World Distance - Near` (150 in
+hud.hdt), with "On When Far" while it is at least that; the `- Far` value (also 150) is not read by this test. The banners toggle closes every banner.
+The banner's alpha (ribbon and name text alike) then moves toward 1 when open and 0 when closed at 1.0 per second of real time, so a banner fades fully
+in or out in one second, and it is drawn while its alpha is above 0. Remake: `scenario::PlayerColor`, `classic/world_hud.rs` `banner_tint` and
+`banner_alpha` ("On When Close" only; there is no options entry for the other values yet).

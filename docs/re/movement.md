@@ -255,8 +255,10 @@ importer: a Procyon Minelayer (7.5 units/s) and a Procyon Frigate (6.6) on their
 
 ## Collision avoidance (read from the original's code, 2026-10-31)
 Static analysis of the original's AI, written as rules; it explains the island behaviour above with the same mechanism for ships.
-- **One avoider for everything:** every AI-steered ship (attacks, ram, board, tow, dock, formation, explore, and the human's move orders) runs the same
-  local avoider while it follows its course. There is no route planner: a course is a list of points, and only the avoider bends it.
+- **One avoider for every computer-captained ship:** every AI-steered ship (attacks, ram, board, tow, dock, formation, explore) runs the same
+  local avoider while it follows its course. The avoider runs only while the computer controls the ship: a ship whose captain is the human
+  skips it on every routine except a dock order and a scripted path, so a move order the human clicks is sailed in straight lines into
+  ships, rocks and land alike (read from the original's code, 2026-11-20). There is no route planner: a course is a list of points, and only the avoider bends it.
 - **Obstacles:** ships, asteroids, black holes, torpedoes, mines, dragons, islands and nebulae (not currents, guns, shells or whales). Every ship counts,
   whatever its side or owner; only a lifeboat ignores other lifeboats. Friendly mines are skipped.
 - **When:** twice a second per ship, spread over 0.05 s steps.
@@ -280,7 +282,7 @@ Static analysis of the original's AI, written as rules; it explains the island b
   look-ahead keeps it off land. At a standstill the look-ahead covers only obstacles whose sphere the ship already overlaps.
 - Fits play: computer ships keep clear of each other (both sides steer) but meet the human's ships, which do not steer for them, and stop in front of a
   moving one of them.
-- Remake: `collision/avoid.rs`, run from `collision::sail` for every AI-steered ship, the human's own ship while it follows a move order (a course-point list; a heading or manual throttle bypasses it), and docking ships; it sets
+- Remake: `collision/avoid.rs`, run from `collision::sail` for every computer-captained ship and for the human's ships on their dock routine; it sets
   `Ship::avoid` (the speed fraction `ship::step` multiplies in) and puts the detour point in front of the course. PROVISIONAL (not ported yet):
   mines, torpedoes, dragons, black holes and nebulae as obstacles (black holes and storms are left to `ship::flee`), the sight-range limit. PROVISIONAL: "barely moves" is read as a speed under 3 units/s (the original tests the
   last position change, push-outs included).
