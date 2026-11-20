@@ -30,6 +30,13 @@ z **including masts**.
 | Procyon Cutter | 19.6 | 11.0 | 21.1 | 33 | 8.1k |
 | Procyon Destroyer | 19.9 | 7.4 | 10.3 | 31 | 7.3k |
 
+**Human scale: a person is about 1.0 unit tall** (1 unit is roughly 1.7 to 2 m, not 1 m). Measured against retail models, not stated
+anywhere: the Navy lifeboat (3.4 long) has its thwarts about 0.5 apart, the Legacy's deck is about 6 wide with rises of 0.35 to 0.55,
+the Man-o'-War (35 long) then comes out at a real ship of the line's length, and pedestal deck guns (light 0.74, medium 1.16, heavy 1.5
+tall) put their trunnions at about a man's chest. Size doors, stairs, rails, hatches and seats to that: a door about 1.2 high, a rail
+about 0.5, a stair step about 0.1 to 0.15. The remaster's deck crews (`render/deckhands.rs`) are drawn at this size. The big retail hulls
+are not strict about it (the Merchant's deck rises a full unit at one step), so match their silhouette first and people second.
+
 1. **Tall.** Sailing ships (Pirate, Navy, civilian) are roughly as tall as they are long: height / length is 0.6 to 1.1 for
    nearly every one (masts and rigging). Only barges, submersibles and the Procyon hulls sit lower (0.2 to 0.6).
 2. **Wide when sailed.** Width with yards out is 0.8 to 1.0 of length for pirate ships; the Navy is narrower (0.4 to 0.6).
@@ -39,7 +46,7 @@ z **including masts**.
    cabins with portholes or windows, stairs/doors, a stern with rudder, one or more masts with a mast ring and crow's nest,
    square sails, **engine plating plus a plasma exhaust**, gun mounts and cannons (`MountV2`/`MountV3`, medium and heavy
    cannon), a lamp, crates (`SY_box`). A ship missing most of these reads as foreign.
-5. **Triangle budget** 4k (small) to 20k (capital). A 10-30 m ship is 5k-10k triangles.
+5. **Triangle budget** 4k (small) to 20k (capital). A 10-30 unit ship is 5k-10k triangles.
 6. **Layers.** Every ship is split into numbered layers (`<Name>Ship_Layer1..N`) that map to damage sections (stern, bow,
    engine, and so on), plus matching `...ShipDamage_Layer*` meshes with the broken look. New ships reuse a retail
    geometry/section set; a mod ship can instead supply only its model (`docs/modding.md`, "A ship from a model").
