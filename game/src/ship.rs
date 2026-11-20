@@ -214,12 +214,17 @@ impl ThinkClock {
 pub const RESELECT_SECS: f32 = 6.0;
 /// Each skirmish captain's current target and how long it has held it: the original's target selection takes the nearest hostile
 /// ship in sight, again every `RESELECT_SECS` or as soon as the old one is gone or out of sight (docs/re/movement.md). Steering,
-/// fire (`combat::gunnery`) and boarding (`boarding::ai_boarding`) all follow it.
+/// fire (`combat::gunnery`) and boarding (`boarding::ai_boarding`) all follow it. The third field is where the guns aim, in the
+/// target's frame: its section nearest to the captain when the target was chosen (`attack::aim_local`), kept until the next choice.
 #[derive(Resource, Default)]
-pub struct CaptainTargets(pub std::collections::HashMap<Entity, (Entity, f32)>);
+pub struct CaptainTargets(pub std::collections::HashMap<Entity, (Entity, f32, Vec3)>);
 impl CaptainTargets {
     pub fn of(&self, e: Entity) -> Option<Entity> {
         self.0.get(&e).map(|t| t.0)
+    }
+    /// The target and the guns' aim point in its frame.
+    pub fn aim_of(&self, e: Entity) -> Option<(Entity, Vec3)> {
+        self.0.get(&e).map(|t| (t.0, t.2))
     }
 }
 
@@ -313,7 +318,7 @@ pub fn ai(
             candidates.push((b.0, b.1.translation.distance(tf.translation)));
         }
         let valid = |t: Entity| snap.iter().any(|f| f.0 == t && f.2 != s.side && f.3) || bases.get(t).is_ok_and(|b| hostile_base(&b));
-        let mut chosen = choose_target(targets.0.get(&e).copied(), &candidates, valid);
+        let mut chosen = choose_target(targets.0.get(&e).map(|t| (t.0, t.1)), &candidates, valid);
         // Nothing found: a fleet mate's target, else an allied ship's (same side, another fleet).
         if chosen.is_none() && !human && explicit.is_none() {
             let fleet = member.map(|m| m.0.as_str());
@@ -323,8 +328,12 @@ pub fn ai(
             chosen = adopt(true).or_else(|| adopt(false)).map(|t| (t, false));
         }
         match chosen {
-            Some((t, true)) => targets.0.entry(e).or_insert((t, 0.0)).1 += dt,
-            Some((t, false)) => _ = targets.0.insert(e, (t, 0.0)),
+            Some((t, true)) => targets.0.entry(e).or_insert((t, 0.0, Vec3::ZERO)).1 += dt,
+            Some((t, false)) => {
+                let aim = snap.iter().find(|f| f.0 == t).map(|f| attack::aim_local(&lib.classes[f.6.1].sections, &f.6.2, &f.6.0, tf.translation, false));
+                let aim = aim.or_else(|| bases.get(t).ok().map(|b| attack::aim_local(&lib.classes[b.4.class].sections, &b.3.sections, b.1, tf.translation, true)));
+                targets.0.insert(e, (t, 0.0, aim.unwrap_or(Vec3::ZERO)));
+            }
             None => _ = targets.0.remove(&e),
         }
         // (position, radius, is a base, aim point)

@@ -106,3 +106,14 @@ fn the_aim_is_the_nearest_damage_section_of_a_ship_dead_or_alive_and_a_bases_nea
     assert_eq!(aim(&class, &[1.0, 0.0], &tf, from, true), Vec3::new(-10.0, 0.0, 100.0), "a base: the nearest live one");
     assert_eq!(aim(&class, &[0.0, 0.0], &tf, from, true), tf.translation, "a base with none left: its centre");
 }
+
+#[test]
+fn the_guns_aim_point_is_that_section_in_the_targets_own_frame_unflattened() {
+    // A raised section (a sail at y 8) on the near side: the guns aim at its centre, height kept, and the point turns with the hull.
+    let section = |x: f32, y: f32| crate::data::Section { min: Vec3::new(x - 1.0, y - 1.0, -1.0), max: Vec3::new(x + 1.0, y + 1.0, 1.0), ..Default::default() };
+    let class = [section(-10.0, 0.0), section(10.0, 8.0)];
+    let tf = Transform::from_xyz(0.0, 0.0, 100.0).with_rotation(Quat::from_rotation_y(PI));
+    let from = Vec3::new(-50.0, 0.0, 100.0); // west of the target: the turned hull's +x section is the near one
+    assert_eq!(aim_local(&class, &[1.0, 1.0], &tf, from, false), Vec3::new(10.0, 8.0, 0.0));
+    assert_eq!(aim_local(&[], &[], &tf, from, false), Vec3::ZERO, "no sections: the target's origin");
+}
