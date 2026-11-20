@@ -418,3 +418,18 @@ fn belly_slope(rest: Vec3, size: f32, phase: f32, clock: f32, wind: f32) -> Vec3
     let arg = 3.3 * clock - k * (rest.y + 0.6 * rest.x) + phase;
     (0.3 + 0.7 * wind) * 0.12 * arg.cos() * -k * Vec3::new(0.6, 1.0, 0.0)
 }
+
+#[test]
+fn a_cut_sail_maps_its_cloth_from_the_hub_for_the_shader() {
+    let fan = Fan { matching: vec![], races: vec![], pleats: 4.0, depth: 0.0 };
+    for (mesh, fan) in [(fan_mesh(), Some(&fan)), (quad(10.0, 10.0), None)] {
+        let (fine, b) = subdivide(&mesh, fan, &[]).unwrap();
+        let Some(VertexAttributeValues::Float32x2(place)) = fine.attribute(Mesh::ATTRIBUTE_UV_1) else { panic!("no uv_b") };
+        for (i, [d, around]) in place.iter().enumerate() {
+            match b.fan.get(i).copied().flatten() {
+                Some(p) => assert_eq!((*d, *around), (p.rim, p.span), "a fan: from its hub, across its span"),
+                None => assert!((b.rest[i].y - 10.0 * *d).abs() < 1e-4 && (b.rest[i].x - 10.0 * *around).abs() < 1e-4, "else up from the bottom edge, across"),
+            }
+        }
+    }
+}

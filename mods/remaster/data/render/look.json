@@ -71,7 +71,7 @@
       0.96,
       0.88
     ],
-    "intensity": 0.78
+    "intensity": 0.7
   },
   "fx_gain": 1.3,
   "shell_gain": 1.5,
@@ -79,12 +79,12 @@
   "sails": {
     "glow": [
       1.0,
-      0.72,
-      0.32
+      0.55,
+      0.18
     ],
     "speed": 1.0,
     "wave": 14.0,
-    "steady": 0.04,
+    "steady": 0.015,
     "backlit": 1.5,
     "transmission": 0.1,
     "billow": 0.035,
@@ -93,14 +93,7 @@
     "opaque": true,
     "line": 0.04,
     "fill": 0.15,
-    "plain": [
-      "pirate",
-      "orange",
-      "ripped",
-      "civilian",
-      "des_",
-      "target"
-    ],
+    "plain": [],
     "cells": 16,
     "match": [
       "sail"
