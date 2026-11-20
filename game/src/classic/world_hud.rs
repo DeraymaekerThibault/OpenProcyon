@@ -187,6 +187,18 @@ fn navigation_heading(ship: Vec3, goal: Vec3) -> f32 {
 struct Label {
     ship: Entity,
     width: f32,
+    /// The original's per-banner open/close monitor: 0 hidden, 1 fully shown.
+    alpha: f32,
+}
+/// 'Max Banner Visible World Distance - Near' in the original's hud.hdt: camera-to-ship distance inside which a banner shows under
+/// the profile default 'On When Close'.
+const BANNER_NEAR: f32 = 150.0;
+/// A banner fades in or out at 1 alpha per real second.
+const BANNER_FADE: f32 = 1.0;
+/// 'On When Close': the banner opens while the camera is within `BANNER_NEAR` of the ship and moves toward open or closed at
+/// `BANNER_FADE` per second.
+fn banner_alpha(alpha: f32, distance: f32, dt: f32) -> f32 {
+    (alpha + if distance <= BANNER_NEAR { BANNER_FADE * dt } else { -BANNER_FADE * dt }).clamp(0.0, 1.0)
 }
 #[derive(Component)]
 struct Labeled;
@@ -267,7 +279,7 @@ fn spawn_labels(
         let tw = font.width(&text) * font_scale;
         let total = l.x + r.x + c.x.max(tw + 8.0);
         let text_pos = Vec2::new(((total - tw) / 2.0).round(), ((22.0 - font.height * font_scale) / 2.0 + 3.0).round()); // +3: the line box sits above the ribbon strip
-        let root = commands.spawn((Label { ship: e, width: total }, Node { position_type: PositionType::Absolute, ..default() }, Visibility::Hidden)).id();
+        let root = commands.spawn((Label { ship: e, width: total, alpha: 0.0 }, Node { position_type: PositionType::Absolute, ..default() }, Visibility::Hidden)).id();
         let mut kids = vec![];
         img.color = tint;
         kids.push(commands.spawn((img, Node { position_type: PositionType::Absolute, ..default() }, RefRect { pos: Vec2::ZERO, size: Vec2::new(total, l.y) })).id());
@@ -299,23 +311,27 @@ fn place_labels(
     lib: Res<Library>,
     toggles: Res<Toggles>,
     sensors: Res<crate::environment::Sensors>,
-    mut labels: Query<(Entity, &Label, &mut Node, &mut Visibility, Option<&Children>), Without<Reticle>>,
+    mut labels: Query<(Entity, &mut Label, &mut Node, &mut Visibility, Option<&Children>), Without<Reticle>>,
     mut imgs: Query<&mut ImageNode, Without<Reticle>>,
+    (wrappers, mut texts, real): (Query<&Children, With<LabelText>>, Query<&mut TextColor>, Res<Time<Real>>),
     mut reticle: Query<(&Reticle, &mut Node, &mut Visibility), With<Reticle>>,
     mission: Option<Res<crate::campaign::Mission>>,
 ) {
     let s = window.height() / REF_H;
     let (camera, ctf) = *cam;
     let project = |g: &GlobalTransform, up: f32| camera.world_to_viewport(ctf, g.translation() + Vec3::Y * up).ok();
-    for (e, label, mut node, mut vis, kids) in &mut labels {
+    for (e, mut label, mut node, mut vis, kids) in &mut labels {
         let Ok((g, h, sh, ms, owner)) = ships.get(label.ship) else {
             commands.entity(e).despawn();
             continue;
         };
+        let far = if toggles.names { ctf.translation().distance(g.translation()) } else { f32::INFINITY };
+        label.alpha = banner_alpha(label.alpha, far, real.delta_secs());
         match project(g, banner_height(&lib.classes[sh.class])) {
-            Some(p) if !h.destroyed && ms.is_none_or(|m| m.visible) && sensors.player_sees(label.ship, mission.as_deref()) && toggles.names && !cinematic(mission.as_deref()) => {
-                // Retail frames with the camera close to the deck show the banner fully opaque (no fade).
-                let a = 1.0;
+            Some(p)
+                if label.alpha > 0.0 && !h.destroyed && ms.is_none_or(|m| m.visible) && sensors.player_sees(label.ship, mission.as_deref()) && !cinematic(mission.as_deref()) =>
+            {
+                let a = label.alpha;
                 // The first three children are the ribbon pieces; the rules' banner type ('Banner BlueTeam' ...) picks their tint.
                 let tint = banner_tint(sh.side, ms, owner);
                 for (n, k) in kids.into_iter().flatten().enumerate() {
@@ -324,6 +340,11 @@ fn place_labels(
                             i.color = tint;
                         }
                         i.color.set_alpha(a);
+                    }
+                    for t in wrappers.get(*k).into_iter().flatten() {
+                        if let Ok(mut c) = texts.get_mut(*t) {
+                            c.0.set_alpha(a);
+                        }
                     }
                 }
                 // Backdrop sits 50 reference px above the anchor point (Offset_ShipName_Background).
@@ -402,6 +423,13 @@ mod tests {
 mod banner_tests {
     use super::*;
 
+    #[test]
+    fn a_banner_fades_in_within_150_units_of_the_camera_and_out_beyond_in_one_second() {
+        assert_eq!(banner_alpha(0.0, 150.0, 0.25), 0.25);
+        assert_eq!(banner_alpha(0.9, 10.0, 0.5), 1.0);
+        assert_eq!(banner_alpha(1.0, 150.1, 0.25), 0.75);
+        assert_eq!(banner_alpha(0.1, 400.0, 0.5), 0.0);
+    }
     #[test]
     fn a_ships_banner_wears_its_map_players_colour_unless_the_rules_name_one() {
         let green = crate::scenario::PlayerColor(Color::srgb(0.0, 0.5, 0.0));

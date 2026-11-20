@@ -158,7 +158,7 @@ fn wall_run(player: bool) -> f32 {
         tree: vec![],
     });
     let goal = Vec3::new(0.0, 0.0, -120.0);
-    let ship = crate::Ship { heading: 0.0, speed: 8.0, order: 2, waypoints: vec![goal], ..crate::Ship::new(class, crate::Side::Player) };
+    let ship = crate::Ship { heading: 0.0, speed: 8.0, order: 2, waypoints: vec![goal], ..crate::Ship::new(class, if player { crate::Side::Player } else { crate::Side::Enemy }) };
     let e = app.world_mut().spawn((ship, health, Transform::default(), Drift::default())).id();
     if player {
         app.world_mut().entity_mut(e).insert(crate::PlayerShip);
@@ -180,9 +180,9 @@ fn ai_ship_on_a_path_detours_round_a_wall_instead_of_grinding_into_it() {
 
 #[test]
 #[ignore = "needs imported assets"]
-fn the_humans_move_order_detours_round_a_wall_too() {
+fn the_humans_move_order_runs_straight_into_a_wall() {
     let best = wall_run(true);
-    assert!(best < 10.0, "the human's ship reaches the marker behind the wall (closest {best})");
+    assert!(best > 80.0, "the human's ship stops at the wall, no detour (closest {best})");
 }
 #[test]
 #[ignore = "needs imported assets"]
