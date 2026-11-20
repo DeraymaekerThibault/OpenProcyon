@@ -9,6 +9,7 @@
 //! - `kit.rs`: what every block repeats: swapping a retail material for the block's, additive (ONE/ONE) drawing, no depth write;
 //! - `lights.rs`: point lights the profile puts on effects (flashes fade, fires and engines flicker);
 //! - `materials.rs`: brighter additive effects and shells for the bloom, smoke lit by the scene, shadow rules for effects;
+//! - `deckhands.rs`: crews on the decks, figures posed on the GPU from baked moves (`shaders/deckhands.wesl`, `data/render/deckhand.json`);
 //! - `sails.rs`: sail materials with a shader (`shaders/sail.wesl`) and cloth that bellies out with the ship's speed;
 //! - `trails.rs`: engine plumes (`shaders/plume.wesl`) and wakes drawn as crossed ribbons (`shaders/wake.wesl`);
 //! - `tracers.rs`: streaks of light behind shells in flight (`shaders/tracer.wesl`);
@@ -38,6 +39,7 @@ pub(crate) mod batch;
 mod bolts;
 mod bursts;
 mod currents;
+mod deckhands;
 mod frame;
 mod holes;
 mod kit;
@@ -86,6 +88,8 @@ pub struct Look {
     pub lit_smoke: bool,
     pub lights: Vec<lights::EffectLight>,
     pub sails: Option<sails::Sails>,
+    /// Crews on the decks of ships whose model marks their places (`Crew_*` nodes); none = empty decks, as classic.
+    pub deckhands: Option<deckhands::Deckhands>,
     pub flags: crate::flag::Cloth,
     pub engines: Option<trails::Engines>,
     pub wakes: Option<trails::Wakes>,
@@ -166,6 +170,7 @@ impl Look {
             lit_smoke: v["lit_smoke"].as_bool().unwrap_or(false),
             lights: lights::parse(&v["lights"]),
             sails: sails::parse(&v["sails"]),
+            deckhands: deckhands::parse(&v["deckhands"]),
             engines: trails::parse_engines(&v["engines"]),
             wakes: trails::parse_wakes(&v["wakes"]),
             tracers: tracers::parse(&v["tracers"]),
@@ -197,6 +202,9 @@ impl Look {
     fn with_shaders(mut self, root: &std::path::Path) -> Look {
         if self.sails.is_some() && !has_shader(root, "sails", sails::SHADER) {
             self.sails = None;
+        }
+        if self.deckhands.is_some() && !has_shader(root, "deckhands", deckhands::SHADER) {
+            self.deckhands = None;
         }
         if self.engines.is_some() && !has_shader(root, "engines", trails::PLUME_SHADER) {
             self.engines = None;
@@ -262,6 +270,7 @@ pub fn plugin(app: &mut App) {
     lights::plugin(app);
     materials::plugin(app);
     sails::plugin(app, &look);
+    deckhands::plugin(app, &look);
     trails::plugin(app, &look);
     tracers::plugin(app, &look);
     surfaces::plugin(app, &look);
