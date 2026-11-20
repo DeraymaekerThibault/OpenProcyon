@@ -23,7 +23,8 @@ tone is adventure: bright, painterly, a little melancholy. The film's art direct
   cloaking on the submersible (`gunnery.md`, `boarding.md`, `cloaking.md`).
 - **Campaign:** 13 missions led by named ships (the first has the player in a torpedo boat, `RLS Comet`, with a Navy exercise,
   a nebula called Clarke, whales and a pirate raid), see `docs/re/campaign.md`.
-- **Scale:** a battle is a few ships to a few dozen; skirmish ships are 11 to 47 units long.
+- **Scale:** a battle is a few ships to a few dozen; skirmish ships are 11 to 47 units long. A person is about 1.0 unit tall (1 unit is
+  roughly 1.7 to 2 m; measured against retail models, see `design-language.md`), so those ships are about 20 to 90 m long.
 
 ## Why it matters for design
 
@@ -38,4 +39,3 @@ tone is adventure: bright, painterly, a little melancholy. The film's art direct
 - The story of the campaign's later missions and the individual named ships (needs a read of the mission data, then own-words notes).
 - Where the Procyon ironclads come from in the fiction, and how a pirate captain gets a ship (for flavour text of mods).
 - Whether the game's manual or in-game text states a timeline or geography worth keeping here (we paraphrase, never quote).
-- Units: whether the game's distance units map to anything in the fiction.

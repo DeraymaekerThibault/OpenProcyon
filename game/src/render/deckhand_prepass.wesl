@@ -1,0 +1,49 @@
+// Not retail: the prepass vertex stage (depth prepass) of the deck crews (game/src/render/deckhands.rs, our own work under the project
+// licence): Bevy's prepass vertex stage with the same pose as the main pass (`deckhand_vat.wesl`), so depth and the drawn figure agree.
+// The crews cast no shadows (NotShadowCaster), so this stage only feeds the depth (and normal) prepass.
+import bevy_pbr::{
+    prepass::io::{Vertex, VertexOutput, decompress_vertex},
+    render::{
+        mesh_bindings::mesh,
+        mesh_functions,
+        view_transformations::position_world_to_clip,
+    },
+};
+import openprocyon::render::deckhand_vat::pose;
+
+@vertex
+fn vertex(vertex_in: Vertex) -> VertexOutput {
+    var out: VertexOutput;
+    let vertex = decompress_vertex(vertex_in, vertex_in.instance_index);
+    let world_from_local = mesh_functions::get_world_from_local(vertex_in.instance_index);
+    var column = 0.0;
+@if(VERTEX_UVS_A)
+    column = vertex.uv.x;
+    var part = 0.0;
+@if(VERTEX_COLORS)
+    part = vertex.color.r * 8.0;
+    let posed = pose(column, part, mesh[vertex_in.instance_index].tag);
+
+    out.world_position = mesh_functions::mesh_position_local_to_world(world_from_local, vec4<f32>(posed.position, 1.0));
+    out.position = position_world_to_clip(out.world_position.xyz);
+@if(UNCLIPPED_DEPTH_ORTHO_EMULATION) {
+    out.unclipped_depth = out.position.z;
+    out.position.z = min(out.position.z, 1.0);
+}
+@if(VERTEX_UVS_A)
+    out.uv = vertex.uv;
+@if(VERTEX_UVS_B)
+    out.uv_b = vertex.uv_b;
+@if(NORMAL_PREPASS_OR_DEFERRED_PREPASS)
+    out.world_normal = mesh_functions::mesh_normal_local_to_world(posed.normal, vertex_in.instance_index);
+@if(VERTEX_COLORS)
+    out.color = posed.color;
+@if(MOTION_VECTOR_PREPASS)
+    out.previous_world_position = mesh_functions::mesh_position_local_to_world(
+        mesh_functions::get_previous_world_from_local(vertex_in.instance_index), vec4<f32>(posed.position, 1.0));
+@if(VERTEX_OUTPUT_INSTANCE_INDEX)
+    out.instance_index = vertex_in.instance_index;
+@if(VISIBILITY_RANGE_DITHER)
+    out.visibility_range_dither = mesh_functions::get_visibility_range_dither_level(vertex_in.instance_index, world_from_local[3]);
+    return out;
+}

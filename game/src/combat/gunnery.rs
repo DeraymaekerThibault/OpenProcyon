@@ -42,6 +42,12 @@ impl GunStates {
         self.0[index] = spawn_gun(commands, assets, lib, ship, mount, gun);
     }
 
+    /// Each mount's visual root (a child of the ship, placed at the mount) and the seconds before it may fire again (0: loaded).
+    /// Presentation only (the render profile's deck crews, `render/deckhands.rs`).
+    pub fn reloads(&self) -> impl Iterator<Item = (Entity, f32)> + '_ {
+        self.0.iter().map(|g| (g.root, g.cooldown.max(0.0)))
+    }
+
     /// A refit re-creates every mount: loaded, no burst in progress.
     pub fn rearm(&mut self) {
         for g in &mut self.0 {
