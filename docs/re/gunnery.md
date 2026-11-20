@@ -12,6 +12,22 @@ the straight distance from the gun to that point divided by the gun's MuzzleSpee
 the aim point is moved by target velocity * flight time. For some targets (flag bit 8 on the target, probably
 crewed/player ships) the lead is only applied while the target is turning and adds an extra physics vector; not modelled.
 
+## Where a computer captain's guns aim on a ship
+When a computer captain chooses a target (its first target, a new choice after the 6 s hold, or a fleet mate's target taken over),
+it also fixes the point its guns aim at: the centre of the target's damage section nearest to the captain's own ship, by straight
+3-D distance, the first section on a tie, destroyed sections included. The point is kept in the target's own frame, so it moves
+and turns with the target, and it stays the same until the next choice; it is not re-picked as the ship circles in between. A
+target with no damage sections is aimed at its origin. So shots from one attacker land around one part of the hull at a time
+(bow when it comes from ahead, a side when abeam, the stern from astern), and several attackers spread their fire over the hull.
+
+Checked in the original (a computer Barque against an idle Man-O-War): the stored point was 12.1 units forward of the
+target's origin while the Barque was ahead, 4.9 to port when it was abeam to port, 16.0 aft when astern and 4.8 to starboard when
+abeam to starboard, and it changed only at target choices, 6.3 and 12.7 s apart.
+
+Remake: `ship::attack::aim_local` picks the section (its box centre, the same point the attack courses steer by), stored with the
+target in `ship::CaptainTargets` and used by `combat::gunnery`. PROVISIONAL: only skirmish captains; a base target keeps the roof
+point of the section nearest its centre (see "Gun tower aim point").
+
 ## Deviation (run once per burst, or per shot if CalculateAccuracyDeviationDuringBurst)
 - Band by distance: <= EffectiveRange -> Effective deviation, <= LongRange -> Long, else Maximum.
 - Half of it, times an accuracy factor that depends on what the gun sits on. **Every ship, computer or not, uses its crew**:
@@ -151,8 +167,8 @@ skirmish, the shell position sampled about 30 times a second.
   The point is adopted only if it is farther from the shooter than a distance drawn uniformly from 50..70; otherwise the guns keep
   their previous point. Each lob bank then aims at that point plus a fresh random offset of at most one unit (flat), on the flight
   plane. Non-lob banks are unaffected. Remake: `gunnery::ground_point`, `bank_point`, `GroundAim`. PROVISIONAL: a lob gun that has
-  never had a point stays idle (the original leaves it aimed at the map origin); the original also skips the think when a friendly
-  ship is in the line of fire or scenery is in the way (not modelled).
+  never had a point stays idle (the original leaves it aimed at the map origin); the think is skipped while a friendly ship or
+  scenery is in the line of fire (see below).
 
 ## Playtest fixes: arcs and torpedoes
 

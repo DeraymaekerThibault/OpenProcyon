@@ -72,18 +72,25 @@ pub fn plan(lib: &Library, class: &Class, health: &Health, guns: Option<&GunStat
     Some((routine, range))
 }
 
-/// The point a Broadside, Frontal or Rear attack steers by (Ram steers at the target's centre): the centre of the target's damage
-/// section nearest to `from`, re-picked every think, the first section on a tie. A ship's dead sections count; a base's only live
-/// ones, and with none left its centre. PROVISIONAL: the original's per-section filter on bases is read as our mission flag.
+/// The point a Broadside, Frontal or Rear attack steers by (Ram steers at the target's centre): `aim_local` in the world, at the
+/// target's height.
 pub fn aim(sections: &[crate::data::Section], hp: &[f32], tf: &Transform, from: Vec3, base: bool) -> Vec3 {
+    tf.transform_point(aim_local(sections, hp, tf, from, base)).with_y(tf.translation.y)
+}
+
+/// The centre of the target's damage section nearest to `from`, in the target's own frame: the first section on a tie, a ship's dead
+/// sections included, a base's only live ones; with none, the target's origin. The original picks it for the steering point every
+/// think and, once when a computer captain chooses its target, as the point its guns aim at. PROVISIONAL: the original's
+/// per-section filter on bases is read as our mission flag.
+pub fn aim_local(sections: &[crate::data::Section], hp: &[f32], tf: &Transform, from: Vec3, base: bool) -> Vec3 {
     let live = |k: usize| hp.get(k).is_some_and(|hp| *hp > 0.0);
     sections
         .iter()
         .enumerate()
         .filter(|(k, s)| !base || (s.mission && live(*k)))
-        .map(|(_, s)| tf.transform_point((s.min + s.max) * 0.5).with_y(tf.translation.y))
-        .min_by(|a, b| a.distance_squared(from).total_cmp(&b.distance_squared(from)))
-        .unwrap_or(tf.translation)
+        .map(|(_, s)| (s.min + s.max) * 0.5)
+        .min_by(|a, b| tf.transform_point(*a).distance_squared(from).total_cmp(&tf.transform_point(*b).distance_squared(from)))
+        .unwrap_or(Vec3::ZERO)
 }
 
 /// A Frontal attacker's break-off: (game time it started, direction).

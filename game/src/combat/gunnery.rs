@@ -364,11 +364,12 @@ pub(super) fn fire(
                     .or_else(|| crate::nearest(seen.iter().filter(|c| !primary && c.side != Side::Player && c.visible), tf.translation, |c| c.aim_point))
                     .map(Contact::aim),
                 // Skirmish computer ships fire at their captain's target (ship::CaptainTargets): a ship, else a hostile base; without one, the player ship.
-                _ => match captains.as_deref().and_then(|c| c.of(me)) {
-                    Some(t) => seen
+                // A ship target is aimed at the section its captain picked on choosing it (ship::CaptainTargets), not the hull's centre.
+                _ => match captains.as_deref().and_then(|c| c.aim_of(me)) {
+                    Some((t, local)) => seen
                         .iter()
                         .find(|c| c.entity == t && c.visible)
-                        .map(Contact::aim)
+                        .map(|c| AimTarget { position: others.get(t).map_or(c.aim_point, |o| o.1.transform_point(local)), ..c.aim() })
                         .or_else(|| base_targets.iter().find(|b| b.0.entity == t && b.1 != ship.side).map(|b| b.0)),
                     None => seen.iter().find(|c| c.is_player && c.visible).map(Contact::aim),
                 },
