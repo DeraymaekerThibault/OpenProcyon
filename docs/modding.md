@@ -234,7 +234,7 @@ the game draws the retail sky sphere. Needs NumPy and Pillow, or nothing in the 
 the frozen importer (`openprocyon-import --bake-skies [the same options]`), and the Mods screen's "Bake HD skies" button (on the
 HD skies and Remaster look panels) runs it with the default options (plus `--split-stars` while the Remaster look is on), shows its `[n/total] ... (p%)` progress and switches the
 mod on when it is done. Each PNG is written beside its target and renamed over it, and `mod.json` comes last, so a stopped bake
-leaves no cut-off files and no half-made mod in the list. The `sky` block (above) adds a layer of gas in front of it; with `--split-stars` the baker writes the stars as their own 16-bit cube (`<sky>_stars.png`) for the block's twinkling stars, and the sky cube is then without them (a profile without the block shows none).
+leaves no cut-off files and no half-made mod in the list. The `sky` block (above) adds a layer of gas in front of it; with `--split-stars` the baker makes the sky in layers, like Shakedown's own: `<sky>_cube.png` is then the calm backdrop alone, the filamented gas is a painted clouds cube (`<sky>_clouds.png`, alpha = density) and the stars their own 16-bit cube (`<sky>_stars.png`), with `data/render/skies.json` showing the clouds as two parallax layers (a profile without a `sky` block shows only the backdrop).
 
 ### Baked surfaces (`tools/bake_surfaces.py`)
 `python -m tools.bake_surfaces` (release download: `openprocyon-import --bake-surfaces`) bakes a surface map for every textured
