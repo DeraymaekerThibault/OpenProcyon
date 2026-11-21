@@ -1,12 +1,69 @@
 # Modding
 
-Mods that ship with the game live in `mods/` (the checkout's, or next to the executable in a download; `tools/package_release.py` copies it) and are listed in the Mods screen, off until ticked (except those marked `"default": true`). Installing another: unzip it into `<user data dir>/mods/` (`$XDG_DATA_HOME/openprocyon`, `%APPDATA%\openprocyon`), then switch it on in the Mods button in the corner of the main menu (a list: click a column title to sort, the Category pull-down filters, click a row to see its details on the right, tick its box or double-click it or use the Switch on / Switch off button to change it). The choice is stored in `mods.json` beside that folder (`{"enabled": ["id", ...], "disabled": ["id", ...]}`, load order, later wins); a mod that is not listed stays off, except a bundled mod whose `mod.json` has `"default": true`, which is on until the player switches it off (`disabled` remembers that; `default` in a user-installed mod is ignored, so dropping a folder in never switches anything on); a mod in the user folder replaces a bundled one with the same `id`. Every folder in `mods/` needs a `mod.json` (`tests/test_bundled_mods.py`). The overlay is built at launch, so changes apply on the next start. Examples: `mods/silver-skirmish` (Silver's ship at 255 points, flagged `skirmish`) `mods/faction-colors` (wakes tinted per fleet type, green engine flames on the Procyon ironclads; JSON only, no art) and `mods/game-speed` (on by default: the not-retail 1x-16x speed buttons beside the command bar). `mod.json` takes `id` (default: folder name), `name`, `version`, `description`, `category` (the Mods table's filter; default "Other"), `default` (bundled mods only, see above); `game_version` and `requires` are not read yet.
+A mod is a folder of files that the game lays over the player's imported assets at launch: data (JSON), models (glTF `.glb`),
+images (PNG) and sounds (OGG). No code and no patching: ships, guns, maps, custom missions and campaigns, sounds, UI art, fonts
+and the graphics look are all files. When something needs the engine to change, see "Sharing a mod" below.
 
-For development, run with `--mod <folder>` (repeatable, later mods win): `cargo run --release -- --mod ../mods/silver-skirmish --ship Ship_Pirate_Silver --map red_rover`.
+## Your first mod
 
-A mod folder mirrors `assets/`. At launch `game/src/modding.rs` builds `local/overlay/` (symlinks to the base files, mod files on top) and the
+A Pirate Man-o'-War in skirmish at 255 points, with its own name (`mods/silver-skirmish` is a working copy):
+
+```
+my-mod/
+  mod.json                                  {"name": "Silver in skirmish", "version": "1.0", "category": "Ships",
+                                             "description": "Silver's ship as a skirmish Man-o'-War."}
+  ships/Ship_Pirate_Silver/ship.json        {"extends": "Ship_Pirate_Silver", "skirmish": true, "points": 255,
+                                             "display_name": "MY_SILVER_NAME"}
+  menu/strings.json                         {"MY_SILVER_NAME": "Silver's Man-o'-War"}
+```
+
+Paths inside the folder mirror the imported `assets/` folder (its layout: [data-format.md](data-format.md)). `extends` copies a
+ship and changes only the keys you give. Try it with `./openprocyon --mod /path/to/my-mod` (from a source checkout:
+`make run ARGS='--mod /path/to/my-mod'`; repeatable, later mods win), or install it as a player does (below). The overlay is built at launch, so restart after every change. More examples in `mods/`: `faction-colors` (JSON only),
+`game-speed`, `remaster` (a whole graphics look). A ship of your own needs only a model and a short `ship.json`
+(["A ship from a model"](#a-ship-from-a-model)).
+
+## Sharing a mod
+
+- **Your mod is yours.** Keep it in your own repository or a zip; players drop it into their mods folder. The OpenProcyon
+  repository does not take in third-party mods: `mods/` holds only the examples the project maintains.
+- **Nothing from the original game.** Do not ship retail files or anything converted from them (models, textures, sounds,
+  strings, maps), not even edited or upscaled. Every player has their own import, so a mod may *use* retail content by
+  reference: `extends` a retail ship, name a retail sound or effect, or map a retail texture onto your model with a
+  `retail:<texture>` material (see "A ship from a model"). What you ship must be your own work or under a licence that allows
+  redistribution; put a `LICENSE` file in the folder.
+- **Say which engine you need.** The engine is pre-1.0: file layouts can still change and a mod may need small fixes after an
+  update. Give the OpenProcyon version (or later) you tested with. `game_version` and `requires` in `mod.json` are not read yet.
+- **Engine changes go upstream.** If a mod needs something files cannot express, open an issue describing it, or a pull request
+  ([CONTRIBUTING.md](../CONTRIBUTING.md)). Generic features that help every mod are welcome; a feature only one mod uses is better
+  done in that mod.
+
+## Installing and switching on
+
+Unzip a mod into `<user data dir>/mods/` (`~/.local/share/openprocyon/mods` on Linux, `%APPDATA%\openprocyon\mods` on Windows),
+then switch it on with the Mods button in the corner of the main menu: a sortable list (the Category pull-down filters; click a
+row for its details; tick its box, double-click it or use Switch on / Switch off). The choice is stored in `mods.json` beside that
+folder (`{"enabled": ["id", ...], "disabled": ["id", ...]}`, load order, later wins). A user mod stays off until switched on;
+dropping a folder in never switches anything on. A user mod replaces a bundled one with the same `id`.
+
+Mods that ship with the game live in `mods/` (the checkout's, or next to the executable in a download) and are off until ticked,
+except those marked `"default": true` (such as `game-speed`), which are on until the player switches them off.
+
+`mod.json` (every mod folder needs one; `tests/test_bundled_mods.py`):
+
+| Key | Meaning |
+|---|---|
+| `id` | default: the folder name |
+| `name`, `version`, `description` | shown in the Mods screen |
+| `category` | the Mods screen's filter (default "Other") |
+| `missions` | the order of a mod campaign's missions (see the custom-mission row below) |
+| `default` | bundled mods only: on until switched off; ignored in user mods |
+| `game_version`, `requires` | not read yet |
+
+## What a mod can change
+
+At launch `game/src/modding.rs` builds `local/overlay/` (symlinks to the base files, mod files on top) and the
 game, Bevy's asset server included, reads only that tree.
-
 | Mod file | Effect |
 |---|---|
 | any file with a base path (`hud/sprites/MainBar_PanicButton/Navy/NoCursor.png`, `ships/Ship_X/model.glb`, `fonts/Sans.otf`, `sound/<kind>/*.ogg`) | replaces the base file: texture packs, upscaled art, new fonts, sounds |
@@ -23,7 +80,7 @@ game, Bevy's asset server included, reads only that tree.
 | a new `ships/<Id>/` folder (`ship.json` and a `model.glb`, see "A ship from a model"; or `geometry`/`model` pointing at another ship), a new `maps/<id>/` folder (`map.json`, `backdrop.png`; `"skirmish": true` lists it), `models/<any folder>/*.glb`, `sound/<any folder>/*.ogg` | new content (schema in `docs/data-format.md`) |
 | a new `maps/<id>/` folder with a `mission.json` (and `media.json`, the campaign's layout) | a custom mission: listed under Single Player > Custom Missions (the button in the corner, not retail) with its `map.json` `name` and `description`, and started with Play or a double-click (`--map <id>` also works). Each mod is one campaign named after its `mod.json` `name`: its missions play in the order of `mod.json` `"missions": ["<id>", ...]` (missions it does not list follow, by id), and winning one offers the next (N, as in the retail campaign). Ids `mission01`..`mission13`, `tutorial` and `basic_tutorial` are not listed: a mod's copy replaces that retail mission. Victory points of custom missions do not count toward the retail campaign total |
 
-Limits (provisional): the fleet screen lists, per fleet type (`race` Navy/Pirate/Procyon), every ship whose `ship.json` has `"skirmish": true` (the importer copies retail's "Available in Multiplayer?" flag; a mod can set it on any ship); `mod.json` (`name`, `version`, `description`) is only printed at startup. Weapons and bullets are shared files, `data/weapons/guns.json` and `bullets.json`; a mod's copies are merged key by key, so adding a gun is one entry. A gun with a `beam` block (not retail) is a beam gun: `{"charge": s, "duration": s, "tick": s, "ramp": per s, "max_power": x, "width": units, "color": [r, g, b]}`. It charges for `charge` seconds with a glow at its first muzzle, then holds a beam along its barrel for `duration` seconds and reloads for `TimeBetweenBursts`. The beam burns the first enemy ship it crosses once per `tick` with the bullet's damage table, times a power of 1 + `ramp` x the seconds it has stayed on that ship (at most `max_power`); `SoundName` plays once when the charge starts, so one sound can carry the charge and the beam. It passes through bases, rocks and scenery (PROVISIONAL). Its `MuzzleSpeed` only sets the turret's lead (use a large value), and `EffectiveRange_Range` is where computer captains with a bow gun turn away. A mod may ship sounds of its own under `sound/`, found by name. Computer captains fit the guns retail computers were seen to fit (carronades, Gattling, plasma, light/medium cannons, star mortar) unless a mod ships `data/ai/weapons.json` (`{"Gun_Name": true|false}`, merged the same way) to restrict or extend what they may pick. The full layout is in `docs/data-format.md`.
+Limits (provisional): the fleet screen lists, per fleet type (`race` Navy/Pirate/Procyon), every ship whose `ship.json` has `"skirmish": true` (the importer copies retail's "Available in Multiplayer?" flag; a mod can set it on any ship); Weapons and bullets are shared files, `data/weapons/guns.json` and `bullets.json`; a mod's copies are merged key by key, so adding a gun is one entry. A gun with a `beam` block (not retail) is a beam gun: `{"charge": s, "duration": s, "tick": s, "ramp": per s, "max_power": x, "width": units, "color": [r, g, b]}`. It charges for `charge` seconds with a glow at its first muzzle, then holds a beam along its barrel for `duration` seconds and reloads for `TimeBetweenBursts`. The beam burns the first enemy ship it crosses once per `tick` with the bullet's damage table, times a power of 1 + `ramp` x the seconds it has stayed on that ship (at most `max_power`); `SoundName` plays once when the charge starts, so one sound can carry the charge and the beam. It passes through bases, rocks and scenery (PROVISIONAL). Its `MuzzleSpeed` only sets the turret's lead (use a large value), and `EffectiveRange_Range` is where computer captains with a bow gun turn away. A mod may ship sounds of its own under `sound/`, found by name. Computer captains fit the guns retail computers were seen to fit (carronades, Gattling, plasma, light/medium cannons, star mortar) unless a mod ships `data/ai/weapons.json` (`{"Gun_Name": true|false}`, merged the same way) to restrict or extend what they may pick. The full layout is in `docs/data-format.md`.
 
 ## A ship from a model
 

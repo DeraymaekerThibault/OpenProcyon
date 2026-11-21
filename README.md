@@ -9,8 +9,8 @@ Disney or the original developers.
 
 ## Status
 
-Early development. Skirmish battles on the retail maps work; all 13 campaign missions load, Mission 1 is the current focus and
-missions 2-13 are first-pass. Status per rule of the original: the project board "OpenProcyon fidelity: every rule of the original".
+Early development. Skirmish battles on the retail maps work; the current focus is skirmish end to end (milestone v0.2), then
+the campaign (v0.3). All 13 campaign missions load; missions 2-13 are first-pass. Status per rule of the original: the project board "OpenProcyon fidelity: every rule of the original".
 
 ## Download and play
 
@@ -59,7 +59,11 @@ captains do) settles the guesses still marked `PROVISIONAL`, and missions 2-13 n
 Read [CONTRIBUTING.md](CONTRIBUTING.md) and [AGENTS.md](AGENTS.md) first: it is the guide for human contributors and AI coding assistants alike, and its hard rules
 (no game content, no decompiled code or executable addresses, behaviour described in your own words) are not negotiable.
 `tools/check.sh` must pass before every commit. Architecture and module ownership: [docs/development.md](docs/development.md).
-Modding: [docs/modding.md](docs/modding.md).
+
+## Modding
+
+Ships, guns, maps, custom missions and campaigns, sounds, UI art and the graphics look are mods: folders of JSON, glTF, PNG and
+OGG files, kept in your own repository and dropped into the game's mods folder. Start with [docs/modding.md](docs/modding.md).
 
 ## Credits
 
