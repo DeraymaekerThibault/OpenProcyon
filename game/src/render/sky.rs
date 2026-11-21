@@ -394,6 +394,15 @@ pub type SkyMaterial = ExtendedMaterial<StandardMaterial, SkyGlow>;
 pub fn plugin(app: &mut App, look: &Look) {
     if look.sky.is_some() {
         app.add_plugins(MaterialPlugin::<SkyMaterial>::default()).init_resource::<SkyEvents>().add_systems(Update, (sky_events, dome).chain());
+        app.add_systems(Update, loading.run_if(resource_exists::<crate::loading::Loading>));
+    }
+}
+
+/// The sky's star and cloud pictures hold a loading battle (`loading.rs`).
+fn loading(mut loading: ResMut<crate::loading::Loading>, server: Res<AssetServer>, stars: Query<&StarsImage>, clouds: Query<&CloudsImage>) {
+    let pictures = stars.iter().map(|s| &s.0).chain(clouds.iter().map(|c| &c.0));
+    if pictures.into_iter().any(|h| crate::loading::pending(&server, h.id().untyped())) {
+        loading.busy("the sky");
     }
 }
 

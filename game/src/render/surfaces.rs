@@ -123,6 +123,7 @@ pub type SurfaceMaterial = ExtendedMaterial<StandardMaterial, SurfaceDetail>;
 pub fn plugin(app: &mut App, look: &Look) {
     if look.surfaces.is_some() {
         app.add_plugins(MaterialPlugin::<SurfaceMaterial>::default()).add_systems(Update, (surfaces, cloaked::<SurfaceMaterial>).chain());
+        app.add_systems(Update, crate::loading::extended::<SurfaceDetail>.run_if(resource_exists::<crate::loading::Loading>));
     }
 }
 
