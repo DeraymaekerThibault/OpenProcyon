@@ -56,6 +56,9 @@ workaround then lowered the whole island a second time. Border Dispute's central
 dock at 29.25 in the layer's frame) sat 58.5 below its map altitude instead of 29.25; Sloggoville and Safetytown sank by about 5 and 7.
 With the dock moved, `Island_Large01` and Sloggoville have their first dock at 0, so the workaround no longer shifts them.
 Assumed, not read from the original: that the original's dock is at the flight plane (it is where the layer rule puts it).
+Boarding points of bases and islands follow the same rule (the node's own position moved with its layer). They used to come from
+the ship rule (scene chain minus the first section's position), which left them 6 to 25 off the model and on several bases about 14
+to 20 below the flight plane, out of the 15-unit boarding range of a ship alongside.
 
 First docks that are still off the flight plane after the layer offset (the workaround still shifts these):
 
