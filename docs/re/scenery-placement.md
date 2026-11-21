@@ -58,7 +58,9 @@ With the dock moved, `Island_Large01` and Sloggoville have their first dock at 0
 Assumed, not read from the original: that the original's dock is at the flight plane (it is where the layer rule puts it).
 Boarding points of bases and islands follow the same rule (the node's own position moved with its layer). They used to come from
 the ship rule (scene chain minus the first section's position), which left them 6 to 25 off the model and on several bases about 14
-to 20 below the flight plane, out of the 15-unit boarding range of a ship alongside.
+to 20 below the flight plane, out of the 15-unit boarding range of a ship alongside. Ambient effect points (fire, smoke, lighthouse beams) follow it too; of the shipped
+scenes only the lighthouse's beam moves (8.6 down, from above the tower's top into the lamp). Flag points on bases and islands are
+not used: only ships fly flags in the remake.
 
 First docks that are still off the flight plane after the layer offset (the workaround still shifts these):
 

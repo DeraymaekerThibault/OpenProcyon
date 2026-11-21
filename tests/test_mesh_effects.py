@@ -3,6 +3,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import numpy as np
+from imported import ASSETS, needs_assets
+from test_docks import glb_xyz
 from test_msb_scene import scene
 
 from tools.export_animations import export as export_animations
@@ -64,6 +67,20 @@ class MeshSceneExports(unittest.TestCase):
                 [2.0, 5.0, 2, 0.0, 0.0, 0.0, 0.0, 5.0],
             ],
         )
+
+    @needs_assets
+    def test_lighthouse_beam_starts_inside_the_tower(self):
+        # The emitter hangs under a layer placed 8.6 below the object; with the raw node position it floated above the top.
+        (beam,) = [
+            p
+            for p in json.loads((ASSETS / "data/mesh_effects.json").read_text())[
+                "IslandLightHouse"
+            ]
+            if p["name"] == "Light_Emiiter"
+        ]
+        tower = glb_xyz(ASSETS / "models/scenery/IslandLightHouse.glb")
+        self.assertLess(beam["pos"][2], tower[:, 2].max())
+        self.assertLess(np.linalg.norm(tower - np.array(beam["pos"]), axis=1).min(), 3)
 
 
 if __name__ == "__main__":
