@@ -500,10 +500,10 @@ fn only_a_ships_own_pick_is_replaced_before_it_docks() {
     assert!(!docker(false, Phase::Approach).retargets(), "an ordered dock is not replaced");
 }
 
-/// The rules' docked relation is registered for a ship dockee only: the original never registers a base or an island.
+/// The rules' 'Is Docked' is true for a docked ship whatever it docked with: the original reads the dock routine, not a relation list.
 #[test]
 #[ignore = "needs imported assets"]
-fn only_a_ship_dockee_is_registered_as_docked_in_the_rules() {
+fn a_base_dockee_counts_as_docked_for_the_rules_like_a_ship() {
     for base in [false, true] {
         let (mut app, lib) = app();
         app.insert_resource(crate::campaign::load_id("mission10"));
@@ -522,6 +522,6 @@ fn only_a_ship_dockee_is_registered_as_docked_in_the_rules() {
         tick(&mut app, 0.1);
         assert!(app.world().get::<Docker>(me).unwrap().is_docked());
         let registered = app.world().resource::<crate::campaign::Mission>().script.is_docked(me, dockee);
-        assert_eq!(registered, !base, "base: {base}");
+        assert!(registered, "base: {base}");
     }
 }

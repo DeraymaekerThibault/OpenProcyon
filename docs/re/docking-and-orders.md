@@ -74,8 +74,9 @@ A dock order names the docker, the dockee and a mode: **tow**, **break tow** or 
 orders and starts the matching activity: towing, or docking; break tow drops the tow link (and ends the towing activity if it was
 running). Grapple, Board and Stop likewise start grappling-then-boarding, boarding, or an idle activity. A ship runs one activity at a
 time: dock, dock-for-repairs, tow, board, grapple-and-board.
-Rule actions `Dock Ships`, `Tow Ships`, `Board Ships`, `Break Tow`, `Set Dock Time` and conditions `Group/Unit Is Docked`, `Group/Unit Has Docked`,
+Rule actions `Dock Ships`, `Tow Ships`, `Board Ships`, `Break Tow`, `Set Dock Time` and conditions `Group/Unit Has Docked`,
 `Is Ship In Tow` use one shared list of links between two objects (kind, docker, dockee; kinds: tow, grapple, dock/board).
+`Group/Unit Is Docked` is the exception: it reads each docker's own dock routine (see the PROVISIONAL note below).
 
 ## 4. Dock routine phases
 None → waiting to dock → approach → pre-docked → docked → moving away from the dock → turning to return → returning. Behaviour:
@@ -182,7 +183,7 @@ addressed by rules (`MissionBase`); left-click / menu dock gated by the sight te
 variants (any friendly ship gets the friendly menu), retail icons/backgrounds/slot offsets and menu sounds, Focus / Stop / Dock live and the
 rest greyed; context cursors. Camera: right-drag still rotates, a short right click opens the menu.
 PROVISIONAL in the remake: dock-point yaw sign, docked ships keeping station on a moving dockee, one repair effect at the ship centre, sight test by centre
-distance minus our hull radii and the player's ship only (no group). The docked relation is registered for ship dockees only; a base or island dockee is never registered (remake matches).
+distance minus our hull radii and the player's ship only (no group). The rules' `Group/Unit Is Docked` does not read the relation list: it reads each docker's dock routine (state docked, dockee in the targets group, every docker must match), so a base or island dockee counts like a ship (mission 11's Cydonia shipyard). The relation list is skipped for bases but is not what that condition reads.
 Verified in Mission 1 (`--mission 1 --script dock|dock-click|dock-menu`: `Script::skip_to_tender` jumps to Objective 4 and puts the player,
 half damaged, next to RLS Bounty; `dock` sends the order like the D key, `dock-click` / `dock-menu` drive the real left click / right-click
 menu with synthetic mouse input): order accepted, approach ends on a dock point, Docked, repair to full, "Jim Has Docked With Tender" →
