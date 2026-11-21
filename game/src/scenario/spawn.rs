@@ -529,7 +529,8 @@ pub const HOSTILE_TO_ALL: Side = Side(u8::MAX);
 const SKIRMISH_BASE_STRENGTH: i32 = 50;
 
 /// Keep meshes, gun mounts, dock points and collision in the same placed scene frame.
-// PROVISIONAL: anchor the first dock to the authored map altitude; native scene assembly is not decoded.
+// PROVISIONAL: anchor the first dock to the authored map altitude; docks already carry their layer offset, so this shifts only
+// scenery whose dock stays off the flight plane after it (docs/re/scenery-placement.md section 2).
 pub fn scenery_transform(object: &serde_json::Value, rotation: Quat, docks: &serde_json::Value) -> Transform {
     let origin = object.get("scene_origin").map_or_else(
         || {

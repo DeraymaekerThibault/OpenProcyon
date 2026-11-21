@@ -49,24 +49,30 @@ scene origin = explicit mod scene_origin, otherwise (0, first dock local Z, 0) i
 
 For upright scenery this forces the first dock to the map object's authored altitude. It fixed reachable docking in owner playtests, but **no retail first-dock normalization rule has been established**. Existing catalogue tests verify the workaround, not original-game height parity. See [campaign.md — Mission 2 owner-playtest fixes](campaign.md#mission-2-owner-playtest-fixes-islands-and-gun-towers).
 
-Among scenery types referenced by exported maps, 21 Base_/Island types have converted docks; 20 have a nonzero first-dock height:
+**Points move with their mesh layer.** Each mesh layer is placed at its scene node's position minus its pivot (the layer offset,
+read and measured for collision, see [collision.md](collision.md)). A dock or gun point stored in that layer's frame moves by the same
+offset; a point under the scene's root node does not move. Before this, the mesh moved but its docks did not, and the first-dock
+workaround then lowered the whole island a second time. Border Dispute's central island (`Island_Large01`, layer offset z -29.25,
+dock at 29.25 in the layer's frame) sat 58.5 below its map altitude instead of 29.25; Sloggoville and Safetytown sank by about 5 and 7.
+With the dock moved, `Island_Large01` and Sloggoville have their first dock at 0, so the workaround no longer shifts them.
+Assumed, not read from the original: that the original's dock is at the flight plane (it is where the layer rule puts it).
+
+First docks that are still off the flight plane after the layer offset (the workaround still shifts these):
 
 | Type | First dock local Z | Upright translation correction |
 |---|---:|---:|
 | `Base_AbandonedCamp` | -17.2 | +17.2 |
 | `Base_SmugglersCamp` | 27 | -27 |
-| `Base_Safetytown` (Norville in Mission 2) | 9 | -9 |
+| `Base_Safetytown` (Norville in Mission 2) | 2 | -2 |
 | `Base_ShipyardFreemason` | 59.3 | -59.3 |
 | `Base_PortIvy` | 56.917 | -56.917 |
-| `Island_Large01` | 29.25 | -29.25 |
 
-These are exported coordinates/corrections, **not measured original height errors**. Scenery without docks is not normalized. Nonzero map altitude and explicit mod `scene_origin` remain supported.
+These layers have position equal to pivot (offset 0), so their vertices themselves sit at the dock's height. These are exported coordinates/corrections, **not measured original height errors**. Scenery without docks is not normalized. Nonzero map altitude and explicit mod `scene_origin` remain supported.
 
 ### Why not simply apply all MSB translations?
 
-- `tools/mdb_to_glb.py::convert` exports MDB vertex positions directly, without MSB mesh-node hierarchy transforms.
+- `tools/mdb_to_glb.py::convert` places each scenery layer by its offset only (position minus pivot); parent node rotations and deeper hierarchy are not applied.
 - `hardpoints` accumulates parent translations, subtracts the first DamageSection's accumulated offset, and ignores parent rotations. Meshes and attachment points do not come from a fully decoded retail scene transform.
-- `tools/export_collision.py::triangles` explicitly ignores GLB node transforms.
 - Retail Layer1 pivots are Z=-17.2 for AbandonedCamp and Z=27 for SmugglersCamp, matching their docks. Safetytown's Layer1 Z=39 does **not** match its docks' Z=9. Its WindMill child also has yaw approximately -0.568977 and a nonzero position.
 - Node assembly links parents and applies pose data: a node's pose subtracts a **rotated pivot** from the pose translation, and the hierarchy applies parent orientation and translation. This is not simply “add every MSB position”. The parser's node fields still need to be mapped to retail pivot versus pose data.
 
