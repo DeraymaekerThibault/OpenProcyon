@@ -11,7 +11,7 @@ struct Deckhand {
     // x: frames in all (the normal rows start here)
     info: vec4<f32>,
     // rgb per outfit and part (outfit * 5 + part: skin, coat, trousers, shoes, hat)
-    palette: array<vec4<f32>, 40>,
+    palette: array<vec4<f32>, 80>,
 }
 
 @group(constants::MATERIAL_BIND_GROUP) @binding(100) var<uniform> deckhand: Deckhand;
