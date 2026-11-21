@@ -1532,3 +1532,13 @@ fn wrecked_hull_keeps_a_tenth_of_speed_and_turning() {
     assert!((speed_factor(class, &wreck) - 0.1).abs() < 1e-6, "speed {}", speed_factor(class, &wreck));
     assert!((turn_factor(class, &wreck) - 0.1).abs() < 1e-6, "turn {}", turn_factor(class, &wreck));
 }
+
+/// The death wipe takes down exactly the sections not yet lost (retail Man-O-War, one staged kill: at the wipe sections 4, 6, 7 and 8
+/// still had 197, 173, 176 and 145 hit points, the rest were at 0 and had already dropped their pieces).
+#[test]
+fn death_wipe_takes_the_sections_that_are_still_standing() {
+    let hp = [0.0, 0.0, 0.0, 0.0, 197.0, 0.0, 173.0, 176.0, 145.0];
+    let fx = DamageFx(hp.iter().map(|h| (if *h > 0.0 { 1 } else { 4 }, None)).collect());
+    assert_eq!(fx.standing(), vec![4, 6, 7, 8]);
+    assert!(DamageFx(vec![(4, None); 3]).standing().is_empty(), "nothing left to wipe: no second piece for a section already lost");
+}

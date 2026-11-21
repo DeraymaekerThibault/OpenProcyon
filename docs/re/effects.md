@@ -276,13 +276,27 @@ own frame read in the order first, third, second (game x, y, z), not a velocity.
 (PROVISIONAL; the earlier frames show the mid hulls drifting away, and a hide at start 0 would remove them at once). A mast that broke off earlier in the fight keeps
 tumbling away for 6+ s: see "Section debris" below.
 
+### Death wipe (0.14 s after the kill)
+The wipe is a normal section-lost hit on every section, so it does what losing a section does, for each section that is still
+standing: the section-destroyed sound, the mesh swap, and its debris piece if the class gives that section one. It does **not** play
+the section's explosion burst (that belongs to a section lost to a hit; the clip's own bursts come later). A section already at 0
+does nothing, so a section that dropped its piece mid-fight does not drop a second one. Measured, one staged kill of a Navy
+Man-O-War (game time 104.5 s): the five sections with a debris piece are the bow, the rudder piece and the three masts; the bow and
+rudder were lost earlier and had dropped theirs, the three masts were still standing and three new pieces appeared one tick after
+the wipe; a standing section without a piece (1100 HP, 197 left) gave none. The pieces ended 7.9 to 11.7 s later.
+When the dying ship is the player's own flagship the original also speaks the "section lost" lines for each section kind; not built.
+Remake: `combat::damage::death_wipe`, called once from `breakup` when the 0.14 s have passed; it works from each section's damage level
+(not yet lost), not from the stored health, which stays as the hull died.
+
 ### Death drive (what a dead hull does until it is removed)
 Measured on a Navy Cutter (sunk by gunfire and in black holes) and read from the original's code; the speed and turning caps were
 checked against the code, the choice of throttle and rudder is PROVISIONAL.
 1. At the kill the ship leaves its fleet and is computer-run, also when a human steered it. Its captain is not stopped by death: it
    keeps thinking every 0.5 s and steering as in battle (an idle ship with no target explores at full throttle; the Cutter run showed
    throttle 1.0 and a hard rudder from the first think, 0.5 s after the kill).
-2. 0.14 s after the kill (the moment the break-apart clip starts) every section is at 0 HP. The speed and turning loss terms
+2. 0.14 s after the kill (the moment the break-apart clip starts) every section is at 0 HP: each is hit for exactly the hit points it
+   has left, in one tick (measured on the original: four deaths of a Man-O-War, 404-891 hit points of non-vital sections wiped in
+   one 0.033 s tick, five ticks after the last change). See "Death wipe" below for what else that does. The speed and turning loss terms
    (dead share of the sections that carry the flag, capped at 0.9) are therefore both at the cap, so thrust, top speed and rudder
    torque are 0.1 of normal. A dead hull keeps 10 % of its drive; it does not stop.
 3. Drift speed = throttle x 0.1 x MaxSpeed x engineer factor, reached through the normal drag law (rate thrust / (mass x

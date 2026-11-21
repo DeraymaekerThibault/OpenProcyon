@@ -3,11 +3,34 @@ use super::*;
 
 /// Per damage section: current smoke/fire level (0 none .. 4 destroyed) and its effect entity.
 #[derive(Component)]
-pub struct DamageFx(Vec<(u8, Option<Entity>)>);
+pub struct DamageFx(pub(super) Vec<(u8, Option<Entity>)>);
 
 impl DamageFx {
     pub fn new(c: &Class) -> Self {
         DamageFx(vec![(0, None); c.sections.len()])
+    }
+
+    /// The sections not yet lost (damage level below destroyed): the ones the death wipe still takes down.
+    pub fn standing(&self) -> Vec<usize> {
+        self.0.iter().enumerate().filter(|(_, (level, _))| *level < 4).map(|(i, _)| i).collect()
+    }
+}
+
+/// The death wipe (docs/re/effects.md "Death wipe"): 0.14 s after the kill every section is hit for all it has left. Each section that was
+/// still standing is lost then: the one explosion sound and its debris piece (a section that dropped its piece earlier has none left), but
+/// no explosion burst. The speech lines the original adds for the player's own flagship are not built.
+#[allow(clippy::too_many_arguments)]
+pub fn death_wipe(
+    commands: &mut Commands,
+    (assets, fxl): (&AssetServer, &FxLib),
+    rng: &mut Rng,
+    sfx: &mut MessageWriter<Sfx>,
+    (tf, class, vel): (&Transform, &crate::data::Class, Vec3),
+    d: &DamageFx,
+) {
+    for i in d.standing() {
+        sfx.write(Sfx { name: "Explosion_Med01".into(), at: Some(tf.translation), vol: 1.0, max: 6000.0 });
+        spawn_debris(commands, assets, fxl, &class.sections[i], tf, vel, || rng.f());
     }
 }
 
