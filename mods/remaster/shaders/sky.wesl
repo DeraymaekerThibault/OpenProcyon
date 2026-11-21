@@ -4,6 +4,11 @@
 // `distance` units out. The camera's position moves the sample point, so each layer slides against the sky as the camera
 // travels (parallax, two speeds for two distances); the map-wide current carries the gas along. Only the brighter gas is kept,
 // softly, and a slowly churning 3-D noise (domain-warped by the clock) breaks the copy into wisps and patches.
+// Clouds (optional, up to 3 decks): real depth. A deck is a horizontal slab of 3-D cloud at a world altitude (negative: under the
+// ships), ray-marched from the camera through the baked noise: a few steps through the slab, one light step toward the sun from
+// each (lit tops, shadowed undersides), a silver rim against the sun, a haze fade with distance. The slab is fixed in the world, so
+// near decks slide against far ones as the camera moves; each carries its own current and churns in place. The decks are composited
+// far to near per pixel over the near layers, and hide the stars behind them.
 // Base (optional): the far sky itself, drawn at alpha 1 from two samples that flow along a noise field and cross-fade (the
 // flow-map trick), with a slow breath in the bright cores. The stars are never warped.
 // Events light the gas, not the stars: a storm's flash and an explosion's warmth (CPU: direction and strength), sheet lightning
@@ -31,10 +36,27 @@ struct Layer {
     c: vec4<f32>,
 }
 
+struct Deck {
+    // x: altitude, y: thickness, z: coverage, w: density (optical depth straight through)
+    a: vec4<f32>,
+    // x: noise scale (world units a cell), y: opacity, z: haze distance, w: churn (cells a second)
+    b: vec4<f32>,
+    // xyz: the current, units a second, w: silver
+    c: vec4<f32>,
+    // rgb: lit colour, w: detail
+    d: vec4<f32>,
+    // rgb: shadow colour, w: steps
+    e: vec4<f32>,
+    // rgb: haze colour, w: 1 when g is the deck's own sun
+    f: vec4<f32>,
+    // xyz: direction toward the sun
+    g: vec4<f32>,
+}
+
 struct Sky {
     // x: brightness (0 = none), y: twinkle depth, z: twinkles a second, w: gain
     stars: vec4<f32>,
-    // x: layer count, y: 1 when the far sky is redrawn
+    // x: layer count, y: 1 when the far sky is redrawn, z: cloud decks
     info: vec4<f32>,
     // x: flow (radians), y: flow cycle seconds, z: breath depth, w: breath seconds
     base: vec4<f32>,
@@ -52,6 +74,7 @@ struct Sky {
     sheet: vec4<f32>,
     sheet_color: vec4<f32>,
     layers: array<Layer, 3>,
+    decks: array<Deck, 3>,
 }
 
 @group(constants::MATERIAL_BIND_GROUP) @binding(100) var<uniform> sky: Sky;
@@ -192,6 +215,100 @@ fn hole_shadow(d: vec3<f32>) -> f32 {
     return s;
 }
 
+// density of a deck's cloud at a world point: h is the height in the slab (0 bottom, 1 top), `warp` the slow churn field there
+fn deck_density(d: Deck, p: vec3<f32>, h: f32, warp: vec3<f32>) -> f32 {
+    let n = (p - d.c.xyz * frame.clock.y) / d.b.x;
+    let base = bake(n + warp * 1.2).r;
+    let fine = bake(n * 2.7 + warp * 2.0 + vec3<f32>(3.1, 1.7, 5.3)).r;
+    let shape = mix(base, fine, d.d.w * 0.5);
+    // fuller in the middle of the slab than at its top and bottom
+    let prof = 4.0 * h * (1.0 - h);
+    // the noise sits near the middle of 0..1: stretch it so coverage is what the key says
+    let e = clamp((shape - 0.5) * 2.2 + 0.5, 0.0, 1.0) * mix(0.6, 1.0, prof);
+    let thr = mix(0.78, 0.3, d.a.z);
+    return smoothstep(thr, thr + 0.28, e);
+}
+
+struct Cloud {
+    // premultiplied colour and coverage
+    rgb: vec3<f32>,
+    a: f32,
+    // distance to where the ray enters the slab (far decks composite first)
+    t: f32,
+}
+
+// one deck along the view ray `dir` from the camera: ray-marched through the slab
+fn deck_march(d: Deck, dir: vec3<f32>, jitter: f32) -> Cloud {
+    var out: Cloud;
+    out.rgb = vec3<f32>(0.0);
+    out.a = 0.0;
+    out.t = 0.0;
+    let eye = view.world_position;
+    let half = 0.5 * d.a.y;
+    var dy = dir.y;
+    if abs(dy) < 1e-3 {
+        dy = select(-1e-3, 1e-3, dy >= 0.0);
+    }
+    let ta = (d.a.x - half - eye.y) / dy;
+    let tb = (d.a.x + half - eye.y) / dy;
+    let t0 = max(min(ta, tb), 0.0);
+    // a grazing ray through a slab is long: cap it, and anything beyond the haze is gone anyway
+    let t1 = min(max(ta, tb), min(t0 + d.a.y * 4.0, d.b.z * 5.0));
+    if t1 <= t0 {
+        return out;
+    }
+    out.t = t0;
+    var sun = d.g.xyz;
+    if d.f.w < 0.5 {
+        sun = vec3<f32>(0.45, 0.6, 0.35);
+        if frame.sun.w > 0.0 {
+            sun = -frame.sun.xyz;
+        }
+    }
+    sun = normalize(sun);
+    let steps = i32(d.e.w);
+    let dt = (t1 - t0) / f32(steps);
+    // a step's optical depth: density a metre of slab, times how far the ray goes
+    let k = d.a.w * dt / d.a.y;
+    let phase = pow(max(dot(dir, sun), 0.0), 5.0);
+    var trans = 1.0;
+    var light = vec3<f32>(0.0);
+    let churn = frame.clock.x * d.b.w;
+    for (var i = 0; i < 12; i = i + 1) {
+        if i >= steps || trans < 0.02 {
+            break;
+        }
+        let p = eye + dir * (t0 + (f32(i) + jitter) * dt);
+        let h = clamp((p.y - (d.a.x - half)) / d.a.y, 0.0, 1.0);
+        let warp = bake(((p - d.c.xyz * frame.clock.y) / d.b.x) * 0.5 + vec3<f32>(churn, churn * 0.7, churn * 0.4)).rgb - vec3<f32>(0.5);
+        let dens = deck_density(d, p, h, warp);
+        if dens < 0.01 {
+            continue;
+        }
+        // one step toward the sun: how much cloud lies between this point and the light
+        let lp = p + sun * (d.a.y * 0.45);
+        let lh = clamp((lp.y - (d.a.x - half)) / d.a.y, 0.0, 1.0);
+        let ld = deck_density(d, lp, lh, warp);
+        let reach = exp(-ld * d.a.w * 0.9);
+        // the tops catch more light even unshadowed; the rim glows where the cloud is thin and the sun is behind it
+        let sky_light = 0.35 + 0.65 * h;
+        var col = mix(d.e.rgb, d.d.rgb, reach * sky_light);
+        col += d.d.rgb * d.c.w * phase * reach * (1.0 - smoothstep(0.0, 0.7, dens)) * 1.5;
+        let tau = dens * k;
+        let absorbed = 1.0 - exp(-tau);
+        light += trans * absorbed * col;
+        trans *= exp(-tau);
+    }
+    // the haze: far decks fade into its colour and thin out
+    let haze = 1.0 - exp(-t0 / d.b.z);
+    let a = (1.0 - trans) * d.b.y;
+    var col = light / max(1.0 - trans, 1e-4);
+    col = mix(col, d.f.rgb, haze);
+    out.a = a * (1.0 - 0.85 * haze);
+    out.rgb = col * out.a;
+    return out;
+}
+
 @fragment
 fn fragment(in: VertexOutput) -> FragmentOutput {
     let straight = normalize(in.world_position.xyz - view.world_position);
@@ -253,6 +370,42 @@ fn fragment(in: VertexOutput) -> FragmentOutput {
         alpha = alpha * (1.0 - a) + a;
     }
 
+    // the cloud decks, over the near layers: far to near, so a near deck hides a far one and what is below it
+    var cover = 0.0;
+    let decks = i32(sky.info.z);
+    if decks > 0 {
+        var clouds: array<Cloud, 3>;
+        let jitter = hash3(vec3<f32>(in.position.xy, 1.0));
+        for (var i = 0; i < 3; i = i + 1) {
+            if i < decks {
+                clouds[i] = deck_march(sky.decks[i], dir, jitter);
+            } else {
+                clouds[i].rgb = vec3<f32>(0.0);
+                clouds[i].a = 0.0;
+                clouds[i].t = -1.0;
+            }
+        }
+        for (var round = 0; round < 3; round = round + 1) {
+            // the farthest left unused
+            var far = -1;
+            var far_t = -2.0;
+            for (var i = 0; i < 3; i = i + 1) {
+                if clouds[i].t > far_t {
+                    far_t = clouds[i].t;
+                    far = i;
+                }
+            }
+            if far < 0 {
+                break;
+            }
+            let c = clouds[far];
+            rgb = rgb * (1.0 - c.a) + c.rgb * lit;
+            alpha = alpha * (1.0 - c.a) + c.a;
+            cover = cover * (1.0 - c.a) + c.a;
+            clouds[far].t = -3.0;
+        }
+    }
+
     var stars = vec3<f32>(0.0);
     if sky.stars.x > 0.0 {
         let sd = dir * vec3<f32>(1.0, 1.0, -1.0);
@@ -267,6 +420,7 @@ fn fragment(in: VertexOutput) -> FragmentOutput {
         stars = light * (1.0 - depth * wave) * sky.stars.x;
     }
     stars += vec3<f32>(0.85, 0.92, 1.0) * shooting_star(dir);
+    stars *= 1.0 - cover;
 
     // the shadow: black, and nothing of the sky behind it
     let keep = 1.0 - shadow;

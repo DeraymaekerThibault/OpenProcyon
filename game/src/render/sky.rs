@@ -7,6 +7,10 @@
 //! `distance` units out, so it slides against the sky as the camera moves (parallax), and carried along a map-wide current
 //! (`drift`, world units a second). Each layer is broken up by slowly churning 3-D noise so it reads as wisps, not as a ghost
 //! of the backdrop. A rigid turn of the whole sky reads as the camera rolling; relative motion reads as depth.
+//! `clouds` are the real depth: up to three cloud decks, each a slab of 3-D cloud at its own altitude in the world, ray-marched
+//! on the dome (a few steps through the slab, one light step toward the sun at each), so a near deck sits in front of a far one
+//! and the decks slide against each other as the camera moves, with lit tops, shadowed undersides, a silver rim against the sun
+//! and a haze fade toward the horizon; they drift with their own current and churn in place. The baked cube stays the backdrop.
 //! `base` also redraws the far sky itself with a slow flow and a breath. The stars are a separate cube of point stars
 //! (`<sky>_stars.png`, 16-bit linear light over `gain`, baked with `tools.bake_sky --split-stars`), each twinkling on its own
 //! phase, the bright ones past 1 so they bloom. Events light the gas, never the stars: a storm's lightning (`nebula::StormFlash`),
@@ -34,10 +38,18 @@ const DOME_SCALE: f32 = 0.98;
 /// Most near layers a sky draws (fixed arrays in the uniform).
 pub const MAX_LAYERS: usize = 3;
 
+/// Most cloud decks a sky draws.
+pub const MAX_DECKS: usize = 3;
+
+/// Most steps through a deck's slab (the shader's loop bound).
+pub const MAX_STEPS: u32 = 12;
+
 /// The `sky` block.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SkyDome {
     pub layers: Vec<NearLayer>,
+    /// The ray-marched cloud decks, over the near layers.
+    pub decks: Vec<Deck>,
     pub stars: Option<Stars>,
     /// The far sky redrawn with a flow and a breath.
     pub base: Option<Base>,
@@ -70,6 +82,62 @@ pub struct NearLayer {
     /// Noise patches across the layer (0 = no breaking up: the plain copy of the sky).
     pub scale: f32,
     pub tint: Vec3,
+}
+
+/// One cloud deck: a slab of cloud, `thickness` thick and centred `altitude` above the play plane (negative: below it), made of the
+/// baked noise at `scale` world units a cell, so it has a real place in the world and parallax follows from the camera's position.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Deck {
+    /// World height of the slab's middle (game z; negative lies under the ships).
+    pub altitude: f32,
+    pub thickness: f32,
+    /// How much of the sky the cloud covers, 0..1.
+    pub coverage: f32,
+    /// Optical depth of a ray straight through the densest cloud (how fast it goes opaque).
+    pub density: f32,
+    /// World units across one cell of the noise (a bigger scale is bigger clouds).
+    pub scale: f32,
+    /// The most any ray is covered, 0..1; 0 draws nothing.
+    pub opacity: f32,
+    /// Distance (world units) over which the deck has faded 63 % of the way into the haze.
+    pub haze: f32,
+    /// The deck's own current, world units a second (Bevy axes, written in game axes).
+    pub drift: Vec3,
+    /// Noise cells a second the shapes churn in place.
+    pub churn: f32,
+    /// Brightness of the rim against the sun, 0..
+    pub silver: f32,
+    /// Share of the fine noise in the shapes, 0..1.
+    pub detail: f32,
+    /// Colour where the sun reaches, where it does not, and what the haze fades to.
+    pub lit: Vec3,
+    pub shadow: Vec3,
+    pub haze_color: Vec3,
+    /// Steps through the slab.
+    pub steps: u32,
+    /// Direction toward the sun (Bevy axes; written in game axes). None: the map's sun, else a fixed one.
+    pub sun: Option<Vec3>,
+}
+
+fn deck(v: &Value) -> Deck {
+    Deck {
+        altitude: num(&v["altitude"], 600.0),
+        thickness: num(&v["thickness"], 300.0).max(1.0),
+        coverage: num(&v["coverage"], 0.5).clamp(0.0, 1.0),
+        density: num(&v["density"], 4.0).max(0.0),
+        scale: num(&v["scale"], 400.0).max(1.0),
+        opacity: num(&v["opacity"], 0.9).clamp(0.0, 1.0),
+        haze: num(&v["haze"], 6000.0).max(1.0),
+        drift: game_vec(&v["drift"]).unwrap_or(Vec3::ZERO),
+        churn: num(&v["churn"], 0.02).max(0.0),
+        silver: num(&v["silver"], 0.6).max(0.0),
+        detail: num(&v["detail"], 0.5).clamp(0.0, 1.0),
+        lit: rgb(&v["lit"]).unwrap_or(Vec3::new(1.0, 0.85, 0.65)).max(Vec3::ZERO),
+        shadow: rgb(&v["shadow"]).unwrap_or(Vec3::new(0.2, 0.2, 0.35)).max(Vec3::ZERO),
+        haze_color: rgb(&v["haze_color"]).unwrap_or(Vec3::new(0.3, 0.3, 0.45)).max(Vec3::ZERO),
+        steps: num(&v["steps"], 6.0).clamp(2.0, MAX_STEPS as f32) as u32,
+        sun: game_vec(&v["sun"]).and_then(Vec3::try_normalize),
+    }
 }
 
 /// The `stars` part of the block.
@@ -177,8 +245,17 @@ pub fn parse(v: &Value) -> Option<SkyDome> {
     .into_iter()
     .filter(|l| l.opacity > 0.0)
     .collect();
+    let decks: Vec<Deck> = match &v["clouds"] {
+        Value::Array(a) => a.iter().filter(|x| x.is_object()).take(MAX_DECKS).map(deck).collect(),
+        c @ Value::Object(_) => vec![deck(c)],
+        _ => vec![],
+    }
+    .into_iter()
+    .filter(|d| d.opacity > 0.0)
+    .collect();
     Some(SkyDome {
         layers,
+        decks,
         stars: v["stars"].is_object().then(|| {
             let t = &v["stars"];
             Stars {
@@ -254,11 +331,30 @@ pub struct LayerUniform {
     pub c: Vec4,
 }
 
+/// One cloud deck in the uniform.
+#[derive(Clone, Copy, Default, Debug, PartialEq, ShaderType)]
+pub struct DeckUniform {
+    /// x: altitude, y: thickness, z: coverage, w: density
+    pub a: Vec4,
+    /// x: noise scale, y: opacity, z: haze distance, w: churn
+    pub b: Vec4,
+    /// xyz: the current, units a second, w: silver
+    pub c: Vec4,
+    /// rgb: lit colour, w: detail
+    pub d: Vec4,
+    /// rgb: shadow colour, w: steps
+    pub e: Vec4,
+    /// rgb: haze colour, w: 1 when `g` is set
+    pub f: Vec4,
+    /// xyz: direction toward the sun
+    pub g: Vec4,
+}
+
 #[derive(Clone, Copy, Default, Debug, PartialEq, ShaderType)]
 pub struct SkyUniform {
     /// x: brightness (0 = no stars), y: twinkle depth, z: twinkles a second, w: gain
     pub stars: Vec4,
-    /// x: number of near layers, y: 1 when the far sky is redrawn
+    /// x: number of near layers, y: 1 when the far sky is redrawn, z: number of cloud decks
     pub info: Vec4,
     /// x: flow (radians), y: flow cycle seconds, z: breath depth, w: breath seconds
     pub base: Vec4,
@@ -278,6 +374,7 @@ pub struct SkyUniform {
     pub sheet: Vec4,
     pub sheet_color: Vec4,
     pub layers: [LayerUniform; MAX_LAYERS],
+    pub decks: [DeckUniform; MAX_DECKS],
 }
 
 impl SkyDome {
@@ -286,10 +383,22 @@ impl SkyDome {
         for (u, l) in layers.iter_mut().zip(&self.layers) {
             *u = LayerUniform { a: Vec4::new(l.opacity, l.threshold, l.softness, l.distance), b: Vec4::new(l.scale, l.tint.x, l.tint.y, l.tint.z), c: l.drift.extend(0.0) };
         }
+        let mut decks = [DeckUniform::default(); MAX_DECKS];
+        for (u, d) in decks.iter_mut().zip(&self.decks) {
+            *u = DeckUniform {
+                a: Vec4::new(d.altitude, d.thickness, d.coverage, d.density),
+                b: Vec4::new(d.scale, d.opacity, d.haze, d.churn),
+                c: d.drift.extend(d.silver),
+                d: d.lit.extend(d.detail),
+                e: d.shadow.extend(d.steps as f32),
+                f: d.haze_color.extend(if d.sun.is_some() { 1.0 } else { 0.0 }),
+                g: d.sun.unwrap_or(Vec3::ZERO).extend(0.0),
+            };
+        }
         let (base, base_tint) = self.base.map_or((Vec4::ZERO, Vec4::ZERO), |b| (Vec4::new(b.flow, b.cycle, b.breath, b.period), b.tint.extend(b.brightness - 1.0)));
         SkyUniform {
             stars: self.stars.map_or(Vec4::ZERO, |t| Vec4::new(t.brightness, t.twinkle, t.speed, t.gain)),
-            info: Vec4::new(self.layers.len().min(MAX_LAYERS) as f32, if self.base.is_some() { 1.0 } else { 0.0 }, 0.0, 0.0),
+            info: Vec4::new(self.layers.len().min(MAX_LAYERS) as f32, if self.base.is_some() { 1.0 } else { 0.0 }, self.decks.len().min(MAX_DECKS) as f32, 0.0),
             base,
             base_tint,
             flash: (self.flash.color * self.flash.strength).extend(self.flash.seconds),
@@ -298,6 +407,7 @@ impl SkyDome {
             sheet: self.sheet.map_or(Vec4::ZERO, |s| Vec4::new(s.every, s.strength, 0.0, 0.0)),
             sheet_color: self.sheet.map_or(Vec4::ZERO, |s| s.color.extend(0.0)),
             layers,
+            decks,
             ..default()
         }
     }
@@ -464,7 +574,7 @@ fn dome(
         let cube = hd.0.path().map(|p| p.path().to_string_lossy().replace('\\', "/"));
         let sky = cube.as_deref().map_or_else(|| block.clone(), |c| block.for_sky(sky_name(c)));
         let want_stars = sky.stars.is_some_and(|t| t.brightness > 0.0);
-        if sky.layers.is_empty() && sky.base.is_none() && !want_stars && sky.sheet.is_none() && sky.shooting_every <= 0.0 {
+        if sky.layers.is_empty() && sky.decks.is_empty() && sky.base.is_none() && !want_stars && sky.sheet.is_none() && sky.shooting_every <= 0.0 {
             continue;
         }
         let stars_handle = match stars {
@@ -532,6 +642,41 @@ mod tests {
         let u = many.uniform();
         assert_eq!((u.info.x, u.layers[1].a.w, u.layers[0].b.x), (3.0, 1500.0, 1.0));
         assert!(parse(&json!({"near": [{"opacity": 0}]})).unwrap().layers.is_empty(), "a layer of no strength draws nothing");
+    }
+
+    #[test]
+    fn clouds_are_optional_decks_capped_at_three_with_defaults() {
+        assert!(parse(&json!({"near": {}})).unwrap().decks.is_empty(), "no `clouds` key, no decks");
+        let one = parse(&json!({"clouds": {"altitude": -200}})).unwrap();
+        assert_eq!((one.decks.len(), one.decks[0].altitude, one.decks[0].steps), (1, -200.0, 6));
+        let many = parse(&json!({"clouds": [{"altitude": 900}, {"altitude": 300}, {}, {}, {}]})).unwrap();
+        assert_eq!(many.decks.len(), MAX_DECKS, "capped");
+        assert_eq!((many.decks[0].altitude, many.decks[1].altitude, many.decks[2].altitude), (900.0, 300.0, 600.0));
+        assert_eq!(many.uniform().info.z, 3.0);
+        assert_eq!(parse(&json!({"clouds": [{"altitude": 900, "opacity": 0}, {"altitude": 5}]})).unwrap().decks.len(), 1, "a deck of no strength draws nothing");
+        let d = parse(&json!({"clouds": [{"coverage": 3, "steps": 99, "drift": [1, 2, 3], "sun": [0, 0, 2]}]})).unwrap().decks[0];
+        assert_eq!((d.coverage, d.steps, d.drift), (1.0, MAX_STEPS, Vec3::new(1.0, 3.0, -2.0)), "clamped; the current in game axes");
+        assert_eq!(d.sun, Some(Vec3::new(0.0, 1.0, 0.0)), "the sun is a unit direction, up in game axes is Bevy's y");
+        assert_eq!(parse(&json!({"clouds": [{}]})).unwrap().decks[0].sun, None);
+    }
+
+    #[test]
+    fn a_decks_uniform_carries_every_field() {
+        let u = parse(&json!({"clouds": [{"altitude": 5, "thickness": 6, "coverage": 0.25, "density": 7, "scale": 8, "opacity": 0.5, "haze": 9, "churn": 0.1, "silver": 2,
+            "detail": 0.75, "lit": [1, 0.5, 0.25], "shadow": [0, 0.1, 0.2], "haze_color": [0.3, 0.4, 0.5], "steps": 4, "sun": [0, 1, 0]}]}))
+        .unwrap()
+        .uniform()
+        .decks[0];
+        assert_eq!((u.a, u.b), (Vec4::new(5.0, 6.0, 0.25, 7.0), Vec4::new(8.0, 0.5, 9.0, 0.1)));
+        assert_eq!((u.c.w, u.d, u.e, u.f, u.g.truncate()), (2.0, Vec4::new(1.0, 0.5, 0.25, 0.75), Vec4::new(0.0, 0.1, 0.2, 4.0), Vec4::new(0.3, 0.4, 0.5, 1.0), Vec3::NEG_Z));
+    }
+
+    #[test]
+    fn clouds_merge_per_sky_as_a_whole_array() {
+        let d = parse(&json!({"clouds": [{"altitude": 100}], "skies": {"skybox_05": {"clouds": [{"altitude": 1}, {"altitude": 2}]}}})).unwrap();
+        assert_eq!(d.decks.len(), 1);
+        let s = d.for_sky("skybox_05");
+        assert_eq!(s.decks.iter().map(|x| x.altitude).collect::<Vec<_>>(), [1.0, 2.0], "an array is replaced, like `near`");
     }
 
     #[test]
