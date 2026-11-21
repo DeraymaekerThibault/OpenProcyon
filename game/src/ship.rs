@@ -54,6 +54,21 @@ pub struct Ship {
     pub crew_turn: f32,        // helmsman's factor on rudder torque
     pub net: f32,              // energy nets on the hull: product of (1 - dissipated) over the active nets; 1.0 = free
     pub avoid: f32,            // speed fraction with land close ahead (collision::contact_slow, AI ships only); 1.0 = clear
+    pub helm: Helm,            // rudder and torque boost as last set by the steer-to-point routine, held between its runs
+}
+
+/// The original runs its steer-to-point law once per think (`THINK_SECS`) and keeps the rudder between runs; the physics still
+/// steps every tick. This hold is what keeps a ship that steers for a point hunting a few degrees instead of settling.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Helm {
+    pub steer: f32,
+    pub boost: f32,
+    pub age: f32, // seconds since the law last ran
+}
+impl Default for Helm {
+    fn default() -> Self {
+        Helm { steer: 0.0, boost: 1.0, age: THINK_SECS } // due at the first step
+    }
 }
 
 impl Ship {
@@ -75,6 +90,7 @@ impl Ship {
             crew_turn: 1.0,
             net: 1.0,
             avoid: 1.0,
+            helm: Helm::default(),
         }
     }
 
@@ -401,8 +417,6 @@ pub fn helm_step(ship: &mut Ship, tf: &mut Transform, class: &combat::Class, hea
         let drag = ph.thrust / ph.mass / ph.max_speed; // 1/s; retail settles with this rate for every order change
         let fraction = ship.ordered();
         let target = fraction * max_speed(ship, class, health) * ship.avoid;
-        let mut steer = 0.0;
-        let mut boost = 1.0;
         let mut want = None;
         if let Some(&wp) = ship.waypoints.first() {
             let d = wp - tf.translation;
@@ -418,13 +432,21 @@ pub fn helm_step(ship: &mut Ship, tf: &mut Transform, class: &combat::Class, hea
         } else if let Some(g) = ship.goal {
             want = Some(g);
         }
+        ship.helm.age += dt;
+        // ponytail: one phase for every ship (the original staggers captains by spawn number), and a ship with no course to steer
+        // for keeps the law due, so a new course acts on the next step (retail's delay for a fresh order is not measured).
         if let Some(w) = want {
-            let off = angdiff(w, ship.heading);
-            steer = (off / HELM_FULL).clamp(-1.0, 1.0);
-            if ai {
-                boost = (1.0 + 3.0 * (off.abs() - AI_BOOST_FROM) / (PI - AI_BOOST_FROM)).clamp(1.0, 4.0);
+            if ship.helm.age >= THINK_SECS {
+                let off = angdiff(w, ship.heading);
+                ship.helm = Helm { steer: (off / HELM_FULL).clamp(-1.0, 1.0), boost: 1.0, age: 0.0 };
+                if ai {
+                    ship.helm.boost = (1.0 + 3.0 * (off.abs() - AI_BOOST_FROM) / (PI - AI_BOOST_FROM)).clamp(1.0, 4.0);
+                }
             }
+        } else {
+            ship.helm = Helm { age: THINK_SECS, ..Helm::default() };
         }
+        let (steer, boost) = (ship.helm.steer, ship.helm.boost);
         // Turning follows the original's ship physics (docs/re/movement.md). Assumed mapping (not verified):
         // rudder in [-1,1] is `steer`, and the torque scale is WOT MaxAngularAcceleration.
         let v = ship.speed.abs();

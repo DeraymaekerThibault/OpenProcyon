@@ -58,8 +58,7 @@ A move click from All Stop with no key pressed runs the cutter at its Ahead Full
   lean), holds it while the rudder is over and levels at the same rate. While a ship steers for a clicked point straight ahead
   its heading weaves: cutter ±2.2° (roll ±3.5°) with a 3.8 s period, Man-O-War ±0.45° with an 11.6 s period. Once it has
   passed its point and holds a course, the heading is dead steady on both (no weave in 30+ s). PROVISIONAL reading: the weave
-  is the course controller hunting for the point, not a straight-course wobble. At Emergency Speed there is no roll. Remake: roll target = 0.25 × rudder, rate-limited, none at Emergency Speed; the weave
-  is not modelled.
+  is the course controller hunting for the point, not a straight-course wobble. At Emergency Speed there is no roll. Remake: roll target = 0.25 × rudder, rate-limited, none at Emergency Speed; the weave comes from the held rudder (see "Computer helm").
 
 ## Other constants
 0.33 / 1.0 / 5/3 / 1/3 (speed bands), 60.0 (α clamp), 0.1 (rudder-speed constant), 0.5 and 0.3 (lateral terms); 0.25 is the
@@ -222,8 +221,11 @@ boost (below), not by the crew.
 
 ## Computer helm (read from the original's code, 2026-10-31)
 - **Rudder:** the same law for the computer and the human: rudder = heading error to the course point / 20°, capped at full,
-  no dead band. The computer sets it at each think (every 0.5 s) and holds it between thinks; the remake steers every frame
-  (ponytail: with the boost below the simulated circles already match, so the hold is not ported).
+  no dead band. The computer sets it at each think (every 0.5 s) and holds it between thinks (16 steps); a ship steering for
+  a clicked point does the same. The hold keeps such a ship hunting around the line to its point: the law alone lets the heading error
+  die away, with the hold the swing stays (a Cutter's ±2° on a 3.8 s period; a Man-O-War's period comes out 11.4 s against 11.6 s
+  measured). Remake: `ship::Helm`, one phase for every ship; a ship with no course re-arms it so a new course acts on the next step.
+  Unchecked: how long a fresh player order waits for its first think, and the roll amplitude of the weave.
 - **Torque boost (computer only):** while the error is at least 11.25°, the ship's maximum angular acceleration is raised by
   1 + 3 × (error − 11.25°) / (180° − 11.25°): × 1.16 at 20°, × 1.33 at 30°, × 1.6 at 45°, × 2.4 at 90°, × 4 at 180°. Ships
   of the human's on an ordinary move order never get it. So a circling computer ship turns faster than its crew factor says:

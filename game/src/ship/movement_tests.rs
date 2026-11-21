@@ -686,3 +686,36 @@ fn dying_cutter_drifts_at_a_tenth_of_max_speed_and_a_fast_one_decays_to_it() {
     assert!((fast.speed - expected).abs() < 0.01, "from 9 u/s {} vs {expected}", fast.speed);
     assert!((expected - 0.906).abs() < 0.01 && (slow.speed - 0.90).abs() < 0.02, "retail measured 0.90: {}", slow.speed);
 }
+
+/// Steering for a clicked point, the rudder law runs once per think and the rudder is held between runs, so the heading
+/// hunts around the line to the point instead of settling (retail Navy Cutter, no crew: +-2.2 deg, 3.8 s period).
+#[test]
+#[ignore = "needs imported assets"]
+fn a_cutter_steering_for_a_point_ahead_weaves_instead_of_settling() {
+    let lib = Library::load(assets_dir());
+    let ci = lib.index("Ship_Navy_Cutter");
+    let class = &lib.classes[ci];
+    let health = Health::new(class);
+    let mut ship = Ship { heading: 1f32.to_radians(), speed: 4.525, order: 2, waypoints: vec![Vec3::new(0.0, 0.0, -113.0)], ..Ship::new(ci, Side::Player) };
+    let mut tf = Transform::default();
+    let (mut lo, mut hi, mut crossings) = (f32::MAX, f32::MIN, vec![]);
+    let mut last = ship.heading;
+    for k in 0..2000 {
+        helm_step(&mut ship, &mut tf, class, &health, 0.033, false);
+        if ship.waypoints.is_empty() {
+            break;
+        }
+        let t = k as f32 * 0.033;
+        if t > 8.0 {
+            (lo, hi) = (lo.min(ship.heading), hi.max(ship.heading));
+        }
+        if last * ship.heading < 0.0 {
+            crossings.push(t);
+        }
+        last = ship.heading;
+    }
+    let swing = (hi - lo).to_degrees();
+    assert!((3.0..7.0).contains(&swing), "heading swing {swing} deg");
+    let period = 2.0 * (crossings[crossings.len() - 1] - crossings[1]) / (crossings.len() - 2) as f32;
+    assert!((3.2..4.4).contains(&period), "period {period} s");
+}
