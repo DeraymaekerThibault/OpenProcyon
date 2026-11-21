@@ -14,7 +14,7 @@ from tools.export_ship import export as export_physics
 from tools.gamefs import ci_file, ci_files
 from tools.mdb import MdbError
 from tools.mdb import parse as parse_mdb
-from tools.mdb_to_glb import convert, hardpoints
+from tools.mdb_to_glb import convert, hardpoints, layer_offsets, with_layer_offset
 from tools.models import model_path
 from tools.msb import parse as parse_msb
 from tools.msb import parse_scene
@@ -365,9 +365,10 @@ def export(root, ship, outdir):
                 close = difflib.get_close_matches(label, list(hp), n=1, cutoff=0.85)
                 label = close[0] if close else label
             node, pos = hp[label]
-            # Base gun nodes already use MDB coordinates; their distinct tower origins must not be added again.
+            # Base gun nodes use their tower mesh's coordinates; the tower's own origin must not be added again, only the
+            # offset that places that mesh layer in scenery.
             if ship.startswith(("Base_", "Island_")):
-                pos = node.pos
+                pos = with_layer_offset(layer_offsets(root, scene), msb, node)
         except (KeyError, FileNotFoundError, ValueError) as e:
             skipped.append(f"{label}:{gun}:{e}")
             continue

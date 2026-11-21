@@ -102,6 +102,17 @@ mod rotation_tests {
 
     #[test]
     #[ignore = "needs imported assets"]
+    fn border_dispute_central_island_hangs_by_its_layer_offset_only() {
+        // Island_Large01's mesh layer already sits 29.25 below the object (scene position minus pivot) and its dock comes
+        // down with it to the flight plane, so the placement adds no second shift.
+        let docks = crate::docking::load_docks();
+        let map: serde_json::Value = serde_json::from_slice(&std::fs::read(crate::assets_dir().join("maps/border_dispute/map.json")).unwrap()).unwrap();
+        let island = map["objects"].as_array().unwrap().iter().find(|o| o["type"] == "Island_Large01").unwrap();
+        assert!(scenery_transform(island, game_rotation(&island["rot"]), &docks).translation.y.abs() < 0.05);
+    }
+
+    #[test]
+    #[ignore = "needs imported assets"]
     fn skirmish_bases_and_tenders_are_dockable() {
         use bevy::ecs::system::RunSystemOnce;
         let mut app = App::new();
