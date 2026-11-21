@@ -472,14 +472,14 @@ pub fn toggle_pause(vtime: &mut Time<Virtual>) {
 }
 
 /// Whether `PROCYON_PROFILE` is set (frame-time logging, and vsync off so the display does not cap the measurement).
-fn profiling() -> bool {
+pub(crate) fn profiling() -> bool {
     std::env::var_os("PROCYON_PROFILE").is_some()
 }
 
-/// Vsync is off while fast-forwarding (more capped steps fit in a second) and whenever profiling (a vsynced frame time only
-/// measures the display period).
-fn present_mode(profiling: bool, speed: f32) -> bevy::window::PresentMode {
-    if profiling || speed > 1.0 { bevy::window::PresentMode::AutoNoVsync } else { bevy::window::PresentMode::AutoVsync }
+/// Vsync is off when the player turns it off, while fast-forwarding (more capped steps fit in a second) and whenever profiling
+/// (a vsynced frame time only measures the display period).
+pub(crate) fn present_mode(profiling: bool, speed: f32) -> bevy::window::PresentMode {
+    if profiling || speed > 1.0 || !menu::vsync() { bevy::window::PresentMode::AutoNoVsync } else { bevy::window::PresentMode::AutoVsync }
 }
 
 /// Testing fast-forward; see [`present_mode`] for the vsync rule.

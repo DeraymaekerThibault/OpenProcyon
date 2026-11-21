@@ -12,6 +12,21 @@ fn difficulty_toggle_cycles_normal_hard_easy() {
 }
 
 #[test]
+fn vsync_and_anti_aliasing_step_show_and_restore() {
+    let mut s = Settings::default();
+    assert_eq!((s.vsync, s.aa), (true, 1), "defaults: vsync on, SMAA (the engine's look before the option)");
+    s.step(Setting::Vsync);
+    s.step(Setting::AntiAlias);
+    assert_eq!((s.vsync, s.aa), (false, 2));
+    let shown = |s: &Settings, k| s.rows(true).into_iter().find(|r| r.0 == k).unwrap().2;
+    assert_eq!((shown(&s, Setting::Vsync), shown(&s, Setting::AntiAlias)), ("Off".into(), "MSAA 4x".into()));
+    s.step(Setting::AntiAlias);
+    assert_eq!(s.aa, 0, "wraps to off");
+    s.step(Setting::RestoreDisplay);
+    assert_eq!((s.vsync, s.aa), (true, 1));
+}
+
+#[test]
 #[ignore = "needs imported assets"]
 fn auto_assign_fills_the_fleet_within_the_points() {
     let lib = Library::load(assets_dir());

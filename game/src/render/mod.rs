@@ -81,7 +81,6 @@ pub struct Look {
     pub contrast: f32,
     pub exposure: f32,
     pub tonemapping: Tonemapping,
-    pub smaa: bool,
     pub ssao: bool,
     /// Image-based light from the baked sky, cd/m²; 0 = none.
     pub sky_light: f32,
@@ -170,7 +169,6 @@ impl Look {
             contrast: num(&cam["contrast"], 1.0),
             exposure: num(&cam["exposure"], 0.0),
             tonemapping,
-            smaa: cam["smaa"].as_bool().unwrap_or(true),
             ssao: cam["ssao"].as_bool().unwrap_or(false),
             sky_light: num(&v["sky_light"], 0.0),
             sky: sky::parse(&v["sky"]),
@@ -300,7 +298,28 @@ pub fn plugin(app: &mut App) {
     if look.sky.is_some() || look.nebulae.is_some() {
         app.add_systems(Startup, volnoise::bake);
     }
-    app.insert_resource(look.flags).insert_resource(look).add_systems(Update, (camera, (sun, sky_light).after(crate::scenario::apply_lighting)));
+    app.insert_resource(look.flags).insert_resource(look).add_systems(Update, (camera, anti_alias.after(camera), (sun, sky_light).after(crate::scenario::apply_lighting)));
+}
+
+/// The player's anti-aliasing option (off / SMAA / MSAA 4x) on every styled game camera, again whenever it changes. SSAO does
+/// not work with MSAA, so a profile with SSAO gets SMAA instead.
+/// Off-screen cameras (the Ships screen's preview) keep their own.
+fn anti_alias(mut commands: Commands, look: Res<Look>, mut last: Local<Option<u8>>, cams: Query<(Entity, Ref<Styled>, &bevy::camera::RenderTarget), With<Camera3d>>) {
+    let aa = crate::menu::anti_alias();
+    let changed = *last != Some(aa);
+    *last = Some(aa);
+    let aa = if aa == 2 && look.ssao { 1 } else { aa };
+    for (cam, styled, target) in &cams {
+        if matches!(target, bevy::camera::RenderTarget::Image(_)) || (!changed && !styled.is_added()) {
+            continue;
+        }
+        let mut e = commands.entity(cam);
+        match aa {
+            0 => e.insert(Msaa::Off).remove::<Smaa>(),
+            1 => e.insert((Msaa::Off, Smaa { preset: SmaaPreset::High })),
+            _ => e.insert(Msaa::Sample4).remove::<Smaa>(),
+        };
+    }
 }
 
 /// Marks a camera or sun the profile has set up (or that must keep plain settings, like the Ships screen's off-screen preview).
@@ -321,13 +340,6 @@ fn camera(mut commands: Commands, look: Res<Look>, cams: Query<Entity, (With<Cam
         }
         let section = ColorGradingSection { saturation: look.saturation, contrast: look.contrast, ..default() };
         e.insert(ColorGrading { global: ColorGradingGlobal { exposure: look.exposure, ..default() }, shadows: section, midtones: section, highlights: section });
-        // SMAA and SSAO both replace the default MSAA (SSAO does not work with it).
-        if look.smaa || look.ssao {
-            e.insert(Msaa::Off);
-        }
-        if look.smaa {
-            e.insert(Smaa { preset: SmaaPreset::High });
-        }
         if look.ssao {
             e.insert(ScreenSpaceAmbientOcclusion::default());
         }
@@ -495,7 +507,7 @@ mod tests {
     #[test]
     fn profile_keys_are_optional() {
         let look = Look::parse(&serde_json::json!({}));
-        assert_eq!((look.bloom, look.fx_gain, look.sky_light, look.shadows, look.smaa, look.lit_smoke), (0.15, 1.0, 0.0, false, true, false));
+        assert_eq!((look.bloom, look.fx_gain, look.sky_light, look.shadows, look.lit_smoke), (0.15, 1.0, 0.0, false, false));
         assert!(look.sky.is_none());
         assert!(look.hide_effects.is_empty());
         assert!(look.lights.is_empty() && look.sails.is_none() && look.engines.is_none() && look.wakes.is_none());
