@@ -12,6 +12,7 @@ pub fn plugin(app: &mut App) {
         .add_systems(Update, navigation.after(crate::camera).before(crate::sky).run_if(in_state(crate::menu::Screen::Battle)).run_if(crate::menu::overlay_closed))
         .add_systems(Update, lob_marker.run_if(in_state(crate::menu::Screen::Battle)).run_if(resource_exists::<crate::combat::LobAim>))
         .add_systems(Update, end_line.run_if(in_state(crate::menu::Screen::Battle)).run_if(resource_exists::<Fonts>))
+        .add_systems(Update, loading_cover)
         .add_systems(
             Update,
             (place_ref_rects, scale_label_text, spawn_labels, place_labels)
@@ -80,6 +81,38 @@ fn end_line(
         let text = crate::menu::text_of(crate::menu::strings(), id);
         let node = Node { position_type: PositionType::Absolute, top: Val::Percent(49.0), left: Val::Px(0.0), width: Val::Percent(100.0), ..default() };
         commands.spawn((crate::Scenario, EndLineText, font.text(&text, size / font.size, Color::WHITE), TextLayout::justify(Justify::Center), node, GlobalZIndex(170)));
+    }
+}
+
+#[derive(Component)]
+struct LoadingCover;
+
+/// The cover over a loading battle (`loading.rs`): black with one word, above the HUD. PROVISIONAL: not retail's loading screen,
+/// whose layout is not specified yet.
+fn loading_cover(
+    mut commands: Commands,
+    loading: Option<Res<openprocyon::loading::Loading>>,
+    window: Single<&Window, With<bevy::window::PrimaryWindow>>,
+    fonts: Option<Res<Fonts>>,
+    shown: Query<Entity, With<LoadingCover>>,
+) {
+    match (loading.is_some(), shown.iter().next()) {
+        (false, Some(cover)) => commands.entity(cover).despawn(),
+        (true, None) => {
+            let node = Node {
+                position_type: PositionType::Absolute,
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                ..default()
+            };
+            let mut cover = commands.spawn((LoadingCover, node, BackgroundColor(Color::BLACK), GlobalZIndex(1000)));
+            if let Some(font) = fonts.as_ref().and_then(|f| f.0.get("Immi14")) {
+                cover.with_child(font.text("Loading...", 17.0 * window.height() / 1080.0 / font.size, Color::WHITE));
+            }
+        }
+        _ => {}
     }
 }
 

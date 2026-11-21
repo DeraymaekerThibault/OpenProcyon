@@ -27,6 +27,7 @@ pub mod fx;
 pub mod interpolate;
 pub mod lifeboats;
 pub mod line_of_fire;
+pub mod loading;
 pub mod logging;
 pub mod menu;
 pub mod modding;
@@ -277,7 +278,7 @@ pub fn run(view: fn(&mut App), setup_view: fn(&mut App)) {
         .init_resource::<ship::CaptainTargets>()
         .init_resource::<course::Plot>()
         .add_systems(Startup, setup)
-        .add_plugins((smoke::plugin, battle_schedule, interpolate::plugin))
+        .add_plugins((smoke::plugin, battle_schedule, interpolate::plugin, loading::plugin))
         .add_systems(
             FixedUpdate,
             (
@@ -430,7 +431,8 @@ fn battle_schedule(app: &mut App) {
             BattleSet::Cleanup,
             BattleSet::Outcome,
         )
-            .chain(),
+            .chain()
+            .run_if(loading::done),
     );
 }
 
@@ -574,8 +576,12 @@ fn run_is_over(frame: u32, last_shot: u32, saved: usize, wanted: usize, scripted
 
 static SHOTS_SAVED: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
-fn screenshot(mut commands: Commands, mut cfg: ResMut<Config>) {
+fn screenshot(mut commands: Commands, mut cfg: ResMut<Config>, loading: Option<Res<loading::Loading>>) {
     let Some(path) = cfg.shot.clone() else { return };
+    // scripts and pictures count frames of the battle: the count waits while it loads
+    if loading.is_some() {
+        return;
+    }
     cfg.frame += 1;
     let mut shots = shot_paths(&path, &cfg.shot_frames);
     if cfg.late_frame > 0 {

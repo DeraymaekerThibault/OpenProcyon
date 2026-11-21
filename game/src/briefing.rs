@@ -151,7 +151,7 @@ fn finish(
 pub fn update(
     mut commands: Commands,
     mut mission: Option<ResMut<Mission>>,
-    time: Res<Time<Real>>,
+    (time, loading): (Res<Time<Real>>, Option<Res<crate::loading::Loading>>),
     keys: Res<ButtonInput<KeyCode>>,
     assets: Res<AssetServer>,
     cfg: Res<crate::Config>,
@@ -167,7 +167,8 @@ pub fn update(
     let Some(ref mut mission) = mission else { return };
     let mission = &mut **mission;
     let Some(mut opening) = mission.opening.take() else { return };
-    opening.elapsed += time.delta_secs();
+    // the opening holds its first frame while the battle loads
+    opening.elapsed += if loading.is_some() { 0.0 } else { time.delta_secs() };
     let cues = mission.data["opening_speech"].as_array().expect("opening speech export");
     let end = 10.0 + cues.iter().map(|c| c["duration"].as_f64().unwrap() as f32).sum::<f32>();
     if binds.just_pressed(&keys, crate::bindings::Act::SkipSpeech) {

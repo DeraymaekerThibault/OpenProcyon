@@ -169,6 +169,7 @@ pub(super) fn ambient_effect<'a>(kind: &str, effect: &'a str) -> Option<&'a str>
 pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Library, fxl: &fx::FxLib, shapes: &collision::Shapes, asteroids: &data::AsteroidDefs, cfg: &Config) {
     info!("battle start: map={:?} player={} allies={:?} enemies={:?}", cfg.map, cfg.player, cfg.allies, cfg.enemies);
     commands.queue(resume_scenario);
+    commands.insert_resource(crate::loading::Loading::default());
     commands.remove_resource::<crate::rules::skirmish::SkirmishScript>();
     let map = cfg.map.as_deref().and_then(data::map_json);
     commands.insert_resource(MapLighting(map.as_ref().and_then(lighting_of)));

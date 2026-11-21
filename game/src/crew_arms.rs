@@ -114,8 +114,10 @@ fn screen(
     ships: Query<(Entity, &crate::Ship, &crate::combat::Health, &crate::campaign::MissionShip)>,
     buttons: Query<(&Action, &Interaction), Changed<Interaction>>,
     mut choice: Local<Choice>,
+    loading: Option<Res<crate::loading::Loading>>,
 ) {
-    if *state.get() != crate::menu::Screen::Battle {
+    // while the battle loads the pause is the loading screen's: this screen opens after it
+    if *state.get() != crate::menu::Screen::Battle || loading.is_some() {
         return;
     }
     let want = mission.as_deref().is_some_and(|m| m.script.crew_screen && !crate::rules::nis(Some(m)));
