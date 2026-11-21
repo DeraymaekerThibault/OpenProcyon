@@ -308,6 +308,8 @@ pub struct Sinking {
     elapsed: f32,
     /// Section mesh nodes: (node, section, rest pose, burst done); filled on the first breakup frame.
     nodes: Option<Vec<(Entity, usize, Transform, bool)>>,
+    /// The 0.14 s section wipe (`damage::death_wipe`) has happened.
+    wiped: bool,
 }
 
 /// Seconds between the kill and the start of the break-apart clip.
@@ -321,7 +323,7 @@ fn breakup_clip<'a>(lib: &'a Library, class: &crate::data::Class) -> Option<&'a 
 
 impl Sinking {
     pub(crate) fn new() -> Self {
-        Sinking { elapsed: 0.0, nodes: None }
+        Sinking { elapsed: 0.0, nodes: None, wiped: false }
     }
 
     /// What the dying hull's drive sees (docs/re/effects.md "Death drive"): from `CLIP_DELAY` after the kill every section is at 0 HP,
@@ -363,14 +365,22 @@ fn breakup(
     mut sfx: MessageWriter<Sfx>,
     time: Res<Time>,
     children: Query<&Children>,
-    mut ships: Query<(Entity, &Transform, &Ship, &mut Visibility, &mut Sinking)>,
+    assets: Res<AssetServer>,
+    mut ships: Query<(Entity, &Transform, &Ship, &mut Visibility, &mut Sinking, Option<&damage::DamageFx>)>,
     mut nodes: Query<(&Name, &mut Transform, &mut Visibility), Without<Ship>>,
 ) {
-    for (e, tf, ship, mut vis, mut sinking) in &mut ships {
+    for (e, tf, ship, mut vis, mut sinking, dfx) in &mut ships {
         let class = &lib.classes[ship.class];
         let clip = breakup_clip(&lib, class);
         sinking.elapsed += time.delta_secs();
         let t = (sinking.elapsed - CLIP_DELAY).max(0.0);
+        if !sinking.wiped && sinking.elapsed >= CLIP_DELAY {
+            sinking.wiped = true;
+            if let Some(dfx) = dfx {
+                let vel = tf.rotation * Vec3::NEG_Z * ship.speed;
+                damage::death_wipe(&mut commands, (&assets, &fxl), &mut rng, &mut sfx, (tf, class, vel), dfx);
+            }
+        }
         if sinking.nodes.is_none() {
             // PROVISIONAL death sound pool; visual randomness must not perturb combat rolls.
             let at = tf.translation;
