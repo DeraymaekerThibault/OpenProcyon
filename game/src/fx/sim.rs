@@ -73,42 +73,32 @@ pub(super) fn update_fx(
                     {
                         let tt = t.max(0.0);
                         let target = conv(Vec3::new(tg[0].at(tt, 0.0), tg[1].at(tt, 0.0), tg[2].at(tt, 0.0)));
-                        let to = target - p.pos;
-                        let d = to.length();
-                        let (k0, k1, k2) = (k[0].at(tt, 0.0), k[1].at(tt, 0.0), k[2].at(tt, 0.0));
-                        let strength = if d > 0.0 { k0 + (k1 + k2 / d) / d } else { k0 };
-                        p.vel += to * strength * move_dt;
+                        p.vel += attraction(target - p.pos, [k[0].at(tt, 0.0), k[1].at(tt, 0.0), k[2].at(tt, 0.0)]) * move_dt;
                     }
                 }
-                st.parts.retain(|p| p.age < p.life && eff.bound.is_none_or(|b| p.pos.length() <= b));
+                st.parts.retain(|p| p.age < p.life);
                 if !prim.ever && t > prim.duration {
                     st.parts.clear();
                 }
                 if t >= 0.0 && emitting {
                     let live = prim.ever || t <= prim.duration;
-                    let mut n = 0u32;
-                    if !st.started {
-                        st.started = true;
-                        n += prim.start;
-                    }
+                    // Retail: rate is particles per tick; the start count joins the first tick's rate, and the sum is scaled by
+                    // the distance detail (so far effects also start with fewer). A fractional count spawns one with that probability.
+                    // A keys-only curve gives its value only on the tick that enters a new key interval, else 0.
+                    let mut r = if std::mem::replace(&mut st.started, true) { 0.0 } else { prim.start as f32 };
                     if live {
-                        // Retail: rate is particles per tick; a fractional rate spawns one with that probability.
-                        // A keys-only curve gives its value only on the tick that enters a new key interval, else 0.
                         let key = prim.rate.key_index(t);
                         let fire = !prim.rate.2 || st.last_key.replace(key) != Some(key);
-                        let r = prim.rate.at(t, 0.0)
-                            * f32::from(u8::from(fire))
-                            * prim.budget
-                            * scale
-                            * detail_factor(prim.low_rate, cam_pos.map_or(0.0, |c| c.distance(gt.translation())));
-                        n += if r >= 1.0 {
-                            r as u32
-                        } else if r > 0.0 && rng.f() < r {
-                            1
-                        } else {
-                            0
-                        };
+                        r += prim.rate.at(t, 0.0) * f32::from(u8::from(fire));
                     }
+                    r *= scale * detail_factor(prim.low_rate, cam_pos.map_or(0.0, |c| c.distance(gt.translation())));
+                    let n = if r >= 1.0 {
+                        r as u32
+                    } else if r > 0.0 && rng.f() < r {
+                        1
+                    } else {
+                        0
+                    };
                     for _ in 0..n {
                         let mut np = spawn_particle(prim, t, &tick_world, &mut rng, fx.vel_scale);
                         if meteor {
@@ -135,6 +125,13 @@ pub(super) fn update_fx(
             commands.entity(e).despawn();
         }
     }
+}
+
+/// Retail attractor (velocity change per second): k = Const + WithDist / d + WithDistSquared / d^2 along the UNIT direction to the
+/// target, d its distance; nothing at d = 0. So a constant k is a constant acceleration of |k| units/s^2, whatever the distance.
+pub(super) fn attraction(to: Vec3, [k0, k1, k2]: [f32; 3]) -> Vec3 {
+    let d = to.length();
+    if d > 0.0 { to / d * (k0 + (k1 + k2 / d) / d) } else { Vec3::ZERO }
 }
 
 // PROVISIONAL: match each meteor's authored fall speed/lifetime to the storm's flight-plane splash surface.

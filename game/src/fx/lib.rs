@@ -4,7 +4,6 @@ use bevy::prelude::*;
 use serde_json::Value;
 use std::collections::HashMap;
 
-use super::sim::TICK;
 use crate::assets_dir;
 
 /// The `curve` key list (time, value) of an exported interpolator; missing numbers read as 0.
@@ -136,16 +135,11 @@ pub(super) struct Prim {
     pub(super) attract: Option<([Curve; 3], [Curve; 3])>,
     pub(super) fallback_life: f32,
     pub(super) low_rate: f32,       // LowDetailParticleRateMultiply
-    pub(super) budget: f32,         // emission scale keeping the steady live count under MAX_LIVE
     pub(super) src: Option<usize>,  // spawn at the positions of this primitive's particles (invisible "source" emitters)
     pub(super) mesh_vertices: bool, // effect variable ASSIGN_RANDOM_POSITIONS_FROM_MESH_VERTEXES: add a random vertex of the owner's mesh to each spawn
 }
 pub(super) struct Effect {
     pub(super) prims: Vec<Prim>,
-    /// Particles that drift farther than this from the effect's origin are removed. PROVISIONAL (owner's choice): only the
-    /// Star mortar impact, whose attractor pushes its glow outward without limit (docs/re/effects.md); its authored
-    /// `EffectMaxRadius` (200) is the bound. No retail rule that removes them was found.
-    pub(super) bound: Option<f32>,
 }
 
 #[derive(Resource)]
@@ -164,11 +158,7 @@ impl FxLib {
     /// A library of empty effects with these names (index = position), for tests that need effect names but no game data.
     #[cfg(test)]
     pub fn with_names(names: &[&str]) -> Self {
-        Self {
-            effects: names.iter().enumerate().map(|(i, n)| (n.to_string(), i)).collect(),
-            list: names.iter().map(|_| Effect { prims: vec![], bound: None }).collect(),
-            tex_names: vec![],
-        }
+        Self { effects: names.iter().enumerate().map(|(i, n)| (n.to_string(), i)).collect(), list: names.iter().map(|_| Effect { prims: vec![] }).collect(), tex_names: vec![] }
     }
 }
 
@@ -260,8 +250,6 @@ pub(super) fn parse_prim(p: &Value, tex_names: &mut Vec<String>) -> Prim {
     } else {
         f32::INFINITY
     };
-    let live = rate.0.iter().map(|(_, r)| *r).fold(0.0, f32::max) / TICK * if flag("Everlasting") { fallback_life } else { fallback_life.min(num("Duration")) };
-    let budget = if live.is_finite() && live > MAX_LIVE { MAX_LIVE / live } else { 1.0 };
     let src = p
         .get("CHUNKDATA_SOURCE_EMITTER")
         .filter(|s| s["CHUNKDATA_PARTICLE_SYSTEM_SOURCE_EMITTER_ENABLED"].as_bool() == Some(true))
@@ -325,7 +313,6 @@ pub(super) fn parse_prim(p: &Value, tex_names: &mut Vec<String>) -> Prim {
         attract,
         fallback_life,
         low_rate: p["LowDetailParticleRateMultiply"].as_f64().unwrap_or(1.0) as f32,
-        budget,
         src,
         mesh_vertices: p["CHUNKDATA_CONST_ACCEPTS_EFFECT_VARIABLES_STRING_VECTOR - Element"].as_str() == Some("ASSIGN_RANDOM_POSITIONS_FROM_MESH_VERTEXES"),
     }
@@ -357,18 +344,12 @@ impl FromWorld for FxLib {
                 Value::Array(a) => a.iter().map(|p| parse_prim(p, &mut tex_names)).collect(),
                 _ => vec![],
             };
-            let bound = (n == "StarMortar_Heavy_Impact").then(|| j["EffectMaxRadius"].as_f64().unwrap_or(200.0) as f32);
             effects.insert(n, list.len());
-            list.push(Effect { prims, bound });
+            list.push(Effect { prims });
         }
         Self { effects, list, tex_names }
     }
 }
-
-/// PROVISIONAL steady live-particle budget per primitive. Every retail effect stays under ~3000 at its per-tick rate
-/// except GravCharge_Medium_Impact (180 per tick for 18 s, ~97000 additive quads): it saturates to a white blob and stalls the
-/// frame. Over-budget primitives emit proportionally fewer particles, keeping their shape. The original's own pool limit is unknown.
-pub(super) const MAX_LIVE: f32 = 4000.0;
 
 #[cfg(test)]
 mod tests {
@@ -437,24 +418,6 @@ mod tests {
         assert!(source.fallback_life.is_infinite(), "start-only source particles remain available");
         let engine = &lib.list[lib.effects["NavyEngine_Light"]].prims[0];
         assert_eq!(engine.life.as_ref().unwrap().at(0.0, 0.0), 1.0, "explicit expiration is unchanged");
-    }
-
-    #[test]
-    #[ignore = "needs imported assets"]
-    fn only_the_gravity_well_is_thinned_to_the_particle_budget() {
-        let lib = FxLib::from_world(&mut World::new());
-        let well = &lib.list[lib.effects["GravCharge_Medium_Impact"]].prims[0];
-        assert!(well.rate.at(0.0, 0.0) * well.budget / TICK * well.fallback_life <= MAX_LIVE + 1.0);
-        let thinned: Vec<_> = lib.effects.iter().filter(|&(_, &i)| lib.list[i].prims.iter().any(|p| p.budget < 1.0)).map(|(n, _)| n.as_str()).collect();
-        assert_eq!(thinned, ["GravCharge_Medium_Impact"], "other effects keep their authored rates");
-    }
-
-    #[test]
-    #[ignore = "needs imported assets"]
-    fn only_the_star_mortar_glow_is_bounded_to_its_effect_radius() {
-        let lib = FxLib::from_world(&mut World::new());
-        assert_eq!(lib.list[lib.effects["StarMortar_Heavy_Impact"]].bound, Some(200.0));
-        assert!(!lib.effects.iter().any(|(n, &i)| n != "StarMortar_Heavy_Impact" && lib.list[i].bound.is_some()));
     }
 
     #[test]
