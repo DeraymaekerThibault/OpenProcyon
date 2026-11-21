@@ -132,6 +132,7 @@ mod rotation_tests {
                 script: None,
                 autolaunch: false,
                 shot_frame: 0,
+                shot_frames: vec![],
                 late_frame: 0,
             });
         app.world_mut()
@@ -180,6 +181,7 @@ mod rotation_tests {
             script: None,
             autolaunch: false,
             shot_frame: 0,
+            shot_frames: vec![],
             late_frame: 0,
         });
         app.world_mut().run_system_once(outcome).unwrap(); // no PlayerShip left

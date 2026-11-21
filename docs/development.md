@@ -50,7 +50,7 @@ tools/check.sh
 cargo run --release --manifest-path game/Cargo.toml -- --mission 1
 python3 -m unittest discover -s tests -p 'test_export_hud.py'
 cargo test --release --manifest-path game/Cargo.toml panels::tests -- --include-ignored  # shared HUD; classic::panels::tests for the retail art
-tools/shot.sh local/mission01.png --mission 1 --script briefing-skip --shot-frame 180 --late-frame 0
+tools/shot.sh local/mission01.png --mission 1 --script briefing-skip --shot-frame 180   # --shot-frame 100,200 saves local/mission01_100.png, _200.png in one run; 1280x720; no late shot unless --late-frame N
 tools/shot.sh local/paused.png --map red_rover --script pause --shot-frame 50 --late-frame 0
 tools/shot.sh local/pause-restart.png --map red_rover --script pause-restart --shot-frame 90 --late-frame 0
 ```
@@ -64,7 +64,7 @@ Python tests that need the install or assets skip.
 Shared sight smoke: `WAYLAND_DISPLAY= tools/shot.sh local/sight.png --script sight --allies Ship_Navy_Cutter --enemies Ship_Pirate_Schooner --shot-frame 135 --late-frame 0`; it freezes three ships and asserts group/range/cloak transitions against real radar widgets. This is wiring validation, not a campaign playthrough.
 
 Screenshot tests need a display, or Xvfb + Mesa for the headless helper. Outputs belong in ignored `local/`.
-The `pause` / `pause-restart` scripts assert that the non-retail Pause key freezes virtual time and that Pause / restarting resumes it; let the run finish past frame 70, not just write its screenshot.
+The `pause` / `pause-restart` scripts assert that the non-retail Pause key freezes virtual time and that Pause / restarting resumes it; a scripted run goes on 100 frames after its last picture, which covers frame 70 (use a later `--shot-frame` or `--late-frame` for assertions beyond that).
 Every run writes `<user dir>/logs/openprocyon.log` (`~/.local/share/openprocyon/`, `%APPDATA%\openprocyon\`; the run before, or the first 20 MB of a very long one, is `openprocyon.previous.log`): header with version/system/arguments, the console log, panics. Testers attach it to bug reports (`game/src/logging.rs`).
 
 `PROCYON_PROFILE=1 make run ARGS='--mission 1'` logs rolling real frame time and world/FX/mesh/audio counts every five real seconds

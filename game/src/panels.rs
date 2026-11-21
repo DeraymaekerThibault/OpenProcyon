@@ -674,6 +674,7 @@ pub mod tests {
             script: None,
             autolaunch: false,
             shot_frame: 0,
+            shot_frames: vec![],
             late_frame: 0,
         });
         let line = app.world_mut().spawn(CrewSpeech("TalkingHead_Character_Aquanogs_0".into())).id();
