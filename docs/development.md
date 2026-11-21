@@ -227,21 +227,15 @@ Raw per-ship exports are temporary inputs to later exporters and removed by pack
 The HUD sprites are cut out, trimmed and alpha-cleaned in `export_hud.py`; the slice strips are made from them, then cleaned. Importing needs a read-only retail install (`--game <dir>` or `PROCYON_GAME_ROOT` in `.env`); the install is never modified.
 Python dependencies are in `requirements.txt` (the checks add ruff via `requirements-dev.txt`, release packaging PyInstaller via `requirements-release.txt`); Rust dependencies and resolved versions are in `game/Cargo.toml` and `game/Cargo.lock`.
 
-## Implementation order
+## What to work on
 
-1. **Finish functional HUD controls:** one complete control at a time (state, input, gameplay handler, feedback and tests). Artwork alone is not implementation.
-2. **Polish and validate Mission 1:** it has been completed manually end-to-end. Resolve the reported FPS/torpedo/docking/towing/nebula issues (`docs/re/campaign.md`, "Next"), and verify defeat, restart and return-to-menu. Do not treat the earlier pirate-fight stall as an outstanding blocker without a new reproduction.
-3. **Fidelity passes:** compare behaviour and screenshots against retail evidence; retain explicit PROVISIONAL labels for guesses.
-4. **Expand playable campaigns:** only after the Mission 1 path works. Exported Missions 2–13 must not be presented as supported gameplay yet.
-
-Keep this list about outcomes, not speculative systems. Use the project board "OpenProcyon fidelity: every rule of the original" as the original-game gap checklist: pick the row and an acceptance scenario before implementing, then update its stage and the owning `docs/re/` evidence. Record limitations next to their owning code. Exported assets, visible buttons and accepted/no-op mission rules do not count as implemented behaviour.
-Never publish, upload or attach converted retail content anywhere (issues, CI artifacts, releases).
+Priorities are the GitHub milestones (v0.2 skirmish, v0.3 campaign, Later) and the rules in [AGENTS.md](../AGENTS.md) "Workflow":
+fidelity work starts from the project board "OpenProcyon fidelity: every rule of the original". Exported assets, visible buttons
+and accepted/no-op mission rules do not count as implemented behaviour. Record limitations next to their owning code.
 
 ## Documentation map
 
-- [data-format.md](data-format.md): editable schema and export limits.
-- [modding.md](modding.md): overlays, inheritance and HD art.
-- [re/hud.md](re/hud.md), [re/campaign.md](re/campaign.md), [re/movement.md](re/movement.md), [re/gunnery.md](re/gunnery.md), [re/effects.md](re/effects.md), [re/sound.md](re/sound.md): evidence behind implementation.
-- [re/scenery-placement.md](re/scenery-placement.md): island/base height, authored tilt and unresolved retail scene/matrix conventions.
-- [re/visibility.md](re/visibility.md): sight range/group spotting, retail occlusion, current consumer gaps and acceptance cases.
+- [../AGENTS.md](../AGENTS.md): the hard rules and the workflow; [../CONTRIBUTING.md](../CONTRIBUTING.md): ways to help, pull requests.
+- [modding.md](modding.md): making and sharing mods, the overlay, the render profile; [data-format.md](data-format.md): the asset layout.
+- [re/](re/): the original's behaviour as specifications (rules, numbers, sources), one file per system.
 - [wot-format.md](wot-format.md): WOT file format notes.

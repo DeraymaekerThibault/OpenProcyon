@@ -14,6 +14,8 @@ in your own words. A pull request that breaks them is closed, however good the r
   Report where the remake differs from the original: triggers, objectives, enemy behaviour, crashes.
 - **Use your own saves.** Your retail save files can be read with this project's tools in `tools/`. Report what you learn
   from them as rules and numbers; never commit the files.
+- **Make a mod.** Ships, maps, missions, sounds and art are files in a mod folder of your own, no engine change needed:
+  [docs/modding.md](docs/modding.md), "Sharing a mod". Open an issue when a mod needs something the engine cannot do yet.
 - **Code.** Pick a backlog row or issue, add the behaviour to the module that owns it ([docs/development.md](docs/development.md)),
   and mark anything you have not checked against the original `PROVISIONAL`.
 
@@ -25,5 +27,6 @@ in your own words. A pull request that breaks them is closed, however good the r
 3. Non-trivial changes need a regression test. Changes to ECS systems or the UI also need a smoke run (`make smokes`, or
    `tools/shot.sh` with the matching `--script`).
 4. Spec changes go into `docs/re/*.md`, citing what they come from (the retail data files, the manual, footage, play).
-5. Ask before adding dependencies, changing asset paths or JSON layouts (mods and saves depend on them), or adding files to
-   `content/` (they need a redistributable licence, recorded next to the file).
+
+The full workflow, and what to ask a maintainer before doing (new dependencies, changed asset paths or JSON layouts, files in
+`content/`), is in [AGENTS.md](AGENTS.md); module ownership in [docs/development.md](docs/development.md).

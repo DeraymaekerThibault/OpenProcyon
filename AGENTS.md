@@ -16,6 +16,7 @@ These protect the project's ability to be shared. `tests/test_repo_hygiene.py` e
 1. **No game content in Git.** Never commit original game files or anything converted from them: models, textures, sounds, music,
    video, maps, missions, ship/weapon data, strings, saves. `assets/` and `local/` are git-ignored; keep it that way. Tests that
    need game data read the imported assets and skip when they are missing (`tests/imported.py`); never add fixtures copied from the game.
+   Never upload or attach converted content anywhere else either (issues, CI artifacts, releases).
 2. **Never run, patch or modify a game installation.** Read it only, and only through the importer and exporters in `tools/`.
 3. **No reverse-engineering artefacts.** Do not add decompiled or disassembled code (not even paraphrased line by line),
    executable addresses, symbol dumps, binary hashes, or instructions/scripts for analysing or unpacking the game executable.
@@ -45,12 +46,11 @@ files to `content/`, or anything that publishes (pushing tags, releases).
   Shared modules own state, input, rules and simulation: `ship.rs`/`scenario.rs`/`view.rs` (ships + AI, battle lifecycle,
   camera/input), `data.rs` (JSON loading), `combat/`, `fx/`, `docking.rs`, `options_menu.rs`, `boarding.rs`, `sprites.rs`,
   `panels.rs` (HUD contract/input), `menu.rs` (front-end model), `campaign.rs` + `rules/` (data-driven mission rule
-  interpreter), `briefing.rs`, `audio.rs`, ... Module ownership and implementation order: `docs/development.md`.
+  interpreter), `briefing.rs`, `audio.rs`, ... Module ownership: `docs/development.md`.
 - `game/src/classic/` the retail presentation. Views only draw; state, input and rules stay in shared modules. Shared code never
   imports a view or builds UI widgets (`tests/test_layers.py`; the compiler enforces the first too, since views live in the binary). Other presentations
   belong in their own crates that depend on the `openprocyon` library.
-- `mods/` mod folders (`--mod <dir>`, `docs/modding.md`). `docs/data-format.md` describes the asset layout.
-- `docs/world/` the world and design-language notes (how ships and factions look, the retail catalogue): read before designing ships, art or missions.
+- `mods/` the example mods the project maintains (`--mod <dir>`, `docs/modding.md`); third-party mods live in their own repositories, not here. `docs/data-format.md` describes the asset layout.
 - Game axes: x = starboard, y = forward, z = up; GLB uses (x, z, -y) with winding (a, c, b).
 
 ## Setup and running
