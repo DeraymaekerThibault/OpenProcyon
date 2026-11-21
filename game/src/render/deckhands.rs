@@ -9,6 +9,9 @@
 //! - Where they go comes from the ship's model: empty nodes named `Crew_<Kind>_...` (`Walk` lanes, `Gun` places by a deck mount,
 //!   `Post`s, `Climb` pairs `_a` at the foot of a shroud and `_b` up it). A ship without them gets no crew.
 //! - Figures are children of the ship, so they ride its motion; they cast no shadows and vanish beyond `range`.
+//! - Map scenery (a town, a pier) gets townsfolk the same way: `Crew_Walk` lanes, `Post`s, and `Work` places where a docker hauls
+//!   or loads for ever. They wear the `Civilian` outfits, one wanders per three walk points (at most `per_ship`), and they cheer a
+//!   victory; nothing else reaches them (no hull, guns or sails).
 //!
 //! PROVISIONAL (a prototype): straight-line walking along the lanes (no avoidance), headcount from the hull's core HP, no blending
 //! between clips.
@@ -40,7 +43,7 @@ const PREPASS_SHADER: &str = "embedded://openprocyon/render/deckhand_prepass.wes
 
 const MAX_CLIPS: usize = 8;
 const PARTS: usize = 5;
-const MAX_OUTFITS: usize = 8;
+const MAX_OUTFITS: usize = 16;
 /// The clips the engine plays, in the shader's tag numbering; `deckhand.json` must list them in this order.
 const CLIPS: [&str; MAX_CLIPS] = ["idle", "walk", "run", "haul", "load", "climb", "cheer", "fall"];
 const IDLE: u32 = 0;
@@ -265,6 +268,8 @@ struct Places {
     links: Vec<Vec<usize>>,
     guns: Vec<Transform>,
     posts: Vec<(String, Transform)>,
+    /// Places where a figure works on the spot (scenery: dockers at the cargo).
+    work: Vec<Transform>,
     /// Foot and top of each shroud a rigger climbs, and the way he faces on it.
     climbs: Vec<(Vec3, Vec3, Quat)>,
 }
@@ -285,6 +290,7 @@ impl Places {
                 }
                 "Gun" => p.guns.push(*t),
                 "Post" => p.posts.push((id.to_string(), *t)),
+                "Work" => p.work.push(*t),
                 "Climb" => {
                     let (stem, end) = id.rsplit_once('_').unwrap_or((id, "a"));
                     climbs.entry(stem.into()).or_default()[usize::from(end == "b")] = Some(*t);
@@ -389,6 +395,10 @@ enum Role {
     Post {
         place: usize,
     },
+    /// A work place's index in `Places::work`: he goes there and hauls (odd places) or loads (even ones).
+    Work {
+        place: usize,
+    },
     Wander,
     /// A shroud (index in `Places::climbs`) and how far along: 0 going to its foot, 1 climbing, 2 working aloft, 3 coming down.
     Rigger {
@@ -433,9 +443,15 @@ fn stamp(time: &Time) -> u32 {
     ((time.elapsed_secs_f64() * 10.0) as u64 & 0xffff) as u32
 }
 
-/// Collects the `Crew_*` nodes of a ship's model as its scene spawns. They hang under the scene's root (a child of the ship), whose
+/// Collects the `Crew_*` nodes of a ship's (or a map scenery object's) model as its scene spawns. They hang under the scene's root (a child of the ship), whose
 /// frame is the model's; the figures go under the same root, so the nodes' own transforms place them.
-fn gather(mut commands: Commands, nodes: Query<(Entity, &Name, &ChildOf, &Transform), Added<Name>>, ships: Query<(), (With<Ship>, Without<Crew>)>, parents: Query<&ChildOf>) {
+#[allow(clippy::type_complexity)]
+fn gather(
+    mut commands: Commands,
+    nodes: Query<(Entity, &Name, &ChildOf, &Transform), Added<Name>>,
+    ships: Query<(), (Or<(With<Ship>, With<crate::clips::SceneLoop>)>, Without<Crew>)>,
+    parents: Query<&ChildOf>,
+) {
     let mut found: HashMap<Entity, (Entity, Vec<(String, Transform)>)> = HashMap::new();
     for (e, name, parent, t) in &nodes {
         if !name.as_str().starts_with("Crew_") {
@@ -450,19 +466,20 @@ fn gather(mut commands: Commands, nodes: Query<(Entity, &Name, &ChildOf, &Transf
     }
 }
 
-/// Mans a ship whose crew places arrived: gun places and posts first, the rest wander; each figure picks an outfit of its race.
+/// Mans a ship whose crew places arrived: gun places, posts and work places first, the rest wander; each figure picks an outfit of
+/// its race. Scenery (no `Ship`) is Civilian and gets one wanderer per three walk points.
 fn staff(
     mut commands: Commands,
     kit: Option<Res<Kit>>,
     lib: Res<Library>,
     time: Res<Time>,
-    ships: Query<(Entity, &Ship, &Health, &CrewNodes, Option<&GunStates>), Without<Crew>>,
+    ships: Query<(Entity, Option<&Ship>, Option<&Health>, &CrewNodes, Option<&GunStates>), Without<Crew>>,
     mounts: Query<&Transform>,
 ) {
     let Some(kit) = kit else { return };
     for (e, ship, health, nodes, guns) in &ships {
         let places = Places::from_nodes(&nodes.nodes);
-        let race = &lib.classes[ship.class].race;
+        let race = ship.map_or("Civilian", |s| lib.classes[s.class].race.as_str());
         let wear: Vec<(u32, bool)> = kit.outfits.iter().enumerate().filter(|(_, o)| o.race.eq_ignore_ascii_case(race)).map(|(i, o)| (i as u32, o.officer)).collect();
         let mut rng = 0x9e37_79b9_7f4a_7c15 ^ (e.to_bits().wrapping_mul(0x2545_f491_4f6c_dd1d));
         let mounts: Vec<Vec3> = guns.map_or(vec![], |g| g.reloads().map(|(root, _)| mounts.get(root).map_or(Vec3::splat(1e9), |t| t.translation)).collect());
@@ -475,8 +492,9 @@ fn staff(
             }
         }
         roles.extend((0..places.posts.len()).map(|place| Role::Post { place }));
+        roles.extend((0..places.work.len()).map(|place| Role::Work { place }));
         roles.truncate(kit.per_ship);
-        let wanderers = kit.per_ship.saturating_sub(roles.len());
+        let wanderers = if ship.is_some() { kit.per_ship } else { roles.len() + places.walk.len() / 3 }.min(kit.per_ship).saturating_sub(roles.len());
         if !places.walk.is_empty() {
             roles.extend(std::iter::repeat_n(Role::Wander, wanderers));
         }
@@ -486,6 +504,7 @@ fn staff(
             let (pos, face) = match role {
                 Role::Gun { place, .. } => (places.guns[place].translation, places.guns[place].rotation),
                 Role::Post { place } => (places.posts[place].1.translation, places.posts[place].1.rotation),
+                Role::Work { place } => (places.work[place].translation, places.work[place].rotation),
                 _ => {
                     let i = (rand(&mut rng) * places.walk.len() as f32) as usize % places.walk.len();
                     (places.walk[i], Quat::from_rotation_y(rand(&mut rng) * std::f32::consts::TAU))
@@ -533,8 +552,8 @@ fn staff(
             places,
             hands,
             total,
-            max_core: health.core.max(1.0),
-            furled: ship.ordered() == 0.0,
+            max_core: health.map_or(1.0, |h| h.core.max(1.0)),
+            furled: ship.is_some_and(|s| s.ordered() == 0.0),
             alarm: 0.0,
             kill_wait: 0.0,
             rng,
@@ -549,7 +568,7 @@ fn drive(
     kit: Option<Res<Kit>>,
     time: Res<Time>,
     outcome: Option<Res<Outcome>>,
-    mut ships: Query<(&Ship, &Health, Option<&GunStates>, &mut Crew)>,
+    mut ships: Query<(Option<&Ship>, Option<&Health>, Option<&GunStates>, &mut Crew)>,
     mut hands: Query<(&mut Hand, &mut Transform, &mut MeshTag)>,
 ) {
     let Some(kit) = kit else { return };
@@ -566,15 +585,16 @@ fn drive(
             crew.alarm = ALARM;
         }
         crew.alarm = (crew.alarm - dt).max(0.0);
-        let cheer = won && ship.side == Side::Player;
+        let cheer = won && ship.is_none_or(|s| s.side == Side::Player);
 
         // the headcount follows the hull: a share stays standing till the end, all fall when the ship goes
         let alive: Vec<Entity> = crew.hands.iter().copied().filter(|&h| hands.get(h).is_ok_and(|(h, _, _)| h.fallen.is_none())).collect();
-        let share = (health.core / crew.max_core).clamp(0.0, 1.0);
-        let target = if health.destroyed { 0 } else { (crew.total as f32 * (0.3 + 0.7 * share)).ceil() as usize };
+        let (core, destroyed) = health.map_or((crew.max_core, false), |h| (h.core, h.destroyed));
+        let share = (core / crew.max_core).clamp(0.0, 1.0);
+        let target = if destroyed { 0 } else { (crew.total as f32 * (0.3 + 0.7 * share)).ceil() as usize };
         crew.kill_wait -= dt;
-        if alive.len() > target && (crew.kill_wait <= 0.0 || health.destroyed) {
-            let n = if health.destroyed { alive.len() } else { 1 };
+        if alive.len() > target && (crew.kill_wait <= 0.0 || destroyed) {
+            let n = if destroyed { alive.len() } else { 1 };
             for _ in 0..n {
                 let i = (rand(&mut crew.rng) * alive.len() as f32) as usize % alive.len();
                 if let Ok((mut h, _, _)) = hands.get_mut(alive[i])
@@ -591,7 +611,7 @@ fn drive(
         }
 
         // sails fold or open: riggers go aloft, one per shroud, taken from the idle wanderers
-        let furled = ship.ordered() == 0.0;
+        let furled = ship.is_some_and(|s| s.ordered() == 0.0);
         if furled != crew.furled {
             crew.furled = furled;
             let mut free: Vec<Entity> = alive.iter().copied().filter(|&h| hands.get(h).is_ok_and(|(h, _, _)| h.role == Role::Wander)).collect();
@@ -673,6 +693,15 @@ fn drive(
                             h.face = home.rotation;
                         }
                     }
+                    Role::Work { place } => {
+                        let home = places.work[place];
+                        if h.pos.distance(home.translation) > 0.1 {
+                            h.path = places.route(h.pos, home.translation);
+                        } else {
+                            h.face = home.rotation;
+                            clip = if place % 2 == 0 { LOAD } else { HAUL };
+                        }
+                    }
                     Role::Wander => {
                         h.wait -= dt;
                         if h.wait <= 0.0 && !places.walk.is_empty() {
@@ -744,8 +773,10 @@ mod tests {
             node("Crew_Climb_Main_P_a", -6.0, 0.0),
             node("Crew_Climb_Main_P_b", -2.0, 0.0),
             node("Crew_Gun_0_0", 1.0, 1.0),
+            node("Crew_Work_Crates_0", 3.0, 1.0),
         ]);
         assert_eq!(p.walk.len(), 5);
+        assert_eq!(p.work.len(), 1);
         assert_eq!(p.climbs.len(), 1);
         assert_eq!(p.guns.len(), 1);
         let r: Vec<Vec3> = p.route(Vec3::new(-2.0, 0.0, 0.5), Vec3::new(2.0, 0.0, -10.5)).into();
