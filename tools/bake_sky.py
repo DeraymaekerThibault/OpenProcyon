@@ -506,7 +506,10 @@ def bake_layers(tex, pos, uv, size, seed=1, stars=60000, split_stars=False):
             faces.append(nebula_face)
             star_faces.append(star_face)
             cloud_faces.append(cloud_face)
-    cat = lambda parts: np.concatenate(parts, 0) if split_stars else None
+
+    def cat(parts):
+        return np.concatenate(parts, 0) if split_stars else None
+
     return np.concatenate(faces, 0), cat(star_faces), cat(cloud_faces)
 
 
@@ -557,14 +560,17 @@ def assemble_job(glb, out, tmp, split_stars):
     with replacing(dst) as part:
         Image.fromarray(img, "RGB").save(part, "PNG", compress_level=6)
     note = ""
-    stack = lambda kind: np.concatenate(
-        [
-            np.load(tmp / f"{glb.stem}.{f}.{k}.{kind}.npy")
-            for f in range(6)
-            for k in range(BANDS)
-        ],
-        0,
-    )
+
+    def stack(kind):
+        return np.concatenate(
+            [
+                np.load(tmp / f"{glb.stem}.{f}.{k}.{kind}.npy")
+                for f in range(6)
+                for k in range(BANDS)
+            ],
+            0,
+        )
+
     clouds_dst = dst.with_name(f"{glb.stem}_clouds.png")
     if split_stars:
         with replacing(dst.with_name(f"{glb.stem}_stars.png")) as part:
