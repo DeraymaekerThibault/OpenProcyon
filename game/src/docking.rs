@@ -662,8 +662,9 @@ fn routine(
                     info!("docking: {e} docked with {} for {:.1} s (repair {:.1} s)", docker.dockee, docker.duration, docker.repair_secs);
                     ship.halt();
                     ship.speed = 0.0;
-                    // Only a ship dockee is registered as docked in the rules' relation; a base or island never is.
-                    if !base && let Some(m) = mission.as_mut() {
+                    // The rules' 'Is Docked' reads the docker's dock routine (state docked, dockee in the group), so a base or island
+                    // counts as well: mission 11's Cydonia shipyard starts its cutscene and the Man-O-War handover from it.
+                    if let Some(m) = mission.as_mut() {
                         m.script.set_docked(e, docker.dockee, true);
                     }
                     // Retail: the dock routine plays HUD_Options_Dock on docking (for every ship) and the repair setup starts the repair effect.
