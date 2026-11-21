@@ -57,6 +57,19 @@ mod volnoise;
 
 /// The render profile's asset path.
 pub const PROFILE: &str = "data/render/look.json";
+/// Sky accents that content mods ship for skies of their own (`{"<sky>": {...sky keys...}}`, merged across mods): a mission mod
+/// cannot add to a graphics mod's `look.json`, which replaces as a whole file.
+pub const SKIES: &str = "data/render/skies.json";
+
+/// Puts the mods' sky accents under the profile's `sky.skies`; the profile's own entry for a sky is merged over the mod's.
+/// A profile without a `sky` block draws no dome, so nothing is added.
+fn add_mod_skies(look: &mut serde_json::Value, skies: Option<serde_json::Value>) {
+    let (Some(sky), Some(mut skies)) = (look.get_mut("sky").and_then(|s| s.as_object_mut()), skies.filter(|s| s.is_object())) else { return };
+    if let Some(own) = sky.get("skies") {
+        crate::modding::merge(&mut skies, own);
+    }
+    sky.insert("skies".into(), skies);
+}
 
 #[derive(Resource, Clone, Debug, PartialEq)]
 pub struct Look {
@@ -264,7 +277,8 @@ fn has_shader(root: &std::path::Path, block: &str, shader: &str) -> bool {
 
 pub fn plugin(app: &mut App) {
     let root = crate::assets_dir();
-    let Some(v) = crate::data::try_json(&root.join(PROFILE)) else { return };
+    let Some(mut v) = crate::data::try_json(&root.join(PROFILE)) else { return };
+    add_mod_skies(&mut v, crate::data::try_json(&root.join(SKIES)));
     let look = Look::parse(&v).with_shaders(root);
     frame::plugin(app);
     lights::plugin(app);
@@ -416,6 +430,19 @@ fn sky_light(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mods_add_accents_for_their_own_skies() {
+        use serde_json::json;
+        let mut look = json!({"sky": {"near": {"distance": 3000}, "skies": {"skybox_05": {"base": {"breath": 0.1}}, "ours": {"near": {"opacity": 0.2}}}}});
+        add_mod_skies(&mut look, Some(json!({"ours": {"near": {"source": "clouds", "opacity": 0.6}}})));
+        let skies = &look["sky"]["skies"];
+        assert_eq!(skies["ours"]["near"], json!({"source": "clouds", "opacity": 0.2}), "the profile's entry is merged over the mod's");
+        assert!(skies["skybox_05"].is_object(), "the profile's other skies stay");
+        let mut plain = json!({"camera": {}});
+        add_mod_skies(&mut plain, Some(json!({"ours": {}})));
+        assert_eq!(plain, json!({"camera": {}}), "no sky block, no dome");
+    }
 
     #[test]
     fn ambient_fill_also_applies_without_baked_skies() {
