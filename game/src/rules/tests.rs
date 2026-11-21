@@ -1075,3 +1075,34 @@ fn mission_ten_tow_is_requested_not_linked_and_ends_with_the_tower() {
     s.step(&w, 0.1, false);
     assert!(s.tows().is_empty(), "a destroyed tower drops its tow");
 }
+
+/// Debug launch option `--fire-rule` (not retail): the named rules' actions run after the world-initialise rules, in the order given,
+/// the rule counts as having run, and its own conditions do not make it fire a second time. An unknown name does no harm.
+#[test]
+fn fire_rule_runs_named_rules_at_start_once_and_in_order() {
+    let flag = |name: &str| serde_json::json!({"Type": "Set Flag Action", "Flag Name": name, "Boolean Value": "TRUE"});
+    let never = serde_json::json!({"Type": "Timer Condition", "Timer Name": "never started", "Equivalence": "Greater Than", "Time in seconds": 1});
+    let data = serde_json::json!({"rules": [
+        {"name": "Init", "conditions": [{"Type": "World Initialize"}], "actions": [flag("init")]},
+        {"name": "Later beat ", "conditions": [never], "actions": [flag("later"), {"Type": "Play speech event", "Speech Event Name": "LINE"}]},
+        {"name": "Last beat", "conditions": [never], "actions": [flag("last")]},
+        {"name": "Unrelated", "conditions": [never], "actions": [flag("unrelated")]},
+    ], "ships": [], "volumes": null, "environment": {}});
+    let mut sc = Script::new(&data, serde_json::json!({"speech": {"LINE": {"text": "x", "duration": 1.0}}}));
+    sc.start_rules = vec!["Last beat".into(), "Later beat".into(), "No such rule".into()];
+    let (fx, _) = sc.step(&[], 0.1, false);
+    assert!(fx.is_empty());
+    for f in ["init", "later", "last"] {
+        assert!(sc.flags.get(f).copied().unwrap_or(false), "{f} should be set at start");
+    }
+    assert!(!sc.flags.contains_key("unrelated"), "only the named rules run");
+    assert_eq!(sc.never_fired(), ["Unrelated"]);
+    assert!(sc.start_rules.is_empty());
+    // A run-once rule does not fire again: clear the flag and step; the rule's condition (a timer never started) would not hold anyway,
+    // so also make it hold and check it stays quiet.
+    sc.flags.clear();
+    sc.timers.insert("never started".into(), 5.0);
+    sc.step(&[], 0.1, false);
+    assert!(!sc.flags.contains_key("later") && !sc.flags.contains_key("last"), "fired rules stay fired");
+    assert!(sc.flags["unrelated"], "a rule that was not fired still runs when its conditions hold");
+}

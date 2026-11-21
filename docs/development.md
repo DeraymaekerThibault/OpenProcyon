@@ -20,6 +20,8 @@ Git Bash (`GIT_BASH=<path>` if it is not in the default place), and the screensh
    grinds on scenery, or the game panics. The game writes one `battle report {json}` line (`PROCYON_REPORT=<game s>`,
    `smoke/report.rs`); read it before adding print statements. When a change touches targeting, steering or what counts as a
    base/ship, add or tighten a scenario there rather than relying on a long manual run.
+   `--fire-rule "<rule name>"` (repeatable) and `--start-at x,y` start a mission at a later beat: the named rules' actions run once the world-initialise rules have
+   run and the primary ship is placed (`Script::fire_start_rules` in `rules/eval.rs`; debug only, see `docs/modding.md`).
    `PROCYON_TRACE=<file.csv>` (`smoke/trace.rs`) logs every ship (position, velocity, heading, section hit points) and every shell
    once per simulation step, in game axes: the table to lay beside a measurement of the original when a battle plays out
    differently (how close ships come, how often they fire and hit). Stage the same start points with a small mod that replaces
