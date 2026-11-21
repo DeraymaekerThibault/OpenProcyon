@@ -11,6 +11,9 @@ pub enum Setting {
     Dialogue,
     /// Video mode (windowed / fullscreen), effect detail (low / medium / high), render background, flag waving.
     Fullscreen,
+    /// Vsync on / off, anti-aliasing (off / SMAA / MSAA 4x). Not retail options.
+    Vsync,
+    AntiAlias,
     Detail,
     Background,
     Flags,
@@ -28,6 +31,9 @@ pub struct Settings {
     pub effects: u8,
     pub dialogue: u8,
     pub fullscreen: bool,
+    pub vsync: bool,
+    /// 0 off, 1 SMAA, 2 MSAA 4x.
+    pub aa: u8,
     pub detail: u8,
     pub background: bool,
     pub flags: bool,
@@ -36,12 +42,22 @@ pub struct Settings {
 }
 impl Default for Settings {
     fn default() -> Self {
-        Settings { master: 10, music: 10, effects: 10, dialogue: 10, fullscreen: false, detail: 2, background: true, flags: true, difficulty: 1 }
+        Settings { master: 10, music: 10, effects: 10, dialogue: 10, fullscreen: false, vsync: true, aa: 1, detail: 2, background: true, flags: true, difficulty: 1 }
     }
 }
 pub(super) static CHANNELS: [std::sync::atomic::AtomicU8; 4] =
     [std::sync::atomic::AtomicU8::new(10), std::sync::atomic::AtomicU8::new(10), std::sync::atomic::AtomicU8::new(10), std::sync::atomic::AtomicU8::new(10)];
 pub(super) static DETAIL: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(2);
+pub(super) static AA: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(1);
+pub(super) static VSYNC: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+/// The anti-aliasing option: 0 off, 1 SMAA, 2 MSAA 4x.
+pub fn anti_alias() -> u8 {
+    AA.load(std::sync::atomic::Ordering::Relaxed)
+}
+/// The vsync option.
+pub fn vsync() -> bool {
+    VSYNC.load(std::sync::atomic::Ordering::Relaxed)
+}
 pub(super) static DIFFICULTY: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(1);
 /// The difficulty option: 0 Easy, 1 Normal, 2 Hard.
 pub fn difficulty() -> u8 {
@@ -82,6 +98,8 @@ impl Settings {
             effects: n("effects", d.effects, 10),
             dialogue: n("dialogue", d.dialogue, 10),
             fullscreen: b("fullscreen", d.fullscreen),
+            vsync: b("vsync", d.vsync),
+            aa: n("aa", d.aa, 2),
             detail: n("detail", d.detail, 2),
             background: b("background", d.background),
             flags: b("flags", d.flags),
@@ -92,7 +110,7 @@ impl Settings {
         let Some(p) = Self::path() else { return };
         let _ = p.parent().map(std::fs::create_dir_all);
         let v = serde_json::json!({"master": self.master, "music": self.music, "effects": self.effects, "dialogue": self.dialogue,
-            "fullscreen": self.fullscreen, "detail": self.detail, "background": self.background, "flags": self.flags, "difficulty": self.difficulty});
+            "fullscreen": self.fullscreen, "vsync": self.vsync, "aa": self.aa, "detail": self.detail, "background": self.background, "flags": self.flags, "difficulty": self.difficulty});
         if let Err(e) = std::fs::write(p, serde_json::to_string_pretty(&v).unwrap_or_default()) {
             warn!("could not save settings: {e}");
         }
@@ -106,13 +124,15 @@ impl Settings {
             Setting::Effects => up(&mut self.effects),
             Setting::Dialogue => up(&mut self.dialogue),
             Setting::Fullscreen => self.fullscreen = !self.fullscreen,
+            Setting::Vsync => self.vsync = !self.vsync,
+            Setting::AntiAlias => self.aa = (self.aa + 1) % 3,
             Setting::Detail => self.detail = (self.detail + 1) % 3,
             Setting::Background => self.background = !self.background,
             Setting::Flags => self.flags = !self.flags,
             Setting::Difficulty => self.difficulty = (self.difficulty + 1) % 3,
             Setting::RestoreDisplay => {
                 let d = Self::default();
-                (self.fullscreen, self.detail, self.background, self.flags) = (d.fullscreen, d.detail, d.background, d.flags);
+                (self.fullscreen, self.vsync, self.aa, self.detail, self.background, self.flags) = (d.fullscreen, d.vsync, d.aa, d.detail, d.background, d.flags);
             }
         }
     }
@@ -123,6 +143,8 @@ impl Settings {
         if display {
             vec![
                 (Setting::Fullscreen, "Video Mode", if self.fullscreen { "Fullscreen" } else { "Windowed" }.into()),
+                (Setting::Vsync, "VSync", on(self.vsync)),
+                (Setting::AntiAlias, "Anti-Aliasing", ["Off", "SMAA", "MSAA 4x"][self.aa.min(2) as usize].into()),
                 (Setting::Detail, "Effect Detail", ["Low", "Medium", "High"][self.detail.min(2) as usize].into()),
                 (Setting::Background, "Render Background", on(self.background)),
                 (Setting::Flags, "Flag Waving", on(self.flags)),
@@ -139,7 +161,7 @@ impl Settings {
 }
 
 /// Pushes the options into the running app: volume levels, window mode, detail.
-pub(super) fn apply_settings(settings: Res<Settings>, mut window: Query<&mut Window, With<bevy::window::PrimaryWindow>>) {
+pub(super) fn apply_settings(settings: Res<Settings>, vtime: Res<Time<Virtual>>, mut window: Query<&mut Window, With<bevy::window::PrimaryWindow>>) {
     if !settings.is_changed() {
         return;
     }
@@ -148,10 +170,16 @@ pub(super) fn apply_settings(settings: Res<Settings>, mut window: Query<&mut Win
     }
     DETAIL.store(settings.detail, std::sync::atomic::Ordering::Relaxed);
     DIFFICULTY.store(settings.difficulty, std::sync::atomic::Ordering::Relaxed);
+    AA.store(settings.aa, std::sync::atomic::Ordering::Relaxed);
+    VSYNC.store(settings.vsync, std::sync::atomic::Ordering::Relaxed);
+    let present = crate::present_mode(crate::profiling(), vtime.relative_speed());
     let mode = if settings.fullscreen { bevy::window::WindowMode::BorderlessFullscreen(bevy::window::MonitorSelection::Current) } else { bevy::window::WindowMode::Windowed };
     for mut w in &mut window {
         if w.mode != mode {
             w.mode = mode;
+        }
+        if w.present_mode != present {
+            w.present_mode = present;
         }
     }
 }

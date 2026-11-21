@@ -513,21 +513,23 @@ fn sound_display_page(ctx: &Ctx, c: &mut ChildSpawnerCommands, display: bool, in
     settings_frame(ctx, c, ingame, (Page::Options, Screen::Options));
     let title = if display { "IDGS_TPFRONTENDTEXT_SCREENS_DISPLAY_OPTIONS" } else { "IDGS_TPFRONTENDTEXT_SCREENS_SOUND_OPTIONS" };
     ctx.text(c, "BlackChancery22", &s(title), 250.0, 300.0, if ingame { 190.0 } else { 160.0 }, true, SETTINGS_GOLD);
-    let (top, step, l, r) = if ingame { (215.0, 38.0, 170.0, 630.0) } else { (205.0, 50.0, 60.0, 700.0) };
+    // Display has six rows (two more than retail), so they sit closer; in game the last must clear the back arrow.
+    let (top, step, l, r) = match (ingame, display) {
+        (true, false) => (215.0, 38.0_f32, 170.0, 630.0),
+        (true, true) => (195.0, 32.0, 170.0, 630.0),
+        (false, false) => (205.0, 50.0, 60.0, 700.0),
+        (false, true) => (205.0, 44.0, 60.0, 700.0),
+    };
+    let h = step.min(36.0) - 4.0;
     for (i, (setting, label, value)) in settings.rows(display).into_iter().enumerate() {
         let y = top + step * i as f32;
-        ctx.text(c, if display { "UniversLightBold14" } else { "UniversBold14" }, label, l, 220.0, y + 16.0, false, Color::WHITE);
-        ctx.text_button(c, [l + (r - l) * 0.5, y, r, y + 32.0], &value, "BlackChancery16", Action::Setting(setting));
+        ctx.text(c, if display { "UniversLightBold14" } else { "UniversBold14" }, label, l, 220.0, y + h * 0.5, false, Color::WHITE);
+        ctx.text_button(c, [l + (r - l) * 0.5, y, r, y + h], &value, "BlackChancery16", Action::Setting(setting));
     }
     if display {
-        let y = top + step * 4.0;
-        ctx.text_button(
-            c,
-            [l, y, l + 200.0, y + 32.0],
-            &s("IDGS_TPFRONTENDTEXT_SCREENS_RESTORE_DEFAULTS"),
-            "BlackChancery16",
-            Action::Setting(crate::menu::Setting::RestoreDisplay),
-        );
+        // In game: on the back arrow's row, left of it.
+        let rect = if ingame { [l, 426.0, l + 170.0, 458.0] } else { [l, top + step * 6.0, l + 200.0, top + step * 6.0 + 32.0] };
+        ctx.text_button(c, rect, &s("IDGS_TPFRONTENDTEXT_SCREENS_RESTORE_DEFAULTS"), "BlackChancery16", Action::Setting(crate::menu::Setting::RestoreDisplay));
     }
 }
 
