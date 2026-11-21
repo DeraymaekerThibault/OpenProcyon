@@ -106,7 +106,9 @@ class BakeSky(unittest.TestCase):
         )
         self.assertGreater(stars.max(), 0)
         self.assertEqual((clouds.shape, clouds.dtype), ((192, 32, 4), np.uint8))
-        self.assertGreater(clouds[..., 3].max(), 0, "the gas is a clouds cube with alpha")
+        self.assertGreater(
+            clouds[..., 3].max(), 0, "the gas is a clouds cube with alpha"
+        )
         self.assertLessEqual(clean.astype(int).sum(), whole.astype(int).sum())
         self.assertTrue((clean != whole).any(), "the stars are not in the nebula cube")
 

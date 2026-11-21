@@ -558,7 +558,12 @@ def assemble_job(glb, out, tmp, split_stars):
         Image.fromarray(img, "RGB").save(part, "PNG", compress_level=6)
     note = ""
     stack = lambda kind: np.concatenate(
-        [np.load(tmp / f"{glb.stem}.{f}.{k}.{kind}.npy") for f in range(6) for k in range(BANDS)], 0
+        [
+            np.load(tmp / f"{glb.stem}.{f}.{k}.{kind}.npy")
+            for f in range(6)
+            for k in range(BANDS)
+        ],
+        0,
     )
     clouds_dst = dst.with_name(f"{glb.stem}_clouds.png")
     if split_stars:
@@ -655,12 +660,28 @@ def main(argv=None):
         # The gas as three clouds layers over the backdrop (the baked clouds cube is a source of the `sky` block); a render
         # profile's own entry for a sky wins. Without a profile with a `sky` block this file does nothing.
         near = [
-            {"source": "clouds", "distance": 6000, "opacity": 0.5, "haze": 0.4, "scale": 2.0, "drift": [0.6, 0.25, 0.0]},
-            {"source": "clouds", "distance": 2500, "opacity": 0.35, "haze": 0.15, "scale": 3.0, "drift": [1.5, 0.6, 0.0]},
+            {
+                "source": "clouds",
+                "distance": 6000,
+                "opacity": 0.5,
+                "haze": 0.4,
+                "scale": 2.0,
+                "drift": [0.6, 0.25, 0.0],
+            },
+            {
+                "source": "clouds",
+                "distance": 2500,
+                "opacity": 0.35,
+                "haze": 0.15,
+                "scale": 3.0,
+                "drift": [1.5, 0.6, 0.0],
+            },
         ]
         skies = {g.stem: {"near": near} for g in glbs}
         (out / "data" / "render").mkdir(parents=True, exist_ok=True)
-        (out / "data" / "render" / "skies.json").write_text(json.dumps(skies, indent=2) + "\n")
+        (out / "data" / "render" / "skies.json").write_text(
+            json.dumps(skies, indent=2) + "\n"
+        )
     # Written last, so a bake that failed or was stopped does not show in the Mods screen as a finished mod.
     (out / "mod.json").write_text(json.dumps(MOD, indent=2) + "\n")
     print(f"done: switch on '{MOD['name']}' in the Mods screen (or --mod {out})")
