@@ -116,7 +116,7 @@ pub fn save_enabled_in(dir: &Path, mods: &[Installed]) {
 
 /// Object files that mods add keys to instead of replacing.
 const MERGED: &[&str] =
-    &["hud/scales.json", "data/collision.json", "data/weapons/guns.json", "data/weapons/bullets.json", "data/ai/weapons.json", "menu/strings.json", "data/render/skies.json"];
+    &["hud/scales.json", "data/collision.json", "data/weapons/guns.json", "data/weapons/bullets.json", "data/ai/weapons.json", "menu/strings.json", "data/render/skies.json", "data/render/nebulae.json"];
 
 fn read(p: &Path) -> Option<Value> {
     crate::data::try_json(p)
