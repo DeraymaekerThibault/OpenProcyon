@@ -59,6 +59,8 @@ impl Script {
             fired: vec![false; n],
             ran: vec![false; n],
             init_done: false,
+            start_rules: vec![],
+            start_at: None,
             briefing_opening: false,
             time: 0.0,
             flags: HashMap::new(),
@@ -136,6 +138,7 @@ impl Script {
     /// Advance the script by `dt`: timers, speech, rules. Returns the ECS effects and any speech file to start.
     pub fn step(&mut self, w: &[Unit], dt: f32, opening: bool) -> (Vec<Fx>, Option<String>) {
         self.time += dt;
+        let first_step = !self.init_done;
         // Timers wait out the opening briefing so the fleets stay put until it is done.
         for (k, v) in self.timers.iter_mut().filter(|_| !opening) {
             if !self.stopped.contains(k) {
@@ -169,18 +172,10 @@ impl Script {
             }
             self.ran[i] = true;
             info!("t={:.1} rule #{i} fired: {}", self.time, r.name.trim());
-            for a in &r.acts {
-                let from = out.len();
-                self.act(a, &w, &mut out, &r.name);
-                // Later rules must see visibility changes immediately, not one ECS frame later.
-                for fx in &out[from..] {
-                    if let Fx::Visible(ids, visible) = fx {
-                        for u in w.iter_mut().filter(|u| ids.contains(&u.e)) {
-                            u.visible = *visible;
-                        }
-                    }
-                }
-            }
+            self.run_acts(r, &mut w, &mut out);
+        }
+        if first_step {
+            self.fire_start_rules(&rules, &mut w, &mut out);
         }
         self.rules = rules;
         self.init_done = true;
@@ -199,6 +194,48 @@ impl Script {
             }
         }
         (out, voice)
+    }
+}
+
+impl Script {
+    /// Runs every action of `r` in order. Later rules must see visibility changes immediately, not one ECS frame later.
+    fn run_acts(&mut self, r: &Rule, w: &mut [Unit], out: &mut Vec<Fx>) {
+        for a in &r.acts {
+            let from = out.len();
+            self.act(a, w, out, &r.name);
+            for fx in &out[from..] {
+                if let Fx::Visible(ids, visible) = fx {
+                    for u in w.iter_mut().filter(|u| ids.contains(&u.e)) {
+                        u.visible = *visible;
+                    }
+                }
+            }
+        }
+    }
+
+    /// Debug aid for mission authors (`--fire-rule`, `--start-at`; not retail behaviour): once the world-initialise rules have run, the
+    /// actions of each named rule run in the order given as if its conditions had held, and the rule counts as having run, so a run-once
+    /// rule does not fire again. An unknown name is a warning listing the valid ones. `start_at` moves the primary ship.
+    fn fire_start_rules(&mut self, rules: &[Rule], w: &mut [Unit], out: &mut Vec<Fx>) {
+        for name in std::mem::take(&mut self.start_rules) {
+            let Some(i) = rules.iter().position(|r| r.name.trim() == name.trim()) else {
+                let valid: Vec<&str> = rules.iter().map(|r| r.name.trim()).collect();
+                warn!("--fire-rule {name:?}: no such rule; the mission's rules are {valid:?}");
+                continue;
+            };
+            if rules[i].once {
+                self.fired[i] = true;
+            }
+            self.ran[i] = true;
+            info!("t={:.1} rule #{i} fired at start (--fire-rule): {}", self.time, name.trim());
+            self.run_acts(&rules[i], w, out);
+        }
+        if let Some((x, y)) = self.start_at.take() {
+            match w.iter().find(|u| u.primary && u.alive) {
+                Some(p) => out.push(Fx::Teleport(vec![p.e], crate::data::conv(x, y, 0.0))),
+                None => warn!("--start-at: the mission has no primary ship to place"),
+            }
+        }
     }
 }
 

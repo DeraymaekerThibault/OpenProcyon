@@ -174,6 +174,9 @@ pub fn run(view: fn(&mut App), setup_view: fn(&mut App)) {
     let _ = ASSETS.set(modding::overlay(&base, &layers));
     let arg = |k: &str| args.iter().position(|a| a == k).and_then(|i| args.get(i + 1)).cloned();
     let shot = arg("--shot");
+    // Debug aids for mission authors: fire named rules at the start (repeatable) and place the primary ship (x,y in game units).
+    let at: Option<Vec<f32>> = arg("--start-at").map(|v| v.split(',').filter_map(|x| x.parse().ok()).collect());
+    campaign::set_start(args.windows(2).filter(|w| w[0] == "--fire-rule").map(|w| w[1].clone()).collect(), at.and_then(|c| (c.len() == 2).then(|| (c[0], c[1]))));
     let cfg = Config {
         groups: vec![],
         player: arg("--ship").unwrap_or(ship::DEFAULT_SHIP.into()),

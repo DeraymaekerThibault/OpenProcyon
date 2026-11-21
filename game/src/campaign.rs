@@ -353,6 +353,12 @@ pub fn load() -> Mission {
     load_id("mission01")
 }
 
+/// Debug launch options (`--fire-rule`, `--start-at`; not retail behaviour), set once by `run` and applied to every mission loaded.
+static START: std::sync::OnceLock<(Vec<String>, Option<(f32, f32)>)> = std::sync::OnceLock::new();
+pub fn set_start(rules: Vec<String>, at: Option<(f32, f32)>) {
+    let _ = START.set((rules, at));
+}
+
 pub fn load_id(id: &str) -> Mission {
     let read = |name: &str| {
         std::fs::read_to_string(assets_dir().join(format!("maps/{id}/{name}.json"))).unwrap_or_else(|_| panic!("missing maps/{id}/{name}.json: run tools.export_campaign"))
@@ -362,6 +368,9 @@ pub fn load_id(id: &str) -> Mission {
     let mut script = rules::Script::new(&data, media);
     // The scripted opening NIS (briefing.rs) only exists for mission 1; later missions start at once and run their own NIS rules.
     script.briefing_opening = id == "mission01";
+    if let Some((rules, at)) = START.get() {
+        (script.start_rules, script.start_at) = (rules.clone(), *at);
+    }
     Mission { id: id.into(), data, opening: script.briefing_opening.then(default), script }
 }
 

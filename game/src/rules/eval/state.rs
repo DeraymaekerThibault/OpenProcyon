@@ -11,6 +11,9 @@ pub struct Script {
     /// Rules that fired at least once, repeating ones included (the autoplay report lists the others).
     pub(in crate::rules) ran: Vec<bool>,
     pub(in crate::rules) init_done: bool,
+    /// Debug launch options (`--fire-rule`, `--start-at`, see `fire_start_rules`); consumed by the first step.
+    pub start_rules: Vec<String>,
+    pub start_at: Option<(f32, f32)>,
     /// The mission's opening NIS rules are played by briefing.rs instead (mission 1 only), so the interpreter skips them. Other
     /// missions (7, 8) have rules named "Opening NIS ..." of their own, which must run: mission 8's end its opening cutscene.
     pub briefing_opening: bool,
