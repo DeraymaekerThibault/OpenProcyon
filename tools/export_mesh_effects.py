@@ -1,6 +1,6 @@
 """Ambient effect points of mesh scenes: assets/data/mesh_effects.json = {scene: [{kind, name, descriptor, pos}]} for the MSB nodes of
 kind PlayEffect or VolcanoSmoke (fire stacks, smoke, lighthouse beams, volcano fountains, buoy light). `pos` is the node's own
-position in the scene's frame (x starboard, y forward, z up); `descriptor` names the effect ('default' leaves it to the node name).
+position moved with its mesh layer (`with_layer_offset`, as docks; x starboard, y forward, z up); `descriptor` names the effect ('default' leaves it to the node name).
 A node may carry several attributes (one volcano smoke node has both kinds) and gets one entry per attribute.
 `effect` is the effect file the world object names for the point (None for VolcanoSmoke points).
 usage: python -m tools.export_mesh_effects <game_root> <assets_dir>"""
@@ -12,6 +12,8 @@ import sys
 from pathlib import Path
 
 from tools.gamefs import ci_files
+from tools.mdb_to_glb import with_layer_offset
+from tools.msb import parse as parse_msb
 from tools.msb import parse_scene
 
 KINDS = ("PlayEffect", "VolcanoSmoke")
@@ -43,12 +45,22 @@ def export(root, out):
     effects = associations(root)
     for msb in ci_files(Path(root) / "BD_MeshScenes", "*.msb"):
         try:
-            scene = parse_scene(msb.read_bytes())
+            data = msb.read_bytes()
+            scene = parse_scene(data)
+            nodes = {n.id: n for n in parse_msb(data)}
         except (ValueError, struct.error) as e:
             print(
                 f"{msb.name}: skipped ({e})"
             )  # unreadable (modded) scene: no effect points
             continue
+        # The lighthouse beam hangs under a layer 8.6 below the object; without its offset it floated above the tower.
+        offsets = {
+            m["name"].lower(): tuple(
+                a - b for a, b in zip(m["pos"], m["pivot"], strict=True)
+            )
+            for m in scene["meshes"]
+        }
+        placed = {n.name: with_layer_offset(offsets, nodes, n) for n in nodes.values()}
         points = [
             dict(
                 kind=kind,
@@ -57,7 +69,7 @@ def export(root, out):
                 effect=effects.get((msb.stem, el["name"]))
                 if kind == "PlayEffect"
                 else None,
-                pos=[round(c, 3) for c in el["pos"]],
+                pos=[round(c, 3) for c in placed.get(el["name"], el["pos"])],
             )
             for group in ("nodes", "meshes", "bones")
             for el in scene[group]
