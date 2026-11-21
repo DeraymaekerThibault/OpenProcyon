@@ -11,6 +11,9 @@
 // Stars: a separate cube of point stars (16-bit linear light over the gain, bound at 103), each twinkling on a phase and rate
 // of its own, the bright ones deeper; the brightest stay above 1 so they bloom. Added as light (the dome is drawn
 // premultiplied: rgb is what is added, a how much of the picture behind is kept back).
+// Cloud layers (`source: clouds`): the same layers, but the lookup reads a painted cloud cube (bound at 107) instead of the sky's gas:
+// rgb is the lit cloud colour, alpha the coverage, each layer turned its own way. Haze sinks a far layer into the backdrop; their
+// coverage hides the stars behind them.
 // Black holes: every lookup (far sky, near gas, stars) goes along the view ray bent around each hole, toward its centre by
 // lensing * core / b (b: the ray's closest approach), fading out by the pull radius, so the clouds and stars smear into an
 // Einstein ring seamlessly; inside the core the sky is black (a round shadow at any camera angle). Drawn here, behind every
@@ -29,6 +32,8 @@ struct Layer {
     b: vec4<f32>,
     // xyz: the current, units a second
     c: vec4<f32>,
+    // x: 1 for a painted cloud layer (the clouds cube), 0 for the sky's own gas, y: haze
+    d: vec4<f32>,
 }
 
 struct Sky {
@@ -62,6 +67,9 @@ struct Sky {
 // the baked tiling noise (game/src/render/volnoise.rs): r the gas (three octaves), g the warp, b a third field; CELLS cells a tile
 @group(constants::MATERIAL_BIND_GROUP) @binding(105) var noise_tex: texture_3d<f32>;
 @group(constants::MATERIAL_BIND_GROUP) @binding(106) var noise_samp: sampler;
+// the painted clouds (`<sky>_clouds.png`, straight-alpha rgba, laid out like the sky cube); bound but unread when no layer asks for it
+@group(constants::MATERIAL_BIND_GROUP) @binding(107) var cloud_cube: texture_cube<f32>;
+@group(constants::MATERIAL_BIND_GROUP) @binding(108) var cloud_sampler: sampler;
 const CELLS: f32 = 8.0;
 
 fn hash3(p: vec3<f32>) -> f32 {
@@ -135,6 +143,17 @@ fn shooting_star(dir: vec3<f32>) -> f32 {
     }
     let line = exp(-(perp * perp) / (0.0012 * 0.0012));
     return sky.shoot.y * line * (1.0 - u / 0.14) * sin(3.14159 * t / life);
+}
+
+// each cloud layer looks the painting up through a turn of its own, so three layers of one painting are not copies
+fn cloud_turn(i: i32, v: vec3<f32>) -> vec3<f32> {
+    if i == 0 {
+        return v;
+    }
+    if i == 1 {
+        return v.yzx * vec3<f32>(-1.0, 1.0, 1.0);
+    }
+    return v.zxy * vec3<f32>(1.0, 1.0, -1.0);
 }
 
 // 0 with the camera inside a hole's shadow sphere or right beside it, 1 from two and a half core radii out
@@ -227,14 +246,45 @@ fn fragment(in: VertexOutput) -> FragmentOutput {
         alpha = a;
     }
 
+    // how much of the sky the painted clouds cover, so the stars behind them are hidden
+    var cover = 0.0;
     let count = i32(sky.info.x);
     for (var i = 0; i < 3; i = i + 1) {
         if i >= count {
             break;
         }
         let l = sky.layers[i];
+        if l.a.x <= 0.0 {
+            continue;
+        }
         // a point on the layer, moved by the camera and carried by the current
         let p = dir * l.a.w + view.world_position - l.c.xyz * frame.clock.y;
+        if l.d.x > 0.5 {
+            // painted clouds: one read of the clouds cube; alpha is the coverage, rgb the lit colour (straight alpha)
+            let q = cloud_turn(i, normalize(p));
+            let tex = textureSampleLevel(cloud_cube, cloud_sampler, q * vec3<f32>(1.0, 1.0, -1.0), 0.0);
+            var cov = tex.a;
+            if l.a.y > 0.0 || l.a.z > 0.0 {
+                cov = smoothstep(l.a.y, l.a.y + max(l.a.z, 0.01), cov);
+            }
+            if l.b.x > 0.0 {
+                // churning noise eats the edges: the dense cores stay, thin parts break into wisps
+                let n = q * l.b.x + vec3<f32>(f32(i) * 7.3);
+                let warp = bake(n * 0.7 + vec3<f32>(clock * 0.011, clock * 0.013, clock * 0.009)).rgb - vec3<f32>(0.5);
+                let f = bake(n + warp * 1.6 + vec3<f32>(0.0, 0.0, clock * 0.006)).r;
+                cov = cov * mix(smoothstep(0.32, 0.68, f), 1.0, cov * cov);
+            }
+            var col = tex.rgb * l.b.yzw;
+            // aerial perspective: flatter, and toward the backdrop behind it
+            let haze = l.d.y;
+            col = mix(col, vec3<f32>(dot(col, vec3<f32>(0.3333))), haze * 0.5);
+            col = mix(col, sample_sky(dir), haze);
+            let a = cov * l.a.x;
+            cover = 1.0 - (1.0 - cover) * (1.0 - a);
+            rgb = rgb * (1.0 - a) + col * lit * a;
+            alpha = alpha * (1.0 - a) + a;
+            continue;
+        }
         // turned and mirrored, so the layer is not the sky's own picture laid over itself
         let q = normalize(p).zxy * vec3<f32>(1.0, -1.0, 1.0);
         let gas = textureSampleLevel(sky_cube, sky_sampler, q, 0.0).rgb * l.b.yzw;
@@ -264,7 +314,7 @@ fn fragment(in: VertexOutput) -> FragmentOutput {
         let rate = sky.stars.z * (0.6 + 0.8 * hash3(cell + vec3<f32>(7.0)));
         let wave = 0.5 + 0.5 * sin(clock * 6.2831853 * rate + phase);
         let depth = sky.stars.y * smoothstep(0.03, 0.6, strength);
-        stars = light * (1.0 - depth * wave) * sky.stars.x;
+        stars = light * (1.0 - depth * wave) * sky.stars.x * (1.0 - cover);
     }
     stars += vec3<f32>(0.85, 0.92, 1.0) * shooting_star(dir);
 
