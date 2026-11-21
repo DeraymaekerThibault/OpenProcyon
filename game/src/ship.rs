@@ -55,6 +55,7 @@ pub struct Ship {
     pub net: f32,              // energy nets on the hull: product of (1 - dissipated) over the active nets; 1.0 = free
     pub avoid: f32,            // speed fraction with land close ahead (collision::contact_slow, AI ships only); 1.0 = clear
     pub helm: Helm,            // rudder and torque boost as last set by the steer-to-point routine, held between its runs
+    pub towed: bool,          // on the end of a tow cable (rules `Tow Ship`): the cable sets its speed, its own engine does not brake it
 }
 
 /// The original runs its steer-to-point law once per think (`THINK_SECS`) and keeps the rudder between runs; the physics still
@@ -91,6 +92,7 @@ impl Ship {
             net: 1.0,
             avoid: 1.0,
             helm: Helm::default(),
+            towed: false,
         }
     }
 
@@ -414,7 +416,9 @@ pub fn step(ship: &mut Ship, tf: &mut Transform, class: &combat::Class, health: 
 pub fn helm_step(ship: &mut Ship, tf: &mut Transform, class: &combat::Class, health: &Health, dt: f32, ai: bool) {
     {
         let ph = &class.phys;
-        let drag = ph.thrust / ph.mass / ph.max_speed; // 1/s; retail settles with this rate for every order change
+        // 1/s; retail settles with this rate for every order change. A towed hull coasts: with its helm at rest its engine would
+        // otherwise brake the whole tow (a First Rate towing a merchant crawled at 28 % of its speed, a tug at 86 %).
+        let drag = if ship.towed { 0.0 } else { ph.thrust / ph.mass / ph.max_speed };
         let fraction = ship.ordered();
         let target = fraction * max_speed(ship, class, health) * ship.avoid;
         let mut want = None;
