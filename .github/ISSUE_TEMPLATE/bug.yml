@@ -23,6 +23,14 @@ body:
       label: What the original does
       description: If you know it, how the original game behaves in the same situation.
   - type: input
+    id: mods
+    attributes:
+      label: Mods switched on
+      description: Try again with third-party mods switched off first. A problem that only happens with a mod goes to that mod's author.
+      placeholder: none
+    validations:
+      required: true
+  - type: input
     id: version
     attributes:
       label: Version and system
