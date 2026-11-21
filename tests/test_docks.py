@@ -26,6 +26,26 @@ def glb_xz(path):
     return np.stack([xyz[:, 0], -xyz[:, 2]], axis=1)
 
 
+def glb_xyz(path):
+    """Vertices of a GLB's undamaged layers placed by their node translation, in the game's (x, y, z)."""
+    b = path.read_bytes()
+    n = struct.unpack("<I", b[12:16])[0]
+    g = json.loads(b[20 : 20 + n])
+    start = 20 + n + 8
+    pts = []
+    for node in g["nodes"]:
+        if "mesh" not in node or "Damage" in node["name"]:
+            continue
+        for pr in g["meshes"][node["mesh"]]["primitives"]:
+            a = g["accessors"][pr["attributes"]["POSITION"]]
+            v = g["bufferViews"][a["bufferView"]]
+            off = start + v.get("byteOffset", 0) + a.get("byteOffset", 0)
+            xyz = np.frombuffer(b, "<f4", a["count"] * 3, off).reshape(-1, 3)
+            pts.append(xyz + node.get("translation", [0, 0, 0]))
+    xyz = np.concatenate(pts)
+    return np.stack([xyz[:, 0], -xyz[:, 2], xyz[:, 1]], axis=1)
+
+
 class DockExportTests(unittest.TestCase):
     @needs_assets
     def test_exported_dock_points(self):
@@ -125,6 +145,20 @@ class DockExportTests(unittest.TestCase):
             "points"
         ][0]
         self.assertLess(abs(dock["pos"][2]), 0.05)
+
+    @needs_assets
+    def test_base_boarding_points_lie_on_the_model(self):
+        # Like the docks: the node's own position moved with its layer. The scene chain minus the first section
+        # left these points 6 to 17 off the model, mostly below it.
+        d = json.loads((ASSETS / "data/boarding.json").read_text())
+        for name, scene in [
+            ("Base_Regina", "BaseRegina"),
+            ("Base_Montgomery", "BaseMontgomery"),
+        ]:
+            xyz = glb_xyz(next((ASSETS / "models").rglob(f"{scene}.glb")))
+            for p in d[name]["points"]:
+                gap = np.linalg.norm(xyz - np.array(p), axis=1).min()
+                self.assertLess(gap, 5, f"{name} {p}")
 
 
 if __name__ == "__main__":
