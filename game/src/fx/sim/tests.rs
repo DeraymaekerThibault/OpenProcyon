@@ -166,3 +166,55 @@ fn scene_budget_only_bites_above_the_budget() {
     assert_eq!(scene_budget_factor(15_000), 1.0);
     assert!((scene_budget_factor(30_000) - 0.5).abs() < 1e-6);
 }
+
+#[test]
+fn attraction_is_constant_along_the_unit_direction() {
+    // Retail: a constant k accelerates by |k| units/s^2 at any distance (Star mortar glow: 20 and 27 outward).
+    for d in [2.0, 70.0] {
+        let a = attraction(Vec3::new(d, 0.0, 0.0), [-20.0, 0.0, 0.0]);
+        assert!((a - Vec3::new(-20.0, 0.0, 0.0)).length() < 1e-5, "{a} at {d}");
+    }
+    assert!((attraction(Vec3::new(0.0, 4.0, 0.0), [0.0, 8.0, 16.0]) - Vec3::new(0.0, 3.0, 0.0)).length() < 1e-5);
+    assert_eq!(attraction(Vec3::ZERO, [5.0, 1.0, 1.0]), Vec3::ZERO);
+}
+
+/// Runs one effect at full detail for `ticks` and returns each primitive's particle distances from the origin.
+fn run_effect(name: &str, ticks: usize) -> Vec<Vec<f32>> {
+    let mut app = App::new();
+    app.init_resource::<Time>().init_resource::<FxLib>().insert_resource(FxRng(7)).add_systems(Update, update_fx);
+    let e = app.world_mut().resource_scope(|world, lib: Mut<FxLib>| spawn(&mut world.commands(), &lib, name, None, Transform::default(), Transform::default(), false).unwrap());
+    app.world_mut().flush();
+    for _ in 0..ticks {
+        app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs_f32(TICK));
+        app.update();
+    }
+    app.world().get::<Fx>(e).unwrap().prims.iter().map(|p| p.parts.iter().map(|q| q.pos.length()).collect()).collect()
+}
+
+fn median(mut v: Vec<f32>) -> f32 {
+    v.sort_by(f32::total_cmp);
+    v[v.len() / 2]
+}
+
+#[test]
+#[ignore = "needs imported assets"]
+fn star_mortar_glow_reaches_the_retail_radius_at_three_seconds() {
+    // Retail (particles read from the running game): at 2.97 s the two glows' median radius is 72 and 96.5 units, from rest at 1.5-2.4.
+    let r = run_effect("StarMortar_Heavy_Impact", 90);
+    assert_eq!((r[0].len(), r[1].len()), (50, 200));
+    let (a, b) = (median(r[0].clone()), median(r[1].clone()));
+    assert!((a - 72.0).abs() < 6.0 && (b - 96.5).abs() < 8.0, "medians {a} {b}");
+}
+
+#[test]
+#[ignore = "needs imported assets"]
+fn gravity_well_ring_is_three_key_bursts_swinging_through_the_centre() {
+    // Retail: the ring gets the rate key's 180 at 0.3, 0.8 and 1.3 s (x detail), the particles live on, and a constant pull of
+    // 5 units/s^2 brings the ring (radius 10-11) to the centre in about 2 s.
+    let r = run_effect("GravCharge_Medium_Impact", 15);
+    assert_eq!((r[0].len(), r[1].len(), r[2].len()), (180, 50, 3));
+    assert_eq!(run_effect("GravCharge_Medium_Impact", 45)[0].len(), 540);
+    let r = run_effect("GravCharge_Medium_Impact", 100);
+    assert!(r[0].iter().cloned().fold(f32::MAX, f32::min) < 2.0, "the first burst reached the centre by 3.3 s");
+    assert!(r[0].iter().all(|&d| d < 12.5), "and nothing flew off");
+}

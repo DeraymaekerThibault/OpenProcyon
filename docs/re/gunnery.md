@@ -146,11 +146,10 @@ skirmish, the shell position sampled about 30 times a second.
   so a resting Cutter is dragged in near the peak and a Man-O-War barely moves. PROVISIONAL: the scale is the black hole's,
   and that ships under way are unmoved by a well is assumed from it.
 
-- **Star mortar impact glow** (`StarMortar_Heavy_Impact`): its two particle systems start at rest next to the centre and an
-  attractor term that flips from +5 to -20 / -27 after 0.5 s pushes them outward without limit (about 12-50 units at 1 s, hundreds
-  at 1.5 s). The effect's authored `EffectMaxRadius` is 200 (the other effects that set one use it as their extent: black hole
-  ribbons 200 / 400 / 800, the gravity charge impact 20 for its radius-10 ring). Remake: particles of this effect that pass 200 units
-  from the burst are removed (`fx::Effect::bound`). PROVISIONAL (owner's choice): no retail code that removes them was found.
+- **Star mortar impact glow** (`StarMortar_Heavy_Impact`): both particle systems start at rest within 1.5-4 units of the centre;
+  the attractor (effects.md: constant acceleration along the unit direction) goes from +5 to -20 / -27 over 0.5 s, so they then
+  speed up outward at 20 and 27 units/s^2. Checked on the original's running game: median radius 72 and 96.5 units at 2.97 s,
+  when the 3 s effect ends. Nothing removes them early and nothing needs to.
 
 ## Who each gun shoots at, and lob aim points of computer ships (read from the original's code)
 - **Panic fire** (the player's button, refused while the ship is docked) goes through every gun bank in two passes. First pass: banks
