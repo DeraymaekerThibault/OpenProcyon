@@ -1,9 +1,41 @@
 #!/usr/bin/env bash
 # Screenshot run that works with or without a display: uses Xvfb + Mesa software Vulkan when there is no $DISPLAY (Windows always has one).
 # usage: tools/shot.sh <out.png> [game args...]   e.g. tools/shot.sh local/x.png --shot-frame 300 --script damage
-set -euo pipefail
+# --shot-frame takes one frame (file: <out.png>) or a list, 100,200,300 (files: <out>_100.png, <out>_200.png, ...). Pictures are 1280x720.
+# Prints each saved file and the elapsed time; exits non-zero when a picture is missing or black (retry with WAYLAND_DISPLAY=).
+set -uo pipefail
 out=$(realpath -m "$1"); shift
-cd "$(dirname "$0")/../game"
-if [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || [ "$(uname -o 2>/dev/null)" = Msys ]; then exec cargo run --release -- --shot "$out" "$@"; fi
-[[ " $* " == *" --late-frame "* ]] || set -- --late-frame 0 "$@"  # the frame-9000 shot takes ~10 min in software
-exec xvfb-run -a -s "-screen 0 1280x720x24" env WGPU_BACKEND=vulkan cargo run --release -- --shot "$out" "$@"
+root="$(cd "$(dirname "$0")/.." && pwd)"
+if [ -z "${PROCYON_ASSETS:-}" ] && [ ! -d "$root/assets" ]; then  # fresh linked worktree: use the main checkout's import
+    common=$(git -C "$root" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)
+    if [ -n "$common" ] && [ -d "$(dirname "$common")/assets" ] && [ "$(dirname "$common")" != "$root" ]; then
+        export PROCYON_ASSETS="$(dirname "$common")/assets"; echo "shot.sh: no assets/ here, using $PROCYON_ASSETS"
+    fi
+fi
+frames=500; prev=
+for a in "$@"; do [ "$prev" = --shot-frame ] && frames=$a; prev=$a; done
+expected=()
+if [[ "$frames" == *,* ]]; then for f in ${frames//,/ }; do expected+=("${out%.png}_$f.png"); done; else expected=("$out"); fi
+rm -f "${expected[@]}"
+cd "$root/game"
+start=$SECONDS
+if [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || [ "$(uname -o 2>/dev/null)" = Msys ]; then
+    cargo run --release -- --shot "$out" "$@"; code=$?
+else
+    xvfb-run -a -s "-screen 0 1280x720x24" env WGPU_BACKEND=vulkan cargo run --release -- --shot "$out" "$@"; code=$?
+fi
+elapsed=$((SECONDS - start))
+[ "$code" -eq 0 ] || { echo "shot.sh: the game exited with status $code" >&2; exit "$code"; }
+status=0
+for f in "${expected[@]}"; do
+    if [ ! -s "$f" ]; then echo "shot.sh: missing picture $f" >&2; status=1; continue; fi
+    python3 - "$f" <<'PY' || { echo "shot.sh: $f is black; on Wayland retry with WAYLAND_DISPLAY=" >&2; status=1; continue; }
+import sys
+from PIL import Image
+im = Image.open(sys.argv[1]).convert("RGB")
+sys.exit(1 if max(hi for _, hi in im.getextrema()) < 12 else 0)
+PY
+    echo "shot.sh: saved $f"
+done
+echo "shot.sh: ${elapsed}s"
+exit "$status"

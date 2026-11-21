@@ -204,6 +204,7 @@ fn border_dispute_keeps_the_humans_command_ship() {
             script: None,
             autolaunch: false,
             shot_frame: 0,
+            shot_frames: vec![],
             late_frame: 0,
         });
     app.world_mut()

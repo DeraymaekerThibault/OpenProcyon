@@ -80,7 +80,10 @@ pub struct Config {
     script: Option<smoke::Script>,
     /// `--autolaunch`: the lobby fills the fleet and starts the battle (dev/smoke hook).
     autolaunch: bool,
+    /// `--shot-frame`: the last requested frame (scripts time themselves off it).
     shot_frame: u32,
+    /// Every `--shot-frame` entry, ascending.
+    shot_frames: Vec<u32>,
     late_frame: u32,
 }
 
@@ -177,6 +180,7 @@ pub fn run(view: fn(&mut App), setup_view: fn(&mut App)) {
     // Debug aids for mission authors: fire named rules at the start (repeatable) and place the primary ship (x,y in game units).
     let at: Option<Vec<f32>> = arg("--start-at").map(|v| v.split(',').filter_map(|x| x.parse().ok()).collect());
     campaign::set_start(args.windows(2).filter(|w| w[0] == "--fire-rule").map(|w| w[1].clone()).collect(), at.and_then(|c| (c.len() == 2).then(|| (c[0], c[1]))));
+    let shot_frames = parse_shot_frames(arg("--shot-frame").as_deref());
     let cfg = Config {
         groups: vec![],
         player: arg("--ship").unwrap_or(ship::DEFAULT_SHIP.into()),
@@ -189,11 +193,17 @@ pub fn run(view: fn(&mut App), setup_view: fn(&mut App)) {
         ended: None,
         script,
         autolaunch: args.iter().any(|a| a == "--autolaunch"),
-        shot_frame: arg("--shot-frame").and_then(|v| v.parse().ok()).unwrap_or(500),
-        late_frame: arg("--late-frame").and_then(|v| v.parse().ok()).unwrap_or(9000), // 0: no _late shot (slow software rendering)
+        shot_frame: shot_frames.last().copied().unwrap_or(500),
+        shot_frames,
+        late_frame: arg("--late-frame").and_then(|v| v.parse().ok()).unwrap_or(0), // 0: no _late shot
     };
     App::new()
-        .add_plugins(DefaultPlugins.set(AssetPlugin { file_path: assets_dir().to_string_lossy().into_owned(), ..default() }).set(logging::plugin()))
+        .add_plugins(
+            DefaultPlugins
+                .set(AssetPlugin { file_path: assets_dir().to_string_lossy().into_owned(), ..default() })
+                .set(logging::plugin())
+                .set(WindowPlugin { primary_window: Some(shot_window(shot.is_some())), ..default() }),
+        )
         .add_plugins((clips::plugin, render::plugin))
         .add_plugins((
             fx::plugin,
@@ -531,10 +541,46 @@ fn profile_counts(
     );
 }
 
+/// `--shot-frame 100,200`: the frames to save, ascending. Nothing parsable (or no flag) means frame 500.
+fn parse_shot_frames(arg: Option<&str>) -> Vec<u32> {
+    let mut frames: Vec<u32> = arg.unwrap_or("").split(',').filter_map(|v| v.trim().parse().ok()).collect();
+    frames.sort_unstable();
+    frames.dedup();
+    if frames.is_empty() { vec![500] } else { frames }
+}
+
+/// File for each requested frame: the `--shot` path itself for one frame, `<stem>_<frame>.png` for a list.
+fn shot_paths(path: &str, frames: &[u32]) -> Vec<(u32, String)> {
+    let several = frames.len() > 1;
+    frames.iter().map(|&f| (f, if several { path.replace(".png", &format!("_{f}.png")) } else { path.to_string() })).collect()
+}
+
+/// Screenshot runs render at 1280x720 physical pixels on every backend (scale factor 1), so pictures compare; interactive runs keep the default window.
+fn shot_window(shooting: bool) -> Window {
+    if !shooting {
+        return Window::default();
+    }
+    Window { resolution: bevy::window::WindowResolution::new(1280, 720).with_scale_factor_override(1.0), resizable: false, ..default() }
+}
+
+/// Whether a screenshot run is over. Every requested picture must be on disk (`saved` counts finished writes). A scripted run
+/// then goes on `SCRIPT_TAIL` frames, because smoke scripts assert after their picture (`pause` at frame 70, `fleet` up to 130).
+/// A battle that ended stops 150 frames later and the `restart` script at frame 560.
+fn run_is_over(frame: u32, last_shot: u32, saved: usize, wanted: usize, scripted: bool, ended: Option<u32>, restart: bool) -> bool {
+    const SCRIPT_TAIL: u32 = 100;
+    let pictures_done = saved >= wanted && frame >= last_shot + if scripted { SCRIPT_TAIL } else { 0 };
+    ended.is_some_and(|e| frame >= e + 150) || pictures_done || (restart && frame >= 560)
+}
+
+static SHOTS_SAVED: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
 fn screenshot(mut commands: Commands, mut cfg: ResMut<Config>) {
     let Some(path) = cfg.shot.clone() else { return };
     cfg.frame += 1;
-    let mut shots = vec![(cfg.shot_frame, path.clone()), (cfg.late_frame, path.replace(".png", "_late.png"))];
+    let mut shots = shot_paths(&path, &cfg.shot_frames);
+    if cfg.late_frame > 0 {
+        shots.push((cfg.late_frame, path.replace(".png", "_late.png")));
+    }
     if cfg.script.as_deref() == Some("speedtest") {
         for (order, label) in ["stop", "slow", "full", "emergency"].iter().enumerate() {
             shots.push((45 + order as u32 * 90, path.replace(".png", &format!("_{label}.png"))));
@@ -543,12 +589,18 @@ fn screenshot(mut commands: Commands, mut cfg: ResMut<Config>) {
     if let Some(end) = cfg.ended {
         shots.push((end + 90, path.replace(".png", "_end.png")));
     }
-    for (frame, p) in shots {
-        if cfg.frame == frame {
-            commands.spawn(bevy::render::view::screenshot::Screenshot::primary_window()).observe(bevy::render::view::screenshot::save_to_disk(p));
+    let last = shots.iter().map(|s| s.0).max().unwrap_or(0);
+    for (frame, p) in &shots {
+        if cfg.frame == *frame {
+            let mut save = bevy::render::view::screenshot::save_to_disk(p.clone());
+            commands.spawn(bevy::render::view::screenshot::Screenshot::primary_window()).observe(move |event: On<bevy::render::view::screenshot::ScreenshotCaptured>| {
+                save(event);
+                SHOTS_SAVED.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            });
         }
     }
-    if cfg.ended.is_some_and(|e| cfg.frame >= e + 150) || cfg.frame >= cfg.late_frame.max(cfg.shot_frame) + 100 || (cfg.script.as_deref() == Some("restart") && cfg.frame >= 560) {
+    let saved = SHOTS_SAVED.load(std::sync::atomic::Ordering::SeqCst);
+    if run_is_over(cfg.frame, last, saved, shots.len(), cfg.script.is_some(), cfg.ended, cfg.script.as_deref() == Some("restart")) {
         std::process::exit(0);
     }
 }
@@ -574,6 +626,24 @@ mod tests {
         let pts = [Vec3::new(5.0, 0.0, 0.0), Vec3::new(1.0, 1.0, 0.0), Vec3::new(-9.0, 0.0, 0.0)];
         assert_eq!(nearest(pts, Vec3::ZERO, |p| *p), Some(pts[1]));
         assert_eq!(nearest(Vec::<Vec3>::new(), Vec3::ZERO, |p| *p), None);
+    }
+    #[test]
+    fn shot_frames_parse_sort_and_name_their_files() {
+        assert_eq!(parse_shot_frames(None), vec![500]);
+        assert_eq!(parse_shot_frames(Some("300,100,200,100")), vec![100, 200, 300]);
+        assert_eq!(parse_shot_frames(Some("x")), vec![500]);
+        assert_eq!(shot_paths("a/x.png", &[300]), vec![(300, "a/x.png".to_string())], "one frame keeps the plain name");
+        assert_eq!(shot_paths("a/x.png", &[100, 200]), vec![(100, "a/x_100.png".to_string()), (200, "a/x_200.png".to_string())]);
+    }
+    #[test]
+    fn a_run_ends_once_pictures_are_saved() {
+        assert!(!run_is_over(300, 300, 0, 1, false, None, false), "picture not written yet");
+        assert!(run_is_over(303, 300, 1, 1, false, None, false), "plain run stops at the save");
+        assert!(!run_is_over(350, 300, 1, 1, true, None, false), "scripts keep asserting after their picture");
+        assert!(run_is_over(400, 300, 1, 1, true, None, false));
+        assert!(!run_is_over(450, 300, 1, 2, false, None, false), "second picture missing");
+        assert!(run_is_over(560, 300, 0, 1, true, None, true), "restart script");
+        assert!(run_is_over(250, 900, 0, 1, true, Some(100), false), "battle ended long ago");
     }
     #[test]
     fn p99_is_the_nearest_rank_sample() {

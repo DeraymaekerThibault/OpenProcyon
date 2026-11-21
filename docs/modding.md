@@ -34,6 +34,10 @@ ship and changes only the keys you give. Try it with `./openprocyon --mod /path/
   redistribution; put a `LICENSE` file in the folder.
 - **Say which engine you need.** The engine is pre-1.0: file layouts can still change and a mod may need small fixes after an
   update. Give the OpenProcyon version (or later) you tested with. `game_version` and `requires` in `mod.json` are not read yet.
+- **You support your mod.** The project maintains the engine and the examples in `mods/`, nothing else. Questions and bugs
+  about a mod go to its author. Report a problem to OpenProcyon only when it also happens with no third-party mods switched on,
+  or when a few files of your own show it. This guide is the help there is for making mods: there is no promise of an answer to
+  questions about a particular mod.
 - **Engine changes go upstream.** If a mod needs something files cannot express, open an issue describing it, or a pull request
   ([CONTRIBUTING.md](../CONTRIBUTING.md)). Generic features that help every mod are welcome; a feature only one mod uses is better
   done in that mod.

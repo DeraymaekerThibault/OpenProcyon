@@ -60,9 +60,11 @@ files to `content/`, or anything that publishes (pushing tags, releases).
 - Import once: `make assets ARGS='--game "/path/to/Treasure Planet Battle at Procyon"'` (or put `PROCYON_GAME_ROOT` in `.env`).
   Re-import after changing an exporter. Installs with community mods import too; vanilla must always work.
 - Run: `make run [ARGS='--mission 1']`. Interactive runs open the main menu; `--map <id>` / `--mission N` start a battle.
-- Screenshots: `tools/shot.sh local/x.png --shot-frame N [--script fxtest|victory|defeat|restart|course|target|damage|dock|...]
-  [--map red_rover] [--menu skirmish] [--dist D --yaw Y --pitch P]`. Without a display it uses Xvfb + software Vulkan.
-  On some Wayland sessions the window renders black; prefix `WAYLAND_DISPLAY=` to force X11. Runs take ~20 s.
+- Screenshots: `tools/shot.sh local/x.png --shot-frame N[,M,...] [--script fxtest|victory|defeat|restart|course|target|damage|dock|...]
+  [--map red_rover] [--menu skirmish] [--dist D --yaw Y --pitch P]`. One frame writes `local/x.png`; a list writes `local/x_N.png`, `local/x_M.png`
+  in one run. Pictures are 1280x720 on every backend and the run ends right after the last one (about 8 s for frame 300; `--late-frame N`
+  adds a `_late` picture). The script prints what it saved and fails on a missing or black picture; in a fresh worktree it uses the main
+  checkout's `assets/`. Without a display it uses Xvfb + software Vulkan. On some Wayland sessions the window renders black: prefix `WAYLAND_DISPLAY=`.
 
 ## Workflow
 
