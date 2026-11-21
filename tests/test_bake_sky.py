@@ -94,9 +94,10 @@ class BakeSky(unittest.TestCase):
     def test_split_stars_leave_the_nebula_clean_and_keep_the_light(self):
         tex = np.full((64, 64, 3), 90, np.uint8)
         pos, uv = uv_sphere(2, 0.5, -0.2, 0.5)
-        whole, none = bake_layers(tex, pos, uv, 32, seed=3, stars=400)
+        whole, none, no_clouds = bake_layers(tex, pos, uv, 32, seed=3, stars=400)
         self.assertIsNone(none)
-        clean, stars = bake_layers(
+        self.assertIsNone(no_clouds)
+        clean, stars, clouds = bake_layers(
             tex, pos, uv, 32, seed=3, stars=400, split_stars=True
         )
         self.assertEqual(
@@ -104,6 +105,10 @@ class BakeSky(unittest.TestCase):
             ((192, 32, 3), (192, 32, 3), np.uint16),
         )
         self.assertGreater(stars.max(), 0)
+        self.assertEqual((clouds.shape, clouds.dtype), ((192, 32, 4), np.uint8))
+        self.assertGreater(
+            clouds[..., 3].max(), 0, "the gas is a clouds cube with alpha"
+        )
         self.assertLessEqual(clean.astype(int).sum(), whole.astype(int).sum())
         self.assertTrue((clean != whole).any(), "the stars are not in the nebula cube")
 
@@ -114,19 +119,21 @@ class BakeSky(unittest.TestCase):
         size, seed = 24, 5
         want = [bake_layers(t, pos, uv, size, seed, 300, True) for t in skies]
         guides = [SkyGuide(t, pos, uv) for t in skies]
-        got = [([], []) for _ in skies]
+        got = [([], [], []) for _ in skies]
         for face in range(6):
             for band in range(BANDS):
                 base = FaceBase(
                     face, size, seed, 300, band
                 )  # computed once, used by both skies
                 for k, guide in enumerate(guides):
-                    neb, stars = shade_face(base, guide, True)
+                    neb, stars, clouds = shade_face(base, guide, True)
                     got[k][0].append(neb)
                     got[k][1].append(stars)
+                    got[k][2].append(clouds)
         for k in range(len(skies)):
             np.testing.assert_array_equal(np.concatenate(got[k][0]), want[k][0])
             np.testing.assert_array_equal(np.concatenate(got[k][1]), want[k][1])
+            np.testing.assert_array_equal(np.concatenate(got[k][2]), want[k][2])
 
     def test_16_bit_png_round_trips(self):
         img = np.arange(4 * 3 * 3, dtype=np.uint16).reshape(4, 3, 3) * 5000

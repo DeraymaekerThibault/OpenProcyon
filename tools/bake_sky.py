@@ -33,6 +33,11 @@ from PIL import Image, ImageFilter
 
 from tools.import_assets import user_dir
 
+# With --split-stars the sky is layers, like a painted one: a calm backdrop (the guide's smooth colour at this share), the
+# filamented gas as a clouds cube (alpha = how dense it is, so the engine's layers can slide it against the backdrop) and the stars.
+BACKDROP = 0.45
+CLOUD_ALPHA = 0.9
+
 MOD = {
     "id": "hd-skies",
     "name": "HD skies",
@@ -286,8 +291,8 @@ def nebula(d, fields, guide, rows, mapping, mean):
     core = np.clip(dens - 0.6, 0, 1)[..., None] ** 2
     col = col + core * luminance(col)[..., None] * 0.6
     # Where the retail art is black, a very faint haze in the sky's own mean colour keeps space from looking empty.
-    col = col + mean * (0.08 * haze)[..., None]
-    return col, dens
+    haze_col = mean * (0.08 * haze)[..., None]
+    return col + haze_col, dens, base * BACKDROP + haze_col
 
 
 def upscale(field, n):
@@ -446,13 +451,15 @@ class SkyGuide:
 
 
 def shade_face(base, sky, split_stars=False):
-    """(nebula band uint8, stars band uint16 or None) of one sky on the face band `base` was prepared for."""
+    """(sky band uint8, stars band uint16, clouds band RGBA uint8): the last two are None unless split_stars. Split, the sky
+    band is the calm backdrop, the gas is the clouds band and the stars their own band; else the sky band has all three."""
     size, rows = base.size, len(base.d)
     col = np.empty((rows, size, 3), np.float32)
+    back = np.empty((rows, size, 3), np.float32)
     dens = np.empty((rows, size), np.float32)
     step = max(1, CHUNK // size)
     for r in range(0, rows, step):
-        col[r : r + step], dens[r : r + step] = nebula(
+        col[r : r + step], dens[r : r + step], back[r : r + step] = nebula(
             base.d[r : r + step],
             base.fields[r : r + step],
             sky.guide,
@@ -462,16 +469,22 @@ def shade_face(base, sky, split_stars=False):
         )
     # thick gas hides the stars behind it
     star = base.stars * (1 - 0.6 * np.clip(dens, 0, 1) ** 0.7)[..., None]
-    star_face = None
-    if split_stars:
-        star_face = np.clip(star / STAR_GAIN * 65535 + 0.5, 0, 65535).astype(np.uint16)
-    else:
-        col += star
-    out = linear_to_srgb(col) * 255
     # triangular dither: no banding in the dark gradients (seeded per face so faces can be baked apart)
     rng = np.random.default_rng([base.seed + 2000, base.face, base.band])
-    out += rng.random(out.shape, np.float32) - rng.random(out.shape, np.float32)
-    return np.clip(out + 0.5, 0, 255).astype(np.uint8), star_face
+
+    def encode(lin):
+        out = linear_to_srgb(lin) * 255
+        out += rng.random(out.shape, np.float32) - rng.random(out.shape, np.float32)
+        return np.clip(out + 0.5, 0, 255).astype(np.uint8)
+
+    if not split_stars:
+        return encode(col + star), None, None
+    # the gas colour is defined everywhere, also where alpha is 0, so bilinear filtering pulls in no dark fringe
+    alpha = np.clip(dens, 0, 1) ** 0.6 * CLOUD_ALPHA
+    a8 = np.clip(alpha * 255 + 0.5, 0, 255).astype(np.uint8)
+    clouds = np.concatenate([encode(col), a8[..., None]], -1)
+    star_face = np.clip(star / STAR_GAIN * 65535 + 0.5, 0, 65535).astype(np.uint16)
+    return encode(back), star_face, clouds
 
 
 def bake(tex, pos, uv, size, seed=1, stars=60000):
@@ -480,20 +493,24 @@ def bake(tex, pos, uv, size, seed=1, stars=60000):
 
 
 def bake_layers(tex, pos, uv, size, seed=1, stars=60000, split_stars=False):
-    """(nebula, stars): the nebula faces as `bake` returns them and, with split_stars, the stars alone (6 * size x size x 3
-    uint16, linear light over STAR_GAIN, already dimmed by the gas in front of them) left out of the nebula; else None."""
+    """(sky, stars, clouds): the sky faces as `bake` returns them and, with split_stars, the stars alone (6 * size x size x 3
+    uint16, linear light over STAR_GAIN, already dimmed by the gas in front of them) and the gas alone (RGBA uint8, straight
+    alpha), both left out of the sky, which is then the calm backdrop; else None."""
     sky = SkyGuide(tex, pos, uv)
-    faces, star_faces = [], []
+    faces, star_faces, cloud_faces = [], [], []
     for face in range(6):
         for band in range(BANDS):
-            nebula_face, star_face = shade_face(
+            nebula_face, star_face, cloud_face = shade_face(
                 FaceBase(face, size, seed, stars, band), sky, split_stars
             )
             faces.append(nebula_face)
             star_faces.append(star_face)
-    return np.concatenate(faces, 0), (
-        np.concatenate(star_faces, 0) if split_stars else None
-    )
+            cloud_faces.append(cloud_face)
+
+    def cat(parts):
+        return np.concatenate(parts, 0) if split_stars else None
+
+    return np.concatenate(faces, 0), cat(star_faces), cat(cloud_faces)
 
 
 def load_sky(glb):
@@ -517,10 +534,11 @@ def bake_face_job(job, glbs, tmp, size, seed, split_stars):
         sky, _ = load_sky(glb)
         if sky is None:
             continue
-        nebula_face, star_face = shade_face(base, sky, split_stars)
+        nebula_face, star_face, cloud_face = shade_face(base, sky, split_stars)
         np.save(tmp / f"{glb.stem}.{face}.{band}.npy", nebula_face)
         if star_face is not None:
             np.save(tmp / f"{glb.stem}.{face}.{band}.stars.npy", star_face)
+            np.save(tmp / f"{glb.stem}.{face}.{band}.clouds.npy", cloud_face)
     return job
 
 
@@ -542,21 +560,28 @@ def assemble_job(glb, out, tmp, split_stars):
     with replacing(dst) as part:
         Image.fromarray(img, "RGB").save(part, "PNG", compress_level=6)
     note = ""
-    if split_stars:
-        star_img = np.concatenate(
+
+    def stack(kind):
+        return np.concatenate(
             [
-                np.load(tmp / f"{glb.stem}.{f}.{k}.stars.npy")
+                np.load(tmp / f"{glb.stem}.{f}.{k}.{kind}.npy")
                 for f in range(6)
                 for k in range(BANDS)
             ],
             0,
         )
+
+    clouds_dst = dst.with_name(f"{glb.stem}_clouds.png")
+    if split_stars:
         with replacing(dst.with_name(f"{glb.stem}_stars.png")) as part:
-            write_png16(part, star_img)
-        note = " + stars"
+            write_png16(part, stack("stars"))
+        with replacing(clouds_dst) as part:
+            Image.fromarray(stack("clouds"), "RGBA").save(part, "PNG", compress_level=6)
+        note = " + stars + clouds"
     else:
-        # A stars cube left by an earlier --split-stars bake would draw its stars a second time over these.
+        # Files left by an earlier --split-stars bake would draw the stars (and gas) a second time over these.
         dst.with_name(f"{glb.stem}_stars.png").unlink(missing_ok=True)
+        clouds_dst.unlink(missing_ok=True)
     return f"{dst.name} ({dst.stat().st_size >> 20} MB{note})"
 
 
@@ -637,6 +662,32 @@ def main(argv=None):
         ):
             step(line)
     shutil.rmtree(tmp, ignore_errors=True)
+    if args.split_stars:
+        # The gas as three clouds layers over the backdrop (the baked clouds cube is a source of the `sky` block); a render
+        # profile's own entry for a sky wins. Without a profile with a `sky` block this file does nothing.
+        near = [
+            {
+                "source": "clouds",
+                "distance": 6000,
+                "opacity": 0.5,
+                "haze": 0.4,
+                "scale": 2.0,
+                "drift": [0.6, 0.25, 0.0],
+            },
+            {
+                "source": "clouds",
+                "distance": 2500,
+                "opacity": 0.35,
+                "haze": 0.15,
+                "scale": 3.0,
+                "drift": [1.5, 0.6, 0.0],
+            },
+        ]
+        skies = {g.stem: {"near": near} for g in glbs}
+        (out / "data" / "render").mkdir(parents=True, exist_ok=True)
+        (out / "data" / "render" / "skies.json").write_text(
+            json.dumps(skies, indent=2) + "\n"
+        )
     # Written last, so a bake that failed or was stopped does not show in the Mods screen as a finished mod.
     (out / "mod.json").write_text(json.dumps(MOD, indent=2) + "\n")
     print(f"done: switch on '{MOD['name']}' in the Mods screen (or --mod {out})")
