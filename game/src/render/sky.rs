@@ -70,6 +70,11 @@ pub struct NearLayer {
     /// Noise patches across the layer (0 = no breaking up: the plain copy of the sky).
     pub scale: f32,
     pub tint: Vec3,
+    /// Whether the layer shows the painted clouds cube (`source: "clouds"`) instead of the sky's own gas. Then `threshold` and
+    /// `softness` act on the cloud's alpha (both 0 by default: alpha passes unchanged).
+    pub clouds: bool,
+    /// Aerial perspective, 0..1: the share the layer's colour sinks into the backdrop behind it, and loses contrast.
+    pub haze: f32,
 }
 
 /// The `stars` part of the block.
@@ -136,14 +141,17 @@ fn game_vec(v: &Value) -> Option<Vec3> {
 }
 
 fn layer(near: &Value) -> NearLayer {
+    let clouds = near["source"].as_str().is_some_and(|s| s.eq_ignore_ascii_case("clouds"));
     NearLayer {
         distance: num(&near["distance"], 4000.0).max(1.0),
         opacity: num(&near["opacity"], 0.5).clamp(0.0, 1.0),
-        threshold: num(&near["threshold"], 0.3).clamp(0.0, 1.0),
-        softness: num(&near["softness"], 0.35).max(0.01),
+        threshold: num(&near["threshold"], if clouds { 0.0 } else { 0.3 }).clamp(0.0, 1.0),
+        softness: if clouds { num(&near["softness"], 0.0).max(0.0) } else { num(&near["softness"], 0.35).max(0.01) },
         drift: game_vec(&near["drift"]).unwrap_or(Vec3::ZERO),
         scale: num(&near["scale"], 2.5).max(0.0),
         tint: rgb(&near["tint"]).unwrap_or(Vec3::ONE).max(Vec3::ZERO),
+        clouds,
+        haze: num(&near["haze"], 0.0).clamp(0.0, 1.0),
     }
 }
 
@@ -252,6 +260,8 @@ pub struct LayerUniform {
     pub b: Vec4,
     /// xyz: the current, units a second
     pub c: Vec4,
+    /// x: 1 for a painted cloud layer, y: haze
+    pub d: Vec4,
 }
 
 #[derive(Clone, Copy, Default, Debug, PartialEq, ShaderType)]
@@ -284,7 +294,12 @@ impl SkyDome {
     fn uniform(&self) -> SkyUniform {
         let mut layers = [LayerUniform::default(); MAX_LAYERS];
         for (u, l) in layers.iter_mut().zip(&self.layers) {
-            *u = LayerUniform { a: Vec4::new(l.opacity, l.threshold, l.softness, l.distance), b: Vec4::new(l.scale, l.tint.x, l.tint.y, l.tint.z), c: l.drift.extend(0.0) };
+            *u = LayerUniform {
+                a: Vec4::new(l.opacity, l.threshold, l.softness, l.distance),
+                b: Vec4::new(l.scale, l.tint.x, l.tint.y, l.tint.z),
+                c: l.drift.extend(0.0),
+                d: Vec4::new(if l.clouds { 1.0 } else { 0.0 }, l.haze, 0.0, 0.0),
+            };
         }
         let (base, base_tint) = self.base.map_or((Vec4::ZERO, Vec4::ZERO), |b| (Vec4::new(b.flow, b.cycle, b.breath, b.period), b.tint.extend(b.brightness - 1.0)));
         SkyUniform {
@@ -352,6 +367,10 @@ pub struct SkyGlow {
     #[texture(105, dimension = "3d")]
     #[sampler(106)]
     pub noise: Option<Handle<Image>>,
+    /// The painted clouds (`<sky>_clouds.png`, straight-alpha rgba); none when the sky has none, and then its cloud layers draw nothing.
+    #[texture(107, dimension = "cube")]
+    #[sampler(108)]
+    pub clouds: Option<Handle<Image>>,
 }
 
 impl MaterialExtension for SkyGlow {
@@ -388,6 +407,12 @@ fn stars_file(root: &std::path::Path, cube: &str) -> Option<String> {
     root.join(&rel).is_file().then_some(rel)
 }
 
+/// The clouds cube that goes with a baked sky (`<sky>_clouds.png`), when the mod has one.
+fn clouds_file(root: &std::path::Path, cube: &str) -> Option<String> {
+    let rel = cube.strip_suffix("_cube.png")?.to_string() + "_clouds.png";
+    root.join(&rel).is_file().then_some(rel)
+}
+
 /// The sky's base name (`skybox_05`) from its cube's path.
 fn sky_name(cube: &str) -> &str {
     let file = cube.rsplit('/').next().unwrap_or(cube);
@@ -403,6 +428,68 @@ fn ready(h: &Handle<Image>, images: &mut Assets<Image>) -> bool {
         Some(_) => images.get_mut(h).is_some_and(|mut i| crate::view::as_cube(&mut i)),
     }
 }
+
+/// Whether a loaded clouds image is (now) a cube map. Before it becomes one, the colour of fully transparent texels is filled in
+/// from their neighbours (`bleed_colour`), so bilinear filtering at a cloud's edge never drags in black.
+fn ready_clouds(h: &Handle<Image>, images: &mut Assets<Image>) -> bool {
+    match images.get(h) {
+        None => false,
+        Some(i) if i.texture_descriptor.size.depth_or_array_layers == 6 => true,
+        Some(_) => images.get_mut(h).is_some_and(|mut i| {
+            let (w, ok) = (
+                i.width() as usize,
+                i.height() == i.width() * 6
+                    && matches!(
+                        i.texture_descriptor.format,
+                        bevy::render::render_resource::TextureFormat::Rgba8UnormSrgb | bevy::render::render_resource::TextureFormat::Rgba8Unorm
+                    ),
+            );
+            if ok && let Some(d) = i.data.as_mut() {
+                bleed_colour(d, w);
+            }
+            crate::view::as_cube(&mut i)
+        }),
+    }
+}
+
+/// Gives every fully transparent texel of the stacked square faces (RGBA8, `w` wide) the average colour of its opaque-ish
+/// neighbours, two texels deep, within its own face. The colour of an invisible texel is whatever the baker left there.
+fn bleed_colour(data: &mut [u8], w: usize) {
+    if w == 0 || data.len() < w * w * 6 * 4 {
+        return;
+    }
+    for face in data.chunks_exact_mut(w * w * 4).take(6) {
+        let mut solid: Vec<bool> = face.as_chunks::<4>().0.iter().map(|p| p[3] > 0).collect();
+        for _ in 0..2 {
+            let prev = face.to_vec();
+            let was = solid.clone();
+            for y in 0..w {
+                for x in 0..w {
+                    if was[y * w + x] {
+                        continue;
+                    }
+                    let (mut sum, mut n) = ([0u32; 3], 0u32);
+                    for (nx, ny) in [(x.wrapping_sub(1), y), (x + 1, y), (x, y.wrapping_sub(1)), (x, y + 1)] {
+                        if nx < w && ny < w && was[ny * w + nx] {
+                            let i = (ny * w + nx) * 4;
+                            (0..3).for_each(|c| sum[c] += prev[i + c] as u32);
+                            n += 1;
+                        }
+                    }
+                    if n > 0 {
+                        let i = (y * w + x) * 4;
+                        (0..3).for_each(|c| face[i + c] = (sum[c] / n) as u8);
+                        solid[y * w + x] = true;
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// The clouds image a sky is waiting for.
+#[derive(Component)]
+pub(super) struct CloudsImage(pub(super) Handle<Image>);
 
 /// The stars image a sky is waiting for.
 #[derive(Component)]
@@ -438,7 +525,7 @@ fn dome(
     frame: Res<super::frame::Frame>,
     noise: Option<Res<super::volnoise::NoiseVolume>>,
     mut warming: Local<bool>,
-    skies: Query<(Entity, &HdSky, Option<&StarsImage>), With<Sky>>,
+    skies: Query<(Entity, &HdSky, Option<&StarsImage>, Option<&CloudsImage>), With<Sky>>,
     domes: Query<(&ChildOf, &MeshMaterial3d<SkyMaterial>, &Dome)>,
     mut images: ResMut<Assets<Image>>,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -457,14 +544,34 @@ fn dome(
         }
     }
     *warming = warm_now;
-    for (e, hd, stars) in &skies {
+    for (e, hd, stars, clouds) in &skies {
         if domes.iter().any(|(p, ..)| p.parent() == e) {
             continue;
         }
         let cube = hd.0.path().map(|p| p.path().to_string_lossy().replace('\\', "/"));
-        let sky = cube.as_deref().map_or_else(|| block.clone(), |c| block.for_sky(sky_name(c)));
+        let mut sky = cube.as_deref().map_or_else(|| block.clone(), |c| block.for_sky(sky_name(c)));
         let want_stars = sky.stars.is_some_and(|t| t.brightness > 0.0);
-        if sky.layers.is_empty() && sky.base.is_none() && !want_stars && sky.sheet.is_none() && sky.shooting_every <= 0.0 {
+        // cloud layers need their cube: without one they stay in place (the layers' turns go by index) but draw nothing
+        let want_clouds = sky.layers.iter().any(|l| l.clouds);
+        let clouds_handle = match clouds {
+            Some(c) => Some(c.0.clone()),
+            None if want_clouds => {
+                let handle = cube.as_deref().and_then(|c| clouds_file(crate::assets_dir(), c)).map(|f| assets.load::<Image>(f));
+                if let Some(h) = &handle {
+                    commands.entity(e).insert(CloudsImage(h.clone()));
+                }
+                handle
+            }
+            None => None,
+        };
+        let clouds_handle = clouds_handle.filter(|h| !assets.load_state(h).is_failed());
+        if clouds_handle.as_ref().is_some_and(|h| !ready_clouds(h, &mut images)) {
+            continue;
+        }
+        if clouds_handle.is_none() {
+            sky.layers.iter_mut().filter(|l| l.clouds).for_each(|l| l.opacity = 0.0);
+        }
+        if sky.layers.iter().all(|l| l.opacity <= 0.0) && sky.base.is_none() && !want_stars && sky.sheet.is_none() && sky.shooting_every <= 0.0 {
             continue;
         }
         let stars_handle = match stars {
@@ -486,8 +593,10 @@ fn dome(
         let Some(noise) = noise.as_ref() else { continue };
         let uniform = sky.uniform();
         let base = StandardMaterial { unlit: true, cull_mode: None, double_sided: true, alpha_mode: AlphaMode::Premultiplied, depth_bias: SORT_BIAS, ..default() };
-        let material =
-            materials.add(SkyMaterial { base, extension: SkyGlow { u: uniform, cube: Some(hd.0.clone()), stars: stars_handle, noise: Some(noise.0.clone()), frame: default() } });
+        let material = materials.add(SkyMaterial {
+            base,
+            extension: SkyGlow { u: uniform, cube: Some(hd.0.clone()), stars: stars_handle, noise: Some(noise.0.clone()), clouds: clouds_handle, frame: default() },
+        });
         commands.entity(e).with_child((
             Dome(sky),
             Mesh3d(meshes.add(Sphere::new(1.0).mesh().uv(48, 24))),
@@ -634,5 +743,57 @@ mod tests {
         assert_eq!(stars_file(&dir, "models/sky/skybox_07_cube.png").as_deref(), Some("models/sky/skybox_07_stars.png"));
         assert_eq!(stars_file(&dir, "models/sky/skybox_07.glb"), None);
         std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn a_layers_source_and_haze_parse_with_defaults() {
+        let d = parse(&json!({"near": [{}, {"source": "clouds", "haze": 0.6}, {"source": "Clouds", "haze": 4, "threshold": 0.2, "softness": 0.1}, {"source": "bogus"}]})).unwrap();
+        assert_eq!(d.layers.len(), 3);
+        let (sky, clouds, strict) = (d.layers[0], d.layers[1], d.layers[2]);
+        assert!(!sky.clouds && sky.haze == 0.0 && (sky.threshold, sky.softness) == (0.3, 0.35), "today's defaults");
+        assert!(clouds.clouds && clouds.haze == 0.6);
+        assert_eq!((clouds.threshold, clouds.softness), (0.0, 0.0), "alpha passes unchanged unless asked");
+        assert!(strict.clouds && strict.haze == 1.0, "haze is clamped, the source is not case-sensitive");
+        assert_eq!((strict.threshold, strict.softness), (0.2, 0.1));
+        assert!(!parse(&json!({"near": {"source": "bogus"}})).unwrap().layers[0].clouds, "an unknown source is the sky");
+    }
+
+    #[test]
+    fn the_new_values_are_packed_into_the_layer_uniform() {
+        let u = parse(&json!({"near": [{"distance": 900}, {"source": "clouds", "haze": 0.3}]})).unwrap().uniform();
+        assert_eq!(u.layers[0].d, Vec4::ZERO, "a plain layer packs as before");
+        assert_eq!(u.layers[1].d, Vec4::new(1.0, 0.3, 0.0, 0.0));
+    }
+
+    #[test]
+    fn source_and_haze_merge_per_sky() {
+        let d = parse(&json!({"near": {"distance": 3000}, "skies": {"shakedown_sky": {"near": {"source": "clouds", "haze": 0.5}, "stars": {}}}})).unwrap();
+        assert!(!d.for_sky("other").layers[0].clouds);
+        let s = d.for_sky("Shakedown_Sky");
+        assert!(s.layers[0].clouds && s.layers[0].haze == 0.5 && s.layers[0].distance == 3000.0, "objects merge key by key");
+    }
+
+    #[test]
+    fn the_clouds_cube_sits_beside_the_sky_cube() {
+        let dir = std::env::temp_dir().join(format!("op-sky-clouds-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("models/sky")).unwrap();
+        assert_eq!(clouds_file(&dir, "models/sky/s_cube.png"), None);
+        std::fs::write(dir.join("models/sky/s_clouds.png"), b"").unwrap();
+        assert_eq!(clouds_file(&dir, "models/sky/s_cube.png").as_deref(), Some("models/sky/s_clouds.png"));
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn transparent_texels_take_the_colour_of_their_neighbours() {
+        let w = 4;
+        let mut data = vec![0u8; w * w * 6 * 4];
+        let at = |x: usize, y: usize| (y * w + x) * 4;
+        data[at(1, 1)..at(1, 1) + 4].copy_from_slice(&[200, 100, 50, 255]);
+        bleed_colour(&mut data, w);
+        assert_eq!(data[at(2, 1)..at(2, 1) + 4], [200, 100, 50, 0], "colour spreads, alpha stays 0");
+        assert_eq!(data[at(3, 1)..at(3, 1) + 4], [200, 100, 50, 0], "two texels deep");
+        assert_eq!(data[at(0, 0)..at(0, 0) + 3], [200, 100, 50], "diagonal reached in two steps");
+        assert_eq!(data[w * w * 4..w * w * 4 + 4], [0, 0, 0, 0], "other faces are untouched");
+        assert_eq!(data[at(1, 1) + 3], 255);
     }
 }
