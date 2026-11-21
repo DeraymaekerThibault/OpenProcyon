@@ -64,6 +64,7 @@ fn rules_app(mission: Mission) -> App {
             script: None,
             autolaunch: false,
             shot_frame: 0,
+            shot_frames: vec![],
             late_frame: 0,
         })
         .insert_resource(mission)

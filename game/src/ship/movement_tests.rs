@@ -576,6 +576,7 @@ fn allied_computer_ships_hunt_the_enemy_base_the_humans_fleet_waits() {
         script: None,
         autolaunch: false,
         shot_frame: 0,
+        shot_frames: vec![],
         late_frame: 0,
     });
     w.init_resource::<crate::environment::Sensors>();
