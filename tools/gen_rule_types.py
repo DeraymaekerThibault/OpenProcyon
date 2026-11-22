@@ -64,7 +64,11 @@ def field_cell(f):
     bits = [kind]
     if "range" in f:
         lo, hi = f["range"]
-        bits.append("fraction %g..%g" % (lo, hi) if (lo, hi) == (0.0, 1.0) else "range %g..%g" % (lo, hi))
+        bits.append(
+            "fraction %g..%g" % (lo, hi)
+            if (lo, hi) == (0.0, 1.0)
+            else "range %g..%g" % (lo, hi)
+        )
     if not f["used"]:
         bits.append("ignored")
     elif f["required"]:
@@ -83,10 +87,19 @@ def render(schema, notes):
     grouped = [n for g in notes["groups"] for n in g["types"]]
     problems = []
     problems += ["no group for Type: " + n for n in sorted(set(types) - set(grouped))]
-    problems += ["group names unknown Type: " + n for n in sorted(set(grouped) - set(types))]
-    problems += ["Type listed in two groups: " + n for n in sorted({n for n in grouped if grouped.count(n) > 1})]
-    problems += ["no note for Type: " + n for n in sorted(set(types) - set(notes["notes"]))]
-    problems += ["note for unknown Type: " + n for n in sorted(set(notes["notes"]) - set(types))]
+    problems += [
+        "group names unknown Type: " + n for n in sorted(set(grouped) - set(types))
+    ]
+    problems += [
+        "Type listed in two groups: " + n
+        for n in sorted({n for n in grouped if grouped.count(n) > 1})
+    ]
+    problems += [
+        "no note for Type: " + n for n in sorted(set(types) - set(notes["notes"]))
+    ]
+    problems += [
+        "note for unknown Type: " + n for n in sorted(set(notes["notes"]) - set(types))
+    ]
     if problems:
         sys.exit("\n".join(problems))
     out = []
@@ -101,7 +114,10 @@ def render(schema, notes):
             if t["handler"] == "victory":
                 kind += " (end rule)"
             fields = "<br>".join(field_cell(f) for f in t["fields"]) or "none"
-            out.append("| `%s` | %s | %s | %s | %s |" % (esc(n), kind, t["origin"], fields, esc(notes["notes"][n])))
+            out.append(
+                "| `%s` | %s | %s | %s | %s |"
+                % (esc(n), kind, t["origin"], fields, esc(notes["notes"][n]))
+            )
         out.append("")
     return "\n".join(out)
 
