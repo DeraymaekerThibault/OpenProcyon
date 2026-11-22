@@ -55,7 +55,7 @@ pub struct Ship {
     pub net: f32,              // energy nets on the hull: product of (1 - dissipated) over the active nets; 1.0 = free
     pub avoid: f32,            // speed fraction with land close ahead (collision::contact_slow, AI ships only); 1.0 = clear
     pub helm: Helm,            // rudder and torque boost as last set by the steer-to-point routine, held between its runs
-    pub towed: bool,          // on the end of a tow cable (rules `Tow Ship`): the cable sets its speed, its own engine does not brake it
+    pub towed: bool,           // on the end of a tow cable (rules `Tow Ship`): the cable sets its speed, its own engine does not brake it
 }
 
 /// The original runs its steer-to-point law once per think (`THINK_SECS`) and keeps the rudder between runs; the physics still
