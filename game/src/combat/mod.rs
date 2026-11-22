@@ -425,13 +425,14 @@ fn breakup(
             continue;
         }
         *vis = Visibility::Hidden;
-        // Keep the logical ship for mission rules, but remove its entire presentation (including looping smoke).
+        // Remove its entire presentation (including looping smoke); the ship itself is queued and goes at the start of the next tick.
         if let Ok(children) = children.get(e) {
             for child in children.iter() {
                 commands.entity(child).try_despawn();
             }
         }
         commands.entity(e).remove::<Sinking>();
+        crate::queue_removal(&mut commands, e);
     }
 }
 

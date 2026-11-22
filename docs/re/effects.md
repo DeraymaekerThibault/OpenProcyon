@@ -322,7 +322,7 @@ have no captain loop (`ai` returns early there), so a dead mission ship holds it
 
 Implementation (`combat/mod.rs`, `clips.rs`): death marks Health destroyed and reports ShipLost at once, plays the class explosion
 and the death sound, then plays the clip on the section mesh nodes (normal and damaged variants), hides and bursts each section as
-above, and removes the presentation at the end (the logical ship stays for mission references). The exporter writes
+above, and at the end removes the presentation and queues the ship itself for removal (it goes at the start of the next tick; the rules keep a record of it as destroyed). The exporter writes
 `sections[].destruct` = {fx, start, end, point} (point in game axes, already reordered). Dev kills (K/J, `--script victory|defeat`)
 zero the core and go through the same path. Classes without a clip hold 1 s.
 

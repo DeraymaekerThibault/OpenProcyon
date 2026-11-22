@@ -176,6 +176,7 @@ fn update(
     let dt = time.delta_secs();
     crate::smoke::dock(&cfg, mission, &mut extra.dock_smoke_skipped, &mut ships);
     let mut world = units(&ships, &lib);
+    mission.script.keep_sunk(&mut world);
     world.extend(animals.iter().map(|(e, a, tf, _)| a.unit(e, tf)));
     world.extend(extra.bases.iter_mut().map(|(e, b, tf, armed)| b.unit(e, tf, armed.map_or(0.0, |(a, h)| crate::combat::base_mission_damage(&lib.classes[a.class], h)))));
     world.extend(rocks.iter().map(|(e, tf, a)| a.unit(e, tf)));

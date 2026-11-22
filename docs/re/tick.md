@@ -67,7 +67,7 @@ not per player). *Measured:* five captains, every think gap 0.528 s, 85 gaps eac
 | Rule | Original | Remake |
 |---|---|---|
 | Game clock | double sum of 0.033f | fixed 33 ms steps (about 2e-10 s per tick apart; not changed) |
-| Removal | queued, destroyed at the start of the next tick, still runs per-object logic once | same for shells, blasts, wells, asteroids and lifeboats; a sunk ship is flagged destroyed at once and its entity stays |
+| Removal | queued, destroyed at the start of the next tick, still runs per-object logic once | same for shells, blasts, wells, asteroids and lifeboats. A sunk ship is flagged destroyed at once (everything that reads "destroyed" keeps working) and is queued for removal when its break-up ends, so it goes at the start of the next tick. The rules, the skirmish victory test and the end-of-battle test remember the ships they saw destroyed, so "Group Destroyed", kill credit and the last-enemy victory still hold after the entity is gone |
 | New objects | join at the start of the next tick and move in it | same |
 | Out of map | tested after integration, queued; floor z = -130 | same for asteroids and shells |
 | Collision | one pass after all movement | same |
