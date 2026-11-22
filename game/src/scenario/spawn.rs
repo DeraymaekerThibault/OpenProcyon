@@ -392,8 +392,13 @@ pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Libra
                 .map(|(i, t)| (t["name_id"].as_str().unwrap_or_default().to_string(), groups.iter().filter(|g| g.team == i as i32).map(|g| g.side).collect()))
                 .collect()
         };
-        match victory::Victory::from_map(map, teams) {
+        // A condition of the map's end rules may name a group of its script instead of listing object ids. A map that lets its script
+        // decide (`"victory": "script"`) needs the victory rules even without usable map rules of its own.
+        let script_groups = data::try_json(&crate::assets_dir().join(format!("maps/{map_id}/script.json"))).map_or(serde_json::Value::Null, |s| s["groups"].clone());
+        let scripted = crate::rules::skirmish::SkirmishScript::decides(&map_id);
+        match victory::Victory::from_map_in(map, teams.clone(), &script_groups) {
             Some(v) => commands.insert_resource(v),
+            None if scripted => commands.insert_resource(victory::Victory::scripted(teams)),
             None => commands.remove_resource::<victory::Victory>(),
         }
         // The map player -> side table and team rosters the script needs (a base player such as 'pirate base' fights for the fleet of

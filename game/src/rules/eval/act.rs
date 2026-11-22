@@ -204,6 +204,10 @@ impl Script {
                     let id = s(a, "Loser - Custom Message String ID");
                     self.ended = Some((self.media["messages"][id].as_str().unwrap_or("Mission failed").into(), false));
                 }
+                // A skirmish script that decides its game: the rule's own message ids (game strings) go to the end line.
+                let id = |k: &str| Some(s(a, k)).filter(|m| m.starts_with("IDGS_")).map(String::from);
+                let (win, lose) = (id("Winner - Custom Message String ID"), id("Loser - Custom Message String ID"));
+                self.edit_end(|e| (e.winner_message, e.loser_message) = (win, lose));
             }
             "Create/Release Event Effect" => out.push(Fx::Event(s(a, "Point Set").into(), s(a, "Effect Name").into(), b(a, "Boolean State"))),
             "Open HUD Texture Overlay" => self.overlay = Some(s(a, "Texture Base Name").to_lowercase()),
@@ -278,7 +282,13 @@ impl Script {
                     entry.1.push(task.into());
                 }
             }
-            "Team X Wins" | "Remaining Team Wins" => {}
+            // Skirmish only: a map that decides its own game (`"victory": "script"`) ends it here; otherwise victory.rs decides from the
+            // map's own end rules.
+            "Team X Wins" => {
+                let team = s(a, "Team Name").to_string();
+                self.edit_end(|e| e.kind = if team.is_empty() { EndKind::Winner } else { EndKind::Team(team) });
+            }
+            "Remaining Team Wins" => self.edit_end(|e| e.kind = EndKind::Winner),
             "Reset Shots Fired Count" => {
                 for e in g("Group/Unit Name") {
                     self.shots.remove(&e);

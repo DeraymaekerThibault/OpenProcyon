@@ -31,6 +31,8 @@ struct TaskRule {
     complete_when: Vec<Value>,
     fail_when: Vec<Value>,
     required: bool,
+    /// The skirmish team the task belongs to (empty: none).
+    team: String,
 }
 
 /// The interpreter state of the engine-added features.
@@ -78,6 +80,7 @@ impl Ext {
                     complete_when: conds(t, "complete_when"),
                     fail_when: conds(t, "fail_when"),
                     required: flag(&t["required"]) == Some(true),
+                    team: s(t, "team").into(),
                 })
                 .collect(),
             objectives_decide: data["victory"].as_str() == Some("objectives"),
@@ -262,7 +265,11 @@ impl Script {
         }
         // Event-quota conditions (kills, captures) are evaluated but their events are not consumed: a task settles once, so it never asks twice.
         self.consume.clear();
-        if self.ext.objectives_decide && self.ended.is_none() {
+        if self.skirmish_decides {
+            if self.end.is_none() {
+                self.team_objectives_end(&specs);
+            }
+        } else if self.ext.objectives_decide && self.ended.is_none() {
             let required: Vec<&Task> = specs.iter().filter(|x| x.required).filter_map(|x| self.tasks.iter().find(|t| t.name == x.name)).collect();
             if required.iter().any(|t| t.failed) {
                 self.ended = Some((self.media["messages"][self.ext.defeat_message.as_str()].as_str().unwrap_or("Mission failed").into(), false));
@@ -271,5 +278,50 @@ impl Script {
             }
         }
         self.ext.tasks = specs;
+    }
+}
+
+impl Script {
+    /// A skirmish script that decides its own game: sets what `Team X Wins`, `Remaining Team Wins`, `End Game` and the team
+    /// objectives say. The first rule to speak wins within a step, and the step after it nothing changes the end any more.
+    pub(in crate::rules) fn edit_end(&mut self, f: impl FnOnce(&mut ScriptEnd)) {
+        if !self.skirmish_decides || self.end_sealed || (self.end.is_some() && self.end_by != self.diag.cur) {
+            return;
+        }
+        self.end_by = self.diag.cur;
+        f(self.end.get_or_insert_with(ScriptEnd::default));
+    }
+
+    /// Per-team objectives of a skirmish script: the tasks that name a `team` and are `required`. A team with a failed required task
+    /// loses; the first team (in the order of the tasks) whose required tasks are all complete wins. Tasks without a team never
+    /// decide a skirmish (the checker says so), so the outcome is the same on every machine.
+    fn team_objectives_end(&mut self, specs: &[TaskRule]) {
+        let mut teams: Vec<&str> = vec![];
+        for t in specs.iter().filter(|t| t.required && !t.team.is_empty()) {
+            if !teams.contains(&t.team.as_str()) {
+                teams.push(&t.team);
+            }
+        }
+        for team in teams {
+            let tasks: Vec<&Task> = specs.iter().filter(|x| x.required && x.team == team).filter_map(|x| self.tasks.iter().find(|t| t.name == x.name)).collect();
+            let kind = if tasks.iter().any(|t| t.failed) {
+                EndKind::Loser(team.to_string())
+            } else if !tasks.is_empty() && tasks.iter().all(|t| t.complete) {
+                EndKind::Team(team.to_string())
+            } else {
+                continue;
+            };
+            let (win, lose) = (Some(self.ext.victory_message.clone()).filter(|m| m.starts_with("IDGS_")), Some(self.ext.defeat_message.clone()).filter(|m| m.starts_with("IDGS_")));
+            self.end_by = self.diag.cur;
+            self.end = Some(ScriptEnd { kind, winner_message: win, loser_message: lose });
+            return;
+        }
+    }
+}
+
+impl Script {
+    /// Lets the script decide the skirmish (`"victory": "script"`): its end rules and team objectives fill `end` (victory.rs reads it).
+    pub fn decide_game(&mut self, on: bool) {
+        self.skirmish_decides = on;
     }
 }

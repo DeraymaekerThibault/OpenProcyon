@@ -3,7 +3,7 @@
 //! decides the human's outcome from a snapshot of the battle; `scenario::outcome` builds the snapshot. A map with a condition
 //! we do not model yet keeps the plain "no enemy ships left" rule. Team points come from the map's own script (rules::skirmish).
 
-use crate::rules::Region;
+use crate::rules::{EndKind, Region, ScriptEnd};
 use crate::scenario::Outcome;
 use crate::ship::Side;
 use bevy::prelude::*;
@@ -96,12 +96,19 @@ impl Victory {
     /// The map's rules, or none when the map has none or one of them needs something not modelled. `teams`: map team name id and
     /// the sides of the fleets on it.
     pub fn from_map(map: &Value, teams: Vec<(String, Vec<Side>)>) -> Option<Victory> {
+        Victory::from_map_in(map, teams, &Value::Null)
+    }
+
+    /// `from_map`, where a condition may name a group of the map's script (`groups`: name -> world-object ids) instead of listing
+    /// object ids: `"objects": [12, "Convoy"]` or `"group": "Convoy"`. A group the script does not define makes the rules unusable
+    /// (the plain "no enemy ships left" outcome stays), with a warning.
+    pub fn from_map_in(map: &Value, teams: Vec<(String, Vec<Side>)>, groups: &Value) -> Option<Victory> {
         let rules = map["victory"].as_array().filter(|r| !r.is_empty())?;
         let mut out = vec![];
         for r in rules {
             let mut conditions = vec![];
             for c in r["if"].as_array()? {
-                conditions.push(condition(c)?);
+                conditions.push(condition(c, groups)?);
             }
             let message = |who: &str| r["end"][who].as_str().filter(|m| m.starts_with("IDGS_")).map(String::from);
             out.push(Rule { conditions, winner: r["winner"].as_str().map(String::from), messages: (message("winner"), message("loser")) });
@@ -110,6 +117,44 @@ impl Victory {
         sides.sort_by_key(|s| s.0);
         sides.dedup();
         Some(Victory { rules: out, teams, sides: sides.len() })
+    }
+
+    /// A map whose own script ends the game (`"victory": "script"`) and has no usable end rules in `map.json`: only `decide_end`
+    /// speaks.
+    pub fn scripted(teams: Vec<(String, Vec<Side>)>) -> Victory {
+        let mut sides: Vec<Side> = teams.iter().flat_map(|t| t.1.iter().copied()).collect();
+        sides.sort_by_key(|s| s.0);
+        sides.dedup();
+        Victory { rules: vec![], teams, sides: sides.len() }
+    }
+
+    /// The name of the human's team.
+    fn ours(&self) -> String {
+        self.teams.iter().find(|(_, sides)| sides.contains(&Side::Player)).map_or_else(|| format!("side {}", Side::Player.0), |t| t.0.clone())
+    }
+
+    /// The human's outcome once the map's script has ended the game (`Script::end`): the team that wins is the one it names, the
+    /// survivors when they are one team, or every team but the one whose required objective failed. The message is the one the
+    /// script gave the human's side.
+    pub fn decide_end(&self, snap: &Snapshot, end: &ScriptEnd) -> (Outcome, Option<String>) {
+        let ours = self.ours();
+        let human_wins = match &end.kind {
+            EndKind::Team(team) => *team == ours,
+            EndKind::Loser(team) => *team != ours,
+            // The map teams with ships afloat (a side on no team counts as its own); mutual allies are one team.
+            EndKind::Winner => {
+                let mut teams: Vec<String> = snap
+                    .ships
+                    .iter()
+                    .filter(|a| a.alive)
+                    .map(|a| self.teams.iter().find(|t| t.1.contains(&a.side)).map_or_else(|| format!("side {}", a.side.0), |t| t.0.clone()))
+                    .collect();
+                teams.sort();
+                teams.dedup();
+                teams == [ours]
+            }
+        };
+        if human_wins { (Outcome::Victory, end.winner_message.clone()) } else { (Outcome::Defeat, end.loser_message.clone()) }
     }
 
     /// The human's outcome once a rule fires (the first in map order), or none while the battle goes on.
@@ -184,8 +229,30 @@ impl Victory {
     }
 }
 
-fn condition(c: &Value) -> Option<Cond> {
-    let objects = || c["objects"].as_array().map(|o| o.iter().filter_map(Value::as_i64).collect::<Vec<_>>());
+fn condition(c: &Value, groups: &Value) -> Option<Cond> {
+    // The object ids of the condition, and the ids of the script's groups named in `objects` or `group`.
+    let objects = || {
+        let mut ids: Vec<i64> = vec![];
+        let mut named: Vec<&str> = c["group"].as_str().into_iter().collect();
+        for o in c["objects"].as_array().map(Vec::as_slice).unwrap_or_default() {
+            match (o.as_i64(), o.as_str()) {
+                (Some(id), _) => ids.push(id),
+                (_, Some(name)) => named.push(name),
+                _ => {}
+            }
+        }
+        if c["objects"].as_array().is_none() && named.is_empty() {
+            return None;
+        }
+        for name in named {
+            let Some(members) = groups[name].as_array() else {
+                warn!("skirmish victory rule: unknown group '{name}' (a condition may name the groups of the map's script)");
+                return None;
+            };
+            ids.extend(members.iter().filter_map(Value::as_i64));
+        }
+        Some(ids)
+    };
     Some(match c["Type"].as_str()? {
         "Group/Unit Vital Section has >,<,= X damage" => Cond::BaseDamage {
             objects: objects()?,

@@ -48,6 +48,13 @@ pub struct Script {
     pub(in crate::rules) cam: Cam,
     pub nis: bool,
     pub ended: Option<(String, bool)>,
+    /// A skirmish script that decides its own game (`"victory": "script"`): set by `SkirmishScript::load`, which keeps the end rules.
+    pub(in crate::rules) skirmish_decides: bool,
+    /// What the script ended the game with (only while `skirmish_decides`); victory.rs reads it.
+    pub end: Option<ScriptEnd>,
+    /// The rule that set `end` and whether the step it was set in is over: later rules do not change it.
+    pub(in crate::rules) end_by: usize,
+    pub(in crate::rules) end_sealed: bool,
     /// 'Open/Close HUD Texture Overlay': the full-screen texture (assets/hud/overlay) the views draw, e.g. the end credits.
     pub overlay: Option<String>,
     pub score: u32,

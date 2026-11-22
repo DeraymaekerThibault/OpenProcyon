@@ -93,6 +93,10 @@ impl Script {
             cam: Cam::default(),
             nis: false,
             ended: None,
+            skirmish_decides: false,
+            end: None,
+            end_by: 0,
+            end_sealed: false,
             overlay: None,
             score: 0,
             music: vec![],
@@ -209,6 +213,7 @@ impl Script {
             self.run_from(i, r, 0, &mut w, &mut out);
         }
         self.update_objectives(&w);
+        self.end_sealed |= self.end.is_some();
         if first_step {
             self.fire_start_rules(&rules, &mut w, &mut out);
         }

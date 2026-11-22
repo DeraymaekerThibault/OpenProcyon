@@ -322,3 +322,24 @@ pub(in crate::rules) fn victory_text(next_world: &str) -> String {
 pub fn in_game_volume(vol: &Value, x: f32, y: f32) -> bool {
     Region::from_json(vol).contains(Vec2::new(x, y))
 }
+
+/// How a skirmish map script ended the game (`"victory": "script"`, see `SkirmishScript`); victory.rs turns it into the human's
+/// outcome.
+#[derive(Clone, Debug, PartialEq, Default)]
+pub enum EndKind {
+    /// 'Team X Wins' names the team; 'Remaining Team Wins' (and an 'End Game' alone) leaves it open: the survivors win when they are
+    /// one team.
+    #[default]
+    Winner,
+    Team(String),
+    /// A team whose required objective failed: it loses, the others win (engine-added objectives, `ext.rs`).
+    Loser(String),
+}
+
+#[derive(Clone, Debug, PartialEq, Default)]
+pub struct ScriptEnd {
+    pub kind: EndKind,
+    /// String ids of the 'End Game' messages for the winners and the losers (placeholders such as "GAME STRING" are dropped).
+    pub winner_message: Option<String>,
+    pub loser_message: Option<String>,
+}

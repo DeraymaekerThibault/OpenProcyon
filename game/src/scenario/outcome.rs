@@ -106,7 +106,10 @@ pub fn outcome(
         let damage: Vec<(i64, f32)> = bases.iter().map(|(b, a, h, _)| (b.id, combat::base_mission_damage(&lib.classes[a.class], h))).collect();
         let captured: Vec<i64> = bases.iter().filter(|b| b.3.is_some_and(|(side, origin)| side.0 != origin.0)).map(|b| b.0.id).collect();
         let points = rules.3.as_ref().map(|s| s.points()).unwrap_or_default();
-        let decided = victory.decide_with_message(&victory::Snapshot { ships: &states, bases: &damage, captured: &captured, points: &points });
+        let snap = victory::Snapshot { ships: &states, bases: &damage, captured: &captured, points: &points };
+        // The map's end rules first, then a script that decides its own game (`"victory": "script"`, rules::skirmish): an End Game,
+        // Team X Wins or Remaining Team Wins rule, or a team's required objectives.
+        let decided = victory.decide_with_message(&snap).or_else(|| rules.3.as_ref().and_then(|s| s.script.end.as_ref()).map(|end| victory.decide_end(&snap, end)));
         end_message = decided.as_ref().and_then(|d| d.1.clone());
         decided.map_or(Outcome::Playing, |d| d.0)
     } else if player.single().is_err() || player.single().is_ok_and(|h| h.destroyed) {
