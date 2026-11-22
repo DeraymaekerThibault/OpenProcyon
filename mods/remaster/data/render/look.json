@@ -326,6 +326,18 @@
       -60
     ]
   },
+  "beams": {
+    "core": [
+      1.0,
+      0.98,
+      0.95
+    ],
+    "brightness": 2.0,
+    "glow": 6.0,
+    "motes": 18,
+    "arcs": 4,
+    "sparks": 14
+  },
   "tracers": {
     "brightness": 1.25,
     "core": [
