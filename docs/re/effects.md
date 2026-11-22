@@ -460,13 +460,19 @@ core: run by fx/) plus a `Vortex` primitive, implemented in `game/src/blackhole.
     counted the earlier gunfire.
   - **Decoded from the original's logic.** Per tick, for anything overlapping the hole: nothing beyond R; pull between R/4 and R
     (ramp (1 - d/R) / 0.25, capped at 1), destroy at or inside R/4 for every class (a ship's core HP goes to 0, the hole is the
-    killer, no credit; rocks die; bullets are pulled and survive, PROVISIONAL). The pull direction is the line to the centre turned
+    killer, no credit; rocks die at their full hit points; torpedoes are pulled and survive). The pull direction is the line to the centre turned
     15 degrees clockwise seen from above. The pull is an acceleration, 0.15 x hull length x Magnitude / Mass (hull term fitted,
     PROVISIONAL; matches the three measured classes within 2 %). Why a resting ship creeps then falls: speeds under 0.1 are snapped
     to 0 each tick, so a resting ship only creeps until one tick of pull (at 30 Hz) reaches 0.1, i.e. pull 3.0. Medium hole: only
     the Cutter breaks free (7.5); Large: Cutter 12.5 and Frigate 3.4, the Man-O-War (2.9) never. Nothing in the pull or the
     kill looks at whether the ship is under way. The 1.1 s lag is probably the destruction sequence. The Star mortar blast pushes through the same acceleration
     helper (a = 0.148 x 12000 x hull length / Mass for up to ~2.7 s; displacement PROVISIONAL, likely under a few units).
+  **Which kinds a hole acts on** (read from the original's code, 2026-11; not measured): ships, rocks and torpedoes, nothing else. Ordinary shells and
+  the other bullets carry none of the three kinds and are skipped (an earlier note said shells were pulled: that was wrong, the kind it meant is the
+  torpedo). Inside R/4 a ship's core goes to 0 (no credit), a rock takes damage equal to its whole hit points, a torpedo is not harmed. The pull on a rock
+  goes through the same force helper but with the rock's own response of 0.1 along both horizontal hull axes and 0 vertically, against a ship's 0.6 on every axis
+  (so a rock is pulled at about a sixth of a ship's rate per unit force over mass; mass and hull-length factor for rocks not read: PROVISIONAL). Remake:
+  `blackhole.rs` acts on ships only (rocks and torpedoes missing).
   Remake (`blackhole.rs`): exactly the law above for every free, undocked ship, with A = 1330 × length / Mass × Magnitude /
   9000, D = R/4, the break-free threshold 3.0 units/s² and the 1.1 s kill inside R/4, credited to nobody in the Game Summary.
   The vortex's KILL_RADIUS only ends its ribbon points. Computer captains keep out of the radius (movement.md).

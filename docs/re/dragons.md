@@ -40,6 +40,14 @@ Numeric parameters used (damage threshold): m6 0.75 (SpaceDragons1/2/NIS), 0.65 
 Stances used: `Stance Persistant`, `Stance_Dummy`, `Stance_Aggressive`, `Stance_Neutral`, `Stance_Defensive`.
 
 
+## Space animals: flock speed and free motion (read from the original's code, 2026-11; not measured)
+- The rule 'Setup Space Animal Flock' takes a Velocity value that is turned into a throttle fraction: Velocity / (the animal's current top speed = hull max
+  speed x the shared speed factor), clamped to 0..1. So the Velocity is a requested speed in units per second, and the animal cannot exceed its top speed.
+  Remake: `Fx::Velocity` sets the speed literally (the whale's top speed is not exported, so a Velocity above it would not be limited: Different when it exceeds it).
+  Mission 1 uses 12.
+- Whales, dragons and torpedoes are not held to the battle plane (see movement.md, plane modes); whales swim with a ship's physics step plus a pitch
+  undulation (a sine of amplitude and period from the hull data, alternating sign, random start) that only tilts the model.
+
 ## Behaviour (decoded from the original's AI; implemented in `game/src/dragons.rs`)
 **Damage.** Every bullet type has a `Dragon` material column, so any gun hurts it. Heavy/medium cannonballs and carronades do 20-60 per hit,
 plasma 25-45, harpoon 50-80, lancers 5-16, gattling 5-7. Light cannonball, torpedo, mines, grav charge, energy net and dark matter carry 0.5 in

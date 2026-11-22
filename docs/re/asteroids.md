@@ -82,7 +82,10 @@ Known so far:
 - Fragments receive linear velocity and a speed cap initialized to its magnitude. Stationary-parent speed interval: **0.8 to 0.8 + (child mass / 60000) × 2.2**. The mass interpolates between constants 0.8 and 3.0; the resulting lower/upper interval is sampled randomly. For moving parents, a signed contribution depends on speed and direction angle; the complete coordinate transformation is not recovered reliably. The runtime's additive parent velocity is explicitly provisional.
 - Children take the parent's owner. This confirms owner inheritance, not insertion into the original named rule group.
 - Each child gets a new random tumble axis and a speed sampled from **0 to π/2 rad/s** .
-- A physics flag is enabled and three limit values are set to the maximum finite float. Their precise movement/acceleration-limit semantics need further tracing.
+- The physics flag set on a fragment turns its own acceleration off (a belt rock's acceleration is the hull's acceleration along a direction its path controller
+  steers; with the flag set it is zero) and also disables the speed cap, which a belt rock keeps. The three maximum-float values are the unused steering
+  direction. So a fragment coasts in a straight line at its starting velocity for ever, with no cap (read from the original's code, 2026-11).
+  Remake: `combat/asteroid.rs` moves fragments by constant velocity (same).
 
 ## Destruction effects
 
