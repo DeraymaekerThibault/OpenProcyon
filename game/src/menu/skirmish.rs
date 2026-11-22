@@ -430,6 +430,8 @@ struct Build<'a> {
     limit: u32,
     fleet_size: usize,
     armed_only: bool,
+    /// Fleet type whose crew roster the named crew come from.
+    crew_race: u8,
     allowed: Option<std::collections::HashSet<String>>,
 }
 
@@ -500,8 +502,9 @@ impl Build<'_> {
     }
     /// Crew for one ship's posts, in post order, while points last.
     fn crew_ship(&mut self, ship: usize) {
-        // Computer crews come from the Navy roster whatever the race (retail saves); the human's from their own race.
-        let name = if self.armed_only { "Navy" } else { RACES.iter().find(|r| r.0 == self.slot.race).map_or("Navy", |r| r.1) };
+        // Every crew comes from the roster of the human player's fleet type, computers' included (the original filters on the local
+        // player's fleet type when it builds a computer fleet).
+        let name = RACES.iter().find(|r| r.0 == self.crew_race).map_or("Navy", |r| r.1);
         let class = &self.lib.classes[self.lib.index(&self.slot.fleet[ship])];
         let caps = crate::boarding::counts(&class.name);
         for (role, &cap) in caps.iter().enumerate() {
@@ -603,11 +606,11 @@ impl Build<'_> {
     }
 }
 
-pub fn auto_build(slot: &mut Slot, limit: u32, fleet_size: usize, lib: &Library, salt: u64, armed_only: bool) {
+pub fn auto_build(slot: &mut Slot, limit: u32, fleet_size: usize, lib: &Library, salt: u64, armed_only: bool, crew_race: u8) {
     let allowed = if armed_only { computer_guns() } else { None };
     let seed = u64::from(limit) * 31 + fleet_size as u64 * 7 + 1 + salt * 977;
     let first_new = slot.fleet.len();
-    let mut b = Build { slot, lib, seed, limit, fleet_size, armed_only, allowed };
+    let mut b = Build { slot, lib, seed, limit, fleet_size, armed_only, crew_race, allowed };
     if armed_only {
         // Computers (source: the original's fleet build, docs/re/skirmish-setup.md): a style is rolled first, then hulls are bought by
         // that style's rules; the style decides which later passes run (swaps only in styles 0-2).
@@ -934,7 +937,7 @@ impl Skirmish {
                 } else if s.fleet.is_empty() {
                     // A computer builds its fleet with the same routine as Auto Assign, inside the same budget.
                     let mut c = s.clone();
-                    auto_build(&mut c, self.victory_limit, self.fleet_size, lib, s.player as u64 + 1 + self.draw * 101, true);
+                    auto_build(&mut c, self.victory_limit, self.fleet_size, lib, s.player as u64 + 1 + self.draw * 101, true, h.race);
                     computer_build = Some((c.weapons.clone(), c.crew.clone()));
                     (c.fleet.iter().map(|n| (n.clone(), None, None)).collect(), vec![])
                 } else {

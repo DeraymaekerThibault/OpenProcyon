@@ -731,7 +731,8 @@ pub fn capture_key(mut keys: ResMut<ButtonInput<KeyCode>>, mut cui: ResMut<CtrlU
 pub fn auto_assign(sk: &mut Skirmish, lib: &Library) {
     let Some(i) = sk.slots.iter().position(|s| s.kind == Kind::Human) else { return };
     let mut slot = sk.slots[i].clone();
-    auto_build(&mut slot, sk.victory_limit, sk.fleet_size, lib, 0, false);
+    let race = slot.race;
+    auto_build(&mut slot, sk.victory_limit, sk.fleet_size, lib, 0, false, race);
     sk.slots[i] = slot;
     sk.error = None;
     if let Some(h) = sk.human().filter(|h| !h.fleet.is_empty()) {
