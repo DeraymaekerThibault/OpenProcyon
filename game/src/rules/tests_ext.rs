@@ -424,3 +424,25 @@ fn check_mission_reports_mistakes_in_the_new_features() {
     }
     assert!(text.contains("warning: rule \"Cutscene\": condition #1 'OP Any Of', nested condition #1 'Flag Condition'"), "a nested name that is never set is a warning: {text}");
 }
+
+#[test]
+fn a_sunk_ship_removed_from_the_world_still_counts_as_destroyed() {
+    let (mission, media) = fixture();
+    let mut s = Script::new(&mission, media);
+    let cond = json!({"Type": "Group Destroyed", "Group Name": "Fleet"});
+    let mut dead = ship_at("Fleet", 0.0, 0.0);
+    dead.alive = false;
+    // The frame it is destroyed, it is in the world.
+    let mut w = vec![dead];
+    s.keep_sunk(&mut w);
+    assert_eq!(w.len(), 1);
+    // After its removal the world has no such unit; the rules still see it destroyed, once.
+    let mut w = vec![];
+    s.keep_sunk(&mut w);
+    assert_eq!(w.len(), 1);
+    assert!(!w[0].alive);
+    assert!(s.cond(&cond, &w, false), "'Group Destroyed' holds for a group whose ships are all gone");
+    let mut again = w.clone();
+    s.keep_sunk(&mut again);
+    assert_eq!(again.len(), 1, "a unit present in the world is not added twice");
+}

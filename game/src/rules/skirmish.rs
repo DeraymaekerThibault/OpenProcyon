@@ -75,6 +75,7 @@ fn run(
             ..Unit::new(e, m.id, tf.translation)
         })
         .collect();
+    sk.script.keep_sunk(&mut world);
     world.extend(animals.iter().map(|(e, a, tf, _)| a.unit(e, tf)));
     // Moving belts: the rocks are units too, tagged with the script's groups by their world-object id.
     world.extend(rocks.iter().map(|(e, tf, a)| a.unit(e, tf)));

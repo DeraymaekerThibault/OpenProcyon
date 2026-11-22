@@ -1608,3 +1608,26 @@ fn a_dual_mount_launches_a_shell_from_every_muzzle_on_each_shot() {
     }
     assert!(dual_shots > 0, "a dual mount shot ({single_shots} single-muzzle shots)");
 }
+
+/// A sunk ship is queued for removal when its break-up ends: it is still there for the rest of that tick and gone after the start of the next.
+#[test]
+#[ignore = "needs imported assets"]
+fn a_sunk_ship_is_removed_at_the_start_of_the_tick_after_its_breakup() {
+    let mut app = asset_app();
+    app.add_message::<Sfx>()
+        .init_resource::<Time>()
+        .init_resource::<FxLib>()
+        .insert_resource(Library::load(assets_dir()))
+        .add_systems(Update, (crate::tick_start, breakup.after(crate::tick_start)));
+    let lib = Library::load(assets_dir());
+    let c = lib.index("Ship_Navy_Cutter");
+    let mut health = Health::new(&lib.classes[c]);
+    health.destroyed = true;
+    health.core = 0.0;
+    let e = app.world_mut().spawn((Transform::default(), Ship::new(c, Side::Enemy), health, Visibility::default(), dying_for(60.0))).id();
+    app.update();
+    assert!(app.world().get_entity(e).is_ok(), "queued: it runs the rest of this tick");
+    assert!(app.world().get::<crate::Removed>(e).is_some());
+    app.update();
+    assert!(app.world().get_entity(e).is_err(), "gone at the start of the next tick");
+}

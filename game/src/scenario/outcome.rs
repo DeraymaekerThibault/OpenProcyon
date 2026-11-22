@@ -62,7 +62,8 @@ pub fn outcome(
     player: Query<&Health, With<PlayerShip>>,
     ships: Query<(&Health, &Ship), Without<PlayerShip>>,
     rules: (Option<Res<victory::Victory>>, Option<Res<combat::Library>>, Option<Res<ship::Fleets>>, Option<Res<crate::rules::skirmish::SkirmishScript>>),
-    all: Query<(&Health, &Ship, &Transform, Option<&ship::FleetMember>, Option<&MapObject>), Without<crate::lifeboats::Lifeboat>>,
+    all: Query<(Entity, &Health, &Ship, &Transform, Option<&ship::FleetMember>, Option<&MapObject>), Without<crate::lifeboats::Lifeboat>>,
+    mut sunk: Local<Vec<(Entity, victory::ShipState)>>,
     bases: Query<(&campaign::MissionBase, &combat::ArmedBase, &Health, Option<(&combat::BaseSide, &combat::BaseOrigin)>)>,
 ) {
     let enemies = || ships.iter().filter(|(_, s)| s.side != Side::Player).map(|(h, _)| h);
@@ -74,25 +75,34 @@ pub fn outcome(
     // The original tests its end rules once a second of game time, so a battle ends up to a second after the cause.
     if !fresh.is_empty() {
         *pass = RulePass::default();
+        sunk.clear();
     }
+    let local = rules.2.as_ref().map(|f| f.local.as_str());
+    let state = |(_, h, s, tf, m, o): (Entity, &Health, &Ship, &Transform, Option<&ship::FleetMember>, Option<&MapObject>)| victory::ShipState {
+        side: s.side,
+        start: o.map_or(s.side, |o| o.start),
+        alive: !h.destroyed,
+        human: m.is_some_and(|m| Some(m.0.as_str()) == local),
+        id: o.and_then(|o| o.id),
+        at: Vec2::new(tf.translation.x, -tf.translation.z),
+    };
+    // A sunk ship leaves the world a tick after its break-up, so every frame notes the destroyed ones: a pass a second apart could
+    // miss a ship that sank and went between two passes.
+    for a in all.iter().filter(|a| a.1.destroyed) {
+        let s = state(a);
+        match sunk.iter_mut().find(|k| k.0 == a.0) {
+            Some(k) => k.1 = s,
+            None => sunk.push((a.0, s)),
+        }
+    }
+    let gone: Vec<victory::ShipState> = sunk.iter().filter(|k| !all.contains(k.0)).map(|k| k.1.clone()).collect();
     if !pass.due(time.delta_secs()) {
         return;
     }
     let mut end_message = None;
     let new = if let (Some(victory), Some(lib)) = (&rules.0, &rules.1) {
         // The map's own rules decide: a base falling, the human fleet or every ship lost.
-        let local = rules.2.as_ref().map(|f| f.local.as_str());
-        let states: Vec<victory::ShipState> = all
-            .iter()
-            .map(|(h, s, tf, m, o)| victory::ShipState {
-                side: s.side,
-                start: o.map_or(s.side, |o| o.start),
-                alive: !h.destroyed,
-                human: m.is_some_and(|m| Some(m.0.as_str()) == local),
-                id: o.and_then(|o| o.id),
-                at: Vec2::new(tf.translation.x, -tf.translation.z),
-            })
-            .collect();
+        let states: Vec<victory::ShipState> = all.iter().map(state).chain(gone.iter().cloned()).collect();
         let damage: Vec<(i64, f32)> = bases.iter().map(|(b, a, h, _)| (b.id, combat::base_mission_damage(&lib.classes[a.class], h))).collect();
         let captured: Vec<i64> = bases.iter().filter(|b| b.3.is_some_and(|(side, origin)| side.0 != origin.0)).map(|b| b.0.id).collect();
         let points = rules.3.as_ref().map(|s| s.points()).unwrap_or_default();
@@ -101,7 +111,7 @@ pub fn outcome(
         decided.map_or(Outcome::Playing, |d| d.0)
     } else if player.single().is_err() || player.single().is_ok_and(|h| h.destroyed) {
         Outcome::Defeat
-    } else if enemies().count() > 0 && enemies().all(|h| h.destroyed) {
+    } else if enemies().count() + gone.iter().filter(|g| g.side != Side::Player).count() > 0 && enemies().all(|h| h.destroyed) {
         Outcome::Victory
     } else {
         Outcome::Playing

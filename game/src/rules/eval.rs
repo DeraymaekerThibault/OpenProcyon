@@ -113,6 +113,7 @@ impl Script {
             base_captures: HashMap::new(),
             captured: vec![],
             destroyed: vec![],
+            sunk: vec![],
             teams: HashMap::new(),
             team_points: HashMap::new(),
             team_objectives: HashMap::new(),

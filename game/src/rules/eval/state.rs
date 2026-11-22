@@ -81,6 +81,9 @@ pub struct Script {
     pub(in crate::rules) captured: Vec<(String, Entity)>,
     /// Ships destroyed and the player who destroyed them, for 'Team has destroyed a ship'.
     pub(in crate::rules) destroyed: Vec<(String, Entity)>,
+    /// Ships that were destroyed, as they last stood: a sunk ship is removed from the world a tick after its break-up, but 'Group
+    /// Destroyed' and the kill counts still answer for it (`keep_sunk`).
+    pub(in crate::rules) sunk: Vec<Unit>,
     /// Skirmish teams: team name id -> its players (`set_teams`). Empty in the campaign, where a team condition counts anyone.
     pub(in crate::rules) teams: HashMap<String, Vec<String>>,
     /// 'Grant Team X Points' totals per team name id ('Team has X points').
@@ -131,6 +134,17 @@ pub struct Script {
 impl Script {
     fn named_group(&self, name: &str) -> bool {
         self.group_names.contains(name)
+    }
+    /// Remembers the destroyed ships of `w` and puts back, as destroyed units, those no longer in the world (removed after their break-up).
+    pub fn keep_sunk(&mut self, w: &mut Vec<Unit>) {
+        for u in w.iter().filter(|u| !u.alive) {
+            match self.sunk.iter_mut().find(|k| k.e == u.e) {
+                Some(k) => *k = u.clone(),
+                None => self.sunk.push(u.clone()),
+            }
+        }
+        let gone: Vec<Unit> = self.sunk.iter().filter(|k| !w.iter().any(|u| u.e == k.e)).cloned().collect();
+        w.extend(gone);
     }
     /// Adds TWT groups and resolves owner/group name collisions for rule selectors.
     pub fn tag(&self, w: &mut [Unit]) {
