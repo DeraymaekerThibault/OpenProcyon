@@ -390,17 +390,18 @@ fn wake_tubes(
     mut commands: Commands,
     time: Res<Time>,
     look: Res<Look>,
-    tubes: Query<(Entity, &WakeTube, &Mesh3d, &MeshMaterial3d<WakeMaterial>)>,
-    wakes: Query<(), With<crate::wake::Wake>>,
+    mut tubes: Query<(Entity, &WakeTube, &Mesh3d, &MeshMaterial3d<WakeMaterial>, &mut Visibility)>,
+    wakes: Query<Has<crate::environment::Unseen>, With<crate::wake::Wake>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<WakeMaterial>>,
 ) {
     let Some(w) = &look.wakes else { return };
-    for (e, tube, mesh, mat) in &tubes {
-        if !wakes.contains(tube.wake) {
+    for (e, tube, mesh, mat, mut vis) in &mut tubes {
+        let Ok(unseen) = wakes.get(tube.wake) else {
             commands.entity(e).despawn();
             continue;
-        }
+        };
+        vis.set_if_neq(if unseen { Visibility::Hidden } else { Visibility::Inherited });
         let built = meshes.get(&tube.ribbon).and_then(|r| match (r.attribute(Mesh::ATTRIBUTE_POSITION), r.attribute(Mesh::ATTRIBUTE_UV_0), r.attribute(Mesh::ATTRIBUTE_COLOR)) {
             (Some(VertexAttributeValues::Float32x3(p)), Some(VertexAttributeValues::Float32x2(uv)), Some(VertexAttributeValues::Float32x4(c))) => {
                 crossed_ribbons(p, uv, c, &w.planes, w.height)

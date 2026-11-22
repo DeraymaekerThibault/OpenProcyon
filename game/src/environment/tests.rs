@@ -185,3 +185,41 @@ fn whale_paths_loop_and_duplicate_points_do_not_hang() {
     animal.advance(&mut tf, 1.0);
     assert_eq!(tf.translation, Vec3::ZERO);
 }
+
+#[test]
+fn an_unseen_ships_running_effects_stop_drawing_and_its_hull_does_not() {
+    use bevy::ecs::system::RunSystemOnce;
+    let mut world = World::new();
+    world.insert_resource(crate::fx::FxLib::with_names(&["Engine", "Hit"]));
+    let health = || crate::combat::Health { sections: vec![], core: 1.0, destroyed: false };
+    let own = world.spawn((Ship::new(0, crate::Side::Player), health(), Visibility::default())).id();
+    let other = world.spawn((Ship::new(0, crate::Side(1)), health(), Visibility::default())).id();
+    let (engine, hit) = world
+        .run_system_once(move |mut commands: Commands, lib: Res<crate::fx::FxLib>| {
+            let at = Transform::IDENTITY;
+            let engine = crate::fx::spawn(&mut commands, &lib, "Engine", Some(other), at, at, false).unwrap();
+            let hit = crate::fx::spawn(&mut commands, &lib, "Hit", Some(other), at, at, true).unwrap();
+            commands.entity(hit).insert(crate::combat::Transient);
+            (engine, hit)
+        })
+        .unwrap();
+    // The player's ship sees 500 (a Man-O-War): the other ship 520 away (surface) is out of sight, 480 away in it.
+    let mut sensors = Sensors { primary: Some(own), ..default() };
+    sensors.objects.insert(own, sensor_object(Vec3::ZERO, 0.0, "A", 500.0));
+    sensors.objects.insert(other, sensor_object(Vec3::X * 520.0, 0.0, "B", 500.0));
+    world.insert_resource(sensors);
+    world.run_system_once(mark_unseen_ship_effects).unwrap();
+    world.flush();
+    assert!(world.get::<Unseen>(engine).is_some() && world.get::<Visibility>(engine) == Some(&Visibility::Hidden), "out of sight: the exhaust stops drawing");
+    assert!(world.get::<Unseen>(hit).is_none(), "one-shot effects are not touched");
+    assert_eq!(world.get::<Visibility>(other), Some(&Visibility::Inherited), "the hull is still drawn");
+    world.resource_mut::<Sensors>().objects.get_mut(&other).unwrap().sphere.0.x = 480.0;
+    world.run_system_once(mark_unseen_ship_effects).unwrap();
+    world.flush();
+    assert!(world.get::<Unseen>(engine).is_none() && world.get::<Visibility>(engine) == Some(&Visibility::Inherited), "in sight again: drawn");
+    world.resource_mut::<Sensors>().objects.get_mut(&other).unwrap().sphere.0.x = 520.0;
+    world.get_mut::<crate::combat::Health>(other).unwrap().destroyed = true;
+    world.run_system_once(mark_unseen_ship_effects).unwrap();
+    world.flush();
+    assert!(world.get::<Unseen>(engine).is_none(), "a sunk ship keeps its effects");
+}

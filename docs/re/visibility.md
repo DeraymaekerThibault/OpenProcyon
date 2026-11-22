@@ -2,7 +2,7 @@
 
 ## Status
 
-**Implemented, with explicit fidelity limits:** shared range/group/contact checks now drive radar, star map, world labels/reticles, world picking, context menus, Focus, docking and ship/base target acquisition. Ship meshes are **not newly hidden by sight range**: retail mesh disappearance versus UI contact loss still needs comparison with the original. Existing script visibility and cloak rendering remain separate.
+**Implemented, with explicit fidelity limits:** shared range/group/contact checks now drive radar, star map, world labels/reticles, world picking, context menus, Focus, docking and ship/base target acquisition. An unseen ship's own effects stop drawing (§5); its hull is not hidden by sight, as in the original. Existing script visibility and cloak rendering remain separate.
 
 Camera visibility, gun range, script visibility, sight range and nebula occlusion are different things. Detection is not a camera-distance or radar-disk test.
 
@@ -75,6 +75,36 @@ The UI first gathers candidate objects inside per-group visibility spheres, then
 
 Snapshot changes become visible next frame; exact retail update cadence is not recovered. No last-known-position/contact-memory system was invented. No new mesh range-culling or cloak timing/AI-override rules were added. Camera fallback on contact loss and the application of the recovered UI gate to automatic ship/base acquisition are coherent remake policies, not proof of every retail consumer's exact behaviour.
 
+## 5. What is drawn of an unseen ship
+
+The original re-tests the interface list once a second (§1 for ships). The result is kept per object as "seen this pass", plus a
+short "keep" value that is 0 while unseen and rises to 1 within about a second after a sighting. A ship counts as **shown** while it is
+seen or its keep value is above 0, and it is not script-hidden.
+
+When a ship stops being shown, these of its own effects are switched off, and switched on again when it is shown:
+
+- engine exhausts
+- wakes
+- damage-section smoke
+- fires
+- the other effects it carries (attached effects)
+
+Not switched: one-shot effects (muzzle flashes, hits, shells). An effect joining two objects is drawn only while both are shown.
+
+**The hull mesh is not hidden by sight.** The ship draw only tests the camera frustum, script visibility and the model's own no-draw
+flag. What makes an unseen ship look absent is the combination: no effects, no label, reticle or radar contact (§4), it cannot be
+picked, and the camera leaves a focus it cannot see. At the widest battle zoom the view is about 550 units across, so a ship beyond a
+typical sight range is off screen anyway.
+
+Checked in the original: a computer Barque approaching an idle Man-O-War (sight 500) was not shown, effects off, at 583 units
+centre distance and shown, effects on, at 573 units; a ship 1010-1043 units away stayed unshown for a minute, one 285 units away stayed
+shown. The hull rule is read, not checked by a value.
+
+Remake: `environment::mark_unseen_ship_effects` hides a ship's non-transient effects (exhausts and their plumes and lights, smoke,
+fires, carried effects) and its wakes while `player_sees` is false; the hull keeps drawing. A sunk ship keeps its effects (the original's
+case is not read). Still different: the test runs every frame instead of once a second, the keep value is not modelled, and effects
+joining two objects are not gated.
+
 ## Validation and remaining acceptance
 
 The default `tools/check.sh` gate passes (210 Rust tests; 75 Python tests, seven install/optional-fixture tests skipped). Re-running the same gate with the retail root enabled exposes an unrelated existing `test_combat.LocalCombatExportTests.test_cutter` failure: it assumes raw critical chances are in [0,1]. Neither that exporter nor its test was changed in this batch; the retail-enabled run has one failure and two optional-fixture skips. Regressions cover strict range equality, surface versus centre distance, altitude, unrelated group exclusion, group spotting, hidden/dead observers/targets, cloak, missing primary, scenery policy, sphere-centre transforms, despawn cleanup, enabled/disabled and short-distance cloud occlusion, same-cloud and concave segments, Focus availability and camera tracking. Existing tower-fire/tower-destruction and Mission 2 docking tests still pass.
@@ -88,4 +118,4 @@ WAYLAND_DISPLAY= tools/shot.sh local/sight-classic.png --script sight \
 
 The script freezes three ships, disables their gun states and asserts detection and actual radar widget visibility through out-of-range → group-spotted → unrelated ally → cloaked → revealed states. It is a wiring check, not a combat or full campaign replay. Screenshots/logs: `local/sight-classic.*`. A separate Mission 2 launch reached initialization/NIS without an ECS error but timed out before capture; it is **not** counted as a completed mission runtime smoke.
 
-**Remaining:** retail mesh/render consumers, lost-contact memory/timing, precise NIS/cloak/crew-modifier semantics, scenery UI distance policy, live moving-storm/overlap geometry, and normal Mission 1/2 playthroughs after the matrix/detection corrections. Validate against original footage/screenshots before claiming full sensor parity.
+**Remaining:** the once-a-second list cadence and keep value (§5), two-ended effects, lost-contact memory/timing, precise NIS/cloak/crew-modifier semantics, scenery UI distance policy, live moving-storm/overlap geometry, and normal Mission 1/2 playthroughs after the matrix/detection corrections. Validate against original footage/screenshots before claiming full sensor parity.
