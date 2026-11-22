@@ -14,8 +14,8 @@ pub mod schema;
 mod state;
 mod types;
 
-use ext::Ext;
 pub use diag::{Diag, TraceOptions, set_trace};
+use ext::Ext;
 pub use state::Script;
 pub use types::*;
 
@@ -164,7 +164,13 @@ impl Script {
         for (i, r) in rules.iter().enumerate() {
             self.diag.cur = i;
             // The opening NIS camera/speech rules are replaced by briefing.rs (which marks its speech as played).
-            if self.fired[i] || !self.ext.is_active(i) || (self.briefing_opening && opening_rule(&r.name)) {
+            if self.fired[i] || (self.briefing_opening && opening_rule(&r.name)) {
+                continue;
+            }
+            if !self.ext.is_active(i) {
+                if self.diag.active() {
+                    self.trace_state(i, "inactive (\"Is Active\" is false or OP Set Rule Active turned it off): its conditions are not evaluated");
+                }
                 continue;
             }
             let mut ok = true;
@@ -185,6 +191,10 @@ impl Script {
                 continue;
             }
             if self.ext.busy(i) {
+                if self.diag.active() {
+                    let note = self.ext.busy_note(i);
+                    self.trace_state(i, &note);
+                }
                 continue;
             }
             for key in std::mem::take(&mut self.consume) {

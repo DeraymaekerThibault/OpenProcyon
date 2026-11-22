@@ -92,6 +92,16 @@ impl Ext {
     pub(in crate::rules) fn busy(&self, rule: usize) -> bool {
         self.pending.iter().any(|p| p.rule == rule)
     }
+    /// For the rule trace: what the rule's pending sequence waits for.
+    pub(in crate::rules) fn busy_note(&self, rule: usize) -> String {
+        let Some(p) = self.pending.iter().find(|p| p.rule == rule) else { return "not waiting".into() };
+        let what = match &p.wait {
+            Wait::Secs(_) => "an OP Wait to end".to_string(),
+            Wait::Speech(n) if n.is_empty() => "the speech queue to empty (OP Wait Until Speech Done)".to_string(),
+            Wait::Speech(n) => format!("speech '{n}' to finish (OP Wait Until Speech Done)"),
+        };
+        format!("busy: its sequence waits for {what} before action #{}; the conditions hold again but this firing is skipped", p.next + 1)
+    }
     pub fn counter(&self, name: &str) -> f32 {
         self.counters.get(name).copied().unwrap_or(0.0)
     }
@@ -139,7 +149,7 @@ impl Script {
             }
             "OP Add To Counter" => *self.ext.counters.entry(s(a, "Counter Name").into()).or_default() += f(a, "Value"),
             "OP Set Rule Active" => {
-                let (name, on) = (s(a, "Rule Name").trim(), flag(&a["Boolean"]).unwrap_or(true));
+                let (name, on) = (s(a, "Rule Name").trim(), b(a, "Boolean"));
                 let mut found = false;
                 for (i, n) in self.ext.names.iter().enumerate() {
                     if n == name {

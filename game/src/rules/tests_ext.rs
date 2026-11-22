@@ -233,8 +233,8 @@ fn inactive_rules_are_not_evaluated_until_a_rule_activates_them() {
     s.step(&[], 0.1, false);
     s.step(&[], 0.1, false);
     assert!(s.flag("woke"), "activated");
-    s.act(&json!({"Type": "OP Set Rule Active", "Rule Name": "sleeper", "Boolean": false}), &[], &mut vec![], "t");
-    assert!(!s.ext.is_active(0), "a JSON boolean works too");
+    s.act(&json!({"Type": "OP Set Rule Active", "Rule Name": "sleeper", "Boolean": "FALSE"}), &[], &mut vec![], "t");
+    assert!(!s.ext.is_active(0), "retail-style FALSE");
 }
 
 #[test]
@@ -348,4 +348,79 @@ fn objectives_victory_reads_its_messages_from_the_media() {
     s.flags.insert("lost".into(), true);
     s.step(&[], 0.1, false);
     assert_eq!(s.ended, Some(("The Comet is gone.".into(), false)));
+}
+
+/// A mission that uses every engine-added Type, key and field: it must pass `--check-mission` with no error and no warning, and run.
+fn fixture() -> (Value, Value) {
+    let mission = json!({
+        "players": ["Player0 Group"],
+        "groups": {"Fleet": [1]},
+        "ships": [{"id": 1, "name": "RLS Comet", "group": "Player0 Group"}],
+        "volumes": {"Area": [[0, 0], [10, 0], [10, 10], [0, 10]]},
+        "environment": {"point_sets": {"Spot": [{"pos": [1.0, 2.0, 3.0]}]}},
+        "victory": "objectives",
+        "victory_message": "won",
+        "defeat_message": "lost",
+        "tasks": [
+            {"Name": "Reach", "Active": true, "required": true,
+             "complete_when": [{"Type": "OP Any Of", "Conditions": [counter_is("kills", "Greater Than", 2.0), flag_is("shortcut", true)]}],
+             "fail_when": [{"Type": "Group Destroyed", "Group Name": "Fleet"}]},
+            {"Name": "Bonus", "Active": true, "required": false, "complete_when": [flag_is("bonus", true)]},
+        ],
+        "rules": [
+            rule("Start", true, json!([{"Type": "World Initialize"}]), json!([
+                {"Type": "OP Set Counter", "Counter Name": "kills", "Value": 0}, set_flag("go"), set_flag("shortcut"), set_flag("bonus")])),
+            rule("Cutscene", true, json!([{"Type": "OP Any Of", "Conditions": [flag_is("go", true), {"Type": "OP Not", "Condition": counter_is("kills", "Less Than", 1.0)}]}]), json!([
+                {"Type": "NIS Start"}, wait(1.0),
+                {"Type": "Teleport Group/Unit", "Group/Unit Name": "Fleet", "Point Set Name": "Spot"},
+                {"Type": "Play speech event", "Speech Event Name": "Hello"},
+                {"Type": "OP Wait Until Speech Done", "Speech Event Name": "Hello"},
+                {"Type": "OP Wait Until Speech Done", "Speech Event Name": ""},
+                {"Type": "NIS End"}, add("kills", 3.0),
+                {"Type": "OP Set Rule Active", "Rule Name": "Later", "Boolean": "TRUE"}])),
+            {"name": "Later", "Run Once": true, "Is Active": false, "conditions": [counter_is("kills", "Greater Than", 2.0)], "actions": [set_flag("later")]},
+        ],
+    });
+    let media = json!({"speech": {"Hello": {"text": "Hi", "duration": 1.0}}, "messages": {"won": "Well sailed.", "lost": "Lost."}});
+    (mission, media)
+}
+
+#[test]
+fn the_fixture_mission_passes_check_mission_and_runs() {
+    let (mission, media) = fixture();
+    let problems = crate::rules::check::check(&mission, &Value::Null, &media);
+    assert_eq!(problems, vec![], "{}", problems.iter().map(ToString::to_string).collect::<Vec<_>>().join("\n"));
+    let mut s = Script::new(&mission, media);
+    let w = [ship_at("Fleet", 0.0, 0.0)];
+    for _ in 0..120 {
+        s.step(&w, 0.1, false);
+    }
+    assert!(s.flag("later"), "the cutscene ran to its end and switched the later rule on");
+    assert_eq!(s.ended, Some(("Well sailed.".into(), true)), "the required task completed through its counter");
+}
+
+#[test]
+fn check_mission_reports_mistakes_in_the_new_features() {
+    let (mut mission, media) = fixture();
+    mission["rules"][1]["conditions"][0]["Conditions"][0] = json!({"Type": "Flag Condition", "Flag Name": "typo", "Boolean Value": "TRUE"});
+    mission["rules"][2]["conditions"] = json!([counter_is("never written", "Greater Than", 0.0)]);
+    mission["rules"][0]["actions"][0] = json!({"Type": "OP Set Counter", "Counter Name": "kills", "Value": 0});
+    mission["rules"][0]["actions"][1] = json!({"Type": "OP Set Rule Active", "Rule Name": "Lter", "Boolean": true});
+    mission["tasks"][0]["complete_when"] = json!([{"Type": "Flag Condiction"}]);
+    mission["tasks"][1]["required"] = json!("yes");
+    mission["victory"] = json!("objectves");
+    mission["victory_message"] = json!(["won"]);
+    let text = crate::rules::check::check(&mission, &Value::Null, &media).iter().map(ToString::to_string).collect::<Vec<_>>().join("\n");
+    for want in [
+        "counter 'never written' is never set (it reads 0), so this can never hold",
+        "unknown rule 'Lter' (did you mean 'Later'?)",
+        "true is not \"TRUE\" or \"FALSE\"",
+        "unknown condition Type (did you mean 'Flag Condition'?)",
+        "\"yes\" is not true/false",
+        "\"objectves\" is not \"objectives\"",
+        "[\"won\"] is not a message id",
+    ] {
+        assert!(text.contains(want), "missing {want:?} in\n{text}");
+    }
+    assert!(text.contains("warning: rule \"Cutscene\": condition #1 'OP Any Of', nested condition #1 'Flag Condition'"), "a nested name that is never set is a warning: {text}");
 }
