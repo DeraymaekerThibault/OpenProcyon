@@ -220,7 +220,7 @@ Tag battle-owned roots for scenario cleanup and test returning to the same ship/
 - **Scratch:** `local/` only (git-ignored). Never put screenshots, logs or raw retail inputs anywhere tracked.
 
 Do not change converted asset paths just to make the tree look tidy: JSON, Bevy asset handles and mod overlays reference those paths.
-Converted content is never committed: every player and contributor imports their own copy. `tools/compare_assets.py <expected> <actual>`
+Converted content is never committed: every player and contributor imports their own copy. `python3 -m tools.compare_assets <expected> <actual>`
 compares two imports by meaning (JSON by value, images by pixels) to check exporter changes. See [data-format.md](data-format.md) and [modding.md](modding.md).
 `data/hud/bar.json` is authored layout configuration; the sprites it names are generated (`hud/sprites/`). Most other retail JSON is regenerated, so edits belong in mods.
 
