@@ -59,7 +59,7 @@ def tool(module, *args, quiet=False):
             with warnings.catch_warnings():
                 # The step modules are also imported as libraries by each other; re-running one as __main__ is intended.
                 warnings.filterwarnings(
-                    "ignore", "found in sys.modules", RuntimeWarning
+                    "ignore", ".*found in sys.modules", RuntimeWarning
                 )
                 try:
                     runpy.run_module(module, run_name="__main__", alter_sys=True)

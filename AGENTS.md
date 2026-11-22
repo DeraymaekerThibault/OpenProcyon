@@ -39,7 +39,7 @@ files to `content/`, or anything that publishes (pushing tags, releases).
 - `tools/` Python parsers/exporters for the retail formats (WOT, MDB, MSB, EFT, HDT, FFT, TWT, TST) and the importer
   `python3 -m tools.import_assets --game <install> [--out <dir>]` (`tools/build_assets.sh` wraps it), which writes JSON/GLB/PNG/OGG assets. Default output: `assets/` in the
   checkout; the game also finds `$XDG_DATA_HOME/openprocyon/assets` (Windows `%APPDATA%\openprocyon\assets`) or `PROCYON_ASSETS`.
-  `tools/compare_assets.py A B` compares two imports by meaning (JSON values, image pixels).
+  `python3 -m tools.compare_assets A B` compares two imports by meaning (JSON values, image pixels).
 - `content/` files that ship with the code: fonts (URW base35), hand-written data (`data/hud/bar.json`), the crew voice event
   table. The game overlays `content/` on the imported assets like a mod (`assets_dir()` in `game/src/lib.rs`).
 - `game/` Rust + Bevy 0.20. `lib.rs` is the `openprocyon` library: wiring and `run(view)`. `main.rs` runs it with the classic view.
@@ -82,7 +82,7 @@ files to `content/`, or anything that publishes (pushing tags, releases).
 - Non-trivial changes need a regression test; ECS/UI changes also need a runtime smoke test (a `--script` or screenshot run).
 - Add behaviour to the module that owns it (`docs/development.md`), not a parallel implementation. Keep asset paths and JSON
   layouts stable; mods reference them.
-- Exporter changes: re-import into a scratch folder and compare with `tools/compare_assets.py` before trusting the result.
+- Exporter changes: re-import into a scratch folder and compare with `python3 -m tools.compare_assets` before trusting the result.
 - Known PROVISIONAL areas: ship linear motion and engine-order mapping, gun arcs, damage-smoke emitter geometry, wake parameters,
   sail alpha, HUD part order, sound falloff/levels and the event to sound-pool mapping.
 - `local/` is git-ignored scratch for screenshots, logs and notes.
