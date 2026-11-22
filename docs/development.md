@@ -22,7 +22,7 @@ Git Bash (`GIT_BASH=<path>` if it is not in the default place), and the screensh
    base/ship, add or tighten a scenario there rather than relying on a long manual run.
    `--fire-rule "<rule name>"` (repeatable) and `--start-at x,y` start a mission at a later beat: the named rules' actions run once the world-initialise rules have
    run and the primary ship is placed (`Script::fire_start_rules` in `rules/eval.rs`; debug only, see `docs/modding.md`).
-   The developer console (`~` or F12, in a battle that runs a mission's rules; `rules/console.rs` model and parsing,
+   The developer console (the backquote key, rebindable, or F12, in a battle that runs a mission's rules; `rules/console.rs` model and parsing,
    `rules/systems/dev_console.rs` keys and effects, `classic/console.rs` drawing; not retail behaviour) is a one-shot runner for the
    rule vocabulary, not a second command system: a line becomes a rule action (or a condition, for a query) and goes through
    `Script::act` / `Script::cond`, so every action a mission can use works (`act {json}`), and a new action needs nothing here.

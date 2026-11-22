@@ -116,17 +116,21 @@ pub enum Act {
     ZoomOut,
     ChangePrimary,
     AttackOnly,
+    /// Opens the developer console (not retail; `rules/console.rs`). F12 always opens it too.
+    Console,
 }
 
 /// Retail list order. `Secondary(n)` rows are generated; see `table()`.
 fn table() -> Vec<(Act, String, KeyCode)> {
-    let secondary = [Digit1, Digit2, Digit3, Digit4, Digit5, Digit6, Digit7, Digit8, Digit9, Digit0];
+    // Not retail: the primary ship is 1 and the secondary ships follow on 2..9, 0 and `\`. The retail table put the primary on the
+    // backquote and the secondaries on 1..0.
+    let secondary = [Digit2, Digit3, Digit4, Digit5, Digit6, Digit7, Digit8, Digit9, Digit0, Backslash];
     let mut t = vec![
         (Act::Screenshot, "Take ScreenShot Description".into(), ScrollLock),
         (Act::SpeedUp, "Increase Speed".into(), Equal),
         (Act::SpeedDown, "Decrease Speed".into(), Minus),
         (Act::PanicFire, "Panic Fire".into(), KeyX),
-        (Act::Primary, "Select Primary Ship".into(), Backquote),
+        (Act::Primary, "Select Primary Ship".into(), Digit1),
     ];
     t.extend(secondary.iter().enumerate().map(|(i, k)| (Act::Secondary(i as u8 + 1), format!("Select Secondary Ship ( {} )", i + 1), *k)));
     t.extend([
@@ -144,6 +148,7 @@ fn table() -> Vec<(Act, String, KeyCode)> {
         (Act::ZoomOut, "Zoom Camera Out".into(), ArrowDown),
         (Act::ChangePrimary, "Change Primary Ship".into(), KeyP),
         (Act::AttackOnly, "Attack Only Mode".into(), AltLeft),
+        (Act::Console, "Open Developer Console".into(), Backquote),
     ]);
     t
 }
@@ -180,9 +185,18 @@ impl Bindings {
     pub fn load() -> Self {
         let mut b = Self::default();
         let saved: HashMap<String, String> = path().and_then(|p| std::fs::read_to_string(p).ok()).and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
-        for r in &mut b.rows {
+        let mut kept = vec![false; b.rows.len()];
+        for (r, kept) in b.rows.iter_mut().zip(&mut kept) {
             if let Some(k) = saved.get(&r.1).and_then(|n| KEYS.iter().find(|e| e.1 == n)) {
                 r.2 = k.0;
+                *kept = true;
+            }
+        }
+        // A default that a saved choice now holds (a file from before a row was added or moved) takes the first free key.
+        for i in 0..b.rows.len() {
+            let clash = !kept[i] && (0..b.rows.len()).any(|j| j != i && b.rows[j].2 == b.rows[i].2 && (kept[j] || j < i));
+            if clash && let Some(free) = KEYS.iter().map(|e| e.0).find(|k| b.rows.iter().all(|r| r.2 != *k)) {
+                b.rows[i].2 = free;
             }
         }
         b
@@ -209,7 +223,7 @@ mod tests {
     #[test]
     fn defaults_are_unique_and_named() {
         let b = Bindings::default();
-        assert_eq!(b.rows.len(), 29);
+        assert_eq!(b.rows.len(), 30);
         for r in &b.rows {
             assert!(bindable(r.2), "{}", r.1);
             assert_eq!(b.rows.iter().filter(|o| o.2 == r.2).count(), 1, "{}", r.1);

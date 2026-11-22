@@ -20,7 +20,7 @@ pub enum Setting {
     RestoreDisplay,
     /// Single Player menu toggle: Normal -> Hard -> Easy.
     Difficulty,
-    /// Display screen: whether `~` opens the developer console (not retail; rules/console.rs).
+    /// Display screen: whether the console key opens the developer console (not retail; rules/console.rs).
     Console,
 }
 
@@ -41,7 +41,7 @@ pub struct Settings {
     pub flags: bool,
     /// 0 Easy, 1 Normal (retail default), 2 Hard: scales shell damage between the player's and computer ships.
     pub difficulty: u8,
-    /// The developer console may be opened with `~` / F12. Off by default.
+    /// The developer console may be opened with its key (backquote by default) / F12. Off by default.
     pub console: bool,
 }
 impl Default for Settings {
