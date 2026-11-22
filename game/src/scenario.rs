@@ -181,6 +181,15 @@ pub fn debug_kill(keys: Res<ButtonInput<KeyCode>>, cfg: Res<Config>, mut ships: 
 #[derive(Resource, Default)]
 pub struct RestartRequest(pub bool);
 
+/// The respawned scenario is a fresh battle for the console: no cheats used, `god` off (the new script is vulnerable again).
+/// The developer view survives a restart of the same mission (`show` overlays are rebuilt) but not a different mission.
+fn reset_console_state(cheats: &mut crate::rules::console::Cheats, dev: &mut crate::rules::console::DevView, new_mission: bool) {
+    *cheats = Default::default();
+    if new_mission {
+        dev.reset();
+    }
+}
+
 pub fn restart(
     mut request: Option<ResMut<RestartRequest>>,
     keys: Res<ButtonInput<KeyCode>>,
@@ -189,6 +198,8 @@ pub fn restart(
     lib: Res<Library>,
     fxl: Res<fx::FxLib>,
     mut cfg: ResMut<Config>,
+    mut cheats: ResMut<crate::rules::console::Cheats>,
+    mut dev: ResMut<crate::rules::console::DevView>,
     mission: Option<Res<campaign::Mission>>,
     shapes: Res<collision::Shapes>,
     asteroids: Res<data::AsteroidDefs>,
@@ -201,10 +212,12 @@ pub fn restart(
     if !keys.just_pressed(KeyCode::KeyR) && !scripted && !asked && next.is_none() {
         return;
     }
-    if next.is_some() {
+    let new_mission = next.is_some();
+    if new_mission {
         cfg.map = next;
     }
     cfg.ended = None;
+    reset_console_state(&mut cheats, &mut dev, new_mission);
     for e in &old {
         commands.entity(e).despawn();
     }

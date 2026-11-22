@@ -19,7 +19,7 @@ pub(super) fn plugin(app: &mut App) {
         .init_resource::<DevView>()
         .init_resource::<crate::scenario::RestartRequest>()
         .add_systems(OnEnter(Screen::Battle), |mut cheats: ResMut<Cheats>| *cheats = Cheats::default())
-        .add_systems(OnExit(Screen::Battle), close_on_leaving)
+        .add_systems(OnExit(Screen::Battle), (close_on_leaving, |mut dev: ResMut<DevView>| dev.reset()))
         // After the input systems and before anything reads the keys: while the console is open the game sees no keyboard or mouse.
         .add_systems(PreUpdate, keys.after(bevy::input::InputSystems).run_if(in_state(Screen::Battle)).run_if(resource_exists::<Mission>).run_if(crate::menu::overlay_closed))
         .add_systems(Update, free_camera.after(crate::camera).run_if(in_state(Screen::Battle)))
