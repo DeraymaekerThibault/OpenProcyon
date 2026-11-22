@@ -237,6 +237,9 @@ pub fn run(view: fn(&mut App), setup_view: fn(&mut App)) {
             if profiling() {
                 app.add_plugins(bevy::diagnostic::FrameTimeDiagnosticsPlugin::default()).add_systems(Last, profile_counts);
             }
+            if let Some(free) = view::FreeCamera::load(assets_dir()) {
+                app.insert_resource(free);
+            }
         })
         .add_plugins(lobby_scenario)
         // Interactive runs open the front end; scripted/screenshot runs and --map go straight to battle (--menu forces the menu).
@@ -275,8 +278,11 @@ pub fn run(view: fn(&mut App), setup_view: fn(&mut App)) {
                     dist: arg("--dist").and_then(|v| v.parse().ok()).unwrap_or(300.0),
                     focus: None,
                 }
-            } else {
+            } else if view::FreeCamera::load(assets_dir()).is_some() {
                 Orbit { yaw: 0.6, pitch: 0.5, dist: 60.0, focus: None }
+            } else {
+                // Retail: the pitch follows the distance (`view::camera`); the zoom limits raise it to the focus's nearest.
+                Orbit { yaw: 0.6, pitch: 0.5, dist: view::RETAIL_START_DIST, focus: None }
             }
         })
         .init_resource::<collision::Shapes>()

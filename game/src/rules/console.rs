@@ -141,7 +141,7 @@ impl Console {
     pub fn submit(&mut self, line: &str) {
         self.pending.push(line.to_string());
     }
-    /// One key press on the open console: typing, Backspace, Up/Down for earlier lines, Enter, Escape / `~` to close.
+    /// One key press on the open console: typing, Backspace, Up/Down for earlier lines, Enter, Escape to close (the system also closes it on the console key).
     pub fn key(&mut self, key: &Key) -> Edit {
         self.key_with(key, false)
     }
@@ -153,7 +153,6 @@ impl Console {
             Key::PageDown => self.scroll_by(1 - SHOWN as isize),
             Key::Home if ctrl => self.scroll_top(),
             Key::End if ctrl => self.scroll_bottom(),
-            Key::Character(c) if c.as_str() == "~" => return Edit::Close,
             Key::Character(c) => {
                 let room = MAX_LINE.saturating_sub(self.line.chars().count());
                 self.line.extend(c.chars().filter(|c| !c.is_control()).take(room));

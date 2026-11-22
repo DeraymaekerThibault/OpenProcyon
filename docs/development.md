@@ -22,7 +22,7 @@ Git Bash (`GIT_BASH=<path>` if it is not in the default place), and the screensh
    base/ship, add or tighten a scenario there rather than relying on a long manual run.
    `--fire-rule "<rule name>"` (repeatable) and `--start-at x,y` start a mission at a later beat: the named rules' actions run once the world-initialise rules have
    run and the primary ship is placed (`Script::fire_start_rules` in `rules/eval.rs`; debug only, see `docs/modding.md`).
-   The developer console (`~` or F12, in a battle that runs a mission's rules; `rules/console.rs` model and parsing,
+   The developer console (the backquote key, rebindable, or F12, in a battle that runs a mission's rules; `rules/console.rs` model and parsing,
    `rules/systems/dev_console.rs` keys and effects, `classic/console.rs` drawing; not retail behaviour) is a one-shot runner for the
    rule vocabulary, not a second command system: a line becomes a rule action (or a condition, for a query) and goes through
    `Script::act` / `Script::cond`, so every action a mission can use works (`act {json}`), and a new action needs nothing here.
@@ -171,7 +171,7 @@ Keep the existing module boundaries. New files should own a real feature, not ju
 | `lib.rs` | Library root and `run(view)`: application wiring, CLI `Config`, time scale/pause, profiling and the screenshot driver | Wiring/ordering systems; feature logic goes in its owning module |
 | `ship.rs` | `Ship`/`Side` state, movement integration (`step`), skirmish AI | Changing free motion or AI; movement tests live here |
 | `scenario.rs` | Battle lifecycle: spawn from map/mission, restart, leave, outcome, ship naming | Changing what spawns or how a battle starts/ends |
-| `view.rs` | Orbit camera, world mouse/keyboard input, sky, F1 debug text | Changing camera or world input |
+| `view.rs` | Orbit camera, world mouse/keyboard input, sky and background stars (`docs/re/sky.md`), retail and free camera (`docs/re/camera.md`), F1 debug text | Changing camera or world input |
 | `data.rs` | JSON → ship classes, sections, mounts, geometry and shared weapon definitions | Changing simulation data schemas; coordinate the exporter and mod fixtures |
 | `combat/` | `mod.rs` health, targets, messages, engines, destruction; `gunnery.rs` gun mounts, turret aim/lead, bursts, ship and tower fire; `shells.rs` shells in flight, torpedo guidance, point defence, hit damage; `hit_test.rs` ray/segment tests against sections; `asteroid.rs` asteroid motion/breakup; `damage.rs` smoke/fires/mesh swaps; `status.rs` HUD-facing gun/section queries; `tests.rs` | Changing combat; report hits/firing/destruction through the existing messages |
 | `collision.rs` | Ship movement substeps, ship/scenery contact, separation and contact velocity; AI collision avoidance (`collision/avoid.rs`) | Changing physical collision; free-motion equations remain in `step` |

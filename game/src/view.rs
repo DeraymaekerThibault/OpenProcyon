@@ -27,13 +27,69 @@ pub struct Pointer<'w> {
     pub binds: Res<'w, crate::bindings::Bindings>,
     pub fleets: ResMut<'w, ship::Fleets>,
     pub plot: ResMut<'w, course::Plot>,
+    pub free: Option<Res<'w, FreeCamera>>,
 }
 
-fn camera_input(mouse: &ButtonInput<MouseButton>, keys: &ButtonInput<KeyCode>, pointer: &Pointer, orbit: &mut Orbit, dt: f32) {
-    // Camera controls use real time, independent of simulation speed or pause.
+/// Not retail: the free camera of the bundled `free-camera` mod (on by default), present when the overlay has `data/camera.json`
+/// (`{"pitch": [0.05, 1.5]}`): right-drag tilts between those pitches (radians). Without it the camera is the retail one.
+#[derive(Resource, Clone, Copy, PartialEq, Debug)]
+pub struct FreeCamera {
+    pub pitch: (f32, f32),
+}
+impl FreeCamera {
+    pub fn load(root: &std::path::Path) -> Option<Self> {
+        let v = crate::data::try_json(&root.join("data/camera.json"))?;
+        let p = |i: usize, d: f32| v["pitch"][i].as_f64().map_or(d, |x| x as f32);
+        Some(FreeCamera { pitch: (p(0, 0.05), p(1, 1.5)) })
+    }
+}
+
+/// Retail camera (`docs/re/camera.md`): height above the target point for a back distance `d`; the pitch follows from it.
+pub fn retail_height(d: f32) -> f32 {
+    0.065 * d.max(0.0).powf(1.4)
+}
+/// Retail zoom limits for a focus of this bounding radius: 1.2 radii (at least 2) out to 300 more.
+pub fn retail_zoom_limits(radius: f32) -> (f32, f32) {
+    let near = (1.2 * radius).max(2.0);
+    (near, near + 300.0)
+}
+/// The retail wanted distance a battle starts at, raised to the focus's nearest.
+pub const RETAIL_START_DIST: f32 = 20.0;
+/// The original steps its camera keys once per world update; here they run on real time at this rate.
+const RETAIL_STEPS_PER_SEC: f32 = 30.0;
+
+/// Retail input: the pitch is not a control. Steps change the wanted distance (`orbit.dist`): outward by their size, inward by twice it.
+fn retail_camera_input(mouse: &ButtonInput<MouseButton>, keys: &ButtonInput<KeyCode>, pointer: &Pointer, orbit: &mut Orbit, dt: f32, radius: f32) {
+    let mut step = -pointer.scroll.delta.y * 10.0; // ponytail: one scroll unit = one wheel notch (line units); pixel-unit touchpads zoom fast
     if mouse.pressed(MouseButton::Right) {
         orbit.yaw -= pointer.motion.delta.x * 0.005;
-        orbit.pitch = (orbit.pitch + pointer.motion.delta.y * 0.005).clamp(0.05, 1.5);
+        step += pointer.motion.delta.y;
+    }
+    let per_tick = RETAIL_STEPS_PER_SEC * dt;
+    if pointer.binds.pressed(keys, Act::RotateLeft) {
+        orbit.yaw += 0.04 * per_tick;
+    }
+    if pointer.binds.pressed(keys, Act::RotateRight) {
+        orbit.yaw -= 0.04 * per_tick;
+    }
+    if pointer.binds.pressed(keys, Act::ZoomIn) {
+        step -= 3.0 * per_tick;
+    }
+    if pointer.binds.pressed(keys, Act::ZoomOut) {
+        step += 3.0 * per_tick;
+    }
+    let (near, far) = retail_zoom_limits(radius);
+    orbit.dist = (orbit.dist + if step > 0.0 { step } else { 2.0 * step }).clamp(near, far);
+}
+
+fn camera_input(mouse: &ButtonInput<MouseButton>, keys: &ButtonInput<KeyCode>, pointer: &Pointer, orbit: &mut Orbit, dt: f32, radius: f32) {
+    // Camera controls use real time, independent of simulation speed or pause.
+    let Some(free) = pointer.free.as_deref() else {
+        return retail_camera_input(mouse, keys, pointer, orbit, dt, radius);
+    };
+    if mouse.pressed(MouseButton::Right) {
+        orbit.yaw -= pointer.motion.delta.x * 0.005;
+        orbit.pitch = (orbit.pitch + pointer.motion.delta.y * 0.005).clamp(free.pitch.0, free.pitch.1);
     }
     orbit.dist = (orbit.dist - pointer.scroll.delta.y * 3.0).clamp(10.0, 300.0);
     if pointer.binds.pressed(keys, Act::RotateLeft) {
@@ -82,7 +138,9 @@ pub fn input(
         if briefing::active(mission.as_deref()) || rules::locked(mission.as_deref()) {
             return;
         }
-        camera_input(&mouse, &keys, &pointer, &mut orbit, time.delta_secs());
+        // The focus's bounding radius sets the retail zoom limits (collision sphere for the mesh bounds, PROVISIONAL; others 0).
+        let radius = orbit.focus.or(Some(actor)).and_then(|e| ships.get(e).ok()).map_or(0.0, |(_, s, ..)| lib.classes[s.class].sphere.1);
+        camera_input(&mouse, &keys, &pointer, &mut orbit, time.delta_secs(), radius);
         let b = &pointer.binds;
 
         // Engine orders: +/- step through All Stop .. Emergency.
@@ -383,14 +441,79 @@ pub fn hd_sky(mut commands: Commands, cams: Query<(Entity, Option<&bevy::light::
     commands.entity(cam).insert(bevy::light::Skybox { image: Some(want.clone()), brightness: 1.0 / bevy::camera::Exposure::default().exposure(), ..default() });
 }
 
+/// The background stars (`docs/re/sky.md`): per group, its star count and colour (sRGB, drawn opaque).
+pub const STAR_GROUPS: [(usize, [f32; 3]); 6] =
+    [(2500, [0.75, 0.75, 0.75]), (600, [0.89, 0.909, 0.99]), (600, [0.804, 0.6, 0.6]), (300, [0.908, 0.909, 0.76]), (1000, [0.4235, 0.545, 0.557]), (30, [1.0, 1.0, 1.0])];
+/// White stars added to the last group as a band, each near one of the `STAR_BAND_RECENT` newest.
+pub const STAR_BAND: usize = 1000;
+pub const STAR_BAND_RECENT: usize = 30;
+/// Share of the sky sphere's radius the stars sit at: inside the low-poly sphere's facets, so the sky never hides them.
+const STAR_RADIUS: f32 = 0.9;
+
+/// The original's cosmetic linear generator (x * 0x19660d + 0x3c6ef35f), which it seeds from the clock.
+struct StarRng(u32);
+impl StarRng {
+    fn step(&mut self) -> u32 {
+        self.0 = self.0.wrapping_mul(0x19660d).wrapping_add(0x3c6ef35f);
+        self.0
+    }
+    /// The low 23 bits as a fraction in [0, 1).
+    fn unit(&mut self) -> f32 {
+        f32::from_bits(self.step() & 0x7f_ffff | 0x3f80_0000) - 1.0
+    }
+    /// Uniform direction: height first, then the turn about the vertical.
+    fn dir(&mut self) -> Vec3 {
+        let z = self.unit() * 2.0 - 1.0;
+        let phi = self.unit() * std::f32::consts::TAU;
+        let r = (1.0 - z * z).max(0.0).sqrt();
+        Vec3::new(phi.cos() * r, phi.sin() * r, z)
+    }
+}
+
+/// The star groups of `STAR_GROUPS`, in game axes: every star a random point of the unit sphere, then the band: star i of
+/// `STAR_BAND` lies a random distance up to (i + 5) / 1000 from a random one of the last group's `STAR_BAND_RECENT` newest.
+pub fn starfield(seed: u32) -> Vec<Vec<Vec3>> {
+    let mut rng = StarRng(seed);
+    let mut groups: Vec<Vec<Vec3>> = STAR_GROUPS.iter().map(|&(n, _)| (0..n).map(|_| rng.dir()).collect()).collect();
+    let band = groups.last_mut().expect("six groups");
+    for i in 0..STAR_BAND {
+        let start = band.len().saturating_sub(STAR_BAND_RECENT);
+        let pick = start + ((rng.step() as i32) % (band.len() - start) as i32).unsigned_abs() as usize;
+        let reach = rng.unit() * (i + 5) as f32 * 0.001;
+        let star = band[pick] + rng.dir() * reach;
+        band.push(star);
+    }
+    groups
+}
+
+/// One point list for the camera-centred `Sky` entity (1 pixel per star): each star in its direction from the camera.
+pub fn star_mesh(groups: &[Vec<Vec3>]) -> Mesh {
+    use bevy::asset::RenderAssetUsages;
+    use bevy::mesh::PrimitiveTopology;
+    let (mut pos, mut col) = (vec![], vec![]);
+    for (stars, (_, c)) in groups.iter().zip(STAR_GROUPS) {
+        let linear = Color::srgb(c[0], c[1], c[2]).to_linear().to_f32_array();
+        for s in stars {
+            let d = s.normalize_or_zero() * STAR_RADIUS;
+            pos.push([d.x, d.z, -d.y]);
+            col.push(linear);
+        }
+    }
+    Mesh::new(PrimitiveTopology::PointList, RenderAssetUsages::RENDER_WORLD)
+        .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, pos)
+        .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, col)
+}
+
+#[allow(clippy::too_many_arguments)]
 pub fn camera(
-    orbit: Res<Orbit>,
+    mut orbit: ResMut<Orbit>,
     ship: Query<&Transform, (With<PlayerShip>, Without<Camera3d>)>,
     tfs: Query<&Transform, Without<Camera3d>>,
     contacts: Query<(), Or<(With<Ship>, With<environment::SpaceAnimal>)>>,
     sensors: Res<environment::Sensors>,
     mut cam: Single<&mut Transform, With<Camera3d>>,
     mission: Option<Res<campaign::Mission>>,
+    (free, time, mut shown): (Option<Res<FreeCamera>>, Option<Res<Time<Real>>>, Local<Option<f32>>),
 ) {
     if briefing::active(mission.as_deref()) || rules::nis(mission.as_deref()) || rules::console::free_cam() {
         return;
@@ -403,8 +526,23 @@ pub fn camera(
         Some(Vec3::new(*v.first()?, *v.get(2).unwrap_or(&0.0), -*v.get(1)?))
     });
     let tracked = orbit.focus.filter(|e| !contacts.contains(*e) || sensors.player_sees(*e, mission.as_deref()));
-    let focus = look.unwrap_or_else(|| tracked.and_then(|e| tfs.get(e).ok()).or_else(|| ship.iter().next()).map_or(Vec3::ZERO, |t| t.translation)) + Vec3::Y * 3.0;
-    let off = Quat::from_rotation_y(orbit.yaw) * Quat::from_rotation_x(-orbit.pitch) * Vec3::new(0.0, 0.0, orbit.dist);
+    let lift = if free.is_some() { 3.0 } else { 2.0 };
+    let focus = look.unwrap_or_else(|| tracked.and_then(|e| tfs.get(e).ok()).or_else(|| ship.iter().next()).map_or(Vec3::ZERO, |t| t.translation)) + Vec3::Y * lift;
+    let len = if free.is_some() {
+        orbit.dist
+    } else {
+        // Retail: the shown distance eases toward the wanted one; the camera stands that far back and `retail_height` up.
+        let dt = time.map_or(0.0, |t| t.delta_secs());
+        let d = shown.map_or(orbit.dist, |s| s + (orbit.dist - s) * (6.5 * dt).min(1.0));
+        *shown = Some(d);
+        let h = retail_height(d);
+        let pitch = h.atan2(d);
+        if orbit.pitch != pitch {
+            orbit.pitch = pitch;
+        }
+        d.hypot(h)
+    };
+    let off = Quat::from_rotation_y(orbit.yaw) * Quat::from_rotation_x(-orbit.pitch) * Vec3::new(0.0, 0.0, len);
     cam.translation = focus + off;
     cam.look_at(focus, Vec3::Y);
 }
@@ -495,6 +633,7 @@ mod camera_tests {
     fn focus_does_not_track_a_ship_outside_group_sight_but_allows_projectile_debug_focus() {
         let (mut world, ids) = ship::movement_tests::fleet_world();
         world.init_resource::<environment::Sensors>();
+        world.insert_resource(FREE);
         let cam = world.spawn((Camera3d::default(), Transform::default())).id();
         world.resource_mut::<Orbit>().focus = Some(ids[5]);
         world.get_mut::<Transform>(ids[5]).unwrap().translation = Vec3::X * 3000.0;
@@ -513,10 +652,95 @@ mod camera_tests {
         assert_eq!(world.get::<Transform>(cam).unwrap().translation, Vec3::new(600.0, 3.0, 60.0));
     }
 
+    const FREE: FreeCamera = FreeCamera { pitch: (0.05, 1.5) };
+
+    fn input_world() -> (World, [Entity; 6]) {
+        let (mut world, ids) = ship::movement_tests::fleet_world();
+        for &e in &ids {
+            world.entity_mut(e).insert(GlobalTransform::default());
+        }
+        world.resource_mut::<ship::Fleets>().selected = Some(ids[0]);
+        world.spawn((Window::default(), PrimaryWindow));
+        world.spawn((Camera::default(), GlobalTransform::default()));
+        world.init_resource::<ButtonInput<MouseButton>>();
+        world.init_resource::<ButtonInput<KeyCode>>();
+        world.init_resource::<AccumulatedMouseMotion>();
+        world.init_resource::<AccumulatedMouseScroll>();
+        world.init_resource::<crate::bindings::Bindings>();
+        world.init_resource::<course::Plot>();
+        world.init_resource::<panels::UiClick>();
+        world.init_resource::<options_menu::OptionsMenu>();
+        world.init_resource::<environment::Sensors>();
+        world.init_resource::<Messages<docking::DockMsg>>();
+        world.init_resource::<Messages<audio::Sfx>>();
+        world.init_resource::<combat::LobAim>();
+        world.init_resource::<Time<Real>>();
+        world.init_resource::<Time<Virtual>>();
+        world.init_resource::<Time>();
+        (world, ids)
+    }
+
+    #[test]
+    fn retail_height_and_limits_follow_the_originals_numbers() {
+        // the retail save: 100 back, 41.02 up
+        assert!((retail_height(100.0) - 41.01).abs() < 0.01);
+        let pitch = |d: f32| retail_height(d).atan2(d).to_degrees();
+        assert!((pitch(100.0) - 22.3).abs() < 0.1 && (pitch(7.67) - 8.4).abs() < 0.1 && (pitch(307.67) - 32.7).abs() < 0.1);
+        assert_eq!(retail_zoom_limits(1.0), (2.0, 302.0));
+        assert_eq!(retail_zoom_limits(10.0), (12.0, 312.0));
+    }
+
+    #[test]
+    #[ignore = "needs imported assets"]
+    fn retail_steps_zoom_out_by_their_size_in_by_twice_and_never_tilt() {
+        let (mut world, ids) = input_world();
+        let radius = world.resource::<Library>().classes[world.get::<Ship>(ids[0]).unwrap().class].sphere.1;
+        let (near, far) = retail_zoom_limits(radius);
+        let run = |world: &mut World, wheel: f32, drag: Vec2| {
+            world.resource_mut::<AccumulatedMouseScroll>().delta = Vec2::new(0.0, wheel);
+            world.resource_mut::<AccumulatedMouseMotion>().delta = drag;
+            world.insert_resource(Orbit { yaw: 0.0, pitch: 0.5, dist: 100.0, focus: Some(ids[0]) });
+            world.run_system_once(input).unwrap();
+            let o = world.resource::<Orbit>();
+            (o.dist, o.yaw, o.pitch)
+        };
+        assert_eq!(run(&mut world, 1.0, Vec2::ZERO).0, 80.0, "a notch in: 20 closer");
+        assert_eq!(run(&mut world, -1.0, Vec2::ZERO).0, 110.0, "a notch out: 10 farther");
+        world.resource_mut::<ButtonInput<MouseButton>>().press(MouseButton::Right);
+        let (dist, yaw, pitch) = run(&mut world, 0.0, Vec2::new(20.0, 5.0));
+        assert_eq!((dist, pitch), (105.0, 0.5), "a vertical drag zooms; it does not tilt");
+        assert!((yaw + 0.1).abs() < 1e-6);
+        assert_eq!(run(&mut world, 0.0, Vec2::new(0.0, -1000.0)).0, near);
+        assert_eq!(run(&mut world, 0.0, Vec2::new(0.0, 1000.0)).0, far);
+    }
+
+    #[test]
+    fn retail_camera_stands_back_and_up_by_the_height_rule_and_eases_to_the_wanted_distance() {
+        let mut world = World::new();
+        world.init_resource::<environment::Sensors>();
+        world.insert_resource(Orbit { yaw: 0.0, pitch: 0.0, dist: 100.0, focus: None });
+        let cam = world.spawn((Camera3d::default(), Transform::default())).id();
+        let mut system = IntoSystem::into_system(camera);
+        system.initialize(&mut world);
+        system.run((), &mut world).unwrap();
+        let t = world.get::<Transform>(cam).unwrap().translation;
+        assert!((t - Vec3::new(0.0, 2.0 + retail_height(100.0), 100.0)).length() < 1e-3, "{t}");
+        assert!((world.resource::<Orbit>().pitch - retail_height(100.0).atan2(100.0)).abs() < 1e-6);
+        // the wanted distance jumps; the shown one closes 6.5 x dt of the gap
+        world.resource_mut::<Orbit>().dist = 200.0;
+        let mut real = Time::<Real>::default();
+        real.advance_by(Duration::from_secs_f32(0.1));
+        world.insert_resource(real);
+        system.run((), &mut world).unwrap();
+        let back = world.get::<Transform>(cam).unwrap().translation.z;
+        assert!((back - 165.0).abs() < 1e-3, "{back}");
+    }
+
     #[test]
     #[ignore = "needs imported assets"]
     fn keyboard_camera_rotation_and_zoom_stay_at_one_x_at_every_simulation_speed() {
         let (mut world, ids) = ship::movement_tests::fleet_world();
+        world.insert_resource(FREE);
         for e in ids {
             world.entity_mut(e).insert(GlobalTransform::default());
         }
@@ -566,6 +790,41 @@ mod camera_tests {
         assert!((orbit.yaw + 0.1).abs() < 0.00001);
         assert_eq!(orbit.pitch, 1.5);
         assert_eq!(orbit.dist, 10.0);
+    }
+}
+
+#[cfg(test)]
+mod star_tests {
+    use super::*;
+
+    #[test]
+    fn six_groups_of_the_retail_counts_on_the_unit_sphere_plus_a_white_band() {
+        let groups = starfield(12345);
+        let counts: Vec<usize> = groups.iter().map(Vec::len).collect();
+        assert_eq!(counts, [2500, 600, 600, 300, 1000, 30 + 1000]);
+        assert!(groups.iter().flatten().take(5030).all(|s| (s.length() - 1.0).abs() < 1e-4), "scattered stars lie on the unit sphere");
+        let band = &groups[5];
+        for i in 0..STAR_BAND {
+            let n = 30 + i;
+            let star = band[n];
+            let reach = (i + 5) as f32 * 0.001 + 1e-5;
+            assert!(band[n.saturating_sub(STAR_BAND_RECENT)..n].iter().any(|s| s.distance(star) <= reach), "band star {i} grows from one of the 30 newest");
+        }
+        assert_ne!(starfield(1)[0][0], starfield(2)[0][0], "the seed changes the pattern");
+    }
+
+    #[test]
+    fn the_generator_is_the_originals_linear_step() {
+        let mut rng = StarRng(0);
+        assert_eq!(rng.step(), 0x3c6ef35f);
+        assert_eq!(rng.step(), 0x3c6ef35fu32.wrapping_mul(0x19660d).wrapping_add(0x3c6ef35f));
+    }
+
+    #[test]
+    fn star_mesh_is_one_point_per_star_inside_the_sky_sphere() {
+        let mesh = star_mesh(&starfield(7));
+        assert_eq!(mesh.primitive_topology(), bevy::mesh::PrimitiveTopology::PointList);
+        assert_eq!(mesh.count_vertices(), 6030);
     }
 }
 

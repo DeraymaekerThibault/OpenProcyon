@@ -758,7 +758,7 @@ pub mod tests {
         assert_eq!(w.resource::<FleetHud>().rows.len(), 10);
         let tenth = w.resource::<FleetHud>().rows[9].entity.unwrap();
         assert!(!w.resource::<crate::ship::Fleets>().bar_open);
-        w.resource_mut::<ButtonInput<KeyCode>>().press(KeyCode::Digit0);
+        w.resource_mut::<ButtonInput<KeyCode>>().press(KeyCode::Backslash);
         w.run_system_once(crate::view::fleet_keys).unwrap();
         assert_eq!(w.resource::<crate::ship::Fleets>().selected, Some(tenth), "number keys work with the bar closed");
         assert!(w.get::<PlayerShip>(ids[0]).is_some());

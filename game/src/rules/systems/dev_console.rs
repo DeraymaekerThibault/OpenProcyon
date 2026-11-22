@@ -38,7 +38,7 @@ fn close(console: &mut Console, vtime: &mut Time<Virtual>) {
     }
 }
 
-/// `~` (or F12) opens the console and pauses the battle; Escape or `~` closes it. While it is open typing goes to its line and the
+/// The console key (`Act::Console`, the backquote key by default; F12 always works) opens the console and pauses the battle; Escape or the console key closes it. While it is open typing goes to its line and the
 /// keyboard and mouse state the game reads is cleared.
 fn keys(
     mut input: MessageReader<KeyboardInput>,
@@ -46,12 +46,14 @@ fn keys(
     mut keyboard: ResMut<ButtonInput<KeyCode>>,
     mut mouse: ResMut<ButtonInput<MouseButton>>,
     mut vtime: ResMut<Time<Virtual>>,
+    binds: Option<Res<crate::bindings::Bindings>>,
     mut wheel: ResMut<bevy::input::mouse::AccumulatedMouseScroll>,
     mut ctrl: Local<bool>,
 ) {
     if !console.available() {
         return;
     }
+    let bound = binds.map_or(KeyCode::Backquote, |b| b.key(crate::bindings::Act::Console));
     for k in input.read() {
         if matches!(k.key_code, KeyCode::ControlLeft | KeyCode::ControlRight) {
             *ctrl = k.state.is_pressed();
@@ -59,19 +61,23 @@ fn keys(
         if !k.state.is_pressed() {
             continue;
         }
+        let toggle = (k.key_code == bound || k.key_code == KeyCode::F12) && !k.repeat;
         if !console.open {
-            let tilde = matches!(&k.logical_key, bevy::input::keyboard::Key::Character(c) if c.as_str() == "~");
-            if (tilde || k.key_code == KeyCode::F12) && !k.repeat {
+            if toggle {
                 console.open = true;
                 if !vtime.is_paused() {
                     vtime.pause();
                     console.paused_by_us = true;
                 }
                 if console.log.is_empty() {
-                    console.say("Developer console. `help` lists the commands; ~ or Escape closes it.");
+                    console.say("Developer console. `help` lists the commands; Escape or the console key closes it.");
                 }
             }
             continue;
+        }
+        if toggle {
+            close(&mut console, &mut vtime);
+            break;
         }
         match console.key_with(&k.logical_key, *ctrl) {
             Edit::Submit(line) => console.pending.push(line),

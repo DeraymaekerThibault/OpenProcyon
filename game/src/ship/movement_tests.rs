@@ -271,7 +271,7 @@ fn rebound_fleet_keys_cycle_including_primary_and_never_change_time_scale() {
         w.resource_mut::<ButtonInput<KeyCode>>().press(key);
         w.run_system_once(view::fleet_keys).unwrap();
     };
-    press(&mut w, KeyCode::Digit2);
+    press(&mut w, KeyCode::Digit3);
     assert_eq!(w.resource::<Fleets>().selected, Some(ids[2]));
     assert!(w.get::<PlayerShip>(ids[0]).is_some());
     press(&mut w, KeyCode::Digit0); // Out of range.

@@ -84,5 +84,5 @@ files to `content/`, or anything that publishes (pushing tags, releases).
   layouts stable; mods reference them.
 - Exporter changes: re-import into a scratch folder and compare with `tools/compare_assets.py` before trusting the result.
 - Known PROVISIONAL areas: ship linear motion and engine-order mapping, gun arcs, damage-smoke emitter geometry, wake parameters,
-  sail alpha, HUD part order, skybox UV remap, sound falloff/levels and the event to sound-pool mapping.
+  sail alpha, HUD part order, sound falloff/levels and the event to sound-pool mapping.
 - `local/` is git-ignored scratch for screenshots, logs and notes.

@@ -186,7 +186,6 @@ fn the_line_editor_types_recalls_and_submits() {
     assert_eq!(c.line, "god", "Up brings the last line back");
     c.key(&Key::ArrowDown);
     assert!(c.line.is_empty());
-    assert_eq!(c.key(&Key::Character("~".into())), Edit::Close, "the key that opens it closes it");
     assert_eq!(c.key(&Key::Escape), Edit::Close);
 }
 
