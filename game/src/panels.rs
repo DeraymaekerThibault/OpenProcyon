@@ -98,6 +98,48 @@ pub enum FleetButton {
     Formation(crate::ship::Formation),
     Attack,
     CeaseFire,
+    /// The main bar's speech-bubble button: toggles the Chat History panel.
+    Chat,
+}
+/// One line of the Chat History: its text and RGBA colour.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ChatLine {
+    pub text: String,
+    pub colour: [f32; 4],
+}
+/// Text colour of a speech line whose event names none (the subtitle's gold).
+pub const CHAT_DEFAULT_COLOUR: [f32; 4] = [1.0, 0.65, 0.1, 1.0];
+/// Chat History: every text line of the battle so far, in the order the lines started playing, and whether the panel is open.
+/// Lines are never dropped during a battle; the log starts empty with each battle (`scenario::reset_fleets`).
+#[derive(Resource, Default)]
+pub struct ChatLog {
+    pub lines: Vec<ChatLine>,
+    pub open: bool,
+}
+impl ChatLog {
+    pub fn push(&mut self, text: impl Into<String>, colour: Option<[f32; 4]>) {
+        self.lines.push(ChatLine { text: text.into(), colour: colour.unwrap_or(CHAT_DEFAULT_COLOUR) });
+    }
+    /// The speech-bubble button: closes the panel when open, else opens it and closes the fleet-commands bar.
+    pub fn toggle(&mut self, fleets: &mut crate::ship::Fleets) {
+        self.open = !self.open;
+        if self.open {
+            fleets.commands_open = false;
+        }
+    }
+}
+/// Moves the lines of mission and skirmish speech that just started into the log.
+fn chat_feed(mission: Option<ResMut<crate::campaign::Mission>>, skirmish: Option<ResMut<crate::rules::skirmish::SkirmishScript>>, mut log: ResMut<ChatLog>) {
+    if let Some(mut m) = mission.filter(|m| !m.script.started.is_empty()) {
+        for (text, colour) in std::mem::take(&mut m.script.started) {
+            log.push(text, colour);
+        }
+    }
+    if let Some(mut sk) = skirmish.filter(|s| !s.script.started.is_empty()) {
+        for (text, colour) in std::mem::take(&mut sk.script.started) {
+            log.push(text, colour);
+        }
+    }
 }
 #[derive(Component)]
 pub struct FleetWindow(pub bool); // true: ship bar, false: commands
@@ -180,6 +222,7 @@ fn fleet_input(
     mut sfx: MessageWriter<crate::audio::Sfx>,
     mut menu: ResMut<crate::options_menu::BarMenuRequest>,
     options: Option<Res<crate::options_menu::OptionsMenu>>,
+    mut chat: ResMut<ChatLog>,
 ) {
     if !model.shown {
         *latch = None;
@@ -221,8 +264,13 @@ fn fleet_input(
         }
         FleetButton::Commands => {
             fleets.commands_open = !fleets.commands_open;
+            // The two bars share the strip above the main bar: opening one closes the other.
+            if fleets.commands_open {
+                chat.open = false;
+            }
             sfx.write(crate::audio::Sfx::ui(if fleets.commands_open { "HUD_FormationBar_Open" } else { "HUD_FormationBar_Close" }));
         }
+        FleetButton::Chat => chat.toggle(&mut fleets),
         FleetButton::Slot(n) => {
             if model.rows.get(n).and_then(|r| r.entity) == entity
                 && let Some(e) = entity
@@ -298,6 +346,8 @@ pub fn plugin(app: &mut App) {
         .init_resource::<Talk>()
         .init_resource::<HeadState>()
         .init_resource::<FleetHud>()
+        .init_resource::<ChatLog>()
+        .add_systems(Update, chat_feed.run_if(in_state(crate::menu::Screen::Battle)))
         .configure_sets(Update, HudSet.after(crate::sprites::choose_skin).run_if(in_state(crate::menu::Screen::Battle)))
         .add_systems(
             PreUpdate,
@@ -629,6 +679,7 @@ pub fn input_app() -> (App, Entity) {
         .init_resource::<ButtonInput<KeyCode>>()
         .init_resource::<ButtonInput<MouseButton>>()
         .init_resource::<UiClick>()
+        .init_resource::<ChatLog>()
         .init_resource::<crate::bindings::Bindings>()
         .init_resource::<combat::Target>()
         .insert_resource(Library::load(crate::assets_dir()))
@@ -643,6 +694,37 @@ pub fn input_app() -> (App, Entity) {
 #[cfg(test)]
 pub mod tests {
     use super::*;
+
+    #[test]
+    fn chat_history_keeps_lines_in_order_with_their_colour() {
+        let mut log = ChatLog::default();
+        log.push("one", Some([1.0, 0.0, 0.0, 1.0]));
+        log.push("two", None);
+        let lines: Vec<_> = log.lines.iter().map(|l| (l.text.as_str(), l.colour)).collect();
+        assert_eq!(lines, [("one", [1.0, 0.0, 0.0, 1.0]), ("two", CHAT_DEFAULT_COLOUR)]);
+    }
+
+    #[test]
+    fn opening_the_chat_history_closes_the_fleet_commands_bar_and_a_second_press_closes_it() {
+        let (mut log, mut fleets) = (ChatLog::default(), crate::ship::Fleets { commands_open: true, ..default() });
+        log.toggle(&mut fleets);
+        assert!(log.open && !fleets.commands_open);
+        fleets.commands_open = true;
+        log.toggle(&mut fleets);
+        assert!(!log.open && fleets.commands_open, "closing leaves the commands bar alone");
+    }
+
+    #[test]
+    fn a_new_battle_starts_with_an_empty_closed_chat_history() {
+        let mut world = World::new();
+        let mut log = ChatLog::default();
+        log.push("old", None);
+        log.open = true;
+        world.insert_resource(log);
+        crate::scenario::reset_fleets(&mut world);
+        let log = world.resource::<ChatLog>();
+        assert!(log.lines.is_empty() && !log.open);
+    }
 
     #[test]
     fn fractional_scales_snap_to_whole_pixels_and_butted_parts_stay_butted() {
@@ -696,6 +778,7 @@ pub mod tests {
         app.add_plugins(MinimalPlugins)
             .init_resource::<ButtonInput<MouseButton>>()
             .init_resource::<FleetHud>()
+            .init_resource::<ChatLog>()
             .init_resource::<crate::options_menu::BarMenuRequest>()
             .insert_resource(crate::Orbit { yaw: 0.0, pitch: 0.0, dist: 60.0, focus: None })
             .add_message::<crate::audio::Sfx>()

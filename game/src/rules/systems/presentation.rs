@@ -68,8 +68,7 @@ pub(super) fn ui(
     mission: Res<Mission>,
     campaign_points: Res<crate::campaign::CampaignPoints>,
     stats: Option<Res<crate::stats::GameStats>>,
-    mut q: Query<(&Ui, &mut Visibility, Option<&mut Text>), Without<ObjectiveText>>,
-    mut objective: Query<&mut Text, With<ObjectiveText>>,
+    mut q: Query<(&Ui, &mut Visibility, Option<&mut Text>)>,
 ) {
     let sc = &mission.script;
     let opening = mission.opening.is_some();
@@ -119,12 +118,6 @@ pub(super) fn ui(
             && **t != content
         {
             **t = content;
-        }
-    }
-    let tasks = if crate::panels::cinematic(Some(&mission)) || super::console::hud_hidden() { String::new() } else { sc.tasks_text() };
-    for mut t in &mut objective {
-        if **t != tasks {
-            **t = tasks.clone();
         }
     }
 }

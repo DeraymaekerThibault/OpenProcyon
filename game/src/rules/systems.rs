@@ -24,7 +24,7 @@ pub use presentation::Ui;
 pub(super) use presentation::{EventFx, event_effect};
 use presentation::{music, nis_camera, presentation, ui};
 
-use crate::campaign::{Mission, MissionBase, MissionShip, ObjectiveText};
+use crate::campaign::{Mission, MissionBase, MissionShip};
 
 use crate::combat::{Asteroid, Destroyed, Fired, Health, Hit, Library, Target};
 

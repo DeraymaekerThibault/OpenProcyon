@@ -55,7 +55,7 @@ pub struct MapLabel {
 pub struct StarmapContents {
     pub icons: Vec<MapIcon>,
     pub labels: Vec<MapLabel>,
-    /// The "Objectives:" panel's text (skirmish: the human team's objective task).
+    /// The "Objectives:" panel's text (skirmish: the human team's objective task; campaign: the active tasks, one per line).
     pub objective: Option<String>,
 }
 
@@ -86,6 +86,7 @@ fn toggle(
     mut over: Local<bool>,
     mut sfx: MessageWriter<Sfx>,
     mut auto: Local<Option<bool>>,
+    mut chat: ResMut<crate::panels::ChatLog>,
 ) {
     let hovered = radar.iter().any(|i| *i != Interaction::None);
     if hovered && !*over {
@@ -116,6 +117,7 @@ fn toggle(
         PlaybackSettings::LOOP.with_volume(bevy::audio::Volume::Linear(crate::menu::volume(crate::menu::Setting::Effects))),
         ChildOf(root),
     ));
+    chat.open = false; // the map covers the screen; the Chat History does not stay open under it
     sfx.write(Sfx::ui("HUD_Map_Open"));
 }
 
@@ -174,6 +176,9 @@ fn describe(
         return;
     }
     let Some(mission) = mission else { return };
+    // Campaign: the "Objectives:" panel lists the active tasks, the same panel skirmish shows (the battle screen itself shows none).
+    let tasks = mission.script.tasks_text();
+    contents.objective = (!tasks.is_empty()).then_some(tasks);
     if mission.script.point_on_map
         && let Some(position) = crate::campaign::objective_point(&mission)
     {

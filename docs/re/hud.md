@@ -78,6 +78,27 @@ names are written in yellow-gold (Starkeep Cerebrus, Orpheus Cove, Outpost Perse
 script (`Setup Team Objective`, `tasks`, `map_text`). Still PROVISIONAL: a team whose rule says `NO OBJECTIVE POINT` (e.g. the Pirates on Ambush) shows no ring
 (its panel text is drawn if it has a task); only the Navy side's map was observed.
 
+## Objectives and the Chat History (retail, 2026-11-22)
+
+**Objectives are listed on the star map only.** The battle screen draws no objective text, in skirmish or in a campaign mission (the campaign case is read from the
+original's code, not seen). The task list is the "Objectives:" panel at the top left of the star map (M): each active task's own text. The remake's campaign star map
+draws the same panel as the skirmish one, listing the mission's active tasks one per line (`StarmapContents::objective`); the campaign no longer draws a task line at the top of the battle
+screen. Not yet read: how a complete or failed task looks in the panel (the remake still prefixes `[done]` / `[failed]`: PROVISIONAL).
+
+**Chat History** (seen once in a skirmish after a fight; the rest read from the original's code). The speech-bubble button at the right end of the main bar toggles a framed
+panel just above the bar, centred on it, about 440 x 170 px at 1440x1080 (blue nine-part frame, a scrollbar on its right, the thumb at the bottom while the list is at its end).
+- Content: every text line of the battle so far, one entry per wrapped line, each in the colour of the event that produced it. Sources in the original: crew speech
+  (`[ Speaker ] text`), the critical-system-hit message of the primary ship (red), chat and alliance messages, and mission speech that has text.
+- A line is added when its speech event starts playing, not when it is queued. Lines are word-wrapped to the panel width and kept for the whole battle (no cap found); a new battle starts empty.
+  New lines scroll the list to its end. The panel is empty at battle start.
+- Opening it closes the fleet-commands bar; opening the star map closes it. Pressing the button again closes it.
+- Remake: `panels::ChatLog` (lines + open flag), fed from `Script.started` (mission and skirmish speech with text, with the event's own text colour, default gold);
+  `classic/panels.rs` `chat_panel` draws it with the retail `ChatBar_*` frame pieces and scrolls with the mouse wheel. The log is cleared with the battle (`scenario::reset_fleets`).
+  Opening the fleet-commands bar also closes the panel (they share the strip above the bar; the original's rule for that direction was not read: PROVISIONAL).
+- Not built: crew speech lines (the remake has the voice files but no text for them, so there is nothing to log), the critical-hit message (see below, wording unread), chat and alliance messages
+  (no multiplayer chat), the blank line between entries, the open/close slide, and the scrollbar's drag and arrow behaviour (the thumb only follows the wheel).
+- Not yet read: automatic opening of the panel by speech events flagged for it, and how complete or failed tasks look.
+
 ## Ship name banners (retail frame, 2026-11-01)
 A ship's name ribbon is tinted with the colour of the map player that owns it: in a Diablo Strait skirmish our banner is green, the same green as our name in the
 top-right roster (slots 1-3 green, navy blue, teal; `players[].color` in the map file gives all eight). The banner is fully opaque with the camera close to
