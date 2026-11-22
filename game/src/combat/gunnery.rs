@@ -106,6 +106,12 @@ impl GunStates {
         self.0.iter().map(|g| (g.root, g.cooldown.max(0.0)))
     }
 
+    /// Every beam gun that is charging or firing: its mount index, gun name, first muzzle and phase. Presentation only (the render
+    /// profile's beams, `render/beams.rs`).
+    pub fn beams(&self) -> impl Iterator<Item = (usize, &str, Entity, super::beam::Phase)> + '_ {
+        self.0.iter().enumerate().filter(|(_, g)| g.beam != super::beam::Phase::Idle).filter_map(|(i, g)| Some((i, g.gun.as_str(), *g.muzzles.first()?, g.beam)))
+    }
+
     /// A refit re-creates every mount: loaded, no burst in progress.
     pub fn rearm(&mut self) {
         for g in &mut self.0 {

@@ -13,6 +13,7 @@
 //! - `sails.rs`: sail materials with a shader (`shaders/sail.wesl`) and cloth that bellies out with the ship's speed;
 //! - `trails.rs`: engine plumes (`shaders/plume.wesl`) and wakes drawn as crossed ribbons (`shaders/wake.wesl`);
 //! - `tracers.rs`: streaks of light behind shells in flight (`shaders/tracer.wesl`);
+//! - `beams.rs`: beam guns (a mod feature) as a ribbon of light with a charge-up, a muzzle flare and sparks where it bites (`shaders/beam.wesl`);
 //! - `surfaces.rs`: relief, roughness and metal for the retail models' textured materials (`shaders/surface.wesl`);
 //! - `sky.rs`: a dome over the baked sky with a near layer of gas that slides against it (`shaders/sky.wesl`);
 //! - `holes.rs`: black holes as a horizon, a bent sky and a spinning accretion disc (`shaders/blackhole.wesl`);
@@ -36,6 +37,7 @@ use bevy::render::view::{ColorGrading, ColorGradingGlobal, ColorGradingSection};
 use serde_json::Value;
 
 pub(crate) mod batch;
+mod beams;
 mod bolts;
 mod bursts;
 mod currents;
@@ -123,6 +125,8 @@ pub struct Look {
     pub engines: Option<trails::Engines>,
     pub wakes: Option<trails::Wakes>,
     pub tracers: Option<tracers::Tracers>,
+    /// Beam guns (a mod feature, `combat/beam.rs`) drawn as light (`beams`, `shaders/beam.wesl`); none = the classic cylinders.
+    pub beams: Option<beams::Beams>,
     pub surfaces: Option<surfaces::Surfaces>,
     pub bursts: Option<bursts::Bursts>,
     pub materials: Option<rules::Materials>,
@@ -202,6 +206,7 @@ impl Look {
             engines: trails::parse_engines(&v["engines"]),
             wakes: trails::parse_wakes(&v["wakes"]),
             tracers: tracers::parse(&v["tracers"]),
+            beams: beams::parse(&v["beams"]),
             surfaces: surfaces::parse(&v["surfaces"]),
             bursts: bursts::parse(&v["bursts"]),
             materials: rules::parse(&v["materials"]),
@@ -242,6 +247,9 @@ impl Look {
         }
         if self.tracers.is_some() && !has_shader(root, "tracers", tracers::SHADER) {
             self.tracers = None;
+        }
+        if self.beams.is_some() && !has_shader(root, "beams", beams::SHADER) {
+            self.beams = None;
         }
         if self.surfaces.is_some() && !has_shader(root, "surfaces", surfaces::SHADER) {
             self.surfaces = None;
@@ -303,6 +311,7 @@ pub fn plugin(app: &mut App) {
     deckhands::plugin(app, &look);
     trails::plugin(app, &look);
     tracers::plugin(app, &look);
+    beams::plugin(app, &look);
     surfaces::plugin(app, &look);
     bursts::plugin(app, &look);
     rules::plugin(app, &look);

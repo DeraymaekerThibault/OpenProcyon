@@ -173,6 +173,10 @@ fn victim_power(phase: &Phase, def: &BeamDef, dt: f32, hit: Option<Entity>) -> f
     }
 }
 
+/// Present when a render profile draws the beams itself (`render/beams.rs`): `draw` then keeps only the lights.
+#[derive(Resource)]
+pub struct Replaced;
+
 /// Meshes the beam is drawn with; the materials are made per gun (each fades on its own).
 #[derive(Resource)]
 pub(super) struct BeamMeshes {
@@ -185,18 +189,22 @@ pub(super) fn setup_look(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>
     commands.insert_resource(BeamMeshes { sphere: meshes.add(Sphere::new(1.0)), cylinder: meshes.add(Cylinder::new(1.0, 1.0)), ring: meshes.add(Torus::new(0.85, 1.0)) });
 }
 
-/// The drawn parts of one active beam gun (children of its muzzle): glow, ring, core, halo; their materials.
+/// The drawn parts of one active beam gun (children of its muzzle): glow, ring, core, halo; their materials; the light where it bites.
 pub(super) struct Drawn {
     parts: [Entity; 4],
     mats: [Handle<StandardMaterial>; 4],
+    impact: Entity,
 }
 
 /// Draws every charging or firing beam gun, from its phase: while charging a glow swells at the muzzle (with a light and a
-/// tightening ring), then a bright core inside a softer halo runs to `length`, flickering, and thins out over its last 0.3 s.
+/// tightening ring), then a bright core inside a softer halo runs to `length`, flickering, and thins out over its last 0.3 s. A beam
+/// that is on a ship also lights the hull where it bites. A render profile that draws beams itself (`Replaced`) leaves only the lights.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn draw(
     mut commands: Commands,
     time: Res<Time>,
     lib: Res<Library>,
+    replaced: Option<Res<Replaced>>,
     meshes: Option<Res<BeamMeshes>>,
     mut mats: ResMut<Assets<StandardMaterial>>,
     guns: Query<(Entity, &GunStates)>,
@@ -234,16 +242,30 @@ pub(super) fn draw(
                     }
                     e.id()
                 });
-                Drawn { parts, mats: mats_ }
+                let light = PointLight { color: Color::linear_rgb(c[0], c[1], c[2]), intensity: 0.0, range: 60.0, ..default() };
+                let impact = commands.spawn((light, Transform::default(), Visibility::Hidden, ChildOf(muzzle))).id();
+                Drawn { parts, mats: mats_, impact }
             });
             let looks = look(&state.beam, def, now);
             for (k, part) in looks.parts.iter().enumerate() {
                 if let Ok((mut tf, mut vis)) = parts.get_mut(d.parts[k]) {
-                    *vis = if part.is_some() { Visibility::Inherited } else { Visibility::Hidden };
+                    // the glow carries the muzzle light: when a profile draws the beam it stays, too small to see
+                    let shown = part.is_some() && (replaced.is_none() || k == 0);
+                    *vis = if shown { Visibility::Inherited } else { Visibility::Hidden };
                     if let Some(p) = part {
-                        *tf = *p;
+                        *tf = if replaced.is_some() { p.with_scale(Vec3::splat(1e-4)) } else { *p };
                     }
                 }
+            }
+            if let Ok((mut tf, mut vis)) = parts.get_mut(d.impact) {
+                *vis = if looks.impact.is_some() { Visibility::Inherited } else { Visibility::Hidden };
+                if let Some((distance, _)) = looks.impact {
+                    // a little short of the hull, so the light falls on it
+                    tf.translation = Vec3::new(0.0, 0.0, -(distance - 2.0).max(0.0));
+                }
+            }
+            if let Ok(mut light) = lights.get_mut(d.impact) {
+                light.intensity = looks.impact.map_or(0.0, |(_, lumens)| lumens);
             }
             if let Ok(mut light) = lights.get_mut(d.parts[0]) {
                 light.intensity = looks.light;
@@ -257,6 +279,7 @@ pub(super) fn draw(
                 commands.entity(*e).try_despawn();
                 mats.remove(m);
             }
+            commands.entity(d.impact).try_despawn();
         }
         keep
     });
@@ -266,6 +289,8 @@ pub(super) fn draw(
 pub struct Looks {
     pub parts: [Option<Transform>; 4],
     pub light: f32,
+    /// A beam that is on a ship: how far down the barrel it bites, and the light there (lumens, more as the damage ramps up).
+    pub impact: Option<(f32, f32)>,
 }
 
 /// What a beam gun in `phase` looks like at time `now` (seconds, for the flicker): glow, ring, core, halo.
@@ -278,21 +303,22 @@ pub fn look(phase: &Phase, def: &BeamDef, now: f32) -> Looks {
         scale: Vec3::new(radius, length, radius),
     };
     match *phase {
-        Phase::Idle => Looks { parts: [None; 4], light: 0.0 },
+        Phase::Idle => Looks { parts: [None; 4], light: 0.0, impact: None },
         Phase::Charging { t } => {
             let f = (t / def.charge.max(0.01)).clamp(0.0, 1.0);
             // The glow swells with the charge; the ring closes in on it and spins faster.
             let glow = Transform::from_scale(Vec3::splat(w * (0.3 + 1.7 * f * f) * flicker));
             let ring = Transform { rotation: Quat::from_rotation_z(now * (2.0 + 14.0 * f)), scale: Vec3::splat(w * (5.0 - 3.0 * f)), ..default() }
                 * Transform::from_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2));
-            Looks { parts: [Some(glow), Some(ring), None, None], light: 300_000.0 * f * f }
+            Looks { parts: [Some(glow), Some(ring), None, None], light: 300_000.0 * f * f, impact: None }
         }
-        Phase::Firing { t, length, .. } => {
+        Phase::Firing { t, length, victim, on, .. } => {
             // Full width at once, thinning out over the last 0.3 s.
             let fade = ((def.duration - t) / 0.3).clamp(0.0, 1.0);
             let r = w * fade * flicker;
             let glow = Transform::from_scale(Vec3::splat(w * 1.6 * fade.max(0.2) * flicker));
-            Looks { parts: [Some(glow), None, Some(along(length, r * 0.35)), Some(along(length, r))], light: 500_000.0 * fade }
+            let impact = victim.map(|_| (length, 400_000.0 * def.power(on) * fade * flicker));
+            Looks { parts: [Some(glow), None, Some(along(length, r * 0.35)), Some(along(length, r))], light: 500_000.0 * fade, impact }
         }
     }
 }
@@ -365,5 +391,10 @@ mod tests {
         let core = firing.parts[2].unwrap();
         assert!((core.scale.y - 80.0).abs() < 1e-4 && (core.translation.z + 40.0).abs() < 1e-4, "runs 80 units down the barrel");
         assert!(look(&Phase::Idle, &d, 0.0).parts.iter().all(Option::is_none));
+        assert!(firing.impact.is_none(), "a beam on nothing lights nothing");
+        let victim = Some(Entity::from_raw_u32(1).unwrap());
+        let fresh = look(&Phase::Firing { t: 1.0, victim, on: 0.0, tick: 0.0, length: 80.0 }, &d, 0.0).impact.unwrap();
+        let held = look(&Phase::Firing { t: 1.0, victim, on: 1.5, tick: 0.0, length: 80.0 }, &d, 0.0).impact.unwrap();
+        assert!(fresh.0 == 80.0 && held.1 > fresh.1 * 1.5, "the hull is lit where the beam bites, brighter as the damage ramps up");
     }
 }
