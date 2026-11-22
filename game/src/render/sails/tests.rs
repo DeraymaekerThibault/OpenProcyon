@@ -262,7 +262,7 @@ fn the_bounds_hold_the_sail_open_bellied_and_shut() {
 #[test]
 fn a_sail_eases_its_bulge_out_as_it_folds() {
     let s = parse(&serde_json::json!({"billow": 0.04, "furl": 0.9})).unwrap();
-    let mut sail = Sail { ship: None, wind: 0.0, clock: 0.0, phase: 0.0, furl: 0.0, size: 10.0, pleats: 6.0, depth: 0.02 };
+    let mut sail = Sail { ship: None, wind: 0.0, clock: 0.0, row: 0, furl: 0.0, size: 10.0, pleats: 6.0, depth: 0.02 };
     assert!(sail.fold(&s).abs_diff_eq(Vec4::new(0.4, 0.0, 6.0, 0.2), 1e-6), "open: the full bulge, not folded");
     sail.furl = 1.0;
     assert!(sail.fold(&s).abs_diff_eq(Vec4::new(0.0, 0.9, 6.0, 0.2), 1e-6), "shut: no bulge, folded by `furl`");

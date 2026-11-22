@@ -82,7 +82,7 @@ impl Surfaces {
     }
 }
 
-/// What the shader gets at `@group(MATERIAL_BIND_GROUP) @binding(100)`, besides the StandardMaterial bindings.
+/// The shader's numbers for one surface, besides the StandardMaterial's.
 #[derive(Clone, Copy, Default, Debug, ShaderType)]
 pub struct SurfaceUniform {
     /// x: relief, y: crevice shading, z: gloss, w: 1 when `map` is a baked surface map
@@ -91,17 +91,26 @@ pub struct SurfaceUniform {
     pub rim: Vec4,
 }
 
+/// Bindless like the StandardMaterial it extends (index table at `@binding(100)`, the uniforms as one array at `@binding(101)`),
+/// so every surface shares one bind group and Bevy draws them as one batch set per pass. With a bind group per material each
+/// of the hundreds of materials is a batch set of its own in the main pass, the prepass and every shadow cascade, and Bevy
+/// prepares each batch set on the GPU separately: 12 ms a frame on a busy port. Where bindless is not supported the uniform,
+/// map and sampler are plain bindings 50, 51 and 52. No frame data here: a storage buffer would end the batching.
 #[derive(Asset, AsBindGroup, TypePath, Clone, Default)]
+#[data(50, SurfaceUniform, binding_array(101))]
+#[bindless(index_table(range(50..53), binding(100)))]
 pub struct SurfaceDetail {
-    #[uniform(100)]
     pub u: SurfaceUniform,
-    /// The frame data (`frame.rs`) at `@binding(99)`.
-    #[storage(99, read_only)]
-    pub frame: super::frame::FrameBinding,
     /// The baked surface map (linear RGBA: u and v slope, crevice, height; see `tools/bake_surfaces.py`).
-    #[texture(101)]
-    #[sampler(102)]
+    #[texture(51)]
+    #[sampler(52)]
     pub map: Option<Handle<Image>>,
+}
+
+impl From<&SurfaceDetail> for SurfaceUniform {
+    fn from(d: &SurfaceDetail) -> Self {
+        d.u
+    }
 }
 
 /// The baked surface map for a glTF material name (`textures/surface/<name without .tga, lowercase>.png`), when an enabled
@@ -178,7 +187,7 @@ pub(super) fn surfaces(
                     info_once!("surfaces: drawing with baked surface maps");
                 }
                 let params = Vec4::new(surface.bump, surface.cavity, surface.gloss, if map.is_some() { 1.0 } else { 0.0 });
-                surface_mats.add(SurfaceMaterial { base, extension: SurfaceDetail { u: SurfaceUniform { params, rim: s.rim }, frame: default(), map } })
+                surface_mats.add(SurfaceMaterial { base, extension: SurfaceDetail { u: SurfaceUniform { params, rim: s.rim }, map } })
             })
             .clone();
         let ship = parents.iter_ancestors(e).find(|a| ships.contains(*a));
