@@ -223,3 +223,20 @@ mod lighting_tests {
         assert_eq!((s[&1], s[&133], s.len()), (60, 80, 2));
     }
 }
+
+mod console_reset_tests {
+    use super::*;
+    use crate::rules::console::{Cheats, DevView};
+
+    #[test]
+    fn a_respawned_scenario_clears_the_cheats_and_a_new_mission_clears_the_developer_view() {
+        let mut cheats = Cheats { used: true, god: true };
+        let mut dev = DevView { hud_hidden: true, ..Default::default() }; // the field only: the statics are shared by every test
+        reset_console_state(&mut cheats, &mut dev, false);
+        assert!(!cheats.used && !cheats.god, "restart: points count again and god is off");
+        assert!(dev.hud_hidden, "the same mission keeps the developer view");
+        cheats.used = true;
+        reset_console_state(&mut cheats, &mut dev, true);
+        assert!(!cheats.used && !dev.hud_hidden, "next mission: plain view");
+    }
+}

@@ -66,6 +66,14 @@ pub fn free_cam() -> bool {
 }
 
 impl DevView {
+    /// Back to the plain view (HUD drawn, orbit camera, nothing shown), including the statics the views read. The one place that
+    /// clears them, so the resource and the statics cannot drift apart.
+    pub fn reset(&mut self) {
+        *self = DevView::default();
+        HUD_HIDDEN.store(false, std::sync::atomic::Ordering::Relaxed);
+        FREE_CAM.store(false, std::sync::atomic::Ordering::Relaxed);
+    }
+
     pub fn apply(&mut self, c: &ViewChange) {
         match c {
             ViewChange::Hud(on) => {

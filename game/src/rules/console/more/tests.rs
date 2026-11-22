@@ -220,8 +220,25 @@ fn show_and_hide_change_the_developer_view() {
     assert!(parse("show everything", "Hero", false).is_err());
 }
 
+/// `apply` and `reset` write process-wide statics: the tests that touch them take turns.
+static VIEW_STATICS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+#[test]
+fn reset_clears_the_developer_view_and_the_statics_the_views_read() {
+    let _g = VIEW_STATICS.lock().unwrap_or_else(|e| e.into_inner());
+    let mut view = DevView::default();
+    view.apply(&ViewChange::Hud(false));
+    view.apply(&ViewChange::FreeCam(true));
+    view.apply(&ViewChange::Show(ShapeKind::Volumes, Some("Gate Area".into())));
+    assert!(hud_hidden() && free_cam());
+    view.reset();
+    assert!(!view.hud_hidden && !view.free_cam && !view.free_fresh && view.shown.is_empty());
+    assert!(!hud_hidden() && !free_cam());
+}
+
 #[test]
 fn cam_and_hud_ask_for_view_changes_and_use_the_rule_action_for_following() {
+    let _g = VIEW_STATICS.lock().unwrap_or_else(|e| e.into_inner());
     let mut sc = script();
     assert_eq!(quick(&mut sc, "cam free").1.view, [ViewChange::FreeCam(true)]);
     let (fx, o) = quick(&mut sc, "cam follow Raiders");
