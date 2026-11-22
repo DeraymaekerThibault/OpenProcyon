@@ -1,7 +1,7 @@
 """Bake high-resolution cubemap skies from the player's imported battle skies (not retail: an optional visual upgrade).
 
 Each retail sky is one 256x256 texture on a low-poly sphere that tiles it twice around the horizon. The baker keeps that
-texture as the colour and density guide, sampled with the same direction -> (u, v) mapping as the sphere, and adds what
+texture as the colour and density guide, sampled with the sphere's direction -> (u, v) mapping (squeezed into its bright band, `squeeze_v`), and adds what
 it lacks at modern resolutions: domain-warped filaments, dust lanes, fine grain and point stars. It writes a cubemap
 (six square faces stacked vertically in +X -X +Y -Y +Z -Z order) as `models/sky/<sky>_cube.png`; the game draws it as a
 skybox instead of the sphere when the file exists (`scenario.rs`, `view::hd_sky`).
@@ -267,8 +267,8 @@ def nebula(d, fields, guide, rows, mapping, mean):
     repeats, offset, slope, centre = mapping
     az, _ = azimuth_elevation(d)
     u = offset - repeats * az / 360
-    # The sphere's own vertical layout: it squeezes the art's whole height into its bright band (mdb_to_glb.py), and
-    # the battle camera mostly looks down, so this keeps the nebula where the player sees it in classic.
+    # The sphere's vertical layout, squeezed into the art's bright band (`squeeze_v`): the battle camera mostly looks
+    # down, so this keeps the nebula where the player sees it.
     v = centre + slope * d[..., 1]
     # Domain warp: the guide is sampled a little off its true place, by large and small swirls, which turns its
     # soft blobs into folded, streaky gas without moving any feature far from where the retail sky has it.
@@ -513,9 +513,21 @@ def bake_layers(tex, pos, uv, size, seed=1, stars=60000, split_stars=False):
     return np.concatenate(faces, 0), cat(star_faces), cat(cloud_faces)
 
 
+def squeeze_v(uv):
+    """Not retail: the HD look's vertical layout. Retail art is dark above and below its bright band, so the sphere's v
+    range 0.127..0.875 is squeezed into 0.3..0.7 and no direction looks black. Skies imported before the importer kept the
+    authored UVs (v span under 0.65; authored spans are 0.75 or more) already carry it and pass unchanged."""
+    if np.ptp(uv[:, 1]) < 0.65:
+        return uv
+    out = uv.copy()
+    out[:, 1] = 0.3 + (uv[:, 1] - 0.127) / 0.748 * 0.4
+    return out
+
+
 def load_sky(glb):
     """(SkyGuide, None) of a sky GLB, or (None, reason) when its sphere does not follow the retail mapping."""
     tex, pos, uv = read_glb(glb)
+    uv = squeeze_v(uv)
     *_, err = fit_mapping(pos, uv)
     if err > 0.2:
         return (
