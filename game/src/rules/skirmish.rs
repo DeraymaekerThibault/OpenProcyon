@@ -1,16 +1,15 @@
 //! A skirmish map's own script (`maps/<id>/script.json`): the same interpreter as the campaign, driving the map's convoys, timers and
-//! team points. The end rules stay with victory.rs; only the effects the skirmish maps use are applied here (paths, owners,
-//! visibility, hold, throttle caps, placed mines, stances, damage, space animals' paths and speed, storm routes).
-use crate::Nearest;
+//! team points. Its effects are applied by the code the campaign uses (`systems::apply`). Retail maps keep their end rules with
+//! victory.rs (`without_end_rules`); a map that opts in with `"victory": "script"` lets its own rules end the game (`script_end`).
 use bevy::prelude::*;
 use serde_json::Value;
 use std::collections::HashMap;
 
+use super::eval::schema;
+use super::systems::{RuleShip, apply};
 use super::*;
-use crate::campaign::MissionShip;
-use crate::combat::{Destroyed, Health};
-use crate::{PlayerShip, Ship, Side, game_to_bevy};
-
+use crate::combat::Destroyed;
+use crate::{Ship, Side};
 #[derive(Resource)]
 pub struct SkirmishScript {
     pub script: Script,
@@ -26,10 +25,22 @@ pub struct SkirmishScript {
 impl SkirmishScript {
     /// The map's script, if it has one. `teams`: (team name id, its players); `sides`: the side of each map player.
     pub fn load(map: &str, teams: Vec<(String, Vec<String>)>, sides: HashMap<String, Side>) -> Option<Self> {
-        let data = crate::data::try_json(&crate::assets_dir().join(format!("maps/{map}/script.json")))?;
-        let mut script = Script::new(&without_end_rules(&data), Value::Null);
+        let dir = crate::assets_dir().join(format!("maps/{map}"));
+        let data = crate::data::try_json(&dir.join("script.json"))?;
+        // Optional speech lines, end messages and ship names, as a mission's `media.json`.
+        let media = crate::data::try_json(&dir.join("media.json")).unwrap_or(Value::Null);
+        let decides = script_decides(&data);
+        warn_campaign_only(map, &data);
+        // A retail map's end rules stay with victory.rs; a map that opts in lets its own end rules (and team objectives) decide.
+        let mut script = Script::new(&if decides { data.clone() } else { without_end_rules(&data) }, media);
         script.set_teams(teams);
+        script.decide_game(decides);
         Some(SkirmishScript { script, sides, paths: data["paths"].clone(), environment: data["environment"].clone(), map_text: data["map_text"].clone() })
+    }
+    /// Whether the map's `script.json` decides how the game ends (`"victory": "script"`; `"objectives"` too, the name the campaign
+    /// gives its task-driven endings).
+    pub fn decides(map: &str) -> bool {
+        crate::data::try_json(&crate::assets_dir().join(format!("maps/{map}/script.json"))).is_some_and(|d| script_decides(&d))
     }
     /// The rules' names of the map-placed ships ('Setup Ship' names) by world-object id; none when the map has no script.
     pub fn ship_names(map: &str) -> Option<HashMap<i64, String>> {
@@ -46,40 +57,56 @@ pub fn plugin(app: &mut App) {
     app.add_systems(Update, run.in_set(crate::FrameRules).run_if(in_state(crate::menu::Screen::Battle)).run_if(resource_exists::<SkirmishScript>));
 }
 
+/// The ECS access the shared effect application (`systems::apply`) needs besides the ships and animals.
+#[derive(bevy::ecs::system::SystemParam)]
+struct SkirmishFx<'w, 's> {
+    bases: apply::Bases<'w, 's>,
+    mines: apply::Mines<'w, 's>,
+    dragons: Query<'w, 's, &'static mut crate::dragons::Dragon>,
+    dock: MessageWriter<'w, crate::docking::DockMsg>,
+    board: MessageWriter<'w, crate::boarding::BoardMsg>,
+    asteroids: MessageWriter<'w, crate::combat::AsteroidSetup>,
+    meteors: MessageWriter<'w, crate::nebula::MeteorRoute>,
+    detonate: MessageWriter<'w, crate::combat::Detonate>,
+    event_fx: Query<'w, 's, (Entity, &'static super::systems::EventFx)>,
+    fxlib: Option<Res<'w, crate::fx::FxLib>>,
+    sfx: Option<ResMut<'w, Messages<crate::audio::Sfx>>>,
+    toggles: Option<ResMut<'w, crate::panels::Toggles>>,
+}
+
+#[allow(clippy::too_many_arguments)]
 fn run(
     mut sk: ResMut<SkirmishScript>,
     time: Res<Time>,
+    lib: Res<crate::data::Library>,
     mut killed: MessageReader<Destroyed>,
     mut captured: MessageReader<crate::boarding::Captured>,
-    mut ships: Query<(Entity, &mut Ship, &Transform, &mut Health, &mut MissionShip, &mut Visibility, Has<PlayerShip>)>,
-    mut animals: Query<(Entity, &mut crate::environment::SpaceAnimal, &Transform, &mut Visibility), Without<Ship>>,
-    mut meteors: MessageWriter<crate::nebula::MeteorRoute>,
-    mut belts: MessageWriter<crate::combat::AsteroidSetup>,
+    mut ships: Query<RuleShip>,
+    mut animals: Query<(Entity, &mut crate::environment::SpaceAnimal, &mut Transform, &mut Visibility), Without<Ship>>,
     rocks: Query<(Entity, &Transform, &crate::combat::Asteroid), (Without<Ship>, Without<crate::environment::SpaceAnimal>)>,
-    mut dragons: Query<&mut crate::dragons::Dragon>,
-    mut mines: Query<(Entity, &Transform, &mut crate::combat::MapMine, Option<&mut crate::combat::Shell>)>,
+    mut fx: SkirmishFx,
+    assets: Res<AssetServer>,
     mut commands: Commands,
-    fxlib: Option<Res<crate::fx::FxLib>>,
-    lib: Option<Res<crate::data::Library>>,
-    event_fx: Query<(Entity, &super::systems::EventFx)>,
 ) {
     let sk = &mut *sk;
     let mut world: Vec<Unit> = ships
         .iter()
-        .map(|(e, _, tf, h, m, _, primary)| Unit {
-            name: m.name.clone(),
-            owner: m.owner.clone(),
-            alive: !h.destroyed,
-            visible: m.visible,
-            primary,
-            ..Unit::new(e, m.id, tf.translation)
+        .map(|s| Unit {
+            name: s.mission.name.clone(),
+            owner: s.mission.owner.clone(),
+            alive: !s.health.destroyed,
+            visible: s.mission.visible,
+            primary: s.primary,
+            flag: s.mission.flag.clone(),
+            attack: s.mission.attack.clone(),
+            ..Unit::new(s.entity, s.mission.id, s.transform.translation)
         })
         .collect();
     sk.script.keep_sunk(&mut world);
     world.extend(animals.iter().map(|(e, a, tf, _)| a.unit(e, tf)));
     // Moving belts: the rocks are units too, tagged with the script's groups by their world-object id.
     world.extend(rocks.iter().map(|(e, tf, a)| a.unit(e, tf)));
-    world.extend(mines.iter().map(|(e, tf, m, _)| m.unit(e, tf)));
+    world.extend(fx.mines.iter().map(|(e, tf, m, _)| m.unit(e, tf)));
     sk.script.tag(&mut world);
     for d in killed.read() {
         if let Some(by) = world.iter().find(|u| u.e == d.by) {
@@ -89,147 +116,54 @@ fn run(
     for c in captured.read() {
         sk.script.record_capture(&c.by, &c.victim, c.unit, false);
     }
-    let (fxs, _) = sk.script.step(&world, time.delta_secs(), false);
-    for fx in fxs {
-        match fx {
-            Fx::Path { units, path, closest, looping } => {
-                info!("map script: {} unit(s) take route '{path}'", units.len());
-                let pts: Vec<Vec3> = sk.paths[path.as_str()].as_array().map(|a| a.iter().map(game_to_bevy).collect()).unwrap_or_default();
-                for e in &units {
-                    if let Ok((_, mut animal, tf, _)) = animals.get_mut(*e) {
-                        animal.follow(&pts, tf.translation, closest, looping);
-                        continue;
-                    }
-                    let Ok((_, mut sh, tf, _, mut ms, ..)) = ships.get_mut(*e) else { continue };
-                    let from = if closest { (0..pts.len()).nearest_to(tf.translation, |a| pts[*a]).unwrap_or(0) } else { 0 };
-                    sh.throttle = None;
-                    sh.waypoints = pts[from.min(pts.len())..].to_vec();
-                    sh.order = 2;
-                    sh.goal = None;
-                    ms.stop_at_end = !looping;
-                    ms.looping = looping.then(|| pts.clone());
+    let (fxs, voice) = sk.script.step(&world, time.delta_secs(), false);
+    if let Some(file) = voice {
+        commands.spawn((
+            crate::Scenario,
+            crate::briefing::Voice,
+            AudioPlayer::new(assets.load(crate::audio::sound(&file))),
+            PlaybackSettings::DESPAWN.with_volume(bevy::audio::Volume::Linear(crate::menu::volume(crate::menu::Setting::Dialogue))),
+        ));
+    }
+    let mut env = apply::FxEnv {
+        script: &mut sk.script,
+        paths: &sk.paths,
+        lib: &lib,
+        bases: &mut fx.bases,
+        dragons: &mut fx.dragons,
+        dock: &mut fx.dock,
+        board: &mut fx.board,
+        asteroids: &mut fx.asteroids,
+        meteors: &mut fx.meteors,
+        detonate: &mut fx.detonate,
+        event_fx: &fx.event_fx,
+        fxlib: fx.fxlib.as_deref(),
+        sfx: fx.sfx.as_deref_mut(),
+        toggles: fx.toggles.as_deref_mut(),
+        orbit: None,
+        sides: Some(&sk.sides),
+        mines: Some(&mut fx.mines),
+    };
+    apply::apply(fxs, &mut env, &mut commands, &mut ships, &mut animals);
+}
+
+/// `"victory": "script"` (or `"objectives"`) in a map's `script.json`: the script's own end rules decide the game.
+fn script_decides(data: &Value) -> bool {
+    matches!(data["victory"].as_str(), Some("script" | "objectives"))
+}
+
+/// A skirmish has no cutscene camera, mission HUD or player-ship handoff: a rule that uses a campaign-only Type (the rule schema marks
+/// them, `--check-mission` reports them as errors) changes nothing there. Say so once per rule and Type when the map loads.
+fn warn_campaign_only(map: &str, data: &Value) {
+    let mut seen = std::collections::HashSet::new();
+    for r in data["rules"].as_array().into_iter().flatten() {
+        for (role, key) in [(schema::Role::Condition, "conditions"), (schema::Role::Action, "actions")] {
+            for e in r[key].as_array().into_iter().flatten() {
+                let (rule, ty) = (r["name"].as_str().unwrap_or("").trim(), e["Type"].as_str().unwrap_or(""));
+                if schema::lookup(role, ty).is_some_and(|d| d.campaign_only) && seen.insert((rule.to_string(), ty.to_string())) {
+                    warn!("map '{map}': rule '{rule}' uses '{ty}', which only campaign missions support; it does nothing in a skirmish");
                 }
             }
-            Fx::Owner(units, owner) => {
-                info!("map script: {} ship(s) now belong to '{owner}'", units.len());
-                for e in &units {
-                    if let Ok((_, mut animal, ..)) = animals.get_mut(*e) {
-                        animal.owner.clone_from(&owner);
-                    }
-                    // A placed mine fights for its new owner's side.
-                    if let Ok((.., mut mine, shell)) = mines.get_mut(*e) {
-                        mine.owner.clone_from(&owner);
-                        mine.side = sk.sides.get(&owner).copied();
-                        if let (Some(mut shell), Some(side)) = (shell, mine.side) {
-                            shell.side = side;
-                        }
-                    }
-                    let Ok((_, mut sh, _, _, mut ms, ..)) = ships.get_mut(*e) else { continue };
-                    if let Some(side) = sk.sides.get(&owner) {
-                        sh.side = *side;
-                    }
-                    ms.owner = owner.clone();
-                }
-            }
-            Fx::Visible(units, on) => {
-                for e in &units {
-                    if let Ok((_, mut animal, _, mut vis)) = animals.get_mut(*e) {
-                        animal.visible = on;
-                        *vis = if on { Visibility::Inherited } else { Visibility::Hidden };
-                    }
-                    let Ok((.., mut ms, mut vis, _)) = ships.get_mut(*e) else { continue };
-                    ms.visible = on;
-                    *vis = if on { Visibility::Inherited } else { Visibility::Hidden };
-                }
-            }
-            // 'Hold position' is the captain's lock (the right-click menu's Hold): the ship stays where it is and still fires; releasing
-            // hands it back to its captain or to the next order the script gives.
-            Fx::Hold(units, on) => {
-                for e in &units {
-                    let Ok((_, mut sh, ..)) = ships.get_mut(*e) else { continue };
-                    if on {
-                        sh.waypoints.clear();
-                        sh.order = 0;
-                        commands.entity(*e).insert(crate::ship::HoldPosition);
-                    } else {
-                        commands.entity(*e).remove::<crate::ship::HoldPosition>();
-                    }
-                }
-            }
-            Fx::Throttle(units, cap) => {
-                for e in &units {
-                    let Ok((_, mut sh, ..)) = ships.get_mut(*e) else { continue };
-                    sh.cap = cap;
-                }
-            }
-            Fx::Event(set, name, on) => super::systems::event_effect(&mut commands, event_fx.iter(), fxlib.as_deref(), &sk.script.point_sets, &set, &name, on),
-            // 'Set Group Throttle Percent': a ship's current speed cap (the human's own ship keeps its throttle); dragons and
-            // animals move at their own rates.
-            Fx::Speed(units, v) => {
-                for e in &units {
-                    let Ok((_, mut sh, .., primary)) = ships.get_mut(*e) else { continue };
-                    if !primary {
-                        sh.cap = v;
-                    }
-                }
-            }
-            Fx::ReturnPoint(units, p) => {
-                for e in &units {
-                    if let Ok(mut d) = dragons.get_mut(*e) {
-                        d.home = Some(p);
-                    }
-                    if let Ok((.., mut ms, _, _)) = ships.get_mut(*e) {
-                        ms.return_point = Some(p);
-                    }
-                }
-            }
-            Fx::Velocity(units, speed) => {
-                for e in units {
-                    if let Ok((_, mut animal, ..)) = animals.get_mut(e) {
-                        animal.speed = speed;
-                    }
-                }
-            }
-            Fx::Asteroids { units, path, closest, mode, speed, tumble } => {
-                let path = sk.paths[path.as_str()].as_array().map(|a| a.iter().map(game_to_bevy).collect()).unwrap_or_default();
-                belts.write(crate::combat::AsteroidSetup { units, path, closest, mode, speed, tumble });
-            }
-            Fx::MeteorPath { group, path, closest, mode } => {
-                let path = sk.paths[path.as_str()].as_array().map(|a| a.iter().map(game_to_bevy).collect()).unwrap_or_default();
-                meteors.write(crate::nebula::MeteorRoute::Path { group, path, closest, mode });
-            }
-            Fx::MeteorSpeed(group, speed) => {
-                meteors.write(crate::nebula::MeteorRoute::Speed { group, speed });
-            }
-            Fx::DragonStance(units, stance) => {
-                for e in units {
-                    if let Ok(mut d) = dragons.get_mut(e) {
-                        d.stance = stance;
-                    }
-                }
-            }
-            Fx::DragonThreshold(units, threshold) => {
-                for e in units {
-                    if let Ok(mut d) = dragons.get_mut(e) {
-                        d.threshold = threshold;
-                    }
-                }
-            }
-            Fx::Stance(units, stance) => {
-                for e in &units {
-                    let Ok((.., mut ms, _, _)) = ships.get_mut(*e) else { continue };
-                    ms.stance = stance;
-                }
-            }
-            Fx::Damage(units, part) => {
-                for e in &units {
-                    let Ok((_, ship, _, mut h, ms, ..)) = ships.get_mut(*e) else { continue };
-                    if let Some(lib) = lib.as_deref() {
-                        crate::combat::fraction_hit(&lib.classes[ship.class], &mut h, part, ship.side, ms.invuln);
-                    }
-                }
-            }
-            _ => {}
         }
     }
 }
