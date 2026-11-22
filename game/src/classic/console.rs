@@ -16,8 +16,8 @@ pub fn plugin(app: &mut App) {
     app.add_systems(Update, (build, draw).chain().run_if(in_state(crate::menu::Screen::Battle)).run_if(resource_exists::<Console>));
 }
 
-fn build(mut commands: Commands, console: Res<Console>, existing: Query<(), With<Panel>>) {
-    if !console.enabled || !existing.is_empty() {
+fn build(mut commands: Commands, existing: Query<(), With<Panel>>) {
+    if !existing.is_empty() {
         return;
     }
     let font = |size| TextFont { font_size: FontSize::Px(size), ..default() };

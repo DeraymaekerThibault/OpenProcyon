@@ -269,3 +269,44 @@ fn why_says_when_a_rule_is_inactive_or_partway_through_its_actions() {
     let (_, o) = run(&mut sc, "why Slow", &mut world(), None);
     assert!(o.lines.iter().any(|l| l.contains("busy") && l.contains("OP Wait")), "{:?}", o.lines);
 }
+
+#[test]
+fn the_command_table_and_the_parser_agree() {
+    let mut names = std::collections::HashSet::new();
+    for e in TABLE {
+        assert!(names.insert(e.name), "{} is listed twice", e.name);
+        let parsed = parse(e.example, "Hero", false).unwrap_or_else(|err| panic!("the example of {}: {err}", e.name));
+        assert_eq!(parsed.cheats(), e.cheats, "{}: the table and Command::cheats disagree", e.name);
+        assert!(e.example.split_whitespace().next().is_some_and(|w| w == e.name), "{}: the example starts with the command", e.name);
+        for a in e.alias {
+            assert!(parse(&format!("{a} {}", e.example.split_once(' ').map_or("", |x| x.1)), "Hero", false).is_ok() || *a == "?", "alias {a}");
+        }
+    }
+}
+
+#[test]
+fn help_lists_commands_by_group_and_marks_the_cheats() {
+    let all = help_lines(None).join("\n");
+    for g in ["Cheats:", "Mission state:", "Raw rule access:"] {
+        assert!(all.contains(g), "{g}");
+    }
+    for e in TABLE {
+        assert!(all.contains(e.usage), "{} is missing from help", e.name);
+    }
+    assert!(all.contains("*god") && all.contains(" flags"), "cheats carry a star, queries do not");
+    let one = help_lines(Some("GOD"));
+    assert!(one.iter().any(|l| l.contains("usage:") && l.contains("god [on|off]")) && one.iter().any(|l| l.contains("example: god on")));
+    assert!(one.last().unwrap().contains("marks the session"));
+    assert!(help_lines(Some("flags")).last().unwrap().contains("does not mark"));
+    assert_eq!(parse("help why", "Hero", false), Ok(Command::Help(Some("why".into()))));
+}
+
+#[test]
+fn an_unknown_command_names_the_nearest_one() {
+    let err = |l: &str| parse(l, "Hero", false).unwrap_err();
+    assert!(err("goh").contains("did you mean god") && err("goh").contains("`help`"), "{}", err("goh"));
+    assert!(err("revael").contains("did you mean reveal"));
+    assert!(err("flag").contains("did you mean flags"));
+    assert!(!err("xyzzyplugh").contains("did you mean"), "nothing is near");
+    assert!(help_lines(Some("rapair"))[0].contains("did you mean repair"));
+}

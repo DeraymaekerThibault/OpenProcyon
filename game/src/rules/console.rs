@@ -15,9 +15,6 @@ use super::*;
 
 /// Point set the `tp x y` command writes its destination to before running 'Teleport Group/Unit'.
 const TP_SET: &str = "(console)";
-/// The command words (Tab completion).
-const COMMANDS: &[&str] =
-    &["act", "cond", "do", "fire", "flags", "god", "help", "kill", "repair", "reveal", "schema", "set", "counter", "counters", "task", "tasks", "timer", "timers", "tp", "why"];
 /// Lines of output kept.
 const LOG_LINES: usize = 200;
 /// Longest command line.
@@ -26,7 +23,7 @@ const MAX_LINE: usize = 400;
 /// The console's state: shared, so views only draw it.
 #[derive(Resource, Default)]
 pub struct Console {
-    /// Whether the console can be opened at all (debug builds, `--console` or `PROCYON_CONSOLE`; see `systems::console::enabled`).
+    /// On without the option: debug builds, `--console` or `PROCYON_CONSOLE` (see `systems::dev_console::enabled`).
     pub enabled: bool,
     pub open: bool,
     /// The line being typed.
@@ -54,6 +51,10 @@ impl Console {
     pub fn new(enabled: bool) -> Self {
         Console { enabled, ..default() }
     }
+    /// Whether `~` opens it: the forced-on cases above, or the "Developer Console" option.
+    pub fn available(&self) -> bool {
+        self.enabled || crate::menu::console_setting()
+    }
     /// Adds a line (or several, split at newlines) to the output.
     pub fn say(&mut self, text: impl AsRef<str>) {
         self.log.extend(text.as_ref().lines().map(String::from));
@@ -66,7 +67,7 @@ impl Console {
             return;
         }
         let word = self.line.to_lowercase();
-        let hits: Vec<&str> = COMMANDS.iter().copied().filter(|c| c.starts_with(&word)).collect();
+        let hits: Vec<&str> = TABLE.iter().flat_map(|c| std::iter::once(c.name).chain(c.alias.iter().copied())).filter(|c| c.starts_with(&word)).collect();
         let Some(first) = hits.first() else { return };
         let common = hits.iter().fold(first.len(), |n, c| n.min(first.chars().zip(c.chars()).take_while(|(a, b)| a == b).count()));
         self.line = first[..common].to_string();
@@ -137,7 +138,7 @@ pub struct Cheats {
 #[derive(Debug, PartialEq)]
 pub enum Command {
     Nothing,
-    Help,
+    Help(Option<String>),
     /// Rule actions, each run through `Script::act`. `god` carries the new state of the god toggle.
     Acts {
         acts: Vec<Value>,
@@ -179,21 +180,124 @@ impl Command {
     }
 }
 
-pub const HELP: &str = "\
-god [on|off]            the player's fleet takes no damage (Set Group/Unit Vulnerability)
-repair [group]          full repair of the player's fleet, or of a group
-kill                    destroy the current target (Destroy Group/Unit)
-reveal                  show every hidden unit (Set Group/Unit Visibility)
-tp <x> <y> [z] | <set>  move the player's ship to game coordinates, or to a point set of the mission
-fire <rule>             run a rule's actions now (as --fire-rule); a part of the name is enough
-why <rule>              which conditions of a rule hold now
-flags | timers | tasks | counters  the mission's state
-set <flag> [on|off]     Set Flag Action;  counter <name> <value>  OP Set Counter;  timer <name> start|stop;  task <name> active|complete|failed [off]
-act <json>              any rule action, e.g. act {\"Type\": \"Set Flag Action\", \"Flag Name\": \"x\", \"Boolean Value\": true}
-cond <json>             evaluate any rule condition
-schema <text>           the fields of an action or condition Type (the rule schema); act / cond check their JSON against it
-Tab completes a command name; Up / Down recall earlier lines.
-Using a command that changes the game marks the session as cheated: campaign points are not recorded.";
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Group {
+    Cheats,
+    State,
+    Raw,
+    Console,
+}
+impl Group {
+    fn title(self) -> &'static str {
+        match self {
+            Group::Cheats => "Cheats",
+            Group::State => "Mission state",
+            Group::Raw => "Raw rule access",
+            Group::Console => "Console",
+        }
+    }
+}
+
+/// One console command. `TABLE` is the only list of commands: `help`, Tab completion and the "did you mean" answer read it, and the
+/// tests parse every example and check `cheats` against `Command::cheats`, so a command cannot be added to the parser without a
+/// row (or the reverse) unnoticed.
+pub struct Entry {
+    pub name: &'static str,
+    pub alias: &'static [&'static str],
+    pub group: Group,
+    pub usage: &'static str,
+    pub about: &'static str,
+    pub example: &'static str,
+    /// Running it marks the session as cheated.
+    pub cheats: bool,
+}
+const fn entry(name: &'static str, group: Group, usage: &'static str, about: &'static str, example: &'static str, cheats: bool) -> Entry {
+    Entry { name, alias: &[], group, usage, about, example, cheats }
+}
+pub static TABLE: &[Entry] = &[
+    entry("god", Group::Cheats, "god [on|off]", "the player's fleet takes no damage (Set Group/Unit Vulnerability); no argument toggles", "god on", true),
+    entry("repair", Group::Cheats, "repair [group]", "full repair of the player's fleet, or of a group (no rule action exists for it)", "repair", true),
+    entry("kill", Group::Cheats, "kill", "destroy the current target (Destroy Group/Unit)", "kill", true),
+    entry("reveal", Group::Cheats, "reveal", "show every hidden unit (Set Group/Unit Visibility)", "reveal", true),
+    entry("tp", Group::Cheats, "tp <x> <y> [z] | tp <point set>", "move the player's ship to game coordinates or to a point set of the mission", "tp 120 -40", true),
+    entry("fire", Group::State, "fire <rule>", "run a rule's actions now, as --fire-rule does; a part of the name is enough", "fire \"Open the gate\"", true),
+    entry("set", Group::State, "set <flag> [on|off]", "Set Flag Action", "set key off", true),
+    entry("timer", Group::State, "timer <name> start|stop", "Start Timer / Stop Timer", "timer t start", true),
+    entry("task", Group::State, "task <name> active|complete|failed [on|off]", "Set Objective Task ... State", "task Escape complete", true),
+    entry("counter", Group::State, "counter <name> <value>", "OP Set Counter", "counter kills 3", true),
+    entry("why", Group::State, "why <rule>", "which conditions of a rule hold now, and whether it is inactive or waiting in an OP Wait", "why gate", false),
+    entry("flags", Group::State, "flags", "every flag that has been set", "flags", false),
+    entry("timers", Group::State, "timers", "every timer, with its time", "timers", false),
+    entry("tasks", Group::State, "tasks", "every objective task and its state", "tasks", false),
+    entry("counters", Group::State, "counters", "every counter that has been set", "counters", false),
+    Entry {
+        alias: &["do"],
+        ..entry(
+            "act",
+            Group::Raw,
+            "act <json>",
+            "run any rule action by its Type and fields, checked against the rule schema (JSON true / false are accepted)",
+            "act {\"Type\": \"Set Flag Action\", \"Flag Name\": \"x\", \"Boolean Value\": true}",
+            true,
+        )
+    },
+    entry(
+        "cond",
+        Group::Raw,
+        "cond <json>",
+        "evaluate any rule condition, checked against the schema",
+        "cond {\"Type\": \"Flag Condition\", \"Flag Name\": \"x\", \"Boolean Value\": true}",
+        false,
+    ),
+    entry("schema", Group::Raw, "schema <text>", "the fields of an action or condition Type (the rule schema)", "schema Teleport", false),
+    Entry { alias: &["?"], ..entry("help", Group::Console, "help [command]", "this list, or a command's usage and an example", "help god", false) },
+];
+
+fn entry_named(word: &str) -> Option<&'static Entry> {
+    TABLE.iter().find(|e| e.name == word || e.alias.contains(&word))
+}
+
+/// The command whose name is nearest to `word` (edit distance of at most 2, or a shared prefix), for "unknown command".
+fn nearest_command(word: &str) -> Option<&'static str> {
+    let word = word.to_lowercase();
+    let distance = |a: &str, b: &str| {
+        let (a, b): (Vec<char>, Vec<char>) = (a.chars().collect(), b.chars().collect());
+        let mut row: Vec<usize> = (0..=b.len()).collect();
+        for (i, ca) in a.iter().enumerate() {
+            let mut prev = std::mem::replace(&mut row[0], i + 1);
+            for (j, cb) in b.iter().enumerate() {
+                let cost = usize::from(ca != cb);
+                let here = (row[j] + 1).min(row[j + 1] + 1).min(prev + cost);
+                prev = std::mem::replace(&mut row[j + 1], here);
+            }
+        }
+        row[b.len()]
+    };
+    TABLE.iter().map(|e| e.name).filter(|n| n.starts_with(&word) || word.starts_with(n) || distance(n, &word) <= 2).min_by_key(|n| distance(n, &word))
+}
+
+/// `help` (every command, grouped) or `help <command>` (its usage and an example), as output lines.
+pub fn help_lines(topic: Option<&str>) -> Vec<String> {
+    if let Some(word) = topic {
+        let word = word.to_lowercase();
+        return match entry_named(&word) {
+            Some(e) => vec![
+                format!("{}: {}", e.name, e.about),
+                format!("  usage:   {}", e.usage),
+                format!("  example: {}", e.example),
+                if e.cheats { "  changes the game: marks the session as cheated".into() } else { "  a query: does not mark the session".into() },
+            ],
+            None => vec![format!("no command '{word}'{}", nearest_command(&word).map_or(String::new(), |n| format!("; did you mean {n}?")))],
+        };
+    }
+    let mut lines = vec![];
+    for group in [Group::Cheats, Group::State, Group::Raw, Group::Console] {
+        lines.push(format!("{}:", group.title()));
+        lines.extend(TABLE.iter().filter(|e| e.group == group).map(|e| format!("  {}{:<42}{}", if e.cheats { "*" } else { " " }, e.usage, e.about)));
+    }
+    lines.push("* marks the session as cheated (campaign points are not recorded). `help <command>` shows an example; Tab completes a command.".into());
+    lines
+}
 
 /// Turns a line into a command. `player` is the human's group name (rules address the fleet by it); `god` the current god state.
 pub fn parse(line: &str, player: &str, god: bool) -> Result<Command, String> {
@@ -203,7 +307,7 @@ pub fn parse(line: &str, player: &str, god: bool) -> Result<Command, String> {
     let act = |a: Value| Command::Acts { acts: vec![a], god: None };
     Ok(match word.to_lowercase().as_str() {
         "" => Command::Nothing,
-        "help" | "?" => Command::Help,
+        "help" | "?" => Command::Help((!rest.is_empty()).then(|| rest.to_string())),
         "god" => {
             let on = match args.as_slice() {
                 [] => !god,
@@ -280,7 +384,7 @@ pub fn parse(line: &str, player: &str, god: bool) -> Result<Command, String> {
             Ok(_) => return Err("a condition needs a \"Type\"".into()),
             Err(e) => return Err(format!("not JSON: {e}")),
         },
-        other => return Err(format!("unknown command '{other}' (help lists them)")),
+        other => return Err(format!("unknown command '{other}'{}; `help` lists the commands", nearest_command(other).map_or(String::new(), |n| format!(" (did you mean {n}?)")))),
     })
 }
 
@@ -345,7 +449,7 @@ impl Script {
         let player = self.player.clone();
         match cmd {
             Command::Nothing => {}
-            Command::Help => o.lines.extend(HELP.lines().map(String::from)),
+            Command::Help(topic) => o.lines = help_lines(topic.as_deref()),
             Command::Acts { acts, .. } => {
                 for a in acts {
                     self.console_act(a, w, out);

@@ -7,8 +7,8 @@ use super::*;
 use crate::menu::Screen;
 use crate::rules::console::{Cheats, Command, Console, Edit, parse};
 
-/// Whether the console may be opened: debug builds, `--console` or `PROCYON_CONSOLE` in the environment. Off in release builds
-/// otherwise, so a stray `~` never hands a player the cheats.
+/// Whether the console is on without the Display option "Developer Console": debug builds, `--console` or `PROCYON_CONSOLE` in the
+/// environment. A release build otherwise leaves it to the option (off by default), so a stray `~` never hands a player the cheats.
 pub fn enabled() -> bool {
     cfg!(debug_assertions) || std::env::args().any(|a| a == "--console") || std::env::var_os("PROCYON_CONSOLE").is_some()
 }
@@ -44,7 +44,7 @@ fn keys(
     mut mouse: ResMut<ButtonInput<MouseButton>>,
     mut vtime: ResMut<Time<Virtual>>,
 ) {
-    if !console.enabled {
+    if !console.available() {
         return;
     }
     for k in input.read().filter(|k| k.state.is_pressed()) {
