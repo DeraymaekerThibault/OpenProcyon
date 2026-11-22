@@ -315,3 +315,37 @@ fn objectives_victory_needs_a_required_task() {
     s.step(&[], 0.1, false);
     assert!(s.ended.is_none());
 }
+
+#[test]
+fn deactivating_a_rule_stops_its_waiting_sequence_and_a_rule_may_switch_itself_off() {
+    let data = json!({"rules": [
+        rule("cutscene", true, json!([]), json!([add("a", 1.0), wait(1.0), add("b", 1.0)])),
+        rule("stop", true, json!([flag_is("stop", true)]), json!([{"Type": "OP Set Rule Active", "Rule Name": "cutscene", "Boolean": "FALSE"}])),
+        rule("self", true, json!([]), json!([add("x", 1.0), {"Type": "OP Set Rule Active", "Rule Name": "self", "Boolean": "FALSE"}, add("y", 1.0)])),
+    ]});
+    let mut s = script(data, Value::Null);
+    s.step(&[], 0.1, false);
+    s.flags.insert("stop".into(), true);
+    for _ in 0..20 {
+        s.step(&[], 0.1, false);
+    }
+    assert_eq!((s.ext.counter("a"), s.ext.counter("b")), (1.0, 0.0), "the cutscene stopped at its wait");
+    assert_eq!((s.ext.counter("x"), s.ext.counter("y")), (1.0, 0.0), "a rule that switches itself off drops the rest of its actions");
+}
+
+#[test]
+fn objectives_victory_reads_its_messages_from_the_media() {
+    let mut d = tasks_data(true);
+    d["victory_message"] = json!("won");
+    d["defeat_message"] = json!("lost");
+    let media = json!({"messages": {"won": "Well sailed.", "lost": "The Comet is gone."}});
+    let mut s = script(d.clone(), media.clone());
+    s.flags.insert("one".into(), true);
+    s.flags.insert("two".into(), true);
+    s.step(&[], 0.1, false);
+    assert_eq!(s.ended, Some(("Well sailed.".into(), true)));
+    let mut s = script(d, media);
+    s.flags.insert("lost".into(), true);
+    s.step(&[], 0.1, false);
+    assert_eq!(s.ended, Some(("The Comet is gone.".into(), false)));
+}

@@ -44,6 +44,9 @@ pub(in crate::rules) struct Ext {
     tasks: Vec<TaskRule>,
     /// `"victory": "objectives"`.
     objectives_decide: bool,
+    /// `victory_message` / `defeat_message`: ids into the media `messages` (as `End Game` reads its loser message).
+    victory_message: String,
+    defeat_message: String,
 }
 
 /// A JSON boolean or a retail-style "TRUE"/"FALSE" string; `None` when the value is neither.
@@ -78,6 +81,8 @@ impl Ext {
                 })
                 .collect(),
             objectives_decide: data["victory"].as_str() == Some("objectives"),
+            victory_message: s(data, "victory_message").into(),
+            defeat_message: s(data, "defeat_message").into(),
         }
     }
     pub(in crate::rules) fn is_active(&self, rule: usize) -> bool {
@@ -139,6 +144,10 @@ impl Script {
                 for (i, n) in self.ext.names.iter().enumerate() {
                     if n == name {
                         self.ext.active[i] = on;
+                        if !on {
+                            // A deactivated rule stops its waiting sequence: a deactivated cutscene does not finish.
+                            self.ext.pending.retain(|p| p.rule != i);
+                        }
                         found = true;
                     }
                 }
@@ -170,6 +179,7 @@ impl Script {
     /// Runs the actions of rule `i` from index `from` in order, stopping at a wait that is not over yet: the rest resumes in a later
     /// `step` (`resume_sequences`). Later rules must see visibility changes immediately, not one ECS frame later.
     pub(in crate::rules) fn run_from(&mut self, i: usize, r: &Rule, from: usize, w: &mut [Unit], out: &mut Vec<Fx>) {
+        let was_active = self.ext.is_active(i);
         for (k, a) in r.acts.iter().enumerate().skip(from) {
             if let Some(wait) = Self::wait_of(a) {
                 if !self.wait_over(&wait) {
@@ -180,6 +190,9 @@ impl Script {
             }
             let at = out.len();
             self.act(a, w, out, &r.name);
+            if was_active && !self.ext.is_active(i) {
+                return; // the rule switched itself off: the rest of its sequence is dropped
+            }
             for fx in &out[at..] {
                 if let Fx::Visible(ids, visible) = fx {
                     for u in w.iter_mut().filter(|u| ids.contains(&u.e)) {
@@ -231,13 +244,14 @@ impl Script {
             self.tasks[i].failed = failed;
             self.tasks[i].complete = complete && !failed;
         }
+        // Event-quota conditions (kills, captures) are evaluated but their events are not consumed: a task settles once, so it never asks twice.
         self.consume.clear();
         if self.ext.objectives_decide && self.ended.is_none() {
             let required: Vec<&Task> = specs.iter().filter(|x| x.required).filter_map(|x| self.tasks.iter().find(|t| t.name == x.name)).collect();
             if required.iter().any(|t| t.failed) {
-                self.ended = Some(("Mission failed".into(), false));
+                self.ended = Some((self.media["messages"][self.ext.defeat_message.as_str()].as_str().unwrap_or("Mission failed").into(), false));
             } else if !required.is_empty() && required.iter().all(|t| t.complete) {
-                self.ended = Some(("Mission complete.".into(), true));
+                self.ended = Some((self.media["messages"][self.ext.victory_message.as_str()].as_str().unwrap_or("Mission complete.").into(), true));
             }
         }
         self.ext.tasks = specs;
