@@ -12,9 +12,9 @@ fn sight_uses_strict_surface_distance_and_three_dimensions() {
     sensors.objects.insert(b, sensor_object(Vec3::X * 130.0, 20.0, "B", 100.0));
     assert!(!sensors.in_sight(a, b, None), "equal to the range is outside");
     sensors.objects.get_mut(&b).unwrap().sphere.0.x -= 0.01;
-    assert!(sensors.player_sees(b, None), "surface, not centre distance");
+    assert!(sensors.sees_now(b, None), "surface, not centre distance");
     sensors.objects.get_mut(&b).unwrap().sphere.0 = Vec3::Y * 140.0;
-    assert!(!sensors.player_sees(b, None), "altitude counts");
+    assert!(!sensors.sees_now(b, None), "altitude counts");
 }
 
 #[test]
@@ -24,14 +24,14 @@ fn group_sharing_excludes_unrelated_hidden_or_dead_observers() {
     sensors.objects.insert(a, sensor_object(Vec3::ZERO, 0.0, "A", 100.0));
     sensors.objects.insert(b, sensor_object(Vec3::X * 200.0, 0.0, "B", 100.0));
     sensors.objects.insert(c, sensor_object(Vec3::X * 150.0, 0.0, "Other ally", 100.0));
-    assert!(!sensors.player_sees(b, None));
+    assert!(!sensors.sees_now(b, None));
     sensors.objects.get_mut(&c).unwrap().group = "A".into();
-    assert!(sensors.player_sees(b, None));
+    assert!(sensors.sees_now(b, None));
     sensors.objects.get_mut(&c).unwrap().shown = false;
-    assert!(!sensors.player_sees(b, None));
+    assert!(!sensors.sees_now(b, None));
     sensors.objects.get_mut(&c).unwrap().shown = true;
     sensors.objects.get_mut(&b).unwrap().shown = false;
-    assert!(!sensors.player_sees(b, None));
+    assert!(!sensors.sees_now(b, None));
 }
 
 #[test]
@@ -41,23 +41,23 @@ fn cloak_script_visibility_no_primary_and_scenery_are_separate() {
     sensors.objects.insert(a, sensor_object(Vec3::ZERO, 0.0, "A", 100.0));
     sensors.objects.insert(b, sensor_object(Vec3::X * 80.0, 0.0, "B", 100.0));
     sensors.objects.get_mut(&b).unwrap().cloak = Some(vec![]);
-    assert!(!sensors.player_sees(b, None));
+    assert!(!sensors.sees_now(b, None));
     sensors.objects.get_mut(&b).unwrap().sphere.0.x = 10.0;
     sensors.objects.get_mut(&b).unwrap().at.x = 10.0;
-    assert!(!sensors.player_sees(b, None), "no distance reveals a cloaked ship");
+    assert!(!sensors.sees_now(b, None), "no distance reveals a cloaked ship");
     sensors.objects.get_mut(&b).unwrap().cloak = Some(vec![crate::Side(u8::MAX)]);
-    assert!(sensors.player_sees(b, None), "a team that knows it sees it");
+    assert!(sensors.sees_now(b, None), "a team that knows it sees it");
     sensors.objects.get_mut(&b).unwrap().cloak = None;
     sensors.objects.get_mut(&b).unwrap().shown = false;
     sensors.primary = None;
-    assert!(!sensors.player_sees(b, None), "no primary never reveals a script-hidden object");
+    assert!(!sensors.sees_now(b, None), "no primary never reveals a script-hidden object");
     sensors.objects.get_mut(&b).unwrap().shown = true;
     sensors.objects.get_mut(&b).unwrap().cloak = None;
-    assert!(sensors.player_sees(b, None), "native no-primary exception");
+    assert!(sensors.sees_now(b, None), "native no-primary exception");
     sensors.primary = Some(a);
     sensors.objects.get_mut(&b).unwrap().sphere.0.x = 1000.0;
     sensors.objects.get_mut(&b).unwrap().scenery = true;
-    assert!(sensors.player_sees(b, None), "do not apply ship contact policy to islands");
+    assert!(sensors.sees_now(b, None), "do not apply ship contact policy to islands");
     assert!(!sensors.in_sight(a, b, None), "docking still needs group sight");
 }
 
@@ -161,12 +161,12 @@ fn enabled_nebula_gates_short_sight_and_group_members_can_see_around_it() {
     let mut sensors = Sensors { primary: Some(a), ..default() };
     sensors.objects.insert(a, sensor_object(Vec3::new(-5.0, 0.0, -5.0), 0.0, "A", 100.0));
     sensors.objects.insert(b, sensor_object(Vec3::new(15.0, 0.0, -5.0), 0.0, "B", 100.0));
-    assert!(!sensors.player_sees(b, Some(&mission)));
+    assert!(!sensors.sees_now(b, Some(&mission)));
     sensors.objects.insert(c, sensor_object(Vec3::new(15.0, 0.0, -15.0), 0.0, "A", 100.0));
-    assert!(sensors.player_sees(b, Some(&mission)));
+    assert!(sensors.sees_now(b, Some(&mission)));
     sensors.objects.remove(&c);
     mission.data["environment"]["nebulae"][0]["Nebula Occlusion On/Off"] = Value::from("FALSE");
-    assert!(sensors.player_sees(b, Some(&mission)));
+    assert!(sensors.sees_now(b, Some(&mission)));
 }
 
 #[test]
@@ -207,6 +207,7 @@ fn an_unseen_ships_running_effects_stop_drawing_and_its_hull_does_not() {
     let mut sensors = Sensors { primary: Some(own), ..default() };
     sensors.objects.insert(own, sensor_object(Vec3::ZERO, 0.0, "A", 500.0));
     sensors.objects.insert(other, sensor_object(Vec3::X * 520.0, 0.0, "B", 500.0));
+    sensors.advance_sightings(None, 0.0, 0.0);
     world.insert_resource(sensors);
     world.run_system_once(mark_unseen_ship_effects).unwrap();
     world.flush();
@@ -214,6 +215,11 @@ fn an_unseen_ships_running_effects_stop_drawing_and_its_hull_does_not() {
     assert!(world.get::<Unseen>(hit).is_none(), "one-shot effects are not touched");
     assert_eq!(world.get::<Visibility>(other), Some(&Visibility::Inherited), "the hull is still drawn");
     world.resource_mut::<Sensors>().objects.get_mut(&other).unwrap().sphere.0.x = 480.0;
+    world.resource_mut::<Sensors>().advance_sightings(None, 0.5, 0.5);
+    world.run_system_once(mark_unseen_ship_effects).unwrap();
+    world.flush();
+    assert!(world.get::<Unseen>(engine).is_some(), "in sight, but the re-test is once a second");
+    world.resource_mut::<Sensors>().advance_sightings(None, 1.1, 0.6);
     world.run_system_once(mark_unseen_ship_effects).unwrap();
     world.flush();
     assert!(world.get::<Unseen>(engine).is_none() && world.get::<Visibility>(engine) == Some(&Visibility::Inherited), "in sight again: drawn");
@@ -222,4 +228,92 @@ fn an_unseen_ships_running_effects_stop_drawing_and_its_hull_does_not() {
     world.run_system_once(mark_unseen_ship_effects).unwrap();
     world.flush();
     assert!(world.get::<Unseen>(engine).is_none(), "a sunk ship keeps its effects");
+}
+
+/// Two ships 480 apart with sight 500 (in sight) or 520 apart (out of it); `b` is the other ship.
+fn view(apart: f32) -> (Sensors, Entity, Entity) {
+    let (a, b) = (Entity::from_bits(1), Entity::from_bits(2));
+    let mut sensors = Sensors { primary: Some(a), ..default() };
+    sensors.objects.insert(a, sensor_object(Vec3::ZERO, 0.0, "A", 500.0));
+    sensors.objects.insert(b, sensor_object(Vec3::X * apart, 0.0, "B", 500.0));
+    (sensors, a, b)
+}
+fn fade(sensors: &Sensors, e: Entity) -> f32 {
+    sensors.sightings[&e].fade
+}
+/// Frames of `dt` real seconds from `from` to `to` (exclusive of `from`).
+fn frames(sensors: &mut Sensors, from: f64, to: f64, dt: f64) -> f64 {
+    let mut t = from;
+    while t + dt <= to + 1e-9 {
+        t += dt;
+        sensors.advance_sightings(None, t, dt as f32);
+    }
+    t
+}
+
+#[test]
+fn an_object_in_sight_when_it_appears_is_shown_at_once_at_full_fade() {
+    let (mut sensors, a, b) = view(480.0);
+    sensors.advance_sightings(None, 0.0, 0.0);
+    assert!(sensors.player_sees(b, None) && sensors.player_sees(a, None));
+    assert_eq!(fade(&sensors, b), 1.0);
+    let (mut far, _, b) = view(520.0);
+    far.advance_sightings(None, 0.0, 0.0);
+    assert!(!far.player_sees(b, None));
+    assert_eq!(fade(&far, b), 0.0);
+}
+
+#[test]
+fn sight_is_re_tested_only_after_more_than_one_real_second() {
+    let (mut sensors, _, b) = view(520.0);
+    sensors.advance_sightings(None, 0.0, 0.0);
+    sensors.objects.get_mut(&b).unwrap().sphere.0.x = 480.0;
+    frames(&mut sensors, 0.0, 1.0, 0.0625);
+    assert!(!sensors.player_sees(b, None), "exactly 1 s later is not yet a re-test");
+    sensors.advance_sightings(None, 1.0625, 0.0625);
+    assert!(sensors.player_sees(b, None), "seen from the re-test on");
+    assert_eq!(fade(&sensors, b), 0.0, "the fade starts from 0 and takes no step on the re-test frame");
+    sensors.retest_now = true;
+    sensors.objects.get_mut(&b).unwrap().sphere.0.x = 520.0;
+    sensors.advance_sightings(None, 1.125, 0.0625);
+    assert!(!sensors.sightings[&b].seen, "a forced re-test does not wait");
+}
+
+#[test]
+fn the_fade_rises_at_0_8_per_second_after_a_sighting_and_falls_as_fast_after_a_loss() {
+    // Frames of 1/16 s; re-tests on the first frame more than 1 s after the last one.
+    let (mut sensors, _, b) = view(520.0);
+    sensors.advance_sightings(None, 0.0, 0.0);
+    sensors.objects.get_mut(&b).unwrap().sphere.0.x = 480.0;
+    frames(&mut sensors, 0.0, 1.0625, 0.0625); // re-test at 1.0625: seen, fade 0
+    assert!(sensors.sightings[&b].seen && fade(&sensors, b) == 0.0);
+    frames(&mut sensors, 1.0625, 1.5625, 0.0625);
+    assert!((fade(&sensors, b) - 0.4).abs() < 1e-4, "0.5 s seen: 0.8 x 0.5 = 0.4, not {}", fade(&sensors, b));
+    frames(&mut sensors, 1.5625, 2.0625, 0.0625);
+    assert!((fade(&sensors, b) - 0.8).abs() < 1e-4, "1.0 s seen: 0.8, not {}", fade(&sensors, b));
+    frames(&mut sensors, 2.0625, 2.5, 0.0625); // re-test at 2.125 (no step), then capped
+    assert_eq!(fade(&sensors, b), 1.0, "capped at 1");
+    // Lost at 2.5; the re-test at 3.1875 drops it, then the fade falls 1 -> 0 in 1.25 s (one more skipped frame at the 4.25 re-test).
+    sensors.objects.get_mut(&b).unwrap().sphere.0.x = 520.0;
+    frames(&mut sensors, 2.5, 3.1875, 0.0625);
+    assert!(!sensors.sightings[&b].seen && sensors.player_sees(b, None), "lost but fading: still shown");
+    assert_eq!(fade(&sensors, b), 1.0);
+    frames(&mut sensors, 3.1875, 4.4375, 0.0625);
+    assert!(sensors.player_sees(b, None), "19 steps after the loss the fade is {} > 0", fade(&sensors, b));
+    frames(&mut sensors, 4.4375, 4.5, 0.0625);
+    assert!(!sensors.player_sees(b, None), "20 steps (1.25 s) after the loss it is gone");
+    assert_eq!(fade(&sensors, b), 0.0);
+}
+
+#[test]
+fn a_line_between_two_objects_is_shown_only_while_both_ends_are() {
+    let (mut sensors, a, b) = view(480.0);
+    sensors.advance_sightings(None, 0.0, 0.0);
+    assert!(sensors.player_sees_both(a, b, None));
+    sensors.objects.get_mut(&b).unwrap().sphere.0.x = 520.0;
+    sensors.retest_now = true;
+    sensors.advance_sightings(None, 0.1, 0.1);
+    assert!(sensors.player_sees_both(a, b, None), "the far end is fading out");
+    frames(&mut sensors, 0.1, 1.5, 0.05);
+    assert!(!sensors.player_sees_both(a, b, None) && sensors.player_sees(a, None), "one end unseen: no line");
 }

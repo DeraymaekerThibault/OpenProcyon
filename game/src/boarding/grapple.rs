@@ -24,18 +24,21 @@ pub struct Ropes(pub Vec<(Vec3, Vec3, f32)>);
 
 /// Bitten grapples run from the grappler's harpoon mount to the target's nearest boarding point (the hull centre without one), slack
 /// by how much the centres closed since the hook bit; tows run taut from the tower's stern tow point to the towee's bow.
+/// A line is drawn only while the player's view shows both its ends (docs/re/visibility.md section 5).
 /// PROVISIONAL: the original's attachment points on the target are not decoded.
 pub(super) fn ropes(
     mut out: ResMut<Ropes>,
     lib: Res<Library>,
     mission: Option<Res<Mission>>,
+    sensors: Option<Res<crate::environment::Sensors>>,
     hooks: Query<&Grapple>,
     ships: Query<(&Ship, &Transform, &Health, Option<&crate::combat::GunStates>, Option<&Boardable>)>,
 ) {
     out.0.clear();
+    let shown = |a: Entity, b: Entity| sensors.as_deref().is_none_or(|s| s.player_sees_both(a, b, mission.as_deref()));
     for g in &hooks {
         let (Ok((ship, tf, health, guns, _)), Ok((_, ttf, _, _, tb))) = (ships.get(g.grappler), ships.get(g.target)) else { continue };
-        if g.flight > 0.0 {
+        if g.flight > 0.0 || !shown(g.grappler, g.target) {
             continue;
         }
         let from = harpoons(&lib, ship, health, guns).next().map_or(tf.translation, |(m, _)| tf.transform_point(m.pos));
@@ -43,7 +46,9 @@ pub(super) fn ropes(
         out.0.push((from, to, (g.length - tf.translation.distance(ttf.translation)).max(0.0)));
     }
     for &(tower, towee) in mission.as_deref().map_or(&[][..], |m| m.script.tows()) {
-        if let (Ok((a, ta, ..)), Ok((b, tb, ..))) = (ships.get(tower), ships.get(towee)) {
+        if let (Ok((a, ta, ..)), Ok((b, tb, ..))) = (ships.get(tower), ships.get(towee))
+            && shown(tower, towee)
+        {
             out.0.push((ta.transform_point(lib.classes[a.class].tow_points[0]), tb.transform_point(lib.classes[b.class].tow_points[1]), 0.0));
         }
     }

@@ -18,11 +18,29 @@ struct SensorObject {
     scenery: bool,
 }
 
+/// Real seconds between re-tests of what the player sees (docs/re/visibility.md section 5).
+pub const SIGHT_RETEST: f64 = 1.0;
+/// The fade after a sighting rises (and after a loss falls) by this much per real second, between 0 and 1.
+pub const SIGHT_FADE_RATE: f32 = 0.8;
+
+/// What the player's view holds of one object: seen at the last re-test, and the fade that follows it.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct Sighting {
+    seen: bool,
+    fade: f32,
+}
+
 /// Frame-boundary snapshot shared by UI and target acquisition; never use camera position as an observer.
 #[derive(Resource, Default)]
 pub struct Sensors {
     objects: std::collections::HashMap<Entity, SensorObject>,
     primary: Option<Entity>,
+    /// The player's view, kept across snapshots: re-tested once a second, faded every frame.
+    sightings: std::collections::HashMap<Entity, Sighting>,
+    /// Real time of the last re-test (none yet: the next frame re-tests).
+    retested: Option<f64>,
+    /// Re-test on the next frame whatever the time (the smoke script, after it moves ships).
+    pub retest_now: bool,
 }
 impl Sensors {
     /// The collision sphere (centre, radius) of a ship or base, as the sight test sees it.
@@ -49,7 +67,17 @@ impl Sensors {
                 })
         })
     }
-    pub fn player_sees(&self, target: Entity, mission: Option<&Mission>) -> bool {
+    /// Whether the player's view shows the object: seen at the last once-a-second re-test, or still fading out after it was lost
+    /// (and not script-hidden or dead). Interface, labels, radar, picking and the ship's own effects follow this.
+    pub fn player_sees(&self, target: Entity, _mission: Option<&Mission>) -> bool {
+        self.objects.get(&target).is_some_and(|o| o.shown) && self.sightings.get(&target).is_some_and(|s| s.seen || s.fade > 0.0)
+    }
+    /// A line between two objects (grapple, tow) is drawn only while the view shows both ends.
+    pub fn player_sees_both(&self, a: Entity, b: Entity, mission: Option<&Mission>) -> bool {
+        self.player_sees(a, mission) && self.player_sees(b, mission)
+    }
+    /// The player's sight test as it stands this frame (what the once-a-second re-test asks).
+    pub fn sees_now(&self, target: Entity, mission: Option<&Mission>) -> bool {
         let Some(to) = self.objects.get(&target).filter(|o| o.shown) else { return false };
         let Some(primary) = self.primary else { return true }; // Native no-current-ship case.
         if crate::briefing::active(mission) || crate::rules::nis(mission) {
@@ -65,6 +93,46 @@ impl Sensors {
         }
         self.in_sight(primary, target, mission)
     }
+    /// One frame of the player's view, `now` and `dt` in real seconds. An object new to the snapshot that is in sight is shown at
+    /// once at full fade. Otherwise every object is re-tested when more than `SIGHT_RETEST` has passed since the last re-test, and
+    /// the fade moves toward 1 while seen and toward 0 while not by `SIGHT_FADE_RATE` x dt. On a re-test frame an object that was
+    /// shown or is seen again takes no fade step (the original restarts its fade clock then).
+    pub fn advance_sightings(&mut self, mission: Option<&Mission>, now: f64, dt: f32) {
+        let retest = self.retest_now || self.retested.is_none_or(|t| now - t > SIGHT_RETEST);
+        if retest {
+            self.retested = Some(now);
+            self.retest_now = false;
+        }
+        self.sightings.retain(|e, _| self.objects.contains_key(e));
+        let tested: Vec<(Entity, bool)> = self.objects.keys().filter(|e| retest || !self.sightings.contains_key(e)).map(|&e| (e, self.sees_now(e, mission))).collect();
+        let mut fresh = std::collections::HashSet::new();
+        for (e, seen) in tested {
+            match self.sightings.entry(e) {
+                std::collections::hash_map::Entry::Vacant(v) => {
+                    v.insert(Sighting { seen, fade: if seen { 1.0 } else { 0.0 } });
+                    fresh.insert(e);
+                }
+                std::collections::hash_map::Entry::Occupied(mut o) => {
+                    let s = o.get_mut();
+                    if s.seen || s.fade > 0.0 || seen {
+                        fresh.insert(e);
+                    }
+                    s.seen = seen;
+                }
+            }
+        }
+        for (e, s) in &mut self.sightings {
+            if fresh.contains(e) {
+                continue;
+            }
+            s.fade = if s.seen { (s.fade + SIGHT_FADE_RATE * dt).min(1.0) } else { (s.fade - SIGHT_FADE_RATE * dt).max(0.0) };
+        }
+    }
+}
+
+/// After each snapshot: the player's view takes one frame (real time, so it runs on while the game is paused or sped up).
+fn advance_sightings(mut sensors: ResMut<Sensors>, mission: Option<Res<Mission>>, time: Res<Time<Real>>) {
+    sensors.advance_sightings(mission.as_deref(), time.elapsed_secs_f64(), time.delta_secs());
 }
 
 /// A ship's crew factor on its sight range. Retail saves store each computer ship's scan range as its WOT sight times its crew
@@ -169,7 +237,7 @@ fn sensor_smoke(world: &mut World) {
     let enemy = *enemies.first().expect("sight smoke requires an enemy");
     let group = world.get::<crate::ship::FleetMember>(primary).unwrap().0.clone();
     if frame != 30 {
-        let seen = world.resource::<Sensors>().player_sees(enemy, None);
+        let seen = world.resource::<Sensors>().sees_now(enemy, None);
         let radar = world.query_filtered::<&Visibility, With<crate::panels::Contact>>().iter(world).any(|v| *v != Visibility::Hidden);
         let expected = matches!(frame, 65 | 125);
         assert_eq!(seen, expected, "sight smoke contact frame {frame}");
@@ -201,6 +269,8 @@ fn sensor_smoke(world: &mut World) {
         125 => info!("sight ECS/UI smoke passed: range loss/reveal, group sharing, unrelated ally, cloak and radar"),
         _ => unreachable!(),
     }
+    // The steps are a few frames apart, not the once-a-second re-test: show each step's result on the next frame.
+    world.resource_mut::<Sensors>().retest_now = true;
 }
 
 /// The swim or wing-beat clip baked into an animal's model (tools/skin.py, docs/re/effects.md "Animal skeletons"), or every glTF
@@ -392,7 +462,11 @@ pub fn plugin(app: &mut App) {
     app.init_resource::<Sensors>()
         .add_systems(
             PreUpdate,
-            (sensor_smoke, refresh_sensors).chain().after(crate::smoke::fleet_smoke).before(crate::panels::hud_input).run_if(in_state(crate::menu::Screen::Battle)),
+            (sensor_smoke, refresh_sensors, advance_sightings)
+                .chain()
+                .after(crate::smoke::fleet_smoke)
+                .before(crate::panels::hud_input)
+                .run_if(in_state(crate::menu::Screen::Battle)),
         )
         .add_systems(FixedUpdate, refresh_sensors.in_set(crate::BattleSet::Sense).run_if(in_state(crate::menu::Screen::Battle)))
         .add_systems(FixedUpdate, update.in_set(crate::BattleSet::Forces).run_if(in_state(crate::menu::Screen::Battle)))

@@ -499,10 +499,12 @@ mod camera_tests {
         world.resource_mut::<Orbit>().focus = Some(ids[5]);
         world.get_mut::<Transform>(ids[5]).unwrap().translation = Vec3::X * 3000.0;
         world.run_system_once(environment::refresh_sensors).unwrap();
+        world.resource_mut::<environment::Sensors>().advance_sightings(None, 0.0, 0.0);
         world.run_system_once(camera).unwrap();
         assert_eq!(world.get::<Transform>(cam).unwrap().translation, Vec3::new(0.0, 3.0, 60.0));
         world.get_mut::<Transform>(ids[5]).unwrap().translation = Vec3::X * 120.0;
         world.run_system_once(environment::refresh_sensors).unwrap();
+        world.resource_mut::<environment::Sensors>().advance_sightings(None, 1.5, 1.5); // the next once-a-second re-test
         world.run_system_once(camera).unwrap();
         assert_eq!(world.get::<Transform>(cam).unwrap().translation, Vec3::new(120.0, 3.0, 60.0));
         let shell = world.spawn(Transform::from_xyz(600.0, 0.0, 0.0)).id();
