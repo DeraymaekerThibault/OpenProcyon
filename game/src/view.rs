@@ -392,7 +392,7 @@ pub fn camera(
     mut cam: Single<&mut Transform, With<Camera3d>>,
     mission: Option<Res<campaign::Mission>>,
 ) {
-    if briefing::active(mission.as_deref()) || rules::nis(mission.as_deref()) {
+    if briefing::active(mission.as_deref()) || rules::nis(mission.as_deref()) || rules::console::free_cam() {
         return;
     }
     // `--look x,y[,z]` (game axes) aims screenshots at a world point instead of the player's ship.

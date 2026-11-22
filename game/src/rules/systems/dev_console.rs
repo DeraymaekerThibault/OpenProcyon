@@ -5,7 +5,7 @@ use bevy::input::keyboard::KeyboardInput;
 
 use super::*;
 use crate::menu::Screen;
-use crate::rules::console::{Cheats, Command, Console, Edit, parse};
+use crate::rules::console::{Cheats, Command, Console, DevView, Edit, Env, ShipInfo, marks_path, parse};
 
 /// Whether the console is on without the Display option "Developer Console": debug builds, `--console` or `PROCYON_CONSOLE` in the
 /// environment. A release build otherwise leaves it to the option (off by default), so a stray `~` never hands a player the cheats.
@@ -16,10 +16,13 @@ pub fn enabled() -> bool {
 pub(super) fn plugin(app: &mut App) {
     app.insert_resource(Console::new(enabled()))
         .init_resource::<Cheats>()
+        .init_resource::<DevView>()
+        .init_resource::<crate::scenario::RestartRequest>()
         .add_systems(OnEnter(Screen::Battle), |mut cheats: ResMut<Cheats>| *cheats = Cheats::default())
         .add_systems(OnExit(Screen::Battle), close_on_leaving)
         // After the input systems and before anything reads the keys: while the console is open the game sees no keyboard or mouse.
         .add_systems(PreUpdate, keys.after(bevy::input::InputSystems).run_if(in_state(Screen::Battle)).run_if(resource_exists::<Mission>).run_if(crate::menu::overlay_closed))
+        .add_systems(Update, free_camera.after(crate::camera).run_if(in_state(Screen::Battle)))
         .add_systems(Update, run.after(update).run_if(in_state(Screen::Battle)).run_if(resource_exists::<Mission>));
 }
 
@@ -81,6 +84,8 @@ fn keys(
 /// are applied as a rule's would be.
 fn run(
     mut console: ResMut<Console>,
+    mut dev: ResMut<DevView>,
+    mut restart: ResMut<crate::scenario::RestartRequest>,
     mission: Option<ResMut<Mission>>,
     target: Res<Target>,
     lib: Res<Library>,
@@ -119,7 +124,25 @@ fn run(
             }
         };
         let mut fx = vec![];
-        let outcome = mission.script.console_run(&cmd, &mut world, target.0, &mut fx);
+        let env = Env {
+            target: target.0,
+            mission: mission.id.clone(),
+            marks: marks_path(),
+            ships: ships
+                .iter()
+                .map(|s| ShipInfo {
+                    e: Some(s.entity),
+                    stance: format!("{:?}", s.mission.stance),
+                    order: s.ship.order,
+                    waypoints: s.ship.waypoints.len(),
+                    attack: s.mission.attack.clone(),
+                    human: s.mission.human || s.primary,
+                    ram: s.mission.ram,
+                    speed: s.ship.speed,
+                })
+                .collect(),
+        };
+        let outcome = mission.script.console_run_with(&cmd, &mut world, &env, &mut fx);
         if outcome.rejected {
             for l in &outcome.lines {
                 console.say(l);
@@ -137,7 +160,50 @@ fn run(
         for l in &outcome.lines {
             console.say(l);
         }
+        if outcome.skip_voice {
+            for e in &extra.voices {
+                commands.entity(e).despawn();
+            }
+        }
+        restart.0 |= outcome.restart;
+        for c in &outcome.view {
+            dev.apply(c);
+        }
         each_ship(&mut ships, outcome.repair, |s| crate::docking::repair(&lib, &s.ship, &mut s.health, true));
         apply_fx(fx, mission, &mut commands, &mut ships, &mut animals, &mut extra, &mut orbit, &lib);
     }
+}
+
+/// `cam free`: arrows fly the camera along its view, PageUp / PageDown rise and sink, dragging with the right mouse button looks,
+/// Shift is five times faster. It runs on real time, so it also works with the battle paused.
+fn free_camera(
+    mut dev: ResMut<DevView>,
+    keys: Res<ButtonInput<KeyCode>>,
+    mouse: Res<ButtonInput<MouseButton>>,
+    motion: Res<bevy::input::mouse::AccumulatedMouseMotion>,
+    time: Res<Time<Real>>,
+    mut cam: Single<&mut Transform, With<Camera3d>>,
+    mut angles: Local<(f32, f32)>,
+) {
+    if !dev.free_cam {
+        return;
+    }
+    if dev.free_fresh {
+        dev.free_fresh = false;
+        let (yaw, pitch, _) = cam.rotation.to_euler(EulerRot::YXZ);
+        *angles = (yaw, pitch);
+    }
+    if mouse.pressed(MouseButton::Right) {
+        angles.0 -= motion.delta.x * 0.003;
+        angles.1 = (angles.1 - motion.delta.y * 0.003).clamp(-1.5, 1.5);
+    }
+    cam.rotation = Quat::from_euler(EulerRot::YXZ, angles.0, angles.1, 0.0);
+    let axis = |plus: KeyCode, minus: KeyCode| f32::from(keys.pressed(plus)) - f32::from(keys.pressed(minus));
+    let speed = 80.0 * if keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight) { 5.0 } else { 1.0 };
+    let step = (*cam.forward() * axis(KeyCode::ArrowUp, KeyCode::ArrowDown)
+        + *cam.right() * axis(KeyCode::ArrowRight, KeyCode::ArrowLeft)
+        + Vec3::Y * axis(KeyCode::PageUp, KeyCode::PageDown))
+        * speed
+        * time.delta_secs();
+    cam.translation += step;
 }

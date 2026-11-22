@@ -310,3 +310,14 @@ fn an_unknown_command_names_the_nearest_one() {
     assert!(!err("xyzzyplugh").contains("did you mean"), "nothing is near");
     assert!(help_lines(Some("rapair"))[0].contains("did you mean repair"));
 }
+
+#[test]
+fn kill_spares_another_unit_with_the_same_name() {
+    let mut sc = script();
+    let mut w = world();
+    w.push(unit(4, "Raider", "Pirates"));
+    let cmd = parse("kill", "Hero", false).unwrap();
+    let mut out = vec![];
+    sc.console_run(&cmd, &mut w, Some(e(3)), &mut out);
+    assert!(matches!(&out[..], [Fx::Destroy(u)] if u == &[e(3)]), "only the target, though the spec names both");
+}

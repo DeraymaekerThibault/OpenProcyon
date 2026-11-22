@@ -177,7 +177,12 @@ pub fn debug_kill(keys: Res<ButtonInput<KeyCode>>, cfg: Res<Config>, mut ships: 
     }
 }
 
+/// Set by the developer console's `restart`: the same as pressing R.
+#[derive(Resource, Default)]
+pub struct RestartRequest(pub bool);
+
 pub fn restart(
+    mut request: Option<ResMut<RestartRequest>>,
     keys: Res<ButtonInput<KeyCode>>,
     mut commands: Commands,
     assets: Res<AssetServer>,
@@ -192,7 +197,8 @@ pub fn restart(
     let scripted = cfg.script.as_deref() == Some("restart") && cfg.frame == 400;
     // N after a won mission continues the campaign.
     let next = mission.filter(|m| keys.just_pressed(KeyCode::KeyN) && m.script.ended.as_ref().is_some_and(|e| e.1)).and_then(|m| campaign::next(&m.id));
-    if !keys.just_pressed(KeyCode::KeyR) && !scripted && next.is_none() {
+    let asked = request.as_mut().is_some_and(|r| std::mem::take(&mut r.0));
+    if !keys.just_pressed(KeyCode::KeyR) && !scripted && !asked && next.is_none() {
         return;
     }
     if next.is_some() {
