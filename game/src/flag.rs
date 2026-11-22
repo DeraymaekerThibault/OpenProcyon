@@ -2,7 +2,7 @@
 //! Not retail: some hulls' points miss their staff (the Legacy's by about 2.2 units, the Heavy Escorts' and the Navy Assault
 //! Cutter's by about 0.5), so every flag is hung on the nearest staff within `SNAP` units, at the points' heights (`snap`).
 use bevy::asset::RenderAssetUsages;
-use bevy::camera::visibility::NoFrustumCulling;
+use bevy::camera::primitives::Aabb;
 use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
 
@@ -23,6 +23,10 @@ pub struct Cloth {
     pub wind: bool,
 }
 
+/// A flag's mesh is rewritten (and so re-uploaded to the GPU) at most this often, in cloth-clock seconds: 60 shapes a second is as
+/// smooth as the 15 rad/s fastest ripple can show, and a display running at 150 Hz does not need 150.
+const REDRAW: f32 = 1.0 / 60.0;
+
 /// How far (units) from its retail points a flag looks for the staff it hangs on.
 const SNAP: f32 = 3.0;
 #[derive(Component)]
@@ -33,6 +37,8 @@ struct Flag {
     /// With `Cloth::wind`: the wave's own clock (it runs faster with speed) and the smoothed share of full speed.
     clock: f32,
     wind: f32,
+    /// The clock the mesh was last written at (`REDRAW`).
+    drawn: f32,
 }
 #[derive(Component)]
 struct Flagged;
@@ -75,16 +81,24 @@ fn spawn(
         let mat = mats.add(material);
         commands.spawn((
             Scenario,
-            Flag { top, bottom, phase: e.index().index() as f32, clock: 0.0, wind: 0.0 },
+            Flag { top, bottom, phase: e.index().index() as f32, clock: 0.0, wind: 0.0, drawn: f32::NEG_INFINITY },
             Unsnapped,
             Mesh3d(meshes.add(m)),
             MeshMaterial3d(mat),
             Transform::default(),
             Visibility::default(),
-            NoFrustumCulling,
+            cloth_bounds(top, bottom),
             ChildOf(e),
         ));
     }
+}
+
+/// The box the cloth can reach, in the ship's frame (the flag sits at the ship's origin): the mesh is rewritten every frame, so a
+/// computed box would lag, and a flag out of view should cost nothing (`wave` skips it by `ViewVisibility`). Generous: the cloth
+/// streams about 1.6 flag heights astern and droops up to as far, and the staff snap moves the points by up to `SNAP`.
+fn cloth_bounds(top: Vec3, bottom: Vec3) -> Aabb {
+    let reach = 2.0 * top.distance(bottom) + SNAP;
+    Aabb { center: ((top + bottom) / 2.0).into(), half_extents: Vec3::splat(reach).into() }
 }
 
 /// Once the ship's meshes are loaded, moves the flag onto the nearest staff (`onto_staff`). Damage layers are left
@@ -195,24 +209,33 @@ fn wave(
     time: Res<Time>,
     settings: Option<Res<crate::menu::Settings>>,
     cloth: Res<Cloth>,
-    lib: Res<Library>,
+    lib: Option<Res<Library>>,
     ships: Query<&Ship>,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut q: Query<(&mut Flag, &Mesh3d, &ChildOf)>,
+    mut q: Query<(&mut Flag, &Mesh3d, &ChildOf, &ViewVisibility)>,
 ) {
     // Display Options 'Flag Waving' off: the cloth holds its last shape.
     if settings.is_some_and(|s| !s.flags) {
         return;
     }
     let dt = time.delta_secs();
-    for (mut f, mesh, parent) in &mut q {
+    for (mut f, mesh, parent, seen) in &mut q {
         if cloth.wind {
-            let share = ships.get(parent.parent()).map_or(0.0, |s| (s.speed.abs() / crate::ship::full_speed(&lib.classes[s.class]).max(1e-3)).clamp(0.0, 1.0));
+            let share = lib
+                .as_ref()
+                .zip(ships.get(parent.parent()).ok())
+                .map_or(0.0, |(lib, s)| (s.speed.abs() / crate::ship::full_speed(&lib.classes[s.class]).max(1e-3)).clamp(0.0, 1.0));
             f.wind += (share - f.wind) * (dt * 1.5).min(1.0);
             f.clock += dt * (0.35 + 0.65 * f.wind);
         } else {
             (f.wind, f.clock) = (1.0, time.elapsed_secs());
         }
+        // The clock runs on, but a flag nobody sees is not drawn into its mesh, nor one that has not moved a 60th of a second since
+        // (a mesh asset that is touched is re-uploaded whole). A change of look redraws at once.
+        if !seen.get() || ((f.clock - f.drawn).abs() < REDRAW && !cloth.is_changed()) {
+            continue;
+        }
+        f.drawn = f.clock;
         let Some(mut m) = meshes.get_mut(&mesh.0) else { continue };
         m.insert_attribute(Mesh::ATTRIBUTE_POSITION, cloth_shape(&f, cloth.flutter));
         if cloth.lit {
@@ -273,6 +296,7 @@ fn retexture(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bevy::camera::visibility::SetViewVisibility;
 
     #[test]
     fn a_flag_that_misses_its_staff_is_hung_on_the_nearest_one() {
@@ -311,7 +335,7 @@ mod tests {
     #[test]
     fn full_wind_is_the_classic_shape_and_no_wind_hangs_the_flag() {
         let (top, bottom, t) = (Vec3::new(0.0, 4.0, 0.0), Vec3::ZERO, 1.3);
-        let flag = |wind| Flag { top, bottom, phase: 0.5, clock: t, wind };
+        let flag = |wind| Flag { top, bottom, phase: 0.5, clock: t, wind, drawn: 0.0 };
         let len = 1.6 * top.distance(bottom);
         let classic = |i: usize, j: usize| {
             let u = i as f32 / SEG as f32;
@@ -324,5 +348,46 @@ mod tests {
         }
         let calm = Vec3::from(cloth_shape(&flag(0.0), 1.0)[vertex(SEG, 0)]);
         assert!(calm.y < top.y - 0.5 * len && calm.z < 0.5 * len, "at rest the free end droops: {calm}");
+    }
+
+    /// A one-flag world: `wave` on a flag whose view visibility the test sets.
+    fn flag_world() -> (App, Entity, Handle<Mesh>) {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, AssetPlugin::default())).init_asset::<Mesh>().init_resource::<Cloth>().add_systems(Update, wave);
+        let mut m = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
+        m.insert_indices(Indices::U32(cloth_indices()));
+        let mesh = app.world_mut().resource_mut::<Assets<Mesh>>().add(m);
+        let ship = app.world_mut().spawn_empty().id();
+        let flag = app
+            .world_mut()
+            .spawn((
+                Flag { top: Vec3::Y * 4.0, bottom: Vec3::ZERO, phase: 0.0, clock: 0.0, wind: 1.0, drawn: f32::NEG_INFINITY },
+                Mesh3d(mesh.clone()),
+                ChildOf(ship),
+                ViewVisibility::HIDDEN,
+            ))
+            .id();
+        (app, flag, mesh)
+    }
+
+    /// Runs one frame `dt` seconds long and tells whether the flag's mesh asset was modified in it.
+    fn frame(app: &mut App, dt: f32, mesh: &Handle<Mesh>) -> bool {
+        app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(std::time::Duration::from_secs_f32(dt)));
+        app.update();
+        let mut msgs = app.world_mut().resource_mut::<bevy::ecs::message::Messages<AssetEvent<Mesh>>>();
+        msgs.drain().any(|e| e.is_modified(mesh.id()))
+    }
+
+    #[test]
+    fn a_flag_out_of_view_is_not_redrawn_and_one_in_view_is_redrawn_at_most_sixty_times_a_second() {
+        let (mut app, flag, mesh) = flag_world();
+        assert!(!(0..5).any(|_| frame(&mut app, 0.01, &mesh)), "out of view: the mesh asset is never touched");
+        app.world_mut().get_mut::<ViewVisibility>(flag).unwrap().set_visible();
+        assert!(frame(&mut app, 0.01, &mesh), "in view: drawn at once");
+        assert!(!frame(&mut app, 0.01, &mesh), "10 ms later: still within the same 60th of a second");
+        assert!(frame(&mut app, 0.01, &mesh), "20 ms after the last draw: due");
+        assert!(app.world().get::<Flag>(flag).unwrap().clock > 0.03, "the clock ran on while it was not drawn");
+        app.world_mut().resource_mut::<Cloth>().lit = true;
+        assert!(frame(&mut app, 0.001, &mesh), "a change of look redraws at once");
     }
 }
