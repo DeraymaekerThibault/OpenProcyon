@@ -4,16 +4,14 @@
   "player_start": {"name": "Hero", "start": [0.0, 0.0, 0.0], "forward": [0.0, 1.0, 0.0]},
   "groups": {"RaiderShips": [11, 12]},
   "ships": [
-    {"id": 10, "type": "Ship_Navy_Cutter", "group": "Hero", "name": "Dauntless", "primary": true, "pos": [0.0, 0.0, 0.0], "rot": [0.0, 0.0, 0.0, 1.0]},
-    {"id": 11, "type": "Ship_Pirate_Sloop", "group": "Raiders", "name": "Raider One", "pos": [400.0, 600.0, 0.0], "rot": [0.0, 0.0, 0.0, 1.0]},
-    {"id": 12, "type": "Ship_Pirate_Sloop", "group": "Raiders", "name": "Raider Two", "pos": [440.0, 620.0, 0.0], "rot": [0.0, 0.0, 0.0, 1.0]}
+    {"id": 10, "type": "Ship_Navy_Cutter", "group": "Hero", "name": "Dauntless", "primary": true, "pos": [0.0, 0.0, 0.0], "rot": [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]},
+    {"id": 11, "type": "Ship_Pirate_Sloop", "group": "Raiders", "name": "Raider One", "pos": [400.0, 600.0, 0.0], "rot": [-1.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0]},
+    {"id": 12, "type": "Ship_Pirate_Sloop", "group": "Raiders", "name": "Raider Two", "pos": [440.0, 620.0, 0.0], "rot": [-1.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0]}
   ],
   "volumes": {"Gate Area": [[300.0, 500.0], [500.0, 500.0], [500.0, 700.0], [300.0, 700.0]]},
   "points": [{"Name": "The Gate", "Position": [400.0, 600.0, 0.0]}],
   "environment": {"point_sets": {}},
   "victory": "objectives",
-  "victory_message": "",
-  "defeat_message": "",
   "tasks": [
     {"Name": "Reach the gate", "text": "Sail to the gate.", "Active": false, "complete_when": [{"Type": "Is Group In Volume", "Group Name": "Hero", "Volume Name": "Gate Area", "Entire Group": "FALSE"}], "required": true},
     {"Name": "Clear the gate", "text": "Sink both raiders.", "Active": false, "complete_when": [{"Type": "OP Counter Condition", "Counter Name": "raiders sunk", "Equivalence": "Greater Than", "Value": 1}], "fail_when": [{"Type": "Group Destroyed", "Group Name": "Hero"}], "required": true}

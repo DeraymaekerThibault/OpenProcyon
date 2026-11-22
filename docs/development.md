@@ -95,7 +95,7 @@ any, the game exits with import instructions. `content/` is always layered on to
 ### Measuring a look
 
 To measure what a look costs (a graphics mod, the render profile in `docs/modding.md`), run the same battle twice with `PROCYON_PROFILE=1`, once
-without and once with `--mod <dir>`, e.g. `PROCYON_PROFILE=1 make run ARGS='--map red_rover'` and the same with `--mod mods/look`. `PROCYON_PROFILE`
+without and once with `--mod <dir>`, e.g. `PROCYON_PROFILE=1 make run ARGS='--map red_rover'` and the same with `--mod mods/remaster`. `PROCYON_PROFILE`
 sets `PresentMode::AutoNoVsync` at every speed (also after the speed buttons), so `frame_ms` is the real render cost, not the display period.
 Compare `frame_ms` (rolling average) and `p99_ms` (99th percentile of the per-frame times since the previous line; a steady 60 fps needs it near 16.7).
 The counters next to them say why a look is slower: `lights` (point + spot lights), `draw_entities` (`Mesh3d` entities), `materials`
@@ -249,6 +249,6 @@ and accepted/no-op mission rules do not count as implemented behaviour. Record l
 ## Documentation map
 
 - [../AGENTS.md](../AGENTS.md): the hard rules and the workflow; [../CONTRIBUTING.md](../CONTRIBUTING.md): ways to help, pull requests.
-- [modding.md](modding.md): making and sharing mods, the overlay, the render profile; [data-format.md](data-format.md): the asset layout.
+- [modding.md](modding.md): making, testing and sharing mods, the overlay, weapons, sounds, the render profile (its first table indexes every doc); [missions.md](missions.md): writing a custom mission; [data-format.md](data-format.md): the asset layout.
 - [re/](re/): the original's behaviour as specifications (rules, numbers, sources), one file per system.
 - [wot-format.md](wot-format.md): WOT file format notes.
