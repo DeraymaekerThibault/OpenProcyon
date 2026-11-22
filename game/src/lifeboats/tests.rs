@@ -10,6 +10,7 @@ fn app(mission: &str) -> App {
         .insert_resource(Rng::new(5))
         .insert_resource(crate::campaign::load_id(mission))
         .add_message::<ShipLost>()
+        .add_message::<ShipAbandoned>()
         .add_message::<crate::audio::Sfx>()
         .add_systems(Update, (crate::tick_start, lifeboats).chain());
     app
@@ -46,6 +47,31 @@ fn boats(app: &mut App) -> Vec<(String, String, Vec3)> {
 fn lose(app: &mut App, e: Entity) {
     app.world_mut().write_message(ShipLost(e));
     app.update();
+}
+
+#[test]
+#[ignore = "needs imported assets"]
+fn abandoning_launches_the_boats_once_whatever_the_flag_and_leaves_the_hull() {
+    let mut app = app("mission02");
+    let at = Vec3::new(10.0, 0.0, 20.0);
+    let hull = ship(&mut app, "Ship_Pirate_Schooner", "Pirates", at, false);
+    app.world_mut().write_message(ShipAbandoned(hull));
+    app.update();
+    let got = boats(&mut app);
+    assert_eq!(got.len(), 2, "the schooner's two boats, though no rule allowed boats on death");
+    assert!(got.iter().all(|b| b.0 == "Pirates" && b.1 == "Ship_Pirate_Lifeboat" && b.2 == at));
+    assert!(app.world().get::<Abandoned>(hull).is_some() && !app.world().get::<Health>(hull).unwrap().destroyed, "still afloat");
+    app.world_mut().write_message(ShipAbandoned(hull));
+    app.update();
+    assert_eq!(boats(&mut app).len(), 2, "a second order launches nothing more");
+    app.world_mut().get_mut::<MissionShip>(hull).unwrap().create_lifeboats = true;
+    lose(&mut app, hull);
+    assert_eq!(boats(&mut app).len(), 2, "sinking later leaves none: the crew is already away");
+    // not a lifeboat's business, and a class without boats launches none
+    let dread = ship(&mut app, "Ship_Procyon_Dreadnought", "Pirates", at, true);
+    app.world_mut().write_message(ShipAbandoned(dread));
+    app.update();
+    assert_eq!(boats(&mut app).len(), 2);
 }
 
 #[test]

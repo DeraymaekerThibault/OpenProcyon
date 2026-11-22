@@ -496,6 +496,7 @@ pub static RULE_TYPES: &[TypeDef] = &[
     act("OP Set Counter", &[counter("Counter Name"), num("Value")]).engine(),
     act("OP Add To Counter", &[counter("Counter Name"), num("Value")]).engine(),
     act("OP Set Rule Active", &[rule_name("Rule Name"), boolean("Boolean")]).engine(),
+    act("OP Abandon Ship", &[grp("Group Name")]).engine(),
     act("OP Board Ship", &[grp("Boarder Group"), grp("Target Group")]).engine(),
     act(
         "*State Init* Setup Nebula",

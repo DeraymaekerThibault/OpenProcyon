@@ -1181,3 +1181,13 @@ fn op_board_ship_emits_a_boarding_effect_for_the_two_groups() {
     s.act(&serde_json::json!({"Type": "OP Board Ship", "Boarder Group": "Black Gull", "Target Group": "Calloway"}), &w, &mut out, "t");
     assert!(matches!(&out[..], [Fx::Board(x, t)] if x == &[a.e] && t == &[b.e]), "boarders, then targets");
 }
+
+#[test]
+fn op_abandon_ship_emits_an_effect_for_the_group() {
+    let mut s = script();
+    let mut a = unit("Gull", "Black Gull", Vec3::ZERO);
+    a.e = World::new().spawn_empty().id();
+    let mut out = vec![];
+    s.act(&serde_json::json!({"Type": "OP Abandon Ship", "Group Name": "Black Gull"}), &[a.clone()], &mut out, "t");
+    assert!(matches!(&out[..], [Fx::Abandon(u)] if u == &[a.e]));
+}

@@ -130,6 +130,8 @@ pub enum Fx {
     Board(Vec<Entity>, Vec<Entity>),
     /// 'Set Lifeboat Creation State': the ships' Create Lifeboats flag (lifeboats.rs reads it when they are destroyed).
     Lifeboats(Vec<Entity>, bool),
+    /// 'OP Abandon Ship': launch the ships' lifeboats now and leave the hulls crewless and adrift.
+    Abandon(Vec<Entity>),
     IslandRepair(Vec<Entity>, bool),
     /// 'Set Dock Time': seconds a docker stays docked.
     DockTime(Vec<Entity>, f32),

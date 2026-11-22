@@ -18,6 +18,15 @@ pub struct Lifeboat {
 #[derive(Message)]
 pub struct ShipLost(pub Entity);
 
+/// A rule ordered the ship's crew off (`OP Abandon Ship`): its boats are launched now, flag or not, and the hull stays afloat. Read by
+/// the same system as `ShipLost`; a ship that was already abandoned, or is a lifeboat or has no boats in its class, launches none.
+#[derive(Message)]
+pub struct ShipAbandoned(pub Entity);
+
+/// On a ship whose crew has left: it launched its boats once and leaves none when it later sinks.
+#[derive(Component)]
+pub struct Abandoned;
+
 pub const PICKUP_SOUND: &str = "HUD_Lifeboat_Pickup";
 /// Victory points for the local player collecting a lifeboat of a player it is not allied with.
 pub const PICKUP_POINTS: u32 = 2;
@@ -47,7 +56,7 @@ fn world_sphere(lib: &Library, ship: &Ship, tf: &Transform) -> (Vec3, f32) {
 
 pub fn plugin(app: &mut App) {
     use crate::menu::Screen;
-    app.add_message::<ShipLost>().add_systems(
+    app.add_message::<ShipLost>().add_message::<ShipAbandoned>().add_systems(
         FixedUpdate,
         // Consume combat deaths before the next rules tick.
         lifeboats.in_set(crate::BattleSet::Cleanup).run_if(in_state(Screen::Battle)).run_if(crate::menu::overlay_closed),
@@ -62,27 +71,28 @@ fn lifeboats(
     fxl: Res<crate::fx::FxLib>,
     mut rng: ResMut<crate::combat::Rng>,
     mut lost: MessageReader<ShipLost>,
+    mut abandoned: MessageReader<ShipAbandoned>,
     mut sfx: MessageWriter<crate::audio::Sfx>,
     mission: Option<ResMut<Mission>>,
-    dying: Query<(&Ship, &Transform, Option<&MissionShip>), Without<Lifeboat>>,
+    dying: Query<(&Ship, &Transform, Option<&MissionShip>, Has<Abandoned>), Without<Lifeboat>>,
     boats: Query<(Entity, &Ship, &Transform, &Lifeboat, Option<&MissionShip>)>,
     ships: Query<(&Ship, &Transform, &Health, Option<&MissionShip>), Without<Lifeboat>>,
 ) {
     let owner = |l: &Lifeboat, m: Option<&MissionShip>| m.map_or_else(|| l.owner.clone(), |m| m.owner.clone());
     let mut present: Vec<(Option<Entity>, String)> = boats.iter().map(|(e, _, _, l, m)| (Some(e), owner(l, m))).collect();
-    for ShipLost(e) in lost.read() {
-        let Ok((ship, tf, ms)) = dying.get(*e) else { continue };
+    let mut launch = |commands: &mut Commands, e: Entity, forced: bool, present: &mut Vec<(Option<Entity>, String)>| {
+        let Ok((ship, tf, ms, abandoned)) = dying.get(e) else { return false };
         let class = &lib.classes[ship.class];
-        let Some(ms) = ms.filter(|m| m.create_lifeboats && class.lifeboats > 0 && !class.is_lifeboat) else { continue };
+        let Some(ms) = ms.filter(|m| (forced || m.create_lifeboats) && class.lifeboats > 0 && !class.is_lifeboat && !abandoned) else { return false };
         let Some(boat) = lib.classes.iter().find(|c| c.name == class_for(&class.race)) else {
             warn!("no {} class: {} leaves no lifeboats", class_for(&class.race), class.name);
-            continue;
+            return false;
         };
         for _ in 0..class.lifeboats {
             let (offset, throttle) = drift(&mut rng);
             let to = Vec3::new(offset.x, 0.0, -offset.y);
             let heading = if to.length_squared() > 1e-6 { (-to.x).atan2(-to.z) } else { ship.heading };
-            let id = crate::spawn_ship(&mut commands, &assets, &lib, &fxl, &boat.name, Side::Player, tf.translation, heading, None);
+            let id = crate::spawn_ship(commands, &assets, &lib, &fxl, &boat.name, Side::Player, tf.translation, heading, None);
             commands.entity(id).remove::<PlayerShip>().remove::<crate::boarding::Boardable>().insert((
                 Lifeboat { owner: ms.owner.clone() },
                 Ship {
@@ -95,6 +105,15 @@ fn lifeboats(
                 },
             ));
             present.push((None, ms.owner.clone()));
+        }
+        true
+    };
+    for ShipLost(e) in lost.read() {
+        launch(&mut commands, *e, false, &mut present);
+    }
+    for ShipAbandoned(e) in abandoned.read() {
+        if launch(&mut commands, *e, true, &mut present) {
+            commands.entity(*e).insert(Abandoned);
         }
     }
     let mut mission = mission;

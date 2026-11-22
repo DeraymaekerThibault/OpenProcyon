@@ -23,7 +23,7 @@
     {
       "title": "Orders, movement and AI",
       "intro": "Scripted orders given to computer ships. The human's own course and throttle are left alone by most of these.",
-      "types": ["Group to follow path", "Set Group Throttle Percent", "Set Max Throttle Percent (Max user settable)", "Set Ship Top Speed Percentage", "GroupA to attack GroupB", "GroupA to Ram GroupB", "Is Group A attacking Group B", "Clear all AI commands", "Set Group/Unit Hold Position", "Set Group/Unit AI Stance", "Set Group/Unit AI Captain", "Set Group/Unit Warning Shot Mode", "Set Group/Unit Border Zone", "Clear Group/Unit Border Zone", "Set Group/Unit Border Zone Return Point"]
+      "types": ["Group to follow path", "Set Group Throttle Percent", "Set Max Throttle Percent (Max user settable)", "Set Ship Top Speed Percentage", "GroupA to attack GroupB", "GroupA to Ram GroupB", "Is Group A attacking Group B", "Clear all AI commands", "Set Group/Unit Hold Position", "Set Group/Unit AI Stance", "Set Group/Unit AI Captain", "Set Group/Unit Warning Shot Mode", "Set Group/Unit Border Zone", "Clear Group/Unit Border Zone", "Set Group/Unit Border Zone Return Point", "OP Escort Group"]
     },
     {
       "title": "Damage and vulnerability",
@@ -68,7 +68,7 @@
     {
       "title": "Engine-added OP types",
       "intro": "Not in the retail game. Every name starts with `OP `. See `docs/modding.md`, \"Mission rule extensions\", for sequences, rule activation and self-completing tasks.",
-      "types": ["OP Any Of", "OP Not", "OP Counter Condition", "OP Set Counter", "OP Add To Counter", "OP Wait", "OP Wait Until Speech Done", "OP Set Rule Active", "OP Board Ship"]
+      "types": ["OP Any Of", "OP Not", "OP Counter Condition", "OP Set Counter", "OP Add To Counter", "OP Wait", "OP Wait Until Speech Done", "OP Set Rule Active"]
     }
   ],
   "notes": {
@@ -135,7 +135,7 @@
     "GroupA to Ram GroupB": "Attack order flown bow-on at emergency speed; contact damage comes from the normal collision rules.",
     "Is Group A attacking Group B": "True when a member of A has B in its orders, or fired at B within the last 6 seconds.",
     "Clear all AI commands": "Drops the ships' scripted orders. The human's own course and throttle stay.",
-    "Set Group/Unit Hold Position": "Holds (clears the waypoints). A missing `Boolean` means TRUE, unlike most boolean fields.",
+    "Set Group/Unit Hold Position": "Holds the ships (clears the waypoints) until a `Boolean` FALSE lifts it: the hold persists, in a mission as in a skirmish (a held ship does not steer or follow a path, and still fires; the human's move, dock, tow and board orders also lift it). A missing `Boolean` means TRUE, unlike most boolean fields.",
     "Set Group/Unit AI Stance": "Stances: `Stance_Neutral`, `Stance_Defensive`, `Stance_Aggressive`, `Stance Persistant` (sic) and others listed.",
     "Set Group/Unit AI Captain": "Only `Captain_Human` is meaningful: it gives the human control of the ships and makes them the primary. Other captains keep the stance AI.",
     "Set Group/Unit Warning Shot Mode": "Makes the ships fire warning shots.",
@@ -223,6 +223,6 @@
     "OP Wait": "Pauses the rest of this rule's action list for `Seconds`. Outside a rule's action list it does nothing.",
     "OP Wait Until Speech Done": "Pauses until the speech event is neither queued nor playing; an empty name waits for all speech. Put it after the `Play speech event` it waits for.",
     "OP Set Rule Active": "Activates or deactivates every rule of that name. A deactivated rule stops a sequence that is waiting.",
-    "OP Board Ship": "Each ship of the first group boards the nearest live ship of the second: it sails over, fires its harpoon, and once the grapple holds starts the boarding fight as the order menu does (the target must be Boardable TRUE; the boarder needs a harpoon and a hostile target). The rules then see the capture. Dropped when either ship dies or the grapple is lost."
+    "OP Escort Group": "The computer ships of `Group Name` keep `Station` (`Astern`, `Ahead`, `Port`, `Starboard`) at `Distance` units from the ship of `Target Group` and match its speed; `Distance` 0 is the two hulls' radii plus 30. They stay in their own group, never join the human's fleet and fire only on what is in range (only an `Stance_Aggressive` escort leaves station, to a hostile in range). An empty `Target Group` ends the escort and stops the ships; so does any later path, attack or `Clear all AI commands` order, and a sunk leader. A skirmish script stores the order but its captain AI does not read it yet (PROVISIONAL). See `docs/modding.md`, Escorts."
   }
 }

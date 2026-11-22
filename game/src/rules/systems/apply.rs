@@ -191,6 +191,24 @@ pub(in crate::rules) fn apply(
             }
             // Ships only: bases, rocks and animals have no flag.
             Fx::Lifeboats(u, on) => each_ship(ships, u, |s| s.mission.create_lifeboats = on),
+            // Crewless (Dummy stance: no guns, no chase, no boarding party) and adrift (course cleared, the hull coasts); health, owner,
+            // Boardable and the rest are left alone. The human's own ship is never abandoned.
+            Fx::Abandon(u) => each_ship(ships, u, |s| {
+                if s.primary {
+                    warn!("OP Abandon Ship: '{}' is the player's ship; left alone", s.mission.name);
+                    return;
+                }
+                s.mission.stance = crate::rules::Stance::Dummy;
+                s.mission.target = None;
+                s.mission.looping = None;
+                s.ship.waypoints.clear();
+                s.ship.goal = None;
+                s.ship.order = 0;
+                let e = s.entity;
+                commands.queue(move |w: &mut World| {
+                    w.write_message(crate::lifeboats::ShipAbandoned(e));
+                });
+            }),
             Fx::IslandRepair(u, on) => {
                 for e in u {
                     env.dock.write(DockMsg::Repairs(e, on));
