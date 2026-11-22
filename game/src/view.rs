@@ -383,6 +383,69 @@ pub fn hd_sky(mut commands: Commands, cams: Query<(Entity, Option<&bevy::light::
     commands.entity(cam).insert(bevy::light::Skybox { image: Some(want.clone()), brightness: 1.0 / bevy::camera::Exposure::default().exposure(), ..default() });
 }
 
+/// The background stars (`docs/re/sky.md`): per group, its star count and colour (sRGB, drawn opaque).
+pub const STAR_GROUPS: [(usize, [f32; 3]); 6] =
+    [(2500, [0.75, 0.75, 0.75]), (600, [0.89, 0.909, 0.99]), (600, [0.804, 0.6, 0.6]), (300, [0.908, 0.909, 0.76]), (1000, [0.4235, 0.545, 0.557]), (30, [1.0, 1.0, 1.0])];
+/// White stars added to the last group as a band, each near one of the `STAR_BAND_RECENT` newest.
+pub const STAR_BAND: usize = 1000;
+pub const STAR_BAND_RECENT: usize = 30;
+/// Share of the sky sphere's radius the stars sit at: inside the low-poly sphere's facets, so the sky never hides them.
+const STAR_RADIUS: f32 = 0.9;
+
+/// The original's cosmetic linear generator (x * 0x19660d + 0x3c6ef35f), which it seeds from the clock.
+struct StarRng(u32);
+impl StarRng {
+    fn step(&mut self) -> u32 {
+        self.0 = self.0.wrapping_mul(0x19660d).wrapping_add(0x3c6ef35f);
+        self.0
+    }
+    /// The low 23 bits as a fraction in [0, 1).
+    fn unit(&mut self) -> f32 {
+        f32::from_bits(self.step() & 0x7f_ffff | 0x3f80_0000) - 1.0
+    }
+    /// Uniform direction: height first, then the turn about the vertical.
+    fn dir(&mut self) -> Vec3 {
+        let z = self.unit() * 2.0 - 1.0;
+        let phi = self.unit() * std::f32::consts::TAU;
+        let r = (1.0 - z * z).max(0.0).sqrt();
+        Vec3::new(phi.cos() * r, phi.sin() * r, z)
+    }
+}
+
+/// The star groups of `STAR_GROUPS`, in game axes: every star a random point of the unit sphere, then the band: star i of
+/// `STAR_BAND` lies a random distance up to (i + 5) / 1000 from a random one of the last group's `STAR_BAND_RECENT` newest.
+pub fn starfield(seed: u32) -> Vec<Vec<Vec3>> {
+    let mut rng = StarRng(seed);
+    let mut groups: Vec<Vec<Vec3>> = STAR_GROUPS.iter().map(|&(n, _)| (0..n).map(|_| rng.dir()).collect()).collect();
+    let band = groups.last_mut().expect("six groups");
+    for i in 0..STAR_BAND {
+        let start = band.len().saturating_sub(STAR_BAND_RECENT);
+        let pick = start + ((rng.step() as i32) % (band.len() - start) as i32).unsigned_abs() as usize;
+        let reach = rng.unit() * (i + 5) as f32 * 0.001;
+        let star = band[pick] + rng.dir() * reach;
+        band.push(star);
+    }
+    groups
+}
+
+/// One point list for the camera-centred `Sky` entity (1 pixel per star): each star in its direction from the camera.
+pub fn star_mesh(groups: &[Vec<Vec3>]) -> Mesh {
+    use bevy::asset::RenderAssetUsages;
+    use bevy::mesh::PrimitiveTopology;
+    let (mut pos, mut col) = (vec![], vec![]);
+    for (stars, (_, c)) in groups.iter().zip(STAR_GROUPS) {
+        let linear = Color::srgb(c[0], c[1], c[2]).to_linear().to_f32_array();
+        for s in stars {
+            let d = s.normalize_or_zero() * STAR_RADIUS;
+            pos.push([d.x, d.z, -d.y]);
+            col.push(linear);
+        }
+    }
+    Mesh::new(PrimitiveTopology::PointList, RenderAssetUsages::RENDER_WORLD)
+        .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, pos)
+        .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, col)
+}
+
 pub fn camera(
     orbit: Res<Orbit>,
     ship: Query<&Transform, (With<PlayerShip>, Without<Camera3d>)>,
@@ -566,6 +629,41 @@ mod camera_tests {
         assert!((orbit.yaw + 0.1).abs() < 0.00001);
         assert_eq!(orbit.pitch, 1.5);
         assert_eq!(orbit.dist, 10.0);
+    }
+}
+
+#[cfg(test)]
+mod star_tests {
+    use super::*;
+
+    #[test]
+    fn six_groups_of_the_retail_counts_on_the_unit_sphere_plus_a_white_band() {
+        let groups = starfield(12345);
+        let counts: Vec<usize> = groups.iter().map(Vec::len).collect();
+        assert_eq!(counts, [2500, 600, 600, 300, 1000, 30 + 1000]);
+        assert!(groups.iter().flatten().take(5030).all(|s| (s.length() - 1.0).abs() < 1e-4), "scattered stars lie on the unit sphere");
+        let band = &groups[5];
+        for i in 0..STAR_BAND {
+            let n = 30 + i;
+            let star = band[n];
+            let reach = (i + 5) as f32 * 0.001 + 1e-5;
+            assert!(band[n.saturating_sub(STAR_BAND_RECENT)..n].iter().any(|s| s.distance(star) <= reach), "band star {i} grows from one of the 30 newest");
+        }
+        assert_ne!(starfield(1)[0][0], starfield(2)[0][0], "the seed changes the pattern");
+    }
+
+    #[test]
+    fn the_generator_is_the_originals_linear_step() {
+        let mut rng = StarRng(0);
+        assert_eq!(rng.step(), 0x3c6ef35f);
+        assert_eq!(rng.step(), 0x3c6ef35fu32.wrapping_mul(0x19660d).wrapping_add(0x3c6ef35f));
+    }
+
+    #[test]
+    fn star_mesh_is_one_point_per_star_inside_the_sky_sphere() {
+        let mesh = star_mesh(&starfield(7));
+        assert_eq!(mesh.primitive_topology(), bevy::mesh::PrimitiveTopology::PointList);
+        assert_eq!(mesh.count_vertices(), 6030);
     }
 }
 

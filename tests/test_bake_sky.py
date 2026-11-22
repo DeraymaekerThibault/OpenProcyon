@@ -22,6 +22,7 @@ from tools.bake_sky import (
     read_png16,
     replacing,
     shade_face,
+    squeeze_v,
     write_png16,
 )
 
@@ -51,6 +52,15 @@ class BakeSky(unittest.TestCase):
             self.assertAlmostEqual(slope, -0.2, places=3)
             self.assertAlmostEqual(centre, 0.5, places=3)
             self.assertLess(err, 1e-3)
+
+    def test_hd_layout_squeezes_authored_uvs_once(self):
+        # authored retail sphere (v 0.127..0.875) -> the HD band 0.3..0.7; an import that already carries it is left alone
+        _, uv = uv_sphere(2, 0.0, -0.374, 0.501, rings=13)
+        uv[:, 1] = np.interp(uv[:, 1], (uv[:, 1].min(), uv[:, 1].max()), (0.127, 0.875))
+        hd = squeeze_v(uv)
+        self.assertAlmostEqual(float(hd[:, 1].min()), 0.3, places=4)
+        self.assertAlmostEqual(float(hd[:, 1].max()), 0.7, places=4)
+        np.testing.assert_array_equal(squeeze_v(hd), hd)
 
     def test_face_centres_follow_bevys_cube_layout(self):
         # Bevy samples the cube with the world ray times (1, 1, -1): its +Z face is world -Z (ahead)

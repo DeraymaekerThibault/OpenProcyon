@@ -177,7 +177,13 @@ pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Libra
     let mut sky_entity = commands.spawn((Scenario, Sky, Transform::from_scale(Vec3::splat(8000.0)), Visibility::default()));
     match view::hd_sky_file(assets_dir(), &sky) {
         Some(file) => sky_entity.insert(view::HdSky(assets.load(file))),
-        None => sky_entity.insert(crate::data::scene(assets, &format!("{sky}.glb"))),
+        // The retail sphere and the original's generated stars, a new pattern each battle; a baked sky has its own stars.
+        None => sky_entity.insert(crate::data::scene(assets, &format!("{sky}.glb"))).with_child((
+            Mesh3d(assets.add(view::star_mesh(&view::starfield(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.subsec_nanos()))))),
+            MeshMaterial3d(assets.add(StandardMaterial { unlit: true, ..default() })),
+            bevy::light::NotShadowCaster,
+            bevy::light::NotShadowReceiver,
+        )),
     };
     let track = map.as_ref().and_then(|m| m["music"].as_str()).unwrap_or("BTL_NavyBig_Full02");
     if !campaign::is_mission(cfg.map.as_deref()) {

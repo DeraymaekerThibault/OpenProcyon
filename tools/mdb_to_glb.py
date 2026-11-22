@@ -199,17 +199,8 @@ def convert(root, scene, model=0, files=None, skin=None, offsets=False):
         level = model(f.stem) if callable(model) else model
         m = mdb.models[min(level, len(mdb.models) - 1)]
         pos = b"".join(struct.pack("<3f", *to_gltf(v.pos)) for v in m.vertices)
-        # Skybox art is dark above/below its bright band (v<0.2, v>0.8; it keeps 0.3..0.7) and the sphere maps the whole texture; squeeze the sphere's
-        # v range (0.127..0.875) into the bright band so no direction looks black. shortcut: not what the retail renderer does if it clamps the camera pitch.
-        sky = scene.lower().startswith("skybox")
-        uv = b"".join(
-            struct.pack(
-                "<2f",
-                v.uv[0],
-                0.3 + (v.uv[1] - 0.127) / 0.748 * 0.4 if sky else v.uv[1],
-            )
-            for v in m.vertices
-        )
+        # Sky spheres keep their authored UVs too: the original draws them unchanged around the camera (docs/re/sky.md), dark poles included.
+        uv = b"".join(struct.pack("<2f", *v.uv) for v in m.vertices)
         xs = list(zip(*[to_gltf(v.pos) for v in m.vertices], strict=True))
         accessors.append(
             {
