@@ -115,3 +115,19 @@ fn a_ship_wedged_against_land_turns_in_place_after_eleven_thinks_toward_the_smal
     }
     assert_eq!(fast.stuck, None, "a ship still under way is never stuck");
 }
+
+#[test]
+fn a_computer_captain_shoots_the_nearest_rock_within_ten_seconds_of_course() {
+    let (near, far, side, behind) = (wall(40.0, 0.0, 10.0), wall(100.0, 0.0, 10.0), wall(30.0, 200.0, 10.0), wall(-40.0, 0.0, 10.0));
+    let pick = |speed: f32, rocks: &[&Obstacle], scan: f32| {
+        let m = me(speed);
+        rock_in_the_way(&m, (m.pos, m.radius), scan, rocks.iter().enumerate().map(|(i, o)| (i, *o)))
+    };
+    // 5 units/s: reach 50 (surface distance), so the wall 25 off the hull's surface qualifies and the one 85 off does not.
+    assert_eq!(pick(5.0, &[&far, &near], 1e3), Some(1));
+    assert_eq!(pick(5.0, &[&far], 1e3), None, "beyond ten times the speed");
+    assert_eq!(pick(5.0, &[&side, &behind], 1e3), None, "off the course");
+    assert_eq!(pick(5.0, &[&near], 10.0), None, "beyond the captain's scan range");
+    assert_eq!(pick(0.0, &[&near], 1e3), None, "at rest only a rock already overlapped counts");
+    assert_eq!(pick(0.0, &[&wall(0.0, 0.0, 10.0)], 1e3), Some(0));
+}
