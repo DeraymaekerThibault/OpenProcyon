@@ -134,7 +134,7 @@ pub struct WakeUniform {
     /// rgb: the wake's tint, a: brightness
     pub tint: Vec4,
     pub hot: Vec4,
-    /// x: v at the ship end, y: clock, z: core strength
+    /// x: v at the ship end (written only when the ribbon's length changes), y: unused (the clock is the frame data's), z: core strength
     pub params: Vec4,
 }
 
@@ -388,7 +388,6 @@ fn crossed_ribbons(
 /// Rebuilds each tube from its wake's ribbon; drops the tube with its wake.
 fn wake_tubes(
     mut commands: Commands,
-    time: Res<Time>,
     look: Res<Look>,
     mut tubes: Query<(Entity, &WakeTube, &Mesh3d, &MeshMaterial3d<WakeMaterial>, &mut Visibility)>,
     wakes: Query<Has<crate::environment::Unseen>, With<crate::wake::Wake>>,
@@ -417,10 +416,18 @@ fn wake_tubes(
             m.insert_attribute(Mesh::ATTRIBUTE_COLOR, col);
             m.insert_indices(Indices::U32(idx));
         }
-        if let Some(mut m) = materials.get_mut(&mat.0) {
-            m.extension.u.params.x = len.max(0.5);
-            m.extension.u.params.y = time.elapsed_secs();
-        }
+        // The clock is the frame data's; the length changes only while the ribbon grows or shrinks, so the material is
+        // written then only (a written material is prepared again by the renderer).
+        set_length(&mut materials, &mat.0, len.max(0.5));
+    }
+}
+
+/// Writes the ribbon's length into its material only when it differs from what the shader reads.
+fn set_length(materials: &mut Assets<WakeMaterial>, handle: &Handle<WakeMaterial>, len: f32) {
+    if materials.get(handle).is_some_and(|m| m.extension.u.params.x != len)
+        && let Some(mut m) = materials.get_mut(handle)
+    {
+        m.extension.u.params.x = len;
     }
 }
 
@@ -458,6 +465,26 @@ mod tests {
         assert_eq!(flat.0, pos.to_vec(), "planes [0]: just the retail ribbon");
         assert!(nor.iter().all(|n| (Vec3::from(*n).length() - 1.0).abs() < 1e-3));
         assert_eq!((tuv[0], tuv[1], tuv[2][1], tcol[0][0]), ([0.0, 0.0], [1.0, 0.0], 0.5, 0.5), "keeps the ribbon's u, v and fade");
+    }
+
+    #[test]
+    fn an_unchanged_wake_length_leaves_the_material_alone_and_a_new_one_reaches_the_shader() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, AssetPlugin::default())).init_asset::<Shader>().init_asset::<StandardMaterial>().init_asset::<WakeMaterial>();
+        let h = app.world_mut().resource_mut::<Assets<WakeMaterial>>().add(WakeMaterial { base: default(), extension: default() });
+        let modified = |app: &mut App| {
+            app.update();
+            let msgs = app.world_mut().resource_mut::<Messages<AssetEvent<WakeMaterial>>>();
+            msgs.iter_current_update_messages().filter(|e| matches!(e, AssetEvent::Modified { .. })).count()
+        };
+        modified(&mut app);
+        for _ in 0..3 {
+            set_length(&mut app.world_mut().resource_mut::<Assets<WakeMaterial>>(), &h, 0.0);
+            assert_eq!(modified(&mut app), 0, "an unchanged length is not a write");
+        }
+        set_length(&mut app.world_mut().resource_mut::<Assets<WakeMaterial>>(), &h, 3.5);
+        assert_eq!(modified(&mut app), 1);
+        assert_eq!(app.world().resource::<Assets<WakeMaterial>>().get(&h).unwrap().extension.u.params.x, 3.5);
     }
 
     #[test]
