@@ -12,7 +12,6 @@ pub(super) struct GunState {
     pub(super) base: Entity,
     pub(super) barrel: Entity,
     pub(super) muzzles: Vec<Entity>,
-    pub(super) next_muzzle: usize,
     pub(super) yaw: f32,
     pub(super) pitch: f32,
     pub(super) aligned: bool,
@@ -84,7 +83,6 @@ pub(super) fn spawn_gun(commands: &mut Commands, assets: &AssetServer, lib: &Lib
         base,
         barrel,
         muzzles,
-        next_muzzle: 0,
         yaw: 0.0,
         pitch: 0.0,
         aligned: false,
@@ -578,37 +576,39 @@ pub(super) fn fire(
                 if gun.dev_per_shot {
                     state.dev = burst_deviation(gun, distance, factor(), &mut rng);
                 }
-                let turn = burst_turn(aim_dir, state.dev, &mut rng);
-                let dir = turn * aim_dir;
-                let muzzle = state.muzzles[state.next_muzzle % state.muzzles.len()];
-                state.next_muzzle += 1;
-                let side = ship.side;
-                let goal = gun_target.map(|t| t.position);
-                let shot = Launch {
-                    vel: gun.lob.and_then(|a| lob_velocity(goal? - origin, a, gun.shell_gravity())).map(|v| turn * v),
-                    aim: goal.filter(|_| is_indirect(&state.gun)),
-                    pd: gun.point_defense,
-                    harmless: mission.is_some_and(|ms| ms.warning_shots),
-                    base: false,
-                    ricochet: band(gun, distance, gun.ricochet),
-                };
-                launch_shell(
-                    &mut commands,
-                    &assets,
-                    &lib,
-                    &fxl,
-                    &look,
-                    &mut sfx,
-                    gun,
-                    muzzle,
-                    globals.get(muzzle).ok().copied(),
-                    origin,
-                    dir,
-                    side,
-                    me,
-                    gun_target.map(|t| t.entity),
-                    shot,
-                );
+                // Every muzzle of the mount launches a shell on each shot, each with its own turn (docs/re/gunnery.md#muzzles).
+                for i in 0..state.muzzles.len() {
+                    let muzzle = state.muzzles[i];
+                    let turn = burst_turn(aim_dir, state.dev, &mut rng);
+                    let dir = turn * aim_dir;
+                    let side = ship.side;
+                    let goal = gun_target.map(|t| t.position);
+                    let shot = Launch {
+                        vel: gun.lob.and_then(|a| lob_velocity(goal? - origin, a, gun.shell_gravity())).map(|v| turn * v),
+                        aim: goal.filter(|_| is_indirect(&state.gun)),
+                        pd: gun.point_defense,
+                        harmless: mission.is_some_and(|ms| ms.warning_shots),
+                        base: false,
+                        ricochet: band(gun, distance, gun.ricochet),
+                    };
+                    launch_shell(
+                        &mut commands,
+                        &assets,
+                        &lib,
+                        &fxl,
+                        &look,
+                        &mut sfx,
+                        gun,
+                        muzzle,
+                        globals.get(muzzle).ok().copied(),
+                        origin,
+                        dir,
+                        side,
+                        me,
+                        gun_target.map(|t| t.entity),
+                        shot,
+                    );
+                }
             }
         }
         // One click, one shot: drop the point once fired, or when the bank cannot reach it.
@@ -815,20 +815,21 @@ pub(super) fn base_fire(
                 if gun.dev_per_shot {
                     state.dev = burst_deviation(gun, distance, island.map_or(0.5, |i| i.accuracy), &mut rng);
                 }
-                let turn = burst_turn(aim_dir, state.dev, &mut rng);
-                let muzzle = state.muzzles[state.next_muzzle % state.muzzles.len()];
-                state.next_muzzle += 1;
-                // The shell must hit ships of the target's side; the shooter's own side is the other one.
-                let side = skirmish_side.map_or(if target_side == Side::Player { Side::Enemy } else { Side::Player }, |b| b.0);
-                let shot = Launch {
-                    vel: gun.lob.and_then(|a| lob_velocity(aim_at.position - origin, a, gun.shell_gravity())).map(|v| turn * v),
-                    aim: (is_indirect(&mount.gun) || gun.lob.is_some()).then_some(aim_at.position),
-                    base: true,
-                    ricochet: band(gun, distance, gun.ricochet),
-                    ..default()
-                };
-                let muzzle_transform = globals.get(muzzle).ok().copied();
-                launch_shell(&mut commands, &assets, &lib, &fxl, &look, &mut sfx, gun, muzzle, muzzle_transform, origin, turn * aim_dir, side, me, Some(aim_at.entity), shot);
+                for i in 0..state.muzzles.len() {
+                    let muzzle = state.muzzles[i];
+                    let turn = burst_turn(aim_dir, state.dev, &mut rng);
+                    // The shell must hit ships of the target's side; the shooter's own side is the other one.
+                    let side = skirmish_side.map_or(if target_side == Side::Player { Side::Enemy } else { Side::Player }, |b| b.0);
+                    let shot = Launch {
+                        vel: gun.lob.and_then(|a| lob_velocity(aim_at.position - origin, a, gun.shell_gravity())).map(|v| turn * v),
+                        aim: (is_indirect(&mount.gun) || gun.lob.is_some()).then_some(aim_at.position),
+                        base: true,
+                        ricochet: band(gun, distance, gun.ricochet),
+                        ..default()
+                    };
+                    let muzzle_transform = globals.get(muzzle).ok().copied();
+                    launch_shell(&mut commands, &assets, &lib, &fxl, &look, &mut sfx, gun, muzzle, muzzle_transform, origin, turn * aim_dir, side, me, Some(aim_at.entity), shot);
+                }
             }
         }
         if let Some(c) = volcano_cycle {

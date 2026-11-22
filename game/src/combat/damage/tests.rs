@@ -24,7 +24,6 @@ mod swap_tests {
             base: Entity::PLACEHOLDER,
             barrel: Entity::PLACEHOLDER,
             muzzles: vec![],
-            next_muzzle: 0,
             yaw: 0.0,
             pitch: 0.0,
             aligned: false,
