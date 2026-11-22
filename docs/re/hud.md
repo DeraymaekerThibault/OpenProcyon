@@ -7,7 +7,7 @@ Sources: the game manual (`Play/Basic_Controls.htm`, `Play/Advanced_Controls.htm
 
 | Area | Original behaviour |
 |---|---|
-| View | 3D camera follows the ship, ship centred; right-drag horizontally rotates, vertically tilts; arrow keys adjust the view |
+| View | 3D camera follows the ship, ship centred; right-drag horizontally rotates, vertically zooms, and the tilt follows the zoom (`camera.md`; the manual's "tilts" is the zoom's tilt); arrow keys adjust the view |
 | Movement | Left-click a destination: green marker, dotted yellow curved course |
 | Engine orders | All Stop, Ahead Slow, Ahead Full, Emergency Speed; +/- steps the order |
 | Manoeuvring | Speed, ship type/size and damage affect turning; the course preview updates with speed |

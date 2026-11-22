@@ -1,0 +1,8 @@
+{
+  "id": "free-camera",
+  "name": "Free camera",
+  "version": "1.0",
+  "category": "Gameplay",
+  "default": true,
+  "description": "Not in the original: right-drag tilts the battle camera freely. Switch off for the original camera, whose tilt follows the zoom."
+}
