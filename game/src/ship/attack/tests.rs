@@ -117,3 +117,23 @@ fn the_guns_aim_point_is_that_section_in_the_targets_own_frame_unflattened() {
     assert_eq!(aim_local(&class, &[1.0, 1.0], &tf, from, false), Vec3::new(10.0, 8.0, 0.0));
     assert_eq!(aim_local(&[], &[], &tf, from, false), Vec3::ZERO, "no sections: the target's origin");
 }
+
+#[test]
+fn a_fully_submerged_submarine_charges_to_a_fifth_of_r_and_breaks_off_at_zero() {
+    let r = 100.0;
+    assert_eq!(frontal_ranges(r, false), (100.0, 100.0));
+    let ranges = frontal_ranges(r, true);
+    assert_eq!(ranges, (20.0, 0.0), "0.2 R to charge, 0 to break off");
+    let near = Vec3::new(0.0, 0.0, 120.0);
+    let mut b = None;
+    // Gap 50 is inside R but outside 0.2 R: still charging.
+    assert_eq!(course_to(Routine::Frontal, near, 0.0, FOE, 50.0, ranges, 0.0, &mut b), Some(vec![FOE]));
+    // Gap 10 is inside 0.2 R but above 0: the break-off ends at once, no course is set and none is kept.
+    assert_eq!(course_to(Routine::Frontal, near, 0.0, FOE, 10.0, ranges, 1.0, &mut b), None);
+    assert!(b.is_none());
+    // Touching hulls: the break-off is 0 x R from its own position.
+    assert_eq!(course_to(Routine::Frontal, near, 0.0, FOE, 0.0, ranges, 2.0, &mut b), Some(vec![near]));
+    // An ordinary ship at the same gaps breaks off at right angles, 100 out.
+    let mut b = None;
+    assert!(course_to(Routine::Frontal, near, 0.0, FOE, 50.0, frontal_ranges(r, false), 0.0, &mut b).is_some_and(|c| (c[0].x - near.x).abs() == r));
+}

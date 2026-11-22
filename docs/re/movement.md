@@ -401,8 +401,9 @@ Static analysis of the original's captain AI, written as rules. Nothing in it de
   starts a break-off, but a break-off ends as soon as the gap is above 0, so in the same think it ends, no course is set and the
   charge course already held stands: the submarine presses in to 0.2 R and keeps its course and its fire there. Only if the hulls touch
   (gap 0 or less) does it sail the break-off, 0 x R from its own position, i.e. stop. An ordinary ship, or a submarine not fully
-  submerged, uses R for both. Remake: `attack::course` in `ship/attack.rs` has one range; build: small, pass the two ranges (`ship/attack.rs`
-  and its caller in `ship.rs`).
+  submerged, uses R for both. Remake: `attack::course_to` in `ship/attack.rs` takes the two ranges (`frontal_ranges`) and returns no course when none is
+  set (the ship keeps the one it held); the skirmish captain in `ship.rs` passes them when its cloak level is exactly 1. Campaign
+  mission ships' own captain still uses R for both (PROVISIONAL: no cloak read there).
 - **Throttle:** full while the next course point is within 11.25° of the bow, else the ship's own minimum, 0.65-0.75 of full (drawn
   per ship). That minimum is a floor under every slow-down but the collision avoider's, so nothing else slows an attacker near its
   course points.
