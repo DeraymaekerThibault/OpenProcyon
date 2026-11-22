@@ -103,6 +103,37 @@ Three launch options make those mistakes loud. None of them is retail behaviour 
 At the start of every mission the interpreter also warns, once per rule and name, about a group, volume, path or point set a rule
 names that the mission does not define (`mission rules: rule 'X': group 'Fleat' in field 'Group Name' of 'Group Destroyed' names no group, player or unit of the mission`).
 
+## Mission rule extensions (engine-added, not retail)
+
+A custom `mission.json` can use a few additions to the retail rule vocabulary. **None of this is in the retail game**: every new Type starts with `OP ` (so it can never clash with a retail name), every new key is optional, and a mission that uses none of it plays exactly as before. The retail rule format is unchanged: a rule is `{"name", "Run Once", "Is Active", "conditions": [...], "actions": [...]}`, its conditions are ANDed, its actions run in order. Boolean fields of the new Types are the retail strings `"TRUE"` / `"FALSE"` (a JSON `true` reads as FALSE, `--check-mission` reports it); only the rule field `"Is Active"` and the task key `required` take JSON booleans.
+
+**Conditions**
+
+| Type | Fields | Meaning |
+|---|---|---|
+| `OP Any Of` | `Conditions`: list of condition objects | true if any of them is true (an empty list is false). Every member is evaluated, so edge conditions inside (`Enter Volume`, event quotas) advance their state exactly as at the top level |
+| `OP Not` | `Condition`: one condition object | true when the inner condition is false. It inverts that frame's answer: an edge condition (`Enter Volume` in a repeating rule, a kill or capture quota) is true for one frame only, so `OP Not` of it is false on that frame and true on every other. Use a level condition (`Is Group In Volume`, a flag) or `Exit Volume` when you want "not inside". An event the inner condition would report is never consumed. Missing `Condition`: warning, false |
+| `OP Counter Condition` | `Counter Name`, `Equivalence` (`Greater Than`, `Less Than`, `Equal To`, as `Timer Condition`), `Value` | compares a counter; a counter that was never set reads 0 |
+
+Both combinators nest (`OP Not` inside `OP Any Of` and so on). "And" is what a rule's condition list already is.
+
+**Actions**
+
+| Type | Fields | Meaning |
+|---|---|---|
+| `OP Set Counter` / `OP Add To Counter` | `Counter Name`, `Value` (number, may be negative) | counters are named numbers local to the mission, 0 until set |
+| `OP Wait` | `Seconds` | pause this rule's action list; the actions after it run `Seconds` later |
+| `OP Wait Until Speech Done` | `Speech Event Name` (empty: the whole speech queue) | pause until that speech event is neither queued nor playing; with an empty name, until nothing is queued or playing. Waiting for an event that is not pending ends at once, so put it after the `Play speech event` it waits for |
+| `OP Set Rule Active` | `Rule Name`, `Boolean` | activates or deactivates every rule of that name (a warning if none exists) |
+
+*Sequences.* When a rule fires, its actions run until the first wait that is not over yet; the interpreter keeps a cursor for the rule, and the remaining actions run in the step the wait ends (rules are evaluated after the resumed actions, so a flag set by the tail is seen by later rules in the same step). A cutscene is therefore one rule: `NIS Start`, `OP Wait`, `Teleport Group/Unit`, `OP Wait`, `NIS End`. Time waits stand still while the opening-briefing pause holds the timers, and speech waits follow the speech queue, which is paused then as well. If a repeating rule's conditions hold again while its sequence is still waiting, that firing is skipped: sequences never overlap and nothing is queued (an event condition keeps its pending event, so it is reported once the sequence has finished; a level condition simply fires again after it). A run-once rule has already fired and is not affected. A rule that is deactivated (`OP Set Rule Active` false, by itself or another rule) while its sequence waits stops: the rest of its actions never run, so a deactivated cutscene does not finish.
+
+*Rule activation.* The rule field `"Is Active"` is honoured: `false` (or `"FALSE"`) means the rule is not evaluated at all, so none of its conditions advance their edge state either, until `OP Set Rule Active` turns it on. A rule without the field is active; every retail rule says `true`. Activating a run-once rule that has already fired does not make it fire again.
+
+**Self-completing objectives.** In `mission.json` `tasks`, a task may carry `complete_when` and `fail_when` (lists of condition objects, ANDed; any condition Type, `OP ...` included) and `required` (bool, default false). While a task is active and neither complete nor failed, the engine marks it failed when `fail_when` holds, otherwise complete when `complete_when` holds (failing wins if both hold in the same step); a decided task stays decided. Condition state advances only while the task is active. The task's active state is still set by `Set Objective Task Active State`, or `"Active": true` in the task. A task without these keys is driven by rules as before. The optional mission-level key `"victory": "objectives"` then ends the mission: lost ("Mission failed") as soon as any `required` task has failed, won once every `required` task is complete (a required task that was never activated keeps the mission going, and a mission with no required task never ends this way). The end text is "Mission complete." / "Mission failed" unless the mission names media `messages` ids in the optional `victory_message` / `defeat_message` (as `End Game` names its loser message). Rules such as `Goto Next Level` and `End Game` keep working next to it.
+
+*Checking and tracing.* `--check-mission` knows all of this (see "Authoring missions"): it checks the conditions nested in `OP Any Of` / `OP Not` like top-level ones (a flag or timer that is never set inside a combinator is a warning, not an error), reports a counter that is read but never set, an `OP Set Rule Active` that names no rule of the mission (an error), a task's `complete_when` / `fail_when` / `required`, and the mission keys `victory`, `victory_message` and `defeat_message`. `--dump-rule-schema` lists the `OP ` Types with `"origin": "engine"`. `--rule-trace` / `--why "<rule>"` also say when a rule is inactive (not evaluated) or busy (its sequence is waiting, so a new firing is skipped), and explain the nested conditions and counters.
+
 ## A ship from a model
 
 A ship needs no retail ship to extend: a folder `ships/<Id>/` with a `model.glb` and a small `ship.json` is a complete ship. The

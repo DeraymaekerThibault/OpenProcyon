@@ -147,6 +147,7 @@ impl Script {
                 let n = self.kills.get(&(player.to_string(), kind == "Asteroid")).copied().unwrap_or(0);
                 self.event(format!("killed|{player}|{kind}"), n, 0.0)
             }
+            t if t.starts_with("OP ") => self.ext_cond(c, w, repeating),
             other => {
                 self.warn(&format!("condition '{other}'"));
                 false

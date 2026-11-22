@@ -37,6 +37,8 @@ pub struct Diag {
     pub(in crate::rules) cur: usize,
     /// Per rule: the conditions that were false when it was last reported.
     last: HashMap<usize, Vec<usize>>,
+    /// Per rule: the inactive / busy note last reported, so a state is logged once, not every frame.
+    state: HashMap<usize, String>,
 }
 
 impl Diag {
@@ -74,12 +76,23 @@ fn resolve_why(why: &[String], names: &[String]) -> (HashSet<usize>, Vec<String>
 }
 
 impl Script {
+    /// A rule that is not evaluated or whose sequence is still running (engine-added `Is Active` / `OP Wait`): logs the state when it changes.
+    pub(in crate::rules) fn trace_state(&mut self, i: usize, note: &str) {
+        if !self.diag.wants(i) || self.diag.state.get(&i).is_some_and(|s| s == note) {
+            return;
+        }
+        self.diag.state.insert(i, note.to_string());
+        self.diag.last.remove(&i);
+        info!("t={:.1} rule trace: '{}' (rule #{i}) is {note}", self.time, self.diag.name(i));
+    }
+
     /// A rule that has not fired: logs which of its conditions are false, when that set changed since the last report.
     pub(in crate::rules) fn trace_waiting(&mut self, i: usize, r: &Rule, failed: &[usize], w: &[Unit]) {
         if !self.diag.wants(i) || self.diag.last.get(&i).is_some_and(|l| l == failed) {
             return;
         }
         self.diag.last.insert(i, failed.to_vec());
+        self.diag.state.remove(&i);
         let why: Vec<String> = failed.iter().map(|&c| format!("#{} {}", c + 1, self.explain(&r.conds[c], w))).collect();
         info!("t={:.1} rule trace: '{}' (rule #{i}) waits for {} of {} conditions: {}", self.time, self.diag.name(i), failed.len(), r.conds.len(), why.join(" | "));
     }
@@ -92,6 +105,13 @@ impl Script {
         let mut notes = vec![];
         for field in def.fields.iter().filter(|f| !c[f.name].is_null()) {
             let v = s(c, field.name);
+            // Engine-added combinators: explain the nested conditions instead of dumping their JSON.
+            if matches!(field.kind, Kind::ConditionList | Kind::Condition) {
+                let subs: Vec<&Value> = if field.kind == Kind::Condition { vec![&c[field.name]] } else { c[field.name].as_array().into_iter().flatten().collect() };
+                let nested: Vec<String> = subs.iter().map(|x| self.explain(x, w)).collect();
+                notes.push(format!("nested: {}", nested.join(" ; ")));
+                continue;
+            }
             fields.push(format!("{}={}", field.name, c[field.name]));
             match field.kind {
                 Kind::Group if !v.is_empty() => {
@@ -103,6 +123,7 @@ impl Script {
                     None => notes.push(format!("no volume '{v}'")),
                 },
                 Kind::Flag => notes.push(format!("flag '{v}' is {}", if self.flag(v) { "TRUE" } else { "FALSE (never set or set false)" })),
+                Kind::Counter => notes.push(format!("counter '{v}' reads {}", self.ext.counter(v))),
                 Kind::Timer => match self.timer(v) {
                     Some(t) => notes.push(format!("timer '{v}' reads {t:.1}s{}", if self.stopped.contains(v) { " (stopped)" } else { "" })),
                     None => notes.push(format!("timer '{v}' was never started")),
@@ -236,5 +257,24 @@ mod tests {
         let (hit, none) = resolve_why(&["Objective 1".into(), "fail".into(), "nope".into()], &names);
         assert_eq!(hit, HashSet::from([0, 2]));
         assert_eq!(none, vec!["nope".to_string()]);
+    }
+
+    #[test]
+    fn the_trace_says_why_a_rule_is_inactive_or_busy() {
+        let data = json!({"rules": [
+            {"name": "sleeper", "Run Once": true, "Is Active": false, "conditions": [], "actions": []},
+            {"name": "busy", "Run Once": false, "Is Active": true, "conditions": [], "actions": [{"Type": "OP Wait", "Seconds": 5}]},
+        ]});
+        let mut s = Script::new(&data, Value::Null);
+        s.diag.all = true;
+        s.step(&[], 0.1, false);
+        s.step(&[], 0.1, false);
+        assert!(s.diag.state.get(&0).is_some_and(|n| n.contains("inactive")), "{:?}", s.diag.state);
+        assert!(s.diag.state.get(&1).is_some_and(|n| n.contains("busy") && n.contains("OP Wait")), "{:?}", s.diag.state);
+        let nested = json!({"Type": "OP Any Of", "Conditions": [
+            {"Type": "OP Counter Condition", "Counter Name": "c", "Equivalence": "Greater Than", "Value": 1},
+            {"Type": "Flag Condition", "Flag Name": "f", "Boolean Value": "TRUE"}]});
+        let text = s.explain(&nested, &[]);
+        assert!(text.contains("counter 'c' reads 0") && text.contains("flag 'f' is FALSE"), "{text}");
     }
 }

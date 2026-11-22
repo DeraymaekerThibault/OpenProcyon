@@ -29,6 +29,14 @@ pub enum Kind {
     Timer,
     /// A flag: written by 'Set Flag Action', read by 'Flag Condition'.
     Flag,
+    /// A counter (engine-added): written by 'OP Set Counter' / 'OP Add To Counter', read by 'OP Counter Condition'.
+    Counter,
+    /// The name of a rule of the mission (engine-added: 'OP Set Rule Active').
+    Rule,
+    /// A list of condition objects (engine-added: 'OP Any Of'); each is checked like a top-level condition.
+    ConditionList,
+    /// One condition object (engine-added: 'OP Not').
+    Condition,
     /// A speech event (`media.json` `speech`, or the mission's own `opening_speech`).
     Speech,
     /// A point set (`environment.point_sets`).
@@ -62,6 +70,10 @@ impl Kind {
             Kind::Point => "point",
             Kind::Timer => "timer",
             Kind::Flag => "flag",
+            Kind::Counter => "counter",
+            Kind::Rule => "rule",
+            Kind::ConditionList => "condition_list",
+            Kind::Condition => "condition",
             Kind::Speech => "speech_event",
             Kind::PointSet => "point_set",
             Kind::MapText => "map_text",
@@ -203,6 +215,18 @@ const fn timer(n: &'static str) -> Field {
 const fn flag(n: &'static str) -> Field {
     Field::new(n, Kind::Flag, "")
 }
+const fn counter(n: &'static str) -> Field {
+    Field::new(n, Kind::Counter, "")
+}
+const fn rule_name(n: &'static str) -> Field {
+    Field::new(n, Kind::Rule, "")
+}
+const fn conditions(n: &'static str) -> Field {
+    Field::new(n, Kind::ConditionList, "[]")
+}
+const fn condition(n: &'static str) -> Field {
+    Field::new(n, Kind::Condition, "")
+}
 const fn speech(n: &'static str) -> Field {
     Field::new(n, Kind::Speech, "")
 }
@@ -312,6 +336,10 @@ pub static RULE_TYPES: &[TypeDef] = &[
     cond("Skirmish Game Complete", &[]).victory(),
     cond("Team Game Complete", &[]).victory(),
     cond("Team X has no ships", &[team("Team Name")]).victory(),
+    // Engine-added (not retail): combinators and counters, interpreted in `ext.rs`.
+    cond("OP Any Of", &[conditions("Conditions")]).engine(),
+    cond("OP Not", &[condition("Condition")]).engine(),
+    cond("OP Counter Condition", &[counter("Counter Name"), choice("Equivalence", COMPARE), num("Value")]).engine(),
     // ---- Actions ----------------------------------------------------------------------------------------------------
     act("Start Timer", &[timer("Timer Name")]),
     act("Stop Timer", &[timer("Timer Name")]),
@@ -453,6 +481,13 @@ pub static RULE_TYPES: &[TypeDef] = &[
     act("Team X Wins", &[team("Team Name").opt()]),
     act("Remaining Team Wins", &[]),
     act("Reset Shots Fired Count", &[grp("Group/Unit Name")]),
+    // Engine-added (not retail): sequences, counters and rule activation, interpreted in `ext.rs`.
+    act("OP Wait", &[num("Seconds")]).engine(),
+    // An empty name waits for the whole speech queue.
+    act("OP Wait Until Speech Done", &[speech("Speech Event Name").opt()]).engine(),
+    act("OP Set Counter", &[counter("Counter Name"), num("Value")]).engine(),
+    act("OP Add To Counter", &[counter("Counter Name"), num("Value")]).engine(),
+    act("OP Set Rule Active", &[rule_name("Rule Name"), boolean("Boolean")]).engine(),
     act(
         "*State Init* Setup Nebula",
         &[
@@ -513,6 +548,10 @@ pub fn to_json() -> Value {
         Kind::Point,
         Kind::Timer,
         Kind::Flag,
+        Kind::Counter,
+        Kind::Rule,
+        Kind::ConditionList,
+        Kind::Condition,
         Kind::Speech,
         Kind::PointSet,
         Kind::MapText,
@@ -560,8 +599,14 @@ mod tests {
     fn schema_matches_the_interpreter() {
         // Conditions that the arms of `fn cond` also test through `t == "..."` guards are listed in their arm's pattern, so the arms
         // are the whole vocabulary.
+        // The engine-added `OP ` Types go through one guard arm in cond.rs / act.rs into ext.rs, which has their arms.
+        let ext: BTreeSet<String> = arms(include_str!("ext.rs")).into_iter().filter(|n| n.starts_with("OP ")).collect();
+        let all: BTreeSet<String> = RULE_TYPES.iter().map(|t| t.name.to_string()).collect();
+        let unlisted: Vec<_> = ext.difference(&all).collect();
+        assert!(unlisted.is_empty(), "ext.rs handles Types with no entry in RULE_TYPES (schema.rs): {unlisted:?}");
         for (role, src, file) in [(Role::Condition, include_str!("cond.rs"), "cond.rs"), (Role::Action, include_str!("act.rs"), "act.rs")] {
-            let handled = arms(src);
+            let mut handled = arms(src);
+            handled.extend(ext.iter().filter(|n| RULE_TYPES.iter().any(|t| t.role == role && t.name == n.as_str())).cloned());
             let declared = names(role, Handler::Interpreter);
             let missing: Vec<_> = handled.difference(&declared).collect();
             let stale: Vec<_> = declared.difference(&handled).collect();

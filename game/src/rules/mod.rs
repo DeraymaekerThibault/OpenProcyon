@@ -10,6 +10,8 @@ pub mod skirmish;
 mod systems;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_ext;
 
 pub use eval::*;
 pub use systems::*;

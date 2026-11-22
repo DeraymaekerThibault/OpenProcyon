@@ -9,11 +9,13 @@ use crate::game_to_bevy;
 mod act;
 mod cond;
 mod diag;
+mod ext;
 pub mod schema;
 mod state;
 mod types;
 
 pub use diag::{Diag, TraceOptions, set_trace};
+use ext::Ext;
 pub use state::Script;
 pub use types::*;
 
@@ -59,6 +61,7 @@ impl Script {
             .map(|t| Task { name: s(t, "Name").into(), text: s(t, "text").into(), active: t["Active"] == true, complete: false, failed: false })
             .collect();
         Script {
+            ext: Ext::new(data, &player),
             rules,
             fired: vec![false; n],
             ran: vec![false; n],
@@ -157,10 +160,17 @@ impl Script {
         if first_step {
             self.audit(&rules, &w);
         }
+        self.resume_sequences(&rules, &mut w, &mut out, dt, opening);
         for (i, r) in rules.iter().enumerate() {
             self.diag.cur = i;
             // The opening NIS camera/speech rules are replaced by briefing.rs (which marks its speech as played).
             if self.fired[i] || (self.briefing_opening && opening_rule(&r.name)) {
+                continue;
+            }
+            if !self.ext.is_active(i) {
+                if self.diag.active() {
+                    self.trace_state(i, "inactive (\"Is Active\" is false or OP Set Rule Active turned it off): its conditions are not evaluated");
+                }
                 continue;
             }
             let mut ok = true;
@@ -180,6 +190,13 @@ impl Script {
                 }
                 continue;
             }
+            if self.ext.busy(i) {
+                if self.diag.active() {
+                    let note = self.ext.busy_note(i);
+                    self.trace_state(i, &note);
+                }
+                continue;
+            }
             for key in std::mem::take(&mut self.consume) {
                 self.events.entry(key).or_default().1 += 1;
             }
@@ -188,8 +205,9 @@ impl Script {
             }
             self.ran[i] = true;
             info!("t={:.1} rule #{i} fired: {}", self.time, r.name.trim());
-            self.run_acts(r, &mut w, &mut out);
+            self.run_from(i, r, 0, &mut w, &mut out);
         }
+        self.update_objectives(&w);
         if first_step {
             self.fire_start_rules(&rules, &mut w, &mut out);
         }
@@ -214,21 +232,6 @@ impl Script {
 }
 
 impl Script {
-    /// Runs every action of `r` in order. Later rules must see visibility changes immediately, not one ECS frame later.
-    fn run_acts(&mut self, r: &Rule, w: &mut [Unit], out: &mut Vec<Fx>) {
-        for a in &r.acts {
-            let from = out.len();
-            self.act(a, w, out, &r.name);
-            for fx in &out[from..] {
-                if let Fx::Visible(ids, visible) = fx {
-                    for u in w.iter_mut().filter(|u| ids.contains(&u.e)) {
-                        u.visible = *visible;
-                    }
-                }
-            }
-        }
-    }
-
     /// Debug aid for mission authors (`--fire-rule`, `--start-at`; not retail behaviour): once the world-initialise rules have run, the
     /// actions of each named rule run in the order given as if its conditions had held, and the rule counts as having run, so a run-once
     /// rule does not fire again. An unknown name is a warning listing the valid ones. `start_at` moves the primary ship.
@@ -244,7 +247,7 @@ impl Script {
             }
             self.ran[i] = true;
             info!("t={:.1} rule #{i} fired at start (--fire-rule): {}", self.time, name.trim());
-            self.run_acts(&rules[i], w, out);
+            self.run_from(i, &rules[i], 0, w, out);
         }
         if let Some((x, y)) = self.start_at.take() {
             match w.iter().find(|u| u.primary && u.alive) {

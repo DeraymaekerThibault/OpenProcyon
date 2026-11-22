@@ -51,6 +51,8 @@ struct Defs {
     paths: BTreeSet<String>,
     volumes: BTreeMap<String, usize>,
     tasks: BTreeSet<String>,
+    /// The mission's rule names, trimmed (`OP Set Rule Active`).
+    rules: BTreeSet<String>,
     points: BTreeSet<String>,
     point_sets: BTreeSet<String>,
     map_text: BTreeSet<String>,
@@ -82,6 +84,7 @@ impl Defs {
             players: names(mission, "players"),
             paths: names(mission, "paths"),
             tasks: mission["tasks"].as_array().into_iter().flatten().filter_map(|t| t["Name"].as_str()).map(String::from).collect(),
+            rules: mission["rules"].as_array().into_iter().flatten().filter_map(|r| r["name"].as_str()).map(|n| n.trim().to_string()).collect(),
             points: mission["points"].as_array().into_iter().flatten().filter_map(|t| t["Name"].as_str()).map(String::from).collect(),
             point_sets: names(&mission["environment"], "point_sets"),
             map_text: names(mission, "map_text"),
@@ -187,6 +190,12 @@ struct Checker<'a> {
     wants_true: bool,
     /// The field being checked is a `soft` reference.
     soft: bool,
+    /// Prefix of `at` while checking the conditions nested in an `OP Any Of` / `OP Not`.
+    parent: String,
+    /// Inside a combinator: a name that is never set or started is a warning, not an error (the other branch, or the negation, may be intended).
+    lenient: bool,
+    /// Counters written by 'OP Set Counter' / 'OP Add To Counter'.
+    counters_set: HashSet<String>,
 }
 
 impl Checker<'_> {
@@ -204,11 +213,11 @@ impl Checker<'_> {
     fn entry(&mut self, role: Role, index: usize, e: &Value) {
         let kind_word = if role == Role::Condition { "condition" } else { "action" };
         let Some(ty) = e["Type"].as_str() else {
-            self.at = format!("{kind_word} #{}", index + 1);
+            self.at = format!("{}{kind_word} #{}", self.parent, index + 1);
             self.err("Type", "has no Type".into());
             return;
         };
-        self.at = format!("{kind_word} #{} '{ty}'", index + 1);
+        self.at = format!("{}{kind_word} #{} '{ty}'", self.parent, index + 1);
         let Some(def) = lookup(role, ty) else {
             let other = if role == Role::Condition { Role::Action } else { Role::Condition };
             let hint = if lookup(other, ty).is_some() {
@@ -225,6 +234,17 @@ impl Checker<'_> {
         };
         let Some(obj) = e.as_object() else { return };
         self.wants_true = e["Boolean Value"].as_str().is_none_or(|v| !v.eq_ignore_ascii_case("FALSE"));
+        if def.name == "OP Counter Condition" {
+            // A counter nobody sets reads 0: the condition needs a writer unless 0 already satisfies it.
+            let value = e["Value"].as_f64().unwrap_or(0.0);
+            let holds_at_zero = match e["Equivalence"].as_str() {
+                Some("Greater Than") => 0.0 > value,
+                Some("Less Than") => 0.0 < value,
+                Some("Equal To") => value.abs() < 1e-4,
+                _ => false,
+            };
+            self.wants_true = !holds_at_zero;
+        }
         for key in obj.keys().filter(|k| k.as_str() != "Type") {
             if def.field(key).is_none() {
                 let hint = suggest(key, def.fields.iter().map(|f| f.name));
@@ -247,6 +267,28 @@ impl Checker<'_> {
     fn value(&mut self, def: &TypeDef, field: &Field, v: &Value, role: Role) {
         let name = field.name;
         self.soft = field.soft;
+        if matches!(field.kind, Kind::ConditionList | Kind::Condition) {
+            let list: Vec<&Value> = match v {
+                Value::Array(a) if field.kind == Kind::ConditionList => a.iter().collect(),
+                Value::Object(_) if field.kind == Kind::Condition => vec![v],
+                _ => {
+                    let want = if field.kind == Kind::ConditionList { "a list of condition objects" } else { "one condition object" };
+                    self.err(name, format!("{v} is not {want}"));
+                    return;
+                }
+            };
+            if list.is_empty() {
+                self.warn(name, "is an empty list; it is never true".into());
+            }
+            let saved = (self.at.clone(), self.parent.clone(), self.wants_true, self.lenient);
+            (self.parent, self.lenient) = (format!("{}, nested ", self.at), true);
+            for (i, e) in list.into_iter().enumerate() {
+                self.entry(Role::Condition, i, e);
+            }
+            (self.at, self.parent, self.wants_true, self.lenient) = saved;
+            self.soft = false;
+            return;
+        }
         if let Kind::Bool = field.kind {
             if !v.as_str().is_some_and(|s| s.eq_ignore_ascii_case("TRUE") || s.eq_ignore_ascii_case("FALSE")) {
                 self.err(name, format!("{v} is not \"TRUE\" or \"FALSE\"; it reads as FALSE"));
@@ -327,14 +369,25 @@ impl Checker<'_> {
                 if role == Role::Action {
                     self.flags_set.insert(text.into());
                 } else {
-                    self.reads.push((Kind::Flag, text.into(), self.wants_true, self.rule.clone(), self.at.clone()));
+                    self.reads.push((Kind::Flag, text.into(), self.wants_true && !self.lenient, self.rule.clone(), self.at.clone()));
                 }
+            }
+            Kind::Counter => {
+                if role == Role::Action {
+                    self.counters_set.insert(text.into());
+                } else {
+                    self.reads.push((Kind::Counter, text.into(), self.wants_true && !self.lenient, self.rule.clone(), self.at.clone()));
+                }
+            }
+            Kind::Rule if !d.rules.contains(text.trim()) => {
+                let hint = suggest(text, d.rules.iter().map(String::as_str));
+                self.err(name, format!("unknown rule '{text}'{hint}; nothing is activated"));
             }
             Kind::Timer => {
                 if def.name == "Start Timer" {
                     self.timers_started.insert(text.into());
                 } else if role == Role::Condition {
-                    self.reads.push((Kind::Timer, text.into(), true, self.rule.clone(), self.at.clone()));
+                    self.reads.push((Kind::Timer, text.into(), !self.lenient, self.rule.clone(), self.at.clone()));
                 }
             }
             _ => {}
@@ -367,6 +420,69 @@ fn describe_default(f: &Field) -> String {
     }
 }
 
+/// The engine-added mission keys (not retail): a task's `complete_when` / `fail_when` / `required`, and `victory`,
+/// `victory_message`, `defeat_message`.
+fn check_tasks_and_victory(c: &mut Checker, mission: &Value) {
+    let mut required = false;
+    for (i, t) in mission["tasks"].as_array().into_iter().flatten().enumerate() {
+        let name = t["Name"].as_str().map_or_else(|| format!("#{}", i + 1), String::from);
+        c.at = "task".into();
+        match &t["required"] {
+            Value::Null | Value::Bool(_) => required |= t["required"] == true,
+            other => {
+                c.rule = format!("task '{name}'");
+                c.err("required", format!("{other} is not true/false; the task is not required"));
+            }
+        }
+        for key in ["complete_when", "fail_when"] {
+            if t[key].is_null() {
+                continue;
+            }
+            c.rule = format!("task '{name}' {key}");
+            let Some(list) = t[key].as_array() else {
+                c.err(key, format!("{} is not a list of condition objects", t[key]));
+                continue;
+            };
+            if list.is_empty() {
+                c.warn(key, "is an empty list; it never holds".into());
+            }
+            c.parent.clear();
+            for (j, e) in list.iter().enumerate() {
+                c.entry(Role::Condition, j, e);
+            }
+        }
+    }
+    c.rule = "(mission)".into();
+    c.at = "mission".into();
+    let victory = &mission["victory"];
+    let objectives = victory.as_str() == Some("objectives");
+    // A skirmish script may carry a `victory` object of its own; only a plain value is the engine-added mode.
+    if !victory.is_null() && !victory.is_object() {
+        if !objectives {
+            c.err("victory", format!("{victory} is not \"objectives\"; the rules decide how the mission ends"));
+        } else if !required {
+            c.warn("victory", "no task has \"required\": true, so the mission never ends this way".into());
+        }
+    }
+    for key in ["victory_message", "defeat_message"] {
+        let v = &mission[key];
+        if v.is_null() {
+            continue;
+        }
+        match v.as_str() {
+            None => c.err(key, format!("{v} is not a message id (a string)")),
+            Some(id) => {
+                if c.defs.media && !c.defs.messages.contains(id) {
+                    c.warn(key, format!("message '{id}' has no media entry; the game falls back to a default"));
+                }
+            }
+        }
+        if !objectives {
+            c.warn(key, "is ignored unless \"victory\" is \"objectives\"".into());
+        }
+    }
+}
+
 /// Validates the rules in `mission` (a `mission.json` / `script.json` document) against the schema and its own definitions.
 /// `map` is the map's `map.json` and `media` its `media.json`; either may be `Value::Null`.
 pub fn check(mission: &Value, map: &Value, media: &Value) -> Vec<Problem> {
@@ -381,6 +497,9 @@ pub fn check(mission: &Value, map: &Value, media: &Value) -> Vec<Problem> {
         reads: vec![],
         wants_true: true,
         soft: false,
+        parent: String::new(),
+        lenient: false,
+        counters_set: HashSet::new(),
     };
     let Some(rules) = mission["rules"].as_array() else {
         c.rule = "(mission)".into();
@@ -395,6 +514,10 @@ pub fn check(mission: &Value, map: &Value, media: &Value) -> Vec<Problem> {
             c.warn("name", "the rule has no name (--fire-rule and --why cannot address it)".into());
         } else if !seen.insert(c.rule.clone()) {
             c.warn("name", "another rule has the same name (--fire-rule and --why take the first)".into());
+        }
+        let active = &r["Is Active"];
+        if !active.is_null() && !active.is_boolean() && !active.as_str().is_some_and(|x| x.eq_ignore_ascii_case("TRUE") || x.eq_ignore_ascii_case("FALSE")) {
+            c.warn("Is Active", format!("{active} is not true/false; the rule is active"));
         }
         if !r["Run Once"].is_null() && !r["Run Once"].is_boolean() {
             c.warn("Run Once", format!("{} is not true/false; the rule runs once", r["Run Once"]));
@@ -414,7 +537,8 @@ pub fn check(mission: &Value, map: &Value, media: &Value) -> Vec<Problem> {
             c.entry(Role::Action, i, e);
         }
     }
-    let (flags, timers) = (std::mem::take(&mut c.flags_set), std::mem::take(&mut c.timers_started));
+    check_tasks_and_victory(&mut c, mission);
+    let (flags, timers, counters) = (std::mem::take(&mut c.flags_set), std::mem::take(&mut c.timers_started), std::mem::take(&mut c.counters_set));
     for (kind, name, wants_true, rule, at) in std::mem::take(&mut c.reads) {
         c.rule = rule;
         c.at = at;
@@ -425,6 +549,14 @@ pub fn check(mission: &Value, map: &Value, media: &Value) -> Vec<Problem> {
                     c.err("Flag Name", format!("flag '{name}' is never set, so this can never hold{hint}"));
                 } else {
                     c.warn("Flag Name", format!("flag '{name}' is never set (always FALSE){hint}"));
+                }
+            }
+            Kind::Counter if !counters.contains(&name) => {
+                let hint = suggest(&name, counters.iter().map(String::as_str));
+                if wants_true {
+                    c.err("Counter Name", format!("counter '{name}' is never set (it reads 0), so this can never hold{hint}"));
+                } else {
+                    c.warn("Counter Name", format!("counter '{name}' is never set (it always reads 0){hint}"));
                 }
             }
             Kind::Timer if !timers.contains(&name) => {

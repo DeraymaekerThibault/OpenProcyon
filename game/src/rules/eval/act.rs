@@ -284,6 +284,7 @@ impl Script {
                     self.shots.remove(&e);
                 }
             }
+            t if t.starts_with("OP ") => self.ext_act(a, rule),
             other => self.warn(&format!("action '{other}' in rule '{rule}'")),
         }
     }
