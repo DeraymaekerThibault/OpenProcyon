@@ -260,7 +260,10 @@ fn sensor_smoke(world: &mut World) {
         65 => world.get_mut::<crate::ship::FleetMember>(ally).unwrap().0 = "Unrelated ally".into(),
         85 => {
             world.get_mut::<crate::ship::FleetMember>(ally).unwrap().0 = group;
-            world.entity_mut(enemy).insert(crate::cloak::Cloak::new(true));
+            // The rules' 'AI Can Override' FALSE: the cloak AI would drop a cloak on a ship whose guns the smoke removed (#418).
+            let mut cloak = crate::cloak::Cloak::new(true);
+            cloak.ai_modify = false;
+            world.entity_mut(enemy).insert(cloak);
         }
         105 => {
             world.entity_mut(enemy).remove::<crate::cloak::Cloak>();

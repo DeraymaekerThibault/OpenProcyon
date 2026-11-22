@@ -259,7 +259,7 @@ fn fleet_input(world: &mut World, frame: u32) {
     }
     let key = match frame {
         30 | 190 | 250 => Some(KeyCode::KeyS),
-        40 | 135 => Some(KeyCode::Digit1),
+        40 | 135 => Some(KeyCode::Digit2), // the first secondary ship (1 selects the primary, #504)
         60 => Some(KeyCode::KeyP),
         180 => Some(KeyCode::KeyR),
         220 => Some(KeyCode::F10),
@@ -301,6 +301,8 @@ fn fleet(world: &mut World, frame: u32, previous: &mut Option<Entity>) {
             let at = world.get::<Transform>(actor).unwrap().translation;
             let enemy = world.query::<(Entity, &Ship)>().iter(world).find(|(_, s)| s.side == Side::Enemy).map(|s| s.0).unwrap();
             world.get_mut::<Transform>(enemy).unwrap().translation = at + Vec3::new(60.0, 25.0, -90.0);
+            // Sight is re-tested once a second (#501) and picking follows it: show the moved enemy on the next frame.
+            world.resource_mut::<crate::environment::Sensors>().retest_now = true;
         }
         44 | 52 => {
             let actor = world.resource::<ship::Fleets>().selected.unwrap();

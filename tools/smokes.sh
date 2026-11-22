@@ -41,7 +41,8 @@ pass=0; fail=()
 while IFS='|' read -r name args; do
     [[ "$name" =~ ${1:-.} ]] || continue
     # shellcheck disable=SC2086
-    if timeout 600 tools/shot.sh "$out/$name.png" $args >"$out/$name.log" 2>&1; then
+    # Scripts that judge themselves (lifeboat-*) log "<script>: PASS" and quit before their picture frame.
+    if timeout 600 tools/shot.sh "$out/$name.png" $args >"$out/$name.log" 2>&1 || grep -q "smoke::.*: PASS" "$out/$name.log"; then
         pass=$((pass + 1)); echo "ok   $name"
     else
         fail+=("$name"); echo "FAIL $name (log: $out/$name.log)"
