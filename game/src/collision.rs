@@ -465,12 +465,13 @@ pub fn sail(
     currents: Query<&crate::environment::Current>,
     mut rams: Option<ResMut<Messages<Ram>>>,
     captains: Query<&crate::campaign::MissionShip>,
-    (fleets, members, mut avoiders, mut rammed, dying): (
+    (fleets, members, mut avoiders, mut rammed, dying, mut broken): (
         Option<Res<crate::ship::Fleets>>,
         Query<&crate::ship::FleetMember>,
         Local<HashMap<Entity, avoid::Avoid>>,
         Local<HashMap<Entity, f32>>,
         Query<&crate::combat::Sinking>,
+        Option<ResMut<Messages<crate::combat::Destroyed>>>,
     ),
 ) {
     let now = time.elapsed_secs();
@@ -741,7 +742,12 @@ pub fn sail(
             rock_drift.0 = Vec3::ZERO;
             crate::combat::knock_off(&mut rock, rock_tf.translation, tf.translation);
             let hurt = rock_hurt(rock.mass, (a.velocity - b.velocity).length(), substep);
-            rock.hp -= hurt;
+            // A rock the touch breaks counts as destroyed by the ship (its owner is credited, as for a shell).
+            if rock.damage(hurt)
+                && let Some(d) = broken.as_mut()
+            {
+                d.write(crate::combat::Destroyed { by: e, victim: rock_e });
+            }
             if let Some(r) = rams.as_mut().filter(|_| hurt > 0.0) {
                 r.write(Ram { a: e, b: rock_e, damage: hurt, at: contact.point });
             }
