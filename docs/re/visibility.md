@@ -73,13 +73,30 @@ The UI first gathers candidate objects inside per-group visibility spheres, then
 - Crew enemy-spotted speech now consumes shared detection, rather than an independent centre-distance heuristic. Its destruction callout requires a previously detected enemy. Dragon brains and homing/point-defence projectiles retain their specialized existing acquisition rules.
 - Rules' actual unit/script visibility is **not overwritten by player detection**. Mission conditions must still know about distant units.
 
-Snapshot changes become visible next frame; exact retail update cadence is not recovered. No last-known-position/contact-memory system was invented. No new mesh range-culling or cloak timing/AI-override rules were added. Camera fallback on contact loss and the application of the recovered UI gate to automatic ship/base acquisition are coherent remake policies, not proof of every retail consumer's exact behaviour.
+Snapshot changes become visible next frame; what the player's view shows follows the once-a-second re-test and fade of §5. No last-known-position/contact-memory system was invented. No new mesh range-culling or cloak timing/AI-override rules were added. Camera fallback on contact loss and the application of the recovered UI gate to automatic ship/base acquisition are coherent remake policies, not proof of every retail consumer's exact behaviour.
 
 ## 5. What is drawn of an unseen ship
 
-The original re-tests the interface list once a second (§1 for ships). The result is kept per object as "seen this pass", plus a
-short "keep" value that is 0 while unseen and rises to 1 within about a second after a sighting. A ship counts as **shown** while it is
-seen or its keep value is above 0, and it is not script-hidden.
+### The player's view: re-tested once a second, with a fade
+
+The original keeps, for every object the interface may show, a **seen** flag and a **fade** value between 0 and 1. Both run on real
+time (they go on while the game is paused or sped up).
+
+- **Re-test.** On the first frame more than **1.0 s** after the previous re-test, every object the view holds loses its seen flag,
+  then every candidate (§3) that passes the sight test (§1) is seen again. Objects that are neither seen nor fading are dropped from
+  the view. A flag can force a re-test on the next frame.
+- **Appearing.** An object with a collision sphere that comes into the world already in sight is seen at once with fade **1** (no
+  fade-in, no wait for the re-test). An object made visible by a script starts again from fade 0.
+- **Fade.** Every drawn frame the fade moves toward 1 while the object is seen and toward 0 while it is not, by **0.8 per real
+  second**, held to [0, 1]. So it takes 1.25 s from 0 to 1, and as long from 1 to 0 after a loss. On a re-test frame an object that
+  was in the view, or is seen again, takes no step that frame (its fade clock restarts).
+- **Shown** = (seen, or fade above 0) and not script-hidden. An object therefore appears at the first re-test after it comes into
+  sight (up to 1 s late) and stays shown for up to 1 s plus 1.25 s after it leaves sight.
+
+Interface consumers (labels, reticles, radar contacts, picking, the camera refocus) and the effects below follow *shown*. The sight
+test itself (Dock, Focus, target acquisition) is asked directly and does not wait for the re-test.
+
+### Effects of a ship that is not shown
 
 When a ship stops being shown, these of its own effects are switched off, and switched on again when it is shown:
 
@@ -89,7 +106,10 @@ When a ship stops being shown, these of its own effects are switched off, and sw
 - fires
 - the other effects it carries (attached effects)
 
-Not switched: one-shot effects (muzzle flashes, hits, shells). An effect joining two objects is drawn only while both are shown.
+Not switched: one-shot effects (muzzle flashes, hits, shells).
+
+A **line between two objects** (grapple and tow ropes) is drawn only while both ends are shown; an end with no drawable part counts as
+shown.
 
 **The hull mesh is not hidden by sight.** The ship draw only tests the camera frustum, script visibility and the model's own no-draw
 flag. What makes an unseen ship look absent is the combination: no effects, no label, reticle or radar contact (§4), it cannot be
@@ -98,12 +118,16 @@ typical sight range is off screen anyway.
 
 Checked in the original: a computer Barque approaching an idle Man-O-War (sight 500) was not shown, effects off, at 583 units
 centre distance and shown, effects on, at 573 units; a ship 1010-1043 units away stayed unshown for a minute, one 285 units away stayed
-shown. The hull rule is read, not checked by a value.
+shown. In two approaches the fade read 0.57 and 0.67 one sample (of one per second) after the sighting and 1.0 one second later,
+which fits 0.8 per second (both at most 0.8) but does not pin the rate. The rate, the 1.25 s fade-out after a loss, the instant full
+fade on appearing and the rope rule are read, not checked by a value; so is the hull rule.
 
-Remake: `environment::mark_unseen_ship_effects` hides a ship's non-transient effects (exhausts and their plumes and lights, smoke,
-fires, carried effects) and its wakes while `player_sees` is false; the hull keeps drawing. A sunk ship keeps its effects (the original's
-case is not read). Still different: the test runs every frame instead of once a second, the keep value is not modelled, and effects
-joining two objects are not gated.
+Remake: `environment::Sensors` keeps the player's view across snapshots (`advance_sightings`, once per frame after the snapshot,
+real time): `player_sees` is *shown* as above and `sees_now` is the sight test of this frame. `mark_unseen_ship_effects` hides a
+ship's non-transient effects (exhausts and their plumes and lights, smoke, fires, carried effects) and its wakes while `player_sees`
+is false; the hull keeps drawing; grapple and tow lines need both ends shown. A sunk ship keeps its effects (the original's case is
+not read). Not modelled: in the original an object dropped from the view while script-hidden keeps its last seen flag while it
+stays out of the view.
 
 ## Validation and remaining acceptance
 
