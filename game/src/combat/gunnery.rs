@@ -21,6 +21,48 @@ pub(super) struct GunState {
     pub(super) dev: f32,              // the burst's deviation angle, drawn when the burst starts (every shot for a `dev_per_shot` gun)
     /// A beam gun's cycle (`combat/beam.rs`); always idle for shell guns.
     pub(super) beam: super::beam::Phase,
+    /// The player's panic order on this gun (`FireRequest`).
+    pub(super) request: FireRequest,
+}
+
+/// Seconds a pending fire request on a direct-fire gun survives without a shot, and on a lobbing gun (docs/re/gunnery.md#fire-request-time-out).
+const REQUEST_LAPSE: f32 = 2.0;
+const REQUEST_LAPSE_LOB: f32 = 5.0;
+
+/// A gun's pending "fire when possible" request: it stays until the gun has fired once, or until more than 2 s (5 s for a lobbing
+/// gun) have passed since it was made. A shot or a time-out ends it for good: the same order does not ask again.
+#[derive(Clone, Copy, Default, Debug, PartialEq)]
+pub(super) struct FireRequest {
+    age: Option<f32>,
+    ended: bool,
+}
+impl FireRequest {
+    pub(super) fn pending(&self) -> bool {
+        self.age.is_some()
+    }
+    /// The order reaches the gun (a request already pending or ended by this order is not restarted).
+    pub(super) fn ask(&mut self) {
+        if !self.ended && self.age.is_none() {
+            self.age = Some(0.0);
+        }
+    }
+    /// Time passes `dt`; the request ends once its age is more than the lapse for this gun.
+    pub(super) fn step(&mut self, dt: f32, lob: bool) {
+        if let Some(age) = self.age.as_mut() {
+            *age += dt;
+            if *age > if lob { REQUEST_LAPSE_LOB } else { REQUEST_LAPSE } {
+                (self.age, self.ended) = (None, true);
+            }
+        }
+    }
+    /// The gun fired: the request is spent.
+    pub(super) fn fired(&mut self) {
+        (self.age, self.ended) = (None, true);
+    }
+    /// The order is gone: the next one asks again.
+    pub(super) fn clear(&mut self) {
+        *self = Self::default();
+    }
 }
 /// Marks the entities of a gun's visual hierarchy (root, base, barrel, muzzle points).
 #[derive(Component)]
@@ -91,6 +133,7 @@ pub(super) fn spawn_gun(commands: &mut Commands, assets: &AssetServer, lib: &Lib
         in_range: false,
         dev: 0.0,
         beam: Default::default(),
+        request: Default::default(),
     }
 }
 
@@ -444,6 +487,13 @@ pub(super) fn fire(
             // The player's indirect guns only fire at a clicked ground point.
             let on_shot = pending.is_some_and(|s| s.0 == mount.bank);
             let gun = &lib.guns[&state.gun];
+            // Panic order: each qualifying gun holds a request that a shot, or its time-out, ends.
+            if !(primary && target.2.panic) {
+                state.request.clear();
+            } else if panic_fires(gun, is_mine(&state.gun)) {
+                state.request.ask();
+                state.request.step(dt, gun.lob.is_some());
+            }
             let gun_target = match (primary && is_indirect(&state.gun), pending) {
                 // Mine guns never aim: while the ship lays mines they drop them along the mount's rest direction.
                 _ if is_mine(&state.gun) => laying.then(|| AimTarget {
@@ -458,7 +508,7 @@ pub(super) fn fire(
                     |(threat, _)| threat.position,
                 )
                 .map(|(threat, _)| *threat),
-                (false, _) if primary && target.2.panic && panic_fires(gun, is_mine(&state.gun)) => panic_target(&seen, tf, mount, gun).or(ship_target),
+                (false, _) if primary && target.2.panic && state.request.pending() && panic_fires(gun, is_mine(&state.gun)) => panic_target(&seen, tf, mount, gun).or(ship_target),
                 (false, _) if !primary && gun.lob.is_some() => {
                     ground_banks.iter().find(|b| b.0 == mount.bank).map(|b| AimTarget { entity: Entity::PLACEHOLDER, position: b.1, velocity: Vec3::ZERO })
                 }
@@ -487,6 +537,7 @@ pub(super) fn fire(
                 match super::beam::advance(&mut state.beam, def, dt, ready && !dead, gun.range[2]) {
                     super::beam::Step::Charge => {
                         shot_fired |= on_shot;
+                        state.request.fired();
                         let target = gun_target.map(|t| t.entity).filter(|e| *e != Entity::PLACEHOLDER);
                         fired.write(Fired { shooter: me, target, bullet: gun.bullet.clone() });
                         if let Some((n, vol, max)) = &gun.sound {
@@ -558,6 +609,7 @@ pub(super) fn fire(
             if state.burst_left == 0 && state.cooldown <= 0.0 && state.aligned && lob_ready {
                 state.burst_left = gun.burst;
                 shot_fired |= on_shot;
+                state.request.fired();
                 if !gun.point_defense {
                     let target = gun_target.map(|t| t.entity).filter(|e| *e != Entity::PLACEHOLDER);
                     fired.write(Fired { shooter: me, target, bullet: gun.bullet.clone() });
@@ -610,6 +662,10 @@ pub(super) fn fire(
                     );
                 }
             }
+        }
+        // The panic order is over once no gun still holds its request.
+        if primary && target.2.panic && !states.0.iter().any(|s| s.request.pending()) {
+            target.2.panic = false;
         }
         // One click, one shot: drop the point once fired, or when the bank cannot reach it.
         if pending.is_some() && (shot_fired || !shot_engaged) {
@@ -1036,6 +1092,28 @@ mod target_tests {
         assert!(!held_by_line(true, &pd, false));
         assert!(!held_by_line(true, &plain, true));
         assert!(!held_by_line(false, &plain, false));
+    }
+
+    #[test]
+    fn a_fire_request_lapses_after_two_seconds_or_five_for_a_lob_gun() {
+        for (lob, lapse) in [(false, 2.0), (true, 5.0)] {
+            let mut r = FireRequest::default();
+            r.ask();
+            r.step(lapse, lob);
+            assert!(r.pending(), "exactly {lapse} s is not yet more than the lapse");
+            r.step(0.01, lob);
+            assert!(!r.pending(), "more than {lapse} s lapses it");
+            r.ask();
+            assert!(!r.pending(), "the same order does not ask again");
+            r.clear();
+            r.ask();
+            assert!(r.pending(), "a new order does");
+        }
+        let mut r = FireRequest::default();
+        r.ask();
+        r.step(1.0, false);
+        r.fired();
+        assert!(!r.pending(), "a shot ends it");
     }
 
     #[test]

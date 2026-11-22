@@ -164,7 +164,7 @@ skirmish, the shell position sampled about 30 times a second.
   every class fires except lob, point-defence and mine guns, which keep their own routines. Each gun that fires then finds its own
   target: the nearest hostile ship in sight within its maximum range, and keeps it. The finder was read testing range, not mount arc.
   Remake: `gunnery::panic_fires` (the class rule) and `panic_target` (nearest, PROVISIONAL: it also requires the mount arc, and falls
-  back to the ship's own target when nothing qualifies; the original's pending request also lapses after 2 s, not modelled).
+  back to the ship's own target when nothing qualifies; the pending request lapses after 2 s or ends with the gun's first shot, see the fire request time-out).
 - A gun's own target choice happens only in panic fire; the "fire at will" state is set by the point-defence routine alone (which
   picks incoming torpedoes and mines, as above). Every other gun fires at the ship's target.
 - **Computer ships' lob guns** (star mortars, nova mortars, gravity charges: the guns flagged as lobbing) do not aim at the target
@@ -267,7 +267,7 @@ harpoon decision.
 - Every qualifying gun bank (some gun classes are skipped; which is unknown) switches to fire-when-possible in panic mode: each
   gun picks its own target, the best candidate within its own range (nearest-style).
 - Remake: `GroundFire::panic` set by the bar button; each non-indirect player gun fires at the nearest enemy ship in its
-  range and arc (fallback: the normal target). Cleared on any retarget (click or C). PROVISIONAL: persistence, selection score, flag filter.
+  range and arc (fallback: the normal target). Cleared on any retarget (click or C), or when no gun holds its request any more (2 s, or the gun's first shot). PROVISIONAL: persistence, selection score, flag filter.
 
 ## Mine laying
 Mine guns (the star-mine dropper on the Navy and Procyon Minelayers and the weapon barge) sit on non-selectable mounts: neither
@@ -413,8 +413,10 @@ A "fire when possible" request on a gun (a fire order, panic fire, or a bank fir
 has fired once, or until more than **2.0 s** have passed since the request was last made for a direct-fire gun, **5.0 s** for a lob
 gun (a gun with the lobbing flag). The time is counted from the latest request (a repeated request restarts it). A shot clears the
 request and its panic mark; the time-out clears only the request. Point-defence guns fire continuously and have no request.
-Remake: no pending request with a time-out (the player's click-shot is dropped once fired or when out of reach, see the cursor
-section). Build: small where a pending-request state exists (`combat/gunnery.rs`), otherwise nothing to attach it to.
+Remake: the panic order is the pending request (`gunnery::FireRequest`, one per gun): each gun that panic fire reaches holds a request
+that ends with its first shot or after the lapse, and the order is over once no gun holds one; a repeated press while some gun still
+holds a request does not restart it (PROVISIONAL). The player's click-shot is still dropped once fired or when out of reach (see the
+cursor section), with no time-out.
 
 ### Torpedoes: no arming, launch record, fixed-aim launchers
 - A torpedo has no arming time or minimum travel. It can hit anything except its firer from the first tick. The firer is on the shell's
