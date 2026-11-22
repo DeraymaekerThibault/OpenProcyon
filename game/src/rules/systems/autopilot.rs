@@ -73,7 +73,13 @@ pub(super) fn drive(
                 Some(lib.classes[s.ship.class].mounts.iter().enumerate().filter(|(i, _)| base_gun(*i)).map(|(_, m)| mount_angle(m.rot)).collect())
             })
             .unwrap_or_default();
-        let sight = Sight { guns, land: extra.land.iter().filter(|(_, v)| *v != Some(&Visibility::Hidden)).map(|(o, _)| o).collect() };
+        // The effective range of the player's guns when every one of them is fixed forward (a Hunter's beam): it fights from a stand-off.
+        let fixed_reach = ships.iter().find(|s| s.primary).and_then(|s| {
+            let guns = extra.player_guns.get(s.entity).ok()?;
+            let live = lib.classes[s.ship.class].mounts.iter().enumerate().filter_map(|(i, m)| Some((m, lib.guns.get(guns.gun(i))?)));
+            forward_fixed_reach(live.filter(|(_, d)| !d.point_defense).map(|(m, d)| (mount_angle(m.rot), m.arc, d.range[0])))
+        });
+        let sight = Sight { fixed_reach, guns, land: extra.land.iter().filter(|(_, v)| *v != Some(&Visibility::Hidden)).map(|(o, _)| o).collect() };
         // Armed bases that still have a live mission section, with the world and base-local point the player's guns aim at: one they
         // can see past the islands from here (`combat::live_tower_point`).
         let gun = from + Vec3::Y * GUN_HEIGHT;
@@ -114,6 +120,8 @@ struct Mortar {
 /// What the dev autopilot knows to aim from a good spot: the player's base-capable guns (angles off the bow) and the islands' and bases'
 /// collision, which stops every shell (`combat::shells`).
 struct Sight<'a> {
+    /// Some(effective range) when the primary's only weapons are forward-fixed guns (`forward_fixed_reach`).
+    fixed_reach: Option<f32>,
     guns: Vec<f32>,
     land: Vec<&'a crate::collision::Obstacle>,
 }
@@ -148,6 +156,40 @@ impl Sight<'_> {
             })
             .filter(|c| self.open(*c) && self.clear(*c + Vec3::Y * GUN_HEIGHT, target))
             .min_by(|a, b| a.distance_squared(from).total_cmp(&b.distance_squared(from)))
+    }
+}
+
+/// Widest arc (radians) and largest angle off the bow for a gun to count as fixed forward (PROVISIONAL).
+const FIXED_ARC: f32 = 0.6;
+const FIXED_OFF_BOW: f32 = 0.3;
+/// A forward-fixed fighter holds at this share of its guns' effective range, and backs off inside `STAND_CLOSE` of it (PROVISIONAL).
+const STAND_HOLD: f32 = 0.7;
+const STAND_CLOSE: f32 = 0.4;
+
+/// The smallest effective range of the guns `(angle off the bow, arc, effective range)` when there is at least one and every one is fixed
+/// forward (a narrow arc about the bow); None otherwise.
+fn forward_fixed_reach(guns: impl Iterator<Item = (f32, f32, f32)>) -> Option<f32> {
+    let mut reach: Option<f32> = None;
+    for (angle, arc, range) in guns {
+        if arc > FIXED_ARC || angle.abs() > FIXED_OFF_BOW {
+            return None;
+        }
+        reach = Some(reach.map_or(range, |r| r.min(range)));
+    }
+    reach.filter(|r| *r > 0.0)
+}
+
+/// Fighting a ship with only a forward gun: `(point to steer for, heading to hold)`. Out of the stand-off it sails at the foe; in the band
+/// it stops steering for a point and holds the bow on it (the gun bears, and it keeps turning to track); too close, it sails out to the
+/// stand-off distance.
+fn forward_stand(pos: Vec3, foe: Vec3, reach: f32) -> (Vec3, Option<f32>) {
+    let (hold, d) = (reach * STAND_HOLD, pos.distance(foe));
+    if d > hold {
+        (foe, None)
+    } else if d < hold * STAND_CLOSE {
+        (pos + (pos - foe).normalize_or(Vec3::X) * hold, None)
+    } else {
+        (pos, Some((-(foe.x - pos.x)).atan2(-(foe.z - pos.z))))
     }
 }
 
@@ -641,7 +683,16 @@ fn autopilot(
         // A ship moored behind an island (mission 6's pirates round the stockade) is not shot through it: sail round to a spot that
         // sees it once close; farther out, straight at it.
         let hidden = foe.pos.distance(p.pos) < FOE_SIGHT_RANGE && !sight.clear(p.pos + Vec3::Y * GUN_HEIGHT, foe.pos + Vec3::Y * GUN_HEIGHT);
-        Some(hidden.then(|| sight.firing_spot(foe.pos + Vec3::Y * GUN_HEIGHT, p.pos, FOE_SPOT)).flatten().unwrap_or(foe.pos))
+        let spot = hidden.then(|| sight.firing_spot(foe.pos + Vec3::Y * GUN_HEIGHT, p.pos, FOE_SPOT)).flatten();
+        match (spot, sight.fixed_reach) {
+            // A forward-fixed gun (the Hunter's beam) needs the bow on the foe for its charge and hold: a stand-off, not a charge through it.
+            (None, Some(reach)) if !hidden => {
+                let (go, bow_on) = forward_stand(p.pos, foe.pos, reach);
+                face = bow_on;
+                Some(go)
+            }
+            (spot, _) => Some(spot.unwrap_or(foe.pos)),
+        }
     } else if let Some(((e, at, local), spot)) = tower_spot {
         intent = "shoot a base from a firing spot";
         // The tower or gate is behind the island from here: sail to the nearest open-water spot that sees it. Once there, stop and

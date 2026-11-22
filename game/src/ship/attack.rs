@@ -11,6 +11,16 @@ use crate::data::Class;
 const FULL_THROTTLE_ARC: f32 = 11.25 * std::f32::consts::PI / 180.0;
 /// A ram's own full-throttle window: the target's centre within this angle of the bow (5 degrees), narrower than the other attacks'.
 const RAM_FULL_THROTTLE_ARC: f32 = 5.0 * std::f32::consts::PI / 180.0;
+/// Standoff attack: the share of R inside which the ship creeps, the share it holds at, and the share inside which the target is
+/// too close and it breaks off like a frontal attacker (PROVISIONAL, not read from the original: it has no such routine).
+const STANDOFF_CREEP: f32 = 0.9;
+const STANDOFF_HOLD: f32 = 0.6;
+const STANDOFF_CLOSE: f32 = 0.35;
+/// Standoff attack: speed fractions of Ahead Full while creeping in and while at the hold distance (PROVISIONAL). A ship needs way on
+/// to turn, so the hold is a crawl, not a stop.
+const STANDOFF_CREEP_SPEED: f32 = 0.25;
+const STANDOFF_HOLD_SPEED: f32 = 0.12;
+
 /// Frontal attack: longest leg sailed at right angles to the line of sight before charging again (s).
 const FRONTAL_LEG: f32 = 15.0;
 
@@ -19,6 +29,9 @@ pub enum Routine {
     /// Keep the target on one beam: +1 port (the original's side A), -1 starboard.
     Broadside(f32),
     Frontal,
+    /// Not in the original. A frontal ship whose main gun is a beam: sails in to R, then holds a stand-off inside R bow-on to the
+    /// target, turning to track it, so the charge and the held beam get their time on target (see `course_to`, `standoff_throttle`).
+    Standoff,
     Rear,
     /// No live gun: sail straight at it.
     Ram,
@@ -36,7 +49,7 @@ fn quadrant(a: f32) -> u8 {
 /// None when no bank covers any quadrant.
 pub fn plan(lib: &Library, class: &Class, health: &Health, guns: Option<&GunStates>) -> Option<(Routine, [f32; 2])> {
     // (bank, victory points, quadrant flags, first live gun's [effective, long] range)
-    let mut banks: Vec<(usize, u32, u8, [f32; 2])> = vec![];
+    let mut banks: Vec<(usize, u32, u8, [f32; 2], bool)> = vec![];
     for (i, m) in class.mounts.iter().enumerate() {
         if m.parent.is_some_and(|p| health.sections.get(p).is_some_and(|hp| *hp <= 0.0)) {
             continue;
@@ -46,8 +59,8 @@ pub fn plan(lib: &Library, class: &Class, health: &Health, guns: Option<&GunStat
         let yaw = m.rot.to_euler(EulerRot::YXZ).0;
         let flags = if m.arc > std::f32::consts::PI { 0b1111 } else { [yaw, yaw - m.arc / 2.0, yaw + m.arc / 2.0].iter().fold(0, |f, a| f | 1 << quadrant(*a)) };
         match banks.iter_mut().find(|b| b.0 == m.bank) {
-            Some(b) => (b.1, b.2) = (b.1 + gun.points.unwrap_or(0), b.2 | flags),
-            None => banks.push((m.bank, gun.points.unwrap_or(0), flags, [gun.range[0], gun.range[1]])),
+            Some(b) => (b.1, b.2, b.4) = (b.1 + gun.points.unwrap_or(0), b.2 | flags, b.4 | gun.beam.is_some()),
+            None => banks.push((m.bank, gun.points.unwrap_or(0), flags, [gun.range[0], gun.range[1]], gun.beam.is_some())),
         }
     }
     if banks.is_empty() {
@@ -56,10 +69,12 @@ pub fn plan(lib: &Library, class: &Class, health: &Health, guns: Option<&GunStat
     let n = banks.len() as f32;
     let range = [banks.iter().map(|b| b.3[0]).sum::<f32>() / n, banks.iter().map(|b| b.3[1]).sum::<f32>() / n];
     let best = banks.iter().map(|b| b.1).max().unwrap_or(0);
-    let f = banks.iter().find(|b| b.1 == best)?.2;
+    let primary = banks.iter().find(|b| b.1 == best)?;
+    let (f, beam) = (primary.2, primary.4);
     let has = |q: u8| f & (1 << q) != 0;
     let routine = if (has(0) || has(1)) && !has(2) && !has(3) {
-        Routine::Frontal
+        // A beam gun needs time on target: only a mod's gun has one, so every retail ship keeps the original's frontal attack.
+        if beam { Routine::Standoff } else { Routine::Frontal }
     } else if has(2) && has(3) {
         Routine::Rear
     } else if !has(1) && !has(2) && (has(0) || has(3)) {
@@ -148,8 +163,36 @@ pub fn course_to(routine: Routine, pos: Vec3, heading: f32, foe: Vec3, gap: f32,
             *breakoff = Some((now, v));
             Some(vec![pos + v * leg_r])
         }
+        // Straight at the target all the way (the bow follows it, so a fixed gun keeps bearing), unless it is too close.
+        Routine::Standoff => {
+            if let Some((since, v)) = *breakoff {
+                if gap < STANDOFF_HOLD * r && now - since < FRONTAL_LEG {
+                    return Some(vec![pos + v * r]);
+                }
+                *breakoff = None;
+            }
+            if gap < STANDOFF_CLOSE * r {
+                let port = crate::ship::angdiff((-d.x).atan2(-d.z), heading) > 0.0;
+                let v = if port { -right } else { right };
+                *breakoff = Some((now, v));
+                return Some(vec![pos + v * r]);
+            }
+            Some(vec![foe])
+        }
         Routine::Rear if gap < r => Some(vec![pos - d * r]),
         Routine::Rear | Routine::Ram => Some(vec![foe]),
+    }
+}
+
+/// A standoff attacker's throttle (fraction of Ahead Full) while it closes on its target: None (full) outside `STANDOFF_CREEP` R, a creep
+/// inside it and a crawl inside `STANDOFF_HOLD` R.
+pub fn standoff_throttle(gap: f32, r: f32) -> Option<f32> {
+    if gap >= STANDOFF_CREEP * r {
+        None
+    } else if gap >= STANDOFF_HOLD * r {
+        Some(STANDOFF_CREEP_SPEED)
+    } else {
+        Some(STANDOFF_HOLD_SPEED)
     }
 }
 

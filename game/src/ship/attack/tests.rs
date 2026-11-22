@@ -137,3 +137,50 @@ fn a_fully_submerged_submarine_charges_to_a_fifth_of_r_and_breaks_off_at_zero() 
     let mut b = None;
     assert!(course_to(Routine::Frontal, near, 0.0, FOE, 50.0, frontal_ranges(r, false), 0.0, &mut b).is_some_and(|c| (c[0].x - near.x).abs() == r));
 }
+
+#[test]
+fn a_standoff_attacker_keeps_the_target_dead_ahead_inside_r_and_breaks_off_only_when_it_is_too_close() {
+    let (r, near) = (200.0, Vec3::new(0.0, 0.0, 150.0));
+    let mut b = None;
+    // Outside R and inside it down to 0.35 R: always the target itself, no break-off (a frontal ship would turn away at R).
+    for gap in [400.0, 200.0, 150.0, 80.0, 71.0] {
+        assert_eq!(course_to(Routine::Standoff, near, 0.0, FOE, gap, (r, r), 0.0, &mut b), Some(vec![FOE]), "gap {gap}");
+        assert!(b.is_none());
+    }
+    // The retail frontal attack does break off at R: a ship without a beam plays as before.
+    assert_ne!(course_to(Routine::Frontal, near, 0.0, FOE, 150.0, (r, r), 0.0, &mut None), Some(vec![FOE]));
+    // Too close (inside 0.35 R): breaks off square, for up to 15 s or until it is back out at the hold distance (0.6 R).
+    let leg = course_to(Routine::Standoff, near, 0.0, FOE, 60.0, (r, r), 1.0, &mut b).unwrap();
+    assert!(b.is_some() && leg[0].z == near.z && (leg[0].x - near.x).abs() == r, "{leg:?}");
+    assert_eq!(course_to(Routine::Standoff, near, 0.0, FOE, 100.0, (r, r), 8.0, &mut b), Some(leg.clone()), "keeps the leg");
+    assert_eq!(course_to(Routine::Standoff, near, 0.0, FOE, 100.0, (r, r), 16.5, &mut b), Some(vec![FOE]), "15 s up: back at it");
+    b = Some((1.0, Vec3::X));
+    assert_eq!(course_to(Routine::Standoff, near, 0.0, FOE, 125.0, (r, r), 3.0, &mut b), Some(vec![FOE]), "far enough again: back at it");
+    assert!(b.is_none());
+}
+
+#[test]
+fn a_standoff_attacker_creeps_inside_0_9_r_and_crawls_at_the_hold_distance() {
+    assert_eq!(standoff_throttle(300.0, 200.0), None, "closing: full");
+    assert_eq!(standoff_throttle(179.0, 200.0), Some(0.25));
+    assert_eq!(standoff_throttle(121.0, 200.0), Some(0.25));
+    assert_eq!(standoff_throttle(100.0, 200.0), Some(0.12), "a crawl, not a stop: it must keep way on to turn");
+}
+
+#[test]
+#[ignore = "needs imported assets"]
+fn a_frontal_ship_is_a_standoff_attacker_only_when_its_main_gun_is_a_beam() {
+    let mut lib = Library::load(crate::assets_dir());
+    let class = lib.classes[lib.index("Ship_Procyon_Frigate")].mounts.iter().map(|m| m.gun.clone()).collect::<Vec<_>>();
+    let health = |lib: &Library| {
+        let c = &lib.classes[lib.index("Ship_Procyon_Frigate")];
+        Health { sections: c.sections.iter().map(|s| s.hp).collect(), core: c.core_hp, destroyed: false }
+    };
+    let routine = |lib: &Library| plan(lib, &lib.classes[lib.index("Ship_Procyon_Frigate")], &health(lib), None).map(|p| p.0);
+    assert_eq!(routine(&lib), Some(Routine::Frontal), "retail guns: the original's frontal attack");
+    let beam = crate::data::BeamDef { charge: 2.0, duration: 6.0, tick: 0.25, ramp: 0.5, max_power: 4.0, width: 0.4, color: [1.0; 3] };
+    for g in &class {
+        lib.guns.get_mut(g).unwrap().beam = Some(beam.clone());
+    }
+    assert_eq!(routine(&lib), Some(Routine::Standoff), "the same ship with beam guns holds a stand-off");
+}

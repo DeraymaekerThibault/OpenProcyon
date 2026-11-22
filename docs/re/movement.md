@@ -396,6 +396,14 @@ Static analysis of the original's captain AI, written as rules. Nothing in it de
   measured from its own hull (centre minus its own radius) to the aim point on the target, the target's size not counted, so it
   holds the same distance from a small and a large target.
   **Ram:** straight at it, full throttle within 5° of the bow (the other attacks' window is 11.25°; a ram steers by its own 5° test, also under the ram order). Remake: `attack::throttle` takes the routine. PROVISIONAL: whether the follower's 11.25° rule still lifts a ram's throttle between 5° and 11.25° is unread (the remake gives the minimum there), as is the lower bound of the ram's angle test.
+- **Stand-off attack (engine-added, not the original's).** The original has no beam gun. A ship whose primary gun bank would attack frontally
+  but holds a mod's beam gun (`beam` block in `guns.json`: a charge, then a held beam that burns harder the longer it stays on one ship) uses
+  `Routine::Standoff` instead: it keeps steering at the target, so the fixed bow gun tracks it, and slows to 0.25 of Ahead Full inside 0.9 R and
+  to a crawl (0.12) inside 0.6 R (it needs way on to turn); only a target inside 0.35 R makes it break off, at right angles like a frontal
+  attacker, until it is back out at 0.6 R or 15 s have passed. Every retail ship keeps the frontal attack above (the choice is made on the gun type).
+  PROVISIONAL: the shares are tuned by eye; breaking off when under fire or when the gun is spent is not built (no such signal is read there).
+  The dev autopilot (`--script mission`) fights a ship the same way when every gun of the primary is fixed forward: closes to 0.7 of the
+  guns' effective range, holds the bow on the foe and backs out inside 0.28 of it (`autopilot.rs`, test driver only).
 - **Frontal attack of a submerged submarine.** A submarine class (the one that can cloak) that is **fully** cloaked (cloak level exactly 1)
   uses two ranges instead of R: it charges until the gap between the hulls is **0.2 R**, and its break-off range is **0**. Reaching 0.2 R
   starts a break-off, but a break-off ends as soon as the gap is above 0, so in the same think it ends, no course is set and the
