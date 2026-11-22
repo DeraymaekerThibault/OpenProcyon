@@ -99,7 +99,10 @@ without and once with `--mod <dir>`, e.g. `PROCYON_PROFILE=1 make run ARGS='--ma
 sets `PresentMode::AutoNoVsync` at every speed (also after the speed buttons), so `frame_ms` is the real render cost, not the display period.
 Compare `frame_ms` (rolling average) and `p99_ms` (99th percentile of the per-frame times since the previous line; a steady 60 fps needs it near 16.7).
 The counters next to them say why a look is slower: `lights` (point + spot lights), `draw_entities` (`Mesh3d` entities), `materials`
-(`StandardMaterial` plus effect-material assets), `particles` and `mesh_assets`. Let each run settle for a few log lines before reading it;
+(`StandardMaterial` plus effect-material assets), `particles` and `mesh_assets`. A second line, `profile gpu_ms`, gives the GPU milliseconds of each render pass
+(rolling average, slowest first; `lightprobe_*` are left over from the sky light's first frames). Watch `uniform_allocation` and `bin_unpacking` there: Bevy runs them once per batch set per view
+(the camera, the prepass and each shadow cascade), so a material type that is not bindless (a bind group per material) or materials changed every frame show up there and in `frame_ms`
+long before the draw passes do. Let each run settle for a few log lines before reading it;
 only compare runs on the same machine and scene.
 
 ## Battle clock and scheduling

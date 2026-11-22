@@ -128,8 +128,26 @@ pub fn plugin(app: &mut App, look: &Look) {
         bevy::shader::load_shader_library!(app, "sail_fold.wesl");
         bevy::asset::embedded_asset!(app, "sail_vertex.wesl");
         bevy::asset::embedded_asset!(app, "sail_prepass.wesl");
-        app.add_plugins(MaterialPlugin::<SailMaterial>::default()).add_systems(Update, (sails, sail_motion, super::surfaces::cloaked::<SailMaterial>).chain());
+        app.add_plugins(MaterialPlugin::<SailMaterial>::default())
+            .add_systems(Startup, make_state)
+            .add_systems(Update, (sails, sail_motion, super::surfaces::cloaked::<SailMaterial>).chain());
     }
+}
+
+/// What moves on a sail, for every sail at once: one row each (x the ship's smoothed share of full speed 0..1, y the sail's
+/// clock in seconds, running faster with speed, z how far the cloth bellies in mesh units, eased out while folding, w how far it
+/// is folded, 0 open .. `furl`), bound at `@binding(102)` of every sail material; `SailGlowUniform::motion.w` is the sail's row.
+/// Written once a frame at a fixed size (so Bevy rewrites it in place), which leaves the sail materials untouched after they are
+/// made: a material that changes is prepared again by Bevy, and doing that for every sail every frame cost 4.6 ms on a busy port.
+pub const STATE: Handle<ShaderBuffer> = bevy::asset::uuid_handle!("2d9a6c1f-3b58-4e7a-8c21-7f4e0a9b6d35");
+
+/// Rows in `STATE`.
+// ponytail: rows are handed out round-robin, so sails share a row only once more than this many are alive at once; give a
+// despawned sail's row back if a battle ever gets there.
+const MAX_SAILS: usize = 1024;
+
+fn make_state(mut buffers: ResMut<Assets<ShaderBuffer>>) {
+    let _ = buffers.insert(&STATE, ShaderBuffer::new(vec![Vec4::ZERO; MAX_SAILS], default()));
 }
 
 /// What the sail shader gets at `@group(MATERIAL_BIND_GROUP) @binding(100)`, besides the StandardMaterial bindings.
@@ -139,15 +157,13 @@ pub struct SailGlowUniform {
     pub color: Vec4,
     /// the profile's four `params`
     pub params: Vec4,
-    /// xyz: direction sunlight travels (world), w: `backlit`
+    /// w: `backlit` (the sun's direction is the frame data's)
     pub sun: Vec4,
-    /// x: the ship's smoothed share of full speed (0..1), y: a per-sail phase (radians), z: the sail's clock (seconds,
-    /// running faster with speed)
+    /// y: a per-sail phase (radians), w: the sail's row in `STATE`, which holds what moves (speed share, clock, bulge, fold)
     pub motion: Vec4,
     /// xy: pattern cells per UV unit along u and v
     pub pattern: Vec4,
-    /// For the engine's vertex stage (`sail_fold.wesl`): x how far the cloth bellies (mesh units, eased out while folding), y how far
-    /// it is folded (0 open .. `furl`), z pleats, w pleat depth (mesh units). A sail shader may ignore it.
+    /// For the engine's vertex stage (`sail_fold.wesl`): z pleats, w pleat depth (mesh units). A sail shader may ignore it.
     pub fold: Vec4,
     /// x: the sail's size (mesh units), y: 1 when `fold_data` holds the sail's fold data (else the mesh is drawn as it is)
     pub shape: Vec4,
@@ -166,6 +182,9 @@ pub struct SailGlow {
     /// The sail's fold data (`fold_data`), read by the vertex stages at `@binding(101)`.
     #[storage(101, read_only)]
     pub fold: Handle<ShaderBuffer>,
+    /// Every sail's moving numbers (`STATE`) at `@binding(102)`.
+    #[storage(102, read_only)]
+    pub state: Handle<ShaderBuffer>,
 }
 
 impl MaterialExtension for SailGlow {
@@ -189,7 +208,8 @@ struct Sail {
     /// Smoothed share of the ship's full speed.
     wind: f32,
     clock: f32,
-    phase: f32,
+    /// Its row in `STATE`.
+    row: usize,
     /// 0 = set, 1 = furled (eased in `fold`).
     furl: f32,
     /// The cut sail's size, pleats and pleat depth (shares of the size); size 0 = not cut, drawn as it is.
@@ -199,7 +219,8 @@ struct Sail {
 }
 
 impl Sail {
-    /// The vertex stage's `fold` numbers now: the bulge eased out as the sail folds, and how far it is folded.
+    /// The vertex stage's `fold` numbers now: the bulge eased out as the sail folds and how far it is folded (both go to the
+    /// sail's `STATE` row), then the pleats and their depth (the uniform's, set once).
     fn fold(&self, s: &Sails) -> Vec4 {
         let f = self.furl * self.furl * (3.0 - 2.0 * self.furl); // smoothstep
         Vec4::new(s.billow * self.size * (1.0 - f), s.furl * f, self.pleats, self.depth * self.size)
@@ -254,6 +275,7 @@ pub(super) fn sails(
     mut sail_mats: ResMut<Assets<SailMaterial>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut buffers: ResMut<Assets<ShaderBuffer>>,
+    mut next_row: Local<usize>,
 ) {
     let Some(s) = &look.sails else { return };
     for (e, name, mat, mesh) in &new {
@@ -270,19 +292,22 @@ pub(super) fn sails(
             base.base_color = base.base_color.with_alpha(1.0);
         }
         let phase = (e.index().index() as f32 * 0.618).fract() * std::f32::consts::TAU;
+        let row = *next_row;
+        *next_row = (row + 1) % MAX_SAILS;
         let handle = sail_mats.add(SailMaterial {
             base,
             extension: SailGlow {
                 u: SailGlowUniform {
                     color: if s.is_plain(name) { Vec4::ZERO } else { s.glow.extend(0.0) },
                     params: s.params,
-                    sun: Vec4::new(0.0, -1.0, 0.0, s.backlit),
-                    motion: Vec4::new(0.0, phase, 0.0, 0.0),
+                    sun: Vec4::new(0.0, 0.0, 0.0, s.backlit),
+                    motion: Vec4::new(0.0, phase, 0.0, row as f32),
                     pattern: cells.extend(0.0).extend(0.0),
                     ..default()
                 },
                 frame: default(),
                 fold: buffers.add(ShaderBuffer::new(vec![Vec4::ZERO], RenderAssetUsages::RENDER_WORLD)),
+                state: STATE,
             },
         });
         let ship = parents.iter_ancestors(e).find(|a| ships.contains(*a));
@@ -291,7 +316,7 @@ pub(super) fn sails(
         let restyled = Restyled { original: mat.0.clone(), styled: handle.clone(), ship };
         let mut entity = super::kit::swap::<StandardMaterial, _>(&mut commands, e, handle.clone());
         entity.try_insert(restyled);
-        let mut sail = Sail { ship, wind: 0.0, clock: 0.0, phase, furl, size: 0.0, pleats: 0.0, depth: 0.0 };
+        let mut sail = Sail { ship, wind: 0.0, clock: 0.0, row, furl, size: 0.0, pleats: 0.0, depth: 0.0 };
         if !s.opaque {
             entity.try_insert(NotShadowCaster);
         }
@@ -323,6 +348,7 @@ pub(super) fn sails(
             if let Some(mut m) = sail_mats.get_mut(&handle) {
                 m.extension.fold = buffers.add(ShaderBuffer::new(data, RenderAssetUsages::RENDER_WORLD));
                 m.extension.u.shape = Vec4::new(billow.size, 1.0, 0.0, 0.0);
+                m.extension.u.fold = Vec4::new(0.0, 0.0, billow.pleats, billow.depth * billow.size);
             }
             (sail.size, sail.pleats, sail.depth) = (billow.size, billow.pleats, billow.depth);
             // shaded by the cut cloth's own facets at rest (the fold data keeps the retail normal the cloth bellies along)
@@ -780,31 +806,29 @@ fn furled(p: Vec3, top: f32, amount: f32) -> Vec3 {
 /// The most `belly` gives (full wind, both waves at their crest): the sail's bounds allow for it.
 const BELLY_MAX: f32 = 0.65 + 0.25 + 0.12;
 
-/// Each sail follows its ship's speed: the share of full speed (smoothed), a clock that runs faster with it, the sun.
+/// Each sail follows its ship's speed: the share of full speed (smoothed) and a clock that runs faster with it, written with
+/// the bulge and the fold to the sail's row of `STATE`.
 fn sail_motion(
     time: Res<Time>,
     look: Res<Look>,
     lib: Option<Res<crate::combat::Library>>,
     ships: Query<&crate::Ship>,
-    frame: Res<super::frame::Frame>,
-    mut sails: Query<(&mut Sail, &MeshMaterial3d<SailMaterial>)>,
-    mut materials: ResMut<Assets<SailMaterial>>,
+    mut sails: Query<&mut Sail>,
+    mut buffers: ResMut<Assets<ShaderBuffer>>,
 ) {
     let (Some(s), Some(lib)) = (&look.sails, lib) else { return };
-    let sun = frame.sun().map_or(Vec3::NEG_Y, |(travel, _)| travel);
+    let Some(mut state) = buffers.get_mut(&STATE) else { return };
+    let Some(rows) = state.cast_slice_mut::<Vec4>() else { return };
     let dt = time.delta_secs();
-    for (mut sail, mat) in &mut sails {
+    for mut sail in &mut sails {
         let share = sail.ship.and_then(|e| ships.get(e).ok()).map_or(0.0, |sh| (sh.speed.abs() / crate::ship::full_speed(&lib.classes[sh.class]).max(1e-3)).clamp(0.0, 1.0));
         sail.wind += (share - sail.wind) * (dt * 1.2).min(1.0);
         sail.clock += dt * s.speed * (0.35 + 0.65 * sail.wind);
         // PROVISIONAL: the crew folds the sails on the All Stop order (not when the ship has coasted to a stop), in 1.5 s.
         let stopped = sail.ship.and_then(|e| ships.get(e).ok()).is_some_and(|sh| sh.ordered() == 0.0);
         sail.furl = (sail.furl + if stopped { dt / 1.5 } else { -dt / 1.5 }).clamp(0.0, 1.0);
-        if let Some(mut m) = materials.get_mut(&mat.0) {
-            m.extension.u.motion = Vec4::new(sail.wind, sail.phase, sail.clock, 0.0);
-            m.extension.u.sun = sun.extend(s.backlit);
-            m.extension.u.fold = sail.fold(s);
-        }
+        let fold = sail.fold(s);
+        rows[sail.row] = Vec4::new(sail.wind, sail.clock, fold.x, fold.y);
     }
 }
 

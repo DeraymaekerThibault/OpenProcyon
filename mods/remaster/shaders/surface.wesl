@@ -11,54 +11,104 @@ import bevy_pbr::render::{
     forward_io::{VertexOutput, FragmentOutput},
     pbr_fragment::pbr_input_from_standard_material,
     pbr_functions::{alpha_discard, apply_pbr_lighting, main_pass_post_lighting_processing},
-    pbr_bindings::{base_color_texture, base_color_sampler},
     mesh_view_bindings::view,
 };
+@if(BINDLESS)
+import bevy_pbr::render::{mesh_bindings::mesh, pbr_bindings::material_indices};
+@if(BINDLESS)
+import bevy_render::bindless::{bindless_samplers_filtering, bindless_textures_2d};
+@if(!BINDLESS)
+import bevy_pbr::render::pbr_bindings::{base_color_texture, base_color_sampler};
 
 struct Surface {
-    // x: relief strength, y: crevice shading, z: gloss, w: 1 when `surface_map` is a baked map
+    // x: relief strength, y: crevice shading, z: gloss, w: 1 when the surface map is a baked map
     params: vec4<f32>,
     // rgb: rim light colour, a: its strength
     rim: vec4<f32>,
 }
 
-@group(constants::MATERIAL_BIND_GROUP) @binding(100) var<uniform> surface: Surface;
-// linear RGBA: u and v slope (times SLOPE_GAIN, 0.5 flat), crevice, height
-@group(constants::MATERIAL_BIND_GROUP) @binding(101) var surface_map: texture_2d<f32>;
-@group(constants::MATERIAL_BIND_GROUP) @binding(102) var surface_map_sampler: sampler;
+// The surface map is linear RGBA: u and v slope (times SLOPE_GAIN, 0.5 flat), crevice, height.
+// Bindless (the usual case): every surface shares one bind group, and the mesh's slot picks its row of each table.
+@if(BINDLESS) {
+struct SurfaceIndices {
+    surface: u32,       // 50
+    map: u32,           // 51
+    map_sampler: u32,   // 52
+}
+@group(constants::MATERIAL_BIND_GROUP) @binding(100) var<storage> surface_indices: array<SurfaceIndices>;
+@group(constants::MATERIAL_BIND_GROUP) @binding(101) var<storage> surfaces: array<Surface>;
+}
+@else {
+@group(constants::MATERIAL_BIND_GROUP) @binding(50) var<uniform> surface_uniform: Surface;
+@group(constants::MATERIAL_BIND_GROUP) @binding(51) var surface_map: texture_2d<f32>;
+@group(constants::MATERIAL_BIND_GROUP) @binding(52) var surface_map_sampler: sampler;
+}
 // `SLOPE_GAIN` in tools/bake_surfaces.py
 const SLOPE_GAIN: f32 = 3.0;
 
-fn luma(uv: vec2<f32>) -> f32 {
-    return dot(textureSample(base_color_texture, base_color_sampler, uv).rgb, vec3<f32>(0.299, 0.587, 0.114));
+fn rgb_luma(c: vec4<f32>) -> f32 {
+    return dot(c.rgb, vec3<f32>(0.299, 0.587, 0.114));
+}
+
+// The colour texture's brightness at `uv`, and its size in texels.
+@if(BINDLESS)
+fn luma(slot: u32, uv: vec2<f32>) -> f32 {
+    return rgb_luma(textureSample(bindless_textures_2d[material_indices[slot].base_color_texture], bindless_samplers_filtering[material_indices[slot].base_color_sampler], uv));
+}
+@if(BINDLESS)
+fn colour_size(slot: u32) -> vec2<f32> {
+    return vec2<f32>(textureDimensions(bindless_textures_2d[material_indices[slot].base_color_texture]));
+}
+@if(BINDLESS)
+fn baked(slot: u32, uv: vec2<f32>) -> vec4<f32> {
+    return textureSample(bindless_textures_2d[surface_indices[slot].map], bindless_samplers_filtering[surface_indices[slot].map_sampler], uv);
+}
+@if(!BINDLESS)
+fn luma(slot: u32, uv: vec2<f32>) -> f32 {
+    return rgb_luma(textureSample(base_color_texture, base_color_sampler, uv));
+}
+@if(!BINDLESS)
+fn colour_size(slot: u32) -> vec2<f32> {
+    return vec2<f32>(textureDimensions(base_color_texture));
+}
+@if(!BINDLESS)
+fn baked(slot: u32, uv: vec2<f32>) -> vec4<f32> {
+    return textureSample(surface_map, surface_map_sampler, uv);
 }
 
 @fragment
 fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> FragmentOutput {
-    // derivatives and samples first, in uniform control flow
+    // the mesh's row of the material tables (unused without bindless), then derivatives and samples first
+@if(BINDLESS)
+    let slot = mesh[in.instance_index].material_and_lightmap_bind_group_slot & 0xffffu;
+@if(BINDLESS)
+    let surface = surfaces[surface_indices[slot].surface];
+@if(!BINDLESS)
+    let slot = 0u;
+@if(!BINDLESS)
+    let surface = surface_uniform;
     let uv = in.uv;
-    let size = vec2<f32>(textureDimensions(base_color_texture));
+    let size = colour_size(slot);
     let texel = 1.0 / max(size, vec2<f32>(1.0));
     let dpx = dpdx(in.world_position.xyz);
     let dpy = dpdy(in.world_position.xyz);
     let duvx = dpdx(uv);
     let duvy = dpdy(uv);
-    // height, its slope along u and v, and how far below its surroundings it lies; the branch is on a uniform, so the
-    // samples stay in uniform control flow
+    // height, its slope along u and v, and how far below its surroundings it lies; the branch is the same for a whole mesh
     var h: f32;
     var slope: vec2<f32>;
     var below: f32;
     if surface.params.w > 0.5 {
-        let m = textureSample(surface_map, surface_map_sampler, uv);
+        let m = baked(slot, uv);
         h = m.a;
         slope = (m.rg * 2.0 - 1.0) / SLOPE_GAIN;
         below = m.b;
     } else {
-        h = luma(uv);
-        let hr = luma(uv + vec2<f32>(texel.x, 0.0));
-        let hl = luma(uv - vec2<f32>(texel.x, 0.0));
-        let hd = luma(uv + vec2<f32>(0.0, texel.y));
-        let hu = luma(uv - vec2<f32>(0.0, texel.y));
+        h = luma(slot, uv);
+        let hr = luma(slot, uv + vec2<f32>(texel.x, 0.0));
+        let hl = luma(slot, uv - vec2<f32>(texel.x, 0.0));
+        let hd = luma(slot, uv + vec2<f32>(0.0, texel.y));
+        let hu = luma(slot, uv - vec2<f32>(0.0, texel.y));
         slope = vec2<f32>(hr - hl, hd - hu) * 0.5;
         below = clamp(((hr + hl + hd + hu) * 0.25 - h) * 6.0, 0.0, 1.0);
     }

@@ -17,10 +17,9 @@ struct SailGlow {
     color: vec4<f32>,
     params: vec4<f32>,
     sun: vec4<f32>,
-    // x: the ship's smoothed share of full speed, y: phase, z: the sail's clock
+    // y: phase, w: the sail's row in `sail_state`
     motion: vec4<f32>,
     pattern: vec4<f32>,
-    // x: how far the cloth bellies (world units, already eased out while folding), y: how far it is folded (0 open .. `furl`),
     // z: pleats, w: pleat depth (mesh units)
     fold: vec4<f32>,
     // x: the sail's size (mesh units), y: 1 when the buffer holds fold data
@@ -29,6 +28,9 @@ struct SailGlow {
 
 @group(constants::MATERIAL_BIND_GROUP) @binding(100) var<uniform> sail: SailGlow;
 @group(constants::MATERIAL_BIND_GROUP) @binding(101) var<storage, read> fold_data: array<vec4<f32>>;
+// What moves, a row for every sail (`STATE` in sails.rs): x the ship's smoothed share of full speed, y the sail's clock, z how far
+// the cloth bellies (mesh units, already eased out while folding), w how far it is folded (0 open .. `furl`)
+@group(constants::MATERIAL_BIND_GROUP) @binding(102) var<storage, read> sail_state: array<vec4<f32>>;
 
 struct Folded {
     position: vec3<f32>,
@@ -76,14 +78,15 @@ fn fold(p: vec3<f32>, rest_normal: vec3<f32>, local: u32) -> Folded {
     let r2 = fold_data[at + 2u];
     let pin = r0.x;
     let top = r0.y;
-    let amp = sail.fold.x;
-    let a = sail.fold.y;
+    let state = sail_state[u32(sail.motion.w)];
+    let amp = state.z;
+    let a = state.w;
 
     // sails.rs `belly`: a slow breath plus ripples running across, slacker with little wind
     let size = max(sail.shape.x, 1.0e-3);
-    let wind = sail.motion.x;
+    let wind = state.x;
     let phase = sail.motion.y;
-    let clock = sail.motion.z;
+    let clock = state.y;
     let k = 6.0 / size;
     let arg = 3.3 * clock - k * (p.y + 0.6 * p.x) + phase;
     let w = 0.3 + 0.7 * wind;

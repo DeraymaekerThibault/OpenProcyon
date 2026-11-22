@@ -235,7 +235,7 @@ pub fn run(view: fn(&mut App), setup_view: fn(&mut App)) {
         .add_plugins(view)
         .add_plugins(|app: &mut App| {
             if profiling() {
-                app.add_plugins(bevy::diagnostic::FrameTimeDiagnosticsPlugin::default()).add_systems(Last, profile_counts);
+                app.add_plugins((bevy::diagnostic::FrameTimeDiagnosticsPlugin::default(), bevy::render::diagnostic::RenderDiagnosticsPlugin)).add_systems(Last, profile_counts);
             }
             if let Some(free) = view::FreeCamera::load(assets_dir()) {
                 app.insert_resource(free);
@@ -554,6 +554,14 @@ fn profile_counts(
         draws.iter().count(),
         standard_materials.len() + effect_materials.len()
     );
+    // GPU milliseconds per render pass (rolling average), the passes above 0.2 ms, slowest first: where a slow frame goes.
+    let mut gpu: Vec<(f64, String)> = diagnostics
+        .iter()
+        .filter_map(|d| Some((d.average()?, d.path().as_str().strip_prefix("render/")?.strip_suffix("/elapsed_gpu")?.to_string())))
+        .filter(|(ms, _)| *ms > 0.2)
+        .collect();
+    gpu.sort_by(|a, b| b.0.total_cmp(&a.0));
+    info!("profile gpu_ms {}", gpu.iter().map(|(ms, pass)| format!("{pass}={ms:.2}")).collect::<Vec<_>>().join(" "));
 }
 
 /// `--shot-frame 100,200`: the frames to save, ascending. Nothing parsable (or no flag) means frame 500.

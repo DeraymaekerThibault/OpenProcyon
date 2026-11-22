@@ -11,21 +11,24 @@ import bevy_pbr::render::{
     pbr_functions::{alpha_discard, apply_pbr_lighting, main_pass_post_lighting_processing},
     mesh_view_bindings::view,
 };
+import openprocyon::render::frame::frame;
 
 struct SailGlow {
     // rgb: glow colour (linear, may exceed 1); black = a plain sail
     color: vec4<f32>,
     // x: edge width (share of a cell), y: wave length in world units, z: steady glow share, w: cell fill share
     params: vec4<f32>,
-    // xyz: direction the sunlight travels (world), w: how much more the sail glows lit from behind
+    // w: how much more the sail glows lit from behind (the sun's direction is the frame data's)
     sun: vec4<f32>,
-    // x: the ship's share of full speed (smoothed), y: phase, z: the sail's clock
+    // y: phase, w: the sail's row in `sail_state`
     motion: vec4<f32>,
     // xy: honeycomb cells per UV unit along u and v
     pattern: vec4<f32>,
 }
 
 @group(constants::MATERIAL_BIND_GROUP) @binding(100) var<uniform> glow: SailGlow;
+// what moves, a row for every sail: x the ship's share of full speed (smoothed), y the sail's clock
+@group(constants::MATERIAL_BIND_GROUP) @binding(102) var<storage, read> sail_state: array<vec4<f32>>;
 
 fn modulo(x: vec2<f32>, y: vec2<f32>) -> vec2<f32> {
     return x - y * floor(x / y);
@@ -63,9 +66,10 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
     var out: FragmentOutput;
     out.color = apply_pbr_lighting(pbr_input);
 
-    let energy = glow.motion.x;
+    let state = sail_state[u32(glow.motion.w)];
+    let energy = state.x;
     let phase = glow.motion.y;
-    let clock = glow.motion.z;
+    let clock = state.y;
 
     let p = in.uv * glow.pattern.xy;
     let h = hex(p);
@@ -121,7 +125,7 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
     let to_cam = normalize(view.world_position.xyz - in.world_position.xyz);
     let n = normalize(in.world_normal) * select(-1.0, 1.0, dot(in.world_normal, to_cam) >= 0.0);
     let rim = pow(1.0 - clamp(dot(n, to_cam), 0.0, 1.0), 2.0);
-    let backlit = clamp(dot(n, glow.sun.xyz), 0.0, 1.0);
+    let backlit = clamp(dot(n, frame.sun.xyz), 0.0, 1.0);
 
     // the gathered light at the focus glows through the cloth, not only along the edges
     let strength = (pattern * (glow.params.z + 1.6 * lit) + core * (0.3 + 0.5 * energy)) * (1.0 + glow.sun.w * backlit) * (0.7 + 0.8 * rim);
