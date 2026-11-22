@@ -269,6 +269,7 @@ pub(super) fn settled(
     mut things: Query<(Option<&mut Ship>, Option<&mut MissionShip>, Option<&mut MissionBase>, &mut Boardable, Option<&mut crate::combat::BaseSide>)>,
     members: Query<&crate::ship::FleetMember>,
     grapples: Query<(Entity, &Grapple)>,
+    mut mission: Option<ResMut<Mission>>,
 ) {
     for s in msgs.read() {
         let Ok([(bship, bms, _, bflag, _), (tship, tms, tbase, mut tflag, tside)]) = things.get_many_mut([s.boarder, s.target]) else { continue };
@@ -313,6 +314,10 @@ pub(super) fn settled(
                 tflag.strength = if is_ship { Strength::ship(tflag.counts, bflag.skill.member()) } else { Strength::base(tflag.strength.full) };
                 for (h, _) in grapples.iter().filter(|(_, g)| g.grappler == s.boarder || g.grappler == s.target) {
                     commands.entity(h).despawn();
+                }
+                // The captor's tow links go with the grapple.
+                if let Some(m) = mission.as_mut() {
+                    m.script.drop_tows_of(s.boarder);
                 }
                 if ours {
                     sfx.write(Sfx::ui("HUD_Options_Dock"));
