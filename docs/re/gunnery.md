@@ -353,8 +353,8 @@ Every shot that strikes a damage section (a hull, a gun tower, a volcano) first 
 - A ricochet does no damage, no spill, no fire and no impact effect. The shot mirrors off the face at 0.6 of its speed and keeps
   flying (it can hit something else), and the bullet's `RicochetSound` for the material plays at the strike.
 - Remake: `combat::shells::ricochet`. PROVISIONAL: a small extra effect the original also plays is not identified; the sound's range
-  is the warning shot's 600 units; warning shots keep their harmless glance; mines' forced ricochet off friendly hulls is not ported
-  (our mines do not strike friendly hulls at all). Rocks never deflect a shot (their material term is -100).
+  is the warning shot's 600 units; warning shots keep their harmless glance; a mine's forced ricochet off allied hulls is the `force` argument of
+  `ricochet`. Rocks never deflect a shot (their material term is -100).
 
 ## Destroyed base part (PROVISIONAL)
 
@@ -436,9 +436,8 @@ section). Build: small where a pending-request state exists (`combat/gunnery.rs`
   radius, so nothing else near it is hurt. Its ricochet factor is -1000 (the roll never ricochets it).
 - **Ricochet off allies.** When the roll does not ricochet a mine, a mine still bounces off any ship whose owner is in mutual
   alliance with the mine's owner (own side included, matrix value 3): no damage, the mine stays live and rebounds at 0.6 of its speed
-  (the normal ricochet motion). Every other ship is hit. Remake (`combat/shells.rs` mine branch): a mine passes through ships of its
-  own side (nothing happens) and strikes allied-but-other-side ships. Build: small, same file: treat mutual alliance as the test and
-  rebound instead of pass.
+  (the normal ricochet motion). Every other ship is hit. Remake (`combat/shells.rs`): the same test (`boarding::allied_pair`: the owners'
+  alliance, else the same side), then the normal ricochet motion; the roll is still drawn. Every other ship is hit.
 - **Mine cap.** When a mine that has an owner object is created, the game reads the world's list of mines (list number 2 of the 13
   per-category object lists; "mines" for that list is inferred from point defence taking list 2 as its second target kind). If that
   list then has more than 100 entries, the **first** (oldest) is removed. This is one removal per creation, **world-wide, not per

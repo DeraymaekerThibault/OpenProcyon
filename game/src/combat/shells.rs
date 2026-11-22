@@ -262,9 +262,10 @@ fn ricochet_sound(sfx: &mut MessageWriter<Sfx>, bd: &BulletDef, key: &str, at: V
 /// ricochet the shell mirrors off the face at 0.6 of its speed, keeps flying and plays its ricochet sound for the material.
 /// PROVISIONAL: the small extra effect the original also plays is not identified; the sound's range is the warning shot's.
 #[allow(clippy::too_many_arguments)]
-fn ricochet(s: &mut Shell, tf: &mut Transform, bd: &BulletDef, key: &str, at: Vec3, n: Vec3, target: Vec3, rng: &mut Rng, sfx: &mut MessageWriter<Sfx>) -> bool {
+fn ricochet(s: &mut Shell, tf: &mut Transform, bd: &BulletDef, key: &str, at: Vec3, n: Vec3, target: Vec3, force: bool, rng: &mut Rng, sfx: &mut MessageWriter<Sfx>) -> bool {
     let angle = (target - s.vel).angle_between(n).to_degrees();
-    if s.harmless || rng.f() >= ricochet_chance(s.ricochet, key, angle) {
+    // `force`: a mine meeting an allied hull glances off whatever the roll says (the roll is still drawn).
+    if s.harmless || (rng.f() >= ricochet_chance(s.ricochet, key, angle) && !force) {
         return false;
     }
     s.vel = (s.vel - 2.0 * s.vel.dot(n) * n) * 0.6;
@@ -495,10 +496,8 @@ pub(super) fn shells(
             continue;
         }
         // Read from the original's code: a shell has no side test against ships; only its rejection list, which holds the firer for the
-        // first second, keeps it off a hull. Allied hulls are struck like enemy ones. PROVISIONAL: a mine still passes its own side
-        // (the original bounces it off allied hulls, which is not ported).
-        let mine = matches!(s.payload, Payload::Mine { .. });
-        let hit = nearest_ship_hit(&ships, &lib, |ship, side| exempt == Some(ship) || (mine && side == s.side), p0, p1);
+        // first second, keeps it off a hull. Allied hulls are struck like enemy ones; only a mine glances off an allied hull (below).
+        let hit = nearest_ship_hit(&ships, &lib, |ship, _| exempt == Some(ship), p0, p1);
         let best = hit.map(|(_, t, section, at)| (t, section, at));
         let best_ship = hit.map(|(entity, ..)| entity);
         let rock = rocks
@@ -578,7 +577,7 @@ pub(super) fn shells(
             let inv = btf.to_matrix().inverse();
             let normal = seg_mesh_hit(inv.transform_point3(p0), inv.transform_point3(p1), sec).map(|(_, n)| (btf.rotation * n).normalize());
             if let Some(n) = normal
-                && ricochet(&mut s, &mut tf, bd, key, at, n, Vec3::ZERO, &mut rng, &mut sfx)
+                && ricochet(&mut s, &mut tf, bd, key, at, n, Vec3::ZERO, false, &mut rng, &mut sfx)
             {
                 continue;
             }
@@ -611,8 +610,12 @@ pub(super) fn shells(
             let hull = Vec3::new(-ship.heading.sin(), 0.0, -ship.heading.cos()) * ship.speed + drift.map_or(Vec3::ZERO, |d| d.0);
             let key = material_key(&class.sections[k].material);
             hull_normal = seg_mesh_hit(inv.transform_point3(p0), inv.transform_point3(p1), &class.sections[k]).map(|(_, n)| (stf.rotation * n).normalize());
+            // Read from the original's code: a mine bounces off any ship whose owner is allied with the mine's owner (own side included).
+            let owner = |ship: Entity| ships.get(ship).ok().and_then(|x| x.5.map(|m| m.owner.as_str()));
+            let allied_hull =
+                matches!(s.payload, Payload::Mine { .. }) && crate::boarding::allied_pair(campaign.as_deref(), (owner(s.shooter), Some(s.side)), (owner(si), Some(ship.side)));
             if let Some(n) = hull_normal
-                && ricochet(&mut s, &mut tf, bd, key, at, n, hull, &mut rng, &mut sfx)
+                && ricochet(&mut s, &mut tf, bd, key, at, n, hull, allied_hull, &mut rng, &mut sfx)
             {
                 continue;
             }
