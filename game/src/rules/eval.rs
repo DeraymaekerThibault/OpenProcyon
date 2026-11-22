@@ -8,9 +8,12 @@ use crate::game_to_bevy;
 
 mod act;
 mod cond;
+mod diag;
+pub mod schema;
 mod state;
 mod types;
 
+pub use diag::{Diag, TraceOptions, set_trace};
 pub use state::Script;
 pub use types::*;
 
@@ -29,6 +32,7 @@ impl Script {
             })
             .collect();
         let n = rules.len();
+        let diag = Diag::new(rules.iter().map(|r| r.name.trim().to_string()).collect(), crate::rules::check::known_names(data));
         // The TWT's PlayerAllianceInfoVector lists the allied player pairs; every other pair of players starts hostile. Owners that are
         // not players ('NO PLAYER', unset) are never hostile. The rules' alliance actions then change it.
         let players: Vec<&str> = data["players"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
@@ -132,6 +136,7 @@ impl Script {
             mortar_bursts: vec![],
             mortar_seen: HashSet::new(),
             crew_screen: false,
+            diag,
         }
     }
 
@@ -149,19 +154,30 @@ impl Script {
         let mut out = vec![];
         let mut w = w.to_vec();
         let rules = std::mem::take(&mut self.rules);
+        if first_step {
+            self.audit(&rules, &w);
+        }
         for (i, r) in rules.iter().enumerate() {
+            self.diag.cur = i;
             // The opening NIS camera/speech rules are replaced by briefing.rs (which marks its speech as played).
             if self.fired[i] || (self.briefing_opening && opening_rule(&r.name)) {
                 continue;
             }
             let mut ok = true;
             self.consume.clear();
-            for c in &r.conds {
+            let mut failed = vec![];
+            for (ci, c) in r.conds.iter().enumerate() {
                 if !self.cond(c, &w, !r.once) {
                     ok = false;
+                    if self.diag.active() {
+                        failed.push(ci);
+                    }
                 }
             } // evaluate all: Enter Volume edge state must advance
             if !ok {
+                if self.diag.active() {
+                    self.trace_waiting(i, r, &failed, &w);
+                }
                 continue;
             }
             for key in std::mem::take(&mut self.consume) {
