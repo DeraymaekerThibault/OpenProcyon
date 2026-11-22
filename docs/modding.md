@@ -224,6 +224,8 @@ from the mission, the rule schema's Types, and inside `act {json}` the Type, the
 through several matches. A name the mission does not have is refused with the closest one ("no group 'Raider'; did you mean
 'Raiders'?"). A name with spaces goes in "quotes"; Tab adds them. A unit is written `Group,Unit`.
 
+The output keeps the last 2000 lines. PageUp / PageDown or the mouse wheel read back through it, Ctrl+Home / Ctrl+End jump to the top and bottom, and the panel says how many lines lie above or below. New output moves the view only if you were at the bottom; pressing Enter returns to it.
+
 Using a command that changes the game marks the battle as cheated: "CHEATS USED" shows on screen and its victory points are not
 added to the campaign total. Commands marked * below do that; queries and view-only commands do not.
 
@@ -233,6 +235,7 @@ added to the campaign total. Commands marked * below do that; queries and view-o
 | Mission state | `fire <rule>`* (run a rule's actions now, as `--fire-rule`; part of the name is enough), `why <rule>` (which conditions hold, and whether it is inactive or waiting in an `OP Wait`), `flags`, `timers`, `tasks`, `counters`, `set <flag> [on\|off]`*, `timer <name> start\|stop`*, `task <name> active\|complete\|failed [on\|off]`*, `counter <name> <value>`* |
 | Mission flow | `rules [text]` (every rule: fired, ran, never fired, inactive, waiting), `skip`* (end the speech line playing), `nis end`*, `win`*, `lose`*, `restart` |
 | Ships | `ships [text]`, `inspect` (the current target: orders, tow), `primary <group>`*, `damage <0..1> [group]`*, `attack <group> <group>`*, `stance <group> <stance>`*, `ally` / `hostile <player> <player>`*, `tow` / `untow <group> <group>`* |
+| Finding names | `list groups\|paths\|volumes\|points\|tasks\|timers\|flags\|counters\|players\|speech\|objects [text]` (groups show their member ids and names, objects their id, type and position, speech the event id and the start of its subtitle), `find <text>` (searches all of them, and ships and rules, and marks each hit with its kind) |
 | Authoring | `where` (the player's position in game units), `mark <name>` (appends `{"name", "pos"}` to `console_marks.txt` in the user data folder, ready to paste into a mission), `show volumes\|paths\|points [name]` and `hide ...` (draw them in the world, labelled) |
 | Camera and sound | `cam free\|player\|follow <group>` (free camera: arrows move, PageUp / PageDown rise and sink, right-drag looks, Shift is faster), `hud on\|off`, `say <speech event>`*, `music <track>` |
 | Raw rule access | `act <json>`* and `cond <json>` (checked against the rule schema; JSON `true` / `false` are accepted), `schema <text>` (the fields of a Type) |

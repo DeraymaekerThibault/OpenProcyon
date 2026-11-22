@@ -55,6 +55,8 @@ pub struct Script {
     pub(in crate::rules) media: Value,
     pub(in crate::rules) paths: Value,
     pub(in crate::rules) points: Value,
+    /// The mission's placed scenery (`objects`: islands, bases, rocks), for the console's `list objects`.
+    pub(in crate::rules) objects: Value,
     pub(in crate::rules) volumes: HashMap<String, Region>,
     pub(in crate::rules) nebulae: Vec<Region>,
     pub(in crate::rules) hits: HashMap<Entity, u32>,

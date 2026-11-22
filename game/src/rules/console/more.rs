@@ -192,6 +192,8 @@ impl Script {
                 o.lines.extend(list.iter().map(|u| self.describe_unit(u, env)));
                 o.lines.push(format!("{} unit(s)", list.len()));
             }
+            Command::List(kind, text) => o.lines = self.list_lines(kind, text, w),
+            Command::Find(text) => o.lines = self.find_lines(text, w),
             Command::Inspect => match env.target.and_then(|t| w.iter().find(|u| u.e == t)) {
                 Some(u) => {
                     o.lines.push(self.describe_unit(u, env));

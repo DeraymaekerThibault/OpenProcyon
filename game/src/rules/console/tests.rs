@@ -345,3 +345,77 @@ fn the_documented_example_mission_passes_the_checker_and_plays() {
     }
     assert!(!sc.nis && sc.task_active("Clear the gate"), "the wait ended and the actions after it ran");
 }
+
+// ------------------------------------------------------------------------------------------------------------ scrollback
+
+fn console_with(lines: usize) -> Console {
+    let mut c = Console::new(true);
+    c.say((0..lines).map(|i| format!("line {i}")).collect::<Vec<_>>().join("\n"));
+    c
+}
+
+#[test]
+fn page_keys_and_ctrl_home_end_move_the_view_through_the_output() {
+    let mut c = console_with(100);
+    assert_eq!(c.scroll, 0, "output starts at the end");
+    c.key(&Key::PageUp);
+    assert_eq!(c.scroll, SHOWN - 1, "a page keeps one line of overlap");
+    c.key(&Key::PageDown);
+    assert_eq!(c.scroll, 0);
+    c.key(&Key::PageDown);
+    assert_eq!(c.scroll, 0, "cannot go below the end");
+    assert_eq!(c.key_with(&Key::Home, true), Edit::None);
+    assert_eq!(c.scroll, 100 - SHOWN, "Ctrl+Home puts the first line at the top of the panel");
+    c.key(&Key::PageUp);
+    assert_eq!(c.scroll, 100 - SHOWN, "cannot go above the start");
+    c.key_with(&Key::End, true);
+    assert_eq!(c.scroll, 0);
+    c.key(&Key::Home);
+    assert_eq!(c.scroll, 0, "Home alone is not a scroll key");
+}
+
+#[test]
+fn scroll_by_clamps_and_a_short_log_does_not_scroll() {
+    let mut c = console_with(5);
+    c.scroll_by(10);
+    assert_eq!(c.scroll, 0, "everything fits");
+    let mut c = console_with(40);
+    c.scroll_by(WHEEL_LINES as isize);
+    assert_eq!(c.scroll, WHEEL_LINES);
+    c.scroll_by(-100);
+    assert_eq!(c.scroll, 0);
+    c.scroll_by(1000);
+    assert_eq!(c.scroll, 40 - SHOWN);
+}
+
+#[test]
+fn new_output_follows_only_a_view_that_was_at_the_end() {
+    let mut c = console_with(50);
+    c.say("new at the end");
+    assert_eq!(c.scroll, 0, "at the bottom: stays at the bottom");
+    c.scroll_by(10);
+    c.say("one\ntwo\nthree");
+    assert_eq!(c.scroll, 13, "scrolled back: the same lines stay in view, the marker counts the new ones");
+    let end = c.log.len() - c.scroll;
+    assert_eq!(c.log[end - 1], "line 40", "the last line in view is the same one after the new output arrived");
+}
+
+#[test]
+fn submitting_a_line_returns_to_the_end() {
+    let mut c = console_with(50);
+    c.scroll_by(20);
+    c.key(&Key::Character("x".into()));
+    assert_eq!(c.key(&Key::Enter), Edit::Submit("x".into()));
+    assert_eq!(c.scroll, 0);
+}
+
+#[test]
+fn the_scrollback_is_capped_and_the_view_stays_inside_it() {
+    let mut c = console_with(LOG_LINES + 500);
+    assert_eq!(c.log.len(), LOG_LINES);
+    assert_eq!(c.log[0], "line 500", "the oldest lines are the ones dropped");
+    c.scroll_top();
+    assert_eq!(c.scroll, LOG_LINES - SHOWN);
+    c.say("more");
+    assert!(c.scroll <= c.max_scroll());
+}
