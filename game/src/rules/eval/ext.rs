@@ -2,7 +2,8 @@
 //! can never clash with a retail name, and a mission that uses none of it behaves exactly as before.
 //!
 //! * Conditions: `OP Any Of`, `OP Not`, `OP Counter Condition`.
-//! * Actions: `OP Wait`, `OP Wait Until Speech Done` (sequences), `OP Set Counter`, `OP Add To Counter`, `OP Set Rule Active`.
+//! * Actions: `OP Wait`, `OP Wait Until Speech Done` (sequences), `OP Set Counter`, `OP Add To Counter`, `OP Set Rule Active`,
+//!   `OP Escort Group` (a ship keeps station on another group's ship).
 //! * Rule field `"Is Active"` (a rule with `false` is not evaluated), task keys `complete_when` / `fail_when` / `required`, and the
 //!   mission key `"victory": "objectives"`.
 
@@ -151,7 +152,7 @@ impl Script {
     }
 
     /// `OP ...` actions that are not waits (a wait reached outside a rule's action list, e.g. through `act` alone, does nothing).
-    pub(in crate::rules) fn ext_act(&mut self, a: &Value, rule: &str) {
+    pub(in crate::rules) fn ext_act(&mut self, a: &Value, w: &[Unit], out: &mut Vec<Fx>, rule: &str) {
         match s(a, "Type") {
             "OP Set Counter" => {
                 self.ext.counters.insert(s(a, "Counter Name").into(), f(a, "Value"));
@@ -173,6 +174,20 @@ impl Script {
                 if !found {
                     self.warn(&format!("rule '{name}' in 'OP Set Rule Active' of rule '{rule}'"));
                 }
+            }
+            // A standing order for computer ships (mission_ai.rs): keep station on the target group's ship, match its speed. An empty
+            // `Target Group` ends it. The ships that follow a path, attack or `Clear all AI commands` later drop it as any order is replaced.
+            "OP Escort Group" => {
+                let target = s(a, "Target Group").trim();
+                let order = (!target.is_empty()).then(|| {
+                    let name = s(a, "Station");
+                    let station = crate::ship::escort::Station::parse(name).unwrap_or_else(|| {
+                        self.warn(&format!("station '{name}' in 'OP Escort Group' of rule '{rule}' (Astern, Ahead, Port or Starboard)"));
+                        crate::ship::escort::Station::Astern
+                    });
+                    crate::ship::escort::Escort { target: target.into(), station, distance: f(a, "Distance").max(0.0) }
+                });
+                out.push(Fx::Escort(ids(w, s(a, "Group Name")), order));
             }
             "OP Wait" | "OP Wait Until Speech Done" => {}
             other => self.warn(&format!("action '{other}' in rule '{rule}'")),

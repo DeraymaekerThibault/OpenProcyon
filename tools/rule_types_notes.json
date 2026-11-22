@@ -23,7 +23,7 @@
     {
       "title": "Orders, movement and AI",
       "intro": "Scripted orders given to computer ships. The human's own course and throttle are left alone by most of these.",
-      "types": ["Group to follow path", "Set Group Throttle Percent", "Set Max Throttle Percent (Max user settable)", "Set Ship Top Speed Percentage", "GroupA to attack GroupB", "GroupA to Ram GroupB", "Is Group A attacking Group B", "Clear all AI commands", "Set Group/Unit Hold Position", "Set Group/Unit AI Stance", "Set Group/Unit AI Captain", "Set Group/Unit Warning Shot Mode", "Set Group/Unit Border Zone", "Clear Group/Unit Border Zone", "Set Group/Unit Border Zone Return Point"]
+      "types": ["Group to follow path", "Set Group Throttle Percent", "Set Max Throttle Percent (Max user settable)", "Set Ship Top Speed Percentage", "GroupA to attack GroupB", "GroupA to Ram GroupB", "Is Group A attacking Group B", "Clear all AI commands", "Set Group/Unit Hold Position", "Set Group/Unit AI Stance", "Set Group/Unit AI Captain", "Set Group/Unit Warning Shot Mode", "Set Group/Unit Border Zone", "Clear Group/Unit Border Zone", "Set Group/Unit Border Zone Return Point", "OP Escort Group"]
     },
     {
       "title": "Damage and vulnerability",
@@ -222,6 +222,7 @@
     "OP Add To Counter": "Adds `Value` (may be negative) to a counter.",
     "OP Wait": "Pauses the rest of this rule's action list for `Seconds`. Outside a rule's action list it does nothing.",
     "OP Wait Until Speech Done": "Pauses until the speech event is neither queued nor playing; an empty name waits for all speech. Put it after the `Play speech event` it waits for.",
-    "OP Set Rule Active": "Activates or deactivates every rule of that name. A deactivated rule stops a sequence that is waiting."
+    "OP Set Rule Active": "Activates or deactivates every rule of that name. A deactivated rule stops a sequence that is waiting.",
+    "OP Escort Group": "The computer ships of `Group Name` keep `Station` (`Astern`, `Ahead`, `Port`, `Starboard`) at `Distance` units from the ship of `Target Group` and match its speed; `Distance` 0 is the two hulls' radii plus 30. They stay in their own group, never join the human's fleet and fire only on what is in range (only an `Stance_Aggressive` escort leaves station, to a hostile in range). An empty `Target Group` ends the escort and stops the ships; so does any later path, attack or `Clear all AI commands` order, and a sunk leader. A skirmish script stores the order but its captain AI does not read it yet (PROVISIONAL). See `docs/modding.md`, Escorts."
   }
 }

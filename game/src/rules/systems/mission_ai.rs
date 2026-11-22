@@ -29,6 +29,24 @@ pub(super) fn mission_ai(
     sc.tag(&mut snap);
     // Where each ship's damage sections are, for the attack's aim point (`ship::attack::aim`).
     let hulls: std::collections::HashMap<Entity, (Transform, usize, Vec<f32>)> = ships.iter().map(|s| (s.0, (*s.2, s.1.class, s.3.sections.clone()))).collect();
+    // 'OP Escort Group': the leaders' poses and the units an escort's `Target Group` is matched against (the human's ship flagged, as
+    // the rules' own units are). Built only when some ship has the order.
+    let escorts = ships.iter().any(|s| s.4.escort.is_some());
+    let poses: std::collections::HashMap<Entity, crate::ship::escort::Leader> = if escorts {
+        ships.iter().map(|s| (s.0, crate::ship::escort::Leader { pos: s.2.translation, heading: s.1.heading, speed: s.1.speed.max(0.0), radius: lib.classes[s.1.class].radius })).collect()
+    } else {
+        default()
+    };
+    let pool: Vec<Unit> = if escorts {
+        let mut pool = snap[..n_ships].to_vec();
+        for u in &mut pool {
+            u.primary = ships.get(u.e).is_ok_and(|s| s.5);
+            u.alive = ships.get(u.e).is_ok_and(|s| !s.3.destroyed);
+        }
+        pool
+    } else {
+        vec![]
+    };
     let player_owner = ships.iter().find(|s| s.5).map_or_else(|| sc.player().into(), |s| s.4.owner.clone());
     for (e, mut ship, tf, h, mut ms, primary, pilot) in &mut ships {
         let is_boat = boats.contains(e);
@@ -114,10 +132,27 @@ pub(super) fn mission_ai(
         if is_held {
             continue; // no chasing, no path: fleet_follow halts it every frame
         }
+        // Escort: the leader is the human's ship when the target group has it, else the nearest live ship of the group. With none
+        // left (sunk, or the name matches nothing) the order ends and the ship stops where it is.
+        let escort = ms.escort.clone().and_then(|order| {
+            let named = |u: &&Unit| u.e != e && u.alive && matches(u, &order.target);
+            let leader = pool.iter().filter(named).find(|u| u.primary).or_else(|| pool.iter().filter(named).nearest_to(tf.translation, |u| u.pos));
+            let leader = leader.and_then(|u| poses.get(&u.e));
+            Some((order, leader.copied()))
+        });
+        if let Some((_, None)) = escort {
+            ms.escort = None;
+            ship.halt();
+            continue;
+        }
         // Movement: an attack order or an aggressive stance closes on the foe with the original's attack (`ship::attack`, as skirmish).
         // A human-captained ship (Captain_Human) only fires: it moves on the human fleet's orders (ship.rs fleet_follow).
         let chase = if ms.human || (ms.stance == Stance::Persistent && !ship.waypoints.is_empty()) {
             None // Persistent scripted routes take precedence over combat steering (Mission 3's swoop/retreat).
+        } else if escort.is_some() {
+            // An escort keeps its station: only an Aggressive one sails out to a hostile, and only to one already in range. Its guns
+            // fire at whatever is in range as any ship's do (`want` above).
+            hostile.filter(|(_, p)| ms.stance == Stance::Aggressive && p.distance(tf.translation) < range)
         } else {
             ordered.or(if ms.stance == Stance::Aggressive { hostile } else { None })
         };
@@ -153,6 +188,14 @@ pub(super) fn mission_ai(
             ship.goal = Some(goal);
             ship.order = order;
             ship.throttle = throttle;
+        } else if let Some((order, Some(leader))) = escort {
+            let class = &lib.classes[ship.class];
+            let c = crate::ship::escort::course(tf.translation, ship.heading, crate::ship::max_speed(&ship, class, h), class.radius, &leader, &order);
+            ms.stop_at_end = false;
+            ship.waypoints = c.waypoints;
+            ship.goal = c.goal;
+            ship.order = c.order;
+            ship.throttle = Some(c.throttle);
         } else if ms.stop_at_end && ms.looping.is_none() {
             // Retail path end (docs/re/movement.md): throttle holds the speed fraction while turned off the point, else full; the last point
             // of the path counts as reached inside 2 x the ship's radius, then the throttle is 0.
@@ -234,6 +277,7 @@ pub(super) fn follow_path(
         sh.order = 2;
         sh.goal = None;
         ms.attack.clear();
+        ms.escort = None;
         ms.stop_at_end = !looping;
         ms.looping = looping.then_some(full);
     }

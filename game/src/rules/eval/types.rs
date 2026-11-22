@@ -163,6 +163,8 @@ pub enum Fx {
     Clear(Vec<Entity>),
     Damage(Vec<Entity>, f32),
     Hold(Vec<Entity>, bool),
+    /// 'OP Escort Group' (engine-added): the ships keep station on the order's target group; `None` ends the escort.
+    Escort(Vec<Entity>, Option<crate::ship::escort::Escort>),
     ResetHits(Vec<Entity>),
     /// 'Set/Clear Group/Unit Border Zone': the volume the units are leashed to (None clears it).
     Border(Vec<Entity>, Option<String>),

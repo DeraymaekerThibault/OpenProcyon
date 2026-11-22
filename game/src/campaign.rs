@@ -35,6 +35,8 @@ pub struct MissionShip {
     pub ram: bool,
     /// The course it was on when a tow took it; it sails on from there once the tow ends (`rules::systems` AI).
     pub towed_course: Option<Vec<Vec3>>,
+    /// 'OP Escort Group' (engine-added): keeps station on another group's ship until an order of its own replaces it.
+    pub escort: Option<crate::ship::escort::Escort>,
 }
 use crate::rules;
 /// A mission base/island that rules can address ('*State Init* Setup Island'): `owner` is its group, e.g. 'AbandonedCamp'.

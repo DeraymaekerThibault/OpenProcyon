@@ -1169,3 +1169,30 @@ fn a_started_speech_line_with_text_is_handed_to_the_chat_history_once() {
     }
     assert_eq!(sc.started, vec![("First.".to_string(), Some([1.0, 0.0, 0.0, 1.0])), ("Second.".to_string(), None)], "in order, textless lines skipped");
 }
+
+#[test]
+fn escort_group_orders_the_named_ships_and_an_empty_target_ends_it() {
+    use crate::ship::escort::{Escort, Station};
+    let mut sc = bare_script(Value::Null, Value::Null);
+    let mut world = World::new();
+    let mut resolute = unit("RLS Resolute", "Admiral", Vec3::ZERO);
+    resolute.e = world.spawn_empty().id();
+    let mut out = vec![];
+    let act = |extra: Value| {
+        let mut a = serde_json::json!({"Type": "OP Escort Group", "Group Name": "Admiral"});
+        a.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        a
+    };
+    sc.act(&act(serde_json::json!({"Target Group": PLAYER, "Station": "starboard", "Distance": 80.0})), std::slice::from_ref(&resolute), &mut out, "test");
+    sc.act(&act(serde_json::json!({"Target Group": PLAYER})), std::slice::from_ref(&resolute), &mut out, "test");
+    sc.act(&act(serde_json::json!({"Target Group": ""})), std::slice::from_ref(&resolute), &mut out, "test");
+    assert!(
+        matches!(&out[..], [Fx::Escort(a, Some(x)), Fx::Escort(b, Some(y)), Fx::Escort(c, None)]
+            if [a, b, c].iter().all(|u| **u == [resolute.e])
+                && *x == Escort { target: PLAYER.into(), station: Station::Starboard, distance: 80.0 }
+                && *y == Escort { target: PLAYER.into(), station: Station::Astern, distance: 0.0 }),
+        "side and distance as given; astern and the hulls' own gap by default; an empty target ends it"
+    );
+    sc.act(&act(serde_json::json!({"Target Group": PLAYER, "Station": "abeam"})), &[resolute], &mut vec![], "test");
+    assert!(sc.warned.iter().any(|w| w.contains("station 'abeam'")), "an unknown station is reported");
+}

@@ -132,6 +132,7 @@ Scripted orders given to computer ships. The human's own course and throttle are
 | `Set Group/Unit Border Zone` | action | retail | `Group/Unit Name` (group; required)<br>`Polygon Name` (volume; required) | Keeps the ships inside a polygon (a `volume`); see the return-point action. |
 | `Clear Group/Unit Border Zone` | action | retail | `Group/Unit Name` (group; required) | Removes the border zone. |
 | `Set Group/Unit Border Zone Return Point` | action | retail | `Group/Unit Name` (group; required)<br>`Pointset Name` (point_set; required) | Where a ship that leaves its border zone is sent back to: the first position of the point set. |
+| `OP Escort Group` | action | engine | `Group Name` (group; required)<br>`Target Group` (group)<br>`Station` (one of `Astern`, `Ahead`, `Port`, `Starboard`; default `Astern`)<br>`Distance` (number; default `0`) | The computer ships of `Group Name` keep `Station` (`Astern`, `Ahead`, `Port`, `Starboard`) at `Distance` units from the ship of `Target Group` and match its speed; `Distance` 0 is the two hulls' radii plus 30. They stay in their own group, never join the human's fleet and fire only on what is in range (only an `Stance_Aggressive` escort leaves station, to a hostile in range). An empty `Target Group` ends the escort and stops the ships; so does any later path, attack or `Clear all AI commands` order, and a sunk leader. A skirmish script stores the order but its captain AI does not read it yet (PROVISIONAL). See `docs/modding.md`, Escorts. |
 
 ## Damage and vulnerability
 

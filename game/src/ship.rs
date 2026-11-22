@@ -1024,6 +1024,7 @@ pub fn fleet_follow(world: &mut World) {
 }
 
 pub mod attack;
+pub mod escort;
 #[cfg(test)]
 pub mod movement_tests;
 pub mod path_end;

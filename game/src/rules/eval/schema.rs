@@ -274,6 +274,7 @@ const COMPARE: &[&str] = &["Greater Than", "Less Than", "Equal To"];
 const FOLLOW: &[&str] = &["to end", "loop", "teleport loop", "end to end"];
 const STANCE: &[&str] = &["Stance_Dummy", "Stance_Neutral", "Stance_Defensive", "Stance_Aggressive", "Stance Persistant", "Stance Persistent", "AI STANCE"];
 const FORMATION: &[&str] = &["None", "Custom", "LineAbreast", "EchelonRight", "EchelonLeft", "Column", "Diamond", "Convoy"];
+const STATIONS: &[&str] = &["Astern", "Ahead", "Port", "Starboard"];
 const GUNNERY: &[&str] = &["CREW SKILL LEVEL", "Green", "Average", "Elite"];
 
 const fn cond(name: &'static str, fields: &'static [Field]) -> TypeDef {
@@ -496,6 +497,8 @@ pub static RULE_TYPES: &[TypeDef] = &[
     act("OP Set Counter", &[counter("Counter Name"), num("Value")]).engine(),
     act("OP Add To Counter", &[counter("Counter Name"), num("Value")]).engine(),
     act("OP Set Rule Active", &[rule_name("Rule Name"), boolean("Boolean")]).engine(),
+    // A standing order for computer ships; an empty `Target Group` ends it. Distance 0 is the hulls' radii plus 30.
+    act("OP Escort Group", &[grp("Group Name"), grp("Target Group").opt(), choice("Station", STATIONS).opt().dflt("Astern"), num("Distance").opt()]).engine(),
     act(
         "*State Init* Setup Nebula",
         &[

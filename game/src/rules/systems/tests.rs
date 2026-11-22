@@ -222,3 +222,40 @@ fn mission_ships_halt_when_their_script_route_runs_out() {
     assert!(!mission.stop_at_end);
     assert!(mission.attack.is_empty());
 }
+
+/// 'OP Escort Group': a computer ship sails to its station on the leader and matches its speed, never turns on a hostile with a
+/// stance that does not hunt, and stops where it is once the leader is gone.
+#[test]
+#[ignore = "needs imported assets"]
+fn an_escort_keeps_station_on_its_leader_and_stops_when_the_leader_sinks() {
+    use crate::ship::escort::{Escort, Station};
+    let lib = Library::load(crate::assets_dir());
+    let mut app = App::new();
+    app.insert_resource(crate::campaign::load())
+        .init_resource::<Time>()
+        .init_resource::<crate::environment::Sensors>()
+        .add_systems(PreUpdate, crate::environment::refresh_sensors)
+        .add_systems(Update, mission_ai);
+    let n = lib.classes[0].sections.len();
+    let health = || Health { sections: vec![1.0; n], core: 1.0, destroyed: false };
+    app.insert_resource(lib);
+    let ms = |name: &str, owner: &str| MissionShip { name: name.into(), owner: owner.into(), visible: true, stance: Stance::Defensive, ..default() };
+    // The leader sails on at 5, 300 units ahead (towards -Z); the escort lies at the origin with its bow on it.
+    let leader = app.world_mut().spawn((Ship { speed: 5.0, order: 2, ..Ship::new(0, Side::Player) }, health(), Transform::from_xyz(0.0, 0.0, -300.0), ms("Lead", "Leaders"))).id();
+    let order = Escort { target: "Leaders".into(), station: Station::Astern, distance: 60.0 };
+    let escort = app.world_mut().spawn((Ship::new(0, Side::Player), health(), Transform::default(), MissionShip { escort: Some(order), ..ms("Escort", "Escorts") })).id();
+    app.update();
+    let sh = app.world().get::<Ship>(escort).unwrap();
+    assert_eq!((sh.order, sh.waypoints.len(), sh.throttle), (2, 1, Some(1.0)), "full speed for a station 240 units off, dead ahead");
+    assert!((sh.waypoints[0] - Vec3::new(0.0, 0.0, -240.0)).length() < 1.0, "astern of the leader, 60 units: {:?}", sh.waypoints);
+    // In its station it matches the leader's speed.
+    app.world_mut().get_mut::<Transform>(escort).unwrap().translation = Vec3::new(0.0, 0.0, -240.0);
+    app.update();
+    let (sh, top) = (app.world().get::<Ship>(escort).unwrap(), app.world().resource::<Library>().classes[0].phys.max_speed * crate::ship::FULL_SPEED);
+    assert!(sh.waypoints.is_empty() && (sh.throttle.unwrap() * top - 5.0).abs() < 0.5, "{:?} of {top}", sh.throttle);
+    // The leader sinks: the order ends and the ship stops.
+    app.world_mut().get_mut::<Health>(leader).unwrap().destroyed = true;
+    app.update();
+    assert!(app.world().get::<MissionShip>(escort).unwrap().escort.is_none());
+    assert_eq!(app.world().get::<Ship>(escort).unwrap().order, 0);
+}

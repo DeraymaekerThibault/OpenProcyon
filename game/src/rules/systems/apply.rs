@@ -255,13 +255,33 @@ pub(in crate::rules) fn apply(
                 }
             }
             Fx::Banner(u, bn) => each_ship(ships, u, |s| s.mission.banner.clone_from(&bn)),
+            Fx::Escort(u, order) => each_ship(ships, u, |s| {
+                if s.primary {
+                    return; // the human's ship takes the human's orders
+                }
+                if order.is_none() && s.mission.escort.is_some() {
+                    s.ship.halt();
+                }
+                s.mission.escort.clone_from(&order);
+                if order.is_some() {
+                    s.mission.attack.clear();
+                    s.mission.ram = false;
+                    s.mission.looping = None;
+                    s.mission.stop_at_end = false;
+                    s.ship.throttle = None;
+                }
+            }),
             Fx::Ram(u, g) => each_ship(ships, u, |s| {
+                s.mission.escort = None;
                 s.mission.ram = true;
                 add_once(&mut s.mission.attack, &g);
             }),
             Fx::Attack(u, g) => {
                 each_dragon(env.dragons, &u, |d| add_once(&mut d.attack, &g));
-                each_ship(ships, u, |s| add_once(&mut s.mission.attack, &g));
+                each_ship(ships, u, |s| {
+                    s.mission.escort = None;
+                    add_once(&mut s.mission.attack, &g)
+                });
             }
             // Only script-given orders are cleared: the human's own course and throttle stay.
             Fx::Clear(u) => {
@@ -271,6 +291,7 @@ pub(in crate::rules) fn apply(
                 });
                 each_ship(ships, u, |s| {
                     s.mission.attack.clear();
+                    s.mission.escort = None;
                     s.mission.ram = false;
                     s.mission.looping = None;
                     if !s.primary {
