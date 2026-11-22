@@ -34,7 +34,7 @@ struct EngineLoop {
 /// PROVISIONAL: engine loops have no max distance in the WOT; levels for engine and music are guesses.
 const ENGINE_MAX: f32 = 300.0;
 const ENGINE_VOL: f32 = 0.25; // PROVISIONAL mix: quieter rumble leaves speech and weapon impacts audible.
-const MUSIC_VOL: f32 = 0.35;
+pub const MUSIC_VOL: f32 = 0.35;
 
 pub fn plugin(app: &mut App) {
     app.add_plugins(crate::crew::plugin)

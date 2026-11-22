@@ -711,3 +711,13 @@ fn every_computer_roll_builds_a_fleet() {
         assert!(spent.iter().filter(|&&p| p > i64::from(limit) - 10).count() >= 10, "most fleets spend the budget to the point: {spent:?}");
     }
 }
+
+#[test]
+fn menu_track_starts_silent_until_the_music_slider_is_applied() {
+    let mut app = App::new();
+    app.add_plugins((MinimalPlugins, bevy::asset::AssetPlugin::default())).init_asset::<bevy::audio::AudioSource>().add_systems(Update, start_music);
+    app.update();
+    let mut q = app.world_mut().query_filtered::<&PlaybackSettings, With<MenuMusic>>();
+    let s = q.single(app.world()).expect("one menu track");
+    assert_eq!(s.volume, bevy::audio::Volume::Linear(0.0), "not at full level while the saved music volume is still unapplied");
+}
