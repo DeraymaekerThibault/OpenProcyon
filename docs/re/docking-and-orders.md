@@ -110,6 +110,16 @@ None → waiting to dock → approach → pre-docked → docked → moving away 
 Tow: the tower sails at the towee's centre (read from the code; not its tow nodes); **inside 50 units of surface distance the tow link is registered**
 (`ToweePoint = front_tow`, `TowerPoint = back_tow` mesh nodes). The remake now uses these nodes for approach and a shared mass-weighted cable constraint; retail spring/damping remain PROVISIONAL.
 
+### Docking a towed ship (read from the original's code; no run)
+Nothing stops a towed ship from docking: neither the dock-ability test nor the dock order looks for tow links. The link the dock routine
+registers for a ship dockee is the same kind as a tow link, and it is only added when no such link already joins the pair (in either order).
+When the dock time ends, or the dock order is cancelled, any link joining docker and dockee is removed.
+- Docking at a tender other than the tower: the towed ship has two links for the dock's duration; the release removes only the tender's. The tow stays.
+- Docking at the own tower (or the tower docking at its towee): no second link is added, and the release removes the tow. **Docking at one's own tower ends the tow.**
+- A base dockee gets no link at all.
+Remake: a dock release (or cancel) breaks any tow between the pair (`Script::break_tow_between`); the dock link itself is still kept apart from the tow list
+(the docked flag the rules read), so a tow link does not read as "docked" to the rules. Unchecked in the running original.
+
 ### Repair on docking
 Per-ship WOT field **`Repair Effect Name`** picks the size class: `Repair_Small` → small; `Repair_Medium`, `Repair_IC_Small` →
 medium; `Repair_Large`, `Repair_IC_Medium` → large; `Repair_IC_Large` → large ironclad; `Repair_Tender` sets nothing. `hud.hdt`
