@@ -45,6 +45,8 @@ fn draw(
     mut mats: ResMut<Assets<StandardMaterial>>,
     mesh: Query<(&Mesh3d, &mut Visibility), With<RopeMesh>>,
     mut look: Local<Option<(f32, f32)>>,
+    // the lines and eye the mesh was last built from
+    mut built: Local<Option<(Vec<(Vec3, Vec3, f32)>, Vec3)>>,
 ) {
     let existing = mesh.single_inner().ok();
     if ropes.0.is_empty() {
@@ -55,6 +57,14 @@ fn draw(
     }
     let (width, segment) = *look.get_or_insert_with(shape);
     let eye = cam.translation();
+    // Same lines, same eye: the ribbons come out the same, so the mesh (still on show) is left alone.
+    if existing.is_some() && built.as_ref().is_some_and(|(lines, at)| *lines == ropes.0 && *at == eye) {
+        if let Some((_, mut vis)) = existing {
+            vis.set_if_neq(Visibility::Inherited);
+        }
+        return;
+    }
+    *built = Some((ropes.0.clone(), eye));
     let (mut pos, mut uv, mut idx) = (vec![], vec![], vec![]);
     for &(a, b, slack) in &ropes.0 {
         let pts = sag_points(a, b, slack);
@@ -124,6 +134,30 @@ mod tests {
         world.resource_mut::<Ropes>().0.push((Vec3::ZERO, Vec3::Z, 0.0));
         app.update();
         assert_eq!(*app.world_mut().query_filtered::<&Visibility, With<RopeMesh>>().single(app.world()).unwrap(), Visibility::Inherited);
+    }
+
+    #[test]
+    fn the_rope_mesh_is_rebuilt_only_when_a_line_or_the_camera_moved() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, AssetPlugin::default()))
+            .init_asset::<Mesh>()
+            .init_asset::<Image>()
+            .init_asset::<StandardMaterial>()
+            .init_resource::<Ropes>()
+            .add_systems(Update, draw);
+        let cam = app.world_mut().spawn((Camera3d::default(), GlobalTransform::default())).id();
+        app.world_mut().resource_mut::<Ropes>().0.push((Vec3::ZERO, Vec3::X * 10.0, 1.0));
+        let modified = |app: &mut App| {
+            app.update();
+            app.world_mut().resource_mut::<Messages<AssetEvent<Mesh>>>().drain().filter(|e| matches!(e, AssetEvent::Modified { .. })).count()
+        };
+        modified(&mut app); // spawns the mesh
+        assert_eq!((modified(&mut app), modified(&mut app)), (0, 0), "nothing moved: the mesh is left alone");
+        app.world_mut().resource_mut::<Ropes>().0[0].1 = Vec3::X * 12.0;
+        assert_eq!(modified(&mut app), 1, "a moved end rebuilds it");
+        assert_eq!(modified(&mut app), 0);
+        app.world_mut().entity_mut(cam).insert(GlobalTransform::from_xyz(0.0, 5.0, 0.0));
+        assert_eq!(modified(&mut app), 1, "a moved camera rebuilds it");
     }
 
     #[test]

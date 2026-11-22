@@ -151,7 +151,7 @@ pub fn update(
         idx.extend([k, k + 1, k + 2, k, k + 2, k + 3]);
     }
     // Do not re-upload unchanged empty meshes every frame while docking or idle.
-    crate::fx::set_ribbons_unless_still_empty(&mut meshes, &mesh.0, pos, uv, col, idx);
+    crate::fx::set_ribbons_if_changed(&mut meshes, &mesh.0, pos, uv, col, idx);
     // Destination stars (HUD_Waypoint_Accept) flat on the plane at every waypoint; a pending plot shows do-nothing stars with the
     // accept star and the cancel X at its last point.
     for (m, Marks(kind)) in &marks {

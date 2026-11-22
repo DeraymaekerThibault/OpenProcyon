@@ -85,12 +85,17 @@ pub fn set_ribbons(
     mesh.insert_indices(bevy::mesh::Indices::U32(idx));
 }
 
-/// `set_ribbons` on the mesh `handle` names, except that an empty mesh is not rewritten with nothing (no re-upload, and Bevy warns
-/// "no vertices" otherwise).
-pub fn set_ribbons_unless_still_empty(meshes: &mut Assets<Mesh>, handle: &Handle<Mesh>, pos: Vec<[f32; 3]>, uv: Vec<[f32; 2]>, col: Vec<[f32; 4]>, idx: Vec<u32>) {
-    if (!pos.is_empty() || meshes.get(handle).is_some_and(|m| m.count_vertices() > 0))
-        && let Some(mut m) = meshes.get_mut(handle)
-    {
+/// `set_ribbons` on the mesh `handle` names, except that nothing is written when the mesh already holds exactly this (the asset is
+/// not touched, so Bevy does not re-extract and re-upload it). That covers a mesh that is still empty (rewriting it with nothing
+/// makes Bevy warn "no vertices") and a ribbon whose inputs did not change since the last frame.
+pub fn set_ribbons_if_changed(meshes: &mut Assets<Mesh>, handle: &Handle<Mesh>, pos: Vec<[f32; 3]>, uv: Vec<[f32; 2]>, col: Vec<[f32; 4]>, idx: Vec<u32>) {
+    use bevy::mesh::VertexAttributeValues as V;
+    let Some(old) = meshes.get(handle) else { return };
+    let same = (matches!(old.attribute(Mesh::ATTRIBUTE_POSITION), Some(V::Float32x3(v)) if *v == pos) || (pos.is_empty() && old.attribute(Mesh::ATTRIBUTE_POSITION).is_none()))
+        && (matches!(old.attribute(Mesh::ATTRIBUTE_UV_0), Some(V::Float32x2(v)) if *v == uv) || (uv.is_empty() && old.attribute(Mesh::ATTRIBUTE_UV_0).is_none()))
+        && (matches!(old.attribute(Mesh::ATTRIBUTE_COLOR), Some(V::Float32x4(v)) if *v == col) || (col.is_empty() && old.attribute(Mesh::ATTRIBUTE_COLOR).is_none()))
+        && (matches!(old.indices(), Some(bevy::mesh::Indices::U32(v)) if *v == idx) || (idx.is_empty() && old.indices().is_none()));
+    if !same && let Some(mut m) = meshes.get_mut(handle) {
         set_ribbons(&mut m, pos, uv, col, idx);
     }
 }
@@ -148,6 +153,8 @@ pub struct Fx {
     /// The vertices of the mesh the effect is told about (a damaged section's layer), ship-local; see `Prim::mesh_vertices`.
     pub vertices: Vec<Vec3>,
     meshes: Vec<Option<(Handle<Mesh>, Handle<StandardMaterial>)>>,
+    /// Per primitive, what its mesh was last written from (morph weight, scale, colour), so an unchanged mesh is left alone.
+    mesh_keys: Vec<Option<[f32; 6]>>,
 }
 
 impl Fx {
@@ -225,6 +232,7 @@ pub fn spawn_with(commands: &mut Commands, lib: &FxLib, name: &str, parent: Opti
         emitting: true,
         vertices: vec![],
         meshes: lib.list[eff].prims.iter().map(|_| None).collect(),
+        mesh_keys: lib.list[eff].prims.iter().map(|_| None).collect(),
     };
     let mut e = commands.spawn((fx, local, GlobalTransform::from(world), Visibility::default()));
     if let Some(p) = parent {
@@ -255,6 +263,8 @@ pub fn spawn_with(commands: &mut Commands, lib: &FxLib, name: &str, parent: Opti
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bevy::asset::RenderAssetUsages;
+    use bevy::mesh::PrimitiveTopology;
 
     #[test]
     fn spawning_an_effect_announces_it_with_the_nodes_forward_unless_the_caller_knows_more() {
@@ -279,5 +289,32 @@ mod tests {
         let plain = EffectStarted { entity: made.0, effect: 1, at: node.translation, forward: node.forward().as_vec3(), shell: None, host: None, material: None };
         assert_eq!(sent[0], plain, "no shell: the node's own forward");
         assert_eq!(sent[1], EffectStarted { entity: made.1, effect: 0, forward: Vec3::Y, shell: Some(shell), host: Some(host), material: Some("Iron"), ..plain });
+    }
+
+    #[test]
+    fn a_ribbon_that_did_not_change_is_not_written_and_one_that_did_is() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, AssetPlugin::default())).init_asset::<Mesh>();
+        let handle = app.world_mut().resource_mut::<Assets<Mesh>>().add(Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default()));
+        let ribbon = |x: f32| (vec![[x, 0.0, 0.0], [x, 1.0, 0.0], [x + 1.0, 0.0, 0.0]], vec![[0.0, 0.0]; 3], vec![[1.0; 4]; 3], vec![0, 1, 2]);
+        let write = |app: &mut App, x: f32| {
+            let (p, u, c, i) = ribbon(x);
+            set_ribbons_if_changed(&mut app.world_mut().resource_mut::<Assets<Mesh>>(), &handle, p, u, c, i);
+            app.update();
+            app.world_mut().resource_mut::<Messages<AssetEvent<Mesh>>>().drain().filter(|e| matches!(e, AssetEvent::Modified { .. })).count()
+        };
+        assert_eq!(write(&mut app, 0.0), 1, "first content");
+        assert_eq!(write(&mut app, 0.0), 0, "same content: the asset is not touched");
+        assert_eq!(write(&mut app, 0.0), 0);
+        assert_eq!(write(&mut app, 2.0), 1, "changed content is written");
+        let none = |app: &mut App| {
+            let mut empty = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
+            empty.insert_attribute(Mesh::ATTRIBUTE_POSITION, Vec::<[f32; 3]>::new());
+            let h = app.world_mut().resource_mut::<Assets<Mesh>>().add(empty);
+            set_ribbons_if_changed(&mut app.world_mut().resource_mut::<Assets<Mesh>>(), &h, vec![], vec![], vec![], vec![]);
+            app.update();
+            app.world_mut().resource_mut::<Messages<AssetEvent<Mesh>>>().drain().filter(|e| matches!(e, AssetEvent::Modified { .. })).count()
+        };
+        assert_eq!(none(&mut app), 0, "an empty mesh is not rewritten with nothing");
     }
 }

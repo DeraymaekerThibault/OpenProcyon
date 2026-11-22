@@ -373,8 +373,8 @@ pub fn update(
                 }
             }
         }
-        if let Some(mut mesh) = h.mesh.as_ref().and_then(|m| meshes.get_mut(m)) {
-            fx::set_ribbons(&mut mesh, pos, uv, col, idx);
+        if let Some(handle) = h.mesh.as_ref() {
+            fx::set_ribbons_if_changed(&mut meshes, handle, pos, uv, col, idx);
         }
     }
 }

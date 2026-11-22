@@ -167,7 +167,7 @@ pub fn update(
     mut mats: ResMut<Assets<crate::fx::EffectMaterial>>,
     ships: Query<(Entity, &Transform, &Ship, Option<&crate::combat::Health>), With<Ship>>,
     lib: Res<crate::combat::Library>,
-    mut wakes: Query<(Entity, &mut Wake, &Mesh3d)>,
+    mut wakes: Query<(Entity, &mut Wake, &Mesh3d, Has<crate::environment::Unseen>)>,
     cloaks: Query<&crate::cloak::Cloak>,
 ) {
     let dt = time.delta_secs().min(0.25);
@@ -177,7 +177,7 @@ pub fn update(
         }
         let class = &lib.classes[sh.class];
         for (idx, (_, effect)) in class.wake.iter().enumerate() {
-            if wakes.iter().any(|(_, w, _)| w.ship == s && w.idx == idx) {
+            if wakes.iter().any(|(_, w, _, _)| w.ship == s && w.idx == idx) {
                 continue;
             }
             let mesh = meshes.add(Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default()));
@@ -190,7 +190,7 @@ pub fn update(
             commands.spawn((Scenario, wake, Mesh3d(mesh), MeshMaterial3d(mats.add(material)), Transform::default(), Visibility::default(), NoFrustumCulling));
         }
     }
-    for (e, mut w, mesh) in &mut wakes {
+    for (e, mut w, mesh, unseen) in &mut wakes {
         let Ok((_, tf, sh, health)) = ships.get(w.ship) else {
             commands.entity(e).despawn();
             continue;
@@ -208,9 +208,15 @@ pub fn update(
         }
         w.acc += dt;
         let node = frame(tf, *at);
+        let mut ticked = false;
         while w.acc >= TICK {
             w.acc -= TICK;
             w.trail.tick(&node);
+            ticked = true;
+        }
+        // The ribbon only changes on an engine tick (30 Hz): between ticks, and while the ship is out of sight, it is not rebuilt.
+        if !ticked || unseen {
+            continue;
         }
         let (mut pos, mut uv, mut col, mut idx) = (vec![], vec![], vec![], vec![]);
         for (i, s) in w.trail.segs.iter().enumerate() {
@@ -225,7 +231,7 @@ pub fn update(
             }
         }
         // An empty mesh is only written once, to clear the last frame's wake: rewriting it every frame makes Bevy warn "no vertices".
-        crate::fx::set_ribbons_unless_still_empty(&mut meshes, &mesh.0, pos, uv, col, idx);
+        crate::fx::set_ribbons_if_changed(&mut meshes, &mesh.0, pos, uv, col, idx);
     }
 }
 
