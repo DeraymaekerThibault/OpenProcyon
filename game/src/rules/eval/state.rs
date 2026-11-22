@@ -195,6 +195,10 @@ impl Script {
     pub fn break_tows(&mut self, tower: Entity) {
         self.tows.retain(|t| t.0 != tower);
     }
+    /// Drops every tow link `ship` is in, as tower or towee (a won boarding fight).
+    pub fn drop_tows_of(&mut self, ship: Entity) {
+        self.tows.retain(|t| t.0 != ship && t.1 != ship);
+    }
     pub fn dock_time(&self, docker: Entity) -> Option<f32> {
         self.dock_times.get(&docker).copied()
     }

@@ -194,6 +194,11 @@ fn grapple_then_board_captures_the_ship_and_tells_the_rules() {
     app.world_mut().entity_mut(me).insert(crate::ship::FleetMember("Player".into(), 0));
     app.world_mut().entity_mut(foe).insert(crate::ship::FleetMember("Enemy".into(), 0));
     app.world_mut().get_mut::<Boardable>(foe).unwrap().strength.defend = 3; // a thin crew, so the seeded fight is short
+    let (towee, other) = (app.world_mut().spawn_empty().id(), app.world_mut().spawn_empty().id());
+    let mut mission = crate::campaign::load();
+    mission.script.set_tow(me, towee, true);
+    mission.script.set_tow(other, towee, true);
+    app.insert_resource(mission);
     tick(&mut app, 0.1);
     assert_eq!(app.world().resource::<BoardStatus>().board(foe), (false, false), "no grapple yet: Board greyed");
     assert_eq!(app.world().resource::<BoardStatus>().grapple(foe), (false, true), "the cutter has a harpoon");
@@ -237,6 +242,7 @@ fn grapple_then_board_captures_the_ship_and_tells_the_rules() {
     crate::ship::reconcile_fleets(app.world_mut());
     assert_eq!(app.world().resource::<crate::ship::Fleets>().roster(), &[me, foe], "capture joins the captor's own roster");
     assert!(held(&mut app, me).is_empty(), "grapple released");
+    assert_eq!(app.world().resource::<Mission>().script.tows(), &[(other, towee)], "the captor's tow links are dropped, others kept");
     assert_eq!(app.world().resource::<Got>().0, vec![("Player".to_string(), "Enemy".to_string())]);
     assert!(app.world().get::<Boardable>(foe).unwrap().strength.defend > 3, "crewed afresh");
 }

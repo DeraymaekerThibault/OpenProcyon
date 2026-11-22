@@ -62,7 +62,7 @@ Per entry and frame:
    (target: defending < 1; boarder: attacking < 1). Bases have no attacking value to lose.
 4. When over, both sides are normalised (§2) and the result is read from the values **before** normalising: boarder attacking vs target defending.
    Target < boarder → **boarder wins** (outcome 0 to the boarder, 1 to the target); target > boarder → boarder loses (1 / 0); equal → draw (2 / 2).
-   Then a win is announced as a capture (rules count it), the grapple between the two is removed, and the boarder's tow links are dropped.
+   Then a win is announced as a capture (rules count it), the grapple between the two is removed, and the boarder's tow links are dropped (every link it is in, as tower or towee).
 5. Results, per side:
    - **target captured**, owners differ: ship → it stops what it was doing, ownership moves to the boarder's player, and the ship
      is crewed afresh (crew list rebuilt, effects re-initialised); base → ownership moves and its defending strength is reset to the initial value.

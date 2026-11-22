@@ -209,6 +209,19 @@ fn human_captain_actions_hand_over_the_primary_ship() {
 
 #[test]
 #[ignore = "needs imported assets"]
+fn dropping_a_ships_tows_removes_it_as_tower_and_as_towee() {
+    let mut sc = script();
+    let mut world = World::new();
+    let (a, b, c, d) = (world.spawn_empty().id(), world.spawn_empty().id(), world.spawn_empty().id(), world.spawn_empty().id());
+    sc.set_tow(a, b, true);
+    sc.set_tow(c, a, true);
+    sc.set_tow(c, d, true);
+    sc.drop_tows_of(a);
+    assert_eq!(sc.tows(), &[(c, d)]);
+}
+
+#[test]
+#[ignore = "needs imported assets"]
 fn menu_tow_links_are_kept_per_tower_and_broken() {
     let mut sc = script();
     let mut world = World::new();
