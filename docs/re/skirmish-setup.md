@@ -179,7 +179,8 @@ skill can read N/A). Dragging one onto a post spends its cost (a 9-point captain
   (random hulls that fit, then swaps, then crew). PROVISIONAL: the style list's weight for style 0, rounding of halves, the hull list order, and
   the exclusion of tenders, tugs and barges, which stays by class name rather than the original's exact list. The rolls draw from the remake's
   own per-fleet random stream, one draw per original draw (the original's single shared generator is not copied); the fleet is still built
-  at launch, not when its slot is added. Crew pick below stays the remake's provisional one. Computer crews never use
+  at launch, not when its slot is added. Every computer's named crew come from the roster of the human player's fleet type (a Pirate human
+  gets Pirate crews on a Navy computer's hulls), not from the computer's own fleet type. Crew pick below stays the remake's provisional one. Computer crews never use
   crewmen rated above 7 in the post's skill except gunners, because the original picks the first crewman rated 7 or less (10 for the two best
   gun banks); there is no list of excluded story characters, so none is built.
 - Launch Game is greyed until a computer opponent is in and (open maps) a fleet is assembled; I'm Ready is always greyed in single player

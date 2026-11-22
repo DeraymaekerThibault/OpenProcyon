@@ -451,7 +451,7 @@ fn computer_swaps_stay_in_the_banks_mount_pool_and_the_race_rule() {
     let mut swaps = 0;
     for salt in 0..40 {
         let mut slot = skirmish::Slot { race: 3, ..skirmish("diablo_straight").slots[1].clone() };
-        skirmish::auto_build(&mut slot, 1000, 10, &lib, salt, true);
+        skirmish::auto_build(&mut slot, 1000, 10, &lib, salt, true, 3);
         for (ship, fit) in slot.weapons.iter().enumerate() {
             let class = &lib.classes[lib.index(&slot.fleet[ship])];
             for (bank, gun) in fit {
@@ -529,6 +529,19 @@ fn fleet_screen_offers_every_fleet_type_without_story_hulls() {
         assert!(list.iter().all(|&i| lib.classes[i].name != "Ship_Pirate_Silver"), "Silver's ship is not offered in retail");
     }
     assert!(offered(&lib, 4).is_empty());
+}
+#[test]
+#[ignore = "needs imported assets"]
+fn computer_crews_come_from_the_human_fleet_types_roster() {
+    let lib = Library::load(assets_dir());
+    for (human, name) in [(0, "Navy"), (2, "Pirate"), (3, "Procyon")] {
+        let roster = crate::crew_arms::roster(name, 0);
+        let mut slot = skirmish::Slot { race: 3, ..skirmish("diablo_straight").slots[1].clone() };
+        (slot.fleet, slot.weapons, slot.names, slot.crew) = Default::default();
+        skirmish::auto_build(&mut slot, 1000, 10, &lib, 1, true, human);
+        let crew: Vec<&String> = slot.crew.iter().flatten().flatten().collect();
+        assert!(!crew.is_empty() && crew.iter().all(|id| roster.contains(id)), "{name}: {crew:?}");
+    }
 }
 #[test]
 fn battle_entry_removes_menu_and_descendants_only() {
@@ -703,7 +716,7 @@ fn every_computer_roll_builds_a_fleet() {
         for salt in 0..20 {
             let mut slot = skirmish::Slot { race: 0, ..skirmish("diablo_straight").slots[1].clone() };
             (slot.fleet, slot.weapons, slot.names, slot.crew) = Default::default();
-            skirmish::auto_build(&mut slot, limit, 5, &lib, salt * 7 + 1, true);
+            skirmish::auto_build(&mut slot, limit, 5, &lib, salt * 7 + 1, true, 0);
             assert!(!slot.fleet.is_empty(), "limit {limit} salt {salt}: no ships");
             spent.push(slot.spent(&lib));
         }
