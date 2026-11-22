@@ -313,7 +313,7 @@ pub fn completions(line: &str, n: &Names) -> Completion {
                 }
                 ("stance", 1) => words(start, partial, &["dummy", "neutral", "defensive", "aggressive", "persistent"]),
                 ("nis", 0) => words(start, partial, &["end"]),
-                ("hud", 0) => words(start, partial, &["on", "off"]),
+                ("hud" | "fps", 0) => words(start, partial, &["on", "off"]),
                 ("cam", 0) => words(start, partial, &["free", "player", "follow"]),
                 ("cam", 1) if toks[0].text == "follow" => pick(start, partial, &n.groups, name_wrap),
                 ("show", 0) => words(start, partial, &["volumes", "paths", "points"]),

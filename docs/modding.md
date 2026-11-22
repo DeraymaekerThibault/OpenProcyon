@@ -233,7 +233,7 @@ added to the campaign total. Commands marked * below do that; queries and view-o
 | Mission flow | `rules [text]` (every rule: fired, ran, never fired, inactive, waiting), `skip`* (end the speech line playing), `nis end`*, `win`*, `lose`*, `restart` |
 | Ships | `ships [text]`, `inspect` (the current target: orders, tow), `primary <group>`*, `damage <0..1> [group]`*, `attack <group> <group>`*, `stance <group> <stance>`*, `ally` / `hostile <player> <player>`*, `tow` / `untow <group> <group>`* |
 | Authoring | `where` (the player's position in game units), `mark <name>` (appends `{"name", "pos"}` to `console_marks.txt` in the user data folder, ready to paste into a mission), `show volumes\|paths\|points [name]` and `hide ...` (draw them in the world, labelled) |
-| Camera and sound | `cam free\|player\|follow <group>` (free camera: arrows move, PageUp / PageDown rise and sink, right-drag looks, Shift is faster), `hud on\|off`, `say <speech event>`*, `music <track>` |
+| Camera and sound | `cam free\|player\|follow <group>` (free camera: arrows move, PageUp / PageDown rise and sink, right-drag looks, Shift is faster), `hud on\|off`, `fps [on\|off]` (a frame-rate counter in the top-right corner: smoothed rate, frame time, the worst frame of the last second, and the game speed when it is not 1; it stays with `hud off`, no argument toggles, and the choice is saved in `settings.json`), `say <speech event>`*, `music <track>` |
 | Raw rule access | `act <json>`* and `cond <json>` (checked against the rule schema; JSON `true` / `false` are accepted), `schema <text>` (the fields of a Type) |
 
 ## A ship from a model

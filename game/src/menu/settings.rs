@@ -43,6 +43,8 @@ pub struct Settings {
     pub difficulty: u8,
     /// The developer console may be opened with its key (backquote by default) / F12. Off by default.
     pub console: bool,
+    /// The console's `fps` command: the frame-rate counter is shown. Off by default.
+    pub fps: bool,
 }
 impl Default for Settings {
     fn default() -> Self {
@@ -59,6 +61,7 @@ impl Default for Settings {
             flags: true,
             difficulty: 1,
             console: false,
+            fps: false,
         }
     }
 }
@@ -79,6 +82,11 @@ pub(super) static CONSOLE: std::sync::atomic::AtomicBool = std::sync::atomic::At
 /// The "Developer Console" option (`--console`, `PROCYON_CONSOLE` and debug builds turn the console on without it).
 pub fn console_setting() -> bool {
     CONSOLE.load(std::sync::atomic::Ordering::Relaxed)
+}
+pub(super) static FPS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// Whether the frame-rate counter is shown (the console's `fps`; saved in `settings.json`).
+pub fn fps_setting() -> bool {
+    FPS.load(std::sync::atomic::Ordering::Relaxed)
 }
 pub(super) static DIFFICULTY: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(1);
 /// The difficulty option: 0 Easy, 1 Normal, 2 Hard.
@@ -127,13 +135,14 @@ impl Settings {
             flags: b("flags", d.flags),
             difficulty: n("difficulty", d.difficulty, 2),
             console: b("console", d.console),
+            fps: b("fps", d.fps),
         }
     }
-    pub(super) fn save(&self) {
+    pub(crate) fn save(&self) {
         let Some(p) = Self::path() else { return };
         let _ = p.parent().map(std::fs::create_dir_all);
         let v = serde_json::json!({"master": self.master, "music": self.music, "effects": self.effects, "dialogue": self.dialogue,
-            "fullscreen": self.fullscreen, "vsync": self.vsync, "aa": self.aa, "detail": self.detail, "background": self.background, "flags": self.flags, "difficulty": self.difficulty, "console": self.console});
+            "fullscreen": self.fullscreen, "vsync": self.vsync, "aa": self.aa, "detail": self.detail, "background": self.background, "flags": self.flags, "difficulty": self.difficulty, "console": self.console, "fps": self.fps});
         if let Err(e) = std::fs::write(p, serde_json::to_string_pretty(&v).unwrap_or_default()) {
             warn!("could not save settings: {e}");
         }
@@ -196,6 +205,7 @@ pub(super) fn apply_settings(settings: Res<Settings>, vtime: Res<Time<Virtual>>,
     DETAIL.store(settings.detail, std::sync::atomic::Ordering::Relaxed);
     DIFFICULTY.store(settings.difficulty, std::sync::atomic::Ordering::Relaxed);
     CONSOLE.store(settings.console, std::sync::atomic::Ordering::Relaxed);
+    FPS.store(settings.fps, std::sync::atomic::Ordering::Relaxed);
     AA.store(settings.aa, std::sync::atomic::Ordering::Relaxed);
     VSYNC.store(settings.vsync, std::sync::atomic::Ordering::Relaxed);
     let present = crate::present_mode(crate::profiling(), vtime.relative_speed());

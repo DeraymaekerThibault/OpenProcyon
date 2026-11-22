@@ -14,8 +14,10 @@ use super::schema::{self, Role};
 use super::*;
 
 mod complete;
+mod fps;
 mod more;
 pub use complete::{Completion, Names, completions, mean, nearest_name, tokens};
+pub use fps::FrameStats;
 pub use more::{CamMode, DevView, Env, Shape, ShapeKind, ShipInfo, ViewChange, free_cam, game_pos, hud_hidden, marks_path};
 
 /// Point set the `tp x y` command writes its destination to before running 'Teleport Group/Unit'.
@@ -222,6 +224,8 @@ pub enum Command {
     Hide(Option<ShapeKind>, Option<String>),
     Cam(CamMode),
     Hud(bool),
+    /// `fps [on|off]`: show or hide the frame-rate counter (no argument toggles).
+    Fps(Option<bool>),
     /// The rule schema's entry for an action or condition Type (or the Types whose name contains the text): its fields.
     Schema(String),
 }
@@ -350,6 +354,14 @@ pub static TABLE: &[Entry] = &[
     entry("hide", Group::Authoring, "hide volumes|paths|points|all [name]", "stop drawing them", "hide all", false),
     entry("cam", Group::Camera, "cam free | player | follow <group>", "a free-flying camera, the orbit camera on the player, or on a group", "cam follow Raiders", false),
     entry("hud", Group::Camera, "hud on|off", "hide or show the HUD, for clean screenshots", "hud off", false),
+    entry(
+        "fps",
+        Group::Camera,
+        "fps [on|off]",
+        "show or hide a frame-rate counter (smoothed rate, frame time, worst frame of the last second); no argument toggles; remembered between runs",
+        "fps on",
+        false,
+    ),
     entry("say", Group::Camera, "say <speech event>", "Play speech event: a line from the mission's media, without reaching its rule (it counts as played)", "say Opening", true),
     entry("music", Group::Camera, "music <track>", "Play Music Track: a music file, without reaching its rule", "music Battle", false),
     Entry {
@@ -531,6 +543,11 @@ pub fn parse(line: &str, player: &str, god: bool) -> Result<Command, String> {
         "hud" => match args.as_slice() {
             [v] => Command::Hud(flag_word(v)?),
             _ => return Err("usage: hud on|off".into()),
+        },
+        "fps" => match args.as_slice() {
+            [] => Command::Fps(None),
+            [v] => Command::Fps(Some(flag_word(v)?)),
+            _ => return Err("usage: fps [on|off]".into()),
         },
         "say" if !rest.is_empty() => act(json!({"Type": "Play speech event", "Speech Event Name": unquote(rest)})),
         "say" => return Err("usage: say <speech event>".into()),
@@ -782,6 +799,7 @@ impl Script {
             | Command::Show(..)
             | Command::Hide(..)
             | Command::Cam(_)
+            | Command::Fps(_)
             | Command::Hud(_) => self.run_more(cmd, w, env, out, &mut o),
             Command::Counters => {
                 o.lines.extend(self.ext.counter_list().into_iter().map(|(k, v)| format!("{k} = {v}")));

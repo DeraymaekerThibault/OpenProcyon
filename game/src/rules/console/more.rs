@@ -40,6 +40,8 @@ pub enum CamMode {
 #[derive(Clone, Debug, PartialEq)]
 pub enum ViewChange {
     Hud(bool),
+    /// The frame-rate counter: `None` toggles. The ECS side owns the setting (it is saved with the options).
+    Fps(Option<bool>),
     FreeCam(bool),
     Show(ShapeKind, Option<String>),
     Hide(Option<ShapeKind>, Option<String>),
@@ -72,6 +74,7 @@ impl DevView {
                 self.hud_hidden = !on;
                 HUD_HIDDEN.store(!on, std::sync::atomic::Ordering::Relaxed);
             }
+            ViewChange::Fps(_) => {}
             ViewChange::FreeCam(on) => {
                 self.free_fresh = *on && !self.free_cam;
                 self.free_cam = *on;
@@ -264,6 +267,7 @@ impl Script {
                     o.lines.push(format!("camera follows {group}"));
                 }
             },
+            Command::Fps(on) => o.view.push(ViewChange::Fps(*on)),
             Command::Hud(on) => {
                 o.view.push(ViewChange::Hud(*on));
                 o.lines.push(format!("HUD {}", if *on { "on" } else { "off" }));
