@@ -1,7 +1,7 @@
 //! Mission one's in-engine opening; retail paths/voices and provisional camera interpolation. `classic/mission_ui.rs` draws it.
 use crate::{
     Scenario,
-    campaign::{Mission, MissionShip, ObjectiveText},
+    campaign::{Mission, MissionShip},
     game_to_bevy,
 };
 use bevy::prelude::*;
@@ -100,7 +100,6 @@ pub fn autoplay_skip(
     ui: Query<Entity, With<BriefingUi>>,
     voices: Query<Entity, With<Voice>>,
     mut ships: Query<(&mut Transform, &MissionShip, &mut crate::Ship, Has<crate::PlayerShip>), Without<Camera3d>>,
-    mut objectives: Query<&mut Visibility, (With<ObjectiveText>, Without<Portrait>)>,
 ) {
     if !crate::smoke::autoplay() || !scripted_skip(&cfg) {
         return;
@@ -113,7 +112,7 @@ pub fn autoplay_skip(
     *elapsed += time.delta_secs();
     if *elapsed >= AUTOPLAY_SKIP_AT {
         mission.opening = None;
-        finish(&mut commands, mission, true, &ui, &voices, &mut ships, &mut objectives);
+        finish(&mut commands, mission, true, &ui, &voices, &mut ships);
     }
 }
 
@@ -125,7 +124,6 @@ fn finish(
     ui: &Query<Entity, With<BriefingUi>>,
     voices: &Query<Entity, With<Voice>>,
     ships: &mut Query<(&mut Transform, &MissionShip, &mut crate::Ship, Has<crate::PlayerShip>), Without<Camera3d>>,
-    objectives: &mut Query<&mut Visibility, (With<ObjectiveText>, Without<Portrait>)>,
 ) {
     for e in ui.iter().chain(voices.iter()) {
         commands.entity(e).despawn();
@@ -142,9 +140,6 @@ fn finish(
     // Rules 'END Opening NIS' (music, command-ship focus at 60 / 10 degrees, throttle) run in rules.rs once these are marked played.
     let names: Vec<String> = mission.data["opening_speech"].as_array().expect("opening speech export").iter().map(|c| c["name"].as_str().unwrap().to_string()).collect();
     mission.script.played.extend(names);
-    for mut vis in objectives {
-        *vis = Visibility::Inherited;
-    }
     info!("Mission 1 briefing complete{}", if skip { " (skipped)" } else { "" });
 }
 
@@ -162,7 +157,6 @@ pub fn update(
     binds: Res<crate::bindings::Bindings>,
     mut subtitles: Query<&mut Text, With<Subtitle>>,
     mut portraits: Query<&mut Visibility, With<Portrait>>,
-    mut objectives: Query<&mut Visibility, (With<ObjectiveText>, Without<Portrait>)>,
 ) {
     let Some(ref mut mission) = mission else { return };
     let mission = &mut **mission;
@@ -176,11 +170,8 @@ pub fn update(
     }
     let skip = scripted_skip(&cfg) && !crate::smoke::autoplay() && cfg.frame == 60;
     if skip || opening.elapsed >= end {
-        finish(&mut commands, mission, skip, &ui, &voices, &mut ships, &mut objectives);
+        finish(&mut commands, mission, skip, &ui, &voices, &mut ships);
         return;
-    }
-    for mut vis in &mut objectives {
-        *vis = Visibility::Hidden;
     }
     let cue = cue_at(opening.elapsed, cues);
     let index = cue.map(|c| c.0);

@@ -271,10 +271,6 @@ pub struct Mission {
     pub opening: Option<crate::briefing::Opening>,
     pub script: rules::Script,
 }
-/// Text widget a view spawns for the rules' current objectives (`rules::Ui` holds the other mission widgets).
-#[derive(Component)]
-pub struct ObjectiveText;
-
 /// True when `map` names a scripted world (a campaign mission "mission01"... or a tutorial), as opposed to a skirmish map.
 pub fn is_mission(map: Option<&str>) -> bool {
     map.is_some_and(|m| assets_dir().join(format!("maps/{m}/mission.json")).exists())

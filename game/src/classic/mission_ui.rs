@@ -1,4 +1,4 @@
-//! Classic mission text and letterboxing: the objectives line, the cutscene speech banner (black strip with the speaker's portrait), the
+//! Classic mission text and letterboxing: the cutscene speech banner (black strip with the speaker's portrait), the
 //! gameplay subtitle, hint and end text, the cutscene bars and the opening briefing's letterbox. The shared `rules::ui` and
 //! `briefing::update` fill in their text, art and visibility.
 //! Layout measured from the reference video, not decoded native NIS window placement.
@@ -6,7 +6,7 @@ use bevy::prelude::*;
 
 use crate::Scenario;
 use crate::briefing::{BriefingUi, Portrait, Subtitle};
-use crate::campaign::{Mission, ObjectiveText};
+use crate::campaign::Mission;
 use crate::rules::Ui;
 use crate::sprites::{HudData, sprite};
 
@@ -51,12 +51,6 @@ fn build_mission(mut commands: Commands, existing: Query<(), With<Ui>>) {
     if !existing.is_empty() {
         return;
     }
-    commands.spawn((
-        Scenario,
-        ObjectiveText,
-        text(18.0, Color::srgb(1.0, 0.9, 0.5)),
-        Node { position_type: PositionType::Absolute, top: Val::Px(12.0), left: Val::Px(180.0), right: Val::Px(180.0), ..default() },
-    ));
     // Cutscene speech banner as in the opening briefing: black strip at the top with the speaker's portrait and the line.
     commands.spawn((Scenario, Ui::SpeechPanel, Visibility::Hidden, BackgroundColor(Color::BLACK), GlobalZIndex(150), speech_strip()));
     for (kind, left, top, size, z) in [(Ui::SpeechFrame, 6.0, 1.0, 104.0, 155), (Ui::SpeechHead, 26.0, 21.0, 64.0, 156)] {

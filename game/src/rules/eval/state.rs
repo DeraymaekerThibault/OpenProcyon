@@ -29,6 +29,8 @@ pub struct Script {
     pub(in crate::rules) queue: VecDeque<String>,
     pub(in crate::rules) speaking: Option<(String, f32)>,
     pub subtitle: String,
+    /// Text lines that started playing since the HUD last took them, with the speech event's text colour: the Chat History feed.
+    pub started: Vec<(String, Option<[f32; 4]>)>,
     pub(in crate::rules) tasks: Vec<Task>,
     pub point: Option<usize>,
     /// Star map switches set by rules: the current objective point's visibility (PROVISIONAL default shown) and per-name map text visibility.
@@ -545,6 +547,10 @@ impl Script {
             let dur = m["duration"].as_f64().map_or((text.len() as f32 / 14.0).max(2.0), |d| d as f32 + 0.3);
             self.subtitle = text.into();
             self.speaking = Some((name.clone(), dur));
+            if !text.is_empty() {
+                let colour = self.speech_colour();
+                self.started.push((text.into(), colour));
+            }
             // The sound file of the TWT speech event (media `file`); mission 1 names its events after their files.
             return m["duration"].as_f64().map(|_| m["file"].as_str().map_or(name, String::from));
         }

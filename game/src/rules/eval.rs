@@ -79,6 +79,7 @@ impl Script {
             queue: VecDeque::new(),
             speaking: None,
             subtitle: String::new(),
+            started: vec![],
             tasks,
             point: None,
             point_on_map: true,

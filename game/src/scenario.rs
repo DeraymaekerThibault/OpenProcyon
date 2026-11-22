@@ -82,6 +82,7 @@ pub fn reset_fleets(world: &mut World) {
         orbit.focus = None;
     }
     world.insert_resource(Target::default());
+    world.insert_resource(panels::ChatLog::default());
     if let Some(mut hud) = world.get_resource_mut::<panels::FleetHud>() {
         *hud = default();
     }

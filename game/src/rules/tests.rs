@@ -1153,3 +1153,19 @@ fn fire_rule_runs_named_rules_at_start_once_and_in_order() {
     assert!(!sc.flags.contains_key("later") && !sc.flags.contains_key("last"), "fired rules stay fired");
     assert!(sc.flags["unrelated"], "a rule that was not fired still runs when its conditions hold");
 }
+
+#[test]
+fn a_started_speech_line_with_text_is_handed_to_the_chat_history_once() {
+    let media = serde_json::json!({"speech": {
+        "A": {"text": "First.", "duration": null, "color": [1.0, 0.0, 0.0, 1.0]},
+        "Mute": {"text": "", "duration": null},
+        "B": {"text": "Second.", "duration": null}}});
+    let mut sc = Script::new(&serde_json::json!({"rules": []}), media);
+    for n in ["A", "Mute", "B"] {
+        sc.queue_speech(n);
+    }
+    for _ in 0..8 {
+        sc.speech_tick(5.0);
+    }
+    assert_eq!(sc.started, vec![("First.".to_string(), Some([1.0, 0.0, 0.0, 1.0])), ("Second.".to_string(), None)], "in order, textless lines skipped");
+}
