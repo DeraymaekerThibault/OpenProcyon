@@ -1112,6 +1112,77 @@ fn shell_into_a_hull_damages_it_and_reports_the_hit() {
     assert!(impacted_material.is_some_and(|key| MATERIALS.contains(&key)), "the hit effect carries a material from the real collision");
 }
 
+/// Read from the original's code: a mine glances off a hull of an allied owner (own side included) and keeps flying at 0.6 of its
+/// speed; a hull that is not allied is struck.
+#[test]
+#[ignore = "needs imported assets"]
+fn a_mine_glances_off_allied_hulls_and_strikes_others() {
+    let lib = Library::load(assets_dir());
+    let c = lib.index("Ship_Navy_Torpedo");
+    let [ta, tb, tc] = lib.classes[c].sections.iter().find(|s| s.vital).unwrap().tris[0];
+    let normal = (tb - ta).cross(tc - ta).normalize();
+    let at = (ta + tb + tc) / 3.0 + normal * 12.0;
+    let bullet = "Bullet_StarMine_Med".to_string();
+    let impact = lib.bullets[&bullet].hit_fx.clone();
+    let mut app = App::new();
+    app.add_plugins((TaskPoolPlugin::default(), AssetPlugin::default()))
+        .init_resource::<Time>()
+        .insert_resource(FxLib::with_names(&impact.iter().map(String::as_str).collect::<Vec<_>>()))
+        .insert_resource(Rng(7))
+        .add_message::<Sfx>()
+        .add_message::<Hit>()
+        .add_message::<Destroyed>()
+        .add_message::<Detonate>()
+        .add_message::<Shoot>()
+        .add_message::<crate::decals::Scar>()
+        .add_systems(Update, (crate::tick_start, shells).chain());
+    let shooter = app.world_mut().spawn_empty().id();
+    let mut hulls = Vec::new();
+    for (i, side) in [Side::Player, Side::Enemy].into_iter().enumerate() {
+        let ship = Ship { heading: 0.0, ..Ship::new(c, side) };
+        let pos = Vec3::new(1000.0 * i as f32, 0.0, 0.0);
+        hulls.push(app.world_mut().spawn((Transform::from_translation(pos), ship, Health::new(&lib.classes[c]), Fires::default())).id());
+    }
+    let mut mines = Vec::new();
+    for i in 0..2 {
+        let shell = Shell {
+            vel: -normal * 200.0,
+            age: 0.0,
+            lifetime: 1000.0,
+            gravity: 0.0,
+            bullet: bullet.clone(),
+            side: Side::Player,
+            shooter,
+            target: None,
+            angular_velocity: 0.0,
+            payload: lib.bullets[&bullet].payload,
+            aim: None,
+            pd: false,
+            hp: 20.0,
+            harmless: false,
+            base: false,
+            ricochet: -1000.0,
+            mine_scan: Default::default(),
+            lost_target: false,
+        };
+        mines.push(app.world_mut().spawn((shell, Transform::from_translation(at + Vec3::new(1000.0 * i as f32, 0.0, 0.0)))).id());
+    }
+    app.insert_resource(lib);
+    let full: Vec<f32> = hulls.iter().map(|h| app.world().get::<Health>(*h).unwrap().sections.iter().sum()).collect();
+    app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs_f32(0.2));
+    app.update();
+    let left: Vec<f32> = hulls.iter().map(|h| app.world().get::<Health>(*h).unwrap().sections.iter().sum()).collect();
+    assert_eq!(left[0], full[0], "an own-side hull takes no damage");
+    let m = app.world().get::<Shell>(mines[0]).expect("the mine is not spent by the allied hull");
+    assert!(m.vel.dot(normal) > 0.0 && m.vel.length() < 200.0 * 0.7, "it rebounds at less than 0.6 of its speed ({:?})", m.vel);
+    assert!(left[1] < full[1], "a hull that is not allied is struck");
+    for _ in 0..2 {
+        app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs_f32(0.01));
+        app.update();
+    }
+    assert!(app.world().get_entity(mines[1]).is_err(), "and the mine is spent");
+}
+
 /// The original sweeps every shot against islands: land between the gun and the hull takes the shot instead.
 #[test]
 #[ignore = "needs imported assets"]
