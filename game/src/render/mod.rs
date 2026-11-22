@@ -71,6 +71,23 @@ fn add_mod_skies(look: &mut serde_json::Value, skies: Option<serde_json::Value>)
     sky.insert("skies".into(), skies);
 }
 
+/// Storm and nebula looks that content mods ship for their own maps (`{"rules": [...], "bolt": {...}}`, merged across mods).
+pub const NEBULAE: &str = "data/render/nebulae.json";
+
+/// Puts the mods' nebula rules in front of the profile's own (first match wins, so a mission mod's storm look beats the
+/// profile's default) and merges its other keys (`bolt`, ...) over the profile's. A profile without a `nebulae` block keeps
+/// the retail clouds: a mission mod never switches the volume renderer on.
+fn add_mod_nebulae(look: &mut serde_json::Value, nebulae: Option<serde_json::Value>) {
+    let (Some(own), Some(mut extra)) = (look.get_mut("nebulae").and_then(|n| n.as_object_mut()), nebulae.filter(|n| n.is_object())) else { return };
+    let mut rules = extra.get_mut("rules").map(serde_json::Value::take).and_then(|r| r.as_array().cloned()).unwrap_or_default();
+    rules.extend(own.get("rules").and_then(|r| r.as_array()).cloned().unwrap_or_default());
+    extra.as_object_mut().map(|o| o.remove("rules"));
+    for (k, v) in extra.as_object().into_iter().flatten() {
+        crate::modding::merge(own.entry(k.clone()).or_insert(serde_json::Value::Null), v);
+    }
+    own.insert("rules".into(), rules.into());
+}
+
 #[derive(Resource, Clone, Debug, PartialEq)]
 pub struct Look {
     pub bloom: f32,
@@ -277,6 +294,7 @@ pub fn plugin(app: &mut App) {
     let root = crate::assets_dir();
     let Some(mut v) = crate::data::try_json(&root.join(PROFILE)) else { return };
     add_mod_skies(&mut v, crate::data::try_json(&root.join(SKIES)));
+    add_mod_nebulae(&mut v, crate::data::try_json(&root.join(NEBULAE)));
     let look = Look::parse(&v).with_shaders(root);
     frame::plugin(app);
     lights::plugin(app);
@@ -454,6 +472,20 @@ mod tests {
         let mut plain = json!({"camera": {}});
         add_mod_skies(&mut plain, Some(json!({"ours": {}})));
         assert_eq!(plain, json!({"camera": {}}), "no sky block, no dome");
+    }
+
+    #[test]
+    fn mods_put_their_storm_rules_first() {
+        use serde_json::json;
+        let mut look = json!({"nebulae": {"bolt": {"width": 0.9, "branches": 2}, "rules": [{"match": "SolarStorm", "density": 0.75}]}});
+        add_mod_nebulae(&mut look, Some(json!({"bolt": {"width": 1.5}, "rules": [{"match": "SolarStorm", "density": 2.0}]})));
+        let n = &look["nebulae"];
+        assert_eq!(n["rules"][0]["density"], json!(2.0), "the mod's rule matches first");
+        assert_eq!(n["rules"][1]["density"], json!(0.75), "the profile's rules stay behind it");
+        assert_eq!(n["bolt"], json!({"width": 1.5, "branches": 2}), "other keys merge over the profile's");
+        let mut plain = json!({"camera": {}});
+        add_mod_nebulae(&mut plain, Some(json!({"rules": []})));
+        assert_eq!(plain, json!({"camera": {}}), "no nebulae block, the retail clouds stay");
     }
 
     #[test]

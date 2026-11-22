@@ -629,6 +629,10 @@ pub fn sail(
             continue;
         }
         let class = &lib.classes[s.class];
+        let towed = tows.iter().any(|link| link.1 == e);
+        if s.towed != towed {
+            s.towed = towed;
+        }
         if let Some(dir) = avoiders.get(&e).and_then(|a| a.stuck).filter(|_| sinking.is_none()) {
             // The original's unstick: a fixed turn in place, sqrt(MaxAngularAcceleration / RotationalFriction) / 3 rad/s, whatever
             // the speed, rudder or crew; the ship keeps its speed but does not move until it is free.

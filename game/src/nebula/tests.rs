@@ -191,3 +191,26 @@ fn a_cloud_whose_shell_the_profile_hides_keeps_running() {
     assert!(age(shown) > 0.5, "the sim runs ({})", age(shown));
     assert_eq!(age(hidden), age(shown), "hidden or not, the same ticks");
 }
+
+#[test]
+fn a_fuel_burning_hull_is_not_slowed_by_a_draining_cloud() {
+    let mut app = App::new();
+    let mut fuel = crate::fixed_tests::synthetic_class();
+    fuel.fuel = true;
+    app.insert_resource(crate::data::Library {
+        classes: vec![crate::fixed_tests::synthetic_class(), fuel],
+        guns: default(),
+        bullets: default(),
+        names: default(),
+        clips: default(),
+    })
+    .init_resource::<StormShift>()
+    .insert_resource(Storms(serde_json::json!([{ "name": "murk", "polygon": [[-100.0, -100.0], [100.0, -100.0], [100.0, 100.0], [-100.0, 100.0]],
+            "cloud": { "drain": true, "points": [{ "pos": [0.0, 0.0, 0.0], "magnitude": 100.0 }] } }])))
+    .add_systems(Update, slowdown);
+    let sail = app.world_mut().spawn((crate::Ship::new(0, crate::Side::Player), Transform::from_xyz(30.0, 0.0, 0.0))).id();
+    let burner = app.world_mut().spawn((crate::Ship::new(1, crate::Side::Player), Transform::from_xyz(30.0, 0.0, 0.0))).id();
+    app.update();
+    assert!(app.world().get::<crate::Ship>(sail).unwrap().sail_energy < 0.5, "the sail hull loses the wind");
+    assert_eq!(app.world().get::<crate::Ship>(burner).unwrap().sail_energy, 1.0, "the fuel hull does not");
+}
