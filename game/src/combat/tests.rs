@@ -682,7 +682,6 @@ fn bank_recharge_follows_the_slowest_live_gun() {
         base: Entity::PLACEHOLDER,
         barrel: Entity::PLACEHOLDER,
         muzzles: vec![],
-        next_muzzle: 0,
         yaw: 0.0,
         pitch: 0.0,
         aligned: false,
@@ -1541,4 +1540,71 @@ fn death_wipe_takes_the_sections_that_are_still_standing() {
     let fx = DamageFx(hp.iter().map(|h| (if *h > 0.0 { 1 } else { 4 }, None)).collect());
     assert_eq!(fx.standing(), vec![4, 6, 7, 8]);
     assert!(DamageFx(vec![(4, None); 3]).standing().is_empty(), "nothing left to wipe: no second piece for a section already lost");
+}
+
+/// Every muzzle of a mount launches a shell on each shot (docs/re/gunnery.md#muzzles): on a Procyon cruiser, whose dual mounts
+/// have two muzzles, the shells launched in a tick equal the muzzle counts of the guns that shot in that tick.
+#[test]
+#[ignore = "needs imported assets"]
+fn a_dual_mount_launches_a_shell_from_every_muzzle_on_each_shot() {
+    let mut app = asset_app();
+    app.add_message::<Sfx>()
+        .add_message::<Fired>()
+        .add_message::<Hit>()
+        .add_message::<Destroyed>()
+        .add_message::<Detonate>()
+        .add_message::<Shoot>()
+        .add_message::<crate::decals::Scar>()
+        .init_resource::<Time>()
+        .init_resource::<FxLib>()
+        .insert_resource(Library::load(assets_dir()))
+        .insert_resource(Rng::new(7))
+        .insert_resource(Look { mesh: default(), shell: default(), enemy_shell: default() })
+        .insert_resource(Target::default())
+        .init_resource::<crate::environment::Sensors>()
+        .add_systems(PreUpdate, crate::environment::refresh_sensors)
+        .add_systems(Update, (crate::tick_start.before(fire), fire, shells.after(fire)));
+    let assets = app.world().resource::<AssetServer>().clone();
+    let lib = Library::load(assets_dir());
+    let c = lib.index("Ship_Procyon_Cruiser");
+    let spawn = |app: &mut App, side, x: f32| {
+        let ship = Ship { heading: 0.0, ..Ship::new(c, side) };
+        let e = app.world_mut().spawn((Transform::from_xyz(x, 0.0, 0.0), ship, Health::new(&lib.classes[c]), Fires::default())).id();
+        let states = spawn_guns(&mut app.world_mut().commands(), &assets, &lib, e, c);
+        app.world_mut().entity_mut(e).insert(states);
+        app.world_mut().flush();
+        e
+    };
+    let me = spawn(&mut app, Side::Player, 0.0);
+    app.world_mut().entity_mut(me).insert(PlayerShip);
+    let enemy = spawn(&mut app, Side::Enemy, 60.0);
+    *app.world_mut().resource_mut::<Target>() = Target(Some(enemy), None, default());
+    let (mut dual_shots, mut single_shots) = (0, 0);
+    let mut seen = std::collections::HashSet::new();
+    for _ in 0..400 {
+        let before: Vec<(f32, u32)> = app.world().get::<GunStates>(me).unwrap().0.iter().map(|s| (s.cooldown, s.burst_left)).collect();
+        app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs_f32(0.05));
+        app.update();
+        let expected: usize = app
+            .world()
+            .get::<GunStates>(me)
+            .unwrap()
+            .0
+            .iter()
+            .zip(&before)
+            .filter(|(s, (cooldown, left))| s.cooldown > *cooldown || s.burst_left < *left)
+            .map(|(s, _)| {
+                let n = lib.guns[&s.gun].muzzles.len();
+                if n > 1 {
+                    dual_shots += 1
+                } else {
+                    single_shots += 1
+                }
+                n
+            })
+            .sum();
+        let launched = app.world_mut().query::<(Entity, &Shell)>().iter(app.world()).filter(|(e, s)| s.shooter == me && seen.insert(*e)).count();
+        assert_eq!(launched, expected, "shells launched in a tick = muzzles of the guns that shot");
+    }
+    assert!(dual_shots > 0, "a dual mount shot ({single_shots} single-muzzle shots)");
 }

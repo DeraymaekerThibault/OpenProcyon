@@ -44,6 +44,13 @@ point of the section nearest its centre (see "Gun tower aim point").
 Per muzzle the angle is applied twice to the muzzle orientation, about two axes, each with a random sign
 (so yaw and pitch error have the same magnitude). Speed is MuzzleSpeed.
 
+## Muzzles
+A gun with several muzzle points (the Procyon dual plasma and lancer mounts have two) launches one shell from **every** muzzle on each
+shot, in the same tick; a burst of 5 shots on a dual mount is 5 pairs. Each shell takes its own deviation turn (two random signs per
+shell; the angle size is the burst's). Each muzzle also plays its own fire sound. Read from the original and confirmed on a Procyon
+cruiser: one shot of a two-muzzle gun counted two shells launched, one shot of a one-muzzle gun counted one. The remake used to fire one
+muzzle per shot, alternating them (OpenProcyon #469). Not yet checked: the sound per muzzle, and the deviation turn per shell.
+
 ## In the remake (`combat/`)
 Lead and deviation follow the above. Ships use the crew rule above: named crew (skirmish, campaign outfit) or, for a placed ship
 off the player's side, its level's generic crew in every slot (3 / 6 / 8 of 10); the player's side with no crew record at all keeps
