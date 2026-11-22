@@ -383,3 +383,87 @@ difficulty factor has scaled both) and rounds the roll to a whole number of hit 
 Remake: the section roll is rounded to the nearest whole number. PROVISIONAL: the original's rounding mode is not confirmed
 (nearest assumed; exact halves are measure-zero for a continuous roll). The spill to neighbours still reuses the rounded roll
 x 0.4 rather than a fresh rounded roll per level, and base parts and lob blasts still take unrounded rolls.
+
+## Read from the original's code: shell fuses, crew, requests, torpedoes, mines, rocks and counter-fire (2026-11, not yet measured in play)
+
+Static reading of the original's code and data; nothing below has been checked against the running game. Where the earlier
+inventory wording was wrong the correction is stated.
+
+### Shell lifetime (no fuse)
+Every shell, mine, net and torpedo carries a `Lifetime` (seconds, from its WOT) and is removed on the first tick whose age is more
+than that value (strict "more than", game time, so one 0.033 s tick of slack). Nothing bursts, rolls or credits on expiry: the
+shell just disappears. Values: cannon 7 / 9 / 12 (light / medium / heavy), carronade 6 / 8 / 9, plasma 7 / 9 / 12, gattling 2.2,
+harpoon and grappling harpoon 3, lancer 2 / 3 / 4, Arcturian fire 8, dragon breath 10, energy net 12, torpedo 25, mine 1,000,000
+(never), star / nova / magma lob shells 30, dark matter 120. The one exception is the torpedo: when it expires it plays its impact
+effect (no damage), and its impact sound if the listener is within the bullet's sound distance (1500 for the torpedo). There is no
+floor under the sea: a shell that falls below the water keeps falling until its lifetime ends.
+Remake: `combat/shells.rs` (age > lifetime) is the same for shells. Differences: it also removes a shell below y = -300, and a
+torpedo's expiry plays nothing. Build: small, `combat/shells.rs`.
+
+### Guns do not need crew
+No crew presence, crew count or alert state stops a gun firing. A gun's "Firing Crew Alert" is the id of a speech line, not a
+condition. When a gun of the fleet's primary ship fires (not a point-defence gun, and only when the id is set) the crew speaks that
+line (41 guns: gunner fire; the torpedo launcher: torpedo-fire line; the mine layer: none). What does gate a gun: the hold-fire
+flags, the cloak hold (a gun that cannot fire cloaked), turret tracking, the reload time (a torpedo launcher's reload is shortened by
+its gunners' skill) and a live section. Remake: nothing gates fire on crew; already the same. No build; the earlier "crew alert"
+wording in `refit-resupply.md` means this speech cue.
+
+### Fire request time-out
+A "fire when possible" request on a gun (a fire order, panic fire, or a bank fired by a computer routine) stays pending until the gun
+has fired once, or until more than **2.0 s** have passed since the request was last made for a direct-fire gun, **5.0 s** for a lob
+gun (a gun with the lobbing flag). The time is counted from the latest request (a repeated request restarts it). A shot clears the
+request and its panic mark; the time-out clears only the request. Point-defence guns fire continuously and have no request.
+Remake: no pending request with a time-out (the player's click-shot is dropped once fired or when out of reach, see the cursor
+section). Build: small where a pending-request state exists (`combat/gunnery.rs`), otherwise nothing to attach it to.
+
+### Torpedoes: no arming, launch record, fixed-aim launchers
+- A torpedo has no arming time or minimum travel. It can hit anything except its firer from the first tick. The firer is on the shell's
+  rejection list and is released after 1.0 s from creation, so the firer's own ship becomes hittable after 1 s. The 0.5 s of straight
+  flight before steering starts is a separate rule (torpedo guidance above). Remake: same as far as hits go; no arming to build.
+- At launch a torpedo records its **launch point** (its own position at the moment it is created at the muzzle) and its **launcher**
+  (the firing object's handle). Both are kept for the torpedo's life. The launcher also becomes the torpedo's target handle for
+  homing. Counter-fire at torpedo launchers (below) reads the launch point.
+- One case records no target: when the launching object is a space animal of hull class 34, the torpedo gets no target handle. A
+  torpedo with no target leaves its 0.5 s straight flight, switches thrust off, and coasts on at its launch velocity. No shipped
+  data qualifies (no animal carries a torpedo launcher), so this is unreachable in vanilla; the meaning of class 34 is not resolved.
+  Spec only, no build.
+
+### Mines
+- **No blast.** A mine strikes as a point projectile against ships and scenery: one hit on the section found from the hit mesh,
+  through the normal hit path (difficulty factor, 0.4 spill to neighbours when the section reaches 0, fire and critical chances of
+  the table, a decal), then the mine is spent. Damage by material (low-high; crit, fire chance, fire strength): wood 60-120 (0.8, 0.7,
+  1), reinforced 50-100 (0.6, 0.5, 1), iron 30-60 (0.5, 0.2, 1), cloth 0, stone 1, dragon 0.5. A mine has 20 hit points and no
+  radius, so nothing else near it is hurt. Its ricochet factor is -1000 (the roll never ricochets it).
+- **Ricochet off allies.** When the roll does not ricochet a mine, a mine still bounces off any ship whose owner is in mutual
+  alliance with the mine's owner (own side included, matrix value 3): no damage, the mine stays live and rebounds at 0.6 of its speed
+  (the normal ricochet motion). Every other ship is hit. Remake (`combat/shells.rs` mine branch): a mine passes through ships of its
+  own side (nothing happens) and strikes allied-but-other-side ships. Build: small, same file: treat mutual alliance as the test and
+  rebound instead of pass.
+- **Mine cap.** When a mine that has an owner object is created, the game reads the world's list of mines (list number 2 of the 13
+  per-category object lists; "mines" for that list is inferred from point defence taking list 2 as its second target kind). If that
+  list then has more than 100 entries, the **first** (oldest) is removed. This is one removal per creation, **world-wide, not per
+  owner**: map-placed minefields (Border Dispute 186, Red Rover 135) are in the same list. Whether the new mine is already in the
+  list at that moment, and whether map-placed mines have an owner object, are not read. UNCHECKED: the earlier wording "an owner
+  keeps at most 100" is wrong on the code. Not built.
+
+### Computer captains shoot rocks on their course
+Once per second (1.0 s), every ship steered by the computer: take the ship's speed v; candidates are asteroids (not other scenery)
+within 10 x v units that the ship's hull box would meet on a straight run of up to 10 s at its present velocity (at rest only a rock it
+already overlaps counts). Take the nearest by surface distance; use it only if that distance is within the captain's scan range.
+Then, unless a friendly ship is in the line of fire to it or scenery blocks it (the rock itself excepted), **every gun bank fires at
+the rock** (normal range and arc tests per gun, any gun class) and the captain is marked busy for this think: the attack routines
+skip their own firing then. The captain's target is not changed. No difficulty or stance term. Remake: no computer fire at rocks
+(only the player's selected rock). Build: medium, a new system in `combat/gunnery.rs` using the existing course-sweep of
+`collision/avoid.rs`; the busy flag must reach the attack routines' firing step.
+
+### Counter-fire at torpedo launch points ("hunt cloaked subs")
+Every think of a computer-steered ship that has at least one lob bank: take torpedoes (not mines) whose launcher passes the **relation
+test used in the code: the launcher is in mutual alliance with the ship (own side included), or either is a lifeboat**. The
+torpedo with the nearest centre within the captain's scan range is taken; the aim point is that torpedo's **launch point**. If no friendly ship
+or scenery blocks the line to the point, every lob bank aims at the point and fires. The cloak state of anyone is never tested, a torpedo
+without a recorded launcher is skipped, and the point is where the torpedo was created, not where the launcher is now. UNCHECKED
+AGAINST THE RUNNING GAME and surprising: the relation test reads as "allied", not "hostile" (hostile is the other mode of the same
+filter), so the original's lob ships would be shelling the launch points of their own side's torpedoes. An earlier reading took it as
+hostile; do not build until one value from the running original settles which. Remake: no such routine. Build: medium, shell
+record gets `launch_point` and `launcher` (`combat/shells.rs`), the routine goes in `combat/gunnery.rs` next to the computer's lob
+aim points.

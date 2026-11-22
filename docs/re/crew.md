@@ -108,3 +108,13 @@ to the point ([skirmish-setup.md](skirmish-setup.md)). Not resolved: the choice 
   Remake: mission ships take the middle of their crew level's saved range / 1.125 for speed and rudder
   (`boarding::Skill::handling`); computer skirmish ships use the measured 1.267.
 - Spotting range. (Repair Rate: refit-resupply.md 3.4; rate of fire: gunnery.md#gunners.)
+
+## Engineers lower the critical-hit chance of their own ship (read from the original's code, 2026-11, not yet measured in play)
+For every section a hit reaches, including the neighbours that take the 0.4 spill, the chance of a critical on that section is
+(1 - E) x the bullet's per-material `Chance of Critical Damage`, held between 0 and 1, where E = the mean over the ship's engineer slots
+of the per-crewman skill factor (the factor in "Per crewman" above, 1.125 for an empty slot up to 1.5) minus 1.0. A default crew gives E
+of about 0.125 (chance x 0.875), a top engineer crew 0.5 (chance x 0.5). Criticals only feed a tally and crew speech (movement.md,
+"Critical hits"), so the effect is on speech frequency. The factor belongs to the struck ship's own engineers, for any attacker, and
+applies to scripted and nebula hits as well. Remake: criticals are not rolled (speech tags fire at section death, `crew.rs`), so there is
+nothing to scale. Build: small once a critical roll exists (`combat/shells.rs`, `combat/gunnery.rs` hit rules); not built before then.
+UNSURE: an engineer post with no slots (count 0) would give E = -1 (chance x 2, clamped); not read to the end.

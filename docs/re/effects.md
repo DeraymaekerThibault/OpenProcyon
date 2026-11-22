@@ -369,6 +369,24 @@ place, keeps the ship's velocity at the moment it broke, sinks at 1.5 units/s, t
 horizontal axis through its pivot, and is removed after 10 s (all PROVISIONAL: no retail numbers). The exporter writes the meshes
 to `models/debris/` and `sections[].debris` = {model, pivot}.
 
+### Section debris: life, motion, fade and end effect (read from the original's code, 2026-11, not yet measured in play)
+One piece per destroyed section that names a `debrisMeshScene`, created at the section's node. All draws come from the battle
+generator (so they shift later battle rolls, see tick.md), in this order.
+- **Life** L = uniform(7.0, 12.5) s (the Ship_Debris WOT's `LifeTimeMin` / `LifeTimeMax`), one draw. The piece is removed at L.
+- **Fade and end**: the mesh fades out over the 1.0 s that ends **1.2 s before L** (so it starts fading 2.2 s before L). At 1.2 s before L
+  it is hidden, its one-shot attached effect starts and its explosion sound plays once at the section's
+  position; the empty object stays until L. Nothing is hurt by it.
+- **Velocity** (units per second): a **cloth** section drifts up and sideways, x = u + 0.9, y = u + 0.9, z = 1.1 u - 0.1 (z in
+  [-0.1, 1.0)); every **other** material sinks, z = 1.5 u - 1.5 (0 to -1.5), with a horizontal part taken from a vector of the section's
+  mesh node turned about the vertical by a uniform angle within +-15 degrees (what that vector is, is not resolved). The speed cap
+  of the piece is the length of this velocity. Whether the piece is also thrust-driven (the WOT has Acceleration 3, Mass 20) or coasts
+  at this velocity is not resolved.
+- **Tumble**: rate 0.2 rad/s; axis = a random unit-ish vector, all three components 2u - 1 for cloth, (0, 2u - 1, 2u - 1) for the others.
+- Draw count: non-cloth 5 (life, angle, two axis, sink), cloth 7 (life, three velocity, three axis).
+Remake (`combat/damage.rs`): fixed life 10 s, constant fall 1.5, spin 0.25-0.75 rad/s about a horizontal axis, keeps the ship's velocity,
+no fade, no end effect or sound, cloth does not rise. Build: medium, `combat/damage.rs` (`spawn_debris`, `debris`) plus a fade on the
+piece's material and the effect and sound hooks at the end; the 5 / 7 draws only matter if the remake wants the original's roll order.
+
 ### Visual refinements that depart from retail (2026-10, requested by the owner)
 - **Damage and debris smoke runs at its authored rate** (the 15 % thinning we had was dropped); the scene-wide budget below keeps a long fight in check.
 - **Scene-wide particle budget** (`fx::SCENE_LIVE_BUDGET`, 15,000 live particles): above it every effect emits proportionally less. The worst single sources by authored rate are a Gattling tracer (about 600 live particles per bullet), docking points (2,400 each) and the gravity-charge well (540 at full detail). Not retail; PROVISIONAL size.
