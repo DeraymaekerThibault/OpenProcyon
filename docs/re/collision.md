@@ -66,6 +66,25 @@ ships), and the side test the remake keeps for bases (whether a shell can strike
 neutral-island handling). Which tick of the original's step a shell is born in relative to its first reset was not measured; the remake
 counts ticks from the one after the shot.
 
+## Dragons and whales in contact (read from the original's code, 2026-11; not measured)
+- A dragon has the ship collision type, so it uses exactly the ship rules: push by mass and torque against ships and other dragons (a 4000-mass ship
+  against the 1000-mass dragon moves the dragon 80 percent of the overlap), ram damage both ways (0.0004 x the other's mass x closing speed, the
+  alliance test zeroing both), the ship-rock rules against rocks, push-out from islands and bases, push-apart against whales and wrecks, no response
+  against lifeboats. The ship-class "lifeboat" flag is never read for a dragon. A hidden or non-collidable dragon passes through everything.
+  Remake: `dragons.rs` gives dragons no contact with ships (shells only): Missing. Needs the dragon's box from its render model and its mass (1000).
+- A whale has the space-object type: against ships, rocks, wrecks and other space objects the only response is a mass-weighted push apart (each moves
+  along the contact normal by the depth times the other's share of the total mass); no velocity change, no damage, no sound. Ramming a whale
+  does nothing but push. Shells that hit a whale are consumed (or deflected and then inert) without damage, since only rocks take hit points from
+  shells. Islands push a whale out. Remake: shells match; ships sail through whales (Missing). The whale's mass was not read.
+
+## What 'collidable' does to the rejection list (read from the original's code, 2026-11)
+The mission action 'Set Collidable' and the visibility action both rewrite each object's rejection list, not a flag: false makes it an empty
+inclusion list (collides with nothing), true makes it an empty exclusion list (collides with everything). Making an object collidable therefore
+also removes every other entry it held: a shell's firer exemption, a lifeboat's parent ship, the 'ignore this one' entry the mission 9 longboat
+teleport adds. Setting an object invisible has the same effect on collision. Remake: `Ghost` is a plain flag, so there are no entries to wipe
+(no visible effect unless a script switches collidable on for a live shell, a lifeboat or the mission 9 longboat); hiding an object does not
+change collision here (Different, PROVISIONAL).
+
 ## Land and bases (read from the original's code, 2026-10-31)
 
 Contact with an island or a base pushes the ship's hull straight out along the horizontal normal, and nothing else: its speed,

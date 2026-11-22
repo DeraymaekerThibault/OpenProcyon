@@ -68,7 +68,17 @@ Each nebula keeps, from its `Terrain_Nebula` state: centre, radius,
   class flag are exempt (not modelled; its meaning is unknown). `Nebula Occlusion` blocks sensors/line of sight through the polygon
   (retail AI also treats `TYPEAVOID 'Nebula'` as an area to avoid on path planning; the remake only does the occlusion).
 - **Camera effect**: the world saves `DATA_NEBULA_CAMERA_EFFECT`, `..._FADE_IN_TIMER`, `..._SPIN_TIMER`, `DATA_NEXT_NEBULA_CAMERA_EFFECT`:
-  when the camera is inside a nebula the original fades in a full-screen/spinning overlay. Unknown. PROVISIONAL / not done.
+  when the camera is inside a nebula the original fades in a full-screen/spinning overlay (read from the original's code, 2026-11; not measured; textures not read).
+  The camera counts as inside a cloud when its 3-D distance to the cloud's centre is under 1.03 x (radius + 50) (not the polygon); the nearest such cloud wins.
+  Overlay kind 1 for a nebula cloud, 2 for the other weather kind, 0 outside. A change of kind fades the old overlay out over 0.5 s, then the new one in
+  over 0.5 s (a first entry fades in at once). The overlay is one or two scrolling cloud textures over the whole view; two drift vectors do the 'spin':
+  each tick position += velocity, velocity += -0.003 (first) or -0.005 (second) x the unit vector of the position. Not built.
+- **Wind force and gust** (read from the original's code, 2026-11; not measured): when winds are on, each ship inside the cloud (3-D distance under the
+  radius, polygon test passed) and farther than 0.05 x radius from the centre gets a force. The unit vector from the ship to the centre is turned about
+  the vertical axis by 60 degrees (36 when the cloud traps objects; sense of rotation not checked), F = wind magnitude x that vector + the cloud's own
+  velocity / 0.033, applied through the same force helper as black holes (acceleration about 0.148 x F x hull length / mass). On top of that, each tick a random
+  impulse 8 x F x U[0,1) is applied at a point 10 units from the ship toward the centre, so it spins the ship as well as pushing it. Remake: `nebula.rs` pushes
+  tangentially by 3 percent of the magnitude per second into a damped drift, with no gust torque, velocity term or inner exclusion (Different/Missing).
 - Lightning, winds and meteor strikes (solar storm / meteor shower variants) use separate WOT damage potentials.
   These are now exported into `data/nebula.json` and applied through the shared damage pipeline. Previously wind used full weapon-lightning
   damage and meteors used heavy-cannon damage. For cloth, weather wind is 5–7 damage versus lightning's 15–40; for wood, meteors are 5–10.

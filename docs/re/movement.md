@@ -69,7 +69,37 @@ measured bank limit above.
 - Every frame: physics = min(destroyed / total vitalToMaxVelocity sections, 0.9); = same for vitalToManeuverability.
    is one of the four "(1 − x)" factors on max speed/thrust; is the `r` in the rudder term (1 − r) (read at).
   Player speech fires when the sail loss crosses 25/50/75/100%.
-- Unknown: (1 − product of (1 − x) over some list, crew-like),, (0.6 × a timed progress, state-dependent), (turn multiplier from crew).
+- The top-speed product and the thrust share one factor Q = (1 − sail loss) × (1 − energy-net loss) × (1 − nebula depth) × (1 − 0.6 × cloak level) ×
+  script percentage × engineer factor (read from the original's code, not measured as a whole). The two terms once listed as unknown are
+  therefore known: the energy-net loss is 1 − the product of (1 − strength) over the ship's nets, the cloak term is 0.6 × the cloak level (0 uncloaked,
+  ramping to 1 over the cloak time, so a fully cloaked ship has 0.4 of its speed), the script percentage is the clamped 0..1 value set by the
+  mission action 'Set Ship Top Speed Percentage' (default 1), and the engineer factor is the crew rating factor (crew.md). The helm's turn
+  multiplier is the navigator factor, applied to the rudder torque only. The 1.125 that appears in full speed (0.5 × 1.125) and in turning is
+  the same crew factor for a ship with no crew: an empty post is filled by a rating-1 hand, 1.075 + 0.05 = 1.125. The drag rate is fixed from
+  the hull (max thrust / mass / max speed) and is not scaled by Q, so Q changes the terminal speed and the acceleration, not the time constant.
+  Remake: `Ship::max_speed` multiplies the same terms; the cloak term is stored in the net slot (`cloak.rs`), so a ship that is both cloaked and
+  netted does not multiply both (PROVISIONAL: whether that state is reachable was not checked).
+
+## Plane modes and which objects are free in 3-D (read from the original's code, 2026-11; not measured)
+- A ship's physics has a restricted-plane switch, on by default. While on: the vertical part of the thrust direction is dropped before it is
+  normalised, the vertical velocity is dropped before drag is built, the vertical damping term is zero, and after the step the height is forced
+  to the plane height (0). Every ship therefore sails exactly in the plane. The switch is cleared only in the constructors of torpedoes, whales and
+  dragons, which move freely in 3-D. Nothing clears it for a ship at run time. The remake's ships are planar everywhere (same); torpedoes,
+  whales and dragons are not moved by this physics here.
+- A second switch, rotate-only, is set by the dock routine only while it turns a ship in place toward its return point (state 6 in
+  docking-and-orders.md) and cleared in every other dock state; in the dock glide it removes the forward motion and leaves the turn.
+  Remake: `docking.rs` `glide(.., turn_only, ..)`.
+
+## Shell and beam steps (read from the original's code, 2026-11; not measured)
+- A shell is launched along its forward axis at the launch speed. Each tick: vertical acceleration −= gravity; position += velocity × dt using the
+  velocity from before the tick; then velocity += (accumulated outside accelerations + gravity) × dt and the accumulators clear. The shell's pose
+  (looking along its velocity, vertical up axis, or the x axis when nearly vertical) is updated only while its speed is at least 0.01 units/s; a
+  slower shell stays where it is but still accelerates. Normal shells never get that slow. Remake: `combat/shells.rs` integrates every tick with no
+  dead zone (no effect on any normal shot).
+- Black holes and other force fields reach shells only through the outside-acceleration accumulator; see effects.md (black holes) for which kinds a hole pulls.
+- Laser-type bullets (their own physics class) move a straight line: position += speed × forward × dt, with no gravity, drag or speed bound; their
+  speed is the length of the displacement they were given. Which bullet types use it was not found (the retail bullets read so far use the
+  shell step). The remake has no such shot type.
 
 ## Core damage (verified, hit handler, core routine, sum)
 - After a hit is applied, if the hit section is vital-to-ship and at 0 HP (the killing hit and every later hit on it), the core loses
