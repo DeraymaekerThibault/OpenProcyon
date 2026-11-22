@@ -86,10 +86,12 @@ regressions are included in `tools/check.sh` (98 Rust tests, 61 Python tests, si
 * So **the rate is particles per tick, not per second** (x30 per second). If the rate is below 1, one particle
   spawns with probability = rate (LCG random in [0,1) < p).
 * `NumberParticlesAtStart` is added on the first tick.
-* **PROVISIONAL particle budget (ours, not retail):** a primitive whose steady live count (peak rate x 30 x lifetime) would
-  exceed 4000 emits proportionally fewer particles. Only `GravCharge_Medium_Impact` trips it (180 per tick for 18 s, about
-  97000 additive particles, more than 30x any other effect): it rendered as a saturated blob and stalled the frame. The
-  original's pool limit, if any, is unknown.
+* The start count joins the first tick's rate **before** the detail factor below, so a far effect also starts with fewer
+  particles. Checked on the running original: a gravity charge well seen at detail 0.67 started its flash with 33 of 50 and its
+  ring got 121 per rate key.
+* Gravity charge well (`GravCharge_Medium_Impact`): its ring rate (180) is keys-only, so it emits 180 x detail on the ticks that
+  enter each key (0.3, 0.8, 1.3 s), 540 at full detail in all, and those particles live for the whole 20 s (running original: 363
+  at detail 0.67). An earlier per-primitive particle budget here assumed 180 every tick and is removed.
 
 ## Distance detail (per effect, spawn count)
 * Each effect gets detail D = (1 - distance to camera / EffectsLowestDetailDistance) clamped to 0..1, times EffectsMaximumDetailPercentage
@@ -166,9 +168,14 @@ and replaces it, see "Pseudo-billboard blend" below. By that rule the disc is pa
 carries |cos| of about 0.78 of the colour and the streak sin of about 0.62.
 
 ## Attractor (movement info slot 4)
-`vel += (target - pos) * k * dt * 0.033` (in per-tick units; i.e. per second `vel += (target-pos)*k*dt`),
-with `k = Const + WithDist/d + WithDistSquared/d^2`, `d = |target - pos|`. The chunk's
-`PositionInterpolator3Chunk` is the **target point**, not an acceleration.
+`vel += unit(target - pos) * k * dt * 0.033` (in per-tick units; per second `vel += unit(target - pos) * k * dt`),
+with `k = Const + WithDist/d + WithDistSquared/d^2`, `d = |target - pos|`, nothing when d = 0. The direction is **normalised**:
+a constant k is a constant acceleration of |k| units/s^2 at any distance (an earlier reading used the raw offset, a spring force,
+which sent the Star mortar glow off exponentially). The chunk's `PositionInterpolator3Chunk` is the **target point**, not an
+acceleration. Its curves are evaluated at the age of the spawn batch every 0.1 s, and the movement runs once more than 0.1 s has
+passed, i.e. every 4th tick (dt 0.132). Checked on the running original: Star mortar glow particles gain 2.64 and 3.56 units/s per
+step at k -20 and -27, at radii from 3 to 90; the gravity well ring (k +5, radius 10-11, from rest) swings through the centre with
+an 8 s period (constant pull: 4 x sqrt(2 x 10.5 / 5) = 8.2 s; a spring would give 2.8 s). Remake: `fx::sim::attraction`.
 
 ## Gravity / friction
 Gravity: `vel += g * dt * 0.033`. Friction: scales velocity by a factor, zero once speed falls below a threshold.
@@ -364,7 +371,7 @@ to `models/debris/` and `sections[].debris` = {model, pivot}.
 
 ### Visual refinements that depart from retail (2026-10, requested by the owner)
 - **Damage and debris smoke runs at its authored rate** (the 15 % thinning we had was dropped); the scene-wide budget below keeps a long fight in check.
-- **Scene-wide particle budget** (`fx::SCENE_LIVE_BUDGET`, 15,000 live particles): above it every effect emits proportionally less. The worst single sources by authored rate are a Gattling tracer (about 600 live particles per bullet), docking points (2,400 each) and the gravity-charge impact (capped per primitive at 4,000). Not retail; PROVISIONAL size.
+- **Scene-wide particle budget** (`fx::SCENE_LIVE_BUDGET`, 15,000 live particles): above it every effect emits proportionally less. The worst single sources by authored rate are a Gattling tracer (about 600 live particles per bullet), docking points (2,400 each) and the gravity-charge well (540 at full detail). Not retail; PROVISIONAL size.
 - **A debris piece's smoke trail stops after 3 s** (`DEBRIS_SMOKE_TIME`); smoke already out fades on its own.
 - **Shell sprites use both of their textures.** A pseudo-billboard effect lists a side texture and a front texture (cannonballs, lancer shots, the Gattling
   tracer, meteors). Retail shows the side streak when seen from the side and a round glow when seen along the shell's flight line, which is what gives
