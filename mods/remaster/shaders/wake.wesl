@@ -10,13 +10,15 @@ import bevy_pbr::render::{
     pbr_bindings::{base_color_texture, base_color_sampler},
     mesh_view_bindings::view,
 };
+// the battle clock (game/src/render/frame.rs)
+import openprocyon::render::frame::frame;
 
 struct WakeGlow {
     // rgb: the wake's colour (the faction tint), a: brightness
     tint: vec4<f32>,
     // rgb: colour near the ship
     hot: vec4<f32>,
-    // x: v at the ship end (the trail's length), y: clock, z: core thread strength, w: unused
+    // x: v at the ship end (the trail's length), y: unused (the clock is frame.clock), z: core thread strength, w: unused
     params: vec4<f32>,
 }
 
@@ -35,7 +37,7 @@ fn noise(p: vec2<f32>) -> f32 {
 
 @fragment
 fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> FragmentOutput {
-    let clock = wake.params.y;
+    let clock = frame.clock.y;
     let fade = in.color.r;
     let across = abs(in.uv.x * 2.0 - 1.0);
     // 0 at the ship, 1 at the oldest end
