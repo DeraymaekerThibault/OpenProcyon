@@ -27,13 +27,69 @@ pub struct Pointer<'w> {
     pub binds: Res<'w, crate::bindings::Bindings>,
     pub fleets: ResMut<'w, ship::Fleets>,
     pub plot: ResMut<'w, course::Plot>,
+    pub free: Option<Res<'w, FreeCamera>>,
 }
 
-fn camera_input(mouse: &ButtonInput<MouseButton>, keys: &ButtonInput<KeyCode>, pointer: &Pointer, orbit: &mut Orbit, dt: f32) {
-    // Camera controls use real time, independent of simulation speed or pause.
+/// Not retail: the free camera of the bundled `free-camera` mod (on by default), present when the overlay has `data/camera.json`
+/// (`{"pitch": [0.05, 1.5]}`): right-drag tilts between those pitches (radians). Without it the camera is the retail one.
+#[derive(Resource, Clone, Copy, PartialEq, Debug)]
+pub struct FreeCamera {
+    pub pitch: (f32, f32),
+}
+impl FreeCamera {
+    pub fn load(root: &std::path::Path) -> Option<Self> {
+        let v = crate::data::try_json(&root.join("data/camera.json"))?;
+        let p = |i: usize, d: f32| v["pitch"][i].as_f64().map_or(d, |x| x as f32);
+        Some(FreeCamera { pitch: (p(0, 0.05), p(1, 1.5)) })
+    }
+}
+
+/// Retail camera (`docs/re/camera.md`): height above the target point for a back distance `d`; the pitch follows from it.
+pub fn retail_height(d: f32) -> f32 {
+    0.065 * d.max(0.0).powf(1.4)
+}
+/// Retail zoom limits for a focus of this bounding radius: 1.2 radii (at least 2) out to 300 more.
+pub fn retail_zoom_limits(radius: f32) -> (f32, f32) {
+    let near = (1.2 * radius).max(2.0);
+    (near, near + 300.0)
+}
+/// The retail wanted distance a battle starts at, raised to the focus's nearest.
+pub const RETAIL_START_DIST: f32 = 20.0;
+/// The original steps its camera keys once per world update; here they run on real time at this rate.
+const RETAIL_STEPS_PER_SEC: f32 = 30.0;
+
+/// Retail input: the pitch is not a control. Steps change the wanted distance (`orbit.dist`): outward by their size, inward by twice it.
+fn retail_camera_input(mouse: &ButtonInput<MouseButton>, keys: &ButtonInput<KeyCode>, pointer: &Pointer, orbit: &mut Orbit, dt: f32, radius: f32) {
+    let mut step = -pointer.scroll.delta.y * 10.0; // ponytail: one scroll unit = one wheel notch (line units); pixel-unit touchpads zoom fast
     if mouse.pressed(MouseButton::Right) {
         orbit.yaw -= pointer.motion.delta.x * 0.005;
-        orbit.pitch = (orbit.pitch + pointer.motion.delta.y * 0.005).clamp(0.05, 1.5);
+        step += pointer.motion.delta.y;
+    }
+    let per_tick = RETAIL_STEPS_PER_SEC * dt;
+    if pointer.binds.pressed(keys, Act::RotateLeft) {
+        orbit.yaw += 0.04 * per_tick;
+    }
+    if pointer.binds.pressed(keys, Act::RotateRight) {
+        orbit.yaw -= 0.04 * per_tick;
+    }
+    if pointer.binds.pressed(keys, Act::ZoomIn) {
+        step -= 3.0 * per_tick;
+    }
+    if pointer.binds.pressed(keys, Act::ZoomOut) {
+        step += 3.0 * per_tick;
+    }
+    let (near, far) = retail_zoom_limits(radius);
+    orbit.dist = (orbit.dist + if step > 0.0 { step } else { 2.0 * step }).clamp(near, far);
+}
+
+fn camera_input(mouse: &ButtonInput<MouseButton>, keys: &ButtonInput<KeyCode>, pointer: &Pointer, orbit: &mut Orbit, dt: f32, radius: f32) {
+    // Camera controls use real time, independent of simulation speed or pause.
+    let Some(free) = pointer.free.as_deref() else {
+        return retail_camera_input(mouse, keys, pointer, orbit, dt, radius);
+    };
+    if mouse.pressed(MouseButton::Right) {
+        orbit.yaw -= pointer.motion.delta.x * 0.005;
+        orbit.pitch = (orbit.pitch + pointer.motion.delta.y * 0.005).clamp(free.pitch.0, free.pitch.1);
     }
     orbit.dist = (orbit.dist - pointer.scroll.delta.y * 3.0).clamp(10.0, 300.0);
     if pointer.binds.pressed(keys, Act::RotateLeft) {
@@ -82,7 +138,9 @@ pub fn input(
         if briefing::active(mission.as_deref()) || rules::locked(mission.as_deref()) {
             return;
         }
-        camera_input(&mouse, &keys, &pointer, &mut orbit, time.delta_secs());
+        // The focus's bounding radius sets the retail zoom limits (collision sphere for the mesh bounds, PROVISIONAL; others 0).
+        let radius = orbit.focus.or(Some(actor)).and_then(|e| ships.get(e).ok()).map_or(0.0, |(_, s, ..)| lib.classes[s.class].sphere.1);
+        camera_input(&mouse, &keys, &pointer, &mut orbit, time.delta_secs(), radius);
         let b = &pointer.binds;
 
         // Engine orders: +/- step through All Stop .. Emergency.
@@ -446,14 +504,16 @@ pub fn star_mesh(groups: &[Vec<Vec3>]) -> Mesh {
         .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, col)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn camera(
-    orbit: Res<Orbit>,
+    mut orbit: ResMut<Orbit>,
     ship: Query<&Transform, (With<PlayerShip>, Without<Camera3d>)>,
     tfs: Query<&Transform, Without<Camera3d>>,
     contacts: Query<(), Or<(With<Ship>, With<environment::SpaceAnimal>)>>,
     sensors: Res<environment::Sensors>,
     mut cam: Single<&mut Transform, With<Camera3d>>,
     mission: Option<Res<campaign::Mission>>,
+    (free, time, mut shown): (Option<Res<FreeCamera>>, Option<Res<Time<Real>>>, Local<Option<f32>>),
 ) {
     if briefing::active(mission.as_deref()) || rules::nis(mission.as_deref()) || rules::console::free_cam() {
         return;
@@ -466,8 +526,23 @@ pub fn camera(
         Some(Vec3::new(*v.first()?, *v.get(2).unwrap_or(&0.0), -*v.get(1)?))
     });
     let tracked = orbit.focus.filter(|e| !contacts.contains(*e) || sensors.player_sees(*e, mission.as_deref()));
-    let focus = look.unwrap_or_else(|| tracked.and_then(|e| tfs.get(e).ok()).or_else(|| ship.iter().next()).map_or(Vec3::ZERO, |t| t.translation)) + Vec3::Y * 3.0;
-    let off = Quat::from_rotation_y(orbit.yaw) * Quat::from_rotation_x(-orbit.pitch) * Vec3::new(0.0, 0.0, orbit.dist);
+    let lift = if free.is_some() { 3.0 } else { 2.0 };
+    let focus = look.unwrap_or_else(|| tracked.and_then(|e| tfs.get(e).ok()).or_else(|| ship.iter().next()).map_or(Vec3::ZERO, |t| t.translation)) + Vec3::Y * lift;
+    let len = if free.is_some() {
+        orbit.dist
+    } else {
+        // Retail: the shown distance eases toward the wanted one; the camera stands that far back and `retail_height` up.
+        let dt = time.map_or(0.0, |t| t.delta_secs());
+        let d = shown.map_or(orbit.dist, |s| s + (orbit.dist - s) * (6.5 * dt).min(1.0));
+        *shown = Some(d);
+        let h = retail_height(d);
+        let pitch = h.atan2(d);
+        if orbit.pitch != pitch {
+            orbit.pitch = pitch;
+        }
+        d.hypot(h)
+    };
+    let off = Quat::from_rotation_y(orbit.yaw) * Quat::from_rotation_x(-orbit.pitch) * Vec3::new(0.0, 0.0, len);
     cam.translation = focus + off;
     cam.look_at(focus, Vec3::Y);
 }
@@ -558,6 +633,7 @@ mod camera_tests {
     fn focus_does_not_track_a_ship_outside_group_sight_but_allows_projectile_debug_focus() {
         let (mut world, ids) = ship::movement_tests::fleet_world();
         world.init_resource::<environment::Sensors>();
+        world.insert_resource(FREE);
         let cam = world.spawn((Camera3d::default(), Transform::default())).id();
         world.resource_mut::<Orbit>().focus = Some(ids[5]);
         world.get_mut::<Transform>(ids[5]).unwrap().translation = Vec3::X * 3000.0;
@@ -576,10 +652,95 @@ mod camera_tests {
         assert_eq!(world.get::<Transform>(cam).unwrap().translation, Vec3::new(600.0, 3.0, 60.0));
     }
 
+    const FREE: FreeCamera = FreeCamera { pitch: (0.05, 1.5) };
+
+    fn input_world() -> (World, [Entity; 6]) {
+        let (mut world, ids) = ship::movement_tests::fleet_world();
+        for &e in &ids {
+            world.entity_mut(e).insert(GlobalTransform::default());
+        }
+        world.resource_mut::<ship::Fleets>().selected = Some(ids[0]);
+        world.spawn((Window::default(), PrimaryWindow));
+        world.spawn((Camera::default(), GlobalTransform::default()));
+        world.init_resource::<ButtonInput<MouseButton>>();
+        world.init_resource::<ButtonInput<KeyCode>>();
+        world.init_resource::<AccumulatedMouseMotion>();
+        world.init_resource::<AccumulatedMouseScroll>();
+        world.init_resource::<crate::bindings::Bindings>();
+        world.init_resource::<course::Plot>();
+        world.init_resource::<panels::UiClick>();
+        world.init_resource::<options_menu::OptionsMenu>();
+        world.init_resource::<environment::Sensors>();
+        world.init_resource::<Messages<docking::DockMsg>>();
+        world.init_resource::<Messages<audio::Sfx>>();
+        world.init_resource::<combat::LobAim>();
+        world.init_resource::<Time<Real>>();
+        world.init_resource::<Time<Virtual>>();
+        world.init_resource::<Time>();
+        (world, ids)
+    }
+
+    #[test]
+    fn retail_height_and_limits_follow_the_originals_numbers() {
+        // the retail save: 100 back, 41.02 up
+        assert!((retail_height(100.0) - 41.01).abs() < 0.01);
+        let pitch = |d: f32| retail_height(d).atan2(d).to_degrees();
+        assert!((pitch(100.0) - 22.3).abs() < 0.1 && (pitch(7.67) - 8.4).abs() < 0.1 && (pitch(307.67) - 32.7).abs() < 0.1);
+        assert_eq!(retail_zoom_limits(1.0), (2.0, 302.0));
+        assert_eq!(retail_zoom_limits(10.0), (12.0, 312.0));
+    }
+
+    #[test]
+    #[ignore = "needs imported assets"]
+    fn retail_steps_zoom_out_by_their_size_in_by_twice_and_never_tilt() {
+        let (mut world, ids) = input_world();
+        let radius = world.resource::<Library>().classes[world.get::<Ship>(ids[0]).unwrap().class].sphere.1;
+        let (near, far) = retail_zoom_limits(radius);
+        let run = |world: &mut World, wheel: f32, drag: Vec2| {
+            world.resource_mut::<AccumulatedMouseScroll>().delta = Vec2::new(0.0, wheel);
+            world.resource_mut::<AccumulatedMouseMotion>().delta = drag;
+            world.insert_resource(Orbit { yaw: 0.0, pitch: 0.5, dist: 100.0, focus: Some(ids[0]) });
+            world.run_system_once(input).unwrap();
+            let o = world.resource::<Orbit>();
+            (o.dist, o.yaw, o.pitch)
+        };
+        assert_eq!(run(&mut world, 1.0, Vec2::ZERO).0, 80.0, "a notch in: 20 closer");
+        assert_eq!(run(&mut world, -1.0, Vec2::ZERO).0, 110.0, "a notch out: 10 farther");
+        world.resource_mut::<ButtonInput<MouseButton>>().press(MouseButton::Right);
+        let (dist, yaw, pitch) = run(&mut world, 0.0, Vec2::new(20.0, 5.0));
+        assert_eq!((dist, pitch), (105.0, 0.5), "a vertical drag zooms; it does not tilt");
+        assert!((yaw + 0.1).abs() < 1e-6);
+        assert_eq!(run(&mut world, 0.0, Vec2::new(0.0, -1000.0)).0, near);
+        assert_eq!(run(&mut world, 0.0, Vec2::new(0.0, 1000.0)).0, far);
+    }
+
+    #[test]
+    fn retail_camera_stands_back_and_up_by_the_height_rule_and_eases_to_the_wanted_distance() {
+        let mut world = World::new();
+        world.init_resource::<environment::Sensors>();
+        world.insert_resource(Orbit { yaw: 0.0, pitch: 0.0, dist: 100.0, focus: None });
+        let cam = world.spawn((Camera3d::default(), Transform::default())).id();
+        let mut system = IntoSystem::into_system(camera);
+        system.initialize(&mut world);
+        system.run((), &mut world).unwrap();
+        let t = world.get::<Transform>(cam).unwrap().translation;
+        assert!((t - Vec3::new(0.0, 2.0 + retail_height(100.0), 100.0)).length() < 1e-3, "{t}");
+        assert!((world.resource::<Orbit>().pitch - retail_height(100.0).atan2(100.0)).abs() < 1e-6);
+        // the wanted distance jumps; the shown one closes 6.5 x dt of the gap
+        world.resource_mut::<Orbit>().dist = 200.0;
+        let mut real = Time::<Real>::default();
+        real.advance_by(Duration::from_secs_f32(0.1));
+        world.insert_resource(real);
+        system.run((), &mut world).unwrap();
+        let back = world.get::<Transform>(cam).unwrap().translation.z;
+        assert!((back - 165.0).abs() < 1e-3, "{back}");
+    }
+
     #[test]
     #[ignore = "needs imported assets"]
     fn keyboard_camera_rotation_and_zoom_stay_at_one_x_at_every_simulation_speed() {
         let (mut world, ids) = ship::movement_tests::fleet_world();
+        world.insert_resource(FREE);
         for e in ids {
             world.entity_mut(e).insert(GlobalTransform::default());
         }

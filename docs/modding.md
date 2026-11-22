@@ -16,7 +16,7 @@ and the graphics look are all files. When something needs the engine to change, 
 | `docs/wot-format.md` | notes on the retail property files the importer reads |
 | `docs/examples/` | tested example data (`gate-ambush.mission.json`, the mission the guide walks through) |
 | `docs/re/*.md` | specifications of the original game's behaviour (rules, numbers, formulas) written from data files, the manual and play, one file per system; read them to learn what a rule does, not to copy |
-| `mods/` | the example mods the project maintains: `faction-colors`, `game-speed`, `remaster`, `silver-skirmish` |
+| `mods/` | the example mods the project maintains: `faction-colors`, `free-camera`, `game-speed`, `remaster`, `silver-skirmish` |
 
 ## Your first mod
 
@@ -37,7 +37,7 @@ ship and changes only the keys you give: the parent is the ship folder named by 
 (from a source checkout: `make run ARGS='--mod /path/to/my-mod'`; repeatable, later mods win), or install it as a player does
 (below). The overlay is built at launch, so restart after every change; ["Testing a mod"](#testing-a-mod) lists the quick ways to
 see the result and ["Troubleshooting"](#troubleshooting) what to check when nothing changes. More examples in `mods/`:
-`faction-colors` (JSON only: recoloured effects and a wake tint), `game-speed`, `remaster` (a whole graphics look),
+`faction-colors` (JSON only: recoloured effects and a wake tint), `free-camera`, `game-speed`, `remaster` (a whole graphics look),
 `silver-skirmish` (this page's example, which also names an existing hull icon). A ship of your own needs only a model and a short
 `ship.json` (["A ship from a model"](#a-ship-from-a-model)); a weapon of your own is a gun entry and a bullet entry
 (["A new weapon"](#a-new-weapon)).
@@ -74,7 +74,7 @@ Ids in `mods.json` that no folder has are ignored. A user mod stays off until sw
 anything on. A user mod replaces a bundled one with the same `id` (of two user folders with one `id`, the first found is kept).
 
 Mods that ship with the game live in `mods/` (the checkout's, or next to the executable in a download) and are off until ticked,
-except those marked `"default": true` (such as `game-speed`), which are on until the player switches them off.
+except those marked `"default": true` (`free-camera`, `game-speed`), which are on until the player switches them off.
 
 Layers, bottom to top: the imported assets, `content/` (what ships with the code), the switched-on mods in `mods.json` order, then
 the `--mod` folders in command-line order. A `--mod` folder needs no switching on and does not appear in the Mods screen.
@@ -143,6 +143,7 @@ stops the game at launch (`mod <folder>: extends unknown '<parent>'`).
 | `menu/strings.json` | merged key by key with the retail string table: new ids for names a mod's ships and screens use (e.g. a ship's `display_name`); see "Strings and names" |
 | `fx/<Name>.json` | a new effect file is loaded without being listed anywhere (the effect's name is its file name, which a gun's `MuzzleFlashEffect`, a bullet's `hit_fx` / `bullet_fx` or a ship's engine `fx` then names); `extends` (the sibling file `<parent>.json`) + `set` recolours a copy of a retail effect, as `mods/faction-colors` does |
 | `data/hud/speed.json` (`{"max": 16}`) | shows the game-speed buttons beside the command bar (not retail), stepping 1x to `max` (default 16); absent: no speed control, as in retail. `--speed N` on the command line works either way |
+| `data/camera.json` (`{"pitch": [0.05, 1.5]}`) | the free battle camera (not retail): right-drag up and down tilts it between the two pitches (radians), the wheel and zoom keys move it 10 to 300 units out without easing; absent: the retail camera, whose tilt follows the zoom (`docs/re/camera.md`) |
 | `data/fx/wake_tint.json` (`{"Navy": [r, g, b], "Pirate": ..., "Procyon": ..., "Civilian": ...}`) | multiplies the wake texture per fleet type (multiplied in linear light, values may exceed 1); absent: retail colours |
 | `models/sky/<sky>_cube.png` (six square cube faces stacked vertically, +X -X +Y -Y +Z -Z in Bevy's cube-map frame) | drawn as the battle camera's skybox instead of that retail sky's sphere (not retail); a render profile's `sky` block also reads `<sky>_stars.png` (the stars on their own) and `<sky>_clouds.png` (painted clouds, straight alpha) when the mod has them, and `data/render/skies.json` (below) tunes the layers per sky; with a render profile's `sky_light` it also lights the scene. A sky made from the player's own imported sky is derived from game content: keep it local, never ship it |
 | a new `ships/<Id>/` folder (`ship.json` and a `model.glb`, see "A ship from a model"; or `geometry`/`model` pointing at another ship), a new `maps/<id>/` folder (`map.json`, `backdrop.png`; `"skirmish": true` lists it), `models/<any folder>/*.glb`, `sound/<any folder>/*.ogg` | new content (schema in `docs/data-format.md`) |
