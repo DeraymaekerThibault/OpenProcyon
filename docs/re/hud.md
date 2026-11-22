@@ -29,7 +29,16 @@ The manual gives no numbers: speeds, turning, timing and damage come from data a
   hud.hdt rectangle, which starts at the bar's top edge), not from where the part's visible art begins: the transparent rows
   cut off the part's top (3, 15 and 10-13 px for the three factions) are not added. Added by mistake they drop the fills by exactly
   that much, out of their tubes, most on the Pirate bar (checked against a retail 1:1 screenshot of the Navy bar and against the
-  faction art for the other two: the fills then sit in the tubes' lit part). The ship portrait keeps its own, art-start origin.
+  faction art for the other two: the fills then sit in the tubes' lit part).
+- Ship portrait and docking icon: the class's portrait picture is placed at `MainBar_ShipIcon_Offset_From_Background_TopLeft` (Navy 24,16;
+  Pirate 21,27; Procyon 10,26) from the top-left of the ship-frame part's whole rectangle, the same untrimmed origin as the gauge
+  fills (the frame art's own transparent top rows, 2 on Pirate and 3 on Procyon, are not added). The check is the art: the portrait's
+  centre then lands on the middle of the bar's height on Pirate and Procyon (46 of 92, 45 of 90) and on the middle of the oval that
+  spans the panic button, frame and gauges on Procyon. The docking/boarding icon (32x33) is placed at `PRIMARY_SHIP_STATUS_ICON_OFFSET_FROM_PRIMARYSHIPICON_TOPLEFT`
+  (Navy and Pirate 7,4; Procyon 8,4) from the top-left of the portrait picture's own untrimmed box (the fleet-bar slots use the
+  same rule), which centres it on the portrait. Both were drawn too low and too far right by the trim of the node they hung on (frame
+  art top 2 / 3 px, then the portrait art's own 2 left / 5 top margin for the docking icon). Not read from the original's draw code:
+  the origins rest on the data values and the art.
 - Weapon and ship-bar toggles stand on their `*_ToggleDetail` arms: arm bottom `Move_Toggle*_Detail_Down` px behind the compass /
   talking head, button at `Toggle*_Button_Offset_From_Detail_TopLeft` (checked on a retail 1:1 screenshot). Ship icons use the class's WOT icon name.
 - A selected secondary shows its name on the `ShipName_HUDComponent_Backdrop_*` plate at the top (PROVISIONAL placement).

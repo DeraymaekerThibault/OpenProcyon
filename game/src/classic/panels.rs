@@ -437,8 +437,8 @@ fn weapon_panel(commands: &mut Commands, c: &Ctx, root: Entity, class: &combat::
     }
 }
 
-/// One bar part plus whatever sits on it: the ship icon on the ship frame, a fill on each status gauge.
-/// The box of one bar part: clicks, hover and pressed art, and the anchor of what is drawn on the part (gauge fills, ship portrait).
+/// One bar part plus whatever sits on it: the ship icon and docking icon on the ship frame, a fill on each status gauge.
+/// The box of one bar part: clicks, hover and pressed art; what is drawn on the part (gauge fills, portrait) is measured from its untrimmed top-left.
 fn spawn_part(commands: &mut Commands, c: &Ctx, class: &combat::Class, parent: Entity, part: &BarPart, floor: f32) {
     let name = part.sprite.as_str();
     let Some(art) = c.sprite(name) else { return };
@@ -456,8 +456,6 @@ fn spawn_part(commands: &mut Commands, c: &Ctx, class: &combat::Class, parent: E
     if name == "MAINBAR_IS_NOT_PAUSED_BUTTON" {
         commands.entity(part_entity).insert(PauseButton);
     }
-    // The portrait is measured from where the part's art starts, not from its transparent margin (the gauge fills are not: see `fill`).
-    let anchor = commands.spawn((Node { position_type: PositionType::Absolute, left: px(art.trim.left, c.s), top: px(art.trim.top, c.s), ..default() }, ChildOf(part_entity))).id();
     if name == "MainBar_PanicButton" {
         commands.entity(part_entity).insert(PanicButton);
     }
@@ -467,7 +465,7 @@ fn spawn_part(commands: &mut Commands, c: &Ctx, class: &combat::Class, parent: E
     let fill = |commands: &mut Commands, sprite: &str, offset_name: &str, gauge: Gauge| {
         let Some(art) = c.sprite(sprite) else { return };
         let o = offset(c.hud, offset_name);
-        // Gauge offsets count from the part's untrimmed top-left, so the fill hangs on the part itself, not on the trimmed `anchor`.
+        // Gauge offsets count from the part's untrimmed top-left, so the fill hangs on the part itself (a child node would start at the sprite's trimmed art).
         commands.spawn((Fill { gauge, art: art.clone(), top: o.y }, c.put(&art, o.x, o.y), ChildOf(part_entity)));
     };
     if name == "MainBar_FleetFormationsButton" {
@@ -483,10 +481,11 @@ fn spawn_part(commands: &mut Commands, c: &Ctx, class: &combat::Class, parent: E
         "MainBar_ShipIcon" => {
             if let Some(icon) = c.sprite(&class.icon("ShipBar")) {
                 let o = offset(c.hud, "MainBar_ShipIcon_Offset_From_Background_TopLeft");
-                let portrait = commands.spawn((c.put(&icon, o.x, o.y), ChildOf(anchor))).id();
+                // Both offsets count from untrimmed top-lefts (the part's, then the portrait's), so both hang on the part itself.
+                commands.spawn((c.put(&icon, o.x, o.y), ChildOf(part_entity)));
                 if let Some(status) = c.sprite("ShipStatus_Icon_Docking_Frame0") {
-                    let at = offset(c.hud, "PRIMARY_SHIP_STATUS_ICON_OFFSET_FROM_PRIMARYSHIPICON_TOPLEFT");
-                    commands.spawn((DockingStatus, c.put(&status, at.x, at.y), Visibility::Hidden, ChildOf(portrait)));
+                    let at = o + offset(c.hud, "PRIMARY_SHIP_STATUS_ICON_OFFSET_FROM_PRIMARYSHIPICON_TOPLEFT");
+                    commands.spawn((DockingStatus, c.put(&status, at.x, at.y), Visibility::Hidden, ChildOf(part_entity)));
                 }
             }
         }
