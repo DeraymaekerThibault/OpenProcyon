@@ -85,7 +85,7 @@ fn console(
     if !*submitted {
         *submitted = true;
         console.open = true;
-        for line in ["help", "god", "tasks", "flags", "why Player Reaches Tender", "kill"] {
+        for line in ["god", "tasks", "why Player Reaches Tender", "schema Set Flag Action", "kill"] {
             console.submit(line);
         }
     }

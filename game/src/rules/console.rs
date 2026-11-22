@@ -10,10 +10,13 @@ use bevy::input::keyboard::Key;
 use bevy::prelude::*;
 use serde_json::{Value, json};
 
+use super::schema::{self, Role};
 use super::*;
 
 /// Point set the `tp x y` command writes its destination to before running 'Teleport Group/Unit'.
 const TP_SET: &str = "(console)";
+/// The command words (Tab completion).
+const COMMANDS: &[&str] = &["act", "cond", "do", "fire", "flags", "god", "help", "kill", "repair", "reveal", "schema", "set", "task", "tasks", "timer", "timers", "tp", "why"];
 /// Lines of output kept.
 const LOG_LINES: usize = 200;
 /// Longest command line.
@@ -56,6 +59,20 @@ impl Console {
         let over = self.log.len().saturating_sub(LOG_LINES);
         self.log.drain(..over);
     }
+    /// Tab: finishes the command word (to the longest prefix the commands starting with it share, and a space when only one does).
+    fn complete(&mut self) {
+        if self.line.contains(char::is_whitespace) {
+            return;
+        }
+        let word = self.line.to_lowercase();
+        let hits: Vec<&str> = COMMANDS.iter().copied().filter(|c| c.starts_with(&word)).collect();
+        let Some(first) = hits.first() else { return };
+        let common = hits.iter().fold(first.len(), |n, c| n.min(first.chars().zip(c.chars()).take_while(|(a, b)| a == b).count()));
+        self.line = first[..common].to_string();
+        if hits.len() == 1 {
+            self.line.push(' ');
+        }
+    }
     /// Queues a line to run as if it had been typed and submitted (the smoke script's way in).
     pub fn submit(&mut self, line: &str) {
         self.pending.push(line.to_string());
@@ -73,6 +90,7 @@ impl Console {
             Key::Backspace => {
                 self.line.pop();
             }
+            Key::Tab => self.complete(),
             Key::ArrowUp if !self.history.is_empty() => {
                 let i = self.recall.map_or(self.history.len() - 1, |i| i.saturating_sub(1));
                 self.recall = Some(i);
@@ -141,6 +159,8 @@ pub enum Command {
     Flags,
     Timers,
     Tasks,
+    /// The rule schema's entry for an action or condition Type (or the Types whose name contains the text): its fields.
+    Schema(String),
 }
 
 #[derive(Debug, PartialEq)]
@@ -168,6 +188,8 @@ flags | timers | tasks  the mission's state
 set <flag> [on|off]     Set Flag Action;  timer <name> start|stop;  task <name> active|complete|failed [off]
 act <json>              any rule action, e.g. act {\"Type\": \"Set Flag Action\", \"Flag Name\": \"x\", \"Boolean Value\": true}
 cond <json>             evaluate any rule condition
+schema <text>           the fields of an action or condition Type (the rule schema); act / cond check their JSON against it
+Tab completes a command name; Up / Down recall earlier lines.
 Using a command that changes the game marks the session as cheated: campaign points are not recorded.";
 
 /// Turns a line into a command. `player` is the human's group name (rules address the fleet by it); `god` the current god state.
@@ -205,6 +227,8 @@ pub fn parse(line: &str, player: &str, god: bool) -> Result<Command, String> {
         "flags" => Command::Flags,
         "timers" => Command::Timers,
         "tasks" => Command::Tasks,
+        "schema" if !rest.is_empty() => Command::Schema(unquote(rest).into()),
+        "schema" => return Err("usage: schema <text>, e.g. schema Teleport".into()),
         "set" => match args.as_slice() {
             [] => return Err("usage: set <flag> [on|off]".into()),
             [name] => act(set_flag(name, true)),
@@ -230,12 +254,18 @@ pub fn parse(line: &str, player: &str, god: bool) -> Result<Command, String> {
             _ => return Err("usage: task <name> active|complete|failed [on|off]".into()),
         },
         "act" | "do" => match serde_json::from_str::<Value>(rest) {
-            Ok(v) if v["Type"].is_string() => Command::Acts { acts: vec![strings(v)], god: None },
+            Ok(v) if v["Type"].is_string() => {
+                validate(Role::Action, &v)?;
+                Command::Acts { acts: vec![strings(v)], god: None }
+            }
             Ok(_) => return Err("an action needs a \"Type\"".into()),
             Err(e) => return Err(format!("not JSON: {e}")),
         },
         "cond" => match serde_json::from_str::<Value>(rest) {
-            Ok(v) if v["Type"].is_string() => Command::Cond(strings(v)),
+            Ok(v) if v["Type"].is_string() => {
+                validate(Role::Condition, &v)?;
+                Command::Cond(strings(v))
+            }
             Ok(_) => return Err("a condition needs a \"Type\"".into()),
             Err(e) => return Err(format!("not JSON: {e}")),
         },
@@ -395,6 +425,7 @@ impl Script {
                     o.lines.push("no timer has been started".into());
                 }
             }
+            Command::Schema(query) => o.lines = schema_lines(query),
             Command::Tasks => {
                 o.lines.extend(self.tasks.iter().map(|t| {
                     let state = if t.complete {
@@ -461,7 +492,7 @@ impl Script {
         for c in &conds {
             let held = self.console_cond(c, w);
             all &= held;
-            lines.push(format!("  {} {}", if held { "yes" } else { "NO " }, describe(c)));
+            lines.push(format!("  {} {}", if held { "yes" } else { "NO " }, self.explain(c, w)));
         }
         if conds.is_empty() {
             lines.push("  (no conditions)".into());
@@ -472,11 +503,67 @@ impl Script {
     }
 }
 
-/// A condition or action in one line: its Type and arguments.
-pub fn describe(c: &Value) -> String {
-    let args: Vec<String> =
-        c.as_object().into_iter().flatten().filter(|(k, _)| *k != "Type").map(|(k, v)| format!("{k}={}", v.as_str().map_or_else(|| v.to_string(), String::from))).collect();
-    format!("{} {}", s(c, "Type"), args.join(", ")).trim_end().to_string()
+/// Checks a raw action or condition against the rule schema: a known Type, no field it does not have, none of its required fields
+/// missing. The interpreter itself ignores what it does not know; at the console that would be a silent no-op.
+pub fn validate(role: Role, v: &Value) -> Result<(), String> {
+    let ty = s(v, "Type");
+    let what = if role == Role::Action { "action" } else { "condition" };
+    let Some(def) = schema::lookup(role, ty) else {
+        let near: Vec<&str> = schema::RULE_TYPES
+            .iter()
+            .filter(|t| t.role == role && (t.name.to_lowercase().contains(&ty.to_lowercase()) || ty.to_lowercase().contains(&t.name.to_lowercase())))
+            .map(|t| t.name)
+            .take(5)
+            .collect();
+        let hint = if near.is_empty() { "`schema <text>` searches the Types".to_string() } else { format!("did you mean: {}", near.join("; ")) };
+        return Err(format!("no {what} Type '{ty}' ({hint})"));
+    };
+    let unknown: Vec<&str> = v.as_object().into_iter().flatten().map(|(k, _)| k.as_str()).filter(|k| *k != "Type" && def.field(k).is_none()).collect();
+    if !unknown.is_empty() {
+        return Err(format!("'{ty}' has no field {}; its fields are: {}", unknown.join(", "), def.fields.iter().map(|f| f.name).collect::<Vec<_>>().join(", ")));
+    }
+    let missing: Vec<&str> = def.fields.iter().filter(|f| f.required && v[f.name].is_null()).map(|f| f.name).collect();
+    if !missing.is_empty() {
+        return Err(format!("'{ty}' needs {}", missing.join(", ")));
+    }
+    Ok(())
+}
+
+/// The schema entries (actions and conditions) whose Type is `query` or contains it (any case), one line each, then their fields.
+pub fn schema_lines(query: &str) -> Vec<String> {
+    let q = query.trim().to_lowercase();
+    let mut types: Vec<&schema::TypeDef> = schema::RULE_TYPES.iter().filter(|t| t.name.to_lowercase() == q).collect();
+    if types.is_empty() {
+        types = schema::RULE_TYPES.iter().filter(|t| t.name.to_lowercase().contains(&q)).collect();
+    }
+    let mut lines = vec![];
+    match types.len() {
+        0 => lines.push(format!("no Type contains '{query}'")),
+        1..=3 => {
+            for t in types {
+                lines.push(format!(
+                    "{} {}{}",
+                    if t.role == Role::Action { "action   " } else { "condition" },
+                    t.name,
+                    if t.origin == schema::Origin::Engine { "  (engine-added)" } else { "" }
+                ));
+                for f in t.fields.iter().filter(|f| f.used) {
+                    lines.push(format!(
+                        "  {} ({}){} default {}",
+                        f.name,
+                        f.kind.name(),
+                        if f.required { " required" } else { "" },
+                        if f.default.is_empty() { "\"\"" } else { f.default }
+                    ));
+                }
+            }
+        }
+        n => {
+            lines.push(format!("{n} Types match; a longer text narrows it:"));
+            lines.extend(types.iter().take(30).map(|t| format!("  {} {}", if t.role == Role::Action { "action   " } else { "condition" }, t.name)));
+        }
+    }
+    lines
 }
 
 #[cfg(test)]

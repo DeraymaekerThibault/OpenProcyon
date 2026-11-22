@@ -71,10 +71,10 @@ fn raw_actions_take_json_booleans() {
 #[test]
 fn only_commands_that_change_the_game_count_as_cheats() {
     let cheats = |l: &str| parse(l, "Hero", false).unwrap().cheats();
-    for l in ["god", "repair", "kill", "reveal", "tp 1 2", "fire x", "set a", "act {\"Type\": \"Start Timer\"}"] {
+    for l in ["god", "repair", "kill", "reveal", "tp 1 2", "fire x", "set a", "act {\"Type\": \"Start Timer\", \"Timer Name\": \"t\"}"] {
         assert!(cheats(l), "{l}");
     }
-    for l in ["help", "why x", "flags", "timers", "tasks", "cond {\"Type\": \"Flag Condition\"}", ""] {
+    for l in ["help", "why x", "flags", "timers", "tasks", "schema flag", ""] {
         assert!(!cheats(l), "{l}");
     }
 }
@@ -198,4 +198,38 @@ fn the_output_log_keeps_its_last_lines() {
     }
     assert_eq!(c.log.len(), LOG_LINES);
     assert_eq!(c.log.last().unwrap(), &format!("line {}", LOG_LINES + 19));
+}
+
+#[test]
+fn raw_actions_and_conditions_are_checked_against_the_schema() {
+    let err = |l: &str| parse(l, "Hero", false).unwrap_err();
+    assert!(err(r#"act {"Type": "Set Flag"}"#).contains("did you mean: Set Flag Action"), "{}", err(r#"act {"Type": "Set Flag"}"#));
+    assert!(err(r#"act {"Type": "Frobnicate"}"#).contains("schema <text>"));
+    assert!(err(r#"act {"Type": "Set Flag Action", "Flag Name": "x"}"#).contains("needs Boolean Value"));
+    assert!(err(r#"act {"Type": "Set Flag Action", "Flag Name": "x", "Boolean Value": true, "Colour": 1}"#).contains("no field Colour"));
+    assert!(err(r#"cond {"Type": "Set Flag Action"}"#).contains("no condition Type"), "an action is not a condition");
+    assert!(parse(r#"cond {"Type": "Flag Condition", "Flag Name": "k", "Boolean Value": true}"#, "Hero", false).is_ok());
+}
+
+#[test]
+fn schema_lists_the_fields_of_a_type() {
+    let lines = schema_lines("Set Flag Action");
+    assert!(lines[0].contains("action") && lines[0].contains("Set Flag Action"));
+    assert!(lines.iter().any(|l| l.contains("Flag Name") && l.contains("required")), "{lines:?}");
+    assert!(schema_lines("flag").len() > 3, "a short text lists the matching Types");
+    assert!(schema_lines("zzz")[0].contains("no Type"));
+}
+
+#[test]
+fn tab_completes_the_command_word() {
+    let mut c = Console::new(true);
+    c.line = "re".into();
+    c.key(&Key::Tab);
+    assert_eq!(c.line, "re", "repair and reveal share only 're'");
+    c.line = "rep".into();
+    c.key(&Key::Tab);
+    assert_eq!(c.line, "repair ");
+    c.line = "fire Open".into();
+    c.key(&Key::Tab);
+    assert_eq!(c.line, "fire Open", "only the command word is completed");
 }

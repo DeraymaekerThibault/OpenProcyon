@@ -98,7 +98,7 @@ impl Script {
     }
 
     /// One condition as the trace shows it: its Type and fields, then what the world says about each name it reads.
-    fn explain(&self, c: &Value, w: &[Unit]) -> String {
+    pub(in crate::rules) fn explain(&self, c: &Value, w: &[Unit]) -> String {
         let ty = s(c, "Type");
         let Some(def) = schema::lookup(Role::Condition, ty) else { return ty.to_string() };
         let mut fields = vec![];
