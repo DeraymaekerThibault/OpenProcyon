@@ -67,7 +67,7 @@ pub(super) fn render_fx(
     mut mats: ResMut<Assets<StandardMaterial>>,
     mut additive: ResMut<Assets<EffectMaterial>>,
     cam: Single<&GlobalTransform, With<Camera3d>>,
-    fx: Query<(&Fx, &GlobalTransform), Without<super::HiddenFx>>,
+    fx: Query<(&Fx, &GlobalTransform), (Without<super::HiddenFx>, Without<crate::environment::Unseen>)>,
     mut vis: Query<&mut Visibility>,
     // the quads of each pooled mesh, kept between frames
     mut batches: Local<HashMap<(usize, Blend), QuadBatch>>,

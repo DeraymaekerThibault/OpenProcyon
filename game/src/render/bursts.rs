@@ -397,7 +397,7 @@ fn start(
 }
 
 /// Effects with `every` keep throwing while they emit.
-fn emitters(time: Res<Time>, look: Res<Look>, mut parts: ResMut<Particles>, mut fx: Query<(&mut Emitter, &Fx, &GlobalTransform)>) {
+fn emitters(time: Res<Time>, look: Res<Look>, mut parts: ResMut<Particles>, mut fx: Query<(&mut Emitter, &Fx, &GlobalTransform), Without<crate::environment::Unseen>>) {
     let Some(b) = &look.bursts else { return };
     let now = time.elapsed_secs();
     for (mut em, f, gt) in &mut fx {
@@ -523,7 +523,7 @@ fn draw(
     mut parts: ResMut<Particles>,
     cams: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
     hosts: Query<&GlobalTransform>,
-    flames: Query<(Entity, &FlameSource, &Fx, &GlobalTransform)>,
+    flames: Query<(Entity, &FlameSource, &Fx, &GlobalTransform), Without<crate::environment::Unseen>>,
     ambient: Res<GlobalAmbientLight>,
     mut glows: Query<(&Mesh3d, &MeshMaterial3d<BurstMaterial>, &mut Visibility), (With<Glows>, Without<Smokes>)>,
     mut smokes: Query<(&Mesh3d, &MeshMaterial3d<SmokeMaterial>, &mut Visibility), (With<Smokes>, Without<Glows>)>,

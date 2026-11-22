@@ -346,6 +346,48 @@ impl SpaceAnimal {
     }
 }
 
+/// On a ship's own running effect (and wake) while the local player's group does not see the ship: it keeps running, it is not drawn.
+#[derive(Component)]
+pub struct Unseen;
+
+/// The original switches a ship's own effects off while the player's group does not see the ship and on again when it does:
+/// engine exhausts, wakes, damage smoke, fires and the other effects the ship carries. The hull itself is still drawn, and one-shot
+/// effects (hits, muzzle flashes) are not touched (docs/re/visibility.md section 5). A sunk ship keeps its effects (not read).
+#[allow(clippy::type_complexity)]
+pub fn mark_unseen_ship_effects(
+    mut commands: Commands,
+    sensors: Res<Sensors>,
+    mission: Option<Res<Mission>>,
+    ships: Query<&crate::combat::Health, With<Ship>>,
+    mut fx: Query<(Entity, &ChildOf, &mut Visibility, Has<Unseen>), (With<crate::fx::Fx>, Without<crate::combat::Transient>, Without<crate::wake::Wake>)>,
+    mut wakes: Query<(Entity, &crate::wake::Wake, &mut Visibility, Has<Unseen>), Without<crate::fx::Fx>>,
+) {
+    let unseen = |ship: Entity| ships.get(ship).is_ok_and(|h| !h.destroyed && !sensors.player_sees(ship, mission.as_deref()));
+    let mut set = |e: Entity, vis: &mut Visibility, marked: bool, hide: bool| {
+        let want = if hide { Visibility::Hidden } else { Visibility::Inherited };
+        if *vis != want {
+            *vis = want;
+        }
+        match (marked, hide) {
+            (false, true) => {
+                commands.entity(e).insert(Unseen);
+            }
+            (true, false) => {
+                commands.entity(e).remove::<Unseen>();
+            }
+            _ => {}
+        }
+    };
+    for (e, parent, mut vis, marked) in &mut fx {
+        if ships.contains(parent.parent()) {
+            set(e, &mut vis, marked, unseen(parent.parent()));
+        }
+    }
+    for (e, wake, mut vis, marked) in &mut wakes {
+        set(e, &mut vis, marked, unseen(wake.ship()));
+    }
+}
+
 pub fn plugin(app: &mut App) {
     app.init_resource::<Sensors>()
         .add_systems(
@@ -354,7 +396,7 @@ pub fn plugin(app: &mut App) {
         )
         .add_systems(FixedUpdate, refresh_sensors.in_set(crate::BattleSet::Sense).run_if(in_state(crate::menu::Screen::Battle)))
         .add_systems(FixedUpdate, update.in_set(crate::BattleSet::Forces).run_if(in_state(crate::menu::Screen::Battle)))
-        .add_systems(Update, (current_fx, flow_currents).run_if(in_state(crate::menu::Screen::Battle)))
+        .add_systems(Update, (current_fx, flow_currents, mark_unseen_ship_effects).run_if(in_state(crate::menu::Screen::Battle)))
         .add_systems(Update, (play_clips, clip_rates).chain());
 }
 
