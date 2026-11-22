@@ -371,17 +371,33 @@ pub fn fires(
 }
 
 /// Retail: a destroyed swappable section swaps its mesh "<A>_<B>" for "<A>Damage_<B>".
-/// The GLB carries both; show whichever matches the section state. Runs every frame so freshly loaded scenes are covered.
+/// The GLB carries both; show whichever matches the section state. Scenes load asynchronously, so the nodes under a ship are
+/// resolved to (section, damaged variant) once, whenever any node's name or parent changes (or a ship leaves `Sinking`),
+/// and cached on the ship; afterwards only a change of a section's destroyed state touches `Visibility`.
+#[derive(Component, Default)]
+pub struct SwapCache {
+    /// (node, section index, is the damaged variant). A damaged variant of a layer that is no swappable section has `usize::MAX`.
+    nodes: Vec<(Entity, usize, bool)>,
+    /// Per section: destroyed state last applied to `nodes`.
+    applied: Vec<bool>,
+}
+
 pub fn swap_meshes(
+    mut commands: Commands,
     lib: Res<Library>,
-    ships: Query<(Entity, &Ship, &Health, Option<&super::GunStates>), Without<super::Sinking>>,
-    bases: Query<(Entity, &super::ArmedBase, &Health, Option<&super::GunStates>), Without<Ship>>,
+    mut ships: Query<(Entity, &Ship, &Health, Option<&super::GunStates>, Option<&mut SwapCache>), Without<super::Sinking>>,
+    mut bases: Query<(Entity, &super::ArmedBase, &Health, Option<&super::GunStates>, Option<&mut SwapCache>), Without<Ship>>,
     children: Query<&Children>,
     mut nodes: Query<(&Name, &mut Visibility)>,
     mut gun_roots: Query<&mut Visibility, (With<super::gunnery::GunPart>, Without<Name>)>,
+    renamed: Query<(), Or<(Changed<Name>, Changed<ChildOf>)>>,
+    mut unsunk: RemovedComponents<super::Sinking>,
 ) {
+    // New or re-parented nodes, or a ship that is back under this system: look at every ship's nodes again.
+    let rescan = !renamed.is_empty() | (unsunk.read().count() > 0);
     // A breaking-up ship's section nodes belong to `deaths` until it is gone. Armed bases swap their destroyed parts the same way.
-    for (e, class, h, guns) in ships.iter().map(|(e, s, h, g)| (e, s.class, h, g)).chain(bases.iter().map(|(e, b, h, g)| (e, b.class, h, g))) {
+    let all = ships.iter_mut().map(|(e, s, h, g, c)| (e, s.class, h, g, c)).chain(bases.iter_mut().map(|(e, b, h, g, c)| (e, b.class, h, g, c)));
+    for (e, class, h, guns, cache) in all {
         let class = &lib.classes[class];
         // The damaged mesh carries its own wrecked mounts, so the guns the section carried go with the intact mesh. PROVISIONAL: no
         // retail code that hides them was found; the original keeps them as children of the section's node.
@@ -391,28 +407,64 @@ pub fn swap_meshes(
                 v.set_if_neq(want);
             }
         }
-        for d in children.iter_descendants(e) {
-            let Ok((name, mut vis)) = nodes.get_mut(d) else { continue };
-            let n = name.as_str();
-            // A layer node's primitives are named "<layer>.<texture>": they follow their node, which is the one that is swapped.
-            if n.contains('.') {
+        let destroyed: Vec<bool> = h.sections.iter().map(|&hp| hp <= 0.0).collect();
+        let want = |&(_, i, damaged): &(Entity, usize, bool), destroyed: &[bool]| match destroyed.get(i) {
+            Some(&d) if d == damaged => Visibility::Inherited,
+            _ => Visibility::Hidden,
+        };
+        let Some(mut cache) = cache else {
+            let found = resolve_swap_nodes(e, class, &children, &nodes);
+            for n in &found {
+                if let Ok((_, mut vis)) = nodes.get_mut(n.0) {
+                    vis.set_if_neq(want(n, &destroyed));
+                }
+            }
+            commands.entity(e).insert(SwapCache { nodes: found, applied: destroyed });
+            continue;
+        };
+        if rescan {
+            cache.nodes = resolve_swap_nodes(e, class, &children, &nodes);
+            cache.applied.clear();
+        }
+        if cache.applied == destroyed {
+            continue;
+        }
+        let cache = &mut *cache;
+        for n in &cache.nodes {
+            // A node whose section did not change keeps what it shows (unless everything was just resolved again).
+            if cache.applied.get(n.1) == destroyed.get(n.1) && n.1 != usize::MAX {
                 continue;
             }
-            let (base, damaged) = match n.split_once("Damage_") {
-                Some((a, b)) => (format!("{a}_{b}"), true),
-                None => (n.to_string(), false),
-            };
-            // A damaged mesh of a layer that is no swappable section can never be shown (it would sit on top of the intact one).
-            let want = match class.sections.iter().position(|s| s.swappable && s.layer.eq_ignore_ascii_case(&base)) {
-                Some(i) if (h.sections[i] <= 0.0) == damaged => Visibility::Inherited,
-                None if !damaged => continue,
-                _ => Visibility::Hidden,
-            };
-            if *vis != want {
-                *vis = want;
+            if let Ok((_, mut vis)) = nodes.get_mut(n.0) {
+                vis.set_if_neq(want(n, &destroyed));
             }
         }
+        cache.applied = destroyed;
     }
+}
+
+/// The nodes under `root` that are a section's intact or damaged mesh, by name.
+fn resolve_swap_nodes(root: Entity, class: &Class, children: &Query<&Children>, nodes: &Query<(&Name, &mut Visibility)>) -> Vec<(Entity, usize, bool)> {
+    let mut found = Vec::new();
+    for d in children.iter_descendants(root) {
+        let Ok((name, _)) = nodes.get(d) else { continue };
+        let n = name.as_str();
+        // A layer node's primitives are named "<layer>.<texture>": they follow their node, which is the one that is swapped.
+        if n.contains('.') {
+            continue;
+        }
+        let (base, damaged) = match n.split_once("Damage_") {
+            Some((a, b)) => (format!("{a}_{b}"), true),
+            None => (n.to_string(), false),
+        };
+        // A damaged mesh of a layer that is no swappable section can never be shown (it would sit on top of the intact one).
+        match class.sections.iter().position(|s| s.swappable && s.layer.eq_ignore_ascii_case(&base)) {
+            Some(i) => found.push((d, i, damaged)),
+            None if damaged => found.push((d, usize::MAX, true)),
+            None => {}
+        }
+    }
+    found
 }
 
 /// Crew damage control (every 12 s, docs/re/refit-resupply.md#crew-damage-control): each tick the most damaged living sail

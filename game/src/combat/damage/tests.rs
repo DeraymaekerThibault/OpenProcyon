@@ -70,6 +70,30 @@ mod swap_tests {
 
     #[test]
     #[ignore = "needs imported assets"]
+    fn late_nodes_are_swapped_at_once_and_a_repair_swaps_back() {
+        let lib = Library::load(crate::assets_dir());
+        let class = lib.index("Base_Procyon1");
+        let mut app = App::new();
+        app.insert_resource(Library::load(crate::assets_dir())).add_systems(Update, swap_meshes);
+        let mut hp = Health::new(&lib.classes[class]);
+        hp.sections[0] = 0.0; // BaseProcyons_Layer2
+        let base = app.world_mut().spawn((ArmedBase { class }, hp)).id();
+        app.update();
+        app.update();
+        // The scene finishes loading after the section was already destroyed: the new nodes show the right mesh straight away.
+        let node = |app: &mut App, name: &str| app.world_mut().spawn((Name::new(name.to_string()), Visibility::default(), ChildOf(base))).id();
+        let [whole, hurt] = ["BaseProcyons_Layer2", "BaseProcyonsDamage_Layer2"].map(|n| node(&mut app, n));
+        app.update();
+        let vis = |app: &App, e| *app.world().get::<Visibility>(e).unwrap();
+        assert_eq!([vis(&app, whole), vis(&app, hurt)], [Visibility::Hidden, Visibility::Inherited]);
+        let full = lib.classes[class].sections[0].hp;
+        app.world_mut().get_mut::<Health>(base).unwrap().sections[0] = full;
+        app.update();
+        assert_eq!([vis(&app, whole), vis(&app, hurt)], [Visibility::Inherited, Visibility::Hidden]);
+    }
+
+    #[test]
+    #[ignore = "needs imported assets"]
     fn a_destroyed_unswappable_section_keeps_its_mesh() {
         // Station Montgomery's island is a 10 HP section with swappable=0: shot down, the island stays.
         let lib = Library::load(crate::assets_dir());
