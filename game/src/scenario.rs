@@ -107,7 +107,12 @@ pub fn shot_target(
     mut ships: Query<(Entity, &mut Ship)>,
     mut keys: ResMut<ButtonInput<KeyCode>>,
     time: Res<Time<Virtual>>,
+    loading: Option<Res<crate::loading::Loading>>,
 ) {
+    // The frame count stands still while a battle loads: a step must not repeat on every loading frame (a press of R would restart again).
+    if loading.is_some() {
+        return;
+    }
     // Runtime self-check: Pause key freezes simulation time, then resumes it while the HUD stays usable.
     if matches!(cfg.script.as_deref(), Some("pause" | "pause-restart")) {
         let resume_key = if cfg.script.as_deref() == Some("pause-restart") { KeyCode::KeyR } else { KeyCode::Pause };
@@ -205,8 +210,10 @@ pub fn restart(
     shapes: Res<collision::Shapes>,
     asteroids: Res<data::AsteroidDefs>,
     old: Query<Entity, Or<(With<Scenario>, With<Transient>)>>,
+    loading: Option<Res<crate::loading::Loading>>,
 ) {
-    let scripted = cfg.script.as_deref() == Some("restart") && cfg.frame == 400;
+    // Not while the restarted battle loads: the frame count stands still then, and frame 400 would restart it again.
+    let scripted = cfg.script.as_deref() == Some("restart") && cfg.frame == 400 && loading.is_none();
     // N after a won mission continues the campaign.
     let next = mission.filter(|m| keys.just_pressed(KeyCode::KeyN) && m.script.ended.as_ref().is_some_and(|e| e.1)).and_then(|m| campaign::next(&m.id));
     let asked = request.as_mut().is_some_and(|r| std::mem::take(&mut r.0));
