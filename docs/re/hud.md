@@ -84,3 +84,7 @@ hud.hdt), with "On When Far" while it is at least that; the `- Far` value (also 
 The banner's alpha (ribbon and name text alike) then moves toward 1 when open and 0 when closed at 1.0 per second of real time, so a banner fades fully
 in or out in one second, and it is drawn while its alpha is above 0. Remake: `scenario::PlayerColor`, `classic/world_hud.rs` `banner_tint` and
 `banner_alpha` ("On When Close" only; there is no options entry for the other values yet).
+
+## Critical hit text on the primary ship (read from the original's code, not built)
+When a hit on the human's primary ship rolls a critical (movement.md, "Critical hits"; the roll names which of the section's critical systems was hit) and the HUD has nothing else open,
+a text for that system is put on the HUD's message list. There are ten critical system kinds, each with its own string. The strings' wording was not read. Remake: no such text (crew voice lines only).

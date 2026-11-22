@@ -68,6 +68,10 @@ explicitly listed below; unsupported ones are logged once (`unsupported ...`) an
 - Smoke test: `--script mission` autopilots the player along the objectives (follows the point, shoots hostiles/asteroids, docks). `PROCYON_AUTOKILL=1`
   also sinks the pirate when close, to reach the ending in a test.
 
+Rule list (read from the original's code): conditions run in file order and the first false one stops the rule. **There is no guard on a rule that fires many passes in a row, and rule names
+need not be unique**: the executable carries the texts "Rule Run 10 Times in a Row" and "Duplicate Rule Name not Allowed", but nothing reads them; a rule's run counter (up on a firing pass,
+down to a floor of 0 otherwise) is never compared, and the loader appends rules without looking at names. The remake does the same (test `repeating_rules_have_no_run_limit_and_rule_names_need_not_be_unique`).
+
 PROVISIONAL in the interpreter: condition combination (AND only; no OR seen in this mission), Enter Volume is level-triggered for run-once rules
 (edge only for repeating ones), 'attacking' = attack order or fired at the group in the last 6 s, damage fraction = max(core loss, mean section loss),
 camera smoothing/path speeds, music volume scale (0.5 x script volume), speech without audio shows its text for max(2 s, chars/14), and `Set Max Throttle Percent` multiplies the ordered speed.

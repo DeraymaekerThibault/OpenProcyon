@@ -256,6 +256,23 @@ fn releasing_a_dock_at_the_own_tower_ends_the_tow_only_there() {
     assert!(sc.tows().is_empty(), "so does the tower docking at its towee");
 }
 
+/// The original has no run guard and no name check: a repeating rule keeps firing past ten passes in a row, and two rules with one name both run.
+#[test]
+fn repeating_rules_have_no_run_limit_and_rule_names_need_not_be_unique() {
+    let ping = serde_json::json!([{"Type": "Play Special Effect", "File Name": "Ping", "Play As Dialog": "FALSE"}]);
+    let data = serde_json::json!({"rules": [
+        {"name": "Same name", "Run Once": false, "conditions": [], "actions": ping},
+        {"name": "Same name", "Run Once": false, "conditions": [], "actions": ping},
+    ], "ships": [], "volumes": null, "environment": {}});
+    let mut sc = Script::new(&data, Value::Null);
+    let mut sounds = 0;
+    for _ in 0..25 {
+        let (fx, _) = sc.step(&[], 1.1, false);
+        sounds += fx.iter().filter(|f| matches!(f, Fx::Sound(n) if n == "Ping")).count();
+    }
+    assert_eq!(sounds, 50, "both rules fire on each of 25 passes: no ten-in-a-row stop, no duplicate-name refusal");
+}
+
 #[test]
 #[ignore = "needs imported assets"]
 fn asteroid_setup_selects_named_groups_and_preserves_kill_attribution() {
