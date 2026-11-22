@@ -46,11 +46,19 @@ fn keys(
     mut keyboard: ResMut<ButtonInput<KeyCode>>,
     mut mouse: ResMut<ButtonInput<MouseButton>>,
     mut vtime: ResMut<Time<Virtual>>,
+    mut wheel: ResMut<bevy::input::mouse::AccumulatedMouseScroll>,
+    mut ctrl: Local<bool>,
 ) {
     if !console.available() {
         return;
     }
-    for k in input.read().filter(|k| k.state.is_pressed()) {
+    for k in input.read() {
+        if matches!(k.key_code, KeyCode::ControlLeft | KeyCode::ControlRight) {
+            *ctrl = k.state.is_pressed();
+        }
+        if !k.state.is_pressed() {
+            continue;
+        }
         if !console.open {
             let tilde = matches!(&k.logical_key, bevy::input::keyboard::Key::Character(c) if c.as_str() == "~");
             if (tilde || k.key_code == KeyCode::F12) && !k.repeat {
@@ -65,7 +73,7 @@ fn keys(
             }
             continue;
         }
-        match console.key(&k.logical_key) {
+        match console.key_with(&k.logical_key, *ctrl) {
             Edit::Submit(line) => console.pending.push(line),
             Edit::Close => close(&mut console, &mut vtime),
             Edit::None => {}
@@ -75,6 +83,13 @@ fn keys(
         }
     }
     if console.open {
+        // The wheel reads back through the output, and the camera does not zoom with it.
+        if wheel.delta.y != 0.0 {
+            let notches = if wheel.unit == bevy::input::mouse::MouseScrollUnit::Line { wheel.delta.y } else { wheel.delta.y / 20.0 };
+            let lines = (notches * crate::rules::console::WHEEL_LINES as f32).round() as isize;
+            console.scroll_by(if lines == 0 { wheel.delta.y.signum() as isize } else { lines });
+            wheel.delta = Vec2::ZERO;
+        }
         keyboard.reset_all();
         mouse.reset_all();
     }

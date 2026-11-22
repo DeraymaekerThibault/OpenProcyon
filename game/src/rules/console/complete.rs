@@ -324,6 +324,7 @@ pub fn completions(line: &str, n: &Names) -> Completion {
                     Some(ShapeKind::Points) => pick(start, partial, &n.points, name_wrap),
                     None => Completion::default(),
                 },
+                ("list", 0) => words(start, partial, list::KINDS),
                 ("say", 0) => pick(start, partial, &n.speech, name_wrap),
                 ("tp", 0) => pick(start, partial, &n.point_sets, name_wrap),
                 ("set", 0) => pick(start, partial, &n.flags, name_wrap),

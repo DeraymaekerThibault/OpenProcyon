@@ -14,14 +14,19 @@ use super::schema::{self, Role};
 use super::*;
 
 mod complete;
+mod list;
 mod more;
 pub use complete::{Completion, Names, completions, mean, nearest_name, tokens};
 pub use more::{CamMode, DevView, Env, Shape, ShapeKind, ShipInfo, ViewChange, free_cam, game_pos, hud_hidden, marks_path};
 
 /// Point set the `tp x y` command writes its destination to before running 'Teleport Group/Unit'.
 const TP_SET: &str = "(console)";
-/// Lines of output kept.
-const LOG_LINES: usize = 200;
+/// Lines of output kept (older ones scroll off; PageUp / the wheel / Ctrl+Home read back through them).
+const LOG_LINES: usize = 2000;
+/// Output lines the panel shows at once (`classic/console.rs` draws this many), and what PageUp / PageDown move by.
+pub const SHOWN: usize = 16;
+/// Lines one wheel notch moves.
+pub const WHEEL_LINES: usize = 3;
 /// Longest command line.
 const MAX_LINE: usize = 400;
 
@@ -34,6 +39,8 @@ pub struct Console {
     /// The line being typed.
     pub line: String,
     pub log: Vec<String>,
+    /// Lines the view is scrolled up from the newest (0: following the end).
+    pub scroll: usize,
     history: Vec<String>,
     /// Index into `history` while Up / Down recall is in use.
     recall: Option<usize>,
@@ -74,9 +81,29 @@ impl Console {
     }
     /// Adds a line (or several, split at newlines) to the output.
     pub fn say(&mut self, text: impl AsRef<str>) {
+        let before = self.log.len();
         self.log.extend(text.as_ref().lines().map(String::from));
+        // New output keeps a view that was scrolled back where it was; one at the end follows the output.
+        if self.scroll > 0 {
+            self.scroll += self.log.len() - before;
+        }
         let over = self.log.len().saturating_sub(LOG_LINES);
         self.log.drain(..over);
+        self.scroll = self.scroll.min(self.max_scroll());
+    }
+    /// How far back the view can go: the first line stays at the top of the panel.
+    pub fn max_scroll(&self) -> usize {
+        self.log.len().saturating_sub(SHOWN)
+    }
+    /// Moves the view back (`lines` > 0) or forward (< 0) through the output.
+    pub fn scroll_by(&mut self, lines: isize) {
+        self.scroll = self.scroll.saturating_add_signed(lines).min(self.max_scroll());
+    }
+    pub fn scroll_top(&mut self) {
+        self.scroll = self.max_scroll();
+    }
+    pub fn scroll_bottom(&mut self) {
+        self.scroll = 0;
     }
     /// Tab: completes the last word of the line (`completions`). One candidate is put in; several are listed in the output and the line
     /// gets what they share; Tab again steps through them.
@@ -116,8 +143,16 @@ impl Console {
     }
     /// One key press on the open console: typing, Backspace, Up/Down for earlier lines, Enter, Escape / `~` to close.
     pub fn key(&mut self, key: &Key) -> Edit {
+        self.key_with(key, false)
+    }
+    /// `key`, knowing whether Ctrl is held (Ctrl+Home / Ctrl+End jump to the top and bottom of the output).
+    pub fn key_with(&mut self, key: &Key, ctrl: bool) -> Edit {
         match key {
             Key::Escape => return Edit::Close,
+            Key::PageUp => self.scroll_by(SHOWN as isize - 1),
+            Key::PageDown => self.scroll_by(1 - SHOWN as isize),
+            Key::Home if ctrl => self.scroll_top(),
+            Key::End if ctrl => self.scroll_bottom(),
             Key::Character(c) if c.as_str() == "~" => return Edit::Close,
             Key::Character(c) => {
                 let room = MAX_LINE.saturating_sub(self.line.chars().count());
@@ -146,6 +181,7 @@ impl Console {
             Key::Enter => {
                 let line = std::mem::take(&mut self.line).trim().to_string();
                 self.recall = None;
+                self.scroll = 0;
                 if line.is_empty() {
                     return Edit::None;
                 }
@@ -216,6 +252,10 @@ pub enum Command {
     Lose,
     Restart,
     Ships(Option<String>),
+    /// `list <kind> [text]`: the names and ids of one kind (see `list::KINDS`).
+    List(&'static str, String),
+    /// `find <text>`: every kind at once.
+    Find(String),
     Inspect,
     Where,
     Mark(String),
@@ -313,6 +353,22 @@ pub static TABLE: &[Entry] = &[
         "ships [text]",
         "id, name, owner, groups, damage, position, visibility and stance of the units whose name, owner or group contains the text",
         "ships raider",
+        false,
+    ),
+    entry(
+        "list",
+        Group::Authoring,
+        "list groups|paths|volumes|points|tasks|timers|flags|counters|players|speech|objects [text]",
+        "the names and ids a mission defines, filtered by text: group members (id and name), objects (id, type, position), speech (event id and the start of its subtitle)",
+        "list groups raid",
+        false,
+    ),
+    entry(
+        "find",
+        Group::Authoring,
+        "find <text>",
+        "search every kind at once (groups, paths, volumes, points, tasks, timers, flags, counters, players, speech, objects, ships, rules)",
+        "find gull",
         false,
     ),
     entry("inspect", Group::Ships, "inspect", "the current target: the same, plus its orders and tow", "inspect", false),
@@ -469,6 +525,15 @@ pub fn parse(line: &str, player: &str, god: bool) -> Result<Command, String> {
         "restart" => Command::Restart,
         "ships" => Command::Ships((!rest.is_empty()).then(|| unquote(rest).to_string())),
         "inspect" => Command::Inspect,
+        "list" => match args.split_first() {
+            Some((k, text)) => match list::parse_kind(k) {
+                Some(kind) => Command::List(kind, text.join(" ")),
+                None => return Err(format!("'{k}': list takes {}", list::KINDS.join(", "))),
+            },
+            None => return Err(format!("usage: list {} [text]", list::KINDS.join("|"))),
+        },
+        "find" if !rest.is_empty() => Command::Find(unquote(rest).to_string()),
+        "find" => return Err("usage: find <text>".into()),
         "primary" if !rest.is_empty() => act(json!({"Type": "Set Fleet Primary Ship", "Group/Unit Name": unquote(rest)})),
         "primary" => return Err("usage: primary <group>".into()),
         "damage" => match args.as_slice() {
@@ -755,17 +820,13 @@ impl Script {
                 Err(e) => o.lines.push(e),
             },
             Command::Flags => {
-                let mut v: Vec<_> = self.flags.iter().collect();
-                v.sort();
-                o.lines.extend(v.into_iter().map(|(k, on)| format!("{k} = {on}")));
+                o.lines = self.flag_lines();
                 if o.lines.is_empty() {
                     o.lines.push("no flag has been set".into());
                 }
             }
             Command::Timers => {
-                let mut v: Vec<_> = self.timers.iter().collect();
-                v.sort_by(|a, b| a.0.cmp(b.0));
-                o.lines.extend(v.into_iter().map(|(k, t)| format!("{k} = {t:.1} s{}", if self.stopped.contains(k) { " (stopped)" } else { "" })));
+                o.lines = self.timer_lines();
                 if o.lines.is_empty() {
                     o.lines.push("no timer has been started".into());
                 }
@@ -777,6 +838,8 @@ impl Script {
             | Command::Lose
             | Command::Restart
             | Command::Ships(_)
+            | Command::List(..)
+            | Command::Find(_)
             | Command::Inspect
             | Command::Where
             | Command::Mark(_)
@@ -785,24 +848,13 @@ impl Script {
             | Command::Cam(_)
             | Command::Hud(_) => self.run_more(cmd, w, env, out, &mut o),
             Command::Counters => {
-                o.lines.extend(self.ext.counter_list().into_iter().map(|(k, v)| format!("{k} = {v}")));
+                o.lines = self.counter_lines();
                 if o.lines.is_empty() {
                     o.lines.push("no counter has been set".into());
                 }
             }
             Command::Tasks => {
-                o.lines.extend(self.tasks.iter().map(|t| {
-                    let state = if t.complete {
-                        "complete"
-                    } else if t.failed {
-                        "failed"
-                    } else if t.active {
-                        "active"
-                    } else {
-                        "inactive"
-                    };
-                    format!("{:<9} {}  {}", state, t.name, t.text.replace('\n', " "))
-                }));
+                o.lines = self.task_lines();
                 if o.lines.is_empty() {
                     o.lines.push("the mission has no tasks".into());
                 }

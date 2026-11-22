@@ -5,8 +5,7 @@ use bevy::prelude::*;
 use crate::campaign::Mission;
 use crate::rules::console::{Cheats, Console, DevView, ShapeKind};
 
-/// Output lines shown above the prompt.
-const SHOWN: usize = 16;
+use crate::rules::console::SHOWN;
 
 #[derive(Component)]
 struct Panel;
@@ -58,8 +57,16 @@ fn draw(
             continue;
         }
         let Some(mut text) = children.first().and_then(|c| texts.get_mut(*c).ok()) else { continue };
-        let tail = console.log.len().saturating_sub(SHOWN);
-        let mut shown = console.log[tail..].join("\n");
+        let end = console.log.len().saturating_sub(console.scroll);
+        let start = end.saturating_sub(SHOWN);
+        let mut shown = String::new();
+        if start > 0 {
+            shown.push_str(&format!("^ {start} more above (PageUp, Ctrl+Home)\n"));
+        }
+        shown.push_str(&console.log[start..end].join("\n"));
+        if console.scroll > 0 {
+            shown.push_str(&format!("\nv {} more below (PageDown, Ctrl+End)", console.scroll));
+        }
         shown.push_str(&format!("\n> {}_", console.line));
         if text.0 != shown {
             text.0 = shown;

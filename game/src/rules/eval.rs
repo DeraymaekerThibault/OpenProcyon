@@ -99,6 +99,7 @@ impl Script {
             media,
             paths: data["paths"].clone(),
             points: data["points"].clone(),
+            objects: data["objects"].clone(),
             volumes: data["volumes"].as_object().into_iter().flatten().map(|(name, v)| (name.clone(), Region::from_json(v))).collect(),
             nebulae: crate::nebula::polygons(data, &crate::nebula::StormShift::default()),
             hits: HashMap::new(),

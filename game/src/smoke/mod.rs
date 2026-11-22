@@ -94,9 +94,14 @@ fn console(
     if !*submitted {
         *submitted = true;
         console.open = true;
-        for line in ["god", "tasks", "why Player Reaches Tender", "schema Set Flag Action", "kill", "rules", "ships", "where", "restart"] {
+        for line in ["god", "tasks", "why Player Reaches Tender", "schema Set Flag Action", "kill", "rules", "ships", "where", "restart", "list groups", "list objects", "find a"] {
             console.submit(line);
         }
+    }
+    if cfg.frame == 45 {
+        // Read back through the output, as PageUp does, so a picture after this shows the "more below" marker.
+        console.scroll_by(30);
+        assert!(console.scroll > 0, "the output is too short to scroll ({} lines)", console.log.len());
     }
     if cfg.frame == 60 {
         assert!(cheats.used && cheats.god, "the console's god command was not run");
