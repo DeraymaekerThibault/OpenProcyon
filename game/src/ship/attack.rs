@@ -105,33 +105,51 @@ pub fn range_gap(routine: Routine, pos: Vec3, own_radius: f32, foe_pos: Vec3, fo
     }
 }
 
+/// What a fully submerged submarine's frontal attack uses in place of R: the charge goes in to this share of R (docs/re/movement.md).
+pub const SUBMERGED_CHARGE: f32 = 0.2;
+
+/// The frontal attack's two ranges `(charge, break-off)`: both R, except for a fully submerged submarine, which charges in to 0.2 R and
+/// breaks off at 0.
+pub fn frontal_ranges(r: f32, submerged: bool) -> (f32, f32) {
+    if submerged { (SUBMERGED_CHARGE * r, 0.0) } else { (r, r) }
+}
+
 /// The course (aim points) of one think. `gap`: distance between the two hulls' spheres; `r`: the attack range; `now`: game seconds.
 #[allow(clippy::too_many_arguments)]
 pub fn course(routine: Routine, pos: Vec3, heading: f32, foe: Vec3, gap: f32, r: f32, now: f32, breakoff: &mut Breakoff) -> Vec<Vec3> {
+    course_to(routine, pos, heading, foe, gap, (r, r), now, breakoff).unwrap_or_else(|| vec![foe])
+}
+
+/// `course` with the frontal attack's two ranges (`frontal_ranges`). None: no course is set this think and the one already held stands.
+#[allow(clippy::too_many_arguments)]
+pub fn course_to(routine: Routine, pos: Vec3, heading: f32, foe: Vec3, gap: f32, (r, leg_r): (f32, f32), now: f32, breakoff: &mut Breakoff) -> Option<Vec<Vec3>> {
     let d = (foe - pos).with_y(0.0).normalize_or_zero();
     let right = Vec3::new(-d.z, 0.0, d.x); // the line of sight turned 90° to starboard
     match routine {
         // Aim R abeam of the target, then R beyond it: the ship ends on its turning circle with the target on the chosen beam.
-        Routine::Broadside(side) => vec![foe + right * side * r, foe + d * r],
+        Routine::Broadside(side) => Some(vec![foe + right * side * r, foe + d * r]),
         Routine::Frontal => {
             if let Some((since, v)) = *breakoff {
-                if gap <= r && now - since < FRONTAL_LEG {
-                    return vec![pos + v * r];
+                if gap <= leg_r && now - since < FRONTAL_LEG {
+                    return Some(vec![pos + v * leg_r]);
                 }
                 *breakoff = None;
             }
             if gap >= r {
-                return vec![foe];
+                return Some(vec![foe]);
             }
             // The line of sight turned 90° toward the side the target bears on (to port when it is on the port bow, else to starboard):
             // the ship turns toward it and circles it on that side. Fixed in the world for the whole leg.
             let port = crate::ship::angdiff((-d.x).atan2(-d.z), heading) > 0.0;
             let v = if port { -right } else { right };
+            if gap > leg_r {
+                return None; // a break-off ends at once above its range (a submerged submarine's: 0)
+            }
             *breakoff = Some((now, v));
-            vec![pos + v * r]
+            Some(vec![pos + v * leg_r])
         }
-        Routine::Rear if gap < r => vec![pos - d * r],
-        Routine::Rear | Routine::Ram => vec![foe],
+        Routine::Rear if gap < r => Some(vec![pos - d * r]),
+        Routine::Rear | Routine::Ram => Some(vec![foe]),
     }
 }
 

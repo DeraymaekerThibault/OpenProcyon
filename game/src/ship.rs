@@ -272,7 +272,7 @@ pub fn ai(
     (lib, fleets): (Res<combat::Library>, Res<Fleets>),
     bases: Query<(Entity, &Transform, &combat::BaseSide, &Health, &combat::ArmedBase)>,
     scripted: Query<&campaign::MissionShip>,
-    dying: Query<(), With<combat::Sinking>>,
+    (dying, cloaks): (Query<(), With<combat::Sinking>>, Query<&crate::cloak::Cloak>),
 ) {
     if mission.is_some() {
         return;
@@ -376,7 +376,7 @@ pub fn ai(
             explore_now(&mut s, &mut explore);
             continue;
         };
-        s.waypoints.clear(); // contact: drop any exploring course (the quadrant is kept for later)
+        let kept = std::mem::take(&mut s.waypoints); // contact: drop any exploring course (the quadrant is kept for later)
         if let Some(away) = flee(&holes, tf.translation) {
             (s.goal, s.order) = (Some(away), 3);
             continue;
@@ -392,7 +392,12 @@ pub fn ai(
         let r = if foe_base { range[1] } else { range[0] };
         let gap = attack::range_gap(routine, tf.translation, class.radius, foe_pos, foe_radius, foe_aim);
         let at = if routine == attack::Routine::Ram { foe_pos } else { foe_aim };
-        let course = attack::course(routine, tf.translation, s.heading, at, gap, r, now, breakoffs.entry(e).or_default());
+        let submerged = cloaks.get(e).is_ok_and(|c| c.level() == 1.0);
+        let ranges = if routine == attack::Routine::Frontal { attack::frontal_ranges(r, submerged) } else { (r, r) };
+        let Some(course) = attack::course_to(routine, tf.translation, s.heading, at, gap, ranges, now, breakoffs.entry(e).or_default()) else {
+            s.waypoints = kept; // no new course: the one it held stands, with its speed order
+            continue;
+        };
         s.throttle = attack::throttle(routine, e, tf.translation, s.heading, course[0]);
         (s.waypoints, s.goal, s.order) = (course, None, 3);
     }
