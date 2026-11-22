@@ -688,8 +688,8 @@ fn update(
             // ONE/ONE ignores texture/colour alpha; edge fading modulates RGB instead.
             col.push([rgb[0] * facing, rgb[1] * facing, rgb[2] * facing, 1.0]);
         }
-        if let Some(mut m) = c.mesh.as_ref().and_then(|m| meshes.get_mut(m)) {
-            fx::set_ribbons(&mut m, pos, uv, col, c.idx.clone());
+        if let Some(handle) = c.mesh.as_ref() {
+            fx::set_ribbons_if_changed(&mut meshes, handle, pos, uv, col, c.idx.clone());
         }
         if let Some(mut sink) = sink {
             let distance = (cam.distance(centre) - c.radius).max(0.0);

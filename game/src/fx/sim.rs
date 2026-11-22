@@ -192,9 +192,10 @@ pub(super) fn render_mesh_fx(
     assets: Res<AssetServer>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    mut effects: Query<(Entity, &mut Fx, &GlobalTransform)>,
+    mut effects: Query<(Entity, &mut Fx, &GlobalTransform), Without<crate::environment::Unseen>>,
 ) {
     for (e, mut fx, gt) in &mut effects {
+        let fx = &mut *fx;
         for (i, prim) in lib.list[fx.eff].prims.iter().enumerate() {
             let Some(def) = &prim.mesh else { continue };
             let age = fx.age + fx.tick_acc - prim.delay;
@@ -215,15 +216,19 @@ pub(super) fn render_mesh_fx(
                 commands.spawn((Mesh3d(mesh.clone()), MeshMaterial3d(material.clone()), Transform::default(), *gt, ChildOf(e), NoFrustumCulling));
                 (mesh, material)
             });
+            let weight = def.weight.at(age, 0.0).clamp(0.0, 1.0);
+            let colour = [prim.rgb[0].at(age, 1.0), prim.rgb[1].at(age, 1.0), prim.rgb[2].at(age, 1.0), prim.alpha.at(age, 1.0)];
+            // Once the curves settle the mesh is not touched again (a touched mesh asset is re-uploaded whole).
+            let key = [weight, scale, colour[0], colour[1], colour[2], colour[3]];
+            if fx.mesh_keys[i] == Some(key) {
+                continue;
+            }
             if let Some(mut mesh) = meshes.get_mut(&entry.0) {
-                let weight = def.weight.at(age, 0.0).clamp(0.0, 1.0);
+                fx.mesh_keys[i] = Some(key);
                 let positions: Vec<_> = def.source.iter().zip(&def.destination).map(|(a, b)| (a.lerp(*b, weight) * scale).to_array()).collect();
                 mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
                 mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, def.uv.clone());
-                mesh.insert_attribute(
-                    Mesh::ATTRIBUTE_COLOR,
-                    vec![[prim.rgb[0].at(age, 1.0), prim.rgb[1].at(age, 1.0), prim.rgb[2].at(age, 1.0), prim.alpha.at(age, 1.0)]; def.source.len()],
-                );
+                mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, vec![colour; def.source.len()]);
                 mesh.insert_indices(Indices::U32(def.indices.clone()));
             }
         }
