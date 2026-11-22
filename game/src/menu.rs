@@ -278,6 +278,7 @@ pub fn plugin(app: &mut App) {
     app.insert_resource(sk)
         .add_systems(OnEnter(Screen::Battle), (clear_menu, stop_music))
         .add_systems(OnEnter(Screen::Main), start_music)
+        .add_systems(Update, follow_music_volume)
         .insert_resource(SaveUi { list: crate::campaign::list_saves(), ..default() })
         .init_resource::<InGame>()
         .init_resource::<ScrollTo>()
@@ -317,7 +318,15 @@ struct MenuMusic;
 fn start_music(mut commands: Commands, assets: Res<AssetServer>, playing: Query<(), With<MenuMusic>>) {
     if playing.is_empty() {
         let e = crate::audio::music(&mut commands, &assets, "FrontEndMusic");
-        commands.entity(e).remove::<crate::audio::Music>().insert(MenuMusic);
+        // Starts silent: the saved levels are only applied in the first frame, so `follow_music_volume` sets the real level.
+        commands.entity(e).remove::<crate::audio::Music>().insert((MenuMusic, PlaybackSettings::LOOP.with_volume(bevy::audio::Volume::Linear(0.0))));
+    }
+}
+
+/// Keeps the menu track at the Music slider's level every frame (the volume given at spawn is never revisited).
+fn follow_music_volume(mut music: Query<&mut AudioSink, With<MenuMusic>>) {
+    for mut sink in &mut music {
+        sink.set_volume(bevy::audio::Volume::Linear(crate::audio::MUSIC_VOL * volume(Setting::Music)));
     }
 }
 
