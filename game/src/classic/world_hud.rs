@@ -195,7 +195,11 @@ fn navigation(
     for (indicator, mut transform, mut vis) in &mut indicators {
         let selected = fleets.selected.and_then(|e| ships.get(e).ok());
         let (tf, ship) = if !indicator.arrow { selected.map_or((primary_tf, ship), |(_, t, s, _)| (t, s)) } else { (primary_tf, ship) };
-        vis.set_if_neq(if cinematic(mission.as_deref()) || (indicator.arrow && goal.is_none()) { Visibility::Hidden } else { Visibility::Inherited });
+        vis.set_if_neq(if cinematic(mission.as_deref()) || crate::rules::console::hud_hidden() || (indicator.arrow && goal.is_none()) {
+            Visibility::Hidden
+        } else {
+            Visibility::Inherited
+        });
         transform.translation = tf.translation;
         // The ring's radius is the ship's radius times its WOT fraction. PROVISIONAL: the small indicator's own radius (the compass mesh
         // measures 5.9) is taken as the ring's.
@@ -362,7 +366,12 @@ fn place_labels(
         label.alpha = banner_alpha(label.alpha, far, real.delta_secs());
         match project(g, banner_height(&lib.classes[sh.class])) {
             Some(p)
-                if label.alpha > 0.0 && !h.destroyed && ms.is_none_or(|m| m.visible) && sensors.player_sees(label.ship, mission.as_deref()) && !cinematic(mission.as_deref()) =>
+                if label.alpha > 0.0
+                    && !h.destroyed
+                    && ms.is_none_or(|m| m.visible)
+                    && sensors.player_sees(label.ship, mission.as_deref())
+                    && !cinematic(mission.as_deref())
+                    && !crate::rules::console::hud_hidden() =>
             {
                 let a = label.alpha;
                 // The first three children are the ribbon pieces; the rules' banner type ('Banner BlueTeam' ...) picks their tint.
@@ -391,7 +400,7 @@ fn place_labels(
         }
     }
     let shown = (|| {
-        if cinematic(mission.as_deref()) {
+        if cinematic(mission.as_deref()) || crate::rules::console::hud_hidden() {
             return None;
         }
         let entity = if selection.0.direct() {

@@ -14,7 +14,9 @@ use super::schema::{self, Role};
 use super::*;
 
 mod complete;
+mod more;
 pub use complete::{Completion, Names, completions, mean, nearest_name, tokens};
+pub use more::{CamMode, DevView, Env, Shape, ShapeKind, ShipInfo, ViewChange, free_cam, game_pos, hud_hidden, marks_path};
 
 /// Point set the `tp x y` command writes its destination to before running 'Teleport Group/Unit'.
 const TP_SET: &str = "(console)";
@@ -206,6 +208,21 @@ pub enum Command {
     Tasks,
     /// Every counter set so far (engine-added `OP` counters).
     Counters,
+    /// Rule actions that only change what is shown or heard (`cam follow`, `music`): run like `Acts`, not a cheat.
+    Soft(Vec<Value>),
+    Rules(Option<String>),
+    Skip,
+    Win,
+    Lose,
+    Restart,
+    Ships(Option<String>),
+    Inspect,
+    Where,
+    Mark(String),
+    Show(ShapeKind, Option<String>),
+    Hide(Option<ShapeKind>, Option<String>),
+    Cam(CamMode),
+    Hud(bool),
     /// The rule schema's entry for an action or condition Type (or the Types whose name contains the text): its fields.
     Schema(String),
 }
@@ -219,7 +236,10 @@ pub enum Dest {
 impl Command {
     /// Whether running it changes the game (it then marks the session as cheated). Queries do not.
     pub fn cheats(&self) -> bool {
-        matches!(self, Command::Acts { .. } | Command::Reveal | Command::Kill | Command::Teleport(_) | Command::Repair(_) | Command::Fire(_))
+        matches!(
+            self,
+            Command::Acts { .. } | Command::Reveal | Command::Kill | Command::Teleport(_) | Command::Repair(_) | Command::Fire(_) | Command::Skip | Command::Win | Command::Lose
+        )
     }
 }
 
@@ -227,6 +247,10 @@ impl Command {
 pub enum Group {
     Cheats,
     State,
+    Flow,
+    Ships,
+    Authoring,
+    Camera,
     Raw,
     Console,
 }
@@ -235,6 +259,10 @@ impl Group {
         match self {
             Group::Cheats => "Cheats",
             Group::State => "Mission state",
+            Group::Flow => "Mission flow",
+            Group::Ships => "Ships and inspection",
+            Group::Authoring => "Authoring helpers",
+            Group::Camera => "Camera and sound",
             Group::Raw => "Raw rule access",
             Group::Console => "Console",
         }
@@ -273,6 +301,58 @@ pub static TABLE: &[Entry] = &[
     entry("timers", Group::State, "timers", "every timer, with its time", "timers", false),
     entry("tasks", Group::State, "tasks", "every objective task and its state", "tasks", false),
     entry("counters", Group::State, "counters", "every counter that has been set", "counters", false),
+    entry("rules", Group::Flow, "rules [text]", "every rule with its state: fired, ran (repeating), never fired, inactive or waiting in an OP Wait", "rules gate", false),
+    entry("skip", Group::Flow, "skip", "end the speech line playing now; it counts as played for Speech Event Played Once", "skip", true),
+    entry("nis", Group::Flow, "nis end", "NIS End: leave a cutscene", "nis end", true),
+    entry("win", Group::Flow, "win", "win the mission (Goto Next Level): test the victory screen and the hand-off", "win", true),
+    entry("lose", Group::Flow, "lose", "lose the mission (End Game): test the defeat screen", "lose", true),
+    entry("restart", Group::Flow, "restart", "restart the mission (the R key)", "restart", false),
+    entry(
+        "ships",
+        Group::Ships,
+        "ships [text]",
+        "id, name, owner, groups, damage, position, visibility and stance of the units whose name, owner or group contains the text",
+        "ships raider",
+        false,
+    ),
+    entry("inspect", Group::Ships, "inspect", "the current target: the same, plus its orders and tow", "inspect", false),
+    entry("primary", Group::Ships, "primary <group>", "Set Fleet Primary Ship: take command of that ship (a unit is written Group,Unit)", "primary Hero,Escort", true),
+    entry(
+        "damage",
+        Group::Ships,
+        "damage <0..1> [group]",
+        "Damage Group/Unit by X percent: that share of every section's hit points (default: the player's fleet)",
+        "damage 0.3 Raiders",
+        true,
+    ),
+    entry("attack", Group::Ships, "attack <group> <target group>", "GroupA to attack GroupB", "attack Pirates Hero", true),
+    entry("stance", Group::Ships, "stance <group> <stance>", "Set Group/Unit AI Stance: dummy, neutral, defensive, aggressive or persistent", "stance Pirates aggressive", true),
+    entry("ally", Group::Ships, "ally <player> <player>", "Set alliance between two players to TRUE", "ally Hero Pirates", true),
+    entry("hostile", Group::Ships, "hostile <player> <player>", "Set alliance between two players to FALSE", "hostile Hero Pirates", true),
+    entry("tow", Group::Ships, "tow <tower> <ship>", "Tow Ship: the first group takes the second in tow", "tow Hero Raiders", true),
+    entry("untow", Group::Ships, "untow <group> <group>", "Break Tow between two groups", "untow Hero Raiders", true),
+    entry("where", Group::Authoring, "where", "the player's ship position in game units (x east, y north), as mission JSON writes them", "where", false),
+    entry(
+        "mark",
+        Group::Authoring,
+        "mark <name>",
+        "append the position to console_marks.txt in the user data folder, as a point line to paste into a mission",
+        "mark Harbour",
+        false,
+    ),
+    entry(
+        "show",
+        Group::Authoring,
+        "show volumes|paths|points [name]",
+        "draw the mission's volumes, paths or points (point sets and objective points) in the world, labelled",
+        "show volumes",
+        false,
+    ),
+    entry("hide", Group::Authoring, "hide volumes|paths|points|all [name]", "stop drawing them", "hide all", false),
+    entry("cam", Group::Camera, "cam free | player | follow <group>", "a free-flying camera, the orbit camera on the player, or on a group", "cam follow Raiders", false),
+    entry("hud", Group::Camera, "hud on|off", "hide or show the HUD, for clean screenshots", "hud off", false),
+    entry("say", Group::Camera, "say <speech event>", "Play speech event: a line from the mission's media, without reaching its rule (it counts as played)", "say Opening", true),
+    entry("music", Group::Camera, "music <track>", "Play Music Track: a music file, without reaching its rule", "music Battle", false),
     Entry {
         alias: &["do"],
         ..entry(
@@ -334,7 +414,7 @@ pub fn help_lines(topic: Option<&str>) -> Vec<String> {
         };
     }
     let mut lines = vec![];
-    for group in [Group::Cheats, Group::State, Group::Raw, Group::Console] {
+    for group in [Group::Cheats, Group::State, Group::Flow, Group::Ships, Group::Authoring, Group::Camera, Group::Raw, Group::Console] {
         lines.push(format!("{}:", group.title()));
         lines.extend(TABLE.iter().filter(|e| e.group == group).map(|e| format!("  {}{:<42}{}", if e.cheats { "*" } else { " " }, e.usage, e.about)));
     }
@@ -378,6 +458,87 @@ pub fn parse(line: &str, player: &str, god: bool) -> Result<Command, String> {
         "flags" => Command::Flags,
         "timers" => Command::Timers,
         "tasks" => Command::Tasks,
+        "rules" => Command::Rules((!rest.is_empty()).then(|| unquote(rest).to_string())),
+        "skip" => Command::Skip,
+        "nis" => match args.as_slice() {
+            ["end"] => act(json!({"Type": "NIS End"})),
+            _ => return Err("usage: nis end".into()),
+        },
+        "win" => Command::Win,
+        "lose" => Command::Lose,
+        "restart" => Command::Restart,
+        "ships" => Command::Ships((!rest.is_empty()).then(|| unquote(rest).to_string())),
+        "inspect" => Command::Inspect,
+        "primary" if !rest.is_empty() => act(json!({"Type": "Set Fleet Primary Ship", "Group/Unit Name": unquote(rest)})),
+        "primary" => return Err("usage: primary <group>".into()),
+        "damage" => match args.as_slice() {
+            [f] | [f, _] => match f.parse::<f32>() {
+                Ok(p) if (0.0..=1.0).contains(&p) => act(json!({"Type": "Damage Group/Unit by X percent", "Group Name": args.get(1).copied().unwrap_or(player), "Percent": p})),
+                _ => return Err(format!("'{f}': the damage is a share between 0 and 1")),
+            },
+            _ => return Err("usage: damage <0..1> [group]".into()),
+        },
+        "attack" => match args.as_slice() {
+            [a, b] => act(json!({"Type": "GroupA to attack GroupB", "Attack Group": a, "Target Group": b})),
+            _ => return Err("usage: attack <group> <target group> (put a name with spaces in \"quotes\")".into()),
+        },
+        "stance" => match args.as_slice() {
+            [g, st] => {
+                let name = match st.to_lowercase().as_str() {
+                    "dummy" => "Stance_Dummy",
+                    "neutral" => "Stance_Neutral",
+                    "defensive" => "Stance_Defensive",
+                    "aggressive" => "Stance_Aggressive",
+                    "persistent" => "Stance Persistent",
+                    other => return Err(format!("'{other}': expected dummy, neutral, defensive, aggressive or persistent")),
+                };
+                act(json!({"Type": "Set Group/Unit AI Stance", "Group/Unit Name": g, "AI Stance": name}))
+            }
+            _ => return Err("usage: stance <group> <stance>".into()),
+        },
+        "ally" | "hostile" => match args.as_slice() {
+            [a, b] => act(
+                json!({"Type": "Set alliance between PlayerA and PlayerB to TRUE/FALSE", "PLAYER A": a, "PLAYER B": b, "SET ALLIANCE TO": wot(word.eq_ignore_ascii_case("ally"))}),
+            ),
+            _ => return Err(format!("usage: {word} <player> <player>")),
+        },
+        "tow" => match args.as_slice() {
+            [a, b] => act(json!({"Type": "Tow Ship", "Docking Group": a, "Target to Tow": b})),
+            _ => return Err("usage: tow <tower group> <ship group>".into()),
+        },
+        "untow" => match args.as_slice() {
+            [a, b] => act(json!({"Type": "Break Tow", "TowerGroupA": a, "TowerGroupB": b})),
+            _ => return Err("usage: untow <group> <group>".into()),
+        },
+        "where" => Command::Where,
+        "mark" if !rest.is_empty() => Command::Mark(unquote(rest).to_string()),
+        "mark" => return Err("usage: mark <name>".into()),
+        "show" | "hide" => {
+            let kind = args.first().and_then(|k| ShapeKind::parse(k));
+            let name = (args.len() > 1).then(|| args[1..].join(" "));
+            match (word.eq_ignore_ascii_case("show"), kind, args.first()) {
+                (true, Some(k), _) => Command::Show(k, name),
+                (false, Some(k), _) => Command::Hide(Some(k), name),
+                (false, None, Some(a)) if a.eq_ignore_ascii_case("all") => Command::Hide(None, None),
+                _ => return Err(format!("usage: {word} volumes|paths|points{} [name]", if word.eq_ignore_ascii_case("hide") { "|all" } else { "" })),
+            }
+        }
+        "cam" => match args.as_slice() {
+            ["free"] => Command::Cam(CamMode::Free),
+            ["player" | "off"] => Command::Cam(CamMode::Player),
+            ["follow", g] => Command::Cam(CamMode::Follow(g.to_string())),
+            _ => return Err("usage: cam free | player | follow <group>".into()),
+        },
+        "hud" => match args.as_slice() {
+            [v] => Command::Hud(flag_word(v)?),
+            _ => return Err("usage: hud on|off".into()),
+        },
+        "say" if !rest.is_empty() => act(json!({"Type": "Play speech event", "Speech Event Name": unquote(rest)})),
+        "say" => return Err("usage: say <speech event>".into()),
+        "music" if !rest.is_empty() => Command::Soft(vec![
+            json!({"Type": "Play Music Track", "File Name": unquote(rest), "Fade In Time ( secs )": 0.0, "Fade Out Time ( secs )": 0.0, "New Volume ( 0 to 1 )": 1.0}),
+        ]),
+        "music" => return Err("usage: music <track>".into()),
         "counters" => Command::Counters,
         "counter" => match args.as_slice() {
             [name, value] => match value.parse::<f32>() {
@@ -485,12 +646,23 @@ pub struct Outcome {
     pub repair: Vec<Entity>,
     /// A name in the command is not in the mission: nothing ran.
     pub rejected: bool,
+    /// End the speech line that is playing (the ECS side stops its sound).
+    pub skip_voice: bool,
+    /// Restart the mission.
+    pub restart: bool,
+    /// Changes to the developer view (`DevView`).
+    pub view: Vec<ViewChange>,
 }
 
 impl Script {
     /// Runs a command against the unit list `w` (what `systems::units` builds each frame). ECS effects go to `out`, as in `step`.
     /// `target`: the player's current target.
     pub fn console_run(&mut self, cmd: &Command, w: &mut [Unit], target: Option<Entity>, out: &mut Vec<Fx>) -> Outcome {
+        self.console_run_with(cmd, w, &Env { target, ..Env::default() }, out)
+    }
+    /// `console_run` with what the ECS side knows (`Env`).
+    pub fn console_run_with(&mut self, cmd: &Command, w: &mut [Unit], env: &Env, out: &mut Vec<Fx>) -> Outcome {
+        let target = env.target;
         let mut o = Outcome::default();
         if let Err(e) = self.check_names(cmd, w) {
             o.lines.push(e);
@@ -501,7 +673,7 @@ impl Script {
         match cmd {
             Command::Nothing => {}
             Command::Help(topic) => o.lines = help_lines(topic.as_deref()),
-            Command::Acts { acts, .. } => {
+            Command::Acts { acts, .. } | Command::Soft(acts) => {
                 for a in acts {
                     self.console_act(a, w, out);
                 }
@@ -524,7 +696,14 @@ impl Script {
             Command::Kill => match target.and_then(|t| w.iter().find(|u| u.e == t)) {
                 Some(u) if !u.name.is_empty() => {
                     let (spec, name) = (format!("{},{}", u.owner, u.name), u.name.clone());
+                    let (from, hit) = (out.len(), u.e);
                     self.console_act(&destroy(&spec), w, out);
+                    // A 'Group,Unit' spec selects by the unit's name alone, so another unit of the same name would go too: keep the target.
+                    for fx in &mut out[from..] {
+                        if let Fx::Destroy(ids) = fx {
+                            ids.retain(|e| *e == hit);
+                        }
+                    }
                     o.lines.push(format!("destroyed {name}"));
                 }
                 Some(_) => o.lines.push("the target has no unit name for a rule to address".into()),
@@ -592,6 +771,19 @@ impl Script {
                 }
             }
             Command::Schema(query) => o.lines = schema_lines(query),
+            Command::Rules(_)
+            | Command::Skip
+            | Command::Win
+            | Command::Lose
+            | Command::Restart
+            | Command::Ships(_)
+            | Command::Inspect
+            | Command::Where
+            | Command::Mark(_)
+            | Command::Show(..)
+            | Command::Hide(..)
+            | Command::Cam(_)
+            | Command::Hud(_) => self.run_more(cmd, w, env, out, &mut o),
             Command::Counters => {
                 o.lines.extend(self.ext.counter_list().into_iter().map(|(k, v)| format!("{k} = {v}")));
                 if o.lines.is_empty() {

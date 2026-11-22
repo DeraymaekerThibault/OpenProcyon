@@ -95,7 +95,7 @@ pub(super) fn ui(
             Ui::SpeechTop => (cutscene, sc.subtitle.clone()),
             Ui::SpeechPanel => (cutscene, String::new()),
             Ui::SpeechFrame | Ui::SpeechHead => (cutscene && portrait.is_some(), String::new()),
-            Ui::Hint => (!crate::panels::cinematic(Some(&mission)) && !sc.hint.is_empty(), sc.hint.clone()),
+            Ui::Hint => (!crate::panels::cinematic(Some(&mission)) && !super::console::hud_hidden() && !sc.hint.is_empty(), sc.hint.clone()),
             Ui::End => (
                 sc.ended.is_some(),
                 sc.ended
@@ -121,7 +121,7 @@ pub(super) fn ui(
             **t = content;
         }
     }
-    let tasks = if crate::panels::cinematic(Some(&mission)) { String::new() } else { sc.tasks_text() };
+    let tasks = if crate::panels::cinematic(Some(&mission)) || super::console::hud_hidden() { String::new() } else { sc.tasks_text() };
     for mut t in &mut objective {
         if **t != tasks {
             **t = tasks.clone();

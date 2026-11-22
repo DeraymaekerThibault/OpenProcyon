@@ -341,7 +341,11 @@ fn update_visibility(
     fleet: Option<Res<FleetHud>>,
 ) {
     for mut v in &mut root {
-        v.set_if_neq(if cinematic(mission.as_deref()) || fleet.as_ref().is_some_and(|f| !f.shown) { Visibility::Hidden } else { Visibility::Inherited });
+        v.set_if_neq(if cinematic(mission.as_deref()) || crate::rules::console::hud_hidden() || fleet.as_ref().is_some_and(|f| !f.shown) {
+            Visibility::Hidden
+        } else {
+            Visibility::Inherited
+        });
     }
     for mut v in &mut weapons {
         v.set_if_neq(if toggles.weapons && fleet.as_ref().is_none_or(|f| f.direct) { Visibility::Inherited } else { Visibility::Hidden });

@@ -63,7 +63,7 @@ Read [CONTRIBUTING.md](CONTRIBUTING.md) and [AGENTS.md](AGENTS.md) first: it is 
 ## Modding
 
 Ships, guns, maps, custom missions and campaigns, sounds, UI art and the graphics look are mods: folders of JSON, glTF, PNG and
-OGG files, kept in your own repository and dropped into the game's mods folder. Start with [docs/modding.md](docs/modding.md).
+OGG files, kept in your own repository and dropped into the game's mods folder. Start with [docs/modding.md](docs/modding.md); to write a mission, [docs/missions.md](docs/missions.md).
 
 ## Credits
 

@@ -14,6 +14,8 @@ fn names() -> Names {
         timers: s(&["t", "Clock"]),
         tasks: s(&["Escape", "Head West"]),
         counters: s(&["kills"]),
+        points: s(&["Harbour", "Objective"]),
+        speech: s(&["Opening"]),
     }
 }
 fn shown(c: &Completion) -> Vec<&str> {
@@ -35,7 +37,7 @@ fn tokens_keep_quoted_names_whole() {
 #[test]
 fn the_command_word_completes() {
     assert_eq!(shown(&completions("fl", &names())), ["flags"]);
-    assert_eq!(shown(&completions("re", &names())), ["repair", "reveal"]);
+    assert_eq!(shown(&completions("re", &names())), ["repair", "restart", "reveal"]);
     assert!(completions("zzz", &names()).items.is_empty());
 }
 
@@ -187,4 +189,24 @@ fn raw_json_names_are_checked_too() {
     assert!(!answer(&mut sc, r#"act {"Type": "Teleport Group/Unit", "Group/Unit Name": "Raiders", "Point Set Name": "Harbour"}"#).0);
     let (rejected, text) = answer(&mut sc, r#"cond {"Type": "Group Destroyed", "Group Name": "Raiderz"}"#);
     assert!(rejected && text.contains("did you mean 'Raiders'"), "{text}");
+}
+
+#[test]
+fn the_second_set_of_commands_completes_its_arguments() {
+    let n = names();
+    assert_eq!(shown(&completions("stance Raiders agg", &n)), ["aggressive"]);
+    assert_eq!(shown(&completions("attack Pi", &n)), ["Pirates"]);
+    assert_eq!(shown(&completions("attack Pirates He", &n)), ["Hero"]);
+    assert_eq!(shown(&completions("tow h", &n)), ["Hero"]);
+    assert_eq!(shown(&completions("damage 0.5 rai", &n)), ["Raiders"]);
+    assert_eq!(shown(&completions("show v", &n)), ["volumes"]);
+    assert_eq!(shown(&completions("show volumes g", &n)), ["Gate Area"]);
+    assert_eq!(shown(&completions("show points obj", &n)), ["Objective"]);
+    assert_eq!(shown(&completions("hide a", &n)), ["all"]);
+    assert_eq!(shown(&completions("cam f", &n)), ["free", "follow"]);
+    assert_eq!(shown(&completions("cam follow rai", &n)), ["Raiders"]);
+    assert_eq!(shown(&completions("hud o", &n)), ["on", "off"]);
+    assert_eq!(shown(&completions("say op", &n)), ["Opening"]);
+    assert_eq!(shown(&completions("nis e", &n)), ["end"]);
+    assert_eq!(shown(&completions("rules fail", &n)), ["Fail Mission"]);
 }

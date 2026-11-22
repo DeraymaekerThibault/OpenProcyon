@@ -21,6 +21,10 @@ pub struct Names {
     pub timers: Vec<String>,
     pub tasks: Vec<String>,
     pub counters: Vec<String>,
+    /// Point sets and objective points (`show points`).
+    pub points: Vec<String>,
+    /// Speech events of the mission's media (`say`).
+    pub speech: Vec<String>,
 }
 
 fn sorted(set: BTreeSet<String>) -> Vec<String> {
@@ -76,6 +80,8 @@ impl Script {
             timers: sorted(timers),
             tasks: sorted(tasks),
             counters: sorted(counters),
+            points: self.shape_names(ShapeKind::Points),
+            speech: sorted(keys(&self.media["speech"]).collect()),
         }
     }
 }
@@ -124,6 +130,13 @@ pub fn mean<'a>(word: &str, items: impl IntoIterator<Item = &'a str>) -> String 
     nearest_name(word, items).map_or(String::new(), |n| format!("; did you mean '{n}'?"))
 }
 
+/// "no group 'X'", with the closest group and, for a unit's name, how a rule writes it.
+fn group_error(spec: &str, w: &[Unit], n: &Names) -> String {
+    let base = spec.split_once(',').map_or(spec, |x| x.0);
+    let unit = w.iter().find(|u| u.name == spec && !u.owner.is_empty()).map_or(String::new(), |u| format!(" (the unit is written '{},{}')", u.owner, u.name));
+    format!("no group '{spec}'{}{unit}", mean(base, n.groups.iter().map(String::as_str)))
+}
+
 /// Whether a rule's 'Group' or 'Group,Unit' spec names something in the mission.
 fn group_known(spec: &str, w: &[Unit], n: &Names) -> bool {
     let (group, unit) = spec.split_once(',').map_or((spec, ""), |(g, u)| (g, u));
@@ -141,15 +154,19 @@ impl Script {
             if spec.is_empty() || group_known(spec, w, &n) {
                 return Ok(());
             }
-            let base = spec.split_once(',').map_or(spec, |x| x.0);
-            Err(format!("no group '{spec}'{}", mean(base, n.groups.iter().map(String::as_str))))
+            Err(group_error(spec, w, &n))
         };
         match cmd {
             Command::Repair(spec) => group(spec),
             Command::Teleport(Dest::Set(name)) if !n.point_sets.contains(name) => {
                 Err(format!("no point set '{name}'{}; the mission has {}", mean(name, n.point_sets.iter().map(String::as_str)), n.point_sets.join(", ")))
             }
-            Command::Acts { acts, god: None } => acts.iter().try_for_each(|a| self.check_fields(Role::Action, a, w, &n)),
+            Command::Acts { acts, god: None } | Command::Soft(acts) => acts.iter().try_for_each(|a| self.check_fields(Role::Action, a, w, &n)),
+            Command::Cam(CamMode::Follow(spec)) => group(spec),
+            Command::Show(kind, Some(name)) | Command::Hide(Some(kind), Some(name)) => {
+                let known = self.shape_names(*kind);
+                if known.contains(name) { Ok(()) } else { Err(format!("no {} '{name}'{}", kind.name(), mean(name, known.iter().map(String::as_str)))) }
+            }
             Command::Cond(c) => self.check_fields(Role::Condition, c, w, &n),
             _ => Ok(()),
         }
@@ -167,7 +184,7 @@ impl Script {
                     if group_known(x, w, n) || f.kind == Kind::Player && n.groups.iter().any(|g| g == base(x)) {
                         continue;
                     }
-                    (&n.groups, false)
+                    return Err(format!("{} (for {} in '{}')", group_error(x, w, n), f.name, def.name));
                 }
                 Kind::PointSet => (&n.point_sets, false),
                 Kind::Volume => (&n.volumes, false),
@@ -177,6 +194,7 @@ impl Script {
                 Kind::Flag => (&n.flags, true),
                 Kind::Timer => (&n.timers, true),
                 Kind::Counter => (&n.counters, true),
+                Kind::Speech if !n.speech.is_empty() => (&n.speech, false),
                 _ => continue,
             };
             if known.iter().any(|k| k == x) {
@@ -271,7 +289,7 @@ pub fn completions(line: &str, n: &Names) -> Completion {
     let name_wrap = |s: &str| quoted(s);
     match cmd.name {
         // These take the rest of the line as one name.
-        "fire" | "why" => {
+        "fire" | "why" | "rules" => {
             let t = rest.strip_prefix('"').unwrap_or(rest);
             pick(off, t, &n.rules, name_wrap)
         }
@@ -290,7 +308,23 @@ pub fn completions(line: &str, n: &Names) -> Completion {
                     let names: Vec<String> = TABLE.iter().map(|e| e.name.to_string()).collect();
                     pick(start, partial, &names, str::to_string)
                 }
-                ("repair", 0) => pick(start, partial, &n.groups, name_wrap),
+                ("repair" | "primary" | "ships", 0) | ("damage", 1) | ("attack" | "ally" | "hostile" | "tow" | "untow", 0 | 1) | ("stance", 0) => {
+                    pick(start, partial, &n.groups, name_wrap)
+                }
+                ("stance", 1) => words(start, partial, &["dummy", "neutral", "defensive", "aggressive", "persistent"]),
+                ("nis", 0) => words(start, partial, &["end"]),
+                ("hud", 0) => words(start, partial, &["on", "off"]),
+                ("cam", 0) => words(start, partial, &["free", "player", "follow"]),
+                ("cam", 1) if toks[0].text == "follow" => pick(start, partial, &n.groups, name_wrap),
+                ("show", 0) => words(start, partial, &["volumes", "paths", "points"]),
+                ("hide", 0) => words(start, partial, &["volumes", "paths", "points", "all"]),
+                ("show" | "hide", 1) => match ShapeKind::parse(&toks[0].text) {
+                    Some(ShapeKind::Volumes) => pick(start, partial, &n.volumes, name_wrap),
+                    Some(ShapeKind::Paths) => pick(start, partial, &n.paths, name_wrap),
+                    Some(ShapeKind::Points) => pick(start, partial, &n.points, name_wrap),
+                    None => Completion::default(),
+                },
+                ("say", 0) => pick(start, partial, &n.speech, name_wrap),
                 ("tp", 0) => pick(start, partial, &n.point_sets, name_wrap),
                 ("set", 0) => pick(start, partial, &n.flags, name_wrap),
                 ("set", 1) => words(start, partial, &["on", "off"]),

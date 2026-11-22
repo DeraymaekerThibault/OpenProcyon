@@ -4,6 +4,20 @@ A mod is a folder of files that the game lays over the player's imported assets 
 images (PNG) and sounds (OGG). No code and no patching: ships, guns, maps, custom missions and campaigns, sounds, UI art, fonts
 and the graphics look are all files. When something needs the engine to change, see "Sharing a mod" below.
 
+## Where things live
+
+| Doc | What it holds |
+|---|---|
+| `docs/modding.md` (this page) | making, testing, installing and sharing mods: the overlay, ships, weapons, sounds, strings, UI art, the render profile |
+| `docs/missions.md` | the guide to writing a custom mission (folder layout, `map.json` / `mission.json` / `media.json` keys, a worked example, the test loop) |
+| [`docs/rule-types.md`](rule-types.md) | the reference for every mission rule Type: its fields, defaults and what it does (the field tables are generated from `--dump-rule-schema` by `tools/gen_rule_types.py`) |
+| `docs/data-format.md` | the layout of the imported `assets/` folder and its JSON files: what a mod file replaces or extends |
+| `docs/development.md` | for engine contributors: the daily loop, checks, smoke tests, module ownership |
+| `docs/wot-format.md` | notes on the retail property files the importer reads |
+| `docs/examples/` | tested example data (`gate-ambush.mission.json`, the mission the guide walks through) |
+| `docs/re/*.md` | specifications of the original game's behaviour (rules, numbers, formulas) written from data files, the manual and play, one file per system; read them to learn what a rule does, not to copy |
+| `mods/` | the example mods the project maintains: `faction-colors`, `game-speed`, `remaster`, `silver-skirmish` |
+
 ## Your first mod
 
 A Pirate Man-o'-War in skirmish at 255 points, with its own name (`mods/silver-skirmish` is a working copy):
@@ -18,10 +32,15 @@ my-mod/
 ```
 
 Paths inside the folder mirror the imported `assets/` folder (its layout: [data-format.md](data-format.md)). `extends` copies a
-ship and changes only the keys you give. Try it with `./openprocyon --mod /path/to/my-mod` (from a source checkout:
-`make run ARGS='--mod /path/to/my-mod'`; repeatable, later mods win), or install it as a player does (below). The overlay is built at launch, so restart after every change. More examples in `mods/`: `faction-colors` (JSON only),
-`game-speed`, `remaster` (a whole graphics look). A ship of your own needs only a model and a short `ship.json`
-(["A ship from a model"](#a-ship-from-a-model)).
+ship and changes only the keys you give: the parent is the ship folder named by `extends`, and a ship that extends its own id
+(as above) changes that ship in place, while a new id adds a copy beside it. Try it with `./openprocyon --mod /path/to/my-mod`
+(from a source checkout: `make run ARGS='--mod /path/to/my-mod'`; repeatable, later mods win), or install it as a player does
+(below). The overlay is built at launch, so restart after every change; ["Testing a mod"](#testing-a-mod) lists the quick ways to
+see the result and ["Troubleshooting"](#troubleshooting) what to check when nothing changes. More examples in `mods/`:
+`faction-colors` (JSON only: recoloured effects and a wake tint), `game-speed`, `remaster` (a whole graphics look),
+`silver-skirmish` (this page's example, which also names an existing hull icon). A ship of your own needs only a model and a short
+`ship.json` (["A ship from a model"](#a-ship-from-a-model)); a weapon of your own is a gun entry and a bullet entry
+(["A new weapon"](#a-new-weapon)).
 
 ## Sharing a mod
 
@@ -44,51 +63,102 @@ ship and changes only the keys you give. Try it with `./openprocyon --mod /path/
 
 ## Installing and switching on
 
-Unzip a mod into `<user data dir>/mods/` (`~/.local/share/openprocyon/mods` on Linux, `%APPDATA%\openprocyon\mods` on Windows),
-then switch it on with the Mods button in the corner of the main menu: a sortable list (the Category pull-down filters; click a
+Unzip a mod into `<user data dir>/mods/` (`~/.local/share/openprocyon/mods` on Linux, `%APPDATA%\openprocyon\mods` on Windows;
+`$XDG_DATA_HOME/openprocyon/mods` when that variable is set), so that the mod's own `mod.json` sits at
+`mods/<folder>/mod.json`, not one folder deeper (a zip that unpacks to `name/name/` leaves the mod listed but empty). Then switch it
+on with the Mods button in the corner of the main menu: a sortable list (the Category pull-down filters; click a
 row for its details; tick its box, double-click it or use Switch on / Switch off). The choice is stored in `mods.json` beside that
-folder (`{"enabled": ["id", ...], "disabled": ["id", ...]}`, load order, later wins). A user mod stays off until switched on;
-dropping a folder in never switches anything on. A user mod replaces a bundled one with the same `id`.
+folder (`{"enabled": ["id", ...], "disabled": ["id", ...]}`). The order of `enabled` is the load order, later wins; the screen has
+no reorder control and saves the switched-on mods in list order, so edit `mods.json` by hand when two mods touch the same file.
+Ids in `mods.json` that no folder has are ignored. A user mod stays off until switched on; dropping a folder in never switches
+anything on. A user mod replaces a bundled one with the same `id` (of two user folders with one `id`, the first found is kept).
 
 Mods that ship with the game live in `mods/` (the checkout's, or next to the executable in a download) and are off until ticked,
 except those marked `"default": true` (such as `game-speed`), which are on until the player switches them off.
 
-`mod.json` (every mod folder needs one; `tests/test_bundled_mods.py`):
+Layers, bottom to top: the imported assets, `content/` (what ships with the code), the switched-on mods in `mods.json` order, then
+the `--mod` folders in command-line order. A `--mod` folder needs no switching on and does not appear in the Mods screen.
+
+`mod.json` is optional for the loader (a folder without one, or with one that is not valid JSON, is listed under its folder name
+in the category "Other"), but write one: the project's own `tests/test_bundled_mods.py` requires `id` (equal to the folder name),
+`name`, `version`, `category` and `description` of every mod in `mods/`. `mod.json` itself is not copied into the overlay; the game
+prints `mod <name> <version> <description>` to the console when it lays each mod over the assets.
 
 | Key | Meaning |
 |---|---|
 | `id` | default: the folder name |
-| `name`, `version`, `description` | shown in the Mods screen |
+| `name`, `version`, `description` | shown in the Mods screen (`name` defaults to the id) |
 | `category` | the Mods screen's filter (default "Other") |
 | `missions` | the order of a mod campaign's missions (see the custom-mission row below) |
 | `default` | bundled mods only: on until switched off; ignored in user mods |
-| `game_version`, `requires` | not read yet |
+| `game_version`, `requires` | not read yet (nothing in the engine looks at them; say in your README which version you tested) |
+
+## Testing a mod
+
+| Goal | How |
+|---|---|
+| load a mod without installing it | `--mod <folder>` (repeatable; a relative path is relative to where you start the game; no need to switch it on; later `--mod`s win). From a checkout: `make run ARGS='--mod mods/x'` |
+| start a battle at once | `--map <id>` (a skirmish map such as `red_rover`, or your mod's map), `--mission N`, with `--ship Ship_Id` (your own ship), `--allies A,B`, `--enemies A,B` (`none` for no enemies) and `--speed N` (fast-forward); `--menu skirmish` (or `mods`) opens that screen; `--lobby "map=border_dispute;points=1000;limit=10;slots=human,7*computer"` sets the skirmish lobby up (see `docs/development.md`) |
+| a picture | `./openprocyon --mod x --map red_rover --ship Ship_Id --shot out.png --shot-frame 300 [--dist D --yaw Y --pitch P]` writes a 1280x720 PNG and exits; a list `--shot-frame 100,300` writes `out_100.png`, `out_300.png`. In a checkout `tools/shot.sh local/x.png` does the same through cargo and checks the picture is not black (`--script damage`, `fxtest`, `victory`, ... stage a situation; the names are listed in `game/src/smoke/mod.rs`) |
+| what the merged files look like | open them in `local/overlay/` (above) |
+| mission mistakes | `--check-mission <map id> --mod <dir>`, `--rule-trace`, `--why "<rule>"`, `--fire-rule`, the developer console (`~`); `--dump-rule-schema` needs no assets (all in "Authoring missions" and `docs/missions.md`) |
+| numbers | `PROCYON_TRACE=<file.csv>` writes every ship's position, velocity, heading and section hit points (and, in `<file>.shells.csv`, every shell) once per simulation step: compare a gun's range or a ship's speed with what you meant. `PROCYON_PROFILE=1` logs frame times, for the cost of a look (`docs/development.md`) |
+| logs | the console shows everything; the same text is written to `<user data dir>/logs/openprocyon.log` (the run before is `openprocyon.previous.log`), starting with the version and your arguments and ending with any panic. The overlay's `mod <name> <version> <description>` line and the retail-texture warning are plain console output and may not be in the log file |
+
+Restart the game after every change: the overlay, the merged tables, the string table, the sound index and the render profile are
+all read once at launch.
 
 ## What a mod can change
 
-At launch `game/src/modding.rs` builds `local/overlay/` (symlinks to the base files, mod files on top) and the
-game, Bevy's asset server included, reads only that tree.
+At launch `game/src/modding.rs` builds the overlay, a folder `local/overlay/` beside the imported assets (`<assets>/../local/overlay`:
+in a checkout `local/overlay/`, for a player `<user data dir>/local/overlay`). It holds links to the base files (hard links on
+Windows, copies when the overlay is on another volume, symlinks elsewhere) with the mod files on top, and is deleted and rebuilt on
+every launch. The game, Bevy's asset server included, reads only that tree, so open a file there to see exactly what the game got
+after merging (merged JSON is written compact). Mods are laid on in order, `content/` first, and for each mod the files that
+carry `"extends"` go last, so they see the mod's own other files.
+
+How a file combines with the one below it depends on its path:
+
+| Path | Rule |
+|---|---|
+| `data/weapons/guns.json`, `data/weapons/bullets.json`, `data/ai/weapons.json`, `data/collision.json`, `data/docks.json`, `menu/strings.json`, `hud/scales.json`, `data/render/skies.json`, `data/render/nebulae.json` | **merged**, deep: objects combine key by key, so a new key is added and an existing one changes only the keys you give; arrays and scalars replace. A file that is not valid JSON, or not an object, does not just get ignored: the merge replaces the whole table below it with that bad value and the game then fails or shows blank text (see "Troubleshooting") |
+| a `.json` file containing `"extends"` | merged over its parent (below); the `extends` key is dropped |
+| any other file (every other JSON such as `data/render/look.json`, `data/hud/theme.json`, `data/hud/slices.json`, `data/fx/wake_tint.json`, images, models, sounds, shaders) | **replaced** whole; with two mods the later one wins and the earlier one's file is gone |
+
+`extends` names the parent: for `ships/<Id>/ship.json` and `maps/<Id>/map.json` (and the other files at that depth) it is another
+ship or map id, for any other file such as `fx/<Name>.json` it is a sibling file `<parent>.json` in the same folder. The parent is read
+from the overlay as built so far, so it may come from the imported assets or from an earlier mod or the same mod. An unknown parent
+stops the game at launch (`mod <folder>: extends unknown '<parent>'`).
+
 | Mod file | Effect |
 |---|---|
-| any file with a base path (`hud/sprites/MainBar_PanicButton/Navy/NoCursor.png`, `ships/Ship_X/model.glb`, `fonts/Sans.otf`, `sound/<kind>/*.ogg`) | replaces the base file: texture packs, upscaled art, new fonts, sounds |
-| `ships/<Id>/ship.json` containing `"extends": "Ship_Navy_Cutter"` | deep-merged over that ship: object keys override one by one, arrays and scalars replace; a new ship or weapon is a few lines (see `mods/silver-skirmish`) |
-| an `extends` file may also carry `"set": {"/engines/0/fx": "X"}` (JSON pointers, applied after the merge) to change one value inside an array, which a merge cannot do; a pointer that does not exist is an error |
+| any file with a base path (`hud/sprites/MainBar_PanicButton/Navy/NoCursor.png`, `ships/Ship_X/model.glb`, `fonts/Sans.otf`, `sound/<kind>/*.ogg`) | replaces the base file: texture packs, upscaled art, new fonts, sounds. A replaced retail `model.glb` keeps that ship's retail `geometry.json` (hit meshes) and sections, so a ship that looks different but hits the same |
+| `ships/<Id>/ship.json` containing `"extends": "Ship_Navy_Cutter"` | deep-merged over that ship: object keys override one by one, arrays and scalars replace; a new ship is a few lines (see `mods/silver-skirmish`) |
+| an `extends` file may also carry `"set": {"/engines/0/fx": "X"}` (JSON pointers, applied after the merge) to change one value inside an array, which a merge cannot do; a pointer that does not exist stops the game at launch (`mod <folder>: <file> sets '<pointer>', which does not exist`). `mods/faction-colors` uses it to point a ship's four engines at recoloured effect copies |
 | `data/collision.json` | merged key by key: a new scenery type's collision (an entry per `type` a map's `objects` name, layout in `docs/data-format.md`), so a mod's own island or rock blocks ships and shells. Without an entry the model is drawn but nothing collides with it |
 | `data/docks.json` | merged key by key: `{"<scenery type>": {"points": [{"label", "pos", "yaw"}], "tender": true}}` (layout in `docs/data-format.md`), so a mod's own base or island gets dock points; scenery no rule owns is dockable by the player's side like a retail island |
 | `data/render/nebulae.json` | merged key by key: `{"rules": [...], "bolt": {...}}`, the storm and nebula looks a content mod wants on its own maps (same keys as the `nebulae` block of `look.json`). Its `rules` go in front of the profile's (first match wins), its other keys merge over the profile's `nebulae`; a rule matches by effect name only, so it applies on every map while the mod is on. Without a profile with a `nebulae` block it does nothing |
 | `data/render/skies.json` | merged key by key: `{"<sky>": {...any `sky` key of `look.json`...}}`, the layers, base and stars of a sky a content mod bakes itself (`models/sky/<sky>_cube.png`). Added under the active render profile's `sky.skies` (the profile's own entry for a sky wins); without a profile with a `sky` block it does nothing, so a mission mod never switches the look on |
 | `models/scenery/<Scene>.glb` with glTF animations | every clip in the file loops from spawn, all together (cranes, flags, beacons: node animation, the player on the model's root). Retail scenery has none; its windmills play `data/animations.json` |
-| `menu/strings.json` | merged key by key with the retail string table: new ids for names a mod's ships and screens use (e.g. a ship's `display_name`) |
-| `fx/<Name>.json` | a new effect file is loaded without being listed anywhere; `extends` + `set` recolours a copy of a retail effect |
+| `menu/strings.json` | merged key by key with the retail string table: new ids for names a mod's ships and screens use (e.g. a ship's `display_name`); see "Strings and names" |
+| `fx/<Name>.json` | a new effect file is loaded without being listed anywhere (the effect's name is its file name, which a gun's `MuzzleFlashEffect`, a bullet's `hit_fx` / `bullet_fx` or a ship's engine `fx` then names); `extends` (the sibling file `<parent>.json`) + `set` recolours a copy of a retail effect, as `mods/faction-colors` does |
 | `data/hud/speed.json` (`{"max": 16}`) | shows the game-speed buttons beside the command bar (not retail), stepping 1x to `max` (default 16); absent: no speed control, as in retail. `--speed N` on the command line works either way |
 | `data/fx/wake_tint.json` (`{"Navy": [r, g, b], "Pirate": ..., "Procyon": ..., "Civilian": ...}`) | multiplies the wake texture per fleet type (multiplied in linear light, values may exceed 1); absent: retail colours |
 | `models/sky/<sky>_cube.png` (six square cube faces stacked vertically, +X -X +Y -Y +Z -Z in Bevy's cube-map frame) | drawn as the battle camera's skybox instead of that retail sky's sphere (not retail); a render profile's `sky` block also reads `<sky>_stars.png` (the stars on their own) and `<sky>_clouds.png` (painted clouds, straight alpha) when the mod has them, and `data/render/skies.json` (below) tunes the layers per sky; with a render profile's `sky_light` it also lights the scene. A sky made from the player's own imported sky is derived from game content: keep it local, never ship it |
 | a new `ships/<Id>/` folder (`ship.json` and a `model.glb`, see "A ship from a model"; or `geometry`/`model` pointing at another ship), a new `maps/<id>/` folder (`map.json`, `backdrop.png`; `"skirmish": true` lists it), `models/<any folder>/*.glb`, `sound/<any folder>/*.ogg` | new content (schema in `docs/data-format.md`) |
-| a new `maps/<id>/` folder with a `mission.json` (and `media.json`, the campaign's layout) | a custom mission: listed under Single Player > Custom Missions (the button in the corner, not retail) with its `map.json` `name` and `description`, and started with Play or a double-click (`--map <id>` also works). Each mod is one campaign named after its `mod.json` `name`: its missions play in the order of `mod.json` `"missions": ["<id>", ...]` (missions it does not list follow, by id), and winning one offers the next (N, as in the retail campaign). Ids `mission01`..`mission13`, `tutorial` and `basic_tutorial` are not listed: a mod's copy replaces that retail mission. Victory points of custom missions do not count toward the retail campaign total. Dialogue: each `media.json` `speech` entry gives the subtitle `text`, `duration`, `file`, talking-head `face`, `speaker` (a string id) and colour, and the sound is `maps/<id>/speech/<file>.ogg` (found by name, any case). The `mission.json` layout (ships, paths, volumes, tasks, rules) is in `docs/data-format.md` and `docs/re/campaign.md`; read the imported retail missions as examples, but write your own: a copied or edited retail mission is game content. To test a late part of a mission without playing the start, launch it with `--fire-rule "<rule name>"` (repeatable; `--map <id>`): once the world-initialise rules have run, the actions of each named rule run in the order given as if its conditions had held, and a run-once rule does not fire again. An unknown name is a warning listing the rule names. `--start-at x,y` also moves the primary ship there (game units), since a rule does not. A debug aid for authors, not retail behaviour. To find mistakes before playing, see "Authoring missions" below. The same can be done while playing with the developer console (`~` or F12; always on in debug builds; in release builds turn on Display Options > Developer Console, or start the game with `--console` or set `PROCYON_CONSOLE=1`; `help` lists the commands; Tab completes names from the mission and the rule schema, and a misspelled name is answered with the closest one): `fire <rule>` runs a rule's actions now (a part of the name is enough), `why <rule>` lists which of its conditions hold, `schema <text>` lists the fields of an action or condition Type and `act` / `cond` reject a Type or field the schema does not have, `flags`, `timers`, `tasks` and `counters` show the mission's state, `set <flag> [on|off]`, `timer <name> start|stop` and `task <name> active|complete|failed` change it, and `act {json}` / `cond {json}` run any rule action or condition by its `Type` and arguments, exactly as written in a `mission.json` rule (JSON `true` / `false` are accepted for the rules' TRUE / FALSE). `god`, `repair`, `kill` (the current target), `reveal` (shows hidden units) and `tp <x> <y>` / `tp <point set>` are shortcuts for testing. Using a command that changes the game marks the battle as cheated: its victory points are not added to the campaign total. Mission rules only (not skirmish scripts) |
+| a new `maps/<id>/` folder with a `mission.json` and a `media.json` (both required: the game stops at launch with `missing maps/<id>/media.json` without it; this is the campaign's layout) | a custom mission: listed under Single Player > Custom Missions (the button in the corner, not retail) with its `map.json` `name` and `description`, and started with Play or a double-click (`--map <id>` also works). Each mod is one campaign named after its `mod.json` `name`: its missions play in the order of `mod.json` `"missions": ["<id>", ...]` (missions it does not list follow, by id), and winning one offers the next (N, as in the retail campaign). Ids `mission01`..`mission13`, `tutorial` and `basic_tutorial` are not listed: a mod's copy replaces that retail mission. Victory points of custom missions do not count toward the retail campaign total. Dialogue: each `media.json` `speech` entry gives the subtitle `text`, `duration`, `file`, talking-head `face` and colour (`speaker` and `head` are not read), and the sound is `maps/<id>/speech/<file>.ogg` (found by name, any case, so speech file names must be unique across all sound folders). The engine holds a line for `duration` plus 0.3 s, so set `duration` to the audio's length; an entry without `duration` is subtitle text only, with no sound. In a mission's `map.json`, `music` is not read (the mission's `Play Music Track` rule chooses the music) and `backdrop` is only a flag: the picture is `maps/<id>/backdrop.png`. The `mission.json` layout (ships, paths, volumes, tasks, rules) is in `docs/data-format.md` and `docs/re/campaign.md`; read the imported retail missions as examples, but write your own: a copied or edited retail mission is game content. To test a late part of a mission without playing the start, launch it with `--fire-rule "<rule name>"` (repeatable; `--map <id>`): once the world-initialise rules have run, the actions of each named rule run in the order given as if its conditions had held, and a run-once rule does not fire again. An unknown name is a warning listing the rule names. `--start-at x,y` also moves the primary ship there (game units), since a rule does not. A debug aid for authors, not retail behaviour. To find mistakes before playing, see "Authoring missions" below (`--check-mission` does not check that a ship `type` exists or that the `.ogg` files are there). The same can be done while playing with the developer console (`~` or F12): see "The developer console" below. |
 
-Limits (provisional): the fleet screen lists, per fleet type (`race` Navy/Pirate/Procyon), every ship whose `ship.json` has `"skirmish": true` (the importer copies retail's "Available in Multiplayer?" flag; a mod can set it on any ship); Weapons and bullets are shared files, `data/weapons/guns.json` and `bullets.json`; a mod's copies are merged key by key, so adding a gun is one entry. A gun with a `beam` block (not retail) is a beam gun: `{"charge": s, "duration": s, "tick": s, "ramp": per s, "max_power": x, "width": units, "color": [r, g, b]}`. It charges for `charge` seconds with a glow at its first muzzle, then holds a beam along its barrel for `duration` seconds and reloads for `TimeBetweenBursts`. The beam burns the first enemy ship it crosses once per `tick` with the bullet's damage table, times a power of 1 + `ramp` x the seconds it has stayed on that ship (at most `max_power`); `SoundName` plays once when the charge starts, so one sound can carry the charge and the beam. It passes through bases, rocks and scenery (PROVISIONAL). A gun's look is its `visual` block: `base` and `barrel` (GLB file names, found by name anywhere under `models/`, e.g. the mod's `models/weapons/gun_X_Layer1.glb`; either may be left out), `pivot` (where the barrel pitches) and `muzzles` (one point per barrel, where shells and the beam start), in game axes (x starboard, y forward, z up) in the gun's own frame. The barrel mesh and the muzzles are authored in the base's frame, not about the pivot; a retail gun's block in the imported `guns.json` is a worked example. Its `MuzzleSpeed` only sets the turret's lead (use a large value), and `EffectiveRange_Range` is where computer captains with a bow gun turn away. A mod may ship sounds of its own under `sound/`, found by name. Computer captains fit the guns retail computers were seen to fit (carronades, Gattling, plasma, light/medium cannons, star mortar) unless a mod ships `data/ai/weapons.json` (`{"Gun_Name": true|false}`, merged the same way) to restrict or extend what they may pick. The full layout is in `docs/data-format.md`.
+Limits (provisional):
+
+- The fleet screen lists, per fleet type (`race` Navy/Pirate/Procyon), every ship whose `ship.json` has `"skirmish": true` (the importer copies retail's "Available in Multiplayer?" flag; a mod can set it on any ship) and gives it `points`.
+- Weapons and bullets are shared files, `data/weapons/guns.json` and `bullets.json`, merged key by key across mods, so adding a gun is one entry in each ("A new weapon" below). A ship names a gun, it never contains one.
+- Computer captains fit only the guns retail computers were seen to fit (carronades, Gattling, plasma, light/medium cannons, star mortar) unless a mod ships `data/ai/weapons.json` (`{"Gun_Name": true|false}`, merged the same way) to restrict or extend what they may pick.
+- A mod may ship sounds of its own under `sound/`, found by name ("Sounds and music" below).
+- The full layout of every file is in `docs/data-format.md`.
 
 ## Authoring missions
+
+The step-by-step guide is `docs/missions.md`; this section is the reference for the checking and tracing flags, and `docs/rule-types.md` lists every condition and action Type with its fields.
 
 The rule interpreter is forgiving: a misspelled group has no members, so a "Group Destroyed" condition never holds; a missing field
 reads as "" or 0; an unknown volume is an empty region; a JSON `true` reads as FALSE (booleans are the strings `"TRUE"` / `"FALSE"`).
@@ -134,6 +204,38 @@ Both combinators nest (`OP Not` inside `OP Any Of` and so on). "And" is what a r
 
 *Checking and tracing.* `--check-mission` knows all of this (see "Authoring missions"): it checks the conditions nested in `OP Any Of` / `OP Not` like top-level ones (a flag or timer that is never set inside a combinator is a warning, not an error), reports a counter that is read but never set, an `OP Set Rule Active` that names no rule of the mission (an error), a task's `complete_when` / `fail_when` / `required`, and the mission keys `victory`, `victory_message` and `defeat_message`. `--dump-rule-schema` lists the `OP ` Types with `"origin": "engine"`. `--rule-trace` / `--why "<rule>"` also say when a rule is inactive (not evaluated) or busy (its sequence is waiting, so a new firing is skipped), and explain the nested conditions and counters.
 
+## Writing a mission
+
+`docs/missions.md` is the guide to writing a custom mission: the folder layout, every key of `map.json`, `mission.json` and
+`media.json`, the worked example `docs/examples/gate-ambush.mission.json` rule by rule, storms, scenery, behaviours that surprise,
+the test loop (`--check-mission`, the console, the autopilot) and a checklist before you share it.
+
+## The developer console
+
+`~` (or F12) opens a console in a battle that runs a mission's rules (not skirmish scripts). It is a development aid, not retail
+behaviour. It is on in debug builds; in a release build turn on Display Options > Developer Console, or start the game with
+`--console` or `PROCYON_CONSOLE=1`. While it is open the battle is paused and the game sees no keyboard or mouse. A command either
+builds a rule action or condition and runs it through the same interpreter as the mission's rules, or reads the mission's state, so
+every action a mission can use is available (`act {json}`). `help` lists the commands; `help <command>` gives usage and an example.
+
+Tab completes the command, then its arguments: rule, group, point set, flag, timer, task, counter, volume, path and speech names
+from the mission, the rule schema's Types, and inside `act {json}` the Type, the field names and a field's values. Tab again cycles
+through several matches. A name the mission does not have is refused with the closest one ("no group 'Raider'; did you mean
+'Raiders'?"). A name with spaces goes in "quotes"; Tab adds them. A unit is written `Group,Unit`.
+
+Using a command that changes the game marks the battle as cheated: "CHEATS USED" shows on screen and its victory points are not
+added to the campaign total. Commands marked * below do that; queries and view-only commands do not.
+
+| group | commands |
+|---|---|
+| Cheats | `god [on\|off]`* (the player's fleet takes no damage), `repair [group]`*, `kill`* (the current target), `reveal`* (shows hidden units), `tp <x> <y> [z]` or `tp <point set>`* |
+| Mission state | `fire <rule>`* (run a rule's actions now, as `--fire-rule`; part of the name is enough), `why <rule>` (which conditions hold, and whether it is inactive or waiting in an `OP Wait`), `flags`, `timers`, `tasks`, `counters`, `set <flag> [on\|off]`*, `timer <name> start\|stop`*, `task <name> active\|complete\|failed [on\|off]`*, `counter <name> <value>`* |
+| Mission flow | `rules [text]` (every rule: fired, ran, never fired, inactive, waiting), `skip`* (end the speech line playing), `nis end`*, `win`*, `lose`*, `restart` |
+| Ships | `ships [text]`, `inspect` (the current target: orders, tow), `primary <group>`*, `damage <0..1> [group]`*, `attack <group> <group>`*, `stance <group> <stance>`*, `ally` / `hostile <player> <player>`*, `tow` / `untow <group> <group>`* |
+| Authoring | `where` (the player's position in game units), `mark <name>` (appends `{"name", "pos"}` to `console_marks.txt` in the user data folder, ready to paste into a mission), `show volumes\|paths\|points [name]` and `hide ...` (draw them in the world, labelled) |
+| Camera and sound | `cam free\|player\|follow <group>` (free camera: arrows move, PageUp / PageDown rise and sink, right-drag looks, Shift is faster), `hud on\|off`, `say <speech event>`*, `music <track>` |
+| Raw rule access | `act <json>`* and `cond <json>` (checked against the rule schema; JSON `true` / `false` are accepted), `schema <text>` (the fields of a Type) |
+
 ## A ship from a model
 
 A ship needs no retail ship to extend: a folder `ships/<Id>/` with a `model.glb` and a small `ship.json` is a complete ship. The
@@ -144,7 +246,7 @@ value is PROVISIONAL (the retail files state each one, the engine only needs a s
 **Layers.** Every mesh node of the model is a layer. With no `geometry.json` (and no `"geometry"` naming another ship), the hit mesh of
 each layer comes from the model's own triangles. With no `sections`, each intact layer becomes one damage section: hull (150 HP, vital to
 the ship, an equal share of the core) or, when its node name contains `sail`, `mast`, `cloth` or `canvas`, cloth (70 HP, vital to speed,
-no core share). Layers that touch (boxes within 0.3) pass hits on to each other. Name a damaged variant `<A>Damage_<B>` for layer
+no core share). Layers that touch (boxes within 0.3 of each other; hulls with hulls, cloth with cloth) pass hits on to each other. Name a damaged variant `<A>Damage_<B>` for layer
 `<A>_<B>` to have it swapped in when the section is destroyed, as the retail hulls do; a destroyed section with none just disappears. A
 `sections` object in `ship.json` replaces the derived ones (the retail schema, `docs/data-format.md`); its `layer` names the mesh node.
 
@@ -155,20 +257,20 @@ engine can tell:
 | `kind` | name contains | derives |
 |---|---|---|
 | `GunPlacement` | `mount`, `lancer`, `turret` | a mount, joined to the `guns` entry of the **same name**; `ship.json` says which `gun` and its `arc_deg` |
-| `EnginePortPlacement` | `engine` | an engine plume (`<Race>Engine_<Light/Medium/Heavy/ExtraHeavy>` by hull length) |
-| `WakePlacement` | `wake` | a wake (`Wake_Light/Medium/Heavy`); with none, one at the stern's waterline |
+| `EnginePortPlacement` | `engine` | an engine plume (`<Race>Engine_<Light/Medium/Heavy/ExtraHeavy>` for hulls shorter than 14 / 22 / 32 units, else the last; `NavyEngine`, `PirateEngine`, `ProcEngine`, `CivillianEngine` (sic)) |
+| `WakePlacement` | `wake` | a wake (`Wake_Light/Medium/Heavy` for hulls shorter than 14 / 28 units, else Heavy); with none, one at the stern's waterline |
 | `FlagAttachmentPoint` | `flag` | the flag pole's ends (names with `top` and `bottom`) |
 | `BoardingEffectPoint` | `boarding` | where boarders cross |
 | `ToweePoint`, `TowerPoint`, `TorpedoHomingPoint` | `tow` (front/back), `homing` | tow and homing points |
-| (none) | `Crew_Walk_<lane>_<k>`, `Crew_Gun_*`, `Crew_Post_*`, `Crew_Climb_<shroud>_a`/`_b` (the whole name) | where deck crews walk, man guns, stand and climb (drawn only by a render profile's `deckhands` block, see below) |
+| (none) | `Crew_Walk_<lane>_<k>`, `Crew_Gun_*`, `Crew_Post_*`, `Crew_Work_*`, `Crew_Climb_<shroud>_a`/`_b` (the whole name) | where deck crews walk, man guns, stand and climb (drawn only by a render profile's `deckhands` block, see below) |
 
 A node's heading about up is its rotation about glTF y (or the extra `rot_raw[0]`): 0 faces forward, a quarter turn to port is +90
 degrees. A gun entry may still give `pos`, `rot`, `parent_layer` itself; `parent_layer` otherwise is the nearest hull layer.
 
-**What `ship.json` can leave out.** `physics` (defaults about a Navy Cutter's: mass 4000, thrust 60000, speed 8, turn 3), `core_hp` (a
+**What `ship.json` can leave out.** `physics` (keys `Mass`, `MaxThrust`, `MaxSpeed`, `RotationalFriction`, `MaxAngularAcceleration`; defaults about a Navy Cutter's: 4000, 60000, 8, 20, 3), `core_hp` (a
 quarter of the hull sections' HP, at least 50), `sections`, `engines`, `wakes`, `flags`, `explosion_fx`, `engine_snd`, `repair_fx` (by
 race and size), `crew_posts` (one gunner per two guns, a captain, mate, navigator, engineer, a rigger per sail, a fighter or two),
-`sphere`, extents, `icon`. `race` picks the engines, sounds and HUD skin; `display_name` is a string id the mod adds in
+`sphere`, extents, `icon`. Other optional keys the loader reads: `sight` (default 400), `ring` (0.65), `cloakable` (true only for ids containing `Submersible`), `fuel`, `lifeboats`, `is_lifeboat`, `model` and `geometry` (another ship's folder to take `model.glb` / `geometry.json` from), `names.json` (a list of names open skirmish maps pick from). Unknown keys are ignored. `race` picks the engines, sounds and HUD skin; `display_name` is a string id the mod adds in
 `menu/strings.json`; `points` and `"skirmish": true` list the ship on the fleet screen. Crew and boarding points of a ship that
 `data/boarding.json` does not list come from `crew_posts` and the model.
 
@@ -186,6 +288,112 @@ its id without `Ship_`) gets them made from the model when the overlay is built:
 fleet cells, and a thin top-down hull outline for the weapon panel, drawn like the retail ones (`game/src/shipart.rs`). Ship your own PNGs
 (`hud/sprites/...`, see "UI art and fonts") to replace either. A gun with no `bank` takes the weapon-panel slot nearest to its place on the outline
 (the panel has 80 fixed slots), one bank per gun; name the same `Bank<NN>` on several guns to have them fire together.
+
+**If it will not load.** Every ship folder is read at launch, so one bad ship stops the game before the menu, with a message that
+names the file (it is also the last thing in the log, see "Testing a mod"):
+`ships/<Id>/ship.json: <parse error with line and column>`; `sections.<label>.layer references missing layer "<name>" in
+ships/<Id>/model.glb (derived)` (the `layer` is the mesh node's name); `guns.<mount>.gun references unknown weapon "<gun>"`
+(the gun is not in the merged `guns.json`); `guns.<mount> has no pos/rot and the model has no hardpoint node named "<mount>"`
+(name an empty node like the mount, case does not matter, or give `pos` and `rot`). A model with no mesh nodes gives a ship with
+no sections.
+
+## A new weapon
+
+A gun is an entry in `data/weapons/guns.json`, the shell it fires an entry in `data/weapons/bullets.json`, and a ship mounts it in
+its `guns` object. Both files are merged key by key, so the mod's files hold only your entries. Do not copy a retail entry: read
+one in your imported `assets/data/weapons/` to learn what a field means, then write your own numbers. The names and numbers
+below are an illustration (PROVISIONAL: tune them in play).
+
+`data/weapons/guns.json`:
+
+```json
+{
+  "Gun_Spark_Light": {
+    "MuzzleSpeed": 160.0,
+    "TimeBetweenBursts": 4.0,
+    "BulletsPerBurst": 1,
+    "DuringBurstReloadTime": 0.0,
+    "EffectiveRange_Range": 120.0, "LongRange_Range": 180.0, "MaximumRange_Range": 240.0,
+    "EffectiveRange_AccuracyDeviation": 0.01, "LongRange_AccuracyDeviation": 0.02, "MaximumRange_AccuracyDeviation": 0.04,
+    "BulletAffectedByGravity": false,
+    "HorizontalRotationSpeed": 1.2, "VerticalRotationSpeed": 1.0, "VerticalMinAngle": -0.1, "VerticalMaxAngle": 0.5,
+    "BulletTypeName_Primary": "Bullet_Spark",
+    "MuzzleFlashEffect": "PlasmaCannon_Heavy_Muzzle",
+    "SoundName": "Weapon_Spark_Fire", "SoundVolume": 1.0, "SoundMaxDistance": 600.0,
+    "Mount Type": "Medium Mount", "Victory Point Cost": 6,
+    "visual": {"base": "gun_Spark_Base.glb", "barrel": "gun_Spark_Barrel.glb", "pivot": [0.0, 0.3, 0.3], "muzzles": [[0.0, 1.5, 0.3]]}
+  }
+}
+```
+
+`data/weapons/bullets.json`:
+
+```json
+{
+  "Bullet_Spark": {
+    "lifetime": 6.0, "hitpoints": 1,
+    "hit_fx": "Lancer_Medium_Impact",
+    "impact_snd": {"Wood": ["Weapon_Spark_Hit"]}, "impact_vol": 0.8, "impact_max": 400.0,
+    "damage": {"Wood": [8, 12, 0, 0, 0], "Reinforced": [6, 9, 0, 0, 0], "Iron": [4, 6, 0, 0, 0],
+               "Cloth": [8, 12, 0, 0, 0], "Stone": [2, 3, 0, 0, 0], "Dragon": [6, 9, 0, 0, 0]}
+  }
+}
+```
+
+and in `ships/<Id>/ship.json` (`Forward_Mount` is an empty node of that name in `model.glb`, or the entry has `pos` and `rot`):
+
+```json
+{"guns": {"Forward_Mount": {"gun": "Gun_Spark_Light", "arc_deg": 40}}}
+```
+
+`PlasmaCannon_Heavy_Muzzle` and `Lancer_Medium_Impact` are retail effect names, used by reference (an effect is a file `fx/<name>.json`,
+yours or the import's). `gun_Spark_Base.glb` and `gun_Spark_Barrel.glb` are your own models, shipped as `models/weapons/<name>.glb`;
+`Weapon_Spark_Fire` and `Weapon_Spark_Hit` are your sounds (see "Sounds and music").
+
+**Gun keys.** These must be present, or the game stops at launch with a bare `called Option::unwrap() on a None value` or
+`number in ship json` panic that does not name the key (the location is `game/src/data.rs`): `MuzzleSpeed`, `TimeBetweenBursts`
+(seconds between bursts), `BulletsPerBurst`, `DuringBurstReloadTime` (between the shots of a burst), the three `*_Range` and three
+`*_AccuracyDeviation` keys (effective, long and maximum range band; deviation in radians), `BulletAffectedByGravity` (a JSON
+`true` / `false`; true makes the shell drop, with a gravity computed from `MuzzleSpeed` and the maximum range), the four turret keys
+(`HorizontalRotationSpeed`, `VerticalRotationSpeed` in rad/s, `VerticalMinAngle`, `VerticalMaxAngle` in rad), `BulletTypeName_Primary`
+(a key of `bullets.json`), and `visual.pivot` and `visual.muzzles` (a list of points; a shell leaves each muzzle). Optional:
+`MuzzleFlashEffect`, `SoundName` / `SoundVolume` (default 1) / `SoundMaxDistance` (600), `Is PointDefense Gun`,
+`Is TorpedoLauncher Gun`, `Is Lobbing Gun` with `LobAngle` (a fixed high arc), `Can Be Fired While Cloaked`,
+`CalculateAccuracyDeviationDuringBurst`, the three `*_RicochetFactor` keys, and `visual.base` / `visual.barrel` (GLB file names,
+found by name anywhere under `models/`, so keep them unique). `pivot` is where the barrel pitches and `muzzles` are the shell origins,
+in game axes (x starboard, y forward, z up) in the base's frame; the barrel mesh is authored in the same frame, not about the pivot.
+A retail gun's `visual` block in your import is a worked example. What is drawn for a gun with neither `base` nor `barrel` is not
+tried (PROVISIONAL).
+
+**Bullet keys.** Required: `lifetime` (seconds; a shell older than this is removed), `impact_vol`, `impact_max` (the impact sounds'
+volume and maximum distance), `impact_snd` (an object, may be `{}`) and `damage`. `damage` is keyed by the six materials `Wood`,
+`Reinforced`, `Iron`, `Cloth`, `Stone`, `Dragon`, each a list of five numbers; the engine reads the first two as the low and high of
+the roll per hit (PROVISIONAL: a search of `combat/` finds no use of the other three), and a material you leave out takes 0 damage. A
+section's material string picks its key by the first of those words it contains (else `Wood`). Optional: `hitpoints`, `hit_fx` (the
+impact effect), `bullet_fx` (an effect that rides the shell; with neither `bullet_fx` nor `glb` the shell is a small placeholder
+sphere), `glb` (the shell's model, a name under `models/`), `impact_snd` lists per material (one is picked at random),
+`ricochet_snd` (`{material: sound}`), `travel_snd` (`[sound, volume, max distance]`, a loop while the shell flies), `decal`
+(`Small`, `Medium`, `Large`), `physics` (a guided shell, as the torpedoes have) and the payload keys `blast` (`radius`, `duration`),
+`mine`, `net` and `kind` (`NovaMortar`, `GravCharge`); read the retail bullets that use them.
+
+**Mounting and buying.** A ship's `guns.<mount>` has `gun` (a key of the merged `guns.json`); `arc_deg` (the width of the firing arc
+centred on the mount's heading: the engine allows the gun to fire up to half of it to either side; gun arcs are PROVISIONAL);
+`bank` (`Bank00` and on, the weapon-panel slot: guns with the same bank fire together and are swapped together; with none each gun
+takes the free slot nearest its place on the outline); and `pos`, `rot` (`[heading in radians, 0, 0]`) and `parent_layer`, which the
+model's node supplies when left out. On the Arms screen a bank can be swapped to your gun when the gun has a `Victory Point Cost`
+(without one it cannot be bought), its `Mount Type` is the same string as the stock gun's (a stock gun whose type starts with
+`Non-Selectable` cannot be swapped at all) and its `Exclusion Race` is not the ship's race (`None` or absent: any); a gun marked
+`Is PointDefense Gun` is never offered. Computer captains fit it only when `data/ai/weapons.json` says
+`{"Gun_Spark_Light": true}`.
+
+**Beam guns (not retail).** A gun with a `beam` block charges and then holds a beam instead of firing shells:
+`{"charge": s, "duration": s, "tick": s, "ramp": per s, "max_power": x, "width": units, "color": [r, g, b]}` (defaults 1.5, 3, 0.25, 0,
+1, 0.4 and [0.5, 1.5, 2.0]; every key optional). It charges for `charge` seconds with a glow at its first muzzle, then holds a beam
+along its barrel for `duration` seconds and reloads for `TimeBetweenBursts`. The beam burns the first enemy ship it crosses once per
+`tick` with the bullet's damage table (so one tick's damage; give the bullet `lifetime` 0), times a power of 1 + `ramp` x the
+seconds it has stayed on that ship (at most `max_power`); `SoundName` plays once when the charge starts, so one sound can carry
+the charge and the beam. It passes through bases, rocks and scenery (PROVISIONAL). For a beam gun `MuzzleSpeed` only sets the
+turret's lead (use a large value), and `EffectiveRange_Range` is where computer captains with a bow gun turn away.
 
 ## UI art and fonts
 UI text is vector, laid out with the retail font advances (`hud/fonts/<name>.json` holds metrics only, no glyph sheets). Slots: BlackChancery* uses `fonts/Chancery.otf`, names containing Bold use `fonts/SansBold.otf`, every other Univers/Immi face uses `fonts/Sans.otf`; a mod replaces a slot by dropping a file at that path (`content/fonts/`: Chancery = URW Z003 for the BlackChancery slots, Nimbus Sans for Univers/Immi; both URW base35 fonts, AGPL with font exception, so they ship with the code).
@@ -243,17 +451,61 @@ and cropped about the centre (the scene and the overlay cover the band between t
 under the same file name at any aspect ratio (2560x1080 for 21:9, say) and it fills a wide window without code; the picture shows whole, whereas the retail
 files carry spare rows below their picture, which the engine leaves out (the visible height is `min(height, width x 0.75)`, for the scene `min(height, width x 394/800)`).
 
+## Sounds and music
+
+Sounds are Ogg Vorbis (`.ogg`; no other format is built in). The game finds a sound by **name**, not by path: the name is the file
+name without extension, compared in lower case, and the file may sit anywhere under `sound/` (or, for dialogue, under
+`maps/<id>/speech/`). So `"SoundName": "Weapon_Spark_Fire"` is `sound/weapons/weapon_spark_fire.ogg` (or `sound/mine/spark.ogg`
+renamed to match). The index is built once at launch from the overlay. A name no file has falls back to `sound/<name>.ogg`, which
+the asset loader fails to load (a message in the log); nothing plays.
+
+- **Add a sound**: ship `sound/<folder>/<name>.ogg` with a name no retail sound has (names must be unique across the whole tree).
+- **Replace a sound**: ship a file at the same path as the base one (`sound/weapons/...`), so there is still one file of that name.
+  A file of the same name in a different folder makes two candidates and which one wins is not defined.
+- **Where names are written**:
+
+| Sound | Named in |
+|---|---|
+| a gun's shot | the gun's `SoundName` (+ `SoundVolume`, `SoundMaxDistance`); one sound per shell of a burst |
+| a shell's impact | the bullet's `impact_snd` (`{material: [names]}`, one picked at random), `impact_vol`, `impact_max`; ricochets `ricochet_snd`; a flight loop `travel_snd` |
+| a ship's engine | the ship's `engine_snd`: three names, for the Half, Full and Emergency orders (a ship from a model gets `Engine_Navy_*`, `Engine_Pirate_*` or `Engine_Proc_*` by race); a loop, silent at All Stop |
+| ship and scenery damage | built-in pools by name: `Explosion_Heavy01`..`08` (a ship or base destroyed), `Explosion_Med01` (a section lost), `Damage_Wood01`..`05`, `Damage_Metal*`, `Damage_Sail*`, `Damage_Stone*` (storms, meteors, rocks, a death sequence), `Ship_Collision_Wood01`..`05`, `Ship_Collision_Metal*` (ships touching). Replace the files to change them. Which event uses which pool is PROVISIONAL (`docs/re/sound.md`) |
+| music | a map's `music` key in `map.json` (a track name; default `BTL_NavyBig_Full02`), played in a loop; the main menu plays `FrontEndMusic` |
+| speech | `maps/<id>/speech/<file>.ogg`, named by the mission's `media.json` |
+| interface sounds | by name in `sound/ui/` (`HUD_*`); replace the file |
+| the helmsman's lines | `voice/<file>.ogg`, chosen by `content/voice/events.json`; replace a file at the same path |
+
+How loud a sound is: the player's volume sliders times the `*Volume` of the data; a positional sound plays at full volume within
+25 units of the camera and falls off with distance (halving per doubling, silent past its maximum distance; PROVISIONAL, as are
+the engine-loop level 0.25 and the music level). A sound with no position (interface, music) ignores distance. Use
+`SoundMaxDistance` / `impact_max` (a few hundred units for a gun, thousands for a big explosion) to make a sound carry further.
+To hear one quickly: the developer console's `music <track>` and `say <speech event>` (see "The developer console"), or fire the
+gun in a `--map` test (see "Testing a mod").
+
+## Strings and names
+
+`menu/strings.json` is one flat object, string id to text (`{"IDGS_MY_SHIP": "Silver's Man-o'-War"}`). A mod's file is merged into
+the retail table key by key, so ship only your own ids and use a prefix no retail id has. Where an id is read: a ship's
+`display_name` (the name the front-end menus show: fleet and ship screens). A `display_name` with no entry, or a ship with
+none, shows the folder name with `Ship_` removed and `_` made a space (`Ship_Pirate_Silver` -> `Pirate Silver`); other screens read
+retail ids and show nothing for an id the table lacks. The table is read once at launch. Only the one table (the language the
+import made) is used: there is no per-language switching. A name pool for open skirmish maps is `ships/<Id>/names.json`, a plain
+list of strings. Mission texts (briefing, speech subtitles, end messages) live in the mission's own `media.json`, see `docs/missions.md`.
+
 ## Graphics mods: the render profile (not retail)
 Graphics upgrades are mods, never engine forks. The engine (`game/src/render/`) provides building blocks; a mod switches
 them on and tunes them with one file, `data/render/look.json`, and ships the shaders most of them draw with
-(`shaders/sail.wesl`, `shaders/plume.wesl`, `shaders/wake.wesl`, `shaders/tracer.wesl`, `shaders/surface.wesl`,
-`shaders/burst.wesl`, `shaders/smoke.wesl`, and any a `materials` rule names; the engine ships none, and a block whose shader is
-missing stays off with a warning). Without `look.json` every part renders as classic, and a profile only changes drawing,
-never rules. Every key is optional; an absent block leaves that feature classic.
+(`shaders/sail.wesl`, `plume.wesl`, `wake.wesl`, `tracer.wesl`, `surface.wesl`, `burst.wesl`, `smoke.wesl`, `sky.wesl`,
+`blackhole.wesl`, `ribbon.wesl`, `nebula.wesl`, `volume.wesl`, `bolt.wesl`, `current.wesl`, `deckhands.wesl`, and any a `materials`
+rule names; the engine ships none, and a block whose shader is missing stays off with a warning in the log). The shaders of
+`mods/remaster/shaders/` are a working set to start from. Without `look.json` every part renders as classic, and a profile only
+changes drawing, never rules. Every key is optional; an absent block leaves that feature classic. `look.json` replaces as a whole
+file (it is not merged), so with two graphics mods the later one's profile is the only one, and a syntax error in it silently leaves
+the classic look; `data/render/skies.json` and `nebulae.json` are the two parts a content mod can add without owning the profile.
 
 | Key | Effect |
 |---|---|
-| `camera` | HDR camera: `bloom` (intensity), `bloom_threshold` (only light brighter than this blooms; 0 = Bevy's natural bloom, which hazes the image), `tonemapping` (`tony_mc_mapface`, `agx`, `aces`, `blender_filmic`, `reinhard_luminance`), `saturation`, `contrast`, `exposure` (stops), `ssao` (crashes with some effects meshes, keep false; the player's MSAA option falls back to SMAA with it). Anti-aliasing itself is a player option (Display Options), not part of the profile, `vignette` (corner darkening), `aberration` and `aberration_pulse` (colour fringing at rest, and added by a blast's camera jolt), `contact_shadows` (screen-space sun shadows where parts touch; adds a depth prepass) |
+| `camera` | HDR camera: `bloom` (intensity, default 0.15), `bloom_threshold` (only light brighter than this blooms; 0 = Bevy's natural bloom, which hazes the image), `tonemapping` (`tony_mc_mapface`, `agx`, `aces`, `blender_filmic`, `reinhard_luminance`), `saturation`, `contrast`, `exposure` (stops), `ssao` (crashes with some effects meshes, keep false; the player's MSAA option falls back to SMAA with it; anti-aliasing itself is a player option in Display Options, not part of the profile), `vignette` (corner darkening), `aberration` and `aberration_pulse` (colour fringing at rest, and added by a blast's camera jolt), `contact_shadows` (screen-space sun shadows where parts touch; adds a depth prepass) |
 | `sky` | a dome over the baked sky (needs `models/sky/<sky>_cube.png` and `shaders/sky.wesl`): `near` (one layer object or an array of at most 3 layers: `distance`, `opacity` 0..1, `threshold` and `softness` of the brightness kept, `drift` the map-wide current in world units a second, game axes, `scale` noise patches across the layer (0 = the plain copy of the sky), `tint`, `source`, `haze`), sparse soft copies of the sky's gas that slide against it as the camera moves (parallax; a far and a near layer give two speeds), broken into wisps by slowly churning noise. `source` is `"sky"` (default: the gas of the baked sky) or `"clouds"`: the layer then reads the painted clouds cube `models/sky/<sky>_clouds.png` (beside `_cube.png`, same six stacked faces and direction mapping, 8-bit sRGB RGBA with straight alpha: rgb the lit cloud colour in the cube's brightness convention, alpha the coverage) instead: coverage is alpha times `opacity`, colour is rgb times `tint`, `threshold` and `softness` act on alpha (both default 0 for clouds: alpha passes unchanged), `scale` noise eats the thin edges and leaves dense cores, each layer index looks the painting up through its own turn, and the coverage of cloud layers hides the stars behind them (gas layers never do). A cloud layer on a sky with no clouds cube draws nothing. `haze` (0..1, default 0) is aerial perspective: that share of the layer's colour sinks into the backdrop in its direction (and loses contrast), so a far layer is paler than a near one. Cost per cloud layer: one cube read plus the noise reads. `base` (`flow` radians, `cycle` seconds, `breath` depth, `period` seconds, `tint`, `brightness` multiplier, default 1) also redraws the far sky at alpha 1 from two lookups that flow along noise and cross-fade, with a slow breath in the bright cores; `brightness` leaves the separate star layer and scene lights unchanged. `flash` (`color`, `strength`, `seconds`, `reach`) is how a storm's lightning (`nebula::StormFlash`) lights the gas in its direction, at half strength `reach` world units from the camera and zero at twice that distance (default 1200, 0 = no falloff); `events` (`[{match, color, strength, seconds}]`, a fragment of an effect's name) warms the gas on the side of a big explosion; `shooting_star` (`every`, `brightness`) and `sheet_lightning` (`every`, `strength`, `color`) come from the shader's own clock. `skies` (`{"skybox_05": {...any of the keys above...}}`) merges per-sky accents over the defaults, by the baked cube's base name. `stars` (`brightness`, `twinkle` depth 0..1 for the bright ones, `speed` twinkles a second, `gain` decoding the 16-bit bake, 16 like the baker's) draws a separate stars cube (`models/sky/<sky>_stars.png`, baked with `--split-stars`; the stars are then left out of `_cube.png`), each star twinkling on its own phase, the brightest above 1 so they bloom; events never light the stars. Replaces the retired `sky_drift`, a rigid turn of the whole sky that read as the camera rolling |
 | `sky_light`, `ambient`, `ambient_floor` | image-based light (cd/m²) computed once from a mod's cube-map sky (`models/sky/<sky>_cube.png`), the multiplier on the flat ambient light (default 1), and an optional minimum for each channel of the map's flat ambient colour (linear RGB, 0..1). Both ambient settings also apply without a baked sky |
 | `sun` | `shadows`, `shadow_distance` (cascades out to this many units), `color` (multiplies the map's sun colour), `intensity` (multiplies its strength) |
@@ -286,7 +538,7 @@ leaves no cut-off files and no half-made mod in the list. The `sky` block (above
 
 ### Baked surfaces (`tools/bake_surfaces.py`)
 `python -m tools.bake_surfaces` (release download: `openprocyon-import --bake-surfaces`) bakes a surface map for every textured
-retail material into the local mod `<user data dir>/mods/baked-surfaces`: `textures/surface/<material name without .tga, lowercase>.png`,
+retail material into the local mod `<user data dir>/mods/baked-surfaces` (switch it on in the Mods screen like any mod): `textures/surface/<material name without .tga, lowercase>.png`,
 linear RGBA at the texture's size: R and G the height slope along u and v (per texel, times 3, 0.5 = flat), B crevice depth, A
 height (the texture's luma). The relief is filtered and taken at several scales, which the shader cannot afford per pixel, and
 the shader samples one map instead of five colour texels. Roughness and metal stay per material in the `surfaces` rules, and
@@ -353,3 +605,26 @@ the profile is read at launch, so restart after edits. A new kind of material (a
 build or move, as for sails) needs a building block in `game/src/render/` first; then keep classic unchanged without the
 profile key and document its uniform here. `sails` and `surfaces` stay as they are; a `materials` rule claims a material
 before they look at it.
+
+## Troubleshooting
+
+| What you see | Look at |
+|---|---|
+| the mod is not in the Mods list | the folder must be directly inside `<user data dir>/mods/` (or `mods/` of the game); a folder is listed even without `mod.json`, but a second folder with the same `id` is skipped. Run with `--mod <folder>` instead to rule the list out |
+| it is listed but nothing changes | it is not switched on (dropping a folder in never switches it on); or the files sit one folder too deep (`mods/name/name/mod.json`); or a path does not mirror the base (`ships/<Id>/ship.json`, `data/weapons/guns.json`: compare with your `assets/`); or you did not restart; or a later mod replaces the same file (replaced, not merged: `look.json`, `theme.json`, `slices.json`, images, models) |
+| `--mod` does nothing and no `mod <name> ...` line appears | the path is wrong: a folder that does not exist is silently ignored (no error), and a `mod.json` is needed for the line to print |
+| the game stops at launch with `extends unknown '<parent>'` or `sets '<pointer>', which does not exist` | the parent ship or sibling file is not in the overlay under that name; the `set` pointer (`/engines/0/fx`) names an array slot or key the merged file lacks |
+| the game stops at launch with a ship message | see "If it will not load" under "A ship from a model" |
+| the game stops at launch with `called Option::unwrap() on a None value` in `data.rs`, or `number in ship json` | a required key of a gun or bullet is missing (lists under "A new weapon"), or your `guns.json` / `bullets.json` is not valid JSON: a mod's copy that does not parse as an object is merged in as `null` and wipes the whole table |
+| every menu text is blank | your `menu/strings.json` did not parse: the same wipe-out, for the string table |
+| a JSON file seems ignored, with no message | optional files read with a forgiving loader ignore a syntax error silently: `data/render/look.json` (the whole profile stays classic), `data/hud/theme.json`, `data/hud/speed.json`, `data/fx/wake_tint.json`, `mod.json`. Validate the file with a JSON checker first. Inside `theme.json` a malformed colour (`#RRGGBB` or `#RRGGBBAA` only) leaves that value as shipped |
+| a graphics block does nothing | the log has `render profile: `<block>` needs shaders/<name>.wesl in the mod; left off` when the shader file is missing; `sky`, `nebulae` and `black_holes` effects also need their own parts (cube PNGs, `shaders/sky.wesl`); `data/render/skies.json` and `nebulae.json` do nothing without the matching block in a profile |
+| a model is untextured | the glTF material has no texture of its own and no `retail:<texture>` name, or the name is not in the import (the console says `mod model: retail texture ... is not in the import; the material stays untextured`); give the material a flat `baseColorFactor` and UV coordinates |
+| a ship is on the fleet screen with the wrong name | its `display_name` id is not in the string table (shown: the prettified folder name) |
+| the ship is not on the fleet screen | `"skirmish": true`, a `race` of Navy, Pirate or Procyon and `points` are needed |
+| a gun never fires | the mount's `arc_deg` and heading (a firing arc of a few degrees), `parent_layer`/`pos` of the mount, the `*_Range` values (ranges are game units), and the gun's name in the ship's `guns` |
+| silence | the file is not Ogg Vorbis, the name differs from the file name, two files share a name, `SoundName` is `""`, or `SoundMaxDistance` is shorter than the camera distance |
+| a mod's map or mission is missing | see `docs/missions.md` |
+
+If none of this explains it: open `<user data dir>/logs/openprocyon.log`, read from the bottom up for the first `WARN`, `ERROR`
+or panic line, then reduce the mod to the one file that shows it before asking anyone.

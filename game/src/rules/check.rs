@@ -700,4 +700,12 @@ mod tests {
         assert!(with[0].message.contains("has no media entry"));
         assert_eq!(check(&m, &Value::Null, &json!({"speech": {"Hello": {}}})), vec![]);
     }
+
+    /// docs/rule-types.md is generated from the schema (tools/gen_rule_types.py); a Type added without re-running it fails here.
+    #[test]
+    fn every_rule_type_is_documented() {
+        let doc = include_str!("../../../docs/rule-types.md");
+        let missing: Vec<&str> = RULE_TYPES.iter().map(|t| t.name).filter(|n| !doc.contains(&format!("`{n}`"))).collect();
+        assert!(missing.is_empty(), "docs/rule-types.md does not document {missing:?}: run tools/gen_rule_types.py (see its docstring)");
+    }
 }

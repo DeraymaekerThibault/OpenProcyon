@@ -45,7 +45,7 @@ macro_rules! scripts {
 
 scripts! {
     Animals => "animals", Asteroid => "asteroid", Board => "board", BriefingSkip => "briefing-skip",
-    Cloak => "cloak", Console => "console", Course => "course", CurrentM3 => "current-m3", Damage => "damage", Defeat => "defeat",
+    Cloak => "cloak", Console => "console", ConsoleView => "console-view", Course => "course", CurrentM3 => "current-m3", Damage => "damage", Defeat => "defeat",
     Dock => "dock", DockClick => "dock-click", DockMenu => "dock-menu",
     Fleet => "fleet", FleetPrimary => "fleet-primary", FleetCrew => "fleet-crew", FleetArms => "fleet-arms", FleetProfile => "fleet-profile", FleetProfileCrew => "fleet-profile-crew", FleetProfileArms => "fleet-profile-arms", FleetShips => "fleet-ships",
     Fire => "fire", FxTest => "fxtest", HuntM3 => "hunt-m3", Impacts => "impacts",
@@ -68,6 +68,8 @@ pub fn plugin(app: &mut App) {
         .add_systems(Update, (shells::shells, animals, stormflash, allstop, fire, impacts, console));
 }
 
+/// `--script console-view --mission N --dist D --pitch P`: shows the mission's volumes, paths and points, hides the HUD and switches to
+/// the free camera (which starts where the orbit camera was), for a screenshot of the drawing.
 /// `--script console --mission 1`: opens the developer console at frame 30 and submits a few lines (`god`, `tasks`, `flags`, `why`),
 /// then checks at frame 60 that `god` reached the player's ship and that the session is marked as cheated. Shot frames after 60
 /// show the open console.
@@ -79,13 +81,20 @@ fn console(
     player: Query<&crate::campaign::MissionShip, With<crate::PlayerShip>>,
     mut submitted: Local<bool>,
 ) {
+    if cfg.script == Some(Script::ConsoleView) && mission.is_some() && cfg.frame >= 30 && !*submitted {
+        *submitted = true;
+        for line in ["nis end", "show volumes", "show paths", "show points", "hud off", "cam free", "ships", "rules"] {
+            console.submit(line);
+        }
+        return;
+    }
     if cfg.script != Some(Script::Console) || mission.is_none() || cfg.frame < 30 {
         return;
     }
     if !*submitted {
         *submitted = true;
         console.open = true;
-        for line in ["god", "tasks", "why Player Reaches Tender", "schema Set Flag Action", "kill"] {
+        for line in ["god", "tasks", "why Player Reaches Tender", "schema Set Flag Action", "kill", "rules", "ships", "where", "restart"] {
             console.submit(line);
         }
     }

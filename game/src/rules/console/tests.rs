@@ -310,3 +310,39 @@ fn an_unknown_command_names_the_nearest_one() {
     assert!(!err("xyzzyplugh").contains("did you mean"), "nothing is near");
     assert!(help_lines(Some("rapair"))[0].contains("did you mean repair"));
 }
+
+#[test]
+fn kill_spares_another_unit_with_the_same_name() {
+    let mut sc = script();
+    let mut w = world();
+    w.push(unit(4, "Raider", "Pirates"));
+    let cmd = parse("kill", "Hero", false).unwrap();
+    let mut out = vec![];
+    sc.console_run(&cmd, &mut w, Some(e(3)), &mut out);
+    assert!(matches!(&out[..], [Fx::Destroy(u)] if u == &[e(3)]), "only the target, though the spec names both");
+}
+
+/// `docs/examples/gate-ambush.mission.json` is the worked example of `docs/missions.md` ("Rules, step by step"): it must stay
+/// valid for the schema and the checker, and its rules must run.
+#[test]
+fn the_documented_example_mission_passes_the_checker_and_plays() {
+    let mission: Value = serde_json::from_str(include_str!("../../../../docs/examples/gate-ambush.mission.json")).expect("the example is JSON");
+    let problems = crate::rules::check::check(&mission, &Value::Null, &Value::Null);
+    let errors: Vec<String> = problems.iter().filter(|p| p.level == crate::rules::check::Level::Error).map(ToString::to_string).collect();
+    assert!(errors.is_empty(), "{errors:#?}");
+    let warnings: Vec<String> = problems.iter().map(ToString::to_string).collect();
+    assert!(warnings.is_empty(), "the example is meant to be clean: {warnings:#?}");
+    let mut sc = Script::new(&mission, Value::Null);
+    let hero = |pos: Vec3| Unit { name: "Dauntless".into(), owner: "Hero".into(), primary: true, ..Unit::new(e(10), 10, pos) };
+    let (fx, _) = sc.step(&[hero(Vec3::ZERO)], 0.1, false);
+    assert!(fx.is_empty());
+    assert!(sc.task_active("Reach the gate"), "the Start rule activates the first task");
+    assert_eq!(sc.ext.counter("raiders sunk"), 0.0);
+    // Sailing into the gate runs the cutscene up to its wait, and the rest four seconds later.
+    sc.step(&[hero(crate::data::conv(400.0, 600.0, 0.0))], 0.1, false);
+    assert!(sc.nis && !sc.task_active("Clear the gate"), "the cutscene is waiting");
+    for _ in 0..45 {
+        sc.step(&[hero(crate::data::conv(400.0, 600.0, 0.0))], 0.1, false);
+    }
+    assert!(!sc.nis && sc.task_active("Clear the gate"), "the wait ended and the actions after it ran");
+}
