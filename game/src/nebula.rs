@@ -619,12 +619,13 @@ pub fn depth_factor(distance: f32, radius: f32) -> f32 {
     if radius > 0.0 { (distance / radius).clamp(0.0, 1.0) } else { 1.0 }
 }
 
-fn slowdown(storms: Option<Res<Storms>>, shift: Res<StormShift>, mut ships: Query<(&mut crate::Ship, &Transform)>) {
+fn slowdown(storms: Option<Res<Storms>>, shift: Res<StormShift>, lib: Res<crate::data::Library>, mut ships: Query<(&mut crate::Ship, &Transform)>) {
     let Some(storms) = storms else { return };
     for (mut ship, tf) in &mut ships {
         let mut q = 1.0f32;
+        let fuel = lib.classes[ship.class].fuel;
         for n in storms.0.as_array().into_iter().flatten() {
-            let Some(p) = n["cloud"]["points"].get(0).filter(|_| n["cloud"]["drain"] == true) else { continue };
+            let Some(p) = n["cloud"]["points"].get(0).filter(|_| n["cloud"]["drain"] == true && !fuel) else { continue };
             let offset = shift.0.get(n["name"].as_str().unwrap_or_default()).copied().unwrap_or_default().0;
             if !crate::rules::in_game_volume(&n["polygon"], tf.translation.x - offset.x, -(tf.translation.z - offset.z)) {
                 continue;

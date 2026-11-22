@@ -105,9 +105,9 @@ fn messages_survive_zero_tick_frames_and_are_not_replayed_in_catch_up() {
     assert_eq!(state.presented, [1, 2, 3, 4], "old outputs are never replayed");
 }
 
-fn moving_ship() -> (App, Entity) {
-    // Hand-authored test physics, not a copy of any imported ship.
-    let class = data::Class {
+/// A hand-authored class for tests that need a `Library` (no imported assets).
+pub(crate) fn synthetic_class() -> data::Class {
+    data::Class {
         name: "Synthetic".into(),
         race: String::new(),
         skirmish: false,
@@ -130,6 +130,7 @@ fn moving_ship() -> (App, Entity) {
         sight: 100.0,
         repair_fx: None,
         cloakable: false,
+        fuel: false,
         cloak_points: None,
         points: 0,
         crew_posts: 0,
@@ -145,7 +146,12 @@ fn moving_ship() -> (App, Entity) {
         homing_point: Vec3::ZERO,
         crew: [0; 8],
         boarding_points: vec![],
-    };
+    }
+}
+
+fn moving_ship() -> (App, Entity) {
+    // Hand-authored test physics, not a copy of any imported ship.
+    let class = synthetic_class();
     let ship = Ship { heading: 0.0, speed: 2.0, order: 2, goal: Some(0.5), ..Ship::new(0, Side::Player) };
     let mut app = clock();
     app.insert_resource(Library { classes: vec![class], guns: default(), bullets: default(), names: default(), clips: default() })

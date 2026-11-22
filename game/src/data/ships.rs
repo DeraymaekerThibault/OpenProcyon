@@ -60,6 +60,7 @@ struct ShipDoc {
     sight: Option<f64>,
     repair_fx: Option<String>,
     cloakable: Option<bool>,
+    fuel: Option<bool>,
     #[serde(default)]
     points: u64,
     crew_posts: Option<HashMap<String, u64>>,
@@ -327,6 +328,7 @@ fn try_load_class(root: &Path, name: &str, guns: &HashMap<String, GunDef>) -> Re
         hull_bound,
         engage,
         cloakable: j.cloakable.unwrap_or_else(|| name.contains("Submersible")),
+        fuel: j.fuel.unwrap_or(false),
         cloak_points,
         points: j.points as u32,
         crew_posts: j.crew_posts.as_ref().map_or(0, |v| v.values().sum::<u64>() as u32),
