@@ -446,3 +446,67 @@ fn a_sunk_ship_removed_from_the_world_still_counts_as_destroyed() {
     s.keep_sunk(&mut again);
     assert_eq!(again.len(), 1, "a unit present in the world is not added twice");
 }
+
+// ---- skirmish scripts that decide their own game (`"victory": "script"`) -------------------------------------------------------
+
+fn deciding(data: Value) -> Script {
+    let mut s = script(data, Value::Null);
+    s.decide_game(true);
+    s
+}
+
+#[test]
+fn an_end_rule_sets_the_winner_and_the_messages_only_for_a_script_that_decides() {
+    let data = json!({"rules": [rule("win", true, json!([]), json!([
+        {"Type": "Team X Wins", "Team Name": "NAVY"},
+        {"Type": "End Game", "Winner - Custom Message String ID": "IDGS_WON", "Loser - Custom Message String ID": "GAME STRING"},
+    ]))]});
+    let mut s = deciding(data.clone());
+    assert_eq!(s.end, None);
+    s.step(&[], 0.1, false);
+    assert_eq!(s.end, Some(ScriptEnd { kind: EndKind::Team("NAVY".into()), winner_message: Some("IDGS_WON".into()), loser_message: None }));
+    let mut plain = script(data, Value::Null);
+    plain.step(&[], 0.1, false);
+    assert_eq!(plain.end, None, "a script that does not opt in leaves the ending to victory.rs");
+}
+
+#[test]
+fn remaining_team_wins_and_a_bare_end_game_leave_the_winner_open_and_the_first_rule_wins() {
+    let data = json!({"rules": [
+        rule("one", true, json!([]), json!([{"Type": "Remaining Team Wins"}])),
+        rule("two", true, json!([]), json!([{"Type": "Team X Wins", "Team Name": "PIRATES"}])),
+    ]});
+    let mut s = deciding(data);
+    s.step(&[], 0.1, false);
+    assert_eq!(s.end.as_ref().map(|e| &e.kind), Some(&EndKind::Winner), "the second rule fired in the same step but speaks second");
+    s.step(&[], 0.1, false);
+    assert_eq!(s.end.as_ref().map(|e| &e.kind), Some(&EndKind::Winner));
+}
+
+#[test]
+fn a_required_task_decides_for_its_team() {
+    let task = |name: &str, team: &str| json!({"Name": name, "Active": true, "required": true, "team": team, "complete_when": [flag_is(&format!("{name}-done"), true)], "fail_when": [flag_is(&format!("{name}-lost"), true)]});
+    let data = json!({"rules": [], "victory": "script", "tasks": [task("A", "NAVY"), task("B", "NAVY"), task("C", "PIRATES")]});
+    let mut s = deciding(data);
+    s.step(&[], 0.1, false);
+    assert_eq!(s.end, None);
+    s.flags.insert("A-done".into(), true);
+    s.step(&[], 0.1, false);
+    assert_eq!(s.end, None, "NAVY still has B to do");
+    s.flags.insert("B-done".into(), true);
+    s.step(&[], 0.1, false);
+    assert_eq!(s.end.as_ref().map(|e| &e.kind), Some(&EndKind::Team("NAVY".into())));
+    let mut lost = deciding(json!({"rules": [], "tasks": [task("C", "PIRATES")]}));
+    lost.flags.insert("C-lost".into(), true);
+    lost.step(&[], 0.1, false);
+    assert_eq!(lost.end.as_ref().map(|e| &e.kind), Some(&EndKind::Loser("PIRATES".into())));
+}
+
+#[test]
+fn a_required_task_without_a_team_never_decides_a_skirmish() {
+    let t = json!({"Name": "A", "Active": true, "required": true, "complete_when": [flag_is("done", true)]});
+    let mut s = deciding(json!({"rules": [], "victory": "objectives", "tasks": [t]}));
+    s.flags.insert("done".into(), true);
+    s.step(&[], 0.1, false);
+    assert_eq!((s.end.clone(), s.ended.clone()), (None, None));
+}

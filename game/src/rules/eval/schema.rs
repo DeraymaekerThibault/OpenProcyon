@@ -169,16 +169,24 @@ pub struct TypeDef {
     pub role: Role,
     pub origin: Origin,
     pub handler: Handler,
+    /// Only a campaign mission shows or reads its effect: a skirmish map script that uses it is an error for `--check-mission`, and
+    /// a warning when the map loads (the cutscene camera, the mission HUD and tutorial hooks, level changes, the human's ship handoffs).
+    pub campaign_only: bool,
     pub fields: &'static [Field],
 }
 
 impl TypeDef {
     const fn new(name: &'static str, role: Role, fields: &'static [Field]) -> TypeDef {
-        TypeDef { name, role, origin: Origin::Retail, handler: Handler::Interpreter, fields }
+        TypeDef { name, role, origin: Origin::Retail, handler: Handler::Interpreter, campaign_only: false, fields }
     }
     /// Added by OpenProcyon, not in the original's rule editor.
     pub const fn engine(mut self) -> TypeDef {
         self.origin = Origin::Engine;
+        self
+    }
+    /// Only campaign missions can use it (see `campaign_only`).
+    const fn campaign(mut self) -> TypeDef {
+        self.campaign_only = true;
         self
     }
     const fn victory(mut self) -> TypeDef {
@@ -328,7 +336,7 @@ pub static RULE_TYPES: &[TypeDef] = &[
     cond("Team has X points", &[team("Team Name"), num("Points")]),
     cond("Player has no lifeboats", &[plr("Player Name")]),
     cond("Is Starmap Open", &[]),
-    cond("Mission 9 - If Mortar explodes within Area", &[vol("Volume Name")]),
+    cond("Mission 9 - If Mortar explodes within Area", &[vol("Volume Name")]).campaign(),
     cond("Player Killed A Object", &[plr("Player Name"), choice("World Object Type", &["Asteroid", "Ship"])]),
     // Skirmish end conditions: read by victory.rs from the map's `victory` rules.
     cond("No Human Controlled Ships Remain", &[]).victory(),
@@ -352,9 +360,9 @@ pub static RULE_TYPES: &[TypeDef] = &[
     act("Set Objective Task Active State", &[task("Objective Task"), boolean("Active State")]),
     act("Set Objective Task Failed State", &[task("Objective Task"), boolean("Failed State")]),
     act("Set Objective Task Complete State", &[task("Objective Task"), boolean("Complete State")]),
-    act("Set Current Objective Point", &[point("Objective Point")]),
-    act("Set Current Objective Point On Ship", &[grp("Group Name")]),
-    act("Set Current Objective Point Visible On Starmap", &[boolean("Visible On Starmap")]),
+    act("Set Current Objective Point", &[point("Objective Point")]).campaign(),
+    act("Set Current Objective Point On Ship", &[grp("Group Name")]).campaign(),
+    act("Set Current Objective Point Visible On Starmap", &[boolean("Visible On Starmap")]).campaign(),
     act("Set Map Text Visibility", &[maptext("Map Text Name"), boolean("Visible On Starmap")]),
     act("Group to follow path", &[grp("Group Name"), path("Path Name"), boolean("Find Closest Point"), choice("Follow Mode", FOLLOW)]),
     act("Setup Space Animal Flock", &[grp("Group Name"), path("Path Name"), boolean("Find Closest Point"), choice("Follow Mode", FOLLOW), num("Velocity")]),
@@ -398,25 +406,25 @@ pub static RULE_TYPES: &[TypeDef] = &[
     act("Reset Hit Count", &[grp("Group/Unit Name")]),
     act("Set FleetFormation Type", &[plr("Player Name"), choice("Formation Type", FORMATION), boolean("Hold Formation")]),
     act("Set Fleet Hold Formation", &[plr("Player Name"), boolean("Hold Formation")]),
-    act("Set Fleet Primary Ship", &[grp("Group/Unit Name")]),
+    act("Set Fleet Primary Ship", &[grp("Group/Unit Name")]).campaign(),
     act("Set Fleet Hold Fire", &[plr("PLAYER FLEET"), boolean("HOLD FIRE")]),
     act("Set alliance between PlayerA and PlayerB to TRUE/FALSE", &[plr("PLAYER A"), plr("PLAYER B"), boolean("SET ALLIANCE TO")]),
     act("Tow Ship", &[grp("Docking Group"), grp("Target to Tow")]),
     act("Break Tow", &[grp("TowerGroupA"), grp("TowerGroupB")]),
-    act("NIS Start", &[boolean("All Objects Visible").ignored(), boolean("Open NIS bars instantly").ignored()]),
-    act("NIS End", &[]),
-    act("NIS Set Camera Path", &[path("Path Name"), boolean("Jump to start").ignored()]),
-    act("NIS Set Camera Speed", &[num("Max Velocity"), num("Acceleration").ignored()]),
-    act("NIS Set Transition Camera Speed", &[num("Max Velocity"), num("Acceleration").ignored()]),
-    act("NIS Focus camera on Group/Unit", &[grp("GroupUnit Name")]),
-    act("NIS Focus camera on Point", &[pset("Point Set Name")]),
-    act("NIS Attach Camera", &[grp("Group/Unit Name"), num("Distance"), num("Angle YZ"), num("Angle XY")]),
-    act("NIS Position Camera Relative to Object", &[grp("Unit Name"), num("Distance"), num("Angle YZ"), num("Angle XY"), boolean("Jump to point").ignored()]),
-    act("NIS Focus on Main Ship", &[]),
+    act("NIS Start", &[boolean("All Objects Visible").ignored(), boolean("Open NIS bars instantly").ignored()]).campaign(),
+    act("NIS End", &[]).campaign(),
+    act("NIS Set Camera Path", &[path("Path Name"), boolean("Jump to start").ignored()]).campaign(),
+    act("NIS Set Camera Speed", &[num("Max Velocity"), num("Acceleration").ignored()]).campaign(),
+    act("NIS Set Transition Camera Speed", &[num("Max Velocity"), num("Acceleration").ignored()]).campaign(),
+    act("NIS Focus camera on Group/Unit", &[grp("GroupUnit Name")]).campaign(),
+    act("NIS Focus camera on Point", &[pset("Point Set Name")]).campaign(),
+    act("NIS Attach Camera", &[grp("Group/Unit Name"), num("Distance"), num("Angle YZ"), num("Angle XY")]).campaign(),
+    act("NIS Position Camera Relative to Object", &[grp("Unit Name"), num("Distance"), num("Angle YZ"), num("Angle XY"), boolean("Jump to point").ignored()]).campaign(),
+    act("NIS Focus on Main Ship", &[]).campaign(),
     act("Set Group/Unit Cloak State", &[grp("Group Name"), boolean("Cloak State"), boolean("AI Can Override")]),
-    act("Focus Camera On Group", &[grp("GroupUnit Name"), num("Distance"), num("Relative Angle"), boolean("Use Transition").ignored()]),
-    act("Add Victory Points for SinglePlayer", &[num("Victory points to be added")]),
-    act("Goto Next Level", &[text("World"), boolean("Display Loading String").ignored()]),
+    act("Focus Camera On Group", &[grp("GroupUnit Name"), num("Distance"), num("Relative Angle"), boolean("Use Transition").ignored()]).campaign(),
+    act("Add Victory Points for SinglePlayer", &[num("Victory points to be added")]).campaign(),
+    act("Goto Next Level", &[text("World"), boolean("Display Loading String").ignored()]).campaign(),
     act(
         "End Game",
         &[
@@ -427,9 +435,9 @@ pub static RULE_TYPES: &[TypeDef] = &[
         ],
     ),
     act("Create/Release Event Effect", &[pset("Point Set"), text("Effect Name"), boolean("Boolean State")]),
-    act("Open HUD Texture Overlay", &[text("Texture Base Name")]),
-    act("Close HUD Texture Overlay", &[]),
-    act("Open Weapon Bar", &[boolean("OpenState")]),
+    act("Open HUD Texture Overlay", &[text("Texture Base Name")]).campaign(),
+    act("Close HUD Texture Overlay", &[]).campaign(),
+    act("Open Weapon Bar", &[boolean("OpenState")]).campaign(),
     act("Play Special Effect", &[text("File Name"), boolean("Play As Dialog").ignored()]),
     act("Set Lifeboat Creation State", &[grp("Group Name"), boolean("Boolean")]),
     act(
@@ -452,28 +460,28 @@ pub static RULE_TYPES: &[TypeDef] = &[
         &[num("World Object ID"), num("Combat Strength").opt(), plr("Player/Owner").opt(), choice("Gunnery Level", GUNNERY).opt(), choice("AI Stance", STANCE).opt()],
     ),
     act("Set Group/Unit Mission Essential", &[grp("Group Name"), boolean("Boolean")]),
-    act("Set Radar Active State", &[boolean("Radar Active")]),
+    act("Set Radar Active State", &[boolean("Radar Active")]).campaign(),
     act("Set Group/Unit Towable", &[grp("Group Name"), boolean("Boolean")]),
     act("Set Group/Unit Movable", &[grp("Group Name"), boolean("Boolean")]),
     act("SetCollidable", &[grp("Group/Unit Name"), boolean("Boolean")]),
     act("Set Group/Unit Border Zone", &[grp("Group/Unit Name"), vol("Polygon Name")]),
     act("Clear Group/Unit Border Zone", &[grp("Group/Unit Name")]),
     act("Set Group/Unit Border Zone Return Point", &[grp("Group/Unit Name"), pset("Pointset Name")]),
-    act("Crew Speech - Toggle On Off", &[boolean("Crew Speech State State")]),
-    act("Crew Speech - Helm Off Course", &[]),
-    act("Open Crew and Arms Screens", &[]),
-    act("Set Is In Calyan Abyss", &[boolean("Boolean Value")]),
-    act("Set Group/Unit AI Captain", &[grp("Group/Unit Name"), choice("AI Stance", &["Captain_Human"])]),
-    act("NIS Zoom", &[num("FOV"), num("Speed")]),
-    act("NIS Toggle NIS mode Gun Accuracy", &[boolean("Use NIS Gun Accuracy")]),
-    act("NIS Toggle All Objects Visibility", &[boolean("All Objects Visible")]),
-    act("Set Nebula Fadeout Distance", &[num("Fadeout Distance")]),
-    act("Set Nebula to Lock Objects", &[boolean("Trap")]),
+    act("Crew Speech - Toggle On Off", &[boolean("Crew Speech State State")]).campaign(),
+    act("Crew Speech - Helm Off Course", &[]).campaign(),
+    act("Open Crew and Arms Screens", &[]).campaign(),
+    act("Set Is In Calyan Abyss", &[boolean("Boolean Value")]).campaign(),
+    act("Set Group/Unit AI Captain", &[grp("Group/Unit Name"), choice("AI Stance", &["Captain_Human"])]).campaign(),
+    act("NIS Zoom", &[num("FOV"), num("Speed")]).campaign(),
+    act("NIS Toggle NIS mode Gun Accuracy", &[boolean("Use NIS Gun Accuracy")]).campaign(),
+    act("NIS Toggle All Objects Visibility", &[boolean("All Objects Visible")]).campaign(),
+    act("Set Nebula Fadeout Distance", &[num("Fadeout Distance")]).campaign(),
+    act("Set Nebula to Lock Objects", &[boolean("Trap")]).campaign(),
     act("Set Group/Unit Warning Shot Mode", &[grp("GroupUnit Name"), boolean("Boolean")]),
-    act("TUTORIAL - Pause when starmap opens?", &[boolean("Pause when starmap opens")]),
+    act("TUTORIAL - Pause when starmap opens?", &[boolean("Pause when starmap opens")]).campaign(),
     act("*State Init* Setup Etherium Current", &[num("World Object ID").ignored(), text("Etherium Name").ignored(), path("Etherium Path").soft()]),
     act("Mission 9 - Do Dark Matter Explosion", &[vol("Affected Area")]),
-    act("Mission 9 - Teleport Longboat", &[grp("Longboat Group Name")]),
+    act("Mission 9 - Teleport Longboat", &[grp("Longboat Group Name")]).campaign(),
     act("Dragon - Set AI Stance", &[grp("Group/Unit Name"), choice("AI Stance", STANCE)]),
     act("Dragon - Set Damage Threshold", &[grp("Group Name"), frac("Damage Threshold")]),
     act("Grant Team X Points", &[team("Team Name"), num("Points")]),
@@ -536,6 +544,7 @@ pub fn to_json() -> Value {
             "role": if t.role == Role::Condition { "condition" } else { "action" },
             "origin": if t.origin == Origin::Retail { "retail" } else { "engine" },
             "handler": if t.handler == Handler::Interpreter { "interpreter" } else { "victory" },
+            "campaign_only": t.campaign_only,
             "fields": t.fields.iter().map(field).collect::<Vec<_>>(),
         })
     };

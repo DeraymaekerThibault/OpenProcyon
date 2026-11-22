@@ -40,9 +40,9 @@ Rule plumbing: run once at start, remember state in flags, measure time, end the
 | `Timer Condition` | condition | retail | `Timer Name` (timer; required)<br>`Equivalence` (one of `Greater Than`, `Less Than`, `Equal To`; required)<br>`Time in seconds` (number; required; default `0`) | Compares the timer's seconds with `Time in seconds`. A timer that was never started is false for every comparison. `Equal To` allows a tiny tolerance and is rarely useful; use `Greater Than`. |
 | `Start Timer` | action | retail | `Timer Name` (timer; required) | Resets the timer to 0 and runs it; starting a running timer restarts it. Timers stand still during the opening-briefing pause. |
 | `Stop Timer` | action | retail | `Timer Name` (timer; required) | Stops the timer advancing; it keeps its last reading (PROVISIONAL: reading after a stop is as the code stores it, not checked against the original). |
-| `Goto Next Level` | action | retail | `World` (text; required)<br>`Display Loading String` (bool; ignored; default `FALSE`) | Ends the mission as a victory. `World` is only used to build the end text (the digits give "Mission N complete."); which mission follows is decided elsewhere (PROVISIONAL: see `docs/missions.md`). Only the first end action takes effect. |
+| `Goto Next Level` | action (campaign only) | retail | `World` (text; required)<br>`Display Loading String` (bool; ignored; default `FALSE`) | Ends the mission as a victory. `World` is only used to build the end text (the digits give "Mission N complete."); which mission follows is decided elsewhere (PROVISIONAL: see `docs/missions.md`). Only the first end action takes effect. |
 | `End Game` | action | retail | `Loser - Custom Message String ID` (message; required)<br>`Winner - Custom Message String ID` (message; ignored)<br>`Use Custom Message` (bool; ignored; default `FALSE`)<br>`Show Stats Screen` (bool; ignored; default `FALSE`) | Ends the mission as a defeat. `Loser - Custom Message String ID` is looked up in `media.json` `messages`; an unknown id shows "Mission failed". The winner message and the stats flag are accepted but ignored. |
-| `Add Victory Points for SinglePlayer` | action | retail | `Victory points to be added` (number; required; default `0`) | Adds to the mission's score. Must be a whole non-negative JSON number. |
+| `Add Victory Points for SinglePlayer` | action (campaign only) | retail | `Victory points to be added` (number; required; default `0`) | Adds to the mission's score. Must be a whole non-negative JSON number. |
 
 ## Objectives and the star map
 
@@ -53,12 +53,12 @@ Tasks and the objective point are declared in `mission.json` (`tasks`, `points`)
 | `Set Objective Task Active State` | action | retail | `Objective Task` (task; required)<br>`Active State` (bool; required; default `FALSE`) | Shows or hides the task. A name that is not in `tasks` does nothing. |
 | `Set Objective Task Failed State` | action | retail | `Objective Task` (task; required)<br>`Failed State` (bool; required; default `FALSE`) | Marks the task failed (or clears it). A name not in `tasks` does nothing. |
 | `Set Objective Task Complete State` | action | retail | `Objective Task` (task; required)<br>`Complete State` (bool; required; default `FALSE`) | Marks the task complete (or clears it). A name not in `tasks` does nothing. |
-| `Set Current Objective Point` | action | retail | `Objective Point` (point; required) | Selects the objective point by `Name` from `points`; `NO OBJECTIVE POINT` clears it. Also drops any point attached to a ship. |
-| `Set Current Objective Point On Ship` | action | retail | `Group Name` (group; required) | Attaches the objective marker to the ship(s) of the group instead of a fixed point. |
-| `Set Current Objective Point Visible On Starmap` | action | retail | `Visible On Starmap` (bool; required; default `FALSE`) | Shows or hides the objective marker on the star map. |
+| `Set Current Objective Point` | action (campaign only) | retail | `Objective Point` (point; required) | Selects the objective point by `Name` from `points`; `NO OBJECTIVE POINT` clears it. Also drops any point attached to a ship. |
+| `Set Current Objective Point On Ship` | action (campaign only) | retail | `Group Name` (group; required) | Attaches the objective marker to the ship(s) of the group instead of a fixed point. |
+| `Set Current Objective Point Visible On Starmap` | action (campaign only) | retail | `Visible On Starmap` (bool; required; default `FALSE`) | Shows or hides the objective marker on the star map. |
 | `Set Map Text Visibility` | action | retail | `Map Text Name` (map_text; required)<br>`Visible On Starmap` (bool; required; default `FALSE`) | Shows or hides one `map_text` label on the star map. |
 | `Is Starmap Open` | condition | retail | none | Holds while the star map is open. |
-| `TUTORIAL - Pause when starmap opens?` | action | retail | `Pause when starmap opens` (bool; required; default `FALSE`) | Tutorial helper: when TRUE the battle pauses whenever the star map opens. |
+| `TUTORIAL - Pause when starmap opens?` | action (campaign only) | retail | `Pause when starmap opens` (bool; required; default `FALSE`) | Tutorial helper: when TRUE the battle pauses whenever the star map opens. |
 
 ## Triggers, positions and counting events
 
@@ -127,7 +127,7 @@ Scripted orders given to computer ships. The human's own course and throttle are
 | `Clear all AI commands` | action | retail | `Group/Unit Name` (group; required) | Drops the ships' scripted orders. The human's own course and throttle stay. |
 | `Set Group/Unit Hold Position` | action | retail | `Group/Unit Name` (group; required)<br>`Boolean` (bool; default `TRUE`) | Holds (clears the waypoints). A missing `Boolean` means TRUE, unlike most boolean fields. |
 | `Set Group/Unit AI Stance` | action | retail | `Group/Unit Name` (group; required)<br>`AI Stance` (one of `Stance_Dummy`, `Stance_Neutral`, `Stance_Defensive`, `Stance_Aggressive`, `Stance Persistant`, `Stance Persistent`, `AI STANCE`; required) | Stances: `Stance_Neutral`, `Stance_Defensive`, `Stance_Aggressive`, `Stance Persistant` (sic) and others listed. |
-| `Set Group/Unit AI Captain` | action | retail | `Group/Unit Name` (group; required)<br>`AI Stance` (one of `Captain_Human`; required) | Only `Captain_Human` is meaningful: it gives the human control of the ships and makes them the primary. Other captains keep the stance AI. |
+| `Set Group/Unit AI Captain` | action (campaign only) | retail | `Group/Unit Name` (group; required)<br>`AI Stance` (one of `Captain_Human`; required) | Only `Captain_Human` is meaningful: it gives the human control of the ships and makes them the primary. Other captains keep the stance AI. |
 | `Set Group/Unit Warning Shot Mode` | action | retail | `GroupUnit Name` (group; required)<br>`Boolean` (bool; required; default `FALSE`) | Makes the ships fire warning shots. |
 | `Set Group/Unit Border Zone` | action | retail | `Group/Unit Name` (group; required)<br>`Polygon Name` (volume; required) | Keeps the ships inside a polygon (a `volume`); see the return-point action. |
 | `Clear Group/Unit Border Zone` | action | retail | `Group/Unit Name` (group; required) | Removes the border zone. |
@@ -168,20 +168,20 @@ A cutscene (NIS) is `NIS Start`, camera Types, then `NIS End`. Use the engine-ad
 
 | Type | Kind | Origin | Fields | What it does |
 |---|---|---|---|---|
-| `NIS Start` | action | retail | `All Objects Visible` (bool; ignored; default `FALSE`)<br>`Open NIS bars instantly` (bool; ignored; default `FALSE`) | Begins a cutscene: letterbox bars on, camera under rule control. The exported visibility and instant-bars fields are ignored. |
-| `NIS End` | action | retail | none | Ends the cutscene, returns the camera and makes all objects visible again. |
-| `NIS Set Camera Path` | action | retail | `Path Name` (path; required)<br>`Jump to start` (bool; ignored; default `FALSE`) | Camera follows `Path Name` (speed default 60 until a speed action). `Jump to start` is ignored. |
-| `NIS Set Camera Speed` | action | retail | `Max Velocity` (number; required; default `0`)<br>`Acceleration` (number; ignored; default `0`) | Sets the speed along the camera path. `Acceleration` is ignored. |
-| `NIS Set Transition Camera Speed` | action | retail | `Max Velocity` (number; required; default `0`)<br>`Acceleration` (number; ignored; default `0`) | Same arm as `NIS Set Camera Speed`. |
-| `NIS Focus camera on Group/Unit` | action | retail | `GroupUnit Name` (group; required) | The camera looks at the unit; clears a point focus and an attached camera. |
-| `NIS Focus camera on Point` | action | retail | `Point Set Name` (point_set; required) | The camera looks at the point set. |
-| `NIS Attach Camera` | action | retail | `Group/Unit Name` (group; required)<br>`Distance` (number; required; default `0`)<br>`Angle YZ` (number; required; default `0`)<br>`Angle XY` (number; required; default `0`) | Places the camera at `Distance` and the two angles relative to the unit and keeps it there. |
-| `NIS Position Camera Relative to Object` | action | retail | `Unit Name` (group; required)<br>`Distance` (number; required; default `0`)<br>`Angle YZ` (number; required; default `0`)<br>`Angle XY` (number; required; default `0`)<br>`Jump to point` (bool; ignored; default `FALSE`) | A fixed offset from the unit, shown like an attached camera (PROVISIONAL). `Jump to point` is ignored. |
-| `NIS Focus on Main Ship` | action | retail | none | Focus on the human's flagship. |
-| `NIS Zoom` | action | retail | `FOV` (number; required; default `0`)<br>`Speed` (number; required; default `0`) | Field of view (radians, vertical, PROVISIONAL) and how fast it changes per second. |
-| `NIS Toggle NIS mode Gun Accuracy` | action | retail | `Use NIS Gun Accuracy` (bool; required; default `FALSE`) | Uses the cutscene gun accuracy while in a NIS. |
-| `NIS Toggle All Objects Visibility` | action | retail | `All Objects Visible` (bool; required; default `FALSE`) | Shows or hides every object during a cutscene. |
-| `Focus Camera On Group` | action | retail | `GroupUnit Name` (group; required)<br>`Distance` (number; required; default `0`)<br>`Relative Angle` (number; required; default `0`)<br>`Use Transition` (bool; ignored; default `FALSE`) | Orbit camera around a group at a distance and relative angle. `Use Transition` is ignored. |
+| `NIS Start` | action (campaign only) | retail | `All Objects Visible` (bool; ignored; default `FALSE`)<br>`Open NIS bars instantly` (bool; ignored; default `FALSE`) | Begins a cutscene: letterbox bars on, camera under rule control. The exported visibility and instant-bars fields are ignored. |
+| `NIS End` | action (campaign only) | retail | none | Ends the cutscene, returns the camera and makes all objects visible again. |
+| `NIS Set Camera Path` | action (campaign only) | retail | `Path Name` (path; required)<br>`Jump to start` (bool; ignored; default `FALSE`) | Camera follows `Path Name` (speed default 60 until a speed action). `Jump to start` is ignored. |
+| `NIS Set Camera Speed` | action (campaign only) | retail | `Max Velocity` (number; required; default `0`)<br>`Acceleration` (number; ignored; default `0`) | Sets the speed along the camera path. `Acceleration` is ignored. |
+| `NIS Set Transition Camera Speed` | action (campaign only) | retail | `Max Velocity` (number; required; default `0`)<br>`Acceleration` (number; ignored; default `0`) | Same arm as `NIS Set Camera Speed`. |
+| `NIS Focus camera on Group/Unit` | action (campaign only) | retail | `GroupUnit Name` (group; required) | The camera looks at the unit; clears a point focus and an attached camera. |
+| `NIS Focus camera on Point` | action (campaign only) | retail | `Point Set Name` (point_set; required) | The camera looks at the point set. |
+| `NIS Attach Camera` | action (campaign only) | retail | `Group/Unit Name` (group; required)<br>`Distance` (number; required; default `0`)<br>`Angle YZ` (number; required; default `0`)<br>`Angle XY` (number; required; default `0`) | Places the camera at `Distance` and the two angles relative to the unit and keeps it there. |
+| `NIS Position Camera Relative to Object` | action (campaign only) | retail | `Unit Name` (group; required)<br>`Distance` (number; required; default `0`)<br>`Angle YZ` (number; required; default `0`)<br>`Angle XY` (number; required; default `0`)<br>`Jump to point` (bool; ignored; default `FALSE`) | A fixed offset from the unit, shown like an attached camera (PROVISIONAL). `Jump to point` is ignored. |
+| `NIS Focus on Main Ship` | action (campaign only) | retail | none | Focus on the human's flagship. |
+| `NIS Zoom` | action (campaign only) | retail | `FOV` (number; required; default `0`)<br>`Speed` (number; required; default `0`) | Field of view (radians, vertical, PROVISIONAL) and how fast it changes per second. |
+| `NIS Toggle NIS mode Gun Accuracy` | action (campaign only) | retail | `Use NIS Gun Accuracy` (bool; required; default `FALSE`) | Uses the cutscene gun accuracy while in a NIS. |
+| `NIS Toggle All Objects Visibility` | action (campaign only) | retail | `All Objects Visible` (bool; required; default `FALSE`) | Shows or hides every object during a cutscene. |
+| `Focus Camera On Group` | action (campaign only) | retail | `GroupUnit Name` (group; required)<br>`Distance` (number; required; default `0`)<br>`Relative Angle` (number; required; default `0`)<br>`Use Transition` (bool; ignored; default `FALSE`) | Orbit camera around a group at a distance and relative angle. `Use Transition` is ignored. |
 
 ## Sound, speech, music and HUD
 
@@ -194,13 +194,13 @@ Speech events come from `media.json` `speech` (or the mission's own `opening_spe
 | `Speech Event Not Played Yet` | condition | retail | `Speech Event Name` (speech_event; required) | True while the event has neither played nor been queued nor is playing. |
 | `Play Music Track` | action | retail | `File Name` (text; required)<br>`Crossfade transition` (bool; ignored; default `FALSE`)<br>`Fade In Time ( secs )` (number; required; default `0`)<br>`Fade Out Time ( secs )` (number; required; default `0`)<br>`New Volume ( 0 to 1 )` (number; fraction 0..1; required; default `0`) | Plays `File Name` with fades. Volume is a fraction 0..1. `Crossfade transition` is ignored. |
 | `Play Special Effect` | action | retail | `File Name` (text; required)<br>`Play As Dialog` (bool; ignored; default `FALSE`) | Plays a sound file by name. `Play As Dialog` is ignored. |
-| `Crew Speech - Toggle On Off` | action | retail | `Crew Speech State State` (bool; required; default `FALSE`) | Turns the crew's spoken warnings on or off (the field name has `State State`, as exported). |
-| `Crew Speech - Helm Off Course` | action | retail | none | Triggers the helmsman's off-course line. |
-| `Open Crew and Arms Screens` | action | retail | none | Opens the crew and arms screens (tutorial). |
-| `Open HUD Texture Overlay` | action | retail | `Texture Base Name` (text; required) | Shows a HUD overlay texture by base name. |
-| `Close HUD Texture Overlay` | action | retail | none | Hides it. |
-| `Open Weapon Bar` | action | retail | `OpenState` (bool; required; default `FALSE`) | Opens or closes the weapon bar (`OpenState`). |
-| `Set Radar Active State` | action | retail | `Radar Active` (bool; required; default `FALSE`) | Turns the radar on or off. |
+| `Crew Speech - Toggle On Off` | action (campaign only) | retail | `Crew Speech State State` (bool; required; default `FALSE`) | Turns the crew's spoken warnings on or off (the field name has `State State`, as exported). |
+| `Crew Speech - Helm Off Course` | action (campaign only) | retail | none | Triggers the helmsman's off-course line. |
+| `Open Crew and Arms Screens` | action (campaign only) | retail | none | Opens the crew and arms screens (tutorial). |
+| `Open HUD Texture Overlay` | action (campaign only) | retail | `Texture Base Name` (text; required) | Shows a HUD overlay texture by base name. |
+| `Close HUD Texture Overlay` | action (campaign only) | retail | none | Hides it. |
+| `Open Weapon Bar` | action (campaign only) | retail | `OpenState` (bool; required; default `FALSE`) | Opens or closes the weapon bar (`OpenState`). |
+| `Set Radar Active State` | action (campaign only) | retail | `Radar Active` (bool; required; default `FALSE`) | Turns the radar on or off. |
 
 ## Environment, nebula, animals and asteroids
 
@@ -211,13 +211,13 @@ Scenery and hazards. Nebula and current setups are read from the mission's `envi
 | `Setup Space Animal Flock` | action | retail | `Group Name` (group; required)<br>`Path Name` (path; required)<br>`Find Closest Point` (bool; required; default `FALSE`)<br>`Follow Mode` (one of `to end`, `loop`, `teleport loop`, `end to end`; required)<br>`Velocity` (number; required; default `0`) | Gives the flock group a path and a speed. Fields are as for `Group to follow path` plus `Velocity`. |
 | `Setup Asteroid Belt` | action | retail | `Group Name` (group; required)<br>`Path Name` (path; required)<br>`Find Closest Point` (bool; required; default `FALSE`)<br>`Follow Mode` (one of `to end`, `loop`, `teleport loop`, `end to end`; required)<br>`Velocity Lower m/sec` (number; required; default `0`)<br>`Velocity Upper m/sec` (number; required; default `0`)<br>`Tumble Lower Rads/sec` (number; required; default `0`)<br>`Tumble Upper Rads/sec` (number; required; default `0`) | Turns the group into a moving belt along the path, with a random speed in `Velocity Lower/Upper m/sec` and tumble in `Tumble Lower/Upper Rads/sec`. |
 | `Set Group Space Objects velocity` | action | retail | `Group Name` (group; required)<br>`Velocity` (number; required; default `0`) | Changes the speed of a group of moving space objects (rocks, animals). |
-| `Set Nebula Fadeout Distance` | action | retail | `Fadeout Distance` (number; required; default `0`) | Distance over which the nebula fades out. |
-| `Set Nebula to Lock Objects` | action | retail | `Trap` (bool; required; default `FALSE`) | When TRUE ships cannot leave the nebula (`Trap`). |
-| `Set Is In Calyan Abyss` | action | retail | `Boolean Value` (bool; required; default `FALSE`) | Sets a mission-wide "in the Calyan Abyss" state that other engine systems read. PROVISIONAL: what exactly changes is not described here. |
+| `Set Nebula Fadeout Distance` | action (campaign only) | retail | `Fadeout Distance` (number; required; default `0`) | Distance over which the nebula fades out. |
+| `Set Nebula to Lock Objects` | action (campaign only) | retail | `Trap` (bool; required; default `FALSE`) | When TRUE ships cannot leave the nebula (`Trap`). |
+| `Set Is In Calyan Abyss` | action (campaign only) | retail | `Boolean Value` (bool; required; default `FALSE`) | Sets a mission-wide "in the Calyan Abyss" state that other engine systems read. PROVISIONAL: what exactly changes is not described here. |
 | `Create/Release Event Effect` | action | retail | `Point Set` (point_set; required)<br>`Effect Name` (text; required)<br>`Boolean State` (bool; required; default `FALSE`) | Creates or releases a named effect at a point set. `Effect Name` is a free text that must match an engine effect. |
 | `Mission 9 - Do Dark Matter Explosion` | action | retail | `Affected Area` (volume; required) | Mission 9 only: the dark-matter blast in the area. |
-| `Mission 9 - Teleport Longboat` | action | retail | `Longboat Group Name` (group; required) | Mission 9 only: moves the longboat group. |
-| `Mission 9 - If Mortar explodes within Area` | condition | retail | `Volume Name` (volume; required) | Mission 9 only: true after a mortar burst inside the volume, and stays true afterwards. |
+| `Mission 9 - Teleport Longboat` | action (campaign only) | retail | `Longboat Group Name` (group; required) | Mission 9 only: moves the longboat group. |
+| `Mission 9 - If Mortar explodes within Area` | condition (campaign only) | retail | `Volume Name` (volume; required) | Mission 9 only: true after a mortar burst inside the volume, and stays true afterwards. |
 
 ## Fleets, alliances and formations
 
@@ -227,7 +227,7 @@ Player names are the owners listed in `players`; a leading `Player0 Group` alway
 |---|---|---|---|---|
 | `Set FleetFormation Type` | action | retail | `Player Name` (player; required)<br>`Formation Type` (one of `None`, `Custom`, `LineAbreast`, `EchelonRight`, `EchelonLeft`, `Column`, `Diamond`, `Convoy`; required)<br>`Hold Formation` (bool; required; default `FALSE`) | Sets the fleet's formation (None, Custom, LineAbreast, EchelonRight, EchelonLeft, Column, Diamond, Convoy) and whether it is held. |
 | `Set Fleet Hold Formation` | action | retail | `Player Name` (player; required)<br>`Hold Formation` (bool; required; default `FALSE`) | Only changes whether the formation is held. |
-| `Set Fleet Primary Ship` | action | retail | `Group/Unit Name` (group; required) | Makes the unit the fleet's primary ship. |
+| `Set Fleet Primary Ship` | action (campaign only) | retail | `Group/Unit Name` (group; required) | Makes the unit the fleet's primary ship. |
 | `Set Fleet Hold Fire` | action | retail | `PLAYER FLEET` (player; required)<br>`HOLD FIRE` (bool; required; default `FALSE`) | Fleet holds or releases fire. |
 | `Set alliance between PlayerA and PlayerB to TRUE/FALSE` | action | retail | `PLAYER A` (player; required)<br>`PLAYER B` (player; required)<br>`SET ALLIANCE TO` (bool; required; default `FALSE`) | TRUE allies the two players, FALSE makes them hostile (both directions). |
 

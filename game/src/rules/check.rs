@@ -59,6 +59,8 @@ struct Defs {
     speech: BTreeSet<String>,
     messages: BTreeSet<String>,
     ship_names: BTreeSet<String>,
+    /// The map's team name ids (`map.json` `teams`); empty without a map.json.
+    teams: BTreeSet<String>,
     /// `media.json` was given, so speech, messages and ship names can be checked.
     media: bool,
 }
@@ -95,6 +97,7 @@ impl Defs {
             ..Default::default()
         };
         d.players.extend(names(map, "players"));
+        d.teams = map["teams"].as_array().into_iter().flatten().filter_map(|t| t["name_id"].as_str()).map(String::from).collect();
         // The interpreter reads the human player under its TWT name or as "Player0 Group" (`alias_player`).
         d.players.insert("Player0 Group".into());
         d.players.extend(mission["player_start"]["name"].as_str().map(String::from));
@@ -179,6 +182,8 @@ fn suggest<'a>(name: &str, candidates: impl Iterator<Item = &'a str>) -> String 
 
 struct Checker<'a> {
     defs: &'a Defs,
+    /// Checking a skirmish map's `script.json`.
+    skirmish: bool,
     out: Vec<Problem>,
     rule: String,
     at: String,
@@ -232,6 +237,9 @@ impl Checker<'_> {
             self.err("Type", format!("unknown {kind_word} Type{hint}; the interpreter ignores it"));
             return;
         };
+        if def.campaign_only && self.skirmish {
+            self.err("Type", format!("'{ty}' is campaign-only: only a campaign mission shows its effect, so a skirmish map script cannot use it"));
+        }
         let Some(obj) = e.as_object() else { return };
         self.wants_true = e["Boolean Value"].as_str().is_none_or(|v| !v.eq_ignore_ascii_case("FALSE"));
         if def.name == "OP Counter Condition" {
@@ -434,6 +442,19 @@ fn check_tasks_and_victory(c: &mut Checker, mission: &Value) {
                 c.err("required", format!("{other} is not true/false; the task is not required"));
             }
         }
+        // Engine-added `team` (skirmish script): the team a required task decides for.
+        if !t["team"].is_null() {
+            c.rule = format!("task '{name}'");
+            match t["team"].as_str() {
+                None => c.err("team", format!("{} is not a team name id (a string)", t["team"])),
+                Some(team) if !c.skirmish => c.warn("team", format!("'{team}' is ignored outside a skirmish map script")),
+                Some(team) if !c.defs.teams.is_empty() && !c.defs.teams.contains(team) => c.warn("team", format!("no team '{team}' in map.json")),
+                Some(_) => {}
+            }
+        } else if c.skirmish && t["required"] == true {
+            c.rule = format!("task '{name}'");
+            c.err("team", "a required task of a skirmish script must name its \"team\": without one it never decides the game".into());
+        }
         for key in ["complete_when", "fail_when"] {
             if t[key].is_null() {
                 continue;
@@ -457,9 +478,11 @@ fn check_tasks_and_victory(c: &mut Checker, mission: &Value) {
     let victory = &mission["victory"];
     let objectives = victory.as_str() == Some("objectives");
     // A skirmish script may carry a `victory` object of its own; only a plain value is the engine-added mode.
-    if !victory.is_null() && !victory.is_object() {
+    let script_decides = c.skirmish && victory.as_str() == Some("script");
+    if !victory.is_null() && !victory.is_object() && !script_decides {
         if !objectives {
-            c.err("victory", format!("{victory} is not \"objectives\"; the rules decide how the mission ends"));
+            let want = if c.skirmish { "\"objectives\" or \"script\"" } else { "\"objectives\" (\"script\" is for a skirmish map's script.json)" };
+            c.err("victory", format!("{victory} is not {want}; the rules decide how the game ends"));
         } else if !required {
             c.warn("victory", "no task has \"required\": true, so the mission never ends this way".into());
         }
@@ -486,9 +509,15 @@ fn check_tasks_and_victory(c: &mut Checker, mission: &Value) {
 /// Validates the rules in `mission` (a `mission.json` / `script.json` document) against the schema and its own definitions.
 /// `map` is the map's `map.json` and `media` its `media.json`; either may be `Value::Null`.
 pub fn check(mission: &Value, map: &Value, media: &Value) -> Vec<Problem> {
+    check_with(mission, map, media, false)
+}
+
+/// `check`, for a skirmish map's `script.json` when `skirmish`: a campaign-only Type (`TypeDef::campaign_only`) is an error there.
+pub fn check_with(mission: &Value, map: &Value, media: &Value, skirmish: bool) -> Vec<Problem> {
     let defs = Defs::collect(mission, map, media);
     let mut c = Checker {
         defs: &defs,
+        skirmish,
         out: vec![],
         rule: String::new(),
         at: "rule".into(),
@@ -699,6 +728,30 @@ mod tests {
         assert_eq!(with.len(), 2);
         assert!(with[0].message.contains("has no media entry"));
         assert_eq!(check(&m, &Value::Null, &json!({"speech": {"Hello": {}}})), vec![]);
+    }
+
+    #[test]
+    fn campaign_only_types_are_errors_in_a_skirmish_script_only() {
+        let m = mission(json!([rule(json!([{"Type": "World Initialize"}]), json!([{"Type": "NIS Start"}, {"Type": "Open Weapon Bar", "OpenState": "TRUE"}]))]));
+        let skirmish: Vec<String> = check_with(&m, &Value::Null, &Value::Null, true).iter().filter(|p| p.level == Level::Error).map(ToString::to_string).collect();
+        assert_eq!(skirmish.len(), 2, "{skirmish:?}");
+        assert!(skirmish[0].contains("action #1 'NIS Start', field \"Type\": 'NIS Start' is campaign-only"), "{skirmish:?}");
+        assert_eq!(check(&m, &Value::Null, &Value::Null), vec![], "a campaign mission may use them");
+    }
+
+    #[test]
+    fn a_skirmish_script_may_decide_its_game_and_its_required_tasks_name_a_team() {
+        let mut m = mission(json!([]));
+        m["victory"] = json!("script");
+        m["tasks"] = json!([{"Name": "Task A", "required": true}, {"Name": "Task B", "required": true, "team": "NAVY"}]);
+        let map = json!({"teams": [{"name_id": "NAVY"}]});
+        let text = |skirmish| check_with(&m, &map, &Value::Null, skirmish).iter().map(ToString::to_string).collect::<Vec<_>>().join("\n");
+        let t = text(true);
+        assert!(t.contains("task 'Task A'") && t.contains("must name its \"team\""), "{t}");
+        assert!(!t.contains("Task B") && !t.contains("\"script\" is not"), "{t}");
+        assert!(text(false).contains("\"script\" is for a skirmish map's script.json"), "{}", text(false));
+        m["tasks"][1]["team"] = json!("PIRATES");
+        assert!(check_with(&m, &map, &Value::Null, true).iter().any(|p| p.message.contains("no team 'PIRATES' in map.json")));
     }
 
     /// docs/rule-types.md is generated from the schema (tools/gen_rule_types.py); a Type added without re-running it fails here.

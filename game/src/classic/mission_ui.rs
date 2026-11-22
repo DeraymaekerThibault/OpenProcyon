@@ -14,7 +14,11 @@ const SPEECH_GOLD: Color = Color::srgb(1.0, 0.65, 0.1);
 
 pub fn plugin(app: &mut App) {
     app.add_systems(Update, (build_mission, build_briefing).before(crate::briefing::update).run_if(in_state(crate::menu::Screen::Battle)).run_if(resource_exists::<Mission>))
-        .add_systems(Update, speech_colour.run_if(in_state(crate::menu::Screen::Battle)).run_if(resource_exists::<Mission>));
+        .add_systems(Update, speech_colour.run_if(in_state(crate::menu::Screen::Battle)).run_if(resource_exists::<Mission>))
+        .add_systems(
+            Update,
+            (build_skirmish_speech, skirmish_subtitle).chain().run_if(in_state(crate::menu::Screen::Battle)).run_if(resource_exists::<crate::rules::skirmish::SkirmishScript>),
+        );
 }
 
 /// Gameplay and cutscene subtitles take the speech event's own text colour (each speaker has one); gold when the event has none.
@@ -112,4 +116,28 @@ fn build_briefing(mut commands: Commands, mission: Res<Mission>, assets: Res<Ass
                 Node { position_type: PositionType::Absolute, right: Val::Px(20.0), bottom: Val::Px(12.0), ..default() },
             ));
         });
+}
+
+/// A skirmish map script's speech lines (`maps/<id>/media.json`): the gameplay subtitle above the main bar, in the speech event's
+/// own colour. The cutscene banner and the rest of the mission widgets stay with the campaign.
+fn build_skirmish_speech(mut commands: Commands, existing: Query<(), With<Ui>>) {
+    if !existing.is_empty() {
+        return;
+    }
+    let node = Node { position_type: PositionType::Absolute, bottom: Val::Percent(9.5), left: Val::Percent(20.0), right: Val::Percent(20.0), ..default() };
+    commands.spawn((Scenario, Ui::Speech, text(20.0, SPEECH_GOLD), Visibility::Hidden, GlobalZIndex(160), node));
+}
+
+fn skirmish_subtitle(sk: Res<crate::rules::skirmish::SkirmishScript>, mut texts: Query<(&Ui, &mut Visibility, &mut Text, &mut TextColor)>) {
+    let colour = sk.script.speech_colour().map_or(SPEECH_GOLD, |[r, g, b, a]| Color::srgba(r, g, b, a));
+    for (ui, mut vis, mut t, mut c) in &mut texts {
+        if !matches!(ui, Ui::Speech) {
+            continue;
+        }
+        vis.set_if_neq(if sk.script.subtitle.is_empty() { Visibility::Hidden } else { Visibility::Inherited });
+        if **t != sk.script.subtitle {
+            **t = sk.script.subtitle.clone();
+        }
+        c.set_if_neq(TextColor(colour));
+    }
 }

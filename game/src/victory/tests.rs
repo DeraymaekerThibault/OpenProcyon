@@ -187,3 +187,36 @@ fn the_retail_maps_load() {
     assert_eq!(at(&[(navy.into(), 350)]), Some(Outcome::Victory));
     assert_eq!(at(&[(pirates.into(), 400)]), Some(Outcome::Defeat));
 }
+
+#[test]
+fn a_script_end_gives_the_human_the_outcome_of_its_team() {
+    let v = Victory::scripted(teams());
+    let fleets = [ship(Side::Player, true), ship(Side(1), false)];
+    let snap = state(&fleets, &[]);
+    let end = |kind| ScriptEnd { kind, winner_message: Some("IDGS_W".into()), loser_message: Some("IDGS_L".into()) };
+    assert_eq!(v.decide_end(&snap, &end(EndKind::Team(NAVY.into()))), (Outcome::Victory, Some("IDGS_W".into())));
+    assert_eq!(v.decide_end(&snap, &end(EndKind::Team(PROC.into()))), (Outcome::Defeat, Some("IDGS_L".into())));
+    assert_eq!(v.decide_end(&snap, &end(EndKind::Loser(PROC.into()))).0, Outcome::Victory);
+    assert_eq!(v.decide_end(&snap, &end(EndKind::Loser(NAVY.into()))).0, Outcome::Defeat);
+    // Remaining Team Wins: the survivors, when they are one team.
+    assert_eq!(v.decide_end(&snap, &end(EndKind::Winner)).0, Outcome::Defeat, "both teams still sail");
+    let mut sunk = ship(Side(1), false);
+    sunk.alive = false;
+    assert_eq!(v.decide_end(&state(&[ship(Side::Player, true), sunk], &[]), &end(EndKind::Winner)).0, Outcome::Victory);
+}
+
+#[test]
+fn conditions_may_name_groups_of_the_script() {
+    let map = json!({"victory": [{"name": "convoy", "winner": NAVY, "if": [{"Type": "Group Destroyed", "objects": ["Convoy", 9]}]}]});
+    let groups = json!({"Convoy": [7, 8]});
+    let v = Victory::from_map_in(&map, teams(), &groups).unwrap();
+    let at = |alive: [bool; 3]| {
+        let fleets = [ship(Side::Player, true), placed(Side(1), 7, alive[0], Vec2::ZERO), placed(Side(1), 8, alive[1], Vec2::ZERO), placed(Side(1), 9, alive[2], Vec2::ZERO)];
+        v.decide(&state(&fleets, &[]))
+    };
+    assert_eq!(at([false, false, true]), None);
+    assert_eq!(at([false, false, false]), Some(Outcome::Victory));
+    let single = json!({"victory": [{"name": "convoy", "winner": NAVY, "if": [{"Type": "Group Destroyed", "group": "Convoy"}]}]});
+    assert!(Victory::from_map_in(&single, teams(), &groups).is_some());
+    assert!(Victory::from_map_in(&single, teams(), &json!({})).is_none(), "an unknown group makes the rules unusable");
+}

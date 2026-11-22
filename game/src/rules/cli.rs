@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
-use super::check::{Level, Problem, check};
+use super::check::{Level, Problem, check_with};
 use super::{TraceOptions, schema, set_trace};
 
 /// `--dump-rule-schema [path]`: writes the rule schema as JSON to `path` (stdout without one) and returns the exit status; `None`
@@ -89,7 +89,8 @@ pub fn check_map(dir: &Path) -> Result<Vec<Problem>, String> {
         ["mission.json", "script.json"].iter().map(|f| dir.join(f)).find(|p| p.is_file()).ok_or_else(|| format!("no mission.json or script.json in {}", dir.display()))?;
     let mission = crate::data::try_json(&rules_file).ok_or_else(|| format!("{} is not valid JSON", rules_file.display()))?;
     let (map, media) = (crate::data::try_json(&dir.join("map.json")), crate::data::try_json(&dir.join("media.json")));
-    let mut problems = check(&mission, map.as_ref().unwrap_or(&Value::Null), media.as_ref().unwrap_or(&Value::Null));
+    let skirmish = rules_file.ends_with("script.json");
+    let mut problems = check_with(&mission, map.as_ref().unwrap_or(&Value::Null), media.as_ref().unwrap_or(&Value::Null), skirmish);
     let note = |level, field: &str, message: &str| Problem { level, rule: "(mission)".into(), at: "files".into(), field: field.into(), message: message.into() };
     if media.is_none() && rules_file.ends_with("mission.json") {
         problems.insert(0, note(Level::Warning, "media.json", "missing: speech events, end messages and ship names are not checked"));
