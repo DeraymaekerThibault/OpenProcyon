@@ -1704,3 +1704,60 @@ fn a_sunk_ship_is_removed_at_the_start_of_the_tick_after_its_breakup() {
     app.update();
     assert!(app.world().get_entity(e).is_err(), "gone at the start of the next tick");
 }
+
+/// Lancer bolts the player's Comet launches in its first burst, with the enemy clicked or with panic fire alone.
+fn comet_lancer_burst(panic: bool) -> usize {
+    let mut app = asset_app();
+    app.add_message::<Sfx>()
+        .add_message::<Fired>()
+        .add_message::<Hit>()
+        .add_message::<Destroyed>()
+        .add_message::<Detonate>()
+        .add_message::<Shoot>()
+        .add_message::<crate::decals::Scar>()
+        .init_resource::<Time>()
+        .init_resource::<FxLib>()
+        .insert_resource(Library::load(assets_dir()))
+        .insert_resource(Rng::new(7))
+        .insert_resource(Look { mesh: default(), shell: default(), enemy_shell: default() })
+        .insert_resource(Target::default())
+        .init_resource::<crate::environment::Sensors>()
+        .add_systems(PreUpdate, crate::environment::refresh_sensors)
+        .add_systems(Update, (crate::tick_start.before(fire), fire, shells.after(fire)));
+    let assets = app.world().resource::<AssetServer>().clone();
+    let lib = Library::load(assets_dir());
+    let spawn = |app: &mut App, class: &str, side, at: Vec3| {
+        let c = lib.index(class);
+        let ship = Ship { heading: 0.0, ..Ship::new(c, side) };
+        let e = app.world_mut().spawn((Transform::from_translation(at), ship, Health::new(&lib.classes[c]), Fires::default())).id();
+        let states = spawn_guns(&mut app.world_mut().commands(), &assets, &lib, e, c);
+        app.world_mut().entity_mut(e).insert(states);
+        app.world_mut().flush();
+        e
+    };
+    let me = spawn(&mut app, "Ship_Navy_Torpedo", Side::Player, Vec3::ZERO);
+    app.world_mut().entity_mut(me).insert(PlayerShip);
+    let enemy = spawn(&mut app, "Ship_Pirate_Sloop", Side::Enemy, Vec3::new(10.0, 0.0, -60.0));
+    *app.world_mut().resource_mut::<Target>() = Target((!panic).then_some(enemy), None, GroundFire { panic, ..default() });
+    let (mut bolts, mut first) = (std::collections::HashSet::new(), None);
+    // The first burst (0.75 s from first to last bolt), not the next (3.5 s reload).
+    for i in 0..200 {
+        app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs_f32(0.02));
+        app.update();
+        bolts.extend(app.world_mut().query::<(Entity, &Shell)>().iter(app.world()).filter(|(_, s)| s.shooter == me && s.bullet.contains("Lancer")).map(|(e, _)| e));
+        first = first.or((!bolts.is_empty()).then_some(i));
+        if first.is_some_and(|f| i > f + 100) {
+            break;
+        }
+    }
+    bolts.len()
+}
+
+/// A burst is BulletsPerBurst shots whoever chose the target: the Comet's light Lancer (4 bolts, 0.25 s apart) fires all four at a
+/// clicked enemy and in panic fire, where the first shot ends the gun's fire request but not its target (docs/re/gunnery.md).
+#[test]
+#[ignore = "needs imported assets"]
+fn a_lancer_burst_is_whole_when_clicked_and_in_panic_fire() {
+    assert_eq!(comet_lancer_burst(false), 4, "clicked enemy");
+    assert_eq!(comet_lancer_burst(true), 4, "panic fire");
+}

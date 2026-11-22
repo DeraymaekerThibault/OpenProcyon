@@ -414,7 +414,8 @@ has fired once, or until more than **2.0 s** have passed since the request was l
 gun (a gun with the lobbing flag). The time is counted from the latest request (a repeated request restarts it). A shot clears the
 request and its panic mark; the time-out clears only the request. Point-defence guns fire continuously and have no request.
 Remake: the panic order is the pending request (`gunnery::FireRequest`, one per gun): each gun that panic fire reaches holds a request
-that ends with its first shot or after the lapse, and the order is over once no gun holds one; a repeated press while some gun still
+that ends with its first shot or after the lapse, and the order is over once no gun holds one and no gun is still in the burst it
+fired (the rest of a burst follows the gun's own target: the request ends with the burst's first shot, the burst does not); a repeated press while some gun still
 holds a request does not restart it (PROVISIONAL). The player's click-shot is still dropped once fired or when out of reach (see the
 cursor section), with no time-out.
 

@@ -569,7 +569,10 @@ pub(super) fn fire(
                 .map(|(threat, _)| *threat),
                 // A rock on the captain's course holds every gun that has not fired at it yet; the attack routine's own fire waits.
                 _ if rock_busy.is_some() => rock_busy.filter(|_| state.rock_ask),
-                (false, _) if primary && target.2.panic && state.request.pending() && panic_fires(gun, is_mine(&state.gun)) => panic_target(&seen, tf, mount, gun).or(ship_target),
+                // The first shot ends the request, not the gun's own target: the rest of its burst follows it (docs/re/gunnery.md).
+                (false, _) if primary && target.2.panic && (state.request.pending() || state.burst_left > 0) && panic_fires(gun, is_mine(&state.gun)) => {
+                    panic_target(&seen, tf, mount, gun).or(ship_target)
+                }
                 (false, _) if !primary && gun.lob.is_some() => {
                     ground_banks.iter().find(|b| b.0 == mount.bank).map(|b| AimTarget { entity: Entity::PLACEHOLDER, position: b.1, velocity: Vec3::ZERO })
                 }
@@ -725,8 +728,8 @@ pub(super) fn fire(
                 }
             }
         }
-        // The panic order is over once no gun still holds its request.
-        if primary && target.2.panic && !states.0.iter().any(|s| s.request.pending()) {
+        // The panic order is over once no gun still holds its request or is in the middle of the burst it fired.
+        if primary && target.2.panic && !states.0.iter().any(|s| s.request.pending() || s.burst_left > 0) {
             target.2.panic = false;
         }
         // One click, one shot: drop the point once fired, or when the bank cannot reach it.
