@@ -16,7 +16,8 @@ use super::*;
 /// Point set the `tp x y` command writes its destination to before running 'Teleport Group/Unit'.
 const TP_SET: &str = "(console)";
 /// The command words (Tab completion).
-const COMMANDS: &[&str] = &["act", "cond", "do", "fire", "flags", "god", "help", "kill", "repair", "reveal", "schema", "set", "task", "tasks", "timer", "timers", "tp", "why"];
+const COMMANDS: &[&str] =
+    &["act", "cond", "do", "fire", "flags", "god", "help", "kill", "repair", "reveal", "schema", "set", "counter", "counters", "task", "tasks", "timer", "timers", "tp", "why"];
 /// Lines of output kept.
 const LOG_LINES: usize = 200;
 /// Longest command line.
@@ -159,6 +160,8 @@ pub enum Command {
     Flags,
     Timers,
     Tasks,
+    /// Every counter set so far (engine-added `OP` counters).
+    Counters,
     /// The rule schema's entry for an action or condition Type (or the Types whose name contains the text): its fields.
     Schema(String),
 }
@@ -184,8 +187,8 @@ reveal                  show every hidden unit (Set Group/Unit Visibility)
 tp <x> <y> [z] | <set>  move the player's ship to game coordinates, or to a point set of the mission
 fire <rule>             run a rule's actions now (as --fire-rule); a part of the name is enough
 why <rule>              which conditions of a rule hold now
-flags | timers | tasks  the mission's state
-set <flag> [on|off]     Set Flag Action;  timer <name> start|stop;  task <name> active|complete|failed [off]
+flags | timers | tasks | counters  the mission's state
+set <flag> [on|off]     Set Flag Action;  counter <name> <value>  OP Set Counter;  timer <name> start|stop;  task <name> active|complete|failed [off]
 act <json>              any rule action, e.g. act {\"Type\": \"Set Flag Action\", \"Flag Name\": \"x\", \"Boolean Value\": true}
 cond <json>             evaluate any rule condition
 schema <text>           the fields of an action or condition Type (the rule schema); act / cond check their JSON against it
@@ -227,6 +230,14 @@ pub fn parse(line: &str, player: &str, god: bool) -> Result<Command, String> {
         "flags" => Command::Flags,
         "timers" => Command::Timers,
         "tasks" => Command::Tasks,
+        "counters" => Command::Counters,
+        "counter" => match args.as_slice() {
+            [name, value] => match value.parse::<f32>() {
+                Ok(v) => act(json!({"Type": "OP Set Counter", "Counter Name": name, "Value": v})),
+                Err(_) => return Err(format!("'{value}' is not a number")),
+            },
+            _ => return Err("usage: counter <name> <value>".into()),
+        },
         "schema" if !rest.is_empty() => Command::Schema(unquote(rest).into()),
         "schema" => return Err("usage: schema <text>, e.g. schema Teleport".into()),
         "set" => match args.as_slice() {
@@ -400,7 +411,7 @@ impl Script {
                     }
                     self.ran[i] = true;
                     info!("t={:.1} rule #{i} fired from the console: {}", self.time, rule.name.trim());
-                    self.run_acts(&rule, w, out);
+                    self.run_from(i, &rule, 0, w, out);
                     o.lines.push(format!("fired '{}' ({} action(s))", rule.name.trim(), rule.acts.len()));
                 }
                 Err(e) => o.lines.push(e),
@@ -426,6 +437,12 @@ impl Script {
                 }
             }
             Command::Schema(query) => o.lines = schema_lines(query),
+            Command::Counters => {
+                o.lines.extend(self.ext.counter_list().into_iter().map(|(k, v)| format!("{k} = {v}")));
+                if o.lines.is_empty() {
+                    o.lines.push("no counter has been set".into());
+                }
+            }
             Command::Tasks => {
                 o.lines.extend(self.tasks.iter().map(|t| {
                     let state = if t.complete {
@@ -488,6 +505,12 @@ impl Script {
         let (name, once, conds) = (self.rules[i].name.trim().to_string(), self.rules[i].once, self.rules[i].conds.clone());
         let mut lines =
             vec![format!("{name}: {}{}", if self.ran[i] { "has run" } else { "has not run" }, if once && self.fired[i] { " (run-once: it will not run again)" } else { "" })];
+        if !self.ext.is_active(i) {
+            lines.push("  inactive (\"Is Active\" is false or OP Set Rule Active turned it off): its conditions are not evaluated; OP Set Rule Active turns it on".into());
+        }
+        if self.ext.busy(i) {
+            lines.push(format!("  {}", self.ext.busy_note(i)));
+        }
         let mut all = true;
         for c in &conds {
             let held = self.console_cond(c, w);
@@ -496,7 +519,7 @@ impl Script {
         }
         if conds.is_empty() {
             lines.push("  (no conditions)".into());
-        } else if all && !(once && self.fired[i]) {
+        } else if all && !(once && self.fired[i]) && self.ext.is_active(i) && !self.ext.busy(i) {
             lines.push("every condition holds now: the rule runs on the next step".into());
         }
         lines

@@ -102,6 +102,12 @@ impl Ext {
         };
         format!("busy: its sequence waits for {what} before action #{}; the conditions hold again but this firing is skipped", p.next + 1)
     }
+    /// Every counter that has been set, by name (the console's `counters`).
+    pub(in crate::rules) fn counter_list(&self) -> Vec<(&str, f32)> {
+        let mut v: Vec<_> = self.counters.iter().map(|(k, x)| (k.as_str(), *x)).collect();
+        v.sort_by(|a, b| a.0.cmp(b.0));
+        v
+    }
     pub fn counter(&self, name: &str) -> f32 {
         self.counters.get(name).copied().unwrap_or(0.0)
     }

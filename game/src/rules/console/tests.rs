@@ -233,3 +233,39 @@ fn tab_completes_the_command_word() {
     c.key(&Key::Tab);
     assert_eq!(c.line, "fire Open", "only the command word is completed");
 }
+
+fn ext_script() -> Script {
+    let data = json!({
+        "player_start": {"name": "Hero"},
+        "rules": [
+            {"name": "Dormant", "Is Active": false, "conditions": [], "actions": [set_flag("late", true)]},
+            {"name": "Slow", "Run Once": false, "conditions": [], "actions": [set_flag("first", true), {"Type": "OP Wait", "Seconds": 5}, set_flag("second", true)]},
+        ],
+        "environment": {}, "volumes": null, "ships": []
+    });
+    Script::new(&data, Value::Null)
+}
+
+#[test]
+fn counter_sets_an_op_counter_and_counters_lists_it() {
+    let mut sc = ext_script();
+    assert_eq!(parse("counter kills 3", "Hero", false), Ok(Command::Acts { acts: vec![json!({"Type": "OP Set Counter", "Counter Name": "kills", "Value": 3.0})], god: None }));
+    assert!(parse("counter kills many", "Hero", false).is_err());
+    assert!(parse("counter kills 3", "Hero", false).unwrap().cheats() && !parse("counters", "Hero", false).unwrap().cheats());
+    assert_eq!(run(&mut sc, "counters", &mut world(), None).1.lines, ["no counter has been set"]);
+    run(&mut sc, "counter kills 3", &mut world(), None);
+    assert_eq!(sc.ext.counter("kills"), 3.0);
+    assert_eq!(run(&mut sc, "counters", &mut world(), None).1.lines, ["kills = 3"]);
+}
+
+#[test]
+fn why_says_when_a_rule_is_inactive_or_partway_through_its_actions() {
+    let mut sc = ext_script();
+    let (_, o) = run(&mut sc, "why Dormant", &mut world(), None);
+    assert!(o.lines.iter().any(|l| l.contains("inactive")), "{:?}", o.lines);
+    assert!(!o.lines.iter().any(|l| l.contains("runs on the next step")));
+    run(&mut sc, "fire Slow", &mut world(), None);
+    assert!(sc.flag("first") && !sc.flag("second"), "fire stops at the wait like a firing does");
+    let (_, o) = run(&mut sc, "why Slow", &mut world(), None);
+    assert!(o.lines.iter().any(|l| l.contains("busy") && l.contains("OP Wait")), "{:?}", o.lines);
+}
