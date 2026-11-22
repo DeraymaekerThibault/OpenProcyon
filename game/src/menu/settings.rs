@@ -20,6 +20,8 @@ pub enum Setting {
     RestoreDisplay,
     /// Single Player menu toggle: Normal -> Hard -> Easy.
     Difficulty,
+    /// Display screen: whether `~` opens the developer console (not retail; rules/console.rs).
+    Console,
 }
 
 /// Sound and display options, saved as `settings.json` in the user folder. PROVISIONAL: the retail sound channel/detail options
@@ -39,10 +41,25 @@ pub struct Settings {
     pub flags: bool,
     /// 0 Easy, 1 Normal (retail default), 2 Hard: scales shell damage between the player's and computer ships.
     pub difficulty: u8,
+    /// The developer console may be opened with `~` / F12. Off by default.
+    pub console: bool,
 }
 impl Default for Settings {
     fn default() -> Self {
-        Settings { master: 10, music: 10, effects: 10, dialogue: 10, fullscreen: false, vsync: true, aa: 1, detail: 2, background: true, flags: true, difficulty: 1 }
+        Settings {
+            master: 10,
+            music: 10,
+            effects: 10,
+            dialogue: 10,
+            fullscreen: false,
+            vsync: true,
+            aa: 1,
+            detail: 2,
+            background: true,
+            flags: true,
+            difficulty: 1,
+            console: false,
+        }
     }
 }
 pub(super) static CHANNELS: [std::sync::atomic::AtomicU8; 4] =
@@ -57,6 +74,11 @@ pub fn anti_alias() -> u8 {
 /// The vsync option.
 pub fn vsync() -> bool {
     VSYNC.load(std::sync::atomic::Ordering::Relaxed)
+}
+pub(super) static CONSOLE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// The "Developer Console" option (`--console`, `PROCYON_CONSOLE` and debug builds turn the console on without it).
+pub fn console_setting() -> bool {
+    CONSOLE.load(std::sync::atomic::Ordering::Relaxed)
 }
 pub(super) static DIFFICULTY: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(1);
 /// The difficulty option: 0 Easy, 1 Normal, 2 Hard.
@@ -104,13 +126,14 @@ impl Settings {
             background: b("background", d.background),
             flags: b("flags", d.flags),
             difficulty: n("difficulty", d.difficulty, 2),
+            console: b("console", d.console),
         }
     }
     pub(super) fn save(&self) {
         let Some(p) = Self::path() else { return };
         let _ = p.parent().map(std::fs::create_dir_all);
         let v = serde_json::json!({"master": self.master, "music": self.music, "effects": self.effects, "dialogue": self.dialogue,
-            "fullscreen": self.fullscreen, "vsync": self.vsync, "aa": self.aa, "detail": self.detail, "background": self.background, "flags": self.flags, "difficulty": self.difficulty});
+            "fullscreen": self.fullscreen, "vsync": self.vsync, "aa": self.aa, "detail": self.detail, "background": self.background, "flags": self.flags, "difficulty": self.difficulty, "console": self.console});
         if let Err(e) = std::fs::write(p, serde_json::to_string_pretty(&v).unwrap_or_default()) {
             warn!("could not save settings: {e}");
         }
@@ -130,6 +153,7 @@ impl Settings {
             Setting::Background => self.background = !self.background,
             Setting::Flags => self.flags = !self.flags,
             Setting::Difficulty => self.difficulty = (self.difficulty + 1) % 3,
+            Setting::Console => self.console = !self.console,
             Setting::RestoreDisplay => {
                 let d = Self::default();
                 (self.fullscreen, self.vsync, self.aa, self.detail, self.background, self.flags) = (d.fullscreen, d.vsync, d.aa, d.detail, d.background, d.flags);
@@ -148,6 +172,7 @@ impl Settings {
                 (Setting::Detail, "Effect Detail", ["Low", "Medium", "High"][self.detail.min(2) as usize].into()),
                 (Setting::Background, "Render Background", on(self.background)),
                 (Setting::Flags, "Flag Waving", on(self.flags)),
+                (Setting::Console, "Developer Console", on(self.console)),
             ]
         } else {
             vec![
@@ -170,6 +195,7 @@ pub(super) fn apply_settings(settings: Res<Settings>, vtime: Res<Time<Virtual>>,
     }
     DETAIL.store(settings.detail, std::sync::atomic::Ordering::Relaxed);
     DIFFICULTY.store(settings.difficulty, std::sync::atomic::Ordering::Relaxed);
+    CONSOLE.store(settings.console, std::sync::atomic::Ordering::Relaxed);
     AA.store(settings.aa, std::sync::atomic::Ordering::Relaxed);
     VSYNC.store(settings.vsync, std::sync::atomic::Ordering::Relaxed);
     let present = crate::present_mode(crate::profiling(), vtime.relative_speed());

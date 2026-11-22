@@ -5,6 +5,7 @@
 //! docking is docking.rs and camera moves are smoothed guesses. Environment presentation lives in environment.rs.
 pub mod check;
 pub mod cli;
+pub mod console;
 mod eval;
 pub mod skirmish;
 mod systems;

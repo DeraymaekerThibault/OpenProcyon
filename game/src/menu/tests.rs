@@ -734,3 +734,16 @@ fn menu_track_starts_silent_until_the_music_slider_is_applied() {
     let s = q.single(app.world()).expect("one menu track");
     assert_eq!(s.volume, bevy::audio::Volume::Linear(0.0), "not at full level while the saved music volume is still unapplied");
 }
+
+#[test]
+fn the_developer_console_option_is_off_by_default_listed_on_display_and_saved() {
+    let mut s = Settings::default();
+    assert!(!s.console, "off by default");
+    let row = |s: &Settings| s.rows(true).into_iter().find(|r| r.0 == Setting::Console).map(|r| (r.1, r.2));
+    assert_eq!(row(&s), Some(("Developer Console", "Off".to_string())));
+    s.step(Setting::Console);
+    assert!(s.console && row(&s).unwrap().1 == "On");
+    s.step(Setting::RestoreDisplay);
+    assert!(s.console, "restoring the display defaults leaves it alone");
+    assert!(!s.rows(false).iter().any(|r| r.0 == Setting::Console), "not on the Sound screen");
+}

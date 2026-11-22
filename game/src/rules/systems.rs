@@ -1,5 +1,6 @@
 //! ECS side of the rule interpreter: dispatch of `Script` effects, mission AI, mission UI, music and NIS camera.
 mod autopilot;
+mod dev_console;
 mod mission_ai;
 mod presentation;
 
@@ -14,6 +15,7 @@ use bevy::prelude::*;
 use serde_json::Value;
 
 use super::*;
+pub use dev_console::enabled as console_enabled;
 pub use mission_ai::leash;
 use mission_ai::{follow_path, leash_player, mission_ai, path_points};
 pub use presentation::Ui;
@@ -68,6 +70,8 @@ struct Extra<'w, 's> {
     toggles: Option<ResMut<'w, crate::panels::Toggles>>,
     detonate: MessageWriter<'w, crate::combat::Detonate>,
     dragons: Query<'w, 's, &'static mut crate::dragons::Dragon>,
+    /// Cheats used in this battle: its victory points are not recorded (`console::Cheats`).
+    cheats: Option<Res<'w, console::Cheats>>,
     /// `--script dock` skipped the briefing already.
     dock_smoke_skipped: Local<'s, bool>,
 }
@@ -85,7 +89,8 @@ fn capture_input(keys: Res<ButtonInput<KeyCode>>, binds: Res<crate::bindings::Bi
 
 pub fn plugin(app: &mut App) {
     use crate::menu::Screen;
-    app.insert_resource(crate::campaign::CampaignPoints::load())
+    app.add_plugins(dev_console::plugin)
+        .insert_resource(crate::campaign::CampaignPoints::load())
         .init_resource::<RuleInput>()
         .add_systems(
             FixedUpdate,
@@ -169,7 +174,7 @@ fn update(
     let mission = &mut *mission;
     let input = std::mem::take(&mut *input);
     // Tutorials and mods' custom missions run the same interpreter but do not count toward the retail campaign.
-    if crate::campaign::is_campaign(&mission.id) {
+    if crate::campaign::is_campaign(&mission.id) && !extra.cheats.as_ref().is_some_and(|c| c.used) {
         extra.campaign_points.record(&mission.id, mission.script.score);
     }
     let opening = mission.opening.is_some();

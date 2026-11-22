@@ -45,7 +45,7 @@ macro_rules! scripts {
 
 scripts! {
     Animals => "animals", Asteroid => "asteroid", Board => "board", BriefingSkip => "briefing-skip",
-    Cloak => "cloak", Course => "course", CurrentM3 => "current-m3", Damage => "damage", Defeat => "defeat",
+    Cloak => "cloak", Console => "console", Course => "course", CurrentM3 => "current-m3", Damage => "damage", Defeat => "defeat",
     Dock => "dock", DockClick => "dock-click", DockMenu => "dock-menu",
     Fleet => "fleet", FleetPrimary => "fleet-primary", FleetCrew => "fleet-crew", FleetArms => "fleet-arms", FleetProfile => "fleet-profile", FleetProfileCrew => "fleet-profile-crew", FleetProfileArms => "fleet-profile-arms", FleetShips => "fleet-ships",
     Fire => "fire", FxTest => "fxtest", HuntM3 => "hunt-m3", Impacts => "impacts",
@@ -65,7 +65,35 @@ pub fn plugin(app: &mut App) {
     trace::plugin(app);
     app.add_systems(PreUpdate, fleet::fleet_smoke.after(bevy::ui::UiSystems::Focus).before(crate::panels::hud_input))
         .add_systems(PreUpdate, lifeboats::smoke.after(bevy::ui::UiSystems::Focus))
-        .add_systems(Update, (shells::shells, animals, stormflash, allstop, fire, impacts));
+        .add_systems(Update, (shells::shells, animals, stormflash, allstop, fire, impacts, console));
+}
+
+/// `--script console --mission 1`: opens the developer console at frame 30 and submits a few lines (`god`, `tasks`, `flags`, `why`),
+/// then checks at frame 60 that `god` reached the player's ship and that the session is marked as cheated. Shot frames after 60
+/// show the open console.
+fn console(
+    cfg: Res<Config>,
+    mission: Option<Res<Mission>>,
+    mut console: ResMut<crate::rules::console::Console>,
+    cheats: Res<crate::rules::console::Cheats>,
+    player: Query<&crate::campaign::MissionShip, With<crate::PlayerShip>>,
+    mut submitted: Local<bool>,
+) {
+    if cfg.script != Some(Script::Console) || mission.is_none() || cfg.frame < 30 {
+        return;
+    }
+    if !*submitted {
+        *submitted = true;
+        console.open = true;
+        for line in ["god", "tasks", "why Player Reaches Tender", "schema Set Flag Action", "kill"] {
+            console.submit(line);
+        }
+    }
+    if cfg.frame == 60 {
+        assert!(cheats.used && cheats.god, "the console's god command was not run");
+        assert!(player.iter().all(|m| m.invuln >= 1.0), "god did not reach the player's ship");
+        info!("console smoke: {} lines of output", console.log.len());
+    }
 }
 
 /// `--script impacts`: the same shot effect against all three materials, spaced around the player for a screenshot.
