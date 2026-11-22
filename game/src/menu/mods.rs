@@ -109,6 +109,8 @@ pub struct ModList {
     /// The category pull-down is open.
     pub filter_open: bool,
     pub bake: SkyBake,
+    /// What the last switch did besides the mod itself (requirements switched on, mods that still need it), shown under the list.
+    pub notice: String,
 }
 
 /// Rows of the list the view draws; the view, the wheel and the scrollbar drag share it.
@@ -119,7 +121,7 @@ impl ModList {
         Self::from(crate::modding::installed(crate::bundled_mods_dir().as_deref()))
     }
     pub fn from(mods: Vec<crate::modding::Installed>) -> Self {
-        ModList { mods, sort: (ModCol::Name, true), category: None, scroll: 0, picked: None, filter_open: false, bake: SkyBake::Idle }
+        ModList { mods, sort: (ModCol::Name, true), category: None, scroll: 0, picked: None, filter_open: false, bake: SkyBake::Idle, notice: String::new() }
     }
     /// Whether mod `i`'s panel offers to bake the HD skies.
     pub fn offers_bake(&self, i: usize) -> bool {
@@ -189,13 +191,60 @@ impl ModList {
             None => self.bake = SkyBake::Failed("The baker finished but no HD skies mod is installed.".into()),
         }
     }
-    /// Flips mod `i` (an index into `mods`) and saves `mods.json`.
+    /// Flips mod `i` (an index into `mods`) and saves `mods.json`. Switching a mod on also switches on the installed mods it
+    /// `requires` (and theirs); switching one off says which mods that are on still need it. A requirement that is not installed
+    /// is only reported (`problems`).
     pub fn toggle(&mut self, i: usize) {
-        let Some(m) = self.mods.get_mut(i) else { return };
-        m.enabled = !m.enabled;
+        self.switch(i);
         if let Some(dir) = crate::campaign::user_dir() {
             crate::modding::save_enabled_in(&dir, &self.mods);
         }
+    }
+    /// `toggle` without the save.
+    fn switch(&mut self, i: usize) {
+        self.notice.clear();
+        let Some(m) = self.mods.get_mut(i) else { return };
+        m.enabled = !m.enabled;
+        if self.mods[i].enabled {
+            let also = self.enable_requirements(i);
+            if !also.is_empty() {
+                self.notice = format!("Also switched on, because {} needs them: {}.", self.mods[i].name, also.join(", "));
+            }
+        } else {
+            let id = &self.mods[i].id;
+            let users: Vec<&str> = self.mods.iter().filter(|o| o.enabled && o.requires.contains(id)).map(|o| o.name.as_str()).collect();
+            if !users.is_empty() {
+                self.notice = format!("Still needed by {}: it will warn at the next start.", users.join(", "));
+            }
+        }
+    }
+    /// Switches on the installed mods that mod `i` requires, and what those require; the names of the ones that were off.
+    fn enable_requirements(&mut self, i: usize) -> Vec<String> {
+        let (mut also, mut todo) = (vec![], self.mods[i].requires.clone());
+        while let Some(id) = todo.pop() {
+            if let Some(m) = self.mods.iter_mut().find(|m| m.id == id && !m.enabled) {
+                m.enabled = true;
+                also.push(m.name.clone());
+                todo.extend(m.requires.clone());
+            }
+        }
+        also
+    }
+    /// What mod `i` needs that the list does not give it: a line per requirement that is not installed or is switched off.
+    pub fn problems(&self, i: usize) -> Vec<String> {
+        let Some(m) = self.mods.get(i) else { return vec![] };
+        m.requires
+            .iter()
+            .filter_map(|needs| match self.mods.iter().find(|o| o.id == *needs) {
+                Some(o) if o.enabled => None,
+                Some(o) => Some(format!("needs {}, which is switched off", o.name)),
+                None => Some(format!("needs {needs}, which is not installed")),
+            })
+            .collect()
+    }
+    /// Whether mod `i` is on with a requirement unmet (the list marks it).
+    pub fn needs_attention(&self, i: usize) -> bool {
+        self.mods.get(i).is_some_and(|m| m.enabled) && !self.problems(i).is_empty()
     }
     /// Sorting by the same column again reverses it.
     pub fn sort_by(&mut self, col: ModCol) {
@@ -247,6 +296,7 @@ mod tests {
             dir: Default::default(),
             enabled,
             default: false,
+            requires: vec![],
         }
     }
     #[test]
@@ -262,6 +312,25 @@ mod tests {
         assert_eq!(l.rows().len(), 2);
         l.set_filter(0);
         assert_eq!(l.category, None, "0 is All");
+    }
+    fn needing(name: &str, enabled: bool, requires: &[&str]) -> crate::modding::Installed {
+        crate::modding::Installed { requires: requires.iter().map(|r| r.to_string()).collect(), ..m(name, "Ships", enabled) }
+    }
+    #[test]
+    fn switching_a_mod_on_switches_its_installed_requirements_on() {
+        let mut l = ModList::from(vec![needing("shakedown", false, &["hunter", "backport", "absent"]), needing("hunter", false, &["first_rate"]), needing("first_rate", false, &[]), needing("backport", true, &[])]);
+        assert_eq!(l.problems(0).len(), 2, "hunter is off and absent is not installed; backport is on");
+        assert!(!l.needs_attention(0), "a mod that is off is not marked");
+        l.switch(0);
+        assert_eq!(l.mods.iter().map(|m| m.enabled).collect::<Vec<_>>(), [true, true, true, true], "hunter and, through it, first_rate");
+        assert!(l.notice.contains("hunter") && l.notice.contains("first_rate") && !l.notice.contains("backport"), "{}", l.notice);
+        assert_eq!(l.problems(0), ["needs absent, which is not installed"], "a requirement that is not installed stays a problem");
+        assert!(l.needs_attention(0));
+        l.switch(2);
+        assert!(!l.mods[2].enabled && l.notice.contains("hunter"), "switching off a mod that is still needed says who needs it: {}", l.notice);
+        l.switch(2);
+        l.switch(0);
+        assert!(l.notice.is_empty(), "the notice is for the last switch only");
     }
     #[test]
     fn pick_survives_sort_and_filter() {

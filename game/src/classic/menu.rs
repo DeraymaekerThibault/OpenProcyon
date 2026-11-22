@@ -556,13 +556,24 @@ fn mods_page_view(ctx: &Ctx, c: &mut ChildSpawnerCommands, mods: &crate::menu::M
         let fill = BackgroundColor(if mods.picked == Some(i) { picked() } else { Color::NONE });
         c.spawn((ctx.node(52.0, y, 414.0, h), Interaction::None, Action::PickMod(i), fill)).with_children(|c| {
             c.spawn((ctx.node(12.0, 2.5, 14.0, 14.0), Interaction::None, Action::ToggleMod(i))).with_children(|c| check_box(ctx, c, [0.0, 0.0, 14.0, 14.0], m.enabled));
-            ctx.text(c, BODY_FONT, &m.name, 42.0, 196.0, h / 2.0, false, Color::WHITE);
+            // A mod that is on with a requirement missing or off is marked: its panel says which.
+            let name = if mods.needs_attention(i) { format!("! {}", m.name) } else { m.name.clone() };
+            ctx.text(c, BODY_FONT, &name, 42.0, 196.0, h / 2.0, false, Color::WHITE);
             ctx.text(c, BODY_FONT, &m.category, 242.0, 100.0, h / 2.0, false, Color::WHITE);
             ctx.text(c, BODY_FONT, &m.version, 342.0, 70.0, h / 2.0, false, Color::WHITE);
         });
     }
     scrollbar(ctx, c, [472.0, 128.0, 488.0, 478.0], ScrollKind::Mods, rows.len(), MOD_ROWS, mods.scroll);
-    let note = if mods.mods.is_empty() { String::new() } else { format!("{} of {} shown. Changes apply the next time the game starts.", rows.len(), mods.mods.len()) };
+    let attention = (0..mods.mods.len()).filter(|&i| mods.needs_attention(i)).count();
+    let note = if mods.mods.is_empty() {
+        String::new()
+    } else if !mods.notice.is_empty() {
+        mods.notice.clone()
+    } else if attention > 0 {
+        format!("{attention} mod(s) marked ! need a mod that is missing or off. Changes apply the next time the game starts.")
+    } else {
+        format!("{} of {} shown. Changes apply the next time the game starts.", rows.len(), mods.mods.len())
+    };
     ctx.text(c, "Univers10", &note, 48.0, 422.0, 490.0, false, Color::WHITE);
     // Right: the category filter and the picked mod.
     let filter = format!("Category: {}", mods.category.as_deref().unwrap_or("All"));
@@ -579,7 +590,9 @@ fn mods_page_view(ctx: &Ctx, c: &mut ChildSpawnerCommands, mods: &crate::menu::M
                 ("Source", (if bundled { "bundled" } else { "installed" }).into()),
                 ("Default", (if m.default { "on" } else { "off" }).into()),
                 ("Folder", folder),
+                ("Needs", if m.requires.is_empty() { "nothing".to_string() } else { m.requires.join(", ") }),
             ];
+            let problems = mods.problems(i);
             for (k, (label, value)) in lines.iter().enumerate() {
                 let cy = 202.0 + k as f32 * 16.0;
                 ctx.text(c, "Univers10", label, 506.0, 60.0, cy, false, Color::WHITE);
@@ -590,7 +603,7 @@ fn mods_page_view(ctx: &Ctx, c: &mut ChildSpawnerCommands, mods: &crate::menu::M
             if mods.offers_bake(i) {
                 // The HD skies are baked here from the player's own copy (`menu::SkyBake`): a status line and a second button.
                 use crate::menu::SkyBake;
-                wrapped(ctx, c, "Univers10", &m.description, [506.0, 290.0, 736.0, 380.0]);
+                wrapped(ctx, c, "Univers10", &m.description, [506.0, 306.0, 736.0, 380.0]);
                 let status = match &mods.bake {
                     SkyBake::Idle => "HD skies are made once on this computer from your own game files. It takes a few minutes.".to_string(),
                     SkyBake::Running { percent: Some(p), .. } => format!("Baking the HD skies: {p}%"),
@@ -598,12 +611,16 @@ fn mods_page_view(ctx: &Ctx, c: &mut ChildSpawnerCommands, mods: &crate::menu::M
                     SkyBake::Done => "HD skies baked and switched on. They show the next time the game starts.".to_string(),
                     SkyBake::Failed(why) => format!("The bake failed: {}", why.lines().next().unwrap_or("")),
                 };
+                let status = if problems.is_empty() { status } else { format!("Warning: {}. {status}", problems.join("; ")) };
                 wrapped(ctx, c, "Univers10", &status, [506.0, 386.0, 736.0, 434.0]);
                 let bake = if matches!(mods.bake, SkyBake::Running { .. }) { "Stop" } else { "Bake HD skies" };
                 ctx.text_button(c, [498.0, 440.0, 618.0, 468.0], label, "BlackChancery16", Action::ToggleMod(i));
                 ctx.text_button(c, [624.0, 440.0, 744.0, 468.0], bake, "BlackChancery16", Action::BakeSkies);
             } else {
-                wrapped(ctx, c, "Univers10", &m.description, [506.0, 290.0, 736.0, 430.0]);
+                wrapped(ctx, c, "Univers10", &m.description, [506.0, 306.0, 736.0, if problems.is_empty() { 430.0 } else { 390.0 }]);
+                if !problems.is_empty() {
+                    wrapped(ctx, c, "Univers10", &format!("Warning: {}.", problems.join("; ")), [506.0, 392.0, 736.0, 436.0]);
+                }
                 ctx.text_button(c, [546.0, 440.0, 696.0, 468.0], label, "BlackChancery16", Action::ToggleMod(i));
             }
         }

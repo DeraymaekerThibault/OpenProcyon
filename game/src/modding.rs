@@ -63,6 +63,107 @@ pub struct Installed {
     pub enabled: bool,
     /// A bundled mod whose `mod.json` has `"default": true`: on until the player switches it off.
     pub default: bool,
+    /// `mod.json` `requires`: ids of the mods this one needs (it is built on their files). Not enforced: a missing or switched-off
+    /// one is a loud warning in the log and on the Mods screen (`requirement_problems`), and switching the mod on there switches
+    /// the installed ones on too.
+    pub requires: Vec<String>,
+}
+
+/// `mod.json` `requires`: a list of mod ids (a single id as a string is accepted too); blanks and repeats are dropped.
+pub fn requires_of(meta: &Value) -> Vec<String> {
+    let mut out: Vec<String> = match &meta["requires"] {
+        Value::String(one) => vec![one.clone()],
+        Value::Array(list) => list.iter().filter_map(|v| v.as_str().map(String::from)).collect(),
+        _ => vec![],
+    };
+    out.iter_mut().for_each(|id| *id = id.trim().to_string());
+    out.retain(|id| !id.is_empty());
+    let mut seen = std::collections::HashSet::new();
+    out.retain(|id| seen.insert(id.clone()));
+    out
+}
+
+/// Why a requirement of a mod that is on is not met.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Unmet {
+    /// No mod of that id is installed.
+    Missing,
+    /// It is installed but not switched on.
+    Off,
+}
+
+/// A mod that is on whose `requires` names a mod that is not.
+#[derive(Clone, PartialEq, Debug)]
+pub struct Problem {
+    /// The mod that asks (its name).
+    pub name: String,
+    pub needs: String,
+    pub why: Unmet,
+}
+
+impl Problem {
+    pub fn message(&self) -> String {
+        match self.why {
+            Unmet::Missing => format!("mod '{}' needs the mod '{}', which is not installed: it will not look or play as intended", self.name, self.needs),
+            Unmet::Off => format!("mod '{}' needs the mod '{}', which is installed but switched off: switch it on in the Mods screen", self.name, self.needs),
+        }
+    }
+}
+
+/// The unmet requirements of the mods in `list` that are on. A requirement counts when a mod of that id in the list is on.
+pub fn requirement_problems(list: &[Installed]) -> Vec<Problem> {
+    let mut out = vec![];
+    for m in list.iter().filter(|m| m.enabled) {
+        for needs in &m.requires {
+            match list.iter().find(|o| o.id == *needs) {
+                Some(o) if o.enabled => {}
+                Some(_) => out.push(Problem { name: m.name.clone(), needs: needs.clone(), why: Unmet::Off }),
+                None => out.push(Problem { name: m.name.clone(), needs: needs.clone(), why: Unmet::Missing }),
+            }
+        }
+    }
+    out
+}
+
+/// What this launch overlays against `installed` (every mod folder found): a `--mod` folder counts as on, with the id of its
+/// `mod.json` (the folder name without one), and asks for what its `requires` names. Logs one warning line per unmet requirement.
+pub fn warn_unmet_requirements(active: &[PathBuf], installed: &[Installed]) {
+    let id_of = |dir: &Path| read(&dir.join("mod.json")).and_then(|m| m["id"].as_str().map(String::from)).filter(|i| !i.is_empty()).unwrap_or_else(|| dir.file_name().map_or_else(String::new, |f| f.to_string_lossy().into_owned()));
+    let mut list: Vec<Installed> = vec![];
+    for dir in active {
+        let meta = read(&dir.join("mod.json")).unwrap_or_default();
+        let id = id_of(dir);
+        let name = meta["name"].as_str().filter(|n| !n.is_empty()).map_or_else(|| id.clone(), String::from);
+        list.push(Installed { id, name, version: String::new(), description: String::new(), category: String::new(), dir: dir.clone(), enabled: true, default: false, requires: requires_of(&meta) });
+    }
+    // The ones that are installed but off (or not at all) answer the question "why".
+    list.extend(installed.iter().filter(|m| !list.iter().any(|a| a.id == m.id)).map(|m| Installed { enabled: false, ..m.clone() }));
+    for p in requirement_problems(&list) {
+        eprintln!("WARNING: {}", p.message());
+    }
+}
+
+/// Puts every mod that is on after the mods it requires that are also on (the order is the overlay order: a later mod wins, and a mod
+/// built on another's files must come after it). Otherwise the order is kept; a cycle is left as it is.
+fn requirements_first(list: &mut Vec<Installed>) {
+    fn visit(i: usize, list: &[Installed], state: &mut [u8], out: &mut Vec<usize>) {
+        if state[i] != 0 {
+            return;
+        }
+        state[i] = 1;
+        if list[i].enabled {
+            for needs in &list[i].requires {
+                if let Some(j) = list.iter().position(|o| o.enabled && o.id == *needs) {
+                    visit(j, list, state, out);
+                }
+            }
+        }
+        out.push(i);
+    }
+    let (mut state, mut order) = (vec![0u8; list.len()], vec![]);
+    (0..list.len()).for_each(|i| visit(i, list, &mut state, &mut order));
+    let mut old: Vec<Option<Installed>> = std::mem::take(list).into_iter().map(Some).collect();
+    list.extend(order.into_iter().filter_map(|i| old[i].take()));
 }
 
 /// Mods are installed by unzipping into this folder; `mods.json` beside it (`{"enabled": ["id", ...], "disabled": ["id", ...]}`, load order,
@@ -92,10 +193,11 @@ pub fn installed_in(user: &Path, bundled: Option<&Path>) -> Vec<Installed> {
             let category = Some(text("category")).filter(|s| !s.is_empty()).unwrap_or_else(|| "Other".into());
             let default = is_bundled && meta["default"].as_bool() == Some(true);
             let enabled = on.contains(&id) || (default && !off.contains(&id));
-            found.push(Installed { enabled, default, id, name, version: text("version"), description: text("description"), category, dir: e.path() });
+            found.push(Installed { enabled, default, id, name, version: text("version"), description: text("description"), category, dir: e.path(), requires: requires_of(&meta) });
         }
     }
     found.sort_by_key(|m| (on.iter().position(|i| *i == m.id).unwrap_or(usize::MAX), m.id.clone()));
+    requirements_first(&mut found);
     found
 }
 
@@ -105,6 +207,8 @@ pub fn installed(bundled: Option<&Path>) -> Vec<Installed> {
 
 /// Writes `mods.json` from the list's enabled mods, in list order, and the default mods switched off.
 pub fn save_enabled_in(dir: &Path, mods: &[Installed]) {
+    let mut mods = mods.to_vec();
+    requirements_first(&mut mods); // a mod is saved after the mods it requires, which is the order it loads in
     let ids = |keep: fn(&Installed) -> bool| -> Vec<&str> { mods.iter().filter(|m| keep(m)).map(|m| m.id.as_str()).collect() };
     let (on, off) = (ids(|m| m.enabled), ids(|m| m.default && !m.enabled));
     let _ = std::fs::create_dir_all(dir);
@@ -308,6 +412,58 @@ mod tests {
         assert_eq!(on(&installed_in(&dir, Some(&bundled))), ["plain", "speed"], "an older mods.json without `disabled` keeps the default on");
         std::fs::remove_dir_all(dir).unwrap();
     }
+    #[test]
+    fn requires_reads_a_list_or_one_id() {
+        let ids = |v: Value| requires_of(&v);
+        assert_eq!(ids(serde_json::json!({"requires": ["a", " b ", "", "a", 3]})), ["a", "b"], "blanks, repeats and non-strings are dropped");
+        assert_eq!(ids(serde_json::json!({"requires": "solo"})), ["solo"]);
+        assert!(ids(serde_json::json!({})).is_empty());
+    }
+
+    fn mod_with(id: &str, enabled: bool, requires: &[&str]) -> Installed {
+        Installed {
+            id: id.into(),
+            name: id.to_uppercase(),
+            version: String::new(),
+            description: String::new(),
+            category: "Other".into(),
+            dir: PathBuf::new(),
+            enabled,
+            default: false,
+            requires: requires.iter().map(|r| r.to_string()).collect(),
+        }
+    }
+
+    #[test]
+    fn an_enabled_mod_with_a_missing_or_switched_off_requirement_is_a_problem() {
+        let list = [mod_with("shakedown", true, &["first_rate", "backport", "hunter"]), mod_with("first_rate", true, &[]), mod_with("backport", false, &[])];
+        let p = requirement_problems(&list);
+        assert_eq!(p.iter().map(|p| (p.needs.as_str(), p.why)).collect::<Vec<_>>(), [("backport", Unmet::Off), ("hunter", Unmet::Missing)]);
+        assert!(p[0].message().contains("switched off") && p[0].message().contains("SHAKEDOWN"));
+        assert!(p[1].message().contains("not installed"));
+        // A mod that is off asks for nothing.
+        assert!(requirement_problems(&[mod_with("a", false, &["gone"])]).is_empty());
+    }
+
+    #[test]
+    fn requires_comes_from_mod_json_and_a_mod_loads_after_its_requirements() {
+        let dir = std::env::temp_dir().join(format!("procyon-mods-requires-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        for (f, meta) in [("a-top", r#"{"requires": ["z-base"]}"#), ("z-base", "{}"), ("m-mid", r#"{"requires": ["z-base", "m-mid", "ghost"]}"#)] {
+            std::fs::create_dir_all(dir.join("mods").join(f)).unwrap();
+            std::fs::write(dir.join("mods").join(f).join("mod.json"), meta).unwrap();
+        }
+        // File order puts the dependents first; the load order puts z-base before both.
+        std::fs::write(dir.join("mods.json"), r#"{"enabled": ["a-top", "m-mid", "z-base"]}"#).unwrap();
+        let list = installed_in(&dir, None);
+        assert_eq!(list.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(), ["z-base", "a-top", "m-mid"]);
+        assert_eq!(list[1].requires, ["z-base"]);
+        save_enabled_in(&dir, &list);
+        let saved: Value = read(&dir.join("mods.json")).unwrap();
+        assert_eq!(saved["enabled"], serde_json::json!(["z-base", "a-top", "m-mid"]));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     #[test]
     fn collision_shapes_merge_by_type() {
         let dir = std::env::temp_dir().join(format!("procyon-mod-collision-{}", std::process::id()));

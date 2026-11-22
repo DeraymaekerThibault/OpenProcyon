@@ -176,8 +176,9 @@ pub fn run(view: fn(&mut App), setup_view: fn(&mut App)) {
     if player && let Some(dir) = base.parent() {
         setup::report_crashes(dir.to_path_buf());
     }
-    let installed = modding::installed(bundled_mods_dir().as_deref()).into_iter().filter(|m| m.enabled).map(|m| m.dir);
-    modding::set_active(installed.chain(mods).collect());
+    let found = modding::installed(bundled_mods_dir().as_deref());
+    modding::set_active(found.iter().filter(|m| m.enabled).map(|m| m.dir.clone()).chain(mods).collect());
+    modding::warn_unmet_requirements(modding::active(), &found);
     let layers: Vec<PathBuf> = std::iter::once(content_dir()).chain(modding::active().iter().cloned()).collect();
     let _ = ASSETS.set(modding::overlay(&base, &layers));
     if let Some(code) = rules::cli::apply(&args) {

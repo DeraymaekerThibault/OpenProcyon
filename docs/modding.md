@@ -52,7 +52,7 @@ see the result and ["Troubleshooting"](#troubleshooting) what to check when noth
   `retail:<texture>` material (see "A ship from a model"). What you ship must be your own work or under a licence that allows
   redistribution; put a `LICENSE` file in the folder.
 - **Say which engine you need.** The engine is pre-1.0: file layouts can still change and a mod may need small fixes after an
-  update. Give the OpenProcyon version (or later) you tested with. `game_version` and `requires` in `mod.json` are not read yet.
+  update. Give the OpenProcyon version (or later) you tested with. `game_version` in `mod.json` is not read yet. If your mod is built on other mods, list them in `requires` (below).
 - **You support your mod.** The project maintains the engine and the examples in `mods/`, nothing else. Questions and bugs
   about a mod go to its author. Report a problem to OpenProcyon only when it also happens with no third-party mods switched on,
   or when a few files of your own show it. This guide is the help there is for making mods: there is no promise of an answer to
@@ -91,7 +91,8 @@ prints `mod <name> <version> <description>` to the console when it lays each mod
 | `category` | the Mods screen's filter (default "Other") |
 | `missions` | the order of a mod campaign's missions (see the custom-mission row below) |
 | `default` | bundled mods only: on until switched off; ignored in user mods |
-| `game_version`, `requires` | not read yet (nothing in the engine looks at them; say in your README which version you tested) |
+| `requires` | ids (the other mods' `id`) of the mods this one needs, as a list: `"requires": ["first_rate", "hunter"]`. Optional and never blocks the launch: when this mod is on and a required mod is not installed or not switched on, the game prints a `WARNING: mod '<name>' needs the mod '<id>', ...` line to the console at start-up (one per missing requirement; a `--mod` folder counts as on, with the `id` of its `mod.json` or its folder name), and the Mods screen marks the mod with `!` and says what it needs in its panel. Switching a mod on in the Mods screen also switches on the installed mods it requires (and theirs), and says so; switching off a mod that another mod on still needs says which. A mod always loads after the mods it requires (`mods.json` order is adjusted when it is saved), so its files win over theirs. A mod that you ship in a pack with the mods it needs should still say so in its README |
+| `game_version` | not read yet (nothing in the engine looks at it; say in your README which version you tested) |
 
 ## Testing a mod
 
