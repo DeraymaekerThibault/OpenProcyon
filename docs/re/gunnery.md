@@ -453,9 +453,11 @@ within 10 x v units that the ship's hull box would meet on a straight run of up 
 already overlaps counts). Take the nearest by surface distance; use it only if that distance is within the captain's scan range.
 Then, unless a friendly ship is in the line of fire to it or scenery blocks it (the rock itself excepted), **every gun bank fires at
 the rock** (normal range and arc tests per gun, any gun class) and the captain is marked busy for this think: the attack routines
-skip their own firing then. The captain's target is not changed. No difficulty or stance term. Remake: no computer fire at rocks
-(only the player's selected rock). Build: medium, a new system in `combat/gunnery.rs` using the existing course-sweep of
-`collision/avoid.rs`; the busy flag must reach the attack routines' firing step.
+skip their own firing then. The captain's target is not changed. No difficulty or stance term. Remake (`combat/gunnery.rs`, `collision::avoid::rock_in_the_way`):
+the look runs every 1.0 s for every ship that is not the player's command ship (the captain's scan range is its sight times its crew
+factor; ships on hold fire do not look); the pick stands until the next look and while it does every gun except point-defence and
+mine guns aims at the rock and fires once, and no gun fires at the ship's target. Guns that cannot bear at the rock wait for it,
+until the next look. PROVISIONAL: the reach test uses the hull's bounding sphere for the surface distance.
 
 ### Counter-fire at torpedo launch points ("hunt cloaked subs")
 Every think of a computer-steered ship that has at least one lob bank: take torpedoes (not mines) whose launcher passes the **relation

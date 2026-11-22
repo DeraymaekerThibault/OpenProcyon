@@ -3,7 +3,7 @@
 //! in the way caps its speed by the gap, sends it to a detour point on the smallest clear turn, and after about 3 s of the same
 //! obstacle the lower-priority ship stops for 4 s; a ship wedged against an obstacle turns in place (`Avoid::stuck`). PROVISIONAL
 //! (not ported): mines, torpedoes, dragons, black holes and nebulae as obstacles, the scanner range limit, the avoider's exclusion list.
-use super::{Obstacle, box_body, contact, hits};
+use super::{BoxBody, Obstacle, box_body, contact, hits};
 use bevy::prelude::*;
 use std::f32::consts::PI;
 
@@ -150,11 +150,7 @@ fn dir(heading: f32) -> Vec3 {
 /// the time of contact; the nearest by sphere gap when several are met at that sample.
 fn sweep<'a>(me: &Me, heading: f32, secs: f32, others: &[&'a Other<'a>]) -> Option<(f32, &'a Other<'a>)> {
     let v = me.speed.abs();
-    let length = (me.bounds[1].z - me.bounds[0].z).max(1.0);
-    // ponytail: one step of `secs` when the ship covers less than a hull length (the original's rule there is unclear).
-    let step = if v * secs < length { secs } else { length / v };
-    let mut t = 0.0;
-    while t <= secs + 1e-4 {
+    for t in sample_times(me, secs) {
         let tf = Transform::from_translation(me.pos + dir(heading) * v * t).with_rotation(Quat::from_rotation_y(heading));
         let body = box_body(me.bounds, &tf);
         let gap = |o: &Other| (o.centre - me.pos).length() - o.radius;
@@ -171,9 +167,35 @@ fn sweep<'a>(me: &Me, heading: f32, secs: f32, others: &[&'a Other<'a>]) -> Opti
         if let Some(o) = hit {
             return Some((t, *o));
         }
-        t += step;
     }
     None
+}
+
+/// The times of a straight run of `secs` at which the hull's box is tested: once per hull length of travel.
+fn sample_times(me: &Me, secs: f32) -> impl Iterator<Item = f32> {
+    let v = me.speed.abs();
+    let length = (me.bounds[1].z - me.bounds[0].z).max(1.0);
+    // ponytail: one step of `secs` when the ship covers less than a hull length (the original's rule there is unclear).
+    let step = if v * secs < length { secs } else { length / v };
+    (0..).map(move |k| k as f32 * step).take_while(move |t| *t <= secs + 1e-4)
+}
+
+/// The rock a computer captain shoots at (docs/re/gunnery.md "Computer captains shoot rocks on their course"): among the rocks within
+/// 10 x speed of the hull (surface distance; at rest only one it overlaps) that the box meets on a straight run of `LOOK` seconds at
+/// the present velocity, the nearest, if it is within `scan`. `ship` is the hull's bounding sphere.
+pub fn rock_in_the_way<'a, K: Copy>(me: &Me, ship: (Vec3, f32), scan: f32, rocks: impl IntoIterator<Item = (K, &'a Obstacle)>) -> Option<K> {
+    let reach = LOOK * me.speed.abs();
+    let times: Vec<f32> = sample_times(me, LOOK).collect();
+    let bodies: Vec<BoxBody> = times
+        .iter()
+        .map(|t| box_body(me.bounds, &Transform::from_translation(me.pos + dir(me.heading) * me.speed.abs() * t).with_rotation(Quat::from_rotation_y(me.heading))))
+        .collect();
+    rocks
+        .into_iter()
+        .map(|(k, o)| (k, o, crate::lifeboats::surface_distance(ship, o.sphere())))
+        .filter(|(_, o, d)| *d <= reach.min(scan) && bodies.iter().any(|b| hits(b, o)))
+        .min_by(|a, b| a.2.total_cmp(&b.2))
+        .map(|a| a.0)
 }
 
 /// The smallest turn of the current heading, in steps of the hull's angular width up to half a circle, after which a full sweep is

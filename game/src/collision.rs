@@ -824,7 +824,7 @@ pub fn sail(
     }
 }
 
-mod avoid;
+pub(crate) mod avoid;
 #[cfg(test)]
 mod tests;
 pub mod tree;

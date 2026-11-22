@@ -23,6 +23,8 @@ pub(super) struct GunState {
     pub(super) beam: super::beam::Phase,
     /// The player's panic order on this gun (`FireRequest`).
     pub(super) request: FireRequest,
+    /// A computer captain's rock-fire request (`RockWatch`): the gun fires once at the rock, then is spent.
+    pub(super) rock_ask: bool,
 }
 
 /// Seconds a pending fire request on a direct-fire gun survives without a shot, and on a lobbing gun (docs/re/gunnery.md#fire-request-time-out).
@@ -62,6 +64,21 @@ impl FireRequest {
     /// The order is gone: the next one asks again.
     pub(super) fn clear(&mut self) {
         *self = Self::default();
+    }
+}
+
+/// Seconds between a computer captain's looks for a rock on its course (docs/re/gunnery.md "Computer captains shoot rocks on their course").
+const ROCK_PERIOD: f32 = 1.0;
+
+/// A computer ship's rock-fire clock and its pick: `rock` is set from one look until the next, and while it is the ship's guns
+/// fire at it and at nothing else.
+pub(super) struct RockWatch {
+    since: f32,
+    rock: Option<AimTarget>,
+}
+impl Default for RockWatch {
+    fn default() -> Self {
+        RockWatch { since: ROCK_PERIOD, rock: None }
     }
 }
 /// Marks the entities of a gun's visual hierarchy (root, base, barrel, muzzle points).
@@ -134,6 +151,7 @@ pub(super) fn spawn_gun(commands: &mut Commands, assets: &AssetServer, lib: &Lib
         dev: 0.0,
         beam: Default::default(),
         request: Default::default(),
+        rock_ask: false,
     }
 }
 
@@ -315,10 +333,11 @@ pub(super) fn fire(
         Option<&crate::cloak::Cloak>,
         Option<&crate::crew_arms::CrewPosts>,
         Option<&crate::boarding::Boardable>,
+        Option<&crate::environment::ScanFactor>,
     )>,
     others: Query<(Entity, &Transform, &Ship, &Health, Has<PlayerShip>, Option<&crate::campaign::MissionShip>, Option<&crate::cloak::Cloak>)>,
     mut parts: Query<&mut Transform, (With<GunPart>, Without<Ship>)>,
-    (globals, threats, points, sensors, captains, mut mine_laying, mut ground, scenery): (
+    (globals, threats, points, sensors, captains, mut mine_laying, mut ground, scenery, mut rock_watch): (
         Query<&GlobalTransform, With<GunPart>>,
         Query<(Entity, &Transform, &Shell), (Without<GunPart>, Without<Ship>)>,
         Option<Res<crate::campaign::CampaignPoints>>,
@@ -326,7 +345,8 @@ pub(super) fn fire(
         Option<Res<crate::ship::CaptainTargets>>,
         Local<bevy::platform::collections::HashMap<Entity, MineLaying>>,
         Local<bevy::platform::collections::HashMap<Entity, GroundAim>>,
-        Query<(Entity, &crate::collision::Obstacle, Option<&Visibility>, Has<Asteroid>), (Without<Ship>, Without<GunPart>)>,
+        Query<(Entity, &crate::collision::Obstacle, Option<&Visibility>, Option<&Asteroid>), (Without<Ship>, Without<GunPart>)>,
+        Local<bevy::platform::collections::HashMap<Entity, RockWatch>>,
     ),
 ) {
     // The human fleet's gunners in a campaign: the roster's best gunner (crew_arms.rs); everyone else the plain-AI factor.
@@ -381,7 +401,7 @@ pub(super) fn fire(
         .collect();
     let mut seen: Vec<Contact> = Vec::with_capacity(contacts.len()); // reused: refilled per shooter
     // In entity order: every shooter draws from the shared `Rng`, and the query's own order can differ from launch to launch.
-    for (me, tf, ship, mut states, health, mission, primary, pilot, cloak, posts, boarding) in shooters.iter_mut().sort::<Entity>() {
+    for (me, tf, ship, mut states, health, mission, primary, pilot, cloak, posts, boarding, scan) in shooters.iter_mut().sort::<Entity>() {
         if health.destroyed {
             ground.remove(&me);
             continue;
@@ -424,30 +444,63 @@ pub(super) fn fire(
         };
         let ship_target = ship_target.filter(|t| sensors.in_sight(me, t.entity, campaign.as_deref()));
         // A computer captain holds fire while a friendly ship or scenery is on the line to the aim point (docs/re/gunnery.md).
-        let line_blocked = !primary
-            && ship_target.is_some_and(|t| {
-                let (start, end) = (tf.translation, t.position);
-                fn who<'a>(s: &Ship, m: Option<&'a crate::campaign::MissionShip>) -> (Option<&'a str>, Option<Side>) {
-                    (m.map(|m| m.owner.as_str()), Some(s.side))
-                }
-                let me_is_boat = class.is_lifeboat;
-                let friends = others.iter().filter(|o| o.0 != me).filter_map(|(_, otf, os, _, _, om, _)| {
-                    let oc = &lib.classes[os.class];
-                    let friendly = me_is_boat || oc.is_lifeboat || crate::boarding::allied_pair(campaign.as_deref(), who(ship, mission), who(os, om));
-                    friendly.then(|| (otf.transform_point(oc.sphere.0), oc.sphere.1))
-                });
-                crate::line_of_fire::friend_in_line(start, end, friends)
-                    || crate::line_of_fire::scenery_in_line(
-                        start,
-                        end,
-                        class.radius,
-                        scenery.iter().filter(|(_, _, v, _)| *v != Some(&Visibility::Hidden)).map(|(e, o, _, rock)| crate::line_of_fire::Scenery {
-                            sphere: o.sphere(),
-                            mesh: (!rock).then_some(o),
-                            target: e == t.entity,
-                        }),
-                    )
+        let blocked = |t: &AimTarget| {
+            let (start, end) = (tf.translation, t.position);
+            fn who<'a>(s: &Ship, m: Option<&'a crate::campaign::MissionShip>) -> (Option<&'a str>, Option<Side>) {
+                (m.map(|m| m.owner.as_str()), Some(s.side))
+            }
+            let me_is_boat = class.is_lifeboat;
+            let friends = others.iter().filter(|o| o.0 != me).filter_map(|(_, otf, os, _, _, om, _)| {
+                let oc = &lib.classes[os.class];
+                let friendly = me_is_boat || oc.is_lifeboat || crate::boarding::allied_pair(campaign.as_deref(), who(ship, mission), who(os, om));
+                friendly.then(|| (otf.transform_point(oc.sphere.0), oc.sphere.1))
             });
+            crate::line_of_fire::friend_in_line(start, end, friends)
+                || crate::line_of_fire::scenery_in_line(
+                    start,
+                    end,
+                    class.radius,
+                    scenery.iter().filter(|(_, _, v, _)| *v != Some(&Visibility::Hidden)).map(|(e, o, _, rock)| crate::line_of_fire::Scenery {
+                        sphere: o.sphere(),
+                        mesh: rock.is_none().then_some(o),
+                        target: e == t.entity,
+                    }),
+                )
+        };
+        // A computer captain looks for a rock on its course once a second (docs/re/gunnery.md); the pick stands until the next look.
+        let rock_busy = if primary || pilot.is_some_and(|p| p.hold_fire) || mission.is_some_and(|m| m.hold_fire) {
+            None
+        } else {
+            let watch = rock_watch.entry(me).or_default();
+            watch.since += dt;
+            if watch.since >= ROCK_PERIOD {
+                watch.since = 0.0;
+                let course = crate::collision::avoid::Me {
+                    pos: tf.translation,
+                    heading: ship.heading,
+                    speed: ship.speed,
+                    bounds: class.collision_bounds,
+                    radius: class.radius,
+                    priority: 0.0,
+                    lifeboat: false,
+                };
+                let live =
+                    scenery.iter().filter(|(_, _, v, _)| *v != Some(&Visibility::Hidden)).filter_map(|(e, o, _, rock)| rock.filter(|r| r.hp > 0.0).map(|r| (e, o, r.velocity)));
+                let pick = crate::collision::avoid::rock_in_the_way(
+                    &course,
+                    (tf.transform_point(class.sphere.0), class.sphere.1),
+                    class.sight * scan.map_or(1.0, |s| s.0),
+                    live.clone().map(|(e, o, _)| (e, o)),
+                );
+                watch.rock =
+                    pick.and_then(|e| live.clone().find(|r| r.0 == e)).map(|(e, o, velocity)| AimTarget { entity: e, position: o.sphere().0, velocity }).filter(|t| !blocked(t));
+                for state in states.0.iter_mut() {
+                    state.rock_ask = watch.rock.is_some();
+                }
+            }
+            watch.rock
+        };
+        let line_blocked = rock_busy.is_none() && !primary && ship_target.is_some_and(|t| blocked(&t));
         let is_mine = |gun: &str| matches!(lib.bullets[&lib.guns[gun].bullet].payload, Payload::Mine { .. });
         let laying = states.0.iter().any(|s| is_mine(&s.gun)) && {
             let hostile = contacts.iter().any(|c| c.side != ship.side && c.visible);
@@ -508,6 +561,8 @@ pub(super) fn fire(
                     |(threat, _)| threat.position,
                 )
                 .map(|(threat, _)| *threat),
+                // A rock on the captain's course holds every gun that has not fired at it yet; the attack routine's own fire waits.
+                _ if rock_busy.is_some() => rock_busy.filter(|_| state.rock_ask),
                 (false, _) if primary && target.2.panic && state.request.pending() && panic_fires(gun, is_mine(&state.gun)) => panic_target(&seen, tf, mount, gun).or(ship_target),
                 (false, _) if !primary && gun.lob.is_some() => {
                     ground_banks.iter().find(|b| b.0 == mount.bank).map(|b| AimTarget { entity: Entity::PLACEHOLDER, position: b.1, velocity: Vec3::ZERO })
@@ -610,6 +665,7 @@ pub(super) fn fire(
                 state.burst_left = gun.burst;
                 shot_fired |= on_shot;
                 state.request.fired();
+                state.rock_ask = false;
                 if !gun.point_defense {
                     let target = gun_target.map(|t| t.entity).filter(|e| *e != Entity::PLACEHOLDER);
                     fired.write(Fired { shooter: me, target, bullet: gun.bullet.clone() });
