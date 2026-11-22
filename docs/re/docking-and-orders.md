@@ -161,6 +161,8 @@ Read from the original's code (not yet checked against a staged run, so PROVISIO
   a captain's destination) and a held ship is halted every frame, the player's too, so nothing steers it; the marker is cleared by a
   move click (single or plotted path), and by the menu's Dock, Tow start and Board start. Whether a grapple-attack order clears it
   is not stated; the remake leaves it. Mission-script moves do not clear it here (not read).
+- **Hold fire** is ended by an attack order on that ship (whether it came from the order itself or from fleet help). Remake: attacking
+  clears the ship's hold-fire flag.
 - **Stop** (cancel actions): ends the current order and activity, so path, throttle and rudder go to zero and a dock or tow approach
   is cancelled. It does not change a hold, the formation hold, hold fire or a grapple order. Remake: Stop halts the ship, ends a
   captain's destination and target and cancels the dock/tow approach; it no longer clears the formation hold or the grapple order.
