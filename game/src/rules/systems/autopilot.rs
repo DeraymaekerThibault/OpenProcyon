@@ -24,6 +24,13 @@ pub(super) fn drive(
             extra.board.write(crate::boarding::BoardMsg::Boardable(s.entity, false));
         }
     }
+    // The bot sails the player's ship as a player's move click would, which ends a hold the mission's rules set (mission 1 holds the
+    // ship for a cutscene and never lifts it: the click does).
+    if !mission.script.nis
+        && let Some(p) = world.iter().find(|u| u.primary)
+    {
+        crate::ship::release_hold(commands, p.e);
+    }
     autopilot_dock(&mission.script, world, &mission.data, extra);
     autopilot_tow(&mission.script, world, &mission.data, extra);
     // While running, the fleet follows in formation with cease fire, as a player would order from the fleet bar: left to their

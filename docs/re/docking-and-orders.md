@@ -171,6 +171,11 @@ Read from the original's code (not yet checked against a staged run, so PROVISIO
   a captain's destination) and a held ship is halted every frame, the player's too, so nothing steers it; the marker is cleared by a
   move click (single or plotted path), and by the menu's Dock, Tow start and Board start. Whether a grapple-attack order clears it
   is not stated; the remake leaves it. Mission-script moves do not clear it here (not read).
+  The rule action `Set Group/Unit Hold Position` sets and clears this same toggle and is persistent: the retail missions hold a ship at
+  setup and give an explicit FALSE before its orders (missions 2, 4, 6, 10, 12: e.g. mission 6 holds the pirates, the cutter and the dragons
+  in its world-init rule and releases each one by name when its trigger fires), so a one-shot stop would let them sail off at the
+  first path. The remake keeps the `HoldPosition` marker in missions too (it used to stop the ship once); the dev autopilot ends a hold
+  as the human's move click would.
 - **Hold fire** is ended by an attack order on that ship (whether it came from the order itself or from fleet help). Remake: attacking
   clears the ship's hold-fire flag.
 - **Stop** (cancel actions): ends the current order and activity, so path, throttle and rudder go to zero and a dock or tow approach

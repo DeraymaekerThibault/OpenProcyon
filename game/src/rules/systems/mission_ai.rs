@@ -71,12 +71,17 @@ pub(super) fn mission_ai(
             ms.stop_at_end = true;
             continue;
         }
-        if primary || h.destroyed || busy.contains(e) || held.contains(e) || pilot.is_some_and(|p| p.hold || p.destination.is_some()) {
+        if primary || h.destroyed || busy.contains(e) || pilot.is_some_and(|p| p.hold || p.destination.is_some()) {
             continue;
         }
-        ship.throttle = None;
+        // A held ship ('Set Group/Unit Hold Position', the captain's lock) keeps its place but still picks and fires on targets.
+        let is_held = held.contains(e);
+        if !is_held {
+            ship.throttle = None;
+        }
         // loops: restart an exhausted path
-        if ship.waypoints.is_empty()
+        if !is_held
+            && ship.waypoints.is_empty()
             && let Some(p) = ms.looping.clone()
         {
             ship.waypoints = p;
@@ -105,6 +110,9 @@ pub(super) fn mission_ai(
         };
         if ms.target != want {
             ms.target = want;
+        }
+        if is_held {
+            continue; // no chasing, no path: fleet_follow halts it every frame
         }
         // Movement: an attack order or an aggressive stance closes on the foe with the original's attack (`ship::attack`, as skirmish).
         // A human-captained ship (Captain_Human) only fires: it moves on the human fleet's orders (ship.rs fleet_follow).

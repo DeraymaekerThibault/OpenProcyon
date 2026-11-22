@@ -135,7 +135,7 @@
     "GroupA to Ram GroupB": "Attack order flown bow-on at emergency speed; contact damage comes from the normal collision rules.",
     "Is Group A attacking Group B": "True when a member of A has B in its orders, or fired at B within the last 6 seconds.",
     "Clear all AI commands": "Drops the ships' scripted orders. The human's own course and throttle stay.",
-    "Set Group/Unit Hold Position": "Holds (clears the waypoints). A missing `Boolean` means TRUE, unlike most boolean fields.",
+    "Set Group/Unit Hold Position": "Holds the ships (clears the waypoints) until a `Boolean` FALSE lifts it: the hold persists, in a mission as in a skirmish (a held ship does not steer or follow a path, and still fires; the human's move, dock, tow and board orders also lift it). A missing `Boolean` means TRUE, unlike most boolean fields.",
     "Set Group/Unit AI Stance": "Stances: `Stance_Neutral`, `Stance_Defensive`, `Stance_Aggressive`, `Stance Persistant` (sic) and others listed.",
     "Set Group/Unit AI Captain": "Only `Captain_Human` is meaningful: it gives the human control of the ships and makes them the primary. Other captains keep the stance AI.",
     "Set Group/Unit Warning Shot Mode": "Makes the ships fire warning shots.",

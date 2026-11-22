@@ -47,6 +47,17 @@ pub(in crate::rules) struct FxEnv<'a, 'w, 's> {
 }
 
 /// Applies `fxs` to the world.
+/// Holds a ship (its course ends, the persistent `HoldPosition` marker goes on) or lifts the hold.
+fn hold_ship(commands: &mut Commands, e: Entity, ship: &mut Ship, on: bool) {
+    if on {
+        ship.waypoints.clear();
+        ship.order = 0;
+        commands.entity(e).insert(crate::ship::HoldPosition);
+    } else {
+        commands.entity(e).remove::<crate::ship::HoldPosition>();
+    }
+}
+
 pub(in crate::rules) fn apply(
     fxs: Vec<Fx>,
     env: &mut FxEnv,
@@ -270,28 +281,14 @@ pub(in crate::rules) fn apply(
                 });
             }
             Fx::Damage(u, p) => each_ship(ships, u, |s| crate::combat::fraction_hit(&env.lib.classes[s.ship.class], &mut s.health, p, s.ship.side, s.mission.invuln)),
-            // A skirmish's 'Hold position' is the captain's lock (the right-click menu's Hold): the ship stays where it is and still
-            // fires; releasing hands it back to its captain or to the next order the script gives.
-            Fx::Hold(u, on) if skirmish => {
+            // 'Set Group/Unit Hold Position' is the right-click menu's Hold, a persistent lock (retail missions set it at the start and
+            // clear it with FALSE before giving the ship its orders: docs/re/docking-and-orders.md "Hold and Stop orders"): the ship stays
+            // where it is and still fires, until a FALSE here or a move, dock, tow or board order of the human's.
+            Fx::Hold(u, on) => {
                 each_dragon(env.dragons, &u, |d| d.hold = on);
                 for e in u {
                     let Ok(RuleShipItem { ship: mut sh, .. }) = ships.get_mut(e) else { continue };
-                    if on {
-                        sh.waypoints.clear();
-                        sh.order = 0;
-                        commands.entity(e).insert(crate::ship::HoldPosition);
-                    } else {
-                        commands.entity(e).remove::<crate::ship::HoldPosition>();
-                    }
-                }
-            }
-            Fx::Hold(u, on) => {
-                each_dragon(env.dragons, &u, |d| d.hold = on);
-                if on {
-                    each_ship(ships, u, |s| {
-                        s.ship.waypoints.clear();
-                        s.ship.order = 0;
-                    });
+                    hold_ship(commands, e, &mut sh, on);
                 }
             }
             Fx::ResetHits(u) => {
@@ -411,5 +408,28 @@ fn marker<C: Component + Clone>(commands: &mut Commands, units: Vec<Entity>, on:
 fn add_once(list: &mut Vec<String>, g: &str) {
     if !list.iter().any(|x| x == g) {
         list.push(g.to_string());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ship::HoldPosition;
+
+    /// Retail campaign missions hold a ship at the start and lift it with a FALSE before its orders (mission 12 holds the whole
+    /// opening cast): the hold stays on until then, in a mission as in a skirmish.
+    #[test]
+    fn hold_position_persists_until_it_is_lifted() {
+        let mut w = World::new();
+        let e = w.spawn_empty().id();
+        let mut ship = Ship { order: 2, waypoints: vec![Vec3::X], ..Ship::new(0, crate::ship::Side::Enemy) };
+        let mut queue = bevy::ecs::world::CommandQueue::default();
+        hold_ship(&mut Commands::new(&mut queue, &w), e, &mut ship, true);
+        queue.apply(&mut w);
+        assert!(w.get::<HoldPosition>(e).is_some(), "the marker stays after the action");
+        assert!(ship.waypoints.is_empty() && ship.order == 0, "the course ends");
+        hold_ship(&mut Commands::new(&mut queue, &w), e, &mut ship, false);
+        queue.apply(&mut w);
+        assert!(w.get::<HoldPosition>(e).is_none(), "FALSE lifts it");
     }
 }
