@@ -26,7 +26,9 @@ needed the backlog is dropped (the game then simply runs slower than real time).
 ## One tick, in order
 
 1. **Pre-tick:** cameras, the end-of-mission countdown (a mission end waits 10 game seconds before the next screen), ambient music.
-   No effect on ships.
+   No effect on ships in normal play (the one thing that can destroy an object here is a debug-only "kill the picked object" request).
+   Both countdowns are 10.0 game seconds: the next-screen one, when the mission is not frozen, shows the screen; when it is frozen, every object is queued
+   for removal and removed at once first. The skirmish / mission-over one only acts while the UI shows the end screen's state.
 2. The tick counter and the clock advance. Effect systems update.
 3. Commands whose tick has come run (queue order; this is the lock-step order in multiplayer).
 4. **New objects join:** everything created since the last tick is added now, in creation order, and may move in this same tick.

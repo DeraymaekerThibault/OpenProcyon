@@ -65,7 +65,7 @@ Per entry and frame:
    Then a win is announced as a capture (rules count it), the grapple between the two is removed, and the boarder's tow links are dropped (every link it is in, as tower or towee).
 5. Results, per side:
    - **target captured**, owners differ: ship → it stops what it was doing, ownership moves to the boarder's player, and the ship
-     is crewed afresh (crew list rebuilt, effects re-initialised); base → ownership moves and its defending strength is reset to the initial value.
+     is crewed afresh (crew list rebuilt from the old per-post counts, one generic crewman per count, crew factors recomputed; only when the capturer is a ship; effects re-initialised); base → ownership moves and its defending strength is reset to the initial value.
    - first-mate speech depends on whether the *human's* primary is the boarder, the target or another own ship: own boarding starts,
      the primary is boarded, own ship / base captured, boarding repelled, we captured a ship / base, our boarding failed. Which line plays
      for each is **[? unknown]**; the remake picks the lines by meaning (`boarding_party`, `landing_party`, `repell_boarders`, `own_ship_boarded`, `enemy_ship_conquered`, `enemy_base_conquered`,
@@ -127,7 +127,11 @@ initial value **[? inferred from the name "Combat Strength"; unverified]**; the 
 m2: lifeboat pickup counts as `PlayerStart` capturing `Pirates` (implemented in `lifeboats.rs`, a separate table from boarding captures; see lifeboats.md); m6: *Capture Pirate Ship* (`Team has captured
 a ship from PirateRunSloop,The Little Thief`, `PvP capture count PlayerStart vs PirateRunner` (the lifeboat route of the same objective; boarding feeds only `Team has captured`)); m9: *Board the Derelict StarHammer*; m10: *Board and Capture
 the Disabled Ironclad*; m11: 12 `Set Group/Unit Boardable`; m12: the Procyon ironclads sail to the palace's landing boundary, `Parliament` is set Boardable
-and `Procs capturing RoyalPalace` (Setup Island, Combat Strength 100) is the defeat. How the AI ironclads start that fight is **[? not found in the original]**.
+and `Procs capturing RoyalPalace` (Setup Island, Combat Strength 100) is the defeat rule. **Computer ships never start a fight against a base**: the computer's
+grapple-and-board routine gates both its harpoon hold/fire and its board start on the target being a ship, so a base is never admitted. The mission has no Board Ships or
+Grapple Ship action either, and the capture table that the defeat rule reads is only written by lifeboat pickup, so that ending cannot fire in the original. The palace is lost
+when its mission-vital section is destroyed (the `ParliamentDead` rule: that section's damage equals 1.0). Remake: `boarding.rs` still lets mission ships board a boardable hostile
+base and feeds that into the capture count; that is extra behaviour (PROVISIONAL), not the original's.
 
 ## Implementation status (`boarding.rs`)
 Done: strengths from the exported crew counts and the skill's generic combat ability; casualty/interval/normalise/outcome exactly as above; start tests and

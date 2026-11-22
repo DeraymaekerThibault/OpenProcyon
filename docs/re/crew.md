@@ -95,6 +95,16 @@ Scan range follows the same rule on the lookout post and spotting: 712.5 = 500 x
 Buying order (2026-10-31, budgets re-read): all hulls and weapons first, then crew ship by ship; 13 of 15 fleets spent their 300 or 340 points
 to the point ([skirmish-setup.md](skirmish-setup.md)). Not resolved: the choice of crewman (257 of 319 picks rated exactly 7 in the post's skill, gunners 8-9).
 
+## Crew losses and the crew-class gate (read from the original's code, 2026-11)
+- **A battle takes no crew away.** Nothing that runs from a shell hit, a fire or a destroyed section adds, removes or replaces a ship's crewmen; the only runtime change of a ship's
+  crew is a capture (a fresh generic crew with the old per-post counts, boarding.md section 4). Boarding casualties are strengths, not crewmen. Remake: same (posts are static).
+- **Crew class per post.** The computer fleet's crew pick (skirmish-setup.md) only seats a man whose crew class may fill the post group. The table has 18 classes by 8 groups
+  (Gunner, Captain, First Mate, Navigator, Engineer, Rigger, Fighter, Lookout; 1 = allowed):
+  0: 01111101, 1: 00001101, 2: 10011111, 3: 00011001, 4: 01111001, 5: 10001010, 6: 01101001, 7: 10000111, 8: 01111111, 9: 11111111, 10: 11111111,
+  11: 11110010, 12: 10001110, 13: 11110111, 14: 00001101, 15: 11111111, 16: 10000111, 17: 00000010 (class 17 may only be a fighter).
+  The class is most likely the crewman's species (the retail crew data has exactly 18 species), but which species is which class number is **not established**, so the table cannot be
+  applied yet. Remake: no gate (PROVISIONAL gap).
+
 ## Open
 - Placed and computer ships' generic crews do get crew factors. Retail saves (missions 3 and 11) store per ship an engineer and a
   navigator factor: Green crews 1.15, Average 1.30-1.37, Elite 1.40-1.47, default (rating-1) hands 1.05-1.10, i.e. about

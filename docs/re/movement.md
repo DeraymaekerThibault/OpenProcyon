@@ -415,3 +415,17 @@ Static analysis of the original's captain AI, written as rules. Nothing in it de
   mission sections), the explore border margin and random draw. A measured Carrack held side A where its stock guns predict side B;
   computer skirmish ships carry swapped guns and that run's fit was not recorded, so it is unresolved. Simulated circles round an idle
   Cutter, aiming at its nearest section, with the computer helm: Carrack 43-48 units (retail 45-50), Barque 53-58 (retail 51-58).
+
+## Border zone for the human's ship, the dormant simple attack, the scanner (read from the original's code, 2026-11)
+- **The human captain is held at a border.** At every captain think (0.5 s), for the fleet's human-captain ship that is outside its border zone, the throttle is set to zero;
+  if it is the primary ship the helmsman's off-course line is spoken. Nothing steers the ship back: it coasts, and the player's throttle is zeroed again on the next think. A flag
+  on the captain that could switch this off was never found set for ships. Remake: `leash_player` steers the player's ship back toward the zone instead (Different, PROVISIONAL; the
+  original's rule is not built because the player's recovery under a zeroed throttle was not observed).
+- **Simple attack routine.** A stand-off attack (stand-off U(100, 250) for non-ship targets, or U(0.75 x mean effective range, mean long range) for ships, circling a random side, 1 % chance
+  per update of re-drawing both) exists in the code but nothing selects it for a captain: no stance, order or chooser reaches it. Its only live effect is that creating a ship captain draws the
+  follower's minimum throttle from U(0.65, 0.75) and its maximum as 1.0 (the remake's per-ship throttle draw). Nothing to build.
+- **Scanner.** Targets are found by gathering world objects of the caller's categories into a candidate list, removing the scanner's own ship, then removing entries that fail each filter the
+  caller chose, in place: dead (damage state not zero), a flag test, relation to the scanner's owner (hostile), whose target is the scanner's ship, owner/launcher hostility (torpedoes use the
+  launcher's owner, other damageable things their target holder's), bearing inside a half angle, inside a region, within a distance; finally the nearest remaining one, accepted only inside the scanner range
+  when the caller asks for the range check. Which filters each caller chooses is in the captain rows; the category numbers are not resolved.
+

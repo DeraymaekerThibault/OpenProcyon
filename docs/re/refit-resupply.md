@@ -40,7 +40,10 @@ Research only; nothing here is implemented. Source: observed behaviour of the or
   - Per section: if current hp > 0 → set to max. If hp is 0 and the flag is *full* → revive: recreate the section's mesh/effect state and set hp to max. Critical-system hit counters of the section are cleared; its damage effect is stopped.
   - If *full*, and the ship has flag bit 1, every **gun info** entry of the ship is rebuilt: an existing gun object is destroyed and a new gun world object is created from the stored mount name, assigned to the same player, attached to the same mesh node, with accuracy deviation recomputed. [C]
   - Effect: hull sections full; destroyed sections and gun mounts back (new objects, so reload timers, burst state and shots-fired counters start from zero [I from re-creation]); no gun *type* is changed (the name is read from the stored mount entry; whether that entry holds the arms-profile gun is [I]).
-- When the docker is the player's selected primary ship the heal also clears HUD warning bytes (session HUD object,, and when *full*) [C that it does; meaning of each byte [?]].
+- When the docker is the player's primary ship the heal also clears four bytes of the HUD's speech table. They are not warnings on screen: each is the "already played" latch of
+  one once-only crew voice line, so clearing it lets the line speak again. Three are always re-armed (the line that says every sail is lost, the one for the engines being lost, the one for
+  the rudder being lost); the fourth (every gun mount gone) only on a *full* heal. A line still keeps its minimum interval since it last played. Read from the original's code;
+  which line each latch belongs to rests on one reading, unchecked on the running game.
 - Release: state 4 waits for the duration, then, frees the dock slot and clears the relation; **a human ship stays where it is**, AI ships move away/turn/return (`docking-and-orders.md`). No player confirmation is needed for repair. [C]
 
 ### 3.2 No finite ammunition
