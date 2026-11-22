@@ -100,6 +100,29 @@ measured bank limit above.
 - Volcano meteors (The Diablo Strait) hit every section of a ship at once for 10-20 each; they are not shells.
 - Damage control mends hulls only through engineers and sails through riggers (refit-resupply.md 3.4).
 
+## Read from the original's code: difficulty switch, hulls with no vital section, last-hit clocks (2026-11, not yet measured in play)
+
+- **The difficulty factor is skipped in networked games.** Every hit through the shared hit routine is scaled by the table above unless a
+  game-setup flag is set; the flag is the networked-game flag (the same flag decides whether the mission rules run inside the world
+  step; the reading of it as "multiplayer" is inferred from that use). Easy: x 0.25 when the struck ship's owner is the local player,
+  else x 3 when the attacker is the local player; Normal: x 0.5 / x 2; Hard and any other level: none. A hit with no attacker
+  (scripted hits, fires) never counts as the local player's, so it is scaled only when the victim is the local player's ship. The factor
+  multiplies the whole damage table (low, high, spill values) before any roll. Remake: only single-player exists, so "always applied" is
+  right today. Build: small, when networked play exists skip `side_damage_scale` (`combat/shells.rs`) when the game is networked.
+- **A hull with no vital section is never sunk by damage.** After every hit, if the ship is not already dying and its core hit
+  points are exactly 0: it counts the sections that are vital to the ship (alive or dead). One or more: the death sequence starts.
+  None: the ship goes to an inert "disabled" state that nothing ever leaves (dragons are exempt even from that and just stay as
+  they are). The core only falls through dead vital sections, so this needs a class with core 0 and no vital section. In the shipped
+  classes none exists (22 have no vital section: bases, volcano islands, lifeboats; none has core 0), so it is unreachable in
+  vanilla; a lifeboat hull can never be sunk by damage. Remake `combat/mod.rs` (`deaths`: dies at core <= 0) is the same for shipped
+  data and differs only for a modded class with core 0 and no vital section (the remake destroys it at once). Build: small, if ever.
+- **Last-hit clocks.** The damage keeper of each ship keeps ten clocks, one per hit kind, set to the game time at the ship's creation and
+  again on every hit of that kind: 0 ram, 2 scripted percentage hit, 3 fire, 4 mortar blast, 5 shell, 6 lightning, 7 rock, 8 wind,
+  9 meteor (1 is never passed). Only the ram clock is read anywhere found: ram damage is routed only when more than 3.5 s have passed
+  on it, so a ship cannot be rammed for damage in its first 3.5 s. The other clocks have no reader. A lightning hit on the fleet's
+  primary ship makes the crew speak (the lightning remark). Remake: the ram cooldown is `RAM_COOLDOWN` in `collision.rs`; the other
+  clocks need nothing built. Whether the remake's ram clock also starts at the ship's creation is not checked.
+
 ### Provisional destroyed-section collision fix
 
 Iron War's Navy torpedo boats have only 50 core HP, but their non-vital sail could continue intercepting shells after reaching zero HP: projectile collision used the original triangles regardless of section damage. The remake now skips destroyed non-vital sections for ship projectile collision, while retaining destroyed vital hull sections for the verified core-damage rule above. A clicked aim point inside a destroyed non-vital section's bounds falls back to the hull centre unless it also lies in vital-section bounds. Neither HP nor weapon damage was changed.
@@ -343,6 +366,13 @@ Static analysis of the original's captain AI, written as rules. Nothing in it de
   measured from its own hull (centre minus its own radius) to the aim point on the target, the target's size not counted, so it
   holds the same distance from a small and a large target.
   **Ram:** straight at it, full throttle within 5° of the bow (the other attacks' window is 11.25°; a ram steers by its own 5° test, also under the ram order). Remake: `attack::throttle` takes the routine. PROVISIONAL: whether the follower's 11.25° rule still lifts a ram's throttle between 5° and 11.25° is unread (the remake gives the minimum there), as is the lower bound of the ram's angle test.
+- **Frontal attack of a submerged submarine.** A submarine class (the one that can cloak) that is **fully** cloaked (cloak level exactly 1)
+  uses two ranges instead of R: it charges until the gap between the hulls is **0.2 R**, and its break-off range is **0**. Reaching 0.2 R
+  starts a break-off, but a break-off ends as soon as the gap is above 0, so in the same think it ends, no course is set and the
+  charge course already held stands: the submarine presses in to 0.2 R and keeps its course and its fire there. Only if the hulls touch
+  (gap 0 or less) does it sail the break-off, 0 x R from its own position, i.e. stop. An ordinary ship, or a submarine not fully
+  submerged, uses R for both. Remake: `attack::course` in `ship/attack.rs` has one range; build: small, pass the two ranges (`ship/attack.rs`
+  and its caller in `ship.rs`).
 - **Throttle:** full while the next course point is within 11.25° of the bow, else the ship's own minimum, 0.65-0.75 of full (drawn
   per ship). That minimum is a floor under every slow-down but the collision avoider's, so nothing else slows an attacker near its
   course points.
