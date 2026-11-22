@@ -1,0 +1,245 @@
+//! Engine-added rule features (not in the retail TWT vocabulary; documented in `docs/modding.md`). Every Type is prefixed `OP ` so it
+//! can never clash with a retail name, and a mission that uses none of it behaves exactly as before.
+//!
+//! * Conditions: `OP Any Of`, `OP Not`, `OP Counter Condition`.
+//! * Actions: `OP Wait`, `OP Wait Until Speech Done` (sequences), `OP Set Counter`, `OP Add To Counter`, `OP Set Rule Active`.
+//! * Rule field `"Is Active"` (a rule with `false` is not evaluated), task keys `complete_when` / `fail_when` / `required`, and the
+//!   mission key `"victory": "objectives"`.
+
+use serde_json::Value;
+
+use super::*;
+
+/// What a sequence waits for.
+enum Wait {
+    /// Seconds left; counts down only while the opening-briefing pause is off, as the timers do.
+    Secs(f32),
+    /// A speech event to be neither queued nor playing; the empty name waits for the whole speech queue to be empty.
+    Speech(String),
+}
+
+/// A rule whose action list stopped at a wait: the cursor is the index of the next action to run.
+struct Pending {
+    rule: usize,
+    next: usize,
+    wait: Wait,
+}
+
+/// A task's self-completion keys (`mission.json` `tasks`).
+struct TaskRule {
+    name: String,
+    complete_when: Vec<Value>,
+    fail_when: Vec<Value>,
+    required: bool,
+}
+
+/// The interpreter state of the engine-added features.
+#[derive(Default)]
+pub(in crate::rules) struct Ext {
+    counters: HashMap<String, f32>,
+    /// Per rule (same order as `Script::rules`): evaluated at all? From the rule's `Is Active`, changed by `OP Set Rule Active`.
+    active: Vec<bool>,
+    names: Vec<String>,
+    pending: Vec<Pending>,
+    tasks: Vec<TaskRule>,
+    /// `"victory": "objectives"`.
+    objectives_decide: bool,
+}
+
+/// A JSON boolean or a retail-style "TRUE"/"FALSE" string; `None` when the value is neither.
+fn flag(v: &Value) -> Option<bool> {
+    match v {
+        Value::Bool(x) => Some(*x),
+        Value::String(x) if x.eq_ignore_ascii_case("true") => Some(true),
+        Value::String(x) if x.eq_ignore_ascii_case("false") => Some(false),
+        _ => None,
+    }
+}
+
+impl Ext {
+    pub(in crate::rules) fn new(data: &Value, player: &str) -> Ext {
+        let rules = data["rules"].as_array().map(Vec::as_slice).unwrap_or_default();
+        let conds = |t: &Value, k: &str| t[k].as_array().into_iter().flatten().map(|c| alias_player(c.clone(), player)).collect::<Vec<_>>();
+        Ext {
+            counters: HashMap::new(),
+            // Every retail rule says true; a rule without the field is active.
+            active: rules.iter().map(|r| flag(&r["Is Active"]).unwrap_or(true)).collect(),
+            names: rules.iter().map(|r| s(r, "name").trim().to_string()).collect(),
+            pending: vec![],
+            tasks: data["tasks"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(|t| TaskRule {
+                    name: s(t, "Name").into(),
+                    complete_when: conds(t, "complete_when"),
+                    fail_when: conds(t, "fail_when"),
+                    required: flag(&t["required"]) == Some(true),
+                })
+                .collect(),
+            objectives_decide: data["victory"].as_str() == Some("objectives"),
+        }
+    }
+    pub(in crate::rules) fn is_active(&self, rule: usize) -> bool {
+        self.active.get(rule).copied().unwrap_or(true)
+    }
+    /// Whether the rule's action list is waiting; a firing of it is skipped meanwhile (not queued).
+    pub(in crate::rules) fn busy(&self, rule: usize) -> bool {
+        self.pending.iter().any(|p| p.rule == rule)
+    }
+    pub fn counter(&self, name: &str) -> f32 {
+        self.counters.get(name).copied().unwrap_or(0.0)
+    }
+}
+
+impl Script {
+    /// `OP ...` conditions. An unknown one warns once and is false, like any unknown condition.
+    pub(in crate::rules) fn ext_cond(&mut self, c: &Value, w: &[Unit], repeating: bool) -> bool {
+        match s(c, "Type") {
+            // Every listed condition is evaluated (no short-circuit), so an edge condition inside (Enter Volume, event quotas) advances
+            // its state exactly as it would at the top level.
+            "OP Any Of" => {
+                let mut any = false;
+                for sub in c["Conditions"].as_array().into_iter().flatten() {
+                    any |= self.cond(sub, w, repeating);
+                }
+                any
+            }
+            // Inverts what the inner condition answers this frame. An edge condition (Enter Volume in a repeating rule, an event quota)
+            // is true for one frame only, so `Not` of it is true on every other frame; use a level condition or `Exit Volume` instead.
+            // An event the inner condition would have reported is never consumed (the rule cannot fire while the inner is true).
+            "OP Not" => {
+                if !c["Condition"].is_object() {
+                    self.warn("'OP Not' without a Condition object");
+                    return false;
+                }
+                let mark = self.consume.len();
+                let inner = self.cond(&c["Condition"], w, repeating);
+                self.consume.truncate(mark);
+                !inner
+            }
+            "OP Counter Condition" => cmp(s(c, "Equivalence"), self.ext.counter(s(c, "Counter Name")), f(c, "Value")),
+            other => {
+                self.warn(&format!("condition '{other}'"));
+                false
+            }
+        }
+    }
+
+    /// `OP ...` actions that are not waits (a wait reached outside a rule's action list, e.g. through `act` alone, does nothing).
+    pub(in crate::rules) fn ext_act(&mut self, a: &Value, rule: &str) {
+        match s(a, "Type") {
+            "OP Set Counter" => {
+                self.ext.counters.insert(s(a, "Counter Name").into(), f(a, "Value"));
+            }
+            "OP Add To Counter" => *self.ext.counters.entry(s(a, "Counter Name").into()).or_default() += f(a, "Value"),
+            "OP Set Rule Active" => {
+                let (name, on) = (s(a, "Rule Name").trim(), flag(&a["Boolean"]).unwrap_or(true));
+                let mut found = false;
+                for (i, n) in self.ext.names.iter().enumerate() {
+                    if n == name {
+                        self.ext.active[i] = on;
+                        found = true;
+                    }
+                }
+                if !found {
+                    self.warn(&format!("rule '{name}' in 'OP Set Rule Active' of rule '{rule}'"));
+                }
+            }
+            "OP Wait" | "OP Wait Until Speech Done" => {}
+            other => self.warn(&format!("action '{other}' in rule '{rule}'")),
+        }
+    }
+
+    fn wait_of(a: &Value) -> Option<Wait> {
+        match s(a, "Type") {
+            "OP Wait" => Some(Wait::Secs(f(a, "Seconds"))),
+            "OP Wait Until Speech Done" => Some(Wait::Speech(s(a, "Speech Event Name").into())),
+            _ => None,
+        }
+    }
+
+    fn wait_over(&self, wait: &Wait) -> bool {
+        match wait {
+            Wait::Secs(t) => *t <= 0.0,
+            Wait::Speech(n) if n.is_empty() => self.queue.is_empty() && self.speaking.is_none(),
+            Wait::Speech(n) => !self.queue.iter().any(|q| q == n) && self.speaking.as_ref().is_none_or(|x| x.0 != *n),
+        }
+    }
+
+    /// Runs the actions of rule `i` from index `from` in order, stopping at a wait that is not over yet: the rest resumes in a later
+    /// `step` (`resume_sequences`). Later rules must see visibility changes immediately, not one ECS frame later.
+    pub(in crate::rules) fn run_from(&mut self, i: usize, r: &Rule, from: usize, w: &mut [Unit], out: &mut Vec<Fx>) {
+        for (k, a) in r.acts.iter().enumerate().skip(from) {
+            if let Some(wait) = Self::wait_of(a) {
+                if !self.wait_over(&wait) {
+                    self.ext.pending.push(Pending { rule: i, next: k + 1, wait });
+                    return;
+                }
+                continue;
+            }
+            let at = out.len();
+            self.act(a, w, out, &r.name);
+            for fx in &out[at..] {
+                if let Fx::Visible(ids, visible) = fx {
+                    for u in w.iter_mut().filter(|u| ids.contains(&u.e)) {
+                        u.visible = *visible;
+                    }
+                }
+            }
+        }
+    }
+
+    /// Counts the waits down and continues the sequences whose wait is over. Time waits do not run during the opening-briefing pause
+    /// (the same pause the timers have); speech waits follow the speech queue, which is also paused then.
+    pub(in crate::rules) fn resume_sequences(&mut self, rules: &[Rule], w: &mut [Unit], out: &mut Vec<Fx>, dt: f32, opening: bool) {
+        for mut p in std::mem::take(&mut self.ext.pending) {
+            if let (Wait::Secs(t), false) = (&mut p.wait, opening) {
+                *t -= dt;
+            }
+            match rules.get(p.rule) {
+                Some(r) if self.wait_over(&p.wait) => self.run_from(p.rule, r, p.next, w, out),
+                Some(_) => self.ext.pending.push(p),
+                None => {}
+            }
+        }
+    }
+
+    /// True when every condition holds (all are evaluated so edge state advances); false for an empty list.
+    fn all_hold(&mut self, conds: &[Value], w: &[Unit]) -> bool {
+        let mut all = !conds.is_empty();
+        for c in conds {
+            all &= self.cond(c, w, false);
+        }
+        all
+    }
+
+    /// Self-completing objectives: an active task that is neither complete nor failed is completed or failed when its `complete_when` /
+    /// `fail_when` hold (failing wins when both do). Then `"victory": "objectives"` ends the mission: lost when a required task has
+    /// failed, won when every required task is complete (a required task that never became active keeps the mission going).
+    pub(in crate::rules) fn update_objectives(&mut self, w: &[Unit]) {
+        if self.ext.tasks.is_empty() {
+            return;
+        }
+        let specs = std::mem::take(&mut self.ext.tasks);
+        for spec in &specs {
+            let Some(i) = self.tasks.iter().position(|t| t.name == spec.name) else { continue };
+            if !self.tasks[i].active || self.tasks[i].complete || self.tasks[i].failed {
+                continue;
+            }
+            let (failed, complete) = (self.all_hold(&spec.fail_when, w), self.all_hold(&spec.complete_when, w));
+            self.tasks[i].failed = failed;
+            self.tasks[i].complete = complete && !failed;
+        }
+        self.consume.clear();
+        if self.ext.objectives_decide && self.ended.is_none() {
+            let required: Vec<&Task> = specs.iter().filter(|x| x.required).filter_map(|x| self.tasks.iter().find(|t| t.name == x.name)).collect();
+            if required.iter().any(|t| t.failed) {
+                self.ended = Some(("Mission failed".into(), false));
+            } else if !required.is_empty() && required.iter().all(|t| t.complete) {
+                self.ended = Some(("Mission complete.".into(), true));
+            }
+        }
+        self.ext.tasks = specs;
+    }
+}

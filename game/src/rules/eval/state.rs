@@ -7,6 +7,8 @@ use super::*;
 
 pub struct Script {
     pub(in crate::rules) rules: Vec<Rule>,
+    /// Engine-added rule features (`eval/ext.rs`).
+    pub(in crate::rules) ext: Ext,
     pub(in crate::rules) fired: Vec<bool>,
     /// Rules that fired at least once, repeating ones included (the autoplay report lists the others).
     pub(in crate::rules) ran: Vec<bool>,
