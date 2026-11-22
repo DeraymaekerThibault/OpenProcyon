@@ -91,7 +91,10 @@ fn run(
     mut ships: Query<RuleShip>,
     mut extra: Extra,
 ) {
-    let (Some(mut mission), false) = (mission, console.pending.is_empty()) else { return };
+    let Some(mut mission) = mission else { return };
+    if console.pending.is_empty() && !console.open {
+        return;
+    }
     let mission = &mut *mission;
     let lines = std::mem::take(&mut console.pending);
     // `Extra` holds the read side of `Cheats` (the points gate in `update`), so changes go through the command queue.
@@ -102,6 +105,9 @@ fn run(
     world.extend(extra.bases.iter_mut().map(|(e, b, tf, armed)| b.unit(e, tf, armed.map_or(0.0, |(a, h)| crate::combat::base_mission_damage(&lib.classes[a.class], h)))));
     world.extend(rocks.iter().map(|(e, tf, a)| a.unit(e, tf)));
     mission.script.tag(&mut world);
+    if console.open {
+        console.names = mission.script.console_names(&world);
+    }
     for line in lines {
         console.say(format!("> {line}"));
         let player = mission.script.player().to_string();
@@ -112,6 +118,14 @@ fn run(
                 continue;
             }
         };
+        let mut fx = vec![];
+        let outcome = mission.script.console_run(&cmd, &mut world, target.0, &mut fx);
+        if outcome.rejected {
+            for l in &outcome.lines {
+                console.say(l);
+            }
+            continue;
+        }
         if cmd.cheats() {
             commands.queue(|w: &mut World| w.resource_mut::<Cheats>().used = true);
         }
@@ -120,8 +134,6 @@ fn run(
             let on = *on;
             commands.queue(move |w: &mut World| w.resource_mut::<Cheats>().god = on);
         }
-        let mut fx = vec![];
-        let outcome = mission.script.console_run(&cmd, &mut world, target.0, &mut fx);
         for l in &outcome.lines {
             console.say(l);
         }

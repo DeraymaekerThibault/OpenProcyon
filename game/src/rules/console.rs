@@ -13,6 +13,9 @@ use serde_json::{Value, json};
 use super::schema::{self, Role};
 use super::*;
 
+mod complete;
+pub use complete::{Completion, Names, completions, mean, nearest_name, tokens};
+
 /// Point set the `tp x y` command writes its destination to before running 'Teleport Group/Unit'.
 const TP_SET: &str = "(console)";
 /// Lines of output kept.
@@ -36,6 +39,18 @@ pub struct Console {
     pub(in crate::rules) paused_by_us: bool,
     /// Lines submitted and not yet run (systems/console.rs runs them once per frame).
     pub(in crate::rules) pending: Vec<String>,
+    /// The mission's names, for Tab (refreshed each frame while open).
+    pub names: Names,
+    tab: Option<TabState>,
+}
+
+/// Repeated Tab on the same line cycles through the candidates.
+struct TabState {
+    start: usize,
+    items: Vec<(String, String)>,
+    next: usize,
+    /// The line as Tab left it; any other edit ends the cycle.
+    last: String,
 }
 
 /// What a key press did to the line.
@@ -61,18 +76,36 @@ impl Console {
         let over = self.log.len().saturating_sub(LOG_LINES);
         self.log.drain(..over);
     }
-    /// Tab: finishes the command word (to the longest prefix the commands starting with it share, and a space when only one does).
+    /// Tab: completes the last word of the line (`completions`). One candidate is put in; several are listed in the output and the line
+    /// gets what they share; Tab again steps through them.
     fn complete(&mut self) {
-        if self.line.contains(char::is_whitespace) {
+        if let Some(t) = self.tab.as_mut().filter(|t| t.last == self.line && !t.items.is_empty()) {
+            let item = &t.items[t.next % t.items.len()].1;
+            self.line = format!("{}{item}", &self.line[..t.start]);
+            t.next += 1;
+            t.last.clone_from(&self.line);
             return;
         }
-        let word = self.line.to_lowercase();
-        let hits: Vec<&str> = TABLE.iter().flat_map(|c| std::iter::once(c.name).chain(c.alias.iter().copied())).filter(|c| c.starts_with(&word)).collect();
-        let Some(first) = hits.first() else { return };
-        let common = hits.iter().fold(first.len(), |n, c| n.min(first.chars().zip(c.chars()).take_while(|(a, b)| a == b).count()));
-        self.line = first[..common].to_string();
-        if hits.len() == 1 {
-            self.line.push(' ');
+        self.tab = None;
+        let c = completions(&self.line, &self.names);
+        match c.items.len() {
+            0 => {}
+            1 => {
+                let word = !self.line.contains(char::is_whitespace);
+                self.line = format!("{}{}", &self.line[..c.start], c.items[0].1);
+                if word || !self.line.ends_with('"') && !self.line.ends_with(' ') && !self.line.ends_with(": ") && !self.line.contains('{') {
+                    self.line.push(' ');
+                }
+            }
+            n => {
+                let shown: Vec<&str> = c.items.iter().take(40).map(|i| i.0.as_str()).collect();
+                self.say(format!("{}{}", shown.join("  "), if n > 40 { format!("  ... {} more", n - 40) } else { String::new() }));
+                let common = common_prefix(c.items.iter().map(|i| i.1.as_str()));
+                if common.chars().count() > self.line[c.start..].chars().count() {
+                    self.line = format!("{}{common}", &self.line[..c.start]);
+                }
+                self.tab = Some(TabState { start: c.start, items: c.items, next: 0, last: self.line.clone() });
+            }
         }
     }
     /// Queues a line to run as if it had been typed and submitted (the smoke script's way in).
@@ -123,6 +156,16 @@ impl Console {
         }
         Edit::None
     }
+}
+
+/// The longest start the strings share, ignoring case (taken from the first).
+fn common_prefix<'a>(mut items: impl Iterator<Item = &'a str>) -> String {
+    let Some(first) = items.next() else { return String::new() };
+    let mut len = first.chars().count();
+    for s in items {
+        len = len.min(first.chars().zip(s.chars()).take_while(|(a, b)| a.to_lowercase().eq(b.to_lowercase())).count());
+    }
+    first.chars().take(len).collect()
 }
 
 /// Whether cheats were used in this battle, and the state of the toggles.
@@ -303,7 +346,8 @@ pub fn help_lines(topic: Option<&str>) -> Vec<String> {
 pub fn parse(line: &str, player: &str, god: bool) -> Result<Command, String> {
     let line = line.trim();
     let (word, rest) = line.split_once(char::is_whitespace).map_or((line, ""), |(w, r)| (w, r.trim()));
-    let args: Vec<&str> = rest.split_whitespace().collect();
+    let owned: Vec<String> = tokens(rest, false).into_iter().map(|t| t.text).collect();
+    let args: Vec<&str> = owned.iter().map(String::as_str).collect();
     let act = |a: Value| Command::Acts { acts: vec![a], god: None };
     Ok(match word.to_lowercase().as_str() {
         "" => Command::Nothing,
@@ -316,7 +360,7 @@ pub fn parse(line: &str, player: &str, god: bool) -> Result<Command, String> {
             };
             Command::Acts { acts: vec![vulnerability(player, if on { 1.0 } else { 0.0 })], god: Some(on) }
         }
-        "repair" => Command::Repair(if rest.is_empty() { player.to_string() } else { rest.to_string() }),
+        "repair" => Command::Repair(if rest.is_empty() { player.to_string() } else { unquote(rest).to_string() }),
         "kill" => Command::Kill,
         "reveal" => Command::Reveal,
         "tp" => match args.as_slice() {
@@ -325,7 +369,7 @@ pub fn parse(line: &str, player: &str, god: bool) -> Result<Command, String> {
                 Command::Teleport(Dest::Xy(n(x)?, n(y)?, args.get(2).map_or(Ok(0.0), |z| n(z))?))
             }
             [] => return Err("usage: tp <x> <y> [z]  or  tp <point set name>".into()),
-            _ => Command::Teleport(Dest::Set(rest.to_string())),
+            _ => Command::Teleport(Dest::Set(unquote(rest).to_string())),
         },
         "spawn" => return Err("spawn: no rule action creates ships yet, so there is nothing to run".into()),
         "fire" if !rest.is_empty() => Command::Fire(unquote(rest).into()),
@@ -348,26 +392,26 @@ pub fn parse(line: &str, player: &str, god: bool) -> Result<Command, String> {
             [] => return Err("usage: set <flag> [on|off]".into()),
             [name] => act(set_flag(name, true)),
             [name, v] => act(set_flag(name, flag_word(v)?)),
-            _ => return Err("usage: set <flag> [on|off] (a flag name has no spaces)".into()),
+            _ => return Err("usage: set <flag> [on|off] (put a name with spaces in \"quotes\")".into()),
         },
         "timer" => match args.as_slice() {
             [name, "start"] => act(json!({"Type": "Start Timer", "Timer Name": name})),
             [name, "stop"] => act(json!({"Type": "Stop Timer", "Timer Name": name})),
             _ => return Err("usage: timer <name> start|stop".into()),
         },
-        "task" => match args.as_slice() {
-            [name, state] | [name, state, _] => {
-                let on = args.get(2).map_or(Ok(true), |v| flag_word(v))?;
-                let (kind, key) = match *state {
-                    "active" => ("Set Objective Task Active State", "Active State"),
-                    "complete" => ("Set Objective Task Complete State", "Complete State"),
-                    "failed" => ("Set Objective Task Failed State", "Failed State"),
-                    other => return Err(format!("'{other}': expected active, complete or failed")),
-                };
-                act(json!({"Type": kind, "Objective Task": name, key: wot(on)}))
-            }
-            _ => return Err("usage: task <name> active|complete|failed [on|off]".into()),
-        },
+        "task" => {
+            let state_at = args.iter().rposition(|a| matches!(*a, "active" | "complete" | "failed"));
+            let Some(k) = state_at.filter(|k| *k > 0 && args.len() <= k + 2) else {
+                return Err("usage: task <name> active|complete|failed [on|off] (put a name with spaces in \"quotes\")".into());
+            };
+            let on = args.get(k + 1).map_or(Ok(true), |v| flag_word(v))?;
+            let (kind, key) = match args[k] {
+                "active" => ("Set Objective Task Active State", "Active State"),
+                "complete" => ("Set Objective Task Complete State", "Complete State"),
+                _ => ("Set Objective Task Failed State", "Failed State"),
+            };
+            act(json!({"Type": kind, "Objective Task": args[..k].join(" "), key: wot(on)}))
+        }
         "act" | "do" => match serde_json::from_str::<Value>(rest) {
             Ok(v) if v["Type"].is_string() => {
                 validate(Role::Action, &v)?;
@@ -439,6 +483,8 @@ pub struct Outcome {
     pub lines: Vec<String>,
     /// Units to repair fully (`repair`).
     pub repair: Vec<Entity>,
+    /// A name in the command is not in the mission: nothing ran.
+    pub rejected: bool,
 }
 
 impl Script {
@@ -446,6 +492,11 @@ impl Script {
     /// `target`: the player's current target.
     pub fn console_run(&mut self, cmd: &Command, w: &mut [Unit], target: Option<Entity>, out: &mut Vec<Fx>) -> Outcome {
         let mut o = Outcome::default();
+        if let Err(e) = self.check_names(cmd, w) {
+            o.lines.push(e);
+            o.rejected = true;
+            return o;
+        }
         let player = self.player.clone();
         match cmd {
             Command::Nothing => {}
@@ -489,7 +540,7 @@ impl Script {
                     Dest::Set(name) => {
                         let mut names: Vec<&str> = self.point_sets.as_object().into_iter().flatten().map(|(k, _)| k.as_str()).filter(|k| *k != TP_SET).collect();
                         names.sort_unstable();
-                        o.lines.push(format!("no point set '{name}'; the mission has {}", names.join(", ")));
+                        o.lines.push(format!("no point set '{name}'{}; the mission has {}", mean(name, names.iter().copied()), names.join(", ")));
                         return o;
                     }
                 };
@@ -599,7 +650,7 @@ impl Script {
         let found: Vec<usize> = (0..self.rules.len()).filter(|&i| self.rules[i].name.to_lowercase().contains(&name.to_lowercase())).collect();
         match found.as_slice() {
             [i] => Ok(*i),
-            [] => Err(format!("no rule named '{name}'")),
+            [] => Err(format!("no rule named '{name}'{}", mean(name, self.rules.iter().map(|r| r.name.trim())))),
             many => Err(format!("'{name}' matches {} rules: {}", many.len(), many.iter().take(8).map(|&i| self.rules[i].name.trim()).collect::<Vec<_>>().join("; "))),
         }
     }
