@@ -90,6 +90,8 @@ Limits (provisional): the fleet screen lists, per fleet type (`race` Navy/Pirate
 
 ## Authoring missions
 
+The step-by-step guide is `docs/missions.md`; this section is the reference for the checking and tracing flags.
+
 The rule interpreter is forgiving: a misspelled group has no members, so a "Group Destroyed" condition never holds; a missing field
 reads as "" or 0; an unknown volume is an empty region; a JSON `true` reads as FALSE (booleans are the strings `"TRUE"` / `"FALSE"`).
 Three launch options make those mistakes loud. None of them is retail behaviour and none changes how a mission plays.
@@ -134,50 +136,11 @@ Both combinators nest (`OP Not` inside `OP Any Of` and so on). "And" is what a r
 
 *Checking and tracing.* `--check-mission` knows all of this (see "Authoring missions"): it checks the conditions nested in `OP Any Of` / `OP Not` like top-level ones (a flag or timer that is never set inside a combinator is a warning, not an error), reports a counter that is read but never set, an `OP Set Rule Active` that names no rule of the mission (an error), a task's `complete_when` / `fail_when` / `required`, and the mission keys `victory`, `victory_message` and `defeat_message`. `--dump-rule-schema` lists the `OP ` Types with `"origin": "engine"`. `--rule-trace` / `--why "<rule>"` also say when a rule is inactive (not evaluated) or busy (its sequence is waiting, so a new firing is skipped), and explain the nested conditions and counters.
 
-## A small mission, rule by rule
+## Writing a mission
 
-`docs/examples/gate-ambush.mission.json` is a complete, small `mission.json` (a unit test keeps it valid: it passes `--check-mission`
-without a warning and its rules run). It is our own, not retail data. Read it beside this page.
-
-**The top-level keys** (each is optional unless noted; the ones not listed here are for retail features such as nebulae and dragons,
-see `docs/re/campaign.md` and the imported missions):
-
-| key | what it holds |
-|---|---|
-| `players` | the player names a rule can name (`Hero`, `Raiders`); the human's own name is `player_start.name` |
-| `alliances` | `[[a, b], ...]`: the pairs of players that start allied; every other pair of players starts hostile |
-| `player_start` | `{"name": <the human's player name>, "start": [x, y, z], "forward": [x, y, z]}`; the human's ship is the placed ship of that group with `"primary": true` (or the group's first) |
-| `groups` | `{"GroupName": [world object ids]}`: named groups of placed ships |
-| `ships` | the placed ships: `id` (unique), `type` (a ship class such as `Ship_Navy_Cutter`; one with no class is not simulated), `group` (the owner), `name`, `primary`, `pos` `[x, y, z]` and `rot` (a quaternion), all in game axes |
-| `volumes` | `{"Name": [[x, y], ...]}`: closed polygons a rule tests ships against |
-| `paths` | `{"Name": [[x, y, z], ...]}`: waypoint lists for `Group to follow path` and the cutscene camera |
-| `points` | `[{"Name", "Position": [x, y, z]}]`: objective points (`Set Current Objective Point`) |
-| `environment` | `{"point_sets": {"Name": [{"pos": [x, y, z]}]}}`, and the retail environment blocks (animals, nebulae) |
-| `tasks` | the objectives: `Name`, `text`, `Active`; engine-added `complete_when`, `fail_when`, `required` |
-| `rules` | the rule list (below) |
-| `victory`, `victory_message`, `defeat_message` | engine-added: `"objectives"` lets the required tasks decide the mission |
-| `map_text`, `opening_speech` | names the checker accepts for map labels and speech events |
-
-Axes are the game's: x to starboard (east), y forward (north), z up. `--check-mission <id>` reports a name no key defines, a field a
-Type does not have, a missing required field, a flag read and never set, and so on; run it after every edit.
-
-**The rules of the example.**
-
-1. `Start` (`World Initialize`, which holds only in the first step) activates the first task, points the objective marker at the gate
-   and sets the counter `raiders sunk` to 0.
-2. `Arrive at the gate` waits for `Enter Volume` (the human's group entering `Gate Area`; it fires once, on entry). Its actions are
-   a cutscene: `NIS Start`, aim the camera at the raiders, `OP Wait` four seconds, `NIS End`; then it starts the second task, orders
-   the raiders to attack, and turns on the next rule with `OP Set Rule Active`. Because of `OP Wait` the actions after it run four
-   seconds later, in the same rule; nothing else in the rule list is held up.
-3. `Count raiders sunk` starts with `"Is Active": false`, so none of its conditions is evaluated until rule 2 switches it on. It is a
-   repeating rule (`"Run Once": false`): each ship the human sinks adds 1 to the counter.
-4. The tasks finish themselves: `Reach the gate` completes when the human is in the volume, `Clear the gate` when the counter is
-   above 1 (`OP Counter Condition`) and fails if the human's group is destroyed. `"victory": "objectives"` then wins the mission when
-   every `required` task is complete and loses it when one fails, so no rule has to call `Goto Next Level` or `End Game`.
-
-Two habits keep missions debuggable: give every rule a name that says what it waits for, and use `--rule-trace` or the console's `why`
-while you play (see "Authoring missions"). Booleans are the strings `"TRUE"` / `"FALSE"` in rules; counters, timers and flags need no
-declaration, they exist once a rule sets them.
+`docs/missions.md` is the guide to writing a custom mission: the folder layout, every key of `map.json`, `mission.json` and
+`media.json`, the worked example `docs/examples/gate-ambush.mission.json` rule by rule, storms, scenery, behaviours that surprise,
+the test loop (`--check-mission`, the console, the autopilot) and a checklist before you share it.
 
 ## The developer console
 

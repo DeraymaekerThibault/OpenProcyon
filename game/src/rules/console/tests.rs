@@ -322,7 +322,7 @@ fn kill_spares_another_unit_with_the_same_name() {
     assert!(matches!(&out[..], [Fx::Destroy(u)] if u == &[e(3)]), "only the target, though the spec names both");
 }
 
-/// `docs/examples/gate-ambush.mission.json` is the worked example of `docs/modding.md` ("A small mission, rule by rule"): it must stay
+/// `docs/examples/gate-ambush.mission.json` is the worked example of `docs/missions.md` ("Rules, step by step"): it must stay
 /// valid for the schema and the checker, and its rules must run.
 #[test]
 fn the_documented_example_mission_passes_the_checker_and_plays() {
