@@ -24,6 +24,12 @@ The manual gives no numbers: speeds, turning, timing and damage come from data a
 - Parts share their top row (gauge offsets are measured from the bar's top-left; rect heights differ only in bottom rows) and dock with
   the shortest part's bottom on the screen edge.
 - Gauges: health = core / max core; combat = guns ready / total (PROVISIONAL); sail = speed factor (PROVISIONAL). Fills crop from the bottom.
+- Gauge fill position: each faction has its own offset per gauge (`MainBar_ShipStatus_{Health,Combat,SailPower}_Offset_From_MainBar_TopLeft`;
+  Navy y 21, Pirate y 35, Procyon y 30, x 0-14). The offset is measured from the top-left of the gauge's bar part (its whole
+  hud.hdt rectangle, which starts at the bar's top edge), not from where the part's visible art begins: the transparent rows
+  cut off the part's top (3, 15 and 10-13 px for the three factions) are not added. Added by mistake they drop the fills by exactly
+  that much, out of their tubes, most on the Pirate bar (checked against a retail 1:1 screenshot of the Navy bar and against the
+  faction art for the other two: the fills then sit in the tubes' lit part). The ship portrait keeps its own, art-start origin.
 - Weapon and ship-bar toggles stand on their `*_ToggleDetail` arms: arm bottom `Move_Toggle*_Detail_Down` px behind the compass /
   talking head, button at `Toggle*_Button_Offset_From_Detail_TopLeft` (checked on a retail 1:1 screenshot). Ship icons use the class's WOT icon name.
 - A selected secondary shows its name on the `ShipName_HUDComponent_Backdrop_*` plate at the top (PROVISIONAL placement).

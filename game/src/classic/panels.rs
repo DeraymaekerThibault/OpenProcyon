@@ -455,7 +455,7 @@ fn spawn_part(commands: &mut Commands, c: &Ctx, class: &combat::Class, parent: E
     if name == "MAINBAR_IS_NOT_PAUSED_BUTTON" {
         commands.entity(part_entity).insert(PauseButton);
     }
-    // The gauge offsets and the portrait are measured from where the part's art starts, not from its transparent margin.
+    // The portrait is measured from where the part's art starts, not from its transparent margin (the gauge fills are not: see `fill`).
     let anchor = commands.spawn((Node { position_type: PositionType::Absolute, left: px(art.trim.left, c.s), top: px(art.trim.top, c.s), ..default() }, ChildOf(part_entity))).id();
     if name == "MainBar_PanicButton" {
         commands.entity(part_entity).insert(PanicButton);
@@ -466,7 +466,8 @@ fn spawn_part(commands: &mut Commands, c: &Ctx, class: &combat::Class, parent: E
     let fill = |commands: &mut Commands, sprite: &str, offset_name: &str, gauge: Gauge| {
         let Some(art) = c.sprite(sprite) else { return };
         let o = offset(c.hud, offset_name);
-        commands.spawn((Fill { gauge, art: art.clone(), top: o.y }, c.put(&art, o.x, o.y), ChildOf(anchor)));
+        // Gauge offsets count from the part's untrimmed top-left, so the fill hangs on the part itself, not on the trimmed `anchor`.
+        commands.spawn((Fill { gauge, art: art.clone(), top: o.y }, c.put(&art, o.x, o.y), ChildOf(part_entity)));
     };
     if name == "MainBar_FleetFormationsButton" {
         commands.entity(part_entity).insert(crate::panels::FleetButton::Commands);
