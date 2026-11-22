@@ -740,3 +740,11 @@ fn a_towed_ship_coasts_instead_of_braking_against_its_tower() {
     assert!((run(true) - 3.0).abs() < 1e-3, "towed: {}", run(true));
     assert!(run(false) < 0.5, "free: {}", run(false));
 }
+
+#[test]
+fn an_attack_order_ends_hold_fire_on_that_ship() {
+    let mut p = FleetPilot { hold_fire: true, ..default() };
+    p.attack(Entity::from_bits(7 | 1 << 32));
+    assert!(!p.hold_fire);
+    assert_eq!(p.target, Some(Entity::from_bits(7 | 1 << 32)));
+}

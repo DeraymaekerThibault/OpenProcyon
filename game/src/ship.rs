@@ -612,6 +612,7 @@ impl FleetPilot {
     pub fn attack(&mut self, target: Entity) {
         self.target = Some(target);
         self.destination = None;
+        self.hold_fire = false;
     }
 }
 
