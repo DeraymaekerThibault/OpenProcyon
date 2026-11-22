@@ -13,16 +13,19 @@ use bevy::prelude::*;
 use super::Look;
 use crate::fx::{EffectStarted, FxLib, HiddenFx};
 
-/// Whether an effect (by its file name) is drawn by the profile instead, given the profile.
-pub fn replaced(look: &Look, effect: &str) -> bool {
+/// Whether an effect (by its file name) is drawn by the profile instead, given the profile and the map being played.
+pub fn replaced(look: &Look, effect: &str, map: Option<&str>) -> bool {
     let lower = effect.to_lowercase();
     look.hide_effects.iter().any(|h| lower.contains(h.as_str()))
         || (look.black_holes.as_ref().is_some_and(|b| b.replace) && effect.starts_with("BlackHoleRibbons_"))
-        || (effect == "Lightning" && look.bolts.is_some() && look.nebulae.as_ref().is_some_and(|n| n.replaces_storms()))
+        || (effect == "Lightning" && look.bolts.is_some() && look.nebulae.as_ref().is_some_and(|n| n.replaces_storms(map)))
 }
 
 pub fn plugin(app: &mut App, look: &Look) {
-    if !look.hide_effects.is_empty() || ["BlackHoleRibbons_Small", "Lightning"].iter().any(|n| replaced(look, n)) {
+    if !look.hide_effects.is_empty()
+        || look.black_holes.as_ref().is_some_and(|b| b.replace)
+        || (look.bolts.is_some() && look.nebulae.as_ref().is_some_and(|n| n.replaces_storms_somewhere()))
+    {
         app.add_systems(Update, hide_replaced);
     }
 }
@@ -31,11 +34,17 @@ fn hide_replaced(
     mut commands: Commands,
     look: Res<Look>,
     lib: Option<Res<FxLib>>,
+    cfg: Option<Res<crate::Config>>,
     mut started: MessageReader<EffectStarted>,
-    mut table: Local<Option<std::collections::HashSet<usize>>>,
+    mut table: Local<Option<(Option<String>, std::collections::HashSet<usize>)>>,
 ) {
     let Some(lib) = lib else { return };
-    let table = table.get_or_insert_with(|| lib.names().filter(|(n, _)| replaced(&look, n)).map(|(_, i)| i).collect());
+    // The set depends on the map (a nebula rule can be scoped to one), so it is rebuilt when the map changes.
+    let map = super::nebulae::current_map(&cfg).map(str::to_string);
+    if table.as_ref().is_none_or(|t| t.0 != map) {
+        *table = Some((map.clone(), lib.names().filter(|(n, _)| replaced(&look, n, map.as_deref())).map(|(_, i)| i).collect()));
+    }
+    let table = &table.as_ref().expect("built above").1;
     for m in started.read() {
         if table.contains(&m.effect) {
             // short effects can be gone by the time commands apply
@@ -62,18 +71,25 @@ mod tests {
         for (look, ribbons, bolt) in
             [(&classic, false, false), (&holes, true, false), (&storms, false, true), (&boltless, false, false), (&clouds, false, false), (&stacked, false, false)]
         {
-            assert_eq!(replaced(look, "BlackHoleRibbons_Large"), ribbons);
-            assert_eq!(replaced(look, "Lightning"), bolt);
-            assert!(!replaced(look, "Explosion_Light") && !replaced(look, "MeteorStorm"), "nothing else is hidden");
+            assert_eq!(replaced(look, "BlackHoleRibbons_Large", None), ribbons);
+            assert_eq!(replaced(look, "Lightning", None), bolt);
+            assert!(!replaced(look, "Explosion_Light", None) && !replaced(look, "MeteorStorm", None), "nothing else is hidden");
         }
+    }
+
+    #[test]
+    fn a_storm_rule_scoped_to_a_map_hides_the_lightning_sprite_only_there() {
+        let look = Look::parse(&json!({"nebulae": {"bolt": {}, "rules": [{"match": "SolarStorm", "replace": true, "map": "shakedown"}]}}));
+        assert!(replaced(&look, "Lightning", Some("shakedown")));
+        assert!(!replaced(&look, "Lightning", Some("mission03")) && !replaced(&look, "Lightning", None));
     }
 
     #[test]
     fn hide_effects_hides_any_effect_by_a_fragment_of_its_name() {
         let look = Look::parse(&json!({"hide_effects": ["explosion_", "MeteorStorm", ""]}));
         assert_eq!(look.hide_effects, ["explosion_", "meteorstorm"], "lower case, empty fragments dropped");
-        assert!(replaced(&look, "Explosion_Light") && replaced(&look, "MeteorStorm"), "not case-sensitive");
-        assert!(!replaced(&look, "Lightning") && !replaced(&look, "BlackHoleRibbons_Large"), "nothing it does not name");
+        assert!(replaced(&look, "Explosion_Light", None) && replaced(&look, "MeteorStorm", None), "not case-sensitive");
+        assert!(!replaced(&look, "Lightning", None) && !replaced(&look, "BlackHoleRibbons_Large", None), "nothing it does not name");
         let mut app = app(look);
         let (boom, bolt) = (app.world_mut().spawn(Transform::default()).id(), app.world_mut().spawn(Transform::default()).id());
         let started = |entity, effect| EffectStarted { entity, effect, at: Vec3::ZERO, forward: Vec3::Z, shell: None, host: None, material: None };

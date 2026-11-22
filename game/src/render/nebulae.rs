@@ -50,6 +50,8 @@ pub struct Nebulae {
 pub struct Rule {
     /// A fragment of the cloud's effect name (`Nebula`, `SolarStorm`), lower case.
     pub matching: String,
+    /// The maps this rule is for (`map` / `maps`); empty = every map. A scoped rule never matches a battle whose map is unknown.
+    pub maps: Vec<String>,
     /// Strength of the gas; above 1 the cores bloom.
     pub density: f32,
     /// Ray steps through the cloud (4..=24).
@@ -92,6 +94,23 @@ pub struct Rule {
     pub flicker: f32,
 }
 
+/// The map ids of a rule: `"map": "id"` and/or `"maps": ["id", ...]`.
+fn maps_of(r: &Value) -> Vec<String> {
+    r["map"].as_str().into_iter().chain(r["maps"].as_array().into_iter().flatten().filter_map(Value::as_str)).filter(|m| !m.is_empty()).map(str::to_string).collect()
+}
+
+/// The id of the map being played, as rules with a `map` see it (none outside a battle).
+pub fn current_map<'a>(cfg: &'a Option<Res<crate::Config>>) -> Option<&'a str> {
+    cfg.as_deref().and_then(|c| c.map.as_deref())
+}
+
+impl Rule {
+    /// Whether the rule is for the battle on `map`: an unscoped rule is for every map, a scoped one for its own maps only.
+    pub fn applies_to(&self, map: Option<&str>) -> bool {
+        self.maps.is_empty() || map.is_some_and(|m| self.maps.iter().any(|x| x == m))
+    }
+}
+
 pub fn parse(v: &Value) -> Option<Nebulae> {
     let all = v["replace"].as_bool().unwrap_or(false);
     v.is_object().then(|| Nebulae {
@@ -102,6 +121,7 @@ pub fn parse(v: &Value) -> Option<Nebulae> {
                     .filter_map(|r| {
                         Some(Rule {
                             matching: r["match"].as_str()?.to_lowercase(),
+                            maps: maps_of(r),
                             density: num(&r["density"], 1.0).clamp(0.0, 8.0),
                             steps: num(&r["steps"], 16.0).clamp(4.0, MAX_STEPS).round(),
                             scale: num(&r["scale"], 2.2).clamp(0.2, 12.0),
@@ -133,15 +153,20 @@ pub fn parse(v: &Value) -> Option<Nebulae> {
 }
 
 impl Nebulae {
-    /// Whether a rule for a solar storm replaces the retail look (its bolts are then drawn by the profile).
-    pub fn replaces_storms(&self) -> bool {
+    /// Whether a rule for a solar storm replaces the retail look on `map` (its bolts are then drawn by the profile).
+    pub fn replaces_storms(&self, map: Option<&str>) -> bool {
+        self.rules.iter().any(|r| r.replace && "solarstorm".contains(&r.matching) && r.applies_to(map))
+    }
+
+    /// Whether such a rule exists for some map: the systems that act on it are only added then.
+    pub fn replaces_storms_somewhere(&self) -> bool {
         self.rules.iter().any(|r| r.replace && "solarstorm".contains(&r.matching))
     }
 
-    /// The rule for a cloud made by the effect `effect`, if any.
-    pub fn find(&self, effect: &str) -> Option<&Rule> {
+    /// The rule for a cloud made by the effect `effect` in a battle on `map`, if any.
+    pub fn find(&self, effect: &str, map: Option<&str>) -> Option<&Rule> {
         let e = effect.to_lowercase();
-        self.rules.iter().find(|r| e.contains(&r.matching))
+        self.rules.iter().find(|r| e.contains(&r.matching) && r.applies_to(map))
     }
 }
 
@@ -304,6 +329,7 @@ impl Rule {
 fn spawn_volumes(
     mut commands: Commands,
     look: Res<Look>,
+    cfg: Option<Res<crate::Config>>,
     time: Res<Time>,
     frame: Res<Frame>,
     noise: Option<Res<NoiseVolume>>,
@@ -315,7 +341,7 @@ fn spawn_volumes(
     let (Some(n), Some(noise)) = (&look.nebulae, noise) else { return };
     let bolt = Bolt::of(&frame);
     for (e, cloud, at) in &clouds {
-        let Some(rule) = n.find(cloud.effect()).filter(|r| r.replace) else { continue };
+        let Some(rule) = n.find(cloud.effect(), current_map(&cfg)).filter(|r| r.replace) else { continue };
         let mesh = cube.get_or_insert_with(|| meshes.add(Cuboid::new(1.0, 1.0, 1.0))).clone();
         // back faces only: the camera may be inside the box, and the shader marches the ray from there
         let base =
@@ -350,6 +376,7 @@ fn sun_of(frame: &Frame) -> SunLight {
 
 fn update_volumes(
     look: Res<Look>,
+    cfg: Option<Res<crate::Config>>,
     time: Res<Time>,
     frame: Res<Frame>,
     clouds: Query<(&Cloud, &GlobalTransform, &Children)>,
@@ -359,7 +386,7 @@ fn update_volumes(
     let Some(n) = &look.nebulae else { return };
     let (sun, bolt) = (sun_of(&frame), Bolt::of(&frame));
     for (cloud, at, children) in &clouds {
-        let Some(rule) = n.find(cloud.effect()).filter(|r| r.replace) else { continue };
+        let Some(rule) = n.find(cloud.effect(), current_map(&cfg)).filter(|r| r.replace) else { continue };
         for mat in children.iter().filter_map(|c| proxies.get(c).ok()) {
             if let Some(mut m) = materials.get_mut(&mat.0) {
                 m.extension.u = rule.volume(cloud, at.translation(), time.elapsed_secs(), &bolt, sun);
@@ -429,10 +456,10 @@ impl Rule {
 }
 
 /// Hides the retail shell of every cloud a replacing rule matches (the cloud keeps running: nothing but its visibility changes).
-fn hide_shells(mut commands: Commands, look: Res<Look>, clouds: Query<(Entity, &Cloud), Without<ShellHidden>>) {
+fn hide_shells(mut commands: Commands, look: Res<Look>, cfg: Option<Res<crate::Config>>, clouds: Query<(Entity, &Cloud), Without<ShellHidden>>) {
     let Some(n) = &look.nebulae else { return };
     for (e, cloud) in &clouds {
-        if n.find(cloud.effect()).is_some_and(|r| r.replace) {
+        if n.find(cloud.effect(), current_map(&cfg)).is_some_and(|r| r.replace) {
             commands.entity(e).try_insert((Visibility::Hidden, ShellHidden));
         }
     }
@@ -443,6 +470,7 @@ fn hide_shells(mut commands: Commands, look: Res<Look>, clouds: Query<(Entity, &
 fn restyle(
     mut commands: Commands,
     look: Res<Look>,
+    cfg: Option<Res<crate::Config>>,
     time: Res<Time>,
     frame: Res<Frame>,
     clouds: Query<(Entity, &Cloud, &GlobalTransform, &MeshMaterial3d<EffectMaterial>), Without<Volumetric>>,
@@ -452,7 +480,7 @@ fn restyle(
     let Some(n) = &look.nebulae else { return };
     let bolt = Bolt::of(&frame);
     for (e, cloud, at, mat) in &clouds {
-        let Some(rule) = n.find(cloud.effect()).filter(|r| !r.replace) else { continue };
+        let Some(rule) = n.find(cloud.effect(), current_map(&cfg)).filter(|r| !r.replace) else { continue };
         let Some(old) = retail.get(&mat.0) else { continue };
         let base = StandardMaterial { base_color: Color::WHITE, base_color_texture: old.base.base_color_texture.clone(), ..old.base.clone() };
         let handle =
@@ -463,6 +491,7 @@ fn restyle(
 
 fn update(
     look: Res<Look>,
+    cfg: Option<Res<crate::Config>>,
     time: Res<Time>,
     frame: Res<Frame>,
     clouds: Query<(&Cloud, &GlobalTransform, &MeshMaterial3d<NebulaMaterial>)>,
@@ -471,7 +500,7 @@ fn update(
     let Some(n) = &look.nebulae else { return };
     let bolt = Bolt::of(&frame);
     for (cloud, at, mat) in &clouds {
-        let (Some(rule), Some(mut m)) = (n.find(cloud.effect()), materials.get_mut(&mat.0)) else { continue };
+        let (Some(rule), Some(mut m)) = (n.find(cloud.effect(), current_map(&cfg)), materials.get_mut(&mat.0)) else { continue };
         m.extension.u = rule.uniform(at.translation(), cloud.radius(), time.elapsed_secs(), &bolt);
     }
 }

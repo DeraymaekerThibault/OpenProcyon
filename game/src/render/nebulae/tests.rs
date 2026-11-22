@@ -42,9 +42,28 @@ fn defaults_and_clamping() {
 #[test]
 fn rules_match_by_effect_name_first_wins() {
     let n = parse(&json!({"rules": [{"match": "SolarStorm", "density": 4}, {"match": "Nebula", "density": 1}, {"match": "s", "density": 9}]})).unwrap();
-    assert_eq!(n.find("SolarStorm").map(|r| r.density), Some(4.0));
-    assert_eq!(n.find("Nebula").map(|r| r.density), Some(1.0));
-    assert!(n.find("Meteor").is_none(), "no rule, the retail material stays");
+    assert_eq!(n.find("SolarStorm", None).map(|r| r.density), Some(4.0));
+    assert_eq!(n.find("Nebula", None).map(|r| r.density), Some(1.0));
+    assert!(n.find("Meteor", None).is_none(), "no rule, the retail material stays");
+}
+
+#[test]
+fn a_rule_can_be_scoped_to_maps_and_others_ignore_it() {
+    let n = parse(&json!({"rules": [
+        {"match": "Nebula", "map": "shakedown", "density": 5},
+        {"match": "Nebula", "maps": ["a", "b"], "map": "c", "density": 3},
+        {"match": "Nebula", "density": 1},
+        {"match": "SolarStorm", "map": "shakedown", "replace": true}]}))
+    .unwrap();
+    assert_eq!(n.rules[1].maps, ["c", "a", "b"], "map and maps add up");
+    let density = |map| n.find("Nebula", map).map(|r| r.density);
+    assert_eq!(density(Some("shakedown")), Some(5.0));
+    assert_eq!(density(Some("b")), Some(3.0));
+    assert_eq!(density(Some("mission01")), Some(1.0), "another map skips the scoped rules and takes the next that matches");
+    assert_eq!(density(None), Some(1.0), "no map known: only unscoped rules");
+    assert!(n.find("SolarStorm", Some("mission01")).is_none() && n.find("SolarStorm", Some("shakedown")).is_some());
+    assert!(n.replaces_storms(Some("shakedown")) && !n.replaces_storms(Some("mission01")) && !n.replaces_storms(None));
+    assert!(n.replaces_storms_somewhere());
 }
 
 #[test]
@@ -90,8 +109,8 @@ fn replace_is_per_rule_or_for_the_block_and_off_by_default() {
     assert!(!parse(&json!({"rules": [{"match": "n"}]})).unwrap().rules[0].replace);
     let n = parse(&json!({"replace": true, "rules": [{"match": "Nebula"}, {"match": "SolarStorm", "replace": false}]})).unwrap();
     assert_eq!((n.rules[0].replace, n.rules[1].replace), (true, false));
-    assert!(!n.replaces_storms(), "the storm rule opted out");
-    assert!(parse(&json!({"rules": [{"match": "SolarStorm", "replace": true}]})).unwrap().replaces_storms());
+    assert!(!n.replaces_storms(None), "the storm rule opted out");
+    assert!(parse(&json!({"rules": [{"match": "SolarStorm", "replace": true}]})).unwrap().replaces_storms(None));
 }
 
 #[test]
