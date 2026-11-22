@@ -589,6 +589,8 @@ fn routine(
             dockable.release(e);
             if let Some(m) = m.as_mut() {
                 m.script.set_docked(e, docker.dockee, false);
+                // Retail: releasing (or cancelling) a dock removes any link between the pair, so docking at one's own tower ends the tow.
+                m.script.break_tow_between(e, docker.dockee);
             }
         };
         let Ok((dockee_tf, mut dockable, dockee_ship, dockee_health)) = dockees.get_mut(docker.dockee) else {

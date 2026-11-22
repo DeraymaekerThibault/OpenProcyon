@@ -191,6 +191,11 @@ impl Script {
             self.tows.push((tower, towee));
         }
     }
+    /// Ends the tow joining two ships, whichever of them is the tower: a dock release removes any link between docker and dockee,
+    /// so docking at one's own tower (or tower docking at its towee) ends the tow.
+    pub fn break_tow_between(&mut self, a: Entity, b: Entity) {
+        self.tows.retain(|t| *t != (a, b) && *t != (b, a));
+    }
     /// Breaks every link `tower` has (the menu's Tow stop).
     pub fn break_tows(&mut self, tower: Entity) {
         self.tows.retain(|t| t.0 != tower);

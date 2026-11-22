@@ -239,6 +239,23 @@ fn menu_tow_links_are_kept_per_tower_and_broken() {
     assert!(sc.tows().is_empty());
 }
 
+/// A dock release removes the link between docker and dockee: docking at the own tower ends the tow, docking elsewhere leaves it.
+#[test]
+fn releasing_a_dock_at_the_own_tower_ends_the_tow_only_there() {
+    let data = serde_json::json!({"rules": [], "ships": [], "volumes": null, "environment": {}});
+    let mut sc = Script::new(&data, Value::Null);
+    let mut world = World::new();
+    let (tower, towee, tender) = (world.spawn_empty().id(), world.spawn_empty().id(), world.spawn_empty().id());
+    sc.set_tow(tower, towee, true);
+    sc.break_tow_between(towee, tender);
+    assert_eq!(sc.tows(), &[(tower, towee)], "a dock at another tender leaves the tow");
+    sc.break_tow_between(towee, tower);
+    assert!(sc.tows().is_empty(), "the towee docking at its tower ends the tow");
+    sc.set_tow(tower, towee, true);
+    sc.break_tow_between(tower, towee);
+    assert!(sc.tows().is_empty(), "so does the tower docking at its towee");
+}
+
 #[test]
 #[ignore = "needs imported assets"]
 fn asteroid_setup_selects_named_groups_and_preserves_kill_attribution() {
