@@ -77,7 +77,7 @@ target the ship starts a boarding activity that keeps re-testing (pathing toward
 once it passes. Board stop removes the fight. Grapple starts a grapple-and-board activity: while the
 boarder has a free grapple gun it closes to the gun's range and fires (a 5 % chance per tick to actually fire once aimed [?]), cleans up grapple relations
 with ships that stopped being hostile, and once a grapple holds and the start test passes (and a strength check [?] and a 20 % roll) it registers the fight.
-The rule actions `Board Ships` / `Grapple Ship` exist but **no mission uses them**; fights only start from the player's orders and these activities.
+The rule actions `Board Ships` / `Grapple Ship` exist but **no mission uses them**; fights only start from the player's orders and these activities. Their fields are not recorded anywhere (no mission, no schema), so the engine does not implement them; the engine-added rule action `OP Board Ship` (`docs/modding.md`, not retail) lets a custom mission start a boarding through the same grapple order, start test and fight.
 
 **Computer captains** run the grapple-and-board activity on their own: every ship the AI steers (all computer ships; not the
 human's command ship) runs it every tick against its current target, without any order:

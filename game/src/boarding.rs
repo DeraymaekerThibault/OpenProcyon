@@ -25,7 +25,7 @@ mod grapple;
 mod odds;
 use ai::ai_boarding;
 pub use fight::Boarders;
-use fight::{fights, handle_messages, per_tick, say, set_flags, settled};
+use fight::{fights, handle_messages, per_tick, say, scripted_boarding, set_flags, settled};
 pub use grapple::Ropes;
 use grapple::{
     Body, HARPOON_SPEED, cancel_grapple_order, grapple_limit, grapple_orders, harpoon_bears, has_harpoon, hook_flight, in_range, radius, ropes, velocity, winch_pull, winch_upkeep,
@@ -131,6 +131,10 @@ fn side_of(tf: &Transform, other: Vec3) -> Vec3 {
 /// The Grapple order: steer for `target` until it is inside harpoon range, then fire.
 #[derive(Component)]
 pub struct GrappleOrder(Entity);
+/// A rule's boarding order (`OP Board Ship`): once the grapple holds and the boarding test passes, the boarder boards `.0`
+/// (`boarding::scripted_boarding`).
+#[derive(Component)]
+pub struct ScriptedBoard(Entity);
 
 #[derive(Message)]
 pub enum BoardMsg {
@@ -151,6 +155,11 @@ pub enum BoardMsg {
     },
     /// 'Set Group/Unit Boardable'.
     Boardable(Entity, bool),
+    /// The rules' `OP Board Ship`: grapple `target` (unless a grapple is already on it) and board it as soon as the normal test allows.
+    Scripted {
+        boarder: Entity,
+        target: Entity,
+    },
 }
 /// A capture, for the mission rules' capture counts (owner names; skirmish sides are "Player" / "Enemy").
 #[derive(Message)]
@@ -202,7 +211,7 @@ pub fn plugin(app: &mut App) {
         // link keeper (7.1); the computer's decision to board runs after collision (8).
         .add_systems(
             FixedUpdate,
-            (handle_messages, set_flags, grapple_orders)
+            (handle_messages, set_flags, grapple_orders, scripted_boarding)
                 .chain()
                 .in_set(crate::BattleSet::Commands)
                 .run_if(in_state(crate::menu::Screen::Battle))

@@ -177,6 +177,18 @@ pub(in crate::rules) fn apply(
                     env.board.write(crate::boarding::BoardMsg::Boardable(e, on));
                 }
             }
+            Fx::Board(boarders, targets) => {
+                for b in boarders {
+                    let Ok(from) = ships.get(b).map(|s| s.transform.translation) else { continue };
+                    let near = targets.iter().copied().filter(|t| *t != b).min_by(|x, y| {
+                        let d = |e: &Entity| ships.get(*e).map_or(f32::MAX, |s| s.transform.translation.distance(from));
+                        d(x).total_cmp(&d(y))
+                    });
+                    if let Some(target) = near {
+                        env.board.write(crate::boarding::BoardMsg::Scripted { boarder: b, target });
+                    }
+                }
+            }
             // Ships only: bases, rocks and animals have no flag.
             Fx::Lifeboats(u, on) => each_ship(ships, u, |s| s.mission.create_lifeboats = on),
             Fx::IslandRepair(u, on) => {

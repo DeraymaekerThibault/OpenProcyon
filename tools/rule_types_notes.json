@@ -68,7 +68,7 @@
     {
       "title": "Engine-added OP types",
       "intro": "Not in the retail game. Every name starts with `OP `. See `docs/modding.md`, \"Mission rule extensions\", for sequences, rule activation and self-completing tasks.",
-      "types": ["OP Any Of", "OP Not", "OP Counter Condition", "OP Set Counter", "OP Add To Counter", "OP Wait", "OP Wait Until Speech Done", "OP Set Rule Active"]
+      "types": ["OP Any Of", "OP Not", "OP Counter Condition", "OP Set Counter", "OP Add To Counter", "OP Wait", "OP Wait Until Speech Done", "OP Set Rule Active", "OP Board Ship"]
     }
   ],
   "notes": {
@@ -222,6 +222,7 @@
     "OP Add To Counter": "Adds `Value` (may be negative) to a counter.",
     "OP Wait": "Pauses the rest of this rule's action list for `Seconds`. Outside a rule's action list it does nothing.",
     "OP Wait Until Speech Done": "Pauses until the speech event is neither queued nor playing; an empty name waits for all speech. Put it after the `Play speech event` it waits for.",
-    "OP Set Rule Active": "Activates or deactivates every rule of that name. A deactivated rule stops a sequence that is waiting."
+    "OP Set Rule Active": "Activates or deactivates every rule of that name. A deactivated rule stops a sequence that is waiting.",
+    "OP Board Ship": "Each ship of the first group boards the nearest live ship of the second: it sails over, fires its harpoon, and once the grapple holds starts the boarding fight as the order menu does (the target must be Boardable TRUE; the boarder needs a harpoon and a hostile target). The rules then see the capture. Dropped when either ship dies or the grapple is lost."
   }
 }

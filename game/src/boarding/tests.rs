@@ -135,7 +135,7 @@ fn app() -> App {
         .init_resource::<Got>()
         .insert_resource(Library::load(assets_dir()))
         .insert_resource(Rng::new(7))
-        .add_systems(Update, (handle_messages, set_flags, grapple_orders, hook_flight, winch_upkeep, winch_pull, drive, fights, settled, status, collect).chain());
+        .add_systems(Update, (handle_messages, set_flags, grapple_orders, scripted_boarding, hook_flight, winch_upkeep, winch_pull, drive, fights, settled, status, collect).chain());
     app
 }
 fn tick(app: &mut App, secs: f32) {
@@ -245,6 +245,42 @@ fn grapple_then_board_captures_the_ship_and_tells_the_rules() {
     assert_eq!(app.world().resource::<Mission>().script.tows(), &[(other, towee)], "the captor's tow links are dropped, others kept");
     assert_eq!(app.world().resource::<Got>().0, vec![("Player".to_string(), "Enemy".to_string())]);
     assert!(app.world().get::<Boardable>(foe).unwrap().strength.defend > 3, "crewed afresh");
+}
+
+/// `OP Board Ship`: from out of harpoon range the boarder sails over, grapples and boards by itself, and the rules are told of the capture;
+/// a target that is not Boardable is grappled but not boarded; a boarder without a harpoon is refused.
+#[test]
+#[ignore = "needs imported assets"]
+fn a_rule_can_order_a_boarding() {
+    let mut app = app();
+    let me = spawn(&mut app, "Ship_Navy_Cutter", Side::Player, Vec3::ZERO, Skill::Elite);
+    let foe = spawn(&mut app, "Ship_Pirate_Schooner", Side::Enemy, Vec3::new(0.0, 0.0, -150.0), Skill::Green);
+    app.world_mut().get_mut::<Boardable>(foe).unwrap().strength.defend = 3;
+    app.insert_resource(crate::campaign::load());
+    app.world_mut().get_mut::<Boardable>(foe).unwrap().on = false;
+    app.world_mut().write_message(BoardMsg::Scripted { boarder: me, target: foe });
+    for _ in 0..400 {
+        tick(&mut app, 0.1);
+    }
+    assert!(app.world().get::<Boarding>(me).is_none(), "not Boardable: no fight");
+    assert!(held(&mut app, me).iter().any(|g| g.0 == foe), "but the harpoon is on");
+    assert!(app.world().get::<ScriptedBoard>(me).is_some(), "the order waits for the flag");
+    app.world_mut().get_mut::<Boardable>(foe).unwrap().on = true;
+    let mut fought = false;
+    for _ in 0..1500 {
+        tick(&mut app, 0.1);
+        fought |= app.world().get::<Boarding>(me).is_some_and(|f| f.target() == foe);
+    }
+    assert!(fought, "the order started the fight once the flag was on");
+    assert!(app.world().get::<ScriptedBoard>(me).is_none());
+    assert_eq!(app.world().get::<Ship>(foe).unwrap().side, Side::Player, "captured");
+    assert_eq!(app.world().resource::<Got>().0, vec![("Player".to_string(), "Enemy".to_string())]);
+    // no harpoon, no order
+    let barge = spawn(&mut app, "Ship_Civilian_Merchant", Side::Player, Vec3::new(500.0, 0.0, 0.0), Skill::Average);
+    let other = spawn(&mut app, "Ship_Pirate_Schooner", Side::Enemy, Vec3::new(500.0, 0.0, -50.0), Skill::Average);
+    app.world_mut().write_message(BoardMsg::Scripted { boarder: barge, target: other });
+    tick(&mut app, 0.1);
+    assert!(app.world().get::<ScriptedBoard>(barge).is_none() && app.world().get::<GrappleOrder>(barge).is_none());
 }
 
 #[test]

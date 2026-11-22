@@ -1169,3 +1169,15 @@ fn a_started_speech_line_with_text_is_handed_to_the_chat_history_once() {
     }
     assert_eq!(sc.started, vec![("First.".to_string(), Some([1.0, 0.0, 0.0, 1.0])), ("Second.".to_string(), None)], "in order, textless lines skipped");
 }
+
+#[test]
+fn op_board_ship_emits_a_boarding_effect_for_the_two_groups() {
+    let mut s = script();
+    let (mut a, mut b) = (unit("Gull", "Black Gull", Vec3::ZERO), unit("Pride", "Calloway", Vec3::X));
+    let mut world = World::new();
+    (a.e, b.e) = (world.spawn_empty().id(), world.spawn_empty().id());
+    let w = [a.clone(), b.clone()];
+    let mut out = vec![];
+    s.act(&serde_json::json!({"Type": "OP Board Ship", "Boarder Group": "Black Gull", "Target Group": "Calloway"}), &w, &mut out, "t");
+    assert!(matches!(&out[..], [Fx::Board(x, t)] if x == &[a.e] && t == &[b.e]), "boarders, then targets");
+}

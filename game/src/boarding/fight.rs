@@ -153,6 +153,39 @@ pub(super) fn handle_messages(mut msgs: MessageReader<BoardMsg>, mut commands: C
                 }
             }
             BoardMsg::Boardable(..) => {}
+            BoardMsg::Scripted { boarder, target } => {
+                if boarders.boarding(boarder, target) {
+                    continue;
+                }
+                if boarders.can_board(boarder, target) {
+                    // The grapple already holds (or the target is a base in reach): the fight starts as from the menu.
+                    commands.entity(boarder).insert(ScriptedBoard(target));
+                } else if boarders.grappled(boarder, target) || boarders.grappling(boarder, target) {
+                    commands.entity(boarder).insert(ScriptedBoard(target)); // waits for the Boardable flag, the range or the hook's flight
+                } else if boarder != target && boarders.can_grapple(boarder) && boarders.hostile(boarder, target) && boarders.ships.contains(target) {
+                    commands.entity(boarder).insert((GrappleOrder(target), ScriptedBoard(target)));
+                } else {
+                    warn!("OP Board Ship: {boarder} cannot board {target} (a ship needs a harpoon and a hostile ship to grapple; a base must be hostile and in reach)");
+                }
+            }
+        }
+    }
+}
+
+/// Carries out `OP Board Ship`: the boarder sails and grapples as ordered, then boards by the same message the menu and the AI send.
+/// The order ends when the fight is registered, when either ship is gone or destroyed, or when no grapple is left on the target (a
+/// snapped rope or a failed harpoon: fire the rule again).
+pub(super) fn scripted_boarding(mut commands: Commands, mut msg: MessageWriter<BoardMsg>, boarders: Boarders, orders: Query<(Entity, &ScriptedBoard, Has<GrappleOrder>)>) {
+    for (e, ScriptedBoard(t), ordered) in &orders {
+        let alive = |x: Entity| boarders.ships.get(x).is_ok_and(|s| !s.1.destroyed);
+        if !alive(e) || (boarders.ships.contains(*t) && !alive(*t)) || boarders.bodies.get(*t).is_err() || boarders.boarding(e, *t) {
+            commands.entity(e).remove::<ScriptedBoard>();
+        } else if boarders.can_board(e, *t) {
+            msg.write(BoardMsg::Board { boarder: Some(e), target: *t });
+            commands.entity(e).remove::<ScriptedBoard>();
+        } else if !ordered && !boarders.grappling(e, *t) && boarders.ships.contains(*t) {
+            info!("OP Board Ship: {e} lost its grapple on {t}; the order is dropped");
+            commands.entity(e).remove::<ScriptedBoard>();
         }
     }
 }

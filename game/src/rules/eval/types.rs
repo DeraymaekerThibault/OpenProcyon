@@ -126,6 +126,8 @@ pub enum Fx {
     Tow(Entity, Entity),
     Dockable(Vec<Entity>, bool),
     Boardable(Vec<Entity>, bool),
+    /// 'OP Board Ship': each boarder grapples and boards the nearest live ship of the target group.
+    Board(Vec<Entity>, Vec<Entity>),
     /// 'Set Lifeboat Creation State': the ships' Create Lifeboats flag (lifeboats.rs reads it when they are destroyed).
     Lifeboats(Vec<Entity>, bool),
     IslandRepair(Vec<Entity>, bool),

@@ -294,6 +294,8 @@ impl Script {
                     self.shots.remove(&e);
                 }
             }
+            // Engine-added, needs the world: the other `OP ` actions are in ext.rs.
+            "OP Board Ship" => out.push(Fx::Board(g("Boarder Group"), g("Target Group"))),
             t if t.starts_with("OP ") => self.ext_act(a, rule),
             other => self.warn(&format!("action '{other}' in rule '{rule}'")),
         }
