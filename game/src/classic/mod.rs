@@ -3,6 +3,7 @@
 use bevy::prelude::*;
 
 mod boarding_bar;
+mod console;
 pub mod crew_arms;
 pub mod menu;
 mod mission_ui;
@@ -26,6 +27,7 @@ pub fn plugin(app: &mut App) {
         crew_arms::plugin,
         ship_preview::plugin,
         boarding_bar::plugin,
+        console::plugin,
         starmap::plugin,
         world_hud::plugin,
         mission_ui::plugin,

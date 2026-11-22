@@ -22,6 +22,16 @@ Git Bash (`GIT_BASH=<path>` if it is not in the default place), and the screensh
    base/ship, add or tighten a scenario there rather than relying on a long manual run.
    `--fire-rule "<rule name>"` (repeatable) and `--start-at x,y` start a mission at a later beat: the named rules' actions run once the world-initialise rules have
    run and the primary ship is placed (`Script::fire_start_rules` in `rules/eval.rs`; debug only, see `docs/modding.md`).
+   The developer console (`~` or F12, in a battle that runs a mission's rules; `rules/console.rs` model and parsing,
+   `rules/systems/dev_console.rs` keys and effects, `classic/console.rs` drawing; not retail behaviour) is a one-shot runner for the
+   rule vocabulary, not a second command system: a line becomes a rule action (or a condition, for a query) and goes through
+   `Script::act` / `Script::cond`, so every action a mission can use works (`act {json}`), and a new action needs nothing here.
+   Short commands only build the common ones (`god`, `kill`, `reveal`, `tp`, `set`, `timer`, `task`); `repair` has no rule action and
+   touches the ships directly; `fire`, `why`, `flags`, `timers`, `tasks` are the mission-debug commands (`help` lists them). It is
+   on in debug builds and, in release builds, with `--console` or `PROCYON_CONSOLE=1`. Any command that changes the game sets
+   `rules::console::Cheats::used` for the battle: the campaign points are not recorded then and the screen shows "CHEATS USED".
+   While it is open the battle is paused and the game sees no keyboard or mouse. Add a command by extending `console::parse`
+   and `Script::console_run` with a test in `rules/console/tests.rs`; `--script console --mission 1` is the runtime smoke test.
    `PROCYON_TRACE=<file.csv>` (`smoke/trace.rs`) logs every ship (position, velocity, heading, section hit points) and every shell
    once per simulation step, in game axes: the table to lay beside a measurement of the original when a battle plays out
    differently (how close ships come, how often they fire and hit). Stage the same start points with a small mod that replaces
