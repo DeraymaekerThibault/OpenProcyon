@@ -149,6 +149,10 @@ fn lobby_scenario(app: &mut App) {
 
 pub fn run(view: fn(&mut App), setup_view: fn(&mut App)) {
     let args: Vec<String> = std::env::args().collect();
+    // Mission authoring (docs/modding.md): the rule schema needs no assets.
+    if let Some(code) = rules::cli::dump_schema(&args) {
+        std::process::exit(code);
+    }
     let script = args.iter().position(|a| a == "--script").map(|i| {
         args.get(i + 1).ok_or_else(|| "--script requires a name".to_owned()).and_then(|name| smoke::Script::parse(name)).unwrap_or_else(|err| {
             eprintln!("{err}");
@@ -176,6 +180,9 @@ pub fn run(view: fn(&mut App), setup_view: fn(&mut App)) {
     modding::set_active(installed.chain(mods).collect());
     let layers: Vec<PathBuf> = std::iter::once(content_dir()).chain(modding::active().iter().cloned()).collect();
     let _ = ASSETS.set(modding::overlay(&base, &layers));
+    if let Some(code) = rules::cli::apply(&args) {
+        std::process::exit(code);
+    }
     let arg = |k: &str| args.iter().position(|a| a == k).and_then(|i| args.get(i + 1)).cloned();
     let shot = arg("--shot");
     // Debug aids for mission authors: fire named rules at the start (repeatable) and place the primary ship (x,y in game units).

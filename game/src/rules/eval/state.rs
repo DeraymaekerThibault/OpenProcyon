@@ -122,6 +122,8 @@ pub struct Script {
     pub(in crate::rules) mortar_seen: HashSet<String>,
     /// 'Open Crew and Arms Screens': the front end shows the crew and arms screen once (menu.rs clears it).
     pub crew_screen: bool,
+    /// Rule trace and start-of-mission audit (diag.rs).
+    pub(in crate::rules) diag: Diag,
 }
 
 impl Script {
