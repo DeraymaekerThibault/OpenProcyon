@@ -234,8 +234,10 @@ Patterns that recur:
 
 Observed while building larger missions and re-read against `game/src/rules/eval/`:
 
-- **`Teleport Group/Unit` sends every member of the group to the first point of the set**, so a group of two lands stacked. Use one group
-  and one point set per ship, offset by hand. It changes the position only: heading, speed and damage stay.
+- **`Teleport Group/Unit` puts a group round the first point of the set**: the original stacks every member on that point; this engine keeps
+  the members' layout round it (one ship lands on it) and moves a ship that would land inside another hull to the nearest free spot. It stops every
+  teleported ship dead (speed, turn rate; the human's ship also its throttle and course; a computer ship keeps its order, so a path set afterwards is
+  followed) and keeps heading and damage. Engine-added, docs/re/collision.md "Teleport and overlap".
 - **Damage is a fraction, 0..1**: `Damage Group/Unit by X percent` and `Group/Unit has >,<,= X damage` take 0.3 for 30 per cent (30 would
   kill; the checker reports it). The condition reads the worst-hit member.
 - **Event quotas count "more than N"**: `Team has captured a ship from Group/Unit` and the other event conditions fire when the count is

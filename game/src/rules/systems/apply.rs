@@ -122,29 +122,7 @@ pub(in crate::rules) fn apply(
                 s.health.destroyed = true;
                 *s.visibility = Visibility::Hidden;
             }),
-            Fx::Teleport(u, p) => {
-                for e in u {
-                    if let Ok(RuleShipItem { ship: mut sh, transform: mut tf, .. }) = ships.get_mut(e) {
-                        tf.translation = p;
-                        sh.waypoints.clear();
-                    } else if let Ok((_, mut animal, mut tf, _)) = animals.get_mut(e) {
-                        tf.translation = p;
-                        animal.velocity = Vec3::ZERO;
-                    } else if env.bases.contains(e) {
-                        // Scenery (wrecks): move the model and its collision body together.
-                        commands.queue(move |w: &mut World| {
-                            let Some(old) = w.get::<Transform>(e).map(|t| t.translation) else { return };
-                            let delta = (p - old).with_y(0.0);
-                            if let Some(mut t) = w.get_mut::<Transform>(e) {
-                                t.translation += delta;
-                            }
-                            if let Some(mut o) = w.get_mut::<crate::collision::Obstacle>(e) {
-                                o.translate(delta);
-                            }
-                        });
-                    }
-                }
-            }
+            Fx::Teleport(u, p) => super::teleport::apply(u, p, env, commands, ships, animals),
             Fx::Dock(dockers, dockees) => {
                 for d in dockers {
                     // docking.rs steers and stops the docker itself

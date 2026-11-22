@@ -705,3 +705,24 @@ fn a_new_ship_cannot_be_rammed_for_its_first_3_5_s() {
     app.update();
     assert!(rams(&mut app) > 0, "the same contact rams after 3.5 s");
 }
+
+#[test]
+fn a_teleported_hull_keeps_its_spot_when_free_and_is_nudged_to_the_nearest_free_one_when_not() {
+    let bounds = [Vec3::new(-2.0, -1.0, -6.0), Vec3::new(2.0, 2.0, 6.0)];
+    let there = Transform::from_xyz(100.0, 0.0, 100.0);
+    let others = [spot::hull(bounds, &there)];
+    let far = Vec3::new(100.0, 0.0, 200.0);
+    assert_eq!(spot::free_spot(bounds, Quat::IDENTITY, far, &others), far, "free: unchanged");
+    let stacked = spot::free_spot(bounds, Quat::IDENTITY, there.translation, &others);
+    assert_ne!(stacked, there.translation);
+    assert!(tree::overlap(&others[0], &spot::hull(bounds, &Transform::from_translation(stacked))).is_none(), "clear of the other hull");
+    assert!(stacked.distance(there.translation) < 14.0, "and close: {stacked}");
+    assert_eq!(stacked.y, 0.0, "height kept");
+    // Wanted just off the other ship's bow: nudged a little, not moved across the whole hull.
+    let wanted = there.translation + Vec3::new(0.0, 0.0, -9.0);
+    let bow = spot::free_spot(bounds, Quat::IDENTITY, wanted, &others);
+    assert!(bow.distance(wanted) < 6.0, "{bow}");
+    // A hull heights apart does not touch.
+    let above = Vec3::new(100.0, 40.0, 100.0);
+    assert_eq!(spot::free_spot(bounds, Quat::IDENTITY, above, &others), above);
+}

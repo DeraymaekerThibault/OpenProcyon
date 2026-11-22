@@ -349,6 +349,8 @@ pub struct SpaceAnimal {
     next: usize,
     looping: bool,
     offset: Vec3,
+    /// Where the leg to `path[next]` began: the line a swerving animal rejoins (`avoid.rs`).
+    line_from: Option<Vec3>,
     call_in: f32,
     calls: usize,
     /// Another system (dragons.rs) is steering it: no path following or calls here.
@@ -369,6 +371,7 @@ impl SpaceAnimal {
             next: 0,
             looping: false,
             offset,
+            line_from: None,
             call_in: 3.0 + (id % 7) as f32,
             calls: id as usize,
             paused: false,
@@ -382,8 +385,15 @@ impl SpaceAnimal {
         self.path = points.iter().map(|p| *p + self.offset).collect();
         self.next = if closest { self.path.iter().enumerate().min_by(|a, b| a.1.distance_squared(pos).total_cmp(&b.1.distance_squared(pos))).map_or(0, |(i, _)| i) } else { 0 };
         self.looping = looping;
+        self.line_from = Some(pos);
     }
+    #[cfg(test)]
     fn advance(&mut self, tf: &mut Transform, dt: f32) {
+        self.advance_around(tf, dt, &[]);
+    }
+    /// `advance` that swims round `bodies` (ships' hulls and rocks) near its way and rejoins the path after them (engine-added,
+    /// `avoid.rs`). With none about it is the plain path follower.
+    fn advance_around(&mut self, tf: &mut Transform, dt: f32, bodies: &[avoid::Body]) {
         if dt <= 0.0 {
             return;
         }
@@ -395,10 +405,18 @@ impl SpaceAnimal {
             let delta = *point - tf.translation;
             let distance = delta.length();
             if distance > remaining {
-                tf.translation += delta.normalize_or_zero() * remaining;
+                let mut dir = delta.normalize_or_zero();
+                if !bodies.is_empty() {
+                    if let Some(from) = self.line_from {
+                        dir = avoid::rejoin(tf.translation, from, *point).map_or(dir, |aim| (aim - tf.translation).normalize_or(dir));
+                    }
+                    dir = avoid::steer(tf.translation, dir, self.radius, self.speed.max(0.0) * avoid::LOOKAHEAD, bodies);
+                }
+                tf.translation += dir * remaining;
                 break;
             }
             tf.translation = *point;
+            self.line_from = Some(*point);
             remaining -= distance;
             self.next += 1;
             if self.next == self.path.len() && self.looping {
@@ -407,6 +425,9 @@ impl SpaceAnimal {
             if remaining <= 0.0 {
                 break;
             }
+        }
+        if !bodies.is_empty() {
+            tf.translation = avoid::push_out(tf.translation, self.radius, bodies);
         }
         self.velocity = (tf.translation - before) / dt.max(0.0001);
         if self.velocity.length_squared() > 0.001 {
@@ -612,17 +633,29 @@ fn flow_currents(time: Res<Time>, mut materials: ResMut<Assets<crate::fx::Effect
 fn update(
     time: Res<Time>,
     mission: Option<Res<Mission>>,
-    mut animals: Query<(&mut SpaceAnimal, &mut Transform, Has<crate::dragons::Dragon>), Without<Ship>>,
+    mut animals: Query<(&mut SpaceAnimal, &mut Transform, Has<crate::dragons::Dragon>), (Without<Ship>, Without<crate::combat::Asteroid>)>,
+    ships: Query<(&Transform, &Ship, Option<&Visibility>), Without<SpaceAnimal>>,
+    rocks: Query<(&Transform, &crate::combat::Asteroid), Without<SpaceAnimal>>,
+    lib: Option<Res<crate::combat::Library>>,
     mut sfx: MessageWriter<crate::audio::Sfx>,
 ) {
     let Some(mission) = mission else { return };
     let dt = time.delta_secs();
     let def = &mission.data["environment"]["whale"];
+    // What a swimming flock steers round, gathered once a step and only when some flock animal is on its way.
+    let mut bodies = vec![];
+    if animals.iter().any(|(a, _, dragon)| !dragon && a.visible && !a.paused && a.speed > 0.0) {
+        if let Some(lib) = lib {
+            bodies
+                .extend(ships.iter().filter(|(_, _, v)| v.is_none_or(|v| *v != Visibility::Hidden)).map(|(tf, s, _)| avoid::Body::hull(lib.classes[s.class].collision_bounds, tf)));
+        }
+        bodies.extend(rocks.iter().filter(|(_, a)| a.radius > 0.0).map(|(tf, a)| avoid::Body::rock(tf.translation, a.radius)));
+    }
     for (mut animal, mut tf, dragon) in &mut animals {
         if !animal.visible || animal.paused {
             continue;
         }
-        animal.advance(&mut tf, dt);
+        animal.advance_around(&mut tf, dt, if dragon { &[] } else { &bodies });
         if dragon {
             continue; // dragons roar in dragons.rs
         }
@@ -675,5 +708,6 @@ fn crosses(polygon: &Value, a: Vec2, b: Vec2) -> bool {
     })
 }
 
+mod avoid;
 #[cfg(test)]
 mod tests;

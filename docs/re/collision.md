@@ -75,7 +75,25 @@ counts ticks from the one after the shot.
 - A whale has the space-object type: against ships, rocks, wrecks and other space objects the only response is a mass-weighted push apart (each moves
   along the contact normal by the depth times the other's share of the total mass); no velocity change, no damage, no sound. Ramming a whale
   does nothing but push. Shells that hit a whale are consumed (or deflected and then inert) without damage, since only rocks take hit points from
-  shells. Islands push a whale out. Remake: shells match; ships sail through whales (Missing). The whale's mass was not read.
+  shells. Islands push a whale out. Remake: shells match. Ships do not push a whale; the whale steers round them instead (Different, engine-added, below). The whale's mass was not read.
+
+## Whales steer round hulls and rocks (engine-added; not the original's behaviour)
+Retail does nothing but push a whale apart from what it touches (above), and the whale's own path following ignores the contact. The remake
+does not push a whale with a ship (no mass for it was read); a flock animal on its path instead looks 2.5 s of swimming ahead (three samples) and
+turns away from a ship's collision box or a rock that its body (the exported box's half diagonal plus 1.5 u of margin) would hit, in proportion to how
+deep the body is inside that clearance, then heads for its next path point again, so it rejoins the path by itself without a recorded detour. It never
+slows. A body that clears it by the margin changes nothing (a ship can pass between two whales that leave the room), and a body at another height does
+not count (whales are not held to the water plane: mission 2 flies them 36 above the ships). A hull that sails onto a whale pushes only the whale
+out. Dragons and every other animal are untouched. Code: `environment/avoid.rs`. PROVISIONAL: the look-ahead, the margin and the turn gain are
+tuned by eye; they are not read from the original.
+
+## Teleport and overlap (engine-added; not the original's behaviour)
+'Teleport Group/Unit' sets the position (the first point of the set) and nothing else in the original, so a group lands stacked and ships
+teleported to nearby points interpenetrate. The remake (`rules/systems/teleport.rs`, `collision/spot.rs`): the members keep their layout round the
+point (a single ship lands on it), a ship that would land inside another hull (a 1 u gap included, the same box test as ship contact) goes to the nearest
+free spot found in widening rings round the wanted one, and every teleported ship is left at a full stop (speed, turn rate, rudder and the contact drift
+zero). The human's ship also drops its throttle, sail order, course and destination; a computer ship keeps its order, so a tug told to follow a path
+afterwards still goes. Wrecks and animals are moved as before, with no layout or nudge. A teleported tow keeps its cable.
 
 ## What 'collidable' does to the rejection list (read from the original's code, 2026-11)
 The mission action 'Set Collidable' and the visibility action both rewrite each object's rejection list, not a flag: false makes it an empty
