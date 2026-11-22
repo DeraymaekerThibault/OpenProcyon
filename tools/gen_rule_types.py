@@ -47,6 +47,9 @@ layout, the keys of `mission.json`, a worked example) is in `docs/missions.md`; 
 - An unknown `Type` is logged once, a condition is then false and an action does nothing.
 - Origin: **retail** Types come from the original game's rule editor. **engine** Types were added by OpenProcyon
   and start with `OP `; the original ignores or rejects them.
+- **campaign only** Types change state that only a campaign mission shows (the cutscene camera, the mission HUD, level changes, the
+  human's ship handoffs). A skirmish map's `script.json` cannot use them: `--check-mission` reports an error and the game warns
+  when the map loads. Every other Type works in both (`docs/modding.md`, "Skirmish map scripts").
 - "ignored" in a field's description means the retail editor exports it but the engine never reads it.
 - Things written PROVISIONAL are not verified against the original.
 
@@ -111,6 +114,8 @@ def render(schema, notes):
         for n in g["types"]:
             t = types[n]
             kind = "condition" if t["role"] == "condition" else "action"
+            if t.get("campaign_only"):
+                kind += " (campaign only)"
             if t["handler"] == "victory":
                 kind += " (end rule)"
             fields = "<br>".join(field_cell(f) for f in t["fields"]) or "none"
