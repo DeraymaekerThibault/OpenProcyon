@@ -420,7 +420,9 @@ fn a_ship_and_a_rock_respond_once_per_tick_with_one_ticks_rate() {
     let mut defs = crate::data::AsteroidDefs::from_world(&mut World::new());
     let mass = 40000.0;
     defs.0.get_mut("Asteroid_Small").unwrap().mass = mass;
-    let rock = crate::combat::Asteroid::new("Asteroid_Small", "rocks", &defs).unwrap();
+    let mut rock = crate::combat::Asteroid::new("Asteroid_Small", "rocks", &defs).unwrap();
+    // hit points well above one tick's damage: the rock must survive to show the whole rate
+    rock.hp = 1.0e6;
     let hp = rock.hp;
     let mut app = App::new();
     let mut time = Time::<()>::default();
@@ -436,6 +438,39 @@ fn a_ship_and_a_rock_respond_once_per_tick_with_one_ticks_rate() {
     let lost = hp - app.world().get::<crate::combat::Asteroid>(b).unwrap().hp;
     let speed = app.world().get::<crate::Ship>(a).unwrap().speed;
     assert!((lost - ROCK_FACTOR * mass * speed).abs() < 0.02 * lost, "one tick takes rate x mass x closing speed: lost {lost}, speed {speed}");
+}
+
+/// A rock the contact damage takes to zero is destroyed by the ship, so the ship's owner gets the credit; one that survives is not.
+#[test]
+#[ignore = "needs imported assets"]
+fn a_rock_broken_by_contact_is_credited_to_the_ship() {
+    let mut credits = vec![];
+    for hp in [1.0, f32::MAX] {
+        let mut lib = crate::Library::load(crate::assets_dir());
+        let class = lib.index("Ship_Navy_Cutter");
+        lib.classes[class].phys.thrust = 0.0;
+        lib.classes[class].collision_bounds = [Vec3::splat(-1.0), Vec3::splat(1.0)];
+        let health = crate::Health::new(&lib.classes[class]);
+        let mut defs = crate::data::AsteroidDefs::from_world(&mut World::new());
+        defs.0.get_mut("Asteroid_Small").unwrap().mass = 40000.0;
+        let mut rock = crate::combat::Asteroid::new("Asteroid_Small", "rocks", &defs).unwrap();
+        rock.hp = hp;
+        let mut app = App::new();
+        let mut time = Time::<()>::default();
+        time.advance_by(crate::BATTLE_TICK);
+        app.insert_resource(time).insert_resource(lib).add_message::<Ram>().add_message::<crate::combat::Destroyed>().add_systems(Update, sail);
+        let ship = crate::Ship { heading: 0.0, speed: 10.0, ..crate::Ship::new(class, crate::Side::Player) };
+        let a = app.world_mut().spawn((ship, health, Transform::from_xyz(0.0, 0.0, 1.5), Drift::default())).id();
+        let body = box_body([Vec3::splat(-1.0), Vec3::splat(1.0)], &Transform::default());
+        let b = app.world_mut().spawn((rock, Transform::default(), Drift::default(), Obstacle { body, triangles: vec![], tree: vec![] })).id();
+        app.update();
+        let sent: Vec<_> = app.world_mut().resource_mut::<Messages<crate::combat::Destroyed>>().drain().map(|d| (d.by, d.victim)).collect();
+        credits.push(sent.clone());
+        if hp == 1.0 {
+            assert_eq!(sent, [(a, b)], "the ship destroyed the rock");
+        }
+    }
+    assert!(credits[1].is_empty(), "a rock that survives the touch is not destroyed");
 }
 
 fn shape_with_tree(offset: Vec3) -> Shapes {
