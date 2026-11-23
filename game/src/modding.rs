@@ -410,7 +410,7 @@ mod tests {
         let (dir, root) = bad_mod(
             "bad-merged",
             &[("data/collision.json", r#"{"Island01": 1}"#), ("data/a.json", r#"{"x": 1}"#)],
-            &[("data/collision.json", r#"{"Island_Ours": "#), ("data/a.json", r#"{"x": 2}"#)],
+            &[("data/collision.json", "Island_Ours: not json"), ("data/a.json", r#"{"x": 2}"#)],
         );
         let c: Value = read(&root.join("data/collision.json")).unwrap();
         assert_eq!(c, serde_json::json!({"Island01": 1}), "neither an empty value nor a half merge");
@@ -421,7 +421,7 @@ mod tests {
     }
     #[test]
     fn bad_json_in_mod_json_does_not_stop_the_mod_or_panic() {
-        let (dir, root) = bad_mod("bad-modjson", &[("data/a.json", r#"{"x": 1}"#)], &[("mod.json", "{not json"), ("data/a.json", r#"{"x": 2}"#)]);
+        let (dir, root) = bad_mod("bad-modjson", &[("data/a.json", r#"{"x": 1}"#)], &[("mod.json", "not json"), ("data/a.json", r#"{"x": 2}"#)]);
         assert_eq!(read(&root.join("data/a.json")).unwrap()["x"], 2);
         assert!(!root.join("mod.json").exists());
         std::fs::remove_dir_all(dir).unwrap();
@@ -432,7 +432,7 @@ mod tests {
             "bad-extends",
             &[("data/a.json", r#"{"x": 1}"#), ("data/c.json", r#"{"x": 1}"#), ("data/d.json", r#"{"list": [1]}"#)],
             &[
-                ("data/a.json", r#"{"extends": "a", "y": "#),
+                ("data/a.json", "extends a, not json"),
                 ("data/b.json", r#"{"extends": "missing", "y": 1}"#),
                 ("data/c.json", r#"{"extends": "c", "y": 3}"#),
                 ("data/d.json", r#"{"extends": "d", "set": {"/list/5": 1}}"#),
