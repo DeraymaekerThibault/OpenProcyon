@@ -15,7 +15,7 @@ pub(super) const AI_MIN_ATTACK: i32 = 10;
 pub(super) fn ai_boarding(
     time: Res<Time>,
     lib: Res<Library>,
-    mut rng: ResMut<SimRng>,
+    (mut rng, spawn_order): (ResMut<SimRng>, Query<&crate::scenario::SpawnIndex>),
     mut commands: Commands,
     mut sfx: MessageWriter<Sfx>,
     boarders: Boarders,
@@ -25,12 +25,21 @@ pub(super) fn ai_boarding(
     targets: Query<(&Transform, &Ship)>,
     all_ships: Query<(Entity, &Transform, &Ship)>,
     scenery: Query<(Entity, &crate::collision::Obstacle, Option<&Visibility>, Has<crate::combat::Asteroid>), (Without<Ship>, Without<crate::combat::GunPart>)>,
-    (mut fired, mut attacked, captains): (MessageReader<crate::combat::Fired>, Local<std::collections::HashSet<(Entity, Entity)>>, Option<Res<crate::ship::CaptainTargets>>),
+    (mut fired, mut attacked, captains, mut start): (
+        MessageReader<crate::combat::Fired>,
+        Local<std::collections::HashSet<(Entity, Entity)>>,
+        Option<Res<crate::ship::CaptainTargets>>,
+        crate::scenario::BattleStart,
+    ),
 ) {
+    if start.is_new() {
+        attacked.clear();
+    }
     attacked.extend(fired.read().filter_map(|f| f.target.map(|t| (f.shooter, t))));
     let dt = time.delta_secs();
     let me = boarders.me();
-    for (e, ship, tf, health, guns, own, ms, pilot) in &ships {
+    // In spawn order: every captain rolls from the battle generator.
+    for (e, ship, tf, health, guns, own, ms, pilot) in crate::scenario::in_spawn_order(&spawn_order, ships, |t| t.0) {
         if ms.is_some_and(|m| m.stance == crate::rules::Stance::Dummy || m.hold_fire) || pilot.is_some_and(|p| p.hold_fire) {
             continue;
         }

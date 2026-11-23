@@ -313,3 +313,21 @@ fn in_spawn_order_sorts_by_creation_number_unnumbered_first() {
     let order = state.get(&world).unwrap();
     assert_eq!(in_spawn_order(&order, [late, early, none], |e| *e), vec![none, early, late]);
 }
+
+/// #536: a system that keeps per-entity state in a `Local` learns of a battle start exactly once, and the effect detail is a
+/// battle-start snapshot.
+#[test]
+fn a_battle_start_is_seen_once_per_system_and_snapshots_detail() {
+    #[derive(Resource, Default)]
+    struct News(Vec<bool>);
+    let mut app = App::new();
+    app.init_resource::<News>().init_resource::<combat::SimRng>().add_systems(Update, |mut start: BattleStart, mut news: ResMut<News>| news.0.push(start.is_new()));
+    reset_sim(app.world_mut());
+    app.update();
+    app.update();
+    reset_sim(app.world_mut());
+    app.update();
+    app.update();
+    assert_eq!(app.world().resource::<News>().0, [true, false, true, false]);
+    assert_eq!(*app.world().resource::<fx::DetailScale>(), fx::DetailScale(menu::detail_scale()));
+}

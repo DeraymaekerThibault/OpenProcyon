@@ -104,6 +104,18 @@ pub fn set_ribbons_if_changed(meshes: &mut Assets<Mesh>, handle: &Handle<Mesh>, 
 struct FxTextures(Vec<Handle<Image>>);
 #[derive(Resource)]
 struct FxRng(u64);
+
+/// The effect-detail option's particle factor as it stood when the battle started (`scenario::reset_sim`), not the live option:
+/// the particle count feeds the effect random stream, so it must not change under a battle. PROVISIONAL: the original may apply
+/// a detail change at once.
+#[derive(Resource, Clone, Copy, Debug, PartialEq)]
+pub struct DetailScale(pub f32);
+
+impl Default for DetailScale {
+    fn default() -> Self {
+        Self(1.0)
+    }
+}
 impl FxRng {
     fn f(&mut self) -> f32 {
         crate::combat::xorshift_unit(&mut self.0)
@@ -167,6 +179,7 @@ pub fn plugin(app: &mut App) {
     app.add_plugins(MaterialPlugin::<EffectMaterial>::default())
         .add_message::<EffectStarted>()
         .init_resource::<FxLib>()
+        .init_resource::<DetailScale>()
         .insert_resource(FxRng(0xD1B54A32D192ED03))
         .init_resource::<FxTextures>()
         .init_resource::<Groups>()
