@@ -1,10 +1,13 @@
 """tools/smokes.py: the change -> smoke map and the verdict of a run (no game is launched)."""
 
 import re
+import subprocess
+import sys
+import tempfile
 import unittest
 from pathlib import Path
 
-from tools import smokes
+from tools import gamelog, smokes
 
 REPO = Path(__file__).resolve().parents[1]
 
@@ -72,6 +75,30 @@ class VerdictTests(unittest.TestCase):
         )
         self.assertEqual(smokes.tail(log), ["thread panicked at a"])
         self.assertEqual(len(smokes.tail("\n".join(f"n{i}" for i in range(30)))), 10)
+
+
+class FloodTests(unittest.TestCase):
+    """#561: a flooded log is read as its markers plus a bounded tail, never whole."""
+
+    def test_markers_survive_and_the_flood_is_cut(self):
+        flood = (
+            "\x1b[31mERROR\x1b[0m rodio::stream: audio stream error: POLLERR\n" * 50_000
+        )
+        with tempfile.NamedTemporaryFile("w", suffix=".log", delete=False) as f:
+            f.write("fleet ECS/UI smoke passed: selection\n" + flood + "last line\n")
+        text = gamelog.read(f.name, "panicked at|smoke passed", tail=1000)
+        self.assertLess(len(text), 1200)
+        self.assertTrue(text.startswith("fleet ECS/UI smoke passed"))
+        self.assertTrue(text.endswith("last line\n"))
+        self.assertNotIn("\x1b", text)
+        verdict = subprocess.run(
+            [sys.executable, "-m", "tools.smokes", "verdict", "asserts", "0", f.name],
+            cwd=REPO,
+            capture_output=True,
+            text=True,
+        )
+        Path(f.name).unlink()
+        self.assertEqual(verdict.returncode, 0, verdict.stdout)
 
 
 if __name__ == "__main__":

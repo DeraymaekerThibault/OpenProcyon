@@ -22,10 +22,10 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import NamedTuple
 
+from tools import gamelog
 from tools.autoplay import assets_env, build_game, display_wrapper, silent_data_home
 
 REPO = Path(__file__).resolve().parents[1]
-ANSI = re.compile(r"\x1b\[[0-9;]*m")
 REPORT = re.compile(r"battle report (\{.*\})")
 FLEETS = ["--ship", "Ship_Navy_Cutter", "--allies", "Ship_Navy_Cutter",
           "--enemies", "Ship_Pirate_Barque,Ship_Pirate_Sloop"]  # fmt: skip
@@ -226,7 +226,7 @@ def main():
                     stderr=subprocess.STDOUT,
                     timeout=seconds + 120,
                 )
-        text = ANSI.sub("", log.read_text(encoding="utf-8", errors="replace"))
+        text = gamelog.read(log, r"panicked at|battle report")
         passed, summary = outcome(text, expect)
         line = f"{'ok  ' if passed else 'FAIL'} {name:<16} {time.monotonic() - start:3.0f}s {summary}"
         if not passed:
