@@ -509,6 +509,10 @@ def lifeboat_fields(p, sections):
     if not sphere["authored"] or sphere["radius"] is None:
         lo, hi = vec(p.get("MinExtents")), vec(p.get("MaxExtents"))
         if not (lo and hi):
+            if not sections:
+                raise ValueError(
+                    "no readable damage section and no authored extents: no collision sphere"
+                )
             lo, hi = (
                 [min(s["aabb"][0][i] for s in sections) for i in range(3)],
                 [max(s["aabb"][1][i] for s in sections) for i in range(3)],
