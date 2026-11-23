@@ -18,11 +18,14 @@ expected=()
 if [[ "$frames" == *,* ]]; then for f in ${frames//,/ }; do expected+=("${out%.png}_$f.png"); done; else expected=("$out"); fi
 rm -f "${expected[@]}"
 cd "$root/game"
+# The `fast` profile (game/Cargo.toml): near-release speed with incremental rebuilds. The built binary runs from game/, as cargo run did.
+cargo build --profile fast -q || exit 1
+game="${CARGO_TARGET_DIR:-$root/game/target}/fast/openprocyon"
 start=$SECONDS
 if [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || [ "$(uname -o 2>/dev/null)" = Msys ]; then
-    cargo run --release -- --shot "$out" "$@"; code=$?
+    "$game" --shot "$out" "$@"; code=$?
 else
-    xvfb-run -a -s "-screen 0 1280x720x24" env WGPU_BACKEND=vulkan cargo run --release -- --shot "$out" "$@"; code=$?
+    xvfb-run -a -s "-screen 0 1280x720x24" env WGPU_BACKEND=vulkan "$game" --shot "$out" "$@"; code=$?
 fi
 elapsed=$((SECONDS - start))
 [ "$code" -eq 0 ] || { echo "shot.sh: the game exited with status $code" >&2; exit "$code"; }

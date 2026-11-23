@@ -36,7 +36,7 @@ damage|--script damage --shot-frame 300 --late-frame 0
 dock|--script dock --shot-frame 600 --late-frame 0
 EOF
 )
-cargo build --release --manifest-path game/Cargo.toml -q || exit 1
+cargo build --profile fast --manifest-path game/Cargo.toml -q || exit 1  # shot.sh then finds it built
 pass=0; fail=()
 while IFS='|' read -r name args; do
     [[ "$name" =~ ${1:-.} ]] || continue

@@ -55,13 +55,12 @@ esac
             with self.subTest(imported=imported):
                 result, calls = self.run_gate(imported)
                 self.assertEqual(result.returncode, 0, result.stderr)
-                tests = [line for line in calls if line.startswith("cargo test ")]
+                tests = [
+                    line for line in calls if line.split()[:2] == ["cargo", "test"]
+                ]
                 self.assertEqual(
                     tests,
-                    [
-                        "cargo test --release"
-                        + (" -- --include-ignored" if imported else "")
-                    ],
+                    ["cargo test" + (" -- --include-ignored" if imported else "")],
                 )
                 smokes = [line for line in calls if line.startswith("timeout ")]
                 self.assertEqual(len(smokes), 1 if imported else 0)
@@ -76,5 +75,5 @@ esac
             with self.subTest(imported=imported):
                 result, calls = self.run_gate(imported, test_status=1)
                 self.assertNotEqual(result.returncode, 0)
-                self.assertNotIn("cargo build --release", calls)
+                self.assertNotIn("cargo build --profile fast", calls)
                 self.assertNotIn("python3 -m unittest discover -s tests", calls)
