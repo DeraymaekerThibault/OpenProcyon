@@ -12,9 +12,9 @@ const HARPOON_RANGE: f32 = 100.0;
 pub(super) const HARPOON_SPEED: f32 = 45.0;
 /// A grapple snaps when the ships' centres get this much further apart than when the hook bit.
 const GRAPPLE_SLACK: f32 = 2.0;
-/// While a boarding is registered on the grapple the line is reeled in at this speed, down to this centre distance.
-/// Line shortened per tick (0.033 s) while reeling in.
+/// Line shortened per tick (0.033 s) while a boarding is registered on the grapple and the line is reeled in.
 const REEL_PER_TICK: f32 = 0.1;
+/// The centre distance the reeling stops at.
 pub(super) const REEL_MIN: f32 = 12.0;
 
 /// The lines between ships, for views to draw (the original's Rope effect): world end points and how much longer than the gap the
@@ -183,7 +183,7 @@ pub(super) fn reeled(distance: f32, dt: f32) -> f32 {
     (distance - REEL_PER_TICK * dt / crate::TICK_SECS).max(REEL_MIN)
 }
 
-/// A bitten grapple is a rope of the length the ships were apart when the hook bit (read from the original's code and checked in play).
+/// A bitten grapple is a rope of the length the ships were apart when the hook bit (checked in play).
 /// Each tick, if the centres are further apart than that, both hulls are moved toward each other along the line by the excess, split
 /// by mass (the lighter one moves more), positions only. The line snaps when the centres were already `GRAPPLE_SLACK` further apart
 /// than at the hit before that pull, which takes a relative speed of about 60 units/s. While a boarding is registered on the pair the

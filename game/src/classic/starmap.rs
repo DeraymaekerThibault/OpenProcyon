@@ -11,9 +11,9 @@ use crate::panels::REF_H;
 use crate::sprites::{Fonts, HudData, sprite};
 use crate::starmap::{MapIconKind, Starmap, StarmapContents};
 
-const OPEN_SECS: f32 = 1.0;
+const OPEN_SECS: f32 = 1.0; // PROVISIONAL: eyeballed timing
 const FRAME_SECS: f32 = 0.1;
-const ALIEN_COUNT: u32 = 10;
+const ALIEN_COUNT: u32 = 10; // PROVISIONAL: eyeballed
 
 pub fn plugin(app: &mut App) {
     app.add_systems(Update, (build, animate, redraw).chain().after(crate::starmap::StarmapSet).run_if(in_state(crate::menu::Screen::Battle)));

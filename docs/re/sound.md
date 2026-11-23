@@ -23,7 +23,7 @@ The float is read as the pool's max distance (same field order as the WOT pools)
 `HUD_SpeedControl_Up/Down` and `HUD_FireAll` are also original-global names.
 
 ## PROVISIONAL in the remake
-- Which event uses which original pool (read from the original's code, 2026-11-01; earlier recording: one `Explosion_Heavy` file about 2.3 s before a wreck stops).
+- Which event uses which original pool (unchecked against play, 2026-11-01; earlier recording: one `Explosion_Heavy` file about 2.3 s before a wreck stops).
   - Each pool plays one uniformly random item at a position; max distance as above, full volume inside a tenth of it. Volume field not decoded (1.0 used).
   - **Section lost** (HP reaches 0): one `Explosion_Med01` at the ship, never a `Damage_*` file. (Gated by a section flag not resolved; PROVISIONAL that it applies to every section.)
   - **Ship destroyed:** one `Explosion_Heavy` file when the destruction is decided (ships and bases only). The dying ship's section explosion list (times and effect names in the

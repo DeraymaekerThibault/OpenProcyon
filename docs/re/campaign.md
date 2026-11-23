@@ -68,7 +68,7 @@ explicitly listed below; unsupported ones are logged once (`unsupported ...`) an
 - Smoke test: `--script mission` autopilots the player along the objectives (follows the point, shoots hostiles/asteroids, docks). `PROCYON_AUTOKILL=1`
   also sinks the pirate when close, to reach the ending in a test.
 
-Rule list (read from the original's code): conditions run in file order and the first false one stops the rule. **There is no guard on a rule that fires many passes in a row, and rule names
+Rule list (unchecked against play): conditions run in file order and the first false one stops the rule. **There is no guard on a rule that fires many passes in a row, and rule names
 need not be unique**: the executable carries the texts "Rule Run 10 Times in a Row" and "Duplicate Rule Name not Allowed", but nothing reads them; a rule's run counter (up on a firing pass,
 down to a floor of 0 otherwise) is never compared, and the loader appends rules without looking at names. The remake does the same (test `repeating_rules_have_no_run_limit_and_rule_names_need_not_be_unique`).
 
@@ -81,7 +81,7 @@ camera smoothing/path speeds, music volume scale (0.5 x script volume), speech w
 Mission 1 now exports `environment` alongside its ships/rules: animal IDs, their named groups, world point sets, nebula setup and whale sound/collision settings.
 `game/src/environment.rs` renders the retail `OvalNebula` mesh at Clarke's exported point (magnitude/radius ~381), using Nebula.eft's additive blend and initial tint,
 and plays the retail `Ambience_Nebula` loop with provisional distance gain. Lightning, meteors and rotational winds are off in this mission and are not added.
-Nebula slow-down is separate from permanent sail damage: inside a nebula whose cloud drains, top speed and thrust are multiplied by the 3-D distance to the cloud's centre over its radius (0 at the centre, 1 at the rim), instantly, the deepest nebula counting (read from the original's code, not yet measured; docs/re/nebula-landmark.md).
+Nebula slow-down is separate from permanent sail damage: inside a nebula whose cloud drains, top speed and thrust are multiplied by the 3-D distance to the cloud's centre over its radius (0 at the centre, 1 at the rim), instantly, the deepest nebula counting (not yet measured; docs/re/nebula-landmark.md).
 Movement and the sail-power gauge use that value. PROVISIONAL sensor occlusion blocks lines crossing Clarke's polygon, except within 40 units;
 selection, ship targeting/AI, radar contacts, labels and reticles share this check. The cloud currently has no retail mesh shifting/edge-fade shader.
 

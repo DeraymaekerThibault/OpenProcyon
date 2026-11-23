@@ -1,7 +1,7 @@
 //! Right-click options menu and context cursors (docs/re/docking-and-orders.md §1-2): a click (not a drag) with the right button on a
 //! ship or base opens an icon menu around the cursor; three variants (enemy / own primary / other) with the retail icons, backgrounds and
 //! slot offsets from hud.hdt. Implemented items: Focus, Stop, Dock, Tow start / stop (campaign missions only, the rules keep the link),
-//! and the enemy menu's Board and Grapple start / stop (boarding.rs); Hold position and Cloak are drawn greyed out.
+//! and the enemy menu's Board and Grapple start / stop (boarding.rs), Hold position and Cloak.
 //! Sounds as in the original: HUD_Options_Open on opening, _Focus / _Stop / _Dock for the item clicked, _NoSelection for a click on no
 //! (enabled) item; HUD_Options_MouseOver when the cursor enters an enabled slot (PROVISIONAL: the original may play it for any button).
 //! The context cursor (dock / can't / attack) follows the mouse while it hovers a ship or base.
@@ -18,6 +18,7 @@ use crate::panels::REF_H;
 use crate::sprites::{HudData, offset, size_of};
 use crate::{Orbit, Ship, Side};
 
+/// PROVISIONAL: the original's click tolerance is not measured.
 const CLICK_PX: f32 = 6.0;
 const CLICK_SECS: f32 = 0.4;
 
@@ -450,6 +451,7 @@ fn spawn_menu(commands: &mut Commands, hud: &HudData, window: &Window, cursor: V
 
 fn menu_centre(window: &Window, cursor: Vec2) -> Vec2 {
     let s = window.height() / REF_H;
+    // PROVISIONAL: the 70 px margin the menu keeps from the window edge is eyeballed.
     cursor.clamp(Vec2::splat(70.0 * s), Vec2::new(window.width(), window.height()) - Vec2::splat(70.0 * s))
 }
 

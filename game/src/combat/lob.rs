@@ -68,7 +68,7 @@ pub fn shoot(mut commands: Commands, lib: Res<Library>, fxl: Res<FxLib>, mut msg
     }
 }
 
-/// A star-class blast (StarMortarCustomInfoFactory: MaxRadius over Duration), read from the original's code: a ring spreading from
+/// A star-class blast (StarMortarCustomInfoFactory: MaxRadius over Duration): a ring spreading from
 /// the burst at MaxRadius / Duration that strikes everything once as it passes its centre (`blasts`).
 #[derive(Component)]
 pub struct Blast {
@@ -80,7 +80,7 @@ pub struct Blast {
     age: f32,
 }
 
-/// A gravity charge's well (GravChargeCustomInfoFactory: Magnitude, Radius, Duration), read from the original's code: for
+/// A gravity charge's well (GravChargeCustomInfoFactory: Magnitude, Radius, Duration): for
 /// `Duration` seconds everything within `radius` (flat distance) is pulled straight toward its centre, with no friend/foe filter.
 /// The ship pull itself is `blackhole::pull`, which reads `force`.
 #[derive(Component)]
@@ -145,14 +145,14 @@ pub fn detonate(
 }
 
 /// The five secondaries' velocities of a Nova mortar splitting with velocity `v`: one straight on, four turned 0.1 rad either way
-/// about the shell's up and right axes (read from the original's code). PROVISIONAL: the pattern is not rolled with the shell's spin.
+/// about the shell's up and right axes. PROVISIONAL: the pattern is not rolled with the shell's spin.
 pub(super) fn nova_split(v: Vec3) -> [Vec3; 5] {
     let right = v.cross(Vec3::Y).normalize_or(Vec3::X);
     let up = right.cross(v).normalize_or(Vec3::Y);
     [(0.0, 0.0), (-0.1, -0.1), (0.1, -0.1), (-0.1, 0.1), (0.1, 0.1)].map(|(yaw, pitch)| Quat::from_axis_angle(up, yaw) * Quat::from_axis_angle(right, pitch) * v)
 }
 
-/// Spreads each blast and strikes what its ring passes, read from the original's code: every ship and base section, rock and shell
+/// Spreads each blast and strikes what its ring passes: every ship and base section, rock and shell
 /// in flight is struck once, when the ring (radius MaxRadius x age / Duration) reaches its centre, for the bullet's damage roll for
 /// the material times max(0.1, 1 - distance / MaxRadius). Ship sections take the difficulty factor and spill; no fires start. Nobody is
 /// spared, the shooter's own ships included; star-class shells are immune. PROVISIONAL: the push the blast gives what is inside it
@@ -294,7 +294,7 @@ fn ram_scale(victim_human: bool, rammer_human: bool, difficulty: u8) -> f32 {
     super::shells::side_damage_scale(as_side(rammer_human), as_side(victim_human), difficulty, false)
 }
 
-/// Contact damage (collision.rs `Ram`, read from the original's code): one hit on the victim's section nearest the contact,
+/// Contact damage (collision.rs `Ram`): one hit on the victim's section nearest the contact,
 /// through the normal hit path. The difficulty factor follows who owns the two ships, not their side: a human-owned victim takes
 /// the incoming factor, else a human-owned rammer gives the outgoing one, else x1 (a rock is a computer attacker; an allied
 /// computer ship is not the human's). A damaging ram also plays the struck section's `Damage_` sound at the contact, but only once

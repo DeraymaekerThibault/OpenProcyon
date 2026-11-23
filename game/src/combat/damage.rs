@@ -237,7 +237,7 @@ pub fn damage_fx(
     }
 }
 
-/// The rules' "Damage Group/Unit by X percent" (read from the original's code, not yet measured): every section in order is hit once for
+/// The rules' "Damage Group/Unit by X percent" (not yet measured): every section in order is hit once for
 /// round(its current hit points x `fraction`) through the normal hit routine (spill into neighbours of a section left at 0, core bleed
 /// through dead vital sections, the human's ships taking the difficulty factor: the hit carries no attacker, so computer ships take
 /// none). The core is never scaled directly: a fraction below 1 leaves it whole unless vital sections die.

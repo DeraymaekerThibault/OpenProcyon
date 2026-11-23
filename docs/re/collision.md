@@ -12,7 +12,7 @@ Source: observed behaviour of the original game, WOT collision definitions and t
 - Helper uses a contact point's displacement from the transformed centre of mass and collision-box dimensions to accumulate angular acceleration, clamped to ±60. The exact torque/sign relationship is not recovered well enough to port.
 - Debug strings include `Collision LOD Level Index` and `Valid Collision Triangle Indices`. The ship-against-land rule is now recovered and measured (below); the collision LOD for shells, restitution, sound trigger and damage calculation remain unresolved.
 
-## Ships and rocks (read from the original's code, 2026-10-31)
+## Ships and rocks (unchecked against play, 2026-10-31)
 
 - **Contact shapes:** ship against ship tests the two physics boxes (the WOT `MinExtents` / `MaxExtents`, no padding) once their
   collision spheres overlap, by separating axes (the box faces and the cross products of their edges); the axis of least
@@ -20,8 +20,8 @@ Source: observed behaviour of the original game, WOT collision definitions and t
 - **Ship against ship**, checked every physics tick (0.033 s) while the hulls overlap: the two are pushed apart in proportion to the other's mass (the heavier one moves less; an idle ship is no exception). The contact normal is
   the box test's own 3-D axis, but the push is horizontal: the depth times |cos| of the angle between that axis and its horizontal
   part, applied along the horizontal part (a steep or vertical axis moves the hulls little or not at all; flat axes lose nothing).
-  The same rule as for land below (confirmed there on retail; for ship pairs read from the code, with only flat normals measured
-  on retail). Neither ship's velocity
+  The same rule as for land below (confirmed there on retail; for ship pairs only flat normals
+  are measured on retail). Neither ship's velocity
   changes: no bounce, restitution or friction. Each gets a yaw kick at the contact point: a force of 0.1 x its mass x the
   difference between its velocity and the pair's mass-weighted common velocity, per tick, over its box inertia (mass x (width² +
   length²) / 12, width and length twice the box's starboard and forward extents), at the contact point taken at deck height; the
@@ -48,7 +48,7 @@ Source: observed behaviour of the original game, WOT collision definitions and t
   a rock touch plays the ship's collision sound (the rock's own impact sound is not read); shells on bases take no difficulty factor
   (the original applies one on the same routine, but its value for bases is not measured).
 
-## A shell's rejection list (read from the original's code; the reset timing measured on retail, 2026-11)
+## A shell's rejection list (unchecked against play; the reset timing measured on retail, 2026-11)
 
 Every object carries a list of objects it ignores in collisions; either side's list can skip a pair for every kind of response. A
 shell's list is created holding **only its firer**, so a shell cannot hit the ship that fired it, and nothing else is spared: there is
@@ -66,7 +66,7 @@ ships), and the side test the remake keeps for bases (whether a shell can strike
 neutral-island handling). Which tick of the original's step a shell is born in relative to its first reset was not measured; the remake
 counts ticks from the one after the shot.
 
-## Dragons and whales in contact (read from the original's code, 2026-11; not measured)
+## Dragons and whales in contact (unchecked against play, 2026-11; not measured)
 - A dragon has the ship collision type, so it uses exactly the ship rules: push by mass and torque against ships and other dragons (a 4000-mass ship
   against the 1000-mass dragon moves the dragon 80 percent of the overlap), ram damage both ways (0.0004 x the other's mass x closing speed, the
   alliance test zeroing both), the ship-rock rules against rocks, push-out from islands and bases, push-apart against whales and wrecks, no response
@@ -77,7 +77,7 @@ counts ticks from the one after the shot.
   does nothing but push. Shells that hit a whale are consumed (or deflected and then inert) without damage, since only rocks take hit points from
   shells. Islands push a whale out. Remake: shells match; ships sail through whales (Missing). The whale's mass was not read.
 
-## What 'collidable' does to the rejection list (read from the original's code, 2026-11)
+## What 'collidable' does to the rejection list (unchecked against play, 2026-11)
 The mission action 'Set Collidable' and the visibility action both rewrite each object's rejection list, not a flag: false makes it an empty
 inclusion list (collides with nothing), true makes it an empty exclusion list (collides with everything). Making an object collidable therefore
 also removes every other entry it held: a shell's firer exemption, a lifeboat's parent ship, the 'ignore this one' entry the mission 9 longboat
@@ -85,14 +85,14 @@ teleport adds. Setting an object invisible has the same effect on collision. Rem
 (no visible effect unless a script switches collidable on for a live shell, a lifeboat or the mission 9 longboat); hiding an object does not
 change collision here (Different, PROVISIONAL).
 
-## Land and bases (read from the original's code, 2026-10-31)
+## Land and bases (unchecked against play, 2026-10-31)
 
 Contact with an island or a base pushes the ship's hull straight out along the horizontal normal, and nothing else: its speed,
 throttle and turn are untouched, it takes no damage and makes no sound. A ship pressing into a shore therefore keeps its (avoider-
 capped) speed and slides along it; one wedged bow-first is freed by the avoider's turn in place ([movement.md](movement.md)).
 Remake: `collision::sail` (the old impulse response for land is gone; ships and rocks keep it until their rules are ported).
 
-## Ships against land: the box tree (read from the original's code and measured on retail, 2026-11-17)
+## Ships against land: the box tree (measured on retail, 2026-11-17)
 
 Replaces the triangle test as the rule for a ship touching an island or base. Checked against 16 runs of the original (2 islands, 2 ships,
 2443 logged ticks): 2441 ticks reproduced to within 0.05 u (median 0.000, 95th percentile 0.01), including a ship that bounced in a
@@ -147,7 +147,7 @@ detection, different shape), a ship that is tilted or not at the water level, sh
 
 ## Measured on retail (2026-10, one glancing ram between our own ships)
 
-Since read from the code: ships of one alliance never damage each other by contact, so the damage below was not the ram; it
+Unchecked against play: ships of one alliance never damage each other by contact, so the damage below was not the ram; it
 matches the Diablo Strait volcano meteors, which hit every section at once.
 
 Headless Diablo Strait skirmish on Easy, our Navy Cutter driven past our own idle Man-O-War; both ships logged at 30 Hz and saved

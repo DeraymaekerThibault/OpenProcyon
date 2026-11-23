@@ -1,6 +1,6 @@
 # The simulation tick: order and timing
 
-Source: reading of the original's code, checked on the running game where marked; described in our own words. This page is the
+Source: checked on the running game where marked, otherwise unchecked against play; described in our own words. This page is the
 order the battle simulation must follow. Individual rules (damage, movement, contact) live in their own pages and only assume this order.
 
 ## The clock
