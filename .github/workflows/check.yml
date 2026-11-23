@@ -36,7 +36,7 @@ jobs:
           fi
           printf '%s\n' "$files"
           # Rust: the game, the data it ships or the example mods it tests, and the workflow itself.
-          if printf '%s\n' "$files" | grep -q -E '^(game/|content/|mods/|tools/check\.sh$|\.github/)'; then echo rust=true; else echo rust=false; fi >> "$GITHUB_OUTPUT"
+          if printf '%s\n' "$files" | grep -q -E '^(game/|content/|mods/|tools/check\.sh$|\.github/|docs/rule-types\.md$|docs/modding\.md$|docs/examples/)'; then echo rust=true; else echo rust=false; fi >> "$GITHUB_OUTPUT"
           # Python: tools, tests, and everything the tests read.
           if printf '%s\n' "$files" | grep -q -E '\.py$|^(tests/|tools/|content/|mods/|requirements|ruff\.toml|\.github/)'; then echo python=true; else echo python=false; fi >> "$GITHUB_OUTPUT"
 
