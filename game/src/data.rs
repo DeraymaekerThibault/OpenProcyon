@@ -47,7 +47,7 @@ impl std::fmt::Display for DataError {
 impl std::error::Error for DataError {}
 
 /// The folder name of the active mod that provides `path` (a link into the overlay is followed to its source).
-fn mod_of(path: &std::path::Path) -> Option<String> {
+pub(crate) fn mod_of(path: &std::path::Path) -> Option<String> {
     let source = std::fs::canonicalize(path).ok()?;
     crate::modding::active().iter().find(|m| std::fs::canonicalize(m).is_ok_and(|m| source.starts_with(m))).and_then(|m| Some(m.file_name()?.to_string_lossy().into_owned()))
 }

@@ -29,6 +29,35 @@ pub struct Portrait;
 #[derive(Component)]
 pub struct Voice;
 
+/// What the scripted opening (mission 1's NIS) reads from the mission data: four speech cues with a name, text and duration, the
+/// camera paths and landmark it flies, and the ships it frames. `None` when all are there; else what is missing. A mod that replaces
+/// `mission01` without them starts without the opening (`campaign::load_id` logs why) instead of panicking in `update`.
+pub fn opening_problem(data: &Value) -> Option<String> {
+    let cues = data["opening_speech"].as_array().filter(|c| c.len() == 4).ok_or("`opening_speech` must list 4 speech cues");
+    let cues = match cues {
+        Ok(c) => c,
+        Err(e) => return Some(e.into()),
+    };
+    if cues.iter().any(|c| c["name"].as_str().is_none() || c["text"].as_str().is_none() || c["duration"].as_f64().is_none()) {
+        return Some("every `opening_speech` cue needs a `name`, `text` and `duration`".into());
+    }
+    for path in ["Opening NIS", "Opneing NIS 2c", "Opening NIS 2d"] {
+        if !data["paths"][path].as_array().is_some_and(|p| !p.is_empty() && p.iter().all(Value::is_array)) {
+            return Some(format!("`paths` has no camera path \"{path}\""));
+        }
+    }
+    if !data["landmarks"]["Montressor Archipelago"].is_array() {
+        return Some("`landmarks` has no \"Montressor Archipelago\"".into());
+    }
+    let ships = data["ships"].as_array();
+    for id in [222, 227, 228, 229, 231] {
+        if !ships.is_some_and(|s| s.iter().any(|s| s["id"].as_i64() == Some(id))) {
+            return Some(format!("`ships` has no ship {id}, which the opening frames"));
+        }
+    }
+    None
+}
+
 pub fn active(mission: Option<&Mission>) -> bool {
     mission.is_some_and(|m| m.opening.is_some())
 }
@@ -225,6 +254,40 @@ pub fn update(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
+
+    fn complete() -> Value {
+        let path = json!([[0, 0, 0], [1, 1, 1]]);
+        let ships: Vec<Value> = [222, 227, 228, 229, 231].iter().map(|id| json!({"id": id})).collect();
+        json!({
+            "opening_speech": (0..4).map(|i| json!({"name": format!("M{i}"), "text": "t", "duration": 1.0})).collect::<Vec<_>>(),
+            "paths": {"Opening NIS": path, "Opneing NIS 2c": path, "Opening NIS 2d": path},
+            "landmarks": {"Montressor Archipelago": [0, 0, 0]},
+            "ships": ships,
+        })
+    }
+
+    #[test]
+    fn a_mission_without_the_openings_data_is_named_not_a_panic() {
+        assert_eq!(opening_problem(&complete()), None);
+        let mut cases = vec![];
+        for (what, edit) in [
+            ("opening_speech", (|d: &mut Value| d["opening_speech"] = json!([])) as fn(&mut Value)),
+            ("name", |d| d["opening_speech"][1] = json!({"text": "t", "duration": 1})),
+            ("camera path", |d| d["paths"] = json!({})),
+            ("landmark", |d| d["landmarks"] = json!({})),
+            ("ship 229", |d| d["ships"] = json!([{"id": 222}])),
+            ("no ships list", |d| d["ships"] = Value::Null),
+        ] {
+            let mut d = complete();
+            edit(&mut d);
+            cases.push((what, opening_problem(&d)));
+        }
+        for (what, problem) in cases {
+            assert!(problem.is_some(), "{what}");
+        }
+        assert!(opening_problem(&Value::Null).is_some());
+    }
     #[test]
     #[ignore = "needs imported assets"]
     fn cue_boundaries_and_path_endpoints() {
