@@ -68,7 +68,20 @@ tools/shot.sh local/paused.png --map red_rover --script pause --shot-frame 50 --
 tools/shot.sh local/pause-restart.png --map red_rover --script pause-restart --shot-frame 90 --late-frame 0
 ```
 
-`make check` calls `tools/check.sh`: ruff format check and lint (Python, rules in `ruff.toml`) → rustfmt check → strict Clippy → Rust tests → Python tests.
+`make check` calls `tools/check.sh` (`make check ARGS=--quick` / `--full` pick a tier). The steps, cheapest first: ruff format check and
+lint (Python, rules in `ruff.toml`) → hygiene rules → Python tests → rustfmt check → strict Clippy → Rust tests; `--full` then builds the
+game and runs the startup smoke and the battle check.
+
+| Tier | When | Runs |
+|---|---|---|
+| `--quick` | while iterating | ruff and hygiene; rustfmt + Clippy if anything under `game/` or a `.rs` file changed, the Python tests if a `.py` file changed (against the merge base with `origin/main`, plus uncommitted and untracked files) |
+| default | before a commit | every step up to the Rust tests (asset tests with `--include-ignored` when an import exists) |
+| `--full` | before a push or PR | default + `fast` game build + startup smoke + battle check; fails without imported assets unless `--allow-partial` |
+
+Each step prints one line (`ok`/`FAIL`, name, seconds) and writes its full output to `local/check/<step>.log`; a failure prints its first
+20 relevant lines and the command to rerun. The last line is `GATE OK <tier> <time>`, `GATE FAIL <step> (<log>)` or
+`GATE PARTIAL ...` (no imported assets: it names what was skipped). Locally the gate unsets `CI`, which would turn Cargo's
+incremental builds off. One module's tests: `cargo test --manifest-path game/Cargo.toml --lib <module::path>`.
 Clippy and the tests build in the dev profile (incremental, debug assertions and overflow checks on); the startup smoke, `shot.sh`,
 `smokes.sh`, `battle_check` and `autoplay` build the game in the `fast` profile (release speed, incremental) and run
 `<target>/fast/openprocyon`. The `release` profile is only for player builds (`release.yml`); `battle_check --profile release`
