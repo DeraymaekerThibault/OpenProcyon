@@ -10,7 +10,7 @@ use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fmt;
 
-use super::schema::{Field, Kind, RULE_TYPES, Role, TypeDef, lookup};
+use super::schema::{Equivalence, Field, Kind, RULE_TYPES, Role, TypeDef, lookup};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Level {
@@ -245,12 +245,7 @@ impl Checker<'_> {
         if def.name == "OP Counter Condition" {
             // A counter nobody sets reads 0: the condition needs a writer unless 0 already satisfies it.
             let value = e["Value"].as_f64().unwrap_or(0.0);
-            let holds_at_zero = match e["Equivalence"].as_str() {
-                Some("Greater Than") => 0.0 > value,
-                Some("Less Than") => 0.0 < value,
-                Some("Equal To") => value.abs() < 1e-4,
-                _ => false,
-            };
+            let holds_at_zero = e["Equivalence"].as_str().and_then(Equivalence::parse).is_some_and(|q| q.holds(0.0, value as f32, 1e-4));
             self.wants_true = !holds_at_zero;
         }
         for key in obj.keys().filter(|k| k.as_str() != "Type") {
