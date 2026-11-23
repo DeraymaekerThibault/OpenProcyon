@@ -60,7 +60,7 @@ def sprite_canvas(path):
         return None
     meta = path.parent.with_suffix(".json")
     try:
-        info = json.loads(meta.read_text())["states"][path.stem]
+        info = json.loads(meta.read_text(encoding="utf-8"))["states"][path.stem]
         with Image.open(path) as image:
             canvas = untrimmed(image, info["size"], info["trim"])
     except (OSError, KeyError, ValueError):
@@ -75,7 +75,10 @@ def differs(a, b):
     ext = a.suffix.lower()
     if ext == ".json":
         try:
-            return json_diff(json.loads(a.read_text()), json.loads(b.read_text()))
+            return json_diff(
+                json.loads(a.read_text(encoding="utf-8")),
+                json.loads(b.read_text(encoding="utf-8")),
+            )
         except ValueError as e:
             return f"unreadable JSON: {e}"
     if ext in IMAGES:

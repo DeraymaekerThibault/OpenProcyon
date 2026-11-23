@@ -5,11 +5,10 @@ Values are raw WOT literals (units not established); each carries its source lin
 """
 
 import json
-import sys
 from pathlib import Path
 
-from tools.source_text import read_source_lines
-from tools.wot import parse_lines, properties
+from tools import cli
+from tools.wot import parse_lines, properties, read_wot
 
 KEYS = (
     "Mass",
@@ -27,9 +26,7 @@ OPTIONAL = ("MinExtents", "MaxExtents")
 
 
 def export(root, name):
-    lines = read_source_lines(
-        Path(root), Path("WorldObjects") / f"{name}.wot", encoding="utf-8"
-    )
+    lines = read_wot(root, name)
     nodes, problems = parse_lines(lines)
     if problems:
         raise ValueError(problems[:3])
@@ -46,6 +43,6 @@ def export(root, name):
 
 
 if __name__ == "__main__":
-    root, name, out = sys.argv[1:4]
-    Path(out).write_text(json.dumps(export(root, name), indent=1))
+    root, name, out = cli.args(__doc__, 3)
+    Path(out).write_text(json.dumps(export(root, name), indent=1), encoding="utf-8")
     print("wrote", out)

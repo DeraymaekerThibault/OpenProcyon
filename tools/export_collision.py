@@ -17,9 +17,9 @@ All vectors are in remake axes (x, up, -y of the game frame), like the triangles
 
 import json
 import struct
-import sys
 from pathlib import Path
 
+from tools import cli
 from tools.export_mesh_detail import collision_lods
 from tools.gamefs import ci_file
 from tools.mdb import box_tree, parse
@@ -150,7 +150,7 @@ def export(root, assets):
     scenes = {}
     # maps/<id>.json right after the map export, maps/<id>/map.json once the import has regrouped the folders
     for f in [*(assets / "maps").glob("*.json"), *(assets / "maps").glob("*/map.json")]:
-        m = json.loads(f.read_text())
+        m = json.loads(f.read_text(encoding="utf-8"))
         if isinstance(m, dict):
             scenes.update({o["type"]: o["scene"] for o in m.get("objects", [])})
     types = set(scenes)
@@ -177,10 +177,10 @@ def export(root, assets):
             raise ValueError(f"No collision box: {typ}")
         out[typ] = d
     (assets / "data/collision.json").write_text(
-        json.dumps(rnd(out, 4), separators=(",", ":")) + "\n"
+        json.dumps(rnd(out, 4), separators=(",", ":")) + "\n", encoding="utf-8"
     )
     print(f"Collision: {len(out)} entity types")
 
 
 if __name__ == "__main__":
-    export(*sys.argv[1:3])
+    export(*cli.args(__doc__, 2))

@@ -8,9 +8,9 @@ usage: python -m tools.export_mesh_effects <game_root> <assets_dir>"""
 import json
 import re
 import struct
-import sys
 from pathlib import Path
 
+from tools import cli
 from tools.gamefs import ci_files
 from tools.mdb_to_glb import with_layer_offset
 from tools.msb import parse as parse_msb
@@ -79,7 +79,9 @@ def export(root, out):
         if points:
             scenes[msb.stem] = points
     (Path(out) / "data").mkdir(exist_ok=True)
-    (Path(out) / "data/mesh_effects.json").write_text(json.dumps(scenes, indent=1))
+    (Path(out) / "data/mesh_effects.json").write_text(
+        json.dumps(scenes, indent=1), encoding="utf-8"
+    )
     print(
         "mesh effects:",
         sum(map(len, scenes.values())),
@@ -90,4 +92,4 @@ def export(root, out):
 
 
 if __name__ == "__main__":
-    export(*sys.argv[1:3])
+    export(*cli.args(__doc__, 2))

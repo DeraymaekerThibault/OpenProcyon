@@ -12,11 +12,11 @@ A mod can ship its own `hud/bar/<skin>.png` + `.json`; the game reads only those
 usage: python3 tools/compose_bar.py <assets dir> [bar.json]"""
 
 import json
-import sys
 from pathlib import Path
 
 from PIL import Image
 
+from tools import cli
 from tools.hud_sprites import IDLE, SKINS, read, sprite_dir
 
 BAR = Path(__file__).resolve().parent.parent / "content/data/hud/bar.json"
@@ -28,7 +28,7 @@ def info(out, name, skin):
     image = read(out, name, skin)
     if image is None:
         return None
-    state = json.loads(meta.read_text())["states"][IDLE]
+    state = json.loads(meta.read_text(encoding="utf-8"))["states"][IDLE]
     return image, state["size"], state["trim"]
 
 
@@ -128,7 +128,7 @@ def compose_skin(out, bar, skin):
 
 def main(out, bar_file=BAR):
     out = Path(out)
-    bar = json.loads(Path(bar_file).read_text())
+    bar = json.loads(Path(bar_file).read_text(encoding="utf-8"))
     (out / "hud/bar").mkdir(parents=True, exist_ok=True)
     for skin in SKINS:
         done = compose_skin(out, bar, skin)
@@ -136,8 +136,10 @@ def main(out, bar_file=BAR):
             continue
         canvas, data = done
         canvas.save(out / f"hud/bar/{skin.lower()}.png")
-        (out / f"hud/bar/{skin.lower()}.json").write_text(json.dumps(data, indent=1))
+        (out / f"hud/bar/{skin.lower()}.json").write_text(
+            json.dumps(data, indent=1), encoding="utf-8"
+        )
 
 
 if __name__ == "__main__":
-    main(*sys.argv[1:])
+    main(*cli.args(__doc__, 1, 2))

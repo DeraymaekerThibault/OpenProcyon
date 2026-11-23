@@ -6,9 +6,9 @@ usage: python -m tools.export_mesh_detail <game_root> <assets_dir>"""
 import functools
 import json
 import re
-import sys
 from pathlib import Path
 
+from tools import cli
 from tools.gamefs import ci_file
 
 
@@ -55,9 +55,11 @@ def export(root, out):
     src = ci_file(Path(root) / "MeshDetailSettings", "MeshDetailSettings.dmt")
     meshes = parse(src.read_text(encoding="latin1"))
     (Path(out) / "data").mkdir(exist_ok=True)
-    (Path(out) / "data/mesh_detail.json").write_text(json.dumps(meshes, indent=0))
+    (Path(out) / "data/mesh_detail.json").write_text(
+        json.dumps(meshes, indent=0), encoding="utf-8"
+    )
     print("mesh detail:", len(meshes), "meshes")
 
 
 if __name__ == "__main__":
-    export(*sys.argv[1:3])
+    export(*cli.args(__doc__, 2))

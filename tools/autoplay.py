@@ -62,7 +62,9 @@ def assets_env():
 def silent_data_home(xdg):
     """Fills a scratch XDG_DATA_HOME with settings that mute the game (default bindings, no saves)."""
     (Path(xdg) / "openprocyon").mkdir()
-    (Path(xdg) / "openprocyon/settings.json").write_text(json.dumps({"master": 0}))
+    (Path(xdg) / "openprocyon/settings.json").write_text(
+        json.dumps({"master": 0}), encoding="utf-8"
+    )
 
 
 def summarise(log, code):
@@ -139,7 +141,7 @@ def main():
             cmd = [*wrap, str(game), "--mission", str(n), "--script", "mission", "--speed", str(args.speed),
                    "--shot", str(out / f"mission{n:02}.png"), "--shot-frame", "1000000000", "--late-frame", "0"]  # fmt: skip
             print(f"mission {n} ...", flush=True)
-            with log.open("w") as f:
+            with log.open("w", encoding="utf-8") as f:
                 try:
                     # Wall-clock cap for a hung run; below 10 fps the game runs slower than 1x, so leave room.
                     code = subprocess.run(
@@ -152,7 +154,13 @@ def main():
                     ).returncode
                 except subprocess.TimeoutExpired:
                     code = "timeout"
-            return (n, *summarise(ANSI.sub("", log.read_text(errors="replace")), code))
+            return (
+                n,
+                *summarise(
+                    ANSI.sub("", log.read_text(encoding="utf-8", errors="replace")),
+                    code,
+                ),
+            )
 
         with ThreadPoolExecutor(args.jobs) as pool:
             rows = list(pool.map(run, args.missions))

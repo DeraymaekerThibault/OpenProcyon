@@ -20,6 +20,8 @@ IMPORTER_DATA = [
     "content/data/hud/slices.json",
 ]
 
+# The one place that names the project repository (the text of PLAY.txt).
+REPO_URL = "https://github.com/DeraymaekerThibault/OpenProcyon"
 PLAY = """OpenProcyon: an unofficial, open-source engine for Treasure Planet: Battle at Procyon (2002).
 This download contains no game content: you need your own copy of the original game.
 
@@ -33,7 +35,7 @@ This download contains no game content: you need your own copy of the original g
    own game files, so they cannot be part of the download. From a terminal: {importer} --bake-skies
 
 OpenProcyon is free software under the GNU GPL v3.0 or later (LICENSE); source code:
-https://github.com/DeraymaekerThibault/OpenProcyon
+{repo}
 content/README.md lists the licences of the files in content/ (fonts, hand-written data);
 THIRD-PARTY-NOTICES.txt those of the libraries inside the game and the importer.
 Not affiliated with or endorsed by Disney or the original developers.
@@ -185,6 +187,7 @@ def main(argv):
     windows = sys.platform == "win32"
     (out / "PLAY.txt").write_text(
         PLAY.format(
+            repo=REPO_URL,
             importer=r".\openprocyon-import" if windows else "./openprocyon-import",
             game="openprocyon" if windows else "./openprocyon",
             assets=r"%APPDATA%\openprocyon\assets"
@@ -192,6 +195,7 @@ def main(argv):
             else "~/.local/share/openprocyon/assets",
         ),
         newline="\r\n" if windows else "\n",
+        encoding="utf-8",
     )
     if not windows:
         with tarfile.open(dist / f"{name}.tar.gz", "w:gz") as tar:

@@ -9,8 +9,9 @@ The raw Ship_*.json files are deleted afterwards. usage: python3 tools/pack_data
 
 import json
 import re
-import sys
 from pathlib import Path
+
+from tools import cli
 
 # Ships offered in the skirmish pickers (retail: the single-player fleet screens); mods opt in with "skirmish": true.
 SKIRMISH = {
@@ -61,7 +62,7 @@ def pack(assets):
         (assets / "data" / sub).mkdir(parents=True, exist_ok=True)
     guns, bullets = {}, {}
     for f in sorted(assets.glob("Ship_*.json")):
-        name, j = f.stem, json.loads(f.read_text())
+        name, j = f.stem, json.loads(f.read_text(encoding="utf-8"))
         for k, g in j["gun_defs"].items():
             assert guns.setdefault(k, g) == g, f"gun {k} differs between ships"
         for k, b in j["bullets"].items():
@@ -108,14 +109,18 @@ def pack(assets):
         ):
             if k in j:
                 ship[k] = j[k]
-        (assets / "data/ships" / f"{name}.json").write_text(dump(rnd(ship)))
+        (assets / "data/ships" / f"{name}.json").write_text(
+            dump(rnd(ship)), encoding="utf-8"
+        )
         (assets / "data/geometry" / f"{name}.json").write_text(
-            json.dumps(geometry, separators=(",", ":"))
+            json.dumps(geometry, separators=(",", ":")), encoding="utf-8"
         )
         f.unlink()
-    (assets / "data/weapons/guns.json").write_text(dump(rnd(guns)))
-    (assets / "data/weapons/bullets.json").write_text(dump(rnd(bullets)))
+    (assets / "data/weapons/guns.json").write_text(dump(rnd(guns)), encoding="utf-8")
+    (assets / "data/weapons/bullets.json").write_text(
+        dump(rnd(bullets)), encoding="utf-8"
+    )
 
 
 if __name__ == "__main__":
-    pack(sys.argv[1])
+    pack(*cli.args(__doc__, 1))

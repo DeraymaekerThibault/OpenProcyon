@@ -22,7 +22,7 @@ from PIL import Image
 from tools.gamefs import ci_file, ci_files
 from tools.mdb import normal, parse
 from tools.msb import parse as parse_msb
-from tools.msb import parse_scene
+from tools.msb import parse_scene, parse_scene_file
 from tools.skin import build as build_skin
 
 
@@ -58,9 +58,7 @@ def scene_layers(root, scene):
     (vanilla PirateSilverShip uses JohnSilverShip_Layer*, ProcyonDMRefulingStationShip ProcyonDMRefulingbaseShip_Layer*).
     """
     try:
-        nodes = parse_msb(
-            ci_file(Path(root) / "BD_MeshScenes", f"{scene}.msb").read_bytes()
-        )
+        nodes = parse_scene_file(root, scene)
     except FileNotFoundError:
         return []
     names = dict.fromkeys(

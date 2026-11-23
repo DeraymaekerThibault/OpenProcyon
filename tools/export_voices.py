@@ -32,7 +32,7 @@ def table(root, voicelines, races, dst=EVENTS):
             )
             if names:
                 ev[d.name] = names
-    Path(dst).write_text(json.dumps(events, indent=1, sort_keys=True))
+    Path(dst).write_text(json.dumps(events, indent=1, sort_keys=True), encoding="utf-8")
     print(sum(len(v) for r in events.values() for v in r.values()), "event entries")
 
 
@@ -41,7 +41,7 @@ def copy(root, out, events=EVENTS):
     root, out = Path(root), Path(out)
     names = {
         n
-        for race in json.loads(Path(events).read_text()).values()
+        for race in json.loads(Path(events).read_text(encoding="utf-8")).values()
         for files in race.values()
         for n in files
     }

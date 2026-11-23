@@ -9,13 +9,12 @@ the original makes only tenders (and every base/island) dockable and repairing b
 usage: python -m tools.export_docks <game_root> <assets_dir>"""
 
 import json
-import sys
 from pathlib import Path
 
+from tools import cli, importlog
 from tools.export_combat import associations, flat, load, placed_objects, scene_name
-from tools.gamefs import ci_file
 from tools.mdb_to_glb import layer_offsets, with_layer_offset
-from tools.msb import parse as parse_msb
+from tools.msb import parse_scene_file
 
 
 def export(root, out):
@@ -26,12 +25,7 @@ def export(root, out):
             if not any(associations(nodes, "DockPoint")):
                 continue
             scene = scene_name(nodes)
-            msb = {
-                n.id: n
-                for n in parse_msb(
-                    ci_file(Path(root) / "BD_MeshScenes", f"{scene}.msb").read_bytes()
-                )
-            }
+            msb = {n.id: n for n in parse_scene_file(root, scene)}
             # Ship meshes are exported without layer offsets, so only scenery points move with their layer.
             offsets = (
                 layer_offsets(root, scene)
@@ -47,16 +41,19 @@ def export(root, out):
                 for n in msb.values()
                 if n.kind == "DockPoint"
             ]
-        except (KeyError, ValueError, FileNotFoundError, StopIteration):
+        except (KeyError, ValueError, FileNotFoundError, StopIteration) as e:
+            importlog.skipped(f"WorldObjects/{name}.wot", f"{type(e).__name__}: {e}")
             continue
         if points:
             docks[name] = dict(
                 points=points, tender=bool(flat(nodes).get("Is Tender", False))
             )
     (Path(out) / "data").mkdir(exist_ok=True)
-    (Path(out) / "data/docks.json").write_text(json.dumps(docks, indent=1))
+    (Path(out) / "data/docks.json").write_text(
+        json.dumps(docks, indent=1), encoding="utf-8"
+    )
     print("docks:", len(docks), "entities with dock points")
 
 
 if __name__ == "__main__":
-    export(*sys.argv[1:3])
+    export(*cli.args(__doc__, 2))

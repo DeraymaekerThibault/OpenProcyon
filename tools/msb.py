@@ -10,6 +10,10 @@ cutter equals the MDB vertex frame (mounts land inside their parent hull layer's
 
 import struct
 from dataclasses import dataclass
+from pathlib import Path
+
+from tools import importlog
+from tools.gamefs import ci_file
 
 
 @dataclass
@@ -34,12 +38,15 @@ def _str(d, o):
     return d[o + 4 : o + 4 + n].decode("latin-1"), o + 4 + n
 
 
-def parse(d):
+def parse(d, source="MSB scene"):
     """Every node, mesh layer and bone as a `Node` (its first attribute as kind/label), read with the strict reader; the pattern
     scan below is the fallback for a scene the strict reader rejects (a modded file)."""
     try:
         scene = parse_scene(d)
-    except (ValueError, struct.error, IndexError):
+    except (ValueError, struct.error, IndexError) as e:
+        importlog.degraded(
+            source, f"strict MSB reader failed ({e}); using the pattern scan"
+        )
         return _scan(d)
     return [
         Node(
@@ -52,6 +59,13 @@ def parse(d):
         )
         for e in scene["nodes"] + scene["meshes"] + scene["bones"]
     ]
+
+
+def parse_scene_file(root, scene):
+    """`parse` of BD_MeshScenes/<scene>.msb in the install `root` (name matched ignoring case; FileNotFoundError when absent);
+    the file name goes into the import log if the scene needs the fallback reader."""
+    path = ci_file(Path(root) / "BD_MeshScenes", f"{scene}.msb")
+    return parse(path.read_bytes(), source=f"BD_MeshScenes/{path.name}")
 
 
 def _scan(d):
@@ -123,6 +137,10 @@ class _Reader:
 
     def string(self):
         n = self.u32()
+        if self.o + n > len(self.d):
+            raise ValueError(
+                f"MSB: string of {n} bytes at {self.o} runs past end ({len(self.d)})"
+            )
         s = self.d[self.o : self.o + n].decode("latin-1")
         self.o += n
         return s

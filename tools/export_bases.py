@@ -5,9 +5,9 @@ New gun/bullet definitions are merged into data/weapons. usage: python3 -m tools
 """
 
 import json
-import sys
 from pathlib import Path
 
+from tools import cli, importlog
 from tools.export_combat import associations, export, load
 from tools.gamefs import ci_files
 from tools.pack_data import dump, rnd, sections_by_label
@@ -17,8 +17,8 @@ def export_bases(root, assets):
     assets = Path(assets)
     wdir = assets / "data/weapons"
     guns, bullets = (
-        json.loads((wdir / "guns.json").read_text()),
-        json.loads((wdir / "bullets.json").read_text()),
+        json.loads((wdir / "guns.json").read_text(encoding="utf-8")),
+        json.loads((wdir / "bullets.json").read_text(encoding="utf-8")),
     )
     wots = [
         w
@@ -33,7 +33,8 @@ def export_bases(root, assets):
             if not armed and not name.startswith("Base_"):
                 continue
             j = export(root, name, assets)
-        except (KeyError, ValueError, FileNotFoundError, StopIteration):
+        except (KeyError, ValueError, FileNotFoundError, StopIteration) as e:
+            importlog.skipped(f"WorldObjects/{name}.wot", f"{type(e).__name__}: {e}")
             continue
         if not j["guns"] and not any(s["vital_mission"] for s in j["sections"]):
             continue
@@ -85,7 +86,7 @@ def export_bases(root, assets):
                 ship[k] = j[k]
         d = assets / "ships" / name
         d.mkdir(parents=True, exist_ok=True)
-        (d / "ship.json").write_text(dump(rnd(ship)))
+        (d / "ship.json").write_text(dump(rnd(ship)), encoding="utf-8")
         (d / "geometry.json").write_text(
             json.dumps(
                 {
@@ -93,12 +94,13 @@ def export_bases(root, assets):
                     for s in j["sections"]
                 },
                 separators=(",", ":"),
-            )
+            ),
+            encoding="utf-8",
         )
         print("base:", name, len(j["guns"]), "guns")
-    (wdir / "guns.json").write_text(dump(rnd(guns)))
-    (wdir / "bullets.json").write_text(dump(rnd(bullets)))
+    (wdir / "guns.json").write_text(dump(rnd(guns)), encoding="utf-8")
+    (wdir / "bullets.json").write_text(dump(rnd(bullets)), encoding="utf-8")
 
 
 if __name__ == "__main__":
-    export_bases(*sys.argv[1:3])
+    export_bases(*cli.args(__doc__, 2))

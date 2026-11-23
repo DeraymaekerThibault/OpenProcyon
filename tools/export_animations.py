@@ -7,9 +7,9 @@ pose or absolute poses is not settled (docs/re/effects.md). usage: python -m too
 
 import json
 import struct
-import sys
 from pathlib import Path
 
+from tools import cli
 from tools.gamefs import ci_files
 from tools.msb import parse_scene
 
@@ -54,7 +54,7 @@ def export(root, out):
             scenes[msb.stem] = [rounded(c, names) for c in scene["animations"]]
     (Path(out) / "data").mkdir(exist_ok=True)
     (Path(out) / "data/animations.json").write_text(
-        json.dumps(scenes, separators=(",", ":"))
+        json.dumps(scenes, separators=(",", ":")), encoding="utf-8"
     )
     print(
         "animations:", sum(map(len, scenes.values())), "clips in", len(scenes), "scenes"
@@ -62,4 +62,4 @@ def export(root, out):
 
 
 if __name__ == "__main__":
-    export(*sys.argv[1:3])
+    export(*cli.args(__doc__, 2))

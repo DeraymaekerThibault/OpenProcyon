@@ -7,10 +7,9 @@ import json
 import math
 import re
 import shutil
-import sys
 from pathlib import Path
 
-from tools import ogg
+from tools import cli, ogg
 from tools.export_campaign_media import PLAYABLE
 from tools.export_combat import export as export_ship
 from tools.export_environment import export_environment
@@ -264,7 +263,9 @@ def export_skirmish_script(root, out, twt):
         for f in script["map_text"]
     ]
     (out / "campaign").mkdir(exist_ok=True)
-    (out / f"campaign/{mid}_script.json").write_text(json.dumps(script, indent=2))
+    (out / f"campaign/{mid}_script.json").write_text(
+        json.dumps(script, indent=2), encoding="utf-8"
+    )
 
 
 def export_mission(root, out, twt):
@@ -315,7 +316,7 @@ def export_mission(root, out, twt):
     # Wrecked hulls (no ship class: no engines or core) are static scenery the rules can still address (teleport, collidable).
     # (A wreck with a ship class, the StarHammer of mission 9, is spawned as a ship instead.)
     classes = (
-        set(json.loads((out / "ships.json").read_text()))
+        set(json.loads((out / "ships.json").read_text(encoding="utf-8")))
         if (out / "ships.json").exists()
         else set()
     )
@@ -352,13 +353,13 @@ def export_mission(root, out, twt):
     m["objects"] = [
         o for o in m["objects"] if o["scene"] and model_path(out, o["scene"]).exists()
     ]
-    registry = json.loads((out / "ships.json").read_text())
+    registry = json.loads((out / "ships.json").read_text(encoding="utf-8"))
     mission["unresolved_ships"] = []
     for typ in sorted({s["type"] for s in mission["ships"]}):
         if typ not in registry:
             try:
                 (out / f"{typ}.json").write_text(
-                    json.dumps(export_ship(root, typ, out))
+                    json.dumps(export_ship(root, typ, out)), encoding="utf-8"
                 )
                 scene = mesh_scene(root, typ)
                 if not model_path(out, scene).exists():
@@ -369,7 +370,7 @@ def export_mission(root, out, twt):
                 mission["unresolved_ships"].append(
                     typ
                 )  # wrecks and other non-combat hulls
-    (out / "ships.json").write_text(json.dumps(registry))
+    (out / "ships.json").write_text(json.dumps(registry), encoding="utf-8")
     handoff = next(
         (r for r in mission["rules"] if r["name"].startswith("END Opening NIS")), None
     )
@@ -386,17 +387,19 @@ def export_mission(root, out, twt):
         src = next((root / "Sound/Music").glob(track + ".ogg"), None) if track else None
         if src and mid in PLAYABLE:
             shutil.copyfile(src, out / "sound" / (track.lower() + ".ogg"))
-    (out / f"maps/{mid}.json").write_text(json.dumps(m))
+    (out / f"maps/{mid}.json").write_text(json.dumps(m), encoding="utf-8")
     bd = out / "menu" / f"{(m.get('backdrop') or '').lower()}.png"
     if m.get("backdrop") and not bd.exists() and (im := tiles(root, m["backdrop"])):
         bd.parent.mkdir(parents=True, exist_ok=True)
         im.save(bd)  # star-map picture; pack_layout moves it to maps/<id>/backdrop.png
     (out / "campaign").mkdir(exist_ok=True)
-    (out / f"campaign/{mid}.json").write_text(json.dumps(mission, indent=2))
+    (out / f"campaign/{mid}.json").write_text(
+        json.dumps(mission, indent=2), encoding="utf-8"
+    )
     print(
         f"{mid}: {len(mission['ships'])} ships, {len(mission['rules'])} rules, {len(mission['volumes'])} volumes"
     )
 
 
 if __name__ == "__main__":
-    main(*sys.argv[1:3])
+    main(*cli.args(__doc__, 2))

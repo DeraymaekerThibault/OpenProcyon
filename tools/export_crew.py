@@ -3,9 +3,9 @@ The game does not use crew yet; this is the data for fleet building and ship ski
 usage: python3 -m tools.export_crew <game_root> <assets dir>"""
 
 import json
-import sys
 from pathlib import Path
 
+from tools import cli
 from tools.export_maps import strings
 from tools.gamefs import ci_files
 from tools.wot import parse_text, properties
@@ -49,9 +49,11 @@ def main(root, out):
         for f in ci_files(Path(root) / "WorldObjects", "Crew_*.wot")
     }
     (Path(out) / "data").mkdir(parents=True, exist_ok=True)
-    (Path(out) / "data/crew.json").write_text(json.dumps(crew, indent=1))
+    (Path(out) / "data/crew.json").write_text(
+        json.dumps(crew, indent=1), encoding="utf-8"
+    )
     print(len(crew), "crew")
 
 
 if __name__ == "__main__":
-    main(*sys.argv[1:3])
+    main(*cli.args(__doc__, 2))

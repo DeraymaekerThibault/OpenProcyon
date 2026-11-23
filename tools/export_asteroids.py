@@ -3,9 +3,9 @@ usage: python3 -m tools.export_asteroids <game_root> <assets_dir>
 """
 
 import math
-import sys
 from pathlib import Path
 
+from tools import cli
 from tools.export_maps import convert_scene
 from tools.gamefs import ci_file, ci_files
 from tools.mdb_to_glb import convert
@@ -91,9 +91,9 @@ def export(root, assets):
                 else convert_scene(root, scene)
             )
     (assets / "data").mkdir(exist_ok=True)
-    (assets / "data/asteroids.json").write_text(dump(defs))
+    (assets / "data/asteroids.json").write_text(dump(defs), encoding="utf-8")
     print(f"exported {len(defs)} ordinary asteroid definitions")
 
 
 if __name__ == "__main__":
-    export(*sys.argv[1:])
+    export(*cli.args(__doc__, 2))

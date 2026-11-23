@@ -11,11 +11,11 @@ HD replacement: ship a 2x PNG of the same name in a mod plus hud/scales.json {"s
 usage: python3 tools/make_slices.py <assets dir> [slices.json [out dir]]"""
 
 import json
-import sys
 from pathlib import Path
 
 from PIL import Image
 
+from tools import cli
 from tools.hud_sprites import SKINS, read
 
 SLICES = Path(__file__).resolve().parent.parent / "content/data/hud/slices.json"
@@ -49,7 +49,7 @@ def main(out, slices=SLICES, tex=None):
     out = Path(out)
     tex = Path(tex) if tex else out / "hud/tex"
     tex.mkdir(parents=True, exist_ok=True)
-    for group, spec in json.loads(Path(slices).read_text()).items():
+    for group, spec in json.loads(Path(slices).read_text(encoding="utf-8")).items():
         names = [spec[k] for k in ("left", "center", "right") if k in spec]
         for skin in SKINS:
             for state in spec.get("states", ["NoCursor"]):
@@ -62,4 +62,4 @@ def main(out, slices=SLICES, tex=None):
 
 
 if __name__ == "__main__":
-    main(*sys.argv[1:])
+    main(*cli.args(__doc__, 1, 3))

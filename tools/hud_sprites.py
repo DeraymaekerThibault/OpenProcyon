@@ -46,7 +46,7 @@ def read(out, component, skin, state=IDLE):
     meta = sprite_dir(out, component) / f"{skin}.json"
     if not meta.is_file():
         return None
-    states = json.loads(meta.read_text())["states"]
+    states = json.loads(meta.read_text(encoding="utf-8"))["states"]
     info = states.get(state) or (states.get(IDLE) if state != IDLE else None)
     if info is None:
         return None

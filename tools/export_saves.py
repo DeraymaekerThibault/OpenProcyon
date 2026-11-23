@@ -5,9 +5,9 @@ has no retail snapshot and reuses mission 12's counters (PROVISIONAL). See docs/
 
 import json
 import re
-import sys
 from pathlib import Path
 
+from tools import cli
 from tools.gamefs import ci_files
 
 
@@ -38,9 +38,11 @@ def main(root, out):
     )  # campaign files may be missing or removed
     for n, c in sorted(found.items()):
         save = {"name": f"Mission {n:02} (start)", "mission": f"mission{n:02}", **c}
-        (out / f"mission{n:02}.json").write_text(json.dumps(save, indent=1) + "\n")
+        (out / f"mission{n:02}.json").write_text(
+            json.dumps(save, indent=1) + "\n", encoding="utf-8"
+        )
         print(save["name"], c["points"], len(c["crew"]), len(c["arms"]))
 
 
 if __name__ == "__main__":
-    main(*sys.argv[1:3])
+    main(*cli.args(__doc__, 2))

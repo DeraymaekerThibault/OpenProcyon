@@ -7,10 +7,10 @@ usage: python -m tools.export_nebulae <game_root> <assets_dir>   (patches existi
 import json
 import re
 import shutil
-import sys
 from pathlib import Path
 
 import tools.export_campaign as campaign
+from tools import cli
 from tools.export_campaign import parse_mission
 from tools.export_combat import flat, load
 from tools.gamefs import ci_files
@@ -117,7 +117,9 @@ def main(root, out):
     if set(damage) != {"lightning", "wind", "meteor"}:
         raise ValueError("Missing nebula weather damage tables")
     (out / "data").mkdir(parents=True, exist_ok=True)
-    (out / "data/nebula.json").write_text(json.dumps(damage, indent=2) + "\n")
+    (out / "data/nebula.json").write_text(
+        json.dumps(damage, indent=2) + "\n", encoding="utf-8"
+    )
     for twt in sorted(
         [*(root / "World").glob("*.twt"), *(root / "World/SinglePlayer").glob("*.twt")]
     ):
@@ -125,7 +127,7 @@ def main(root, out):
         f = out / "maps" / f"{mid}.json"
         if not f.exists():
             continue
-        m = json.loads(f.read_text())
+        m = json.loads(f.read_text(encoding="utf-8"))
         try:
             m["nebulae"] = nebulae(
                 twt.read_text(encoding="latin1"), str(twt.relative_to(root))
@@ -137,7 +139,7 @@ def main(root, out):
         ) as e:  # installs vary (mods); one broken map must not stop the import
             print(f"skip {mid} nebulae: {e}")
             continue
-        f.write_text(json.dumps(m))
+        f.write_text(json.dumps(m), encoding="utf-8")
         print(f"{mid}: {len(m['nebulae'])} nebula setups")
     dst = model_path(out, "GeoSolar", mkdir=True)
     if not dst.exists():
@@ -151,4 +153,4 @@ def main(root, out):
 
 
 if __name__ == "__main__":
-    main(*sys.argv[1:3])
+    main(*cli.args(__doc__, 2))
