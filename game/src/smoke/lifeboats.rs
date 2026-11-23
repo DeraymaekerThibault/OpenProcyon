@@ -7,7 +7,7 @@ use bevy::prelude::*;
 /// docs/re/lifeboats.md §7.10). SCRIPTED: it kills the pirate through its health (the combat-death path, not a fight), teleports the
 /// collector onto a boat and, for mission 1, marks the NIS speech as played; everything else is the normal rules and systems.
 /// Normal-combat validation is a manual play-through. Panics (non-zero exit) when an expectation fails.
-pub(super) fn smoke(world: &mut World, mut stage: Local<(u32, u32)>, mut score: Local<u32>, mut expect: Local<Option<(String, String, u32)>>) {
+pub(super) fn smoke(world: &mut World, mut stage: Local<(u32, u32)>, mut score: Local<u32>, mut expect: Local<Option<(String, crate::names::Owner, u32)>>) {
     let cfg = world.resource::<crate::Config>();
     let Some(script) = cfg.script.as_deref().filter(|s| s.starts_with("lifeboat-")).map(str::to_owned) else { return };
     let (frame, shot) = (cfg.frame, cfg.shot.is_some());

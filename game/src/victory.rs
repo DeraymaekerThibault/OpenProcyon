@@ -3,6 +3,7 @@
 //! decides the human's outcome from a snapshot of the battle; `scenario::outcome` builds the snapshot. A map with a condition
 //! we do not model yet keeps the plain "no enemy ships left" rule. Team points come from the map's own script (rules::skirmish).
 
+use crate::rules::schema::Equivalence;
 use crate::rules::{EndKind, Region, ScriptEnd};
 use crate::scenario::Outcome;
 use crate::ship::Side;
@@ -14,7 +15,7 @@ enum Cond {
     /// A base group's mission-critical damage (0-1) compared with the rule's number.
     BaseDamage {
         objects: Vec<i64>,
-        test: Test,
+        test: Equivalence,
         value: f32,
     },
     NoTeamHasShips,
@@ -42,13 +43,6 @@ enum Cond {
     DestroyedFrom(Vec<i64>),
     /// The team has scored at least this many points through the map's script (rules::skirmish).
     TeamPoints(String, i32),
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-enum Test {
-    Equal,
-    Greater,
-    Less,
 }
 
 #[derive(Clone, Debug)]
@@ -185,12 +179,7 @@ impl Victory {
             let hit = rule.conditions.iter().all(|c| match c {
                 Cond::BaseDamage { objects, test, value } => {
                     let damages: Vec<f32> = snap.bases.iter().filter(|b| objects.contains(&b.0)).map(|b| b.1).collect();
-                    !damages.is_empty()
-                        && damages.iter().all(|d| match test {
-                            Test::Equal => (d - value).abs() < 0.001 || (*value >= 1.0 && *d >= 0.999),
-                            Test::Greater => d > value,
-                            Test::Less => d < value,
-                        })
+                    !damages.is_empty() && damages.iter().all(|d| test.holds(*d, *value, 0.001) || (*test == Equivalence::EqualTo && *value >= 1.0 && *d >= 0.999))
                 }
                 Cond::NoTeamHasShips => alive_sides.is_empty(),
                 Cond::NoHumanShips => !human_alive,
@@ -254,16 +243,9 @@ fn condition(c: &Value, groups: &Value) -> Option<Cond> {
         Some(ids)
     };
     Some(match c["Type"].as_str()? {
-        "Group/Unit Vital Section has >,<,= X damage" => Cond::BaseDamage {
-            objects: objects()?,
-            test: match c["Equivalence"].as_str()? {
-                "Equal To" => Test::Equal,
-                "Greater Than" => Test::Greater,
-                "Less Than" => Test::Less,
-                _ => return None,
-            },
-            value: c["Damage Percent"].as_f64()? as f32,
-        },
+        "Group/Unit Vital Section has >,<,= X damage" => {
+            Cond::BaseDamage { objects: objects()?, test: Equivalence::parse(c["Equivalence"].as_str()?)?, value: c["Damage Percent"].as_f64()? as f32 }
+        }
         "No Team Has Ships" => Cond::NoTeamHasShips,
         "No Human Controlled Ships Remain" => Cond::NoHumanShips,
         "Team X has no ships" => Cond::TeamHasNoShips(c["Team Name"].as_str()?.to_string()),
@@ -272,9 +254,7 @@ fn condition(c: &Value, groups: &Value) -> Option<Cond> {
         // a base's capture comes from the snapshot's captured bases
         "Team has captured a ship from Group/Unit" => Cond::Captured(objects()?),
         "Group Destroyed" => Cond::GroupDestroyed(objects()?),
-        "Does Group Contain Unit Name" => {
-            Cond::UnitPresent { objects: objects()?, exists: c["Exists?"].as_bool().or_else(|| c["Exists?"].as_str().map(|v| v.eq_ignore_ascii_case("true")))? }
-        }
+        "Does Group Contain Unit Name" => Cond::UnitPresent { objects: objects()?, exists: crate::data::wot_flag(&c["Exists?"]) },
         "Enter Volume" => Cond::InVolume { objects: objects()?, polygon: Region::from_json(c.get("polygon").filter(|p| p.as_array().is_some_and(|a| a.len() > 2))?) },
         "Team has destroyed a ship from Group/Unit" => Cond::DestroyedFrom(objects()?),
         "Team has X points" => Cond::TeamPoints(c["Team Name"].as_str()?.to_string(), c["Points"].as_i64()? as i32),

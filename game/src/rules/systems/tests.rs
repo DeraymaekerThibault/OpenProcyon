@@ -89,7 +89,7 @@ fn a_ship_handed_to_the_human_is_stopped_not_capped_by_a_group_throttle() {
     let class = lib.index("Ship_Navy_Torpedo");
     let mut app = rules_app(mission);
     let ship = |order| Ship { heading: 0.0, order, ..Ship::new(class, Side::Player) };
-    let ms = |name: &str| MissionShip { name: name.into(), owner: owner.clone(), visible: true, ..default() };
+    let ms = |name: &str| MissionShip { name: name.into(), owner: owner.as_str().into(), visible: true, ..default() };
     app.world_mut().spawn((ship(EngineOrder::Stop), Health::new(&lib.classes[class]), Transform::default(), Visibility::Inherited, PlayerShip, ms("RLS Comet")));
     let boat = app.world_mut().spawn((ship(EngineOrder::Full), Health::new(&lib.classes[class]), Transform::from_xyz(50.0, 0.0, 0.0), Visibility::Inherited, ms("Longboat"))).id();
     app.insert_resource(lib);
@@ -119,7 +119,7 @@ fn mission_two_attack_volume_changes_base_owner_and_gunfire_advances_the_story()
             Transform::from_xyz(-970.0, 0.0, 450.0),
             Visibility::Inherited,
             PlayerShip,
-            MissionShip { id: 249, name: "RLS Comet".into(), owner: player_owner.clone(), visible: true, ..default() },
+            MissionShip { id: 249, name: "RLS Comet".into(), owner: player_owner.as_str().into(), visible: true, ..default() },
         ))
         .id();
     let base = app.world_mut().spawn((MissionBase { id: 24, owner: "NO PLAYER".into() }, Transform::default())).id();

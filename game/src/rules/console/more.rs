@@ -218,7 +218,7 @@ impl Script {
                             o.lines.push(format!("  attacking {}", i.attack.join(", ")));
                         }
                     }
-                    let name = |e: Entity| w.iter().find(|x| x.e == e).map_or("?".to_string(), |x| x.name.clone());
+                    let name = |e: Entity| w.iter().find(|x| x.e == e).map_or("?".to_string(), |x| x.name.to_string());
                     for (tower, towed) in self.tows.iter().filter(|t| t.0 == u.e || t.1 == u.e) {
                         o.lines.push(if *tower == u.e { format!("  towing {}", name(*towed)) } else { format!("  towed by {}", name(*tower)) });
                     }
@@ -286,7 +286,7 @@ impl Script {
     fn describe_unit(&self, u: &Unit, env: &Env) -> String {
         let (x, y, _) = game_pos(u.pos);
         let stance = env.ships.iter().find(|i| i.e == Some(u.e)).map_or("-", |i| i.stance.as_str());
-        let groups: Vec<&str> = u.groups.iter().map(String::as_str).filter(|g| *g != u.owner).collect();
+        let groups: Vec<&str> = u.groups.iter().map(GroupName::as_str).filter(|g| *g != u.owner.as_str()).collect();
         format!(
             "#{} {} [{}]{} dmg {:.0}% at ({x:.0}, {y:.0}){}{} {stance}",
             u.id,

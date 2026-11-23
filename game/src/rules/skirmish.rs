@@ -1,4 +1,4 @@
-//! A skirmish map's own script (`maps/<id>/script.json`): the same interpreter as the campaign, driving the map's convoys, timers and
+//! Not retail: a skirmish map's own script (`maps/<id>/script.json`), the same interpreter as the campaign, driving the map's convoys, timers and
 //! team points. Its effects are applied by the code the campaign uses (`systems::apply`). Retail maps keep their end rules with
 //! victory.rs (`without_end_rules`); a map that opts in with `"victory": "script"` lets its own rules end the game (`script_end`).
 use bevy::prelude::*;
@@ -93,8 +93,8 @@ fn run(
     let mut world: Vec<Unit> = ships
         .iter()
         .map(|s| Unit {
-            name: s.mission.name.clone(),
-            owner: s.mission.owner.clone(),
+            name: s.mission.name.as_str().into(),
+            owner: s.mission.owner.as_str().into(),
             alive: !s.health.destroyed,
             visible: s.mission.visible,
             primary: s.primary,

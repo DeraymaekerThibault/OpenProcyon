@@ -11,7 +11,7 @@ pub enum Setting {
     Dialogue,
     /// Video mode (windowed / fullscreen), effect detail (low / medium / high), render background, flag waving.
     Fullscreen,
-    /// Vsync on / off, anti-aliasing (off / SMAA / MSAA 4x). Not retail options.
+    /// Not retail: vsync on / off, anti-aliasing (off / SMAA / MSAA 4x).
     Vsync,
     AntiAlias,
     Detail,
@@ -20,7 +20,7 @@ pub enum Setting {
     RestoreDisplay,
     /// Single Player menu toggle: Normal -> Hard -> Easy.
     Difficulty,
-    /// Display screen: whether the console key opens the developer console (not retail; rules/console.rs).
+    /// Not retail: Display screen, whether the console key opens the developer console (rules/console.rs).
     Console,
 }
 

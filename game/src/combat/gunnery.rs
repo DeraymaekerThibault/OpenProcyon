@@ -319,7 +319,7 @@ pub(super) fn fire(
     fxl: Res<FxLib>,
     mut target: ResMut<Target>,
     look: Res<Look>,
-    (mut rng, spawn_order): (ResMut<SimRng>, Query<&crate::scenario::SpawnIndex>),
+    (mut rng, spawn_order, mut start): (ResMut<SimRng>, Query<&crate::scenario::SpawnIndex>, crate::scenario::BattleStart),
     mut sfx: MessageWriter<Sfx>,
     mut fired: MessageWriter<Fired>,
     objects: Query<
@@ -355,6 +355,11 @@ pub(super) fn fire(
         Local<bevy::platform::collections::HashMap<Entity, RockWatch>>,
     ),
 ) {
+    if start.is_new() {
+        mine_laying.clear();
+        ground.clear();
+        rock_watch.clear();
+    }
     // The human fleet's gunners in a campaign: the roster's best gunner (crew_arms.rs); everyone else the plain-AI factor.
     let crewed = crate::crew_arms::accuracy(points.as_deref());
     let dt = time.delta_secs();
@@ -406,8 +411,12 @@ pub(super) fn fire(
         })
         .collect();
     let mut seen: Vec<Contact> = Vec::with_capacity(contacts.len()); // reused: refilled per shooter
-    // In entity order: every shooter draws from the shared `Rng`, and the query's own order can differ from launch to launch.
-    for (me, tf, ship, mut states, health, mission, primary, pilot, cloak, posts, boarding, scan) in shooters.iter_mut().sort::<Entity>() {
+    // In spawn order: every shooter draws from the shared `Rng`, and the query's own order differs between launches and restarts.
+    // Each ship's guns draw in mount order (the order of its `GunStates`).
+    let order = crate::scenario::in_spawn_order(&spawn_order, shooters.iter().map(|s| s.0), |e| *e);
+    let mut walk = shooters.iter_many_mut(&order);
+    while let Some(item) = walk.fetch_next() {
+        let Ok((me, tf, ship, mut states, health, mission, primary, pilot, cloak, posts, boarding, scan)) = item else { continue };
         if health.destroyed {
             ground.remove(&me);
             continue;
@@ -863,7 +872,7 @@ pub(super) fn base_fire(
     lib: Res<Library>,
     fxl: Res<FxLib>,
     look: Res<Look>,
-    mut rng: ResMut<SimRng>,
+    (mut rng, spawn_order): (ResMut<SimRng>, Query<&crate::scenario::SpawnIndex>),
     mut sfx: MessageWriter<Sfx>,
     mut fired: MessageWriter<Fired>,
     campaign: Option<Res<crate::campaign::Mission>>,
@@ -876,7 +885,10 @@ pub(super) fn base_fire(
     (globals, sensors): (Query<&GlobalTransform, With<GunPart>>, Res<crate::environment::Sensors>),
 ) {
     let dt = time.delta_secs();
-    for (me, tf, base, armed, health, mut states, skirmish_side, island, visibility) in bases.iter_mut().sort::<Entity>() {
+    let order = crate::scenario::in_spawn_order(&spawn_order, bases.iter().map(|b| b.0), |e| *e);
+    let mut walk = bases.iter_many_mut(&order);
+    while let Some(item) = walk.fetch_next() {
+        let Ok((me, tf, base, armed, health, mut states, skirmish_side, island, visibility)) = item else { continue };
         // A base a rule has hidden (mission 11's armed asteroids until a speech line) does not fire. PROVISIONAL: the original's rule for a hidden island's guns is not read.
         if visibility.is_some_and(|v| *v == Visibility::Hidden) {
             continue;
