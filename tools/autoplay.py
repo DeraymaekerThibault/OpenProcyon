@@ -50,7 +50,12 @@ def display_wrapper():
         or os.environ.get("WAYLAND_DISPLAY")
     ):
         return []
-    return ["xvfb-run", "-a", "-s", "-screen 0 1280x720x24"]
+    # -d lets Xvfb pick a free display (-displayfd); -a races between parallel runs. Older xvfb-run (Debian) has only -a.
+    helptext = subprocess.run(
+        ["xvfb-run", "--help"], capture_output=True, text=True
+    ).stdout
+    auto = "-d" if "--auto-display" in helptext else "-a"
+    return ["xvfb-run", auto, "-s", "-screen 0 1280x720x24"]
 
 
 def assets_env():
