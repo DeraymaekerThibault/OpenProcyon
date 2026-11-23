@@ -31,6 +31,7 @@ pub mod loading;
 pub mod logging;
 pub mod menu;
 pub mod modding;
+pub mod names;
 pub mod nebula;
 pub mod options_menu;
 pub mod panels;

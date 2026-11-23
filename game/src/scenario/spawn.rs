@@ -323,7 +323,7 @@ pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Libra
             let slots: Vec<_> = ship::formation_slots(kind, &radii).into_iter().map(|v| game_to_bevy(&p["start"]) + Quat::from_rotation_y(heading) * v).collect();
             // A scripted map's ships answer to their map player's name (`MissionShip::owner`), so the fleet is keyed the same way, or the
             // fleet bookkeeping drops the human's command ship (no control, no HUD).
-            let owner = if script_names.is_some() { p["name"].as_str().unwrap_or_default().to_string() } else { format!("player{}", g.player) };
+            let owner: crate::names::Owner = if script_names.is_some() { p["name"].as_str().unwrap_or_default().to_string() } else { format!("player{}", g.player) }.into();
             if let Some((name, flag)) = &g.row {
                 let colour = p["color"]
                     .as_array()
