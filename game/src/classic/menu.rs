@@ -5,6 +5,7 @@
 //! no transitions.
 
 #![allow(deprecated)] // shortcut: bevy 0.20 Interaction (deprecated for picking Hovered/Pressed); port when it is removed
+use crate::scenario::Race;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use serde_json::Value;
@@ -13,7 +14,7 @@ use crate::assets_dir;
 use crate::bindings::Bindings;
 use crate::combat::Library;
 use crate::menu::{
-    Action, BuildMenu, Cell, Choice, CtrlUi, FLEET_SIZE, InGame, Kind, MenuKey, MenuModel, MenuRoot, Page, RACES, RunButtons, SaveUi, Screen, ScrollKind, Skirmish, SliderTrack,
+    Action, BuildMenu, Cell, Choice, CtrlUi, FLEET_SIZE, InGame, Kind, MenuKey, MenuModel, MenuRoot, Page, RunButtons, SaveUi, Screen, ScrollKind, Skirmish, SliderTrack,
     VICTORY_LIMIT, menu_active, offered, pretty, strings, text_of,
 };
 use crate::sprites::{BODY_FONT, Fonts, HudData};
@@ -412,8 +413,8 @@ fn summary(ctx: &Ctx, c: &mut ChildSpawnerCommands, stats: &crate::stats::GameSt
     rows.sort_by_key(|((_, line), _)| std::cmp::Reverse(line.end));
     for (row, ((name, line), best)) in rows.into_iter().enumerate() {
         let cy = 210.0 + row as f32 * 60.0;
-        let race = RACES.iter().find(|r| r.1 == line.race).map_or(0, |r| r.0);
-        piece(ctx, c, &format!("FrontEnd_Flag_Small_Icon_{:02}", flag_base(race) + row % 10), [37.0, cy - 12.5, 65.0, cy + 12.5]);
+        let race = Race::from_class(&line.race).unwrap_or(Race::Navy);
+        piece(ctx, c, &format!("FrontEnd_Flag_Small_Icon_{:02}", race.flag_base() + row % 10), [37.0, cy - 12.5, 65.0, cy + 12.5]);
         ctx.text(c, BODY_FONT, name, 77.0, 110.0, cy, false, Color::WHITE);
         for (i, (cell, green)) in line.cells().iter().zip(best).enumerate() {
             let x = 197.0 + i as f32 * 140.0;
@@ -686,15 +687,6 @@ fn ingame_window(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4]
     ctx.image(c, "menu/fe_ingame_window.png", Some(Rect::new(10.0, 38.0, 682.0, 484.0)), l, t, r - l, b - t, Color::WHITE);
 }
 
-/// First flag icon of a fleet type's block of ten (`FrontEnd_Flag_*Icon_NN`): Navy 0, Pirate 10, Procyon 20.
-fn flag_base(race: u8) -> usize {
-    match race {
-        2 => 10,
-        3 => 20,
-        _ => 0,
-    }
-}
-
 /// Where a 'Front End Dialog Screen Backdrop' frame (`frontenddialogscreen.png`) is drawn for its ReferenceArea `[l, t, r, b]`:
 /// centred on the screen, top at the area's top, scaled by 653/485 x 256/242. Fitted on the in-game menu (area [101,185,586,427]
 /// measured at x 74..727, y 185..441); it puts the frame's inner area around the dialog's content (in-game menu buttons x 174..629,
@@ -782,7 +774,7 @@ fn players_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, _rect: [f32; 4], sk: &S
         let cy = 184.0 + i as f32 * 32.0;
         let me = slot.kind == Kind::Human;
         let live = slot.kind.live();
-        let base = flag_base(slot.race);
+        let base = slot.race.flag_base();
         if live {
             let mut flag = c.spawn((ctx.node(250.0, cy - 12.5, 28.0, 25.0), Interaction::None));
             if me {
@@ -803,7 +795,7 @@ fn players_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, _rect: [f32; 4], sk: &S
             None if slot.team >= 0 => team_label(&s, slot.team),
             None => "-".into(),
         };
-        let race = RACES.iter().find(|r| r.0 == slot.race).map_or_else(|| s("IDGS_TPFRONTENDTEXT01_PLEASE_SELECT_A_RACE"), |r| s(r.2));
+        let race = slot.race.fleet_text().map_or_else(|| s("IDGS_TPFRONTENDTEXT01_PLEASE_SELECT_A_RACE"), s);
         let kind = match slot.kind {
             Kind::Human => s("IDGS_TPFRONTENDTEXT_SCREENS_PLAYER"),
             Kind::Computer => s("IDGS_TPFRONTENDTEXT01_COMPUTER"),
@@ -824,7 +816,7 @@ fn players_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, _rect: [f32; 4], sk: &S
     }
     if sk.flag_picker {
         // Retail: a modal gold frame over the lobby with the fleet type's ten flags, two rows of five 75 apart; only a pick closes it.
-        let base = flag_base(sk.human().map_or(0, |h| h.race));
+        let base = sk.human().map_or(Race::Navy, |h| h.race).flag_base();
         c.spawn((Interaction::None, bevy::ui::FocusPolicy::Block, Action::FlagPicker(true), ctx.node(0.0, 0.0, 800.0, 600.0), ZIndex(1)));
         c.spawn((ctx.node(150.0, 175.0, 475.0, 245.0), ZIndex(2))).with_children(|c| {
             ctx.image(c, "menu/frontenddialogscreen.png", None, 0.0, 0.0, 475.0, 245.0, Color::WHITE);
@@ -857,7 +849,7 @@ fn players_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, _rect: [f32; 4], sk: &S
                 Choice::Computer => s("IDGS_TPFRONTENDTEXT01_COMPUTER"),
                 Choice::Open => s("IDGS_TPFRONTENDTEXT01_OPEN"),
                 Choice::Close => s("IDGS_TPFRONTENDTEXT_SCREENS_CLOSE"),
-                Choice::Fleet(r) => RACES.iter().find(|x| x.0 == r).map_or_else(String::new, |x| s(x.2)),
+                Choice::Fleet(r) => r.fleet_text().map_or_else(String::new, s),
                 Choice::Team(t) => team_label(&s, t),
             };
             (label, Action::Choose(cell, choice))

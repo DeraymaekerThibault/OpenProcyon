@@ -1,8 +1,50 @@
 //! Shared ship state, movement integration and skirmish AI.
 use crate::*;
 
-/// All Stop, Ahead Slow, Ahead Full, Emergency Speed as fractions of Ahead Full speed (measured on the retail cutter, docs/re/movement.md).
-pub const ORDERS: [(&str, f32); 4] = [("All Stop", 0.0), ("Ahead Slow", 0.5), ("Ahead Full", 1.0), ("Emergency Speed", 2.0)];
+/// A ship's engine order: All Stop, Ahead Slow, Ahead Full, Emergency Speed. The discriminants are the retail dial and sound
+/// indices (0..=3), and the order of the variants is the order of the speeds.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub enum EngineOrder {
+    #[default]
+    Stop = 0,
+    Slow = 1,
+    Full = 2,
+    Emergency = 3,
+}
+
+impl EngineOrder {
+    pub const ALL: [EngineOrder; 4] = [EngineOrder::Stop, EngineOrder::Slow, EngineOrder::Full, EngineOrder::Emergency];
+
+    /// The order at dial/sound index `i` (0 All Stop .. 3 Emergency); `None` past the last.
+    pub fn from_index(i: usize) -> Option<Self> {
+        Self::ALL.get(i).copied()
+    }
+
+    /// The dial/sound index, 0..=3.
+    pub fn index(self) -> usize {
+        self as usize
+    }
+
+    /// The HUD name of the order.
+    pub fn label(self) -> &'static str {
+        ["All Stop", "Ahead Slow", "Ahead Full", "Emergency Speed"][self.index()]
+    }
+
+    /// The fraction of Ahead Full speed the order commands (measured on the retail cutter, docs/re/movement.md).
+    pub fn fraction(self) -> f32 {
+        [0.0, 0.5, 1.0, 2.0][self.index()]
+    }
+
+    /// One step up the dial, stopping at Emergency.
+    pub fn faster(self) -> Self {
+        Self::from_index(self.index() + 1).unwrap_or(self)
+    }
+
+    /// One step down the dial, stopping at All Stop.
+    pub fn slower(self) -> Self {
+        Self::from_index(self.index().saturating_sub(1)).unwrap_or(self)
+    }
+}
 
 /// Ahead Full without crew settles at this fraction of WOT MaxSpeed (so Emergency is 1.125 x MaxSpeed). Measured on the cutter,
 /// Man-O-War, Carrack, Barque and Minelayer (docs/re/movement.md); the engineers raise it (`Ship::crew_speed`).
@@ -44,7 +86,7 @@ pub struct Ship {
     pub heading: f32, // radians about +Y; forward is -Z at heading 0 (the GLB export maps game +y bow to -Z)
     pub speed: f32,
     pub ang_vel: f32,
-    pub order: usize,
+    pub order: EngineOrder,
     pub waypoints: Vec<Vec3>,
     pub goal: Option<f32>,     // AI: heading to hold when there are no waypoints
     pub cap: f32,              // script 'Max Throttle Percent': fraction of the ordered speed the ship may use
@@ -81,7 +123,7 @@ impl Ship {
             heading: 0.0,
             speed: 0.0,
             ang_vel: 0.0,
-            order: 0,
+            order: EngineOrder::Stop,
             waypoints: vec![],
             goal: None,
             cap: 1.0,
@@ -100,7 +142,7 @@ impl Ship {
     pub fn halt(&mut self) {
         self.waypoints.clear();
         self.goal = None;
-        self.order = 0;
+        self.order = EngineOrder::Stop;
     }
 
     /// The Hold and Stop orders' effect on the controls: rudder and throttle to zero, the current order and course end. A held ship
@@ -111,7 +153,7 @@ impl Ship {
 
     /// The commanded share of Ahead Full: 0 at All Stop (or a throttle of 0), otherwise the throttle or the order's fraction.
     pub fn ordered(&self) -> f32 {
-        if self.order == 0 { 0.0 } else { self.throttle.unwrap_or(ORDERS[self.order].1) }
+        if self.order == EngineOrder::Stop { 0.0 } else { self.throttle.unwrap_or(self.order.fraction()) }
     }
 }
 
@@ -307,7 +349,7 @@ pub fn ai(
             continue;
         }
         if held.contains(e) {
-            s.order = 0;
+            s.order = EngineOrder::Stop;
             s.goal = None;
             continue;
         }
@@ -365,12 +407,12 @@ pub fn ai(
         });
         let class = &lib.classes[s.class];
         let explore_now = |s: &mut Ship, explore: &mut Explore| {
-            (s.waypoints, s.goal, s.order) = (vec![explore.goal(&cfg, e, tf.translation, class.sight)], None, 3);
+            (s.waypoints, s.goal, s.order) = (vec![explore.goal(&cfg, e, tf.translation, class.sight)], None, EngineOrder::Emergency);
         };
         let Some((foe_pos, foe_radius, foe_base, foe_aim)) = foe else {
             s.goal = None;
             if human || explicit.is_some() {
-                s.order = 0;
+                s.order = EngineOrder::Stop;
                 continue;
             }
             explore_now(&mut s, &mut explore);
@@ -378,11 +420,11 @@ pub fn ai(
         };
         let kept = std::mem::take(&mut s.waypoints); // contact: drop any exploring course (the quadrant is kept for later)
         if let Some(away) = flee(&holes, tf.translation) {
-            (s.goal, s.order) = (Some(away), 3);
+            (s.goal, s.order) = (Some(away), EngineOrder::Emergency);
             continue;
         }
         let Some((routine, range)) = attack::plan(&lib, class, h, guns) else {
-            (s.goal, s.order) = (None, 0);
+            (s.goal, s.order) = (None, EngineOrder::Stop);
             continue;
         };
         if routine == attack::Routine::Ram && foe_base {
@@ -399,7 +441,7 @@ pub fn ai(
             continue;
         };
         s.throttle = attack::throttle(routine, e, tf.translation, s.heading, course[0]);
-        (s.waypoints, s.goal, s.order) = (course, None, 3);
+        (s.waypoints, s.goal, s.order) = (course, None, EngineOrder::Emergency);
     }
 }
 
@@ -474,7 +516,7 @@ pub fn helm_step(ship: &mut Ship, tf: &mut Transform, class: &combat::Class, hea
         tf.translation += fwd * ship.speed * dt;
         // Roll about the bow axis toward the rudder, rate-limited; none at Emergency Speed (measured, docs/re/movement.md).
         // PROVISIONAL: target proportional to rudder; retail also weaves slightly while steering for a point (not modelled).
-        let lean = if ship.order == 3 { 0.0 } else { steer * MAX_ROLL };
+        let lean = if ship.order == EngineOrder::Emergency { 0.0 } else { steer * MAX_ROLL };
         let roll = tf.rotation.to_euler(EulerRot::YXZ).2;
         let roll = roll + (lean - roll).clamp(-ROLL_RATE * dt, ROLL_RATE * dt);
         tf.rotation = Quat::from_rotation_y(ship.heading) * Quat::from_rotation_z(roll);
@@ -810,7 +852,7 @@ pub fn set_formation(world: &mut World, owner: &str, kind: Option<Formation>, ho
             s.waypoints.clear();
             s.goal = None;
             if !hold {
-                s.order = 0;
+                s.order = EngineOrder::Stop;
                 s.throttle = None;
             }
         }
@@ -821,7 +863,7 @@ fn install_primary(world: &mut World, candidate: Entity, target: Option<Entity>)
     let max = world.get::<Ship>(candidate).zip(world.get::<Health>(candidate)).map_or(0.0, |(s, h)| max_speed(s, &world.resource::<Library>().classes[s.class], h));
     if let Some(mut s) = world.get_mut::<Ship>(candidate) {
         s.throttle = Some(if max > 0.001 { (s.speed.abs() / max).clamp(0.0, 1.0) } else { 0.0 });
-        s.order = 2;
+        s.order = EngineOrder::Full;
     }
     world.entity_mut(candidate).insert((PlayerShip, FleetPilot::default()));
     if let Some(mut m) = world.get_mut::<campaign::MissionShip>(candidate) {
@@ -1015,7 +1057,7 @@ pub fn fleet_follow(world: &mut World) {
                 if let Some(mut s) = world.get_mut::<Ship>(e) {
                     s.waypoints = if distance > 3.0 { vec![aim] } else { vec![] };
                     s.goal = if pilot.hold { Some((-(tf.rotation * Vec3::NEG_Z).x).atan2(-(tf.rotation * Vec3::NEG_Z).z)) } else { None };
-                    s.order = if wanted < 0.01 { 0 } else { 2 };
+                    s.order = if wanted < 0.01 { EngineOrder::Stop } else { EngineOrder::Full };
                     s.throttle = Some(if max > 0.001 { (wanted / max).clamp(0.0, 1.0) } else { 0.0 });
                 }
             }
@@ -1114,5 +1156,24 @@ mod think_clock_tests {
         let mut c = ThinkClock::new(0.0, 0);
         let since = (1..=16).find_map(|k| c.due(k as f32 * 0.033)).unwrap();
         assert!((since - 0.528).abs() < 1e-4);
+    }
+}
+
+#[cfg(test)]
+mod engine_order_tests {
+    use super::EngineOrder::{self, *};
+    #[test]
+    fn the_dial_indices_round_trip_and_stop_at_both_ends() {
+        for (i, o) in [Stop, Slow, Full, Emergency].into_iter().enumerate() {
+            assert_eq!(EngineOrder::from_index(i), Some(o));
+            assert_eq!(o.index(), i);
+        }
+        assert_eq!(EngineOrder::from_index(4), None);
+        assert_eq!((Emergency.faster(), Stop.slower(), Slow.faster(), Full.slower()), (Emergency, Stop, Full, Slow));
+    }
+    #[test]
+    fn labels_and_speed_fractions_are_the_retail_ones() {
+        assert_eq!(EngineOrder::ALL.map(|o| (o.label(), o.fraction())), [("All Stop", 0.0), ("Ahead Slow", 0.5), ("Ahead Full", 1.0), ("Emergency Speed", 2.0)]);
+        assert!(Stop < Slow && Slow < Full && Full < Emergency);
     }
 }

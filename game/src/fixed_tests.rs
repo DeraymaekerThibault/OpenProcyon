@@ -1,5 +1,6 @@
 //! Asset-free regressions for the production battle clock and schedule boundary.
 use super::*;
+use crate::EngineOrder;
 use bevy::time::TimeUpdateStrategy;
 use std::time::Duration;
 
@@ -152,7 +153,7 @@ pub(crate) fn synthetic_class() -> data::Class {
 fn moving_ship() -> (App, Entity) {
     // Hand-authored test physics, not a copy of any imported ship.
     let class = synthetic_class();
-    let ship = Ship { heading: 0.0, speed: 2.0, order: 2, goal: Some(0.5), ..Ship::new(0, Side::Player) };
+    let ship = Ship { heading: 0.0, speed: 2.0, order: EngineOrder::Full, goal: Some(0.5), ..Ship::new(0, Side::Player) };
     let mut app = clock();
     app.insert_resource(Library { classes: vec![class], guns: default(), bullets: default(), names: default(), clips: default() })
         .add_systems(FixedUpdate, sail.in_set(BattleSet::Simulate));

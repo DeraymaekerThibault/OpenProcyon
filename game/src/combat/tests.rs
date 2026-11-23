@@ -1,4 +1,5 @@
 use super::*;
+use crate::EngineOrder;
 
 /// Mission 6's stockade gate has no guns, only a vitalToMission section, and the rules wait for that section's damage to reach 1.
 /// The importer must export it as a class (an attackable base), and shooting the section down must read as full mission damage.
@@ -1012,7 +1013,7 @@ fn engine_exhaust_needs_motion_not_just_an_order() {
         .add_systems(Update, engine_rate);
     let lib = Library::load(assets_dir());
     let c = lib.index("Ship_Navy_Torpedo");
-    let ship = Ship { heading: 0.0, order: 2, ..Ship::new(c, Side::Player) };
+    let ship = Ship { heading: 0.0, order: EngineOrder::Full, ..Ship::new(c, Side::Player) };
     let s = app.world_mut().spawn((Transform::default(), ship, Health::new(&lib.classes[c]))).id();
     let fx = app.world_mut().resource_scope(|world, fxl: Mut<FxLib>| {
         spawn_engines(&mut world.commands(), &fxl, &lib, s, c, Transform::default());

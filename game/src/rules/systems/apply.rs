@@ -4,6 +4,7 @@
 //! (an owner change then moves the ship to the new owner's side) and has no orbit camera.
 
 use super::*;
+use crate::EngineOrder;
 use std::collections::HashMap;
 
 /// Base queries as the rule dispatcher reads them (bases carry no `Ship`).
@@ -113,7 +114,7 @@ pub(in crate::rules) fn apply(
                 if !s.primary && !s.mission.human {
                     s.ship.cap = v;
                 } else if v <= 0.0 && !skirmish {
-                    s.ship.order = 0;
+                    s.ship.order = EngineOrder::Stop;
                     s.ship.waypoints.clear();
                 }
             }),
@@ -264,7 +265,7 @@ pub(in crate::rules) fn apply(
                     s.mission.looping = None;
                     if !s.primary {
                         s.ship.waypoints.clear();
-                        s.ship.order = 0;
+                        s.ship.order = EngineOrder::Stop;
                         s.ship.goal = None;
                     }
                 });
@@ -278,7 +279,7 @@ pub(in crate::rules) fn apply(
                     let Ok(RuleShipItem { ship: mut sh, .. }) = ships.get_mut(e) else { continue };
                     if on {
                         sh.waypoints.clear();
-                        sh.order = 0;
+                        sh.order = EngineOrder::Stop;
                         commands.entity(e).insert(crate::ship::HoldPosition);
                     } else {
                         commands.entity(e).remove::<crate::ship::HoldPosition>();
@@ -290,7 +291,7 @@ pub(in crate::rules) fn apply(
                 if on {
                     each_ship(ships, u, |s| {
                         s.ship.waypoints.clear();
-                        s.ship.order = 0;
+                        s.ship.order = EngineOrder::Stop;
                     });
                 }
             }

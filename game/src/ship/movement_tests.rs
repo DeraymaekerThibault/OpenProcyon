@@ -1,4 +1,5 @@
 use super::*;
+use crate::EngineOrder;
 pub fn fleet_world() -> (World, [Entity; 6]) {
     let mut w = World::new();
     let lib = Library::load(assets_dir());
@@ -345,14 +346,14 @@ fn ship_keeps_speed_and_heading_past_last_waypoint() {
     // Not class 0: the sorted ship folders now start with the (immobile) armed bases.
     let ci = lib.index("Ship_Navy_Cutter");
     let class = &lib.classes[ci];
-    let mut ship = Ship { heading: 0.0, order: 3, waypoints: vec![Vec3::new(-30.0, 0.0, -80.0)], ..Ship::new(ci, Side::Player) };
+    let mut ship = Ship { heading: 0.0, order: EngineOrder::Emergency, waypoints: vec![Vec3::new(-30.0, 0.0, -80.0)], ..Ship::new(ci, Side::Player) };
     let mut tf = Transform::default();
     let h = Health { sections: vec![1.0; class.sections.len()], core: 1.0, destroyed: false };
     for _ in 0..3000 {
         step(&mut ship, &mut tf, class, &h, 0.033);
     }
     assert!(ship.waypoints.is_empty());
-    assert!(ship.order == 3 && ship.speed > 1.0, "speed {}", ship.speed);
+    assert!(ship.order == EngineOrder::Emergency && ship.speed > 1.0, "speed {}", ship.speed);
 }
 #[test]
 fn exploring_heads_for_quadrant_centres() {
@@ -408,7 +409,7 @@ fn a_broadside_attacker_circles_an_idle_ship_on_its_turning_circle() {
             let at = attack::aim(cutter, &cutter_hp, &Transform::IDENTITY, tf.translation, false);
             let course = attack::course(routine, tf.translation, ship.heading, at, gap, range[0], i as f32 * dt, &mut None);
             let throttle = attack::throttle(routine, e, tf.translation, ship.heading, course[0]).map(|_| 2.0 * min_throttle);
-            (ship.throttle, ship.waypoints, ship.goal, ship.order) = (throttle, course, None, 3);
+            (ship.throttle, ship.waypoints, ship.goal, ship.order) = (throttle, course, None, EngineOrder::Emergency);
             helm_step(&mut ship, &mut tf, class, &h, dt, true);
             if i as f32 * dt > 120.0 {
                 let d = foe - tf.translation;
@@ -437,30 +438,30 @@ fn cutter_matches_measured_retail_movement() {
             step(ship, tf, class, &h, dt);
         }
     };
-    let mut ship = Ship { heading: 0.0, order: 1, ..Ship::new(ci, Side::Player) };
+    let mut ship = Ship { heading: 0.0, order: EngineOrder::Slow, ..Ship::new(ci, Side::Player) };
     let mut tf = Transform::default();
     run(&mut ship, &mut tf, 1.0);
     assert!((ship.speed - 1.95).abs() < 0.1, "Slow from rest after 1 s: {}", ship.speed); // 0.53 s time constant
-    for (order, measured) in [(1, 2.2655), (2, 4.531), (3, 9.0623)] {
+    for (order, measured) in [(EngineOrder::Slow, 2.2655), (EngineOrder::Full, 4.531), (EngineOrder::Emergency, 9.0623)] {
         ship.order = order;
         run(&mut ship, &mut tf, 8.0);
-        assert!((ship.speed - measured).abs() < 0.01, "order {order}: {} vs {measured}", ship.speed);
+        assert!((ship.speed - measured).abs() < 0.01, "order {order:?}: {} vs {measured}", ship.speed);
     }
-    ship.order = 2;
+    ship.order = EngineOrder::Full;
     run(&mut ship, &mut tf, 8.0);
-    ship.order = 0;
+    ship.order = EngineOrder::Stop;
     run(&mut ship, &mut tf, 0.75); // retail: 23 ticks of decay to 1.05, then rest on the 24th (0.83 s)
     assert!(ship.speed > 1.0, "still slowing after 0.75 s: {}", ship.speed);
     run(&mut ship, &mut tf, 0.15);
     assert_eq!(ship.speed, 0.0, "All Stop from Full is at rest after about 0.83 s");
-    for order in [1, 2] {
+    for order in [EngineOrder::Slow, EngineOrder::Full] {
         ship.order = order;
         run(&mut ship, &mut tf, 8.0);
         ship.goal = Some(ship.heading + 3.0); // hard to port
         run(&mut ship, &mut tf, 3.0);
         let roll = tf.rotation.to_euler(EulerRot::YXZ).2;
         assert!(roll > 0.1 && roll < MAX_ROLL, "leaning into the turn, not yet at the limit: {roll}");
-        assert!((ship.ang_vel.to_degrees() - 13.6).abs() < 0.4, "order {order} turn rate {}", ship.ang_vel.to_degrees());
+        assert!((ship.ang_vel.to_degrees() - 13.6).abs() < 0.4, "order {order:?} turn rate {}", ship.ang_vel.to_degrees());
         ship.goal = Some(ship.heading + 3.0);
         run(&mut ship, &mut tf, 2.0);
         assert!((tf.rotation.to_euler(EulerRot::YXZ).2 - MAX_ROLL).abs() < 1e-3, "full lean after about 4 s");
@@ -481,7 +482,7 @@ fn crewed_cutter_matches_measured_retail_speed_and_turn() {
     assert_eq!(crate::crew_arms::skill_factor(0.1), 1.0, "default hands change nothing");
     for (skill, full, turn) in [(0.5, 5.336, 15.61), (0.9, 6.041, 9.99)] {
         let f = crate::crew_arms::skill_factor(skill);
-        let mut ship = Ship { heading: 0.0, order: 2, crew_speed: f, crew_turn: f, ..Ship::new(ci, Side::Player) };
+        let mut ship = Ship { heading: 0.0, order: EngineOrder::Full, crew_speed: f, crew_turn: f, ..Ship::new(ci, Side::Player) };
         let mut tf = Transform::default();
         for _ in 0..300 {
             step(&mut ship, &mut tf, class, &h, 0.0344);
@@ -500,7 +501,11 @@ fn crewed_cutter_matches_measured_retail_speed_and_turn() {
 #[ignore = "needs imported assets"]
 fn uncrewed_turns_match_measured_retail() {
     let lib = combat::Library::load(crate::assets_dir());
-    for (name, order, speed, turn) in [("Ship_Navy_Cutter", 3, 9.056, 9.71), ("Ship_Navy_ManOWar", 2, 2.341, 4.16), ("Ship_Navy_ManOWar", 3, 4.684, 3.11)] {
+    for (name, order, speed, turn) in [
+        ("Ship_Navy_Cutter", EngineOrder::Emergency, 9.056, 9.71),
+        ("Ship_Navy_ManOWar", EngineOrder::Full, 2.341, 4.16),
+        ("Ship_Navy_ManOWar", EngineOrder::Emergency, 4.684, 3.11),
+    ] {
         let ci = lib.index(name);
         let class = &lib.classes[ci];
         let h = Health { sections: vec![1.0; class.sections.len()], core: 1.0, destroyed: false };
@@ -509,12 +514,12 @@ fn uncrewed_turns_match_measured_retail() {
         for _ in 0..1500 {
             step(&mut ship, &mut tf, class, &h, 0.0344);
         }
-        assert!((ship.speed - speed).abs() < 0.01, "{name} order {order}: speed {} vs {speed}", ship.speed);
+        assert!((ship.speed - speed).abs() < 0.01, "{name} order {order:?}: speed {} vs {speed}", ship.speed);
         ship.goal = Some(ship.heading + 3.0);
         for _ in 0..300 {
             step(&mut ship, &mut tf, class, &h, 0.0344);
         }
-        assert!((ship.ang_vel.to_degrees() - turn).abs() < 0.05, "{name} order {order}: turn {} vs {turn}", ship.ang_vel.to_degrees());
+        assert!((ship.ang_vel.to_degrees() - turn).abs() < 0.05, "{name} order {order:?}: turn {} vs {turn}", ship.ang_vel.to_degrees());
     }
 }
 
@@ -549,8 +554,8 @@ fn ships_lean_into_turns_except_at_emergency_speed() {
         }
         tf.rotation.to_euler(EulerRot::YXZ).2.abs()
     };
-    assert!(roll(2) > 0.05, "Ahead Full leans: {}", roll(2));
-    assert!(roll(3) < 1e-4, "Emergency Speed stays level: {}", roll(3));
+    assert!(roll(EngineOrder::Full) > 0.05, "Ahead Full leans: {}", roll(EngineOrder::Full));
+    assert!(roll(EngineOrder::Emergency) < 1e-4, "Emergency Speed stays level: {}", roll(EngineOrder::Emergency));
 }
 
 /// Border Dispute with every slot filled: allied computer fleets share the human's side but must still go for the enemy base,
@@ -585,11 +590,11 @@ fn allied_computer_ships_hunt_the_enemy_base_the_humans_fleet_waits() {
     // A captain first thinks one period (plus its start delay) after it appears, so run the system at 0 s and again at 1 s.
     let captains = w.register_system(ai);
     w.run_system(captains).unwrap();
-    assert_eq!(w.get::<Ship>(ids[4]).unwrap().order, 0, "no captain has thought yet");
+    assert_eq!(w.get::<Ship>(ids[4]).unwrap().order, EngineOrder::Stop, "no captain has thought yet");
     w.resource_mut::<Time>().advance_by(std::time::Duration::from_secs(1));
     w.run_system(captains).unwrap();
-    assert!(w.get::<Ship>(ids[4]).unwrap().order > 0, "the ally sets off for the enemy base");
-    assert_eq!(w.get::<Ship>(ids[1]).unwrap().order, 0, "the human's own ship waits for orders");
+    assert!(w.get::<Ship>(ids[4]).unwrap().order > EngineOrder::Stop, "the ally sets off for the enemy base");
+    assert_eq!(w.get::<Ship>(ids[1]).unwrap().order, EngineOrder::Stop, "the human's own ship waits for orders");
 }
 
 #[test]
@@ -612,14 +617,22 @@ fn a_formation_swap_pass_gives_ships_the_slot_nearest_them_and_leaves_fitting_on
 }
 
 fn plain_ship() -> Ship {
-    Ship { heading: 0.0, speed: 5.0, order: 3, waypoints: vec![Vec3::new(10.0, 0.0, -50.0)], goal: Some(1.0), throttle: Some(0.5), ..Ship::new(0, Side::Player) }
+    Ship {
+        heading: 0.0,
+        speed: 5.0,
+        order: EngineOrder::Emergency,
+        waypoints: vec![Vec3::new(10.0, 0.0, -50.0)],
+        goal: Some(1.0),
+        throttle: Some(0.5),
+        ..Ship::new(0, Side::Player)
+    }
 }
 
 #[test]
 fn hold_and_stop_zero_the_controls_and_end_the_course() {
     let mut s = plain_ship();
     s.stand_still();
-    assert_eq!((s.order, s.ordered()), (0, 0.0));
+    assert_eq!((s.order, s.ordered()), (EngineOrder::Stop, 0.0));
     assert!(s.waypoints.is_empty() && s.goal.is_none(), "no leftover course for the helm to steer to");
 }
 
@@ -664,7 +677,7 @@ fn dying_cutter_drifts_at_a_tenth_of_max_speed_and_a_fast_one_decays_to_it() {
     let dt = 0.0344;
     let ship = |speed| Ship {
         speed,
-        order: 3,
+        order: EngineOrder::Emergency,
         throttle: Some(1.0 / FULL_SPEED), // the computer's throttle 1.0
         crew_speed: 1.125,
         crew_turn: 1.125,
@@ -696,7 +709,7 @@ fn a_cutter_steering_for_a_point_ahead_weaves_instead_of_settling() {
     let ci = lib.index("Ship_Navy_Cutter");
     let class = &lib.classes[ci];
     let health = Health::new(class);
-    let mut ship = Ship { heading: 1f32.to_radians(), speed: 4.525, order: 2, waypoints: vec![Vec3::new(0.0, 0.0, -113.0)], ..Ship::new(ci, Side::Player) };
+    let mut ship = Ship { heading: 1f32.to_radians(), speed: 4.525, order: EngineOrder::Full, waypoints: vec![Vec3::new(0.0, 0.0, -113.0)], ..Ship::new(ci, Side::Player) };
     let mut tf = Transform::default();
     let (mut lo, mut hi, mut crossings) = (f32::MAX, f32::MIN, vec![]);
     let mut last = ship.heading;

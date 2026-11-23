@@ -1,4 +1,5 @@
 //! Skirmish lobby model: map list, player slots, races, fleets within the victory points and ship stats for the views.
+use crate::scenario::Race;
 use bevy::prelude::*;
 use serde_json::Value;
 
@@ -36,7 +37,7 @@ pub enum Choice {
     Computer,
     Open,
     Close,
-    Fleet(u8),
+    Fleet(Race),
     Team(i32),
 }
 
@@ -51,8 +52,8 @@ pub struct Slot {
     pub player: usize, // index in the map's player list
     pub name: String,
     pub kind: Kind,
-    pub race: u8,  // fleet type as in the TWT: 0 Navy, 2 Pirate, 3 Procyon, 4 none chosen yet
-    pub team: i32, // -1: on its own
+    pub race: Race, // fleet type; `Unchosen` until picked
+    pub team: i32,  // -1: on its own
     /// Which of the fleet type's ten flags the player flies (0-9); only the human slot's can be changed.
     pub flag: u8,
     pub fleet: Vec<String>,
@@ -290,12 +291,10 @@ impl SliderRange {
 pub const VICTORY_LIMIT: SliderRange = SliderRange { min: 50, max: 1000, step: 10, default: 300 };
 pub const FLEET_SIZE: SliderRange = SliderRange { min: 1, max: 10, step: 1, default: 5 };
 
-pub const RACES: [(u8, &str, &str); 3] =
-    [(0, "Navy", "IDGS_TPFRONTENDTEXT03_FLEET_NAVY"), (2, "Pirate", "IDGS_TPFRONTENDTEXT03_FLEET_PIRATE"), (3, "Procyon", "IDGS_TPFRONTENDTEXT03_FLEET_PROCYON")];
 /// Ship classes the fleet screen offers for a race: those flagged `"skirmish"` (retail's own "Available in Multiplayer?"; mods can flag more).
-pub fn offered(lib: &Library, race: u8) -> Vec<usize> {
-    let Some((_, name, _)) = RACES.iter().find(|r| r.0 == race) else { return vec![] };
-    let mut list: Vec<usize> = (0..lib.classes.len()).filter(|&i| lib.classes[i].race == *name && lib.classes[i].skirmish).collect();
+pub fn offered(lib: &Library, race: Race) -> Vec<usize> {
+    let Some(name) = race.class_name() else { return vec![] };
+    let mut list: Vec<usize> = (0..lib.classes.len()).filter(|&i| lib.classes[i].race == name && lib.classes[i].skirmish).collect();
     // As the original's 'Available Ships': most expensive first (StarHammer, Man-O-War, Frigate, ...).
     list.sort_by(|&a, &b| lib.classes[b].points.cmp(&lib.classes[a].points).then_with(|| lib.classes[a].name.cmp(&lib.classes[b].name)));
     list
@@ -412,12 +411,12 @@ pub(super) fn price_window(avg: i64, room: i64, cur: i64) -> (i64, i64) {
 pub(super) const HULL_PRICE_FLOOR: i64 = 22;
 
 /// Selection multiplier of styles 3 and 5 (the hull's price is only scaled in the choice; the points paid are the plain price).
-fn race_multiplier(race: u8) -> f64 {
+fn race_multiplier(race: Race) -> f64 {
     match race {
-        0 => 1.57,
-        2 => 1.72,
-        3 => 1.42,
-        _ => 1.0,
+        Race::Navy => 1.57,
+        Race::Pirate => 1.72,
+        Race::Procyon => 1.42,
+        Race::Unchosen => 1.0,
     }
 }
 
@@ -431,7 +430,7 @@ struct Build<'a> {
     fleet_size: usize,
     armed_only: bool,
     /// Fleet type whose crew roster the named crew come from.
-    crew_race: u8,
+    crew_race: Race,
     allowed: Option<std::collections::HashSet<String>>,
 }
 
@@ -504,7 +503,7 @@ impl Build<'_> {
     fn crew_ship(&mut self, ship: usize) {
         // Every crew comes from the roster of the human player's fleet type, computers' included (the original filters on the local
         // player's fleet type when it builds a computer fleet).
-        let name = RACES.iter().find(|r| r.0 == self.crew_race).map_or("Navy", |r| r.1);
+        let name = self.crew_race.class_name().unwrap_or("Navy");
         let class = &self.lib.classes[self.lib.index(&self.slot.fleet[ship])];
         let caps = crate::boarding::counts(&class.name);
         for (role, &cap) in caps.iter().enumerate() {
@@ -606,7 +605,7 @@ impl Build<'_> {
     }
 }
 
-pub fn auto_build(slot: &mut Slot, limit: u32, fleet_size: usize, lib: &Library, salt: u64, armed_only: bool, crew_race: u8) {
+pub fn auto_build(slot: &mut Slot, limit: u32, fleet_size: usize, lib: &Library, salt: u64, armed_only: bool, crew_race: Race) {
     let allowed = if armed_only { computer_guns() } else { None };
     let seed = u64::from(limit) * 31 + fleet_size as u64 * 7 + 1 + salt * 977;
     let first_new = slot.fleet.len();
@@ -662,9 +661,9 @@ pub(super) fn new_slots(map: &Value) -> Vec<Slot> {
         .filter(|(_, p)| p["playable"].as_bool().unwrap_or(false))
         .map(|(i, p)| {
             let team = p["team"].as_i64().unwrap_or(-1) as i32;
-            let team_race = usize::try_from(team).ok().and_then(|t| teams.get(t)).map_or(4, |t| t["race"].as_u64().unwrap_or(4) as u8);
+            let team_race = usize::try_from(team).ok().and_then(|t| teams.get(t)).map_or(Race::Unchosen, |t| Race::from_twt(t["race"].as_u64().unwrap_or(4)));
             // Historical maps name each player's race, or leave it open (4) and the team's race stands.
-            let race = if open { team_race } else { Some(p["race"].as_u64().unwrap_or(4) as u8).filter(|r| *r != 4).unwrap_or(team_race) };
+            let race = if open { team_race } else { Some(Race::from_twt(p["race"].as_u64().unwrap_or(4))).filter(|r| *r != Race::Unchosen).unwrap_or(team_race) };
             let fleet = if open { vec![] } else { ships_of(map, i) };
             Slot { player: i, name: p["name"].as_str().unwrap_or("").trim().into(), kind: Kind::Computer, race, team, flag: 0, fleet, weapons: vec![], names: vec![], crew: vec![] }
         })
@@ -678,10 +677,10 @@ pub(super) fn new_slots(map: &Value) -> Vec<Slot> {
             s.kind = Kind::Open;
         }
         if let Some(h) = slots.first_mut().filter(|_| teams.is_empty()) {
-            (h.race, h.team) = (0, 0);
+            (h.race, h.team) = (Race::Navy, 0);
         }
         for s in slots.iter_mut().skip(1).filter(|_| teams.is_empty()) {
-            (s.race, s.team) = (4, -1);
+            (s.race, s.team) = (Race::Unchosen, -1);
         }
     }
     slots
@@ -739,7 +738,7 @@ impl Skirmish {
             },
             Cell::Fleet(i) if self.free_teams() && self.slots.get(i).is_some_and(|s| s.kind.live()) => {
                 let now = self.slots[i].race;
-                let mut v: Vec<Choice> = [0u8, 2, 3].into_iter().filter(|&r| r == now).chain([0u8, 2, 3].into_iter().filter(|&r| r != now)).map(Choice::Fleet).collect();
+                let mut v: Vec<Choice> = Race::PLAYABLE.into_iter().filter(|&r| r == now).chain(Race::PLAYABLE.into_iter().filter(|&r| r != now)).map(Choice::Fleet).collect();
                 v.dedup();
                 v
             }
@@ -756,7 +755,7 @@ impl Skirmish {
         (0..10).find(|&f| !self.flag_taken(i, me.race, f)).unwrap_or(0)
     }
     /// Another live slot of `race` flies flag `f`.
-    pub fn flag_taken(&self, i: usize, race: u8, f: u8) -> bool {
+    pub fn flag_taken(&self, i: usize, race: Race, f: u8) -> bool {
         self.slots.iter().enumerate().any(|(j, s)| j != i && s.kind.live() && s.race == race && s.flag == f)
     }
     pub fn choose(&mut self, cell: Cell, choice: Choice) {
@@ -784,14 +783,14 @@ impl Skirmish {
                             // PROVISIONAL: the original gave the first computer on a free-for-all map Pirate, Team 2 beside a Navy, Team 1 player.
                             s.team = (0..TEAMS).find(|t| !used.contains(t)).unwrap_or(0);
                             // Navy, Pirate, Procyon by slot, round again (the player is slot 0, Navy).
-                            s.race = [0u8, 2, 3][i % 3];
+                            s.race = Race::PLAYABLE[i % 3];
                         }
                     }
                     _ => {
                         s.kind = if choice == Choice::Open { Kind::Open } else { Kind::Closed };
                         s.clear_fleet();
                         if free {
-                            (s.race, s.team) = (4, -1);
+                            (s.race, s.team) = (Race::Unchosen, -1);
                         }
                     }
                 }
@@ -895,7 +894,7 @@ impl Skirmish {
             return Some("No opponent: open another slot on a different team.");
         }
         if self.open() {
-            if h.race == 4 {
+            if h.race == Race::Unchosen {
                 return Some("IDGS_TPFRONTENDTEXT01_PLEASE_SELECT_A_RACE");
             }
             if h.fleet.is_empty() {
@@ -958,7 +957,7 @@ impl Skirmish {
                     player: s.player,
                     side,
                     human: s.kind == Kind::Human,
-                    race: if s.race == 4 { crate::scenario::faction(&s.name).unwrap_or(4) } else { s.race },
+                    race: if s.race == Race::Unchosen { crate::scenario::faction(&s.name).unwrap_or(Race::Unchosen) } else { s.race },
                     team: s.team,
                     row: Some((matches!(s.kind, Kind::Human).then(|| s.name.clone()), flag_icon(s.race, s.flag))),
                     ids,
@@ -1039,12 +1038,8 @@ pub fn ship_stats(lib: &Library, ci: usize) -> ShipStats {
 }
 
 /// First flag icon of a fleet type's block of ten (`FrontEnd_Flag_*Icon_NN`): Navy 0, Pirate 10, Procyon 20, plus the slot's flag.
-pub fn flag_icon(race: u8, flag: u8) -> usize {
-    (match race {
-        2 => 10,
-        3 => 20,
-        _ => 0,
-    }) + usize::from(flag)
+pub fn flag_icon(race: Race, flag: u8) -> usize {
+    race.flag_base() + usize::from(flag)
 }
 
 #[cfg(test)]

@@ -1,5 +1,6 @@
 //! Harpoon range and bearing, the grapple flight and the winch that reels hulls together.
 use super::*;
+use crate::EngineOrder;
 
 /// Boarder and target must be this close (hull surface to hull surface) and this slow relative to each other.
 pub(super) const SHIP_RANGE: f32 = 10.0;
@@ -141,7 +142,7 @@ pub(super) fn grapple_orders(
             sfx.write(Sfx { name: "Weapon_GrapHarpoon_Fire".into(), at: Some(tf.translation), vol: 0.7, max: 600.0 });
         } else {
             ship.waypoints = vec![ttf.translation];
-            ship.order = 2;
+            ship.order = EngineOrder::Full;
         }
     }
 }

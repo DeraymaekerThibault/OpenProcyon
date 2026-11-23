@@ -1,5 +1,6 @@
 //! Spawning a battle: ships, map scenery, fleets, bases and the test arena.
 use super::*;
+use crate::scenario::Race;
 
 /// Names ships that no script names: a random not-yet-used entry of the ship type's pool, as open maps do (WOT 'Available Unique
 /// Ship Name'); a used-up pool repeats names. PROVISIONAL: the original's selection (and its uniqueness scope) is unknown.
@@ -42,17 +43,17 @@ pub struct MapObject {
     pub start: Side,
 }
 
-/// The fleet type (TWT race: 0 Navy, 2 Pirate, 3 Procyon) a base or player name stands for: "navybase", "proc base", "Piratebase",
+/// The fleet type a base or player name stands for: "navybase", "proc base", "Piratebase",
 /// `Base_Grant`... PROVISIONAL: read from the retail names, the TWT carries no explicit owner side.
-pub fn faction(name: &str) -> Option<u8> {
+pub fn faction(name: &str) -> Option<Race> {
     let n = name.to_lowercase();
     let has = |words: &[&str]| words.iter().any(|w| n.contains(w));
     if has(&["pirate", "privateer"]) {
-        Some(2)
+        Some(Race::Pirate)
     } else if has(&["proc"]) {
-        Some(3)
+        Some(Race::Procyon)
     } else if has(&["navy", "grant", "montgomery", "shipyard", "port", "regina"]) {
-        Some(0)
+        Some(Race::Navy)
     } else {
         None
     }
@@ -214,7 +215,7 @@ pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Libra
                     player: 0,
                     side: Side::Player,
                     human: true,
-                    race: players[0]["race"].as_u64().unwrap_or(4) as u8,
+                    race: Race::from_twt(players[0]["race"].as_u64().unwrap_or(4)),
                     team: players[0]["team"].as_i64().unwrap_or(-1) as i32,
                     row: None,
                     ids: vec![],
@@ -226,7 +227,7 @@ pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Libra
                     player: them,
                     side: Side::Enemy,
                     human: false,
-                    race: players[them]["race"].as_u64().unwrap_or(4) as u8,
+                    race: Race::from_twt(players[them]["race"].as_u64().unwrap_or(4)),
                     team: players[them]["team"].as_i64().unwrap_or(-1) as i32,
                     row: None,
                     ids: vec![],
@@ -259,7 +260,7 @@ pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Libra
                 player,
                 side: Side::Player,
                 human: false,
-                race: 4,
+                race: Race::Unchosen,
                 team: -1,
                 row: None,
                 ids: vec![],
@@ -292,7 +293,7 @@ pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Libra
                     player: p,
                     side,
                     human: false,
-                    race: 4,
+                    race: Race::Unchosen,
                     team,
                     row: None,
                     ids: placed.iter().map(|o| o["id"].as_i64()).collect(),

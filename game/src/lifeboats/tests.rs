@@ -100,7 +100,7 @@ fn boats_sail_straight_at_a_fraction_of_class_speed_and_never_collide_with_ships
     lose(&mut app, parent);
     let mut q = app.world_mut().query_filtered::<&Ship, With<Lifeboat>>();
     for s in q.iter(app.world()) {
-        assert_eq!((s.order, s.waypoints.len(), s.side), (2, 1, Side::Player));
+        assert_eq!((s.order, s.waypoints.len(), s.side), (EngineOrder::Full, 1, Side::Player));
         assert!((0.2..=1.0).contains(&s.throttle.unwrap()) && s.waypoints[0].length() > 1.0e3);
         let to = s.waypoints[0].normalize();
         assert!((Vec3::new(-s.heading.sin(), 0.0, -s.heading.cos()) - to).length() < 1e-3, "heading faces its goal");

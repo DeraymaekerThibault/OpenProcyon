@@ -17,6 +17,7 @@ pub use saves::*;
 pub use settings::*;
 pub use skirmish::*;
 
+use crate::scenario::Race;
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use serde_json::Value;
@@ -573,7 +574,7 @@ fn fleet_hook(mut sk: ResMut<Skirmish>, lib: Res<Library>, cfg: Res<crate::Confi
     }
     *done = true;
     if let Some(i) = sk.slots.iter().position(|s| s.kind == Kind::Human) {
-        sk.slots[i].race = 0;
+        sk.slots[i].race = Race::Navy;
     }
     sk.fleet_size = 5;
     apply(&mut sk, &lib, &Action::AutoAssign);
