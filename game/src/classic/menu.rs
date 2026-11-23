@@ -4,7 +4,6 @@
 //! PROVISIONAL: which element shows the map picture (Lobby Information area), the description font, the fleet editor
 //! no transitions.
 
-#![allow(deprecated)] // shortcut: bevy 0.20 Interaction (deprecated for picking Hovered/Pressed); port when it is removed
 use crate::scenario::Race;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
@@ -135,6 +134,7 @@ fn build(
 }
 
 /// One element of a retail screen file (`menu/<screen>.json`): its art and, for buttons, the `Action` it runs.
+#[allow(deprecated)] // Interaction, see pointer.rs
 fn element(ctx: &Ctx, c: &mut ChildSpawnerCommands, m: &MenuModel, e: &Value, strings: &Value, preview: Option<&super::ship_preview::ShipPreview>) {
     let MenuModel { sk, ig, saves: ui, lib, state, settings, stats, outcome, end_message, .. } = m;
     let impl_ = e["impl"].as_str().unwrap_or("");
@@ -442,6 +442,7 @@ fn save_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], ui
 
 /// Options and Control Options (front end: green-banner screen; in game: gold dialog). Rectangles are 800x600 canvas
 /// coordinates measured from the retail screenshots (PROVISIONAL: no .tst exported).
+#[allow(deprecated)] // Interaction, see pointer.rs
 fn options_page(ctx: &Ctx, c: &mut ChildSpawnerCommands, controls: bool, ingame: bool, strings: &Value, binds: &Bindings, cui: &CtrlUi) {
     let s = |id: &str| text_of(strings, id);
     let gold = SETTINGS_GOLD;
@@ -536,6 +537,7 @@ fn sound_display_page(ctx: &Ctx, c: &mut ChildSpawnerCommands, display: bool, in
 
 /// Mods screen: the list on the left (sortable column titles, check boxes, scrollbar), the picked mod on the right, the category
 /// pull-down above it. PROVISIONAL: no retail screen, so the layout and the strings are ours.
+#[allow(deprecated)] // Interaction, see pointer.rs
 fn mods_page_view(ctx: &Ctx, c: &mut ChildSpawnerCommands, mods: &crate::menu::ModList) {
     use crate::menu::{MOD_ROWS, ModCol};
     settings_frame(ctx, c, false, (Page::Options, Screen::Main));
@@ -627,6 +629,7 @@ fn mods_page_view(ctx: &Ctx, c: &mut ChildSpawnerCommands, mods: &crate::menu::M
 
 /// Single Player > Custom Missions (not retail; laid out like the Mods page): the missions mods add, grouped by campaign (mod),
 /// and the picked one's description with Play.
+#[allow(deprecated)] // Interaction, see pointer.rs
 fn missions_page_view(ctx: &Ctx, c: &mut ChildSpawnerCommands, missions: &crate::menu::MissionList) {
     use crate::menu::MISSION_ROWS;
     settings_frame(ctx, c, false, (Page::Options, Screen::SinglePlayer));
@@ -726,6 +729,7 @@ fn frontend_backdrop(ctx: &Ctx, c: &mut ChildSpawnerCommands, scene: usize) {
 /// Rows of the Create Skirmish map list (the original's eight open maps fill it exactly).
 const MAP_ROWS: usize = 8;
 
+#[allow(deprecated)] // Interaction, see pointer.rs
 fn map_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, sk: &Skirmish, strings: &Value) {
     let (l, r) = (280.0, 712.0);
     stretched_window(ctx, c, [l, 120.0, r, 318.0]);
@@ -756,6 +760,7 @@ fn team_label(s: &dyn Fn(&str) -> String, team: i32) -> String {
     s(&format!("IDGS_TPTEAMNAMES_TEAM_{}", team + 1))
 }
 
+#[allow(deprecated)] // Interaction, see pointer.rs
 fn players_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, _rect: [f32; 4], sk: &Skirmish, strings: &Value) {
     let s = |id: &str| strings[id].as_str().unwrap_or(id).to_string();
     let open = sk.open();
@@ -864,6 +869,7 @@ fn players_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, _rect: [f32; 4], sk: &S
 /// The lobby's Map Description dialog (`Map Description Dialog Screen.tst`): the dialog frame, the map description in Univers10 inside
 /// 'Map Information Button' [146,207,641,330] and a 'Back' button [324,339,457,383]. A full-screen blocker keeps the lobby beneath
 /// from reacting. The frame follows `dialog_frame` for the screen's backdrop area [61,165,603,436].
+#[allow(deprecated)] // Interaction, see pointer.rs
 fn map_info_dialog(ctx: &Ctx, c: &mut ChildSpawnerCommands, sk: &Skirmish, strings: &Value) {
     c.spawn((ctx.node(0.0, 0.0, 800.0, 600.0), Interaction::None, BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.35))));
     let [x, y, w, h] = dialog_frame([61.0, 165.0, 603.0, 436.0]);
@@ -876,6 +882,7 @@ fn map_info_dialog(ctx: &Ctx, c: &mut ChildSpawnerCommands, sk: &Skirmish, strin
 /// over the screen, the profile list with its title, the picked profile's victory points, the file name entry, Save / Load and Cancel.
 /// A full-screen blocker keeps what is beneath from reacting; it does not dim it (retail shows the screen behind through the frame art's
 /// translucent middle, undimmed). PROVISIONAL: title and number positions are eyeballed from a screenshot.
+#[allow(deprecated)] // Interaction, see pointer.rs
 pub(super) fn profile_dialog(ctx: &Ctx, c: &mut ChildSpawnerCommands, sk: &Skirmish, lib: &Library, strings: &Value) {
     use crate::profiles::Kind as K;
     let Some(d) = &sk.profile else { return };

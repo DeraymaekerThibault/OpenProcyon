@@ -202,11 +202,10 @@ impl Bindings {
     }
     pub fn save(&self) {
         let map: std::collections::BTreeMap<_, _> = self.rows.iter().map(|r| (r.1.as_str(), key_name(r.2))).collect();
-        if let Some(p) = path() {
-            let _ = p.parent().map(std::fs::create_dir_all);
-            if let Err(e) = std::fs::write(p, serde_json::to_string_pretty(&map).unwrap_or_default()) {
-                warn!("could not save key bindings: {e}");
-            }
+        if let Some(p) = path()
+            && let Err(e) = crate::data::write_atomic(&p, &serde_json::to_string_pretty(&map).unwrap_or_default())
+        {
+            warn!("could not save key bindings: {e}");
         }
     }
 }

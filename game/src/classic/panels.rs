@@ -7,7 +7,6 @@
 //! faction composed at import (`tools/compose_bar.py`: `hud/bar/<skin>.png` and the part boxes in `.json`); only what moves is drawn on
 //! it: the buttons' hover and pressed art and the gauge fills. Parts share their top edge (the data's gauge offsets are "from MainBar
 //! TopLeft"), and the bar is docked with its shortest part's bottom on the screen edge.
-#![allow(deprecated)] // shortcut: bevy 0.20 Interaction (deprecated for picking Hovered/Pressed); port with menu.rs when it is removed
 use bevy::prelude::*;
 use bevy::ui::{FocusPolicy, RelativeCursorPosition};
 use std::collections::HashMap;
@@ -17,6 +16,7 @@ use crate::panels::{
     Contact, DockingStatus, Gauge, GunButton, HeadState, HudRoot, HudSet, MAX_CONTACTS, PanicButton, PauseButton, REF_H, Radar, RadarButton, ShipIconButton, Solid, ToggleButton,
     WeaponPanel, gauge_value, px,
 };
+use crate::pointer::Pointer;
 use crate::sprites::{HudData, IDLE, Sprite, offset, size_of, sprite, sprite_state};
 use crate::{Library, PlayerShip, Ship};
 
@@ -194,6 +194,7 @@ impl Ctx<'_> {
         Some(States { art: [a, b, c], s: self.s })
     }
     /// A button: its decorative arm (`detail`, drawn first) and the button sprite at `at` inside it, with hover/press art.
+    #[allow(deprecated)] // Interaction, see pointer.rs
     fn toggle(&self, commands: &mut Commands, parent: Entity, detail: &str, detail_at: Vec2, button: &str, at: Vec2, marker: impl Bundle) {
         if let Some(art) = self.sprite(detail) {
             commands.spawn((self.put(&art, detail_at.x, detail_at.y), ChildOf(parent), Solid, Interaction::None, FocusPolicy::Block));
@@ -219,6 +220,7 @@ impl Ctx<'_> {
 }
 
 /// (Re)builds the whole HUD tree.
+#[allow(deprecated)] // Interaction, see pointer.rs
 fn build(
     mut commands: Commands,
     assets: Res<AssetServer>,
@@ -350,6 +352,7 @@ fn build(
 
 /// The talking head (bottom-right corner): wooden housing with the portrait seen through its ring, the iris, light and voice box,
 /// and the ship-bar toggle on its corner.
+#[allow(deprecated)] // Interaction, see pointer.rs
 fn talking_head(commands: &mut Commands, c: &Ctx, root: Entity) {
     let (hud, s) = (c.hud, c.s);
     let solid = || (Interaction::None, FocusPolicy::Block, Solid);
@@ -400,6 +403,7 @@ fn talking_head(commands: &mut Commands, c: &Ctx, root: Entity) {
 
 /// The weapon panel (left edge, vertically centred): the ship outline, and per selectable gun bank its status frame, gun icon and
 /// recharge bar.
+#[allow(deprecated)] // Interaction, see pointer.rs
 fn weapon_panel(commands: &mut Commands, c: &Ctx, root: Entity, class: &combat::Class, banks: &[(usize, usize)], guns: &GunStates, window_h: f32) {
     let (hud, s) = (c.hud, c.s);
     let solid = || (Interaction::None, FocusPolicy::Block, Solid);
@@ -439,6 +443,7 @@ fn weapon_panel(commands: &mut Commands, c: &Ctx, root: Entity, class: &combat::
 
 /// One bar part plus whatever sits on it: the ship icon and docking icon on the ship frame, a fill on each status gauge.
 /// The box of one bar part: clicks, hover and pressed art; what is drawn on the part (gauge fills, portrait) is measured from its untrimmed top-left.
+#[allow(deprecated)] // Interaction, see pointer.rs
 fn spawn_part(commands: &mut Commands, c: &Ctx, class: &combat::Class, parent: Entity, part: &BarPart, floor: f32) {
     let name = part.sprite.as_str();
     let Some(art) = c.sprite(name) else { return };
@@ -545,6 +550,7 @@ fn update_sweep(time: Res<Time>, frames: Option<Res<Frames>>, mut q: Query<(&mut
     }
 }
 
+#[allow(deprecated)] // Interaction, see pointer.rs
 fn radar_face(button: Query<&Interaction, With<RadarButton>>, mut q: Query<(&RadarFace, &mut ImageNode, &mut Node)>) {
     let i = button.iter().next().map_or(0, state_index);
     for (f, mut img, mut node) in &mut q {
@@ -619,6 +625,7 @@ fn update_guns(
 
 /// Bar buttons draw their hover and pressed art over the composed bar (PAUSE: the paused art, always, while the game is paused).
 /// PROVISIONAL: the retail hourglass art is swapped; any retail restrictions while paused are not decoded.
+#[allow(deprecated)] // Interaction, see pointer.rs
 fn bar_button_art(vtime: Res<Time<Virtual>>, mut q: Query<(&BarButton, &Interaction, &mut ImageNode, &mut Node)>) {
     for (button, interaction, mut img, mut node) in &mut q {
         let at = state_index(interaction);
@@ -658,6 +665,7 @@ struct CommandArt([States; 2]);
 /// the six formation buttons from `Offset_FormationBar_Icons`, then the attack and hold-fire buttons `Offset_FleetHelpBar_Icons`.x
 /// apart. PROVISIONAL: no retail capture of the open window; the frame width and the help buttons' place are inferred from the data
 /// (the icons end at x 470 on the 487 px Navy bar).
+#[allow(deprecated)] // Interaction, see pointer.rs
 fn commands_window(commands: &mut Commands, c: &Ctx, root: Entity, screen_w: f32, bar_w: f32, floor: f32) {
     use crate::panels::FleetButton as B;
     let top = offset(c.hud, "MainBarExtension_TopLeft_Offset_From_MainBar_TopLeft").y;
@@ -697,6 +705,7 @@ fn commands_window(commands: &mut Commands, c: &Ctx, root: Entity, screen_w: f32
 
 /// Game-speed control (not retail; only with `SpeedControl`, from the `game-speed` mod): a tooltip-backdrop plate beside the main bar's right end between round slower /
 /// faster buttons (the front-end Prev / Next art at 30 px, which only the Navy set has).
+#[allow(deprecated)] // Interaction, see pointer.rs
 fn speed_plate(commands: &mut Commands, c: &Ctx, fonts: Option<&crate::sprites::Fonts>, root: Entity, bar_right: f32) {
     use crate::panels::{SpeedButton, SpeedLabel};
     let h = c.size_of("ToolTipBackdrop_Center").y;
@@ -778,16 +787,18 @@ fn name_plate(
     }
 }
 
+#[allow(deprecated)] // Interaction, see pointer.rs
 fn button_states(mut q: Query<(&States, &Interaction, &mut ImageNode, &mut Node), Or<(Changed<Interaction>, Added<States>)>>) {
     for (states, i, mut img, mut node) in &mut q {
         states.art[state_index(i)].show(&mut img, &mut node, states.s);
     }
 }
+#[allow(deprecated)] // Interaction, see pointer.rs
 fn state_index(i: &Interaction) -> usize {
-    match i {
-        Interaction::None => 0,
-        Interaction::Hovered => 1,
-        Interaction::Pressed => 2,
+    match crate::pointer::of(i) {
+        Pointer::Off => 0,
+        Pointer::Over => 1,
+        Pointer::Down => 2,
     }
 }
 
@@ -796,6 +807,7 @@ fn state_index(i: &Interaction) -> usize {
 /// (selected art for the selected ship), the class icon at `Offset_ShipBar_ShipIcon`, the `ShipBar_Health` strip clipped from the
 /// top as the ship loses health, and the docking/boarding icon. PROVISIONAL: slot columns and the 51 px row pitch are read off the
 /// art (first row at `SHIPBAR_SHIPICON_ORIGIN_OFFSET_FROM_SHIPBAR_TOPLEFT`.y); scroll arrows and the open/close slide are not drawn.
+#[allow(deprecated)] // Interaction, see pointer.rs
 fn fleet_art(
     mut commands: Commands,
     assets: Res<AssetServer>,
@@ -915,6 +927,7 @@ const CHAT_SIZE: Vec2 = Vec2::new(391.0, 151.0);
 
 /// Builds the panel while the log is open and rebuilds it whenever a line is added, so it shows the newest line (scrolled to the bottom).
 /// PROVISIONAL: the open and close animation is not drawn; the list wraps with the engine's text layout, not the original's.
+#[allow(deprecated)] // Interaction, see pointer.rs
 fn chat_panel(
     mut commands: Commands,
     assets: Res<AssetServer>,
@@ -970,6 +983,7 @@ fn chat_panel(
 }
 
 /// Mouse wheel over the panel scrolls the list; the thumb follows the list.
+#[allow(deprecated)] // Interaction, see pointer.rs
 fn chat_scroll(
     mut wheel: MessageReader<bevy::input::mouse::MouseWheel>,
     panel: Query<&Interaction, With<ChatPanel>>,
@@ -977,7 +991,7 @@ fn chat_scroll(
     mut thumb: Query<&mut Node, With<ChatThumb>>,
     window: Single<&Window, With<bevy::window::PrimaryWindow>>,
 ) {
-    let over = panel.iter().any(|i| *i != Interaction::None);
+    let over = panel.iter().any(crate::pointer::over);
     let s = window.height() / REF_H;
     for (mut pos, node) in &mut list {
         for ev in wheel.read().filter(|_| over) {
@@ -1029,6 +1043,7 @@ mod tests {
     }
     #[test]
     #[ignore = "needs imported assets"]
+    #[allow(deprecated)] // Interaction, see pointer.rs
     fn dial_click_sets_the_engine_order_and_counts_as_a_hud_click() {
         let (mut app, root) = crate::panels::input_app();
         app.add_systems(Update, crate::panels::engine_input.before(crate::panels::hud_input));
@@ -1047,6 +1062,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)] // Interaction, see pointer.rs
     fn bar_buttons_draw_art_only_when_hovered_or_paused() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins).add_systems(Update, bar_button_art);

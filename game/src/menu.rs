@@ -3,7 +3,6 @@
 //! Views (`classic/menu.rs` retail screens) draw the current screen in `BuildMenu` from `MenuModel`
 //! and tag their buttons with an `Action`; `buttons` / `save_actions` here run them. Maps: assets/maps/<id> (tools/export_maps.py).
 
-#![allow(deprecated)] // shortcut: bevy 0.20 Interaction (deprecated for picking Hovered/Pressed); port when it is removed
 mod lobby_scenario;
 mod missions;
 mod mods;
@@ -222,20 +221,21 @@ pub fn button_sound(action: &Action, arrow: Option<&ArrowButton>, select: bool) 
 }
 
 /// Rollover when the pointer first reaches a widget, the select sound when it is pressed (not again when the press is released).
+#[allow(deprecated)] // Interaction, see pointer.rs
 fn button_sounds(
     q: Query<(Entity, &Interaction, &Action, Option<&ArrowButton>), Changed<Interaction>>,
     mut pointed: Local<std::collections::HashSet<Entity>>,
     mut sfx: MessageWriter<crate::audio::Sfx>,
 ) {
     for (e, i, action, arrow) in &q {
-        if *i == Interaction::None {
+        if !crate::pointer::over(i) {
             pointed.remove(&e);
             continue;
         }
         if pointed.insert(e) {
             sfx.write(crate::audio::Sfx::ui(button_sound(action, arrow, false)));
         }
-        if *i == Interaction::Pressed {
+        if crate::pointer::down(i) {
             sfx.write(crate::audio::Sfx::ui(button_sound(action, arrow, true)));
         }
     }
@@ -378,11 +378,12 @@ pub struct ListEntry(pub bool);
 
 /// Retail pull-downs stay open while the button is held: press the cell, drag to an entry, release to pick it. The lobby's current
 /// value (a plain click) does not pick on release, so that click keeps the list open.
+#[allow(deprecated)] // Interaction, see pointer.rs
 fn dropdown_release(mouse: Res<ButtonInput<MouseButton>>, entries: Query<(&Action, &Interaction, &ListEntry)>, mut sk: ResMut<Skirmish>, lib: Res<Library>) {
     if !mouse.just_released(MouseButton::Left) {
         return;
     }
-    if let Some((action, ..)) = entries.iter().find(|(_, i, e)| e.0 && **i != Interaction::None) {
+    if let Some((action, ..)) = entries.iter().find(|(_, i, e)| e.0 && crate::pointer::over(i)) {
         apply(&mut sk, &lib, action);
     }
 }
@@ -421,6 +422,7 @@ fn held_track<T: Copy>(mouse: &ButtonInput<MouseButton>, dragging: &mut Option<T
 }
 
 /// Dragging any scrollbar. The menu is rebuilt after every change, so the drag is remembered here rather than in the node.
+#[allow(deprecated)] // Interaction, see pointer.rs
 fn scroll_drag(
     tracks: Query<(&ScrollTrack, &Interaction, &bevy::ui::RelativeCursorPosition)>,
     mouse: Res<ButtonInput<MouseButton>>,
@@ -429,7 +431,7 @@ fn scroll_drag(
     mut mods: ResMut<ModList>,
     mut dragging: Local<Option<ScrollKind>>,
 ) {
-    let Some(kind) = held_track(&mouse, &mut dragging, tracks.iter().find(|(_, i, _)| **i == Interaction::Pressed).map(|(t, ..)| t.kind)) else { return };
+    let Some(kind) = held_track(&mouse, &mut dragging, tracks.iter().find(|(_, i, _)| crate::pointer::down(i)).map(|(t, ..)| t.kind)) else { return };
     let Some((t, y)) = tracks.iter().find(|(t, ..)| t.kind == kind).and_then(|(t, _, rel)| rel.normalized.map(|p| (*t, p.y + 0.5))) else { return };
     // The thumb's centre follows the cursor along the room its length leaves.
     let pos = ((y - t.thumb / 2.0) / (1.0 - t.thumb).max(0.01)).clamp(0.0, 1.0);
@@ -453,6 +455,7 @@ pub const SLIDER_TRACK: f32 = 134.0;
 pub const SLIDER_KNOB: f32 = 22.0;
 
 /// Dragging a slider's knob. The menu is rebuilt after every change, so the drag is remembered here rather than in the node.
+#[allow(deprecated)] // Interaction, see pointer.rs
 fn slider_drag(
     tracks: Query<(&SliderTrack, &Interaction, &bevy::ui::RelativeCursorPosition)>,
     mouse: Res<ButtonInput<MouseButton>>,
@@ -460,7 +463,7 @@ fn slider_drag(
     lib: Res<Library>,
     mut dragging: Local<Option<SliderTrack>>,
 ) {
-    let Some(kind) = held_track(&mouse, &mut dragging, tracks.iter().find(|(_, i, _)| **i == Interaction::Pressed).map(|(t, ..)| *t)) else { return };
+    let Some(kind) = held_track(&mouse, &mut dragging, tracks.iter().find(|(_, i, _)| crate::pointer::down(i)).map(|(t, ..)| *t)) else { return };
     let Some(x) = tracks.iter().find(|(t, ..)| **t == kind).and_then(|(.., rel)| rel.normalized).map(|p| p.x + 0.5) else { return };
     let fraction = (x * SLIDER_TRACK - SLIDER_KNOB / 2.0) / (SLIDER_TRACK - SLIDER_KNOB);
     match kind {
@@ -552,6 +555,7 @@ fn mods_bake_hook(mut mods: ResMut<ModList>, mut job: ResMut<BakeJob>, cfg: Res<
 
 /// Smoke hook (`--menu missions --script missions-play`): presses the Custom Missions screen's Play button once it is drawn, so the
 /// run starts the first custom mission the way a click does (needs a mission mod switched on or passed with `--mod`).
+#[allow(deprecated)] // Interaction, see pointer.rs
 fn missions_play_hook(cfg: Res<crate::Config>, mut buttons: Query<(&mut Interaction, &Action)>, mut done: Local<bool>) {
     if *done || cfg.script != Some(crate::smoke::Script::MissionsPlay) || cfg.frame < 30 {
         return;
@@ -866,6 +870,7 @@ impl ClickClock {
 }
 
 /// Runs the `Action` of a pressed button (whichever view drew it).
+#[allow(deprecated)] // Interaction, see pointer.rs
 fn buttons(
     q: Query<(&Interaction, &Action), Changed<Interaction>>,
     mut next: ResMut<NextState<Screen>>,
@@ -885,7 +890,7 @@ fn buttons(
     mut clicks: Local<ClickClock>,
 ) {
     for (i, action) in &q {
-        if *i != Interaction::Pressed {
+        if !crate::pointer::down(i) {
             continue;
         }
         let profile = matches!(action, Action::OpenProfile(..) | Action::PickProfile(_) | Action::DoProfile | Action::CloseProfile);

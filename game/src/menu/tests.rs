@@ -89,6 +89,7 @@ fn skirmish_list_counts_playable_players_like_the_original() {
 }
 
 #[test]
+#[allow(deprecated)] // Interaction, see pointer.rs
 fn menu_widgets_play_rollover_once_and_their_own_select_sound() {
     let mut app = App::new();
     app.add_plugins(MinimalPlugins).add_message::<crate::audio::Sfx>().add_systems(Update, button_sounds);

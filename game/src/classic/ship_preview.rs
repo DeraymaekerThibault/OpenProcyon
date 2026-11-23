@@ -2,7 +2,6 @@
 //! menu draws over the globe grid. Everything lives on its own render layer, so the battle camera never sees it.
 //! The hull stands still at a fixed bearing; dragging with the mouse over the viewport turns it.
 //! PROVISIONAL: the original's camera angle is matched by eye on one screenshot.
-#![allow(deprecated)] // shortcut: bevy 0.20 Interaction, as in menu.rs
 use bevy::app::{HierarchyPropagatePlugin, Propagate};
 use bevy::camera::RenderTarget;
 use bevy::camera::visibility::RenderLayers;
@@ -105,8 +104,9 @@ fn frame(lib: Res<Library>, hulls: Query<&PreviewHull>, mut camera: Query<&mut T
     *cam = Transform::from_xyz(d * 0.6, d * 0.18, d * 0.78).looking_at(Vec3::Y * r * 0.2, Vec3::Y);
 }
 
+#[allow(deprecated)] // Interaction, see pointer.rs
 fn drag(viewport: Query<&Interaction, With<PreviewDrag>>, motion: Res<bevy::input::mouse::AccumulatedMouseMotion>, mut hulls: Query<&mut Transform, With<PreviewHull>>) {
-    if !viewport.iter().any(|i| matches!(i, Interaction::Pressed)) {
+    if !viewport.iter().any(crate::pointer::down) {
         return;
     }
     for mut t in &mut hulls {

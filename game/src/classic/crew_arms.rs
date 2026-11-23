@@ -1,7 +1,6 @@
 //! Retail Crew Select / Arms Selection screens over the shared outfitting model (`crew_arms::FitView`), laid out as measured on
 //! original screenshots: the fleet-assembly backdrop, Ships / Crew / Arms tabs, the slot bar, crew posts around the ship outline or
 //! the weapon mounts on it, stat bars, and the crew or weapon list. Falls back to a plain list when the model has no `fit`.
-#![allow(deprecated)]
 use super::widgets::{
     Ctx, GOLD, PanelKind, canvas, dropdown, fleet_bar, full_screen, info_panel, list_row, list_row_cost, pad, panel, piece, pulldown_cell, scrollbar, selected_tab, size_of,
     stretched_window, victory_points, wrapped,
@@ -39,6 +38,7 @@ const PANEL: Vec2 = Vec2::new(286.5, 116.5);
 /// Crew portrait size (reference units).
 const FACE: f32 = 30.0;
 
+#[allow(deprecated)] // Interaction, see pointer.rs
 fn build(
     mut commands: Commands,
     model: Res<ScreenModel>,
@@ -124,6 +124,7 @@ fn slot_bar(ctx: &Ctx, c: &mut ChildSpawnerCommands, fit: &FitView, lib: &Librar
 }
 
 /// A crew portrait: the named crew member's portrait, else the race's generic crew face; clicking selects the post's role.
+#[allow(deprecated)] // Interaction, see pointer.rs
 fn face(ctx: &Ctx, c: &mut ChildSpawnerCommands, centre: Vec2, slot: &Option<(String, String)>, race: &str, (role, idx): (usize, usize)) {
     let action = if slot.is_some() { Action::PostFace(role, idx) } else { Action::SelectPost(role) };
     let mut b = c.spawn((Interaction::None, action, ctx.node(centre.x - FACE / 2.0, centre.y - FACE / 2.0, FACE, FACE)));
@@ -200,6 +201,7 @@ fn slot_centre(ctx: &Ctx, bank: usize) -> Vec2 {
 
 /// Arms Selection as measured: the help text in a framed box, the ship outline with each selectable bank's gun icon in its frame;
 /// clicking a mount selects it (gold frame) and the list on the right then offers the compatible weapons.
+#[allow(deprecated)] // Interaction, see pointer.rs
 fn arms(ctx: &Ctx, c: &mut ChildSpawnerCommands, fit: &FitView, lib: &Library, strings: &Value) {
     stretched_window(ctx, c, [52.0, 150.0, 253.0, 307.0]);
     let text = if fit.message.is_empty() { text_of(strings, "IDGS_TPFRONTENDTEXT02_WEAPON_UPGRADE_INFO") } else { fit.message.clone() };
@@ -260,6 +262,7 @@ fn list(ctx: &Ctx, c: &mut ChildSpawnerCommands, fit: &FitView, strings: &Value)
 }
 
 /// The plain presentation (no retail view data): title, details, navigation and rows as text buttons.
+#[allow(deprecated)] // Interaction, see pointer.rs
 fn plain(commands: &mut Commands, model: &ScreenModel) {
     commands
         .spawn((
