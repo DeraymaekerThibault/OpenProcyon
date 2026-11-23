@@ -85,7 +85,7 @@ For a mission, the loader reads only the keys marked "yes" below. Numbers are ga
 | `world_half` | yes | half the side of the map's square: the star map's extent and where computer ships search. Default 1000. Keep your objects and ships inside it (nothing stops you leaving it) |
 | `objects` | yes | scenery, section 9 |
 | `nebulae` | yes | clouds and storms, section 8 |
-| `mines` | yes, custom missions only | `[{"type": "Bullet_StarMine_Med", "id": 7, "pos": [x, y, z]}]`: mines resting where you put them, hostile to every ship until a rule hands one over with `Set Group/Unit Owner` (give each a unique `id`, and list it in a `groups` entry to address it). `OP Place Mines` lays them from a rule instead. `docs/modding.md` "Mission rule extensions" |
+| `mines` | yes, custom missions only | `[{"type": "Bullet_StarMine_Med", "id": 7, "pos": [x, y, z]}]`: mines resting where you put them, hostile to every ship until a rule hands one over with `Set Group/Unit Owner` (give each a unique `id`, and list it in a `groups` entry to address it). A mine answers to its group only, never to its owner's name. `OP Place Mines` lays them from a rule instead. `docs/modding.md` "Mission rule extensions" |
 | `players` | no | skirmish lobby slots. `--check-mission` reads the names as known players, but a mission's players live in `mission.json`. Leave it out, or fill it as the retail maps do: `{"name", "team": -1, "start": [x, y, z], "forward": [x, y, z], "formation": 0, "playable": true, "race": 4, "color": [r, g, b, a]}` (`race`: 0 Navy, 2 Pirate, 3 Procyon, 4 open; other numbers are unverified) |
 | `alliance_change`, `teams`, `ship_names`, `name_id`, `desc_id`, `assemble`, `islands_make_sounds` | no | skirmish-lobby and retail-text fields; leave them out |
 

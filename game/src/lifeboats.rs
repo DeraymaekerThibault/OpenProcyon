@@ -74,7 +74,8 @@ fn lifeboats(
     mission: Option<ResMut<Mission>>,
     dying: Query<(&Ship, &Transform, Option<&MissionShip>), Without<Lifeboat>>,
     boats: Query<(Entity, &Ship, &Transform, &Lifeboat, Option<&MissionShip>)>,
-    ships: Query<(&Ship, &Transform, &Health, Option<&MissionShip>), Without<Lifeboat>>,
+    // Not retail: an abandoned hull (`OP Abandon Ship`) has nobody aboard to take a boat in, its own or anyone's.
+    ships: Query<(&Ship, &Transform, &Health, Option<&MissionShip>), (Without<Lifeboat>, Without<Abandoned>)>,
 ) {
     let owner = |l: &Lifeboat, m: Option<&MissionShip>| m.map_or_else(|| l.owner.clone(), |m| m.owner.clone());
     let mut present: Vec<(Option<Entity>, crate::names::Owner)> = boats.iter().map(|(e, _, _, l, m)| (Some(e), owner(l, m))).collect();

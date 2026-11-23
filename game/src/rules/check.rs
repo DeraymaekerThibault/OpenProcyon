@@ -10,7 +10,7 @@ use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fmt;
 
-use super::schema::{Equivalence, Field, Kind, RULE_TYPES, Role, TypeDef, lookup};
+use super::schema::{Equivalence, Field, Kind, Origin, RULE_TYPES, Role, TypeDef, lookup};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Level {
@@ -264,6 +264,8 @@ impl Checker<'_> {
             match obj.get(field.name) {
                 None if field.required => self.err(field.name, format!("missing; reads as {}", describe_default(field))),
                 None => {}
+                // Engine-added Types: an optional field written as "" is the same as leaving it out (the interpreter reads it so).
+                Some(v) if def.origin == Origin::Engine && !field.required && v.as_str() == Some("") => {}
                 Some(v) if field.used => {
                     self.value(def, field, v, role);
                     self.soft = false;
@@ -277,7 +279,7 @@ impl Checker<'_> {
     fn teleport_index(&mut self, e: &Value) {
         let Some(index) = e["Point Index"].as_f64() else { return };
         if index < 0.0 || index.fract() != 0.0 {
-            self.err("Point Index", format!("{index} is not a whole number from 0 up; the point is not found"));
+            self.err("Point Index", format!("{index} is not a whole number from 0 up; nothing is moved"));
         } else if let Some(len) = e["Point Set Name"].as_str().and_then(|n| self.defs.point_set_len.get(n))
             && index as usize >= *len
         {

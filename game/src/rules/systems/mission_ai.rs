@@ -37,6 +37,15 @@ pub(super) fn mission_ai(
     let hulls: std::collections::HashMap<Entity, (Transform, usize, Vec<f32>)> = ships.iter().map(|s| (s.0, (*s.2, s.1.class, s.3.sections.clone()))).collect();
     // Where each ship is, which way it points and how fast it goes: what `OP Follow Group` keeps station on.
     let kin: std::collections::HashMap<Entity, (Vec3, f32, f32, usize)> = ships.iter().map(|s| (s.0, (s.2.translation, s.1.heading, s.1.speed, s.1.class))).collect();
+    // Followers given the same station on the same group line up one behind the other instead of fighting for one slot: each ship's
+    // place in that line, in spawn order.
+    let mut line: Vec<(crate::scenario::SpawnIndex, Entity, String, Station, u32)> =
+        ships.iter().filter(|s| !s.3.destroyed).filter_map(|s| s.4.follow.as_ref().map(|f| (key(s.0), s.0, f.group.clone(), f.station, f.distance.to_bits()))).collect();
+    line.sort_by_key(|l| (l.0, l.1));
+    let place_in_line = |e: Entity| {
+        let Some(me) = line.iter().find(|l| l.1 == e) else { return 0 };
+        line.iter().take_while(|l| l.1 != e).filter(|l| (&l.2, l.3, l.4) == (&me.2, me.3, me.4)).count()
+    };
     let player_owner = ships.iter().find(|s| s.5).map_or_else(|| sc.player().into(), |s| s.4.owner.clone());
     for (e, mut ship, tf, h, mut ms, primary, pilot, abandoned) in &mut ships {
         let is_boat = boats.contains(e);
@@ -127,7 +136,7 @@ pub(super) fn mission_ai(
         // Not retail: a standing `OP Follow Group` order. The ship keeps its station beside, ahead of or astern of a ship of the group
         // (the one it first chose, until that one is gone) as a fleet's follower holds its formation slot (`ship::follow_speed`); it still
         // fires at its target. The human's own ship never follows. PROVISIONAL: the station is the leader's position plus an offset in its
-        // frame, with no allowance for the leader's turn rate.
+        // frame, with no allowance for the leader's turn rate; ships that share a station stand a hull and 10 units further out each.
         if !ms.human
             && let Some(mut order) = ms.follow.clone()
         {
@@ -140,7 +149,8 @@ pub(super) fn mission_ai(
             if let Some(&(lpos, lheading, lspeed, lclass)) = leader.and_then(|l| kin.get(&l)) {
                 let class = &lib.classes[ship.class];
                 let here = tf.translation;
-                let slot = (lpos + Quat::from_rotation_y(lheading) * order.station.offset(order.distance)).with_y(here.y);
+                let out = order.distance + place_in_line(e) as f32 * (2.0 * class.radius + 10.0);
+                let slot = (lpos + Quat::from_rotation_y(lheading) * order.station.offset(out)).with_y(here.y);
                 let top = crate::ship::max_speed(&ship, class, h);
                 let to = slot - here;
                 let error = if to.length_squared() > 1.0 { crate::ship::angdiff((-to.x).atan2(-to.z), ship.heading) } else { 0.0 };

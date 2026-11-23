@@ -11,6 +11,8 @@ use crate::rules::Ui;
 use crate::sprites::{HudData, sprite};
 
 const SPEECH_GOLD: Color = Color::srgb(1.0, 0.65, 0.1);
+/// The `OP Fade` cover sits above the cutscene bars (140) and below every mission text (the speech banner starts at 150).
+const FADE_Z: i32 = 145;
 
 pub fn plugin(app: &mut App) {
     app.add_systems(Update, (build_mission, build_briefing).before(crate::briefing::update).run_if(in_state(crate::menu::Screen::Battle)).run_if(resource_exists::<Mission>))
@@ -79,9 +81,10 @@ fn build_mission(mut commands: Commands, existing: Query<(), With<Ui>>) {
     commands.spawn((Scenario, Ui::Speech, text(20.0, Color::srgb(1.0, 0.75, 0.2)), Visibility::Hidden, GlobalZIndex(160), at(None, Some(9.5), 20.0)));
     commands.spawn((Scenario, Ui::Hint, text(18.0, Color::srgb(0.7, 0.9, 1.0)), Visibility::Hidden, GlobalZIndex(160), at(Some(30.0), None, 30.0)));
     commands.spawn((Scenario, Ui::End, text(34.0, Color::WHITE), Visibility::Hidden, GlobalZIndex(170), at(Some(35.0), None, 15.0)));
-    // Not retail: the cover `OP Fade` fades to black and back; above the speech banner, below the end text.
+    // Not retail: the cover `OP Fade` fades to black and back; above the cutscene bars, below the speech banner, the subtitles and the
+    // end text, which stay readable over it.
     let whole = Node { position_type: PositionType::Absolute, width: Val::Percent(100.0), height: Val::Percent(100.0), ..default() };
-    commands.spawn((Scenario, Ui::Fade, whole, BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.0)), Visibility::Hidden, GlobalZIndex(165)));
+    commands.spawn((Scenario, Ui::Fade, whole, BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.0)), Visibility::Hidden, GlobalZIndex(FADE_Z)));
     for (bar, top) in [(Ui::BarTop, true), (Ui::BarBottom, false)] {
         let mut node = Node { position_type: PositionType::Absolute, width: Val::Percent(100.0), height: Val::Percent(12.0), ..default() };
         if top {
@@ -174,5 +177,22 @@ mod tests {
         assert!((at(&mut app, 1.0) - 1.0).abs() < 0.01, "the middle: black");
         assert!((at(&mut app, 1.0) - 0.5).abs() < 0.01, "on the way back");
         assert_eq!(at(&mut app, 1.0), 0.0, "over: the picture is clear and nothing keeps the cover up");
+    }
+
+    /// Not retail: the fade cover lies over the cutscene bars and under every mission text, so a fade can be spoken over.
+    #[test]
+    fn the_fade_cover_is_above_the_bars_and_below_the_speech_and_end_texts() {
+        let mut app = App::new();
+        app.add_systems(Update, build_mission);
+        app.update();
+        let z = |app: &mut App, want: fn(&Ui) -> bool| {
+            let mut q = app.world_mut().query::<(&Ui, &GlobalZIndex)>();
+            q.iter(app.world()).filter(|(ui, _)| want(ui)).map(|(_, z)| z.0).collect::<Vec<_>>()
+        };
+        let cover = z(&mut app, |ui| matches!(ui, Ui::Fade));
+        assert_eq!(cover.len(), 1);
+        assert!(z(&mut app, |ui| matches!(ui, Ui::BarTop | Ui::BarBottom)).iter().all(|b| *b < cover[0]));
+        let texts = z(&mut app, |ui| matches!(ui, Ui::Speech | Ui::SpeechTop | Ui::SpeechPanel | Ui::SpeechFrame | Ui::SpeechHead | Ui::Hint | Ui::End));
+        assert!(texts.len() == 7 && texts.iter().all(|t| *t > cover[0]), "{texts:?} over {cover:?}");
     }
 }

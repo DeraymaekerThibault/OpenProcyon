@@ -779,3 +779,73 @@ fn check_mission_knows_the_ship_and_world_types() {
         assert!(text.contains(want), "missing {want:?} in\n{text}");
     }
 }
+
+#[test]
+fn a_teleport_index_that_is_not_a_whole_number_from_zero_moves_nothing() {
+    let points = json!({"environment": {"point_sets": {"harbour": [{"pos": [0.0, 0.0, 0.0]}, {"pos": [9.0, 9.0, 0.0]}]}}});
+    let w = [unit(1, "Fleet", 5.0, 5.0)];
+    for (bad, said) in [(json!(-1), "point -1 of"), (json!(1.5), "point 1.5 of"), (json!(0.5), "point 0.5 of")] {
+        let (s, fx) = effects(json!({"Type": "OP Teleport", "Group/Unit Name": "Fleet", "Point Set Name": "harbour", "Point Index": bad}), points.clone(), &w);
+        assert!(fx.is_empty(), "{bad}: the checker says nothing is moved, and nothing is");
+        assert!(s.warned.iter().any(|w| w.contains(said)), "{:?}", s.warned);
+    }
+    // An index written as "" is left out (the first point); a string that is not a number reads 0 like every number field.
+    for index in [json!(""), json!("1")] {
+        let (_, fx) = effects(json!({"Type": "OP Teleport", "Group/Unit Name": "Fleet", "Point Set Name": "harbour", "Point Index": index}), points.clone(), &w);
+        assert!(matches!(fx.as_slice(), [Fx::Place { units, .. }] if units == &[(e(1), Vec3::ZERO)]));
+    }
+}
+
+#[test]
+fn an_optional_field_written_as_an_empty_string_is_the_same_as_leaving_it_out() {
+    let extra = json!({"environment": {"point_sets": {"harbour": [{"pos": [0.0, 0.0, 0.0]}]}}, "paths": {"lane": [[0.0, 0.0, 0.0], [0.0, 100.0, 0.0]]}});
+    let mut ship = unit(1, "Fleet", 0.0, 0.0);
+    ship.heading = 1.0;
+    let (_, fx) = effects(json!({"Type": "OP Teleport", "Group/Unit Name": "Fleet", "Point Set Name": "harbour", "Heading": ""}), extra.clone(), &[ship]);
+    assert!(matches!(fx.as_slice(), [Fx::Place { heading: None, .. }]), "\"\" is no heading, not heading 0");
+    let (_, fx) = effects(json!({"Type": "OP Etherium Current", "Etherium Path": "lane", "Strength": "", "Width": "", "Boolean": ""}), extra, &[]);
+    assert!(matches!(fx.as_slice(), [Fx::CurrentSet { strength: None, width: None, on: None, .. }]), "nothing is changed, the current is not switched off");
+    let mut sub = unit(2, "Sub", 0.0, 0.0);
+    sub.cloaked = true;
+    assert!(holds(json!({"Type": "OP Group Is Cloaked", "Group Name": "Sub", "Boolean": ""}), &[sub]), "\"\" is the default, TRUE");
+    // The checker agrees: no complaint about the empty optional fields of an engine Type.
+    let mission = json!({
+        "players": ["Player0 Group"], "groups": {"Fleet": [1]}, "ships": [{"id": 1, "name": "RLS Hawk", "group": "Fleet"}],
+        "paths": {"lane": [[0.0, 0.0, 0.0], [0.0, 100.0, 0.0]]}, "environment": {"point_sets": {"harbour": [{"pos": [0.0, 0.0, 0.0]}]}},
+        "rules": [rule("r", true, json!([{"Type": "OP Group Is Cloaked", "Group Name": "Fleet", "Boolean": ""}]), json!([
+            {"Type": "OP Teleport", "Group/Unit Name": "Fleet", "Point Set Name": "harbour", "Point Index": "", "Heading": ""},
+            {"Type": "OP Etherium Current", "Etherium Path": "lane", "Strength": "", "Width": "", "Boolean": ""},
+        ]))],
+    });
+    let text = crate::rules::check::check(&mission, &Value::Null, &Value::Null).iter().map(ToString::to_string).collect::<Vec<_>>().join("\n");
+    assert_eq!(text, "");
+}
+
+#[test]
+fn a_group_cannot_follow_itself() {
+    let w = [unit(1, "Convoy", 0.0, 0.0), unit(2, "Convoy", 50.0, 0.0), unit(3, "Escort", 90.0, 0.0)];
+    let follow = |who: &str| json!({"Type": "OP Follow Group", "Group Name": who, "Target Group": "Convoy", "Station": "Astern", "Distance": 40});
+    let (s, fx) = effects(follow("Convoy"), json!({}), &w);
+    assert!(matches!(fx.as_slice(), [Fx::Follow { units, .. }] if units.is_empty()), "no ship is told to follow its own group");
+    assert!(s.warned.iter().any(|w| w.contains("are in the group 'Convoy' they should follow")), "{:?}", s.warned);
+    let (s, fx) = effects(follow("Escort"), json!({}), &w);
+    assert!(matches!(fx.as_slice(), [Fx::Follow { units, .. }] if units == &[e(3)]) && !s.warned.iter().any(|w| w.contains("should follow")));
+}
+
+#[test]
+fn a_fade_is_cleared_when_the_mission_ends_and_a_restarted_mission_has_none() {
+    let data = json!({"rules": [
+        rule("fade", true, json!([{"Type": "World Initialize"}]), json!([{"Type": "OP Fade", "Seconds": 4.0}])),
+        rule("lose", true, json!([flag_is("lose", true)]), json!([{"Type": "End Game"}])),
+    ]});
+    let mut s = script(data.clone(), Value::Null);
+    s.step(&[], 0.1, false);
+    s.step(&[], 1.9, false);
+    assert!(s.fade_alpha() > 0.9, "black at the middle");
+    s.flags.insert("lose".into(), true);
+    s.step(&[], 0.1, false);
+    assert!(s.ended.is_some());
+    assert_eq!(s.fade_alpha(), 0.0, "the end text is shown on a clear picture");
+    // A restart loads the mission again: a new script, no fade left over.
+    assert_eq!(script(data, Value::Null).fade_alpha(), 0.0);
+}

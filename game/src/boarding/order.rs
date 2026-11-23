@@ -15,6 +15,10 @@ pub(super) fn begin(commands: &mut Commands, boarders: &Boarders, boarder: Entit
     if boarder == target || !boarders.live_ship(boarder) || !boarders.live_ship(target) || boarders.boarding(boarder, target) {
         return;
     }
+    if boarders.abandoned(boarder) {
+        info!("OP Board Ship: {boarder} was abandoned and has no crew to board with");
+        return;
+    }
     if boarders.grappled(boarder, target) || boarders.grappling(boarder, target) {
         commands.entity(boarder).insert(BoardOrder(target));
     } else if boarders.can_grapple(boarder) && boarders.hostile(boarder, target) {
@@ -24,7 +28,8 @@ pub(super) fn begin(commands: &mut Commands, boarders: &Boarders, boarder: Entit
     }
 }
 
-/// Sends the boarding once the hook holds. An order ends when either ship is gone, when the fight has started, or when the grapple it
+/// Sends the boarding once the hook holds. An order ends when either ship is gone or abandoned, when the two are no longer hostile, when
+/// the fight has started, or when the grapple it
 /// waited for was lost (cut, out of range): nothing keeps trying behind the mission author's back. A target that is not Boardable
 /// (`Set Group/Unit Boardable`) keeps the order waiting while the grapple holds.
 pub(super) fn board_orders(
@@ -37,7 +42,11 @@ pub(super) fn board_orders(
     for (e, BoardOrder(target)) in &orders {
         let target = *target;
         let waiting = grapple_orders.get(e).is_ok_and(|g| g.0 == target) || boarders.grappling(e, target);
-        if !boarders.live_ship(e) || !boarders.live_ship(target) || boarders.boarding(e, target) {
+        if boarders.abandoned(e) {
+            // The crew left (`OP Abandon Ship`): nobody is steering for the target or waiting to board.
+            commands.entity(e).remove::<(BoardOrder, GrappleOrder)>();
+        } else if !boarders.live_ship(e) || !boarders.live_ship(target) || boarders.boarding(e, target) || !boarders.hostile(e, target) {
+            // Also when the target stopped being an enemy while the hook held (someone else captured it, an alliance changed).
             commands.entity(e).remove::<BoardOrder>();
         } else if boarders.can_board(e, target) {
             msg.write(BoardMsg::Board { boarder: Some(e), target });

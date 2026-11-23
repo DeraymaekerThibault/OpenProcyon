@@ -307,7 +307,7 @@ impl CampaignValues {
     pub fn incoming(&self, id: &str) -> HashMap<String, f32> {
         self.incoming_in(custom_missions(), id)
     }
-    fn incoming_in(&self, list: &[CustomMission], id: &str) -> HashMap<String, f32> {
+    pub(crate) fn incoming_in(&self, list: &[CustomMission], id: &str) -> HashMap<String, f32> {
         let Some(i) = list.iter().position(|m| m.id == id).filter(|i| *i > 0) else { return HashMap::new() };
         let before = &list[i - 1];
         if before.campaign != list[i].campaign {
@@ -334,7 +334,10 @@ pub struct CustomMission {
 /// Not retail: `id` is a mission one of this launch's mods adds (`custom_missions`): the places that read keys only custom missions have
 /// (a map's `mines`) ask this, so retail missions and the tutorials are never affected.
 pub fn is_custom(id: &str) -> bool {
-    custom_missions().iter().any(|m| m.id == id)
+    is_custom_in(custom_missions(), id)
+}
+fn is_custom_in(list: &[CustomMission], id: &str) -> bool {
+    list.iter().any(|m| m.id == id)
 }
 
 /// The custom missions of this launch's mods (`modding::active`), read once.
@@ -735,5 +738,24 @@ mod tests {
         assert!(values.incoming_in(&list, "not listed").is_empty());
         values.commit("one", HashMap::from([("rescued".to_string(), 5.0)]));
         assert_eq!(values.incoming_in(&list, "two").get("rescued"), Some(&5.0), "a mission won again hands on its new values");
+    }
+
+    /// Not retail: only a mission a mod adds takes the custom-mission paths (its map's `mines`); a retail id or a tutorial never does,
+    /// even when a mod ships a copy of it (`custom_missions_in` leaves those out).
+    #[test]
+    fn retail_missions_and_tutorials_are_never_custom() {
+        let dir = std::env::temp_dir().join(format!("procyon-is-custom-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        for id in ["harbour", "mission03", "tutorial", "basic_tutorial"] {
+            let p = dir.join(format!("saga/maps/{id}/mission.json"));
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, "{}").unwrap();
+        }
+        let list = custom_missions_in(&[dir.join("saga")], &dir.join("merged"));
+        assert!(is_custom_in(&list, "harbour"));
+        for retail in ["mission03", "mission01", "tutorial", "basic_tutorial", "red_rover"] {
+            assert!(!is_custom_in(&list, retail), "{retail}");
+        }
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

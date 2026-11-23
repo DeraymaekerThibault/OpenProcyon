@@ -58,6 +58,11 @@ pub(in crate::rules) struct Ext {
     defeat_message: String,
 }
 
+/// An optional field that was written: not missing and not the empty string an authoring tool writes for "nothing chosen".
+fn given<'a>(v: &'a Value, k: &str) -> Option<&'a Value> {
+    Some(&v[k]).filter(|x| !x.is_null() && x.as_str() != Some(""))
+}
+
 /// A JSON boolean or a retail-style "TRUE"/"FALSE" string; `None` when the value is neither.
 fn flag(v: &Value) -> Option<bool> {
     match v {
@@ -157,7 +162,7 @@ impl Script {
             // `Boolean` TRUE (the default): every live member is fully cloaked; FALSE: none is. A group with no live member holds neither.
             "OP Group Is Cloaked" => {
                 let m: Vec<&Unit> = members(w, s(c, "Group Name")).into_iter().filter(|u| u.alive).collect();
-                let on = c["Boolean"].is_null() || b(c, "Boolean");
+                let on = given(c, "Boolean").is_none_or(|_| b(c, "Boolean"));
                 !m.is_empty() && m.iter().all(|u| u.cloaked == on)
             }
             // The fastest or slowest of the live ships' own speeds (units per second, along their headings) against `Speed`; a group with
@@ -191,8 +196,9 @@ impl Script {
             // whole layout turns with the group's first ship (rotated about the centre by the change of its heading).
             "OP Teleport" => {
                 let (set, group) = (s(a, "Point Set Name"), s(a, "Group/Unit Name"));
-                let index = f(a, "Point Index").max(0.0) as usize;
-                let Some(p) = self.point_sets[set].get(index) else {
+                // A whole number from 0 up; anything else that is a number moves nothing (what `--check-mission` says of it).
+                let index = given(a, "Point Index").map_or(0.0, |_| f(a, "Point Index"));
+                let Some(p) = Some(index).filter(|i| *i >= 0.0 && i.fract() == 0.0).and_then(|i| self.point_sets[set].get(i as usize)) else {
                     self.warn(&format!("point {index} of point set '{set}' in 'OP Teleport' of rule '{rule}'"));
                     return;
                 };
@@ -204,7 +210,7 @@ impl Script {
                     return;
                 }
                 let centre = anchor.iter().map(|u| u.pos).sum::<Vec3>() / anchor.len() as f32;
-                let heading = (!a["Heading"].is_null()).then(|| -f(a, "Heading").to_radians());
+                let heading = a["Heading"].as_f64().map(|h| -(h as f32).to_radians());
                 let turn = heading.map_or(0.0, |h| h - anchor.iter().find(|u| u.speed.is_some()).map_or(h, |u| u.heading));
                 let spin = Quat::from_rotation_y(turn);
                 out.push(Fx::Place { units: all.iter().map(|u| (u.e, dest + spin * (u.pos - centre))).collect(), heading });
@@ -217,7 +223,7 @@ impl Script {
                     path: p.iter().map(game_to_bevy).collect(),
                     strength: a["Strength"].as_f64().map(|v| v as f32),
                     width: a["Width"].as_f64().map(|v| v as f32),
-                    on: (!a["Boolean"].is_null()).then(|| b(a, "Boolean")),
+                    on: given(a, "Boolean").map(|_| b(a, "Boolean")),
                 }),
                 None => self.warn(&format!("path '{}' in 'OP Etherium Current' of rule '{rule}'", s(a, "Etherium Path"))),
             },
@@ -228,7 +234,19 @@ impl Script {
                 out.push(Fx::Mines { set: s(a, "Point Set Name").into(), bullet: bullet.into(), owner: s(a, "Player/Owner").into() });
             }
             "OP Follow Group" => match Station::parse(s(a, "Station")) {
-                Some(station) => out.push(Fx::Follow { units: ids(w, s(a, "Group Name")), group: s(a, "Target Group").into(), station, distance: f(a, "Distance").max(0.0) }),
+                Some(station) => {
+                    // A ship cannot keep station on its own group: it would pick a ship that follows it in turn.
+                    let (all, target) = (members(w, s(a, "Group Name")), s(a, "Target Group"));
+                    let units: Vec<Entity> = all.iter().filter(|u| !matches(u, target)).map(|u| u.e).collect();
+                    if units.len() < all.len() {
+                        self.warn(&format!(
+                            "'OP Follow Group' of rule '{rule}': {} ship(s) of '{}' are in the group '{target}' they should follow",
+                            all.len() - units.len(),
+                            s(a, "Group Name")
+                        ));
+                    }
+                    out.push(Fx::Follow { units, group: target.into(), station, distance: f(a, "Distance").max(0.0) });
+                }
                 None => self.warn(&format!("station '{}' in 'OP Follow Group' of rule '{rule}'", s(a, "Station"))),
             },
             // The crews take to the boats as on a death by damage (lifeboats.rs) and the hulls stay afloat, disabled.
@@ -406,7 +424,8 @@ impl Script {
 impl Script {
     /// How black the picture is now, 0..1: 0 with no fade running, 1 at its middle (`OP Fade`).
     pub fn fade_alpha(&self) -> f32 {
-        self.ext.fade.map_or(0.0, |(total, t)| (1.0 - (2.0 * t / total - 1.0).abs()).clamp(0.0, 1.0))
+        // A mission that has ended shows its end text on a clear picture, whatever fade was running.
+        self.ext.fade.filter(|_| self.ended.is_none()).map_or(0.0, |(total, t)| (1.0 - (2.0 * t / total - 1.0).abs()).clamp(0.0, 1.0))
     }
     /// Moves a running fade on by `dt` seconds of the mission's time.
     pub(in crate::rules) fn advance_fade(&mut self, dt: f32) {

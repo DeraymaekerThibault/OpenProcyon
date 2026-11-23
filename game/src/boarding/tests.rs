@@ -468,3 +468,33 @@ fn a_board_order_ends_when_the_grapple_is_lost_and_waits_while_the_target_is_not
     tick(&mut app, 0.1);
     assert!(app.world().get::<order::BoardOrder>(a).is_none(), "the hook is gone: the order lapses");
 }
+
+#[test]
+fn a_board_order_ends_when_the_target_is_no_longer_an_enemy_and_an_abandoned_ship_takes_none() {
+    // The hook holds on a target that may not be boarded yet; someone else captures it meanwhile (it now fights for the boarder's side).
+    let (mut app, a, b) = order_world(true, Side::Enemy);
+    app.world_mut().get_mut::<Boardable>(b).unwrap().on = false;
+    app.world_mut().write_message(BoardMsg::Order { boarder: a, target: b });
+    for _ in 0..30 {
+        tick(&mut app, 0.1);
+    }
+    assert!(app.world().get::<order::BoardOrder>(a).is_some() && held(&mut app, a).iter().any(|g| g.0 == b && g.1 <= 0.0), "hooked and waiting");
+    app.world_mut().get_mut::<Ship>(b).unwrap().side = Side::Player;
+    tick(&mut app, 0.1);
+    assert!(app.world().get::<order::BoardOrder>(a).is_none(), "not an enemy any more: the order does not wait forever");
+    // A ship whose crew left cannot be told to board, and loses an order it had.
+    let (mut app, a, b) = order_world(true, Side::Enemy);
+    app.world_mut().entity_mut(a).insert(crate::lifeboats::Abandoned);
+    app.world_mut().write_message(BoardMsg::Order { boarder: a, target: b });
+    tick(&mut app, 0.1);
+    assert!(app.world().get::<order::BoardOrder>(a).is_none() && app.world().get::<GrappleOrder>(a).is_none() && held(&mut app, a).is_empty());
+    let (mut app, a, b) = order_world(true, Side::Enemy);
+    app.world_mut().get_mut::<Transform>(b).unwrap().translation = Vec3::new(0.0, 0.0, -5000.0); // out of harpoon range: the order steers
+    app.world_mut().write_message(BoardMsg::Order { boarder: a, target: b });
+    tick(&mut app, 0.1);
+    assert!(app.world().get::<GrappleOrder>(a).is_some());
+    app.world_mut().entity_mut(a).insert(crate::lifeboats::Abandoned);
+    tick(&mut app, 0.1);
+    tick(&mut app, 0.1);
+    assert!(app.world().get::<order::BoardOrder>(a).is_none() && app.world().get::<GrappleOrder>(a).is_none(), "abandoned on the way: both orders end");
+}

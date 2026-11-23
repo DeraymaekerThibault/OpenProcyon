@@ -207,7 +207,9 @@ fn update(
     world.extend(animals.iter().map(|(e, a, tf, _)| a.unit(e, tf)));
     world.extend(extra.bases.iter_mut().map(|(e, b, tf, armed)| b.unit(e, tf, armed.map_or(0.0, |(a, h)| crate::combat::base_mission_damage(&lib.classes[a.class], h)))));
     world.extend(rocks.iter().map(|(e, tf, a)| a.unit(e, tf)));
-    world.extend(extra.mines.iter().map(|(e, tf, m, _)| m.unit(e, tf)));
+    // Not retail: a mission's mines answer to an explicit group (their world-object ids) only, never to their owner's name: a faction
+    // whose ships are all gone is destroyed although its mines rest, and owner-wide orders do not reach them.
+    world.extend(extra.mines.iter().map(|(e, tf, m, _)| Unit { owner: GroupName::default(), ..m.unit(e, tf) }));
     mission.script.tag(&mut world);
     let owner_of = |e: Entity| world.iter().find(|u| u.e == e).map(|u| u.owner.to_string());
     for h in hits.read() {
