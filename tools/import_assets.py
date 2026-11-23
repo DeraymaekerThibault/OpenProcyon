@@ -26,6 +26,7 @@ from pathlib import Path
 
 from tools import importlog
 from tools.gamefs import ci_files
+from tools.jsonio import dump
 
 REPO = Path(__file__).resolve().parents[1]
 # The release download runs this module frozen by PyInstaller (no checkout, no Python install).
@@ -44,6 +45,11 @@ FIRST = [
 SCENERY = ["Island01", "Island02", "IslandSmall01", "IslandMed01", "Islandrocky1"]
 # Music: one skirmish track (Red Rover's script plays BTL_NavyBig_Full02); the other maps use other tracks.
 MUSIC = ["BTL_NavyBig_Full02.ogg", "FrontEndMusic.ogg"]
+
+
+# Layout version of the files an import writes, recorded in <assets>/importer.json (the game does not read it; tools and mods can).
+# Raise it when a file's meaning or location changes. JSON is written by tools.jsonio: indent 2, number lists on one line.
+FORMAT = 1
 
 
 class StepFailed(Exception):
@@ -212,7 +218,7 @@ def export_ships(root, out, want, part=lambda i, k: None):
             importlog.skipped(f"WorldObjects/{s}.wot", f"no mesh for scene {scene}")
             continue
         ships.append(s)
-    (out / "ships.json").write_text(json.dumps(ships) + "\n", encoding="utf-8")
+    (out / "ships.json").write_text(dump(ships), encoding="utf-8")
 
 
 def model(root, scene, glb):
@@ -377,6 +383,7 @@ def main(argv):
             run()
         except StepFailed as e:
             sys.exit(f"import failed at step {name!r}: {e}")
+    (target / "importer.json").write_text(dump(dict(format=FORMAT)), encoding="utf-8")
     if target != out:
         try:
             swap_in(target, out)

@@ -3,6 +3,7 @@ everything else byte for byte. Used to check that a fresh import reproduces the 
 Usage: python3 -m tools.compare_assets <expected dir> <actual dir> [--detail N]
 """
 
+import argparse
 import json
 import math
 import sys
@@ -131,10 +132,9 @@ def main(expected, actual, detail=5):
 
 
 if __name__ == "__main__":
-    args = sys.argv[1:]
-    n = 5
-    if "--detail" in args:
-        i = args.index("--detail")
-        n = int(args[i + 1])
-        del args[i : i + 2]
-    sys.exit(main(*args, detail=n))
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("expected")
+    ap.add_argument("actual")
+    ap.add_argument("--detail", type=int, default=5, help="examples listed per folder")
+    a = ap.parse_args()
+    sys.exit(main(a.expected, a.actual, detail=a.detail))

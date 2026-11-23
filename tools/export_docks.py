@@ -8,11 +8,11 @@ node kind rather than by the attribute's DescriptorName: several WOTs name every
 the original makes only tenders (and every base/island) dockable and repairing by default (docs/re/docking-and-orders.md).
 usage: python -m tools.export_docks <game_root> <assets_dir>"""
 
-import json
 from pathlib import Path
 
 from tools import cli, importlog
 from tools.export_combat import associations, flat, load, placed_objects, scene_name
+from tools.jsonio import dump
 from tools.mdb_to_glb import layer_offsets, with_layer_offset
 from tools.msb import parse_scene_file
 
@@ -49,9 +49,7 @@ def export(root, out):
                 points=points, tender=bool(flat(nodes).get("Is Tender", False))
             )
     (Path(out) / "data").mkdir(exist_ok=True)
-    (Path(out) / "data/docks.json").write_text(
-        json.dumps(docks, indent=1), encoding="utf-8"
-    )
+    (Path(out) / "data/docks.json").write_text(dump(docks), encoding="utf-8")
     print("docks:", len(docks), "entities with dock points")
 
 

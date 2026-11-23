@@ -9,9 +9,9 @@ from pathlib import Path
 
 from tools import cli, importlog
 from tools.export_combat import flat, load, placed_objects, scene_name
+from tools.jsonio import dump
 from tools.mdb_to_glb import hardpoints, layer_offsets, with_layer_offset
 from tools.msb import parse_scene_file
-from tools.pack_data import dump
 
 ROLES = (
     "Gunners",

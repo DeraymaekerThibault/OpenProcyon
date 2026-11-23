@@ -10,7 +10,8 @@ from pathlib import Path
 from tools import cli, importlog
 from tools.export_combat import associations, export, load
 from tools.gamefs import ci_files
-from tools.pack_data import dump, rnd, sections_by_label
+from tools.jsonio import dump
+from tools.pack_data import rnd, sections_by_label
 
 
 def export_bases(root, assets):
@@ -88,12 +89,11 @@ def export_bases(root, assets):
         d.mkdir(parents=True, exist_ok=True)
         (d / "ship.json").write_text(dump(rnd(ship)), encoding="utf-8")
         (d / "geometry.json").write_text(
-            json.dumps(
+            dump(
                 {
                     s["layer"]: {"aabb": rnd(s["aabb"], 4), "tris": rnd(s["tris"], 4)}
                     for s in j["sections"]
-                },
-                separators=(",", ":"),
+                }
             ),
             encoding="utf-8",
         )

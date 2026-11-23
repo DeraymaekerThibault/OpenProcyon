@@ -7,12 +7,12 @@ never registered, so they are skipped.
 usage: python3 -m tools.export_decals <game_root> <assets_dir>
 """
 
-import json
 from pathlib import Path
 
 from PIL import Image
 
 from tools import cli
+from tools.jsonio import dump
 
 SIZES = {"Small": 0, "Medium": 1, "Large": 2}
 
@@ -70,9 +70,7 @@ def main(root, out):
         Image.open(f).convert("RGBA").save(out / "decals" / f"{name}.png")
         table[name] = dict(size=SIZES[size], materials=groups)
     (out / "data").mkdir(exist_ok=True)
-    (out / "data/decals.json").write_text(
-        json.dumps(table, indent=1) + "\n", encoding="utf-8"
-    )
+    (out / "data/decals.json").write_text(dump(table), encoding="utf-8")
     print(f"decals: {len(table)}")
 
 

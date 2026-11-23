@@ -18,6 +18,7 @@ from PIL import Image
 
 from tools import cli
 from tools.hud_sprites import IDLE, SKINS, read, sprite_dir
+from tools.jsonio import dump
 
 BAR = Path(__file__).resolve().parent.parent / "content/data/hud/bar.json"
 
@@ -136,9 +137,7 @@ def main(out, bar_file=BAR):
             continue
         canvas, data = done
         canvas.save(out / f"hud/bar/{skin.lower()}.png")
-        (out / f"hud/bar/{skin.lower()}.json").write_text(
-            json.dumps(data, indent=1), encoding="utf-8"
-        )
+        (out / f"hud/bar/{skin.lower()}.json").write_text(dump(data), encoding="utf-8")
 
 
 if __name__ == "__main__":

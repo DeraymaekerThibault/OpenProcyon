@@ -5,13 +5,13 @@ Raw WOT literals are kept; interpretation is the game's job. Hit geometry is MDB
 """
 
 import difflib
-import json
 from pathlib import Path
 
 from tools import cli
 from tools.export_mesh_detail import collision_lods
 from tools.export_ship import export as export_physics
 from tools.gamefs import ci_file, ci_files
+from tools.jsonio import dump
 from tools.mdb import MdbError
 from tools.mdb import parse as parse_mdb
 from tools.mdb_to_glb import convert, hardpoints, layer_offsets, with_layer_offset
@@ -541,7 +541,7 @@ def fx_names(j):
 if __name__ == "__main__":
     root, ship, out = cli.args(__doc__, 3)
     j = export(root, ship, Path(out).parent)
-    Path(out).write_text(json.dumps(j), encoding="utf-8")
+    Path(out).write_text(dump(j), encoding="utf-8")
     print(
         "wrote",
         out,

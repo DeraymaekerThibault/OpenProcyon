@@ -8,10 +8,10 @@
 The raw Ship_*.json files are deleted afterwards. usage: python3 tools/pack_data.py <assets dir>"""
 
 import json
-import re
 from pathlib import Path
 
 from tools import cli
+from tools.jsonio import dump
 
 # Ships offered in the skirmish pickers (retail: the single-player fleet screens); mods opt in with "skirmish": true.
 SKIRMISH = {
@@ -23,8 +23,6 @@ SKIRMISH = {
     "Ship_Pirate_Gunboat",
     "Ship_Pirate_Barque",
 }
-
-NUM = re.compile(r"\[\s*(-?[\d.eE+-]+(?:,\s*-?[\d.eE+-]+)*)\s*\]")
 
 
 def rnd(v, nd=6):
@@ -43,17 +41,6 @@ def sections_by_label(j):
         s["label"]: {k: v for k, v in s.items() if k not in ("label", "aabb", "tris")}
         for s in j["sections"]
     }
-
-
-def dump(v):
-    """indent=2, but number lists stay on one line."""
-    return (
-        NUM.sub(
-            lambda m: "[" + re.sub(r"\s+", " ", m.group(1)) + "]",
-            json.dumps(v, indent=2),
-        )
-        + "\n"
-    )
 
 
 def pack(assets):
@@ -113,7 +100,7 @@ def pack(assets):
             dump(rnd(ship)), encoding="utf-8"
         )
         (assets / "data/geometry" / f"{name}.json").write_text(
-            json.dumps(geometry, separators=(",", ":")), encoding="utf-8"
+            dump(geometry), encoding="utf-8"
         )
         f.unlink()
     (assets / "data/weapons/guns.json").write_text(dump(rnd(guns)), encoding="utf-8")

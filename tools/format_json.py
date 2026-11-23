@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 
 from tools import cli
-from tools.pack_data import dump
+from tools.jsonio import dump
 
 
 def main(assets):

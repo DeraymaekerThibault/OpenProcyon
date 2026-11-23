@@ -5,12 +5,12 @@ Retail: 61 scenes, 65 clips. Ships carry one break-apart clip (ANIMATION00, 2-20
 (ENVIRONMENT) or crane motion (CRANES), the three animals a swim cycle on their bones. Whether values are offsets from the rest
 pose or absolute poses is not settled (docs/re/effects.md). usage: python -m tools.export_animations <game_root> <assets_dir>"""
 
-import json
 import struct
 from pathlib import Path
 
 from tools import cli
 from tools.gamefs import ci_files
+from tools.jsonio import dump
 from tools.msb import parse_scene
 
 
@@ -53,9 +53,7 @@ def export(root, out):
             }
             scenes[msb.stem] = [rounded(c, names) for c in scene["animations"]]
     (Path(out) / "data").mkdir(exist_ok=True)
-    (Path(out) / "data/animations.json").write_text(
-        json.dumps(scenes, separators=(",", ":")), encoding="utf-8"
-    )
+    (Path(out) / "data/animations.json").write_text(dump(scenes), encoding="utf-8")
     print(
         "animations:", sum(map(len, scenes.values())), "clips in", len(scenes), "scenes"
     )

@@ -5,11 +5,13 @@ retail Sound/Dialogue file of the same name, so any install (vanilla or modded) 
 usage: python3 -m tools.export_voices copy <game_root> <out_assets>                        (import step)
        python3 -m tools.export_voices table <game_root> <CL_Data/Voicelines/English> [Race ...]  (regenerate the table)"""
 
+import argparse
 import json
 import re
 import shutil
-import sys
 from pathlib import Path
+
+from tools.jsonio import dump
 
 CREW_LINE = re.compile(
     r"[a-z]{2}(gunner|captain|firstmate|helmsman|engineer|rigger|spotter)\d"
@@ -32,7 +34,7 @@ def table(root, voicelines, races, dst=EVENTS):
             )
             if names:
                 ev[d.name] = names
-    Path(dst).write_text(json.dumps(events, indent=1, sort_keys=True), encoding="utf-8")
+    Path(dst).write_text(dump(events, sort_keys=True), encoding="utf-8")
     print(sum(len(v) for r in events.values() for v in r.values()), "event entries")
 
 
@@ -59,8 +61,19 @@ def copy(root, out, events=EVENTS):
 
 
 if __name__ == "__main__":
-    mode, *args = sys.argv[1:]
-    if mode == "copy":
-        copy(*args)
+    ap = argparse.ArgumentParser(description=__doc__.split("usage:")[0])
+    sub = ap.add_subparsers(dest="mode", required=True)
+    c = sub.add_parser(
+        "copy", help="copy the retail files the event table names (import step)"
+    )
+    c.add_argument("game_root")
+    c.add_argument("out_assets")
+    t = sub.add_parser("table", help="regenerate the event table")
+    t.add_argument("game_root")
+    t.add_argument("voicelines")
+    t.add_argument("races", nargs="*")
+    a = ap.parse_args()
+    if a.mode == "copy":
+        copy(a.game_root, a.out_assets)
     else:
-        table(args[0], args[1], args[2:])
+        table(a.game_root, a.voicelines, a.races)

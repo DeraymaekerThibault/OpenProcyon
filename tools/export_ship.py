@@ -4,10 +4,10 @@ usage: python -m tools.export_ship <game_root> Ship_Navy_Cutter <out.json>
 Values are raw WOT literals (units not established); each carries its source line.
 """
 
-import json
 from pathlib import Path
 
 from tools import cli
+from tools.jsonio import dump
 from tools.wot import parse_lines, properties, read_wot
 
 KEYS = (
@@ -44,5 +44,5 @@ def export(root, name):
 
 if __name__ == "__main__":
     root, name, out = cli.args(__doc__, 3)
-    Path(out).write_text(json.dumps(export(root, name), indent=1), encoding="utf-8")
+    Path(out).write_text(dump(export(root, name)), encoding="utf-8")
     print("wrote", out)

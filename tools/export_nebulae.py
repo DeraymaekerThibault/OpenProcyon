@@ -14,6 +14,7 @@ from tools import cli
 from tools.export_campaign import parse_mission
 from tools.export_combat import flat, load
 from tools.gamefs import ci_files
+from tools.jsonio import dump
 from tools.mdb_to_glb import convert
 from tools.models import model_path
 
@@ -117,9 +118,7 @@ def main(root, out):
     if set(damage) != {"lightning", "wind", "meteor"}:
         raise ValueError("Missing nebula weather damage tables")
     (out / "data").mkdir(parents=True, exist_ok=True)
-    (out / "data/nebula.json").write_text(
-        json.dumps(damage, indent=2) + "\n", encoding="utf-8"
-    )
+    (out / "data/nebula.json").write_text(dump(damage), encoding="utf-8")
     for twt in sorted(
         [*(root / "World").glob("*.twt"), *(root / "World/SinglePlayer").glob("*.twt")]
     ):
@@ -139,7 +138,7 @@ def main(root, out):
         ) as e:  # installs vary (mods); one broken map must not stop the import
             print(f"skip {mid} nebulae: {e}")
             continue
-        f.write_text(json.dumps(m), encoding="utf-8")
+        f.write_text(dump(m), encoding="utf-8")
         print(f"{mid}: {len(m['nebulae'])} nebula setups")
     dst = model_path(out, "GeoSolar", mkdir=True)
     if not dst.exists():

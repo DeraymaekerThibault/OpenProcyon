@@ -4,7 +4,6 @@ tools/hud_sprites.py) and the font metrics in hud/fonts/ (no glyph sheets: UI te
 usage: python -m tools.export_hud <game_root> <outdir>
 """
 
-import json
 import re
 import shutil
 from pathlib import Path
@@ -17,6 +16,7 @@ from tools.fix_alpha_bleed import bleed
 from tools.gamefs import ci_files
 from tools.hdt import parse
 from tools.hud_sprites import IDLE, SKINS, sprite_dir, trim_image
+from tools.jsonio import dump
 
 SAFE = re.compile(r"^[A-Za-z0-9_ ]+$")
 ART = ("TextureName - ", "TextureArea - ", "TextureAreaTrimmed - ")
@@ -99,7 +99,7 @@ def main(root, out):
                 count += 1
             if meta["states"]:
                 (sprite_dir(out, name) / f"{skin_name}.json").write_text(
-                    json.dumps(meta), encoding="utf-8"
+                    dump(meta), encoding="utf-8"
                 )
     # hud.json keeps the layout numbers, timings and offsets; the art lives in hud/sprites.
     data = {
@@ -113,12 +113,12 @@ def main(root, out):
         }
         for name, comp in comps.items()
     }
-    (hud / "hud.json").write_text(json.dumps(data), encoding="utf-8")
+    (hud / "hud.json").write_text(dump(data), encoding="utf-8")
     (hud / "fonts").mkdir(exist_ok=True)
     for f in ci_files(Path(root) / "Fonts", "*.fft"):
         font = parse_font(Path(f).read_text(encoding="latin1"))
         (hud / "fonts" / (Path(f).stem + ".json")).write_text(
-            json.dumps(font), encoding="utf-8"
+            dump(font), encoding="utf-8"
         )
     print(
         f"exported {len(comps)} HUD components, {count} sprites; missing sheets: {sorted(missing)}"
