@@ -271,6 +271,8 @@ pub fn plugin(app: &mut App) {
     crate::scenario::number_spawns::<Ship>(app);
     crate::scenario::number_spawns::<Shell>(app);
     crate::scenario::number_spawns::<lob::Blast>(app);
+    crate::scenario::number_spawns::<Asteroid>(app);
+    crate::scenario::number_spawns::<ArmedBase>(app);
     app.insert_resource(Library::load(assets_dir()))
         .init_resource::<Target>()
         .add_message::<Hit>()
