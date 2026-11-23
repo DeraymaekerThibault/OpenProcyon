@@ -11,7 +11,7 @@ corpus = []
 for p in list((root / "game/src").rglob("*.rs")) + list(
     (root / "assets").rglob("*.json")
 ):
-    corpus.append(p.read_text(errors="ignore").lower())
+    corpus.append(p.read_text(encoding="utf-8", errors="ignore").lower())
 corpus = "\n".join(corpus)
 unused = collections.defaultdict(list)
 for p in sorted((root / "assets").rglob("*")):

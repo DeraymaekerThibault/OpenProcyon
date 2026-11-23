@@ -6,11 +6,11 @@ usage: python -m tools.export_campaign_media <game_root> <assets_dir>"""
 
 import json
 import shutil
-import sys
 from pathlib import Path
 
-from tools import ogg
+from tools import cli, ogg
 from tools.export_maps import strings
+from tools.jsonio import dump
 
 # Maps whose audio is copied into assets/sound (the JSON lists every cue regardless): the 13 campaign missions and both tutorials.
 PLAYABLE = {f"mission{n:02d}" for n in range(1, 14)} | {"tutorial", "basic_tutorial"}
@@ -25,7 +25,7 @@ def main(root, out):
 
 def export(root, out, mid):
     names = strings(root)
-    mission = json.loads((out / f"campaign/{mid}.json").read_text())
+    mission = json.loads((out / f"campaign/{mid}.json").read_text(encoding="utf-8"))
     from tools.export_campaign import (
         speech_events,
     )  # late: export_campaign imports PLAYABLE from here
@@ -103,15 +103,15 @@ def export(root, out, mid):
                 out / "sound" / (t.lower() + ".ogg"),
             )
     (out / f"campaign/{mid}_media.json").write_text(
-        json.dumps(
+        dump(
             dict(
                 speech=speech, messages=messages, ship_names=ship_names, journal=journal
-            ),
-            indent=1,
-        )
+            )
+        ),
+        encoding="utf-8",
     )
     print(mid, len(speech), "speech events,", len(music), "music tracks")
 
 
 if __name__ == "__main__":
-    main(sys.argv[1], sys.argv[2])
+    main(*cli.args(__doc__, 2))

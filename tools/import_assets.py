@@ -24,6 +24,10 @@ import traceback
 import warnings
 from pathlib import Path
 
+from tools import importlog
+from tools.gamefs import ci_files
+from tools.jsonio import dump
+
 REPO = Path(__file__).resolve().parents[1]
 # The release download runs this module frozen by PyInstaller (no checkout, no Python install).
 FROZEN = getattr(sys, "frozen", False)
@@ -41,6 +45,11 @@ FIRST = [
 SCENERY = ["Island01", "Island02", "IslandSmall01", "IslandMed01", "Islandrocky1"]
 # Music: one skirmish track (Red Rover's script plays BTL_NavyBig_Full02); the other maps use other tracks.
 MUSIC = ["BTL_NavyBig_Full02.ogg", "FrontEndMusic.ogg"]
+
+
+# Layout version of the files an import writes, recorded in <assets>/importer.json (the game does not read it; tools and mods can).
+# Raise it when a file's meaning or location changes. JSON is written by tools.jsonio: indent 2, number lists on one line.
+FORMAT = 1
 
 
 class StepFailed(Exception):
@@ -148,7 +157,7 @@ def read_env(path):
     """KEY=value lines of a .env file (optional quotes, # comments)."""
     env = {}
     if path.is_file():
-        for line in path.read_text().splitlines():
+        for line in path.read_text(encoding="utf-8").splitlines():
             key, sep, value = line.strip().partition("=")
             if sep and not key.startswith("#"):
                 env[key.strip()] = value.strip().strip("\"'")
@@ -194,11 +203,11 @@ def export_ships(root, out, want, part=lambda i, k: None):
         ok, err = tool("tools.export_combat", root, s, out / f"{s}.json", quiet=True)
         if not ok:
             (out / f"{s}.json").unlink(missing_ok=True)
-            print(
-                f"skip {s}: {err}"
-            )  # wrecks/debris are not combat ships; anything else is an exporter bug
+            # wrecks/debris are not combat ships; anything else is an exporter bug
+            print(f"skip {s}: {err}")
+            importlog.skipped(f"WorldObjects/{s}.wot", err)
             continue
-        scene = json.loads((out / f"{s}.json").read_text())["scene"]
+        scene = json.loads((out / f"{s}.json").read_text(encoding="utf-8"))["scene"]
         glb = out / "models/ships" / f"{scene}.glb"
         if (
             not glb.is_file()
@@ -206,38 +215,48 @@ def export_ships(root, out, want, part=lambda i, k: None):
         ):
             (out / f"{s}.json").unlink(missing_ok=True)
             print(f"skip {s} (no mesh)")
+            importlog.skipped(f"WorldObjects/{s}.wot", f"no mesh for scene {scene}")
             continue
         ships.append(s)
-    (out / "ships.json").write_text(json.dumps(ships) + "\n")
+    (out / "ships.json").write_text(dump(ships), encoding="utf-8")
+
+
+def model(root, scene, glb):
+    """One scenery/UI mesh; a mesh a modded install lacks is logged and skipped, not fatal."""
+    if glb.is_file():
+        return
+    ok, err = tool("tools.mdb_to_glb", root, scene, glb, quiet=True)
+    if not ok:
+        importlog.skipped(f"BD_MeshScenes/{scene}.msb", err)
 
 
 def models(root, out):
     for kind, scenes in (("sky", ["skybox_07"]), ("scenery", SCENERY)):
         for scene in scenes:
-            if not (out / "models" / kind / f"{scene}.glb").is_file():
-                tool(
-                    "tools.mdb_to_glb",
-                    root,
-                    scene,
-                    out / "models" / kind / f"{scene}.glb",
-                )
+            model(root, scene, out / "models" / kind / f"{scene}.glb")
     for part in ("COMPASS", "ARROW"):
         name = f"SELECTION_INDICATOR_{part}_SMALL"
-        tool("tools.mdb_to_glb", root, name, out / "models/ui" / f"{name}.glb")
+        model(root, name, out / "models/ui" / f"{name}.glb")
     # The lob-aim ground marker: one mesh per weapon, and a "no firing solution" twin of each.
     for weapon in ("GRAVCHARGE", "STARMORTAR", "NOVAMORTAR"):
         for suffix in ("", "_HAS_NO_FIRING_SOLUTION"):
             name = f"LOBTARGET_{weapon}{suffix}"
-            tool("tools.mdb_to_glb", root, name, out / "models/ui" / f"{name}.glb")
+            model(root, name, out / "models/ui" / f"{name}.glb")
 
 
 def sounds(root, out):
     """Original Ogg Vorbis, copied with lowercase names (WOT names differ in case from the files)."""
     (out / "sound").mkdir(exist_ok=True)
-    files = sorted((root / "Sound/SoundEffects").glob("*.ogg")) + sorted(
-        (root / "Sound/GUI").glob("*.ogg")
+    files = ci_files(root / "Sound/SoundEffects", "*.ogg") + ci_files(
+        root / "Sound/GUI", "*.ogg"
     )
-    for f in files + [root / "Sound/Music" / m for m in MUSIC]:
+    for m in MUSIC:
+        found = ci_files(root / "Sound/Music", m)
+        if found:
+            files += found
+        else:
+            importlog.skipped(f"Sound/Music/{m}", "file not found")
+    for f in files:
         if not (out / "sound" / f.name.lower()).is_file():
             shutil.copyfile(f, out / "sound" / f.name.lower())
 
@@ -247,13 +266,14 @@ def flags(root, out):
     from PIL import Image
 
     (out / "flags").mkdir(exist_ok=True)
-    for f in (root / "BD_FlagTextures").glob("*.tga"):
+    for f in ci_files(root / "BD_FlagTextures", "*.tga"):
         Image.open(f).convert("RGBA").save(out / "flags" / (f.stem.lower() + ".png"))
 
 
 def steps(root, out, want, part=lambda i, k: None):
     def ship_files():
-        return [out / f"{s}.json" for s in json.loads((out / "ships.json").read_text())]
+        names = json.loads((out / "ships.json").read_text(encoding="utf-8"))
+        return [out / f"{s}.json" for s in names]
 
     return [
         ("ships", lambda: export_ships(root, out, want, part)),
@@ -339,7 +359,7 @@ def main(argv):
     if not (root / "WorldObjects").is_dir():
         sys.exit(f"not a game install (no WorldObjects/): {root}")
     if not want:
-        names = sorted(f.stem for f in (root / "WorldObjects").glob("Ship_*.wot"))
+        names = sorted(f.stem for f in ci_files(root / "WorldObjects", "Ship_*.wot"))
         want = FIRST + [n for n in names if n not in FIRST]
     # Every import is a clean pass: the steps skip files that already exist (models shared by many maps), so importing over an
     # earlier import would keep its outdated files. A folder with content is rebuilt beside it and replaced only on success.
@@ -348,6 +368,12 @@ def main(argv):
         shutil.rmtree(target)  # an earlier import that failed or was stopped
     for kind in ("ships", "sky", "scenery", "ui"):
         (target / "models" / kind).mkdir(parents=True, exist_ok=True)
+    log = (
+        (user_dir() or REPO / "local") / "import.log"
+        if FROZEN
+        else REPO / "local/import.log"
+    )
+    importlog.start(log)
     progress = Progress()
     todo = steps(root, target, want, progress.part)
     progress.names = [name for name, _ in todo]
@@ -357,6 +383,7 @@ def main(argv):
             run()
         except StepFailed as e:
             sys.exit(f"import failed at step {name!r}: {e}")
+    (target / "importer.json").write_text(dump(dict(format=FORMAT)), encoding="utf-8")
     if target != out:
         try:
             swap_in(target, out)
@@ -364,6 +391,7 @@ def main(argv):
             sys.exit(
                 f"the import finished in {target}, but it could not replace {out} ({e}); close programs using it and retry"
             )
+    print(importlog.summary(len(todo)))
     print(f"done: {out}")
 
 

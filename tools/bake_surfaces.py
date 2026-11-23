@@ -126,7 +126,7 @@ def main(argv=None):
             Image.fromarray(bake(rgb), "RGBA").save(part, "PNG")
         step(name)
     # Written last, so a bake that failed or was stopped does not show in the Mods screen as a finished mod.
-    (out / "mod.json").write_text(json.dumps(MOD, indent=2) + "\n")
+    (out / "mod.json").write_text(json.dumps(MOD, indent=2) + "\n", encoding="utf-8")
     print(f"done: switch on '{MOD['name']}' in the Mods screen (or --mod {out})")
 
 
