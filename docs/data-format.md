@@ -167,7 +167,7 @@ ones and whatever it changes (a ship from a model: `docs/modding.md` "A ship fro
 | `points` | integer | no | `0` (fleet cost) |
 | `display_name`, `icon` | string | no | the hull's name string, an icon named from the id |
 | `model`, `geometry`, `scene` | string | no | the ship's own folder (`model`, `geometry`); `scene` none |
-| `core_hp` | number | no | a quarter of the hull sections' HP, at least 50 (needs a model) |
+| `core_hp` | number | no | with a model: a quarter of the hull sections' HP, at least 50; without one: 100 |
 | `physics` | object | no | `Mass` 4000, `MaxThrust` 60000, `MaxSpeed` 8, `RotationalFriction` 20, `MaxAngularAcceleration` 3 (PROVISIONAL, about a Navy Cutter's); `MinExtents`, `MaxExtents`, `CenterOfMass` default to the model |
 | `sections` | object by label | no | built from the model's layers; each section needs `layer`, `material`, `hp`, `core_pct`, `vital_ship`, `vital_speed`, `vital_turn`; optional `vital_mission` (`false`), `swappable` (`true`), `adjacent` and `criticals` (empty), `destruct`, `debris`, `debris_fx` |
 | `guns` | object by mount | no | none; each mount needs `gun` (a key of `guns.json`) and `arc_deg`; `pos`/`rot` default to the model's hardpoint node of that name, `bank` to the nearest weapon-panel slot, `parent_layer` none |
