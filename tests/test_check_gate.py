@@ -43,6 +43,8 @@ esac
                 path = bin_dir / name
                 path.write_text(shim)
                 path.chmod(0o755)
+            (root / "tools/shot.sh").write_text(shim)  # the startup smoke runs shot.sh
+            (root / "tools/shot.sh").chmod(0o755)
             log = root / "calls"
             env = dict(
                 os.environ,
@@ -93,9 +95,15 @@ esac
         self.assertIn(
             "cargo build --manifest-path game/Cargo.toml --profile fast", calls
         )
-        self.assertEqual(
-            len([line for line in calls if line.startswith("timeout ")]), 1
+        # A self-quitting menu run with a picture, not a timed one.
+        self.assertTrue(
+            [
+                line
+                for line in calls
+                if line.startswith("shot.sh") and "--menu main --shot-frame" in line
+            ]
         )
+        self.assertFalse([line for line in calls if line.startswith("timeout ")])
         self.assertIn("python3 -m tools.battle_check", calls)
         self.assertTrue(self.last_line(result).startswith("GATE OK full"))
 

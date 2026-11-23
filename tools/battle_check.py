@@ -1,5 +1,5 @@
 """Battle check: play short skirmish battles and fail when one stops behaving like a battle.
-usage: python3 -m tools.battle_check [NAME ...] [--speed N] [--profile fast|release]   (default: every scenario below)
+usage: python3 -m tools.battle_check [NAME ...] [--speed N] [--profile fast|release] [--jobs N]   (default: every scenario below)
 Two kinds of scenario: a map with the --ship/--allies/--enemies fleet shortcut, and a lobby scenario (`--lobby <spec>`,
 game/src/menu/lobby_scenario.rs) that sets the skirmish lobby up like a player (slots, victory points, fleet limit) and presses
 Launch. The shortcut never plays an allied computer slot or a full lobby; only lobby scenarios do.
@@ -17,6 +17,8 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import NamedTuple
 
@@ -167,6 +169,12 @@ def main():
         default="fast",
         help="Cargo profile to build the game with (default fast; release to time what players get)",
     )
+    ap.add_argument(
+        "--jobs",
+        type=int,
+        default=0,
+        help="scenarios to play at once, each with its own display (default: half the cores; 1 to judge stutter)",
+    )
     args = ap.parse_args()
     chosen = [s for s in SCENARIOS if not args.names or s.name in args.names]
     if not chosen:
@@ -177,21 +185,33 @@ def main():
     out = REPO / "local/battle_check"
     out.mkdir(parents=True, exist_ok=True)
     wrap = display_wrapper()
-    failed = 0
-    with tempfile.TemporaryDirectory() as xdg:
-        # A scratch XDG_DATA_HOME (default bindings, no saves, silent) and X11, as tools/autoplay.py.
-        silent_data_home(xdg)
-        env = {
-            **os.environ,
-            "XDG_DATA_HOME": xdg,
-            **assets_env(),
-            "WAYLAND_DISPLAY": "",
-        }
-        if wrap:
-            env["WGPU_BACKEND"] = "vulkan"
-        for name, game_args, seconds, expect in chosen:
+    # Software Vulkan is CPU-bound: half the cores is the most that pays off.
+    jobs = max(1, min(args.jobs or (os.cpu_count() or 2) // 2, len(chosen)))
+    if jobs > 1:
+        print(
+            f"battle_check: {jobs} jobs; stutter is not judged (load-sensitive: use --jobs 1 for that)"
+        )
+
+    def run(scenario):
+        """Plays one scenario in its own display and scratch XDG_DATA_HOME; returns (passed, line)."""
+        name, game_args, seconds, expect = scenario
+        if jobs > 1:
+            expect = expect | {"no-stutter"}
+        start = time.monotonic()
+        with tempfile.TemporaryDirectory() as xdg:
+            # A scratch XDG_DATA_HOME (default bindings, no saves, silent) and X11, as tools/autoplay.py.
+            silent_data_home(xdg)
+            env = {
+                **os.environ,
+                "XDG_DATA_HOME": xdg,
+                **assets_env(),
+                "WAYLAND_DISPLAY": "",
+                "PROCYON_OVERLAY": str(Path(xdg) / "overlay"),
+                "PROCYON_REPORT": str(seconds),
+            }
+            if wrap:
+                env["WGPU_BACKEND"] = "vulkan"
             log = out / f"{name}.log"
-            env["PROCYON_REPORT"] = str(seconds)
             cmd = [*wrap, str(game), *game_args, "--speed", str(args.speed)]
             # Wall-clock cap for a hung run (below ~10 fps the game runs slower than asked); a timeout reports no battle.
             with log.open("w") as f, contextlib.suppress(subprocess.TimeoutExpired):
@@ -203,11 +223,28 @@ def main():
                     stderr=subprocess.STDOUT,
                     timeout=seconds + 120,
                 )
-            passed, summary = outcome(
-                ANSI.sub("", log.read_text(errors="replace")), expect
+        text = ANSI.sub("", log.read_text(errors="replace"))
+        passed, summary = outcome(text, expect)
+        line = f"{'ok  ' if passed else 'FAIL'} {name:<16} {time.monotonic() - start:3.0f}s {summary}"
+        if not passed:
+            line += f"\n    rerun: python3 -m tools.battle_check {name} --jobs 1   (log: {log})"
+            line += "".join(
+                "\n    " + ln for ln in text.splitlines()[-10:] if ln.strip()
             )
-            failed += not passed
-            print(f"{'ok  ' if passed else 'FAIL'} {name:<16} {summary}", flush=True)
+        return passed, line
+
+    start = time.monotonic()
+    with ThreadPoolExecutor(jobs) as pool:
+        # Results print in the order the runs finish.
+        futures = [pool.submit(run, s) for s in chosen]
+        results = []
+        for f in as_completed(futures):
+            results.append(f.result())
+            print(results[-1][1], flush=True)
+    failed = sum(not passed for passed, _ in results)
+    print(
+        f"battle_check: {len(results) - failed} ok, {failed} FAIL in {time.monotonic() - start:.0f}s (jobs {jobs})"
+    )
     if failed:
         sys.exit(f"{failed} battle scenario(s) failed; logs: {out}")
 

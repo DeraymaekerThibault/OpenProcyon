@@ -86,17 +86,10 @@ if [ "$tier" = full ]; then
     step game-build cargo build --manifest-path game/Cargo.toml --profile fast
     game="${CARGO_TARGET_DIR:-$PWD/game/target}/fast/openprocyon"
     # Startup smoke: the unit tests run single systems, so only a real start finds conflicts between systems (Bevy B0001) and
-    # startup panics. Runs the menu for 10 s (timeout ends it with status 124); only a panic in the log fails. Needs a display
-    # or Xvfb (like tools/shot.sh).
-    startup_smoke() {
-      if [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || [ "$(uname -o 2>/dev/null)" = Msys ]; then
-        out=$(cd game && timeout 10 "$game" 2>&1) || true
-      else
-        out=$(cd game && xvfb-run -a -s '-screen 0 1280x720x24' env WGPU_BACKEND=vulkan timeout 10 "$game" 2>&1) || true
-      fi
-      printf '%s\n' "$out"
-      ! printf '%s\n' "$out" | grep -q "panicked at"
-    }
+    # startup panics. Opens the main menu, writes one picture after 120 frames and quits by itself (shot.sh: Xvfb when there is
+    # no display; a panic, a missing or a black picture fails).
+    export PROCYON_BIN=$game
+    startup_smoke() { tools/shot.sh local/check/startup.png --menu main --shot-frame 120; }
     step startup-smoke startup_smoke
     # Battle check: short skirmishes with fixed fleets must still play like battles (the computer engages, nobody grinds on an
     # island, nothing panics). Whole-battle regressions that single-system tests miss show up here (~1-2 min).

@@ -11,11 +11,18 @@ Git Bash (`GIT_BASH=<path>` if it is not in the default place), and the screensh
 2. Put editable gameplay changes in `mods/`; change exporters only when the retail conversion is wrong.
 3. Add a small regression test for new logic. Prefer synthetic parser tests and pure mission-rule tests over long simulations.
 4. Run the relevant tests while iterating, then `make check` before committing.
-5. For ECS wiring or UI changes, also run a screenshot smoke test. Unit tests do not detect every Bevy query conflict or layout problem. `make smokes` runs every documented smoke with its arguments (`tools/smokes.sh`; add new smokes to its list).
+5. For ECS wiring or UI changes, also run a screenshot smoke test. Unit tests do not detect every Bevy query conflict or layout problem. `make smokes [ARGS="--jobs N"]` runs every documented smoke with its arguments (`tools/smokes.sh`; add new smokes to its list with
+   a `kind`: `asserts` for a script that logs a PASS line when its checks held (the run fails without it), `visual` otherwise). It builds
+   once, runs the binary, plays N at once (default: half the cores; each run has its own display, scratch `XDG_DATA_HOME` and mod overlay)
+   and ends with one line (`smokes: 22 ok, 2 FAIL: dock, fleet (...)`); a failure prints its last relevant log lines and the rerun command.
+   `make smoke WHAT=changed` runs only the smokes that the files changed against the merge base with origin/main (and uncommitted ones)
+   map to; the map is `MAP` in `tools/smokes.py` (combat, ship: battle check + damage, target, course; rules, campaign: briefing-skip,
+   lifeboat-m1, storm-m3, hunt-m3; docking, boarding: dock + battle check; classic, panels, menu: pause, fleet, mods; fx, render: fxtest;
+   lib.rs, loading, smoke/: everything). `WHAT=<regex>` picks smokes by name.
    `make autoplay [ARGS="1 2"]` (`tools/autoplay.py`) plays campaign missions with the `--script mission` autopilot and prints a
    table per mission: outcome (won, lost, time limit, stuck in NIS, panic), peak entities/particles, slowest frame and how many
    mission rules never fired (named in the log). It finds crashes and soft-locks, not fidelity problems.
-   `make battles [ARGS=ambush]` (`tools/battle_check.py`, part of `make check` when assets are imported) plays short skirmishes with
+   `make battles [ARGS=ambush]` (`tools/battle_check.py [--jobs N]`, part of `make check --full` when assets are imported; stutter is judged only with `--jobs 1`) plays short skirmishes with
    fixed fleets at 16x and fails when one stops behaving like a battle: a side never fires or hits, a computer ship parks, a ship
    grinds on scenery, or the game panics. The game writes one `battle report {json}` line (`PROCYON_REPORT=<game s>`,
    `smoke/report.rs`); read it before adding print statements. When a change touches targeting, steering or what counts as a
