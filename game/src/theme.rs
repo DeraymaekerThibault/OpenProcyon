@@ -272,7 +272,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let shipped = Theme::default();
         assert_eq!(Theme::from_files(&dir.join("absent.json"), None), shipped, "no file: the defaults");
-        for (name, text) in [("syntax", "{ \"rim_width\": "), ("array", "[1, 2]"), ("number", "4")] {
+        for (name, text) in [("syntax", "rim_width: "), ("array", "[1, 2]"), ("number", "4")] {
             std::fs::write(dir.join(format!("{name}.json")), text).unwrap();
             assert_eq!(Theme::from_files(&dir.join(format!("{name}.json")), None), shipped, "{name}");
         }

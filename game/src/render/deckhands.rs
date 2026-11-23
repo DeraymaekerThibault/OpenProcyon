@@ -808,7 +808,7 @@ mod tests {
         std::fs::create_dir_all(head.parent().unwrap()).unwrap();
         std::fs::write(head.with_extension("bin"), []).unwrap();
         // not JSON, JSON of another shape, and a clip list longer than the eight the shader has room for
-        for text in ["{ clips", r#"["verts"]"#, r#"{"verts": 0, "frames": 0, "part": [], "clips": [{"name": "idle"}, {"name": "walk"}, {"name": "run"}, {"name": "haul"}, {"name": "load"}, {"name": "climb"}, {"name": "cheer"}, {"name": "fall"}, {}]}"#] {
+        for text in ["clips", r#"["verts"]"#, r#"{"verts": 0, "frames": 0, "part": [], "clips": [{"name": "idle"}, {"name": "walk"}, {"name": "run"}, {"name": "haul"}, {"name": "load"}, {"name": "climb"}, {"name": "cheer"}, {"name": "fall"}, {}]}"#] {
             std::fs::write(&head, text).unwrap();
             assert!(read_kit(&root).is_none(), "{text}");
         }

@@ -498,11 +498,11 @@ mod tests {
         std::fs::create_dir_all(root.join("data/render")).unwrap();
         std::fs::create_dir_all(&base).unwrap();
         assert!(profile_json(&root, &base).is_none(), "no profile: the classic look, quietly");
-        std::fs::write(root.join(PROFILE), r#"{"sky": {"near": {}}, "bloom": "#).unwrap();
+        std::fs::write(root.join(PROFILE), "[1, 2,").unwrap();
         assert!(profile_json(&root, &base).is_none(), "a syntax error turns the profile off (with an error line), not the game");
         std::fs::write(root.join(PROFILE), r#"{"sky": {"near": {}}}"#).unwrap();
         std::fs::write(root.join(SKIES), "[oops").unwrap();
-        std::fs::write(root.join(NEBULAE), "{").unwrap();
+        std::fs::write(root.join(NEBULAE), "nope").unwrap();
         let v = profile_json(&root, &base).expect("the profile stands without its bad accent files");
         assert!(v["sky"].get("skies").is_none());
         std::fs::remove_dir_all(dir).unwrap();

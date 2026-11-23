@@ -957,7 +957,7 @@ mod load_or_base_tests {
     #[test]
     fn a_bad_file_is_skipped_and_the_base_file_is_kept() {
         let d = dir("bad");
-        std::fs::write(d.join("syntax.json"), "{width: 3").unwrap();
+        std::fs::write(d.join("syntax.json"), "width: 3").unwrap();
         std::fs::write(d.join("type.json"), r#"{"width": "wide"}"#).unwrap();
         std::fs::write(d.join("base.json"), r#"{"width": 9}"#).unwrap();
         for bad in ["syntax.json", "type.json"] {

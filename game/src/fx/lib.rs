@@ -412,7 +412,7 @@ mod tests {
         std::fs::write(dir.join("index.json"), r#"["Good", "Syntax", "Shape", "Gone", "Kept"]"#).unwrap();
         let prim = r#"{"Primitive": [{}]}"#;
         std::fs::write(dir.join("Good.json"), prim).unwrap();
-        std::fs::write(dir.join("Syntax.json"), "{ not json").unwrap();
+        std::fs::write(dir.join("Syntax.json"), "not json").unwrap();
         std::fs::write(dir.join("Shape.json"), "[1, 2]").unwrap_or_default();
         std::fs::write(dir.join("Kept.json"), "oops").unwrap();
         std::fs::write(base.join("Kept.json"), prim).unwrap();
