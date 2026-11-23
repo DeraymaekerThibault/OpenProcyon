@@ -214,7 +214,10 @@ def main():
             log = out / f"{name}.log"
             cmd = [*wrap, str(game), *game_args, "--speed", str(args.speed)]
             # Wall-clock cap for a hung run (below ~10 fps the game runs slower than asked); a timeout reports no battle.
-            with log.open("w") as f, contextlib.suppress(subprocess.TimeoutExpired):
+            with (
+                log.open("w", encoding="utf-8") as f,
+                contextlib.suppress(subprocess.TimeoutExpired),
+            ):
                 subprocess.run(
                     cmd,
                     cwd=REPO / "game",
@@ -223,7 +226,7 @@ def main():
                     stderr=subprocess.STDOUT,
                     timeout=seconds + 120,
                 )
-        text = ANSI.sub("", log.read_text(errors="replace"))
+        text = ANSI.sub("", log.read_text(encoding="utf-8", errors="replace"))
         passed, summary = outcome(text, expect)
         line = f"{'ok  ' if passed else 'FAIL'} {name:<16} {time.monotonic() - start:3.0f}s {summary}"
         if not passed:

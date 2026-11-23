@@ -57,7 +57,7 @@ class ImportTolerance(unittest.TestCase):
             load=mock.DEFAULT,
             scene_name=mock.Mock(return_value="S"),
             hardpoints=mock.Mock(return_value=[]),
-            parse_msb=mock.Mock(return_value=[]),
+            parse_scene_file=mock.Mock(return_value=[]),
             ci_file=mock.DEFAULT,
             associations=lambda _, kind: mounts if kind == "GunPlacement" else [],
             flat=lambda _: defaultdict(float, {"BulletTypeName_Primary": "B"}),

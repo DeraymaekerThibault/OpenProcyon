@@ -79,7 +79,7 @@ fn hunt_m3(world: &mut World, frame: u32) {
         m.opening = None;
         world.get_mut::<Transform>(primary).unwrap().translation = Vec3::new(500.0, 0.0, -500.0);
         let mut ship = world.get_mut::<Ship>(primary).unwrap();
-        ship.order = 0;
+        ship.order = EngineOrder::Stop;
         ship.waypoints.clear();
         ship.speed = 0.0;
     }
@@ -100,7 +100,7 @@ fn hunt_m3(world: &mut World, frame: u32) {
         let pos = world.get::<Transform>(exile).unwrap().translation;
         world.get_mut::<Transform>(primary).unwrap().translation = pos - Vec3::X * 100.0;
         let mut ship = world.get_mut::<Ship>(primary).unwrap();
-        ship.order = 2;
+        ship.order = EngineOrder::Full;
         ship.speed = 10.0;
     }
     if frame == 80 {
@@ -161,7 +161,7 @@ fn storm_m3(world: &mut World, frame: u32) {
         let e = world.resource::<ship::Fleets>().primary().unwrap();
         world.get_mut::<Transform>(e).unwrap().translation = Vec3::new(600.0, 0.0, 1050.0);
         let mut sh = world.get_mut::<Ship>(e).unwrap();
-        sh.order = 0;
+        sh.order = EngineOrder::Stop;
         sh.speed = 0.0;
         sh.waypoints.clear();
     }
@@ -412,7 +412,7 @@ fn profile_arms(world: &mut World, frame: u32) {
         20 => world.resource_scope(|world, lib: Mut<Library>| {
             let mut sk = world.resource_mut::<Skirmish>();
             let h = human(&sk);
-            sk.slots[h].race = 0;
+            sk.slots[h].race = crate::scenario::Race::Navy;
             sk.fleet_size = 5;
             crate::menu::auto_assign(&mut sk, &lib);
             // Every point spent (the hook has no map, so set the budget to what the fleet costs).
@@ -476,7 +476,7 @@ fn ships_double_click(world: &mut World, frame: u32) {
         20 => {
             let mut sk = world.resource_mut::<Skirmish>();
             let h = sk.slots.iter().position(|s| s.kind == crate::menu::Kind::Human).unwrap();
-            sk.slots[h].race = 0;
+            sk.slots[h].race = crate::scenario::Race::Navy;
             while !sk.slots[h].fleet.is_empty() {
                 sk.slots[h].remove_ship(0);
             }
@@ -486,11 +486,11 @@ fn ships_double_click(world: &mut World, frame: u32) {
         // The cheapest hull sits on the last row; the list shows eight rows, so scroll it into view.
         22 => {
             let lib = world.resource::<Library>();
-            let n = crate::menu::offered(lib, 0).len();
+            let n = crate::menu::offered(lib, crate::scenario::Race::Navy).len();
             world.resource_mut::<Skirmish>().scroll = n.saturating_sub(8);
         }
         26 | 30 => {
-            let n = crate::menu::offered(world.resource::<Library>(), 0).len();
+            let n = crate::menu::offered(world.resource::<Library>(), crate::scenario::Race::Navy).len();
             press(world, n - 1);
         }
         32 => {

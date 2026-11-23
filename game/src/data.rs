@@ -155,6 +155,69 @@ impl FromWorld for AsteroidDefs {
 /// The retail torpedo bullet (WOT `BulletTypeName_Primary`); aiming, launch and crew calls treat it specially.
 pub const TORPEDO_BULLET: &str = "Bullet_Torpedo";
 
+/// Whether `bullet` is a torpedo. One rule for every caller: the name starts with `TORPEDO_BULLET`. The retail data has exactly one
+/// such bullet (`Bullet_Torpedo`), so an exact match and a prefix match give the same answer on it; the prefix also takes a mod's
+/// `Bullet_Torpedo_Heavy`-style variants.
+pub fn is_torpedo_bullet(bullet: &str) -> bool {
+    bullet.starts_with(TORPEDO_BULLET)
+}
+
+/// The weapon family a gun or bullet name stands for, read once from the name (`Gun_Harpoon_Light`, `Bullet_NovaMortar`...). Names
+/// that carry two families resolve in the order of the variants; the retail names carry one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GunFamily {
+    Harpoon,
+    GravCharge,
+    EnergyNet,
+    Gattling,
+    ArcturianFire,
+    NovaMortar,
+    StarMortar,
+    StarMine,
+    Torpedo,
+    Lancer,
+    Plasma,
+    Carronade,
+    /// Any other name with "Mortar" in it (a mod's).
+    Mortar,
+    /// Any other name with "Mine" in it (a mod's).
+    Mine,
+    /// Cannonballs, and every name that is none of the above.
+    Cannon,
+}
+
+impl GunFamily {
+    pub fn of(name: &str) -> Self {
+        const NAMES: [(&str, GunFamily); 14] = [
+            ("Harpoon", GunFamily::Harpoon),
+            ("GravCharge", GunFamily::GravCharge),
+            ("EnergyNet", GunFamily::EnergyNet),
+            ("Gattling", GunFamily::Gattling),
+            ("ArcturianFire", GunFamily::ArcturianFire),
+            ("NovaMortar", GunFamily::NovaMortar),
+            ("StarMortar", GunFamily::StarMortar),
+            ("StarMine", GunFamily::StarMine),
+            ("Torpedo", GunFamily::Torpedo),
+            ("Lancer", GunFamily::Lancer),
+            ("Plasma", GunFamily::Plasma),
+            ("Carronade", GunFamily::Carronade),
+            ("Mortar", GunFamily::Mortar),
+            ("Mine", GunFamily::Mine),
+        ];
+        NAMES.iter().find(|(n, _)| name.contains(n)).map_or(GunFamily::Cannon, |(_, f)| *f)
+    }
+
+    /// Lobbed or laid rather than aimed: mortars, mines and gravity charges.
+    pub fn is_indirect(self) -> bool {
+        matches!(self, Self::GravCharge | Self::NovaMortar | Self::StarMortar | Self::Mortar | Self::StarMine | Self::Mine)
+    }
+
+    /// A mine: a star mine or any other mine.
+    pub fn is_mine(self) -> bool {
+        matches!(self, Self::StarMine | Self::Mine)
+    }
+}
+
 pub struct GunDef {
     pub mount_type: Option<String>,
     pub points: Option<u32>,
@@ -173,6 +236,12 @@ pub struct GunDef {
     pub deviation: [f32; 3], // per range band (effective, long, maximum): accuracy deviation (rad); PROVISIONAL: used as max cone half-angle
     pub gravity: bool,
     pub bullet: String,
+    /// Read once at load from the gun's name (`load_weapons`); `Cannon` for a def built without a name.
+    pub family: GunFamily,
+    /// Read once at load from `bullet`.
+    pub bullet_family: GunFamily,
+    /// `is_torpedo_bullet(bullet)`, read once at load.
+    pub bullet_torpedo: bool,
     pub base: Option<String>,   // glb of the turning base
     pub barrel: Option<String>, // glb of the pitching barrel
     pub pivot: Vec3,            // barrel pivot in the base frame
@@ -231,9 +300,6 @@ impl BeamDef {
     }
 }
 impl GunDef {
-    /// Gravity on this gun's shells (units/s^2): MuzzleSpeed^2 / (sqrt(2) * MaximumRange), so a shell fired at 45 degrees
-    /// would carry sqrt(2) times the maximum range. Measured on retail shells of seven guns (docs/re/gunnery.md#shell-gravity);
-    /// 0 for guns not flagged BulletAffectedByGravity.
     /// Time from the first shot of a burst to the next burst: TimeBetweenBursts (seconds) runs from the burst's last shot.
     /// Measured on retail gattling bursts (8 shots 0.15 s apart, a new burst every ~4.1 s) and medium cannons (9.0 s).
     pub fn burst_cycle(&self) -> f32 {
@@ -244,6 +310,9 @@ impl GunDef {
         (self.reload - cut).max(0.0) + self.burst.saturating_sub(1) as f32 * self.burst_reload
     }
 
+    /// Gravity on this gun's shells (units/s^2): MuzzleSpeed^2 / (sqrt(2) * MaximumRange), so a shell fired at 45 degrees
+    /// would carry sqrt(2) times the maximum range. Measured on retail shells of seven guns (docs/re/gunnery.md#shell-gravity);
+    /// 0 for guns not flagged BulletAffectedByGravity.
     pub fn shell_gravity(&self) -> f32 {
         if self.gravity && self.range[2] > 0.0 { self.muzzle * self.muzzle / (std::f32::consts::SQRT_2 * self.range[2]) } else { 0.0 }
     }
@@ -284,6 +353,10 @@ pub struct BulletDef {
     pub decal: Option<u8>,
     /// Energy net: a hit slows the ship for `duration` seconds, thrust and top speed x (1 - `dissipated`); nets stack.
     pub net: Option<(f32, f32)>,
+    /// Read once at load from the bullet's name (`load_weapons`); `Cannon` for a def built without a name.
+    pub family: GunFamily,
+    /// `is_torpedo_bullet(name)`, read once at load.
+    pub torpedo: bool,
 }
 pub struct Mount {
     pub pos: Vec3,
@@ -415,6 +488,10 @@ pub struct Library {
     pub clips: crate::clips::Clips,
 }
 impl Library {
+    /// The family of the gun fitted under `gun` (its def's field, read at load). A name with no def (a test's) is parsed on the spot.
+    pub fn family(&self, gun: &str) -> GunFamily {
+        self.guns.get(gun).map_or_else(|| GunFamily::of(gun), |g| g.family)
+    }
     pub fn index(&self, name: &str) -> usize {
         self.classes
             .iter()
@@ -450,6 +527,9 @@ pub fn gun_def(g: &Value) -> GunDef {
         deviation: [num(&g["EffectiveRange_AccuracyDeviation"]), num(&g["LongRange_AccuracyDeviation"]), num(&g["MaximumRange_AccuracyDeviation"])],
         gravity: g["BulletAffectedByGravity"].as_bool().unwrap(),
         bullet: g["BulletTypeName_Primary"].as_str().unwrap().into(),
+        family: GunFamily::Cannon,
+        bullet_family: GunFamily::of(g["BulletTypeName_Primary"].as_str().unwrap()),
+        bullet_torpedo: is_torpedo_bullet(g["BulletTypeName_Primary"].as_str().unwrap()),
         base: g["visual"]["base"].as_str().map(String::from),
         barrel: g["visual"]["barrel"].as_str().map(String::from),
         pivot: conv_v(&g["visual"]["pivot"]),
@@ -465,7 +545,7 @@ pub fn gun_def(g: &Value) -> GunDef {
         lob: (g["Is Lobbing Gun"] == true).then(|| g["LobAngle"].as_f64().unwrap_or(0.785) as f32),
         cloak_fire: g["Can Be Fired While Cloaked"].as_bool().unwrap_or_else(|| {
             let b = g["BulletTypeName_Primary"].as_str().unwrap_or_default();
-            b.starts_with(TORPEDO_BULLET) || b == "Bullet_Gattling"
+            is_torpedo_bullet(b) || b == "Bullet_Gattling"
         }),
         beam: BeamDef::from_json(&g["beam"]),
     }
@@ -502,6 +582,8 @@ pub fn bullet_def(b: &Value) -> BulletDef {
             .iter()
             .map(|(m, v)| (m.clone(), v.as_array().unwrap().iter().map(|s| s.as_str().unwrap().to_string()).collect()))
             .collect(),
+        family: GunFamily::Cannon,
+        torpedo: false,
         net: b["net"].as_object().map(|n| (n["duration"].as_f64().unwrap_or(0.0) as f32, n["dissipated"].as_f64().unwrap_or(0.0) as f32)),
         hit_fx: b["hit_fx"].as_str().map(String::from),
         bullet_fx: b["bullet_fx"].as_str().map(String::from),
@@ -548,7 +630,9 @@ pub fn map_json(id: &str) -> Option<Value> {
 /// Every gun and bullet definition (`data/weapons/*.json`), shared by all ships.
 pub fn load_weapons(root: &std::path::Path) -> (HashMap<String, GunDef>, HashMap<String, BulletDef>) {
     let table = |file: &str| read_json(&root.join("data/weapons").join(file)).as_object().unwrap().clone();
-    (table("guns.json").iter().map(|(k, g)| (k.clone(), gun_def(g))).collect(), table("bullets.json").iter().map(|(k, b)| (k.clone(), bullet_def(b))).collect())
+    let guns = table("guns.json").iter().map(|(k, g)| (k.clone(), GunDef { family: GunFamily::of(k), ..gun_def(g) })).collect();
+    let bullets = table("bullets.json").iter().map(|(k, b)| (k.clone(), BulletDef { family: GunFamily::of(k), torpedo: is_torpedo_bullet(k), ..bullet_def(b) })).collect();
+    (guns, bullets)
 }
 
 /// Ship ids: the folders of `ships/` that hold a `ship.json`, sorted.
@@ -663,5 +747,66 @@ mod tests {
         assert_eq!(conv(1.0, 2.0, 3.0), Vec3::new(1.0, 3.0, -2.0));
         assert_eq!(crate::game_to_bevy(&serde_json::json!([1.0, 2.0, 3.0])), conv(1.0, 2.0, 3.0));
         assert_eq!(crate::game_to_bevy(&serde_json::json!([1.0])), Vec3::new(1.0, 0.0, 0.0), "missing components read as 0");
+    }
+}
+
+#[cfg(test)]
+mod gun_family_tests {
+    use super::{GunFamily::*, *};
+
+    #[test]
+    fn names_parse_to_their_family() {
+        for (name, family) in [
+            ("Gun_Harpoon_Light_2Deck", Harpoon),
+            ("Gun_GravCharge_Med", GravCharge),
+            ("Gun_EnergyNet_Med", EnergyNet),
+            ("Gun_Gattling_Light", Gattling),
+            ("Gun_ArcturianFire_Heavy", ArcturianFire),
+            ("Bullet_NovaMortar_Secondary", NovaMortar),
+            ("Gun_StarMortar", StarMortar),
+            ("Gun_StarMine_Med", StarMine),
+            ("Bullet_Torpedo", Torpedo),
+            ("Gun_IC_LancerDualMed_DestroyerFront", Lancer),
+            ("Gun_Plasma_Heavy", Plasma),
+            ("Gun_Carronade_Med", Carronade),
+            ("Gun_Mortar_Mod", Mortar),
+            ("Bullet_Mine2", Mine),
+            ("Gun_CannonBall_Med", Cannon),
+            ("Gun_Volcano", Cannon),
+        ] {
+            assert_eq!(GunFamily::of(name), family, "{name}");
+        }
+        assert!(GunFamily::of("Gun_NovaMortar").is_indirect() && GunFamily::of("Bullet_Mine2").is_indirect() && !GunFamily::of("Gun_Torpedo").is_indirect());
+        assert!(GunFamily::of("Bullet_StarMine_Med").is_mine() && !GunFamily::of("Bullet_StarMortar").is_mine());
+    }
+
+    #[test]
+    fn a_torpedo_bullet_is_a_name_starting_with_the_retail_torpedo() {
+        assert!(is_torpedo_bullet("Bullet_Torpedo") && is_torpedo_bullet("Bullet_Torpedo_Heavy"));
+        assert!(!is_torpedo_bullet("Bullet_CannonBall_Med") && !is_torpedo_bullet("Gun_Torpedo"));
+    }
+
+    /// The name rules the families replaced, kept here to prove the enum answers alike on every gun and bullet of the imported data.
+    #[test]
+    #[ignore = "needs imported assets"]
+    fn the_families_agree_with_the_substring_rules_on_every_retail_name() {
+        let (guns, bullets) = load_weapons(crate::assets_dir());
+        for name in guns.keys() {
+            let old = name.contains("Mortar") || name.contains("Mine") || name.contains("GravCharge");
+            assert_eq!(GunFamily::of(name).is_indirect(), old, "{name}");
+            assert_eq!(GunFamily::of(name) == Harpoon, name.contains("Harpoon"), "{name}");
+            assert_eq!(guns[name].family, GunFamily::of(name), "{name}: stored at load");
+            assert_eq!(guns[name].bullet_family.is_mine(), guns[name].bullet.contains("Mine"), "{name}");
+            assert_eq!(guns[name].bullet_torpedo, guns[name].bullet == TORPEDO_BULLET, "{name}");
+        }
+        for name in bullets.keys() {
+            assert_eq!(GunFamily::of(name).is_mine(), name.contains("Mine"), "{name}");
+            assert_eq!((bullets[name].family, bullets[name].torpedo), (GunFamily::of(name), is_torpedo_bullet(name)), "{name}: stored at load");
+            // torpedo: the two checks the code used to mix
+            assert_eq!(is_torpedo_bullet(name), name == TORPEDO_BULLET, "{name}");
+        }
+        for g in guns.values() {
+            assert_eq!(is_torpedo_bullet(&g.bullet), g.bullet == TORPEDO_BULLET, "{}", g.bullet);
+        }
     }
 }

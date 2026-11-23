@@ -134,7 +134,7 @@ class ImportAssets(unittest.TestCase):
                 import_assets.tool("tools.format_json")
             ok, err = import_assets.tool("tools.format_json", quiet=True)
             self.assertFalse(ok)
-            self.assertIn("IndexError", err)
+            self.assertIn("usage:", err)
             self.assertEqual(import_assets.sys.argv, argv)
 
     def test_frozen_default_out_is_the_folder_the_game_reads(self):

@@ -25,7 +25,7 @@ pub fn plugin(app: &mut App) {
 }
 
 #[derive(Component)]
-struct LobMarker(usize, bool);
+struct LobMarker(crate::combat::LobKind, bool);
 
 /// The armed lob bank's ground marker: a flat retail mesh (one per weapon, plus a "no firing solution" twin) lying on the sea at
 /// the point under the mouse. PROVISIONAL: drawn at the mesh's own size (about 7 radius, the data says `LobIcon WorldSpace Radius` 10)
@@ -44,7 +44,7 @@ fn lob_marker(mut commands: Commands, assets: Res<AssetServer>, aim: Res<crate::
         }
         commands.entity(e).despawn();
     }
-    let weapon = ["GRAVCHARGE", "NOVAMORTAR", "STARMORTAR"][a.kind];
+    let weapon = ["GRAVCHARGE", "NOVAMORTAR", "STARMORTAR"][a.kind.index()];
     let twin = if a.solution { "" } else { "_HAS_NO_FIRING_SOLUTION" };
     commands.spawn((
         LobMarker(a.kind, a.solution),
@@ -161,7 +161,7 @@ fn navigation(
             ));
             if !arrow {
                 // PROVISIONAL backing fill: the native indicator render state is not decoded.
-                let mesh = meshes.add(Circle::new(5.2));
+                let mesh = meshes.add(Circle::new(5.2)); // PROVISIONAL: eyeballed against footage
                 let material = materials.add(StandardMaterial {
                     base_color: Color::srgba(0.02, 0.22, 0.38, 0.8),
                     unlit: true,
@@ -315,7 +315,7 @@ fn spawn_labels(
         let font_scale = 1.05;
         let tw = font.width(&text) * font_scale;
         let total = l.x + r.x + c.x.max(tw + 8.0);
-        let text_pos = Vec2::new(((total - tw) / 2.0).round(), ((22.0 - font.height * font_scale) / 2.0 + 3.0).round()); // +3: the line box sits above the ribbon strip
+        let text_pos = Vec2::new(((total - tw) / 2.0).round(), ((22.0 - font.height * font_scale) / 2.0 + 3.0).round()); // PROVISIONAL: +3, the line box sits above the ribbon strip
         let root = commands.spawn((Label { ship: e, width: total, alpha: 0.0 }, Node { position_type: PositionType::Absolute, ..default() }, Visibility::Hidden)).id();
         let mut kids = vec![];
         img.color = tint;

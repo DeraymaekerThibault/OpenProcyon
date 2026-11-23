@@ -5,14 +5,13 @@ with its mesh layer (`with_layer_offset`, the dock rule); a ship's comes from `h
 in the original's role order Gunners, Captains, First Mates, Navigators, Engineers, Riggers, Fighters, Lookouts (docs/re/boarding.md).
 usage: python -m tools.export_boarding <game_root> <assets_dir>"""
 
-import sys
 from pathlib import Path
 
+from tools import cli, importlog
 from tools.export_combat import flat, load, placed_objects, scene_name
-from tools.gamefs import ci_file
+from tools.jsonio import dump
 from tools.mdb_to_glb import hardpoints, layer_offsets, with_layer_offset
-from tools.msb import parse as parse_msb
-from tools.pack_data import dump
+from tools.msb import parse_scene_file
 
 ROLES = (
     "Gunners",
@@ -28,12 +27,7 @@ ROLES = (
 
 def scenery_points(root, scene):
     """Boarding points of a base or island, in the frame its placed meshes and docks share."""
-    msb = {
-        n.id: n
-        for n in parse_msb(
-            ci_file(Path(root) / "BD_MeshScenes", f"{scene}.msb").read_bytes()
-        )
-    }
+    msb = {n.id: n for n in parse_scene_file(root, scene)}
     offsets = layer_offsets(root, scene)
     return [
         with_layer_offset(offsets, msb, n)
@@ -60,7 +54,8 @@ def export(root, out):
                     ]
                 )
             ]
-        except (KeyError, ValueError, FileNotFoundError, StopIteration):
+        except (KeyError, ValueError, FileNotFoundError, StopIteration) as e:
+            importlog.skipped(f"WorldObjects/{name}.wot", f"{type(e).__name__}: {e}")
             continue
         entry = {"points": points}
         if name.startswith("Ship_"):
@@ -69,9 +64,9 @@ def export(root, out):
         if points or "crew" in entry:
             data[name] = entry
     (Path(out) / "data").mkdir(exist_ok=True)
-    (Path(out) / "data/boarding.json").write_text(dump(data))
+    (Path(out) / "data/boarding.json").write_text(dump(data), encoding="utf-8")
     print("boarding:", len(data), "entities")
 
 
 if __name__ == "__main__":
-    export(*sys.argv[1:3])
+    export(*cli.args(__doc__, 2))

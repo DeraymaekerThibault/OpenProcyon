@@ -41,10 +41,19 @@ pub struct Fires {
     pub tick: f32,
 }
 
+/// A fire's life, changed only on the fire ticks: burning; out (found dead, stops emitting); cut loose from the ship; gone.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FireState {
+    Burning,
+    Out,
+    Loose,
+    Done,
+}
+
 pub struct Fire {
     pub sec: usize,
     pub intensity: f32,
-    pub state: u8,
+    pub state: FireState,
     pub fx: Option<Entity>,
 }
 
@@ -237,7 +246,7 @@ pub fn damage_fx(
     }
 }
 
-/// The rules' "Damage Group/Unit by X percent" (read from the original's code, not yet measured): every section in order is hit once for
+/// The rules' "Damage Group/Unit by X percent" (not yet measured): every section in order is hit once for
 /// round(its current hit points x `fraction`) through the normal hit routine (spill into neighbours of a section left at 0, core bleed
 /// through dead vital sections, the human's ships taking the difficulty factor: the hit carries no attacker, so computer ships take
 /// none). The core is never scaled directly: a fraction below 1 leaves it whole unless vital sections die.
@@ -304,13 +313,15 @@ pub fn fires(
             let posts = posts.or(generic.as_ref());
             let mut crew = fire_fighting(&std::array::from_fn(|role| crew_slots(me, class, posts, role, "leadership")));
             while crew > 0.0 {
-                let Some(f) = fires.list.iter_mut().filter(|f| f.state == 0 && f.intensity > 0.0).max_by(|a, b| a.intensity.total_cmp(&b.intensity)) else { break };
+                let Some(f) = fires.list.iter_mut().filter(|f| f.state == FireState::Burning && f.intensity > 0.0).max_by(|a, b| a.intensity.total_cmp(&b.intensity)) else {
+                    break;
+                };
                 let used = crew.min(f.intensity);
                 f.intensity -= used;
                 crew -= used;
             }
             let (core, secs) = (hp.core, hp.sections.clone());
-            for f in fires.list.iter().filter(|f| f.state == 0) {
+            for f in fires.list.iter().filter(|f| f.state == FireState::Burning) {
                 let burn = fire_damage(f.intensity, humans, crate::menu::difficulty());
                 let was = hp.sections[f.sec];
                 hp.sections[f.sec] = (was - burn).max(0.0);
@@ -329,9 +340,9 @@ pub fn fires(
             // on the tick that finds it, is cut loose from the ship on the next and deleted on the one after; a burning fire doubles.
             for f in &mut fires.list {
                 match f.state {
-                    2 => f.state = 3,
-                    1 => {
-                        f.state = 2;
+                    FireState::Loose => f.state = FireState::Done,
+                    FireState::Out => {
+                        f.state = FireState::Loose;
                         if let Some(e) = f.fx {
                             commands.entity(e).queue(|mut w: EntityWorldMut| {
                                 let world = w.get::<GlobalTransform>().map(|g| g.compute_transform());
@@ -343,7 +354,7 @@ pub fn fires(
                         }
                     }
                     _ if f.intensity <= 0.0 || burnt[f.sec] => {
-                        f.state = 1;
+                        f.state = FireState::Out;
                         if let Some(Ok(mut x)) = f.fx.map(|e| fxq.get_mut(e)) {
                             x.emitting = false;
                         }
@@ -358,7 +369,7 @@ pub fn fires(
             }
         }
         fires.list.retain(|f| {
-            let done = f.state == 3;
+            let done = f.state == FireState::Done;
             if done
                 && let Some(e) = f.fx
                 && let Ok(mut c) = commands.get_entity(e)

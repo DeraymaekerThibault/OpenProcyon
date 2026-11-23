@@ -93,7 +93,7 @@ fn computer_captain_grapples_and_boards_its_target() {
             tick(&mut app, 0.1);
         }
         assert!(held(&mut app, foe).is_empty(), "an untouched computer ship leaves its target alone");
-        app.world_mut().write_message(crate::combat::Fired { shooter: me, target: Some(foe), bullet: String::new() });
+        app.world_mut().write_message(crate::combat::Fired { shooter: me, target: Some(foe), bullet: String::new(), torpedo: false, mine: false });
         let (mut grappled, mut boarded) = (false, false);
         for _ in 0..600 {
             tick(&mut app, 0.1);

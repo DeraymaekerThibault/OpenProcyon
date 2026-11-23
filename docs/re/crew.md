@@ -66,13 +66,13 @@ Saves made mid-battle store per ship an engineer and a navigator factor. Measure
   mean rating 8.67 would give 1.508).
 - **Speed:** Ahead Full = 0.5 × WOT MaxSpeed × engineer factor; Emergency twice that. The speed bands of the turn formula use the
   uncrewed MaxSpeed (the engineers' Man-O-War at Full, 0.745 × MaxSpeed, falls in the top band: 2.68°/s measured and predicted).
-- **Rudder:** torque × navigator factor, linear, the same for every ship, human or computer, at any difficulty (read from the
-  original's code, 2026-10-31). The factor scales the rudder term only; the speed bands (on the uncrewed MaxSpeed) and the
+- **Rudder:** torque × navigator factor, linear, the same for every ship, human or computer, at any difficulty (unchecked against
+  play, 2026-10-31). The factor scales the rudder term only; the speed bands (on the uncrewed MaxSpeed) and the
   rotational drag follow, so a steady turn grows with the square root of the factor. The engineer factor scales thrust, so it
   multiplies top speed and the first acceleration alike; drag is not scaled, so the time constant does not change. Computer ships
   still turn harder: not the crew, but the computer helm's torque boost
   ([movement.md](movement.md#computer-helm-read-from-the-originals-code-2026-10-31)).
-- **Leadership** (read from the original's code, 2026-10-31): each ship draws two chances in [0, 1) once when it is crewed. Every
+- **Leadership** (unchecked against play, 2026-10-31): each ship draws two chances in [0, 1) once when it is crewed. Every
   crewman but the captain and the first mate gains 0.1 skill (on the 0-1 scale, capped at 1) when the captain's Leadership / 10
   beats the first chance, and 0.05 when the first mate's beats the second. So a Leadership-7 captain lifts the crew 70 % of the
   time, fixed for the battle. The bonus counts wherever a crewman's skill does: gunnery accuracy, sail and hull repair,
@@ -87,15 +87,14 @@ the first ship is crewed in full (gunners, captain, first mate, navigator, engin
 the last ones are mostly empty posts (empty slot = the rating-1 hand). Each ship's saved engineer and navigator factor is reproduced exactly from its
 crew (62 of 64 ships): the per-crewman value above, averaged over the post's slots, **and when the class has no such post at all (a Sloop has no engineers,
 a Gunboat no navigator) the factor is 1 + 0.05 x a stand-in's rating in that skill** (no 0.075; no stand-in counts as rating 1: 1.05). The stand-in is
-the first mate (failing that the captain) for the navigator, fighter and lookout posts, and the captain for the others (read from
-the original's code).
+the first mate (failing that the captain) for the navigator, fighter and lookout posts, and the captain for the others (unchecked against play).
 The two misses are Pirate ships under a Crag captain whose engineering is not listed in the data (the saved 1.30 reads as rating 6).
 This is also where the generic levels' floors come from: a Green / Average / Elite captain is rated 3 / 6 / 8, so a postless factor is 1.15 / 1.30 / 1.40.
 Scan range follows the same rule on the lookout post and spotting: 712.5 = 500 x 1.425 (lookout rated 7), 525 = 500 x 1.05 (no lookout post, empty captain).
 Buying order (2026-10-31, budgets re-read): all hulls and weapons first, then crew ship by ship; 13 of 15 fleets spent their 300 or 340 points
 to the point ([skirmish-setup.md](skirmish-setup.md)). Not resolved: the choice of crewman (257 of 319 picks rated exactly 7 in the post's skill, gunners 8-9).
 
-## Crew losses and the crew-class gate (read from the original's code, 2026-11)
+## Crew losses and the crew-class gate (unchecked against play, 2026-11)
 - **A battle takes no crew away.** Nothing that runs from a shell hit, a fire or a destroyed section adds, removes or replaces a ship's crewmen; the only runtime change of a ship's
   crew is a capture (a fresh generic crew with the old per-post counts, boarding.md section 4). Boarding casualties are strengths, not crewmen. Remake: same (posts are static).
 - **Crew class per post.** The computer fleet's crew pick (skirmish-setup.md) only seats a man whose crew class may fill the post group. The table has 18 classes by 8 groups
@@ -119,7 +118,7 @@ to the point ([skirmish-setup.md](skirmish-setup.md)). Not resolved: the choice 
   (`boarding::Skill::handling`); computer skirmish ships use the measured 1.267.
 - Spotting range. (Repair Rate: refit-resupply.md 3.4; rate of fire: gunnery.md#gunners.)
 
-## Engineers lower the critical-hit chance of their own ship (read from the original's code, 2026-11, not yet measured in play)
+## Engineers lower the critical-hit chance of their own ship (unchecked against play, 2026-11, not yet measured in play)
 For every section a hit reaches, including the neighbours that take the 0.4 spill, the chance of a critical on that section is
 (1 - E) x the bullet's per-material `Chance of Critical Damage`, held between 0 and 1, where E = the mean over the ship's engineer slots
 of the per-crewman skill factor (the factor in "Per crewman" above, 1.125 for an empty slot up to 1.5) minus 1.0. A default crew gives E

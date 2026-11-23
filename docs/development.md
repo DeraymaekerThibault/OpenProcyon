@@ -113,7 +113,7 @@ checks reveal/patrol without premature hunt, spotting/retreat without engagement
 so it does not validate the full retreat through scenery or combat. Current visual smoke: `tools/shot.sh local/m3-current.png --mission 3 --script current-m3 --shot-frame 90 --late-frame 0` places the ship on the current and checks two flowing ribbon layers.
 Diagnostics are off by default; simulation speed does not scale the frame-time measurement.
 Use a scratch `XDG_DATA_HOME` for automated campaign runs if the player's campaign-point save must remain untouched.
-Converted assets are found in this order: `PROCYON_ASSETS`, `assets/` in the source checkout (regardless of the working directory), then the
+Converted assets are found in this order: `PROCYON_ASSETS`, `assets/` in the source checkout (the checkout is found from the working directory or the executable: either must lie inside it), then the
 per-user folder `$XDG_DATA_HOME/openprocyon/assets` (Linux default `~/.local/share`; `%APPDATA%\openprocyon\assets` on Windows). Without
 any, the game exits with import instructions. `content/` is always layered on top. The tools (tests, `check.sh`, `shot.sh`, `smokes.sh`,
 `battle_check`, `autoplay`) use one order, `find_assets()` in `tools/import_assets.py`: the game's, with the main checkout's `assets/`

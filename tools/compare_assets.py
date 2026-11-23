@@ -3,6 +3,7 @@ everything else byte for byte. Used to check that a fresh import reproduces the 
 Usage: python3 -m tools.compare_assets <expected dir> <actual dir> [--detail N]
 """
 
+import argparse
 import json
 import math
 import sys
@@ -60,7 +61,7 @@ def sprite_canvas(path):
         return None
     meta = path.parent.with_suffix(".json")
     try:
-        info = json.loads(meta.read_text())["states"][path.stem]
+        info = json.loads(meta.read_text(encoding="utf-8"))["states"][path.stem]
         with Image.open(path) as image:
             canvas = untrimmed(image, info["size"], info["trim"])
     except (OSError, KeyError, ValueError):
@@ -75,7 +76,10 @@ def differs(a, b):
     ext = a.suffix.lower()
     if ext == ".json":
         try:
-            return json_diff(json.loads(a.read_text()), json.loads(b.read_text()))
+            return json_diff(
+                json.loads(a.read_text(encoding="utf-8")),
+                json.loads(b.read_text(encoding="utf-8")),
+            )
         except ValueError as e:
             return f"unreadable JSON: {e}"
     if ext in IMAGES:
@@ -128,10 +132,9 @@ def main(expected, actual, detail=5):
 
 
 if __name__ == "__main__":
-    args = sys.argv[1:]
-    n = 5
-    if "--detail" in args:
-        i = args.index("--detail")
-        n = int(args[i + 1])
-        del args[i : i + 2]
-    sys.exit(main(*args, detail=n))
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("expected")
+    ap.add_argument("actual")
+    ap.add_argument("--detail", type=int, default=5, help="examples listed per folder")
+    a = ap.parse_args()
+    sys.exit(main(a.expected, a.actual, detail=a.detail))

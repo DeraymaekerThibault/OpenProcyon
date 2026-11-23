@@ -96,7 +96,7 @@ human's command ship) runs it every tick against its current target, without any
   player's other ships their pilot's target); the line-of-fire skip is not modelled.
 **The grapple line.** A harpoon hit links the two ships; the link remembers the centre distance at that moment and uses it as the rope's length.
 Each tick, if the centres are further apart than the length, the rope pulls **both hulls toward each other by the excess, split by
-mass** (the lighter one moves more; positions only, no velocity change) — read from the original's code, and in play the excess
+mass** (the lighter one moves more; positions only, no velocity change) — and in play the excess
 after the ships' own move never exceeded one tick of their relative motion (0.07 units). A ship cannot sail away from a bitten
 grapple: it is held at the length. Order within a tick: the rope's break test and reel, then this pull, then the ships' physics, so
 the break test sees the stretch from the last tick's motion, before the pull. Each frame it is let go (rope-break sound `rope_break_placeholder` at the midpoint) when:

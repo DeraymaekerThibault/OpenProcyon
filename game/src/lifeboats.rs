@@ -1,6 +1,7 @@
 //! Lifeboats (docs/re/lifeboats.md): a destroyed ship whose Create Lifeboats flag is set leaves `Number of lifeboats` boats of its race,
 //! which drift away until any live ship touches one; the nearest such ship collects it. Lifeboats are identified by the class flag
 //! `Is Lifeboat` only, never by name (`Ship_Navy_Lifeboat_Mission9` is a combat ship). Boarding captures are a separate feature.
+use crate::EngineOrder;
 use crate::campaign::{Mission, MissionShip};
 use crate::combat::{Health, Library};
 use crate::{PlayerShip, Ship, Side};
@@ -87,7 +88,7 @@ fn lifeboats(
                 Lifeboat { owner: ms.owner.clone() },
                 Ship {
                     heading,
-                    order: 2,
+                    order: EngineOrder::Full,
                     waypoints: vec![tf.translation + to * 10000.0],
                     throttle: Some(throttle),
                     // Side::Player: never an enemy, the original treats lifeboats as friendly to everyone

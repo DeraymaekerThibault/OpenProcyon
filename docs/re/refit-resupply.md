@@ -42,7 +42,7 @@ Research only; nothing here is implemented. Source: observed behaviour of the or
   - Effect: hull sections full; destroyed sections and gun mounts back (new objects, so reload timers, burst state and shots-fired counters start from zero [I from re-creation]); no gun *type* is changed (the name is read from the stored mount entry; whether that entry holds the arms-profile gun is [I]).
 - When the docker is the player's primary ship the heal also clears four bytes of the HUD's speech table. They are not warnings on screen: each is the "already played" latch of
   one once-only crew voice line, so clearing it lets the line speak again. Three are always re-armed (the line that says every sail is lost, the one for the engines being lost, the one for
-  the rudder being lost); the fourth (every gun mount gone) only on a *full* heal. A line still keeps its minimum interval since it last played. Read from the original's code;
+  the rudder being lost); the fourth (every gun mount gone) only on a *full* heal. A line still keeps its minimum interval since it last played. Unchecked against play;
   which line each latch belongs to rests on one reading, unchecked on the running game.
 - Release: state 4 waits for the duration, then, frees the dock slot and clears the relation; **a human ship stays where it is**, AI ships move away/turn/return (`docking-and-orders.md`). No player confirmation is needed for repair. [C]
 

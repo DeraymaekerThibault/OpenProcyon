@@ -18,14 +18,14 @@ usage: python3 -m tools.pack_layout <assets dir>"""
 import json
 import re
 import shutil
-import sys
 from pathlib import Path
 
-from tools.pack_data import dump
+from tools import cli
+from tools.jsonio import dump
 
 
 def _read(p):
-    return json.loads(p.read_text()) if p.exists() else None
+    return json.loads(p.read_text(encoding="utf-8")) if p.exists() else None
 
 
 def pack_ships(assets):
@@ -41,32 +41,34 @@ def pack_ships(assets):
     )
     owner = {}
     for s in ships:
-        scene = json.loads((data / "ships" / f"{s}.json").read_text())["scene"]
+        scene = json.loads((data / "ships" / f"{s}.json").read_text(encoding="utf-8"))[
+            "scene"
+        ]
         owner.setdefault(
             scene, s
         )  # sorted: the plain hull comes before its _Feather/_NIS/... variants
     for s in ships:
         d = assets / "ships" / s
         d.mkdir(parents=True, exist_ok=True)
-        j = json.loads((data / "ships" / f"{s}.json").read_text())
+        j = json.loads((data / "ships" / f"{s}.json").read_text(encoding="utf-8"))
         j["geometry"], j["model"] = s, owner[j["scene"]]
-        (d / "ship.json").write_text(dump(j))
+        (d / "ship.json").write_text(dump(j), encoding="utf-8")
         (data / "ships" / f"{s}.json").unlink()
         shutil.move(data / "geometry" / f"{s}.json", d / "geometry.json")
         glb = assets / "models/ships" / f"{j['scene']}.glb"
         if owner[j["scene"]] == s and glb.exists():
             shutil.move(glb, d / "model.glb")
         if s in names:
-            (d / "names.json").write_text(dump(names.pop(s)))
+            (d / "names.json").write_text(dump(names.pop(s)), encoding="utf-8")
         if s in docks:
-            (d / "docks.json").write_text(dump(docks.pop(s)))
+            (d / "docks.json").write_text(dump(docks.pop(s)), encoding="utf-8")
     for sub in ("ships", "geometry"):
         if (data / sub).is_dir() and not any((data / sub).iterdir()):
             (data / sub).rmdir()
     (data / "ship_names.json").unlink(missing_ok=True)
     (assets / "ships.json").unlink(missing_ok=True)
     if docks:
-        (data / "docks.json").write_text(dump(docks))
+        (data / "docks.json").write_text(dump(docks), encoding="utf-8")
 
 
 def pack_maps(assets):
@@ -76,12 +78,12 @@ def pack_maps(assets):
     for f in sorted(maps.glob("*.json")):
         if f.stem == "index":
             continue
-        m = json.loads(f.read_text())
+        m = json.loads(f.read_text(encoding="utf-8"))
         d = maps / f.stem
         d.mkdir(exist_ok=True)
         if f.stem in listed:
             m["skirmish"] = True
-        (d / "map.json").write_text(dump(m))
+        (d / "map.json").write_text(dump(m), encoding="utf-8")
         f.unlink()
         for src, dst in (
             (assets / "campaign" / f"{f.stem}.json", "mission.json"),
@@ -139,7 +141,7 @@ def pack_sound(assets):
     flat = sorted(sound.glob("*.ogg")) if sound.is_dir() else []
     users = {}  # file stem -> maps whose JSON names it
     for f in assets.glob("maps/*/*.json"):
-        for tok in set(re.findall(r"[A-Za-z0-9_]+", f.read_text())):
+        for tok in set(re.findall(r"[A-Za-z0-9_]+", f.read_text(encoding="utf-8"))):
             users.setdefault(tok.lower(), set()).add(f.parent.name)
     for f in flat:
         kind = next((k for k, pre in SOUND_KINDS if f.name.startswith(pre)), None)
@@ -170,4 +172,4 @@ def pack(assets):
 
 
 if __name__ == "__main__":
-    pack(sys.argv[1])
+    pack(*cli.args(__doc__, 1))

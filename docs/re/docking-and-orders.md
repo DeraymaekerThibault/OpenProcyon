@@ -89,7 +89,7 @@ None → waiting to dock → approach → pre-docked → docked → moving away 
   over and send the holder back to waiting (1); otherwise hold (path cleared) inside **80 units** of the point, or path toward it.
 - **Approach point**: on the dock-point node's own forward axis, on the side the docker is on (axis flipped when the docker is
   ≥ 90° off it), **1.5 × dockee length** out for a ship dockee, **1 × docker length** for a base (lengths = collision-box y extents).
-- **2 dock approach** (read from the code, 2026-10-31): within **10 units** → 3. The approach point is recomputed every think (twice a
+- **2 dock approach** (unchecked against play, 2026-10-31): within **10 units** → 3. The approach point is recomputed every think (twice a
   second; the side follows the docker) and sailed as a one-point course through the collision avoider ([movement.md](movement.md#collision-avoidance-read-from-the-originals-code-2026-10-31));
   nothing checks whether it lies on land, and there is no route planning. Above **0.6π** seen from a ship dockee's centre the course is only
   reset. Once the approach point is reached (within **2 × the docker's radius**) the ship **glides**: normal sailing is off, the heading turns
@@ -107,10 +107,10 @@ None → waiting to dock → approach → pre-docked → docked → moving away 
 - The move-away leg (5) is the same glide.
 - **6 turning to return**: turns in place (glide, no movement) toward the start; done within 0.1 rad or after 10 s, then a one-point course
   **100 units toward the start** (not to the start itself). **7 returning**: sail it (with the avoider) until it ends → 0.
-Tow: the tower sails at the towee's centre (read from the code; not its tow nodes); **inside 50 units of surface distance the tow link is registered**
+Tow: the tower sails at the towee's centre (unchecked against play; not its tow nodes); **inside 50 units of surface distance the tow link is registered**
 (`ToweePoint = front_tow`, `TowerPoint = back_tow` mesh nodes). The remake now uses these nodes for approach and a shared mass-weighted cable constraint; retail spring/damping remain PROVISIONAL.
 
-### Docking a towed ship (read from the original's code; no run)
+### Docking a towed ship (unchecked against play; no run)
 Nothing stops a towed ship from docking: neither the dock-ability test nor the dock order looks for tow links. The link the dock routine
 registers for a ship dockee is the same kind as a tow link, and it is only added when no such link already joins the pair (in either order).
 When the dock time ends, or the dock order is cancelled, any link joining docker and dockee is removed.
@@ -136,7 +136,7 @@ Computer players' ships (not the human's, not ones under explicit orders, never 
 least two of their damage sections are at or below half their hit points** (destroyed sections do not count), they pick the
 nearest (by surface gap) friendly dockable ship or island that repairs, at any distance in skirmish but only within the ship's sight range in a
 campaign, and run the dock routine above on it
-(read from the code). The choice is re-made every think, so a ship can switch docks on the way; once started the routine runs to its end
+(unchecked against play). The choice is re-made every think, so a ship can switch docks on the way; once started the routine runs to its end
 even if repairs are no longer needed, and there is no give-up timer. Overall hull share is not the test, which is why a skirmish computer ship at 80 % hull with its damage
 spread thin never docked ([movement.md](movement.md#computer-captains-measured-2026-10)). Remake: `docking::ai_repair_dock` picks the nearest by surface gap (centre distance minus both
 collision radii) at every think while the ship has not yet docked, so a nearer dock replaces its earlier pick; a dock ordered by the player or a rule is not replaced, and
@@ -164,7 +164,7 @@ waypoint-mode click behaviour, and what the two `RepairVitalSection` rule action
 
 ## Hold and Stop orders
 
-Read from the original's code (not yet checked against a staged run, so PROVISIONAL in the details below).
+Unchecked against play (not yet checked against a staged run, so PROVISIONAL in the details below).
 - **Hold position** (the toggle, not a stance): setting it zeroes rudder and throttle and ends the current order; while it is on,
   the ship neither steers nor follows a path. Move, dock, tow and board orders clear it; attack orders, Stop, panic and bank attacks
   do not (a held ship ordered to attack stays put and fires). Remake: the Hold item halts the ship (course, heading goal, order,

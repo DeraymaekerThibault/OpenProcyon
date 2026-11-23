@@ -4,11 +4,11 @@ usage: python -m tools.export_overlays <game_root> <assets_dir>"""
 
 import json
 import re
-import sys
 from pathlib import Path
 
 from PIL import Image
 
+from tools import cli
 from tools.export_maps import fill_seams
 
 
@@ -25,7 +25,7 @@ def main(root, out):
         ),
     ]
     for f in missions:
-        for r in json.loads(f.read_text()).get("rules", []):
+        for r in json.loads(f.read_text(encoding="utf-8")).get("rules", []):
             names |= {
                 a["Texture Base Name"]
                 for a in r["actions"]
@@ -56,4 +56,4 @@ def main(root, out):
 
 
 if __name__ == "__main__":
-    main(sys.argv[1], sys.argv[2])
+    main(*cli.args(__doc__, 2))

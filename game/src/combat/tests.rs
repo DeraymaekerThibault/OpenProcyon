@@ -1,4 +1,5 @@
 use super::*;
+use crate::EngineOrder;
 
 /// Mission 6's stockade gate has no guns, only a vitalToMission section, and the rules wait for that section's damage to reach 1.
 /// The importer must export it as a class (an attackable base), and shooting the section down must read as full mission damage.
@@ -709,7 +710,7 @@ fn every_gun_has_a_panel_icon_and_pd_is_hidden() {
     for name in g.keys() {
         assert!(hud.get(gun_icon(name)).is_some(), "{name} -> {} missing", gun_icon(name));
     }
-    assert!(is_indirect("Gun_NovaMortar") && !is_indirect("Gun_CannonBall_Med"));
+    assert!(GunFamily::of("Gun_NovaMortar").is_indirect() && !GunFamily::of("Gun_CannonBall_Med").is_indirect());
     assert!(g["Gun_Lancer_PD_Light"].point_defense);
 }
 #[test]
@@ -785,7 +786,7 @@ fn torpedo_guidance_launch_coast_and_moving_target_intercept() {
     let old_y = p.y;
     let next = guide_torpedo(p, &mut v, &mut spin, 16.0, None, true, physics, 0.1);
     assert_eq!(next.y, old_y, "lost target must stop altitude tracking");
-    // Read from the original's code: a torpedo that lost its target cuts its thrust and slows to rest.
+    // A torpedo that lost its target cuts its thrust and slows to rest.
     let before = v.with_y(0.0).length();
     for i in 0..600 {
         guide_torpedo(p, &mut v, &mut spin, 20.0 + i as f32 * 0.1, None, false, physics, 0.1);
@@ -1012,7 +1013,7 @@ fn engine_exhaust_needs_motion_not_just_an_order() {
         .add_systems(Update, engine_rate);
     let lib = Library::load(assets_dir());
     let c = lib.index("Ship_Navy_Torpedo");
-    let ship = Ship { heading: 0.0, order: 2, ..Ship::new(c, Side::Player) };
+    let ship = Ship { heading: 0.0, order: EngineOrder::Full, ..Ship::new(c, Side::Player) };
     let s = app.world_mut().spawn((Transform::default(), ship, Health::new(&lib.classes[c]))).id();
     let fx = app.world_mut().resource_scope(|world, fxl: Mut<FxLib>| {
         spawn_engines(&mut world.commands(), &fxl, &lib, s, c, Transform::default());
@@ -1079,6 +1080,7 @@ fn shell_into_a_hull_damages_it_and_reports_the_hit() {
         lifetime: 5.0,
         gravity: 0.0,
         bullet: bullet.clone(),
+        torpedo: is_torpedo_bullet(&bullet),
         side: Side::Player,
         shooter,
         target: None,
@@ -1114,7 +1116,7 @@ fn shell_into_a_hull_damages_it_and_reports_the_hit() {
     assert!(impacted_material.is_some_and(|key| MATERIALS.contains(&key)), "the hit effect carries a material from the real collision");
 }
 
-/// Read from the original's code: a mine glances off a hull of an allied owner (own side included) and keeps flying at 0.6 of its
+/// A mine glances off a hull of an allied owner (own side included) and keeps flying at 0.6 of its
 /// speed; a hull that is not allied is struck.
 #[test]
 #[ignore = "needs imported assets"]
@@ -1153,6 +1155,7 @@ fn a_mine_glances_off_allied_hulls_and_strikes_others() {
             lifetime: 1000.0,
             gravity: 0.0,
             bullet: bullet.clone(),
+            torpedo: is_torpedo_bullet(&bullet),
             side: Side::Player,
             shooter,
             target: None,
@@ -1219,6 +1222,7 @@ fn land_in_the_way_stops_a_shell_before_the_hull() {
         lifetime: 5.0,
         gravity: 0.0,
         bullet: bullet.clone(),
+        torpedo: is_torpedo_bullet(&bullet),
         side: Side::Player,
         shooter,
         target: None,
@@ -1309,7 +1313,7 @@ fn a_map_mine_rests_where_the_map_put_it_and_fights_for_no_one_until_given_an_ow
     assert!(matches!(shell.payload, Payload::Mine { sight, .. } if sight == 50.0));
 }
 
-/// Read from the original's code: a mine picks its target only every 5 s, the first time 5 s after it was laid.
+/// A mine picks its target only every 5 s, the first time 5 s after it was laid.
 #[test]
 #[ignore = "needs imported assets"]
 fn a_mine_picks_its_target_five_seconds_after_it_is_laid() {
@@ -1337,6 +1341,7 @@ fn a_mine_picks_its_target_five_seconds_after_it_is_laid() {
         lifetime: 1000.0,
         gravity: 0.0,
         bullet: bullet.clone(),
+        torpedo: is_torpedo_bullet(&bullet),
         side: Side::Player,
         shooter,
         target: None,
@@ -1447,11 +1452,11 @@ fn seg_mesh_world(tf: &Transform, s: &Section, a: Vec3, b: Vec3) -> Option<f32> 
 
 #[test]
 fn lob_cursor_sprites_follow_weapon_and_solution() {
-    assert_eq!(lob_kind("Bullet_NovaMortar"), Some(1));
-    assert_eq!(lob_kind("Bullet_CannonBall"), None);
-    let a = LobAimed { kind: 2, solution: true, point: Vec3::ZERO };
+    assert_eq!(lob_kind(GunFamily::of("Bullet_NovaMortar")), Some(LobKind::NovaMortar));
+    assert_eq!(lob_kind(GunFamily::of("Bullet_CannonBall")), None);
+    let a = LobAimed { kind: LobKind::StarMortar, solution: true, point: Vec3::ZERO };
     assert_eq!(a.cursor(), "Cursor_PrimaryShip_SetLobTarget_StarMortar");
-    let b = LobAimed { kind: 0, solution: false, ..a };
+    let b = LobAimed { kind: LobKind::GravCharge, solution: false, ..a };
     assert_eq!(b.cursor(), "Cursor_PrimaryShip_SetLobTarget_GravCharge_HAS_NO_FIRING_SOLUTION");
 }
 
@@ -1465,7 +1470,7 @@ fn a_fire_that_burns_a_floored_section_out_goes_out() {
     hp.sections[0] = 1.0;
     let mut app = App::new();
     app.init_resource::<Time>().add_systems(Update, super::damage::fires);
-    let fire = super::damage::Fire { sec: 0, intensity: 50.0, state: 0, fx: None };
+    let fire = super::damage::Fire { sec: 0, intensity: 50.0, state: super::damage::FireState::Burning, fx: None };
     let ms = crate::campaign::MissionShip { invuln: 0.5, ..Default::default() };
     let ship = Ship { heading: 0.0, ..Ship::new(c, Side::Player) };
     let e = app.world_mut().spawn((Transform::default(), ship, hp, super::damage::Fires { list: vec![fire], tick: 0.0 }, ms)).id();
@@ -1512,6 +1517,7 @@ fn a_new_shell_first_moves_in_the_tick_after_it_was_created() {
         lifetime: 5.0,
         gravity: 0.0,
         bullet: bullet.clone(),
+        torpedo: is_torpedo_bullet(&bullet),
         side: Side::Player,
         shooter: Entity::PLACEHOLDER,
         target: None,
@@ -1760,4 +1766,12 @@ fn comet_lancer_burst(panic: bool) -> usize {
 fn a_lancer_burst_is_whole_when_clicked_and_in_panic_fire() {
     assert_eq!(comet_lancer_burst(false), 4, "clicked enemy");
     assert_eq!(comet_lancer_burst(true), 4, "panic fire");
+}
+
+#[test]
+fn state_enums_keep_the_frame_and_art_indices() {
+    assert_eq!([BankState::Ready, BankState::Recharging, BankState::Destroyed, BankState::OutOfRange].map(BankState::index), [0, 1, 2, 3]);
+    assert_eq!([LobKind::GravCharge, LobKind::NovaMortar, LobKind::StarMortar].map(LobKind::index), [0, 1, 2]);
+    assert_eq!(lob_kind(GunFamily::of("Bullet_GravCharge")), Some(LobKind::GravCharge));
+    assert_eq!(lob_kind(GunFamily::of("Bullet_StarMortar")), Some(LobKind::StarMortar));
 }

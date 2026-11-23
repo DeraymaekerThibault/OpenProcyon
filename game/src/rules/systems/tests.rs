@@ -1,4 +1,5 @@
 use super::*;
+use crate::EngineOrder;
 
 #[test]
 fn rule_keys_latch_until_a_tick_and_opening_skip_is_not_queued_twice() {
@@ -89,13 +90,13 @@ fn a_ship_handed_to_the_human_is_stopped_not_capped_by_a_group_throttle() {
     let mut app = rules_app(mission);
     let ship = |order| Ship { heading: 0.0, order, ..Ship::new(class, Side::Player) };
     let ms = |name: &str| MissionShip { name: name.into(), owner: owner.clone(), visible: true, ..default() };
-    app.world_mut().spawn((ship(0), Health::new(&lib.classes[class]), Transform::default(), Visibility::Inherited, PlayerShip, ms("RLS Comet")));
-    let boat = app.world_mut().spawn((ship(2), Health::new(&lib.classes[class]), Transform::from_xyz(50.0, 0.0, 0.0), Visibility::Inherited, ms("Longboat"))).id();
+    app.world_mut().spawn((ship(EngineOrder::Stop), Health::new(&lib.classes[class]), Transform::default(), Visibility::Inherited, PlayerShip, ms("RLS Comet")));
+    let boat = app.world_mut().spawn((ship(EngineOrder::Full), Health::new(&lib.classes[class]), Transform::from_xyz(50.0, 0.0, 0.0), Visibility::Inherited, ms("Longboat"))).id();
     app.insert_resource(lib);
     app.update();
     let (sh, m) = (app.world().get::<Ship>(boat).unwrap(), app.world().get::<MissionShip>(boat).unwrap());
     assert!(m.human, "Captain_Human applied");
-    assert_eq!((sh.cap, sh.order), (1.0, 0), "stopped, but free to sail on the human's orders");
+    assert_eq!((sh.cap, sh.order), (1.0, EngineOrder::Stop), "stopped, but free to sail on the human's orders");
 }
 
 #[test]
@@ -127,7 +128,7 @@ fn mission_two_attack_volume_changes_base_owner_and_gunfire_advances_the_story()
     let owner = &app.world().get::<MissionBase>(base).unwrap().owner;
     assert_eq!(owner, "SmugglerCampEnemy");
     assert!(app.world().resource::<Mission>().script.hostile(owner, &player_owner));
-    app.world_mut().resource_mut::<Messages<Fired>>().write(Fired { shooter: base, target: Some(player), bullet: "Bullet_CannonBall_Light".into() });
+    app.world_mut().resource_mut::<Messages<Fired>>().write(Fired { shooter: base, target: Some(player), bullet: "Bullet_CannonBall_Light".into(), torpedo: false, mine: false });
     app.update();
     let script = &app.world().resource::<Mission>().script;
     assert!(script.timers.contains_key("OnyxFirePause"), "the first tower shot unlocks the next dialogue");
@@ -144,7 +145,7 @@ fn mission_ships_halt_when_their_script_route_runs_out() {
         .init_resource::<crate::environment::Sensors>()
         .add_systems(PreUpdate, crate::environment::refresh_sensors)
         .add_systems(Update, mission_ai);
-    let ship = Ship { heading: 0.0, speed: 5.0, order: 2, ..Ship::new(0, Side::Player) };
+    let ship = Ship { heading: 0.0, speed: 5.0, order: EngineOrder::Full, ..Ship::new(0, Side::Player) };
     let n = lib.classes[0].sections.len();
     let health = || Health { sections: vec![1.0; n], core: 1.0, destroyed: false };
     app.insert_resource(lib);
@@ -193,15 +194,15 @@ fn mission_ships_halt_when_their_script_route_runs_out() {
     assert_eq!(app.world().get::<MissionShip>(persistent).unwrap().target, Some(foe));
     assert_eq!(app.world().get::<Ship>(persistent).unwrap().waypoints, route, "persistent attack order must not cancel the scripted swoop");
     let order = |e| app.world().get::<Ship>(e).unwrap().order;
-    assert_eq!(order(done), 0, "finished route stops");
+    assert_eq!(order(done), EngineOrder::Stop, "finished route stops");
     assert!(!app.world().get::<MissionShip>(done).unwrap().stop_at_end);
-    assert_eq!(order(en_route), 2, "still on its path");
+    assert_eq!(order(en_route), EngineOrder::Full, "still on its path");
     assert_eq!(app.world().get::<Ship>(en_route).unwrap().throttle, Some(1.0), "aligned with its point: full throttle");
     let held = app.world().get::<Ship>(turning).unwrap().throttle.unwrap();
     assert!(held > 0.0 && held < 1.0, "turned off its point: the speed fraction is held, not full ({held})");
-    assert_eq!(order(near), 0, "last point within 2 x radius counts as reached");
+    assert_eq!(order(near), EngineOrder::Stop, "last point within 2 x radius counts as reached");
     assert!(app.world().get::<Ship>(near).unwrap().waypoints.is_empty());
-    assert_eq!(order(looping), 2, "loops restart instead");
+    assert_eq!(order(looping), EngineOrder::Full, "loops restart instead");
     app.world_mut().get_mut::<MissionShip>(persistent).unwrap().stance = Stance::Aggressive;
     app.update();
     assert!(app.world().get::<Ship>(persistent).unwrap().waypoints.is_empty(), "aggressive stance switches to combat steering");

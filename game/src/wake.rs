@@ -1,4 +1,4 @@
-//! Ship wakes (docs/re/effects.md "Wakes"): a Trail primitive attached to the ship's wake placement, read from the original's code.
+//! Ship wakes (docs/re/effects.md "Wakes"): a Trail primitive attached to the ship's wake placement.
 //! Segments are laid in world space every 15 engine ticks and then drift on their own; the newest one follows the stern.
 use bevy::asset::RenderAssetUsages;
 use bevy::camera::visibility::NoFrustumCulling;

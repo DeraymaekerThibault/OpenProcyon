@@ -1,6 +1,7 @@
 //! Mission AI: alliances, targets, movement, border leashes and path following.
 
 use super::*;
+use crate::EngineOrder;
 
 /// Alliances -> sides, hold fire, target choice and movement for every unit but the player's; towing.
 pub(super) fn mission_ai(
@@ -45,17 +46,17 @@ pub(super) fn mission_ai(
         }
         if sc.tows().iter().any(|link| link.1 == e) {
             // PROVISIONAL: the original's towee after release is not traced; it resumes its course (mission 10's convoy leader).
-            if ms.towed_course.is_none() && ship.order == 2 && !ship.waypoints.is_empty() {
+            if ms.towed_course.is_none() && ship.order == EngineOrder::Full && !ship.waypoints.is_empty() {
                 ms.towed_course = Some(std::mem::take(&mut ship.waypoints));
             }
             ship.waypoints.clear();
-            ship.order = 0;
+            ship.order = EngineOrder::Stop;
             ship.goal = None;
             continue; // Movement/turning come from the shared tow constraint, not a rigid teleport.
         }
         if ms.towed_course.is_some() && !h.destroyed {
             ship.waypoints = ms.towed_course.take().unwrap_or_default();
-            ship.order = 2;
+            ship.order = EngineOrder::Full;
         }
         // Border zone: a ship outside its leash volume drops what it was doing and heads back (to its return point, else the
         // zone's centre). PROVISIONAL: the original's border AI is unknown; this re-enters and resumes on the next frame inside.
@@ -66,7 +67,7 @@ pub(super) fn mission_ai(
         {
             ship.waypoints = vec![back];
             ship.goal = None;
-            ship.order = 2;
+            ship.order = EngineOrder::Full;
             ship.throttle = None;
             ms.stop_at_end = true;
             continue;
@@ -80,9 +81,9 @@ pub(super) fn mission_ai(
             && let Some(p) = ms.looping.clone()
         {
             ship.waypoints = p;
-            ship.order = 2;
+            ship.order = EngineOrder::Full;
         }
-        let range = lib.classes[ship.class].engage * 1.3;
+        let range = lib.classes[ship.class].engage * 1.3; // PROVISIONAL: the 1.3 factor on engage range is a guess
         let partner = |x: Entity| sc.tows().iter().any(|t| (t.0 == e && t.1 == x) || (t.1 == e && t.0 == x));
         let near = |pool: &[Unit], pred: &dyn Fn(&Unit) -> bool, acquire: bool| {
             pool.iter()
@@ -119,9 +120,9 @@ pub(super) fn mission_ai(
         if let (Some((foe, fp)), false) = (chase, ms.stance == Stance::Dummy) {
             let (goal, order, throttle) = if ms.ram && ordered.is_some() {
                 let d = fp - tf.translation;
-                ((-d.x).atan2(-d.z), 3, crate::ship::attack::throttle(crate::ship::attack::Routine::Ram, e, tf.translation, ship.heading, fp))
+                ((-d.x).atan2(-d.z), EngineOrder::Emergency, crate::ship::attack::throttle(crate::ship::attack::Routine::Ram, e, tf.translation, ship.heading, fp))
             } else if let Some(away) = crate::ship::flee(&holes, tf.translation) {
-                (away, 3, None)
+                (away, EngineOrder::Emergency, None)
             } else {
                 // PROVISIONAL: the target's radius is left out of the gap (rocks and ships alike), and the course is steered as a heading.
                 let class = &lib.classes[ship.class];
@@ -134,9 +135,9 @@ pub(super) fn mission_ai(
                         };
                         let course = crate::ship::attack::course(routine, tf.translation, ship.heading, at, gap, range[0], time.elapsed_secs(), breakoffs.entry(e).or_default());
                         let d = course[0] - tf.translation;
-                        ((-d.x).atan2(-d.z), 3, crate::ship::attack::throttle(routine, e, tf.translation, ship.heading, course[0]))
+                        ((-d.x).atan2(-d.z), EngineOrder::Emergency, crate::ship::attack::throttle(routine, e, tf.translation, ship.heading, course[0]))
                     }
-                    None => (ship.heading, 0, None),
+                    None => (ship.heading, EngineOrder::Stop, None),
                 }
             };
             ms.stop_at_end = true;
@@ -165,7 +166,7 @@ pub(super) fn mission_ai(
             ship.throttle = None;
             ship.waypoints.clear();
             ms.stop_at_end = false;
-            ship.order = 0;
+            ship.order = EngineOrder::Stop;
             ship.goal = None;
         }
     }
@@ -193,8 +194,8 @@ pub(super) fn leash_player(mut mission: ResMut<Mission>, mut ships: Query<(&mut 
             }
             ship.waypoints = vec![p];
             ship.goal = None;
-            if ship.order == 0 {
-                ship.order = 1;
+            if ship.order == EngineOrder::Stop {
+                ship.order = EngineOrder::Slow;
             }
         }
         None if *out => {
@@ -223,7 +224,7 @@ pub(super) fn follow_path(
         let from = if closest { (0..full.len()).nearest_to(tf.translation, |a| full[*a]).unwrap_or(0) } else { 0 };
         sh.throttle = None;
         sh.waypoints = full[from..].to_vec();
-        sh.order = 2;
+        sh.order = EngineOrder::Full;
         sh.goal = None;
         ms.attack.clear();
         ms.stop_at_end = !looping;
