@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Opt-in: enabled through .claude/settings.local.example.json, not the shared settings.
 # WorktreeCreate: stdin has {"name": "<slug>"}; the last stdout line must be the worktree path. worktree.sh logs to stdout, so
 # everything it prints goes to stderr and only the path is printed here. The branch and the directory are named after the slug.
 set -euo pipefail

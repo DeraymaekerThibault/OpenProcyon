@@ -27,3 +27,9 @@ Rules of thumb
 - Run long Python (`compare_assets`, `battle_check`, `autoplay`, the importer) under `systemd-run --user --scope -q -p MemoryMax=4G -p MemorySwapMax=0 <cmd>`.
 - Game runs: scratch `XDG_DATA_HOME=$(mktemp -d)` so `bindings.json` cannot remap smoke keys.
 - New worktree: `tools/worktree.sh new <branch>`; remove: `tools/worktree.sh rm <path>`.
+
+Hooks
+- Shared (`.claude/settings.json`): the command allowlist, and a hook that formats the one file you just edited.
+- Opt-in (`.claude/settings.local.example.json`): run `tools/check.sh --quick` at the end of every turn that changed files, and create
+  or remove worktrees through `tools/worktree.sh`. To use them, copy the file to `.claude/settings.local.json` (git-ignored), or
+  merge its `hooks` into the one you have.

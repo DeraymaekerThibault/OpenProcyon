@@ -74,7 +74,7 @@ files to `content/`, or anything that publishes (pushing tags, releases).
   clippy or the Python tests for what changed), run `tools/check.sh` before every commit, `tools/check.sh --full` (adds the startup smoke
   and the battle check) once before you push or open a PR. One Rust test: `cargo test --manifest-path game/Cargo.toml --lib <module::path>`.
   Smokes for what you changed: `make smoke WHAT=changed` (`tools/smokes.sh --changed`). Never build `--release` except for a release;
-  never `cargo clean` without `--workspace`. Claude Code users: `.claude/skills/procyon-loop` maps these to commands, `.claude/settings.json` formats edited files.
+  never `cargo clean` without `--workspace`. Claude Code users: `.claude/skills/procyon-loop` maps these to commands, `.claude/settings.json` formats edited files; opt-in hooks are in `.claude/settings.local.example.json`.
   Each step prints one line with its log in `local/check/`; trust only the final `GATE OK` line. `GATE PARTIAL` means assets were missing and tests were skipped.
 - Where the engine stands against the original is tracked in one place: the project board "OpenProcyon fidelity: every rule of the
   original" (one row per rule of the original's battle simulation, with its stage: unknown, read, confirmed, specced, built, tested,
