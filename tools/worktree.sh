@@ -5,7 +5,7 @@
 #                                                 (reflink: near free on btrfs/XFS) without incremental/, so only this crate builds
 #        tools/worktree.sh rm <path>              deletes its game/target, then git worktree remove (refuses a dirty worktree)
 #        tools/worktree.sh gc [-n]                every worktree: incremental/ older than GC_DAYS (7), local/{smokes,check,battle_check}
-#                                                 files older than 14 days, `cargo clean --workspace` on a target over GC_CAP_GB (8);
+#                                                 files older than 14 days, `cargo clean --workspace` on a target over GC_CAP_GB (16; a warm worktree after --full is about 13);
 #                                                 removed worktrees: their leftover target, then git worktree prune. -n: only print.
 # WORKTREE_SEED=<target dir> copies another build than the main checkout's. Each worktree keeps its own target: do not share one
 # CARGO_TARGET_DIR between active worktrees (one lock per profile, binaries overwrite each other); the scripts here unset it.
@@ -43,7 +43,7 @@ rm_wt() {
 }
 
 gc() {
-    local dry= days=${GC_DAYS:-7} cap=${GC_CAP_GB:-8}
+    local dry= days=${GC_DAYS:-7} cap=${GC_CAP_GB:-16}
     [ "${1:-}" != -n ] || dry=1
     run() { echo "  $*"; [ -n "$dry" ] || "$@"; }
     local wt prunable
