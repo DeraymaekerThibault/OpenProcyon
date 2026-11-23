@@ -40,6 +40,62 @@ pub fn cinematic(mission: Option<&crate::campaign::Mission>) -> bool {
     crate::briefing::active(mission) || crate::rules::nis(mission)
 }
 
+/// What the world HUD marks this frame, decided once here so every view draws the same things (views only place and fade them).
+#[derive(Resource, Default, Debug, PartialEq)]
+pub struct WorldMarks {
+    /// The ship or animal the target reticle stands on: the aimed target while the player flies the selected ship, else the target
+    /// the selected ship was ordered at; none when it is hidden, unseen or the HUD is off.
+    pub reticle: Option<Entity>,
+    /// The ships whose name banner may show (alive, visible to the mission, seen by the player, HUD on). A view still fades it with
+    /// the camera distance and the toggle, and hides it when the ship is off screen.
+    pub banners: std::collections::HashSet<Entity>,
+}
+
+/// The target the reticle marks: `aimed` (the player's own target) when the selected ship is the one flown, else its ordered one
+/// (a fleet pilot's order first, then a mission ship's).
+pub fn reticle_target(direct: bool, aimed: Option<Entity>, pilot_target: Option<Entity>, mission_target: Option<Entity>) -> Option<Entity> {
+    if direct { aimed } else { pilot_target.or(mission_target) }
+}
+
+/// Whether a ship's name banner may show.
+pub fn banner_allowed(destroyed: bool, mission_visible: bool, seen: bool, hud_off: bool) -> bool {
+    !hud_off && !destroyed && mission_visible && seen
+}
+
+#[allow(clippy::too_many_arguments)]
+fn decide_world_marks(
+    mut marks: ResMut<WorldMarks>,
+    target: Res<combat::Target>,
+    fleets: Res<crate::ship::Fleets>,
+    pilots: Query<&crate::ship::FleetPilot>,
+    ships: Query<(Entity, &Health, Option<&crate::campaign::MissionShip>), With<Ship>>,
+    animals: Query<&crate::environment::SpaceAnimal>,
+    sensors: Res<crate::environment::Sensors>,
+    mission: Option<Res<crate::campaign::Mission>>,
+) {
+    let hud_off = cinematic(mission.as_deref()) || crate::rules::console::hud_hidden();
+    let mut next = WorldMarks::default();
+    for (e, h, ms) in &ships {
+        if banner_allowed(h.destroyed, ms.is_none_or(|m| m.visible), sensors.player_sees(e, mission.as_deref()), hud_off) {
+            next.banners.insert(e);
+        }
+    }
+    if !hud_off {
+        let ordered = fleets.selected.map(|e| (pilots.get(e).ok().and_then(|p| p.target), ships.get(e).ok().and_then(|s| s.2.and_then(|m| m.target))));
+        let (pilot, mission_target) = ordered.unwrap_or((None, None));
+        next.reticle = reticle_target(fleets.direct(), target.0, pilot, mission_target).filter(|&e| {
+            let shown = match ships.get(e) {
+                Ok((_, h, ms)) => !h.destroyed && ms.is_none_or(|m| m.visible),
+                Err(_) => animals.get(e).is_ok_and(|a| a.visible),
+            };
+            shown && sensors.player_sees(e, mission.as_deref())
+        });
+    }
+    if *marks != next {
+        *marks = next;
+    }
+}
+
 /// Root of the view's HUD tree: hidden during cinematics, and clicks only count while it shows.
 #[derive(Component)]
 pub struct HudRoot;
@@ -346,6 +402,7 @@ pub fn plugin(app: &mut App) {
         .init_resource::<Talk>()
         .init_resource::<HeadState>()
         .init_resource::<FleetHud>()
+        .init_resource::<WorldMarks>()
         .init_resource::<ChatLog>()
         .add_systems(Update, chat_feed.run_if(in_state(crate::menu::Screen::Battle)))
         .configure_sets(Update, HudSet.after(crate::sprites::choose_skin).run_if(in_state(crate::menu::Screen::Battle)))
@@ -358,7 +415,8 @@ pub fn plugin(app: &mut App) {
                 .run_if(crate::menu::overlay_closed),
         )
         .add_systems(PreUpdate, name_toggle)
-        .add_systems(Update, (fleet_model, update_visibility, update_contacts, update_docking_status, talking_head, pause_button, speed_button).chain().in_set(HudSet));
+        .add_systems(Update, (fleet_model, update_visibility, update_contacts, update_docking_status, talking_head, pause_button, speed_button).chain().in_set(HudSet))
+        .add_systems(Update, decide_world_marks.in_set(HudSet).run_if(resource_exists::<combat::Target>));
 }
 
 /// `N` toggles the ship-name banners.
@@ -701,6 +759,24 @@ pub mod tests {
     use super::*;
 
     #[test]
+    fn the_reticle_follows_the_aim_when_flying_else_the_order() {
+        let (aim, pilot, mission) = (Some(Entity::from_raw_u32(1).unwrap()), Some(Entity::from_raw_u32(2).unwrap()), Some(Entity::from_raw_u32(3).unwrap()));
+        assert_eq!(reticle_target(true, aim, pilot, mission), aim, "the flown ship marks the player's own target");
+        assert_eq!(reticle_target(true, None, pilot, mission), None, "no aimed target, no reticle, whatever the fleet orders");
+        assert_eq!(reticle_target(false, aim, pilot, mission), pilot, "a fleet pilot's order comes first");
+        assert_eq!(reticle_target(false, aim, None, mission), mission, "then the mission ship's");
+        assert_eq!(reticle_target(false, aim, None, None), None);
+    }
+
+    #[test]
+    fn a_banner_needs_a_living_visible_seen_ship_and_the_hud_on() {
+        assert!(banner_allowed(false, true, true, false));
+        for (destroyed, visible, seen, hud_off) in [(true, true, true, false), (false, false, true, false), (false, true, false, false), (false, true, true, true)] {
+            assert!(!banner_allowed(destroyed, visible, seen, hud_off), "{destroyed} {visible} {seen} {hud_off}");
+        }
+    }
+
+    #[test]
     fn chat_history_keeps_lines_in_order_with_their_colour() {
         let mut log = ChatLog::default();
         log.push("one", Some([1.0, 0.0, 0.0, 1.0]));
@@ -1003,5 +1079,118 @@ pub mod tests {
         }
         assert_eq!(seen, [true, false, true], "each click toggles the pause");
         assert_eq!(app.world().resource::<Time<Virtual>>().relative_speed(), 4.0, "pausing and resuming keep the speed setting");
+    }
+
+    /// A world with the real sensor snapshot and sight pass feeding `decide_world_marks` (no assets: one synthetic hull class).
+    /// Returns the app and the entities: player ship, fleet ship (pilot targets `enemy`), enemy, script-hidden, destroyed, out of sight, animal.
+    struct MarkWorld {
+        app: App,
+        player: Entity,
+        fleet: Entity,
+        enemy: Entity,
+        hidden: Entity,
+        destroyed: Entity,
+        far: Entity,
+        animal: Entity,
+    }
+
+    fn mark_world() -> MarkWorld {
+        let class = crate::fixed_tests::synthetic_class();
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(Library { classes: vec![class], guns: default(), bullets: default(), names: default(), clips: default() })
+            .init_resource::<crate::environment::Sensors>()
+            .init_resource::<combat::Target>()
+            .init_resource::<crate::ship::Fleets>()
+            .init_resource::<WorldMarks>()
+            .add_systems(
+                Update,
+                (
+                    crate::environment::refresh_sensors,
+                    |mut s: ResMut<crate::environment::Sensors>, m: Option<Res<crate::campaign::Mission>>| s.advance_sightings(m.as_deref(), 0.0, 0.0),
+                    decide_world_marks,
+                )
+                    .chain(),
+            );
+        let alive = || Health { sections: vec![], core: 100.0, destroyed: false };
+        let at = |x: f32| Transform::from_xyz(x, 0.0, 0.0);
+        let enemy_side = crate::Side::Enemy;
+        let mission_ship = |visible: bool| crate::campaign::MissionShip { owner: "Enemy".into(), visible, ..default() };
+        let world = app.world_mut();
+        let player = world.spawn((Ship::new(0, crate::Side::Player), alive(), at(0.0), PlayerShip, crate::ship::FleetMember("Player".into(), 0))).id();
+        let enemy = world.spawn((Ship::new(0, enemy_side), alive(), at(20.0), mission_ship(true))).id();
+        let fleet = world
+            .spawn((
+                Ship::new(0, crate::Side::Player),
+                alive(),
+                at(10.0),
+                crate::ship::FleetMember("Player".into(), 1),
+                crate::ship::FleetPilot { target: Some(enemy), ..default() },
+            ))
+            .id();
+        let hidden = world.spawn((Ship::new(0, enemy_side), alive(), at(25.0), mission_ship(false))).id();
+        let destroyed = world.spawn((Ship::new(0, enemy_side), Health { destroyed: true, ..alive() }, at(30.0), mission_ship(true))).id();
+        let far = world.spawn((Ship::new(0, enemy_side), alive(), at(5000.0), mission_ship(true))).id();
+        let animal = world.spawn((crate::environment::SpaceAnimal::new("Whales", 5.0, Vec3::ZERO, 1, true), at(35.0))).id();
+        let mut fleets = world.resource_mut::<crate::ship::Fleets>();
+        fleets.local = "Player".into();
+        fleets.groups.insert("Player".into(), crate::ship::Fleet { members: vec![player, fleet], formation: default(), cease_fire: false });
+        fleets.selected = Some(player);
+        MarkWorld { app, player, fleet, enemy, hidden, destroyed, far, animal }
+    }
+
+    fn marks(w: &mut MarkWorld, aimed: Option<Entity>) -> (Option<Entity>, Vec<Entity>) {
+        w.app.world_mut().resource_mut::<combat::Target>().0 = aimed;
+        w.app.update();
+        let m = w.app.world().resource::<WorldMarks>();
+        let mut banners: Vec<_> = m.banners.iter().copied().collect();
+        banners.sort();
+        (m.reticle, banners)
+    }
+
+    #[test]
+    fn banners_show_only_living_visible_seen_ships() {
+        let mut w = mark_world();
+        let (_, banners) = marks(&mut w, None);
+        let mut expect = vec![w.player, w.fleet, w.enemy];
+        expect.sort();
+        assert_eq!(banners, expect, "not the script-hidden, destroyed or out-of-sight ships, and no animal");
+        for e in [w.hidden, w.destroyed, w.far, w.animal] {
+            assert!(!banners.contains(&e));
+        }
+    }
+
+    #[test]
+    fn the_reticle_stands_on_the_aimed_target_only_when_it_is_shown_and_seen() {
+        let mut w = mark_world();
+        let (enemy, animal) = (w.enemy, w.animal);
+        assert_eq!(marks(&mut w, Some(enemy)).0, Some(enemy), "the flown ship marks its own target");
+        assert_eq!(marks(&mut w, Some(animal)).0, Some(animal), "a space animal can be marked");
+        assert_eq!(marks(&mut w, None).0, None);
+        let bad = [w.hidden, w.destroyed, w.far];
+        for hidden in bad {
+            assert_eq!(marks(&mut w, Some(hidden)).0, None, "no reticle on a hidden, destroyed or unseen target");
+        }
+    }
+
+    #[test]
+    fn a_selected_fleet_ship_shows_its_ordered_target_not_the_aimed_one() {
+        let mut w = mark_world();
+        let (enemy, animal, far, fleet) = (w.enemy, w.animal, w.far, w.fleet);
+        w.app.world_mut().resource_mut::<crate::ship::Fleets>().selected = Some(fleet);
+        assert_eq!(marks(&mut w, Some(animal)).0, Some(enemy), "the fleet pilot's order wins over the player's aim");
+        w.app.world_mut().get_mut::<crate::ship::FleetPilot>(fleet).unwrap().target = Some(far);
+        assert_eq!(marks(&mut w, Some(enemy)).0, None, "an ordered target out of sight is not marked either");
+    }
+
+    #[test]
+    fn a_cinematic_clears_every_mark() {
+        let mut w = mark_world();
+        let enemy = w.enemy;
+        assert!(marks(&mut w, Some(enemy)).0.is_some(), "marks show before the cutscene");
+        let mut script = crate::rules::Script::new(&serde_json::json!({"rules": []}), serde_json::json!({}));
+        script.nis = true;
+        w.app.insert_resource(crate::campaign::Mission { id: "t".into(), data: serde_json::json!({}), opening: None, script });
+        assert_eq!(marks(&mut w, Some(enemy)), (None, vec![]), "an in-game cutscene hides banners and the reticle");
     }
 }
