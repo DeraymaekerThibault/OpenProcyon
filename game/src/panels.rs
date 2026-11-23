@@ -1080,4 +1080,117 @@ pub mod tests {
         assert_eq!(seen, [true, false, true], "each click toggles the pause");
         assert_eq!(app.world().resource::<Time<Virtual>>().relative_speed(), 4.0, "pausing and resuming keep the speed setting");
     }
+
+    /// A world with the real sensor snapshot and sight pass feeding `decide_world_marks` (no assets: one synthetic hull class).
+    /// Returns the app and the entities: player ship, fleet ship (pilot targets `enemy`), enemy, script-hidden, destroyed, out of sight, animal.
+    struct MarkWorld {
+        app: App,
+        player: Entity,
+        fleet: Entity,
+        enemy: Entity,
+        hidden: Entity,
+        destroyed: Entity,
+        far: Entity,
+        animal: Entity,
+    }
+
+    fn mark_world() -> MarkWorld {
+        let class = crate::fixed_tests::synthetic_class();
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(Library { classes: vec![class], guns: default(), bullets: default(), names: default(), clips: default() })
+            .init_resource::<crate::environment::Sensors>()
+            .init_resource::<combat::Target>()
+            .init_resource::<crate::ship::Fleets>()
+            .init_resource::<WorldMarks>()
+            .add_systems(
+                Update,
+                (
+                    crate::environment::refresh_sensors,
+                    |mut s: ResMut<crate::environment::Sensors>, m: Option<Res<crate::campaign::Mission>>| s.advance_sightings(m.as_deref(), 0.0, 0.0),
+                    decide_world_marks,
+                )
+                    .chain(),
+            );
+        let alive = || Health { sections: vec![], core: 100.0, destroyed: false };
+        let at = |x: f32| Transform::from_xyz(x, 0.0, 0.0);
+        let enemy_side = crate::Side::Enemy;
+        let mission_ship = |visible: bool| crate::campaign::MissionShip { owner: "Enemy".into(), visible, ..default() };
+        let world = app.world_mut();
+        let player = world.spawn((Ship::new(0, crate::Side::Player), alive(), at(0.0), PlayerShip, crate::ship::FleetMember("Player".into(), 0))).id();
+        let enemy = world.spawn((Ship::new(0, enemy_side), alive(), at(20.0), mission_ship(true))).id();
+        let fleet = world
+            .spawn((
+                Ship::new(0, crate::Side::Player),
+                alive(),
+                at(10.0),
+                crate::ship::FleetMember("Player".into(), 1),
+                crate::ship::FleetPilot { target: Some(enemy), ..default() },
+            ))
+            .id();
+        let hidden = world.spawn((Ship::new(0, enemy_side), alive(), at(25.0), mission_ship(false))).id();
+        let destroyed = world.spawn((Ship::new(0, enemy_side), Health { destroyed: true, ..alive() }, at(30.0), mission_ship(true))).id();
+        let far = world.spawn((Ship::new(0, enemy_side), alive(), at(5000.0), mission_ship(true))).id();
+        let animal = world.spawn((crate::environment::SpaceAnimal::new("Whales", 5.0, Vec3::ZERO, 1, true), at(35.0))).id();
+        let mut fleets = world.resource_mut::<crate::ship::Fleets>();
+        fleets.local = "Player".into();
+        fleets.groups.insert("Player".into(), crate::ship::Fleet { members: vec![player, fleet], formation: default(), cease_fire: false });
+        fleets.selected = Some(player);
+        MarkWorld { app, player, fleet, enemy, hidden, destroyed, far, animal }
+    }
+
+    fn marks(w: &mut MarkWorld, aimed: Option<Entity>) -> (Option<Entity>, Vec<Entity>) {
+        w.app.world_mut().resource_mut::<combat::Target>().0 = aimed;
+        w.app.update();
+        let m = w.app.world().resource::<WorldMarks>();
+        let mut banners: Vec<_> = m.banners.iter().copied().collect();
+        banners.sort();
+        (m.reticle, banners)
+    }
+
+    #[test]
+    fn banners_show_only_living_visible_seen_ships() {
+        let mut w = mark_world();
+        let (_, banners) = marks(&mut w, None);
+        let mut expect = vec![w.player, w.fleet, w.enemy];
+        expect.sort();
+        assert_eq!(banners, expect, "not the script-hidden, destroyed or out-of-sight ships, and no animal");
+        for e in [w.hidden, w.destroyed, w.far, w.animal] {
+            assert!(!banners.contains(&e));
+        }
+    }
+
+    #[test]
+    fn the_reticle_stands_on_the_aimed_target_only_when_it_is_shown_and_seen() {
+        let mut w = mark_world();
+        let (enemy, animal) = (w.enemy, w.animal);
+        assert_eq!(marks(&mut w, Some(enemy)).0, Some(enemy), "the flown ship marks its own target");
+        assert_eq!(marks(&mut w, Some(animal)).0, Some(animal), "a space animal can be marked");
+        assert_eq!(marks(&mut w, None).0, None);
+        let bad = [w.hidden, w.destroyed, w.far];
+        for hidden in bad {
+            assert_eq!(marks(&mut w, Some(hidden)).0, None, "no reticle on a hidden, destroyed or unseen target");
+        }
+    }
+
+    #[test]
+    fn a_selected_fleet_ship_shows_its_ordered_target_not_the_aimed_one() {
+        let mut w = mark_world();
+        let (enemy, animal, far, fleet) = (w.enemy, w.animal, w.far, w.fleet);
+        w.app.world_mut().resource_mut::<crate::ship::Fleets>().selected = Some(fleet);
+        assert_eq!(marks(&mut w, Some(animal)).0, Some(enemy), "the fleet pilot's order wins over the player's aim");
+        w.app.world_mut().get_mut::<crate::ship::FleetPilot>(fleet).unwrap().target = Some(far);
+        assert_eq!(marks(&mut w, Some(enemy)).0, None, "an ordered target out of sight is not marked either");
+    }
+
+    #[test]
+    fn a_cinematic_clears_every_mark() {
+        let mut w = mark_world();
+        let enemy = w.enemy;
+        assert!(marks(&mut w, Some(enemy)).0.is_some(), "marks show before the cutscene");
+        let mut script = crate::rules::Script::new(&serde_json::json!({"rules": []}), serde_json::json!({}));
+        script.nis = true;
+        w.app.insert_resource(crate::campaign::Mission { id: "t".into(), data: serde_json::json!({}), opening: None, script });
+        assert_eq!(marks(&mut w, Some(enemy)), (None, vec![]), "an in-game cutscene hides banners and the reticle");
+    }
 }
