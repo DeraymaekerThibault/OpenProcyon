@@ -515,7 +515,7 @@ mod tests {
         assert_eq!(v.rect, None, "the whole image is inside those rows");
     }
     fn sans(advances: &[(char, f32)]) -> Font {
-        let bytes = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../content/fonts/Sans.otf")).unwrap();
+        let bytes = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../content/fonts/Sans.otf")).expect("content/fonts/Sans.otf is in the checkout");
         Font {
             face: Handle::default(),
             metrics: std::sync::Arc::new(ab_glyph::FontVec::try_from_vec(bytes).unwrap()),

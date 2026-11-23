@@ -41,7 +41,7 @@ TEXT_SUFFIXES = {
 }
 
 ADDRESS = re.compile(
-    r"\b0x0{0,2}(?!7fffff)[4-7][0-9a-fA-F]{5}(?![0-9a-fA-F])|\b(?:FUN|DAT|LAB|PTR)_[0-9a-fA-F]{6,8}\b|\bTP::\w+"
+    r"\b0[xX]0{0,2}(?!7fffff)[4-9][0-9a-fA-F]{5}(?![0-9a-fA-F_])|\b(?:FUN|DAT|LAB|PTR)_[0-9a-fA-F]{6,8}\b|\bTP::\w+"
 )
 DECOMPILER = re.compile(
     r"\b(?:param_\d+|[iuf]Var\d+|local_[0-9a-f]{2,}|undefined[248]?)\b"
@@ -63,8 +63,12 @@ RULE_FILES = {"AGENTS.md", "README.md"}
 
 def tracked():
     try:
+        # Tracked files and untracked ones that are not ignored, so a new file is checked before it is staged.
         out = subprocess.run(
-            ["git", "ls-files", "-z"], cwd=ROOT, capture_output=True, check=True
+            ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+            cwd=ROOT,
+            capture_output=True,
+            check=True,
         ).stdout
         return [ROOT / p for p in out.decode().split("\0") if p]
     except (OSError, subprocess.CalledProcessError):
@@ -134,6 +138,8 @@ class RepoHygiene(unittest.TestCase):
             "iVar3 = param_1;",
             "DAT_0074d8e0",
             "**0x0055ecf0**",
+            "0x00800000 table",
+            "0X5E4FD0",
             "`TP::ILineOfSightOccluder`",
         ):
             self.assertTrue(ADDRESS.search(hit) or DECOMPILER.search(hit), hit)

@@ -183,7 +183,7 @@ pub(super) fn reeled(distance: f32, dt: f32) -> f32 {
     (distance - REEL_PER_TICK * dt / crate::TICK_SECS).max(REEL_MIN)
 }
 
-/// A bitten grapple is a rope of the length the ships were apart when the hook bit (read from the original's code and checked in play).
+/// A bitten grapple is a rope of the length the ships were apart when the hook bit (per the original's behaviour and checked in play).
 /// Each tick, if the centres are further apart than that, both hulls are moved toward each other along the line by the excess, split
 /// by mass (the lighter one moves more), positions only. The line snaps when the centres were already `GRAPPLE_SLACK` further apart
 /// than at the hit before that pull, which takes a relative speed of about 60 units/s. While a boarding is registered on the pair the

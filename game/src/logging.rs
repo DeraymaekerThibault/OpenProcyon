@@ -51,11 +51,24 @@ impl std::io::Write for Rotating {
     }
 }
 
+/// The command line for a log or crash report: flags and plain values stay, anything that looks like a path (it can hold a
+/// user name) becomes `<path>`, also after `--flag=`.
+pub(crate) fn redacted_args() -> Vec<String> {
+    std::env::args().skip(1).map(|a| redact_arg(&a)).collect()
+}
+fn redact_arg(arg: &str) -> String {
+    let hide = |v: &str| if v.contains('/') || v.contains('\\') { "<path>".to_owned() } else { v.to_owned() };
+    match arg.split_once('=') {
+        Some((flag, v)) => format!("{flag}={}", hide(v)),
+        None => hide(arg),
+    }
+}
+
 fn file_layer(_: &mut App) -> Option<BoxedLayer> {
     let path = log_path()?;
     fs::create_dir_all(path.parent()?).ok()?;
     let mut file = Rotating::open(path).ok()?;
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    let args = redacted_args();
     use std::io::Write;
     let _ = writeln!(file, "OpenProcyon {} on {} {}\narguments: {}\n", env!("CARGO_PKG_VERSION"), std::env::consts::OS, std::env::consts::ARCH, args.join(" "));
     // Panics bypass tracing: log them too, then hand on to the previous hook (the crash screen's, if installed).
@@ -71,6 +84,12 @@ fn file_layer(_: &mut App) -> Option<BoxedLayer> {
 mod tests {
     use super::*;
     use std::io::Write;
+
+    #[test]
+    fn paths_in_arguments_are_hidden() {
+        let hidden: Vec<_> = ["--mission", "3", "/home/me/g", "--mod=C:\\Users\\me\\m", "--map=red_rover"].map(redact_arg).into();
+        assert_eq!(hidden, ["--mission", "3", "<path>", "--mod=<path>", "--map=red_rover"]);
+    }
 
     #[test]
     fn full_log_becomes_previous_and_newest_lines_are_kept() {

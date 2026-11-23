@@ -95,7 +95,7 @@ pub fn fallback_posts(ship: &crate::Ship, boarding: Option<&crate::boarding::Boa
 /// rudder factors always carry both (`skill_factor`); this is for gunnery, repairs, fire-fighting and boarding.
 pub fn leadership_bonus(e: Entity, posts: &CrewPosts) -> f32 {
     let lead = |role: usize| posts.0[role].first().and_then(|id| ability(id, "leadership")).unwrap_or(0.0);
-    // ponytail: fixed per-ship draws from the entity, not the original's random generator.
+    // PROVISIONAL: fixed per-ship draws from the entity, not the original's random generator.
     let h = e.to_bits().wrapping_mul(0x9E37_79B9_7F4A_7C15);
     let u = |shift: u32| ((h >> shift) & 0xFF_FFFF) as f32 / (1u32 << 24) as f32;
     (if lead(1) > u(40) { 0.1 } else { 0.0 }) + if lead(2) > u(16) { 0.05 } else { 0.0 }

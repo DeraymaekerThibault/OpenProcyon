@@ -612,7 +612,7 @@ pub fn spawn(commands: &mut Commands, assets: &AssetServer, fxl: &fx::FxLib, map
     }
 }
 
-/// A ship inside a nebula whose cloud drains is slowed by how deep it is. Read from the original's code: the multiplier on top speed and
+/// A ship inside a nebula whose cloud drains is slowed by how deep it is. Per the original's behaviour: the multiplier on top speed and
 /// thrust is the 3-D distance to the cloud's centre over its radius, clamped to 0..1 (0 at the centre, 1 at the rim), instant and with
 /// no recovery time; the deepest nebula counts. Not modelled: the hulls the original exempts.
 pub fn depth_factor(distance: f32, radius: f32) -> f32 {

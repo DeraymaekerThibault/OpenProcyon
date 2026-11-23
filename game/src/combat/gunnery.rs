@@ -1007,7 +1007,7 @@ fn aim_turret(
             engaged = Some((dir, to_target.length()));
         }
     }
-    // Read from the original's code: a direct-fire gun with no target never runs its tracking, so it stays where it was (also under hold
+    // Per the original's behaviour: a direct-fire gun with no target never runs its tracking, so it stays where it was (also under hold
     // fire); a lob gun keeps tracking its stored ground point and returns to rest here.
     if aim_at.is_none() && gun.lob.is_none() {
         want_yaw = state.yaw;

@@ -95,11 +95,23 @@ pub(crate) fn base_assets() -> PathBuf {
     if let Some(dir) = std::env::var_os("PROCYON_ASSETS") {
         return PathBuf::from(dir);
     }
-    let checkout = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../assets");
-    if checkout.join("ships").is_dir() {
-        return checkout;
+    let checkout = checkout_dir().map(|dir| dir.join("assets"));
+    if let Some(checkout) = checkout.as_ref().filter(|c| c.join("ships").is_dir()) {
+        return checkout.clone();
     }
-    user_assets().unwrap_or(checkout)
+    user_assets().or(checkout).unwrap_or_else(|| PathBuf::from("assets"))
+}
+
+/// The source checkout, found at run time (never baked into the binary, so a release build carries no build-machine path): the
+/// nearest folder holding `game/Cargo.toml` and `content/`, looking up from the working directory, then from the executable
+/// (`make run` and the check scripts start inside the checkout or build into it).
+pub(crate) fn checkout_dir() -> Option<PathBuf> {
+    let cwd = std::env::current_dir().ok();
+    let binary = std::env::current_exe().ok();
+    [cwd, binary]
+        .into_iter()
+        .flatten()
+        .find_map(|start| start.ancestors().find(|dir| dir.join("game/Cargo.toml").is_file() && dir.join("content").is_dir()).map(|dir| dir.to_path_buf()))
 }
 
 /// Where the importer puts converted assets by default (see `campaign::user_dir`).
@@ -114,12 +126,12 @@ fn player_assets(base: &std::path::Path) -> bool {
 /// executable (the release download), else `content/` in the checkout.
 fn content_dir() -> PathBuf {
     let exe_dir = std::env::current_exe().ok().and_then(|path| path.parent().map(|dir| dir.join("content")));
-    content_dir_from(exe_dir, PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../content"))
+    content_dir_from(exe_dir, checkout_dir().map_or_else(|| PathBuf::from("content"), |dir| dir.join("content")))
 }
 /// The `mods/` that ships with the game: next to the executable in a download, the checkout's under `make run`.
 pub fn bundled_mods_dir() -> Option<PathBuf> {
     let beside_binary = std::env::current_exe().ok().and_then(|path| path.parent().map(|dir| dir.join("mods")));
-    beside_binary.filter(|dir| dir.is_dir()).or_else(|| Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../mods")).filter(|d| d.is_dir()))
+    beside_binary.filter(|dir| dir.is_dir()).or_else(|| checkout_dir().map(|dir| dir.join("mods")).filter(|d| d.is_dir()))
 }
 fn content_dir_from(next_to_exe: Option<PathBuf>, checkout: PathBuf) -> PathBuf {
     next_to_exe.filter(|dir| dir.join("fonts").is_dir()).unwrap_or(checkout)

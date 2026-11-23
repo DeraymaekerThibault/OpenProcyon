@@ -369,7 +369,7 @@ fn swap_pool(mount: &str) -> &'static [&'static str] {
 
 /// The style roll's list (computer fleets): index drawn uniformly. Style 0 has six entries, 2, 1 and 5 one each; style 4 (cheap boats up to the
 /// limit) joins when the points per free slot are under 30 and there are more than 6 slots; style 3 (a few big hulls) joins at 600+ points
-/// with 4+ slots. The six-entry weight of style 0 is read from the original's list builder, not seen run (PROVISIONAL).
+/// with 4+ slots. The six-entry weight of style 0 comes from the original's data, not seen run (PROVISIONAL).
 pub(super) fn style_list(points: i64, slots: i64) -> Vec<u8> {
     let mut list = vec![0, 0, 0, 0, 0, 0, 2, 1];
     if slots > 0 && points / slots < 30 && slots > 6 {

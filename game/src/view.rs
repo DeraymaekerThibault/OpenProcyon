@@ -60,7 +60,7 @@ const RETAIL_STEPS_PER_SEC: f32 = 30.0;
 
 /// Retail input: the pitch is not a control. Steps change the wanted distance (`orbit.dist`): outward by their size, inward by twice it.
 fn retail_camera_input(mouse: &ButtonInput<MouseButton>, keys: &ButtonInput<KeyCode>, pointer: &Pointer, orbit: &mut Orbit, dt: f32, radius: f32) {
-    let mut step = -pointer.scroll.delta.y * 10.0; // ponytail: one scroll unit = one wheel notch (line units); pixel-unit touchpads zoom fast
+    let mut step = -pointer.scroll.delta.y * 10.0; // PROVISIONAL: one scroll unit = one wheel notch (line units); pixel-unit touchpads zoom fast
     if mouse.pressed(MouseButton::Right) {
         orbit.yaw -= pointer.motion.delta.x * 0.005;
         step += pointer.motion.delta.y;

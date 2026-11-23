@@ -17,11 +17,11 @@ pub struct EndMessage(pub Option<String>);
 #[derive(Resource, Default)]
 pub struct EndLine(pub Option<String>);
 
-/// Seconds the end line shows before the Game Summary opens (read from the original's code: 10 s after the end rule fires; the
+/// Seconds the end line shows before the Game Summary opens (per the original's behaviour: 10 s after the end rule fires; the
 /// rules run once a second, and a 1 frame/s recording saw about 13 s from the sinking).
 pub const END_LINE_SECS: f32 = 10.0;
 
-/// The battlefield's game-over line (read from the original's code): the firing rule's own message for the human's side, else
+/// The battlefield's game-over line (per the original's behaviour): the firing rule's own message for the human's side, else
 /// "Game Won!" when the human is among the winners and "Game Lost!" otherwise. (Border Dispute's no-human-ships rule names "Game
 /// Lost" for winners and losers alike, which is why that line showed under a VICTORY! summary.)
 pub(super) fn end_line_id(outcome: Outcome, message: Option<&str>) -> Option<String> {
