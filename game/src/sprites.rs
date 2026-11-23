@@ -392,7 +392,9 @@ fn load_fonts(mut commands: Commands, assets: Res<AssetServer>, mut faces_assets
         let (file, k) = vector_slot(&name);
         let size = name.trim_start_matches(|c: char| !c.is_ascii_digit()).parse::<f32>().unwrap_or(12.0) * k;
         if !faces.contains_key(file) {
-            let face = std::fs::read(assets_dir().join(format!("fonts/{file}.otf"))).map_err(|e| e.to_string()).and_then(|bytes| ab_glyph::FontVec::try_from_vec(bytes).map_err(|e| e.to_string()));
+            let face = std::fs::read(assets_dir().join(format!("fonts/{file}.otf")))
+                .map_err(|e| e.to_string())
+                .and_then(|bytes| ab_glyph::FontVec::try_from_vec(bytes).map_err(|e| e.to_string()));
             match face {
                 Ok(metrics) => {
                     faces.insert(file, (assets.load(format!("fonts/{file}.otf")), std::sync::Arc::new(metrics)));

@@ -1146,7 +1146,11 @@ mod tests {
         let mods = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../mods");
         let mut roots = vec![assets_dir().to_path_buf()];
         roots.extend(std::fs::read_dir(mods).into_iter().flatten().flatten().map(|m| m.path()));
-        let mut files: Vec<_> = roots.iter().flat_map(|r| std::fs::read_dir(r.join("hud/bar")).into_iter().flatten().flatten().map(|e| e.path())).filter(|p| p.extension().is_some_and(|e| e == "json")).collect();
+        let mut files: Vec<_> = roots
+            .iter()
+            .flat_map(|r| std::fs::read_dir(r.join("hud/bar")).into_iter().flatten().flatten().map(|e| e.path()))
+            .filter(|p| p.extension().is_some_and(|e| e == "json"))
+            .collect();
         files.sort();
         files.dedup();
         files
@@ -1173,7 +1177,12 @@ mod tests {
         std::fs::write(dir.join("good.json"), good).unwrap();
         let ok: BarLayout = crate::data::load(&dir.join("good.json")).unwrap();
         assert_eq!((ok.size, ok.parts.len(), ok.parts[0].size), (Vec2::new(800.0, 120.0), 1, Vec2::new(2.0, 3.0)));
-        for (name, text) in [("syntax", "{"), ("no_parts", r#"{"width": 1, "height": 1}"#), ("no_sprite", r#"{"width": 1, "height": 1, "parts": [{"x": 0, "width": 1, "height": 1}]}"#), ("text", r#"{"width": "1", "height": 1, "parts": []}"#)] {
+        for (name, text) in [
+            ("syntax", "{"),
+            ("no_parts", r#"{"width": 1, "height": 1}"#),
+            ("no_sprite", r#"{"width": 1, "height": 1, "parts": [{"x": 0, "width": 1, "height": 1}]}"#),
+            ("text", r#"{"width": "1", "height": 1, "parts": []}"#),
+        ] {
             let path = dir.join(format!("{name}.json"));
             std::fs::write(&path, text).unwrap();
             let e = crate::data::load::<BarLayout>(&path).unwrap_err().to_string();

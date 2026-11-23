@@ -325,7 +325,8 @@ pub(super) fn parse_prim(p: &Value, tex_names: &mut Vec<String>) -> Prim {
 /// The imported index, then any other `<name>.json` in the folder (an effect a mod adds is not in the imported index).
 fn effect_names(dir: &std::path::Path, base: Option<&std::path::Path>) -> Vec<String> {
     let index = dir.join("index.json");
-    let mut names: Vec<String> = crate::data::load_or_base(&index, base.map(|b| b.join("index.json")).as_deref(), "no effect index; the effect files are still read").unwrap_or_default();
+    let mut names: Vec<String> =
+        crate::data::load_or_base(&index, base.map(|b| b.join("index.json")).as_deref(), "no effect index; the effect files are still read").unwrap_or_default();
     let mut extra: Vec<String> = std::fs::read_dir(dir)
         .into_iter()
         .flatten()
