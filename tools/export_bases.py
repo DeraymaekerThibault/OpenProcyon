@@ -29,9 +29,14 @@ def export_bases(root, assets):
     for wot in wots:
         name = wot.stem
         try:
-            armed = any(associations(load(root, name), "GunPlacement"))
+            nodes = load(root, name)
+            armed = any(associations(nodes, "GunPlacement"))
             # A gunless base with a vitalToMission section is still a rules target: mission 6's stockade gate must be shot down.
-            if not armed and not name.startswith("Base_"):
+            # A gunless one without damage sections is drawn scenery only (Base_Cresentia, a render entity): maps draw it from
+            # its scene GLB and it needs no class.
+            if not armed and not (
+                name.startswith("Base_") and any(associations(nodes, "DamageSection"))
+            ):
                 continue
             j = export(root, name, assets)
         except (KeyError, ValueError, FileNotFoundError, StopIteration) as e:
