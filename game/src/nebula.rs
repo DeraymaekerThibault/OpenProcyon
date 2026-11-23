@@ -655,7 +655,7 @@ fn update(
     assets: Res<AssetServer>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut mats: ResMut<Assets<fx::EffectMaterial>>,
-    cam: Single<&GlobalTransform, With<Camera3d>>,
+    cam: Single<&GlobalTransform, (With<Camera3d>, With<crate::MainCamera>)>,
     mut clouds: Query<(Entity, &mut Cloud, &GlobalTransform, Option<&mut AudioSink>)>,
 ) {
     let cam = cam.translation();

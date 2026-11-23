@@ -66,7 +66,7 @@ pub(super) fn render_fx(
     mut meshes: ResMut<Assets<Mesh>>,
     mut mats: ResMut<Assets<StandardMaterial>>,
     mut additive: ResMut<Assets<EffectMaterial>>,
-    cam: Single<&GlobalTransform, With<Camera3d>>,
+    cam: Single<&GlobalTransform, (With<Camera3d>, With<crate::MainCamera>)>,
     fx: Query<(&Fx, &GlobalTransform), (Without<super::HiddenFx>, Without<crate::environment::Unseen>)>,
     mut vis: Query<&mut Visibility>,
     // the quads of each pooled mesh, kept between frames
@@ -243,7 +243,7 @@ mod tests {
             .add_systems(Update, (update_fx, render_fx).chain());
         let n = app.world().resource::<FxLib>().tex_names.len();
         app.insert_resource(FxTextures(vec![Handle::default(); n]));
-        app.world_mut().spawn((Camera3d::default(), GlobalTransform::default()));
+        app.world_mut().spawn((crate::MainCamera, Camera3d::default(), GlobalTransform::default()));
         app.world_mut()
             .resource_scope(|world, lib: Mut<FxLib>| spawn(&mut world.commands(), &lib, "Docking_Point", None, Transform::default(), Transform::default(), false).unwrap());
         app.world_mut().flush();

@@ -340,7 +340,7 @@ fn banner_height(class: &crate::combat::Class) -> f32 {
 fn place_labels(
     mut commands: Commands,
     window: Single<&Window, With<bevy::window::PrimaryWindow>>,
-    cam: Single<(&Camera, &GlobalTransform), With<Camera3d>>,
+    cam: Single<(&Camera, &GlobalTransform), (With<Camera3d>, With<crate::MainCamera>)>,
     target: Res<Target>,
     selection: (Res<crate::ship::Fleets>, Query<&crate::ship::FleetPilot>),
     ships: Query<(&GlobalTransform, &Health, &Ship, Option<&crate::campaign::MissionShip>, Option<&crate::scenario::PlayerColor>)>,

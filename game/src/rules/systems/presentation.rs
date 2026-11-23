@@ -205,7 +205,7 @@ pub(super) fn nis_camera(
     time: Res<Time>,
     orbit: Res<Orbit>,
     units: Query<(&Transform, Option<&Ship>), Without<Camera3d>>,
-    mut cam: Single<&mut Transform, With<Camera3d>>,
+    mut cam: Single<&mut Transform, (With<Camera3d>, With<crate::MainCamera>)>,
     mut travelled: Local<f32>,
 ) {
     let sc = &mission.script;

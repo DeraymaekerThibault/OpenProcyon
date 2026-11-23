@@ -154,7 +154,7 @@ fn build_shapes(
     }
 }
 
-fn place_labels(camera: Single<(&Camera, &GlobalTransform), With<Camera3d>>, mut labels: Query<(&DebugLabel, &mut Node, &mut Visibility)>) {
+fn place_labels(camera: Single<(&Camera, &GlobalTransform), (With<Camera3d>, With<crate::MainCamera>)>, mut labels: Query<(&DebugLabel, &mut Node, &mut Visibility)>) {
     let (camera, ctf) = *camera;
     for (label, mut node, mut vis) in &mut labels {
         match camera.world_to_viewport(ctf, label.0) {

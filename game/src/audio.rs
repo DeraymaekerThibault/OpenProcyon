@@ -56,7 +56,7 @@ struct TravelLoop;
 fn travel(
     mut commands: Commands,
     assets: Res<AssetServer>,
-    cam: Single<&GlobalTransform, With<Camera3d>>,
+    cam: Single<&GlobalTransform, (With<Camera3d>, With<crate::MainCamera>)>,
     shells: Query<(Entity, &GlobalTransform, &Travel, Option<&Children>)>,
     mut loops: Query<(Entity, &mut AudioSink), With<TravelLoop>>,
 ) {
@@ -95,7 +95,7 @@ fn ambience(
     mut commands: Commands,
     assets: Res<AssetServer>,
     mission: Option<Res<crate::campaign::Mission>>,
-    cam: Single<&GlobalTransform, With<Camera3d>>,
+    cam: Single<&GlobalTransform, (With<Camera3d>, With<crate::MainCamera>)>,
     holes: Query<(Entity, &GlobalTransform), With<crate::blackhole::BlackHole>>,
     meteors: Query<(Entity, &GlobalTransform), With<crate::nebula::MeteorEmitter>>,
     islands: Query<(Entity, &GlobalTransform, &IslandLoop)>,
@@ -218,7 +218,13 @@ pub fn music(commands: &mut Commands, assets: &AssetServer, name: &str) -> Entit
         .id()
 }
 
-fn play(mut commands: Commands, assets: Res<AssetServer>, mut msgs: MessageReader<Sfx>, cam: Single<&GlobalTransform, With<Camera3d>>, screen: Res<State<Screen>>) {
+fn play(
+    mut commands: Commands,
+    assets: Res<AssetServer>,
+    mut msgs: MessageReader<Sfx>,
+    cam: Single<&GlobalTransform, (With<Camera3d>, With<crate::MainCamera>)>,
+    screen: Res<State<Screen>>,
+) {
     for s in msgs.read() {
         // Front-end screens only play UI sounds (a menu backdrop battle stays silent).
         if s.at.is_some() && *screen.get() != Screen::Battle {
@@ -237,7 +243,7 @@ fn engines(
     mut commands: Commands,
     assets: Res<AssetServer>,
     lib: Res<Library>,
-    cam: Single<&GlobalTransform, With<Camera3d>>,
+    cam: Single<&GlobalTransform, (With<Camera3d>, With<crate::MainCamera>)>,
     ships: Query<(Entity, &GlobalTransform, &Ship, &Health)>,
     mut loops: Query<(Entity, &EngineLoop, Option<&mut AudioSink>)>,
 ) {
@@ -355,6 +361,8 @@ mod tests {
             .insert_resource(Library::load(crate::assets_dir()))
             .insert_resource(crate::panels::Toggles { weapons: false, names: false })
             .add_plugins(plugin);
+        app.world_mut().spawn((crate::MainCamera, Camera3d::default(), GlobalTransform::default()));
+        // A second 3D camera, like the Fleet screen's ship preview (#546): the sounds must still play.
         app.world_mut().spawn((Camera3d::default(), GlobalTransform::default()));
         let hero = app.world_mut().spawn((PlayerShip, Ship { heading: 0.0, order: 1, ..Ship::new(0, crate::Side::Player) })).id();
         app.update();
