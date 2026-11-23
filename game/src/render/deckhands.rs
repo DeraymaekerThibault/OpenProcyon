@@ -62,13 +62,30 @@ const LIE: f32 = 12.0;
 /// Seconds after a gun last reloaded that the crew still runs (beat to quarters).
 const ALARM: f32 = 10.0;
 
+/// Headcount calibration: deck area (units^2) that counts as one unit before the power law. Calibrated on retail hulls (see `headcount`), not read from the game's data.
+const HEADCOUNT_DECK_UNIT: f32 = 16.5;
+/// Headcount calibration: the power law's exponent. Calibrated on retail hulls (see `headcount`), not read from the game's data.
+const HEADCOUNT_EXPONENT: f32 = 1.52;
+/// A gun place belongs to the nearest gun mount only within this distance (units). Engine choice, not the original's.
+const GUN_MOUNT_REACH: f32 = 4.0;
+/// A figure waits a random time up to this many seconds before its first walk. Engine choice, not the original's.
+const MAX_IDLE_WAIT: f32 = 6.0;
+/// Distance (units) over which a crew figure fades out past its draw range. Engine choice, not the original's.
+const FADE_OUT_RANGE: f32 = 30.0;
+/// PROVISIONAL: share of the crew that stays standing until the hull is gone; a guess at how the original thins a crew with hull damage.
+const STANDING_MIN: f32 = 0.3;
+/// PROVISIONAL: shortest pause (seconds) between two figures falling as the hull weakens; a guess.
+const KILL_WAIT_MIN: f32 = 0.4;
+/// PROVISIONAL: random extra pause (seconds) on top of `KILL_WAIT_MIN`; a guess.
+const KILL_WAIT_SPAN: f32 = 0.8;
+
 /// Figures on a ship whose model gives no `Crew_Count_<n>`, from its deck: the collision box's length times beam, in units^2. Crews
 /// grow faster than decks (`area^1.52`), calibrated on retail hulls: a fishing boat (15-26) carries 1-2, a sloop or packet (24-48) 2-5,
 /// a cutter (61) 7, a frigate (115) 19, a Man-o'-War (186) 40; a first rate reaches `per_ship` (60), which caps every ship. Gun places,
 /// posts and work places are always manned, and a ship with shrouds keeps one wanderer per shroud to go aloft; the count only sizes the
 /// wanderers.
 fn headcount(deck: f32) -> usize {
-    (deck.max(0.0) / 16.5).powf(1.52).round().max(1.0) as usize
+    (deck.max(0.0) / HEADCOUNT_DECK_UNIT).powf(HEADCOUNT_EXPONENT).round().max(1.0) as usize
 }
 
 /// One outfit: the colours of a figure's parts (linear rgb), worn by a race's crews; `officer` outfits go to the posts.
@@ -501,7 +518,7 @@ fn staff(
         let mut roles = vec![];
         for (place, t) in places.guns.iter().enumerate() {
             let near = (0..mounts.len()).min_by(|&a, &b| mounts[a].distance(t.translation).total_cmp(&mounts[b].distance(t.translation)));
-            if let Some(m) = near.filter(|&m| mounts[m].distance(t.translation) < 4.0) {
+            if let Some(m) = near.filter(|&m| mounts[m].distance(t.translation) < GUN_MOUNT_REACH) {
                 let slot = roles.iter().filter(|r| matches!(r, Role::Gun { mount, .. } if *mount == m)).count();
                 roles.push(Role::Gun { place, mount: m, slot });
             }
@@ -545,7 +562,7 @@ fn staff(
                 path: VecDeque::new(),
                 running: false,
                 climbing: false,
-                wait: rand(&mut rng) * 6.0,
+                wait: rand(&mut rng) * MAX_IDLE_WAIT,
                 clip: IDLE,
                 outfit,
                 phase: (rand(&mut rng) * 255.0) as u32,
@@ -564,7 +581,7 @@ fn staff(
                         kit.aabb,
                         NoAutoAabb,
                         NotShadowCaster,
-                        VisibilityRange { start_margin: 0.0..0.0, end_margin: kit.range..kit.range + 30.0, use_aabb: false },
+                        VisibilityRange { start_margin: 0.0..0.0, end_margin: kit.range..kit.range + FADE_OUT_RANGE, use_aabb: false },
                         ChildOf(nodes.frame),
                     ))
                     .id(),
@@ -615,7 +632,7 @@ fn drive(
         let alive: Vec<Entity> = crew.hands.iter().copied().filter(|&h| hands.get(h).is_ok_and(|(h, _, _)| h.fallen.is_none())).collect();
         let (core, destroyed) = health.map_or((crew.max_core, false), |h| (h.core, h.destroyed));
         let share = (core / crew.max_core).clamp(0.0, 1.0);
-        let target = if destroyed { 0 } else { (crew.total as f32 * (0.3 + 0.7 * share)).ceil() as usize };
+        let target = if destroyed { 0 } else { (crew.total as f32 * (STANDING_MIN + (1.0 - STANDING_MIN) * share)).ceil() as usize };
         crew.kill_wait -= dt;
         if alive.len() > target && (crew.kill_wait <= 0.0 || destroyed) {
             let n = if destroyed { alive.len() } else { 1 };
@@ -631,7 +648,7 @@ fn drive(
                     h.clip = FALL;
                 }
             }
-            crew.kill_wait = 0.4 + rand(&mut crew.rng) * 0.8;
+            crew.kill_wait = KILL_WAIT_MIN + rand(&mut crew.rng) * KILL_WAIT_SPAN;
         }
 
         // sails fold or open: riggers go aloft, one per shroud, taken from the idle wanderers
