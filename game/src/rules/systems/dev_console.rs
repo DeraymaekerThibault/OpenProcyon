@@ -154,7 +154,7 @@ fn run(
                 .map(|s| ShipInfo {
                     e: Some(s.entity),
                     stance: format!("{:?}", s.mission.stance),
-                    order: s.ship.order,
+                    order: s.ship.order.index(),
                     waypoints: s.ship.waypoints.len(),
                     attack: s.mission.attack.clone(),
                     human: s.mission.human || s.primary,

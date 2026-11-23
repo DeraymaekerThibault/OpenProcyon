@@ -72,7 +72,7 @@ pub struct SpeedLabel;
 #[derive(Component)]
 pub struct EngineDial;
 #[derive(Component)]
-pub struct EngineOrder(pub usize);
+pub struct EngineTab(pub crate::EngineOrder);
 /// Weapon panel container: shown or hidden by the weapon-bar toggle (button or key).
 #[derive(Component)]
 pub struct WeaponPanel;
@@ -586,7 +586,7 @@ pub fn hud_input(
         let (ship, equipped) = *ship;
         let class = &lib.classes[ship.class];
         for (GunButton(bank), _) in guns.iter().filter(|(_, i)| **i != Interaction::None) {
-            let indirect = class.mounts.iter().enumerate().any(|(i, m)| m.bank == *bank && combat::is_indirect(equipped.map_or(m.gun.as_str(), |g| g.gun(i))));
+            let indirect = class.mounts.iter().enumerate().any(|(i, m)| m.bank == *bank && combat::is_indirect(&lib, equipped.map_or(m.gun.as_str(), |g| g.gun(i))));
             target.2.armed = if indirect && target.2.armed != Some(*bank) { Some(*bank) } else { None };
             target.2.shot = None;
         }
@@ -597,20 +597,21 @@ pub fn hud_input(
 }
 
 /// PROVISIONAL: retail dial segment geometry uses the existing Navy 86x101 coordinates.
-pub fn speed_order_at(p: Vec2) -> usize {
-    [Vec2::new(54.0, 71.0), Vec2::new(44.0, 57.0), Vec2::new(31.0, 44.0), Vec2::new(14.0, 34.0)]
+pub fn speed_order_at(p: Vec2) -> crate::EngineOrder {
+    let i = [Vec2::new(54.0, 71.0), Vec2::new(44.0, 57.0), Vec2::new(31.0, 44.0), Vec2::new(14.0, 34.0)]
         .iter()
         .enumerate()
         .min_by(|a, b| p.distance_squared(*a.1).total_cmp(&b.1.distance_squared(p)))
         .unwrap()
-        .0
+        .0;
+    crate::EngineOrder::from_index(i).unwrap_or_default()
 }
 
 pub fn engine_input(
     mouse: Res<ButtonInput<MouseButton>>,
     mut ship: Single<&mut Ship, With<PlayerShip>>,
     dial: Query<(&Interaction, &bevy::ui::RelativeCursorPosition), With<EngineDial>>,
-    tabs: Query<(&EngineOrder, &Interaction)>,
+    tabs: Query<(&EngineTab, &Interaction)>,
     visible: Query<&Visibility, With<HudRoot>>,
     fleets: Option<Res<crate::ship::Fleets>>,
     options: Option<Res<crate::options_menu::OptionsMenu>>,
@@ -903,11 +904,11 @@ pub mod tests {
         let mut f = crate::ship::Fleets { local: "Player".into(), selected: Some(secondary), ..default() };
         f.groups.insert("Player".into(), crate::ship::Fleet { members: vec![primary, secondary], ..default() });
         w.insert_resource(f);
-        w.spawn((Solid, EngineOrder(2), Interaction::Pressed));
+        w.spawn((Solid, EngineTab(crate::EngineOrder::Full), Interaction::Pressed));
         w.resource_mut::<ButtonInput<MouseButton>>().press(MouseButton::Left);
         w.get_mut::<Ship>(primary).unwrap().throttle = Some(0.4);
         app.update();
-        assert_eq!(app.world().get::<Ship>(primary).unwrap().order, 0);
+        assert_eq!(app.world().get::<Ship>(primary).unwrap().order, crate::EngineOrder::Stop);
         assert_eq!(app.world().get::<Ship>(primary).unwrap().throttle, Some(0.4));
         app.world_mut().resource_mut::<crate::ship::Fleets>().selected = Some(primary);
         *app.world_mut().get_mut::<Visibility>(root).unwrap() = Visibility::Hidden;
@@ -915,7 +916,7 @@ pub mod tests {
         assert_eq!(app.world().get::<Ship>(primary).unwrap().throttle, Some(0.4));
         *app.world_mut().get_mut::<Visibility>(root).unwrap() = Visibility::Inherited;
         app.update();
-        assert_eq!(app.world().get::<Ship>(primary).unwrap().order, 2);
+        assert_eq!(app.world().get::<Ship>(primary).unwrap().order, crate::EngineOrder::Full);
         assert_eq!(app.world().get::<Ship>(primary).unwrap().throttle, None);
     }
 

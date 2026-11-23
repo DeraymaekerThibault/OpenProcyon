@@ -10,6 +10,8 @@ pub struct Shell {
     /// Downward acceleration (units/s^2): the firing gun's `GunDef::shell_gravity`, 0 for straight-flying shells.
     pub(super) gravity: f32,
     pub(super) bullet: String,
+    /// The bullet is a torpedo (`BulletDef::torpedo`).
+    pub(super) torpedo: bool,
     pub side: Side,
     pub(super) shooter: Entity,
     pub(super) target: Option<Entity>,
@@ -392,7 +394,7 @@ pub(super) fn shells(
     let dt = time.delta_secs();
     // Torpedoes and mines in flight, for point-defence intercepts; each is shot down at most once.
     let threats: Vec<(Entity, Vec3, Side)> =
-        q.iter().filter(|(_, s, _)| s.bullet.starts_with(TORPEDO_BULLET) || matches!(s.payload, Payload::Mine { .. })).map(|(e, s, t)| (e, t.translation, s.side)).collect();
+        q.iter().filter(|(_, s, _)| s.torpedo || matches!(s.payload, Payload::Mine { .. })).map(|(e, s, t)| (e, t.translation, s.side)).collect();
     let mut threat_hp: std::collections::HashMap<Entity, f32> = q.iter().filter(|(e, ..)| threats.iter().any(|t| t.0 == *e)).map(|(e, s, _)| (e, s.hp)).collect();
     let mut downed: Vec<Entity> = vec![];
     for (e, mut s, mut tf) in &mut q {
@@ -728,7 +730,7 @@ pub(super) fn hit_ship(
             }
         });
     }
-    if s.bullet == TORPEDO_BULLET {
+    if s.torpedo {
         info!("Torpedo hit {} ({}){}", class.name, sec.label, if invuln >= 1.0 { " [training: invulnerable]" } else { "" });
     }
     // Decoded: no check for an existing fire on the section, so one section can burn several fires.
@@ -757,7 +759,7 @@ pub(super) fn hit_ship(
             });
         }
         info!("fire on {} of {}", sec.label, class.name);
-        fires.list.push(Fire { sec: k, intensity: fire_str, state: 0, fx });
+        fires.list.push(Fire { sec: k, intensity: fire_str, state: FireState::Burning, fx });
     }
     sfx.write_batch(bd.impact_sound(key, at, rng));
     if outcome.lost {

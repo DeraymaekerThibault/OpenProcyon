@@ -30,6 +30,7 @@ pub(super) fn arm(mut commands: Commands, assets: Res<AssetServer>, lib: Res<Lib
                 lifetime: b.lifetime,
                 gravity: 0.0,
                 bullet: mine.bullet.clone(),
+                torpedo: b.torpedo,
                 side: mine.side.unwrap_or(crate::scenario::HOSTILE_TO_ALL),
                 shooter: e,
                 target: None,

@@ -25,7 +25,7 @@ pub fn plugin(app: &mut App) {
 }
 
 #[derive(Component)]
-struct LobMarker(usize, bool);
+struct LobMarker(crate::combat::LobKind, bool);
 
 /// The armed lob bank's ground marker: a flat retail mesh (one per weapon, plus a "no firing solution" twin) lying on the sea at
 /// the point under the mouse. PROVISIONAL: drawn at the mesh's own size (about 7 radius, the data says `LobIcon WorldSpace Radius` 10)
@@ -44,7 +44,7 @@ fn lob_marker(mut commands: Commands, assets: Res<AssetServer>, aim: Res<crate::
         }
         commands.entity(e).despawn();
     }
-    let weapon = ["GRAVCHARGE", "NOVAMORTAR", "STARMORTAR"][a.kind];
+    let weapon = ["GRAVCHARGE", "NOVAMORTAR", "STARMORTAR"][a.kind.index()];
     let twin = if a.solution { "" } else { "_HAS_NO_FIRING_SOLUTION" };
     commands.spawn((
         LobMarker(a.kind, a.solution),

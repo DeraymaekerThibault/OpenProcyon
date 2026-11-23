@@ -108,6 +108,9 @@ pub struct Fired {
     pub target: Option<Entity>,
     /// The burst's bullet type (crew callouts: torpedoes away, mortar fired).
     pub bullet: String,
+    /// `bullet` is a torpedo / a mine, read once at load (`GunDef::bullet_torpedo`, `bullet_family`).
+    pub torpedo: bool,
+    pub mine: bool,
 }
 /// Exhaust effect on a ship. The ship's speed fraction is sent to it once a second as both the emitter rate and the
 /// velocity-length multiplier; it goes out with the section it hangs on.

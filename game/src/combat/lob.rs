@@ -42,6 +42,7 @@ pub fn shoot(mut commands: Commands, lib: Res<Library>, fxl: Res<FxLib>, mut msg
                     lifetime: b.lifetime.min(30.0),
                     gravity: m.gravity,
                     bullet: m.bullet.clone(),
+                    torpedo: b.torpedo,
                     side: m.side,
                     shooter: m.shooter,
                     target: m.target,

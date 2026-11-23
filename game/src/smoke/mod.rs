@@ -6,6 +6,7 @@ mod shells;
 mod trace;
 pub use fleet::fleet_smoke;
 
+use crate::EngineOrder;
 use crate::{Config, campaign::Mission, rules::RuleShip};
 use bevy::prelude::*;
 
@@ -194,7 +195,7 @@ pub(crate) fn dock(cfg: &Config, mission: &mut Mission, skipped: &mut bool, ship
             continue;
         }
         s.ship.waypoints.clear();
-        s.ship.order = 0;
+        s.ship.order = EngineOrder::Stop;
         s.ship.speed = 0.0;
     }
 }

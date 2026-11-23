@@ -16,14 +16,83 @@ use spawn::{ambient_effect, setup_strengths};
 #[derive(Component)]
 pub struct Scenario;
 
+/// A fleet type, as the TWT numbers it: 0 Navy, 2 Pirate, 3 Procyon; 4 (and any other number) is no fleet type chosen or known.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum Race {
+    Navy,
+    Pirate,
+    Procyon,
+    #[default]
+    Unchosen,
+}
+
+impl Race {
+    /// The fleet types a lobby slot can pick, in the lobby's order.
+    pub const PLAYABLE: [Race; 3] = [Race::Navy, Race::Pirate, Race::Procyon];
+
+    /// The race of a TWT `race` number (the map JSON keeps the number).
+    pub fn from_twt(n: u64) -> Self {
+        match n {
+            0 => Race::Navy,
+            2 => Race::Pirate,
+            3 => Race::Procyon,
+            _ => Race::Unchosen,
+        }
+    }
+
+    /// The TWT number (`from_twt(r.twt())` is `r`); 4 for no fleet type.
+    pub fn twt(self) -> u8 {
+        match self {
+            Race::Navy => 0,
+            Race::Pirate => 2,
+            Race::Procyon => 3,
+            Race::Unchosen => 4,
+        }
+    }
+
+    /// The race of a ship class (`Class::race`: "Navy", "Pirate", "Procyon"); None for any other.
+    pub fn from_class(name: &str) -> Option<Self> {
+        Self::PLAYABLE.into_iter().find(|r| r.class_name() == Some(name))
+    }
+
+    /// The `race` the ship classes of this fleet type carry; None for no fleet type.
+    pub fn class_name(self) -> Option<&'static str> {
+        match self {
+            Race::Navy => Some("Navy"),
+            Race::Pirate => Some("Pirate"),
+            Race::Procyon => Some("Procyon"),
+            Race::Unchosen => None,
+        }
+    }
+
+    /// The string-table id of the fleet type's name in the lobby's pull-down; None for no fleet type.
+    pub fn fleet_text(self) -> Option<&'static str> {
+        match self {
+            Race::Navy => Some("IDGS_TPFRONTENDTEXT03_FLEET_NAVY"),
+            Race::Pirate => Some("IDGS_TPFRONTENDTEXT03_FLEET_PIRATE"),
+            Race::Procyon => Some("IDGS_TPFRONTENDTEXT03_FLEET_PROCYON"),
+            Race::Unchosen => None,
+        }
+    }
+
+    /// First flag icon of the fleet type's block of ten (`FrontEnd_Flag_*Icon_NN`): Navy 0, Pirate 10, Procyon 20 (Navy's for none).
+    pub fn flag_base(self) -> usize {
+        match self {
+            Race::Pirate => 10,
+            Race::Procyon => 20,
+            Race::Navy | Race::Unchosen => 0,
+        }
+    }
+}
+
 /// One fleet of a battle: whose start point it uses (index in the map's player list), which side it fights for, whether the
 /// human commands it, and its ships with an explicit start position (historical maps) or none (formation at the start point).
 pub struct Group {
     pub player: usize,
     pub side: Side,
     pub human: bool,
-    /// Fleet type as in the TWT (0 Navy, 2 Pirate, 3 Procyon, 4 unknown): which base the fleet defends.
-    pub race: u8,
+    /// Fleet type: which base the fleet defends.
+    pub race: Race,
     /// Index in the map's team list (or the lobby team on free-for-all maps), -1: on its own.
     pub team: i32,
     /// The lobby slot behind this fleet (the in-battle player list shows one row per slot): the human's name (none: "Computer") and the
@@ -140,7 +209,7 @@ pub fn shot_target(
     if cfg.script.as_deref() == Some("speedtest") {
         for (_, mut s) in &mut ships {
             if s.side == Side::Player {
-                s.order = ((cfg.frame / 90) % 4) as usize;
+                s.order = EngineOrder::from_index(((cfg.frame / 90) % 4) as usize).unwrap_or_default();
             }
         }
     }
@@ -148,7 +217,7 @@ pub fn shot_target(
         for (_, mut s) in &mut ships {
             if s.side == Side::Player {
                 s.waypoints = vec![Vec3::new(-90.0, 0.0, -80.0), Vec3::new(40.0, 0.0, -200.0)];
-                s.order = 2;
+                s.order = EngineOrder::Full;
                 s.goal = None;
             }
         }

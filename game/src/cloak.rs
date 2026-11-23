@@ -182,7 +182,7 @@ fn spotted(
     watchers: Query<(&Ship, &Transform, &Health, Option<&ScanFactor>)>,
 ) {
     let rng = rng.get_or_insert_with(crate::combat::Rng::default);
-    for f in fired.read().filter(|f| f.bullet.starts_with(crate::combat::TORPEDO_BULLET)) {
+    for f in fired.read().filter(|f| f.torpedo) {
         let Ok((mut c, tf)) = ships.get_mut(f.shooter) else { continue };
         if c.state != State::Full {
             continue;

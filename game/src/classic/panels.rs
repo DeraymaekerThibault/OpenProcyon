@@ -499,7 +499,7 @@ fn spawn_part(commands: &mut Commands, c: &Ctx, class: &combat::Class, parent: E
 fn update_dial(player: Single<&Ship, With<PlayerShip>>, frames: Option<Res<Frames>>, mut q: Query<(&mut ImageNode, &mut Node), With<Dial>>) {
     let Some(frames) = frames else { return };
     // Retail frames 0..3 match Stop / Slow / Full / Emergency (red through dark green).
-    let Some(art) = frames.dial.get(player.order.min(3)) else { return };
+    let Some(art) = frames.dial.get(player.order.index()) else { return };
     for (mut img, mut node) in &mut q {
         art.show(&mut img, &mut node, frames.s);
     }
@@ -605,12 +605,12 @@ fn update_guns(
             }
             // Dimmed while the bank reloads (the bar beside it shows how far along it is).
             let tint = match st {
-                2 => Color::srgba(1.0, 1.0, 1.0, 0.25),
-                1 => Color::srgb(0.55, 0.55, 0.55),
+                combat::BankState::Destroyed => Color::srgba(1.0, 1.0, 1.0, 0.25),
+                combat::BankState::Recharging => Color::srgb(0.55, 0.55, 0.55),
                 _ => Color::WHITE,
             };
             img.map_unchanged(|i| &mut i.color).set_if_neq(tint);
-        } else if let Some(art) = frames.gun.get(st) {
+        } else if let Some(art) = frames.gun.get(st.index()) {
             art.show(&mut img, &mut node, frames.s);
             img.map_unchanged(|i| &mut i.color).set_if_neq(if armed { Color::srgb(1.0, 0.9, 0.3) } else { Color::WHITE });
         }
@@ -995,6 +995,7 @@ fn chat_scroll(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::EngineOrder;
     use crate::assets_dir;
     use crate::sprites::meta;
 
@@ -1006,7 +1007,12 @@ mod tests {
     #[test]
     #[ignore = "needs imported assets"]
     fn speed_segments_and_frames_match_engine_orders() {
-        for (order, centre) in [(0, Vec2::new(54.0, 71.0)), (1, Vec2::new(44.0, 57.0)), (2, Vec2::new(31.0, 44.0)), (3, Vec2::new(14.0, 34.0))] {
+        for (order, centre) in [
+            (EngineOrder::Stop, Vec2::new(54.0, 71.0)),
+            (EngineOrder::Slow, Vec2::new(44.0, 57.0)),
+            (EngineOrder::Full, Vec2::new(31.0, 44.0)),
+            (EngineOrder::Emergency, Vec2::new(14.0, 34.0)),
+        ] {
             assert_eq!(crate::panels::speed_order_at(centre), order);
             assert_eq!(crate::panels::speed_order_at(centre + Vec2::splat(1.0)), order);
         }
@@ -1031,13 +1037,13 @@ mod tests {
         app.world_mut().resource_mut::<ButtonInput<MouseButton>>().press(MouseButton::Left);
         app.update();
         let order = app.world_mut().query_filtered::<&Ship, With<PlayerShip>>().single(app.world()).unwrap().order;
-        assert_eq!(order, 2);
+        assert_eq!(order, EngineOrder::Full);
         assert!(app.world().resource::<crate::panels::UiClick>().0);
         // Hidden HUD (cinematics): the dial does nothing.
         app.world_mut().entity_mut(root).insert(Visibility::Hidden);
-        app.world_mut().query_filtered::<&mut Ship, With<PlayerShip>>().single_mut(app.world_mut()).unwrap().order = 0;
+        app.world_mut().query_filtered::<&mut Ship, With<PlayerShip>>().single_mut(app.world_mut()).unwrap().order = EngineOrder::Stop;
         app.update();
-        assert_eq!(app.world_mut().query_filtered::<&Ship, With<PlayerShip>>().single(app.world()).unwrap().order, 0);
+        assert_eq!(app.world_mut().query_filtered::<&Ship, With<PlayerShip>>().single(app.world()).unwrap().order, EngineOrder::Stop);
     }
 
     #[test]
