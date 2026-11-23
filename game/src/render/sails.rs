@@ -142,7 +142,7 @@ pub fn plugin(app: &mut App, look: &Look) {
 pub const STATE: Handle<ShaderBuffer> = bevy::asset::uuid_handle!("2d9a6c1f-3b58-4e7a-8c21-7f4e0a9b6d35");
 
 /// Rows in `STATE`.
-// PROVISIONAL: rows are handed out round-robin, so sails share a row only once more than this many are alive at once; give a
+// Rows are handed out round-robin, so sails share a row only once more than this many are alive at once; give a
 // despawned sail's row back if a battle ever gets there.
 const MAX_SAILS: usize = 1024;
 

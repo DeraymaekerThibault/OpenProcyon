@@ -29,7 +29,7 @@ pub struct Shell {
     pub(super) ricochet: f32,
     /// A mine's last target pick (`MINE_RESCAN`).
     pub(super) mine_scan: MineScan,
-    /// A torpedo whose target was destroyed, released or cloaked: it cuts its thrust and slows to rest (per the original's behaviour).
+    /// A torpedo whose target was destroyed, released or cloaked: it cuts its thrust and slows to rest.
     pub(super) lost_target: bool,
 }
 /// When a mine last picked a target (its age then) and whom.
@@ -57,8 +57,6 @@ pub(super) fn core_bleed(class: &Class, hp: &Health, roll: f32) -> f32 {
     (roll * pct / 100.0).round()
 }
 
-/// Native launch coast (0.5 s), 20-degree rudder saturation and lead inside 100 units; native WOT physics.
-/// PROVISIONAL: uses the remake's planar integrator; the native invalidation timer and altitude tick scheduling remain approximate.
 /// One point-defence bolt against a torpedo or mine: it loses the bolt's hitpoints; true once it is destroyed.
 pub(super) fn wear_down(threat_hp: &mut f32, bolt_hp: f32) -> bool {
     *threat_hp -= bolt_hp;
@@ -71,6 +69,9 @@ pub(super) fn torpedo_height_step(y: f32, target_y: f32) -> f32 {
     if dz.abs() > 0.05 { (y + 0.025 * dz.signum()).clamp(-3.0, 3.0) } else { y }
 }
 
+/// One tick of a homing torpedo's guidance.
+/// Native launch coast (0.5 s), 20-degree rudder saturation and lead inside 100 units; native WOT physics.
+/// PROVISIONAL: uses the remake's planar integrator; the native invalidation timer and altitude tick scheduling remain approximate.
 pub(super) fn guide_torpedo(
     mut position: Vec3,
     velocity: &mut Vec3,
@@ -95,7 +96,7 @@ pub(super) fn guide_torpedo(
             let delta = aim - position;
             let want = (-delta.x).atan2(-delta.z);
             rudder = (crate::angdiff(want, heading) / 20.0f32.to_radians()).clamp(-1.0, 1.0);
-            // Per the original's behaviour: once per tick, a homing torpedo steps its height 0.025 toward the target's when the two
+            // Once per tick, a homing torpedo steps its height 0.025 toward the target's when the two
             // differ by more than 0.05, bounded to +/-3 units.
             if i == 0 {
                 position.y = torpedo_height_step(position.y, point.y);
@@ -185,7 +186,7 @@ pub(super) fn apply_ship_hit(class: &Class, hp: &mut Health, k: usize, damage: [
     let protected = invuln >= 1.0;
     let scale = if protected { 0.0 } else { 1.0 };
     let (was, core, secs) = (hp.sections[k], hp.core, hp.sections.clone());
-    // Per the original's behaviour: the roll is rounded to a whole number (nearest; the rounding mode is not confirmed), after the
+    // The roll is rounded to a whole number (nearest; the rounding mode is not confirmed), after the
     // difficulty factor has scaled `lo` and `hi`.
     let roll = damage_roll(lo, hi, rng);
     hp.sections[k] = (was - scale * roll).max(0.0);
@@ -239,7 +240,7 @@ pub(super) fn base_parts_burst(commands: &mut Commands, fxl: &FxLib, class: &Cla
     }
 }
 
-/// Per the original's behaviour: the chance a shell striking a section glances off it unharmed, from the gun's range-band factor,
+/// The chance a shell striking a section glances off it unharmed, from the gun's range-band factor,
 /// the section's material and the angle in degrees between the shell's flight (relative to the target) reversed and the face's normal
 /// (0 head-on, 90 grazing).
 pub(super) fn ricochet_chance(factor: f32, material: &str, angle: f32) -> f32 {
@@ -275,7 +276,7 @@ fn ricochet(s: &mut Shell, tf: &mut Transform, bd: &BulletDef, key: &str, at: Ve
     true
 }
 
-/// Per the original's behaviour: a hit that leaves its section at 0 hit points (already dead or not) passes 0.4 x its damage on
+/// A hit that leaves its section at 0 hit points (already dead or not) passes 0.4 x its damage on
 /// to every neighbouring section, and on from any of those left at 0, each section once per hit.
 fn spill(class: &Class, hp: &mut Health, k: usize, damage: f32, seen: &mut Vec<usize>) {
     for &n in &class.sections[k].adjacent {
@@ -417,7 +418,7 @@ pub(super) fn shells(
         // Mines (MineAI sight, MinePhysics max speed): home on the nearest hostile ship in sight, else coast to rest at the drop point.
         // PROVISIONAL: the original's mine steering/drag is unknown.
         if let Payload::Mine { sight, speed } = s.payload {
-            // Per the original's behaviour: a mine picks its target only every MINE_RESCAN seconds, the first time that long after it was
+            // A mine picks its target only every MINE_RESCAN seconds, the first time that long after it was
             // laid, and between picks keeps chasing the stored one while it is alive and not cloaked.
             if s.age - s.mine_scan.at > MINE_RESCAN {
                 s.mine_scan.at = s.age;
@@ -469,6 +470,7 @@ pub(super) fn shells(
         // is destroyed at zero. PROVISIONAL: hitpoint-for-hitpoint exchange inferred from the WOT values, not verified in the original.
         if s.pd
             && let Some(&(te, tp, _)) = threats.iter().find(|t| t.2 != s.side && !downed.contains(&t.0) && segment_distance(t.1, p0, p1) < 2.5)
+        // PROVISIONAL: point-defence hit radius 2.5 is eyeballed
         {
             crate::queue_removal(&mut commands, e);
             let at = Transform::from_translation(tp);
@@ -483,11 +485,11 @@ pub(super) fn shells(
             continue;
         }
         let exempt = firer_exempt(s.age).then_some(s.shooter);
-        // Islands and bases (per the original's behaviour): every projectile's step is swept against their collision triangles, so
+        // Islands and bases: every projectile's step is swept against their collision triangles, so
         // nothing beyond the first land it meets can be hit; an island's or base's own shots leave it freely for the first
         // second (the firer is on the shell's rejection list). A gun tower's section a hair past the surface still counts.
         let ground = land.iter().filter(|(oe, _, v)| exempt != Some(*oe) && *v != Some(&Visibility::Hidden)).filter_map(|(_, o, _)| o.segment_hit(p0, p1)).min_by(f32::total_cmp);
-        let p1 = ground.map_or(p1, |t| p0.lerp(p1, (t + 0.5 / p0.distance(p1).max(1e-3)).min(1.0)));
+        let p1 = ground.map_or(p1, |t| p0.lerp(p1, (t + 0.5 / p0.distance(p1).max(1e-3)).min(1.0))); // PROVISIONAL: the 0.5-unit overshoot past the surface is eyeballed
         // Lob shells burst where they come down through the height they were aimed at.
         if let Some(a) = s.aim.filter(|a| !matches!(s.payload, Payload::Mine { .. }) && s.vel.y < 0.0 && p1.y <= a.y) {
             let t = if (p0.y - p1.y).abs() > 1e-4 { ((p0.y - a.y) / (p0.y - p1.y)).clamp(0.0, 1.0) } else { 1.0 };
@@ -495,7 +497,7 @@ pub(super) fn shells(
             crate::queue_removal(&mut commands, e);
             continue;
         }
-        // Per the original's behaviour: a shell has no side test against ships; only its rejection list, which holds the firer for the
+        // A shell has no side test against ships; only its rejection list, which holds the firer for the
         // first second, keeps it off a hull. Allied hulls are struck like enemy ones; only a mine glances off an allied hull (below).
         let hit = nearest_ship_hit(&ships, &lib, |ship, _| exempt == Some(ship), p0, p1);
         let best = hit.map(|(_, t, section, at)| (t, section, at));
@@ -610,7 +612,7 @@ pub(super) fn shells(
             let hull = Vec3::new(-ship.heading.sin(), 0.0, -ship.heading.cos()) * ship.speed + drift.map_or(Vec3::ZERO, |d| d.0);
             let key = material_key(&class.sections[k].material);
             hull_normal = seg_mesh_hit(inv.transform_point3(p0), inv.transform_point3(p1), &class.sections[k]).map(|(_, n)| (stf.rotation * n).normalize());
-            // Per the original's behaviour: a mine bounces off any ship whose owner is allied with the mine's owner (own side included).
+            // A mine bounces off any ship whose owner is allied with the mine's owner (own side included).
             let owner = |ship: Entity| ships.get(ship).ok().and_then(|x| x.5.map(|m| m.owner.as_str()));
             let allied_hull =
                 matches!(s.payload, Payload::Mine { .. }) && crate::boarding::allied_pair(campaign.as_deref(), (owner(s.shooter), Some(s.side)), (owner(si), Some(ship.side)));
@@ -688,6 +690,8 @@ pub(super) struct ShipTarget<'a> {
 /// A shell striking section `k` of a ship at `at`: damage, fire, hull scar and sounds (the impact effect is the caller's). `power`
 /// multiplies the damage roll (1 for shells; a beam's ramp, `combat/beam.rs`).
 #[allow(clippy::too_many_arguments)]
+/// Damage rules of one shell hit on section `k` (`damage` = [lower, upper, crit, fire chance, fire strength]).
+/// Criticals are not modelled: in the original they only feed a tally and crew speech (docs/re/movement.md).
 pub(super) fn hit_ship(
     commands: &mut Commands,
     fxl: &FxLib,
@@ -713,7 +717,7 @@ pub(super) fn hit_ship(
     hits.write(Hit { shooter: s.shooter, victim: se });
     if let Some((duration, dissipated)) = bd.net {
         commands.entity(se).queue(move |mut w: EntityWorldMut| {
-            // Per the original's behaviour: a net hit orders a cloaking or cloaked ship to decloak.
+            // A net hit orders a cloaking or cloaked ship to decloak.
             if let Some(mut c) = w.get_mut::<crate::cloak::Cloak>() {
                 c.stop();
             }
@@ -728,7 +732,7 @@ pub(super) fn hit_ship(
         info!("Torpedo hit {} ({}){}", class.name, sec.label, if invuln >= 1.0 { " [training: invulnerable]" } else { "" });
     }
     // Decoded: no check for an existing fire on the section, so one section can burn several fires.
-    // Per the original's behaviour: this one ship, a lifeboat of mission 9, never catches fire.
+    // This one ship, a lifeboat of mission 9, never catches fire.
     let outcome = apply_ship_hit(class, hp, k, damage, invuln, class.name != "Ship_Navy_Lifeboat_Mission9", rng);
     if let (Some(size), true) = (bd.decal, invuln < 1.0) {
         let inv = stf.to_matrix().inverse();

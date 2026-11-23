@@ -1007,7 +1007,7 @@ fn aim_turret(
             engaged = Some((dir, to_target.length()));
         }
     }
-    // Per the original's behaviour: a direct-fire gun with no target never runs its tracking, so it stays where it was (also under hold
+    // A direct-fire gun with no target never runs its tracking, so it stays where it was (also under hold
     // fire); a lob gun keeps tracking its stored ground point and returns to rest here.
     if aim_at.is_none() && gun.lob.is_none() {
         want_yaw = state.yaw;
@@ -1060,8 +1060,6 @@ fn burst_turn(aim_dir: Vec3, deviation: f32, rng: &mut Rng) -> Quat {
     Quat::from_axis_angle(Vec3::Y, sign(rng.f()) * deviation) * Quat::from_axis_angle(right, sign(rng.f()) * deviation)
 }
 
-/// Damage rules of one shell hit on section `k` (`damage` = [lower, upper, crit, fire chance, fire strength]).
-/// Criticals are not modelled: in the original they only feed a tally and crew speech (docs/re/movement.md).
 /// Seconds the gunner of `bank` takes off TimeBetweenBursts: 10 x gunnery (0..1), for the player's crewed ships only; computer
 /// ships fire every TimeBetweenBursts here. Decoded: only torpedo launchers use it (the caller checks), the wait is
 /// max(0, TimeBetweenBursts - 10 x the raw gunnery of the bank's gunner), with no leadership bonus; computer ships' torpedo launchers

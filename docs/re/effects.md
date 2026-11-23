@@ -222,7 +222,7 @@ the system creates every 50 ticks, `HitGround`, `Jitter`, `AttractorLine`, and t
 The same engine tick (1/30 s) is probably the ship-physics step too, which may fix the provisional x0.1 thrust time
 scale in `docs/re/movement.md` (not yet checked).
 
-## Wakes and engine flames (read from the original's code, 2026-11)
+## Wakes and engine flames (unchecked against play, 2026-11)
 
 Both are attached to a placement on the ship's mesh scene (`WakePlacement`, `EnginePortPlacement`; the node faces astern, yaw pi) and
 are fed once per second by a keeper object: the ship's **speed fraction** (0..1, clamped) is sent to the effect as the
@@ -296,8 +296,7 @@ Remake: `combat::damage::death_wipe`, called once from `breakup` when the 0.14 s
 (not yet lost), not from the stored health, which stays as the hull died.
 
 ### Death drive (what a dead hull does until it is removed)
-Measured on a Navy Cutter (sunk by gunfire and in black holes) and read from the original's code; the speed and turning caps were
-checked against the code, the choice of throttle and rudder is PROVISIONAL.
+Measured on a Navy Cutter (sunk by gunfire and in black holes); the speed and turning caps are unchecked against play, and the choice of throttle and rudder is PROVISIONAL.
 1. At the kill the ship leaves its fleet and is computer-run, also when a human steered it. Its captain is not stopped by death: it
    keeps thinking every 0.5 s and steering as in battle (an idle ship with no target explores at full throttle; the Cutter run showed
    throttle 1.0 and a hard rudder from the first think, 0.5 s after the kill).
@@ -369,7 +368,7 @@ place, keeps the ship's velocity at the moment it broke, sinks at 1.5 units/s, t
 horizontal axis through its pivot, and is removed after 10 s (all PROVISIONAL: no retail numbers). The exporter writes the meshes
 to `models/debris/` and `sections[].debris` = {model, pivot}.
 
-### Section debris: life, motion, fade and end effect (read from the original's code, 2026-11, not yet measured in play)
+### Section debris: life, motion, fade and end effect (unchecked against play, 2026-11, not yet measured in play)
 One piece per destroyed section that names a `debrisMeshScene`, created at the section's node. All draws come from the battle
 generator (so they shift later battle rolls, see tick.md), in this order.
 - **Life** L = uniform(7.0, 12.5) s (the Ship_Debris WOT's `LifeTimeMin` / `LifeTimeMax`), one draw. The piece is removed at L.
@@ -414,7 +413,7 @@ piece's material and the effect and sound hooks at the end; the 5 / 7 draws only
   section die.
   A dead fire stops emitting after 3 s and is removed after 5 more. Burning fires then double in intensity.
 - Nebula meteor, lightning and wind hits carry no attacker either, so on the human's own ships they take the difficulty factor like
-  fires (Easy × 0.25, Normal × 0.5, Hard × 1) and on other ships none. Read from the original's code, not yet measured.
+  fires (Easy × 0.25, Normal × 0.5, Hard × 1) and on other ships none. Unchecked against play, not yet measured.
 - Scripted damage ("Damage Group/Unit by X percent", a fraction 0.4-0.6 in missions 1 and 3 and `locusts`). Read from the original's
   code, not yet measured: every section in order takes one hit of round(its current hit points × fraction) through the ordinary
   hit routine (spill into the neighbours of a section left at 0, core bleed through dead vital sections, the human's ships taking
@@ -476,7 +475,7 @@ core: run by fx/) plus a `Vortex` primitive, implemented in `game/src/blackhole.
     units, were where the wreck stopped).
   - Destruction by the hole credits no kill: the Game Summary showed the computer with 0 Ships Sunk, and our Damage Taken only
     counted the earlier gunfire.
-  - **Decoded from the original's logic.** Per tick, for anything overlapping the hole: nothing beyond R; pull between R/4 and R
+  - **Unchecked against play.** Per tick, for anything overlapping the hole: nothing beyond R; pull between R/4 and R
     (ramp (1 - d/R) / 0.25, capped at 1), destroy at or inside R/4 for every class (a ship's core HP goes to 0, the hole is the
     killer, no credit; rocks die at their full hit points; torpedoes are pulled and survive). The pull direction is the line to the centre turned
     15 degrees clockwise seen from above. The pull is an acceleration, 0.15 x hull length x Magnitude / Mass (hull term fitted,
@@ -485,7 +484,7 @@ core: run by fx/) plus a `Vortex` primitive, implemented in `game/src/blackhole.
     the Cutter breaks free (7.5); Large: Cutter 12.5 and Frigate 3.4, the Man-O-War (2.9) never. Nothing in the pull or the
     kill looks at whether the ship is under way. The 1.1 s lag is probably the destruction sequence. The Star mortar blast pushes through the same acceleration
     helper (a = 0.148 x 12000 x hull length / Mass for up to ~2.7 s; displacement PROVISIONAL, likely under a few units).
-  **Which kinds a hole acts on** (read from the original's code, 2026-11; not measured): ships, rocks and torpedoes, nothing else. Ordinary shells and
+  **Which kinds a hole acts on** (unchecked against play, 2026-11; not measured): ships, rocks and torpedoes, nothing else. Ordinary shells and
   the other bullets carry none of the three kinds and are skipped (an earlier note said shells were pulled: that was wrong, the kind it meant is the
   torpedo). Inside R/4 a ship's core goes to 0 (no credit), a rock takes damage equal to its whole hit points, a torpedo is not harmed. The pull on a rock
   goes through the same force helper but with the rock's own response of 0.1 along both horizontal hull axes and 0 vertically, against a ship's 0.6 on every axis

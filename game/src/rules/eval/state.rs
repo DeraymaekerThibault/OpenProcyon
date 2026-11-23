@@ -544,7 +544,7 @@ impl Script {
             let name = self.queue.pop_front()?;
             let m = &self.media["speech"][name.as_str()];
             let text = m["text"].as_str().unwrap_or("");
-            let dur = m["duration"].as_f64().map_or((text.len() as f32 / 14.0).max(2.0), |d| d as f32 + 0.3);
+            let dur = m["duration"].as_f64().map_or((text.len() as f32 / 14.0).max(2.0), |d| d as f32 + 0.3); // PROVISIONAL: reading-time formula and the 0.3 s tail are guesses
             self.subtitle = text.into();
             self.speaking = Some((name.clone(), dur));
             if !text.is_empty() {

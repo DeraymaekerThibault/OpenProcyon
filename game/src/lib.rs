@@ -141,8 +141,6 @@ pub fn assets_dir() -> &'static std::path::Path {
     ASSETS.get_or_init(|| modding::overlay(&base_assets(), &[content_dir()]))
 }
 
-/// Runs the game with one presentation (a view plugin such as the binary's `classic::plugin`); without imported assets it opens
-/// the first-run import screen instead (`setup.rs`, drawn by `setup_view`), which starts the game again once the import is done.
 /// --lobby <spec>: play a skirmish setup through the lobby model instead of the --ship/--allies/--enemies shortcut. A named function,
 /// not a closure: Bevy names every non-capturing closure plugin alike, so a second one panics at startup ("already added").
 fn lobby_scenario(app: &mut App) {
@@ -159,6 +157,8 @@ fn lobby_scenario(app: &mut App) {
     }
 }
 
+/// Runs the game with one presentation (a view plugin such as the binary's `classic::plugin`); without imported assets it opens
+/// the first-run import screen instead (`setup.rs`, drawn by `setup_view`), which starts the game again once the import is done.
 pub fn run(view: fn(&mut App), setup_view: fn(&mut App)) {
     let args: Vec<String> = std::env::args().collect();
     // Mission authoring (docs/modding.md): the rule schema needs no assets.

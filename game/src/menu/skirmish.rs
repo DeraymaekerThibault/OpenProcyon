@@ -301,11 +301,6 @@ pub fn offered(lib: &Library, race: u8) -> Vec<usize> {
     list
 }
 
-/// Auto Assign. Measured on the original (docs/re/skirmish-setup.md): it fills the fleet with hulls that fit the points still left,
-/// mixing classes (300 points / 5 ships gave a Heavy Scout, a Heavy Escort and three Warsloops; 50 points two Torpedo Boats). Hulls it
-/// adds itself also get weapon swaps (a hand-added ship only gets crew), and the points that remain buy named crew. The player's own
-/// Auto Assign is PROVISIONAL (random hulls that fit). Computers follow the original's fleet build: a style roll, then that style's hull
-/// batches or fills, weapon swaps (styles 0-2 only) and crew (`Build`, docs/re/skirmish-setup.md).
 /// The guns computer captains may fit (`data/ai/weapons.json`, `{gun: true|false}`, merged key by key across mods). No file: the guns
 /// retail computers were seen to fit (`RETAIL_COMPUTER_GUNS`).
 fn computer_guns() -> Option<std::collections::HashSet<String>> {
@@ -606,6 +601,11 @@ impl Build<'_> {
     }
 }
 
+/// Auto Assign. Measured on the original (docs/re/skirmish-setup.md): it fills the fleet with hulls that fit the points still left,
+/// mixing classes (300 points / 5 ships gave a Heavy Scout, a Heavy Escort and three Warsloops; 50 points two Torpedo Boats). Hulls it
+/// adds itself also get weapon swaps (a hand-added ship only gets crew), and the points that remain buy named crew. The player's own
+/// Auto Assign is PROVISIONAL (random hulls that fit). Computers follow the original's fleet build: a style roll, then that style's hull
+/// batches or fills, weapon swaps (styles 0-2 only) and crew (`Build`, docs/re/skirmish-setup.md).
 pub fn auto_build(slot: &mut Slot, limit: u32, fleet_size: usize, lib: &Library, salt: u64, armed_only: bool, crew_race: u8) {
     let allowed = if armed_only { computer_guns() } else { None };
     let seed = u64::from(limit) * 31 + fleet_size as u64 * 7 + 1 + salt * 977;
@@ -813,11 +813,11 @@ impl Skirmish {
         }
     }
     /// Scroll the slot bar by `d` slots, within the fleet size limit (retail shows five at a time).
+    /// Scrolls the slot bar by `d` slots, keeping it inside the fleet.
     pub fn scroll_slots(&mut self, d: i32) {
         let max = self.fleet_size.saturating_sub(SLOT_BAR);
         self.slot_scroll = (self.slot_scroll as i64 + i64::from(d)).clamp(0, max as i64) as usize;
     }
-    /// Keep the picked fleet slot inside the slot bar.
     /// The profiles the dialog offers: a fleet's by fleet type, a ship's crew or arms by hull class.
     pub fn open_profile(&mut self, kind: crate::profiles::Kind, save: bool, lib: &Library) {
         use crate::profiles::Kind as K;
@@ -884,11 +884,11 @@ impl Skirmish {
     pub fn human(&self) -> Option<&Slot> {
         self.slots.iter().find(|s| s.kind == Kind::Human)
     }
-    /// Why the game cannot launch yet (a string id, or plain text), if so.
     /// Victory points the human player has left to spend on ships ('Current Victory Points').
     pub fn points_left(&self, lib: &Library) -> i64 {
         i64::from(self.victory_limit) - self.human().map_or(0, |h| h.spent(lib))
     }
+    /// Why the game cannot launch yet (a string id, or plain text), if so.
     pub fn launch_error(&self) -> Option<&'static str> {
         let h = self.human()?;
         if !self.slots.iter().any(|s| s.kind.live() && self.hostile(h, s)) {

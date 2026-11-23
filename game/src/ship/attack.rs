@@ -1,4 +1,4 @@
-//! The original's attack manoeuvres for computer captains, per the original's behaviour (docs/re/movement.md, "Computer captains: attack"):
+//! The original's attack manoeuvres for computer captains (docs/re/movement.md, "Computer captains: attack"):
 //! the primary gun bank picks Broadside (one side), Frontal, Rear or Ram; R is the guns' mean effective range (long range against
 //! a base); the captain sails a course of aim points, re-planned every think, at full throttle when the next point is within
 //! 11.25° of the bow and at its minimum throttle otherwise.

@@ -302,6 +302,7 @@ struct Contact {
     push: Vec3,
     point: Vec3,
 }
+/// The contact with the shallowest push; coplanar triangles count as one face.
 fn closest_contact(contacts: Vec<Contact>) -> Option<Contact> {
     let first = contacts.iter().min_by(|a, b| a.push.length_squared().total_cmp(&b.push.length_squared()))?;
     let normal = first.push.normalize();
@@ -428,7 +429,7 @@ pub fn nearest_section(class: &crate::data::Class, tf: &Transform, at: Vec3) -> 
     (0..class.sections.len()).min_by(|a, b| d(a).total_cmp(&d(b)))
 }
 
-/// Contact damage `damage` to ship `a` from ship or rock `b` at `at` (docs/re/collision.md, per the original's behaviour):
+/// Contact damage `damage` to ship `a` from ship or rock `b` at `at` (docs/re/collision.md):
 /// `combat::lob::ram_damage` puts it on `a`'s section nearest `at`, scaled by difficulty when `b` is a ship.
 #[derive(Message)]
 pub struct Ram {

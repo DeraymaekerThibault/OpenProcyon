@@ -2,7 +2,7 @@
 //! docked, then for AI ships move away / turn / return), repair while docked, dock-point marker effects and the rule hooks
 //! (`Dock Ships`, `Set Group/Unit Dockable`, `Set Dock Time`, `Toggle Island Repair When Docked`, `Group/Unit Is Docked`).
 //! Clicks and the right-click menu issue `DockMsg`s; rules.rs reads `Script::docked`, which this module keeps up to date.
-//! The movement is the original's (observed, docs/re/docking-and-orders.md): one approach point on the dock point's axis,
+//! The movement is the original's (docs/re/docking-and-orders.md): one approach point on the dock point's axis,
 //! sailed under the collision avoider (no route planning), then a scripted glide onto the point; leaving glides away, turns in place
 //! and sails one leg back. PROVISIONAL: dock-point yaw sign and the repair effect placement (one at the ship centre).
 //! Tows (menu Tow start / stop): the tower steers for the towee and the link is registered inside 50 units of surface distance; the

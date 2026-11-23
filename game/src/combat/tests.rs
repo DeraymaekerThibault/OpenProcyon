@@ -785,7 +785,7 @@ fn torpedo_guidance_launch_coast_and_moving_target_intercept() {
     let old_y = p.y;
     let next = guide_torpedo(p, &mut v, &mut spin, 16.0, None, true, physics, 0.1);
     assert_eq!(next.y, old_y, "lost target must stop altitude tracking");
-    // Per the original's behaviour: a torpedo that lost its target cuts its thrust and slows to rest.
+    // A torpedo that lost its target cuts its thrust and slows to rest.
     let before = v.with_y(0.0).length();
     for i in 0..600 {
         guide_torpedo(p, &mut v, &mut spin, 20.0 + i as f32 * 0.1, None, false, physics, 0.1);
@@ -1114,7 +1114,7 @@ fn shell_into_a_hull_damages_it_and_reports_the_hit() {
     assert!(impacted_material.is_some_and(|key| MATERIALS.contains(&key)), "the hit effect carries a material from the real collision");
 }
 
-/// Per the original's behaviour: a mine glances off a hull of an allied owner (own side included) and keeps flying at 0.6 of its
+/// A mine glances off a hull of an allied owner (own side included) and keeps flying at 0.6 of its
 /// speed; a hull that is not allied is struck.
 #[test]
 #[ignore = "needs imported assets"]
@@ -1309,7 +1309,7 @@ fn a_map_mine_rests_where_the_map_put_it_and_fights_for_no_one_until_given_an_ow
     assert!(matches!(shell.payload, Payload::Mine { sight, .. } if sight == 50.0));
 }
 
-/// Per the original's behaviour: a mine picks its target only every 5 s, the first time 5 s after it was laid.
+/// A mine picks its target only every 5 s, the first time 5 s after it was laid.
 #[test]
 #[ignore = "needs imported assets"]
 fn a_mine_picks_its_target_five_seconds_after_it_is_laid() {

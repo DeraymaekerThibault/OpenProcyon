@@ -8,7 +8,7 @@ use crate::campaign::Mission;
 use crate::sprites::HudData;
 use crate::{Ship, Side};
 
-const BAR_VISIBLE: f32 = 250.0;
+const BAR_VISIBLE: f32 = 250.0; // PROVISIONAL: eyeballed against footage
 const BAR_SIZE: Vec2 = Vec2::new(171.0, 40.0);
 const BAR_INNER: (Vec2, Vec2) = (Vec2::new(40.0, 13.0), Vec2::new(130.0, 29.0));
 

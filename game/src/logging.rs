@@ -56,6 +56,10 @@ impl std::io::Write for Rotating {
 pub(crate) fn redacted_args() -> Vec<String> {
     std::env::args().skip(1).map(|a| redact_arg(&a)).collect()
 }
+/// A panic location without the build machine's folders (a dependency sits under the user's home): from `src/` on.
+pub(crate) fn trim_source_path(file: &str) -> &str {
+    file.rfind("/src/").or_else(|| file.rfind("\\src\\")).map_or(file, |i| &file[i + 1..])
+}
 fn redact_arg(arg: &str) -> String {
     let hide = |v: &str| if v.contains('/') || v.contains('\\') { "<path>".to_owned() } else { v.to_owned() };
     match arg.split_once('=') {
@@ -89,6 +93,13 @@ mod tests {
     fn paths_in_arguments_are_hidden() {
         let hidden: Vec<_> = ["--mission", "3", "/home/me/g", "--mod=C:\\Users\\me\\m", "--map=red_rover"].map(redact_arg).into();
         assert_eq!(hidden, ["--mission", "3", "<path>", "--mod=<path>", "--map=red_rover"]);
+    }
+
+    #[test]
+    fn panic_locations_start_at_src() {
+        assert_eq!(trim_source_path("/home/me/.cargo/registry/x-1.0/src/lib.rs"), "src/lib.rs");
+        assert_eq!(trim_source_path("game/src/ship.rs"), "src/ship.rs");
+        assert_eq!(trim_source_path("C:\\Users\\me\\x\\src\\a.rs"), "src\\a.rs");
     }
 
     #[test]

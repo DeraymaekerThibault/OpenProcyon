@@ -37,7 +37,7 @@ The manual gives no numbers: speeds, turning, timing and damage come from data a
   spans the panic button, frame and gauges on Procyon. The docking/boarding icon (32x33) is placed at `PRIMARY_SHIP_STATUS_ICON_OFFSET_FROM_PRIMARYSHIPICON_TOPLEFT`
   (Navy and Pirate 7,4; Procyon 8,4) from the top-left of the portrait picture's own untrimmed box (the fleet-bar slots use the
   same rule), which centres it on the portrait. Both were drawn too low and too far right by the trim of the node they hung on (frame
-  art top 2 / 3 px, then the portrait art's own 2 left / 5 top margin for the docking icon). Not read from the original's draw code:
+  art top 2 / 3 px, then the portrait art's own 2 left / 5 top margin for the docking icon). Not measured against the original's drawing:
   the origins rest on the data values and the art.
 - Weapon and ship-bar toggles stand on their `*_ToggleDetail` arms: arm bottom `Move_Toggle*_Detail_Down` px behind the compass /
   talking head, button at `Toggle*_Button_Offset_From_Detail_TopLeft` (checked on a retail 1:1 screenshot). Ship icons use the class's WOT icon name.
@@ -89,12 +89,11 @@ script (`Setup Team Objective`, `tasks`, `map_text`). Still PROVISIONAL: a team 
 
 ## Objectives and the Chat History (retail, 2026-11-22)
 
-**Objectives are listed on the star map only.** The battle screen draws no objective text, in skirmish or in a campaign mission (the campaign case is read from the
-original's code, not seen). The task list is the "Objectives:" panel at the top left of the star map (M): each active task's own text. The remake's campaign star map
+**Objectives are listed on the star map only.** The battle screen draws no objective text, in skirmish or in a campaign mission (the campaign case is unchecked against play). The task list is the "Objectives:" panel at the top left of the star map (M): each active task's own text. The remake's campaign star map
 draws the same panel as the skirmish one, listing the mission's active tasks one per line (`StarmapContents::objective`); the campaign no longer draws a task line at the top of the battle
 screen. Not yet read: how a complete or failed task looks in the panel (the remake still prefixes `[done]` / `[failed]`: PROVISIONAL).
 
-**Chat History** (seen once in a skirmish after a fight; the rest read from the original's code). The speech-bubble button at the right end of the main bar toggles a framed
+**Chat History** (seen once in a skirmish after a fight; the rest unchecked against play). The speech-bubble button at the right end of the main bar toggles a framed
 panel just above the bar, centred on it, about 440 x 170 px at 1440x1080 (blue nine-part frame, a scrollbar on its right, the thumb at the bottom while the list is at its end).
 - Content: every text line of the battle so far, one entry per wrapped line, each in the colour of the event that produced it. Sources in the original: crew speech
   (`[ Speaker ] text`), the critical-system-hit message of the primary ship (red), chat and alliance messages, and mission speech that has text.
@@ -113,7 +112,7 @@ A ship's name ribbon is tinted with the colour of the map player that owns it: i
 top-right roster (slots 1-3 green, navy blue, teal; `players[].color` in the map file gives all eight). The banner is fully opaque with the camera close to
 the deck. A rule's banner type ('Banner BlueTeam' ...) still overrides in missions. Not observed: enemy and allied banners in a frame.
 
-**When a banner shows** (read from the original's code, 2026-11-20; unchecked against a running game). The profile option "Ship Name Banners" has four
+**When a banner shows** (unchecked against play, 2026-11-20). The profile option "Ship Name Banners" has four
 values: 0 off, 1 "On When Close" (the default profile's value), 2 "On When Far", 3 always on. Every frame each ship's banner is opened or closed: with
 "On When Close" it is open while the straight distance from the camera to the ship's centre is at most `Max Banner Visible World Distance - Near` (150 in
 hud.hdt), with "On When Far" while it is at least that; the `- Far` value (also 150) is not read by this test. The banners toggle closes every banner.
@@ -121,6 +120,6 @@ The banner's alpha (ribbon and name text alike) then moves toward 1 when open an
 in or out in one second, and it is drawn while its alpha is above 0. Remake: `scenario::PlayerColor`, `classic/world_hud.rs` `banner_tint` and
 `banner_alpha` ("On When Close" only; there is no options entry for the other values yet).
 
-## Critical hit text on the primary ship (read from the original's code, not built)
+## Critical hit text on the primary ship (unchecked against play, not built)
 When a hit on the human's primary ship rolls a critical (movement.md, "Critical hits"; the roll names which of the section's critical systems was hit) and the HUD has nothing else open,
 a text for that system is put on the HUD's message list. There are ten critical system kinds, each with its own string. The strings' wording was not read. Remake: no such text (crew voice lines only).

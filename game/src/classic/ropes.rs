@@ -11,7 +11,7 @@ use bevy::prelude::*;
 use crate::Scenario;
 use crate::boarding::Ropes;
 
-const POINTS: usize = 24;
+const POINTS: usize = 24; // PROVISIONAL: eyeballed
 /// Never thinner than this fraction of the camera distance (about two pixels at 1080p).
 const MIN_WIDTH: f32 = 0.002;
 

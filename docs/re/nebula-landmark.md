@@ -63,17 +63,17 @@ Each nebula keeps, from its `Terrain_Nebula` state: centre, radius,
   So ships slow more the deeper they are; the exact use of the factor (probably a speed/accel multiplier of `1 - factor` or a sail-power
   drain) is PROVISIONAL.
 - **Slow-down** (was "sail energy drain"): the flag only gates the depth factor. While a ship is inside a cloud whose flag is on, its top speed and
-  thrust are multiplied by the 3-D distance to the cloud's centre over its radius, clamped to 0..1 (read from the original's code, not yet measured):
+  thrust are multiplied by the 3-D distance to the cloud's centre over its radius, clamped to 0..1 (not yet measured):
   half the radius deep halves the speed, the exact centre stops the ship. Instant, no recovery time, the deepest nebula counts. Hulls with a certain
   class flag are exempt (not modelled; its meaning is unknown). `Nebula Occlusion` blocks sensors/line of sight through the polygon
   (retail AI also treats `TYPEAVOID 'Nebula'` as an area to avoid on path planning; the remake only does the occlusion).
 - **Camera effect**: the world saves `DATA_NEBULA_CAMERA_EFFECT`, `..._FADE_IN_TIMER`, `..._SPIN_TIMER`, `DATA_NEXT_NEBULA_CAMERA_EFFECT`:
-  when the camera is inside a nebula the original fades in a full-screen/spinning overlay (read from the original's code, 2026-11; not measured; textures not read).
+  when the camera is inside a nebula the original fades in a full-screen/spinning overlay (unchecked against play, 2026-11; not measured; textures not read).
   The camera counts as inside a cloud when its 3-D distance to the cloud's centre is under 1.03 x (radius + 50) (not the polygon); the nearest such cloud wins.
   Overlay kind 1 for a nebula cloud, 2 for the other weather kind, 0 outside. A change of kind fades the old overlay out over 0.5 s, then the new one in
   over 0.5 s (a first entry fades in at once). The overlay is one or two scrolling cloud textures over the whole view; two drift vectors do the 'spin':
   each tick position += velocity, velocity += -0.003 (first) or -0.005 (second) x the unit vector of the position. Not built.
-- **Wind force and gust** (read from the original's code, 2026-11; not measured): when winds are on, each ship inside the cloud (3-D distance under the
+- **Wind force and gust** (unchecked against play, 2026-11; not measured): when winds are on, each ship inside the cloud (3-D distance under the
   radius, polygon test passed) and farther than 0.05 x radius from the centre gets a force. The unit vector from the ship to the centre is turned about
   the vertical axis by 60 degrees (36 when the cloud traps objects; sense of rotation not checked), F = wind magnitude x that vector + the cloud's own
   velocity / 0.033, applied through the same force helper as black holes (acceleration about 0.148 x F x hull length / mass). On top of that, each tick a random

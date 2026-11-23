@@ -19,10 +19,11 @@ pub(super) fn name(id: &str) -> &str {
     crew_data()[id]["name"].as_str().unwrap_or(id)
 }
 
-/// Legacy mission-start saves have availability lists but no post assignments.
+/// The best `skill` among the campaign roster's crew.
 pub fn best(points: &CampaignPoints, skill: &str) -> Option<f32> {
     points.crew.iter().filter_map(|c| ability(c, skill)).reduce(f32::max)
 }
+/// Legacy mission-start saves have availability lists but no post assignments: the roster's best gunner crews every gun.
 pub fn accuracy(points: Option<&CampaignPoints>) -> f32 {
     points.and_then(|p| best(p, "gunnery")).map_or(0.5, |g| 1.0 - 0.8 * g)
 }
