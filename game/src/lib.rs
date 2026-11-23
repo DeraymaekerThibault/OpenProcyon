@@ -206,7 +206,9 @@ pub fn run(view: fn(&mut App), setup_view: fn(&mut App)) {
     let installed = modding::installed(bundled_mods_dir().as_deref()).into_iter().filter(|m| m.enabled).map(|m| m.dir);
     modding::set_active(installed.chain(mods).collect());
     let layers: Vec<PathBuf> = std::iter::once(content_dir()).chain(modding::active().iter().cloned()).collect();
-    let _ = ASSETS.set(modding::overlay(&base, &layers, own_overlay()));
+    let (root, report) = modding::overlay_report(&base, &layers, own_overlay());
+    report.without(&content_dir()).log();
+    let _ = ASSETS.set(root);
     if let Some(code) = rules::cli::apply(&args) {
         std::process::exit(code);
     }
