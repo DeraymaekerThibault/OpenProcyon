@@ -16,6 +16,7 @@ import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+from tools import gamelog
 from tools.import_assets import find_assets
 
 REPO = Path(__file__).resolve().parents[1]
@@ -37,7 +38,6 @@ def build_game(profile="fast"):
     )
 
 
-ANSI = re.compile(r"\x1b\[[0-9;]*m")
 PROFILE = re.compile(r"profile .*frame_ms=([\d.]+) entities=(\d+) .*particles=(\d+)")
 END = re.compile(r'autoplay end outcome="([^"]+)" time=(\d+) never_fired=\[(.*)\]')
 
@@ -162,7 +162,7 @@ def main():
             return (
                 n,
                 *summarise(
-                    ANSI.sub("", log.read_text(encoding="utf-8", errors="replace")),
+                    gamelog.read(log, r"panicked at|profile |autoplay end"),
                     code,
                 ),
             )

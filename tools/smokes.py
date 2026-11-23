@@ -8,6 +8,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from tools import gamelog
+
 REPO = Path(__file__).resolve().parents[1]
 # A self-judging script logs one of these when its assertions all held (smoke/lifeboats.rs, smoke/fleet.rs).
 PASS = re.compile(r": PASS| smoke passed| ECS smoke passed| dispatch passed")
@@ -93,7 +95,7 @@ def main(argv):
             print(f"smokes: no mapping for {f}", file=sys.stderr)
         print(" ".join(names))
     elif argv[:1] == ["verdict"] and len(argv) == 4:
-        log = Path(argv[3]).read_text(errors="replace")
+        log = gamelog.read(argv[3], r"panicked at|" + PASS.pattern)
         why = verdict(argv[1], int(argv[2]), log)
         if why:
             print(why)

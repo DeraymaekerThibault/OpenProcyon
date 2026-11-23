@@ -43,7 +43,15 @@ new() {
 }
 
 rm_wt() {
-    local wt; wt=$(cd "$1" && pwd)
+    local wt
+    if [ ! -d "$1" ]; then # already deleted by hand: drop git's record of it
+        wt=$(realpath -m "$1")
+        git -C "$main" worktree list --porcelain | grep -qx "worktree $wt" || { say "$wt is not a worktree of $main"; exit 1; }
+        git -C "$main" worktree prune
+        say "removed $wt (its folder was already gone)"
+        return
+    fi
+    wt=$(cd "$1" && pwd)
     [ "$wt" != "$main" ] || { say "refusing to remove the main checkout"; exit 1; }
     git -C "$main" worktree list --porcelain | grep -qx "worktree $wt" || { say "$wt is not a worktree of $main"; exit 1; }
     [ -z "$(git -C "$wt" status --porcelain)" ] || { say "$wt has uncommitted changes; commit or discard them first"; exit 1; }

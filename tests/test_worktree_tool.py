@@ -58,3 +58,7 @@ class WorktreeTool(unittest.TestCase):
             self.assertNotIn(
                 "older than", sh("tools/worktree.sh", "new", "topic", str(wt))
             )
+            # A worktree whose folder was deleted by hand still goes.
+            shutil.rmtree(wt)
+            self.assertIn("already gone", sh("tools/worktree.sh", "rm", str(wt)))
+            self.assertNotIn(str(wt), sh("git", "worktree", "list"))
