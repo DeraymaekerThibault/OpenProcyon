@@ -520,7 +520,7 @@ impl MenuModel<'_> {
                 cui.scroll,
                 (cui.capture, &self.binds.rows),
                 (&self.settings, &self.mods, (self.missions.picked, self.missions.scroll)),
-                (sk.dropdown, sk.name_open),
+                (sk.dropdown, sk.name_open, sk.map_info, sk.arms_open, sk.arms_tab),
                 sk.flag_picker,
                 sk.map_scroll,
                 sk.slot_scroll
