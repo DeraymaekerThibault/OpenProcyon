@@ -1,4 +1,4 @@
-//! Beam guns: not in the original, a mod feature (`beam` block of a gun in `guns.json`, `data::BeamDef`). A beam gun charges for
+//! Not retail: beam guns, a mod feature (`beam` block of a gun in `guns.json`, `data::BeamDef`). A beam gun charges for
 //! `charge` seconds (a glow grows at the muzzle), then holds a beam along its barrel for `duration` seconds and reloads. The beam
 //! burns the first enemy ship it crosses every `tick` seconds with the gun's bullet damage, times a power that grows while it stays on
 //! the same ship, so a captain who keeps the target in the beam (by turning the ship: the mount's arc is narrow) does the most harm.

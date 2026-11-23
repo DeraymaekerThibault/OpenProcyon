@@ -643,7 +643,7 @@ pub fn hud_shown(visible: &Query<&Visibility, With<HudRoot>>) -> bool {
     !visible.is_empty() && visible.iter().all(|v| *v != Visibility::Hidden)
 }
 
-/// PAUSE button: a click toggles simulation pause (also available on the non-retail Pause key).
+/// PAUSE button: a click toggles simulation pause (the Pause key does the same, `view.rs`).
 #[allow(deprecated)] // Interaction, see pointer.rs
 fn pause_button(mouse: Res<ButtonInput<MouseButton>>, mut vtime: ResMut<Time<Virtual>>, q: Query<&Interaction, With<PauseButton>>, mission: Option<Res<crate::campaign::Mission>>) {
     if !cinematic(mission.as_deref()) && mouse.just_pressed(MouseButton::Left) && q.iter().any(crate::pointer::over) {

@@ -23,7 +23,7 @@ fn detail_factor(low: f32, dist: f32) -> f32 {
     d - d * low + low
 }
 const LOWEST_DETAIL_DISTANCE: f32 = 350.0;
-/// Whole-scene live-particle budget (not retail): above it every effect emits proportionally fewer particles, so a long fight with many
+/// Not retail: a whole-scene live-particle budget. Above it every effect emits proportionally fewer particles, so a long fight with many
 /// Gattling tracers, damage smoke and impacts cannot pile up thousands of quads per frame. PROVISIONAL: sized for a mid-range GPU; the
 /// per-primitive `MAX_LIVE` still applies. The count lags the emission by a frame.
 const SCENE_LIVE_BUDGET: f32 = 15_000.0;

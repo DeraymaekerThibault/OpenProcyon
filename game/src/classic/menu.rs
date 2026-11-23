@@ -116,11 +116,11 @@ fn build(
                     element(&ctx, c, &model, e, strings, preview.as_deref());
                 }
                 if *state.get() == Screen::Main {
-                    // Small corner button: the retail main menu has no Mods entry.
+                    // Not retail: a small corner button; the retail main menu has no Mods entry.
                     ctx.text_button(c, [670.0, 553.0, 780.0, 581.0], "Mods", "BlackChancery16", Action::Goto(Screen::Mods));
                 }
                 if *state.get() == Screen::SinglePlayer {
-                    // Small corner button, like Mods on the main menu: the retail Single Player menu has no Custom Missions entry.
+                    // Not retail: a small corner button, like Mods on the main menu; the retail Single Player menu has no Custom Missions entry.
                     ctx.text_button(c, [620.0, 553.0, 780.0, 581.0], "Custom Missions", "BlackChancery16", Action::Goto(Screen::Missions));
                 }
                 if *state.get() == Screen::Lobby && sk.map_info {
@@ -627,7 +627,7 @@ fn mods_page_view(ctx: &Ctx, c: &mut ChildSpawnerCommands, mods: &crate::menu::M
     }
 }
 
-/// Single Player > Custom Missions (not retail; laid out like the Mods page): the missions mods add, grouped by campaign (mod),
+/// Not retail: Single Player > Custom Missions (laid out like the Mods page), the missions mods add, grouped by campaign (mod),
 /// and the picked one's description with Play.
 #[allow(deprecated)] // Interaction, see pointer.rs
 fn missions_page_view(ctx: &Ctx, c: &mut ChildSpawnerCommands, missions: &crate::menu::MissionList) {

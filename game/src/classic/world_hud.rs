@@ -87,8 +87,8 @@ fn end_line(
 #[derive(Component)]
 struct LoadingCover;
 
-/// The cover over a loading battle (`loading.rs`): black with one word, above the HUD. PROVISIONAL: not retail's loading screen,
-/// whose layout is not specified yet.
+/// Not retail: the cover over a loading battle (`loading.rs`), black with one word, above the HUD. PROVISIONAL: it stands in for
+/// retail's loading screen, whose layout is not specified yet.
 fn loading_cover(
     mut commands: Commands,
     loading: Option<Res<openprocyon::loading::Loading>>,

@@ -178,6 +178,7 @@ pub fn input(
             target.1 = None;
             target.2.panic = false;
         }
+        // Not retail: the Pause key toggles the pause too, beside the HUD pause button.
         if keys.just_pressed(KeyCode::Pause) {
             toggle_pause(&mut vtime);
         }
@@ -397,8 +398,8 @@ pub fn sky(
     sky.1.set_if_neq(want);
 }
 
-/// A baked cube map for this retail sky (`models/sky/<sky>_cube.png`, six square faces stacked +X -X +Y -Y +Z -Z;
-/// not retail), when a mod provides one: the scenario draws it instead of the sky sphere.
+/// Not retail: a baked cube map for this retail sky (`models/sky/<sky>_cube.png`, six square faces stacked +X -X +Y -Y +Z -Z),
+/// when a mod provides one: the scenario draws it instead of the sky sphere.
 pub fn hd_sky_file(root: &std::path::Path, sky: &str) -> Option<String> {
     let rel = format!("models/sky/{sky}_cube.png");
     root.join(&rel).is_file().then_some(rel)

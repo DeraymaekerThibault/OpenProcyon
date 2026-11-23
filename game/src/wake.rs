@@ -140,7 +140,7 @@ impl Wake {
     }
 }
 
-/// Multiplier of the wake texture per fleet type, from the optional `data/fx/wake_tint.json` (`{"Navy": [r, g, b]}`, values may exceed 1).
+/// Not retail: a multiplier of the wake texture per fleet type, from the optional `data/fx/wake_tint.json` (`{"Navy": [r, g, b]}`, values may exceed 1).
 /// Absent: the retail colour for everyone. A mod ships the file, so wakes can tell the factions apart without new textures.
 pub fn wake_tint(race: &str) -> Option<[f32; 3]> {
     static TINTS: std::sync::OnceLock<serde_json::Value> = std::sync::OnceLock::new();

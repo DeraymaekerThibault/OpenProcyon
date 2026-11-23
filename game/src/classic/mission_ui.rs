@@ -112,7 +112,7 @@ fn build_briefing(mut commands: Commands, mission: Res<Mission>, assets: Res<Ass
         });
 }
 
-/// A skirmish map script's speech lines (`maps/<id>/media.json`): the gameplay subtitle above the main bar, in the speech event's
+/// Not retail: a skirmish map script's speech lines (`maps/<id>/media.json`), the gameplay subtitle above the main bar, in the speech event's
 /// own colour. The cutscene banner and the rest of the mission widgets stay with the campaign.
 fn build_skirmish_speech(mut commands: Commands, existing: Query<(), With<Ui>>) {
     if !existing.is_empty() {

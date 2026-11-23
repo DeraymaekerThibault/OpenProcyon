@@ -291,7 +291,7 @@ pub fn next(id: &str) -> Option<String> {
     next_custom(custom_missions(), id)
 }
 
-/// A mission a mod adds (not retail): its map id, the map's name and description, and the campaign it belongs to (its mod).
+/// Not retail: a mission a mod adds. Its map id, the map's name and description, and the campaign it belongs to (its mod).
 #[derive(Clone, Debug, PartialEq)]
 pub struct CustomMission {
     pub id: String,
@@ -349,7 +349,7 @@ pub fn load() -> Mission {
     load_id("mission01")
 }
 
-/// Debug launch options (`--fire-rule`, `--start-at`; not retail behaviour), set once by `run` and applied to every mission loaded.
+/// Not retail: debug launch options (`--fire-rule`, `--start-at`), set once by `run` and applied to every mission loaded.
 static START: std::sync::OnceLock<(Vec<String>, Option<(f32, f32)>)> = std::sync::OnceLock::new();
 pub fn set_start(rules: Vec<String>, at: Option<(f32, f32)>) {
     let _ = START.set((rules, at));
