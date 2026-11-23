@@ -14,7 +14,7 @@ const SPEECH_GOLD: Color = Color::srgb(1.0, 0.65, 0.1);
 
 pub fn plugin(app: &mut App) {
     app.add_systems(Update, (build_mission, build_briefing).before(crate::briefing::update).run_if(in_state(crate::menu::Screen::Battle)).run_if(resource_exists::<Mission>))
-        .add_systems(Update, speech_colour.run_if(in_state(crate::menu::Screen::Battle)).run_if(resource_exists::<Mission>))
+        .add_systems(Update, (speech_colour, fade_picture).run_if(in_state(crate::menu::Screen::Battle)).run_if(resource_exists::<Mission>))
         .add_systems(
             Update,
             (build_skirmish_speech, skirmish_subtitle).chain().run_if(in_state(crate::menu::Screen::Battle)).run_if(resource_exists::<crate::rules::skirmish::SkirmishScript>),
@@ -27,6 +27,16 @@ fn speech_colour(mission: Res<Mission>, mut texts: Query<(&Ui, &mut TextColor)>)
     for (ui, mut c) in &mut texts {
         if matches!(ui, Ui::Speech | Ui::SpeechTop) && c.0 != colour {
             c.0 = colour;
+        }
+    }
+}
+
+/// Not retail: how black the picture is (`OP Fade`, `Script::fade_alpha`); the shared `rules::ui` shows the cover while it is above 0.
+fn fade_picture(mission: Res<Mission>, mut covers: Query<(&Ui, &mut BackgroundColor)>) {
+    let alpha = mission.script.fade_alpha();
+    for (ui, mut c) in &mut covers {
+        if matches!(ui, Ui::Fade) {
+            c.set_if_neq(BackgroundColor(Color::srgba(0.0, 0.0, 0.0, alpha)));
         }
     }
 }
@@ -69,6 +79,9 @@ fn build_mission(mut commands: Commands, existing: Query<(), With<Ui>>) {
     commands.spawn((Scenario, Ui::Speech, text(20.0, Color::srgb(1.0, 0.75, 0.2)), Visibility::Hidden, GlobalZIndex(160), at(None, Some(9.5), 20.0)));
     commands.spawn((Scenario, Ui::Hint, text(18.0, Color::srgb(0.7, 0.9, 1.0)), Visibility::Hidden, GlobalZIndex(160), at(Some(30.0), None, 30.0)));
     commands.spawn((Scenario, Ui::End, text(34.0, Color::WHITE), Visibility::Hidden, GlobalZIndex(170), at(Some(35.0), None, 15.0)));
+    // Not retail: the cover `OP Fade` fades to black and back; above the speech banner, below the end text.
+    let whole = Node { position_type: PositionType::Absolute, width: Val::Percent(100.0), height: Val::Percent(100.0), ..default() };
+    commands.spawn((Scenario, Ui::Fade, whole, BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.0)), Visibility::Hidden, GlobalZIndex(165)));
     for (bar, top) in [(Ui::BarTop, true), (Ui::BarBottom, false)] {
         let mut node = Node { position_type: PositionType::Absolute, width: Val::Percent(100.0), height: Val::Percent(12.0), ..default() };
         if top {
@@ -133,5 +146,33 @@ fn skirmish_subtitle(sk: Res<crate::rules::skirmish::SkirmishScript>, mut texts:
             **t = sk.script.subtitle.clone();
         }
         c.set_if_neq(TextColor(colour));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::rules::Script;
+    use serde_json::json;
+
+    /// Not retail: `OP Fade` darkens the cover to black at the middle of its time and clears it at the end.
+    #[test]
+    fn the_cover_is_black_at_the_middle_of_a_fade_and_clear_again_at_its_end() {
+        let data = json!({"rules": [{"name": "fade", "Run Once": true, "conditions": [{"Type": "World Initialize"}], "actions": [{"Type": "OP Fade", "Seconds": 4.0}]}]});
+        let mission = Mission { id: "synthetic".into(), script: Script::new(&data, json!({})), data, opening: None };
+        let mut app = App::new();
+        app.insert_resource(mission).add_systems(Update, fade_picture);
+        let cover = app.world_mut().spawn((Ui::Fade, BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.0)))).id();
+        let alpha = |app: &App| app.world().get::<BackgroundColor>(cover).unwrap().0.alpha();
+        let at = |app: &mut App, dt: f32| {
+            app.world_mut().resource_mut::<Mission>().script.step(&[], dt, false);
+            app.update();
+            alpha(app)
+        };
+        assert!(at(&mut app, 0.01) < 0.01, "just started");
+        assert!((at(&mut app, 1.0) - 0.5).abs() < 0.01, "a quarter of the way: half black");
+        assert!((at(&mut app, 1.0) - 1.0).abs() < 0.01, "the middle: black");
+        assert!((at(&mut app, 1.0) - 0.5).abs() < 0.01, "on the way back");
+        assert_eq!(at(&mut app, 1.0), 0.0, "over: the picture is clear and nothing keeps the cover up");
     }
 }

@@ -348,3 +348,26 @@ fn under_fixed_step_the_view_advances_one_tick_per_frame_whatever_the_frame_rate
     // It did play out: lost at the first re-test after the move, then faded out.
     assert!(fast[39].0 && !fast[119].0 && fast[119].1 < fast[60].1);
 }
+
+/// Not retail: `OP Etherium Current` sets a current's strength and lane and switches it off; a current nobody changed pushes exactly as before.
+#[test]
+fn a_current_can_be_made_stronger_wider_and_switched_off() {
+    let path = vec![Vec3::ZERO, Vec3::NEG_Z * 500.0];
+    let mut current = Current::new(path.clone()).named("lane");
+    assert_eq!(current.name(), "lane");
+    let (inside, edge) = (Vec3::new(0.0, 0.0, -100.0), Vec3::new(CURRENT_RADIUS + 20.0, 0.0, -100.0));
+    assert_eq!((current.force(inside), current.force(edge)), (Vec3::NEG_Z * CURRENT_FORCE, Vec3::ZERO), "the retail strength and lane");
+    current.set(Some(2.0), None, None);
+    assert_eq!(current.force(inside), Vec3::NEG_Z * CURRENT_FORCE * 2.0);
+    current.set(None, Some(4.0 * CURRENT_RADIUS), None);
+    assert_eq!(current.force(edge), Vec3::NEG_Z * CURRENT_FORCE * 2.0, "a lane twice as wide reaches the ship at the edge");
+    let mesh = current_mesh_of(&path, 2.0 * CURRENT_RADIUS);
+    let Some(bevy::mesh::VertexAttributeValues::Float32x3(positions)) = mesh.attribute(Mesh::ATTRIBUTE_POSITION) else { panic!("ribbon vertices") };
+    assert!((Vec3::from_array(positions[0]).distance(Vec3::from_array(positions[1])) - 4.0 * CURRENT_RADIUS).abs() < 0.001, "the ribbon is as wide as the lane");
+    current.set(None, None, Some(false));
+    assert!(!current.is_on() && current.force(inside) == Vec3::ZERO, "off: no push");
+    current.set(None, None, Some(true));
+    assert_eq!(current.force(inside), Vec3::NEG_Z * CURRENT_FORCE * 2.0, "back on with the settings it had");
+    let retail = Current::new(path);
+    assert_eq!((retail.name(), retail.is_on()), ("", true));
+}

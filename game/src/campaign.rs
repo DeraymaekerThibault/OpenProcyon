@@ -3,6 +3,7 @@
 use crate::{PlayerShip, Side, assets_dir, combat::Library, game_to_bevy};
 use bevy::prelude::*;
 use serde_json::Value;
+use std::collections::HashMap;
 
 /// Mission state of one unit. `owner` is the rules' player name (changes with 'Set Group/Unit Owner'); `id` its TWT world object id.
 #[derive(Component, Default)]
@@ -35,6 +36,8 @@ pub struct MissionShip {
     pub ram: bool,
     /// The course it was on when a tow took it; it sails on from there once the tow ends (`rules::systems` AI).
     pub towed_course: Option<Vec<Vec3>>,
+    /// Not retail: the standing order of the mission rule `OP Follow Group` (`rules::systems` mission AI keeps the station).
+    pub follow: Option<rules::FollowOrder>,
 }
 use crate::rules;
 /// A mission base/island that rules can address ('*State Init* Setup Island'): `owner` is its group, e.g. 'AbandonedCamp'.
@@ -291,6 +294,33 @@ pub fn next(id: &str) -> Option<String> {
     next_custom(custom_missions(), id)
 }
 
+/// Not retail: the campaign counters (`OP Set Campaign Counter`) each custom mission handed on when it was won, kept in memory for the
+/// session (not saved). A mission starts with what the mission before it in the same mod campaign handed on; a mission that was lost or
+/// restarted hands on nothing, so a replay starts from the same values as the first try.
+#[derive(Resource, Default)]
+pub struct CampaignValues {
+    handed_on: HashMap<String, HashMap<String, f32>>,
+}
+impl CampaignValues {
+    /// What a mission starts with: the values the previous mission of its campaign handed on (none for the first mission, a retail
+    /// mission, or when that one was never won in this session).
+    pub fn incoming(&self, id: &str) -> HashMap<String, f32> {
+        self.incoming_in(custom_missions(), id)
+    }
+    fn incoming_in(&self, list: &[CustomMission], id: &str) -> HashMap<String, f32> {
+        let Some(i) = list.iter().position(|m| m.id == id).filter(|i| *i > 0) else { return HashMap::new() };
+        let before = &list[i - 1];
+        if before.campaign != list[i].campaign {
+            return HashMap::new();
+        }
+        self.handed_on.get(&before.id).cloned().unwrap_or_default()
+    }
+    /// A won mission hands its values on (replacing what it handed on before).
+    pub fn commit(&mut self, id: &str, values: HashMap<String, f32>) {
+        self.handed_on.insert(id.into(), values);
+    }
+}
+
 /// Not retail: a mission a mod adds. Its map id, the map's name and description, and the campaign it belongs to (its mod).
 #[derive(Clone, Debug, PartialEq)]
 pub struct CustomMission {
@@ -299,6 +329,12 @@ pub struct CustomMission {
     pub description: String,
     /// The mod's `name` (folder name when it has none): each mod is one campaign.
     pub campaign: String,
+}
+
+/// Not retail: `id` is a mission one of this launch's mods adds (`custom_missions`): the places that read keys only custom missions have
+/// (a map's `mines`) ask this, so retail missions and the tutorials are never affected.
+pub fn is_custom(id: &str) -> bool {
+    custom_missions().iter().any(|m| m.id == id)
 }
 
 /// The custom missions of this launch's mods (`modding::active`), read once.
@@ -495,7 +531,15 @@ pub fn spawn(commands: &mut Commands, assets: &AssetServer, lib: &Library, fxl: 
         }
     }
     crate::environment::spawn(commands, assets, &mission.data, false);
+    // Not retail: the campaign counters the mission before this one in the mod's campaign handed on.
+    let id = mission.id.clone();
     commands.insert_resource(mission);
+    commands.queue(move |w: &mut World| {
+        let values = w.get_resource::<CampaignValues>().map(|c| c.incoming(&id)).unwrap_or_default();
+        if let Some(mut m) = w.get_resource_mut::<Mission>() {
+            m.script.set_campaign_values(values);
+        }
+    });
 }
 
 /// Position of the rules' current objective point (None for 'NO OBJECTIVE POINT').
@@ -673,5 +717,23 @@ mod tests {
         assert_eq!(next_custom(&list, "solo"), None);
         assert!(is_campaign("mission03") && !is_campaign("mission_x") && !is_campaign("mission"));
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// Not retail: what a won custom mission hands to the next one of its mod campaign (`OP Set Campaign Counter`).
+    #[test]
+    fn campaign_values_pass_from_a_won_mission_to_the_next_one_of_the_same_campaign_only() {
+        let m = |id: &str, campaign: &str| CustomMission { id: id.into(), name: id.into(), description: String::new(), campaign: campaign.into() };
+        let list = [m("one", "Saga"), m("two", "Saga"), m("three", "Saga"), m("other", "Elsewhere")];
+        let mut values = CampaignValues::default();
+        assert!(values.incoming_in(&list, "one").is_empty(), "the first mission starts with nothing");
+        assert!(values.incoming_in(&list, "two").is_empty(), "the first one was not won yet");
+        values.commit("one", HashMap::from([("rescued".to_string(), 3.0)]));
+        assert_eq!(values.incoming_in(&list, "two").get("rescued"), Some(&3.0), "the next mission starts with what the won one handed on");
+        assert_eq!(values.incoming_in(&list, "two").get("rescued"), Some(&3.0), "a replay starts from the same values");
+        assert!(values.incoming_in(&list, "three").is_empty(), "only the mission before it hands values on");
+        assert!(values.incoming_in(&list, "other").is_empty(), "another campaign does not see them, even when listed next");
+        assert!(values.incoming_in(&list, "not listed").is_empty());
+        values.commit("one", HashMap::from([("rescued".to_string(), 5.0)]));
+        assert_eq!(values.incoming_in(&list, "two").get("rescued"), Some(&5.0), "a mission won again hands on its new values");
     }
 }

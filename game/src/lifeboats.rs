@@ -14,6 +14,12 @@ pub struct Lifeboat {
     pub owner: crate::names::Owner,
 }
 
+/// Not retail: a ship whose crew was ordered off by the mission rule `OP Abandon Ship`. The hull stays afloat and alive for the rules, but
+/// it cannot move or fire (the mission AI holds its throttle cap at 0, gunnery skips it); it can still be boarded and towed. Its lifeboats
+/// launched when this was added, so a later destruction of the hull leaves none.
+#[derive(Component)]
+pub struct Abandoned;
+
 /// A ship was destroyed in combat (core hit points gone, or the dev kill keys). Scripted `Destroy Group/Unit` is not reported:
 /// whether it starts the original's lifeboat-spawning explosion state is unverified (docs/re/lifeboats.md §4.3).
 #[derive(Message)]
@@ -63,6 +69,7 @@ fn lifeboats(
     fxl: Res<crate::fx::FxLib>,
     (mut rng, spawn_order): (ResMut<crate::combat::SimRng>, Query<&crate::scenario::SpawnIndex>),
     mut lost: MessageReader<ShipLost>,
+    (abandoned, new_abandoned): (Query<(), With<Abandoned>>, Query<Entity, Added<Abandoned>>),
     mut sfx: MessageWriter<crate::audio::Sfx>,
     mission: Option<ResMut<Mission>>,
     dying: Query<(&Ship, &Transform, Option<&MissionShip>), Without<Lifeboat>>,
@@ -71,33 +78,16 @@ fn lifeboats(
 ) {
     let owner = |l: &Lifeboat, m: Option<&MissionShip>| m.map_or_else(|| l.owner.clone(), |m| m.owner.clone());
     let mut present: Vec<(Option<Entity>, crate::names::Owner)> = boats.iter().map(|(e, _, _, l, m)| (Some(e), owner(l, m))).collect();
-    // In spawn order of the lost ships: each boat's drift draws from the battle generator.
+    // In spawn order of the lost ships: each boat's drift draws from the battle generator. A hull that was abandoned already
+    // launched its boats (Not retail: `OP Abandon Ship`), so its destruction leaves none.
     for ShipLost(e) in crate::scenario::in_spawn_order(&spawn_order, lost.read(), |l| l.0) {
-        let Ok((ship, tf, ms)) = dying.get(*e) else { continue };
-        let class = &lib.classes[ship.class];
-        let Some(ms) = ms.filter(|m| m.create_lifeboats && class.lifeboats > 0 && !class.is_lifeboat) else { continue };
-        let Some(boat) = lib.classes.iter().find(|c| c.name == class_for(&class.race)) else {
-            warn!("no {} class: {} leaves no lifeboats", class_for(&class.race), class.name);
-            continue;
-        };
-        for _ in 0..class.lifeboats {
-            let (offset, throttle) = drift(&mut rng);
-            let to = Vec3::new(offset.x, 0.0, -offset.y);
-            let heading = if to.length_squared() > 1e-6 { (-to.x).atan2(-to.z) } else { ship.heading };
-            let id = crate::spawn_ship(&mut commands, &assets, &lib, &fxl, &boat.name, Side::Player, tf.translation, heading, None);
-            commands.entity(id).remove::<PlayerShip>().remove::<crate::boarding::Boardable>().insert((
-                Lifeboat { owner: ms.owner.clone() },
-                Ship {
-                    heading,
-                    order: EngineOrder::Full,
-                    waypoints: vec![tf.translation + to * 10000.0],
-                    throttle: Some(throttle),
-                    // Side::Player: never an enemy, the original treats lifeboats as friendly to everyone
-                    ..Ship::new(lib.index(&boat.name), Side::Player)
-                },
-            ));
-            present.push((None, ms.owner.clone()));
+        if !abandoned.contains(*e) {
+            launch(&mut commands, &assets, &lib, &fxl, &mut rng, *e, &dying, &mut present);
         }
+    }
+    // Not retail: the crews of ships that were just ordered off (`OP Abandon Ship`) take to the boats the same way, by the same flag.
+    for e in crate::scenario::in_spawn_order(&spawn_order, new_abandoned.iter(), |e| *e) {
+        launch(&mut commands, &assets, &lib, &fxl, &mut rng, e, &dying, &mut present);
     }
     let mut mission = mission;
     // Each boat is tested against the nearest live non-lifeboat ship (any owner, human or AI); contact of the bounding spheres collects it.
@@ -121,6 +111,45 @@ fn lifeboats(
     }
     if let Some(m) = mission.as_mut() {
         m.script.set_lifeboat_owners(present.into_iter().map(|p| p.1.to_string()).collect());
+    }
+}
+
+/// The boats a ship leaves, if its Create Lifeboats flag is set and its class has any: used by a destruction and by `OP Abandon Ship`.
+#[allow(clippy::too_many_arguments)]
+fn launch(
+    commands: &mut Commands,
+    assets: &AssetServer,
+    lib: &Library,
+    fxl: &crate::fx::FxLib,
+    rng: &mut crate::combat::SimRng,
+    e: Entity,
+    dying: &Query<(&Ship, &Transform, Option<&MissionShip>), Without<Lifeboat>>,
+    present: &mut Vec<(Option<Entity>, crate::names::Owner)>,
+) {
+    let Ok((ship, tf, ms)) = dying.get(e) else { return };
+    let class = &lib.classes[ship.class];
+    let Some(ms) = ms.filter(|m| m.create_lifeboats && class.lifeboats > 0 && !class.is_lifeboat) else { return };
+    let Some(boat) = lib.classes.iter().find(|c| c.name == class_for(&class.race)) else {
+        warn!("no {} class: {} leaves no lifeboats", class_for(&class.race), class.name);
+        return;
+    };
+    for _ in 0..class.lifeboats {
+        let (offset, throttle) = drift(rng);
+        let to = Vec3::new(offset.x, 0.0, -offset.y);
+        let heading = if to.length_squared() > 1e-6 { (-to.x).atan2(-to.z) } else { ship.heading };
+        let id = crate::spawn_ship(commands, assets, lib, fxl, &boat.name, Side::Player, tf.translation, heading, None);
+        commands.entity(id).remove::<PlayerShip>().remove::<crate::boarding::Boardable>().insert((
+            Lifeboat { owner: ms.owner.clone() },
+            Ship {
+                heading,
+                order: EngineOrder::Full,
+                waypoints: vec![tf.translation + to * 10000.0],
+                throttle: Some(throttle),
+                // Side::Player: never an enemy, the original treats lifeboats as friendly to everyone
+                ..Ship::new(lib.index(&boat.name), Side::Player)
+            },
+        ));
+        present.push((None, ms.owner.clone()));
     }
 }
 

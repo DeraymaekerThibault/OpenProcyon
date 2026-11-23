@@ -55,6 +55,8 @@ struct Defs {
     rules: BTreeSet<String>,
     points: BTreeSet<String>,
     point_sets: BTreeSet<String>,
+    /// How many points each point set has (`OP Teleport`'s `Point Index`).
+    point_set_len: BTreeMap<String, usize>,
     map_text: BTreeSet<String>,
     speech: BTreeSet<String>,
     messages: BTreeSet<String>,
@@ -96,6 +98,7 @@ impl Defs {
             media: media.is_object(),
             ..Default::default()
         };
+        d.point_set_len = mission["environment"]["point_sets"].as_object().into_iter().flatten().map(|(k, v)| (k.clone(), v.as_array().map_or(0, Vec::len))).collect();
         d.players.extend(names(map, "players"));
         d.teams = map["teams"].as_array().into_iter().flatten().filter_map(|t| t["name_id"].as_str()).map(String::from).collect();
         // The interpreter reads the human player under its TWT name or as "Player0 Group" (`alias_player`).
@@ -248,6 +251,9 @@ impl Checker<'_> {
             let holds_at_zero = e["Equivalence"].as_str().and_then(Equivalence::parse).is_some_and(|q| q.holds(0.0, value as f32, 1e-4));
             self.wants_true = !holds_at_zero;
         }
+        if def.name == "OP Teleport" {
+            self.teleport_index(e);
+        }
         for key in obj.keys().filter(|k| k.as_str() != "Type") {
             if def.field(key).is_none() {
                 let hint = suggest(key, def.fields.iter().map(|f| f.name));
@@ -264,6 +270,25 @@ impl Checker<'_> {
                 }
                 Some(_) => {}
             }
+        }
+    }
+
+    /// `OP Teleport`: `Point Index` is a whole number inside the point set (the interpreter would skip the action with a warning).
+    fn teleport_index(&mut self, e: &Value) {
+        let Some(index) = e["Point Index"].as_f64() else { return };
+        if index < 0.0 || index.fract() != 0.0 {
+            self.err("Point Index", format!("{index} is not a whole number from 0 up; the point is not found"));
+        } else if let Some(len) = e["Point Set Name"].as_str().and_then(|n| self.defs.point_set_len.get(n))
+            && index as usize >= *len
+        {
+            self.err(
+                "Point Index",
+                format!(
+                    "point set '{}' has {len} points (0..{}); index {index} is past its end, so nothing is moved",
+                    e["Point Set Name"].as_str().unwrap_or(""),
+                    len.saturating_sub(1)
+                ),
+            );
         }
     }
 

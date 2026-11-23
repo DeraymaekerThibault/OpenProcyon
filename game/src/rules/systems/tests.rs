@@ -223,3 +223,119 @@ fn mission_ships_halt_when_their_script_route_runs_out() {
     assert!(!mission.stop_at_end);
     assert!(mission.attack.is_empty());
 }
+
+/// The mission AI on its own, with one synthetic class and a script that has no rules: what `OP Follow Group` and an abandoned hull make
+/// the captains do.
+fn ai_world() -> App {
+    let data = serde_json::json!({"rules": []});
+    let mission = Mission { id: "synthetic".into(), script: Script::new(&data, serde_json::json!({})), data, opening: None };
+    let mut app = App::new();
+    app.insert_resource(mission)
+        .insert_resource(Library { classes: vec![crate::fixed_tests::synthetic_class()], guns: default(), bullets: default(), names: default(), clips: default() })
+        .init_resource::<Time>()
+        .init_resource::<crate::environment::Sensors>()
+        .add_systems(PreUpdate, crate::environment::refresh_sensors)
+        .add_systems(Update, mission_ai);
+    app
+}
+
+fn ai_ship(app: &mut App, name: &str, owner: &str, at: Vec3, follow: Option<FollowOrder>, speed: f32) -> Entity {
+    let ship = Ship { heading: 0.0, speed, order: EngineOrder::Full, ..Ship::new(0, Side::Player) };
+    let ms = MissionShip { name: name.into(), owner: owner.into(), visible: true, follow, ..default() };
+    app.world_mut().spawn((ship, Health { sections: vec![], core: 100.0, destroyed: false }, Transform::from_translation(at), ms)).id()
+}
+
+#[test]
+fn a_follower_steers_for_its_station_in_the_leaders_frame_and_keeps_its_leader() {
+    for (station, slot) in [
+        (Station::Astern, Vec3::new(0.0, 0.0, 40.0)),
+        (Station::Ahead, Vec3::new(0.0, 0.0, -40.0)),
+        (Station::AbeamStarboard, Vec3::new(40.0, 0.0, 0.0)),
+        (Station::AbeamPort, Vec3::new(-40.0, 0.0, 0.0)),
+    ] {
+        let mut app = ai_world();
+        // The leader at the origin heading "north" (-Z at heading 0); the escort far off, clear of the line to every station.
+        let leader = ai_ship(&mut app, "Leader", "Convoy", Vec3::ZERO, None, 5.0);
+        let other = ai_ship(&mut app, "Other", "Convoy", Vec3::new(500.0, 0.0, 0.0), None, 5.0);
+        let order = FollowOrder { group: "Convoy".into(), station, distance: 40.0, leader: None };
+        let escort = ai_ship(&mut app, "Escort", "Escort", Vec3::new(30.0, 0.0, 400.0), Some(order), 0.0);
+        app.update();
+        let (ship, ms) = (app.world().get::<Ship>(escort).unwrap(), app.world().get::<MissionShip>(escort).unwrap());
+        assert_eq!(ms.follow.as_ref().and_then(|f| f.leader), Some(leader), "the nearest ship of the group, not {other:?}");
+        assert!(ship.waypoints.first().is_some_and(|w| w.distance(slot) < 1e-3), "{station:?}: {:?}", ship.waypoints);
+        assert_eq!(ship.order, EngineOrder::Full, "far from the station: full speed");
+        assert!(!ms.stop_at_end);
+        // Leader gone: the escort stands still and keeps its order.
+        app.world_mut().get_mut::<Health>(leader).unwrap().destroyed = true;
+        app.world_mut().get_mut::<Health>(other).unwrap().destroyed = true;
+        app.update();
+        let ship = app.world().get::<Ship>(escort).unwrap();
+        assert_eq!((ship.order, ship.waypoints.len()), (EngineOrder::Stop, 0));
+        assert!(app.world().get::<MissionShip>(escort).unwrap().follow.is_some());
+    }
+}
+
+#[test]
+fn a_follower_in_its_station_matches_the_leaders_speed() {
+    let mut app = ai_world();
+    ai_ship(&mut app, "Leader", "Convoy", Vec3::ZERO, None, 3.0);
+    let order = FollowOrder { group: "Convoy".into(), station: Station::Astern, distance: 40.0, leader: None };
+    let escort = ai_ship(&mut app, "Escort", "Escort", Vec3::new(0.0, 0.0, 40.5), Some(order), 3.0);
+    app.update();
+    let ship = app.world().get::<Ship>(escort).unwrap();
+    assert!(ship.waypoints.is_empty(), "within 3 units of the slot there is nothing to steer for");
+    let top = crate::ship::max_speed(ship, &app.world().resource::<Library>().classes[0], app.world().get::<Health>(escort).unwrap());
+    assert!((ship.throttle.unwrap() * top - 3.0).abs() < 1e-3, "the leader's speed as a share of its own top speed: {:?}", ship.throttle);
+}
+
+#[test]
+fn an_abandoned_hull_takes_no_orders_and_is_held_at_zero_speed_whatever_a_rule_sets() {
+    let mut app = ai_world();
+    let hull = ai_ship(&mut app, "Hulk", "Navy", Vec3::ZERO, None, 4.0);
+    app.world_mut().get_mut::<Ship>(hull).unwrap().waypoints = vec![Vec3::new(0.0, 0.0, -500.0)];
+    app.world_mut().entity_mut(hull).insert(crate::lifeboats::Abandoned);
+    app.update();
+    let (ship, ms) = (app.world().get::<Ship>(hull).unwrap(), app.world().get::<MissionShip>(hull).unwrap());
+    assert_eq!((ship.cap, ship.order, ship.waypoints.len()), (0.0, EngineOrder::Stop, 0));
+    assert!(ms.hold_fire && ms.target.is_none());
+    app.world_mut().get_mut::<Ship>(hull).unwrap().cap = 1.0; // a later `Set Group Throttle Percent`
+    app.update();
+    assert_eq!(app.world().get::<Ship>(hull).unwrap().cap, 0.0, "held again");
+}
+
+/// The rules `update` system with the queries a custom mission adds (placed mines are rule units, a ship's cloak and abandoned state):
+/// it starts without a query conflict and a mine is addressed by its world-object id like any unit. Asset-free.
+#[test]
+fn a_custom_missions_mines_are_units_the_rules_can_count_and_hand_over() {
+    let data = serde_json::json!({
+        "players": ["Player0 Group", "Pirates"],
+        "groups": {"Field": [5, 6]},
+        "rules": [
+            {"name": "count", "Run Once": true, "conditions": [{"Type": "Group has X members", "Group Name": "Field", "Equivalence": "Equal To", "number": 2}],
+             "actions": [{"Type": "Set Flag Action", "Flag Name": "two mines", "Boolean Value": "TRUE"}, {"Type": "Set Group/Unit Owner", "Group/Unit Name": "Field", "New Owner": "Pirates"}]},
+        ],
+    });
+    let mission = Mission { id: "synthetic".into(), script: Script::new(&data, serde_json::json!({})), data, opening: None };
+    let mut app = rules_app(mission);
+    let class = crate::fixed_tests::synthetic_class();
+    app.insert_resource(Library { classes: vec![class], guns: default(), bullets: default(), names: default(), clips: default() });
+    app.world_mut().spawn((
+        Ship::new(0, Side::Player),
+        Health { sections: vec![], core: 100.0, destroyed: false },
+        Transform::default(),
+        Visibility::Inherited,
+        PlayerShip,
+        MissionShip { id: 1, name: "RLS Hawk".into(), owner: "Player0 Group".into(), visible: true, ..default() },
+    ));
+    let mines: Vec<Entity> = [5, 6]
+        .map(|id| app.world_mut().spawn((crate::combat::MapMine { id, bullet: "Bullet_StarMine_Med".into(), owner: String::new(), side: None }, Transform::default())).id())
+        .into();
+    app.update();
+    app.update();
+    assert!(app.world().resource::<Mission>().script.flag("two mines"), "both mines are in the group the rules see");
+    for e in mines {
+        let mine = app.world().get::<crate::combat::MapMine>(e).unwrap();
+        assert_eq!(mine.owner, "Pirates", "Set Group/Unit Owner hands a mission's mine to a player");
+        assert_eq!(mine.side, Some(Side::Enemy), "and it fights for the side that player has in the mission: hostile to the human's");
+    }
+}

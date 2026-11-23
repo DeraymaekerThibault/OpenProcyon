@@ -85,6 +85,7 @@ For a mission, the loader reads only the keys marked "yes" below. Numbers are ga
 | `world_half` | yes | half the side of the map's square: the star map's extent and where computer ships search. Default 1000. Keep your objects and ships inside it (nothing stops you leaving it) |
 | `objects` | yes | scenery, section 9 |
 | `nebulae` | yes | clouds and storms, section 8 |
+| `mines` | yes, custom missions only | `[{"type": "Bullet_StarMine_Med", "id": 7, "pos": [x, y, z]}]`: mines resting where you put them, hostile to every ship until a rule hands one over with `Set Group/Unit Owner` (give each a unique `id`, and list it in a `groups` entry to address it). `OP Place Mines` lays them from a rule instead. `docs/modding.md` "Mission rule extensions" |
 | `players` | no | skirmish lobby slots. `--check-mission` reads the names as known players, but a mission's players live in `mission.json`. Leave it out, or fill it as the retail maps do: `{"name", "team": -1, "start": [x, y, z], "forward": [x, y, z], "formation": 0, "playable": true, "race": 4, "color": [r, g, b, a]}` (`race`: 0 Navy, 2 Pirate, 3 Procyon, 4 open; other numbers are unverified) |
 | `alliance_change`, `teams`, `ship_names`, `name_id`, `desc_id`, `assemble`, `islands_make_sounds` | no | skirmish-lobby and retail-text fields; leave them out |
 
@@ -234,8 +235,9 @@ Patterns that recur:
 
 Observed while building larger missions and re-read against `game/src/rules/eval/`:
 
-- **`Teleport Group/Unit` sends every member of the group to the first point of the set**, so a group of two lands stacked. Use one group
-  and one point set per ship, offset by hand. It changes the position only: heading, speed and damage stay.
+- **`Teleport Group/Unit` sends every member of the group to the first point of the set**, so a group of two lands stacked. It changes
+  the position only: heading, speed and damage stay. `OP Teleport` takes a point index, an optional heading and keeps the group's layout
+  (`docs/modding.md` "Mission rule extensions"); use it for anything that is not a lone ship.
 - **Damage is a fraction, 0..1**: `Damage Group/Unit by X percent` and `Group/Unit has >,<,= X damage` take 0.3 for 30 per cent (30 would
   kill; the checker reports it). The condition reads the worst-hit member.
 - **Event quotas count "more than N"**: `Team has captured a ship from Group/Unit` and the other event conditions fire when the count is
@@ -243,13 +245,16 @@ Observed while building larger missions and re-read against `game/src/rules/eval
 - **`Group/Unit Docked`** (`Dockers Group/Unit Name`, `Targets Group/Unit Name`) is the docking condition; `Is Ship In Tow` takes
   `Towing Group`, `Target to Tow`, `Boolean`. The tow action is `Tow Ship` (`Docking Group` is the tower), and `Break Tow` lets the
   towed ship coast. A tug within 50 units of its tow (hull to hull) links at once; further away it sails over first.
-- **Lifeboats come with a death by damage**, not by `Destroy Group/Unit`; a ship that only limps on launches none. To stage an
-  abandon-ship scene, place lifeboat ships beside the hull and keep them clear of every live ship: a ship whose bounding sphere
-  touches one collects it.
+- **Lifeboats come with a death by damage**, not by `Destroy Group/Unit`; a ship that only limps on launches none. `OP Abandon Ship`
+  launches them from a hull that stays afloat, disabled (the ship needs `Set Lifeboat Creation State` TRUE). To stage the scene with
+  boats you place yourself, keep them clear of every live ship: a ship whose bounding sphere touches one collects it.
 - **Animals on a mission map start hidden**: a whale or flock needs `Set Group/Unit Visibility` TRUE (the console's `reveal`
   does it for everything) before it shows.
-- **Boarding by the player needs a harpoon mount** on the player's ship; no rule starts a boarding. A capture can be staged with
-  `Transfer Group/Unit to Group`.
+- **Boarding needs a harpoon mount**, for the player and for `OP Board Ship` alike; a boarder without one does nothing. `OP Board Ship`
+  starts a boarding from a rule (a ship that cannot grapple, or a target that is not hostile or not Boardable, is logged and skipped).
+  A capture can also be staged with `Transfer Group/Unit to Group`.
+- **Following and "stopped alongside"**: `OP Follow Group` keeps a ship on a station beside, ahead of or behind another (a campaign
+  mission's AI carries it out); `OP Group Speed` with `Fastest` `Less Than` a small number is "the whole group has stopped".
 - **Throttle caps**: `Set Group Throttle Percent` sets the current speed, `Set Max Throttle Percent (Max user settable)` caps what the
   player may choose; `Speed 0` on the human's ship stops it without capping it.
 - **Time**: timers wait out only the retail mission 1's opening briefing, so a custom mission has no such pause. Whether rule time keeps

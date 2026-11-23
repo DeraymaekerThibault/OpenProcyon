@@ -78,6 +78,10 @@ impl Boarders<'_, '_> {
     pub fn me(&self) -> Option<Entity> {
         self.player.single().ok()
     }
+    /// `e` is a live ship (a base or a destroyed hull has nothing to grapple).
+    pub fn live_ship(&self, e: Entity) -> bool {
+        self.ships.get(e).is_ok_and(|s| !s.1.destroyed)
+    }
 }
 
 const CREW_LINES: [(&str, &[&str]); 11] = [
@@ -153,6 +157,7 @@ pub(super) fn handle_messages(mut msgs: MessageReader<BoardMsg>, mut commands: C
                 }
             }
             BoardMsg::Boardable(..) => {}
+            BoardMsg::Order { boarder, target } => order::begin(&mut commands, &boarders, boarder, target),
         }
     }
 }
