@@ -39,7 +39,7 @@ fn ship(app: &mut App, class: &str, owner: &str, at: Vec3, flag: bool) -> Entity
     };
     app.world_mut().spawn((s, health, Transform::from_translation(at), ms)).id()
 }
-fn boats(app: &mut App) -> Vec<(String, String, Vec3)> {
+fn boats(app: &mut App) -> Vec<(crate::names::Owner, String, Vec3)> {
     let mut q = app.world_mut().query::<(&Lifeboat, &Ship, &Transform)>();
     let lib = app.world().resource::<Library>();
     q.iter(app.world()).map(|(l, s, t)| (l.owner.clone(), lib.classes[s.class].name.clone(), t.translation)).collect()

@@ -252,7 +252,7 @@ fn hostile_island_towers_shoot_the_player_and_neutral_ones_do_not() {
     let ms = crate::campaign::MissionShip {
         id: 1,
         name: "p".into(),
-        owner: player,
+        owner: player.into(),
         hold_fire: false,
         invuln: 1.0,
         visible: true,

@@ -3,6 +3,7 @@
 use serde_json::Value;
 
 use super::*;
+use crate::names::name_newtype;
 
 #[derive(Clone, Copy, PartialEq, Debug, Default)]
 pub enum Stance {
@@ -30,49 +31,6 @@ impl Stance {
     }
 }
 
-macro_rules! name_newtype {
-    ($(#[$m:meta])* $t:ident) => {
-        $(#[$m])*
-        #[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Debug, Default)]
-        pub struct $t(String);
-        impl $t {
-            pub fn as_str(&self) -> &str {
-                &self.0
-            }
-        }
-        impl From<&str> for $t {
-            fn from(s: &str) -> Self {
-                Self(s.to_string())
-            }
-        }
-        impl From<String> for $t {
-            fn from(s: String) -> Self {
-                Self(s)
-            }
-        }
-        impl std::ops::Deref for $t {
-            type Target = str;
-            fn deref(&self) -> &str {
-                &self.0
-            }
-        }
-        impl std::fmt::Display for $t {
-            fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-                self.0.fmt(f)
-            }
-        }
-        impl PartialEq<str> for $t {
-            fn eq(&self, o: &str) -> bool {
-                self.0 == o
-            }
-        }
-        impl PartialEq<&str> for $t {
-            fn eq(&self, o: &&str) -> bool {
-                self.0 == *o
-            }
-        }
-    };
-}
 name_newtype!(
     /// A mission ship's name as rules refer to it ("Group/Unit Name" selectors, the script's `name` field).
     ShipId

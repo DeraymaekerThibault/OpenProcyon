@@ -279,22 +279,22 @@ pub(super) fn settled(
         let r = rng.f();
         match s.outcome {
             Outcome::Won => {
-                let owner = |ms: &Option<Mut<MissionShip>>, mb: &Option<Mut<MissionBase>>, ship: &Option<Mut<Ship>>| {
+                let owner = |ms: &Option<Mut<MissionShip>>, mb: &Option<Mut<MissionBase>>, ship: &Option<Mut<Ship>>| -> crate::names::Owner {
                     ms.as_ref()
                         .map(|m| m.owner.clone())
-                        .or_else(|| mb.as_ref().map(|m| m.owner.clone()))
+                        .or_else(|| mb.as_ref().map(|m| m.owner.as_str().into()))
                         .unwrap_or_else(|| if side_of(ship) == Some(Side::Player) { "Player".into() } else { "Enemy".into() })
                 };
                 let (by, victim) = (owner(&bms, &None, &bship), owner(&tms, &tbase, &tship));
                 info!("boarding: {} captured {}", by, victim);
-                captured.write(Captured { by: by.clone(), victim, unit: s.target });
+                captured.write(Captured { by: by.clone(), victim: victim.to_string(), unit: s.target });
                 if let Some(mut m) = tms {
                     m.owner = by.clone();
                     m.target = None;
                     m.attack.clear();
                 }
                 if let Some(mut b) = tbase {
-                    b.owner = by;
+                    b.owner = by.to_string();
                 }
                 // A skirmish base changes sides with its guns and its place in the end rules.
                 if let (Some(mut bs), Some(side)) = (tside, side_of(&bship)) {

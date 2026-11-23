@@ -11,7 +11,7 @@ use bevy::prelude::*;
 /// whose owner then wins so 'Set Group/Unit Owner' keeps working. Spawned boats have no `MissionShip`: rules address groups, not them.
 #[derive(Component)]
 pub struct Lifeboat {
-    pub owner: String,
+    pub owner: crate::names::Owner,
 }
 
 /// A ship was destroyed in combat (core hit points gone, or the dev kill keys). Scripted `Destroy Group/Unit` is not reported:
@@ -70,7 +70,7 @@ fn lifeboats(
     ships: Query<(&Ship, &Transform, &Health, Option<&MissionShip>), Without<Lifeboat>>,
 ) {
     let owner = |l: &Lifeboat, m: Option<&MissionShip>| m.map_or_else(|| l.owner.clone(), |m| m.owner.clone());
-    let mut present: Vec<(Option<Entity>, String)> = boats.iter().map(|(e, _, _, l, m)| (Some(e), owner(l, m))).collect();
+    let mut present: Vec<(Option<Entity>, crate::names::Owner)> = boats.iter().map(|(e, _, _, l, m)| (Some(e), owner(l, m))).collect();
     // In spawn order of the lost ships: each boat's drift draws from the battle generator.
     for ShipLost(e) in crate::scenario::in_spawn_order(&spawn_order, lost.read(), |l| l.0) {
         let Ok((ship, tf, ms)) = dying.get(*e) else { continue };
@@ -120,7 +120,7 @@ fn lifeboats(
         }
     }
     if let Some(m) = mission.as_mut() {
-        m.script.set_lifeboat_owners(present.into_iter().map(|p| p.1).collect());
+        m.script.set_lifeboat_owners(present.into_iter().map(|p| p.1.to_string()).collect());
     }
 }
 

@@ -11,7 +11,7 @@ use crate::{Orbit, Ship, Side};
 #[derive(Clone, PartialEq)]
 pub struct Row {
     /// Key of the slot's ships (`FleetMember.0`).
-    pub owner: String,
+    pub owner: crate::names::Owner,
     /// The human's lobby name; none: the computer's label.
     pub name: Option<String>,
     /// Flag icon number (`FrontEnd_Flag_Small_Icon_NN`).
@@ -27,7 +27,7 @@ pub struct Row {
     pub request_in: bool,
 }
 impl Row {
-    pub fn new(owner: String, name: Option<String>, flag: usize, colour: Color, allied: bool) -> Row {
+    pub fn new(owner: crate::names::Owner, name: Option<String>, flag: usize, colour: Color, allied: bool) -> Row {
         Row { owner, name, flag, colour, local: false, alive: true, allied, request_out: false, request_in: false }
     }
 }
@@ -130,7 +130,7 @@ fn click(
                 }
             }
             if let Some(mut sk) = sk
-                && let Some(s) = sk.sides.get_mut(&owner)
+                && let Some(s) = sk.sides.get_mut(owner.as_str())
             {
                 *s = side;
             }

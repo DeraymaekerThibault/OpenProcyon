@@ -9,7 +9,7 @@ use serde_json::Value;
 pub struct MissionShip {
     pub id: i64,
     pub name: String,
-    pub owner: String,
+    pub owner: crate::names::Owner,
     pub hold_fire: bool,
     pub invuln: f32,
     pub visible: bool,
@@ -447,7 +447,7 @@ pub fn spawn(commands: &mut Commands, assets: &AssetServer, lib: &Library, fxl: 
         let st = &mission.data["player_start"];
         ships.push(serde_json::json!({"id": -1, "type": crate::ship::DEFAULT_SHIP, "pos": st["start"], "rot": [st["forward"][1], -st["forward"][0].as_f64().unwrap_or(0.0), 0.0, st["forward"][0], st["forward"][1], 0.0, 0.0, 0.0, 1.0], "name": "RLS Stand-in", "group": player_group}));
     }
-    let local_owner = player_group.as_str().unwrap_or_default().to_string();
+    let local_owner: crate::names::Owner = player_group.as_str().unwrap_or_default().into();
     commands.queue(move |w: &mut World| {
         w.resource_mut::<crate::ship::Fleets>().local = local_owner;
     });
@@ -458,7 +458,7 @@ pub fn spawn(commands: &mut Commands, assets: &AssetServer, lib: &Library, fxl: 
         let pos = game_to_bevy(&s["pos"]);
         let forward = crate::scenario::game_rotation(&s["rot"]) * Vec3::NEG_Z;
         let heading = (-forward.x).atan2(-forward.z);
-        let owner = s["group"].as_str().unwrap_or("").to_string();
+        let owner: crate::names::Owner = s["group"].as_str().unwrap_or("").into();
         let e = crate::spawn_ship(commands, assets, lib, fxl, s["type"].as_str().unwrap(), Side::Player, pos, heading, None);
         commands.entity(e).insert(crate::ship::FleetMember(owner.clone(), slot));
         commands.entity(e).insert(MissionShip {
