@@ -107,7 +107,8 @@ jobs:
       - run: pip install -r requirements-dev.txt
       - run: tools/check.sh
 
-  # The Windows build must keep working (the game ships there): the same gate, which never runs smokes below --full.
+  # The Windows build must keep working (the game ships there): clippy and the Rust tests, no smokes. The Python tests and lint run on
+  # Linux only (some tests drive shell tools).
   rust-windows:
     needs: [changes, lint]
     if: needs.changes.outputs.rust == 'true'
@@ -127,10 +128,5 @@ jobs:
         with:
           workspaces: game
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          cache: pip
-          cache-dependency-path: requirements-dev.txt
-      - run: pip install -r requirements-dev.txt
-      - run: tools/check.sh
+      - run: cargo clippy --manifest-path game/Cargo.toml --all-targets -- -D warnings
+      - run: cargo test --manifest-path game/Cargo.toml
