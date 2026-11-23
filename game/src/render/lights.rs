@@ -93,7 +93,7 @@ fn effect_lights(
         let e = m.entity;
         let Some(l) = table.get(&m.effect) else { continue };
         // a flash starts at its peak; a steady light starts at a random point of its flicker, so fires do not pulse in step
-        let age = if l.seconds > 0.0 { 0.0 } else { e.index().index() as f32 * 0.37 % 7.0 };
+        let age = if l.seconds > 0.0 { 0.0 } else { e.index().index() as f32 * FLICKER_PHASE_STEP % FLICKER_PHASE_WRAP };
         let glow = EffectGlow { peak: l.lumens, seconds: l.seconds, age, flicker: l.flicker, thrust: None };
         let (mut at, mut spot) = (Transform::default(), None);
         if l.cone > 0.0 || l.offset != 0.0 {
@@ -128,6 +128,19 @@ fn effect_lights(
     }
 }
 
+/// A steady light starts at a point of its flicker given by the entity index times this (seconds), so fires do not pulse in step. Engine choice, not the original's.
+const FLICKER_PHASE_STEP: f32 = 0.37;
+/// The per-entity flicker start wraps at this many seconds. Engine choice, not the original's.
+const FLICKER_PHASE_WRAP: f32 = 7.0;
+/// Flicker: angular rates (rad/s) of the three sine waves multiplied and added into the noise. Engine choice, not the original's.
+const FLICKER_RATES: [f32; 3] = [13.0, 7.3, 23.0];
+/// Flicker: phase offsets (rad) of the second and third wave. Engine choice, not the original's.
+const FLICKER_OFFSETS: [f32; 2] = [1.1, 2.0];
+/// Flicker: weights of the product wave and of the third wave (they sum to 1). Engine choice, not the original's.
+const FLICKER_MIX: [f32; 2] = [0.7, 0.3];
+/// How fast an exhaust light follows the engine's thrust, per second. Engine choice, not the original's.
+const THRUST_LIGHT_RATE: f32 = 2.5;
+
 /// Intensity of a light `age` seconds in: the quadratic fade (if any) times the flicker.
 fn glow_at(g: &EffectGlow) -> Option<f32> {
     let fade = if g.seconds > 0.0 {
@@ -140,7 +153,10 @@ fn glow_at(g: &EffectGlow) -> Option<f32> {
         1.0
     };
     let t = g.age;
-    let noise = 0.5 + 0.5 * ((13.0 * t).sin() * (7.3 * t + 1.1).sin() * 0.7 + (23.0 * t + 2.0).sin() * 0.3);
+    let noise = 0.5
+        + 0.5
+            * ((FLICKER_RATES[0] * t).sin() * (FLICKER_RATES[1] * t + FLICKER_OFFSETS[0]).sin() * FLICKER_MIX[0]
+                + (FLICKER_RATES[2] * t + FLICKER_OFFSETS[1]).sin() * FLICKER_MIX[1]);
     Some(g.peak * fade * (1.0 - g.flicker * noise) * g.thrust.unwrap_or(1.0))
 }
 
@@ -156,7 +172,7 @@ fn fade_lights(
         let parent = parent.map(ChildOf::parent);
         if let Some((engine, fx)) = parent.and_then(|p| engines.get(p).ok()) {
             let target = if fx.is_none_or(|f| f.emitting) { engine.thrust() } else { 0.0 };
-            glow.thrust = Some(glow.thrust.map_or(target, |t| t + (target - t) * (time.delta_secs() * 2.5).min(1.0)));
+            glow.thrust = Some(glow.thrust.map_or(target, |t| t + (target - t) * (time.delta_secs() * THRUST_LIGHT_RATE).min(1.0)));
         }
         let flame = parent.and_then(|p| flames.get(p).ok()).map(FlameSource::strength);
         if glow.thrust.is_none() && glow.seconds <= 0.0 && glow.flicker <= 0.0 && flame.is_none() {

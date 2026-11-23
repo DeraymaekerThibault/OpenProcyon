@@ -803,8 +803,18 @@ fn furled(p: Vec3, top: f32, amount: f32) -> Vec3 {
     Vec3::new(p.x, top - (top - p.y) * (1.0 - amount), p.z)
 }
 
-/// The most `belly` gives (full wind, both waves at their crest): the sail's bounds allow for it.
+/// The most `belly` gives (full wind, both waves at their crest): the sail's bounds allow for it. The three terms are the
+/// shader's steady bulge and the amplitudes of its two waves (`shaders/sail.wesl`); engine choice, not the original's.
 const BELLY_MAX: f32 = 0.65 + 0.25 + 0.12;
+
+/// How fast a sail's wind follows its ship's share of full speed, per second. Engine choice, not the original's.
+const WIND_RATE: f32 = 1.2;
+/// A sail's flutter clock runs at this share of the profile's `speed` in dead calm. Engine choice, not the original's.
+const CLOCK_IDLE: f32 = 0.35;
+/// Further share of the profile's `speed` the clock gains at full wind (with `CLOCK_IDLE` it sums to 1). Engine choice, not the original's.
+const CLOCK_WIND: f32 = 0.65;
+/// PROVISIONAL: seconds the crew takes to fold or unfold a sail; a guess at the original's fold time.
+const FOLD_SECONDS: f32 = 1.5;
 
 /// Each sail follows its ship's speed: the share of full speed (smoothed) and a clock that runs faster with it, written with
 /// the bulge and the fold to the sail's row of `STATE`.
@@ -822,11 +832,11 @@ fn sail_motion(
     let dt = time.delta_secs();
     for mut sail in &mut sails {
         let share = sail.ship.and_then(|e| ships.get(e).ok()).map_or(0.0, |sh| (sh.speed.abs() / crate::ship::full_speed(&lib.classes[sh.class]).max(1e-3)).clamp(0.0, 1.0));
-        sail.wind += (share - sail.wind) * (dt * 1.2).min(1.0);
-        sail.clock += dt * s.speed * (0.35 + 0.65 * sail.wind);
-        // PROVISIONAL: the crew folds the sails on the All Stop order (not when the ship has coasted to a stop), in 1.5 s.
+        sail.wind += (share - sail.wind) * (dt * WIND_RATE).min(1.0);
+        sail.clock += dt * s.speed * (CLOCK_IDLE + CLOCK_WIND * sail.wind);
+        // PROVISIONAL: the crew folds the sails on the All Stop order (not when the ship has coasted to a stop), in `FOLD_SECONDS`.
         let stopped = sail.ship.and_then(|e| ships.get(e).ok()).is_some_and(|sh| sh.ordered() == 0.0);
-        sail.furl = (sail.furl + if stopped { dt / 1.5 } else { -dt / 1.5 }).clamp(0.0, 1.0);
+        sail.furl = (sail.furl + if stopped { dt / FOLD_SECONDS } else { -dt / FOLD_SECONDS }).clamp(0.0, 1.0);
         let fold = sail.fold(s);
         rows[sail.row] = Vec4::new(sail.wind, sail.clock, fold.x, fold.y);
     }
