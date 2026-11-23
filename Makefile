@@ -10,7 +10,7 @@ endif
 
 help:
 	$(info make run [ARGS="--mission 1"]     Run the game from the repository root (Cargo profile fast))
-	$(info make check [ARGS=--fast]          Format check, strict Clippy, Rust + Python tests (--fast: no startup smoke or battle check))
+	$(info make check [ARGS=--quick|--full]  The gate: --quick while iterating, default before a commit, --full before a PR)
 	$(info make fmt                          Format Rust and Python source)
 	$(info make test-python                  Fast parser/exporter tests (no Rust build))
 	$(info make shot OUT=local/ui.png [ARGS="--shot-frame 80 --late-frame 0"])
