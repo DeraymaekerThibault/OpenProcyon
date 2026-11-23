@@ -161,6 +161,11 @@ fn lobby_scenario(app: &mut App) {
     }
 }
 
+/// The command line starts a battle, a menu screen or a screenshot directly (no player is there to use the import screen).
+fn is_scripted(args: &[String]) -> bool {
+    args.iter().any(|a| matches!(a.as_str(), "--shot" | "--script" | "--menu" | "--map" | "--mission"))
+}
+
 /// Runs the game with one presentation (a view plugin such as the binary's `classic::plugin`); without imported assets it opens
 /// the first-run import screen instead (`setup.rs`, drawn by `setup_view`), which starts the game again once the import is done.
 pub fn run(view: fn(&mut App), setup_view: fn(&mut App)) {
@@ -185,6 +190,11 @@ pub fn run(view: fn(&mut App), setup_view: fn(&mut App)) {
         false if base.join("ships").is_dir() => setup::Imported::Ready,
         false => setup::Imported::Missing,
     };
+    if status != setup::Imported::Ready && is_scripted(&args) {
+        // A scripted run (tools/smokes.sh, shot.sh) has nobody to answer the import screen: fail at once with the hint.
+        eprintln!("No imported assets in {} ({status:?}). Import your copy of the game first: make assets ARGS=\"--game <install dir>\" (or set PROCYON_ASSETS).", base.display());
+        std::process::exit(1);
+    }
     if status != setup::Imported::Ready || args.iter().any(|a| a == "--crashed") {
         eprintln!("Game assets in {}: {status:?}; opening the import screen.", base.display());
         return setup::run(base, content_dir(), setup_view, status, player);
@@ -674,6 +684,15 @@ mod tests {
         let pts = [Vec3::new(5.0, 0.0, 0.0), Vec3::new(1.0, 1.0, 0.0), Vec3::new(-9.0, 0.0, 0.0)];
         assert_eq!(nearest(pts, Vec3::ZERO, |p| *p), Some(pts[1]));
         assert_eq!(nearest(Vec::<Vec3>::new(), Vec3::ZERO, |p| *p), None);
+    }
+    #[test]
+    fn scripted_runs_never_get_the_import_screen() {
+        let args = |a: &[&str]| a.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        for flag in ["--shot", "--script", "--menu", "--map", "--mission"] {
+            assert!(is_scripted(&args(&["game", flag, "x"])), "{flag}");
+        }
+        assert!(!is_scripted(&args(&["game"])));
+        assert!(!is_scripted(&args(&["game", "--crashed", "log.txt"])));
     }
     #[test]
     fn shot_frames_parse_sort_and_name_their_files() {

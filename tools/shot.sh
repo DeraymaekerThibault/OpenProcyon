@@ -20,8 +20,12 @@ if [[ "$frames" == *,* ]]; then for f in ${frames//,/ }; do expected+=("${out%.p
 rm -f "${expected[@]}"
 cd "$root/game"
 # The `fast` profile (game/Cargo.toml): near-release speed with incremental rebuilds. The built binary runs from game/, as cargo run did.
-cargo build --profile fast -q || exit 1
-game="${CARGO_TARGET_DIR:-$root/game/target}/fast/openprocyon"
+# PROCYON_BIN (an absolute path) is a binary the caller has built: smokes.sh and check.sh build once and skip the per-run cargo.
+if [ -n "${PROCYON_BIN:-}" ]; then game=$PROCYON_BIN
+else
+    cargo build --profile fast -q || exit 1
+    game="${CARGO_TARGET_DIR:-$root/game/target}/fast/openprocyon"
+fi
 start=$SECONDS
 if [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || [ "$(uname -o 2>/dev/null)" = Msys ]; then
     "$game" --shot "$out" "$@"; code=$?
