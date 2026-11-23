@@ -45,3 +45,16 @@ class WorktreeTool(unittest.TestCase):
             sh("tools/worktree.sh", "rm", str(wt))
             self.assertFalse(wt.exists())
             self.assertNotIn(str(wt), sh("git", "worktree", "list"))
+
+            # A build older than game/Cargo.toml is copied with a warning; a newer one is not.
+            (main / "game/Cargo.toml").write_text("[package]\n")
+            os.utime(main / "game/target/debug/deps/libx.rlib", (0, 0))
+            out = sh("tools/worktree.sh", "new", "topic", str(wt))
+            self.assertIn("older than game/Cargo.toml", out)
+            # Not committed in the scratch repository: the worktree has no Cargo.toml, unlike the main checkout.
+            self.assertIn("differs from the main checkout", out)
+            sh("tools/worktree.sh", "rm", str(wt))
+            (main / "game/target/debug/deps/libx.rlib").touch()
+            self.assertNotIn(
+                "older than", sh("tools/worktree.sh", "new", "topic", str(wt))
+            )
