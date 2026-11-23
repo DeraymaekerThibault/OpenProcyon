@@ -40,13 +40,13 @@ pub fn turn_factor(c: &Class, h: &Health) -> f32 {
     1.0 - loss(c, h, |s| s.turn)
 }
 
-pub fn is_indirect(gun: &str) -> bool {
-    GunFamily::of(gun).is_indirect()
+pub fn is_indirect(lib: &Library, gun: &str) -> bool {
+    lib.family(gun).is_indirect()
 }
 
 /// Lob weapon of a bullet: 0 gravity charge, 1 nova mortar, 2 star mortar (None: not a lob weapon with a targeting cursor).
-pub fn lob_kind(bullet: &str) -> Option<usize> {
-    match GunFamily::of(bullet) {
+pub fn lob_kind(bullet: GunFamily) -> Option<usize> {
+    match bullet {
         GunFamily::GravCharge => Some(0),
         GunFamily::NovaMortar => Some(1),
         GunFamily::StarMortar => Some(2),

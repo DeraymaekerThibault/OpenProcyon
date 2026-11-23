@@ -236,6 +236,12 @@ pub struct GunDef {
     pub deviation: [f32; 3], // per range band (effective, long, maximum): accuracy deviation (rad); PROVISIONAL: used as max cone half-angle
     pub gravity: bool,
     pub bullet: String,
+    /// Read once at load from the gun's name (`load_weapons`); `Cannon` for a def built without a name.
+    pub family: GunFamily,
+    /// Read once at load from `bullet`.
+    pub bullet_family: GunFamily,
+    /// `is_torpedo_bullet(bullet)`, read once at load.
+    pub bullet_torpedo: bool,
     pub base: Option<String>,   // glb of the turning base
     pub barrel: Option<String>, // glb of the pitching barrel
     pub pivot: Vec3,            // barrel pivot in the base frame
@@ -347,6 +353,10 @@ pub struct BulletDef {
     pub decal: Option<u8>,
     /// Energy net: a hit slows the ship for `duration` seconds, thrust and top speed x (1 - `dissipated`); nets stack.
     pub net: Option<(f32, f32)>,
+    /// Read once at load from the bullet's name (`load_weapons`); `Cannon` for a def built without a name.
+    pub family: GunFamily,
+    /// `is_torpedo_bullet(name)`, read once at load.
+    pub torpedo: bool,
 }
 pub struct Mount {
     pub pos: Vec3,
@@ -478,6 +488,10 @@ pub struct Library {
     pub clips: crate::clips::Clips,
 }
 impl Library {
+    /// The family of the gun fitted under `gun` (its def's field, read at load). A name with no def (a test's) is parsed on the spot.
+    pub fn family(&self, gun: &str) -> GunFamily {
+        self.guns.get(gun).map_or_else(|| GunFamily::of(gun), |g| g.family)
+    }
     pub fn index(&self, name: &str) -> usize {
         self.classes
             .iter()
@@ -513,6 +527,9 @@ pub fn gun_def(g: &Value) -> GunDef {
         deviation: [num(&g["EffectiveRange_AccuracyDeviation"]), num(&g["LongRange_AccuracyDeviation"]), num(&g["MaximumRange_AccuracyDeviation"])],
         gravity: g["BulletAffectedByGravity"].as_bool().unwrap(),
         bullet: g["BulletTypeName_Primary"].as_str().unwrap().into(),
+        family: GunFamily::Cannon,
+        bullet_family: GunFamily::of(g["BulletTypeName_Primary"].as_str().unwrap()),
+        bullet_torpedo: is_torpedo_bullet(g["BulletTypeName_Primary"].as_str().unwrap()),
         base: g["visual"]["base"].as_str().map(String::from),
         barrel: g["visual"]["barrel"].as_str().map(String::from),
         pivot: conv_v(&g["visual"]["pivot"]),
@@ -565,6 +582,8 @@ pub fn bullet_def(b: &Value) -> BulletDef {
             .iter()
             .map(|(m, v)| (m.clone(), v.as_array().unwrap().iter().map(|s| s.as_str().unwrap().to_string()).collect()))
             .collect(),
+        family: GunFamily::Cannon,
+        torpedo: false,
         net: b["net"].as_object().map(|n| (n["duration"].as_f64().unwrap_or(0.0) as f32, n["dissipated"].as_f64().unwrap_or(0.0) as f32)),
         hit_fx: b["hit_fx"].as_str().map(String::from),
         bullet_fx: b["bullet_fx"].as_str().map(String::from),
@@ -611,7 +630,9 @@ pub fn map_json(id: &str) -> Option<Value> {
 /// Every gun and bullet definition (`data/weapons/*.json`), shared by all ships.
 pub fn load_weapons(root: &std::path::Path) -> (HashMap<String, GunDef>, HashMap<String, BulletDef>) {
     let table = |file: &str| read_json(&root.join("data/weapons").join(file)).as_object().unwrap().clone();
-    (table("guns.json").iter().map(|(k, g)| (k.clone(), gun_def(g))).collect(), table("bullets.json").iter().map(|(k, b)| (k.clone(), bullet_def(b))).collect())
+    let guns = table("guns.json").iter().map(|(k, g)| (k.clone(), GunDef { family: GunFamily::of(k), ..gun_def(g) })).collect();
+    let bullets = table("bullets.json").iter().map(|(k, b)| (k.clone(), BulletDef { family: GunFamily::of(k), torpedo: is_torpedo_bullet(k), ..bullet_def(b) })).collect();
+    (guns, bullets)
 }
 
 /// Ship ids: the folders of `ships/` that hold a `ship.json`, sorted.
@@ -774,9 +795,13 @@ mod gun_family_tests {
             let old = name.contains("Mortar") || name.contains("Mine") || name.contains("GravCharge");
             assert_eq!(GunFamily::of(name).is_indirect(), old, "{name}");
             assert_eq!(GunFamily::of(name) == Harpoon, name.contains("Harpoon"), "{name}");
+            assert_eq!(guns[name].family, GunFamily::of(name), "{name}: stored at load");
+            assert_eq!(guns[name].bullet_family.is_mine(), guns[name].bullet.contains("Mine"), "{name}");
+            assert_eq!(guns[name].bullet_torpedo, guns[name].bullet == TORPEDO_BULLET, "{name}");
         }
         for name in bullets.keys() {
             assert_eq!(GunFamily::of(name).is_mine(), name.contains("Mine"), "{name}");
+            assert_eq!((bullets[name].family, bullets[name].torpedo), (GunFamily::of(name), is_torpedo_bullet(name)), "{name}: stored at load");
             // torpedo: the two checks the code used to mix
             assert_eq!(is_torpedo_bullet(name), name == TORPEDO_BULLET, "{name}");
         }

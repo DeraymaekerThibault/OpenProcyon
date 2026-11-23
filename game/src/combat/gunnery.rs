@@ -361,7 +361,7 @@ pub(super) fn fire(
     // Point-defence targets: torpedoes and mines in flight, with their side.
     let incoming: Vec<(AimTarget, Side)> = threats
         .iter()
-        .filter(|(_, _, shell)| is_torpedo_bullet(&shell.bullet) || matches!(shell.payload, Payload::Mine { .. }))
+        .filter(|(_, _, shell)| shell.torpedo || matches!(shell.payload, Payload::Mine { .. }))
         .map(|(entity, transform, shell)| (AimTarget { entity, position: transform.translation, velocity: shell.vel }, shell.side))
         .collect();
     // 'NIS Toggle NIS mode Gun Accuracy': scripted broadsides fly true.
@@ -553,7 +553,7 @@ pub(super) fn fire(
                 state.request.ask();
                 state.request.step(dt, gun.lob.is_some());
             }
-            let gun_target = match (primary && is_indirect(&state.gun), pending) {
+            let gun_target = match (primary && is_indirect(&lib, &state.gun), pending) {
                 // Mine guns never aim: while the ship lays mines they drop them along the mount's rest direction.
                 _ if is_mine(&state.gun) => laying.then(|| AimTarget {
                     entity: Entity::PLACEHOLDER,
@@ -581,7 +581,7 @@ pub(super) fn fire(
                 _ => None,
             };
             // PROVISIONAL (owner retail recollection): torpedoes cannot target base towers.
-            let gun_target = gun_target.filter(|t| !is_torpedo_bullet(&gun.bullet) || !objects.get(t.entity).is_ok_and(|o| o.3.is_some()));
+            let gun_target = gun_target.filter(|t| !gun.bullet_torpedo || !objects.get(t.entity).is_ok_and(|o| o.3.is_some()));
             state.cooldown -= dt;
             state.burst_timer -= dt;
             let mount_rot = tf.rotation * mount.rot;
@@ -589,7 +589,7 @@ pub(super) fn fire(
             let dead = mount.parent.is_some_and(|p| health.sections[p] <= 0.0);
             // Harpoons are grapples, fired by the Grapple order (boarding.rs) and never at will. PROVISIONAL: the original's
             // grapple-gun exclusion is unknown. A dead mount section rests its gun.
-            let aim_at = gun_target.filter(|_| !dead && GunFamily::of(&state.gun) != GunFamily::Harpoon);
+            let aim_at = gun_target.filter(|_| !dead && lib.family(&state.gun) != GunFamily::Harpoon);
             let engaged = aim_turret(state, gun, mount, mount_rot, origin, aim_at, dt, &mut parts);
             shot_engaged |= on_shot && engaged.is_some();
             // A beam gun charges, then holds its beam (combat/beam.rs burns what it touches); it fires no shells.
@@ -603,7 +603,7 @@ pub(super) fn fire(
                         shot_fired |= on_shot;
                         state.request.fired();
                         let target = gun_target.map(|t| t.entity).filter(|e| *e != Entity::PLACEHOLDER);
-                        fired.write(Fired { shooter: me, target, bullet: gun.bullet.clone() });
+                        fired.write(Fired { shooter: me, target, bullet: gun.bullet.clone(), torpedo: gun.bullet_torpedo, mine: gun.bullet_family.is_mine() });
                         if let Some((n, vol, max)) = &gun.sound {
                             sfx.write(Sfx { name: n.clone(), at: Some(origin), vol: *vol, max: *max });
                         }
@@ -677,7 +677,7 @@ pub(super) fn fire(
                 state.rock_ask = false;
                 if !gun.point_defense {
                     let target = gun_target.map(|t| t.entity).filter(|e| *e != Entity::PLACEHOLDER);
-                    fired.write(Fired { shooter: me, target, bullet: gun.bullet.clone() });
+                    fired.write(Fired { shooter: me, target, bullet: gun.bullet.clone(), torpedo: gun.bullet_torpedo, mine: gun.bullet_family.is_mine() });
                 }
                 // Decoded: the gunner shortens only a torpedo launcher's wait (all other guns reload at their authored time).
                 let cut = if gun.torpedo_launcher { gunner_reload_cut(ship, posts, points.as_deref(), &lib, mount.bank) } else { 0.0 };
@@ -702,7 +702,7 @@ pub(super) fn fire(
                     let goal = gun_target.map(|t| t.position);
                     let shot = Launch {
                         vel: gun.lob.and_then(|a| lob_velocity(goal? - origin, a, gun.shell_gravity())).map(|v| turn * v),
-                        aim: goal.filter(|_| is_indirect(&state.gun)),
+                        aim: goal.filter(|_| is_indirect(&lib, &state.gun)),
                         pd: gun.point_defense,
                         harmless: mission.is_some_and(|ms| ms.warning_shots),
                         base: false,
@@ -796,7 +796,7 @@ pub(super) fn launch_shell(
         sfx.write(Sfx { name: n.clone(), at: Some(from), vol: *vol, max: *max });
     }
     let mat = if side == Side::Player { look.shell.clone() } else { look.enemy_shell.clone() };
-    let vel = shot.vel.unwrap_or_else(|| launch_velocity(dir, g.muzzle, is_torpedo_bullet(&g.bullet)));
+    let vel = shot.vel.unwrap_or_else(|| launch_velocity(dir, g.muzzle, g.bullet_torpedo));
     let stf = Transform::from_translation(from).looking_to(vel, Vec3::Y);
     let shell = commands
         .spawn((
@@ -807,6 +807,7 @@ pub(super) fn launch_shell(
                 // Mines drift.
                 gravity: if matches!(b.payload, Payload::Mine { .. }) { 0.0 } else { g.shell_gravity() },
                 bullet: g.bullet.clone(),
+                torpedo: b.torpedo,
                 side,
                 shooter,
                 target,
@@ -913,8 +914,8 @@ pub(super) fn base_fire(
             let (mount_rot, origin) = (tf.rotation * mount.rot, tf.transform_point(mount.pos));
             let dead = mount.parent.is_some_and(|p| health.sections[p] <= 0.0);
             // Mortar towers lob at the ship (PROVISIONAL: mines/grav charges on bases are not seen in the data and stay idle).
-            let usable = !is_indirect(&mount.gun) || gun.lob.is_some();
-            let aim_at = target.map(|t| t.0).filter(|_| !dead && !gun.point_defense && GunFamily::of(&mount.gun) != GunFamily::Harpoon && usable);
+            let usable = !is_indirect(&lib, &mount.gun) || gun.lob.is_some();
+            let aim_at = target.map(|t| t.0).filter(|_| !dead && !gun.point_defense && lib.family(&mount.gun) != GunFamily::Harpoon && usable);
             let engaged = aim_turret(state, gun, mount, mount_rot, origin, aim_at, dt, &mut parts);
             let (Some((aim_dir, distance)), Some((aim_at, target_side))) = (engaged, target) else {
                 state.burst_left = 0;
@@ -922,7 +923,7 @@ pub(super) fn base_fire(
             };
             if state.burst_left == 0 && state.cooldown <= 0.0 && state.aligned && volcano_cycle.is_none() {
                 state.burst_left = gun.burst;
-                fired.write(Fired { shooter: me, target: Some(aim_at.entity), bullet: gun.bullet.clone() });
+                fired.write(Fired { shooter: me, target: Some(aim_at.entity), bullet: gun.bullet.clone(), torpedo: gun.bullet_torpedo, mine: gun.bullet_family.is_mine() });
                 state.cooldown = gun.burst_cycle();
                 state.burst_timer = 0.0;
                 volcano_cycle = volcano.then_some(state.cooldown);
@@ -943,7 +944,7 @@ pub(super) fn base_fire(
                     let side = skirmish_side.map_or(if target_side == Side::Player { Side::Enemy } else { Side::Player }, |b| b.0);
                     let shot = Launch {
                         vel: gun.lob.and_then(|a| lob_velocity(aim_at.position - origin, a, gun.shell_gravity())).map(|v| turn * v),
-                        aim: (is_indirect(&mount.gun) || gun.lob.is_some()).then_some(aim_at.position),
+                        aim: (is_indirect(&lib, &mount.gun) || gun.lob.is_some()).then_some(aim_at.position),
                         base: true,
                         ricochet: band(gun, distance, gun.ricochet),
                         ..default()
@@ -990,7 +991,7 @@ fn aim_turret(
     let half_arc = mount.arc / 2.0; // already converted to radians when loading the mount
     let (mut want_yaw, mut want_pitch, mut engaged) = (0.0f32, Some(0.0f32), None);
     if let Some(aim_at) = aim_at {
-        let to_target = aim_offset(aim_at.position - origin, aim_at.velocity, gun.muzzle, is_torpedo_bullet(&gun.bullet));
+        let to_target = aim_offset(aim_at.position - origin, aim_at.velocity, gun.muzzle, gun.bullet_torpedo);
         let dir = match gun.lob.and_then(|angle| lob_velocity(to_target, angle, gun.shell_gravity())) {
             Some(velocity) => velocity.normalize(),
             None => aim(to_target, gun.muzzle, gun.shell_gravity()),

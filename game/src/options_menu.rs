@@ -563,7 +563,7 @@ fn context_cursor(
         // Armed lob bank: its cursor shows over everything (ships, bases, sea) while the pointer is on the sea plane.
         if let (true, Some(bank), Ok((_, tf, sh, health)), Ok(g)) = (fleets.direct(), target.2.armed, ships.get(actor), guns.get(actor)) {
             let class = &lib.classes[sh.class];
-            let kind = class.mounts.iter().enumerate().find(|(_, m)| m.bank == bank).and_then(|(i, _)| crate::combat::lob_kind(&lib.guns[g.gun(i)].bullet));
+            let kind = class.mounts.iter().enumerate().find(|(_, m)| m.bank == bank).and_then(|(i, _)| crate::combat::lob_kind(lib.guns[g.gun(i)].bullet_family));
             let point = ray.intersect_plane(Vec3::ZERO, InfinitePlane3d::new(Vec3::Y)).map(|t| ray.get_point(t));
             if let (Some(kind), Some(point)) = (kind, point) {
                 let a = crate::combat::LobAimed { kind, solution: crate::combat::lob_solution(&lib, class, health, g, tf, bank, point), point };

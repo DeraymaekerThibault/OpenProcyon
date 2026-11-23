@@ -586,7 +586,7 @@ pub fn hud_input(
         let (ship, equipped) = *ship;
         let class = &lib.classes[ship.class];
         for (GunButton(bank), _) in guns.iter().filter(|(_, i)| **i != Interaction::None) {
-            let indirect = class.mounts.iter().enumerate().any(|(i, m)| m.bank == *bank && combat::is_indirect(equipped.map_or(m.gun.as_str(), |g| g.gun(i))));
+            let indirect = class.mounts.iter().enumerate().any(|(i, m)| m.bank == *bank && combat::is_indirect(&lib, equipped.map_or(m.gun.as_str(), |g| g.gun(i))));
             target.2.armed = if indirect && target.2.armed != Some(*bank) { Some(*bank) } else { None };
             target.2.shot = None;
         }

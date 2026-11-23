@@ -128,7 +128,7 @@ fn mission_two_attack_volume_changes_base_owner_and_gunfire_advances_the_story()
     let owner = &app.world().get::<MissionBase>(base).unwrap().owner;
     assert_eq!(owner, "SmugglerCampEnemy");
     assert!(app.world().resource::<Mission>().script.hostile(owner, &player_owner));
-    app.world_mut().resource_mut::<Messages<Fired>>().write(Fired { shooter: base, target: Some(player), bullet: "Bullet_CannonBall_Light".into() });
+    app.world_mut().resource_mut::<Messages<Fired>>().write(Fired { shooter: base, target: Some(player), bullet: "Bullet_CannonBall_Light".into(), torpedo: false, mine: false });
     app.update();
     let script = &app.world().resource::<Mission>().script;
     assert!(script.timers.contains_key("OnyxFirePause"), "the first tower shot unlocks the next dialogue");

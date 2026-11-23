@@ -710,7 +710,7 @@ fn every_gun_has_a_panel_icon_and_pd_is_hidden() {
     for name in g.keys() {
         assert!(hud.get(gun_icon(name)).is_some(), "{name} -> {} missing", gun_icon(name));
     }
-    assert!(is_indirect("Gun_NovaMortar") && !is_indirect("Gun_CannonBall_Med"));
+    assert!(GunFamily::of("Gun_NovaMortar").is_indirect() && !GunFamily::of("Gun_CannonBall_Med").is_indirect());
     assert!(g["Gun_Lancer_PD_Light"].point_defense);
 }
 #[test]
@@ -1080,6 +1080,7 @@ fn shell_into_a_hull_damages_it_and_reports_the_hit() {
         lifetime: 5.0,
         gravity: 0.0,
         bullet: bullet.clone(),
+        torpedo: is_torpedo_bullet(&bullet),
         side: Side::Player,
         shooter,
         target: None,
@@ -1154,6 +1155,7 @@ fn a_mine_glances_off_allied_hulls_and_strikes_others() {
             lifetime: 1000.0,
             gravity: 0.0,
             bullet: bullet.clone(),
+            torpedo: is_torpedo_bullet(&bullet),
             side: Side::Player,
             shooter,
             target: None,
@@ -1220,6 +1222,7 @@ fn land_in_the_way_stops_a_shell_before_the_hull() {
         lifetime: 5.0,
         gravity: 0.0,
         bullet: bullet.clone(),
+        torpedo: is_torpedo_bullet(&bullet),
         side: Side::Player,
         shooter,
         target: None,
@@ -1338,6 +1341,7 @@ fn a_mine_picks_its_target_five_seconds_after_it_is_laid() {
         lifetime: 1000.0,
         gravity: 0.0,
         bullet: bullet.clone(),
+        torpedo: is_torpedo_bullet(&bullet),
         side: Side::Player,
         shooter,
         target: None,
@@ -1448,8 +1452,8 @@ fn seg_mesh_world(tf: &Transform, s: &Section, a: Vec3, b: Vec3) -> Option<f32> 
 
 #[test]
 fn lob_cursor_sprites_follow_weapon_and_solution() {
-    assert_eq!(lob_kind("Bullet_NovaMortar"), Some(1));
-    assert_eq!(lob_kind("Bullet_CannonBall"), None);
+    assert_eq!(lob_kind(GunFamily::of("Bullet_NovaMortar")), Some(1));
+    assert_eq!(lob_kind(GunFamily::of("Bullet_CannonBall")), None);
     let a = LobAimed { kind: 2, solution: true, point: Vec3::ZERO };
     assert_eq!(a.cursor(), "Cursor_PrimaryShip_SetLobTarget_StarMortar");
     let b = LobAimed { kind: 0, solution: false, ..a };
@@ -1513,6 +1517,7 @@ fn a_new_shell_first_moves_in_the_tick_after_it_was_created() {
         lifetime: 5.0,
         gravity: 0.0,
         bullet: bullet.clone(),
+        torpedo: is_torpedo_bullet(&bullet),
         side: Side::Player,
         shooter: Entity::PLACEHOLDER,
         target: None,

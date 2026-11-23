@@ -82,7 +82,7 @@ fn harpoons<'a>(lib: &'a Library, ship: &Ship, health: &'a Health, guns: Option<
         .iter()
         .enumerate()
         .map(move |(i, m)| (m, guns.map_or(m.gun.as_str(), |g| g.gun(i))))
-        .filter(|(m, gun)| GunFamily::of(gun) == GunFamily::Harpoon && m.parent.is_none_or(|p| health.sections[p] > 0.0))
+        .filter(|(m, gun)| lib.family(gun) == GunFamily::Harpoon && m.parent.is_none_or(|p| health.sections[p] > 0.0))
 }
 /// How many grapples the ship may hold: every gun bank whose first working gun (the first of its mounts whose section still stands)
 /// fires the grappling harpoon adds all its guns, working or not.
@@ -92,7 +92,7 @@ pub(super) fn grapple_limit(lib: &Library, ship: &Ship, health: &Health, guns: O
         mounts
             .iter()
             .enumerate()
-            .map(|(i, m)| (m.bank, m.parent.is_none_or(|p| health.sections[p] > 0.0), GunFamily::of(guns.map_or(m.gun.as_str(), |g| g.gun(i))) == GunFamily::Harpoon)),
+            .map(|(i, m)| (m.bank, m.parent.is_none_or(|p| health.sections[p] > 0.0), lib.family(guns.map_or(m.gun.as_str(), |g| g.gun(i))) == GunFamily::Harpoon)),
     )
 }
 /// `grapple_limit` over (bank, working, fires the harpoon) per gun, in mount order.

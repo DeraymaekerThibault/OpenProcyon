@@ -143,6 +143,7 @@ pub(super) fn burn(
                 lifetime: 0.0,
                 gravity: 0.0,
                 bullet: gun.bullet.clone(),
+                torpedo: bd.torpedo,
                 side: ship.side,
                 shooter: me,
                 target: Some(se),
