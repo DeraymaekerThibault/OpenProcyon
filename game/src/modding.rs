@@ -115,8 +115,9 @@ pub fn save_enabled_in(dir: &Path, mods: &[Installed]) {
     }
 }
 
-/// Object files that mods add keys to instead of replacing.
-const MERGED: &[&str] = &[
+/// Object files that mods add keys to instead of replacing: the one list (`render/mod.rs` reads the two render files it names,
+/// `docs/modding.md` lists them all; a test keeps the doc in step).
+pub const MERGED: &[&str] = &[
     "hud/scales.json",
     "data/collision.json",
     "data/docks.json",
@@ -124,8 +125,8 @@ const MERGED: &[&str] = &[
     "data/weapons/bullets.json",
     "data/ai/weapons.json",
     "menu/strings.json",
-    "data/render/skies.json",
-    "data/render/nebulae.json",
+    crate::render::SKIES,
+    crate::render::NEBULAE,
 ];
 
 fn read(p: &Path) -> Option<Value> {
@@ -381,6 +382,18 @@ fn apply_file(name: &str, from: &Path, to: &Path, base: &Path, doc: Option<&Valu
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_merged_list_in_docs_modding_md_is_this_one() {
+        let doc = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("../docs/modding.md")).unwrap();
+        let row = doc.lines().find(|l| l.contains("**merged**, deep")).expect("the merge rule row of docs/modding.md");
+        let mut listed: Vec<&str> = row.split('|').nth(1).unwrap().split('`').skip(1).step_by(2).collect();
+        let mut code: Vec<&str> = MERGED.to_vec();
+        listed.sort();
+        code.sort();
+        assert_eq!(listed, code, "docs/modding.md and modding::MERGED list different files");
+    }
+
     #[test]
     fn only_an_empty_or_marked_folder_may_be_rebuilt_as_an_overlay() {
         let dir = std::env::temp_dir().join(format!("procyon_overlay_guard_{}", std::process::id()));

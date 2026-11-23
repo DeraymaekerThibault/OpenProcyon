@@ -317,3 +317,34 @@ fn a_line_between_two_objects_is_shown_only_while_both_ends_are() {
     frames(&mut sensors, 0.1, 1.5, 0.05);
     assert!(!sensors.player_sees_both(a, b, None) && sensors.player_sees(a, None), "one end unseen: no line");
 }
+
+/// The `advance_sightings` system's view of `b` after each of 120 updates, with `sleep` of wall time between updates and the
+/// `--fixed-step` time strategy; `b` leaves sight at update 40.
+fn fixed_step_sightings(sleep: std::time::Duration) -> Vec<(bool, f32)> {
+    let (sensors, _, b) = view(480.0);
+    let mut app = App::new();
+    app.add_plugins(bevy::time::TimePlugin)
+        .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(crate::BATTLE_TICK))
+        .insert_resource(sensors)
+        .add_systems(Update, advance_sightings);
+    (0..120)
+        .map(|i| {
+            if i == 40 {
+                app.world_mut().resource_mut::<Sensors>().objects.insert(b, sensor_object(Vec3::X * 520.0, 0.0, "B", 500.0));
+            }
+            std::thread::sleep(sleep);
+            app.update();
+            let s = &app.world().resource::<Sensors>().sightings[&b];
+            (s.seen, s.fade)
+        })
+        .collect()
+}
+
+#[test]
+fn under_fixed_step_the_view_advances_one_tick_per_frame_whatever_the_frame_rate() {
+    let fast = fixed_step_sightings(std::time::Duration::ZERO);
+    let slow = fixed_step_sightings(std::time::Duration::from_millis(5));
+    assert_eq!(fast, slow);
+    // It did play out: lost at the first re-test after the move, then faded out.
+    assert!(fast[39].0 && !fast[119].0 && fast[119].1 < fast[60].1);
+}

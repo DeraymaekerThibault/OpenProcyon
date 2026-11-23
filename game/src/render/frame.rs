@@ -133,8 +133,14 @@ fn gather(
     holes: Query<(&GlobalTransform, &Pull), With<BlackHole>>,
     mut bolts: MessageReader<StormFlash>,
     mut frame: ResMut<Frame>,
+    (loading, mut clock): (Option<Res<crate::loading::Loading>>, Local<f32>),
 ) {
-    let now = real.elapsed_secs();
+    // The shaders' wall clock stands still behind the loading cover, so a picture N frames after loading does not depend on how
+    // many frames the load took (#535 fixed-step runs give identical pictures).
+    if loading.is_none() {
+        *clock += real.delta_secs();
+    }
+    let now = *clock;
     frame.rows[CLOCK] = Vec4::new(now, battle.elapsed_secs(), real.delta_secs(), battle.delta_secs());
     let (sun, colour) = suns.iter().next().map_or((Vec4::ZERO, Vec3::ZERO), |(l, t)| (t.forward().as_vec3().extend(l.illuminance / 10_000.0), l.color.to_linear().to_vec3()));
     frame.rows[SUN] = sun;

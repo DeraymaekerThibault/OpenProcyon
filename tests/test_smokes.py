@@ -84,7 +84,10 @@ class FloodTests(unittest.TestCase):
         flood = (
             "\x1b[31mERROR\x1b[0m rodio::stream: audio stream error: POLLERR\n" * 50_000
         )
-        with tempfile.NamedTemporaryFile("w", suffix=".log", delete=False) as f:
+        # newline="": no \r\n translation on Windows, the log is byte-exact like the game's own
+        with tempfile.NamedTemporaryFile(
+            "w", suffix=".log", delete=False, newline=""
+        ) as f:
             f.write("fleet ECS/UI smoke passed: selection\n" + flood + "last line\n")
         text = gamelog.read(f.name, "panicked at|smoke passed", tail=1000)
         self.assertLess(len(text), 1200)

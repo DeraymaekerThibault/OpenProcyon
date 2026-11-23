@@ -4,6 +4,31 @@ A mod is a folder of files that the game lays over the player's imported assets 
 images (PNG) and sounds (OGG). No code and no patching: ships, guns, maps, custom missions and campaigns, sounds, UI art, fonts
 and the graphics look are all files. When something needs the engine to change, see "Sharing a mod" below.
 
+## Your first mod in 5 minutes
+
+You need a source checkout with the game imported (`make assets`, see the README). Make Silver's Man-o'-War cheaper in skirmish:
+
+1. Copy the example: `cp -r mods/silver-skirmish local/my-mod` (`local/` is git-ignored scratch).
+2. Open `local/my-mod/ships/Ship_Pirate_Silver/ship.json` and change `"points": 255` to `"points": 100`.
+3. In `local/my-mod/mod.json` change `id` to `my-mod` and `name` to your own (the folder name is the id; the example mods need
+   `id`, `name`, `version`, `category`, `description`).
+4. Run it from the checkout root: `make run ARGS='--mod local/my-mod'`. Open Skirmish, set your row's fleet type to Pirate in the
+   lobby (Silver's ship is a Pirate hull, and the fleet screen lists only your fleet type's ships), then open the fleet screen:
+   it is listed under Available Ships as "Pirate Man-O-War" at its new cost, 100.
+5. To see exactly what the game got, open `local/overlay/ships/Ship_Pirate_Silver/ship.json` (one line of JSON): the
+   overlay holds the base files with your files laid over them, rebuilt at every launch. Restart after every edit.
+
+Three things to know before you go further:
+
+- `"extends": "<Id>"` copies that ship and changes only the keys you give. The same id as the folder changes that ship in place; a
+  new id (a new folder) adds a ship beside it.
+- A key the game does not know is ignored without a word: a typo such as `"sigth"` does nothing. Compare the spelling with
+  [data-format.md](data-format.md#shipjson-keys).
+- Nothing changes? Check the folder nesting (`my-mod/mod.json`, not `my-mod/my-mod/mod.json`), that you restarted, and
+  ["Troubleshooting"](#troubleshooting).
+
+The longer walk-through below ("Your first mod") builds a mod from scratch.
+
 ## Where things live
 
 | Doc | What it holds |
@@ -157,6 +182,48 @@ Limits (provisional):
 - A mod may ship sounds of its own under `sound/`, found by name ("Sounds and music" below).
 - The full layout of every file is in `docs/data-format.md`.
 
+## Engine extensions (not retail)
+
+This is the one list of what OpenProcyon adds to the original. Everything else aims to behave as the retail game does. Every item
+here is marked in the code with a comment that starts `Not retail:` on the module or item that owns it (`game/src/rules/eval/`
+marks its additions with `Origin::Engine` instead), and `tests/test_extensions.py` checks that this table and those markers agree:
+a file listed here must carry the marker, and a file that carries it must be listed here. A new extension adds a row and the
+marker in the same change.
+
+*Gate* is what switches it on: a file in the overlay (a mod, or `content/`), a key in a data file, or "always" for additions that
+need no data. *Changes* is `simulation` when it can change what happens in a battle (who hits, moves, wins), `presentation` when it
+changes only what is drawn or heard, and `control` when it adds a way for the player to act (keys, menus, the clock) without new
+rules. Data keys the engine adds are also listed per file: ship and gun keys in `docs/data-format.md` ("ship.json keys", the
+`Source` column; `ENGINE_SHIP_KEYS` / `ENGINE_GUN_KEYS` in `game/src/data.rs`), mission keys in "Mission rule extensions" below.
+
+| Extension | Gate | Changes | Code |
+|---|---|---|---|
+| Beam guns: charge, then a held beam that burns ships | a `beam` block on a gun in `data/weapons/guns.json` | simulation | `game/src/combat/beam.rs`, `game/src/data.rs` |
+| Hulls that burn fuel, so a nebula's drain does not slow them | `"fuel": true` in `ship.json` | simulation | `game/src/data.rs` |
+| Mission rule extensions (`OP ` Types, `Is Active`, self-completing tasks, `victory`) | the keys in `mission.json` / `script.json` | simulation | `game/src/rules/eval/schema.rs`, `game/src/rules/check.rs` |
+| Skirmish map scripts and their speech | `maps/<id>/script.json`, `maps/<id>/media.json` | simulation | `game/src/rules/skirmish.rs`, `game/src/classic/mission_ui.rs` |
+| Custom missions a mod adds, and the Single Player > Custom Missions page | a mod's `maps/<id>/mission.json` + `media.json` (the button is always there) | control | `game/src/campaign.rs`, `game/src/menu.rs`, `game/src/classic/menu.rs` |
+| Debug launch options `--fire-rule`, `--start-at` | the command line | control | `game/src/campaign.rs` |
+| Developer console | always (`~` or F12; in a release build Display Options > Developer Console or `--console`) | control (it runs rule actions) | `game/src/rules/console.rs`, `game/src/bindings.rs`, `game/src/menu/settings.rs` |
+| Game-speed buttons | `data/hud/speed.json` (the bundled `game-speed` mod, on by default) | control | `game/src/panels.rs`, `game/src/classic/panels.rs` |
+| Pause key | always | control | `game/src/view.rs` |
+| Number keys: primary ship on 1, secondaries on 2..9, 0, `\` | always | control | `game/src/bindings.rs` |
+| Mods page and its main-menu button, the HD skies bake | always | control | `game/src/menu/mods.rs`, `game/src/classic/menu.rs` |
+| Free camera | `data/camera.json` (the bundled `free-camera` mod, on by default) | presentation | `game/src/view.rs` |
+| Cube-map skies | `models/sky/<sky>_cube.png` | presentation | `game/src/view.rs` |
+| Wake tint per fleet type | `data/fx/wake_tint.json` | presentation | `game/src/wake.rs` |
+| Render profile: sails, plumes, wakes, tracers, bursts, surfaces, deck crews, beams, skies, nebulae, currents, black holes, lights | `data/render/look.json` plus the mod's shaders | presentation | `game/src/render/` |
+| Vsync and anti-aliasing options | always (Display Options) | presentation | `game/src/menu/settings.rs` |
+| Scene-wide particle budget | always | presentation | `game/src/fx/sim.rs` |
+| Debris smoke that stops after a few seconds | always | presentation | `game/src/combat/damage.rs` |
+| Damage decals cleared by a full dock repair | always | presentation | `game/src/decals.rs` |
+| Flags hung on the nearest staff | always | presentation | `game/src/flag.rs` |
+| Loading cover over a battle that is still loading | always | presentation | `game/src/loading.rs`, `game/src/classic/world_hud.rs` |
+
+`game/src/render/` stands for its modules: each one that is part of the render profile starts `Not retail:` (shared helpers such
+as `batch.rs`, which the retail effects use too, do not). The mission rule extensions are described in "Mission rule extensions"
+and "Skirmish map scripts" below, the render profile in "Graphics mods", the console in "The developer console".
+
 ## Authoring missions
 
 The step-by-step guide is `docs/missions.md`; this section is the reference for the checking and tracing flags, and `docs/rule-types.md` lists every condition and action Type with its fields.
@@ -167,7 +234,7 @@ Three launch options make those mistakes loud. None of them is retail behaviour 
 
 | flag | what it does |
 | --- | --- |
-| `--check-mission <map id>` | Loads `maps/<id>/` (`mission.json`, or a skirmish map's `script.json`, plus `map.json` and `media.json`; add `--mod <dir>` as in a normal launch) and checks every rule against the rule schema and the mission's own definitions, without starting the game. It prints one line per problem with the rule, the condition or action and the field, and exits 1 if there are errors. Errors: an unknown Type, a campaign-only Type in a skirmish `script.json`, an unknown or missing field, a group, player, volume, path, objective task or point, point set or map text the mission does not define, a flag or timer that is read but never set or started, a boolean that is not `"TRUE"`/`"FALSE"`, a number that is not a number or is outside its range (damage, throttle and volume fields are fractions 0..1, not percentages), a value outside an enum such as `Equivalence`. Warnings: a speech event, end message or ship name with no `media.json` entry, an empty or memberless group, a rule with no actions, a repeated rule name, a unit name no ship has. `--check-mission all` checks every map the game can see. The retail missions pass with warnings only (the original's own typos, such as mission 10's etherium path `ebend`). A line looks like `ERROR: rule "Convoy Arrives": condition #1 'Enter Volume', field "Volume Name": unknown volume 'Harbor Mouth' (did you mean 'Harbour Mouth'?); it is an empty region that nothing is ever inside` |
+| `--check-mission <map id>` | Loads `maps/<id>/` (`mission.json`, or a skirmish map's `script.json`, plus `map.json` and `media.json`; add `--mod <dir>` as in a normal launch) and checks every rule against the rule schema and the mission's own definitions, without starting the game. It prints one line per problem with the rule, the condition or action and the field, and exits 1 if there are errors. Errors: an unknown Type, a campaign-only Type in a skirmish `script.json`, an unknown or missing field, a group, player, volume, path, objective task or point, point set or map text the mission does not define, a flag or timer that is read but never set or started, a boolean that is not `"TRUE"`/`"FALSE"` (a JSON `true` or `false` is rejected: booleans in rules are always the strings), a number that is not a number or is outside its range (damage, throttle and volume fields are fractions 0..1, not percentages), a value outside an enum such as `Equivalence`. Warnings: a speech event, end message or ship name with no `media.json` entry, an empty or memberless group, a rule with no actions, a repeated rule name, a unit name no ship has. `--check-mission all` checks every map the game can see. The retail missions pass with warnings only (the original's own typos, such as mission 10's etherium path `ebend`). A line names the map folder and file, then the rule, the condition or action and the field: `mission03/mission.json: ERROR: rule "Convoy Arrives": condition #1 'Enter Volume', field "Volume Name": unknown volume 'Harbor Mouth' (did you mean 'Harbour Mouth'?); it is an empty region that nothing is ever inside` |
 | `--dump-rule-schema [path]` | Writes the rule vocabulary as JSON (to `path`, or stdout) and exits; it needs no game assets. Every condition and action Type is listed with `role` (`condition` / `action`), `origin` (`retail`, or `engine` for Types this engine adds), `handler` (`interpreter`, or `victory` for the skirmish end conditions `victory.rs` reads), `campaign_only` (true: a skirmish `script.json` cannot use the Type, `--check-mission` reports an error) and its `fields`: `name`, `kind` (`group`, `player`, `path`, `volume`, `task`, `point`, `timer`, `flag`, `speech_event`, `point_set`, `map_text`, `message`, `team`, `ship_name`, `bool`, `number`, `enum` with its `values`, `text`), `default` (what the interpreter reads when the field is missing), `required`, `used` (false for fields the retail editor exports and the engine ignores), `range` and `soft`. A top-level `kinds` list gives the editor placeholders (`NO PATH`, `NO PLAYER`, ...) that mean "nothing chosen". Use it to lint or generate missions instead of scraping the source. The table is `game/src/rules/eval/schema.rs`; a unit test fails when it and the interpreter's match arms disagree |
 | `--rule-trace`, `--why "<rule name>"` | While the mission plays, log why rules have not fired: `--rule-trace` (or `PROCYON_RULE_TRACE=1`) for every rule that has not fired, `--why` (repeatable) for the named rule only (a name that is part of a rule's name picks every rule containing it). Each line lists the conditions that are false and what the world says about the names they read (group size and living members, flag value, timer reading, speech played or not, volume vertices). A rule is reported when it first waits and again only when the set of false conditions changes, so the log stays short. A `--why` name that matches no rule is a warning listing the rule names |
 

@@ -130,68 +130,65 @@ impl Looks {
     }
 }
 
-fn look(fill: [&str; 5], rim: [&str; 2]) -> Look {
-    let c = |s| hex(s).unwrap_or(Color::BLACK);
-    Look { fill: fill.map(c), rim: rim.map(c) }
-}
+/// The shipped `content/data/hud/theme.json`, compiled in: the one place the default numbers live.
+const SHIPPED: &str = include_str!("../../content/data/hud/theme.json");
 
 impl Default for Theme {
+    /// The shipped file applied over a blank theme (a malformed or missing key there would show as black or zero).
     fn default() -> Self {
-        let c = |s| hex(s).unwrap_or(Color::BLACK);
-        Self {
-            panel_fill: c("#001A44").with_alpha(0.82),
-            box_fill: c("#00103E"),
-            band_fill: c("#0F2E63"),
-            edge: c("#0F7070"),
-            window_fill: c("#0E478AB3"),
-            window_rim: c("#2FC4D4"),
-            heading: c("#40BFD938"),
-            picked: c("#33B3CC73"),
-            rim: c("#BC8724"),
-            rim_light: c("#FFB626"),
-            rim_width: 4.0,
-            rim_outline: c("#2A2316"),
-            rim_core: c("#FFD758"),
-            rim_keyline: c("#43300F"),
-            rim_shadow: c("#53370C"),
-            inset_shadow: c("#00081CB3"),
-            inset_size: 8.0,
-            box_inset_size: 7.0,
-            glow: c("#0A8C96AA"),
-            glow_size: 5.0,
-            track_fill: [c("#288DC666"), c("#58B2E666")],
-            thumb: [c("#2F5C8F"), c("#02112A")],
-            tick: c("#17C21D"),
-            edge_width: 1.0,
-            panel_radius: 20.0,
-            box_radius: 4.0,
-            slot_radius: 6.0,
-            shadow_alpha: 0.5,
-            shadow_blur: 8.0,
-            button: Looks {
-                idle: look(["#3F6A8C", "#5A7FA0", "#042656", "#033F5E", "#022A55"], ["#7A6A48", "#5E5238"]),
-                hover: look(["#2FD3EB", "#4BAFDA", "#15506C", "#088B94", "#0B6E78"], ["#7A6A48", "#5E5238"]),
-                pressed: look(["#006A60", "#003E36", "#00846C", "#00B898", "#00DCC0"], ["#7A6A48", "#5E5238"]),
-                selected: look(["#007F74", "#004A40", "#00987E", "#00D6B1", "#00FBDC"], ["#7A6A48", "#5E5238"]),
-                disabled: look(["#3E4650", "#59636E", "#1A1F26", "#1C2229", "#14181E"], ["#7A6A48", "#5E5238"]),
-                rim_width: 3.0,
-            },
-            pulldown: Looks {
-                idle: look(["#00133AB0"; 5], ["#00D0E0B0", "#00B0C0B0"]),
-                hover: look(["#0A2A5AC0"; 5], ["#40E8F4D0", "#20D0DCD0"]),
-                pressed: look(["#0C3A78E0"; 5], ["#40E8F4D0", "#20D0DCD0"]),
-                selected: look(["#0C3A78FF"; 5], ["#1FA8C8B0", "#0A7F9FB0"]),
-                disabled: look(["#10182AB0"; 5], ["#3A5058A0", "#2E4048A0"]),
-                rim_width: 0.0,
-            },
-        }
+        let v: Value = serde_json::from_str(SHIPPED).expect("content/data/hud/theme.json is valid JSON");
+        Self::from_json_over(Self::blank(), &v)
     }
 }
 
 impl Theme {
+    /// Every colour black, every length zero: only the base `from_json_over` starts from.
+    fn blank() -> Self {
+        let k = Color::BLACK;
+        let l = Look { fill: [k; 5], rim: [k; 2] };
+        let looks = Looks { idle: l, hover: l, pressed: l, selected: l, disabled: l, rim_width: 0.0 };
+        Self {
+            panel_fill: k,
+            box_fill: k,
+            band_fill: k,
+            edge: k,
+            window_fill: k,
+            window_rim: k,
+            heading: k,
+            picked: k,
+            rim: k,
+            rim_light: k,
+            rim_width: 0.0,
+            rim_outline: k,
+            rim_core: k,
+            rim_keyline: k,
+            rim_shadow: k,
+            inset_shadow: k,
+            inset_size: 0.0,
+            box_inset_size: 0.0,
+            glow: k,
+            glow_size: 0.0,
+            track_fill: [k; 2],
+            thumb: [k; 2],
+            tick: k,
+            edge_width: 0.0,
+            panel_radius: 0.0,
+            box_radius: 0.0,
+            slot_radius: 0.0,
+            shadow_alpha: 0.0,
+            shadow_blur: 0.0,
+            button: looks.clone(),
+            pulldown: looks,
+        }
+    }
+
     /// The defaults with every key present in `v` applied (a malformed value keeps its default).
     pub fn from_json(v: &Value) -> Self {
-        let mut t = Self::default();
+        Self::from_json_over(Self::default(), v)
+    }
+
+    fn from_json_over(base: Self, v: &Value) -> Self {
+        let mut t = base;
         let colour = |key: &str| v.get(key).and_then(Value::as_str).and_then(hex);
         let num = |key: &str| v.get(key).and_then(Value::as_f64).map(|n| n as f32);
         if let Some(c) = colour("panel_fill") {
@@ -256,11 +253,26 @@ mod tests {
     use super::*;
 
     #[test]
-    fn shipped_theme_file_matches_the_defaults() {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../content/data/hud/theme.json");
-        let v: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
-        assert_eq!(Theme::from_json(&v), Theme::default());
-        assert_eq!(Theme::default().rim_width, 4.0);
+    fn the_defaults_come_from_the_shipped_file() {
+        let d = Theme::default();
+        assert_eq!((d.rim_width, d.button.rim_width, d.pulldown.rim_width), (4.0, 3.0, 0.0));
+        assert_eq!(d.panel_fill, hex("#001A44").unwrap().with_alpha(0.82));
+        assert_eq!(d.button.hover.fill[0], hex("#2FD3EB").unwrap());
+    }
+
+    #[test]
+    fn every_key_of_the_shipped_file_is_read() {
+        // Dropping any one key must change the theme: a key nothing reads (a typo) or one the default silently fills in would not.
+        let full: Value = serde_json::from_str(SHIPPED).unwrap();
+        let reference = Theme::from_json_over(Theme::blank(), &full);
+        for key in full.as_object().unwrap().keys().filter(|k| !k.starts_with('_')) {
+            let mut v = full.clone();
+            v.as_object_mut().unwrap().remove(key);
+            // panel_alpha equals the fallback alpha of panel_fill (0.82), so dropping it alone changes nothing visible.
+            if key != "panel_alpha" {
+                assert_ne!(Theme::from_json_over(Theme::blank(), &v), reference, "{key} is not read");
+            }
+        }
     }
 
     #[test]

@@ -47,6 +47,25 @@ pub fn number_spawns<T: Component>(app: &mut App) {
     });
 }
 
+/// Counts battle starts (the first and every restart). A system that keeps per-entity state in a `Local` asks `BattleStart` and
+/// drops it when a new battle began, so nothing of the last battle survives a restart.
+#[derive(Resource, Default)]
+pub struct BattleEpoch(u32);
+
+/// `is_new()` is true once for each battle start, on the first run of the system after it.
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct BattleStart<'w, 's> {
+    epoch: Option<Res<'w, BattleEpoch>>,
+    seen: Local<'s, u32>,
+}
+
+impl BattleStart<'_, '_> {
+    pub fn is_new(&mut self) -> bool {
+        let now = self.epoch.as_ref().map_or(0, |e| e.0);
+        std::mem::replace(&mut *self.seen, now) != now
+    }
+}
+
 /// `items` in spawn order (`entity` names each item's entity; `order` looks up its number). Unnumbered items (unit-test worlds) come
 /// first, in their given order, as before.
 pub fn in_spawn_order<T>(order: &Query<&SpawnIndex>, items: impl IntoIterator<Item = T>, entity: impl Fn(&T) -> Entity) -> Vec<T> {
@@ -75,6 +94,8 @@ pub fn reset_sim(world: &mut World) {
     world.insert_resource(combat::SimRng::new(seed));
     world.insert_resource(SpawnCounters::default());
     world.insert_resource(difficulty);
+    world.insert_resource(fx::DetailScale(menu::detail_scale()));
+    world.get_resource_or_insert_with(BattleEpoch::default).0 += 1;
 }
 
 /// A fleet type, as the TWT numbers it: 0 Navy, 2 Pirate, 3 Procyon; 4 (and any other number) is no fleet type chosen or known.

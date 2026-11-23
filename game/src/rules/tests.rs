@@ -861,7 +861,7 @@ fn full_tutorial_camera_objective_clears_by_timer_or_by_leaving_the_start_area()
     for leave in [false, true] {
         let mut sc = crate::campaign::load_id("tutorial").script;
         let mut p = unit("RLS Intrepid", sc.player(), Vec3::new(-1316.7, 0.0, 1407.8)); // the start, in Bevy axes
-        p.groups = vec![sc.player().to_string()];
+        p.groups = vec![sc.player().into()];
         p.primary = true;
         let mut units = [p];
         let active = |sc: &Script| sc.tasks.iter().any(|t| t.active && t.name == "Try Out Camera");
@@ -1123,7 +1123,7 @@ fn mission_ten_tow_is_requested_not_linked_and_ends_with_the_tower() {
     assert!(s.tows().is_empty(), "a destroyed tower drops its tow");
 }
 
-/// Debug launch option `--fire-rule` (not retail): the named rules' actions run after the world-initialise rules, in the order given,
+/// Debug launch option `--fire-rule` (`campaign.rs`): the named rules' actions run after the world-initialise rules, in the order given,
 /// the rule counts as having run, and its own conditions do not make it fire a second time. An unknown name does no harm.
 #[test]
 fn fire_rule_runs_named_rules_at_start_once_and_in_order() {

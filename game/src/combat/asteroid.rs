@@ -65,7 +65,7 @@ impl Asteroid {
         self.hp == 0.0
     }
     pub fn unit(&self, e: Entity, tf: &Transform) -> crate::rules::Unit {
-        crate::rules::Unit { name: self.kind.clone(), owner: self.group.clone(), alive: self.hp > 0.0, ..crate::rules::Unit::new(e, self.id, tf.translation) }
+        crate::rules::Unit { name: self.kind.as_str().into(), owner: self.group.as_str().into(), alive: self.hp > 0.0, ..crate::rules::Unit::new(e, self.id, tf.translation) }
     }
 }
 
@@ -104,7 +104,7 @@ impl PathMode {
 pub fn asteroid_motion(
     time: Res<Time>,
     mut setups: MessageReader<AsteroidSetup>,
-    mut rng: ResMut<SimRng>,
+    (mut rng, spawn_order): (ResMut<SimRng>, Query<&crate::scenario::SpawnIndex>),
     mut rocks: Query<(Entity, &mut Asteroid, &mut Transform, &mut crate::collision::Drift)>,
 ) {
     for setup in setups.read() {
@@ -112,7 +112,8 @@ pub fn asteroid_motion(
             setup.speed.iter().chain(&setup.tumble).all(|v| v.is_finite() && *v >= 0.0) && setup.speed[0] <= setup.speed[1] && setup.tumble[0] <= setup.tumble[1],
             "Invalid asteroid setup intervals"
         );
-        for &e in &setup.units {
+        // In spawn order: each rock draws its velocity and axis from the battle generator.
+        for e in crate::scenario::in_spawn_order(&spawn_order, setup.units.iter().copied(), |e| *e) {
             let Ok((_, mut rock, tf, mut drift)) = rocks.get_mut(e) else { continue };
             drift.0 = Vec3::ZERO; // A new rule-controlled velocity replaces previous contact motion.
             let speed = rng.range(setup.speed[0], setup.speed[1]);
@@ -290,11 +291,11 @@ pub fn asteroid_deaths(
     shapes: Res<crate::collision::Shapes>,
     assets: Res<AssetServer>,
     fxl: Res<FxLib>,
-    mut rng: ResMut<SimRng>,
+    (mut rng, spawn_order): (ResMut<SimRng>, Query<&crate::scenario::SpawnIndex>),
     mut sfx: MessageWriter<Sfx>,
     mut target: ResMut<Target>,
 ) {
-    for death in killed.read() {
+    for death in crate::scenario::in_spawn_order(&spawn_order, killed.read(), |d| d.victim) {
         let Ok((parent, tf, drift)) = rocks.get(death.victim) else { continue };
         let def = &defs.0[&parent.kind];
         // PROVISIONAL: default effect scale and existing explosion pool until the native caller is fully traced.

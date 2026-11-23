@@ -220,7 +220,7 @@ pub(in crate::rules) fn apply(
                         if let Some(side) = side {
                             sh.side = side;
                         }
-                        ms.owner = o.clone();
+                        ms.owner = o.as_str().into();
                     }
                 }
             }

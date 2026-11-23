@@ -3,6 +3,7 @@
 use serde_json::Value;
 
 use super::*;
+use crate::names::name_newtype;
 
 #[derive(Clone, Copy, PartialEq, Debug, Default)]
 pub enum Stance {
@@ -30,17 +31,26 @@ impl Stance {
     }
 }
 
+name_newtype!(
+    /// A mission ship's name as rules refer to it ("Group/Unit Name" selectors, the script's `name` field).
+    ShipId
+);
+name_newtype!(
+    /// An owner or a named group: both act as group selectors in rules ("Player/Owner", `group`).
+    GroupName
+);
+
 /// What the interpreter needs to know about one unit; built each frame from the ECS.
 #[derive(Clone)]
 pub struct Unit {
     pub e: Entity,
     /// TWT world object id (-1: none); `Script::tag` adds the named TWT groups containing it to `groups`.
     pub id: i64,
-    pub name: String,
-    pub owner: String,
+    pub name: ShipId,
+    pub owner: GroupName,
     /// A named TWT group shadows this owner as a rule selector; set by `Script::tag`.
     pub owner_is_named_group: bool,
-    pub groups: Vec<String>,
+    pub groups: Vec<GroupName>,
     pub pos: Vec3,
     pub alive: bool,
     pub visible: bool,
@@ -56,8 +66,8 @@ impl Unit {
         Unit {
             e,
             id,
-            name: String::new(),
-            owner: String::new(),
+            name: ShipId::default(),
+            owner: GroupName::default(),
             owner_is_named_group: false,
             groups: vec![],
             pos,
@@ -202,12 +212,7 @@ pub(in crate::rules) fn b(v: &Value, k: &str) -> bool {
     crate::data::wot_flag(&v[k])
 }
 pub(in crate::rules) fn cmp(eq: &str, a: f32, bb: f32) -> bool {
-    match eq {
-        "Greater Than" => a > bb,
-        "Less Than" => a < bb,
-        "Equal To" => (a - bb).abs() < 1e-4,
-        _ => false,
-    }
+    super::schema::Equivalence::parse(eq).is_some_and(|e| e.holds(a, bb, 1e-4))
 }
 /// Group part of a 'Group,Unit' spec.
 pub(in crate::rules) fn base(spec: &str) -> &str {

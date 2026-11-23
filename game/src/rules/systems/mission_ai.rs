@@ -16,8 +16,11 @@ pub(super) fn mission_ai(
     holes: Query<(&Transform, &crate::blackhole::Pull), Without<Ship>>,
     storms: (Option<Res<crate::nebula::Storms>>, Option<Res<crate::nebula::StormShift>>),
     (guns, time, mut breakoffs): (Query<&crate::combat::GunStates>, Res<Time>, Local<std::collections::HashMap<Entity, crate::ship::attack::Breakoff>>),
-    spawn_order: Query<&crate::scenario::SpawnIndex>,
+    (spawn_order, mut start): (Query<&crate::scenario::SpawnIndex>, crate::scenario::BattleStart),
 ) {
+    if start.is_new() {
+        breakoffs.clear();
+    }
     let key = |e: Entity| crate::scenario::SpawnIndex::of(&spawn_order, e);
     let Some(mission) = mission else { return };
     let holes = crate::ship::hole_list(&holes, storms.0.as_deref(), storms.1.as_deref());

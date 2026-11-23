@@ -85,6 +85,7 @@ files to `content/`, or anything that publishes (pushing tags, releases).
 - Whole-battle comparison (the parity rows listed in #377, label `parity`) is a smoke test that finds rules nobody knew to look for;
   a difference it shows becomes a row on the board, not more runs. `PROCYON_TRACE` (`docs/development.md`) produces this engine's column.
 - Non-trivial changes need a regression test; ECS/UI changes also need a runtime smoke test (a `--script` or screenshot run).
+- Refactors that should not change behaviour: check a simulation refactor with `tools/tracediff.py` (same seed, `--fixed-step`, before and after) and a drawing change with `tools/visdiff.py` (`docs/development.md`).
 - Add behaviour to the module that owns it (`docs/development.md`), not a parallel implementation. Keep asset paths and JSON
   layouts stable; mods reference them.
 - Exporter changes: re-import into a scratch folder and compare with `python3 -m tools.compare_assets` before trusting the result.

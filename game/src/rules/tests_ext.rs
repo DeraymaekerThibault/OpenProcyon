@@ -414,7 +414,7 @@ fn check_mission_reports_mistakes_in_the_new_features() {
     for want in [
         "counter 'never written' is never set (it reads 0), so this can never hold",
         "unknown rule 'Lter' (did you mean 'Later'?)",
-        "true is not \"TRUE\" or \"FALSE\"",
+        "field \"Boolean\": the JSON boolean true is not allowed",
         "unknown condition Type (did you mean 'Flag Condition'?)",
         "\"yes\" is not true/false",
         "\"objectves\" is not \"objectives\"",

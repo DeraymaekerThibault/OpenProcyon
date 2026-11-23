@@ -87,7 +87,7 @@ impl Script {
                 names
                     .into_iter()
                     .map(|g| {
-                        let mut ids: Vec<i64> = self.groups.iter().filter(|(_, n)| n.contains(g)).map(|(id, _)| *id).collect();
+                        let mut ids: Vec<i64> = self.groups.iter().filter(|(_, n)| n.iter().any(|n| n == g.as_str())).map(|(id, _)| *id).collect();
                         ids.sort_unstable();
                         let members: Vec<String> = ids.iter().map(|id| self.object_label(*id, w)).collect();
                         if members.is_empty() { format!("{g}: no members") } else { format!("{g} ({}): {}", members.len(), members.join(", ")) }
@@ -150,7 +150,7 @@ impl Script {
                 .players
                 .iter()
                 .map(|p| {
-                    let ships = w.iter().filter(|u| u.owner == *p).count();
+                    let ships = w.iter().filter(|u| u.owner == p.as_str()).count();
                     format!("{p}: {ships} unit(s){}", if *p == self.player { ", the human player" } else { "" })
                 })
                 .collect(),

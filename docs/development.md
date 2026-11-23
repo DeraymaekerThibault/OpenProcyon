@@ -46,6 +46,12 @@ Git Bash (`GIT_BASH=<path>` if it is not in the default place), and the screensh
    the map's `map.json`. Ships and shells are numbered by creation order (`SpawnIndex`) and `gt` restarts at 0 when a battle restarts,
    so two runs compare row by row. Every battle logs `battle seed N`; `--seed N` or `PROCYON_SEED=N` replays it (`combat::SimRng`,
    docs/re/tick.md).
+   `--fixed-step` (or `PROCYON_FIXED_STEP=1`) makes a scripted run reproducible: each frame is one 33 ms tick at 1x whatever
+   the frame rate, and the clock-seeded cosmetic draws (ship names, stars) use a fixed seed. Run twice, it gives the same
+   pictures and the same trace. `python3 -m tools.tracediff A.csv B.csv` compares two traces (one line per file, then the
+   first differing row). `python3 -m tools.visdiff` renders fixed-step scenes from the merge base (a warm worktree,
+   `../openprocyon-visdiff-base`) and from this checkout, and prints `same` or `CHANGED` per scene, with diff pictures in
+   `local/visdiff/`. Nothing is committed or uploaded. Both builds need `--fixed-step`, so the base must contain #535.
    Two kinds of scenario: a map with the `--ship/--allies/--enemies` shortcut (the human's own fleet; no lobby), and a lobby
    scenario (`--lobby "map=border_dispute;points=1000;limit=10;slots=human,7*computer"`, `menu/lobby_scenario.rs`) that sets the
    skirmish lobby up through the same model as its pull-downs, Auto Assign and Launch button. Only lobby scenarios play allied

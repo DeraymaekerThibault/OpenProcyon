@@ -466,15 +466,22 @@ pub fn sail(
     currents: Query<&crate::environment::Current>,
     mut rams: Option<ResMut<Messages<Ram>>>,
     captains: Query<&crate::campaign::MissionShip>,
-    (fleets, members, mut avoiders, mut rammed, dying, mut broken): (
+    (fleets, members, mut avoiders, mut rammed, dying, mut broken, spawn_order): (
         Option<Res<crate::ship::Fleets>>,
         Query<&crate::ship::FleetMember>,
         Local<HashMap<Entity, avoid::Avoid>>,
         Local<HashMap<Entity, f32>>,
         Query<&crate::combat::Sinking>,
         Option<ResMut<Messages<crate::combat::Destroyed>>>,
+        (Query<&crate::scenario::SpawnIndex>, crate::scenario::BattleStart),
     ),
 ) {
+    let (spawn_order, mut start) = spawn_order;
+    if start.is_new() {
+        cables.clear();
+        avoiders.clear();
+        rammed.clear();
+    }
     let now = time.elapsed_secs();
     // The ram clock starts at creation: a new ship cannot be rammed for its first `RAM_COOLDOWN` s.
     for (ship, new, ..) in ships.iter_mut() {
@@ -683,8 +690,13 @@ pub fn sail(
         apply_impulse(&mut a, &mut da, &ba, j);
         apply_impulse(&mut b, &mut db, &bb, -j);
     }
-    // The collision pass, after every object has moved: ships against the land and rocks, then ship against ship.
-    for (e, s, mut tf, health, drift, docker) in &mut ships {
+    // The collision pass, after every object has moved: ships against the land and rocks, then ship against ship. Ships, rocks and
+    // pairs go in spawn order: the bump sound draws random numbers, and each push moves a hull the next pair sees.
+    let ship_order = crate::scenario::in_spawn_order(&spawn_order, ships.iter().map(|s| s.0), |e| *e);
+    let rock_order = crate::scenario::in_spawn_order(&spawn_order, rocks.iter().map(|r| r.0), |e| *e);
+    let mut walk = ships.iter_many_mut(&ship_order);
+    while let Some(item) = walk.fetch_next() {
+        let Ok((e, s, mut tf, health, drift, docker)) = item else { continue };
         if health.destroyed || ghost(e) || docker.is_some_and(|d| d.gliding() || d.is_docked()) || pinned(e) {
             continue;
         }
@@ -714,7 +726,9 @@ pub fn sail(
         }
         // PROVISIONAL: native asteroid restitution/inertia remain unresolved.
         // shortcut: share the planar ship solver for rocks; upgrade when native asteroid response is decoded.
-        for (rock_e, mut rock, mut rock_tf, mut obstacle, mut rock_drift, visible) in &mut rocks {
+        let mut rock_walk = rocks.iter_many_mut(&rock_order);
+        while let Some(item) = rock_walk.fetch_next() {
+            let Ok((rock_e, mut rock, mut rock_tf, mut obstacle, mut rock_drift, visible)) = item else { continue };
             if rock.hp <= 0.0 || visible == Some(&Visibility::Hidden) {
                 continue;
             }
@@ -755,8 +769,9 @@ pub fn sail(
         }
     }
     // One pass over all pairs: an overlapping pair responds once per tick; a formation overlap settles over several ticks.
-    let mut pairs = ships.iter_combinations_mut();
-    while let Some([(ea, mut a, mut ta, ha, da, docka), (eb, mut b, mut tb, hb, db, dockb)]) = pairs.fetch_next() {
+    let pairs = (0..ship_order.len()).flat_map(|i| (i + 1..ship_order.len()).map(move |j| (i, j)));
+    for (i, j) in pairs {
+        let Ok([(ea, mut a, mut ta, ha, da, docka), (eb, mut b, mut tb, hb, db, dockb)]) = ships.get_many_mut([ship_order[i], ship_order[j]]) else { continue };
         // In the original a ship hitting a lifeboat has no response: lifeboats pass through ships and each other (they still touch for pickup).
         if ha.destroyed
             || hb.destroyed

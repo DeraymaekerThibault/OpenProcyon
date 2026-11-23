@@ -112,6 +112,34 @@ pub enum Origin {
     /// Added by OpenProcyon; the original ignores or rejects it.
     Engine,
 }
+/// The `Equivalence` choice of the comparison conditions: the one place its three spellings and their meaning live. Callers keep
+/// their own epsilon for `EqualTo` (the interpreter's `cmp` 1e-4, the skirmish end rules 1e-3); any other spelling holds never.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Equivalence {
+    GreaterThan,
+    LessThan,
+    EqualTo,
+}
+impl Equivalence {
+    pub const NAMES: [&'static str; 3] = ["Greater Than", "Less Than", "Equal To"];
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "Greater Than" => Some(Self::GreaterThan),
+            "Less Than" => Some(Self::LessThan),
+            "Equal To" => Some(Self::EqualTo),
+            _ => None,
+        }
+    }
+    /// `a <op> b`, `EqualTo` meaning `|a - b| < epsilon`.
+    pub fn holds(self, a: f32, b: f32, epsilon: f32) -> bool {
+        match self {
+            Self::GreaterThan => a > b,
+            Self::LessThan => a < b,
+            Self::EqualTo => (a - b).abs() < epsilon,
+        }
+    }
+}
+
 /// Who evaluates the Type. Skirmish end conditions are read by `victory.rs`, not by the interpreter's match arms.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Handler {
@@ -270,7 +298,7 @@ const fn text(n: &'static str) -> Field {
     Field::new(n, Kind::Text, "")
 }
 
-const COMPARE: &[&str] = &["Greater Than", "Less Than", "Equal To"];
+const COMPARE: &[&str] = &Equivalence::NAMES;
 const FOLLOW: &[&str] = &["to end", "loop", "teleport loop", "end to end"];
 const STANCE: &[&str] = &["Stance_Dummy", "Stance_Neutral", "Stance_Defensive", "Stance_Aggressive", "Stance Persistant", "Stance Persistent", "AI STANCE"];
 const FORMATION: &[&str] = &["None", "Custom", "LineAbreast", "EchelonRight", "EchelonLeft", "Column", "Diamond", "Convoy"];
@@ -622,6 +650,49 @@ mod tests {
             assert!(missing.is_empty(), "{file} handles Types with no entry in RULE_TYPES (schema.rs): {missing:?}");
             assert!(stale.is_empty(), "RULE_TYPES (schema.rs) has Types {file} does not handle: {stale:?}");
         }
+    }
+
+    #[test]
+    fn victory_rs_and_the_victory_entries_agree() {
+        // The arms of victory.rs's `match c["Type"]`; its other `"..." =>` lines are not Types.
+        let read: BTreeSet<String> =
+            arms(include_str!("../../victory.rs")).into_iter().filter(|n| RULE_TYPES.iter().any(|t| t.name == n.as_str()) || !Equivalence::NAMES.contains(&n.as_str())).collect();
+        let declared = names(Role::Condition, Handler::Victory);
+        // It also reads some Types the interpreter shares (Group Destroyed, Enter Volume, ...): those need an entry, of either handler.
+        let all = names(Role::Condition, Handler::Interpreter).into_iter().chain(declared.iter().cloned()).collect::<BTreeSet<_>>();
+        let missing: Vec<_> = read.difference(&all).collect();
+        let stale: Vec<_> = declared.difference(&read).collect();
+        assert!(missing.is_empty(), "victory.rs reads Types with no entry in RULE_TYPES: {missing:?}");
+        assert!(stale.is_empty(), "RULE_TYPES has Handler::Victory Types victory.rs does not read: {stale:?}");
+    }
+
+    #[test]
+    fn equivalence_spellings_and_epsilons_are_the_callers_today() {
+        for (name, e) in Equivalence::NAMES.iter().zip([Equivalence::GreaterThan, Equivalence::LessThan, Equivalence::EqualTo]) {
+            assert_eq!(Equivalence::parse(name), Some(e));
+        }
+        assert_eq!(Equivalence::parse(">"), None, "only the three retail spellings parse");
+        assert!(!cmp_str("greater than", 2.0, 1.0), "case matters, as before");
+        // Interpreter epsilon 1e-4, skirmish end rules 1e-3 (each caller passes its own).
+        assert!(Equivalence::EqualTo.holds(1.0, 1.00005, 1e-4) && !Equivalence::EqualTo.holds(1.0, 1.0002, 1e-4));
+        assert!(Equivalence::EqualTo.holds(1.0, 1.0005, 0.001) && !Equivalence::EqualTo.holds(1.0, 1.002, 0.001));
+        assert!(crate::rules::cmp("Equal To", 1.0, 1.00005) && !crate::rules::cmp("Equal To", 1.0, 1.0002));
+        assert!(!crate::rules::cmp("Nonsense", 1.0, 1.0));
+    }
+
+    fn cmp_str(eq: &str, a: f32, b: f32) -> bool {
+        crate::rules::cmp(eq, a, b)
+    }
+
+    /// Decided (#537): JSON booleans in a rule's boolean field are rejected. `--check-mission` reports them as errors, and every
+    /// reader (this one and victory.rs's `Exists?`) reads only the string "TRUE" (any case) as true, so a JSON `true` reads FALSE.
+    #[test]
+    fn a_json_true_in_a_rule_reads_false() {
+        use serde_json::json;
+        assert!(crate::rules::b(&json!({"Boolean Value": "TRUE"}), "Boolean Value"));
+        assert!(crate::rules::b(&json!({"Boolean Value": "true"}), "Boolean Value"));
+        assert!(!crate::rules::b(&json!({"Boolean Value": true}), "Boolean Value"));
+        assert!(!crate::rules::b(&json!({}), "Boolean Value"));
     }
 
     #[test]

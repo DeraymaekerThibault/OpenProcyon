@@ -309,13 +309,16 @@ pub fn ai(
     holes: Query<(&Transform, &crate::blackhole::Pull), Without<Ship>>,
     storms: (Option<Res<crate::nebula::Storms>>, Option<Res<crate::nebula::StormShift>>),
     (mut explore, mut breakoffs): (Local<Explore>, Local<std::collections::HashMap<Entity, attack::Breakoff>>),
-    (mut clocks, spawn_order): (Local<std::collections::HashMap<Entity, ThinkClock>>, Query<&crate::scenario::SpawnIndex>),
+    (mut clocks, spawn_order, mut start): (Local<std::collections::HashMap<Entity, ThinkClock>>, Query<&crate::scenario::SpawnIndex>, crate::scenario::BattleStart),
     (time, mut targets): (Res<Time>, ResMut<CaptainTargets>),
     (lib, fleets): (Res<combat::Library>, Res<Fleets>),
     bases: Query<(Entity, &Transform, &combat::BaseSide, &Health, &combat::ArmedBase)>,
     scripted: Query<&campaign::MissionShip>,
     (dying, cloaks): (Query<(), With<combat::Sinking>>, Query<&crate::cloak::Cloak>),
 ) {
+    if start.is_new() {
+        (*explore, *breakoffs, *clocks) = Default::default();
+    }
     if mission.is_some() {
         return;
     }
@@ -325,7 +328,7 @@ pub fn ai(
     let holes = hole_list(&holes, storms.0.as_deref(), storms.1.as_deref());
     let now = time.elapsed_secs();
     // (entity, position, side, afloat, radius, fleet, the aim point seen from a position)
-    let snap: Vec<(Entity, Vec3, Side, bool, f32, Option<String>, (Transform, usize, Vec<f32>))> = ships
+    let snap: Vec<(Entity, Vec3, Side, bool, f32, Option<crate::names::Owner>, (Transform, usize, Vec<f32>))> = ships
         .iter()
         .map(|(e, t, s, h, _, _, m, _)| (e, t.translation, s.side, !h.destroyed, lib.classes[s.class].radius, m.map(|m| m.0.clone()), (*t, s.class, h.sections.clone())))
         .collect();
@@ -530,7 +533,7 @@ pub fn approach_speed(speed: f32, target: f32, rate: f32, dt: f32) -> f32 {
 
 /// Fleet identity is not allegiance: allied skirmish players have different owners.
 #[derive(Component, Clone)]
-pub struct FleetMember(pub String, pub usize);
+pub struct FleetMember(pub crate::names::Owner, pub usize);
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Formation {
@@ -571,8 +574,8 @@ pub struct Fleet {
 }
 #[derive(Resource, Default)]
 pub struct Fleets {
-    pub groups: std::collections::BTreeMap<String, Fleet>,
-    pub local: String,
+    pub groups: std::collections::BTreeMap<crate::names::Owner, Fleet>,
+    pub local: crate::names::Owner,
     pub selected: Option<Entity>,
     pub bar_open: bool,
     pub commands_open: bool,

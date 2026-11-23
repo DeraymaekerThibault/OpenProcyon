@@ -3,6 +3,7 @@
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -11,6 +12,11 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 @unittest.skipUnless(shutil.which("bash") and shutil.which("git"), "needs bash and git")
+@unittest.skipIf(
+    sys.platform == "win32",
+    "worktree.sh is a developer tool for Linux/macOS: it relies on symlinks (.venv) and POSIX paths, "
+    "and Windows cannot execute the script directly (WinError 193)",
+)
 class WorktreeTool(unittest.TestCase):
     def test_new_copies_the_build_without_incremental_and_rm_removes_it(self):
         with tempfile.TemporaryDirectory() as tmp:

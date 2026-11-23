@@ -155,7 +155,7 @@ pub enum BoardMsg {
 /// A capture, for the mission rules' capture counts (owner names; skirmish sides are "Player" / "Enemy").
 #[derive(Message)]
 pub struct Captured {
-    pub by: String,
+    pub by: crate::names::Owner,
     pub victim: String,
     pub unit: Entity,
 }

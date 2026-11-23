@@ -134,7 +134,7 @@ fn ship_group_rules_read_ids_volumes_and_captures() {
         {"name": "reach", "winner": NAVY, "if": [{"Type": "Enter Volume", "objects": [129], "polygon": square}]},
         {"name": "taken", "winner": PROC, "if": [{"Type": "Team has captured a ship from Group/Unit", "objects": [129]}]},
         {"name": "sunk", "winner": NAVY, "if": [{"Type": "Group Destroyed", "objects": [130, 131]}, {"Type": "Group Destroyed", "objects": [136]}]},
-        {"name": "lost", "winner": null, "if": [{"Type": "Does Group Contain Unit Name", "objects": [129], "Exists?": false}]},
+        {"name": "lost", "winner": null, "if": [{"Type": "Does Group Contain Unit Name", "objects": [129], "Exists?": "FALSE"}]},
     ]});
     let v = Victory::from_map(&map, teams()).unwrap();
     let far = Vec2::new(500.0, 500.0);
@@ -157,6 +157,18 @@ fn a_team_no_map_names_has_no_ships() {
     let at = |team: &str| Victory::from_map(&rule(team), teams()).unwrap().decide(&state(&fleets, &[]));
     assert_eq!(at("NOBODY"), Some(Outcome::Victory), "an unknown team name reads true");
     assert_eq!(at(PROC), None, "a team with ships afloat reads false");
+}
+
+/// `Exists?` reads like every rule boolean: only the string "TRUE" (any case) is true; a JSON boolean reads as FALSE, which
+/// `--check-mission` reports as an error.
+#[test]
+fn exists_reads_only_the_retail_strings() {
+    let exists = |v: Value| match condition(&json!({"Type": "Does Group Contain Unit Name", "objects": [129], "Exists?": v}), &json!({})) {
+        Some(Cond::UnitPresent { exists, .. }) => exists,
+        _ => panic!("not parsed"),
+    };
+    assert!(exists(json!("TRUE")) && exists(json!("true")));
+    assert!(!exists(json!("FALSE")) && !exists(json!(true)) && !exists(json!(false)));
 }
 
 #[test]
