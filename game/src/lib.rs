@@ -90,6 +90,21 @@ pub struct Config {
 }
 
 static ASSETS: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+/// `--fixed-step` / `PROCYON_FIXED_STEP=1` (#535): every frame advances exactly one battle tick of game time at 1x, whatever the
+/// machine's frame rate, and the clock-seeded cosmetic draws (ship names, stars) use a fixed seed. With the battle seed (`--seed`)
+/// and frames counted after loading, the same scripted run gives the same pictures and trace on every run.
+static FIXED_STEP: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+pub fn fixed_step() -> bool {
+    FIXED_STEP.load(std::sync::atomic::Ordering::Relaxed)
+}
+/// A seed from the clock, or a constant in a fixed-step run.
+pub fn clock_seed() -> u64 {
+    if fixed_step() {
+        return 0x9E37_79B9;
+    }
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(1, |d| d.as_nanos() as u64)
+}
 /// Converted assets: `PROCYON_ASSETS`, else `assets/` in the source checkout, else the per-user folder the importer
 /// (`python -m tools.import_assets`, or the release download's `openprocyon-import`) fills. Nothing from the original game ships with the code.
 pub(crate) fn base_assets() -> PathBuf {
@@ -212,6 +227,7 @@ pub fn run(view: fn(&mut App), setup_view: fn(&mut App)) {
     }
     let arg = |k: &str| args.iter().position(|a| a == k).and_then(|i| args.get(i + 1)).cloned();
     let shot = arg("--shot");
+    FIXED_STEP.store(args.iter().any(|a| a == "--fixed-step") || std::env::var_os("PROCYON_FIXED_STEP").is_some_and(|v| v == "1"), std::sync::atomic::Ordering::Relaxed);
     // Debug aids for mission authors: fire named rules at the start (repeatable) and place the primary ship (x,y in game units).
     let at: Option<Vec<f32>> = arg("--start-at").map(|v| v.split(',').filter_map(|x| x.parse().ok()).collect());
     campaign::set_start(args.windows(2).filter(|w| w[0] == "--fire-rule").map(|w| w[1].clone()).collect(), at.and_then(|c| (c.len() == 2).then(|| (c[0], c[1]))));
@@ -288,6 +304,13 @@ pub fn run(view: fn(&mut App), setup_view: fn(&mut App)) {
             _ => menu::Screen::Battle,
         })
         .insert_resource(cfg)
+        .insert_resource(match fixed_step() {
+            true => {
+                info!("fixed step: {} ms of game time per frame", BATTLE_TICK.as_millis());
+                bevy::time::TimeUpdateStrategy::ManualDuration(BATTLE_TICK)
+            }
+            false => default(),
+        })
         .insert_resource(Outcome::Playing)
         .init_resource::<scenario::EndMessage>()
         .init_resource::<scenario::EndLine>()
