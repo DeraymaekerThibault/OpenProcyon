@@ -100,7 +100,7 @@ fn run(
             primary: s.primary,
             flag: s.mission.flag.clone(),
             attack: s.mission.attack.clone(),
-            ..Unit::new(s.entity, s.mission.id, super::systems::sim_pos(&s.transform, s.interp))
+            ..Unit::new(s.entity, s.mission.id, super::systems::sim_pos(s.transform, s.interp))
         })
         .collect();
     sk.script.keep_sunk(&mut world);

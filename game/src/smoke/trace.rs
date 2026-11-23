@@ -3,6 +3,7 @@
 //! - `<file>.csv`: gt, ship, x, y, vx, vy, fx, fy, hp (section hit points joined by '/'); `ship` is the ship's creation number
 //!   (`scenario::SpawnIndex`) and indexes `<file>.ships.json`.
 //! - `<file>.shells.csv`: gt, id, class, x, y, z, vx, vy, vz; `id` is the shell's creation number; its last row is where it hit or died.
+//!
 //! Rows go in creation order. `gt` starts again from 0 when a battle starts (a restart), so a restarted battle lines up with the first.
 use bevy::prelude::*;
 use std::collections::HashMap;
@@ -59,8 +60,8 @@ fn write(
     let mut ships: Vec<_> = ships.iter().filter(|s| !s.3.destroyed).collect();
     ships.sort_by_key(|s| *s.0);
     for (i, ship, tf, health) in ships {
-        if !trace.names.contains_key(&i.0) {
-            trace.names.insert(i.0, lib.classes[ship.class].name.clone());
+        if let std::collections::hash_map::Entry::Vacant(v) = trace.names.entry(i.0) {
+            v.insert(lib.classes[ship.class].name.clone());
             let names: serde_json::Map<_, _> = trace.names.iter().map(|(i, n)| (i.to_string(), n.clone().into())).collect();
             std::fs::write(format!("{}.ships.json", trace.base), serde_json::Value::Object(names).to_string()).unwrap();
         }

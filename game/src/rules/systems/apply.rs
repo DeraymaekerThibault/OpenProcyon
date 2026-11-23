@@ -160,7 +160,7 @@ pub(in crate::rules) fn apply(
                 }
             }
             Fx::Tow(tower, towee) => {
-                let at = |e| ships.get(e).ok().map(|s| (super::sim_pos(&s.transform, s.interp), env.lib.classes[s.ship.class].radius));
+                let at = |e| ships.get(e).ok().map(|s| (super::sim_pos(s.transform, s.interp), env.lib.classes[s.ship.class].radius));
                 if let (Some((p, rp)), Some((q, rq))) = (at(tower), at(towee))
                     && crate::docking::tow_in_range(p, q, rp, rq)
                 {
@@ -358,7 +358,7 @@ pub(in crate::rules) fn apply(
             }
             Fx::Longboat(u) => {
                 // Launched from the human's command ship: alongside it, same heading.
-                let from = ships.iter().find(|s| s.primary).map(|s| (super::sim_pos(&s.transform, s.interp), s.ship.heading, env.lib.classes[s.ship.class].radius));
+                let from = ships.iter().find(|s| s.primary).map(|s| (super::sim_pos(s.transform, s.interp), s.ship.heading, env.lib.classes[s.ship.class].radius));
                 if let Some((p, heading, r)) = from {
                     for (k, e) in u.into_iter().enumerate() {
                         if let Ok(RuleShipItem { ship: mut sh, transform: mut tf, .. }) = ships.get_mut(e) {
