@@ -16,6 +16,8 @@ import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+from tools.import_assets import find_assets
+
 REPO = Path(__file__).resolve().parents[1]
 
 
@@ -49,6 +51,12 @@ def display_wrapper():
     ):
         return []
     return ["xvfb-run", "-a", "-s", "-screen 0 1280x720x24"]
+
+
+def assets_env():
+    """PROCYON_ASSETS for a game run: the scratch XDG_DATA_HOME hides the per-user import and a linked worktree has none."""
+    assets = find_assets()
+    return {"PROCYON_ASSETS": str(assets)} if assets else {}
 
 
 def silent_data_home(xdg):
@@ -114,6 +122,7 @@ def main():
         env = {
             **os.environ,
             "XDG_DATA_HOME": xdg,
+            **assets_env(),
             "WAYLAND_DISPLAY": "",
             "PROCYON_AUTOPLAY": str(args.limit),
             "PROCYON_PROFILE": "1",

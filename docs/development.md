@@ -108,7 +108,10 @@ Diagnostics are off by default; simulation speed does not scale the frame-time m
 Use a scratch `XDG_DATA_HOME` for automated campaign runs if the player's campaign-point save must remain untouched.
 Converted assets are found in this order: `PROCYON_ASSETS`, `assets/` in the source checkout (regardless of the working directory), then the
 per-user folder `$XDG_DATA_HOME/openprocyon/assets` (Linux default `~/.local/share`; `%APPDATA%\openprocyon\assets` on Windows). Without
-any, the game exits with import instructions. `content/` is always layered on top. CLI mod/screenshot paths remain relative to the working directory.
+any, the game exits with import instructions. `content/` is always layered on top. The tools (tests, `check.sh`, `shot.sh`, `smokes.sh`,
+`battle_check`, `autoplay`) use one order, `find_assets()` in `tools/import_assets.py`: the game's, with the main checkout's `assets/`
+after this checkout's, so a linked worktree uses the main import (never copy `assets/`). They export it as `PROCYON_ASSETS` for the game;
+`check.sh` prints `ASSETS: <path>` or `ASSETS: missing`. CLI mod/screenshot paths remain relative to the working directory.
 
 ### Measuring a look
 

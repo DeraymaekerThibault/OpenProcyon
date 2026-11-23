@@ -6,12 +6,8 @@
 set -uo pipefail
 out=$(realpath -m "$1"); shift
 root="$(cd "$(dirname "$0")/.." && pwd)"
-if [ -z "${PROCYON_ASSETS:-}" ] && [ ! -d "$root/assets" ]; then  # fresh linked worktree: use the main checkout's import
-    common=$(git -C "$root" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)
-    if [ -n "$common" ] && [ -d "$(dirname "$common")/assets" ] && [ "$(dirname "$common")" != "$root" ]; then
-        export PROCYON_ASSETS="$(dirname "$common")/assets"; echo "shot.sh: no assets/ here, using $PROCYON_ASSETS"
-    fi
-fi
+# The import every tool uses (tools/import_assets.py find_assets: a fresh linked worktree uses the main checkout's).
+[ -n "${PROCYON_ASSETS:-}" ] || { a=$(cd "$root" && python3 -c 'from tools.import_assets import find_assets; print(find_assets() or "")'); [ -z "$a" ] || export PROCYON_ASSETS="$a"; }
 frames=500; prev=
 for a in "$@"; do [ "$prev" = --shot-frame ] && frames=$a; prev=$a; done
 expected=()

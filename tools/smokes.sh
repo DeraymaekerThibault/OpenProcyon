@@ -7,7 +7,8 @@ cd "$(dirname "$0")/.."
 out=local/smokes; mkdir -p "$out"
 export XDG_DATA_HOME; XDG_DATA_HOME=$(mktemp -d)
 trap 'rm -rf "$XDG_DATA_HOME"' EXIT
-[ -d assets ] && export PROCYON_ASSETS="${PROCYON_ASSETS:-$PWD/assets}"
+# The scratch XDG_DATA_HOME hides the per-user import: pass on the one every tool finds (tools/import_assets.py find_assets).
+a=$(python3 -c 'from tools.import_assets import find_assets; print(find_assets() or "")'); [ -z "$a" ] || export PROCYON_ASSETS="$a"
 # name | game args (shot.sh adds --shot <png>)
 smokes=$(cat <<'EOF'
 briefing-skip|--mission 1 --script briefing-skip --shot-frame 180 --late-frame 0

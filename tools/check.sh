@@ -51,6 +51,11 @@ if [ "$tier" = quick ] && base=$(git merge-base HEAD origin/main 2>/dev/null || 
   printf '%s\n' "$changed" | grep -q -E '\.py$' || python=
 fi
 
+# The imported assets, found like every tool finds them (tools/import_assets.py find_assets: also the main checkout's from a
+# linked worktree) and exported so the game and the battle check read the same folder.
+assets=$(python3 -c 'from tools.import_assets import find_assets; print(find_assets() or "")')
+if [ -n "$assets" ]; then imported=1; export PROCYON_ASSETS="$assets"; echo "ASSETS: $assets"
+else imported=0; echo "ASSETS: missing"; fi
 step ruff-format ruff format --check .
 step ruff-lint ruff check .
 step hygiene python3 -m unittest discover -s tests -p test_repo_hygiene.py
@@ -67,7 +72,6 @@ if [ "$tier" = quick ]; then
   exit 0
 fi
 
-imported=$(python3 -c 'import sys; sys.path.insert(0, "tests"); from imported import ASSETS; print(int((ASSETS / "ships").is_dir()))')
 if [ "$imported" = 1 ]; then
   step rust-tests cargo test --manifest-path game/Cargo.toml -- --include-ignored
 else

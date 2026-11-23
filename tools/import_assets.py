@@ -17,6 +17,7 @@ import multiprocessing
 import os
 import runpy
 import shutil
+import subprocess
 import sys
 import time
 import traceback
@@ -102,6 +103,45 @@ def user_assets():
     if not d:
         sys.exit("no XDG_DATA_HOME, HOME or APPDATA to put the assets in: pass --out")
     return d / "assets"
+
+
+def main_worktree(repo=REPO):
+    """The main checkout when `repo` is a linked git worktree (it shares the main checkout's git dir), else `repo` itself."""
+    try:
+        common = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(repo),
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir",
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        return repo
+    return Path(common).parent
+
+
+def find_assets(env=os.environ, repo=REPO):
+    """Where the converted assets are; the one lookup order of every tool (tests, check.sh, shot.sh, smokes, battle_check,
+    autoplay): PROCYON_ASSETS, assets/ in this checkout, assets/ in the main checkout (a linked worktree uses the main
+    import, never a copy), then the per-user folder. None when no import is found. The tools export the result as
+    PROCYON_ASSETS so the game reads the same folder (its own order, base_assets() in game/src/lib.rs, has no worktree step)."""
+    if env.get("PROCYON_ASSETS"):
+        return Path(env["PROCYON_ASSETS"])
+    user = user_dir(env)
+    for d in (
+        repo / "assets",
+        main_worktree(repo) / "assets",
+        user and user / "assets",
+    ):
+        if d and (d / "ships").is_dir():
+            return d
+    return None
 
 
 def read_env(path):
