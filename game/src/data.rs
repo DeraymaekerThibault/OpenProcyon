@@ -155,6 +155,69 @@ impl FromWorld for AsteroidDefs {
 /// The retail torpedo bullet (WOT `BulletTypeName_Primary`); aiming, launch and crew calls treat it specially.
 pub const TORPEDO_BULLET: &str = "Bullet_Torpedo";
 
+/// Whether `bullet` is a torpedo. One rule for every caller: the name starts with `TORPEDO_BULLET`. The retail data has exactly one
+/// such bullet (`Bullet_Torpedo`), so an exact match and a prefix match give the same answer on it; the prefix also takes a mod's
+/// `Bullet_Torpedo_Heavy`-style variants.
+pub fn is_torpedo_bullet(bullet: &str) -> bool {
+    bullet.starts_with(TORPEDO_BULLET)
+}
+
+/// The weapon family a gun or bullet name stands for, read once from the name (`Gun_Harpoon_Light`, `Bullet_NovaMortar`...). Names
+/// that carry two families resolve in the order of the variants; the retail names carry one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GunFamily {
+    Harpoon,
+    GravCharge,
+    EnergyNet,
+    Gattling,
+    ArcturianFire,
+    NovaMortar,
+    StarMortar,
+    StarMine,
+    Torpedo,
+    Lancer,
+    Plasma,
+    Carronade,
+    /// Any other name with "Mortar" in it (a mod's).
+    Mortar,
+    /// Any other name with "Mine" in it (a mod's).
+    Mine,
+    /// Cannonballs, and every name that is none of the above.
+    Cannon,
+}
+
+impl GunFamily {
+    pub fn of(name: &str) -> Self {
+        const NAMES: [(&str, GunFamily); 14] = [
+            ("Harpoon", GunFamily::Harpoon),
+            ("GravCharge", GunFamily::GravCharge),
+            ("EnergyNet", GunFamily::EnergyNet),
+            ("Gattling", GunFamily::Gattling),
+            ("ArcturianFire", GunFamily::ArcturianFire),
+            ("NovaMortar", GunFamily::NovaMortar),
+            ("StarMortar", GunFamily::StarMortar),
+            ("StarMine", GunFamily::StarMine),
+            ("Torpedo", GunFamily::Torpedo),
+            ("Lancer", GunFamily::Lancer),
+            ("Plasma", GunFamily::Plasma),
+            ("Carronade", GunFamily::Carronade),
+            ("Mortar", GunFamily::Mortar),
+            ("Mine", GunFamily::Mine),
+        ];
+        NAMES.iter().find(|(n, _)| name.contains(n)).map_or(GunFamily::Cannon, |(_, f)| *f)
+    }
+
+    /// Lobbed or laid rather than aimed: mortars, mines and gravity charges.
+    pub fn is_indirect(self) -> bool {
+        matches!(self, Self::GravCharge | Self::NovaMortar | Self::StarMortar | Self::Mortar | Self::StarMine | Self::Mine)
+    }
+
+    /// A mine: a star mine or any other mine.
+    pub fn is_mine(self) -> bool {
+        matches!(self, Self::StarMine | Self::Mine)
+    }
+}
+
 pub struct GunDef {
     pub mount_type: Option<String>,
     pub points: Option<u32>,
@@ -465,7 +528,7 @@ pub fn gun_def(g: &Value) -> GunDef {
         lob: (g["Is Lobbing Gun"] == true).then(|| g["LobAngle"].as_f64().unwrap_or(0.785) as f32),
         cloak_fire: g["Can Be Fired While Cloaked"].as_bool().unwrap_or_else(|| {
             let b = g["BulletTypeName_Primary"].as_str().unwrap_or_default();
-            b.starts_with(TORPEDO_BULLET) || b == "Bullet_Gattling"
+            is_torpedo_bullet(b) || b == "Bullet_Gattling"
         }),
         beam: BeamDef::from_json(&g["beam"]),
     }
@@ -663,5 +726,62 @@ mod tests {
         assert_eq!(conv(1.0, 2.0, 3.0), Vec3::new(1.0, 3.0, -2.0));
         assert_eq!(crate::game_to_bevy(&serde_json::json!([1.0, 2.0, 3.0])), conv(1.0, 2.0, 3.0));
         assert_eq!(crate::game_to_bevy(&serde_json::json!([1.0])), Vec3::new(1.0, 0.0, 0.0), "missing components read as 0");
+    }
+}
+
+#[cfg(test)]
+mod gun_family_tests {
+    use super::{GunFamily::*, *};
+
+    #[test]
+    fn names_parse_to_their_family() {
+        for (name, family) in [
+            ("Gun_Harpoon_Light_2Deck", Harpoon),
+            ("Gun_GravCharge_Med", GravCharge),
+            ("Gun_EnergyNet_Med", EnergyNet),
+            ("Gun_Gattling_Light", Gattling),
+            ("Gun_ArcturianFire_Heavy", ArcturianFire),
+            ("Bullet_NovaMortar_Secondary", NovaMortar),
+            ("Gun_StarMortar", StarMortar),
+            ("Gun_StarMine_Med", StarMine),
+            ("Bullet_Torpedo", Torpedo),
+            ("Gun_IC_LancerDualMed_DestroyerFront", Lancer),
+            ("Gun_Plasma_Heavy", Plasma),
+            ("Gun_Carronade_Med", Carronade),
+            ("Gun_Mortar_Mod", Mortar),
+            ("Bullet_Mine2", Mine),
+            ("Gun_CannonBall_Med", Cannon),
+            ("Gun_Volcano", Cannon),
+        ] {
+            assert_eq!(GunFamily::of(name), family, "{name}");
+        }
+        assert!(GunFamily::of("Gun_NovaMortar").is_indirect() && GunFamily::of("Bullet_Mine2").is_indirect() && !GunFamily::of("Gun_Torpedo").is_indirect());
+        assert!(GunFamily::of("Bullet_StarMine_Med").is_mine() && !GunFamily::of("Bullet_StarMortar").is_mine());
+    }
+
+    #[test]
+    fn a_torpedo_bullet_is_a_name_starting_with_the_retail_torpedo() {
+        assert!(is_torpedo_bullet("Bullet_Torpedo") && is_torpedo_bullet("Bullet_Torpedo_Heavy"));
+        assert!(!is_torpedo_bullet("Bullet_CannonBall_Med") && !is_torpedo_bullet("Gun_Torpedo"));
+    }
+
+    /// The name rules the families replaced, kept here to prove the enum answers alike on every gun and bullet of the imported data.
+    #[test]
+    #[ignore = "needs imported assets"]
+    fn the_families_agree_with_the_substring_rules_on_every_retail_name() {
+        let (guns, bullets) = load_weapons(crate::assets_dir());
+        for name in guns.keys() {
+            let old = name.contains("Mortar") || name.contains("Mine") || name.contains("GravCharge");
+            assert_eq!(GunFamily::of(name).is_indirect(), old, "{name}");
+            assert_eq!(GunFamily::of(name) == Harpoon, name.contains("Harpoon"), "{name}");
+        }
+        for name in bullets.keys() {
+            assert_eq!(GunFamily::of(name).is_mine(), name.contains("Mine"), "{name}");
+            // torpedo: the two checks the code used to mix
+            assert_eq!(is_torpedo_bullet(name), name == TORPEDO_BULLET, "{name}");
+        }
+        for g in guns.values() {
+            assert_eq!(is_torpedo_bullet(&g.bullet), g.bullet == TORPEDO_BULLET, "{}", g.bullet);
+        }
     }
 }

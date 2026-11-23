@@ -391,7 +391,7 @@ pub(super) fn shells(
     let dt = time.delta_secs();
     // Torpedoes and mines in flight, for point-defence intercepts; each is shot down at most once.
     let threats: Vec<(Entity, Vec3, Side)> =
-        q.iter().filter(|(_, s, _)| s.bullet.starts_with(TORPEDO_BULLET) || matches!(s.payload, Payload::Mine { .. })).map(|(e, s, t)| (e, t.translation, s.side)).collect();
+        q.iter().filter(|(_, s, _)| is_torpedo_bullet(&s.bullet) || matches!(s.payload, Payload::Mine { .. })).map(|(e, s, t)| (e, t.translation, s.side)).collect();
     let mut threat_hp: std::collections::HashMap<Entity, f32> = q.iter().filter(|(e, ..)| threats.iter().any(|t| t.0 == *e)).map(|(e, s, _)| (e, s.hp)).collect();
     let mut downed: Vec<Entity> = vec![];
     for (e, mut s, mut tf) in &mut q {
@@ -724,7 +724,7 @@ pub(super) fn hit_ship(
             }
         });
     }
-    if s.bullet == TORPEDO_BULLET {
+    if is_torpedo_bullet(&s.bullet) {
         info!("Torpedo hit {} ({}){}", class.name, sec.label, if invuln >= 1.0 { " [training: invulnerable]" } else { "" });
     }
     // Decoded: no check for an existing fire on the section, so one section can burn several fires.

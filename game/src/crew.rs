@@ -259,9 +259,9 @@ fn callouts(
         hazards.push("meteor_shower");
     }
     for f in world.fired.read().filter(|f| f.shooter == me) {
-        if f.bullet.starts_with(crate::data::TORPEDO_BULLET) {
+        if crate::data::is_torpedo_bullet(&f.bullet) {
             reports.push("torpedoes_away");
-        } else if !f.bullet.contains("Mine") {
+        } else if !crate::data::GunFamily::of(&f.bullet).is_mine() {
             // Retail: every gun's Firing Crew Alert is fire_weapon except the torpedo's and the mine's (none); no gun uses fire_mortar.
             reports.push("fire_weapon");
         }

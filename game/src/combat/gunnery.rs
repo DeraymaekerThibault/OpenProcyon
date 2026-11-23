@@ -361,7 +361,7 @@ pub(super) fn fire(
     // Point-defence targets: torpedoes and mines in flight, with their side.
     let incoming: Vec<(AimTarget, Side)> = threats
         .iter()
-        .filter(|(_, _, shell)| shell.bullet.starts_with(TORPEDO_BULLET) || matches!(shell.payload, Payload::Mine { .. }))
+        .filter(|(_, _, shell)| is_torpedo_bullet(&shell.bullet) || matches!(shell.payload, Payload::Mine { .. }))
         .map(|(entity, transform, shell)| (AimTarget { entity, position: transform.translation, velocity: shell.vel }, shell.side))
         .collect();
     // 'NIS Toggle NIS mode Gun Accuracy': scripted broadsides fly true.
@@ -581,7 +581,7 @@ pub(super) fn fire(
                 _ => None,
             };
             // PROVISIONAL (owner retail recollection): torpedoes cannot target base towers.
-            let gun_target = gun_target.filter(|t| gun.bullet != TORPEDO_BULLET || !objects.get(t.entity).is_ok_and(|o| o.3.is_some()));
+            let gun_target = gun_target.filter(|t| !is_torpedo_bullet(&gun.bullet) || !objects.get(t.entity).is_ok_and(|o| o.3.is_some()));
             state.cooldown -= dt;
             state.burst_timer -= dt;
             let mount_rot = tf.rotation * mount.rot;
@@ -589,7 +589,7 @@ pub(super) fn fire(
             let dead = mount.parent.is_some_and(|p| health.sections[p] <= 0.0);
             // Harpoons are grapples, fired by the Grapple order (boarding.rs) and never at will. PROVISIONAL: the original's
             // grapple-gun exclusion is unknown. A dead mount section rests its gun.
-            let aim_at = gun_target.filter(|_| !dead && !state.gun.contains("Harpoon"));
+            let aim_at = gun_target.filter(|_| !dead && GunFamily::of(&state.gun) != GunFamily::Harpoon);
             let engaged = aim_turret(state, gun, mount, mount_rot, origin, aim_at, dt, &mut parts);
             shot_engaged |= on_shot && engaged.is_some();
             // A beam gun charges, then holds its beam (combat/beam.rs burns what it touches); it fires no shells.
@@ -796,7 +796,7 @@ pub(super) fn launch_shell(
         sfx.write(Sfx { name: n.clone(), at: Some(from), vol: *vol, max: *max });
     }
     let mat = if side == Side::Player { look.shell.clone() } else { look.enemy_shell.clone() };
-    let vel = shot.vel.unwrap_or_else(|| launch_velocity(dir, g.muzzle, g.bullet == TORPEDO_BULLET));
+    let vel = shot.vel.unwrap_or_else(|| launch_velocity(dir, g.muzzle, is_torpedo_bullet(&g.bullet)));
     let stf = Transform::from_translation(from).looking_to(vel, Vec3::Y);
     let shell = commands
         .spawn((
@@ -914,7 +914,7 @@ pub(super) fn base_fire(
             let dead = mount.parent.is_some_and(|p| health.sections[p] <= 0.0);
             // Mortar towers lob at the ship (PROVISIONAL: mines/grav charges on bases are not seen in the data and stay idle).
             let usable = !is_indirect(&mount.gun) || gun.lob.is_some();
-            let aim_at = target.map(|t| t.0).filter(|_| !dead && !gun.point_defense && !mount.gun.contains("Harpoon") && usable);
+            let aim_at = target.map(|t| t.0).filter(|_| !dead && !gun.point_defense && GunFamily::of(&mount.gun) != GunFamily::Harpoon && usable);
             let engaged = aim_turret(state, gun, mount, mount_rot, origin, aim_at, dt, &mut parts);
             let (Some((aim_dir, distance)), Some((aim_at, target_side))) = (engaged, target) else {
                 state.burst_left = 0;
@@ -990,7 +990,7 @@ fn aim_turret(
     let half_arc = mount.arc / 2.0; // already converted to radians when loading the mount
     let (mut want_yaw, mut want_pitch, mut engaged) = (0.0f32, Some(0.0f32), None);
     if let Some(aim_at) = aim_at {
-        let to_target = aim_offset(aim_at.position - origin, aim_at.velocity, gun.muzzle, gun.bullet == TORPEDO_BULLET);
+        let to_target = aim_offset(aim_at.position - origin, aim_at.velocity, gun.muzzle, is_torpedo_bullet(&gun.bullet));
         let dir = match gun.lob.and_then(|angle| lob_velocity(to_target, angle, gun.shell_gravity())) {
             Some(velocity) => velocity.normalize(),
             None => aim(to_target, gun.muzzle, gun.shell_gravity()),

@@ -41,12 +41,17 @@ pub fn turn_factor(c: &Class, h: &Health) -> f32 {
 }
 
 pub fn is_indirect(gun: &str) -> bool {
-    gun.contains("Mortar") || gun.contains("Mine") || gun.contains("GravCharge")
+    GunFamily::of(gun).is_indirect()
 }
 
 /// Lob weapon of a bullet: 0 gravity charge, 1 nova mortar, 2 star mortar (None: not a lob weapon with a targeting cursor).
 pub fn lob_kind(bullet: &str) -> Option<usize> {
-    [("GravCharge", 0), ("NovaMortar", 1), ("StarMortar", 2)].into_iter().find(|(n, _)| bullet.contains(n)).map(|(_, k)| k)
+    match GunFamily::of(bullet) {
+        GunFamily::GravCharge => Some(0),
+        GunFamily::NovaMortar => Some(1),
+        GunFamily::StarMortar => Some(2),
+        _ => None,
+    }
 }
 
 /// The armed lob bank's aim under the mouse (docs/re/gunnery.md "Lob targeting cursor"); None when not armed or no ground point.
