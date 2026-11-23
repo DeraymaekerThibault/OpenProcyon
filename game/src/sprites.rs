@@ -320,11 +320,11 @@ pub fn offset(h: &HudData, name: &str) -> Vec2 {
 
 pub fn plugin(app: &mut App) {
     let path = assets_dir().join("hud/hud.json");
-    let Ok(text) = std::fs::read_to_string(&path) else {
+    if !path.is_file() {
         warn!("no HUD data at {path:?}; run tools/build_assets.sh");
         return;
-    };
-    let comps: Value = serde_json::from_str(&text).expect("hud.json");
+    }
+    let Some(comps) = crate::data::load_asset::<Value>("hud/hud.json", "the HUD is not drawn") else { return };
     app.insert_resource(HudData { comps: comps.into(), skin: "Navy" })
         .add_systems(PostStartup, load_fonts)
         .add_systems(Update, choose_skin.run_if(in_state(crate::menu::Screen::Battle)));
@@ -382,18 +382,28 @@ fn load_fonts(mut commands: Commands, assets: Res<AssetServer>, mut faces_assets
     };
     let mut faces: HashMap<&str, (Handle<bevy::text::Font>, std::sync::Arc<ab_glyph::FontVec>)> = HashMap::new();
     for e in dir.flatten() {
-        let Ok(v) = serde_json::from_str::<Value>(&std::fs::read_to_string(e.path()).unwrap_or_default()) else { continue };
-        let name = e.path().file_stem().unwrap().to_string_lossy().to_string();
+        let path = e.path();
+        if path.extension().is_none_or(|x| x != "json") {
+            continue;
+        }
+        let name = path.file_stem().unwrap().to_string_lossy().to_string();
+        let Some(v) = crate::data::load_asset::<Value>(&format!("hud/fonts/{name}.json"), &format!("font {name} is left out")) else { continue };
         // Retail names carry the nominal size ("BlackChancery22"); the face is a stand-in with the same character (Chancery, Univers-like sans).
         let (file, k) = vector_slot(&name);
         let size = name.trim_start_matches(|c: char| !c.is_ascii_digit()).parse::<f32>().unwrap_or(12.0) * k;
-        let (face, metrics) = faces
-            .entry(file)
-            .or_insert_with(|| {
-                let bytes = std::fs::read(assets_dir().join(format!("fonts/{file}.otf"))).expect("UI font");
-                (assets.load(format!("fonts/{file}.otf")), std::sync::Arc::new(ab_glyph::FontVec::try_from_vec(bytes).expect("UI font parse")))
-            })
-            .clone();
+        if !faces.contains_key(file) {
+            let face = std::fs::read(assets_dir().join(format!("fonts/{file}.otf"))).map_err(|e| e.to_string()).and_then(|bytes| ab_glyph::FontVec::try_from_vec(bytes).map_err(|e| e.to_string()));
+            match face {
+                Ok(metrics) => {
+                    faces.insert(file, (assets.load(format!("fonts/{file}.otf")), std::sync::Arc::new(metrics)));
+                }
+                Err(err) => {
+                    eprintln!("error: fonts/{file}.otf (face of {name}): {err}; font {name} is left out");
+                    continue;
+                }
+            }
+        }
+        let (face, metrics) = faces[file].clone();
         fonts.0.insert(name, Font { face, metrics, size, height: v["height"].as_f64().unwrap_or(0.0) as f32, advances: advance_table(&v) });
     }
     commands.insert_resource(fonts);

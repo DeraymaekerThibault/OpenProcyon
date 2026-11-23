@@ -22,29 +22,66 @@ use crate::{Library, PlayerShip, Ship};
 
 /// The composed main bar of an art set (`hud/bar/<skin>.json` next to its `.png`): the image holds every part's idle art, the parts
 /// are the boxes the dynamic pieces sit on. Reference pixels.
+/// The composed main bar of one faction (`hud/bar/<skin>.json`): its size and the parts on it, in reference pixels.
+#[derive(serde::Deserialize, Default, Debug, PartialEq)]
+#[serde(from = "RawBar")]
 struct BarLayout {
     size: Vec2,
     parts: Vec<BarPart>,
 }
+#[derive(Debug, PartialEq)]
 struct BarPart {
     sprite: String,
     x: f32,
     size: Vec2,
 }
+/// The file's fields (`width` and `height` beside the parts); unknown fields are allowed.
+#[derive(serde::Deserialize)]
+struct RawBar {
+    width: f32,
+    height: f32,
+    parts: Vec<RawPart>,
+}
+#[derive(serde::Deserialize)]
+struct RawPart {
+    sprite: String,
+    x: f32,
+    width: f32,
+    height: f32,
+}
+impl From<RawBar> for BarLayout {
+    fn from(r: RawBar) -> Self {
+        let parts = r.parts.into_iter().map(|p| BarPart { sprite: p.sprite, x: p.x, size: Vec2::new(p.width, p.height) }).collect();
+        Self { size: Vec2::new(r.width, r.height), parts }
+    }
+}
 impl BarLayout {
     fn path(skin: &str) -> String {
         format!("hud/bar/{}", skin.to_lowercase())
     }
-    fn load(skin: &str) -> Self {
-        let value = crate::data::read_json(&crate::assets_dir().join(format!("{}.json", Self::path(skin))));
-        let num = |v: &serde_json::Value, key: &str| v[key].as_f64().unwrap_or_else(|| panic!("HUD bar {skin}: `{key}` must be a number")) as f32;
+    /// The skin's bar, read once per process. A file that does not read is reported by `data::load_asset` (file, mod, line and
+    /// column); the retail file stands in for it, and with none the bar is empty (nothing drawn) rather than a crash.
+    fn load(skin: &str) -> std::sync::Arc<Self> {
+        static CACHE: std::sync::Mutex<Vec<(String, std::sync::Arc<BarLayout>)>> = std::sync::Mutex::new(Vec::new());
+        let mut cache = CACHE.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((_, layout)) = cache.iter().find(|(s, _)| s == skin) {
+            return layout.clone();
+        }
+        let layout = std::sync::Arc::new(crate::data::load_asset::<BarLayout>(&format!("{}.json", Self::path(skin)), "the main bar is not drawn").unwrap_or_default());
+        cache.push((skin.to_string(), layout.clone()));
+        layout
+    }
+    /// The layout as the code read it before it was typed: `Value` walking with a panic per missing field.
+    #[cfg(test)]
+    fn untyped(value: &serde_json::Value) -> Self {
+        let num = |v: &serde_json::Value, key: &str| v[key].as_f64().unwrap_or_else(|| panic!("HUD bar: `{key}` must be a number")) as f32;
         let parts = value["parts"]
             .as_array()
             .expect("HUD bar needs parts")
             .iter()
             .map(|p| BarPart { sprite: p["sprite"].as_str().expect("HUD bar part needs a sprite").to_string(), x: num(p, "x"), size: Vec2::new(num(p, "width"), num(p, "height")) })
             .collect();
-        Self { size: Vec2::new(num(&value, "width"), num(&value, "height")), parts }
+        Self { size: Vec2::new(num(value, "width"), num(value, "height")), parts }
     }
 }
 
@@ -1105,13 +1142,56 @@ mod tests {
         }
     }
 
+    fn bar_files() -> Vec<std::path::PathBuf> {
+        let mods = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../mods");
+        let mut roots = vec![assets_dir().to_path_buf()];
+        roots.extend(std::fs::read_dir(mods).into_iter().flatten().flatten().map(|m| m.path()));
+        let mut files: Vec<_> = roots.iter().flat_map(|r| std::fs::read_dir(r.join("hud/bar")).into_iter().flatten().flatten().map(|e| e.path())).filter(|p| p.extension().is_some_and(|e| e == "json")).collect();
+        files.sort();
+        files.dedup();
+        files
+    }
+
+    #[test]
+    #[ignore = "needs imported assets"]
+    fn typed_bar_layouts_equal_the_untyped_reader_on_retail_and_mod_data() {
+        let files = bar_files();
+        assert!(files.len() >= 3, "retail has a bar per faction: {files:?}");
+        for f in files {
+            let typed: BarLayout = crate::data::load(&f).unwrap_or_else(|e| panic!("{e}"));
+            let old = BarLayout::untyped(&crate::data::read_json(&f));
+            assert_eq!(typed, old, "{}", f.display());
+        }
+    }
+
+    #[test]
+    fn a_bad_bar_file_is_an_error_naming_the_file_and_never_a_panic() {
+        let dir = std::env::temp_dir().join(format!("procyon-bar-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let good = r#"{"width": 800, "height": 120, "extra": 1, "parts": [{"sprite": "A", "x": 1, "width": 2, "height": 3, "more": true}]}"#;
+        std::fs::write(dir.join("good.json"), good).unwrap();
+        let ok: BarLayout = crate::data::load(&dir.join("good.json")).unwrap();
+        assert_eq!((ok.size, ok.parts.len(), ok.parts[0].size), (Vec2::new(800.0, 120.0), 1, Vec2::new(2.0, 3.0)));
+        for (name, text) in [("syntax", "{"), ("no_parts", r#"{"width": 1, "height": 1}"#), ("no_sprite", r#"{"width": 1, "height": 1, "parts": [{"x": 0, "width": 1, "height": 1}]}"#), ("text", r#"{"width": "1", "height": 1, "parts": []}"#)] {
+            let path = dir.join(format!("{name}.json"));
+            std::fs::write(&path, text).unwrap();
+            let e = crate::data::load::<BarLayout>(&path).unwrap_err().to_string();
+            assert!(e.contains(&format!("{name}.json")), "{e}");
+            // the loader the game uses: reported, the base file stands in when there is one, otherwise the bar is empty
+            assert_eq!(crate::data::load_or_base::<BarLayout>(&path, Some(&dir.join("good.json")), "x").map(|l| l.parts.len()), Some(1), "{name}");
+            assert_eq!(crate::data::load_or_base::<BarLayout>(&path, None, "x"), None, "{name}");
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     #[test]
     #[ignore = "needs imported assets"]
     fn every_faction_has_the_bar_parts_it_needs() {
         let comps: std::sync::Arc<serde_json::Value> = crate::data::read_json(&assets_dir().join("hud/hud.json")).into();
         for skin in ["Navy", "Pirate", "Procyon"] {
             let data = HudData { comps: comps.clone(), skin };
-            for part in BarLayout::load(skin).parts {
+            for part in &BarLayout::load(skin).parts {
                 assert!(size_of(&data, &part.sprite).is_some(), "{skin} lacks {}", part.sprite);
             }
         }

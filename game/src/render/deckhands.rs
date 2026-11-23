@@ -214,11 +214,12 @@ fn f16_to_f32(h: u16) -> f32 {
 
 /// The figure's header and texels, checked: None (with a warning) leaves the block off.
 fn read_kit(root: &std::path::Path) -> Option<(Value, Vec<u8>)> {
-    let head = crate::data::try_json(&root.join(DATA))?;
+    let head: Value = crate::data::load_or_base(&root.join(DATA), None, "deck crews are left off")?;
     let bin = std::fs::read(root.join(DATA).with_extension("bin")).ok()?;
     let (verts, frames) = (head["verts"].as_u64()? as usize, head["frames"].as_u64()? as usize);
-    let names: Vec<&str> = head["clips"].as_array()?.iter().filter_map(|c| c["name"].as_str()).collect();
-    if bin.len() != verts * frames * 2 * 8 || names != CLIPS || head["part"].as_array()?.len() != verts {
+    let clips = head["clips"].as_array()?;
+    let names: Vec<&str> = clips.iter().filter_map(|c| c["name"].as_str()).collect();
+    if bin.len() != verts * frames * 2 * 8 || names != CLIPS || clips.len() != CLIPS.len() || head["part"].as_array()?.len() != verts {
         warn!("render profile: {DATA} does not match its .bin or the clips {CLIPS:?}; deck crews left off");
         return None;
     }
@@ -798,6 +799,21 @@ fn drive(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_bad_kit_header_leaves_deck_crews_off_without_panicking() {
+        let root = std::env::temp_dir().join(format!("procyon-kit-bad-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let head = root.join(DATA);
+        std::fs::create_dir_all(head.parent().unwrap()).unwrap();
+        std::fs::write(head.with_extension("bin"), []).unwrap();
+        // not JSON, JSON of another shape, and a clip list longer than the eight the shader has room for
+        for text in ["{ clips", r#"["verts"]"#, r#"{"verts": 0, "frames": 0, "part": [], "clips": [{"name": "idle"}, {"name": "walk"}, {"name": "run"}, {"name": "haul"}, {"name": "load"}, {"name": "climb"}, {"name": "cheer"}, {"name": "fall"}, {}]}"#] {
+            std::fs::write(&head, text).unwrap();
+            assert!(read_kit(&root).is_none(), "{text}");
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     fn node(name: &str, x: f32, z: f32) -> (String, Transform) {
         (name.into(), Transform::from_xyz(x, 0.0, z))
