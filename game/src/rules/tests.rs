@@ -861,7 +861,7 @@ fn full_tutorial_camera_objective_clears_by_timer_or_by_leaving_the_start_area()
     for leave in [false, true] {
         let mut sc = crate::campaign::load_id("tutorial").script;
         let mut p = unit("RLS Intrepid", sc.player(), Vec3::new(-1316.7, 0.0, 1407.8)); // the start, in Bevy axes
-        p.groups = vec![sc.player().to_string()];
+        p.groups = vec![sc.player().into()];
         p.primary = true;
         let mut units = [p];
         let active = |sc: &Script| sc.tasks.iter().any(|t| t.active && t.name == "Try Out Camera");
@@ -1168,4 +1168,13 @@ fn a_started_speech_line_with_text_is_handed_to_the_chat_history_once() {
         sc.speech_tick(5.0);
     }
     assert_eq!(sc.started, vec![("First.".to_string(), Some([1.0, 0.0, 0.0, 1.0])), ("Second.".to_string(), None)], "in order, textless lines skipped");
+}
+
+#[test]
+fn name_newtypes_keep_the_json_unchanged() {
+    let json = serde_json::json!({"ship": "Legacy", "group": ["Pirates", "Player"]});
+    let ship: ShipId = serde_json::from_value(json["ship"].clone()).unwrap();
+    let groups: Vec<GroupName> = serde_json::from_value(json["group"].clone()).unwrap();
+    assert_eq!((ship.as_str(), groups[1].as_str()), ("Legacy", "Player"));
+    assert_eq!(serde_json::json!({"ship": ship, "group": groups}), json);
 }

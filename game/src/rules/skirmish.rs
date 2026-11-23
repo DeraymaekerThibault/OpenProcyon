@@ -93,8 +93,8 @@ fn run(
     let mut world: Vec<Unit> = ships
         .iter()
         .map(|s| Unit {
-            name: s.mission.name.clone(),
-            owner: s.mission.owner.clone(),
+            name: s.mission.name.as_str().into(),
+            owner: s.mission.owner.as_str().into(),
             alive: !s.health.destroyed,
             visible: s.mission.visible,
             primary: s.primary,

@@ -65,7 +65,7 @@ impl Asteroid {
         self.hp == 0.0
     }
     pub fn unit(&self, e: Entity, tf: &Transform) -> crate::rules::Unit {
-        crate::rules::Unit { name: self.kind.clone(), owner: self.group.clone(), alive: self.hp > 0.0, ..crate::rules::Unit::new(e, self.id, tf.translation) }
+        crate::rules::Unit { name: self.kind.as_str().into(), owner: self.group.as_str().into(), alive: self.hp > 0.0, ..crate::rules::Unit::new(e, self.id, tf.translation) }
     }
 }
 
