@@ -2636,7 +2636,7 @@ Overall: the modder-facing design is strong in its core idea. One merged overlay
 
 ##### B8-25 [severity: low] [category: fidelity-risk] Docking module header and comments describe the original's behaviour as "read from its code"
 **Where**: game/src/docking.rs:7 ("The movement is the original's (read from its code, docs/re/docking-and-orders.md)") and several "Retail:" comments (:600-700).
-**What**: AGENTS.md hard rules 3/4 say specs are written in your own words citing observable sources (data files, manual, footage, play), and no decompiled-code descriptions. "Read from its code" points at a source the repo says it must not rely on or describe.
+**What**: AGENTS.md hard rules 3/4 say specs are written in your own words citing observable sources (data files, manual, footage, play), and no descriptions of the original program's code. "Read from its code" points at a source the repo says it must not rely on or describe.
 **Why**: Project safety/legal rule; trivially fixed by rewording.
 **Suggestion**: Reword to "the original's observed movement (docs/re/docking-and-orders.md)" and check docs/re/docking-and-orders.md for the same phrase (outside this bucket, flag to the docs reviewer).
 **Behaviour-preserving?** yes.
@@ -2759,7 +2759,7 @@ Overall: the importer pipeline is in good shape. `import_assets.py` has a staged
 **Effort**: M
 
 ##### B9-11 [severity: medium] [category: shell] `tools/check.sh` is POSIX `sh` with `set -e` only, uses `python3` on Windows, and mixes `eval` with composed command strings
-**Where**: tools/check.sh:1,8 (`#!/bin/sh`, `set -e`, no `-u`), :17 (`python3 -c ...` although the loop at :13 adds `.venv/Scripts` where only `python.exe` exists on Windows; the Makefile at :6 handles this with `$(PY)`), :31-34 (`run="xvfb-run -a -s '-screen ...' env ..."` then `eval "$run timeout 10 ..."`).
+**Where**: tools/check.sh:1,8 (`#!/bin/sh`, `set -e`, no `-u`), :17 (`python3 -c ...` although the loop at :13 adds `.venv/Scripts` where Windows has no `python3` binary; the Makefile at :6 handles this with `$(PY)`), :31-34 (`run="xvfb-run -a -s '-screen ...' env ..."` then `eval "$run timeout 10 ..."`).
 **What**: on Git Bash for Windows `python3` may be the Store stub (the comment at :12 acknowledges it). The `eval` of a string containing quotes is fragile; bash arrays (as shot.sh already uses) avoid it. `cd ..` bookkeeping is repeated (`cd ..` at :22, `(cd .. && ...)` at :44, final `cd ..`).
 **Why**: robustness of the one validation gate.
 **Suggestion**: `#!/usr/bin/env bash`, `set -euo pipefail`, `PY=$(command -v python3 || command -v python)`, `run=(xvfb-run -a -s "-screen 0 1280x720x24" env WGPU_BACKEND=vulkan)` and `"${run[@]}" timeout 10 target/release/openprocyon`. Use `pushd/popd` or subshells for `game/`. Note: with `pipefail` the smoke's `| grep -q` pipeline status needs care (`timeout` returns 124 by design), so keep `|| true` on the producer or check the grep status explicitly.
@@ -2826,7 +2826,7 @@ Overall: the importer pipeline is in good shape. `import_assets.py` has a staged
 **Where**: tests/test_repo_hygiene.py:18-45 (`GAME_SUFFIXES`, `TEXT_SUFFIXES`), :67-70 (`TOOLING`), :86.
 **What**: (a) `GAME_SUFFIXES` lacks `.png/.jpg` (converted textures), `.bmp`, `.ttf` third-party fonts (content/ is allowed), `.twt`/`.tst` are there but `.ckb`, `.dat`, `.sav`, `.bin`, `.mp3`, `.ogv`, `.avi` are not, nor `.zip`/`.7z`/`.pak` archives of game data. (b) `p.read_text(errors="replace")` and `TEXT_SUFFIXES` miss `.cfg`, `.ini`, `.ron`, `.glsl`/`.wgsl`, `.html`, `.csv`, `.sh` is there but extensionless scripts are not. (c) The ADDRESS pattern only matches 0x4..-0x7.. six-digit literals. A `0x0085c3f0` would be missed because of `0{0,2}` handling of `0x00xxxxxx`? It matches up to two leading zeros plus [4-7]..., so `0x00854ac0` (a typical address) is not covered (first digit 8).
 **Why**: this test is the only mechanical enforcement of hard rules 1 and 3.
-**Suggestion**: extend `GAME_SUFFIXES` with the extra media/archive suffixes (png only outside `content/`, `docs/`, `game/`, `mods/` pictures that are ours, so make it path-scoped instead: any image under `assets/`/`local/` is already forbidden by the git-ignore, so add a check that `git ls-files` contains no path under those). Widen ADDRESS to `0x00?[4-9a-f]` for the typical 0x00400000-0x00ffffff range and keep the 0x7fffff exclusion. Add unit cases to `test_patterns`.
+**Suggestion**: extend `GAME_SUFFIXES` with the extra media/archive suffixes (png only outside `content/`, `docs/`, `game/`, `mods/` pictures that are ours, so make it path-scoped instead: any image under `assets/`/`local/` is already forbidden by the git-ignore, so add a check that `git ls-files` contains no path under those). Widen ADDRESS to also cover the upper half of the usual 32-bit image range (leading digits 8-f after the zero padding) and keep the 0x7fffff exclusion. Add unit cases to `test_patterns`.
 **Behaviour-preserving?**: yes (test only; might flag existing text, check with the run)
 **Effort**: S
 
