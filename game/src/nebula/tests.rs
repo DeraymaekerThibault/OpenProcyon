@@ -181,7 +181,7 @@ fn a_cloud_whose_shell_the_profile_hides_keeps_running() {
         .init_asset::<Image>()
         .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(Duration::from_millis(100)))
         .add_systems(Update, update);
-    app.world_mut().spawn((Camera3d::default(), GlobalTransform::default()));
+    app.world_mut().spawn((crate::MainCamera, Camera3d::default(), GlobalTransform::default()));
     let shown = app.world_mut().spawn((Cloud::for_tests("Nebula", 100.0), GlobalTransform::default(), Visibility::default())).id();
     let hidden = app.world_mut().spawn((Cloud::for_tests("Nebula", 100.0), GlobalTransform::default(), Visibility::Hidden)).id();
     for _ in 0..12 {

@@ -150,7 +150,7 @@ pub fn update(
     keys: Res<ButtonInput<KeyCode>>,
     assets: Res<AssetServer>,
     cfg: Res<crate::Config>,
-    mut camera: Single<&mut Transform, With<Camera3d>>,
+    mut camera: Single<&mut Transform, (With<Camera3d>, With<crate::MainCamera>)>,
     mut ships: Query<(&mut Transform, &MissionShip, &mut crate::Ship, Has<crate::PlayerShip>), Without<Camera3d>>,
     ui: Query<Entity, With<BriefingUi>>,
     voices: Query<Entity, With<Voice>>,

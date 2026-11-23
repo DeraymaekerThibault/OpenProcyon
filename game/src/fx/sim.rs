@@ -37,7 +37,7 @@ pub(super) fn update_fx(
     lib: Res<FxLib>,
     mut rng: ResMut<FxRng>,
     mut q: Query<(Entity, &mut Fx, &GlobalTransform)>,
-    cam: Query<&GlobalTransform, With<Camera3d>>,
+    cam: Query<&GlobalTransform, (With<Camera3d>, With<crate::MainCamera>)>,
 ) {
     let frame = time.delta_secs().min(0.25);
     let scene = scene_budget_factor(q.iter().map(|(_, f, _)| f.particle_count()).sum());

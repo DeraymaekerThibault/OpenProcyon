@@ -40,7 +40,7 @@ fn draw(
     mut commands: Commands,
     assets: Res<AssetServer>,
     ropes: Res<Ropes>,
-    cam: Single<&GlobalTransform, With<Camera3d>>,
+    cam: Single<&GlobalTransform, (With<Camera3d>, With<crate::MainCamera>)>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut mats: ResMut<Assets<StandardMaterial>>,
     mesh: Query<(&Mesh3d, &mut Visibility), With<RopeMesh>>,
@@ -116,7 +116,7 @@ mod tests {
             .init_asset::<StandardMaterial>()
             .init_resource::<Ropes>()
             .add_systems(Update, draw);
-        app.world_mut().spawn((Camera3d::default(), GlobalTransform::default()));
+        app.world_mut().spawn((crate::MainCamera, Camera3d::default(), GlobalTransform::default()));
         app.update();
         assert_eq!(app.world_mut().query::<&RopeMesh>().iter(app.world()).count(), 0);
         app.world_mut().resource_mut::<Ropes>().0.push((Vec3::ZERO, Vec3::X, 0.0));
@@ -145,7 +145,7 @@ mod tests {
             .init_asset::<StandardMaterial>()
             .init_resource::<Ropes>()
             .add_systems(Update, draw);
-        let cam = app.world_mut().spawn((Camera3d::default(), GlobalTransform::default())).id();
+        let cam = app.world_mut().spawn((crate::MainCamera, Camera3d::default(), GlobalTransform::default())).id();
         app.world_mut().resource_mut::<Ropes>().0.push((Vec3::ZERO, Vec3::X * 10.0, 1.0));
         let modified = |app: &mut App| {
             app.update();

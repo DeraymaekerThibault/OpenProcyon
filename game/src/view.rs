@@ -386,7 +386,11 @@ pub fn toggle_debug(keys: Res<ButtonInput<KeyCode>>, mut q: Query<&mut Visibilit
 #[derive(Component)]
 pub struct Sky;
 
-pub fn sky(cam: Single<&Transform, (With<Camera3d>, Without<Sky>)>, mut sky: Single<(&mut Transform, &mut Visibility), With<Sky>>, settings: Option<Res<menu::Settings>>) {
+pub fn sky(
+    cam: Single<&Transform, (With<Camera3d>, With<crate::MainCamera>, Without<Sky>)>,
+    mut sky: Single<(&mut Transform, &mut Visibility), With<Sky>>,
+    settings: Option<Res<menu::Settings>>,
+) {
     sky.0.translation = cam.translation;
     // Display Options 'Render Background'.
     let want = if settings.is_some_and(|s| !s.background) { Visibility::Hidden } else { Visibility::Inherited };
@@ -511,7 +515,7 @@ pub fn camera(
     tfs: Query<&Transform, Without<Camera3d>>,
     contacts: Query<(), Or<(With<Ship>, With<environment::SpaceAnimal>)>>,
     sensors: Res<environment::Sensors>,
-    mut cam: Single<&mut Transform, With<Camera3d>>,
+    mut cam: Single<&mut Transform, (With<Camera3d>, With<crate::MainCamera>)>,
     mission: Option<Res<campaign::Mission>>,
     (free, time, mut shown): (Option<Res<FreeCamera>>, Option<Res<Time<Real>>>, Local<Option<f32>>),
 ) {
@@ -634,7 +638,7 @@ mod camera_tests {
         let (mut world, ids) = ship::movement_tests::fleet_world();
         world.init_resource::<environment::Sensors>();
         world.insert_resource(FREE);
-        let cam = world.spawn((Camera3d::default(), Transform::default())).id();
+        let cam = world.spawn((crate::MainCamera, Camera3d::default(), Transform::default())).id();
         world.resource_mut::<Orbit>().focus = Some(ids[5]);
         world.get_mut::<Transform>(ids[5]).unwrap().translation = Vec3::X * 3000.0;
         world.run_system_once(environment::refresh_sensors).unwrap();
@@ -719,7 +723,7 @@ mod camera_tests {
         let mut world = World::new();
         world.init_resource::<environment::Sensors>();
         world.insert_resource(Orbit { yaw: 0.0, pitch: 0.0, dist: 100.0, focus: None });
-        let cam = world.spawn((Camera3d::default(), Transform::default())).id();
+        let cam = world.spawn((crate::MainCamera, Camera3d::default(), Transform::default())).id();
         let mut system = IntoSystem::into_system(camera);
         system.initialize(&mut world);
         system.run((), &mut world).unwrap();
