@@ -254,12 +254,7 @@ pub(in crate::rules) fn b(v: &Value, k: &str) -> bool {
     crate::data::wot_flag(&v[k])
 }
 pub(in crate::rules) fn cmp(eq: &str, a: f32, bb: f32) -> bool {
-    match eq {
-        "Greater Than" => a > bb,
-        "Less Than" => a < bb,
-        "Equal To" => (a - bb).abs() < 1e-4,
-        _ => false,
-    }
+    super::schema::Equivalence::parse(eq).is_some_and(|e| e.holds(a, bb, 1e-4))
 }
 /// Group part of a 'Group,Unit' spec.
 pub(in crate::rules) fn base(spec: &str) -> &str {

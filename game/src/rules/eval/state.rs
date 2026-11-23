@@ -459,7 +459,7 @@ impl Script {
                         }
                     }
                     // Mission 4's stuck sloop and mission 6's PirateBigBrother are spotted by closing in.
-                    "Group to Group Distance" if s(c, "Equivalence") == "Less Than" && player_in(s(c, "GroupA Name")) => {
+                    "Group to Group Distance" if schema::Equivalence::parse(s(c, "Equivalence")) == Some(schema::Equivalence::LessThan) && player_in(s(c, "GroupA Name")) => {
                         if let Some(u) = members(w, s(c, "GroupB Name")).into_iter().filter(|u| u.alive && u.visible && u.e != p.e).nearest_to(p.pos, |u| u.pos)
                             && u.pos.distance(p.pos) >= f(c, "Distance")
                         {
