@@ -54,6 +54,9 @@ fi
 # The imported assets, found like every tool finds them (tools/import_assets.py find_assets: also the main checkout's from a
 # linked worktree) and exported so the game and the battle check read the same folder.
 assets=$(python3 -c 'from tools.import_assets import find_assets; print(find_assets() or "")')
+# The game builds its mod overlay next to the assets (<assets>/../local/overlay); with the main checkout's import every worktree
+# would rebuild the same folder under the others' runs, so each checkout gets its own.
+export PROCYON_OVERLAY="${PROCYON_OVERLAY:-$PWD/local/tool-overlay}"
 if [ -n "$assets" ]; then imported=1; export PROCYON_ASSETS="$assets"; echo "ASSETS: $assets"
 else imported=0; echo "ASSETS: missing"; fi
 step ruff-format ruff format --check .
