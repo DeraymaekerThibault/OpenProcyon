@@ -56,6 +56,53 @@ PROVISIONAL in `docs/` are guesses. The campaign economy (points, availability, 
 
 **Engine-added mission fields (not retail; optional, `mission.json`/`script.json`).** Rule `conditions`/`actions` records with a `Type` starting `OP ` (`OP Any Of` `{Conditions: [..]}`, `OP Not` `{Condition: {..}}`, `OP Counter Condition` `{Counter Name, Equivalence, Value}`, `OP Wait` `{Seconds}`, `OP Wait Until Speech Done` `{Speech Event Name}`, `OP Set Counter` / `OP Add To Counter` `{Counter Name, Value}`, `OP Set Rule Active` `{Rule Name, Boolean}`); the rule field `"Is Active"` (retail writes `true` on every rule; `false` now means "not evaluated"); `tasks[]` keys `complete_when` / `fail_when` (lists of condition records, ANDed) and `required` (bool, default false), plus `team` (a skirmish team `name_id`: in a skirmish script the task decides for that team); and the top-level `"victory": "objectives"` (`"script"` in a skirmish `script.json`) with optional `victory_message` / `defeat_message` (media `messages` ids). Their meaning is in "Mission rule extensions" in `docs/modding.md`.
 
+## ship.json keys
+
+The keys of `ships/<Id>/ship.json` the loader reads (`game/src/data/ships.rs`). "Required" means the file fails to load without it, with a
+message naming the file; "default" is what a missing key gives. The importer writes all of them; a mod's ship needs only the required
+ones and whatever it changes (a ship from a model: `docs/modding.md` "A ship from a model").
+
+| Key | Type | Required | Default when missing |
+|---|---|---|---|
+| `extends` | ship id | no | none; deep-merged over that ship's file at overlay time, then dropped |
+| `race` | string | no | empty |
+| `skirmish` | bool | no | `false`: the ship is not offered on the fleet screen |
+| `points` | integer | no | `0` (fleet cost) |
+| `display_name`, `icon` | string | no | the hull's name string, an icon named from the id |
+| `model`, `geometry`, `scene` | string | no | the ship's own folder (`model`, `geometry`); `scene` none |
+| `core_hp` | number | no | a quarter of the hull sections' HP, at least 50 (needs a model) |
+| `physics` | object | no | `Mass` 4000, `MaxThrust` 60000, `MaxSpeed` 8, `RotationalFriction` 20, `MaxAngularAcceleration` 3 (PROVISIONAL, about a Navy Cutter's); `MinExtents`, `MaxExtents`, `CenterOfMass` default to the model |
+| `sections` | object by label | no | built from the model's layers; each section needs `layer`, `material`, `hp`, `core_pct`, `vital_ship`, `vital_speed`, `vital_turn`; optional `vital_mission` (`false`), `swappable` (`true`), `adjacent` and `criticals` (empty), `destruct`, `debris`, `debris_fx` |
+| `guns` | object by mount | no | none; each mount needs `gun` (a key of `guns.json`) and `arc_deg`; `pos`/`rot` default to the model's hardpoint node of that name, `bank` to the nearest weapon-panel slot, `parent_layer` none |
+| `engines`, `wakes`, `flags` | arrays | no | from the model's `EnginePortPlacement`, `WakePlacement`, `FlagAttachmentPoint` nodes |
+| `explosion_fx`, `repair_fx` | string | no | by race and size |
+| `engine_snd` | array of names | no | by race and size |
+| `sight` | number | no | `400` (AI sight range) |
+| `ring` | number | no | `0.65` |
+| `cloakable` | bool | no | `true` only for ids containing `Submersible` |
+| `fuel` | bool | no | `false` |
+| `crew_posts` | object | no | one gunner per two guns, a captain, mate, navigator, engineer, a rigger per sail, a fighter or two |
+| `lifeboats` | integer | no | `0` |
+| `is_lifeboat` | bool | no | `false` |
+| `sphere` | `{center, radius}` | no | from the model |
+
+## Silently ignored
+
+The loader never rejects a key it does not know, and nothing is logged for it, so a typo is indistinguishable from a feature that does
+nothing. Check the spelling against the tables above when a change has no effect:
+
+- **Unknown keys** in `ship.json`, in its `sections`, `guns`, `engines`, `wakes` and `flags` entries, and in `physics` (`Mass`, not `mass`):
+  the key is dropped.
+- **A misspelt key** (`sigth`, `Maxspeed`) is an unknown key, so it is dropped, while a known key with a value of the wrong type is an
+  error that stops the game at launch naming the file.
+- **`mod.json`**: `game_version` and `requires` are not read yet (`docs/modding.md` "Sharing a mod").
+- **Object files that are not valid JSON objects** in a merged path (`docs/modding.md` rule table) are not ignored; they replace the
+  table below them.
+
+PROVISIONAL: the list describes how the loader behaves in this checkout, not a promise; keys that hold a malformed
+value in the optional theme and render files (`data/hud/theme.json`, `data/render/look.json`) keep their default instead, also
+without a message.
+
 ## Example: a faster cutter with a heavier gun
 A mod's `ships/Ship_Navy_Cutter_Fast/ship.json`:
 ```json

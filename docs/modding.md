@@ -4,6 +4,29 @@ A mod is a folder of files that the game lays over the player's imported assets 
 images (PNG) and sounds (OGG). No code and no patching: ships, guns, maps, custom missions and campaigns, sounds, UI art, fonts
 and the graphics look are all files. When something needs the engine to change, see "Sharing a mod" below.
 
+## Your first mod in 5 minutes
+
+You need a source checkout with the game imported (`make assets`, see the README). Make Silver's Man-o'-War cheaper in skirmish:
+
+1. Copy the example: `cp -r mods/silver-skirmish local/my-mod` (`local/` is git-ignored scratch).
+2. Open `local/my-mod/ships/Ship_Pirate_Silver/ship.json` and change `"points": 255` to `"points": 100`.
+3. In `local/my-mod/mod.json` change `id` to `my-mod` and `name` to your own (the folder name is the id; the example mods need
+   `id`, `name`, `version`, `category`, `description`).
+4. Run it: `make run ARGS='--mod local/my-mod'`, open Skirmish and look for the ship in the fleet screen at its new cost.
+5. To see exactly what the game got, open `local/overlay/ships/Ship_Pirate_Silver/ship.json`: the overlay holds the base files with
+   your files laid over them, rebuilt at every launch. Restart after every edit.
+
+Three things to know before you go further:
+
+- `"extends": "<Id>"` copies that ship and changes only the keys you give. The same id as the folder changes that ship in place; a
+  new id (a new folder) adds a ship beside it.
+- A key the game does not know is ignored without a word: a typo such as `"sigth"` does nothing. Compare the spelling with
+  [data-format.md](data-format.md#shipjson-keys).
+- Nothing changes? Check the folder nesting (`my-mod/mod.json`, not `my-mod/my-mod/mod.json`), that you restarted, and
+  ["Troubleshooting"](#troubleshooting).
+
+The longer walk-through below ("Your first mod") builds a mod from scratch.
+
 ## Where things live
 
 | Doc | What it holds |
