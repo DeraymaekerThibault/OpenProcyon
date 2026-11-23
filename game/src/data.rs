@@ -12,11 +12,62 @@ fn asset_context(path: &std::path::Path) -> String {
     format!("{} (source {})", path.display(), source.display())
 }
 
+/// Why a data file could not be loaded: the file, the mod folder that provided it (when it came from one) and the underlying
+/// message (serde's carries the line, column and, for typed reads, the field).
+#[derive(Debug)]
+pub enum DataError {
+    Read { path: std::path::PathBuf, source_mod: Option<String>, error: std::io::Error },
+    Parse { path: std::path::PathBuf, source_mod: Option<String>, error: serde_json::Error },
+}
+
+impl DataError {
+    pub fn path(&self) -> &std::path::Path {
+        match self {
+            DataError::Read { path, .. } | DataError::Parse { path, .. } => path,
+        }
+    }
+    /// The mod folder the file came from, if it came from one.
+    pub fn source_mod(&self) -> Option<&str> {
+        match self {
+            DataError::Read { source_mod, .. } | DataError::Parse { source_mod, .. } => source_mod.as_deref(),
+        }
+    }
+}
+
+impl std::fmt::Display for DataError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let from = self.source_mod().map(|m| format!(" from mod {m:?}")).unwrap_or_default();
+        match self {
+            DataError::Read { path, error, .. } => write!(f, "{}{from}: {error}; run tools/build_assets.sh if assets are missing", asset_context(path)),
+            DataError::Parse { path, error, .. } => write!(f, "{}{from}: {error}", asset_context(path)),
+        }
+    }
+}
+
+impl std::error::Error for DataError {}
+
+/// The folder name of the active mod that provides `path` (a link into the overlay is followed to its source).
+fn mod_of(path: &std::path::Path) -> Option<String> {
+    let source = std::fs::canonicalize(path).ok()?;
+    crate::modding::active().iter().find(|m| std::fs::canonicalize(m).is_ok_and(|m| source.starts_with(m))).and_then(|m| Some(m.file_name()?.to_string_lossy().into_owned()))
+}
+
+/// Typed read of a JSON file, naming `source_mod` as the provider in errors (`None`: found out from the active mods).
+pub fn load_as<T: serde::de::DeserializeOwned>(path: &std::path::Path, source_mod: Option<&str>) -> Result<T, DataError> {
+    let source_mod = source_mod.map(String::from).or_else(|| mod_of(path));
+    let bytes = std::fs::read(path).map_err(|error| DataError::Read { path: path.to_path_buf(), source_mod: source_mod.clone(), error })?;
+    serde_json::from_slice(&bytes).map_err(|error| DataError::Parse { path: path.to_path_buf(), source_mod, error })
+}
+
+/// The one typed load path: a JSON file as `T`, or a `DataError` naming the file, its mod and serde's field/line/column message.
+/// Unknown fields stay allowed unless `T` denies them.
+pub fn load<T: serde::de::DeserializeOwned>(path: &std::path::Path) -> Result<T, DataError> {
+    load_as(path, None)
+}
+
 /// Typed required asset with the resolved source path and serde's field/line/column diagnostic.
 fn read_typed<T: serde::de::DeserializeOwned>(path: &std::path::Path) -> Result<T, String> {
-    let context = asset_context(path);
-    let bytes = std::fs::read(path).map_err(|e| format!("{context}: {e}; run tools/build_assets.sh if assets are missing"))?;
-    serde_json::from_slice(&bytes).map_err(|e| format!("{context}: {e}"))
+    load(path).map_err(|e| e.to_string())
 }
 
 /// Asset path of a converted model given its file name (`NavyCutterShip.glb`): GLBs live in `models/<category>/` (tools/models.py);
