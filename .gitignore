@@ -29,3 +29,6 @@ __pycache__/
 .venv/
 /game/target/
 /dist/
+# Claude Code: personal settings and its own worktrees (the shared config in .claude/ is tracked).
+.claude/settings.local.json
+.claude/worktrees/

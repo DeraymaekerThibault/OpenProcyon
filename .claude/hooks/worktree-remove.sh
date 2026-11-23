@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Opt-in: enabled through .claude/settings.local.example.json, not the shared settings.
 # WorktreeRemove: stdin has {"worktree_path": "..."}. Removes the worktree with its build (worktree.sh refuses a dirty one),
 # then the branch if it is merged (git branch -d; an unmerged branch stays).
 set -euo pipefail
