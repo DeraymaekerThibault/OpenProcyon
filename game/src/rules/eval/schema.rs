@@ -684,10 +684,10 @@ mod tests {
         crate::rules::cmp(eq, a, b)
     }
 
-    /// PINS TODAY'S BEHAVIOUR, not a decision: a JSON `true` in a rule's boolean field reads FALSE (only the string "TRUE", any case,
-    /// is true), so a hand-written `"Boolean Value": true` silently inverts. victory.rs's `Exists?` is the exception and accepts both.
+    /// Decided (#537): JSON booleans in a rule's boolean field are rejected. `--check-mission` reports them as errors, and every
+    /// reader (this one and victory.rs's `Exists?`) reads only the string "TRUE" (any case) as true, so a JSON `true` reads FALSE.
     #[test]
-    fn a_json_true_in_a_rule_reads_false_today() {
+    fn a_json_true_in_a_rule_reads_false() {
         use serde_json::json;
         assert!(crate::rules::b(&json!({"Boolean Value": "TRUE"}), "Boolean Value"));
         assert!(crate::rules::b(&json!({"Boolean Value": "true"}), "Boolean Value"));

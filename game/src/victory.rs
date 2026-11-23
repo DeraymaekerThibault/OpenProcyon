@@ -254,9 +254,7 @@ fn condition(c: &Value, groups: &Value) -> Option<Cond> {
         // a base's capture comes from the snapshot's captured bases
         "Team has captured a ship from Group/Unit" => Cond::Captured(objects()?),
         "Group Destroyed" => Cond::GroupDestroyed(objects()?),
-        "Does Group Contain Unit Name" => {
-            Cond::UnitPresent { objects: objects()?, exists: c["Exists?"].as_bool().or_else(|| c["Exists?"].as_str().map(|v| v.eq_ignore_ascii_case("true")))? }
-        }
+        "Does Group Contain Unit Name" => Cond::UnitPresent { objects: objects()?, exists: crate::data::wot_flag(&c["Exists?"]) },
         "Enter Volume" => Cond::InVolume { objects: objects()?, polygon: Region::from_json(c.get("polygon").filter(|p| p.as_array().is_some_and(|a| a.len() > 2))?) },
         "Team has destroyed a ship from Group/Unit" => Cond::DestroyedFrom(objects()?),
         "Team has X points" => Cond::TeamPoints(c["Team Name"].as_str()?.to_string(), c["Points"].as_i64()? as i32),
