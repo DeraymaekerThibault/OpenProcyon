@@ -14,7 +14,7 @@ use std::sync::OnceLock;
 use crate::audio::Sfx;
 use crate::campaign::{Mission, MissionBase, MissionShip};
 use crate::collision::Drift;
-use crate::combat::{Health, Library, Rng};
+use crate::combat::{Health, Library, SimRng};
 use crate::data::conv;
 use crate::fx::FxLib;
 use crate::{PlayerShip, Ship, Side, assets_dir};

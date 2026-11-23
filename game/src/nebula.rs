@@ -342,7 +342,7 @@ fn storms(
     mut sfx: MessageWriter<crate::audio::Sfx>,
     mut flashes: MessageWriter<StormFlash>,
     mut timers: Local<HashMap<(String, u8), f32>>,
-    mut seed: Local<u32>,
+    mut rng: ResMut<crate::combat::SimRng>,
 ) {
     let (Some(map), Some(damage)) = (setups, damage) else { return };
     if map.is_changed() {
@@ -350,10 +350,7 @@ fn storms(
     }
     let trap = mission.as_ref().is_some_and(|m| m.script.nebula_trap);
     let dt = time.delta_secs();
-    let mut rnd = || {
-        *seed = seed.wrapping_mul(0x19660d).wrapping_add(0x3c6ef35f);
-        (*seed >> 8) as f32 / (1u32 << 24) as f32
-    };
+    let mut rnd = || rng.nebula.f();
     for n in map.0.as_array().into_iter().flatten() {
         let name = n["name"].as_str().unwrap_or_default();
         let (offset, step) = shift.0.get(name).copied().unwrap_or_default();

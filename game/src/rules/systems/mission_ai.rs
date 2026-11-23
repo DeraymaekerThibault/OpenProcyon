@@ -16,7 +16,9 @@ pub(super) fn mission_ai(
     holes: Query<(&Transform, &crate::blackhole::Pull), Without<Ship>>,
     storms: (Option<Res<crate::nebula::Storms>>, Option<Res<crate::nebula::StormShift>>),
     (guns, time, mut breakoffs): (Query<&crate::combat::GunStates>, Res<Time>, Local<std::collections::HashMap<Entity, crate::ship::attack::Breakoff>>),
+    spawn_order: Query<&crate::scenario::SpawnIndex>,
 ) {
+    let key = |e: Entity| crate::scenario::SpawnIndex::of(&spawn_order, e);
     let Some(mission) = mission else { return };
     let holes = crate::ship::hole_list(&holes, storms.0.as_deref(), storms.1.as_deref());
     let sc = &mission.script;
@@ -120,7 +122,7 @@ pub(super) fn mission_ai(
         if let (Some((foe, fp)), false) = (chase, ms.stance == Stance::Dummy) {
             let (goal, order, throttle) = if ms.ram && ordered.is_some() {
                 let d = fp - tf.translation;
-                ((-d.x).atan2(-d.z), EngineOrder::Emergency, crate::ship::attack::throttle(crate::ship::attack::Routine::Ram, e, tf.translation, ship.heading, fp))
+                ((-d.x).atan2(-d.z), EngineOrder::Emergency, crate::ship::attack::throttle(crate::ship::attack::Routine::Ram, key(e), tf.translation, ship.heading, fp))
             } else if let Some(away) = crate::ship::flee(&holes, tf.translation) {
                 (away, EngineOrder::Emergency, None)
             } else {
@@ -135,7 +137,7 @@ pub(super) fn mission_ai(
                         };
                         let course = crate::ship::attack::course(routine, tf.translation, ship.heading, at, gap, range[0], time.elapsed_secs(), breakoffs.entry(e).or_default());
                         let d = course[0] - tf.translation;
-                        ((-d.x).atan2(-d.z), EngineOrder::Emergency, crate::ship::attack::throttle(routine, e, tf.translation, ship.heading, course[0]))
+                        ((-d.x).atan2(-d.z), EngineOrder::Emergency, crate::ship::attack::throttle(routine, key(e), tf.translation, ship.heading, course[0]))
                     }
                     None => (ship.heading, EngineOrder::Stop, None),
                 }

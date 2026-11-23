@@ -15,7 +15,7 @@ pub(super) const AI_MIN_ATTACK: i32 = 10;
 pub(super) fn ai_boarding(
     time: Res<Time>,
     lib: Res<Library>,
-    mut rng: ResMut<Rng>,
+    mut rng: ResMut<SimRng>,
     mut commands: Commands,
     mut sfx: MessageWriter<Sfx>,
     boarders: Boarders,

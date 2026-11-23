@@ -76,11 +76,11 @@ pub fn fire_fighting(posts: &[Vec<f32>; 8]) -> f32 {
 /// Every ship uses its own crew, computer or not: `posts` is its named crew, or its level's generic crew for a placed ship
 /// (`crew_arms::fallback_posts`); an empty slot is a rating-1 hand (0.1). Every slot but the captain's and first mate's gains the
 /// ship's leadership bonus (`crew_arms::leadership_bonus`, 0 for a ship without crew).
-pub fn crew_slots(e: Entity, class: &Class, posts: Option<&crate::crew_arms::CrewPosts>, role: usize, skill: &str) -> Vec<f32> {
+pub fn crew_slots(key: crate::scenario::SpawnIndex, class: &Class, posts: Option<&crate::crew_arms::CrewPosts>, role: usize, skill: &str) -> Vec<f32> {
     const GENERIC: f32 = 0.1;
     let cap = crate::boarding::counts(&class.name)[role] as usize;
     let named: Vec<f32> = posts.map(|p| p.0[role].iter().map(|id| crate::crew_arms::ability(id, skill).unwrap_or(GENERIC)).collect()).unwrap_or_default();
-    let bonus = if matches!(role, 1 | 2) { 0.0 } else { posts.map_or(0.0, |p| crate::crew_arms::leadership_bonus(e, p)) };
+    let bonus = if matches!(role, 1 | 2) { 0.0 } else { posts.map_or(0.0, |p| crate::crew_arms::leadership_bonus(key, p)) };
     named.iter().copied().chain(std::iter::repeat(GENERIC)).take(cap.max(named.len())).map(|v| (v + bonus).min(1.0)).collect()
 }
 
@@ -250,8 +250,8 @@ pub fn damage_fx(
 /// round(its current hit points x `fraction`) through the normal hit routine (spill into neighbours of a section left at 0, core bleed
 /// through dead vital sections, the human's ships taking the difficulty factor: the hit carries no attacker, so computer ships take
 /// none). The core is never scaled directly: a fraction below 1 leaves it whole unless vital sections die.
-pub fn fraction_hit(class: &Class, hp: &mut Health, fraction: f32, victim: Side, invuln: f32) {
-    let scale = super::shells::side_damage_scale(Side::Enemy, victim, crate::menu::difficulty(), false);
+pub fn fraction_hit(class: &Class, hp: &mut Health, fraction: f32, victim: Side, invuln: f32, difficulty: u8) {
+    let scale = super::shells::side_damage_scale(Side::Enemy, victim, difficulty, false);
     let mut rng = Rng::default();
     for k in 0..hp.sections.len() {
         let d = (hp.sections[k].round_ties_even() * fraction * scale).round_ties_even();
@@ -273,6 +273,8 @@ pub fn fire_damage(intensity: f32, humans_own_ship: bool, difficulty: u8) -> f32
 /// their section by their intensity, fires on destroyed sections die, dead fires fade out (3 s) then go (5 s), burning
 /// fires double. Effect size follows intensity (full at 20, floor 10%).
 pub fn fires(
+    spawn_order: Query<&crate::scenario::SpawnIndex>,
+    difficulty: Res<crate::scenario::Difficulty>,
     mut commands: Commands,
     time: Res<Time>,
     lib: Res<Library>,
@@ -311,7 +313,7 @@ pub fn fires(
             let class = &lib.classes[ship.class];
             let generic = posts.is_none().then(|| crate::crew_arms::fallback_posts(ship, boarding, &class.name)).flatten();
             let posts = posts.or(generic.as_ref());
-            let mut crew = fire_fighting(&std::array::from_fn(|role| crew_slots(me, class, posts, role, "leadership")));
+            let mut crew = fire_fighting(&std::array::from_fn(|role| crew_slots(crate::scenario::SpawnIndex::of(&spawn_order, me), class, posts, role, "leadership")));
             while crew > 0.0 {
                 let Some(f) = fires.list.iter_mut().filter(|f| f.state == FireState::Burning && f.intensity > 0.0).max_by(|a, b| a.intensity.total_cmp(&b.intensity)) else {
                     break;
@@ -322,7 +324,7 @@ pub fn fires(
             }
             let (core, secs) = (hp.core, hp.sections.clone());
             for f in fires.list.iter().filter(|f| f.state == FireState::Burning) {
-                let burn = fire_damage(f.intensity, humans, crate::menu::difficulty());
+                let burn = fire_damage(f.intensity, humans, difficulty.0);
                 let was = hp.sections[f.sec];
                 hp.sections[f.sec] = (was - burn).max(0.0);
                 if was > 0.0 && hp.sections[f.sec] == 0.0 {
@@ -522,9 +524,10 @@ pub fn damage_control(class: &Class, sections: &mut [f32], engineers: &[f32], ri
 }
 
 pub fn crew_repair(
+    spawn_order: Query<&crate::scenario::SpawnIndex>,
     time: Res<Time>,
     lib: Res<Library>,
-    mut rng: ResMut<Rng>,
+    mut rng: ResMut<SimRng>,
     mut ships: Query<(Entity, &Ship, &mut Health, Option<&crate::crew_arms::CrewPosts>, Option<&crate::boarding::Boardable>)>,
     mut acc: Local<f32>,
 ) {
@@ -533,14 +536,17 @@ pub fn crew_repair(
         return;
     }
     *acc -= CREW_REPAIR_TICK;
-    for (e, ship, mut h, posts, boarding) in &mut ships {
+    for (e, ship, mut h, posts, boarding) in crate::scenario::in_spawn_order(&spawn_order, ships.iter_mut(), |x| x.0) {
         if h.destroyed {
             continue;
         }
         let class = &lib.classes[ship.class];
         let generic = posts.is_none().then(|| crate::crew_arms::fallback_posts(ship, boarding, &class.name)).flatten();
         let posts = posts.or(generic.as_ref());
-        let (engineers, riggers) = (crew_slots(e, class, posts, 4, "engineering"), crew_slots(e, class, posts, 5, "rigging"));
+        let (engineers, riggers) = (
+            crew_slots(crate::scenario::SpawnIndex::of(&spawn_order, e), class, posts, 4, "engineering"),
+            crew_slots(crate::scenario::SpawnIndex::of(&spawn_order, e), class, posts, 5, "rigging"),
+        );
         damage_control(class, &mut h.sections, &engineers, &riggers, &mut || rng.f());
     }
 }

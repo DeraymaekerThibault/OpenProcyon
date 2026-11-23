@@ -20,7 +20,8 @@ fn base_fire_app() -> App {
         .init_resource::<Time>()
         .init_resource::<FxLib>()
         .insert_resource(Library::load(assets_dir()))
-        .insert_resource(Rng::new(7))
+        .insert_resource(SimRng::new(7))
+        .init_resource::<crate::scenario::Difficulty>()
         .insert_resource(Look { mesh: default(), shell: default(), enemy_shell: default() })
         .init_resource::<crate::environment::Sensors>()
         .add_systems(PreUpdate, crate::environment::refresh_sensors)
@@ -223,7 +224,8 @@ fn hostile_island_towers_shoot_the_player_and_neutral_ones_do_not() {
         .init_resource::<Time>()
         .init_resource::<FxLib>()
         .insert_resource(Library::load(assets_dir()))
-        .insert_resource(Rng::new(7))
+        .insert_resource(SimRng::new(7))
+        .init_resource::<crate::scenario::Difficulty>()
         .insert_resource(Look { mesh: default(), shell: default(), enemy_shell: default() })
         .init_resource::<crate::environment::Sensors>()
         .add_systems(PreUpdate, crate::environment::refresh_sensors)
@@ -404,7 +406,8 @@ fn the_command_ship_holds_fire_until_an_enemy_is_clicked() {
         .init_resource::<Time>()
         .init_resource::<FxLib>()
         .insert_resource(Library::load(assets_dir()))
-        .insert_resource(Rng::new(7))
+        .insert_resource(SimRng::new(7))
+        .init_resource::<crate::scenario::Difficulty>()
         .insert_resource(Look { mesh: default(), shell: default(), enemy_shell: default() })
         .insert_resource(Target::default())
         .init_resource::<crate::environment::Sensors>()
@@ -450,7 +453,8 @@ fn a_skirmish_computer_ship_with_a_map_script_fires_at_its_captains_target() {
         .init_resource::<Time>()
         .init_resource::<FxLib>()
         .insert_resource(Library::load(assets_dir()))
-        .insert_resource(Rng::new(7))
+        .insert_resource(SimRng::new(7))
+        .init_resource::<crate::scenario::Difficulty>()
         .insert_resource(Look { mesh: default(), shell: default(), enemy_shell: default() })
         .insert_resource(Target::default())
         .init_resource::<crate::ship::CaptainTargets>()
@@ -495,7 +499,8 @@ fn the_command_ship_damages_a_clicked_hostile_skirmish_base() {
         .init_resource::<Time>()
         .init_resource::<FxLib>()
         .insert_resource(Library::load(assets_dir()))
-        .insert_resource(Rng::new(7))
+        .insert_resource(SimRng::new(7))
+        .init_resource::<crate::scenario::Difficulty>()
         .insert_resource(Look { mesh: default(), shell: default(), enemy_shell: default() })
         .insert_resource(Target::default())
         .init_resource::<crate::environment::Sensors>()
@@ -549,7 +554,8 @@ fn a_destroyed_base_part_blasts() {
         .init_resource::<Time>()
         .init_resource::<FxLib>()
         .insert_resource(Library::load(assets_dir()))
-        .insert_resource(Rng::new(7))
+        .insert_resource(SimRng::new(7))
+        .init_resource::<crate::scenario::Difficulty>()
         .insert_resource(Look { mesh: default(), shell: default(), enemy_shell: default() })
         .insert_resource(Target::default())
         .init_resource::<crate::environment::Sensors>()
@@ -892,7 +898,7 @@ fn computer_ships_use_their_own_crew_for_repair() {
         let foe = ship(Side::Enemy);
         let boardable = Boardable::ship(&class.name, skill, true);
         let generic = crate::crew_arms::fallback_posts(&foe, Some(&boardable), &class.name);
-        damage::crew_slots(Entity::PLACEHOLDER, class, generic.as_ref(), role, "engineering")
+        damage::crew_slots(crate::scenario::SpawnIndex(0), class, generic.as_ref(), role, "engineering")
     };
     let (green, elite) = (slots(Skill::Green, 4), slots(Skill::Elite, 5));
     assert!(!green.is_empty() && green.iter().all(|v| (0.3..=0.45).contains(v)), "green engineers {green:?}");
@@ -901,7 +907,7 @@ fn computer_ships_use_their_own_crew_for_repair() {
     let boardable = Boardable::ship(&class.name, Skill::Elite, true);
     assert!(crate::crew_arms::fallback_posts(&ship(Side::Player), Some(&boardable), &class.name).is_none());
     // A computer ship without a crew record carries rating-1 hands in every slot.
-    let none = damage::crew_slots(Entity::PLACEHOLDER, class, None, 4, "engineering");
+    let none = damage::crew_slots(crate::scenario::SpawnIndex(0), class, None, 4, "engineering");
     assert!(none.iter().all(|v| (*v - 0.1).abs() < 1e-6));
 }
 
@@ -1054,7 +1060,8 @@ fn shell_into_a_hull_damages_it_and_reports_the_hit() {
     app.add_plugins((TaskPoolPlugin::default(), AssetPlugin::default()))
         .init_resource::<Time>()
         .add_message::<crate::fx::EffectStarted>()
-        .insert_resource(Rng(7))
+        .insert_resource(SimRng::new(7))
+        .init_resource::<crate::scenario::Difficulty>()
         .add_message::<Sfx>()
         .add_message::<Hit>()
         .add_message::<Destroyed>()
@@ -1132,7 +1139,8 @@ fn a_mine_glances_off_allied_hulls_and_strikes_others() {
     app.add_plugins((TaskPoolPlugin::default(), AssetPlugin::default()))
         .init_resource::<Time>()
         .insert_resource(FxLib::with_names(&impact.iter().map(String::as_str).collect::<Vec<_>>()))
-        .insert_resource(Rng(7))
+        .insert_resource(SimRng::new(7))
+        .init_resource::<crate::scenario::Difficulty>()
         .add_message::<Sfx>()
         .add_message::<Hit>()
         .add_message::<Destroyed>()
@@ -1198,7 +1206,8 @@ fn land_in_the_way_stops_a_shell_before_the_hull() {
     app.add_plugins((TaskPoolPlugin::default(), AssetPlugin::default()))
         .init_resource::<Time>()
         .init_resource::<FxLib>()
-        .insert_resource(Rng(7))
+        .insert_resource(SimRng::new(7))
+        .init_resource::<crate::scenario::Difficulty>()
         .add_message::<Sfx>()
         .add_message::<Hit>()
         .add_message::<Destroyed>()
@@ -1323,7 +1332,8 @@ fn a_mine_picks_its_target_five_seconds_after_it_is_laid() {
     app.add_plugins((TaskPoolPlugin::default(), AssetPlugin::default()))
         .init_resource::<Time>()
         .init_resource::<FxLib>()
-        .insert_resource(Rng(7))
+        .insert_resource(SimRng::new(7))
+        .init_resource::<crate::scenario::Difficulty>()
         .add_message::<Sfx>()
         .add_message::<Hit>()
         .add_message::<Destroyed>()
@@ -1469,7 +1479,7 @@ fn a_fire_that_burns_a_floored_section_out_goes_out() {
     let mut hp = Health::new(&lib.classes[c]);
     hp.sections[0] = 1.0;
     let mut app = App::new();
-    app.init_resource::<Time>().add_systems(Update, super::damage::fires);
+    app.init_resource::<Time>().init_resource::<crate::scenario::Difficulty>().add_systems(Update, super::damage::fires);
     let fire = super::damage::Fire { sec: 0, intensity: 50.0, state: super::damage::FireState::Burning, fx: None };
     let ms = crate::campaign::MissionShip { invuln: 0.5, ..Default::default() };
     let ship = Ship { heading: 0.0, ..Ship::new(c, Side::Player) };
@@ -1501,7 +1511,8 @@ fn a_new_shell_first_moves_in_the_tick_after_it_was_created() {
     app.add_plugins((TaskPoolPlugin::default(), AssetPlugin::default()))
         .init_resource::<Time>()
         .init_resource::<FxLib>()
-        .insert_resource(Rng(7))
+        .insert_resource(SimRng::new(7))
+        .init_resource::<crate::scenario::Difficulty>()
         .add_message::<Sfx>()
         .add_message::<Hit>()
         .add_message::<Destroyed>()
@@ -1637,7 +1648,8 @@ fn a_dual_mount_launches_a_shell_from_every_muzzle_on_each_shot() {
         .init_resource::<Time>()
         .init_resource::<FxLib>()
         .insert_resource(Library::load(assets_dir()))
-        .insert_resource(Rng::new(7))
+        .insert_resource(SimRng::new(7))
+        .init_resource::<crate::scenario::Difficulty>()
         .insert_resource(Look { mesh: default(), shell: default(), enemy_shell: default() })
         .insert_resource(Target::default())
         .init_resource::<crate::environment::Sensors>()
@@ -1697,7 +1709,7 @@ fn a_sunk_ship_is_removed_at_the_start_of_the_tick_after_its_breakup() {
         .init_resource::<Time>()
         .init_resource::<FxLib>()
         .insert_resource(Library::load(assets_dir()))
-        .add_systems(Update, (crate::tick_start, breakup.after(crate::tick_start)));
+        .add_systems(Update, (crate::tick_start, sink_clock.after(crate::tick_start)));
     let lib = Library::load(assets_dir());
     let c = lib.index("Ship_Navy_Cutter");
     let mut health = Health::new(&lib.classes[c]);
@@ -1724,7 +1736,8 @@ fn comet_lancer_burst(panic: bool) -> usize {
         .init_resource::<Time>()
         .init_resource::<FxLib>()
         .insert_resource(Library::load(assets_dir()))
-        .insert_resource(Rng::new(7))
+        .insert_resource(SimRng::new(7))
+        .init_resource::<crate::scenario::Difficulty>()
         .insert_resource(Look { mesh: default(), shell: default(), enemy_shell: default() })
         .insert_resource(Target::default())
         .init_resource::<crate::environment::Sensors>()

@@ -402,13 +402,12 @@ fn a_broadside_attacker_circles_an_idle_ship_on_its_turning_circle() {
         let cutter = &lib.classes[lib.index("Ship_Navy_Cutter")].sections;
         let cutter_hp: Vec<f32> = cutter.iter().map(|s| s.hp).collect();
         let dt = 1.0 / 30.0;
-        let e = Entity::from_raw_u32(3).unwrap();
         let (mut dists, mut beams) = (vec![], vec![]);
         for i in 0..(200.0 / dt) as usize {
             let gap = tf.translation.length() - class.radius;
             let at = attack::aim(cutter, &cutter_hp, &Transform::IDENTITY, tf.translation, false);
             let course = attack::course(routine, tf.translation, ship.heading, at, gap, range[0], i as f32 * dt, &mut None);
-            let throttle = attack::throttle(routine, e, tf.translation, ship.heading, course[0]).map(|_| 2.0 * min_throttle);
+            let throttle = attack::throttle(routine, crate::scenario::SpawnIndex(3), tf.translation, ship.heading, course[0]).map(|_| 2.0 * min_throttle);
             (ship.throttle, ship.waypoints, ship.goal, ship.order) = (throttle, course, None, EngineOrder::Emergency);
             helm_step(&mut ship, &mut tf, class, &h, dt, true);
             if i as f32 * dt > 120.0 {

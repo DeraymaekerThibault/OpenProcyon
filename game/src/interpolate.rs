@@ -26,7 +26,6 @@ impl Interp {
         Interp { prev: at, sim: None, drawn: at }
     }
     /// The simulation's pose: the stored one while an interpolated pose is drawn, else `current` (the entity's `Transform`).
-    #[cfg(test)]
     pub fn sim_pose(&self, current: &Transform) -> Transform {
         self.sim.unwrap_or(*current)
     }

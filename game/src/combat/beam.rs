@@ -105,17 +105,19 @@ pub fn track(phase: &mut Phase, def: &BeamDef, dt: f32, hit: Option<(Entity, f32
 
 /// Burns what every firing beam touches (after `fire`, which runs the cycle and turns the turrets).
 pub(super) fn burn(
+    spawn_order: Query<&crate::scenario::SpawnIndex>,
     mut commands: Commands,
     time: Res<Time>,
     lib: Res<Library>,
     fxl: Res<FxLib>,
-    mut rng: ResMut<Rng>,
+    mut rng: ResMut<SimRng>,
+    difficulty: Res<crate::scenario::Difficulty>,
     (mut sfx, mut hits, mut scars): (MessageWriter<Sfx>, MessageWriter<Hit>, MessageWriter<crate::decals::Scar>),
     mut shooters: Query<(Entity, &Transform, &Ship, &mut GunStates)>,
     mut ships: ShipTargets,
 ) {
     let dt = time.delta_secs();
-    for (me, tf, ship, mut states) in &mut shooters {
+    for (me, tf, ship, mut states) in crate::scenario::in_spawn_order(&spawn_order, shooters.iter_mut(), |x| x.0) {
         let class = &lib.classes[ship.class];
         let sunk = ships.get(me).is_ok_and(|s| s.3.destroyed);
         for (mount, state) in class.mounts.iter().zip(states.0.iter_mut()) {
@@ -160,7 +162,7 @@ pub(super) fn burn(
             };
             let material = Some(crate::combat::material_key(&lib.classes[victim_ship.class].sections[k].material));
             let target = ShipTarget { entity: se, transform: stf, side: victim_ship.side, class: &lib.classes[victim_ship.class], invuln: mission.map_or(0.0, |m| m.invuln) };
-            hit_ship(&mut commands, &fxl, &mut rng, (&mut sfx, &mut hits, &mut scars), bd, &shell, target, &mut hp, &mut fires, k, at, victim);
+            hit_ship(&mut commands, &fxl, &mut rng, (&mut sfx, &mut hits, &mut scars), bd, &shell, target, &mut hp, &mut fires, k, at, victim, difficulty.0);
             hit_fx(&mut commands, &fxl, bd, at, shell.vel, Some((se, stf)), Surface { body: Some(se), normal: None, material });
         }
     }

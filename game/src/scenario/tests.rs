@@ -270,3 +270,46 @@ mod race_tests {
         assert_eq!((Race::from_class("Civilian"), Race::from_class("")), (None, None));
     }
 }
+
+/// #536: one seed gives one sequence, the named streams are independent of the battle stream, and a battle start (`reset_sim`) reseeds,
+/// renumbers spawns from 0 and snapshots the difficulty.
+#[test]
+fn a_battle_start_reseeds_and_renumbers() {
+    let draws = |r: &mut combat::SimRng| (0..4).map(|_| r.f()).collect::<Vec<_>>();
+    let (mut a, mut b) = (combat::SimRng::new(42), combat::SimRng::new(42));
+    assert_eq!(draws(&mut a), draws(&mut b));
+    assert_ne!(draws(&mut combat::SimRng::new(43)), draws(&mut combat::SimRng::new(42)));
+    let mut c = combat::SimRng::new(42);
+    let nebula: Vec<f32> = (0..4).map(|_| c.nebula.f()).collect();
+    assert_eq!(draws(&mut c), draws(&mut combat::SimRng::new(42)), "drawing from a named stream leaves the battle stream alone");
+    assert_ne!(nebula, draws(&mut combat::SimRng::new(42)));
+    // The default seed keeps the battle stream every battle used before seeds were settable.
+    assert_eq!(combat::Rng::default().f(), combat::SimRng::default().f());
+
+    #[derive(Component)]
+    struct Thing;
+    let mut app = App::new();
+    number_spawns::<Thing>(&mut app);
+    app.init_resource::<combat::SimRng>();
+    let spawn = |app: &mut App| app.world_mut().spawn(Thing).id();
+    let (x, y) = (spawn(&mut app), spawn(&mut app));
+    app.world_mut().flush();
+    let index = |app: &App, e| *app.world().get::<SpawnIndex>(e).unwrap();
+    assert_eq!((index(&app, x), index(&app, y)), (SpawnIndex(0), SpawnIndex(1)));
+    app.world_mut().resource_mut::<combat::SimRng>().f();
+    reset_sim(app.world_mut());
+    assert_eq!(app.world().resource::<combat::SimRng>().clone_state(), combat::SimRng::new(combat::SimRng::configured_seed()).clone_state());
+    let z = spawn(&mut app);
+    app.world_mut().flush();
+    assert_eq!(index(&app, z), SpawnIndex(0), "numbering starts again at the next battle");
+    assert_eq!(*app.world().resource::<Difficulty>(), Difficulty(menu::difficulty()));
+}
+
+#[test]
+fn in_spawn_order_sorts_by_creation_number_unnumbered_first() {
+    let mut world = World::new();
+    let (late, early, none) = (world.spawn(SpawnIndex(5)).id(), world.spawn(SpawnIndex(1)).id(), world.spawn_empty().id());
+    let mut state = bevy::ecs::system::SystemState::<Query<&SpawnIndex>>::new(&mut world);
+    let order = state.get(&world).unwrap();
+    assert_eq!(in_spawn_order(&order, [late, early, none], |e| *e), vec![none, early, late]);
+}

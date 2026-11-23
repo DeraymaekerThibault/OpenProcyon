@@ -134,7 +134,8 @@ fn app() -> App {
         .init_resource::<BoardStatus>()
         .init_resource::<Got>()
         .insert_resource(Library::load(assets_dir()))
-        .insert_resource(Rng::new(7))
+        .insert_resource(SimRng::new(7))
+        .init_resource::<crate::scenario::Difficulty>()
         .add_systems(Update, (handle_messages, set_flags, grapple_orders, hook_flight, winch_upkeep, winch_pull, drive, fights, settled, status, collect).chain());
     app
 }

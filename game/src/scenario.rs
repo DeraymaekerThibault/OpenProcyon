@@ -16,6 +16,67 @@ use spawn::{ambient_effect, setup_strengths};
 #[derive(Component)]
 pub struct Scenario;
 
+/// Creation order within one kind of object (ships among ships, shells among shells), counted from 0 at every battle start. The
+/// original updates objects in creation order (docs/re/tick.md); systems whose random draws or tie-breaks depend on order go by this
+/// (`in_spawn_order`), not by query or `Entity` order, which change with despawns and between a battle and its restart.
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct SpawnIndex(pub u32);
+
+impl SpawnIndex {
+    /// `e`'s number, 0 when it has none (unit-test worlds).
+    pub fn of(order: &Query<&SpawnIndex>, e: Entity) -> SpawnIndex {
+        order.get(e).copied().unwrap_or(SpawnIndex(0))
+    }
+    /// A fixed draw in [0, 1) for this object (`salt` picks one of several), the same in every run of the battle.
+    pub fn draw(self, salt: u32) -> f32 {
+        let h = (u64::from(self.0) << 32 | u64::from(salt)).wrapping_add(0x9E37_79B9_7F4A_7C15).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        ((h ^ (h >> 31)) >> 40) as f32 / (1u64 << 24) as f32
+    }
+}
+
+/// The next `SpawnIndex` of each numbered kind; cleared at battle start.
+#[derive(Resource, Default)]
+pub struct SpawnCounters(std::collections::HashMap<std::any::TypeId, u32>);
+
+/// Numbers every new `T` in the order it is added (command order, so the order the systems spawned them). One kind per entity.
+pub fn number_spawns<T: Component>(app: &mut App) {
+    app.init_resource::<SpawnCounters>().add_observer(|add: On<Add<T>>, mut counters: ResMut<SpawnCounters>, mut commands: Commands| {
+        let n = counters.0.entry(std::any::TypeId::of::<T>()).or_default();
+        commands.entity(add.entity).try_insert(SpawnIndex(*n));
+        *n += 1;
+    });
+}
+
+/// `items` in spawn order (`entity` names each item's entity; `order` looks up its number). Unnumbered items (unit-test worlds) come
+/// first, in their given order, as before.
+pub fn in_spawn_order<T>(order: &Query<&SpawnIndex>, items: impl IntoIterator<Item = T>, entity: impl Fn(&T) -> Entity) -> Vec<T> {
+    let mut v: Vec<_> = items.into_iter().map(|t| (order.get(entity(&t)).ok().copied(), t)).collect();
+    v.sort_by_key(|(i, _)| *i);
+    v.into_iter().map(|(_, t)| t).collect()
+}
+
+/// The difficulty option (0 Easy, 1 Normal, 2 Hard) as it stood when the battle started: the simulation reads this, not the live
+/// option. PROVISIONAL: whether the original applies a difficulty change made during a battle is not observed.
+#[derive(Resource, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Difficulty(pub u8);
+
+impl Default for Difficulty {
+    fn default() -> Self {
+        Self(1)
+    }
+}
+
+/// Battle start (the first one and every restart): reseed the simulation's random numbers, restart spawn numbering, take the
+/// difficulty. The seed is logged so a run can be repeated with `--seed`.
+pub fn reset_sim(world: &mut World) {
+    let seed = combat::SimRng::configured_seed();
+    let difficulty = Difficulty(menu::difficulty());
+    info!("battle seed {seed} (repeat with --seed {seed}), difficulty {}", difficulty.0);
+    world.insert_resource(combat::SimRng::new(seed));
+    world.insert_resource(SpawnCounters::default());
+    world.insert_resource(difficulty);
+}
+
 /// A fleet type, as the TWT numbers it: 0 Navy, 2 Pirate, 3 Procyon; 4 (and any other number) is no fleet type chosen or known.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum Race {

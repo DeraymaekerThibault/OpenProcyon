@@ -319,7 +319,7 @@ pub(super) fn fire(
     fxl: Res<FxLib>,
     mut target: ResMut<Target>,
     look: Res<Look>,
-    mut rng: ResMut<Rng>,
+    (mut rng, spawn_order): (ResMut<SimRng>, Query<&crate::scenario::SpawnIndex>),
     mut sfx: MessageWriter<Sfx>,
     mut fired: MessageWriter<Fired>,
     objects: Query<
@@ -657,7 +657,7 @@ pub(super) fn fire(
                 match posts.or(generic.as_ref()) {
                     Some(p) => {
                         let slot = if generic.is_some() { Some(0) } else { crate::crew_arms::weapon_banks(&lib, class).iter().position(|(b, _)| *b == mount.bank) };
-                        gunner_accuracy(p.gunner_skill(slot) + crate::crew_arms::leadership_bonus(me, p))
+                        gunner_accuracy(p.gunner_skill(slot) + crate::crew_arms::leadership_bonus(crate::scenario::SpawnIndex::of(&spawn_order, me), p))
                     }
                     None if human => crewed,
                     None => gunner_accuracy(crate::crew_arms::DEFAULT_HAND),
@@ -863,7 +863,7 @@ pub(super) fn base_fire(
     lib: Res<Library>,
     fxl: Res<FxLib>,
     look: Res<Look>,
-    mut rng: ResMut<Rng>,
+    mut rng: ResMut<SimRng>,
     mut sfx: MessageWriter<Sfx>,
     mut fired: MessageWriter<Fired>,
     campaign: Option<Res<crate::campaign::Mission>>,

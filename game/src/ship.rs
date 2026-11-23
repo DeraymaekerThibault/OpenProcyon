@@ -203,7 +203,7 @@ impl Explore {
         let (x, y) = (if q & 1 == 1 { half / 2.0 } else { -half / 2.0 }, if q & 2 == 2 { half / 2.0 } else { -half / 2.0 });
         Vec3::new(x, 0.0, -y)
     }
-    fn goal(&mut self, cfg: &Config, e: Entity, here: Vec3, sight: f32) -> Vec3 {
+    fn goal(&mut self, cfg: &Config, e: Entity, key: crate::scenario::SpawnIndex, here: Vec3, sight: f32) -> Vec3 {
         if self.map.as_ref() != Some(&cfg.map) {
             let map = cfg.map.as_ref().and_then(|id| crate::data::map_json(id)).unwrap_or_default();
             self.half = map["world_half"].as_f64().unwrap_or(1000.0) as f32;
@@ -211,9 +211,9 @@ impl Explore {
             self.quadrant.clear();
         }
         let half = self.half;
-        let q = self.quadrant.entry(e).or_insert(e.index_u32() as usize % 4);
+        let q = self.quadrant.entry(e).or_insert(key.0 as usize % 4);
         if Vec2::new(here.x, here.z).distance(Explore::centre(*q, half).xz()) < 0.5 * sight {
-            let draw = (e.to_bits() ^ (here.x.to_bits() as u64) << 7 ^ here.z.to_bits() as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+            let draw = (u64::from(key.0) ^ (here.x.to_bits() as u64) << 7 ^ here.z.to_bits() as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15);
             *q = (draw >> 62) as usize;
         }
         Explore::centre(*q, half)
@@ -309,7 +309,7 @@ pub fn ai(
     holes: Query<(&Transform, &crate::blackhole::Pull), Without<Ship>>,
     storms: (Option<Res<crate::nebula::Storms>>, Option<Res<crate::nebula::StormShift>>),
     (mut explore, mut breakoffs): (Local<Explore>, Local<std::collections::HashMap<Entity, attack::Breakoff>>),
-    (mut clocks, mut spawned): (Local<std::collections::HashMap<Entity, ThinkClock>>, Local<usize>),
+    (mut clocks, spawn_order): (Local<std::collections::HashMap<Entity, ThinkClock>>, Query<&crate::scenario::SpawnIndex>),
     (time, mut targets): (Res<Time>, ResMut<CaptainTargets>),
     (lib, fleets): (Res<combat::Library>, Res<Fleets>),
     bases: Query<(Entity, &Transform, &combat::BaseSide, &Health, &combat::ArmedBase)>,
@@ -331,12 +331,11 @@ pub fn ai(
         .collect();
     breakoffs.retain(|e, _| snap.iter().any(|f| f.0 == *e));
     clocks.retain(|e, _| snap.iter().any(|f| f.0 == *e));
-    for (e, tf, mut s, h, me, pilot, member, guns) in &mut ships {
+    // Captains think in creation order (docs/re/tick.md step 8): a captain adopting a mate's target sees the targets chosen before it.
+    for (e, tf, mut s, h, me, pilot, member, guns) in crate::scenario::in_spawn_order(&spawn_order, ships.iter_mut(), |x| x.0) {
+        let key = crate::scenario::SpawnIndex::of(&spawn_order, e);
         // Between thinks the ship keeps the course, speed order and target of its last think.
-        let clock = clocks.entry(e).or_insert_with(|| {
-            *spawned += 1;
-            ThinkClock::new(now, *spawned - 1)
-        });
+        let clock = clocks.entry(e).or_insert_with(|| ThinkClock::new(now, key.0 as usize));
         let Some(dt) = clock.due(now) else { continue };
         // The human's own fleet waits for orders; allied computer fleets share the human's side but hunt like any computer.
         // A ship that was just sunk has left its fleet and is computer-run, whoever steered it (docs/re/effects.md "Death drive").
@@ -407,7 +406,7 @@ pub fn ai(
         });
         let class = &lib.classes[s.class];
         let explore_now = |s: &mut Ship, explore: &mut Explore| {
-            (s.waypoints, s.goal, s.order) = (vec![explore.goal(&cfg, e, tf.translation, class.sight)], None, EngineOrder::Emergency);
+            (s.waypoints, s.goal, s.order) = (vec![explore.goal(&cfg, e, key, tf.translation, class.sight)], None, EngineOrder::Emergency);
         };
         let Some((foe_pos, foe_radius, foe_base, foe_aim)) = foe else {
             s.goal = None;
@@ -440,7 +439,7 @@ pub fn ai(
             s.waypoints = kept; // no new course: the one it held stands, with its speed order
             continue;
         };
-        s.throttle = attack::throttle(routine, e, tf.translation, s.heading, course[0]);
+        s.throttle = attack::throttle(routine, key, tf.translation, s.heading, course[0]);
         (s.waypoints, s.goal, s.order) = (course, None, EngineOrder::Emergency);
     }
 }
@@ -746,17 +745,17 @@ fn captain_target_valid(world: &World, actor: Entity, target: Entity) -> bool {
 /// first surviving member becomes command ship after death/capture; empty fleets have no command ship.
 pub fn reconcile_fleets(world: &mut World) {
     let mut live: Vec<_> = world
-        .query::<(Entity, &Ship, &Health, &FleetMember, Option<&campaign::MissionShip>)>()
+        .query::<(Entity, &Ship, &Health, &FleetMember, Option<&campaign::MissionShip>, Option<&crate::scenario::SpawnIndex>)>()
         .iter(world)
-        .filter(|(_, _, h, _, _)| !h.destroyed)
-        .map(|(e, _, _, f, m)| (e, m.map_or_else(|| f.0.clone(), |m| m.owner.clone()), f.1))
+        .filter(|(_, _, h, _, _, _)| !h.destroyed)
+        .map(|(e, _, _, f, m, i)| (e, m.map_or_else(|| f.0.clone(), |m| m.owner.clone()), f.1, i.copied()))
         .collect();
-    live.sort_by_key(|s| (s.2, s.0.to_bits()));
+    live.sort_by_key(|s| (s.2, s.3));
     world.resource_scope(|world, mut fleets: Mut<Fleets>| {
         for (owner, fleet) in &mut fleets.groups {
             fleet.members.retain(|e| live.iter().any(|s| s.0 == *e && s.1 == *owner));
         }
-        for (e, owner, _) in &live {
+        for (e, owner, _, _) in &live {
             let f = fleets.groups.entry(owner.clone()).or_default();
             let joined = !f.members.contains(e);
             if joined {

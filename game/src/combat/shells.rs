@@ -372,7 +372,7 @@ pub(super) fn shells(
     time: Res<Time>,
     lib: Res<Library>,
     fxl: Res<FxLib>,
-    mut rng: ResMut<Rng>,
+    (mut rng, spawn_order, difficulty): (ResMut<SimRng>, Query<&crate::scenario::SpawnIndex>, Res<crate::scenario::Difficulty>),
     mut sfx: MessageWriter<Sfx>,
     mut hits: MessageWriter<Hit>,
     mut destroyed: MessageWriter<Destroyed>,
@@ -397,7 +397,7 @@ pub(super) fn shells(
         q.iter().filter(|(_, s, _)| s.torpedo || matches!(s.payload, Payload::Mine { .. })).map(|(e, s, t)| (e, t.translation, s.side)).collect();
     let mut threat_hp: std::collections::HashMap<Entity, f32> = q.iter().filter(|(e, ..)| threats.iter().any(|t| t.0 == *e)).map(|(e, s, _)| (e, s.hp)).collect();
     let mut downed: Vec<Entity> = vec![];
-    for (e, mut s, mut tf) in &mut q {
+    for (e, mut s, mut tf) in crate::scenario::in_spawn_order(&spawn_order, q.iter_mut(), |x| x.0) {
         if downed.contains(&e) {
             continue;
         }
@@ -523,7 +523,7 @@ pub(super) fn shells(
             {
                 let [lo, hi, ..] = bd.damage["Dragon"];
                 // Retail rolls the same difficulty factor against a dragon as against a computer ship (decoded; not measured on a dragon).
-                d.hurt(rng.range(lo, hi).round() * side_damage_scale(s.side, Side::Enemy, crate::menu::difficulty(), s.base));
+                d.hurt(rng.range(lo, hi).round() * side_damage_scale(s.side, Side::Enemy, difficulty.0, s.base));
             }
             hit_fx(&mut commands, &fxl, bd, p0 + (p1 - p0) * t, s.vel, None, Surface::default());
             crate::queue_removal(&mut commands, e);
@@ -643,7 +643,7 @@ pub(super) fn shells(
             let (se, stf, ship, mut hp, mut fires, mission, _) = ships.get_mut(si).unwrap();
             let target = ShipTarget { entity: se, transform: stf, side: ship.side, class: &lib.classes[ship.class], invuln: mission.map_or(0.0, |m| m.invuln) };
             let surface = Surface { body: Some(se), normal: hull_normal, material: Some(material_key(&target.class.sections[k].material)) };
-            hit_ship(&mut commands, &fxl, &mut rng, (&mut sfx, &mut hits, &mut scars), bd, &s, target, &mut hp, &mut fires, k, at, 1.0);
+            hit_ship(&mut commands, &fxl, &mut rng, (&mut sfx, &mut hits, &mut scars), bd, &s, target, &mut hp, &mut fires, k, at, 1.0, difficulty.0);
             hit_fx(&mut commands, &fxl, bd, at, s.vel, Some((se, stf)), surface);
             if matches!(s.payload, Payload::Blast { .. }) {
                 detonate.write(Detonate { bullet: s.bullet.clone(), at, shooter: Some(s.shooter), owner: Some((s.side, s.base)) });
@@ -707,13 +707,14 @@ pub(super) fn hit_ship(
     k: usize,
     at: Vec3,
     power: f32,
+    difficulty: u8,
 ) {
     let ShipTarget { entity: se, transform: stf, side, class, invuln } = target;
     let sec = &class.sections[k];
     let key = material_key(&sec.material);
     // Criticals are not modelled: in the original they only feed a tally and crew speech (docs/re/movement.md).
     let mut damage = bd.damage[key];
-    let scale = side_damage_scale(s.side, side, crate::menu::difficulty(), s.base);
+    let scale = side_damage_scale(s.side, side, difficulty, s.base);
     damage[0] *= scale * power;
     damage[1] *= scale * power;
     hits.write(Hit { shooter: s.shooter, victim: se });
