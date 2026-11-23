@@ -23,3 +23,19 @@ class Summarise(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AssetsEnv(unittest.TestCase):
+    def test_each_checkout_builds_its_own_overlay(self):
+        """The default overlay sits next to the assets; a worktree using the main import must not rebuild the main one."""
+        import os
+        from unittest import mock
+
+        from tools import autoplay
+
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("PROCYON_OVERLAY", None)
+            env = autoplay.assets_env()
+        self.assertEqual(
+            env["PROCYON_OVERLAY"], str(autoplay.REPO / "local/tool-overlay")
+        )
