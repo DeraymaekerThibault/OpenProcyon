@@ -1,6 +1,6 @@
 """Autoplay: run campaign missions unattended and summarise what broke (#68).
 usage: python3 -m tools.autoplay [MISSION ...] [--speed N] [--jobs N] [--limit SECONDS] [--mortal]   (default: missions 1-13, speed 16, limit 3600)
-Each mission runs the release game with the `--script mission` autopilot steering the player's ship (PROCYON_AUTOPLAY in
+Each mission runs the game (the `fast` profile unless --profile) with the `--script mission` autopilot steering the player's ship (PROCYON_AUTOPLAY in
 game/src/smoke/mod.rs ends the run). The player's fleet is invulnerable (PROCYON_AUTOINVULN) unless --mortal is given: the
 bot has no tactics, and the goal is to reach every rule, not to win fights. Logs go to local/autoplay/missionNN.log; the table lists the outcome, the game time
 reached, peak entity/particle counts, the slowest frame and how many rules never fired (listed in the log's last line).
@@ -17,7 +17,24 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
-GAME = REPO / "game/target/release/openprocyon"
+
+
+def build_game(profile="fast"):
+    """Builds the game with a Cargo profile (`fast` for checking runs, `release` as players get it) and returns the binary."""
+    subprocess.run(
+        ["cargo", "build", "--profile", profile, "--quiet"],
+        cwd=REPO / "game",
+        check=True,
+    )
+    target = Path(os.environ.get("CARGO_TARGET_DIR", REPO / "game/target"))
+    # Cargo names the release profile's folder `release` and every custom profile's after the profile.
+    return (
+        target
+        / profile
+        / ("openprocyon.exe" if sys.platform == "win32" else "openprocyon")
+    )
+
+
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
 PROFILE = re.compile(r"profile .*frame_ms=([\d.]+) entities=(\d+) .*particles=(\d+)")
 END = re.compile(r'autoplay end outcome="([^"]+)" time=(\d+) never_fired=\[(.*)\]')
@@ -80,10 +97,13 @@ def main():
         action="store_true",
         help="let the player's fleet take damage (default: invulnerable)",
     )
-    args = ap.parse_args()
-    subprocess.run(
-        ["cargo", "build", "--release", "--quiet"], cwd=REPO / "game", check=True
+    ap.add_argument(
+        "--profile",
+        default="fast",
+        help="Cargo profile to build the game with (default fast; release to time what players get)",
     )
+    args = ap.parse_args()
+    game = build_game(args.profile)
     out = REPO / "local/autoplay"
     out.mkdir(parents=True, exist_ok=True)
     wrap = display_wrapper()
@@ -107,7 +127,7 @@ def main():
             log = out / f"mission{n:02}.log"
             # Each run builds its own asset overlay (game/src/modding.rs); parallel runs sharing local/overlay broke each other.
             menv = {**env, "PROCYON_OVERLAY": str(Path(xdg) / f"overlay{n}")}
-            cmd = [*wrap, str(GAME), "--mission", str(n), "--script", "mission", "--speed", str(args.speed),
+            cmd = [*wrap, str(game), "--mission", str(n), "--script", "mission", "--speed", str(args.speed),
                    "--shot", str(out / f"mission{n:02}.png"), "--shot-frame", "1000000000", "--late-frame", "0"]  # fmt: skip
             print(f"mission {n} ...", flush=True)
             with log.open("w") as f:

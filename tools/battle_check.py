@@ -1,10 +1,10 @@
 """Battle check: play short skirmish battles and fail when one stops behaving like a battle.
-usage: python3 -m tools.battle_check [NAME ...] [--speed N]   (default: every scenario below)
+usage: python3 -m tools.battle_check [NAME ...] [--speed N] [--profile fast|release]   (default: every scenario below)
 Two kinds of scenario: a map with the --ship/--allies/--enemies fleet shortcut, and a lobby scenario (`--lobby <spec>`,
 game/src/menu/lobby_scenario.rs) that sets the skirmish lobby up like a player (slots, victory points, fleet limit) and presses
 Launch. The shortcut never plays an allied computer slot or a full lobby; only lobby scenarios do.
-Each scenario runs the release game with PROCYON_REPORT (game/src/smoke/report.rs), which logs one `battle report {json}` line
-when one side is gone or the time is up. The expectations below are whole-battle invariants (the computer engages, nobody grinds on
+Each scenario runs the game (Cargo profile `fast` unless --profile) with PROCYON_REPORT (game/src/smoke/report.rs), which logs
+one `battle report {json}` line when one side is gone or the time is up. The expectations below are whole-battle invariants (the computer engages, nobody grinds on
 an island, nothing panics): they catch regressions where one feature quietly changes another (armed volcanoes taken for bases,
 map-script tags hiding the captain's target). Runs take ~10-40 s each; logs go to local/battle_check/<name>.log.
 Needs imported assets and a display, or Xvfb + Mesa like tools/shot.sh."""
@@ -20,13 +20,9 @@ import tempfile
 from pathlib import Path
 from typing import NamedTuple
 
-from tools.autoplay import display_wrapper, silent_data_home
+from tools.autoplay import build_game, display_wrapper, silent_data_home
 
 REPO = Path(__file__).resolve().parents[1]
-GAME = (
-    Path(os.environ.get("CARGO_TARGET_DIR", REPO / "game/target"))
-    / "release/openprocyon"
-)
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
 REPORT = re.compile(r"battle report (\{.*\})")
 FLEETS = ["--ship", "Ship_Navy_Cutter", "--allies", "Ship_Navy_Cutter",
@@ -166,15 +162,18 @@ def main():
     )
     ap.add_argument("names", nargs="*", help="scenarios to run (default: all)")
     ap.add_argument("--speed", type=float, default=16)
+    ap.add_argument(
+        "--profile",
+        default="fast",
+        help="Cargo profile to build the game with (default fast; release to time what players get)",
+    )
     args = ap.parse_args()
     chosen = [s for s in SCENARIOS if not args.names or s.name in args.names]
     if not chosen:
         sys.exit(
             f"no scenario named {args.names}; known: {[s.name for s in SCENARIOS]}"
         )
-    subprocess.run(
-        ["cargo", "build", "--release", "--quiet"], cwd=REPO / "game", check=True
-    )
+    game = build_game(args.profile)
     out = REPO / "local/battle_check"
     out.mkdir(parents=True, exist_ok=True)
     wrap = display_wrapper()
@@ -188,7 +187,7 @@ def main():
         for name, game_args, seconds, expect in chosen:
             log = out / f"{name}.log"
             env["PROCYON_REPORT"] = str(seconds)
-            cmd = [*wrap, str(GAME), *game_args, "--speed", str(args.speed)]
+            cmd = [*wrap, str(game), *game_args, "--speed", str(args.speed)]
             # Wall-clock cap for a hung run (below ~10 fps the game runs slower than asked); a timeout reports no battle.
             with log.open("w") as f, contextlib.suppress(subprocess.TimeoutExpired):
                 subprocess.run(

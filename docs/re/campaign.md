@@ -42,7 +42,7 @@ still require executable investigation.
 
 ## Implemented: rule interpreter (`game/src/rules/`)
 
-Run `cd game && cargo run --release -- --mission 1`, or Single Player → Start New Campaign. `R` restarts, `F10` returns to the menu.
+Run `cd game && cargo run --profile fast -- --mission 1`, or Single Player → Start New Campaign. `R` restarts, `F10` returns to the menu.
 The old hard-coded stage machine is gone: all mission flow comes from the 135 exported rules, evaluated every frame
 (`Script::step`, pure and unit-tested). All 19 condition types and 52 action types of the mission are either implemented or
 explicitly listed below; unsupported ones are logged once (`unsupported ...`) and a test fails if a new unknown type appears.
@@ -109,7 +109,7 @@ See “Next” below for the latest Mission 1 remediation and what has actually 
 
 ## Checks performed
 
-- Rust tests (`cargo test --release`, 12): every condition/action type of the mission is handled; world-init rules (flags, objective point, timers, Jim's
+- Rust tests (`cargo test`, 12): every condition/action type of the mission is handled; world-init rules (flags, objective point, timers, Jim's
   path, music); Blue leaves at world timer 46 and Red at 51 only while the start flag is false; alliance set/clear; volumes/timers/speech conditions;
   speech without audio completes; opening cue boundaries and path endpoints; menu, HUD and movement tests.
 - End-to-end smoke run (`--script mission --speed 10`, `PROCYON_AUTOKILL=1`): the autopilot followed the objectives through both fleet exercises, the black-flag

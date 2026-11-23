@@ -9,7 +9,7 @@ SH := "$(or $(GIT_BASH),$(or $(ProgramW6432),$(ProgramFiles))/Git/bin/bash)"
 endif
 
 help:
-	$(info make run [ARGS="--mission 1"]     Run the game from the repository root)
+	$(info make run [ARGS="--mission 1"]     Run the game from the repository root (Cargo profile fast))
 	$(info make check [ARGS=--fast]          Format check, strict Clippy, Rust + Python tests (--fast: no startup smoke or battle check))
 	$(info make fmt                          Format Rust and Python source)
 	$(info make test-python                  Fast parser/exporter tests (no Rust build))
@@ -20,7 +20,7 @@ help:
 	$(info make assets ARGS="--game <install dir>"  Import your copy of the game (once; again after exporter changes))
 
 run:
-	cargo run --release --manifest-path game/Cargo.toml -- $(ARGS)
+	cargo run --profile fast --manifest-path game/Cargo.toml -- $(ARGS)
 
 check:
 	$(SH) tools/check.sh $(ARGS)
