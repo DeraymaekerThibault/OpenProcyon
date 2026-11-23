@@ -46,6 +46,17 @@ def base_tree(ref):
     return BASE_WT
 
 
+def build(tree):
+    """The `fast` binary of `tree` (outside the run's time cap: a first build in a fresh tree takes minutes)."""
+    env = {k: v for k, v in os.environ.items() if k != "CARGO_TARGET_DIR"}
+    subprocess.run(
+        ["cargo", "build", "--profile", "fast", "-q"],
+        cwd=Path(tree, "game"),
+        env=env,
+        check=True,
+    )
+
+
 def render(tree, scene, png):
     """One fixed-step picture from `tree`'s build, offscreen, with default settings; the run is capped and killed with its game."""
     with tempfile.TemporaryDirectory() as xdg:
@@ -113,6 +124,8 @@ def main(argv=None):
         f"visdiff: base {ref[:9]} vs {git('rev-parse', '--short', 'HEAD')} (+ uncommitted changes)",
         flush=True,
     )
+    for tree in trees.values():
+        build(tree)
     changed = 0
     for scene in args.scene or SCENES:
         pics = {side: OUT / f"{scene}_{side}.png" for side in trees}
