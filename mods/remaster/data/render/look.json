@@ -77,6 +77,8 @@
   "lit_smoke": true,
   "deckhands": {
     "per_ship": 60,
+    "per_scenery": 150,
+    "lod_distance": 45,
     "range": 170,
     "outfits": [
       {"race": "Navy", "skin": [0.62, 0.42, 0.30], "coat": [0.08, 0.13, 0.35], "trousers": [0.75, 0.72, 0.64], "shoes": [0.03, 0.03, 0.03], "hat": [0.05, 0.06, 0.12]},
