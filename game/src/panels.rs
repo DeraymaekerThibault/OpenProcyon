@@ -40,6 +40,62 @@ pub fn cinematic(mission: Option<&crate::campaign::Mission>) -> bool {
     crate::briefing::active(mission) || crate::rules::nis(mission)
 }
 
+/// What the world HUD marks this frame, decided once here so every view draws the same things (views only place and fade them).
+#[derive(Resource, Default, Debug, PartialEq)]
+pub struct WorldMarks {
+    /// The ship or animal the target reticle stands on: the aimed target while the player flies the selected ship, else the target
+    /// the selected ship was ordered at; none when it is hidden, unseen or the HUD is off.
+    pub reticle: Option<Entity>,
+    /// The ships whose name banner may show (alive, visible to the mission, seen by the player, HUD on). A view still fades it with
+    /// the camera distance and the toggle, and hides it when the ship is off screen.
+    pub banners: std::collections::HashSet<Entity>,
+}
+
+/// The target the reticle marks: `aimed` (the player's own target) when the selected ship is the one flown, else its ordered one
+/// (a fleet pilot's order first, then a mission ship's).
+pub fn reticle_target(direct: bool, aimed: Option<Entity>, pilot_target: Option<Entity>, mission_target: Option<Entity>) -> Option<Entity> {
+    if direct { aimed } else { pilot_target.or(mission_target) }
+}
+
+/// Whether a ship's name banner may show.
+pub fn banner_allowed(destroyed: bool, mission_visible: bool, seen: bool, hud_off: bool) -> bool {
+    !hud_off && !destroyed && mission_visible && seen
+}
+
+#[allow(clippy::too_many_arguments)]
+fn decide_world_marks(
+    mut marks: ResMut<WorldMarks>,
+    target: Res<combat::Target>,
+    fleets: Res<crate::ship::Fleets>,
+    pilots: Query<&crate::ship::FleetPilot>,
+    ships: Query<(Entity, &Health, Option<&crate::campaign::MissionShip>), With<Ship>>,
+    animals: Query<&crate::environment::SpaceAnimal>,
+    sensors: Res<crate::environment::Sensors>,
+    mission: Option<Res<crate::campaign::Mission>>,
+) {
+    let hud_off = cinematic(mission.as_deref()) || crate::rules::console::hud_hidden();
+    let mut next = WorldMarks::default();
+    for (e, h, ms) in &ships {
+        if banner_allowed(h.destroyed, ms.is_none_or(|m| m.visible), sensors.player_sees(e, mission.as_deref()), hud_off) {
+            next.banners.insert(e);
+        }
+    }
+    if !hud_off {
+        let ordered = fleets.selected.map(|e| (pilots.get(e).ok().and_then(|p| p.target), ships.get(e).ok().and_then(|s| s.2.and_then(|m| m.target))));
+        let (pilot, mission_target) = ordered.unwrap_or((None, None));
+        next.reticle = reticle_target(fleets.direct(), target.0, pilot, mission_target).filter(|&e| {
+            let shown = match ships.get(e) {
+                Ok((_, h, ms)) => !h.destroyed && ms.is_none_or(|m| m.visible),
+                Err(_) => animals.get(e).is_ok_and(|a| a.visible),
+            };
+            shown && sensors.player_sees(e, mission.as_deref())
+        });
+    }
+    if *marks != next {
+        *marks = next;
+    }
+}
+
 /// Root of the view's HUD tree: hidden during cinematics, and clicks only count while it shows.
 #[derive(Component)]
 pub struct HudRoot;
@@ -346,6 +402,7 @@ pub fn plugin(app: &mut App) {
         .init_resource::<Talk>()
         .init_resource::<HeadState>()
         .init_resource::<FleetHud>()
+        .init_resource::<WorldMarks>()
         .init_resource::<ChatLog>()
         .add_systems(Update, chat_feed.run_if(in_state(crate::menu::Screen::Battle)))
         .configure_sets(Update, HudSet.after(crate::sprites::choose_skin).run_if(in_state(crate::menu::Screen::Battle)))
@@ -358,7 +415,8 @@ pub fn plugin(app: &mut App) {
                 .run_if(crate::menu::overlay_closed),
         )
         .add_systems(PreUpdate, name_toggle)
-        .add_systems(Update, (fleet_model, update_visibility, update_contacts, update_docking_status, talking_head, pause_button, speed_button).chain().in_set(HudSet));
+        .add_systems(Update, (fleet_model, update_visibility, update_contacts, update_docking_status, talking_head, pause_button, speed_button).chain().in_set(HudSet))
+        .add_systems(Update, decide_world_marks.in_set(HudSet).run_if(resource_exists::<combat::Target>));
 }
 
 /// `N` toggles the ship-name banners.
@@ -699,6 +757,24 @@ pub fn input_app() -> (App, Entity) {
 #[cfg(test)]
 pub mod tests {
     use super::*;
+
+    #[test]
+    fn the_reticle_follows_the_aim_when_flying_else_the_order() {
+        let (aim, pilot, mission) = (Some(Entity::from_raw_u32(1).unwrap()), Some(Entity::from_raw_u32(2).unwrap()), Some(Entity::from_raw_u32(3).unwrap()));
+        assert_eq!(reticle_target(true, aim, pilot, mission), aim, "the flown ship marks the player's own target");
+        assert_eq!(reticle_target(true, None, pilot, mission), None, "no aimed target, no reticle, whatever the fleet orders");
+        assert_eq!(reticle_target(false, aim, pilot, mission), pilot, "a fleet pilot's order comes first");
+        assert_eq!(reticle_target(false, aim, None, mission), mission, "then the mission ship's");
+        assert_eq!(reticle_target(false, aim, None, None), None);
+    }
+
+    #[test]
+    fn a_banner_needs_a_living_visible_seen_ship_and_the_hud_on() {
+        assert!(banner_allowed(false, true, true, false));
+        for (destroyed, visible, seen, hud_off) in [(true, true, true, false), (false, false, true, false), (false, true, false, false), (false, true, true, true)] {
+            assert!(!banner_allowed(destroyed, visible, seen, hud_off), "{destroyed} {visible} {seen} {hud_off}");
+        }
+    }
 
     #[test]
     fn chat_history_keeps_lines_in_order_with_their_colour() {

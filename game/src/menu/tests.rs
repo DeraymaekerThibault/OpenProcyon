@@ -784,3 +784,103 @@ fn dialog_and_panel_flags_change_the_menu_key() {
         last = key;
     }
 }
+
+/// A skirmish with a human and a computer slot on an open or historical map, no assets needed (the retail button table reads only this).
+fn bare_skirmish(open: bool, human_ships: usize) -> Skirmish {
+    let slot = |player, kind, team| Slot { player, name: format!("p{player}"), kind, race: Race::Navy, team, flag: 0, fleet: vec![], weapons: vec![], names: vec![], crew: vec![] };
+    let mut human = slot(0, Kind::Human, 0);
+    human.fleet = vec!["Ship_Navy_Cutter".into(); human_ships];
+    Skirmish {
+        map: None,
+        slots: vec![human, slot(1, Kind::Computer, 1)],
+        maps: vec![],
+        selected: 0,
+        historical: !open,
+        fleet_size: 5,
+        draw: 0,
+        victory_limit: 300,
+        map_json: serde_json::json!({ "assemble": open }),
+        error: None,
+        dropdown: None,
+        name_open: false,
+        flag_picker: false,
+        ship_pick: 0,
+        ship_chosen: false,
+        view_slot: false,
+        fleet_pick: 0,
+        slot_scroll: 0,
+        map_scroll: 0,
+        scroll: 0,
+        arms_open: false,
+        arms_tab: false,
+        map_info: false,
+        profile: None,
+    }
+}
+
+fn button(screen: Screen, impl_: &str, sk: &Skirmish) -> Option<RetailButton> {
+    retail_button(screen, impl_, &ButtonContext { page: None, skirmish: sk, outcome: crate::scenario::Outcome::Playing })
+}
+
+#[test]
+fn retail_buttons_navigate_the_front_end() {
+    let sk = bare_skirmish(true, 1);
+    assert!(matches!(button(Screen::Main, "Open Single Player Menu Button", &sk), Some(RetailButton::Run(Action::Goto(Screen::SinglePlayer)))));
+    assert!(matches!(button(Screen::Main, "Open Next Screen Button", &sk), Some(RetailButton::Run(Action::Quit))));
+    assert!(matches!(button(Screen::SinglePlayer, "Open Prev Arrow Button", &sk), Some(RetailButton::Run(Action::Goto(Screen::Main)))));
+    assert!(matches!(button(Screen::CreateSkirmish, "Open Prev Arrow Button", &sk), Some(RetailButton::Run(Action::Goto(Screen::SinglePlayer)))));
+    assert!(matches!(button(Screen::CreateSkirmish, "Open Next Arrow Button", &sk), Some(RetailButton::Run(Action::Goto(Screen::Lobby)))));
+    assert!(matches!(button(Screen::Fleet, "Open Next Arrow Button", &sk), Some(RetailButton::Run(Action::Goto(Screen::Lobby)))));
+    assert!(matches!(button(Screen::Tutorial, "Start Basic Training Tutorial Button", &sk), Some(RetailButton::Run(Action::Tutorial("basic_tutorial")))));
+    // Not in the table: art and lists, a button of another screen, and the multiplayer buttons (the view greys those out).
+    assert!(button(Screen::Main, "Front End Screen Backdrop", &sk).is_none());
+    assert!(button(Screen::Lobby, "Open Prev Arrow Button", &sk).is_none());
+    assert!(button(Screen::Main, "Open Multiplayer Menu Button", &sk).is_none());
+}
+
+#[test]
+fn launch_is_greyed_until_the_lobby_can_start_and_ship_selection_needs_an_open_map() {
+    let ready = bare_skirmish(true, 2);
+    assert!(matches!(button(Screen::Lobby, "Open Next Screen Button", &ready), Some(RetailButton::Run(Action::Launch))));
+    assert!(matches!(button(Screen::Lobby, "Open Ship Selection Screen", &ready), Some(RetailButton::Run(Action::Goto(Screen::Fleet)))));
+    let no_fleet = bare_skirmish(true, 0);
+    assert!(matches!(button(Screen::Lobby, "Open Next Screen Button", &no_fleet), Some(RetailButton::Disabled)));
+    let mut alone = bare_skirmish(false, 0);
+    alone.slots[1].kind = Kind::Open;
+    assert!(matches!(button(Screen::Lobby, "Open Next Screen Button", &alone), Some(RetailButton::Disabled)), "no opponent");
+    assert!(button(Screen::Lobby, "Open Ship Selection Screen", &bare_skirmish(false, 0)).is_none(), "historical maps bring their own fleets");
+}
+
+#[test]
+fn fleet_screen_buttons_follow_the_pick_and_the_fleet() {
+    let mut sk = bare_skirmish(true, 2);
+    let state = |sk: &Skirmish, n: &str| button(Screen::Fleet, n, sk);
+    assert!(matches!(state(&sk, "Open Ship Selection Screen"), Some(RetailButton::CurrentTab)));
+    for n in ["Open Crew Selection Screen", "Open Arms Selection Screen", "Drop Ship From Fleet Button"] {
+        assert!(matches!(state(&sk, n), Some(RetailButton::Run(_))), "{n}: a ship is in the picked slot");
+    }
+    assert!(matches!(state(&sk, "Add Ship To Fleet Button"), Some(RetailButton::Disabled)), "no hull type clicked");
+    sk.ship_chosen = true;
+    assert!(matches!(state(&sk, "Add Ship To Fleet Button"), Some(RetailButton::Run(Action::AddShip))));
+    sk.fleet_pick = 2;
+    for n in ["Open Crew Selection Screen", "Open Arms Selection Screen", "Drop Ship From Fleet Button"] {
+        assert!(matches!(state(&sk, n), Some(RetailButton::Disabled)), "{n}: the picked slot is empty");
+    }
+    assert!(matches!(state(&sk, "Open Save Fleet Profile Dialog Button"), Some(RetailButton::Run(_))));
+    sk.slots[0].fleet.clear();
+    assert!(state(&sk, "Open Save Fleet Profile Dialog Button").is_none(), "an empty fleet cannot be saved (the view greys the button)");
+    assert!(matches!(state(&sk, "Open Load Fleet Profile Dialog Button"), Some(RetailButton::Run(_))));
+}
+
+#[test]
+fn in_game_menu_buttons_depend_on_the_page_and_the_outcome() {
+    let sk = bare_skirmish(true, 1);
+    let with = |page, outcome, n: &str| retail_button(Screen::Battle, n, &ButtonContext { page, skirmish: &sk, outcome });
+    use crate::scenario::Outcome;
+    assert!(matches!(with(Some(Page::Menu), Outcome::Playing, "Open Previous Screen Button"), Some(RetailButton::Run(Action::Ingame(None)))));
+    assert!(matches!(with(Some(Page::Options), Outcome::Playing, "Open Previous Screen Button"), Some(RetailButton::Run(Action::Ingame(Some(Page::Menu))))));
+    assert!(matches!(with(Some(Page::Summary), Outcome::Playing, "Open Next Arrow Button"), Some(RetailButton::Run(Action::Ingame(Some(Page::Menu))))));
+    assert!(matches!(with(Some(Page::Summary), Outcome::Victory, "Open Next Arrow Button"), Some(RetailButton::Run(Action::QuitToMenu))));
+    assert!(matches!(with(Some(Page::Save), Outcome::Playing, "Load or Save Campaign Button"), Some(RetailButton::Run(Action::DoSave))));
+    assert!(matches!(with(Some(Page::Load), Outcome::Playing, "Load or Save Campaign Button"), Some(RetailButton::Run(Action::DoLoad))));
+}
