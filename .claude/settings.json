@@ -1,0 +1,40 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      { "matcher": "Edit|Write|MultiEdit", "hooks": [ { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/format.sh", "timeout": 30 } ] }
+    ],
+    "Stop": [
+      { "hooks": [ { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/stop-check.sh", "timeout": 600 } ] }
+    ],
+    "WorktreeCreate": [
+      { "hooks": [ { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/worktree-create.sh" } ] }
+    ],
+    "WorktreeRemove": [
+      { "hooks": [ { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/worktree-remove.sh" } ] }
+    ]
+  },
+  "permissions": {
+    "allow": [
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git branch --show-current)",
+      "Bash(gh issue view:*)",
+      "Bash(gh pr view:*)",
+      "Bash(gh pr checks:*)",
+      "Bash(tools/check.sh:*)",
+      "Bash(make check:*)",
+      "Bash(cargo test:*)",
+      "Bash(cargo clippy:*)",
+      "Bash(cargo fmt --manifest-path game/Cargo.toml --check)",
+      "Bash(ruff check:*)",
+      "Bash(ruff format --check:*)",
+      "Bash(python3 -m ruff check:*)",
+      "Bash(python3 -m ruff format --check:*)",
+      "Bash(python3 -m unittest:*)",
+      "Bash(tools/smokes.sh:*)",
+      "Bash(make smoke:*)",
+      "Bash(tools/shot.sh:*)"
+    ]
+  }
+}

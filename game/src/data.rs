@@ -622,6 +622,17 @@ pub fn read_json(path: &std::path::Path) -> Value {
 pub fn try_json(path: &std::path::Path) -> Option<Value> {
     serde_json::from_str(&std::fs::read_to_string(path).ok()?).ok()
 }
+/// Writes `path` whole or not at all: a temp file next to it (`.tmp` extension), then a rename, so a crash never leaves half a file.
+pub fn write_atomic(path: &std::path::Path, contents: &str) -> std::io::Result<()> {
+    let temp = path.with_extension("tmp");
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    std::fs::write(&temp, contents)?;
+    std::fs::rename(&temp, path).inspect_err(|_| {
+        let _ = std::fs::remove_file(&temp);
+    })
+}
 /// A map's `maps/<id>/map.json`, if that map was imported.
 pub fn map_json(id: &str) -> Option<Value> {
     try_json(&crate::assets_dir().join(format!("maps/{id}/map.json")))
@@ -808,5 +819,20 @@ mod gun_family_tests {
         for g in guns.values() {
             assert_eq!(is_torpedo_bullet(&g.bullet), g.bullet == TORPEDO_BULLET, "{}", g.bullet);
         }
+    }
+}
+
+#[cfg(test)]
+mod write_atomic_tests {
+    #[test]
+    fn a_save_replaces_the_file_and_leaves_no_temp_behind() {
+        let dir = std::env::temp_dir().join(format!("procyon-atomic-{}", std::process::id())).join("nested");
+        let path = dir.join("settings.json");
+        super::write_atomic(&path, r#"{"master": 3}"#).unwrap();
+        super::write_atomic(&path, r#"{"master": 4}"#).unwrap();
+        assert_eq!(super::try_json(&path).unwrap()["master"], 4);
+        let names: Vec<_> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name()).collect();
+        assert_eq!(names, ["settings.json"], "no temp file stays");
+        let _ = std::fs::remove_dir_all(dir.parent().unwrap());
     }
 }

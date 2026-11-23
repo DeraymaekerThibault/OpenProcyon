@@ -177,7 +177,7 @@ only in what is drawn:
 
 ```
 shared core + model      ship, combat/, collision, rules/, campaign, docking, boarding, scenario, data, modding, ...
-(the `openprocyon` lib)  menu.rs / panels.rs / options_menu.rs: UI state, Actions, marker components, input and their behaviour
+(the `openprocyon` lib)  menu.rs / panels.rs / options_menu.rs / pointer.rs (the one reader of the deprecated `Interaction`): UI state, Actions, marker components, input and their behaviour
         ▲
 classic/  (this binary)  retail-art views
 ```

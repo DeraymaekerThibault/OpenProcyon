@@ -2,6 +2,7 @@ use super::fitting::{FitError, family};
 use super::view::{crew_rows, weapon_rows};
 use super::*;
 #[test]
+#[allow(deprecated)] // Interaction, see pointer.rs
 fn widgets_play_rollover_once_and_select_on_press() {
     let mut app = App::new();
     app.add_plugins(MinimalPlugins).add_message::<crate::audio::Sfx>().add_systems(Update, button_sounds);

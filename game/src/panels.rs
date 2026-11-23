@@ -3,7 +3,6 @@
 //! A view builds its widgets under one `HudRoot` and tags them with the markers below (`PanicButton`, `GunButton`, `Contact`, ...);
 //! this module gives them their behaviour: clicks, what the gauges read (`gauge_value`), radar contact placement (`Radar`), the
 //! docking/boarding status icon, the talking-head state (`HeadState`), pause and the game-speed buttons. Views only draw.
-#![allow(deprecated)] // shortcut: bevy 0.20 Interaction (deprecated for picking Hovered/Pressed); port with menu.rs when it is removed
 use bevy::prelude::*;
 
 use crate::bindings::Act;
@@ -211,6 +210,7 @@ fn fleet_model(
     model.cease_fire = f.is_some_and(|f| f.cease_fire);
 }
 
+#[allow(deprecated)] // Interaction, see pointer.rs
 fn fleet_input(
     mouse: Res<ButtonInput<MouseButton>>,
     model: Res<FleetHud>,
@@ -231,7 +231,7 @@ fn fleet_input(
     let hovered = buttons
         .iter()
         .find(|(_, b, i)| {
-            **i != Interaction::None
+            crate::pointer::over(i)
                 && match b {
                     FleetButton::Slot(n) => model.ships && model.rows.get(*n).is_some(),
                     FleetButton::Formation(_) | FleetButton::Attack | FleetButton::CeaseFire => model.commands,
@@ -519,12 +519,13 @@ pub struct HudFocus<'w, 's> {
     menu: Option<Res<'w, crate::options_menu::OptionsMenu>>,
     sfx: Option<ResMut<'w, Messages<crate::audio::Sfx>>>,
     plot: Option<ResMut<'w, crate::course::Plot>>,
-    movement: Query<'w, 's, &'static Interaction, With<MovementButton>>,
+    movement: Query<'w, 's, &'static crate::pointer::Raw, With<MovementButton>>,
     crew: Option<Res<'w, crate::crew_arms::ScreenModel>>,
 }
 
 /// Clicks on the HUD: weapon-panel toggle (also W), panic, the ship icon (camera back to the player's ship) and the gun icons.
 /// `UiClick` tells the world to ignore clicks that land on the HUD.
+#[allow(deprecated)] // Interaction, see pointer.rs
 pub fn hud_input(
     keys: Res<ButtonInput<KeyCode>>,
     binds: Res<crate::bindings::Bindings>,
@@ -547,19 +548,19 @@ pub fn hud_input(
         return;
     }
     let shown = hud_shown(&visible);
-    ui.0 = shown && solid.iter().any(|i| *i != Interaction::None);
+    ui.0 = shown && solid.iter().any(crate::pointer::over);
     if focus.menu.as_ref().is_some_and(|m| m.is_open()) {
         return;
     }
     let click = shown && mouse.just_pressed(MouseButton::Left);
     let mut flip = shown && binds.just_pressed(&keys, Act::WeaponBar);
-    if click && toggle.iter().any(|i| *i != Interaction::None) {
+    if click && toggle.iter().any(crate::pointer::over) {
         flip = true;
     }
-    if ((click && panic.iter().any(|i| *i != Interaction::None)) || (shown && binds.just_pressed(&keys, Act::PanicFire))) && focus.fleets.as_ref().is_none_or(|f| f.direct()) {
+    if ((click && panic.iter().any(crate::pointer::over)) || (shown && binds.just_pressed(&keys, Act::PanicFire))) && focus.fleets.as_ref().is_none_or(|f| f.direct()) {
         target.2.panic = true;
     }
-    if click && ship_icon.iter().any(|i| *i != Interaction::None) {
+    if click && ship_icon.iter().any(crate::pointer::over) {
         if let Some(f) = focus.fleets.as_mut() {
             if let Some(e) = f.primary() {
                 f.select(e, &mut focus.orbit);
@@ -572,7 +573,7 @@ pub fn hud_input(
         }
     }
     if click
-        && focus.movement.iter().any(|i| *i != Interaction::None)
+        && focus.movement.iter().any(crate::pointer::over)
         && let Some(plot) = focus.plot.as_mut()
     {
         plot.advanced = !plot.advanced;
@@ -585,7 +586,7 @@ pub fn hud_input(
         // Clicking an indirect bank's icon arms it (again to disarm); the next map click is its shot.
         let (ship, equipped) = *ship;
         let class = &lib.classes[ship.class];
-        for (GunButton(bank), _) in guns.iter().filter(|(_, i)| **i != Interaction::None) {
+        for (GunButton(bank), _) in guns.iter().filter(|(_, i)| crate::pointer::over(i)) {
             let indirect = class.mounts.iter().enumerate().any(|(i, m)| m.bank == *bank && combat::is_indirect(&lib, equipped.map_or(m.gun.as_str(), |g| g.gun(i))));
             target.2.armed = if indirect && target.2.armed != Some(*bank) { Some(*bank) } else { None };
             target.2.shot = None;
@@ -607,6 +608,7 @@ pub fn speed_order_at(p: Vec2) -> crate::EngineOrder {
     crate::EngineOrder::from_index(i).unwrap_or_default()
 }
 
+#[allow(deprecated)] // Interaction, see pointer.rs
 pub fn engine_input(
     mouse: Res<ButtonInput<MouseButton>>,
     mut ship: Single<&mut Ship, With<PlayerShip>>,
@@ -624,8 +626,8 @@ pub fn engine_input(
     {
         return;
     }
-    let order = tabs.iter().find(|(_, i)| **i != Interaction::None).map(|(o, _)| o.0).or_else(|| {
-        dial.iter().find(|(i, _)| **i != Interaction::None).and_then(|(_, rel)| rel.normalized).map(|p| {
+    let order = tabs.iter().find(|(_, i)| crate::pointer::over(i)).map(|(o, _)| o.0).or_else(|| {
+        dial.iter().find(|(i, _)| crate::pointer::over(i)).and_then(|(_, rel)| rel.normalized).map(|p| {
             let p = p + Vec2::splat(0.5);
             speed_order_at(Vec2::new(p.x * 86.0, p.y * 101.0))
         })
@@ -642,13 +644,15 @@ pub fn hud_shown(visible: &Query<&Visibility, With<HudRoot>>) -> bool {
 }
 
 /// PAUSE button: a click toggles simulation pause (also available on the non-retail Pause key).
+#[allow(deprecated)] // Interaction, see pointer.rs
 fn pause_button(mouse: Res<ButtonInput<MouseButton>>, mut vtime: ResMut<Time<Virtual>>, q: Query<&Interaction, With<PauseButton>>, mission: Option<Res<crate::campaign::Mission>>) {
-    if !cinematic(mission.as_deref()) && mouse.just_pressed(MouseButton::Left) && q.iter().any(|i| *i != Interaction::None) {
+    if !cinematic(mission.as_deref()) && mouse.just_pressed(MouseButton::Left) && q.iter().any(crate::pointer::over) {
         crate::toggle_pause(&mut vtime);
     }
 }
 
 /// Speed buttons step the game speed; labels follow it (and `--speed`).
+#[allow(deprecated)] // Interaction, see pointer.rs
 fn speed_button(
     mouse: Res<ButtonInput<MouseButton>>,
     mut vtime: ResMut<Time<Virtual>>,
@@ -658,7 +662,7 @@ fn speed_button(
     mission: Option<Res<crate::campaign::Mission>>,
     control: Option<Res<SpeedControl>>,
 ) {
-    let clicked = buttons.iter().find(|(_, i)| **i != Interaction::None).map(|(b, _)| *b);
+    let clicked = buttons.iter().find(|(_, i)| crate::pointer::over(i)).map(|(b, _)| *b);
     if let (Some(b), Some(control)) = (clicked.filter(|_| !cinematic(mission.as_deref()) && mouse.just_pressed(MouseButton::Left)), control) {
         let speed = vtime.relative_speed() * if b == SpeedButton::Faster { 2.0 } else { 0.5 };
         crate::set_game_speed(&mut vtime, &mut window, speed.clamp(1.0, control.max));
@@ -774,6 +778,7 @@ pub mod tests {
     }
 
     #[test]
+    #[allow(deprecated)] // Interaction, see pointer.rs
     fn ship_bar_release_latch_hidden_gate_and_context_menu_do_not_promote() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
@@ -895,6 +900,7 @@ pub mod tests {
 
     #[test]
     #[ignore = "needs imported assets"]
+    #[allow(deprecated)] // Interaction, see pointer.rs
     fn engine_tabs_clear_throttle_only_for_direct_visible_controls() {
         let (mut app, root) = input_app();
         app.add_systems(Update, engine_input.before(hud_input));
@@ -922,6 +928,7 @@ pub mod tests {
 
     #[test]
     #[ignore = "needs imported assets"]
+    #[allow(deprecated)] // Interaction, see pointer.rs
     fn hud_clicks_do_not_leak_to_world_and_hidden_hud_ignores_input() {
         let (mut app, root) = input_app();
         app.world_mut().spawn((Solid, PanicButton, Interaction::Pressed));
@@ -944,6 +951,7 @@ pub mod tests {
     }
 
     #[test]
+    #[allow(deprecated)] // Interaction, see pointer.rs
     fn speed_buttons_step_and_clamp_the_game_speed() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins).init_resource::<ButtonInput<MouseButton>>().insert_resource(SpeedControl { max: 16.0 }).add_systems(Update, speed_button);
@@ -978,6 +986,7 @@ pub mod tests {
     }
 
     #[test]
+    #[allow(deprecated)] // Interaction, see pointer.rs
     fn pause_button_toggles_virtual_time_and_keeps_speed() {
         let mut app = App::new();
         let mut time = Time::<Virtual>::default();

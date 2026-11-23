@@ -1,6 +1,5 @@
 //! Shared campaign/skirmish outfitting: recruitment, posts and mount-compatible bank weapon changes.
 //! Retail prices/capacities are data-driven; catalogue fallback, unique hires and upgrade policy are provisional.
-#![allow(deprecated)] // Bevy 0.20 Interaction, as menu.rs.
 use bevy::prelude::*;
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -83,25 +82,27 @@ pub fn button_sound(action: &Action, select: bool) -> &'static str {
 }
 
 /// Rollover when the pointer first reaches a widget, the select sound when it is pressed (as `menu::button_sounds`).
+#[allow(deprecated)] // Interaction, see pointer.rs
 fn button_sounds(
     q: Query<(Entity, &Interaction, &Action), Changed<Interaction>>,
     mut pointed: Local<std::collections::HashSet<Entity>>,
     mut sfx: MessageWriter<crate::audio::Sfx>,
 ) {
     for (e, i, action) in &q {
-        if *i == Interaction::None {
+        if !crate::pointer::over(i) {
             pointed.remove(&e);
             continue;
         }
         if pointed.insert(e) {
             sfx.write(crate::audio::Sfx::ui(button_sound(action, false)));
         }
-        if *i == Interaction::Pressed {
+        if crate::pointer::down(i) {
             sfx.write(crate::audio::Sfx::ui(button_sound(action, true)));
         }
     }
 }
 
+#[allow(deprecated)] // Interaction, see pointer.rs
 fn screen(
     mission: Option<ResMut<crate::campaign::Mission>>,
     state: Res<State<crate::menu::Screen>>,
@@ -142,7 +143,7 @@ fn screen(
     let action = if keys.just_pressed(KeyCode::Enter) {
         Some(Action::Close)
     } else if mouse.just_pressed(MouseButton::Left) {
-        buttons.iter().find(|(_, i)| **i == Interaction::Pressed).map(|(a, _)| a.clone())
+        buttons.iter().find(|(_, i)| crate::pointer::down(i)).map(|(a, _)| a.clone())
     } else {
         None
     };
@@ -242,6 +243,7 @@ fn campaign_action(
     }
 }
 
+#[allow(deprecated)] // Interaction, see pointer.rs
 fn skirmish_screen(
     state: Res<State<crate::menu::Screen>>,
     mut sk: ResMut<crate::menu::Skirmish>,
@@ -284,7 +286,7 @@ fn skirmish_screen(
         a => a.clone(),
     };
     let carrying = carry.is_some();
-    let mut pressed = if mouse.just_pressed(MouseButton::Left) { buttons.iter().find(|(_, i)| **i == Interaction::Pressed).map(|(a, _)| as_target(a, carrying)) } else { None };
+    let mut pressed = if mouse.just_pressed(MouseButton::Left) { buttons.iter().find(|(_, i)| crate::pointer::down(i)).map(|(a, _)| as_target(a, carrying)) } else { None };
     // Double-click a roster row with no post selected: seat the member on the first free post that counts their best skill.
     if let Some(Action::PickCrew(id)) = &pressed
         && !choice.post_picked
@@ -307,7 +309,7 @@ fn skirmish_screen(
     // Clicking a roster row (press and release on it, no drag) with a post selected seats the member there.
     let clicked_row = if mouse.just_released(MouseButton::Left) && !choice.arms && choice.post_picked && origin.is_none() {
         match carry.as_ref() {
-            Some(Carry::Crew(id)) if all.iter().any(|(a, i)| matches!(a, Action::PickCrew(x) if x == id) && *i != Interaction::None) => Some(Action::Hire(id.clone())),
+            Some(Carry::Crew(id)) if all.iter().any(|(a, i)| matches!(a, Action::PickCrew(x) if x == id) && crate::pointer::over(i)) => Some(Action::Hire(id.clone())),
             _ => None,
         }
     } else {
@@ -316,7 +318,7 @@ fn skirmish_screen(
     // Right-click on a posted face: back to the roster.
     let unposted = if mouse.just_pressed(MouseButton::Right) && !choice.arms {
         all.iter().find_map(|(a, i)| match a {
-            Action::PostFace(r, k) if *i != Interaction::None => Some(Action::Unpost(*r, *k)),
+            Action::PostFace(r, k) if crate::pointer::over(i) => Some(Action::Unpost(*r, *k)),
             _ => None,
         })
     } else {
@@ -324,7 +326,7 @@ fn skirmish_screen(
     };
     // Released over a post or mount while carrying: the drop of a drag.
     let released_on = if mouse.just_released(MouseButton::Left) && carry.is_some() {
-        all.iter().find(|(a, i)| matches!(a, Action::SelectPost(_) | Action::PostFace(..)) && **i != Interaction::None).map(|(a, _)| as_target(a, true))
+        all.iter().find(|(a, i)| matches!(a, Action::SelectPost(_) | Action::PostFace(..)) && crate::pointer::over(i)).map(|(a, _)| as_target(a, true))
     } else {
         None
     };

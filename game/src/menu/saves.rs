@@ -24,6 +24,7 @@ pub(super) const QUICK: &str = "QuickSave";
 /// Load / Save / Remove / Quit buttons of the Load Campaign screen and the in-game menu.
 /// PROVISIONAL: a save is a mission-start checkpoint plus the campaign counters; loading restarts that mission. No delete or overwrite
 /// confirmation dialogs (the retail screens have them).
+#[allow(deprecated)] // Interaction, see pointer.rs
 pub(super) fn save_actions(
     q: Query<(&Interaction, &Action), Changed<Interaction>>,
     mut commands: Commands,
@@ -36,7 +37,7 @@ pub(super) fn save_actions(
     mut next: ResMut<NextState<Screen>>,
     (keys, state): (Res<ButtonInput<KeyCode>>, Res<State<Screen>>),
 ) {
-    let mut acts: Vec<Action> = q.iter().filter(|(i, _)| **i == Interaction::Pressed).map(|(_, a)| a.clone()).collect();
+    let mut acts: Vec<Action> = q.iter().filter(|(i, _)| crate::pointer::down(i)).map(|(_, a)| a.clone()).collect();
     // Dev hook: `--script ingame-do-load` loads the mission 5 start save from the Load page at frame 120.
     if cfg.script.as_deref() == Some("ingame-do-load") && cfg.frame == 120 {
         ui.selected = ui.list.iter().position(|s| s.0.mission == "mission05");

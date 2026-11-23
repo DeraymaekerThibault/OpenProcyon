@@ -2,11 +2,11 @@
 //! canvas and scaled to the window. Every retail screen (`menu.rs`, `crew_arms.rs`) builds from these; behaviour stays in the shared
 //! markers each widget carries (`menu::Action`, `crew_arms::Action`, `ScrollTrack`, ...). `hover` swaps the hover/press art.
 
-#![allow(deprecated)] // shortcut: bevy 0.20 Interaction (deprecated for picking Hovered/Pressed); port when it is removed
 use bevy::prelude::*;
 use bevy::ui::{FocusPolicy, RelativeCursorPosition};
 
 use crate::menu::{ArrowButton, ListEntry, RunButtons, SLIDER_KNOB, SLOT_BAR, ScrollKind, ScrollTrack, SliderTrack, menu_active};
+use crate::pointer::Pointer;
 use crate::sprites::{BODY_FONT, Fonts, HudData, IDLE, MENU_SKIN, meta_in, sprite_in};
 use crate::theme::{Look, Looks, State, Theme};
 
@@ -49,12 +49,12 @@ struct Drawn {
 }
 
 /// The state a drawn control shows: the cursor's wins, else selected or idle.
-pub(super) fn state_of(interaction: Interaction, selected: bool) -> State {
-    match interaction {
-        Interaction::Pressed => State::Pressed,
-        Interaction::Hovered => State::Hover,
-        Interaction::None if selected => State::Selected,
-        Interaction::None => State::Idle,
+pub(super) fn state_of(pointer: Pointer, selected: bool) -> State {
+    match pointer {
+        Pointer::Down => State::Pressed,
+        Pointer::Over => State::Hover,
+        Pointer::Off if selected => State::Selected,
+        Pointer::Off => State::Idle,
     }
 }
 
@@ -78,10 +78,11 @@ fn gradient(look: &Look, round: bool) -> BackgroundGradient {
 }
 
 /// Restyle drawn buttons and pull-downs when the cursor enters, presses or leaves them.
+#[allow(deprecated)] // Interaction, see pointer.rs
 fn hover_drawn(q: Query<(&Interaction, &Drawn), Changed<Interaction>>, mut fills: Query<&mut BackgroundGradient>) {
     let theme = Theme::current();
     for (i, drawn) in &q {
-        let look = looks(theme, drawn.family).get(state_of(*i, drawn.selected));
+        let look = looks(theme, drawn.family).get(state_of(crate::pointer::of(i), drawn.selected));
         if let Ok(mut fill) = fills.get_mut(drawn.fill) {
             *fill = gradient(look, drawn.round);
         }
@@ -126,6 +127,7 @@ fn cover_size(shown: Vec2, frame: Vec2) -> Vec2 {
 }
 
 /// Hover/press art of the retail buttons and list cells.
+#[allow(deprecated)] // Interaction, see pointer.rs
 fn hover(
     q: Query<(Entity, &Interaction, Option<&Art>, Option<&Rest>), Changed<Interaction>>,
     mut fills: Query<&mut BackgroundColor>,
@@ -136,12 +138,12 @@ fn hover(
     let scale = canvas(&window).1;
     for (e, i, art, rest) in &q {
         if let (Some(rest), Ok(mut bg)) = (rest, fills.get_mut(e)) {
-            bg.0 = if *i == Interaction::None { rest.0 } else { CELL_HOVER };
+            bg.0 = if !crate::pointer::over(i) { rest.0 } else { CELL_HOVER };
         }
-        let state = match i {
-            Interaction::Pressed => "CursorDown",
-            Interaction::Hovered => "CursorOver",
-            Interaction::None => IDLE,
+        let state = match crate::pointer::of(i) {
+            Pointer::Down => "CursorDown",
+            Pointer::Over => "CursorOver",
+            Pointer::Off => IDLE,
         };
         for (e, name) in art.map(|a| a.0.as_slice()).unwrap_or(&[]) {
             let Ok((mut img, mut node)) = imgs.get_mut(*e) else { continue };
@@ -251,6 +253,7 @@ impl Ctx<'_> {
         self.text_aligned(c, font, s, x, w, cy, JustifyContent::FlexEnd, tint);
     }
     /// A drawn text button over `[l, t, r, b]`: a pill in a gold tube rim whose fill follows the cursor (theme.json `button`).
+    #[allow(deprecated)] // Interaction, see pointer.rs
     pub(super) fn text_button(&self, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], label: &str, font: &str, action: impl Bundle) {
         let (w, h) = (r - l, b - t);
         let (root, fill) = self.pill(c, Family::Button, State::Idle, [l, t, w, h], false);
@@ -518,6 +521,7 @@ pub(super) fn selected_tab(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]
 }
 
 /// A round retail arrow button (`FrontEnd_Prev_Button`, `FrontEnd_Next_Button`, ...).
+#[allow(deprecated)] // Interaction, see pointer.rs
 pub(super) fn arrow(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], name: &str, action: impl Bundle) {
     let forward = name.contains("Next") || name.contains("Right");
     let mut root = c.spawn((Interaction::None, action, ArrowButton { forward }, ctx.node(l, t, r - l, b - t)));
@@ -536,6 +540,7 @@ pub(super) fn stretched_window(ctx: &Ctx, c: &mut ChildSpawnerCommands, rect: [f
 /// A vertical scrollbar for a list of `total` rows of which `visible` show from row `first`: a light translucent track in a gold rim and a
 /// cylinder-glossed pill thumb that never gets shorter than the track is wide and stays inside it; pressing and dragging the track moves
 /// it (`menu::scroll_drag`, the same everywhere).
+#[allow(deprecated)] // Interaction, see pointer.rs
 pub(super) fn scrollbar(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], kind: ScrollKind, total: usize, visible: usize, first: usize) {
     let h = b - t;
     let (len, top) = thumb_span(h, total, visible, first, r - l);
@@ -575,6 +580,7 @@ fn thumb(ctx: &Ctx, c: &mut ChildSpawnerCommands, [x, y, w, h]: [f32; 4]) {
 
 /// The Create Skirmish slider: a rounded track between two round step buttons (33 px, each with a chevron) and a pill knob that follows
 /// `fraction` (dragging the track moves it, see `menu::slider_drag`). The 134 px hit box between the buttons is the retail track.
+#[allow(deprecated)] // Interaction, see pointer.rs
 pub(super) fn slider(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], fraction: f32, dec: impl Bundle, inc: impl Bundle, kind: SliderTrack) {
     const CAP: f32 = 33.0;
     let cy = (t + b) / 2.0;
@@ -589,6 +595,7 @@ pub(super) fn slider(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32
 
 /// A round step button over `[x, y, w, h]`: a sphere in a gold ring with a chevron pointing left or right; clickable with an action,
 /// greyed and inert without one.
+#[allow(deprecated)] // Interaction, see pointer.rs
 fn step_button(ctx: &Ctx, c: &mut ChildSpawnerCommands, left: bool, rect: [f32; 4], action: Option<impl Bundle>) {
     let state = if action.is_some() { State::Idle } else { State::Disabled };
     let (root, fill) = ctx.pill(c, Family::Button, state, rect, true);
@@ -621,6 +628,7 @@ fn chevron(ctx: &Ctx, c: &mut ChildSpawnerCommands, left: bool, size: f32, (cx, 
 /// the fleet's ship-bar icons: a filled slot shows its icon and picks, an empty one shows its number; `current` gets a gold tint.
 /// The arrows are the round end buttons of the horizontal scrollbar art (the FrontEnd_Scroll_*_Button entries point at an unrelated
 /// sheet region): the first 33 px of FrontEnd_Horizontal_Scrollbar_Background_Left, the last 33 of _Right.
+#[allow(deprecated)] // Interaction, see pointer.rs
 pub(super) fn fleet_bar<A: Bundle>(
     ctx: &Ctx,
     c: &mut ChildSpawnerCommands,
@@ -683,6 +691,7 @@ pub(super) fn list_row(ctx: &Ctx, c: &mut ChildSpawnerCommands, rect: [f32; 4], 
 
 /// A list row with a price column: `cost` is right-aligned, `grey` dims the whole row (a hull the points left cannot pay for).
 #[allow(clippy::too_many_arguments)]
+#[allow(deprecated)] // Interaction, see pointer.rs
 pub(super) fn list_row_cost(
     ctx: &Ctx,
     c: &mut ChildSpawnerCommands,
@@ -734,6 +743,7 @@ fn bare(left: f32, top: f32, width: f32, height: f32) -> Node {
 }
 
 /// A radio choice: a drawn check box and its Univers12 label.
+#[allow(deprecated)] // Interaction, see pointer.rs
 pub(super) fn radio(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], label: &str, on: bool, action: impl Bundle) {
     let cy = (t + b) / 2.0 - 3.0; // measured: the original row sits 3 units above the element's centre
     let mut root = c.spawn((Interaction::None, action, ctx.node(l, t, r - l, b - t)));
@@ -765,6 +775,7 @@ pub(super) fn wrapped(ctx: &Ctx, c: &mut ChildSpawnerCommands, font: &str, s: &s
 }
 
 /// A list cell with left-aligned text, highlighted when `on`; clickable when it has an action.
+#[allow(deprecated)] // Interaction, see pointer.rs
 pub(super) fn cell(ctx: &Ctx, c: &mut ChildSpawnerCommands, [x, y, w, h]: [f32; 4], label: &str, on: bool, action: Option<impl Bundle>) {
     let tint = if on {
         Color::srgb(1.0, 0.9, 0.4)
@@ -783,8 +794,9 @@ pub(super) fn cell(ctx: &Ctx, c: &mut ChildSpawnerCommands, [x, y, w, h]: [f32; 
 
 /// A drawn pull-down box (theme.json `pulldown`, its selected look for the local player) with centred Univers10 text and, for
 /// drop-downs, the retail `FrontEnd_PullDown_Arrow` at its right end.
+#[allow(deprecated)] // Interaction, see pointer.rs
 pub(super) fn pulldown_cell(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b]: [f32; 4], label: &str, selected: bool, action: Option<impl Bundle>, arrow: bool) {
-    let state = state_of(Interaction::None, selected);
+    let state = state_of(Pointer::Off, selected);
     let (root, fill) = ctx.pill(c, Family::Pulldown, state, [l, t, r - l, b - t], false);
     let mut cmds = c.commands();
     let mut e = cmds.entity(root);
@@ -805,6 +817,7 @@ pub(super) fn pulldown_cell(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b
 /// An open pull-down list, shared by every screen: a full-screen blocker (a click elsewhere runs `close`) and one backed entry per
 /// `(label, action)` stacked `h` apart from `[x, y, w, h]`. Entries also pick on the release of a held press (`menu::dropdown_release`),
 /// except the `keep` one, drawn highlighted (a plain click on the lobby's current value keeps the list open).
+#[allow(deprecated)] // Interaction, see pointer.rs
 pub(super) fn dropdown<A: Component>(ctx: &Ctx, c: &mut ChildSpawnerCommands, close: A, [x, y, w, h]: [f32; 4], entries: Vec<(String, A)>, keep: Option<usize>) {
     c.spawn((Interaction::None, FocusPolicy::Block, close, ctx.node(0.0, 0.0, 800.0, 600.0), ZIndex(1)));
     for (k, (label, action)) in entries.into_iter().enumerate() {
@@ -864,10 +877,10 @@ mod tests {
 
     #[test]
     fn cursor_and_selection_map_to_a_state() {
-        assert_eq!(state_of(Interaction::None, false), State::Idle);
-        assert_eq!(state_of(Interaction::None, true), State::Selected);
-        assert_eq!(state_of(Interaction::Hovered, true), State::Hover);
-        assert_eq!(state_of(Interaction::Pressed, false), State::Pressed);
+        assert_eq!(state_of(Pointer::Off, false), State::Idle);
+        assert_eq!(state_of(Pointer::Off, true), State::Selected);
+        assert_eq!(state_of(Pointer::Over, true), State::Hover);
+        assert_eq!(state_of(Pointer::Down, false), State::Pressed);
         // The looks the states pick are the theme's own per-state colours.
         let t = Theme::default();
         assert_eq!(looks(&t, Family::Button).get(State::Hover).fill[0], t.button.hover.fill[0]);

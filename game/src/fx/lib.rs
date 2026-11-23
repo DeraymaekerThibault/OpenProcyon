@@ -76,6 +76,10 @@ pub(super) enum Blend {
     Multiply,
 }
 
+/// Shortest lifetime (seconds) given to an effect whose life is worked out from its curves or `Duration`. Engine choice, not the original's.
+const MIN_EFFECT_SECONDS: f32 = 0.05;
+/// PROVISIONAL: scale of a rectangle primitive that has no size entry (planks, boarding sprites); a guess, see docs/re/effects.md.
+const RECT_SCALE_NO_SIZE: f32 = 0.1;
 /// Effect meshes drawn without a morph (exported by tools/export_effects.py too).
 const STATIC_MESHES: [&str; 1] = ["Periscope_Layer1"];
 
@@ -225,7 +229,7 @@ pub(super) fn parse_prim(p: &Value, tex_names: &mut Vec<String>) -> Prim {
     let rgb = c3(cc);
     let alpha = Curve::from(get(cp, &["ColorFaderChunk", "AlphaComponentChunk"]));
     let size = Curve::from(get(cp, &["SizeChunk", "SizeInterpolatorChunk"]));
-    let rect_scale = if get(cp, &["Rectangle2dChunk"]).is_some() && size.is_empty() { 0.1 } else { 1.0 };
+    let rect_scale = if get(cp, &["Rectangle2dChunk"]).is_some() && size.is_empty() { RECT_SCALE_NO_SIZE } else { 1.0 };
     let rect = get(cp, &["Rectangle2dChunk"])
         .map(|r| ["TopLeftXInterpolatorChunk", "TopLeftYInterpolatorChunk", "BottomRightXInterpolatorChunk", "BottomRightYInterpolatorChunk"].map(|k| Curve::from(r.get(k))));
     let life = get(cp, &["ExpirationChunk", "ExpirationInterpolateChunk"]).map(|c| Curve::from(Some(c))).filter(|c| !c.is_empty());
@@ -244,9 +248,9 @@ pub(super) fn parse_prim(p: &Value, tex_names: &mut Vec<String>) -> Prim {
     let fallback_life = if start_only_loop {
         f32::INFINITY
     } else if fl > 0.0 {
-        fl.max(0.05)
+        fl.max(MIN_EFFECT_SECONDS)
     } else if rate.0.iter().any(|(_, r)| *r > 0.0) {
-        num("Duration").max(0.05)
+        num("Duration").max(MIN_EFFECT_SECONDS)
     } else {
         f32::INFINITY
     };

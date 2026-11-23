@@ -1,7 +1,6 @@
 //! The retail player list window (top right of a skirmish battle; docs/re/player-names.md): the state is `alliance::Roster`, this
 //! draws it from the HUD art and tags the buttons the shared `alliance::click` reads. Rebuilt whenever the roster, the scale or the
 //! art set changes. PROVISIONAL: the window height is +-1 px, and the strike-through colour is the footage's red.
-#![allow(deprecated)] // bevy 0.20 Interaction, as in panels.rs
 use bevy::prelude::*;
 use bevy::ui::FocusPolicy;
 
@@ -20,6 +19,7 @@ pub fn plugin(app: &mut App) {
 const ROW: f32 = 23.0;
 const FLAG: Vec2 = Vec2::new(29.0, 21.0);
 
+#[allow(deprecated)] // Interaction, see pointer.rs
 fn window(
     mut commands: Commands,
     assets: Res<AssetServer>,
