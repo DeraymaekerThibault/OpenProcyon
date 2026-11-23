@@ -45,7 +45,7 @@ fn to_square(p: Vec3, half: f32, side: f32) -> Vec2 {
     Vec2::new(p.x + half, p.z + half) / (2.0 * half) * side
 }
 
-#[allow(deprecated)] // shortcut: bevy 0.20 Interaction, same as panels.rs
+#[allow(deprecated)] // Interaction, see pointer.rs
 fn build(
     mut commands: Commands,
     assets: Res<AssetServer>,

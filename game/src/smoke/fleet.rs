@@ -1,7 +1,6 @@
 use crate::*;
 
 /// ECS/UI self-check through shared keys and widget markers, usable with either presentation.
-#[allow(deprecated)] // Same shared Interaction markers as panels.rs; test driver only.
 pub fn fleet_smoke(world: &mut World, mut previous: Local<Option<Entity>>) {
     let cfg = world.resource::<Config>();
     let frame = cfg.frame;
@@ -212,7 +211,7 @@ fn fleet_primary(world: &mut World, frame: u32) {
     }
 }
 
-#[allow(deprecated)]
+#[allow(deprecated)] // Interaction, see pointer.rs
 fn fleet_input(world: &mut World, frame: u32) {
     world.resource_mut::<ButtonInput<KeyCode>>().reset_all();
     use crate::panels::FleetButton as B;
@@ -393,7 +392,7 @@ fn fleet(world: &mut World, frame: u32, previous: &mut Option<Entity>) {
 /// `--menu fleet --script fleet-profile-arms` (scratch `XDG_DATA_HOME`): an auto-assigned Navy fleet on the Arms tab with a swapped gun
 /// is saved as an arms profile, the gun is put back, and Load Arms is clicked through its buttons: refused while every point is spent
 /// (shot at frame 55 shows the reason), then the swapped gun comes back once there is room.
-#[allow(deprecated)]
+#[allow(deprecated)] // Interaction, see pointer.rs
 fn profile_arms(world: &mut World, frame: u32) {
     use crate::menu::{Action as A, Skirmish};
     let press = |world: &mut World, what: &str, want: &dyn Fn(&A) -> bool| {
@@ -459,7 +458,7 @@ fn profile_arms(world: &mut World, frame: u32) {
 
 /// `--menu fleet --script fleet-ships`: on the Ships screen the cheapest Navy hull is double-clicked (two presses of its row a few
 /// frames apart) and lands in the fleet; a dearer hull is double-clicked with too few points left and is refused with a reason.
-#[allow(deprecated)]
+#[allow(deprecated)] // Interaction, see pointer.rs
 fn ships_double_click(world: &mut World, frame: u32) {
     use crate::menu::{Action as A, Skirmish};
     let press = |world: &mut World, row: usize| {
@@ -512,7 +511,7 @@ fn ships_double_click(world: &mut World, frame: u32) {
 
 /// `--menu fleet --script fleet-crew`: on the Crew tab of an auto-assigned fleet a post is clicked, then a roster row is clicked
 /// (press and release, no drag) and the member is seated on that post; a right-click on their face returns them to the roster.
-#[allow(deprecated)]
+#[allow(deprecated)] // Interaction, see pointer.rs
 fn crew_clicks(world: &mut World, frame: u32) {
     use crate::crew_arms::Action as A;
     use crate::menu::Skirmish;
@@ -577,7 +576,7 @@ struct ClickedRow(String);
 
 /// `--menu fleet --script fleet-arms`: on the Arms tab a weapon row that fits the selected bank is double-clicked and the bank carries
 /// that gun afterwards.
-#[allow(deprecated)]
+#[allow(deprecated)] // Interaction, see pointer.rs
 fn arms_clicks(world: &mut World, frame: u32) {
     use crate::crew_arms::Action as A;
     use crate::menu::Skirmish;

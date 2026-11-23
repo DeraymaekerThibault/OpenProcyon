@@ -118,11 +118,7 @@ pub fn list(kind: Kind) -> Vec<Profile> {
 pub fn write(kind: Kind, p: &Profile) -> Result<(), String> {
     let name = crate::campaign::clean_name(&p.name);
     let dir = dir(kind).filter(|_| !name.is_empty()).ok_or("invalid profile name")?;
-    let (path, temp) = (dir.join(format!("{name}.json")), dir.join(format!("{name}.tmp")));
-    std::fs::create_dir_all(&dir)
-        .and_then(|()| std::fs::write(&temp, serde_json::to_string_pretty(&p.to_json(kind)).unwrap()))
-        .and_then(|()| std::fs::rename(&temp, &path))
-        .map_err(|e| e.to_string())
+    crate::data::write_atomic(&dir.join(format!("{name}.json")), &serde_json::to_string_pretty(&p.to_json(kind)).unwrap()).map_err(|e| e.to_string())
 }
 
 #[cfg(test)]

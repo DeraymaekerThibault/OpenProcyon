@@ -34,6 +34,7 @@ pub mod modding;
 pub mod nebula;
 pub mod options_menu;
 pub mod panels;
+pub mod pointer;
 pub mod profiles;
 pub mod render;
 pub mod retail_tex;

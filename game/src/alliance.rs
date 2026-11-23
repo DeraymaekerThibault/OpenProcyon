@@ -1,7 +1,6 @@
 //! The in-battle player list (docs/re/player-names.md): one row per lobby slot with its flag, name, whether its fleet still floats
 //! and, on every row but the human's, the alliance icon, which on free-for-all maps (`Is Alliance Change Allowed`) is a button.
 //! State, rules and input live here; the view only draws `Roster` and spawns the `AllianceIcon` / `RosterName` buttons.
-#![allow(deprecated)] // bevy 0.20 Interaction, as in panels.rs
 use bevy::prelude::*;
 
 use crate::combat::Health;
@@ -92,6 +91,7 @@ fn update(mut roster: ResMut<Roster>, fleets: Res<Fleets>, ships: Query<(&Ship, 
     }
 }
 
+#[allow(deprecated)] // Interaction, see pointer.rs
 fn click(
     mouse: Res<ButtonInput<MouseButton>>,
     mut roster: ResMut<Roster>,
@@ -105,7 +105,7 @@ fn click(
         return;
     }
     let local_alive = roster.rows.iter().any(|r| r.local && r.alive);
-    if let Some((AllianceIcon(i), _)) = icons.iter().find(|(_, i)| **i != Interaction::None) {
+    if let Some((AllianceIcon(i), _)) = icons.iter().find(|(_, i)| crate::pointer::over(i)) {
         let i = *i;
         let Some(row) = roster.rows.get(i).filter(|r| roster.changeable && !r.local && local_alive) else { return };
         let (owner, side) = match press(row.allied, row.request_out, row.request_in) {
@@ -137,7 +137,7 @@ fn click(
         }
         return;
     }
-    if let Some((RosterName(i), _)) = names.iter().find(|(_, i)| **i != Interaction::None) {
+    if let Some((RosterName(i), _)) = names.iter().find(|(_, i)| crate::pointer::over(i)) {
         // The camera goes to the player's first ship, when the local player has none left or is allied with it.
         let Some(row) = roster.rows.get(*i).filter(|r| r.alive && !r.local && (!local_alive || r.allied)) else { return };
         if let Some((e, ..)) = ships.iter().filter(|s| s.2.0 == row.owner && !s.3.destroyed).min_by_key(|s| s.2.1) {

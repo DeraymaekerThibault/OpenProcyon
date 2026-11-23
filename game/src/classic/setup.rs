@@ -1,6 +1,5 @@
 //! First-run "Import your game" screen (state and input in `setup.rs`). There is no imported art yet, so it is drawn from the
 //! `content/` fonts and plain boxes; nothing here is retail art or branding.
-#![allow(deprecated)] // shortcut: bevy 0.20 Interaction (deprecated for picking Hovered/Pressed); port when it is removed
 use bevy::prelude::*;
 
 use crate::setup::{Phase, Setup, SetupAction, SetupInput};
@@ -39,6 +38,7 @@ fn label(fonts: &Fonts, s: impl Into<String>, size: f32, colour: Color, bold: bo
     (Text::new(s), TextFont { font: font.into(), font_size: FontSize::Px(size), ..default() }, TextColor(colour))
 }
 
+#[allow(deprecated)] // Interaction, see pointer.rs
 fn button(c: &mut ChildSpawnerCommands, fonts: &Fonts, text: &str, action: SetupAction, enabled: bool) {
     let fill = if enabled { BUTTON } else { OFF };
     let node = Node {
@@ -228,9 +228,10 @@ fn crashed(p: &mut ChildSpawnerCommands, fonts: &Fonts, message: &str, report: &
     });
 }
 
+#[allow(deprecated)] // Interaction, see pointer.rs
 fn hover(mut q: Query<(&Interaction, &Rest, &mut BackgroundColor), Changed<Interaction>>) {
     for (i, rest, mut bg) in &mut q {
-        bg.0 = if *i == Interaction::None { rest.0 } else { BUTTON_HOVER };
+        bg.0 = if !crate::pointer::over(i) { rest.0 } else { BUTTON_HOVER };
     }
 }
 
