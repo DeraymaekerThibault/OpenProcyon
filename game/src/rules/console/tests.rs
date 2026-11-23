@@ -283,6 +283,23 @@ fn the_command_table_and_the_parser_agree() {
     }
 }
 
+/// The other direction of the check above: a word the parser answers to needs a row in `TABLE`, or `help` would not show it.
+#[test]
+fn every_word_the_parser_accepts_is_in_the_table() {
+    let src = include_str!("../console.rs");
+    let body = &src[src.find("match word.to_lowercase().as_str() {").expect("the parser's match")..];
+    let body = &body[..body.find("\nfn flag_word").expect("end of parse")];
+    let mut seen = 0;
+    for line in body.lines().filter(|l| l.starts_with("        \"")) {
+        let Some((pat, _)) = line.split_once("=>") else { continue };
+        for word in pat.split('|').filter_map(|w| w.trim().strip_prefix('"')?.split('"').next()).filter(|w| !w.is_empty()) {
+            seen += 1;
+            assert!(entry_named(word).is_some() || PLANNED.contains(&word), "`{word}` is parsed but has no row in console::TABLE, so `help` hides it");
+        }
+    }
+    assert!(seen > 40, "the scan found only {seen} command words: did the parser's layout change?");
+}
+
 #[test]
 fn help_lists_commands_by_group_and_marks_the_cheats() {
     let all = help_lines(None).join("\n");
@@ -292,6 +309,7 @@ fn help_lists_commands_by_group_and_marks_the_cheats() {
     for e in TABLE {
         assert!(all.contains(e.usage), "{} is missing from help", e.name);
     }
+    assert!(all.contains("Keys:") && all.contains("PageUp") && all.contains("(also: do)"), "keys and aliases are listed");
     assert!(all.contains("*god") && all.contains(" flags"), "cheats carry a star, queries do not");
     let one = help_lines(Some("GOD"));
     assert!(one.iter().any(|l| l.contains("usage:") && l.contains("god [on|off]")) && one.iter().any(|l| l.contains("example: god on")));

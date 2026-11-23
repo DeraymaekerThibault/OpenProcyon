@@ -431,6 +431,19 @@ pub static TABLE: &[Entry] = &[
     Entry { alias: &["?"], ..entry("help", Group::Console, "help [command]", "this list, or a command's usage and an example", "help god", false) },
 ];
 
+/// The keys of the open console, listed by `help` (kept next to `Console::key_with` and the wheel in `systems/dev_console.rs`).
+pub static KEYS: &[(&str, &str)] = &[
+    ("Tab", "complete the last word; repeat Tab to cycle, several matches are listed"),
+    ("Up / Down", "earlier / later lines of this session"),
+    ("PageUp / PageDown, mouse wheel", "scroll the output"),
+    ("Ctrl+Home / Ctrl+End", "jump to the top / bottom of the output"),
+    ("Escape or the console key", "close the console (the battle is paused while it is open)"),
+];
+
+/// Commands the parser answers with a refusal, not an action: they have no table row on purpose.
+#[cfg(test)]
+const PLANNED: &[&str] = &["spawn"];
+
 fn entry_named(word: &str) -> Option<&'static Entry> {
     TABLE.iter().find(|e| e.name == word || e.alias.contains(&word))
 }
@@ -471,8 +484,13 @@ pub fn help_lines(topic: Option<&str>) -> Vec<String> {
     let mut lines = vec![];
     for group in [Group::Cheats, Group::State, Group::Flow, Group::Ships, Group::Authoring, Group::Camera, Group::Raw, Group::Console] {
         lines.push(format!("{}:", group.title()));
-        lines.extend(TABLE.iter().filter(|e| e.group == group).map(|e| format!("  {}{:<42}{}", if e.cheats { "*" } else { " " }, e.usage, e.about)));
+        lines.extend(TABLE.iter().filter(|e| e.group == group).map(|e| {
+            let alias = if e.alias.is_empty() { String::new() } else { format!(" (also: {})", e.alias.join(", ")) };
+            format!("  {}{:<42}{}{alias}", if e.cheats { "*" } else { " " }, e.usage, e.about)
+        }));
     }
+    lines.push("Keys:".into());
+    lines.extend(KEYS.iter().map(|(key, what)| format!("   {key:<42}{what}")));
     lines.push("* marks the session as cheated (campaign points are not recorded). `help <command>` shows an example; Tab completes a command.".into());
     lines
 }
