@@ -861,7 +861,7 @@ fn full_tutorial_camera_objective_clears_by_timer_or_by_leaving_the_start_area()
     for leave in [false, true] {
         let mut sc = crate::campaign::load_id("tutorial").script;
         let mut p = unit("RLS Intrepid", sc.player(), Vec3::new(-1316.7, 0.0, 1407.8)); // the start, in Bevy axes
-        p.groups = vec![sc.player().to_string()];
+        p.groups = vec![sc.player().into()];
         p.primary = true;
         let mut units = [p];
         let active = |sc: &Script| sc.tasks.iter().any(|t| t.active && t.name == "Try Out Camera");

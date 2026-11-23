@@ -290,7 +290,8 @@ fn callouts(
         let class = &lib.classes[ship.class];
         class.mounts.iter().filter(|m| m.parent.is_none_or(|p| hp.sections[p] > 0.0)).count()
     });
-    let crew_speech = world.mission.as_deref().is_none_or(|m| m.script.crew_speech);
+    // Not in a fixed-step run: a line starts when the one before has finished playing, which follows the audio device's clock.
+    let crew_speech = !crate::fixed_step() && world.mission.as_deref().is_none_or(|m| m.script.crew_speech);
     let class = &lib.classes[ship.class];
     let sails = class.sections.iter().zip(&hp.sections).filter(|(c, _)| c.material.contains("Sail")).map(|(c, h)| h / c.hp.max(1.0)).collect();
     let mut enemies = vec![];

@@ -12,9 +12,11 @@ You need a source checkout with the game imported (`make assets`, see the README
 2. Open `local/my-mod/ships/Ship_Pirate_Silver/ship.json` and change `"points": 255` to `"points": 100`.
 3. In `local/my-mod/mod.json` change `id` to `my-mod` and `name` to your own (the folder name is the id; the example mods need
    `id`, `name`, `version`, `category`, `description`).
-4. Run it: `make run ARGS='--mod local/my-mod'`, open Skirmish and look for the ship in the fleet screen at its new cost.
-5. To see exactly what the game got, open `local/overlay/ships/Ship_Pirate_Silver/ship.json`: the overlay holds the base files with
-   your files laid over them, rebuilt at every launch. Restart after every edit.
+4. Run it from the checkout root: `make run ARGS='--mod local/my-mod'`. Open Skirmish, set your row's fleet type to Pirate in the
+   lobby (Silver's ship is a Pirate hull, and the fleet screen lists only your fleet type's ships), then open the fleet screen:
+   it is listed under Available Ships as "Pirate Man-O-War" at its new cost, 100.
+5. To see exactly what the game got, open `local/overlay/ships/Ship_Pirate_Silver/ship.json` (one line of JSON): the
+   overlay holds the base files with your files laid over them, rebuilt at every launch. Restart after every edit.
 
 Three things to know before you go further:
 

@@ -1,9 +1,14 @@
 use crate::*;
 
 /// ECS/UI self-check through shared keys and widget markers, usable with either presentation.
-pub fn fleet_smoke(world: &mut World, mut previous: Local<Option<Entity>>) {
+/// Each frame's step runs once: the count stops while a battle loads (and is advanced after this system), so without the check a
+/// step that re-enters the battle (`fleet` at 230) would restart it on every frame until the run is killed (#568).
+pub fn fleet_smoke(world: &mut World, mut previous: Local<Option<Entity>>, mut done: Local<Option<u32>>) {
     let cfg = world.resource::<Config>();
     let frame = cfg.frame;
+    if done.replace(frame) == Some(frame) {
+        return;
+    }
     match cfg.script.as_deref() {
         Some("current-m3") => current_m3(world, frame),
         Some("hunt-m3") => hunt_m3(world, frame),

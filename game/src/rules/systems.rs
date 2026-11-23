@@ -148,8 +148,8 @@ fn units(ships: &Query<RuleShip>, lib: &Library) -> Vec<Unit> {
             let secs =
                 if h.sections.is_empty() { 0.0 } else { h.sections.iter().zip(&class.sections).map(|(x, c)| 1.0 - x / c.hp.max(1.0)).sum::<f32>() / h.sections.len() as f32 };
             Unit {
-                name: m.name.clone(),
-                owner: m.owner.clone(),
+                name: m.name.as_str().into(),
+                owner: m.owner.as_str().into(),
                 alive: !h.destroyed,
                 visible: m.visible,
                 primary,
@@ -196,7 +196,7 @@ fn update(
     world.extend(extra.bases.iter_mut().map(|(e, b, tf, armed)| b.unit(e, tf, armed.map_or(0.0, |(a, h)| crate::combat::base_mission_damage(&lib.classes[a.class], h)))));
     world.extend(rocks.iter().map(|(e, tf, a)| a.unit(e, tf)));
     mission.script.tag(&mut world);
-    let owner_of = |e: Entity| world.iter().find(|u| u.e == e).map(|u| u.owner.clone());
+    let owner_of = |e: Entity| world.iter().find(|u| u.e == e).map(|u| u.owner.to_string());
     for h in hits.read() {
         mission.script.record_hit(owner_of(h.shooter).as_deref(), h.victim);
     }
@@ -208,7 +208,7 @@ fn update(
     }
     let script = &mut mission.script;
     for u in world.iter().filter(|u| rocks.contains(u.e)) {
-        script.belt.entry(u.e).or_insert_with(|| std::iter::once(u.owner.clone()).chain(u.groups.iter().cloned()).collect());
+        script.belt.entry(u.e).or_insert_with(|| std::iter::once(u.owner.to_string()).chain(u.groups.iter().map(ToString::to_string)).collect());
     }
     for d in killed.read() {
         if let Some(o) = owner_of(d.by) {

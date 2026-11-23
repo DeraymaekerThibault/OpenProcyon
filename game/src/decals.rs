@@ -2,7 +2,7 @@
 //! (assets/decals, data/decals.json from tools/export_decals.py): the bucket for the struck section's material, the size class of
 //! the bullet's 'Decal Damage Size'. Decoded: every hit that is not a ricochet leaves a scar of 0.25 / 0.5 / 1.0 units, crowded scars merge
 //! (`merge`), at most 150 per ship. PROVISIONAL: the original clips the scar onto the hull triangles; here it is a camera-lit quad
-//! facing back along the shell's path. A dock repair that brings every section back to full clears them (Not retail: an addition of ours). A destroyed section's scars go with it (its mesh is swapped
+//! facing back along the shell's path. A dock repair that brings every section back to full clears them (not retail: an addition of ours). A destroyed section's scars go with it (its mesh is swapped
 //! for the broken one), and a destroyed ship loses them all before it breaks up (owner's call: they looked wrong on the pieces).
 use bevy::prelude::*;
 use std::collections::HashMap;

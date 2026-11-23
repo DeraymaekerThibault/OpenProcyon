@@ -61,7 +61,7 @@ fn lifeboats(
     assets: Res<AssetServer>,
     lib: Res<Library>,
     fxl: Res<crate::fx::FxLib>,
-    mut rng: ResMut<crate::combat::SimRng>,
+    (mut rng, spawn_order): (ResMut<crate::combat::SimRng>, Query<&crate::scenario::SpawnIndex>),
     mut lost: MessageReader<ShipLost>,
     mut sfx: MessageWriter<crate::audio::Sfx>,
     mission: Option<ResMut<Mission>>,
@@ -71,7 +71,8 @@ fn lifeboats(
 ) {
     let owner = |l: &Lifeboat, m: Option<&MissionShip>| m.map_or_else(|| l.owner.clone(), |m| m.owner.clone());
     let mut present: Vec<(Option<Entity>, String)> = boats.iter().map(|(e, _, _, l, m)| (Some(e), owner(l, m))).collect();
-    for ShipLost(e) in lost.read() {
+    // In spawn order of the lost ships: each boat's drift draws from the battle generator.
+    for ShipLost(e) in crate::scenario::in_spawn_order(&spawn_order, lost.read(), |l| l.0) {
         let Ok((ship, tf, ms)) = dying.get(*e) else { continue };
         let class = &lib.classes[ship.class];
         let Some(ms) = ms.filter(|m| m.create_lifeboats && class.lifeboats > 0 && !class.is_lifeboat) else { continue };

@@ -12,8 +12,7 @@ pub struct Namer {
 impl Namer {
     #[allow(clippy::new_without_default)] // time-seeded: a `Default` would hide the randomness
     pub fn new() -> Self {
-        let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(1, |d| d.as_nanos() as u64);
-        Namer { used: Default::default(), seed: t | 1 }
+        Namer { used: Default::default(), seed: crate::clock_seed() | 1 }
     }
     pub fn pick(&mut self, lib: &Library, class: &str) -> Option<String> {
         let pool = lib.names.get(class)?;
@@ -181,7 +180,7 @@ pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Libra
         Some(file) => sky_entity.insert(view::HdSky(assets.load(file))),
         // The retail sphere and the original's generated stars, a new pattern each battle; a baked sky has its own stars.
         None => sky_entity.insert(crate::data::scene(assets, &format!("{sky}.glb"))).with_child((
-            Mesh3d(assets.add(view::star_mesh(&view::starfield(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.subsec_nanos()))))),
+            Mesh3d(assets.add(view::star_mesh(&view::starfield(crate::clock_seed() as u32)))),
             MeshMaterial3d(assets.add(StandardMaterial { unlit: true, ..default() })),
             bevy::light::NotShadowCaster,
             bevy::light::NotShadowReceiver,
