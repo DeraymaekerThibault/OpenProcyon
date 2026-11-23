@@ -437,3 +437,28 @@ fn the_scrollback_is_capped_and_the_view_stays_inside_it() {
     c.say("more");
     assert!(c.scroll <= c.max_scroll());
 }
+
+// ------------------------------------------------------------------------------------------------------------------- `fps`
+
+#[test]
+fn fps_toggles_or_sets_the_counter_without_marking_cheats() {
+    assert_eq!(parse("fps", "Hero", false), Ok(Command::Fps(None)));
+    assert_eq!(parse("fps on", "Hero", false), Ok(Command::Fps(Some(true))));
+    assert_eq!(parse("fps off", "Hero", false), Ok(Command::Fps(Some(false))));
+    assert!(parse("fps maybe", "Hero", false).is_err());
+    assert!(parse("fps on off", "Hero", false).unwrap_err().starts_with("usage: fps"));
+    assert!(!parse("fps", "Hero", false).unwrap().cheats(), "a view command");
+    let mut sc = script();
+    let (out, o) = run(&mut sc, "fps on", &mut world(), None);
+    assert!(out.is_empty());
+    assert_eq!(o.view, vec![ViewChange::Fps(Some(true))], "the ECS side owns the saved setting");
+}
+
+#[test]
+fn fps_is_in_the_help_table_and_tab_offers_on_and_off() {
+    let e = entry_named("fps").expect("in the table");
+    assert!(!e.cheats && help_lines(None).iter().any(|l| l.contains("fps [on|off]")));
+    let c = completions("fps o", &Names::default());
+    let shown: Vec<&str> = c.items.iter().map(|i| i.0.as_str()).collect();
+    assert_eq!(shown, vec!["on", "off"]);
+}

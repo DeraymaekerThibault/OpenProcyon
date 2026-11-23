@@ -83,7 +83,7 @@ fn console(
 ) {
     if cfg.script == Some(Script::ConsoleView) && mission.is_some() && cfg.frame >= 30 && !*submitted {
         *submitted = true;
-        for line in ["nis end", "show volumes", "show paths", "show points", "hud off", "cam free", "ships", "rules"] {
+        for line in ["nis end", "show volumes", "show paths", "show points", "hud off", "cam free", "fps on", "ships", "rules"] {
             console.submit(line);
         }
         return;

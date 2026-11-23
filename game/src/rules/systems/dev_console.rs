@@ -5,7 +5,7 @@ use bevy::input::keyboard::KeyboardInput;
 
 use super::*;
 use crate::menu::Screen;
-use crate::rules::console::{Cheats, Command, Console, DevView, Edit, Env, ShipInfo, marks_path, parse};
+use crate::rules::console::{Cheats, Command, Console, DevView, Edit, Env, FrameStats, ShipInfo, ViewChange, marks_path, parse};
 
 /// Whether the console is on without the Display option "Developer Console": debug builds, `--console` or `PROCYON_CONSOLE` in the
 /// environment. A release build otherwise leaves it to the option (off by default), so a stray `~` never hands a player the cheats.
@@ -22,8 +22,19 @@ pub(super) fn plugin(app: &mut App) {
         .add_systems(OnExit(Screen::Battle), (close_on_leaving, |mut dev: ResMut<DevView>| dev.reset()))
         // After the input systems and before anything reads the keys: while the console is open the game sees no keyboard or mouse.
         .add_systems(PreUpdate, keys.after(bevy::input::InputSystems).run_if(in_state(Screen::Battle)).run_if(resource_exists::<Mission>).run_if(crate::menu::overlay_closed))
+        .init_resource::<crate::rules::console::FrameStats>()
+        .add_systems(Last, frame_stats)
         .add_systems(Update, free_camera.after(crate::camera).run_if(in_state(Screen::Battle)))
         .add_systems(Update, run.after(update).run_if(in_state(Screen::Battle)).run_if(resource_exists::<Mission>));
+}
+
+/// Feeds the frame-rate counter from the real-time clock while it is shown.
+fn frame_stats(time: Res<Time<Real>>, mut stats: ResMut<FrameStats>) {
+    if crate::menu::fps_setting() {
+        stats.push(time.elapsed_secs_f64(), time.delta_secs_f64());
+    } else {
+        stats.clear();
+    }
 }
 
 fn close_on_leaving(mut console: ResMut<Console>, mut vtime: ResMut<Time<Virtual>>) {
@@ -116,6 +127,7 @@ fn run(
     mut commands: Commands,
     mut ships: Query<RuleShip>,
     mut extra: Extra,
+    mut settings: Option<ResMut<crate::menu::Settings>>,
 ) {
     let Some(mut mission) = mission else { return };
     if console.pending.is_empty() && !console.open {
@@ -189,6 +201,11 @@ fn run(
         restart.0 |= outcome.restart;
         for c in &outcome.view {
             dev.apply(c);
+            if let (ViewChange::Fps(want), Some(settings)) = (c, settings.as_mut()) {
+                settings.fps = want.unwrap_or(!settings.fps);
+                settings.save();
+                console.say(format!("fps counter {}", if settings.fps { "on" } else { "off" }));
+            }
         }
         each_ship(&mut ships, outcome.repair, |s| crate::docking::repair(&lib, &s.ship, &mut s.health, true));
         apply_fx(fx, mission, &mut commands, &mut ships, &mut animals, &mut extra, &mut orbit, &lib);
