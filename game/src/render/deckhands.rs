@@ -7,7 +7,8 @@
 //!   the engine's vertex stages `deckhand_vertex.wesl` and `deckhand_prepass.wesl`, the mod's `shaders/deckhands.wesl` shades). Every
 //!   figure shares one mesh and one material, so a whole battle's crews are one batch; what each plays is its `MeshTag`.
 //! - Where they go comes from the ship's model: empty nodes named `Crew_<Kind>_...` (`Walk` lanes, `Gun` places by a deck mount,
-//!   `Post`s, `Climb` pairs `_a` at the foot of a shroud and `_b` up it). A ship without them gets no crew.
+//!   `Post`s, `Climb` pairs `_a` at the foot of a shroud and `_b` up it). A ship without them gets no crew. How many wander grows
+//!   with the deck (`headcount`: 1-2 on a fishing boat, 40 on a Man-o'-War, 60 on a first rate) unless a `Crew_Count_<n>` node sets the total.
 //! - Figures are children of the ship, so they ride its motion; they cast no shadows and vanish beyond `range`.
 //! - Map scenery (a town, a pier) gets townsfolk the same way: `Crew_Walk` lanes, `Post`s, and `Work` places where a docker hauls
 //!   or loads for ever. They wear the `Civilian` outfits, one wanders per three walk points (at most `per_ship`), and they cheer a
@@ -61,6 +62,15 @@ const LIE: f32 = 12.0;
 /// Seconds after a gun last reloaded that the crew still runs (beat to quarters).
 const ALARM: f32 = 10.0;
 
+/// Figures on a ship whose model gives no `Crew_Count_<n>`, from its deck: the collision box's length times beam, in units^2. Crews
+/// grow faster than decks (`area^1.52`), calibrated on retail hulls: a fishing boat (15-26) carries 1-2, a sloop or packet (24-48) 2-5,
+/// a cutter (61) 7, a frigate (115) 19, a Man-o'-War (186) 40; a first rate reaches `per_ship` (60), which caps every ship. Gun places,
+/// posts and work places are always manned, and a ship with shrouds keeps one wanderer per shroud to go aloft; the count only sizes the
+/// wanderers.
+fn headcount(deck: f32) -> usize {
+    (deck.max(0.0) / 16.5).powf(1.52).round().max(1.0) as usize
+}
+
 /// One outfit: the colours of a figure's parts (linear rgb), worn by a race's crews; `officer` outfits go to the posts.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Outfit {
@@ -72,7 +82,8 @@ pub struct Outfit {
 /// The `deckhands` block.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Deckhands {
-    /// Most figures on one ship (gun places and posts fill first, the rest wander).
+    /// Most figures on one ship, a ceiling: how many a ship carries comes from its deck (`headcount`) or its model's `Crew_Count_<n>`
+    /// (gun places and posts fill first, the rest wander).
     pub per_ship: usize,
     /// Camera distance beyond which figures are not drawn.
     pub range: f32,
@@ -272,6 +283,8 @@ struct Places {
     work: Vec<Transform>,
     /// Foot and top of each shroud a rigger climbs, and the way he faces on it.
     climbs: Vec<(Vec3, Vec3, Quat)>,
+    /// `Crew_Count_<n>`: the figures the model asks for (all roles), instead of the count from the deck.
+    count: Option<usize>,
 }
 
 impl Places {
@@ -291,6 +304,7 @@ impl Places {
                 "Gun" => p.guns.push(*t),
                 "Post" => p.posts.push((id.to_string(), *t)),
                 "Work" => p.work.push(*t),
+                "Count" => p.count = id.split('_').next().and_then(|n| n.parse().ok()),
                 "Climb" => {
                     let (stem, end) = id.rsplit_once('_').unwrap_or((id, "a"));
                     climbs.entry(stem.into()).or_default()[usize::from(end == "b")] = Some(*t);
@@ -466,8 +480,9 @@ fn gather(
     }
 }
 
-/// Mans a ship whose crew places arrived: gun places, posts and work places first, the rest wander; each figure picks an outfit of
-/// its race. Scenery (no `Ship`) is Civilian and gets one wanderer per three walk points.
+/// Mans a ship whose crew places arrived: gun places, posts and work places first, then wanderers up to the headcount (the model's
+/// `Crew_Count_<n>`, else `headcount` of the ship's deck); each figure picks an outfit of its race. Scenery (no `Ship`) is Civilian
+/// and gets one wanderer per three walk points unless it gives a `Crew_Count`.
 fn staff(
     mut commands: Commands,
     kit: Option<Res<Kit>>,
@@ -494,7 +509,16 @@ fn staff(
         roles.extend((0..places.posts.len()).map(|place| Role::Post { place }));
         roles.extend((0..places.work.len()).map(|place| Role::Work { place }));
         roles.truncate(kit.per_ship);
-        let wanderers = if ship.is_some() { kit.per_ship } else { roles.len() + places.walk.len() / 3 }.min(kit.per_ship).saturating_sub(roles.len());
+        let target = places.count.unwrap_or_else(|| match ship {
+            Some(s) => {
+                let c = &lib.classes[s.class];
+                headcount(c.length * (c.collision_bounds[1].x - c.collision_bounds[0].x))
+            }
+            None => roles.len() + places.walk.len() / 3,
+        });
+        // riggers go aloft from the wanderers: one per shroud stays on deck whatever the count
+        let target = if ship.is_some() { target.max(roles.len() + places.climbs.len()) } else { target };
+        let wanderers = target.min(kit.per_ship).saturating_sub(roles.len());
         if !places.walk.is_empty() {
             roles.extend(std::iter::repeat_n(Role::Wander, wanderers));
         }
@@ -782,6 +806,16 @@ mod tests {
         let r: Vec<Vec3> = p.route(Vec3::new(-2.0, 0.0, 0.5), Vec3::new(2.0, 0.0, -10.5)).into();
         assert_eq!(r.len(), 6, "{r:?}");
         assert_eq!(r[3], Vec3::new(0.0, 0.0, -10.0));
+    }
+
+    #[test]
+    fn the_headcount_grows_with_the_deck_and_a_node_overrides_it() {
+        // decks (length x beam) from a rowing-boat size to a ship of the line
+        let n: Vec<usize> = [0.0, 15.0, 26.0, 48.0, 60.0, 115.0, 186.0, 1200.0].map(headcount).into();
+        assert_eq!(n, [1, 1, 2, 5, 7, 19, 40, 676]);
+        assert_eq!(Places::from_nodes(&[node("Crew_Count_3", 0.0, 0.0)]).count, Some(3));
+        assert_eq!(Places::from_nodes(&[node("Crew_Count_12_x", 0.0, 0.0)]).count, Some(12));
+        assert_eq!(Places::from_nodes(&[node("Crew_Walk_P_0", 0.0, 0.0)]).count, None);
     }
 
     #[test]
