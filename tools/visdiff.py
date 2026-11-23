@@ -140,7 +140,7 @@ def main(argv=None):
             continue
         changed += 1
         print(
-            f"CHANGED  {scene} {frac:.1%} px, bbox {box[0]},{box[1]}-{box[2]},{box[3]}, diff {diff.relative_to(REPO)}",
+            f"CHANGED  {scene} {frac:.2%} px ({round(frac * 1280 * 720)} px), bbox {box[0]},{box[1]}-{box[2]},{box[3]}, diff {diff.relative_to(REPO)}",
             flush=True,
         )
     return 1 if changed else 0
