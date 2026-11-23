@@ -5,13 +5,13 @@ on:
   push:
     branches: [main]
   pull_request:
-concurrency: # a newer push to the same branch cancels the outdated run
+concurrency: # a newer push to a PR cancels its outdated run; main runs always finish so they save the cache
   group: check-${{ github.ref }}
-  cancel-in-progress: true
-# CI compiles and runs no game (no assets), so the release profile's optimisation only costs time on the small runner.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+# CI builds only the dev profile and runs no game (no assets): our crate unoptimised; dependencies keep
+# opt-level 3 from [profile.dev.package."*"] and come from the cache.
 env:
-  CARGO_PROFILE_RELEASE_OPT_LEVEL: 0
-  CARGO_PROFILE_RELEASE_DEBUG: false
+  CARGO_PROFILE_DEV_OPT_LEVEL: 0
   CARGO_INCREMENTAL: 0
 jobs:
   check:
@@ -26,5 +26,6 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: game
+          save-if: ${{ github.ref == 'refs/heads/main' }} # PRs restore main's cache, never save their own
       - run: pip install -r requirements-dev.txt
       - run: tools/check.sh
