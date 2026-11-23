@@ -194,7 +194,10 @@ def main():
             env["PROCYON_REPORT"] = str(seconds)
             cmd = [*wrap, str(game), *game_args, "--speed", str(args.speed)]
             # Wall-clock cap for a hung run (below ~10 fps the game runs slower than asked); a timeout reports no battle.
-            with log.open("w") as f, contextlib.suppress(subprocess.TimeoutExpired):
+            with (
+                log.open("w", encoding="utf-8") as f,
+                contextlib.suppress(subprocess.TimeoutExpired),
+            ):
                 subprocess.run(
                     cmd,
                     cwd=REPO / "game",
@@ -204,7 +207,7 @@ def main():
                     timeout=seconds + 120,
                 )
             passed, summary = outcome(
-                ANSI.sub("", log.read_text(errors="replace")), expect
+                ANSI.sub("", log.read_text(encoding="utf-8", errors="replace")), expect
             )
             failed += not passed
             print(f"{'ok  ' if passed else 'FAIL'} {name:<16} {summary}", flush=True)

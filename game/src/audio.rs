@@ -1,7 +1,7 @@
 //! Sound: original Ogg files from assets/sound (tools/build_assets.sh). Names, volumes and max distances come from the WOTs
 //! (gun SoundName/SoundVolume/SoundMaxDistance, bullet impact pools, ship EngineSoundName Half/Full/Emergency) and the original's
 //! built-in pools (docs/re/sound.md). PROVISIONAL: the distance falloff curve, engine/music levels, and which event uses which built-in pool (ship death = Explosion_Heavy, section loss =
-//! Explosion_Med01, read from the original's code).
+//! Explosion_Med01).
 
 use crate::EngineOrder;
 use bevy::audio::Volume;
@@ -108,7 +108,7 @@ fn ambience(
     for (e, a, mut sink) in &mut beds {
         let source = holes
             .get(a.0)
-            .map(|h| (h.1.translation(), 1500.0))
+            .map(|h| (h.1.translation(), 1500.0)) // PROVISIONAL: hearing distances 1500 / 400 and the 0.6 bed volume are eyeballed
             .or_else(|_| meteors.get(a.0).map(|m| (m.1.translation(), 400.0)))
             .or_else(|_| islands.get(a.0).map(|i| (i.1.translation(), i.2.max)));
         match source {
@@ -127,7 +127,7 @@ fn ambience(
     }
     for (e, tf) in &meteors {
         if !has.contains(&e) {
-            let inside = tf.translation().distance(c) < 150.0;
+            let inside = tf.translation().distance(c) < 150.0; // PROVISIONAL: the "inside" radius is eyeballed
             let name = if inside { "MeteorStorm_Inside" } else { "MeteorStorm_Outside" };
             commands.spawn((crate::Scenario, Ambient(e), AudioPlayer::new(assets.load(sound(name))), PlaybackSettings::LOOP.with_volume(Volume::Linear(0.0))));
         }

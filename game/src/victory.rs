@@ -196,7 +196,7 @@ impl Victory {
                 Cond::NoHumanShips => !human_alive,
                 // A team name no map team has reads true, as in the original.
                 Cond::TeamHasNoShips(team) => !team_has_ships(team),
-                // ponytail: a battle with one side only (a test or dev run) never completes.
+                // A battle with one side only (a test or dev run) never completes.
                 Cond::SkirmishComplete => self.sides >= 2 && (alive_teams.len() <= 1 || !human_alive),
                 Cond::TeamComplete => self.sides >= 2 && alive_teams.len() == 1,
                 Cond::GroupDestroyed(objects) => {

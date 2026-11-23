@@ -1,6 +1,5 @@
 //! Keyboard bindings (retail "Control Options"; default list from the retail screenshots). Stored per user as `bindings.json`
-//! (action label -> key name). PROVISIONAL: only the actions marked `wired` have an effect in battle; the rest are listed and
-//! rebindable like retail but nothing reads them yet.
+//! (action label -> key name).
 use bevy::prelude::*;
 use std::collections::HashMap;
 

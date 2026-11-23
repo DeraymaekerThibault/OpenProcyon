@@ -3,6 +3,8 @@
 import struct
 from dataclasses import dataclass, field
 
+from tools import importlog
+
 
 class MdbError(ValueError):
     pass
@@ -113,8 +115,10 @@ def _tag_table(trailing):
         try:
             names = [r.take(r.u32()).decode("latin-1") for _ in range(r.u32())]
             return {n: k for k, n in enumerate(names)}
-        except (MdbError, struct.error):
-            pass
+        except (MdbError, struct.error) as e:
+            importlog.degraded(
+                "MDB collision tag table", f"{e}; using the islands' table"
+            )
     return {n: k for k, n in enumerate(_TREE_TAGS)}
 
 

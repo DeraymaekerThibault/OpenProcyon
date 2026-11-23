@@ -302,6 +302,7 @@ struct Contact {
     push: Vec3,
     point: Vec3,
 }
+/// The contact with the shallowest push; coplanar triangles count as one face.
 fn closest_contact(contacts: Vec<Contact>) -> Option<Contact> {
     let first = contacts.iter().min_by(|a, b| a.push.length_squared().total_cmp(&b.push.length_squared()))?;
     let normal = first.push.normalize();
@@ -428,7 +429,7 @@ pub fn nearest_section(class: &crate::data::Class, tf: &Transform, at: Vec3) -> 
     (0..class.sections.len()).min_by(|a, b| d(a).total_cmp(&d(b)))
 }
 
-/// Contact damage `damage` to ship `a` from ship or rock `b` at `at` (docs/re/collision.md, read from the original's code):
+/// Contact damage `damage` to ship `a` from ship or rock `b` at `at` (docs/re/collision.md):
 /// `combat::lob::ram_damage` puts it on `a`'s section nearest `at`, scaled by difficulty when `b` is a ship.
 #[derive(Message)]
 pub struct Ram {
@@ -693,7 +694,7 @@ pub fn sail(
                 continue;
             }
             if !obstacle.tree.is_empty() {
-                // The original (read from its code): the ship's box against the mesh's box tree, one push out along the
+                // The original: the ship's box against the mesh's box tree, one push out along the
                 // horizontal normal per tick, no iteration (docs/re/collision.md).
                 let ship = tree::Box3::placed(class.collision_bounds, &tf);
                 if let Some(push) = tree::land_push(&obstacle.tree, &ship) {
@@ -706,7 +707,7 @@ pub fn sail(
                 let body = box_body(class.collision_bounds, &tf);
                 let contacts = static_contacts(&body, obstacle);
                 let Some(contact) = closest_contact(contacts) else { break };
-                // The original (read from its code): land and bases only push the hull out along the horizontal normal; speed,
+                // The original: land and bases only push the hull out along the horizontal normal; speed,
                 // turn, damage and sound are untouched, so a ship slides along the shore and can still turn free.
                 tf.translation += contact.push.with_y(0.0);
             }
@@ -736,7 +737,7 @@ pub fn sail(
             let delta = -push * (b.inverse_mass / (a.inverse_mass + b.inverse_mass));
             rock_tf.translation += delta;
             obstacle.translate(delta);
-            // ponytail: a rock touch sounds like a ship touch on the ship's side (the rock's own impact sound is not read).
+            // PROVISIONAL: a rock touch sounds like a ship touch on the ship's side (the rock's own impact sound is not read).
             bump([(class, &*tf), (class, &*tf)], contact.point, substep);
             // ...and dropped from its belt for good (waypoints cleared on every touching tick); it keeps that speed afterwards.
             rock_drift.0 = Vec3::ZERO;
@@ -775,7 +776,7 @@ pub fn sail(
         if !ba.bounds.overlaps(bb.bounds) {
             continue;
         }
-        // The original (read from its code): the two boxes' 3-D separating-axis test, the least-penetration axis as the normal; the
+        // The original: the two boxes' 3-D separating-axis test, the least-penetration axis as the normal; the
         // pair is pushed apart along its horizontal part by depth x |cos| (a tilted or vertical normal moves the hulls less).
         let Some(push) = hull_push(&tree::Box3::placed(ca.collision_bounds, &ta), &tree::Box3::placed(cb.collision_bounds, &tb)) else { continue };
         if push == Vec3::ZERO {
@@ -790,7 +791,7 @@ pub fn sail(
         if total <= 0.0 {
             continue;
         }
-        // The original (read from its code): pushed apart by mass, the heavier hull moving less; no bounce, both keep their
+        // The original: pushed apart by mass, the heavier hull moving less; no bounce, both keep their
         // velocity. Each gets a yaw kick at the contact point from 0.1 x its mass x its change to the pair's common velocity
         // per 0.033 s, over a box's inertia (the own mass cancels: a light ship swings, a heavy one hardly turns).
         ta.translation += push * (a_body.inverse_mass / total);

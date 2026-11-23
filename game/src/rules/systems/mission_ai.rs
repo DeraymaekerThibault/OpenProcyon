@@ -83,7 +83,7 @@ pub(super) fn mission_ai(
             ship.waypoints = p;
             ship.order = EngineOrder::Full;
         }
-        let range = lib.classes[ship.class].engage * 1.3;
+        let range = lib.classes[ship.class].engage * 1.3; // PROVISIONAL: the 1.3 factor on engage range is a guess
         let partner = |x: Entity| sc.tows().iter().any(|t| (t.0 == e && t.1 == x) || (t.1 == e && t.0 == x));
         let near = |pool: &[Unit], pred: &dyn Fn(&Unit) -> bool, acquire: bool| {
             pool.iter()

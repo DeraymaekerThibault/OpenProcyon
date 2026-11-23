@@ -113,7 +113,7 @@ pub struct Fired {
     pub mine: bool,
 }
 /// Exhaust effect on a ship. The ship's speed fraction is sent to it once a second as both the emitter rate and the
-/// velocity-length multiplier (read from the original's code); it goes out with the section it hangs on.
+/// velocity-length multiplier; it goes out with the section it hangs on.
 #[derive(Component, Default)]
 pub struct Engine {
     section: Option<usize>,
@@ -256,7 +256,7 @@ pub fn spawn_engines(commands: &mut Commands, fxl: &FxLib, lib: &Library, ship: 
     }
 }
 
-/// The engine keeper's update (read from the original's code): once a second the ship's speed fraction (0..1) becomes both the
+/// The engine keeper's update: once a second the ship's speed fraction (0..1) becomes both the
 /// emitter-rate and the velocity-length multiplier of every exhaust; an exhaust exists only while that is above 0 and its
 /// section stands, and the cloaking factor (1 - level) scales the rate. PROVISIONAL: the fraction is speed over Full (the original
 /// multiplies two physics values).

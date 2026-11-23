@@ -9,6 +9,7 @@ Hardpoints from BD_MeshScenes/<Scene>.msb become empty nodes under "hardpoints" 
 {kind, label}; yaw is applied about up. shortcut: parent rotations are ignored (all zero in the cutter).
 """
 
+import argparse
 import io
 import json
 import math
@@ -22,7 +23,7 @@ from PIL import Image
 from tools.gamefs import ci_file, ci_files
 from tools.mdb import normal, parse
 from tools.msb import parse as parse_msb
-from tools.msb import parse_scene
+from tools.msb import parse_scene, parse_scene_file
 from tools.skin import build as build_skin
 
 
@@ -58,9 +59,7 @@ def scene_layers(root, scene):
     (vanilla PirateSilverShip uses JohnSilverShip_Layer*, ProcyonDMRefulingStationShip ProcyonDMRefulingbaseShip_Layer*).
     """
     try:
-        nodes = parse_msb(
-            ci_file(Path(root) / "BD_MeshScenes", f"{scene}.msb").read_bytes()
-        )
+        nodes = parse_scene_file(root, scene)
     except FileNotFoundError:
         return []
     names = dict.fromkeys(
@@ -328,8 +327,11 @@ def convert(root, scene, model=0, files=None, skin=None, offsets=False):
 
 
 if __name__ == "__main__":
-    args = sys.argv[1:]
-    model = int(args[args.index("--model") + 1]) if "--model" in args else 0
-    root, scene, out = args[:3]
-    Path(out).write_bytes(convert(root, scene, model))
-    print(f"wrote {out}")
+    ap = argparse.ArgumentParser(description=__doc__.split("usage:")[0])
+    ap.add_argument("root")
+    ap.add_argument("scene")
+    ap.add_argument("out")
+    ap.add_argument("--model", type=int, default=0)
+    a = ap.parse_args()
+    Path(a.out).write_bytes(convert(a.root, a.scene, a.model))
+    print(f"wrote {a.out}")

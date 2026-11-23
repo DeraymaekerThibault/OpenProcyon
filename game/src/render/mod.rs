@@ -1,3 +1,4 @@
+//! Constants in this module tree are presentation taste, not original rules, unless marked otherwise.
 //! Not retail: render extensions a graphics mod switches on with a render profile, `data/render/look.json` in the overlay.
 //! Absent, everything renders as classic. A profile changes how the battle is drawn, never what happens. The engine
 //! provides the building blocks; the mod tunes them in the profile and ships the shaders the blocks draw with

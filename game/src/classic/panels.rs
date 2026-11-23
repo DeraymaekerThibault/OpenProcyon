@@ -428,7 +428,7 @@ fn weapon_panel(commands: &mut Commands, c: &Ctx, root: Entity, class: &combat::
             commands.spawn((GunSlot { bank: *bank, icon: true }, GunButton(*bank), c.put(&art, icon_at.x, icon_at.y), ChildOf(weapon), solid()));
         }
         // Recharge bar beside the icon: the empty bar (WeaponBar_SlotBackground) with the yellow WeaponBar_RechargeStatus growing from the bottom.
-        // PROVISIONAL: drawing order/fill direction are read from the artwork; the original's drawing code was not found.
+        // PROVISIONAL: drawing order/fill direction are read from the artwork; the original's drawing order was not observed.
         if let (Some(outline), Some(fill)) = (c.sprite("WeaponBar_SlotBackground"), c.sprite("WeaponBar_RechargeStatus")) {
             let at = pos + offset(hud, "Offset_WeaponBar_Recharge");
             commands.spawn((c.put(&outline, at.x, at.y), ChildOf(weapon)));

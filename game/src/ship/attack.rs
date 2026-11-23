@@ -1,4 +1,4 @@
-//! The original's attack manoeuvres for computer captains, read from its code (docs/re/movement.md, "Computer captains: attack"):
+//! The original's attack manoeuvres for computer captains (docs/re/movement.md, "Computer captains: attack"):
 //! the primary gun bank picks Broadside (one side), Frontal, Rear or Ram; R is the guns' mean effective range (long range against
 //! a base); the captain sails a course of aim points, re-planned every think, at full throttle when the next point is within
 //! 11.25° of the bow and at its minimum throttle otherwise.
@@ -161,7 +161,7 @@ pub fn throttle(routine: Routine, e: Entity, pos: Vec3, heading: f32, point: Vec
     if crate::ship::angdiff((-d.x).atan2(-d.z), heading).abs() <= arc {
         return None;
     }
-    // ponytail: a fixed per-ship draw from the entity, not the original's random generator.
+    // PROVISIONAL: a fixed per-ship draw from the entity, not the original's random generator.
     let u = (e.to_bits().wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 40) as f32 / (1u64 << 24) as f32;
     Some(2.0 * (0.65 + 0.1 * u))
 }

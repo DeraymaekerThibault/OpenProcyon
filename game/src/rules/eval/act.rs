@@ -158,7 +158,7 @@ impl Script {
                 self.all_visible = true;
             }
             "NIS Set Camera Path" => {
-                self.cam.path = Some((s(a, "Path Name").into(), 0.0, 60.0));
+                self.cam.path = Some((s(a, "Path Name").into(), 0.0, 60.0)); // PROVISIONAL: default camera path speed 60 is a guess
             }
             "NIS Set Camera Speed" | "NIS Set Transition Camera Speed" => {
                 if let Some(p) = &mut self.cam.path {

@@ -298,7 +298,7 @@ impl Clip {
 }
 
 /// Starts an animal's clip once its model has spawned (the glTF loader puts the player on the skeleton root): looped, from a
-/// phase of its own (the original draws a random start in [0, duration)). ponytail: the phase comes from the entity, not a draw.
+/// phase of its own (the original draws a random start in [0, duration)). PROVISIONAL: the phase comes from the entity, not a draw.
 fn play_clips(
     mut commands: Commands,
     mut players: Query<(Entity, &mut AnimationPlayer), Added<AnimationPlayer>>,

@@ -33,7 +33,7 @@ fn speech_colour(mission: Res<Mission>, mut texts: Query<(&Ui, &mut TextColor)>)
 
 /// The top strip both the briefing and cutscene speech use.
 fn speech_strip() -> Node {
-    Node { position_type: PositionType::Absolute, top: Val::Px(0.0), width: Val::Percent(100.0), height: Val::Percent(14.0), ..default() }
+    Node { position_type: PositionType::Absolute, top: Val::Px(0.0), width: Val::Percent(100.0), height: Val::Percent(14.0), ..default() } // PROVISIONAL: the 14% strip height is eyeballed
 }
 /// The speech line beside the portrait.
 fn speech_line() -> Node {

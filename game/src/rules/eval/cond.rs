@@ -161,6 +161,6 @@ impl Script {
         let targets = members(w, bb);
         // Rocks: a shot rock may already be gone from the unit list, so `belt` remembers which group names it answered to.
         let hit = |tg: &Entity| targets.iter().any(|x| x.e == *tg) || self.belt.get(tg).is_some_and(|g| g.iter().any(|g| g == target_group));
-        members(w, a).iter().any(|u| u.attack.iter().any(|g| base(g) == target_group) || self.fired_at.get(&u.e).is_some_and(|(t, tg)| self.time - t < 6.0 && hit(tg)))
+        members(w, a).iter().any(|u| u.attack.iter().any(|g| base(g) == target_group) || self.fired_at.get(&u.e).is_some_and(|(t, tg)| self.time - t < 6.0 && hit(tg))) // PROVISIONAL: the 6 s "attacking" window is a guess
     }
 }

@@ -183,12 +183,12 @@ pub type CaptainBusy = Or<(With<docking::Docker>, With<docking::Tower>, With<boa
 /// Emergency Speed. A retail save of such a Carrack holds engineer and navigator factor 1.425, our uncrewed Cutter 1.125, and
 /// 1.425 / 1.125 = 1.267 (docs/re/crew.md).
 pub const COMPUTER_CREW: f32 = 1.267;
-/// The original's computer helm (read from its code): while the course point is at least this far off the bow, the ship's rudder
+/// The original's computer helm: while the course point is at least this far off the bow, the ship's rudder
 /// torque rises linearly from x1 to x4 at 180°. Human-captained ships never get it.
 const AI_BOOST_FROM: f32 = 11.25 * PI / 180.0;
 /// Computer captains keep this far outside a black hole's radius (retail: a Carrack rode 157-165 units from a 145-radius hole).
 pub const HOLE_MARGIN: f32 = 15.0;
-/// Map exploration of skirmish captains with no target (read from the original's code): each ship sails for the centre of a
+/// Map exploration of skirmish captains with no target: each ship sails for the centre of a
 /// quadrant (a quarter of the map's extent out on each axis) and, within half its sight range of it, picks a quadrant at random
 /// (possibly the same one). PROVISIONAL: the map's border margin is ignored; the random draw is a fixed hash, not the original's.
 #[derive(Default)]
@@ -295,7 +295,7 @@ fn choose_target(held: Option<(Entity, f32)>, candidates: &[(Entity, f32)], vali
     held.filter(|h| h.1 < RESELECT_SECS && valid(h.0)).map(|h| (h.0, true)).or_else(|| candidates.iter().min_by(|a, b| a.1.total_cmp(&b.1)).map(|c| (c.0, false)))
 }
 
-/// Skirmish captains, as read from the original's code (docs/re/movement.md "Computer captains"): every think the target is the nearer
+/// Skirmish captains (docs/re/movement.md "Computer captains"): every think the target is the nearer
 /// of the nearest hostile ship in sight and the nearest hostile base at any range, kept for `RESELECT_SECS`; failing both, a fleet
 /// mate's or an ally's target. The attack itself is `attack`. With no target a computer ship explores (`Explore`). The player ship
 /// only uses this in demo (--shot) mode as an autopilot.
@@ -484,7 +484,7 @@ pub fn helm_step(ship: &mut Ship, tf: &mut Transform, class: &combat::Class, hea
             want = Some(g);
         }
         ship.helm.age += dt;
-        // ponytail: one phase for every ship (the original staggers captains by spawn number), and a ship with no course to steer
+        // PROVISIONAL: one phase for every ship (the original staggers captains by spawn number), and a ship with no course to steer
         // for keeps the law due, so a new course acts on the next step (retail's delay for a fresh order is not measured).
         if let Some(w) = want {
             if ship.helm.age >= THINK_SECS {
@@ -689,7 +689,7 @@ pub fn formation_slots(kind: Formation, radii: &[f32]) -> Vec<Vec3> {
     slots
 }
 
-/// Read from the original's code (not yet measured): after a layout the slots are given a single swap pass, so ships that are already
+/// Not yet measured: after a layout the slots are given a single swap pass, so ships that are already
 /// closer to another slot take that one. Not for Custom and Column. `ships` is each member's position in the leader's frame and the
 /// angle between its heading and the leader's. For each slot i from 1, the member that fits its point best (lowest index on a tie,
 /// the leader included) swaps its own slot with slot i when it fits that point strictly better than its own. Fit is 50 falling to 0

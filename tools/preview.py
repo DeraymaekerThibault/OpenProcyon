@@ -1,7 +1,7 @@
 """Tiny painter's-algorithm preview of MDB layers (validation aid, not a renderer)."""
 
+import argparse
 import math
-import sys
 from pathlib import Path
 
 from PIL import Image, ImageDraw
@@ -72,7 +72,13 @@ def render(root, layers, model, yaw, pitch, size=700, points=()):
 if __name__ == "__main__":
     from tools.mdb_to_glb import hardpoints
 
-    root, out, scene, *layers = sys.argv[1:]
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("root")
+    ap.add_argument("out")
+    ap.add_argument("scene")
+    ap.add_argument("layers", nargs="*")
+    a = ap.parse_args()
+    root, out, scene, layers = a.root, a.out, a.scene, a.layers
     colors = {
         "GunPlacement": (255, 40, 40),
         "EnginePortPlacement": (40, 255, 255),
