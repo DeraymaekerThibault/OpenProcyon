@@ -298,7 +298,9 @@ impl Checker<'_> {
             return;
         }
         if let Kind::Bool = field.kind {
-            if !v.as_str().is_some_and(|s| s.eq_ignore_ascii_case("TRUE") || s.eq_ignore_ascii_case("FALSE")) {
+            if v.is_boolean() {
+                self.err(name, format!("the JSON boolean {v} is not allowed; write the string \"{}\" (a JSON boolean reads as FALSE)", if v == true { "TRUE" } else { "FALSE" }));
+            } else if !v.as_str().is_some_and(|s| s.eq_ignore_ascii_case("TRUE") || s.eq_ignore_ascii_case("FALSE")) {
                 self.err(name, format!("{v} is not \"TRUE\" or \"FALSE\"; it reads as FALSE"));
             }
             return;
@@ -693,12 +695,19 @@ mod tests {
         let t = text(json!([rule(
             json!([{"Type": "Flag Condition", "Flag Name": "F", "Boolean Value": true}]),
             json!([
+                {"Type": "Set Flag Action", "Flag Name": "F", "Boolean Value": false},
                 {"Type": "Damage Group/Unit by X percent", "Group Name": "Fleet", "Percent": 50},
                 {"Type": "Set Group Throttle Percent", "Group Name": "Fleet", "Throttle Percent": "0.5"},
                 {"Type": "Set Group/Unit AI Stance", "Group/Unit Name": "Fleet", "AI Stance": "Stance_Agressive"},
             ])
         )]));
-        for want in ["true is not \"TRUE\" or \"FALSE\"; it reads as FALSE", "50 is outside 0..1", "\"0.5\" is not a number; it reads as 0", "'Stance_Agressive' is not one of"] {
+        for want in [
+            "field \"Boolean Value\": the JSON boolean true is not allowed; write the string \"TRUE\"",
+            "action #1 'Set Flag Action', field \"Boolean Value\": the JSON boolean false is not allowed; write the string \"FALSE\"",
+            "50 is outside 0..1",
+            "\"0.5\" is not a number; it reads as 0",
+            "'Stance_Agressive' is not one of",
+        ] {
             assert!(t.contains(want), "missing {want:?} in\n{t}");
         }
     }
