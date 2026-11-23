@@ -534,7 +534,7 @@ const MAX_CATCH_UP_FRAMES: u32 = 10;
 /// Fastest speed of the HUD speed buttons when `data/hud/speed.json` gives no `max`.
 pub const MAX_GAME_SPEED: f32 = 16.0;
 
-/// Freezes or resumes the simulation by pausing virtual time (the HUD pause button and non-retail Pause key). The speed setting is kept.
+/// Freezes or resumes the simulation by pausing virtual time (the HUD pause button and the Pause key, `view.rs`). The speed setting is kept.
 /// Systems on `Res<Time>` stop advancing; real-time UI (menus, star map, options) keeps working.
 pub fn toggle_pause(vtime: &mut Time<Virtual>) {
     if vtime.is_paused() { vtime.unpause() } else { vtime.pause() }

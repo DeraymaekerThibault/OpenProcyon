@@ -1,4 +1,4 @@
-//! A skirmish map's own script (`maps/<id>/script.json`): the same interpreter as the campaign, driving the map's convoys, timers and
+//! Not retail: a skirmish map's own script (`maps/<id>/script.json`), the same interpreter as the campaign, driving the map's convoys, timers and
 //! team points. Its effects are applied by the code the campaign uses (`systems::apply`). Retail maps keep their end rules with
 //! victory.rs (`without_end_rules`); a map that opts in with `"victory": "script"` lets its own rules end the game (`script_end`).
 use bevy::prelude::*;

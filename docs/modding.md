@@ -182,6 +182,48 @@ Limits (provisional):
 - A mod may ship sounds of its own under `sound/`, found by name ("Sounds and music" below).
 - The full layout of every file is in `docs/data-format.md`.
 
+## Engine extensions (not retail)
+
+This is the one list of what OpenProcyon adds to the original. Everything else aims to behave as the retail game does. Every item
+here is marked in the code with a comment that starts `Not retail:` on the module or item that owns it (`game/src/rules/eval/`
+marks its additions with `Origin::Engine` instead), and `tests/test_extensions.py` checks that this table and those markers agree:
+a file listed here must carry the marker, and a file that carries it must be listed here. A new extension adds a row and the
+marker in the same change.
+
+*Gate* is what switches it on: a file in the overlay (a mod, or `content/`), a key in a data file, or "always" for additions that
+need no data. *Changes* is `simulation` when it can change what happens in a battle (who hits, moves, wins), `presentation` when it
+changes only what is drawn or heard, and `control` when it adds a way for the player to act (keys, menus, the clock) without new
+rules. Data keys the engine adds are also listed per file: ship and gun keys in `docs/data-format.md` ("ship.json keys", the
+`Source` column; `ENGINE_SHIP_KEYS` / `ENGINE_GUN_KEYS` in `game/src/data.rs`), mission keys in "Mission rule extensions" below.
+
+| Extension | Gate | Changes | Code |
+|---|---|---|---|
+| Beam guns: charge, then a held beam that burns ships | a `beam` block on a gun in `data/weapons/guns.json` | simulation | `game/src/combat/beam.rs`, `game/src/data.rs` |
+| Hulls that burn fuel, so a nebula's drain does not slow them | `"fuel": true` in `ship.json` | simulation | `game/src/data.rs` |
+| Mission rule extensions (`OP ` Types, `Is Active`, self-completing tasks, `victory`) | the keys in `mission.json` / `script.json` | simulation | `game/src/rules/eval/schema.rs`, `game/src/rules/check.rs` |
+| Skirmish map scripts and their speech | `maps/<id>/script.json`, `maps/<id>/media.json` | simulation | `game/src/rules/skirmish.rs`, `game/src/classic/mission_ui.rs` |
+| Custom missions a mod adds, and the Single Player > Custom Missions page | a mod's `maps/<id>/mission.json` + `media.json` (the button is always there) | control | `game/src/campaign.rs`, `game/src/menu.rs`, `game/src/classic/menu.rs` |
+| Debug launch options `--fire-rule`, `--start-at` | the command line | control | `game/src/campaign.rs` |
+| Developer console | always (`~` or F12; in a release build Display Options > Developer Console or `--console`) | control (it runs rule actions) | `game/src/rules/console.rs`, `game/src/bindings.rs`, `game/src/menu/settings.rs` |
+| Game-speed buttons | `data/hud/speed.json` (the bundled `game-speed` mod, on by default) | control | `game/src/panels.rs`, `game/src/classic/panels.rs` |
+| Pause key | always | control | `game/src/view.rs` |
+| Number keys: primary ship on 1, secondaries on 2..9, 0, `\` | always | control | `game/src/bindings.rs` |
+| Mods page and its main-menu button, the HD skies bake | always | control | `game/src/menu/mods.rs`, `game/src/classic/menu.rs` |
+| Free camera | `data/camera.json` (the bundled `free-camera` mod, on by default) | presentation | `game/src/view.rs` |
+| Cube-map skies | `models/sky/<sky>_cube.png` | presentation | `game/src/view.rs` |
+| Wake tint per fleet type | `data/fx/wake_tint.json` | presentation | `game/src/wake.rs` |
+| Render profile: sails, plumes, wakes, tracers, bursts, surfaces, deck crews, beams, skies, nebulae, currents, black holes, lights | `data/render/look.json` plus the mod's shaders | presentation | `game/src/render/` |
+| Vsync and anti-aliasing options | always (Display Options) | presentation | `game/src/menu/settings.rs` |
+| Scene-wide particle budget | always | presentation | `game/src/fx/sim.rs` |
+| Debris smoke that stops after a few seconds | always | presentation | `game/src/combat/damage.rs` |
+| Damage decals cleared by a full dock repair | always | presentation | `game/src/decals.rs` |
+| Flags hung on the nearest staff | always | presentation | `game/src/flag.rs` |
+| Loading cover over a battle that is still loading | always | presentation | `game/src/loading.rs`, `game/src/classic/world_hud.rs` |
+
+`game/src/render/` stands for its modules: each one that is part of the render profile starts `Not retail:` (shared helpers such
+as `batch.rs`, which the retail effects use too, do not). The mission rule extensions are described in "Mission rule extensions"
+and "Skirmish map scripts" below, the render profile in "Graphics mods", the console in "The developer console".
+
 ## Authoring missions
 
 The step-by-step guide is `docs/missions.md`; this section is the reference for the checking and tracing flags, and `docs/rule-types.md` lists every condition and action Type with its fields.

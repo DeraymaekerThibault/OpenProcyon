@@ -703,7 +703,7 @@ fn commands_window(commands: &mut Commands, c: &Ctx, root: Entity, screen_w: f32
     }
 }
 
-/// Game-speed control (not retail; only with `SpeedControl`, from the `game-speed` mod): a tooltip-backdrop plate beside the main bar's right end between round slower /
+/// Not retail: the game-speed control (only with `SpeedControl`, from the `game-speed` mod), a tooltip-backdrop plate beside the main bar's right end between round slower /
 /// faster buttons (the front-end Prev / Next art at 30 px, which only the Navy set has).
 #[allow(deprecated)] // Interaction, see pointer.rs
 fn speed_plate(commands: &mut Commands, c: &Ctx, fonts: Option<&crate::sprites::Fonts>, root: Entity, bar_right: f32) {

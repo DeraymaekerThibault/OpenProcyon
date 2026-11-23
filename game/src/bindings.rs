@@ -115,7 +115,7 @@ pub enum Act {
     ZoomOut,
     ChangePrimary,
     AttackOnly,
-    /// Opens the developer console (not retail; `rules/console.rs`). F12 always opens it too.
+    /// Not retail: opens the developer console (`rules/console.rs`). F12 always opens it too.
     Console,
 }
 

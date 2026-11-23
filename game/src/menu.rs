@@ -40,7 +40,7 @@ pub enum Screen {
     Controls,
     /// Main menu > Tutorial: Basic Training / Full Training (`Tutorial Screen.tst`).
     Tutorial,
-    /// Single Player > Custom Missions: the missions mods add (`MissionList`). Not retail.
+    /// Not retail: Single Player > Custom Missions, the missions mods add (`MissionList`).
     Missions,
     /// Options > Sound Options (`Audio_Options.tst`) and Display Options (`Display Options Screen.tst`).
     Audio,

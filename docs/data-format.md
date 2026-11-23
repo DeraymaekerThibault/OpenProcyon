@@ -159,29 +159,38 @@ The keys of `ships/<Id>/ship.json` the loader reads (`game/src/data/ships.rs`). 
 message naming the file; "default" is what a missing key gives. The importer writes all of them; a mod's ship needs only the required
 ones and whatever it changes (a ship from a model: `docs/modding.md` "A ship from a model").
 
-| Key | Type | Required | Default when missing |
-|---|---|---|---|
-| `extends` | ship id | no | none; deep-merged over that ship's file at overlay time, then dropped |
-| `race` | string | no | empty |
-| `skirmish` | bool | no | `false`: the ship is not offered on the fleet screen |
-| `points` | integer | no | `0` (fleet cost) |
-| `display_name`, `icon` | string | no | the hull's name string, an icon named from the id |
-| `model`, `geometry`, `scene` | string | no | the ship's own folder (`model`, `geometry`); `scene` none |
-| `core_hp` | number | no | with a model: a quarter of the hull sections' HP, at least 50; without one: 100 |
-| `physics` | object | no | `Mass` 4000, `MaxThrust` 60000, `MaxSpeed` 8, `RotationalFriction` 20, `MaxAngularAcceleration` 3 (PROVISIONAL, about a Navy Cutter's); `MinExtents`, `MaxExtents`, `CenterOfMass` default to the model |
-| `sections` | object by label | no | built from the model's layers; each section needs `layer`, `material`, `hp`, `core_pct`, `vital_ship`, `vital_speed`, `vital_turn`; optional `vital_mission` (`false`), `swappable` (`true`), `adjacent` and `criticals` (empty), `destruct`, `debris`, `debris_fx` |
-| `guns` | object by mount | no | none; each mount needs `gun` (a key of `guns.json`) and `arc_deg`; `pos`/`rot` default to the model's hardpoint node of that name, `bank` to the nearest weapon-panel slot, `parent_layer` none |
-| `engines`, `wakes`, `flags` | arrays | no | from the model's `EnginePortPlacement`, `WakePlacement`, `FlagAttachmentPoint` nodes |
-| `explosion_fx`, `repair_fx` | string | no | by race and size |
-| `engine_snd` | array of names | no | by race and size |
-| `sight` | number | no | `400` (AI sight range) |
-| `ring` | number | no | `0.65` |
-| `cloakable` | bool | no | `true` only for ids containing `Submersible` |
-| `fuel` | bool | no | `false` |
-| `crew_posts` | object | no | one gunner per two guns, a captain, mate, navigator, engineer, a rigger per sail, a fighter or two |
-| `lifeboats` | integer | no | `0` |
-| `is_lifeboat` | bool | no | `false` |
-| `sphere` | `{center, radius}` | no | from the model |
+*Source* says where a key comes from: `retail` keys carry a value the importer reads from the original's ship data (the WOT
+fields keep their retail names inside `physics`, `Mass`, `MaxThrust`, ...; the outer keys are this engine's snake_case names for
+them), `engine` keys have no retail counterpart and exist for mods (`ENGINE_SHIP_KEYS` in `game/src/data.rs`). The full list of
+engine extensions, with what switches each on, is "Engine extensions (not retail)" in `docs/modding.md`.
+
+Gun entries in `data/weapons/guns.json` are retail apart from one engine key, `beam` (a beam gun, `ENGINE_GUN_KEYS` in
+`game/src/data.rs`; its fields are in "A new weapon" in `docs/modding.md`).
+
+| Key | Source | Type | Required | Default when missing |
+|---|---|---|---|---|
+| `extends` | engine | ship id | no | none; deep-merged over that ship's file at overlay time, then dropped |
+| `race` | retail | string | no | empty |
+| `skirmish` | retail | bool | no | `false`: the ship is not offered on the fleet screen |
+| `points` | retail | integer | no | `0` (fleet cost) |
+| `display_name`, `icon` | retail | string | no | the hull's name string, an icon named from the id |
+| `model`, `geometry` | engine | string | no | the ship's own folder (`model.glb`, `geometry.json`); another ship's id takes that ship's file |
+| `scene` | retail | string | no | none |
+| `core_hp` | retail | number | no | with a model: a quarter of the hull sections' HP, at least 50; without one: 100 |
+| `physics` | retail | object | no | `Mass` 4000, `MaxThrust` 60000, `MaxSpeed` 8, `RotationalFriction` 20, `MaxAngularAcceleration` 3 (PROVISIONAL, about a Navy Cutter's); `MinExtents`, `MaxExtents`, `CenterOfMass` default to the model |
+| `sections` | retail | object by label | no | built from the model's layers; each section needs `layer`, `material`, `hp`, `core_pct`, `vital_ship`, `vital_speed`, `vital_turn`; optional `vital_mission` (`false`), `swappable` (`true`), `adjacent` and `criticals` (empty), `destruct`, `debris`, `debris_fx` |
+| `guns` | retail | object by mount | no | none; each mount needs `gun` (a key of `guns.json`) and `arc_deg`; `pos`/`rot` default to the model's hardpoint node of that name, `bank` to the nearest weapon-panel slot, `parent_layer` none |
+| `engines`, `wakes`, `flags` | retail | arrays | no | from the model's `EnginePortPlacement`, `WakePlacement`, `FlagAttachmentPoint` nodes |
+| `explosion_fx`, `repair_fx` | retail | string | no | by race and size |
+| `engine_snd` | retail | array of names | no | by race and size |
+| `sight` | retail | number | no | `400` (AI sight range) |
+| `ring` | retail | number | no | `0.65` |
+| `cloakable` | retail | bool | no | `true` only for ids containing `Submersible` |
+| `fuel` | engine | bool | no | `false` |
+| `crew_posts` | retail | object | no | one gunner per two guns, a captain, mate, navigator, engineer, a rigger per sail, a fighter or two |
+| `lifeboats` | retail | integer | no | `0` |
+| `is_lifeboat` | retail | bool | no | `false` |
+| `sphere` | retail | `{center, radius}` | no | from the model |
 
 ## Silently ignored
 
