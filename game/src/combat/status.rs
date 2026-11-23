@@ -44,12 +44,25 @@ pub fn is_indirect(lib: &Library, gun: &str) -> bool {
     lib.family(gun).is_indirect()
 }
 
-/// Lob weapon of a bullet: 0 gravity charge, 1 nova mortar, 2 star mortar (None: not a lob weapon with a targeting cursor).
-pub fn lob_kind(bullet: GunFamily) -> Option<usize> {
+/// The lob weapons that have a targeting cursor; the discriminant indexes the cursor and marker art.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LobKind {
+    GravCharge = 0,
+    NovaMortar = 1,
+    StarMortar = 2,
+}
+impl LobKind {
+    pub fn index(self) -> usize {
+        self as usize
+    }
+}
+
+/// Lob weapon of a bullet (None: not a lob weapon with a targeting cursor).
+pub fn lob_kind(bullet: GunFamily) -> Option<LobKind> {
     match bullet {
-        GunFamily::GravCharge => Some(0),
-        GunFamily::NovaMortar => Some(1),
-        GunFamily::StarMortar => Some(2),
+        GunFamily::GravCharge => Some(LobKind::GravCharge),
+        GunFamily::NovaMortar => Some(LobKind::NovaMortar),
+        GunFamily::StarMortar => Some(LobKind::StarMortar),
         _ => None,
     }
 }
@@ -59,7 +72,7 @@ pub fn lob_kind(bullet: GunFamily) -> Option<usize> {
 pub struct LobAim(pub Option<LobAimed>);
 #[derive(Clone, Copy, PartialEq)]
 pub struct LobAimed {
-    pub kind: usize,
+    pub kind: LobKind,
     pub solution: bool,
     pub point: Vec3,
 }
@@ -71,7 +84,7 @@ impl LobAimed {
             ["Cursor_PrimaryShip_SetLobTarget_NovaMortar", "Cursor_PrimaryShip_SetLobTarget_NovaMortar_HAS_NO_FIRING_SOLUTION"],
             ["Cursor_PrimaryShip_SetLobTarget_StarMortar", "Cursor_PrimaryShip_SetLobTarget_StarMortar_HAS_NO_FIRING_SOLUTION"],
         ];
-        C[self.kind][!self.solution as usize]
+        C[self.kind.index()][!self.solution as usize]
     }
 }
 
@@ -101,17 +114,32 @@ fn live_guns<'a>(g: &'a GunStates, c: &'a Class, h: &'a Health, bank: usize) -> 
     c.mounts.iter().zip(&g.0).filter(move |(m, _)| m.bank == bank && m.parent.is_none_or(|p| h.sections[p] > 0.0)).map(|(_, s)| s)
 }
 
-/// Panel frame of a bank: 0 ready and in range / 1 recharging / 2 destroyed / 3 ready, nothing in range.
-pub fn bank_state(g: &GunStates, c: &Class, h: &Health, bank: usize) -> usize {
+/// Panel frame of a bank; the discriminant indexes the frame art.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BankState {
+    /// Ready and in range.
+    Ready = 0,
+    Recharging = 1,
+    Destroyed = 2,
+    /// Ready, nothing in range.
+    OutOfRange = 3,
+}
+impl BankState {
+    pub fn index(self) -> usize {
+        self as usize
+    }
+}
+
+pub fn bank_state(g: &GunStates, c: &Class, h: &Health, bank: usize) -> BankState {
     let live: Vec<&GunState> = live_guns(g, c, h, bank).collect();
     if live.is_empty() {
-        2
+        BankState::Destroyed
     } else if live.iter().any(|s| s.cooldown > 0.0) {
-        1
+        BankState::Recharging
     } else if live.iter().any(|s| s.in_range) {
-        0
+        BankState::Ready
     } else {
-        3
+        BankState::OutOfRange
     }
 }
 

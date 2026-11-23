@@ -755,7 +755,7 @@ pub(super) fn hit_ship(
             });
         }
         info!("fire on {} of {}", sec.label, class.name);
-        fires.list.push(Fire { sec: k, intensity: fire_str, state: 0, fx });
+        fires.list.push(Fire { sec: k, intensity: fire_str, state: FireState::Burning, fx });
     }
     sfx.write_batch(bd.impact_sound(key, at, rng));
     if outcome.lost {

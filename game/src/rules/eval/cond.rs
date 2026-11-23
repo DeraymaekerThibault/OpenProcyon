@@ -2,6 +2,7 @@
 
 use serde_json::Value;
 
+use super::state::{Entered, EventKey};
 use super::*;
 
 impl Script {
@@ -87,7 +88,7 @@ impl Script {
             }
             "Unit is Within any Nebula" => members(w, s(c, "Unit Name")).iter().any(|u| u.alive && self.nebulae.iter().any(|p| in_volume(p, u.pos))),
             "All Units from Group have entered trigger volume Once" => {
-                let key = s(c, "Group Name").to_string() + "|" + s(c, "Volume Name");
+                let key = Entered::AllOnce { group: s(c, "Group Name").into(), volume: s(c, "Volume Name").into() };
                 let vol = self.volume(s(c, "Volume Name")).clone();
                 let m: Vec<_> = members(w, s(c, "Group Name")).into_iter().filter(|u| u.alive).collect();
                 let seen = self.entered.entry(key).or_default();
@@ -106,24 +107,24 @@ impl Script {
                 let (team, group) = (s(c, "Team Name"), s(c, "Group/Unit"));
                 let ids = ids(w, group);
                 let n = self.captured.iter().filter(|(by, e)| ids.contains(e) && self.in_team(team, by)).count() as u32;
-                self.event(format!("captured|{team}|{group}"), n, f(c, "Number Of Captures"))
+                self.event(EventKey::Captured { team: team.into(), group: group.into() }, n, f(c, "Number Of Captures"))
             }
             "Team has destroyed a ship from Group/Unit" => {
                 let (team, group) = (s(c, "Team Name"), s(c, "Group/Unit"));
                 let ids = ids(w, group);
                 let n = self.destroyed.iter().filter(|(by, e)| ids.contains(e) && self.in_team(team, by)).count() as u32;
-                self.event(format!("destroyed|{team}|{group}"), n, f(c, "Number Of Ships Destroyed"))
+                self.event(EventKey::Destroyed { team: team.into(), group: group.into() }, n, f(c, "Number Of Ships Destroyed"))
             }
             // Each unit of the group counts once, the first time it is inside. PROVISIONAL: 'Team Name' is read as the team the rule
             // credits, not a filter on the units (Convoy Raid: the convoys entering the pirates' theft area score for the pirates).
             "Unit from Group enters trigger volume ( Once per Unit )" => {
-                let key = format!("once|{}|{}", s(c, "Group Name"), s(c, "Volume Name"));
+                let (group, volume) = (s(c, "Group Name").to_string(), s(c, "Volume Name").to_string());
                 let vol = self.volume(s(c, "Volume Name")).clone();
                 let inside: Vec<Entity> = members(w, s(c, "Group Name")).iter().filter(|u| u.alive && in_volume(&vol, u.pos)).map(|u| u.e).collect();
-                let seen = self.entered.entry(key.clone()).or_default();
+                let seen = self.entered.entry(Entered::OncePerUnit { group: group.clone(), volume: volume.clone() }).or_default();
                 seen.extend(inside);
                 let n = seen.len() as u32;
-                self.event(key, n, 0.0)
+                self.event(EventKey::Once { group, volume }, n, 0.0)
             }
             "Team has X points" => self.team_points.get(s(c, "Team Name")).copied().unwrap_or(0) as f32 >= f(c, "Points"),
             // True for an unknown player; otherwise no lifeboat is owned by the player (a boat counts until it is removed).
@@ -145,7 +146,7 @@ impl Script {
             "Player Killed A Object" => {
                 let (player, kind) = (base(s(c, "Player Name")), s(c, "World Object Type"));
                 let n = self.kills.get(&(player.to_string(), kind == "Asteroid")).copied().unwrap_or(0);
-                self.event(format!("killed|{player}|{kind}"), n, 0.0)
+                self.event(EventKey::Killed { player: player.into(), kind: kind.into() }, n, 0.0)
             }
             t if t.starts_with("OP ") => self.ext_cond(c, w, repeating),
             other => {

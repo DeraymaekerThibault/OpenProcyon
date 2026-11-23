@@ -605,12 +605,12 @@ fn update_guns(
             }
             // Dimmed while the bank reloads (the bar beside it shows how far along it is).
             let tint = match st {
-                2 => Color::srgba(1.0, 1.0, 1.0, 0.25),
-                1 => Color::srgb(0.55, 0.55, 0.55),
+                combat::BankState::Destroyed => Color::srgba(1.0, 1.0, 1.0, 0.25),
+                combat::BankState::Recharging => Color::srgb(0.55, 0.55, 0.55),
                 _ => Color::WHITE,
             };
             img.map_unchanged(|i| &mut i.color).set_if_neq(tint);
-        } else if let Some(art) = frames.gun.get(st) {
+        } else if let Some(art) = frames.gun.get(st.index()) {
             art.show(&mut img, &mut node, frames.s);
             img.map_unchanged(|i| &mut i.color).set_if_neq(if armed { Color::srgb(1.0, 0.9, 0.3) } else { Color::WHITE });
         }

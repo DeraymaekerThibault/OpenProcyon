@@ -193,7 +193,7 @@ pub fn input(
                 target.2.armed = None;
                 target.2.shot = Some((bank, ray.get_point(t)));
                 // Retail plays a sound only for gravity charges (PROVISIONAL: star/nova silent as decoded, unconfirmed in play)
-                if let Some(a) = lob.0.filter(|a| a.kind == 0) {
+                if let Some(a) = lob.0.filter(|a| a.kind == crate::combat::LobKind::GravCharge) {
                     sfx.write(audio::Sfx::ui(if a.solution { "HUD_LobWeapon_Accept" } else { "HUD_LobWeapon_Reject" }));
                 }
                 return;

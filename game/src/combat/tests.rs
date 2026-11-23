@@ -1452,11 +1452,11 @@ fn seg_mesh_world(tf: &Transform, s: &Section, a: Vec3, b: Vec3) -> Option<f32> 
 
 #[test]
 fn lob_cursor_sprites_follow_weapon_and_solution() {
-    assert_eq!(lob_kind(GunFamily::of("Bullet_NovaMortar")), Some(1));
+    assert_eq!(lob_kind(GunFamily::of("Bullet_NovaMortar")), Some(LobKind::NovaMortar));
     assert_eq!(lob_kind(GunFamily::of("Bullet_CannonBall")), None);
-    let a = LobAimed { kind: 2, solution: true, point: Vec3::ZERO };
+    let a = LobAimed { kind: LobKind::StarMortar, solution: true, point: Vec3::ZERO };
     assert_eq!(a.cursor(), "Cursor_PrimaryShip_SetLobTarget_StarMortar");
-    let b = LobAimed { kind: 0, solution: false, ..a };
+    let b = LobAimed { kind: LobKind::GravCharge, solution: false, ..a };
     assert_eq!(b.cursor(), "Cursor_PrimaryShip_SetLobTarget_GravCharge_HAS_NO_FIRING_SOLUTION");
 }
 
@@ -1470,7 +1470,7 @@ fn a_fire_that_burns_a_floored_section_out_goes_out() {
     hp.sections[0] = 1.0;
     let mut app = App::new();
     app.init_resource::<Time>().add_systems(Update, super::damage::fires);
-    let fire = super::damage::Fire { sec: 0, intensity: 50.0, state: 0, fx: None };
+    let fire = super::damage::Fire { sec: 0, intensity: 50.0, state: super::damage::FireState::Burning, fx: None };
     let ms = crate::campaign::MissionShip { invuln: 0.5, ..Default::default() };
     let ship = Ship { heading: 0.0, ..Ship::new(c, Side::Player) };
     let e = app.world_mut().spawn((Transform::default(), ship, hp, super::damage::Fires { list: vec![fire], tick: 0.0 }, ms)).id();
@@ -1766,4 +1766,12 @@ fn comet_lancer_burst(panic: bool) -> usize {
 fn a_lancer_burst_is_whole_when_clicked_and_in_panic_fire() {
     assert_eq!(comet_lancer_burst(false), 4, "clicked enemy");
     assert_eq!(comet_lancer_burst(true), 4, "panic fire");
+}
+
+#[test]
+fn state_enums_keep_the_frame_and_art_indices() {
+    assert_eq!([BankState::Ready, BankState::Recharging, BankState::Destroyed, BankState::OutOfRange].map(BankState::index), [0, 1, 2, 3]);
+    assert_eq!([LobKind::GravCharge, LobKind::NovaMortar, LobKind::StarMortar].map(LobKind::index), [0, 1, 2]);
+    assert_eq!(lob_kind(GunFamily::of("Bullet_GravCharge")), Some(LobKind::GravCharge));
+    assert_eq!(lob_kind(GunFamily::of("Bullet_StarMortar")), Some(LobKind::StarMortar));
 }
