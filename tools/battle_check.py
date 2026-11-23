@@ -20,7 +20,7 @@ import tempfile
 from pathlib import Path
 from typing import NamedTuple
 
-from tools.autoplay import build_game, display_wrapper, silent_data_home
+from tools.autoplay import assets_env, build_game, display_wrapper, silent_data_home
 
 REPO = Path(__file__).resolve().parents[1]
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
@@ -181,7 +181,12 @@ def main():
     with tempfile.TemporaryDirectory() as xdg:
         # A scratch XDG_DATA_HOME (default bindings, no saves, silent) and X11, as tools/autoplay.py.
         silent_data_home(xdg)
-        env = {**os.environ, "XDG_DATA_HOME": xdg, "WAYLAND_DISPLAY": ""}
+        env = {
+            **os.environ,
+            "XDG_DATA_HOME": xdg,
+            **assets_env(),
+            "WAYLAND_DISPLAY": "",
+        }
         if wrap:
             env["WGPU_BACKEND"] = "vulkan"
         for name, game_args, seconds, expect in chosen:

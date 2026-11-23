@@ -48,7 +48,7 @@ esac
                 os.environ,
                 PATH=f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
                 GATE_LOG=str(log),
-                IMPORTED=str(int(imported)),
+                IMPORTED="/fake/assets" if imported else "",
                 TEST_STATUS=str(test_status),
                 DISPLAY=":test",
             )
