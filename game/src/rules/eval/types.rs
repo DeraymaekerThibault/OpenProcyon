@@ -33,8 +33,7 @@ impl Stance {
 macro_rules! name_newtype {
     ($(#[$m:meta])* $t:ident) => {
         $(#[$m])*
-        #[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Debug, Default, serde::Serialize, serde::Deserialize)]
-        #[serde(transparent)]
+        #[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Debug, Default)]
         pub struct $t(String);
         impl $t {
             pub fn as_str(&self) -> &str {
