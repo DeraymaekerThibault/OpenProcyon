@@ -54,9 +54,14 @@ def display_wrapper():
 
 
 def assets_env():
-    """PROCYON_ASSETS for a game run: the scratch XDG_DATA_HOME hides the per-user import and a linked worktree has none."""
+    """PROCYON_ASSETS for a game run (the scratch XDG_DATA_HOME hides the per-user import and a linked worktree has none), and
+    this checkout's own PROCYON_OVERLAY: the default overlay sits next to the assets, shared by every worktree using the main import."""
     assets = find_assets()
-    return {"PROCYON_ASSETS": str(assets)} if assets else {}
+    overlay = os.environ.get("PROCYON_OVERLAY", str(REPO / "local/tool-overlay"))
+    return {
+        "PROCYON_OVERLAY": overlay,
+        **({"PROCYON_ASSETS": str(assets)} if assets else {}),
+    }
 
 
 def silent_data_home(xdg):

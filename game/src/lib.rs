@@ -124,9 +124,13 @@ pub fn bundled_mods_dir() -> Option<PathBuf> {
 fn content_dir_from(next_to_exe: Option<PathBuf>, checkout: PathBuf) -> PathBuf {
     next_to_exe.filter(|dir| dir.join("fonts").is_dir()).unwrap_or(checkout)
 }
+/// PROCYON_OVERLAY: where this launch builds its overlay (modding::overlay).
+fn own_overlay() -> Option<PathBuf> {
+    std::env::var_os("PROCYON_OVERLAY").map(PathBuf::from)
+}
 /// The asset root: the imported assets with `content/` and any `--mod` folders overlaid on top (see modding.rs).
 pub fn assets_dir() -> &'static std::path::Path {
-    ASSETS.get_or_init(|| modding::overlay(&base_assets(), &[content_dir()]))
+    ASSETS.get_or_init(|| modding::overlay(&base_assets(), &[content_dir()], own_overlay()))
 }
 
 /// Runs the game with one presentation (a view plugin such as the binary's `classic::plugin`); without imported assets it opens
@@ -179,7 +183,7 @@ pub fn run(view: fn(&mut App), setup_view: fn(&mut App)) {
     let installed = modding::installed(bundled_mods_dir().as_deref()).into_iter().filter(|m| m.enabled).map(|m| m.dir);
     modding::set_active(installed.chain(mods).collect());
     let layers: Vec<PathBuf> = std::iter::once(content_dir()).chain(modding::active().iter().cloned()).collect();
-    let _ = ASSETS.set(modding::overlay(&base, &layers));
+    let _ = ASSETS.set(modding::overlay(&base, &layers, own_overlay()));
     if let Some(code) = rules::cli::apply(&args) {
         std::process::exit(code);
     }

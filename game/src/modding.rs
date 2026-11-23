@@ -139,13 +139,13 @@ fn disposable(dir: &Path) -> bool {
     dir.join(OVERLAY_MARK).exists() || std::fs::read_dir(dir).map_or(true, |mut d| d.next().is_none())
 }
 
-/// Builds the overlay and returns its root; with no mods returns `base` unchanged.
-pub fn overlay(base: &Path, mods: &[PathBuf]) -> PathBuf {
+/// Builds the overlay and returns its root; with no mods returns `base` unchanged. `own`: a folder of the launch's own
+/// (PROCYON_OVERLAY, read by the caller: the tools give each checkout and each parallel run one, so runs sharing an import do not
+/// rebuild each other's tree); else `<base>/../local/overlay`.
+pub fn overlay(base: &Path, mods: &[PathBuf], own: Option<PathBuf>) -> PathBuf {
     if mods.is_empty() {
         return base.to_path_buf();
     }
-    // PROCYON_OVERLAY: a launch of its own (tools/autoplay.py --jobs) so parallel runs do not rebuild each other's tree.
-    let own = std::env::var_os("PROCYON_OVERLAY").map(PathBuf::from);
     if let Some(dir) = &own {
         assert!(disposable(dir), "PROCYON_OVERLAY {} holds files that are not an overlay; refusing to delete it", dir.display());
     }
@@ -259,7 +259,7 @@ mod tests {
         std::fs::write(base.join("data/a.json"), r#"{"x": 1, "y": 1}"#).unwrap();
         std::fs::write(m.join("data/a.json"), r#"{"x": 2}"#).unwrap();
         std::fs::write(m.join("data/b.json"), r#"{"extends": "a", "y": 3}"#).unwrap();
-        let root = overlay(&base, &[m]);
+        let root = overlay(&base, &[m], None);
         let b: Value = read(&root.join("data/b.json")).unwrap();
         assert_eq!((b["x"].as_i64(), b["y"].as_i64()), (Some(2), Some(3)), "b extends the mod's own a.json, not the base one");
         // overlay files may be links to the base: replacing one must never write through to the original
@@ -317,7 +317,7 @@ mod tests {
         }
         std::fs::write(base.join("data/collision.json"), r#"{"Island01": {"min": [0, 0, 0], "max": [1, 1, 1]}}"#).unwrap();
         std::fs::write(m.join("data/collision.json"), r#"{"Island_Ours": {"min": [0, 0, 0], "max": [2, 2, 2]}}"#).unwrap();
-        let c: Value = read(&overlay(&base, &[m]).join("data/collision.json")).unwrap();
+        let c: Value = read(&overlay(&base, &[m], None).join("data/collision.json")).unwrap();
         assert!(c["Island01"].is_object() && c["Island_Ours"].is_object(), "a mod's scenery type is added beside the retail ones");
         std::fs::remove_dir_all(dir).unwrap();
     }
@@ -330,7 +330,7 @@ mod tests {
         }
         std::fs::write(base.join("data/docks.json"), r#"{"Base_X": {"points": [{"label": "DockPoint1", "pos": [0, 0, 0], "yaw": 0}], "tender": true}}"#).unwrap();
         std::fs::write(m.join("data/docks.json"), r#"{"FerrumTown": {"points": [{"label": "Berth1", "pos": [1, 2, 0], "yaw": 1.5}], "tender": true}}"#).unwrap();
-        let c: Value = read(&overlay(&base, &[m]).join("data/docks.json")).unwrap();
+        let c: Value = read(&overlay(&base, &[m], None).join("data/docks.json")).unwrap();
         assert!(c["Base_X"]["points"].is_array() && c["FerrumTown"]["points"].is_array(), "a mod's dock points are added beside the retail ones");
         std::fs::remove_dir_all(dir).unwrap();
     }
@@ -343,7 +343,7 @@ mod tests {
         }
         std::fs::write(base.join("data/a.json"), r#"{"list": [{"fx": "x", "pos": 1}, {"fx": "y"}]}"#).unwrap();
         std::fs::write(m.join("data/a.json"), r#"{"extends": "a", "set": {"/list/1/fx": "z"}}"#).unwrap();
-        let root = overlay(&base, &[m]);
+        let root = overlay(&base, &[m], None);
         let a: Value = read(&root.join("data/a.json")).unwrap();
         assert_eq!(a, serde_json::json!({"list": [{"fx": "x", "pos": 1}, {"fx": "z"}]}));
         std::fs::remove_dir_all(dir).unwrap();
