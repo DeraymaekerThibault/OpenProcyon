@@ -283,6 +283,45 @@ fn the_command_table_and_the_parser_agree() {
     }
 }
 
+/// The table's `about` text cites rule Types by name. Each must still exist in `RULE_TYPES` (a rename there fails here), and each
+/// must still be cited by the table (a rename here fails too), so the free text cannot drift from the vocabulary.
+#[test]
+fn the_rule_types_the_table_cites_exist_in_the_vocabulary() {
+    const CITED: &[&str] = &[
+        "Break Tow",
+        "Damage Group/Unit by X percent",
+        "Destroy Group/Unit",
+        "End Game",
+        "Goto Next Level",
+        "GroupA to attack GroupB",
+        "NIS End",
+        "OP Set Counter",
+        "OP Wait",
+        "Play Music Track",
+        "Play speech event",
+        "Set Flag Action",
+        "Set Fleet Primary Ship",
+        "Set Group/Unit AI Stance",
+        "Set Group/Unit Visibility",
+        "Set Group/Unit Vulnerability",
+        "Speech Event Played Once",
+        "Start Timer",
+        "Stop Timer",
+        "Tow Ship",
+    ];
+    let text: String = TABLE.iter().map(|e| format!("{} {}\n", e.usage, e.about)).collect();
+    for name in CITED {
+        assert!(schema::RULE_TYPES.iter().any(|t| t.name == *name), "'{name}' is not in RULE_TYPES");
+        assert!(text.contains(name), "'{name}' is no longer cited by the console table; update CITED");
+    }
+    // Anything in the vocabulary the table also cites must be listed, so a new citation gets pinned.
+    for t in schema::RULE_TYPES {
+        if text.contains(t.name) {
+            assert!(CITED.contains(&t.name), "the console table cites '{}': add it to CITED", t.name);
+        }
+    }
+}
+
 #[test]
 fn help_lists_commands_by_group_and_marks_the_cheats() {
     let all = help_lines(None).join("\n");
