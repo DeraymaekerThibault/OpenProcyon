@@ -21,7 +21,7 @@ pub(super) fn drive(
     if std::env::var_os("PROCYON_AUTOINVULN").is_some()
         && let Some(owner) = world.iter().find(|u| u.primary).map(|u| u.owner.clone())
     {
-        for s in ships.iter().filter(|s| s.mission.owner == owner) {
+        for s in ships.iter().filter(|s| s.mission.owner == owner.as_str()) {
             extra.board.write(crate::boarding::BoardMsg::Boardable(s.entity, false));
         }
     }
@@ -746,7 +746,7 @@ fn autopilot(
     // exercised. Re-applied every tick, overriding the rules' own vulnerability changes for those ships; a "lost" outcome then only
     // comes from rules that do not need a player ship to sink.
     if std::env::var_os("PROCYON_AUTOINVULN").is_some() {
-        for mut s in ships.iter_mut().filter(|s| s.mission.owner == p.owner) {
+        for mut s in ships.iter_mut().filter(|s| s.mission.owner == p.owner.as_str()) {
             s.mission.invuln = 1.0;
         }
     }

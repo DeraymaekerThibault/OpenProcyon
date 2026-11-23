@@ -48,10 +48,10 @@ impl Script {
                 }
             }
         }
-        let mut groups: HashMap<i64, Vec<String>> = HashMap::new();
+        let mut groups: HashMap<i64, Vec<GroupName>> = HashMap::new();
         for (name, ids) in data["groups"].as_object().into_iter().flatten() {
             for id in ids.as_array().into_iter().flatten().filter_map(Value::as_i64) {
-                groups.entry(id).or_default().push(name.clone());
+                groups.entry(id).or_default().push(name.as_str().into());
             }
         }
         let tasks = data["tasks"]

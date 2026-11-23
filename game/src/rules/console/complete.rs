@@ -67,12 +67,12 @@ impl Script {
             .iter()
             .cloned()
             .chain(self.players.iter().cloned())
-            .chain(w.iter().flat_map(|u| std::iter::once(u.owner.clone()).chain(u.groups.iter().cloned())))
+            .chain(w.iter().flat_map(|u| std::iter::once(u.owner.to_string()).chain(u.groups.iter().map(ToString::to_string))))
             .collect();
         Names {
             rules: self.rules.iter().map(|r| r.name.trim().to_string()).collect(),
             groups: sorted(groups),
-            units: sorted(w.iter().map(|u| u.name.clone()).collect()),
+            units: sorted(w.iter().map(|u| u.name.to_string()).collect()),
             point_sets: sorted(keys(&self.point_sets).filter(|k| k != TP_SET).collect()),
             volumes: sorted(self.volumes.keys().cloned().collect()),
             paths: sorted(keys(&self.paths).collect()),

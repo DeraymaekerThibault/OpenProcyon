@@ -45,7 +45,7 @@ pub struct MissionBase {
 }
 impl MissionBase {
     pub fn unit(&self, e: Entity, tf: &Transform, damage: f32) -> rules::Unit {
-        rules::Unit { owner: self.owner.clone(), damage, ..rules::Unit::new(e, self.id, tf.translation) }
+        rules::Unit { owner: self.owner.as_str().into(), damage, ..rules::Unit::new(e, self.id, tf.translation) }
     }
 }
 #[derive(Resource, Default)]
@@ -533,7 +533,7 @@ mod tests {
         let base = app.world().get::<MissionBase>(grant).expect("Base_Grant is a MissionBase");
         let mission = load_id("mission05");
         let mut player = base.unit(Entity::PLACEHOLDER, &Transform::default(), 0.0);
-        (player.primary, player.owner, player.id) = (true, mission.script.player().to_string(), -2);
+        (player.primary, player.owner, player.id) = (true, mission.script.player().into(), -2);
         let mut w = vec![player, base.unit(grant, &Transform::default(), 0.0)];
         mission.script.tag(&mut w);
         assert!(mission.script.dock_targets(&w).contains(&grant), "the opening dock rule waits for Grant");

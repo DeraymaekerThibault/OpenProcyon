@@ -30,17 +30,69 @@ impl Stance {
     }
 }
 
+macro_rules! name_newtype {
+    ($(#[$m:meta])* $t:ident) => {
+        $(#[$m])*
+        #[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Debug, Default)]
+        pub struct $t(String);
+        impl $t {
+            pub fn as_str(&self) -> &str {
+                &self.0
+            }
+        }
+        impl From<&str> for $t {
+            fn from(s: &str) -> Self {
+                Self(s.to_string())
+            }
+        }
+        impl From<String> for $t {
+            fn from(s: String) -> Self {
+                Self(s)
+            }
+        }
+        impl std::ops::Deref for $t {
+            type Target = str;
+            fn deref(&self) -> &str {
+                &self.0
+            }
+        }
+        impl std::fmt::Display for $t {
+            fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                self.0.fmt(f)
+            }
+        }
+        impl PartialEq<str> for $t {
+            fn eq(&self, o: &str) -> bool {
+                self.0 == o
+            }
+        }
+        impl PartialEq<&str> for $t {
+            fn eq(&self, o: &&str) -> bool {
+                self.0 == *o
+            }
+        }
+    };
+}
+name_newtype!(
+    /// A mission ship's name as rules refer to it ("Group/Unit Name" selectors, the script's `name` field).
+    ShipId
+);
+name_newtype!(
+    /// An owner or a named group: both act as group selectors in rules ("Player/Owner", `group`).
+    GroupName
+);
+
 /// What the interpreter needs to know about one unit; built each frame from the ECS.
 #[derive(Clone)]
 pub struct Unit {
     pub e: Entity,
     /// TWT world object id (-1: none); `Script::tag` adds the named TWT groups containing it to `groups`.
     pub id: i64,
-    pub name: String,
-    pub owner: String,
+    pub name: ShipId,
+    pub owner: GroupName,
     /// A named TWT group shadows this owner as a rule selector; set by `Script::tag`.
     pub owner_is_named_group: bool,
-    pub groups: Vec<String>,
+    pub groups: Vec<GroupName>,
     pub pos: Vec3,
     pub alive: bool,
     pub visible: bool,
@@ -56,8 +108,8 @@ impl Unit {
         Unit {
             e,
             id,
-            name: String::new(),
-            owner: String::new(),
+            name: ShipId::default(),
+            owner: GroupName::default(),
             owner_is_named_group: false,
             groups: vec![],
             pos,

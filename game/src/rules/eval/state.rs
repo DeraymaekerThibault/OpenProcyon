@@ -106,7 +106,7 @@ pub struct Script {
     /// Every asteroid seen, with the group names it answered to (a destroyed rock leaves the unit list but still counts as attacked).
     pub(in crate::rules) belt: HashMap<Entity, Vec<String>>,
     /// TWT named groups by world object id (a unit also answers to its current owner, `matches`).
-    pub(in crate::rules) groups: HashMap<i64, Vec<String>>,
+    pub(in crate::rules) groups: HashMap<i64, Vec<GroupName>>,
     pub(in crate::rules) group_names: HashSet<String>,
     /// Lifeboats saved as the original tallies them: (collecting player, lifeboat owner, count). The only source of the rules'
     /// capture counts apart from `base_captures`; boarding a ship never touches it.
@@ -196,8 +196,8 @@ impl Script {
             // "Player0 Group" (aliased to the human's name) is the human's fleet: every ship the human owns, even where a TWT group
             // of the same name shadows the owner. Mission 5's TWT group "Player" is the starting Sea Sparrow and Comet; a rule later hands
             // the RLS Superior (TWT group "Jim") to the player as fleet primary. Without this its warning shot never counted.
-            if u.owner == self.player && !u.groups.contains(&self.player) {
-                u.groups.push(self.player.clone());
+            if u.owner == *self.player && !u.groups.contains(&GroupName::from(self.player.as_str())) {
+                u.groups.push(self.player.as_str().into());
             }
         }
     }
@@ -495,7 +495,9 @@ impl Script {
                         out.extend(vol.near_inside(Vec2::new(p.pos.x, -p.pos.z)).map(at));
                         out.extend(vol.grid(8).into_iter().map(at));
                     }
-                    "Player has hit Group/Unit at least x Times" | "Group/Unit Hit at least x Times by Player ( with eqivalence )" if base(s(c, "Player Name")) == p.owner => {
+                    "Player has hit Group/Unit at least x Times" | "Group/Unit Hit at least x Times by Player ( with eqivalence )"
+                        if base(s(c, "Player Name")) == p.owner.as_str() =>
+                    {
                         out.extend(members(w, s(c, "Group/Unit Name")).iter().filter(|u| u.alive && u.visible && u.owner != p.owner).map(|u| Want::Hit(u.e)));
                     }
                     "Group Destroyed" | "Group/Unit Vital Section has >,<,= X damage" | "Group/Unit has >,<,= X damage" => {
