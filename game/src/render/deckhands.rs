@@ -1353,7 +1353,9 @@ mod tests {
         bad["figures"][0]["lods"][1]["verts"] = 395.into();
         assert!(parse_header(&bad).is_err());
         let many: Vec<&str> = vec!["x"; MAX_CLIPS];
-        assert!(parse_header(&header(&many)).unwrap_err().contains("at most"));
+        let mut tall = header(&many);
+        tall["pose"]["height"] = 1000.into();
+        assert!(parse_header(&tall).unwrap_err().contains("at most"));
     }
 
     #[test]
