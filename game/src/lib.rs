@@ -93,7 +93,8 @@ static ASSETS: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
 
 /// `--fixed-step` / `PROCYON_FIXED_STEP=1` (#535): every frame advances exactly one battle tick of game time at 1x, whatever the
 /// machine's frame rate, and the clock-seeded cosmetic draws (ship names, stars) use a fixed seed. With the battle seed (`--seed`)
-/// and frames counted after loading, the same scripted run gives the same pictures and trace on every run.
+/// and frames counted after loading, the same scripted run gives the same pictures and trace on every run. The crew stays silent
+/// (its lines follow audio playback, not the tick).
 static FIXED_STEP: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 pub fn fixed_step() -> bool {
     FIXED_STEP.load(std::sync::atomic::Ordering::Relaxed)
