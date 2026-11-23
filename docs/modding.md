@@ -198,7 +198,7 @@ rules. Data keys the engine adds are also listed per file: ship and gun keys in 
 
 | Extension | Gate | Changes | Code |
 |---|---|---|---|
-| Beam guns: charge, then a held beam that burns ships | a `beam` block on a gun in `data/weapons/guns.json` | simulation | `game/src/combat/beam.rs`, `game/src/data.rs` |
+| Beam guns: charge, then a held beam that burns ships | a `beam` block on a gun in `data/weapons/guns.json` | simulation | `game/src/combat/beam.rs`, `game/src/data.rs`, `game/src/data/weapons.rs` |
 | Hulls that burn fuel, so a nebula's drain does not slow them | `"fuel": true` in `ship.json` | simulation | `game/src/data.rs` |
 | Mission rule extensions (`OP ` Types, `Is Active`, self-completing tasks, `victory`) | the keys in `mission.json` / `script.json` | simulation | `game/src/rules/eval/schema.rs`, `game/src/rules/check.rs` |
 | Skirmish map scripts and their speech | `maps/<id>/script.json`, `maps/<id>/media.json` | simulation | `game/src/rules/skirmish.rs`, `game/src/classic/mission_ui.rs` |
