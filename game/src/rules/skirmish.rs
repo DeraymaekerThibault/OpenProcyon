@@ -63,6 +63,7 @@ struct SkirmishFx<'w, 's> {
     bases: apply::Bases<'w, 's>,
     mines: apply::Mines<'w, 's>,
     dragons: Query<'w, 's, &'static mut crate::dragons::Dragon>,
+    difficulty: Option<Res<'w, crate::scenario::Difficulty>>,
     dock: MessageWriter<'w, crate::docking::DockMsg>,
     board: MessageWriter<'w, crate::boarding::BoardMsg>,
     asteroids: MessageWriter<'w, crate::combat::AsteroidSetup>,
@@ -99,7 +100,7 @@ fn run(
             primary: s.primary,
             flag: s.mission.flag.clone(),
             attack: s.mission.attack.clone(),
-            ..Unit::new(s.entity, s.mission.id, s.transform.translation)
+            ..Unit::new(s.entity, s.mission.id, super::systems::sim_pos(s.transform, s.interp))
         })
         .collect();
     sk.script.keep_sunk(&mut world);
@@ -140,6 +141,7 @@ fn run(
         fxlib: fx.fxlib.as_deref(),
         sfx: fx.sfx.as_deref_mut(),
         toggles: fx.toggles.as_deref_mut(),
+        difficulty: fx.difficulty.as_deref().copied().unwrap_or_default().0,
         orbit: None,
         sides: Some(&sk.sides),
         mines: Some(&mut fx.mines),

@@ -24,7 +24,12 @@ fn find_closest_point_skips_points_behind_the_rock() {
 #[ignore = "needs imported assets"]
 fn asteroid_tumble_obeys_group_ranges_without_drift() {
     let mut app = App::new();
-    app.init_resource::<Time>().init_resource::<AsteroidDefs>().insert_resource(Rng(123)).add_message::<AsteroidSetup>().add_systems(Update, asteroid_motion);
+    app.init_resource::<Time>()
+        .init_resource::<AsteroidDefs>()
+        .insert_resource(SimRng::new(123))
+        .init_resource::<crate::scenario::Difficulty>()
+        .add_message::<AsteroidSetup>()
+        .add_systems(Update, asteroid_motion);
     let defs = app.world().resource::<AsteroidDefs>();
     let a = Asteroid::new("Asteroid_Large", "Asteroid Belt", defs).unwrap();
     let b = Asteroid::new("Asteroid_Med", "Montressor Asteroids", defs).unwrap();
@@ -199,7 +204,7 @@ fn a_rock_a_ship_touched_leaves_its_belt_and_keeps_a_quarter_of_the_centre_dista
 #[test]
 fn the_belt_system_runs_controller_then_physics() {
     let mut app = App::new();
-    app.init_resource::<Time>().insert_resource(Rng(1)).add_message::<AsteroidSetup>().add_systems(Update, asteroid_motion);
+    app.init_resource::<Time>().insert_resource(SimRng::new(1)).init_resource::<crate::scenario::Difficulty>().add_message::<AsteroidSetup>().add_systems(Update, asteroid_motion);
     let mut r = rock(100.0);
     (r.speed, r.path) = (10.0, vec![Vec3::X * 1000.0, Vec3::X * 2000.0]);
     let e = app.world_mut().spawn((r, Transform::default())).id();
@@ -214,7 +219,12 @@ fn the_belt_system_runs_controller_then_physics() {
 #[ignore = "needs imported assets"]
 fn asteroid_setup_replaces_contact_drift_without_erasing_it_each_tick() {
     let mut app = App::new();
-    app.init_resource::<Time>().init_resource::<AsteroidDefs>().insert_resource(Rng(123)).add_message::<AsteroidSetup>().add_systems(Update, asteroid_motion);
+    app.init_resource::<Time>()
+        .init_resource::<AsteroidDefs>()
+        .insert_resource(SimRng::new(123))
+        .init_resource::<crate::scenario::Difficulty>()
+        .add_message::<AsteroidSetup>()
+        .add_systems(Update, asteroid_motion);
     let rock = Asteroid::new("Asteroid_Small", "rocks", app.world().resource::<AsteroidDefs>()).unwrap();
     let e = app.world_mut().spawn((rock, Transform::default())).id();
     app.world_mut().get_mut::<crate::collision::Drift>(e).unwrap().0 = Vec3::X * 6.0;
@@ -235,7 +245,8 @@ fn asteroid_breakup_is_once_only_recursive_and_cleans_target() {
         .init_resource::<crate::collision::Shapes>()
         .init_resource::<FxLib>()
         .init_resource::<Target>()
-        .insert_resource(Rng(123))
+        .insert_resource(SimRng::new(123))
+        .init_resource::<crate::scenario::Difficulty>()
         .add_message::<Destroyed>()
         .add_message::<Detonate>()
         .add_message::<Shoot>()

@@ -169,6 +169,7 @@ pub(super) fn ambient_effect<'a>(kind: &str, effect: &'a str) -> Option<&'a str>
 /// start vectors. Without a map: the test arena (player at the origin, enemies on a ring).
 pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Library, fxl: &fx::FxLib, shapes: &collision::Shapes, asteroids: &data::AsteroidDefs, cfg: &Config) {
     info!("battle start: map={:?} player={} allies={:?} enemies={:?}", cfg.map, cfg.player, cfg.allies, cfg.enemies);
+    commands.queue(super::reset_sim);
     commands.queue(resume_scenario);
     commands.insert_resource(crate::loading::Loading::default());
     commands.remove_resource::<crate::rules::skirmish::SkirmishScript>();

@@ -61,7 +61,7 @@ fn lifeboats(
     assets: Res<AssetServer>,
     lib: Res<Library>,
     fxl: Res<crate::fx::FxLib>,
-    mut rng: ResMut<crate::combat::Rng>,
+    mut rng: ResMut<crate::combat::SimRng>,
     mut lost: MessageReader<ShipLost>,
     mut sfx: MessageWriter<crate::audio::Sfx>,
     mission: Option<ResMut<Mission>>,

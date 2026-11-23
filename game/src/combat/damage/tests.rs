@@ -144,7 +144,7 @@ mod fire_tests {
         let class = &lib.classes[lib.index("Ship_Navy_Cutter")];
         let lost = |victim: Side, p: f32| {
             let mut hp = Health::new(class);
-            fraction_hit(class, &mut hp, p, victim, 0.0);
+            fraction_hit(class, &mut hp, p, victim, 0.0, crate::scenario::Difficulty::default().0);
             (class.sections.iter().map(|s| s.hp).sum::<f32>() - hp.sections.iter().sum::<f32>(), hp.core)
         };
         let (enemy, core) = lost(Side::Enemy, 0.5);
@@ -160,7 +160,7 @@ mod fire_tests {
         let lib = Library::load(crate::assets_dir());
         let class = lib.index("Ship_Navy_Cutter");
         let mut app = App::new();
-        app.init_resource::<Time>().add_systems(Update, fires);
+        app.init_resource::<Time>().init_resource::<crate::scenario::Difficulty>().add_systems(Update, fires);
         let mut hp = Health::new(&lib.classes[class]);
         hp.sections[0] = 0.0;
         let ship = crate::Ship { heading: 0.0, ..crate::Ship::new(class, crate::Side::Enemy) };

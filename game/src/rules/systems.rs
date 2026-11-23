@@ -56,6 +56,7 @@ struct Extra<'w, 's> {
     land: Query<'w, 's, (&'static crate::collision::Obstacle, Option<&'static Visibility>), (Without<Ship>, Without<Asteroid>, Without<crate::environment::SpaceAnimal>)>,
     /// Whether the dev autopilot last ordered its fleet to run (formation held, cease fire).
     fleet_fleeing: Local<'s, bool>,
+    difficulty: Option<Res<'w, crate::scenario::Difficulty>>,
     /// The dev autopilot's memory between frames.
     pilot: Local<'s, autopilot::State>,
     board: MessageWriter<'w, crate::boarding::BoardMsg>,
@@ -130,12 +131,19 @@ pub struct RuleShip {
     pub visibility: &'static mut Visibility,
     /// The human's own ship.
     pub primary: Has<PlayerShip>,
+    /// Its interpolation: rules see the simulation pose (`RuleShip::sim_pos`), not the drawn one.
+    pub interp: Option<&'static crate::interpolate::Interp>,
+}
+
+/// The simulation position of a ship whose drawn pose is `tf` (interpolated between ticks when it has an `Interp`).
+pub fn sim_pos(tf: &Transform, interp: Option<&crate::interpolate::Interp>) -> Vec3 {
+    interp.map_or(tf.translation, |i| i.sim_pose(tf).translation)
 }
 
 fn units(ships: &Query<RuleShip>, lib: &Library) -> Vec<Unit> {
     ships
         .iter()
-        .map(|RuleShipReadOnlyItem { entity: e, ship, transform: tf, health: h, mission: m, primary, .. }| {
+        .map(|RuleShipReadOnlyItem { entity: e, ship, transform: tf, health: h, mission: m, primary, interp, .. }| {
             let class = &lib.classes[ship.class];
             let secs =
                 if h.sections.is_empty() { 0.0 } else { h.sections.iter().zip(&class.sections).map(|(x, c)| 1.0 - x / c.hp.max(1.0)).sum::<f32>() / h.sections.len() as f32 };
@@ -148,7 +156,7 @@ fn units(ships: &Query<RuleShip>, lib: &Library) -> Vec<Unit> {
                 damage: (1.0 - h.core / class.core_hp).max(secs).clamp(0.0, 1.0),
                 flag: m.flag.clone(),
                 attack: m.attack.clone(),
-                ..Unit::new(e, m.id, tf.translation)
+                ..Unit::new(e, m.id, sim_pos(tf, interp))
             }
         })
         .collect()
@@ -273,6 +281,7 @@ fn apply_fx(
         fxlib: extra.fxlib.as_deref(),
         sfx: extra.sfx.as_deref_mut(),
         toggles: extra.toggles.as_deref_mut(),
+        difficulty: extra.difficulty.as_deref().copied().unwrap_or_default().0,
         orbit: Some(orbit),
         sides: None,
         mines: None,

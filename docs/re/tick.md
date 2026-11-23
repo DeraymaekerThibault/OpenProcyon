@@ -93,6 +93,15 @@ There are two generators, both the 32-bit linear one (state x 1664525 + 10139042
 So a cosmetic draw never changes a battle roll except through the few listed above. The remake keeps a combat generator and a separate effects generator,
 which is the same split; its generator and seeding differ, so the sequences are not the original's. *Read from code only.*
 
+The remake reseeds its battle generator (`combat::SimRng`) at every battle start, a restart included, from `--seed N` / `PROCYON_SEED`
+or a fixed default, and logs the seed (`battle seed ...`), so the same seed and input replay the same battle. The original's seed comes
+from the map (PROVISIONAL: the remake uses one default for every map). Nebula storm and cloak-spotting rolls draw from their own named
+streams, as they had private generators before; boarding draws from the battle generator, as in the original. Objects carry their
+creation number within their kind (`scenario::SpawnIndex`, from 0 each battle), and systems whose rolls or tie-breaks depend on order
+(shells, blasts, beams, crew repair, captains, cloak watchers) go in that order; per-ship fixed draws (attack throttle, leadership,
+explore quadrant) and the think timer's start delay come from it instead of entity ids. The break-up timer and the removal at its end
+run on the tick, and the battle reads the difficulty as it stood at battle start (`scenario::Difficulty`).
+
 ## Unmeasured
 
 - The out-of-map test is read from code only. *Measured:* removal one tick late (457 of 460 shells were queued in their last tick in the world and gone the next)

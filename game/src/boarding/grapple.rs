@@ -158,7 +158,7 @@ pub(super) fn hook_flight(
     mut commands: Commands,
     time: Res<Time>,
     assets: Option<Res<AssetServer>>,
-    mut rng: ResMut<Rng>,
+    mut rng: ResMut<SimRng>,
     mut sfx: MessageWriter<Sfx>,
     mut hooks: Query<&mut Grapple>,
     ships: Query<&Transform>,

@@ -94,12 +94,10 @@ pub fn fallback_posts(ship: &crate::Ship, boarding: Option<&crate::boarding::Boa
 /// Leadership (docs/re/crew.md): each ship draws two chances in [0, 1) once; every crewman but the captain and first mate gains 0.1
 /// skill when the captain's Leadership (0..1) beats the first, and 0.05 when the first mate's beats the second. The saved speed and
 /// rudder factors always carry both (`skill_factor`); this is for gunnery, repairs, fire-fighting and boarding.
-pub fn leadership_bonus(e: Entity, posts: &CrewPosts) -> f32 {
+pub fn leadership_bonus(key: crate::scenario::SpawnIndex, posts: &CrewPosts) -> f32 {
     let lead = |role: usize| posts.0[role].first().and_then(|id| ability(id, "leadership")).unwrap_or(0.0);
-    // PROVISIONAL: fixed per-ship draws from the entity, not the original's random generator.
-    let h = e.to_bits().wrapping_mul(0x9E37_79B9_7F4A_7C15);
-    let u = |shift: u32| ((h >> shift) & 0xFF_FFFF) as f32 / (1u32 << 24) as f32;
-    (if lead(1) > u(40) { 0.1 } else { 0.0 }) + if lead(2) > u(16) { 0.05 } else { 0.0 }
+    // PROVISIONAL: fixed per-ship draws from its spawn number, not the original's random generator.
+    (if lead(1) > key.draw(1) { 0.1 } else { 0.0 }) + if lead(2) > key.draw(2) { 0.05 } else { 0.0 }
 }
 
 /// One crewman's factor on top speed (engineering) or rudder torque (navigation), relative to a rating-1 hand: retail saves

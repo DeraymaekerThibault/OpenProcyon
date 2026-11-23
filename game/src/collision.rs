@@ -461,7 +461,7 @@ pub fn sail(
     boats: Query<(), With<crate::lifeboats::Lifeboat>>,
     mut ships: Query<(Entity, &mut crate::Ship, &mut Transform, &crate::Health, &mut Drift, Option<&crate::docking::Docker>)>,
     mut sfx: Option<ResMut<Messages<crate::audio::Sfx>>>,
-    mut rng: Option<ResMut<crate::combat::Rng>>,
+    mut rng: Option<ResMut<crate::combat::SimRng>>,
     flags: Query<(Has<Pinned>, Has<Ghost>)>,
     currents: Query<&crate::environment::Current>,
     mut rams: Option<ResMut<Messages<Ram>>>,

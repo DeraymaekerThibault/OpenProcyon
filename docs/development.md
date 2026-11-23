@@ -43,7 +43,9 @@ Git Bash (`GIT_BASH=<path>` if it is not in the default place), and the screensh
    `PROCYON_TRACE=<file.csv>` (`smoke/trace.rs`) logs every ship (position, velocity, heading, section hit points) and every shell
    once per simulation step, in game axes: the table to lay beside a measurement of the original when a battle plays out
    differently (how close ships come, how often they fire and hit). Stage the same start points with a small mod that replaces
-   the map's `map.json`.
+   the map's `map.json`. Ships and shells are numbered by creation order (`SpawnIndex`) and `gt` restarts at 0 when a battle restarts,
+   so two runs compare row by row. Every battle logs `battle seed N`; `--seed N` or `PROCYON_SEED=N` replays it (`combat::SimRng`,
+   docs/re/tick.md).
    Two kinds of scenario: a map with the `--ship/--allies/--enemies` shortcut (the human's own fleet; no lobby), and a lobby
    scenario (`--lobby "map=border_dispute;points=1000;limit=10;slots=human,7*computer"`, `menu/lobby_scenario.rs`) that sets the
    skirmish lobby up through the same model as its pull-downs, Auto Assign and Launch button. Only lobby scenarios play allied

@@ -49,6 +49,7 @@ fn a_bolt_that_finds_no_ship_is_announced_with_its_segment_and_changes_nothing_e
     app.insert_resource(lib)
         .init_resource::<Time>()
         .init_resource::<StormShift>()
+        .init_resource::<crate::combat::SimRng>()
         .insert_resource(WeatherDamage(serde_json::from_value(crate::data::read_json(&assets_dir().join("data/nebula.json"))).unwrap()))
         .insert_resource(Storms(serde_json::json!([{
             "name":"test storm", "polygon":[[-1000.0,-1000.0],[1000.0,-1000.0],[1000.0,1000.0],[-1000.0,1000.0]],
@@ -86,6 +87,7 @@ fn thirty_seconds_in_a_storm_does_not_guarantee_lightning_damage() {
     app.insert_resource(lib)
         .init_resource::<Time>()
         .init_resource::<StormShift>()
+        .init_resource::<crate::combat::SimRng>()
         .insert_resource(WeatherDamage(serde_json::from_value(crate::data::read_json(&assets_dir().join("data/nebula.json"))).unwrap()))
         .insert_resource(Storms(serde_json::json!([{
             "name":"test storm", "polygon":[[-1000.0,-1000.0],[1000.0,-1000.0],[1000.0,1000.0],[-1000.0,1000.0]],

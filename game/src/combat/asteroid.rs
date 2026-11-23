@@ -104,7 +104,7 @@ impl PathMode {
 pub fn asteroid_motion(
     time: Res<Time>,
     mut setups: MessageReader<AsteroidSetup>,
-    mut rng: ResMut<Rng>,
+    mut rng: ResMut<SimRng>,
     mut rocks: Query<(Entity, &mut Asteroid, &mut Transform, &mut crate::collision::Drift)>,
 ) {
     for setup in setups.read() {
@@ -290,7 +290,7 @@ pub fn asteroid_deaths(
     shapes: Res<crate::collision::Shapes>,
     assets: Res<AssetServer>,
     fxl: Res<FxLib>,
-    mut rng: ResMut<Rng>,
+    mut rng: ResMut<SimRng>,
     mut sfx: MessageWriter<Sfx>,
     mut target: ResMut<Target>,
 ) {
