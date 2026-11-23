@@ -103,7 +103,7 @@ pub const DEBRIS_FALL: f32 = 1.5;
 pub const DEBRIS_SPIN: f32 = 0.5;
 pub const DEBRIS_LIFE: f32 = 10.0;
 /// A piece's smoke trail stops after this long (the smoke already out fades on its own), so a tumbling piece does not smoulder
-/// for its whole fall. Visual refinement, not retail.
+/// for its whole fall. Not retail: a visual refinement.
 pub const DEBRIS_SMOKE_TIME: f32 = 3.0;
 
 /// The smoke trail effect of a debris piece.

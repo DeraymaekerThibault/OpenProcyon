@@ -1123,7 +1123,7 @@ fn mission_ten_tow_is_requested_not_linked_and_ends_with_the_tower() {
     assert!(s.tows().is_empty(), "a destroyed tower drops its tow");
 }
 
-/// Debug launch option `--fire-rule` (not retail): the named rules' actions run after the world-initialise rules, in the order given,
+/// Debug launch option `--fire-rule` (`campaign.rs`): the named rules' actions run after the world-initialise rules, in the order given,
 /// the rule counts as having run, and its own conditions do not make it fire a second time. An unknown name does no harm.
 #[test]
 fn fire_rule_runs_named_rules_at_start_once_and_in_order() {

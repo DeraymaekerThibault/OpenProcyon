@@ -18,7 +18,8 @@ Run from the checkout (or worktree) root. Details: `AGENTS.md`, `docs/developmen
 | all smokes | `make smokes ARGS="--jobs 4"` | Every documented smoke, in parallel. |
 | a picture | `tools/shot.sh local/x.png --shot-frame 300 [--script S] [--map red_rover]` | One 1280x720 screenshot, fails on a missing or black one. Prefix `WAYLAND_DISPLAY=` on Wayland if black. |
 | whole-battle sanity | `make battles [ARGS=ambush]` | `tools.battle_check`: short fixed-fleet skirmishes, fails when one stops behaving like a battle. |
-| "compare against main" (behaviour) | `PROCYON_TRACE=local/new.csv` on this checkout, again on main's binary, then diff the CSVs | Per-ship position/velocity/heading/hit-point log and shells (`docs/development.md`). A difference becomes a board row, not more runs. |
+| "compare against main" (behaviour) | `PROCYON_TRACE=local/new.csv` on this checkout, again on main's binary, then `python3 -m tools.tracediff main.csv new.csv` | Per-ship position/velocity/heading/hit-point log and shells (`docs/development.md`). A difference becomes a board row, not more runs. |
+| "did my refactor change anything?" | simulation refactor: same seed, `--fixed-step`, `PROCYON_TRACE` on both builds, then `python3 -m tools.tracediff A.csv B.csv`; drawing change: `python3 -m tools.visdiff` | tracediff prints `same` or the first differing row; visdiff renders fixed-step scenes from the merge base and this checkout and prints `same` or `CHANGED` per scene (diffs in `local/visdiff/`). |
 | "compare against main" (assets) | `python3 -m tools.compare_assets <dirA> <dirB>` | Compares two imports by meaning (JSON values, image pixels). Re-import into a scratch folder after an exporter change. |
 | format | `make fmt` | `cargo fmt`, `ruff format`, `ruff check --fix` over everything. A hook already formats the one file you edit. |
 

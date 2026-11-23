@@ -428,7 +428,7 @@ fn describe_default(f: &Field) -> String {
     }
 }
 
-/// The engine-added mission keys (not retail): a task's `complete_when` / `fail_when` / `required`, and `victory`,
+/// Not retail: the engine-added mission keys, a task's `complete_when` / `fail_when` / `required`, and `victory`,
 /// `victory_message`, `defeat_message`.
 fn check_tasks_and_victory(c: &mut Checker, mission: &Value) {
     let mut required = false;

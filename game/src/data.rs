@@ -258,11 +258,18 @@ pub struct GunDef {
     pub lob: Option<f32>,
     /// WOT 'Can Be Fired While Cloaked' (torpedoes and gatlings).
     pub cloak_fire: bool,
-    /// Not in the original: a mod gun with a `beam` block charges, then holds a beam instead of firing shells (`combat/beam.rs`).
+    /// Not retail: a mod gun with a `beam` block charges, then holds a beam instead of firing shells (`combat/beam.rs`).
     pub beam: Option<BeamDef>,
 }
 
-/// A beam gun's `beam` block in `guns.json` (not retail; for mods). The gun's bullet supplies the damage table (one tick's damage)
+/// Not retail: the `ship.json` keys the engine adds (no retail counterpart; `docs/data-format.md` "ship.json keys", Source
+/// `engine`). Every other key the ship loader reads carries a retail value. `tests/test_extensions.py` keeps this list, the loader
+/// and the docs in step.
+pub const ENGINE_SHIP_KEYS: &[&str] = &["extends", "model", "geometry", "fuel"];
+/// Not retail: the gun keys of `guns.json` the engine adds (`beam`, a beam gun). Checked like `ENGINE_SHIP_KEYS`.
+pub const ENGINE_GUN_KEYS: &[&str] = &["beam"];
+
+/// Not retail: a beam gun's `beam` block in `guns.json` (for mods). The gun's bullet supplies the damage table (one tick's damage)
 /// and the impact effect; `SoundName` plays once when the charge starts, so one sound can carry the charge and the beam.
 #[derive(Clone, Debug, PartialEq)]
 pub struct BeamDef {
@@ -440,7 +447,7 @@ pub struct Class {
     pub repair_fx: Option<String>,
     /// WOT 'Is Cloakable' (only the Procyon submersible).
     pub cloakable: bool,
-    /// ship.json `fuel`: the hull burns fuel, not wind, so a nebula's energy drain (`cloud.drain`) does not slow it (mods: the Procyon Hunter).
+    /// Not retail: ship.json `fuel`, the hull burns fuel, not wind, so a nebula's energy drain (`cloud.drain`) does not slow it (mods: the Procyon Hunter).
     pub fuel: bool,
     /// The cloak effects' mount points (Cloaking / DeCloaking, FullyCloaked): translation and rotation in hull space.
     pub cloak_points: Option<[(Vec3, Quat); 2]>,
