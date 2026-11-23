@@ -747,3 +747,34 @@ fn the_developer_console_option_is_off_by_default_listed_on_display_and_saved() 
     assert!(s.console, "restoring the display defaults leaves it alone");
     assert!(!s.rows(false).iter().any(|r| r.0 == Setting::Console), "not on the Sound screen");
 }
+
+/// #545: the views redraw only when `MenuModel::key` changes, so every flag a view draws from must be in it.
+#[test]
+#[ignore = "needs imported assets"]
+fn dialog_and_panel_flags_change_the_menu_key() {
+    use bevy::ecs::system::SystemState;
+    let mut world = World::new();
+    world.insert_resource(skirmish("red_rover"));
+    world.insert_resource(Library::load(assets_dir()));
+    world.insert_resource(State::new(Screen::Lobby));
+    world.insert_resource(ModList::from(vec![]));
+    world.init_resource::<InGame>();
+    world.init_resource::<SaveUi>();
+    world.init_resource::<Bindings>();
+    world.init_resource::<CtrlUi>();
+    world.init_resource::<Settings>();
+    world.init_resource::<MissionList>();
+    world.init_resource::<crate::stats::GameStats>();
+    world.insert_resource(crate::scenario::Outcome::Playing);
+    world.init_resource::<crate::scenario::EndMessage>();
+    let window = Window::default();
+    let mut model: SystemState<MenuModel> = SystemState::new(&mut world);
+    let mut last = model.get(&world).unwrap().key(&window);
+    let flips: [fn(&mut Skirmish); 3] = [|sk| sk.map_info = true, |sk| sk.arms_open = true, |sk| sk.arms_tab = true];
+    for (i, flip) in flips.into_iter().enumerate() {
+        flip(&mut world.resource_mut::<Skirmish>());
+        let key = model.get(&world).unwrap().key(&window);
+        assert_ne!(key, last, "flag {i} must change the key, or the screen does not redraw");
+        last = key;
+    }
+}
