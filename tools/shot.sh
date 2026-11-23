@@ -8,6 +8,8 @@ out=$(realpath -m "$1"); shift
 root="$(cd "$(dirname "$0")/.." && pwd)"
 # The import every tool uses (tools/import_assets.py find_assets: a fresh linked worktree uses the main checkout's).
 [ -n "${PROCYON_ASSETS:-}" ] || { a=$(cd "$root" && python3 -c 'from tools.import_assets import find_assets; print(find_assets() or "")'); [ -z "$a" ] || export PROCYON_ASSETS="$a"; }
+# This checkout's own mod overlay (the default sits next to the assets, shared by every worktree using the main import).
+export PROCYON_OVERLAY="${PROCYON_OVERLAY:-$root/local/tool-overlay}"
 # A scratch XDG_DATA_HOME (after the asset lookup, which may use the per-user import): the player's key bindings, options and
 # saves neither change the run nor get changed by it.
 export XDG_DATA_HOME; XDG_DATA_HOME=$(mktemp -d); trap 'rm -rf "$XDG_DATA_HOME"' EXIT
