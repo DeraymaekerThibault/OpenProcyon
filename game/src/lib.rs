@@ -358,6 +358,9 @@ pub fn run(view: fn(&mut App), setup_view: fn(&mut App)) {
                 .run_if(in_state(menu::Screen::Battle))
                 .run_if(menu::overlay_closed),
         )
+        // The script frame count comes before Update, so the scripts and pictures there each see every frame number once (#590);
+        // `loading::wait` runs before it, so the frame a battle finishes loading counts (else a script step repeats: R restarts again).
+        .add_systems(PreUpdate, screenshot)
         .add_systems(OnEnter(menu::Screen::Battle), enter_battle)
         .add_systems(OnExit(menu::Screen::Battle), scenario::reset_fleets)
         .add_systems(
@@ -380,7 +383,6 @@ pub fn run(view: fn(&mut App), setup_view: fn(&mut App)) {
                     .chain()
                     .run_if(in_state(menu::Screen::Battle))
                     .run_if(menu::overlay_closed),
-                screenshot,
                 view::hd_sky,
                 view::screenshot_key,
                 view::focus_projectile.run_if(in_state(menu::Screen::Battle)),
