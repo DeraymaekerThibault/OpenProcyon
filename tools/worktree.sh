@@ -26,6 +26,16 @@ new() {
         [ -d "$seed/$p" ] || { say "no $seed/$p to copy: the first $p build here is cold"; continue; }
         cp -a --reflink=auto "$seed/$p" "$wt/game/target/"
         rm -rf "$wt/game/target/$p/incremental"
+        # A seed built before a profile or dependency change makes the first build here mostly cold.
+        for f in Cargo.toml Cargo.lock; do
+            if [ -f "$main/game/$f" ] && [ -z "$(find "$seed/$p/deps" -maxdepth 1 -newer "$main/game/$f" -print -quit 2>/dev/null)" ]; then
+                say "warning: the $p build in $seed is older than game/$f: run tools/check.sh in the main checkout first"
+            fi
+        done
+    done
+    for f in Cargo.toml Cargo.lock; do
+        [ ! -f "$main/game/$f" ] || cmp -s "$main/game/$f" "$wt/game/$f" ||
+            say "warning: game/$f here differs from the main checkout's, whose build was copied (pull there and rebuild)"
     done
     say "copied the build in $((SECONDS - t))s: $(du -sh "$wt/game/target" | cut -f1) (logical size)"
     [ -e "$wt/.venv" ] || [ ! -d "$main/.venv" ] || ln -s "$main/.venv" "$wt/.venv"
