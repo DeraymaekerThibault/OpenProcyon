@@ -569,3 +569,22 @@ fn without_a_mission_view_commands_run_and_rule_commands_say_so() {
         assert!(o.rejected && o.view.is_empty() && !o.restart, "{line} must not run");
     }
 }
+
+#[test]
+fn the_panel_text_shows_the_window_hints_and_the_typed_line() {
+    let mut c = Console::new(true);
+    c.line = "go".into();
+    assert_eq!(c.display(), "\n> go_", "empty output: just the prompt");
+    for i in 0..SHOWN + 4 {
+        c.say(format!("l{i}"));
+    }
+    let text = c.display();
+    assert!(text.starts_with("^ 4 more above"), "{text}");
+    assert!(text.ends_with(&format!("l{}\n> go_", SHOWN + 3)) && !text.contains("more below"), "following the output shows the newest line");
+    c.scroll_by(2);
+    let text = c.display();
+    assert!(text.starts_with("^ 2 more above") && text.contains("v 2 more below") && !text.contains(&format!("l{}", SHOWN + 3)), "{text}");
+    c.scroll_top();
+    let text = c.display();
+    assert!(!text.contains("more above") && text.starts_with("l0\n") && text.contains("v 4 more below"), "{text}");
+}

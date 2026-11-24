@@ -101,6 +101,21 @@ impl Console {
     pub fn scroll_by(&mut self, lines: isize) {
         self.scroll = self.scroll.saturating_add_signed(lines).min(self.max_scroll());
     }
+    /// The panel's text: the visible window of the output with its "more above / below" hints, then the line being typed.
+    pub fn display(&self) -> String {
+        let end = self.log.len().saturating_sub(self.scroll);
+        let start = end.saturating_sub(SHOWN);
+        let mut shown = String::new();
+        if start > 0 {
+            shown.push_str(&format!("^ {start} more above (PageUp, Ctrl+Home)\n"));
+        }
+        shown.push_str(&self.log[start..end].join("\n"));
+        if self.scroll > 0 {
+            shown.push_str(&format!("\nv {} more below (PageDown, Ctrl+End)", self.scroll));
+        }
+        shown.push_str(&format!("\n> {}_", self.line));
+        shown
+    }
     pub fn scroll_top(&mut self) {
         self.scroll = self.max_scroll();
     }
