@@ -1203,3 +1203,24 @@ fn kill_kinds_alliances_and_hold_fire_are_typed_and_asset_free() {
     assert_eq!(s.captured.len(), 1);
     assert_eq!(s.destroyed[0].0, "Blues");
 }
+
+/// docs/re/campaign.md: a stopped timer tests false for every comparison; Equal To means "at least".
+#[test]
+fn a_stopped_timer_tests_false_and_equal_to_means_at_least() {
+    let data = serde_json::json!({"rules": [], "ships": [], "volumes": null, "environment": {}});
+    let mut s = Script::new(&data, Value::Null);
+    let cond = |eq: &str, n: f32| serde_json::json!({"Type": "Timer Condition", "Timer Name": "T", "Equivalence": eq, "Time in seconds": n});
+    let mut out = vec![];
+    s.act(&serde_json::json!({"Type": "Start Timer", "Timer Name": "T"}), &[], &mut out, "t");
+    s.step(&[], 3.0, false);
+    assert!(s.cond(&cond("Greater Than", 2.0), &[], false));
+    assert!(s.cond(&cond("Less Than", 4.0), &[], false));
+    assert!(s.cond(&cond("Equal To", 2.0), &[], false), "3 s reached 2 s");
+    assert!(!s.cond(&cond("Equal To", 4.0), &[], false));
+    s.act(&serde_json::json!({"Type": "Stop Timer", "Timer Name": "T"}), &[], &mut out, "t");
+    for eq in ["Greater Than", "Less Than", "Equal To"] {
+        assert!(!s.cond(&cond(eq, 2.0), &[], false), "{eq} on a stopped timer");
+    }
+    s.act(&serde_json::json!({"Type": "Start Timer", "Timer Name": "T"}), &[], &mut out, "t");
+    assert!(s.cond(&cond("Less Than", 1.0), &[], false), "restarted from 0");
+}
