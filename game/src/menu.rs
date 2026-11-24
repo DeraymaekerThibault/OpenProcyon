@@ -6,6 +6,7 @@
 mod lobby_scenario;
 mod missions;
 mod mods;
+mod preview;
 mod saves;
 mod scroll;
 mod settings;
@@ -13,6 +14,7 @@ mod skirmish;
 pub use lobby_scenario::*;
 pub use missions::*;
 pub use mods::*;
+pub use preview::*;
 pub use saves::*;
 pub use scroll::*;
 pub use settings::*;
