@@ -585,6 +585,50 @@ fn retexture_models(root: &Path, models: &BTreeSet<PathBuf>, images: &HashMap<St
     }
 }
 
+/// How a mod file combines with what the layers below it left at its path (docs/modding.md "What a mod can change").
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MergeRule {
+    /// `mod.json`: read for the mod's details, never placed.
+    Meta,
+    /// One of [`MERGED`]: objects combine key by key, arrays and scalars replace.
+    Merged,
+    /// A `.json` file with `"extends"`: merged over its parent ([`extends_parent`]), then `set` pointers; `extends` and `set` dropped.
+    Extends,
+    /// `textures/<retail texture name>.png`: swapped into every model that uses that texture, not placed as a file.
+    Texture,
+    /// Anything else: the file replaces the one below it whole.
+    Replaced,
+}
+
+/// The rule for the mod file `rel` (relative to the mod folder, `/` separators). `doc` is the file's JSON when it is a `.json` file
+/// (whether it holds `"extends"` decides between [`MergeRule::Extends`] and [`MergeRule::Replaced`]); `None` reads as no `extends`.
+/// The same decision the overlay makes when it lays the file down.
+pub fn merge_rule(rel: &str, doc: Option<&Value>) -> MergeRule {
+    if rel == "mod.json" {
+        MergeRule::Meta
+    } else if MERGED.contains(&rel) {
+        MergeRule::Merged
+    } else if rel.ends_with(".json") && doc.is_some_and(|v| v.get("extends").is_some()) {
+        MergeRule::Extends
+    } else if texture_override(Path::new(rel)).is_some() {
+        MergeRule::Texture
+    } else {
+        MergeRule::Replaced
+    }
+}
+
+/// The file (relative to the asset root, `/` separators) that `rel` with `"extends": parent` is laid over: for `ships/<id>/<file>`
+/// and `maps/<id>/<file>` the same file of ship or map `parent`, for any other file the sibling `<parent>.json`. `None` when `rel` has
+/// no file name.
+pub fn extends_parent(rel: &str, parent: &str) -> Option<String> {
+    let parts: Vec<&str> = rel.split('/').collect();
+    match parts.as_slice() {
+        [top @ ("ships" | "maps"), _, file] => Some(format!("{top}/{parent}/{file}")),
+        [dirs @ .., file] if !file.is_empty() => Some(dirs.iter().map(|d| format!("{d}/")).collect::<String>() + &format!("{parent}.json")),
+        _ => None,
+    }
+}
+
 /// Puts one mod file into the overlay at `to`. An `Err` leaves the base file in place; the caller logs it and goes on.
 /// `doc`: the file's parsed JSON, for a `.json` file.
 fn apply_file(name: &str, from: &Path, to: &Path, base: &Path, doc: Option<&Value>) -> Result<Applied, String> {
@@ -613,12 +657,9 @@ fn apply_file(name: &str, from: &Path, to: &Path, base: &Path, doc: Option<&Valu
     }
     if let (true, Some(v)) = (name.ends_with(".json"), doc.filter(|v| v.get("extends").is_some())) {
         let parent = v["extends"].as_str().unwrap_or_default();
-        // ships/<id>/ship.json extends ships/<parent>/ship.json; other files extend a sibling <parent>.json.
-        let parent_path = match name.split('/').count() == 3 && (name.starts_with("ships/") || name.starts_with("maps/")) {
-            true => to.parent().and_then(Path::parent).zip(to.file_name()).map(|(d, f)| d.join(parent).join(f)),
-            false => Some(to.with_file_name(format!("{parent}.json"))),
-        }
-        .ok_or_else(|| format!("cannot place the file extended by '{parent}'"))?;
+        // The overlay's root is `to` minus `name`; the parent is found there (`extends_parent` has the rule).
+        let root = name.split('/').try_fold(to, |p, _| p.parent()).ok_or_else(|| format!("cannot place the file extended by '{parent}'"))?;
+        let parent_path = extends_parent(name, parent).map(|rel| root.join(rel)).ok_or_else(|| format!("cannot place the file extended by '{parent}'"))?;
         if !parent_path.exists() {
             return Err(format!("extends unknown '{parent}' (no {})", parent_path.display()));
         }
@@ -655,6 +696,28 @@ fn apply_file(name: &str, from: &Path, to: &Path, base: &Path, doc: Option<&Valu
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn merge_rule_and_extends_parent_name_the_overlays_own_decisions() {
+        let ext = serde_json::json!({"extends": "P"});
+        assert_eq!(merge_rule("mod.json", None), MergeRule::Meta);
+        assert_eq!(merge_rule("data/weapons/guns.json", Some(&ext)), MergeRule::Merged, "a merged path merges even with extends");
+        assert_eq!(merge_rule("ships/S/ship.json", Some(&ext)), MergeRule::Extends);
+        assert_eq!(merge_rule("ships/S/ship.json", Some(&serde_json::json!({"points": 1}))), MergeRule::Replaced);
+        assert_eq!(merge_rule("ships/S/ship.json", None), MergeRule::Replaced);
+        assert_eq!(merge_rule("textures/Hull_Planks.PNG", None), MergeRule::Texture);
+        assert_eq!(merge_rule("textures/surface/x.png", None), MergeRule::Replaced);
+        assert_eq!(merge_rule("ships/S/model.glb", None), MergeRule::Replaced);
+        for m in MERGED {
+            assert_eq!(merge_rule(m, None), MergeRule::Merged, "{m}");
+        }
+        assert_eq!(extends_parent("ships/New/ship.json", "Ship_Old").as_deref(), Some("ships/Ship_Old/ship.json"));
+        assert_eq!(extends_parent("maps/m2/map.json", "m1").as_deref(), Some("maps/m1/map.json"));
+        assert_eq!(extends_parent("fx/Red_Engine.json", "Engine").as_deref(), Some("fx/Engine.json"));
+        assert_eq!(extends_parent("data/render/look.json", "base").as_deref(), Some("data/render/base.json"));
+        assert_eq!(extends_parent("top.json", "other").as_deref(), Some("other.json"));
+        assert_eq!(extends_parent("ships/S/sub/x.json", "y").as_deref(), Some("ships/S/sub/y.json"), "only depth 3 is by id");
+    }
 
     #[test]
     fn mod_json_new_keys_default_and_read_leniently() {

@@ -11,6 +11,12 @@
 //! - [`rule_schema`]: the mission rule vocabulary as JSON, the same document `--dump-rule-schema` writes.
 //! - [`schemas`]: JSON Schemas of `ship.json`, `guns.json`, `bullets.json`, `data/crew_nodes.json` and `mod.json` (`--dump-schemas <dir>`).
 //! - [`check_mission`] / [`known_names`]: the mission checker behind `--check-mission`, on JSON values in memory.
+//! - [`Finding`]: what the checkers find, located by `path` (printed) and `pointer` (a JSON pointer); [`unknown_key_findings`] gives
+//!   the unknown-key warnings of any document with the nearest known key.
+//! - [`merge_rule`] / [`extends_parent`] / [`MERGED`]: how a mod file combines with the overlay below it, and what an `extends` file
+//!   is laid over.
+//! - [`game_to_bevy`] / [`bevy_to_game`] / [`mount_rotation`] / [`mount_rot`]: the files' axes and `rot` triples as the loader reads them.
+//! - [`crew_kind`] / [`CREW_KINDS`] / [`CREW_NODE`]: crew node names, and the kind of a model's crew nodes in `data::derive::Facts`.
 //!
 //! Shared code: no UI and no view imports.
 
@@ -20,12 +26,12 @@ use serde_json::Value;
 
 mod check_mod;
 mod json;
-pub use check_mod::{check_mod, check_mod_with, unknown_keys};
+pub use check_mod::{check_mod, check_mod_with, unknown_key_findings, unknown_keys};
 pub use json::to_json_string;
 
 pub use crate::data::DataError;
-pub use crate::modding::{ModEntry, ModReport};
-pub use crate::rules::check::{Finding, Level, Problem, defined_names};
+pub use crate::modding::{MERGED, MergeRule, ModEntry, ModReport, extends_parent, merge_rule};
+pub use crate::rules::check::{Finding, JsonPath, Level, Problem, Segment, defined_names};
 
 /// The version of this engine (the crate version).
 pub const ENGINE_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -116,6 +122,32 @@ fn strip_required(node: &mut Value) {
 pub fn check_mission(mission: &Value, map: &Value, media: &Value, skirmish: bool) -> Vec<Problem> {
     crate::rules::check::check_with(mission, map, media, skirmish)
 }
+
+/// A point in game axes (x starboard, y forward, z up), as the files hold it, to Bevy's axes (x, z, -y): what the loader does with
+/// every `pos` (`data::conv`).
+pub fn game_to_bevy(p: [f64; 3]) -> bevy::math::Vec3 {
+    crate::data::conv(p[0] as f32, p[1] as f32, p[2] as f32)
+}
+
+/// The inverse of [`game_to_bevy`]: a Bevy-axes vector as the `[x, y, z]` a file holds.
+pub fn bevy_to_game(v: bevy::math::Vec3) -> [f64; 3] {
+    [v.x as f64, -v.z as f64, v.y as f64]
+}
+
+/// A `rot` triple of a gun mount or a crew node (`ship.json`), as the rotation the loader gives the node (Bevy axes).
+pub fn mount_rotation(rot: [f64; 3]) -> bevy::math::Quat {
+    crate::data::mount_rotation(rot)
+}
+
+/// The inverse of [`mount_rotation`]: the `rot` triple that gives `rotation` (each angle in radians; one of the triples when there
+/// are several).
+pub fn mount_rot(rotation: bevy::math::Quat) -> [f64; 3] {
+    let (z, y, x) = rotation.to_euler(bevy::math::EulerRot::ZYX);
+    [y as f64, -z as f64, x as f64]
+}
+
+pub use crate::data::crew_nodes::{CREW_KINDS, crew_kind};
+pub use crate::data::derive::CREW_NODE;
 
 /// Every name a group spec of this mission can mean (groups, players, placed ships, environment); see `rules::check::known_names`.
 pub use crate::rules::check::known_names;
@@ -324,5 +356,40 @@ mod tests {
         let problems = check_mission(&mission, &Value::Null, &Value::Null, false);
         assert!(problems.iter().any(|p| p.level == Level::Error && p.field == "Volume Name" && p.message.contains("unknown volume 'Gate Aera'")), "{problems:#?}");
         assert!(known_names(&mission).contains("Hero"));
+    }
+
+    #[test]
+    fn axes_and_rotations_round_trip_as_the_loader_reads_them() {
+        for p in [[0.0, 0.0, 0.0], [1.0, 2.0, 3.0], [-4.5, 10.25, -0.5]] {
+            assert_eq!(bevy_to_game(game_to_bevy(p)), p);
+            assert_eq!(game_to_bevy(p), crate::data::conv(p[0] as f32, p[1] as f32, p[2] as f32));
+        }
+        // forward in the files is Bevy -z
+        assert_eq!(game_to_bevy([0.0, 1.0, 0.0]), bevy::math::Vec3::NEG_Z);
+        for rot in [[0.0, 0.0, 0.0], [0.5, 0.0, 0.0], [0.3, -0.2, 0.1], [-1.2, 0.4, 0.7]] {
+            let q = mount_rotation(rot);
+            let back = mount_rot(q);
+            assert!(mount_rotation(back).angle_between(q) < 1e-5, "{rot:?} -> {back:?}");
+            for k in 0..3 {
+                assert!((back[k] - rot[k]).abs() < 1e-5, "{rot:?} -> {back:?}");
+            }
+        }
+        assert_eq!(crew_kind("Crew_Walk_P_0"), Some("Walk"));
+        assert_eq!(crew_kind("Crew_Climb_Main_a"), Some("Climb"));
+        assert_eq!(crew_kind("Crew_Dance_1"), None);
+        assert_eq!(crew_kind("Gun_Mount"), None);
+    }
+
+    #[test]
+    fn a_models_crew_nodes_are_points_of_their_own_kind() {
+        use crate::data::derive;
+        let node = |name: &str| serde_json::json!({"name": name, "translation": [1.0, 2.0, 3.0]});
+        // `point_kind` on single nodes: a crew name wins over the name guesses; an explicit kind wins over both
+        assert_eq!(derive::point_kind(&node("Crew_Work_Engine"), "Crew_Work_Engine").as_deref(), Some(CREW_NODE));
+        assert_eq!(derive::point_kind(&node("Crew_Gun_Mount_1"), "Crew_Gun_Mount_1").as_deref(), Some(CREW_NODE));
+        assert_eq!(derive::point_kind(&node("Engine_1"), "Engine_1").as_deref(), Some("EnginePortPlacement"));
+        let tagged = serde_json::json!({"name": "Crew_Walk_A_0", "extras": {"kind": "WakePlacement"}});
+        assert_eq!(derive::point_kind(&tagged, "Crew_Walk_A_0").as_deref(), Some("WakePlacement"));
+        assert_eq!(derive::point_kind(&node("Crew_Dance_1"), "Crew_Dance_1"), None, "not a crew kind");
     }
 }

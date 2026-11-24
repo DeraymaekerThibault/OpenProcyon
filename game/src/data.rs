@@ -10,6 +10,7 @@ pub mod crew_nodes;
 mod ships;
 mod weapons;
 pub use crew::{CrewMember, roster};
+pub(crate) use ships::mount_rotation;
 pub use ships::{derive, load_class, try_load_class};
 pub(crate) use weapons::lenient;
 pub use weapons::try_load_weapons;

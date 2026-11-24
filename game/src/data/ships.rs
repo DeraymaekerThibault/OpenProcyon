@@ -290,7 +290,7 @@ pub(super) fn point(v: [f64; 3]) -> Vec3 {
 }
 
 /// A `rot` triple of a gun (or a crew node) as the node's rotation; preserves the rolled frame of inverted mounts.
-pub(super) fn mount_rotation(rot: [f64; 3]) -> Quat {
+pub(crate) fn mount_rotation(rot: [f64; 3]) -> Quat {
     let r = rot.map(|v| v as f32);
     Quat::from_rotation_z(-r[1]) * Quat::from_rotation_y(r[0]) * Quat::from_rotation_x(r[2])
 }
