@@ -166,7 +166,7 @@ pub(super) struct States {
 struct RadarFace(States);
 
 pub fn plugin(app: &mut App) {
-    app.init_resource::<BarLayouts>().add_systems(
+    app.init_resource::<BarLayouts>().add_systems(PreUpdate, chat_capture_wheel.after(bevy::ui::UiSystems::Focus).run_if(in_state(crate::menu::Screen::Battle))).add_systems(
         Update,
         (
             build.before(HudSet).after(crate::sprites::choose_skin).run_if(in_state(crate::menu::Screen::Battle)),
@@ -1029,6 +1029,15 @@ fn chat_panel(
     commands.spawn((ChatThumb, thumb, BackgroundColor(Color::srgb(0.05, 0.12, 0.3)), ChildOf(panel)));
 }
 
+/// Over the Chat History the wheel belongs to its list: the camera reads the accumulated wheel, so it is cleared here (as the console and
+/// the menus do); `chat_scroll` reads the wheel messages, which this leaves alone.
+#[allow(deprecated)] // Interaction, see pointer.rs
+fn chat_capture_wheel(panel: Query<&Interaction, With<ChatPanel>>, mut wheel: ResMut<bevy::input::mouse::AccumulatedMouseScroll>) {
+    if panel.iter().any(crate::pointer::over) {
+        wheel.delta = Vec2::ZERO;
+    }
+}
+
 /// Mouse wheel over the panel scrolls the list; the thumb follows the list.
 #[allow(deprecated)] // Interaction, see pointer.rs
 fn chat_scroll(
@@ -1104,6 +1113,22 @@ mod tests {
         app.world_mut().query_filtered::<&mut Ship, With<PlayerShip>>().single_mut(app.world_mut()).unwrap().order = EngineOrder::Stop;
         app.update();
         assert_eq!(app.world_mut().query_filtered::<&Ship, With<PlayerShip>>().single(app.world()).unwrap().order, EngineOrder::Stop);
+    }
+
+    #[test]
+    #[allow(deprecated)] // Interaction, see pointer.rs
+    fn the_wheel_over_the_chat_panel_does_not_reach_the_camera() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins).init_resource::<bevy::input::mouse::AccumulatedMouseScroll>().add_systems(Update, chat_capture_wheel);
+        let panel = app.world_mut().spawn((ChatPanel, Interaction::None)).id();
+        let turn = |app: &mut App| {
+            app.world_mut().resource_mut::<bevy::input::mouse::AccumulatedMouseScroll>().delta = Vec2::new(0.0, 2.0);
+            app.update();
+            app.world().resource::<bevy::input::mouse::AccumulatedMouseScroll>().delta.y
+        };
+        assert_eq!(turn(&mut app), 2.0, "off the panel the camera keeps the wheel");
+        app.world_mut().entity_mut(panel).insert(Interaction::Hovered);
+        assert_eq!(turn(&mut app), 0.0, "over the panel the list takes it");
     }
 
     #[test]

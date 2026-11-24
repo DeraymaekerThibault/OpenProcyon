@@ -509,15 +509,17 @@ pub fn help_lines(topic: Option<&str>) -> Vec<String> {
         };
     }
     let mut lines = vec![];
+    // One description column for commands and keys, as wide as the longest usage or key name (plus two spaces).
+    let width = TABLE.iter().map(|e| e.usage.chars().count()).chain(KEYS.iter().map(|k| k.0.chars().count())).max().unwrap_or(0) + 2;
     for group in [Group::Cheats, Group::State, Group::Flow, Group::Ships, Group::Authoring, Group::Camera, Group::Raw, Group::Console] {
         lines.push(format!("{}:", group.title()));
         lines.extend(TABLE.iter().filter(|e| e.group == group).map(|e| {
             let alias = if e.alias.is_empty() { String::new() } else { format!(" (also: {})", e.alias.join(", ")) };
-            format!("  {}{:<42}{}{alias}", if e.cheats { "*" } else { " " }, e.usage, e.about)
+            format!("  {}{:<width$}{}{alias}", if e.cheats { "*" } else { " " }, e.usage, e.about)
         }));
     }
     lines.push("Keys:".into());
-    lines.extend(KEYS.iter().map(|(key, what)| format!("   {key:<42}{what}")));
+    lines.extend(KEYS.iter().map(|(key, what)| format!("   {key:<width$}{what}")));
     lines.push("* marks the session as cheated (campaign points are not recorded). `help <command>` shows an example; Tab completes a command.".into());
     lines
 }

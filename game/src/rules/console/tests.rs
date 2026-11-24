@@ -358,6 +358,22 @@ fn help_lists_commands_by_group_and_marks_the_cheats() {
 }
 
 #[test]
+fn help_descriptions_start_in_one_column() {
+    let lines = help_lines(None);
+    let column = |l: &str, text: &str| l.find(text).unwrap();
+    let rows: Vec<&String> = lines.iter().filter(|l| l.starts_with("  ") && !l.trim().is_empty()).collect();
+    assert!(rows.len() > TABLE.len(), "commands and keys are listed");
+    for e in TABLE {
+        let row = rows.iter().find(|l| l.contains(e.usage)).unwrap();
+        assert_eq!(column(row, e.about), column(rows[0], TABLE[0].about), "{} lines up", e.name);
+    }
+    for (key, what) in KEYS {
+        let row = rows.iter().find(|l| l.contains(key)).unwrap();
+        assert_eq!(column(row, what), column(rows[0], TABLE[0].about), "key '{key}' lines up");
+    }
+}
+
+#[test]
 fn an_unknown_command_names_the_nearest_one() {
     let err = |l: &str| parse(l, "Hero", false).unwrap_err();
     assert!(err("goh").contains("did you mean god") && err("goh").contains("`help`"), "{}", err("goh"));
