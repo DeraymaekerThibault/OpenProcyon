@@ -675,13 +675,13 @@ pub(super) fn fire(
                 state.burst_left = 0;
                 continue;
             }
-            // Accuracy factor: 0.1 in a cinematic; else every ship, computer or not, uses 1 - 0.8 x the gunnery of the gunner in the gun's
+            // Accuracy factor: 0 for a ship in warning-shot mode, 0.1 in a cinematic; else every ship, computer or not, uses 1 - 0.8 x the gunnery of the gunner in the gun's
             // own bank slot (+ the ship's leadership bonus). A slot nobody was put in holds a rating-1 hand. A placed computer ship's
             // gunners are its level's generic crew, in every slot. Only the player's side without any crew record falls back: the
             // campaign roster's best gunner for the human fleet, else a rating-1 hand.
             let factor = || {
-                if nis_aim {
-                    return 0.1;
+                if let Some(f) = mode_factor(mission.is_some_and(|ms| ms.warning_shots), nis_aim) {
+                    return f;
                 }
                 let human = campaign.as_deref().is_some_and(|c| mission.is_some_and(|ms| ms.owner == c.script.player()));
                 match posts.or(generic.as_ref()) {
@@ -1071,6 +1071,18 @@ pub(super) fn gunner_accuracy(skill: f32) -> f32 {
     1.0 - 0.8 * skill.clamp(0.0, 1.0)
 }
 
+/// docs/re/gunnery.md: a ship in warning-shot mode fires with no deviation, before the cinematic factor 0.1 is considered;
+/// `None` when neither mode is on and the crew's factor applies.
+fn mode_factor(warning_shots: bool, nis: bool) -> Option<f32> {
+    if warning_shots {
+        Some(0.0)
+    } else if nis {
+        Some(0.1)
+    } else {
+        None
+    }
+}
+
 /// A burst's deviation angle, drawn once per burst (once per shot for a gun with `dev_per_shot`): the range band's deviation * 0.5, uniform in +-that, times `accuracy`.
 fn burst_deviation(gun: &GunDef, distance: f32, accuracy: f32, rng: &mut Rng) -> f32 {
     (rng.f() * 2.0 - 1.0) * band(gun, distance, gun.deviation) * 0.5 * accuracy
@@ -1134,6 +1146,16 @@ mod deviation_tests {
     fn the_gun_flag_chooses_between_one_deviation_per_burst_and_one_per_shot() {
         assert!(gun(true).dev_per_shot);
         assert!(!gun(false).dev_per_shot);
+    }
+
+    #[test]
+    fn a_warning_shot_flies_without_deviation_even_in_a_cinematic() {
+        assert_eq!(mode_factor(true, false), Some(0.0));
+        assert_eq!(mode_factor(true, true), Some(0.0));
+        assert_eq!(mode_factor(false, true), Some(0.1));
+        assert_eq!(mode_factor(false, false), None);
+        let mut rng = Rng(5);
+        assert!((0..50).all(|_| burst_deviation(&gun(false), 250.0, 0.0, &mut rng) == 0.0));
     }
 
     #[test]
