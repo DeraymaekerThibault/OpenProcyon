@@ -144,7 +144,7 @@ pub(super) fn music(
                 fade.kill = true;
             }
         }
-        if c.file == crate::rules::refs::NO_MUSIC {
+        if crate::rules::refs::is_no_music(&c.file) {
             continue;
         }
         let vol = c.vol * 0.5; // PROVISIONAL scale of the script's 0..1 volume (the skirmish uses 0.35)

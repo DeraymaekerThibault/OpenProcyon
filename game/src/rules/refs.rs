@@ -15,8 +15,12 @@ pub struct Lookups<'a> {
     pub picture: Option<&'a dyn Fn(&str) -> bool>,
 }
 
-/// The music track name that means "stop the music" (`Play Music Track`); the player plays no file for it.
-pub const NO_MUSIC: &str = "None";
+/// Whether a `Play Music Track` file name means "stop the music": `None`, with or without `.ogg`, in any case (sounds are looked up
+/// case-insensitively, see `audio::sound`). The player and the mission check both use this, so they cannot disagree.
+pub fn is_no_music(file: &str) -> bool {
+    let name = file.strip_suffix(".ogg").or_else(|| file.strip_suffix(".OGG")).unwrap_or(file);
+    name.eq_ignore_ascii_case("none")
+}
 
 /// Ship classes named `<class>_Wrecked` are scenery the spawner places by their TWT group, not ship classes with a `ship.json`.
 pub fn is_wrecked_hull(class: &str) -> bool {
@@ -47,7 +51,7 @@ pub fn check_references(mission: &Value, map: &Value, media: &Value, look: &Look
                 match ty {
                     "Play Music Track" | "Play Special Effect" => {
                         let silence = ty == "Play Music Track";
-                        if let Some(file) = a["File Name"].as_str().filter(|f| !f.is_empty() && !(silence && *f == NO_MUSIC) && !sound(f)) {
+                        if let Some(file) = a["File Name"].as_str().filter(|f| !f.is_empty() && !(silence && is_no_music(f)) && !sound(f)) {
                             out.push(problem(&rule, at, "File Name", format!("the sound '{file}.ogg' is not in any sound folder of the game or the mods")));
                         }
                     }
@@ -119,6 +123,8 @@ mod tests {
             "ships": [{"type": "Galleon_Wrecked", "name": "W"}, {"type": "Ship_Ghost", "name": "G"}],
             "rules": [{"name": "M", "actions": [
                 {"Type": "Play Music Track", "File Name": "None"},
+                {"Type": "Play Music Track", "File Name": "None.ogg"},
+                {"Type": "Play Music Track", "File Name": "none"},
                 {"Type": "Play Music Track", "File Name": "lost_track"},
                 {"Type": "Play Special Effect", "File Name": "None"},
             ]}]
