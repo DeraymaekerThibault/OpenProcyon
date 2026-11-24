@@ -1,6 +1,6 @@
 //! Battle start: the battle waits, paused and behind the view's cover, until what it shows is ready: models and their textures
 //! loaded and placed, the sky's pictures loaded, the shader pipelines compiled. The scene is drawn under the cover meanwhile, so
-//! the uploads and compiles that would stutter the first seconds happen unseen, and its music waits with it. Not retail's loading screen (PROVISIONAL: its
+//! the uploads and compiles that would stutter the first seconds happen unseen, and its music waits with it. Not retail: this stands in for retail's loading screen (PROVISIONAL: its
 //! layout is not specified yet); the battle clock starts when the cover lifts, so nothing of the battle is lost.
 use bevy::asset::{UntypedAssetId, VisitAssetDependencies};
 use bevy::pbr::{ExtendedMaterial, MaterialExtension};
@@ -130,7 +130,7 @@ pub fn plugin(app: &mut App) {
         render.insert_resource(compiling.clone()).add_systems(bevy::render::Render, pipelines.in_set(bevy::render::RenderSystems::Cleanup));
     }
     app.insert_resource(compiling)
-        .add_systems(PreUpdate, wait.after(bevy::input::InputSystems).before(bevy::ui::UiSystems::Focus).run_if(resource_exists::<Loading>))
+        .add_systems(PreUpdate, wait.after(bevy::input::InputSystems).before(bevy::ui::UiSystems::Focus).before(crate::screenshot).run_if(resource_exists::<Loading>))
         .add_systems(Update, plain.run_if(resource_exists::<Loading>))
         // between Update, whose systems start sounds, and PostUpdate, where Bevy begins to play them (its set there is private)
         .add_systems(SpawnScene, hush);

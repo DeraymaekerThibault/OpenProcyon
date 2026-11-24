@@ -11,9 +11,9 @@ use crate::panels::REF_H;
 use crate::sprites::{Fonts, HudData, sprite};
 use crate::starmap::{MapIconKind, Starmap, StarmapContents};
 
-const OPEN_SECS: f32 = 1.0;
+const OPEN_SECS: f32 = 1.0; // PROVISIONAL: eyeballed timing
 const FRAME_SECS: f32 = 0.1;
-const ALIEN_COUNT: u32 = 10;
+const ALIEN_COUNT: u32 = 10; // PROVISIONAL: eyeballed
 
 pub fn plugin(app: &mut App) {
     app.add_systems(Update, (build, animate, redraw).chain().after(crate::starmap::StarmapSet).run_if(in_state(crate::menu::Screen::Battle)));
@@ -45,7 +45,7 @@ fn to_square(p: Vec3, half: f32, side: f32) -> Vec2 {
     Vec2::new(p.x + half, p.z + half) / (2.0 * half) * side
 }
 
-#[allow(deprecated)] // shortcut: bevy 0.20 Interaction, same as panels.rs
+#[allow(deprecated)] // Interaction, see pointer.rs
 fn build(
     mut commands: Commands,
     assets: Res<AssetServer>,

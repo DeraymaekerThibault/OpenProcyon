@@ -119,7 +119,7 @@ radius, so the remake uses each class's bounding-sphere radius. Geometry is plan
 
 The layout stores **leader-relative distance and angle**; reconstructs a slot from the leader's current pose. Thus slots rotate and translate with the leader, not fixed lateral offsets along every route point. A post-pass (except Custom and Column) swaps slot assignments using a distance/heading-cost calculation. The generated geometry is recovered, but **exact member-to-slot assignment/tie behaviour is still unknown**; do not freeze ECS iteration order as retail slot order.
 
-After the layout (every type except Custom and Column) the slots get one swap pass, read from the original's code and not yet
+After the layout (every type except Custom and Column) the slots get one swap pass, unchecked against play and not yet
 measured. For each slot i from the second, the member, leader included, that fits that slot's point best (lowest index on a tie)
 swaps its own slot with slot i if it fits the point strictly better than its own. Fit = 50 falling to 0 over an angle of 0..pi
 between the member's heading and the leader's, plus 50 falling to 0 over a distance of 0..500 units from the member's current

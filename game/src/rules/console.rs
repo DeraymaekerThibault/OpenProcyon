@@ -1,4 +1,4 @@
-//! Developer console (not retail behaviour): a one-shot runner for the mission rule vocabulary, opened with `~`.
+//! Not retail: the developer console, a one-shot runner for the mission rule vocabulary, opened with `~`.
 //!
 //! A typed command is not a second command system. It is turned into a rule action (or a condition, for a query) and run through
 //! `Script::act` / `Script::cond`, so every action a mission can use is available, and `act {json}` takes any of them as raw JSON.

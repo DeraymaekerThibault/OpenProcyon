@@ -56,6 +56,7 @@ struct Extra<'w, 's> {
     land: Query<'w, 's, (&'static crate::collision::Obstacle, Option<&'static Visibility>), (Without<Ship>, Without<Asteroid>, Without<crate::environment::SpaceAnimal>)>,
     /// Whether the dev autopilot last ordered its fleet to run (formation held, cease fire).
     fleet_fleeing: Local<'s, bool>,
+    difficulty: Option<Res<'w, crate::scenario::Difficulty>>,
     /// The dev autopilot's memory between frames.
     pilot: Local<'s, autopilot::State>,
     board: MessageWriter<'w, crate::boarding::BoardMsg>,
@@ -130,25 +131,32 @@ pub struct RuleShip {
     pub visibility: &'static mut Visibility,
     /// The human's own ship.
     pub primary: Has<PlayerShip>,
+    /// Its interpolation: rules see the simulation pose (`RuleShip::sim_pos`), not the drawn one.
+    pub interp: Option<&'static crate::interpolate::Interp>,
+}
+
+/// The simulation position of a ship whose drawn pose is `tf` (interpolated between ticks when it has an `Interp`).
+pub fn sim_pos(tf: &Transform, interp: Option<&crate::interpolate::Interp>) -> Vec3 {
+    interp.map_or(tf.translation, |i| i.sim_pose(tf).translation)
 }
 
 fn units(ships: &Query<RuleShip>, lib: &Library) -> Vec<Unit> {
     ships
         .iter()
-        .map(|RuleShipReadOnlyItem { entity: e, ship, transform: tf, health: h, mission: m, primary, .. }| {
+        .map(|RuleShipReadOnlyItem { entity: e, ship, transform: tf, health: h, mission: m, primary, interp, .. }| {
             let class = &lib.classes[ship.class];
             let secs =
                 if h.sections.is_empty() { 0.0 } else { h.sections.iter().zip(&class.sections).map(|(x, c)| 1.0 - x / c.hp.max(1.0)).sum::<f32>() / h.sections.len() as f32 };
             Unit {
-                name: m.name.clone(),
-                owner: m.owner.clone(),
+                name: m.name.as_str().into(),
+                owner: m.owner.as_str().into(),
                 alive: !h.destroyed,
                 visible: m.visible,
                 primary,
                 damage: (1.0 - h.core / class.core_hp).max(secs).clamp(0.0, 1.0),
                 flag: m.flag.clone(),
                 attack: m.attack.clone(),
-                ..Unit::new(e, m.id, tf.translation)
+                ..Unit::new(e, m.id, sim_pos(tf, interp))
             }
         })
         .collect()
@@ -188,7 +196,7 @@ fn update(
     world.extend(extra.bases.iter_mut().map(|(e, b, tf, armed)| b.unit(e, tf, armed.map_or(0.0, |(a, h)| crate::combat::base_mission_damage(&lib.classes[a.class], h)))));
     world.extend(rocks.iter().map(|(e, tf, a)| a.unit(e, tf)));
     mission.script.tag(&mut world);
-    let owner_of = |e: Entity| world.iter().find(|u| u.e == e).map(|u| u.owner.clone());
+    let owner_of = |e: Entity| world.iter().find(|u| u.e == e).map(|u| u.owner.to_string());
     for h in hits.read() {
         mission.script.record_hit(owner_of(h.shooter).as_deref(), h.victim);
     }
@@ -200,7 +208,7 @@ fn update(
     }
     let script = &mut mission.script;
     for u in world.iter().filter(|u| rocks.contains(u.e)) {
-        script.belt.entry(u.e).or_insert_with(|| std::iter::once(u.owner.clone()).chain(u.groups.iter().cloned()).collect());
+        script.belt.entry(u.e).or_insert_with(|| std::iter::once(u.owner.to_string()).chain(u.groups.iter().map(ToString::to_string)).collect());
     }
     for d in killed.read() {
         if let Some(o) = owner_of(d.by) {
@@ -273,6 +281,7 @@ fn apply_fx(
         fxlib: extra.fxlib.as_deref(),
         sfx: extra.sfx.as_deref_mut(),
         toggles: extra.toggles.as_deref_mut(),
+        difficulty: extra.difficulty.as_deref().copied().unwrap_or_default().0,
         orbit: Some(orbit),
         sides: None,
         mines: None,

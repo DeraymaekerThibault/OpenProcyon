@@ -108,8 +108,7 @@ fn importers(args: &[std::ffi::OsString]) -> Vec<(String, Command)> {
         args(&mut cmd);
         list.push((frozen.display().to_string(), cmd));
     }
-    let checkout = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..");
-    if checkout.join("tools/import_assets.py").is_file() {
+    if let Some(checkout) = crate::checkout_dir().filter(|c| c.join("tools/import_assets.py").is_file()) {
         let venv = [".venv/Scripts/python.exe", ".venv/bin/python"].map(|p| checkout.join(p));
         let pythons: Vec<(String, Vec<&str>)> = venv
             .iter()

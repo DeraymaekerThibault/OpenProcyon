@@ -1,4 +1,5 @@
 use super::*;
+use crate::scenario::Race;
 
 #[test]
 fn difficulty_toggle_cycles_normal_hard_easy() {
@@ -31,13 +32,13 @@ fn vsync_and_anti_aliasing_step_show_and_restore() {
 fn auto_assign_fills_the_fleet_within_the_points() {
     let lib = Library::load(assets_dir());
     let mut sk = skirmish("red_rover");
-    sk.slots[0].race = 0;
+    sk.slots[0].race = Race::Navy;
     sk.fleet_size = 5;
     apply(&mut sk, &lib, &Action::AutoAssign);
     let fleet = &sk.human().unwrap().fleet;
     assert!(!fleet.is_empty() && fleet.len() <= 5);
     assert!(sk.points_left(&lib) >= 0, "never overspends");
-    let navy = offered(&lib, 0);
+    let navy = offered(&lib, Race::Navy);
     assert_eq!(lib.classes[navy[0]].name, "Ship_Navy_StarHammer", "the original lists the StarHammer first");
 }
 
@@ -54,8 +55,8 @@ fn frigate_stats_match_the_original_fleet_screen() {
 fn fleet_spends_victory_points() {
     let lib = Library::load(assets_dir());
     let mut sk = skirmish("red_rover");
-    sk.slots[0].race = 0;
-    sk.ship_pick = offered(&lib, 0).iter().position(|&c| lib.classes[c].name == "Ship_Navy_Frigate").unwrap();
+    sk.slots[0].race = Race::Navy;
+    sk.ship_pick = offered(&lib, Race::Navy).iter().position(|&c| lib.classes[c].name == "Ship_Navy_Frigate").unwrap();
     sk.fleet_size = 5;
     assert_eq!(sk.points_left(&lib), 300);
     apply(&mut sk, &lib, &Action::AddShip);
@@ -88,6 +89,7 @@ fn skirmish_list_counts_playable_players_like_the_original() {
 }
 
 #[test]
+#[allow(deprecated)] // Interaction, see pointer.rs
 fn menu_widgets_play_rollover_once_and_their_own_select_sound() {
     let mut app = App::new();
     app.add_plugins(MinimalPlugins).add_message::<crate::audio::Sfx>().add_systems(Update, button_sounds);
@@ -158,7 +160,7 @@ fn skirmish_ship_names_default_to_the_pool_and_follow_the_pull_down() {
     sk.fleet_size = 2;
     sk.choose(Cell::Player(1), Choice::Computer);
     let human = sk.slots.iter().position(|s| s.kind == Kind::Human).unwrap();
-    sk.ship_pick = offered(&lib, 0).iter().position(|&i| lib.classes[i].name == "Ship_Navy_Cutter").unwrap();
+    sk.ship_pick = offered(&lib, Race::Navy).iter().position(|&i| lib.classes[i].name == "Ship_Navy_Cutter").unwrap();
     apply(&mut sk, &lib, &Action::AddShip);
     apply(&mut sk, &lib, &Action::AddShip);
     let pool = lib.names["Ship_Navy_Cutter"].clone();
@@ -239,7 +241,7 @@ fn skirmish_weapon_choices_follow_fleet_entries_and_survive_launch_planning() {
     sk.fleet_size = 3;
     sk.choose(Cell::Player(1), Choice::Computer);
     let human = sk.slots.iter().position(|s| s.kind == Kind::Human).unwrap();
-    sk.ship_pick = offered(&lib, 0).iter().position(|&i| lib.classes[i].name == "Ship_Navy_Cutter").unwrap();
+    sk.ship_pick = offered(&lib, Race::Navy).iter().position(|&i| lib.classes[i].name == "Ship_Navy_Cutter").unwrap();
     apply(&mut sk, &lib, &Action::AddShip);
     apply(&mut sk, &lib, &Action::AddShip);
     let class = &lib.classes[lib.index("Ship_Navy_Cutter")];
@@ -261,7 +263,7 @@ fn skirmish_weapon_choices_follow_fleet_entries_and_survive_launch_planning() {
     assert_eq!(sk.slots[human].weapons.len(), 1);
     assert!(sk.slots[human].weapons[0].is_empty(), "dropping a ship also drops its fitting");
     sk.slots[human].weapons[0].insert(bank, "Gun_GravCharge_Med".into());
-    sk.choose(Cell::Fleet(human), Choice::Fleet(2));
+    sk.choose(Cell::Fleet(human), Choice::Fleet(Race::Pirate));
     assert!(sk.slots[human].fleet.is_empty());
     assert!(sk.slots[human].weapons.is_empty());
 }
@@ -280,7 +282,7 @@ fn historical_map_commands_the_ship_its_rules_mark_primary() {
 #[ignore = "needs imported assets"]
 fn historical_map_keeps_preplaced_fleets_and_fixed_fleet_types() {
     let slots = new_slots(&map("ambush"));
-    assert_eq!(slots.iter().map(|s| (s.race, s.team)).collect::<Vec<_>>(), [(0, 0), (2, 1), (2, 1), (2, 1)]);
+    assert_eq!(slots.iter().map(|s| (s.race, s.team)).collect::<Vec<_>>(), [(Race::Navy, 0), (Race::Pirate, 1), (Race::Pirate, 1), (Race::Pirate, 1)]);
     assert!(slots.iter().all(|s| !s.fleet.is_empty() && s.kind != Kind::Closed));
     assert_eq!(slots[0].kind, Kind::Human);
     // Taking a pirate slot makes the other pirates allies and the Navy hostile.
@@ -305,7 +307,7 @@ fn three_team_historical_map_is_a_three_way_battle() {
 #[ignore = "needs imported assets"]
 fn open_map_locks_fleet_type_to_team_and_needs_a_fleet() {
     let mut sk = skirmish("red_rover");
-    assert_eq!((sk.slots[0].race, sk.slots[1].race), (0, 2));
+    assert_eq!((sk.slots[0].race, sk.slots[1].race), (Race::Navy, Race::Pirate));
     assert!(sk.slots.iter().skip(1).all(|s| s.kind == Kind::Open), "retail: you alone, every other slot Open");
     assert_eq!(sk.launch_error(), Some("No opponent: open another slot on a different team."));
     sk.choose(Cell::Player(1), Choice::Computer);
@@ -320,13 +322,13 @@ fn open_map_locks_fleet_type_to_team_and_needs_a_fleet() {
     assert!(!plan[1].ships.is_empty() && plan[1].ships.iter().all(|s| s.0.contains("Pirate")), "computer fleet is built from its fleet type");
     // Free-for-all map: you choose the fleet type yourself.
     let mut sk = skirmish("diablo_straight");
-    assert_eq!((sk.slots[0].race, sk.slots[0].team, sk.slots[1].kind), (0, 0, Kind::Open), "retail: you are Navy, Team 1");
+    assert_eq!((sk.slots[0].race, sk.slots[0].team, sk.slots[1].kind), (Race::Navy, 0, Kind::Open), "retail: you are Navy, Team 1");
     sk.choose(Cell::Player(1), Choice::Computer);
-    assert_eq!((sk.slots[1].race, sk.slots[1].team), (2, 1), "a new computer: Pirate, Team 2");
+    assert_eq!((sk.slots[1].race, sk.slots[1].team), (Race::Pirate, 1), "a new computer: Pirate, Team 2");
     assert_eq!(sk.choices(Cell::Team(1))[..2], [Choice::Team(1), Choice::Team(0)], "current team first");
-    assert_eq!(sk.choices(Cell::Fleet(0)), [Choice::Fleet(0), Choice::Fleet(2), Choice::Fleet(3)]);
+    assert_eq!(sk.choices(Cell::Fleet(0)), [Choice::Fleet(Race::Navy), Choice::Fleet(Race::Pirate), Choice::Fleet(Race::Procyon)]);
     sk.choose(Cell::Player(1), Choice::Close);
-    assert_eq!((sk.slots[1].kind, sk.slots[1].race, sk.slots[1].team), (Kind::Closed, 4, -1));
+    assert_eq!((sk.slots[1].kind, sk.slots[1].race, sk.slots[1].team), (Kind::Closed, Race::Unchosen, -1));
 }
 #[test]
 #[ignore = "needs imported assets"]
@@ -334,8 +336,8 @@ fn lobby_actions_edit_slots_and_fleet() {
     let lib = Library::load(assets_dir());
     let mut sk = skirmish("diablo_straight"); // free-for-all
     sk.fleet_size = 2;
-    assert_eq!(sk.slots[0].race, 0);
-    let cheapest = offered(&lib, 0).len() - 1; // the list is most expensive first; points never limit cheap ships here
+    assert_eq!(sk.slots[0].race, Race::Navy);
+    let cheapest = offered(&lib, Race::Navy).len() - 1; // the list is most expensive first; points never limit cheap ships here
     apply(&mut sk, &lib, &Action::PickShip(cheapest));
     for _ in 0..3 {
         apply(&mut sk, &lib, &Action::AddShip);
@@ -343,8 +345,8 @@ fn lobby_actions_edit_slots_and_fleet() {
     assert_eq!(sk.slots[0].fleet.len(), 2, "fleet size limit");
     apply(&mut sk, &lib, &Action::DropShip);
     assert_eq!(sk.slots[0].fleet.len(), 1);
-    sk.choose(Cell::Fleet(0), Choice::Fleet(2));
-    assert!(sk.slots[0].fleet.is_empty() && sk.slots[0].race == 2, "a new fleet type clears the fleet");
+    sk.choose(Cell::Fleet(0), Choice::Fleet(Race::Pirate));
+    assert!(sk.slots[0].fleet.is_empty() && sk.slots[0].race == Race::Pirate, "a new fleet type clears the fleet");
     apply(&mut sk, &lib, &Action::PickShip(0));
     apply(&mut sk, &lib, &Action::AddShip);
     sk.choose(Cell::Team(0), Choice::Team(4));
@@ -395,17 +397,21 @@ fn computers_cycle_fleet_types_by_slot_and_fleets_never_share_a_flag() {
     for i in 1..=4 {
         sk.choose(Cell::Player(i), Choice::Computer);
     }
-    assert_eq!(sk.slots.iter().take(5).map(|s| s.race).collect::<Vec<_>>(), [0, 2, 3, 0, 2], "Navy, Pirate, Procyon, then round again");
+    assert_eq!(
+        sk.slots.iter().take(5).map(|s| s.race).collect::<Vec<_>>(),
+        [Race::Navy, Race::Pirate, Race::Procyon, Race::Navy, Race::Pirate],
+        "Navy, Pirate, Procyon, then round again"
+    );
     // Two Navy fleets: the second gets the next flag, and the first cannot take it.
     assert_eq!((sk.slots[0].flag, sk.slots[3].flag), (0, 1));
-    assert!(sk.flag_taken(0, 0, 1));
+    assert!(sk.flag_taken(0, Race::Navy, 1));
     let lib = Library::load(assets_dir());
     apply(&mut sk, &lib, &Action::PickFlag(1));
     assert_eq!(sk.slots[0].flag, 0, "a taken flag is refused");
     apply(&mut sk, &lib, &Action::PickFlag(5));
     assert_eq!(sk.slots[0].flag, 5);
     // Changing a fleet type moves it off a flag the new type's fleets already fly.
-    sk.choose(Cell::Fleet(3), Choice::Fleet(2));
+    sk.choose(Cell::Fleet(3), Choice::Fleet(Race::Pirate));
     assert_ne!(sk.slots[3].flag, sk.slots[4].flag);
 }
 #[test]
@@ -450,8 +456,8 @@ fn computer_swaps_stay_in_the_banks_mount_pool_and_the_race_rule() {
     let lib = Library::load(assets_dir());
     let mut swaps = 0;
     for salt in 0..40 {
-        let mut slot = skirmish::Slot { race: 3, ..skirmish("diablo_straight").slots[1].clone() };
-        skirmish::auto_build(&mut slot, 1000, 10, &lib, salt, true, 3);
+        let mut slot = skirmish::Slot { race: Race::Procyon, ..skirmish("diablo_straight").slots[1].clone() };
+        skirmish::auto_build(&mut slot, 1000, 10, &lib, salt, true, Race::Procyon);
         for (ship, fit) in slot.weapons.iter().enumerate() {
             let class = &lib.classes[lib.index(&slot.fleet[ship])];
             for (bank, gun) in fit {
@@ -477,7 +483,7 @@ fn slot_bar_shows_five_slots_and_follows_the_picked_one() {
     assert_eq!(sk.slot_scroll, 3, "eight slots: the last window starts at slot 4");
     sk.scroll_slots(-10);
     assert_eq!(sk.slot_scroll, 0);
-    apply(&mut sk, &lib, &Action::PickShip(offered(&lib, 0).len() - 1));
+    apply(&mut sk, &lib, &Action::PickShip(offered(&lib, Race::Navy).len() - 1));
     for _ in 0..7 {
         apply(&mut sk, &lib, &Action::AddShip);
     }
@@ -522,21 +528,21 @@ fn fleet_screen_starts_blank_and_greys_crew_arms_drop() {
 #[ignore = "needs imported assets"]
 fn fleet_screen_offers_every_fleet_type_without_story_hulls() {
     let lib = Library::load(assets_dir());
-    for (race, name) in [(0, "Navy"), (2, "Pirate"), (3, "Procyon")] {
+    for (race, name) in [(Race::Navy, "Navy"), (Race::Pirate, "Pirate"), (Race::Procyon, "Procyon")] {
         let list = offered(&lib, race);
         assert!(list.len() >= 5, "{name}: {}", list.len());
         assert!(list.iter().all(|&i| lib.classes[i].race == name && lib.classes[i].skirmish));
         assert!(list.iter().all(|&i| lib.classes[i].name != "Ship_Pirate_Silver"), "Silver's ship is not offered in retail");
     }
-    assert!(offered(&lib, 4).is_empty());
+    assert!(offered(&lib, Race::Unchosen).is_empty());
 }
 #[test]
 #[ignore = "needs imported assets"]
 fn computer_crews_come_from_the_human_fleet_types_roster() {
     let lib = Library::load(assets_dir());
-    for (human, name) in [(0, "Navy"), (2, "Pirate"), (3, "Procyon")] {
+    for (human, name) in [(Race::Navy, "Navy"), (Race::Pirate, "Pirate"), (Race::Procyon, "Procyon")] {
         let roster = crate::crew_arms::roster(name, 0);
-        let mut slot = skirmish::Slot { race: 3, ..skirmish("diablo_straight").slots[1].clone() };
+        let mut slot = skirmish::Slot { race: Race::Procyon, ..skirmish("diablo_straight").slots[1].clone() };
         (slot.fleet, slot.weapons, slot.names, slot.crew) = Default::default();
         skirmish::auto_build(&mut slot, 1000, 10, &lib, 1, true, human);
         let crew: Vec<&String> = slot.crew.iter().flatten().flatten().collect();
@@ -579,7 +585,7 @@ fn loading_a_fleet_crew_or_arms_profile_restores_what_was_saved_and_refuses_what
     use crate::profiles::Kind as K;
     let lib = Library::load(assets_dir());
     let mut sk = skirmish("red_rover");
-    sk.slots[0].race = 0;
+    sk.slots[0].race = Race::Navy;
     sk.fleet_size = 5;
     sk.victory_limit = 1000;
     apply(&mut sk, &lib, &Action::AutoAssign);
@@ -648,14 +654,14 @@ fn two_quick_clicks_on_one_row_make_a_double_click() {
 fn a_hull_over_the_points_left_is_refused_with_a_reason() {
     let lib = Library::load(assets_dir());
     let mut sk = skirmish("red_rover");
-    sk.slots[0].race = 0;
+    sk.slots[0].race = Race::Navy;
     sk.fleet_size = 5;
     sk.victory_limit = 100; // dearer than every frigate-class hull, cheaper than the StarHammer
     apply(&mut sk, &lib, &Action::PickShip(0));
     apply(&mut sk, &lib, &Action::AddShip);
     assert!(sk.human().unwrap().fleet.is_empty());
     assert_eq!(sk.error, Some("Not enough victory points."));
-    apply(&mut sk, &lib, &Action::PickShip(offered(&lib, 0).len() - 1));
+    apply(&mut sk, &lib, &Action::PickShip(offered(&lib, Race::Navy).len() - 1));
     assert_eq!(sk.error, None, "picking another hull clears the message");
     apply(&mut sk, &lib, &Action::AddShip);
     assert_eq!(sk.human().unwrap().fleet.len(), 1, "an affordable hull is added");
@@ -714,9 +720,9 @@ fn every_computer_roll_builds_a_fleet() {
     for limit in [300, 340] {
         let mut spent = vec![];
         for salt in 0..20 {
-            let mut slot = skirmish::Slot { race: 0, ..skirmish("diablo_straight").slots[1].clone() };
+            let mut slot = skirmish::Slot { race: Race::Navy, ..skirmish("diablo_straight").slots[1].clone() };
             (slot.fleet, slot.weapons, slot.names, slot.crew) = Default::default();
-            skirmish::auto_build(&mut slot, limit, 5, &lib, salt * 7 + 1, true, 0);
+            skirmish::auto_build(&mut slot, limit, 5, &lib, salt * 7 + 1, true, Race::Navy);
             assert!(!slot.fleet.is_empty(), "limit {limit} salt {salt}: no ships");
             spent.push(slot.spent(&lib));
         }
@@ -753,4 +759,135 @@ fn the_fps_counter_setting_is_off_by_default_and_not_a_menu_row() {
     let s = Settings::default();
     assert!(!s.fps, "off by default");
     assert!(!s.rows(true).iter().any(|r| r.1.to_lowercase().contains("fps")), "only the console command changes it");
+}
+
+/// #545: the views redraw only when `MenuModel::key` changes, so every flag a view draws from must be in it.
+#[test]
+#[ignore = "needs imported assets"]
+fn dialog_and_panel_flags_change_the_menu_key() {
+    use bevy::ecs::system::SystemState;
+    let mut world = World::new();
+    world.insert_resource(skirmish("red_rover"));
+    world.insert_resource(Library::load(assets_dir()));
+    world.insert_resource(State::new(Screen::Lobby));
+    world.insert_resource(ModList::from(vec![]));
+    world.init_resource::<InGame>();
+    world.init_resource::<SaveUi>();
+    world.init_resource::<Bindings>();
+    world.init_resource::<CtrlUi>();
+    world.init_resource::<Settings>();
+    world.init_resource::<MissionList>();
+    world.init_resource::<crate::stats::GameStats>();
+    world.insert_resource(crate::scenario::Outcome::Playing);
+    world.init_resource::<crate::scenario::EndMessage>();
+    let window = Window::default();
+    let mut model: SystemState<MenuModel> = SystemState::new(&mut world);
+    let mut last = model.get(&world).unwrap().key(&window);
+    let flips: [fn(&mut Skirmish); 3] = [|sk| sk.map_info = true, |sk| sk.arms_open = true, |sk| sk.arms_tab = true];
+    for (i, flip) in flips.into_iter().enumerate() {
+        flip(&mut world.resource_mut::<Skirmish>());
+        let key = model.get(&world).unwrap().key(&window);
+        assert_ne!(key, last, "flag {i} must change the key, or the screen does not redraw");
+        last = key;
+    }
+}
+
+/// A skirmish with a human and a computer slot on an open or historical map, no assets needed (the retail button table reads only this).
+fn bare_skirmish(open: bool, human_ships: usize) -> Skirmish {
+    let slot = |player, kind, team| Slot { player, name: format!("p{player}"), kind, race: Race::Navy, team, flag: 0, fleet: vec![], weapons: vec![], names: vec![], crew: vec![] };
+    let mut human = slot(0, Kind::Human, 0);
+    human.fleet = vec!["Ship_Navy_Cutter".into(); human_ships];
+    Skirmish {
+        map: None,
+        slots: vec![human, slot(1, Kind::Computer, 1)],
+        maps: vec![],
+        selected: 0,
+        historical: !open,
+        fleet_size: 5,
+        draw: 0,
+        victory_limit: 300,
+        map_json: serde_json::json!({ "assemble": open }),
+        error: None,
+        dropdown: None,
+        name_open: false,
+        flag_picker: false,
+        ship_pick: 0,
+        ship_chosen: false,
+        view_slot: false,
+        fleet_pick: 0,
+        slot_scroll: 0,
+        map_scroll: 0,
+        scroll: 0,
+        arms_open: false,
+        arms_tab: false,
+        map_info: false,
+        profile: None,
+    }
+}
+
+fn button(screen: Screen, impl_: &str, sk: &Skirmish) -> Option<RetailButton> {
+    retail_button(screen, impl_, &ButtonContext { page: None, skirmish: sk, outcome: crate::scenario::Outcome::Playing })
+}
+
+#[test]
+fn retail_buttons_navigate_the_front_end() {
+    let sk = bare_skirmish(true, 1);
+    assert!(matches!(button(Screen::Main, "Open Single Player Menu Button", &sk), Some(RetailButton::Run(Action::Goto(Screen::SinglePlayer)))));
+    assert!(matches!(button(Screen::Main, "Open Next Screen Button", &sk), Some(RetailButton::Run(Action::Quit))));
+    assert!(matches!(button(Screen::SinglePlayer, "Open Prev Arrow Button", &sk), Some(RetailButton::Run(Action::Goto(Screen::Main)))));
+    assert!(matches!(button(Screen::CreateSkirmish, "Open Prev Arrow Button", &sk), Some(RetailButton::Run(Action::Goto(Screen::SinglePlayer)))));
+    assert!(matches!(button(Screen::CreateSkirmish, "Open Next Arrow Button", &sk), Some(RetailButton::Run(Action::Goto(Screen::Lobby)))));
+    assert!(matches!(button(Screen::Fleet, "Open Next Arrow Button", &sk), Some(RetailButton::Run(Action::Goto(Screen::Lobby)))));
+    assert!(matches!(button(Screen::Tutorial, "Start Basic Training Tutorial Button", &sk), Some(RetailButton::Run(Action::Tutorial("basic_tutorial")))));
+    // Not in the table: art and lists, a button of another screen, and the multiplayer buttons (the view greys those out).
+    assert!(button(Screen::Main, "Front End Screen Backdrop", &sk).is_none());
+    assert!(button(Screen::Lobby, "Open Prev Arrow Button", &sk).is_none());
+    assert!(button(Screen::Main, "Open Multiplayer Menu Button", &sk).is_none());
+}
+
+#[test]
+fn launch_is_greyed_until_the_lobby_can_start_and_ship_selection_needs_an_open_map() {
+    let ready = bare_skirmish(true, 2);
+    assert!(matches!(button(Screen::Lobby, "Open Next Screen Button", &ready), Some(RetailButton::Run(Action::Launch))));
+    assert!(matches!(button(Screen::Lobby, "Open Ship Selection Screen", &ready), Some(RetailButton::Run(Action::Goto(Screen::Fleet)))));
+    let no_fleet = bare_skirmish(true, 0);
+    assert!(matches!(button(Screen::Lobby, "Open Next Screen Button", &no_fleet), Some(RetailButton::Disabled)));
+    let mut alone = bare_skirmish(false, 0);
+    alone.slots[1].kind = Kind::Open;
+    assert!(matches!(button(Screen::Lobby, "Open Next Screen Button", &alone), Some(RetailButton::Disabled)), "no opponent");
+    assert!(button(Screen::Lobby, "Open Ship Selection Screen", &bare_skirmish(false, 0)).is_none(), "historical maps bring their own fleets");
+}
+
+#[test]
+fn fleet_screen_buttons_follow_the_pick_and_the_fleet() {
+    let mut sk = bare_skirmish(true, 2);
+    let state = |sk: &Skirmish, n: &str| button(Screen::Fleet, n, sk);
+    assert!(matches!(state(&sk, "Open Ship Selection Screen"), Some(RetailButton::CurrentTab)));
+    for n in ["Open Crew Selection Screen", "Open Arms Selection Screen", "Drop Ship From Fleet Button"] {
+        assert!(matches!(state(&sk, n), Some(RetailButton::Run(_))), "{n}: a ship is in the picked slot");
+    }
+    assert!(matches!(state(&sk, "Add Ship To Fleet Button"), Some(RetailButton::Disabled)), "no hull type clicked");
+    sk.ship_chosen = true;
+    assert!(matches!(state(&sk, "Add Ship To Fleet Button"), Some(RetailButton::Run(Action::AddShip))));
+    sk.fleet_pick = 2;
+    for n in ["Open Crew Selection Screen", "Open Arms Selection Screen", "Drop Ship From Fleet Button"] {
+        assert!(matches!(state(&sk, n), Some(RetailButton::Disabled)), "{n}: the picked slot is empty");
+    }
+    assert!(matches!(state(&sk, "Open Save Fleet Profile Dialog Button"), Some(RetailButton::Run(_))));
+    sk.slots[0].fleet.clear();
+    assert!(state(&sk, "Open Save Fleet Profile Dialog Button").is_none(), "an empty fleet cannot be saved (the view greys the button)");
+    assert!(matches!(state(&sk, "Open Load Fleet Profile Dialog Button"), Some(RetailButton::Run(_))));
+}
+
+#[test]
+fn in_game_menu_buttons_depend_on_the_page_and_the_outcome() {
+    let sk = bare_skirmish(true, 1);
+    let with = |page, outcome, n: &str| retail_button(Screen::Battle, n, &ButtonContext { page, skirmish: &sk, outcome });
+    use crate::scenario::Outcome;
+    assert!(matches!(with(Some(Page::Menu), Outcome::Playing, "Open Previous Screen Button"), Some(RetailButton::Run(Action::Ingame(None)))));
+    assert!(matches!(with(Some(Page::Options), Outcome::Playing, "Open Previous Screen Button"), Some(RetailButton::Run(Action::Ingame(Some(Page::Menu))))));
+    assert!(matches!(with(Some(Page::Summary), Outcome::Playing, "Open Next Arrow Button"), Some(RetailButton::Run(Action::Ingame(Some(Page::Menu))))));
+    assert!(matches!(with(Some(Page::Summary), Outcome::Victory, "Open Next Arrow Button"), Some(RetailButton::Run(Action::QuitToMenu))));
+    assert!(matches!(with(Some(Page::Save), Outcome::Playing, "Load or Save Campaign Button"), Some(RetailButton::Run(Action::DoSave))));
+    assert!(matches!(with(Some(Page::Load), Outcome::Playing, "Load or Save Campaign Button"), Some(RetailButton::Run(Action::DoLoad))));
 }

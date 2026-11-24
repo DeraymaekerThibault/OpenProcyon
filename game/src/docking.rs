@@ -2,12 +2,13 @@
 //! docked, then for AI ships move away / turn / return), repair while docked, dock-point marker effects and the rule hooks
 //! (`Dock Ships`, `Set Group/Unit Dockable`, `Set Dock Time`, `Toggle Island Repair When Docked`, `Group/Unit Is Docked`).
 //! Clicks and the right-click menu issue `DockMsg`s; rules.rs reads `Script::docked`, which this module keeps up to date.
-//! The movement is the original's (read from its code, docs/re/docking-and-orders.md): one approach point on the dock point's axis,
+//! The movement is the original's (docs/re/docking-and-orders.md): one approach point on the dock point's axis,
 //! sailed under the collision avoider (no route planning), then a scripted glide onto the point; leaving glides away, turns in place
 //! and sails one leg back. PROVISIONAL: dock-point yaw sign and the repair effect placement (one at the ship centre).
 //! Tows (menu Tow start / stop): the tower steers for the towee and the link is registered inside 50 units of surface distance; the
 //! rigid tow itself lives in rules.rs. The docking status icon lives on the primary ship's bottom-bar portrait in panels.rs.
 //! PROVISIONAL: the tow approach point (the towee's centre, not its tow node).
+use crate::EngineOrder;
 use crate::Nearest;
 use bevy::ecs::system::{ParamSet, SystemParam};
 use bevy::prelude::*;
@@ -436,7 +437,7 @@ fn tow_routine(
         } else {
             sh.waypoints = vec![(front - (rear - here)).with_y(here.y)];
             sh.goal = None;
-            sh.order = 2;
+            sh.order = EngineOrder::Full;
         }
     }
 }
@@ -498,7 +499,7 @@ fn glide(ship: &mut Ship, tf: &mut Transform, to: Vec3, top: f32, turn_only: boo
     } else {
         GLIDE_TURNING
     };
-    (ship.waypoints, ship.goal, ship.order) = (vec![], None, 0);
+    (ship.waypoints, ship.goal, ship.order) = (vec![], None, EngineOrder::Stop);
     tf.translation += Vec3::new(-ship.heading.sin(), 0.0, -ship.heading.cos()) * ship.speed * dt;
     tf.rotation = Quat::from_rotation_y(ship.heading);
 }
@@ -631,11 +632,11 @@ fn routine(
                     claim(&mut dockable, &mut docker, e, i);
                 } else if here.distance(p) < WAIT_DIST {
                     ship.waypoints.clear();
-                    ship.order = 0;
+                    ship.order = EngineOrder::Stop;
                 } else {
                     ship.waypoints = vec![p.with_y(here.y)];
                     ship.goal = None;
-                    ship.order = 2;
+                    ship.order = EngineOrder::Full;
                 }
             }
             Phase::Approach => {
@@ -688,14 +689,14 @@ fn routine(
                 }
                 // The final leg's glide is movement: `dock_glide` runs it in the next tick's step.
                 if !docker.final_leg {
-                    (ship.waypoints, ship.goal, ship.order) = (vec![ap], None, 2);
+                    (ship.waypoints, ship.goal, ship.order) = (vec![ap], None, EngineOrder::Full);
                 }
             }
             Phase::Docked => {
                 docker.timer += dt;
                 // Retail: the ship stays where the glide left it (within 10 units, any heading); the link pull (`docked_hold`) keeps it on
                 // station on a moving dockee, and the heal (`docked_repair`) is the upkeep armed at docking.
-                ship.order = 0;
+                ship.order = EngineOrder::Stop;
                 ship.speed = 0.0;
                 if docker.timer >= docker.duration {
                     info!("docking: {e} released by {} (core {:.0}/{:.0})", docker.dockee, health.core, class.core_hp);
@@ -731,13 +732,13 @@ fn routine(
                 if angdiff(bearing(here, docker.start), ship.heading).abs() < TURN_DONE || docker.timer >= LEG_SECS {
                     // Retail: one leg of 100 units toward where the ship came from, not back to that point.
                     let dir = (docker.start - here).with_y(0.0).normalize_or_zero();
-                    (ship.waypoints, ship.order) = (vec![here + dir * RETURN_LEG], 2);
+                    (ship.waypoints, ship.order) = (vec![here + dir * RETURN_LEG], EngineOrder::Full);
                     docker.phase = Phase::Return;
                 }
             }
             Phase::Return => {
                 if ship.waypoints.is_empty() {
-                    ship.order = 0;
+                    ship.order = EngineOrder::Stop;
                     commands.entity(e).remove::<Docker>();
                 }
             }

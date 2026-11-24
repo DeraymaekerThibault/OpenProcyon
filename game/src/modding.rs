@@ -3,6 +3,7 @@
 //! Rules: a mod file replaces the base file of the same path (a new `ships/<id>/` or `maps/<id>/` folder is new content);
 //! a JSON with `"extends": "Ship_Navy_Cutter"` is deep-merged over the same file of that base ship/map, so a new ship is a few lines.
 use serde_json::Value;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 pub fn walk(dir: &Path, rel: &Path, out: &mut Vec<PathBuf>) {
@@ -114,8 +115,9 @@ pub fn save_enabled_in(dir: &Path, mods: &[Installed]) {
     }
 }
 
-/// Object files that mods add keys to instead of replacing.
-const MERGED: &[&str] = &[
+/// Object files that mods add keys to instead of replacing: the one list (`render/mod.rs` reads the two render files it names,
+/// `docs/modding.md` lists them all; a test keeps the doc in step).
+pub const MERGED: &[&str] = &[
     "hud/scales.json",
     "data/collision.json",
     "data/docks.json",
@@ -123,12 +125,96 @@ const MERGED: &[&str] = &[
     "data/weapons/bullets.json",
     "data/ai/weapons.json",
     "menu/strings.json",
-    "data/render/skies.json",
-    "data/render/nebulae.json",
+    crate::render::SKIES,
+    crate::render::NEBULAE,
 ];
 
 fn read(p: &Path) -> Option<Value> {
     crate::data::try_json(p)
+}
+
+/// What one mod file did to the overlay.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Applied {
+    /// `mod.json`: metadata only.
+    Meta,
+    /// A plain file put in place: an override when the overlay already had one, else a new file (the caller tells which).
+    Placed,
+    /// Keys merged into a `MERGED` object file.
+    Merged,
+    /// Deep-merged over its `extends` parent.
+    Extends,
+}
+
+/// One mod layer's part in the overlay: counts per category come from the lists.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ModEntry {
+    pub name: String,
+    pub version: String,
+    pub dir: PathBuf,
+    pub overrides: Vec<String>,
+    pub merged: Vec<String>,
+    pub extends: Vec<String>,
+    pub added: Vec<String>,
+    /// (file, why): the same error text the loader reports, so a mod author sees one wording.
+    pub skipped: Vec<(String, String)>,
+}
+
+/// What `overlay` did, as data: which mods loaded and what each did to which file. `log` prints it; a mod screen can read it.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ModReport {
+    pub mods: Vec<ModEntry>,
+}
+
+/// Files listed per category before "+K more".
+const REPORT_LIST: usize = 8;
+
+impl ModReport {
+    /// Drops the entry for `dir` (the game's own `content/` layer) unless it skipped something, which the player or developer must see.
+    pub fn without(mut self, dir: &Path) -> Self {
+        self.mods.retain(|m| m.dir != dir || !m.skipped.is_empty());
+        self
+    }
+
+    /// The report as log lines: one short line with no mods, else a block per mod with counts and up to `REPORT_LIST` files per category.
+    pub fn lines(&self) -> Vec<String> {
+        if self.mods.is_empty() {
+            return vec!["mods: none (vanilla)".into()];
+        }
+        let list = |names: &[String]| -> String {
+            let mut s = names.iter().take(REPORT_LIST).cloned().collect::<Vec<_>>().join(", ");
+            if names.len() > REPORT_LIST {
+                s += &format!(", +{} more", names.len() - REPORT_LIST);
+            }
+            s
+        };
+        let mut out = vec![format!("mods: {} loaded", self.mods.len())];
+        for m in &self.mods {
+            let version = if m.version.is_empty() { String::new() } else { format!(" {}", m.version) };
+            out.push(format!("  {}{version} ({})", m.name, m.dir.display()));
+            for (label, files) in [("overrides", &m.overrides), ("merges", &m.merged), ("extends", &m.extends), ("adds", &m.added)] {
+                if !files.is_empty() {
+                    out.push(format!("    {label} {}: {}", files.len(), list(files)));
+                }
+            }
+            if !m.skipped.is_empty() {
+                out.push(format!("    skipped {}:", m.skipped.len()));
+                for (f, why) in m.skipped.iter().take(REPORT_LIST) {
+                    out.push(format!("      {f}: {why}"));
+                }
+                if m.skipped.len() > REPORT_LIST {
+                    out.push(format!("      +{} more", m.skipped.len() - REPORT_LIST));
+                }
+            }
+        }
+        out
+    }
+
+    pub fn log(&self) {
+        for l in self.lines() {
+            eprintln!("{l}");
+        }
+    }
 }
 
 /// Marks a `PROCYON_OVERLAY` folder as one the game built, and so may delete and rebuild.
@@ -139,13 +225,21 @@ fn disposable(dir: &Path) -> bool {
     dir.join(OVERLAY_MARK).exists() || std::fs::read_dir(dir).map_or(true, |mut d| d.next().is_none())
 }
 
-/// Builds the overlay and returns its root; with no mods returns `base` unchanged.
-pub fn overlay(base: &Path, mods: &[PathBuf]) -> PathBuf {
+/// Builds the overlay and returns its root; with no mods returns `base` unchanged. `own`: a folder of the launch's own
+/// (PROCYON_OVERLAY, read by the caller: the tools give each checkout and each parallel run one, so runs sharing an import do not
+/// rebuild each other's tree); else `<base>/../local/overlay`.
+pub fn overlay(base: &Path, mods: &[PathBuf], own: Option<PathBuf>) -> PathBuf {
+    let (root, report) = overlay_report(base, mods, own);
+    report.log();
+    root
+}
+
+/// `overlay` that returns what it did instead of printing it.
+pub fn overlay_report(base: &Path, mods: &[PathBuf], own: Option<PathBuf>) -> (PathBuf, ModReport) {
+    let mut report = ModReport::default();
     if mods.is_empty() {
-        return base.to_path_buf();
+        return (base.to_path_buf(), report);
     }
-    // PROCYON_OVERLAY: a launch of its own (tools/autoplay.py --jobs) so parallel runs do not rebuild each other's tree.
-    let own = std::env::var_os("PROCYON_OVERLAY").map(PathBuf::from);
     if let Some(dir) = &own {
         assert!(disposable(dir), "PROCYON_OVERLAY {} holds files that are not an overlay; refusing to delete it", dir.display());
     }
@@ -163,65 +257,51 @@ pub fn overlay(base: &Path, mods: &[PathBuf]) -> PathBuf {
         link(&base.join(rel), &to);
     }
     for m in mods {
+        let modname = m.file_name().map_or_else(|| m.to_string_lossy().into_owned(), |n| n.to_string_lossy().into_owned());
+        let mut entry = ModEntry { name: modname.clone(), dir: m.clone(), ..Default::default() };
         let mut mf = vec![];
         walk(m, Path::new(""), &mut mf);
+        // A JSON file that does not parse is skipped with one error line naming file and mod (the base file stays); the
+        // rest of the mod still loads. Parsed once here: extends detection and the merge below reuse it.
+        let mut docs: HashMap<PathBuf, Value> = HashMap::new();
+        mf.retain(|rel| {
+            if rel.extension().is_none_or(|e| e != "json") {
+                return true;
+            }
+            match crate::data::load_as::<Value>(&m.join(rel), Some(&modname)) {
+                Ok(v) => {
+                    docs.insert(rel.clone(), v);
+                    true
+                }
+                Err(e) => {
+                    entry.skipped.push((rel.to_string_lossy().replace('\\', "/"), e.to_string()));
+                    false
+                }
+            }
+        });
         // Files that extend another go last (stable sort over sorted names), so they see sibling mod files, not only the base.
         // shortcut: one level; a chain of extends inside one mod needs a topological order.
         mf.sort();
-        mf.sort_by_key(|r| read(&m.join(r)).is_some_and(|v| v.get("extends").is_some()));
+        mf.sort_by_key(|r| docs.get(r).is_some_and(|v| v.get("extends").is_some()));
         for rel in mf {
             let (from, to) = (m.join(&rel), root.join(&rel));
-            std::fs::create_dir_all(to.parent().unwrap()).unwrap();
             let name = rel.to_string_lossy().replace('\\', "/");
-            if name == "mod.json" {
-                let v = read(&from).unwrap_or_default();
-                eprintln!("mod {} {} {}", v["name"].as_str().unwrap_or(&m.to_string_lossy()), v["version"].as_str().unwrap_or(""), v["description"].as_str().unwrap_or(""));
-                continue;
-            }
-            if MERGED.contains(&name.as_str()) {
-                let mut b = read(&root.join(&rel)).unwrap_or(Value::Null);
-                if !b.is_object() {
-                    b = Value::Object(Default::default())
+            let existed = to.exists();
+            match apply_file(&name, &from, &to, base, docs.get(&rel)) {
+                Ok(Applied::Meta) => {
+                    let meta = docs.get(&rel);
+                    let text = |k: &str| meta.and_then(|v| v[k].as_str()).filter(|s| !s.is_empty()).map(str::to_string);
+                    entry.name = text("name").unwrap_or(entry.name);
+                    entry.version = text("version").unwrap_or_default();
                 }
-                merge(&mut b, &read(&from).unwrap_or_default());
-                let _ = std::fs::remove_file(&to);
-                std::fs::write(&to, serde_json::to_string(&b).unwrap()).unwrap();
-                continue;
-            }
-            if let (true, Some(v)) = (name.ends_with(".json"), read(&from).filter(|v| v.get("extends").is_some())) {
-                let parent = v["extends"].as_str().unwrap_or_default();
-                // ships/<id>/ship.json extends ships/<parent>/ship.json; other files extend a sibling <parent>.json.
-                let base = match name.split('/').count() == 3 && (name.starts_with("ships/") || name.starts_with("maps/")) {
-                    true => to.parent().and_then(Path::parent).map(|d| d.join(parent).join(to.file_name().unwrap())).unwrap_or_default(),
-                    false => to.with_file_name(format!("{parent}.json")),
-                };
-                let mut b = read(&base).unwrap_or_else(|| panic!("mod {}: extends unknown '{parent}'", m.display()));
-                merge(&mut b, &v);
-                b.as_object_mut().unwrap().remove("extends");
-                // "set": {"/engines/0/fx": "X"} replaces single values inside arrays, which a merge cannot reach.
-                if let Some(Value::Object(set)) = b.as_object_mut().unwrap().remove("set") {
-                    for (ptr, value) in set {
-                        match b.pointer_mut(&ptr) {
-                            Some(slot) => *slot = value,
-                            None => panic!("mod {}: {name} sets '{ptr}', which does not exist", m.display()),
-                        }
-                    }
-                }
-                let _ = std::fs::remove_file(&to);
-                std::fs::write(&to, serde_json::to_string(&b).unwrap()).unwrap();
-            } else if name.ends_with(".glb") && (name.starts_with("ships/") || name.starts_with("models/")) {
-                // A model that names retail textures (`retail:<name>`) gets them from the player's import (retail_tex.rs).
-                match std::fs::read(&from).ok().and_then(|bytes| crate::retail_tex::bake(&bytes, base)) {
-                    Some(baked) => {
-                        let _ = std::fs::remove_file(&to);
-                        std::fs::write(&to, baked).unwrap();
-                    }
-                    None => link(&from, &to),
-                }
-            } else {
-                link(&from, &to);
+                Ok(Applied::Merged) => entry.merged.push(name),
+                Ok(Applied::Extends) => entry.extends.push(name),
+                Ok(Applied::Placed) if existed => entry.overrides.push(name),
+                Ok(Applied::Placed) => entry.added.push(name),
+                Err(e) => entry.skipped.push((name, e)),
             }
         }
+        report.mods.push(entry);
     }
     // Ships the mods bring get the UI art their model implies, unless they ship their own (shipart.rs).
     let mut ids: Vec<String> =
@@ -229,12 +309,91 @@ pub fn overlay(base: &Path, mods: &[PathBuf]) -> PathBuf {
     ids.sort();
     ids.dedup();
     crate::shipart::generate(&root, &ids);
-    root
+    (root, report)
+}
+
+/// Puts one mod file into the overlay at `to`. An `Err` leaves the base file in place; the caller logs it and goes on.
+/// `doc`: the file's parsed JSON, for a `.json` file.
+fn apply_file(name: &str, from: &Path, to: &Path, base: &Path, doc: Option<&Value>) -> Result<Applied, String> {
+    fn io(what: &'static str) -> impl Fn(std::io::Error) -> String {
+        move |e| format!("{what}: {e}")
+    }
+    if let Some(dir) = to.parent() {
+        std::fs::create_dir_all(dir).map_err(io("cannot create the overlay folder"))?;
+    }
+    let write = |v: &Value| -> Result<(), String> {
+        let text = serde_json::to_string(v).map_err(|e| format!("cannot write the merged file: {e}"))?;
+        let _ = std::fs::remove_file(to);
+        std::fs::write(to, text).map_err(io("cannot write the merged file"))
+    };
+    if name == "mod.json" {
+        return Ok(Applied::Meta);
+    }
+    if MERGED.contains(&name) {
+        // The file earlier layers left in the overlay; a missing one starts empty, an unreadable one is an error.
+        let mut b = if to.exists() { crate::data::load_as::<Value>(to, None).map_err(|e| e.to_string())? } else { Value::Null };
+        if !b.is_object() {
+            b = Value::Object(Default::default())
+        }
+        merge(&mut b, doc.unwrap_or(&Value::Null));
+        return write(&b).map(|()| Applied::Merged);
+    }
+    if let (true, Some(v)) = (name.ends_with(".json"), doc.filter(|v| v.get("extends").is_some())) {
+        let parent = v["extends"].as_str().unwrap_or_default();
+        // ships/<id>/ship.json extends ships/<parent>/ship.json; other files extend a sibling <parent>.json.
+        let parent_path = match name.split('/').count() == 3 && (name.starts_with("ships/") || name.starts_with("maps/")) {
+            true => to.parent().and_then(Path::parent).zip(to.file_name()).map(|(d, f)| d.join(parent).join(f)),
+            false => Some(to.with_file_name(format!("{parent}.json"))),
+        }
+        .ok_or_else(|| format!("cannot place the file extended by '{parent}'"))?;
+        if !parent_path.exists() {
+            return Err(format!("extends unknown '{parent}' (no {})", parent_path.display()));
+        }
+        let mut b = crate::data::load_as::<Value>(&parent_path, None).map_err(|e| format!("extends '{parent}': {e}"))?;
+        merge(&mut b, v);
+        let obj = b.as_object_mut().ok_or_else(|| format!("extends '{parent}', which is not a JSON object"))?;
+        obj.remove("extends");
+        // "set": {"/engines/0/fx": "X"} replaces single values inside arrays, which a merge cannot reach.
+        if let Some(Value::Object(set)) = obj.remove("set") {
+            for (ptr, value) in set {
+                match b.pointer_mut(&ptr) {
+                    Some(slot) => *slot = value,
+                    None => return Err(format!("sets '{ptr}', which does not exist")),
+                }
+            }
+        }
+        return write(&b).map(|()| Applied::Extends);
+    }
+    if name.ends_with(".glb") && (name.starts_with("ships/") || name.starts_with("models/")) {
+        // A model that names retail textures (`retail:<name>`) gets them from the player's import (retail_tex.rs).
+        match std::fs::read(from).ok().and_then(|bytes| crate::retail_tex::bake(&bytes, base)) {
+            Some(baked) => {
+                let _ = std::fs::remove_file(to);
+                std::fs::write(to, baked).map_err(io("cannot write the baked model"))?;
+            }
+            None => link(from, to),
+        }
+    } else {
+        link(from, to);
+    }
+    Ok(Applied::Placed)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_merged_list_in_docs_modding_md_is_this_one() {
+        let doc = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("../docs/modding.md")).unwrap();
+        let row = doc.lines().find(|l| l.contains("**merged**, deep")).expect("the merge rule row of docs/modding.md");
+        let mut listed: Vec<&str> = row.split('|').nth(1).unwrap().split('`').skip(1).step_by(2).collect();
+        let mut code: Vec<&str> = MERGED.to_vec();
+        listed.sort();
+        code.sort();
+        assert_eq!(listed, code, "docs/modding.md and modding::MERGED list different files");
+    }
+
     #[test]
     fn only_an_empty_or_marked_folder_may_be_rebuilt_as_an_overlay() {
         let dir = std::env::temp_dir().join(format!("procyon_overlay_guard_{}", std::process::id()));
@@ -259,7 +418,7 @@ mod tests {
         std::fs::write(base.join("data/a.json"), r#"{"x": 1, "y": 1}"#).unwrap();
         std::fs::write(m.join("data/a.json"), r#"{"x": 2}"#).unwrap();
         std::fs::write(m.join("data/b.json"), r#"{"extends": "a", "y": 3}"#).unwrap();
-        let root = overlay(&base, &[m]);
+        let root = overlay(&base, &[m], None);
         let b: Value = read(&root.join("data/b.json")).unwrap();
         assert_eq!((b["x"].as_i64(), b["y"].as_i64()), (Some(2), Some(3)), "b extends the mod's own a.json, not the base one");
         // overlay files may be links to the base: replacing one must never write through to the original
@@ -317,7 +476,7 @@ mod tests {
         }
         std::fs::write(base.join("data/collision.json"), r#"{"Island01": {"min": [0, 0, 0], "max": [1, 1, 1]}}"#).unwrap();
         std::fs::write(m.join("data/collision.json"), r#"{"Island_Ours": {"min": [0, 0, 0], "max": [2, 2, 2]}}"#).unwrap();
-        let c: Value = read(&overlay(&base, &[m]).join("data/collision.json")).unwrap();
+        let c: Value = read(&overlay(&base, &[m], None).join("data/collision.json")).unwrap();
         assert!(c["Island01"].is_object() && c["Island_Ours"].is_object(), "a mod's scenery type is added beside the retail ones");
         std::fs::remove_dir_all(dir).unwrap();
     }
@@ -330,7 +489,7 @@ mod tests {
         }
         std::fs::write(base.join("data/docks.json"), r#"{"Base_X": {"points": [{"label": "DockPoint1", "pos": [0, 0, 0], "yaw": 0}], "tender": true}}"#).unwrap();
         std::fs::write(m.join("data/docks.json"), r#"{"FerrumTown": {"points": [{"label": "Berth1", "pos": [1, 2, 0], "yaw": 1.5}], "tender": true}}"#).unwrap();
-        let c: Value = read(&overlay(&base, &[m]).join("data/docks.json")).unwrap();
+        let c: Value = read(&overlay(&base, &[m], None).join("data/docks.json")).unwrap();
         assert!(c["Base_X"]["points"].is_array() && c["FerrumTown"]["points"].is_array(), "a mod's dock points are added beside the retail ones");
         std::fs::remove_dir_all(dir).unwrap();
     }
@@ -343,9 +502,62 @@ mod tests {
         }
         std::fs::write(base.join("data/a.json"), r#"{"list": [{"fx": "x", "pos": 1}, {"fx": "y"}]}"#).unwrap();
         std::fs::write(m.join("data/a.json"), r#"{"extends": "a", "set": {"/list/1/fx": "z"}}"#).unwrap();
-        let root = overlay(&base, &[m]);
+        let root = overlay(&base, &[m], None);
         let a: Value = read(&root.join("data/a.json")).unwrap();
         assert_eq!(a, serde_json::json!({"list": [{"fx": "x", "pos": 1}, {"fx": "z"}]}));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+    /// A synthetic base + one mod in a temp dir; `files` are the mod's (path, text). Returns the overlay root and the stderr-free state.
+    fn bad_mod(tag: &str, base_files: &[(&str, &str)], files: &[(&str, &str)]) -> (PathBuf, PathBuf) {
+        let dir = std::env::temp_dir().join(format!("procyon-mod-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        for (root, list) in [("assets", base_files), ("mod", files)] {
+            for (f, text) in list {
+                let p = dir.join(root).join(f);
+                std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+                std::fs::write(p, text).unwrap();
+            }
+        }
+        let root = overlay(&dir.join("assets"), &[dir.join("mod")], None);
+        (dir, root)
+    }
+    #[test]
+    fn bad_json_in_a_merged_file_is_skipped_and_the_base_file_survives() {
+        let (dir, root) = bad_mod(
+            "bad-merged",
+            &[("data/collision.json", r#"{"Island01": 1}"#), ("data/a.json", r#"{"x": 1}"#)],
+            &[("data/collision.json", "Island_Ours: not json"), ("data/a.json", r#"{"x": 2}"#)],
+        );
+        let c: Value = read(&root.join("data/collision.json")).unwrap();
+        assert_eq!(c, serde_json::json!({"Island01": 1}), "neither an empty value nor a half merge");
+        assert_eq!(read(&root.join("data/a.json")).unwrap()["x"], 2, "the mod's other files still load");
+        let e = crate::data::load_as::<Value>(&dir.join("mod/data/collision.json"), Some("mod")).unwrap_err().to_string();
+        assert!(e.contains("collision.json") && e.contains("mod \"mod\"") && e.contains("line 1 column"), "{e}");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn bad_json_in_mod_json_does_not_stop_the_mod_or_panic() {
+        let (dir, root) = bad_mod("bad-modjson", &[("data/a.json", r#"{"x": 1}"#)], &[("mod.json", "not json"), ("data/a.json", r#"{"x": 2}"#)]);
+        assert_eq!(read(&root.join("data/a.json")).unwrap()["x"], 2);
+        assert!(!root.join("mod.json").exists());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn bad_json_in_an_extends_file_and_a_bad_extends_leave_the_base_file() {
+        let (dir, root) = bad_mod(
+            "bad-extends",
+            &[("data/a.json", r#"{"x": 1}"#), ("data/c.json", r#"{"x": 1}"#), ("data/d.json", r#"{"list": [1]}"#)],
+            &[
+                ("data/a.json", "extends a, not json"),
+                ("data/b.json", r#"{"extends": "missing", "y": 1}"#),
+                ("data/c.json", r#"{"extends": "c", "y": 3}"#),
+                ("data/d.json", r#"{"extends": "d", "set": {"/list/5": 1}}"#),
+            ],
+        );
+        assert_eq!(read(&root.join("data/a.json")).unwrap(), serde_json::json!({"x": 1}), "unparsable extends file: base stays");
+        assert!(!root.join("data/b.json").exists(), "unknown parent: nothing added");
+        assert_eq!(read(&root.join("data/c.json")).unwrap(), serde_json::json!({"x": 1, "y": 3}), "a good extends file in the same mod still applies");
+        assert_eq!(read(&root.join("data/d.json")).unwrap(), serde_json::json!({"list": [1]}), "a set path that does not exist leaves the base");
         std::fs::remove_dir_all(dir).unwrap();
     }
     #[test]
@@ -354,5 +566,74 @@ mod tests {
         merge(&mut b, &serde_json::json!({"physics": {"MaxSpeed": 20.0}}));
         assert_eq!(b["physics"]["MaxSpeed"], 20.0);
         assert_eq!(b["physics"]["Mass"], 5);
+    }
+    /// Temp dir with a base and a mod from (path, text) lists; returns (dir, report).
+    fn report_for(tag: &str, base_files: &[(&str, &str)], files: &[(&str, &str)]) -> (PathBuf, ModReport) {
+        let dir = std::env::temp_dir().join(format!("procyon-mod-report-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        for (root, list) in [("assets", base_files), ("mod", files)] {
+            for (f, text) in list {
+                let p = dir.join(root).join(f);
+                std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+                std::fs::write(p, text).unwrap();
+            }
+        }
+        let (_, report) = overlay_report(&dir.join("assets"), &[dir.join("mod")], None);
+        (dir, report)
+    }
+    #[test]
+    fn report_sorts_files_into_override_merge_extends_added_and_skipped() {
+        let (dir, r) = report_for(
+            "all",
+            &[("data/a.json", r#"{"x": 1}"#), ("data/collision.json", "{}"), ("data/base.json", r#"{"y": 1}"#)],
+            &[
+                ("mod.json", r#"{"name": "Demo", "version": "2.1"}"#),
+                ("data/a.json", r#"{"x": 2}"#),
+                ("data/collision.json", r#"{"K": 1}"#),
+                ("data/child.json", r#"{"extends": "base", "y": 2}"#),
+                ("data/new.json", "{}"),
+                ("data/broken.json", "not json"),
+            ],
+        );
+        let m = &r.mods[0];
+        assert_eq!((m.name.as_str(), m.version.as_str()), ("Demo", "2.1"));
+        assert_eq!(m.overrides, ["data/a.json"]);
+        assert_eq!(m.merged, ["data/collision.json"]);
+        assert_eq!(m.extends, ["data/child.json"]);
+        assert_eq!(m.added, ["data/new.json"]);
+        assert_eq!(m.skipped.len(), 1);
+        assert!(m.skipped[0].0 == "data/broken.json" && m.skipped[0].1.contains("line 1 column"), "{:?}", m.skipped);
+        let text = r.lines().join("\n");
+        assert!(text.contains("Demo 2.1") && text.contains("overrides 1: data/a.json") && text.contains("skipped 1:"), "{text}");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn report_skips_a_bad_extends_with_the_loader_error() {
+        let (dir, r) = report_for("badext", &[], &[("data/c.json", r#"{"extends": "nope"}"#)]);
+        assert!(r.mods[0].skipped[0].1.contains("extends unknown 'nope'"), "{:?}", r.mods[0].skipped);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn report_caps_long_lists_and_names_the_rest() {
+        let files: Vec<(String, String)> = (0..20).map(|i| (format!("data/f{i:02}.json"), "{}".into())).collect();
+        let base: Vec<(&str, &str)> = files.iter().map(|(f, t)| (f.as_str(), t.as_str())).collect();
+        let (dir, r) = report_for("cap", &base, &base);
+        assert_eq!(r.mods[0].overrides.len(), 20);
+        let lines = r.lines();
+        assert!(lines.len() < 8, "{lines:?}");
+        assert!(lines.iter().any(|l| l.contains("overrides 20:") && l.contains("+12 more")), "{lines:?}");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn report_for_no_mods_is_one_short_line() {
+        let (root, r) = overlay_report(Path::new("nowhere"), &[], None);
+        assert_eq!(root, Path::new("nowhere"));
+        assert_eq!(r.lines(), ["mods: none (vanilla)"]);
+        // a clean layer of the game's own is dropped from the report; one that skipped something stays
+        let own = PathBuf::from("content");
+        let clean = ModReport { mods: vec![ModEntry { dir: own.clone(), ..Default::default() }] };
+        assert!(clean.without(&own).mods.is_empty());
+        let bad = ModReport { mods: vec![ModEntry { dir: own.clone(), skipped: vec![("a".into(), "b".into())], ..Default::default() }] };
+        assert_eq!(bad.without(&own).mods.len(), 1);
     }
 }

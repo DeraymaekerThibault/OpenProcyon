@@ -300,6 +300,45 @@ fn every_word_the_parser_accepts_is_in_the_table() {
     assert!(seen > 40, "the scan found only {seen} command words: did the parser's layout change?");
 }
 
+/// The table's `about` text cites rule Types by name. Each must still exist in `RULE_TYPES` (a rename there fails here), and each
+/// must still be cited by the table (a rename here fails too), so the free text cannot drift from the vocabulary.
+#[test]
+fn the_rule_types_the_table_cites_exist_in_the_vocabulary() {
+    const CITED: &[&str] = &[
+        "Break Tow",
+        "Damage Group/Unit by X percent",
+        "Destroy Group/Unit",
+        "End Game",
+        "Goto Next Level",
+        "GroupA to attack GroupB",
+        "NIS End",
+        "OP Set Counter",
+        "OP Wait",
+        "Play Music Track",
+        "Play speech event",
+        "Set Flag Action",
+        "Set Fleet Primary Ship",
+        "Set Group/Unit AI Stance",
+        "Set Group/Unit Visibility",
+        "Set Group/Unit Vulnerability",
+        "Speech Event Played Once",
+        "Start Timer",
+        "Stop Timer",
+        "Tow Ship",
+    ];
+    let text: String = TABLE.iter().map(|e| format!("{} {}\n", e.usage, e.about)).collect();
+    for name in CITED {
+        assert!(schema::RULE_TYPES.iter().any(|t| t.name == *name), "'{name}' is not in RULE_TYPES");
+        assert!(text.contains(name), "'{name}' is no longer cited by the console table; update CITED");
+    }
+    // Anything in the vocabulary the table also cites must be listed, so a new citation gets pinned.
+    for t in schema::RULE_TYPES {
+        if text.contains(t.name) {
+            assert!(CITED.contains(&t.name), "the console table cites '{}': add it to CITED", t.name);
+        }
+    }
+}
+
 #[test]
 fn help_lists_commands_by_group_and_marks_the_cheats() {
     let all = help_lines(None).join("\n");
@@ -461,4 +500,54 @@ fn fps_is_in_the_help_table_and_tab_offers_on_and_off() {
     let c = completions("fps o", &Names::default());
     let shown: Vec<&str> = c.items.iter().map(|i| i.0.as_str()).collect();
     assert_eq!(shown, vec!["on", "off"]);
+}
+
+/// Every row of `KEYS` (the `help` text) names keys `Console::key_with` really acts on, and a new row must be added here.
+#[test]
+fn the_keys_help_lists_match_what_key_with_does() {
+    // Each effect is measured on a console that has lines, history and a completable word, so a dead key shows no change.
+    fn state(c: &Console) -> (String, usize, Option<Edit>) {
+        (c.line.clone(), c.scroll, None)
+    }
+    let fresh = || {
+        let mut c = console_with(100);
+        c.history = vec!["first".into(), "second".into()];
+        c.line = "rep".into();
+        c
+    };
+    // (the word `KEYS` uses, the key, Ctrl held, a console set up so that the key must change the line or the scroll)
+    let setup_scrolled = || {
+        let mut c = fresh();
+        c.scroll_by(10);
+        c
+    };
+    let cases: Vec<(&str, Key, bool, Console)> = vec![
+        ("Tab", Key::Tab, false, fresh()),
+        ("Up", Key::ArrowUp, false, fresh()),
+        ("Down", Key::ArrowDown, false, fresh()),
+        ("PageUp", Key::PageUp, false, fresh()),
+        ("PageDown", Key::PageDown, false, setup_scrolled()),
+        ("Ctrl+Home", Key::Home, true, fresh()),
+        ("Ctrl+End", Key::End, true, setup_scrolled()),
+    ];
+    let mut covered = std::collections::HashSet::new();
+    for (name, key, ctrl, mut c) in cases {
+        let before = state(&c);
+        c.key_with(&key, ctrl);
+        assert_ne!(state(&c), before, "{name} is listed in KEYS but key_with does nothing with it");
+        covered.insert(name);
+    }
+    let mut c = fresh();
+    assert_eq!(c.key_with(&Key::Escape, false), Edit::Close, "Escape closes");
+    covered.insert("Escape");
+    // Every key word in KEYS must be one of the cases above (the mouse wheel and the console key are handled in the system, not here).
+    for (keys, _) in KEYS {
+        for word in keys.split(|ch: char| ch == '/' || ch == ',' || ch == ' ').filter(|w| !w.is_empty()) {
+            let known = covered.contains(word) || ["or", "the", "console", "key", "mouse", "wheel"].contains(&word);
+            assert!(known, "KEYS lists '{word}' but this test does not exercise it: add a case");
+        }
+    }
+    for want in covered {
+        assert!(KEYS.iter().any(|(k, _)| k.contains(want)), "key_with handles {want} but KEYS does not list it");
+    }
 }

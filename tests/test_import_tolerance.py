@@ -7,7 +7,7 @@ from collections import defaultdict
 from pathlib import Path
 from unittest import mock
 
-from tools import export_combat, export_saves
+from tools import export_bases, export_combat, export_saves, importlog
 from tools.export_campaign import parse_mission
 from tools.gamefs import ci_files
 from tools.mdb import MdbError
@@ -57,7 +57,7 @@ class ImportTolerance(unittest.TestCase):
             load=mock.DEFAULT,
             scene_name=mock.Mock(return_value="S"),
             hardpoints=mock.Mock(return_value=[]),
-            parse_msb=mock.Mock(return_value=[]),
+            parse_scene_file=mock.Mock(return_value=[]),
             ci_file=mock.DEFAULT,
             associations=lambda _, kind: mounts if kind == "GunPlacement" else [],
             flat=lambda _: defaultdict(float, {"BulletTypeName_Primary": "B"}),
@@ -69,6 +69,32 @@ class ImportTolerance(unittest.TestCase):
         self.assertEqual(j["gun_defs"], {})
         self.assertEqual(j["guns"], [])
         self.assertEqual(len(j["skipped_guns"]), 2)
+
+    def test_render_only_base_is_scenery_not_a_failed_export(self):
+        # Base_Cresentia (#557): no guns and no damage sections, drawn from its scene GLB. It must not reach the class export,
+        # whose sphere fallback needs sections, nor show as a skipped file. A gunless base with a section is still exported.
+        kinds = {"Base_Scenery": [], "Base_Gate": ["DamageSection"]}
+        with tempfile.TemporaryDirectory() as d:
+            wdir = Path(d) / "data/weapons"
+            wdir.mkdir(parents=True)
+            for f in ("guns.json", "bullets.json"):
+                (wdir / f).write_text("{}")
+            exported = mock.Mock(
+                return_value=dict(guns=[], sections=[], gun_defs={}, bullets={})
+            )
+            importlog.start()
+            with mock.patch.multiple(
+                export_bases,
+                ci_files=lambda _, p: [
+                    Path(f"{n}.wot") for n in kinds if p == "Base_*.wot"
+                ],
+                load=lambda _, name: kinds[name],
+                associations=lambda nodes, kind: [kind] if kind in nodes else [],
+                export=exported,
+            ):
+                export_bases.export_bases("root", d)
+        self.assertEqual([c.args[1] for c in exported.call_args_list], ["Base_Gate"])
+        self.assertEqual(importlog.count(importlog.SKIPPED), 0)
 
 
 if __name__ == "__main__":

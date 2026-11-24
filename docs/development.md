@@ -11,11 +11,18 @@ Git Bash (`GIT_BASH=<path>` if it is not in the default place), and the screensh
 2. Put editable gameplay changes in `mods/`; change exporters only when the retail conversion is wrong.
 3. Add a small regression test for new logic. Prefer synthetic parser tests and pure mission-rule tests over long simulations.
 4. Run the relevant tests while iterating, then `make check` before committing.
-5. For ECS wiring or UI changes, also run a screenshot smoke test. Unit tests do not detect every Bevy query conflict or layout problem. `make smokes` runs every documented smoke with its arguments (`tools/smokes.sh`; add new smokes to its list).
+5. For ECS wiring or UI changes, also run a screenshot smoke test. Unit tests do not detect every Bevy query conflict or layout problem. `make smokes [ARGS="--jobs N"]` runs every documented smoke with its arguments (`tools/smokes.sh`; add new smokes to its list with
+   a `kind`: `asserts` for a script that logs a PASS line when its checks held (the run fails without it), `visual` otherwise). It builds
+   once, runs the binary, plays N at once (default: half the cores; each run has its own display, scratch `XDG_DATA_HOME` and mod overlay)
+   and ends with one line (`smokes: 22 ok, 2 FAIL: dock, fleet (...)`); a failure prints its last relevant log lines and the rerun command.
+   `make smoke WHAT=changed` runs only the smokes that the files changed against the merge base with origin/main (and uncommitted ones)
+   map to; the map is `MAP` in `tools/smokes.py` (combat, ship: battle check + damage, target, course; rules, campaign: briefing-skip,
+   lifeboat-m1, storm-m3, hunt-m3; docking, boarding: dock + battle check; classic, panels, menu: pause, fleet, mods; fx, render: fxtest;
+   lib.rs, loading, smoke/: everything). `WHAT=<regex>` picks smokes by name.
    `make autoplay [ARGS="1 2"]` (`tools/autoplay.py`) plays campaign missions with the `--script mission` autopilot and prints a
    table per mission: outcome (won, lost, time limit, stuck in NIS, panic), peak entities/particles, slowest frame and how many
    mission rules never fired (named in the log). It finds crashes and soft-locks, not fidelity problems.
-   `make battles [ARGS=ambush]` (`tools/battle_check.py`, part of `make check` when assets are imported) plays short skirmishes with
+   `make battles [ARGS=ambush]` (`tools/battle_check.py [--jobs N]`, part of `make check --full` when assets are imported; stutter is judged only with `--jobs 1`) plays short skirmishes with
    fixed fleets at 16x and fails when one stops behaving like a battle: a side never fires or hits, a computer ship parks, a ship
    grinds on scenery, or the game panics. The game writes one `battle report {json}` line (`PROCYON_REPORT=<game s>`,
    `smoke/report.rs`); read it before adding print statements. When a change touches targeting, steering or what counts as a
@@ -28,7 +35,7 @@ Git Bash (`GIT_BASH=<path>` if it is not in the default place), and the screensh
    `Script::act` / `Script::cond`, so every action a mission can use works (`act {json}`), and a new action needs nothing here.
    Short commands only build the common ones (`god`, `kill`, `reveal`, `tp`, `set`, `timer`, `task`); `repair` has no rule action and
    touches the ships directly; `fire`, `why` (the rule trace's `Script::explain`, asked once), `flags`, `timers`, `tasks` are the mission-debug commands, and `schema <text>` prints a Type's fields from `rules/eval/schema.rs`, which `act` / `cond` also check their JSON against (`help` lists them; Tab completes the command word, then the arguments: rule, group, point set, flag, timer, task and counter names from the mission, schema Types, and inside act / cond JSON the Type, field names and a field's values; repeated Tab cycles, several matches are listed; a name the mission does not have is refused with the closest one; a name with spaces goes in "quotes" and Tab adds them; the code is rules/console/complete.rs). Mission flow (`rules`, `skip`, `nis end`, `win`, `lose`, `restart`), ships and inspection (`ships`, `inspect`, `primary`, `damage`, `attack`, `stance`, `ally`, `hostile`, `tow`, `untow`), authoring (`where`, `mark`, `show` / `hide` volumes, paths and points, drawn as thin unlit boxes with UI labels because the build has no gizmos: `classic/console.rs`) and camera and sound (`cam free|player|follow`, `hud on|off`, `fps [on|off]`, `say`, `music`; `fps` measures frames from the real-time clock in `rules/console/fps.rs`, saves `Settings.fps` and is drawn by `classic/console.rs`) are in `rules/console/more.rs`; each uses a rule action through `Script::act` where one exists (`skip`, `restart`, the drawing and the free camera ask the ECS side through `Outcome`; `DevView` holds what is shown). `--script console-view --mission 2 --console --dist 1500 --pitch 1.3` is the runtime check for the drawing, the HUD switch and the free camera. `list <kind>` and `find <text>` print the names and ids a mission defines (`rules/console/list.rs`; queries); the output scrolls (`Console::scroll`, 2000 lines; the keys and wheel are in `systems/dev_console.rs`, the markers in `classic/console.rs`). `counters` / `counter <name> <value>` read and set the engine-added counters (`OP Set Counter`), `why` also says when a rule is inactive or waiting in an `OP Wait`, and `spawn` waits for an action that creates ships (none exists). It is
-   on in debug builds, and in release builds when the Display option "Developer Console" is on (off by default, saved in `settings.json` as `console`); `--console` or `PROCYON_CONSOLE=1` turn it on for one run without the option. `help` lists the commands from one table (`console::TABLE`), which Tab completion and the "did you mean" answer also read. Any command that changes the game sets
+   on in debug builds, and in release builds when the Display option "Developer Console" is on (off by default, saved in `settings.json` as `console`); `--console` or `PROCYON_CONSOLE=1` turn it on for one run without the option. `help` lists the commands from one table (`console::TABLE`), which Tab completion and the "did you mean" answer also read. The keys `help` lists under "Keys:" are `console::KEYS`; change it together with `Console::key_with` (a test checks they agree). Any command that changes the game sets
    `rules::console::Cheats::used` for the battle: the campaign points are not recorded then and the screen shows "CHEATS USED". A restart (R, `restart`, N) clears that mark and `god`; leaving the battle or loading another mission
    resets the developer view (`hud`, `cam`, `show`), a restart of the same mission keeps it.
    While it is open the battle is paused and the game sees no keyboard or mouse. Add a command by extending `console::parse`
@@ -36,7 +43,15 @@ Git Bash (`GIT_BASH=<path>` if it is not in the default place), and the screensh
    `PROCYON_TRACE=<file.csv>` (`smoke/trace.rs`) logs every ship (position, velocity, heading, section hit points) and every shell
    once per simulation step, in game axes: the table to lay beside a measurement of the original when a battle plays out
    differently (how close ships come, how often they fire and hit). Stage the same start points with a small mod that replaces
-   the map's `map.json`.
+   the map's `map.json`. Ships and shells are numbered by creation order (`SpawnIndex`) and `gt` restarts at 0 when a battle restarts,
+   so two runs compare row by row. Every battle logs `battle seed N`; `--seed N` or `PROCYON_SEED=N` replays it (`combat::SimRng`,
+   docs/re/tick.md).
+   `--fixed-step` (or `PROCYON_FIXED_STEP=1`) makes a scripted run reproducible: each frame is one 33 ms tick at 1x whatever
+   the frame rate, and the clock-seeded cosmetic draws (ship names, stars) use a fixed seed. Run twice, it gives the same
+   pictures and the same trace. `python3 -m tools.tracediff A.csv B.csv` compares two traces (one line per file, then the
+   first differing row). `python3 -m tools.visdiff` renders fixed-step scenes from the merge base (a warm worktree,
+   `../openprocyon-visdiff-base`) and from this checkout, and prints `same` or `CHANGED` per scene, with diff pictures in
+   `local/visdiff/`. Nothing is committed or uploaded. Both builds need `--fixed-step`, so the base must contain #535.
    Two kinds of scenario: a map with the `--ship/--allies/--enemies` shortcut (the human's own fleet; no lobby), and a lobby
    scenario (`--lobby "map=border_dispute;points=1000;limit=10;slots=human,7*computer"`, `menu/lobby_scenario.rs`) that sets the
    skirmish lobby up through the same model as its pull-downs, Auto Assign and Launch button. Only lobby scenarios play allied
@@ -60,18 +75,35 @@ Git Bash (`GIT_BASH=<path>` if it is not in the default place), and the screensh
 # No Make dependency required: these are the authoritative underlying commands.
 python3 -m tools.import_assets --game <install dir>   # once: convert your own copy of the game into assets/
 tools/check.sh
-cargo run --release --manifest-path game/Cargo.toml -- --mission 1
+cargo run --profile fast --manifest-path game/Cargo.toml -- --mission 1   # fast: near-release speed, incremental; release is for player builds
 python3 -m unittest discover -s tests -p 'test_export_hud.py'
-cargo test --release --manifest-path game/Cargo.toml panels::tests -- --include-ignored  # shared HUD; classic::panels::tests for the retail art
+cargo test --manifest-path game/Cargo.toml panels::tests -- --include-ignored  # shared HUD; classic::panels::tests for the retail art
 tools/shot.sh local/mission01.png --mission 1 --script briefing-skip --shot-frame 180   # --shot-frame 100,200 saves local/mission01_100.png, _200.png in one run; 1280x720; no late shot unless --late-frame N
 tools/shot.sh local/paused.png --map red_rover --script pause --shot-frame 50 --late-frame 0
 tools/shot.sh local/pause-restart.png --map red_rover --script pause-restart --shot-frame 90 --late-frame 0
 ```
 
-`make check` calls `tools/check.sh`: ruff format check and lint (Python, rules in `ruff.toml`) → rustfmt check → strict Clippy → Rust release tests → Python tests. Rust tests that need converted
+`make check` calls `tools/check.sh` (`make check ARGS=--quick` / `--full` pick a tier). The steps, cheapest first: ruff format check and
+lint (Python, rules in `ruff.toml`) → hygiene rules → Python tests → rustfmt check → strict Clippy → Rust tests; `--full` then builds the
+game and runs the startup smoke and the battle check.
+
+| Tier | When | Runs |
+|---|---|---|
+| `--quick` | while iterating | ruff and hygiene; rustfmt + Clippy if anything under `game/` or a `.rs` file changed, the Python tests if a `.py` file changed (against the merge base with `origin/main`, plus uncommitted and untracked files) |
+| default | before a commit | every step up to the Rust tests (asset tests with `--include-ignored` when an import exists) |
+| `--full` | before a push or PR | default + `fast` game build + startup smoke + battle check; fails without imported assets unless `--allow-partial` |
+
+Each step prints one line (`ok`/`FAIL`, name, seconds) and writes its full output to `local/check/<step>.log`; a failure prints its first
+20 relevant lines and the command to rerun. The last line is `GATE OK <tier> <time>`, `GATE FAIL <step> (<log>)` or
+`GATE PARTIAL ...` (no imported assets: it names what was skipped). Locally the gate unsets `CI`, which would turn Cargo's
+incremental builds off. One module's tests: `cargo test --manifest-path game/Cargo.toml --lib <module::path>`.
+Clippy and the tests build in the dev profile (incremental, debug assertions and overflow checks on); the startup smoke, `shot.sh`,
+`smokes.sh`, `battle_check` and `autoplay` build the game in the `fast` profile (release speed, incremental) and run
+`<target>/fast/openprocyon`. The `release` profile is only for player builds (`release.yml`); `battle_check --profile release`
+or `autoplay --profile release` times what players get. Rust tests that need converted
 assets are marked `#[ignore = "needs imported assets"]`; the gate runs them with `--include-ignored` when an import exists.
 Mark new Rust tests that load imported data with the same ignore reason, including tests that do so through helpers.
-Asset-free Rust tests always run. For a manual full run after importing, use `cargo test --release --manifest-path game/Cargo.toml -- --include-ignored`.
+Asset-free Rust tests always run. For a manual full run after importing, use `cargo test --manifest-path game/Cargo.toml -- --include-ignored`.
 Python tests that need the install or assets skip.
 `make fmt` formats Rust and Python (`ruff format`, `ruff check --fix`); it does not rewrite generated JSON. `python3 -m tools.format_json assets` formats asset JSON when needed.
 Shared sight smoke: `WAYLAND_DISPLAY= tools/shot.sh local/sight.png --script sight --allies Ship_Navy_Cutter --enemies Ship_Pirate_Schooner --shot-frame 135 --late-frame 0`; it freezes three ships and asserts group/range/cloak transitions against real radar widgets. This is wiring validation, not a campaign playthrough.
@@ -89,9 +121,12 @@ checks reveal/patrol without premature hunt, spotting/retreat without engagement
 so it does not validate the full retreat through scenery or combat. Current visual smoke: `tools/shot.sh local/m3-current.png --mission 3 --script current-m3 --shot-frame 90 --late-frame 0` places the ship on the current and checks two flowing ribbon layers.
 Diagnostics are off by default; simulation speed does not scale the frame-time measurement.
 Use a scratch `XDG_DATA_HOME` for automated campaign runs if the player's campaign-point save must remain untouched.
-Converted assets are found in this order: `PROCYON_ASSETS`, `assets/` in the source checkout (regardless of the working directory), then the
+Converted assets are found in this order: `PROCYON_ASSETS`, `assets/` in the source checkout (the checkout is found from the working directory or the executable: either must lie inside it), then the
 per-user folder `$XDG_DATA_HOME/openprocyon/assets` (Linux default `~/.local/share`; `%APPDATA%\openprocyon\assets` on Windows). Without
-any, the game exits with import instructions. `content/` is always layered on top. CLI mod/screenshot paths remain relative to the working directory.
+any, the game exits with import instructions. `content/` is always layered on top. The tools (tests, `check.sh`, `shot.sh`, `smokes.sh`,
+`battle_check`, `autoplay`) use one order, `find_assets()` in `tools/import_assets.py`: the game's, with the main checkout's `assets/`
+after this checkout's, so a linked worktree uses the main import (never copy `assets/`). They export it as `PROCYON_ASSETS` for the game;
+`check.sh` prints `ASSETS: <path>` or `ASSETS: missing`. CLI mod/screenshot paths remain relative to the working directory.
 
 ### Measuring a look
 
@@ -148,7 +183,7 @@ only in what is drawn:
 
 ```
 shared core + model      ship, combat/, collision, rules/, campaign, docking, boarding, scenario, data, modding, ...
-(the `openprocyon` lib)  menu.rs / panels.rs / options_menu.rs: UI state, Actions, marker components, input and their behaviour
+(the `openprocyon` lib)  menu.rs / panels.rs / options_menu.rs / pointer.rs (the one reader of the deprecated `Interaction`): UI state, Actions, marker components, input and their behaviour
         ▲
 classic/  (this binary)  retail-art views
 ```

@@ -3,7 +3,6 @@
 //! A view builds its widgets under one `HudRoot` and tags them with the markers below (`PanicButton`, `GunButton`, `Contact`, ...);
 //! this module gives them their behaviour: clicks, what the gauges read (`gauge_value`), radar contact placement (`Radar`), the
 //! docking/boarding status icon, the talking-head state (`HeadState`), pause and the game-speed buttons. Views only draw.
-#![allow(deprecated)] // shortcut: bevy 0.20 Interaction (deprecated for picking Hovered/Pressed); port with menu.rs when it is removed
 use bevy::prelude::*;
 
 use crate::bindings::Act;
@@ -41,6 +40,62 @@ pub fn cinematic(mission: Option<&crate::campaign::Mission>) -> bool {
     crate::briefing::active(mission) || crate::rules::nis(mission)
 }
 
+/// What the world HUD marks this frame, decided once here so every view draws the same things (views only place and fade them).
+#[derive(Resource, Default, Debug, PartialEq)]
+pub struct WorldMarks {
+    /// The ship or animal the target reticle stands on: the aimed target while the player flies the selected ship, else the target
+    /// the selected ship was ordered at; none when it is hidden, unseen or the HUD is off.
+    pub reticle: Option<Entity>,
+    /// The ships whose name banner may show (alive, visible to the mission, seen by the player, HUD on). A view still fades it with
+    /// the camera distance and the toggle, and hides it when the ship is off screen.
+    pub banners: std::collections::HashSet<Entity>,
+}
+
+/// The target the reticle marks: `aimed` (the player's own target) when the selected ship is the one flown, else its ordered one
+/// (a fleet pilot's order first, then a mission ship's).
+pub fn reticle_target(direct: bool, aimed: Option<Entity>, pilot_target: Option<Entity>, mission_target: Option<Entity>) -> Option<Entity> {
+    if direct { aimed } else { pilot_target.or(mission_target) }
+}
+
+/// Whether a ship's name banner may show.
+pub fn banner_allowed(destroyed: bool, mission_visible: bool, seen: bool, hud_off: bool) -> bool {
+    !hud_off && !destroyed && mission_visible && seen
+}
+
+#[allow(clippy::too_many_arguments)]
+fn decide_world_marks(
+    mut marks: ResMut<WorldMarks>,
+    target: Res<combat::Target>,
+    fleets: Res<crate::ship::Fleets>,
+    pilots: Query<&crate::ship::FleetPilot>,
+    ships: Query<(Entity, &Health, Option<&crate::campaign::MissionShip>), With<Ship>>,
+    animals: Query<&crate::environment::SpaceAnimal>,
+    sensors: Res<crate::environment::Sensors>,
+    mission: Option<Res<crate::campaign::Mission>>,
+) {
+    let hud_off = cinematic(mission.as_deref()) || crate::rules::console::hud_hidden();
+    let mut next = WorldMarks::default();
+    for (e, h, ms) in &ships {
+        if banner_allowed(h.destroyed, ms.is_none_or(|m| m.visible), sensors.player_sees(e, mission.as_deref()), hud_off) {
+            next.banners.insert(e);
+        }
+    }
+    if !hud_off {
+        let ordered = fleets.selected.map(|e| (pilots.get(e).ok().and_then(|p| p.target), ships.get(e).ok().and_then(|s| s.2.and_then(|m| m.target))));
+        let (pilot, mission_target) = ordered.unwrap_or((None, None));
+        next.reticle = reticle_target(fleets.direct(), target.0, pilot, mission_target).filter(|&e| {
+            let shown = match ships.get(e) {
+                Ok((_, h, ms)) => !h.destroyed && ms.is_none_or(|m| m.visible),
+                Err(_) => animals.get(e).is_ok_and(|a| a.visible),
+            };
+            shown && sensors.player_sees(e, mission.as_deref())
+        });
+    }
+    if *marks != next {
+        *marks = next;
+    }
+}
+
 /// Root of the view's HUD tree: hidden during cinematics, and clicks only count while it shows.
 #[derive(Component)]
 pub struct HudRoot;
@@ -72,7 +127,7 @@ pub struct SpeedLabel;
 #[derive(Component)]
 pub struct EngineDial;
 #[derive(Component)]
-pub struct EngineOrder(pub usize);
+pub struct EngineTab(pub crate::EngineOrder);
 /// Weapon panel container: shown or hidden by the weapon-bar toggle (button or key).
 #[derive(Component)]
 pub struct WeaponPanel;
@@ -211,6 +266,7 @@ fn fleet_model(
     model.cease_fire = f.is_some_and(|f| f.cease_fire);
 }
 
+#[allow(deprecated)] // Interaction, see pointer.rs
 fn fleet_input(
     mouse: Res<ButtonInput<MouseButton>>,
     model: Res<FleetHud>,
@@ -231,7 +287,7 @@ fn fleet_input(
     let hovered = buttons
         .iter()
         .find(|(_, b, i)| {
-            **i != Interaction::None
+            crate::pointer::over(i)
                 && match b {
                     FleetButton::Slot(n) => model.ships && model.rows.get(*n).is_some(),
                     FleetButton::Formation(_) | FleetButton::Attack | FleetButton::CeaseFire => model.commands,
@@ -346,6 +402,7 @@ pub fn plugin(app: &mut App) {
         .init_resource::<Talk>()
         .init_resource::<HeadState>()
         .init_resource::<FleetHud>()
+        .init_resource::<WorldMarks>()
         .init_resource::<ChatLog>()
         .add_systems(Update, chat_feed.run_if(in_state(crate::menu::Screen::Battle)))
         .configure_sets(Update, HudSet.after(crate::sprites::choose_skin).run_if(in_state(crate::menu::Screen::Battle)))
@@ -358,7 +415,8 @@ pub fn plugin(app: &mut App) {
                 .run_if(crate::menu::overlay_closed),
         )
         .add_systems(PreUpdate, name_toggle)
-        .add_systems(Update, (fleet_model, update_visibility, update_contacts, update_docking_status, talking_head, pause_button, speed_button).chain().in_set(HudSet));
+        .add_systems(Update, (fleet_model, update_visibility, update_contacts, update_docking_status, talking_head, pause_button, speed_button).chain().in_set(HudSet))
+        .add_systems(Update, decide_world_marks.in_set(HudSet).run_if(resource_exists::<combat::Target>));
 }
 
 /// `N` toggles the ship-name banners.
@@ -519,12 +577,13 @@ pub struct HudFocus<'w, 's> {
     menu: Option<Res<'w, crate::options_menu::OptionsMenu>>,
     sfx: Option<ResMut<'w, Messages<crate::audio::Sfx>>>,
     plot: Option<ResMut<'w, crate::course::Plot>>,
-    movement: Query<'w, 's, &'static Interaction, With<MovementButton>>,
+    movement: Query<'w, 's, &'static crate::pointer::Raw, With<MovementButton>>,
     crew: Option<Res<'w, crate::crew_arms::ScreenModel>>,
 }
 
 /// Clicks on the HUD: weapon-panel toggle (also W), panic, the ship icon (camera back to the player's ship) and the gun icons.
 /// `UiClick` tells the world to ignore clicks that land on the HUD.
+#[allow(deprecated)] // Interaction, see pointer.rs
 pub fn hud_input(
     keys: Res<ButtonInput<KeyCode>>,
     binds: Res<crate::bindings::Bindings>,
@@ -547,19 +606,19 @@ pub fn hud_input(
         return;
     }
     let shown = hud_shown(&visible);
-    ui.0 = shown && solid.iter().any(|i| *i != Interaction::None);
+    ui.0 = shown && solid.iter().any(crate::pointer::over);
     if focus.menu.as_ref().is_some_and(|m| m.is_open()) {
         return;
     }
     let click = shown && mouse.just_pressed(MouseButton::Left);
     let mut flip = shown && binds.just_pressed(&keys, Act::WeaponBar);
-    if click && toggle.iter().any(|i| *i != Interaction::None) {
+    if click && toggle.iter().any(crate::pointer::over) {
         flip = true;
     }
-    if ((click && panic.iter().any(|i| *i != Interaction::None)) || (shown && binds.just_pressed(&keys, Act::PanicFire))) && focus.fleets.as_ref().is_none_or(|f| f.direct()) {
+    if ((click && panic.iter().any(crate::pointer::over)) || (shown && binds.just_pressed(&keys, Act::PanicFire))) && focus.fleets.as_ref().is_none_or(|f| f.direct()) {
         target.2.panic = true;
     }
-    if click && ship_icon.iter().any(|i| *i != Interaction::None) {
+    if click && ship_icon.iter().any(crate::pointer::over) {
         if let Some(f) = focus.fleets.as_mut() {
             if let Some(e) = f.primary() {
                 f.select(e, &mut focus.orbit);
@@ -572,7 +631,7 @@ pub fn hud_input(
         }
     }
     if click
-        && focus.movement.iter().any(|i| *i != Interaction::None)
+        && focus.movement.iter().any(crate::pointer::over)
         && let Some(plot) = focus.plot.as_mut()
     {
         plot.advanced = !plot.advanced;
@@ -585,8 +644,8 @@ pub fn hud_input(
         // Clicking an indirect bank's icon arms it (again to disarm); the next map click is its shot.
         let (ship, equipped) = *ship;
         let class = &lib.classes[ship.class];
-        for (GunButton(bank), _) in guns.iter().filter(|(_, i)| **i != Interaction::None) {
-            let indirect = class.mounts.iter().enumerate().any(|(i, m)| m.bank == *bank && combat::is_indirect(equipped.map_or(m.gun.as_str(), |g| g.gun(i))));
+        for (GunButton(bank), _) in guns.iter().filter(|(_, i)| crate::pointer::over(i)) {
+            let indirect = class.mounts.iter().enumerate().any(|(i, m)| m.bank == *bank && combat::is_indirect(&lib, equipped.map_or(m.gun.as_str(), |g| g.gun(i))));
             target.2.armed = if indirect && target.2.armed != Some(*bank) { Some(*bank) } else { None };
             target.2.shot = None;
         }
@@ -597,20 +656,22 @@ pub fn hud_input(
 }
 
 /// PROVISIONAL: retail dial segment geometry uses the existing Navy 86x101 coordinates.
-pub fn speed_order_at(p: Vec2) -> usize {
-    [Vec2::new(54.0, 71.0), Vec2::new(44.0, 57.0), Vec2::new(31.0, 44.0), Vec2::new(14.0, 34.0)]
+pub fn speed_order_at(p: Vec2) -> crate::EngineOrder {
+    let i = [Vec2::new(54.0, 71.0), Vec2::new(44.0, 57.0), Vec2::new(31.0, 44.0), Vec2::new(14.0, 34.0)]
         .iter()
         .enumerate()
         .min_by(|a, b| p.distance_squared(*a.1).total_cmp(&b.1.distance_squared(p)))
         .unwrap()
-        .0
+        .0;
+    crate::EngineOrder::from_index(i).unwrap_or_default()
 }
 
+#[allow(deprecated)] // Interaction, see pointer.rs
 pub fn engine_input(
     mouse: Res<ButtonInput<MouseButton>>,
     mut ship: Single<&mut Ship, With<PlayerShip>>,
     dial: Query<(&Interaction, &bevy::ui::RelativeCursorPosition), With<EngineDial>>,
-    tabs: Query<(&EngineOrder, &Interaction)>,
+    tabs: Query<(&EngineTab, &Interaction)>,
     visible: Query<&Visibility, With<HudRoot>>,
     fleets: Option<Res<crate::ship::Fleets>>,
     options: Option<Res<crate::options_menu::OptionsMenu>>,
@@ -623,8 +684,8 @@ pub fn engine_input(
     {
         return;
     }
-    let order = tabs.iter().find(|(_, i)| **i != Interaction::None).map(|(o, _)| o.0).or_else(|| {
-        dial.iter().find(|(i, _)| **i != Interaction::None).and_then(|(_, rel)| rel.normalized).map(|p| {
+    let order = tabs.iter().find(|(_, i)| crate::pointer::over(i)).map(|(o, _)| o.0).or_else(|| {
+        dial.iter().find(|(i, _)| crate::pointer::over(i)).and_then(|(_, rel)| rel.normalized).map(|p| {
             let p = p + Vec2::splat(0.5);
             speed_order_at(Vec2::new(p.x * 86.0, p.y * 101.0))
         })
@@ -640,14 +701,16 @@ pub fn hud_shown(visible: &Query<&Visibility, With<HudRoot>>) -> bool {
     !visible.is_empty() && visible.iter().all(|v| *v != Visibility::Hidden)
 }
 
-/// PAUSE button: a click toggles simulation pause (also available on the non-retail Pause key).
+/// PAUSE button: a click toggles simulation pause (the Pause key does the same, `view.rs`).
+#[allow(deprecated)] // Interaction, see pointer.rs
 fn pause_button(mouse: Res<ButtonInput<MouseButton>>, mut vtime: ResMut<Time<Virtual>>, q: Query<&Interaction, With<PauseButton>>, mission: Option<Res<crate::campaign::Mission>>) {
-    if !cinematic(mission.as_deref()) && mouse.just_pressed(MouseButton::Left) && q.iter().any(|i| *i != Interaction::None) {
+    if !cinematic(mission.as_deref()) && mouse.just_pressed(MouseButton::Left) && q.iter().any(crate::pointer::over) {
         crate::toggle_pause(&mut vtime);
     }
 }
 
 /// Speed buttons step the game speed; labels follow it (and `--speed`).
+#[allow(deprecated)] // Interaction, see pointer.rs
 fn speed_button(
     mouse: Res<ButtonInput<MouseButton>>,
     mut vtime: ResMut<Time<Virtual>>,
@@ -657,7 +720,7 @@ fn speed_button(
     mission: Option<Res<crate::campaign::Mission>>,
     control: Option<Res<SpeedControl>>,
 ) {
-    let clicked = buttons.iter().find(|(_, i)| **i != Interaction::None).map(|(b, _)| *b);
+    let clicked = buttons.iter().find(|(_, i)| crate::pointer::over(i)).map(|(b, _)| *b);
     if let (Some(b), Some(control)) = (clicked.filter(|_| !cinematic(mission.as_deref()) && mouse.just_pressed(MouseButton::Left)), control) {
         let speed = vtime.relative_speed() * if b == SpeedButton::Faster { 2.0 } else { 0.5 };
         crate::set_game_speed(&mut vtime, &mut window, speed.clamp(1.0, control.max));
@@ -694,6 +757,24 @@ pub fn input_app() -> (App, Entity) {
 #[cfg(test)]
 pub mod tests {
     use super::*;
+
+    #[test]
+    fn the_reticle_follows_the_aim_when_flying_else_the_order() {
+        let (aim, pilot, mission) = (Some(Entity::from_raw_u32(1).unwrap()), Some(Entity::from_raw_u32(2).unwrap()), Some(Entity::from_raw_u32(3).unwrap()));
+        assert_eq!(reticle_target(true, aim, pilot, mission), aim, "the flown ship marks the player's own target");
+        assert_eq!(reticle_target(true, None, pilot, mission), None, "no aimed target, no reticle, whatever the fleet orders");
+        assert_eq!(reticle_target(false, aim, pilot, mission), pilot, "a fleet pilot's order comes first");
+        assert_eq!(reticle_target(false, aim, None, mission), mission, "then the mission ship's");
+        assert_eq!(reticle_target(false, aim, None, None), None);
+    }
+
+    #[test]
+    fn a_banner_needs_a_living_visible_seen_ship_and_the_hud_on() {
+        assert!(banner_allowed(false, true, true, false));
+        for (destroyed, visible, seen, hud_off) in [(true, true, true, false), (false, false, true, false), (false, true, false, false), (false, true, true, true)] {
+            assert!(!banner_allowed(destroyed, visible, seen, hud_off), "{destroyed} {visible} {seen} {hud_off}");
+        }
+    }
 
     #[test]
     fn chat_history_keeps_lines_in_order_with_their_colour() {
@@ -773,6 +854,7 @@ pub mod tests {
     }
 
     #[test]
+    #[allow(deprecated)] // Interaction, see pointer.rs
     fn ship_bar_release_latch_hidden_gate_and_context_menu_do_not_promote() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
@@ -894,6 +976,7 @@ pub mod tests {
 
     #[test]
     #[ignore = "needs imported assets"]
+    #[allow(deprecated)] // Interaction, see pointer.rs
     fn engine_tabs_clear_throttle_only_for_direct_visible_controls() {
         let (mut app, root) = input_app();
         app.add_systems(Update, engine_input.before(hud_input));
@@ -903,11 +986,11 @@ pub mod tests {
         let mut f = crate::ship::Fleets { local: "Player".into(), selected: Some(secondary), ..default() };
         f.groups.insert("Player".into(), crate::ship::Fleet { members: vec![primary, secondary], ..default() });
         w.insert_resource(f);
-        w.spawn((Solid, EngineOrder(2), Interaction::Pressed));
+        w.spawn((Solid, EngineTab(crate::EngineOrder::Full), Interaction::Pressed));
         w.resource_mut::<ButtonInput<MouseButton>>().press(MouseButton::Left);
         w.get_mut::<Ship>(primary).unwrap().throttle = Some(0.4);
         app.update();
-        assert_eq!(app.world().get::<Ship>(primary).unwrap().order, 0);
+        assert_eq!(app.world().get::<Ship>(primary).unwrap().order, crate::EngineOrder::Stop);
         assert_eq!(app.world().get::<Ship>(primary).unwrap().throttle, Some(0.4));
         app.world_mut().resource_mut::<crate::ship::Fleets>().selected = Some(primary);
         *app.world_mut().get_mut::<Visibility>(root).unwrap() = Visibility::Hidden;
@@ -915,12 +998,13 @@ pub mod tests {
         assert_eq!(app.world().get::<Ship>(primary).unwrap().throttle, Some(0.4));
         *app.world_mut().get_mut::<Visibility>(root).unwrap() = Visibility::Inherited;
         app.update();
-        assert_eq!(app.world().get::<Ship>(primary).unwrap().order, 2);
+        assert_eq!(app.world().get::<Ship>(primary).unwrap().order, crate::EngineOrder::Full);
         assert_eq!(app.world().get::<Ship>(primary).unwrap().throttle, None);
     }
 
     #[test]
     #[ignore = "needs imported assets"]
+    #[allow(deprecated)] // Interaction, see pointer.rs
     fn hud_clicks_do_not_leak_to_world_and_hidden_hud_ignores_input() {
         let (mut app, root) = input_app();
         app.world_mut().spawn((Solid, PanicButton, Interaction::Pressed));
@@ -943,6 +1027,7 @@ pub mod tests {
     }
 
     #[test]
+    #[allow(deprecated)] // Interaction, see pointer.rs
     fn speed_buttons_step_and_clamp_the_game_speed() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins).init_resource::<ButtonInput<MouseButton>>().insert_resource(SpeedControl { max: 16.0 }).add_systems(Update, speed_button);
@@ -977,6 +1062,7 @@ pub mod tests {
     }
 
     #[test]
+    #[allow(deprecated)] // Interaction, see pointer.rs
     fn pause_button_toggles_virtual_time_and_keeps_speed() {
         let mut app = App::new();
         let mut time = Time::<Virtual>::default();
@@ -993,5 +1079,118 @@ pub mod tests {
         }
         assert_eq!(seen, [true, false, true], "each click toggles the pause");
         assert_eq!(app.world().resource::<Time<Virtual>>().relative_speed(), 4.0, "pausing and resuming keep the speed setting");
+    }
+
+    /// A world with the real sensor snapshot and sight pass feeding `decide_world_marks` (no assets: one synthetic hull class).
+    /// Returns the app and the entities: player ship, fleet ship (pilot targets `enemy`), enemy, script-hidden, destroyed, out of sight, animal.
+    struct MarkWorld {
+        app: App,
+        player: Entity,
+        fleet: Entity,
+        enemy: Entity,
+        hidden: Entity,
+        destroyed: Entity,
+        far: Entity,
+        animal: Entity,
+    }
+
+    fn mark_world() -> MarkWorld {
+        let class = crate::fixed_tests::synthetic_class();
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(Library { classes: vec![class], guns: default(), bullets: default(), names: default(), clips: default() })
+            .init_resource::<crate::environment::Sensors>()
+            .init_resource::<combat::Target>()
+            .init_resource::<crate::ship::Fleets>()
+            .init_resource::<WorldMarks>()
+            .add_systems(
+                Update,
+                (
+                    crate::environment::refresh_sensors,
+                    |mut s: ResMut<crate::environment::Sensors>, m: Option<Res<crate::campaign::Mission>>| s.advance_sightings(m.as_deref(), 0.0, 0.0),
+                    decide_world_marks,
+                )
+                    .chain(),
+            );
+        let alive = || Health { sections: vec![], core: 100.0, destroyed: false };
+        let at = |x: f32| Transform::from_xyz(x, 0.0, 0.0);
+        let enemy_side = crate::Side::Enemy;
+        let mission_ship = |visible: bool| crate::campaign::MissionShip { owner: "Enemy".into(), visible, ..default() };
+        let world = app.world_mut();
+        let player = world.spawn((Ship::new(0, crate::Side::Player), alive(), at(0.0), PlayerShip, crate::ship::FleetMember("Player".into(), 0))).id();
+        let enemy = world.spawn((Ship::new(0, enemy_side), alive(), at(20.0), mission_ship(true))).id();
+        let fleet = world
+            .spawn((
+                Ship::new(0, crate::Side::Player),
+                alive(),
+                at(10.0),
+                crate::ship::FleetMember("Player".into(), 1),
+                crate::ship::FleetPilot { target: Some(enemy), ..default() },
+            ))
+            .id();
+        let hidden = world.spawn((Ship::new(0, enemy_side), alive(), at(25.0), mission_ship(false))).id();
+        let destroyed = world.spawn((Ship::new(0, enemy_side), Health { destroyed: true, ..alive() }, at(30.0), mission_ship(true))).id();
+        let far = world.spawn((Ship::new(0, enemy_side), alive(), at(5000.0), mission_ship(true))).id();
+        let animal = world.spawn((crate::environment::SpaceAnimal::new("Whales", 5.0, Vec3::ZERO, 1, true), at(35.0))).id();
+        let mut fleets = world.resource_mut::<crate::ship::Fleets>();
+        fleets.local = "Player".into();
+        fleets.groups.insert("Player".into(), crate::ship::Fleet { members: vec![player, fleet], formation: default(), cease_fire: false });
+        fleets.selected = Some(player);
+        MarkWorld { app, player, fleet, enemy, hidden, destroyed, far, animal }
+    }
+
+    fn marks(w: &mut MarkWorld, aimed: Option<Entity>) -> (Option<Entity>, Vec<Entity>) {
+        w.app.world_mut().resource_mut::<combat::Target>().0 = aimed;
+        w.app.update();
+        let m = w.app.world().resource::<WorldMarks>();
+        let mut banners: Vec<_> = m.banners.iter().copied().collect();
+        banners.sort();
+        (m.reticle, banners)
+    }
+
+    #[test]
+    fn banners_show_only_living_visible_seen_ships() {
+        let mut w = mark_world();
+        let (_, banners) = marks(&mut w, None);
+        let mut expect = vec![w.player, w.fleet, w.enemy];
+        expect.sort();
+        assert_eq!(banners, expect, "not the script-hidden, destroyed or out-of-sight ships, and no animal");
+        for e in [w.hidden, w.destroyed, w.far, w.animal] {
+            assert!(!banners.contains(&e));
+        }
+    }
+
+    #[test]
+    fn the_reticle_stands_on_the_aimed_target_only_when_it_is_shown_and_seen() {
+        let mut w = mark_world();
+        let (enemy, animal) = (w.enemy, w.animal);
+        assert_eq!(marks(&mut w, Some(enemy)).0, Some(enemy), "the flown ship marks its own target");
+        assert_eq!(marks(&mut w, Some(animal)).0, Some(animal), "a space animal can be marked");
+        assert_eq!(marks(&mut w, None).0, None);
+        let bad = [w.hidden, w.destroyed, w.far];
+        for hidden in bad {
+            assert_eq!(marks(&mut w, Some(hidden)).0, None, "no reticle on a hidden, destroyed or unseen target");
+        }
+    }
+
+    #[test]
+    fn a_selected_fleet_ship_shows_its_ordered_target_not_the_aimed_one() {
+        let mut w = mark_world();
+        let (enemy, animal, far, fleet) = (w.enemy, w.animal, w.far, w.fleet);
+        w.app.world_mut().resource_mut::<crate::ship::Fleets>().selected = Some(fleet);
+        assert_eq!(marks(&mut w, Some(animal)).0, Some(enemy), "the fleet pilot's order wins over the player's aim");
+        w.app.world_mut().get_mut::<crate::ship::FleetPilot>(fleet).unwrap().target = Some(far);
+        assert_eq!(marks(&mut w, Some(enemy)).0, None, "an ordered target out of sight is not marked either");
+    }
+
+    #[test]
+    fn a_cinematic_clears_every_mark() {
+        let mut w = mark_world();
+        let enemy = w.enemy;
+        assert!(marks(&mut w, Some(enemy)).0.is_some(), "marks show before the cutscene");
+        let mut script = crate::rules::Script::new(&serde_json::json!({"rules": []}), serde_json::json!({}));
+        script.nis = true;
+        w.app.insert_resource(crate::campaign::Mission { id: "t".into(), data: serde_json::json!({}), opening: None, script });
+        assert_eq!(marks(&mut w, Some(enemy)), (None, vec![]), "an in-game cutscene hides banners and the reticle");
     }
 }

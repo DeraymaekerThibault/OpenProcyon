@@ -342,7 +342,7 @@ fn storms(
     mut sfx: MessageWriter<crate::audio::Sfx>,
     mut flashes: MessageWriter<StormFlash>,
     mut timers: Local<HashMap<(String, u8), f32>>,
-    mut seed: Local<u32>,
+    mut rng: ResMut<crate::combat::SimRng>,
 ) {
     let (Some(map), Some(damage)) = (setups, damage) else { return };
     if map.is_changed() {
@@ -350,10 +350,7 @@ fn storms(
     }
     let trap = mission.as_ref().is_some_and(|m| m.script.nebula_trap);
     let dt = time.delta_secs();
-    let mut rnd = || {
-        *seed = seed.wrapping_mul(0x19660d).wrapping_add(0x3c6ef35f);
-        (*seed >> 8) as f32 / (1u32 << 24) as f32
-    };
+    let mut rnd = || rng.nebula.f();
     for n in map.0.as_array().into_iter().flatten() {
         let name = n["name"].as_str().unwrap_or_default();
         let (offset, step) = shift.0.get(name).copied().unwrap_or_default();
@@ -435,7 +432,7 @@ fn storms(
         {
             let r = rnd();
             if r < dt * 0.4 {
-                sfx.write(crate::audio::Sfx { name: format!("Solar_Storm_Lightning0{}", 1 + (rnd() * 8.0) as u32 % 8), at: Some(c), vol: 0.8, max: 1500.0 });
+                sfx.write(crate::audio::Sfx { name: format!("Solar_Storm_Lightning0{}", 1 + (rnd() * 8.0) as u32 % 8), at: Some(c), vol: 0.8, max: 1500.0 }); // PROVISIONAL: lightning sound level and range are eyeballed
                 flashes.write(StormFlash { at: c, from: c, to: c, hit: false });
             }
         }
@@ -612,7 +609,7 @@ pub fn spawn(commands: &mut Commands, assets: &AssetServer, fxl: &fx::FxLib, map
     }
 }
 
-/// A ship inside a nebula whose cloud drains is slowed by how deep it is. Read from the original's code: the multiplier on top speed and
+/// A ship inside a nebula whose cloud drains is slowed by how deep it is. The multiplier on top speed and
 /// thrust is the 3-D distance to the cloud's centre over its radius, clamped to 0..1 (0 at the centre, 1 at the rim), instant and with
 /// no recovery time; the deepest nebula counts. Not modelled: the hulls the original exempts.
 pub fn depth_factor(distance: f32, radius: f32) -> f32 {
@@ -655,7 +652,7 @@ fn update(
     assets: Res<AssetServer>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut mats: ResMut<Assets<fx::EffectMaterial>>,
-    cam: Single<&GlobalTransform, With<Camera3d>>,
+    cam: Single<&GlobalTransform, (With<Camera3d>, With<crate::MainCamera>)>,
     mut clouds: Query<(Entity, &mut Cloud, &GlobalTransform, Option<&mut AudioSink>)>,
 ) {
     let cam = cam.translation();
@@ -693,7 +690,7 @@ fn update(
         }
         if let Some(mut sink) = sink {
             let distance = (cam.distance(centre) - c.radius).max(0.0);
-            sink.set_volume(Volume::Linear(0.25 * (1.0 - distance / c.sound_distance).clamp(0.0, 1.0) * crate::menu::volume(crate::menu::Setting::Effects)));
+            sink.set_volume(Volume::Linear(0.25 * (1.0 - distance / c.sound_distance).clamp(0.0, 1.0) * crate::menu::volume(crate::menu::Setting::Effects))); // PROVISIONAL: loop level 0.25 is eyeballed
         }
     }
 }

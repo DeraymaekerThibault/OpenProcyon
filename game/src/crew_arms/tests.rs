@@ -2,6 +2,7 @@ use super::fitting::{FitError, family};
 use super::view::{crew_rows, weapon_rows};
 use super::*;
 #[test]
+#[allow(deprecated)] // Interaction, see pointer.rs
 fn widgets_play_rollover_once_and_select_on_press() {
     let mut app = App::new();
     app.add_plugins(MinimalPlugins).add_message::<crate::audio::Sfx>().add_systems(Update, button_sounds);
@@ -95,11 +96,11 @@ fn the_first_mate_stands_in_for_a_missing_helm_and_the_captain_for_missing_engin
 fn a_leadership_ten_captain_always_lifts_the_crew_and_no_officers_never_do() {
     let mut posts = CrewPosts(Default::default());
     for i in 0..50 {
-        assert_eq!(leadership_bonus(Entity::from_raw_u32(i).unwrap(), &posts), 0.0);
+        assert_eq!(leadership_bonus(crate::scenario::SpawnIndex(i), &posts), 0.0);
     }
     posts.0[1] = vec!["Crew_Navy_Amelia".into()]; // leadership 10
     for i in 0..50 {
-        assert!(leadership_bonus(Entity::from_raw_u32(i).unwrap(), &posts) >= 0.1);
+        assert!(leadership_bonus(crate::scenario::SpawnIndex(i), &posts) >= 0.1);
     }
 }
 #[test]

@@ -1,6 +1,5 @@
 //! Keyboard bindings (retail "Control Options"; default list from the retail screenshots). Stored per user as `bindings.json`
-//! (action label -> key name). PROVISIONAL: only the actions marked `wired` have an effect in battle; the rest are listed and
-//! rebindable like retail but nothing reads them yet.
+//! (action label -> key name).
 use bevy::prelude::*;
 use std::collections::HashMap;
 
@@ -116,7 +115,7 @@ pub enum Act {
     ZoomOut,
     ChangePrimary,
     AttackOnly,
-    /// Opens the developer console (not retail; `rules/console.rs`). F12 always opens it too.
+    /// Not retail: opens the developer console (`rules/console.rs`). F12 always opens it too.
     Console,
 }
 
@@ -203,11 +202,10 @@ impl Bindings {
     }
     pub fn save(&self) {
         let map: std::collections::BTreeMap<_, _> = self.rows.iter().map(|r| (r.1.as_str(), key_name(r.2))).collect();
-        if let Some(p) = path() {
-            let _ = p.parent().map(std::fs::create_dir_all);
-            if let Err(e) = std::fs::write(p, serde_json::to_string_pretty(&map).unwrap_or_default()) {
-                warn!("could not save key bindings: {e}");
-            }
+        if let Some(p) = path()
+            && let Err(e) = crate::data::write_atomic(&p, &serde_json::to_string_pretty(&map).unwrap_or_default())
+        {
+            warn!("could not save key bindings: {e}");
         }
     }
 }

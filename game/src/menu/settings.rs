@@ -11,7 +11,7 @@ pub enum Setting {
     Dialogue,
     /// Video mode (windowed / fullscreen), effect detail (low / medium / high), render background, flag waving.
     Fullscreen,
-    /// Vsync on / off, anti-aliasing (off / SMAA / MSAA 4x). Not retail options.
+    /// Not retail: vsync on / off, anti-aliasing (off / SMAA / MSAA 4x).
     Vsync,
     AntiAlias,
     Detail,
@@ -20,7 +20,7 @@ pub enum Setting {
     RestoreDisplay,
     /// Single Player menu toggle: Normal -> Hard -> Easy.
     Difficulty,
-    /// Display screen: whether the console key opens the developer console (not retail; rules/console.rs).
+    /// Not retail: Display screen, whether the console key opens the developer console (rules/console.rs).
     Console,
 }
 
@@ -118,9 +118,12 @@ impl Settings {
         Some(crate::campaign::user_dir()?.join("settings.json"))
     }
     pub fn load() -> Self {
-        let v = Self::path().and_then(|p| crate::data::try_json(&p)).unwrap_or_default();
+        Self::from_json(&Self::path().and_then(|p| crate::data::try_json(&p)).unwrap_or_default())
+    }
+    /// Out-of-range numbers clamp to the option's maximum (a plain `as u8` would wrap 256 to 0); wrong types fall back to the default.
+    fn from_json(v: &serde_json::Value) -> Self {
         let d = Self::default();
-        let n = |k: &str, def: u8, max: u8| v[k].as_u64().map_or(def, |x| (x as u8).min(max));
+        let n = |k: &str, def: u8, max: u8| v[k].as_u64().map_or(def, |x| x.min(max as u64) as u8);
         let b = |k: &str, def: bool| v[k].as_bool().unwrap_or(def);
         Settings {
             master: n("master", d.master, 10),
@@ -140,10 +143,9 @@ impl Settings {
     }
     pub(crate) fn save(&self) {
         let Some(p) = Self::path() else { return };
-        let _ = p.parent().map(std::fs::create_dir_all);
         let v = serde_json::json!({"master": self.master, "music": self.music, "effects": self.effects, "dialogue": self.dialogue,
             "fullscreen": self.fullscreen, "vsync": self.vsync, "aa": self.aa, "detail": self.detail, "background": self.background, "flags": self.flags, "difficulty": self.difficulty, "console": self.console, "fps": self.fps});
-        if let Err(e) = std::fs::write(p, serde_json::to_string_pretty(&v).unwrap_or_default()) {
+        if let Err(e) = crate::data::write_atomic(&p, &serde_json::to_string_pretty(&v).unwrap_or_default()) {
             warn!("could not save settings: {e}");
         }
     }
@@ -227,4 +229,18 @@ fn master_volume_scales_every_channel_and_zero_mutes() {
     assert_eq!(mix(5, Some(4)), 0.2);
     assert_eq!(mix(0, Some(10)), 0.0);
     assert_eq!(mix(7, None), 0.7);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn out_of_range_numbers_clamp_instead_of_wrapping() {
+        // 256 and 300 would wrap to 0 and 44 through `as u8`; a negative or fractional value is not an unsigned integer: default.
+        let s = Settings::from_json(&serde_json::json!({"master": 256, "music": 300, "effects": 11, "dialogue": -1, "aa": 4294967296u64, "detail": 1.5}));
+        let d = Settings::default();
+        assert_eq!((s.master, s.music, s.effects, s.dialogue, s.aa, s.detail), (10, 10, 10, d.dialogue, 2, d.detail));
+        assert_eq!(Settings::from_json(&serde_json::json!({"master": 7})).master, 7);
+    }
 }

@@ -7,7 +7,8 @@ fn app(mission: &str) -> App {
         .init_asset::<WorldAsset>()
         .init_resource::<crate::fx::FxLib>()
         .insert_resource(Library::load(crate::assets_dir()))
-        .insert_resource(Rng::new(5))
+        .insert_resource(crate::combat::SimRng::new(5))
+        .init_resource::<crate::scenario::Difficulty>()
         .insert_resource(crate::campaign::load_id(mission))
         .add_message::<ShipLost>()
         .add_message::<crate::audio::Sfx>()
@@ -38,7 +39,7 @@ fn ship(app: &mut App, class: &str, owner: &str, at: Vec3, flag: bool) -> Entity
     };
     app.world_mut().spawn((s, health, Transform::from_translation(at), ms)).id()
 }
-fn boats(app: &mut App) -> Vec<(String, String, Vec3)> {
+fn boats(app: &mut App) -> Vec<(crate::names::Owner, String, Vec3)> {
     let mut q = app.world_mut().query::<(&Lifeboat, &Ship, &Transform)>();
     let lib = app.world().resource::<Library>();
     q.iter(app.world()).map(|(l, s, t)| (l.owner.clone(), lib.classes[s.class].name.clone(), t.translation)).collect()
@@ -100,7 +101,7 @@ fn boats_sail_straight_at_a_fraction_of_class_speed_and_never_collide_with_ships
     lose(&mut app, parent);
     let mut q = app.world_mut().query_filtered::<&Ship, With<Lifeboat>>();
     for s in q.iter(app.world()) {
-        assert_eq!((s.order, s.waypoints.len(), s.side), (2, 1, Side::Player));
+        assert_eq!((s.order, s.waypoints.len(), s.side), (EngineOrder::Full, 1, Side::Player));
         assert!((0.2..=1.0).contains(&s.throttle.unwrap()) && s.waypoints[0].length() > 1.0e3);
         let to = s.waypoints[0].normalize();
         assert!((Vec3::new(-s.heading.sin(), 0.0, -s.heading.cos()) - to).length() < 1e-3, "heading faces its goal");

@@ -108,9 +108,12 @@ pub struct Fired {
     pub target: Option<Entity>,
     /// The burst's bullet type (crew callouts: torpedoes away, mortar fired).
     pub bullet: String,
+    /// `bullet` is a torpedo / a mine, read once at load (`GunDef::bullet_torpedo`, `bullet_family`).
+    pub torpedo: bool,
+    pub mine: bool,
 }
 /// Exhaust effect on a ship. The ship's speed fraction is sent to it once a second as both the emitter rate and the
-/// velocity-length multiplier (read from the original's code); it goes out with the section it hangs on.
+/// velocity-length multiplier; it goes out with the section it hangs on.
 #[derive(Component, Default)]
 pub struct Engine {
     section: Option<usize>,
@@ -152,12 +155,71 @@ pub fn xorshift_unit(state: &mut u64) -> f32 {
     (*state >> 40) as f32 / (1u64 << 24) as f32
 }
 
-#[derive(Resource)]
+/// One xorshift stream. The simulation's streams live in `SimRng`; a `Rng` of its own is for drawn-only effects.
 pub struct Rng(u64);
 
 impl Default for Rng {
     fn default() -> Self {
-        Self(0x9E3779B97F4A7C15)
+        Self(SimRng::DEFAULT_SEED)
+    }
+}
+
+/// The battle's random numbers, reseeded at every battle start (`scenario::reset_sim`), so one seed and the same input give the same
+/// battle, a restart included. Seed: `--seed N` / `PROCYON_SEED`, else `DEFAULT_SEED`. It derefs to the battle stream, which every roll
+/// that changes the battle takes (gun scatter, damage, fire, ricochet, boarding, lifeboats, asteroids; docs/re/tick.md "Random
+/// numbers"); systems that kept a private generator before draw from their own named stream so they do not shift the battle rolls.
+/// PROVISIONAL: the original seeds its battle generator from the map; this one is the same for every map unless given.
+#[derive(Resource)]
+pub struct SimRng {
+    pub seed: u64,
+    battle: Rng,
+    /// Nebula storm lightning and meteor rolls (`nebula::storms`).
+    pub nebula: Rng,
+    /// A cloaked ship being spotted when it fires a torpedo (`cloak::spotted`).
+    pub cloak: Rng,
+}
+
+impl SimRng {
+    /// The seed every battle used before seeds were settable, kept so the battle stream starts where it did.
+    pub const DEFAULT_SEED: u64 = 0x9E3779B97F4A7C15;
+    pub fn new(seed: u64) -> Self {
+        // splitmix64 of (seed, stream number): independent, never-zero xorshift states.
+        let stream = |n: u64| {
+            let mut z = seed.wrapping_add(n.wrapping_mul(0x9E3779B97F4A7C15));
+            z = (z ^ (z >> 30)).wrapping_mul(0xBF58476D1CE4E5B9);
+            z = (z ^ (z >> 27)).wrapping_mul(0x94D049BB133111EB);
+            (z ^ (z >> 31)) | 1
+        };
+        Self { seed, battle: Rng(if seed == 0 { stream(0) } else { seed }), nebula: Rng(stream(1)), cloak: Rng(stream(2)) }
+    }
+    /// The generator states, to compare two `SimRng`s.
+    #[cfg(test)]
+    pub fn clone_state(&self) -> (u64, u64, u64, u64) {
+        (self.seed, self.battle.0, self.nebula.0, self.cloak.0)
+    }
+    /// The seed of the next battle: `--seed N`, else `PROCYON_SEED`, else `DEFAULT_SEED`.
+    pub fn configured_seed() -> u64 {
+        let args: Vec<String> = std::env::args().collect();
+        let arg = args.iter().position(|a| a == "--seed").and_then(|i| args.get(i + 1)).cloned();
+        arg.or_else(|| std::env::var("PROCYON_SEED").ok()).and_then(|s| s.trim().parse().ok()).unwrap_or(Self::DEFAULT_SEED)
+    }
+}
+
+impl Default for SimRng {
+    fn default() -> Self {
+        Self::new(Self::DEFAULT_SEED)
+    }
+}
+
+impl std::ops::Deref for SimRng {
+    type Target = Rng;
+    fn deref(&self) -> &Rng {
+        &self.battle
+    }
+}
+impl std::ops::DerefMut for SimRng {
+    fn deref_mut(&mut self) -> &mut Rng {
+        &mut self.battle
     }
 }
 /// How shells are drawn: an unlit sphere, gold for the player's side, red for the enemy's.
@@ -169,7 +231,6 @@ pub struct Look {
 }
 
 impl Rng {
-    #[cfg(test)]
     pub fn new(seed: u64) -> Self {
         Self(seed)
     }
@@ -207,6 +268,11 @@ pub fn material_key(material: &str) -> &'static str {
 }
 
 pub fn plugin(app: &mut App) {
+    crate::scenario::number_spawns::<Ship>(app);
+    crate::scenario::number_spawns::<Shell>(app);
+    crate::scenario::number_spawns::<lob::Blast>(app);
+    crate::scenario::number_spawns::<Asteroid>(app);
+    crate::scenario::number_spawns::<ArmedBase>(app);
     app.insert_resource(Library::load(assets_dir()))
         .init_resource::<Target>()
         .add_message::<Hit>()
@@ -218,13 +284,14 @@ pub fn plugin(app: &mut App) {
         .add_message::<Strike>()
         .add_message::<AsteroidSetup>()
         .init_resource::<crate::data::AsteroidDefs>()
-        .init_resource::<Rng>()
+        .init_resource::<SimRng>()
+        .init_resource::<crate::scenario::Difficulty>()
         .add_systems(Startup, (setup, beam::setup_look))
         .add_systems(
             FixedUpdate,
             (
                 (minefield::arm, fire, beam::burn, base_fire, lob::shoot, shells, lob::detonate, lob::blasts, lob::grav_wells, lob::ram_damage, lob::strikes).chain(),
-                (asteroid_deaths, fires, status::tick_nets, crew_repair, deaths).chain(),
+                (asteroid_deaths, fires, status::tick_nets, crew_repair, sink_clock, deaths).chain(),
             )
                 .chain()
                 .in_set(crate::BattleSet::Combat),
@@ -253,7 +320,7 @@ pub fn spawn_engines(commands: &mut Commands, fxl: &FxLib, lib: &Library, ship: 
     }
 }
 
-/// The engine keeper's update (read from the original's code): once a second the ship's speed fraction (0..1) becomes both the
+/// The engine keeper's update: once a second the ship's speed fraction (0..1) becomes both the
 /// emitter-rate and the velocity-length multiplier of every exhaust; an exhaust exists only while that is above 0 and its
 /// section stands, and the cloaking factor (1 - level) scales the rate. PROVISIONAL: the fraction is speed over Full (the original
 /// multiplies two physics values).
@@ -363,16 +430,14 @@ fn breakup(
     fxl: Res<FxLib>,
     mut rng: Local<Rng>,
     mut sfx: MessageWriter<Sfx>,
-    time: Res<Time>,
     children: Query<&Children>,
     assets: Res<AssetServer>,
-    mut ships: Query<(Entity, &Transform, &Ship, &mut Visibility, &mut Sinking, Option<&damage::DamageFx>)>,
+    mut ships: Query<(Entity, &Transform, &Ship, &mut Sinking, Option<&damage::DamageFx>)>,
     mut nodes: Query<(&Name, &mut Transform, &mut Visibility), Without<Ship>>,
 ) {
-    for (e, tf, ship, mut vis, mut sinking, dfx) in &mut ships {
+    for (e, tf, ship, mut sinking, dfx) in &mut ships {
         let class = &lib.classes[ship.class];
         let clip = breakup_clip(&lib, class);
-        sinking.elapsed += time.delta_secs();
         let t = (sinking.elapsed - CLIP_DELAY).max(0.0);
         if !sinking.wiped && sinking.elapsed >= CLIP_DELAY {
             sinking.wiped = true;
@@ -421,11 +486,20 @@ fn breakup(
                 }
             }
         }
-        if t < clip.map_or(BREAKUP_FALLBACK, |c| c.duration) {
+    }
+}
+
+/// The break-up clock runs on the tick (the death drive reads it, `Sinking::drive_health`), and so does the end of the break-up:
+/// the hull's presentation goes and the ship is queued for removal at the start of the next tick. `breakup` only draws from it.
+fn sink_clock(mut commands: Commands, lib: Res<Library>, time: Res<Time>, children: Query<&Children>, mut ships: Query<(Entity, &Ship, &mut Sinking, &mut Visibility)>) {
+    for (e, ship, mut sinking, mut vis) in &mut ships {
+        sinking.elapsed += time.delta_secs();
+        let clip = breakup_clip(&lib, &lib.classes[ship.class]);
+        if sinking.elapsed - CLIP_DELAY < clip.map_or(BREAKUP_FALLBACK, |c| c.duration) {
             continue;
         }
         *vis = Visibility::Hidden;
-        // Remove its entire presentation (including looping smoke); the ship itself is queued and goes at the start of the next tick.
+        // Its entire presentation goes too (including looping smoke).
         if let Ok(children) = children.get(e) {
             for child in children.iter() {
                 commands.entity(child).try_despawn();

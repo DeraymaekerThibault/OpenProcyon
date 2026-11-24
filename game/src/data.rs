@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::sync::OnceLock;
 
 mod ships;
+mod weapons;
 pub use ships::{derive, load_class};
 
 fn asset_context(path: &std::path::Path) -> String {
@@ -12,11 +13,62 @@ fn asset_context(path: &std::path::Path) -> String {
     format!("{} (source {})", path.display(), source.display())
 }
 
+/// Why a data file could not be loaded: the file, the mod folder that provided it (when it came from one) and the underlying
+/// message (serde's carries the line, column and, for typed reads, the field).
+#[derive(Debug)]
+pub enum DataError {
+    Read { path: std::path::PathBuf, source_mod: Option<String>, error: std::io::Error },
+    Parse { path: std::path::PathBuf, source_mod: Option<String>, error: serde_json::Error },
+}
+
+impl DataError {
+    pub fn path(&self) -> &std::path::Path {
+        match self {
+            DataError::Read { path, .. } | DataError::Parse { path, .. } => path,
+        }
+    }
+    /// The mod folder the file came from, if it came from one.
+    pub fn source_mod(&self) -> Option<&str> {
+        match self {
+            DataError::Read { source_mod, .. } | DataError::Parse { source_mod, .. } => source_mod.as_deref(),
+        }
+    }
+}
+
+impl std::fmt::Display for DataError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let from = self.source_mod().map(|m| format!(" from mod {m:?}")).unwrap_or_default();
+        match self {
+            DataError::Read { path, error, .. } => write!(f, "{}{from}: {error}; run tools/build_assets.sh if assets are missing", asset_context(path)),
+            DataError::Parse { path, error, .. } => write!(f, "{}{from}: {error}", asset_context(path)),
+        }
+    }
+}
+
+impl std::error::Error for DataError {}
+
+/// The folder name of the active mod that provides `path` (a link into the overlay is followed to its source).
+fn mod_of(path: &std::path::Path) -> Option<String> {
+    let source = std::fs::canonicalize(path).ok()?;
+    crate::modding::active().iter().find(|m| std::fs::canonicalize(m).is_ok_and(|m| source.starts_with(m))).and_then(|m| Some(m.file_name()?.to_string_lossy().into_owned()))
+}
+
+/// Typed read of a JSON file, naming `source_mod` as the provider in errors (`None`: found out from the active mods).
+pub fn load_as<T: serde::de::DeserializeOwned>(path: &std::path::Path, source_mod: Option<&str>) -> Result<T, DataError> {
+    let source_mod = source_mod.map(String::from).or_else(|| mod_of(path));
+    let bytes = std::fs::read(path).map_err(|error| DataError::Read { path: path.to_path_buf(), source_mod: source_mod.clone(), error })?;
+    serde_json::from_slice(&bytes).map_err(|error| DataError::Parse { path: path.to_path_buf(), source_mod, error })
+}
+
+/// The one typed load path: a JSON file as `T`, or a `DataError` naming the file, its mod and serde's field/line/column message.
+/// Unknown fields stay allowed unless `T` denies them.
+pub fn load<T: serde::de::DeserializeOwned>(path: &std::path::Path) -> Result<T, DataError> {
+    load_as(path, None)
+}
+
 /// Typed required asset with the resolved source path and serde's field/line/column diagnostic.
 fn read_typed<T: serde::de::DeserializeOwned>(path: &std::path::Path) -> Result<T, String> {
-    let context = asset_context(path);
-    let bytes = std::fs::read(path).map_err(|e| format!("{context}: {e}; run tools/build_assets.sh if assets are missing"))?;
-    serde_json::from_slice(&bytes).map_err(|e| format!("{context}: {e}"))
+    load(path).map_err(|e| e.to_string())
 }
 
 /// Asset path of a converted model given its file name (`NavyCutterShip.glb`): GLBs live in `models/<category>/` (tools/models.py);
@@ -155,6 +207,70 @@ impl FromWorld for AsteroidDefs {
 /// The retail torpedo bullet (WOT `BulletTypeName_Primary`); aiming, launch and crew calls treat it specially.
 pub const TORPEDO_BULLET: &str = "Bullet_Torpedo";
 
+/// Whether `bullet` is a torpedo. One rule for every caller: the name starts with `TORPEDO_BULLET`. The retail data has exactly one
+/// such bullet (`Bullet_Torpedo`), so an exact match and a prefix match give the same answer on it; the prefix also takes a mod's
+/// `Bullet_Torpedo_Heavy`-style variants.
+pub fn is_torpedo_bullet(bullet: &str) -> bool {
+    bullet.starts_with(TORPEDO_BULLET)
+}
+
+/// The weapon family a gun or bullet name stands for, read once from the name (`Gun_Harpoon_Light`, `Bullet_NovaMortar`...). Names
+/// that carry two families resolve in the order of the variants; the retail names carry one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GunFamily {
+    Harpoon,
+    GravCharge,
+    EnergyNet,
+    Gattling,
+    ArcturianFire,
+    NovaMortar,
+    StarMortar,
+    StarMine,
+    Torpedo,
+    Lancer,
+    Plasma,
+    Carronade,
+    /// Any other name with "Mortar" in it (a mod's).
+    Mortar,
+    /// Any other name with "Mine" in it (a mod's).
+    Mine,
+    /// Cannonballs, and every name that is none of the above.
+    Cannon,
+}
+
+impl GunFamily {
+    pub fn of(name: &str) -> Self {
+        const NAMES: [(&str, GunFamily); 14] = [
+            ("Harpoon", GunFamily::Harpoon),
+            ("GravCharge", GunFamily::GravCharge),
+            ("EnergyNet", GunFamily::EnergyNet),
+            ("Gattling", GunFamily::Gattling),
+            ("ArcturianFire", GunFamily::ArcturianFire),
+            ("NovaMortar", GunFamily::NovaMortar),
+            ("StarMortar", GunFamily::StarMortar),
+            ("StarMine", GunFamily::StarMine),
+            ("Torpedo", GunFamily::Torpedo),
+            ("Lancer", GunFamily::Lancer),
+            ("Plasma", GunFamily::Plasma),
+            ("Carronade", GunFamily::Carronade),
+            ("Mortar", GunFamily::Mortar),
+            ("Mine", GunFamily::Mine),
+        ];
+        NAMES.iter().find(|(n, _)| name.contains(n)).map_or(GunFamily::Cannon, |(_, f)| *f)
+    }
+
+    /// Lobbed or laid rather than aimed: mortars, mines and gravity charges.
+    pub fn is_indirect(self) -> bool {
+        matches!(self, Self::GravCharge | Self::NovaMortar | Self::StarMortar | Self::Mortar | Self::StarMine | Self::Mine)
+    }
+
+    /// A mine: a star mine or any other mine.
+    pub fn is_mine(self) -> bool {
+        matches!(self, Self::StarMine | Self::Mine)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct GunDef {
     pub mount_type: Option<String>,
     pub points: Option<u32>,
@@ -173,6 +289,12 @@ pub struct GunDef {
     pub deviation: [f32; 3], // per range band (effective, long, maximum): accuracy deviation (rad); PROVISIONAL: used as max cone half-angle
     pub gravity: bool,
     pub bullet: String,
+    /// Read once at load from the gun's name (`load_weapons`); `Cannon` for a def built without a name.
+    pub family: GunFamily,
+    /// Read once at load from `bullet`.
+    pub bullet_family: GunFamily,
+    /// `is_torpedo_bullet(bullet)`, read once at load.
+    pub bullet_torpedo: bool,
     pub base: Option<String>,   // glb of the turning base
     pub barrel: Option<String>, // glb of the pitching barrel
     pub pivot: Vec3,            // barrel pivot in the base frame
@@ -189,11 +311,18 @@ pub struct GunDef {
     pub lob: Option<f32>,
     /// WOT 'Can Be Fired While Cloaked' (torpedoes and gatlings).
     pub cloak_fire: bool,
-    /// Not in the original: a mod gun with a `beam` block charges, then holds a beam instead of firing shells (`combat/beam.rs`).
+    /// Not retail: a mod gun with a `beam` block charges, then holds a beam instead of firing shells (`combat/beam.rs`).
     pub beam: Option<BeamDef>,
 }
 
-/// A beam gun's `beam` block in `guns.json` (not retail; for mods). The gun's bullet supplies the damage table (one tick's damage)
+/// Not retail: the `ship.json` keys the engine adds (no retail counterpart; `docs/data-format.md` "ship.json keys", Source
+/// `engine`). Every other key the ship loader reads carries a retail value. `tests/test_extensions.py` keeps this list, the loader
+/// and the docs in step.
+pub const ENGINE_SHIP_KEYS: &[&str] = &["extends", "model", "geometry", "fuel"];
+/// Not retail: the gun keys of `guns.json` the engine adds (`beam`, a beam gun). Checked like `ENGINE_SHIP_KEYS`.
+pub const ENGINE_GUN_KEYS: &[&str] = &["beam"];
+
+/// Not retail: a beam gun's `beam` block in `guns.json` (for mods). The gun's bullet supplies the damage table (one tick's damage)
 /// and the impact effect; `SoundName` plays once when the charge starts, so one sound can carry the charge and the beam.
 #[derive(Clone, Debug, PartialEq)]
 pub struct BeamDef {
@@ -231,9 +360,6 @@ impl BeamDef {
     }
 }
 impl GunDef {
-    /// Gravity on this gun's shells (units/s^2): MuzzleSpeed^2 / (sqrt(2) * MaximumRange), so a shell fired at 45 degrees
-    /// would carry sqrt(2) times the maximum range. Measured on retail shells of seven guns (docs/re/gunnery.md#shell-gravity);
-    /// 0 for guns not flagged BulletAffectedByGravity.
     /// Time from the first shot of a burst to the next burst: TimeBetweenBursts (seconds) runs from the burst's last shot.
     /// Measured on retail gattling bursts (8 shots 0.15 s apart, a new burst every ~4.1 s) and medium cannons (9.0 s).
     pub fn burst_cycle(&self) -> f32 {
@@ -244,6 +370,9 @@ impl GunDef {
         (self.reload - cut).max(0.0) + self.burst.saturating_sub(1) as f32 * self.burst_reload
     }
 
+    /// Gravity on this gun's shells (units/s^2): MuzzleSpeed^2 / (sqrt(2) * MaximumRange), so a shell fired at 45 degrees
+    /// would carry sqrt(2) times the maximum range. Measured on retail shells of seven guns (docs/re/gunnery.md#shell-gravity);
+    /// 0 for guns not flagged BulletAffectedByGravity.
     pub fn shell_gravity(&self) -> f32 {
         if self.gravity && self.range[2] > 0.0 { self.muzzle * self.muzzle / (std::f32::consts::SQRT_2 * self.range[2]) } else { 0.0 }
     }
@@ -264,6 +393,7 @@ pub enum Payload {
     /// Mine: drifts at `speed` toward ships within `sight` and bursts on contact.
     Mine { sight: f32, speed: f32 },
 }
+#[derive(Clone, Debug, PartialEq)]
 pub struct BulletDef {
     pub glb: Option<String>,
     pub physics: Option<Physics>,
@@ -284,6 +414,10 @@ pub struct BulletDef {
     pub decal: Option<u8>,
     /// Energy net: a hit slows the ship for `duration` seconds, thrust and top speed x (1 - `dissipated`); nets stack.
     pub net: Option<(f32, f32)>,
+    /// Read once at load from the bullet's name (`load_weapons`); `Cannon` for a def built without a name.
+    pub family: GunFamily,
+    /// `is_torpedo_bullet(name)`, read once at load.
+    pub torpedo: bool,
 }
 pub struct Mount {
     pub pos: Vec3,
@@ -331,6 +465,7 @@ pub struct Destruct {
     pub end: f32,
     pub point: Vec3,
 }
+#[derive(Clone, Debug, PartialEq)]
 pub struct Physics {
     pub mass: f32,
     pub thrust: f32,
@@ -367,7 +502,7 @@ pub struct Class {
     pub repair_fx: Option<String>,
     /// WOT 'Is Cloakable' (only the Procyon submersible).
     pub cloakable: bool,
-    /// ship.json `fuel`: the hull burns fuel, not wind, so a nebula's energy drain (`cloud.drain`) does not slow it (mods: the Procyon Hunter).
+    /// Not retail: ship.json `fuel`, the hull burns fuel, not wind, so a nebula's energy drain (`cloud.drain`) does not slow it (mods: the Procyon Hunter).
     pub fuel: bool,
     /// The cloak effects' mount points (Cloaking / DeCloaking, FullyCloaked): translation and rotation in hull space.
     pub cloak_points: Option<[(Vec3, Quat); 2]>,
@@ -415,6 +550,10 @@ pub struct Library {
     pub clips: crate::clips::Clips,
 }
 impl Library {
+    /// The family of the gun fitted under `gun` (its def's field, read at load). A name with no def (a test's) is parsed on the spot.
+    pub fn family(&self, gun: &str) -> GunFamily {
+        self.guns.get(gun).map_or_else(|| GunFamily::of(gun), |g| g.family)
+    }
     pub fn index(&self, name: &str) -> usize {
         self.classes
             .iter()
@@ -433,99 +572,14 @@ pub fn conv_v(v: &Value) -> Vec3 {
     conv(num(&v[0]), num(&v[1]), num(&v[2]))
 }
 
+/// Test helpers: one gun or bullet entry through the typed path (panics with the error).
+#[cfg(test)]
 pub fn gun_def(g: &Value) -> GunDef {
-    GunDef {
-        mount_type: g["Mount Type"].as_str().map(|s| s.split_whitespace().collect::<Vec<_>>().join(" ")),
-        points: g["Victory Point Cost"].as_u64().and_then(|v| u32::try_from(v).ok()),
-        exclusion: g["Exclusion Race"].as_str().filter(|s| *s != "None").map(String::from),
-        point_defense: g["Is PointDefense Gun"].as_bool().unwrap_or(false),
-        torpedo_launcher: g["Is TorpedoLauncher Gun"].as_bool().unwrap_or(false),
-        muzzle: num(&g["MuzzleSpeed"]),
-        reload: num(&g["TimeBetweenBursts"]),
-        burst: g["BulletsPerBurst"].as_u64().unwrap() as u32,
-        burst_reload: num(&g["DuringBurstReloadTime"]),
-        dev_per_shot: g["CalculateAccuracyDeviationDuringBurst"].as_bool().unwrap_or(false),
-        range: [num(&g["EffectiveRange_Range"]), num(&g["LongRange_Range"]), num(&g["MaximumRange_Range"])],
-        ricochet: ["EffectiveRange", "LongRange", "MaximumRange"].map(|b| g[format!("{b}_RicochetFactor")].as_f64().unwrap_or(0.0) as f32),
-        deviation: [num(&g["EffectiveRange_AccuracyDeviation"]), num(&g["LongRange_AccuracyDeviation"]), num(&g["MaximumRange_AccuracyDeviation"])],
-        gravity: g["BulletAffectedByGravity"].as_bool().unwrap(),
-        bullet: g["BulletTypeName_Primary"].as_str().unwrap().into(),
-        base: g["visual"]["base"].as_str().map(String::from),
-        barrel: g["visual"]["barrel"].as_str().map(String::from),
-        pivot: conv_v(&g["visual"]["pivot"]),
-        muzzles: g["visual"]["muzzles"].as_array().unwrap().iter().map(conv_v).collect(),
-        yaw_speed: num(&g["HorizontalRotationSpeed"]),
-        pitch_speed: num(&g["VerticalRotationSpeed"]),
-        pitch_limits: [num(&g["VerticalMinAngle"]), num(&g["VerticalMaxAngle"])],
-        muzzle_fx: g["MuzzleFlashEffect"].as_str().map(String::from),
-        sound: g["SoundName"]
-            .as_str()
-            .filter(|s| !s.is_empty())
-            .map(|s| (s.into(), g["SoundVolume"].as_f64().unwrap_or(1.0) as f32, g["SoundMaxDistance"].as_f64().unwrap_or(600.0) as f32)),
-        lob: (g["Is Lobbing Gun"] == true).then(|| g["LobAngle"].as_f64().unwrap_or(0.785) as f32),
-        cloak_fire: g["Can Be Fired While Cloaked"].as_bool().unwrap_or_else(|| {
-            let b = g["BulletTypeName_Primary"].as_str().unwrap_or_default();
-            b.starts_with(TORPEDO_BULLET) || b == "Bullet_Gattling"
-        }),
-        beam: BeamDef::from_json(&g["beam"]),
-    }
+    weapons::gun_from_value("", g.clone()).unwrap_or_else(|e| panic!("{e}"))
 }
-
+#[cfg(test)]
 pub fn bullet_def(b: &Value) -> BulletDef {
-    let physics = b["physics"].as_object().map(|p| {
-        let get = |key: &str| p[key].as_f64().unwrap_or(f64::NAN) as f32;
-        let physics = Physics {
-            mass: get("Mass"),
-            thrust: get("MaxThrust"),
-            max_speed: get("MaxSpeed"),
-            rot_friction: get("RotationalFriction"),
-            max_ang_acc: get("MaxAngularAcceleration"),
-        };
-        assert!(
-            [physics.mass, physics.thrust, physics.max_speed, physics.max_ang_acc].iter().all(|v| v.is_finite() && *v > 0.0)
-                && physics.rot_friction.is_finite()
-                && physics.rot_friction >= 0.0,
-            "Invalid bullet physics"
-        );
-        physics
-    });
-    BulletDef {
-        physics,
-        glb: b["glb"].as_str().map(String::from),
-        lifetime: num(&b["lifetime"]),
-        hitpoints: b["hitpoints"].as_f64().unwrap_or(1.0) as f32,
-        impact_vol: num(&b["impact_vol"]),
-        impact_max: num(&b["impact_max"]),
-        impact_snd: b["impact_snd"]
-            .as_object()
-            .unwrap()
-            .iter()
-            .map(|(m, v)| (m.clone(), v.as_array().unwrap().iter().map(|s| s.as_str().unwrap().to_string()).collect()))
-            .collect(),
-        net: b["net"].as_object().map(|n| (n["duration"].as_f64().unwrap_or(0.0) as f32, n["dissipated"].as_f64().unwrap_or(0.0) as f32)),
-        hit_fx: b["hit_fx"].as_str().map(String::from),
-        bullet_fx: b["bullet_fx"].as_str().map(String::from),
-        payload: {
-            let f = |v: &Value, k: &str| v[k].as_f64().unwrap_or(0.0) as f32;
-            match (b["kind"].as_str().unwrap_or(""), &b["blast"], &b["mine"]) {
-                (_, _, m) if m.is_object() => Payload::Mine { sight: f(m, "sight"), speed: f(m, "speed") },
-                ("NovaMortar", ..) => Payload::Nova,
-                // 40000: the retail value, for imports made before `magnitude` was exported.
-                ("GravCharge", bl, _) => Payload::Grav { radius: f(bl, "radius"), duration: f(bl, "duration"), magnitude: bl["magnitude"].as_f64().map_or(40000.0, |m| m as f32) },
-                (_, bl, _) if bl.is_object() => Payload::Blast { radius: f(bl, "radius"), duration: f(bl, "duration") },
-                _ => Payload::Shell,
-            }
-        },
-        travel_snd: b["travel_snd"].as_array().and_then(|a| Some((a.first()?.as_str()?.to_string(), a.get(1)?.as_f64()? as f32, a.get(2)?.as_f64()? as f32))),
-        decal: b["decal"].as_str().and_then(|d| ["Small", "Medium", "Large"].iter().position(|x| *x == d)).map(|i| i as u8),
-        ricochet_snd: b["ricochet_snd"].as_object().map(|m| m.iter().filter_map(|(k, v)| Some((k.clone(), v.as_str()?.to_string()))).collect()).unwrap_or_default(),
-        damage: {
-            // Mod bullets may omit materials: missing ones deal no damage instead of panicking in `shells`.
-            let mut d: HashMap<String, [f32; 5]> = crate::combat::MATERIALS.iter().map(|m| (m.to_string(), [0.0; 5])).collect();
-            d.extend(b["damage"].as_object().unwrap().iter().map(|(m, d)| (m.clone(), [num(&d[0]), num(&d[1]), num(&d[2]), num(&d[3]), num(&d[4])])));
-            d
-        },
-    }
+    weapons::bullet_from_value("", b.clone()).unwrap_or_else(|e| panic!("{e}"))
 }
 
 /// A retail boolean field: the exporters keep WOT's "TRUE"/"FALSE" strings (any case); anything else is false.
@@ -540,15 +594,25 @@ pub fn read_json(path: &std::path::Path) -> Value {
 pub fn try_json(path: &std::path::Path) -> Option<Value> {
     serde_json::from_str(&std::fs::read_to_string(path).ok()?).ok()
 }
+/// Writes `path` whole or not at all: a temp file next to it (`.tmp` extension), then a rename, so a crash never leaves half a file.
+pub fn write_atomic(path: &std::path::Path, contents: &str) -> std::io::Result<()> {
+    let temp = path.with_extension("tmp");
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    std::fs::write(&temp, contents)?;
+    std::fs::rename(&temp, path).inspect_err(|_| {
+        let _ = std::fs::remove_file(&temp);
+    })
+}
 /// A map's `maps/<id>/map.json`, if that map was imported.
 pub fn map_json(id: &str) -> Option<Value> {
     try_json(&crate::assets_dir().join(format!("maps/{id}/map.json")))
 }
 
-/// Every gun and bullet definition (`data/weapons/*.json`), shared by all ships.
+/// Every gun and bullet definition (`data/weapons/*.json`), shared by all ships. Fail-fast, naming the file, entry and field.
 pub fn load_weapons(root: &std::path::Path) -> (HashMap<String, GunDef>, HashMap<String, BulletDef>) {
-    let table = |file: &str| read_json(&root.join("data/weapons").join(file)).as_object().unwrap().clone();
-    (table("guns.json").iter().map(|(k, g)| (k.clone(), gun_def(g))).collect(), table("bullets.json").iter().map(|(k, b)| (k.clone(), bullet_def(b))).collect())
+    weapons::try_load_weapons(root).unwrap_or_else(|e| panic!("{e}"))
 }
 
 /// Ship ids: the folders of `ships/` that hold a `ship.json`, sorted.
@@ -571,11 +635,169 @@ impl Library {
         assert!(!ids.is_empty(), "no ships in {}/ships; run tools/build_assets.sh", root.display());
         let (guns, bullets) = load_weapons(root);
         let classes: Vec<Class> = ids.iter().map(|n| load_class(root, n, &guns)).collect();
+        weapons::check_weapon_refs(classes.iter().flat_map(|c| c.mounts.iter().map(|m| (c.name.as_str(), m.gun.as_str()))), &guns, &bullets).unwrap_or_else(|e| panic!("{e}"));
         for c in &classes {
             crate::boarding::register(&c.name, c.crew, &c.boarding_points);
         }
         let names = ids.iter().filter_map(|n| Some((n.clone(), serde_json::from_value(try_json(&root.join(format!("ships/{n}/names.json")))?).ok()?))).collect();
         Library { classes, guns, bullets, names, clips: crate::clips::load(root) }
+    }
+}
+
+/// The untyped readers the typed `weapons` path replaced, kept to prove the two agree on all retail and mod data.
+#[cfg(test)]
+mod legacy {
+    use super::*;
+
+    pub fn gun_def(g: &Value) -> GunDef {
+        GunDef {
+            mount_type: g["Mount Type"].as_str().map(|s| s.split_whitespace().collect::<Vec<_>>().join(" ")),
+            points: g["Victory Point Cost"].as_u64().and_then(|v| u32::try_from(v).ok()),
+            exclusion: g["Exclusion Race"].as_str().filter(|s| *s != "None").map(String::from),
+            point_defense: g["Is PointDefense Gun"].as_bool().unwrap_or(false),
+            torpedo_launcher: g["Is TorpedoLauncher Gun"].as_bool().unwrap_or(false),
+            muzzle: num(&g["MuzzleSpeed"]),
+            reload: num(&g["TimeBetweenBursts"]),
+            burst: g["BulletsPerBurst"].as_u64().unwrap() as u32,
+            burst_reload: num(&g["DuringBurstReloadTime"]),
+            dev_per_shot: g["CalculateAccuracyDeviationDuringBurst"].as_bool().unwrap_or(false),
+            range: [num(&g["EffectiveRange_Range"]), num(&g["LongRange_Range"]), num(&g["MaximumRange_Range"])],
+            ricochet: ["EffectiveRange", "LongRange", "MaximumRange"].map(|b| g[format!("{b}_RicochetFactor")].as_f64().unwrap_or(0.0) as f32),
+            deviation: [num(&g["EffectiveRange_AccuracyDeviation"]), num(&g["LongRange_AccuracyDeviation"]), num(&g["MaximumRange_AccuracyDeviation"])],
+            gravity: g["BulletAffectedByGravity"].as_bool().unwrap(),
+            bullet: g["BulletTypeName_Primary"].as_str().unwrap().into(),
+            family: GunFamily::Cannon,
+            bullet_family: GunFamily::of(g["BulletTypeName_Primary"].as_str().unwrap()),
+            bullet_torpedo: is_torpedo_bullet(g["BulletTypeName_Primary"].as_str().unwrap()),
+            base: g["visual"]["base"].as_str().map(String::from),
+            barrel: g["visual"]["barrel"].as_str().map(String::from),
+            pivot: conv_v(&g["visual"]["pivot"]),
+            muzzles: g["visual"]["muzzles"].as_array().unwrap().iter().map(conv_v).collect(),
+            yaw_speed: num(&g["HorizontalRotationSpeed"]),
+            pitch_speed: num(&g["VerticalRotationSpeed"]),
+            pitch_limits: [num(&g["VerticalMinAngle"]), num(&g["VerticalMaxAngle"])],
+            muzzle_fx: g["MuzzleFlashEffect"].as_str().map(String::from),
+            sound: g["SoundName"]
+                .as_str()
+                .filter(|s| !s.is_empty())
+                .map(|s| (s.into(), g["SoundVolume"].as_f64().unwrap_or(1.0) as f32, g["SoundMaxDistance"].as_f64().unwrap_or(600.0) as f32)),
+            lob: (g["Is Lobbing Gun"] == true).then(|| g["LobAngle"].as_f64().unwrap_or(0.785) as f32),
+            cloak_fire: g["Can Be Fired While Cloaked"].as_bool().unwrap_or_else(|| {
+                let b = g["BulletTypeName_Primary"].as_str().unwrap_or_default();
+                is_torpedo_bullet(b) || b == "Bullet_Gattling"
+            }),
+            beam: BeamDef::from_json(&g["beam"]),
+        }
+    }
+
+    pub fn bullet_def(b: &Value) -> BulletDef {
+        let physics = b["physics"].as_object().map(|p| {
+            let get = |key: &str| p[key].as_f64().unwrap_or(f64::NAN) as f32;
+            let physics = Physics {
+                mass: get("Mass"),
+                thrust: get("MaxThrust"),
+                max_speed: get("MaxSpeed"),
+                rot_friction: get("RotationalFriction"),
+                max_ang_acc: get("MaxAngularAcceleration"),
+            };
+            assert!(
+                [physics.mass, physics.thrust, physics.max_speed, physics.max_ang_acc].iter().all(|v| v.is_finite() && *v > 0.0)
+                    && physics.rot_friction.is_finite()
+                    && physics.rot_friction >= 0.0,
+                "Invalid bullet physics"
+            );
+            physics
+        });
+        BulletDef {
+            physics,
+            glb: b["glb"].as_str().map(String::from),
+            lifetime: num(&b["lifetime"]),
+            hitpoints: b["hitpoints"].as_f64().unwrap_or(1.0) as f32,
+            impact_vol: num(&b["impact_vol"]),
+            impact_max: num(&b["impact_max"]),
+            impact_snd: b["impact_snd"]
+                .as_object()
+                .unwrap()
+                .iter()
+                .map(|(m, v)| (m.clone(), v.as_array().unwrap().iter().map(|s| s.as_str().unwrap().to_string()).collect()))
+                .collect(),
+            family: GunFamily::Cannon,
+            torpedo: false,
+            net: b["net"].as_object().map(|n| (n["duration"].as_f64().unwrap_or(0.0) as f32, n["dissipated"].as_f64().unwrap_or(0.0) as f32)),
+            hit_fx: b["hit_fx"].as_str().map(String::from),
+            bullet_fx: b["bullet_fx"].as_str().map(String::from),
+            payload: {
+                let f = |v: &Value, k: &str| v[k].as_f64().unwrap_or(0.0) as f32;
+                match (b["kind"].as_str().unwrap_or(""), &b["blast"], &b["mine"]) {
+                    (_, _, m) if m.is_object() => Payload::Mine { sight: f(m, "sight"), speed: f(m, "speed") },
+                    ("NovaMortar", ..) => Payload::Nova,
+                    // 40000: the retail value, for imports made before `magnitude` was exported.
+                    ("GravCharge", bl, _) => {
+                        Payload::Grav { radius: f(bl, "radius"), duration: f(bl, "duration"), magnitude: bl["magnitude"].as_f64().map_or(40000.0, |m| m as f32) }
+                    }
+                    (_, bl, _) if bl.is_object() => Payload::Blast { radius: f(bl, "radius"), duration: f(bl, "duration") },
+                    _ => Payload::Shell,
+                }
+            },
+            travel_snd: b["travel_snd"].as_array().and_then(|a| Some((a.first()?.as_str()?.to_string(), a.get(1)?.as_f64()? as f32, a.get(2)?.as_f64()? as f32))),
+            decal: b["decal"].as_str().and_then(|d| ["Small", "Medium", "Large"].iter().position(|x| *x == d)).map(|i| i as u8),
+            ricochet_snd: b["ricochet_snd"].as_object().map(|m| m.iter().filter_map(|(k, v)| Some((k.clone(), v.as_str()?.to_string()))).collect()).unwrap_or_default(),
+            damage: {
+                // Mod bullets may omit materials: missing ones deal no damage instead of panicking in `shells`.
+                let mut d: HashMap<String, [f32; 5]> = crate::combat::MATERIALS.iter().map(|m| (m.to_string(), [0.0; 5])).collect();
+                d.extend(b["damage"].as_object().unwrap().iter().map(|(m, d)| (m.clone(), [num(&d[0]), num(&d[1]), num(&d[2]), num(&d[3]), num(&d[4])])));
+                d
+            },
+        }
+    }
+}
+
+#[cfg(test)]
+mod weapons_equivalence {
+    use super::*;
+
+    /// Both readers on every entry of the two tables.
+    fn assert_alike(guns: &serde_json::Map<String, Value>, bullets: &serde_json::Map<String, Value>, what: &str) {
+        for (name, g) in guns {
+            let old = GunDef { family: GunFamily::of(name), ..legacy::gun_def(g) };
+            assert_eq!(weapons::gun_from_value(name, g.clone()).unwrap_or_else(|e| panic!("{what}: {e}")), old, "{what}: gun {name}");
+        }
+        for (name, b) in bullets {
+            let old = BulletDef { family: GunFamily::of(name), torpedo: is_torpedo_bullet(name), ..legacy::bullet_def(b) };
+            assert_eq!(weapons::bullet_from_value(name, b.clone()).unwrap_or_else(|e| panic!("{what}: {e}")), old, "{what}: bullet {name}");
+        }
+    }
+
+    /// The typed reader gives exactly what the untyped one gave, on the imported retail tables and on every `mods/` weapon file
+    /// (merged over retail, as the overlay does).
+    #[test]
+    #[ignore = "needs imported assets"]
+    fn typed_guns_and_bullets_equal_the_untyped_readers_on_retail_and_mod_data() {
+        let weapons = crate::assets_dir().join("data/weapons");
+        let (Some(guns), Some(bullets)) = (try_json(&weapons.join("guns.json")), try_json(&weapons.join("bullets.json"))) else {
+            eprintln!("skipped: no imported data/weapons");
+            return;
+        };
+        let (guns, bullets) = (guns.as_object().unwrap().clone(), bullets.as_object().unwrap().clone());
+        assert!(!guns.is_empty() && !bullets.is_empty());
+        assert_alike(&guns, &bullets, "retail");
+        let (retail_guns, retail_bullets) = weapons::try_load_weapons(crate::assets_dir()).unwrap();
+        assert_eq!((retail_guns.len(), retail_bullets.len()), (guns.len(), bullets.len()));
+        let mods = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../mods");
+        let mut seen = 0;
+        for m in std::fs::read_dir(mods).unwrap().flatten() {
+            let mut merged = |file: &str, base: &serde_json::Map<String, Value>| {
+                let mut v = Value::Object(base.clone());
+                if let Some(over) = try_json(&m.path().join("data/weapons").join(file)) {
+                    seen += 1;
+                    crate::modding::merge(&mut v, &over);
+                }
+                v.as_object().unwrap().clone()
+            };
+            let (g, b) = (merged("guns.json", &guns), merged("bullets.json", &bullets));
+            assert_alike(&g, &b, &m.file_name().to_string_lossy());
+        }
+        eprintln!("compared retail and {seen} mod weapon file(s)");
     }
 }
 
@@ -663,5 +885,81 @@ mod tests {
         assert_eq!(conv(1.0, 2.0, 3.0), Vec3::new(1.0, 3.0, -2.0));
         assert_eq!(crate::game_to_bevy(&serde_json::json!([1.0, 2.0, 3.0])), conv(1.0, 2.0, 3.0));
         assert_eq!(crate::game_to_bevy(&serde_json::json!([1.0])), Vec3::new(1.0, 0.0, 0.0), "missing components read as 0");
+    }
+}
+
+#[cfg(test)]
+mod gun_family_tests {
+    use super::{GunFamily::*, *};
+
+    #[test]
+    fn names_parse_to_their_family() {
+        for (name, family) in [
+            ("Gun_Harpoon_Light_2Deck", Harpoon),
+            ("Gun_GravCharge_Med", GravCharge),
+            ("Gun_EnergyNet_Med", EnergyNet),
+            ("Gun_Gattling_Light", Gattling),
+            ("Gun_ArcturianFire_Heavy", ArcturianFire),
+            ("Bullet_NovaMortar_Secondary", NovaMortar),
+            ("Gun_StarMortar", StarMortar),
+            ("Gun_StarMine_Med", StarMine),
+            ("Bullet_Torpedo", Torpedo),
+            ("Gun_IC_LancerDualMed_DestroyerFront", Lancer),
+            ("Gun_Plasma_Heavy", Plasma),
+            ("Gun_Carronade_Med", Carronade),
+            ("Gun_Mortar_Mod", Mortar),
+            ("Bullet_Mine2", Mine),
+            ("Gun_CannonBall_Med", Cannon),
+            ("Gun_Volcano", Cannon),
+        ] {
+            assert_eq!(GunFamily::of(name), family, "{name}");
+        }
+        assert!(GunFamily::of("Gun_NovaMortar").is_indirect() && GunFamily::of("Bullet_Mine2").is_indirect() && !GunFamily::of("Gun_Torpedo").is_indirect());
+        assert!(GunFamily::of("Bullet_StarMine_Med").is_mine() && !GunFamily::of("Bullet_StarMortar").is_mine());
+    }
+
+    #[test]
+    fn a_torpedo_bullet_is_a_name_starting_with_the_retail_torpedo() {
+        assert!(is_torpedo_bullet("Bullet_Torpedo") && is_torpedo_bullet("Bullet_Torpedo_Heavy"));
+        assert!(!is_torpedo_bullet("Bullet_CannonBall_Med") && !is_torpedo_bullet("Gun_Torpedo"));
+    }
+
+    /// The name rules the families replaced, kept here to prove the enum answers alike on every gun and bullet of the imported data.
+    #[test]
+    #[ignore = "needs imported assets"]
+    fn the_families_agree_with_the_substring_rules_on_every_retail_name() {
+        let (guns, bullets) = load_weapons(crate::assets_dir());
+        for name in guns.keys() {
+            let old = name.contains("Mortar") || name.contains("Mine") || name.contains("GravCharge");
+            assert_eq!(GunFamily::of(name).is_indirect(), old, "{name}");
+            assert_eq!(GunFamily::of(name) == Harpoon, name.contains("Harpoon"), "{name}");
+            assert_eq!(guns[name].family, GunFamily::of(name), "{name}: stored at load");
+            assert_eq!(guns[name].bullet_family.is_mine(), guns[name].bullet.contains("Mine"), "{name}");
+            assert_eq!(guns[name].bullet_torpedo, guns[name].bullet == TORPEDO_BULLET, "{name}");
+        }
+        for name in bullets.keys() {
+            assert_eq!(GunFamily::of(name).is_mine(), name.contains("Mine"), "{name}");
+            assert_eq!((bullets[name].family, bullets[name].torpedo), (GunFamily::of(name), is_torpedo_bullet(name)), "{name}: stored at load");
+            // torpedo: the two checks the code used to mix
+            assert_eq!(is_torpedo_bullet(name), name == TORPEDO_BULLET, "{name}");
+        }
+        for g in guns.values() {
+            assert_eq!(is_torpedo_bullet(&g.bullet), g.bullet == TORPEDO_BULLET, "{}", g.bullet);
+        }
+    }
+}
+
+#[cfg(test)]
+mod write_atomic_tests {
+    #[test]
+    fn a_save_replaces_the_file_and_leaves_no_temp_behind() {
+        let dir = std::env::temp_dir().join(format!("procyon-atomic-{}", std::process::id())).join("nested");
+        let path = dir.join("settings.json");
+        super::write_atomic(&path, r#"{"master": 3}"#).unwrap();
+        super::write_atomic(&path, r#"{"master": 4}"#).unwrap();
+        assert_eq!(super::try_json(&path).unwrap()["master"], 4);
+        let names: Vec<_> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name()).collect();
+        assert_eq!(names, ["settings.json"], "no temp file stays");
+        let _ = std::fs::remove_dir_all(dir.parent().unwrap());
     }
 }

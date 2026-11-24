@@ -1,5 +1,7 @@
 //! Harpoon range and bearing, the grapple flight and the winch that reels hulls together.
 use super::*;
+use crate::EngineOrder;
+use crate::data::GunFamily;
 
 /// Boarder and target must be this close (hull surface to hull surface) and this slow relative to each other.
 pub(super) const SHIP_RANGE: f32 = 10.0;
@@ -12,9 +14,9 @@ const HARPOON_RANGE: f32 = 100.0;
 pub(super) const HARPOON_SPEED: f32 = 45.0;
 /// A grapple snaps when the ships' centres get this much further apart than when the hook bit.
 const GRAPPLE_SLACK: f32 = 2.0;
-/// While a boarding is registered on the grapple the line is reeled in at this speed, down to this centre distance.
-/// Line shortened per tick (0.033 s) while reeling in.
+/// Line shortened per tick (0.033 s) while a boarding is registered on the grapple and the line is reeled in.
 const REEL_PER_TICK: f32 = 0.1;
+/// The centre distance the reeling stops at.
 pub(super) const REEL_MIN: f32 = 12.0;
 
 /// The lines between ships, for views to draw (the original's Rope effect): world end points and how much longer than the gap the
@@ -80,13 +82,18 @@ fn harpoons<'a>(lib: &'a Library, ship: &Ship, health: &'a Health, guns: Option<
         .iter()
         .enumerate()
         .map(move |(i, m)| (m, guns.map_or(m.gun.as_str(), |g| g.gun(i))))
-        .filter(|(m, gun)| gun.contains("Harpoon") && m.parent.is_none_or(|p| health.sections[p] > 0.0))
+        .filter(|(m, gun)| lib.family(gun) == GunFamily::Harpoon && m.parent.is_none_or(|p| health.sections[p] > 0.0))
 }
 /// How many grapples the ship may hold: every gun bank whose first working gun (the first of its mounts whose section still stands)
 /// fires the grappling harpoon adds all its guns, working or not.
 pub(super) fn grapple_limit(lib: &Library, ship: &Ship, health: &Health, guns: Option<&crate::combat::GunStates>) -> usize {
     let mounts = &lib.classes[ship.class].mounts;
-    bank_limit(mounts.iter().enumerate().map(|(i, m)| (m.bank, m.parent.is_none_or(|p| health.sections[p] > 0.0), guns.map_or(m.gun.as_str(), |g| g.gun(i)).contains("Harpoon"))))
+    bank_limit(
+        mounts
+            .iter()
+            .enumerate()
+            .map(|(i, m)| (m.bank, m.parent.is_none_or(|p| health.sections[p] > 0.0), lib.family(guns.map_or(m.gun.as_str(), |g| g.gun(i))) == GunFamily::Harpoon)),
+    )
 }
 /// `grapple_limit` over (bank, working, fires the harpoon) per gun, in mount order.
 pub(super) fn bank_limit(guns: impl Iterator<Item = (usize, bool, bool)>) -> usize {
@@ -141,7 +148,7 @@ pub(super) fn grapple_orders(
             sfx.write(Sfx { name: "Weapon_GrapHarpoon_Fire".into(), at: Some(tf.translation), vol: 0.7, max: 600.0 });
         } else {
             ship.waypoints = vec![ttf.translation];
-            ship.order = 2;
+            ship.order = EngineOrder::Full;
         }
     }
 }
@@ -151,7 +158,7 @@ pub(super) fn hook_flight(
     mut commands: Commands,
     time: Res<Time>,
     assets: Option<Res<AssetServer>>,
-    mut rng: ResMut<Rng>,
+    mut rng: ResMut<SimRng>,
     mut sfx: MessageWriter<Sfx>,
     mut hooks: Query<&mut Grapple>,
     ships: Query<&Transform>,
@@ -183,7 +190,7 @@ pub(super) fn reeled(distance: f32, dt: f32) -> f32 {
     (distance - REEL_PER_TICK * dt / crate::TICK_SECS).max(REEL_MIN)
 }
 
-/// A bitten grapple is a rope of the length the ships were apart when the hook bit (read from the original's code and checked in play).
+/// A bitten grapple is a rope of the length the ships were apart when the hook bit (checked in play).
 /// Each tick, if the centres are further apart than that, both hulls are moved toward each other along the line by the excess, split
 /// by mass (the lighter one moves more), positions only. The line snaps when the centres were already `GRAPPLE_SLACK` further apart
 /// than at the hit before that pull, which takes a relative speed of about 60 units/s. While a boarding is registered on the pair the

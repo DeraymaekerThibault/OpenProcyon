@@ -191,6 +191,21 @@ struct Plume {
 /// How far a plume's thrust moves before its material is written again (smaller than a glow change anyone could see).
 const THRUST_STEP: f32 = 0.004;
 
+/// Plume width at zero thrust, as a share of its full width. Engine choice, not the original's.
+const PLUME_WIDTH_IDLE: f32 = 0.65;
+/// Further share of full width the plume gains at full thrust (with `PLUME_WIDTH_IDLE` it sums to 1). Engine choice, not the original's.
+const PLUME_WIDTH_THRUST: f32 = 0.35;
+/// Plume length at zero thrust, as a share of its full length. Engine choice, not the original's.
+const PLUME_LENGTH_IDLE: f32 = 0.2;
+/// Further share of full length the plume gains at full thrust (with `PLUME_LENGTH_IDLE` it sums to 1). Engine choice, not the original's.
+const PLUME_LENGTH_THRUST: f32 = 0.8;
+/// Size of the plume length's flicker (a fraction of its length). Engine choice, not the original's.
+const PLUME_FLICKER: f32 = 0.06;
+/// How fast a plume's thrust follows the engine's, per second. Engine choice, not the original's.
+const PLUME_THRUST_RATE: f32 = 2.5;
+/// A plume whose thrust is below this is hidden. Engine choice, not the original's.
+const PLUME_HIDDEN_BELOW: f32 = 0.02;
+
 const RINGS: usize = 16;
 const AROUND: usize = 20;
 
@@ -272,10 +287,10 @@ fn plumes(
 
 /// The plume's scale at a thrust: longer and a little wider the harder the engine pushes, its length flickering a little.
 fn plume_scale(p: &Plume, thrust: f32) -> Vec3 {
-    let w = p.width * (0.65 + 0.35 * thrust);
+    let w = p.width * (PLUME_WIDTH_IDLE + PLUME_WIDTH_THRUST * thrust);
     let t = p.clock;
-    let flicker = 1.0 + 0.06 * (23.0 * t + p.seed).sin() * (13.7 * t + 2.0 * p.seed).sin();
-    Vec3::new(w, w, p.length * (0.2 + 0.8 * thrust) * flicker)
+    let flicker = 1.0 + PLUME_FLICKER * (23.0 * t + p.seed).sin() * (13.7 * t + 2.0 * p.seed).sin();
+    Vec3::new(w, w, p.length * (PLUME_LENGTH_IDLE + PLUME_LENGTH_THRUST * thrust) * flicker)
 }
 
 fn plume_motion(
@@ -287,10 +302,10 @@ fn plume_motion(
     let dt = time.delta_secs();
     for (mut p, parent, mut tf, mut vis, mat) in &mut plumes {
         let target = engines.get(parent.parent()).map_or(0.0, |(e, fx)| if fx.emitting { e.thrust() } else { 0.0 });
-        p.thrust += (target - p.thrust) * (dt * 2.5).min(1.0);
+        p.thrust += (target - p.thrust) * (dt * PLUME_THRUST_RATE).min(1.0);
         p.clock += dt;
         tf.scale = plume_scale(&p, p.thrust);
-        vis.set_if_neq(if p.thrust < 0.02 { Visibility::Hidden } else { Visibility::Inherited });
+        vis.set_if_neq(if p.thrust < PLUME_HIDDEN_BELOW { Visibility::Hidden } else { Visibility::Inherited });
         if (p.thrust - p.shown).abs() > THRUST_STEP
             && let Some(mut m) = materials.get_mut(&mat.0)
         {

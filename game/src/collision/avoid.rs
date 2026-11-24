@@ -175,7 +175,7 @@ fn sweep<'a>(me: &Me, heading: f32, secs: f32, others: &[&'a Other<'a>]) -> Opti
 fn sample_times(me: &Me, secs: f32) -> impl Iterator<Item = f32> {
     let v = me.speed.abs();
     let length = (me.bounds[1].z - me.bounds[0].z).max(1.0);
-    // ponytail: one step of `secs` when the ship covers less than a hull length (the original's rule there is unclear).
+    // PROVISIONAL: one step of `secs` when the ship covers less than a hull length (the original's rule there is unclear).
     let step = if v * secs < length { secs } else { length / v };
     (0..).map(move |k| k as f32 * step).take_while(move |t| *t <= secs + 1e-4)
 }

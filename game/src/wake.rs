@@ -1,4 +1,4 @@
-//! Ship wakes (docs/re/effects.md "Wakes"): a Trail primitive attached to the ship's wake placement, read from the original's code.
+//! Ship wakes (docs/re/effects.md "Wakes"): a Trail primitive attached to the ship's wake placement.
 //! Segments are laid in world space every 15 engine ticks and then drift on their own; the newest one follows the stern.
 use bevy::asset::RenderAssetUsages;
 use bevy::camera::visibility::NoFrustumCulling;
@@ -140,7 +140,7 @@ impl Wake {
     }
 }
 
-/// Multiplier of the wake texture per fleet type, from the optional `data/fx/wake_tint.json` (`{"Navy": [r, g, b]}`, values may exceed 1).
+/// Not retail: a multiplier of the wake texture per fleet type, from the optional `data/fx/wake_tint.json` (`{"Navy": [r, g, b]}`, values may exceed 1).
 /// Absent: the retail colour for everyone. A mod ships the file, so wakes can tell the factions apart without new textures.
 pub fn wake_tint(race: &str) -> Option<[f32; 3]> {
     static TINTS: std::sync::OnceLock<serde_json::Value> = std::sync::OnceLock::new();

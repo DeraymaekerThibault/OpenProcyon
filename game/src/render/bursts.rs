@@ -26,6 +26,25 @@ pub const SMOKE_SHADER: &str = "shaders/smoke.wesl";
 /// Most particles alive at once; the oldest give way.
 const CAP: usize = 12000;
 
+/// Share of the sky's shadow-side colour the smoke takes as its shade. Engine choice, not the original's.
+const SMOKE_SHADE: f32 = 0.35;
+/// How fast the camera jolt dies down, per second (the jolt is scaled by `1 - dt * this` each frame). Engine choice, not the original's.
+const SHAKE_DECAY: f32 = 4.0;
+/// Camera jolt: angular rates (rad/s) of the four sine waves that make the offset wobble. Engine choice, not the original's.
+const SHAKE_RATES: [f32; 4] = [37.0, 23.0, 31.0, 29.0];
+/// Camera jolt: world units of offset per unit of a rule's `shake`. Engine choice, not the original's.
+const SHAKE_AMPLITUDE: f32 = 0.35;
+/// Camera jolt: distance (world units) at which a blast's `shake` is halved. Engine choice, not the original's.
+const SHAKE_FALLOFF_DISTANCE: f32 = 150.0;
+/// Most jolt that flares the colour fringing; stronger shake does not fringe more. Engine choice, not the original's.
+const ABERRATION_JOLT_MAX: f32 = 2.0;
+/// Smoke from a flame source starts this fraction of the flame's height above its anchor. Engine choice, not the original's.
+const SMOKE_FLAME_LIFT: f32 = 0.8;
+/// Ether dust: modulus of the cheap per-mote hash (a prime, so motes do not line up). Engine choice, not the original's.
+const MOTE_HASH_MODULUS: u32 = 10007;
+/// Ether dust: radius of the fade-out around the lens, as a fraction of the box's half size. Engine choice, not the original's.
+const MOTE_NEAR_FRACTION: f32 = 0.08;
+
 /// What a particle is drawn as; the shader gets it as `uv.x / 4`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
@@ -388,7 +407,7 @@ fn start(
         }
         if rule.shake > 0.0 {
             let d = eye.map_or(0.0, |c| c.distance(m.at));
-            parts.shake = parts.shake.max(rule.shake / (1.0 + d / 150.0));
+            parts.shake = parts.shake.max(rule.shake / (1.0 + d / SHAKE_FALLOFF_DISTANCE));
         }
         if rule.every > 0.0 {
             commands.entity(m.entity).try_insert(Emitter { rule: r, next: now + rule.every });
@@ -418,7 +437,7 @@ fn throw_parts(parts: &mut Particles, rule: &Rule, at: Vec3, forward: Vec3, now:
         if debris.is_some() && kind.is_impact_debris() {
             continue;
         }
-        let lift = if *kind == Kind::Smoke { rule.flame.map_or(0.0, |f| f.height * 0.8 * scale) } else { 0.0 };
+        let lift = if *kind == Kind::Smoke { rule.flame.map_or(0.0, |f| f.height * SMOKE_FLAME_LIFT * scale) } else { 0.0 };
         parts.throw(*kind, p, at + Vec3::Y * lift, forward, now, None);
     }
     for (kind, p) in debris.into_iter().flatten() {
@@ -576,13 +595,13 @@ fn draw(
     let (sm, smat, mut svis) = smokes.single_mut().expect("one smoke mesh");
     svis.set_if_neq(smoke.upload(&mut meshes, &sm.0));
     // the clock and the sun are the frame data's; only the sky's colour on the shadowed side is the smoke's own, and it rarely changes
-    let shade = (ambient.color.to_linear().to_vec3() * 0.35).extend(1.0);
+    let shade = (ambient.color.to_linear().to_vec3() * SMOKE_SHADE).extend(1.0);
     if smoke_mats.get(&smat.0).is_some_and(|m| m.extension.u.shade != shade)
         && let Some(mut m) = smoke_mats.get_mut(&smat.0)
     {
         m.extension.u.shade = shade;
     }
-    parts.shake *= (1.0 - time.delta_secs() * 4.0).max(0.0);
+    parts.shake *= (1.0 - time.delta_secs() * SHAKE_DECAY).max(0.0);
 }
 
 /// Specks of dust in a box around the camera, each drifting slowly on its own; the box wraps, so they never run out.
@@ -591,14 +610,14 @@ fn motes(b: &mut QuadBatch, m: &Part, eye: Vec3, now: f32, cam: &GlobalTransform
     let span = 2.0 * half;
     let (right, up, back) = (cam.right().as_vec3(), cam.up().as_vec3(), cam.back().as_vec3());
     for i in 0..m.count {
-        let h = |k: u32| ((i.wrapping_mul(2654435761).wrapping_add(k.wrapping_mul(40503))) % 10007) as f32 / 10007.0;
+        let h = |k: u32| ((i.wrapping_mul(2654435761).wrapping_add(k.wrapping_mul(40503))) % MOTE_HASH_MODULUS) as f32 / MOTE_HASH_MODULUS as f32;
         let home = Vec3::new(h(1), h(2), h(3)) * span;
         let drift = Vec3::new(h(4) - 0.5, (h(5) - 0.5) * 0.3, h(6) - 0.5) * 2.0 * now;
         let rel = (home + drift - eye).rem_euclid(Vec3::splat(span)) - Vec3::splat(half);
         let p = eye + rel;
         // fade in from the box's edge and very near the lens; `age` carries that fade (1 = gone)
         let edge = (rel.abs().max_element() / half).clamp(0.0, 1.0);
-        let near = (rel.length() / (half * 0.08)).clamp(0.0, 1.0);
+        let near = (rel.length() / (half * MOTE_NEAR_FRACTION)).clamp(0.0, 1.0);
         let fade = 1.0 - (1.0 - edge * edge) * near;
         let s = m.size * (0.5 + h(7));
         quad(b, Kind::Mote, p, right * s, up * s, back, m.color, fade, (h(8) * 63.0) as u32);
@@ -614,7 +633,7 @@ fn shake(mut commands: Commands, time: Res<Time>, parts: Res<Particles>, mut cam
         return;
     }
     let t = time.elapsed_secs();
-    let j = Vec3::new((t * 37.0).sin() + (t * 23.0).sin() * 0.5, (t * 31.0).sin(), (t * 29.0).sin()) * parts.shake * 0.35;
+    let j = Vec3::new((t * SHAKE_RATES[0]).sin() + (t * SHAKE_RATES[1]).sin() * 0.5, (t * SHAKE_RATES[2]).sin(), (t * SHAKE_RATES[3]).sin()) * parts.shake * SHAKE_AMPLITUDE;
     for mut tf in &mut cams {
         tf.translation += j;
     }
@@ -631,7 +650,7 @@ fn unshake(mut commands: Commands, shaken: Option<Res<Shaken>>, mut cams: Query<
 
 /// Colour fringing flaring with the camera's jolt.
 fn aberration(look: Res<Look>, parts: Option<Res<Particles>>, mut cams: Query<(Entity, Option<&mut ChromaticAberration>), With<Camera3d>>, mut commands: Commands) {
-    let jolt = parts.map_or(0.0, |p| p.shake.min(2.0));
+    let jolt = parts.map_or(0.0, |p| p.shake.min(ABERRATION_JOLT_MAX));
     let want = look.aberration + look.aberration_pulse * jolt;
     for (cam, ca) in &mut cams {
         match ca {

@@ -9,9 +9,11 @@ from pathlib import Path
 
 from PIL import Image
 
+from tools import cli
 from tools.eft import load
 from tools.export_combat import fx_names
 from tools.gamefs import ci_file, ci_files
+from tools.jsonio import dump
 from tools.mdb_to_glb import convert
 from tools.models import model_path
 
@@ -121,7 +123,7 @@ def main(root, outdir, ship_jsons):
     (fx / "tex").mkdir(parents=True, exist_ok=True)
     names = set(EXTRAS)
     for p in ship_jsons:
-        names |= fx_names(json.loads(Path(p).read_text()))
+        names |= fx_names(json.loads(Path(p).read_text(encoding="utf-8")))
     # Weapons no stock ship carries (base and island guns, swappable guns) are exported before this step; their bullet, impact and
     # muzzle effects are needed too, or their shells are invisible.
     wdir = Path(outdir) / "data/weapons"
@@ -130,12 +132,12 @@ def main(root, outdir, ship_jsons):
         ("guns.json", ("MuzzleFlashEffect",)),
     ):
         if (wdir / f).is_file():
-            for rec in json.loads((wdir / f).read_text()).values():
+            for rec in json.loads((wdir / f).read_text(encoding="utf-8")).values():
                 names |= {rec.get(k) for k in keys}
     if (
         fx / "index.json"
     ).is_file():  # a second pass (after the base weapons exist) adds to the first
-        names |= set(json.loads((fx / "index.json").read_text()))
+        names |= set(json.loads((fx / "index.json").read_text(encoding="utf-8")))
     names -= {None, "none", "NoEffect", ""}
     done, missing = [], []
     for n in sorted(names):
@@ -145,7 +147,7 @@ def main(root, outdir, ship_jsons):
             missing.append(n)
             continue
         export_morph_meshes(root, outdir, j)
-        (fx / f"{n}.json").write_text(json.dumps(j))
+        (fx / f"{n}.json").write_text(dump(j), encoding="utf-8")
         done.append(n)
         t = set()
         textures(j, t)
@@ -158,9 +160,10 @@ def main(root, outdir, ship_jsons):
                 print("warning: missing effect texture", tex, file=sys.stderr)
                 continue
             Image.open(src[0]).convert("RGBA").save(dst)
-    (fx / "index.json").write_text(json.dumps(done))
+    (fx / "index.json").write_text(dump(done), encoding="utf-8")
     print(f"exported {len(done)} effects; missing: {missing}")
 
 
 if __name__ == "__main__":
-    main(sys.argv[1], sys.argv[2], sys.argv[3:])
+    root, out, *ships = cli.args(__doc__, 2, 10**6)
+    main(root, out, ships)

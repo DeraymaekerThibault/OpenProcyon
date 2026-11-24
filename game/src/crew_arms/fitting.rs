@@ -187,6 +187,7 @@ pub(super) enum Carry {
 pub struct SkirmishCrew(pub [Vec<String>; 8]);
 
 pub(super) fn apply_skirmish_crew(
+    spawn_order: Query<&crate::scenario::SpawnIndex>,
     mut commands: Commands,
     lib: Res<Library>,
     mut ships: Query<(Entity, &mut crate::Ship, &SkirmishCrew, &mut crate::boarding::Boardable), Added<SkirmishCrew>>,
@@ -197,7 +198,7 @@ pub(super) fn apply_skirmish_crew(
         (ship.crew_speed, ship.crew_turn) = posts.handling(&caps);
         // Sight follows the lookouts, for every ship (retail: scan range = sight x the lookout post's factor, ours included).
         commands.entity(e).insert(crate::environment::ScanFactor(posts.scan(&caps)));
-        boarding.apply_posts(&posts, leadership_bonus(e, &posts));
+        boarding.apply_posts(&posts, leadership_bonus(crate::scenario::SpawnIndex::of(&spawn_order, e), &posts));
         commands.entity(e).insert(posts);
     }
 }
@@ -223,6 +224,7 @@ pub(super) fn apply_skirmish_weapons(
 }
 
 pub(super) fn apply_outfit(
+    spawn_order: Query<&crate::scenario::SpawnIndex>,
     mut commands: Commands,
     assets: Res<AssetServer>,
     lib: Res<Library>,
@@ -268,7 +270,7 @@ pub(super) fn apply_outfit(
                 commands.entity(e).insert(crate::environment::ScanFactor(wanted.as_ref().unwrap_or(&CrewPosts(Default::default())).scan(&caps)));
             }
             if let Some(posts) = &wanted {
-                boarding.apply_posts(posts, leadership_bonus(e, posts));
+                boarding.apply_posts(posts, leadership_bonus(crate::scenario::SpawnIndex::of(&spawn_order, e), posts));
                 commands.entity(e).insert(posts.clone());
             } else {
                 boarding.reset_crew();

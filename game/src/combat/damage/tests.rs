@@ -144,7 +144,7 @@ mod fire_tests {
         let class = &lib.classes[lib.index("Ship_Navy_Cutter")];
         let lost = |victim: Side, p: f32| {
             let mut hp = Health::new(class);
-            fraction_hit(class, &mut hp, p, victim, 0.0);
+            fraction_hit(class, &mut hp, p, victim, 0.0, crate::scenario::Difficulty::default().0);
             (class.sections.iter().map(|s| s.hp).sum::<f32>() - hp.sections.iter().sum::<f32>(), hp.core)
         };
         let (enemy, core) = lost(Side::Enemy, 0.5);
@@ -160,12 +160,12 @@ mod fire_tests {
         let lib = Library::load(crate::assets_dir());
         let class = lib.index("Ship_Navy_Cutter");
         let mut app = App::new();
-        app.init_resource::<Time>().add_systems(Update, fires);
+        app.init_resource::<Time>().init_resource::<crate::scenario::Difficulty>().add_systems(Update, fires);
         let mut hp = Health::new(&lib.classes[class]);
         hp.sections[0] = 0.0;
         let ship = crate::Ship { heading: 0.0, ..crate::Ship::new(class, crate::Side::Enemy) };
         app.insert_resource(lib);
-        let fire = Fire { sec: 0, intensity: 5.0, state: 0, fx: None };
+        let fire = Fire { sec: 0, intensity: 5.0, state: FireState::Burning, fx: None };
         let e = app.world_mut().spawn((Transform::default(), ship, hp, Fires { list: vec![fire], tick: 0.0 })).id();
         let states = |app: &App| app.world().get::<Fires>(e).unwrap().list.iter().map(|f| f.state).collect::<Vec<_>>();
         let step = |app: &mut App, secs: f32| {
@@ -173,13 +173,13 @@ mod fire_tests {
             app.update();
         };
         step(&mut app, 5.0);
-        assert_eq!(states(&app), [0], "no tick yet: nothing changes");
+        assert_eq!(states(&app), [FireState::Burning], "no tick yet: nothing changes");
         step(&mut app, 1.5);
-        assert_eq!(states(&app), [1], "the tick finds the dead fire");
+        assert_eq!(states(&app), [FireState::Out], "the tick finds the dead fire");
         step(&mut app, 1.0);
-        assert_eq!(states(&app), [1], "between ticks it stays put");
+        assert_eq!(states(&app), [FireState::Out], "between ticks it stays put");
         step(&mut app, 5.5);
-        assert_eq!(states(&app), [2]);
+        assert_eq!(states(&app), [FireState::Loose]);
         step(&mut app, 6.0);
         assert!(states(&app).is_empty(), "deleted on the third tick");
     }

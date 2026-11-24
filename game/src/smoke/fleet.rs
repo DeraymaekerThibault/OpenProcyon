@@ -1,10 +1,14 @@
 use crate::*;
 
 /// ECS/UI self-check through shared keys and widget markers, usable with either presentation.
-#[allow(deprecated)] // Same shared Interaction markers as panels.rs; test driver only.
-pub fn fleet_smoke(world: &mut World, mut previous: Local<Option<Entity>>) {
+/// Each frame's step runs once: the count stops while a battle loads (and is advanced after this system), so without the check a
+/// step that re-enters the battle (`fleet` at 230) would restart it on every frame until the run is killed (#568).
+pub fn fleet_smoke(world: &mut World, mut previous: Local<Option<Entity>>, mut done: Local<Option<u32>>) {
     let cfg = world.resource::<Config>();
     let frame = cfg.frame;
+    if done.replace(frame) == Some(frame) {
+        return;
+    }
     match cfg.script.as_deref() {
         Some("current-m3") => current_m3(world, frame),
         Some("hunt-m3") => hunt_m3(world, frame),
@@ -79,7 +83,7 @@ fn hunt_m3(world: &mut World, frame: u32) {
         m.opening = None;
         world.get_mut::<Transform>(primary).unwrap().translation = Vec3::new(500.0, 0.0, -500.0);
         let mut ship = world.get_mut::<Ship>(primary).unwrap();
-        ship.order = 0;
+        ship.order = EngineOrder::Stop;
         ship.waypoints.clear();
         ship.speed = 0.0;
     }
@@ -100,7 +104,7 @@ fn hunt_m3(world: &mut World, frame: u32) {
         let pos = world.get::<Transform>(exile).unwrap().translation;
         world.get_mut::<Transform>(primary).unwrap().translation = pos - Vec3::X * 100.0;
         let mut ship = world.get_mut::<Ship>(primary).unwrap();
-        ship.order = 2;
+        ship.order = EngineOrder::Full;
         ship.speed = 10.0;
     }
     if frame == 80 {
@@ -161,7 +165,7 @@ fn storm_m3(world: &mut World, frame: u32) {
         let e = world.resource::<ship::Fleets>().primary().unwrap();
         world.get_mut::<Transform>(e).unwrap().translation = Vec3::new(600.0, 0.0, 1050.0);
         let mut sh = world.get_mut::<Ship>(e).unwrap();
-        sh.order = 0;
+        sh.order = EngineOrder::Stop;
         sh.speed = 0.0;
         sh.waypoints.clear();
     }
@@ -212,7 +216,7 @@ fn fleet_primary(world: &mut World, frame: u32) {
     }
 }
 
-#[allow(deprecated)]
+#[allow(deprecated)] // Interaction, see pointer.rs
 fn fleet_input(world: &mut World, frame: u32) {
     world.resource_mut::<ButtonInput<KeyCode>>().reset_all();
     use crate::panels::FleetButton as B;
@@ -393,7 +397,7 @@ fn fleet(world: &mut World, frame: u32, previous: &mut Option<Entity>) {
 /// `--menu fleet --script fleet-profile-arms` (scratch `XDG_DATA_HOME`): an auto-assigned Navy fleet on the Arms tab with a swapped gun
 /// is saved as an arms profile, the gun is put back, and Load Arms is clicked through its buttons: refused while every point is spent
 /// (shot at frame 55 shows the reason), then the swapped gun comes back once there is room.
-#[allow(deprecated)]
+#[allow(deprecated)] // Interaction, see pointer.rs
 fn profile_arms(world: &mut World, frame: u32) {
     use crate::menu::{Action as A, Skirmish};
     let press = |world: &mut World, what: &str, want: &dyn Fn(&A) -> bool| {
@@ -412,7 +416,7 @@ fn profile_arms(world: &mut World, frame: u32) {
         20 => world.resource_scope(|world, lib: Mut<Library>| {
             let mut sk = world.resource_mut::<Skirmish>();
             let h = human(&sk);
-            sk.slots[h].race = 0;
+            sk.slots[h].race = crate::scenario::Race::Navy;
             sk.fleet_size = 5;
             crate::menu::auto_assign(&mut sk, &lib);
             // Every point spent (the hook has no map, so set the budget to what the fleet costs).
@@ -459,7 +463,7 @@ fn profile_arms(world: &mut World, frame: u32) {
 
 /// `--menu fleet --script fleet-ships`: on the Ships screen the cheapest Navy hull is double-clicked (two presses of its row a few
 /// frames apart) and lands in the fleet; a dearer hull is double-clicked with too few points left and is refused with a reason.
-#[allow(deprecated)]
+#[allow(deprecated)] // Interaction, see pointer.rs
 fn ships_double_click(world: &mut World, frame: u32) {
     use crate::menu::{Action as A, Skirmish};
     let press = |world: &mut World, row: usize| {
@@ -476,7 +480,7 @@ fn ships_double_click(world: &mut World, frame: u32) {
         20 => {
             let mut sk = world.resource_mut::<Skirmish>();
             let h = sk.slots.iter().position(|s| s.kind == crate::menu::Kind::Human).unwrap();
-            sk.slots[h].race = 0;
+            sk.slots[h].race = crate::scenario::Race::Navy;
             while !sk.slots[h].fleet.is_empty() {
                 sk.slots[h].remove_ship(0);
             }
@@ -486,11 +490,11 @@ fn ships_double_click(world: &mut World, frame: u32) {
         // The cheapest hull sits on the last row; the list shows eight rows, so scroll it into view.
         22 => {
             let lib = world.resource::<Library>();
-            let n = crate::menu::offered(lib, 0).len();
+            let n = crate::menu::offered(lib, crate::scenario::Race::Navy).len();
             world.resource_mut::<Skirmish>().scroll = n.saturating_sub(8);
         }
         26 | 30 => {
-            let n = crate::menu::offered(world.resource::<Library>(), 0).len();
+            let n = crate::menu::offered(world.resource::<Library>(), crate::scenario::Race::Navy).len();
             press(world, n - 1);
         }
         32 => {
@@ -512,7 +516,7 @@ fn ships_double_click(world: &mut World, frame: u32) {
 
 /// `--menu fleet --script fleet-crew`: on the Crew tab of an auto-assigned fleet a post is clicked, then a roster row is clicked
 /// (press and release, no drag) and the member is seated on that post; a right-click on their face returns them to the roster.
-#[allow(deprecated)]
+#[allow(deprecated)] // Interaction, see pointer.rs
 fn crew_clicks(world: &mut World, frame: u32) {
     use crate::crew_arms::Action as A;
     use crate::menu::Skirmish;
@@ -577,7 +581,7 @@ struct ClickedRow(String);
 
 /// `--menu fleet --script fleet-arms`: on the Arms tab a weapon row that fits the selected bank is double-clicked and the bank carries
 /// that gun afterwards.
-#[allow(deprecated)]
+#[allow(deprecated)] // Interaction, see pointer.rs
 fn arms_clicks(world: &mut World, frame: u32) {
     use crate::crew_arms::Action as A;
     use crate::menu::Skirmish;

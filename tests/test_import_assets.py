@@ -134,7 +134,7 @@ class ImportAssets(unittest.TestCase):
                 import_assets.tool("tools.format_json")
             ok, err = import_assets.tool("tools.format_json", quiet=True)
             self.assertFalse(ok)
-            self.assertIn("IndexError", err)
+            self.assertIn("usage:", err)
             self.assertEqual(import_assets.sys.argv, argv)
 
     def test_frozen_default_out_is_the_folder_the_game_reads(self):
@@ -162,3 +162,30 @@ class ImportAssets(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FindAssets(unittest.TestCase):
+    def test_lookup_order(self):
+        """PROCYON_ASSETS, this checkout, the main checkout of a linked worktree, then the per-user folder."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            main, wt, xdg = tmp / "main", tmp / "wt", tmp / "xdg"
+            git = ["git", "-c", "user.name=t", "-c", "user.email=t@t", "-C", str(main)]
+            main.mkdir()
+            run = import_assets.subprocess.run
+            run([*git, "init", "-q"], check=True)
+            run([*git, "commit", "-q", "--allow-empty", "-m", "base"], check=True)
+            run([*git, "worktree", "add", "-q", str(wt)], check=True)
+            env = {"XDG_DATA_HOME": str(xdg)}
+
+            def find(**extra):
+                return import_assets.find_assets({**env, **extra}, repo=wt)
+
+            self.assertIsNone(find())
+            (xdg / "openprocyon/assets/ships").mkdir(parents=True)
+            self.assertEqual(find(), xdg / "openprocyon/assets")
+            (main / "assets/ships").mkdir(parents=True)
+            self.assertEqual(find().resolve(), (main / "assets").resolve())
+            (wt / "assets/ships").mkdir(parents=True)
+            self.assertEqual(find(), wt / "assets")
+            self.assertEqual(find(PROCYON_ASSETS="/x"), Path("/x"))

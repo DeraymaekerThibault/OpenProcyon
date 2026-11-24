@@ -1,4 +1,4 @@
-//! Beam guns: not in the original, a mod feature (`beam` block of a gun in `guns.json`, `data::BeamDef`). A beam gun charges for
+//! Not retail: beam guns, a mod feature (`beam` block of a gun in `guns.json`, `data::BeamDef`). A beam gun charges for
 //! `charge` seconds (a glow grows at the muzzle), then holds a beam along its barrel for `duration` seconds and reloads. The beam
 //! burns the first enemy ship it crosses every `tick` seconds with the gun's bullet damage, times a power that grows while it stays on
 //! the same ship, so a captain who keeps the target in the beam (by turning the ship: the mount's arc is narrow) does the most harm.
@@ -105,17 +105,19 @@ pub fn track(phase: &mut Phase, def: &BeamDef, dt: f32, hit: Option<(Entity, f32
 
 /// Burns what every firing beam touches (after `fire`, which runs the cycle and turns the turrets).
 pub(super) fn burn(
+    spawn_order: Query<&crate::scenario::SpawnIndex>,
     mut commands: Commands,
     time: Res<Time>,
     lib: Res<Library>,
     fxl: Res<FxLib>,
-    mut rng: ResMut<Rng>,
+    mut rng: ResMut<SimRng>,
+    difficulty: Res<crate::scenario::Difficulty>,
     (mut sfx, mut hits, mut scars): (MessageWriter<Sfx>, MessageWriter<Hit>, MessageWriter<crate::decals::Scar>),
     mut shooters: Query<(Entity, &Transform, &Ship, &mut GunStates)>,
     mut ships: ShipTargets,
 ) {
     let dt = time.delta_secs();
-    for (me, tf, ship, mut states) in &mut shooters {
+    for (me, tf, ship, mut states) in crate::scenario::in_spawn_order(&spawn_order, shooters.iter_mut(), |x| x.0) {
         let class = &lib.classes[ship.class];
         let sunk = ships.get(me).is_ok_and(|s| s.3.destroyed);
         for (mount, state) in class.mounts.iter().zip(states.0.iter_mut()) {
@@ -143,6 +145,7 @@ pub(super) fn burn(
                 lifetime: 0.0,
                 gravity: 0.0,
                 bullet: gun.bullet.clone(),
+                torpedo: bd.torpedo,
                 side: ship.side,
                 shooter: me,
                 target: Some(se),
@@ -159,7 +162,7 @@ pub(super) fn burn(
             };
             let material = Some(crate::combat::material_key(&lib.classes[victim_ship.class].sections[k].material));
             let target = ShipTarget { entity: se, transform: stf, side: victim_ship.side, class: &lib.classes[victim_ship.class], invuln: mission.map_or(0.0, |m| m.invuln) };
-            hit_ship(&mut commands, &fxl, &mut rng, (&mut sfx, &mut hits, &mut scars), bd, &shell, target, &mut hp, &mut fires, k, at, victim);
+            hit_ship(&mut commands, &fxl, &mut rng, (&mut sfx, &mut hits, &mut scars), bd, &shell, target, &mut hp, &mut fires, k, at, victim, difficulty.0);
             hit_fx(&mut commands, &fxl, bd, at, shell.vel, Some((se, stf)), Surface { body: Some(se), normal: None, material });
         }
     }

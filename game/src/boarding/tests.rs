@@ -63,7 +63,7 @@ fn exported_data_has_crews_and_base_points() {
 }
 
 #[derive(Resource, Default)]
-struct Got(Vec<(String, String)>);
+struct Got(Vec<(crate::names::Owner, String)>);
 fn collect(mut msgs: MessageReader<Captured>, mut got: ResMut<Got>) {
     got.0.extend(msgs.read().map(|c| (c.by.clone(), c.victim.clone())));
 }
@@ -93,7 +93,7 @@ fn computer_captain_grapples_and_boards_its_target() {
             tick(&mut app, 0.1);
         }
         assert!(held(&mut app, foe).is_empty(), "an untouched computer ship leaves its target alone");
-        app.world_mut().write_message(crate::combat::Fired { shooter: me, target: Some(foe), bullet: String::new() });
+        app.world_mut().write_message(crate::combat::Fired { shooter: me, target: Some(foe), bullet: String::new(), torpedo: false, mine: false });
         let (mut grappled, mut boarded) = (false, false);
         for _ in 0..600 {
             tick(&mut app, 0.1);
@@ -134,7 +134,8 @@ fn app() -> App {
         .init_resource::<BoardStatus>()
         .init_resource::<Got>()
         .insert_resource(Library::load(assets_dir()))
-        .insert_resource(Rng::new(7))
+        .insert_resource(SimRng::new(7))
+        .init_resource::<crate::scenario::Difficulty>()
         .add_systems(Update, (handle_messages, set_flags, grapple_orders, hook_flight, winch_upkeep, winch_pull, drive, fights, settled, status, collect).chain());
     app
 }
@@ -243,7 +244,7 @@ fn grapple_then_board_captures_the_ship_and_tells_the_rules() {
     assert_eq!(app.world().resource::<crate::ship::Fleets>().roster(), &[me, foe], "capture joins the captor's own roster");
     assert!(held(&mut app, me).is_empty(), "grapple released");
     assert_eq!(app.world().resource::<Mission>().script.tows(), &[(other, towee)], "the captor's tow links are dropped, others kept");
-    assert_eq!(app.world().resource::<Got>().0, vec![("Player".to_string(), "Enemy".to_string())]);
+    assert_eq!(app.world().resource::<Got>().0, vec![("Player".into(), "Enemy".to_string())]);
     assert!(app.world().get::<Boardable>(foe).unwrap().strength.defend > 3, "crewed afresh");
 }
 

@@ -60,7 +60,7 @@ const RETAIL_STEPS_PER_SEC: f32 = 30.0;
 
 /// Retail input: the pitch is not a control. Steps change the wanted distance (`orbit.dist`): outward by their size, inward by twice it.
 fn retail_camera_input(mouse: &ButtonInput<MouseButton>, keys: &ButtonInput<KeyCode>, pointer: &Pointer, orbit: &mut Orbit, dt: f32, radius: f32) {
-    let mut step = -pointer.scroll.delta.y * 10.0; // ponytail: one scroll unit = one wheel notch (line units); pixel-unit touchpads zoom fast
+    let mut step = -pointer.scroll.delta.y * 10.0; // One scroll unit = one wheel notch (line units); pixel-unit touchpads zoom fast
     if mouse.pressed(MouseButton::Right) {
         orbit.yaw -= pointer.motion.delta.x * 0.005;
         step += pointer.motion.delta.y;
@@ -146,11 +146,11 @@ pub fn input(
         // Engine orders: +/- step through All Stop .. Emergency.
         if direct && (b.just_pressed(&keys, Act::SpeedUp) || keys.just_pressed(KeyCode::NumpadAdd)) {
             ship.throttle = None;
-            ship.order = (ship.order + 1).min(ORDERS.len() - 1);
+            ship.order = ship.order.faster();
         }
         if direct && (b.just_pressed(&keys, Act::SpeedDown) || keys.just_pressed(KeyCode::NumpadSubtract)) {
             ship.throttle = None;
-            ship.order = ship.order.saturating_sub(1);
+            ship.order = ship.order.slower();
         }
         // Advanced movement: Enter accepts the plotted course, Backspace drops it (and nothing else).
         if direct && keys.just_pressed(KeyCode::Enter) && !pointer.plot.pending.is_empty() {
@@ -170,7 +170,7 @@ pub fn input(
                     p.target = None;
                     p.hold = false;
                 }
-                ship.order = 0;
+                ship.order = EngineOrder::Stop;
             }
         }
         if direct && keys.just_pressed(KeyCode::KeyC) {
@@ -178,6 +178,7 @@ pub fn input(
             target.1 = None;
             target.2.panic = false;
         }
+        // Not retail: the Pause key toggles the pause too, beside the HUD pause button.
         if keys.just_pressed(KeyCode::Pause) {
             toggle_pause(&mut vtime);
         }
@@ -193,7 +194,7 @@ pub fn input(
                 target.2.armed = None;
                 target.2.shot = Some((bank, ray.get_point(t)));
                 // Retail plays a sound only for gravity charges (PROVISIONAL: star/nova silent as decoded, unconfirmed in play)
-                if let Some(a) = lob.0.filter(|a| a.kind == 0) {
+                if let Some(a) = lob.0.filter(|a| a.kind == crate::combat::LobKind::GravCharge) {
                     sfx.write(audio::Sfx::ui(if a.solution { "HUD_LobWeapon_Accept" } else { "HUD_LobWeapon_Reject" }));
                 }
                 return;
@@ -268,9 +269,9 @@ pub fn input(
                 ship.waypoints.clear();
             }
             ship.waypoints.push(p);
-            if ship.order == 0 || ship.throttle == Some(0.0) {
+            if ship.order == EngineOrder::Stop || ship.throttle == Some(0.0) {
                 ship.throttle = None;
-                ship.order = 2;
+                ship.order = EngineOrder::Full;
             } // light green 'Full', as in the original
         }
     })();
@@ -338,9 +339,9 @@ pub fn fleet_keys(
 /// The plotted course becomes the ship's (light-green Full if it was stopped, as a basic click does).
 fn commit_plot(ship: &mut Ship, plot: &mut course::Plot) {
     ship.waypoints = std::mem::take(&mut plot.pending);
-    if ship.order == 0 || ship.throttle == Some(0.0) {
+    if ship.order == EngineOrder::Stop || ship.throttle == Some(0.0) {
         ship.throttle = None;
-        ship.order = 2;
+        ship.order = EngineOrder::Full;
     }
 }
 
@@ -386,15 +387,19 @@ pub fn toggle_debug(keys: Res<ButtonInput<KeyCode>>, mut q: Query<&mut Visibilit
 #[derive(Component)]
 pub struct Sky;
 
-pub fn sky(cam: Single<&Transform, (With<Camera3d>, Without<Sky>)>, mut sky: Single<(&mut Transform, &mut Visibility), With<Sky>>, settings: Option<Res<menu::Settings>>) {
+pub fn sky(
+    cam: Single<&Transform, (With<Camera3d>, With<crate::MainCamera>, Without<Sky>)>,
+    mut sky: Single<(&mut Transform, &mut Visibility), With<Sky>>,
+    settings: Option<Res<menu::Settings>>,
+) {
     sky.0.translation = cam.translation;
     // Display Options 'Render Background'.
     let want = if settings.is_some_and(|s| !s.background) { Visibility::Hidden } else { Visibility::Inherited };
     sky.1.set_if_neq(want);
 }
 
-/// A baked cube map for this retail sky (`models/sky/<sky>_cube.png`, six square faces stacked +X -X +Y -Y +Z -Z;
-/// not retail), when a mod provides one: the scenario draws it instead of the sky sphere.
+/// Not retail: a baked cube map for this retail sky (`models/sky/<sky>_cube.png`, six square faces stacked +X -X +Y -Y +Z -Z),
+/// when a mod provides one: the scenario draws it instead of the sky sphere.
 pub fn hd_sky_file(root: &std::path::Path, sky: &str) -> Option<String> {
     let rel = format!("models/sky/{sky}_cube.png");
     root.join(&rel).is_file().then_some(rel)
@@ -511,7 +516,7 @@ pub fn camera(
     tfs: Query<&Transform, Without<Camera3d>>,
     contacts: Query<(), Or<(With<Ship>, With<environment::SpaceAnimal>)>>,
     sensors: Res<environment::Sensors>,
-    mut cam: Single<&mut Transform, With<Camera3d>>,
+    mut cam: Single<&mut Transform, (With<Camera3d>, With<crate::MainCamera>)>,
     mission: Option<Res<campaign::Mission>>,
     (free, time, mut shown): (Option<Res<FreeCamera>>, Option<Res<Time<Real>>>, Local<Option<f32>>),
 ) {
@@ -562,7 +567,7 @@ pub fn hud(
     let left = format!(
         "{}\nOrder: {} (+/-)\nSpeed: {:.1} (max {:.1})\nHeading: {:03.0}\nGuns ready: {}/{}   Enemies: {}\nCore {:.0}/{:.0}\n{}\nLMB: target enemy / set course (Shift adds, X clears)\nC: clear target  R: restart  RMB drag, arrows: view",
         class.name,
-        ORDERS[ship.order].0,
+        ship.order.label(),
         ship.speed,
         class.phys.max_speed * combat::speed_factor(class, health),
         (-ship.heading.to_degrees()).rem_euclid(360.0),
@@ -634,7 +639,7 @@ mod camera_tests {
         let (mut world, ids) = ship::movement_tests::fleet_world();
         world.init_resource::<environment::Sensors>();
         world.insert_resource(FREE);
-        let cam = world.spawn((Camera3d::default(), Transform::default())).id();
+        let cam = world.spawn((crate::MainCamera, Camera3d::default(), Transform::default())).id();
         world.resource_mut::<Orbit>().focus = Some(ids[5]);
         world.get_mut::<Transform>(ids[5]).unwrap().translation = Vec3::X * 3000.0;
         world.run_system_once(environment::refresh_sensors).unwrap();
@@ -719,7 +724,7 @@ mod camera_tests {
         let mut world = World::new();
         world.init_resource::<environment::Sensors>();
         world.insert_resource(Orbit { yaw: 0.0, pitch: 0.0, dist: 100.0, focus: None });
-        let cam = world.spawn((Camera3d::default(), Transform::default())).id();
+        let cam = world.spawn((crate::MainCamera, Camera3d::default(), Transform::default())).id();
         let mut system = IntoSystem::into_system(camera);
         system.initialize(&mut world);
         system.run((), &mut world).unwrap();

@@ -3,7 +3,6 @@
 //! Views (`classic/menu.rs` retail screens) draw the current screen in `BuildMenu` from `MenuModel`
 //! and tag their buttons with an `Action`; `buttons` / `save_actions` here run them. Maps: assets/maps/<id> (tools/export_maps.py).
 
-#![allow(deprecated)] // shortcut: bevy 0.20 Interaction (deprecated for picking Hovered/Pressed); port when it is removed
 mod lobby_scenario;
 mod missions;
 mod mods;
@@ -17,6 +16,7 @@ pub use saves::*;
 pub use settings::*;
 pub use skirmish::*;
 
+use crate::scenario::Race;
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use serde_json::Value;
@@ -40,7 +40,7 @@ pub enum Screen {
     Controls,
     /// Main menu > Tutorial: Basic Training / Full Training (`Tutorial Screen.tst`).
     Tutorial,
-    /// Single Player > Custom Missions: the missions mods add (`MissionList`). Not retail.
+    /// Not retail: Single Player > Custom Missions, the missions mods add (`MissionList`).
     Missions,
     /// Options > Sound Options (`Audio_Options.tst`) and Display Options (`Display Options Screen.tst`).
     Audio,
@@ -163,6 +163,85 @@ impl InGame {
         self.page
     }
 }
+/// What the retail screen files' button elements (`menu/<screen>.json`, by their `impl` name) do in this engine.
+#[derive(Clone)]
+pub enum RetailButton {
+    /// Enabled: runs this action.
+    Run(Action),
+    /// Shown greyed out (retail greys the button out until its condition holds).
+    Disabled,
+    /// The tab of the screen that is open now: drawn lit, does nothing.
+    CurrentTab,
+}
+
+/// The state `retail_button` decides from.
+pub struct ButtonContext<'a> {
+    /// The open page of the in-game menu.
+    pub page: Option<Page>,
+    pub skirmish: &'a Skirmish,
+    pub outcome: crate::scenario::Outcome,
+}
+
+/// The action table of the retail buttons and when they are enabled. `None`: not a button of this table (a backdrop, a list, a label,
+/// a slider ...), or a retail button this engine does not implement on `screen` (the view then greys it out when it has a label).
+/// Views only draw the result.
+pub fn retail_button(screen: Screen, impl_: &str, cx: &ButtonContext) -> Option<RetailButton> {
+    use RetailButton::{CurrentTab, Disabled, Run};
+    let sk = cx.skirmish;
+    Some(match (screen, impl_) {
+        (Screen::Main, "Open Single Player Menu Button") => Run(Action::Goto(Screen::SinglePlayer)),
+        (Screen::Main, "Open Option Screen") => Run(Action::Goto(Screen::Options)),
+        (Screen::Main, "Open Tutorial Button") => Run(Action::Goto(Screen::Tutorial)),
+        (Screen::Main, "Open Next Screen Button") => Run(Action::Quit),
+        (Screen::Tutorial, "Start Basic Training Tutorial Button") => Run(Action::Tutorial("basic_tutorial")),
+        (Screen::Tutorial, "Start Full Training Tutorial Button") => Run(Action::Tutorial("tutorial")),
+        (Screen::Tutorial, "Open Prev Arrow Button") => Run(Action::Goto(Screen::Main)),
+        (Screen::SinglePlayer, "Open Load Campaign Screen Button") => Run(Action::OpenLoad),
+        (Screen::SinglePlayer, "Open Next Screen Button") => Run(Action::Campaign),
+        (Screen::SinglePlayer, "Open Create Skirmish Game Screen") => Run(Action::Goto(Screen::CreateSkirmish)),
+        (Screen::SinglePlayer, "Open Prev Arrow Button") => Run(Action::Goto(Screen::Main)),
+        (Screen::CreateSkirmish, "Open Prev Arrow Button") => Run(Action::Goto(Screen::SinglePlayer)),
+        (Screen::CreateSkirmish, "Open Next Arrow Button") => Run(Action::Goto(Screen::Lobby)),
+        (Screen::Load, "Open Prev Arrow Button") => Run(Action::Goto(Screen::SinglePlayer)),
+        (Screen::Load | Screen::Battle, "Load or Save Campaign Button") => Run(if cx.page == Some(Page::Save) { Action::DoSave } else { Action::DoLoad }),
+        (Screen::Load | Screen::Battle, "Open Confirm Saved Game Delete Dialog Button") => Run(Action::Remove),
+        (Screen::Battle, "Open Next Screen Button") => Run(Action::Ingame(Some(Page::Options))),
+        (Screen::Battle, "In Game Menu Stats Screen Button") => Run(Action::Ingame(Some(Page::Summary))),
+        // A decided battle continues to the main menu (measured on a won skirmish); opened from the in-game menu it goes back there.
+        (Screen::Battle, "Open Next Arrow Button") => Run(if cx.outcome == crate::scenario::Outcome::Playing { Action::Ingame(Some(Page::Menu)) } else { Action::QuitToMenu }),
+        (Screen::Battle, "Open Saved Campaign Screen Button") => Run(Action::Ingame(Some(Page::Save))),
+        (Screen::Battle, "Open Load Campaign Screen Button") => Run(Action::Ingame(Some(Page::Load))),
+        (Screen::Battle, "InGameMenu QuitGame Button") => Run(Action::QuitToMenu),
+        (Screen::Battle, "Open Previous Screen Button") => Run(Action::Ingame(if cx.page == Some(Page::Menu) { None } else { Some(Page::Menu) })),
+        // Retail greys Launch Game until a computer opponent is in and (open maps) a fleet is assembled.
+        (Screen::Lobby, "Open Next Screen Button") => {
+            if sk.launch_error().is_some() {
+                Disabled
+            } else {
+                Run(Action::Launch)
+            }
+        }
+        (Screen::Lobby, "Open Map Description Dialog Button") => Run(Action::MapInfo(true)),
+        (Screen::Lobby, "Open Previous Screen Button") => Run(Action::Goto(Screen::CreateSkirmish)),
+        (Screen::Lobby, "Open Ship Selection Screen") if sk.open() => Run(Action::Goto(Screen::Fleet)),
+        (Screen::Fleet, "Open Ship Selection Screen") => CurrentTab,
+        // Retail greys these out: Crew, Arms and Drop until the picked fleet slot holds a ship, Add until a hull type is clicked.
+        (Screen::Fleet, "Add Ship To Fleet Button") => enabled_if(sk.ship_chosen, Action::AddShip),
+        (Screen::Fleet, "Drop Ship From Fleet Button") => enabled_if(sk.slot_filled(), Action::DropShip),
+        (Screen::Fleet, "Open Crew Selection Screen") => enabled_if(sk.slot_filled(), Action::OpenCrew),
+        (Screen::Fleet, "Open Arms Selection Screen") => enabled_if(sk.slot_filled(), Action::OpenArms),
+        (Screen::Fleet, "Open Next Arrow Button") => Run(Action::Goto(Screen::Lobby)),
+        (Screen::Fleet, "AutoAssign Button") => Run(Action::AutoAssign),
+        (Screen::Fleet, "Open Load Fleet Profile Dialog Button") => Run(Action::OpenProfile(crate::profiles::Kind::Fleet, false)),
+        (Screen::Fleet, "Open Save Fleet Profile Dialog Button") if sk.human().is_some_and(|h| !h.fleet.is_empty()) => Run(Action::OpenProfile(crate::profiles::Kind::Fleet, true)),
+        _ => return None,
+    })
+}
+
+fn enabled_if(on: bool, action: Action) -> RetailButton {
+    if on { RetailButton::Run(action) } else { RetailButton::Disabled }
+}
+
 /// Run condition: no in-game menu is open (battle input systems use it so the menu does not click through).
 pub fn overlay_closed(ig: Res<InGame>) -> bool {
     ig.page.is_none()
@@ -221,20 +300,21 @@ pub fn button_sound(action: &Action, arrow: Option<&ArrowButton>, select: bool) 
 }
 
 /// Rollover when the pointer first reaches a widget, the select sound when it is pressed (not again when the press is released).
+#[allow(deprecated)] // Interaction, see pointer.rs
 fn button_sounds(
     q: Query<(Entity, &Interaction, &Action, Option<&ArrowButton>), Changed<Interaction>>,
     mut pointed: Local<std::collections::HashSet<Entity>>,
     mut sfx: MessageWriter<crate::audio::Sfx>,
 ) {
     for (e, i, action, arrow) in &q {
-        if *i == Interaction::None {
+        if !crate::pointer::over(i) {
             pointed.remove(&e);
             continue;
         }
         if pointed.insert(e) {
             sfx.write(crate::audio::Sfx::ui(button_sound(action, arrow, false)));
         }
-        if *i == Interaction::Pressed {
+        if crate::pointer::down(i) {
             sfx.write(crate::audio::Sfx::ui(button_sound(action, arrow, true)));
         }
     }
@@ -377,11 +457,12 @@ pub struct ListEntry(pub bool);
 
 /// Retail pull-downs stay open while the button is held: press the cell, drag to an entry, release to pick it. The lobby's current
 /// value (a plain click) does not pick on release, so that click keeps the list open.
+#[allow(deprecated)] // Interaction, see pointer.rs
 fn dropdown_release(mouse: Res<ButtonInput<MouseButton>>, entries: Query<(&Action, &Interaction, &ListEntry)>, mut sk: ResMut<Skirmish>, lib: Res<Library>) {
     if !mouse.just_released(MouseButton::Left) {
         return;
     }
-    if let Some((action, ..)) = entries.iter().find(|(_, i, e)| e.0 && **i != Interaction::None) {
+    if let Some((action, ..)) = entries.iter().find(|(_, i, e)| e.0 && crate::pointer::over(i)) {
         apply(&mut sk, &lib, action);
     }
 }
@@ -420,6 +501,7 @@ fn held_track<T: Copy>(mouse: &ButtonInput<MouseButton>, dragging: &mut Option<T
 }
 
 /// Dragging any scrollbar. The menu is rebuilt after every change, so the drag is remembered here rather than in the node.
+#[allow(deprecated)] // Interaction, see pointer.rs
 fn scroll_drag(
     tracks: Query<(&ScrollTrack, &Interaction, &bevy::ui::RelativeCursorPosition)>,
     mouse: Res<ButtonInput<MouseButton>>,
@@ -428,7 +510,7 @@ fn scroll_drag(
     mut mods: ResMut<ModList>,
     mut dragging: Local<Option<ScrollKind>>,
 ) {
-    let Some(kind) = held_track(&mouse, &mut dragging, tracks.iter().find(|(_, i, _)| **i == Interaction::Pressed).map(|(t, ..)| t.kind)) else { return };
+    let Some(kind) = held_track(&mouse, &mut dragging, tracks.iter().find(|(_, i, _)| crate::pointer::down(i)).map(|(t, ..)| t.kind)) else { return };
     let Some((t, y)) = tracks.iter().find(|(t, ..)| t.kind == kind).and_then(|(t, _, rel)| rel.normalized.map(|p| (*t, p.y + 0.5))) else { return };
     // The thumb's centre follows the cursor along the room its length leaves.
     let pos = ((y - t.thumb / 2.0) / (1.0 - t.thumb).max(0.01)).clamp(0.0, 1.0);
@@ -452,6 +534,7 @@ pub const SLIDER_TRACK: f32 = 134.0;
 pub const SLIDER_KNOB: f32 = 22.0;
 
 /// Dragging a slider's knob. The menu is rebuilt after every change, so the drag is remembered here rather than in the node.
+#[allow(deprecated)] // Interaction, see pointer.rs
 fn slider_drag(
     tracks: Query<(&SliderTrack, &Interaction, &bevy::ui::RelativeCursorPosition)>,
     mouse: Res<ButtonInput<MouseButton>>,
@@ -459,7 +542,7 @@ fn slider_drag(
     lib: Res<Library>,
     mut dragging: Local<Option<SliderTrack>>,
 ) {
-    let Some(kind) = held_track(&mouse, &mut dragging, tracks.iter().find(|(_, i, _)| **i == Interaction::Pressed).map(|(t, ..)| *t)) else { return };
+    let Some(kind) = held_track(&mouse, &mut dragging, tracks.iter().find(|(_, i, _)| crate::pointer::down(i)).map(|(t, ..)| *t)) else { return };
     let Some(x) = tracks.iter().find(|(t, ..)| **t == kind).and_then(|(.., rel)| rel.normalized).map(|p| p.x + 0.5) else { return };
     let fraction = (x * SLIDER_TRACK - SLIDER_KNOB / 2.0) / (SLIDER_TRACK - SLIDER_KNOB);
     match kind {
@@ -520,7 +603,7 @@ impl MenuModel<'_> {
                 cui.scroll,
                 (cui.capture, &self.binds.rows),
                 (&self.settings, &self.mods, (self.missions.picked, self.missions.scroll)),
-                (sk.dropdown, sk.name_open),
+                (sk.dropdown, sk.name_open, sk.map_info, sk.arms_open, sk.arms_tab),
                 sk.flag_picker,
                 sk.map_scroll,
                 sk.slot_scroll
@@ -551,6 +634,7 @@ fn mods_bake_hook(mut mods: ResMut<ModList>, mut job: ResMut<BakeJob>, cfg: Res<
 
 /// Smoke hook (`--menu missions --script missions-play`): presses the Custom Missions screen's Play button once it is drawn, so the
 /// run starts the first custom mission the way a click does (needs a mission mod switched on or passed with `--mod`).
+#[allow(deprecated)] // Interaction, see pointer.rs
 fn missions_play_hook(cfg: Res<crate::Config>, mut buttons: Query<(&mut Interaction, &Action)>, mut done: Local<bool>) {
     if *done || cfg.script != Some(crate::smoke::Script::MissionsPlay) || cfg.frame < 30 {
         return;
@@ -573,7 +657,7 @@ fn fleet_hook(mut sk: ResMut<Skirmish>, lib: Res<Library>, cfg: Res<crate::Confi
     }
     *done = true;
     if let Some(i) = sk.slots.iter().position(|s| s.kind == Kind::Human) {
-        sk.slots[i].race = 0;
+        sk.slots[i].race = Race::Navy;
     }
     sk.fleet_size = 5;
     apply(&mut sk, &lib, &Action::AutoAssign);
@@ -865,6 +949,7 @@ impl ClickClock {
 }
 
 /// Runs the `Action` of a pressed button (whichever view drew it).
+#[allow(deprecated)] // Interaction, see pointer.rs
 fn buttons(
     q: Query<(&Interaction, &Action), Changed<Interaction>>,
     mut next: ResMut<NextState<Screen>>,
@@ -884,7 +969,7 @@ fn buttons(
     mut clicks: Local<ClickClock>,
 ) {
     for (i, action) in &q {
-        if *i != Interaction::Pressed {
+        if !crate::pointer::down(i) {
             continue;
         }
         let profile = matches!(action, Action::OpenProfile(..) | Action::PickProfile(_) | Action::DoProfile | Action::CloseProfile);

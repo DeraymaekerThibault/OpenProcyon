@@ -44,7 +44,8 @@ fn a_star_blast_strikes_every_section_once_as_its_ring_passes_and_spares_nobody(
     let damage = lib.bullets[bullet].damage.clone();
     let mut app = App::new();
     app.insert_resource(lib)
-        .insert_resource(Rng(5))
+        .insert_resource(SimRng::new(5))
+        .init_resource::<crate::scenario::Difficulty>()
         .init_resource::<Time>()
         .init_resource::<FxLib>()
         .add_message::<Hit>()
@@ -90,7 +91,7 @@ fn storm_wind_uses_weather_damage_and_respects_mission_protection() {
         serde_json::from_value(crate::data::read_json(&crate::assets_dir().join("data/nebula.json"))).unwrap();
     assert_eq!(&tables["wind"]["Cloth"][..2], &[5.0, 7.0]);
     let mut app = App::new();
-    app.insert_resource(lib).insert_resource(Rng(123)).add_message::<Strike>().add_systems(Update, strikes);
+    app.insert_resource(lib).insert_resource(SimRng::new(123)).init_resource::<crate::scenario::Difficulty>().add_message::<Strike>().add_systems(Update, strikes);
     let e = app.world_mut().spawn((Transform::default(), ship, hp, crate::campaign::MissionShip::default())).id();
     for _ in 0..3 {
         app.world_mut().write_message(Strike { victim: e, damage: tables["wind"].clone(), section: k });
@@ -135,7 +136,12 @@ fn a_ram_hits_only_the_section_nearest_the_contact() {
     let at = (s.min + s.max) * 0.5;
     // A Cutter rammed by an enemy Man-O-War at 9 units/s: 0.0004 x 40000 x 9 = 144 hit points.
     let damage = 0.0004 * lib.classes[mow].phys.mass * 9.0;
-    app.insert_resource(lib).insert_resource(Rng(7)).add_message::<crate::collision::Ram>().add_message::<crate::audio::Sfx>().add_systems(Update, ram_damage);
+    app.insert_resource(lib)
+        .insert_resource(SimRng::new(7))
+        .init_resource::<crate::scenario::Difficulty>()
+        .add_message::<crate::collision::Ram>()
+        .add_message::<crate::audio::Sfx>()
+        .add_systems(Update, ram_damage);
     app.world_mut().write_message(crate::collision::Ram { a, b, damage, at });
     app.update();
     let sounds: Vec<String> = app.world_mut().resource_mut::<Messages<crate::audio::Sfx>>().drain().map(|s| s.name).collect();

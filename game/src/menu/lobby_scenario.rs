@@ -11,6 +11,7 @@
 //! - `slots`: the lobby rows in order, `human`, `computer`, `open` or `closed`; `N*kind` repeats. The first row is always the
 //!   human's. Rows left out stay as the lobby opens them. Computers take the team and fleet type the lobby gives them.
 use super::*;
+use crate::scenario::Race;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum SlotSpec {
@@ -97,9 +98,9 @@ impl LobbyScenario {
         }
         if sk.open() {
             // The human picks a fleet type when the map leaves it open, then presses Auto Assign.
-            if sk.human().is_some_and(|h| h.race == 4) {
+            if sk.human().is_some_and(|h| h.race == Race::Unchosen) {
                 let i = sk.slots.iter().position(|s| s.kind == Kind::Human).unwrap_or(0);
-                sk.choose(Cell::Fleet(i), Choice::Fleet(0));
+                sk.choose(Cell::Fleet(i), Choice::Fleet(Race::Navy));
             }
             if self.fleet.is_empty() {
                 crate::menu::auto_assign(sk, lib);

@@ -33,7 +33,7 @@ fn speech_colour(mission: Res<Mission>, mut texts: Query<(&Ui, &mut TextColor)>)
 
 /// The top strip both the briefing and cutscene speech use.
 fn speech_strip() -> Node {
-    Node { position_type: PositionType::Absolute, top: Val::Px(0.0), width: Val::Percent(100.0), height: Val::Percent(14.0), ..default() }
+    Node { position_type: PositionType::Absolute, top: Val::Px(0.0), width: Val::Percent(100.0), height: Val::Percent(14.0), ..default() } // PROVISIONAL: the 14% strip height is eyeballed
 }
 /// The speech line beside the portrait.
 fn speech_line() -> Node {
@@ -112,7 +112,7 @@ fn build_briefing(mut commands: Commands, mission: Res<Mission>, assets: Res<Ass
         });
 }
 
-/// A skirmish map script's speech lines (`maps/<id>/media.json`): the gameplay subtitle above the main bar, in the speech event's
+/// Not retail: a skirmish map script's speech lines (`maps/<id>/media.json`), the gameplay subtitle above the main bar, in the speech event's
 /// own colour. The cutscene banner and the rest of the mission widgets stay with the campaign.
 fn build_skirmish_speech(mut commands: Commands, existing: Query<(), With<Ui>>) {
     if !existing.is_empty() {

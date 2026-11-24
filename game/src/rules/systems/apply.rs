@@ -4,6 +4,7 @@
 //! (an owner change then moves the ship to the new owner's side) and has no orbit camera.
 
 use super::*;
+use crate::EngineOrder;
 use std::collections::HashMap;
 
 /// Base queries as the rule dispatcher reads them (bases carry no `Ship`).
@@ -38,6 +39,8 @@ pub(in crate::rules) struct FxEnv<'a, 'w, 's> {
     pub fxlib: Option<&'a crate::fx::FxLib>,
     pub sfx: Option<&'a mut Messages<crate::audio::Sfx>>,
     pub toggles: Option<&'a mut crate::panels::Toggles>,
+    /// The battle's difficulty (`scenario::Difficulty`), for damage the rules deal.
+    pub difficulty: u8,
     /// The orbit camera (the campaign's; a skirmish has none).
     pub orbit: Option<&'a mut Orbit>,
     /// A skirmish's map players and the side each fights for; none in the campaign.
@@ -113,7 +116,7 @@ pub(in crate::rules) fn apply(
                 if !s.primary && !s.mission.human {
                     s.ship.cap = v;
                 } else if v <= 0.0 && !skirmish {
-                    s.ship.order = 0;
+                    s.ship.order = EngineOrder::Stop;
                     s.ship.waypoints.clear();
                 }
             }),
@@ -157,7 +160,7 @@ pub(in crate::rules) fn apply(
                 }
             }
             Fx::Tow(tower, towee) => {
-                let at = |e| ships.get(e).ok().map(|s| (s.transform.translation, env.lib.classes[s.ship.class].radius));
+                let at = |e| ships.get(e).ok().map(|s| (super::sim_pos(s.transform, s.interp), env.lib.classes[s.ship.class].radius));
                 if let (Some((p, rp)), Some((q, rq))) = (at(tower), at(towee))
                     && crate::docking::tow_in_range(p, q, rp, rq)
                 {
@@ -217,7 +220,7 @@ pub(in crate::rules) fn apply(
                         if let Some(side) = side {
                             sh.side = side;
                         }
-                        ms.owner = o.clone();
+                        ms.owner = o.as_str().into();
                     }
                 }
             }
@@ -264,12 +267,14 @@ pub(in crate::rules) fn apply(
                     s.mission.looping = None;
                     if !s.primary {
                         s.ship.waypoints.clear();
-                        s.ship.order = 0;
+                        s.ship.order = EngineOrder::Stop;
                         s.ship.goal = None;
                     }
                 });
             }
-            Fx::Damage(u, p) => each_ship(ships, u, |s| crate::combat::fraction_hit(&env.lib.classes[s.ship.class], &mut s.health, p, s.ship.side, s.mission.invuln)),
+            Fx::Damage(u, p) => {
+                each_ship(ships, u, |s| crate::combat::fraction_hit(&env.lib.classes[s.ship.class], &mut s.health, p, s.ship.side, s.mission.invuln, env.difficulty))
+            }
             // A skirmish's 'Hold position' is the captain's lock (the right-click menu's Hold): the ship stays where it is and still
             // fires; releasing hands it back to its captain or to the next order the script gives.
             Fx::Hold(u, on) if skirmish => {
@@ -278,7 +283,7 @@ pub(in crate::rules) fn apply(
                     let Ok(RuleShipItem { ship: mut sh, .. }) = ships.get_mut(e) else { continue };
                     if on {
                         sh.waypoints.clear();
-                        sh.order = 0;
+                        sh.order = EngineOrder::Stop;
                         commands.entity(e).insert(crate::ship::HoldPosition);
                     } else {
                         commands.entity(e).remove::<crate::ship::HoldPosition>();
@@ -290,7 +295,7 @@ pub(in crate::rules) fn apply(
                 if on {
                     each_ship(ships, u, |s| {
                         s.ship.waypoints.clear();
-                        s.ship.order = 0;
+                        s.ship.order = EngineOrder::Stop;
                     });
                 }
             }
@@ -353,7 +358,7 @@ pub(in crate::rules) fn apply(
             }
             Fx::Longboat(u) => {
                 // Launched from the human's command ship: alongside it, same heading.
-                let from = ships.iter().find(|s| s.primary).map(|s| (s.transform.translation, s.ship.heading, env.lib.classes[s.ship.class].radius));
+                let from = ships.iter().find(|s| s.primary).map(|s| (super::sim_pos(s.transform, s.interp), s.ship.heading, env.lib.classes[s.ship.class].radius));
                 if let Some((p, heading, r)) = from {
                     for (k, e) in u.into_iter().enumerate() {
                         if let Ok(RuleShipItem { ship: mut sh, transform: mut tf, .. }) = ships.get_mut(e) {

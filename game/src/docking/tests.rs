@@ -1,4 +1,5 @@
 use super::*;
+use crate::EngineOrder;
 use std::time::Duration;
 
 #[test]
@@ -221,7 +222,7 @@ fn tick(app: &mut App, secs: f32) {
 fn ship(lib: &Library, name: &str, side: Side) -> (Ship, Health) {
     let class = lib.index(name);
     let c = &lib.classes[class];
-    (Ship { heading: 0.0, speed: 3.0, order: 2, ..Ship::new(class, side) }, Health::new(c))
+    (Ship { heading: 0.0, speed: 3.0, order: EngineOrder::Full, ..Ship::new(class, side) }, Health::new(c))
 }
 fn point(x: f32) -> DockPoint {
     DockPoint { pos: Vec3::new(x, 0.0, 0.0), fwd: Vec3::NEG_Z }
@@ -286,7 +287,7 @@ fn player_docks_repairs_and_leaves_its_slot_free() {
     let position = app.world().get::<Transform>(me).unwrap().translation;
     {
         let mut ship = app.world_mut().get_mut::<Ship>(me).unwrap();
-        ship.order = 2;
+        ship.order = EngineOrder::Full;
         ship.waypoints = vec![position + Vec3::NEG_Z * 100.0];
     }
     tick(&mut app, 0.1);

@@ -1,4 +1,5 @@
 //! Mission one's in-engine opening; retail paths/voices and provisional camera interpolation. `classic/mission_ui.rs` draws it.
+use crate::EngineOrder;
 use crate::{
     Scenario,
     campaign::{Mission, MissionShip},
@@ -75,7 +76,7 @@ pub(crate) fn halt_arrival(mission: Option<Res<Mission>>, mut ships: Query<&mut 
     if active(mission.as_deref()) {
         for mut sh in &mut ships {
             if sh.waypoints.is_empty() {
-                sh.order = 0;
+                sh.order = EngineOrder::Stop;
             }
         }
     }
@@ -134,7 +135,7 @@ fn finish(
             tf.translation = end;
             sh.waypoints.clear();
             sh.speed = 0.0;
-            sh.order = 0;
+            sh.order = EngineOrder::Stop;
         }
     }
     // Rules 'END Opening NIS' (music, command-ship focus at 60 / 10 degrees, throttle) run in rules.rs once these are marked played.
@@ -150,7 +151,7 @@ pub fn update(
     keys: Res<ButtonInput<KeyCode>>,
     assets: Res<AssetServer>,
     cfg: Res<crate::Config>,
-    mut camera: Single<&mut Transform, With<Camera3d>>,
+    mut camera: Single<&mut Transform, (With<Camera3d>, With<crate::MainCamera>)>,
     mut ships: Query<(&mut Transform, &MissionShip, &mut crate::Ship, Has<crate::PlayerShip>), Without<Camera3d>>,
     ui: Query<Entity, With<BriefingUi>>,
     voices: Query<Entity, With<Voice>>,

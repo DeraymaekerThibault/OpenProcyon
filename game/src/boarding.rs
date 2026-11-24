@@ -14,7 +14,7 @@ use std::sync::OnceLock;
 use crate::audio::Sfx;
 use crate::campaign::{Mission, MissionBase, MissionShip};
 use crate::collision::Drift;
-use crate::combat::{Health, Library, Rng};
+use crate::combat::{Health, Library, SimRng};
 use crate::data::conv;
 use crate::fx::FxLib;
 use crate::{PlayerShip, Ship, Side, assets_dir};
@@ -155,7 +155,7 @@ pub enum BoardMsg {
 /// A capture, for the mission rules' capture counts (owner names; skirmish sides are "Player" / "Enemy").
 #[derive(Message)]
 pub struct Captured {
-    pub by: String,
+    pub by: crate::names::Owner,
     pub victim: String,
     pub unit: Entity,
 }

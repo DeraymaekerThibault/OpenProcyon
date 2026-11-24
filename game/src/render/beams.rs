@@ -207,13 +207,26 @@ fn arc(b: &mut QuadBatch, from: Vec3, to: Vec3, half: f32, eye: Vec3, colour: Ve
     strip(b, Kind::Arc, &pts, eye, colour, |i| (half, i as f32 / N as f32, alpha));
 }
 
+/// Size of the fast beam flicker (a fraction of the glow's size; the slower, larger one is 0.1). Engine choice, not the original's.
+const BEAM_FLICKER_FINE: f32 = 0.07;
+/// The arcs change shape once per this many seconds (about fourteen times a second). Engine choice, not the original's.
+const ARC_TICK_SECONDS: f32 = 0.07;
+/// A firing beam thins out over its last this many seconds. Engine choice, not the original's.
+const FADE_OUT_SECONDS: f32 = 0.3;
+/// A firing beam flares wide for this many seconds as it lights. Engine choice, not the original's.
+const IGNITE_SECONDS: f32 = 0.18;
+/// Hit sparks fly out at least this far (beam widths) ... Engine choice, not the original's.
+const SPARK_REACH_MIN: f32 = 3.0;
+/// ... and up to this much farther over their life. Engine choice, not the original's.
+const SPARK_REACH_SPAN: f32 = 30.0;
+
 /// Draws one beam gun into the batch at time `now` (seconds, for everything that moves).
 pub fn emit(b: &mut QuadBatch, cfg: &Beams, v: &View, eye: Vec3, now: f32) {
     let w = v.width;
-    let flicker = 1.0 + 0.1 * (now * 47.0).sin() + 0.07 * (now * 113.0).sin();
+    let flicker = 1.0 + 0.1 * (now * 47.0).sin() + BEAM_FLICKER_FINE * (now * 113.0).sin();
     let (side_a, side_b) = v.dir.any_orthonormal_pair();
     // the arcs change shape some fourteen times a second
-    let tick = (now / 0.07) as u32;
+    let tick = (now / ARC_TICK_SECONDS) as u32;
     match v.phase {
         Phase::Idle => {}
         Phase::Charging { t } => {
@@ -246,8 +259,8 @@ pub fn emit(b: &mut QuadBatch, cfg: &Beams, v: &View, eye: Vec3, now: f32) {
         }
         Phase::Firing { t, length, victim, .. } => {
             // full at once, thinning out over the last 0.3 s; for an instant as it lights it is three times as wide
-            let fade = ((v.duration - t) / 0.3).clamp(0.0, 1.0);
-            let ignite = (1.0 - t / 0.18).clamp(0.0, 1.0);
+            let fade = ((v.duration - t) / FADE_OUT_SECONDS).clamp(0.0, 1.0);
+            let ignite = (1.0 - t / IGNITE_SECONDS).clamp(0.0, 1.0);
             let heat = if v.max_power > 1.0 { ((v.power - 1.0) / (v.max_power - 1.0)).clamp(0.0, 1.0) } else { 0.0 };
             let colour = v.color.lerp(v.color + Vec3::splat(0.6), heat);
             let half = w * cfg.glow * 0.5 * (1.0 + 0.3 * heat + 2.0 * ignite) * fade * flicker;
@@ -281,7 +294,7 @@ pub fn emit(b: &mut QuadBatch, cfg: &Beams, v: &View, eye: Vec3, now: f32) {
                     let x = (now * (1.8 + 1.6 * hash(v.seed ^ 0x77, i)) + hash(v.seed ^ 0x99, i)).fract();
                     let life = (now * (1.8 + 1.6 * hash(v.seed ^ 0x77, i)) + hash(v.seed ^ 0x99, i)) as u32;
                     let out = (unit(v.seed ^ life.wrapping_mul(7919), i) - v.dir * 0.7).normalize_or(-v.dir);
-                    let p = at + out * w * (3.0 + 30.0 * x) * (0.4 + 0.6 * hash(v.seed ^ 0x13, i)) - Vec3::Y * w * 10.0 * x * x;
+                    let p = at + out * w * (SPARK_REACH_MIN + SPARK_REACH_SPAN * x) * (0.4 + 0.6 * hash(v.seed ^ 0x13, i)) - Vec3::Y * w * 10.0 * x * x;
                     spot(b, Kind::Mote, p, w * 0.6 * (1.0 - x) * (1.0 + heat), eye, 0.0, colour.extend(fade * (1.0 - x) * (1.0 - x)));
                 }
             }

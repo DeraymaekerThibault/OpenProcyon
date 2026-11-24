@@ -130,7 +130,10 @@ impl Sensors {
     }
 }
 
-/// After each snapshot: the player's view takes one frame (real time, so it runs on while the game is paused or sped up).
+/// After each snapshot: the player's view takes one frame (real time, so it runs on while the game is paused or sped up;
+/// docs/re/visibility.md §5). It is a frame system, not a tick one, and nothing in the simulation reads it. Under `--fixed-step`
+/// Bevy advances real time by one `BATTLE_TICK` per frame too, so a fixed-step run gets the same view whatever the machine's frame
+/// rate (`under_fixed_step_the_view_advances_one_tick_per_frame_whatever_the_frame_rate`).
 fn advance_sightings(mut sensors: ResMut<Sensors>, mission: Option<Res<Mission>>, time: Res<Time<Real>>) {
     sensors.advance_sightings(mission.as_deref(), time.elapsed_secs_f64(), time.delta_secs());
 }
@@ -298,7 +301,7 @@ impl Clip {
 }
 
 /// Starts an animal's clip once its model has spawned (the glTF loader puts the player on the skeleton root): looped, from a
-/// phase of its own (the original draws a random start in [0, duration)). ponytail: the phase comes from the entity, not a draw.
+/// phase of its own (the original draws a random start in [0, duration)). PROVISIONAL: the phase comes from the entity, not a draw.
 fn play_clips(
     mut commands: Commands,
     mut players: Query<(Entity, &mut AnimationPlayer), Added<AnimationPlayer>>,
@@ -379,7 +382,14 @@ impl SpaceAnimal {
         }
     }
     pub fn unit(&self, e: Entity, tf: &Transform) -> Unit {
-        Unit { name: self.home.clone(), owner: self.owner.clone(), groups: vec![self.home.clone()], alive: !self.dead, visible: self.visible, ..Unit::new(e, -1, tf.translation) }
+        Unit {
+            name: self.home.as_str().into(),
+            owner: self.owner.as_str().into(),
+            groups: vec![self.home.as_str().into()],
+            alive: !self.dead,
+            visible: self.visible,
+            ..Unit::new(e, -1, tf.translation)
+        }
     }
     pub fn follow(&mut self, points: &[Vec3], pos: Vec3, closest: bool, looping: bool) {
         self.path = points.iter().map(|p| *p + self.offset).collect();

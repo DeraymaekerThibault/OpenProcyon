@@ -2,8 +2,10 @@
 
 import math
 import re
+from pathlib import Path
 
-from tools.source_text import SourceLine
+from tools.gamefs import ci_file
+from tools.source_text import SourceLine, read_source_lines
 
 HEADER = re.compile(r"([0-9]{8,})\s+(.+)")
 TYPE_TOKEN = re.compile(r"\s+(String|Int|Float|Bool|Vector3|Matrix33|Coord|Colour)\b")
@@ -15,6 +17,16 @@ FACTORIES = {
     "TorpedoPhysics": "projectile",
     "MinePhysics": "projectile",
 }
+
+
+def read_wot(root, name):
+    """The lines of WorldObjects/<name>.wot, found case-insensitively and decoded as latin-1 like every other retail reader
+    (it never fails to decode, so a stray byte cannot turn into a silent skip)."""
+    root = Path(root)
+    found = ci_file(root / "WorldObjects", f"{name}.wot")
+    return read_source_lines(
+        root, Path("WorldObjects") / found.name, encoding="latin-1"
+    )
 
 
 def issue(diagnostics, source, code, message, severity="error"):

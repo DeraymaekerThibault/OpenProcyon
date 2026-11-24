@@ -1,3 +1,4 @@
+//! Constants in this module tree are presentation taste, not original rules, unless marked otherwise.
 //! Not retail: render extensions a graphics mod switches on with a render profile, `data/render/look.json` in the overlay.
 //! Absent, everything renders as classic. A profile changes how the battle is drawn, never what happens. The engine
 //! provides the building blocks; the mod tunes them in the profile and ships the shaders the blocks draw with
@@ -360,7 +361,7 @@ fn camera(mut commands: Commands, look: Res<Look>, cams: Query<Entity, (With<Cam
         if look.bloom > 0.0 {
             let mut bloom = Bloom { intensity: look.bloom, ..Bloom::NATURAL };
             if look.bloom_threshold > 0.0 {
-                bloom.prefilter = BloomPrefilter { threshold: look.bloom_threshold, threshold_softness: 0.4 };
+                bloom.prefilter = BloomPrefilter { threshold: look.bloom_threshold, threshold_softness: BLOOM_THRESHOLD_SOFTNESS };
                 bloom.composite_mode = BloomCompositeMode::Additive;
             }
             e.insert(bloom);
@@ -404,8 +405,12 @@ fn sun(
             sun.shadow_maps_enabled = look.shadows;
             sun.contact_shadows_enabled = look.contact_shadows;
             sun.illuminance *= look.sun_intensity;
-            let cascades =
-                CascadeShadowConfigBuilder { num_cascades: 4, first_cascade_far_bound: look.shadow_distance / 20.0, maximum_distance: look.shadow_distance, ..default() };
+            let cascades = CascadeShadowConfigBuilder {
+                num_cascades: SHADOW_CASCADES,
+                first_cascade_far_bound: look.shadow_distance / FIRST_CASCADE_DIVISOR,
+                maximum_distance: look.shadow_distance,
+                ..default()
+            };
             commands.entity(e).insert((Styled, StyledSun, cascades.build()));
         }
     }
@@ -417,6 +422,13 @@ struct SkyLit {
     image: Handle<Image>,
     frames: u32,
 }
+
+/// Bloom's soft knee width when a brightness threshold is set. Engine choice, not the original's.
+const BLOOM_THRESHOLD_SOFTNESS: f32 = 0.4;
+/// Cascades of the sun's shadow map. Engine choice, not the original's.
+const SHADOW_CASCADES: usize = 4;
+/// The first shadow cascade reaches `shadow_distance` divided by this. Engine choice, not the original's.
+const FIRST_CASCADE_DIVISOR: f32 = 20.0;
 
 /// Frames Bevy's GPU filter gets to turn the sky into diffuse and specular light. It refilters the whole cube with its mip
 /// chain every frame while `GeneratedEnvironmentMapLight` is present (7 ms a frame at 2048), so it is removed afterwards and
