@@ -14,7 +14,7 @@ use super::{TraceOptions, schema, set_trace};
 /// when the flag is not given. Needs no game assets.
 pub fn dump_schema(args: &[String]) -> Option<i32> {
     let i = args.iter().position(|a| a == "--dump-rule-schema")?;
-    let json = serde_json::to_string_pretty(&schema::to_json()).expect("schema is JSON");
+    let json = serde_json::to_string_pretty(&crate::authoring::rule_schema()).expect("schema is JSON");
     match args.get(i + 1).filter(|a| !a.starts_with("--")) {
         Some(path) => match std::fs::write(path, json + "\n") {
             Ok(()) => {

@@ -3,6 +3,7 @@
 
 pub mod alliance;
 pub mod audio;
+pub mod authoring;
 pub mod battle;
 pub mod bindings;
 pub mod blackhole;
@@ -113,14 +114,19 @@ pub fn clock_seed() -> u64 {
 /// Converted assets: `PROCYON_ASSETS`, else `assets/` in the source checkout, else the per-user folder the importer
 /// (`python -m tools.import_assets`, or the release download's `openprocyon-import`) fills. Nothing from the original game ships with the code.
 pub(crate) fn base_assets() -> PathBuf {
+    find_base_assets().unwrap_or_else(|| PathBuf::from("assets"))
+}
+/// The lookup behind `base_assets`, with no fallback: `None` when there is no env var, no checkout and no per-user folder to name.
+/// Touches nothing on disk.
+pub(crate) fn find_base_assets() -> Option<PathBuf> {
     if let Some(dir) = std::env::var_os("PROCYON_ASSETS") {
-        return PathBuf::from(dir);
+        return Some(PathBuf::from(dir));
     }
     let checkout = checkout_dir().map(|dir| dir.join("assets"));
     if let Some(checkout) = checkout.as_ref().filter(|c| c.join("ships").is_dir()) {
-        return checkout.clone();
+        return Some(checkout.clone());
     }
-    user_assets().or(checkout).unwrap_or_else(|| PathBuf::from("assets"))
+    user_assets().or(checkout)
 }
 
 /// The source checkout, found at run time (never baked into the binary, so a release build carries no build-machine path): the

@@ -236,17 +236,36 @@ pub fn overlay(base: &Path, mods: &[PathBuf], own: Option<PathBuf>) -> PathBuf {
 
 /// `overlay` that returns what it did instead of printing it.
 pub fn overlay_report(base: &Path, mods: &[PathBuf], own: Option<PathBuf>) -> (PathBuf, ModReport) {
-    let mut report = ModReport::default();
     if mods.is_empty() {
-        return (base.to_path_buf(), report);
+        return (base.to_path_buf(), ModReport::default());
     }
     if let Some(dir) = &own {
         assert!(disposable(dir), "PROCYON_OVERLAY {} holds files that are not an overlay; refusing to delete it", dir.display());
     }
     let root = own.clone().unwrap_or_else(|| base.join("../local/overlay"));
-    let _ = std::fs::remove_dir_all(&root);
-    if own.is_some() {
-        std::fs::create_dir_all(&root).unwrap();
+    let report = build_overlay(base, mods, &root, own.is_some());
+    (root, report)
+}
+
+/// Builds the overlay of `mods` over `base` into `out`, a folder the caller chose (a tool's own scratch folder, so it never touches the
+/// game's shared `local/overlay`, #136). `out` is rebuilt whole; it must be missing, empty or an overlay built earlier, else an error
+/// and nothing is deleted. With no mods nothing is built (the base is the root). See `authoring::overlay_into`.
+pub fn overlay_into(base: &Path, mods: &[PathBuf], out: &Path) -> Result<ModReport, String> {
+    if mods.is_empty() {
+        return Ok(ModReport::default());
+    }
+    if !disposable(out) {
+        return Err(format!("{} holds files that are not an overlay; refusing to delete it", out.display()));
+    }
+    Ok(build_overlay(base, mods, out, true))
+}
+
+/// The shared core: replaces `root` with base links plus the mods' files. `marked` writes the overlay mark (a folder the caller chose).
+fn build_overlay(base: &Path, mods: &[PathBuf], root: &Path, marked: bool) -> ModReport {
+    let mut report = ModReport::default();
+    let _ = std::fs::remove_dir_all(root);
+    if marked {
+        std::fs::create_dir_all(root).unwrap();
         std::fs::write(root.join(OVERLAY_MARK), "").unwrap();
     }
     let mut files = vec![];
@@ -308,8 +327,8 @@ pub fn overlay_report(base: &Path, mods: &[PathBuf], own: Option<PathBuf>) -> (P
         mods.iter().flat_map(|m| std::fs::read_dir(m.join("ships")).into_iter().flatten().flatten()).filter_map(|e| e.file_name().into_string().ok()).collect();
     ids.sort();
     ids.dedup();
-    crate::shipart::generate(&root, &ids);
-    (root, report)
+    crate::shipart::generate(root, &ids);
+    report
 }
 
 /// Puts one mod file into the overlay at `to`. An `Err` leaves the base file in place; the caller logs it and goes on.

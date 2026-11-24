@@ -130,6 +130,10 @@ prints `mod <name> <version> <description>` to the console when it lays each mod
 | numbers | `PROCYON_TRACE=<file.csv>` writes every ship's position, velocity, heading and section hit points (and, in `<file>.shells.csv`, every shell) once per simulation step: compare a gun's range or a ship's speed with what you meant. `PROCYON_PROFILE=1` logs frame times, for the cost of a look (`docs/development.md`) |
 | logs | the console shows everything; the same text is written to `<user data dir>/logs/openprocyon.log` (the run before is `openprocyon.previous.log`), starting with the version and your arguments and ending with any panic. The overlay's `mod <name> <version> <description>` line and the retail-texture warning are plain console output and may not be in the log file |
 
+Tools that link the engine as a library (an editor, a checker) use `openprocyon::authoring` instead of the game's internals: it finds the
+imported assets without side effects, builds a mod overlay into a folder of the tool's own (the game's `local/overlay` is not touched, so
+several instances can run at once), and returns the rule schema and the mission checker's findings as values.
+
 Restart the game after every change: the overlay, the merged tables, the string table, the sound index and the render profile are
 all read once at launch.
 
