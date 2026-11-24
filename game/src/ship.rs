@@ -969,7 +969,7 @@ const TURNING_THROTTLE: f32 = 0.2;
 /// A follower's wanted speed. Measured on retail (docs/re/fleet-controls.md, Diamond slot behind a stationary Man-O-War): full speed until
 /// the last few units, then it stops dead; in the slot it matches the leader's speed. No proportional slow-down on the way in. A ship
 /// sent to a destination (not holding formation) stops within 5 units of it.
-fn follow_speed(hold: bool, distance: f32, leader_speed: f32, max: f32, heading_error: f32) -> f32 {
+pub(crate) fn follow_speed(hold: bool, distance: f32, leader_speed: f32, max: f32, heading_error: f32) -> f32 {
     if hold {
         if distance > SLOT_ARRIVE { if heading_error.abs() > ALIGNED { TURNING_THROTTLE * max } else { max } } else { leader_speed.clamp(0.0, max) }
     } else if distance < 5.0 {
@@ -982,7 +982,7 @@ fn follow_speed(hold: bool, distance: f32, leader_speed: f32, max: f32, heading_
 /// Where a follower aims on its way to `goal`: straight, unless that line passes within `clearance` of the leader (a slot behind the
 /// leader is reached from beside it at spawn), then a point off the leader's flank on the side the line already passes. PROVISIONAL: the
 /// original's follower pathing is unknown; this only keeps followers from driving through the ship they follow and shoving it.
-fn steer_round(from: Vec3, goal: Vec3, leader: Vec3, clearance: f32) -> Vec3 {
+pub(crate) fn steer_round(from: Vec3, goal: Vec3, leader: Vec3, clearance: f32) -> Vec3 {
     let (d, rel) = ((goal - from).with_y(0.0), (leader - from).with_y(0.0));
     let t = if d.length_squared() > 0.0 { (rel.dot(d) / d.length_squared()).clamp(0.0, 1.0) } else { 0.0 };
     let off = (from + d * t - leader).with_y(0.0);

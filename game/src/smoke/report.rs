@@ -108,6 +108,7 @@ fn watch(
     obstacles: Query<(&crate::collision::Obstacle, Option<&Visibility>), (Without<Ship>, Without<crate::combat::Asteroid>)>,
     mut fired: MessageReader<Fired>,
     mut hits: MessageReader<Hit>,
+    mut exit: MessageWriter<AppExit>,
 ) {
     let dt = time.delta_secs();
     report.time += dt;
@@ -184,5 +185,5 @@ fn watch(
         "fleets": fleets_json(&cfg, &sk, &lib),
     });
     info!("battle report {json}");
-    std::process::exit(0);
+    exit.write(crate::exit::app_exit(0));
 }

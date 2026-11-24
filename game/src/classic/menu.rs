@@ -13,21 +13,18 @@ use crate::assets_dir;
 use crate::bindings::Bindings;
 use crate::combat::Library;
 use crate::menu::{
-    Action, BuildMenu, Cell, Choice, CtrlUi, FLEET_SIZE, InGame, Kind, MenuKey, MenuModel, MenuRoot, Page, RetailButton, RunButtons, SaveUi, Screen, ScrollKind, Skirmish,
+    Action, BuildMenu, Cell, Choice, CtrlUi, FLEET_SIZE, Kind, MAP_ROWS, MenuKey, MenuModel, MenuRoot, Page, RetailButton, SHIP_ROWS, SaveUi, Screen, ScrollKind, Skirmish,
     SliderTrack, VICTORY_LIMIT, menu_active, offered, pretty, strings, text_of,
 };
 use crate::sprites::{BODY_FONT, Fonts, HudData};
 
 use super::widgets::{
     Ctx, GOLD, Rest, arrow, canvas, cell, check_box, disabled, dropdown, fleet_bar, full_screen, heading, info_panel, list_row_cost, pad, picked, piece, piece_flipped,
-    pulldown_cell, radio, scrollbar, selected_tab, size_of, slider, stretched_window, victory_points, wheel_step, wrapped,
+    pulldown_cell, radio, scrollbar, selected_tab, size_of, slider, stretched_window, victory_points, wrapped,
 };
 
 pub fn plugin(app: &mut App) {
-    app.add_systems(
-        Update,
-        ((scroll_controls, scroll_saves, scroll_mods, scroll_missions).before(BuildMenu), build.in_set(BuildMenu), wheel.after(RunButtons)).run_if(menu_active),
-    );
+    app.add_systems(Update, build.in_set(BuildMenu).run_if(menu_active));
 }
 
 /// Rebuilds the current screen when the state, the selection or the window size changes.
@@ -667,9 +664,6 @@ fn frontend_backdrop(ctx: &Ctx, c: &mut ChildSpawnerCommands, scene: usize) {
 /// Map list as measured on the original: a framed panel (x 280..712, y 120..318) with a lighter header bar holding 'Historical Maps' /
 /// 'Open Maps' and 'Players' in UniversBold14, Univers12 rows 19 apart from y 172 with the playable player count at x 578, a teal bar
 /// behind the selected map, and the retail scrollbar at x 727..752. PROVISIONAL: header bar and selection colours are matched by eye.
-/// Rows of the Create Skirmish map list (the original's eight open maps fill it exactly).
-const MAP_ROWS: usize = 8;
-
 #[allow(deprecated)] // Interaction, see pointer.rs
 fn map_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, sk: &Skirmish, strings: &Value) {
     let (l, r) = (280.0, 712.0);
@@ -858,8 +852,6 @@ pub(super) fn profile_dialog(ctx: &Ctx, c: &mut ChildSpawnerCommands, sk: &Skirm
     });
 }
 
-const SHIP_ROWS: usize = 8;
-
 /// The ship-name pull-down at the top left of the preview, shown while a fleet ship is displayed: the name and the pull-down arrow;
 /// holding it lists the hull's other names 19 apart under it (measured with the retail driver). PROVISIONAL: the box is the lobby's
 /// pull-down art, retail draws a plainer outlined box that grows with the name.
@@ -935,62 +927,6 @@ fn ship_info(ctx: &Ctx, c: &mut ChildSpawnerCommands, _rect: [f32; 4], sk: &Skir
     // A refused Add (PROVISIONAL: retail only greys the button) says why under the stats.
     if let Some(e) = sk.error {
         ctx.text(c, BODY_FONT, strings[e].as_str().unwrap_or(e), 496.0, 270.0, 292.0, true, Color::srgb(1.0, 0.4, 0.3));
-    }
-}
-
-/// Mouse wheel scrolls the Ship Types Available list.
-fn wheel(mut wheel: MessageReader<bevy::input::mouse::MouseWheel>, state: Res<State<Screen>>, mut sk: ResMut<Skirmish>, lib: Res<Library>) {
-    let dy: f32 = wheel.read().map(|e| e.y).sum();
-    if dy == 0.0 {
-        return;
-    }
-    if *state.get() == Screen::CreateSkirmish {
-        let n = sk.maps.iter().filter(|m| m.2 != sk.historical).count();
-        let max = n.saturating_sub(MAP_ROWS);
-        sk.map_scroll = wheel_step(sk.map_scroll, dy, max);
-        return;
-    }
-    if *state.get() != Screen::Fleet {
-        return;
-    }
-    let n = sk.human().map_or(0, |h| offered(&lib, h.race).len());
-    let max = n.saturating_sub(SHIP_ROWS);
-    sk.scroll = wheel_step(sk.scroll, dy, max);
-}
-
-fn scroll_controls(mut wheel: MessageReader<bevy::input::mouse::MouseWheel>, state: Res<State<Screen>>, ig: Res<InGame>, mut cui: ResMut<CtrlUi>, binds: Res<Bindings>) {
-    let dy: f32 = wheel.read().map(|e| e.y).sum();
-    if dy != 0.0 && (*state.get() == Screen::Controls || ig.page() == Some(Page::Controls)) {
-        let max = binds.rows.len().saturating_sub(if ig.page().is_some() { 8 } else { 17 });
-        cui.scroll = wheel_step(cui.scroll, dy, max);
-    }
-}
-
-/// Mouse wheel scrolls the Mods table.
-fn scroll_mods(mut wheel: MessageReader<bevy::input::mouse::MouseWheel>, state: Res<State<Screen>>, mut mods: ResMut<crate::menu::ModList>) {
-    let dy: f32 = wheel.read().map(|e| e.y).sum();
-    if dy != 0.0 && *state.get() == Screen::Mods {
-        let max = mods.rows().len().saturating_sub(crate::menu::MOD_ROWS);
-        let next = wheel_step(mods.scroll, dy, max);
-        mods.scroll = next;
-    }
-}
-
-/// Mouse wheel scrolls the Custom Missions list.
-fn scroll_missions(mut wheel: MessageReader<bevy::input::mouse::MouseWheel>, state: Res<State<Screen>>, mut missions: ResMut<crate::menu::MissionList>) {
-    let dy: f32 = wheel.read().map(|e| e.y).sum();
-    if dy != 0.0 && *state.get() == Screen::Missions {
-        let max = missions.list.len().saturating_sub(crate::menu::MISSION_ROWS);
-        missions.scroll = wheel_step(missions.scroll, dy, max);
-    }
-}
-
-/// Mouse wheel scrolls the save lists.
-fn scroll_saves(mut wheel: MessageReader<bevy::input::mouse::MouseWheel>, state: Res<State<Screen>>, ig: Res<InGame>, mut ui: ResMut<SaveUi>) {
-    let dy: f32 = wheel.read().map(|e| e.y).sum();
-    if dy != 0.0 && (*state.get() == Screen::Load || matches!(ig.page(), Some(Page::Load | Page::Save))) {
-        let max = ui.list.len().saturating_sub(10);
-        ui.scroll = wheel_step(ui.scroll, dy, max);
     }
 }
 

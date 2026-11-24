@@ -836,11 +836,6 @@ pub(super) fn victory_points(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, 
     ctx.text(c, "UniversLightBold14", &n, x + f.width(label), f.width(&n) + 2.0, (t + b) / 2.0, false, GOLD);
 }
 
-/// One mouse-wheel step of a list's first visible row: up scrolls back, down forward up to `max`.
-pub(super) fn wheel_step(first: usize, dy: f32, max: usize) -> usize {
-    if dy > 0.0 { first.saturating_sub(1) } else { (first + 1).min(max) }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -942,12 +937,5 @@ mod tests {
         assert_eq!(grey[0].colour, BorderColor::all(theme.rim_outline));
         assert_eq!(grey[1].colour.left, Color::BLACK);
         assert_eq!(grey.last().unwrap().colour, BorderColor::all(theme.rim_keyline));
-    }
-
-    #[test]
-    fn wheel_step_stays_in_range() {
-        assert_eq!(wheel_step(0, 1.0, 5), 0);
-        assert_eq!(wheel_step(5, -1.0, 5), 5);
-        assert_eq!(wheel_step(2, -1.0, 5), 3);
     }
 }

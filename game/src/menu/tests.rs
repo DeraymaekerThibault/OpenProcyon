@@ -754,6 +754,13 @@ fn the_developer_console_option_is_off_by_default_listed_on_display_and_saved() 
     assert!(!s.rows(false).iter().any(|r| r.0 == Setting::Console), "not on the Sound screen");
 }
 
+#[test]
+fn the_fps_counter_setting_is_off_by_default_and_not_a_menu_row() {
+    let s = Settings::default();
+    assert!(!s.fps, "off by default");
+    assert!(!s.rows(true).iter().any(|r| r.1.to_lowercase().contains("fps")), "only the console command changes it");
+}
+
 /// #545: the views redraw only when `MenuModel::key` changes, so every flag a view draws from must be in it.
 #[test]
 #[ignore = "needs imported assets"]

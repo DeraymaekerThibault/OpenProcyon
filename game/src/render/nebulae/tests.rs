@@ -51,10 +51,10 @@ fn rules_match_by_effect_name_first_wins() {
 fn the_uniform_carries_the_boxes_axes_and_a_fading_bolt() {
     let rule = &parse(&json!({"rules": [{"match": "n", "steps": 20}]})).unwrap().rules[0];
     let bolt = Bolt { at: Vec3::new(1.0, 2.0, 3.0), left: 0.5, ..default() };
-    let u = rule.uniform(Vec3::new(10.0, 0.0, 0.0), 300.0, 4.0, &bolt);
+    let u = rule.uniform(Vec3::new(10.0, 0.0, 0.0), 300.0, &bolt);
     assert_eq!((u.centre, u.axes), (Vec4::new(10.0, 0.0, 0.0, 300.0), Vec4::new(1.0, 0.7, 0.99, 20.0)));
     assert_eq!(u.flash, Vec4::new(1.0, 2.0, 3.0, 0.25));
-    assert_eq!(rule.uniform(Vec3::ZERO, 1.0, 0.0, &Bolt::default()).flash.w, 0.0);
+    assert_eq!(rule.uniform(Vec3::ZERO, 1.0, &Bolt::default()).flash.w, 0.0);
 }
 
 #[test]
@@ -173,10 +173,40 @@ fn the_volume_follows_the_retail_breath_the_sun_and_the_bolt() {
     let rule = &parse(&json!({"rules": [{"match": "n", "steps": 12, "max_opacity": 0.5, "sun": 2, "core_glow": 6}]})).unwrap().rules[0];
     let cloud = Cloud::for_tests("Nebula", 200.0);
     let sun = SunLight { toward: Vec3::new(0.0, 3.0, 0.0), color: Vec3::new(2.0, 1.0, 1.0) };
-    let u = rule.volume(&cloud, Vec3::new(1.0, 2.0, 3.0), 5.0, &Bolt { at: Vec3::X, from: Vec3::X, to: Vec3::X * 3.0, left: 0.5, ..default() }, sun);
+    let u = rule.volume(&cloud, Vec3::new(1.0, 2.0, 3.0), &Bolt { at: Vec3::X, from: Vec3::X, to: Vec3::X * 3.0, left: 0.5, ..default() }, sun);
     assert_eq!(u.axes, (AXES * cloud.breath()).extend(12.0));
     assert_eq!((u.sun, u.sun_color.truncate()), (Vec4::new(0.0, 1.0, 0.0, 2.0), Vec3::new(1.0, 0.5, 0.5)), "a unit direction and a colour normalised to its brightest channel");
-    assert_eq!((u.low.w, u.flash.w, u.params.x, u.params.w), (0.5, 0.25, 5.0, 1.0));
+    assert_eq!((u.low.w, u.flash.w, u.params.x, u.params.w), (0.5, 0.25, 0.0, 1.0));
     assert_eq!(u.alt, Vec3::ONE.extend(6.0), "core emission reaches the shader independently of opacity, flash and hue");
     assert_eq!((u.flash.truncate(), u.flash_to.truncate()), (Vec3::X, Vec3::X * 3.0), "the volume is lit along the whole bolt");
+}
+
+/// How many `Modified` events the material asset got during one more frame.
+fn modified<M: Asset>(app: &mut App) -> usize {
+    app.update();
+    let msgs = app.world_mut().resource_mut::<Messages<AssetEvent<M>>>();
+    msgs.iter_current_update_messages().filter(|e| matches!(e, AssetEvent::Modified { .. })).count()
+}
+
+#[test]
+fn a_cloud_that_has_not_changed_leaves_its_materials_alone() {
+    // the clock is the frame data's, so a still cloud (no bolt, no sun change) writes nothing, however long the battle runs
+    let mut app = volume_app(json!({"nebulae": {"rules": [{"match": "Nebula", "replace": true}]}}));
+    app.init_asset::<NebulaMaterial>().add_systems(Update, update.after(update_volumes));
+    app.world_mut().spawn((Cloud::for_tests("Nebula", 100.0), GlobalTransform::default(), Visibility::Hidden));
+    let glow = app.world_mut().resource_mut::<Assets<NebulaMaterial>>().add(NebulaMaterial { base: default(), extension: default() });
+    app.world_mut().spawn((Cloud::for_tests("Nebula", 50.0), GlobalTransform::default(), MeshMaterial3d(glow.clone())));
+    for _ in 0..3 {
+        app.update();
+    }
+    // (events of earlier frames may still be in the buffer: what counts is that no frame adds one)
+    let settled = (modified::<VolumeMaterial>(&mut app), modified::<NebulaMaterial>(&mut app));
+    for _ in 0..3 {
+        assert_eq!(modified::<VolumeMaterial>(&mut app), settled.0, "volume");
+        assert_eq!(modified::<NebulaMaterial>(&mut app), settled.1, "shell");
+    }
+    // a bolt does reach the shell's material
+    app.world_mut().resource_mut::<Frame>().rows[crate::render::frame::BOLT_AT] = Vec4::new(0.0, 0.0, 0.0, 0.0);
+    app.update();
+    assert!(app.world().resource::<Assets<NebulaMaterial>>().get(&glow).unwrap().extension.u.flash.w > 0.0);
 }

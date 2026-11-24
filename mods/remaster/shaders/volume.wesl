@@ -11,6 +11,8 @@
 // (`variation`), so it is not one flat wash. A solar storm is not a quiet cloud: its gas wheels round the centre like a cyclone
 // (`swirl`, faster near the centre; two phases of the turn are blended so the gas never winds up), the edges of its billows burn
 // as hot plasma filaments (`filaments`), and lightning keeps flickering deep inside it (`flicker`).
+// the battle clock (game/src/render/frame.rs)
+import openprocyon::render::frame::frame;
 import bevy_pbr::render::{
     forward_io::{VertexOutput, FragmentOutput},
     mesh_view_bindings::view,
@@ -38,7 +40,7 @@ struct Volume {
     flash: vec4<f32>,
     // xyz: its other end
     flash_to: vec4<f32>,
-    // x: clock, y: a bolt's reach (world units), z: a bolt's brightness, w: the mission's fadeout factor
+    // x: unused (the clock is frame.clock), y: a bolt's reach (world units), z: a bolt's brightness, w: the mission's fadeout factor
     params: vec4<f32>,
     // x: swirl (turns a second near the centre), y: filaments, z: flicker, w: hue variation
     storm: vec4<f32>,
@@ -145,7 +147,7 @@ fn fragment(in: VertexOutput) -> FragmentOutput {
     let steps = ceil(clamp(len / (radius * 0.05), 4.0, vol.axes.w));
     let dt = len / steps;
     let jitter = fract(52.9829189 * fract(dot(in.position.xy, vec2<f32>(0.06711056, 0.00583715))));
-    let clock = vol.params.x * vol.look.z;
+    let clock = frame.clock.y * vol.look.z;
     let sun = vol.sun.xyz;
     let light_steps = i32(vol.tint.w);
     let lstep = radius * 0.1;
@@ -179,8 +181,8 @@ fn fragment(in: VertexOutput) -> FragmentOutput {
             g = sample(q, clock);
         } else {
             let period = 8.0;
-            let pa = fract(vol.params.x / period);
-            let pb = fract(vol.params.x / period + 0.5);
+            let pa = fract(frame.clock.y / period);
+            let pb = fract(frame.clock.y / period + 0.5);
             let rate = vol.storm.x * 6.2831853 * period / (0.4 + 1.6 * length(q.xz));
             let ga = sample(spin(q, -(pa - 0.5) * rate), clock);
             let gb = sample(spin(q, -(pb - 0.5) * rate), clock);
@@ -225,7 +227,7 @@ fn fragment(in: VertexOutput) -> FragmentOutput {
             emitted += vol.high.rgb * vec3<f32>(1.3, 1.0, 0.7) * vol.storm.y * g.y * edge;
             // lightning flickering deep inside: patches that light up and die out a few times a second
             if vol.storm.z > 0.0 {
-                let tf = vol.params.x * 2.3;
+                let tf = frame.clock.y * 2.3;
                 let k0 = floor(tf);
                 let at0 = bake(q * 0.9 + vec3<f32>(k0 * 3.7, k0 * 1.3, 0.0)).b;
                 let at1 = bake(q * 0.9 + vec3<f32>((k0 + 1.0) * 3.7, (k0 + 1.0) * 1.3, 0.0)).b;

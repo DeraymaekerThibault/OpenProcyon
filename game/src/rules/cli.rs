@@ -112,6 +112,13 @@ pub fn check_map(dir: &Path) -> Result<Vec<Problem>, String> {
     let skirmish = rules_file.ends_with("script.json");
     let mut problems = check_with(&mission, map.as_ref().unwrap_or(&Value::Null), media.as_ref().unwrap_or(&Value::Null), skirmish);
     let note = |level, field: &str, message: &str| Problem { level, rule: "(mission)".into(), at: "files".into(), field: field.into(), message: message.into() };
+    // What the mission points at: skipped without imported assets, since there is nothing to look in.
+    let root = crate::assets_dir();
+    let ship = |c: &str| root.join("ships").join(c).join("ship.json").is_file();
+    let sound = |f: &str| root.join(crate::audio::sound(f)).is_file();
+    let picture = |f: &str| dir.join(f).is_file();
+    let look = super::refs::Lookups { ship: root.join("ships").is_dir().then_some(&ship), sound: root.join("sound").is_dir().then_some(&sound), picture: Some(&picture) };
+    problems.extend(super::refs::check_references(&mission, map.as_ref().unwrap_or(&Value::Null), media.as_ref().unwrap_or(&Value::Null), &look));
     if media.is_none() && rules_file.ends_with("mission.json") {
         problems.insert(0, note(Level::Warning, "media.json", "missing: speech events, end messages and ship names are not checked"));
     }
@@ -138,6 +145,20 @@ mod tests {
         assert!(lines.iter().any(|l| l.contains("media.json") && l.starts_with("warning")), "{lines:?}");
         std::fs::remove_dir_all(&dir).unwrap();
         assert!(check_map(&dir).is_err());
+    }
+
+    #[test]
+    fn a_missing_backdrop_picture_is_an_error_in_the_map_check() {
+        let dir = std::env::temp_dir().join(format!("procyon-backdrop-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("mission.json"), json!({"players": [], "rules": []}).to_string()).unwrap();
+        std::fs::write(dir.join("map.json"), json!({"backdrop": true}).to_string()).unwrap();
+        let lines: Vec<String> = check_map(&dir).unwrap().iter().map(ToString::to_string).collect();
+        assert!(lines.iter().any(|l| l.starts_with("ERROR") && l.contains("field \"backdrop\"") && l.contains("backdrop.png")), "{lines:?}");
+        std::fs::write(dir.join("backdrop.png"), b"x").unwrap();
+        let lines: Vec<String> = check_map(&dir).unwrap().iter().map(ToString::to_string).collect();
+        assert!(!lines.iter().any(|l| l.contains("backdrop.png")), "{lines:?}");
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     /// Retail passes `--check-mission`: its own oddities are warnings, and every Type it uses is in the schema.

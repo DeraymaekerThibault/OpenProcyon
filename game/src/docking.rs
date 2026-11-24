@@ -571,6 +571,193 @@ fn docked_repair(lib: Res<Library>, mut dockers: Query<(Entity, &Ship, &mut Heal
     }
 }
 
+/// What one docker's step reads: its own and its dockee's situation this tick.
+struct Step<'a> {
+    e: Entity,
+    dt: f32,
+    here: Vec3,
+    class: &'a crate::data::Class,
+    core: f32,
+    base: bool,
+    human: bool,
+    dockee_len: f32,
+    dockee_tf: &'a Transform,
+}
+
+/// `e` leaves its dock: the point is released and the rules' docked and tow links between the pair end.
+fn release_dock(mission: &mut Option<ResMut<Mission>>, e: Entity, dockable: &mut Dockable, docker: &Docker) {
+    dockable.release(e);
+    if let Some(m) = mission.as_mut() {
+        m.script.set_docked(e, docker.dockee, false);
+        // Retail: releasing (or cancelling) a dock removes any link between the pair, so docking at one's own tower ends the tow.
+        m.script.break_tow_between(e, docker.dockee);
+    }
+}
+
+/// Waiting for a point: reserve the nearest free one, else compete for the nearest taken one or hold short of it. Returns the ship
+/// whose point was taken over.
+fn wait_phase(st: &Step, dockable: &mut Dockable, docker: &mut Docker, ship: &mut Ship, pos_of: &impl Fn(Entity) -> Option<Vec3>) -> Option<Entity> {
+    let Step { e, here, dockee_tf, .. } = *st;
+    if let Some(i) = dockable.nearest_free(dockee_tf, here) {
+        claim(dockable, docker, e, i);
+        return None;
+    }
+    let i = dockable.nearest(dockee_tf, here)?;
+    let (p, _) = dockable.world(dockee_tf, i);
+    // Every point taken: take this one over if we would get there sooner than its holder (the original compares distance ÷ own
+    // speed, so a stopped ship never does), else hold short of it.
+    let holder = dockable.taken[i].and_then(pos_of);
+    if ship.speed.abs() > 0.01 && holder.is_some_and(|h| here.distance(p) < h.distance(p)) {
+        let bumped = dockable.taken[i];
+        claim(dockable, docker, e, i);
+        return bumped;
+    } else if here.distance(p) < WAIT_DIST {
+        ship.waypoints.clear();
+        ship.order = EngineOrder::Stop;
+    } else {
+        ship.waypoints = vec![p.with_y(here.y)];
+        ship.goal = None;
+        ship.order = EngineOrder::Full;
+    }
+    None
+}
+
+/// The ship has reached its dock point: dock, arm the repair and tell the rules.
+fn arrive(
+    st: &Step,
+    tf: &Transform,
+    kept: Option<&DockTime>,
+    dockable: &Dockable,
+    docker: &mut Docker,
+    ship: &mut Ship,
+    world: (&mut Option<ResMut<Mission>>, &mut Commands, &mut MessageWriter<Sfx>, Option<&FxLib>),
+) {
+    let Step { e, here, class, base, dockee_tf, .. } = *st;
+    let (mission, commands, sfx, fxl) = world;
+    docker.phase = Phase::Docked;
+    docker.timer = 0.0;
+    let (heal_at, effect) = if dockable.repairs { repair_secs(class.repair_fx.as_deref()) } else { (0.0, 0.0) };
+    docker.repair_secs = heal_at;
+    docker.healed = false;
+    // Campaign worlds (IsCampaign) and every base give the full refit; a skirmish tender only tops up.
+    docker.full = base || mission.is_some();
+    // The ship's dock time (5 s unless 'Set Dock Time' changed it) becomes the longer of itself and the repair time, and stays
+    // that long for its later dockings.
+    docker.duration = dock_duration(mission.as_ref().and_then(|m| m.script.dock_time(e)), kept.map(|k| k.0), effect);
+    if let Some(m) = mission.as_mut() {
+        m.script.keep_dock_time(e, docker.duration);
+    } else {
+        commands.entity(e).insert(DockTime(docker.duration));
+    }
+    docker.offset = dockee_tf.compute_affine().inverse().transform_point3(here);
+    info!("docking: {e} docked with {} for {:.1} s (repair {:.1} s)", docker.dockee, docker.duration, docker.repair_secs);
+    ship.halt();
+    ship.speed = 0.0;
+    // The rules' 'Is Docked' reads the docker's dock routine (state docked, dockee in the group), so a base or island
+    // counts as well: mission 11's Cydonia shipyard starts its cutscene and the Man-O-War handover from it.
+    if let Some(m) = mission.as_mut() {
+        m.script.set_docked(e, docker.dockee, true);
+    }
+    // Retail: the dock routine plays HUD_Options_Dock on docking (for every ship) and the repair setup starts the repair effect.
+    sfx.write(Sfx::ui("HUD_Options_Dock"));
+    if docker.repair_secs > 0.0
+        && let (Some(fxl), Some(name)) = (fxl, class.repair_fx.as_deref())
+    {
+        let local = Transform::from_translation(class.centre);
+        crate::fx::spawn(commands, fxl, name, Some(e), local, *tf * local, true);
+    }
+}
+
+/// Approach: arrive when on the point, else sail to the approach point and switch to the glide for the final leg.
+fn approach_phase(st: &Step, dockable: &Dockable, docker: &mut Docker, ship: &mut Ship) -> bool {
+    let Some(i) = docker.point else {
+        docker.phase = Phase::Wait;
+        return false;
+    };
+    let (p, fwd) = dockable.world(st.dockee_tf, i);
+    if flat(p, st.here) < ARRIVE {
+        return true;
+    }
+    // Retail, every think: the approach point on the dock point's axis on the ship's present side (no check for land), sailed
+    // under the avoider; inside two of its radii the glide takes over.
+    let leg = if st.base { st.class.length } else { 1.5 * st.dockee_len };
+    let ap = approach_point(p, fwd, st.here, leg);
+    if !docker.final_leg && flat(ap, st.here) < 2.0 * st.class.radius {
+        docker.final_leg = true;
+    }
+    // The final leg's glide is movement: `dock_glide` runs it in the next tick's step.
+    if !docker.final_leg {
+        (ship.waypoints, ship.goal, ship.order) = (vec![ap], None, EngineOrder::Full);
+    }
+    false
+}
+
+/// Docked: count the time, and when it is up release the dock and pick what the ship does next. True: the dock was released.
+fn docked_phase(st: &Step, docker: &mut Docker, ship: &mut Ship) -> bool {
+    docker.timer += st.dt;
+    // Retail: the ship stays where the glide left it (within 10 units, any heading); the link pull (`docked_hold`) keeps it on
+    // station on a moving dockee, and the heal (`docked_repair`) is the upkeep armed at docking.
+    ship.order = EngineOrder::Stop;
+    ship.speed = 0.0;
+    if docker.timer < docker.duration {
+        return false;
+    }
+    info!("docking: {} released by {} (core {:.0}/{:.0})", st.e, docker.dockee, st.core, st.class.core_hp);
+    true
+}
+
+/// After the release: the human ship just stays where it is; AI ships leave along the dock axis (ship dockees) and sail back.
+fn leave_dock(st: &Step, docker: &mut Docker) {
+    docker.phase = if st.human {
+        Phase::Clear
+    } else if st.base {
+        Phase::Turn
+    } else {
+        Phase::Away
+    };
+    docker.timer = 0.0;
+}
+
+/// The legs after the release (clear, away, turn, return). True: the ship is done with the dock routine.
+fn leave_phase(st: &Step, dockable: &Dockable, docker: &mut Docker, ship: &mut Ship) -> bool {
+    let here = st.here;
+    match docker.phase {
+        Phase::Clear => {
+            docker.timer += st.dt;
+            let out = docker.point.is_none_or(|i| flat(dockable.world(st.dockee_tf, i).0, here) > st.class.length);
+            out || docker.timer >= LEG_SECS
+        }
+        Phase::Away => {
+            docker.timer += st.dt;
+            let (p, fwd) = docker.point.map_or((st.dockee_tf.translation, Vec3::NEG_Z), |i| dockable.world(st.dockee_tf, i));
+            let to = away_target(p, fwd, ship.heading, st.dockee_len + st.class.length, here.y);
+            if flat(to, here) < AWAY_DONE || docker.timer >= LEG_SECS {
+                docker.phase = Phase::Turn;
+                docker.timer = 0.0;
+            }
+            false
+        }
+        Phase::Turn => {
+            docker.timer += st.dt;
+            if angdiff(bearing(here, docker.start), ship.heading).abs() < TURN_DONE || docker.timer >= LEG_SECS {
+                // Retail: one leg of 100 units toward where the ship came from, not back to that point.
+                let dir = (docker.start - here).with_y(0.0).normalize_or_zero();
+                (ship.waypoints, ship.order) = (vec![here + dir * RETURN_LEG], EngineOrder::Full);
+                docker.phase = Phase::Return;
+            }
+            false
+        }
+        Phase::Return => {
+            let done = ship.waypoints.is_empty();
+            if done {
+                ship.order = EngineOrder::Stop;
+            }
+            done
+        }
+        _ => false,
+    }
+}
+
 fn routine(
     time: Res<Time>,
     lib: Res<Library>,
@@ -586,30 +773,29 @@ fn routine(
     let pos_of = |e: Entity| positions.iter().find(|w| w.0 == e).map(|w| w.1);
     let mut bumped = vec![];
     for (e, tf, mut ship, health, mut docker, human, kept) in &mut dockers {
-        let gone = |m: &mut Option<ResMut<Mission>>, dockable: &mut Dockable, docker: &Docker| {
-            dockable.release(e);
-            if let Some(m) = m.as_mut() {
-                m.script.set_docked(e, docker.dockee, false);
-                // Retail: releasing (or cancelling) a dock removes any link between the pair, so docking at one's own tower ends the tow.
-                m.script.break_tow_between(e, docker.dockee);
-            }
-        };
         let Ok((dockee_tf, mut dockable, dockee_ship, dockee_health)) = dockees.get_mut(docker.dockee) else {
             commands.entity(e).remove::<Docker>();
             continue;
         };
         if health.destroyed || dockee_health.is_some_and(|h| h.destroyed) || (!dockable.enabled && matches!(docker.phase, Phase::Wait | Phase::Approach)) {
-            gone(&mut mission, &mut dockable, &docker);
+            release_dock(&mut mission, e, &mut dockable, &docker);
             commands.entity(e).remove::<Docker>();
             continue;
         }
-        let class = &lib.classes[ship.class];
-        let base = dockee_ship.is_none();
-        let dockee_len = dockee_ship.map_or(0.0, |s| lib.classes[s.class].length);
-        let here = tf.translation;
+        let st = Step {
+            e,
+            dt,
+            here: tf.translation,
+            class: &lib.classes[ship.class],
+            core: health.core,
+            base: dockee_ship.is_none(),
+            human,
+            dockee_len: dockee_ship.map_or(0.0, |s| lib.classes[s.class].length),
+            dockee_tf,
+        };
         // Retail: a reserved point that is no longer the nearest gives way to the nearest one when that is free.
         if let (Some(i), Phase::Approach) = (docker.point, docker.phase)
-            && let Some(n) = dockable.nearest(dockee_tf, here)
+            && let Some(n) = dockable.nearest(dockee_tf, st.here)
             && n != i
             && dockable.taken[n].is_none()
         {
@@ -617,128 +803,20 @@ fn routine(
             claim(&mut dockable, &mut docker, e, n);
         }
         match docker.phase {
-            Phase::Wait => {
-                if let Some(i) = dockable.nearest_free(dockee_tf, here) {
-                    claim(&mut dockable, &mut docker, e, i);
-                    continue;
-                }
-                let Some(i) = dockable.nearest(dockee_tf, here) else { continue };
-                let (p, _) = dockable.world(dockee_tf, i);
-                // Every point taken: take this one over if we would get there sooner than its holder (the original compares distance ÷ own
-                // speed, so a stopped ship never does), else hold short of it.
-                let holder = dockable.taken[i].and_then(pos_of);
-                if ship.speed.abs() > 0.01 && holder.is_some_and(|h| here.distance(p) < h.distance(p)) {
-                    bumped.extend(dockable.taken[i]);
-                    claim(&mut dockable, &mut docker, e, i);
-                } else if here.distance(p) < WAIT_DIST {
-                    ship.waypoints.clear();
-                    ship.order = EngineOrder::Stop;
-                } else {
-                    ship.waypoints = vec![p.with_y(here.y)];
-                    ship.goal = None;
-                    ship.order = EngineOrder::Full;
-                }
-            }
+            Phase::Wait => bumped.extend(wait_phase(&st, &mut dockable, &mut docker, &mut ship, &pos_of)),
             Phase::Approach => {
-                let Some(i) = docker.point else {
-                    docker.phase = Phase::Wait;
-                    continue;
-                };
-                let (p, fwd) = dockable.world(dockee_tf, i);
-                if flat(p, here) < ARRIVE {
-                    docker.phase = Phase::Docked;
-                    docker.timer = 0.0;
-                    let (heal_at, effect) = if dockable.repairs { repair_secs(class.repair_fx.as_deref()) } else { (0.0, 0.0) };
-                    docker.repair_secs = heal_at;
-                    docker.healed = false;
-                    // Campaign worlds (IsCampaign) and every base give the full refit; a skirmish tender only tops up.
-                    docker.full = base || mission.is_some();
-                    // The ship's dock time (5 s unless 'Set Dock Time' changed it) becomes the longer of itself and the repair time, and stays
-                    // that long for its later dockings.
-                    docker.duration = dock_duration(mission.as_ref().and_then(|m| m.script.dock_time(e)), kept.map(|k| k.0), effect);
-                    if let Some(m) = mission.as_mut() {
-                        m.script.keep_dock_time(e, docker.duration);
-                    } else {
-                        commands.entity(e).insert(DockTime(docker.duration));
-                    }
-                    docker.offset = dockee_tf.compute_affine().inverse().transform_point3(here);
-                    info!("docking: {e} docked with {} for {:.1} s (repair {:.1} s)", docker.dockee, docker.duration, docker.repair_secs);
-                    ship.halt();
-                    ship.speed = 0.0;
-                    // The rules' 'Is Docked' reads the docker's dock routine (state docked, dockee in the group), so a base or island
-                    // counts as well: mission 11's Cydonia shipyard starts its cutscene and the Man-O-War handover from it.
-                    if let Some(m) = mission.as_mut() {
-                        m.script.set_docked(e, docker.dockee, true);
-                    }
-                    // Retail: the dock routine plays HUD_Options_Dock on docking (for every ship) and the repair setup starts the repair effect.
-                    sfx.write(Sfx::ui("HUD_Options_Dock"));
-                    if docker.repair_secs > 0.0
-                        && let (Some(fxl), Some(name)) = (fxl.as_deref(), class.repair_fx.as_deref())
-                    {
-                        let local = Transform::from_translation(class.centre);
-                        crate::fx::spawn(&mut commands, fxl, name, Some(e), local, *tf * local, true);
-                    }
-                    continue;
-                }
-                // Retail, every think: the approach point on the dock point's axis on the ship's present side (no check for land), sailed
-                // under the avoider; inside two of its radii the glide takes over.
-                let leg = if base { class.length } else { 1.5 * dockee_len };
-                let ap = approach_point(p, fwd, here, leg);
-                if !docker.final_leg && flat(ap, here) < 2.0 * class.radius {
-                    docker.final_leg = true;
-                }
-                // The final leg's glide is movement: `dock_glide` runs it in the next tick's step.
-                if !docker.final_leg {
-                    (ship.waypoints, ship.goal, ship.order) = (vec![ap], None, EngineOrder::Full);
+                if approach_phase(&st, &dockable, &mut docker, &mut ship) {
+                    arrive(&st, tf, kept, &dockable, &mut docker, &mut ship, (&mut mission, &mut commands, &mut sfx, fxl.as_deref()));
                 }
             }
             Phase::Docked => {
-                docker.timer += dt;
-                // Retail: the ship stays where the glide left it (within 10 units, any heading); the link pull (`docked_hold`) keeps it on
-                // station on a moving dockee, and the heal (`docked_repair`) is the upkeep armed at docking.
-                ship.order = EngineOrder::Stop;
-                ship.speed = 0.0;
-                if docker.timer >= docker.duration {
-                    info!("docking: {e} released by {} (core {:.0}/{:.0})", docker.dockee, health.core, class.core_hp);
-                    gone(&mut mission, &mut dockable, &docker);
-                    // The human ship just stays where it is; AI ships leave along the dock axis (ship dockees) and sail back.
-                    if human {
-                        docker.phase = Phase::Clear;
-                        docker.timer = 0.0;
-                    } else {
-                        docker.phase = if base { Phase::Turn } else { Phase::Away };
-                        docker.timer = 0.0;
-                    }
+                if docked_phase(&st, &mut docker, &mut ship) {
+                    release_dock(&mut mission, e, &mut dockable, &docker);
+                    leave_dock(&st, &mut docker);
                 }
             }
-            Phase::Clear => {
-                docker.timer += dt;
-                let out = docker.point.is_none_or(|i| flat(dockable.world(dockee_tf, i).0, here) > class.length);
-                if out || docker.timer >= LEG_SECS {
-                    commands.entity(e).remove::<Docker>();
-                }
-            }
-            Phase::Away => {
-                docker.timer += dt;
-                let (p, fwd) = docker.point.map_or((dockee_tf.translation, Vec3::NEG_Z), |i| dockable.world(dockee_tf, i));
-                let to = away_target(p, fwd, ship.heading, dockee_len + class.length, here.y);
-                if flat(to, here) < AWAY_DONE || docker.timer >= LEG_SECS {
-                    docker.phase = Phase::Turn;
-                    docker.timer = 0.0;
-                }
-            }
-            Phase::Turn => {
-                docker.timer += dt;
-                if angdiff(bearing(here, docker.start), ship.heading).abs() < TURN_DONE || docker.timer >= LEG_SECS {
-                    // Retail: one leg of 100 units toward where the ship came from, not back to that point.
-                    let dir = (docker.start - here).with_y(0.0).normalize_or_zero();
-                    (ship.waypoints, ship.order) = (vec![here + dir * RETURN_LEG], EngineOrder::Full);
-                    docker.phase = Phase::Return;
-                }
-            }
-            Phase::Return => {
-                if ship.waypoints.is_empty() {
-                    ship.order = EngineOrder::Stop;
+            Phase::Clear | Phase::Away | Phase::Turn | Phase::Return => {
+                if leave_phase(&st, &dockable, &mut docker, &mut ship) {
                     commands.entity(e).remove::<Docker>();
                 }
             }
@@ -755,7 +833,7 @@ fn routine(
 
 /// Every dock point of a dockable object shows the 'Docking_Point' effect while the object can be
 /// docked with; the effects go away when it cannot (disabled, destroyed or a hostile base).
-#[allow(clippy::type_complexity)]
+#[expect(clippy::type_complexity, reason = "a Bevy query")]
 fn markers(
     mut commands: Commands,
     fxl: Option<Res<FxLib>>,
@@ -797,7 +875,7 @@ pub fn needs_repair(lib: &Library, ship: &Ship, h: &Health) -> bool {
 /// dock must be within the ship's sight range; skirmish has no limit. The nearest dock by surface gap (centre distance minus both
 /// collision radii) is picked at every think while the ship has not yet docked, so a nearer dock replaces an earlier pick; once docked
 /// the routine runs to its end.
-#[allow(clippy::type_complexity)]
+#[expect(clippy::type_complexity, reason = "a Bevy query")]
 fn ai_repair_dock(
     lib: Res<Library>,
     mission: Option<Res<Mission>>,
