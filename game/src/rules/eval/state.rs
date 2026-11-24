@@ -22,8 +22,8 @@ pub(in crate::rules) enum EventKey {
         volume: String,
     },
     Killed {
-        player: String,
-        kind: String,
+        player: Owner,
+        kind: KillKind,
     },
 }
 
@@ -69,8 +69,8 @@ pub struct Script {
     /// (older ones stay active), sets the point when the name exists in the map and clears it for "NO OBJECTIVE POINT"; any other
     /// unknown name leaves the point as it was (decoded).
     pub(in crate::rules) team_objectives: HashMap<String, (String, Vec<String>)>,
-    pub(in crate::rules) hold_fire: HashSet<String>,
-    pub(in crate::rules) hostile: HashSet<(String, String)>,
+    pub(in crate::rules) hold_fire: HashSet<Owner>,
+    pub(in crate::rules) hostile: HashSet<(Owner, Owner)>,
     pub(in crate::rules) player: String,
     pub(in crate::rules) tows: Vec<(Entity, Entity)>,
     pub(in crate::rules) tow_specs: Vec<(String, String)>,
@@ -110,22 +110,22 @@ pub struct Script {
     pub(in crate::rules) group_names: HashSet<String>,
     /// Lifeboats saved as the original tallies them: (collecting player, lifeboat owner, count). The only source of the rules'
     /// capture counts apart from `base_captures`; boarding a ship never touches it.
-    pub(in crate::rules) lifeboats_saved: Vec<(String, String, u32)>,
+    pub(in crate::rules) lifeboats_saved: Vec<(Owner, Owner, u32)>,
     /// Owner of every lifeboat in the world, refreshed by lifeboats.rs each frame (`Player has no lifeboats`).
     pub(in crate::rules) lifeboat_owners: Vec<String>,
     /// PROVISIONAL bridge, bases only: boardings of a base by (capturing player, base's previous player). The original's capture count has no
     /// writer but lifeboat pickup, yet mission 12's defeat reads 'Procs vs RoyalPalace' (the palace is a boardable base), so it is kept alive.
     /// Ship boardings are not counted here: mission 6's 'PlayerStart vs PirateRunner' is the lifeboat route, its boarding route is 'Team has captured'.
-    pub(in crate::rules) base_captures: HashMap<(String, String), u32>,
+    pub(in crate::rules) base_captures: HashMap<(Owner, Owner), u32>,
     /// Units captured by boarding (boarding.rs) and the capturing player, for 'Team has captured a ship'.
-    pub(in crate::rules) captured: Vec<(String, Entity)>,
+    pub(in crate::rules) captured: Vec<(Owner, Entity)>,
     /// Ships destroyed and the player who destroyed them, for 'Team has destroyed a ship'.
-    pub(in crate::rules) destroyed: Vec<(String, Entity)>,
+    pub(in crate::rules) destroyed: Vec<(Owner, Entity)>,
     /// Ships that were destroyed, as they last stood: a sunk ship is removed from the world a tick after its break-up, but 'Group
     /// Destroyed' and the kill counts still answer for it (`keep_sunk`).
     pub(in crate::rules) sunk: Vec<Unit>,
     /// Skirmish teams: team name id -> its players (`set_teams`). Empty in the campaign, where a team condition counts anyone.
-    pub(in crate::rules) teams: HashMap<String, Vec<String>>,
+    pub(in crate::rules) teams: HashMap<String, Vec<Owner>>,
     /// 'Grant Team X Points' totals per team name id ('Team has X points').
     pub team_points: HashMap<String, i32>,
     /// Event conditions (kills, captures, per-unit volume entries): events seen and events already reported, per condition key.
@@ -307,7 +307,8 @@ impl Script {
     /// 'Procs', its ironclads belong to the allied 'Procs2').
     pub fn record_capture(&mut self, by: &str, victim: &str, unit: Entity, base: bool) {
         if base {
-            let credit: Vec<String> = std::iter::once(by.to_string()).chain(self.players.iter().filter(|p| *p != by && *p != victim && !self.hostile(p, by)).cloned()).collect();
+            let credit: Vec<Owner> =
+                std::iter::once(Owner::from(by)).chain(self.players.iter().filter(|p| *p != by && *p != victim && !self.hostile(p, by)).map(|p| Owner::from(p.as_str()))).collect();
             for p in credit {
                 *self.base_captures.entry((p, victim.into())).or_default() += 1;
             }
@@ -333,7 +334,7 @@ impl Script {
     }
     /// Skirmish teams: (team name id, its players).
     pub fn set_teams(&mut self, teams: Vec<(String, Vec<String>)>) {
-        self.teams = teams.into_iter().collect();
+        self.teams = teams.into_iter().map(|(team, players)| (team, players.into_iter().map(Owner::from).collect())).collect();
     }
     /// Whether `player` plays for `team`; true for any player when the team is unknown or not given (campaign rules).
     pub(in crate::rules) fn in_team(&self, team: &str, player: &str) -> bool {

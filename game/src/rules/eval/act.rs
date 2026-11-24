@@ -127,7 +127,7 @@ impl Script {
             T::SetFleetHoldFormation => out.push(Fx::Formation(base(s(a, "Player Name")).into(), None, b(a, "Hold Formation"))),
             T::SetFleetPrimaryShip => out.push(Fx::Primary(g("Group/Unit Name"))),
             T::SetFleetHoldFire => {
-                let o = base(s(a, "PLAYER FLEET")).to_string();
+                let o = Owner::from(base(s(a, "PLAYER FLEET")));
                 if b(a, "HOLD FIRE") {
                     self.hold_fire.insert(o);
                 } else {
@@ -135,7 +135,7 @@ impl Script {
                 }
             }
             T::SetAllianceBetweenPlayerAAndPlayerBToTRUEFALSE => {
-                let (x, y) = (base(s(a, "PLAYER A")).to_string(), base(s(a, "PLAYER B")).to_string());
+                let (x, y) = (Owner::from(base(s(a, "PLAYER A"))), Owner::from(base(s(a, "PLAYER B"))));
                 self.hostile.retain(|p| !((p.0 == x && p.1 == y) || (p.0 == y && p.1 == x)));
                 if !b(a, "SET ALLIANCE TO") {
                     self.hostile.insert((x, y));

@@ -147,9 +147,9 @@ impl Script {
             }
             // One event per object destroyed by the player, by kind (rocks or ships); a repeating rule scores once per kill.
             T::PlayerKilledAObject => {
-                let (player, kind) = (base(s(c, "Player Name")), s(c, "World Object Type"));
-                let n = self.kills.get(&(player.to_string(), kind == "Asteroid")).copied().unwrap_or(0);
-                self.event(EventKey::Killed { player: player.into(), kind: kind.into() }, n, 0.0)
+                let (player, kind) = (base(s(c, "Player Name")), KillKind::parse(s(c, "World Object Type")));
+                let n = self.kills.get(&(player.to_string(), kind == KillKind::Asteroid)).copied().unwrap_or(0);
+                self.event(EventKey::Killed { player: player.into(), kind }, n, 0.0)
             }
             t if t.is_engine() => self.ext_cond(t, c, w, repeating),
             other => {

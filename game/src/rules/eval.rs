@@ -5,6 +5,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use crate::Nearest;
 use crate::campaign::Mission;
 use crate::game_to_bevy;
+use crate::names::Owner;
 
 mod act;
 mod cond;
@@ -46,7 +47,7 @@ impl Script {
         for (i, a) in players.iter().enumerate() {
             for bb in &players[i + 1..] {
                 if a != bb && !allied.contains(&(*a, *bb)) {
-                    hostile.insert((a.to_string(), bb.to_string()));
+                    hostile.insert((Owner::from(*a), Owner::from(*bb)));
                 }
             }
         }
