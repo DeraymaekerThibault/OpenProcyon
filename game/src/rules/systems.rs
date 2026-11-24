@@ -4,6 +4,7 @@ mod autopilot;
 mod dev_console;
 mod mission_ai;
 mod presentation;
+mod teleport;
 
 use crate::Nearest;
 

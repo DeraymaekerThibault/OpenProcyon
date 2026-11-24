@@ -471,3 +471,9 @@ filter), so the original's lob ships would be shelling the launch points of thei
 hostile; do not build until one value from the running original settles which. Remake: no such routine. Build: medium, shell
 record gets `launch_point` and `launcher` (`combat/shells.rs`), the routine goes in `combat/gunnery.rs` next to the computer's lob
 aim points.
+
+## Beam guns and the two holds (Not retail, PROVISIONAL)
+
+The retail game has no beam gun (a mod's gun can have one). A beam obeys the holds the shell guns have: it does not start, and drops a
+charge or beam under way, while its ship is cloaked (unless the gun may fire cloaked) and while a computer captain's line to the target
+has a friendly ship or scenery on it. The original's beam handling is not traced for either hold; it is taken to follow the other guns.

@@ -254,6 +254,23 @@ pub(super) fn held_by_line(blocked: bool, gun: &crate::data::GunDef, mine: bool)
     blocked && !gun.point_defense && !mine
 }
 
+/// Whether a beam gun holds this tick. Shell guns hold for two reasons before they fire (a cloaked ship whose gun cannot fire cloaked, and
+/// a friendly ship or scenery on the line to the target); a beam obeys the same two. PROVISIONAL: the original's beam gun is not traced
+/// for either hold, so it is taken to follow the other guns.
+pub(super) fn beam_held(cloaked_now: bool, line_blocked: bool, gun: &crate::data::GunDef) -> bool {
+    (cloaked_now && !gun.cloak_fire) || held_by_line(line_blocked, gun, false)
+}
+
+/// One tick of a beam gun's cycle. A held gun drops a charge or a beam that is under way (as a shell gun drops the rest of its burst)
+/// and starts nothing; otherwise `beam::advance` runs the cycle (`ready`: loaded, aligned and on a target).
+pub(super) fn beam_step(phase: &mut super::beam::Phase, def: &crate::data::BeamDef, dt: f32, ready: bool, held: bool, range: f32) -> super::beam::Step {
+    if held {
+        *phase = super::beam::Phase::Idle;
+        return super::beam::Step::None;
+    }
+    super::beam::advance(phase, def, dt, ready, range)
+}
+
 /// Panic fire skips lobbing, point-defence and mine-laying guns (they are left to their own routines); every other gun,
 /// torpedo launchers included, fires. `mine` is whether the gun lays mines.
 pub(super) fn panic_fires(gun: &crate::data::GunDef, mine: bool) -> bool {
@@ -605,11 +622,13 @@ pub(super) fn fire(
             shot_engaged |= on_shot && engaged.is_some();
             // A beam gun charges, then holds its beam (combat/beam.rs burns what it touches); it fires no shells.
             if let Some(def) = &gun.beam {
-                let ready = engaged.is_some() && state.cooldown <= 0.0 && state.aligned && !(cloaked_now && !gun.cloak_fire);
+                let ready = engaged.is_some() && state.cooldown <= 0.0 && state.aligned;
                 if dead {
                     state.beam = super::beam::Phase::Idle;
                 }
-                match super::beam::advance(&mut state.beam, def, dt, ready && !dead, gun.range[2]) {
+                // The cloak and line-of-fire holds of the shell guns below apply to a beam too.
+                let held = beam_held(cloaked_now, line_blocked, gun);
+                match beam_step(&mut state.beam, def, dt, ready && !dead, held, gun.range[2]) {
                     super::beam::Step::Charge => {
                         shot_fired |= on_shot;
                         state.request.fired();
