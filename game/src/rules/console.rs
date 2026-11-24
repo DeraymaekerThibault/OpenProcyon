@@ -494,6 +494,10 @@ fn nearest_command(word: &str) -> Option<&'static str> {
     TABLE.iter().map(|e| e.name).filter(|n| n.starts_with(&word) || word.starts_with(n) || distance(n, &word) <= 2).min_by_key(|n| distance(n, &word))
 }
 
+/// Splits a `help` row into its command (or key) and its description. The console font is proportional, so the view draws the two
+/// pieces in separate columns instead of padding with spaces.
+pub const HELP_COLUMN: char = '\t';
+
 /// `help` (every command, grouped) or `help <command>` (its usage and an example), as output lines.
 pub fn help_lines(topic: Option<&str>) -> Vec<String> {
     if let Some(word) = topic {
@@ -509,17 +513,15 @@ pub fn help_lines(topic: Option<&str>) -> Vec<String> {
         };
     }
     let mut lines = vec![];
-    // One description column for commands and keys, as wide as the longest usage or key name (plus two spaces).
-    let width = TABLE.iter().map(|e| e.usage.chars().count()).chain(KEYS.iter().map(|k| k.0.chars().count())).max().unwrap_or(0) + 2;
     for group in [Group::Cheats, Group::State, Group::Flow, Group::Ships, Group::Authoring, Group::Camera, Group::Raw, Group::Console] {
         lines.push(format!("{}:", group.title()));
         lines.extend(TABLE.iter().filter(|e| e.group == group).map(|e| {
             let alias = if e.alias.is_empty() { String::new() } else { format!(" (also: {})", e.alias.join(", ")) };
-            format!("  {}{:<width$}{}{alias}", if e.cheats { "*" } else { " " }, e.usage, e.about)
+            format!("  {}{}{HELP_COLUMN}{}{alias}", if e.cheats { "*" } else { " " }, e.usage, e.about)
         }));
     }
     lines.push("Keys:".into());
-    lines.extend(KEYS.iter().map(|(key, what)| format!("   {key:<width$}{what}")));
+    lines.extend(KEYS.iter().map(|(key, what)| format!("   {key}{HELP_COLUMN}{what}")));
     lines.push("* marks the session as cheated (campaign points are not recorded). `help <command>` shows an example; Tab completes a command.".into());
     lines
 }

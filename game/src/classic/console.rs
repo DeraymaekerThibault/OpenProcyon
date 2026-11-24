@@ -3,7 +3,7 @@
 use bevy::prelude::*;
 
 use crate::campaign::Mission;
-use crate::rules::console::{Cheats, Console, DevView, ShapeKind};
+use crate::rules::console::{Cheats, Console, DevView, HELP_COLUMN, ShapeKind};
 
 #[derive(Component)]
 struct Panel;
@@ -26,8 +26,15 @@ fn build(mut commands: Commands, existing: Query<(), With<Panel>>) {
         Visibility::Hidden,
         GlobalZIndex(400),
         BackgroundColor(Color::srgba(0.0, 0.0, 0.05, 0.88)),
-        Node { position_type: PositionType::Absolute, top: Val::Px(0.0), left: Val::Px(0.0), width: Val::Percent(100.0), padding: UiRect::all(Val::Px(8.0)), ..default() },
-        children![(Text::new(""), font(15.0), TextColor(Color::srgb(0.85, 0.95, 0.85)))],
+        Node {
+            position_type: PositionType::Absolute,
+            top: Val::Px(0.0),
+            left: Val::Px(0.0),
+            width: Val::Percent(100.0),
+            padding: UiRect::all(Val::Px(8.0)),
+            flex_direction: FlexDirection::Column,
+            ..default()
+        },
     ));
     commands.spawn((
         Tag,
@@ -40,26 +47,48 @@ fn build(mut commands: Commands, existing: Query<(), With<Panel>>) {
     ));
 }
 
+/// Width of the command column of `help` rows, in px at the console's 15 px font (fits the longest usage, "PageUp / PageDown, mouse wheel").
+const COMMAND_COLUMN: f32 = 260.0;
+
 fn draw(
+    mut commands: Commands,
     console: Res<Console>,
     cheats: Res<Cheats>,
-    mut panel: Query<(&mut Visibility, &Children), (With<Panel>, Without<Tag>)>,
+    mut panel: Query<(Entity, &mut Visibility, Option<&Children>), (With<Panel>, Without<Tag>)>,
     mut tag: Query<&mut Visibility, (With<Tag>, Without<Panel>)>,
-    mut texts: Query<&mut Text>,
+    mut drawn: Local<String>,
 ) {
     for mut v in &mut tag {
         v.set_if_neq(if cheats.used { Visibility::Inherited } else { Visibility::Hidden });
     }
-    for (mut v, children) in &mut panel {
+    for (e, mut v, children) in &mut panel {
         v.set_if_neq(if console.open { Visibility::Inherited } else { Visibility::Hidden });
         if !console.open {
             continue;
         }
-        let Some(mut text) = children.first().and_then(|c| texts.get_mut(*c).ok()) else { continue };
         let shown = console.display();
-        if text.0 != shown {
-            text.0 = shown;
+        if *drawn == shown && children.is_some() {
+            continue;
         }
+        // One row per line; a `help` row is two pieces: the command in a fixed column, the description wrapping beside it.
+        commands.entity(e).despawn_children();
+        commands.entity(e).with_children(|p| {
+            for line in shown.lines() {
+                let piece = |text: &str| (Text::new(text), TextFont { font_size: FontSize::Px(15.0), ..default() }, TextColor(Color::srgb(0.85, 0.95, 0.85)));
+                match line.split_once(HELP_COLUMN) {
+                    Some((command, about)) => {
+                        p.spawn(Node { width: Val::Percent(100.0), ..default() }).with_children(|row| {
+                            row.spawn((piece(command), Node { width: Val::Px(COMMAND_COLUMN), flex_shrink: 0.0, ..default() }));
+                            row.spawn((piece(about), Node { flex_grow: 1.0, flex_basis: Val::Px(0.0), min_width: Val::Px(0.0), ..default() }));
+                        });
+                    }
+                    None => {
+                        p.spawn(piece(line));
+                    }
+                }
+            }
+        });
+        *drawn = shown;
     }
 }
 

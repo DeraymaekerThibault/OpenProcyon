@@ -1050,10 +1050,10 @@ fn chat_scroll(
     let over = panel.iter().any(crate::pointer::over);
     let s = window.height() / REF_H;
     for (mut pos, node) in &mut list {
-        for ev in wheel.read().filter(|_| over) {
-            pos.y = crate::panels::chat_scroll_after_wheel(pos.y, ev.y, s);
-        }
         let (view, content) = (node.size.y * node.inverse_scale_factor, node.content_size.y * node.inverse_scale_factor);
+        for ev in wheel.read().filter(|_| over) {
+            pos.y = crate::panels::chat_scroll_after_wheel(pos.y, ev.y, s, content - view);
+        }
         for mut t in &mut thumb {
             t.top = px(crate::panels::chat_thumb_top(pos.y, view, content), s);
         }
@@ -1113,6 +1113,30 @@ mod tests {
         app.world_mut().query_filtered::<&mut Ship, With<PlayerShip>>().single_mut(app.world_mut()).unwrap().order = EngineOrder::Stop;
         app.update();
         assert_eq!(app.world_mut().query_filtered::<&Ship, With<PlayerShip>>().single(app.world()).unwrap().order, EngineOrder::Stop);
+    }
+
+    #[test]
+    #[allow(deprecated)] // Interaction, see pointer.rs
+    fn the_wheel_over_the_chat_panel_moves_its_list_and_thumb() {
+        use bevy::input::mouse::{MouseScrollUnit, MouseWheel};
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins).add_message::<MouseWheel>().add_systems(Update, chat_scroll);
+        app.world_mut().spawn((Window { resolution: (REF_H as u32 * 4 / 3, REF_H as u32).into(), ..default() }, bevy::window::PrimaryWindow));
+        app.world_mut().spawn((ChatPanel, Interaction::Hovered));
+        // 100 px of list showing 300 px of lines, built scrolled to the end.
+        let node = ComputedNode { size: Vec2::new(300.0, 100.0), content_size: Vec2::new(300.0, 300.0), inverse_scale_factor: 1.0, ..default() };
+        let list = app.world_mut().spawn((ChatList, ScrollPosition(Vec2::new(0.0, 1.0e6)), node)).id();
+        let thumb = app.world_mut().spawn((ChatThumb, Node::default())).id();
+        let turn = |app: &mut App, y: f32| {
+            app.world_mut().write_message(MouseWheel { unit: MouseScrollUnit::Line, x: 0.0, y, window: Entity::PLACEHOLDER, phase: bevy::input::touch::TouchPhase::Moved });
+            app.update();
+            (app.world().get::<ScrollPosition>(list).unwrap().y, app.world().get::<Node>(thumb).unwrap().top)
+        };
+        let (up, thumb_up) = turn(&mut app, 1.0);
+        assert_eq!(up, 200.0 - crate::panels::CHAT_WHEEL_STEP, "one notch up leaves the end");
+        let (down, thumb_down) = turn(&mut app, -1.0);
+        assert_eq!(down, 200.0, "one notch down is back at the end");
+        assert_ne!(thumb_up, thumb_down, "the thumb follows the list");
     }
 
     #[test]
