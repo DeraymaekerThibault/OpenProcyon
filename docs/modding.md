@@ -152,6 +152,7 @@ How a file combines with the one below it depends on its path:
 |---|---|
 | `data/weapons/guns.json`, `data/weapons/bullets.json`, `data/ai/weapons.json`, `data/collision.json`, `data/docks.json`, `data/crew_nodes.json`, `menu/strings.json`, `hud/scales.json`, `data/render/skies.json`, `data/render/nebulae.json` | **merged**, deep: objects combine key by key, so a new key is added and an existing one changes only the keys you give; arrays and scalars replace. A file that is not valid JSON, or not an object, does not just get ignored: the merge replaces the whole table below it with that bad value and the game then fails or shows blank text (see "Troubleshooting") |
 | a `.json` file containing `"extends"` | merged over its parent (below); the `extends` key is dropped |
+| `textures/<retail texture name>.png` | **not placed**: replaces that retail texture by name inside every model that uses it (below); the later mod wins for one name |
 | any other file (every other JSON such as `data/render/look.json`, `data/hud/theme.json`, `data/hud/slices.json`, `data/fx/wake_tint.json`, images, models, sounds, shaders) | **replaced** whole; with two mods the later one wins and the earlier one's file is gone |
 
 `extends` names the parent: for `ships/<Id>/ship.json` and `maps/<Id>/map.json` (and the other files at that depth) it is another
@@ -162,6 +163,7 @@ stops the game at launch (`mod <folder>: extends unknown '<parent>'`).
 | Mod file | Effect |
 |---|---|
 | any file with a base path (`hud/sprites/MainBar_PanicButton/Navy/NoCursor.png`, `ships/Ship_X/model.glb`, `fonts/Sans.otf`, `sound/<kind>/*.ogg`) | replaces the base file: texture packs, upscaled art, new fonts, sounds. A replaced retail `model.glb` keeps that ship's retail `geometry.json` (hit meshes) and sections, so a ship that looks different but hits the same |
+| `textures/<retail texture name>.png` | replaces that retail texture in every `ships/` and `models/` model of the overlay that uses it, with no model shipped (see "Replacing a retail texture by name") |
 | `ships/<Id>/ship.json` containing `"extends": "Ship_Navy_Cutter"` | deep-merged over that ship: object keys override one by one, arrays and scalars replace; a new ship is a few lines (see `mods/silver-skirmish`) |
 | an `extends` file may also carry `"set": {"/engines/0/fx": "X"}` (JSON pointers, applied after the merge) to change one value inside an array, which a merge cannot do; a pointer that does not exist stops the game at launch (`mod <folder>: <file> sets '<pointer>', which does not exist`). `mods/faction-colors` uses it to point a ship's four engines at recoloured effect copies |
 | `data/collision.json` | merged key by key: a new scenery type's collision (an entry per `type` a map's `objects` name, layout in `docs/data-format.md`), so a mod's own island or rock blocks ships and shells. Without an entry the model is drawn but nothing collides with it |
@@ -214,6 +216,7 @@ rules. Data keys the engine adds are also listed per file: ship and gun keys in 
 | Developer console | always (`~` or F12; in a release build Display Options > Developer Console or `--console`) | control (it runs rule actions) | `game/src/rules/console.rs`, `game/src/bindings.rs`, `game/src/menu/settings.rs` |
 | Game-speed buttons | `data/hud/speed.json` (the bundled `game-speed` mod, on by default) | control | `game/src/panels.rs`, `game/src/classic/panels.rs` |
 | Pause key | always | control | `game/src/view.rs` |
+| Replace a retail texture by name (`textures/<name>.png` swapped into every model that uses it) | `textures/<name>.png` in a mod | presentation | `game/src/retail_tex.rs`, `game/src/modding.rs` |
 | Crew places in JSON (deck crews and townsfolk without editing a model) | a `crew_nodes` key in `ship.json`, or `data/crew_nodes.json` | presentation | `game/src/data/crew_nodes.rs`, `game/src/render/deckhands.rs` |
 | Number keys: primary ship on 1, secondaries on 2..9, 0, `\` | always | control | `game/src/bindings.rs` |
 | Mods page and its main-menu button, the HD skies bake | always | control | `game/src/menu/mods.rs`, `game/src/classic/menu.rs` |
@@ -427,6 +430,17 @@ and renamed to the retail name (`o_main_body.tga`), so the engine's name rules (
 give the material a flat `baseColorFactor` as a fallback look. The baked model exists only in the overlay (`local/overlay`, git-ignored),
 so nothing converted from the game is committed; a name the import does not have leaves that material untextured and logs a warning.
 Applies to `ships/` and `models/` GLBs of a mod.
+
+**Replacing a retail texture by name.** A texture pack ships only its pictures: a file `textures/<retail texture name>.png` in a
+mod (the retail texture's file name without `.tga`, any letter case: `textures/O_Main_Body.png`; `textures/proc_pon_main.tga.png` works
+too) replaces that texture in every model of the overlay that uses it: retail ships, scenery and the mod's own models, including a
+`retail:<texture>` material. The PNG may be any size; its bytes are embedded as they are. The material names are those of the imported
+`ships/*/model.glb` (a name containing `.tga` there is the key; `textures/surface/` is a different thing, see "Graphics mods"). When the overlay is
+built, only the models that use an overridden texture are rewritten (in `local/overlay`, git-ignored, so nothing converted from the game
+or the pack is committed twice); every other model stays a link, so a mod without `textures/` costs nothing and one with it costs a
+small read of each model's header. With two mods the later one wins for the same name. A name no model uses is a warning in the mod
+report (`no model uses 1 texture override(s)`, with the file name; usually a typo), never an error. A file that is not a PNG is skipped
+with a reason. A picture with an alpha channel makes the material a cut-out. Not retail.
 
 **UI art.** A ship with no `hud/sprites/ShipBar_ShipIcon_<art>` and `WeaponBar_ShipIcon_<art>` (`<art>` = its `icon` without the prefix, else
 its id without `Ship_`) gets them made from the model when the overlay is built: a solid pale side silhouette for the command bar and

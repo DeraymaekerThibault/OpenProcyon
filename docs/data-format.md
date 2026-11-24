@@ -23,6 +23,7 @@ Short form first (paths by area), the full description of every path under "Deta
 | `ships/<Id>/model.glb` | Hull mesh with its hardpoint nodes |
 | `models/scenery/SpaceDragon.glb`, `SpaceWhale.glb` | The two animals: skinned mesh plus looping clip |
 | `ships/<Id>/names.json`, `docks.json` | Optional: ship-name pool for open maps; dock points |
+| `textures/<retail texture name>.png` | Mods only (not in an import; not retail): replaces the retail texture of that name (file name without `.tga`, any case) inside every `ships/` and `models/` model that uses it, any resolution. Never placed in the overlay; the models that use it are rewritten there. `textures/surface/` is a different thing (baked surface maps) |
 
 **Weapons and AI**
 

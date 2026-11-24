@@ -2,8 +2,10 @@
 //! `<assets>/../local/overlay` as symlinks (hard links, or copies, off Unix) so every loader, Bevy's included, sees a single root.
 //! Rules: a mod file replaces the base file of the same path (a new `ships/<id>/` or `maps/<id>/` folder is new content);
 //! a JSON with `"extends": "Ship_Navy_Cutter"` is deep-merged over the same file of that base ship/map, so a new ship is a few lines.
+//! Not retail: a mod's `textures/<retail texture name>.png` swaps that texture in every model of the overlay that uses it; only those
+//! models are rewritten (`retexture_models`), the rest stay links.
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 
 pub fn walk(dir: &Path, rel: &Path, out: &mut Vec<PathBuf>) {
@@ -157,6 +159,10 @@ pub struct ModEntry {
     pub merged: Vec<String>,
     pub extends: Vec<String>,
     pub added: Vec<String>,
+    /// `textures/<name>.png` files: retail textures this mod replaces by name (not placed as files; they are written into models).
+    pub textures: Vec<String>,
+    /// The `textures` files that won over earlier mods' but that no model of the overlay uses (a typo, as a rule).
+    pub unused_textures: Vec<String>,
     /// (file, why): the same error text the loader reports, so a mod author sees one wording.
     pub skipped: Vec<(String, String)>,
 }
@@ -173,7 +179,7 @@ const REPORT_LIST: usize = 8;
 impl ModReport {
     /// Drops the entry for `dir` (the game's own `content/` layer) unless it skipped something, which the player or developer must see.
     pub fn without(mut self, dir: &Path) -> Self {
-        self.mods.retain(|m| m.dir != dir || !m.skipped.is_empty());
+        self.mods.retain(|m| m.dir != dir || !m.skipped.is_empty() || !m.unused_textures.is_empty());
         self
     }
 
@@ -193,10 +199,13 @@ impl ModReport {
         for m in &self.mods {
             let version = if m.version.is_empty() { String::new() } else { format!(" {}", m.version) };
             out.push(format!("  {}{version} ({})", m.name, m.dir.display()));
-            for (label, files) in [("overrides", &m.overrides), ("merges", &m.merged), ("extends", &m.extends), ("adds", &m.added)] {
+            for (label, files) in [("overrides", &m.overrides), ("merges", &m.merged), ("extends", &m.extends), ("adds", &m.added), ("texture overrides", &m.textures)] {
                 if !files.is_empty() {
                     out.push(format!("    {label} {}: {}", files.len(), list(files)));
                 }
+            }
+            if !m.unused_textures.is_empty() {
+                out.push(format!("    warning: no model uses {} texture override(s), check the names: {}", m.unused_textures.len(), list(&m.unused_textures)));
             }
             if !m.skipped.is_empty() {
                 out.push(format!("    skipped {}:", m.skipped.len()));
@@ -276,6 +285,10 @@ fn build_overlay(base: &Path, mods: &[PathBuf], root: &Path, marked: bool) -> Mo
         std::fs::create_dir_all(to.parent().unwrap()).unwrap();
         link(&base.join(rel), &to);
     }
+    // Retail texture key -> the PNG bytes, and who gave them (index of the mod in the report, its file); a later mod replaces an earlier one.
+    let mut images: HashMap<String, Vec<u8>> = HashMap::new();
+    let mut owners: HashMap<String, (usize, String)> = HashMap::new();
+    let mut models: BTreeSet<PathBuf> = files.iter().filter(|r| is_model(r)).cloned().collect();
     for m in mods {
         let modname = m.file_name().map_or_else(|| m.to_string_lossy().into_owned(), |n| n.to_string_lossy().into_owned());
         let mut entry = ModEntry { name: modname.clone(), dir: m.clone(), ..Default::default() };
@@ -302,6 +315,21 @@ fn build_overlay(base: &Path, mods: &[PathBuf], root: &Path, marked: bool) -> Mo
         // Files that extend another go last (stable sort over sorted names), so they see sibling mod files, not only the base.
         // shortcut: one level; a chain of extends inside one mod needs a topological order.
         mf.sort();
+        mf.retain(|rel| {
+            let Some(k) = texture_override(rel) else { return true };
+            let name = rel.to_string_lossy().replace('\\', "/");
+            match std::fs::read(m.join(rel)) {
+                Ok(png) if png.starts_with(b"\x89PNG\r\n\x1a\n") && png.len() > 26 => {
+                    entry.textures.push(name.clone());
+                    owners.insert(k.clone(), (report.mods.len(), name));
+                    images.insert(k, png);
+                }
+                Ok(_) => entry.skipped.push((name, "not a PNG picture".into())),
+                Err(e) => entry.skipped.push((name, format!("cannot read: {e}"))),
+            }
+            false
+        });
+        models.extend(mf.iter().filter(|r| is_model(r)).cloned());
         mf.sort_by_key(|r| docs.get(r).is_some_and(|v| v.get("extends").is_some()));
         for rel in mf {
             let (from, to) = (m.join(&rel), root.join(&rel));
@@ -323,6 +351,7 @@ fn build_overlay(base: &Path, mods: &[PathBuf], root: &Path, marked: bool) -> Mo
         }
         report.mods.push(entry);
     }
+    retexture_models(root, &models, &images, &owners, &mut report);
     // Ships the mods bring get the UI art their model implies, unless they ship their own (shipart.rs).
     let mut ids: Vec<String> =
         mods.iter().flat_map(|m| std::fs::read_dir(m.join("ships")).into_iter().flatten().flatten()).filter_map(|e| e.file_name().into_string().ok()).collect();
@@ -330,6 +359,50 @@ fn build_overlay(base: &Path, mods: &[PathBuf], root: &Path, marked: bool) -> Mo
     ids.dedup();
     crate::shipart::generate(root, &ids);
     report
+}
+
+/// A model file the engine loads textures for: the overlay's `ships/` and `models/` GLBs.
+fn is_model(rel: &Path) -> bool {
+    rel.extension().is_some_and(|e| e == "glb") && (rel.starts_with("ships") || rel.starts_with("models"))
+}
+
+/// The retail texture key a mod file `textures/<name>.png` stands for (any case of name and extension, `.tga` optional); `None` for any
+/// other path, `textures/surface/...` (baked surface maps) included.
+fn texture_override(rel: &Path) -> Option<String> {
+    let mut parts = rel.components();
+    let (dir, file) = (parts.next()?, parts.next()?);
+    let file = Path::new(file.as_os_str());
+    if parts.next().is_some() || dir.as_os_str() != "textures" || !file.extension().is_some_and(|e| e.eq_ignore_ascii_case("png")) {
+        return None;
+    }
+    Some(crate::retail_tex::key(&file.file_stem()?.to_string_lossy()))
+}
+
+/// Not retail: writes, in place of the link, a copy of each model in `models` that uses a texture in `textures`, with that texture
+/// replaced (retail_tex.rs). A model that uses none stays a link, and finding that out reads only its JSON chunk. A texture no model
+/// uses is reported on the mod whose file won.
+fn retexture_models(root: &Path, models: &BTreeSet<PathBuf>, images: &HashMap<String, Vec<u8>>, owners: &HashMap<String, (usize, String)>, report: &mut ModReport) {
+    if images.is_empty() {
+        return;
+    }
+    let mut used: BTreeSet<String> = BTreeSet::new();
+    for rel in models {
+        let path = root.join(rel);
+        if !crate::retail_tex::uses_any(&path, images) {
+            continue;
+        }
+        let Some((bytes, keys)) = std::fs::read(&path).ok().and_then(|b| crate::retail_tex::retexture(&b, images)) else { continue };
+        let _ = std::fs::remove_file(&path);
+        if let Err(e) = std::fs::write(&path, bytes) {
+            eprintln!("mod textures: cannot write {}: {e}", rel.display());
+        }
+        used.extend(keys);
+    }
+    let mut unused: Vec<_> = owners.iter().filter(|(k, _)| !used.contains(*k)).map(|(_, (i, name))| (*i, name.clone())).collect();
+    unused.sort();
+    for (i, name) in unused {
+        report.mods[i].unused_textures.push(name);
+    }
 }
 
 /// Puts one mod file into the overlay at `to`. An `Err` leaves the base file in place; the caller logs it and goes on.
@@ -686,5 +759,65 @@ mod tests {
         assert!(clean.without(&own).mods.is_empty());
         let bad = ModReport { mods: vec![ModEntry { dir: own.clone(), skipped: vec![("a".into(), "b".into())], ..Default::default() }] };
         assert_eq!(bad.without(&own).mods.len(), 1);
+    }
+    /// A tiny GLB with one material named `name` and `image` as its texture.
+    fn model_with_texture(name: &str, image: &[u8]) -> Vec<u8> {
+        let doc = serde_json::json!({"asset": {"version": "2.0"}, "buffers": [{"byteLength": image.len()}], "bufferViews": [{"buffer": 0, "byteLength": image.len()}],
+            "images": [{"bufferView": 0, "mimeType": "image/png"}], "textures": [{"source": 0}],
+            "materials": [{"name": name, "pbrMetallicRoughness": {"baseColorTexture": {"index": 0}}}]});
+        crate::data::derive::tests::glb(doc, image)
+    }
+    fn has(hay: &[u8], needle: &[u8]) -> bool {
+        hay.windows(needle.len()).any(|w| w == needle)
+    }
+    #[test]
+    fn a_mods_texture_png_replaces_that_retail_texture_in_every_model_that_uses_it() {
+        let dir = std::env::temp_dir().join(format!("procyon-mod-textures-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let (base, a, b) = (dir.join("assets"), dir.join("a"), dir.join("b"));
+        let old = crate::shipart::png(2, 2, &[7u8; 16]);
+        let (first, second) = (crate::shipart::png(4, 4, &[1u8; 64]), crate::shipart::png(8, 8, &[2u8; 256]));
+        let put = |p: PathBuf, bytes: &[u8]| {
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, bytes).unwrap();
+        };
+        put(base.join("ships/Ship_A/model.glb"), &model_with_texture("Hull_Planks.tga", &old));
+        put(base.join("ships/Ship_B/model.glb"), &model_with_texture("Other.tga", &old));
+        put(base.join("models/scenery/Pier.glb"), &model_with_texture("hull_planks.tga", &old));
+        // a mod model asks for the retail texture, which the import has
+        put(
+            a.join("ships/Ship_Mine/model.glb"),
+            &crate::data::derive::tests::glb(
+                serde_json::json!({"asset": {"version": "2.0"}, "buffers": [{"byteLength": 4}], "materials": [{"name": "retail:hull_planks"}]}),
+                &[0; 4],
+            ),
+        );
+        put(a.join("textures/HULL_PLANKS.PNG"), &first);
+        put(a.join("textures/typo_name.png"), &first);
+        put(b.join("textures/Hull_Planks.tga.png"), &second);
+        put(b.join("textures/surface/Other.png"), &first);
+        let (root, report) = overlay_report(&base, &[a, b], Some(dir.join("overlay")));
+        for rel in ["ships/Ship_A/model.glb", "models/scenery/Pier.glb", "ships/Ship_Mine/model.glb"] {
+            let out = std::fs::read(root.join(rel)).unwrap();
+            assert!(has(&out, &second) && !has(&out, &first), "{rel}: the later mod's picture, and only it");
+            assert!(!std::fs::symlink_metadata(root.join(rel)).unwrap().file_type().is_symlink(), "{rel} is a rewritten copy");
+        }
+        #[cfg(unix)]
+        assert!(std::fs::symlink_metadata(root.join("ships/Ship_B/model.glb")).unwrap().file_type().is_symlink(), "a model using no overridden texture stays a link");
+        assert!(!root.join("textures/Hull_Planks.tga.png").exists() && !root.join("textures/HULL_PLANKS.PNG").exists(), "texture files are not placed");
+        assert!(root.join("textures/surface/Other.png").exists(), "textures/surface/ keeps its own meaning");
+        assert_eq!(report.mods[0].textures, ["textures/HULL_PLANKS.PNG", "textures/typo_name.png"]);
+        assert_eq!(report.mods[0].unused_textures, ["textures/typo_name.png"], "a name no model uses is a warning on its mod");
+        assert!(report.mods[1].unused_textures.is_empty() && report.mods[1].textures.len() == 1);
+        let text = report.lines().join("\n");
+        assert!(text.contains("texture overrides 2") && text.contains("warning: no model uses 1") && text.contains("typo_name.png"), "{text}");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn a_texture_file_that_is_not_a_png_is_skipped_with_a_reason() {
+        let (dir, report) = report_for("badpng", &[], &[("textures/x.png", "not a picture")]);
+        assert_eq!(report.mods[0].skipped[0].0, "textures/x.png");
+        assert!(report.mods[0].textures.is_empty());
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }
