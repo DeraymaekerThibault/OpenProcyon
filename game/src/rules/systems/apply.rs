@@ -125,15 +125,28 @@ pub(in crate::rules) fn apply(
                 s.health.destroyed = true;
                 *s.visibility = Visibility::Hidden;
             }),
+            // Retail `Teleport Group/Unit`: every member goes to the first point. This engine keeps the group's layout round it, moves a hull
+            // that would land in another to the nearest free spot and leaves the ships at rest (docs/re/collision.md "Teleport and overlap").
             Fx::Teleport(u, p) => {
-                for e in u {
-                    place(e, p, None, false, env, commands, ships, animals);
+                let members: Vec<_> = u.iter().filter_map(|e| ships.get(*e).ok().map(|s| (*e, s.transform.translation))).collect();
+                let targets = super::teleport::layout(&members.iter().map(|m| m.1).collect::<Vec<_>>(), p);
+                // Hulls a teleported ship must not land in: every other ship in play, and each member once it has been placed.
+                let mut hulls: Vec<_> = ships
+                    .iter()
+                    .filter(|s| !u.contains(&s.entity) && !s.health.destroyed && *s.visibility != Visibility::Hidden)
+                    .map(|s| crate::collision::spot::hull(env.lib.classes[s.ship.class].collision_bounds, s.transform))
+                    .collect();
+                for ((e, _), at) in members.iter().zip(targets) {
+                    place(*e, at, None, true, Some(&mut hulls), env, commands, ships, animals);
+                }
+                for e in u.into_iter().filter(|e| !members.iter().any(|m| m.0 == *e)) {
+                    place(e, p, None, false, None, env, commands, ships, animals); // animals and scenery go to the point itself
                 }
             }
             // Not retail: `OP Teleport`, the retail teleport's way of placing a unit, plus the heading and the speed.
             Fx::Place { units, heading } => {
                 for (e, p) in units {
-                    place(e, p, heading, true, env, commands, ships, animals);
+                    place(e, p, heading, true, None, env, commands, ships, animals);
                 }
             }
             // Not retail: `OP Follow Group`. A later order of any kind (path, attack, ram, hold, clear) replaces it; the mission AI keeps the
@@ -452,21 +465,37 @@ fn mission_side(script: &Script, owner: &str) -> Side {
 
 /// Moves one unit to `p` (the retail `Teleport Group/Unit`, with `heading` and `clear_speed` off): a ship loses its waypoints, an animal its
 /// velocity, scenery moves with its collision body. Not retail: `heading` (radians about +Y; ships only) and `clear_speed` (a ship's speed and
-/// turn rate, and the push of a contact or a current) are what `OP Teleport` adds.
+/// turn rate, and the push of a contact or a current) are what `OP Teleport` adds. Not retail: `retail_fix` is the retail teleport's engine-added
+/// handling of a ship; it lands on the nearest spot clear of `retail_fix`'s hulls (and joins them), and the
+/// human's ship also drops its throttle, sail order and course (`teleport::stop`).
 #[allow(clippy::too_many_arguments)]
 fn place(
     e: Entity,
     p: Vec3,
     heading: Option<f32>,
     clear_speed: bool,
+    retail_fix: Option<&mut Vec<crate::collision::tree::Box3>>,
     env: &FxEnv,
     commands: &mut Commands,
     ships: &mut Query<RuleShip>,
     animals: &mut Query<(Entity, &mut crate::environment::SpaceAnimal, &mut Transform, &mut Visibility), Without<Ship>>,
 ) {
-    if let Ok(RuleShipItem { ship: mut sh, transform: mut tf, .. }) = ships.get_mut(e) {
+    if let Ok(RuleShipItem { ship: mut sh, transform: mut tf, mission, primary, .. }) = ships.get_mut(e) {
         tf.translation = p;
         sh.waypoints.clear();
+        let human = mission.human || primary;
+        if let Some(hulls) = retail_fix {
+            let bounds = env.lib.classes[sh.class].collision_bounds;
+            let rotation = heading.map_or(tf.rotation, Quat::from_rotation_y);
+            tf.translation = crate::collision::spot::free_spot(bounds, rotation, p, hulls);
+            hulls.push(crate::collision::spot::hull(bounds, &Transform { rotation, ..*tf }));
+            super::teleport::stop(&mut sh, human);
+            commands.queue(move |w: &mut World| {
+                if human && let Some(mut pilot) = w.get_mut::<crate::ship::FleetPilot>(e) {
+                    pilot.destination = None;
+                }
+            });
+        }
         if clear_speed {
             sh.speed = 0.0;
             sh.ang_vel = 0.0;

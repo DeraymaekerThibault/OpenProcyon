@@ -133,11 +133,11 @@ impl Ext {
 
 impl Script {
     /// `OP ...` conditions. An unknown one warns once and is false, like any unknown condition.
-    pub(in crate::rules) fn ext_cond(&mut self, c: &Value, w: &[Unit], repeating: bool) -> bool {
-        match s(c, "Type") {
+    pub(in crate::rules) fn ext_cond(&mut self, ty: RuleType, c: &Value, w: &[Unit], repeating: bool) -> bool {
+        match ty {
             // Every listed condition is evaluated (no short-circuit), so an edge condition inside (Enter Volume, event quotas) advances
             // its state exactly as it would at the top level.
-            "OP Any Of" => {
+            T::OPAnyOf => {
                 let mut any = false;
                 for sub in c["Conditions"].as_array().into_iter().flatten() {
                     any |= self.cond(sub, w, repeating);
@@ -147,7 +147,7 @@ impl Script {
             // Inverts what the inner condition answers this frame. An edge condition (Enter Volume in a repeating rule, an event quota)
             // is true for one frame only, so `Not` of it is true on every other frame; use a level condition or `Exit Volume` instead.
             // An event the inner condition would have reported is never consumed (the rule cannot fire while the inner is true).
-            "OP Not" => {
+            T::OPNot => {
                 if !c["Condition"].is_object() {
                     self.warn("'OP Not' without a Condition object");
                     return false;
@@ -157,44 +157,44 @@ impl Script {
                 self.consume.truncate(mark);
                 !inner
             }
-            "OP Counter Condition" => cmp(s(c, "Equivalence"), self.ext.counter(s(c, "Counter Name")), f(c, "Value")),
-            "OP Campaign Counter Condition" => cmp(s(c, "Equivalence"), self.ext.campaign.get(s(c, "Counter Name")).copied().unwrap_or(0.0), f(c, "Value")),
+            T::OPCounterCondition => cmp(s(c, "Equivalence"), self.ext.counter(s(c, "Counter Name")), f(c, "Value")),
+            T::OPCampaignCounterCondition => cmp(s(c, "Equivalence"), self.ext.campaign.get(s(c, "Counter Name")).copied().unwrap_or(0.0), f(c, "Value")),
             // `Boolean` TRUE (the default): every live member is fully cloaked; FALSE: none is. A group with no live member holds neither.
-            "OP Group Is Cloaked" => {
+            T::OPGroupIsCloaked => {
                 let m: Vec<&Unit> = members(w, s(c, "Group Name")).into_iter().filter(|u| u.alive).collect();
                 let on = given(c, "Boolean").is_none_or(|_| b(c, "Boolean"));
                 !m.is_empty() && m.iter().all(|u| u.cloaked == on)
             }
             // The fastest or slowest of the live ships' own speeds (units per second, along their headings) against `Speed`; a group with
             // no live ship holds nothing.
-            "OP Group Speed" => {
+            T::OPGroupSpeed => {
                 let speeds = members(w, s(c, "Group Name")).into_iter().filter(|u| u.alive).filter_map(|u| u.speed);
                 let pick = if s(c, "Which") == "Slowest" { speeds.reduce(f32::min) } else { speeds.reduce(f32::max) };
                 pick.is_some_and(|v| cmp(s(c, "Equivalence"), v, f(c, "Speed")))
             }
             // Active: switched on and neither complete nor failed yet. Complete and Failed are the task's flags, however they were set.
-            "OP Task State" => self.tasks.iter().find(|t| t.name == s(c, "Objective Task")).is_some_and(|t| match s(c, "State") {
+            T::OPTaskState => self.tasks.iter().find(|t| t.name == s(c, "Objective Task")).is_some_and(|t| match s(c, "State") {
                 "Active" => t.active && !t.complete && !t.failed,
                 "Complete" => t.complete,
                 "Failed" => t.failed,
                 _ => false,
             }),
             other => {
-                self.warn(&format!("condition '{other}'"));
+                self.warn(&format!("condition '{}'", other.name()));
                 false
             }
         }
     }
 
     /// `OP ...` actions that are not waits (a wait reached outside a rule's action list, e.g. through `act` alone, does nothing).
-    pub(in crate::rules) fn ext_act(&mut self, a: &Value, w: &[Unit], out: &mut Vec<Fx>, rule: &str) {
-        match s(a, "Type") {
+    pub(in crate::rules) fn ext_act(&mut self, ty: RuleType, a: &Value, w: &[Unit], out: &mut Vec<Fx>, rule: &str) {
+        match ty {
             // The same grapple-then-board a player's orders make (boarding.rs): the ships of `Group Name` take the nearest live ship of
             // `Target Group`.
-            "OP Board Ship" => out.push(Fx::Board(ids(w, s(a, "Group Name")), ids(w, s(a, "Target Group")))),
+            T::OPBoardShip => out.push(Fx::Board(ids(w, s(a, "Group Name")), ids(w, s(a, "Target Group")))),
             // Each member keeps its place in the group's current layout: the group's centre goes to the point, and with a `Heading` the
             // whole layout turns with the group's first ship (rotated about the centre by the change of its heading).
-            "OP Teleport" => {
+            T::OPTeleport => {
                 let (set, group) = (s(a, "Point Set Name"), s(a, "Group/Unit Name"));
                 // A whole number from 0 up; anything else that is a number moves nothing (what `--check-mission` says of it).
                 let index = given(a, "Point Index").map_or(0.0, |_| f(a, "Point Index"));
@@ -217,7 +217,7 @@ impl Script {
             }
             // The current on a mission path, made when none runs there yet. A setting left out stays as it is (a new current starts at the
             // retail strength 1, 120 wide, on).
-            "OP Etherium Current" => match self.paths[s(a, "Etherium Path")].as_array() {
+            T::OPEtheriumCurrent => match self.paths[s(a, "Etherium Path")].as_array() {
                 Some(p) => out.push(Fx::CurrentSet {
                     name: s(a, "Etherium Path").into(),
                     path: p.iter().map(game_to_bevy).collect(),
@@ -228,12 +228,12 @@ impl Script {
                 None => self.warn(&format!("path '{}' in 'OP Etherium Current' of rule '{rule}'", s(a, "Etherium Path"))),
             },
             // Presentation only: the picture goes to black and back over `Seconds` (half each way); a new fade replaces one that runs.
-            "OP Fade" => self.ext.fade = Some((f(a, "Seconds"), 0.0)).filter(|f| f.0 > 0.0),
-            "OP Place Mines" => {
+            T::OPFade => self.ext.fade = Some((f(a, "Seconds"), 0.0)).filter(|f| f.0 > 0.0),
+            T::OPPlaceMines => {
                 let bullet = Some(s(a, "Bullet")).filter(|b| !b.is_empty()).unwrap_or("Bullet_StarMine_Med");
                 out.push(Fx::Mines { set: s(a, "Point Set Name").into(), bullet: bullet.into(), owner: s(a, "Player/Owner").into() });
             }
-            "OP Follow Group" => match Station::parse(s(a, "Station")) {
+            T::OPFollowGroup => match Station::parse(s(a, "Station")) {
                 Some(station) => {
                     // A ship cannot keep station on its own group: it would pick a ship that follows it in turn.
                     let (all, target) = (members(w, s(a, "Group Name")), s(a, "Target Group"));
@@ -250,16 +250,16 @@ impl Script {
                 None => self.warn(&format!("station '{}' in 'OP Follow Group' of rule '{rule}'", s(a, "Station"))),
             },
             // The crews take to the boats as on a death by damage (lifeboats.rs) and the hulls stay afloat, disabled.
-            "OP Abandon Ship" => out.push(Fx::Abandon(ids(w, s(a, "Group Name")))),
-            "OP Set Counter" => {
+            T::OPAbandonShip => out.push(Fx::Abandon(ids(w, s(a, "Group Name")))),
+            T::OPSetCounter => {
                 self.ext.counters.insert(s(a, "Counter Name").into(), f(a, "Value"));
             }
-            "OP Add To Counter" => *self.ext.counters.entry(s(a, "Counter Name").into()).or_default() += f(a, "Value"),
-            "OP Set Campaign Counter" => {
+            T::OPAddToCounter => *self.ext.counters.entry(s(a, "Counter Name").into()).or_default() += f(a, "Value"),
+            T::OPSetCampaignCounter => {
                 self.ext.campaign.insert(s(a, "Counter Name").into(), f(a, "Value"));
             }
-            "OP Add To Campaign Counter" => *self.ext.campaign.entry(s(a, "Counter Name").into()).or_default() += f(a, "Value"),
-            "OP Set Rule Active" => {
+            T::OPAddToCampaignCounter => *self.ext.campaign.entry(s(a, "Counter Name").into()).or_default() += f(a, "Value"),
+            T::OPSetRuleActive => {
                 let (name, on) = (s(a, "Rule Name").trim(), b(a, "Boolean"));
                 let mut found = false;
                 for (i, n) in self.ext.names.iter().enumerate() {
@@ -276,15 +276,15 @@ impl Script {
                     self.warn(&format!("rule '{name}' in 'OP Set Rule Active' of rule '{rule}'"));
                 }
             }
-            "OP Wait" | "OP Wait Until Speech Done" => {}
-            other => self.warn(&format!("action '{other}' in rule '{rule}'")),
+            T::OPWait | T::OPWaitUntilSpeechDone => {}
+            other => self.warn(&format!("action '{}' in rule '{rule}'", other.name())),
         }
     }
 
     fn wait_of(a: &Value) -> Option<Wait> {
-        match s(a, "Type") {
-            "OP Wait" => Some(Wait::Secs(f(a, "Seconds"))),
-            "OP Wait Until Speech Done" => Some(Wait::Speech(s(a, "Speech Event Name").into())),
+        match RuleType::of(Role::Action, a)? {
+            T::OPWait => Some(Wait::Secs(f(a, "Seconds"))),
+            T::OPWaitUntilSpeechDone => Some(Wait::Speech(s(a, "Speech Event Name").into())),
             _ => None,
         }
     }

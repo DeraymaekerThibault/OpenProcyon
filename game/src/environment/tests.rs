@@ -371,3 +371,61 @@ fn a_current_can_be_made_stronger_wider_and_switched_off() {
     let retail = Current::new(path);
     assert_eq!((retail.name(), retail.is_on()), ("", true));
 }
+
+fn ship_hull(x: f32, z: f32) -> avoid::Body {
+    avoid::Body::hull([Vec3::new(-2.0, -1.0, -6.0), Vec3::new(2.0, 2.0, 6.0)], &Transform::from_xyz(x, 0.0, z))
+}
+
+/// Swims a whale (radius 5) at 12 u/s along +X from the origin at `height` past `bodies`, in 0.1 s steps, and returns every position.
+fn swim(bodies: &[avoid::Body], height: f32) -> Vec<Vec3> {
+    let mut animal = SpaceAnimal { speed: 12.0, ..SpaceAnimal::new("Whales", 5.0, Vec3::ZERO, 0, true) };
+    let mut tf = Transform::from_xyz(0.0, height, 0.0);
+    animal.follow(&[Vec3::new(0.0, height, 0.0), Vec3::new(600.0, height, 0.0)], tf.translation, false, false);
+    (0..400)
+        .map(|_| {
+            animal.advance_around(&mut tf, 0.1, bodies);
+            tf.translation
+        })
+        .collect()
+}
+
+fn hull_distance(b: &avoid::Body, p: Vec3) -> f32 {
+    b.nearest(p.xz()).1
+}
+
+#[test]
+fn a_whale_steers_round_a_hull_on_its_path_and_rejoins_the_path() {
+    // A ship lying across the way, 100 ahead.
+    let hull = ship_hull(100.0, 0.0);
+    let plain = swim(&[], 0.0);
+    assert!(plain.iter().any(|p| hull_distance(&hull, *p) == 0.0), "without avoidance it passes through the hull");
+    let track = swim(&[hull], 0.0);
+    let nearest = track.iter().map(|p| hull_distance(&hull, *p)).fold(f32::MAX, f32::min);
+    assert!(nearest > 2.5, "never inside the body: {nearest}");
+    let widest = track.iter().map(|p| p.z.abs()).fold(0.0, f32::max);
+    assert!(widest < 25.0, "a small sidestep, not a detour: {widest}");
+    let past = track.iter().find(|p| p.x > 150.0).unwrap();
+    assert!(past.z.abs() < 8.0, "back near the path past the hull: {past}");
+    assert!(track.last().unwrap().x > 300.0 && track.last().unwrap().z.abs() < 1.0, "and on along it");
+}
+
+#[test]
+fn a_whale_does_not_swerve_for_a_hull_that_clears_it_or_is_at_another_height() {
+    let plain = swim(&[], 0.0);
+    // The hull's near side is 14 - 2 = 12 off the path, past radius 5 + margin 1.5.
+    assert_eq!(swim(&[ship_hull(100.0, 14.0)], 0.0), plain, "a gap that leaves room is left alone");
+    // Mission 2 flies its whales at 36 above ships at 0.
+    assert!(swim(&[ship_hull(100.0, 0.0)], 36.0).iter().all(|p| p.z == 0.0), "flown over");
+}
+
+#[test]
+fn a_whale_goes_between_two_hulls_with_room_and_a_hull_on_top_of_it_pushes_it_out() {
+    // Gap 20 between the near sides; the whale needs 2 x 6.5 = 13.
+    let (a, b) = (ship_hull(100.0, 12.0), ship_hull(100.0, -12.0));
+    let track = swim(&[a, b], 0.0);
+    assert!(track.iter().all(|p| hull_distance(&a, *p) > 2.5 && hull_distance(&b, *p) > 2.5));
+    assert!(track.last().unwrap().x > 300.0, "through and on");
+    let hull = ship_hull(100.0, 0.0);
+    let out = avoid::push_out(Vec3::new(100.0, 0.0, 0.5), 5.0, &[hull]);
+    assert!(hull_distance(&hull, out) >= 2.5 - 1e-3, "{out}");
+}

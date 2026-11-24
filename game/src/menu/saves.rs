@@ -28,7 +28,8 @@ pub(super) const QUICK: &str = "QuickSave";
 pub(super) fn save_actions(
     q: Query<(&Interaction, &Action), Changed<Interaction>>,
     mut commands: Commands,
-    (mut ui, mut ig, mut points, mut sk): (ResMut<SaveUi>, ResMut<InGame>, ResMut<CampaignPoints>, ResMut<Skirmish>),
+    (mut ui, ig, mut points, mut sk): (ResMut<SaveUi>, InGame, ResMut<CampaignPoints>, ResMut<Skirmish>),
+    (mut paused, mut overlay): (ResMut<PausedByMenu>, ResMut<NextState<Overlay>>),
     mut cfg: ResMut<crate::Config>,
     mission: Option<Res<crate::campaign::Mission>>,
     old: Query<Entity, Or<(With<crate::Scenario>, With<crate::Transient>)>>,
@@ -54,7 +55,7 @@ pub(super) fn save_actions(
         _ => None,
     });
     // Retail default bindings (UserProfiles/default.pft, DirectInput scancodes 0x3d / 0x3e): F3 Quick Save, F4 Quick Load.
-    if *state.get() == Screen::Battle && ig.page.is_none() {
+    if *state.get() == Screen::Battle && ig.page().is_none() {
         acts.extend([(KeyCode::F3, Action::QuickSave), (KeyCode::F4, Action::QuickLoad)].into_iter().filter(|(k, _)| keys.just_pressed(*k)).map(|k| k.1));
     }
     acts.reverse();
@@ -80,17 +81,17 @@ pub(super) fn save_actions(
                 ui.open();
                 next.set(Screen::Load);
             }
-            Action::Ingame(None) => close_overlay(&mut commands, &roots, &mut ig, &mut vtime),
+            Action::Ingame(None) => close_overlay(&mut commands, &roots, &mut paused, &mut overlay, &mut vtime),
             Action::Ingame(Some(p)) => {
                 if p != Page::Menu {
                     ui.open();
                 }
-                ig.page = Some(p);
+                overlay.set(Overlay::Open(p));
             }
             Action::PickSave(n) => {
                 ui.selected = Some(n);
                 ui.status = None;
-                if let (Some(Page::Save), Some((s, false))) = (ig.page, ui.list.get(n)) {
+                if let (Some(Page::Save), Some((s, false))) = (ig.page(), ui.list.get(n)) {
                     ui.name = s.name.clone();
                 }
             }
@@ -102,7 +103,7 @@ pub(super) fn save_actions(
                     for e in &old {
                         commands.entity(e).despawn();
                     }
-                    close_overlay(&mut commands, &roots, &mut ig, &mut vtime);
+                    close_overlay(&mut commands, &roots, &mut paused, &mut overlay, &mut vtime);
                 }
                 next.set(Screen::Battle); // from the battle too: re-entering the state spawns the mission again
             }
@@ -137,7 +138,7 @@ pub(super) fn save_actions(
                     commands.entity(e).despawn();
                 }
                 // The mission is removed on leaving the battle (`reset_fleets`), not here: mission systems still running this frame would panic on it.
-                close_overlay(&mut commands, &roots, &mut ig, &mut vtime);
+                close_overlay(&mut commands, &roots, &mut paused, &mut overlay, &mut vtime);
                 next.set(Screen::Main);
             }
             _ => {}
@@ -146,9 +147,9 @@ pub(super) fn save_actions(
 }
 
 /// Typing into the Save page's file name entry.
-pub(super) fn save_text(mut keys: MessageReader<bevy::input::keyboard::KeyboardInput>, ig: Res<InGame>, mut ui: ResMut<SaveUi>) {
+pub(super) fn save_text(mut keys: MessageReader<bevy::input::keyboard::KeyboardInput>, ig: InGame, mut ui: ResMut<SaveUi>) {
     use bevy::input::keyboard::Key;
-    for k in keys.read().filter(|k| k.state.is_pressed() && ig.page == Some(Page::Save)) {
+    for k in keys.read().filter(|k| k.state.is_pressed() && ig.page() == Some(Page::Save)) {
         match &k.logical_key {
             Key::Character(c) if ui.name.chars().count() < 32 => ui.name.extend(c.chars().filter(|c| !c.is_control())),
             Key::Space if ui.name.chars().count() < 32 => ui.name.push(' '),

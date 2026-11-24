@@ -35,6 +35,14 @@ GRIND = 10.0
 # Frames over 50 ms a battle may have (after the first second) before it counts as stuttering; healthy runs have 0-1.
 STUTTER = 10
 
+# Whole-run sanity limits, checked in every scenario. PROVISIONAL: generous until real runs show the healthy ranges.
+# Furthest any ship may get from the origin along one axis (game units) and the most entities a battle may hold at once.
+BOUNDS = 50000
+ENTITY_CAP = 50000
+
+MIXED = ["--ship", "Ship_Navy_Frigate", "--allies", "Ship_Navy_Cutter,Ship_Navy_Frigate",
+         "--enemies", "Ship_Pirate_Barque,Ship_Pirate_Sloop,Ship_Pirate_Barque"]  # fmt: skip
+
 # Share of a victory-point budget a computer fleet should spend. PROVISIONAL: the retail figure is being measured.
 SPEND = 0.6
 # Seconds in which every side should have fired. PROVISIONAL: not measured on the retail maps; tighten after the first real runs.
@@ -48,9 +56,9 @@ class Scenario(NamedTuple):
     expect: set
 
 
-def shortcut(name, map_id, seconds, expect):
+def shortcut(name, map_id, seconds, expect, fleets=FLEETS):
     """A map with the fixed --ship/--allies/--enemies fleets (the human's own fleet; no lobby)."""
-    return Scenario(name, ["--map", map_id, *FLEETS], seconds, expect)
+    return Scenario(name, ["--map", map_id, *fleets], seconds, expect)
 
 
 def lobby(name, spec, seconds, expect):
@@ -62,7 +70,8 @@ def lobby(name, spec, seconds, expect):
 # (the human fleet receives no orders, so its firing is not guaranteed). "patrol": every computer-commanded ship
 # (allied computer fleets included, the human's own fleet excluded) that is still afloat sails at least 300 units. "fire": every side fires within FIRE_BY
 # s, and on a side with computer ships one of them fires. "budget": every computer fleet spends most of its victory points.
-# Every scenario also checks for panics, grinding and stutter ("no-stutter" skips the last, only with an open issue).
+# "resolve": the battle ends (one side left) or a ship sinks within the time. PROVISIONAL.
+# Every scenario also checks for panics, grinding, non-finite or far-off positions, runaway entity counts and stutter ("no-stutter" skips the last, only with an open issue).
 SCENARIOS = [
     shortcut("ambush", "ambush", 120, {"engage"}),  # starts 514 apart among 22 islands
     shortcut("bayles_stand", "bayles_stand", 120, {"engage"}),  # starts 464 apart
@@ -77,14 +86,51 @@ SCENARIOS = [
         "border_dispute_full",
         "map=border_dispute;points=1000;limit=10;slots=human,7*computer",
         300,
-        {"patrol", "fire", "budget"},
+        {"patrol", "fire", "budget", "resolve"},
     ),
+    # More maps and mixed fleets (only the whole-run invariants and the computer's engagement are judged). PROVISIONAL: red_rover and the
+    # mixed fleets have not been watched for long; loosen "engage" if the first real runs say so.
+    shortcut("red_rover", "red_rover", 120, {"engage"}),
+    shortcut("mixed_fleets", "red_rover", 120, set(), fleets=MIXED),
 ]
 
 
 def computer(ship):
     """A computer captain commands the ship. Older reports only had the side: everything off the player's side."""
     return ship.get("computer", ship["side"] != "player")
+
+
+def sanity(s):
+    """The failed whole-run invariants of a report's `sanity` block (absent in older reports: nothing to judge)."""
+    fails = []
+    if s.get("non_finite", 0):
+        fails.append(
+            f"{s['non_finite']} ship positions were not finite (NaN or infinity)"
+        )
+    if s.get("farthest", 0) > BOUNDS:
+        fails.append(
+            f"a ship got {s['farthest']:.0f} units from the origin (limit {BOUNDS})"
+        )
+    if s.get("entities", 0) > ENTITY_CAP:
+        fails.append(f"{s['entities']} entities alive at once (limit {ENTITY_CAP})")
+    return fails
+
+
+def comparable(report):
+    """A report without what differs between runs of one seed: the real frame times."""
+    return {k: v for k, v in report.items() if k != "frame_ms"}
+
+
+def same_run(log_a, log_b):
+    """(same, why) for two logs of one fixed-step, seeded scenario: the battle reports must match exactly."""
+    reports = [REPORT.search(log) for log in (log_a, log_b)]
+    if not all(reports):
+        return False, "a repeat produced no battle report"
+    a, b = (comparable(json.loads(m[1])) for m in reports)
+    if a == b:
+        return True, "same report twice"
+    keys = sorted(k for k in a.keys() | b.keys() if a.get(k) != b.get(k))
+    return False, f"the same seed gave different reports ({', '.join(keys)})"
 
 
 def evaluate(report, expect):
@@ -126,6 +172,13 @@ def evaluate(report, expect):
                 fails.append(
                     f"{f['side']} computer fleet (player {f['player']}) spent {f['spent']} of {f['budget']} points"
                 )
+    if (
+        "resolve" in expect
+        and not report.get("ended", True)
+        and not any(s.get("sunk") for s in report["ships"])
+    ):
+        fails.append(f"nothing sank and no side was beaten in {report['time']:.0f} s")
+    fails += sanity(report.get("sanity", {}))
     frames = report.get("frame_ms", {})
     if "no-stutter" not in expect and frames.get("over_50", 0) > STUTTER:
         fails.append(
@@ -158,6 +211,11 @@ def outcome(log, expect):
     return not fails, "; ".join(fails) or f"ok at {report['time']:.0f} s ({sides})"
 
 
+def deterministic(on):
+    """(extra game arguments, extra environment) of a reproducible run: fixed step and the seed 1."""
+    return (["--fixed-step", "--seed", "1"], {}) if on else ([], {})
+
+
 def main():
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -174,6 +232,11 @@ def main():
         type=int,
         default=0,
         help="scenarios to play at once, each with its own display (default: half the cores; 1 to judge stutter)",
+    )
+    ap.add_argument(
+        "--twice",
+        action="store_true",
+        help="play each scenario twice, fixed-step with seed 1, and fail when the two reports differ",
     )
     args = ap.parse_args()
     chosen = [s for s in SCENARIOS if not args.names or s.name in args.names]
@@ -195,9 +258,33 @@ def main():
     def run(scenario):
         """Plays one scenario in its own display and scratch XDG_DATA_HOME; returns (passed, line)."""
         name, game_args, seconds, expect = scenario
-        if jobs > 1:
+        if jobs > 1 or args.twice:
             expect = expect | {"no-stutter"}
         start = time.monotonic()
+        log = out / f"{name}.log"
+        text = play(name, game_args, seconds, log, *deterministic(args.twice))
+        passed, summary = outcome(text, expect)
+        if passed and args.twice:
+            passed, summary = same_run(
+                text,
+                play(
+                    name,
+                    game_args,
+                    seconds,
+                    out / f"{name}.repeat.log",
+                    *deterministic(True),
+                ),
+            )
+        line = f"{'ok  ' if passed else 'FAIL'} {name:<16} {time.monotonic() - start:3.0f}s {summary}"
+        if not passed:
+            line += f"\n    rerun: python3 -m tools.battle_check {name} --jobs 1   (log: {log})"
+            line += "".join(
+                "\n    " + ln for ln in text.splitlines()[-10:] if ln.strip()
+            )
+        return passed, line
+
+    def play(name, game_args, seconds, log, extra, env_extra):
+        """Plays one scenario in its own display and scratch XDG_DATA_HOME; returns the log text."""
         with tempfile.TemporaryDirectory() as xdg:
             # A scratch XDG_DATA_HOME (default bindings, no saves, silent) and X11, as tools/autoplay.py.
             silent_data_home(xdg)
@@ -208,12 +295,12 @@ def main():
                 "WAYLAND_DISPLAY": "",
                 "PROCYON_OVERLAY": str(Path(xdg) / "overlay"),
                 "PROCYON_REPORT": str(seconds),
+                **env_extra,
             }
             if wrap:
                 env["WGPU_BACKEND"] = "vulkan"
-            log = out / f"{name}.log"
-            cmd = [*wrap, str(game), *game_args, "--speed", str(args.speed)]
-            # Wall-clock cap for a hung run (below ~10 fps the game runs slower than asked); a timeout reports no battle.
+            cmd = [*wrap, str(game), *game_args, "--speed", str(args.speed), *extra]
+            # Wall-clock cap for a hung run (below ~10 fps the game runs slower than asked; a fixed-step run needs one frame per tick); a timeout reports no battle.
             with (
                 log.open("w", encoding="utf-8") as f,
                 contextlib.suppress(subprocess.TimeoutExpired),
@@ -224,17 +311,9 @@ def main():
                     env=env,
                     stdout=f,
                     stderr=subprocess.STDOUT,
-                    timeout=seconds + 120,
+                    timeout=seconds * (4 if extra else 1) + 120,
                 )
-        text = gamelog.read(log, r"panicked at|battle report")
-        passed, summary = outcome(text, expect)
-        line = f"{'ok  ' if passed else 'FAIL'} {name:<16} {time.monotonic() - start:3.0f}s {summary}"
-        if not passed:
-            line += f"\n    rerun: python3 -m tools.battle_check {name} --jobs 1   (log: {log})"
-            line += "".join(
-                "\n    " + ln for ln in text.splitlines()[-10:] if ln.strip()
-            )
-        return passed, line
+        return gamelog.read(log, r"panicked at|battle report")
 
     start = time.monotonic()
     with ThreadPoolExecutor(jobs) as pool:

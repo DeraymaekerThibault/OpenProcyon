@@ -37,7 +37,7 @@ fn wheel_dy(wheel: &mut MessageReader<bevy::input::mouse::MouseWheel>) -> f32 {
 }
 
 /// Mouse wheel scrolls the Control Options list.
-pub fn scroll_controls(mut wheel: MessageReader<bevy::input::mouse::MouseWheel>, state: Res<State<Screen>>, ig: Res<InGame>, mut cui: ResMut<CtrlUi>, binds: Res<Bindings>) {
+pub fn scroll_controls(mut wheel: MessageReader<bevy::input::mouse::MouseWheel>, state: Res<State<Screen>>, ig: InGame, mut cui: ResMut<CtrlUi>, binds: Res<Bindings>) {
     let dy = wheel_dy(&mut wheel);
     if dy != 0.0 && (*state.get() == Screen::Controls || ig.page() == Some(Page::Controls)) {
         let max = max_first(binds.rows.len(), control_rows(ig.page().is_some()));
@@ -64,7 +64,7 @@ pub fn scroll_missions(mut wheel: MessageReader<bevy::input::mouse::MouseWheel>,
 }
 
 /// Mouse wheel scrolls the save lists.
-pub fn scroll_saves(mut wheel: MessageReader<bevy::input::mouse::MouseWheel>, state: Res<State<Screen>>, ig: Res<InGame>, mut ui: ResMut<SaveUi>) {
+pub fn scroll_saves(mut wheel: MessageReader<bevy::input::mouse::MouseWheel>, state: Res<State<Screen>>, ig: InGame, mut ui: ResMut<SaveUi>) {
     let dy = wheel_dy(&mut wheel);
     if dy != 0.0 && (*state.get() == Screen::Load || matches!(ig.page(), Some(Page::Load | Page::Save))) {
         let max = max_first(ui.list.len(), SAVE_ROWS);
@@ -119,7 +119,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, bevy::state::app::StatesPlugin))
             .init_state::<Screen>()
-            .init_resource::<InGame>()
+            .add_sub_state::<crate::menu::Overlay>()
             .insert_resource(SaveUi { list: (0..saves).map(|_| (Default::default(), false)).collect(), ..default() })
             .add_message::<bevy::input::mouse::MouseWheel>()
             .add_systems(Update, scroll_saves);

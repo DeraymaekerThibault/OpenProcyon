@@ -92,7 +92,7 @@ fn a_target_behind_an_island_is_shot_from_a_spot_that_sees_it() {
         [Vec3::new(50.0, 0.0, -200.0), Vec3::new(60.0, 0.0, -200.0), Vec3::new(60.0, 0.0, 200.0)],
         [Vec3::new(50.0, 0.0, -200.0), Vec3::new(60.0, 0.0, 200.0), Vec3::new(50.0, 0.0, 200.0)],
     ]);
-    let sight = Sight { guns: vec![], land: vec![&wall] };
+    let sight = Sight { fixed_reach: None, guns: vec![], land: vec![&wall] };
     let target = Vec3::new(100.0, GUN_HEIGHT, 0.0);
     assert!(!sight.clear(Vec3::new(0.0, GUN_HEIGHT, 0.0), target), "the wall hides it from the west");
     assert!(sight.clear(Vec3::new(150.0, GUN_HEIGHT, 0.0), target));
@@ -122,8 +122,8 @@ fn a_tower_is_faced_with_the_gun_nearest_the_bow() {
 
 #[test]
 fn a_tow_task_names_its_ship_by_name_suffix_or_in_its_text() {
-    let task = |name: &str, text: &str| super::super::eval::Task { name: name.into(), text: text.into(), active: true, complete: false, failed: false };
-    let unit = |n: u32, name: &str| super::super::eval::Unit {
+    let task = |name: &str, text: &str| (name.to_string(), text.to_string());
+    let unit = |n: u32, name: &str| Unit {
         e: Entity::from_raw_u32(n).unwrap(),
         id: n as i64,
         name: name.into(),
@@ -145,16 +145,22 @@ fn a_tow_task_names_its_ship_by_name_suffix_or_in_its_text() {
     let me = w[0].e;
     // Mission 4: the task name says "tender", the text names the ship.
     let m4 = task("Tow tender to safety", "Tow the RLS Bachanalia to the Rally Point.");
-    assert_eq!(task_towee(&m4, &w, me).map(|u| u.e), Some(w[2].e));
-    assert_eq!(task_towee(&task("TowHarvester", ""), &w, me).map(|u| u.e), Some(w[3].e), "a name suffix still wins");
-    assert!(task_towee(&task("Tow the wreck", "Tow the wreck home."), &w, me).is_none(), "an unnamed ship never matches the text");
-    assert!(task_towee(&task("Protect the RLS Bachanalia", "Protect the RLS Bachanalia."), &w, me).is_none(), "only Tow tasks");
+    assert_eq!(task_towee(&m4.0, &m4.1, &w, me).map(|u| u.e), Some(w[2].e));
+    assert_eq!(task_towee(&task("TowHarvester", "").0, &task("TowHarvester", "").1, &w, me).map(|u| u.e), Some(w[3].e), "a name suffix still wins");
+    assert!(
+        task_towee(&task("Tow the wreck", "Tow the wreck home.").0, &task("Tow the wreck", "Tow the wreck home.").1, &w, me).is_none(),
+        "an unnamed ship never matches the text"
+    );
+    assert!(
+        task_towee(&task("Protect the RLS Bachanalia", "Protect the RLS Bachanalia.").0, &task("Protect the RLS Bachanalia", "Protect the RLS Bachanalia.").1, &w, me).is_none(),
+        "only Tow tasks"
+    );
     let w = [unit(1, "RLS Sea Sparrow"), unit(5, "RLS Yorkshire")];
     let sloop = task("MO4 free stuck sloop", "Tow the RLS Yorkshire Clear of the Island it has Run Aground On.");
-    assert_eq!(task_towee(&sloop, &w, me).map(|u| u.e), Some(w[1].e), "a task whose text says Tow");
+    assert_eq!(task_towee(&sloop.0, &sloop.1, &w, me).map(|u| u.e), Some(w[1].e), "a task whose text says Tow");
     let w = [unit(1, "RLS Sea Sparrow"), unit(6, "RLS Indomitable")];
     let mow = task("rescue bh man o war", "Tow the RLS Indominable Clear of the Vanov Black Hole.");
-    assert_eq!(task_towee(&mow, &w, me).map(|u| u.e), Some(w[1].e), "the misspelt name still matches");
+    assert_eq!(task_towee(&mow.0, &mow.1, &w, me).map(|u| u.e), Some(w[1].e), "the misspelt name still matches");
 }
 
 #[test]
@@ -166,4 +172,30 @@ fn autopilot_flees_on_cover_and_escape_objectives_but_fights_the_rest() {
     assert!(defend_task("Defend Her Majesty Aboard Parliament."));
     assert!(defend_task("Keep the Pirates From Firing on Dorlinor."));
     assert!(!defend_task("Search Nearby Islands for Ships."));
+}
+
+#[test]
+fn only_a_ship_with_nothing_but_forward_fixed_guns_fights_from_a_stand_off() {
+    // (angle off the bow, arc, effective range): a Hunter's one beam, 16 degrees wide.
+    let beam = (0.0, 0.28, 200.0);
+    assert_eq!(forward_fixed_reach([beam].into_iter()), Some(200.0));
+    assert_eq!(forward_fixed_reach([beam, (0.1, 0.2, 150.0)].into_iter()), Some(150.0), "the shortest reach");
+    assert_eq!(forward_fixed_reach([beam, (1.57, 2.0, 90.0)].into_iter()), None, "a broadside gun besides: charges as before");
+    assert_eq!(forward_fixed_reach([(0.0, 3.0, 100.0)].into_iter()), None, "a wide arc is not fixed");
+    assert_eq!(forward_fixed_reach(std::iter::empty()), None);
+}
+
+#[test]
+fn a_forward_gun_closes_to_its_hold_distance_faces_the_foe_and_backs_out_when_too_close() {
+    let foe = Vec3::new(0.0, 0.0, -500.0);
+    let reach = 200.0; // hold at 140
+    assert_eq!(forward_stand(Vec3::ZERO, foe, reach), (foe, None), "far: sails at it");
+    let at = Vec3::new(0.0, 0.0, -400.0); // 100 from the foe: inside the hold, outside the close limit (56)
+    let (go, face) = forward_stand(at, foe, reach);
+    assert_eq!(go, at, "holds where it is");
+    assert!(face.unwrap().abs() < 1e-4, "bow on the foe (heading 0 faces -Z)");
+    let east = forward_stand(Vec3::new(100.0, 0.0, -500.0), foe, reach).1.unwrap();
+    assert!((east - std::f32::consts::FRAC_PI_2).abs() < 1e-4, "keeps turning to track it: foe due west is heading +90 degrees, {east}");
+    let (out, face) = forward_stand(Vec3::new(0.0, 0.0, -460.0), foe, reach);
+    assert!(face.is_none() && out.z > -460.0 && (out.distance(foe) - 140.0 - 40.0).abs() < 1.0, "too close: sails out to the hold distance, {out}");
 }

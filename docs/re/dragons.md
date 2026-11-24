@@ -45,6 +45,7 @@ Stances used: `Stance Persistant`, `Stance_Dummy`, `Stance_Aggressive`, `Stance_
   speed x the shared speed factor), clamped to 0..1. So the Velocity is a requested speed in units per second, and the animal cannot exceed its top speed.
   Remake: `Fx::Velocity` sets the speed literally (the whale's top speed is not exported, so a Velocity above it would not be limited: Different when it exceeds it).
   Mission 1 uses 12.
+- A flock animal in the remake steers round ship hulls and rocks near its path (engine-added, docs/re/collision.md "Whales steer round hulls and rocks"); the original only pushes it apart on contact.
 - Whales, dragons and torpedoes are not held to the battle plane (see movement.md, plane modes); whales swim with a ship's physics step plus a pitch
   undulation (a sine of amplitude and period from the hull data, alternating sign, random start) that only tilts the model.
 

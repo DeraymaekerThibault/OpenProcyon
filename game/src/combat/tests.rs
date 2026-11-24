@@ -1789,19 +1789,56 @@ fn state_enums_keep_the_frame_and_art_indices() {
     assert_eq!(lob_kind(GunFamily::of("Bullet_StarMortar")), Some(LobKind::StarMortar));
 }
 
-/// Not retail: a beam that is charging or firing when its ship is abandoned (`OP Abandon Ship`) stops, as on a sunk ship; `fire` no
-/// longer runs the cycle of an abandoned ship, so nothing else would end it. Asset-free.
-#[test]
-fn the_beams_of_an_abandoned_ship_stop() {
-    let gun = crate::data::gun_def(&serde_json::json!({
+/// A synthetic gun with the fields `gun_def` needs; a beam gun when `beam`.
+fn beam_gun(beam: bool) -> crate::data::GunDef {
+    let mut data = serde_json::json!({
         "BulletsPerBurst": 1, "BulletAffectedByGravity": false, "BulletTypeName_Primary": "Bullet_X",
         "EffectiveRange_Range": 100.0, "LongRange_Range": 200.0, "MaximumRange_Range": 300.0,
         "EffectiveRange_AccuracyDeviation": 0.2, "LongRange_AccuracyDeviation": 0.4, "MaximumRange_AccuracyDeviation": 0.8,
         "MuzzleSpeed": 100.0, "TimeBetweenBursts": 5.0, "DuringBurstReloadTime": 0.1, "HorizontalRotationSpeed": 1.0,
         "VerticalRotationSpeed": 1.0, "VerticalMinAngle": 0.0, "VerticalMaxAngle": 1.0,
         "visual": { "muzzles": [], "pivot": [0.0, 0.0, 0.0] },
-        "beam": {"charge": 2.0, "duration": 30.0, "tick": 0.25, "ramp": 0.6, "max_power": 2.0},
-    }));
+    });
+    if beam {
+        data["beam"] = serde_json::json!({"charge": 2.0, "duration": 30.0, "tick": 0.25, "ramp": 0.6, "max_power": 2.0});
+    }
+    crate::data::gun_def(&data)
+}
+
+/// Not retail: a beam obeys the cloak hold and the line-of-fire hold of the shell guns (`beam_held`, `beam_step`). Asset-free.
+#[test]
+fn a_beam_holds_while_its_ship_is_cloaked_or_a_friend_is_on_the_line_and_fires_on_a_clear_line() {
+    let gun = beam_gun(true);
+    let def = gun.beam.clone().unwrap();
+    assert!(!gun.cloak_fire, "a beam gun cannot fire cloaked, as the other guns that are not exempt");
+    let line = (Vec3::ZERO, Vec3::new(0.0, 0.0, -200.0));
+    let friend = |x: f32| [(Vec3::new(x, 0.0, -100.0), 10.0)];
+    let step = |phase: &mut beam::Phase, cloaked: bool, friends: &[(Vec3, f32)]| {
+        let blocked = crate::line_of_fire::friend_in_line(line.0, line.1, friends.iter().copied());
+        gunnery::beam_step(phase, &def, 0.1, true, gunnery::beam_held(cloaked, blocked, &gun), 300.0)
+    };
+    let mut clear = beam::Phase::Idle;
+    assert!(matches!(step(&mut clear, false, &friend(80.0)), beam::Step::Charge), "a friend well off the line: the beam charges");
+    let mut phase = beam::Phase::Idle;
+    assert!(matches!(step(&mut phase, true, &[]), beam::Step::None) && phase == beam::Phase::Idle, "cloaked: it does not start");
+    assert!(matches!(step(&mut phase, false, &friend(0.0)), beam::Step::None) && phase == beam::Phase::Idle, "a friend on the line: it does not start");
+    // Held while charging (or firing): the beam is dropped, not carried on through the friend or the cloak.
+    for held in [(true, 80.0), (false, 0.0)] {
+        let mut charging = beam::Phase::Charging { t: 0.5 };
+        step(&mut charging, held.0, &friend(held.1));
+        assert_eq!(charging, beam::Phase::Idle, "{held:?}");
+    }
+    // A gun that may fire cloaked is not held by the cloak (the line still holds it).
+    let mut cloak_gun = beam_gun(true);
+    cloak_gun.cloak_fire = true;
+    assert!(!gunnery::beam_held(true, false, &cloak_gun) && gunnery::beam_held(true, true, &cloak_gun));
+}
+
+/// Not retail: a beam that is charging or firing when its ship is abandoned (`OP Abandon Ship`) stops, as on a sunk ship; `fire` no
+/// longer runs the cycle of an abandoned ship, so nothing else would end it. Asset-free.
+#[test]
+fn the_beams_of_an_abandoned_ship_stop() {
+    let gun = beam_gun(true);
     assert!(gun.beam.is_some());
     let mut class = crate::fixed_tests::synthetic_class();
     class.mounts = (0..2).map(|_| crate::data::Mount { pos: Vec3::ZERO, rot: Quat::IDENTITY, arc: std::f32::consts::TAU, gun: "Gun_Beam".into(), bank: 0, parent: None }).collect();

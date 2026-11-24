@@ -969,8 +969,7 @@ struct ChatList;
 #[derive(Component)]
 struct ChatThumb;
 
-/// Panel size in reference px (measured on the original at 1440x1080: ~440 x 170 px).
-const CHAT_SIZE: Vec2 = Vec2::new(391.0, 151.0);
+const CHAT_SIZE: Vec2 = Vec2::new(crate::panels::CHAT_SIZE[0], crate::panels::CHAT_SIZE[1]);
 
 /// Builds the panel while the log is open and rebuilds it whenever a line is added, so it shows the newest line (scrolled to the bottom).
 /// PROVISIONAL: the open and close animation is not drawn; the list wraps with the engine's text layout, not the original's.
@@ -1043,13 +1042,11 @@ fn chat_scroll(
     let s = window.height() / REF_H;
     for (mut pos, node) in &mut list {
         for ev in wheel.read().filter(|_| over) {
-            pos.y -= ev.y * 24.0 * s;
+            pos.y = crate::panels::chat_scroll_after_wheel(pos.y, ev.y, s);
         }
         let (view, content) = (node.size.y * node.inverse_scale_factor, node.content_size.y * node.inverse_scale_factor);
-        let reach = (content - view).max(0.0);
-        let track = CHAT_SIZE.y - 28.0 - 20.0;
         for mut t in &mut thumb {
-            t.top = px(14.0 + track * if reach > 0.0 { (pos.y / reach).clamp(0.0, 1.0) } else { 1.0 }, s);
+            t.top = px(crate::panels::chat_thumb_top(pos.y, view, content), s);
         }
     }
 }

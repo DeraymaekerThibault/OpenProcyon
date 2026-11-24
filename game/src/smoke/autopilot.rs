@@ -1,20 +1,61 @@
 //! Dev autopilot for `--script mission` (tools/autoplay.py): steers the human's ship through a campaign mission from what its rules
 //! wait for. A test driver for unattended runs, not game behaviour; all its tuning is PROVISIONAL.
-use super::*;
 use crate::EngineOrder;
+use crate::campaign::{Mission, MissionBase, MissionShip};
+use crate::combat::{ArmedBase, Asteroid, Health, Library, Target};
+use crate::docking::DockMsg;
+use crate::rules::{RuleShip, RuleWorld, Script, Unit, Want, live_tasks, player_hits};
+use crate::{Config, Nearest, PlayerShip, Ship, game_to_bevy};
+use bevy::prelude::*;
+use serde_json::Value;
 
-/// `--script mission`, outside mission 1's scripted opening: the bot's orders for one frame (fleet, docking, towing, steering).
+/// What the autopilot reads and writes beyond its system's other arguments.
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct Extra<'w, 's> {
+    bases:
+        Query<'w, 's, (Entity, &'static MissionBase, &'static Transform, Option<(&'static ArmedBase, &'static Health)>), (Without<Ship>, Without<crate::environment::SpaceAnimal>)>,
+    dock: MessageWriter<'w, DockMsg>,
+    board: MessageWriter<'w, crate::boarding::BoardMsg>,
+    /// Non-empty while the player's ship is running a dock sequence.
+    docking_player: Query<'w, 's, (), (With<PlayerShip>, With<crate::docking::Docker>)>,
+    /// Non-empty while the player's ship is sailing to pick up a tow.
+    towing_player: Query<'w, 's, (), (With<PlayerShip>, With<crate::docking::Tower>)>,
+    /// Spawned lifeboats (pre-placed ones carry a `MissionShip` and are rule units).
+    lifeboats: Query<'w, 's, (&'static Transform, &'static crate::lifeboats::Lifeboat), (With<Ship>, Without<MissionShip>)>,
+    /// The player's guns (the dev autopilot fires mission 9's Star Mortar).
+    player_guns: Query<'w, 's, &'static crate::combat::GunStates, With<PlayerShip>>,
+    /// Island and base collision: the dev autopilot's line-of-sight test for a firing position.
+    land: Query<'w, 's, (&'static crate::collision::Obstacle, Option<&'static Visibility>), (Without<Ship>, Without<Asteroid>, Without<crate::environment::SpaceAnimal>)>,
+    /// Whether the dev autopilot last ordered its fleet to run (formation held, cease fire).
+    fleet_fleeing: Local<'s, bool>,
+    /// The dev autopilot's memory between frames.
+    pilot: Local<'s, State>,
+}
+
+type Rocks<'w, 's> = Query<'w, 's, (Entity, &'static Transform, &'static Asteroid), (Without<Ship>, Without<crate::environment::SpaceAnimal>)>;
+
+/// `--script mission`, outside mission 1's scripted opening: the bot's orders for one frame (fleet, docking, towing, steering), right
+/// after the rule dispatcher `update`, on the world snapshot it took.
 #[allow(clippy::too_many_arguments)]
-pub(super) fn drive(
-    commands: &mut Commands,
-    mission: &mut Mission,
-    world: &[Unit],
-    extra: &mut Extra,
-    ships: &mut Query<RuleShip>,
-    target: &mut Target,
-    rocks: &Query<(Entity, &Transform, &Asteroid), (Without<Ship>, Without<crate::environment::SpaceAnimal>)>,
-    lib: &Library,
+pub fn drive(
+    cfg: Res<Config>,
+    lib: Res<Library>,
+    mission: Option<ResMut<Mission>>,
+    snapshot: Res<RuleWorld>,
+    mut commands: Commands,
+    mut ships: Query<RuleShip>,
+    mut target: ResMut<Target>,
+    rocks: Rocks,
+    mut extra: Extra,
 ) {
+    let Some(mut mission) = mission else { return };
+    let mission = &mut *mission;
+    // Not during mission 1's scripted opening (briefing.rs): the player sails the rules' arrival path into the fleet meanwhile.
+    if cfg.script != Some(super::Script::Mission) || mission.opening.is_some() {
+        return;
+    }
+    let world = snapshot.0.as_slice();
+    let (commands, ships, target, rocks, lib, extra) = (&mut commands, &mut ships, &mut *target, &rocks, &*lib, &mut extra);
     mission.script.crew_screen = false; // keep the default crew and arms (missions 3+ open the screen after their first NIS)
     // PROCYON_AUTOINVULN also keeps the player's fleet from being boarded: a pirate captured mission 4's flagship while the
     // invulnerable bot fought it, leaving the run on a stranded stand-in ship.
@@ -74,7 +115,13 @@ pub(super) fn drive(
                 Some(lib.classes[s.ship.class].mounts.iter().enumerate().filter(|(i, _)| base_gun(*i)).map(|(_, m)| mount_angle(m.rot)).collect())
             })
             .unwrap_or_default();
-        let sight = Sight { guns, land: extra.land.iter().filter(|(_, v)| *v != Some(&Visibility::Hidden)).map(|(o, _)| o).collect() };
+        // The effective range of the player's guns when every one of them is fixed forward (a Hunter's beam): it fights from a stand-off.
+        let fixed_reach = ships.iter().find(|s| s.primary).and_then(|s| {
+            let guns = extra.player_guns.get(s.entity).ok()?;
+            let live = lib.classes[s.ship.class].mounts.iter().enumerate().filter_map(|(i, m)| Some((m, lib.guns.get(guns.gun(i))?)));
+            forward_fixed_reach(live.filter(|(_, d)| !d.point_defense).map(|(m, d)| (mount_angle(m.rot), m.arc, d.range[0])))
+        });
+        let sight = Sight { fixed_reach, guns, land: extra.land.iter().filter(|(_, v)| *v != Some(&Visibility::Hidden)).map(|(o, _)| o).collect() };
         // Armed bases that still have a live mission section, with the world and base-local point the player's guns aim at: one they
         // can see past the islands from here (`combat::live_tower_point`).
         let gun = from + Vec3::Y * GUN_HEIGHT;
@@ -115,6 +162,8 @@ struct Mortar {
 /// What the dev autopilot knows to aim from a good spot: the player's base-capable guns (angles off the bow) and the islands' and bases'
 /// collision, which stops every shell (`combat::shells`).
 struct Sight<'a> {
+    /// Some(effective range) when the primary's only weapons are forward-fixed guns (`forward_fixed_reach`).
+    fixed_reach: Option<f32>,
     guns: Vec<f32>,
     land: Vec<&'a crate::collision::Obstacle>,
 }
@@ -152,6 +201,40 @@ impl Sight<'_> {
     }
 }
 
+/// Widest arc (radians) and largest angle off the bow for a gun to count as fixed forward (PROVISIONAL).
+const FIXED_ARC: f32 = 0.6;
+const FIXED_OFF_BOW: f32 = 0.3;
+/// A forward-fixed fighter holds at this share of its guns' effective range, and backs off inside `STAND_CLOSE` of it (PROVISIONAL).
+const STAND_HOLD: f32 = 0.7;
+const STAND_CLOSE: f32 = 0.4;
+
+/// The smallest effective range of the guns `(angle off the bow, arc, effective range)` when there is at least one and every one is fixed
+/// forward (a narrow arc about the bow); None otherwise.
+fn forward_fixed_reach(guns: impl Iterator<Item = (f32, f32, f32)>) -> Option<f32> {
+    let mut reach: Option<f32> = None;
+    for (angle, arc, range) in guns {
+        if arc > FIXED_ARC || angle.abs() > FIXED_OFF_BOW {
+            return None;
+        }
+        reach = Some(reach.map_or(range, |r| r.min(range)));
+    }
+    reach.filter(|r| *r > 0.0)
+}
+
+/// Fighting a ship with only a forward gun: `(point to steer for, heading to hold)`. Out of the stand-off it sails at the foe; in the band
+/// it stops steering for a point and holds the bow on it (the gun bears, and it keeps turning to track); too close, it sails out to the
+/// stand-off distance.
+fn forward_stand(pos: Vec3, foe: Vec3, reach: f32) -> (Vec3, Option<f32>) {
+    let (hold, d) = (reach * STAND_HOLD, pos.distance(foe));
+    if d > hold {
+        (foe, None)
+    } else if d < hold * STAND_CLOSE {
+        (pos + (pos - foe).normalize_or(Vec3::X) * hold, None)
+    } else {
+        (pos, Some((-(foe.x - pos.x)).atan2(-(foe.z - pos.z))))
+    }
+}
+
 /// A mount's rest direction as an angle off the bow, in the heading convention (0 = bow, -Z; positive turns about +Y).
 fn mount_angle(rot: Quat) -> f32 {
     let d = rot * Vec3::NEG_Z;
@@ -185,13 +268,13 @@ fn objective_at(sc: &Script, data: &Value) -> Option<Vec3> {
 }
 
 /// A task to dock, by its name or its text (mission 9's "M09E - Return To Ship" reads "Return to and dock with Command Ship").
-fn is_dock_task(t: &Task) -> bool {
-    t.name.to_ascii_lowercase().contains("dock") || t.text.to_ascii_lowercase().contains("dock")
+fn is_dock_task(name: &str, text: &str) -> bool {
+    name.to_ascii_lowercase().contains("dock") || text.to_ascii_lowercase().contains("dock")
 }
 
 /// The dev autopilot is running for the objective point instead of fighting (see `flee_task`).
 fn fleeing(sc: &Script) -> bool {
-    (sc.point.is_some() || sc.point_pos.is_some()) && sc.tasks.iter().any(|t| t.active && !t.complete && flee_task(&t.text))
+    (sc.point.is_some() || sc.point_pos.is_some()) && live_tasks(sc).any(|(_, text)| flee_task(text))
 }
 
 /// True for an objective text that tells the player to get away rather than fight (dev autopilot heuristic, PROVISIONAL: English task texts).
@@ -434,14 +517,14 @@ fn unstick(time: f32, pos: Vec3, goal: Option<Vec3>, cell: &mut Option<Stuck>) -
 /// too: mission 4's "MO4 free stuck sloop" reads "Tow the RLS Yorkshire Clear of the Island it has Run Aground On.". The text may
 /// misspell the name (mission 4's "Tow the RLS Indominable ..." for the RLS Indomitable), so the first six letters of the name's last
 /// word are enough.
-fn task_towee<'a>(t: &super::eval::Task, w: &'a [Unit], player: Entity) -> Option<&'a Unit> {
-    let name = t.name.strip_prefix("Tow").filter(|n| !n.is_empty());
-    if name.is_none() && !t.text.starts_with("Tow ") {
+fn task_towee<'a>(name: &str, text: &str, w: &'a [Unit], player: Entity) -> Option<&'a Unit> {
+    let name = name.strip_prefix("Tow").filter(|n| !n.is_empty());
+    if name.is_none() && !text.starts_with("Tow ") {
         return None;
     }
     let candidates = || w.iter().filter(|u| u.alive && u.e != player && !u.name.is_empty());
-    let stem = |u: &&Unit| u.name.rsplit(' ').next().and_then(|w| w.get(..6)).is_some_and(|w| t.text.contains(w));
-    name.and_then(|n| candidates().find(|u| u.name.ends_with(n))).or_else(|| candidates().find(|u| t.text.contains(u.name.as_str()))).or_else(|| candidates().find(stem))
+    let stem = |u: &&Unit| u.name.rsplit(' ').next().and_then(|w| w.get(..6)).is_some_and(|w| text.contains(w));
+    name.and_then(|n| candidates().find(|u| u.name.ends_with(n))).or_else(|| candidates().find(|u| text.contains(u.name.as_str()))).or_else(|| candidates().find(stem))
 }
 
 fn autopilot_tow(sc: &Script, w: &[Unit], data: &Value, extra: &mut Extra) {
@@ -449,7 +532,7 @@ fn autopilot_tow(sc: &Script, w: &[Unit], data: &Value, extra: &mut Extra) {
     if sc.nis || !extra.towing_player.is_empty() || !extra.docking_player.is_empty() || sc.tows().iter().any(|t| t.0 == p.e) {
         return;
     }
-    if let Some(towee) = sc.tasks.iter().filter(|t| t.active && !t.complete).find_map(|t| task_towee(t, w, p.e)) {
+    if let Some(towee) = live_tasks(sc).find_map(|(name, text)| task_towee(name, text, w, p.e)) {
         extra.dock.write(DockMsg::TowStart { tower: None, towee: towee.e });
         return;
     }
@@ -482,10 +565,9 @@ fn autopilot_dock(sc: &Script, w: &[Unit], data: &Value, extra: &mut Extra) {
     if !extra.docking_player.is_empty() || sc.nis || sc.task_active("Dock With Tender") {
         return;
     }
-    let dock_task = |t: &&Task| t.active && !t.complete && is_dock_task(t);
-    for t in sc.tasks.iter().filter(dock_task) {
+    for (task, _) in live_tasks(sc).filter(|(name, text)| is_dock_task(name, text)) {
         // A task whose objective point carries its name (mission 2's camps): the base nearest that point.
-        let Some(at) = data["points"].as_array().and_then(|a| a.iter().find(|x| x["Name"] == t.name.as_str())).map(|x| game_to_bevy(&x["Position"])) else { continue };
+        let Some(at) = data["points"].as_array().and_then(|a| a.iter().find(|x| x["Name"] == task)).map(|x| game_to_bevy(&x["Position"])) else { continue };
         if at.distance(p.pos) > NEAR {
             continue;
         }
@@ -499,7 +581,7 @@ fn autopilot_dock(sc: &Script, w: &[Unit], data: &Value, extra: &mut Extra) {
     // when the target sits at the objective point (mission 5's "Deliver Supplies to Alamein" is a dock at Alamein).
     let point = objective_at(sc, data);
     if let Some((dockee, at)) = dock_target(sc, w, p.pos).filter(|(_, at)| at.distance(p.pos) < NEAR)
-        && (sc.tasks.iter().any(|t| dock_task(&t)) || point.is_some_and(|q| q.distance(at) < BASE_RANGE))
+        && (live_tasks(sc).any(|(name, text)| is_dock_task(name, text)) || point.is_some_and(|q| q.distance(at) < BASE_RANGE))
     {
         extra.dock.write(DockMsg::Dock { docker: None, dockee });
     }
@@ -544,7 +626,7 @@ fn autopilot(
     });
     // A task to defend what sits at the objective point (mission 12's "Defend Her Majesty Aboard Parliament"): the enemy closest to that
     // point comes before whatever attacks the player, or the boarders capture it while the bot duels submarines.
-    let raider = objective_at(sc, data).filter(|_| sc.tasks.iter().any(|t| t.active && !t.complete && defend_task(&t.text))).and_then(|at| {
+    let raider = objective_at(sc, data).filter(|_| live_tasks(sc).any(|(_, text)| defend_task(text))).and_then(|at| {
         w.iter().filter(|u| u.alive && u.visible && sc.hostile(&u.owner, &p.owner) && ships.contains(u.e)).nearest_to(at, |u| u.pos).filter(|u| u.pos.distance(at) < DEFEND_RADIUS)
     });
     // What the unfired rules wait for (`Script::wants`): a volume to enter or a unit to shoot (mission 5's blockaders) is where to sail
@@ -642,7 +724,16 @@ fn autopilot(
         // A ship moored behind an island (mission 6's pirates round the stockade) is not shot through it: sail round to a spot that
         // sees it once close; farther out, straight at it.
         let hidden = foe.pos.distance(p.pos) < FOE_SIGHT_RANGE && !sight.clear(p.pos + Vec3::Y * GUN_HEIGHT, foe.pos + Vec3::Y * GUN_HEIGHT);
-        Some(hidden.then(|| sight.firing_spot(foe.pos + Vec3::Y * GUN_HEIGHT, p.pos, FOE_SPOT)).flatten().unwrap_or(foe.pos))
+        let spot = hidden.then(|| sight.firing_spot(foe.pos + Vec3::Y * GUN_HEIGHT, p.pos, FOE_SPOT)).flatten();
+        match (spot, sight.fixed_reach) {
+            // A forward-fixed gun (the Hunter's beam) needs the bow on the foe for its charge and hold: a stand-off, not a charge through it.
+            (None, Some(reach)) if !hidden => {
+                let (go, bow_on) = forward_stand(p.pos, foe.pos, reach);
+                face = bow_on;
+                Some(go)
+            }
+            (spot, _) => Some(spot.unwrap_or(foe.pos)),
+        }
     } else if let Some(((e, at, local), spot)) = tower_spot {
         intent = "shoot a base from a firing spot";
         // The tower or gate is behind the island from here: sail to the nearest open-water spot that sees it. Once there, stop and
@@ -691,7 +782,7 @@ fn autopilot(
         // to what the rules want.
         objective_at(sc, data)
             .filter(|at| at.distance(p.pos) > POINT_REACHED || wanted_at.is_none())
-            .or_else(|| sc.tasks.iter().any(|t| t.active && !t.complete && is_dock_task(t)).then(|| dock_target(sc, w, p.pos).map(|t| t.1)).flatten())
+            .or_else(|| live_tasks(sc).any(|(name, text)| is_dock_task(name, text)).then(|| dock_target(sc, w, p.pos).map(|t| t.1)).flatten())
             .or(wanted_at)
             // Still nowhere to go (mission 10's "Defend Merchant Fleet"): stay with the nearest friendly ship outside the player's fleet.
             // Only once the ship is idle: a course the rules gave (mission 1's "Player Ordered Around Archipelago" path) wins.
@@ -735,8 +826,7 @@ fn autopilot(
     }
     // Dev shortcut for end-to-end runs: PROCYON_AUTOKILL=1 sinks the pirate once the player is close.
     if std::env::var_os("PROCYON_AUTOKILL").is_some()
-        && let Some(wr) =
-            w.iter().find(|u| u.name == "Warrior" && u.alive && u.visible && u.pos.distance(p.pos) < 250.0 && sc.hits_by.get(&(PLAYER.to_string(), u.e)).is_some_and(|n| *n >= 3))
+        && let Some(wr) = w.iter().find(|u| u.name == "Warrior" && u.alive && u.visible && u.pos.distance(p.pos) < 250.0 && player_hits(sc, u.e) >= 3)
         && let Ok(mut x) = ships.get_mut(wr.e)
     {
         x.health.core = 0.0;

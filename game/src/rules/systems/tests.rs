@@ -35,6 +35,7 @@ fn rules_app(mission: Mission) -> App {
         .init_resource::<Time>()
         .init_resource::<ButtonInput<KeyCode>>()
         .init_resource::<RuleInput>()
+        .init_resource::<RuleWorld>()
         .init_resource::<Target>()
         .init_resource::<crate::bindings::Bindings>()
         .init_resource::<crate::campaign::CampaignPoints>()
@@ -517,4 +518,65 @@ fn a_missions_mines_do_not_answer_to_their_owners_name_only_to_their_group() {
     app.update();
     app.update();
     assert!(flag(&app, "pirates destroyed"));
+}
+
+#[test]
+fn a_teleported_group_keeps_its_layout_round_the_point_and_a_single_ship_lands_on_it() {
+    let point = Vec3::new(800.0, 5.0, -800.0);
+    let at = teleport::layout(&[Vec3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 40.0)], point);
+    assert_eq!(at, [point + Vec3::new(0.0, 0.0, -20.0), point + Vec3::new(0.0, 0.0, 20.0)]);
+    assert_eq!(teleport::layout(&[Vec3::new(3.0, 9.0, 4.0)], point), [point], "one ship: on the point, at the point's height");
+    assert!(teleport::layout(&[], point).is_empty());
+}
+
+#[test]
+fn a_teleported_ship_is_at_rest_and_only_the_humans_forgets_its_orders() {
+    let moving = || Ship {
+        speed: 9.0,
+        ang_vel: 0.3,
+        order: crate::EngineOrder::Emergency,
+        throttle: Some(0.8),
+        waypoints: vec![Vec3::X],
+        goal: Some(1.0),
+        helm: crate::ship::Helm { steer: 0.7, boost: 2.0, age: 0.0 },
+        ..Ship::new(0, Side::Player)
+    };
+    let mut tug = moving();
+    teleport::stop(&mut tug, false);
+    assert_eq!((tug.speed, tug.ang_vel, tug.helm.steer), (0.0, 0.0, 0.0));
+    assert_eq!((tug.order, tug.throttle), (crate::EngineOrder::Emergency, Some(0.8)), "a computer ship keeps its order: told to follow a path it still goes");
+    let mut own = moving();
+    teleport::stop(&mut own, true);
+    assert_eq!((own.speed, own.ang_vel, own.order, own.throttle, own.goal), (0.0, 0.0, crate::EngineOrder::Stop, None, None), "the player's ship stops for good");
+    assert!(own.waypoints.is_empty());
+}
+
+#[test]
+#[ignore = "needs imported assets"]
+fn teleporting_ships_to_one_point_keeps_them_apart_and_at_rest() {
+    let lib = Library::load(crate::assets_dir());
+    let class = lib.index("Ship_Navy_Torpedo");
+    let mut mission = crate::campaign::load_id("mission02");
+    let data = serde_json::json!({
+        "environment": {"point_sets": {"Spot": [{"pos": [100.0, 100.0, 0.0]}]}},
+        "rules": [{"name": "Cut", "conditions": [{"Type": "World Initialize"}], "actions": [
+            {"Type": "Teleport Group/Unit", "Group/Unit Name": "Player0 Group,Own", "Point Set Name": "Spot"},
+            {"Type": "Teleport Group/Unit", "Group/Unit Name": "Player0 Group,Other", "Point Set Name": "Spot"}]}]});
+    mission.script = Script::new(&data, serde_json::json!({}));
+    let owner = mission.script.player().to_string();
+    let mut app = rules_app(mission);
+    let moving = Ship { heading: 0.0, speed: 9.0, ang_vel: 0.2, order: crate::EngineOrder::Emergency, ..Ship::new(class, Side::Player) };
+    let ms = |name: &str| MissionShip { name: name.into(), owner: owner.as_str().into(), visible: true, ..default() };
+    let own = app.world_mut().spawn((moving.clone(), Health::new(&lib.classes[class]), Transform::from_xyz(-500.0, 0.0, 0.0), Visibility::Inherited, PlayerShip, ms("Own"))).id();
+    let other = app.world_mut().spawn((moving, Health::new(&lib.classes[class]), Transform::from_xyz(500.0, 0.0, 0.0), Visibility::Inherited, ms("Other"))).id();
+    let bounds = lib.classes[class].collision_bounds;
+    app.insert_resource(lib);
+    app.update();
+    let world = app.world();
+    let (a, b) = (world.get::<Transform>(own).unwrap(), world.get::<Transform>(other).unwrap());
+    assert!(crate::collision::tree::overlap(&crate::collision::spot::hull(bounds, a), &crate::collision::spot::hull(bounds, b)).is_none(), "{a:?} {b:?}");
+    assert!(a.translation.distance(b.translation) < 40.0, "side by side, not far apart");
+    let (sa, sb) = (world.get::<Ship>(own).unwrap(), world.get::<Ship>(other).unwrap());
+    assert_eq!((sa.speed, sa.ang_vel, sa.order), (0.0, 0.0, crate::EngineOrder::Stop), "the player's ship is at all stop");
+    assert_eq!((sb.speed, sb.ang_vel, sb.order), (0.0, 0.0, crate::EngineOrder::Emergency), "a computer ship keeps its order");
 }

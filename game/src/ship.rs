@@ -440,11 +440,16 @@ pub fn ai(
         let at = if routine == attack::Routine::Ram { foe_pos } else { foe_aim };
         let submerged = cloaks.get(e).is_ok_and(|c| c.level() == 1.0);
         let ranges = if routine == attack::Routine::Frontal { attack::frontal_ranges(r, submerged) } else { (r, r) };
-        let Some(course) = attack::course_to(routine, tf.translation, s.heading, at, gap, ranges, now, breakoffs.entry(e).or_default()) else {
+        let breakoff = breakoffs.entry(e).or_default();
+        let Some(course) = attack::course_to(routine, tf.translation, s.heading, at, gap, ranges, now, breakoff) else {
             s.waypoints = kept; // no new course: the one it held stands, with its speed order
             continue;
         };
-        s.throttle = attack::throttle(routine, key, tf.translation, s.heading, course[0]);
+        s.throttle = if routine == attack::Routine::Standoff && breakoff.is_none() {
+            attack::standoff_throttle(gap, r)
+        } else {
+            attack::throttle(routine, key, tf.translation, s.heading, course[0])
+        };
         (s.waypoints, s.goal, s.order) = (course, None, EngineOrder::Emergency);
     }
 }
