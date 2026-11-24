@@ -44,6 +44,45 @@ const SMOKE_FLAME_LIFT: f32 = 0.8;
 const MOTE_HASH_MODULUS: u32 = 10007;
 /// Ether dust: radius of the fade-out around the lens, as a fraction of the box's half size. Engine choice, not the original's.
 const MOTE_NEAR_FRACTION: f32 = 0.08;
+// Tuning that is the engine's own, not read from the original. All PROVISIONAL.
+/// A flame source's width and height (game units) and brightness when the profile leaves them out.
+const FLAME_WIDTH: f32 = 3.0;
+const FLAME_HEIGHT: f32 = 5.0;
+const FLAME_BRIGHTNESS: f32 = 2.0;
+/// Each part's launch speed is the kind's times a random share of this range (minimum plus span)...
+const SPEED_JITTER_MIN: f32 = 0.6;
+const SPEED_JITTER_SPAN: f32 = 0.8;
+/// ...its life the kind's times a share of this range...
+const LIFE_JITTER_MIN: f32 = 0.7;
+const LIFE_JITTER_SPAN: f32 = 0.6;
+/// ...and its size the kind's times a share of this one.
+const SIZE_JITTER_MIN: f32 = 0.75;
+const SIZE_JITTER_SPAN: f32 = 0.5;
+/// A flash grows from this share of its size by this much over its life.
+const FLASH_GROW_FROM: f32 = 0.6;
+const FLASH_GROW_BY: f32 = 0.8;
+/// A fireball swells quickly (rate: per share of its life) from this share of its size by this much.
+const FIREBALL_GROW_FROM: f32 = 0.4;
+const FIREBALL_GROW_BY: f32 = 1.1;
+const FIREBALL_GROW_RATE: f32 = 4.0;
+/// A smoke puff grows with the square root of its age, from this share of its size by this much.
+const SMOKE_GROW_FROM: f32 = 0.5;
+const SMOKE_GROW_BY: f32 = 1.8;
+/// A scorch mark shrinks by this share of its size over its life.
+const SCORCH_SHRINK: f32 = 0.3;
+/// A spark's streak is this many seconds of its flight long, plus its size.
+const SPARK_TAIL_SECONDS: f32 = 0.04;
+/// A splinter's and a fibre's width as a share of its length.
+const SPLINTER_WIDTH: f32 = 0.35;
+const FIBER_WIDTH: f32 = 0.28;
+/// How far a billboard particle is pushed toward the camera, as a share of its size, so it does not cut into what it lights.
+const BILLBOARD_PUSH: f32 = 0.3;
+/// How far a flame's billboard is pushed toward the camera (game units), so a base on the hit surface does not clip into it.
+const FLAME_DEPTH_BIAS: f32 = 0.25;
+/// A scorch mark sits this far off the hull along its normal (game units), and its size is the kind's times a share of this range of the hit's size.
+const SCORCH_LIFT: f32 = 0.05;
+const SCORCH_SIZE_MIN: f32 = 0.6;
+const SCORCH_SIZE_SPAN: f32 = 0.4;
 
 /// What a particle is drawn as; the shader gets it as `uv.x / 4`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -122,9 +161,9 @@ pub(super) struct FlameSource {
 
 impl FlameSource {
     pub(super) fn parse(v: &Value) -> Option<Self> {
-        let width = num(&v["width"], 3.0);
-        let height = num(&v["height"], 5.0);
-        let brightness = num(&v["brightness"], 2.0);
+        let width = num(&v["width"], FLAME_WIDTH);
+        let height = num(&v["height"], FLAME_HEIGHT);
+        let brightness = num(&v["brightness"], FLAME_BRIGHTNESS);
         (v.is_object() && width > 0.0 && height > 0.0 && brightness > 0.0).then_some(Self { width, height, brightness })
     }
 
@@ -278,9 +317,9 @@ impl Particles {
     pub fn throw(&mut self, kind: Kind, p: &Part, at: Vec3, forward: Vec3, now: f32, host: Option<Entity>) {
         for _ in 0..p.count {
             let dir = self.direction(forward.normalize_or(Vec3::NEG_Z), p.spread);
-            let jitter = 0.6 + 0.8 * self.next();
+            let jitter = SPEED_JITTER_MIN + SPEED_JITTER_SPAN * self.next();
             let seed = (self.next() * 63.0) as u32;
-            let (life, size) = (p.seconds * (0.7 + 0.6 * self.next()), p.size * (0.75 + 0.5 * self.next()));
+            let (life, size) = (p.seconds * (LIFE_JITTER_MIN + LIFE_JITTER_SPAN * self.next()), p.size * (SIZE_JITTER_MIN + SIZE_JITTER_SPAN * self.next()));
             self.list.push(Particle { kind, born: now, life, from: at, vel: dir * p.speed * jitter, drag: p.drag, rise: p.rise, size, color: p.color, seed, host });
         }
         if self.list.len() > CAP {
@@ -452,8 +491,8 @@ fn scorch(time: Res<Time>, look: Res<Look>, mut parts: ResMut<Particles>, mut sc
         return;
     };
     for s in scars.read() {
-        let p = Part { size: p.size * (0.6 + 0.4 * s.size as f32), speed: 0.0, ..p };
-        parts.throw(Kind::Scorch, &p, s.local - s.dir * 0.05, -s.dir, time.elapsed_secs(), Some(s.ship));
+        let p = Part { size: p.size * (SCORCH_SIZE_MIN + SCORCH_SIZE_SPAN * s.size as f32), speed: 0.0, ..p };
+        parts.throw(Kind::Scorch, &p, s.local - s.dir * SCORCH_LIFT, -s.dir, time.elapsed_secs(), Some(s.ship));
     }
 }
 
@@ -491,17 +530,17 @@ fn place(b: &mut QuadBatch, p: &Particle, at: Vec3, t: f32, cam: &GlobalTransfor
     let centre = at + offset;
     let (right, up, back) = (cam.right().as_vec3(), cam.up().as_vec3(), cam.back().as_vec3());
     let grow = match p.kind {
-        Kind::Flash => 0.6 + 0.8 * age,
-        Kind::Fireball => 0.4 + 1.1 * (1.0 - (-4.0 * age).exp()),
-        Kind::Smoke => 0.5 + 1.8 * age.sqrt(),
-        Kind::Scorch => 1.0 - 0.3 * age,
+        Kind::Flash => FLASH_GROW_FROM + FLASH_GROW_BY * age,
+        Kind::Fireball => FIREBALL_GROW_FROM + FIREBALL_GROW_BY * (1.0 - (-FIREBALL_GROW_RATE * age).exp()),
+        Kind::Smoke => SMOKE_GROW_FROM + SMOKE_GROW_BY * age.sqrt(),
+        Kind::Scorch => 1.0 - SCORCH_SHRINK * age,
         _ => 1.0,
     };
     let s = p.size * grow;
     match p.kind {
         Kind::Spark => {
             let to_cam = (cam.translation() - centre).normalize_or(back);
-            let along = vel * 0.04 + vel.normalize_or(Vec3::Y) * p.size;
+            let along = vel * SPARK_TAIL_SECONDS + vel.normalize_or(Vec3::Y) * p.size;
             let side = along.cross(to_cam).normalize_or(right) * p.size;
             quad(b, p.kind, centre - along * 0.5, along * 0.5, side, to_cam, p.color, age, p.seed);
         }
@@ -510,14 +549,14 @@ fn place(b: &mut QuadBatch, p: &Particle, at: Vec3, t: f32, cam: &GlobalTransfor
             let (sn, cs) = (seed * 2.4 + t * (5.0 + seed % 7.0)).sin_cos();
             let along = right * cs + up * sn;
             let side = up * cs - right * sn;
-            let width = if p.kind == Kind::Splinter { 0.35 } else { 0.28 };
+            let width = if p.kind == Kind::Splinter { SPLINTER_WIDTH } else { FIBER_WIDTH };
             quad(b, p.kind, centre, along * s, side * s * width, back, p.color, age, p.seed);
         }
         Kind::Ring => {
             let r = p.size + offset.length();
             quad(b, p.kind, at, Vec3::X * r, Vec3::Z * r, Vec3::Y, p.color, age, p.seed);
         }
-        _ => quad(b, p.kind, centre + back * s * 0.3, right * s, up * s, back, p.color, age, p.seed),
+        _ => quad(b, p.kind, centre + back * s * BILLBOARD_PUSH, right * s, up * s, back, p.color, age, p.seed),
     }
 }
 
@@ -531,7 +570,7 @@ fn flame_quad(b: &mut QuadBatch, f: &FlameSource, strength: f32, at: Vec3, cam: 
     let h = cam.up().as_vec3() * (0.5 * f.height * size);
     let back = cam.back().as_vec3();
     // Small depth bias keeps a base exactly on the hit surface from clipping into the planks.
-    quad(b, Kind::Flame, at + h + back * 0.25, a, h, back, Vec3::splat(f.brightness), 0.0, seed);
+    quad(b, Kind::Flame, at + h + back * FLAME_DEPTH_BIAS, a, h, back, Vec3::splat(f.brightness), 0.0, seed);
 }
 
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
