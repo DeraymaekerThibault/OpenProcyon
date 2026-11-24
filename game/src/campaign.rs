@@ -3,6 +3,7 @@
 use crate::{PlayerShip, Side, assets_dir, combat::Library, game_to_bevy};
 use bevy::prelude::*;
 use serde_json::Value;
+use std::collections::HashMap;
 
 /// Mission state of one unit. `owner` is the rules' player name (changes with 'Set Group/Unit Owner'); `id` its TWT world object id.
 #[derive(Component, Default)]
@@ -35,6 +36,8 @@ pub struct MissionShip {
     pub ram: bool,
     /// The course it was on when a tow took it; it sails on from there once the tow ends (`rules::systems` AI).
     pub towed_course: Option<Vec<Vec3>>,
+    /// Not retail: the standing order of the mission rule `OP Follow Group` (`rules::systems` mission AI keeps the station).
+    pub follow: Option<rules::FollowOrder>,
 }
 use crate::rules;
 /// A mission base/island that rules can address ('*State Init* Setup Island'): `owner` is its group, e.g. 'AbandonedCamp'.
@@ -291,6 +294,33 @@ pub fn next(id: &str) -> Option<String> {
     next_custom(custom_missions(), id)
 }
 
+/// Not retail: the campaign counters (`OP Set Campaign Counter`) each custom mission handed on when it was won, kept in memory for the
+/// session (not saved). A mission starts with what the mission before it in the same mod campaign handed on; a mission that was lost or
+/// restarted hands on nothing, so a replay starts from the same values as the first try.
+#[derive(Resource, Default)]
+pub struct CampaignValues {
+    handed_on: HashMap<String, HashMap<String, f32>>,
+}
+impl CampaignValues {
+    /// What a mission starts with: the values the previous mission of its campaign handed on (none for the first mission, a retail
+    /// mission, or when that one was never won in this session).
+    pub fn incoming(&self, id: &str) -> HashMap<String, f32> {
+        self.incoming_in(custom_missions(), id)
+    }
+    pub(crate) fn incoming_in(&self, list: &[CustomMission], id: &str) -> HashMap<String, f32> {
+        let Some(i) = list.iter().position(|m| m.id == id).filter(|i| *i > 0) else { return HashMap::new() };
+        let before = &list[i - 1];
+        if before.campaign != list[i].campaign {
+            return HashMap::new();
+        }
+        self.handed_on.get(&before.id).cloned().unwrap_or_default()
+    }
+    /// A won mission hands its values on (replacing what it handed on before).
+    pub fn commit(&mut self, id: &str, values: HashMap<String, f32>) {
+        self.handed_on.insert(id.into(), values);
+    }
+}
+
 /// Not retail: a mission a mod adds. Its map id, the map's name and description, and the campaign it belongs to (its mod).
 #[derive(Clone, Debug, PartialEq)]
 pub struct CustomMission {
@@ -299,6 +329,15 @@ pub struct CustomMission {
     pub description: String,
     /// The mod's `name` (folder name when it has none): each mod is one campaign.
     pub campaign: String,
+}
+
+/// Not retail: `id` is a mission one of this launch's mods adds (`custom_missions`): the places that read keys only custom missions have
+/// (a map's `mines`) ask this, so retail missions and the tutorials are never affected.
+pub fn is_custom(id: &str) -> bool {
+    is_custom_in(custom_missions(), id)
+}
+fn is_custom_in(list: &[CustomMission], id: &str) -> bool {
+    list.iter().any(|m| m.id == id)
 }
 
 /// The custom missions of this launch's mods (`modding::active`), read once.
@@ -355,15 +394,35 @@ pub fn set_start(rules: Vec<String>, at: Option<(f32, f32)>) {
     let _ = START.set((rules, at));
 }
 
+/// The findings of `rules::cli::report_lines` for a mission of mod `from`, each prefixed with the mod: what `load_id` logs.
+fn check_log_lines(id: &str, from: &str, dir: &std::path::Path) -> Vec<String> {
+    rules::cli::report_lines(id, dir).into_iter().map(|l| format!("mod {from}: {l}")).collect()
+}
+
 pub fn load_id(id: &str) -> Mission {
     let read = |name: &str| {
         std::fs::read_to_string(assets_dir().join(format!("maps/{id}/{name}.json"))).unwrap_or_else(|_| panic!("missing maps/{id}/{name}.json: run tools.export_campaign"))
     };
     let data: Value = serde_json::from_str(&read("mission")).expect("invalid mission JSON");
     let media: Value = serde_json::from_str(&read("media")).expect("invalid media JSON");
+    // A mission a mod adds or overrides is checked like `--check-mission` does; retail missions are not re-checked at load.
+    let file = assets_dir().join(format!("maps/{id}/mission.json"));
+    if let (Some(from), Some(dir)) = (crate::data::mod_of(&file), file.parent()) {
+        for line in check_log_lines(id, &from, dir) {
+            eprintln!("{line}");
+        }
+    }
     let mut script = rules::Script::new(&data, media);
     // The scripted opening NIS (briefing.rs) only exists for mission 1; later missions start at once and run their own NIS rules.
-    script.briefing_opening = id == "mission01";
+    // A mod's `mission01` without the data it reads starts without the opening.
+    script.briefing_opening = id == "mission01"
+        && match crate::briefing::opening_problem(&data) {
+            None => true,
+            Some(why) => {
+                eprintln!("error: mod {}: maps/mission01/mission.json: {why}; the mission starts without the scripted opening", crate::data::mod_of(&file).unwrap_or_default());
+                false
+            }
+        };
     if let Some((rules, at)) = START.get() {
         (script.start_rules, script.start_at) = (rules.clone(), *at);
     }
@@ -433,9 +492,21 @@ pub fn spawn(commands: &mut Commands, assets: &AssetServer, lib: &Library, fxl: 
             ));
         }
     }
-    let mut ships: Vec<Value> = mission.data["ships"].as_array().expect("mission ships").clone();
-    // Wrecks and other hulls without a ship class are not simulated yet (docs/re/campaign.md).
-    ships.retain(|s| lib.classes.iter().any(|c| Some(c.name.as_str()) == s["type"].as_str()));
+    let mut ships: Vec<Value> = mission.data["ships"].as_array().cloned().unwrap_or_else(|| {
+        eprintln!("error: maps/{id}/mission.json has no \"ships\" list; no ships are placed");
+        vec![]
+    });
+    // Wrecks and other hulls without a ship class are not simulated yet (docs/re/campaign.md); a ship without an id is skipped.
+    ships.retain(|s| {
+        if !lib.classes.iter().any(|c| Some(c.name.as_str()) == s["type"].as_str()) {
+            return false;
+        }
+        let has_id = s["id"].as_i64().is_some();
+        if !has_id {
+            eprintln!("error: maps/{id}/mission.json: a ship of type {} has no integer `id`; skipped", s["type"]);
+        }
+        has_id
+    });
     let player_group = mission.data["player_start"]["name"].clone();
     // The human's ship is the one the TWT flags primary; if none is (missions 9, 13) use the player group's first, else a stand-in cutter.
     let primary_id = [|s: &Value, g: &Value| s["primary"] == true && s["group"] == *g, |s: &Value, g: &Value| s["group"] == *g]
@@ -495,7 +566,15 @@ pub fn spawn(commands: &mut Commands, assets: &AssetServer, lib: &Library, fxl: 
         }
     }
     crate::environment::spawn(commands, assets, &mission.data, false);
+    // Not retail: the campaign counters the mission before this one in the mod's campaign handed on.
+    let id = mission.id.clone();
     commands.insert_resource(mission);
+    commands.queue(move |w: &mut World| {
+        let values = w.get_resource::<CampaignValues>().map(|c| c.incoming(&id)).unwrap_or_default();
+        if let Some(mut m) = w.get_resource_mut::<Mission>() {
+            m.script.set_campaign_values(values);
+        }
+    });
 }
 
 /// Position of the rules' current objective point (None for 'NO OBJECTIVE POINT').
@@ -505,6 +584,28 @@ pub fn objective_point(m: &Mission) -> Option<Vec3> {
 
 #[cfg(test)]
 mod tests {
+    use serde_json::json;
+
+    #[test]
+    fn a_mod_mission_with_a_bad_rule_is_reported_with_its_file_and_mod() {
+        let dir = std::env::temp_dir().join(format!("procyon-modmission-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let rules = json!({"players": [], "rules": [{"name": "R", "Run Once": true, "conditions": [{"Type": "World Initialize"}], "actions": [{"Type": "Nonsense"}]}]});
+        std::fs::write(dir.join("mission.json"), rules.to_string()).unwrap();
+        let lines = super::check_log_lines("mymission", "my-mod", &dir);
+        assert!(lines.iter().all(|l| l.starts_with("mod my-mod: mymission")), "{lines:?}");
+        assert!(lines.iter().any(|l| l.contains("mymission/mission.json: ERROR: rule \"R\"") && l.contains("unknown action Type")), "{lines:?}");
+        assert!(lines.last().is_some_and(|l| l.ends_with("errors, 1 warnings") || l.contains(" errors, ")), "a count line closes the report: {lines:?}");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_script_without_a_rules_list_runs_without_rules() {
+        // used to be `expect("rules")`: now an error line and a script with no rules
+        let script = crate::rules::Script::new(&json!({"players": []}), json!({}));
+        assert!(!script.briefing_opening);
+    }
     use super::*;
 
     /// Mission 5's Waystation Grant has no 'Setup Island' rule. It must still be a rules unit, or docking there never satisfies the
@@ -672,6 +773,43 @@ mod tests {
         assert_eq!(next_custom(&list, "a_first"), None, "the campaign ends at its mod's last mission");
         assert_eq!(next_custom(&list, "solo"), None);
         assert!(is_campaign("mission03") && !is_campaign("mission_x") && !is_campaign("mission"));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// Not retail: what a won custom mission hands to the next one of its mod campaign (`OP Set Campaign Counter`).
+    #[test]
+    fn campaign_values_pass_from_a_won_mission_to_the_next_one_of_the_same_campaign_only() {
+        let m = |id: &str, campaign: &str| CustomMission { id: id.into(), name: id.into(), description: String::new(), campaign: campaign.into() };
+        let list = [m("one", "Saga"), m("two", "Saga"), m("three", "Saga"), m("other", "Elsewhere")];
+        let mut values = CampaignValues::default();
+        assert!(values.incoming_in(&list, "one").is_empty(), "the first mission starts with nothing");
+        assert!(values.incoming_in(&list, "two").is_empty(), "the first one was not won yet");
+        values.commit("one", HashMap::from([("rescued".to_string(), 3.0)]));
+        assert_eq!(values.incoming_in(&list, "two").get("rescued"), Some(&3.0), "the next mission starts with what the won one handed on");
+        assert_eq!(values.incoming_in(&list, "two").get("rescued"), Some(&3.0), "a replay starts from the same values");
+        assert!(values.incoming_in(&list, "three").is_empty(), "only the mission before it hands values on");
+        assert!(values.incoming_in(&list, "other").is_empty(), "another campaign does not see them, even when listed next");
+        assert!(values.incoming_in(&list, "not listed").is_empty());
+        values.commit("one", HashMap::from([("rescued".to_string(), 5.0)]));
+        assert_eq!(values.incoming_in(&list, "two").get("rescued"), Some(&5.0), "a mission won again hands on its new values");
+    }
+
+    /// Not retail: only a mission a mod adds takes the custom-mission paths (its map's `mines`); a retail id or a tutorial never does,
+    /// even when a mod ships a copy of it (`custom_missions_in` leaves those out).
+    #[test]
+    fn retail_missions_and_tutorials_are_never_custom() {
+        let dir = std::env::temp_dir().join(format!("procyon-is-custom-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        for id in ["harbour", "mission03", "tutorial", "basic_tutorial"] {
+            let p = dir.join(format!("saga/maps/{id}/mission.json"));
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, "{}").unwrap();
+        }
+        let list = custom_missions_in(&[dir.join("saga")], &dir.join("merged"));
+        assert!(is_custom_in(&list, "harbour"));
+        for retail in ["mission03", "mission01", "tutorial", "basic_tutorial", "red_rover"] {
+            assert!(!is_custom_in(&list, retail), "{retail}");
+        }
         std::fs::remove_dir_all(dir).unwrap();
     }
 }
