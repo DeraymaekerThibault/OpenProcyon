@@ -45,11 +45,43 @@ pub fn rule_schema() -> Value {
 
 /// The JSON Schemas (draft 2020-12) of the files a modder writes, as `(file name, schema)`: `ship.schema.json`, `guns.schema.json`,
 /// `bullets.schema.json`, `crew_nodes.schema.json`, `mod.schema.json`; the files `--dump-schemas <dir>` writes. Generated from the
-/// types the loader reads, so they cannot drift from it. Unknown keys stay allowed, as in the loader. Needs no assets.
+/// types the loader reads, so they cannot drift from it. Unknown keys stay allowed, as in the loader. No key is `required`: a mod's
+/// files are merged over a parent (`extends`, or a retail entry) before the loader reads them, so a partial file is valid; the loader's
+/// own validation of the merged result is unchanged. Needs no assets.
 pub fn schemas() -> Vec<(&'static str, Value)> {
     let mut all = crate::data::schemas();
     all.push(("mod.schema.json", crate::modding::schema()));
+    for (_, schema) in &mut all {
+        strip_required(schema);
+    }
+    // `extends` and `set` are consumed by the overlay merge before the loader reads a ship (docs/modding.md "Extending a file").
+    if let Some(props) = all[0].1["properties"].as_object_mut() {
+        props.insert("extends".into(), serde_json::json!({"type": "string", "description": "Not part of the ship: the id of the ship this file extends. The mod merge lays this file over `ships/<id>/ship.json` before the game reads it."}));
+        props.insert(
+            "set".into(),
+            serde_json::json!({"type": "object", "description": "Not part of the ship: with `extends`, JSON pointers (`/engines/0/fx`) mapped to the value that replaces what the merge left there; reaches inside arrays."}),
+        );
+    }
     all
+}
+
+/// Removes the `required` keyword from a JSON Schema, wherever it is a keyword (not a property that is itself named `required`).
+fn strip_required(node: &mut Value) {
+    match node {
+        Value::Object(map) => {
+            map.remove("required");
+            for (key, child) in map.iter_mut() {
+                match (key.as_str(), child) {
+                    // A table of schemas by name: the names are not keywords, their values are schemas.
+                    ("properties" | "$defs" | "definitions" | "patternProperties", Value::Object(table)) => table.values_mut().for_each(strip_required),
+                    ("enum" | "const" | "default" | "examples", _) => {}
+                    (_, child) => strip_required(child),
+                }
+            }
+        }
+        Value::Array(items) => items.iter_mut().for_each(strip_required),
+        _ => {}
+    }
 }
 
 /// Checks a mission's rules like `--check-mission`: `mission` is `mission.json` (or a skirmish map's `script.json`, then `skirmish`
@@ -183,6 +215,32 @@ mod tests {
         assert!(ship["properties"]["core_hp"]["description"].as_str().unwrap().contains("Core hit points"));
         assert!(ship["properties"]["$schema"].is_object(), "an editor may write the $schema key");
         assert!(all[4].1["properties"]["requires"]["description"].as_str().unwrap().contains("mods"));
+    }
+
+    fn has_required(node: &Value) -> bool {
+        match node {
+            Value::Object(map) => map.iter().any(|(k, v)| k == "required" && v.is_array()) || map.values().any(has_required),
+            Value::Array(items) => items.iter().any(has_required),
+            _ => false,
+        }
+    }
+
+    #[test]
+    fn no_published_schema_requires_a_key_so_partial_mod_files_validate() {
+        for (name, schema) in schemas() {
+            assert!(!has_required(&schema), "{name} still has a `required` list");
+        }
+        // The loader's own types do list them (the strip is the published view only), and the keys are still described.
+        assert!(has_required(&crate::data::schemas()[0].1), "the loader's schema still knows what a complete file has");
+        let all = schemas();
+        let ship = &all[0].1;
+        assert!(ship["properties"]["sections"]["additionalProperties"].is_object() || ship["properties"]["sections"].is_object());
+        // A minimal extending file: nothing is demanded, both keys are described.
+        let mini = json!({"extends": "Ship_X", "points": 100});
+        let mut unknown = vec![];
+        unknown_keys(ship, ship, &mini, "", &mut unknown);
+        assert!(unknown.is_empty(), "{unknown:?}");
+        assert_eq!(ship["properties"]["points"]["type"], "integer");
     }
 
     #[test]

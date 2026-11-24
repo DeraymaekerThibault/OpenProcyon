@@ -305,7 +305,7 @@ pub fn bullet_from_value(name: &str, v: Value) -> Result<BulletDef, String> {
 }
 
 /// The schema of `data/weapons/guns.json`: an object of gun entries by name. Mods merge this file key by key, so a mod entry that only
-/// changes some keys of a retail gun is valid even though the schema lists the retail keys as required.
+/// changes some keys of a retail gun is valid. (`authoring::schemas` publishes these schemas without `required`.)
 pub(super) fn guns_schema() -> Value {
     table_schema::<GunDoc>("guns.json")
 }
