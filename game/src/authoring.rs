@@ -16,6 +16,8 @@
 //! - [`merge_rule`] / [`extends_parent`] / [`MERGED`]: how a mod file combines with the overlay below it, and what an `extends` file
 //!   is laid over.
 //! - [`game_to_bevy`] / [`bevy_to_game`] / [`mount_rotation`] / [`mount_rot`]: the files' axes and `rot` triples as the loader reads them.
+//! - [`resolved_ship`]: a ship as the game loads it (points, speed, sections, guns, engines, ...), each value with its [`Source`]: the
+//!   file, the model or a default.
 //! - [`crew_kind`] / [`CREW_KINDS`] / [`CREW_NODE`]: crew node names, and the kind of a model's crew nodes in `data::derive::Facts`.
 //!
 //! Shared code: no UI and no view imports.
@@ -26,8 +28,10 @@ use serde_json::Value;
 
 mod check_mod;
 mod json;
+mod resolved;
 pub use check_mod::{check_mod, check_mod_with, unknown_key_findings, unknown_keys};
 pub use json::to_json_string;
+pub use resolved::{ResolvedEngine, ResolvedFlag, ResolvedGun, ResolvedPost, ResolvedSection, ResolvedShip, ResolvedWake, Source, resolved_ship};
 
 pub use crate::data::DataError;
 pub use crate::modding::{MERGED, MergeRule, ModEntry, ModReport, extends_parent, merge_rule};
