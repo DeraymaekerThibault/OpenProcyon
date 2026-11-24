@@ -1,6 +1,5 @@
 //! ECS side of the rule interpreter: dispatch of `Script` effects, mission AI, mission UI, music and NIS camera.
 pub(super) mod apply;
-mod autopilot;
 mod dev_console;
 mod mission_ai;
 mod presentation;
@@ -47,21 +46,9 @@ struct Extra<'w, 's> {
     /// Not retail: the mines a custom mission's map places (`mines`), which its rules hand to players and address by group.
     mines: apply::Mines<'w, 's>,
     dock: MessageWriter<'w, DockMsg>,
-    /// Non-empty while the player's ship is running a dock sequence.
-    docking_player: Query<'w, 's, (), (With<PlayerShip>, With<crate::docking::Docker>)>,
-    /// Non-empty while the player's ship is sailing to pick up a tow.
-    towing_player: Query<'w, 's, (), (With<PlayerShip>, With<crate::docking::Tower>)>,
-    /// Spawned lifeboats (pre-placed ones carry a `MissionShip` and are rule units).
-    lifeboats: Query<'w, 's, (&'static Transform, &'static crate::lifeboats::Lifeboat), (With<Ship>, Without<MissionShip>)>,
-    /// The player's guns (the dev autopilot fires mission 9's Star Mortar).
-    player_guns: Query<'w, 's, &'static crate::combat::GunStates, With<PlayerShip>>,
-    /// Island and base collision: the dev autopilot's line-of-sight test for a firing position.
-    land: Query<'w, 's, (&'static crate::collision::Obstacle, Option<&'static Visibility>), (Without<Ship>, Without<Asteroid>, Without<crate::environment::SpaceAnimal>)>,
-    /// Whether the dev autopilot last ordered its fleet to run (formation held, cease fire).
-    fleet_fleeing: Local<'s, bool>,
     difficulty: Option<Res<'w, crate::scenario::Difficulty>>,
-    /// The dev autopilot's memory between frames.
-    pilot: Local<'s, autopilot::State>,
+    /// Where the frame's units are left for the dev autopilot.
+    snapshot: ResMut<'w, RuleWorld>,
     board: MessageWriter<'w, crate::boarding::BoardMsg>,
     captured: MessageReader<'w, 's, crate::boarding::Captured>,
     asteroids: MessageWriter<'w, crate::combat::AsteroidSetup>,
@@ -84,6 +71,10 @@ struct Extra<'w, 's> {
     dock_smoke_skipped: Local<'s, bool>,
 }
 
+/// The units `update` saw this frame (before its effects applied), left for the dev autopilot.
+#[derive(Resource, Default)]
+pub struct RuleWorld(pub Vec<Unit>);
+
 #[derive(Resource, Default)]
 struct RuleInput {
     skip_speech: bool,
@@ -101,6 +92,7 @@ pub fn plugin(app: &mut App) {
         .insert_resource(crate::campaign::CampaignPoints::load())
         .init_resource::<crate::campaign::CampaignValues>()
         .init_resource::<RuleInput>()
+        .init_resource::<RuleWorld>()
         .add_systems(
             FixedUpdate,
             (
@@ -116,6 +108,7 @@ pub fn plugin(app: &mut App) {
             (
                 capture_input.before(crate::briefing::update),
                 update.after(capture_input).in_set(crate::FrameRules).run_if(crate::menu::overlay_closed),
+                crate::smoke::autopilot::drive.after(update).in_set(crate::FrameRules).run_if(crate::menu::overlay_closed),
                 crate::smoke::screenshot_hooks,
                 presentation.after(nis_camera),
                 (ui, music, nis_camera.after(crate::camera)),
@@ -182,7 +175,6 @@ fn update(
     cfg: Res<Config>,
     lib: Res<Library>,
     mut orbit: ResMut<Orbit>,
-    mut target: ResMut<Target>,
     mut hits: MessageReader<Hit>,
     mut fired: MessageReader<Fired>,
     mut killed: MessageReader<Destroyed>,
@@ -269,10 +261,8 @@ fn update(
             extra.dock.write(DockMsg::Dock { docker: None, dockee: t.e });
         }
     }
-    // Not during mission 1's scripted opening (briefing.rs): the player sails the rules' arrival path into the fleet meanwhile.
-    if cfg.script.as_deref() == Some("mission") && mission.opening.is_none() {
-        autopilot::drive(&mut commands, mission, &world, &mut extra, &mut ships, &mut target, &rocks, &lib);
-    }
+    // The frame's snapshot, for the dev autopilot (smoke/autopilot.rs), which runs right after this system.
+    extra.snapshot.0 = world;
 }
 
 /// Applies the effects a `Script::step` returned to the world: ship orders, flags, docking and tow messages, effects, the orbit camera.

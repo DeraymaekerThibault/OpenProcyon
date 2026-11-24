@@ -1,4 +1,5 @@
 //! Scripted wiring checks; these are not substitutes for manual gameplay validation.
+pub mod autopilot;
 mod fleet;
 mod lifeboats;
 mod report;
