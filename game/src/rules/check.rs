@@ -751,6 +751,44 @@ pub fn unused_definitions(mission: &Value) -> Vec<Finding> {
     out
 }
 
+/// Warnings for ships the mission places, and scenery and mines `map.json` places, outside the playable square (`world_half`,
+/// default 1000, on x and y). A finding about `map.json` has `file` "map.json"; one about the mission leaves `file` empty.
+pub fn outside_world(mission: &Value, map: &Value) -> Vec<Finding> {
+    let half = map["world_half"].as_f64().unwrap_or(1000.0);
+    let outside = |p: &Value| p.as_array().is_some_and(|p| p.iter().take(2).filter_map(Value::as_f64).any(|v| v.abs() > half));
+    let mut out = vec![];
+    for (i, s) in mission["ships"].as_array().into_iter().flatten().enumerate().filter(|(_, s)| outside(&s["pos"])) {
+        let who = s["name"].as_str().or_else(|| s["type"].as_str()).unwrap_or("ship");
+        out.push(Finding::in_file(Level::Warning, "", format!("ships[{i}].pos"), format!("{who} is at {} , outside world_half {half}", s["pos"])));
+    }
+    for key in ["objects", "mines"] {
+        for (i, o) in map[key].as_array().into_iter().flatten().enumerate().filter(|(_, o)| outside(&o["pos"])) {
+            let who = o["type"].as_str().unwrap_or(key);
+            out.push(Finding::in_file(Level::Warning, "map.json", format!("{key}[{i}].pos"), format!("{who} is at {} , outside world_half {half}", o["pos"])));
+        }
+    }
+    out
+}
+
+/// Warnings for `map.json` scenery whose `scene` model is not among `models` (the file names under `models/`, `Rock.glb`): it would
+/// be an invisible obstacle. `file` is "map.json".
+pub fn missing_scenery(map: &Value, models: &HashSet<String>) -> Vec<Finding> {
+    let mut out = vec![];
+    for (i, o) in map["objects"].as_array().into_iter().flatten().enumerate() {
+        let Some(scene) = o["scene"].as_str().filter(|s| !s.is_empty() && !models.contains(&format!("{s}.glb"))) else { continue };
+        let best = nearest(scene, models.iter().filter_map(|m| m.strip_suffix(".glb")));
+        let mut f = Finding::in_file(
+            Level::Warning,
+            "map.json",
+            format!("objects[{i}].scene"),
+            format!("the scenery model '{scene}.glb' is not under models/ of the game or the mods{}", did_you_mean(best)),
+        );
+        f.suggestion = best.map(String::from);
+        out.push(f);
+    }
+    out
+}
+
 /// Every string anywhere below `v`, keys excluded.
 fn all_strings(v: &Value, out: &mut BTreeSet<String>) {
     match v {
@@ -1090,6 +1128,22 @@ mod tests {
         );
         assert!(get("player").contains(&"Pirates") && get("player").contains(&"Rival") && get("player").contains(&"Player0 Group"));
         assert!(defined_names(&Value::Null, &Value::Null, &Value::Null)["group"].is_empty());
+    }
+
+    #[test]
+    fn placements_outside_world_half_and_scenery_without_a_model_are_warnings_naming_their_file() {
+        let mission = json!({"ships": [{"name": "Far", "pos": [0, 1200, 0]}, {"pos": [10, 10, 0]}]});
+        let map =
+            json!({"objects": [{"type": "Rock", "scene": "Rokk", "pos": [-1001, 0, 0]}, {"type": "Isle", "scene": "Isle", "pos": [0, 0, 0]}], "mines": [{"pos": [0, 0, 900]}]});
+        let far = outside_world(&mission, &map);
+        let at: Vec<_> = far.iter().map(|f| (f.file.as_str(), f.path.as_str())).collect();
+        assert_eq!(at, [("", "ships[0].pos"), ("map.json", "objects[0].pos")], "z does not count");
+        assert!(far[0].message.contains("Far is at") && far[0].message.contains("world_half 1000"));
+        assert!(outside_world(&mission, &json!({"world_half": 1500})).is_empty(), "the map's own square");
+        let models = HashSet::from(["Rock.glb".to_string(), "Isle.glb".to_string()]);
+        let missing = missing_scenery(&map, &models);
+        assert_eq!(missing.len(), 1);
+        assert_eq!((missing[0].file.as_str(), missing[0].path.as_str(), missing[0].suggestion.as_deref()), ("map.json", "objects[0].scene", Some("Rock")));
     }
 
     #[test]

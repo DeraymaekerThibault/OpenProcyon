@@ -466,8 +466,8 @@ fn resolve_swap_nodes(root: Entity, class: &Class, children: &Query<&Children>, 
         if n.contains('.') {
             continue;
         }
-        let (base, damaged) = match n.split_once("Damage_") {
-            Some((a, b)) => (format!("{a}_{b}"), true),
+        let (base, damaged) = match crate::data::derive::damaged_layer(n) {
+            Some(base) => (base, true),
             None => (n.to_string(), false),
         };
         // A damaged mesh of a layer that is no swappable section can never be shown (it would sit on top of the intact one).

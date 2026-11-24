@@ -198,6 +198,17 @@ fn points<'a>(facts: &'a Facts, kind: &'a str) -> impl Iterator<Item = &'a Point
     facts.points.iter().filter(move |p| p.kind == kind)
 }
 
+/// The hardpoint node a gun mount `label` takes its place from when `ship.json` gives no `pos`/`rot`: the `GunPlacement` node of that
+/// whole name, ignoring case.
+pub fn mount_node<'a>(facts: &'a Facts, label: &str) -> Option<&'a Point> {
+    points(facts, "GunPlacement").find(|p| p.name.eq_ignore_ascii_case(label))
+}
+
+/// The section layer a damaged mesh `<A>Damage_<B>` stands in for (`<A>_<B>`, matched ignoring case); `None` for an intact mesh.
+pub fn damaged_layer(name: &str) -> Option<String> {
+    name.split_once("Damage_").map(|(a, b)| format!("{a}_{b}"))
+}
+
 /// Fill in every part of `j` the document did not state, from the model's `facts`.
 pub(super) fn complete(j: &mut ShipDoc, facts: &Facts, root: &Path) {
     let intact: Vec<&Layer> = facts.layers.iter().filter(|l| !l.name.contains("Damage_")).collect();
@@ -238,7 +249,7 @@ pub(super) fn complete(j: &mut ShipDoc, facts: &Facts, root: &Path) {
     j.core_hp.get_or_insert((0.25 * hull_hp).max(50.0));
 
     for (label, m) in &mut j.guns {
-        let node = points(facts, "GunPlacement").find(|p| p.name.eq_ignore_ascii_case(label));
+        let node = mount_node(facts, label);
         if m.pos.is_none() {
             m.pos = node.map(|p| p.pos);
         }
@@ -348,6 +359,13 @@ pub(super) fn complete(j: &mut ShipDoc, facts: &Facts, root: &Path) {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+
+    #[test]
+    fn a_damaged_mesh_stands_in_for_the_layer_its_name_makes() {
+        assert_eq!(damaged_layer("HullDamage_Two").as_deref(), Some("Hull_Two"));
+        assert_eq!(damaged_layer("Mast1Damage_Top_Sail").as_deref(), Some("Mast1_Top_Sail"), "only the first Damage_ is the marker");
+        assert_eq!(damaged_layer("Hull_Two"), None);
+    }
 
     /// A binary glTF of the given JSON and binary payload.
     pub(crate) fn glb(json: Value, bin: &[u8]) -> Vec<u8> {

@@ -178,7 +178,9 @@ pub fn retexture(bytes: &[u8], images: &HashMap<String, Vec<u8>>) -> Option<(Vec
     let mut glb = Glb::parse(bytes)?;
     let mut slot: HashMap<String, usize> = HashMap::new();
     for (i, m) in glb.doc["materials"].as_array()?.clone().iter().enumerate() {
-        let k = key(m["name"].as_str().map(|n| n.strip_prefix(PREFIX).unwrap_or(n))?);
+        // An unnamed material (valid glTF) matches no texture; it must not stop the others from being swapped.
+        let Some(name) = m["name"].as_str() else { continue };
+        let k = key(name.strip_prefix(PREFIX).unwrap_or(name));
         let Some(image) = images.get(&k) else { continue };
         let old = m["pbrMetallicRoughness"]["baseColorTexture"]["index"].as_u64().map(|t| t as usize);
         let texture = match slot.get(&k) {
@@ -286,6 +288,20 @@ mod tests {
         assert!(doc["materials"][1]["pbrMetallicRoughness"]["baseColorTexture"].is_null());
         assert!(retexture(&textured("other.tga", &old), &images).is_none(), "no matching material: nothing to rewrite");
         assert!(retexture(&textured("retail:HULL_PLANKS", &old), &images).is_some(), "a retail: name matches too");
+    }
+
+    #[test]
+    fn an_unnamed_material_does_not_stop_the_others_from_being_swapped() {
+        let old = crate::shipart::png(2, 2, &[7u8; 16]);
+        let images = HashMap::from([("hull_planks".to_string(), crate::shipart::png(4, 4, &[9u8; 64]))]);
+        let doc = json!({"asset": {"version": "2.0"}, "buffers": [{"byteLength": old.len()}], "bufferViews": [{"buffer": 0, "byteLength": old.len()}],
+            "images": [{"bufferView": 0, "mimeType": "image/png"}], "textures": [{"source": 0}],
+            "materials": [{"pbrMetallicRoughness": {}}, {"name": "Hull_Planks.tga", "pbrMetallicRoughness": {"baseColorTexture": {"index": 0}}}]});
+        let (out, used) = retexture(&glb(doc, &old), &images).expect("the named material is still rewritten");
+        assert_eq!(used, ["hull_planks"]);
+        let (doc, _) = crate::data::glb_json(&out).unwrap();
+        assert_ne!(doc["materials"][1]["pbrMetallicRoughness"]["baseColorTexture"]["index"], 0, "it points at the new texture");
+        assert!(doc["materials"][0]["pbrMetallicRoughness"]["baseColorTexture"].is_null(), "the unnamed one is left alone");
     }
 
     #[test]

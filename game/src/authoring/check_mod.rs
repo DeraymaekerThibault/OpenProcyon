@@ -14,7 +14,7 @@ use serde_json::Value;
 
 use crate::data::derive;
 use crate::modding::{self, Installed};
-use crate::rules::check::{Finding, Level, did_you_mean, nearest, unused_definitions};
+use crate::rules::check::{Finding, Level, did_you_mean, missing_scenery, nearest, outside_world, unused_definitions};
 
 /// Checks the mod in `dir` against the imported assets in `base` (`None`: nothing imported, so only the mod's own files are looked
 /// at and one warning says what was skipped). The mods `dir` lists in `requires` are laid under it when they are installed. Writes
@@ -377,16 +377,22 @@ impl Checker<'_> {
                 self.with_hint(Level::Warning, file, &path, format!("'{l}' is the layer of no section; the mount is attached to none"), best.as_deref());
             }
         }
-        // A damaged variant `<A>Damage_<B>` is shown for the section whose layer is `<A>_<B>`; one with no such section never shows.
-        for l in facts.iter().flat_map(|f| f.layers.iter()).filter(|l| l.name.contains("Damage_") && !l.name.contains('.')) {
-            let base = l.name.replacen("Damage_", "_", 1);
-            if !section_layers.iter().any(|s| s.eq_ignore_ascii_case(&base)) {
-                let best = nearest(&base, section_layers.iter().map(String::as_str)).map(String::from);
+        // A damaged variant is shown only for a swappable section of its layer (the rule of `combat::damage`'s swap); else never.
+        // Sections derived from the model are all swappable.
+        let swappable: Vec<&String> = if explicit.is_empty() {
+            section_layers.iter().collect()
+        } else {
+            explicit.iter().filter(|(_, s)| s["swappable"] != false).filter_map(|(_, s)| s["layer"].as_str()).filter_map(|l| section_layers.iter().find(|x| *x == l)).collect()
+        };
+        for l in facts.iter().flat_map(|f| f.layers.iter()).filter(|l| !l.name.contains('.')) {
+            let Some(base) = derive::damaged_layer(&l.name) else { continue };
+            if !swappable.iter().any(|s| s.eq_ignore_ascii_case(&base)) {
+                let best = nearest(&base, swappable.iter().map(|s| s.as_str())).map(String::from);
                 self.with_hint(
                     Level::Warning,
                     &model_file,
                     &l.name,
-                    format!("'{}' is a damaged variant of '{base}', which is the layer of no section, so it is never shown", l.name),
+                    format!("'{}' is a damaged variant of '{base}', which is the layer of no swappable section, so it is never shown", l.name),
                     best.as_deref(),
                 );
             }
@@ -409,7 +415,7 @@ impl Checker<'_> {
             if facts.is_none() && !self.have_base {
                 continue; // the model may be a retail one this check cannot read
             }
-            match nodes.iter().find(|p| p.name.eq_ignore_ascii_case(label)) {
+            match facts.as_ref().and_then(|f| derive::mount_node(f, label)) {
                 Some(node) if node.inferred => self.warn(
                     file,
                     &format!("guns.{label}"),
@@ -452,38 +458,13 @@ impl Checker<'_> {
             let (Some(mission), map) = (crate::data::try_json(&rules), crate::data::try_json(&dir.join("map.json")).unwrap_or_default()) else { continue };
             let mission_file = format!("maps/{id}/{rules_name}");
             self.out.extend(unused_definitions(&mission).into_iter().map(|f| f.with_file(&mission_file)));
-            // Positions inside the playable square (`world_half`, default 1000).
-            let half = map["world_half"].as_f64().unwrap_or(1000.0);
-            let outside = |p: &Value| p.as_array().is_some_and(|p| p.iter().take(2).filter_map(Value::as_f64).any(|v| v.abs() > half));
-            let mut far = vec![];
-            for (i, s) in mission["ships"].as_array().into_iter().flatten().enumerate().filter(|(_, s)| outside(&s["pos"])) {
-                let who = s["name"].as_str().or_else(|| s["type"].as_str()).unwrap_or("ship");
-                far.push((mission_file.clone(), format!("ships[{i}].pos"), format!("{who} is at {} , outside world_half {half}", s["pos"])));
-            }
-            for key in ["objects", "mines"] {
-                for (i, o) in map[key].as_array().into_iter().flatten().enumerate().filter(|(_, o)| outside(&o["pos"])) {
-                    let who = o["type"].as_str().unwrap_or(key);
-                    far.push((format!("maps/{id}/map.json"), format!("{key}[{i}].pos"), format!("{who} is at {} , outside world_half {half}", o["pos"])));
-                }
-            }
-            for (file, path, message) in far {
-                self.warn(&file, &path, message);
-            }
-            // Scenery whose mesh is nowhere: it would be an invisible obstacle.
-            if let Some(models) = &models {
-                for (i, o) in map["objects"].as_array().into_iter().flatten().enumerate() {
-                    if let Some(scene) = o["scene"].as_str().filter(|s| !s.is_empty() && !models.contains(&format!("{s}.glb"))) {
-                        let best = nearest(scene, models.iter().filter_map(|m| m.strip_suffix(".glb"))).map(String::from);
-                        self.with_hint(
-                            Level::Warning,
-                            &format!("maps/{id}/map.json"),
-                            &format!("objects[{i}].scene"),
-                            format!("the scenery model '{scene}.glb' is not under models/ of the game or the mods"),
-                            best.as_deref(),
-                        );
-                    }
-                }
-            }
+            // Findings of `rules::check` name `map.json` or nothing (the rules file); here they get the map folder.
+            let map_file = format!("maps/{id}/map.json");
+            let placed = outside_world(&mission, &map).into_iter().chain(models.as_ref().map(|m| missing_scenery(&map, m)).unwrap_or_default());
+            self.out.extend(placed.map(|f| {
+                let file = if f.file == "map.json" { map_file.clone() } else { mission_file.clone() };
+                f.with_file(&file)
+            }));
         }
     }
 }
@@ -785,6 +766,21 @@ mod tests {
         let ship_m_errors = found.iter().filter(|f| f.level == Level::Error && f.file == m && f.message.contains("cannot load")).count();
         assert_eq!(ship_m_errors, 0, "the loader is asked only about a ship the other checks found no error in");
         std::fs::remove_dir_all(base).unwrap();
+        std::fs::remove_dir_all(mod_dir).unwrap();
+    }
+
+    #[test]
+    fn a_damaged_variant_of_a_section_that_is_not_swappable_is_never_shown() {
+        let mod_dir = scratch("swappable");
+        // The model's `HullDamage_Two` stands in for a section of layer `Hull_Two`.
+        let section = |swappable: bool| json!({"Two": {"layer": "Hull_Two", "material": "Wood", "hp": 1, "core_pct": 1, "vital_ship": true, "vital_speed": false, "vital_turn": false, "swappable": swappable}});
+        put(&mod_dir, "ships/Ship_W/model.glb", small_model(true));
+        put_json(&mod_dir, "ships/Ship_W/ship.json", json!({"sections": section(true)}));
+        let warned = |found: &[Finding]| has(found, Level::Warning, "ships/Ship_W/model.glb", "HullDamage_Two", "no swappable section");
+        assert!(!warned(&check_mod_with(&mod_dir, None, &[])), "a swappable section shows it");
+        put_json(&mod_dir, "ships/Ship_W/ship.json", json!({"sections": section(false)}));
+        let found = check_mod_with(&mod_dir, None, &[]);
+        assert!(warned(&found), "{:?}", lines(&found));
         std::fs::remove_dir_all(mod_dir).unwrap();
     }
 
