@@ -32,7 +32,10 @@ if [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || [ "$(uname -o 2>/dev/null)" = Ms
 else
     # Mesa's software Vulkan when installed: on a machine with a GPU, Vulkan otherwise picks it and has no present mode on Xvfb.
     lvp=$(ls /usr/share/vulkan/icd.d/lvp_icd.*.json 2>/dev/null | head -1)
-    xvfb-run -a -s "-screen 0 1280x720x24" env WGPU_BACKEND=vulkan ${lvp:+VK_ICD_FILENAMES=$lvp} "$game" --shot "$out" "$@"; code=$?
+    # -d lets Xvfb pick a free display itself (-displayfd); -a scans lock files first and races when smokes run in parallel.
+    # Older xvfb-run builds (Debian) only have -a.
+    auto=-a; xvfb-run --help 2>&1 | grep -q -- --auto-display && auto=-d
+    xvfb-run $auto -s "-screen 0 1280x720x24" env WGPU_BACKEND=vulkan ${lvp:+VK_ICD_FILENAMES=$lvp} "$game" --shot "$out" "$@"; code=$?
 fi
 elapsed=$((SECONDS - start))
 [ "$code" -eq 0 ] || { echo "shot.sh: the game exited with status $code" >&2; exit "$code"; }
