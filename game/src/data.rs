@@ -4,8 +4,11 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
+mod asteroids;
+mod crew;
 mod ships;
 mod weapons;
+pub use crew::{CrewMember, roster};
 pub use ships::{derive, load_class};
 
 fn asset_context(path: &std::path::Path) -> String {
@@ -179,6 +182,7 @@ pub(crate) fn glb_json(bytes: &[u8]) -> Option<(Value, usize)> {
     Some((serde_json::from_slice(bytes.get(20..end)?).ok()?, end))
 }
 
+#[derive(Debug, PartialEq)]
 pub struct AsteroidDef {
     pub scene: String,
     pub hp: f32,
@@ -192,48 +196,9 @@ pub struct AsteroidDef {
 #[derive(Resource)]
 pub struct AsteroidDefs(pub HashMap<String, AsteroidDef>);
 impl FromWorld for AsteroidDefs {
+    /// Required data: a missing or invalid file stops the game with the error naming the file, its mod and the entry and field.
     fn from_world(_: &mut World) -> Self {
-        let doc = read_json(&crate::assets_dir().join("data/asteroids.json"));
-        let defs: HashMap<_, _> = doc
-            .as_object()
-            .expect("Asteroid type map")
-            .iter()
-            .map(|(name, d)| {
-                let num = |key: &str| {
-                    let v = d[key].as_f64().unwrap_or_else(|| panic!("Asteroid number {name}: {key} (re-run the asset importer)")) as f32;
-                    assert!(v.is_finite() && v > 0.0, "Invalid asteroid {name}: {key}");
-                    v
-                };
-                let text = |key: &str| d[key].as_str().expect("Asteroid string").to_string();
-                let children: Vec<_> = d["children"].as_array().expect("Asteroid children").iter().map(|v| v.as_str().expect("Asteroid child").to_string()).collect();
-                assert_eq!(children.len(), 10, "Asteroid death slots: {name}");
-                (
-                    name.clone(),
-                    AsteroidDef {
-                        scene: text("scene"),
-                        hp: num("hp"),
-                        mass: num("mass"),
-                        radius: num("radius"),
-                        acceleration: num("acceleration"),
-                        children,
-                        effect: text("effect"),
-                    },
-                )
-            })
-            .collect();
-        fn visit(name: &str, defs: &HashMap<String, AsteroidDef>, ancestors: &mut Vec<String>) {
-            assert!(!ancestors.iter().any(|a| a == name), "Cyclic asteroid breakup: {name}");
-            let d = defs.get(name).unwrap_or_else(|| panic!("Unknown asteroid child: {name}"));
-            ancestors.push(name.into());
-            for child in d.children.iter().filter(|c| !c.is_empty()) {
-                visit(child, defs, ancestors);
-            }
-            ancestors.pop();
-        }
-        for name in defs.keys() {
-            visit(name, &defs, &mut vec![]);
-        }
-        Self(defs)
+        Self(asteroids::try_load(&crate::assets_dir().join("data/asteroids.json")).unwrap_or_else(|e| panic!("{e}")))
     }
 }
 
@@ -682,6 +647,50 @@ impl Library {
 mod legacy {
     use super::*;
 
+    /// The asteroid reader before `asteroids`, on an already parsed file.
+    pub fn asteroids(doc: &Value) -> HashMap<String, AsteroidDef> {
+        let defs: HashMap<_, _> = doc
+            .as_object()
+            .expect("Asteroid type map")
+            .iter()
+            .map(|(name, d)| {
+                let num = |key: &str| {
+                    let v = d[key].as_f64().unwrap_or_else(|| panic!("Asteroid number {name}: {key} (re-run the asset importer)")) as f32;
+                    assert!(v.is_finite() && v > 0.0, "Invalid asteroid {name}: {key}");
+                    v
+                };
+                let text = |key: &str| d[key].as_str().expect("Asteroid string").to_string();
+                let children: Vec<_> = d["children"].as_array().expect("Asteroid children").iter().map(|v| v.as_str().expect("Asteroid child").to_string()).collect();
+                assert_eq!(children.len(), 10, "Asteroid death slots: {name}");
+                (
+                    name.clone(),
+                    AsteroidDef {
+                        scene: text("scene"),
+                        hp: num("hp"),
+                        mass: num("mass"),
+                        radius: num("radius"),
+                        acceleration: num("acceleration"),
+                        children,
+                        effect: text("effect"),
+                    },
+                )
+            })
+            .collect();
+        fn visit(name: &str, defs: &HashMap<String, AsteroidDef>, ancestors: &mut Vec<String>) {
+            assert!(!ancestors.iter().any(|a| a == name), "Cyclic asteroid breakup: {name}");
+            let d = defs.get(name).unwrap_or_else(|| panic!("Unknown asteroid child: {name}"));
+            ancestors.push(name.into());
+            for child in d.children.iter().filter(|c| !c.is_empty()) {
+                visit(child, defs, ancestors);
+            }
+            ancestors.pop();
+        }
+        for name in defs.keys() {
+            visit(name, &defs, &mut vec![]);
+        }
+        defs
+    }
+
     pub fn gun_def(g: &Value) -> GunDef {
         GunDef {
             mount_type: g["Mount Type"].as_str().map(|s| s.split_whitespace().collect::<Vec<_>>().join(" ")),
@@ -831,6 +840,38 @@ mod weapons_equivalence {
             assert_alike(&g, &b, &m.file_name().to_string_lossy());
         }
         eprintln!("compared retail and {seen} mod weapon file(s)");
+    }
+}
+
+#[cfg(test)]
+mod asteroids_equivalence {
+    use super::*;
+
+    fn typed(doc: &Value) -> HashMap<String, AsteroidDef> {
+        asteroids::build(serde_json::from_value(doc.clone()).unwrap_or_else(|e| panic!("{e}"))).unwrap_or_else(|e| panic!("{e}"))
+    }
+
+    /// The typed reader gives exactly what the untyped one gave, on the imported retail table and on every `mods/` asteroid file
+    /// (merged over retail, as the overlay does).
+    #[test]
+    #[ignore = "needs imported assets"]
+    fn typed_asteroids_equal_the_untyped_reader_on_retail_and_mod_data() {
+        let Some(retail) = try_json(&crate::assets_dir().join("data/asteroids.json")) else {
+            eprintln!("skipped: no imported data/asteroids.json");
+            return;
+        };
+        assert_eq!(typed(&retail), legacy::asteroids(&retail), "retail");
+        assert!(!typed(&retail).is_empty());
+        let mods = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../mods");
+        let mut seen = 0;
+        for m in std::fs::read_dir(mods).unwrap().flatten() {
+            let Some(over) = try_json(&m.path().join("data/asteroids.json")) else { continue };
+            seen += 1;
+            let mut merged = retail.clone();
+            crate::modding::merge(&mut merged, &over);
+            assert_eq!(typed(&merged), legacy::asteroids(&merged), "{}", m.file_name().to_string_lossy());
+        }
+        eprintln!("compared retail and {seen} mod asteroid file(s)");
     }
 }
 
