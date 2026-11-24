@@ -50,7 +50,7 @@ pub struct Surface {
 
 fn surface(v: &Value, d: Surface) -> Surface {
     Surface {
-        roughness: num(&v["roughness"], d.roughness).clamp(0.02, 1.0),
+        roughness: num(&v["roughness"], d.roughness).clamp(ROUGHNESS_MIN, 1.0),
         metallic: num(&v["metallic"], d.metallic).clamp(0.0, 1.0),
         reflectance: num(&v["reflectance"], d.reflectance),
         bump: num(&v["bump"], d.bump),
@@ -59,14 +59,21 @@ fn surface(v: &Value, d: Surface) -> Surface {
     }
 }
 
+/// PROVISIONAL: the surface a profile gets for a material no rule names (and the base its rules start from).
+const DEFAULT_SURFACE: Surface = Surface { roughness: 0.8, metallic: 0.0, reflectance: 0.4, bump: 1.0, cavity: 0.3, gloss: 0.2 };
+/// PROVISIONAL: the rim light's colour (linear rgb), a pale blue, when the profile names none.
+const DEFAULT_RIM: Vec3 = Vec3::new(0.6, 0.7, 1.0);
+/// The smoothest roughness a profile may ask for: a profile's `roughness`: a perfect mirror is not wanted on a hull.
+const ROUGHNESS_MIN: f32 = 0.02;
+
 pub fn parse(v: &Value) -> Option<Surfaces> {
     v.is_object().then(|| {
-        let default = surface(&v["default"], Surface { roughness: 0.8, metallic: 0.0, reflectance: 0.4, bump: 1.0, cavity: 0.3, gloss: 0.2 });
+        let default = surface(&v["default"], DEFAULT_SURFACE);
         Surfaces {
             rules: v["rules"].as_array().into_iter().flatten().map(|r| (names(&r["match"], &[]), surface(r, default))).filter(|(m, _)| !m.is_empty()).collect(),
             default,
             skip: names(&v["skip"], &[]),
-            rim: super::rgb(&v["rim"]).unwrap_or(Vec3::new(0.6, 0.7, 1.0)).extend(num(&v["rim_strength"], 0.0)),
+            rim: super::rgb(&v["rim"]).unwrap_or(DEFAULT_RIM).extend(num(&v["rim_strength"], 0.0)),
         }
     })
 }

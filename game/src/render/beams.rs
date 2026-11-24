@@ -43,14 +43,31 @@ pub struct Beams {
     pub sparks: usize,
 }
 
+/// PROVISIONAL: the beam core's colour (linear rgb) when a profile names none.
+const CORE_COLOR: Vec3 = Vec3::new(1.0, 0.98, 0.95);
+/// PROVISIONAL: the beam's brightness multiplier when a profile names none.
+const BRIGHTNESS: f32 = 2.0;
+/// PROVISIONAL: the beam glow's width in beam widths, and the range a profile may set it to.
+const GLOW: f32 = 6.0;
+const GLOW_RANGE: (f32, f32) = (1.5, 30.0);
+/// PROVISIONAL: motes drawn into a charging muzzle, and the most a profile may ask for.
+const MOTES: f32 = 18.0;
+const MOTES_MAX: f32 = 64.0;
+/// PROVISIONAL: arcs round the muzzle, and the most a profile may ask for.
+const ARCS: f32 = 4.0;
+const ARCS_MAX: f32 = 12.0;
+/// PROVISIONAL: sparks off the struck hull, and the most a profile may ask for.
+const SPARKS: f32 = 14.0;
+const SPARKS_MAX: f32 = 64.0;
+
 pub fn parse(v: &Value) -> Option<Beams> {
     v.is_object().then(|| Beams {
-        core: rgb(&v["core"]).unwrap_or(Vec3::new(1.0, 0.98, 0.95)).max(Vec3::ZERO),
-        brightness: num(&v["brightness"], 2.0).max(0.0),
-        glow: num(&v["glow"], 6.0).clamp(1.5, 30.0),
-        motes: num(&v["motes"], 18.0).clamp(0.0, 64.0) as usize,
-        arcs: num(&v["arcs"], 4.0).clamp(0.0, 12.0) as usize,
-        sparks: num(&v["sparks"], 14.0).clamp(0.0, 64.0) as usize,
+        core: rgb(&v["core"]).unwrap_or(CORE_COLOR).max(Vec3::ZERO),
+        brightness: num(&v["brightness"], BRIGHTNESS).max(0.0),
+        glow: num(&v["glow"], GLOW).clamp(GLOW_RANGE.0, GLOW_RANGE.1),
+        motes: num(&v["motes"], MOTES).clamp(0.0, MOTES_MAX) as usize,
+        arcs: num(&v["arcs"], ARCS).clamp(0.0, ARCS_MAX) as usize,
+        sparks: num(&v["sparks"], SPARKS).clamp(0.0, SPARKS_MAX) as usize,
     })
 }
 
@@ -207,7 +224,13 @@ fn arc(b: &mut QuadBatch, from: Vec3, to: Vec3, half: f32, eye: Vec3, colour: Ve
     strip(b, Kind::Arc, &pts, eye, colour, |i| (half, i as f32 / N as f32, alpha));
 }
 
-/// Size of the fast beam flicker (a fraction of the glow's size; the slower, larger one is 0.1). Engine choice, not the original's.
+/// Size of the slow beam flicker (a fraction of the glow's size). Engine choice, not the original's. PROVISIONAL.
+const BEAM_FLICKER_COARSE: f32 = 0.1;
+/// Speed of the slow flicker (radians per second). PROVISIONAL.
+const BEAM_FLICKER_COARSE_RATE: f32 = 47.0;
+/// Speed of the fast flicker (radians per second). PROVISIONAL.
+const BEAM_FLICKER_FINE_RATE: f32 = 113.0;
+/// Size of the fast beam flicker (a fraction of the glow's size). Engine choice, not the original's.
 const BEAM_FLICKER_FINE: f32 = 0.07;
 /// The arcs change shape once per this many seconds (about fourteen times a second). Engine choice, not the original's.
 const ARC_TICK_SECONDS: f32 = 0.07;
@@ -223,7 +246,7 @@ const SPARK_REACH_SPAN: f32 = 30.0;
 /// Draws one beam gun into the batch at time `now` (seconds, for everything that moves).
 pub fn emit(b: &mut QuadBatch, cfg: &Beams, v: &View, eye: Vec3, now: f32) {
     let w = v.width;
-    let flicker = 1.0 + 0.1 * (now * 47.0).sin() + BEAM_FLICKER_FINE * (now * 113.0).sin();
+    let flicker = 1.0 + BEAM_FLICKER_COARSE * (now * BEAM_FLICKER_COARSE_RATE).sin() + BEAM_FLICKER_FINE * (now * BEAM_FLICKER_FINE_RATE).sin();
     let (side_a, side_b) = v.dir.any_orthonormal_pair();
     // the arcs change shape some fourteen times a second
     let tick = (now / ARC_TICK_SECONDS) as u32;

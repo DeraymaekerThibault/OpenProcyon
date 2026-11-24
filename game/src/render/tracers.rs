@@ -60,13 +60,43 @@ pub struct Smoke {
     pub rise: f32,
 }
 
+// What a profile's tracer and smoke keys fall back to when it leaves them out. PROVISIONAL.
+/// PROVISIONAL: a smoke trail's grey (linear rgb).
+const SMOKE_COLOR: f32 = 0.45;
+/// PROVISIONAL: a smoke trail's width at the shell, in game units.
+const SMOKE_WIDTH: f32 = 0.5;
+/// PROVISIONAL: how many times wider a smoke trail is at its oldest end.
+const SMOKE_WIDEN: f32 = 4.0;
+/// PROVISIONAL: how long a smoke trail lasts, in seconds.
+const SMOKE_SECONDS: f32 = 1.3;
+/// PROVISIONAL: how fast a smoke trail rises, in game units per second.
+const SMOKE_RISE: f32 = 0.3;
+/// PROVISIONAL: a tracer's default colour (linear rgb), a warm orange.
+const TRACER_COLOR: Vec3 = Vec3::new(1.0, 0.6, 0.3);
+/// PROVISIONAL: a tracer streak's width, in game units.
+const TRACER_WIDTH: f32 = 0.4;
+/// PROVISIONAL: how long a tracer streak stays visible behind the shell, in seconds.
+const TRACER_SECONDS: f32 = 0.25;
+/// PROVISIONAL: the size of a tracer's bright head, in game units.
+const TRACER_HEAD: f32 = 1.0;
+/// PROVISIONAL: how far the head is stretched along the flight, as a multiple of its size.
+const TRACER_STRETCH: f32 = 1.5;
+/// PROVISIONAL: the head's white-hot core colour (linear rgb).
+const TRACER_CORE: Vec3 = Vec3::new(1.0, 0.95, 0.85);
+/// PROVISIONAL: the tracer's brightness multiplier.
+const TRACER_BRIGHTNESS: f32 = 2.0;
+/// PROVISIONAL: the share of retail flight particles kept (1 keeps them all).
+const TRACER_PARTICLES: f32 = 1.0;
+/// PROVISIONAL: how much of the sky's ambient colour smoke keeps on its shadowed side.
+const SMOKE_SHADE: f32 = 0.35;
+
 fn smoke(v: &Value) -> Option<Smoke> {
     v.is_object().then(|| Smoke {
-        color: rgb(&v["color"]).unwrap_or(Vec3::splat(0.45)),
-        width: num(&v["width"], 0.5).max(0.0),
-        widen: num(&v["widen"], 4.0).max(1.0),
-        seconds: num(&v["seconds"], 1.3).max(0.05),
-        rise: num(&v["rise"], 0.3),
+        color: rgb(&v["color"]).unwrap_or(Vec3::splat(SMOKE_COLOR)),
+        width: num(&v["width"], SMOKE_WIDTH).max(0.0),
+        widen: num(&v["widen"], SMOKE_WIDEN).max(1.0),
+        seconds: num(&v["seconds"], SMOKE_SECONDS).max(0.05),
+        rise: num(&v["rise"], SMOKE_RISE),
     })
 }
 
@@ -92,13 +122,13 @@ fn bullet_names(v: &Value) -> Option<Vec<String>> {
 
 pub fn parse(v: &Value) -> Option<Tracers> {
     v.is_object().then(|| {
-        let default = tracer(&v["default"], Tracer { color: Vec3::new(1.0, 0.6, 0.3), width: 0.4, seconds: 0.25, head: 1.0, stretch: 1.5, smoke: None });
+        let default = tracer(&v["default"], Tracer { color: TRACER_COLOR, width: TRACER_WIDTH, seconds: TRACER_SECONDS, head: TRACER_HEAD, stretch: TRACER_STRETCH, smoke: None });
         Tracers {
             bullets: v["bullets"].as_array().into_iter().flatten().filter_map(|b| Some((bullet_names(&b["match"])?, tracer(b, default)))).collect(),
             default,
-            core: rgb(&v["core"]).unwrap_or(Vec3::new(1.0, 0.95, 0.85)),
-            brightness: num(&v["brightness"], 2.0),
-            particles: num(&v["particles"], 1.0),
+            core: rgb(&v["core"]).unwrap_or(TRACER_CORE),
+            brightness: num(&v["brightness"], TRACER_BRIGHTNESS),
+            particles: num(&v["particles"], TRACER_PARTICLES),
         }
     })
 }
@@ -275,7 +305,7 @@ fn smoke_trails(
     }
     vis.set_if_neq(batch.upload(&mut meshes, &mesh.0));
     // the sky's colour on the shadowed side, as the puffs have it
-    let shade = (ambient.color.to_linear().to_vec3() * 0.35).extend(1.0);
+    let shade = (ambient.color.to_linear().to_vec3() * SMOKE_SHADE).extend(1.0);
     if materials.get(&mat.0).is_some_and(|m| m.extension.u.shade != shade)
         && let Some(mut m) = materials.get_mut(&mat.0)
     {
