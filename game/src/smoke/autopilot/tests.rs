@@ -122,8 +122,8 @@ fn a_tower_is_faced_with_the_gun_nearest_the_bow() {
 
 #[test]
 fn a_tow_task_names_its_ship_by_name_suffix_or_in_its_text() {
-    let task = |name: &str, text: &str| super::super::eval::Task { name: name.into(), text: text.into(), active: true, complete: false, failed: false };
-    let unit = |n: u32, name: &str| super::super::eval::Unit {
+    let task = |name: &str, text: &str| (name.to_string(), text.to_string());
+    let unit = |n: u32, name: &str| Unit {
         e: Entity::from_raw_u32(n).unwrap(),
         id: n as i64,
         name: name.into(),
@@ -145,16 +145,22 @@ fn a_tow_task_names_its_ship_by_name_suffix_or_in_its_text() {
     let me = w[0].e;
     // Mission 4: the task name says "tender", the text names the ship.
     let m4 = task("Tow tender to safety", "Tow the RLS Bachanalia to the Rally Point.");
-    assert_eq!(task_towee(&m4, &w, me).map(|u| u.e), Some(w[2].e));
-    assert_eq!(task_towee(&task("TowHarvester", ""), &w, me).map(|u| u.e), Some(w[3].e), "a name suffix still wins");
-    assert!(task_towee(&task("Tow the wreck", "Tow the wreck home."), &w, me).is_none(), "an unnamed ship never matches the text");
-    assert!(task_towee(&task("Protect the RLS Bachanalia", "Protect the RLS Bachanalia."), &w, me).is_none(), "only Tow tasks");
+    assert_eq!(task_towee(&m4.0, &m4.1, &w, me).map(|u| u.e), Some(w[2].e));
+    assert_eq!(task_towee(&task("TowHarvester", "").0, &task("TowHarvester", "").1, &w, me).map(|u| u.e), Some(w[3].e), "a name suffix still wins");
+    assert!(
+        task_towee(&task("Tow the wreck", "Tow the wreck home.").0, &task("Tow the wreck", "Tow the wreck home.").1, &w, me).is_none(),
+        "an unnamed ship never matches the text"
+    );
+    assert!(
+        task_towee(&task("Protect the RLS Bachanalia", "Protect the RLS Bachanalia.").0, &task("Protect the RLS Bachanalia", "Protect the RLS Bachanalia.").1, &w, me).is_none(),
+        "only Tow tasks"
+    );
     let w = [unit(1, "RLS Sea Sparrow"), unit(5, "RLS Yorkshire")];
     let sloop = task("MO4 free stuck sloop", "Tow the RLS Yorkshire Clear of the Island it has Run Aground On.");
-    assert_eq!(task_towee(&sloop, &w, me).map(|u| u.e), Some(w[1].e), "a task whose text says Tow");
+    assert_eq!(task_towee(&sloop.0, &sloop.1, &w, me).map(|u| u.e), Some(w[1].e), "a task whose text says Tow");
     let w = [unit(1, "RLS Sea Sparrow"), unit(6, "RLS Indomitable")];
     let mow = task("rescue bh man o war", "Tow the RLS Indominable Clear of the Vanov Black Hole.");
-    assert_eq!(task_towee(&mow, &w, me).map(|u| u.e), Some(w[1].e), "the misspelt name still matches");
+    assert_eq!(task_towee(&mow.0, &mow.1, &w, me).map(|u| u.e), Some(w[1].e), "the misspelt name still matches");
 }
 
 #[test]

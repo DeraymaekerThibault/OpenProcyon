@@ -1172,3 +1172,34 @@ fn a_started_speech_line_with_text_is_handed_to_the_chat_history_once() {
     }
     assert_eq!(sc.started, vec![("First.".to_string(), Some([1.0, 0.0, 0.0, 1.0])), ("Second.".to_string(), None)], "in order, textless lines skipped");
 }
+
+/// Needs no assets: the kill kind of 'Player Killed A Object' and the owner-keyed alliance and hold-fire state.
+#[test]
+fn kill_kinds_alliances_and_hold_fire_are_typed_and_asset_free() {
+    assert_eq!(KillKind::parse("Asteroid"), KillKind::Asteroid);
+    assert_eq!(KillKind::parse("Ship"), KillKind::Ship);
+    assert_eq!(KillKind::parse("anything else"), KillKind::Ship, "only Asteroid counts rocks, as before");
+    let mut s = Script::new(&serde_json::json!({"rules": []}), serde_json::Value::Null);
+    let mut out = vec![];
+    let alliance = |on: &str| serde_json::json!({"Type": "Set alliance between PlayerA and PlayerB to TRUE/FALSE", "PLAYER A": "Reds", "PLAYER B": "Blues", "SET ALLIANCE TO": on});
+    s.act(&alliance("FALSE"), &[], &mut out, "t");
+    assert!(s.hostile("Reds", "Blues") && s.hostile("Blues", "Reds"), "enmity is symmetric");
+    assert!(!s.hostile("Reds", "Reds"));
+    s.act(&alliance("TRUE"), &[], &mut out, "t");
+    assert!(!s.hostile("Reds", "Blues") && !s.hostile("Blues", "Reds"));
+    let hold = |on: &str| serde_json::json!({"Type": "Set Fleet Hold Fire", "PLAYER FLEET": "Reds", "HOLD FIRE": on});
+    s.act(&hold("TRUE"), &[], &mut out, "t");
+    assert!(s.holds_fire("Reds") && !s.holds_fire("Blues"));
+    s.act(&hold("FALSE"), &[], &mut out, "t");
+    assert!(!s.holds_fire("Reds"));
+    // A capture is credited to the captor's team members only.
+    let mut world = World::new();
+    let e = world.spawn_empty().id();
+    s.set_teams(vec![("Navy".into(), vec!["Reds".into()]), ("Pirates".into(), vec!["Blues".into()])]);
+    s.record_capture("Reds", "Blues", e, false);
+    s.record_destroyed("Blues", e);
+    assert!(s.in_team("Navy", "Reds") && !s.in_team("Navy", "Blues"));
+    assert_eq!(s.team_of("Blues"), Some("Pirates"));
+    assert_eq!(s.captured.len(), 1);
+    assert_eq!(s.destroyed[0].0, "Blues");
+}

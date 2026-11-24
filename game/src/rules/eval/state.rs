@@ -22,8 +22,8 @@ pub(in crate::rules) enum EventKey {
         volume: String,
     },
     Killed {
-        player: String,
-        kind: String,
+        player: Owner,
+        kind: KillKind,
     },
 }
 
@@ -69,8 +69,8 @@ pub struct Script {
     /// (older ones stay active), sets the point when the name exists in the map and clears it for "NO OBJECTIVE POINT"; any other
     /// unknown name leaves the point as it was (decoded).
     pub(in crate::rules) team_objectives: HashMap<String, (String, Vec<String>)>,
-    pub(in crate::rules) hold_fire: HashSet<String>,
-    pub(in crate::rules) hostile: HashSet<(String, String)>,
+    pub(in crate::rules) hold_fire: HashSet<Owner>,
+    pub(in crate::rules) hostile: HashSet<(Owner, Owner)>,
     pub(in crate::rules) player: String,
     pub(in crate::rules) tows: Vec<(Entity, Entity)>,
     pub(in crate::rules) tow_specs: Vec<(String, String)>,
@@ -110,22 +110,22 @@ pub struct Script {
     pub(in crate::rules) group_names: HashSet<String>,
     /// Lifeboats saved as the original tallies them: (collecting player, lifeboat owner, count). The only source of the rules'
     /// capture counts apart from `base_captures`; boarding a ship never touches it.
-    pub(in crate::rules) lifeboats_saved: Vec<(String, String, u32)>,
+    pub(in crate::rules) lifeboats_saved: Vec<(Owner, Owner, u32)>,
     /// Owner of every lifeboat in the world, refreshed by lifeboats.rs each frame (`Player has no lifeboats`).
     pub(in crate::rules) lifeboat_owners: Vec<String>,
     /// PROVISIONAL bridge, bases only: boardings of a base by (capturing player, base's previous player). The original's capture count has no
     /// writer but lifeboat pickup, yet mission 12's defeat reads 'Procs vs RoyalPalace' (the palace is a boardable base), so it is kept alive.
     /// Ship boardings are not counted here: mission 6's 'PlayerStart vs PirateRunner' is the lifeboat route, its boarding route is 'Team has captured'.
-    pub(in crate::rules) base_captures: HashMap<(String, String), u32>,
+    pub(in crate::rules) base_captures: HashMap<(Owner, Owner), u32>,
     /// Units captured by boarding (boarding.rs) and the capturing player, for 'Team has captured a ship'.
-    pub(in crate::rules) captured: Vec<(String, Entity)>,
+    pub(in crate::rules) captured: Vec<(Owner, Entity)>,
     /// Ships destroyed and the player who destroyed them, for 'Team has destroyed a ship'.
-    pub(in crate::rules) destroyed: Vec<(String, Entity)>,
+    pub(in crate::rules) destroyed: Vec<(Owner, Entity)>,
     /// Ships that were destroyed, as they last stood: a sunk ship is removed from the world a tick after its break-up, but 'Group
     /// Destroyed' and the kill counts still answer for it (`keep_sunk`).
     pub(in crate::rules) sunk: Vec<Unit>,
     /// Skirmish teams: team name id -> its players (`set_teams`). Empty in the campaign, where a team condition counts anyone.
-    pub(in crate::rules) teams: HashMap<String, Vec<String>>,
+    pub(in crate::rules) teams: HashMap<String, Vec<Owner>>,
     /// 'Grant Team X Points' totals per team name id ('Team has X points').
     pub team_points: HashMap<String, i32>,
     /// Event conditions (kills, captures, per-unit volume entries): events seen and events already reported, per condition key.
@@ -307,7 +307,8 @@ impl Script {
     /// 'Procs', its ironclads belong to the allied 'Procs2').
     pub fn record_capture(&mut self, by: &str, victim: &str, unit: Entity, base: bool) {
         if base {
-            let credit: Vec<String> = std::iter::once(by.to_string()).chain(self.players.iter().filter(|p| *p != by && *p != victim && !self.hostile(p, by)).cloned()).collect();
+            let credit: Vec<Owner> =
+                std::iter::once(Owner::from(by)).chain(self.players.iter().filter(|p| *p != by && *p != victim && !self.hostile(p, by)).map(|p| Owner::from(p.as_str()))).collect();
             for p in credit {
                 *self.base_captures.entry((p, victim.into())).or_default() += 1;
             }
@@ -333,7 +334,7 @@ impl Script {
     }
     /// Skirmish teams: (team name id, its players).
     pub fn set_teams(&mut self, teams: Vec<(String, Vec<String>)>) {
-        self.teams = teams.into_iter().collect();
+        self.teams = teams.into_iter().map(|(team, players)| (team, players.into_iter().map(Owner::from).collect())).collect();
     }
     /// Whether `player` plays for `team`; true for any player when the team is unknown or not given (campaign rules).
     pub(in crate::rules) fn in_team(&self, team: &str, player: &str) -> bool {
@@ -421,7 +422,7 @@ impl Script {
             if r.conds.iter().any(|c| self.gate(c) == Some(false)) {
                 continue;
             }
-            for c in r.conds.iter().filter(|c| matches!(s(c, "Type"), "Group/Unit Docked" | "Group/Unit Is Docked")) {
+            for c in r.conds.iter().filter(|c| matches!(RuleType::of(Role::Condition, c), Some(T::GroupUnitDocked | T::GroupUnitIsDocked))) {
                 if !members(w, s(c, "Dockers Group/Unit Name")).iter().any(|u| u.e == p.e) {
                     continue;
                 }
@@ -449,8 +450,8 @@ impl Script {
             }
             let player_in = |spec: &str| members(w, spec).iter().any(|u| u.e == p.e);
             for c in &r.conds {
-                match s(c, "Type") {
-                    "Enter Volume" | "Is Group In Volume" if player_in(s(c, "Group Name")) => {
+                match RuleType::of(Role::Condition, c) {
+                    Some(T::EnterVolume | T::IsGroupInVolume) if player_in(s(c, "Group Name")) => {
                         // The nearest point inside, not the centroid: mission 11's "Pursue Silver 1" is a bent band whose centroid lies
                         // outside it, and the bot circled there.
                         let vol = self.volume(s(c, "Volume Name"));
@@ -459,7 +460,7 @@ impl Script {
                         }
                     }
                     // Mission 4's stuck sloop and mission 6's PirateBigBrother are spotted by closing in.
-                    "Group to Group Distance" if schema::Equivalence::parse(s(c, "Equivalence")) == Some(schema::Equivalence::LessThan) && player_in(s(c, "GroupA Name")) => {
+                    Some(T::GroupToGroupDistance) if schema::Equivalence::parse(s(c, "Equivalence")) == Some(schema::Equivalence::LessThan) && player_in(s(c, "GroupA Name")) => {
                         if let Some(u) = members(w, s(c, "GroupB Name")).into_iter().filter(|u| u.alive && u.visible && u.e != p.e).nearest_to(p.pos, |u| u.pos)
                             && u.pos.distance(p.pos) >= f(c, "Distance")
                         {
@@ -467,14 +468,14 @@ impl Script {
                         }
                     }
                     // Mission 5's warning shot: firing on the blockading fishing boats.
-                    "Is Group A attacking Group B" if player_in(s(c, "GroupA Name")) => {
+                    Some(T::IsGroupAAttackingGroupB) if player_in(s(c, "GroupA Name")) => {
                         out.extend(members(w, s(c, "GroupB Name")).iter().filter(|u| u.alive && u.visible && u.owner != p.owner).map(|u| Want::Hit(u.e)));
                     }
-                    "Is Ship In Tow" if b(c, "Boolean") && player_in(s(c, "Towing Group")) => {
+                    Some(T::IsShipInTow) if b(c, "Boolean") && player_in(s(c, "Towing Group")) => {
                         let towed = |e: Entity| self.tows.iter().any(|t| t.0 == p.e && t.1 == e);
                         out.extend(members(w, s(c, "Target to Tow")).iter().filter(|u| u.alive && u.e != p.e && !towed(u.e)).map(|u| Want::Tow(u.e)));
                     }
-                    "Exit Volume" => {
+                    Some(T::ExitVolume) => {
                         let vol = self.volume(s(c, "Volume Name"));
                         // Only a ship the player tows: the player's own ship starts inside big area volumes (mission 2), and
                         // running from their centre took the bot off its objective.
@@ -487,7 +488,7 @@ impl Script {
                     }
                     // The part of the volume nearest the player: mission 9's StarHammer cannot move, and the Dark Matter's centre lies
                     // beyond the Star Mortar's 350 reach.
-                    "Mission 9 - If Mortar explodes within Area" => {
+                    Some(T::Mission9IfMortarExplodesWithinArea) => {
                         // The nearest point first, then a grid across the volume: the wreck's one Nova Mortar covers only 15
                         // degrees dead ahead, so the bot takes the first point a mount can reach.
                         let vol = self.volume(s(c, "Volume Name"));
@@ -495,13 +496,11 @@ impl Script {
                         out.extend(vol.near_inside(Vec2::new(p.pos.x, -p.pos.z)).map(at));
                         out.extend(vol.grid(8).into_iter().map(at));
                     }
-                    "Player has hit Group/Unit at least x Times" | "Group/Unit Hit at least x Times by Player ( with eqivalence )"
-                        if base(s(c, "Player Name")) == p.owner.as_str() =>
-                    {
+                    Some(T::PlayerHasHitGroupUnitAtLeastXTimes | T::GroupUnitHitAtLeastXTimesByPlayerWithEqivalence) if base(s(c, "Player Name")) == p.owner.as_str() => {
                         out.extend(members(w, s(c, "Group/Unit Name")).iter().filter(|u| u.alive && u.visible && u.owner != p.owner).map(|u| Want::Hit(u.e)));
                     }
-                    "Group Destroyed" | "Group/Unit Vital Section has >,<,= X damage" | "Group/Unit has >,<,= X damage" => {
-                        let spec = if s(c, "Type") == "Group Destroyed" { s(c, "Group Name") } else { s(c, "Group/Unit Name") };
+                    Some(ty @ (T::GroupDestroyed | T::GroupUnitVitalSectionHasXDamage | T::GroupUnitHasXDamage)) => {
+                        let spec = if ty == T::GroupDestroyed { s(c, "Group Name") } else { s(c, "Group/Unit Name") };
                         out.extend(members(w, spec).iter().filter(|u| u.alive && u.visible && self.hostile(&u.owner, &p.owner)).map(|u| Want::Hit(u.e)));
                     }
                     _ => {}
@@ -512,12 +511,12 @@ impl Script {
     }
     /// A condition the rules decide without the world: Some(holds) for flag, timer and speech gates, None for the rest.
     fn gate(&self, c: &Value) -> Option<bool> {
-        Some(match s(c, "Type") {
-            "World Initialize" => false,
-            "Flag Condition" => self.flags.get(s(c, "Flag Name")).copied().unwrap_or(false) == b(c, "Boolean Value"),
-            "Timer Condition" => self.timer(s(c, "Timer Name")).is_some_and(|v| cmp(s(c, "Equivalence"), v, f(c, "Time in seconds"))),
-            "Speech Event Played Once" => self.played.contains(s(c, "Speech Event Name")),
-            "Speech Event Not Played Yet" => !self.played.contains(s(c, "Speech Event Name")),
+        Some(match RuleType::of(Role::Condition, c)? {
+            T::WorldInitialize => false,
+            T::FlagCondition => self.flags.get(s(c, "Flag Name")).copied().unwrap_or(false) == b(c, "Boolean Value"),
+            T::TimerCondition => self.timer(s(c, "Timer Name")).is_some_and(|v| cmp(s(c, "Equivalence"), v, f(c, "Time in seconds"))),
+            T::SpeechEventPlayedOnce => self.played.contains(s(c, "Speech Event Name")),
+            T::SpeechEventNotPlayedYet => !self.played.contains(s(c, "Speech Event Name")),
             _ => return None,
         })
     }
@@ -526,7 +525,7 @@ impl Script {
     fn worth_wanting(&self, r: &Rule) -> bool {
         let name = r.name.to_ascii_lowercase();
         let bad = ["fail", "wrong", "bounds", "dead", "punish", "too long", "ignores", "death", "lose", "lost"];
-        if bad.iter().any(|x| name.contains(x)) || r.acts.iter().any(|a| s(a, "Type") == "End Game") {
+        if bad.iter().any(|x| name.contains(x)) || r.acts.iter().any(|a| RuleType::of(Role::Action, a) == Some(T::EndGame)) {
             return false;
         }
         r.acts.iter().any(|a| {

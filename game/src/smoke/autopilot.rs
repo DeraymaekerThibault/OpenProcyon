@@ -1,20 +1,61 @@
 //! Dev autopilot for `--script mission` (tools/autoplay.py): steers the human's ship through a campaign mission from what its rules
 //! wait for. A test driver for unattended runs, not game behaviour; all its tuning is PROVISIONAL.
-use super::*;
 use crate::EngineOrder;
+use crate::campaign::{Mission, MissionBase, MissionShip};
+use crate::combat::{ArmedBase, Asteroid, Health, Library, Target};
+use crate::docking::DockMsg;
+use crate::rules::{RuleShip, RuleWorld, Script, Unit, Want, live_tasks, player_hits};
+use crate::{Config, Nearest, PlayerShip, Ship, game_to_bevy};
+use bevy::prelude::*;
+use serde_json::Value;
 
-/// `--script mission`, outside mission 1's scripted opening: the bot's orders for one frame (fleet, docking, towing, steering).
+/// What the autopilot reads and writes beyond its system's other arguments.
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct Extra<'w, 's> {
+    bases:
+        Query<'w, 's, (Entity, &'static MissionBase, &'static Transform, Option<(&'static ArmedBase, &'static Health)>), (Without<Ship>, Without<crate::environment::SpaceAnimal>)>,
+    dock: MessageWriter<'w, DockMsg>,
+    board: MessageWriter<'w, crate::boarding::BoardMsg>,
+    /// Non-empty while the player's ship is running a dock sequence.
+    docking_player: Query<'w, 's, (), (With<PlayerShip>, With<crate::docking::Docker>)>,
+    /// Non-empty while the player's ship is sailing to pick up a tow.
+    towing_player: Query<'w, 's, (), (With<PlayerShip>, With<crate::docking::Tower>)>,
+    /// Spawned lifeboats (pre-placed ones carry a `MissionShip` and are rule units).
+    lifeboats: Query<'w, 's, (&'static Transform, &'static crate::lifeboats::Lifeboat), (With<Ship>, Without<MissionShip>)>,
+    /// The player's guns (the dev autopilot fires mission 9's Star Mortar).
+    player_guns: Query<'w, 's, &'static crate::combat::GunStates, With<PlayerShip>>,
+    /// Island and base collision: the dev autopilot's line-of-sight test for a firing position.
+    land: Query<'w, 's, (&'static crate::collision::Obstacle, Option<&'static Visibility>), (Without<Ship>, Without<Asteroid>, Without<crate::environment::SpaceAnimal>)>,
+    /// Whether the dev autopilot last ordered its fleet to run (formation held, cease fire).
+    fleet_fleeing: Local<'s, bool>,
+    /// The dev autopilot's memory between frames.
+    pilot: Local<'s, State>,
+}
+
+type Rocks<'w, 's> = Query<'w, 's, (Entity, &'static Transform, &'static Asteroid), (Without<Ship>, Without<crate::environment::SpaceAnimal>)>;
+
+/// `--script mission`, outside mission 1's scripted opening: the bot's orders for one frame (fleet, docking, towing, steering), right
+/// after the rule dispatcher `update`, on the world snapshot it took.
 #[allow(clippy::too_many_arguments)]
-pub(super) fn drive(
-    commands: &mut Commands,
-    mission: &mut Mission,
-    world: &[Unit],
-    extra: &mut Extra,
-    ships: &mut Query<RuleShip>,
-    target: &mut Target,
-    rocks: &Query<(Entity, &Transform, &Asteroid), (Without<Ship>, Without<crate::environment::SpaceAnimal>)>,
-    lib: &Library,
+pub fn drive(
+    cfg: Res<Config>,
+    lib: Res<Library>,
+    mission: Option<ResMut<Mission>>,
+    snapshot: Res<RuleWorld>,
+    mut commands: Commands,
+    mut ships: Query<RuleShip>,
+    mut target: ResMut<Target>,
+    rocks: Rocks,
+    mut extra: Extra,
 ) {
+    let Some(mut mission) = mission else { return };
+    let mission = &mut *mission;
+    // Not during mission 1's scripted opening (briefing.rs): the player sails the rules' arrival path into the fleet meanwhile.
+    if cfg.script != Some(super::Script::Mission) || mission.opening.is_some() {
+        return;
+    }
+    let world = snapshot.0.as_slice();
+    let (commands, ships, target, rocks, lib, extra) = (&mut commands, &mut ships, &mut *target, &rocks, &*lib, &mut extra);
     mission.script.crew_screen = false; // keep the default crew and arms (missions 3+ open the screen after their first NIS)
     // PROCYON_AUTOINVULN also keeps the player's fleet from being boarded: a pirate captured mission 4's flagship while the
     // invulnerable bot fought it, leaving the run on a stranded stand-in ship.
@@ -227,13 +268,13 @@ fn objective_at(sc: &Script, data: &Value) -> Option<Vec3> {
 }
 
 /// A task to dock, by its name or its text (mission 9's "M09E - Return To Ship" reads "Return to and dock with Command Ship").
-fn is_dock_task(t: &Task) -> bool {
-    t.name.to_ascii_lowercase().contains("dock") || t.text.to_ascii_lowercase().contains("dock")
+fn is_dock_task(name: &str, text: &str) -> bool {
+    name.to_ascii_lowercase().contains("dock") || text.to_ascii_lowercase().contains("dock")
 }
 
 /// The dev autopilot is running for the objective point instead of fighting (see `flee_task`).
 fn fleeing(sc: &Script) -> bool {
-    (sc.point.is_some() || sc.point_pos.is_some()) && sc.tasks.iter().any(|t| t.active && !t.complete && flee_task(&t.text))
+    (sc.point.is_some() || sc.point_pos.is_some()) && live_tasks(sc).any(|(_, text)| flee_task(text))
 }
 
 /// True for an objective text that tells the player to get away rather than fight (dev autopilot heuristic, PROVISIONAL: English task texts).
@@ -476,14 +517,14 @@ fn unstick(time: f32, pos: Vec3, goal: Option<Vec3>, cell: &mut Option<Stuck>) -
 /// too: mission 4's "MO4 free stuck sloop" reads "Tow the RLS Yorkshire Clear of the Island it has Run Aground On.". The text may
 /// misspell the name (mission 4's "Tow the RLS Indominable ..." for the RLS Indomitable), so the first six letters of the name's last
 /// word are enough.
-fn task_towee<'a>(t: &super::eval::Task, w: &'a [Unit], player: Entity) -> Option<&'a Unit> {
-    let name = t.name.strip_prefix("Tow").filter(|n| !n.is_empty());
-    if name.is_none() && !t.text.starts_with("Tow ") {
+fn task_towee<'a>(name: &str, text: &str, w: &'a [Unit], player: Entity) -> Option<&'a Unit> {
+    let name = name.strip_prefix("Tow").filter(|n| !n.is_empty());
+    if name.is_none() && !text.starts_with("Tow ") {
         return None;
     }
     let candidates = || w.iter().filter(|u| u.alive && u.e != player && !u.name.is_empty());
-    let stem = |u: &&Unit| u.name.rsplit(' ').next().and_then(|w| w.get(..6)).is_some_and(|w| t.text.contains(w));
-    name.and_then(|n| candidates().find(|u| u.name.ends_with(n))).or_else(|| candidates().find(|u| t.text.contains(u.name.as_str()))).or_else(|| candidates().find(stem))
+    let stem = |u: &&Unit| u.name.rsplit(' ').next().and_then(|w| w.get(..6)).is_some_and(|w| text.contains(w));
+    name.and_then(|n| candidates().find(|u| u.name.ends_with(n))).or_else(|| candidates().find(|u| text.contains(u.name.as_str()))).or_else(|| candidates().find(stem))
 }
 
 fn autopilot_tow(sc: &Script, w: &[Unit], data: &Value, extra: &mut Extra) {
@@ -491,7 +532,7 @@ fn autopilot_tow(sc: &Script, w: &[Unit], data: &Value, extra: &mut Extra) {
     if sc.nis || !extra.towing_player.is_empty() || !extra.docking_player.is_empty() || sc.tows().iter().any(|t| t.0 == p.e) {
         return;
     }
-    if let Some(towee) = sc.tasks.iter().filter(|t| t.active && !t.complete).find_map(|t| task_towee(t, w, p.e)) {
+    if let Some(towee) = live_tasks(sc).find_map(|(name, text)| task_towee(name, text, w, p.e)) {
         extra.dock.write(DockMsg::TowStart { tower: None, towee: towee.e });
         return;
     }
@@ -524,10 +565,9 @@ fn autopilot_dock(sc: &Script, w: &[Unit], data: &Value, extra: &mut Extra) {
     if !extra.docking_player.is_empty() || sc.nis || sc.task_active("Dock With Tender") {
         return;
     }
-    let dock_task = |t: &&Task| t.active && !t.complete && is_dock_task(t);
-    for t in sc.tasks.iter().filter(dock_task) {
+    for (task, _) in live_tasks(sc).filter(|(name, text)| is_dock_task(name, text)) {
         // A task whose objective point carries its name (mission 2's camps): the base nearest that point.
-        let Some(at) = data["points"].as_array().and_then(|a| a.iter().find(|x| x["Name"] == t.name.as_str())).map(|x| game_to_bevy(&x["Position"])) else { continue };
+        let Some(at) = data["points"].as_array().and_then(|a| a.iter().find(|x| x["Name"] == task)).map(|x| game_to_bevy(&x["Position"])) else { continue };
         if at.distance(p.pos) > NEAR {
             continue;
         }
@@ -541,7 +581,7 @@ fn autopilot_dock(sc: &Script, w: &[Unit], data: &Value, extra: &mut Extra) {
     // when the target sits at the objective point (mission 5's "Deliver Supplies to Alamein" is a dock at Alamein).
     let point = objective_at(sc, data);
     if let Some((dockee, at)) = dock_target(sc, w, p.pos).filter(|(_, at)| at.distance(p.pos) < NEAR)
-        && (sc.tasks.iter().any(|t| dock_task(&t)) || point.is_some_and(|q| q.distance(at) < BASE_RANGE))
+        && (live_tasks(sc).any(|(name, text)| is_dock_task(name, text)) || point.is_some_and(|q| q.distance(at) < BASE_RANGE))
     {
         extra.dock.write(DockMsg::Dock { docker: None, dockee });
     }
@@ -586,7 +626,7 @@ fn autopilot(
     });
     // A task to defend what sits at the objective point (mission 12's "Defend Her Majesty Aboard Parliament"): the enemy closest to that
     // point comes before whatever attacks the player, or the boarders capture it while the bot duels submarines.
-    let raider = objective_at(sc, data).filter(|_| sc.tasks.iter().any(|t| t.active && !t.complete && defend_task(&t.text))).and_then(|at| {
+    let raider = objective_at(sc, data).filter(|_| live_tasks(sc).any(|(_, text)| defend_task(text))).and_then(|at| {
         w.iter().filter(|u| u.alive && u.visible && sc.hostile(&u.owner, &p.owner) && ships.contains(u.e)).nearest_to(at, |u| u.pos).filter(|u| u.pos.distance(at) < DEFEND_RADIUS)
     });
     // What the unfired rules wait for (`Script::wants`): a volume to enter or a unit to shoot (mission 5's blockaders) is where to sail
@@ -742,7 +782,7 @@ fn autopilot(
         // to what the rules want.
         objective_at(sc, data)
             .filter(|at| at.distance(p.pos) > POINT_REACHED || wanted_at.is_none())
-            .or_else(|| sc.tasks.iter().any(|t| t.active && !t.complete && is_dock_task(t)).then(|| dock_target(sc, w, p.pos).map(|t| t.1)).flatten())
+            .or_else(|| live_tasks(sc).any(|(name, text)| is_dock_task(name, text)).then(|| dock_target(sc, w, p.pos).map(|t| t.1)).flatten())
             .or(wanted_at)
             // Still nowhere to go (mission 10's "Defend Merchant Fleet"): stay with the nearest friendly ship outside the player's fleet.
             // Only once the ship is idle: a course the rules gave (mission 1's "Player Ordered Around Archipelago" path) wins.
@@ -786,8 +826,7 @@ fn autopilot(
     }
     // Dev shortcut for end-to-end runs: PROCYON_AUTOKILL=1 sinks the pirate once the player is close.
     if std::env::var_os("PROCYON_AUTOKILL").is_some()
-        && let Some(wr) =
-            w.iter().find(|u| u.name == "Warrior" && u.alive && u.visible && u.pos.distance(p.pos) < 250.0 && sc.hits_by.get(&(PLAYER.to_string(), u.e)).is_some_and(|n| *n >= 3))
+        && let Some(wr) = w.iter().find(|u| u.name == "Warrior" && u.alive && u.visible && u.pos.distance(p.pos) < 250.0 && player_hits(sc, u.e) >= 3)
         && let Ok(mut x) = ships.get_mut(wr.e)
     {
         x.health.core = 0.0;
