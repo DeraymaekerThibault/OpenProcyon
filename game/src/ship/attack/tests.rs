@@ -184,3 +184,41 @@ fn a_frontal_ship_is_a_standoff_attacker_only_when_its_main_gun_is_a_beam() {
     }
     assert_eq!(routine(&lib), Some(Routine::Standoff), "the same ship with beam guns holds a stand-off");
 }
+
+/// Asset-free: a ship whose main bank faces forward takes the frontal attack with shell guns, and a stand-off only with a beam in its
+/// primary bank, so a retail ship (no beam gun anywhere in the original) never does.
+#[test]
+fn a_synthetic_forward_ship_is_frontal_without_a_beam_primary_and_standoff_with_one() {
+    let gun = |beam: bool| {
+        let mut data = serde_json::json!({
+            "BulletsPerBurst": 1, "BulletAffectedByGravity": false, "BulletTypeName_Primary": "Bullet_X",
+            "EffectiveRange_Range": 100.0, "LongRange_Range": 200.0, "MaximumRange_Range": 300.0,
+            "EffectiveRange_AccuracyDeviation": 0.2, "LongRange_AccuracyDeviation": 0.4, "MaximumRange_AccuracyDeviation": 0.8,
+            "MuzzleSpeed": 100.0, "TimeBetweenBursts": 5.0, "DuringBurstReloadTime": 0.1, "HorizontalRotationSpeed": 1.0,
+            "VerticalRotationSpeed": 1.0, "VerticalMinAngle": 0.0, "VerticalMaxAngle": 1.0,
+            "visual": { "muzzles": [], "pivot": [0.0, 0.0, 0.0] },
+        });
+        if beam {
+            data["beam"] = serde_json::json!({"charge": 2.0, "duration": 6.0, "tick": 0.25, "ramp": 0.5, "max_power": 4.0});
+        }
+        crate::data::gun_def(&data)
+    };
+    let mount = |gun: &str, bank: usize| crate::data::Mount { pos: Vec3::ZERO, rot: Quat::IDENTITY, arc: 0.5, gun: gun.into(), bank, parent: None };
+    let mut class = crate::fixed_tests::synthetic_class();
+    let health = Health { sections: vec![], core: 100.0, destroyed: false };
+    let routine = |lib: &Library, class: &crate::combat::Class| plan(lib, class, &health, None).map(|p| p.0);
+    let lib = |guns: &[(&str, bool)]| Library {
+        classes: vec![],
+        guns: guns.iter().map(|(n, b)| (n.to_string(), gun(*b))).collect(),
+        bullets: default(),
+        names: default(),
+        clips: default(),
+    };
+    class.mounts = vec![mount("Gun_Shell", 0)];
+    assert_eq!(routine(&lib(&[("Gun_Shell", false)]), &class), Some(Routine::Frontal), "stock guns: the original's frontal attack");
+    class.mounts = vec![mount("Gun_Beam", 0)];
+    assert_eq!(routine(&lib(&[("Gun_Beam", true)]), &class), Some(Routine::Standoff), "a beam primary holds a stand-off");
+    // A beam in a bank that is not the primary one (fewer victory points: none are set here, so the first bank on a tie) does not decide.
+    class.mounts = vec![mount("Gun_Shell", 0), mount("Gun_Beam", 1)];
+    assert_eq!(routine(&lib(&[("Gun_Shell", false), ("Gun_Beam", true)]), &class), Some(Routine::Frontal), "the primary bank is the shell guns");
+}
