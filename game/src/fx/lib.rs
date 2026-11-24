@@ -323,8 +323,10 @@ pub(super) fn parse_prim(p: &Value, tex_names: &mut Vec<String>) -> Prim {
 }
 
 /// The imported index, then any other `<name>.json` in the folder (an effect a mod adds is not in the imported index).
-fn effect_names(dir: &std::path::Path) -> Vec<String> {
-    let mut names: Vec<String> = crate::data::try_json(&dir.join("index.json")).and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default();
+fn effect_names(dir: &std::path::Path, base: Option<&std::path::Path>) -> Vec<String> {
+    let index = dir.join("index.json");
+    let mut names: Vec<String> =
+        crate::data::load_or_base(&index, base.map(|b| b.join("index.json")).as_deref(), "no effect index; the effect files are still read").unwrap_or_default();
     let mut extra: Vec<String> = std::fs::read_dir(dir)
         .into_iter()
         .flatten()
@@ -337,13 +339,19 @@ fn effect_names(dir: &std::path::Path) -> Vec<String> {
     names
 }
 
-impl FromWorld for FxLib {
-    fn from_world(_: &mut World) -> Self {
-        let dir = assets_dir().join("fx");
-        let names = effect_names(&dir);
+impl FxLib {
+    /// Reads every effect of `dir` (`base`: the same folder of the retail import, for a file a mod broke). An effect file that is
+    /// missing or invalid is left out with one `error:` line naming it and its mod; the others load, and a lookup of the missing
+    /// name finds nothing (no effect is played), as for any unknown effect.
+    pub fn from_dir(dir: &std::path::Path, base: Option<&std::path::Path>) -> Self {
         let (mut effects, mut list, mut tex_names) = (HashMap::new(), vec![], vec![]);
-        for n in names {
-            let j = crate::data::read_json(&dir.join(format!("{n}.json")));
+        for n in effect_names(dir, base) {
+            let file = format!("{n}.json");
+            if !dir.join(&file).is_file() {
+                eprintln!("error: {}: effect {n:?} is in the index but its file is missing; the effect is left out", dir.join(&file).display());
+                continue;
+            }
+            let Some(j) = crate::data::load_or_base::<Value>(&dir.join(&file), base.map(|b| b.join(&file)).as_deref(), &format!("effect {n:?} is left out")) else { continue };
             let prims = match &j["Primitive"] {
                 Value::Array(a) => a.iter().map(|p| parse_prim(p, &mut tex_names)).collect(),
                 _ => vec![],
@@ -352,6 +360,12 @@ impl FromWorld for FxLib {
             list.push(Effect { prims });
         }
         Self { effects, list, tex_names }
+    }
+}
+
+impl FromWorld for FxLib {
+    fn from_world(_: &mut World) -> Self {
+        Self::from_dir(&assets_dir().join("fx"), Some(&crate::base_assets().join("fx")))
     }
 }
 
@@ -385,8 +399,34 @@ mod tests {
         for f in ["A.json", "ModEffect.json", "notes.txt"] {
             std::fs::write(dir.join(f), "{}").unwrap();
         }
-        assert_eq!(effect_names(&dir), ["A", "ModEffect"]);
+        assert_eq!(effect_names(&dir, None), ["A", "ModEffect"]);
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_bad_effect_file_is_left_out_or_replaced_by_the_base_and_the_others_load() {
+        let root = std::env::temp_dir().join(format!("procyon-fx-bad-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let (dir, base) = (root.join("mod"), root.join("base"));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::create_dir_all(&base).unwrap();
+        std::fs::write(dir.join("index.json"), r#"["Good", "Syntax", "Shape", "Gone", "Kept"]"#).unwrap();
+        let prim = r#"{"Primitive": [{}]}"#;
+        std::fs::write(dir.join("Good.json"), prim).unwrap();
+        std::fs::write(dir.join("Syntax.json"), "not json").unwrap();
+        std::fs::write(dir.join("Shape.json"), "[1, 2]").unwrap_or_default();
+        std::fs::write(dir.join("Kept.json"), "oops").unwrap();
+        std::fs::write(base.join("Kept.json"), prim).unwrap();
+        let lib = FxLib::from_dir(&dir, Some(&base));
+        let mut names: Vec<_> = lib.effects.keys().map(String::as_str).collect();
+        names.sort();
+        // `Shape` is valid JSON of another shape: it loads as an effect without primitives, as before.
+        assert_eq!(names, ["Good", "Kept", "Shape"]);
+        assert_eq!(lib.list[lib.effects["Kept"]].prims.len(), 1, "the base file stands in for the broken one");
+        // a broken index is reported and the folder's files are still found
+        std::fs::write(dir.join("index.json"), r#"{"not": "a list"}"#).unwrap();
+        assert!(FxLib::from_dir(&dir, None).effects.contains_key("Good"));
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
