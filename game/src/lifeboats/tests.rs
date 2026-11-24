@@ -168,3 +168,73 @@ fn preplaced_mission4_boats_are_lifeboats_by_flag_and_mission9_longboat_is_not()
     assert!([220, 221, 222].iter().all(|id| flagged("mission04", *id)));
     assert!(!flagged("mission09", 303), "Ship_Navy_Lifeboat_Mission9 is a combat story ship");
 }
+
+// ---- Not retail: `OP Abandon Ship` (the `Abandoned` marker), with synthetic classes (no imported assets).
+
+/// A world with a hull class that carries two boats and its race's lifeboat class.
+fn abandon_app() -> App {
+    let hull = crate::data::Class { name: "Hull".into(), race: "Navy".into(), lifeboats: 2, ..crate::fixed_tests::synthetic_class() };
+    let boat = crate::data::Class { name: class_for("Navy"), is_lifeboat: true, ..crate::fixed_tests::synthetic_class() };
+    let mut app = App::new();
+    app.add_plugins((MinimalPlugins, bevy::asset::AssetPlugin::default()))
+        .init_asset::<WorldAsset>()
+        .init_resource::<crate::fx::FxLib>()
+        .insert_resource(Library { classes: vec![hull, boat], guns: default(), bullets: default(), names: default(), clips: default() })
+        .insert_resource(crate::combat::SimRng::new(5))
+        .add_message::<ShipLost>()
+        .add_message::<crate::audio::Sfx>()
+        .add_systems(Update, (crate::tick_start, lifeboats).chain());
+    app
+}
+fn hull(app: &mut App, at: Vec3) -> Entity {
+    let health = Health::new(&app.world().resource::<Library>().classes[0]);
+    let ms = MissionShip { name: "Hull".into(), owner: "Navy".into(), visible: true, create_lifeboats: true, ..default() };
+    app.world_mut().spawn((Ship::new(0, Side::Player), health, Transform::from_translation(at), ms)).id()
+}
+fn boat_count(app: &mut App) -> usize {
+    app.world_mut().query::<&Lifeboat>().iter(app.world()).count()
+}
+
+#[test]
+fn an_abandoned_hull_launches_its_boats_once_and_does_not_collect_them() {
+    let mut app = abandon_app();
+    let ship = hull(&mut app, Vec3::ZERO);
+    app.update();
+    assert_eq!(boat_count(&mut app), 0);
+    app.world_mut().entity_mut(ship).insert(Abandoned);
+    app.update();
+    assert_eq!(boat_count(&mut app), 2, "the crew takes to the boats, by the same flag and class count as a death");
+    // The boats start at the hull, inside its bounding sphere: the hull they left must not take them back in.
+    for _ in 0..5 {
+        app.update();
+    }
+    assert_eq!(boat_count(&mut app), 2, "nobody is aboard the abandoned hull to collect a boat");
+    // A later death of the hull leaves no second set.
+    app.world_mut().get_mut::<Health>(ship).unwrap().destroyed = true;
+    lose(&mut app, ship);
+    app.update();
+    assert_eq!(boat_count(&mut app), 2, "the boats left when the ship was abandoned");
+}
+
+#[test]
+fn an_abandoned_hull_collects_nobody_elses_boat_and_a_crewed_ship_still_does() {
+    let mut app = abandon_app();
+    let (wreck, other) = (hull(&mut app, Vec3::ZERO), hull(&mut app, Vec3::new(500.0, 0.0, 0.0)));
+    app.world_mut().entity_mut(wreck).insert(Abandoned);
+    app.world_mut().get_mut::<MissionShip>(wreck).unwrap().create_lifeboats = false;
+    app.update();
+    // The other ship sinks beside the abandoned hull: its boats rest on the wreck and stay.
+    app.world_mut().get_mut::<Transform>(other).unwrap().translation = Vec3::new(0.5, 0.0, 0.0);
+    app.world_mut().get_mut::<Health>(other).unwrap().destroyed = true;
+    lose(&mut app, other);
+    for _ in 0..3 {
+        app.update();
+    }
+    assert_eq!(boat_count(&mut app), 2, "the wreck has no crew to take them in");
+    // A crewed ship in the same place collects them, as before.
+    app.world_mut().entity_mut(wreck).remove::<Abandoned>();
+    for _ in 0..3 {
+        app.update();
+    }
+    assert_eq!(boat_count(&mut app), 0, "a live, crewed ship touching a boat collects it");
+}

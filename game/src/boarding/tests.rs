@@ -388,3 +388,113 @@ fn the_reel_takes_a_tenth_of_a_unit_per_0_033_s_tick() {
     assert!((reeled(50.0, 2.0 * crate::TICK_SECS) - 49.8).abs() < 1e-5);
     assert_eq!(reeled(12.05, 1.0), REEL_MIN);
 }
+
+// ---- `OP Board Ship` (boarding/order.rs): the order a mission rule gives, with synthetic ships (no imported assets).
+
+/// Two ships 40 units apart, `a` (side Player) with or without a harpoon, `b` (side `foe`) a boardable hull.
+fn order_world(harpoon: bool, foe: Side) -> (App, Entity, Entity) {
+    let mut class = crate::fixed_tests::synthetic_class();
+    if harpoon {
+        class.mounts = vec![crate::data::Mount { pos: Vec3::ZERO, rot: Quat::IDENTITY, arc: std::f32::consts::TAU, gun: "Gun_Harpoon".into(), bank: 0, parent: None }];
+    }
+    let mut app = App::new();
+    app.add_message::<BoardMsg>()
+        .add_message::<Captured>()
+        .add_message::<Settled>()
+        .add_message::<Sfx>()
+        .insert_resource(Time::<()>::default())
+        .insert_resource(Library { classes: vec![class], guns: default(), bullets: default(), names: default(), clips: default() })
+        .insert_resource(SimRng::new(7))
+        .add_systems(Update, (handle_messages, set_flags, grapple_orders, board_orders, hook_flight).chain());
+    let hull = |app: &mut App, at: Vec3, side: Side| {
+        let health = Health::new(&app.world().resource::<Library>().classes[0]);
+        let boardable = Boardable { on: true, strength: Strength::ship(SCHOONER, Skill::Average.member()), skill: Skill::Average, counts: SCHOONER, points: vec![] };
+        app.world_mut().spawn((Transform::from_translation(at), Ship::new(0, side), health, Drift::default(), boardable)).id()
+    };
+    let a = hull(&mut app, Vec3::ZERO, Side::Player);
+    let b = hull(&mut app, Vec3::new(0.0, 0.0, -40.0), foe);
+    (app, a, b)
+}
+
+#[test]
+fn a_board_order_grapples_and_boards_when_the_hook_holds() {
+    let (mut app, a, b) = order_world(true, Side::Enemy);
+    app.world_mut().write_message(BoardMsg::Order { boarder: a, target: b });
+    tick(&mut app, 0.1);
+    assert!(app.world().get::<order::BoardOrder>(a).is_some(), "waiting for the hook");
+    assert!(held(&mut app, a).iter().any(|g| g.0 == b && g.1 > 0.0), "the harpoon is in the air: the Grapple order a player gives");
+    assert!(app.world().get::<Boarding>(a).is_none(), "no boarding before the hook bites");
+    for _ in 0..30 {
+        tick(&mut app, 0.1);
+        if app.world().get::<Boarding>(a).is_some() {
+            break;
+        }
+    }
+    assert!(app.world().get::<Boarding>(a).is_some_and(|f| f.target() == b), "the boarding the Board order of the menu makes");
+    assert!(app.world().get::<order::BoardOrder>(a).is_none(), "the order is spent");
+}
+
+#[test]
+fn a_ship_without_a_harpoon_or_a_friendly_target_cannot_be_ordered_to_board() {
+    let (mut app, a, b) = order_world(false, Side::Enemy);
+    app.world_mut().write_message(BoardMsg::Order { boarder: a, target: b });
+    tick(&mut app, 0.1);
+    assert!(app.world().get::<order::BoardOrder>(a).is_none() && app.world().get::<GrappleOrder>(a).is_none() && held(&mut app, a).is_empty(), "no harpoon: nothing happens");
+    let (mut app, a, b) = order_world(true, Side::Player);
+    app.world_mut().write_message(BoardMsg::Order { boarder: a, target: b });
+    tick(&mut app, 0.1);
+    assert!(app.world().get::<order::BoardOrder>(a).is_none() && held(&mut app, a).is_empty(), "an ally is not boarded");
+}
+
+#[test]
+fn a_board_order_ends_when_the_grapple_is_lost_and_waits_while_the_target_is_not_boardable() {
+    let (mut app, a, b) = order_world(true, Side::Enemy);
+    app.world_mut().get_mut::<Boardable>(b).unwrap().on = false;
+    app.world_mut().write_message(BoardMsg::Order { boarder: a, target: b });
+    for _ in 0..30 {
+        tick(&mut app, 0.1);
+    }
+    assert!(app.world().get::<order::BoardOrder>(a).is_some() && app.world().get::<Boarding>(a).is_none(), "grappled, but the target may not be boarded: it waits");
+    app.world_mut().get_mut::<Boardable>(b).unwrap().on = true;
+    tick(&mut app, 0.1);
+    tick(&mut app, 0.1);
+    assert!(app.world().get::<Boarding>(a).is_some(), "once Boardable is set the boarding starts");
+    // A lost grapple drops the order.
+    let (mut app, a, b) = order_world(true, Side::Enemy);
+    app.world_mut().get_mut::<Boardable>(b).unwrap().on = false;
+    app.world_mut().write_message(BoardMsg::Order { boarder: a, target: b });
+    tick(&mut app, 0.1);
+    drop_grapples(&mut app, a);
+    tick(&mut app, 0.1);
+    assert!(app.world().get::<order::BoardOrder>(a).is_none(), "the hook is gone: the order lapses");
+}
+
+#[test]
+fn a_board_order_ends_when_the_target_is_no_longer_an_enemy_and_an_abandoned_ship_takes_none() {
+    // The hook holds on a target that may not be boarded yet; someone else captures it meanwhile (it now fights for the boarder's side).
+    let (mut app, a, b) = order_world(true, Side::Enemy);
+    app.world_mut().get_mut::<Boardable>(b).unwrap().on = false;
+    app.world_mut().write_message(BoardMsg::Order { boarder: a, target: b });
+    for _ in 0..30 {
+        tick(&mut app, 0.1);
+    }
+    assert!(app.world().get::<order::BoardOrder>(a).is_some() && held(&mut app, a).iter().any(|g| g.0 == b && g.1 <= 0.0), "hooked and waiting");
+    app.world_mut().get_mut::<Ship>(b).unwrap().side = Side::Player;
+    tick(&mut app, 0.1);
+    assert!(app.world().get::<order::BoardOrder>(a).is_none(), "not an enemy any more: the order does not wait forever");
+    // A ship whose crew left cannot be told to board, and loses an order it had.
+    let (mut app, a, b) = order_world(true, Side::Enemy);
+    app.world_mut().entity_mut(a).insert(crate::lifeboats::Abandoned);
+    app.world_mut().write_message(BoardMsg::Order { boarder: a, target: b });
+    tick(&mut app, 0.1);
+    assert!(app.world().get::<order::BoardOrder>(a).is_none() && app.world().get::<GrappleOrder>(a).is_none() && held(&mut app, a).is_empty());
+    let (mut app, a, b) = order_world(true, Side::Enemy);
+    app.world_mut().get_mut::<Transform>(b).unwrap().translation = Vec3::new(0.0, 0.0, -5000.0); // out of harpoon range: the order steers
+    app.world_mut().write_message(BoardMsg::Order { boarder: a, target: b });
+    tick(&mut app, 0.1);
+    assert!(app.world().get::<GrappleOrder>(a).is_some());
+    app.world_mut().entity_mut(a).insert(crate::lifeboats::Abandoned);
+    tick(&mut app, 0.1);
+    tick(&mut app, 0.1);
+    assert!(app.world().get::<order::BoardOrder>(a).is_none() && app.world().get::<GrappleOrder>(a).is_none(), "abandoned on the way: both orders end");
+}
