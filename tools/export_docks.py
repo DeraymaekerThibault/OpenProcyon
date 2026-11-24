@@ -1,4 +1,4 @@
-"""Dock points: assets/data/docks.json = {entity: {points: [{label, pos, yaw}], tender: bool}}.
+"""Dock points: assets/data/docks.json = {entity: {points: [{label, pos, yaw, layer}], tender: bool}}.
 Dock points are the MSB nodes of kind 'DockPoint' of Ship_*/Base_*/Island_* world objects that declare 'DockPoint' mesh attributes
 (the node's own position, in its layer mesh's vertex frame, plus the offset that places that layer in scenery, `with_layer_offset`;
 x starboard / y forward / z up; `yaw` = the node's rotation about z, radians). Not the gun-mount rule of `mdb_to_glb.hardpoints`:
@@ -37,6 +37,12 @@ def export(root, out):
                     label=n.label,
                     pos=[round(c, 3) for c in with_layer_offset(offsets, msb, n)],
                     yaw=round(n.rot[0], 4),
+                    # The damage section the point sits on (bases, islands): losing it closes the object's docks.
+                    layer=(
+                        msb[n.parent].name
+                        if n.parent in msb and msb[n.parent].kind == "DamageSection"
+                        else None
+                    ),
                 )
                 for n in msb.values()
                 if n.kind == "DockPoint"
