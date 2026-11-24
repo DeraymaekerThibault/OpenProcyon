@@ -7,15 +7,17 @@ use std::sync::OnceLock;
 mod asteroids;
 mod crew;
 pub mod crew_nodes;
+pub mod maps;
 mod ships;
 mod weapons;
 pub use crew::{CrewMember, roster};
+pub use maps::MapDoc;
 pub use ships::{derive, load_class, try_load_class};
 pub(crate) use weapons::lenient;
 pub use weapons::try_load_weapons;
 
 /// The JSON schemas of the files a modder writes, by file name (`ship.schema.json`, ...): `ship.json`, `guns.json`, `bullets.json`,
-/// `data/crew_nodes.json`. `authoring::schemas` adds `mod.json`.
+/// `data/crew_nodes.json`. `authoring::schemas` adds `mod.json` and `map.json` (`map_schema`).
 pub fn schemas() -> Vec<(&'static str, Value)> {
     vec![
         ("ship.schema.json", ships::schema()),
@@ -23,6 +25,11 @@ pub fn schemas() -> Vec<(&'static str, Value)> {
         ("bullets.schema.json", weapons::bullets_schema()),
         ("crew_nodes.schema.json", crew_nodes::schema()),
     ]
+}
+
+/// The JSON schema of `maps/<id>/map.json` (`map.schema.json`), generated from [`MapDoc`].
+pub fn map_schema() -> Value {
+    maps::schema()
 }
 
 /// The file as errors name it: its path in the asset root and its source, which for a file a mod provided is the mod's own file even

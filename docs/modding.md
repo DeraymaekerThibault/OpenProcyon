@@ -127,7 +127,7 @@ Keys the loader does not know are ignored, and a known key of the wrong type cou
 
 `openprocyon --dump-schemas <dir>` writes JSON Schemas (draft 2020-12) for the files a mod writes: `ship.schema.json` (`ships/<Id>/ship.json`),
 `guns.schema.json` and `bullets.schema.json` (`data/weapons/*.json`), `crew_nodes.schema.json` (`data/crew_nodes.json`) and
-`mod.schema.json` (`mod.json`). It needs no game assets and exits 0. They are generated from the types the loader reads, so key names,
+`mod.schema.json` (`mod.json`) and `map.schema.json` (`maps/<id>/map.json`: sky, lighting, `world_half`, players, scenery, nebulae, mines, skirmish end rules). It needs no game assets and exits 0. They are generated from the types the loader reads, so key names,
 types and the field descriptions in the editor's hover are what the game really takes; tools linking the engine get the same from
 `openprocyon::authoring::schemas()`. Unknown keys stay allowed (the loader ignores them), so a misspelt key is not an error in the editor but
 is not offered either (`--check-mod` warns about it, with the nearest known key). No key is marked required: a mod file is merged over its parent (`extends`, or the retail entry of the same name) before
@@ -148,11 +148,12 @@ or map files to schemas once in `.vscode/settings.json`:
   { "fileMatch": ["data/weapons/guns.json"], "url": "./schemas/guns.schema.json" },
   { "fileMatch": ["data/weapons/bullets.json"], "url": "./schemas/bullets.schema.json" },
   { "fileMatch": ["data/crew_nodes.json"], "url": "./schemas/crew_nodes.schema.json" },
-  { "fileMatch": ["mod.json"], "url": "./schemas/mod.schema.json" }
+  { "fileMatch": ["mod.json"], "url": "./schemas/mod.schema.json" },
+  { "fileMatch": ["maps/*/map.json"], "url": "./schemas/map.schema.json" }
 ] }
 ```
 
-`$schema` is ignored in `ship.json`, `mod.json`, `guns.json`, `bullets.json` and `data/crew_nodes.json`. For `--dump-rule-schema` (mission rules) see "Authoring missions".
+`$schema` is ignored in `ship.json`, `mod.json`, `map.json`, `guns.json`, `bullets.json` and `data/crew_nodes.json`. `map.schema.json` documents the keys the engine already read from `map.json` (their names, types and defaults are unchanged); a value of the wrong type still counts as absent in the game, the schema is what an editor should offer. `--check-mod` does not yet warn about unknown `map.json` keys. There is no `script.schema.json` (`mission.json` and `script.json` are read by the rules interpreter from the JSON as written, not through one typed document): their vocabulary is `--dump-rule-schema` (mission rules) in "Authoring missions".
 
 
 ## Testing a mod

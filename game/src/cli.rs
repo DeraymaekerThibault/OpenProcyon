@@ -93,7 +93,7 @@ mod tests {
         assert_eq!(quick(&args(&["game", "--dump-schemas", &out.to_string_lossy()])), Some(0));
         let mut files: Vec<String> = std::fs::read_dir(&out).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
         files.sort();
-        assert_eq!(files, ["bullets.schema.json", "crew_nodes.schema.json", "guns.schema.json", "mod.schema.json", "ship.schema.json"]);
+        assert_eq!(files, ["bullets.schema.json", "crew_nodes.schema.json", "guns.schema.json", "map.schema.json", "mod.schema.json", "ship.schema.json"]);
         std::fs::remove_dir_all(dir).unwrap();
     }
 }
