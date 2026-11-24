@@ -20,6 +20,8 @@ use serde_json::Value;
 
 mod check_mod;
 mod json;
+#[cfg(test)]
+mod keyed_tests;
 pub use check_mod::{check_mod, check_mod_with, unknown_keys};
 pub use json::to_json_string;
 
@@ -86,6 +88,10 @@ pub fn schemas() -> Vec<(&'static str, Value)> {
         props.insert(
             "set".into(),
             serde_json::json!({"type": "object", "description": "Not part of the ship: with `extends`, JSON pointers (`/engines/0/fx`) mapped to the value that replaces what the merge left there; reaches inside arrays."}),
+        );
+        props.insert(
+            "merge".into(),
+            serde_json::json!({"type": "object", "description": "Not part of the ship (PROVISIONAL spelling): with `extends`, a list merged by key instead of replaced, as {\"/crew_nodes\": \"name\"}: the file's list at that pointer changes, adds or (`\"$remove\": true`) removes single entries of the parent's list, matched by that field. Applied before `set`."}),
         );
     }
     all

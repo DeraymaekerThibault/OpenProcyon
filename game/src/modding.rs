@@ -94,6 +94,156 @@ pub fn merge(base: &mut Value, over: &Value) {
     }
 }
 
+/// The slot a JSON pointer names in `v`, walking object keys only (a missing key is created as `null`); `None` when the path meets a
+/// non-object or is not a pointer. Part of the keyed merge (`merge_keyed`).
+fn object_slot<'a>(v: &'a mut Value, ptr: &str) -> Option<&'a mut Value> {
+    let rest = ptr.strip_prefix('/')?;
+    let mut at = v;
+    for token in rest.split('/') {
+        let key = token.replace("~1", "/").replace("~0", "~");
+        at = at.as_object_mut()?.entry(key).or_insert(Value::Null);
+    }
+    Some(at)
+}
+
+/// The list at `ptr` in the diff, taken out of it (so the plain merge leaves it alone); `Ok(None)` when the diff has none there.
+fn take_list(diff: &mut Value, ptr: &str) -> Result<Option<Vec<Value>>, String> {
+    let Some((parent, last)) = ptr.rsplit_once('/').filter(|(_, last)| !last.is_empty()) else {
+        return Err(format!("merges '{ptr}': not a JSON pointer to a key (like \"/objects\")"));
+    };
+    let last = last.replace("~1", "/").replace("~0", "~");
+    let mut at = &mut *diff;
+    for token in parent.split('/').skip(1) {
+        let key = token.replace("~1", "/").replace("~0", "~");
+        at = match at.as_object_mut().and_then(|o| o.get_mut(&key)) {
+            Some(next) => next,
+            None => return Ok(None),
+        };
+    }
+    match at.as_object_mut().and_then(|o| o.remove(&last)) {
+        None => Ok(None),
+        Some(Value::Array(list)) => Ok(Some(list)),
+        Some(_) => Err(format!("merges '{ptr}': the file's value there is not a list")),
+    }
+}
+
+/// The text a key value is matched by: strings, numbers and booleans only.
+fn key_text(v: Option<&Value>) -> Option<String> {
+    v.filter(|v| matches!(v, Value::String(_) | Value::Number(_) | Value::Bool(_))).map(Value::to_string)
+}
+
+/// Keyed merge (the `$remove` spelling is PROVISIONAL, docs/modding.md "Changing one entry of a list"): `entries` are matched to the base list at
+/// `ptr` by the field `field`. A matching entry is deep-merged (`merge`) into the base entry; one the base has not is appended, in
+/// order; `{"<field>": k, "$remove": true}` drops the base entry (a missing one adds a line to `warnings`). Base entries that are not
+/// mentioned keep their place. Errors (the whole file is then skipped, as for a bad `set`): the base is not a list, a base entry has
+/// no key or two share one, a diff entry is no object or has no key.
+fn merge_keyed(base: &mut Value, ptr: &str, field: &str, entries: &[Value], warnings: &mut Vec<String>) -> Result<(), String> {
+    let err = |m: String| format!("merges '{ptr}': {m}");
+    let slot = object_slot(base, ptr).ok_or_else(|| err("the file being extended has no object on that path".into()))?;
+    if slot.is_null() {
+        *slot = Value::Array(vec![]);
+    }
+    let Value::Array(list) = slot else { return Err(err("the file being extended has no list there".into())) };
+    let mut items: Vec<Option<Value>> = std::mem::take(list).into_iter().map(Some).collect();
+    let mut index: HashMap<String, usize> = HashMap::new();
+    for (i, e) in items.iter().flatten().enumerate() {
+        let Some(k) = key_text(e.get(field)) else {
+            let first = e.as_object().map(|o| o.keys().cloned().collect::<Vec<_>>().join(", ")).unwrap_or_default();
+            return Err(err(format!("entry {i} of the list being extended has no '{field}' (unknown key field? its fields: {first})")));
+        };
+        if let Some(j) = index.insert(k.clone(), i) {
+            return Err(err(format!("entries {j} and {i} of the list being extended have the same '{field}' ({k}), so they cannot be told apart")));
+        }
+    }
+    for (n, entry) in entries.iter().enumerate() {
+        let Some(obj) = entry.as_object() else { return Err(err(format!("entry {n} is not an object"))) };
+        let Some(k) = key_text(obj.get(field)) else { return Err(err(format!("entry {n} has no '{field}'"))) };
+        let remove = obj.get("$remove") == Some(&Value::Bool(true));
+        let mut change = entry.clone();
+        if let Some(o) = change.as_object_mut() {
+            o.remove("$remove");
+        }
+        match (index.get(&k).copied(), remove) {
+            (Some(i), true) => {
+                items[i] = None;
+                index.remove(&k);
+            }
+            (None, true) => warnings.push(format!("merges '{ptr}': removes {field} {k}, which is not in the list being extended")),
+            (Some(i), false) => merge(items[i].as_mut().expect("indexed entries are present"), &change),
+            (None, false) => {
+                index.insert(k, items.len());
+                items.push(Some(change));
+            }
+        }
+    }
+    if let Some(Value::Array(out)) = object_slot(base, ptr) {
+        *out = items.into_iter().flatten().collect();
+    }
+    Ok(())
+}
+
+/// The lists of a map or mission file whose entries have a stable key, merged by that key by default (PROVISIONAL, each from what the
+/// loader reads: docs/modding.md "Changing one entry of a list"). `name` is the file's path inside the assets. Lists of other files,
+/// and every list not named here (a ship's `engines`, a rule's `actions`), replace whole as before.
+fn keyed_defaults(name: &str) -> &'static [(&'static str, &'static str)] {
+    let parts: Vec<&str> = name.split('/').collect();
+    match parts[..] {
+        ["maps", _, "map.json"] => &[("/objects", "id"), ("/ships", "id"), ("/mines", "id"), ("/nebulae", "name"), ("/players", "name")],
+        ["maps", _, "mission.json"] => &[("/ships", "id"), ("/rules", "name"), ("/points", "Name")],
+        ["maps", _, "script.json"] => &[("/rules", "name")],
+        _ => &[],
+    }
+}
+
+/// What an `extends` file does to its parent: `diff` merged over `parent` (objects deep, everything else replaced), except the lists
+/// of `keyed_defaults(file)` and those named by `"merge": {"<pointer>": "<key field>"}`, which merge by key (`merge_keyed`); then
+/// `"set"`. `"merge": {"<pointer>": false}` makes a default list replace whole instead. `extends`, `merge` and `set` are dropped from
+/// the result. Order: the whole merge (keyed lists included) first, then `set`, so a `set` pointer counts the entries after the keyed
+/// merge. Returns the result and the warnings.
+fn extend(mut parent: Value, diff: &Value, file: &str) -> Result<(Value, Vec<String>), String> {
+    let mut diff = diff.clone();
+    // A `merge` that is not an object is not this feature: it stays data.
+    let explicit = match diff.as_object_mut().filter(|o| o.get("merge").is_some_and(Value::is_object)).and_then(|o| o.remove("merge")) {
+        Some(Value::Object(m)) => m,
+        _ => Default::default(),
+    };
+    let mut lists = vec![];
+    for (ptr, field) in keyed_defaults(file) {
+        if !explicit.contains_key(*ptr) && diff.pointer(ptr).is_some_and(Value::is_array) {
+            let list = take_list(&mut diff, ptr)?.unwrap_or_default();
+            lists.push((ptr.to_string(), field.to_string(), list));
+        }
+    }
+    for (ptr, field) in &explicit {
+        if *field == Value::Bool(false) {
+            continue;
+        }
+        let field =
+            field.as_str().filter(|f| !f.is_empty()).ok_or_else(|| format!("merges '{ptr}': the key field must be a field name (a string), or false to replace the list"))?;
+        match take_list(&mut diff, ptr)? {
+            Some(list) => lists.push((ptr.clone(), field.to_string(), list)),
+            None => return Err(format!("merges '{ptr}': the file has no list there")),
+        }
+    }
+    merge(&mut parent, &diff);
+    let obj = parent.as_object_mut().ok_or("the merged file is not a JSON object")?;
+    obj.remove("extends");
+    let set = obj.remove("set");
+    let mut warnings = vec![];
+    for (ptr, field, list) in lists {
+        merge_keyed(&mut parent, &ptr, &field, &list, &mut warnings)?;
+    }
+    if let Some(Value::Object(set)) = set {
+        for (ptr, value) in set {
+            match parent.pointer_mut(&ptr) {
+                Some(slot) => *slot = value,
+                None => return Err(format!("sets '{ptr}', which does not exist")),
+            }
+        }
+    }
+    Ok((parent, warnings))
+}
+
 /// The file-format version of `mod.json` and of the mod layout this engine reads. A `mod.json` without `format` is version 1.
 pub const MOD_FORMAT: u32 = 1;
 
@@ -338,6 +488,8 @@ pub struct ModEntry {
     pub unused_textures: Vec<String>,
     /// (file, why): the same error text the loader reports, so a mod author sees one wording.
     pub skipped: Vec<(String, String)>,
+    /// (file, why): a file that applied with something to look at (a keyed `$remove` of an entry the list has not).
+    pub warnings: Vec<(String, String)>,
 }
 
 /// What `overlay` did, as data: which mods loaded and what each did to which file. `log` prints it; a mod screen can read it.
@@ -352,7 +504,7 @@ const REPORT_LIST: usize = 8;
 impl ModReport {
     /// Drops the entry for `dir` (the game's own `content/` layer) unless it skipped something, which the player or developer must see.
     pub fn without(mut self, dir: &Path) -> Self {
-        self.mods.retain(|m| m.dir != dir || !m.skipped.is_empty() || !m.unused_textures.is_empty());
+        self.mods.retain(|m| m.dir != dir || !m.skipped.is_empty() || !m.warnings.is_empty() || !m.unused_textures.is_empty());
         self
     }
 
@@ -379,6 +531,9 @@ impl ModReport {
             }
             if !m.unused_textures.is_empty() {
                 out.push(format!("    warning: no model uses {} texture override(s), check the names: {}", m.unused_textures.len(), list(&m.unused_textures)));
+            }
+            for (f, why) in &m.warnings {
+                out.push(format!("    warning: {f}: {why}"));
             }
             if !m.skipped.is_empty() {
                 out.push(format!("    skipped {}:", m.skipped.len()));
@@ -511,7 +666,9 @@ fn build_overlay(base: &Path, mods: &[PathBuf], root: &Path, marked: bool) -> Mo
             let (from, to) = (m.join(&rel), root.join(&rel));
             let name = rel.to_string_lossy().replace('\\', "/");
             let existed = to.exists();
-            let applied = apply_file(&name, &from, &to, base, docs.get(&rel));
+            let mut warned = vec![];
+            let applied = apply_file(&name, &from, &to, base, docs.get(&rel), &mut warned);
+            entry.warnings.extend(warned.into_iter().map(|w| (name.clone(), w)));
             if applied.as_ref().is_ok_and(|a| *a != Applied::Meta) {
                 record_origin(&to, m, &from);
             }
@@ -586,8 +743,9 @@ fn retexture_models(root: &Path, models: &BTreeSet<PathBuf>, images: &HashMap<St
 }
 
 /// Puts one mod file into the overlay at `to`. An `Err` leaves the base file in place; the caller logs it and goes on.
-/// `doc`: the file's parsed JSON, for a `.json` file.
-fn apply_file(name: &str, from: &Path, to: &Path, base: &Path, doc: Option<&Value>) -> Result<Applied, String> {
+/// `doc`: the file's parsed JSON, for a `.json` file. `warnings`: what went wrong without stopping the file (a keyed removal of an
+/// entry the list has not).
+fn apply_file(name: &str, from: &Path, to: &Path, base: &Path, doc: Option<&Value>, warnings: &mut Vec<String>) -> Result<Applied, String> {
     fn io(what: &'static str) -> impl Fn(std::io::Error) -> String {
         move |e| format!("{what}: {e}")
     }
@@ -622,19 +780,9 @@ fn apply_file(name: &str, from: &Path, to: &Path, base: &Path, doc: Option<&Valu
         if !parent_path.exists() {
             return Err(format!("extends unknown '{parent}' (no {})", parent_path.display()));
         }
-        let mut b = crate::data::load_as::<Value>(&parent_path, None).map_err(|e| format!("extends '{parent}': {e}"))?;
-        merge(&mut b, v);
-        let obj = b.as_object_mut().ok_or_else(|| format!("extends '{parent}', which is not a JSON object"))?;
-        obj.remove("extends");
-        // "set": {"/engines/0/fx": "X"} replaces single values inside arrays, which a merge cannot reach.
-        if let Some(Value::Object(set)) = obj.remove("set") {
-            for (ptr, value) in set {
-                match b.pointer_mut(&ptr) {
-                    Some(slot) => *slot = value,
-                    None => return Err(format!("sets '{ptr}', which does not exist")),
-                }
-            }
-        }
+        let b = crate::data::load_as::<Value>(&parent_path, None).map_err(|e| format!("extends '{parent}': {e}"))?;
+        let (b, found) = extend(b, v, name)?;
+        warnings.extend(found);
         return write(&b).map(|()| Applied::Extends);
     }
     if name.ends_with(".glb") && (name.starts_with("ships/") || name.starts_with("models/")) {
