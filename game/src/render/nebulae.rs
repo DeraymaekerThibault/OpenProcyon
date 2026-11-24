@@ -160,7 +160,7 @@ pub struct NebulaUniform {
     pub high: Vec4,
     /// xyz: where the last bolt struck (world), w: how much of its light is left (0 = none)
     pub flash: Vec4,
-    /// x: clock (battle seconds), y: how far a bolt reaches (world units)
+    /// x: unused (the clock is the frame data's), y: how far a bolt reaches (world units)
     pub params: Vec4,
 }
 
@@ -218,7 +218,7 @@ pub struct VolumeUniform {
     pub flash: Vec4,
     /// xyz: its other end
     pub flash_to: Vec4,
-    /// x: clock, y: a bolt's reach (world units), z: a bolt's brightness, w: the mission's fadeout factor
+    /// x: unused (the clock is the frame data's), y: a bolt's reach (world units), z: a bolt's brightness, w: the mission's fadeout factor
     pub params: Vec4,
     /// x: swirl, y: filaments, z: flicker, w: hue variation
     pub storm: Vec4,
@@ -278,7 +278,7 @@ impl Default for SunLight {
 }
 
 impl Rule {
-    fn volume(&self, cloud: &Cloud, centre: Vec3, clock: f32, bolt: &Bolt, sun: SunLight) -> VolumeUniform {
+    fn volume(&self, cloud: &Cloud, centre: Vec3, bolt: &Bolt, sun: SunLight) -> VolumeUniform {
         let radius = cloud.radius();
         let colour = sun.color / sun.color.max_element().max(1e-3);
         let reach = self.flash_reach * radius;
@@ -293,7 +293,7 @@ impl Rule {
             sun_color: colour.extend(self.inside),
             flash: bolt.from.extend(bolt.light(reach)),
             flash_to: bolt.to.extend(0.0),
-            params: Vec4::new(clock, reach, self.flash, cloud.fade()),
+            params: Vec4::new(0.0, reach, self.flash, cloud.fade()),
             storm: Vec4::new(self.swirl, self.filaments, self.flicker, self.variation),
             alt: self.color_alt.extend(self.core_glow),
         }
@@ -304,7 +304,6 @@ impl Rule {
 fn spawn_volumes(
     mut commands: Commands,
     look: Res<Look>,
-    time: Res<Time>,
     frame: Res<Frame>,
     noise: Option<Res<NoiseVolume>>,
     clouds: Query<(Entity, &Cloud, &GlobalTransform), Without<VolumeProxyOf>>,
@@ -320,10 +319,8 @@ fn spawn_volumes(
         // back faces only: the camera may be inside the box, and the shader marches the ray from there
         let base =
             StandardMaterial { unlit: true, cull_mode: Some(bevy::render::render_resource::Face::Front), double_sided: false, alpha_mode: AlphaMode::Premultiplied, ..default() };
-        let material = materials.add(VolumeMaterial {
-            base,
-            extension: VolumeGas { u: rule.volume(cloud, at.translation(), time.elapsed_secs(), &bolt, SunLight::default()), noise: noise.0.clone(), frame: default() },
-        });
+        let material = materials
+            .add(VolumeMaterial { base, extension: VolumeGas { u: rule.volume(cloud, at.translation(), &bolt, SunLight::default()), noise: noise.0.clone(), frame: default() } });
         let size = AXES * 2.0 * cloud.radius() * BOX_MARGIN;
         commands.entity(e).insert(VolumeProxyOf).with_child((
             VolumeProxy,
@@ -350,7 +347,6 @@ fn sun_of(frame: &Frame) -> SunLight {
 
 fn update_volumes(
     look: Res<Look>,
-    time: Res<Time>,
     frame: Res<Frame>,
     clouds: Query<(&Cloud, &GlobalTransform, &Children)>,
     proxies: Query<&MeshMaterial3d<VolumeMaterial>, With<VolumeProxy>>,
@@ -361,8 +357,12 @@ fn update_volumes(
     for (cloud, at, children) in &clouds {
         let Some(rule) = n.find(cloud.effect()).filter(|r| r.replace) else { continue };
         for mat in children.iter().filter_map(|c| proxies.get(c).ok()) {
-            if let Some(mut m) = materials.get_mut(&mat.0) {
-                m.extension.u = rule.volume(cloud, at.translation(), time.elapsed_secs(), &bolt, sun);
+            let u = rule.volume(cloud, at.translation(), &bolt, sun);
+            // `get` first: `get_mut` marks the asset changed, and Bevy then prepares the material again
+            if materials.get(&mat.0).is_some_and(|m| m.extension.u != u)
+                && let Some(mut m) = materials.get_mut(&mat.0)
+            {
+                m.extension.u = u;
             }
         }
     }
@@ -415,7 +415,7 @@ impl Bolt {
 }
 
 impl Rule {
-    fn uniform(&self, centre: Vec3, radius: f32, clock: f32, bolt: &Bolt) -> NebulaUniform {
+    fn uniform(&self, centre: Vec3, radius: f32, bolt: &Bolt) -> NebulaUniform {
         NebulaUniform {
             centre: centre.extend(radius),
             axes: AXES.extend(self.steps),
@@ -423,7 +423,7 @@ impl Rule {
             low: self.color_low.extend(self.inside),
             high: self.color_high.extend(self.flash),
             flash: bolt.at.extend(bolt.light(self.flash_reach * radius)),
-            params: Vec4::new(clock, self.flash_reach * radius, 0.0, 0.0),
+            params: Vec4::new(0.0, self.flash_reach * radius, 0.0, 0.0),
         }
     }
 }
@@ -443,7 +443,6 @@ fn hide_shells(mut commands: Commands, look: Res<Look>, clouds: Query<(Entity, &
 fn restyle(
     mut commands: Commands,
     look: Res<Look>,
-    time: Res<Time>,
     frame: Res<Frame>,
     clouds: Query<(Entity, &Cloud, &GlobalTransform, &MeshMaterial3d<EffectMaterial>), Without<Volumetric>>,
     retail: Res<Assets<EffectMaterial>>,
@@ -455,24 +454,23 @@ fn restyle(
         let Some(rule) = n.find(cloud.effect()).filter(|r| !r.replace) else { continue };
         let Some(old) = retail.get(&mat.0) else { continue };
         let base = StandardMaterial { base_color: Color::WHITE, base_color_texture: old.base.base_color_texture.clone(), ..old.base.clone() };
-        let handle =
-            materials.add(NebulaMaterial { base, extension: NebulaGlow { u: rule.uniform(at.translation(), cloud.radius(), time.elapsed_secs(), &bolt), frame: default() } });
+        let handle = materials.add(NebulaMaterial { base, extension: NebulaGlow { u: rule.uniform(at.translation(), cloud.radius(), &bolt), frame: default() } });
         super::kit::swap::<EffectMaterial, _>(&mut commands, e, handle).try_insert(Volumetric);
     }
 }
 
-fn update(
-    look: Res<Look>,
-    time: Res<Time>,
-    frame: Res<Frame>,
-    clouds: Query<(&Cloud, &GlobalTransform, &MeshMaterial3d<NebulaMaterial>)>,
-    mut materials: ResMut<Assets<NebulaMaterial>>,
-) {
+fn update(look: Res<Look>, frame: Res<Frame>, clouds: Query<(&Cloud, &GlobalTransform, &MeshMaterial3d<NebulaMaterial>)>, mut materials: ResMut<Assets<NebulaMaterial>>) {
     let Some(n) = &look.nebulae else { return };
     let bolt = Bolt::of(&frame);
     for (cloud, at, mat) in &clouds {
-        let (Some(rule), Some(mut m)) = (n.find(cloud.effect()), materials.get_mut(&mat.0)) else { continue };
-        m.extension.u = rule.uniform(at.translation(), cloud.radius(), time.elapsed_secs(), &bolt);
+        let Some(rule) = n.find(cloud.effect()) else { continue };
+        let u = rule.uniform(at.translation(), cloud.radius(), &bolt);
+        // `get` first: `get_mut` marks the asset changed, and Bevy then prepares the material again
+        if materials.get(&mat.0).is_some_and(|m| m.extension.u != u)
+            && let Some(mut m) = materials.get_mut(&mat.0)
+        {
+            m.extension.u = u;
+        }
     }
 }
 
