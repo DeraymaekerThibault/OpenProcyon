@@ -551,3 +551,21 @@ fn the_keys_help_lists_match_what_key_with_does() {
         assert!(KEYS.iter().any(|(k, _)| k.contains(want)), "key_with handles {want} but KEYS does not list it");
     }
 }
+
+#[test]
+fn without_a_mission_view_commands_run_and_rule_commands_say_so() {
+    let run = |line: &str| console_without_mission(line, &parse(line, "", false).unwrap());
+    let o = run("fps");
+    assert_eq!(o.view, vec![ViewChange::Fps(None)], "fps works in a skirmish");
+    assert!(!o.rejected);
+    assert_eq!(run("fps off").view, vec![ViewChange::Fps(Some(false))]);
+    assert!(run("help").lines.iter().any(|l| l.contains("fps")), "help lists the commands");
+    assert_eq!(run("hud off").view, vec![ViewChange::Hud(false)]);
+    assert_eq!(run("cam free").view, vec![ViewChange::FreeCam(true)]);
+    for line in ["god", "tp 1 2", "flags", "rules", "ships", "win", "restart", "show volumes", "cam follow Raiders", "act {\"Type\": \"NIS End\"}"] {
+        let o = run(line);
+        let word = line.split(' ').next().unwrap();
+        assert_eq!(o.lines, vec![format!("{word}: needs a mission (this battle has no mission rules)")], "{line}");
+        assert!(o.rejected && o.view.is_empty() && !o.restart, "{line} must not run");
+    }
+}

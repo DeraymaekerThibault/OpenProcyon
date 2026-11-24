@@ -753,6 +753,35 @@ pub struct Outcome {
     pub view: Vec<ViewChange>,
 }
 
+/// Runs a command in a battle with no mission rules (a skirmish): the commands that only change the view or print console help work, every
+/// other answers one line saying it needs a mission. Nothing here changes the game, so it never marks the session as cheated.
+pub fn console_without_mission(line: &str, cmd: &Command) -> Outcome {
+    let mut o = Outcome::default();
+    match cmd {
+        Command::Nothing => {}
+        Command::Help(topic) => o.lines = help_lines(topic.as_deref()),
+        Command::Fps(on) => o.view.push(ViewChange::Fps(*on)),
+        Command::Hud(on) => {
+            o.view.push(ViewChange::Hud(*on));
+            o.lines.push(format!("HUD {}", if *on { "on" } else { "off" }));
+        }
+        Command::Cam(CamMode::Free) => {
+            o.view.push(ViewChange::FreeCam(true));
+            o.lines.push("free camera: arrows move, PageUp / PageDown rise and sink, right mouse drag looks, Shift is faster; `cam player` returns".into());
+        }
+        Command::Cam(CamMode::Player) => {
+            o.view.push(ViewChange::FreeCam(false));
+            o.lines.push("orbit camera back".into());
+        }
+        _ => {
+            let word = line.split_whitespace().next().unwrap_or_default().to_lowercase();
+            o.lines.push(format!("{word}: needs a mission (this battle has no mission rules)"));
+            o.rejected = true;
+        }
+    }
+    o
+}
+
 impl Script {
     /// Runs a command against the unit list `w` (what `systems::units` builds each frame). ECS effects go to `out`, as in `step`.
     /// `target`: the player's current target.
