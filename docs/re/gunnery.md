@@ -35,7 +35,7 @@ point of the section nearest its centre (see "Gun tower aim point").
   per ship from the captain's and first mate's Leadership, [crew.md](crew.md)) and clamped to [0, 1]. A slot nobody holds is a
   rating-1 hand (0.1, so a factor of 0.92 before bonuses). The flat 0.5 belongs to objects that are neither ships, bases nor dragons;
   a base reads a per-base value (the mission's gunnery level for its guns, `IslandGunnery`), a dragon's breath 0.8 (the remake gives
-  dragon breath no spread yet). NIS mode uses 0.1 (the deviation is scaled, not removed).
+  dragon breath no spread yet). NIS mode uses 0.1 (the deviation is scaled, not removed). A ship a mission rule puts in warning-shot mode fires with no deviation at all; this is tested before the NIS factor, so it wins in a cinematic too.
 - The final angle is uniform in [-a, +a].
 - Remake: the cinematic factor is 0.1. The gun's `CalculateAccuracyDeviationDuringBurst` flag (set on a few retail guns) makes the angle be
   drawn for every shot instead of once per burst (`GunDef::dev_per_shot`; the exporter writes the flag, so re-import assets).
