@@ -566,6 +566,33 @@ mod tests {
         assert!(error.contains("ship.json") && error.contains("crew_nodes[1].name") && error.contains("Crew_Dance_0"), "{error}");
     }
     #[test]
+    fn a_bad_ship_in_a_mod_is_an_error_naming_the_mods_own_file_not_a_panic() {
+        let dir = std::env::temp_dir().join(format!("procyon-badmod-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let (base, m, out) = (dir.join("assets"), dir.join("bad_mod"), dir.join("overlay"));
+        for d in ["ships/Synthetic", "data/weapons"] {
+            std::fs::create_dir_all(base.join(d)).unwrap();
+        }
+        std::fs::create_dir_all(m.join("ships/Synthetic")).unwrap();
+        std::fs::write(base.join("ships/Synthetic/ship.json"), ship().to_string()).unwrap();
+        std::fs::write(base.join("ships/Synthetic/geometry.json"), geometry().to_string()).unwrap();
+        std::fs::write(base.join("data/weapons/guns.json"), "{}").unwrap();
+        std::fs::write(base.join("data/weapons/bullets.json"), "{}").unwrap();
+        let mod_file = m.join("ships/Synthetic/ship.json");
+        std::fs::write(&mod_file, r#"{"extends": "Synthetic", "crew_nodes": [{"name": "Crew_Bogus_1", "pos": [0, 0, 0]}]}"#).unwrap();
+        crate::modding::overlay_into(&base, &[m], &out).unwrap();
+        let source = std::fs::canonicalize(&mod_file).unwrap();
+        let error = Library::try_load(&out).err().expect("bad data is an Err, not a panic");
+        assert!(error.contains("crew_nodes[0].name") && error.contains("Crew_Bogus_1"), "{error}");
+        assert!(error.contains(&format!("(source {})", source.display())), "the source is the mod's own file: {error}");
+        assert!(!error.contains(&format!("(source {}", out.display())), "{error}");
+        // the same mod without the bad entry loads
+        std::fs::write(&mod_file, r#"{"extends": "Synthetic", "core_hp": 7}"#).unwrap();
+        crate::modding::overlay_into(&base, &[dir.join("bad_mod")], &out).unwrap();
+        assert_eq!(Library::try_load(&out).ok().map(|l| l.classes.len()), Some(1));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
     fn tow_and_homing_points_in_ship_json_win_over_the_hull_ends_and_absent_keys_change_nothing() {
         let plain = Fixture::new(ship(), geometry()).load().unwrap();
         let mut doc = ship();

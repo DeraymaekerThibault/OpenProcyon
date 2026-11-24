@@ -267,13 +267,26 @@ pub fn material_key(material: &str) -> &'static str {
     MATERIALS.iter().find(|m| material.contains(**m)).copied().unwrap_or("Wood")
 }
 
+/// The library `preload` built, for `plugin` to take.
+static PRELOADED: std::sync::Mutex<Option<Library>> = std::sync::Mutex::new(None);
+
+/// Loads the ship and weapon data of the asset root now and keeps it for `plugin`, so bad data in a mod ends the launch with a message
+/// (the caller prints it and exits) instead of a panic while the app is built.
+pub fn preload() -> Result<(), String> {
+    let lib = Library::try_load(assets_dir())?;
+    if let Ok(mut slot) = PRELOADED.lock() {
+        *slot = Some(lib);
+    }
+    Ok(())
+}
+
 pub fn plugin(app: &mut App) {
     crate::scenario::number_spawns::<Ship>(app);
     crate::scenario::number_spawns::<Shell>(app);
     crate::scenario::number_spawns::<lob::Blast>(app);
     crate::scenario::number_spawns::<Asteroid>(app);
     crate::scenario::number_spawns::<ArmedBase>(app);
-    app.insert_resource(Library::load(assets_dir()))
+    app.insert_resource(PRELOADED.lock().ok().and_then(|mut slot| slot.take()).unwrap_or_else(|| Library::load(assets_dir())))
         .init_resource::<Target>()
         .add_message::<Hit>()
         .add_message::<Splashed>()

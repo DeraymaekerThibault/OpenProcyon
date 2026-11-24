@@ -159,7 +159,7 @@ or map files to schemas once in `.vscode/settings.json`:
 
 | Goal | How |
 |---|---|
-| load a mod without installing it | `--mod <folder>` (repeatable; a relative path is relative to where you start the game; no need to switch it on; later `--mod`s win). From a checkout: `make run ARGS='--mod mods/x'` |
+| load a mod without installing it | `--mod <folder>` (repeatable; a relative path is relative to where you start the game, `tools/shot.sh` makes it absolute against your directory first; a folder that does not exist, or a file, stops the launch with an error naming the path; no need to switch it on; later `--mod`s win). A ship or weapon file the game cannot load stops the launch with the loader's message, which names the mod's own file. From a checkout: `make run ARGS='--mod mods/x'` |
 | start a battle at once | `--map <id>` (a skirmish map such as `red_rover`, or your mod's map), `--mission N`, with `--ship Ship_Id` (your own ship), `--allies A,B`, `--enemies A,B` (`none` for no enemies) and `--speed N` (fast-forward); `--menu skirmish` (or `mods`) opens that screen; `--lobby "map=border_dispute;points=1000;limit=10;slots=human,7*computer"` sets the skirmish lobby up (see `docs/development.md`) |
 | a picture | `./openprocyon --mod x --map red_rover --ship Ship_Id --shot out.png --shot-frame 300 [--dist D --yaw Y --pitch P]` writes a 1280x720 PNG and exits; a list `--shot-frame 100,300` writes `out_100.png`, `out_300.png`. In a checkout `tools/shot.sh local/x.png` does the same through cargo and checks the picture is not black (`--script damage`, `fxtest`, `victory`, ... stage a situation; the names are listed in `game/src/smoke/mod.rs`) |
 | what the merged files look like | open them in `local/overlay/` (above) |

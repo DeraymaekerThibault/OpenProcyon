@@ -212,7 +212,10 @@ pub fn run(view: fn(&mut App), setup_view: fn(&mut App)) {
             exit::quit(2);
         })
     });
-    let mods: Vec<PathBuf> = args.windows(2).filter(|w| w[0] == "--mod").map(|w| PathBuf::from(&w[1])).collect();
+    let mods = modding::mod_args(&args).unwrap_or_else(|error| {
+        eprintln!("error: {error}");
+        exit::quit(2);
+    });
     let base = base_assets();
     // A player's folder (the download's import) must come from this version and is replaced whole when imported again; a
     // developer's assets (PROCYON_ASSETS, the checkout's assets/) are used as they are.
@@ -244,6 +247,11 @@ pub fn run(view: fn(&mut App), setup_view: fn(&mut App)) {
     let _ = ASSETS.set(root);
     if let Some(code) = rules::cli::apply(&args) {
         exit::quit(code);
+    }
+    // Bad ship or weapon data (a mod's ship.json) ends the launch here with the message, not with a panic while the app is built.
+    if let Err(error) = combat::preload() {
+        eprintln!("error: {error}");
+        exit::quit(1);
     }
     let arg = |k: &str| args.iter().position(|a| a == k).and_then(|i| args.get(i + 1)).cloned();
     let shot = arg("--shot");

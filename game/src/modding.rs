@@ -31,6 +31,29 @@ fn link(from: &Path, to: &Path) {
 
 static ACTIVE: std::sync::OnceLock<Vec<PathBuf>> = std::sync::OnceLock::new();
 
+/// The `--mod <folder>` arguments of a command line, in order. A missing value, a path that does not exist and a path that is a file
+/// are errors naming the path: a mod that silently loads nothing is the worst way to fail.
+pub fn mod_args(args: &[String]) -> Result<Vec<PathBuf>, String> {
+    let mut mods = vec![];
+    for i in (1..args.len()).filter(|&i| args[i] == "--mod") {
+        let Some(path) = args.get(i + 1).filter(|p| !p.starts_with("--")) else {
+            return Err("--mod takes the mod's folder".into());
+        };
+        let dir = PathBuf::from(path);
+        if dir.is_file() {
+            return Err(format!("--mod {path}: that is a file, not a mod folder"));
+        }
+        if !dir.is_dir() {
+            return Err(format!(
+                "--mod {path}: no such folder (a relative path is read from {})",
+                std::env::current_dir().map_or_else(|_| ".".into(), |d| d.display().to_string())
+            ));
+        }
+        mods.push(dir);
+    }
+    Ok(mods)
+}
+
 /// Records this launch's mod folders (switched-on installed mods, then `--mod` folders, in overlay order). Set once, at startup.
 pub fn set_active(dirs: Vec<PathBuf>) {
     let _ = ACTIVE.set(dirs);
@@ -39,6 +62,22 @@ pub fn set_active(dirs: Vec<PathBuf>) {
 /// The mod folders overlaid in this launch (empty before `set_active`, as in unit tests).
 pub fn active() -> &'static [PathBuf] {
     ACTIVE.get().map_or(&[], Vec::as_slice)
+}
+
+/// Overlay file (canonical path) -> (the mod folder, the mod's own file) that provided it. A merged or extended file is a copy in the
+/// overlay, so its path says nothing about where it came from; errors name the mod's file instead (`origin_of`).
+static ORIGINS: std::sync::Mutex<Vec<(PathBuf, PathBuf, PathBuf)>> = std::sync::Mutex::new(Vec::new());
+
+/// The mod folder and the mod's own file behind a file of a built overlay; `None` for a base file or one no overlay built here knows.
+pub(crate) fn origin_of(path: &Path) -> Option<(PathBuf, PathBuf)> {
+    let key = std::fs::canonicalize(path).ok()?;
+    ORIGINS.lock().ok()?.iter().find(|(k, _, _)| *k == key).map(|(_, dir, file)| (dir.clone(), file.clone()))
+}
+
+fn record_origin(overlay_file: &Path, dir: &Path, file: &Path) {
+    let (Ok(key), Ok(mut all)) = (std::fs::canonicalize(overlay_file), ORIGINS.lock()) else { return };
+    all.retain(|(k, _, _)| *k != key);
+    all.push((key, dir.to_path_buf(), file.to_path_buf()));
 }
 
 /// Objects merge key by key, anything else is replaced.
@@ -405,6 +444,9 @@ pub fn overlay_into(base: &Path, mods: &[PathBuf], out: &Path) -> Result<ModRepo
 /// The shared core: replaces `root` with base links plus the mods' files. `marked` writes the overlay mark (a folder the caller chose).
 fn build_overlay(base: &Path, mods: &[PathBuf], root: &Path, marked: bool) -> ModReport {
     let mut report = ModReport::default();
+    if let (Ok(old), Ok(mut all)) = (std::fs::canonicalize(root), ORIGINS.lock()) {
+        all.retain(|(k, _, _)| !k.starts_with(&old));
+    }
     let _ = std::fs::remove_dir_all(root);
     if marked {
         std::fs::create_dir_all(root).unwrap();
@@ -467,7 +509,11 @@ fn build_overlay(base: &Path, mods: &[PathBuf], root: &Path, marked: bool) -> Mo
             let (from, to) = (m.join(&rel), root.join(&rel));
             let name = rel.to_string_lossy().replace('\\', "/");
             let existed = to.exists();
-            match apply_file(&name, &from, &to, base, docs.get(&rel)) {
+            let applied = apply_file(&name, &from, &to, base, docs.get(&rel));
+            if applied.as_ref().is_ok_and(|a| *a != Applied::Meta) {
+                record_origin(&to, m, &from);
+            }
+            match applied {
                 Ok(Applied::Meta) => {
                     let meta = docs.get(&rel);
                     let text = |k: &str| meta.and_then(|v| v[k].as_str()).filter(|s| !s.is_empty()).map(str::to_string);
@@ -626,6 +672,25 @@ mod tests {
         let by = |id: &str| list.iter().find(|m| m.id == id).unwrap().clone();
         assert_eq!((by("plain").format, by("plain").game_version.as_str(), by("plain").requires.len()), (1, "", 0));
         assert_eq!((by("new").format, by("new").game_version.as_str(), by("new").requires.clone()), (2, "9.0.0", vec!["plain".to_string(), "ghost".to_string()]));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn mod_arguments_must_name_folders() {
+        let dir = std::env::temp_dir().join(format!("procyon-modargs-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("m")).unwrap();
+        std::fs::write(dir.join("f.json"), "{}").unwrap();
+        let args = |a: &[&str]| a.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let (m, f, gone) = (dir.join("m").to_string_lossy().into_owned(), dir.join("f.json").to_string_lossy().into_owned(), dir.join("gone").to_string_lossy().into_owned());
+        assert_eq!(mod_args(&args(&["game", "--map", "x"])).unwrap(), Vec::<PathBuf>::new());
+        assert_eq!(mod_args(&args(&["game", "--mod", &m, "--mod", &m])).unwrap(), vec![dir.join("m"), dir.join("m")]);
+        let error = mod_args(&args(&["game", "--mod", &m, "--mod", &gone])).unwrap_err();
+        assert!(error.contains(&gone) && error.contains("no such folder"), "{error}");
+        let error = mod_args(&args(&["game", "--mod", &f])).unwrap_err();
+        assert!(error.contains(&f) && error.contains("file"), "{error}");
+        assert!(mod_args(&args(&["game", "--mod"])).unwrap_err().contains("takes"));
+        assert!(mod_args(&args(&["game", "--mod", "--map", "x"])).unwrap_err().contains("takes"));
         std::fs::remove_dir_all(dir).unwrap();
     }
 
