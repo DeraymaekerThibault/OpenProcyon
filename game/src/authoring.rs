@@ -10,6 +10,7 @@
 //!   [`DataError`] that names the file and the mod that provided it.
 //! - [`rule_schema`]: the mission rule vocabulary as JSON, the same document `--dump-rule-schema` writes.
 //! - [`schemas`]: JSON Schemas of `ship.json`, `guns.json`, `bullets.json`, `data/crew_nodes.json` and `mod.json` (`--dump-schemas <dir>`).
+//! - [`extensions`]: the engine's additions to the original (the table of docs/modding.md), as data.
 //! - [`check_mission`] / [`known_names`]: the mission checker behind `--check-mission`, on JSON values in memory.
 //! - [`Finding`]: what the checkers find, located by `path` (printed) and `pointer` (a JSON pointer); [`unknown_key_findings`] gives
 //!   the unknown-key warnings of any document with the nearest known key.
@@ -28,12 +29,15 @@ use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
+mod annotate;
 mod art;
 mod check_mod;
+mod extensions;
 mod json;
 mod resolved;
 pub use art::{GunBank, ShipArt, ship_art};
 pub use check_mod::{check_mod, check_mod_with, unknown_key_findings, unknown_keys};
+pub use extensions::{Extension, ExtensionKind, extensions};
 pub use json::to_json_string;
 pub use resolved::{ResolvedEngine, ResolvedFlag, ResolvedGun, ResolvedPost, ResolvedSection, ResolvedShip, ResolvedWake, Source, resolved_ship};
 
@@ -88,18 +92,24 @@ pub fn rule_schema() -> Value {
 /// types the loader reads, so they cannot drift from it. Unknown keys stay allowed, as in the loader. No key is `required`: a mod's
 /// files are merged over a parent (`extends`, or a retail entry) before the loader reads them, so a partial file is valid; the loader's
 /// own validation of the merged result is unchanged. Needs no assets.
+///
+/// Every property of the ship, guns and bullets schemas carries `"x-origin"`: `"retail"` or `"engine"` (a key the engine adds; the
+/// `ENGINE_SHIP_KEYS` / `ENGINE_GUN_KEYS` keys). A ship key the engine fills in when the file leaves it out carries `"x-default-from"`:
+/// `model`, `race_and_size`, `navy_cutter`, `hull` or `weapon_panel` (`data::SHIP_FILLS`); so do the nested keys it fills (`guns` `pos`
+/// `rot` `bank` `parent_layer`, `engines` `pos` `rot` `fx` `parent_layer`, `physics` `MinExtents` ...), on their definitions.
 pub fn schemas() -> Vec<(&'static str, Value)> {
     let mut all = crate::data::schemas();
+    annotate::all(&mut all);
     all.push(("mod.schema.json", crate::modding::schema()));
     for (_, schema) in &mut all {
         strip_required(schema);
     }
     // `extends` and `set` are consumed by the overlay merge before the loader reads a ship (docs/modding.md "Extending a file").
     if let Some(props) = all[0].1["properties"].as_object_mut() {
-        props.insert("extends".into(), serde_json::json!({"type": "string", "description": "Not part of the ship: the id of the ship this file extends. The mod merge lays this file over `ships/<id>/ship.json` before the game reads it."}));
+        props.insert("extends".into(), serde_json::json!({"type": "string", "x-origin": "engine", "description": "Not part of the ship: the id of the ship this file extends. The mod merge lays this file over `ships/<id>/ship.json` before the game reads it."}));
         props.insert(
             "set".into(),
-            serde_json::json!({"type": "object", "description": "Not part of the ship: with `extends`, JSON pointers (`/engines/0/fx`) mapped to the value that replaces what the merge left there; reaches inside arrays."}),
+            serde_json::json!({"type": "object", "x-origin": "engine", "description": "Not part of the ship: with `extends`, JSON pointers (`/engines/0/fx`) mapped to the value that replaces what the merge left there; reaches inside arrays."}),
         );
     }
     all
@@ -281,6 +291,72 @@ mod tests {
         assert!(ship["properties"]["core_hp"]["description"].as_str().unwrap().contains("Core hit points"));
         assert!(ship["properties"]["$schema"].is_object(), "an editor may write the $schema key");
         assert!(all[4].1["properties"]["requires"]["description"].as_str().unwrap().contains("mods"));
+    }
+
+    /// The definition a property's schema points to, or the property itself.
+    fn resolve<'a>(root: &'a Value, node: &'a Value) -> &'a Value {
+        fn find(v: &Value) -> Option<&str> {
+            match v {
+                Value::Object(m) => m.get("$ref").and_then(Value::as_str).or_else(|| m.iter().filter(|(k, _)| !k.starts_with("x-")).find_map(|(_, v)| find(v))),
+                Value::Array(a) => a.iter().find_map(find),
+                _ => None,
+            }
+        }
+        find(node).and_then(|r| r.strip_prefix("#/$defs/")).map_or(node, |n| &root["$defs"][n])
+    }
+
+    #[test]
+    fn schema_annotations_equal_the_engine_constants_and_the_fill_table() {
+        use crate::data::{ENGINE_GUN_KEYS, ENGINE_SHIP_KEYS, SHIP_FILLS};
+        let all = schemas();
+        let (ship, guns, bullets) = (&all[0].1, &all[1].1, &all[2].1);
+        let origins = |props: &Value| -> (Vec<String>, Vec<String>) {
+            let (mut engine, mut retail) = (vec![], vec![]);
+            for (k, v) in props.as_object().unwrap() {
+                match v["x-origin"].as_str() {
+                    Some("engine") => engine.push(k.clone()),
+                    Some("retail") => retail.push(k.clone()),
+                    other => panic!("{k} has x-origin {other:?}"),
+                }
+            }
+            engine.sort();
+            (engine, retail)
+        };
+        let (engine, retail) = origins(&ship["properties"]);
+        let mut want: Vec<String> = ENGINE_SHIP_KEYS.iter().map(|s| s.to_string()).chain(["$schema", "set"].map(String::from)).collect();
+        want.sort();
+        assert_eq!(engine, want, "the ship keys marked engine are ENGINE_SHIP_KEYS (plus the file-only `$schema` and `set`)");
+        assert!(["race", "core_hp", "sections", "guns", "physics"].iter().all(|k| retail.contains(&k.to_string())), "{retail:?}");
+        let (engine, retail) = origins(&guns["$defs"]["entry"]["properties"]);
+        assert_eq!(engine, ENGINE_GUN_KEYS, "only `beam` is ours");
+        assert!(retail.contains(&"MuzzleSpeed".to_string()));
+        let (engine, retail) = origins(&bullets["$defs"]["entry"]["properties"]);
+        assert!(engine.is_empty() && retail.contains(&"lifetime".to_string()), "every bullet key is retail");
+        // x-default-from: exactly the table, at the top level and below it
+        let mut seen = 0;
+        for (path, fill) in SHIP_FILLS {
+            let mut parts = path.split('.');
+            let node = &ship["properties"][parts.next().unwrap()];
+            let node = match parts.next() {
+                None => node,
+                Some(sub) => &resolve(ship, node)["properties"][sub],
+            };
+            assert_eq!(node["x-default-from"], fill.name(), "{path}");
+            seen += 1;
+        }
+        fn count(v: &Value) -> usize {
+            match v {
+                Value::Object(m) => m.iter().map(|(k, v)| usize::from(k == "x-default-from") + count(v)).sum(),
+                Value::Array(a) => a.iter().map(count).sum(),
+                _ => 0,
+            }
+        }
+        assert_eq!(count(ship), seen, "no annotation outside the table");
+        assert_eq!(count(guns) + count(bullets), 0);
+        assert_eq!(ship["properties"]["engines"]["x-default-from"], "model");
+        assert_eq!(ship["properties"]["crew_posts"]["x-default-from"], "race_and_size");
+        assert_eq!(ship["properties"]["tow"]["x-default-from"], "hull");
+        assert_eq!(resolve(ship, &ship["properties"]["guns"])["properties"]["bank"]["x-default-from"], "weapon_panel");
     }
 
     fn has_required(node: &Value) -> bool {
