@@ -140,6 +140,43 @@ pub fn defined_names(mission: &Value, map: &Value, media: &Value) -> BTreeMap<St
     Defs::collect(mission, map, media).names_by_kind()
 }
 
+/// The fewest vertices of a polygon volume (a smaller one is an empty region, an error where a rule uses it).
+const MIN_VOLUME_VERTICES: usize = 3;
+
+/// The kinds of rule field that take a name the mission defines (`names_by_kind` keys, except `unit`).
+const NAMED_KINDS: [Kind; 17] = [
+    Kind::Group,
+    Kind::Player,
+    Kind::Path,
+    Kind::Volume,
+    Kind::Task,
+    Kind::Point,
+    Kind::PointSet,
+    Kind::Timer,
+    Kind::Flag,
+    Kind::Counter,
+    Kind::CampaignCounter,
+    Kind::Rule,
+    Kind::Speech,
+    Kind::MapText,
+    Kind::Message,
+    Kind::Team,
+    Kind::ShipName,
+];
+
+/// For each kind of rule field (the keys of [`defined_names`], `group`, `volume`, `flag`, ...), exactly the names a field of that
+/// kind takes without the checker reporting the name, sorted. Where [`defined_names`] says what the mission defines under each
+/// heading, this says what may be written in a field: a `group` field takes the TWT groups, the players and the groups of placed
+/// ships and of the environment, but not a unit's own name (that goes after the comma: `unit`); a `volume` only when it has three
+/// vertices; a `rule` by its trimmed name. The membership test is the checker's own (`Defs::accepts`), so the two cannot disagree.
+/// Kinds the checker does not look names up for (`timer`, `flag`, `counter`, `campaign_counter`, `team`) list what the mission
+/// defines, and accept any name. `speech_event`, `message` and `ship_name` list the entries of `media.json` (any id is accepted when
+/// `media` is `Value::Null`, so the list is then what `opening_speech` and nothing else gives). The editor placeholders (`NO PATH`,
+/// ...) are always accepted and not listed. Enum values are per field, in the rule schema.
+pub fn accepted_names(mission: &Value, map: &Value, media: &Value) -> BTreeMap<String, Vec<String>> {
+    Defs::collect(mission, map, media).accepted()
+}
+
 /// Every name a group spec of this mission can mean: its TWT groups, players, the groups and names of placed ships and of the
 /// environment (animals, dragons, nebulae). The interpreter's start-of-mission audit warns about specs that are none of these.
 pub fn known_names(mission: &Value) -> HashSet<String> {
@@ -273,6 +310,53 @@ impl Defs {
 
     fn group_known(&self, name: &str) -> bool {
         self.groups.contains_key(name) || self.players.contains(name) || self.other_groups.contains(name)
+    }
+
+    /// Whether the checker lets a field of `kind` hold `name` without a finding about the name itself: the one test the checker's
+    /// field arms and [`accepted_names`] both use. A `Group` field is the group part of a spec (before any `,unit`). Kinds the checker
+    /// does not look names up for (flags, timers and counters are matched across rules later, teams, enums, text, ...) accept any name.
+    /// Speech, message and ship-name ids are only looked up when `media.json` was given.
+    pub(crate) fn accepts(&self, kind: Kind, name: &str) -> bool {
+        match kind {
+            Kind::Group | Kind::Player => self.group_known(name),
+            Kind::Path => self.paths.contains(name),
+            Kind::Volume => self.volumes.get(name).is_some_and(|n| *n >= MIN_VOLUME_VERTICES),
+            Kind::Task => self.tasks.contains(name),
+            Kind::Point => self.points.contains(name),
+            Kind::PointSet => self.point_sets.contains(name),
+            Kind::MapText => self.map_text.contains(name),
+            Kind::Speech => !self.media || self.speech.contains(name),
+            Kind::Message => !self.media || self.messages.contains(name),
+            Kind::ShipName => !self.media || self.ship_names.contains(name),
+            Kind::Rule => self.rules.contains(name.trim()),
+            _ => true,
+        }
+    }
+
+    /// Whether the `unit` part of a group spec (`Group,Unit`) is a ship the mission places (or the human's command ship).
+    fn accepts_unit(&self, unit: &str) -> bool {
+        unit == "HUMAN CONTROLLED COMMAND SHIP" || self.units.contains(unit)
+    }
+
+    /// The names a field of each kind accepts, by `Kind::name` (see [`accepted_names`]).
+    fn accepted(&self) -> BTreeMap<String, Vec<String>> {
+        let all = self.names_by_kind();
+        let mut out = BTreeMap::new();
+        for (kind, defined) in &all {
+            let Some(k) = NAMED_KINDS.iter().find(|k| k.name() == kind) else {
+                // `unit`: the part after the comma of a group spec.
+                let units = defined.iter().cloned().chain(["HUMAN CONTROLLED COMMAND SHIP".to_string()]).filter(|u| self.accepts_unit(u));
+                out.insert(kind.clone(), units.collect());
+                continue;
+            };
+            // The candidates: what the mission defines, and for a group or player field also every name of the other of the two.
+            let mut candidates: BTreeSet<&String> = defined.iter().collect();
+            if matches!(k, Kind::Group | Kind::Player) {
+                candidates.extend(all["group"].iter().chain(&all["player"]).chain(&self.other_groups));
+            }
+            out.insert(kind.clone(), candidates.into_iter().filter(|n| self.accepts(*k, n)).cloned().collect());
+        }
+        out
     }
 }
 
@@ -534,11 +618,11 @@ impl Checker<'_> {
                 self.err(name, format!("'{text}' is not one of {values:?}{hint}"));
             }
             Kind::Group => self.group(name, text, def, role),
-            Kind::Player if !d.group_known(text) => {
+            Kind::Player if !d.accepts(Kind::Player, text) => {
                 let hint = self.suggest(text, d.players.iter().chain(d.groups.keys()).map(String::as_str));
                 self.err(name, format!("unknown player '{text}'{hint}"));
             }
-            Kind::Path if !d.paths.contains(text) => {
+            Kind::Path if !d.accepts(Kind::Path, text) => {
                 let hint = self.suggest(text, d.paths.iter().map(String::as_str));
                 self.err(name, format!("unknown path '{text}'{hint}"));
             }
@@ -547,31 +631,31 @@ impl Checker<'_> {
                     let hint = self.suggest(text, d.volumes.keys().map(String::as_str));
                     self.err(name, format!("unknown volume '{text}'{hint}; it is an empty region that nothing is ever inside"));
                 }
-                Some(n) if *n < 3 => self.err(name, format!("volume '{text}' has {n} vertices; fewer than 3 is an empty region")),
+                Some(n) if *n < MIN_VOLUME_VERTICES => self.err(name, format!("volume '{text}' has {n} vertices; fewer than 3 is an empty region")),
                 Some(_) => {}
             },
-            Kind::Task if !d.tasks.contains(text) => {
+            Kind::Task if !d.accepts(Kind::Task, text) => {
                 let hint = self.suggest(text, d.tasks.iter().map(String::as_str));
                 self.err(name, format!("unknown objective task '{text}'{hint}"));
             }
-            Kind::Point if !d.points.contains(text) => {
+            Kind::Point if !d.accepts(Kind::Point, text) => {
                 let hint = self.suggest(text, d.points.iter().map(String::as_str));
                 self.err(name, format!("unknown objective point '{text}'{hint}"));
             }
-            Kind::PointSet if !d.point_sets.contains(text) => {
+            Kind::PointSet if !d.accepts(Kind::PointSet, text) => {
                 let hint = self.suggest(text, d.point_sets.iter().map(String::as_str));
                 self.err(name, format!("unknown point set '{text}'{hint}"));
             }
-            Kind::MapText if !d.map_text.contains(text) => {
+            Kind::MapText if !d.accepts(Kind::MapText, text) => {
                 let hint = self.suggest(text, d.map_text.iter().map(String::as_str));
                 self.err(name, format!("unknown map text '{text}'{hint}"));
             }
-            Kind::Speech if d.media && !d.speech.contains(text) => {
+            Kind::Speech if !d.accepts(Kind::Speech, text) => {
                 let hint = self.suggest(text, d.speech.iter().map(String::as_str));
                 self.warn(name, format!("speech event '{text}' has no media entry (no text, no sound){hint}"));
             }
-            Kind::Message if d.media && !d.messages.contains(text) => self.warn(name, format!("message '{text}' has no media entry; the game falls back to a default")),
-            Kind::ShipName if d.media && !d.ship_names.contains(text) => self.warn(name, format!("ship name '{text}' has no media entry; the rule does nothing")),
+            Kind::Message if !d.accepts(Kind::Message, text) => self.warn(name, format!("message '{text}' has no media entry; the game falls back to a default")),
+            Kind::ShipName if !d.accepts(Kind::ShipName, text) => self.warn(name, format!("ship name '{text}' has no media entry; the rule does nothing")),
             Kind::Flag => {
                 if role == Role::Action {
                     self.flags_set.insert(text.into());
@@ -586,7 +670,7 @@ impl Checker<'_> {
                     self.reads.push((Kind::Counter, text.into(), self.wants_true && !self.lenient, self.rule.clone(), self.at.clone(), self.place.clone()));
                 }
             }
-            Kind::Rule if !d.rules.contains(text.trim()) => {
+            Kind::Rule if !d.accepts(Kind::Rule, text) => {
                 let hint = self.suggest(text, d.rules.iter().map(String::as_str));
                 self.err(name, format!("unknown rule '{text}'{hint}; nothing is activated"));
             }
@@ -604,15 +688,14 @@ impl Checker<'_> {
     fn group(&mut self, field: &str, spec: &str, def: &TypeDef, role: Role) {
         let d = self.defs;
         let (group, unit) = spec.split_once(',').map_or((spec, None), |(g, u)| (g, Some(u)));
-        if !d.group_known(group) {
+        if !d.accepts(Kind::Group, group) {
             let hint = self.suggest(group, d.groups.keys().chain(&d.players).chain(&d.other_groups).map(String::as_str));
             self.err(field, format!("unknown group '{group}'{hint}; it has no members"));
         } else if role == Role::Condition && unit.is_none() && d.groups.get(group) == Some(&0) && !d.players.contains(group) {
             self.warn(field, format!("group '{group}' is defined with no members (in '{}')", def.name));
         }
         if let Some(unit) = unit
-            && unit != "HUMAN CONTROLLED COMMAND SHIP"
-            && !d.units.contains(unit)
+            && !d.accepts_unit(unit)
         {
             let hint = self.suggest(unit, d.units.iter().map(String::as_str));
             self.warn(field, format!("unit '{unit}' is not the name of any ship the mission places{hint}"));
@@ -1128,6 +1211,60 @@ mod tests {
         );
         assert!(get("player").contains(&"Pirates") && get("player").contains(&"Rival") && get("player").contains(&"Player0 Group"));
         assert!(defined_names(&Value::Null, &Value::Null, &Value::Null)["group"].is_empty());
+    }
+
+    #[test]
+    fn accepted_names_are_what_the_checker_accepts_per_kind() {
+        let mut m = mission(json!([rule(json!([]), json!([]))]));
+        m["ships"] = json!([{"id": 1, "name": "RLS Hawk", "group": "Player0 Group"}, {"id": 2, "name": "Raider", "group": "Escort"}]);
+        m["environment"]["animals"] = json!([{"group": "Whales"}]);
+        let map = json!({"teams": [{"name_id": "NAVY"}], "players": [{"name": "Rival"}]});
+        let media = json!({"speech": {"HELLO": {}}, "messages": {"LOST": "x"}, "ship_names": {"HAWK": "y"}});
+        let accepted = accepted_names(&m, &map, &media);
+        let get = |k: &str| accepted[k].iter().map(String::as_str).collect::<Vec<_>>();
+        // A group field takes players and the groups of placed ships and of the environment too, but not a unit's own name.
+        for name in ["Fleet", "Empty", "Pirates", "Rival", "Player0 Group", "Escort", "Whales"] {
+            assert!(get("group").contains(&name), "{name} in {:?}", get("group"));
+        }
+        assert!(!get("group").contains(&"RLS Hawk") && !get("group").contains(&"Raider"));
+        assert_eq!(get("group"), get("player"));
+        assert!(get("unit").contains(&"Raider") && get("unit").contains(&"HUMAN CONTROLLED COMMAND SHIP"));
+        assert_eq!(get("volume"), ["Area"], "a volume of one vertex is an error where it is used");
+        assert_eq!((get("rule"), get("speech_event"), get("team")), (vec!["R"], vec!["HELLO"], vec!["NAVY"]));
+        // The editor's superset (`defined_names`) still lists what is defined, a lone vertex included.
+        assert!(defined_names(&m, &map, &media)["volume"].contains(&"Dot".to_string()));
+        // Without media.json any id is accepted and none is listed beyond opening_speech.
+        assert!(accepted_names(&m, &map, &Value::Null)["message"].is_empty());
+        // Every name offered passes the checker in a field of its kind; one not offered is reported.
+        let checked =
+            [Kind::Group, Kind::Player, Kind::Path, Kind::Volume, Kind::Task, Kind::Point, Kind::PointSet, Kind::Rule, Kind::Speech, Kind::MapText, Kind::Message, Kind::ShipName];
+        for kind in checked {
+            let (def, field) = RULE_TYPES
+                .iter()
+                .flat_map(|t| t.fields.iter().map(move |f| (t, f)))
+                .filter(|(_, f)| f.kind == kind && f.used)
+                .min_by_key(|(t, f)| (t.role == Role::Condition, f.soft))
+                .unwrap_or_else(|| panic!("no rule field of kind {}", kind.name()));
+            let reported = |name: &str, spec: &str| {
+                let mut m = m.clone();
+                let list = if def.role == Role::Action { "actions" } else { "conditions" };
+                m["rules"][0][list] = json!([{"Type": def.name, field.name: spec}]);
+                check_with(&m, &map, &media, false).into_iter().filter(|p| p.field == field.name).map(|p| (name.to_string(), p.message)).collect::<Vec<_>>()
+            };
+            assert!(!accepted[kind.name()].is_empty(), "{} has names", kind.name());
+            for name in &accepted[kind.name()] {
+                assert_eq!(reported(name, name), vec![], "{} field {}.{} refuses an offered name", kind.name(), def.name, field.name);
+            }
+            assert!(!reported("zzz", "Nope zzz").is_empty(), "{} field {}.{} accepts a name nothing defines", kind.name(), def.name, field.name);
+        }
+        // A group spec's unit part.
+        let (def, field) = RULE_TYPES.iter().flat_map(|t| t.fields.iter().map(move |f| (t, f))).find(|(t, f)| t.role == Role::Action && f.kind == Kind::Group).unwrap();
+        let spec = |unit: &str| {
+            let mut m = m.clone();
+            m["rules"][0]["actions"] = json!([{"Type": def.name, field.name: format!("Fleet,{unit}")}]);
+            check_with(&m, &map, &media, false).into_iter().filter(|p| p.field == field.name).count()
+        };
+        assert!(accepted["unit"].iter().all(|u| spec(u) == 0) && spec("Nobody") == 1);
     }
 
     #[test]

@@ -13,6 +13,8 @@
 //! - [`resolved_ship`]: a ship as the loader sees it ([`ResolvedShip`]): speed, thrust, mass, hit points, mounts and every hardpoint
 //!   in game axes, each with its source (a JSON pointer into `ship.json`, a model node, or a fallback rule), serializable.
 //! - [`check_mission`] / [`known_names`]: the mission checker behind `--check-mission`, on JSON values in memory.
+//! - [`defined_names`] / [`accepted_names`]: the names a mission defines per kind of rule field, and exactly the names a field of
+//!   that kind accepts (derived from the checker's own test, so a `group` field also offers players and placed ships' groups).
 //!
 //! Shared code: no UI and no view imports.
 
@@ -28,7 +30,7 @@ pub use json::to_json_string;
 pub use crate::data::DataError;
 pub use crate::data::resolved::{Hardpoint, HardpointKind, ResolvedMount, ResolvedSection, ResolvedShip, Source, Sourced, resolved_ship};
 pub use crate::modding::{ModEntry, ModReport};
-pub use crate::rules::check::{Finding, Level, Problem, defined_names};
+pub use crate::rules::check::{Finding, Level, Problem, accepted_names, defined_names};
 
 /// The version of this engine (the crate version).
 pub const ENGINE_VERSION: &str = env!("CARGO_PKG_VERSION");
