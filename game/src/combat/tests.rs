@@ -1788,3 +1788,65 @@ fn state_enums_keep_the_frame_and_art_indices() {
     assert_eq!(lob_kind(GunFamily::of("Bullet_GravCharge")), Some(LobKind::GravCharge));
     assert_eq!(lob_kind(GunFamily::of("Bullet_StarMortar")), Some(LobKind::StarMortar));
 }
+
+/// Not retail: a beam that is charging or firing when its ship is abandoned (`OP Abandon Ship`) stops, as on a sunk ship; `fire` no
+/// longer runs the cycle of an abandoned ship, so nothing else would end it. Asset-free.
+#[test]
+fn the_beams_of_an_abandoned_ship_stop() {
+    let gun = crate::data::gun_def(&serde_json::json!({
+        "BulletsPerBurst": 1, "BulletAffectedByGravity": false, "BulletTypeName_Primary": "Bullet_X",
+        "EffectiveRange_Range": 100.0, "LongRange_Range": 200.0, "MaximumRange_Range": 300.0,
+        "EffectiveRange_AccuracyDeviation": 0.2, "LongRange_AccuracyDeviation": 0.4, "MaximumRange_AccuracyDeviation": 0.8,
+        "MuzzleSpeed": 100.0, "TimeBetweenBursts": 5.0, "DuringBurstReloadTime": 0.1, "HorizontalRotationSpeed": 1.0,
+        "VerticalRotationSpeed": 1.0, "VerticalMinAngle": 0.0, "VerticalMaxAngle": 1.0,
+        "visual": { "muzzles": [], "pivot": [0.0, 0.0, 0.0] },
+        "beam": {"charge": 2.0, "duration": 30.0, "tick": 0.25, "ramp": 0.6, "max_power": 2.0},
+    }));
+    assert!(gun.beam.is_some());
+    let mut class = crate::fixed_tests::synthetic_class();
+    class.mounts = (0..2).map(|_| crate::data::Mount { pos: Vec3::ZERO, rot: Quat::IDENTITY, arc: std::f32::consts::TAU, gun: "Gun_Beam".into(), bank: 0, parent: None }).collect();
+    let mut app = App::new();
+    app.insert_resource(Time::<()>::default())
+        .insert_resource(Library { classes: vec![class], guns: [("Gun_Beam".to_string(), gun)].into(), bullets: default(), names: default(), clips: default() })
+        .init_resource::<FxLib>()
+        .insert_resource(SimRng::new(3))
+        .init_resource::<crate::scenario::Difficulty>()
+        .add_message::<Sfx>()
+        .add_message::<Hit>()
+        .add_message::<crate::decals::Scar>()
+        .add_systems(Update, beam::burn);
+    let state = |phase| GunState {
+        gun: "Gun_Beam".into(),
+        root: Entity::PLACEHOLDER,
+        cooldown: 0.0,
+        burst_left: 0,
+        burst_timer: 0.0,
+        base: Entity::PLACEHOLDER,
+        barrel: Entity::PLACEHOLDER,
+        muzzles: vec![],
+        yaw: 0.0,
+        pitch: 0.0,
+        aligned: false,
+        was_aligned: false,
+        lob_wait: None,
+        in_range: false,
+        dev: 0.0,
+        beam: phase,
+        request: Default::default(),
+        rock_ask: false,
+    };
+    let firing = beam::Phase::Firing { t: 1.0, victim: None, on: 0.0, tick: 0.0, length: 300.0 };
+    let ship = |app: &mut App, x: f32| {
+        let guns = GunStates(vec![state(firing), state(beam::Phase::Charging { t: 0.5 })]);
+        app.world_mut()
+            .spawn((Ship::new(0, Side::Player), Health { sections: vec![], core: 100.0, destroyed: false }, Fires::default(), Transform::from_xyz(x, 0.0, 0.0), guns))
+            .id()
+    };
+    let (crewed, wreck) = (ship(&mut app, 0.0), ship(&mut app, 5000.0));
+    app.world_mut().entity_mut(wreck).insert(crate::lifeboats::Abandoned);
+    app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs_f32(0.1));
+    app.update();
+    let phases = |e: Entity| app.world().get::<GunStates>(e).unwrap().0.iter().map(|g| g.beam).collect::<Vec<_>>();
+    assert_eq!(phases(wreck), [beam::Phase::Idle, beam::Phase::Idle], "a firing beam and a charging one both stop");
+    assert!(matches!(phases(crewed)[..], [beam::Phase::Firing { .. }, beam::Phase::Charging { .. }]), "a crewed ship's beams run on");
+}

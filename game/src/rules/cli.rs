@@ -71,6 +71,21 @@ pub fn apply(args: &[String]) -> Option<i32> {
     Some(i32::from(errors > 0))
 }
 
+/// `check_map` for the log: one line per finding, prefixed with the file as `--check-mission` prints it, and a count line. A folder
+/// that cannot be checked at all is one error line.
+pub fn report_lines(id: &str, dir: &Path) -> Vec<String> {
+    let file = rules_file(dir).and_then(|f| f.file_name()?.to_str().map(String::from)).unwrap_or_else(|| "mission.json".into());
+    match check_map(dir) {
+        Ok(problems) => {
+            let errors = problems.iter().filter(|p| p.level == Level::Error).count();
+            let mut lines: Vec<String> = problems.iter().map(|p| format!("{id}/{file}: {p}")).collect();
+            lines.push(format!("{id}: {errors} errors, {} warnings", problems.len() - errors));
+            lines
+        }
+        Err(message) => vec![format!("{id}: ERROR: {message}")],
+    }
+}
+
 /// Every folder under `maps/` with rules (a campaign mission or a skirmish script), sorted.
 fn all_ids(maps: &Path) -> Vec<String> {
     let mut ids: Vec<String> = std::fs::read_dir(maps)

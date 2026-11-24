@@ -23,6 +23,7 @@ mod ai;
 mod fight;
 mod grapple;
 mod odds;
+mod order;
 use ai::ai_boarding;
 pub use fight::Boarders;
 use fight::{fights, handle_messages, per_tick, say, set_flags, settled};
@@ -32,6 +33,7 @@ use grapple::{
 };
 use odds::points;
 pub use odds::{Outcome, Skill, Strength, casualty, counts, interval, register, settle};
+use order::board_orders;
 /// A ship or base that can be boarded. `on` is the target's Boardable flag (WOT 'Boardable' / 'Set Group/Unit Boardable').
 #[derive(Component, Clone, Debug)]
 pub struct Boardable {
@@ -151,6 +153,12 @@ pub enum BoardMsg {
     },
     /// 'Set Group/Unit Boardable'.
     Boardable(Entity, bool),
+    /// Not retail: the mission rule `OP Board Ship`. The boarder takes the order a player gives by hand, a grapple and then the
+    /// boarding once the hook has bitten (`order::board_orders`); a boarder with no harpoon, or a target it is not hostile to, only logs.
+    Order {
+        boarder: Entity,
+        target: Entity,
+    },
 }
 /// A capture, for the mission rules' capture counts (owner names; skirmish sides are "Player" / "Enemy").
 #[derive(Message)]
@@ -202,7 +210,7 @@ pub fn plugin(app: &mut App) {
         // link keeper (7.1); the computer's decision to board runs after collision (8).
         .add_systems(
             FixedUpdate,
-            (handle_messages, set_flags, grapple_orders)
+            (handle_messages, set_flags, grapple_orders, board_orders)
                 .chain()
                 .in_set(crate::BattleSet::Commands)
                 .run_if(in_state(crate::menu::Screen::Battle))

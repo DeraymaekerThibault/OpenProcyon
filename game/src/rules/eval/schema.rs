@@ -10,6 +10,8 @@
 
 use serde_json::{Value, json};
 
+use super::Station;
+
 /// What a field's value refers to. The checker resolves each kind against the mission's own definitions.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Kind {
@@ -31,6 +33,9 @@ pub enum Kind {
     Flag,
     /// A counter (engine-added): written by 'OP Set Counter' / 'OP Add To Counter', read by 'OP Counter Condition'.
     Counter,
+    /// A campaign counter (engine-added): kept for the next mission of the same mod campaign, so one set by an earlier mission is not an
+    /// error. Written by 'OP Set Campaign Counter' / 'OP Add To Campaign Counter', read by 'OP Campaign Counter Condition'.
+    CampaignCounter,
     /// The name of a rule of the mission (engine-added: 'OP Set Rule Active').
     Rule,
     /// A list of condition objects (engine-added: 'OP Any Of'); each is checked like a top-level condition.
@@ -71,6 +76,7 @@ impl Kind {
             Kind::Timer => "timer",
             Kind::Flag => "flag",
             Kind::Counter => "counter",
+            Kind::CampaignCounter => "campaign_counter",
             Kind::Rule => "rule",
             Kind::ConditionList => "condition_list",
             Kind::Condition => "condition",
@@ -254,6 +260,9 @@ const fn flag(n: &'static str) -> Field {
 const fn counter(n: &'static str) -> Field {
     Field::new(n, Kind::Counter, "")
 }
+const fn campaign_counter(n: &'static str) -> Field {
+    Field::new(n, Kind::CampaignCounter, "")
+}
 const fn rule_name(n: &'static str) -> Field {
     Field::new(n, Kind::Rule, "")
 }
@@ -299,6 +308,7 @@ const fn text(n: &'static str) -> Field {
 }
 
 const COMPARE: &[&str] = &Equivalence::NAMES;
+const STATION: &[&str] = &Station::NAMES;
 const FOLLOW: &[&str] = &["to end", "loop", "teleport loop", "end to end"];
 const STANCE: &[&str] = &["Stance_Dummy", "Stance_Neutral", "Stance_Defensive", "Stance_Aggressive", "Stance Persistant", "Stance Persistent", "AI STANCE"];
 const FORMATION: &[&str] = &["None", "Custom", "LineAbreast", "EchelonRight", "EchelonLeft", "Column", "Diamond", "Convoy"];
@@ -376,6 +386,10 @@ pub static RULE_TYPES: &[TypeDef] = &[
     cond("OP Any Of", &[conditions("Conditions")]).engine(),
     cond("OP Not", &[condition("Condition")]).engine(),
     cond("OP Counter Condition", &[counter("Counter Name"), choice("Equivalence", COMPARE), num("Value")]).engine(),
+    cond("OP Campaign Counter Condition", &[campaign_counter("Counter Name"), choice("Equivalence", COMPARE), num("Value")]).engine(),
+    cond("OP Group Is Cloaked", &[grp("Group Name"), boolean("Boolean").dflt("TRUE").opt()]).engine(),
+    cond("OP Group Speed", &[grp("Group Name"), choice("Which", &["Fastest", "Slowest"]), choice("Equivalence", COMPARE), num("Speed")]).engine(),
+    cond("OP Task State", &[task("Objective Task"), choice("State", &["Active", "Complete", "Failed"])]).engine(),
     // ---- Actions ----------------------------------------------------------------------------------------------------
     act("Start Timer", &[timer("Timer Name")]),
     act("Stop Timer", &[timer("Timer Name")]),
@@ -524,6 +538,21 @@ pub static RULE_TYPES: &[TypeDef] = &[
     act("OP Set Counter", &[counter("Counter Name"), num("Value")]).engine(),
     act("OP Add To Counter", &[counter("Counter Name"), num("Value")]).engine(),
     act("OP Set Rule Active", &[rule_name("Rule Name"), boolean("Boolean")]).engine(),
+    act("OP Set Campaign Counter", &[campaign_counter("Counter Name"), num("Value")]).engine(),
+    act("OP Add To Campaign Counter", &[campaign_counter("Counter Name"), num("Value")]).engine(),
+    // Orders that act on ships: applied by the module that owns the behaviour (boarding.rs, lifeboats.rs, ...), see docs/modding.md.
+    act("OP Board Ship", &[grp("Group Name"), grp("Target Group")]).engine(),
+    act("OP Abandon Ship", &[grp("Group Name")]).engine(),
+    // `Heading` is a compass bearing in degrees in game axes (0 up the map along +y, 90 toward +x); absent, ships keep their headings.
+    act("OP Teleport", &[grp("Group/Unit Name"), pset("Point Set Name"), num("Point Index").opt(), num("Heading").opt().dflt("")]).engine(),
+    act(
+        "OP Etherium Current",
+        &[path("Etherium Path"), num("Strength").opt().dflt("").range(0.0, 1000.0), num("Width").opt().dflt("").range(0.0, 100000.0), boolean("Boolean").opt().dflt("")],
+    )
+    .engine(),
+    act("OP Fade", &[num("Seconds").range(0.0, 600.0)]).engine().campaign(),
+    act("OP Place Mines", &[pset("Point Set Name"), text("Bullet").opt().dflt("Bullet_StarMine_Med"), plr("Player/Owner").opt()]).engine(),
+    act("OP Follow Group", &[grp("Group Name"), grp("Target Group"), choice("Station", STATION), num("Distance").range(0.0, 100000.0)]).engine(),
     act(
         "*State Init* Setup Nebula",
         &[
@@ -586,6 +615,7 @@ pub fn to_json() -> Value {
         Kind::Timer,
         Kind::Flag,
         Kind::Counter,
+        Kind::CampaignCounter,
         Kind::Rule,
         Kind::ConditionList,
         Kind::Condition,

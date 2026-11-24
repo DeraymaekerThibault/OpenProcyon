@@ -340,6 +340,8 @@ pub(super) fn fire(
         Option<&crate::crew_arms::CrewPosts>,
         Option<&crate::boarding::Boardable>,
         Option<&crate::environment::ScanFactor>,
+        // Not retail: an abandoned hull (`OP Abandon Ship`) cannot fire.
+        Has<crate::lifeboats::Abandoned>,
     )>,
     others: Query<(Entity, &Transform, &Ship, &Health, Has<PlayerShip>, Option<&crate::campaign::MissionShip>, Option<&crate::cloak::Cloak>)>,
     mut parts: Query<&mut Transform, (With<GunPart>, Without<Ship>)>,
@@ -416,8 +418,8 @@ pub(super) fn fire(
     let order = crate::scenario::in_spawn_order(&spawn_order, shooters.iter().map(|s| s.0), |e| *e);
     let mut walk = shooters.iter_many_mut(&order);
     while let Some(item) = walk.fetch_next() {
-        let Ok((me, tf, ship, mut states, health, mission, primary, pilot, cloak, posts, boarding, scan)) = item else { continue };
-        if health.destroyed {
+        let Ok((me, tf, ship, mut states, health, mission, primary, pilot, cloak, posts, boarding, scan, abandoned)) = item else { continue };
+        if health.destroyed || abandoned {
             ground.remove(&me);
             continue;
         }
