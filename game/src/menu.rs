@@ -7,12 +7,14 @@ mod lobby_scenario;
 mod missions;
 mod mods;
 mod saves;
+mod scroll;
 mod settings;
 mod skirmish;
 pub use lobby_scenario::*;
 pub use missions::*;
 pub use mods::*;
 pub use saves::*;
+pub use scroll::*;
 pub use settings::*;
 pub use skirmish::*;
 
@@ -386,6 +388,8 @@ pub fn plugin(app: &mut App) {
         )
         .add_systems(PostUpdate, (summary_on_end, esc_menu).chain().run_if(in_state(Screen::Battle)))
         .add_systems(Update, (lobby_scenario, autolaunch).chain().run_if(in_state(Screen::Lobby)))
+        .add_systems(Update, (scroll_controls, scroll_saves, scroll_mods, scroll_missions).before(BuildMenu).run_if(menu_active))
+        .add_systems(Update, scroll_skirmish.after(RunButtons).run_if(menu_active))
         .add_systems(Update, fleet_hook.run_if(in_state(Screen::Fleet)))
         .add_systems(Update, mods_bake_hook.run_if(in_state(Screen::Mods)))
         .add_systems(Update, missions_play_hook.after(BuildMenu).before(RunButtons).run_if(in_state(Screen::Missions)));
