@@ -121,6 +121,7 @@ pub const MERGED: &[&str] = &[
     "hud/scales.json",
     "data/collision.json",
     "data/docks.json",
+    "data/crew_nodes.json",
     "data/weapons/guns.json",
     "data/weapons/bullets.json",
     "data/ai/weapons.json",
@@ -510,6 +511,37 @@ mod tests {
         std::fs::write(m.join("data/docks.json"), r#"{"FerrumTown": {"points": [{"label": "Berth1", "pos": [1, 2, 0], "yaw": 1.5}], "tender": true}}"#).unwrap();
         let c: Value = read(&overlay(&base, &[m], None).join("data/docks.json")).unwrap();
         assert!(c["Base_X"]["points"].is_array() && c["FerrumTown"]["points"].is_array(), "a mod's dock points are added beside the retail ones");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn crew_nodes_merge_by_scenery_type_across_mods() {
+        let dir = std::env::temp_dir().join(format!("procyon-mod-crew-nodes-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let (base, a, b) = (dir.join("assets"), dir.join("a"), dir.join("b"));
+        for (d, text) in [
+            (&base, r#"{"Town": [{"name": "Crew_Walk_A_0", "pos": [0, 0, 0]}]}"#),
+            (&a, r#"{"Pier": [{"name": "Crew_Work_0", "pos": [1, 0, 0]}]}"#),
+            (&b, r#"{"Town": [{"name": "Crew_Walk_B_0", "pos": [2, 0, 0]}]}"#),
+        ] {
+            std::fs::create_dir_all(d.join("data")).unwrap();
+            std::fs::write(d.join("data/crew_nodes.json"), text).unwrap();
+        }
+        let c: Value = read(&overlay(&base, &[a, b], None).join("data/crew_nodes.json")).unwrap();
+        assert!(c["Pier"].is_array(), "the first mod's type is added");
+        assert_eq!(c["Town"][0]["name"], "Crew_Walk_B_0", "a type a later mod gives replaces its list (arrays replace)");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn a_ship_extending_a_retail_hull_with_crew_nodes_keeps_the_hulls_other_keys() {
+        let (dir, root) = bad_mod(
+            "crew-nodes-extends",
+            &[("ships/Ship_X/ship.json", r#"{"race": "Navy", "core_hp": 80, "guns": {"G": {"arc_deg": 90, "gun": "Y"}}}"#)],
+            &[("ships/Ship_Crewed/ship.json", r#"{"extends": "Ship_X", "crew_nodes": [{"name": "Crew_Walk_P_0", "pos": [0, 1, 2]}]}"#)],
+        );
+        let s: Value = read(&root.join("ships/Ship_Crewed/ship.json")).unwrap();
+        assert_eq!((s["race"].as_str(), s["core_hp"].as_i64(), s["guns"]["G"]["gun"].as_str()), (Some("Navy"), Some(80), Some("Y")));
+        assert_eq!(s["crew_nodes"][0]["name"], "Crew_Walk_P_0");
+        assert!(s.get("extends").is_none());
         std::fs::remove_dir_all(dir).unwrap();
     }
     #[test]

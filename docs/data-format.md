@@ -51,6 +51,7 @@ Short form first (paths by area), the full description of every path under "Deta
 | Path | What it is |
 |---|---|
 | `data/docks.json` | Dock points of bases and islands |
+| `data/crew_nodes.json` | Optional, mods only: crew places of map scenery by type |
 | `data/mesh_detail.json` | Per-mesh detail levels, no-draw distance, collision LOD |
 | `data/animations.json` | Mesh scene animation clips |
 | `data/mesh_effects.json` | Ambient effect points of mesh scenes (fires, smoke, volcanoes) |
@@ -118,6 +119,7 @@ Short form first (paths by area), the full description of every path under "Deta
 **World data**
 
 - `data/docks.json`: dock points of bases and islands (ships keep theirs in `ships/<id>/docks.json`): `pos` local game frame, `yaw` radians about z, `tender` (WOT `Is Tender`: dockable by default) (`tools/export_docks.py`)
+- `data/crew_nodes.json`: optional, a mod's (engine extension, no retail counterpart): `{"<scenery type>": [{"name": "Crew_Walk_A_0", "pos": [x, y, z], "rot": [..]}]}`, the deck-crew places a scenery model would carry as `Crew_*` nodes (grammar in `docs/modding.md` "A ship from a model"); `pos`/`rot` in the scenery's own frame, game axes, as a gun's; same-named model nodes are replaced, others added; mods merge it key by key
 - `data/mesh_detail.json`: per-mesh detail settings: `levels` ([max camera distance, detail fraction]), `no_draw` distance, `collision_lod` (level whose triangles retail collides with); the empty name is the default (`tools/export_mesh_detail.py`)
 - `data/animations.json`: mesh scene animation clips: `{scene: [{name, duration, motions: [{node, target, channels}]}]}`, six channels per motion (x, y, z, yaw, pitch, roll in radians), keyframe `[time, value, smoothing, tension, continuity, bias, in tangent, out tangent]` (`tools/export_animations.py`, `tools/msb.py parse_scene`). The animals' clips are also baked into their GLBs (below)
 - `data/mesh_effects.json`: ambient effect points of mesh scenes (fire stacks, smoke, lighthouse, volcano fountains): `kind` PlayEffect/VolcanoSmoke, node `name`, `descriptor`, `effect` (the effect file the world object's attribute names; null for VolcanoSmoke), `pos` (`tools/export_mesh_effects.py`). The effect files are in `fx/`. Every point is placed by the game
@@ -187,6 +189,7 @@ Gun entries in `data/weapons/guns.json` are retail apart from one engine key, `b
 | `ring` | retail | number | no | `0.65` |
 | `cloakable` | retail | bool | no | `true` only for ids containing `Submersible` |
 | `fuel` | engine | bool | no | `false` |
+| `crew_nodes` | engine | array of `{name, pos, rot?}` | no | none; crew places for deck crews, added to the model's `Crew_*` nodes (a node of the same name replaces the model's); `name` is a `Crew_<Kind>_...` node name, `pos`/`rot` as a gun's, ship frame |
 | `crew_posts` | retail | object | no | one gunner per two guns, a captain, mate, navigator, engineer, a rigger per sail, a fighter or two |
 | `lifeboats` | retail | integer | no | `0` |
 | `is_lifeboat` | retail | bool | no | `false` |

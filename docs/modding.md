@@ -150,7 +150,7 @@ How a file combines with the one below it depends on its path:
 
 | Path | Rule |
 |---|---|
-| `data/weapons/guns.json`, `data/weapons/bullets.json`, `data/ai/weapons.json`, `data/collision.json`, `data/docks.json`, `menu/strings.json`, `hud/scales.json`, `data/render/skies.json`, `data/render/nebulae.json` | **merged**, deep: objects combine key by key, so a new key is added and an existing one changes only the keys you give; arrays and scalars replace. A file that is not valid JSON, or not an object, does not just get ignored: the merge replaces the whole table below it with that bad value and the game then fails or shows blank text (see "Troubleshooting") |
+| `data/weapons/guns.json`, `data/weapons/bullets.json`, `data/ai/weapons.json`, `data/collision.json`, `data/docks.json`, `data/crew_nodes.json`, `menu/strings.json`, `hud/scales.json`, `data/render/skies.json`, `data/render/nebulae.json` | **merged**, deep: objects combine key by key, so a new key is added and an existing one changes only the keys you give; arrays and scalars replace. A file that is not valid JSON, or not an object, does not just get ignored: the merge replaces the whole table below it with that bad value and the game then fails or shows blank text (see "Troubleshooting") |
 | a `.json` file containing `"extends"` | merged over its parent (below); the `extends` key is dropped |
 | any other file (every other JSON such as `data/render/look.json`, `data/hud/theme.json`, `data/hud/slices.json`, `data/fx/wake_tint.json`, images, models, sounds, shaders) | **replaced** whole; with two mods the later one wins and the earlier one's file is gone |
 
@@ -166,6 +166,7 @@ stops the game at launch (`mod <folder>: extends unknown '<parent>'`).
 | an `extends` file may also carry `"set": {"/engines/0/fx": "X"}` (JSON pointers, applied after the merge) to change one value inside an array, which a merge cannot do; a pointer that does not exist stops the game at launch (`mod <folder>: <file> sets '<pointer>', which does not exist`). `mods/faction-colors` uses it to point a ship's four engines at recoloured effect copies |
 | `data/collision.json` | merged key by key: a new scenery type's collision (an entry per `type` a map's `objects` name, layout in `docs/data-format.md`), so a mod's own island or rock blocks ships and shells. Without an entry the model is drawn but nothing collides with it |
 | `data/docks.json` | merged key by key: `{"<scenery type>": {"points": [{"label", "pos", "yaw"}], "tender": true}}` (layout in `docs/data-format.md`), so a mod's own base or island gets dock points; scenery no rule owns is dockable by the player's side like a retail island |
+| `data/crew_nodes.json` | merged key by key: `{"<scenery type>": [{"name": "Crew_Walk_A_0", "pos": [x, y, z], "rot": [..]}]}`, the crew places of map scenery (a town's lanes, posts and work places) with no model change; same entries and rules as a ship's `crew_nodes` ("A ship from a model"). A type's list is an array, so a later mod's list for a type replaces an earlier one. Drawn only by a render profile's `deckhands` block |
 | `data/render/nebulae.json` | merged key by key: `{"rules": [...], "bolt": {...}}`, the storm and nebula looks a content mod wants on its own maps (same keys as the `nebulae` block of `look.json`). Its `rules` go in front of the profile's (first match wins), its other keys merge over the profile's `nebulae`; a rule matches by effect name only, so it applies on every map while the mod is on. Without a profile with a `nebulae` block it does nothing |
 | `data/render/skies.json` | merged key by key: `{"<sky>": {...any `sky` key of `look.json`...}}`, the layers, base and stars of a sky a content mod bakes itself (`models/sky/<sky>_cube.png`). Added under the active render profile's `sky.skies` (the profile's own entry for a sky wins); without a profile with a `sky` block it does nothing, so a mission mod never switches the look on |
 | `models/scenery/<Scene>.glb` with glTF animations | every clip in the file loops from spawn, all together (cranes, flags, beacons: node animation, the player on the model's root). Retail scenery has none; its windmills play `data/animations.json` |
@@ -213,6 +214,7 @@ rules. Data keys the engine adds are also listed per file: ship and gun keys in 
 | Developer console | always (`~` or F12; in a release build Display Options > Developer Console or `--console`) | control (it runs rule actions) | `game/src/rules/console.rs`, `game/src/bindings.rs`, `game/src/menu/settings.rs` |
 | Game-speed buttons | `data/hud/speed.json` (the bundled `game-speed` mod, on by default) | control | `game/src/panels.rs`, `game/src/classic/panels.rs` |
 | Pause key | always | control | `game/src/view.rs` |
+| Crew places in JSON (deck crews and townsfolk without editing a model) | a `crew_nodes` key in `ship.json`, or `data/crew_nodes.json` | presentation | `game/src/data/crew_nodes.rs`, `game/src/render/deckhands.rs` |
 | Number keys: primary ship on 1, secondaries on 2..9, 0, `\` | always | control | `game/src/bindings.rs` |
 | Mods page and its main-menu button, the HD skies bake | always | control | `game/src/menu/mods.rs`, `game/src/classic/menu.rs` |
 | Free camera | `data/camera.json` (the bundled `free-camera` mod, on by default) | presentation | `game/src/view.rs` |
@@ -395,10 +397,20 @@ engine can tell:
 | `FlagAttachmentPoint` | `flag` | the flag pole's ends (names with `top` and `bottom`) |
 | `BoardingEffectPoint` | `boarding` | where boarders cross |
 | `ToweePoint`, `TowerPoint`, `TorpedoHomingPoint` | `tow` (front/back), `homing` | tow and homing points |
-| (none) | `Crew_Walk_<lane>_<k>`, `Crew_Gun_*`, `Crew_Post_*`, `Crew_Work_*`, `Crew_Climb_<shroud>_a`/`_b` (the whole name) | where deck crews and townsfolk walk, man guns, stand, work (and carry loads between work places) and climb (drawn only by a render profile's `deckhands` block, see below) |
+| (none) | `Crew_Walk_<lane>_<k>`, `Crew_Gun_*`, `Crew_Post_*`, `Crew_Work_*`, `Crew_Climb_<shroud>_a`/`_b` (the whole name) | where deck crews and townsfolk walk, man guns, stand, work (and carry loads between work places) and climb (drawn only by a render profile's `deckhands` block, see below); the same nodes may instead be listed in JSON: `crew_nodes` in `ship.json`, `data/crew_nodes.json` for scenery, see below) |
 
 A node's heading about up is its rotation about glTF y (or the extra `rot_raw[0]`): 0 faces forward, a quarter turn to port is +90
 degrees. A gun entry may still give `pos`, `rot`, `parent_layer` itself; `parent_layer` otherwise is the nearest hull layer.
+
+**Crew places in JSON.** The `Crew_*` nodes need not be in the model. A ship's `crew_nodes` key lists them as
+`{"name": "Crew_Walk_P_0", "pos": [x, y, z], "rot": [..]}` (`rot` optional; `pos` and `rot` are the ship's own frame and the
+convention of a gun's `pos` and `rot`, game axes: x starboard, y forward, z up), and `data/crew_nodes.json` does the same for map
+scenery by type. `name` is exactly the node-name grammar above, so a typo is an error naming the file and the entry
+(`ships/<Id>/ship.json: crew_nodes[2].name`). The JSON nodes are added to the model's; a JSON node with the name of a model node
+replaces it, so a mod can move one place. Through `extends` it works on a retail hull, with no GLB at all:
+`{"extends": "Ship_Navy_Cutter", "crew_nodes": [{"name": "Crew_Walk_P_0", "pos": [0, -2, 1.2]}, {"name": "Crew_Walk_P_1", "pos": [0, 3, 1.2]}]}`
+(the list is an array, so it replaces a parent's own `crew_nodes`). Only a render profile's `deckhands` block draws crews; this
+changes nothing in a battle. `Crew_Count_<n>` takes a `pos` too, which is not used.
 
 **What `ship.json` can leave out.** `physics` (keys `Mass`, `MaxThrust`, `MaxSpeed`, `RotationalFriction`, `MaxAngularAcceleration`; defaults about a Navy Cutter's: 4000, 60000, 8, 20, 3), `core_hp` (a
 quarter of the hull sections' HP, at least 50), `sections`, `engines`, `wakes`, `flags`, `explosion_fx`, `engine_snd`, `repair_fx` (by

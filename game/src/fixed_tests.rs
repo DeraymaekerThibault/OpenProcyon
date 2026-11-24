@@ -147,6 +147,7 @@ pub(crate) fn synthetic_class() -> data::Class {
         homing_point: Vec3::ZERO,
         crew: [0; 8],
         boarding_points: vec![],
+        crew_nodes: vec![],
     }
 }
 

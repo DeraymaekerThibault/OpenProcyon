@@ -6,6 +6,7 @@ use std::fmt;
 use std::path::Path;
 
 pub mod derive;
+use super::crew_nodes;
 
 /// Preserve authored section/mount order: parent indices and weapon banks depend on it.
 fn ordered<'de, D, T>(deserializer: D) -> Result<Vec<(String, T)>, D::Error>
@@ -71,6 +72,8 @@ struct ShipDoc {
     #[serde(default)]
     is_lifeboat: bool,
     sphere: Option<SphereDoc>,
+    #[serde(default)]
+    crew_nodes: Vec<crew_nodes::CrewNodeDoc>,
 }
 
 /// PROVISIONAL defaults, about a Navy Cutter's, for a ship that states no physics.
@@ -177,8 +180,14 @@ struct GeometryDoc {
     tris: Vec<f64>,
 }
 
-fn point(v: [f64; 3]) -> Vec3 {
+pub(super) fn point(v: [f64; 3]) -> Vec3 {
     conv(v[0] as f32, v[1] as f32, v[2] as f32)
+}
+
+/// A `rot` triple of a gun (or a crew node) as the node's rotation; preserves the rolled frame of inverted mounts.
+pub(super) fn mount_rotation(rot: [f64; 3]) -> Quat {
+    let r = rot.map(|v| v as f32);
+    Quat::from_rotation_z(-r[1]) * Quat::from_rotation_y(r[0]) * Quat::from_rotation_x(r[2])
 }
 
 fn optional_point(v: Option<&Vec<f64>>) -> Vec3 {
@@ -249,11 +258,9 @@ fn try_load_class(root: &Path, name: &str, guns: &HashMap<String, GunDef>) -> Re
             let (Some(pos), Some(rot)) = (g.pos, g.rot) else {
                 return Err(format!("{context}: guns.{label} has no pos/rot and the model has no hardpoint node named {label:?}"));
             };
-            let r = rot.map(|v| v as f32);
             Ok(Mount {
                 pos: point(pos),
-                // Preserve the rolled frame of inverted mounts.
-                rot: Quat::from_rotation_z(-r[1]) * Quat::from_rotation_y(r[0]) * Quat::from_rotation_x(r[2]),
+                rot: mount_rotation(rot),
                 arc: (g.arc_deg as f32).to_radians(),
                 gun: g.gun.clone(),
                 bank: g.bank.as_deref().and_then(|b| b.trim_start_matches("Bank").parse().ok()).unwrap_or(0),
@@ -261,6 +268,7 @@ fn try_load_class(root: &Path, name: &str, guns: &HashMap<String, GunDef>) -> Re
             })
         })
         .collect::<Result<Vec<_>, String>>()?;
+    let crew_nodes = crew_nodes::nodes(&j.crew_nodes, &format!("{context}: crew_nodes"))?;
     let hull = |f: &dyn Fn(&Section) -> bool| sections.iter().filter(|s| f(s)).fold((Vec3::MAX, Vec3::MIN), |(a, b), s| (a.min(s.min), b.max(s.max)));
     let (hmn, hmx) = hull(&|s| s.vital);
     let (amn, amx) = hull(&|_| true);
@@ -334,6 +342,7 @@ fn try_load_class(root: &Path, name: &str, guns: &HashMap<String, GunDef>) -> Re
         crew_posts: j.crew_posts.as_ref().map_or(0, |v| v.values().sum::<u64>() as u32),
         crew: ["Gunners", "Captains", "First Mates", "Navigators", "Engineers", "Riggers", "Fighters", "Lookouts"]
             .map(|k| j.crew_posts.as_ref().and_then(|v| v.get(k)).map_or(0, |n| *n as u32)),
+        crew_nodes,
         boarding_points: facts.iter().flat_map(|f| f.points.iter()).filter(|p| p.kind == "BoardingEffectPoint").map(|p| point(p.pos)).collect(),
         display_name: j.display_name,
         icon: j.icon,
@@ -430,6 +439,21 @@ mod tests {
         doc["guns"]["Test mount"] = serde_json::json!({"pos":[0,0,0],"rot":[0,0,0],"arc_deg":90,"gun":"Missing"});
         let error = Fixture::new(doc, geometry()).load().err().unwrap();
         assert!(error.contains("guns.Test mount.gun") && error.contains("Missing"), "{error}");
+    }
+    #[test]
+    fn crew_nodes_in_ship_json_reach_the_class_and_a_bad_one_names_file_and_field() {
+        let mut doc = ship();
+        doc["crew_nodes"] = serde_json::json!([{"name": "Crew_Walk_P_0", "pos": [1, 2, 3]}, {"name": "Crew_Post_Captain", "pos": [0, 0, 0], "rot": [0.5, 0, 0]}]);
+        let c = Fixture::new(doc.clone(), geometry()).load().unwrap();
+        assert_eq!(c.crew_nodes.iter().map(|n| n.0.as_str()).collect::<Vec<_>>(), ["Crew_Walk_P_0", "Crew_Post_Captain"]);
+        assert_eq!(c.crew_nodes[0].1.translation, Vec3::new(1.0, 3.0, -2.0), "game axes, as a gun's pos");
+        assert!(Fixture::new(ship(), geometry()).load().unwrap().crew_nodes.is_empty());
+        doc["crew_nodes"][1].as_object_mut().unwrap().remove("pos");
+        let error = Fixture::new(doc.clone(), geometry()).load().err().unwrap();
+        assert!(error.contains("ship.json") && error.contains("pos"), "{error}");
+        doc["crew_nodes"][1] = serde_json::json!({"name": "Crew_Dance_0", "pos": [0, 0, 0]});
+        let error = Fixture::new(doc, geometry()).load().err().unwrap();
+        assert!(error.contains("ship.json") && error.contains("crew_nodes[1].name") && error.contains("Crew_Dance_0"), "{error}");
     }
     #[test]
     fn missing_file_and_mod_symlink_errors_identify_the_source() {

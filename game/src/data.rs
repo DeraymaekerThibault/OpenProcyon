@@ -6,6 +6,7 @@ use std::sync::OnceLock;
 
 mod asteroids;
 mod crew;
+pub mod crew_nodes;
 mod ships;
 mod weapons;
 pub use crew::{CrewMember, roster};
@@ -316,7 +317,7 @@ pub struct GunDef {
 /// Not retail: the `ship.json` keys the engine adds (no retail counterpart; `docs/data-format.md` "ship.json keys", Source
 /// `engine`). Every other key the ship loader reads carries a retail value. `tests/test_extensions.py` keeps this list, the loader
 /// and the docs in step.
-pub const ENGINE_SHIP_KEYS: &[&str] = &["extends", "model", "geometry", "fuel"];
+pub const ENGINE_SHIP_KEYS: &[&str] = &["extends", "model", "geometry", "fuel", "crew_nodes"];
 /// Not retail: the gun keys of `guns.json` the engine adds (`beam`, a beam gun). Checked like `ENGINE_SHIP_KEYS`.
 pub const ENGINE_GUN_KEYS: &[&str] = &["beam"];
 
@@ -527,6 +528,8 @@ pub struct Class {
     /// BoardingEffectPoint nodes: `boarding::register` offers them for ships `data/boarding.json` does not list.
     pub crew: [u32; 8],
     pub boarding_points: Vec<Vec3>,
+    /// Not retail: the crew places the ship's `crew_nodes` key gives (`data/crew_nodes.rs`), combined with the model's by the deck crews.
+    pub crew_nodes: Vec<crew_nodes::CrewNode>,
 }
 impl Class {
     /// The class's HUD icon of a bar ("ShipBar", "WeaponBar"): the WOT icon name (several classes share art, and names differ from
