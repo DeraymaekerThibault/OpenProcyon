@@ -36,6 +36,8 @@ pub fn extensions() -> Vec<Extension> {
 }
 
 fn parse(text: &str) -> Vec<Extension> {
+    // A Windows checkout may give the compiled-in file CRLF line ends (git autocrlf).
+    let text = text.replace("\r\n", "\n");
     let Some(start) = text.find("\n## Engine extensions (not retail)\n") else { return vec![] };
     let section = &text[start + 1..];
     let section = section[3..].find("\n## ").map_or(section, |end| &section[..end + 3]);
@@ -88,5 +90,12 @@ mod tests {
             all,
             [Extension { feature: "A thing".into(), gate: "a key".into(), kind: ExtensionKind::Presentation, code: vec!["game/src/a.rs".into(), "game/src/b/".into()] }]
         );
+    }
+
+    #[test]
+    fn a_table_with_crlf_line_ends_parses_like_lf() {
+        let lf = "\n## Engine extensions (not retail)\n\n| Extension | Gate | Changes | Code |\n|---|---|---|---|\n| A thing | a key | control | `game/src/a.rs` |\n\n## Next\n";
+        assert_eq!(parse(&lf.replace('\n', "\r\n")), parse(lf));
+        assert_eq!(parse(lf).len(), 1);
     }
 }
