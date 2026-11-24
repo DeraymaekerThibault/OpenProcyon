@@ -17,3 +17,13 @@ mod tests_ext;
 
 pub use eval::*;
 pub use systems::*;
+
+/// The (name, text) of every task that is active and not yet complete: the dev autopilot (`smoke/autopilot.rs`) reads the tasks this way.
+pub fn live_tasks(sc: &Script) -> impl Iterator<Item = (&str, &str)> {
+    sc.tasks.iter().filter(|t| t.active && !t.complete).map(|t| (t.name.as_str(), t.text.as_str()))
+}
+
+/// How often the human's ships have hit `victim` (the dev autopilot's "someone is fighting it" test).
+pub fn player_hits(sc: &Script, victim: bevy::prelude::Entity) -> u32 {
+    sc.hits_by.get(&(eval::PLAYER.to_string(), victim)).copied().unwrap_or(0)
+}

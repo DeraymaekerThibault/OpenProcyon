@@ -35,6 +35,7 @@ fn rules_app(mission: Mission) -> App {
         .init_resource::<Time>()
         .init_resource::<ButtonInput<KeyCode>>()
         .init_resource::<RuleInput>()
+        .init_resource::<RuleWorld>()
         .init_resource::<Target>()
         .init_resource::<crate::bindings::Bindings>()
         .init_resource::<crate::campaign::CampaignPoints>()
