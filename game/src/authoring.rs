@@ -12,6 +12,8 @@
 //! - [`schemas`]: JSON Schemas of `ship.json`, `guns.json`, `bullets.json`, `data/crew_nodes.json` and `mod.json` (`--dump-schemas <dir>`).
 //! - [`resolved_ship`]: a ship as the loader sees it ([`ResolvedShip`]): speed, thrust, mass, hit points, mounts and every hardpoint
 //!   in game axes, each with its source (a JSON pointer into `ship.json`, a model node, or a fallback rule), serializable.
+//! - [`game_content_in`]: the files of a mod that are equal in meaning to the player's import ([`ContentMatch`], [`MatchKind`]):
+//!   game content a mod must not ship (what `tools/compare_assets.py` does by meaning; PROVISIONAL limits in `authoring/content.rs`).
 //! - [`check_mission`] / [`known_names`]: the mission checker behind `--check-mission`, on JSON values in memory.
 //! - [`defined_names`] / [`accepted_names`]: the names a mission defines per kind of rule field, and exactly the names a field of
 //!   that kind accepts (derived from the checker's own test, so a `group` field also offers players and placed ships' groups).
@@ -23,8 +25,10 @@ use std::path::{Path, PathBuf};
 use serde_json::Value;
 
 mod check_mod;
+mod content;
 mod json;
 pub use check_mod::{check_mod, check_mod_with, unknown_keys};
+pub use content::{ContentMatch, MatchKind, game_content_in};
 pub use json::to_json_string;
 
 pub use crate::data::DataError;
