@@ -324,7 +324,7 @@ pub fn plugin(app: &mut App) {
     bolts::plugin(app, &look);
     currents::plugin(app, &look);
     // one baked noise volume for every block that samples it
-    if look.sky.is_some() || look.nebulae.is_some() {
+    if look.sky.is_some() || look.nebulae.is_some() || look.currents.is_some() || look.black_holes.is_some() {
         app.add_systems(Startup, volnoise::bake);
     }
     app.insert_resource(look.flags).insert_resource(look).add_systems(Update, (camera, anti_alias.after(camera), (sun, sky_light).after(crate::scenario::apply_lighting)));

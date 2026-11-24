@@ -358,6 +358,19 @@ fn help_lists_commands_by_group_and_marks_the_cheats() {
 }
 
 #[test]
+fn help_rows_split_into_a_command_column_and_a_description() {
+    let lines = help_lines(None);
+    for e in TABLE {
+        let row = lines.iter().find(|l| l.split(HELP_COLUMN).next().is_some_and(|c| c.trim_start_matches([' ', '*']) == e.usage)).unwrap();
+        assert!(row.split(HELP_COLUMN).nth(1).unwrap().starts_with(e.about), "{} has its description in the second column", e.name);
+    }
+    for (key, what) in KEYS {
+        assert!(lines.contains(&format!("   {key}{HELP_COLUMN}{what}")), "key '{key}' has its description in the second column");
+    }
+    assert!(lines.iter().all(|l| l.matches(HELP_COLUMN).count() <= 1), "at most one column break per row");
+}
+
+#[test]
 fn an_unknown_command_names_the_nearest_one() {
     let err = |l: &str| parse(l, "Hero", false).unwrap_err();
     assert!(err("goh").contains("did you mean god") && err("goh").contains("`help`"), "{}", err("goh"));

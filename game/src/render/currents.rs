@@ -1,8 +1,9 @@
 //! Not retail: Etherium currents of the render profile (`currents` block, drawn with the mod's `shaders/current.wesl`). The retail
 //! current is two additive strips scrolling a texture along the path (`environment.rs`, `CurrentRibbon`). This swaps those
-//! strips' material for one whose shader draws flowing streaks, sparkles that ride downstream faster than the streaks, soft edges
-//! and a little bloom in the core. The mesh, its UVs (u across, v along the path from its first point to its last: the way the
-//! force pushes) and the retail scroll are kept, so the flow direction is the retail one.
+//! strips' material for one whose shader draws a river of glowing gas in the manner of the profile's nebulae: wisps of the same
+//! baked noise (`volnoise.rs`), drawn out along the flow and running downstream, in a few layers at different heights so the river
+//! has depth, with soft edges and a little bloom where the gas is dense. The mesh, its UVs (u across, v along the path from its
+//! first point to its last: the way the force pushes) and the retail scroll are kept, so the flow direction is the retail one.
 //!
 //! Only reads `environment::CurrentRibbon`; nothing here changes what a current does.
 
@@ -13,6 +14,7 @@ use bevy::render::render_resource::{AsBindGroup, RenderPipelineDescriptor, Shade
 use bevy::shader::ShaderRef;
 use serde_json::Value;
 
+use super::volnoise::NoiseVolume;
 use super::{Look, num, rgb};
 use crate::environment::CurrentRibbon;
 use crate::fx::EffectMaterial;
@@ -24,28 +26,36 @@ pub const SHADER: &str = "shaders/current.wesl";
 pub struct Currents {
     /// Overall strength; the core is past 1 so it blooms.
     pub brightness: f32,
-    /// Streaks across the strip.
+    /// Wisps across the strip.
     pub streaks: f32,
-    /// Strength of the sparkles that ride downstream.
+    /// Strength of the glints that ride downstream.
     pub sparkle: f32,
-    /// Extra light along the strip's middle line.
+    /// Extra light where the gas is dense.
     pub core: f32,
     /// How much of the retail texture stays under the streaks.
     pub texture: f32,
     pub color: Vec3,
     /// Strength of the slow pulses that run down the current (they make the direction readable at a glance).
     pub pulse: f32,
+    /// Colour of dense gas (linear); the default is `color` half way to white.
+    pub color_high: Vec3,
+    /// How much gas the middle of the current always holds, whatever the noise says there, so the river never breaks (0 = the
+    /// noise alone).
+    pub fill: f32,
 }
 
 pub fn parse(v: &Value) -> Option<Currents> {
+    let color = rgb(&v["color"]).unwrap_or(Vec3::new(0.45, 0.8, 1.0)).max(Vec3::ZERO);
     v.is_object().then(|| Currents {
         brightness: num(&v["brightness"], 1.4).max(0.0),
         streaks: num(&v["streaks"], 10.0).clamp(1.0, 60.0),
         sparkle: num(&v["sparkle"], 1.0).max(0.0),
         core: num(&v["core"], 1.5).max(0.0),
         texture: num(&v["texture"], 0.5).clamp(0.0, 1.0),
-        color: rgb(&v["color"]).unwrap_or(Vec3::new(0.45, 0.8, 1.0)).max(Vec3::ZERO),
+        color,
         pulse: num(&v["pulse"], 0.35).clamp(0.0, 1.0),
+        color_high: rgb(&v["color_high"]).unwrap_or(color.lerp(Vec3::ONE, 0.5)).max(Vec3::ZERO),
+        fill: num(&v["fill"], 0.1).clamp(0.0, 0.5),
     })
 }
 
@@ -56,8 +66,10 @@ pub struct CurrentUniform {
     pub look: Vec4,
     /// rgb: colour, w: share of the retail texture kept
     pub color: Vec4,
-    /// x: this strip's retail scroll speed (texture heights a second), y: pulse strength (the clock is the frame data's)
+    /// x: this strip's retail scroll speed (texture heights a second), y: pulse strength, z: fill (the clock is the frame data's)
     pub params: Vec4,
+    /// rgb: colour of dense gas
+    pub high: Vec4,
 }
 
 impl Currents {
@@ -65,7 +77,8 @@ impl Currents {
         CurrentUniform {
             look: Vec4::new(self.brightness, self.streaks, self.sparkle, self.core),
             color: self.color.extend(self.texture),
-            params: Vec4::new(speed, self.pulse, 0.0, 0.0),
+            params: Vec4::new(speed, self.pulse, self.fill, 0.0),
+            high: self.color_high.extend(0.0),
         }
     }
 }
@@ -77,6 +90,10 @@ pub struct CurrentGlow {
     /// The frame data (`frame.rs`) at `@binding(99)`.
     #[storage(99, read_only)]
     pub frame: super::frame::FrameBinding,
+    /// The baked noise (`volnoise.rs`), the one the clouds are made of.
+    #[texture(101, dimension = "3d")]
+    #[sampler(102)]
+    pub noise: Handle<Image>,
 }
 
 impl MaterialExtension for CurrentGlow {
@@ -107,15 +124,16 @@ pub fn plugin(app: &mut App, look: &Look) {
 fn restyle(
     mut commands: Commands,
     look: Res<Look>,
+    noise: Option<Res<NoiseVolume>>,
     strips: Query<(Entity, &CurrentRibbon, &MeshMaterial3d<EffectMaterial>)>,
     retail: Res<Assets<EffectMaterial>>,
     mut materials: ResMut<Assets<CurrentMaterial>>,
 ) {
-    let Some(c) = &look.currents else { return };
+    let (Some(c), Some(noise)) = (&look.currents, noise) else { return };
     for (e, ribbon, mat) in &strips {
         let Some(old) = retail.get(&mat.0) else { continue };
         let base = StandardMaterial { uv_transform: default(), ..old.base.clone() };
-        let handle = materials.add(CurrentMaterial { base, extension: CurrentGlow { u: c.uniform(ribbon.0), frame: default() } });
+        let handle = materials.add(CurrentMaterial { base, extension: CurrentGlow { u: c.uniform(ribbon.0), frame: default(), noise: noise.0.clone() } });
         super::kit::swap::<EffectMaterial, _>(&mut commands, e, handle);
     }
 }
@@ -132,7 +150,10 @@ mod tests {
         assert!(c.brightness > 0.0 && c.texture <= 1.0);
         let c = parse(&json!({"streaks": 999, "texture": 4, "brightness": -1})).unwrap();
         assert_eq!((c.streaks, c.texture, c.brightness), (60.0, 1.0, 0.0));
-        assert_eq!(c.uniform(0.25).params, Vec4::new(0.25, c.pulse, 0.0, 0.0));
+        assert_eq!(c.uniform(0.25).params, Vec4::new(0.25, c.pulse, c.fill, 0.0));
+        assert_eq!(c.color_high, c.color.lerp(Vec3::ONE, 0.5), "dense gas is the colour half way to white unless the profile names one");
+        let c = parse(&json!({"color_high": [2, 0, 0], "fill": 9})).unwrap();
+        assert_eq!((c.uniform(0.0).high, c.fill), (Vec4::new(2.0, 0.0, 0.0, 0.0), 0.5));
     }
 
     #[test]
@@ -144,7 +165,9 @@ mod tests {
             .init_asset::<Mesh>()
             .init_asset::<EffectMaterial>()
             .init_asset::<CurrentMaterial>()
+            .init_asset::<Image>()
             .insert_resource(Look::parse(&json!({"currents": {}})))
+            .add_systems(Startup, crate::render::volnoise::bake)
             .add_systems(Update, restyle);
         let mesh = app.world_mut().resource_mut::<Assets<Mesh>>().add(Mesh::from(Cuboid::default()));
         let retail = app.world_mut().resource_mut::<Assets<EffectMaterial>>().add(crate::fx::additive_material(Handle::default()));
@@ -158,5 +181,6 @@ mod tests {
         let (_, m) = w.resource::<Assets<CurrentMaterial>>().iter().next().unwrap();
         assert_eq!(m.base.uv_transform, default(), "no scroll in the material: the shader scrolls by the frame clock");
         assert_eq!(m.extension.u.params.x, 0.25, "at the strip's own retail speed");
+        assert_eq!(m.extension.noise, w.resource::<NoiseVolume>().0, "the gas is the clouds' baked noise");
     }
 }

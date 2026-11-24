@@ -66,6 +66,7 @@ fn keys(
         return;
     }
     let bound = binds.map_or(KeyCode::Backquote, |b| b.key(crate::bindings::Act::Console));
+    let was_open = console.open;
     for k in input.read() {
         if matches!(k.key_code, KeyCode::ControlLeft | KeyCode::ControlRight) {
             *ctrl = k.state.is_pressed();
@@ -99,6 +100,12 @@ fn keys(
         if !console.open {
             break;
         }
+    }
+    // The closing frame is cleared too: this Escape or console key must not reach the game (Escape would also open the in-game menu,
+    // whose next click then closes it, so the first click after closing the console seemed to do nothing).
+    if was_open && !console.open {
+        keyboard.reset_all();
+        mouse.reset_all();
     }
     if console.open {
         // The wheel reads back through the output, and the camera does not zoom with it.
@@ -309,6 +316,26 @@ mod tests {
         press(&mut app, KeyCode::Backquote);
         app.update();
         assert!(!app.world().resource::<Console>().open);
+    }
+
+    #[test]
+    fn closing_with_escape_hides_the_escape_from_the_game() {
+        let mut app = skirmish();
+        press(&mut app, KeyCode::Backquote);
+        app.update();
+        assert!(app.world().resource::<Console>().open);
+        app.world_mut().resource_mut::<ButtonInput<KeyCode>>().press(KeyCode::Escape);
+        app.world_mut().write_message(KeyboardInput {
+            key_code: KeyCode::Escape,
+            logical_key: Key::Escape,
+            state: bevy::input::ButtonState::Pressed,
+            text: None,
+            repeat: false,
+            window: Entity::PLACEHOLDER,
+        });
+        app.update();
+        assert!(!app.world().resource::<Console>().open);
+        assert!(!app.world().resource::<ButtonInput<KeyCode>>().just_pressed(KeyCode::Escape), "the game must not also open the in-game menu");
     }
 
     #[test]

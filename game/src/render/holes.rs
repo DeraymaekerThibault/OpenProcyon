@@ -1,8 +1,9 @@
 //! Not retail: black holes of the render profile (`black_holes` block, drawn with the mod's `shaders/blackhole.wesl`). The retail
 //! look is only its additive ribbons (`blackhole.rs`); this puts a flat disc of the pull's radius in the hole's plane, just under
 //! the ships: a black horizon exactly as wide as the kill core (`Pull::core`), a thin bright ring on its edge that marks the kill
-//! zone at any zoom, a hot accretion disc that turns the way the pull swirls (clockwise seen from above), the faint outline of
-//! the pull radius, and a flash when a ship is swallowed. Without `replace` the retail ribbons stay on top as the infalling streams; with
+//! zone at any zoom, a hot accretion disc of swirling gas (the baked noise the profile's clouds are made of, `volnoise.rs`) that
+//! turns the way the pull swirls (clockwise seen from above), fading to nothing at the pull radius, and a flash when a ship is
+//! swallowed. Without `replace` the retail ribbons stay on top as the infalling streams; with
 //! it the retail glow and beam layers are hidden (`replace.rs`) and the hole's own vortex strips are restyled as thin, hot infall
 //! threads (`shaders/ribbon.wesl`). The disc is thin and crisp (hard inner edge, fine arms, sharp photon ring). All sizes are
 //! shares of the pull radius, so the three hole sizes scale together.
@@ -20,6 +21,7 @@ use bevy::render::render_resource::{AsBindGroup, RenderPipelineDescriptor, Shade
 use bevy::shader::ShaderRef;
 use serde_json::Value;
 
+use super::volnoise::NoiseVolume;
 use super::{Look, num, rgb};
 use crate::blackhole::{BlackHole, Pull, Swallowed};
 
@@ -174,6 +176,10 @@ pub struct HoleGlow {
     /// The frame data (`frame.rs`) at `@binding(99)`.
     #[storage(99, read_only)]
     pub frame: super::frame::FrameBinding,
+    /// The baked noise (`volnoise.rs`), the one the clouds are made of.
+    #[texture(101, dimension = "3d")]
+    #[sampler(102)]
+    pub noise: Handle<Image>,
 }
 
 impl MaterialExtension for HoleGlow {
@@ -333,14 +339,15 @@ fn update_ribbons(
 fn spawn_discs(
     mut commands: Commands,
     look: Res<Look>,
+    noise: Option<Res<NoiseVolume>>,
     holes: Query<(Entity, &Pull, &GlobalTransform), (With<BlackHole>, Without<HoleLook>)>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<HoleMaterial>>,
 ) {
-    let Some(b) = &look.black_holes else { return };
+    let (Some(b), Some(noise)) = (&look.black_holes, noise) else { return };
     for (e, pull, at) in &holes {
         let base = StandardMaterial { unlit: true, cull_mode: None, double_sided: true, alpha_mode: AlphaMode::Premultiplied, ..default() };
-        let material = materials.add(HoleMaterial { base, extension: HoleGlow { u: b.uniform(at.translation(), pull, 0.0), frame: default() } });
+        let material = materials.add(HoleMaterial { base, extension: HoleGlow { u: b.uniform(at.translation(), pull, 0.0), frame: default(), noise: noise.0.clone() } });
         let (mesh, tf) = if b.depth > 0.0 {
             (funnel_mesh(pull.radius, b.depth, b.throat), Transform::from_xyz(0.0, -b.drop * pull.radius, 0.0))
         } else {

@@ -35,6 +35,8 @@ fn app() -> App {
         .init_asset::<StandardMaterial>()
         .init_asset::<Mesh>()
         .init_asset::<HoleMaterial>()
+        .init_asset::<Image>()
+        .add_systems(Startup, crate::render::volnoise::bake)
         .insert_resource(Look::parse(&json!({"black_holes": {}})))
         .add_systems(Update, spawn_discs);
     app
