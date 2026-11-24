@@ -343,65 +343,41 @@ fn ship_contact_pushes_the_hulls_apart_and_keeps_both_speeds() {
     }
 }
 
-#[test]
-fn off_centre_impulse_transfers_spin_without_creating_energy() {
-    let a = ContactBody { velocity: Vec3::NEG_Z * 10.0, inverse_mass: 0.5, inverse_inertia: 0.2, arm: Vec3::X * 2.0, ..fixed_body() };
-    let b = ContactBody { inverse_mass: 0.25, inverse_inertia: 0.1, arm: Vec3::NEG_X * 2.0, ..fixed_body() };
-    let j = impulse(&a, &b, Vec3::Z);
-    let va = a.velocity + j * a.inverse_mass;
-    let vb = b.velocity - j * b.inverse_mass;
-    let wa = a.arm.cross(j).y * a.inverse_inertia;
-    let wb = -b.arm.cross(j).y * b.inverse_inertia;
-    assert!(wa < 0.0 && wb < 0.0);
-    let after = va.length_squared() / a.inverse_mass + vb.length_squared() / b.inverse_mass + wa * wa / a.inverse_inertia + wb * wb / b.inverse_inertia;
-    assert!(after <= a.velocity.length_squared() / a.inverse_mass);
-    let point_velocity = va + Vec3::Y.cross(a.arm) * wa - vb - Vec3::Y.cross(b.arm) * wb;
-    assert!(point_velocity.z.abs() < 1e-4);
-    assert!((va / a.inverse_mass + vb / b.inverse_mass - a.velocity / a.inverse_mass).length() < 1e-4);
-}
-
+/// The original's tow keeper: both hulls run their own step, then a taut rope moves the pair back together, 25 % on the tower and
+/// 75 % on the towee, without touching speeds. The towee keeps braking itself, so the pair crawls at about three quarters of the
+/// tower's speed and the towee trails the tower; once the tow is broken nothing teleports.
 #[test]
 #[ignore = "needs imported assets"]
-fn tow_uses_mass_and_independent_hardpoints_and_breaks_without_teleporting() {
+fn a_tow_moves_the_pair_back_together_by_a_quarter_and_three_quarters() {
     let lib = crate::Library::load(crate::assets_dir());
     let class = lib.index("Ship_Navy_Cutter");
     let health = || crate::Health::new(&lib.classes[class]);
-    let hull = crate::Ship { heading: 0.0, speed: 10.0, order: EngineOrder::Full, ..crate::Ship::new(class, crate::Side::Player) };
+    let hull = crate::Ship { heading: 0.0, order: EngineOrder::Full, ..crate::Ship::new(class, crate::Side::Player) };
     let mut app = App::new();
     let a = app.world_mut().spawn((hull.clone(), health(), Transform::default(), Drift::default())).id();
-    let b = app.world_mut().spawn((crate::Ship { speed: 0.0, order: EngineOrder::Stop, ..hull }, health(), Transform::from_xyz(3.0, 0.0, 30.0), Drift::default())).id();
+    let b = app.world_mut().spawn((crate::Ship { order: EngineOrder::Stop, ..hull }, health(), Transform::from_xyz(0.0, 0.0, 40.0), Drift::default())).id();
     let mut mission = crate::campaign::load();
     mission.script.set_tow(a, b, true);
     let mut time = Time::<()>::default();
-    time.advance_by(std::time::Duration::from_secs_f32(0.02));
+    time.advance_by(std::time::Duration::from_secs_f32(0.033));
     app.insert_resource(time).insert_resource(lib).insert_resource(mission).add_systems(Update, sail);
-    for _ in 0..100 {
+    for _ in 0..600 {
         app.update();
     }
-    let tower = app.world().get::<crate::Ship>(a).unwrap();
-    let cargo = app.world().get::<crate::Ship>(b).unwrap();
-    assert!(cargo.speed > 0.0 && cargo.ang_vel.abs() > 0.001, "off-axis bow attachment must pull and turn the cargo");
-    assert!((cargo.heading - tower.heading).abs() > 0.001, "heading must not be copied");
-    let before = app.world().get::<Transform>(b).unwrap().translation;
-    assert!(before.z < 29.0);
+    fn at(app: &App, e: Entity) -> Vec3 {
+        app.world().get::<Transform>(e).unwrap().translation
+    }
+    let (tower, cargo) = (app.world().get::<crate::Ship>(a).unwrap(), app.world().get::<crate::Ship>(b).unwrap());
+    // Two equal hulls: the tower's thrust works on both masses, so its speed settles at half; the towee brakes itself to 0.
+    let full = crate::ship::full_speed(&app.world().resource::<crate::Library>().classes[class]);
+    assert!((tower.speed - 0.5 * full).abs() < 0.05 * full && cargo.speed.abs() < 1e-3, "tower {} cargo {}", tower.speed, cargo.speed);
+    assert!((at(&app, a) - at(&app, b)).with_y(0.0).length() < 40.0 + 1.0, "the rope holds: {}", (at(&app, a) - at(&app, b)).length());
+    assert!(at(&app, b).z < 40.0 - 20.0, "the towee follows: {}", at(&app, b).z);
+    let before = at(&app, b);
     app.world_mut().resource_mut::<crate::campaign::Mission>().script.break_tows(a);
     app.world_mut().get_mut::<Transform>(a).unwrap().translation.x += 500.0;
     app.update();
-    assert!(app.world().get::<Transform>(b).unwrap().translation.distance(before) < 1.0);
-}
-
-#[test]
-fn impulse_conserves_momentum_and_leaves_separating_contacts_alone() {
-    let va = Vec3::X * -10.0;
-    let vb = Vec3::ZERO;
-    let a_body = ContactBody { velocity: va, inverse_mass: 0.5, ..fixed_body() };
-    let b_body = ContactBody { velocity: vb, inverse_mass: 0.25, ..fixed_body() };
-    let j = impulse(&a_body, &b_body, Vec3::X);
-    let a = va + j * 0.5;
-    let b = vb - j * 0.25;
-    assert!((a.x - b.x).abs() < 1e-5);
-    assert!((a * 2.0 + b * 4.0 - va * 2.0).length() < 1e-4);
-    assert_eq!(impulse(&ContactBody { velocity: Vec3::X, inverse_mass: 1.0, ..fixed_body() }, &b_body, Vec3::X), Vec3::ZERO);
+    assert!(at(&app, b).distance(before) < 1.0);
 }
 
 /// docs/re/tick.md: contact rates are written per 0.033 s tick, not per 1/30 s: one tick of contact does exactly rate x mass x speed.

@@ -200,12 +200,15 @@ This checks mission progression and runtime wiring, not manual combat or retail 
 
 ## Tow constraint
 
-The rule interpreter still owns tow relationships; movement substeps now own the physics. Ship models provide the tower's stern
-`TowerPoint` and cargo's bow `ToweePoint`, with hull-end fallbacks for custom models. Each link captures its initial horizontal node
-separation as cable length. Slack links exert no force; extended links correct position by inverse mass and apply a tension-only
-impulse at the attachment points, turning both hulls independently. No ship position, heading or speed is copied from its partner.
-Broken links discard their stored length; missing/destroyed partners exert no force. Retail rope/spring constants are unknown:
-this is a provisional inelastic cable, not a literal port. Regression covers off-axis pulling/turning and release without teleporting.
+The rule interpreter owns tow relationships; the movement substep owns the physics. A link is a rope whose length is the distance
+between the two hull centres when it forms. Each tick both hulls first run their own step, nothing in which reads the link: the
+towee has no engine order, so its own forward drag brakes it and its sideways speed is damped as for any ship. Then the rope acts on
+positions only: when the centres are further apart than the length, the stretch is removed along the line of centres, 25 % on the
+tower and 75 % on the towee (all on the tower when the towee is pinned). Speeds are not changed by the rope. The tower's thrust
+works on both hulls (divided by its own mass plus the towee's) while its drag stays that of its own mass, so its top speed under tow is
+its own times mass / (mass + towee mass). Two equal hulls therefore settle at half the tower's speed, with the towee trailing it.
+The rope also turns the towee about its tow point so it trails the rope: PROVISIONAL, the original's torque constants are not decoded
+(the angular part of the 75 % move is used). Broken links discard their length; missing or destroyed partners exert no force.
 
 ## Explicitly provisional / unfinished
 
