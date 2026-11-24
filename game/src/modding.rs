@@ -77,7 +77,9 @@ pub(crate) fn origin_of(path: &Path) -> Option<(PathBuf, PathBuf)> {
 fn record_origin(overlay_file: &Path, dir: &Path, file: &Path) {
     let (Ok(key), Ok(mut all)) = (std::fs::canonicalize(overlay_file), ORIGINS.lock()) else { return };
     all.retain(|(k, _, _)| *k != key);
-    all.push((key, dir.to_path_buf(), file.to_path_buf()));
+    // Canonical like the key, so errors name the same path on every platform (Windows adds `\\?\` and expands short names).
+    let canonical = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+    all.push((key, canonical(dir), canonical(file)));
 }
 
 /// Objects merge key by key, anything else is replaced.
