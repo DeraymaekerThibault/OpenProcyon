@@ -16,6 +16,8 @@ mod types;
 
 pub use diag::{Diag, TraceOptions, set_trace};
 use ext::Ext;
+use schema::RuleType as T;
+pub use schema::{Role, RuleType};
 pub use state::Script;
 pub use types::*;
 
@@ -271,7 +273,9 @@ impl Script {
 pub fn without_end_rules(data: &Value) -> Value {
     let mut data = data.clone();
     if let Some(rules) = data["rules"].as_array_mut() {
-        rules.retain(|r| !r["actions"].as_array().into_iter().flatten().any(|a| matches!(s(a, "Type"), "End Game" | "Team X Wins" | "Remaining Team Wins")));
+        rules.retain(|r| {
+            !r["actions"].as_array().into_iter().flatten().any(|a| matches!(RuleType::of(schema::Role::Action, a), Some(T::EndGame | T::TeamXWins | T::RemainingTeamWins)))
+        });
     }
     data
 }

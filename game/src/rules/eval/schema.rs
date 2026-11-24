@@ -1,12 +1,14 @@
 //! The rule language as data: every condition and action `Type` the mission rules can use, with its fields, the kind of each field
 //! and the value the interpreter reads when a field is missing.
 //!
-//! This table is the machine-readable vocabulary (`--dump-rule-schema`) and what `--check-mission` validates a mission against
-//! (`check.rs`). It does not drive the interpreter: `act.rs` / `cond.rs` stay the authority on behaviour, and the unit test
-//! `schema_matches_the_interpreter` fails when a `Type` is handled there without an entry here, or the other way round.
+//! The vocabulary is the `rule_types!` list below: one `RuleType` variant per Type, with its role and exact spelling. The interpreter
+//! (`act.rs`, `cond.rs`, `ext.rs`) matches on the variants; this table describes them (`--dump-rule-schema`) and is what
+//! `--check-mission` validates a mission against (`check.rs`). It does not drive the interpreter: `act.rs` / `cond.rs` stay the
+//! authority on behaviour, and the unit tests `every_type_has_one_entry` and `the_interpreter_handles_every_interpreter_type` fail when
+//! a variant has no entry here or the interpreter has no arm for an entry.
 //!
-//! To add a `Type`: write its arm in `act.rs` / `cond.rs`, then append one `cond(..)` / `act(..)` entry to `RULE_TYPES` (engine-added
-//! Types use `.engine()`). Retail field names are kept exactly as the TWT exports them, typos included.
+//! To add a `Type`: add its line to `rule_types!`, write its arm in `act.rs` / `cond.rs`, then append one `cond(..)` / `act(..)` entry
+//! to `RULE_TYPES` (engine-added Types use `.engine()`). Retail field names are kept exactly as the TWT exports them, typos included.
 
 use serde_json::{Value, json};
 
@@ -140,6 +142,206 @@ impl Equivalence {
     }
 }
 
+/// One variant per Type of the rule language, with its role and its exact spelling. This list is the only place a Type's name is
+/// written as a string in the interpreter: `act.rs`, `cond.rs` and `ext.rs` match on the variants, the table below describes them.
+macro_rules! rule_types {
+    ($($variant:ident = $role:ident $name:literal,)*) => {
+        #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+        pub enum RuleType {
+            $($variant,)*
+        }
+        impl RuleType {
+            /// Every Type, conditions first, in the order of the list.
+            pub const ALL: &'static [RuleType] = &[$(RuleType::$variant,)*];
+            /// The spelling the mission files use.
+            pub const fn name(self) -> &'static str {
+                match self {
+                    $(RuleType::$variant => $name,)*
+                }
+            }
+            pub const fn role(self) -> Role {
+                match self {
+                    $(RuleType::$variant => Role::$role,)*
+                }
+            }
+            /// The Type a name spells in the given role; `None` for anything the language does not have (the caller warns, as before).
+            pub fn parse(role: Role, name: &str) -> Option<RuleType> {
+                match (role, name) {
+                    $((Role::$role, $name) => Some(RuleType::$variant),)*
+                    _ => None,
+                }
+            }
+        }
+    };
+}
+
+rule_types! {
+    WorldInitialize = Condition "World Initialize",
+    FlagCondition = Condition "Flag Condition",
+    TimerCondition = Condition "Timer Condition",
+    SpeechEventPlayedOnce = Condition "Speech Event Played Once",
+    SpeechEventNotPlayedYet = Condition "Speech Event Not Played Yet",
+    IsGroupInVolume = Condition "Is Group In Volume",
+    EnterVolume = Condition "Enter Volume",
+    ExitVolume = Condition "Exit Volume",
+    TeamMemberEntersVolume = Condition "Team Member Enters Volume",
+    GroupDestroyed = Condition "Group Destroyed",
+    GroupUnderAttack = Condition "Group Under Attack",
+    GroupUnitFiredXShots = Condition "Group/Unit Fired X Shots",
+    GroupUnitVitalSectionHasXDamage = Condition "Group/Unit Vital Section has >,<,= X damage",
+    DoesGroupContainUnitName = Condition "Does Group Contain Unit Name",
+    IsShipInTow = Condition "Is Ship In Tow",
+    IsGroupAAttackingGroupB = Condition "Is Group A attacking Group B",
+    GroupUnitHitAtLeastXTimes = Condition "Group/Unit Hit at least x Times",
+    GroupUnitHitAtLeastXTimesByPlayerWithEqivalence = Condition "Group/Unit Hit at least x Times by Player ( with eqivalence )",
+    PlayerHasHitGroupUnitAtLeastXTimes = Condition "Player has hit Group/Unit at least x Times",
+    GroupHasXMembers = Condition "Group has X members",
+    GroupUnitHasXDamage = Condition "Group/Unit has >,<,= X damage",
+    GroupUnitContainsNoMissionEssentialShips = Condition "Group/Unit contains no mission essential ships",
+    UnitFlagTexture = Condition "Unit Flag Texture",
+    GroupToGroupDistance = Condition "Group to Group Distance",
+    GroupUnitDocked = Condition "Group/Unit Docked",
+    GroupUnitIsDocked = Condition "Group/Unit Is Docked",
+    UnitIsWithinAnyNebula = Condition "Unit is Within any Nebula",
+    AllUnitsFromGroupHaveEnteredTriggerVolumeOnce = Condition "All Units from Group have entered trigger volume Once",
+    PlayerVsPlayerCaptureCount = Condition "Player Vs Player capture count",
+    TeamHasCapturedAShipFromGroupUnit = Condition "Team has captured a ship from Group/Unit",
+    TeamHasDestroyedAShipFromGroupUnit = Condition "Team has destroyed a ship from Group/Unit",
+    UnitFromGroupEntersTriggerVolumeOncePerUnit = Condition "Unit from Group enters trigger volume ( Once per Unit )",
+    TeamHasXPoints = Condition "Team has X points",
+    PlayerHasNoLifeboats = Condition "Player has no lifeboats",
+    IsStarmapOpen = Condition "Is Starmap Open",
+    Mission9IfMortarExplodesWithinArea = Condition "Mission 9 - If Mortar explodes within Area",
+    PlayerKilledAObject = Condition "Player Killed A Object",
+    NoHumanControlledShipsRemain = Condition "No Human Controlled Ships Remain",
+    NoTeamHasShips = Condition "No Team Has Ships",
+    SkirmishGameComplete = Condition "Skirmish Game Complete",
+    TeamGameComplete = Condition "Team Game Complete",
+    TeamXHasNoShips = Condition "Team X has no ships",
+    OPAnyOf = Condition "OP Any Of",
+    OPNot = Condition "OP Not",
+    OPCounterCondition = Condition "OP Counter Condition",
+    StartTimer = Action "Start Timer",
+    StopTimer = Action "Stop Timer",
+    SetFlagAction = Action "Set Flag Action",
+    PlaySpeechEvent = Action "Play speech event",
+    PlayMusicTrack = Action "Play Music Track",
+    SetObjectiveTaskActiveState = Action "Set Objective Task Active State",
+    SetObjectiveTaskFailedState = Action "Set Objective Task Failed State",
+    SetObjectiveTaskCompleteState = Action "Set Objective Task Complete State",
+    SetCurrentObjectivePoint = Action "Set Current Objective Point",
+    SetCurrentObjectivePointOnShip = Action "Set Current Objective Point On Ship",
+    SetCurrentObjectivePointVisibleOnStarmap = Action "Set Current Objective Point Visible On Starmap",
+    SetMapTextVisibility = Action "Set Map Text Visibility",
+    GroupToFollowPath = Action "Group to follow path",
+    SetupSpaceAnimalFlock = Action "Setup Space Animal Flock",
+    SetupAsteroidBelt = Action "Setup Asteroid Belt",
+    SetGroupThrottlePercent = Action "Set Group Throttle Percent",
+    DestroyGroupUnit = Action "Destroy Group/Unit",
+    TransferGroupUnitToGroup = Action "Transfer Group/Unit to Group",
+    GroupAToRamGroupB = Action "GroupA to Ram GroupB",
+    TeleportGroupUnit = Action "Teleport Group/Unit",
+    DockShips = Action "Dock Ships",
+    SetGroupUnitDockable = Action "Set Group/Unit Dockable",
+    SetGroupUnitBoardable = Action "Set Group/Unit Boardable",
+    ToggleIslandRepairWhenDocked = Action "Toggle Island Repair When Docked",
+    SetDockTime = Action "Set Dock Time",
+    SetGroupSpaceObjectsVelocity = Action "Set Group Space Objects velocity",
+    SetMaxThrottlePercentMaxUserSettable = Action "Set Max Throttle Percent (Max user settable)",
+    SetShipTopSpeedPercentage = Action "Set Ship Top Speed Percentage",
+    SetShipName = Action "Set Ship Name",
+    SetGroupUnitAIStance = Action "Set Group/Unit AI Stance",
+    SetGroupUnitOwner = Action "Set Group/Unit Owner",
+    SetGroupUnitVisibility = Action "Set Group/Unit Visibility",
+    SetGroupUnitVulnerability = Action "Set Group/Unit Vulnerability",
+    SetShipsFlagTexture = Action "Set Ships Flag Texture",
+    SetShipBannerType = Action "Set Ship Banner Type",
+    GroupAToAttackGroupB = Action "GroupA to attack GroupB",
+    ClearAllAICommands = Action "Clear all AI commands",
+    DamageGroupUnitByXPercent = Action "Damage Group/Unit by X percent",
+    SetGroupUnitHoldPosition = Action "Set Group/Unit Hold Position",
+    ResetHitCount = Action "Reset Hit Count",
+    SetFleetFormationType = Action "Set FleetFormation Type",
+    SetFleetHoldFormation = Action "Set Fleet Hold Formation",
+    SetFleetPrimaryShip = Action "Set Fleet Primary Ship",
+    SetFleetHoldFire = Action "Set Fleet Hold Fire",
+    SetAllianceBetweenPlayerAAndPlayerBToTRUEFALSE = Action "Set alliance between PlayerA and PlayerB to TRUE/FALSE",
+    TowShip = Action "Tow Ship",
+    BreakTow = Action "Break Tow",
+    NISStart = Action "NIS Start",
+    NISEnd = Action "NIS End",
+    NISSetCameraPath = Action "NIS Set Camera Path",
+    NISSetCameraSpeed = Action "NIS Set Camera Speed",
+    NISSetTransitionCameraSpeed = Action "NIS Set Transition Camera Speed",
+    NISFocusCameraOnGroupUnit = Action "NIS Focus camera on Group/Unit",
+    NISFocusCameraOnPoint = Action "NIS Focus camera on Point",
+    NISAttachCamera = Action "NIS Attach Camera",
+    NISPositionCameraRelativeToObject = Action "NIS Position Camera Relative to Object",
+    NISFocusOnMainShip = Action "NIS Focus on Main Ship",
+    SetGroupUnitCloakState = Action "Set Group/Unit Cloak State",
+    FocusCameraOnGroup = Action "Focus Camera On Group",
+    AddVictoryPointsForSinglePlayer = Action "Add Victory Points for SinglePlayer",
+    GotoNextLevel = Action "Goto Next Level",
+    EndGame = Action "End Game",
+    CreateReleaseEventEffect = Action "Create/Release Event Effect",
+    OpenHUDTextureOverlay = Action "Open HUD Texture Overlay",
+    CloseHUDTextureOverlay = Action "Close HUD Texture Overlay",
+    OpenWeaponBar = Action "Open Weapon Bar",
+    PlaySpecialEffect = Action "Play Special Effect",
+    SetLifeboatCreationState = Action "Set Lifeboat Creation State",
+    StateInitSetupShip = Action "*State Init* Setup Ship",
+    StateInitSetupIsland = Action "*State Init* Setup Island",
+    SetGroupUnitMissionEssential = Action "Set Group/Unit Mission Essential",
+    SetRadarActiveState = Action "Set Radar Active State",
+    SetGroupUnitTowable = Action "Set Group/Unit Towable",
+    SetGroupUnitMovable = Action "Set Group/Unit Movable",
+    SetCollidable = Action "SetCollidable",
+    SetGroupUnitBorderZone = Action "Set Group/Unit Border Zone",
+    ClearGroupUnitBorderZone = Action "Clear Group/Unit Border Zone",
+    SetGroupUnitBorderZoneReturnPoint = Action "Set Group/Unit Border Zone Return Point",
+    CrewSpeechToggleOnOff = Action "Crew Speech - Toggle On Off",
+    CrewSpeechHelmOffCourse = Action "Crew Speech - Helm Off Course",
+    OpenCrewAndArmsScreens = Action "Open Crew and Arms Screens",
+    SetIsInCalyanAbyss = Action "Set Is In Calyan Abyss",
+    SetGroupUnitAICaptain = Action "Set Group/Unit AI Captain",
+    NISZoom = Action "NIS Zoom",
+    NISToggleNISModeGunAccuracy = Action "NIS Toggle NIS mode Gun Accuracy",
+    NISToggleAllObjectsVisibility = Action "NIS Toggle All Objects Visibility",
+    SetNebulaFadeoutDistance = Action "Set Nebula Fadeout Distance",
+    SetNebulaToLockObjects = Action "Set Nebula to Lock Objects",
+    SetGroupUnitWarningShotMode = Action "Set Group/Unit Warning Shot Mode",
+    TUTORIALPauseWhenStarmapOpens = Action "TUTORIAL - Pause when starmap opens?",
+    StateInitSetupEtheriumCurrent = Action "*State Init* Setup Etherium Current",
+    Mission9DoDarkMatterExplosion = Action "Mission 9 - Do Dark Matter Explosion",
+    Mission9TeleportLongboat = Action "Mission 9 - Teleport Longboat",
+    DragonSetAIStance = Action "Dragon - Set AI Stance",
+    DragonSetDamageThreshold = Action "Dragon - Set Damage Threshold",
+    GrantTeamXPoints = Action "Grant Team X Points",
+    SetupTeamObjective = Action "Setup Team Objective",
+    TeamXWins = Action "Team X Wins",
+    RemainingTeamWins = Action "Remaining Team Wins",
+    ResetShotsFiredCount = Action "Reset Shots Fired Count",
+    OPWait = Action "OP Wait",
+    OPWaitUntilSpeechDone = Action "OP Wait Until Speech Done",
+    OPSetCounter = Action "OP Set Counter",
+    OPAddToCounter = Action "OP Add To Counter",
+    OPSetRuleActive = Action "OP Set Rule Active",
+    StateInitSetupNebula = Action "*State Init* Setup Nebula",
+}
+
+use RuleType as T;
+
+impl RuleType {
+    /// Added by OpenProcyon (`Origin::Engine`): interpreted in `ext.rs`.
+    pub fn is_engine(self) -> bool {
+        schema_def(self).origin == Origin::Engine
+    }
+    /// The Type of a condition or action object, read from its `"Type"` field.
+    pub fn of(role: Role, entry: &Value) -> Option<RuleType> {
+        RuleType::parse(role, crate::rules::s(entry, "Type"))
+    }
+}
+
 /// Who evaluates the Type. Skirmish end conditions are read by `victory.rs`, not by the interpreter's match arms.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Handler {
@@ -193,6 +395,7 @@ impl Field {
 
 #[derive(Clone, Copy, Debug)]
 pub struct TypeDef {
+    pub ty: RuleType,
     pub name: &'static str,
     pub role: Role,
     pub origin: Origin,
@@ -204,8 +407,8 @@ pub struct TypeDef {
 }
 
 impl TypeDef {
-    const fn new(name: &'static str, role: Role, fields: &'static [Field]) -> TypeDef {
-        TypeDef { name, role, origin: Origin::Retail, handler: Handler::Interpreter, campaign_only: false, fields }
+    const fn new(ty: RuleType, fields: &'static [Field]) -> TypeDef {
+        TypeDef { ty, name: ty.name(), role: ty.role(), origin: Origin::Retail, handler: Handler::Interpreter, campaign_only: false, fields }
     }
     /// Added by OpenProcyon, not in the original's rule editor.
     pub const fn engine(mut self) -> TypeDef {
@@ -304,55 +507,52 @@ const STANCE: &[&str] = &["Stance_Dummy", "Stance_Neutral", "Stance_Defensive", 
 const FORMATION: &[&str] = &["None", "Custom", "LineAbreast", "EchelonRight", "EchelonLeft", "Column", "Diamond", "Convoy"];
 const GUNNERY: &[&str] = &["CREW SKILL LEVEL", "Green", "Average", "Elite"];
 
-const fn cond(name: &'static str, fields: &'static [Field]) -> TypeDef {
-    TypeDef::new(name, Role::Condition, fields)
+const fn cond(ty: RuleType, fields: &'static [Field]) -> TypeDef {
+    TypeDef::new(ty, fields)
 }
-const fn act(name: &'static str, fields: &'static [Field]) -> TypeDef {
-    TypeDef::new(name, Role::Action, fields)
+const fn act(ty: RuleType, fields: &'static [Field]) -> TypeDef {
+    TypeDef::new(ty, fields)
 }
 
 /// Every Type of the rule language. Append a new Type's entry at the end of its section.
 pub static RULE_TYPES: &[TypeDef] = &[
     // ---- Conditions -------------------------------------------------------------------------------------------------
-    cond("World Initialize", &[]),
-    cond("Flag Condition", &[flag("Flag Name"), boolean("Boolean Value")]),
-    cond("Timer Condition", &[timer("Timer Name"), choice("Equivalence", COMPARE), num("Time in seconds")]),
-    cond("Speech Event Played Once", &[speech("Speech Event Name")]),
-    cond("Speech Event Not Played Yet", &[speech("Speech Event Name")]),
-    cond("Is Group In Volume", &[grp("Group Name"), vol("Volume Name"), boolean("Entire Group").opt()]),
-    cond("Enter Volume", &[grp("Group Name"), vol("Volume Name")]),
-    cond("Exit Volume", &[grp("Group Name"), vol("Volume Name")]),
-    cond("Team Member Enters Volume", &[team("Team Name"), vol("Volume Name")]),
-    cond("Group Destroyed", &[grp("Group Name")]),
-    cond("Group Under Attack", &[grp("Group Name")]),
-    cond("Group/Unit Fired X Shots", &[grp("Group/Unit Name"), choice("Equivalence", COMPARE), num("Number Of Rounds Fired")]),
-    cond("Group/Unit Vital Section has >,<,= X damage", &[grp("Group/Unit Name"), text("Vital Section").ignored(), choice("Equivalence", COMPARE), frac("Damage Percent")]),
-    cond("Does Group Contain Unit Name", &[grp("Unit Name"), boolean("Exists?")]),
-    cond("Is Ship In Tow", &[grp("Towing Group"), grp("Target to Tow"), boolean("Boolean")]),
-    cond("Is Group A attacking Group B", &[grp("GroupA Name"), grp("GroupB Name")]),
-    cond("Group/Unit Hit at least x Times", &[grp("Group/Unit Name"), num("Number Of Times Hit")]),
+    cond(T::WorldInitialize, &[]),
+    cond(T::FlagCondition, &[flag("Flag Name"), boolean("Boolean Value")]),
+    cond(T::TimerCondition, &[timer("Timer Name"), choice("Equivalence", COMPARE), num("Time in seconds")]),
+    cond(T::SpeechEventPlayedOnce, &[speech("Speech Event Name")]),
+    cond(T::SpeechEventNotPlayedYet, &[speech("Speech Event Name")]),
+    cond(T::IsGroupInVolume, &[grp("Group Name"), vol("Volume Name"), boolean("Entire Group").opt()]),
+    cond(T::EnterVolume, &[grp("Group Name"), vol("Volume Name")]),
+    cond(T::ExitVolume, &[grp("Group Name"), vol("Volume Name")]),
+    cond(T::TeamMemberEntersVolume, &[team("Team Name"), vol("Volume Name")]),
+    cond(T::GroupDestroyed, &[grp("Group Name")]),
+    cond(T::GroupUnderAttack, &[grp("Group Name")]),
+    cond(T::GroupUnitFiredXShots, &[grp("Group/Unit Name"), choice("Equivalence", COMPARE), num("Number Of Rounds Fired")]),
+    cond(T::GroupUnitVitalSectionHasXDamage, &[grp("Group/Unit Name"), text("Vital Section").ignored(), choice("Equivalence", COMPARE), frac("Damage Percent")]),
+    cond(T::DoesGroupContainUnitName, &[grp("Unit Name"), boolean("Exists?")]),
+    cond(T::IsShipInTow, &[grp("Towing Group"), grp("Target to Tow"), boolean("Boolean")]),
+    cond(T::IsGroupAAttackingGroupB, &[grp("GroupA Name"), grp("GroupB Name")]),
+    cond(T::GroupUnitHitAtLeastXTimes, &[grp("Group/Unit Name"), num("Number Of Times Hit")]),
+    cond(T::GroupUnitHitAtLeastXTimesByPlayerWithEqivalence, &[grp("Group/Unit Name"), plr("Player Name"), choice("Equivalence", COMPARE), num("Number Of Times Hit")]),
+    cond(T::PlayerHasHitGroupUnitAtLeastXTimes, &[plr("Player Name"), grp("Group/Unit Name"), num("Number Of Times Hit")]),
+    cond(T::GroupHasXMembers, &[grp("Group Name"), choice("Equivalence", COMPARE), num("number")]),
+    cond(T::GroupUnitHasXDamage, &[grp("Group/Unit Name"), choice("Equivalence", COMPARE), frac("Damage Percent")]),
+    cond(T::GroupUnitContainsNoMissionEssentialShips, &[grp("Group Name")]),
+    cond(T::UnitFlagTexture, &[grp("Unit Name"), text("Flag Type"), boolean("Boolean")]),
+    cond(T::GroupToGroupDistance, &[grp("GroupA Name"), grp("GroupB Name"), choice("Equivalence", COMPARE), num("Distance")]),
+    cond(T::GroupUnitDocked, &[grp("Dockers Group/Unit Name"), grp("Targets Group/Unit Name")]),
+    cond(T::GroupUnitIsDocked, &[grp("Dockers Group/Unit Name"), grp("Targets Group/Unit Name")]),
+    cond(T::UnitIsWithinAnyNebula, &[grp("Unit Name")]),
     cond(
-        "Group/Unit Hit at least x Times by Player ( with eqivalence )",
-        &[grp("Group/Unit Name"), plr("Player Name"), choice("Equivalence", COMPARE), num("Number Of Times Hit")],
-    ),
-    cond("Player has hit Group/Unit at least x Times", &[plr("Player Name"), grp("Group/Unit Name"), num("Number Of Times Hit")]),
-    cond("Group has X members", &[grp("Group Name"), choice("Equivalence", COMPARE), num("number")]),
-    cond("Group/Unit has >,<,= X damage", &[grp("Group/Unit Name"), choice("Equivalence", COMPARE), frac("Damage Percent")]),
-    cond("Group/Unit contains no mission essential ships", &[grp("Group Name")]),
-    cond("Unit Flag Texture", &[grp("Unit Name"), text("Flag Type"), boolean("Boolean")]),
-    cond("Group to Group Distance", &[grp("GroupA Name"), grp("GroupB Name"), choice("Equivalence", COMPARE), num("Distance")]),
-    cond("Group/Unit Docked", &[grp("Dockers Group/Unit Name"), grp("Targets Group/Unit Name")]),
-    cond("Group/Unit Is Docked", &[grp("Dockers Group/Unit Name"), grp("Targets Group/Unit Name")]),
-    cond("Unit is Within any Nebula", &[grp("Unit Name")]),
-    cond(
-        "All Units from Group have entered trigger volume Once",
+        T::AllUnitsFromGroupHaveEnteredTriggerVolumeOnce,
         &[grp("Group Name"), vol("Volume Name"), plr("Player Name").ignored(), num("Object that have already entered - Size").ignored()],
     ),
-    cond("Player Vs Player capture count", &[plr("Player Name A"), plr("Player Name B"), choice("Equivalence", COMPARE), num("Number Of Captures")]),
-    cond("Team has captured a ship from Group/Unit", &[team("Team Name"), grp("Group/Unit"), num("Number Of Captures")]),
-    cond("Team has destroyed a ship from Group/Unit", &[team("Team Name"), grp("Group/Unit"), num("Number Of Ships Destroyed")]),
+    cond(T::PlayerVsPlayerCaptureCount, &[plr("Player Name A"), plr("Player Name B"), choice("Equivalence", COMPARE), num("Number Of Captures")]),
+    cond(T::TeamHasCapturedAShipFromGroupUnit, &[team("Team Name"), grp("Group/Unit"), num("Number Of Captures")]),
+    cond(T::TeamHasDestroyedAShipFromGroupUnit, &[team("Team Name"), grp("Group/Unit"), num("Number Of Ships Destroyed")]),
     cond(
-        "Unit from Group enters trigger volume ( Once per Unit )",
+        T::UnitFromGroupEntersTriggerVolumeOncePerUnit,
         &[
             grp("Group Name"),
             vol("Volume Name"),
@@ -361,41 +561,41 @@ pub static RULE_TYPES: &[TypeDef] = &[
             num("Object that have already entered - Size").ignored(),
         ],
     ),
-    cond("Team has X points", &[team("Team Name"), num("Points")]),
-    cond("Player has no lifeboats", &[plr("Player Name")]),
-    cond("Is Starmap Open", &[]),
-    cond("Mission 9 - If Mortar explodes within Area", &[vol("Volume Name")]).campaign(),
-    cond("Player Killed A Object", &[plr("Player Name"), choice("World Object Type", &["Asteroid", "Ship"])]),
+    cond(T::TeamHasXPoints, &[team("Team Name"), num("Points")]),
+    cond(T::PlayerHasNoLifeboats, &[plr("Player Name")]),
+    cond(T::IsStarmapOpen, &[]),
+    cond(T::Mission9IfMortarExplodesWithinArea, &[vol("Volume Name")]).campaign(),
+    cond(T::PlayerKilledAObject, &[plr("Player Name"), choice("World Object Type", &["Asteroid", "Ship"])]),
     // Skirmish end conditions: read by victory.rs from the map's `victory` rules.
-    cond("No Human Controlled Ships Remain", &[]).victory(),
-    cond("No Team Has Ships", &[]).victory(),
-    cond("Skirmish Game Complete", &[]).victory(),
-    cond("Team Game Complete", &[]).victory(),
-    cond("Team X has no ships", &[team("Team Name")]).victory(),
+    cond(T::NoHumanControlledShipsRemain, &[]).victory(),
+    cond(T::NoTeamHasShips, &[]).victory(),
+    cond(T::SkirmishGameComplete, &[]).victory(),
+    cond(T::TeamGameComplete, &[]).victory(),
+    cond(T::TeamXHasNoShips, &[team("Team Name")]).victory(),
     // Engine-added (not retail): combinators and counters, interpreted in `ext.rs`.
-    cond("OP Any Of", &[conditions("Conditions")]).engine(),
-    cond("OP Not", &[condition("Condition")]).engine(),
-    cond("OP Counter Condition", &[counter("Counter Name"), choice("Equivalence", COMPARE), num("Value")]).engine(),
+    cond(T::OPAnyOf, &[conditions("Conditions")]).engine(),
+    cond(T::OPNot, &[condition("Condition")]).engine(),
+    cond(T::OPCounterCondition, &[counter("Counter Name"), choice("Equivalence", COMPARE), num("Value")]).engine(),
     // ---- Actions ----------------------------------------------------------------------------------------------------
-    act("Start Timer", &[timer("Timer Name")]),
-    act("Stop Timer", &[timer("Timer Name")]),
-    act("Set Flag Action", &[flag("Flag Name"), boolean("Boolean Value")]),
-    act("Play speech event", &[speech("Speech Event Name")]),
+    act(T::StartTimer, &[timer("Timer Name")]),
+    act(T::StopTimer, &[timer("Timer Name")]),
+    act(T::SetFlagAction, &[flag("Flag Name"), boolean("Boolean Value")]),
+    act(T::PlaySpeechEvent, &[speech("Speech Event Name")]),
     act(
-        "Play Music Track",
+        T::PlayMusicTrack,
         &[text("File Name"), boolean("Crossfade transition").ignored(), num("Fade In Time ( secs )"), num("Fade Out Time ( secs )"), frac("New Volume ( 0 to 1 )")],
     ),
-    act("Set Objective Task Active State", &[task("Objective Task"), boolean("Active State")]),
-    act("Set Objective Task Failed State", &[task("Objective Task"), boolean("Failed State")]),
-    act("Set Objective Task Complete State", &[task("Objective Task"), boolean("Complete State")]),
-    act("Set Current Objective Point", &[point("Objective Point")]).campaign(),
-    act("Set Current Objective Point On Ship", &[grp("Group Name")]).campaign(),
-    act("Set Current Objective Point Visible On Starmap", &[boolean("Visible On Starmap")]).campaign(),
-    act("Set Map Text Visibility", &[maptext("Map Text Name"), boolean("Visible On Starmap")]),
-    act("Group to follow path", &[grp("Group Name"), path("Path Name"), boolean("Find Closest Point"), choice("Follow Mode", FOLLOW)]),
-    act("Setup Space Animal Flock", &[grp("Group Name"), path("Path Name"), boolean("Find Closest Point"), choice("Follow Mode", FOLLOW), num("Velocity")]),
+    act(T::SetObjectiveTaskActiveState, &[task("Objective Task"), boolean("Active State")]),
+    act(T::SetObjectiveTaskFailedState, &[task("Objective Task"), boolean("Failed State")]),
+    act(T::SetObjectiveTaskCompleteState, &[task("Objective Task"), boolean("Complete State")]),
+    act(T::SetCurrentObjectivePoint, &[point("Objective Point")]).campaign(),
+    act(T::SetCurrentObjectivePointOnShip, &[grp("Group Name")]).campaign(),
+    act(T::SetCurrentObjectivePointVisibleOnStarmap, &[boolean("Visible On Starmap")]).campaign(),
+    act(T::SetMapTextVisibility, &[maptext("Map Text Name"), boolean("Visible On Starmap")]),
+    act(T::GroupToFollowPath, &[grp("Group Name"), path("Path Name"), boolean("Find Closest Point"), choice("Follow Mode", FOLLOW)]),
+    act(T::SetupSpaceAnimalFlock, &[grp("Group Name"), path("Path Name"), boolean("Find Closest Point"), choice("Follow Mode", FOLLOW), num("Velocity")]),
     act(
-        "Setup Asteroid Belt",
+        T::SetupAsteroidBelt,
         &[
             grp("Group Name"),
             path("Path Name"),
@@ -407,54 +607,54 @@ pub static RULE_TYPES: &[TypeDef] = &[
             num("Tumble Upper Rads/sec"),
         ],
     ),
-    act("Set Group Throttle Percent", &[grp("Group Name"), frac("Throttle Percent")]),
-    act("Destroy Group/Unit", &[grp("Group Name")]),
-    act("Transfer Group/Unit to Group", &[grp("Group/Unit to transfer"), grp("Target Group")]),
-    act("GroupA to Ram GroupB", &[grp("Group Name"), grp("Group Unit Target")]),
-    act("Teleport Group/Unit", &[grp("Group/Unit Name"), pset("Point Set Name")]),
-    act("Dock Ships", &[grp("Docking Group"), grp("Target to Dock to")]),
-    act("Set Group/Unit Dockable", &[grp("Group Name"), boolean("Boolean")]),
-    act("Set Group/Unit Boardable", &[grp("Group Name"), boolean("Boolean")]),
-    act("Toggle Island Repair When Docked", &[grp("Group Name"), boolean("Repair when docked")]),
-    act("Set Dock Time", &[grp("Docking GroupUnit"), num("Dock Time")]),
-    act("Set Group Space Objects velocity", &[grp("Group Name"), num("Velocity")]),
-    act("Set Max Throttle Percent (Max user settable)", &[grp("Group Name"), frac("Throttle Percent")]),
-    act("Set Ship Top Speed Percentage", &[grp("Group Name"), frac("Throttle Speed")]),
-    act("Set Ship Name", &[grp("Group/Unit Name"), shipname("New Ship Name")]),
-    act("Set Group/Unit AI Stance", &[grp("Group/Unit Name"), choice("AI Stance", STANCE)]),
-    act("Set Group/Unit Owner", &[grp("Group/Unit Name"), plr("New Owner")]),
-    act("Set Group/Unit Visibility", &[grp("Group/Unit Name"), boolean("Boolean")]),
-    act("Set Group/Unit Vulnerability", &[grp("Group Name"), frac("Invulnerable Percent")]),
-    act("Set Ships Flag Texture", &[grp("Group Name"), text("Flag Texture")]),
-    act("Set Ship Banner Type", &[grp("Group/Unit Name"), text("Banner Type")]),
-    act("GroupA to attack GroupB", &[grp("Attack Group"), grp("Target Group")]),
-    act("Clear all AI commands", &[grp("Group/Unit Name")]),
-    act("Damage Group/Unit by X percent", &[grp("Group Name"), frac("Percent")]),
-    act("Set Group/Unit Hold Position", &[grp("Group/Unit Name"), boolean("Boolean").opt().dflt("TRUE")]),
-    act("Reset Hit Count", &[grp("Group/Unit Name")]),
-    act("Set FleetFormation Type", &[plr("Player Name"), choice("Formation Type", FORMATION), boolean("Hold Formation")]),
-    act("Set Fleet Hold Formation", &[plr("Player Name"), boolean("Hold Formation")]),
-    act("Set Fleet Primary Ship", &[grp("Group/Unit Name")]).campaign(),
-    act("Set Fleet Hold Fire", &[plr("PLAYER FLEET"), boolean("HOLD FIRE")]),
-    act("Set alliance between PlayerA and PlayerB to TRUE/FALSE", &[plr("PLAYER A"), plr("PLAYER B"), boolean("SET ALLIANCE TO")]),
-    act("Tow Ship", &[grp("Docking Group"), grp("Target to Tow")]),
-    act("Break Tow", &[grp("TowerGroupA"), grp("TowerGroupB")]),
-    act("NIS Start", &[boolean("All Objects Visible").ignored(), boolean("Open NIS bars instantly").ignored()]).campaign(),
-    act("NIS End", &[]).campaign(),
-    act("NIS Set Camera Path", &[path("Path Name"), boolean("Jump to start").ignored()]).campaign(),
-    act("NIS Set Camera Speed", &[num("Max Velocity"), num("Acceleration").ignored()]).campaign(),
-    act("NIS Set Transition Camera Speed", &[num("Max Velocity"), num("Acceleration").ignored()]).campaign(),
-    act("NIS Focus camera on Group/Unit", &[grp("GroupUnit Name")]).campaign(),
-    act("NIS Focus camera on Point", &[pset("Point Set Name")]).campaign(),
-    act("NIS Attach Camera", &[grp("Group/Unit Name"), num("Distance"), num("Angle YZ"), num("Angle XY")]).campaign(),
-    act("NIS Position Camera Relative to Object", &[grp("Unit Name"), num("Distance"), num("Angle YZ"), num("Angle XY"), boolean("Jump to point").ignored()]).campaign(),
-    act("NIS Focus on Main Ship", &[]).campaign(),
-    act("Set Group/Unit Cloak State", &[grp("Group Name"), boolean("Cloak State"), boolean("AI Can Override")]),
-    act("Focus Camera On Group", &[grp("GroupUnit Name"), num("Distance"), num("Relative Angle"), boolean("Use Transition").ignored()]).campaign(),
-    act("Add Victory Points for SinglePlayer", &[num("Victory points to be added")]).campaign(),
-    act("Goto Next Level", &[text("World"), boolean("Display Loading String").ignored()]).campaign(),
+    act(T::SetGroupThrottlePercent, &[grp("Group Name"), frac("Throttle Percent")]),
+    act(T::DestroyGroupUnit, &[grp("Group Name")]),
+    act(T::TransferGroupUnitToGroup, &[grp("Group/Unit to transfer"), grp("Target Group")]),
+    act(T::GroupAToRamGroupB, &[grp("Group Name"), grp("Group Unit Target")]),
+    act(T::TeleportGroupUnit, &[grp("Group/Unit Name"), pset("Point Set Name")]),
+    act(T::DockShips, &[grp("Docking Group"), grp("Target to Dock to")]),
+    act(T::SetGroupUnitDockable, &[grp("Group Name"), boolean("Boolean")]),
+    act(T::SetGroupUnitBoardable, &[grp("Group Name"), boolean("Boolean")]),
+    act(T::ToggleIslandRepairWhenDocked, &[grp("Group Name"), boolean("Repair when docked")]),
+    act(T::SetDockTime, &[grp("Docking GroupUnit"), num("Dock Time")]),
+    act(T::SetGroupSpaceObjectsVelocity, &[grp("Group Name"), num("Velocity")]),
+    act(T::SetMaxThrottlePercentMaxUserSettable, &[grp("Group Name"), frac("Throttle Percent")]),
+    act(T::SetShipTopSpeedPercentage, &[grp("Group Name"), frac("Throttle Speed")]),
+    act(T::SetShipName, &[grp("Group/Unit Name"), shipname("New Ship Name")]),
+    act(T::SetGroupUnitAIStance, &[grp("Group/Unit Name"), choice("AI Stance", STANCE)]),
+    act(T::SetGroupUnitOwner, &[grp("Group/Unit Name"), plr("New Owner")]),
+    act(T::SetGroupUnitVisibility, &[grp("Group/Unit Name"), boolean("Boolean")]),
+    act(T::SetGroupUnitVulnerability, &[grp("Group Name"), frac("Invulnerable Percent")]),
+    act(T::SetShipsFlagTexture, &[grp("Group Name"), text("Flag Texture")]),
+    act(T::SetShipBannerType, &[grp("Group/Unit Name"), text("Banner Type")]),
+    act(T::GroupAToAttackGroupB, &[grp("Attack Group"), grp("Target Group")]),
+    act(T::ClearAllAICommands, &[grp("Group/Unit Name")]),
+    act(T::DamageGroupUnitByXPercent, &[grp("Group Name"), frac("Percent")]),
+    act(T::SetGroupUnitHoldPosition, &[grp("Group/Unit Name"), boolean("Boolean").opt().dflt("TRUE")]),
+    act(T::ResetHitCount, &[grp("Group/Unit Name")]),
+    act(T::SetFleetFormationType, &[plr("Player Name"), choice("Formation Type", FORMATION), boolean("Hold Formation")]),
+    act(T::SetFleetHoldFormation, &[plr("Player Name"), boolean("Hold Formation")]),
+    act(T::SetFleetPrimaryShip, &[grp("Group/Unit Name")]).campaign(),
+    act(T::SetFleetHoldFire, &[plr("PLAYER FLEET"), boolean("HOLD FIRE")]),
+    act(T::SetAllianceBetweenPlayerAAndPlayerBToTRUEFALSE, &[plr("PLAYER A"), plr("PLAYER B"), boolean("SET ALLIANCE TO")]),
+    act(T::TowShip, &[grp("Docking Group"), grp("Target to Tow")]),
+    act(T::BreakTow, &[grp("TowerGroupA"), grp("TowerGroupB")]),
+    act(T::NISStart, &[boolean("All Objects Visible").ignored(), boolean("Open NIS bars instantly").ignored()]).campaign(),
+    act(T::NISEnd, &[]).campaign(),
+    act(T::NISSetCameraPath, &[path("Path Name"), boolean("Jump to start").ignored()]).campaign(),
+    act(T::NISSetCameraSpeed, &[num("Max Velocity"), num("Acceleration").ignored()]).campaign(),
+    act(T::NISSetTransitionCameraSpeed, &[num("Max Velocity"), num("Acceleration").ignored()]).campaign(),
+    act(T::NISFocusCameraOnGroupUnit, &[grp("GroupUnit Name")]).campaign(),
+    act(T::NISFocusCameraOnPoint, &[pset("Point Set Name")]).campaign(),
+    act(T::NISAttachCamera, &[grp("Group/Unit Name"), num("Distance"), num("Angle YZ"), num("Angle XY")]).campaign(),
+    act(T::NISPositionCameraRelativeToObject, &[grp("Unit Name"), num("Distance"), num("Angle YZ"), num("Angle XY"), boolean("Jump to point").ignored()]).campaign(),
+    act(T::NISFocusOnMainShip, &[]).campaign(),
+    act(T::SetGroupUnitCloakState, &[grp("Group Name"), boolean("Cloak State"), boolean("AI Can Override")]),
+    act(T::FocusCameraOnGroup, &[grp("GroupUnit Name"), num("Distance"), num("Relative Angle"), boolean("Use Transition").ignored()]).campaign(),
+    act(T::AddVictoryPointsForSinglePlayer, &[num("Victory points to be added")]).campaign(),
+    act(T::GotoNextLevel, &[text("World"), boolean("Display Loading String").ignored()]).campaign(),
     act(
-        "End Game",
+        T::EndGame,
         &[
             message("Loser - Custom Message String ID"),
             message("Winner - Custom Message String ID").ignored(),
@@ -462,14 +662,14 @@ pub static RULE_TYPES: &[TypeDef] = &[
             boolean("Show Stats Screen").ignored(),
         ],
     ),
-    act("Create/Release Event Effect", &[pset("Point Set"), text("Effect Name"), boolean("Boolean State")]),
-    act("Open HUD Texture Overlay", &[text("Texture Base Name")]).campaign(),
-    act("Close HUD Texture Overlay", &[]).campaign(),
-    act("Open Weapon Bar", &[boolean("OpenState")]).campaign(),
-    act("Play Special Effect", &[text("File Name"), boolean("Play As Dialog").ignored()]),
-    act("Set Lifeboat Creation State", &[grp("Group Name"), boolean("Boolean")]),
+    act(T::CreateReleaseEventEffect, &[pset("Point Set"), text("Effect Name"), boolean("Boolean State")]),
+    act(T::OpenHUDTextureOverlay, &[text("Texture Base Name")]).campaign(),
+    act(T::CloseHUDTextureOverlay, &[]).campaign(),
+    act(T::OpenWeaponBar, &[boolean("OpenState")]).campaign(),
+    act(T::PlaySpecialEffect, &[text("File Name"), boolean("Play As Dialog").ignored()]),
+    act(T::SetLifeboatCreationState, &[grp("Group Name"), boolean("Boolean")]),
     act(
-        "*State Init* Setup Ship",
+        T::StateInitSetupShip,
         &[
             num("World Object ID"),
             text("Ship Name").opt(),
@@ -484,48 +684,48 @@ pub static RULE_TYPES: &[TypeDef] = &[
         ],
     ),
     act(
-        "*State Init* Setup Island",
+        T::StateInitSetupIsland,
         &[num("World Object ID"), num("Combat Strength").opt(), plr("Player/Owner").opt(), choice("Gunnery Level", GUNNERY).opt(), choice("AI Stance", STANCE).opt()],
     ),
-    act("Set Group/Unit Mission Essential", &[grp("Group Name"), boolean("Boolean")]),
-    act("Set Radar Active State", &[boolean("Radar Active")]).campaign(),
-    act("Set Group/Unit Towable", &[grp("Group Name"), boolean("Boolean")]),
-    act("Set Group/Unit Movable", &[grp("Group Name"), boolean("Boolean")]),
-    act("SetCollidable", &[grp("Group/Unit Name"), boolean("Boolean")]),
-    act("Set Group/Unit Border Zone", &[grp("Group/Unit Name"), vol("Polygon Name")]),
-    act("Clear Group/Unit Border Zone", &[grp("Group/Unit Name")]),
-    act("Set Group/Unit Border Zone Return Point", &[grp("Group/Unit Name"), pset("Pointset Name")]),
-    act("Crew Speech - Toggle On Off", &[boolean("Crew Speech State State")]).campaign(),
-    act("Crew Speech - Helm Off Course", &[]).campaign(),
-    act("Open Crew and Arms Screens", &[]).campaign(),
-    act("Set Is In Calyan Abyss", &[boolean("Boolean Value")]).campaign(),
-    act("Set Group/Unit AI Captain", &[grp("Group/Unit Name"), choice("AI Stance", &["Captain_Human"])]).campaign(),
-    act("NIS Zoom", &[num("FOV"), num("Speed")]).campaign(),
-    act("NIS Toggle NIS mode Gun Accuracy", &[boolean("Use NIS Gun Accuracy")]).campaign(),
-    act("NIS Toggle All Objects Visibility", &[boolean("All Objects Visible")]).campaign(),
-    act("Set Nebula Fadeout Distance", &[num("Fadeout Distance")]).campaign(),
-    act("Set Nebula to Lock Objects", &[boolean("Trap")]).campaign(),
-    act("Set Group/Unit Warning Shot Mode", &[grp("GroupUnit Name"), boolean("Boolean")]),
-    act("TUTORIAL - Pause when starmap opens?", &[boolean("Pause when starmap opens")]).campaign(),
-    act("*State Init* Setup Etherium Current", &[num("World Object ID").ignored(), text("Etherium Name").ignored(), path("Etherium Path").soft()]),
-    act("Mission 9 - Do Dark Matter Explosion", &[vol("Affected Area")]),
-    act("Mission 9 - Teleport Longboat", &[grp("Longboat Group Name")]).campaign(),
-    act("Dragon - Set AI Stance", &[grp("Group/Unit Name"), choice("AI Stance", STANCE)]),
-    act("Dragon - Set Damage Threshold", &[grp("Group Name"), frac("Damage Threshold")]),
-    act("Grant Team X Points", &[team("Team Name"), num("Points")]),
-    act("Setup Team Objective", &[team("Team Name"), point("Objective Point"), task("Objective Task").opt()]),
-    act("Team X Wins", &[team("Team Name").opt()]),
-    act("Remaining Team Wins", &[]),
-    act("Reset Shots Fired Count", &[grp("Group/Unit Name")]),
+    act(T::SetGroupUnitMissionEssential, &[grp("Group Name"), boolean("Boolean")]),
+    act(T::SetRadarActiveState, &[boolean("Radar Active")]).campaign(),
+    act(T::SetGroupUnitTowable, &[grp("Group Name"), boolean("Boolean")]),
+    act(T::SetGroupUnitMovable, &[grp("Group Name"), boolean("Boolean")]),
+    act(T::SetCollidable, &[grp("Group/Unit Name"), boolean("Boolean")]),
+    act(T::SetGroupUnitBorderZone, &[grp("Group/Unit Name"), vol("Polygon Name")]),
+    act(T::ClearGroupUnitBorderZone, &[grp("Group/Unit Name")]),
+    act(T::SetGroupUnitBorderZoneReturnPoint, &[grp("Group/Unit Name"), pset("Pointset Name")]),
+    act(T::CrewSpeechToggleOnOff, &[boolean("Crew Speech State State")]).campaign(),
+    act(T::CrewSpeechHelmOffCourse, &[]).campaign(),
+    act(T::OpenCrewAndArmsScreens, &[]).campaign(),
+    act(T::SetIsInCalyanAbyss, &[boolean("Boolean Value")]).campaign(),
+    act(T::SetGroupUnitAICaptain, &[grp("Group/Unit Name"), choice("AI Stance", &["Captain_Human"])]).campaign(),
+    act(T::NISZoom, &[num("FOV"), num("Speed")]).campaign(),
+    act(T::NISToggleNISModeGunAccuracy, &[boolean("Use NIS Gun Accuracy")]).campaign(),
+    act(T::NISToggleAllObjectsVisibility, &[boolean("All Objects Visible")]).campaign(),
+    act(T::SetNebulaFadeoutDistance, &[num("Fadeout Distance")]).campaign(),
+    act(T::SetNebulaToLockObjects, &[boolean("Trap")]).campaign(),
+    act(T::SetGroupUnitWarningShotMode, &[grp("GroupUnit Name"), boolean("Boolean")]),
+    act(T::TUTORIALPauseWhenStarmapOpens, &[boolean("Pause when starmap opens")]).campaign(),
+    act(T::StateInitSetupEtheriumCurrent, &[num("World Object ID").ignored(), text("Etherium Name").ignored(), path("Etherium Path").soft()]),
+    act(T::Mission9DoDarkMatterExplosion, &[vol("Affected Area")]),
+    act(T::Mission9TeleportLongboat, &[grp("Longboat Group Name")]).campaign(),
+    act(T::DragonSetAIStance, &[grp("Group/Unit Name"), choice("AI Stance", STANCE)]),
+    act(T::DragonSetDamageThreshold, &[grp("Group Name"), frac("Damage Threshold")]),
+    act(T::GrantTeamXPoints, &[team("Team Name"), num("Points")]),
+    act(T::SetupTeamObjective, &[team("Team Name"), point("Objective Point"), task("Objective Task").opt()]),
+    act(T::TeamXWins, &[team("Team Name").opt()]),
+    act(T::RemainingTeamWins, &[]),
+    act(T::ResetShotsFiredCount, &[grp("Group/Unit Name")]),
     // Engine-added (not retail): sequences, counters and rule activation, interpreted in `ext.rs`.
-    act("OP Wait", &[num("Seconds")]).engine(),
+    act(T::OPWait, &[num("Seconds")]).engine(),
     // An empty name waits for the whole speech queue.
-    act("OP Wait Until Speech Done", &[speech("Speech Event Name").opt()]).engine(),
-    act("OP Set Counter", &[counter("Counter Name"), num("Value")]).engine(),
-    act("OP Add To Counter", &[counter("Counter Name"), num("Value")]).engine(),
-    act("OP Set Rule Active", &[rule_name("Rule Name"), boolean("Boolean")]).engine(),
+    act(T::OPWaitUntilSpeechDone, &[speech("Speech Event Name").opt()]).engine(),
+    act(T::OPSetCounter, &[counter("Counter Name"), num("Value")]).engine(),
+    act(T::OPAddToCounter, &[counter("Counter Name"), num("Value")]).engine(),
+    act(T::OPSetRuleActive, &[rule_name("Rule Name"), boolean("Boolean")]).engine(),
     act(
-        "*State Init* Setup Nebula",
+        T::StateInitSetupNebula,
         &[
             num("World Object ID").ignored(),
             text("New Nebula Name").opt(),
@@ -551,7 +751,12 @@ pub static RULE_TYPES: &[TypeDef] = &[
 ];
 
 pub fn lookup(role: Role, name: &str) -> Option<&'static TypeDef> {
-    RULE_TYPES.iter().find(|t| t.role == role && t.name == name)
+    RuleType::parse(role, name).map(schema_def)
+}
+
+/// The table entry of a Type (every variant has exactly one: `every_type_has_one_entry`).
+pub fn schema_def(ty: RuleType) -> &'static TypeDef {
+    RULE_TYPES.iter().find(|t| t.ty == ty).expect("every RuleType has an entry in RULE_TYPES")
 }
 
 /// The schema as JSON for tools (`--dump-rule-schema`): every Type with its fields, and the kinds with their placeholders.
@@ -633,23 +838,62 @@ mod tests {
     }
 
     #[test]
-    fn schema_matches_the_interpreter() {
-        // Conditions that the arms of `fn cond` also test through `t == "..."` guards are listed in their arm's pattern, so the arms
-        // are the whole vocabulary.
-        // The engine-added `OP ` Types go through one guard arm in cond.rs / act.rs into ext.rs, which has their arms.
-        let ext: BTreeSet<String> = arms(include_str!("ext.rs")).into_iter().filter(|n| n.starts_with("OP ")).collect();
-        let all: BTreeSet<String> = RULE_TYPES.iter().map(|t| t.name.to_string()).collect();
-        let unlisted: Vec<_> = ext.difference(&all).collect();
-        assert!(unlisted.is_empty(), "ext.rs handles Types with no entry in RULE_TYPES (schema.rs): {unlisted:?}");
-        for (role, src, file) in [(Role::Condition, include_str!("cond.rs"), "cond.rs"), (Role::Action, include_str!("act.rs"), "act.rs")] {
-            let mut handled = arms(src);
-            handled.extend(ext.iter().filter(|n| RULE_TYPES.iter().any(|t| t.role == role && t.name == n.as_str())).cloned());
-            let declared = names(role, Handler::Interpreter);
-            let missing: Vec<_> = handled.difference(&declared).collect();
-            let stale: Vec<_> = declared.difference(&handled).collect();
-            assert!(missing.is_empty(), "{file} handles Types with no entry in RULE_TYPES (schema.rs): {missing:?}");
-            assert!(stale.is_empty(), "RULE_TYPES (schema.rs) has Types {file} does not handle: {stale:?}");
+    fn every_type_has_one_entry() {
+        // The enum is the vocabulary, the table describes it: one entry per variant, in its own role, spelled as the enum says.
+        assert_eq!(RuleType::ALL.len(), RULE_TYPES.len());
+        let mut seen = BTreeSet::new();
+        for t in RULE_TYPES {
+            assert!(seen.insert(t.ty), "{} has two entries", t.name);
+            assert_eq!((t.ty.name(), t.ty.role()), (t.name, t.role));
+            assert_eq!(RuleType::parse(t.role, t.name), Some(t.ty), "{} does not parse back", t.name);
         }
+        for ty in RuleType::ALL {
+            assert!(seen.contains(ty), "{} has no entry in RULE_TYPES", ty.name());
+        }
+        assert_eq!(RuleType::parse(Role::Action, "Flag Condition"), None, "a name belongs to its own role");
+        assert_eq!(RuleType::parse(Role::Condition, "flag condition"), None, "case matters, as before");
+    }
+
+    #[test]
+    fn engine_types_are_the_op_types() {
+        for t in RULE_TYPES {
+            assert_eq!(t.ty.is_engine(), t.name.starts_with("OP "), "{}", t.name);
+        }
+    }
+
+    /// The interpreter reaches every Type the table gives it (a Type without an arm would fall to "unsupported"), and warns about
+    /// the ones it does not have, with the text it always used. Replaces the old source-text comparison of the match arms.
+    #[test]
+    fn the_interpreter_handles_every_interpreter_type() {
+        use serde_json::json;
+        let data = json!({"rules": [], "paths": [], "volumes": []});
+        let mut s = crate::rules::Script::new(&data, Value::Null);
+        let w = vec![];
+        for t in RULE_TYPES.iter().filter(|t| t.handler == Handler::Interpreter) {
+            let entry = json!({"Type": t.name});
+            match t.role {
+                Role::Condition => {
+                    s.cond(&entry, &w, false);
+                }
+                Role::Action => s.act(&entry, &w, &mut vec![], "t"),
+            }
+        }
+        // Empty fields may warn about a name (an unknown ship name, a rule); only "condition 'X'" / "action 'X'" mean no arm.
+        let no_arm: Vec<_> = s.warned.iter().filter(|w| w.starts_with("condition '") || w.starts_with("action '")).collect();
+        assert!(no_arm.is_empty(), "the interpreter has no arm for: {no_arm:?}");
+        s.warned.clear();
+        // The skirmish end conditions are victory.rs's: here they are unsupported, as before.
+        s.cond(&json!({"Type": "Skirmish Game Complete"}), &w, false);
+        s.cond(&json!({"Type": "OP Bogus"}), &w, false);
+        s.act(&json!({"Type": "OP Bogus"}), &w, &mut vec![], "r");
+        s.act(&json!({"Type": "Flag Condition"}), &w, &mut vec![], "r");
+        s.cond(&json!({"Type": "Set Flag Action"}), &w, false);
+        let mut warned: Vec<_> = s.warned.iter().cloned().collect();
+        warned.sort();
+        assert_eq!(
+            warned,
+            ["action 'Flag Condition' in rule 'r'", "action 'OP Bogus' in rule 'r'", "condition 'OP Bogus'", "condition 'Set Flag Action'", "condition 'Skirmish Game Complete'"]
+        );
     }
 
     #[test]
@@ -705,11 +949,6 @@ mod tests {
                 assert!(fields.insert(f.name), "{}: duplicate field {}", t.name, f.name);
                 assert!(f.range.is_none() || f.kind == Kind::Number, "{}.{}: only numbers have a range", t.name, f.name);
             }
-        }
-        // Skirmish end conditions are not interpreter arms, so they must not be.
-        let cond_arms = arms(include_str!("cond.rs"));
-        for t in RULE_TYPES.iter().filter(|t| t.handler == Handler::Victory) {
-            assert!(!cond_arms.contains(t.name), "{} is read by victory.rs, not cond.rs", t.name);
         }
     }
 

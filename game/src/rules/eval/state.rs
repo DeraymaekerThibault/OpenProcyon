@@ -421,7 +421,7 @@ impl Script {
             if r.conds.iter().any(|c| self.gate(c) == Some(false)) {
                 continue;
             }
-            for c in r.conds.iter().filter(|c| matches!(s(c, "Type"), "Group/Unit Docked" | "Group/Unit Is Docked")) {
+            for c in r.conds.iter().filter(|c| matches!(RuleType::of(Role::Condition, c), Some(T::GroupUnitDocked | T::GroupUnitIsDocked))) {
                 if !members(w, s(c, "Dockers Group/Unit Name")).iter().any(|u| u.e == p.e) {
                     continue;
                 }
@@ -449,8 +449,8 @@ impl Script {
             }
             let player_in = |spec: &str| members(w, spec).iter().any(|u| u.e == p.e);
             for c in &r.conds {
-                match s(c, "Type") {
-                    "Enter Volume" | "Is Group In Volume" if player_in(s(c, "Group Name")) => {
+                match RuleType::of(Role::Condition, c) {
+                    Some(T::EnterVolume | T::IsGroupInVolume) if player_in(s(c, "Group Name")) => {
                         // The nearest point inside, not the centroid: mission 11's "Pursue Silver 1" is a bent band whose centroid lies
                         // outside it, and the bot circled there.
                         let vol = self.volume(s(c, "Volume Name"));
@@ -459,7 +459,7 @@ impl Script {
                         }
                     }
                     // Mission 4's stuck sloop and mission 6's PirateBigBrother are spotted by closing in.
-                    "Group to Group Distance" if schema::Equivalence::parse(s(c, "Equivalence")) == Some(schema::Equivalence::LessThan) && player_in(s(c, "GroupA Name")) => {
+                    Some(T::GroupToGroupDistance) if schema::Equivalence::parse(s(c, "Equivalence")) == Some(schema::Equivalence::LessThan) && player_in(s(c, "GroupA Name")) => {
                         if let Some(u) = members(w, s(c, "GroupB Name")).into_iter().filter(|u| u.alive && u.visible && u.e != p.e).nearest_to(p.pos, |u| u.pos)
                             && u.pos.distance(p.pos) >= f(c, "Distance")
                         {
@@ -467,14 +467,14 @@ impl Script {
                         }
                     }
                     // Mission 5's warning shot: firing on the blockading fishing boats.
-                    "Is Group A attacking Group B" if player_in(s(c, "GroupA Name")) => {
+                    Some(T::IsGroupAAttackingGroupB) if player_in(s(c, "GroupA Name")) => {
                         out.extend(members(w, s(c, "GroupB Name")).iter().filter(|u| u.alive && u.visible && u.owner != p.owner).map(|u| Want::Hit(u.e)));
                     }
-                    "Is Ship In Tow" if b(c, "Boolean") && player_in(s(c, "Towing Group")) => {
+                    Some(T::IsShipInTow) if b(c, "Boolean") && player_in(s(c, "Towing Group")) => {
                         let towed = |e: Entity| self.tows.iter().any(|t| t.0 == p.e && t.1 == e);
                         out.extend(members(w, s(c, "Target to Tow")).iter().filter(|u| u.alive && u.e != p.e && !towed(u.e)).map(|u| Want::Tow(u.e)));
                     }
-                    "Exit Volume" => {
+                    Some(T::ExitVolume) => {
                         let vol = self.volume(s(c, "Volume Name"));
                         // Only a ship the player tows: the player's own ship starts inside big area volumes (mission 2), and
                         // running from their centre took the bot off its objective.
@@ -487,7 +487,7 @@ impl Script {
                     }
                     // The part of the volume nearest the player: mission 9's StarHammer cannot move, and the Dark Matter's centre lies
                     // beyond the Star Mortar's 350 reach.
-                    "Mission 9 - If Mortar explodes within Area" => {
+                    Some(T::Mission9IfMortarExplodesWithinArea) => {
                         // The nearest point first, then a grid across the volume: the wreck's one Nova Mortar covers only 15
                         // degrees dead ahead, so the bot takes the first point a mount can reach.
                         let vol = self.volume(s(c, "Volume Name"));
@@ -495,13 +495,11 @@ impl Script {
                         out.extend(vol.near_inside(Vec2::new(p.pos.x, -p.pos.z)).map(at));
                         out.extend(vol.grid(8).into_iter().map(at));
                     }
-                    "Player has hit Group/Unit at least x Times" | "Group/Unit Hit at least x Times by Player ( with eqivalence )"
-                        if base(s(c, "Player Name")) == p.owner.as_str() =>
-                    {
+                    Some(T::PlayerHasHitGroupUnitAtLeastXTimes | T::GroupUnitHitAtLeastXTimesByPlayerWithEqivalence) if base(s(c, "Player Name")) == p.owner.as_str() => {
                         out.extend(members(w, s(c, "Group/Unit Name")).iter().filter(|u| u.alive && u.visible && u.owner != p.owner).map(|u| Want::Hit(u.e)));
                     }
-                    "Group Destroyed" | "Group/Unit Vital Section has >,<,= X damage" | "Group/Unit has >,<,= X damage" => {
-                        let spec = if s(c, "Type") == "Group Destroyed" { s(c, "Group Name") } else { s(c, "Group/Unit Name") };
+                    Some(ty @ (T::GroupDestroyed | T::GroupUnitVitalSectionHasXDamage | T::GroupUnitHasXDamage)) => {
+                        let spec = if ty == T::GroupDestroyed { s(c, "Group Name") } else { s(c, "Group/Unit Name") };
                         out.extend(members(w, spec).iter().filter(|u| u.alive && u.visible && self.hostile(&u.owner, &p.owner)).map(|u| Want::Hit(u.e)));
                     }
                     _ => {}
@@ -512,12 +510,12 @@ impl Script {
     }
     /// A condition the rules decide without the world: Some(holds) for flag, timer and speech gates, None for the rest.
     fn gate(&self, c: &Value) -> Option<bool> {
-        Some(match s(c, "Type") {
-            "World Initialize" => false,
-            "Flag Condition" => self.flags.get(s(c, "Flag Name")).copied().unwrap_or(false) == b(c, "Boolean Value"),
-            "Timer Condition" => self.timer(s(c, "Timer Name")).is_some_and(|v| cmp(s(c, "Equivalence"), v, f(c, "Time in seconds"))),
-            "Speech Event Played Once" => self.played.contains(s(c, "Speech Event Name")),
-            "Speech Event Not Played Yet" => !self.played.contains(s(c, "Speech Event Name")),
+        Some(match RuleType::of(Role::Condition, c)? {
+            T::WorldInitialize => false,
+            T::FlagCondition => self.flags.get(s(c, "Flag Name")).copied().unwrap_or(false) == b(c, "Boolean Value"),
+            T::TimerCondition => self.timer(s(c, "Timer Name")).is_some_and(|v| cmp(s(c, "Equivalence"), v, f(c, "Time in seconds"))),
+            T::SpeechEventPlayedOnce => self.played.contains(s(c, "Speech Event Name")),
+            T::SpeechEventNotPlayedYet => !self.played.contains(s(c, "Speech Event Name")),
             _ => return None,
         })
     }
@@ -526,7 +524,7 @@ impl Script {
     fn worth_wanting(&self, r: &Rule) -> bool {
         let name = r.name.to_ascii_lowercase();
         let bad = ["fail", "wrong", "bounds", "dead", "punish", "too long", "ignores", "death", "lose", "lost"];
-        if bad.iter().any(|x| name.contains(x)) || r.acts.iter().any(|a| s(a, "Type") == "End Game") {
+        if bad.iter().any(|x| name.contains(x)) || r.acts.iter().any(|a| RuleType::of(Role::Action, a) == Some(T::EndGame)) {
             return false;
         }
         r.acts.iter().any(|a| {

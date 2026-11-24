@@ -118,11 +118,11 @@ impl Ext {
 
 impl Script {
     /// `OP ...` conditions. An unknown one warns once and is false, like any unknown condition.
-    pub(in crate::rules) fn ext_cond(&mut self, c: &Value, w: &[Unit], repeating: bool) -> bool {
-        match s(c, "Type") {
+    pub(in crate::rules) fn ext_cond(&mut self, ty: RuleType, c: &Value, w: &[Unit], repeating: bool) -> bool {
+        match ty {
             // Every listed condition is evaluated (no short-circuit), so an edge condition inside (Enter Volume, event quotas) advances
             // its state exactly as it would at the top level.
-            "OP Any Of" => {
+            T::OPAnyOf => {
                 let mut any = false;
                 for sub in c["Conditions"].as_array().into_iter().flatten() {
                     any |= self.cond(sub, w, repeating);
@@ -132,7 +132,7 @@ impl Script {
             // Inverts what the inner condition answers this frame. An edge condition (Enter Volume in a repeating rule, an event quota)
             // is true for one frame only, so `Not` of it is true on every other frame; use a level condition or `Exit Volume` instead.
             // An event the inner condition would have reported is never consumed (the rule cannot fire while the inner is true).
-            "OP Not" => {
+            T::OPNot => {
                 if !c["Condition"].is_object() {
                     self.warn("'OP Not' without a Condition object");
                     return false;
@@ -142,22 +142,22 @@ impl Script {
                 self.consume.truncate(mark);
                 !inner
             }
-            "OP Counter Condition" => cmp(s(c, "Equivalence"), self.ext.counter(s(c, "Counter Name")), f(c, "Value")),
+            T::OPCounterCondition => cmp(s(c, "Equivalence"), self.ext.counter(s(c, "Counter Name")), f(c, "Value")),
             other => {
-                self.warn(&format!("condition '{other}'"));
+                self.warn(&format!("condition '{}'", other.name()));
                 false
             }
         }
     }
 
     /// `OP ...` actions that are not waits (a wait reached outside a rule's action list, e.g. through `act` alone, does nothing).
-    pub(in crate::rules) fn ext_act(&mut self, a: &Value, rule: &str) {
-        match s(a, "Type") {
-            "OP Set Counter" => {
+    pub(in crate::rules) fn ext_act(&mut self, ty: RuleType, a: &Value, rule: &str) {
+        match ty {
+            T::OPSetCounter => {
                 self.ext.counters.insert(s(a, "Counter Name").into(), f(a, "Value"));
             }
-            "OP Add To Counter" => *self.ext.counters.entry(s(a, "Counter Name").into()).or_default() += f(a, "Value"),
-            "OP Set Rule Active" => {
+            T::OPAddToCounter => *self.ext.counters.entry(s(a, "Counter Name").into()).or_default() += f(a, "Value"),
+            T::OPSetRuleActive => {
                 let (name, on) = (s(a, "Rule Name").trim(), b(a, "Boolean"));
                 let mut found = false;
                 for (i, n) in self.ext.names.iter().enumerate() {
@@ -174,15 +174,15 @@ impl Script {
                     self.warn(&format!("rule '{name}' in 'OP Set Rule Active' of rule '{rule}'"));
                 }
             }
-            "OP Wait" | "OP Wait Until Speech Done" => {}
-            other => self.warn(&format!("action '{other}' in rule '{rule}'")),
+            T::OPWait | T::OPWaitUntilSpeechDone => {}
+            other => self.warn(&format!("action '{}' in rule '{rule}'", other.name())),
         }
     }
 
     fn wait_of(a: &Value) -> Option<Wait> {
-        match s(a, "Type") {
-            "OP Wait" => Some(Wait::Secs(f(a, "Seconds"))),
-            "OP Wait Until Speech Done" => Some(Wait::Speech(s(a, "Speech Event Name").into())),
+        match RuleType::of(Role::Action, a)? {
+            T::OPWait => Some(Wait::Secs(f(a, "Seconds"))),
+            T::OPWaitUntilSpeechDone => Some(Wait::Speech(s(a, "Speech Event Name").into())),
             _ => None,
         }
     }

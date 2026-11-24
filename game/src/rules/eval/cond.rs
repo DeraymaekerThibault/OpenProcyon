@@ -7,73 +7,76 @@ use super::*;
 
 impl Script {
     pub(in crate::rules) fn cond(&mut self, c: &Value, w: &[Unit], repeating: bool) -> bool {
-        let t = s(c, "Type");
+        let Some(t) = RuleType::of(Role::Condition, c) else {
+            self.warn(&format!("condition '{}'", s(c, "Type")));
+            return false;
+        };
         match t {
-            "World Initialize" => !self.init_done,
-            "Flag Condition" => self.flags.get(s(c, "Flag Name")).copied().unwrap_or(false) == b(c, "Boolean Value"),
-            "Timer Condition" => self.timer(s(c, "Timer Name")).is_some_and(|v| cmp(s(c, "Equivalence"), v, f(c, "Time in seconds"))),
-            "Speech Event Played Once" => self.played.contains(s(c, "Speech Event Name")),
-            "Speech Event Not Played Yet" => {
+            T::WorldInitialize => !self.init_done,
+            T::FlagCondition => self.flags.get(s(c, "Flag Name")).copied().unwrap_or(false) == b(c, "Boolean Value"),
+            T::TimerCondition => self.timer(s(c, "Timer Name")).is_some_and(|v| cmp(s(c, "Equivalence"), v, f(c, "Time in seconds"))),
+            T::SpeechEventPlayedOnce => self.played.contains(s(c, "Speech Event Name")),
+            T::SpeechEventNotPlayedYet => {
                 let n = s(c, "Speech Event Name");
                 !self.played.contains(n) && !self.queue.iter().any(|q| q == n) && self.speaking.as_ref().is_none_or(|x| x.0 != n)
             }
-            "Is Group In Volume" | "Enter Volume" => self.group_in_volume(c, w, t == "Enter Volume", repeating),
-            "Exit Volume" => self.group_exited_volume(c, w),
+            T::IsGroupInVolume | T::EnterVolume => self.group_in_volume(c, w, t == T::EnterVolume, repeating),
+            T::ExitVolume => self.group_exited_volume(c, w),
             // A live, visible ship of one of the team's players inside the volume (skirmish teams; anyone in the campaign).
-            "Team Member Enters Volume" => {
+            T::TeamMemberEntersVolume => {
                 let (team, vol) = (s(c, "Team Name"), self.volume(s(c, "Volume Name")));
                 w.iter().any(|u| u.alive && u.visible && self.in_team(team, &u.owner) && in_volume(vol, u.pos))
             }
-            "Group Destroyed" => {
+            T::GroupDestroyed => {
                 let m = members(w, s(c, "Group Name"));
                 !m.is_empty() && m.iter().all(|u| !u.alive)
             }
             // PROVISIONAL: 'under attack' = any member has been hit since its hit count was last reset.
-            "Group Under Attack" => members(w, s(c, "Group Name")).iter().any(|u| self.hits.get(&u.e).is_some_and(|n| *n > 0)),
-            "Group/Unit Fired X Shots" => {
+            T::GroupUnderAttack => members(w, s(c, "Group Name")).iter().any(|u| self.hits.get(&u.e).is_some_and(|n| *n > 0)),
+            T::GroupUnitFiredXShots => {
                 let n: u32 = members(w, s(c, "Group/Unit Name")).iter().map(|u| self.shots.get(&u.e).copied().unwrap_or(0)).sum();
                 cmp(s(c, "Equivalence"), n as f32, f(c, "Number Of Rounds Fired"))
             }
             // PROVISIONAL: vital sections are not modelled; the unit's overall damage stands in.
-            "Group/Unit Vital Section has >,<,= X damage" => {
+            T::GroupUnitVitalSectionHasXDamage => {
                 let m = members(w, s(c, "Group/Unit Name"));
                 !m.is_empty() && cmp(s(c, "Equivalence"), m.iter().map(|u| u.damage).fold(0.0, f32::max), f(c, "Damage Percent"))
             }
-            "Does Group Contain Unit Name" => {
+            T::DoesGroupContainUnitName => {
                 let (g, unit) = s(c, "Unit Name").split_once(',').unwrap_or((s(c, "Unit Name"), ""));
                 w.iter().any(|u| u.alive && u.owner == g && u.name == unit) == b(c, "Exists?")
             }
-            "Is Ship In Tow" => {
+            T::IsShipInTow => {
                 let (x, y) = (ids(w, s(c, "Towing Group")), ids(w, s(c, "Target to Tow")));
                 self.tows.iter().any(|t| x.contains(&t.0) && y.contains(&t.1)) == b(c, "Boolean")
             }
-            "Is Group A attacking Group B" => self.attacking(w, s(c, "GroupA Name"), s(c, "GroupB Name")),
-            "Group/Unit Hit at least x Times" => {
+            T::IsGroupAAttackingGroupB => self.attacking(w, s(c, "GroupA Name"), s(c, "GroupB Name")),
+            T::GroupUnitHitAtLeastXTimes => {
                 let n: u32 = members(w, s(c, "Group/Unit Name")).iter().map(|u| self.hits.get(&u.e).copied().unwrap_or(0)).sum();
                 n as f32 >= f(c, "Number Of Times Hit")
             }
-            "Group/Unit Hit at least x Times by Player ( with eqivalence )" => {
+            T::GroupUnitHitAtLeastXTimesByPlayerWithEqivalence => {
                 let by = base(s(c, "Player Name"));
                 let n: u32 = members(w, s(c, "Group/Unit Name")).iter().map(|u| self.hits_by.get(&(by.into(), u.e)).copied().unwrap_or(0)).sum();
                 cmp(s(c, "Equivalence"), n as f32, f(c, "Number Of Times Hit"))
             }
-            "Player has hit Group/Unit at least x Times" => {
+            T::PlayerHasHitGroupUnitAtLeastXTimes => {
                 let by = base(s(c, "Player Name"));
                 let n: u32 = members(w, s(c, "Group/Unit Name")).iter().map(|u| self.hits_by.get(&(by.into(), u.e)).copied().unwrap_or(0)).sum();
                 n as f32 >= f(c, "Number Of Times Hit")
             }
-            "Group has X members" => cmp(s(c, "Equivalence"), members(w, s(c, "Group Name")).iter().filter(|u| u.alive).count() as f32, f(c, "number")),
-            "Group/Unit has >,<,= X damage" => {
+            T::GroupHasXMembers => cmp(s(c, "Equivalence"), members(w, s(c, "Group Name")).iter().filter(|u| u.alive).count() as f32, f(c, "number")),
+            T::GroupUnitHasXDamage => {
                 let m = members(w, s(c, "Group/Unit Name"));
                 !m.is_empty() && cmp(s(c, "Equivalence"), m.iter().map(|u| u.damage).fold(0.0, f32::max), f(c, "Damage Percent"))
             }
-            "Group/Unit contains no mission essential ships" => !w.iter().any(|u| u.owner == base(s(c, "Group Name")) && u.primary && u.alive),
-            "Unit Flag Texture" => {
+            T::GroupUnitContainsNoMissionEssentialShips => !w.iter().any(|u| u.owner == base(s(c, "Group Name")) && u.primary && u.alive),
+            T::UnitFlagTexture => {
                 // TWT group membership: ships that left the group (owner 'Dead Ships') still count.
                 let m = members(w, base(s(c, "Unit Name")));
                 !m.is_empty() && m.iter().all(|u| u.flag == s(c, "Flag Type")) == b(c, "Boolean")
             }
-            "Group to Group Distance" => {
+            T::GroupToGroupDistance => {
                 let (a, bb) = (members(w, s(c, "GroupA Name")), members(w, s(c, "GroupB Name")));
                 let d = a
                     .iter()
@@ -82,12 +85,12 @@ impl Script {
                     .fold(f32::INFINITY, f32::min);
                 d.is_finite() && cmp(s(c, "Equivalence"), d, f(c, "Distance"))
             }
-            "Group/Unit Docked" | "Group/Unit Is Docked" => {
+            T::GroupUnitDocked | T::GroupUnitIsDocked => {
                 let (a, bb) = (members(w, s(c, "Dockers Group/Unit Name")), members(w, s(c, "Targets Group/Unit Name")));
                 a.iter().any(|x| bb.iter().any(|y| self.docked.contains(&(x.e, y.e))))
             }
-            "Unit is Within any Nebula" => members(w, s(c, "Unit Name")).iter().any(|u| u.alive && self.nebulae.iter().any(|p| in_volume(p, u.pos))),
-            "All Units from Group have entered trigger volume Once" => {
+            T::UnitIsWithinAnyNebula => members(w, s(c, "Unit Name")).iter().any(|u| u.alive && self.nebulae.iter().any(|p| in_volume(p, u.pos))),
+            T::AllUnitsFromGroupHaveEnteredTriggerVolumeOnce => {
                 let key = Entered::AllOnce { group: s(c, "Group Name").into(), volume: s(c, "Volume Name").into() };
                 let vol = self.volume(s(c, "Volume Name")).clone();
                 let m: Vec<_> = members(w, s(c, "Group Name")).into_iter().filter(|u| u.alive).collect();
@@ -96,20 +99,20 @@ impl Script {
                 !m.is_empty() && m.iter().all(|u| seen.contains(&u.e))
             }
             // The original's count is the lifeboat table; an unknown player makes the condition false.
-            "Player Vs Player capture count" => {
+            T::PlayerVsPlayerCaptureCount => {
                 let (a, bb) = (base(s(c, "Player Name A")), base(s(c, "Player Name B")));
                 let known = |p: &str| self.players.iter().any(|x| x == p);
                 let n = self.lifeboats_saved_by(a, bb) + self.base_captures.get(&(a.into(), bb.into())).copied().unwrap_or(0);
                 known(a) && known(bb) && cmp(s(c, "Equivalence"), n as f32, f(c, "Number Of Captures"))
             }
             // Campaign maps have no teams: a capture by anyone of a unit of the group counts there.
-            "Team has captured a ship from Group/Unit" => {
+            T::TeamHasCapturedAShipFromGroupUnit => {
                 let (team, group) = (s(c, "Team Name"), s(c, "Group/Unit"));
                 let ids = ids(w, group);
                 let n = self.captured.iter().filter(|(by, e)| ids.contains(e) && self.in_team(team, by)).count() as u32;
                 self.event(EventKey::Captured { team: team.into(), group: group.into() }, n, f(c, "Number Of Captures"))
             }
-            "Team has destroyed a ship from Group/Unit" => {
+            T::TeamHasDestroyedAShipFromGroupUnit => {
                 let (team, group) = (s(c, "Team Name"), s(c, "Group/Unit"));
                 let ids = ids(w, group);
                 let n = self.destroyed.iter().filter(|(by, e)| ids.contains(e) && self.in_team(team, by)).count() as u32;
@@ -117,7 +120,7 @@ impl Script {
             }
             // Each unit of the group counts once, the first time it is inside. PROVISIONAL: 'Team Name' is read as the team the rule
             // credits, not a filter on the units (Convoy Raid: the convoys entering the pirates' theft area score for the pirates).
-            "Unit from Group enters trigger volume ( Once per Unit )" => {
+            T::UnitFromGroupEntersTriggerVolumeOncePerUnit => {
                 let (group, volume) = (s(c, "Group Name").to_string(), s(c, "Volume Name").to_string());
                 let vol = self.volume(s(c, "Volume Name")).clone();
                 let inside: Vec<Entity> = members(w, s(c, "Group Name")).iter().filter(|u| u.alive && in_volume(&vol, u.pos)).map(|u| u.e).collect();
@@ -126,15 +129,15 @@ impl Script {
                 let n = seen.len() as u32;
                 self.event(EventKey::Once { group, volume }, n, 0.0)
             }
-            "Team has X points" => self.team_points.get(s(c, "Team Name")).copied().unwrap_or(0) as f32 >= f(c, "Points"),
+            T::TeamHasXPoints => self.team_points.get(s(c, "Team Name")).copied().unwrap_or(0) as f32 >= f(c, "Points"),
             // True for an unknown player; otherwise no lifeboat is owned by the player (a boat counts until it is removed).
-            "Player has no lifeboats" => {
+            T::PlayerHasNoLifeboats => {
                 let p = base(s(c, "Player Name"));
                 !self.players.iter().any(|x| x == p) || !self.lifeboat_owners.iter().any(|o| o == p)
             }
-            "Is Starmap Open" => self.starmap_open,
+            T::IsStarmapOpen => self.starmap_open,
             // A mortar burst inside the volume since the rule last looked (bursts accumulate until the frame's step ends).
-            "Mission 9 - If Mortar explodes within Area" => {
+            T::Mission9IfMortarExplodesWithinArea => {
                 let vol = self.volume(s(c, "Volume Name"));
                 let hit = self.mortar_bursts.iter().any(|p| in_volume(vol, *p));
                 if hit {
@@ -143,14 +146,14 @@ impl Script {
                 hit || self.mortar_seen.contains(s(c, "Volume Name"))
             }
             // One event per object destroyed by the player, by kind (rocks or ships); a repeating rule scores once per kill.
-            "Player Killed A Object" => {
+            T::PlayerKilledAObject => {
                 let (player, kind) = (base(s(c, "Player Name")), s(c, "World Object Type"));
                 let n = self.kills.get(&(player.to_string(), kind == "Asteroid")).copied().unwrap_or(0);
                 self.event(EventKey::Killed { player: player.into(), kind: kind.into() }, n, 0.0)
             }
-            t if t.starts_with("OP ") => self.ext_cond(c, w, repeating),
+            t if t.is_engine() => self.ext_cond(t, c, w, repeating),
             other => {
-                self.warn(&format!("condition '{other}'"));
+                self.warn(&format!("condition '{}'", other.name()));
                 false
             }
         }
