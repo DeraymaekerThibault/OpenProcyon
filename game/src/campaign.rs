@@ -469,7 +469,7 @@ pub fn spawn(commands: &mut Commands, assets: &AssetServer, lib: &Library, fxl: 
         .collect();
     for (e, o) in bases {
         // Wrecked hulls are scenery the rules address by their TWT group (mission 6 teleports them and turns their collision off).
-        if o["type"].as_str().is_some_and(|t| t.ends_with("_Wrecked")) {
+        if o["type"].as_str().is_some_and(crate::rules::refs::is_wrecked_hull) {
             commands.entity(*e).insert(MissionBase { id: o["id"].as_i64().unwrap_or(-1), owner: String::new() });
             continue;
         }
