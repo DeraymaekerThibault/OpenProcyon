@@ -2,6 +2,7 @@
 //!
 //! - `x-origin`: `"retail"` (the original has the value; the importer writes it) or `"engine"` (an extension for mods; the keys of
 //!   `ENGINE_SHIP_KEYS` / `ENGINE_GUN_KEYS`, plus `$schema` and `set`, which are no data of the game).
+//! - `x-required-new` (set in `authoring::schemas`, on the entry of `guns.json` / `bullets.json`): the fields a NEW entry must set.
 //! - `x-default-from`: where the engine takes the value when the file leaves the key out, from the `SHIP_FILLS` table next to the
 //!   ship loader (`data/ships.rs`): `model`, `race_and_size`, `navy_cutter`, `hull`, `weapon_panel`.
 use serde_json::Value;

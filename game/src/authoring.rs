@@ -89,10 +89,11 @@ pub fn rule_schema() -> Value {
 
 /// The JSON Schemas (draft 2020-12) of the files a modder writes, as `(file name, schema)`: `ship.schema.json`, `guns.schema.json`,
 /// `bullets.schema.json`, `crew_nodes.schema.json`, `mod.schema.json`; the files `--dump-schemas <dir>` writes. Generated from the
-/// types the loader reads, so they cannot drift from it. Unknown keys stay allowed, as in the loader. No key of a ship, `crew_nodes` or `mod.json` is `required`: a mod's
-/// files are merged over a parent (`extends`) before the loader reads them, so a partial file is valid; the loader's own validation of the
-/// merged result is unchanged. The entries of `guns.json` and `bullets.json` list their `required` fields (what the loader needs of an
-/// entry, derived from the same types): a new entry must state them, an entry that changes a retail one need not. Needs no assets.
+/// types the loader reads, so they cannot drift from it. Unknown keys stay allowed, as in the loader. No key is `required`: a mod's
+/// files are merged over a parent (`extends`, or a retail entry) before the loader reads them, so a partial file is valid; the loader's own
+/// validation of the merged result is unchanged. The entry of `guns.json` and `bullets.json` carries `"x-required-new"`, the dotted
+/// fields a NEW entry must set (what the loader needs, derived from the same types; see [`required_new`]); a change to a retail entry
+/// needs none. Needs no assets.
 ///
 /// Every property of the ship, guns and bullets schemas carries `"x-origin"`: `"retail"` or `"engine"` (a key the engine adds; the
 /// `ENGINE_SHIP_KEYS` / `ENGINE_GUN_KEYS` keys). A ship key the engine fills in when the file leaves it out carries `"x-default-from"`:
@@ -103,11 +104,14 @@ pub fn schemas() -> Vec<(&'static str, Value)> {
     annotate::all(&mut all);
     all.push(("mod.schema.json", crate::modding::schema()));
     for (name, schema) in &mut all {
-        // A ship, a mission or a mod file is merged over its parent first, so no key of it is demanded. `guns.json` and `bullets.json`
-        // keep what the loader needs of a whole entry: an entry that changes a retail one needs only the keys it changes, a new one all.
-        if !matches!(*name, "guns.schema.json" | "bullets.schema.json") {
-            strip_required(schema);
+        // `guns.json` and `bullets.json` entries are merged key by key, so a partial entry is the normal case and no key is `required`;
+        // what a NEW entry must set is listed apart, as the non-enforcing annotation `x-required-new` on the entry.
+        if matches!(*name, "guns.schema.json" | "bullets.schema.json") {
+            let mut list = vec![];
+            required_paths(schema, &schema["$defs"]["entry"], "", &mut list);
+            schema["$defs"]["entry"]["x-required-new"] = list.into();
         }
+        strip_required(schema);
     }
     // `extends` and `set` are consumed by the overlay merge before the loader reads a ship (docs/modding.md "Extending a file").
     if let Some(props) = all[0].1["properties"].as_object_mut() {
@@ -118,6 +122,34 @@ pub fn schemas() -> Vec<(&'static str, Value)> {
         );
     }
     all
+}
+
+/// The fields (dotted, going into the objects they hold, such as `visual.pivot`) that the loader needs of a whole entry of
+/// `data/weapons/guns.json` or `bullets.json` (a file name, or its path); what a new entry must set, since an entry that changes a
+/// retail one needs none. Empty for any other file. The list is the `x-required-new` of the published schema.
+pub fn required_new(file: &str) -> Vec<String> {
+    let name = match file.rsplit('/').next() {
+        Some("guns.json") => "guns.schema.json",
+        Some("bullets.json") => "bullets.schema.json",
+        _ => return vec![],
+    };
+    schemas()
+        .iter()
+        .find(|(n, _)| *n == name)
+        .and_then(|(_, s)| s["$defs"]["entry"]["x-required-new"].as_array().map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect()))
+        .unwrap_or_default()
+}
+
+/// The `required` paths of an entry schema (before they are stripped), dotted, into the objects named by `$ref`.
+fn required_paths(root: &Value, node: &Value, prefix: &str, out: &mut Vec<String>) {
+    for k in node["required"].as_array().into_iter().flatten().filter_map(Value::as_str) {
+        out.push(format!("{prefix}{k}"));
+    }
+    for (k, sub) in node["properties"].as_object().into_iter().flatten() {
+        if let Some(def) = sub["$ref"].as_str().and_then(|r| r.strip_prefix("#/$defs/")) {
+            required_paths(root, &root["$defs"][def], &format!("{prefix}{k}."), out);
+        }
+    }
 }
 
 /// Removes the `required` keyword from a JSON Schema, wherever it is a keyword (not a property that is itself named `required`).
@@ -373,10 +405,9 @@ mod tests {
     }
 
     #[test]
-    fn only_the_weapon_tables_list_required_keys_so_partial_mod_files_validate() {
+    fn no_published_schema_requires_a_key_so_partial_mod_files_validate() {
         for (name, schema) in schemas() {
-            let weapons = matches!(name, "guns.schema.json" | "bullets.schema.json");
-            assert_eq!(has_required(&schema), weapons, "{name}: only the weapon tables list what a whole entry needs");
+            assert!(!has_required(&schema), "{name} still has a `required` list");
         }
         // The loader's own types do list them (the strip is the published view only), and the keys are still described.
         assert!(has_required(&crate::data::schemas()[0].1), "the loader's schema still knows what a complete file has");
@@ -387,18 +418,6 @@ mod tests {
         let mini = json!({"extends": "Ship_X", "points": 100});
         assert!(unknown(ship, &mini).is_empty(), "{:?}", unknown(ship, &mini));
         assert_eq!(ship["properties"]["points"]["type"], "integer");
-    }
-
-    /// The `required` paths of an entry schema (nested objects with a `$ref` included), dotted.
-    fn required_paths(root: &Value, node: &Value, prefix: &str, out: &mut Vec<String>) {
-        for k in node["required"].as_array().into_iter().flatten().filter_map(Value::as_str) {
-            out.push(format!("{prefix}{k}"));
-        }
-        for (k, sub) in node["properties"].as_object().into_iter().flatten() {
-            if let Some(def) = sub["$ref"].as_str().and_then(|r| r.strip_prefix("#/$defs/")) {
-                required_paths(root, &root["$defs"][def], &format!("{prefix}{k}."), out);
-            }
-        }
     }
 
     fn remove_path(v: &mut Value, path: &str) {
@@ -412,7 +431,7 @@ mod tests {
     }
 
     #[test]
-    fn the_required_fields_of_guns_and_bullets_are_what_the_loader_needs() {
+    fn x_required_new_of_guns_and_bullets_is_what_the_loader_needs() {
         let all = schemas();
         let full_gun = json!({"Mount Type": "Medium Mount", "Victory Point Cost": 3, "MuzzleFlashEffect": "Fx", "SoundName": "s", "SoundVolume": 1, "Is Lobbing Gun": false,
             "MuzzleSpeed": 1, "TimeBetweenBursts": 1, "BulletsPerBurst": 1, "DuringBurstReloadTime": 1, "EffectiveRange_Range": 1, "LongRange_Range": 1,
@@ -423,8 +442,12 @@ mod tests {
         for (name, entry, full) in [("guns.schema.json", &all[1].1, full_gun), ("bullets.schema.json", &all[2].1, full_bullet)] {
             let is_gun = name.starts_with("guns");
             let load = |v: &Value| if is_gun { crate::data::gun_from_value("G", v.clone()).map(|_| ()) } else { crate::data::bullet_from_value("B", v.clone()).map(|_| ()) };
-            let mut required = vec![];
-            required_paths(entry, &entry["$defs"]["entry"], "", &mut required);
+            let required = required_new(if is_gun { "data/weapons/guns.json" } else { "data/weapons/bullets.json" });
+            assert_eq!(entry["$defs"]["entry"]["x-required-new"], json!(required));
+            // the loader's own (unstripped) types say the same
+            let mut own = vec![];
+            required_paths(&crate::data::schemas()[if is_gun { 1 } else { 2 }].1, &crate::data::schemas()[if is_gun { 1 } else { 2 }].1["$defs"]["entry"], "", &mut own);
+            assert_eq!(own, required);
             assert!(required.len() >= 5, "{name}: {required:?}");
             assert_eq!(load(&full), Ok(()), "{name}: the full entry loads");
             // with only the required fields, it loads; without any one of them, it does not

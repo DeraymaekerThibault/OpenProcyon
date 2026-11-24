@@ -204,7 +204,7 @@ The published ship schema (`authoring::schemas`, `--dump-schemas`) marks each ke
 `"x-default-from"`, on the key and, where the engine fills a part of an entry, on that part (`guns` `pos`, `rot`, `bank`, `parent_layer`;
 `engines` `pos`, `rot`, `fx`, `parent_layer`; `physics` `MinExtents`, ...). One table in `game/src/data/ships.rs` (`SHIP_FILLS`) says
 which, and a test keeps the schema equal to it. Every property of the ship, guns and bullets schemas also has `"x-origin"`, the *Source*
-column above: `retail` or `engine`.
+column above: `retail` or `engine`. The entry of the guns and bullets schemas carries `"x-required-new"`, a list of the fields a new entry must set (dotted: `visual.pivot`); it is an annotation, not JSON Schema `required`, because the entries of a mod are merged key by key and a change to a retail entry needs none.
 
 | `x-default-from` | Meaning | Keys |
 |---|---|---|
