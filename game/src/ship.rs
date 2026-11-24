@@ -97,7 +97,8 @@ pub struct Ship {
     pub net: f32,              // energy nets on the hull: product of (1 - dissipated) over the active nets; 1.0 = free
     pub avoid: f32,            // speed fraction with land close ahead (collision::contact_slow, AI ships only); 1.0 = clear
     pub helm: Helm,            // rudder and torque boost as last set by the steer-to-point routine, held between its runs
-    pub towed: bool,           // on the end of a tow cable (rules `Tow Ship`): the cable sets its speed, its own engine does not brake it
+    pub towed: bool,           // on the end of a tow cable (rules `Tow Ship`): its engines are idle (exhaust)
+    pub tow_mass: f32,         // mass of the ship this one tows (0 = none): thrust works on both hulls
 }
 
 /// The original runs its steer-to-point law once per think (`THINK_SECS`) and keeps the rudder between runs; the physics still
@@ -135,6 +136,7 @@ impl Ship {
             avoid: 1.0,
             helm: Helm::default(),
             towed: false,
+            tow_mass: 0.0,
         }
     }
 
@@ -470,11 +472,12 @@ pub fn step(ship: &mut Ship, tf: &mut Transform, class: &combat::Class, health: 
 pub fn helm_step(ship: &mut Ship, tf: &mut Transform, class: &combat::Class, health: &Health, dt: f32, ai: bool) {
     {
         let ph = &class.phys;
-        // 1/s; retail settles with this rate for every order change. A towed hull coasts: with its helm at rest its engine would
-        // otherwise brake the whole tow (a First Rate towing a merchant crawled at 28 % of its speed, a tug at 86 %).
-        let drag = if ship.towed { 0.0 } else { ph.thrust / ph.mass / ph.max_speed };
+        // 1/s; retail settles with this rate for every order change. A towed hull keeps it: it brakes itself and the tow keeper
+        // drags it along (collision.rs). Thrust divided by both masses against a drag set by the hull's own lowers a tower's
+        // terminal speed to M / (M + tow mass) of its top speed.
+        let drag = ph.thrust / ph.mass / ph.max_speed;
         let fraction = ship.ordered();
-        let target = fraction * max_speed(ship, class, health) * ship.avoid;
+        let target = fraction * max_speed(ship, class, health) * ship.avoid * ph.mass / (ph.mass + ship.tow_mass);
         let mut want = None;
         if let Some(&wp) = ship.waypoints.first() {
             let d = wp - tf.translation;

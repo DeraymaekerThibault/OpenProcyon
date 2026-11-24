@@ -55,21 +55,30 @@ impl From<RawBar> for BarLayout {
         Self { size: Vec2::new(r.width, r.height), parts }
     }
 }
+/// The bars read so far, by skin.
+#[derive(Resource, Default)]
+struct BarLayouts(Vec<(String, std::sync::Arc<BarLayout>)>);
+
+impl BarLayouts {
+    fn get(&mut self, skin: &str) -> std::sync::Arc<BarLayout> {
+        if let Some((_, layout)) = self.0.iter().find(|(s, _)| s == skin) {
+            return layout.clone();
+        }
+        let layout = BarLayout::load(skin);
+        self.0.push((skin.to_string(), layout.clone()));
+        layout
+    }
+}
+
 impl BarLayout {
     fn path(skin: &str) -> String {
         format!("hud/bar/{}", skin.to_lowercase())
     }
-    /// The skin's bar, read once per process. A file that does not read is reported by `data::load_asset` (file, mod, line and
-    /// column); the retail file stands in for it, and with none the bar is empty (nothing drawn) rather than a crash.
+    /// The skin's bar. A file that does not read is reported by `data::load_asset` (file, mod, line and column); the retail file
+    /// stands in for it, and with none the bar is empty (nothing drawn) rather than a crash. The HUD systems read it through
+    /// `BarLayouts`, once per skin.
     fn load(skin: &str) -> std::sync::Arc<Self> {
-        static CACHE: std::sync::Mutex<Vec<(String, std::sync::Arc<BarLayout>)>> = std::sync::Mutex::new(Vec::new());
-        let mut cache = CACHE.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some((_, layout)) = cache.iter().find(|(s, _)| s == skin) {
-            return layout.clone();
-        }
-        let layout = std::sync::Arc::new(crate::data::load_asset::<BarLayout>(&format!("{}.json", Self::path(skin)), "the main bar is not drawn").unwrap_or_default());
-        cache.push((skin.to_string(), layout.clone()));
-        layout
+        std::sync::Arc::new(crate::data::load_asset::<BarLayout>(&format!("{}.json", Self::path(skin)), "the main bar is not drawn").unwrap_or_default())
     }
     /// The layout as the code read it before it was typed: `Value` walking with a panic per missing field.
     #[cfg(test)]
@@ -157,7 +166,7 @@ pub(super) struct States {
 struct RadarFace(States);
 
 pub fn plugin(app: &mut App) {
-    app.add_systems(
+    app.init_resource::<BarLayouts>().add_systems(
         Update,
         (
             build.before(HudSet).after(crate::sprites::choose_skin).run_if(in_state(crate::menu::Screen::Battle)),
@@ -269,6 +278,7 @@ fn build(
     old: Query<Entity, With<HudRoot>>,
     mut last: Local<Option<(usize, &'static str, u32, Vec<String>)>>,
     speed: Option<Res<crate::panels::SpeedControl>>,
+    mut bars: ResMut<BarLayouts>,
 ) {
     let s = window.height() / REF_H;
     let (player, guns) = *player;
@@ -290,7 +300,7 @@ fn build(
 
     // ---- main bar: the composed image bottom-docked and centred, the dynamic parts on their boxes ---------------------------
     // PROVISIONAL: which bottom rows retail shows is not measured per faction; the composed bar ends on its shortest part.
-    let layout = BarLayout::load(hud.skin);
+    let layout = bars.get(hud.skin);
     let (bar_w, floor) = (layout.size.x, layout.size.y);
     commands_window(&mut commands, &c, root, window.width() / s, bar_w, floor);
     if speed.is_some() {
@@ -975,6 +985,7 @@ fn chat_panel(
     roots: Query<Entity, With<HudRoot>>,
     old: Query<Entity, With<ChatPanel>>,
     mut built: Local<Option<(Entity, bool, usize, u32)>>,
+    mut bars: ResMut<BarLayouts>,
 ) {
     let Some(root) = roots.iter().next() else { return };
     let key = (root, log.open, log.lines.len(), window.height() as u32);
@@ -988,7 +999,7 @@ fn chat_panel(
     let Some(font) = fonts.as_ref().and_then(|f| f.0.get("Univers10")).filter(|_| log.open) else { return };
     let s = window.height() / REF_H;
     let c = Ctx { assets: &assets, hud: &hud, s };
-    let layout = BarLayout::load(hud.skin);
+    let layout = bars.get(hud.skin);
     // Same strip as the fleet-commands bar, which it replaces while open.
     let top = offset(&hud, "MainBarExtension_TopLeft_Offset_From_MainBar_TopLeft").y;
     let h_bar = c.size_of("FormationBar_LeftDetail").y.max(c.size_of("FormationBar_RightDetail").y);

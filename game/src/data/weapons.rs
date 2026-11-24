@@ -6,7 +6,7 @@ use serde::{Deserialize, Deserializer};
 use std::collections::BTreeMap;
 
 /// A field the original reader took with `as_str()`, `as_f64()`, ... and a default: a missing value or one of the wrong type is `None`.
-fn lenient<'de, D: Deserializer<'de>, T: serde::de::DeserializeOwned>(d: D) -> Result<Option<T>, D::Error> {
+pub(super) fn lenient<'de, D: Deserializer<'de>, T: serde::de::DeserializeOwned>(d: D) -> Result<Option<T>, D::Error> {
     Ok(Value::deserialize(d).ok().and_then(|v| serde_json::from_value(v).ok()))
 }
 

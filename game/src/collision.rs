@@ -386,41 +386,19 @@ pub fn set_velocity(ship: &mut crate::Ship, drift: &mut Drift, velocity: Vec3) {
 }
 struct ContactBody {
     velocity: Vec3,
-    spin: f32,
     inverse_mass: f32,
     inverse_inertia: f32,
     arm: Vec3,
-}
-impl ContactBody {
-    fn at_point(&self) -> Vec3 {
-        self.velocity + Vec3::Y.cross(self.arm) * self.spin
-    }
-    fn effective_mass(&self, normal: Vec3) -> f32 {
-        self.inverse_mass + self.arm.cross(normal).y.powi(2) * self.inverse_inertia
-    }
 }
 fn ship_body(ship: &crate::Ship, tf: &Transform, drift: &Drift, class: &crate::data::Class, point: Vec3) -> ContactBody {
     let size = (class.collision_bounds[1] - class.collision_bounds[0]) * tf.scale.abs();
     // PROVISIONAL box inertia; native contact torque exists, its exact inertia mapping is not recovered.
     ContactBody {
         velocity: forward(ship) * ship.speed + drift.0,
-        spin: ship.ang_vel,
         inverse_mass: 1.0 / class.phys.mass,
         inverse_inertia: 12.0 / (class.phys.mass * (size.x * size.x + size.z * size.z).max(0.001)),
         arm: (point - tf.transform_point(class.mass_centre)).with_y(0.0),
     }
-}
-/// Inelastic contact response is PROVISIONAL; include both linear and angular effective mass.
-fn impulse(a: &ContactBody, b: &ContactBody, normal: Vec3) -> Vec3 {
-    normal * (-(a.at_point() - b.at_point()).dot(normal).min(0.0) / (a.effective_mass(normal) + b.effective_mass(normal)))
-}
-fn apply_impulse(ship: &mut crate::Ship, drift: &mut Drift, body: &ContactBody, j: Vec3) {
-    set_velocity(ship, drift, body.velocity + j * body.inverse_mass);
-    ship.ang_vel += body.arm.cross(j).y * body.inverse_inertia;
-}
-#[cfg(test)]
-fn fixed_body() -> ContactBody {
-    ContactBody { velocity: Vec3::ZERO, spin: 0.0, inverse_mass: 0.0, inverse_inertia: 0.0, arm: Vec3::ZERO }
 }
 
 /// The index of `class`'s damage section (placed by `tf`) whose box centre is nearest `at`.
@@ -529,16 +507,15 @@ pub fn sail(
         if cables.contains_key(&(tower, towee)) {
             continue;
         }
-        if let Ok([(_, a, ta, ha, _, _), (_, b, tb, hb, _, _)]) = ships.get_many_mut([tower, towee])
+        if let Ok([(_, _, ta, ha, _, _), (_, _, tb, hb, _, _)]) = ships.get_many_mut([tower, towee])
             && !ha.destroyed
             && !hb.destroyed
         {
-            let p = ta.transform_point(lib.classes[a.class].tow_points[0]);
-            let q = tb.transform_point(lib.classes[b.class].tow_points[1]);
-            // PROVISIONAL: retain the registration distance as cable length; native spring constants are not decoded.
-            cables.insert((tower, towee), (p - q).with_y(0.0).length());
+            // The original: the length is the distance between the hull centres when the link forms.
+            cables.insert((tower, towee), (ta.translation - tb.translation).with_y(0.0).length());
         }
     }
+    let tow_masses: HashMap<Entity, f32> = tows.iter().filter_map(|&(tower, towee)| Some((tower, lib.classes[ships.get(towee).ok()?.1.class].phys.mass))).collect();
     let local = fleets.as_ref().map(|f| f.local.as_str());
     // The human's ships (`Captain_Human` in the original): the player ship and the human's fleet; allied computer fleets share the side.
     let humans = |e: Entity, side: crate::Side| side == crate::Side::Player && (human.contains(e) || members.get(e).ok().is_none_or(|m| Some(m.0.as_str()) == local));
@@ -642,6 +619,11 @@ pub fn sail(
         if s.towed != towed {
             s.towed = towed;
         }
+        // The tower's thrust works on both hulls (the original divides it by its own mass plus the towee's).
+        let tow_mass = tow_masses.get(&e).copied().unwrap_or(0.0);
+        if s.tow_mass != tow_mass {
+            s.tow_mass = tow_mass;
+        }
         if let Some(dir) = avoiders.get(&e).and_then(|a| a.stuck).filter(|_| sinking.is_none()) {
             // The original's unstick: a fixed turn in place, sqrt(MaxAngularAcceleration / RotationalFriction) / 3 rad/s, whatever
             // the speed, rudder or crew; the ship keeps its speed but does not move until it is free.
@@ -665,30 +647,32 @@ pub fn sail(
         drift.0 *= (-2.0 * substep).exp();
         tf.translation += drift.0 * substep;
     }
-    // Slack cables only pull, never push; both hulls remain independently simulated.
+    // The original's tow keeper (docs/re/collision.md Tow constraint): after both hulls ran their own step, a taut link moves the
+    // pair back together along the line of centres, 25 % on the tower and 75 % on a movable towee (all on the tower when the towee is
+    // pinned). Speeds are not touched: the towee's own drag and sideways damping already ran.
     for (&(tower, towee), &length) in cables.iter() {
-        let Ok([(_, mut a, mut ta, ha, mut da, _), (_, mut b, mut tb, hb, mut db, _)]) = ships.get_many_mut([tower, towee]) else { continue };
+        let Ok([(_, _, mut ta, ha, _, _), (_, mut b, mut tb, hb, db, _)]) = ships.get_many_mut([tower, towee]) else { continue };
         if ha.destroyed || hb.destroyed {
             continue;
         }
-        let ca = &lib.classes[a.class];
-        let cb = &lib.classes[b.class];
-        let p = ta.transform_point(ca.tow_points[0]);
-        let q = tb.transform_point(cb.tow_points[1]);
-        let separation = (p - q).with_y(0.0);
+        let separation = (tb.translation - ta.translation).with_y(0.0);
         let distance = separation.length();
         if distance <= length || distance < 0.001 {
             continue;
         }
-        let normal = -separation / distance;
-        let ba = ship_body(&a, &ta, &da, ca, p);
-        let bb = ship_body(&b, &tb, &db, cb, q);
-        let j = impulse(&ba, &bb, normal);
-        let error = separation * ((distance - length) / distance);
-        ta.translation -= error * (ba.inverse_mass / (ba.inverse_mass + bb.inverse_mass));
-        tb.translation += error * (bb.inverse_mass / (ba.inverse_mass + bb.inverse_mass));
-        apply_impulse(&mut a, &mut da, &ba, j);
-        apply_impulse(&mut b, &mut db, &bb, -j);
+        let stretch = separation / distance * (distance - length);
+        if pinned(towee) {
+            ta.translation += stretch;
+            continue;
+        }
+        ta.translation += stretch * 0.25;
+        tb.translation -= stretch * 0.75;
+        // PROVISIONAL rope torque on the towee (the original's constants are not decoded): the pull acts at its tow point, so the
+        // hull swings to trail the rope. Only the angular part of the pull of that 75 % move is applied.
+        let cb = &lib.classes[b.class];
+        let body = ship_body(&b, &tb, &db, cb, tb.transform_point(cb.tow_points[1]));
+        let pull = -stretch * 0.75 / substep / body.inverse_mass;
+        b.ang_vel += body.arm.cross(pull).y * body.inverse_inertia * substep;
     }
     // The collision pass, after every object has moved: ships against the land and rocks, then ship against ship. Ships, rocks and
     // pairs go in spawn order: the bump sound draws random numbers, and each push moves a hull the next pair sees.
@@ -739,7 +723,6 @@ pub fn sail(
             let size = obstacle.body.bounds.max - obstacle.body.bounds.min;
             let b = ContactBody {
                 velocity: rock.velocity + rock_drift.0,
-                spin: rock.angular_velocity().y,
                 inverse_mass: 1.0 / rock.mass,
                 inverse_inertia: 12.0 / (rock.mass * (size.x * size.x + size.z * size.z).max(0.001)),
                 arm: (contact.point - rock_tf.translation).with_y(0.0),

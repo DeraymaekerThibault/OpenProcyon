@@ -399,12 +399,21 @@ fn check_log_lines(id: &str, from: &str, dir: &std::path::Path) -> Vec<String> {
     rules::cli::report_lines(id, dir).into_iter().map(|l| format!("mod {from}: {l}")).collect()
 }
 
+/// `mission.json` and `media.json` of a map folder; the error names the file and the mod that provides it.
+fn read_mission_files(dir: &std::path::Path) -> Result<(Value, Value), String> {
+    let from = ["mission", "media", "map"].iter().find_map(|n| crate::data::mod_of(&dir.join(format!("{n}.json"))));
+    let read = |name: &str| crate::data::load_as::<Value>(&dir.join(format!("{name}.json")), from.as_deref()).map_err(|e| e.to_string());
+    Ok((read("mission")?, read("media")?))
+}
+
+/// `try_load_id` for callers that cannot go on without the mission (the retail missions in tests).
 pub fn load_id(id: &str) -> Mission {
-    let read = |name: &str| {
-        std::fs::read_to_string(assets_dir().join(format!("maps/{id}/{name}.json"))).unwrap_or_else(|_| panic!("missing maps/{id}/{name}.json: run tools.export_campaign"))
-    };
-    let data: Value = serde_json::from_str(&read("mission")).expect("invalid mission JSON");
-    let media: Value = serde_json::from_str(&read("media")).expect("invalid media JSON");
+    try_load_id(id).unwrap_or_else(|e| panic!("{e}"))
+}
+
+/// Loads `maps/<id>/mission.json` and `media.json`, or says which file (and which mod provides it) is missing or invalid.
+pub fn try_load_id(id: &str) -> Result<Mission, String> {
+    let (data, media) = read_mission_files(&assets_dir().join(format!("maps/{id}")))?;
     // A mission a mod adds or overrides is checked like `--check-mission` does; retail missions are not re-checked at load.
     let file = assets_dir().join(format!("maps/{id}/mission.json"));
     if let (Some(from), Some(dir)) = (crate::data::mod_of(&file), file.parent()) {
@@ -426,12 +435,19 @@ pub fn load_id(id: &str) -> Mission {
     if let Some((rules, at)) = START.get() {
         (script.start_rules, script.start_at) = (rules.clone(), *at);
     }
-    Mission { id: id.into(), data, opening: script.briefing_opening.then(default), script }
+    Ok(Mission { id: id.into(), data, opening: script.briefing_opening.then(default), script })
 }
 
 /// `bases`: the map's scenery entities with their exported object records (id, type); those that a rule sets up become `MissionBase`s.
 pub fn spawn(commands: &mut Commands, assets: &AssetServer, lib: &Library, fxl: &crate::fx::FxLib, id: &str, bases: &[(Entity, Value)]) {
-    let mission = load_id(id);
+    let mission = match try_load_id(id) {
+        Ok(m) => m,
+        Err(why) => {
+            eprintln!("error: {why}; the mission cannot start, back to the main menu");
+            commands.queue(|world: &mut World| world.resource_mut::<NextState<crate::menu::Screen>>().set(crate::menu::Screen::Main));
+            return;
+        }
+    };
     let setups =
         |kind: &'static str| mission.data["rules"].as_array().into_iter().flatten().flat_map(|r| r["actions"].as_array().into_iter().flatten()).filter(move |a| a["Type"] == kind);
     let islands: Vec<(i64, String, i32, crate::combat::IslandGunnery)> = setups("*State Init* Setup Island")
@@ -745,6 +761,24 @@ mod tests {
         points.save_to(path.clone()).unwrap();
         assert_eq!(CampaignPoints::load_from(path).total, 27);
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_missing_or_invalid_mission_file_is_an_error_naming_the_file_not_a_panic() {
+        let dir = std::env::temp_dir().join(format!("procyon-load-{}", std::process::id())).join("maps/m1");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("mission.json"), "{\"rules\": []}").unwrap();
+        let err = super::read_mission_files(&dir).unwrap_err();
+        assert!(err.contains("media.json"), "{err}");
+        std::fs::write(dir.join("media.json"), "not json").unwrap();
+        let err = super::read_mission_files(&dir).unwrap_err();
+        assert!(err.contains("media.json"), "{err}");
+        std::fs::write(dir.join("media.json"), "{}").unwrap();
+        std::fs::write(dir.join("mission.json"), "").unwrap();
+        assert!(super::read_mission_files(&dir).unwrap_err().contains("mission.json"));
+        std::fs::write(dir.join("mission.json"), "{}").unwrap();
+        assert!(super::read_mission_files(&dir).is_ok());
+        std::fs::remove_dir_all(dir.parent().unwrap().parent().unwrap()).unwrap();
     }
 
     #[test]

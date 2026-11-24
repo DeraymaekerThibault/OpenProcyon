@@ -120,9 +120,17 @@ impl Tracker {
     }
 }
 
-fn events() -> &'static Value {
-    static EVENTS: std::sync::OnceLock<Value> = std::sync::OnceLock::new();
-    EVENTS.get_or_init(|| crate::data::try_json(&crate::assets_dir().join("voice/events.json")).unwrap_or(Value::Null))
+/// `content/voice/events.json`: event name -> voice files, per speaker set. Only the human-male set is read (other speakers swap the prefix).
+#[derive(serde::Deserialize, Default)]
+struct VoiceEvents {
+    #[serde(rename = "HumanMale", default)]
+    human_male: HashMap<String, Vec<String>>,
+}
+
+/// The table, read once through `data::load_asset`: a file that does not parse gives one named `error:` line and silent crew.
+fn events() -> &'static VoiceEvents {
+    static EVENTS: std::sync::OnceLock<VoiceEvents> = std::sync::OnceLock::new();
+    EVENTS.get_or_init(|| crate::data::load_asset("voice/events.json", "the crew stays silent").unwrap_or_default())
 }
 
 /// Retail dialogue files are `<species><post><nn>`: two letters per species, one line set per post (not every species voices
@@ -163,8 +171,8 @@ fn faction_crew(race: &str) -> (&'static str, &'static str) {
 /// first named crew member at the line's post whose species voices it, else by the ship's faction crew (`race` = the hull's
 /// race), else the human-male table entry. `exists` says whether a dialogue file was imported.
 pub fn voice_line(event: &str, n: usize, race: &str, posts: Option<&crate::crew_arms::CrewPosts>, exists: impl Fn(&str) -> bool) -> Option<(String, String)> {
-    let files = events()["HumanMale"][event].as_array().filter(|a| !a.is_empty())?;
-    let base = files[n % files.len()].as_str()?;
+    let files = events().human_male.get(event).filter(|a| !a.is_empty())?;
+    let base = files[n % files.len()].as_str();
     let rest = base.strip_prefix("hm")?;
     let role = POSTS.iter().find(|(p, _)| rest.starts_with(p)).map(|(_, r)| *r);
     let named = role.and_then(|r| posts.map(|p| &p.0[r])).into_iter().flatten();
@@ -348,6 +356,38 @@ fn callouts(
 
 #[cfg(test)]
 mod tests {
+    fn shipped() -> std::path::PathBuf {
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../content/voice/events.json")
+    }
+
+    /// The typed table equals the untyped reader on the file the repository ships (no game assets needed).
+    #[test]
+    fn the_typed_voice_table_equals_the_untyped_reader_on_the_shipped_file() {
+        let typed: VoiceEvents = crate::data::load(&shipped()).unwrap_or_else(|e| panic!("{e}"));
+        let raw = crate::data::try_json(&shipped()).unwrap();
+        let raw = raw["HumanMale"].as_object().unwrap();
+        assert!(raw.len() > 20 && typed.human_male.len() == raw.len());
+        for (event, files) in raw {
+            let want: Vec<&str> = files.as_array().unwrap().iter().map(|f| f.as_str().unwrap()).collect();
+            assert_eq!(typed.human_male[event], want, "{event}");
+        }
+    }
+
+    #[test]
+    fn a_voice_table_with_a_wrong_type_names_the_file_and_the_position() {
+        let dir = std::env::temp_dir().join(format!("procyon-voice-bad-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("events.json"), r#"["HumanMale"]"#).unwrap();
+        let e = crate::data::load::<VoiceEvents>(&dir.join("events.json")).err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(e.contains("events.json") && e.contains("invalid type"), "{e}");
+        std::fs::write(dir.join("events.json"), r#"{"HumanMale": {"ammo_hit": "hmgunner01"}}"#).unwrap();
+        let e = crate::data::load::<VoiceEvents>(&dir.join("events.json")).err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(e.contains("events.json") && e.contains("expected a sequence") && e.contains("line 1 column"), "{e}");
+        std::fs::write(dir.join("events.json"), r#"{"Other": {}}"#).unwrap();
+        assert!(crate::data::load::<VoiceEvents>(&dir.join("events.json")).unwrap().human_male.is_empty(), "other speaker sets and unknown keys are allowed");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     use super::*;
 
     fn snap() -> Snapshot {

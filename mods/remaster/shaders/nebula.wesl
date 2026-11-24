@@ -6,6 +6,8 @@
 // around it from inside for a moment (a point-light term in the march). With the camera outside, only the near side of the shell
 // marches (from the cloud's front to its back); with the camera inside, the far wall marches from the camera, so the gas fills the
 // view gently (`inside` caps it), and a short fine march streams wisps past the camera.
+// the battle clock (game/src/render/frame.rs)
+import openprocyon::render::frame::frame;
 import bevy_pbr::render::{
     forward_io::{VertexOutput, FragmentOutput},
     pbr_fragment::pbr_input_from_standard_material,
@@ -25,7 +27,7 @@ struct Nebula {
     high: vec4<f32>,
     // xyz: the last bolt, w: what is left of its light
     flash: vec4<f32>,
-    // x: clock, y: a bolt's reach (world units)
+    // x: unused (the clock is frame.clock), y: a bolt's reach (world units)
     params: vec4<f32>,
 }
 
@@ -93,7 +95,7 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
         let dt = (t1 - t0) / f32(steps);
         // a different start per pixel, so the steps do not band
         let jitter = fract(52.9829189 * fract(dot(in.position.xy, vec2<f32>(0.06711056, 0.00583715))));
-        let clock = nebula.params.x * nebula.look.z;
+        let clock = frame.clock.y * nebula.look.z;
         var acc = vec3<f32>(0.0);
         for (var i = 0; i < 24; i = i + 1) {
             if i >= steps {
