@@ -20,6 +20,7 @@ pub mod decals;
 pub mod docking;
 pub mod dragons;
 pub mod environment;
+pub mod exit;
 #[cfg(test)]
 mod fixed_tests;
 pub mod flag;
@@ -31,9 +32,11 @@ pub mod loading;
 pub mod logging;
 pub mod menu;
 pub mod modding;
+pub mod names;
 pub mod nebula;
 pub mod options_menu;
 pub mod panels;
+pub mod pointer;
 pub mod profiles;
 pub mod render;
 pub mod retail_tex;
@@ -53,9 +56,11 @@ pub mod wake;
 
 // Explicit crate-root re-exports, grouped by owning module. No glob re-exports here (docs/development.md).
 // scenario.rs: battle lifecycle and map objects.
-pub use scenario::{Group, Namer, Outcome, Scenario, debug_kill, enter_battle, game_to_bevy, leave_battle, outcome, restart, resume_scenario, shot_target, spawn_ship};
+pub use scenario::{
+    Group, Namer, Outcome, Scenario, debug_kill, enter_battle, game_to_bevy, leave_battle, outcome, restart, resume_scenario, scripted_kills, scripted_steps, spawn_ship,
+};
 // ship.rs: ship state, sides and AI.
-pub use ship::{ORDERS, PlayerShip, Ship, ShipName, Side, ai, angdiff, approach_speed, step};
+pub use ship::{EngineOrder, PlayerShip, Ship, ShipName, Side, ai, angdiff, approach_speed, step};
 // view.rs: camera, input and HUD wiring.
 pub use view::{Orbit, Sky, Slot, camera, hud, input, sky, toggle_debug};
 
@@ -89,17 +94,45 @@ pub struct Config {
 }
 
 static ASSETS: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+/// `--fixed-step` / `PROCYON_FIXED_STEP=1` (#535): every frame advances exactly one battle tick of game time at 1x, whatever the
+/// machine's frame rate, and the clock-seeded cosmetic draws (ship names, stars) use a fixed seed. With the battle seed (`--seed`)
+/// and frames counted after loading, the same scripted run gives the same pictures and trace on every run. The crew stays silent
+/// (its lines follow audio playback, not the tick).
+static FIXED_STEP: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+pub fn fixed_step() -> bool {
+    FIXED_STEP.load(std::sync::atomic::Ordering::Relaxed)
+}
+/// A seed from the clock, or a constant in a fixed-step run.
+pub fn clock_seed() -> u64 {
+    if fixed_step() {
+        return 0x9E37_79B9;
+    }
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(1, |d| d.as_nanos() as u64)
+}
 /// Converted assets: `PROCYON_ASSETS`, else `assets/` in the source checkout, else the per-user folder the importer
 /// (`python -m tools.import_assets`, or the release download's `openprocyon-import`) fills. Nothing from the original game ships with the code.
 pub(crate) fn base_assets() -> PathBuf {
     if let Some(dir) = std::env::var_os("PROCYON_ASSETS") {
         return PathBuf::from(dir);
     }
-    let checkout = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../assets");
-    if checkout.join("ships").is_dir() {
-        return checkout;
+    let checkout = checkout_dir().map(|dir| dir.join("assets"));
+    if let Some(checkout) = checkout.as_ref().filter(|c| c.join("ships").is_dir()) {
+        return checkout.clone();
     }
-    user_assets().unwrap_or(checkout)
+    user_assets().or(checkout).unwrap_or_else(|| PathBuf::from("assets"))
+}
+
+/// The source checkout, found at run time (never baked into the binary, so a release build carries no build-machine path): the
+/// nearest folder holding `game/Cargo.toml` and `content/`, looking up from the working directory, then from the executable
+/// (`make run` and the check scripts start inside the checkout or build into it).
+pub(crate) fn checkout_dir() -> Option<PathBuf> {
+    let cwd = std::env::current_dir().ok();
+    let binary = std::env::current_exe().ok();
+    [cwd, binary]
+        .into_iter()
+        .flatten()
+        .find_map(|start| start.ancestors().find(|dir| dir.join("game/Cargo.toml").is_file() && dir.join("content").is_dir()).map(|dir| dir.to_path_buf()))
 }
 
 /// Where the importer puts converted assets by default (see `campaign::user_dir`).
@@ -114,23 +147,25 @@ fn player_assets(base: &std::path::Path) -> bool {
 /// executable (the release download), else `content/` in the checkout.
 fn content_dir() -> PathBuf {
     let exe_dir = std::env::current_exe().ok().and_then(|path| path.parent().map(|dir| dir.join("content")));
-    content_dir_from(exe_dir, PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../content"))
+    content_dir_from(exe_dir, checkout_dir().map_or_else(|| PathBuf::from("content"), |dir| dir.join("content")))
 }
 /// The `mods/` that ships with the game: next to the executable in a download, the checkout's under `make run`.
 pub fn bundled_mods_dir() -> Option<PathBuf> {
     let beside_binary = std::env::current_exe().ok().and_then(|path| path.parent().map(|dir| dir.join("mods")));
-    beside_binary.filter(|dir| dir.is_dir()).or_else(|| Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../mods")).filter(|d| d.is_dir()))
+    beside_binary.filter(|dir| dir.is_dir()).or_else(|| checkout_dir().map(|dir| dir.join("mods")).filter(|d| d.is_dir()))
 }
 fn content_dir_from(next_to_exe: Option<PathBuf>, checkout: PathBuf) -> PathBuf {
     next_to_exe.filter(|dir| dir.join("fonts").is_dir()).unwrap_or(checkout)
 }
+/// PROCYON_OVERLAY: where this launch builds its overlay (modding::overlay).
+fn own_overlay() -> Option<PathBuf> {
+    std::env::var_os("PROCYON_OVERLAY").map(PathBuf::from)
+}
 /// The asset root: the imported assets with `content/` and any `--mod` folders overlaid on top (see modding.rs).
 pub fn assets_dir() -> &'static std::path::Path {
-    ASSETS.get_or_init(|| modding::overlay(&base_assets(), &[content_dir()]))
+    ASSETS.get_or_init(|| modding::overlay(&base_assets(), &[content_dir()], own_overlay()))
 }
 
-/// Runs the game with one presentation (a view plugin such as the binary's `classic::plugin`); without imported assets it opens
-/// the first-run import screen instead (`setup.rs`, drawn by `setup_view`), which starts the game again once the import is done.
 /// --lobby <spec>: play a skirmish setup through the lobby model instead of the --ship/--allies/--enemies shortcut. A named function,
 /// not a closure: Bevy names every non-capturing closure plugin alike, so a second one panics at startup ("already added").
 fn lobby_scenario(app: &mut App) {
@@ -141,22 +176,29 @@ fn lobby_scenario(app: &mut App) {
             }
             Err(err) => {
                 eprintln!("{err}");
-                std::process::exit(2);
+                exit::quit(2);
             }
         }
     }
 }
 
+/// The command line starts a battle, a menu screen or a screenshot directly (no player is there to use the import screen).
+fn is_scripted(args: &[String]) -> bool {
+    args.iter().any(|a| matches!(a.as_str(), "--shot" | "--script" | "--menu" | "--map" | "--mission"))
+}
+
+/// Runs the game with one presentation (a view plugin such as the binary's `classic::plugin`); without imported assets it opens
+/// the first-run import screen instead (`setup.rs`, drawn by `setup_view`), which starts the game again once the import is done.
 pub fn run(view: fn(&mut App), setup_view: fn(&mut App)) {
     let args: Vec<String> = std::env::args().collect();
     // Mission authoring (docs/modding.md): the rule schema needs no assets.
     if let Some(code) = rules::cli::dump_schema(&args) {
-        std::process::exit(code);
+        exit::quit(code);
     }
     let script = args.iter().position(|a| a == "--script").map(|i| {
         args.get(i + 1).ok_or_else(|| "--script requires a name".to_owned()).and_then(|name| smoke::Script::parse(name)).unwrap_or_else(|err| {
             eprintln!("{err}");
-            std::process::exit(2);
+            exit::quit(2);
         })
     });
     let mods: Vec<PathBuf> = args.windows(2).filter(|w| w[0] == "--mod").map(|w| PathBuf::from(&w[1])).collect();
@@ -169,6 +211,11 @@ pub fn run(view: fn(&mut App), setup_view: fn(&mut App)) {
         false if base.join("ships").is_dir() => setup::Imported::Ready,
         false => setup::Imported::Missing,
     };
+    if status != setup::Imported::Ready && is_scripted(&args) {
+        // A scripted run (tools/smokes.sh, shot.sh) has nobody to answer the import screen: fail at once with the hint.
+        eprintln!("No imported assets in {} ({status:?}). Import your copy of the game first: make assets ARGS=\"--game <install dir>\" (or set PROCYON_ASSETS).", base.display());
+        exit::quit(1);
+    }
     if status != setup::Imported::Ready || args.iter().any(|a| a == "--crashed") {
         eprintln!("Game assets in {}: {status:?}; opening the import screen.", base.display());
         return setup::run(base, content_dir(), setup_view, status, player);
@@ -179,12 +226,15 @@ pub fn run(view: fn(&mut App), setup_view: fn(&mut App)) {
     let installed = modding::installed(bundled_mods_dir().as_deref()).into_iter().filter(|m| m.enabled).map(|m| m.dir);
     modding::set_active(installed.chain(mods).collect());
     let layers: Vec<PathBuf> = std::iter::once(content_dir()).chain(modding::active().iter().cloned()).collect();
-    let _ = ASSETS.set(modding::overlay(&base, &layers));
+    let (root, report) = modding::overlay_report(&base, &layers, own_overlay());
+    report.without(&content_dir()).log();
+    let _ = ASSETS.set(root);
     if let Some(code) = rules::cli::apply(&args) {
-        std::process::exit(code);
+        exit::quit(code);
     }
     let arg = |k: &str| args.iter().position(|a| a == k).and_then(|i| args.get(i + 1)).cloned();
     let shot = arg("--shot");
+    FIXED_STEP.store(args.iter().any(|a| a == "--fixed-step") || std::env::var_os("PROCYON_FIXED_STEP").is_some_and(|v| v == "1"), std::sync::atomic::Ordering::Relaxed);
     // Debug aids for mission authors: fire named rules at the start (repeatable) and place the primary ship (x,y in game units).
     let at: Option<Vec<f32>> = arg("--start-at").map(|v| v.split(',').filter_map(|x| x.parse().ok()).collect());
     campaign::set_start(args.windows(2).filter(|w| w[0] == "--fire-rule").map(|w| w[1].clone()).collect(), at.and_then(|c| (c.len() == 2).then(|| (c[0], c[1]))));
@@ -205,7 +255,7 @@ pub fn run(view: fn(&mut App), setup_view: fn(&mut App)) {
         shot_frames,
         late_frame: arg("--late-frame").and_then(|v| v.parse().ok()).unwrap_or(0), // 0: no _late shot
     };
-    App::new()
+    let result = App::new()
         .add_plugins(
             DefaultPlugins
                 .set(AssetPlugin { file_path: assets_dir().to_string_lossy().into_owned(), ..default() })
@@ -261,6 +311,13 @@ pub fn run(view: fn(&mut App), setup_view: fn(&mut App)) {
             _ => menu::Screen::Battle,
         })
         .insert_resource(cfg)
+        .insert_resource(match fixed_step() {
+            true => {
+                info!("fixed step: {} ms of game time per frame", BATTLE_TICK.as_millis());
+                bevy::time::TimeUpdateStrategy::ManualDuration(BATTLE_TICK)
+            }
+            false => default(),
+        })
         .insert_resource(Outcome::Playing)
         .init_resource::<scenario::EndMessage>()
         .init_resource::<scenario::EndLine>()
@@ -304,13 +361,16 @@ pub fn run(view: fn(&mut App), setup_view: fn(&mut App)) {
                 .run_if(in_state(menu::Screen::Battle))
                 .run_if(menu::overlay_closed),
         )
+        // The script frame count comes before Update, so the scripts and pictures there each see every frame number once (#590);
+        // `loading::wait` runs before it, so the frame a battle finishes loading counts (else a script step repeats: R restarts again).
+        .add_systems(PreUpdate, screenshot)
         .add_systems(OnEnter(menu::Screen::Battle), enter_battle)
         .add_systems(OnExit(menu::Screen::Battle), scenario::reset_fleets)
         .add_systems(
             Update,
             (
                 (
-                    (shot_target, restart, debug_kill).chain(),
+                    (scripted_steps, restart, debug_kill, scripted_kills).chain(),
                     briefing::update,
                     view::fleet_keys,
                     input,
@@ -326,19 +386,27 @@ pub fn run(view: fn(&mut App), setup_view: fn(&mut App)) {
                     .chain()
                     .run_if(in_state(menu::Screen::Battle))
                     .run_if(menu::overlay_closed),
-                screenshot,
                 view::hd_sky,
                 view::screenshot_key,
                 view::focus_projectile.run_if(in_state(menu::Screen::Battle)),
             ),
         )
         .run();
+    // A system that stopped the run with an error code (`exit::app_exit`) sets the process's status.
+    if let AppExit::Error(_) = result {
+        exit::quit(exit::status(&result));
+    }
 }
+
+/// The camera the player looks through. Other 3D cameras exist (the Fleet screen's ship preview renders to a texture), so systems
+/// that need the one view camera filter on this, not on `Camera3d` alone: a `Single` over two cameras silently skips the system.
+#[derive(Component)]
+pub struct MainCamera;
 
 fn setup(mut commands: Commands, cfg: Res<Config>, mut vtime: ResMut<Time<Virtual>>, mut window: Single<&mut Window, With<bevy::window::PrimaryWindow>>) {
     // --speed N runs the simulation faster for testing; without vsync, so a hidden window is not held to the compositor's pace.
     set_game_speed(&mut vtime, &mut window, cfg.speed);
-    commands.spawn((Camera3d::default(), Projection::Perspective(PerspectiveProjection { far: 20000.0, ..default() })));
+    commands.spawn((MainCamera, Camera3d::default(), Projection::Perspective(PerspectiveProjection { far: 20000.0, ..default() })));
     commands.spawn((DirectionalLight { illuminance: 9000.0, shadow_maps_enabled: false, ..default() }, Transform::from_xyz(30.0, 60.0, 20.0).looking_at(Vec3::ZERO, Vec3::Y)));
     commands.insert_resource(GlobalAmbientLight { color: Color::WHITE, brightness: 450.0, ..default() });
     commands.insert_resource(ClearColor(Color::srgb(0.03, 0.04, 0.09)));
@@ -478,7 +546,7 @@ const MAX_CATCH_UP_FRAMES: u32 = 10;
 /// Fastest speed of the HUD speed buttons when `data/hud/speed.json` gives no `max`.
 pub const MAX_GAME_SPEED: f32 = 16.0;
 
-/// Freezes or resumes the simulation by pausing virtual time (the HUD pause button and non-retail Pause key). The speed setting is kept.
+/// Freezes or resumes the simulation by pausing virtual time (the HUD pause button and the Pause key, `view.rs`). The speed setting is kept.
 /// Systems on `Res<Time>` stop advancing; real-time UI (menus, star map, options) keeps working.
 pub fn toggle_pause(vtime: &mut Time<Virtual>) {
     if vtime.is_paused() { vtime.unpause() } else { vtime.pause() }
@@ -597,7 +665,7 @@ fn run_is_over(frame: u32, last_shot: u32, saved: usize, wanted: usize, scripted
 
 static SHOTS_SAVED: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
-fn screenshot(mut commands: Commands, mut cfg: ResMut<Config>, loading: Option<Res<loading::Loading>>) {
+fn screenshot(mut commands: Commands, mut cfg: ResMut<Config>, loading: Option<Res<loading::Loading>>, mut exit: MessageWriter<AppExit>) {
     let Some(path) = cfg.shot.clone() else { return };
     // scripts and pictures count frames of the battle: the count waits while it loads
     if loading.is_some() {
@@ -628,7 +696,7 @@ fn screenshot(mut commands: Commands, mut cfg: ResMut<Config>, loading: Option<R
     }
     let saved = SHOTS_SAVED.load(std::sync::atomic::Ordering::SeqCst);
     if run_is_over(cfg.frame, last, saved, shots.len(), cfg.script.is_some(), cfg.ended, cfg.script.as_deref() == Some("restart")) {
-        std::process::exit(0);
+        exit.write(exit::app_exit(0));
     }
 }
 
@@ -653,6 +721,15 @@ mod tests {
         let pts = [Vec3::new(5.0, 0.0, 0.0), Vec3::new(1.0, 1.0, 0.0), Vec3::new(-9.0, 0.0, 0.0)];
         assert_eq!(nearest(pts, Vec3::ZERO, |p| *p), Some(pts[1]));
         assert_eq!(nearest(Vec::<Vec3>::new(), Vec3::ZERO, |p| *p), None);
+    }
+    #[test]
+    fn scripted_runs_never_get_the_import_screen() {
+        let args = |a: &[&str]| a.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        for flag in ["--shot", "--script", "--menu", "--map", "--mission"] {
+            assert!(is_scripted(&args(&["game", flag, "x"])), "{flag}");
+        }
+        assert!(!is_scripted(&args(&["game"])));
+        assert!(!is_scripted(&args(&["game", "--crashed", "log.txt"])));
     }
     #[test]
     fn shot_frames_parse_sort_and_name_their_files() {

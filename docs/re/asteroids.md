@@ -30,7 +30,7 @@ The remake moves each meteor emitter (not a meteor object) with the shared `comb
 Mission 3's `MontgomeryIslands` setup names a group with no members in the map, so it does nothing (also true in the data).
 Skirmish maps move their belts too (see "Skirmish maps" below).
 
-## Belt motion in detail (read from the original's code, 2026-11)
+## Belt motion in detail (unchecked against play, 2026-11)
 - Setup, per rock: a speed drawn once in the rule's Lower..Upper range (units per second, no scaling), a tumble rate in its range
   (radians per second), a random start direction and a random tumble axis. The speed is the rock's speed cap.
 - Each 1/30 s tick the path controller pushes the rock toward its current point with the rock's WOT `Acceleration` (150 Huge/Large,
@@ -84,7 +84,7 @@ Known so far:
 - Each child gets a new random tumble axis and a speed sampled from **0 to π/2 rad/s** .
 - The physics flag set on a fragment turns its own acceleration off (a belt rock's acceleration is the hull's acceleration along a direction its path controller
   steers; with the flag set it is zero) and also disables the speed cap, which a belt rock keeps. The three maximum-float values are the unused steering
-  direction. So a fragment coasts in a straight line at its starting velocity for ever, with no cap (read from the original's code, 2026-11).
+  direction. So a fragment coasts in a straight line at its starting velocity for ever, with no cap (unchecked against play, 2026-11).
   Remake: `combat/asteroid.rs` moves fragments by constant velocity (same).
 
 ## Destruction effects

@@ -1,4 +1,5 @@
 //! Skirmish lobby model: map list, player slots, races, fleets within the victory points and ship stats for the views.
+use crate::scenario::Race;
 use bevy::prelude::*;
 use serde_json::Value;
 
@@ -36,7 +37,7 @@ pub enum Choice {
     Computer,
     Open,
     Close,
-    Fleet(u8),
+    Fleet(Race),
     Team(i32),
 }
 
@@ -51,8 +52,8 @@ pub struct Slot {
     pub player: usize, // index in the map's player list
     pub name: String,
     pub kind: Kind,
-    pub race: u8,  // fleet type as in the TWT: 0 Navy, 2 Pirate, 3 Procyon, 4 none chosen yet
-    pub team: i32, // -1: on its own
+    pub race: Race, // fleet type; `Unchosen` until picked
+    pub team: i32,  // -1: on its own
     /// Which of the fleet type's ten flags the player flies (0-9); only the human slot's can be changed.
     pub flag: u8,
     pub fleet: Vec<String>,
@@ -290,22 +291,15 @@ impl SliderRange {
 pub const VICTORY_LIMIT: SliderRange = SliderRange { min: 50, max: 1000, step: 10, default: 300 };
 pub const FLEET_SIZE: SliderRange = SliderRange { min: 1, max: 10, step: 1, default: 5 };
 
-pub const RACES: [(u8, &str, &str); 3] =
-    [(0, "Navy", "IDGS_TPFRONTENDTEXT03_FLEET_NAVY"), (2, "Pirate", "IDGS_TPFRONTENDTEXT03_FLEET_PIRATE"), (3, "Procyon", "IDGS_TPFRONTENDTEXT03_FLEET_PROCYON")];
 /// Ship classes the fleet screen offers for a race: those flagged `"skirmish"` (retail's own "Available in Multiplayer?"; mods can flag more).
-pub fn offered(lib: &Library, race: u8) -> Vec<usize> {
-    let Some((_, name, _)) = RACES.iter().find(|r| r.0 == race) else { return vec![] };
-    let mut list: Vec<usize> = (0..lib.classes.len()).filter(|&i| lib.classes[i].race == *name && lib.classes[i].skirmish).collect();
+pub fn offered(lib: &Library, race: Race) -> Vec<usize> {
+    let Some(name) = race.class_name() else { return vec![] };
+    let mut list: Vec<usize> = (0..lib.classes.len()).filter(|&i| lib.classes[i].race == name && lib.classes[i].skirmish).collect();
     // As the original's 'Available Ships': most expensive first (StarHammer, Man-O-War, Frigate, ...).
     list.sort_by(|&a, &b| lib.classes[b].points.cmp(&lib.classes[a].points).then_with(|| lib.classes[a].name.cmp(&lib.classes[b].name)));
     list
 }
 
-/// Auto Assign. Measured on the original (docs/re/skirmish-setup.md): it fills the fleet with hulls that fit the points still left,
-/// mixing classes (300 points / 5 ships gave a Heavy Scout, a Heavy Escort and three Warsloops; 50 points two Torpedo Boats). Hulls it
-/// adds itself also get weapon swaps (a hand-added ship only gets crew), and the points that remain buy named crew. The player's own
-/// Auto Assign is PROVISIONAL (random hulls that fit). Computers follow the original's fleet build: a style roll, then that style's hull
-/// batches or fills, weapon swaps (styles 0-2 only) and crew (`Build`, docs/re/skirmish-setup.md).
 /// The guns computer captains may fit (`data/ai/weapons.json`, `{gun: true|false}`, merged key by key across mods). No file: the guns
 /// retail computers were seen to fit (`RETAIL_COMPUTER_GUNS`).
 fn computer_guns() -> Option<std::collections::HashSet<String>> {
@@ -369,7 +363,7 @@ fn swap_pool(mount: &str) -> &'static [&'static str] {
 
 /// The style roll's list (computer fleets): index drawn uniformly. Style 0 has six entries, 2, 1 and 5 one each; style 4 (cheap boats up to the
 /// limit) joins when the points per free slot are under 30 and there are more than 6 slots; style 3 (a few big hulls) joins at 600+ points
-/// with 4+ slots. The six-entry weight of style 0 is read from the original's list builder, not seen run (PROVISIONAL).
+/// with 4+ slots. The six-entry weight of style 0 comes from the original's data, not seen run (PROVISIONAL).
 pub(super) fn style_list(points: i64, slots: i64) -> Vec<u8> {
     let mut list = vec![0, 0, 0, 0, 0, 0, 2, 1];
     if slots > 0 && points / slots < 30 && slots > 6 {
@@ -412,12 +406,12 @@ pub(super) fn price_window(avg: i64, room: i64, cur: i64) -> (i64, i64) {
 pub(super) const HULL_PRICE_FLOOR: i64 = 22;
 
 /// Selection multiplier of styles 3 and 5 (the hull's price is only scaled in the choice; the points paid are the plain price).
-fn race_multiplier(race: u8) -> f64 {
+fn race_multiplier(race: Race) -> f64 {
     match race {
-        0 => 1.57,
-        2 => 1.72,
-        3 => 1.42,
-        _ => 1.0,
+        Race::Navy => 1.57,
+        Race::Pirate => 1.72,
+        Race::Procyon => 1.42,
+        Race::Unchosen => 1.0,
     }
 }
 
@@ -431,7 +425,7 @@ struct Build<'a> {
     fleet_size: usize,
     armed_only: bool,
     /// Fleet type whose crew roster the named crew come from.
-    crew_race: u8,
+    crew_race: Race,
     allowed: Option<std::collections::HashSet<String>>,
 }
 
@@ -504,7 +498,7 @@ impl Build<'_> {
     fn crew_ship(&mut self, ship: usize) {
         // Every crew comes from the roster of the human player's fleet type, computers' included (the original filters on the local
         // player's fleet type when it builds a computer fleet).
-        let name = RACES.iter().find(|r| r.0 == self.crew_race).map_or("Navy", |r| r.1);
+        let name = self.crew_race.class_name().unwrap_or("Navy");
         let class = &self.lib.classes[self.lib.index(&self.slot.fleet[ship])];
         let caps = crate::boarding::counts(&class.name);
         for (role, &cap) in caps.iter().enumerate() {
@@ -606,7 +600,12 @@ impl Build<'_> {
     }
 }
 
-pub fn auto_build(slot: &mut Slot, limit: u32, fleet_size: usize, lib: &Library, salt: u64, armed_only: bool, crew_race: u8) {
+/// Auto Assign. Measured on the original (docs/re/skirmish-setup.md): it fills the fleet with hulls that fit the points still left,
+/// mixing classes (300 points / 5 ships gave a Heavy Scout, a Heavy Escort and three Warsloops; 50 points two Torpedo Boats). Hulls it
+/// adds itself also get weapon swaps (a hand-added ship only gets crew), and the points that remain buy named crew. The player's own
+/// Auto Assign is PROVISIONAL (random hulls that fit). Computers follow the original's fleet build: a style roll, then that style's hull
+/// batches or fills, weapon swaps (styles 0-2 only) and crew (`Build`, docs/re/skirmish-setup.md).
+pub fn auto_build(slot: &mut Slot, limit: u32, fleet_size: usize, lib: &Library, salt: u64, armed_only: bool, crew_race: Race) {
     let allowed = if armed_only { computer_guns() } else { None };
     let seed = u64::from(limit) * 31 + fleet_size as u64 * 7 + 1 + salt * 977;
     let first_new = slot.fleet.len();
@@ -662,9 +661,9 @@ pub(super) fn new_slots(map: &Value) -> Vec<Slot> {
         .filter(|(_, p)| p["playable"].as_bool().unwrap_or(false))
         .map(|(i, p)| {
             let team = p["team"].as_i64().unwrap_or(-1) as i32;
-            let team_race = usize::try_from(team).ok().and_then(|t| teams.get(t)).map_or(4, |t| t["race"].as_u64().unwrap_or(4) as u8);
+            let team_race = usize::try_from(team).ok().and_then(|t| teams.get(t)).map_or(Race::Unchosen, |t| Race::from_twt(t["race"].as_u64().unwrap_or(4)));
             // Historical maps name each player's race, or leave it open (4) and the team's race stands.
-            let race = if open { team_race } else { Some(p["race"].as_u64().unwrap_or(4) as u8).filter(|r| *r != 4).unwrap_or(team_race) };
+            let race = if open { team_race } else { Some(Race::from_twt(p["race"].as_u64().unwrap_or(4))).filter(|r| *r != Race::Unchosen).unwrap_or(team_race) };
             let fleet = if open { vec![] } else { ships_of(map, i) };
             Slot { player: i, name: p["name"].as_str().unwrap_or("").trim().into(), kind: Kind::Computer, race, team, flag: 0, fleet, weapons: vec![], names: vec![], crew: vec![] }
         })
@@ -678,10 +677,10 @@ pub(super) fn new_slots(map: &Value) -> Vec<Slot> {
             s.kind = Kind::Open;
         }
         if let Some(h) = slots.first_mut().filter(|_| teams.is_empty()) {
-            (h.race, h.team) = (0, 0);
+            (h.race, h.team) = (Race::Navy, 0);
         }
         for s in slots.iter_mut().skip(1).filter(|_| teams.is_empty()) {
-            (s.race, s.team) = (4, -1);
+            (s.race, s.team) = (Race::Unchosen, -1);
         }
     }
     slots
@@ -739,7 +738,7 @@ impl Skirmish {
             },
             Cell::Fleet(i) if self.free_teams() && self.slots.get(i).is_some_and(|s| s.kind.live()) => {
                 let now = self.slots[i].race;
-                let mut v: Vec<Choice> = [0u8, 2, 3].into_iter().filter(|&r| r == now).chain([0u8, 2, 3].into_iter().filter(|&r| r != now)).map(Choice::Fleet).collect();
+                let mut v: Vec<Choice> = Race::PLAYABLE.into_iter().filter(|&r| r == now).chain(Race::PLAYABLE.into_iter().filter(|&r| r != now)).map(Choice::Fleet).collect();
                 v.dedup();
                 v
             }
@@ -756,7 +755,7 @@ impl Skirmish {
         (0..10).find(|&f| !self.flag_taken(i, me.race, f)).unwrap_or(0)
     }
     /// Another live slot of `race` flies flag `f`.
-    pub fn flag_taken(&self, i: usize, race: u8, f: u8) -> bool {
+    pub fn flag_taken(&self, i: usize, race: Race, f: u8) -> bool {
         self.slots.iter().enumerate().any(|(j, s)| j != i && s.kind.live() && s.race == race && s.flag == f)
     }
     pub fn choose(&mut self, cell: Cell, choice: Choice) {
@@ -784,14 +783,14 @@ impl Skirmish {
                             // PROVISIONAL: the original gave the first computer on a free-for-all map Pirate, Team 2 beside a Navy, Team 1 player.
                             s.team = (0..TEAMS).find(|t| !used.contains(t)).unwrap_or(0);
                             // Navy, Pirate, Procyon by slot, round again (the player is slot 0, Navy).
-                            s.race = [0u8, 2, 3][i % 3];
+                            s.race = Race::PLAYABLE[i % 3];
                         }
                     }
                     _ => {
                         s.kind = if choice == Choice::Open { Kind::Open } else { Kind::Closed };
                         s.clear_fleet();
                         if free {
-                            (s.race, s.team) = (4, -1);
+                            (s.race, s.team) = (Race::Unchosen, -1);
                         }
                     }
                 }
@@ -813,11 +812,11 @@ impl Skirmish {
         }
     }
     /// Scroll the slot bar by `d` slots, within the fleet size limit (retail shows five at a time).
+    /// Scrolls the slot bar by `d` slots, keeping it inside the fleet.
     pub fn scroll_slots(&mut self, d: i32) {
         let max = self.fleet_size.saturating_sub(SLOT_BAR);
         self.slot_scroll = (self.slot_scroll as i64 + i64::from(d)).clamp(0, max as i64) as usize;
     }
-    /// Keep the picked fleet slot inside the slot bar.
     /// The profiles the dialog offers: a fleet's by fleet type, a ship's crew or arms by hull class.
     pub fn open_profile(&mut self, kind: crate::profiles::Kind, save: bool, lib: &Library) {
         use crate::profiles::Kind as K;
@@ -884,18 +883,18 @@ impl Skirmish {
     pub fn human(&self) -> Option<&Slot> {
         self.slots.iter().find(|s| s.kind == Kind::Human)
     }
-    /// Why the game cannot launch yet (a string id, or plain text), if so.
     /// Victory points the human player has left to spend on ships ('Current Victory Points').
     pub fn points_left(&self, lib: &Library) -> i64 {
         i64::from(self.victory_limit) - self.human().map_or(0, |h| h.spent(lib))
     }
+    /// Why the game cannot launch yet (a string id, or plain text), if so.
     pub fn launch_error(&self) -> Option<&'static str> {
         let h = self.human()?;
         if !self.slots.iter().any(|s| s.kind.live() && self.hostile(h, s)) {
             return Some("No opponent: open another slot on a different team.");
         }
         if self.open() {
-            if h.race == 4 {
+            if h.race == Race::Unchosen {
                 return Some("IDGS_TPFRONTENDTEXT01_PLEASE_SELECT_A_RACE");
             }
             if h.fleet.is_empty() {
@@ -919,65 +918,66 @@ impl Skirmish {
             .iter()
             .filter(|s| s.kind.live())
             .map(|s| {
-                let mut computer_build = None;
-                let (ships, ids): (Vec<_>, Vec<Option<i64>>) = if !open {
-                    // The first ship becomes the command ship: the one the map flags as primary (its Setup Ship rule), else map order.
-                    let mut placed: Vec<&Value> = self.map_json["ships"].as_array().into_iter().flatten().filter(|o| o["player"].as_u64() == Some(s.player as u64)).collect();
-                    placed.sort_by_key(|o| o["primary"].as_bool() != Some(true));
-                    placed
-                        .into_iter()
-                        .filter_map(|o| {
-                            Some((
-                                (o["type"].as_str()?.to_string(), Some([0, 1, 2].map(|i| o["pos"][i].as_f64().unwrap_or(0.0) as f32)), o["name"].as_str().map(String::from)),
-                                o["id"].as_i64(),
-                            ))
-                        })
-                        .filter(|(t, _)| lib.classes.iter().any(|c| c.name == t.0))
-                        .unzip()
+                let (ships, ids, computer_build) = if !open {
+                    let (ships, ids) = self.placed_fleet(s, lib);
+                    (ships, ids, None)
                 } else if s.fleet.is_empty() {
                     // A computer builds its fleet with the same routine as Auto Assign, inside the same budget.
                     let mut c = s.clone();
                     auto_build(&mut c, self.victory_limit, self.fleet_size, lib, s.player as u64 + 1 + self.draw * 101, true, h.race);
-                    computer_build = Some((c.weapons.clone(), c.crew.clone()));
-                    (c.fleet.iter().map(|n| (n.clone(), None, None)).collect(), vec![])
+                    (c.fleet.iter().map(|n| (n.clone(), None, None)).collect(), vec![], Some((c.weapons.clone(), c.crew.clone())))
                 } else {
                     let names = s.ship_names(lib);
-                    (s.fleet.iter().zip(names).map(|(n, label)| (n.clone(), None, label)).collect(), vec![])
+                    (s.fleet.iter().zip(names).map(|(n, label)| (n.clone(), None, label)).collect(), vec![], None)
                 };
-                let side = if s.kind == Kind::Human || !self.hostile(h, s) {
-                    crate::Side::Player
-                } else {
-                    let key = if s.team >= 0 { (s.team, 0) } else { (-1, s.player) };
-                    let i = foes.iter().position(|k| *k == key).unwrap_or_else(|| {
-                        foes.push(key);
-                        foes.len() - 1
-                    });
-                    crate::Side(1 + i as u8)
+                let side = if s.kind == Kind::Human || !self.hostile(h, s) { crate::Side::Player } else { foe_side(&mut foes, s) };
+                // A built computer fleet keeps its weapons and its named crew (retail computer ships carry named crew; their speed and sight follow the posts).
+                let (weapons, crew) = match computer_build {
+                    Some(built) => built,
+                    None if open => (s.weapons.clone(), s.crew.clone()),
+                    None => (vec![], vec![]),
                 };
                 crate::Group {
                     player: s.player,
                     side,
                     human: s.kind == Kind::Human,
-                    race: if s.race == 4 { crate::scenario::faction(&s.name).unwrap_or(4) } else { s.race },
+                    race: if s.race == Race::Unchosen { crate::scenario::faction(&s.name).unwrap_or(Race::Unchosen) } else { s.race },
                     team: s.team,
                     row: Some((matches!(s.kind, Kind::Human).then(|| s.name.clone()), flag_icon(s.race, s.flag))),
                     ids,
                     ships,
-                    // A built computer fleet keeps its weapons and its named crew (retail computer ships carry named crew; their speed and sight follow the posts).
-                    weapons: match &computer_build {
-                        Some((weapons, _)) => weapons.clone(),
-                        None if open => s.weapons.clone(),
-                        None => vec![],
-                    },
-                    crew: match &computer_build {
-                        Some((_, crew)) => crew.clone(),
-                        None if open => s.crew.clone(),
-                        None => vec![],
-                    },
+                    weapons,
+                    crew,
                 }
             })
             .collect()
     }
+    /// A historical map's pre-placed ships of slot `s` (class, position, name) and their ids. The first ship becomes the command ship:
+    /// the one the map flags as primary (its Setup Ship rule), else map order.
+    fn placed_fleet(&self, s: &Slot, lib: &Library) -> (Vec<(String, Option<[f32; 3]>, Option<String>)>, Vec<Option<i64>>) {
+        let mut placed: Vec<&Value> = self.map_json["ships"].as_array().into_iter().flatten().filter(|o| o["player"].as_u64() == Some(s.player as u64)).collect();
+        placed.sort_by_key(|o| o["primary"].as_bool() != Some(true));
+        placed
+            .into_iter()
+            .filter_map(|o| {
+                Some((
+                    (o["type"].as_str()?.to_string(), Some([0, 1, 2].map(|i| o["pos"][i].as_f64().unwrap_or(0.0) as f32)), o["name"].as_str().map(String::from)),
+                    o["id"].as_i64(),
+                ))
+            })
+            .filter(|(t, _)| lib.classes.iter().any(|c| c.name == t.0))
+            .unzip()
+    }
+}
+
+/// The hostile side of slot `s`: one side per hostile team (teamless slots each their own), numbered in the order first met.
+fn foe_side(foes: &mut Vec<(i32, usize)>, s: &Slot) -> crate::Side {
+    let key = if s.team >= 0 { (s.team, 0) } else { (-1, s.player) };
+    let i = foes.iter().position(|k| *k == key).unwrap_or_else(|| {
+        foes.push(key);
+        foes.len() - 1
+    });
+    crate::Side(1 + i as u8)
 }
 
 /// The skirmish list: every `maps/<id>/map.json` flagged `"skirmish": true` (campaign maps are not offered), sorted by id, with
@@ -1039,17 +1039,13 @@ pub fn ship_stats(lib: &Library, ci: usize) -> ShipStats {
 }
 
 /// First flag icon of a fleet type's block of ten (`FrontEnd_Flag_*Icon_NN`): Navy 0, Pirate 10, Procyon 20, plus the slot's flag.
-pub fn flag_icon(race: u8, flag: u8) -> usize {
-    (match race {
-        2 => 10,
-        3 => 20,
-        _ => 0,
-    }) + usize::from(flag)
+pub fn flag_icon(race: Race, flag: u8) -> usize {
+    race.flag_base() + usize::from(flag)
 }
 
 #[cfg(test)]
 mod ai_weapon_tests {
-    use super::{allowed_guns, swap_pool};
+    use super::{Kind, Race, Slot, allowed_guns, foe_side, swap_pool};
     #[test]
     fn swap_pools_by_mount_size() {
         assert_eq!(swap_pool("Light Mount").len(), 4);
@@ -1066,5 +1062,14 @@ mod ai_weapon_tests {
         let list = serde_json::json!({"Gun_A": true, "Gun_B": false});
         assert_eq!(allowed_guns(&list), Some(["Gun_A".to_string()].into()));
         assert_eq!(allowed_guns(&serde_json::Value::Null), None);
+    }
+    fn slot(player: usize, team: i32) -> Slot {
+        Slot { player, name: String::new(), kind: Kind::Computer, race: Race::Unchosen, team, flag: 0, fleet: vec![], weapons: vec![], names: vec![], crew: vec![] }
+    }
+    #[test]
+    fn hostile_sides_number_by_team_in_the_order_met() {
+        let mut foes = vec![];
+        let sides: Vec<_> = [slot(1, 3), slot(2, -1), slot(3, 3), slot(4, -1), slot(2, -1)].iter().map(|s| foe_side(&mut foes, s).0).collect();
+        assert_eq!(sides, [1, 2, 1, 3, 2], "one side per team, each teamless slot on its own");
     }
 }

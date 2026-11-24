@@ -39,11 +39,19 @@ mod end_line_tests {
 }
 
 mod rotation_tests {
+    use crate::scenario::Race::*;
     #[test]
     fn base_owners_are_read_from_their_names() {
-        for (name, race) in
-            [("navybase", 0), ("Piratebase", 2), ("proc base", 3), ("pirate base", 2), ("navy port", 0), ("Base_Grant", 0), ("Base_Procyon2", 3), ("Base_PirateMP_3", 2)]
-        {
+        for (name, race) in [
+            ("navybase", Navy),
+            ("Piratebase", Pirate),
+            ("proc base", Procyon),
+            ("pirate base", Pirate),
+            ("navy port", Navy),
+            ("Base_Grant", Navy),
+            ("Base_Procyon2", Procyon),
+            ("Base_PirateMP_3", Pirate),
+        ] {
             assert_eq!(super::faction(name), Some(race), "{name}");
         }
         assert_eq!(super::faction("asteroids"), None);
@@ -239,4 +247,87 @@ mod console_reset_tests {
         reset_console_state(&mut cheats, &mut dev, true);
         assert!(!cheats.used && !dev.hud_hidden, "next mission: plain view");
     }
+}
+
+mod race_tests {
+    use crate::scenario::Race::{self, *};
+    #[test]
+    fn twt_numbers_parse_and_round_trip() {
+        for (n, r) in [(0, Navy), (2, Pirate), (3, Procyon), (4, Unchosen)] {
+            assert_eq!(Race::from_twt(n), r);
+            assert_eq!(u64::from(r.twt()), n);
+        }
+        assert_eq!(Race::from_twt(1), Unchosen, "numbers the lobby never offers are no fleet type");
+        assert_eq!(Race::default(), Unchosen);
+    }
+    #[test]
+    fn class_names_flags_and_texts_follow_the_fleet_type() {
+        assert_eq!(Race::PLAYABLE.map(|r| (r.class_name(), r.flag_base())), [(Some("Navy"), 0), (Some("Pirate"), 10), (Some("Procyon"), 20)]);
+        assert_eq!((Unchosen.class_name(), Unchosen.fleet_text(), Unchosen.flag_base()), (None, None, 0));
+        for r in Race::PLAYABLE {
+            assert_eq!(Race::from_class(r.class_name().unwrap()), Some(r));
+        }
+        assert_eq!((Race::from_class("Civilian"), Race::from_class("")), (None, None));
+    }
+}
+
+/// #536: one seed gives one sequence, the named streams are independent of the battle stream, and a battle start (`reset_sim`) reseeds,
+/// renumbers spawns from 0 and snapshots the difficulty.
+#[test]
+fn a_battle_start_reseeds_and_renumbers() {
+    let draws = |r: &mut combat::SimRng| (0..4).map(|_| r.f()).collect::<Vec<_>>();
+    let (mut a, mut b) = (combat::SimRng::new(42), combat::SimRng::new(42));
+    assert_eq!(draws(&mut a), draws(&mut b));
+    assert_ne!(draws(&mut combat::SimRng::new(43)), draws(&mut combat::SimRng::new(42)));
+    let mut c = combat::SimRng::new(42);
+    let nebula: Vec<f32> = (0..4).map(|_| c.nebula.f()).collect();
+    assert_eq!(draws(&mut c), draws(&mut combat::SimRng::new(42)), "drawing from a named stream leaves the battle stream alone");
+    assert_ne!(nebula, draws(&mut combat::SimRng::new(42)));
+    // The default seed keeps the battle stream every battle used before seeds were settable.
+    assert_eq!(combat::Rng::default().f(), combat::SimRng::default().f());
+
+    #[derive(Component)]
+    struct Thing;
+    let mut app = App::new();
+    number_spawns::<Thing>(&mut app);
+    app.init_resource::<combat::SimRng>();
+    let spawn = |app: &mut App| app.world_mut().spawn(Thing).id();
+    let (x, y) = (spawn(&mut app), spawn(&mut app));
+    app.world_mut().flush();
+    let index = |app: &App, e| *app.world().get::<SpawnIndex>(e).unwrap();
+    assert_eq!((index(&app, x), index(&app, y)), (SpawnIndex(0), SpawnIndex(1)));
+    app.world_mut().resource_mut::<combat::SimRng>().f();
+    reset_sim(app.world_mut());
+    assert_eq!(app.world().resource::<combat::SimRng>().clone_state(), combat::SimRng::new(combat::SimRng::configured_seed()).clone_state());
+    let z = spawn(&mut app);
+    app.world_mut().flush();
+    assert_eq!(index(&app, z), SpawnIndex(0), "numbering starts again at the next battle");
+    assert_eq!(*app.world().resource::<Difficulty>(), Difficulty(menu::difficulty()));
+}
+
+#[test]
+fn in_spawn_order_sorts_by_creation_number_unnumbered_first() {
+    let mut world = World::new();
+    let (late, early, none) = (world.spawn(SpawnIndex(5)).id(), world.spawn(SpawnIndex(1)).id(), world.spawn_empty().id());
+    let mut state = bevy::ecs::system::SystemState::<Query<&SpawnIndex>>::new(&mut world);
+    let order = state.get(&world).unwrap();
+    assert_eq!(in_spawn_order(&order, [late, early, none], |e| *e), vec![none, early, late]);
+}
+
+/// #536: a system that keeps per-entity state in a `Local` learns of a battle start exactly once, and the effect detail is a
+/// battle-start snapshot.
+#[test]
+fn a_battle_start_is_seen_once_per_system_and_snapshots_detail() {
+    #[derive(Resource, Default)]
+    struct News(Vec<bool>);
+    let mut app = App::new();
+    app.init_resource::<News>().init_resource::<combat::SimRng>().add_systems(Update, |mut start: BattleStart, mut news: ResMut<News>| news.0.push(start.is_new()));
+    reset_sim(app.world_mut());
+    app.update();
+    app.update();
+    reset_sim(app.world_mut());
+    app.update();
+    app.update();
+    assert_eq!(app.world().resource::<News>().0, [true, false, true, false]);
+    assert_eq!(*app.world().resource::<fx::DetailScale>(), fx::DetailScale(menu::detail_scale()));
 }

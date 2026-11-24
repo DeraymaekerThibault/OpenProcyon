@@ -1,8 +1,50 @@
 //! Shared ship state, movement integration and skirmish AI.
 use crate::*;
 
-/// All Stop, Ahead Slow, Ahead Full, Emergency Speed as fractions of Ahead Full speed (measured on the retail cutter, docs/re/movement.md).
-pub const ORDERS: [(&str, f32); 4] = [("All Stop", 0.0), ("Ahead Slow", 0.5), ("Ahead Full", 1.0), ("Emergency Speed", 2.0)];
+/// A ship's engine order: All Stop, Ahead Slow, Ahead Full, Emergency Speed. The discriminants are the retail dial and sound
+/// indices (0..=3), and the order of the variants is the order of the speeds.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub enum EngineOrder {
+    #[default]
+    Stop = 0,
+    Slow = 1,
+    Full = 2,
+    Emergency = 3,
+}
+
+impl EngineOrder {
+    pub const ALL: [EngineOrder; 4] = [EngineOrder::Stop, EngineOrder::Slow, EngineOrder::Full, EngineOrder::Emergency];
+
+    /// The order at dial/sound index `i` (0 All Stop .. 3 Emergency); `None` past the last.
+    pub fn from_index(i: usize) -> Option<Self> {
+        Self::ALL.get(i).copied()
+    }
+
+    /// The dial/sound index, 0..=3.
+    pub fn index(self) -> usize {
+        self as usize
+    }
+
+    /// The HUD name of the order.
+    pub fn label(self) -> &'static str {
+        ["All Stop", "Ahead Slow", "Ahead Full", "Emergency Speed"][self.index()]
+    }
+
+    /// The fraction of Ahead Full speed the order commands (measured on the retail cutter, docs/re/movement.md).
+    pub fn fraction(self) -> f32 {
+        [0.0, 0.5, 1.0, 2.0][self.index()]
+    }
+
+    /// One step up the dial, stopping at Emergency.
+    pub fn faster(self) -> Self {
+        Self::from_index(self.index() + 1).unwrap_or(self)
+    }
+
+    /// One step down the dial, stopping at All Stop.
+    pub fn slower(self) -> Self {
+        Self::from_index(self.index().saturating_sub(1)).unwrap_or(self)
+    }
+}
 
 /// Ahead Full without crew settles at this fraction of WOT MaxSpeed (so Emergency is 1.125 x MaxSpeed). Measured on the cutter,
 /// Man-O-War, Carrack, Barque and Minelayer (docs/re/movement.md); the engineers raise it (`Ship::crew_speed`).
@@ -44,7 +86,7 @@ pub struct Ship {
     pub heading: f32, // radians about +Y; forward is -Z at heading 0 (the GLB export maps game +y bow to -Z)
     pub speed: f32,
     pub ang_vel: f32,
-    pub order: usize,
+    pub order: EngineOrder,
     pub waypoints: Vec<Vec3>,
     pub goal: Option<f32>,     // AI: heading to hold when there are no waypoints
     pub cap: f32,              // script 'Max Throttle Percent': fraction of the ordered speed the ship may use
@@ -81,7 +123,7 @@ impl Ship {
             heading: 0.0,
             speed: 0.0,
             ang_vel: 0.0,
-            order: 0,
+            order: EngineOrder::Stop,
             waypoints: vec![],
             goal: None,
             cap: 1.0,
@@ -100,7 +142,7 @@ impl Ship {
     pub fn halt(&mut self) {
         self.waypoints.clear();
         self.goal = None;
-        self.order = 0;
+        self.order = EngineOrder::Stop;
     }
 
     /// The Hold and Stop orders' effect on the controls: rudder and throttle to zero, the current order and course end. A held ship
@@ -111,7 +153,7 @@ impl Ship {
 
     /// The commanded share of Ahead Full: 0 at All Stop (or a throttle of 0), otherwise the throttle or the order's fraction.
     pub fn ordered(&self) -> f32 {
-        if self.order == 0 { 0.0 } else { self.throttle.unwrap_or(ORDERS[self.order].1) }
+        if self.order == EngineOrder::Stop { 0.0 } else { self.throttle.unwrap_or(self.order.fraction()) }
     }
 }
 
@@ -141,12 +183,12 @@ pub type CaptainBusy = Or<(With<docking::Docker>, With<docking::Tower>, With<boa
 /// Emergency Speed. A retail save of such a Carrack holds engineer and navigator factor 1.425, our uncrewed Cutter 1.125, and
 /// 1.425 / 1.125 = 1.267 (docs/re/crew.md).
 pub const COMPUTER_CREW: f32 = 1.267;
-/// The original's computer helm (read from its code): while the course point is at least this far off the bow, the ship's rudder
+/// The original's computer helm: while the course point is at least this far off the bow, the ship's rudder
 /// torque rises linearly from x1 to x4 at 180°. Human-captained ships never get it.
 const AI_BOOST_FROM: f32 = 11.25 * PI / 180.0;
 /// Computer captains keep this far outside a black hole's radius (retail: a Carrack rode 157-165 units from a 145-radius hole).
 pub const HOLE_MARGIN: f32 = 15.0;
-/// Map exploration of skirmish captains with no target (read from the original's code): each ship sails for the centre of a
+/// Map exploration of skirmish captains with no target: each ship sails for the centre of a
 /// quadrant (a quarter of the map's extent out on each axis) and, within half its sight range of it, picks a quadrant at random
 /// (possibly the same one). PROVISIONAL: the map's border margin is ignored; the random draw is a fixed hash, not the original's.
 #[derive(Default)]
@@ -161,7 +203,7 @@ impl Explore {
         let (x, y) = (if q & 1 == 1 { half / 2.0 } else { -half / 2.0 }, if q & 2 == 2 { half / 2.0 } else { -half / 2.0 });
         Vec3::new(x, 0.0, -y)
     }
-    fn goal(&mut self, cfg: &Config, e: Entity, here: Vec3, sight: f32) -> Vec3 {
+    fn goal(&mut self, cfg: &Config, e: Entity, key: crate::scenario::SpawnIndex, here: Vec3, sight: f32) -> Vec3 {
         if self.map.as_ref() != Some(&cfg.map) {
             let map = cfg.map.as_ref().and_then(|id| crate::data::map_json(id)).unwrap_or_default();
             self.half = map["world_half"].as_f64().unwrap_or(1000.0) as f32;
@@ -169,9 +211,9 @@ impl Explore {
             self.quadrant.clear();
         }
         let half = self.half;
-        let q = self.quadrant.entry(e).or_insert(e.index_u32() as usize % 4);
+        let q = self.quadrant.entry(e).or_insert(key.0 as usize % 4);
         if Vec2::new(here.x, here.z).distance(Explore::centre(*q, half).xz()) < 0.5 * sight {
-            let draw = (e.to_bits() ^ (here.x.to_bits() as u64) << 7 ^ here.z.to_bits() as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+            let draw = (u64::from(key.0) ^ (here.x.to_bits() as u64) << 7 ^ here.z.to_bits() as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15);
             *q = (draw >> 62) as usize;
         }
         Explore::centre(*q, half)
@@ -253,7 +295,7 @@ fn choose_target(held: Option<(Entity, f32)>, candidates: &[(Entity, f32)], vali
     held.filter(|h| h.1 < RESELECT_SECS && valid(h.0)).map(|h| (h.0, true)).or_else(|| candidates.iter().min_by(|a, b| a.1.total_cmp(&b.1)).map(|c| (c.0, false)))
 }
 
-/// Skirmish captains, as read from the original's code (docs/re/movement.md "Computer captains"): every think the target is the nearer
+/// Skirmish captains (docs/re/movement.md "Computer captains"): every think the target is the nearer
 /// of the nearest hostile ship in sight and the nearest hostile base at any range, kept for `RESELECT_SECS`; failing both, a fleet
 /// mate's or an ally's target. The attack itself is `attack`. With no target a computer ship explores (`Explore`). The player ship
 /// only uses this in demo (--shot) mode as an autopilot.
@@ -267,13 +309,16 @@ pub fn ai(
     holes: Query<(&Transform, &crate::blackhole::Pull), Without<Ship>>,
     storms: (Option<Res<crate::nebula::Storms>>, Option<Res<crate::nebula::StormShift>>),
     (mut explore, mut breakoffs): (Local<Explore>, Local<std::collections::HashMap<Entity, attack::Breakoff>>),
-    (mut clocks, mut spawned): (Local<std::collections::HashMap<Entity, ThinkClock>>, Local<usize>),
+    (mut clocks, spawn_order, mut start): (Local<std::collections::HashMap<Entity, ThinkClock>>, Query<&crate::scenario::SpawnIndex>, crate::scenario::BattleStart),
     (time, mut targets): (Res<Time>, ResMut<CaptainTargets>),
     (lib, fleets): (Res<combat::Library>, Res<Fleets>),
     bases: Query<(Entity, &Transform, &combat::BaseSide, &Health, &combat::ArmedBase)>,
     scripted: Query<&campaign::MissionShip>,
     (dying, cloaks): (Query<(), With<combat::Sinking>>, Query<&crate::cloak::Cloak>),
 ) {
+    if start.is_new() {
+        (*explore, *breakoffs, *clocks) = Default::default();
+    }
     if mission.is_some() {
         return;
     }
@@ -283,18 +328,17 @@ pub fn ai(
     let holes = hole_list(&holes, storms.0.as_deref(), storms.1.as_deref());
     let now = time.elapsed_secs();
     // (entity, position, side, afloat, radius, fleet, the aim point seen from a position)
-    let snap: Vec<(Entity, Vec3, Side, bool, f32, Option<String>, (Transform, usize, Vec<f32>))> = ships
+    let snap: Vec<(Entity, Vec3, Side, bool, f32, Option<crate::names::Owner>, (Transform, usize, Vec<f32>))> = ships
         .iter()
         .map(|(e, t, s, h, _, _, m, _)| (e, t.translation, s.side, !h.destroyed, lib.classes[s.class].radius, m.map(|m| m.0.clone()), (*t, s.class, h.sections.clone())))
         .collect();
     breakoffs.retain(|e, _| snap.iter().any(|f| f.0 == *e));
     clocks.retain(|e, _| snap.iter().any(|f| f.0 == *e));
-    for (e, tf, mut s, h, me, pilot, member, guns) in &mut ships {
+    // Captains think in creation order (docs/re/tick.md step 8): a captain adopting a mate's target sees the targets chosen before it.
+    for (e, tf, mut s, h, me, pilot, member, guns) in crate::scenario::in_spawn_order(&spawn_order, ships.iter_mut(), |x| x.0) {
+        let key = crate::scenario::SpawnIndex::of(&spawn_order, e);
         // Between thinks the ship keeps the course, speed order and target of its last think.
-        let clock = clocks.entry(e).or_insert_with(|| {
-            *spawned += 1;
-            ThinkClock::new(now, *spawned - 1)
-        });
+        let clock = clocks.entry(e).or_insert_with(|| ThinkClock::new(now, key.0 as usize));
         let Some(dt) = clock.due(now) else { continue };
         // The human's own fleet waits for orders; allied computer fleets share the human's side but hunt like any computer.
         // A ship that was just sunk has left its fleet and is computer-run, whoever steered it (docs/re/effects.md "Death drive").
@@ -307,7 +351,7 @@ pub fn ai(
             continue;
         }
         if held.contains(e) {
-            s.order = 0;
+            s.order = EngineOrder::Stop;
             s.goal = None;
             continue;
         }
@@ -365,12 +409,12 @@ pub fn ai(
         });
         let class = &lib.classes[s.class];
         let explore_now = |s: &mut Ship, explore: &mut Explore| {
-            (s.waypoints, s.goal, s.order) = (vec![explore.goal(&cfg, e, tf.translation, class.sight)], None, 3);
+            (s.waypoints, s.goal, s.order) = (vec![explore.goal(&cfg, e, key, tf.translation, class.sight)], None, EngineOrder::Emergency);
         };
         let Some((foe_pos, foe_radius, foe_base, foe_aim)) = foe else {
             s.goal = None;
             if human || explicit.is_some() {
-                s.order = 0;
+                s.order = EngineOrder::Stop;
                 continue;
             }
             explore_now(&mut s, &mut explore);
@@ -378,11 +422,11 @@ pub fn ai(
         };
         let kept = std::mem::take(&mut s.waypoints); // contact: drop any exploring course (the quadrant is kept for later)
         if let Some(away) = flee(&holes, tf.translation) {
-            (s.goal, s.order) = (Some(away), 3);
+            (s.goal, s.order) = (Some(away), EngineOrder::Emergency);
             continue;
         }
         let Some((routine, range)) = attack::plan(&lib, class, h, guns) else {
-            (s.goal, s.order) = (None, 0);
+            (s.goal, s.order) = (None, EngineOrder::Stop);
             continue;
         };
         if routine == attack::Routine::Ram && foe_base {
@@ -402,9 +446,9 @@ pub fn ai(
         s.throttle = if routine == attack::Routine::Standoff && breakoff.is_none() {
             attack::standoff_throttle(gap, r)
         } else {
-            attack::throttle(routine, e, tf.translation, s.heading, course[0])
+            attack::throttle(routine, key, tf.translation, s.heading, course[0])
         };
-        (s.waypoints, s.goal, s.order) = (course, None, 3);
+        (s.waypoints, s.goal, s.order) = (course, None, EngineOrder::Emergency);
     }
 }
 
@@ -447,7 +491,7 @@ pub fn helm_step(ship: &mut Ship, tf: &mut Transform, class: &combat::Class, hea
             want = Some(g);
         }
         ship.helm.age += dt;
-        // ponytail: one phase for every ship (the original staggers captains by spawn number), and a ship with no course to steer
+        // PROVISIONAL: one phase for every ship (the original staggers captains by spawn number), and a ship with no course to steer
         // for keeps the law due, so a new course acts on the next step (retail's delay for a fresh order is not measured).
         if let Some(w) = want {
             if ship.helm.age >= THINK_SECS {
@@ -479,7 +523,7 @@ pub fn helm_step(ship: &mut Ship, tf: &mut Transform, class: &combat::Class, hea
         tf.translation += fwd * ship.speed * dt;
         // Roll about the bow axis toward the rudder, rate-limited; none at Emergency Speed (measured, docs/re/movement.md).
         // PROVISIONAL: target proportional to rudder; retail also weaves slightly while steering for a point (not modelled).
-        let lean = if ship.order == 3 { 0.0 } else { steer * MAX_ROLL };
+        let lean = if ship.order == EngineOrder::Emergency { 0.0 } else { steer * MAX_ROLL };
         let roll = tf.rotation.to_euler(EulerRot::YXZ).2;
         let roll = roll + (lean - roll).clamp(-ROLL_RATE * dt, ROLL_RATE * dt);
         tf.rotation = Quat::from_rotation_y(ship.heading) * Quat::from_rotation_z(roll);
@@ -494,7 +538,7 @@ pub fn approach_speed(speed: f32, target: f32, rate: f32, dt: f32) -> f32 {
 
 /// Fleet identity is not allegiance: allied skirmish players have different owners.
 #[derive(Component, Clone)]
-pub struct FleetMember(pub String, pub usize);
+pub struct FleetMember(pub crate::names::Owner, pub usize);
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Formation {
@@ -535,8 +579,8 @@ pub struct Fleet {
 }
 #[derive(Resource, Default)]
 pub struct Fleets {
-    pub groups: std::collections::BTreeMap<String, Fleet>,
-    pub local: String,
+    pub groups: std::collections::BTreeMap<crate::names::Owner, Fleet>,
+    pub local: crate::names::Owner,
     pub selected: Option<Entity>,
     pub bar_open: bool,
     pub commands_open: bool,
@@ -652,7 +696,7 @@ pub fn formation_slots(kind: Formation, radii: &[f32]) -> Vec<Vec3> {
     slots
 }
 
-/// Read from the original's code (not yet measured): after a layout the slots are given a single swap pass, so ships that are already
+/// Not yet measured: after a layout the slots are given a single swap pass, so ships that are already
 /// closer to another slot take that one. Not for Custom and Column. `ships` is each member's position in the leader's frame and the
 /// angle between its heading and the leader's. For each slot i from 1, the member that fits its point best (lowest index on a tie,
 /// the leader included) swaps its own slot with slot i when it fits that point strictly better than its own. Fit is 50 falling to 0
@@ -709,17 +753,17 @@ fn captain_target_valid(world: &World, actor: Entity, target: Entity) -> bool {
 /// first surviving member becomes command ship after death/capture; empty fleets have no command ship.
 pub fn reconcile_fleets(world: &mut World) {
     let mut live: Vec<_> = world
-        .query::<(Entity, &Ship, &Health, &FleetMember, Option<&campaign::MissionShip>)>()
+        .query::<(Entity, &Ship, &Health, &FleetMember, Option<&campaign::MissionShip>, Option<&crate::scenario::SpawnIndex>)>()
         .iter(world)
-        .filter(|(_, _, h, _, _)| !h.destroyed)
-        .map(|(e, _, _, f, m)| (e, m.map_or_else(|| f.0.clone(), |m| m.owner.clone()), f.1))
+        .filter(|(_, _, h, _, _, _)| !h.destroyed)
+        .map(|(e, _, _, f, m, i)| (e, m.map_or_else(|| f.0.clone(), |m| m.owner.clone()), f.1, i.copied()))
         .collect();
-    live.sort_by_key(|s| (s.2, s.0.to_bits()));
+    live.sort_by_key(|s| (s.2, s.3));
     world.resource_scope(|world, mut fleets: Mut<Fleets>| {
         for (owner, fleet) in &mut fleets.groups {
             fleet.members.retain(|e| live.iter().any(|s| s.0 == *e && s.1 == *owner));
         }
-        for (e, owner, _) in &live {
+        for (e, owner, _, _) in &live {
             let f = fleets.groups.entry(owner.clone()).or_default();
             let joined = !f.members.contains(e);
             if joined {
@@ -815,7 +859,7 @@ pub fn set_formation(world: &mut World, owner: &str, kind: Option<Formation>, ho
             s.waypoints.clear();
             s.goal = None;
             if !hold {
-                s.order = 0;
+                s.order = EngineOrder::Stop;
                 s.throttle = None;
             }
         }
@@ -826,7 +870,7 @@ fn install_primary(world: &mut World, candidate: Entity, target: Option<Entity>)
     let max = world.get::<Ship>(candidate).zip(world.get::<Health>(candidate)).map_or(0.0, |(s, h)| max_speed(s, &world.resource::<Library>().classes[s.class], h));
     if let Some(mut s) = world.get_mut::<Ship>(candidate) {
         s.throttle = Some(if max > 0.001 { (s.speed.abs() / max).clamp(0.0, 1.0) } else { 0.0 });
-        s.order = 2;
+        s.order = EngineOrder::Full;
     }
     world.entity_mut(candidate).insert((PlayerShip, FleetPilot::default()));
     if let Some(mut m) = world.get_mut::<campaign::MissionShip>(candidate) {
@@ -927,7 +971,7 @@ const TURNING_THROTTLE: f32 = 0.2;
 /// A follower's wanted speed. Measured on retail (docs/re/fleet-controls.md, Diamond slot behind a stationary Man-O-War): full speed until
 /// the last few units, then it stops dead; in the slot it matches the leader's speed. No proportional slow-down on the way in. A ship
 /// sent to a destination (not holding formation) stops within 5 units of it.
-fn follow_speed(hold: bool, distance: f32, leader_speed: f32, max: f32, heading_error: f32) -> f32 {
+pub(crate) fn follow_speed(hold: bool, distance: f32, leader_speed: f32, max: f32, heading_error: f32) -> f32 {
     if hold {
         if distance > SLOT_ARRIVE { if heading_error.abs() > ALIGNED { TURNING_THROTTLE * max } else { max } } else { leader_speed.clamp(0.0, max) }
     } else if distance < 5.0 {
@@ -940,7 +984,7 @@ fn follow_speed(hold: bool, distance: f32, leader_speed: f32, max: f32, heading_
 /// Where a follower aims on its way to `goal`: straight, unless that line passes within `clearance` of the leader (a slot behind the
 /// leader is reached from beside it at spawn), then a point off the leader's flank on the side the line already passes. PROVISIONAL: the
 /// original's follower pathing is unknown; this only keeps followers from driving through the ship they follow and shoving it.
-fn steer_round(from: Vec3, goal: Vec3, leader: Vec3, clearance: f32) -> Vec3 {
+pub(crate) fn steer_round(from: Vec3, goal: Vec3, leader: Vec3, clearance: f32) -> Vec3 {
     let (d, rel) = ((goal - from).with_y(0.0), (leader - from).with_y(0.0));
     let t = if d.length_squared() > 0.0 { (rel.dot(d) / d.length_squared()).clamp(0.0, 1.0) } else { 0.0 };
     let off = (from + d * t - leader).with_y(0.0);
@@ -1020,7 +1064,7 @@ pub fn fleet_follow(world: &mut World) {
                 if let Some(mut s) = world.get_mut::<Ship>(e) {
                     s.waypoints = if distance > 3.0 { vec![aim] } else { vec![] };
                     s.goal = if pilot.hold { Some((-(tf.rotation * Vec3::NEG_Z).x).atan2(-(tf.rotation * Vec3::NEG_Z).z)) } else { None };
-                    s.order = if wanted < 0.01 { 0 } else { 2 };
+                    s.order = if wanted < 0.01 { EngineOrder::Stop } else { EngineOrder::Full };
                     s.throttle = Some(if max > 0.001 { (wanted / max).clamp(0.0, 1.0) } else { 0.0 });
                 }
             }
@@ -1119,5 +1163,24 @@ mod think_clock_tests {
         let mut c = ThinkClock::new(0.0, 0);
         let since = (1..=16).find_map(|k| c.due(k as f32 * 0.033)).unwrap();
         assert!((since - 0.528).abs() < 1e-4);
+    }
+}
+
+#[cfg(test)]
+mod engine_order_tests {
+    use super::EngineOrder::{self, *};
+    #[test]
+    fn the_dial_indices_round_trip_and_stop_at_both_ends() {
+        for (i, o) in [Stop, Slow, Full, Emergency].into_iter().enumerate() {
+            assert_eq!(EngineOrder::from_index(i), Some(o));
+            assert_eq!(o.index(), i);
+        }
+        assert_eq!(EngineOrder::from_index(4), None);
+        assert_eq!((Emergency.faster(), Stop.slower(), Slow.faster(), Full.slower()), (Emergency, Stop, Full, Slow));
+    }
+    #[test]
+    fn labels_and_speed_fractions_are_the_retail_ones() {
+        assert_eq!(EngineOrder::ALL.map(|o| (o.label(), o.fraction())), [("All Stop", 0.0), ("Ahead Slow", 0.5), ("Ahead Full", 1.0), ("Emergency Speed", 2.0)]);
+        assert!(Stop < Slow && Slow < Full && Full < Emergency);
     }
 }

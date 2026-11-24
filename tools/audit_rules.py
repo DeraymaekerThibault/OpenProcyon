@@ -19,7 +19,7 @@ eval_sources = [
         if p.name not in ("schema.rs", "diag.rs")
     ),
 ]
-src = "\n".join(p.read_text() for p in eval_sources)
+src = "\n".join(p.read_text(encoding="utf-8") for p in eval_sources)
 assets = pathlib.Path(os.environ.get("PROCYON_ASSETS") or root / "assets")
 lits = set(re.findall(r'"([^"\n]+)"', src))
 m = re.search(r"// Setup actions the remake does not need.*?=> \{\}", src, re.DOTALL)
@@ -29,7 +29,7 @@ use = collections.defaultdict(lambda: collections.defaultdict(int))
 for p in sorted(assets.glob("maps/*/mission.json")) + sorted(
     assets.glob("maps/*/map.json")
 ):
-    d = json.loads(p.read_text())
+    d = json.loads(p.read_text(encoding="utf-8"))
     for r in d.get("rules", []):
         for kind in ("conditions", "actions"):
             for x in r.get(kind, []):

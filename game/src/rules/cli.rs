@@ -50,8 +50,9 @@ pub fn apply(args: &[String]) -> Option<i32> {
         match check_map(&maps.join(id)) {
             Ok(problems) => {
                 let out = &mut std::io::stdout();
+                let file = rules_file(&maps.join(id)).and_then(|f| f.file_name()?.to_str().map(String::from)).unwrap_or_default();
                 for p in &problems {
-                    let _ = writeln!(out, "{id}: {p}");
+                    let _ = writeln!(out, "{id}/{file}: {p}");
                 }
                 let e = problems.iter().filter(|p| p.level == Level::Error).count();
                 let _ = writeln!(out, "{id}: {e} errors, {} warnings", problems.len() - e);
@@ -70,6 +71,21 @@ pub fn apply(args: &[String]) -> Option<i32> {
     Some(i32::from(errors > 0))
 }
 
+/// `check_map` for the log: one line per finding, prefixed with the file as `--check-mission` prints it, and a count line. A folder
+/// that cannot be checked at all is one error line.
+pub fn report_lines(id: &str, dir: &Path) -> Vec<String> {
+    let file = rules_file(dir).and_then(|f| f.file_name()?.to_str().map(String::from)).unwrap_or_else(|| "mission.json".into());
+    match check_map(dir) {
+        Ok(problems) => {
+            let errors = problems.iter().filter(|p| p.level == Level::Error).count();
+            let mut lines: Vec<String> = problems.iter().map(|p| format!("{id}/{file}: {p}")).collect();
+            lines.push(format!("{id}: {errors} errors, {} warnings", problems.len() - errors));
+            lines
+        }
+        Err(message) => vec![format!("{id}: ERROR: {message}")],
+    }
+}
+
 /// Every folder under `maps/` with rules (a campaign mission or a skirmish script), sorted.
 fn all_ids(maps: &Path) -> Vec<String> {
     let mut ids: Vec<String> = std::fs::read_dir(maps)
@@ -83,10 +99,14 @@ fn all_ids(maps: &Path) -> Vec<String> {
     ids
 }
 
+/// A map folder's rules file: `mission.json`, or a skirmish map's `script.json`.
+fn rules_file(dir: &Path) -> Option<PathBuf> {
+    ["mission.json", "script.json"].iter().map(|f| dir.join(f)).find(|p| p.is_file())
+}
+
 /// Loads `map.json`, `mission.json` (or a skirmish map's `script.json`) and `media.json` of a map folder and checks its rules.
 pub fn check_map(dir: &Path) -> Result<Vec<Problem>, String> {
-    let rules_file: PathBuf =
-        ["mission.json", "script.json"].iter().map(|f| dir.join(f)).find(|p| p.is_file()).ok_or_else(|| format!("no mission.json or script.json in {}", dir.display()))?;
+    let rules_file = rules_file(dir).ok_or_else(|| format!("no mission.json or script.json in {}", dir.display()))?;
     let mission = crate::data::try_json(&rules_file).ok_or_else(|| format!("{} is not valid JSON", rules_file.display()))?;
     let (map, media) = (crate::data::try_json(&dir.join("map.json")), crate::data::try_json(&dir.join("media.json")));
     let skirmish = rules_file.ends_with("script.json");

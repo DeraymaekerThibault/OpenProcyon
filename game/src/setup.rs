@@ -4,7 +4,6 @@
 //! the app is built and the asset root is fixed for the process (`ASSETS`, `AssetPlugin`), and winit cannot open a second event
 //! loop in one process, so the full game cannot be built in place of this small app; a fresh process with the same arguments is
 //! the clean way to continue to the main menu. State and input live here; the view (`classic/setup.rs`) only draws.
-#![allow(deprecated)] // shortcut: bevy 0.20 Interaction (deprecated for picking Hovered/Pressed); port when it is removed
 
 use bevy::input::ButtonState;
 use bevy::input::keyboard::{Key, KeyboardInput};
@@ -274,9 +273,10 @@ fn paste(tx: mpsc::Sender<Msg>) {
     });
 }
 
+#[allow(deprecated)] // Interaction, see pointer.rs
 fn buttons(q: Query<(&Interaction, &SetupAction), Changed<Interaction>>, mut setup: ResMut<Setup>, mut exit: MessageWriter<AppExit>) {
     for (i, action) in &q {
-        if *i != Interaction::Pressed {
+        if !crate::pointer::down(i) {
             continue;
         }
         match *action {

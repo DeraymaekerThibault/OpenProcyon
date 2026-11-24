@@ -39,7 +39,7 @@ files to `content/`, or anything that publishes (pushing tags, releases).
 - `tools/` Python parsers/exporters for the retail formats (WOT, MDB, MSB, EFT, HDT, FFT, TWT, TST) and the importer
   `python3 -m tools.import_assets --game <install> [--out <dir>]` (`tools/build_assets.sh` wraps it), which writes JSON/GLB/PNG/OGG assets. Default output: `assets/` in the
   checkout; the game also finds `$XDG_DATA_HOME/openprocyon/assets` (Windows `%APPDATA%\openprocyon\assets`) or `PROCYON_ASSETS`.
-  `tools/compare_assets.py A B` compares two imports by meaning (JSON values, image pixels).
+  `python3 -m tools.compare_assets A B` compares two imports by meaning (JSON values, image pixels).
 - `content/` files that ship with the code: fonts (URW base35), hand-written data (`data/hud/bar.json`), the crew voice event
   table. The game overlays `content/` on the imported assets like a mod (`assets_dir()` in `game/src/lib.rs`).
 - `game/` Rust + Bevy 0.20. `lib.rs` is the `openprocyon` library: wiring and `run(view)`. `main.rs` runs it with the classic view.
@@ -69,8 +69,13 @@ files to `content/`, or anything that publishes (pushing tags, releases).
 ## Workflow
 
 - `tools/check.sh` (`make check`) is the single validation gate: ruff format/lint (`ruff.toml`), rustfmt, clippy `-D warnings`, Rust tests
-  (asset-free tests always run; ignored asset tests also run when assets are imported), Python tests including the hygiene rules. `make fmt` formats both languages. Run it before every commit; do not add
-  parallel wrappers. While iterating, `tools/check.sh --fast` skips the startup smoke and the battle check.
+  (asset-free tests always run; ignored asset tests also run when assets are imported), Python tests including the hygiene rules. `make fmt` formats both languages.
+  It has tiers, all inside the one script (do not add parallel wrappers): iterate with `tools/check.sh --quick` (ruff and hygiene, plus
+  clippy or the Python tests for what changed), run `tools/check.sh` before every commit, `tools/check.sh --full` (adds the startup smoke
+  and the battle check) once before you push or open a PR. One Rust test: `cargo test --manifest-path game/Cargo.toml --lib <module::path>`.
+  Smokes for what you changed: `make smoke WHAT=changed` (`tools/smokes.sh --changed`). Never build `--release` except for a release;
+  never `cargo clean` without `--workspace`. Claude Code users: `.claude/skills/procyon-loop` maps these to commands, `.claude/settings.json` formats edited files; opt-in hooks are in `.claude/settings.local.example.json`.
+  Each step prints one line with its log in `local/check/`; trust only the final `GATE OK` line. `GATE PARTIAL` means assets were missing and tests were skipped.
 - Where the engine stands against the original is tracked in one place: the project board "OpenProcyon fidelity: every rule of the
   original" (one row per rule of the original's battle simulation, with its stage: unknown, read, confirmed, specced, built, tested,
   and whether it differs here). Fidelity work starts from the board. Do not create another overview: no new tracking issue,
@@ -80,9 +85,13 @@ files to `content/`, or anything that publishes (pushing tags, releases).
 - Whole-battle comparison (the parity rows listed in #377, label `parity`) is a smoke test that finds rules nobody knew to look for;
   a difference it shows becomes a row on the board, not more runs. `PROCYON_TRACE` (`docs/development.md`) produces this engine's column.
 - Non-trivial changes need a regression test; ECS/UI changes also need a runtime smoke test (a `--script` or screenshot run).
+- Refactors that should not change behaviour: check a simulation refactor with `tools/tracediff.py` (same seed, `--fixed-step`, before and after) and a drawing change with `tools/visdiff.py` (`docs/development.md`).
 - Add behaviour to the module that owns it (`docs/development.md`), not a parallel implementation. Keep asset paths and JSON
   layouts stable; mods reference them.
-- Exporter changes: re-import into a scratch folder and compare with `tools/compare_assets.py` before trusting the result.
+- Exporter changes: re-import into a scratch folder and compare with `python3 -m tools.compare_assets` before trusting the result.
 - Known PROVISIONAL areas: ship linear motion and engine-order mapping, gun arcs, damage-smoke emitter geometry, wake parameters,
   sail alpha, HUD part order, sound falloff/levels and the event to sound-pool mapping.
 - `local/` is git-ignored scratch for screenshots, logs and notes.
+- Worktrees: `tools/worktree.sh new <branch>` makes one with a copy of the main checkout's build (only this crate compiles),
+  `tools/worktree.sh rm <path>` removes it with its build, `tools/worktree.sh gc [-n]` caps build disk use. Assets come from the
+  main checkout's import; never copy `assets/`.

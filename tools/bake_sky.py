@@ -698,10 +698,10 @@ def main(argv=None):
         skies = {g.stem: {"near": near} for g in glbs}
         (out / "data" / "render").mkdir(parents=True, exist_ok=True)
         (out / "data" / "render" / "skies.json").write_text(
-            json.dumps(skies, indent=2) + "\n"
+            json.dumps(skies, indent=2) + "\n", encoding="utf-8"
         )
     # Written last, so a bake that failed or was stopped does not show in the Mods screen as a finished mod.
-    (out / "mod.json").write_text(json.dumps(MOD, indent=2) + "\n")
+    (out / "mod.json").write_text(json.dumps(MOD, indent=2) + "\n", encoding="utf-8")
     print(f"done: switch on '{MOD['name']}' in the Mods screen (or --mod {out})")
 
 

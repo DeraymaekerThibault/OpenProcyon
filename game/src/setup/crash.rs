@@ -24,8 +24,8 @@ pub fn report_crashes(dir: PathBuf) {
 
 fn crash_report(info: &std::panic::PanicHookInfo, backtrace: &str) -> String {
     let message = info.payload().downcast_ref::<&str>().map(|s| s.to_string()).or_else(|| info.payload().downcast_ref::<String>().cloned()).unwrap_or_default();
-    let place = info.location().map_or(String::new(), |l| format!("{}:{}", l.file(), l.line()));
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    let place = info.location().map_or(String::new(), |l| format!("{}:{}", crate::logging::trim_source_path(l.file()), l.line()));
+    let args = crate::logging::redacted_args();
     format!(
         "OpenProcyon {} crashed. Please attach this file when you report the problem.\nmessage: {}\nat: {place}\nsystem: {} {}\narguments: {}\n\n{backtrace}\n",
         env!("CARGO_PKG_VERSION"),

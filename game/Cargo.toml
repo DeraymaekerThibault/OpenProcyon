@@ -1,6 +1,6 @@
 [package]
 name = "openprocyon"
-version = "0.1.4"
+version = "0.2.0"
 edition = "2024"
 license = "GPL-3.0-or-later"
 rust-version = "1.97.1" # Bevy 0.20
@@ -19,11 +19,26 @@ wayland-sys = { version = "0.31", features = ["dlopen"] }
 too_many_arguments = "allow"
 type_complexity = "allow"
 
+[lib]
+doctest = false # no doc examples; skips the rustdoc pass on every `cargo test`
+
+# The edit loop: clippy and tests (tools/check.sh). Line tables keep file:line in backtraces; full debuginfo made the dev game
+# binary 2.5 GB.
 [profile.dev]
 opt-level = 1
+debug = "line-tables-only"
 
 [profile.dev.package."*"]
 opt-level = 3
+debug = false
+
+# Runs that check the game (startup smoke, shot.sh, smokes.sh, battle_check, autoplay): near-release speed, incremental rebuilds.
+[profile.fast]
+inherits = "release"
+incremental = true
+codegen-units = 256
+debug = "line-tables-only"
+strip = false
 
 # Player downloads: no debug symbols; thin LTO is left off because it made both binaries larger (Linux 106 -> 109 MB, Windows 90 -> 96 MB).
 [profile.release]

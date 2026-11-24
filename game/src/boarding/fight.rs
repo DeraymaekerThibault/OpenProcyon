@@ -11,6 +11,7 @@ pub struct Boarders<'w, 's> {
     grapples: Query<'w, 's, (Entity, &'static Grapple)>,
     ships: Query<'w, 's, (&'static Ship, &'static Health, Option<&'static crate::combat::GunStates>)>,
     player: Query<'w, 's, Entity, With<PlayerShip>>,
+    abandoned: Query<'w, 's, (), With<crate::lifeboats::Abandoned>>,
     lib: Res<'w, Library>,
     mission: Option<Res<'w, Mission>>,
 }
@@ -78,6 +79,14 @@ impl Boarders<'_, '_> {
     pub fn me(&self) -> Option<Entity> {
         self.player.single().ok()
     }
+    /// Not retail: the crew of `e` left it (`OP Abandon Ship`).
+    pub fn abandoned(&self, e: Entity) -> bool {
+        self.abandoned.contains(e)
+    }
+    /// `e` is a live ship (a base or a destroyed hull has nothing to grapple).
+    pub fn live_ship(&self, e: Entity) -> bool {
+        self.ships.get(e).is_ok_and(|s| !s.1.destroyed)
+    }
 }
 
 const CREW_LINES: [(&str, &[&str]); 11] = [
@@ -112,7 +121,7 @@ fn end_fight(commands: &mut Commands, e: Entity, fx: &[Entity]) {
     commands.entity(e).remove::<Boarding>();
 }
 
-pub(super) fn handle_messages(mut msgs: MessageReader<BoardMsg>, mut commands: Commands, assets: Option<Res<AssetServer>>, mut rng: ResMut<Rng>, boarders: Boarders) {
+pub(super) fn handle_messages(mut msgs: MessageReader<BoardMsg>, mut commands: Commands, assets: Option<Res<AssetServer>>, mut rng: ResMut<SimRng>, boarders: Boarders) {
     let me = boarders.me();
     for m in msgs.read() {
         match *m {
@@ -153,6 +162,7 @@ pub(super) fn handle_messages(mut msgs: MessageReader<BoardMsg>, mut commands: C
                 }
             }
             BoardMsg::Boardable(..) => {}
+            BoardMsg::Order { boarder, target } => order::begin(&mut commands, &boarders, boarder, target),
         }
     }
 }
@@ -177,7 +187,7 @@ pub(super) fn fights(
     mut commands: Commands,
     time: Res<Time>,
     lib: Res<Library>,
-    mut rng: ResMut<Rng>,
+    mut rng: ResMut<SimRng>,
     assets: Option<Res<AssetServer>>,
     fxl: Option<Res<FxLib>>,
     mut sfx: MessageWriter<Sfx>,
@@ -263,11 +273,11 @@ pub(super) fn settled(
     mut msgs: MessageReader<Settled>,
     mut commands: Commands,
     assets: Option<Res<AssetServer>>,
-    mut rng: ResMut<Rng>,
+    mut rng: ResMut<SimRng>,
     mut sfx: MessageWriter<Sfx>,
     mut captured: MessageWriter<Captured>,
     mut things: Query<(Option<&mut Ship>, Option<&mut MissionShip>, Option<&mut MissionBase>, &mut Boardable, Option<&mut crate::combat::BaseSide>)>,
-    members: Query<&crate::ship::FleetMember>,
+    (members, spawn_order): (Query<&crate::ship::FleetMember>, Query<&crate::scenario::SpawnIndex>),
     grapples: Query<(Entity, &Grapple)>,
     mut mission: Option<ResMut<Mission>>,
 ) {
@@ -279,22 +289,22 @@ pub(super) fn settled(
         let r = rng.f();
         match s.outcome {
             Outcome::Won => {
-                let owner = |ms: &Option<Mut<MissionShip>>, mb: &Option<Mut<MissionBase>>, ship: &Option<Mut<Ship>>| {
+                let owner = |ms: &Option<Mut<MissionShip>>, mb: &Option<Mut<MissionBase>>, ship: &Option<Mut<Ship>>| -> crate::names::Owner {
                     ms.as_ref()
                         .map(|m| m.owner.clone())
-                        .or_else(|| mb.as_ref().map(|m| m.owner.clone()))
+                        .or_else(|| mb.as_ref().map(|m| m.owner.as_str().into()))
                         .unwrap_or_else(|| if side_of(ship) == Some(Side::Player) { "Player".into() } else { "Enemy".into() })
                 };
                 let (by, victim) = (owner(&bms, &None, &bship), owner(&tms, &tbase, &tship));
                 info!("boarding: {} captured {}", by, victim);
-                captured.write(Captured { by: by.clone(), victim, unit: s.target });
+                captured.write(Captured { by: by.clone(), victim: victim.to_string(), unit: s.target });
                 if let Some(mut m) = tms {
                     m.owner = by.clone();
                     m.target = None;
                     m.attack.clear();
                 }
                 if let Some(mut b) = tbase {
-                    b.owner = by;
+                    b.owner = by.to_string();
                 }
                 // A skirmish base changes sides with its guns and its place in the end rules.
                 if let (Some(mut bs), Some(side)) = (tside, side_of(&bship)) {
@@ -302,7 +312,8 @@ pub(super) fn settled(
                 }
                 if let (Ok(member), true) = (members.get(s.boarder), is_ship) {
                     let mut member = member.clone();
-                    member.1 = s.target.to_bits() as usize;
+                    // Behind the fleet's own ships in roster order, captured ships among themselves in creation order.
+                    member.1 = (1 << 32) + crate::scenario::SpawnIndex::of(&spawn_order, s.target).0 as usize;
                     commands.entity(s.target).insert((member, crate::ship::FleetPilot::default()));
                 }
                 if let Some(mut sh) = tship {

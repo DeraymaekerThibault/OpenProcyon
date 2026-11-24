@@ -12,7 +12,6 @@
 //! PROVISIONAL: the window layout (centred square, flipped quadrants of the world-line corner texture), close controls
 //! (click, Esc, M), label colour and icon orientation sign are unknown; the original's pause-when-open gate is a tutorial rule
 //! (`Pause when starmap opens`) the remake does not model, so the battle keeps running behind the map.
-#![allow(deprecated)] // shortcut: bevy 0.20 Interaction, same as panels.rs
 use bevy::audio::{AudioPlayer, PlaybackSettings};
 use bevy::prelude::*;
 
@@ -73,6 +72,7 @@ pub fn block_world(open: Query<(), With<Starmap>>, mut ui: ResMut<UiClick>) {
     ui.0 |= !open.is_empty();
 }
 
+#[allow(deprecated)] // Interaction, see pointer.rs
 fn toggle(
     mut commands: Commands,
     assets: Res<AssetServer>,
@@ -88,7 +88,7 @@ fn toggle(
     mut auto: Local<Option<bool>>,
     mut chat: ResMut<crate::panels::ChatLog>,
 ) {
-    let hovered = radar.iter().any(|i| *i != Interaction::None);
+    let hovered = radar.iter().any(crate::pointer::over);
     if hovered && !*over {
         sfx.write(Sfx::ui("HUD_Map_MouseOver"));
     }

@@ -175,19 +175,21 @@ fn advance(time: Res<Time>, mut splashes: MessageReader<Splashed>, mut ships: Qu
 /// its scan range (sight x lookout factor) of the sub gets one draw with the chance (factor - 1), and the team is added on the first
 /// success. A watcher without lookouts never spots it. This is the only way an enemy learns of it (no periodic detection).
 fn spotted(
-    mut rng: Local<Option<crate::combat::Rng>>,
+    mut rng: ResMut<crate::combat::SimRng>,
     mut fired: MessageReader<crate::combat::Fired>,
     lib: Res<Library>,
     mut ships: Query<(&mut Cloak, &Transform)>,
-    watchers: Query<(&Ship, &Transform, &Health, Option<&ScanFactor>)>,
+    watchers: Query<(Entity, &Ship, &Transform, &Health, Option<&ScanFactor>)>,
+    spawn_order: Query<&crate::scenario::SpawnIndex>,
 ) {
-    let rng = rng.get_or_insert_with(crate::combat::Rng::default);
-    for f in fired.read().filter(|f| f.bullet.starts_with(crate::combat::TORPEDO_BULLET)) {
+    let rng = &mut rng.cloak;
+    let watchers = crate::scenario::in_spawn_order(&spawn_order, watchers.iter(), |w| w.0);
+    for f in fired.read().filter(|f| f.torpedo) {
         let Ok((mut c, tf)) = ships.get_mut(f.shooter) else { continue };
         if c.state != State::Full {
             continue;
         }
-        for (w, wtf, wh, scan) in &watchers {
+        for &(_, w, wtf, wh, scan) in &watchers {
             let factor = scan.map_or(0.0, |s| s.0);
             let reach = lib.classes[w.class].sight * factor * DETECT_REACH;
             if wh.destroyed || c.knows.contains(&w.side) || wtf.translation.distance(tf.translation) >= reach || rng.f() >= factor - 1.0 {

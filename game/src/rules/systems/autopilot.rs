@@ -1,6 +1,7 @@
 //! Dev autopilot for `--script mission` (tools/autoplay.py): steers the human's ship through a campaign mission from what its rules
 //! wait for. A test driver for unattended runs, not game behaviour; all its tuning is PROVISIONAL.
 use super::*;
+use crate::EngineOrder;
 
 /// `--script mission`, outside mission 1's scripted opening: the bot's orders for one frame (fleet, docking, towing, steering).
 #[allow(clippy::too_many_arguments)]
@@ -20,7 +21,7 @@ pub(super) fn drive(
     if std::env::var_os("PROCYON_AUTOINVULN").is_some()
         && let Some(owner) = world.iter().find(|u| u.primary).map(|u| u.owner.clone())
     {
-        for s in ships.iter().filter(|s| s.mission.owner == owner) {
+        for s in ships.iter().filter(|s| s.mission.owner == owner.as_str()) {
             extra.board.write(crate::boarding::BoardMsg::Boardable(s.entity, false));
         }
     }
@@ -796,7 +797,7 @@ fn autopilot(
     // exercised. Re-applied every tick, overriding the rules' own vulnerability changes for those ships; a "lost" outcome then only
     // comes from rules that do not need a player ship to sink.
     if std::env::var_os("PROCYON_AUTOINVULN").is_some() {
-        for mut s in ships.iter_mut().filter(|s| s.mission.owner == p.owner) {
+        for mut s in ships.iter_mut().filter(|s| s.mission.owner == p.owner.as_str()) {
             s.mission.invuln = 1.0;
         }
     }
@@ -819,19 +820,19 @@ fn autopilot(
         if let Some(h) = face {
             s.ship.waypoints.clear();
             s.ship.goal = Some(h);
-            s.ship.order = 1;
+            s.ship.order = EngineOrder::Slow;
             s.ship.throttle = None;
         } else if g.distance(p.pos) > 60.0 || unrouted.is_some_and(|u| u.distance(p.pos) > 60.0) || foe.is_none() {
             // Near the goal itself (not a route point on the way, mission 6's shore) the bot creeps instead (order 1).
             s.ship.waypoints = vec![g];
             // Emergency Speed while the goal is far (a human's "+"; the computer captains run in at it too), Ahead Full for the last stretch
             // so the slower Emergency turn does not overshoot it.
-            s.ship.order = if unrouted.is_some_and(|u| u.distance(p.pos) > EMERGENCY_DIST) { 3 } else { 2 };
+            s.ship.order = if unrouted.is_some_and(|u| u.distance(p.pos) > EMERGENCY_DIST) { EngineOrder::Emergency } else { EngineOrder::Full };
             s.ship.goal = None;
             s.ship.throttle = None; // a move order releases a manual throttle (the opening NIS leaves it at 0)
         } else {
             s.ship.waypoints.clear();
-            s.ship.order = 1;
+            s.ship.order = EngineOrder::Slow;
         }
     }
 }

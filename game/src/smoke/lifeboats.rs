@@ -7,7 +7,7 @@ use bevy::prelude::*;
 /// docs/re/lifeboats.md §7.10). SCRIPTED: it kills the pirate through its health (the combat-death path, not a fight), teleports the
 /// collector onto a boat and, for mission 1, marks the NIS speech as played; everything else is the normal rules and systems.
 /// Normal-combat validation is a manual play-through. Panics (non-zero exit) when an expectation fails.
-pub(super) fn smoke(world: &mut World, mut stage: Local<(u32, u32)>, mut score: Local<u32>, mut expect: Local<Option<(String, String, u32)>>) {
+pub(super) fn smoke(world: &mut World, mut stage: Local<(u32, u32)>, mut score: Local<u32>, mut expect: Local<Option<(String, crate::names::Owner, u32)>>) {
     let cfg = world.resource::<crate::Config>();
     let Some(script) = cfg.script.as_deref().filter(|s| s.starts_with("lifeboat-")).map(str::to_owned) else { return };
     let (frame, shot) = (cfg.frame, cfg.shot.is_some());
@@ -29,7 +29,7 @@ pub(super) fn smoke(world: &mut World, mut stage: Local<(u32, u32)>, mut score: 
                 pick(world, "Longboat");
             }
             info!("{script}: PASS");
-            std::process::exit(0);
+            crate::exit::request(world, 0);
         }
         return;
     }
@@ -50,7 +50,7 @@ pub(super) fn smoke(world: &mut World, mut stage: Local<(u32, u32)>, mut score: 
             if found.len() as u32 >= n {
                 assert!(found.len() as u32 == n && found.iter().all(|f| f.0 == owner && f.1 == class), "{script}: wrong boats {found:?}");
                 info!("{script}: PASS");
-                std::process::exit(0);
+                crate::exit::request(world, 0);
             }
         }
         return;
@@ -121,7 +121,7 @@ pub(super) fn smoke(world: &mut World, mut stage: Local<(u32, u32)>, mut score: 
                 if wait(&mut stage, ended.is_some(), "the fallback exit") {
                     assert_eq!(world.resource::<Mission>().script.lifeboat_owners().len(), 2, "uncollected boats stay until the level changes");
                     info!("{script}: PASS (fallback exit)");
-                    std::process::exit(0);
+                    crate::exit::request(world, 0);
                 }
                 return;
             }
@@ -173,7 +173,7 @@ pub(super) fn smoke(world: &mut World, mut stage: Local<(u32, u32)>, mut score: 
                     assert_eq!((sc.task_complete("PickUpLifeboats"), sc.task_active("PickUpLifeboats")), (!ladyj, false));
                 }
                 info!("{script}: PASS");
-                std::process::exit(0);
+                crate::exit::request(world, 0);
             }
         }
         _ => {}

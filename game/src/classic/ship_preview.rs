@@ -1,8 +1,7 @@
 //! The Ships screen's 3D preview ('Ship ViewPort Button'): the selected hull rendered by an off-screen camera into an image that the
 //! menu draws over the globe grid. Everything lives on its own render layer, so the battle camera never sees it.
 //! The hull stands still at a fixed bearing; dragging with the mouse over the viewport turns it.
-//! PROVISIONAL: the original's camera angle is matched by eye on one screenshot.
-#![allow(deprecated)] // shortcut: bevy 0.20 Interaction, as in menu.rs
+//! This file only builds the render rig and applies the decisions of `menu/preview.rs` (hull choice, camera framing, drag turn).
 use bevy::app::{HierarchyPropagatePlugin, Propagate};
 use bevy::camera::RenderTarget;
 use bevy::camera::visibility::RenderLayers;
@@ -10,7 +9,7 @@ use bevy::prelude::*;
 use bevy::render::render_resource::TextureFormat;
 
 use crate::combat::Library;
-use crate::menu::{Screen, Skirmish};
+use crate::menu::{HullChange, PREVIEW_YAW, Screen, Skirmish, drag_turn, hull_change, preview_camera};
 
 /// The image the preview renders into; the menu draws it in the viewport.
 #[derive(Resource)]
@@ -27,8 +26,6 @@ struct PreviewHull(usize);
 const LAYER: usize = 7;
 /// Render size: the 393x285 viewport at twice its reference size.
 const SIZE: UVec2 = UVec2::new(786, 570);
-/// Radians of hull turn per pixel of mouse drag.
-const DRAG: f32 = 0.01;
 
 /// Marks the menu node that shows the preview; pressing and dragging on it turns the hull.
 #[derive(Component)]
@@ -80,10 +77,7 @@ fn despawn(mut commands: Commands, parts: Query<Entity, Or<(With<PreviewPart>, W
 /// The selected class (the human player's offered list at `ship_pick`), reloaded when the selection changes; the camera is placed
 /// to frame its hull from the bow quarter, slightly above.
 fn show_hull(mut commands: Commands, assets: Res<AssetServer>, sk: Res<Skirmish>, lib: Res<Library>, hulls: Query<(Entity, &PreviewHull)>) {
-    let want = sk.shown_class(&lib);
-    if hulls.iter().any(|(_, h)| Some(h.0) == want) {
-        return;
-    }
+    let HullChange::Replace(want) = hull_change(hulls.iter().map(|(_, h)| h.0), sk.shown_class(&lib)) else { return };
     for (e, _) in &hulls {
         commands.entity(e).despawn();
     }
@@ -93,23 +87,22 @@ fn show_hull(mut commands: Commands, assets: Res<AssetServer>, sk: Res<Skirmish>
         PreviewHull(ci),
         WorldAssetRoot(assets.load(GltfAssetLabel::Scene(0).from_asset(class.glb.clone()))),
         Propagate(RenderLayers::layer(LAYER)),
-        Transform::from_rotation(Quat::from_rotation_y(0.9)),
+        Transform::from_rotation(Quat::from_rotation_y(PREVIEW_YAW)),
     ));
 }
 
 /// Frames the shown hull: the original fills most of the viewport, seen from slightly above the deck.
 fn frame(lib: Res<Library>, hulls: Query<&PreviewHull>, mut camera: Query<&mut Transform, (With<Camera3d>, With<PreviewPart>)>) {
     let (Ok(hull), Ok(mut cam)) = (hulls.single(), camera.single_mut()) else { return };
-    let r = lib.classes[hull.0].hull_bound.max(5.0);
-    let d = r * 1.75;
-    *cam = Transform::from_xyz(d * 0.6, d * 0.18, d * 0.78).looking_at(Vec3::Y * r * 0.2, Vec3::Y);
+    *cam = preview_camera(lib.classes[hull.0].hull_bound);
 }
 
+#[allow(deprecated)] // Interaction, see pointer.rs
 fn drag(viewport: Query<&Interaction, With<PreviewDrag>>, motion: Res<bevy::input::mouse::AccumulatedMouseMotion>, mut hulls: Query<&mut Transform, With<PreviewHull>>) {
-    if !viewport.iter().any(|i| matches!(i, Interaction::Pressed)) {
+    if !viewport.iter().any(crate::pointer::down) {
         return;
     }
     for mut t in &mut hulls {
-        t.rotate_y(motion.delta.x * DRAG);
+        t.rotate_y(drag_turn(motion.delta.x));
     }
 }

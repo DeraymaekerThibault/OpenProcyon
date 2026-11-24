@@ -158,7 +158,7 @@ impl Script {
                 self.all_visible = true;
             }
             "NIS Set Camera Path" => {
-                self.cam.path = Some((s(a, "Path Name").into(), 0.0, 60.0));
+                self.cam.path = Some((s(a, "Path Name").into(), 0.0, 60.0)); // PROVISIONAL: default camera path speed 60 is a guess
             }
             "NIS Set Camera Speed" | "NIS Set Transition Camera Speed" => {
                 if let Some(p) = &mut self.cam.path {
@@ -259,7 +259,7 @@ impl Script {
             "Set Group/Unit Warning Shot Mode" => out.push(Fx::WarningShots(g("GroupUnit Name"), b(a, "Boolean"))),
             "TUTORIAL - Pause when starmap opens?" => self.starmap_pause = b(a, "Pause when starmap opens"),
             "*State Init* Setup Etherium Current" => match self.paths[s(a, "Etherium Path")].as_array() {
-                Some(p) => out.push(Fx::Current(p.iter().map(game_to_bevy).collect())),
+                Some(p) => out.push(Fx::Current(s(a, "Etherium Path").into(), p.iter().map(game_to_bevy).collect())),
                 // Mission 10's 'bend' current names a path the TWT does not have (retail data); it has no effect there either.
                 None => debug!("etherium current without path '{}'", s(a, "Etherium Path")),
             },
@@ -294,7 +294,7 @@ impl Script {
                     self.shots.remove(&e);
                 }
             }
-            t if t.starts_with("OP ") => self.ext_act(a, rule),
+            t if t.starts_with("OP ") => self.ext_act(a, w, out, rule),
             other => self.warn(&format!("action '{other}' in rule '{rule}'")),
         }
     }

@@ -5,21 +5,20 @@ Raw WOT literals are kept; interpretation is the game's job. Hit geometry is MDB
 """
 
 import difflib
-import json
-import sys
 from pathlib import Path
 
+from tools import cli
 from tools.export_mesh_detail import collision_lods
 from tools.export_ship import export as export_physics
 from tools.gamefs import ci_file, ci_files
+from tools.jsonio import dump
 from tools.mdb import MdbError
 from tools.mdb import parse as parse_mdb
 from tools.mdb_to_glb import convert, hardpoints, layer_offsets, with_layer_offset
 from tools.models import model_path
 from tools.msb import parse as parse_msb
-from tools.msb import parse_scene
-from tools.source_text import read_source_lines
-from tools.wot import parse_lines, properties
+from tools.msb import parse_scene, parse_scene_file
+from tools.wot import parse_lines, properties, read_wot
 
 GUN_KEYS = (
     "MuzzleSpeed",
@@ -74,9 +73,7 @@ def debris_record(root, scene, outdir):
     if not scene:
         return None
     try:
-        nodes = parse_msb(
-            ci_file(Path(root) / "BD_MeshScenes", f"{scene}.msb").read_bytes()
-        )
+        nodes = parse_scene_file(root, scene)
     except FileNotFoundError:
         return None
     layer = next((n for n in nodes if "_layer" in n.name.lower()), None)
@@ -128,11 +125,7 @@ def placed_objects(root):
 
 
 def load(root, name):
-    nodes, problems = parse_lines(
-        read_source_lines(
-            Path(root), Path("WorldObjects") / f"{name}.wot", encoding="utf-8"
-        )
-    )
+    nodes, problems = parse_lines(read_wot(root, name))
     if problems:
         raise ValueError(problems[:3])
     return nodes
@@ -297,12 +290,7 @@ def gun_visual(root, gun, outdir):
     Node rotations other than yaw are ignored.
     """
     scene = scene_name(load(root, gun))
-    nodes = {
-        n.id: n
-        for n in parse_msb(
-            ci_file(Path(root) / "BD_MeshScenes", f"{scene}.msb").read_bytes()
-        )
-    }
+    nodes = {n.id: n for n in parse_scene_file(root, scene)}
     base = next(n for n in nodes.values() if n.parent < 0)
     barrel = next(
         (n for n in nodes.values() if n.kind == "GunVerticalPivotPlacement"), None
@@ -331,12 +319,7 @@ def export(root, ship, outdir):
     nodes = load(root, ship)
     scene = scene_name(nodes)
     hp = {n.label: (n, pos) for n, pos in hardpoints(root, scene)}
-    msb = {
-        n.id: n
-        for n in parse_msb(
-            ci_file(Path(root) / "BD_MeshScenes", f"{scene}.msb").read_bytes()
-        )
-    }
+    msb = {n.id: n for n in parse_scene_file(root, scene)}
     guns, gun_defs, bullets, skipped = [], {}, {}, []
     for _, label, assoc in associations(nodes, "GunPlacement"):
         gun, arc, bank = assoc.split(",")[:3]
@@ -526,6 +509,10 @@ def lifeboat_fields(p, sections):
     if not sphere["authored"] or sphere["radius"] is None:
         lo, hi = vec(p.get("MinExtents")), vec(p.get("MaxExtents"))
         if not (lo and hi):
+            if not sections:
+                raise ValueError(
+                    "no readable damage section and no authored extents: no collision sphere"
+                )
             lo, hi = (
                 [min(s["aabb"][0][i] for s in sections) for i in range(3)],
                 [max(s["aabb"][1][i] for s in sections) for i in range(3)],
@@ -556,9 +543,9 @@ def fx_names(j):
 
 
 if __name__ == "__main__":
-    root, ship, out = sys.argv[1:4]
+    root, ship, out = cli.args(__doc__, 3)
     j = export(root, ship, Path(out).parent)
-    Path(out).write_text(json.dumps(j))
+    Path(out).write_text(dump(j), encoding="utf-8")
     print(
         "wrote",
         out,

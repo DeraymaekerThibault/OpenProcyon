@@ -1,6 +1,6 @@
 """Autoplay: run campaign missions unattended and summarise what broke (#68).
 usage: python3 -m tools.autoplay [MISSION ...] [--speed N] [--jobs N] [--limit SECONDS] [--mortal]   (default: missions 1-13, speed 16, limit 3600)
-Each mission runs the release game with the `--script mission` autopilot steering the player's ship (PROCYON_AUTOPLAY in
+Each mission runs the game (the `fast` profile unless --profile) with the `--script mission` autopilot steering the player's ship (PROCYON_AUTOPLAY in
 game/src/smoke/mod.rs ends the run). The player's fleet is invulnerable (PROCYON_AUTOINVULN) unless --mortal is given: the
 bot has no tactics, and the goal is to reach every rule, not to win fights. Logs go to local/autoplay/missionNN.log; the table lists the outcome, the game time
 reached, peak entity/particle counts, the slowest frame and how many rules never fired (listed in the log's last line).
@@ -16,9 +16,28 @@ import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+from tools import gamelog
+from tools.import_assets import find_assets
+
 REPO = Path(__file__).resolve().parents[1]
-GAME = REPO / "game/target/release/openprocyon"
-ANSI = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def build_game(profile="fast"):
+    """Builds the game with a Cargo profile (`fast` for checking runs, `release` as players get it) and returns the binary."""
+    subprocess.run(
+        ["cargo", "build", "--profile", profile, "--quiet"],
+        cwd=REPO / "game",
+        check=True,
+    )
+    target = Path(os.environ.get("CARGO_TARGET_DIR", REPO / "game/target"))
+    # Cargo names the release profile's folder `release` and every custom profile's after the profile.
+    return (
+        target
+        / profile
+        / ("openprocyon.exe" if sys.platform == "win32" else "openprocyon")
+    )
+
+
 PROFILE = re.compile(r"profile .*frame_ms=([\d.]+) entities=(\d+) .*particles=(\d+)")
 END = re.compile(r'autoplay end outcome="([^"]+)" time=(\d+) never_fired=\[(.*)\]')
 
@@ -31,13 +50,31 @@ def display_wrapper():
         or os.environ.get("WAYLAND_DISPLAY")
     ):
         return []
-    return ["xvfb-run", "-a", "-s", "-screen 0 1280x720x24"]
+    # -d lets Xvfb pick a free display (-displayfd); -a races between parallel runs. Older xvfb-run (Debian) has only -a.
+    helptext = subprocess.run(
+        ["xvfb-run", "--help"], capture_output=True, text=True
+    ).stdout
+    auto = "-d" if "--auto-display" in helptext else "-a"
+    return ["xvfb-run", auto, "-s", "-screen 0 1280x720x24"]
+
+
+def assets_env():
+    """PROCYON_ASSETS for a game run (the scratch XDG_DATA_HOME hides the per-user import and a linked worktree has none), and
+    this checkout's own PROCYON_OVERLAY: the default overlay sits next to the assets, shared by every worktree using the main import."""
+    assets = find_assets()
+    overlay = os.environ.get("PROCYON_OVERLAY", str(REPO / "local/tool-overlay"))
+    return {
+        "PROCYON_OVERLAY": overlay,
+        **({"PROCYON_ASSETS": str(assets)} if assets else {}),
+    }
 
 
 def silent_data_home(xdg):
     """Fills a scratch XDG_DATA_HOME with settings that mute the game (default bindings, no saves)."""
     (Path(xdg) / "openprocyon").mkdir()
-    (Path(xdg) / "openprocyon/settings.json").write_text(json.dumps({"master": 0}))
+    (Path(xdg) / "openprocyon/settings.json").write_text(
+        json.dumps({"master": 0}), encoding="utf-8"
+    )
 
 
 def summarise(log, code):
@@ -80,10 +117,13 @@ def main():
         action="store_true",
         help="let the player's fleet take damage (default: invulnerable)",
     )
-    args = ap.parse_args()
-    subprocess.run(
-        ["cargo", "build", "--release", "--quiet"], cwd=REPO / "game", check=True
+    ap.add_argument(
+        "--profile",
+        default="fast",
+        help="Cargo profile to build the game with (default fast; release to time what players get)",
     )
+    args = ap.parse_args()
+    game = build_game(args.profile)
     out = REPO / "local/autoplay"
     out.mkdir(parents=True, exist_ok=True)
     wrap = display_wrapper()
@@ -94,6 +134,7 @@ def main():
         env = {
             **os.environ,
             "XDG_DATA_HOME": xdg,
+            **assets_env(),
             "WAYLAND_DISPLAY": "",
             "PROCYON_AUTOPLAY": str(args.limit),
             "PROCYON_PROFILE": "1",
@@ -107,10 +148,10 @@ def main():
             log = out / f"mission{n:02}.log"
             # Each run builds its own asset overlay (game/src/modding.rs); parallel runs sharing local/overlay broke each other.
             menv = {**env, "PROCYON_OVERLAY": str(Path(xdg) / f"overlay{n}")}
-            cmd = [*wrap, str(GAME), "--mission", str(n), "--script", "mission", "--speed", str(args.speed),
+            cmd = [*wrap, str(game), "--mission", str(n), "--script", "mission", "--speed", str(args.speed),
                    "--shot", str(out / f"mission{n:02}.png"), "--shot-frame", "1000000000", "--late-frame", "0"]  # fmt: skip
             print(f"mission {n} ...", flush=True)
-            with log.open("w") as f:
+            with log.open("w", encoding="utf-8") as f:
                 try:
                     # Wall-clock cap for a hung run; below 10 fps the game runs slower than 1x, so leave room.
                     code = subprocess.run(
@@ -123,7 +164,13 @@ def main():
                     ).returncode
                 except subprocess.TimeoutExpired:
                     code = "timeout"
-            return (n, *summarise(ANSI.sub("", log.read_text(errors="replace")), code))
+            return (
+                n,
+                *summarise(
+                    gamelog.read(log, r"panicked at|profile |autoplay end"),
+                    code,
+                ),
+            )
 
         with ThreadPoolExecutor(args.jobs) as pool:
             rows = list(pool.map(run, args.missions))

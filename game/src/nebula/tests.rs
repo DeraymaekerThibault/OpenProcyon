@@ -49,6 +49,7 @@ fn a_bolt_that_finds_no_ship_is_announced_with_its_segment_and_changes_nothing_e
     app.insert_resource(lib)
         .init_resource::<Time>()
         .init_resource::<StormShift>()
+        .init_resource::<crate::combat::SimRng>()
         .insert_resource(WeatherDamage(serde_json::from_value(crate::data::read_json(&assets_dir().join("data/nebula.json"))).unwrap()))
         .insert_resource(Storms(serde_json::json!([{
             "name":"test storm", "polygon":[[-1000.0,-1000.0],[1000.0,-1000.0],[1000.0,1000.0],[-1000.0,1000.0]],
@@ -86,6 +87,7 @@ fn thirty_seconds_in_a_storm_does_not_guarantee_lightning_damage() {
     app.insert_resource(lib)
         .init_resource::<Time>()
         .init_resource::<StormShift>()
+        .init_resource::<crate::combat::SimRng>()
         .insert_resource(WeatherDamage(serde_json::from_value(crate::data::read_json(&assets_dir().join("data/nebula.json"))).unwrap()))
         .insert_resource(Storms(serde_json::json!([{
             "name":"test storm", "polygon":[[-1000.0,-1000.0],[1000.0,-1000.0],[1000.0,1000.0],[-1000.0,1000.0]],
@@ -181,7 +183,7 @@ fn a_cloud_whose_shell_the_profile_hides_keeps_running() {
         .init_asset::<Image>()
         .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(Duration::from_millis(100)))
         .add_systems(Update, update);
-    app.world_mut().spawn((Camera3d::default(), GlobalTransform::default()));
+    app.world_mut().spawn((crate::MainCamera, Camera3d::default(), GlobalTransform::default()));
     let shown = app.world_mut().spawn((Cloud::for_tests("Nebula", 100.0), GlobalTransform::default(), Visibility::default())).id();
     let hidden = app.world_mut().spawn((Cloud::for_tests("Nebula", 100.0), GlobalTransform::default(), Visibility::Hidden)).id();
     for _ in 0..12 {

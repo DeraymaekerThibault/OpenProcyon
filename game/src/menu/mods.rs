@@ -15,8 +15,8 @@ pub const HD_SKIES: &str = "hd-skies";
 /// Mods whose panel offers the bake: the skies themselves, and the remaster look that is "best with HD skies".
 const BAKE_FROM: [&str; 2] = [HD_SKIES, "remaster"];
 
-/// The HD skies bake: the importer's `--bake-skies` (`tools/bake_sky.py`) on the imported assets, written into the player's
-/// mods folder. Not retail. The new skies show from the next start, like any mod change.
+/// Not retail: the HD skies bake, the importer's `--bake-skies` (`tools/bake_sky.py`) on the imported assets, written into the player's
+/// mods folder. The new skies show from the next start, like any mod change.
 #[derive(Clone, Debug, PartialEq, Default)]
 pub enum SkyBake {
     #[default]

@@ -106,7 +106,7 @@ pub fn update(
     let mut line: Vec<Vec3> = vec![];
     // A pending plot previews its course instead of the one being sailed.
     let plotted = !plot.pending.is_empty();
-    let ship = &if plotted { Ship { waypoints: plot.pending.clone(), order: ship.order.max(1), ..ship.clone() } } else { ship.clone() };
+    let ship = &if plotted { Ship { waypoints: plot.pending.clone(), order: ship.order.max(crate::EngineOrder::Slow), ..ship.clone() } } else { ship.clone() };
     if !ship.waypoints.is_empty() && shown {
         // Run the real movement step forward so the curve shows the turning radius, then stop drawing where the
         // ship's box would first touch scenery. PROVISIONAL: free motion only (no drift/steer-away), 0.1 s sample steps.

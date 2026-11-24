@@ -91,7 +91,7 @@ ballistic arc and attributed to the ship it started from.
 
 ## Gunners
 - **Only torpedo launchers** (the gun flag `Is TorpedoLauncher Gun`; in retail data only `Gun_Torpedo`, TimeBetweenBursts 35) have their wait
-  shortened by crew (decoded from the original's logic): wait = max(0, TimeBetweenBursts - 10 x the raw Gunnery (0..1) of the gunner at the
+  shortened by crew (unchecked against play): wait = max(0, TimeBetweenBursts - 10 x the raw Gunnery (0..1) of the gunner at the
   gun's bank), with no leadership bonus, no difficulty term and no human/computer distinction (a computer torpedo ship uses its own generic
   crew's gunnery; PROVISIONAL, remake: computer ships fire at the authored time). Every other gun (cannons, carronades, Gattlings, lancers,
   mortars, mines, point defence) reloads at its authored TimeBetweenBursts whoever mans it. The in-burst spacing never changes. The wait is
@@ -128,7 +128,7 @@ skirmish, the shell position sampled about 30 times a second.
   later a wide flat pink-orange ring spreading over the flight plane (blast MaxRadius 60 over Duration 3 in the bullet
   data); a ring from a shell ~50 units ahead reached the firing ship.
 
-## Mortar blasts (read from the original's code, 2026-10-31)
+## Mortar blasts (unchecked against play, 2026-10-31)
 - Star-class blasts (Star mortar, Nova secondaries, the volcano's magma bolt, mission 9's dark matter) are a ring spreading from the
   burst at MaxRadius / Duration (Star: 60 over 3 s, 20 units/s). A Star shell bursts where it comes down to the flight plane; one that
   strikes a hull or tower first deals its normal hit (unless it ricochets), then bursts there. One that times out just vanishes.
@@ -145,7 +145,7 @@ skirmish, the shell position sampled about 30 times a second.
   constant over the radius) is not ported: its scale to ship motion is unmeasured. The Nova
   pattern is not rolled with the shell's spin; lifeboats are not struck. The remake bursts lob shells at their aim point's height,
   not at the flight plane.
-- **Gravity charge well** (read from the original's code): for 17 s after it lands (Radius 40) everything within 40 units (flat
+- **Gravity charge well** (unchecked against play): for 17 s after it lands (Radius 40) everything within 40 units (flat
   distance, no friend/foe filter, the shooter's ships included) is pulled straight at the centre with force Magnitude (40000) x
   4 s² for s < 0.5, 4 (1 - s)² beyond, s = (40 - d) / 40: zero at the centre and at the rim, the full 40000 at d = 20, a quarter of it
   at 10 and 30. It does no damage. Remake: `combat::lob::GravWell::force`; ships get it through the black hole's pull
@@ -158,7 +158,7 @@ skirmish, the shell position sampled about 30 times a second.
   speed up outward at 20 and 27 units/s^2. Checked on the original's running game: median radius 72 and 96.5 units at 2.97 s,
   when the 3 s effect ends. Nothing removes them early and nothing needs to.
 
-## Who each gun shoots at, and lob aim points of computer ships (read from the original's code)
+## Who each gun shoots at, and lob aim points of computer ships (unchecked against play)
 - **Panic fire** (the player's button, refused while the ship is docked) goes through every gun bank in two passes. First pass: banks
   whose guns are not lobbing, not point-defence, not mine-laying and not torpedo launchers. Second pass: torpedo-launcher banks. So
   every class fires except lob, point-defence and mine guns, which keep their own routines. Each gun that fires then finds its own
@@ -237,7 +237,7 @@ particles and the authored EFT brightness/size/rectangle curves are unchanged. T
   with an enemy Carrack 40 units away for over a minute; the Game Summary shows 0 Damage Inflicted for us both times. So the
   command ship's direct-fire guns need a clicked target or panic fire (point defence not checked).
 
-## Read from the original's code, not yet measured in play (2026-11)
+## Unchecked against play, not yet measured in play (2026-11)
 - **Idle guns.** A direct-fire gun with no target never runs its tracking, so it stays where it was; hold fire (a fleet order or a script)
   freezes the turrets the same way, it does not swing them back to rest. A lob gun keeps tracking its stored ground point.
 - **Torpedo that loses its target** (destroyed, released or fully cloaked): it cuts its thrust and slows to rest, and can still hit;
@@ -246,7 +246,7 @@ particles and the authored EFT brightness/size/rectangle curves are unchanged. T
 - **Ignition.** One ship, the mission 9 lifeboat, never catches fire.
 
 ## Line of fire (computer captains)
-Read from the original's code, not yet measured in play. A computer-run ship (never the human's command ship) fires nothing in a
+Unchecked against play, not yet measured in play. A computer-run ship (never the human's command ship) fires nothing in a
 think while the straight segment from its centre to the aim point is blocked: no bank fire, no ground-fire point, no harpoon roll.
 Every attack routine's firing step has the test (simple, ram, broadside, frontal, rear, formation, dock for repairs) and so does the
 harpoon decision.
@@ -282,7 +282,7 @@ time of 10 s and a no-laying time of 20 s (retail saves: `LAYMINESMAXTIME` 10, `
 - Remake: `combat::gunnery::MineLaying`; mine guns never aim at a target.
 
 ### Mine target pick
-Read from the original's code (the 5 s constant read from its data; not yet measured in play): a mine does not look for a target every
+Unchecked against play (the 5 s constant read from its data; not yet measured in play): a mine does not look for a target every
 frame. It picks the nearest hostile ship in sight only every 5 s, the first time 5 s after it was laid, keeps chasing that ship in
 between while it is alive and not cloaked, and coasts to rest when it has none. A ship that sails into sight is therefore noticed
 up to 5 s late, and one that leaves sight is still chased until the next pick.
@@ -294,7 +294,7 @@ speed 20) and rest where they were put. Until given an owner a mine is hostile t
 (`maps/<id>/map.json` `mines`). The mine's mesh is the scene's first mesh element (`StarmineV2_Layer1`), now exported so mines are visible.
 PROVISIONAL: whether an unowned mine really is hostile to all (the scripts always assign every field at world start).
 
-## Shots and land (read from the original's code, 2026-10-31)
+## Shots and land (unchecked against play, 2026-10-31)
 Every projectile (cannon shells, lob shells, harpoons, nets, torpedoes, mines and lancer bolts alike) has each step of its flight
 swept as a 3-D segment against the collision triangles of islands, bases and armed asteroids, so nothing behind the first land it
 meets can be hit. The firer's own island or base is exempt. Only scenery with no collision at all (nebulae, black holes, wrecks,
@@ -342,7 +342,7 @@ are filed by the original's table (five in every group, six in wood and cloth, t
 are never used); the 15 % smoke thinning is gone. Not applied yet: freezing effects that are off-screen (a unit-radius frustum test;
 spawn gate 700 with 50 hysteresis).
 
-## Ricochet (read from the original's code, 2026-10-31)
+## Ricochet (unchecked against play, 2026-10-31)
 Every shot that strikes a damage section (a hull, a gun tower, a volcano) first rolls a ricochet:
 - Chance = (F + M + angle) / 100, clamped to 0..1, one uniform draw per strike.
 - F is the firing gun's ricochet factor for the range band it fired in (`EffectiveRange_`, `LongRange_`, `MaximumRange_RicochetFactor`,
@@ -361,7 +361,7 @@ Every shot that strikes a damage section (a hull, a gun tower, a volcano) first 
 When a mission-vital part of an armed base (building, defence ring) drops to 0 hit points, the remake plays that part's own destruct effect (from the retail section data) at the centre of the part, plus a ship-explosion sound. The part then swaps to its damaged mesh and stops blocking shells. Retail's actual effect and sound for a destroyed base part have not been measured; every headless attempt lost to the base's guns first (#97).
 
 ## Lob targeting cursor
-Source: static reading of the original; **[?]** = inferred, not seen in play. Remake: `combat::LobAim`/`lob_solution`, `options_menu::context_cursor`, `view::input`, `classic/world_hud.rs` (PROVISIONAL where marked).
+Source: unchecked against play unless noted; **[?]** = inferred, not seen in play. Remake: `combat::LobAim`/`lob_solution`, `options_menu::context_cursor`, `view::input`, `classic/world_hud.rs` (PROVISIONAL where marked).
 - **Arming**: a left click on a weapon-bar bank whose first gun is a lob gun arms it for the *primary* ship (no ammo/reload check); the weapon type
   comes from the bank's bullet (gravity charge, nova mortar, star mortar). Other banks get the ordinary fire toggle.
 - **Leaving**: a right click while armed cancels it, plays `HUD_LobWeapon_Cancel` and opens no menu. A left click with a ground point under the cursor
@@ -384,9 +384,9 @@ Remake: the section roll is rounded to the nearest whole number. PROVISIONAL: th
 (nearest assumed; exact halves are measure-zero for a continuous roll). The spill to neighbours still reuses the rounded roll
 x 0.4 rather than a fresh rounded roll per level, and base parts and lob blasts still take unrounded rolls.
 
-## Read from the original's code: shell fuses, crew, requests, torpedoes, mines, rocks and counter-fire (2026-11, not yet measured in play)
+## Unchecked against play: shell fuses, crew, requests, torpedoes, mines, rocks and counter-fire (2026-11, not yet measured in play)
 
-Static reading of the original's code and data; nothing below has been checked against the running game. Where the earlier
+Unchecked against play: nothing below has been checked against the running game. Where the earlier
 inventory wording was wrong the correction is stated.
 
 ### Shell lifetime (no fuse)
@@ -414,7 +414,8 @@ has fired once, or until more than **2.0 s** have passed since the request was l
 gun (a gun with the lobbing flag). The time is counted from the latest request (a repeated request restarts it). A shot clears the
 request and its panic mark; the time-out clears only the request. Point-defence guns fire continuously and have no request.
 Remake: the panic order is the pending request (`gunnery::FireRequest`, one per gun): each gun that panic fire reaches holds a request
-that ends with its first shot or after the lapse, and the order is over once no gun holds one; a repeated press while some gun still
+that ends with its first shot or after the lapse, and the order is over once no gun holds one and no gun is still in the burst it
+fired (the rest of a burst follows the gun's own target: the request ends with the burst's first shot, the burst does not); a repeated press while some gun still
 holds a request does not restart it (PROVISIONAL). The player's click-shot is still dropped once fired or when out of reach (see the
 cursor section), with no time-out.
 

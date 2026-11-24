@@ -1,13 +1,14 @@
 //! Mission AI: alliances, targets, movement, border leashes and path following.
 
 use super::*;
+use crate::EngineOrder;
 
 /// Alliances -> sides, hold fire, target choice and movement for every unit but the player's; towing.
 pub(super) fn mission_ai(
     mission: Option<Res<Mission>>,
     lib: Res<Library>,
     rocks: Query<(Entity, &Transform, &Asteroid), Without<Ship>>,
-    mut ships: Query<(Entity, &mut Ship, &mut Transform, &Health, &mut MissionShip, Has<PlayerShip>, Option<&crate::ship::FleetPilot>)>,
+    mut ships: Query<(Entity, &mut Ship, &mut Transform, &Health, &mut MissionShip, Has<PlayerShip>, Option<&crate::ship::FleetPilot>, Has<crate::lifeboats::Abandoned>)>,
     busy: Query<(), crate::ship::CaptainBusy>,
     boats: Query<(), With<crate::lifeboats::Lifeboat>>,
     sensors: Res<crate::environment::Sensors>,
@@ -15,7 +16,12 @@ pub(super) fn mission_ai(
     holes: Query<(&Transform, &crate::blackhole::Pull), Without<Ship>>,
     storms: (Option<Res<crate::nebula::Storms>>, Option<Res<crate::nebula::StormShift>>),
     (guns, time, mut breakoffs): (Query<&crate::combat::GunStates>, Res<Time>, Local<std::collections::HashMap<Entity, crate::ship::attack::Breakoff>>),
+    (spawn_order, mut start): (Query<&crate::scenario::SpawnIndex>, crate::scenario::BattleStart),
 ) {
+    if start.is_new() {
+        breakoffs.clear();
+    }
+    let key = |e: Entity| crate::scenario::SpawnIndex::of(&spawn_order, e);
     let Some(mission) = mission else { return };
     let holes = crate::ship::hole_list(&holes, storms.0.as_deref(), storms.1.as_deref());
     let sc = &mission.script;
@@ -23,14 +29,25 @@ pub(super) fn mission_ai(
     let unit = |e, id, name: &str, owner: &str, pos, alive| Unit { name: name.into(), owner: owner.into(), alive, visible: alive, ..Unit::new(e, id, pos) };
     // Lifeboats (mission 4's pre-placed ones) are never an enemy or a target, whoever owns them.
     let mut snap: Vec<Unit> =
-        ships.iter().filter(|s| !boats.contains(s.0)).map(|(e, _, tf, h, m, _, _)| unit(e, m.id, &m.name, &m.owner, tf.translation, !h.destroyed && m.visible)).collect();
+        ships.iter().filter(|s| !boats.contains(s.0)).map(|(e, _, tf, h, m, ..)| unit(e, m.id, &m.name, &m.owner, tf.translation, !h.destroyed && m.visible)).collect();
     let n_ships = snap.len();
     snap.extend(rocks.iter().map(|(e, tf, a)| unit(e, a.id, &a.kind, &a.group, tf.translation, a.hp > 0.0)));
     sc.tag(&mut snap);
     // Where each ship's damage sections are, for the attack's aim point (`ship::attack::aim`).
     let hulls: std::collections::HashMap<Entity, (Transform, usize, Vec<f32>)> = ships.iter().map(|s| (s.0, (*s.2, s.1.class, s.3.sections.clone()))).collect();
+    // Where each ship is, which way it points and how fast it goes: what `OP Follow Group` keeps station on.
+    let kin: std::collections::HashMap<Entity, (Vec3, f32, f32, usize)> = ships.iter().map(|s| (s.0, (s.2.translation, s.1.heading, s.1.speed, s.1.class))).collect();
+    // Followers given the same station on the same group line up one behind the other instead of fighting for one slot: each ship's
+    // place in that line, in spawn order.
+    let mut line: Vec<(crate::scenario::SpawnIndex, Entity, String, Station, u32)> =
+        ships.iter().filter(|s| !s.3.destroyed).filter_map(|s| s.4.follow.as_ref().map(|f| (key(s.0), s.0, f.group.clone(), f.station, f.distance.to_bits()))).collect();
+    line.sort_by_key(|l| (l.0, l.1));
+    let place_in_line = |e: Entity| {
+        let Some(me) = line.iter().find(|l| l.1 == e) else { return 0 };
+        line.iter().take_while(|l| l.1 != e).filter(|l| (&l.2, l.3, l.4) == (&me.2, me.3, me.4)).count()
+    };
     let player_owner = ships.iter().find(|s| s.5).map_or_else(|| sc.player().into(), |s| s.4.owner.clone());
-    for (e, mut ship, tf, h, mut ms, primary, pilot) in &mut ships {
+    for (e, mut ship, tf, h, mut ms, primary, pilot, abandoned) in &mut ships {
         let is_boat = boats.contains(e);
         let side = if !is_boat && sc.hostile(&ms.owner, &player_owner) { Side::Enemy } else { Side::Player };
         if ship.side != side {
@@ -39,23 +56,33 @@ pub(super) fn mission_ai(
         if is_boat {
             continue; // drifts or sits where it was placed; no captain AI
         }
-        let hold = ms.stance == Stance::Dummy || sc.holds_fire(&ms.owner);
+        let hold = ms.stance == Stance::Dummy || sc.holds_fire(&ms.owner) || abandoned;
         if ms.hold_fire != hold {
             ms.hold_fire = hold;
         }
+        // Not retail: an abandoned hull (`OP Abandon Ship`) takes no orders from its captain and cannot be given speed by a later rule.
+        if abandoned {
+            if ship.cap != 0.0 {
+                ship.cap = 0.0;
+            }
+            ship.halt();
+            ship.throttle = None;
+            ms.target = None;
+            continue;
+        }
         if sc.tows().iter().any(|link| link.1 == e) {
             // PROVISIONAL: the original's towee after release is not traced; it resumes its course (mission 10's convoy leader).
-            if ms.towed_course.is_none() && ship.order == 2 && !ship.waypoints.is_empty() {
+            if ms.towed_course.is_none() && ship.order == EngineOrder::Full && !ship.waypoints.is_empty() {
                 ms.towed_course = Some(std::mem::take(&mut ship.waypoints));
             }
             ship.waypoints.clear();
-            ship.order = 0;
+            ship.order = EngineOrder::Stop;
             ship.goal = None;
             continue; // Movement/turning come from the shared tow constraint, not a rigid teleport.
         }
         if ms.towed_course.is_some() && !h.destroyed {
             ship.waypoints = ms.towed_course.take().unwrap_or_default();
-            ship.order = 2;
+            ship.order = EngineOrder::Full;
         }
         // Border zone: a ship outside its leash volume drops what it was doing and heads back (to its return point, else the
         // zone's centre). PROVISIONAL: the original's border AI is unknown; this re-enters and resumes on the next frame inside.
@@ -66,7 +93,7 @@ pub(super) fn mission_ai(
         {
             ship.waypoints = vec![back];
             ship.goal = None;
-            ship.order = 2;
+            ship.order = EngineOrder::Full;
             ship.throttle = None;
             ms.stop_at_end = true;
             continue;
@@ -80,9 +107,9 @@ pub(super) fn mission_ai(
             && let Some(p) = ms.looping.clone()
         {
             ship.waypoints = p;
-            ship.order = 2;
+            ship.order = EngineOrder::Full;
         }
-        let range = lib.classes[ship.class].engage * 1.3;
+        let range = lib.classes[ship.class].engage * 1.3; // PROVISIONAL: the 1.3 factor on engage range is a guess
         let partner = |x: Entity| sc.tows().iter().any(|t| (t.0 == e && t.1 == x) || (t.1 == e && t.0 == x));
         let near = |pool: &[Unit], pred: &dyn Fn(&Unit) -> bool, acquire: bool| {
             pool.iter()
@@ -106,6 +133,41 @@ pub(super) fn mission_ai(
         if ms.target != want {
             ms.target = want;
         }
+        // Not retail: a standing `OP Follow Group` order. The ship keeps its station beside, ahead of or astern of a ship of the group
+        // (the one it first chose, until that one is gone) as a fleet's follower holds its formation slot (`ship::follow_speed`); it still
+        // fires at its target. The human's own ship never follows. PROVISIONAL: the station is the leader's position plus an offset in its
+        // frame, with no allowance for the leader's turn rate; ships that share a station stand a hull and 10 units further out each.
+        if !ms.human
+            && let Some(mut order) = ms.follow.clone()
+        {
+            let leader =
+                order.leader.filter(|l| snap[..n_ships].iter().any(|u| u.e == *l && u.alive)).or_else(|| near(&snap[..n_ships], &|s| matches(s, &order.group), false).map(|x| x.0));
+            if order.leader != leader {
+                order.leader = leader;
+                ms.follow = Some(order.clone());
+            }
+            if let Some(&(lpos, lheading, lspeed, lclass)) = leader.and_then(|l| kin.get(&l)) {
+                let class = &lib.classes[ship.class];
+                let here = tf.translation;
+                let out = order.distance + place_in_line(e) as f32 * (2.0 * class.radius + 10.0);
+                let slot = (lpos + Quat::from_rotation_y(lheading) * order.station.offset(out)).with_y(here.y);
+                let top = crate::ship::max_speed(&ship, class, h);
+                let to = slot - here;
+                let error = if to.length_squared() > 1.0 { crate::ship::angdiff((-to.x).atan2(-to.z), ship.heading) } else { 0.0 };
+                let aim = crate::ship::steer_round(here, slot, lpos, class.radius + lib.classes[lclass].radius);
+                let wanted = crate::ship::follow_speed(true, to.length(), lspeed, top, error);
+                ship.waypoints = if to.length() > 3.0 { vec![aim] } else { vec![] };
+                ship.goal = Some(lheading);
+                ship.order = if wanted < 0.01 { EngineOrder::Stop } else { EngineOrder::Full };
+                ship.throttle = Some(if top > 0.001 { (wanted / top).clamp(0.0, 1.0) } else { 0.0 });
+                ms.stop_at_end = false;
+            } else {
+                // Nothing to follow (the group is gone): stand still until a ship of it shows up.
+                ship.halt();
+                ship.throttle = None;
+            }
+            continue;
+        }
         // Movement: an attack order or an aggressive stance closes on the foe with the original's attack (`ship::attack`, as skirmish).
         // A human-captained ship (Captain_Human) only fires: it moves on the human fleet's orders (ship.rs fleet_follow).
         let chase = if ms.human || (ms.stance == Stance::Persistent && !ship.waypoints.is_empty()) {
@@ -119,9 +181,9 @@ pub(super) fn mission_ai(
         if let (Some((foe, fp)), false) = (chase, ms.stance == Stance::Dummy) {
             let (goal, order, throttle) = if ms.ram && ordered.is_some() {
                 let d = fp - tf.translation;
-                ((-d.x).atan2(-d.z), 3, crate::ship::attack::throttle(crate::ship::attack::Routine::Ram, e, tf.translation, ship.heading, fp))
+                ((-d.x).atan2(-d.z), EngineOrder::Emergency, crate::ship::attack::throttle(crate::ship::attack::Routine::Ram, key(e), tf.translation, ship.heading, fp))
             } else if let Some(away) = crate::ship::flee(&holes, tf.translation) {
-                (away, 3, None)
+                (away, EngineOrder::Emergency, None)
             } else {
                 // PROVISIONAL: the target's radius is left out of the gap (rocks and ships alike), and the course is steered as a heading.
                 let class = &lib.classes[ship.class];
@@ -134,9 +196,9 @@ pub(super) fn mission_ai(
                         };
                         let course = crate::ship::attack::course(routine, tf.translation, ship.heading, at, gap, range[0], time.elapsed_secs(), breakoffs.entry(e).or_default());
                         let d = course[0] - tf.translation;
-                        ((-d.x).atan2(-d.z), 3, crate::ship::attack::throttle(routine, e, tf.translation, ship.heading, course[0]))
+                        ((-d.x).atan2(-d.z), EngineOrder::Emergency, crate::ship::attack::throttle(routine, key(e), tf.translation, ship.heading, course[0]))
                     }
-                    None => (ship.heading, 0, None),
+                    None => (ship.heading, EngineOrder::Stop, None),
                 }
             };
             ms.stop_at_end = true;
@@ -165,7 +227,7 @@ pub(super) fn mission_ai(
             ship.throttle = None;
             ship.waypoints.clear();
             ms.stop_at_end = false;
-            ship.order = 0;
+            ship.order = EngineOrder::Stop;
             ship.goal = None;
         }
     }
@@ -193,8 +255,8 @@ pub(super) fn leash_player(mut mission: ResMut<Mission>, mut ships: Query<(&mut 
             }
             ship.waypoints = vec![p];
             ship.goal = None;
-            if ship.order == 0 {
-                ship.order = 1;
+            if ship.order == EngineOrder::Stop {
+                ship.order = EngineOrder::Slow;
             }
         }
         None if *out => {
@@ -222,8 +284,9 @@ pub(super) fn follow_path(
         let full = points.to_vec(); // Continuous fleet followers supply leader-relative slots, not cloned path offsets.
         let from = if closest { (0..full.len()).nearest_to(tf.translation, |a| full[*a]).unwrap_or(0) } else { 0 };
         sh.throttle = None;
+        ms.follow = None;
         sh.waypoints = full[from..].to_vec();
-        sh.order = 2;
+        sh.order = EngineOrder::Full;
         sh.goal = None;
         ms.attack.clear();
         ms.stop_at_end = !looping;

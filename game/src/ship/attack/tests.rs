@@ -56,7 +56,7 @@ fn the_guns_astern_routine_measures_to_the_aim_point_without_the_targets_size() 
 
 #[test]
 fn full_throttle_within_eleven_degrees_of_the_bow_else_the_ships_minimum() {
-    let e = Entity::from_raw_u32(7).unwrap();
+    let e = crate::scenario::SpawnIndex(7);
     let pos = Vec3::ZERO;
     assert_eq!(throttle(Routine::Frontal, e, pos, 0.0, Vec3::new(0.0, 0.0, -100.0)), None, "dead ahead: full");
     assert_eq!(throttle(Routine::Frontal, e, pos, 0.0, Vec3::new(19.0, 0.0, -100.0)), None, "10.8 degrees off: still full");
@@ -67,7 +67,7 @@ fn full_throttle_within_eleven_degrees_of_the_bow_else_the_ships_minimum() {
 
 #[test]
 fn a_ram_goes_full_throttle_only_within_five_degrees_of_the_bow() {
-    let e = Entity::from_raw_u32(7).unwrap();
+    let e = crate::scenario::SpawnIndex(7);
     let pos = Vec3::ZERO;
     assert_eq!(throttle(Routine::Ram, e, pos, 0.0, Vec3::new(8.0, 0.0, -100.0)), None, "4.6 degrees off: full");
     let slow = throttle(Routine::Ram, e, pos, 0.0, Vec3::new(10.0, 0.0, -100.0));

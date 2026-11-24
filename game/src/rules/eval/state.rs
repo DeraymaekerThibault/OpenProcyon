@@ -5,6 +5,35 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 use super::*;
 
+/// Which event condition a count belongs to, with the names that tell its instances apart.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub(in crate::rules) enum EventKey {
+    Captured {
+        team: String,
+        group: String,
+    },
+    Destroyed {
+        team: String,
+        group: String,
+    },
+    /// Each unit of `group` entering `volume`, counted once.
+    Once {
+        group: String,
+        volume: String,
+    },
+    Killed {
+        player: String,
+        kind: String,
+    },
+}
+
+/// The units seen inside a volume so far, for the two "entered trigger volume" conditions (they keep separate sets).
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub(in crate::rules) enum Entered {
+    AllOnce { group: String, volume: String },
+    OncePerUnit { group: String, volume: String },
+}
+
 pub struct Script {
     pub(in crate::rules) rules: Vec<Rule>,
     /// Engine-added rule features (`eval/ext.rs`).
@@ -73,11 +102,11 @@ pub struct Script {
     pub(in crate::rules) fired_at: HashMap<Entity, (f32, Entity)>,
     pub(in crate::rules) prev_inside: HashMap<(String, usize), bool>,
     /// 'All Units from Group have entered trigger volume Once': members seen inside, per group|volume.
-    pub(in crate::rules) entered: HashMap<String, HashSet<Entity>>,
+    pub(in crate::rules) entered: HashMap<Entered, HashSet<Entity>>,
     /// Every asteroid seen, with the group names it answered to (a destroyed rock leaves the unit list but still counts as attacked).
     pub(in crate::rules) belt: HashMap<Entity, Vec<String>>,
     /// TWT named groups by world object id (a unit also answers to its current owner, `matches`).
-    pub(in crate::rules) groups: HashMap<i64, Vec<String>>,
+    pub(in crate::rules) groups: HashMap<i64, Vec<GroupName>>,
     pub(in crate::rules) group_names: HashSet<String>,
     /// Lifeboats saved as the original tallies them: (collecting player, lifeboat owner, count). The only source of the rules'
     /// capture counts apart from `base_captures`; boarding a ship never touches it.
@@ -101,9 +130,9 @@ pub struct Script {
     pub team_points: HashMap<String, i32>,
     /// Event conditions (kills, captures, per-unit volume entries): events seen and events already reported, per condition key.
     /// PROVISIONAL: a rule that fires reports one pending event, so a repeating rule fires once per event.
-    pub(in crate::rules) events: HashMap<String, (u32, u32)>,
+    pub(in crate::rules) events: HashMap<EventKey, (u32, u32)>,
     /// Event keys the rule being evaluated would report if all its conditions hold.
-    pub(in crate::rules) consume: Vec<String>,
+    pub(in crate::rules) consume: Vec<EventKey>,
     /// The TWT's players (the capture conditions credit a captor's allies too).
     pub(in crate::rules) players: Vec<String>,
     /// 'Set Current Objective Point On Ship': the objective marker follows this unit (`point_pos`).
@@ -167,8 +196,8 @@ impl Script {
             // "Player0 Group" (aliased to the human's name) is the human's fleet: every ship the human owns, even where a TWT group
             // of the same name shadows the owner. Mission 5's TWT group "Player" is the starting Sea Sparrow and Comet; a rule later hands
             // the RLS Superior (TWT group "Jim") to the player as fleet primary. Without this its warning shot never counted.
-            if u.owner == self.player && !u.groups.contains(&self.player) {
-                u.groups.push(self.player.clone());
+            if u.owner == *self.player && !u.groups.contains(&GroupName::from(self.player.as_str())) {
+                u.groups.push(self.player.as_str().into());
             }
         }
     }
@@ -312,7 +341,7 @@ impl Script {
     }
     /// An event condition: `seen` events so far under `key`; true while some are unreported (more than `quota`), queuing one
     /// to be reported if the rule fires.
-    pub(in crate::rules) fn event(&mut self, key: String, seen: u32, quota: f32) -> bool {
+    pub(in crate::rules) fn event(&mut self, key: EventKey, seen: u32, quota: f32) -> bool {
         let e = self.events.entry(key.clone()).or_default();
         e.0 = e.0.max(seen);
         let pending = (e.0 - e.1) as f32 > quota;
@@ -430,7 +459,7 @@ impl Script {
                         }
                     }
                     // Mission 4's stuck sloop and mission 6's PirateBigBrother are spotted by closing in.
-                    "Group to Group Distance" if s(c, "Equivalence") == "Less Than" && player_in(s(c, "GroupA Name")) => {
+                    "Group to Group Distance" if schema::Equivalence::parse(s(c, "Equivalence")) == Some(schema::Equivalence::LessThan) && player_in(s(c, "GroupA Name")) => {
                         if let Some(u) = members(w, s(c, "GroupB Name")).into_iter().filter(|u| u.alive && u.visible && u.e != p.e).nearest_to(p.pos, |u| u.pos)
                             && u.pos.distance(p.pos) >= f(c, "Distance")
                         {
@@ -466,7 +495,9 @@ impl Script {
                         out.extend(vol.near_inside(Vec2::new(p.pos.x, -p.pos.z)).map(at));
                         out.extend(vol.grid(8).into_iter().map(at));
                     }
-                    "Player has hit Group/Unit at least x Times" | "Group/Unit Hit at least x Times by Player ( with eqivalence )" if base(s(c, "Player Name")) == p.owner => {
+                    "Player has hit Group/Unit at least x Times" | "Group/Unit Hit at least x Times by Player ( with eqivalence )"
+                        if base(s(c, "Player Name")) == p.owner.as_str() =>
+                    {
                         out.extend(members(w, s(c, "Group/Unit Name")).iter().filter(|u| u.alive && u.visible && u.owner != p.owner).map(|u| Want::Hit(u.e)));
                     }
                     "Group Destroyed" | "Group/Unit Vital Section has >,<,= X damage" | "Group/Unit has >,<,= X damage" => {
@@ -544,7 +575,7 @@ impl Script {
             let name = self.queue.pop_front()?;
             let m = &self.media["speech"][name.as_str()];
             let text = m["text"].as_str().unwrap_or("");
-            let dur = m["duration"].as_f64().map_or((text.len() as f32 / 14.0).max(2.0), |d| d as f32 + 0.3);
+            let dur = m["duration"].as_f64().map_or((text.len() as f32 / 14.0).max(2.0), |d| d as f32 + 0.3); // PROVISIONAL: reading-time formula and the 0.3 s tail are guesses
             self.subtitle = text.into();
             self.speaking = Some((name.clone(), dur));
             if !text.is_empty() {
@@ -579,5 +610,19 @@ impl Script {
         let now = !m.is_empty() && m.iter().any(|u| in_volume(vol, u.pos));
         let was = self.prev_inside.insert(key, now).unwrap_or(false);
         was && !now
+    }
+}
+
+#[cfg(test)]
+mod event_key_tests {
+    use super::{Entered, EventKey};
+    #[test]
+    fn event_keys_tell_conditions_and_names_apart() {
+        let (g, v) = ("Group".to_string(), "Vol".to_string());
+        let once = EventKey::Once { group: g.clone(), volume: v.clone() };
+        assert_eq!(once, EventKey::Once { group: g.clone(), volume: v.clone() });
+        assert_ne!(once, EventKey::Captured { team: g.clone(), group: v.clone() });
+        assert_ne!(EventKey::Captured { team: "T".into(), group: g.clone() }, EventKey::Destroyed { team: "T".into(), group: g.clone() });
+        assert_ne!(Entered::AllOnce { group: g.clone(), volume: v.clone() }, Entered::OncePerUnit { group: g, volume: v });
     }
 }

@@ -2,13 +2,13 @@
 (the volcanoes), and the loop's Ogg file next to the other sounds.
 usage: python -m tools.export_island_sounds <game_root> <assets_dir>"""
 
-import json
 import shutil
-import sys
 from pathlib import Path
 
+from tools import cli, importlog
 from tools.export_combat import flat, load
 from tools.gamefs import ci_files
+from tools.jsonio import dump
 
 
 def export(root, out):
@@ -17,14 +17,16 @@ def export(root, out):
     for wot in ci_files(root / "WorldObjects", "Island_*.wot"):
         try:
             f = flat(load(root, wot.stem))
-        except (KeyError, ValueError, FileNotFoundError):
-            continue  # installs vary (mods); one broken island must not stop the import
+        except (KeyError, ValueError, FileNotFoundError) as e:
+            # installs vary (mods); one broken island must not stop the import
+            importlog.skipped(f"WorldObjects/{wot.name}", f"{type(e).__name__}: {e}")
+            continue
         if f.get("HasAmbientSound") and f.get("AmbientSoundName"):
             islands[wot.stem] = dict(
                 sound=f["AmbientSoundName"], distance=f["AmbientSoundMaxDistance"]
             )
     (out / "data").mkdir(exist_ok=True)
-    (out / "data/island_sounds.json").write_text(json.dumps(islands, indent=1))
+    (out / "data/island_sounds.json").write_text(dump(islands), encoding="utf-8")
     (out / "sound").mkdir(exist_ok=True)
     for sound in {i["sound"] for i in islands.values()}:
         src = ci_files(root / "Sound/Dialogue", sound + ".ogg")
@@ -35,4 +37,4 @@ def export(root, out):
 
 
 if __name__ == "__main__":
-    export(*sys.argv[1:3])
+    export(*cli.args(__doc__, 2))

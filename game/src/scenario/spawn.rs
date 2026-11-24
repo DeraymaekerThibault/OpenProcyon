@@ -1,5 +1,6 @@
 //! Spawning a battle: ships, map scenery, fleets, bases and the test arena.
 use super::*;
+use crate::scenario::Race;
 
 /// Names ships that no script names: a random not-yet-used entry of the ship type's pool, as open maps do (WOT 'Available Unique
 /// Ship Name'); a used-up pool repeats names. PROVISIONAL: the original's selection (and its uniqueness scope) is unknown.
@@ -11,8 +12,7 @@ pub struct Namer {
 impl Namer {
     #[allow(clippy::new_without_default)] // time-seeded: a `Default` would hide the randomness
     pub fn new() -> Self {
-        let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(1, |d| d.as_nanos() as u64);
-        Namer { used: Default::default(), seed: t | 1 }
+        Namer { used: Default::default(), seed: crate::clock_seed() | 1 }
     }
     pub fn pick(&mut self, lib: &Library, class: &str) -> Option<String> {
         let pool = lib.names.get(class)?;
@@ -42,17 +42,17 @@ pub struct MapObject {
     pub start: Side,
 }
 
-/// The fleet type (TWT race: 0 Navy, 2 Pirate, 3 Procyon) a base or player name stands for: "navybase", "proc base", "Piratebase",
+/// The fleet type a base or player name stands for: "navybase", "proc base", "Piratebase",
 /// `Base_Grant`... PROVISIONAL: read from the retail names, the TWT carries no explicit owner side.
-pub fn faction(name: &str) -> Option<u8> {
+pub fn faction(name: &str) -> Option<Race> {
     let n = name.to_lowercase();
     let has = |words: &[&str]| words.iter().any(|w| n.contains(w));
     if has(&["pirate", "privateer"]) {
-        Some(2)
+        Some(Race::Pirate)
     } else if has(&["proc"]) {
-        Some(3)
+        Some(Race::Procyon)
     } else if has(&["navy", "grant", "montgomery", "shipyard", "port", "regina"]) {
-        Some(0)
+        Some(Race::Navy)
     } else {
         None
     }
@@ -168,6 +168,7 @@ pub(super) fn ambient_effect<'a>(kind: &str, effect: &'a str) -> Option<&'a str>
 /// start vectors. Without a map: the test arena (player at the origin, enemies on a ring).
 pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Library, fxl: &fx::FxLib, shapes: &collision::Shapes, asteroids: &data::AsteroidDefs, cfg: &Config) {
     info!("battle start: map={:?} player={} allies={:?} enemies={:?}", cfg.map, cfg.player, cfg.allies, cfg.enemies);
+    commands.queue(super::reset_sim);
     commands.queue(resume_scenario);
     commands.insert_resource(crate::loading::Loading::default());
     commands.remove_resource::<crate::rules::skirmish::SkirmishScript>();
@@ -179,7 +180,7 @@ pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Libra
         Some(file) => sky_entity.insert(view::HdSky(assets.load(file))),
         // The retail sphere and the original's generated stars, a new pattern each battle; a baked sky has its own stars.
         None => sky_entity.insert(crate::data::scene(assets, &format!("{sky}.glb"))).with_child((
-            Mesh3d(assets.add(view::star_mesh(&view::starfield(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.subsec_nanos()))))),
+            Mesh3d(assets.add(view::star_mesh(&view::starfield(crate::clock_seed() as u32)))),
             MeshMaterial3d(assets.add(StandardMaterial { unlit: true, ..default() })),
             bevy::light::NotShadowCaster,
             bevy::light::NotShadowReceiver,
@@ -197,6 +198,10 @@ pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Libra
         nebula::spawn(commands, assets, fxl, map);
         if campaign::is_mission(cfg.map.as_deref()) {
             campaign::spawn(commands, assets, lib, fxl, cfg.map.as_deref().unwrap(), &bases);
+            // Not retail: a custom mission's map places mines like a skirmish map does. Retail missions never read their `mines` key.
+            if campaign::is_custom(cfg.map.as_deref().unwrap()) {
+                spawn_mines(commands, map);
+            }
             commands.insert_resource(Target::default());
             commands.insert_resource(Outcome::Playing);
             return;
@@ -214,7 +219,7 @@ pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Libra
                     player: 0,
                     side: Side::Player,
                     human: true,
-                    race: players[0]["race"].as_u64().unwrap_or(4) as u8,
+                    race: Race::from_twt(players[0]["race"].as_u64().unwrap_or(4)),
                     team: players[0]["team"].as_i64().unwrap_or(-1) as i32,
                     row: None,
                     ids: vec![],
@@ -226,7 +231,7 @@ pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Libra
                     player: them,
                     side: Side::Enemy,
                     human: false,
-                    race: players[them]["race"].as_u64().unwrap_or(4) as u8,
+                    race: Race::from_twt(players[them]["race"].as_u64().unwrap_or(4)),
                     team: players[them]["team"].as_i64().unwrap_or(-1) as i32,
                     row: None,
                     ids: vec![],
@@ -259,7 +264,7 @@ pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Libra
                 player,
                 side: Side::Player,
                 human: false,
-                race: 4,
+                race: Race::Unchosen,
                 team: -1,
                 row: None,
                 ids: vec![],
@@ -292,7 +297,7 @@ pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Libra
                     player: p,
                     side,
                     human: false,
-                    race: 4,
+                    race: Race::Unchosen,
                     team,
                     row: None,
                     ids: placed.iter().map(|o| o["id"].as_i64()).collect(),
@@ -322,7 +327,7 @@ pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Libra
             let slots: Vec<_> = ship::formation_slots(kind, &radii).into_iter().map(|v| game_to_bevy(&p["start"]) + Quat::from_rotation_y(heading) * v).collect();
             // A scripted map's ships answer to their map player's name (`MissionShip::owner`), so the fleet is keyed the same way, or the
             // fleet bookkeeping drops the human's command ship (no control, no HUD).
-            let owner = if script_names.is_some() { p["name"].as_str().unwrap_or_default().to_string() } else { format!("player{}", g.player) };
+            let owner: crate::names::Owner = if script_names.is_some() { p["name"].as_str().unwrap_or_default().to_string() } else { format!("player{}", g.player) }.into();
             if let Some((name, flag)) = &g.row {
                 let colour = p["color"]
                     .as_array()
@@ -433,10 +438,7 @@ pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Libra
             None => commands.remove_resource::<crate::rules::skirmish::SkirmishScript>(),
         }
         // Mines the map placed (Border Dispute, Red Rover): the script gives each field to a player.
-        for m in map["mines"].as_array().into_iter().flatten() {
-            let (Some(bullet), Some(id)) = (m["type"].as_str(), m["id"].as_i64()) else { continue };
-            commands.spawn((Scenario, combat::MapMine { id, bullet: bullet.into(), owner: String::new(), side: None }, Transform::from_translation(game_to_bevy(&m["pos"]))));
-        }
+        spawn_mines(commands, map);
         // The map's space whales and dragons (named in its script's environment).
         if let Some(script) = data::try_json(&crate::assets_dir().join(format!("maps/{map_id}/script.json"))) {
             crate::environment::spawn(commands, assets, &script, true);
@@ -449,6 +451,14 @@ pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Libra
     }
     commands.insert_resource(Target::default());
     commands.insert_resource(Outcome::Playing);
+}
+
+/// The mines a map places (`mines`: `[{type, id, pos}]`), resting where the map put them until a script hands them to a player.
+fn spawn_mines(commands: &mut Commands, map: &serde_json::Value) {
+    for m in map["mines"].as_array().into_iter().flatten() {
+        let (Some(bullet), Some(id)) = (m["type"].as_str(), m["id"].as_i64()) else { continue };
+        commands.spawn((Scenario, combat::MapMine { id, bullet: bullet.into(), owner: String::new(), side: None }, Transform::from_translation(game_to_bevy(&m["pos"]))));
+    }
 }
 
 /// Armed bases and islands of a skirmish map: each fights for the side whose fleet type is theirs, with guns, damage and boarding state.

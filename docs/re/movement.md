@@ -18,7 +18,7 @@ Consequence for the cutter (full rudder) at the measured order speeds: about 12.
 
 ## Linear motion
 - Drag is linear (not quadratic) with rate `(MaxThrust/Mass)/MaxSpeed`; terminal speed = throttle × current max speed.
-- Lateral/vertical velocity is damped separately (read from the original's code, not measured): the ship's own velocity is split
+- Lateral/vertical velocity is damped separately (not measured): the ship's own velocity is split
   along its forward, starboard and up axes. Each tick the starboard part is reduced by 0.5 of itself and the up part by 0.3 of
   itself (an acceleration of -0.5 x part / tick length, resp. -0.3 x, added to the thrust and the forward drag); a part slower than
   0.01 units/s is left alone (the forward drag has the same 0.01 dead zone). Pushes from collisions, fields and currents are a
@@ -70,7 +70,7 @@ measured bank limit above.
    is one of the four "(1 − x)" factors on max speed/thrust; is the `r` in the rudder term (1 − r) (read at).
   Player speech fires when the sail loss crosses 25/50/75/100%.
 - The top-speed product and the thrust share one factor Q = (1 − sail loss) × (1 − energy-net loss) × (1 − nebula depth) × (1 − 0.6 × cloak level) ×
-  script percentage × engineer factor (read from the original's code, not measured as a whole). The two terms once listed as unknown are
+  script percentage × engineer factor (not measured as a whole). The two terms once listed as unknown are
   therefore known: the energy-net loss is 1 − the product of (1 − strength) over the ship's nets, the cloak term is 0.6 × the cloak level (0 uncloaked,
   ramping to 1 over the cloak time, so a fully cloaked ship has 0.4 of its speed), the script percentage is the clamped 0..1 value set by the
   mission action 'Set Ship Top Speed Percentage' (default 1), and the engineer factor is the crew rating factor (crew.md). The helm's turn
@@ -80,7 +80,7 @@ measured bank limit above.
   Remake: `Ship::max_speed` multiplies the same terms; the cloak term is stored in the net slot (`cloak.rs`), so a ship that is both cloaked and
   netted does not multiply both (PROVISIONAL: whether that state is reachable was not checked).
 
-## Plane modes and which objects are free in 3-D (read from the original's code, 2026-11; not measured)
+## Plane modes and which objects are free in 3-D (unchecked against play, 2026-11; not measured)
 - A ship's physics has a restricted-plane switch, on by default. While on: the vertical part of the thrust direction is dropped before it is
   normalised, the vertical velocity is dropped before drag is built, the vertical damping term is zero, and after the step the height is forced
   to the plane height (0). Every ship therefore sails exactly in the plane. The switch is cleared only in the constructors of torpedoes, whales and
@@ -90,7 +90,7 @@ measured bank limit above.
   docking-and-orders.md) and cleared in every other dock state; in the dock glide it removes the forward motion and leaves the turn.
   Remake: `docking.rs` `glide(.., turn_only, ..)`.
 
-## Shell and beam steps (read from the original's code, 2026-11; not measured)
+## Shell and beam steps (unchecked against play, 2026-11; not measured)
 - A shell is launched along its forward axis at the launch speed. Each tick: vertical acceleration −= gravity; position += velocity × dt using the
   velocity from before the tick; then velocity += (accumulated outside accelerations + gravity) × dt and the accumulators clear. The shell's pose
   (looking along its velocity, vertical up axis, or the x axis when nearly vertical) is updated only while its speed is at least 0.01 units/s; a
@@ -130,7 +130,7 @@ measured bank limit above.
 - Volcano meteors (The Diablo Strait) hit every section of a ship at once for 10-20 each; they are not shells.
 - Damage control mends hulls only through engineers and sails through riggers (refit-resupply.md 3.4).
 
-## Read from the original's code: difficulty switch, hulls with no vital section, last-hit clocks (2026-11, not yet measured in play)
+## Unchecked against play: difficulty switch, hulls with no vital section, last-hit clocks (2026-11, not yet measured in play)
 
 - **The difficulty factor is skipped in networked games.** Every hit through the shared hit routine is scaled by the table above unless a
   game-setup flag is set; the flag is the networked-game flag (the same flag decides whether the mission rules run inside the world
@@ -217,7 +217,7 @@ Headless retail skirmishes, one computer ship against our idle or fleeing Navy C
 - **Circling speed:** the path's saved minimum throttle × the crewed top speed: Carrack 0.745 × 8.71 = 6.49, measured 6.47; the
   Carrack and Barque ratios above (0.66, 0.74) lie in the saves' 0.65-0.75 range.
 - **Computer turn rate:** the circling Carrack's 8.23°/s at 6.47 needs rudder torque × 1.605 on top of the uncrewed formula,
-  more than its navigator factor alone gives (× 1.267 relative to ours: 7.33°/s). The original's code explains it (below,
+  more than its navigator factor alone gives (× 1.267 relative to ours: 7.33°/s). The original's rules explain it (below,
   "Computer helm"): the computer's helm boosts rudder torque while the course point is more than 11.25° off the bow.
 - **Assault Cutter (Zemyatin, idle Cutter target):** it did not circle: it swung back and forth across our bow at 6.3 units/s
   between 66 and 117 units for 90 s (turn reversing every ~10-20 s), then closed at Emergency and rammed our Cutter, which sank
@@ -235,7 +235,7 @@ Headless retail skirmishes, one computer ship against our idle or fleeing Navy C
   [boarding.md](boarding.md) §5.
 - **Target choice:** a computer ship takes the nearest hostile object within its scan range as its target, and chooses again
   every 6 s (keeping a farther target until then) or at once when the target is gone. It circles and fires at that target, so
-  in a fleet battle each computer ship goes for whichever of our ships is nearest (the full rule, read from the code, is below).
+  in a fleet battle each computer ship goes for whichever of our ships is nearest (the full rule, unchecked against play, is below).
   Checked in a fleet battle (Zemyatin, our Man-O-War + Cutter vs a computer Assault Cutter + Barque, six saves over 28 s): both
   computer ships took our Cutter, the nearer of our two ships by 45 units, from 2.8 s on and kept it; no spreading over targets.
   Remake:
@@ -262,7 +262,7 @@ Headless retail skirmishes, one computer ship against our idle or fleeing Navy C
   collision avoidance against ships, asteroids, black holes, torpedoes, mines, dragons, islands and nebulae; waypoint following with
   a random minimum throttle 0.65-0.75; a scan range = WOT sight × the crew factor.
 - **Fire:** see [gunnery.md](gunnery.md) (computer guns fire without clicks; the human command ship's do not).
-- Remake: see "Computer captains: decisions and attack" below (read from the original's code).
+- Remake: see "Computer captains: decisions and attack" below (unchecked against play).
 - **Helm (decoded):** the waypoint steering puts the rudder hard over when the heading error to the current point exceeds 20°
   and proportionally (error / 20°) inside it; a path point counts as reached within 2 × the ship's radius. Remake: `ship::HELM_FULL`
   for every ship.
@@ -272,7 +272,7 @@ Headless retail skirmishes, one computer ship against our idle or fleeing Navy C
   navigator factors (1.31, 1.37) squared; the same-ship save above gives 1.605 = 1.267². Explained by the computer helm's torque
 boost (below), not by the crew.
 
-## Computer helm (read from the original's code, 2026-10-31)
+## Computer helm (unchecked against play, 2026-10-31)
 - **Rudder:** the same law for the computer and the human: rudder = heading error to the course point / 20°, capped at full,
   no dead band. The computer sets it at each think (every 0.5 s) and holds it between thinks (16 steps); a ship steering for
   a clicked point does the same. The hold keeps such a ship hunting around the line to its point: the law alone lets the heading error
@@ -308,12 +308,12 @@ importer: a Procyon Minelayer (7.5 units/s) and a Procyon Frigate (6.6) on their
 - **Open:** concave coasts; why the Frigate looped (radius about 38-55) 120-250 units from our idle ship instead of circling it; the patrol legs.
 - Remake: the collision avoider below (`collision/avoid.rs`) does all of this; no route planning round islands for computer captains.
 
-## Collision avoidance (read from the original's code, 2026-10-31)
+## Collision avoidance (unchecked against play, 2026-10-31)
 Static analysis of the original's AI, written as rules; it explains the island behaviour above with the same mechanism for ships.
 - **One avoider for every computer-captained ship:** every AI-steered ship (attacks, ram, board, tow, dock, formation, explore) runs the same
   local avoider while it follows its course. The avoider runs only while the computer controls the ship: a ship whose captain is the human
   skips it on every routine except a dock order and a scripted path, so a move order the human clicks is sailed in straight lines into
-  ships, rocks and land alike (read from the original's code, 2026-11-20). There is no route planner: a course is a list of points, and only the avoider bends it.
+  ships, rocks and land alike (unchecked against play, 2026-11-20). There is no route planner: a course is a list of points, and only the avoider bends it.
 - **Obstacles:** ships, asteroids, black holes, torpedoes, mines, dragons, islands and nebulae (not currents, guns, shells or whales). Every ship counts,
   whatever its side or owner; only a lifeboat ignores other lifeboats. Friendly mines are skipped.
 - **When:** twice a second per ship, spread over 0.05 s steps.
@@ -328,7 +328,7 @@ Static analysis of the original's AI, written as rules; it explains the island b
 - **Right of way:** after the same obstacle six thinks in a row (about 3 s), each side's priority is its speed, plus 50 for a moving ship commanded by the
   human; anything that is not a ship has 0. If the obstacle's priority is at least the ship's own, the ship stops for 4 s, again while it persists.
   So computer ships give way to the human's moving ships, the slower of two computer ships stops, and a moving ship never stops for land.
-- **Inside a black hole or nebula:** straight out to 2r beyond its rim. **Wedged** (read from the original's code): when the same obstacle has been
+- **Inside a black hole or nebula:** straight out to 2r beyond its rim. **Wedged** (unchecked against play): when the same obstacle has been
   found on more than ten thinks in a row (about 5.5 s), the ship overlaps its bounding sphere (gap under 1 unit) and it barely moves (under
   0.1 units per 0.033 s), the avoider drops the detour and turns the ship in place toward the side of the smaller clear turn (a tie, or no
   clear side: the original's sign convention). The turn runs at a fixed sqrt(MaxAngularAcceleration / RotationalFriction) / 3 rad/s (a
@@ -350,7 +350,7 @@ took two sunk ships for parked ones). All the Navy computer ships sailed straigh
 Torpedo boats then patrolled 340-405 units off the base centre (median ~375) at 7-11 units/s for over 20 minutes. The Frigate and
 the Fast Frigates closed to 124-173 units, about their mean gun range (162-165), stayed inside 300 units for 1-4 minutes at a time
 and sank there. The Procyon ships went to the middle of the map and to the front of their own base, not at our base.
-Read from the code (below): against a base the attack range is the guns' mean long range, so a Navy Frigate (161.7) works at
+Unchecked against play (below): against a base the attack range is the guns' mean long range, so a Navy Frigate (161.7) works at
 124-173 units; there is no separate standoff.
 
 Turning (same log, `COMPUTER_TURN`): re-running each steady turn through our turn model gives a torque factor of about 2.0 for an
@@ -358,10 +358,10 @@ uncrewed Submersible (11 turns) and 0.9-1.1 for crewed Fast Frigates (15 turns),
 Frigate; Torpedo boats slow and weave in turns and do not fit. Crewed ships do not turn harder than uncrewed ones, so the
 factor-squared reading above is not supported; the computer helm's torque boost ("Computer helm") explains the extra turning.
 Run-in slow-down: four run-ins slowed 48-64 units from their target whatever the class (Carrack 48, Barque 49 and 60, Minelayer
-64), i.e. 0.32-0.59 of the gun reach. Read from the code: the throttle drops to the ship's minimum whenever its next course point is
+64), i.e. 0.32-0.59 of the gun reach. Unchecked against play: the throttle drops to the ship's minimum whenever its next course point is
 more than 11.25° off the bow, which the broadside aim point is once the ship nears its target.
 
-## Computer captains: decisions and attack (read from the original's code, 2026-10-31)
+## Computer captains: decisions and attack (unchecked against play, 2026-10-31)
 Static analysis of the original's captain AI, written as rules. Nothing in it depends on the difficulty setting.
 - **When a captain thinks (measured, 2026-11-16):** once 0.5 s has passed since its last think. With the 0.033 s step that is every
   16th step, 0.528 s (five ships, 85 thinks each, all 0.528 s). The clock restarts at each think, so no remainder carries over.
@@ -425,7 +425,7 @@ Static analysis of the original's captain AI, written as rules. Nothing in it de
   computer skirmish ships carry swapped guns and that run's fit was not recorded, so it is unresolved. Simulated circles round an idle
   Cutter, aiming at its nearest section, with the computer helm: Carrack 43-48 units (retail 45-50), Barque 53-58 (retail 51-58).
 
-## Border zone for the human's ship, the dormant simple attack, the scanner (read from the original's code, 2026-11)
+## Border zone for the human's ship, the dormant simple attack, the scanner (unchecked against play, 2026-11)
 - **The human captain is held at a border.** At every captain think (0.5 s), for the fleet's human-captain ship that is outside its border zone, the throttle is set to zero;
   if it is the primary ship the helmsman's off-course line is spoken. Nothing steers the ship back: it coasts, and the player's throttle is zeroed again on the next think. A flag
   on the captain that could switch this off was never found set for ships. Remake: `leash_player` steers the player's ship back toward the zone instead (Different, PROVISIONAL; the

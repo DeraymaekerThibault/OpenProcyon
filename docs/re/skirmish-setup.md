@@ -157,13 +157,13 @@ skill can read N/A). Dragging one onto a post spends its cost (a 9-point captain
   lancers 4 of 4, energy nets 4 of 4, gravity charge 1 of 1) and kept where the budget was spent (a two-ship fleet kept its lancers). Banks of stock cannons,
   carronades and Gattlings were swapped about half the time; two-deck banks, point-defence lancers, mines and torpedoes were never touched. The remake's
   default list is exactly that set (`RETAIL_COMPUTER_GUNS`, overridable by `data/ai/weapons.json`); PROVISIONAL: a gun that never showed up may still be allowed.
-  Remake swap rule (read from the original's build routine, not yet checked against a single measured value): every light, medium or heavy
+  Remake swap rule (unchecked against play, not yet checked against a single measured value): every light, medium or heavy
   bank gets exactly one random pick, no coin flip, from its mount size's pool: light {Cannon, Gattling, Carronade, Plasma}, medium {Cannon,
   Carronade, Plasma}, heavy {Cannon x2, Carronade x2, Plasma x2, Fire Launcher, Star Mortar} (a listed-twice gun weighs double). The pick may
   equal the stock gun (no change); a gun barred for the hull's race (carronade for Procyon, plasma for Pirate) is redrawn; the swap is kept only
   if points remain afterwards. Two-deck, point-defence, mine, torpedo and special banks are never touched. The original runs this only for
   fleets of its first three build styles (the remake: computer fleets of styles 0-2, and the player's Auto Assign).
-- Computer fleet build (read from the original's build routine, not yet checked against a measured value; built in `auto_build`): one draw
+- Computer fleet build (unchecked against play, not yet checked against a measured value; built in `auto_build`): one draw
   rolls a style from a list: style 0 six entries, styles 2, 1 and 5 one each, style 4 added when points / free slots is under 30 with more
   than 6 slots, style 3 added at 600+ points with 4+ slots (300 points, 5 slots: 6/9 style 0, 1/9 each for 1, 2, 5). Styles 0-2 buy hulls in up
   to five batches while points remain. A batch takes shares of the points left: style 0 A = 0.5 + 0.2u and B = 0.1 + 0.2v, style 1 A = 0.45 + 0.1u
@@ -251,12 +251,12 @@ retail map files (2026-10-27), not from a played battle:
   team has no ships left.
 - **Maps without bases (Diablo Strait, Dragon's Nest, Shadow Dance, The Maw, Zemyatin Anomaly, Iron War, Storm Front):** one rule ends
   the game on the engine conditions "Skirmish Game Complete" (Diablo Strait, Dragon's Nest, Shadow Dance, The Maw, Zemyatin) or
-  "Team Game Complete" (Iron War, Storm Front; Red Rover uses it too). Read from the original's code (2026-10-31): Skirmish Game
+  "Team Game Complete" (Iron War, Storm Front; Red Rover uses it too). Unchecked against play (2026-10-31): Skirmish Game
   Complete holds when every player with ships left is allied with every other, **or when no human-controlled player has a ship**, so
   on those maps losing the human fleet ends the battle at once even while allies fight on. Team Game Complete holds when exactly one
   team still has ships.
 
-**How the original ends a battle** (read from its code, 2026-10-31). There is no built-in "last team standing": a battle ends only when
+**How the original ends a battle** (unchecked against play, 2026-10-31). There is no built-in "last team standing": a battle ends only when
 a map rule's End Game action runs, and a map without such a rule never ends by itself. The rules are checked once a second; every
 skirmish end rule runs once. What counts as "having ships": ships, not bases or islands, and never lifeboats; a captured ship counts
 for its new owner; hidden, Persistent and Dummy ships count. The winners are the named team's players, sunk ones included (Team X
@@ -297,9 +297,9 @@ winner/loser message (`IDGS_TPINGAMEMESSAGE_*`, the human's side) is shown under
 (PROVISIONAL: retail position and timing unmeasured; "GAME STRING" means no custom message).
 
 ## Result when the human's ships are all lost (retail, Border Dispute, 2026-10-27)
-The original's code explains these observations (above): Border Dispute's "no human ships" and "draw" rules name "Game Lost" as their
+The original's rules explain these observations (above): Border Dispute's "no human ships" and "draw" rules name "Game Lost" as their
 message for winners and losers alike, so the field reads Game Lost even when the human's allies won. Which header the Game Summary
-shows is not read from the code; the remake uses the human's place among the winners (PROVISIONAL, fits both observations).
+shows is unchecked against play; the remake uses the human's place among the winners (PROVISIONAL, fits both observations).
 
 When every human ship sinks, the battlefield shows "Game Lost! Exiting..." and the game ends, but the Game Summary header depends on the
 teams: with Navy computer allies alive and the whole Procyon fleet sunk (both bases standing) it read VICTORY!, twice; with the lone Procyon

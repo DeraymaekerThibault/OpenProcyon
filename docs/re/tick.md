@@ -1,6 +1,6 @@
 # The simulation tick: order and timing
 
-Source: reading of the original's code, checked on the running game where marked; described in our own words. This page is the
+Source: checked on the running game where marked, otherwise unchecked against play; described in our own words. This page is the
 order the battle simulation must follow. Individual rules (damage, movement, contact) live in their own pages and only assume this order.
 
 ## The clock
@@ -92,6 +92,20 @@ There are two generators, both the 32-bit linear one (state x 1664525 + 10139042
 
 So a cosmetic draw never changes a battle roll except through the few listed above. The remake keeps a combat generator and a separate effects generator,
 which is the same split; its generator and seeding differ, so the sequences are not the original's. *Read from code only.*
+
+The remake reseeds its battle generator (`combat::SimRng`) at every battle start, a restart included, from `--seed N` / `PROCYON_SEED`
+or a fixed default, and logs the seed (`battle seed ...`), so the same seed and input replay the same battle. The original's seed comes
+from the map (PROVISIONAL: the remake uses one default for every map). Nebula storm and cloak-spotting rolls draw from their own named
+streams, as they had private generators before; boarding draws from the battle generator, as in the original. Objects carry their
+creation number within their kind (`scenario::SpawnIndex`, from 0 each battle), and systems whose rolls or tie-breaks depend on order
+(shells, blasts, beams, crew repair, captains, cloak watchers, the shooters of `fire` and the island gun towers, the ship-against-rock and
+ship-against-ship collision passes with their bump-sound rolls, the AI boarding rolls, lifeboat drift, asteroid set-up and break-up)
+go in that order, a ship's guns in mount order; per-ship fixed draws (attack throttle, leadership,
+explore quadrant) and the think timer's start delay come from it instead of entity ids. The break-up timer and the removal at its end
+run on the tick, and the battle reads the difficulty as it stood at battle start (`scenario::Difficulty`); the effect-detail factor that scales
+particle emission is a battle-start snapshot too (`fx::DetailScale`; PROVISIONAL: the original may apply a changed option at once). Per-entity state
+that systems keep between ticks (captain think clocks and break-offs, collision avoiders and ram clocks, gun ground-aim state) is dropped at each
+battle start (`scenario::BattleStart`). Still in query order: the grapple hook-flight speech roll, and cosmetic entity-derived values.
 
 ## Unmeasured
 

@@ -4,6 +4,7 @@
 //! (an owner change then moves the ship to the new owner's side) and has no orbit camera.
 
 use super::*;
+use crate::EngineOrder;
 use std::collections::HashMap;
 
 /// Base queries as the rule dispatcher reads them (bases carry no `Ship`).
@@ -38,6 +39,8 @@ pub(in crate::rules) struct FxEnv<'a, 'w, 's> {
     pub fxlib: Option<&'a crate::fx::FxLib>,
     pub sfx: Option<&'a mut Messages<crate::audio::Sfx>>,
     pub toggles: Option<&'a mut crate::panels::Toggles>,
+    /// The battle's difficulty (`scenario::Difficulty`), for damage the rules deal.
+    pub difficulty: u8,
     /// The orbit camera (the campaign's; a skirmish has none).
     pub orbit: Option<&'a mut Orbit>,
     /// A skirmish's map players and the side each fights for; none in the campaign.
@@ -113,7 +116,7 @@ pub(in crate::rules) fn apply(
                 if !s.primary && !s.mission.human {
                     s.ship.cap = v;
                 } else if v <= 0.0 && !skirmish {
-                    s.ship.order = 0;
+                    s.ship.order = EngineOrder::Stop;
                     s.ship.waypoints.clear();
                 }
             }),
@@ -122,7 +125,39 @@ pub(in crate::rules) fn apply(
                 s.health.destroyed = true;
                 *s.visibility = Visibility::Hidden;
             }),
-            Fx::Teleport(u, p) => super::teleport::apply(u, p, env, commands, ships, animals),
+            // Retail `Teleport Group/Unit`: every member goes to the first point. This engine keeps the group's layout round it, moves a hull
+            // that would land in another to the nearest free spot and leaves the ships at rest (docs/re/collision.md "Teleport and overlap").
+            Fx::Teleport(u, p) => {
+                let members: Vec<_> = u.iter().filter_map(|e| ships.get(*e).ok().map(|s| (*e, s.transform.translation))).collect();
+                let targets = super::teleport::layout(&members.iter().map(|m| m.1).collect::<Vec<_>>(), p);
+                // Hulls a teleported ship must not land in: every other ship in play, and each member once it has been placed.
+                let mut hulls: Vec<_> = ships
+                    .iter()
+                    .filter(|s| !u.contains(&s.entity) && !s.health.destroyed && *s.visibility != Visibility::Hidden)
+                    .map(|s| crate::collision::spot::hull(env.lib.classes[s.ship.class].collision_bounds, s.transform))
+                    .collect();
+                for ((e, _), at) in members.iter().zip(targets) {
+                    place(*e, at, None, true, Some(&mut hulls), env, commands, ships, animals);
+                }
+                for e in u.into_iter().filter(|e| !members.iter().any(|m| m.0 == *e)) {
+                    place(e, p, None, false, None, env, commands, ships, animals); // animals and scenery go to the point itself
+                }
+            }
+            // Not retail: `OP Teleport`, the retail teleport's way of placing a unit, plus the heading and the speed.
+            Fx::Place { units, heading } => {
+                for (e, p) in units {
+                    place(e, p, heading, true, None, env, commands, ships, animals);
+                }
+            }
+            // Not retail: `OP Follow Group`. A later order of any kind (path, attack, ram, hold, clear) replaces it; the mission AI keeps the
+            // station (rules/systems/mission_ai.rs).
+            Fx::Follow { units, group, station, distance } => each_ship(ships, units, |s| {
+                s.mission.follow = Some(crate::rules::FollowOrder { group: group.clone(), station, distance, leader: None });
+                s.mission.attack.clear();
+                s.mission.ram = false;
+                s.mission.looping = None;
+                s.mission.stop_at_end = false;
+            }),
             Fx::Dock(dockers, dockees) => {
                 for d in dockers {
                     // docking.rs steers and stops the docker itself
@@ -135,7 +170,7 @@ pub(in crate::rules) fn apply(
                 }
             }
             Fx::Tow(tower, towee) => {
-                let at = |e| ships.get(e).ok().map(|s| (s.transform.translation, env.lib.classes[s.ship.class].radius));
+                let at = |e| ships.get(e).ok().map(|s| (super::sim_pos(s.transform, s.interp), env.lib.classes[s.ship.class].radius));
                 if let (Some((p, rp)), Some((q, rq))) = (at(tower), at(towee))
                     && crate::docking::tow_in_range(p, q, rp, rq)
                 {
@@ -143,6 +178,46 @@ pub(in crate::rules) fn apply(
                 } else {
                     // Mission 10's Plunder starts ~700 units from the merchant it tows. PROVISIONAL: the original's approach is not traced.
                     env.dock.write(DockMsg::TowStart { tower: Some(tower), towee });
+                }
+            }
+            // Each boarder takes the nearest live ship of the target group through the order a player's menu gives (boarding.rs): a
+            // grapple, then the boarding once the hook has bitten.
+            Fx::Board(boarders, targets) => {
+                let at = |e| ships.get(e).ok().filter(|s| !s.health.destroyed).map(|s| super::sim_pos(s.transform, s.interp));
+                for b in boarders {
+                    let Some(from) = at(b) else { continue };
+                    let target = targets.iter().copied().filter(|t| *t != b).filter_map(|t| Some((t, at(t)?))).min_by(|x, y| x.1.distance(from).total_cmp(&y.1.distance(from)));
+                    match target {
+                        Some((target, _)) => {
+                            env.board.write(crate::boarding::BoardMsg::Order { boarder: b, target });
+                        }
+                        None => debug!("OP Board Ship: no live ship in the target group for {b}"),
+                    }
+                }
+            }
+            // Not retail: the crews of the ships take to the boats and the hulls are left disabled (lifeboats.rs launches the boats when it
+            // sees `Abandoned` added, by the ship's Create Lifeboats flag). A hull that is already abandoned or destroyed is skipped.
+            Fx::Abandon(u) => each_ship(ships, u, |s| {
+                if s.health.destroyed || s.abandoned {
+                    return;
+                }
+                s.ship.halt();
+                s.ship.cap = 0.0;
+                s.mission.hold_fire = true;
+                s.mission.attack.clear();
+                s.mission.target = None;
+                commands.entity(s.entity).insert(crate::lifeboats::Abandoned);
+            }),
+            // Not retail: `OP Place Mines`. The mines are the map's own kind (combat/minefield.rs arms them); one of an unknown bullet is skipped.
+            Fx::Mines { set, bullet, owner } => {
+                if !env.lib.bullets.contains_key(&bullet) {
+                    warn!("OP Place Mines: no bullet '{bullet}'");
+                    continue;
+                }
+                let side = (!owner.is_empty()).then(|| env.sides.and_then(|s| s.get(&owner)).copied().unwrap_or_else(|| mission_side(env.script, &owner)));
+                for p in env.script.point_sets[&set].as_array().into_iter().flatten() {
+                    let mine = crate::combat::MapMine { id: -1, bullet: bullet.clone(), owner: owner.clone(), side };
+                    commands.spawn((Scenario, mine, Transform::from_translation(game_to_bevy(&p["pos"]))));
                 }
             }
             Fx::Dockable(u, on) => {
@@ -176,6 +251,8 @@ pub(in crate::rules) fn apply(
                     info!("map script: {} ship(s) now belong to '{o}'", u.len());
                 }
                 let side = env.sides.and_then(|s| s.get(&o)).copied();
+                // Not retail: a custom mission's placed mine fights for the side its new owner has in the mission's alliance table.
+                let mine_side = side.or_else(|| env.sides.is_none().then(|| mission_side(env.script, &o)));
                 for e in u {
                     if let Ok((_, mut base, ..)) = env.bases.get_mut(e) {
                         base.owner = o.clone();
@@ -186,8 +263,8 @@ pub(in crate::rules) fn apply(
                     // A placed mine fights for its new owner's side.
                     if let Some(Ok((.., mut mine, shell))) = env.mines.as_mut().map(|m| m.get_mut(e)) {
                         mine.owner.clone_from(&o);
-                        mine.side = side;
-                        if let (Some(mut shell), Some(side)) = (shell, side) {
+                        mine.side = mine_side;
+                        if let (Some(mut shell), Some(side)) = (shell, mine_side) {
                             shell.side = side;
                         }
                     }
@@ -195,7 +272,7 @@ pub(in crate::rules) fn apply(
                         if let Some(side) = side {
                             sh.side = side;
                         }
-                        ms.owner = o.clone();
+                        ms.owner = o.as_str().into();
                     }
                 }
             }
@@ -223,12 +300,16 @@ pub(in crate::rules) fn apply(
             }
             Fx::Banner(u, bn) => each_ship(ships, u, |s| s.mission.banner.clone_from(&bn)),
             Fx::Ram(u, g) => each_ship(ships, u, |s| {
+                s.mission.follow = None;
                 s.mission.ram = true;
                 add_once(&mut s.mission.attack, &g);
             }),
             Fx::Attack(u, g) => {
                 each_dragon(env.dragons, &u, |d| add_once(&mut d.attack, &g));
-                each_ship(ships, u, |s| add_once(&mut s.mission.attack, &g));
+                each_ship(ships, u, |s| {
+                    s.mission.follow = None;
+                    add_once(&mut s.mission.attack, &g);
+                });
             }
             // Only script-given orders are cleared: the human's own course and throttle stay.
             Fx::Clear(u) => {
@@ -237,17 +318,20 @@ pub(in crate::rules) fn apply(
                     d.hold = false;
                 });
                 each_ship(ships, u, |s| {
+                    s.mission.follow = None;
                     s.mission.attack.clear();
                     s.mission.ram = false;
                     s.mission.looping = None;
                     if !s.primary {
                         s.ship.waypoints.clear();
-                        s.ship.order = 0;
+                        s.ship.order = EngineOrder::Stop;
                         s.ship.goal = None;
                     }
                 });
             }
-            Fx::Damage(u, p) => each_ship(ships, u, |s| crate::combat::fraction_hit(&env.lib.classes[s.ship.class], &mut s.health, p, s.ship.side, s.mission.invuln)),
+            Fx::Damage(u, p) => {
+                each_ship(ships, u, |s| crate::combat::fraction_hit(&env.lib.classes[s.ship.class], &mut s.health, p, s.ship.side, s.mission.invuln, env.difficulty))
+            }
             // A skirmish's 'Hold position' is the captain's lock (the right-click menu's Hold): the ship stays where it is and still
             // fires; releasing hands it back to its captain or to the next order the script gives.
             Fx::Hold(u, on) if skirmish => {
@@ -256,7 +340,7 @@ pub(in crate::rules) fn apply(
                     let Ok(RuleShipItem { ship: mut sh, .. }) = ships.get_mut(e) else { continue };
                     if on {
                         sh.waypoints.clear();
-                        sh.order = 0;
+                        sh.order = EngineOrder::Stop;
                         commands.entity(e).insert(crate::ship::HoldPosition);
                     } else {
                         commands.entity(e).remove::<crate::ship::HoldPosition>();
@@ -267,8 +351,9 @@ pub(in crate::rules) fn apply(
                 each_dragon(env.dragons, &u, |d| d.hold = on);
                 if on {
                     each_ship(ships, u, |s| {
+                        s.mission.follow = None;
                         s.ship.waypoints.clear();
-                        s.ship.order = 0;
+                        s.ship.order = EngineOrder::Stop;
                     });
                 }
             }
@@ -320,9 +405,25 @@ pub(in crate::rules) fn apply(
                 }
             }
             Fx::WarningShots(u, on) => each_ship(ships, u, |s| s.mission.warning_shots = on),
-            Fx::Current(path) => {
-                commands.spawn((Scenario, crate::environment::Current::new(path)));
+            Fx::Current(name, path) => {
+                commands.spawn((Scenario, crate::environment::Current::new(path).named(&name)));
             }
+            // Not retail: `OP Etherium Current` changes the current of that path (retail or made by this action), or makes one.
+            Fx::CurrentSet { name, path, strength, width, on } => commands.queue(move |w: &mut World| {
+                let found = w.query::<(Entity, &crate::environment::Current)>().iter(w).find(|(_, c)| c.name() == name).map(|(e, _)| e);
+                match found {
+                    Some(e) => {
+                        if let Some(mut c) = w.get_mut::<crate::environment::Current>(e) {
+                            c.set(strength, width, on);
+                        }
+                    }
+                    None => {
+                        let mut c = crate::environment::Current::new(path).named(&name);
+                        c.set(strength, width, on);
+                        w.spawn((Scenario, c));
+                    }
+                }
+            }),
             Fx::DarkMatter(volume) => {
                 // The blast starts at the volume's centre (game x, y) at the ships' height.
                 if let Some(c) = env.script.volume(&volume).centroid() {
@@ -331,7 +432,7 @@ pub(in crate::rules) fn apply(
             }
             Fx::Longboat(u) => {
                 // Launched from the human's command ship: alongside it, same heading.
-                let from = ships.iter().find(|s| s.primary).map(|s| (s.transform.translation, s.ship.heading, env.lib.classes[s.ship.class].radius));
+                let from = ships.iter().find(|s| s.primary).map(|s| (super::sim_pos(s.transform, s.interp), s.ship.heading, env.lib.classes[s.ship.class].radius));
                 if let Some((p, heading, r)) = from {
                     for (k, e) in u.into_iter().enumerate() {
                         if let Ok(RuleShipItem { ship: mut sh, transform: mut tf, .. }) = ships.get_mut(e) {
@@ -354,6 +455,75 @@ pub(in crate::rules) fn apply(
                 orbit.yaw = heading + angle.to_radians();
             }
         }
+    }
+}
+
+/// The side a mission player's thing fights for: the enemy side when the owner is hostile to the human player, else the player's.
+fn mission_side(script: &Script, owner: &str) -> Side {
+    if script.hostile(owner, script.player()) { Side::Enemy } else { Side::Player }
+}
+
+/// Moves one unit to `p` (the retail `Teleport Group/Unit`, with `heading` and `clear_speed` off): a ship loses its waypoints, an animal its
+/// velocity, scenery moves with its collision body. Not retail: `heading` (radians about +Y; ships only) and `clear_speed` (a ship's speed and
+/// turn rate, and the push of a contact or a current) are what `OP Teleport` adds. `retail_fix` is the retail teleport's engine-added
+/// handling of a ship (not in the original): it lands on the nearest spot clear of `retail_fix`'s hulls (and joins them), and the
+/// human's ship also drops its throttle, sail order and course (`teleport::stop`).
+#[allow(clippy::too_many_arguments)]
+fn place(
+    e: Entity,
+    p: Vec3,
+    heading: Option<f32>,
+    clear_speed: bool,
+    retail_fix: Option<&mut Vec<crate::collision::tree::Box3>>,
+    env: &FxEnv,
+    commands: &mut Commands,
+    ships: &mut Query<RuleShip>,
+    animals: &mut Query<(Entity, &mut crate::environment::SpaceAnimal, &mut Transform, &mut Visibility), Without<Ship>>,
+) {
+    if let Ok(RuleShipItem { ship: mut sh, transform: mut tf, mission, primary, .. }) = ships.get_mut(e) {
+        tf.translation = p;
+        sh.waypoints.clear();
+        let human = mission.human || primary;
+        if let Some(hulls) = retail_fix {
+            let bounds = env.lib.classes[sh.class].collision_bounds;
+            let rotation = heading.map_or(tf.rotation, Quat::from_rotation_y);
+            tf.translation = crate::collision::spot::free_spot(bounds, rotation, p, hulls);
+            hulls.push(crate::collision::spot::hull(bounds, &Transform { rotation, ..*tf }));
+            super::teleport::stop(&mut sh, human);
+            commands.queue(move |w: &mut World| {
+                if human && let Some(mut pilot) = w.get_mut::<crate::ship::FleetPilot>(e) {
+                    pilot.destination = None;
+                }
+            });
+        }
+        if clear_speed {
+            sh.speed = 0.0;
+            sh.ang_vel = 0.0;
+            commands.queue(move |w: &mut World| {
+                if let Some(mut d) = w.get_mut::<crate::collision::Drift>(e) {
+                    d.0 = Vec3::ZERO;
+                }
+            });
+        }
+        if let Some(h) = heading {
+            sh.heading = h;
+            tf.rotation = Quat::from_rotation_y(h);
+        }
+    } else if let Ok((_, mut animal, mut tf, _)) = animals.get_mut(e) {
+        tf.translation = p;
+        animal.velocity = Vec3::ZERO;
+    } else if env.bases.contains(e) {
+        // Scenery (wrecks): move the model and its collision body together.
+        commands.queue(move |w: &mut World| {
+            let Some(old) = w.get::<Transform>(e).map(|t| t.translation) else { return };
+            let delta = (p - old).with_y(0.0);
+            if let Some(mut t) = w.get_mut::<Transform>(e) {
+                t.translation += delta;
+            }
+            if let Some(mut o) = w.get_mut::<crate::collision::Obstacle>(e) {
+                o.translate(delta);
+            }
+        });
     }
 }
 

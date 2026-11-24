@@ -15,7 +15,7 @@ pub struct MapMine {
 
 impl MapMine {
     pub fn unit(&self, e: Entity, tf: &Transform) -> crate::rules::Unit {
-        crate::rules::Unit { name: self.bullet.clone(), owner: self.owner.clone(), ..crate::rules::Unit::new(e, self.id, tf.translation) }
+        crate::rules::Unit { name: self.bullet.as_str().into(), owner: self.owner.as_str().into(), ..crate::rules::Unit::new(e, self.id, tf.translation) }
     }
 }
 
@@ -30,6 +30,7 @@ pub(super) fn arm(mut commands: Commands, assets: Res<AssetServer>, lib: Res<Lib
                 lifetime: b.lifetime,
                 gravity: 0.0,
                 bullet: mine.bullet.clone(),
+                torpedo: b.torpedo,
                 side: mine.side.unwrap_or(crate::scenario::HOSTILE_TO_ALL),
                 shooter: e,
                 target: None,

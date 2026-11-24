@@ -25,7 +25,7 @@ use crate::blackhole::{BlackHole, Pull, Swallowed};
 
 pub const SHADER: &str = "shaders/blackhole.wesl";
 
-/// Seconds the ring and disc flash when a hole swallows a ship.
+/// Seconds the ring and disc flash when a hole swallows a ship. Engine choice, not the original's.
 const FLASH_SECONDS: f32 = 1.0;
 
 /// The `black_holes` block; every size is a share of the hole's pull radius.

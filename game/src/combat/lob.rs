@@ -42,6 +42,7 @@ pub fn shoot(mut commands: Commands, lib: Res<Library>, fxl: Res<FxLib>, mut msg
                     lifetime: b.lifetime.min(30.0),
                     gravity: m.gravity,
                     bullet: m.bullet.clone(),
+                    torpedo: b.torpedo,
                     side: m.side,
                     shooter: m.shooter,
                     target: m.target,
@@ -68,7 +69,7 @@ pub fn shoot(mut commands: Commands, lib: Res<Library>, fxl: Res<FxLib>, mut msg
     }
 }
 
-/// A star-class blast (StarMortarCustomInfoFactory: MaxRadius over Duration), read from the original's code: a ring spreading from
+/// A star-class blast (StarMortarCustomInfoFactory: MaxRadius over Duration): a ring spreading from
 /// the burst at MaxRadius / Duration that strikes everything once as it passes its centre (`blasts`).
 #[derive(Component)]
 pub struct Blast {
@@ -80,7 +81,7 @@ pub struct Blast {
     age: f32,
 }
 
-/// A gravity charge's well (GravChargeCustomInfoFactory: Magnitude, Radius, Duration), read from the original's code: for
+/// A gravity charge's well (GravChargeCustomInfoFactory: Magnitude, Radius, Duration): for
 /// `Duration` seconds everything within `radius` (flat distance) is pulled straight toward its centre, with no friend/foe filter.
 /// The ship pull itself is `blackhole::pull`, which reads `force`.
 #[derive(Component)]
@@ -111,7 +112,7 @@ pub fn detonate(
     fxl: Res<FxLib>,
     mut msgs: MessageReader<Detonate>,
     mut sfx: MessageWriter<Sfx>,
-    mut rng: ResMut<Rng>,
+    mut rng: ResMut<SimRng>,
     mission: Option<ResMut<crate::campaign::Mission>>,
 ) {
     let mut mission = mission;
@@ -145,25 +146,27 @@ pub fn detonate(
 }
 
 /// The five secondaries' velocities of a Nova mortar splitting with velocity `v`: one straight on, four turned 0.1 rad either way
-/// about the shell's up and right axes (read from the original's code). PROVISIONAL: the pattern is not rolled with the shell's spin.
+/// about the shell's up and right axes. PROVISIONAL: the pattern is not rolled with the shell's spin.
 pub(super) fn nova_split(v: Vec3) -> [Vec3; 5] {
     let right = v.cross(Vec3::Y).normalize_or(Vec3::X);
     let up = right.cross(v).normalize_or(Vec3::Y);
     [(0.0, 0.0), (-0.1, -0.1), (0.1, -0.1), (-0.1, 0.1), (0.1, 0.1)].map(|(yaw, pitch)| Quat::from_axis_angle(up, yaw) * Quat::from_axis_angle(right, pitch) * v)
 }
 
-/// Spreads each blast and strikes what its ring passes, read from the original's code: every ship and base section, rock and shell
+/// Spreads each blast and strikes what its ring passes: every ship and base section, rock and shell
 /// in flight is struck once, when the ring (radius MaxRadius x age / Duration) reaches its centre, for the bullet's damage roll for
 /// the material times max(0.1, 1 - distance / MaxRadius). Ship sections take the difficulty factor and spill; no fires start. Nobody is
 /// spared, the shooter's own ships included; star-class shells are immune. PROVISIONAL: the push the blast gives what is inside it
 /// (the bullet's `Magnitude`) is not ported (its scale to ship motion is unmeasured); lifeboats are not struck.
 #[allow(clippy::too_many_arguments)]
 pub fn blasts(
+    spawn_order: Query<&crate::scenario::SpawnIndex>,
     mut commands: Commands,
     time: Res<Time>,
     lib: Res<Library>,
     fxl: Res<FxLib>,
-    mut rng: ResMut<Rng>,
+    mut rng: ResMut<SimRng>,
+    difficulty: Res<crate::scenario::Difficulty>,
     (mut hits, mut destroyed, mut splashes): (MessageWriter<Hit>, MessageWriter<Destroyed>, MessageWriter<super::Splashed>),
     q: Query<(Entity, &mut Blast, &Transform), (Without<Ship>, Without<Shell>, Without<crate::Joining>)>,
     mut ships: Query<(Entity, &Transform, &Ship, &mut Health, Option<&crate::campaign::MissionShip>), Without<crate::lifeboats::Lifeboat>>,
@@ -173,7 +176,7 @@ pub fn blasts(
 ) {
     let dt = time.delta_secs();
     let mut q = q;
-    for (e, mut b, tf) in &mut q {
+    for (e, mut b, tf) in crate::scenario::in_spawn_order(&spawn_order, q.iter_mut(), |x| x.0) {
         let before = b.radius * (b.age / b.duration).min(1.0);
         b.age += dt;
         let now = b.radius * (b.age / b.duration).min(1.0);
@@ -192,7 +195,7 @@ pub fn blasts(
                 continue;
             }
             let class = &lib.classes[ship.class];
-            let scale = b.owner.map_or(1.0, |(side, base)| side_damage_scale(side, ship.side, crate::menu::difficulty(), base));
+            let scale = b.owner.map_or(1.0, |(side, base)| side_damage_scale(side, ship.side, difficulty.0, base));
             let mut struck = false;
             for k in 0..class.sections.len() {
                 let sec = &class.sections[k];
@@ -270,7 +273,13 @@ pub struct Strike {
     pub section: usize,
 }
 
-pub fn strikes(lib: Res<Library>, mut rng: ResMut<Rng>, mut msgs: MessageReader<Strike>, mut ships: Query<(&Ship, &mut Health, Option<&crate::campaign::MissionShip>)>) {
+pub fn strikes(
+    lib: Res<Library>,
+    mut rng: ResMut<SimRng>,
+    difficulty: Res<crate::scenario::Difficulty>,
+    mut msgs: MessageReader<Strike>,
+    mut ships: Query<(&Ship, &mut Health, Option<&crate::campaign::MissionShip>)>,
+) {
     for m in msgs.read() {
         let Ok((ship, mut hp, ms)) = ships.get_mut(m.victim) else { continue };
         if hp.destroyed {
@@ -282,7 +291,7 @@ pub fn strikes(lib: Res<Library>, mut rng: ResMut<Rng>, mut msgs: MessageReader<
         let key = material_key(&section.material);
         let Some(damage) = m.damage.get(key) else { continue };
         // The hit carries no attacker, so only the human's own ships take the difficulty factor (as fires do).
-        let f = super::shells::side_damage_scale(Side::Enemy, ship.side, crate::menu::difficulty(), false);
+        let f = super::shells::side_damage_scale(Side::Enemy, ship.side, difficulty.0, false);
         let damage = [damage[0] * f, damage[1] * f, damage[2], damage[3], damage[4]];
         apply_ship_hit(class, &mut hp, k, damage, ms.map_or(0.0, |m| m.invuln), false, &mut rng);
     }
@@ -294,7 +303,7 @@ fn ram_scale(victim_human: bool, rammer_human: bool, difficulty: u8) -> f32 {
     super::shells::side_damage_scale(as_side(rammer_human), as_side(victim_human), difficulty, false)
 }
 
-/// Contact damage (collision.rs `Ram`, read from the original's code): one hit on the victim's section nearest the contact,
+/// Contact damage (collision.rs `Ram`): one hit on the victim's section nearest the contact,
 /// through the normal hit path. The difficulty factor follows who owns the two ships, not their side: a human-owned victim takes
 /// the incoming factor, else a human-owned rammer gives the outgoing one, else x1 (a rock is a computer attacker; an allied
 /// computer ship is not the human's). A damaging ram also plays the struck section's `Damage_` sound at the contact, but only once
@@ -302,7 +311,8 @@ fn ram_scale(victim_human: bool, rammer_human: bool, difficulty: u8) -> f32 {
 #[allow(clippy::too_many_arguments)]
 pub fn ram_damage(
     lib: Res<Library>,
-    mut rng: ResMut<Rng>,
+    mut rng: ResMut<SimRng>,
+    difficulty: Res<crate::scenario::Difficulty>,
     mut msgs: MessageReader<crate::collision::Ram>,
     mut ships: Query<(&Ship, &Transform, &mut Health, Option<&crate::campaign::MissionShip>, Option<&crate::ship::FleetMember>)>,
     fleets: Option<Res<crate::ship::Fleets>>,
@@ -317,7 +327,7 @@ pub fn ram_damage(
             continue;
         }
         let class = &lib.classes[ship.class];
-        let scale = ram_scale(human(ship, member), rammer.unwrap_or(false), crate::menu::difficulty());
+        let scale = ram_scale(human(ship, member), rammer.unwrap_or(false), difficulty.0);
         let Some(k) = crate::collision::nearest_section(class, tf, r.at).filter(|k| *k < hp.sections.len()) else { continue };
         let d = r.damage * scale;
         apply_ship_hit(class, &mut hp, k, [d, d, 0.0, 0.0, 0.0], ms.map_or(0.0, |m| m.invuln), false, &mut rng);

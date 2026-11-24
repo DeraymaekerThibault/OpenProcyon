@@ -137,6 +137,9 @@ fn a_tow_task_names_its_ship_by_name_suffix_or_in_its_text() {
         damage: 0.0,
         flag: String::new(),
         attack: vec![],
+        heading: 0.0,
+        speed: None,
+        cloaked: false,
     };
     let w = [unit(1, "RLS Sea Sparrow"), unit(2, ""), unit(3, "RLS Bachanalia"), unit(4, "Harvester")];
     let me = w[0].e;

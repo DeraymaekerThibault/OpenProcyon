@@ -60,7 +60,7 @@ const RETAIL_STEPS_PER_SEC: f32 = 30.0;
 
 /// Retail input: the pitch is not a control. Steps change the wanted distance (`orbit.dist`): outward by their size, inward by twice it.
 fn retail_camera_input(mouse: &ButtonInput<MouseButton>, keys: &ButtonInput<KeyCode>, pointer: &Pointer, orbit: &mut Orbit, dt: f32, radius: f32) {
-    let mut step = -pointer.scroll.delta.y * 10.0; // ponytail: one scroll unit = one wheel notch (line units); pixel-unit touchpads zoom fast
+    let mut step = -pointer.scroll.delta.y * 10.0; // One scroll unit = one wheel notch (line units); pixel-unit touchpads zoom fast
     if mouse.pressed(MouseButton::Right) {
         orbit.yaw -= pointer.motion.delta.x * 0.005;
         step += pointer.motion.delta.y;
@@ -106,6 +106,184 @@ fn camera_input(mouse: &ButtonInput<MouseButton>, keys: &ButtonInput<KeyCode>, p
     }
 }
 
+/// The asteroids and space animals a click can pick.
+type ObjectQuery<'w, 's> = Query<
+    'w,
+    's,
+    (Entity, &'static Transform, Option<&'static combat::Asteroid>, Option<&'static environment::SpaceAnimal>),
+    Or<(With<combat::Asteroid>, With<environment::SpaceAnimal>)>,
+>;
+
+/// A ship as the click picking sees it: entity, transform, ship, destroyed, visible.
+type Clickable = (Entity, Transform, Ship, bool, bool);
+
+/// The selected ship, which this frame's input changes (written back by `input` once, when it differs).
+struct Controlled<'a> {
+    actor: Entity,
+    /// The player's own ship under direct control, rather than a captain's order.
+    direct: bool,
+    ship: &'a mut Ship,
+    pilot: &'a mut Option<ship::FleetPilot>,
+}
+
+/// What a click on the world looks up.
+struct ClickScene<'a> {
+    keys: &'a ButtonInput<KeyCode>,
+    lib: &'a Library,
+    sensors: &'a environment::Sensors,
+    mission: Option<&'a campaign::Mission>,
+    others: &'a [Clickable],
+    objects: &'a ObjectQuery<'a, 'a>,
+    player_pos: Vec3,
+}
+
+/// Speed, course and order keys of the selected ship.
+fn keyboard_orders(c: &mut Controlled, keys: &ButtonInput<KeyCode>, pointer: &mut Pointer, target: &mut Target, vtime: &mut Time<Virtual>, commands: &mut Commands) {
+    let b = &pointer.binds;
+    let direct = c.direct;
+    // Engine orders: +/- step through All Stop .. Emergency.
+    if direct && (b.just_pressed(keys, Act::SpeedUp) || keys.just_pressed(KeyCode::NumpadAdd)) {
+        c.ship.throttle = None;
+        c.ship.order = c.ship.order.faster();
+    }
+    if direct && (b.just_pressed(keys, Act::SpeedDown) || keys.just_pressed(KeyCode::NumpadSubtract)) {
+        c.ship.throttle = None;
+        c.ship.order = c.ship.order.slower();
+    }
+    // Advanced movement: Enter accepts the plotted course, Backspace drops it (and nothing else).
+    if direct && keys.just_pressed(KeyCode::Enter) && !pointer.plot.pending.is_empty() {
+        commit_plot(c.ship, &mut pointer.plot);
+    }
+    if keys.just_pressed(KeyCode::Backspace) && !pointer.plot.pending.is_empty() {
+        pointer.plot.pending.clear();
+    } else if keys.just_pressed(KeyCode::Backspace) {
+        commands.entity(c.actor).remove::<boarding::GrappleOrder>();
+        cancel_orders(c, target);
+    }
+    if direct && keys.just_pressed(KeyCode::KeyC) {
+        target.0 = None;
+        target.1 = None;
+        target.2.panic = false;
+    }
+    // Not retail: the Pause key toggles the pause too, beside the HUD pause button.
+    if keys.just_pressed(KeyCode::Pause) {
+        toggle_pause(vtime);
+    }
+}
+
+/// Backspace with no plotted course: the ship's waypoints go, and with them an armed bank and shot (direct control), or the
+/// captain's destination, target and hold and the engines (a captain).
+fn cancel_orders(c: &mut Controlled, target: &mut Target) {
+    c.ship.waypoints.clear();
+    if c.direct {
+        target.2.armed = None;
+        target.2.shot = None;
+    } else {
+        if let Some(p) = c.pilot.as_mut() {
+            p.destination = None;
+            p.target = None;
+            p.hold = false;
+        }
+        c.ship.order = EngineOrder::Stop;
+    }
+}
+
+/// An armed indirect bank takes this click as its shot target (a click with no ground point under it keeps the bank armed).
+fn armed_shot(direct: bool, ray: Ray3d, target: &mut Target, lob: &combat::LobAim, sfx: &mut MessageWriter<audio::Sfx>) -> bool {
+    let (true, Some(bank), Some(t)) = (direct, target.2.armed, ray.intersect_plane(Vec3::ZERO, InfinitePlane3d::new(Vec3::Y))) else { return false };
+    target.2.armed = None;
+    target.2.shot = Some((bank, ray.get_point(t)));
+    // Retail plays a sound only for gravity charges (PROVISIONAL: star/nova silent as decoded, unconfirmed in play)
+    if let Some(a) = lob.0.filter(|a| a.kind == crate::combat::LobKind::GravCharge) {
+        sfx.write(audio::Sfx::ui(if a.solution { "HUD_LobWeapon_Accept" } else { "HUD_LobWeapon_Reject" }));
+    }
+    true
+}
+
+/// The nearest ship on the ray that passes `keep` (entity, distance).
+fn nearest_ship(others: &[Clickable], lib: &Library, ray: Ray3d, keep: impl Fn(&Clickable) -> bool) -> Option<(Entity, f32)> {
+    others.iter().filter(|o| keep(o)).filter_map(|(e, tf, s, _, _)| combat::ray_hit(&lib.classes[s.class], tf, ray).map(|t| (*e, t))).min_by(|a, b| a.1.total_cmp(&b.1))
+}
+
+/// A left click on one of the player's own ships selects it.
+fn select_own(ray: Ray3d, scene: &ClickScene, fleets: &mut ship::Fleets, orbit: &mut Orbit) -> bool {
+    let own = nearest_ship(scene.others, scene.lib, ray, |(e, _, _, h, m)| fleets.roster().contains(e) && !*h && *m);
+    let Some((e, _)) = own else { return false };
+    fleets.select(e, orbit);
+    true
+}
+
+/// A left click that is not a selection: dock, pick a target or give a move order.
+fn left_click(c: &mut Controlled, ray: Ray3d, scene: &ClickScene, pointer: &mut Pointer, target: &mut Target, docks: &mut docking::Dockees, commands: &mut Commands) {
+    let (actor, direct) = (c.actor, c.direct);
+    // Attack Only Mode (held key): a click only picks targets, never a dock or a destination.
+    let attack_only = pointer.binds.pressed(scene.keys, Act::AttackOnly);
+    // An allied ship or base with dock points: left-click docks when it is dockable and in sight (the cursor shows whether it can).
+    if let Some((e, ok)) = docks.under(ray, actor).filter(|_| !attack_only) {
+        if ok {
+            docks.dock_as(actor, e);
+        }
+        return;
+    }
+    let hit = nearest_ship(scene.others, scene.lib, ray, |(e, _, s, h, m)| s.side != Side::Player && !*h && *m && scene.sensors.player_sees(*e, scene.mission));
+    let object = object_hit(scene.objects.iter(), ray, scene.sensors, scene.mission);
+    let base = docks.hostile_base_hit(ray, scene.player_pos);
+    let pick = [hit, object, base.map(|(e, t, _)| (e, t))].into_iter().flatten().min_by(|a, b| a.1.total_cmp(&b.1));
+    if let Some((e, t)) = pick {
+        if !direct {
+            if let Some(p) = c.pilot.as_mut() {
+                p.attack(e);
+            }
+            return;
+        }
+        target.0 = Some(e);
+        target.2.panic = false;
+        // Remember the clicked spot on the hull (ship-local) so the guns aim there.
+        let at = ray.origin + *ray.direction * t;
+        target.1 = scene.others.iter().find(|o| o.0 == e).map(|o| o.1.to_matrix().inverse().transform_point3(at)).or_else(|| base.filter(|b| b.0 == e).map(|b| b.2));
+        return;
+    }
+    if attack_only {
+        return;
+    }
+    let Some(t) = ray.intersect_plane(Vec3::ZERO, InfinitePlane3d::new(Vec3::Y)) else { return };
+    move_order(c, ray.get_point(t), scene.keys, pointer, docks, commands);
+}
+
+/// A click on empty water: plot a course point (advanced movement) or order the ship there (Shift appends).
+fn move_order(c: &mut Controlled, p: Vec3, keys: &ButtonInput<KeyCode>, pointer: &mut Pointer, docks: &mut docking::Dockees, commands: &mut Commands) {
+    let (actor, direct) = (c.actor, c.direct);
+    if direct && pointer.plot.advanced {
+        match pointer.plot.pressed(p) {
+            Some(true) => {
+                docks.cancel_as(actor);
+                ship::release_hold(commands, actor);
+                commit_plot(c.ship, &mut pointer.plot);
+            }
+            Some(false) => pointer.plot.pending.clear(),
+            None => pointer.plot.pending.push(p),
+        }
+        return;
+    }
+    // A move order cancels a dock routine in progress and gives control back (original behaviour).
+    docks.cancel_as(actor);
+    ship::release_hold(commands, actor);
+    if !direct {
+        if let Some(pilot) = c.pilot.as_mut() {
+            pilot.move_to(p);
+        }
+        return;
+    }
+    if !keys.pressed(KeyCode::ShiftLeft) {
+        c.ship.waypoints.clear();
+    }
+    c.ship.waypoints.push(p);
+    if c.ship.order == EngineOrder::Stop || c.ship.throttle == Some(0.0) {
+        c.ship.throttle = None;
+        c.ship.order = EngineOrder::Full;
+    } // light green 'Full', as in the original
+}
+
 pub fn input(
     mouse: Res<ButtonInput<MouseButton>>,
     keys: Res<ButtonInput<KeyCode>>,
@@ -121,159 +299,35 @@ pub fn input(
     ui: Res<crate::panels::UiClick>,
     mut docks: docking::Dockees,
     (sensors, mission, mut sfx, lob): (Res<environment::Sensors>, Option<Res<campaign::Mission>>, MessageWriter<audio::Sfx>, Res<combat::LobAim>),
-    objects: Query<(Entity, &Transform, Option<&combat::Asteroid>, Option<&environment::SpaceAnimal>), Or<(With<combat::Asteroid>, With<environment::SpaceAnimal>)>>,
+    objects: ObjectQuery,
     mut commands: Commands,
 ) {
     let Some(actor) = pointer.fleets.selected else { return };
     let direct = pointer.fleets.direct();
-    let others: Vec<_> = if mouse.just_pressed(MouseButton::Left) && !ui.0 {
-        ships.iter().map(|(e, s, tf, h, m, _)| (e, tf.compute_transform(), s.clone(), h.destroyed, m.is_none_or(|m| m.visible))).collect()
-    } else {
-        vec![]
-    };
+    let clicking = mouse.just_pressed(MouseButton::Left) && !ui.0;
+    let others: Vec<Clickable> =
+        if clicking { ships.iter().map(|(e, s, tf, h, m, _)| (e, tf.compute_transform(), s.clone(), h.destroyed, m.is_none_or(|m| m.visible))).collect() } else { vec![] };
     let Ok((_, source, player_tf, _, _, source_pilot)) = ships.get(actor) else { return };
     let mut ship = source.clone();
     let mut pilot = source_pilot.cloned();
-    (|| {
-        if briefing::active(mission.as_deref()) || rules::locked(mission.as_deref()) {
-            return;
-        }
+    if !briefing::active(mission.as_deref()) && !rules::locked(mission.as_deref()) {
+        let mut c = Controlled { actor, direct, ship: &mut ship, pilot: &mut pilot };
         // The focus's bounding radius sets the retail zoom limits (collision sphere for the mesh bounds, PROVISIONAL; others 0).
         let radius = orbit.focus.or(Some(actor)).and_then(|e| ships.get(e).ok()).map_or(0.0, |(_, s, ..)| lib.classes[s.class].sphere.1);
         camera_input(&mouse, &keys, &pointer, &mut orbit, time.delta_secs(), radius);
-        let b = &pointer.binds;
-
-        // Engine orders: +/- step through All Stop .. Emergency.
-        if direct && (b.just_pressed(&keys, Act::SpeedUp) || keys.just_pressed(KeyCode::NumpadAdd)) {
-            ship.throttle = None;
-            ship.order = (ship.order + 1).min(ORDERS.len() - 1);
-        }
-        if direct && (b.just_pressed(&keys, Act::SpeedDown) || keys.just_pressed(KeyCode::NumpadSubtract)) {
-            ship.throttle = None;
-            ship.order = ship.order.saturating_sub(1);
-        }
-        // Advanced movement: Enter accepts the plotted course, Backspace drops it (and nothing else).
-        if direct && keys.just_pressed(KeyCode::Enter) && !pointer.plot.pending.is_empty() {
-            commit_plot(&mut ship, &mut pointer.plot);
-        }
-        if keys.just_pressed(KeyCode::Backspace) && !pointer.plot.pending.is_empty() {
-            pointer.plot.pending.clear();
-        } else if keys.just_pressed(KeyCode::Backspace) {
-            commands.entity(actor).remove::<boarding::GrappleOrder>();
-            ship.waypoints.clear();
-            if direct {
-                target.2.armed = None;
-                target.2.shot = None;
-            } else {
-                if let Some(p) = pilot.as_mut() {
-                    p.destination = None;
-                    p.target = None;
-                    p.hold = false;
-                }
-                ship.order = 0;
-            }
-        }
-        if direct && keys.just_pressed(KeyCode::KeyC) {
-            target.0 = None;
-            target.1 = None;
-            target.2.panic = false;
-        }
-        if keys.just_pressed(KeyCode::Pause) {
-            toggle_pause(&mut vtime);
-        }
-
+        keyboard_orders(&mut c, &keys, &mut pointer, &mut target, &mut vtime, &mut commands);
         // Left click: an enemy ship selects it as target, otherwise set a destination on the plane (Shift appends).
-        if mouse.just_pressed(MouseButton::Left) && !ui.0 && !docks.menu_swallows_click() {
-            let Some(cursor) = window.cursor_position() else { return };
+        if clicking && !docks.menu_swallows_click() {
             let (camera, gt) = *cam;
-            let Ok(ray) = camera.viewport_to_world(gt, cursor) else { return };
-            // An armed indirect bank takes this click as its shot target.
-            // (a click with no ground point under it keeps the bank armed)
-            if let (true, Some(bank), Some(t)) = (direct, target.2.armed, ray.intersect_plane(Vec3::ZERO, InfinitePlane3d::new(Vec3::Y))) {
-                target.2.armed = None;
-                target.2.shot = Some((bank, ray.get_point(t)));
-                // Retail plays a sound only for gravity charges (PROVISIONAL: star/nova silent as decoded, unconfirmed in play)
-                if let Some(a) = lob.0.filter(|a| a.kind == 0) {
-                    sfx.write(audio::Sfx::ui(if a.solution { "HUD_LobWeapon_Accept" } else { "HUD_LobWeapon_Reject" }));
+            if let Some(ray) = window.cursor_position().and_then(|cursor| camera.viewport_to_world(gt, cursor).ok()) {
+                let scene =
+                    ClickScene { keys: &keys, lib: &lib, sensors: &sensors, mission: mission.as_deref(), others: &others, objects: &objects, player_pos: player_tf.translation() };
+                if !armed_shot(direct, ray, &mut target, &lob, &mut sfx) && !select_own(ray, &scene, &mut pointer.fleets, &mut orbit) {
+                    left_click(&mut c, ray, &scene, &mut pointer, &mut target, &mut docks, &mut commands);
                 }
-                return;
             }
-            let own = others
-                .iter()
-                .filter(|(e, _, _, h, m)| pointer.fleets.roster().contains(e) && !*h && *m)
-                .filter_map(|(e, tf, s, _, _)| combat::ray_hit(&lib.classes[s.class], tf, ray).map(|t| (*e, t)))
-                .min_by(|a, b| a.1.total_cmp(&b.1));
-            if let Some((e, _)) = own {
-                pointer.fleets.select(e, &mut orbit);
-                return;
-            }
-            // Attack Only Mode (held key): a click only picks targets, never a dock or a destination.
-            let attack_only = pointer.binds.pressed(&keys, Act::AttackOnly);
-            // An allied ship or base with dock points: left-click docks when it is dockable and in sight (the cursor shows whether it can).
-            if let Some((e, ok)) = docks.under(ray, actor).filter(|_| !attack_only) {
-                if ok {
-                    docks.dock_as(actor, e);
-                }
-                return;
-            }
-            let hit = others
-                .iter()
-                .filter(|(e, _, s, h, m)| s.side != Side::Player && !*h && *m && sensors.player_sees(*e, mission.as_deref()))
-                .filter_map(|(e, tf, s, _, _)| combat::ray_hit(&lib.classes[s.class], tf, ray).map(|t| (*e, t)))
-                .min_by(|a, b| a.1.total_cmp(&b.1));
-            let object = object_hit(objects.iter(), ray, &sensors, mission.as_deref());
-            let base = docks.hostile_base_hit(ray, player_tf.translation());
-            let pick = [hit, object, base.map(|(e, t, _)| (e, t))].into_iter().flatten().min_by(|a, b| a.1.total_cmp(&b.1));
-            if let Some((e, t)) = pick {
-                if !direct {
-                    if let Some(p) = pilot.as_mut() {
-                        p.attack(e);
-                    }
-                    return;
-                }
-                target.0 = Some(e);
-                target.2.panic = false;
-                // Remember the clicked spot on the hull (ship-local) so the guns aim there.
-                let at = ray.origin + *ray.direction * t;
-                target.1 = others.iter().find(|o| o.0 == e).map(|o| o.1.to_matrix().inverse().transform_point3(at)).or_else(|| base.filter(|b| b.0 == e).map(|b| b.2));
-                return;
-            }
-            if attack_only {
-                return;
-            }
-            let Some(t) = ray.intersect_plane(Vec3::ZERO, InfinitePlane3d::new(Vec3::Y)) else { return };
-            let p = ray.get_point(t);
-            if direct && pointer.plot.advanced {
-                match pointer.plot.pressed(p) {
-                    Some(true) => {
-                        docks.cancel_as(actor);
-                        ship::release_hold(&mut commands, actor);
-                        commit_plot(&mut ship, &mut pointer.plot);
-                    }
-                    Some(false) => pointer.plot.pending.clear(),
-                    None => pointer.plot.pending.push(p),
-                }
-                return;
-            }
-            // A move order cancels a dock routine in progress and gives control back (original behaviour).
-            docks.cancel_as(actor);
-            ship::release_hold(&mut commands, actor);
-            if !direct {
-                if let Some(pilot) = pilot.as_mut() {
-                    pilot.move_to(p);
-                }
-                return;
-            }
-            if !keys.pressed(KeyCode::ShiftLeft) {
-                ship.waypoints.clear();
-            }
-            ship.waypoints.push(p);
-            if ship.order == 0 || ship.throttle == Some(0.0) {
-                ship.throttle = None;
-                ship.order = 2;
-            } // light green 'Full', as in the original
         }
-    })();
+    }
     if ship != *source {
         commands.entity(actor).insert(ship);
     }
@@ -338,9 +392,9 @@ pub fn fleet_keys(
 /// The plotted course becomes the ship's (light-green Full if it was stopped, as a basic click does).
 fn commit_plot(ship: &mut Ship, plot: &mut course::Plot) {
     ship.waypoints = std::mem::take(&mut plot.pending);
-    if ship.order == 0 || ship.throttle == Some(0.0) {
+    if ship.order == EngineOrder::Stop || ship.throttle == Some(0.0) {
         ship.throttle = None;
-        ship.order = 2;
+        ship.order = EngineOrder::Full;
     }
 }
 
@@ -386,15 +440,19 @@ pub fn toggle_debug(keys: Res<ButtonInput<KeyCode>>, mut q: Query<&mut Visibilit
 #[derive(Component)]
 pub struct Sky;
 
-pub fn sky(cam: Single<&Transform, (With<Camera3d>, Without<Sky>)>, mut sky: Single<(&mut Transform, &mut Visibility), With<Sky>>, settings: Option<Res<menu::Settings>>) {
+pub fn sky(
+    cam: Single<&Transform, (With<Camera3d>, With<crate::MainCamera>, Without<Sky>)>,
+    mut sky: Single<(&mut Transform, &mut Visibility), With<Sky>>,
+    settings: Option<Res<menu::Settings>>,
+) {
     sky.0.translation = cam.translation;
     // Display Options 'Render Background'.
     let want = if settings.is_some_and(|s| !s.background) { Visibility::Hidden } else { Visibility::Inherited };
     sky.1.set_if_neq(want);
 }
 
-/// A baked cube map for this retail sky (`models/sky/<sky>_cube.png`, six square faces stacked +X -X +Y -Y +Z -Z;
-/// not retail), when a mod provides one: the scenario draws it instead of the sky sphere.
+/// Not retail: a baked cube map for this retail sky (`models/sky/<sky>_cube.png`, six square faces stacked +X -X +Y -Y +Z -Z),
+/// when a mod provides one: the scenario draws it instead of the sky sphere.
 pub fn hd_sky_file(root: &std::path::Path, sky: &str) -> Option<String> {
     let rel = format!("models/sky/{sky}_cube.png");
     root.join(&rel).is_file().then_some(rel)
@@ -504,14 +562,14 @@ pub fn star_mesh(groups: &[Vec<Vec3>]) -> Mesh {
         .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, col)
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments, reason = "a Bevy system")]
 pub fn camera(
     mut orbit: ResMut<Orbit>,
     ship: Query<&Transform, (With<PlayerShip>, Without<Camera3d>)>,
     tfs: Query<&Transform, Without<Camera3d>>,
     contacts: Query<(), Or<(With<Ship>, With<environment::SpaceAnimal>)>>,
     sensors: Res<environment::Sensors>,
-    mut cam: Single<&mut Transform, With<Camera3d>>,
+    mut cam: Single<&mut Transform, (With<Camera3d>, With<crate::MainCamera>)>,
     mission: Option<Res<campaign::Mission>>,
     (free, time, mut shown): (Option<Res<FreeCamera>>, Option<Res<Time<Real>>>, Local<Option<f32>>),
 ) {
@@ -562,7 +620,7 @@ pub fn hud(
     let left = format!(
         "{}\nOrder: {} (+/-)\nSpeed: {:.1} (max {:.1})\nHeading: {:03.0}\nGuns ready: {}/{}   Enemies: {}\nCore {:.0}/{:.0}\n{}\nLMB: target enemy / set course (Shift adds, X clears)\nC: clear target  R: restart  RMB drag, arrows: view",
         class.name,
-        ORDERS[ship.order].0,
+        ship.order.label(),
         ship.speed,
         class.phys.max_speed * combat::speed_factor(class, health),
         (-ship.heading.to_degrees()).rem_euclid(360.0),
@@ -634,7 +692,7 @@ mod camera_tests {
         let (mut world, ids) = ship::movement_tests::fleet_world();
         world.init_resource::<environment::Sensors>();
         world.insert_resource(FREE);
-        let cam = world.spawn((Camera3d::default(), Transform::default())).id();
+        let cam = world.spawn((crate::MainCamera, Camera3d::default(), Transform::default())).id();
         world.resource_mut::<Orbit>().focus = Some(ids[5]);
         world.get_mut::<Transform>(ids[5]).unwrap().translation = Vec3::X * 3000.0;
         world.run_system_once(environment::refresh_sensors).unwrap();
@@ -719,7 +777,7 @@ mod camera_tests {
         let mut world = World::new();
         world.init_resource::<environment::Sensors>();
         world.insert_resource(Orbit { yaw: 0.0, pitch: 0.0, dist: 100.0, focus: None });
-        let cam = world.spawn((Camera3d::default(), Transform::default())).id();
+        let cam = world.spawn((crate::MainCamera, Camera3d::default(), Transform::default())).id();
         let mut system = IntoSystem::into_system(camera);
         system.initialize(&mut world);
         system.run((), &mut world).unwrap();

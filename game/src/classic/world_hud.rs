@@ -2,7 +2,7 @@
 //! navigation indicator under the player's ship. `N` (`panels::Toggles::names`) toggles the banners.
 use bevy::prelude::*;
 
-use crate::combat::{Health, Target};
+use crate::combat::Health;
 use crate::panels::{REF_H, Toggles, cinematic};
 use crate::sprites::{Fonts, HudData, size_of, slice, sprite};
 use crate::{Library, PlayerShip, Ship};
@@ -18,6 +18,7 @@ pub fn plugin(app: &mut App) {
             (place_ref_rects, scale_label_text, spawn_labels, place_labels)
                 .chain()
                 .after(crate::sprites::choose_skin)
+                .after(crate::panels::HudSet)
                 .run_if(in_state(crate::menu::Screen::Battle))
                 .run_if(resource_exists::<HudData>)
                 .run_if(resource_exists::<Fonts>),
@@ -25,7 +26,7 @@ pub fn plugin(app: &mut App) {
 }
 
 #[derive(Component)]
-struct LobMarker(usize, bool);
+struct LobMarker(crate::combat::LobKind, bool);
 
 /// The armed lob bank's ground marker: a flat retail mesh (one per weapon, plus a "no firing solution" twin) lying on the sea at
 /// the point under the mouse. PROVISIONAL: drawn at the mesh's own size (about 7 radius, the data says `LobIcon WorldSpace Radius` 10)
@@ -44,7 +45,7 @@ fn lob_marker(mut commands: Commands, assets: Res<AssetServer>, aim: Res<crate::
         }
         commands.entity(e).despawn();
     }
-    let weapon = ["GRAVCHARGE", "NOVAMORTAR", "STARMORTAR"][a.kind];
+    let weapon = ["GRAVCHARGE", "NOVAMORTAR", "STARMORTAR"][a.kind.index()];
     let twin = if a.solution { "" } else { "_HAS_NO_FIRING_SOLUTION" };
     commands.spawn((
         LobMarker(a.kind, a.solution),
@@ -87,8 +88,8 @@ fn end_line(
 #[derive(Component)]
 struct LoadingCover;
 
-/// The cover over a loading battle (`loading.rs`): black with one word, above the HUD. PROVISIONAL: not retail's loading screen,
-/// whose layout is not specified yet.
+/// Not retail: the cover over a loading battle (`loading.rs`), black with one word, above the HUD. PROVISIONAL: it stands in for
+/// retail's loading screen, whose layout is not specified yet.
 fn loading_cover(
     mut commands: Commands,
     loading: Option<Res<openprocyon::loading::Loading>>,
@@ -161,7 +162,7 @@ fn navigation(
             ));
             if !arrow {
                 // PROVISIONAL backing fill: the native indicator render state is not decoded.
-                let mesh = meshes.add(Circle::new(5.2));
+                let mesh = meshes.add(Circle::new(5.2)); // PROVISIONAL: eyeballed against footage
                 let material = materials.add(StandardMaterial {
                     base_color: Color::srgba(0.02, 0.22, 0.38, 0.8),
                     unlit: true,
@@ -315,7 +316,7 @@ fn spawn_labels(
         let font_scale = 1.05;
         let tw = font.width(&text) * font_scale;
         let total = l.x + r.x + c.x.max(tw + 8.0);
-        let text_pos = Vec2::new(((total - tw) / 2.0).round(), ((22.0 - font.height * font_scale) / 2.0 + 3.0).round()); // +3: the line box sits above the ribbon strip
+        let text_pos = Vec2::new(((total - tw) / 2.0).round(), ((22.0 - font.height * font_scale) / 2.0 + 3.0).round()); // PROVISIONAL: +3, the line box sits above the ribbon strip
         let root = commands.spawn((Label { ship: e, width: total, alpha: 0.0 }, Node { position_type: PositionType::Absolute, ..default() }, Visibility::Hidden)).id();
         let mut kids = vec![];
         img.color = tint;
@@ -340,39 +341,29 @@ fn banner_height(class: &crate::combat::Class) -> f32 {
 fn place_labels(
     mut commands: Commands,
     window: Single<&Window, With<bevy::window::PrimaryWindow>>,
-    cam: Single<(&Camera, &GlobalTransform), With<Camera3d>>,
-    target: Res<Target>,
-    selection: (Res<crate::ship::Fleets>, Query<&crate::ship::FleetPilot>),
+    cam: Single<(&Camera, &GlobalTransform), (With<Camera3d>, With<crate::MainCamera>)>,
+    marks: Res<crate::panels::WorldMarks>,
     ships: Query<(&GlobalTransform, &Health, &Ship, Option<&crate::campaign::MissionShip>, Option<&crate::scenario::PlayerColor>)>,
     animals: Query<(&GlobalTransform, &crate::environment::SpaceAnimal)>,
     lib: Res<Library>,
     toggles: Res<Toggles>,
-    sensors: Res<crate::environment::Sensors>,
     mut labels: Query<(Entity, &mut Label, &mut Node, &mut Visibility, Option<&Children>), Without<Reticle>>,
     mut imgs: Query<&mut ImageNode, Without<Reticle>>,
     (wrappers, mut texts, real): (Query<&Children, With<LabelText>>, Query<&mut TextColor>, Res<Time<Real>>),
     mut reticle: Query<(&Reticle, &mut Node, &mut Visibility), With<Reticle>>,
-    mission: Option<Res<crate::campaign::Mission>>,
 ) {
     let s = window.height() / REF_H;
     let (camera, ctf) = *cam;
     let project = |g: &GlobalTransform, up: f32| camera.world_to_viewport(ctf, g.translation() + Vec3::Y * up).ok();
     for (e, mut label, mut node, mut vis, kids) in &mut labels {
-        let Ok((g, h, sh, ms, owner)) = ships.get(label.ship) else {
+        let Ok((g, _, sh, ms, owner)) = ships.get(label.ship) else {
             commands.entity(e).despawn();
             continue;
         };
         let far = if toggles.names { ctf.translation().distance(g.translation()) } else { f32::INFINITY };
         label.alpha = banner_alpha(label.alpha, far, real.delta_secs());
         match project(g, banner_height(&lib.classes[sh.class])) {
-            Some(p)
-                if label.alpha > 0.0
-                    && !h.destroyed
-                    && ms.is_none_or(|m| m.visible)
-                    && sensors.player_sees(label.ship, mission.as_deref())
-                    && !cinematic(mission.as_deref())
-                    && !crate::rules::console::hud_hidden() =>
-            {
+            Some(p) if label.alpha > 0.0 && marks.banners.contains(&label.ship) => {
                 let a = label.alpha;
                 // The first three children are the ribbon pieces; the rules' banner type ('Banner BlueTeam' ...) picks their tint.
                 let tint = banner_tint(sh.side, ms, owner);
@@ -400,23 +391,13 @@ fn place_labels(
         }
     }
     let shown = (|| {
-        if cinematic(mission.as_deref()) || crate::rules::console::hud_hidden() {
-            return None;
-        }
-        let entity = if selection.0.direct() {
-            target.0
-        } else {
-            selection.0.selected.and_then(|e| selection.1.get(e).ok().and_then(|p| p.target).or_else(|| ships.get(e).ok().and_then(|s| s.3.and_then(|m| m.target))))
-        }?;
-        let (g, r, visible) = if let Ok((g, h, ship, ms, _)) = ships.get(entity) {
-            (g, lib.classes[ship.class].radius, !h.destroyed && ms.is_none_or(|m| m.visible))
+        let entity = marks.reticle?;
+        let (g, r) = if let Ok((g, _, ship, ..)) = ships.get(entity) {
+            (g, lib.classes[ship.class].radius)
         } else {
             let (g, a) = animals.get(entity).ok()?;
-            (g, a.radius, a.visible)
+            (g, a.radius)
         };
-        if !visible || !sensors.player_sees(entity, mission.as_deref()) {
-            return None;
-        }
         let p = project(g, 0.0)?;
         // Chevrons stand on the diagonals just outside the target's projected radius.
         let edge = camera.world_to_viewport(ctf, g.translation() + ctf.right() * r).ok().map_or(0.0, |q| (q - p).length());

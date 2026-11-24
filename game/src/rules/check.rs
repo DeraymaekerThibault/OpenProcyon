@@ -10,7 +10,7 @@ use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fmt;
 
-use super::schema::{Field, Kind, RULE_TYPES, Role, TypeDef, lookup};
+use super::schema::{Equivalence, Field, Kind, Origin, RULE_TYPES, Role, TypeDef, lookup};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Level {
@@ -55,6 +55,8 @@ struct Defs {
     rules: BTreeSet<String>,
     points: BTreeSet<String>,
     point_sets: BTreeSet<String>,
+    /// How many points each point set has (`OP Teleport`'s `Point Index`).
+    point_set_len: BTreeMap<String, usize>,
     map_text: BTreeSet<String>,
     speech: BTreeSet<String>,
     messages: BTreeSet<String>,
@@ -96,6 +98,7 @@ impl Defs {
             media: media.is_object(),
             ..Default::default()
         };
+        d.point_set_len = mission["environment"]["point_sets"].as_object().into_iter().flatten().map(|(k, v)| (k.clone(), v.as_array().map_or(0, Vec::len))).collect();
         d.players.extend(names(map, "players"));
         d.teams = map["teams"].as_array().into_iter().flatten().filter_map(|t| t["name_id"].as_str()).map(String::from).collect();
         // The interpreter reads the human player under its TWT name or as "Player0 Group" (`alias_player`).
@@ -245,13 +248,11 @@ impl Checker<'_> {
         if def.name == "OP Counter Condition" {
             // A counter nobody sets reads 0: the condition needs a writer unless 0 already satisfies it.
             let value = e["Value"].as_f64().unwrap_or(0.0);
-            let holds_at_zero = match e["Equivalence"].as_str() {
-                Some("Greater Than") => 0.0 > value,
-                Some("Less Than") => 0.0 < value,
-                Some("Equal To") => value.abs() < 1e-4,
-                _ => false,
-            };
+            let holds_at_zero = e["Equivalence"].as_str().and_then(Equivalence::parse).is_some_and(|q| q.holds(0.0, value as f32, 1e-4));
             self.wants_true = !holds_at_zero;
+        }
+        if def.name == "OP Teleport" {
+            self.teleport_index(e);
         }
         for key in obj.keys().filter(|k| k.as_str() != "Type") {
             if def.field(key).is_none() {
@@ -263,12 +264,33 @@ impl Checker<'_> {
             match obj.get(field.name) {
                 None if field.required => self.err(field.name, format!("missing; reads as {}", describe_default(field))),
                 None => {}
+                // Engine-added Types: an optional field written as "" is the same as leaving it out (the interpreter reads it so).
+                Some(v) if def.origin == Origin::Engine && !field.required && v.as_str() == Some("") => {}
                 Some(v) if field.used => {
                     self.value(def, field, v, role);
                     self.soft = false;
                 }
                 Some(_) => {}
             }
+        }
+    }
+
+    /// `OP Teleport`: `Point Index` is a whole number inside the point set (the interpreter would skip the action with a warning).
+    fn teleport_index(&mut self, e: &Value) {
+        let Some(index) = e["Point Index"].as_f64() else { return };
+        if index < 0.0 || index.fract() != 0.0 {
+            self.err("Point Index", format!("{index} is not a whole number from 0 up; nothing is moved"));
+        } else if let Some(len) = e["Point Set Name"].as_str().and_then(|n| self.defs.point_set_len.get(n))
+            && index as usize >= *len
+        {
+            self.err(
+                "Point Index",
+                format!(
+                    "point set '{}' has {len} points (0..{}); index {index} is past its end, so nothing is moved",
+                    e["Point Set Name"].as_str().unwrap_or(""),
+                    len.saturating_sub(1)
+                ),
+            );
         }
     }
 
@@ -298,7 +320,9 @@ impl Checker<'_> {
             return;
         }
         if let Kind::Bool = field.kind {
-            if !v.as_str().is_some_and(|s| s.eq_ignore_ascii_case("TRUE") || s.eq_ignore_ascii_case("FALSE")) {
+            if v.is_boolean() {
+                self.err(name, format!("the JSON boolean {v} is not allowed; write the string \"{}\" (a JSON boolean reads as FALSE)", if v == true { "TRUE" } else { "FALSE" }));
+            } else if !v.as_str().is_some_and(|s| s.eq_ignore_ascii_case("TRUE") || s.eq_ignore_ascii_case("FALSE")) {
                 self.err(name, format!("{v} is not \"TRUE\" or \"FALSE\"; it reads as FALSE"));
             }
             return;
@@ -428,7 +452,7 @@ fn describe_default(f: &Field) -> String {
     }
 }
 
-/// The engine-added mission keys (not retail): a task's `complete_when` / `fail_when` / `required`, and `victory`,
+/// Not retail: the engine-added mission keys, a task's `complete_when` / `fail_when` / `required`, and `victory`,
 /// `victory_message`, `defeat_message`.
 fn check_tasks_and_victory(c: &mut Checker, mission: &Value) {
     let mut required = false;
@@ -693,12 +717,19 @@ mod tests {
         let t = text(json!([rule(
             json!([{"Type": "Flag Condition", "Flag Name": "F", "Boolean Value": true}]),
             json!([
+                {"Type": "Set Flag Action", "Flag Name": "F", "Boolean Value": false},
                 {"Type": "Damage Group/Unit by X percent", "Group Name": "Fleet", "Percent": 50},
                 {"Type": "Set Group Throttle Percent", "Group Name": "Fleet", "Throttle Percent": "0.5"},
                 {"Type": "Set Group/Unit AI Stance", "Group/Unit Name": "Fleet", "AI Stance": "Stance_Agressive"},
             ])
         )]));
-        for want in ["true is not \"TRUE\" or \"FALSE\"; it reads as FALSE", "50 is outside 0..1", "\"0.5\" is not a number; it reads as 0", "'Stance_Agressive' is not one of"] {
+        for want in [
+            "field \"Boolean Value\": the JSON boolean true is not allowed; write the string \"TRUE\"",
+            "action #1 'Set Flag Action', field \"Boolean Value\": the JSON boolean false is not allowed; write the string \"FALSE\"",
+            "50 is outside 0..1",
+            "\"0.5\" is not a number; it reads as 0",
+            "'Stance_Agressive' is not one of",
+        ] {
             assert!(t.contains(want), "missing {want:?} in\n{t}");
         }
     }

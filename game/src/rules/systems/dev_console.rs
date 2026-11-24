@@ -154,7 +154,7 @@ fn run(
                 .map(|s| ShipInfo {
                     e: Some(s.entity),
                     stance: format!("{:?}", s.mission.stance),
-                    order: s.ship.order,
+                    order: s.ship.order.index(),
                     waypoints: s.ship.waypoints.len(),
                     attack: s.mission.attack.clone(),
                     human: s.mission.human || s.primary,
@@ -203,7 +203,7 @@ fn free_camera(
     mouse: Res<ButtonInput<MouseButton>>,
     motion: Res<bevy::input::mouse::AccumulatedMouseMotion>,
     time: Res<Time<Real>>,
-    mut cam: Single<&mut Transform, With<Camera3d>>,
+    mut cam: Single<&mut Transform, (With<Camera3d>, With<crate::MainCamera>)>,
     mut angles: Local<(f32, f32)>,
 ) {
     if !dev.free_cam {

@@ -8,7 +8,7 @@ use bevy::prelude::*;
 use std::collections::HashMap;
 
 use super::lib::{Curve, FxLib, Prim, conv};
-use super::{Fx, FxRng, P};
+use super::{DetailScale, Fx, FxRng, P};
 
 /// Engine tick (retail constant 0.033): particles spawn and advance once per tick; velocities are stored per second.
 pub(super) use crate::TICK_SECS as TICK;
@@ -23,7 +23,7 @@ fn detail_factor(low: f32, dist: f32) -> f32 {
     d - d * low + low
 }
 const LOWEST_DETAIL_DISTANCE: f32 = 350.0;
-/// Whole-scene live-particle budget (not retail): above it every effect emits proportionally fewer particles, so a long fight with many
+/// Not retail: a whole-scene live-particle budget. Above it every effect emits proportionally fewer particles, so a long fight with many
 /// Gattling tracers, damage smoke and impacts cannot pile up thousands of quads per frame. PROVISIONAL: sized for a mid-range GPU; the
 /// per-primitive `MAX_LIVE` still applies. The count lags the emission by a frame.
 const SCENE_LIVE_BUDGET: f32 = 15_000.0;
@@ -36,10 +36,12 @@ pub(super) fn update_fx(
     time: Res<Time>,
     lib: Res<FxLib>,
     mut rng: ResMut<FxRng>,
+    detail: Option<Res<DetailScale>>,
     mut q: Query<(Entity, &mut Fx, &GlobalTransform)>,
-    cam: Query<&GlobalTransform, With<Camera3d>>,
+    cam: Query<&GlobalTransform, (With<Camera3d>, With<crate::MainCamera>)>,
 ) {
     let frame = time.delta_secs().min(0.25);
+    let detail = detail.map_or(1.0, |d| d.0);
     let scene = scene_budget_factor(q.iter().map(|(_, f, _)| f.particle_count()).sum());
     let cam_pos = cam.single().ok().map(|c| c.translation());
     for (e, mut fx, gt) in &mut q {
@@ -58,7 +60,7 @@ pub(super) fn update_fx(
             fx.age += TICK;
             fx.move_acc += TICK;
             let move_dt = if fx.move_acc > MOVE_STEP { std::mem::take(&mut fx.move_acc) } else { 0.0 };
-            let (age, scale, emitting) = (fx.age, fx.rate_scale * crate::menu::detail_scale() * scene, fx.emitting);
+            let (age, scale, emitting) = (fx.age, fx.rate_scale * detail * scene, fx.emitting);
             busy = false;
             // A source emitter places particles at the positions of its source primitive's particles.
             let sources: HashMap<usize, Vec<Vec3>> =

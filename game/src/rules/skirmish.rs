@@ -1,4 +1,4 @@
-//! A skirmish map's own script (`maps/<id>/script.json`): the same interpreter as the campaign, driving the map's convoys, timers and
+//! Not retail: a skirmish map's own script (`maps/<id>/script.json`), the same interpreter as the campaign, driving the map's convoys, timers and
 //! team points. Its effects are applied by the code the campaign uses (`systems::apply`). Retail maps keep their end rules with
 //! victory.rs (`without_end_rules`); a map that opts in with `"victory": "script"` lets its own rules end the game (`script_end`).
 use bevy::prelude::*;
@@ -63,6 +63,7 @@ struct SkirmishFx<'w, 's> {
     bases: apply::Bases<'w, 's>,
     mines: apply::Mines<'w, 's>,
     dragons: Query<'w, 's, &'static mut crate::dragons::Dragon>,
+    difficulty: Option<Res<'w, crate::scenario::Difficulty>>,
     dock: MessageWriter<'w, crate::docking::DockMsg>,
     board: MessageWriter<'w, crate::boarding::BoardMsg>,
     asteroids: MessageWriter<'w, crate::combat::AsteroidSetup>,
@@ -92,14 +93,17 @@ fn run(
     let mut world: Vec<Unit> = ships
         .iter()
         .map(|s| Unit {
-            name: s.mission.name.clone(),
-            owner: s.mission.owner.clone(),
+            name: s.mission.name.as_str().into(),
+            owner: s.mission.owner.as_str().into(),
             alive: !s.health.destroyed,
             visible: s.mission.visible,
             primary: s.primary,
             flag: s.mission.flag.clone(),
             attack: s.mission.attack.clone(),
-            ..Unit::new(s.entity, s.mission.id, s.transform.translation)
+            heading: s.ship.heading,
+            speed: Some(s.ship.speed.abs()),
+            cloaked: s.cloak.is_some_and(|c| c.state == crate::cloak::State::Full),
+            ..Unit::new(s.entity, s.mission.id, super::systems::sim_pos(s.transform, s.interp))
         })
         .collect();
     sk.script.keep_sunk(&mut world);
@@ -140,6 +144,7 @@ fn run(
         fxlib: fx.fxlib.as_deref(),
         sfx: fx.sfx.as_deref_mut(),
         toggles: fx.toggles.as_deref_mut(),
+        difficulty: fx.difficulty.as_deref().copied().unwrap_or_default().0,
         orbit: None,
         sides: Some(&sk.sides),
         mines: Some(&mut fx.mines),

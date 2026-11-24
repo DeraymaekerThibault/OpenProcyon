@@ -319,7 +319,7 @@ pub(super) fn fire(
     fxl: Res<FxLib>,
     mut target: ResMut<Target>,
     look: Res<Look>,
-    mut rng: ResMut<Rng>,
+    (mut rng, spawn_order, mut start): (ResMut<SimRng>, Query<&crate::scenario::SpawnIndex>, crate::scenario::BattleStart),
     mut sfx: MessageWriter<Sfx>,
     mut fired: MessageWriter<Fired>,
     objects: Query<
@@ -340,6 +340,8 @@ pub(super) fn fire(
         Option<&crate::crew_arms::CrewPosts>,
         Option<&crate::boarding::Boardable>,
         Option<&crate::environment::ScanFactor>,
+        // Not retail: an abandoned hull (`OP Abandon Ship`) cannot fire.
+        Has<crate::lifeboats::Abandoned>,
     )>,
     others: Query<(Entity, &Transform, &Ship, &Health, Has<PlayerShip>, Option<&crate::campaign::MissionShip>, Option<&crate::cloak::Cloak>)>,
     mut parts: Query<&mut Transform, (With<GunPart>, Without<Ship>)>,
@@ -355,13 +357,18 @@ pub(super) fn fire(
         Local<bevy::platform::collections::HashMap<Entity, RockWatch>>,
     ),
 ) {
+    if start.is_new() {
+        mine_laying.clear();
+        ground.clear();
+        rock_watch.clear();
+    }
     // The human fleet's gunners in a campaign: the roster's best gunner (crew_arms.rs); everyone else the plain-AI factor.
     let crewed = crate::crew_arms::accuracy(points.as_deref());
     let dt = time.delta_secs();
     // Point-defence targets: torpedoes and mines in flight, with their side.
     let incoming: Vec<(AimTarget, Side)> = threats
         .iter()
-        .filter(|(_, _, shell)| shell.bullet.starts_with(TORPEDO_BULLET) || matches!(shell.payload, Payload::Mine { .. }))
+        .filter(|(_, _, shell)| shell.torpedo || matches!(shell.payload, Payload::Mine { .. }))
         .map(|(entity, transform, shell)| (AimTarget { entity, position: transform.translation, velocity: shell.vel }, shell.side))
         .collect();
     // 'NIS Toggle NIS mode Gun Accuracy': scripted broadsides fly true.
@@ -406,9 +413,13 @@ pub(super) fn fire(
         })
         .collect();
     let mut seen: Vec<Contact> = Vec::with_capacity(contacts.len()); // reused: refilled per shooter
-    // In entity order: every shooter draws from the shared `Rng`, and the query's own order can differ from launch to launch.
-    for (me, tf, ship, mut states, health, mission, primary, pilot, cloak, posts, boarding, scan) in shooters.iter_mut().sort::<Entity>() {
-        if health.destroyed {
+    // In spawn order: every shooter draws from the shared `Rng`, and the query's own order differs between launches and restarts.
+    // Each ship's guns draw in mount order (the order of its `GunStates`).
+    let order = crate::scenario::in_spawn_order(&spawn_order, shooters.iter().map(|s| s.0), |e| *e);
+    let mut walk = shooters.iter_many_mut(&order);
+    while let Some(item) = walk.fetch_next() {
+        let Ok((me, tf, ship, mut states, health, mission, primary, pilot, cloak, posts, boarding, scan, abandoned)) = item else { continue };
+        if health.destroyed || abandoned {
             ground.remove(&me);
             continue;
         }
@@ -553,7 +564,7 @@ pub(super) fn fire(
                 state.request.ask();
                 state.request.step(dt, gun.lob.is_some());
             }
-            let gun_target = match (primary && is_indirect(&state.gun), pending) {
+            let gun_target = match (primary && is_indirect(&lib, &state.gun), pending) {
                 // Mine guns never aim: while the ship lays mines they drop them along the mount's rest direction.
                 _ if is_mine(&state.gun) => laying.then(|| AimTarget {
                     entity: Entity::PLACEHOLDER,
@@ -569,7 +580,10 @@ pub(super) fn fire(
                 .map(|(threat, _)| *threat),
                 // A rock on the captain's course holds every gun that has not fired at it yet; the attack routine's own fire waits.
                 _ if rock_busy.is_some() => rock_busy.filter(|_| state.rock_ask),
-                (false, _) if primary && target.2.panic && state.request.pending() && panic_fires(gun, is_mine(&state.gun)) => panic_target(&seen, tf, mount, gun).or(ship_target),
+                // The first shot ends the request, not the gun's own target: the rest of its burst follows it (docs/re/gunnery.md).
+                (false, _) if primary && target.2.panic && (state.request.pending() || state.burst_left > 0) && panic_fires(gun, is_mine(&state.gun)) => {
+                    panic_target(&seen, tf, mount, gun).or(ship_target)
+                }
                 (false, _) if !primary && gun.lob.is_some() => {
                     ground_banks.iter().find(|b| b.0 == mount.bank).map(|b| AimTarget { entity: Entity::PLACEHOLDER, position: b.1, velocity: Vec3::ZERO })
                 }
@@ -578,7 +592,7 @@ pub(super) fn fire(
                 _ => None,
             };
             // PROVISIONAL (owner retail recollection): torpedoes cannot target base towers.
-            let gun_target = gun_target.filter(|t| gun.bullet != TORPEDO_BULLET || !objects.get(t.entity).is_ok_and(|o| o.3.is_some()));
+            let gun_target = gun_target.filter(|t| !gun.bullet_torpedo || !objects.get(t.entity).is_ok_and(|o| o.3.is_some()));
             state.cooldown -= dt;
             state.burst_timer -= dt;
             let mount_rot = tf.rotation * mount.rot;
@@ -586,7 +600,7 @@ pub(super) fn fire(
             let dead = mount.parent.is_some_and(|p| health.sections[p] <= 0.0);
             // Harpoons are grapples, fired by the Grapple order (boarding.rs) and never at will. PROVISIONAL: the original's
             // grapple-gun exclusion is unknown. A dead mount section rests its gun.
-            let aim_at = gun_target.filter(|_| !dead && !state.gun.contains("Harpoon"));
+            let aim_at = gun_target.filter(|_| !dead && lib.family(&state.gun) != GunFamily::Harpoon);
             let engaged = aim_turret(state, gun, mount, mount_rot, origin, aim_at, dt, &mut parts);
             shot_engaged |= on_shot && engaged.is_some();
             // A beam gun charges, then holds its beam (combat/beam.rs burns what it touches); it fires no shells.
@@ -600,7 +614,7 @@ pub(super) fn fire(
                         shot_fired |= on_shot;
                         state.request.fired();
                         let target = gun_target.map(|t| t.entity).filter(|e| *e != Entity::PLACEHOLDER);
-                        fired.write(Fired { shooter: me, target, bullet: gun.bullet.clone() });
+                        fired.write(Fired { shooter: me, target, bullet: gun.bullet.clone(), torpedo: gun.bullet_torpedo, mine: gun.bullet_family.is_mine() });
                         if let Some((n, vol, max)) = &gun.sound {
                             sfx.write(Sfx { name: n.clone(), at: Some(origin), vol: *vol, max: *max });
                         }
@@ -654,7 +668,7 @@ pub(super) fn fire(
                 match posts.or(generic.as_ref()) {
                     Some(p) => {
                         let slot = if generic.is_some() { Some(0) } else { crate::crew_arms::weapon_banks(&lib, class).iter().position(|(b, _)| *b == mount.bank) };
-                        gunner_accuracy(p.gunner_skill(slot) + crate::crew_arms::leadership_bonus(me, p))
+                        gunner_accuracy(p.gunner_skill(slot) + crate::crew_arms::leadership_bonus(crate::scenario::SpawnIndex::of(&spawn_order, me), p))
                     }
                     None if human => crewed,
                     None => gunner_accuracy(crate::crew_arms::DEFAULT_HAND),
@@ -674,7 +688,7 @@ pub(super) fn fire(
                 state.rock_ask = false;
                 if !gun.point_defense {
                     let target = gun_target.map(|t| t.entity).filter(|e| *e != Entity::PLACEHOLDER);
-                    fired.write(Fired { shooter: me, target, bullet: gun.bullet.clone() });
+                    fired.write(Fired { shooter: me, target, bullet: gun.bullet.clone(), torpedo: gun.bullet_torpedo, mine: gun.bullet_family.is_mine() });
                 }
                 // Decoded: the gunner shortens only a torpedo launcher's wait (all other guns reload at their authored time).
                 let cut = if gun.torpedo_launcher { gunner_reload_cut(ship, posts, points.as_deref(), &lib, mount.bank) } else { 0.0 };
@@ -699,7 +713,7 @@ pub(super) fn fire(
                     let goal = gun_target.map(|t| t.position);
                     let shot = Launch {
                         vel: gun.lob.and_then(|a| lob_velocity(goal? - origin, a, gun.shell_gravity())).map(|v| turn * v),
-                        aim: goal.filter(|_| is_indirect(&state.gun)),
+                        aim: goal.filter(|_| is_indirect(&lib, &state.gun)),
                         pd: gun.point_defense,
                         harmless: mission.is_some_and(|ms| ms.warning_shots),
                         base: false,
@@ -725,8 +739,8 @@ pub(super) fn fire(
                 }
             }
         }
-        // The panic order is over once no gun still holds its request.
-        if primary && target.2.panic && !states.0.iter().any(|s| s.request.pending()) {
+        // The panic order is over once no gun still holds its request or is in the middle of the burst it fired.
+        if primary && target.2.panic && !states.0.iter().any(|s| s.request.pending() || s.burst_left > 0) {
             target.2.panic = false;
         }
         // One click, one shot: drop the point once fired, or when the bank cannot reach it.
@@ -793,7 +807,7 @@ pub(super) fn launch_shell(
         sfx.write(Sfx { name: n.clone(), at: Some(from), vol: *vol, max: *max });
     }
     let mat = if side == Side::Player { look.shell.clone() } else { look.enemy_shell.clone() };
-    let vel = shot.vel.unwrap_or_else(|| launch_velocity(dir, g.muzzle, g.bullet == TORPEDO_BULLET));
+    let vel = shot.vel.unwrap_or_else(|| launch_velocity(dir, g.muzzle, g.bullet_torpedo));
     let stf = Transform::from_translation(from).looking_to(vel, Vec3::Y);
     let shell = commands
         .spawn((
@@ -804,6 +818,7 @@ pub(super) fn launch_shell(
                 // Mines drift.
                 gravity: if matches!(b.payload, Payload::Mine { .. }) { 0.0 } else { g.shell_gravity() },
                 bullet: g.bullet.clone(),
+                torpedo: b.torpedo,
                 side,
                 shooter,
                 target,
@@ -859,7 +874,7 @@ pub(super) fn base_fire(
     lib: Res<Library>,
     fxl: Res<FxLib>,
     look: Res<Look>,
-    mut rng: ResMut<Rng>,
+    (mut rng, spawn_order): (ResMut<SimRng>, Query<&crate::scenario::SpawnIndex>),
     mut sfx: MessageWriter<Sfx>,
     mut fired: MessageWriter<Fired>,
     campaign: Option<Res<crate::campaign::Mission>>,
@@ -872,7 +887,10 @@ pub(super) fn base_fire(
     (globals, sensors): (Query<&GlobalTransform, With<GunPart>>, Res<crate::environment::Sensors>),
 ) {
     let dt = time.delta_secs();
-    for (me, tf, base, armed, health, mut states, skirmish_side, island, visibility) in bases.iter_mut().sort::<Entity>() {
+    let order = crate::scenario::in_spawn_order(&spawn_order, bases.iter().map(|b| b.0), |e| *e);
+    let mut walk = bases.iter_many_mut(&order);
+    while let Some(item) = walk.fetch_next() {
+        let Ok((me, tf, base, armed, health, mut states, skirmish_side, island, visibility)) = item else { continue };
         // A base a rule has hidden (mission 11's armed asteroids until a speech line) does not fire. PROVISIONAL: the original's rule for a hidden island's guns is not read.
         if visibility.is_some_and(|v| *v == Visibility::Hidden) {
             continue;
@@ -910,8 +928,8 @@ pub(super) fn base_fire(
             let (mount_rot, origin) = (tf.rotation * mount.rot, tf.transform_point(mount.pos));
             let dead = mount.parent.is_some_and(|p| health.sections[p] <= 0.0);
             // Mortar towers lob at the ship (PROVISIONAL: mines/grav charges on bases are not seen in the data and stay idle).
-            let usable = !is_indirect(&mount.gun) || gun.lob.is_some();
-            let aim_at = target.map(|t| t.0).filter(|_| !dead && !gun.point_defense && !mount.gun.contains("Harpoon") && usable);
+            let usable = !is_indirect(&lib, &mount.gun) || gun.lob.is_some();
+            let aim_at = target.map(|t| t.0).filter(|_| !dead && !gun.point_defense && lib.family(&mount.gun) != GunFamily::Harpoon && usable);
             let engaged = aim_turret(state, gun, mount, mount_rot, origin, aim_at, dt, &mut parts);
             let (Some((aim_dir, distance)), Some((aim_at, target_side))) = (engaged, target) else {
                 state.burst_left = 0;
@@ -919,7 +937,7 @@ pub(super) fn base_fire(
             };
             if state.burst_left == 0 && state.cooldown <= 0.0 && state.aligned && volcano_cycle.is_none() {
                 state.burst_left = gun.burst;
-                fired.write(Fired { shooter: me, target: Some(aim_at.entity), bullet: gun.bullet.clone() });
+                fired.write(Fired { shooter: me, target: Some(aim_at.entity), bullet: gun.bullet.clone(), torpedo: gun.bullet_torpedo, mine: gun.bullet_family.is_mine() });
                 state.cooldown = gun.burst_cycle();
                 state.burst_timer = 0.0;
                 volcano_cycle = volcano.then_some(state.cooldown);
@@ -940,7 +958,7 @@ pub(super) fn base_fire(
                     let side = skirmish_side.map_or(if target_side == Side::Player { Side::Enemy } else { Side::Player }, |b| b.0);
                     let shot = Launch {
                         vel: gun.lob.and_then(|a| lob_velocity(aim_at.position - origin, a, gun.shell_gravity())).map(|v| turn * v),
-                        aim: (is_indirect(&mount.gun) || gun.lob.is_some()).then_some(aim_at.position),
+                        aim: (is_indirect(&lib, &mount.gun) || gun.lob.is_some()).then_some(aim_at.position),
                         base: true,
                         ricochet: band(gun, distance, gun.ricochet),
                         ..default()
@@ -987,7 +1005,7 @@ fn aim_turret(
     let half_arc = mount.arc / 2.0; // already converted to radians when loading the mount
     let (mut want_yaw, mut want_pitch, mut engaged) = (0.0f32, Some(0.0f32), None);
     if let Some(aim_at) = aim_at {
-        let to_target = aim_offset(aim_at.position - origin, aim_at.velocity, gun.muzzle, gun.bullet == TORPEDO_BULLET);
+        let to_target = aim_offset(aim_at.position - origin, aim_at.velocity, gun.muzzle, gun.bullet_torpedo);
         let dir = match gun.lob.and_then(|angle| lob_velocity(to_target, angle, gun.shell_gravity())) {
             Some(velocity) => velocity.normalize(),
             None => aim(to_target, gun.muzzle, gun.shell_gravity()),
@@ -1004,7 +1022,7 @@ fn aim_turret(
             engaged = Some((dir, to_target.length()));
         }
     }
-    // Read from the original's code: a direct-fire gun with no target never runs its tracking, so it stays where it was (also under hold
+    // A direct-fire gun with no target never runs its tracking, so it stays where it was (also under hold
     // fire); a lob gun keeps tracking its stored ground point and returns to rest here.
     if aim_at.is_none() && gun.lob.is_none() {
         want_yaw = state.yaw;
@@ -1057,8 +1075,6 @@ fn burst_turn(aim_dir: Vec3, deviation: f32, rng: &mut Rng) -> Quat {
     Quat::from_axis_angle(Vec3::Y, sign(rng.f()) * deviation) * Quat::from_axis_angle(right, sign(rng.f()) * deviation)
 }
 
-/// Damage rules of one shell hit on section `k` (`damage` = [lower, upper, crit, fire chance, fire strength]).
-/// Criticals are not modelled: in the original they only feed a tally and crew speech (docs/re/movement.md).
 /// Seconds the gunner of `bank` takes off TimeBetweenBursts: 10 x gunnery (0..1), for the player's crewed ships only; computer
 /// ships fire every TimeBetweenBursts here. Decoded: only torpedo launchers use it (the caller checks), the wait is
 /// max(0, TimeBetweenBursts - 10 x the raw gunnery of the bank's gunner), with no leadership bonus; computer ships' torpedo launchers

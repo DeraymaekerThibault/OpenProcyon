@@ -2,6 +2,7 @@ use super::fitting::{FitError, family};
 use super::view::{crew_rows, weapon_rows};
 use super::*;
 #[test]
+#[allow(deprecated)] // Interaction, see pointer.rs
 fn widgets_play_rollover_once_and_select_on_press() {
     let mut app = App::new();
     app.add_plugins(MinimalPlugins).add_message::<crate::audio::Sfx>().add_systems(Update, button_sounds);
@@ -95,11 +96,11 @@ fn the_first_mate_stands_in_for_a_missing_helm_and_the_captain_for_missing_engin
 fn a_leadership_ten_captain_always_lifts_the_crew_and_no_officers_never_do() {
     let mut posts = CrewPosts(Default::default());
     for i in 0..50 {
-        assert_eq!(leadership_bonus(Entity::from_raw_u32(i).unwrap(), &posts), 0.0);
+        assert_eq!(leadership_bonus(crate::scenario::SpawnIndex(i), &posts), 0.0);
     }
     posts.0[1] = vec!["Crew_Navy_Amelia".into()]; // leadership 10
     for i in 0..50 {
-        assert!(leadership_bonus(Entity::from_raw_u32(i).unwrap(), &posts) >= 0.1);
+        assert!(leadership_bonus(crate::scenario::SpawnIndex(i), &posts) >= 0.1);
     }
 }
 #[test]
@@ -351,4 +352,21 @@ fn the_price_change_is_the_difference_times_the_guns_in_the_bank() {
     let (a, b) = (i64::from(lib.guns[&gun].points.unwrap_or(0)), i64::from(lib.guns[stock].points.unwrap_or(0)));
     assert_eq!(bank_delta(&lib, class, &BTreeMap::new(), target, &gun), Some((a - b) * guns));
     assert_eq!(bank_delta(&lib, class, &BTreeMap::new(), target, stock), Some(0));
+}
+#[test]
+fn navigation_actions_move_only_the_choice() {
+    let mut c = Choice { ship: 1, post: 3, page: 2, post_picked: true, message: "x".into(), ..default() };
+    assert!(navigate(&mut c, &Action::Ship(1), 3, 0));
+    assert_eq!((c.ship, c.post, c.page, c.post_picked), (2, 0, 0, false));
+    assert!(navigate(&mut c, &Action::Ship(1), 3, 0), "the ship list wraps");
+    assert_eq!(c.ship, 0);
+    assert!(navigate(&mut c, &Action::Post(-1), 3, 4));
+    assert_eq!(c.post, 3, "the post list wraps backwards");
+    assert!(navigate(&mut c, &Action::Page(-5), 3, 4));
+    assert_eq!(c.page, 0, "a page never goes below the first");
+    assert!(navigate(&mut c, &Action::Tab, 3, 4));
+    assert!(c.arms && c.message.is_empty());
+    assert!(navigate(&mut c, &Action::SelectShip(9), 3, 4));
+    assert_eq!(c.ship, 2, "a picked ship is clamped to the fleet");
+    assert!(!navigate(&mut c, &Action::Sort, 3, 4), "other actions are not navigation");
 }

@@ -11,11 +11,18 @@ Git Bash (`GIT_BASH=<path>` if it is not in the default place), and the screensh
 2. Put editable gameplay changes in `mods/`; change exporters only when the retail conversion is wrong.
 3. Add a small regression test for new logic. Prefer synthetic parser tests and pure mission-rule tests over long simulations.
 4. Run the relevant tests while iterating, then `make check` before committing.
-5. For ECS wiring or UI changes, also run a screenshot smoke test. Unit tests do not detect every Bevy query conflict or layout problem. `make smokes` runs every documented smoke with its arguments (`tools/smokes.sh`; add new smokes to its list).
+5. For ECS wiring or UI changes, also run a screenshot smoke test. Unit tests do not detect every Bevy query conflict or layout problem. `make smokes [ARGS="--jobs N"]` runs every documented smoke with its arguments (`tools/smokes.sh`; add new smokes to its list with
+   a `kind`: `asserts` for a script that logs a PASS line when its checks held (the run fails without it), `visual` otherwise). It builds
+   once, runs the binary, plays N at once (default: half the cores; each run has its own display, scratch `XDG_DATA_HOME` and mod overlay)
+   and ends with one line (`smokes: 22 ok, 2 FAIL: dock, fleet (...)`); a failure prints its last relevant log lines and the rerun command.
+   `make smoke WHAT=changed` runs only the smokes that the files changed against the merge base with origin/main (and uncommitted ones)
+   map to; the map is `MAP` in `tools/smokes.py` (combat, ship: battle check + damage, target, course; rules, campaign: briefing-skip,
+   lifeboat-m1, storm-m3, hunt-m3; docking, boarding: dock + battle check; classic, panels, menu: pause, fleet, mods; fx, render: fxtest;
+   lib.rs, loading, smoke/: everything). `WHAT=<regex>` picks smokes by name.
    `make autoplay [ARGS="1 2"]` (`tools/autoplay.py`) plays campaign missions with the `--script mission` autopilot and prints a
    table per mission: outcome (won, lost, time limit, stuck in NIS, panic), peak entities/particles, slowest frame and how many
    mission rules never fired (named in the log). It finds crashes and soft-locks, not fidelity problems.
-   `make battles [ARGS=ambush]` (`tools/battle_check.py`, part of `make check` when assets are imported) plays short skirmishes with
+   `make battles [ARGS=ambush]` (`tools/battle_check.py [--jobs N]`, part of `make check --full` when assets are imported; stutter is judged only with `--jobs 1`) plays short skirmishes with
    fixed fleets at 16x and fails when one stops behaving like a battle: a side never fires or hits, a computer ship parks, a ship
    grinds on scenery, or the game panics. The game writes one `battle report {json}` line (`PROCYON_REPORT=<game s>`,
    `smoke/report.rs`); read it before adding print statements. When a change touches targeting, steering or what counts as a
@@ -36,7 +43,15 @@ Git Bash (`GIT_BASH=<path>` if it is not in the default place), and the screensh
    `PROCYON_TRACE=<file.csv>` (`smoke/trace.rs`) logs every ship (position, velocity, heading, section hit points) and every shell
    once per simulation step, in game axes: the table to lay beside a measurement of the original when a battle plays out
    differently (how close ships come, how often they fire and hit). Stage the same start points with a small mod that replaces
-   the map's `map.json`.
+   the map's `map.json`. Ships and shells are numbered by creation order (`SpawnIndex`) and `gt` restarts at 0 when a battle restarts,
+   so two runs compare row by row. Every battle logs `battle seed N`; `--seed N` or `PROCYON_SEED=N` replays it (`combat::SimRng`,
+   docs/re/tick.md).
+   `--fixed-step` (or `PROCYON_FIXED_STEP=1`) makes a scripted run reproducible: each frame is one 33 ms tick at 1x whatever
+   the frame rate, and the clock-seeded cosmetic draws (ship names, stars) use a fixed seed. Run twice, it gives the same
+   pictures and the same trace. `python3 -m tools.tracediff A.csv B.csv` compares two traces (one line per file, then the
+   first differing row). `python3 -m tools.visdiff` renders fixed-step scenes from the merge base (a warm worktree,
+   `../openprocyon-visdiff-base`) and from this checkout, and prints `same` or `CHANGED` per scene, with diff pictures in
+   `local/visdiff/`. Nothing is committed or uploaded. Both builds need `--fixed-step`, so the base must contain #535.
    Two kinds of scenario: a map with the `--ship/--allies/--enemies` shortcut (the human's own fleet; no lobby), and a lobby
    scenario (`--lobby "map=border_dispute;points=1000;limit=10;slots=human,7*computer"`, `menu/lobby_scenario.rs`) that sets the
    skirmish lobby up through the same model as its pull-downs, Auto Assign and Launch button. Only lobby scenarios play allied
@@ -60,18 +75,35 @@ Git Bash (`GIT_BASH=<path>` if it is not in the default place), and the screensh
 # No Make dependency required: these are the authoritative underlying commands.
 python3 -m tools.import_assets --game <install dir>   # once: convert your own copy of the game into assets/
 tools/check.sh
-cargo run --release --manifest-path game/Cargo.toml -- --mission 1
+cargo run --profile fast --manifest-path game/Cargo.toml -- --mission 1   # fast: near-release speed, incremental; release is for player builds
 python3 -m unittest discover -s tests -p 'test_export_hud.py'
-cargo test --release --manifest-path game/Cargo.toml panels::tests -- --include-ignored  # shared HUD; classic::panels::tests for the retail art
+cargo test --manifest-path game/Cargo.toml panels::tests -- --include-ignored  # shared HUD; classic::panels::tests for the retail art
 tools/shot.sh local/mission01.png --mission 1 --script briefing-skip --shot-frame 180   # --shot-frame 100,200 saves local/mission01_100.png, _200.png in one run; 1280x720; no late shot unless --late-frame N
 tools/shot.sh local/paused.png --map red_rover --script pause --shot-frame 50 --late-frame 0
 tools/shot.sh local/pause-restart.png --map red_rover --script pause-restart --shot-frame 90 --late-frame 0
 ```
 
-`make check` calls `tools/check.sh`: ruff format check and lint (Python, rules in `ruff.toml`) → rustfmt check → strict Clippy → Rust release tests → Python tests. Rust tests that need converted
+`make check` calls `tools/check.sh` (`make check ARGS=--quick` / `--full` pick a tier). The steps, cheapest first: ruff format check and
+lint (Python, rules in `ruff.toml`) → hygiene rules → Python tests → rustfmt check → strict Clippy → Rust tests; `--full` then builds the
+game and runs the startup smoke and the battle check.
+
+| Tier | When | Runs |
+|---|---|---|
+| `--quick` | while iterating | ruff and hygiene; rustfmt + Clippy if anything under `game/` or a `.rs` file changed, the Python tests if a `.py` file changed (against the merge base with `origin/main`, plus uncommitted and untracked files) |
+| default | before a commit | every step up to the Rust tests (asset tests with `--include-ignored` when an import exists) |
+| `--full` | before a push or PR | default + `fast` game build + startup smoke + battle check; fails without imported assets unless `--allow-partial` |
+
+Each step prints one line (`ok`/`FAIL`, name, seconds) and writes its full output to `local/check/<step>.log`; a failure prints its first
+20 relevant lines and the command to rerun. The last line is `GATE OK <tier> <time>`, `GATE FAIL <step> (<log>)` or
+`GATE PARTIAL ...` (no imported assets: it names what was skipped). Locally the gate unsets `CI`, which would turn Cargo's
+incremental builds off. One module's tests: `cargo test --manifest-path game/Cargo.toml --lib <module::path>`.
+Clippy and the tests build in the dev profile (incremental, debug assertions and overflow checks on); the startup smoke, `shot.sh`,
+`smokes.sh`, `battle_check` and `autoplay` build the game in the `fast` profile (release speed, incremental) and run
+`<target>/fast/openprocyon`. The `release` profile is only for player builds (`release.yml`); `battle_check --profile release`
+or `autoplay --profile release` times what players get. Rust tests that need converted
 assets are marked `#[ignore = "needs imported assets"]`; the gate runs them with `--include-ignored` when an import exists.
 Mark new Rust tests that load imported data with the same ignore reason, including tests that do so through helpers.
-Asset-free Rust tests always run. For a manual full run after importing, use `cargo test --release --manifest-path game/Cargo.toml -- --include-ignored`.
+Asset-free Rust tests always run. For a manual full run after importing, use `cargo test --manifest-path game/Cargo.toml -- --include-ignored`.
 Python tests that need the install or assets skip.
 `make fmt` formats Rust and Python (`ruff format`, `ruff check --fix`); it does not rewrite generated JSON. `python3 -m tools.format_json assets` formats asset JSON when needed.
 Shared sight smoke: `WAYLAND_DISPLAY= tools/shot.sh local/sight.png --script sight --allies Ship_Navy_Cutter --enemies Ship_Pirate_Schooner --shot-frame 135 --late-frame 0`; it freezes three ships and asserts group/range/cloak transitions against real radar widgets. This is wiring validation, not a campaign playthrough.
@@ -89,9 +121,12 @@ checks reveal/patrol without premature hunt, spotting/retreat without engagement
 so it does not validate the full retreat through scenery or combat. Current visual smoke: `tools/shot.sh local/m3-current.png --mission 3 --script current-m3 --shot-frame 90 --late-frame 0` places the ship on the current and checks two flowing ribbon layers.
 Diagnostics are off by default; simulation speed does not scale the frame-time measurement.
 Use a scratch `XDG_DATA_HOME` for automated campaign runs if the player's campaign-point save must remain untouched.
-Converted assets are found in this order: `PROCYON_ASSETS`, `assets/` in the source checkout (regardless of the working directory), then the
+Converted assets are found in this order: `PROCYON_ASSETS`, `assets/` in the source checkout (the checkout is found from the working directory or the executable: either must lie inside it), then the
 per-user folder `$XDG_DATA_HOME/openprocyon/assets` (Linux default `~/.local/share`; `%APPDATA%\openprocyon\assets` on Windows). Without
-any, the game exits with import instructions. `content/` is always layered on top. CLI mod/screenshot paths remain relative to the working directory.
+any, the game exits with import instructions. `content/` is always layered on top. The tools (tests, `check.sh`, `shot.sh`, `smokes.sh`,
+`battle_check`, `autoplay`) use one order, `find_assets()` in `tools/import_assets.py`: the game's, with the main checkout's `assets/`
+after this checkout's, so a linked worktree uses the main import (never copy `assets/`). They export it as `PROCYON_ASSETS` for the game;
+`check.sh` prints `ASSETS: <path>` or `ASSETS: missing`. CLI mod/screenshot paths remain relative to the working directory.
 
 ### Measuring a look
 
@@ -148,7 +183,7 @@ only in what is drawn:
 
 ```
 shared core + model      ship, combat/, collision, rules/, campaign, docking, boarding, scenario, data, modding, ...
-(the `openprocyon` lib)  menu.rs / panels.rs / options_menu.rs: UI state, Actions, marker components, input and their behaviour
+(the `openprocyon` lib)  menu.rs / panels.rs / options_menu.rs / pointer.rs (the one reader of the deprecated `Interaction`): UI state, Actions, marker components, input and their behaviour
         ▲
 classic/  (this binary)  retail-art views
 ```
@@ -182,9 +217,9 @@ Keep the existing module boundaries. New files should own a real feature, not ju
 | `campaign.rs` | Mission loading (`load_id`, `next`), campaign ship/map setup, campaign points and save files (`CampaignSave`, `list_saves`, `write_save`) | Changing mission initialization or which exported mission is loadable |
 | `rules/` | `eval.rs` pure rule evaluator (`Script`, no ECS; `eval/` holds types, state, conditions, actions); `systems.rs` ECS dispatch (`systems/` holds mission AI, presentation, autopilot); `tests.rs` | Implementing a retail condition/action; test the evaluator before ECS wiring |
 | `docking.rs` | Dock points and their marker effects, dock routine (wait / approach / docked / return), repair while docked, dock rule hooks, click-to-dock picking | Changing docking/repair or the `Group/Unit Is Docked`-style rules |
-| `boarding.rs` | Submodules `boarding/odds.rs` (strengths, casualty odds), `grapple.rs` (harpoon, hook, winch), `fight.rs` (the fight and capture), `ai.rs`. Crew strengths, grapple order/hook/winch, boarding fight and capture, the status bar, AI boarding of bases; `BoardMsg` / `Captured` messages | Changing boarding/grappling or the capture rules (`docs/re/boarding.md`) |
+| `boarding.rs` | Submodules `boarding/odds.rs` (strengths, casualty odds), `grapple.rs` (harpoon, hook, winch), `fight.rs` (the fight and capture), `ai.rs`, `order.rs` (the board order the mission rule `OP Board Ship` gives). Crew strengths, grapple order/hook/winch, boarding fight and capture, the status bar, AI boarding of bases; `BoardMsg` / `Captured` messages | Changing boarding/grappling or the capture rules (`docs/re/boarding.md`) |
 | `crew_arms.rs` | Submodules `crew_arms/posts.rs` (crew data, posts), `fitting.rs` (guns, banks, applying outfits), `view.rs` (screen model). Campaign outfitting model, recruitment, post/bank transactions, live crew/equipment application; `classic/crew_arms.rs` draws it | Changing crew/arms purchases, assignment and their gameplay consumers (`docs/re/scoring-saves.md` §7, `docs/re/crew.md`) |
-| `lifeboats.rs` | Lifeboats: `Lifeboat` marker, `ShipLost` message, boat spawn when a flagged ship is destroyed, drift, nearest-ship sphere pickup, pickup sound/points/table, rule-visible owner list | Changing lifeboat creation/pickup (`docs/re/lifeboats.md`); the creation flag lives on `MissionShip`, the saved table in `rules::Script` |
+| `lifeboats.rs` | Lifeboats: `Lifeboat` marker, `ShipLost` message, boat spawn when a flagged ship is destroyed, drift, nearest-ship sphere pickup, pickup sound/points/table, rule-visible owner list; `Abandoned`, the hull left disabled by `OP Abandon Ship` | Changing lifeboat creation/pickup (`docs/re/lifeboats.md`); the creation flag lives on `MissionShip`, the saved table in `rules::Script` |
 | `loading.rs` | Battle start gate: `Loading` exists while models, textures, sky pictures and shader pipelines are not ready; the battle is paused, takes no input, starts no sound (music included) and counts no screenshot frames meanwhile, and views draw a cover (`Loading::busy` for a system that waits on an asset of its own) | Changing what a battle waits for before it starts |
 | `smoke/` | Validated `--script` names, fleet/campaign and lifeboat smoke drivers, tender setup hook, `PROCYON_END_SHOT`/`PROCYON_NIS_SHOT` screenshot hooks | Adding a script name or changing scripted checks; keep production simulation in its owning module and preserve system ordering |
 | `classic/` | Retail-art views (default): `menu.rs` front-end screens and list scrolling, `widgets.rs` the front-end widget kit (canvas, panels, buttons, lists, scrollbars, pull-downs, fleet bar, info panel) drawn from `theme.rs` / `data/hud/theme.json`, with the hover state swap, `panels.rs` HUD sprites (bar, compass, dial, talking head, weapon panel), `options_menu.rs` right-click menu art and context cursor, `world_hud.rs` ship-name banners, target chevrons and objective indicator, `starmap.rs` star map art, `mission_ui.rs` objectives, speech banners, hints, end text and letterboxes, `boarding_bar.rs` boarding status bar, `crew_arms.rs` outfitting screens, `setup.rs` the first-run import screen (content/ fonts and plain boxes) | Changing how the retail look is drawn; behaviour goes in the shared module |
@@ -220,7 +255,7 @@ Tag battle-owned roots for scenario cleanup and test returning to the same ship/
 - **Scratch:** `local/` only (git-ignored). Never put screenshots, logs or raw retail inputs anywhere tracked.
 
 Do not change converted asset paths just to make the tree look tidy: JSON, Bevy asset handles and mod overlays reference those paths.
-Converted content is never committed: every player and contributor imports their own copy. `tools/compare_assets.py <expected> <actual>`
+Converted content is never committed: every player and contributor imports their own copy. `python3 -m tools.compare_assets <expected> <actual>`
 compares two imports by meaning (JSON by value, images by pixels) to check exporter changes. See [data-format.md](data-format.md) and [modding.md](modding.md).
 `data/hud/bar.json` is authored layout configuration; the sprites it names are generated (`hud/sprites/`). Most other retail JSON is regenerated, so edits belong in mods.
 

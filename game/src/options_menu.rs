@@ -1,10 +1,11 @@
 //! Right-click options menu and context cursors (docs/re/docking-and-orders.md §1-2): a click (not a drag) with the right button on a
 //! ship or base opens an icon menu around the cursor; three variants (enemy / own primary / other) with the retail icons, backgrounds and
 //! slot offsets from hud.hdt. Implemented items: Focus, Stop, Dock, Tow start / stop (campaign missions only, the rules keep the link),
-//! and the enemy menu's Board and Grapple start / stop (boarding.rs); Hold position and Cloak are drawn greyed out.
+//! and the enemy menu's Board and Grapple start / stop (boarding.rs), Hold position and Cloak.
 //! Sounds as in the original: HUD_Options_Open on opening, _Focus / _Stop / _Dock for the item clicked, _NoSelection for a click on no
 //! (enabled) item; HUD_Options_MouseOver when the cursor enters an enabled slot (PROVISIONAL: the original may play it for any button).
 //! The context cursor (dock / can't / attack) follows the mouse while it hovers a ship or base.
+use bevy::ecs::system::SystemParam;
 use bevy::input::mouse::AccumulatedMouseMotion;
 use bevy::prelude::*;
 use bevy::window::{CursorOptions, PrimaryWindow};
@@ -18,6 +19,7 @@ use crate::panels::REF_H;
 use crate::sprites::{HudData, offset, size_of};
 use crate::{Orbit, Ship, Side};
 
+/// PROVISIONAL: the original's click tolerance is not measured.
 const CLICK_PX: f32 = 6.0;
 const CLICK_SECS: f32 = 0.4;
 
@@ -175,41 +177,217 @@ fn background(kind: Kind) -> [&'static str; 4] {
     }
 }
 
+/// The input a click on the menu reads.
+#[derive(SystemParam)]
+struct MenuInput<'w> {
+    mouse: Res<'w, ButtonInput<MouseButton>>,
+    keys: ResMut<'w, ButtonInput<KeyCode>>,
+    motion: Res<'w, AccumulatedMouseMotion>,
+    time: Res<'w, Time<Real>>,
+    ui: Res<'w, crate::panels::UiClick>,
+}
+
+/// What the menu looks up about the battle.
+#[derive(SystemParam)]
+struct MenuScene<'w, 's> {
+    mission: Option<Res<'w, crate::campaign::Mission>>,
+    fleets: Res<'w, crate::ship::Fleets>,
+    sensors: Res<'w, crate::environment::Sensors>,
+    lib: Res<'w, Library>,
+    actors: Query<'w, 's, (Entity, &'static Ship, &'static Transform)>,
+    ships: Query<'w, 's, (Entity, &'static Transform, &'static Ship, &'static Health)>,
+    flags: Query<'w, 's, (Has<crate::ship::HoldPosition>, Option<&'static crate::cloak::Cloak>)>,
+}
+
+/// Boarding and grappling: the tests for the slots and the messages the slots send.
+#[derive(SystemParam)]
+struct MenuBoarding<'w, 's> {
+    boarders: crate::boarding::Boarders<'w, 's>,
+    board: MessageWriter<'w, BoardMsg>,
+    status: Res<'w, crate::boarding::BoardStatus>,
+}
+
+/// A right click is a press and release close together; a longer or moving press is the camera drag.
+fn is_tap(press: (Vec2, f32), cursor: Vec2, now: f32) -> bool {
+    press.0.distance(cursor) <= CLICK_PX && now - press.1 <= CLICK_SECS
+}
+
+/// The sound of a left click on slot `act` and the boarding message it sends, after doing what the slot says for ship `actor`
+/// (`player` is its ship state). A Focus slot the ship cannot see the target for comes in as `Unavailable`.
+fn run_slot(
+    act: Option<Act>,
+    target: Entity,
+    actor: Entity,
+    player: &mut Ship,
+    commands: &mut Commands,
+    orbit: &mut Orbit,
+    docks: &mut Dockees,
+) -> (&'static str, Option<BoardMsg>) {
+    let mut msg = None;
+    let sound = match act {
+        Some(Act::Focus) => {
+            orbit.focus = Some(target);
+            "HUD_Options_Focus"
+        }
+        Some(Act::Stop) => {
+            player.stand_still();
+            commands.entity(actor).insert(player.clone());
+            commands.queue(move |w: &mut World| {
+                if let Some(mut p) = w.get_mut::<crate::ship::FleetPilot>(actor) {
+                    p.cancel_actions();
+                }
+            });
+            docks.cancel_as(actor);
+            "HUD_Options_Stop"
+        }
+        Some(Act::HoldOn) => {
+            player.stand_still();
+            commands.entity(actor).insert((player.clone(), crate::ship::HoldPosition));
+            commands.queue(move |w: &mut World| {
+                if let Some(mut p) = w.get_mut::<crate::ship::FleetPilot>(actor) {
+                    p.hold_position();
+                }
+            });
+            "HUD_Options_Select"
+        }
+        Some(Act::HoldOff) => {
+            commands.entity(actor).remove::<crate::ship::HoldPosition>();
+            "HUD_Options_Select"
+        }
+        Some(a @ (Act::CloakStart | Act::CloakStop)) => {
+            let on = a == Act::CloakStart;
+            commands.queue(move |w: &mut World| {
+                let side = w.get::<Ship>(actor).map(|s| s.side);
+                if let (Some(mut c), Some(side)) = (w.get_mut::<crate::cloak::Cloak>(actor), side) {
+                    if on {
+                        c.start(side);
+                    } else {
+                        c.stop();
+                    }
+                }
+            });
+            if on { "HUD_Options_CloakStart" } else { "HUD_Options_CloakStop" }
+        }
+        Some(Act::BoardStart) => {
+            crate::ship::release_hold(commands, actor);
+            msg = Some(BoardMsg::Board { boarder: Some(actor), target });
+            "HUD_Options_BoardStart"
+        }
+        Some(Act::BoardStop) => {
+            msg = Some(BoardMsg::Unboard { boarder: Some(actor) });
+            "HUD_Options_BoardStop"
+        }
+        Some(Act::GrappleStart) => {
+            msg = Some(BoardMsg::Grapple { grappler: Some(actor), target });
+            "HUD_Options_GrappleStart"
+        }
+        Some(Act::GrappleStop) => {
+            msg = Some(BoardMsg::Ungrapple { grappler: Some(actor) });
+            "HUD_Options_GrappleStop"
+        }
+        Some(Act::Dock) if docks.can_dock(actor, target) => {
+            crate::ship::release_hold(commands, actor);
+            docks.dock_as(actor, target);
+            "HUD_Options_Dock"
+        }
+        Some(Act::TowStart) => {
+            crate::ship::release_hold(commands, actor);
+            docks.tow_as(actor, target);
+            "HUD_Options_TowStart"
+        }
+        Some(Act::TowStop) => {
+            docks.break_tow_as(actor);
+            "HUD_Options_TowStop"
+        }
+        Some(Act::Unavailable | Act::Dock) | None => "HUD_Options_NoSelection",
+    };
+    (sound, msg)
+}
+
+/// What a right click at `ray` opens the menu for: the target, the menu variant and whether Dock is enabled. None: nothing to open.
+fn pick_target(
+    scene: &MenuScene,
+    docks: &Dockees,
+    ray: Ray3d,
+    actor: Entity,
+    player_class: usize,
+    player_at: &Transform,
+    bar_target: Option<Entity>,
+) -> Option<(Entity, Kind, bool)> {
+    let mission = scene.mission.as_deref();
+    let nearest = |side_ok: &dyn Fn(&Ship) -> bool, skip: Option<Entity>| {
+        scene
+            .ships
+            .iter()
+            .filter(|(e, _, sh, h)| Some(*e) != skip && side_ok(sh) && !h.destroyed && scene.sensors.player_sees(*e, mission))
+            .filter_map(|(e, tf, sh, _)| ray_hit(&scene.lib.classes[sh.class], tf, ray).map(|t| (e, t)))
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+    };
+    let ally = nearest(&|sh| sh.side == Side::Player, Some(actor));
+    let enemy = nearest(&|sh| sh.side != Side::Player, None);
+    let own = ray_hit(&scene.lib.classes[player_class], player_at, ray);
+    if let Some(e) = bar_target {
+        if !scene.fleets.roster().contains(&e) {
+            return None;
+        }
+        Some((e, if e == actor { Kind::Selected } else { Kind::Friendly }, docks.can_dock(actor, e)))
+    } else if own.is_some() {
+        Some((actor, Kind::Selected, false))
+    } else if let Some((e, ok)) = docks.under(ray, actor) {
+        Some((e, Kind::Friendly, ok))
+    } else if let Some((e, _)) = ally {
+        Some((e, Kind::Friendly, false)) // any other friendly ship: Focus, Tow and a greyed Dock
+    } else {
+        let hostile = [enemy, docks.hostile_base_hit(ray, player_at.translation).map(|(e, t, _)| (e, t))].into_iter().flatten().min_by(|a, b| a.1.total_cmp(&b.1));
+        hostile.map(|(e, _)| (e, Kind::Enemy, false)) // an enemy ship or a hostile base: same menu
+    }
+}
+
+/// The state of the Board, Grapple, Hold and Cloak slots for `actor` and the menu's `target`.
+fn slot_hooks(scene: &MenuScene, boarding: &MenuBoarding, actor: Entity, target: Entity, player_class: usize) -> Hooks {
+    let mission = scene.mission.as_deref();
+    let (held, cloak) = scene.flags.get(actor).map(|(h, c)| (h, c.map(|c| (c.stop_shown(), c.stop_shown() || c.can_start())))).unwrap_or_default();
+    let cloak = cloak.or_else(|| scene.lib.classes[player_class].cloakable.then_some((false, false)));
+    let b = &boarding.boarders;
+    let mut hooks = if scene.ships.get(target).is_err() {
+        // A base: boarding goes by range, there is nothing to grapple.
+        let on = b.boarding(actor, target);
+        Hooks { board: (on, on || b.can_board(actor, target)), ..default() }
+    } else if Some(actor) == scene.fleets.primary() {
+        Hooks { board: boarding.status.board(target), grapple: boarding.status.grapple(target), ..default() }
+    } else {
+        let on = b.boarding(actor, target);
+        let grappling = b.grappling(actor, target);
+        Hooks { board: (on, on || b.can_board(actor, target)), grapple: (grappling, grappling || b.can_grapple(actor)), ..default() }
+    };
+    (hooks.hold, hooks.cloak) = (held, cloak);
+    hooks.focus_unavailable = target != actor && !scene.sensors.in_sight(actor, target, mission);
+    hooks
+}
+
+#[expect(clippy::too_many_arguments, reason = "a Bevy system; the inputs are bundled as far as the borrows allow")]
 fn menu(
-    (mouse, mut keys, mission, boarders, mut board, fleets, mut bar, status, ui, flags, sensors, mut target): (
-        Res<ButtonInput<MouseButton>>,
-        ResMut<ButtonInput<KeyCode>>,
-        Option<Res<crate::campaign::Mission>>,
-        crate::boarding::Boarders,
-        MessageWriter<BoardMsg>,
-        Res<crate::ship::Fleets>,
-        ResMut<BarMenuRequest>,
-        Res<crate::boarding::BoardStatus>,
-        Res<crate::panels::UiClick>,
-        Query<(Has<crate::ship::HoldPosition>, Option<&crate::cloak::Cloak>)>,
-        Res<crate::environment::Sensors>,
-        ResMut<crate::combat::Target>,
-    ),
-    time: Res<Time<Real>>,
-    motion: Res<AccumulatedMouseMotion>,
+    mut input: MenuInput,
+    scene: MenuScene,
+    mut boarding: MenuBoarding,
+    mut bar: ResMut<BarMenuRequest>,
+    mut target: ResMut<crate::combat::Target>,
     window: Single<&Window, With<PrimaryWindow>>,
     cam: Single<(&Camera, &GlobalTransform)>,
     hud: Option<Res<HudData>>,
-    lib: Res<Library>,
     state: Res<OptionsMenu>,
     mut local: Local<Local2>,
     mut commands: Commands,
     mut orbit: ResMut<Orbit>,
-    actors: Query<(Entity, &Ship, &Transform)>,
-    ships: Query<(Entity, &Transform, &Ship, &Health)>,
     mut docks: Dockees,
     mut sfx: MessageWriter<Sfx>,
 ) {
-    let Some(actor) = fleets.selected else { return };
-    let Ok((e, source, tf)) = actors.get(actor) else { return };
+    let mission = scene.mission.as_deref();
+    let Some(actor) = scene.fleets.selected else { return };
+    let Ok((e, source, tf)) = scene.actors.get(actor) else { return };
     let mut player = (e, source.clone(), tf);
     let Local2 { open: open_menu, press, hover } = &mut *local;
-    if open_menu.as_ref().is_some_and(|o| o.actor != actor || commands.get_entity(o.root).is_err() || !sensors.player_sees(o.target, mission.as_deref())) {
+    if open_menu.as_ref().is_some_and(|o| o.actor != actor || commands.get_entity(o.root).is_err() || !scene.sensors.player_sees(o.target, mission)) {
         if let Some(o) = open_menu.take()
             && let Ok(mut e) = commands.get_entity(o.root)
         {
@@ -220,7 +398,7 @@ fn menu(
         state.open.store(false, Ordering::Relaxed);
     }
     state.swallow.store(false, Ordering::Relaxed);
-    if crate::panels::cinematic(mission.as_deref()) || crate::rules::locked(mission.as_deref()) {
+    if crate::panels::cinematic(mission) || crate::rules::locked(mission) {
         if let Some(open) = open_menu.take() {
             commands.entity(open.root).despawn();
         }
@@ -239,117 +417,48 @@ fn menu(
         }
     }
     // Left click: pick a slot (or just close).
-    if open_menu.is_some() && (mouse.just_pressed(MouseButton::Left) || keys.just_pressed(KeyCode::Escape)) {
+    if open_menu.is_some() && (input.mouse.just_pressed(MouseButton::Left) || input.keys.just_pressed(KeyCode::Escape)) {
         let open = open_menu.take().unwrap();
-        keys.clear_just_pressed(KeyCode::Escape); // this Esc closed the menu; it must not also open the in-game menu
+        input.keys.clear_just_pressed(KeyCode::Escape); // this Esc closed the menu; it must not also open the in-game menu
         state.open.store(false, Ordering::Relaxed);
         commands.entity(open.root).despawn();
-        if !mouse.just_pressed(MouseButton::Left) {
+        if !input.mouse.just_pressed(MouseButton::Left) {
             return;
         }
         state.swallow.store(true, Ordering::Relaxed);
-        let sound = match slot.map(|i| open.items[i].0) {
-            Some(Act::Focus) if open.target == actor || sensors.in_sight(actor, open.target, mission.as_deref()) => {
-                orbit.focus = Some(open.target);
-                "HUD_Options_Focus"
-            }
-            Some(Act::Stop) => {
-                player.1.stand_still();
-                commands.entity(actor).insert(player.1.clone());
-                commands.queue(move |w: &mut World| {
-                    if let Some(mut p) = w.get_mut::<crate::ship::FleetPilot>(actor) {
-                        p.cancel_actions();
-                    }
-                });
-                docks.cancel_as(actor);
-                "HUD_Options_Stop"
-            }
-            Some(Act::HoldOn) => {
-                player.1.stand_still();
-                commands.entity(actor).insert((player.1.clone(), crate::ship::HoldPosition));
-                commands.queue(move |w: &mut World| {
-                    if let Some(mut p) = w.get_mut::<crate::ship::FleetPilot>(actor) {
-                        p.hold_position();
-                    }
-                });
-                "HUD_Options_Select"
-            }
-            Some(Act::HoldOff) => {
-                commands.entity(actor).remove::<crate::ship::HoldPosition>();
-                "HUD_Options_Select"
-            }
-            Some(a @ (Act::CloakStart | Act::CloakStop)) => {
-                let on = a == Act::CloakStart;
-                commands.queue(move |w: &mut World| {
-                    let side = w.get::<Ship>(actor).map(|s| s.side);
-                    if let (Some(mut c), Some(side)) = (w.get_mut::<crate::cloak::Cloak>(actor), side) {
-                        if on {
-                            c.start(side);
-                        } else {
-                            c.stop();
-                        }
-                    }
-                });
-                if on { "HUD_Options_CloakStart" } else { "HUD_Options_CloakStop" }
-            }
-            Some(Act::BoardStart) => {
-                crate::ship::release_hold(&mut commands, actor);
-                board.write(BoardMsg::Board { boarder: Some(actor), target: open.target });
-                "HUD_Options_BoardStart"
-            }
-            Some(Act::BoardStop) => {
-                board.write(BoardMsg::Unboard { boarder: Some(actor) });
-                "HUD_Options_BoardStop"
-            }
-            Some(Act::GrappleStart) => {
-                board.write(BoardMsg::Grapple { grappler: Some(actor), target: open.target });
-                "HUD_Options_GrappleStart"
-            }
-            Some(Act::GrappleStop) => {
-                board.write(BoardMsg::Ungrapple { grappler: Some(actor) });
-                "HUD_Options_GrappleStop"
-            }
-            Some(Act::Dock) if docks.can_dock(actor, open.target) => {
-                crate::ship::release_hold(&mut commands, actor);
-                docks.dock_as(actor, open.target);
-                "HUD_Options_Dock"
-            }
-            Some(Act::TowStart) => {
-                crate::ship::release_hold(&mut commands, actor);
-                docks.tow_as(actor, open.target);
-                "HUD_Options_TowStart"
-            }
-            Some(Act::TowStop) => {
-                docks.break_tow_as(actor);
-                "HUD_Options_TowStop"
-            }
-            Some(Act::Unavailable | Act::Focus | Act::Dock) | None => "HUD_Options_NoSelection",
+        let act = slot.map(|i| open.items[i].0);
+        let act = match act {
+            Some(Act::Focus) if open.target != actor && !scene.sensors.in_sight(actor, open.target, mission) => Some(Act::Unavailable),
+            act => act,
         };
+        let (sound, msg) = run_slot(act, open.target, actor, &mut player.1, &mut commands, &mut orbit, &mut docks);
+        if let Some(msg) = msg {
+            boarding.board.write(msg);
+        }
         sfx.write(Sfx::ui(sound));
         return;
     }
     let Some(cursor) = cursor else { return };
-    // Right click = press and release close together (a longer or moving press is the camera drag).
-    if mouse.just_pressed(MouseButton::Right) {
-        *press = Some((cursor, time.elapsed_secs()));
+    if input.mouse.just_pressed(MouseButton::Right) {
+        *press = Some((cursor, input.time.elapsed_secs()));
     }
-    if mouse.pressed(MouseButton::Right) && motion.delta.length() > CLICK_PX {
+    if input.mouse.pressed(MouseButton::Right) && input.motion.delta.length() > CLICK_PX {
         *press = None;
     }
     let bar_target = bar.0.take();
     if bar_target.is_none() {
-        if ui.0 {
+        if input.ui.0 {
             *press = None;
             return;
         }
-        if !mouse.just_released(MouseButton::Right) {
+        if !input.mouse.just_released(MouseButton::Right) {
             return;
         }
-        let Some((at, t0)) = press.take() else { return };
-        if at.distance(cursor) > CLICK_PX || time.elapsed_secs() - t0 > CLICK_SECS {
+        let Some(pressed) = press.take() else { return };
+        if !is_tap(pressed, cursor, input.time.elapsed_secs()) {
             return;
         }
-        if crate::panels::cinematic(mission.as_deref()) {
+        if crate::panels::cinematic(mission) {
             return;
         }
         // A right click while a lob bank is armed only cancels it (no menu).
@@ -369,50 +478,10 @@ fn menu(
     }
     let (camera, gt) = *cam;
     let Ok(ray) = camera.viewport_to_world(gt, cursor) else { return };
-    let ally = ships
-        .iter()
-        .filter(|(e, _, sh, h)| *e != actor && sh.side == Side::Player && !h.destroyed && sensors.player_sees(*e, mission.as_deref()))
-        .filter_map(|(e, tf, sh, _)| ray_hit(&lib.classes[sh.class], tf, ray).map(|t| (e, t)))
-        .min_by(|a, b| a.1.total_cmp(&b.1));
-    let enemy = ships
-        .iter()
-        .filter(|(e, _, sh, h)| sh.side != Side::Player && !h.destroyed && sensors.player_sees(*e, mission.as_deref()))
-        .filter_map(|(e, tf, sh, _)| ray_hit(&lib.classes[sh.class], tf, ray).map(|t| (e, t)))
-        .min_by(|a, b| a.1.total_cmp(&b.1));
-    let own = ray_hit(&lib.classes[player.1.class], player.2, ray);
-    let (target, kind, can_dock) = if let Some(e) = bar_target {
-        if !fleets.roster().contains(&e) {
-            return;
-        }
-        (e, if e == actor { Kind::Selected } else { Kind::Friendly }, docks.can_dock(actor, e))
-    } else if own.is_some() {
-        (actor, Kind::Selected, false)
-    } else if let Some((e, ok)) = docks.under(ray, actor) {
-        (e, Kind::Friendly, ok)
-    } else if let Some((e, _)) = ally {
-        (e, Kind::Friendly, false) // any other friendly ship: Focus, Tow and a greyed Dock
-    } else if let Some((e, _)) = [enemy, docks.hostile_base_hit(ray, player.2.translation).map(|(e, t, _)| (e, t))].into_iter().flatten().min_by(|a, b| a.1.total_cmp(&b.1)) {
-        (e, Kind::Enemy, false) // an enemy ship or a hostile base: same menu
-    } else {
-        return;
-    };
+    let Some((target, kind, can_dock)) = pick_target(&scene, &docks, ray, actor, player.1.class, player.2, bar_target) else { return };
     // The player's ship already towing this one gets Stop; any other ship gets Start, enabled for ships when a tow can be made.
-    let tow = if docks.towee_of(player.0) == Some(target) { Tow::Stop } else { Tow::Start(docks.can_tow() && docks.towable(target) && ships.get(target).is_ok()) };
-    let (held, cloak) = flags.get(actor).map(|(h, c)| (h, c.map(|c| (c.stop_shown(), c.stop_shown() || c.can_start())))).unwrap_or_default();
-    let cloak = cloak.or_else(|| lib.classes[player.1.class].cloakable.then_some((false, false)));
-    let mut hooks = if ships.get(target).is_err() {
-        // A base: boarding goes by range, there is nothing to grapple.
-        let boarding = boarders.boarding(actor, target);
-        Hooks { board: (boarding, boarding || boarders.can_board(actor, target)), ..default() }
-    } else if Some(actor) == fleets.primary() {
-        Hooks { board: status.board(target), grapple: status.grapple(target), ..default() }
-    } else {
-        let boarding = boarders.boarding(actor, target);
-        let grappling = boarders.grappling(actor, target);
-        Hooks { board: (boarding, boarding || boarders.can_board(actor, target)), grapple: (grappling, grappling || boarders.can_grapple(actor)), ..default() }
-    };
-    (hooks.hold, hooks.cloak) = (held, cloak);
-    hooks.focus_unavailable = target != actor && !sensors.in_sight(actor, target, mission.as_deref());
+    let tow = if docks.towee_of(player.0) == Some(target) { Tow::Stop } else { Tow::Start(docks.can_tow() && docks.towable(target) && scene.ships.get(target).is_ok()) };
+    let hooks = slot_hooks(&scene, &boarding, actor, target, player.1.class);
     let (root, rects) = spawn_menu(&mut commands, &hud, &window, cursor, kind, can_dock, tow, hooks);
     *open_menu = Some(Open { actor, target, root, items: rects });
     *hover = None;
@@ -450,6 +519,7 @@ fn spawn_menu(commands: &mut Commands, hud: &HudData, window: &Window, cursor: V
 
 fn menu_centre(window: &Window, cursor: Vec2) -> Vec2 {
     let s = window.height() / REF_H;
+    // PROVISIONAL: the 70 px margin the menu keeps from the window edge is eyeballed.
     cursor.clamp(Vec2::splat(70.0 * s), Vec2::new(window.width(), window.height()) - Vec2::splat(70.0 * s))
 }
 
@@ -563,7 +633,7 @@ fn context_cursor(
         // Armed lob bank: its cursor shows over everything (ships, bases, sea) while the pointer is on the sea plane.
         if let (true, Some(bank), Ok((_, tf, sh, health)), Ok(g)) = (fleets.direct(), target.2.armed, ships.get(actor), guns.get(actor)) {
             let class = &lib.classes[sh.class];
-            let kind = class.mounts.iter().enumerate().find(|(_, m)| m.bank == bank).and_then(|(i, _)| crate::combat::lob_kind(&lib.guns[g.gun(i)].bullet));
+            let kind = class.mounts.iter().enumerate().find(|(_, m)| m.bank == bank).and_then(|(i, _)| crate::combat::lob_kind(lib.guns[g.gun(i)].bullet_family));
             let point = ray.intersect_plane(Vec3::ZERO, InfinitePlane3d::new(Vec3::Y)).map(|t| ray.get_point(t));
             if let (Some(kind), Some(point)) = (kind, point) {
                 let a = crate::combat::LobAimed { kind, solution: crate::combat::lob_solution(&lib, class, health, g, tf, bank, point), point };
@@ -616,6 +686,14 @@ fn context_cursor(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_right_click_is_a_short_press_that_stays_put() {
+        let (at, t0) = (Vec2::new(100.0, 100.0), 10.0);
+        assert!(is_tap((at, t0), at + Vec2::new(3.0, 0.0), t0 + 0.2));
+        assert!(!is_tap((at, t0), at + Vec2::new(8.0, 0.0), t0 + 0.2), "moved: a camera drag");
+        assert!(!is_tap((at, t0), at, t0 + 0.5), "held: a camera drag");
+    }
 
     fn enabled(list: &[(Act, &str, bool)], act: Act) -> Option<bool> {
         list.iter().find(|i| i.0 == act).map(|i| i.2)

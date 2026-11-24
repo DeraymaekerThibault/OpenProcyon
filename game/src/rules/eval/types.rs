@@ -3,6 +3,7 @@
 use serde_json::Value;
 
 use super::*;
+use crate::names::name_newtype;
 
 #[derive(Clone, Copy, PartialEq, Debug, Default)]
 pub enum Stance {
@@ -30,17 +31,69 @@ impl Stance {
     }
 }
 
+/// Where `OP Follow Group` keeps a ship relative to the ship it follows (the follower's side of the leader).
+#[derive(Clone, Copy, PartialEq, Debug, Default)]
+pub enum Station {
+    #[default]
+    Astern,
+    Ahead,
+    AbeamStarboard,
+    AbeamPort,
+}
+impl Station {
+    pub const NAMES: [&'static str; 4] = ["Astern", "Ahead", "Abeam Starboard", "Abeam Port"];
+    pub fn parse(s: &str) -> Option<Station> {
+        match s {
+            "Astern" => Some(Station::Astern),
+            "Ahead" => Some(Station::Ahead),
+            "Abeam Starboard" => Some(Station::AbeamStarboard),
+            "Abeam Port" => Some(Station::AbeamPort),
+            _ => None,
+        }
+    }
+    /// The station `distance` units from the leader's centre, in the leader's frame (Bevy axes: bow -Z, starboard +X).
+    pub fn offset(self, distance: f32) -> Vec3 {
+        distance
+            * match self {
+                Station::Astern => Vec3::Z,
+                Station::Ahead => Vec3::NEG_Z,
+                Station::AbeamStarboard => Vec3::X,
+                Station::AbeamPort => Vec3::NEG_X,
+            }
+    }
+}
+
+/// A standing `OP Follow Group` order of one ship (`MissionShip::follow`), carried out by the mission AI.
+#[derive(Clone, PartialEq, Debug)]
+pub struct FollowOrder {
+    /// The group (or owner) whose ship it keeps station on.
+    pub group: String,
+    pub station: Station,
+    pub distance: f32,
+    /// The ship it chose from that group; the choice stands until that ship is gone.
+    pub leader: Option<Entity>,
+}
+
+name_newtype!(
+    /// A mission ship's name as rules refer to it ("Group/Unit Name" selectors, the script's `name` field).
+    ShipId
+);
+name_newtype!(
+    /// An owner or a named group: both act as group selectors in rules ("Player/Owner", `group`).
+    GroupName
+);
+
 /// What the interpreter needs to know about one unit; built each frame from the ECS.
 #[derive(Clone)]
 pub struct Unit {
     pub e: Entity,
     /// TWT world object id (-1: none); `Script::tag` adds the named TWT groups containing it to `groups`.
     pub id: i64,
-    pub name: String,
-    pub owner: String,
+    pub name: ShipId,
+    pub owner: GroupName,
     /// A named TWT group shadows this owner as a rule selector; set by `Script::tag`.
     pub owner_is_named_group: bool,
-    pub groups: Vec<String>,
+    pub groups: Vec<GroupName>,
     pub pos: Vec3,
     pub alive: bool,
     pub visible: bool,
@@ -48,6 +101,12 @@ pub struct Unit {
     pub damage: f32,
     pub flag: String,
     pub attack: Vec<String>,
+    /// A ship's heading (radians about +Y, `Ship::heading`; 0 for everything else) and its own speed along it in units per second
+    /// (None for what is not a ship); `OP Teleport` and `OP Group Speed` read them.
+    pub heading: f32,
+    pub speed: Option<f32>,
+    /// Fully cloaked (`cloak::State::Full`), not while cloaking or decloaking; `OP Group Is Cloaked`.
+    pub cloaked: bool,
 }
 
 impl Unit {
@@ -56,8 +115,8 @@ impl Unit {
         Unit {
             e,
             id,
-            name: String::new(),
-            owner: String::new(),
+            name: ShipId::default(),
+            owner: GroupName::default(),
             owner_is_named_group: false,
             groups: vec![],
             pos,
@@ -67,6 +126,9 @@ impl Unit {
             damage: 0.0,
             flag: String::new(),
             attack: vec![],
+            heading: 0.0,
+            speed: None,
+            cloaked: false,
         }
     }
 }
@@ -176,8 +238,16 @@ pub enum Fx {
     WarningShots(Vec<Entity>, bool),
     /// 'Set Group/Unit Cloak State': (units, cloaked, AI may drop it to fire) (cloak.rs).
     Cloak(Vec<Entity>, bool, bool),
-    /// '*State Init* Setup Etherium Current': the path the current flows along.
-    Current(Vec<Vec3>),
+    /// '*State Init* Setup Etherium Current': the name of the path the current flows along, and its points.
+    Current(String, Vec<Vec3>),
+    /// 'OP Etherium Current' (engine-added): the current on the path `name` (made when there is none) gets the settings that are given.
+    CurrentSet {
+        name: String,
+        path: Vec<Vec3>,
+        strength: Option<f32>,
+        width: Option<f32>,
+        on: Option<bool>,
+    },
     /// 'Mission 9 - Do Dark Matter Explosion': a blast over the volume.
     DarkMatter(String),
     /// 'Mission 9 - Teleport Longboat': the longboat appears beside the human's command ship.
@@ -190,6 +260,29 @@ pub enum Fx {
         dist: f32,
         angle: f32,
     },
+    /// 'OP Board Ship' (engine-added): the boarders, then the target group's units; each boarder takes the nearest live ship of it.
+    Board(Vec<Entity>, Vec<Entity>),
+    /// 'OP Teleport' (engine-added): each unit's new position, and the heading (radians about +Y) every ship takes when one is given;
+    /// ships also lose their speed and turn rate.
+    Place {
+        units: Vec<(Entity, Vec3)>,
+        heading: Option<f32>,
+    },
+    /// 'OP Follow Group' (engine-added): the ships keep `station` at `distance` from a ship of `group` (`MissionShip::follow`).
+    Follow {
+        units: Vec<Entity>,
+        group: String,
+        station: Station,
+        distance: f32,
+    },
+    /// 'OP Place Mines' (engine-added): a mine of `bullet` at every point of the point set, given to `owner` (empty: hostile to every ship).
+    Mines {
+        set: String,
+        bullet: String,
+        owner: String,
+    },
+    /// 'OP Abandon Ship' (engine-added): the crews leave in their lifeboats and the hulls are left disabled afloat (lifeboats.rs `Abandoned`).
+    Abandon(Vec<Entity>),
 }
 
 pub(in crate::rules) fn s<'a>(v: &'a Value, k: &str) -> &'a str {
@@ -202,12 +295,7 @@ pub(in crate::rules) fn b(v: &Value, k: &str) -> bool {
     crate::data::wot_flag(&v[k])
 }
 pub(in crate::rules) fn cmp(eq: &str, a: f32, bb: f32) -> bool {
-    match eq {
-        "Greater Than" => a > bb,
-        "Less Than" => a < bb,
-        "Equal To" => (a - bb).abs() < 1e-4,
-        _ => false,
-    }
+    super::schema::Equivalence::parse(eq).is_some_and(|e| e.holds(a, bb, 1e-4))
 }
 /// Group part of a 'Group,Unit' spec.
 pub(in crate::rules) fn base(spec: &str) -> &str {

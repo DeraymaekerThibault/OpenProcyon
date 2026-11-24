@@ -1,4 +1,5 @@
 use super::*;
+use crate::EngineOrder;
 
 /// Mission 6's stockade gate has no guns, only a vitalToMission section, and the rules wait for that section's damage to reach 1.
 /// The importer must export it as a class (an attackable base), and shooting the section down must read as full mission damage.
@@ -19,7 +20,8 @@ fn base_fire_app() -> App {
         .init_resource::<Time>()
         .init_resource::<FxLib>()
         .insert_resource(Library::load(assets_dir()))
-        .insert_resource(Rng::new(7))
+        .insert_resource(SimRng::new(7))
+        .init_resource::<crate::scenario::Difficulty>()
         .insert_resource(Look { mesh: default(), shell: default(), enemy_shell: default() })
         .init_resource::<crate::environment::Sensors>()
         .add_systems(PreUpdate, crate::environment::refresh_sensors)
@@ -222,7 +224,8 @@ fn hostile_island_towers_shoot_the_player_and_neutral_ones_do_not() {
         .init_resource::<Time>()
         .init_resource::<FxLib>()
         .insert_resource(Library::load(assets_dir()))
-        .insert_resource(Rng::new(7))
+        .insert_resource(SimRng::new(7))
+        .init_resource::<crate::scenario::Difficulty>()
         .insert_resource(Look { mesh: default(), shell: default(), enemy_shell: default() })
         .init_resource::<crate::environment::Sensors>()
         .add_systems(PreUpdate, crate::environment::refresh_sensors)
@@ -249,7 +252,7 @@ fn hostile_island_towers_shoot_the_player_and_neutral_ones_do_not() {
     let ms = crate::campaign::MissionShip {
         id: 1,
         name: "p".into(),
-        owner: player,
+        owner: player.into(),
         hold_fire: false,
         invuln: 1.0,
         visible: true,
@@ -403,7 +406,8 @@ fn the_command_ship_holds_fire_until_an_enemy_is_clicked() {
         .init_resource::<Time>()
         .init_resource::<FxLib>()
         .insert_resource(Library::load(assets_dir()))
-        .insert_resource(Rng::new(7))
+        .insert_resource(SimRng::new(7))
+        .init_resource::<crate::scenario::Difficulty>()
         .insert_resource(Look { mesh: default(), shell: default(), enemy_shell: default() })
         .insert_resource(Target::default())
         .init_resource::<crate::environment::Sensors>()
@@ -449,7 +453,8 @@ fn a_skirmish_computer_ship_with_a_map_script_fires_at_its_captains_target() {
         .init_resource::<Time>()
         .init_resource::<FxLib>()
         .insert_resource(Library::load(assets_dir()))
-        .insert_resource(Rng::new(7))
+        .insert_resource(SimRng::new(7))
+        .init_resource::<crate::scenario::Difficulty>()
         .insert_resource(Look { mesh: default(), shell: default(), enemy_shell: default() })
         .insert_resource(Target::default())
         .init_resource::<crate::ship::CaptainTargets>()
@@ -494,7 +499,8 @@ fn the_command_ship_damages_a_clicked_hostile_skirmish_base() {
         .init_resource::<Time>()
         .init_resource::<FxLib>()
         .insert_resource(Library::load(assets_dir()))
-        .insert_resource(Rng::new(7))
+        .insert_resource(SimRng::new(7))
+        .init_resource::<crate::scenario::Difficulty>()
         .insert_resource(Look { mesh: default(), shell: default(), enemy_shell: default() })
         .insert_resource(Target::default())
         .init_resource::<crate::environment::Sensors>()
@@ -548,7 +554,8 @@ fn a_destroyed_base_part_blasts() {
         .init_resource::<Time>()
         .init_resource::<FxLib>()
         .insert_resource(Library::load(assets_dir()))
-        .insert_resource(Rng::new(7))
+        .insert_resource(SimRng::new(7))
+        .init_resource::<crate::scenario::Difficulty>()
         .insert_resource(Look { mesh: default(), shell: default(), enemy_shell: default() })
         .insert_resource(Target::default())
         .init_resource::<crate::environment::Sensors>()
@@ -709,7 +716,7 @@ fn every_gun_has_a_panel_icon_and_pd_is_hidden() {
     for name in g.keys() {
         assert!(hud.get(gun_icon(name)).is_some(), "{name} -> {} missing", gun_icon(name));
     }
-    assert!(is_indirect("Gun_NovaMortar") && !is_indirect("Gun_CannonBall_Med"));
+    assert!(GunFamily::of("Gun_NovaMortar").is_indirect() && !GunFamily::of("Gun_CannonBall_Med").is_indirect());
     assert!(g["Gun_Lancer_PD_Light"].point_defense);
 }
 #[test]
@@ -785,7 +792,7 @@ fn torpedo_guidance_launch_coast_and_moving_target_intercept() {
     let old_y = p.y;
     let next = guide_torpedo(p, &mut v, &mut spin, 16.0, None, true, physics, 0.1);
     assert_eq!(next.y, old_y, "lost target must stop altitude tracking");
-    // Read from the original's code: a torpedo that lost its target cuts its thrust and slows to rest.
+    // A torpedo that lost its target cuts its thrust and slows to rest.
     let before = v.with_y(0.0).length();
     for i in 0..600 {
         guide_torpedo(p, &mut v, &mut spin, 20.0 + i as f32 * 0.1, None, false, physics, 0.1);
@@ -891,7 +898,7 @@ fn computer_ships_use_their_own_crew_for_repair() {
         let foe = ship(Side::Enemy);
         let boardable = Boardable::ship(&class.name, skill, true);
         let generic = crate::crew_arms::fallback_posts(&foe, Some(&boardable), &class.name);
-        damage::crew_slots(Entity::PLACEHOLDER, class, generic.as_ref(), role, "engineering")
+        damage::crew_slots(crate::scenario::SpawnIndex(0), class, generic.as_ref(), role, "engineering")
     };
     let (green, elite) = (slots(Skill::Green, 4), slots(Skill::Elite, 5));
     assert!(!green.is_empty() && green.iter().all(|v| (0.3..=0.45).contains(v)), "green engineers {green:?}");
@@ -900,7 +907,7 @@ fn computer_ships_use_their_own_crew_for_repair() {
     let boardable = Boardable::ship(&class.name, Skill::Elite, true);
     assert!(crate::crew_arms::fallback_posts(&ship(Side::Player), Some(&boardable), &class.name).is_none());
     // A computer ship without a crew record carries rating-1 hands in every slot.
-    let none = damage::crew_slots(Entity::PLACEHOLDER, class, None, 4, "engineering");
+    let none = damage::crew_slots(crate::scenario::SpawnIndex(0), class, None, 4, "engineering");
     assert!(none.iter().all(|v| (*v - 0.1).abs() < 1e-6));
 }
 
@@ -1012,7 +1019,7 @@ fn engine_exhaust_needs_motion_not_just_an_order() {
         .add_systems(Update, engine_rate);
     let lib = Library::load(assets_dir());
     let c = lib.index("Ship_Navy_Torpedo");
-    let ship = Ship { heading: 0.0, order: 2, ..Ship::new(c, Side::Player) };
+    let ship = Ship { heading: 0.0, order: EngineOrder::Full, ..Ship::new(c, Side::Player) };
     let s = app.world_mut().spawn((Transform::default(), ship, Health::new(&lib.classes[c]))).id();
     let fx = app.world_mut().resource_scope(|world, fxl: Mut<FxLib>| {
         spawn_engines(&mut world.commands(), &fxl, &lib, s, c, Transform::default());
@@ -1053,7 +1060,8 @@ fn shell_into_a_hull_damages_it_and_reports_the_hit() {
     app.add_plugins((TaskPoolPlugin::default(), AssetPlugin::default()))
         .init_resource::<Time>()
         .add_message::<crate::fx::EffectStarted>()
-        .insert_resource(Rng(7))
+        .insert_resource(SimRng::new(7))
+        .init_resource::<crate::scenario::Difficulty>()
         .add_message::<Sfx>()
         .add_message::<Hit>()
         .add_message::<Destroyed>()
@@ -1079,6 +1087,7 @@ fn shell_into_a_hull_damages_it_and_reports_the_hit() {
         lifetime: 5.0,
         gravity: 0.0,
         bullet: bullet.clone(),
+        torpedo: is_torpedo_bullet(&bullet),
         side: Side::Player,
         shooter,
         target: None,
@@ -1114,7 +1123,7 @@ fn shell_into_a_hull_damages_it_and_reports_the_hit() {
     assert!(impacted_material.is_some_and(|key| MATERIALS.contains(&key)), "the hit effect carries a material from the real collision");
 }
 
-/// Read from the original's code: a mine glances off a hull of an allied owner (own side included) and keeps flying at 0.6 of its
+/// A mine glances off a hull of an allied owner (own side included) and keeps flying at 0.6 of its
 /// speed; a hull that is not allied is struck.
 #[test]
 #[ignore = "needs imported assets"]
@@ -1130,7 +1139,8 @@ fn a_mine_glances_off_allied_hulls_and_strikes_others() {
     app.add_plugins((TaskPoolPlugin::default(), AssetPlugin::default()))
         .init_resource::<Time>()
         .insert_resource(FxLib::with_names(&impact.iter().map(String::as_str).collect::<Vec<_>>()))
-        .insert_resource(Rng(7))
+        .insert_resource(SimRng::new(7))
+        .init_resource::<crate::scenario::Difficulty>()
         .add_message::<Sfx>()
         .add_message::<Hit>()
         .add_message::<Destroyed>()
@@ -1153,6 +1163,7 @@ fn a_mine_glances_off_allied_hulls_and_strikes_others() {
             lifetime: 1000.0,
             gravity: 0.0,
             bullet: bullet.clone(),
+            torpedo: is_torpedo_bullet(&bullet),
             side: Side::Player,
             shooter,
             target: None,
@@ -1195,7 +1206,8 @@ fn land_in_the_way_stops_a_shell_before_the_hull() {
     app.add_plugins((TaskPoolPlugin::default(), AssetPlugin::default()))
         .init_resource::<Time>()
         .init_resource::<FxLib>()
-        .insert_resource(Rng(7))
+        .insert_resource(SimRng::new(7))
+        .init_resource::<crate::scenario::Difficulty>()
         .add_message::<Sfx>()
         .add_message::<Hit>()
         .add_message::<Destroyed>()
@@ -1219,6 +1231,7 @@ fn land_in_the_way_stops_a_shell_before_the_hull() {
         lifetime: 5.0,
         gravity: 0.0,
         bullet: bullet.clone(),
+        torpedo: is_torpedo_bullet(&bullet),
         side: Side::Player,
         shooter,
         target: None,
@@ -1309,7 +1322,7 @@ fn a_map_mine_rests_where_the_map_put_it_and_fights_for_no_one_until_given_an_ow
     assert!(matches!(shell.payload, Payload::Mine { sight, .. } if sight == 50.0));
 }
 
-/// Read from the original's code: a mine picks its target only every 5 s, the first time 5 s after it was laid.
+/// A mine picks its target only every 5 s, the first time 5 s after it was laid.
 #[test]
 #[ignore = "needs imported assets"]
 fn a_mine_picks_its_target_five_seconds_after_it_is_laid() {
@@ -1319,7 +1332,8 @@ fn a_mine_picks_its_target_five_seconds_after_it_is_laid() {
     app.add_plugins((TaskPoolPlugin::default(), AssetPlugin::default()))
         .init_resource::<Time>()
         .init_resource::<FxLib>()
-        .insert_resource(Rng(7))
+        .insert_resource(SimRng::new(7))
+        .init_resource::<crate::scenario::Difficulty>()
         .add_message::<Sfx>()
         .add_message::<Hit>()
         .add_message::<Destroyed>()
@@ -1337,6 +1351,7 @@ fn a_mine_picks_its_target_five_seconds_after_it_is_laid() {
         lifetime: 1000.0,
         gravity: 0.0,
         bullet: bullet.clone(),
+        torpedo: is_torpedo_bullet(&bullet),
         side: Side::Player,
         shooter,
         target: None,
@@ -1447,11 +1462,11 @@ fn seg_mesh_world(tf: &Transform, s: &Section, a: Vec3, b: Vec3) -> Option<f32> 
 
 #[test]
 fn lob_cursor_sprites_follow_weapon_and_solution() {
-    assert_eq!(lob_kind("Bullet_NovaMortar"), Some(1));
-    assert_eq!(lob_kind("Bullet_CannonBall"), None);
-    let a = LobAimed { kind: 2, solution: true, point: Vec3::ZERO };
+    assert_eq!(lob_kind(GunFamily::of("Bullet_NovaMortar")), Some(LobKind::NovaMortar));
+    assert_eq!(lob_kind(GunFamily::of("Bullet_CannonBall")), None);
+    let a = LobAimed { kind: LobKind::StarMortar, solution: true, point: Vec3::ZERO };
     assert_eq!(a.cursor(), "Cursor_PrimaryShip_SetLobTarget_StarMortar");
-    let b = LobAimed { kind: 0, solution: false, ..a };
+    let b = LobAimed { kind: LobKind::GravCharge, solution: false, ..a };
     assert_eq!(b.cursor(), "Cursor_PrimaryShip_SetLobTarget_GravCharge_HAS_NO_FIRING_SOLUTION");
 }
 
@@ -1464,8 +1479,8 @@ fn a_fire_that_burns_a_floored_section_out_goes_out() {
     let mut hp = Health::new(&lib.classes[c]);
     hp.sections[0] = 1.0;
     let mut app = App::new();
-    app.init_resource::<Time>().add_systems(Update, super::damage::fires);
-    let fire = super::damage::Fire { sec: 0, intensity: 50.0, state: 0, fx: None };
+    app.init_resource::<Time>().init_resource::<crate::scenario::Difficulty>().add_systems(Update, super::damage::fires);
+    let fire = super::damage::Fire { sec: 0, intensity: 50.0, state: super::damage::FireState::Burning, fx: None };
     let ms = crate::campaign::MissionShip { invuln: 0.5, ..Default::default() };
     let ship = Ship { heading: 0.0, ..Ship::new(c, Side::Player) };
     let e = app.world_mut().spawn((Transform::default(), ship, hp, super::damage::Fires { list: vec![fire], tick: 0.0 }, ms)).id();
@@ -1496,7 +1511,8 @@ fn a_new_shell_first_moves_in_the_tick_after_it_was_created() {
     app.add_plugins((TaskPoolPlugin::default(), AssetPlugin::default()))
         .init_resource::<Time>()
         .init_resource::<FxLib>()
-        .insert_resource(Rng(7))
+        .insert_resource(SimRng::new(7))
+        .init_resource::<crate::scenario::Difficulty>()
         .add_message::<Sfx>()
         .add_message::<Hit>()
         .add_message::<Destroyed>()
@@ -1512,6 +1528,7 @@ fn a_new_shell_first_moves_in_the_tick_after_it_was_created() {
         lifetime: 5.0,
         gravity: 0.0,
         bullet: bullet.clone(),
+        torpedo: is_torpedo_bullet(&bullet),
         side: Side::Player,
         shooter: Entity::PLACEHOLDER,
         target: None,
@@ -1631,7 +1648,8 @@ fn a_dual_mount_launches_a_shell_from_every_muzzle_on_each_shot() {
         .init_resource::<Time>()
         .init_resource::<FxLib>()
         .insert_resource(Library::load(assets_dir()))
-        .insert_resource(Rng::new(7))
+        .insert_resource(SimRng::new(7))
+        .init_resource::<crate::scenario::Difficulty>()
         .insert_resource(Look { mesh: default(), shell: default(), enemy_shell: default() })
         .insert_resource(Target::default())
         .init_resource::<crate::environment::Sensors>()
@@ -1691,7 +1709,7 @@ fn a_sunk_ship_is_removed_at_the_start_of_the_tick_after_its_breakup() {
         .init_resource::<Time>()
         .init_resource::<FxLib>()
         .insert_resource(Library::load(assets_dir()))
-        .add_systems(Update, (crate::tick_start, breakup.after(crate::tick_start)));
+        .add_systems(Update, (crate::tick_start, sink_clock.after(crate::tick_start)));
     let lib = Library::load(assets_dir());
     let c = lib.index("Ship_Navy_Cutter");
     let mut health = Health::new(&lib.classes[c]);
@@ -1703,4 +1721,132 @@ fn a_sunk_ship_is_removed_at_the_start_of_the_tick_after_its_breakup() {
     assert!(app.world().get::<crate::Removed>(e).is_some());
     app.update();
     assert!(app.world().get_entity(e).is_err(), "gone at the start of the next tick");
+}
+
+/// Lancer bolts the player's Comet launches in its first burst, with the enemy clicked or with panic fire alone.
+fn comet_lancer_burst(panic: bool) -> usize {
+    let mut app = asset_app();
+    app.add_message::<Sfx>()
+        .add_message::<Fired>()
+        .add_message::<Hit>()
+        .add_message::<Destroyed>()
+        .add_message::<Detonate>()
+        .add_message::<Shoot>()
+        .add_message::<crate::decals::Scar>()
+        .init_resource::<Time>()
+        .init_resource::<FxLib>()
+        .insert_resource(Library::load(assets_dir()))
+        .insert_resource(SimRng::new(7))
+        .init_resource::<crate::scenario::Difficulty>()
+        .insert_resource(Look { mesh: default(), shell: default(), enemy_shell: default() })
+        .insert_resource(Target::default())
+        .init_resource::<crate::environment::Sensors>()
+        .add_systems(PreUpdate, crate::environment::refresh_sensors)
+        .add_systems(Update, (crate::tick_start.before(fire), fire, shells.after(fire)));
+    let assets = app.world().resource::<AssetServer>().clone();
+    let lib = Library::load(assets_dir());
+    let spawn = |app: &mut App, class: &str, side, at: Vec3| {
+        let c = lib.index(class);
+        let ship = Ship { heading: 0.0, ..Ship::new(c, side) };
+        let e = app.world_mut().spawn((Transform::from_translation(at), ship, Health::new(&lib.classes[c]), Fires::default())).id();
+        let states = spawn_guns(&mut app.world_mut().commands(), &assets, &lib, e, c);
+        app.world_mut().entity_mut(e).insert(states);
+        app.world_mut().flush();
+        e
+    };
+    let me = spawn(&mut app, "Ship_Navy_Torpedo", Side::Player, Vec3::ZERO);
+    app.world_mut().entity_mut(me).insert(PlayerShip);
+    let enemy = spawn(&mut app, "Ship_Pirate_Sloop", Side::Enemy, Vec3::new(10.0, 0.0, -60.0));
+    *app.world_mut().resource_mut::<Target>() = Target((!panic).then_some(enemy), None, GroundFire { panic, ..default() });
+    let (mut bolts, mut first) = (std::collections::HashSet::new(), None);
+    // The first burst (0.75 s from first to last bolt), not the next (3.5 s reload).
+    for i in 0..200 {
+        app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs_f32(0.02));
+        app.update();
+        bolts.extend(app.world_mut().query::<(Entity, &Shell)>().iter(app.world()).filter(|(_, s)| s.shooter == me && s.bullet.contains("Lancer")).map(|(e, _)| e));
+        first = first.or((!bolts.is_empty()).then_some(i));
+        if first.is_some_and(|f| i > f + 100) {
+            break;
+        }
+    }
+    bolts.len()
+}
+
+/// A burst is BulletsPerBurst shots whoever chose the target: the Comet's light Lancer (4 bolts, 0.25 s apart) fires all four at a
+/// clicked enemy and in panic fire, where the first shot ends the gun's fire request but not its target (docs/re/gunnery.md).
+#[test]
+#[ignore = "needs imported assets"]
+fn a_lancer_burst_is_whole_when_clicked_and_in_panic_fire() {
+    assert_eq!(comet_lancer_burst(false), 4, "clicked enemy");
+    assert_eq!(comet_lancer_burst(true), 4, "panic fire");
+}
+
+#[test]
+fn state_enums_keep_the_frame_and_art_indices() {
+    assert_eq!([BankState::Ready, BankState::Recharging, BankState::Destroyed, BankState::OutOfRange].map(BankState::index), [0, 1, 2, 3]);
+    assert_eq!([LobKind::GravCharge, LobKind::NovaMortar, LobKind::StarMortar].map(LobKind::index), [0, 1, 2]);
+    assert_eq!(lob_kind(GunFamily::of("Bullet_GravCharge")), Some(LobKind::GravCharge));
+    assert_eq!(lob_kind(GunFamily::of("Bullet_StarMortar")), Some(LobKind::StarMortar));
+}
+
+/// Not retail: a beam that is charging or firing when its ship is abandoned (`OP Abandon Ship`) stops, as on a sunk ship; `fire` no
+/// longer runs the cycle of an abandoned ship, so nothing else would end it. Asset-free.
+#[test]
+fn the_beams_of_an_abandoned_ship_stop() {
+    let gun = crate::data::gun_def(&serde_json::json!({
+        "BulletsPerBurst": 1, "BulletAffectedByGravity": false, "BulletTypeName_Primary": "Bullet_X",
+        "EffectiveRange_Range": 100.0, "LongRange_Range": 200.0, "MaximumRange_Range": 300.0,
+        "EffectiveRange_AccuracyDeviation": 0.2, "LongRange_AccuracyDeviation": 0.4, "MaximumRange_AccuracyDeviation": 0.8,
+        "MuzzleSpeed": 100.0, "TimeBetweenBursts": 5.0, "DuringBurstReloadTime": 0.1, "HorizontalRotationSpeed": 1.0,
+        "VerticalRotationSpeed": 1.0, "VerticalMinAngle": 0.0, "VerticalMaxAngle": 1.0,
+        "visual": { "muzzles": [], "pivot": [0.0, 0.0, 0.0] },
+        "beam": {"charge": 2.0, "duration": 30.0, "tick": 0.25, "ramp": 0.6, "max_power": 2.0},
+    }));
+    assert!(gun.beam.is_some());
+    let mut class = crate::fixed_tests::synthetic_class();
+    class.mounts = (0..2).map(|_| crate::data::Mount { pos: Vec3::ZERO, rot: Quat::IDENTITY, arc: std::f32::consts::TAU, gun: "Gun_Beam".into(), bank: 0, parent: None }).collect();
+    let mut app = App::new();
+    app.insert_resource(Time::<()>::default())
+        .insert_resource(Library { classes: vec![class], guns: [("Gun_Beam".to_string(), gun)].into(), bullets: default(), names: default(), clips: default() })
+        .init_resource::<FxLib>()
+        .insert_resource(SimRng::new(3))
+        .init_resource::<crate::scenario::Difficulty>()
+        .add_message::<Sfx>()
+        .add_message::<Hit>()
+        .add_message::<crate::decals::Scar>()
+        .add_systems(Update, beam::burn);
+    let state = |phase| GunState {
+        gun: "Gun_Beam".into(),
+        root: Entity::PLACEHOLDER,
+        cooldown: 0.0,
+        burst_left: 0,
+        burst_timer: 0.0,
+        base: Entity::PLACEHOLDER,
+        barrel: Entity::PLACEHOLDER,
+        muzzles: vec![],
+        yaw: 0.0,
+        pitch: 0.0,
+        aligned: false,
+        was_aligned: false,
+        lob_wait: None,
+        in_range: false,
+        dev: 0.0,
+        beam: phase,
+        request: Default::default(),
+        rock_ask: false,
+    };
+    let firing = beam::Phase::Firing { t: 1.0, victim: None, on: 0.0, tick: 0.0, length: 300.0 };
+    let ship = |app: &mut App, x: f32| {
+        let guns = GunStates(vec![state(firing), state(beam::Phase::Charging { t: 0.5 })]);
+        app.world_mut()
+            .spawn((Ship::new(0, Side::Player), Health { sections: vec![], core: 100.0, destroyed: false }, Fires::default(), Transform::from_xyz(x, 0.0, 0.0), guns))
+            .id()
+    };
+    let (crewed, wreck) = (ship(&mut app, 0.0), ship(&mut app, 5000.0));
+    app.world_mut().entity_mut(wreck).insert(crate::lifeboats::Abandoned);
+    app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs_f32(0.1));
+    app.update();
+    let phases = |e: Entity| app.world().get::<GunStates>(e).unwrap().0.iter().map(|g| g.beam).collect::<Vec<_>>();
+    assert_eq!(phases(wreck), [beam::Phase::Idle, beam::Phase::Idle], "a firing beam and a charging one both stop");
+    assert!(matches!(phases(crewed)[..], [beam::Phase::Firing { .. }, beam::Phase::Charging { .. }]), "a crewed ship's beams run on");
 }

@@ -13,13 +13,16 @@ fn vertex(vertex_in: Vertex) -> VertexOutput {
     var out: VertexOutput;
     let vertex = decompress_vertex(vertex_in, vertex_in.instance_index);
     let world_from_local = mesh_functions::get_world_from_local(vertex_in.instance_index);
-    var column = 0.0;
+    var texel = 0.0;
 @if(VERTEX_UVS_A)
-    column = vertex.uv.x;
-    var part = 0.0;
+    texel = vertex.uv.x;
+    var slot = 0.0;
 @if(VERTEX_COLORS)
-    part = vertex.color.r * 8.0;
-    let posed = pose(column, part, mesh[vertex_in.instance_index].tag);
+    slot = vertex.color.r * 8.0;
+    var rest_normal = vec3<f32>(0.0, 1.0, 0.0);
+@if(VERTEX_NORMALS)
+    rest_normal = vertex.normal;
+    let posed = pose(texel, slot, vertex.position, rest_normal, mesh[vertex_in.instance_index].tag);
 
     out.world_normal = mesh_functions::mesh_normal_local_to_world(posed.normal, vertex_in.instance_index);
     out.world_position = mesh_functions::mesh_position_local_to_world(world_from_local, vec4<f32>(posed.position, 1.0));

@@ -1,8 +1,9 @@
 //! Sound: original Ogg files from assets/sound (tools/build_assets.sh). Names, volumes and max distances come from the WOTs
 //! (gun SoundName/SoundVolume/SoundMaxDistance, bullet impact pools, ship EngineSoundName Half/Full/Emergency) and the original's
 //! built-in pools (docs/re/sound.md). PROVISIONAL: the distance falloff curve, engine/music levels, and which event uses which built-in pool (ship death = Explosion_Heavy, section loss =
-//! Explosion_Med01, read from the original's code).
+//! Explosion_Med01).
 
+use crate::EngineOrder;
 use bevy::audio::Volume;
 use bevy::prelude::*;
 
@@ -28,7 +29,7 @@ impl Sfx {
 #[derive(Component)]
 struct EngineLoop {
     ship: Entity,
-    order: usize,
+    order: EngineOrder,
 }
 
 /// PROVISIONAL: engine loops have no max distance in the WOT; levels for engine and music are guesses.
@@ -56,7 +57,7 @@ struct TravelLoop;
 fn travel(
     mut commands: Commands,
     assets: Res<AssetServer>,
-    cam: Single<&GlobalTransform, With<Camera3d>>,
+    cam: Single<&GlobalTransform, (With<Camera3d>, With<crate::MainCamera>)>,
     shells: Query<(Entity, &GlobalTransform, &Travel, Option<&Children>)>,
     mut loops: Query<(Entity, &mut AudioSink), With<TravelLoop>>,
 ) {
@@ -95,7 +96,7 @@ fn ambience(
     mut commands: Commands,
     assets: Res<AssetServer>,
     mission: Option<Res<crate::campaign::Mission>>,
-    cam: Single<&GlobalTransform, With<Camera3d>>,
+    cam: Single<&GlobalTransform, (With<Camera3d>, With<crate::MainCamera>)>,
     holes: Query<(Entity, &GlobalTransform), With<crate::blackhole::BlackHole>>,
     meteors: Query<(Entity, &GlobalTransform), With<crate::nebula::MeteorEmitter>>,
     islands: Query<(Entity, &GlobalTransform, &IslandLoop)>,
@@ -107,7 +108,7 @@ fn ambience(
     for (e, a, mut sink) in &mut beds {
         let source = holes
             .get(a.0)
-            .map(|h| (h.1.translation(), 1500.0))
+            .map(|h| (h.1.translation(), 1500.0)) // PROVISIONAL: hearing distances 1500 / 400 and the 0.6 bed volume are eyeballed
             .or_else(|_| meteors.get(a.0).map(|m| (m.1.translation(), 400.0)))
             .or_else(|_| islands.get(a.0).map(|i| (i.1.translation(), i.2.max)));
         match source {
@@ -126,7 +127,7 @@ fn ambience(
     }
     for (e, tf) in &meteors {
         if !has.contains(&e) {
-            let inside = tf.translation().distance(c) < 150.0;
+            let inside = tf.translation().distance(c) < 150.0; // PROVISIONAL: the "inside" radius is eyeballed
             let name = if inside { "MeteorStorm_Inside" } else { "MeteorStorm_Outside" };
             commands.spawn((crate::Scenario, Ambient(e), AudioPlayer::new(assets.load(sound(name))), PlaybackSettings::LOOP.with_volume(Volume::Linear(0.0))));
         }
@@ -218,7 +219,13 @@ pub fn music(commands: &mut Commands, assets: &AssetServer, name: &str) -> Entit
         .id()
 }
 
-fn play(mut commands: Commands, assets: Res<AssetServer>, mut msgs: MessageReader<Sfx>, cam: Single<&GlobalTransform, With<Camera3d>>, screen: Res<State<Screen>>) {
+fn play(
+    mut commands: Commands,
+    assets: Res<AssetServer>,
+    mut msgs: MessageReader<Sfx>,
+    cam: Single<&GlobalTransform, (With<Camera3d>, With<crate::MainCamera>)>,
+    screen: Res<State<Screen>>,
+) {
     for s in msgs.read() {
         // Front-end screens only play UI sounds (a menu backdrop battle stays silent).
         if s.at.is_some() && *screen.get() != Screen::Battle {
@@ -237,7 +244,7 @@ fn engines(
     mut commands: Commands,
     assets: Res<AssetServer>,
     lib: Res<Library>,
-    cam: Single<&GlobalTransform, With<Camera3d>>,
+    cam: Single<&GlobalTransform, (With<Camera3d>, With<crate::MainCamera>)>,
     ships: Query<(Entity, &GlobalTransform, &Ship, &Health)>,
     mut loops: Query<(Entity, &EngineLoop, Option<&mut AudioSink>)>,
 ) {
@@ -254,10 +261,10 @@ fn engines(
         }
     }
     for (e, tf, s, h) in &ships {
-        if h.destroyed || s.order == 0 || has.contains(&e) {
+        if h.destroyed || s.order == EngineOrder::Stop || has.contains(&e) {
             continue;
         }
-        let Some(name) = &lib.classes[s.class].engine_snd[s.order.min(3) - 1] else { continue };
+        let Some(name) = &lib.classes[s.class].engine_snd[s.order.index() - 1] else { continue };
         let v = ENGINE_VOL * crate::menu::volume(crate::menu::Setting::Effects) * gain(cam.translation(), Some(tf.translation()), ENGINE_MAX);
         commands.spawn((EngineLoop { ship: e, order: s.order }, ChildOf(e), AudioPlayer::new(assets.load(sound(name))), PlaybackSettings::LOOP.with_volume(Volume::Linear(v))));
     }
@@ -265,17 +272,17 @@ fn engines(
 
 /// Speed-control clicks when the player's engine order changes (keys or dial), weapon-bar open/close.
 fn hud_sounds(
-    player: Option<Single<(&Ship, Has<crate::docking::Docker>), With<PlayerShip>>>,
+    player: Option<Single<(&Ship, Has<crate::docking::Docker>, Has<crate::docking::Tower>), With<PlayerShip>>>,
     toggles: Res<crate::panels::Toggles>,
     mission: Option<Res<crate::campaign::Mission>>,
-    mut last: Local<Option<(usize, bool)>>,
+    mut last: Local<Option<(EngineOrder, bool)>>,
     mut last_wp: Local<Option<Vec3>>,
     mut out: MessageWriter<Sfx>,
 ) {
     let Some(player) = player else { return };
-    let (p, docking) = *player;
-    // Orders during the opening briefing are scripted, like docking ones.
-    let docking = docking || mission.is_some_and(|m| m.opening.is_some());
+    let (p, docking, towing) = *player;
+    // Orders during the opening briefing are scripted, like docking ones; so is the tower's approach (it re-aims every tick).
+    let docking = docking || towing || mission.is_some_and(|m| m.opening.is_some());
     let now = (p.order, toggles.weapons);
     if let Some((order, weapons)) = *last {
         if !docking && now.0 > order {
@@ -299,7 +306,7 @@ fn hud_sounds(
 
 /// Crew line (content/voice/events.json, grouping from the community remake; tools/export_voices.py) when the player's engine order changes.
 /// Spoken by the helmsman's voice (`crew::voice_line`). PROVISIONAL: order->event mapping (3 -> emergency_speed vs full_power) is a guess.
-fn helm_acknowledges(last: &mut Option<usize>, order: usize, docking: bool) -> bool {
+fn helm_acknowledges(last: &mut Option<EngineOrder>, order: EngineOrder, docking: bool) -> bool {
     // Track automatic orders too, so leaving the dock does not announce a stale change.
     last.replace(order).is_some_and(|prev| prev != order) && !docking
 }
@@ -308,7 +315,7 @@ fn helmsman(
     player: Option<Single<(&Ship, Has<crate::docking::Docker>, Option<&crate::crew_arms::CrewPosts>), With<PlayerShip>>>,
     lib: Res<Library>,
     mission: Option<Res<crate::campaign::Mission>>,
-    mut last: Local<Option<usize>>,
+    mut last: Local<Option<EngineOrder>>,
     mut n: Local<usize>,
     mut commands: Commands,
     assets: Res<AssetServer>,
@@ -320,7 +327,12 @@ fn helmsman(
     if !helm_acknowledges(&mut last, p.order, scripted) {
         return;
     }
-    let ev = ["full_stop", "slow_ahead", "full_ahead"].get(p.order).copied().unwrap_or("emergency_speed");
+    let ev = match p.order {
+        EngineOrder::Stop => "full_stop",
+        EngineOrder::Slow => "slow_ahead",
+        EngineOrder::Full => "full_ahead",
+        EngineOrder::Emergency => "emergency_speed",
+    };
     *n += 1;
     debug!("voice {ev}");
     let Some((file, face)) = crate::crew::voice_line(ev, *n, &lib.classes[p.class].race, posts, crate::crew::voice_exists) else { return };
@@ -355,10 +367,12 @@ mod tests {
             .insert_resource(Library::load(crate::assets_dir()))
             .insert_resource(crate::panels::Toggles { weapons: false, names: false })
             .add_plugins(plugin);
+        app.world_mut().spawn((crate::MainCamera, Camera3d::default(), GlobalTransform::default()));
+        // A second 3D camera, like the Fleet screen's ship preview (#546): the sounds must still play.
         app.world_mut().spawn((Camera3d::default(), GlobalTransform::default()));
-        let hero = app.world_mut().spawn((PlayerShip, Ship { heading: 0.0, order: 1, ..Ship::new(0, crate::Side::Player) })).id();
+        let hero = app.world_mut().spawn((PlayerShip, Ship { heading: 0.0, order: EngineOrder::Slow, ..Ship::new(0, crate::Side::Player) })).id();
         app.update();
-        app.world_mut().get_mut::<Ship>(hero).unwrap().order = 2;
+        app.world_mut().get_mut::<Ship>(hero).unwrap().order = EngineOrder::Full;
         app.update();
         assert_eq!(app.world_mut().query::<&AudioPlayer>().iter(app.world()).count(), 0, "no helmsman or HUD audio from the menu duel");
         app.world_mut().resource_mut::<Messages<Sfx>>().write(Sfx::ui("FE_Button_Select"));
@@ -380,11 +394,11 @@ mod tests {
     #[test]
     fn docking_orders_are_silent_without_delaying_acknowledgements_until_release() {
         let mut last = None;
-        assert!(!helm_acknowledges(&mut last, 0, false), "initial state is silent");
-        assert!(helm_acknowledges(&mut last, 2, false), "player order");
-        assert!(!helm_acknowledges(&mut last, 1, true), "automatic approach");
-        assert!(!helm_acknowledges(&mut last, 0, true), "automatic stop");
-        assert!(!helm_acknowledges(&mut last, 0, false), "dock release is silent");
-        assert!(helm_acknowledges(&mut last, 1, false), "next player order still works");
+        assert!(!helm_acknowledges(&mut last, EngineOrder::Stop, false), "initial state is silent");
+        assert!(helm_acknowledges(&mut last, EngineOrder::Full, false), "player order");
+        assert!(!helm_acknowledges(&mut last, EngineOrder::Slow, true), "automatic approach");
+        assert!(!helm_acknowledges(&mut last, EngineOrder::Stop, true), "automatic stop");
+        assert!(!helm_acknowledges(&mut last, EngineOrder::Stop, false), "dock release is silent");
+        assert!(helm_acknowledges(&mut last, EngineOrder::Slow, false), "next player order still works");
     }
 }

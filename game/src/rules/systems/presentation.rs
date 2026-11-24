@@ -14,6 +14,8 @@ pub enum Ui {
     End,
     BarTop,
     BarBottom,
+    /// Not retail: the black cover `OP Fade` draws (`classic/mission_ui.rs` sets its alpha from `Script::fade_alpha`).
+    Fade,
 }
 
 /// A looping effect created by 'Create/Release Event Effect', keyed by point set + effect name.
@@ -112,6 +114,7 @@ pub(super) fn ui(
                     .unwrap_or_default(),
             ),
             Ui::BarTop | Ui::BarBottom => (sc.nis && !opening, String::new()),
+            Ui::Fade => (sc.fade_alpha() > 0.0, String::new()),
         };
         vis.set_if_neq(if show { Visibility::Inherited } else { Visibility::Hidden });
         if let Some(mut t) = text
@@ -205,7 +208,7 @@ pub(super) fn nis_camera(
     time: Res<Time>,
     orbit: Res<Orbit>,
     units: Query<(&Transform, Option<&Ship>), Without<Camera3d>>,
-    mut cam: Single<&mut Transform, With<Camera3d>>,
+    mut cam: Single<&mut Transform, (With<Camera3d>, With<crate::MainCamera>)>,
     mut travelled: Local<f32>,
 ) {
     let sc = &mission.script;

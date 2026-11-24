@@ -1,4 +1,4 @@
-//! The original's attack manoeuvres for computer captains, read from its code (docs/re/movement.md, "Computer captains: attack"):
+//! The original's attack manoeuvres for computer captains (docs/re/movement.md, "Computer captains: attack"):
 //! the primary gun bank picks Broadside (one side), Frontal, Rear or Ram; R is the guns' mean effective range (long range against
 //! a base); the captain sails a course of aim points, re-planned every think, at full throttle when the next point is within
 //! 11.25° of the bow and at its minimum throttle otherwise.
@@ -198,14 +198,14 @@ pub fn standoff_throttle(gap: f32, r: f32) -> Option<f32> {
 
 /// The follower's throttle toward `point` as a fraction of Ahead Full (`Ship::throttle`): full (Emergency) within 11.25° of the bow,
 /// else the ship's minimum, 0.65-0.75 of full drawn once per ship. A `Ram` has a narrower window: 5° of the bow.
-pub fn throttle(routine: Routine, e: Entity, pos: Vec3, heading: f32, point: Vec3) -> Option<f32> {
+pub fn throttle(routine: Routine, key: crate::scenario::SpawnIndex, pos: Vec3, heading: f32, point: Vec3) -> Option<f32> {
     let d = point - pos;
     let arc = if routine == Routine::Ram { RAM_FULL_THROTTLE_ARC } else { FULL_THROTTLE_ARC };
     if crate::ship::angdiff((-d.x).atan2(-d.z), heading).abs() <= arc {
         return None;
     }
-    // ponytail: a fixed per-ship draw from the entity, not the original's random generator.
-    let u = (e.to_bits().wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 40) as f32 / (1u64 << 24) as f32;
+    // PROVISIONAL: a fixed per-ship draw from its spawn number, not the original's random generator.
+    let u = key.draw(0);
     Some(2.0 * (0.65 + 0.1 * u))
 }
 
