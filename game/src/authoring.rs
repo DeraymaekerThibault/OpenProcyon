@@ -10,6 +10,8 @@
 //!   [`DataError`] that names the file and the mod that provided it.
 //! - [`rule_schema`]: the mission rule vocabulary as JSON, the same document `--dump-rule-schema` writes.
 //! - [`schemas`]: JSON Schemas of `ship.json`, `guns.json`, `bullets.json`, `data/crew_nodes.json` and `mod.json` (`--dump-schemas <dir>`).
+//! - [`resolved_ship`]: a ship as the loader sees it ([`ResolvedShip`]): speed, thrust, mass, hit points, mounts and every hardpoint
+//!   in game axes, each with its source (a JSON pointer into `ship.json`, a model node, or a fallback rule), serializable.
 //! - [`check_mission`] / [`known_names`]: the mission checker behind `--check-mission`, on JSON values in memory.
 //!
 //! Shared code: no UI and no view imports.
@@ -24,6 +26,7 @@ pub use check_mod::{check_mod, check_mod_with, unknown_keys};
 pub use json::to_json_string;
 
 pub use crate::data::DataError;
+pub use crate::data::resolved::{Hardpoint, HardpointKind, ResolvedMount, ResolvedSection, ResolvedShip, Source, Sourced, resolved_ship};
 pub use crate::modding::{ModEntry, ModReport};
 pub use crate::rules::check::{Finding, Level, Problem, defined_names};
 

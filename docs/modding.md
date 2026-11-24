@@ -171,7 +171,7 @@ or map files to schemas once in `.vscode/settings.json`:
 
 Tools that link the engine as a library (an editor, a checker) use `openprocyon::authoring` instead of the game's internals: it finds the
 imported assets without side effects, builds a mod overlay into a folder of the tool's own (the game's `local/overlay` is not touched, so
-several instances can run at once), and returns the rule schema, the JSON Schemas of the mod files (`schemas()`), the mission checker's findings as values, the whole-mod check (`check_mod`) and a writer for the engine's JSON layout (`to_json_string`: the exact text `tools/jsonio.py` writes, so a saved file differs from the importer's only where its data does).
+several instances can run at once), and returns the rule schema, the JSON Schemas of the mod files (`schemas()`), the mission checker's findings as values, the whole-mod check (`check_mod`), a ship as the loader sees it (`resolved_ship`: speed, mass, hit points, mounts and every hardpoint in game axes, each with its source, a JSON pointer into `ship.json` or a model node), the files of a mod that are game content (`game_content_in`: equal in meaning to the import's file, JSON by value, other files by bytes, a model against every ship model; PROVISIONAL: a PNG is compared by bytes, a moved or edited-and-derived file is not found) and a writer for the engine's JSON layout (`to_json_string`: the exact text `tools/jsonio.py` writes, so a saved file differs from the importer's only where its data does).
 
 Restart the game after every change: the overlay, the merged tables, the string table, the sound index and the render profile are
 all read once at launch.

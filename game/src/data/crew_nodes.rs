@@ -17,11 +17,11 @@ const KINDS: [&str; 6] = ["Walk", "Gun", "Post", "Work", "Climb", "Count"];
 #[derive(Deserialize, JsonSchema)]
 pub(super) struct CrewNodeDoc {
     /// The node's name: `Crew_Walk_<lane>_<k>`, `Crew_Gun_*`, `Crew_Post_*`, `Crew_Work_*`, `Crew_Climb_<shroud>_a` / `_b` or `Crew_Count_<n>`.
-    name: String,
+    pub(in crate::data) name: String,
     /// Ship frame, game axes (x starboard, y forward, z up): the convention of a gun's `pos`.
-    pos: [f64; 3],
+    pub(in crate::data) pos: [f64; 3],
     /// Rotation, the convention of a gun's `rot`: the way the figure faces at the place.
-    rot: Option<[f64; 3]>,
+    pub(in crate::data) rot: Option<[f64; 3]>,
 }
 
 /// A crew place as the deck crews read it: the node's name and its transform in the model's frame.

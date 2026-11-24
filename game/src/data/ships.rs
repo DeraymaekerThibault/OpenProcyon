@@ -8,6 +8,7 @@ use std::fmt;
 use std::path::Path;
 
 pub mod derive;
+pub mod resolved;
 use super::crew_nodes;
 
 /// Preserve authored section/mount order: parent indices and weapon banks depend on it.
@@ -306,6 +307,46 @@ pub fn load_class(root: &Path, name: &str, guns: &HashMap<String, GunDef>) -> Cl
 
 /// `load_class` that returns the error (it names the file and the field) instead of panicking; used by `--check-mod`.
 pub fn try_load_class(root: &Path, name: &str, guns: &HashMap<String, GunDef>) -> Result<Class, String> {
+    build(root, name, Some(guns)).map(|(class, _)| class)
+}
+
+/// Where the loader's decision about the two kinds of point that `ship.json` and the model both can give is made: a point's value and
+/// where it came from. `tow` and `homing` in `ship.json` win over the model's `TowerPoint` / `ToweePoint` / `TorpedoHomingPoint`
+/// nodes, which win over a PROVISIONAL hull-end fallback. Both the loader and `authoring::resolved_ship` read it from here.
+pub(super) struct Special {
+    pub tow: [(Vec3, resolved::Source); 2],
+    pub homing: (Vec3, resolved::Source),
+}
+
+/// `nodes`: the model's glTF JSON; `bounds`: the collision box; `hull`: the box of the vital sections.
+fn special_points(j: &ShipDoc, nodes: Option<&Value>, bounds: [Vec3; 2], hull: (Vec3, Vec3)) -> Special {
+    let node = |kind: &str| nodes?["nodes"].as_array()?.iter().find(|n| n["extras"]["kind"] == kind);
+    let node_point = |kind: &str| {
+        node(kind).map(|n| {
+            (
+                Vec3::new(num(&n["translation"][0]), num(&n["translation"][1]), num(&n["translation"][2])),
+                resolved::Source::Model { name: n["name"].as_str().unwrap_or_default().to_string() },
+            )
+        })
+    };
+    let fallback = |what: &str| resolved::Source::Fallback { rule: what.into() };
+    let tow = match &j.tow {
+        Some(t) => [(point(t.tower), resolved::Source::json("/tow/tower")), (point(t.towee), resolved::Source::json("/tow/towee"))],
+        None => [
+            node_point("TowerPoint").unwrap_or((Vec3::new(0.0, 0.0, bounds[1].z), fallback("PROVISIONAL: the hull's forward end"))),
+            node_point("ToweePoint").unwrap_or((Vec3::new(0.0, 0.0, bounds[0].z), fallback("PROVISIONAL: the hull's aft end"))),
+        ],
+    };
+    let homing = match j.homing {
+        Some(h) => (point(h), resolved::Source::json("/homing")),
+        None => node_point("TorpedoHomingPoint").unwrap_or(((hull.0 + hull.1) * 0.5, fallback("PROVISIONAL: the centre of the vital sections"))),
+    };
+    Special { tow, homing }
+}
+
+/// The loader. With `guns` it checks each mount's gun and averages their ranges; without it (`authoring::resolved_ship`) it does
+/// neither. Returns what `resolved` needs besides the class.
+pub(super) fn build(root: &Path, name: &str, guns: Option<&HashMap<String, GunDef>>) -> Result<(Class, resolved::Parts), String> {
     let path = root.join(format!("ships/{name}/ship.json"));
     let mut j: ShipDoc = read_typed(&path)?;
     let glb = format!("ships/{}/model.glb", j.model.as_deref().unwrap_or(name));
@@ -358,7 +399,7 @@ pub fn try_load_class(root: &Path, name: &str, guns: &HashMap<String, GunDef>) -
         .guns
         .iter()
         .map(|(label, g)| {
-            if !guns.contains_key(&g.gun) {
+            if guns.is_some_and(|guns| !guns.contains_key(&g.gun)) {
                 return Err(format!("{context}: guns.{label}.gun references unknown weapon {:?}", g.gun));
             }
             let (Some(pos), Some(rot)) = (g.pos, g.rot) else {
@@ -379,7 +420,10 @@ pub fn try_load_class(root: &Path, name: &str, guns: &HashMap<String, GunDef>) -
     let (hmn, hmx) = hull(&|s| s.vital);
     let (amn, amx) = hull(&|_| true);
     let ph = &j.physics;
-    let engage = if mounts.is_empty() { 60.0 } else { mounts.iter().map(|m| guns[&m.gun].range[0]).sum::<f32>() / mounts.len() as f32 };
+    let engage = match guns {
+        Some(guns) if !mounts.is_empty() => mounts.iter().map(|m| guns[&m.gun].range[0]).sum::<f32>() / mounts.len() as f32,
+        _ => 60.0,
+    };
     let bounds = if ph.min_extents.is_some() && ph.max_extents.is_some() {
         let (a, b) = (optional_point(ph.min_extents.as_ref()), optional_point(ph.max_extents.as_ref()));
         [a.min(b), a.max(b)]
@@ -389,7 +433,6 @@ pub fn try_load_class(root: &Path, name: &str, guns: &HashMap<String, GunDef>) -
     let nodes = glb_json(&model_bytes).map(|(doc, _)| doc);
     let node = |kind: &str| nodes.as_ref()?["nodes"].as_array()?.iter().find(|n| n["extras"]["kind"] == kind);
     let translation = |n: &Value| Vec3::new(num(&n["translation"][0]), num(&n["translation"][1]), num(&n["translation"][2]));
-    let node_point = |kind: &str| node(kind).map(translation);
     // The cloak's two effect points (MSB 'CloakingEffectPoint' / 'FullyCloakedEffectPoint'): where Cloaking/DeCloaking and the
     // FullyCloaked periscope trail play; the second faces aft (rot_raw is a yaw about the hull's up axis).
     let effect_point = |kind: &str| node(kind).map(|n| (translation(n), Quat::from_rotation_y(num(&n["extras"]["rot_raw"][0]))));
@@ -403,6 +446,8 @@ pub fn try_load_class(root: &Path, name: &str, guns: &HashMap<String, GunDef>) -
         flags.iter().find(|f| f.label.to_lowercase().contains("flag") && f.label.to_lowercase().contains(end)).map(|f| point(f.pos))
     };
     let flag = flag_at("top").zip(flag_at("bot"));
+    let special = special_points(&j, nodes.as_ref(), bounds, (hmn, hmx));
+    let parts = resolved::Parts::new(&j, facts.as_ref(), special, &glb);
     let engines = j
         .engines
         .into_iter()
@@ -412,7 +457,7 @@ pub fn try_load_class(root: &Path, name: &str, guns: &HashMap<String, GunDef>) -
             Some((point(e.pos?), Quat::from_rotation_y(e.rot.map_or(0.0, |r| r[0] as f32)), e.fx?, section))
         })
         .collect();
-    Ok(Class {
+    let class = Class {
         name: name.into(),
         race: j.race,
         skirmish: j.skirmish,
@@ -458,14 +503,11 @@ pub fn try_load_class(root: &Path, name: &str, guns: &HashMap<String, GunDef>) -
         lifeboats: j.lifeboats as u32,
         is_lifeboat: j.is_lifeboat,
         sphere: j.sphere.map_or((centre, radius), |s| (point(s.center), s.radius as f32)),
-        // PROVISIONAL hull-end fallback for custom models without authored tow/homing nodes.
-        // Not retail: `tow` and `homing` in ship.json win over the model's nodes.
-        tow_points: match &j.tow {
-            Some(t) => [point(t.tower), point(t.towee)],
-            None => [node_point("TowerPoint").unwrap_or(Vec3::new(0.0, 0.0, bounds[1].z)), node_point("ToweePoint").unwrap_or(Vec3::new(0.0, 0.0, bounds[0].z))],
-        },
-        homing_point: j.homing.map(point).or_else(|| node_point("TorpedoHomingPoint")).unwrap_or((hmn + hmx) * 0.5),
-    })
+        // PROVISIONAL hull-end fallbacks for custom models without authored tow/homing nodes (`special_points`).
+        tow_points: [parts.special.tow[0].0, parts.special.tow[1].0],
+        homing_point: parts.special.homing.0,
+    };
+    Ok((class, parts))
 }
 
 #[cfg(test)]
