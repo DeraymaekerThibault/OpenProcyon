@@ -62,11 +62,20 @@ pub struct Dockable {
     markers: Vec<Entity>,
     /// Per point, the number in its label (`DockPoint3` -> 3, 0 if none): picks the base's `CRANESnn` clip.
     pub numbers: Vec<u32>,
+    /// Per point, the layer of the damage section it sits on (bases and islands).
+    pub layers: Vec<Option<String>>,
+    /// docs/re/docking-and-orders.md: a base or island lost a section carrying a dock point; its docks stay closed for good,
+    /// whatever 'Set Group/Unit Dockable' says.
+    pub lost: bool,
 }
 impl Dockable {
     pub fn new(points: Vec<DockPoint>, enabled: bool) -> Self {
         let taken = vec![None; points.len()];
-        Dockable { numbers: vec![0; points.len()], points, taken, enabled, repairs: enabled, markers: vec![] }
+        Dockable { numbers: vec![0; points.len()], layers: vec![None; points.len()], points, taken, enabled, repairs: enabled, markers: vec![], lost: false }
+    }
+    /// Can be docked with now: switched on and its docks not lost.
+    pub fn open(&self) -> bool {
+        self.enabled && !self.lost
     }
     fn world(&self, tf: &Transform, i: usize) -> (Vec3, Vec3) {
         let p = &self.points[i];
@@ -125,7 +134,8 @@ pub fn dockable_for(docks: &Value, entity: &str) -> Option<Dockable> {
     let enabled = !entity.starts_with("Ship_") || d["tender"].as_bool().unwrap_or(false);
     let numbers: Vec<u32> =
         d["points"].as_array()?.iter().map(|p| p["label"].as_str().unwrap_or("").trim_start_matches(|c: char| !c.is_ascii_digit()).parse().unwrap_or(0)).collect();
-    (!points.is_empty()).then(|| Dockable { numbers, ..Dockable::new(points, enabled) })
+    let layers = d["points"].as_array()?.iter().map(|p| p["layer"].as_str().map(String::from)).collect();
+    (!points.is_empty()).then(|| Dockable { numbers, layers, ..Dockable::new(points, enabled) })
 }
 
 #[derive(Message)]
@@ -259,6 +269,7 @@ pub fn plugin(app: &mut App) {
             FixedUpdate,
             (ai_repair_dock, routine, tow_routine).chain().in_set(crate::BattleSet::Ai).run_if(in_state(crate::menu::Screen::Battle)).run_if(crate::menu::overlay_closed),
         )
+        .add_systems(FixedUpdate, docks_lost.in_set(crate::BattleSet::Combat).run_if(in_state(crate::menu::Screen::Battle)))
         .add_systems(FixedUpdate, docked_repair.in_set(crate::BattleSet::Combat).run_if(in_state(crate::menu::Screen::Battle)).run_if(crate::menu::overlay_closed))
         .add_systems(Update, play_cranes.run_if(in_state(crate::menu::Screen::Battle)))
         .add_systems(Update, (cancel_input, markers).chain().before(crate::input).run_if(in_state(crate::menu::Screen::Battle)).run_if(crate::menu::overlay_closed));
@@ -349,7 +360,7 @@ fn handle_messages(
             DockMsg::Dock { docker, dockee } | DockMsg::Repair { docker, dockee } => {
                 let chosen = matches!(*m, DockMsg::Repair { .. });
                 let Some(docker) = docker.or_else(|| player.single().ok()) else { continue };
-                if docker == dockee || dockers.get(docker).is_ok_and(|d| d.dockee == dockee) || !dockables.get(dockee).is_ok_and(|d| d.enabled) {
+                if docker == dockee || dockers.get(docker).is_ok_and(|d| d.dockee == dockee) || !dockables.get(dockee).is_ok_and(Dockable::open) {
                     continue;
                 }
                 let Ok(start) = pos.get(docker).map(|t| t.translation) else { continue };
@@ -777,7 +788,7 @@ fn routine(
             commands.entity(e).remove::<Docker>();
             continue;
         };
-        if health.destroyed || dockee_health.is_some_and(|h| h.destroyed) || (!dockable.enabled && matches!(docker.phase, Phase::Wait | Phase::Approach)) {
+        if health.destroyed || dockee_health.is_some_and(|h| h.destroyed) || (!dockable.open() && matches!(docker.phase, Phase::Wait | Phase::Approach)) {
             release_dock(&mut mission, e, &mut dockable, &docker);
             commands.entity(e).remove::<Docker>();
             continue;
@@ -831,6 +842,19 @@ fn routine(
     }
 }
 
+/// docs/re/docking-and-orders.md: a base or island whose damage section under a dock point is destroyed loses all its docks for good.
+/// ponytail: the crane parts of that point keep their clip; stopping them is cosmetic.
+fn docks_lost(mut q: Query<(&mut Dockable, &crate::combat::ArmedBase, &Health)>, lib: Res<Library>) {
+    for (mut dk, base, h) in &mut q {
+        if !dk.lost && section_under_dock_lost(&dk.layers, &lib.classes[base.class].sections, &h.sections) {
+            dk.lost = true;
+        }
+    }
+}
+fn section_under_dock_lost(layers: &[Option<String>], sections: &[crate::data::Section], hp: &[f32]) -> bool {
+    sections.iter().zip(hp).any(|(s, h)| *h <= 0.0 && layers.iter().flatten().any(|l| l.eq_ignore_ascii_case(&s.layer)))
+}
+
 /// Every dock point of a dockable object shows the 'Docking_Point' effect while the object can be
 /// docked with; the effects go away when it cannot (disabled, destroyed or a hostile base).
 #[expect(clippy::type_complexity, reason = "a Bevy query")]
@@ -842,7 +866,7 @@ fn markers(
 ) {
     let Some(fxl) = fxl else { return };
     for (e, tf, mut dk, h, base, side) in &mut q {
-        let on = dk.enabled && !h.is_some_and(|h| h.destroyed) && !hostile_base(mission.as_deref(), base, side);
+        let on = dk.open() && !h.is_some_and(|h| h.destroyed) && !hostile_base(mission.as_deref(), base, side);
         if on && dk.markers.is_empty() {
             dk.markers = (0..dk.points.len())
                 .filter_map(|i| {
@@ -903,7 +927,7 @@ fn ai_repair_dock(
         };
         let candidates = docks
             .iter()
-            .filter(|(d, _, dk, dship, dms, base)| *d != e && dk.enabled && dk.repairs && friendly(*dship, dms.map(|m| m.owner.as_str()).or(base.map(|b| b.owner.as_str()))));
+            .filter(|(d, _, dk, dship, dms, base)| *d != e && dk.open() && dk.repairs && friendly(*dship, dms.map(|m| m.owner.as_str()).or(base.map(|b| b.owner.as_str()))));
         let reach = if script.is_some() { lib.classes[ship.class].sight } else { f32::INFINITY };
         let candidates = candidates.filter(|d| d.1.translation.distance(tf.translation) <= reach);
         let sphere = |e: Entity, tf: &Transform| sensors.as_ref().and_then(|s| s.sphere(e)).unwrap_or((tf.translation, 0.0));
@@ -946,7 +970,7 @@ impl Dockees<'_, '_> {
     }
     pub fn can_dock(&self, actor: Entity, dockee: Entity) -> bool {
         let Ok((_, _, d, ship, base)) = self.q.get(dockee) else { return false };
-        d.enabled && !self.base_hostile(dockee, base) && ship.is_none_or(|s| s.side == Side::Player) && self.sensors.in_sight(actor, dockee, self.mission.as_deref())
+        d.open() && !self.base_hostile(dockee, base) && ship.is_none_or(|s| s.side == Side::Player) && self.sensors.in_sight(actor, dockee, self.mission.as_deref())
     }
     /// Dockable ally under the ray, with whether the selected ship's group has sight (no separate dock range).
     pub fn under(&self, ray: Ray3d, actor: Entity) -> Option<(Entity, bool)> {

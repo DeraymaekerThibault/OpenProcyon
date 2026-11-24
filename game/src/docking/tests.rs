@@ -526,3 +526,18 @@ fn a_base_dockee_counts_as_docked_for_the_rules_like_a_ship() {
         assert!(registered, "base: {base}");
     }
 }
+
+/// docs/re/docking-and-orders.md: losing the section under any dock point closes every dock of the base for good; other sections do not.
+#[test]
+fn a_base_loses_its_docks_with_the_section_under_a_dock_point() {
+    let section = |layer: &str| crate::data::Section { layer: layer.into(), ..default() };
+    let sections = [section("Pier_Layer1"), section("Tower_Layer2")];
+    let layers = [Some("pier_layer1".to_string()), None];
+    assert!(!section_under_dock_lost(&layers, &sections, &[10.0, 10.0]));
+    assert!(!section_under_dock_lost(&layers, &sections, &[10.0, 0.0]), "a tower without docks");
+    assert!(section_under_dock_lost(&layers, &sections, &[0.0, 10.0]), "the pier under the dock point");
+    let mut dk = Dockable::new(vec![DockPoint { pos: Vec3::ZERO, fwd: Vec3::NEG_Z }], true);
+    dk.lost = true;
+    dk.enabled = true; // 'Set Group/Unit Dockable' TRUE does not reopen lost docks
+    assert!(!dk.open());
+}

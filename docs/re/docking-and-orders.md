@@ -27,6 +27,9 @@ Dock-ability test: the two players are **allied**, `o` is dockable (every ship a
 carries a dock point.
 **Defaults**: a ship is dockable *and* repairs ("Repair When
 Docked With") only when its WOT `Is Tender` is true; islands/bases always. "Set Group/Unit Dockable" writes only the dockable flag.
+**Docks lost with their section**: every dock point of a base or island sits on one of its damage sections. When any such section is
+destroyed, all docks of that object close for good (a later "Set Group/Unit Dockable" TRUE does not reopen them) and the crane parts
+of that point stop. Ships never lose their docks this way. Remake: built; the crane parts keep playing.
 **There is no dock range.** The range check is a *sight* test (also used to enable the menu's Focus item): the AI entity's `Default SightRange` (400-600
 for most ships; crew multiplier applied elsewhere). It passes when the surface distance (centre distance minus both
 collision radii) from the selected ship, or any ship of its group, is below that ship's sight range and the object is not hidden.
