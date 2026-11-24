@@ -55,7 +55,9 @@ pub mod wake;
 
 // Explicit crate-root re-exports, grouped by owning module. No glob re-exports here (docs/development.md).
 // scenario.rs: battle lifecycle and map objects.
-pub use scenario::{Group, Namer, Outcome, Scenario, debug_kill, enter_battle, game_to_bevy, leave_battle, outcome, restart, resume_scenario, shot_target, spawn_ship};
+pub use scenario::{
+    Group, Namer, Outcome, Scenario, debug_kill, enter_battle, game_to_bevy, leave_battle, outcome, restart, resume_scenario, scripted_kills, scripted_steps, spawn_ship,
+};
 // ship.rs: ship state, sides and AI.
 pub use ship::{EngineOrder, PlayerShip, Ship, ShipName, Side, ai, angdiff, approach_speed, step};
 // view.rs: camera, input and HUD wiring.
@@ -367,7 +369,7 @@ pub fn run(view: fn(&mut App), setup_view: fn(&mut App)) {
             Update,
             (
                 (
-                    (shot_target, restart, debug_kill).chain(),
+                    (scripted_steps, restart, debug_kill, scripted_kills).chain(),
                     briefing::update,
                     view::fleet_keys,
                     input,
