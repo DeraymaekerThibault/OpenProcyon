@@ -1,22 +1,27 @@
 //! Crew data and posting rules: abilities, posts, recruitment and placement.
 use super::*;
 
+/// The roster as the JSON object the crew screens (`view.rs`, `fitting.rs`) still index: the typed entries, serialised once.
+/// PROVISIONAL shim until those files read `data::roster()` directly.
 pub(super) fn crew_data() -> &'static Value {
     static DATA: std::sync::OnceLock<Value> = std::sync::OnceLock::new();
-    DATA.get_or_init(|| crate::data::try_json(&crate::assets_dir().join("data/crew.json")).unwrap_or_default())
+    DATA.get_or_init(|| serde_json::to_value(crate::data::roster()).unwrap_or_default())
+}
+fn member(id: &str) -> Option<&'static crate::data::CrewMember> {
+    crate::data::roster().get(id)
 }
 pub fn ability(id: &str, skill: &str) -> Option<f32> {
-    crew_data()[id]["skills"][skill].as_f64().map(|v| (v as f32 / 10.0).clamp(0.0, 1.0))
+    member(id)?.rating(skill).map(|v| (v as f32 / 10.0).clamp(0.0, 1.0))
 }
 pub fn species(id: &str) -> Option<&str> {
-    crew_data()[id]["species"].as_str()
+    member(id)?.species.as_deref()
 }
 /// Talking-head sprite of a named crew member (`TalkingHead_Character_*`).
 pub fn portrait(id: &str) -> Option<&str> {
-    crew_data()[id]["portrait"].as_str().filter(|p| !p.is_empty())
+    member(id)?.portrait.as_deref().filter(|p| !p.is_empty())
 }
 pub(super) fn name(id: &str) -> &str {
-    crew_data()[id]["name"].as_str().unwrap_or(id)
+    member(id).and_then(|m| m.name.as_deref()).unwrap_or(id)
 }
 
 /// The best `skill` among the campaign roster's crew.
@@ -114,7 +119,7 @@ pub fn post_skill_name(role: usize) -> &'static str {
 
 /// What a crew member costs in victory points (0 when unknown).
 pub fn crew_points(id: &str) -> u32 {
-    crew_data()[id]["points"].as_u64().and_then(|v| u32::try_from(v).ok()).unwrap_or(0)
+    member(id).and_then(|m| m.points).and_then(|v| u32::try_from(v).ok()).unwrap_or(0)
 }
 
 /// The Sort By entry (`SORTS` index) of a post's skill: Captain and First Mate to Leadership, Helmsman to Navigation, Lookout to
@@ -174,14 +179,14 @@ pub(super) fn spend(points: &mut CampaignPoints, cost: u32) -> Result<(), String
     Ok(())
 }
 pub(super) fn recruit(points: &mut CampaignPoints, id: &str, race: &str) -> Result<(), String> {
-    let d = &crew_data()[id];
-    if d["race"].as_str() != Some(race) || (!points.crew.is_empty() && !points.crew.iter().any(|c| c == id)) {
+    let d = member(id);
+    if d.and_then(|m| m.race.as_deref()) != Some(race) || (!points.crew.is_empty() && !points.crew.iter().any(|c| c == id)) {
         return Err("This crew member is not available to this fleet.".into());
     }
     if points.outfit.hired.iter().any(|c| c == id) {
         return Err("Already recruited.".into());
     }
-    let price = d["points"].as_u64().and_then(|v| u32::try_from(v).ok()).ok_or("Missing crew price.")?;
+    let price = d.and_then(|m| m.points).and_then(|v| u32::try_from(v).ok()).ok_or("Missing crew price.")?;
     spend(points, price)?;
     points.outfit.hired.push(id.into());
     Ok(())
