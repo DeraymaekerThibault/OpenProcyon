@@ -394,15 +394,35 @@ pub fn set_start(rules: Vec<String>, at: Option<(f32, f32)>) {
     let _ = START.set((rules, at));
 }
 
+/// The findings of `rules::cli::report_lines` for a mission of mod `from`, each prefixed with the mod: what `load_id` logs.
+fn check_log_lines(id: &str, from: &str, dir: &std::path::Path) -> Vec<String> {
+    rules::cli::report_lines(id, dir).into_iter().map(|l| format!("mod {from}: {l}")).collect()
+}
+
 pub fn load_id(id: &str) -> Mission {
     let read = |name: &str| {
         std::fs::read_to_string(assets_dir().join(format!("maps/{id}/{name}.json"))).unwrap_or_else(|_| panic!("missing maps/{id}/{name}.json: run tools.export_campaign"))
     };
     let data: Value = serde_json::from_str(&read("mission")).expect("invalid mission JSON");
     let media: Value = serde_json::from_str(&read("media")).expect("invalid media JSON");
+    // A mission a mod adds or overrides is checked like `--check-mission` does; retail missions are not re-checked at load.
+    let file = assets_dir().join(format!("maps/{id}/mission.json"));
+    if let (Some(from), Some(dir)) = (crate::data::mod_of(&file), file.parent()) {
+        for line in check_log_lines(id, &from, dir) {
+            eprintln!("{line}");
+        }
+    }
     let mut script = rules::Script::new(&data, media);
     // The scripted opening NIS (briefing.rs) only exists for mission 1; later missions start at once and run their own NIS rules.
-    script.briefing_opening = id == "mission01";
+    // A mod's `mission01` without the data it reads starts without the opening.
+    script.briefing_opening = id == "mission01"
+        && match crate::briefing::opening_problem(&data) {
+            None => true,
+            Some(why) => {
+                eprintln!("error: mod {}: maps/mission01/mission.json: {why}; the mission starts without the scripted opening", crate::data::mod_of(&file).unwrap_or_default());
+                false
+            }
+        };
     if let Some((rules, at)) = START.get() {
         (script.start_rules, script.start_at) = (rules.clone(), *at);
     }
@@ -472,9 +492,21 @@ pub fn spawn(commands: &mut Commands, assets: &AssetServer, lib: &Library, fxl: 
             ));
         }
     }
-    let mut ships: Vec<Value> = mission.data["ships"].as_array().expect("mission ships").clone();
-    // Wrecks and other hulls without a ship class are not simulated yet (docs/re/campaign.md).
-    ships.retain(|s| lib.classes.iter().any(|c| Some(c.name.as_str()) == s["type"].as_str()));
+    let mut ships: Vec<Value> = mission.data["ships"].as_array().cloned().unwrap_or_else(|| {
+        eprintln!("error: maps/{id}/mission.json has no \"ships\" list; no ships are placed");
+        vec![]
+    });
+    // Wrecks and other hulls without a ship class are not simulated yet (docs/re/campaign.md); a ship without an id is skipped.
+    ships.retain(|s| {
+        if !lib.classes.iter().any(|c| Some(c.name.as_str()) == s["type"].as_str()) {
+            return false;
+        }
+        let has_id = s["id"].as_i64().is_some();
+        if !has_id {
+            eprintln!("error: maps/{id}/mission.json: a ship of type {} has no integer `id`; skipped", s["type"]);
+        }
+        has_id
+    });
     let player_group = mission.data["player_start"]["name"].clone();
     // The human's ship is the one the TWT flags primary; if none is (missions 9, 13) use the player group's first, else a stand-in cutter.
     let primary_id = [|s: &Value, g: &Value| s["primary"] == true && s["group"] == *g, |s: &Value, g: &Value| s["group"] == *g]
@@ -552,6 +584,28 @@ pub fn objective_point(m: &Mission) -> Option<Vec3> {
 
 #[cfg(test)]
 mod tests {
+    use serde_json::json;
+
+    #[test]
+    fn a_mod_mission_with_a_bad_rule_is_reported_with_its_file_and_mod() {
+        let dir = std::env::temp_dir().join(format!("procyon-modmission-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let rules = json!({"players": [], "rules": [{"name": "R", "Run Once": true, "conditions": [{"Type": "World Initialize"}], "actions": [{"Type": "Nonsense"}]}]});
+        std::fs::write(dir.join("mission.json"), rules.to_string()).unwrap();
+        let lines = super::check_log_lines("mymission", "my-mod", &dir);
+        assert!(lines.iter().all(|l| l.starts_with("mod my-mod: mymission")), "{lines:?}");
+        assert!(lines.iter().any(|l| l.contains("mymission/mission.json: ERROR: rule \"R\"") && l.contains("unknown action Type")), "{lines:?}");
+        assert!(lines.last().is_some_and(|l| l.ends_with("errors, 1 warnings") || l.contains(" errors, ")), "a count line closes the report: {lines:?}");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_script_without_a_rules_list_runs_without_rules() {
+        // used to be `expect("rules")`: now an error line and a script with no rules
+        let script = crate::rules::Script::new(&json!({"players": []}), json!({}));
+        assert!(!script.briefing_opening);
+    }
     use super::*;
 
     /// Mission 5's Waystation Grant has no 'Setup Island' rule. It must still be a rules unit, or docking there never satisfies the

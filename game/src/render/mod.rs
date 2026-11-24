@@ -299,11 +299,19 @@ fn has_shader(root: &std::path::Path, block: &str, shader: &str) -> bool {
     found
 }
 
+/// The render profile with the mods' sky and nebula accents added. A file that is present but invalid is reported (file, mod,
+/// line and column) and left out: without a profile the classic look stays on, and the error says why.
+fn profile_json(root: &std::path::Path, base: &std::path::Path) -> Option<serde_json::Value> {
+    let read = |rel: &str, instead: &str| crate::data::load_or_base::<serde_json::Value>(&root.join(rel), Some(&base.join(rel)), instead);
+    let mut v = read(PROFILE, "the render profile is off (classic look)")?;
+    add_mod_skies(&mut v, read(SKIES, "its sky accents are left out"));
+    add_mod_nebulae(&mut v, read(NEBULAE, "its nebula looks are left out"));
+    Some(v)
+}
+
 pub fn plugin(app: &mut App) {
     let root = crate::assets_dir();
-    let Some(mut v) = crate::data::try_json(&root.join(PROFILE)) else { return };
-    add_mod_skies(&mut v, crate::data::try_json(&root.join(SKIES)));
-    add_mod_nebulae(&mut v, crate::data::try_json(&root.join(NEBULAE)));
+    let Some(v) = profile_json(root, &crate::base_assets()) else { return };
     let look = Look::parse(&v).with_shaders(root);
     frame::plugin(app);
     lights::plugin(app);
@@ -481,6 +489,24 @@ fn sky_light(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_bad_profile_or_accent_file_is_reported_and_left_out_without_panicking() {
+        let dir = std::env::temp_dir().join(format!("procyon-profile-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let (root, base) = (dir.join("root"), dir.join("base"));
+        std::fs::create_dir_all(root.join("data/render")).unwrap();
+        std::fs::create_dir_all(&base).unwrap();
+        assert!(profile_json(&root, &base).is_none(), "no profile: the classic look, quietly");
+        std::fs::write(root.join(PROFILE), "[1, 2,").unwrap();
+        assert!(profile_json(&root, &base).is_none(), "a syntax error turns the profile off (with an error line), not the game");
+        std::fs::write(root.join(PROFILE), r#"{"sky": {"near": {}}}"#).unwrap();
+        std::fs::write(root.join(SKIES), "[oops").unwrap();
+        std::fs::write(root.join(NEBULAE), "nope").unwrap();
+        let v = profile_json(&root, &base).expect("the profile stands without its bad accent files");
+        assert!(v["sky"].get("skies").is_none());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 
     #[test]
     fn mods_add_accents_for_their_own_skies() {
