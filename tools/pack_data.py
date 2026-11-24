@@ -12,17 +12,10 @@ from pathlib import Path
 
 from tools import cli
 from tools.jsonio import dump
+from tools.skirmish_ships import SKIRMISH_SHIPS
 
-# Ships offered in the skirmish pickers (retail: the single-player fleet screens); mods opt in with "skirmish": true.
-SKIRMISH = {
-    "Ship_Navy_Cutter",
-    "Ship_Navy_Frigate",
-    "Ship_Navy_FastFrigate",
-    "Ship_Pirate_Schooner",
-    "Ship_Pirate_Sloop",
-    "Ship_Pirate_Gunboat",
-    "Ship_Pirate_Barque",
-}
+# Ships offered in the skirmish pickers: tools/skirmish_ships.py (also the importer's first ships); mods opt in with "skirmish": true.
+SKIRMISH = set(SKIRMISH_SHIPS)
 
 
 def rnd(v, nd=6):

@@ -353,3 +353,20 @@ fn the_price_change_is_the_difference_times_the_guns_in_the_bank() {
     assert_eq!(bank_delta(&lib, class, &BTreeMap::new(), target, &gun), Some((a - b) * guns));
     assert_eq!(bank_delta(&lib, class, &BTreeMap::new(), target, stock), Some(0));
 }
+#[test]
+fn navigation_actions_move_only_the_choice() {
+    let mut c = Choice { ship: 1, post: 3, page: 2, post_picked: true, message: "x".into(), ..default() };
+    assert!(navigate(&mut c, &Action::Ship(1), 3, 0));
+    assert_eq!((c.ship, c.post, c.page, c.post_picked), (2, 0, 0, false));
+    assert!(navigate(&mut c, &Action::Ship(1), 3, 0), "the ship list wraps");
+    assert_eq!(c.ship, 0);
+    assert!(navigate(&mut c, &Action::Post(-1), 3, 4));
+    assert_eq!(c.post, 3, "the post list wraps backwards");
+    assert!(navigate(&mut c, &Action::Page(-5), 3, 4));
+    assert_eq!(c.page, 0, "a page never goes below the first");
+    assert!(navigate(&mut c, &Action::Tab, 3, 4));
+    assert!(c.arms && c.message.is_empty());
+    assert!(navigate(&mut c, &Action::SelectShip(9), 3, 4));
+    assert_eq!(c.ship, 2, "a picked ship is clamped to the fleet");
+    assert!(!navigate(&mut c, &Action::Sort, 3, 4), "other actions are not navigation");
+}

@@ -283,6 +283,23 @@ fn the_command_table_and_the_parser_agree() {
     }
 }
 
+/// The other direction of the check above: a word the parser answers to needs a row in `TABLE`, or `help` would not show it.
+#[test]
+fn every_word_the_parser_accepts_is_in_the_table() {
+    let src = include_str!("../console.rs");
+    let body = &src[src.find("match word.to_lowercase().as_str() {").expect("the parser's match")..];
+    let body = &body[..body.find("\nfn flag_word").expect("end of parse")];
+    let mut seen = 0;
+    for line in body.lines().filter(|l| l.starts_with("        \"")) {
+        let Some((pat, _)) = line.split_once("=>") else { continue };
+        for word in pat.split('|').filter_map(|w| w.trim().strip_prefix('"')?.split('"').next()).filter(|w| !w.is_empty()) {
+            seen += 1;
+            assert!(entry_named(word).is_some() || PLANNED.contains(&word), "`{word}` is parsed but has no row in console::TABLE, so `help` hides it");
+        }
+    }
+    assert!(seen > 40, "the scan found only {seen} command words: did the parser's layout change?");
+}
+
 /// The table's `about` text cites rule Types by name. Each must still exist in `RULE_TYPES` (a rename there fails here), and each
 /// must still be cited by the table (a rename here fails too), so the free text cannot drift from the vocabulary.
 #[test]
@@ -331,6 +348,7 @@ fn help_lists_commands_by_group_and_marks_the_cheats() {
     for e in TABLE {
         assert!(all.contains(e.usage), "{} is missing from help", e.name);
     }
+    assert!(all.contains("Keys:") && all.contains("PageUp") && all.contains("(also: do)"), "keys and aliases are listed");
     assert!(all.contains("*god") && all.contains(" flags"), "cheats carry a star, queries do not");
     let one = help_lines(Some("GOD"));
     assert!(one.iter().any(|l| l.contains("usage:") && l.contains("god [on|off]")) && one.iter().any(|l| l.contains("example: god on")));
@@ -457,4 +475,116 @@ fn the_scrollback_is_capped_and_the_view_stays_inside_it() {
     assert_eq!(c.scroll, LOG_LINES - SHOWN);
     c.say("more");
     assert!(c.scroll <= c.max_scroll());
+}
+
+// ------------------------------------------------------------------------------------------------------------------- `fps`
+
+#[test]
+fn fps_toggles_or_sets_the_counter_without_marking_cheats() {
+    assert_eq!(parse("fps", "Hero", false), Ok(Command::Fps(None)));
+    assert_eq!(parse("fps on", "Hero", false), Ok(Command::Fps(Some(true))));
+    assert_eq!(parse("fps off", "Hero", false), Ok(Command::Fps(Some(false))));
+    assert!(parse("fps maybe", "Hero", false).is_err());
+    assert!(parse("fps on off", "Hero", false).unwrap_err().starts_with("usage: fps"));
+    assert!(!parse("fps", "Hero", false).unwrap().cheats(), "a view command");
+    let mut sc = script();
+    let (out, o) = run(&mut sc, "fps on", &mut world(), None);
+    assert!(out.is_empty());
+    assert_eq!(o.view, vec![ViewChange::Fps(Some(true))], "the ECS side owns the saved setting");
+}
+
+#[test]
+fn fps_is_in_the_help_table_and_tab_offers_on_and_off() {
+    let e = entry_named("fps").expect("in the table");
+    assert!(!e.cheats && help_lines(None).iter().any(|l| l.contains("fps [on|off]")));
+    let c = completions("fps o", &Names::default());
+    let shown: Vec<&str> = c.items.iter().map(|i| i.0.as_str()).collect();
+    assert_eq!(shown, vec!["on", "off"]);
+}
+
+/// Every row of `KEYS` (the `help` text) names keys `Console::key_with` really acts on, and a new row must be added here.
+#[test]
+fn the_keys_help_lists_match_what_key_with_does() {
+    // Each effect is measured on a console that has lines, history and a completable word, so a dead key shows no change.
+    fn state(c: &Console) -> (String, usize, Option<Edit>) {
+        (c.line.clone(), c.scroll, None)
+    }
+    let fresh = || {
+        let mut c = console_with(100);
+        c.history = vec!["first".into(), "second".into()];
+        c.line = "rep".into();
+        c
+    };
+    // (the word `KEYS` uses, the key, Ctrl held, a console set up so that the key must change the line or the scroll)
+    let setup_scrolled = || {
+        let mut c = fresh();
+        c.scroll_by(10);
+        c
+    };
+    let cases: Vec<(&str, Key, bool, Console)> = vec![
+        ("Tab", Key::Tab, false, fresh()),
+        ("Up", Key::ArrowUp, false, fresh()),
+        ("Down", Key::ArrowDown, false, fresh()),
+        ("PageUp", Key::PageUp, false, fresh()),
+        ("PageDown", Key::PageDown, false, setup_scrolled()),
+        ("Ctrl+Home", Key::Home, true, fresh()),
+        ("Ctrl+End", Key::End, true, setup_scrolled()),
+    ];
+    let mut covered = std::collections::HashSet::new();
+    for (name, key, ctrl, mut c) in cases {
+        let before = state(&c);
+        c.key_with(&key, ctrl);
+        assert_ne!(state(&c), before, "{name} is listed in KEYS but key_with does nothing with it");
+        covered.insert(name);
+    }
+    let mut c = fresh();
+    assert_eq!(c.key_with(&Key::Escape, false), Edit::Close, "Escape closes");
+    covered.insert("Escape");
+    // Every key word in KEYS must be one of the cases above (the mouse wheel and the console key are handled in the system, not here).
+    for (keys, _) in KEYS {
+        for word in keys.split(['/', ',', ' ']).filter(|w| !w.is_empty()) {
+            let known = covered.contains(word) || ["or", "the", "console", "key", "mouse", "wheel"].contains(&word);
+            assert!(known, "KEYS lists '{word}' but this test does not exercise it: add a case");
+        }
+    }
+    for want in covered {
+        assert!(KEYS.iter().any(|(k, _)| k.contains(want)), "key_with handles {want} but KEYS does not list it");
+    }
+}
+
+#[test]
+fn without_a_mission_view_commands_run_and_rule_commands_say_so() {
+    let run = |line: &str| console_without_mission(line, &parse(line, "", false).unwrap());
+    let o = run("fps");
+    assert_eq!(o.view, vec![ViewChange::Fps(None)], "fps works in a skirmish");
+    assert!(!o.rejected);
+    assert_eq!(run("fps off").view, vec![ViewChange::Fps(Some(false))]);
+    assert!(run("help").lines.iter().any(|l| l.contains("fps")), "help lists the commands");
+    assert_eq!(run("hud off").view, vec![ViewChange::Hud(false)]);
+    assert_eq!(run("cam free").view, vec![ViewChange::FreeCam(true)]);
+    for line in ["god", "tp 1 2", "flags", "rules", "ships", "win", "restart", "show volumes", "cam follow Raiders", "act {\"Type\": \"NIS End\"}"] {
+        let o = run(line);
+        let word = line.split(' ').next().unwrap();
+        assert_eq!(o.lines, vec![format!("{word}: needs a mission (this battle has no mission rules)")], "{line}");
+        assert!(o.rejected && o.view.is_empty() && !o.restart, "{line} must not run");
+    }
+}
+
+#[test]
+fn the_panel_text_shows_the_window_hints_and_the_typed_line() {
+    let mut c = Console::new(true);
+    c.line = "go".into();
+    assert_eq!(c.display(), "\n> go_", "empty output: just the prompt");
+    for i in 0..SHOWN + 4 {
+        c.say(format!("l{i}"));
+    }
+    let text = c.display();
+    assert!(text.starts_with("^ 4 more above"), "{text}");
+    assert!(text.ends_with(&format!("l{}\n> go_", SHOWN + 3)) && !text.contains("more below"), "following the output shows the newest line");
+    c.scroll_by(2);
+    let text = c.display();
+    assert!(text.starts_with("^ 2 more above") && text.contains("v 2 more below") && !text.contains(&format!("l{}", SHOWN + 3)), "{text}");
+    c.scroll_top();
+    let text = c.display();
+    assert!(!text.contains("more above") && text.starts_with("l0\n") && text.contains("v 4 more below"), "{text}");
 }

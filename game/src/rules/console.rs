@@ -14,9 +14,11 @@ use super::schema::{self, Role};
 use super::*;
 
 mod complete;
+mod fps;
 mod list;
 mod more;
 pub use complete::{Completion, Names, completions, mean, nearest_name, tokens};
+pub use fps::FrameStats;
 pub use more::{CamMode, DevView, Env, Shape, ShapeKind, ShipInfo, ViewChange, free_cam, game_pos, hud_hidden, marks_path};
 
 /// Point set the `tp x y` command writes its destination to before running 'Teleport Group/Unit'.
@@ -98,6 +100,21 @@ impl Console {
     /// Moves the view back (`lines` > 0) or forward (< 0) through the output.
     pub fn scroll_by(&mut self, lines: isize) {
         self.scroll = self.scroll.saturating_add_signed(lines).min(self.max_scroll());
+    }
+    /// The panel's text: the visible window of the output with its "more above / below" hints, then the line being typed.
+    pub fn display(&self) -> String {
+        let end = self.log.len().saturating_sub(self.scroll);
+        let start = end.saturating_sub(SHOWN);
+        let mut shown = String::new();
+        if start > 0 {
+            shown.push_str(&format!("^ {start} more above (PageUp, Ctrl+Home)\n"));
+        }
+        shown.push_str(&self.log[start..end].join("\n"));
+        if self.scroll > 0 {
+            shown.push_str(&format!("\nv {} more below (PageDown, Ctrl+End)", self.scroll));
+        }
+        shown.push_str(&format!("\n> {}_", self.line));
+        shown
     }
     pub fn scroll_top(&mut self) {
         self.scroll = self.max_scroll();
@@ -262,6 +279,8 @@ pub enum Command {
     Hide(Option<ShapeKind>, Option<String>),
     Cam(CamMode),
     Hud(bool),
+    /// `fps [on|off]`: show or hide the frame-rate counter (no argument toggles).
+    Fps(Option<bool>),
     /// The rule schema's entry for an action or condition Type (or the Types whose name contains the text): its fields.
     Schema(String),
 }
@@ -406,6 +425,14 @@ pub static TABLE: &[Entry] = &[
     entry("hide", Group::Authoring, "hide volumes|paths|points|all [name]", "stop drawing them", "hide all", false),
     entry("cam", Group::Camera, "cam free | player | follow <group>", "a free-flying camera, the orbit camera on the player, or on a group", "cam follow Raiders", false),
     entry("hud", Group::Camera, "hud on|off", "hide or show the HUD, for clean screenshots", "hud off", false),
+    entry(
+        "fps",
+        Group::Camera,
+        "fps [on|off]",
+        "show or hide a frame-rate counter (smoothed rate, frame time, worst frame of the last second); no argument toggles; remembered between runs",
+        "fps on",
+        false,
+    ),
     entry("say", Group::Camera, "say <speech event>", "Play speech event: a line from the mission's media, without reaching its rule (it counts as played)", "say Opening", true),
     entry("music", Group::Camera, "music <track>", "Play Music Track: a music file, without reaching its rule", "music Battle", false),
     Entry {
@@ -430,6 +457,19 @@ pub static TABLE: &[Entry] = &[
     entry("schema", Group::Raw, "schema <text>", "the fields of an action or condition Type (the rule schema)", "schema Teleport", false),
     Entry { alias: &["?"], ..entry("help", Group::Console, "help [command]", "this list, or a command's usage and an example", "help god", false) },
 ];
+
+/// The keys of the open console, listed by `help` (kept next to `Console::key_with` and the wheel in `systems/dev_console.rs`).
+pub static KEYS: &[(&str, &str)] = &[
+    ("Tab", "complete the last word; repeat Tab to cycle, several matches are listed"),
+    ("Up / Down", "earlier / later lines of this session"),
+    ("PageUp / PageDown, mouse wheel", "scroll the output"),
+    ("Ctrl+Home / Ctrl+End", "jump to the top / bottom of the output"),
+    ("Escape or the console key", "close the console (the battle is paused while it is open)"),
+];
+
+/// Commands the parser answers with a refusal, not an action: they have no table row on purpose.
+#[cfg(test)]
+const PLANNED: &[&str] = &["spawn"];
 
 fn entry_named(word: &str) -> Option<&'static Entry> {
     TABLE.iter().find(|e| e.name == word || e.alias.contains(&word))
@@ -471,8 +511,13 @@ pub fn help_lines(topic: Option<&str>) -> Vec<String> {
     let mut lines = vec![];
     for group in [Group::Cheats, Group::State, Group::Flow, Group::Ships, Group::Authoring, Group::Camera, Group::Raw, Group::Console] {
         lines.push(format!("{}:", group.title()));
-        lines.extend(TABLE.iter().filter(|e| e.group == group).map(|e| format!("  {}{:<42}{}", if e.cheats { "*" } else { " " }, e.usage, e.about)));
+        lines.extend(TABLE.iter().filter(|e| e.group == group).map(|e| {
+            let alias = if e.alias.is_empty() { String::new() } else { format!(" (also: {})", e.alias.join(", ")) };
+            format!("  {}{:<42}{}{alias}", if e.cheats { "*" } else { " " }, e.usage, e.about)
+        }));
     }
+    lines.push("Keys:".into());
+    lines.extend(KEYS.iter().map(|(key, what)| format!("   {key:<42}{what}")));
     lines.push("* marks the session as cheated (campaign points are not recorded). `help <command>` shows an example; Tab completes a command.".into());
     lines
 }
@@ -597,6 +642,11 @@ pub fn parse(line: &str, player: &str, god: bool) -> Result<Command, String> {
             [v] => Command::Hud(flag_word(v)?),
             _ => return Err("usage: hud on|off".into()),
         },
+        "fps" => match args.as_slice() {
+            [] => Command::Fps(None),
+            [v] => Command::Fps(Some(flag_word(v)?)),
+            _ => return Err("usage: fps [on|off]".into()),
+        },
         "say" if !rest.is_empty() => act(json!({"Type": "Play speech event", "Speech Event Name": unquote(rest)})),
         "say" => return Err("usage: say <speech event>".into()),
         "music" if !rest.is_empty() => Command::Soft(vec![
@@ -716,6 +766,35 @@ pub struct Outcome {
     pub restart: bool,
     /// Changes to the developer view (`DevView`).
     pub view: Vec<ViewChange>,
+}
+
+/// Runs a command in a battle with no mission rules (a skirmish): the commands that only change the view or print console help work, every
+/// other answers one line saying it needs a mission. Nothing here changes the game, so it never marks the session as cheated.
+pub fn console_without_mission(line: &str, cmd: &Command) -> Outcome {
+    let mut o = Outcome::default();
+    match cmd {
+        Command::Nothing => {}
+        Command::Help(topic) => o.lines = help_lines(topic.as_deref()),
+        Command::Fps(on) => o.view.push(ViewChange::Fps(*on)),
+        Command::Hud(on) => {
+            o.view.push(ViewChange::Hud(*on));
+            o.lines.push(format!("HUD {}", if *on { "on" } else { "off" }));
+        }
+        Command::Cam(CamMode::Free) => {
+            o.view.push(ViewChange::FreeCam(true));
+            o.lines.push("free camera: arrows move, PageUp / PageDown rise and sink, right mouse drag looks, Shift is faster; `cam player` returns".into());
+        }
+        Command::Cam(CamMode::Player) => {
+            o.view.push(ViewChange::FreeCam(false));
+            o.lines.push("orbit camera back".into());
+        }
+        _ => {
+            let word = line.split_whitespace().next().unwrap_or_default().to_lowercase();
+            o.lines.push(format!("{word}: needs a mission (this battle has no mission rules)"));
+            o.rejected = true;
+        }
+    }
+    o
 }
 
 impl Script {
@@ -845,6 +924,7 @@ impl Script {
             | Command::Show(..)
             | Command::Hide(..)
             | Command::Cam(_)
+            | Command::Fps(_)
             | Command::Hud(_) => self.run_more(cmd, w, env, out, &mut o),
             Command::Counters => {
                 o.lines = self.counter_lines();

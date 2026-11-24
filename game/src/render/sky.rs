@@ -140,15 +140,56 @@ fn game_vec(v: &Value) -> Option<Vec3> {
     rgb(v).map(|d| Vec3::new(d.x, d.z, -d.y))
 }
 
+// What a profile's sky keys fall back to when it leaves them out. All PROVISIONAL.
+/// A near layer's distance from the camera.
+const LAYER_DISTANCE: f32 = 4000.0;
+/// A near layer's opacity.
+const LAYER_OPACITY: f32 = 0.5;
+/// Where a picture layer cuts its picture's brightness off, and how softly.
+const LAYER_THRESHOLD: f32 = 0.3;
+const LAYER_SOFTNESS: f32 = 0.35;
+/// The same for a cloud layer, which has no cut-off.
+const CLOUD_THRESHOLD: f32 = 0.0;
+const CLOUD_SOFTNESS: f32 = 0.0;
+/// How many times the picture repeats over a near layer.
+const LAYER_SCALE: f32 = 2.5;
+/// Star brightness, twinkle depth, twinkle speed and gain.
+const STARS_BRIGHTNESS: f32 = 1.0;
+const STARS_TWINKLE: f32 = 0.4;
+const STARS_SPEED: f32 = 2.5;
+const STARS_GAIN: f32 = 16.0;
+/// The base picture's brightness, drift rate, drift cycle (seconds), breathing depth and breathing period (seconds).
+const BASE_BRIGHTNESS: f32 = 1.0;
+const BASE_FLOW: f32 = 0.02;
+const BASE_CYCLE: f32 = 30.0;
+const BASE_BREATH: f32 = 0.05;
+const BASE_PERIOD: f32 = 30.0;
+/// The sky's flash on a hit: colour (linear rgb, pale blue), strength, length (seconds) and reach (game units).
+const FLASH_COLOR: Vec3 = Vec3::new(0.65, 0.78, 1.0);
+const FLASH_STRENGTH: f32 = 1.5;
+const FLASH_SECONDS: f32 = 0.4;
+const FLASH_REACH: f32 = 1200.0;
+/// A sky event's colour (linear rgb, warm orange), strength and length (seconds).
+const EVENT_COLOR: Vec3 = Vec3::new(1.0, 0.6, 0.3);
+const EVENT_STRENGTH: f32 = 1.0;
+const EVENT_SECONDS: f32 = 1.0;
+/// A shooting star every this many seconds, and how bright it is.
+const SHOOTING_EVERY: f32 = 180.0;
+const SHOOTING_BRIGHTNESS: f32 = 6.0;
+/// Sheet lightning every this many seconds, its strength and colour (linear rgb).
+const SHEET_EVERY: f32 = 40.0;
+const SHEET_STRENGTH: f32 = 1.5;
+const SHEET_COLOR: Vec3 = Vec3::new(0.7, 0.8, 1.0);
+
 fn layer(near: &Value) -> NearLayer {
     let clouds = near["source"].as_str().is_some_and(|s| s.eq_ignore_ascii_case("clouds"));
     NearLayer {
-        distance: num(&near["distance"], 4000.0).max(1.0),
-        opacity: num(&near["opacity"], 0.5).clamp(0.0, 1.0),
-        threshold: num(&near["threshold"], if clouds { 0.0 } else { 0.3 }).clamp(0.0, 1.0),
-        softness: if clouds { num(&near["softness"], 0.0).max(0.0) } else { num(&near["softness"], 0.35).max(0.01) },
+        distance: num(&near["distance"], LAYER_DISTANCE).max(1.0),
+        opacity: num(&near["opacity"], LAYER_OPACITY).clamp(0.0, 1.0),
+        threshold: num(&near["threshold"], if clouds { CLOUD_THRESHOLD } else { LAYER_THRESHOLD }).clamp(0.0, 1.0),
+        softness: if clouds { num(&near["softness"], CLOUD_SOFTNESS).max(0.0) } else { num(&near["softness"], LAYER_SOFTNESS).max(0.01) },
         drift: game_vec(&near["drift"]).unwrap_or(Vec3::ZERO),
-        scale: num(&near["scale"], 2.5).max(0.0),
+        scale: num(&near["scale"], LAYER_SCALE).max(0.0),
         tint: rgb(&near["tint"]).unwrap_or(Vec3::ONE).max(Vec3::ZERO),
         clouds,
         haze: num(&near["haze"], 0.0).clamp(0.0, 1.0),
@@ -190,28 +231,28 @@ pub fn parse(v: &Value) -> Option<SkyDome> {
         stars: v["stars"].is_object().then(|| {
             let t = &v["stars"];
             Stars {
-                brightness: num(&t["brightness"], 1.0).max(0.0),
-                twinkle: num(&t["twinkle"], 0.4).clamp(0.0, 1.0),
-                speed: num(&t["speed"], 2.5).max(0.0),
-                gain: num(&t["gain"], 16.0).max(0.0),
+                brightness: num(&t["brightness"], STARS_BRIGHTNESS).max(0.0),
+                twinkle: num(&t["twinkle"], STARS_TWINKLE).clamp(0.0, 1.0),
+                speed: num(&t["speed"], STARS_SPEED).max(0.0),
+                gain: num(&t["gain"], STARS_GAIN).max(0.0),
             }
         }),
         base: v["base"].is_object().then(|| {
             let b = &v["base"];
             Base {
-                brightness: num(&b["brightness"], 1.0).max(0.0),
-                flow: num(&b["flow"], 0.02).clamp(0.0, 0.2),
-                cycle: num(&b["cycle"], 30.0).max(1.0),
-                breath: num(&b["breath"], 0.05).clamp(0.0, 1.0),
-                period: num(&b["period"], 30.0).max(1.0),
+                brightness: num(&b["brightness"], BASE_BRIGHTNESS).max(0.0),
+                flow: num(&b["flow"], BASE_FLOW).clamp(0.0, 0.2),
+                cycle: num(&b["cycle"], BASE_CYCLE).max(1.0),
+                breath: num(&b["breath"], BASE_BREATH).clamp(0.0, 1.0),
+                period: num(&b["period"], BASE_PERIOD).max(1.0),
                 tint: rgb(&b["tint"]).unwrap_or(Vec3::ONE).max(Vec3::ZERO),
             }
         }),
         flash: Flash {
-            color: rgb(&v["flash"]["color"]).unwrap_or(Vec3::new(0.65, 0.78, 1.0)).max(Vec3::ZERO),
-            strength: num(&v["flash"]["strength"], 1.5).max(0.0),
-            seconds: num(&v["flash"]["seconds"], 0.4).max(0.05),
-            reach: num(&v["flash"]["reach"], 1200.0).max(0.0),
+            color: rgb(&v["flash"]["color"]).unwrap_or(FLASH_COLOR).max(Vec3::ZERO),
+            strength: num(&v["flash"]["strength"], FLASH_STRENGTH).max(0.0),
+            seconds: num(&v["flash"]["seconds"], FLASH_SECONDS).max(0.05),
+            reach: num(&v["flash"]["reach"], FLASH_REACH).max(0.0),
         },
         events: v["events"]
             .as_array()
@@ -220,20 +261,20 @@ pub fn parse(v: &Value) -> Option<SkyDome> {
                     .filter_map(|e| {
                         Some(SkyEvent {
                             effect: e["match"].as_str()?.to_string(),
-                            color: rgb(&e["color"]).unwrap_or(Vec3::new(1.0, 0.6, 0.3)).max(Vec3::ZERO),
-                            strength: num(&e["strength"], 1.0).max(0.0),
-                            seconds: num(&e["seconds"], 1.0).max(0.05),
+                            color: rgb(&e["color"]).unwrap_or(EVENT_COLOR).max(Vec3::ZERO),
+                            strength: num(&e["strength"], EVENT_STRENGTH).max(0.0),
+                            seconds: num(&e["seconds"], EVENT_SECONDS).max(0.05),
                         })
                     })
                     .collect()
             })
             .unwrap_or_default(),
-        shooting_every: if v["shooting_star"].is_object() { num(&v["shooting_star"]["every"], 180.0).max(10.0) } else { 0.0 },
-        shooting_brightness: num(&v["shooting_star"]["brightness"], 6.0).max(0.0),
+        shooting_every: if v["shooting_star"].is_object() { num(&v["shooting_star"]["every"], SHOOTING_EVERY).max(10.0) } else { 0.0 },
+        shooting_brightness: num(&v["shooting_star"]["brightness"], SHOOTING_BRIGHTNESS).max(0.0),
         sheet: v["sheet_lightning"].is_object().then(|| Sheet {
-            every: num(&v["sheet_lightning"]["every"], 40.0).max(5.0),
-            strength: num(&v["sheet_lightning"]["strength"], 1.5).max(0.0),
-            color: rgb(&v["sheet_lightning"]["color"]).unwrap_or(Vec3::new(0.7, 0.8, 1.0)).max(Vec3::ZERO),
+            every: num(&v["sheet_lightning"]["every"], SHEET_EVERY).max(5.0),
+            strength: num(&v["sheet_lightning"]["strength"], SHEET_STRENGTH).max(0.0),
+            color: rgb(&v["sheet_lightning"]["color"]).unwrap_or(SHEET_COLOR).max(Vec3::ZERO),
         }),
         raw: Value::Object(raw),
         skies,

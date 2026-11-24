@@ -29,7 +29,7 @@ pub(super) fn smoke(world: &mut World, mut stage: Local<(u32, u32)>, mut score: 
                 pick(world, "Longboat");
             }
             info!("{script}: PASS");
-            std::process::exit(0);
+            crate::exit::request(world, 0);
         }
         return;
     }
@@ -50,7 +50,7 @@ pub(super) fn smoke(world: &mut World, mut stage: Local<(u32, u32)>, mut score: 
             if found.len() as u32 >= n {
                 assert!(found.len() as u32 == n && found.iter().all(|f| f.0 == owner && f.1 == class), "{script}: wrong boats {found:?}");
                 info!("{script}: PASS");
-                std::process::exit(0);
+                crate::exit::request(world, 0);
             }
         }
         return;
@@ -121,7 +121,7 @@ pub(super) fn smoke(world: &mut World, mut stage: Local<(u32, u32)>, mut score: 
                 if wait(&mut stage, ended.is_some(), "the fallback exit") {
                     assert_eq!(world.resource::<Mission>().script.lifeboat_owners().len(), 2, "uncollected boats stay until the level changes");
                     info!("{script}: PASS (fallback exit)");
-                    std::process::exit(0);
+                    crate::exit::request(world, 0);
                 }
                 return;
             }
@@ -173,7 +173,7 @@ pub(super) fn smoke(world: &mut World, mut stage: Local<(u32, u32)>, mut score: 
                     assert_eq!((sc.task_complete("PickUpLifeboats"), sc.task_active("PickUpLifeboats")), (!ladyj, false));
                 }
                 info!("{script}: PASS");
-                std::process::exit(0);
+                crate::exit::request(world, 0);
             }
         }
         _ => {}

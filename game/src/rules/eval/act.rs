@@ -262,7 +262,7 @@ impl Script {
             T::SetGroupUnitWarningShotMode => out.push(Fx::WarningShots(g("GroupUnit Name"), b(a, "Boolean"))),
             T::TUTORIALPauseWhenStarmapOpens => self.starmap_pause = b(a, "Pause when starmap opens"),
             T::StateInitSetupEtheriumCurrent => match self.paths[s(a, "Etherium Path")].as_array() {
-                Some(p) => out.push(Fx::Current(p.iter().map(game_to_bevy).collect())),
+                Some(p) => out.push(Fx::Current(s(a, "Etherium Path").into(), p.iter().map(game_to_bevy).collect())),
                 // Mission 10's 'bend' current names a path the TWT does not have (retail data); it has no effect there either.
                 None => debug!("etherium current without path '{}'", s(a, "Etherium Path")),
             },
@@ -297,7 +297,7 @@ impl Script {
                     self.shots.remove(&e);
                 }
             }
-            t if t.is_engine() => self.ext_act(t, a, rule),
+            t if t.is_engine() => self.ext_act(t, a, w, out, rule),
             other => self.warn(&format!("action '{}' in rule '{rule}'", other.name())),
         }
     }

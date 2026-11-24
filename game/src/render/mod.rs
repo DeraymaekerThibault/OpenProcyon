@@ -234,50 +234,33 @@ impl Look {
 impl Look {
     /// The profile without the blocks whose shader the overlay (`root`) lacks.
     fn with_shaders(mut self, root: &std::path::Path) -> Look {
-        if self.sails.is_some() && !has_shader(root, "sails", sails::SHADER) {
-            self.sails = None;
+        /// One row per block: the profile field, the name a warning uses and the shaders the block needs (all of them).
+        macro_rules! gate {
+            ($($field:ident, $block:literal, [$($shader:expr),+];)+) => {$(
+                keep(&mut self.$field, root, $block, &[$($shader),+]);
+            )+};
         }
-        if self.deckhands.is_some() && !has_shader(root, "deckhands", deckhands::SHADER) {
-            self.deckhands = None;
+        gate! {
+            sails, "sails", [sails::SHADER];
+            deckhands, "deckhands", [deckhands::SHADER];
+            engines, "engines", [trails::PLUME_SHADER];
+            wakes, "wakes", [trails::WAKE_SHADER];
+            tracers, "tracers", [tracers::SHADER];
+            beams, "beams", [beams::SHADER];
+            surfaces, "surfaces", [surfaces::SHADER];
+            bursts, "bursts", [bursts::SHADER, bursts::SMOKE_SHADER];
+            sky, "sky", [sky::SHADER];
+            black_holes, "black_holes", [holes::SHADER];
+            currents, "currents", [currents::SHADER];
+            nebulae, "nebulae", [nebulae::SHADER];
+            bolts, "nebulae.bolt", [bolts::SHADER];
         }
-        if self.engines.is_some() && !has_shader(root, "engines", trails::PLUME_SHADER) {
-            self.engines = None;
-        }
-        if self.wakes.is_some() && !has_shader(root, "wakes", trails::WAKE_SHADER) {
-            self.wakes = None;
-        }
-        if self.tracers.is_some() && !has_shader(root, "tracers", tracers::SHADER) {
-            self.tracers = None;
-        }
-        if self.beams.is_some() && !has_shader(root, "beams", beams::SHADER) {
-            self.beams = None;
-        }
-        if self.surfaces.is_some() && !has_shader(root, "surfaces", surfaces::SHADER) {
-            self.surfaces = None;
-        }
-        if self.bursts.is_some() && !(has_shader(root, "bursts", bursts::SHADER) & has_shader(root, "bursts", bursts::SMOKE_SHADER)) {
-            self.bursts = None;
-        }
-        if self.sky.is_some() && !has_shader(root, "sky", sky::SHADER) {
-            self.sky = None;
-        }
-        if self.black_holes.is_some() && !has_shader(root, "black_holes", holes::SHADER) {
-            self.black_holes = None;
-        }
+        // optional parts of a block that stay on the base look without their shader
         if let Some(b) = self.black_holes.as_mut()
             && b.replace
             && !has_shader(root, "black_holes", holes::RIBBON_SHADER)
         {
             b.replace = false;
-        }
-        if self.currents.is_some() && !has_shader(root, "currents", currents::SHADER) {
-            self.currents = None;
-        }
-        if self.nebulae.is_some() && !has_shader(root, "nebulae", nebulae::SHADER) {
-            self.nebulae = None;
-        }
-        if self.bolts.is_some() && !has_shader(root, "nebulae.bolt", bolts::SHADER) {
-            self.bolts = None;
         }
         if let Some(n) = self.nebulae.as_mut()
             && n.rules.iter().any(|r| r.replace)
@@ -290,6 +273,16 @@ impl Look {
     }
 }
 
+/// Turns a present block off unless the overlay has every shader it needs (each missing one is warned about).
+fn keep<T>(block: &mut Option<T>, root: &std::path::Path, name: &str, shaders: &[&str]) {
+    if block.is_some() {
+        let found: Vec<bool> = shaders.iter().map(|s| has_shader(root, name, s)).collect();
+        if !found.iter().all(|&f| f) {
+            *block = None;
+        }
+    }
+}
+
 /// Whether the overlay has a block's shader; without it the block stays off (a warning names the file the mod should ship).
 fn has_shader(root: &std::path::Path, block: &str, shader: &str) -> bool {
     let found = root.join(shader).is_file();
@@ -299,11 +292,19 @@ fn has_shader(root: &std::path::Path, block: &str, shader: &str) -> bool {
     found
 }
 
+/// The render profile with the mods' sky and nebula accents added. A file that is present but invalid is reported (file, mod,
+/// line and column) and left out: without a profile the classic look stays on, and the error says why.
+fn profile_json(root: &std::path::Path, base: &std::path::Path) -> Option<serde_json::Value> {
+    let read = |rel: &str, instead: &str| crate::data::load_or_base::<serde_json::Value>(&root.join(rel), Some(&base.join(rel)), instead);
+    let mut v = read(PROFILE, "the render profile is off (classic look)")?;
+    add_mod_skies(&mut v, read(SKIES, "its sky accents are left out"));
+    add_mod_nebulae(&mut v, read(NEBULAE, "its nebula looks are left out"));
+    Some(v)
+}
+
 pub fn plugin(app: &mut App) {
     let root = crate::assets_dir();
-    let Some(mut v) = crate::data::try_json(&root.join(PROFILE)) else { return };
-    add_mod_skies(&mut v, crate::data::try_json(&root.join(SKIES)));
-    add_mod_nebulae(&mut v, crate::data::try_json(&root.join(NEBULAE)));
+    let Some(v) = profile_json(root, &crate::base_assets()) else { return };
     let look = Look::parse(&v).with_shaders(root);
     frame::plugin(app);
     lights::plugin(app);
@@ -481,6 +482,24 @@ fn sky_light(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_bad_profile_or_accent_file_is_reported_and_left_out_without_panicking() {
+        let dir = std::env::temp_dir().join(format!("procyon-profile-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let (root, base) = (dir.join("root"), dir.join("base"));
+        std::fs::create_dir_all(root.join("data/render")).unwrap();
+        std::fs::create_dir_all(&base).unwrap();
+        assert!(profile_json(&root, &base).is_none(), "no profile: the classic look, quietly");
+        std::fs::write(root.join(PROFILE), "[1, 2,").unwrap();
+        assert!(profile_json(&root, &base).is_none(), "a syntax error turns the profile off (with an error line), not the game");
+        std::fs::write(root.join(PROFILE), r#"{"sky": {"near": {}}}"#).unwrap();
+        std::fs::write(root.join(SKIES), "[oops").unwrap();
+        std::fs::write(root.join(NEBULAE), "nope").unwrap();
+        let v = profile_json(&root, &base).expect("the profile stands without its bad accent files");
+        assert!(v["sky"].get("skies").is_none());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 
     #[test]
     fn mods_add_accents_for_their_own_skies() {

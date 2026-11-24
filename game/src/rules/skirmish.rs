@@ -100,6 +100,9 @@ fn run(
             primary: s.primary,
             flag: s.mission.flag.clone(),
             attack: s.mission.attack.clone(),
+            heading: s.ship.heading,
+            speed: Some(s.ship.speed.abs()),
+            cloaked: s.cloak.is_some_and(|c| c.state == crate::cloak::State::Full),
             ..Unit::new(s.entity, s.mission.id, super::systems::sim_pos(s.transform, s.interp))
         })
         .collect();

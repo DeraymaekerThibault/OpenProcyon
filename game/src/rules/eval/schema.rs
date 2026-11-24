@@ -12,6 +12,8 @@
 
 use serde_json::{Value, json};
 
+use super::Station;
+
 /// What a field's value refers to. The checker resolves each kind against the mission's own definitions.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Kind {
@@ -33,6 +35,9 @@ pub enum Kind {
     Flag,
     /// A counter (engine-added): written by 'OP Set Counter' / 'OP Add To Counter', read by 'OP Counter Condition'.
     Counter,
+    /// A campaign counter (engine-added): kept for the next mission of the same mod campaign, so one set by an earlier mission is not an
+    /// error. Written by 'OP Set Campaign Counter' / 'OP Add To Campaign Counter', read by 'OP Campaign Counter Condition'.
+    CampaignCounter,
     /// The name of a rule of the mission (engine-added: 'OP Set Rule Active').
     Rule,
     /// A list of condition objects (engine-added: 'OP Any Of'); each is checked like a top-level condition.
@@ -73,6 +78,7 @@ impl Kind {
             Kind::Timer => "timer",
             Kind::Flag => "flag",
             Kind::Counter => "counter",
+            Kind::CampaignCounter => "campaign_counter",
             Kind::Rule => "rule",
             Kind::ConditionList => "condition_list",
             Kind::Condition => "condition",
@@ -221,6 +227,10 @@ rule_types! {
     OPAnyOf = Condition "OP Any Of",
     OPNot = Condition "OP Not",
     OPCounterCondition = Condition "OP Counter Condition",
+    OPCampaignCounterCondition = Condition "OP Campaign Counter Condition",
+    OPGroupIsCloaked = Condition "OP Group Is Cloaked",
+    OPGroupSpeed = Condition "OP Group Speed",
+    OPTaskState = Condition "OP Task State",
     StartTimer = Action "Start Timer",
     StopTimer = Action "Stop Timer",
     SetFlagAction = Action "Set Flag Action",
@@ -326,6 +336,15 @@ rule_types! {
     OPSetCounter = Action "OP Set Counter",
     OPAddToCounter = Action "OP Add To Counter",
     OPSetRuleActive = Action "OP Set Rule Active",
+    OPSetCampaignCounter = Action "OP Set Campaign Counter",
+    OPAddToCampaignCounter = Action "OP Add To Campaign Counter",
+    OPBoardShip = Action "OP Board Ship",
+    OPAbandonShip = Action "OP Abandon Ship",
+    OPTeleport = Action "OP Teleport",
+    OPEtheriumCurrent = Action "OP Etherium Current",
+    OPFade = Action "OP Fade",
+    OPPlaceMines = Action "OP Place Mines",
+    OPFollowGroup = Action "OP Follow Group",
     StateInitSetupNebula = Action "*State Init* Setup Nebula",
 }
 
@@ -457,6 +476,9 @@ const fn flag(n: &'static str) -> Field {
 const fn counter(n: &'static str) -> Field {
     Field::new(n, Kind::Counter, "")
 }
+const fn campaign_counter(n: &'static str) -> Field {
+    Field::new(n, Kind::CampaignCounter, "")
+}
 const fn rule_name(n: &'static str) -> Field {
     Field::new(n, Kind::Rule, "")
 }
@@ -502,6 +524,7 @@ const fn text(n: &'static str) -> Field {
 }
 
 const COMPARE: &[&str] = &Equivalence::NAMES;
+const STATION: &[&str] = &Station::NAMES;
 const FOLLOW: &[&str] = &["to end", "loop", "teleport loop", "end to end"];
 const STANCE: &[&str] = &["Stance_Dummy", "Stance_Neutral", "Stance_Defensive", "Stance_Aggressive", "Stance Persistant", "Stance Persistent", "AI STANCE"];
 const FORMATION: &[&str] = &["None", "Custom", "LineAbreast", "EchelonRight", "EchelonLeft", "Column", "Diamond", "Convoy"];
@@ -576,6 +599,10 @@ pub static RULE_TYPES: &[TypeDef] = &[
     cond(T::OPAnyOf, &[conditions("Conditions")]).engine(),
     cond(T::OPNot, &[condition("Condition")]).engine(),
     cond(T::OPCounterCondition, &[counter("Counter Name"), choice("Equivalence", COMPARE), num("Value")]).engine(),
+    cond(T::OPCampaignCounterCondition, &[campaign_counter("Counter Name"), choice("Equivalence", COMPARE), num("Value")]).engine(),
+    cond(T::OPGroupIsCloaked, &[grp("Group Name"), boolean("Boolean").dflt("TRUE").opt()]).engine(),
+    cond(T::OPGroupSpeed, &[grp("Group Name"), choice("Which", &["Fastest", "Slowest"]), choice("Equivalence", COMPARE), num("Speed")]).engine(),
+    cond(T::OPTaskState, &[task("Objective Task"), choice("State", &["Active", "Complete", "Failed"])]).engine(),
     // ---- Actions ----------------------------------------------------------------------------------------------------
     act(T::StartTimer, &[timer("Timer Name")]),
     act(T::StopTimer, &[timer("Timer Name")]),
@@ -724,6 +751,21 @@ pub static RULE_TYPES: &[TypeDef] = &[
     act(T::OPSetCounter, &[counter("Counter Name"), num("Value")]).engine(),
     act(T::OPAddToCounter, &[counter("Counter Name"), num("Value")]).engine(),
     act(T::OPSetRuleActive, &[rule_name("Rule Name"), boolean("Boolean")]).engine(),
+    act(T::OPSetCampaignCounter, &[campaign_counter("Counter Name"), num("Value")]).engine(),
+    act(T::OPAddToCampaignCounter, &[campaign_counter("Counter Name"), num("Value")]).engine(),
+    // Orders that act on ships: applied by the module that owns the behaviour (boarding.rs, lifeboats.rs, ...), see docs/modding.md.
+    act(T::OPBoardShip, &[grp("Group Name"), grp("Target Group")]).engine(),
+    act(T::OPAbandonShip, &[grp("Group Name")]).engine(),
+    // `Heading` is a compass bearing in degrees in game axes (0 up the map along +y, 90 toward +x); absent, ships keep their headings.
+    act(T::OPTeleport, &[grp("Group/Unit Name"), pset("Point Set Name"), num("Point Index").opt(), num("Heading").opt().dflt("")]).engine(),
+    act(
+        T::OPEtheriumCurrent,
+        &[path("Etherium Path"), num("Strength").opt().dflt("").range(0.0, 1000.0), num("Width").opt().dflt("").range(0.0, 100000.0), boolean("Boolean").opt().dflt("")],
+    )
+    .engine(),
+    act(T::OPFade, &[num("Seconds").range(0.0, 600.0)]).engine().campaign(),
+    act(T::OPPlaceMines, &[pset("Point Set Name"), text("Bullet").opt().dflt("Bullet_StarMine_Med"), plr("Player/Owner").opt()]).engine(),
+    act(T::OPFollowGroup, &[grp("Group Name"), grp("Target Group"), choice("Station", STATION), num("Distance").range(0.0, 100000.0)]).engine(),
     act(
         T::StateInitSetupNebula,
         &[
@@ -791,6 +833,7 @@ pub fn to_json() -> Value {
         Kind::Timer,
         Kind::Flag,
         Kind::Counter,
+        Kind::CampaignCounter,
         Kind::Rule,
         Kind::ConditionList,
         Kind::Condition,

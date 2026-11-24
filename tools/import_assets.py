@@ -27,21 +27,14 @@ from pathlib import Path
 from tools import importlog
 from tools.gamefs import ci_files
 from tools.jsonio import dump
+from tools.skirmish_ships import SKIRMISH_SHIPS
 
 REPO = Path(__file__).resolve().parents[1]
 # The release download runs this module frozen by PyInstaller (no checkout, no Python install).
 FROZEN = getattr(sys, "frozen", False)
 # Every Ship_*.wot is exported; the curated retail skirmish ships come first (first = default player ship). Hulls that are not combat
 # ships (wrecks, debris) fail the exporter and are skipped.
-FIRST = [
-    "Ship_Navy_Cutter",
-    "Ship_Navy_Frigate",
-    "Ship_Navy_FastFrigate",
-    "Ship_Pirate_Schooner",
-    "Ship_Pirate_Sloop",
-    "Ship_Pirate_Gunboat",
-    "Ship_Pirate_Barque",
-]
+FIRST = SKIRMISH_SHIPS
 SCENERY = ["Island01", "Island02", "IslandSmall01", "IslandMed01", "Islandrocky1"]
 # Music: one skirmish track (Red Rover's script plays BTL_NavyBig_Full02); the other maps use other tracks.
 MUSIC = ["BTL_NavyBig_Full02.ogg", "FrontEndMusic.ogg"]

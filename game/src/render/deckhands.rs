@@ -2,20 +2,30 @@
 //! wander the decks, go aloft when the sails fold or open, fall as the hull is shot to pieces and cheer a victory. Presentation only:
 //! they read the battle (gun reloads, orders, hull, outcome), never change it, and use their own random numbers.
 //!
-//! - The figure and its moves come from the mod: `data/render/deckhand.json` and `.bin` (built by the expansion's
-//!   `tools/build_deckhand.py`): one mesh whose vertices are posed on the GPU from a vertex animation texture (`deckhand_vat.wesl`;
-//!   the engine's vertex stages `deckhand_vertex.wesl` and `deckhand_prepass.wesl`, the mod's `shaders/deckhands.wesl` shades). Every
-//!   figure shares one mesh and one material, so a whole battle's crews are one batch; what each plays is its `MeshTag`.
+//! - The figures and their moves come from the mod: `data/render/deckhand.json` (bake format version 2), `deckhand.bin` (a bone-transform
+//!   texture: a quaternion and a translation per bone per frame) and `deckhand_mesh.bin` (each figure's rest-pose mesh, one per level of
+//!   detail, with bone index and colour slot per vertex), built by the expansion's `tools/build_deckhand.py`. The GPU poses every vertex from
+//!   its bone's transform (`deckhand_vat.wesl`; the engine's vertex stages `deckhand_vertex.wesl` and `deckhand_prepass.wesl`, the mod's
+//!   `shaders/deckhands.wesl` shades). One material serves every figure and there is one mesh per figure and level of detail, so a whole
+//!   battle's crews are a handful of batches; what each figure plays and wears is its `MeshTag` (clip, outfit, phase, start). Clips are found by
+//!   name (`idle`, `walk`, `run`, `haul`, `load`, `climb`, `cheer`, `fall` are required; `talk` and `carry` fall back to `idle` and `walk`).
+//!   An outfit names its `figure` (the first when it does not), so a race's crew is a mix of figures through its outfits. Far figures swap to
+//!   the figure's second mesh (a box per bone) by camera distance, checked a few times a second and staggered over the frames.
 //! - Where they go comes from the ship's model: empty nodes named `Crew_<Kind>_...` (`Walk` lanes, `Gun` places by a deck mount,
 //!   `Post`s, `Climb` pairs `_a` at the foot of a shroud and `_b` up it). A ship without them gets no crew. How many wander grows
-//!   with the deck (`headcount`: 1-2 on a fishing boat, 40 on a Man-o'-War, 60 on a first rate) unless a `Crew_Count_<n>` node sets the total.
-//! - Figures are children of the ship, so they ride its motion; they cast no shadows and vanish beyond `range`.
-//! - Map scenery (a town, a pier) gets townsfolk the same way: `Crew_Walk` lanes, `Post`s, and `Work` places where a docker hauls
-//!   or loads for ever. They wear the `Civilian` outfits, one wanders per three walk points (at most `per_ship`), and they cheer a
-//!   victory; nothing else reaches them (no hull, guns or sails).
+//!   with the deck (`headcount`, from the collision box's length times beam: 1-2 on a fishing boat, 40 on a Man-o'-War, 60 on a first rate)
+//!   unless a `Crew_Count_<n>` node sets the total.
+//! - Figures are children of the ship, so they ride its motion; they cast no shadows and vanish beyond `range`. A crew beyond `range` plus the
+//!   fade is not stepped at all (the clips run on the GPU clock anyway); its figures carry on from where they stood when it comes back.
+//! - Map scenery (a town, a pier) gets townsfolk the same way: `Crew_Walk` lanes, `Post`s, and `Work` places where a docker works on the spot
+//!   and now and then carries a load to the nearest other work place. They wear the `Civilian` outfits, one wanders per three walk points (at
+//!   most `per_scenery`), and they cheer a victory; nothing else reaches them (no hull, guns or sails).
+//! - Behaviour (all presentation, own random numbers): a walking figure keeps to the right of its lane by its own offset and stops a little
+//!   short of its walk point at a random spot; a wanderer that stops near another idle figure turns to it and talks for a while; a fallen
+//!   figure sinks away in its last second instead of popping.
 //!
-//! PROVISIONAL (a prototype): straight-line walking along the lanes (no avoidance), headcount from the hull's core HP, no blending
-//! between clips.
+//! PROVISIONAL (a prototype): straight-line walking along the lanes (no avoidance beyond the lane offset), no blending between clips;
+//! the distances and times of the behaviour below are eyeballed.
 
 use std::collections::{HashMap, VecDeque};
 
@@ -37,16 +47,22 @@ use crate::{Ship, Side};
 
 /// The fragment shader; the mod ships it.
 pub const SHADER: &str = "shaders/deckhands.wesl";
-/// The figure and its baked moves (`.bin` beside it); the mod ships them.
+/// The figures and their baked moves (`deckhand.bin`, the pose texture, and `deckhand_mesh.bin`, the rest meshes, beside it); the mod ships them.
 pub const DATA: &str = "data/render/deckhand.json";
 const VERTEX_SHADER: &str = "embedded://openprocyon/render/deckhand_vertex.wesl";
 const PREPASS_SHADER: &str = "embedded://openprocyon/render/deckhand_prepass.wesl";
 
-const MAX_CLIPS: usize = 8;
-const PARTS: usize = 5;
-const MAX_OUTFITS: usize = 16;
-/// The clips the engine plays, in the shader's tag numbering; `deckhand.json` must list them in this order.
-const CLIPS: [&str; MAX_CLIPS] = ["idle", "walk", "run", "haul", "load", "climb", "cheer", "fall"];
+/// The bake format this reads (`version` in `deckhand.json`).
+const FORMAT: u64 = 2;
+/// Most clips a bake may hold (the tag's 4 bits).
+const MAX_CLIPS: usize = 16;
+/// Colour slots a figure's vertices pick from, by name: an outfit's keys.
+const SLOTS: [&str; 8] = ["skin", "coat", "trousers", "shoes", "hat", "trim", "metal", "hair"];
+/// Most outfits (the tag's 5 bits).
+const MAX_OUTFITS: usize = 32;
+/// The clips the engine plays, in the shader's tag numbering; the first `REQUIRED` of them must be in `deckhand.json` (found by name).
+const CLIPS: [&str; 10] = ["idle", "walk", "run", "haul", "load", "climb", "cheer", "fall", "talk", "carry"];
+const REQUIRED: usize = 8;
 const IDLE: u32 = 0;
 const WALK: u32 = 1;
 const RUN: u32 = 2;
@@ -55,10 +71,18 @@ const LOAD: u32 = 4;
 const CLIMB: u32 = 5;
 const CHEER: u32 = 6;
 const FALL: u32 = 7;
+const TALK: u32 = 8;
+const CARRY: u32 = 9;
+/// What an optional clip plays when the bake lacks it: (clip, stand-in).
+const FALLBACK: [(u32, u32); 2] = [(TALK, IDLE), (CARRY, WALK)];
 /// Walk points closer than this join, whichever lanes they are on.
 const LINK: f32 = 2.3;
 /// Seconds a fallen figure lies on deck before it goes.
 const LIE: f32 = 12.0;
+/// Seconds at the end of that, over which a fallen figure sinks and shrinks away. Engine choice.
+const SINK: f32 = 1.0;
+/// Depth (units) a fallen figure has sunk by when it is gone. Engine choice.
+const SINK_DEPTH: f32 = 0.12;
 /// Seconds after a gun last reloaded that the crew still runs (beat to quarters).
 const ALARM: f32 = 10.0;
 
@@ -78,6 +102,31 @@ const STANDING_MIN: f32 = 0.3;
 const KILL_WAIT_MIN: f32 = 0.4;
 /// PROVISIONAL: random extra pause (seconds) on top of `KILL_WAIT_MIN`; a guess.
 const KILL_WAIT_SPAN: f32 = 0.8;
+/// Camera distance (units) beyond which a figure wears its second, boxy mesh, when `deckhands.lod_distance` does not say. Engine choice: about
+/// where a figure is 20 px tall on a 720p screen; PROVISIONAL, not compared with the box mesh's look at every zoom.
+const LOD_DISTANCE: f32 = 45.0;
+/// The swap distance is this much further out going to the far mesh and this much nearer coming back, so a figure at the edge does not flicker. Engine choice.
+const LOD_HYSTERESIS: f32 = 0.1;
+/// Each figure's level of detail is checked every this many frames (the crews' figures are spread over them). Engine choice.
+const LOD_PERIOD: u32 = 8;
+/// Heights a figure's scale is drawn from (1.0 is the baked height). Engine choice.
+const HEIGHT_MIN: f32 = 0.94;
+const HEIGHT_SPAN: f32 = 0.12;
+/// A walking figure keeps this far (units, a random share of the span each) to the right of its lane. Engine choice.
+const LANE_MIN: f32 = 0.12;
+const LANE_SPAN: f32 = 0.25;
+/// A figure ends a walk this far (units) around its walk point, at most, and a little short of it. Engine choice.
+const STOP_SCATTER: f32 = 0.6;
+/// A wanderer that stops within this distance (units) of another idle figure turns to it and talks. Engine choice.
+const CHAT_REACH: f32 = 1.5;
+/// Seconds a chat lasts: the least and the random extra. Engine choice.
+const CHAT_MIN: f32 = 3.0;
+const CHAT_SPAN: f32 = 5.0;
+/// Seconds a docker works on the spot between carrying trips: the least and the random extra. Engine choice.
+const WORK_MIN: f32 = 6.0;
+const WORK_SPAN: f32 = 8.0;
+/// Most figures on one piece of map scenery when `per_scenery` does not say. Engine choice.
+const PER_SCENERY: usize = 150;
 
 /// Figures on a ship whose model gives no `Crew_Count_<n>`, from its deck: the collision box's length times beam, in units^2. Crews
 /// grow faster than decks (`area^1.52`), calibrated on retail hulls: a fishing boat (15-26) carries 1-2, a sloop or packet (24-48) 2-5,
@@ -88,12 +137,14 @@ fn headcount(deck: f32) -> usize {
     (deck.max(0.0) / HEADCOUNT_DECK_UNIT).powf(HEADCOUNT_EXPONENT).round().max(1.0) as usize
 }
 
-/// One outfit: the colours of a figure's parts (linear rgb), worn by a race's crews; `officer` outfits go to the posts.
+/// One outfit: the colours of a figure's slots (linear rgb), worn by a race's crews; `officer` outfits go to the posts.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Outfit {
     pub race: String,
     pub officer: bool,
-    pub colors: [Vec3; PARTS],
+    /// The figure (by the bake's name) that wears it; None is the bake's first.
+    pub figure: Option<String>,
+    pub colors: [Vec3; SLOTS.len()],
 }
 
 /// The `deckhands` block.
@@ -102,8 +153,12 @@ pub struct Deckhands {
     /// Most figures on one ship, a ceiling: how many a ship carries comes from its deck (`headcount`) or its model's `Crew_Count_<n>`
     /// (gun places and posts fill first, the rest wander).
     pub per_ship: usize,
+    /// Most figures on one piece of map scenery (a town), separate from `per_ship`.
+    pub per_scenery: usize,
     /// Camera distance beyond which figures are not drawn.
     pub range: f32,
+    /// Camera distance beyond which figures wear their far mesh.
+    pub lod_distance: f32,
     pub outfits: Vec<Outfit>,
 }
 
@@ -116,17 +171,23 @@ pub fn parse(v: &Value) -> Option<Deckhands> {
         .into_iter()
         .flatten()
         .filter_map(|o| {
-            let mut colors = [Vec3::splat(0.5); PARTS];
-            for (i, k) in ["skin", "coat", "trousers", "shoes", "hat"].iter().enumerate() {
+            let mut colors = [Vec3::splat(0.5); SLOTS.len()];
+            for (i, k) in SLOTS.iter().enumerate() {
                 if let Some(c) = rgb(&o[*k]) {
                     colors[i] = c;
                 }
             }
-            Some(Outfit { race: o["race"].as_str()?.to_string(), officer: o["officer"].as_bool().unwrap_or(false), colors })
+            Some(Outfit { race: o["race"].as_str()?.to_string(), officer: o["officer"].as_bool().unwrap_or(false), figure: o["figure"].as_str().map(String::from), colors })
         })
         .take(MAX_OUTFITS)
         .collect();
-    Some(Deckhands { per_ship: num(&v["per_ship"], 60.0).max(0.0) as usize, range: num(&v["range"], 160.0).max(1.0), outfits })
+    Some(Deckhands {
+        per_ship: num(&v["per_ship"], 60.0).max(0.0) as usize,
+        per_scenery: num(&v["per_scenery"], PER_SCENERY as f32).max(0.0) as usize,
+        range: num(&v["range"], 160.0).max(1.0),
+        lod_distance: num(&v["lod_distance"], LOD_DISTANCE).max(1.0),
+        outfits,
+    })
 }
 
 pub fn plugin(app: &mut App, look: &Look) {
@@ -134,24 +195,22 @@ pub fn plugin(app: &mut App, look: &Look) {
         bevy::shader::load_shader_library!(app, "deckhand_vat.wesl");
         bevy::asset::embedded_asset!(app, "deckhand_vertex.wesl");
         bevy::asset::embedded_asset!(app, "deckhand_prepass.wesl");
-        app.add_plugins(MaterialPlugin::<DeckhandMaterial>::default()).add_systems(Startup, load_kit).add_systems(Update, (gather, staff, drive).chain());
+        app.add_plugins(MaterialPlugin::<DeckhandMaterial>::default()).add_systems(Startup, load_kit).add_systems(Update, (gather, staff, drive, lod).chain());
     }
 }
 
 /// What the vertex stages get at `@group(MATERIAL_BIND_GROUP) @binding(100)` (`struct Deckhand` in deckhand_vat.wesl).
 #[derive(Clone, Copy, Debug, ShaderType)]
 pub struct DeckhandUniform {
-    /// Per clip: x first row, y frames, z frames a second, w 1 when it loops.
+    /// Per clip (the tag's numbering): x first row, y frames, z frames a second, w 1 when it loops.
     pub clips: [Vec4; MAX_CLIPS],
-    /// x: frames in all (the normal rows start there).
-    pub info: Vec4,
-    /// rgb per outfit and part: `outfit * 5 + part`.
-    pub palette: [Vec4; MAX_OUTFITS * PARTS],
+    /// rgb per outfit and slot: `outfit * 8 + slot`.
+    pub palette: [Vec4; MAX_OUTFITS * SLOTS.len()],
 }
 
 impl Default for DeckhandUniform {
     fn default() -> Self {
-        DeckhandUniform { clips: [Vec4::ZERO; MAX_CLIPS], info: Vec4::ZERO, palette: [Vec4::ONE; MAX_OUTFITS * PARTS] }
+        DeckhandUniform { clips: [Vec4::ZERO; MAX_CLIPS], palette: [Vec4::ONE; MAX_OUTFITS * SLOTS.len()] }
     }
 }
 
@@ -162,7 +221,7 @@ pub struct DeckhandExt {
     /// The frame data (`frame.rs`) at `@binding(99)`: the battle clock the moves run on.
     #[storage(99, read_only)]
     pub frame: super::frame::FrameBinding,
-    /// The baked moves (Rgba16Float, read with textureLoad).
+    /// The baked bone transforms (Rgba16Float, read with textureLoad).
     #[texture(101)]
     pub vat: Handle<Image>,
 }
@@ -186,105 +245,242 @@ struct Clip {
     seconds: f32,
 }
 
-/// The loaded figure: the shared mesh and material, clip lengths, how fast he moves, and which outfit index each race may wear.
+/// One figure of the bake: its meshes by level of detail (0 the full one) and its bounds.
+struct FigureKit {
+    lods: Vec<Handle<Mesh>>,
+    aabb: Aabb,
+}
+
+/// The loaded figures: the shared material, clip lengths (by the tag's numbering), how fast they move, and which figure each outfit wears.
 #[derive(Resource)]
 struct Kit {
-    mesh: Handle<Mesh>,
+    figures: Vec<FigureKit>,
     material: Handle<DeckhandMaterial>,
     clips: Vec<Clip>,
     walk: f32,
     run: f32,
     climb: f32,
-    aabb: Aabb,
     range: f32,
     per_ship: usize,
+    per_scenery: usize,
+    lod_distance: f32,
     outfits: Vec<Outfit>,
+    /// Per outfit: the index in `figures`.
+    outfit_figure: Vec<usize>,
 }
 
-fn f16_to_f32(h: u16) -> f32 {
-    let s = if h & 0x8000 != 0 { -1.0 } else { 1.0 };
-    let e = ((h >> 10) & 0x1f) as i32;
-    let m = (h & 0x3ff) as f32;
-    s * match e {
-        0 => m * 2f32.powi(-24),
-        31 => f32::INFINITY,
-        _ => (1.0 + m / 1024.0) * 2f32.powi(e - 15),
+/// A clip of the bake's header.
+#[derive(Clone, Debug, PartialEq)]
+struct ClipDef {
+    name: String,
+    start: usize,
+    frames: usize,
+    looped: bool,
+    seconds: f32,
+}
+
+/// A figure of the bake's header: its rig, bounds and meshes (`(vertices, byte offset)` per level of detail).
+#[derive(Clone, Debug, PartialEq)]
+struct FigureDef {
+    name: String,
+    rig: usize,
+    bounds: [Vec3; 2],
+    lods: Vec<(usize, usize)>,
+}
+
+/// `deckhand.json` (format 2), checked.
+#[derive(Clone, Debug, PartialEq)]
+struct Header {
+    fps: f32,
+    /// Units a second the walk, run and climb clips cover (the baker's `speeds`).
+    speeds: [f32; 3],
+    clips: Vec<ClipDef>,
+    /// Per rig: its bone count and the first texel of its row.
+    rigs: Vec<(usize, usize)>,
+    figures: Vec<FigureDef>,
+    width: usize,
+    height: usize,
+}
+
+/// The header read and checked against itself (the file sizes are `read_kit`'s).
+fn parse_header(head: &Value) -> Result<Header, String> {
+    if head["version"].as_u64() != Some(FORMAT) {
+        return Err(format!("not bake format {FORMAT} (rebuild it with the expansion's tools/build_deckhand.py)"));
     }
-}
-
-/// The figure's header and texels, checked: None (with a warning) leaves the block off.
-fn read_kit(root: &std::path::Path) -> Option<(Value, Vec<u8>)> {
-    let head = crate::data::try_json(&root.join(DATA))?;
-    let bin = std::fs::read(root.join(DATA).with_extension("bin")).ok()?;
-    let (verts, frames) = (head["verts"].as_u64()? as usize, head["frames"].as_u64()? as usize);
-    let names: Vec<&str> = head["clips"].as_array()?.iter().filter_map(|c| c["name"].as_str()).collect();
-    if bin.len() != verts * frames * 2 * 8 || names != CLIPS || head["part"].as_array()?.len() != verts {
-        warn!("render profile: {DATA} does not match its .bin or the clips {CLIPS:?}; deck crews left off");
-        return None;
+    let (width, height) = (head["pose"]["width"].as_u64().unwrap_or(0) as usize, head["pose"]["height"].as_u64().unwrap_or(0) as usize);
+    let parts: Vec<&str> = head["parts"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
+    if parts != SLOTS {
+        return Err(format!("`parts` is {parts:?}, not {SLOTS:?}"));
     }
-    Some((head, bin))
+    let mut clips = vec![];
+    for c in head["clips"].as_array().ok_or("no `clips`")? {
+        let def = ClipDef {
+            name: c["name"].as_str().ok_or("a clip without a name")?.to_string(),
+            start: c["start"].as_u64().ok_or("a clip without `start`")? as usize,
+            frames: c["frames"].as_u64().ok_or("a clip without `frames`")? as usize,
+            looped: c["loop"].as_bool().unwrap_or(true),
+            seconds: num(&c["seconds"], 1.0),
+        };
+        if def.frames == 0 || def.start + def.frames > height {
+            return Err(format!("clip `{}` lies outside the pose texture's {height} rows", def.name));
+        }
+        clips.push(def);
+    }
+    if clips.len() > MAX_CLIPS {
+        return Err(format!("{} clips, at most {MAX_CLIPS}", clips.len()));
+    }
+    let mut rigs = vec![];
+    let mut rig_names = vec![];
+    for r in head["rigs"].as_array().ok_or("no `rigs`")? {
+        let (bones, column) = (r["bones"].as_u64().unwrap_or(0) as usize, r["column"].as_u64().unwrap_or(0) as usize);
+        if bones == 0 || column + 2 * bones > width {
+            return Err(format!("rig {:?} lies outside the pose texture's {width} columns", r["name"]));
+        }
+        rig_names.push(r["name"].as_str().unwrap_or(""));
+        rigs.push((bones, column));
+    }
+    let mut figures = vec![];
+    for f in head["figures"].as_array().ok_or("no `figures`")? {
+        let name = f["name"].as_str().ok_or("a figure without a name")?.to_string();
+        let rig = rig_names.iter().position(|r| Some(*r) == f["rig"].as_str()).ok_or_else(|| format!("figure `{name}`: unknown rig {:?}", f["rig"]))?;
+        let lods: Vec<(usize, usize)> =
+            f["lods"].as_array().into_iter().flatten().map(|l| (l["verts"].as_u64().unwrap_or(0) as usize, l["offset"].as_u64().unwrap_or(0) as usize)).collect();
+        if lods.is_empty() || lods.iter().any(|l| l.0 == 0 || l.0 % 3 != 0) {
+            return Err(format!("figure `{name}`: no mesh, or a vertex count that is not whole triangles"));
+        }
+        let v = |k: usize| Vec3::new(num(&f["bounds"][k][0], -1.0), num(&f["bounds"][k][1], 0.0), num(&f["bounds"][k][2], -1.0));
+        figures.push(FigureDef { name, rig, bounds: [v(0), v(1)], lods });
+    }
+    if figures.is_empty() {
+        return Err("no figures".into());
+    }
+    let speeds = [num(&head["speeds"]["walk"], 1.3), num(&head["speeds"]["run"], 3.6), num(&head["speeds"]["climb"], 0.9)];
+    Ok(Header { fps: num(&head["fps"], 15.0), speeds, clips, rigs, figures, width, height })
 }
 
-fn load_kit(mut commands: Commands, look: Res<Look>, mut meshes: ResMut<Assets<Mesh>>, mut images: ResMut<Assets<Image>>, mut materials: ResMut<Assets<DeckhandMaterial>>) {
-    let Some(d) = look.deckhands.as_ref() else { return };
-    let Some((head, bin)) = read_kit(crate::assets_dir()) else {
-        warn!("render profile: `deckhands` needs {DATA} and its .bin in the mod; left off");
-        return;
+/// For each of the engine's clips (`CLIPS`, the tag's numbering) the index of the bake's clip that plays it: by name, the optional ones
+/// falling back (`talk` to `idle`, `carry` to `walk`). Err names a missing required clip.
+fn resolve_clips(clips: &[ClipDef]) -> Result<Vec<usize>, String> {
+    let find = |name: &str| clips.iter().position(|c| c.name == name);
+    let mut out = vec![];
+    for (i, name) in CLIPS.iter().enumerate() {
+        let found = find(name).or_else(|| {
+            let stand_in = FALLBACK.iter().find(|f| f.0 as usize == i)?.1 as usize;
+            out.get(stand_in).copied()
+        });
+        out.push(found.ok_or_else(|| format!("no clip `{name}`"))?);
+    }
+    debug_assert!(out.len() > REQUIRED);
+    Ok(out)
+}
+
+/// The header, the pose texels and the meshes, read and checked: None (with a warning) leaves the block off.
+fn read_kit(root: &std::path::Path) -> Option<(Header, Vec<u8>, Vec<u8>)> {
+    let json: Value = crate::data::load_or_base(&root.join(DATA), None, "deck crews are left off")?;
+    let fail = |why: String| {
+        warn!("render profile: {DATA}: {why}; deck crews left off");
+        None
     };
-    let verts = head["verts"].as_u64().unwrap_or(0) as usize;
-    let frames = head["frames"].as_u64().unwrap_or(0) as usize;
-    let fps = num(&head["fps"], 15.0);
-    let texel = |i: usize| -> Vec3 {
-        let h = |k: usize| f16_to_f32(u16::from_le_bytes([bin[i * 8 + k * 2], bin[i * 8 + k * 2 + 1]]));
-        Vec3::new(h(0), h(1), h(2))
+    let head = match parse_header(&json) {
+        Ok(h) => h,
+        Err(why) => return fail(why),
     };
-    // the rest shape is the first frame (idle); the shader replaces it every frame, the CPU only needs its count and bounds
-    let pos: Vec<[f32; 3]> = (0..verts).map(|i| texel(i).to_array()).collect();
-    let nor: Vec<[f32; 3]> = (0..verts).map(|i| texel(frames * verts + i).to_array()).collect();
-    let uv: Vec<[f32; 2]> = (0..verts).map(|i| [i as f32, 0.0]).collect();
-    let col: Vec<[f32; 4]> = head["part"].as_array().unwrap().iter().map(|p| [p.as_f64().unwrap_or(0.0) as f32 / 8.0, 0.0, 0.0, 1.0]).collect();
+    let Ok(pose) = std::fs::read(root.join(DATA).with_extension("bin")) else { return fail("no .bin beside it".into()) };
+    let Ok(mesh) = std::fs::read(root.join(DATA).with_file_name("deckhand_mesh.bin")) else { return fail("no deckhand_mesh.bin beside it".into()) };
+    if pose.len() != head.width * head.height * 8 {
+        return fail(format!("the .bin holds {} bytes, not {}x{} texels", pose.len(), head.width, head.height));
+    }
+    if head.figures.iter().any(|f| f.lods.iter().any(|&(v, o)| o + v * MESH_VERTEX_BYTES > mesh.len())) {
+        return fail("deckhand_mesh.bin is shorter than its meshes".into());
+    }
+    if let Err(why) = resolve_clips(&head.clips) {
+        return fail(why);
+    }
+    Some((head, pose, mesh))
+}
+
+/// Bytes a vertex takes in `deckhand_mesh.bin`: position, normal, bone index and colour slot, as f32.
+const MESH_VERTEX_BYTES: usize = 8 * 4;
+
+/// One level of detail of a figure, from `deckhand_mesh.bin`. `column` is the figure's rig's first texel: a vertex's bone becomes the texel of
+/// its rotation, as the vertex stages read it from `uv.x`; its colour slot becomes `color.r` (a share of 8).
+fn build_mesh(bytes: &[u8], verts: usize, column: usize) -> Mesh {
+    let f = |i: usize, k: usize| f32::from_le_bytes(bytes[i * MESH_VERTEX_BYTES + k * 4..][..4].try_into().unwrap());
+    let pos: Vec<[f32; 3]> = (0..verts).map(|i| [f(i, 0), f(i, 1), f(i, 2)]).collect();
+    let nor: Vec<[f32; 3]> = (0..verts).map(|i| [f(i, 3), f(i, 4), f(i, 5)]).collect();
+    let uv: Vec<[f32; 2]> = (0..verts).map(|i| [column as f32 + 2.0 * f(i, 6), 0.0]).collect();
+    let col: Vec<[f32; 4]> = (0..verts).map(|i| [f(i, 7) / SLOTS.len() as f32, 0.0, 0.0, 1.0]).collect();
     let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::RENDER_WORLD);
     mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, pos);
     mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, nor);
     mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uv);
     mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, col);
     mesh.insert_indices(Indices::U32((0..verts as u32).collect()));
+    mesh
+}
+
+fn load_kit(mut commands: Commands, look: Res<Look>, mut meshes: ResMut<Assets<Mesh>>, mut images: ResMut<Assets<Image>>, mut materials: ResMut<Assets<DeckhandMaterial>>) {
+    let Some(d) = look.deckhands.as_ref() else { return };
+    let Some((head, pose, mesh_bytes)) = read_kit(crate::assets_dir()) else {
+        warn!("render profile: `deckhands` needs {DATA} (format {FORMAT}) with its .bin and deckhand_mesh.bin in the mod; left off");
+        return;
+    };
+    let figures: Vec<FigureKit> = head
+        .figures
+        .iter()
+        .map(|f| FigureKit {
+            lods: f.lods.iter().map(|&(verts, offset)| meshes.add(build_mesh(&mesh_bytes[offset..], verts, head.rigs[f.rig].1))).collect(),
+            aabb: Aabb::from_min_max(f.bounds[0], f.bounds[1]),
+        })
+        .collect();
     let vat = Image::new(
-        Extent3d { width: verts as u32, height: 2 * frames as u32, depth_or_array_layers: 1 },
+        Extent3d { width: head.width as u32, height: head.height as u32, depth_or_array_layers: 1 },
         TextureDimension::D2,
-        bin,
+        pose,
         TextureFormat::Rgba16Float,
         RenderAssetUsages::RENDER_WORLD,
     );
-    let mut u = DeckhandUniform { info: Vec4::new(frames as f32, verts as f32, 0.0, 0.0), ..default() };
+    let mut u = DeckhandUniform::default();
     let mut clips = vec![];
-    for (i, c) in head["clips"].as_array().unwrap().iter().enumerate() {
-        let n = num(&c["frames"], 1.0);
-        u.clips[i] = Vec4::new(num(&c["start"], 0.0), n, fps, f32::from(u8::from(c["loop"].as_bool().unwrap_or(true))));
-        clips.push(Clip { seconds: num(&c["seconds"], n / fps) });
+    for (i, &c) in resolve_clips(&head.clips).unwrap_or_default().iter().enumerate() {
+        let c = &head.clips[c];
+        u.clips[i] = Vec4::new(c.start as f32, c.frames as f32, head.fps, f32::from(u8::from(c.looped)));
+        clips.push(Clip { seconds: c.seconds });
     }
+    let outfit_figure: Vec<usize> = d
+        .outfits
+        .iter()
+        .map(|o| {
+            o.figure.as_ref().map_or(0, |name| {
+                head.figures.iter().position(|f| &f.name == name).unwrap_or_else(|| {
+                    warn!("render profile: an outfit wears figure `{name}`, which {DATA} lacks; it gets `{}`", head.figures[0].name);
+                    0
+                })
+            })
+        })
+        .collect();
     for (o, outfit) in d.outfits.iter().enumerate() {
         for (p, c) in outfit.colors.iter().enumerate() {
-            u.palette[o * PARTS + p] = c.extend(1.0);
+            u.palette[o * SLOTS.len() + p] = c.extend(1.0);
         }
     }
-    let b = &head["bounds"];
-    let v = |k: usize| Vec3::new(num(&b[k][0], -1.0), num(&b[k][1], 0.0), num(&b[k][2], -1.0));
     let material = materials.add(ExtendedMaterial {
         base: StandardMaterial { base_color: Color::WHITE, perceptual_roughness: 0.85, ..default() },
         extension: DeckhandExt { u, frame: default(), vat: images.add(vat) },
     });
     commands.insert_resource(Kit {
-        mesh: meshes.add(mesh),
+        figures,
         material,
         clips,
-        walk: num(&head["speeds"]["walk"], 1.3),
-        run: num(&head["speeds"]["run"], 3.6),
-        climb: num(&head["speeds"]["climb"], 0.9),
-        aabb: Aabb::from_min_max(v(0), v(1)),
+        walk: head.speeds[0],
+        run: head.speeds[1],
+        climb: head.speeds[2],
         range: d.range,
         per_ship: d.per_ship,
+        per_scenery: d.per_scenery,
+        lod_distance: d.lod_distance,
         outfits: d.outfits.clone(),
+        outfit_figure,
     });
 }
 
@@ -406,13 +602,22 @@ struct CrewNodes {
 struct Crew {
     places: Places,
     hands: Vec<Entity>,
+    /// The scene root the figures hang under (their frame), and a sphere around every place of the crew in it: the crew is not stepped
+    /// while the camera is further from the sphere than `range` and the fade.
+    frame: Entity,
+    centre: Vec3,
+    radius: f32,
     /// Figures at the start; the headcount falls from it with the hull.
     total: usize,
+    /// Of `hands`, how many are lying on the deck.
+    fallen: usize,
     max_core: f32,
     furled: bool,
     alarm: f32,
     kill_wait: f32,
     rng: u64,
+    /// The gun mounts' reload times of this frame (kept to reuse its memory).
+    reloads: Vec<f32>,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -426,7 +631,7 @@ enum Role {
     Post {
         place: usize,
     },
-    /// A work place's index in `Places::work`: he goes there and hauls (odd places) or loads (even ones).
+    /// A work place's index in `Places::work`: he works there on the spot (hauls at odd places, loads at even ones) and now and then carries a load to the nearest other one and back.
     Work {
         place: usize,
     },
@@ -438,28 +643,86 @@ enum Role {
     },
 }
 
+/// Where a docker is on a carrying trip.
+#[derive(Clone, Copy, PartialEq)]
+enum Errand {
+    None,
+    /// Walking to the other work place with a load.
+    Out,
+    /// Walking home with it.
+    Back,
+}
+
 #[derive(Component)]
 struct Hand {
     role: Role,
     pos: Vec3,
     face: Quat,
     path: VecDeque<Vec3>,
+    /// Where the walk along `path` last set off or passed a point (the lane's direction is from it to the next point).
+    from: Vec3,
     /// What the path is for: run, or climb (faces the shroud).
     running: bool,
     climbing: bool,
+    /// He was walking last frame (so a stop is noticed once).
+    moving: bool,
+    carry: bool,
+    errand: Errand,
     wait: f32,
+    /// Seconds of a chat still to go.
+    chat: f32,
     clip: u32,
     outfit: u32,
     phase: u32,
     started: u32,
+    /// The figure (index in `Kit::figures`) and which of its meshes he wears now.
+    figure: usize,
+    lod: usize,
+    /// Scale of this one (1.0 is the baked height), and how far (units) he walks to the right of his lane.
+    height: f32,
+    side: f32,
     /// Seconds since he fell; None while alive.
     fallen: Option<f32>,
 }
 
+/// A figure's `MeshTag`: bits 0-3 the clip, 4-8 the outfit, 9-15 the phase (a share of the clip, 1/128), 16-31 when the clip started (battle
+/// seconds x 10, wrapping at 65536). `deckhand_vat.wesl` reads it back.
+fn pack_tag(clip: u32, outfit: u32, phase: u32, started: u32) -> u32 {
+    (clip & 15) | ((outfit & 31) << 4) | ((phase & 127) << 9) | ((started & 0xffff) << 16)
+}
+
 impl Hand {
     fn tag(&self) -> MeshTag {
-        MeshTag::new(self.clip | (self.outfit << 4) | (self.phase << 8) | (self.started << 16))
+        MeshTag::new(pack_tag(self.clip, self.outfit, self.phase, self.started))
     }
+
+    /// Sets off along a route to `to`; with a random number generator he ends it at a random spot a little short of `to`.
+    fn go(&mut self, places: &Places, to: Vec3, scatter: Option<&mut u64>) {
+        let mut path = places.route(self.pos, to);
+        if let Some(rng) = scatter
+            && let Some(last) = path.back().copied()
+        {
+            let before = if path.len() > 1 { path[path.len() - 2] } else { self.pos };
+            path.pop_back();
+            path.push_back(stop_spot(last, before, rng));
+        }
+        self.path = path;
+        self.from = self.pos;
+    }
+}
+
+/// A spot around `to` (within `STOP_SCATTER`, and nearer the way he comes from, `before`) to stop at, so two never stand in one place.
+fn stop_spot(to: Vec3, before: Vec3, rng: &mut u64) -> Vec3 {
+    let a = rand(rng) * std::f32::consts::TAU;
+    let r = rand(rng).sqrt() * STOP_SCATTER;
+    let back = (before - to).with_y(0.0).normalize_or_zero() * rand(rng) * STOP_SCATTER * 0.5;
+    to + Vec3::new(a.cos() * r, 0.0, a.sin() * r) + back
+}
+
+/// The point a walker aims for on the way to `next`: `side` units to the right of the lane `from` -> `next` (forward is -z, right +x).
+fn lane_goal(from: Vec3, next: Vec3, side: f32) -> Vec3 {
+    let d = (next - from).xz().normalize_or_zero();
+    next + Vec3::new(-d.y, 0.0, d.x) * side
 }
 
 fn rand(rng: &mut u64) -> f32 {
@@ -497,6 +760,25 @@ fn gather(
     }
 }
 
+/// A sphere (centre, radius) around every place of a crew, in its frame.
+fn place_sphere(places: &Places) -> (Vec3, f32) {
+    let points: Vec<Vec3> = places
+        .walk
+        .iter()
+        .copied()
+        .chain(places.guns.iter().map(|t| t.translation))
+        .chain(places.posts.iter().map(|p| p.1.translation))
+        .chain(places.work.iter().map(|t| t.translation))
+        .chain(places.climbs.iter().flat_map(|c| [c.0, c.1]))
+        .collect();
+    if points.is_empty() {
+        return (Vec3::ZERO, 0.0);
+    }
+    let (lo, hi) = points.iter().fold((Vec3::splat(f32::MAX), Vec3::splat(f32::MIN)), |(lo, hi), p| (lo.min(*p), hi.max(*p)));
+    let centre = (lo + hi) / 2.0;
+    (centre, points.iter().map(|p| p.distance(centre)).fold(0.0, f32::max) + 1.0)
+}
+
 /// Mans a ship whose crew places arrived: gun places, posts and work places first, then wanderers up to the headcount (the model's
 /// `Crew_Count_<n>`, else `headcount` of the ship's deck); each figure picks an outfit of its race. Scenery (no `Ship`) is Civilian
 /// and gets one wanderer per three walk points unless it gives a `Crew_Count`.
@@ -525,7 +807,9 @@ fn staff(
         }
         roles.extend((0..places.posts.len()).map(|place| Role::Post { place }));
         roles.extend((0..places.work.len()).map(|place| Role::Work { place }));
-        roles.truncate(kit.per_ship);
+        // a ship's crew is capped by `per_ship`, a piece of scenery's by `per_scenery`
+        let cap = if ship.is_some() { kit.per_ship } else { kit.per_scenery };
+        roles.truncate(cap);
         let target = places.count.unwrap_or_else(|| match ship {
             Some(s) => {
                 let c = &lib.classes[s.class];
@@ -535,7 +819,7 @@ fn staff(
         });
         // riggers go aloft from the wanderers: one per shroud stays on deck whatever the count
         let target = if ship.is_some() { target.max(roles.len() + places.climbs.len()) } else { target };
-        let wanderers = target.min(kit.per_ship).saturating_sub(roles.len());
+        let wanderers = target.min(cap).saturating_sub(roles.len());
         if !places.walk.is_empty() {
             roles.extend(std::iter::repeat_n(Role::Wander, wanderers));
         }
@@ -548,25 +832,37 @@ fn staff(
                 Role::Work { place } => (places.work[place].translation, places.work[place].rotation),
                 _ => {
                     let i = (rand(&mut rng) * places.walk.len() as f32) as usize % places.walk.len();
-                    (places.walk[i], Quat::from_rotation_y(rand(&mut rng) * std::f32::consts::TAU))
+                    (stop_spot(places.walk[i], places.walk[i], &mut rng), Quat::from_rotation_y(rand(&mut rng) * std::f32::consts::TAU))
                 }
             };
             let officer = matches!(role, Role::Post { .. });
             let pick: Vec<u32> = wear.iter().filter(|(_, o)| *o == officer).map(|(i, _)| *i).collect();
             let pick = if pick.is_empty() { wear.iter().map(|(i, _)| *i).collect() } else { pick };
             let outfit = if pick.is_empty() { 0 } else { pick[(rand(&mut rng) * pick.len() as f32) as usize % pick.len()] };
+            let figure = kit.outfit_figure.get(outfit as usize).copied().unwrap_or(0);
+            let height = HEIGHT_MIN + rand(&mut rng) * HEIGHT_SPAN;
+            let side = LANE_MIN + rand(&mut rng) * LANE_SPAN;
             let hand = Hand {
                 role,
                 pos,
                 face,
                 path: VecDeque::new(),
+                from: pos,
                 running: false,
                 climbing: false,
-                wait: rand(&mut rng) * MAX_IDLE_WAIT,
+                moving: false,
+                carry: false,
+                errand: Errand::None,
+                wait: if matches!(role, Role::Work { .. }) { 1.0 + rand(&mut rng) * WORK_SPAN } else { rand(&mut rng) * MAX_IDLE_WAIT },
+                chat: 0.0,
                 clip: IDLE,
                 outfit,
-                phase: (rand(&mut rng) * 255.0) as u32,
+                phase: (rand(&mut rng) * 127.0) as u32,
                 started: now,
+                figure,
+                lod: 0,
+                height,
+                side,
                 fallen: None,
             };
             let tag = hand.tag();
@@ -574,11 +870,11 @@ fn staff(
                 commands
                     .spawn((
                         hand,
-                        Transform::from_translation(pos).with_rotation(face),
-                        Mesh3d(kit.mesh.clone()),
+                        Transform::from_translation(pos).with_rotation(face).with_scale(Vec3::splat(height)),
+                        Mesh3d(kit.figures[figure].lods[0].clone()),
                         MeshMaterial3d(kit.material.clone()),
                         tag,
-                        kit.aabb,
+                        kit.figures[figure].aabb,
                         NoAutoAabb,
                         NotShadowCaster,
                         VisibilityRange { start_margin: 0.0..0.0, end_margin: kit.range..kit.range + FADE_OUT_RANGE, use_aabb: false },
@@ -589,26 +885,43 @@ fn staff(
         }
         let total = hands.len();
         debug!("deckhands: {total} on {race} ship {e:?} ({} walk points, {} gun places)", places.walk.len(), places.guns.len());
+        let (centre, radius) = place_sphere(&places);
         commands.entity(e).remove::<CrewNodes>().insert(Crew {
             places,
             hands,
+            frame: nodes.frame,
+            centre,
+            radius,
             total,
+            fallen: 0,
             max_core: health.map_or(1.0, |h| h.core.max(1.0)),
             furled: ship.is_some_and(|s| s.ordered() == 0.0),
             alarm: 0.0,
             kill_wait: 0.0,
             rng,
+            reloads: vec![],
         });
     }
 }
 
-/// Each manned ship: who falls, whether the riggers go aloft, then every figure's next step and clip.
+/// Whether the camera is within `reach` of the crew's places (the camera's position, the crew's frame): a crew beyond it is not stepped.
+/// No camera counts as near.
+fn within(camera: Option<Vec3>, frame: Option<&GlobalTransform>, crew: &Crew, reach: f32) -> bool {
+    let (Some(cam), Some(frame)) = (camera, frame) else { return true };
+    let scale = frame.affine().matrix3.x_axis.length().max(1e-3);
+    cam.distance(frame.transform_point(crew.centre)) <= reach + crew.radius * scale
+}
+
+/// Each manned ship: who falls, whether the riggers go aloft, then every figure's next step and clip. A crew the camera is too far from to
+/// see (`range` and the fade) is skipped: its figures stand where they were till it is near again.
 #[allow(clippy::type_complexity)]
 fn drive(
     mut commands: Commands,
     kit: Option<Res<Kit>>,
     time: Res<Time>,
     outcome: Option<Res<Outcome>>,
+    camera: Option<Single<&GlobalTransform, (With<Camera3d>, With<crate::MainCamera>)>>,
+    frames: Query<&GlobalTransform>,
     mut ships: Query<(Option<&Ship>, Option<&Health>, Option<&GunStates>, &mut Crew)>,
     mut hands: Query<(&mut Hand, &mut Transform, &mut MeshTag)>,
 ) {
@@ -617,11 +930,19 @@ fn drive(
     if dt <= 0.0 {
         return;
     }
+    let cam = camera.map(|c| c.translation());
     let now = stamp(&time);
     let won = outcome.is_some_and(|o| *o == Outcome::Victory);
     for (ship, health, guns, mut crew) in &mut ships {
         let crew = &mut *crew;
-        let reloads: Vec<f32> = guns.map_or(vec![], |g| g.reloads().map(|(_, c)| c).collect());
+        if !within(cam, frames.get(crew.frame).ok(), crew, kit.range + FADE_OUT_RANGE) {
+            continue;
+        }
+        let mut reloads = std::mem::take(&mut crew.reloads);
+        reloads.clear();
+        if let Some(g) = guns {
+            reloads.extend(g.reloads().map(|(_, c)| c));
+        }
         if reloads.iter().any(|&c| c > 0.0) {
             crew.alarm = ALARM;
         }
@@ -629,14 +950,18 @@ fn drive(
         let cheer = won && ship.is_none_or(|s| s.side == Side::Player);
 
         // the headcount follows the hull: a share stays standing till the end, all fall when the ship goes
-        let alive: Vec<Entity> = crew.hands.iter().copied().filter(|&h| hands.get(h).is_ok_and(|(h, _, _)| h.fallen.is_none())).collect();
+        let alive_count = crew.hands.len() - crew.fallen;
         let (core, destroyed) = health.map_or((crew.max_core, false), |h| (h.core, h.destroyed));
         let share = (core / crew.max_core).clamp(0.0, 1.0);
         let target = if destroyed { 0 } else { (crew.total as f32 * (STANDING_MIN + (1.0 - STANDING_MIN) * share)).ceil() as usize };
         crew.kill_wait -= dt;
-        if alive.len() > target && (crew.kill_wait <= 0.0 || destroyed) {
+        if alive_count > target && (crew.kill_wait <= 0.0 || destroyed) {
+            let alive: Vec<Entity> = crew.hands.iter().copied().filter(|&h| hands.get(h).is_ok_and(|(h, _, _)| h.fallen.is_none())).collect();
             let n = if destroyed { alive.len() } else { 1 };
             for _ in 0..n {
+                if alive.is_empty() {
+                    break;
+                }
                 let i = (rand(&mut crew.rng) * alive.len() as f32) as usize % alive.len();
                 if let Ok((mut h, _, _)) = hands.get_mut(alive[i])
                     && h.fallen.is_none()
@@ -646,6 +971,7 @@ fn drive(
                     h.started = now;
                     h.phase = 0;
                     h.clip = FALL;
+                    crew.fallen += 1;
                 }
             }
             crew.kill_wait = KILL_WAIT_MIN + rand(&mut crew.rng) * KILL_WAIT_SPAN;
@@ -655,29 +981,42 @@ fn drive(
         let furled = ship.is_some_and(|s| s.ordered() == 0.0);
         if furled != crew.furled {
             crew.furled = furled;
-            let mut free: Vec<Entity> = alive.iter().copied().filter(|&h| hands.get(h).is_ok_and(|(h, _, _)| h.role == Role::Wander)).collect();
+            let mut free: Vec<Entity> = crew.hands.iter().copied().filter(|&h| hands.get(h).is_ok_and(|(h, _, _)| h.fallen.is_none() && h.role == Role::Wander)).collect();
             for climb in 0..crew.places.climbs.len() {
                 let Some(e) = free.pop() else { break };
                 if let Ok((mut h, _, _)) = hands.get_mut(e) {
                     h.role = Role::Rigger { climb, stage: 0 };
                     h.path = crew.places.route(h.pos, crew.places.climbs[climb].0);
+                    h.from = h.pos;
                     h.running = true;
                     h.climbing = false;
+                    h.carry = false;
+                    h.chat = 0.0;
                 }
             }
         }
 
         let places = &crew.places;
         let rng = &mut crew.rng;
+        let mut gone = 0;
+        let mut stopped: Vec<(Entity, Vec3)> = vec![];
         crew.hands.retain(|&e| {
             let Ok((mut h, mut t, mut tag)) = hands.get_mut(e) else { return false };
             let h = &mut *h;
             let mut clip;
             if let Some(f) = h.fallen.as_mut() {
                 *f += dt;
-                if *f > LIE + kit.clips[FALL as usize].seconds {
+                let end = LIE + kit.clips[FALL as usize].seconds;
+                if *f > end {
                     commands.entity(e).despawn();
+                    gone += 1;
                     return false;
+                }
+                if *f > end - SINK {
+                    // the last second: down and small, instead of popping
+                    let k = (*f - (end - SINK)) / SINK;
+                    t.translation = h.pos - Vec3::Y * SINK_DEPTH * k;
+                    t.scale = Vec3::splat(h.height * (1.0 - k));
                 }
                 return true;
             }
@@ -692,13 +1031,16 @@ fn drive(
                 } else {
                     kit.walk
                 };
-                let to = next - h.pos;
+                h.moving = true;
+                let goal = if h.climbing || h.path.len() == 1 { next } else { lane_goal(h.from, next, h.side) };
+                let to = goal - h.pos;
                 let step = speed * dt;
                 if !h.climbing && to.xz().length() > 0.05 {
                     h.face = Quat::from_rotation_y((-to.x).atan2(-to.z));
                 }
                 if to.length() <= step {
-                    h.pos = next;
+                    h.pos = goal;
+                    h.from = next;
                     h.path.pop_front();
                 } else {
                     h.pos += to / to.length() * step;
@@ -707,17 +1049,25 @@ fn drive(
                     CLIMB
                 } else if speed >= kit.run {
                     RUN
+                } else if h.carry {
+                    CARRY
                 } else {
                     WALK
                 };
             } else {
                 h.running = false;
                 clip = IDLE;
+                if h.moving {
+                    h.moving = false;
+                    if h.role == Role::Wander {
+                        stopped.push((e, h.pos));
+                    }
+                }
                 match h.role {
                     Role::Gun { place, mount, slot } => {
                         let home = places.guns[place];
                         if h.pos.distance(home.translation) > 0.1 {
-                            h.path = places.route(h.pos, home.translation);
+                            h.go(places, home.translation, None);
                             h.running = crew.alarm > 0.0;
                         } else {
                             h.face = home.rotation;
@@ -729,25 +1079,52 @@ fn drive(
                     Role::Post { place } => {
                         let home = places.posts[place].1;
                         if h.pos.distance(home.translation) > 0.1 {
-                            h.path = places.route(h.pos, home.translation);
+                            h.go(places, home.translation, None);
                         } else {
                             h.face = home.rotation;
                         }
                     }
                     Role::Work { place } => {
                         let home = places.work[place];
-                        if h.pos.distance(home.translation) > 0.1 {
-                            h.path = places.route(h.pos, home.translation);
+                        if h.errand == Errand::Out {
+                            // delivered: carry back
+                            h.errand = Errand::Back;
+                            h.go(places, home.translation, None);
                         } else {
-                            h.face = home.rotation;
-                            clip = if place % 2 == 0 { LOAD } else { HAUL };
+                            if h.errand == Errand::Back {
+                                h.errand = Errand::None;
+                                h.carry = false;
+                                h.wait = WORK_MIN + rand(rng) * WORK_SPAN;
+                            }
+                            if h.pos.distance(home.translation) > 0.1 {
+                                h.go(places, home.translation, None);
+                            } else {
+                                h.face = home.rotation;
+                                clip = if place % 2 == 0 { LOAD } else { HAUL };
+                                h.wait -= dt;
+                                if h.wait <= 0.0 {
+                                    let other = (0..places.work.len()).filter(|&o| o != place).min_by(|&a, &b| {
+                                        places.work[a].translation.distance_squared(home.translation).total_cmp(&places.work[b].translation.distance_squared(home.translation))
+                                    });
+                                    if let Some(o) = other {
+                                        h.errand = Errand::Out;
+                                        h.carry = true;
+                                        h.go(places, places.work[o].translation, Some(&mut *rng));
+                                    } else {
+                                        h.wait = WORK_MIN;
+                                    }
+                                }
+                            }
                         }
                     }
                     Role::Wander => {
                         h.wait -= dt;
-                        if h.wait <= 0.0 && !places.walk.is_empty() {
+                        if h.chat > 0.0 {
+                            h.chat -= dt;
+                            clip = TALK;
+                        } else if h.wait <= 0.0 && !places.walk.is_empty() {
                             let i = (rand(rng) * places.walk.len() as f32) as usize % places.walk.len();
-                            h.path = places.route(h.pos, places.walk[i]);
+                            h.go(places, places.walk[i], Some(&mut *rng));
                             h.wait = 2.0 + rand(rng) * 8.0;
                         }
                     }
@@ -758,6 +1135,7 @@ fn drive(
                             0 => {
                                 h.climbing = true;
                                 h.path = VecDeque::from([top]);
+                                h.from = h.pos;
                                 h.role = Role::Rigger { climb, stage: 1 };
                             }
                             1 => {
@@ -771,6 +1149,7 @@ fn drive(
                                 if h.wait <= 0.0 {
                                     h.climbing = true;
                                     h.path = VecDeque::from([foot]);
+                                    h.from = h.pos;
                                     h.role = Role::Rigger { climb, stage: 3 };
                                 }
                             }
@@ -788,19 +1167,123 @@ fn drive(
                 h.started = now;
                 *tag = h.tag();
             }
-            t.translation = h.pos;
-            t.rotation = t.rotation.slerp(h.face, (dt * 10.0).min(1.0));
+            // write only what changed: a standing figure costs no transform propagation
+            if t.translation != h.pos {
+                t.translation = h.pos;
+            }
+            if t.rotation != h.face {
+                let turned = t.rotation.slerp(h.face, (dt * 10.0).min(1.0));
+                t.rotation = if turned.angle_between(h.face) < 1e-3 { h.face } else { turned };
+            }
             true
         });
+        crew.fallen -= gone;
+        // wanderers that stopped by another idle figure turn to it and talk
+        for (e, at) in stopped {
+            let mate = crew
+                .hands
+                .iter()
+                .copied()
+                .filter(|&o| o != e)
+                .filter_map(|o| {
+                    let (h, _, _) = hands.get(o).ok()?;
+                    let idle = h.role == Role::Wander && h.fallen.is_none() && h.path.is_empty() && h.chat <= 0.0 && !h.moving;
+                    (idle && h.pos.xz().distance(at.xz()) < CHAT_REACH).then_some((h.pos, o))
+                })
+                .min_by(|a, b| a.0.xz().distance_squared(at.xz()).total_cmp(&b.0.xz().distance_squared(at.xz())));
+            if let Some((p, o)) = mate {
+                let secs = CHAT_MIN + rand(&mut crew.rng) * CHAT_SPAN;
+                for (who, other) in [(e, p), (o, at)] {
+                    if let Ok((mut h, _, _)) = hands.get_mut(who) {
+                        let d = other - h.pos;
+                        h.face = Quat::from_rotation_y((-d.x).atan2(-d.z));
+                        h.chat = secs;
+                        h.wait = h.wait.max(secs);
+                    }
+                }
+            }
+        }
+        crew.reloads = reloads;
     }
+}
+
+/// Far figures wear their figure's second mesh. Every figure is looked at once every `LOD_PERIOD` frames (a crew's figures spread over them),
+/// with a margin either side of the distance so one at the edge does not flicker. The mesh handle is swapped on the figure's own entity.
+#[allow(clippy::type_complexity)]
+fn lod(
+    mut frame: Local<u32>,
+    kit: Option<Res<Kit>>,
+    camera: Option<Single<&GlobalTransform, (With<Camera3d>, With<crate::MainCamera>)>>,
+    frames: Query<&GlobalTransform>,
+    crews: Query<&Crew>,
+    mut hands: Query<(&mut Hand, &GlobalTransform, &mut Mesh3d)>,
+) {
+    let (Some(kit), Some(camera)) = (kit, camera) else { return };
+    *frame = frame.wrapping_add(1);
+    let cam = camera.translation();
+    for crew in &crews {
+        if !within(Some(cam), frames.get(crew.frame).ok(), crew, kit.range + FADE_OUT_RANGE) {
+            continue;
+        }
+        for &e in crew.hands.iter().skip((*frame % LOD_PERIOD) as usize).step_by(LOD_PERIOD as usize) {
+            let Ok((mut h, gt, mut mesh)) = hands.get_mut(e) else { continue };
+            let lods = &kit.figures[h.figure].lods;
+            let want = want_lod(h.lod, cam.distance(gt.translation()), kit.lod_distance, lods.len());
+            if want != h.lod {
+                h.lod = want;
+                mesh.0 = lods[want].clone();
+            }
+        }
+    }
+}
+
+/// The level of detail for a figure that wears `current` at `distance` from the camera: the far one (the last of `levels`) beyond `at`,
+/// with `LOD_HYSTERESIS` of margin on whichever side he is on now.
+fn want_lod(current: usize, distance: f32, at: f32, levels: usize) -> usize {
+    let far = levels - 1;
+    if far == 0 {
+        return 0;
+    }
+    let edge = if current == 0 { at * (1.0 + LOD_HYSTERESIS) } else { at * (1.0 - LOD_HYSTERESIS) };
+    if distance > edge { far } else { 0 }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    #[test]
+    fn a_bad_kit_header_leaves_deck_crews_off_without_panicking() {
+        let root = std::env::temp_dir().join(format!("procyon-kit-bad-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let head = root.join(DATA);
+        std::fs::create_dir_all(head.parent().unwrap()).unwrap();
+        std::fs::write(head.with_extension("bin"), []).unwrap();
+        // not JSON, JSON of another shape, a version-1 header, and a clip list longer than the shader has room for
+        let many = format!(r#"{{"version": {FORMAT}, "clips": [{}]}}"#, vec![r#"{"name": "x"}"#; MAX_CLIPS + 1].join(","));
+        for text in ["clips", r#"["verts"]"#, r#"{"version": 1, "verts": 0, "frames": 0, "part": [], "clips": []}"#, many.as_str()] {
+            std::fs::write(&head, text).unwrap();
+            assert!(read_kit(&root).is_none(), "{text}");
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     fn node(name: &str, x: f32, z: f32) -> (String, Transform) {
         (name.into(), Transform::from_xyz(x, 0.0, z))
+    }
+
+    /// A minimal v2 header: the eight required clips (and `extra`), one rig of 11 bones, one figure with two levels of detail.
+    fn header(extra: &[&str]) -> Value {
+        let names: Vec<&str> = CLIPS[..REQUIRED].iter().copied().chain(extra.iter().copied()).collect();
+        let clips: Vec<Value> = names.iter().enumerate().map(|(i, n)| serde_json::json!({"name": n, "start": i * 10, "frames": 10, "loop": true, "seconds": 1.0})).collect();
+        serde_json::json!({
+            "version": 2, "fps": 15, "frames": 200, "clips": clips,
+            "speeds": {"walk": 0.7, "run": 2.0, "climb": 0.5},
+            "parts": SLOTS, "rigs": [{"name": "human", "bones": 11, "column": 0}],
+            "figures": [{"name": "sailor", "rig": "human", "bounds": [[-0.3, 0.0, -0.6], [0.3, 1.2, 0.5]],
+                         "lods": [{"verts": 1116, "offset": 0}, {"verts": 396, "offset": 35712}]}],
+            "pose": {"width": 22, "height": 200}
+        })
     }
 
     #[test]
@@ -842,18 +1325,121 @@ mod tests {
     }
 
     #[test]
-    fn half_floats_decode() {
-        assert_eq!(f16_to_f32(0x3c00), 1.0);
-        assert_eq!(f16_to_f32(0xc000), -2.0);
-        assert!((f16_to_f32(0x3555) - 0.333).abs() < 0.001);
+    fn the_block_parses_outfits_figures_and_caps() {
+        let d = parse(&serde_json::json!({"per_ship": 40, "outfits": [
+            {"race": "Navy", "officer": true, "coat": [0.1, 0.2, 0.5], "trim": [0.9, 0.8, 0.1], "figure": "officer"},
+            {"race": "Navy"}]}))
+        .unwrap();
+        assert_eq!(d.per_ship, 40);
+        assert_eq!(d.per_scenery, 150, "the scenery cap has its own default");
+        assert_eq!(d.lod_distance, LOD_DISTANCE);
+        assert!(d.outfits[0].officer);
+        assert_eq!(d.outfits[0].figure.as_deref(), Some("officer"));
+        assert_eq!(d.outfits[0].colors[1], Vec3::new(0.1, 0.2, 0.5));
+        assert_eq!(d.outfits[0].colors[5], Vec3::new(0.9, 0.8, 0.1), "trim is slot 5");
+        assert_eq!(d.outfits[1].figure, None);
+        assert!(parse(&Value::Null).is_none());
+        let d = parse(&serde_json::json!({"per_scenery": 20, "lod_distance": 30.0, "outfits": (0..40).map(|_| serde_json::json!({"race": "Navy"})).collect::<Vec<_>>()})).unwrap();
+        assert_eq!((d.per_scenery, d.lod_distance, d.outfits.len()), (20, 30.0, MAX_OUTFITS));
     }
 
     #[test]
-    fn the_block_parses_outfits() {
-        let d = parse(&serde_json::json!({"per_ship": 40, "outfits": [{"race": "Navy", "officer": true, "coat": [0.1, 0.2, 0.5]}]})).unwrap();
-        assert_eq!(d.per_ship, 40);
-        assert!(d.outfits[0].officer);
-        assert_eq!(d.outfits[0].colors[1], Vec3::new(0.1, 0.2, 0.5));
-        assert!(parse(&Value::Null).is_none());
+    fn the_header_parses_and_is_checked() {
+        let h = parse_header(&header(&[])).unwrap();
+        assert_eq!((h.width, h.height, h.clips.len(), h.rigs.clone()), (22, 200, 8, vec![(11, 0)]));
+        assert_eq!(h.speeds, [0.7, 2.0, 0.5]);
+        assert_eq!(h.figures[0].lods, vec![(1116, 0), (396, 35712)]);
+        assert_eq!(h.figures[0].bounds[1], Vec3::new(0.3, 1.2, 0.5));
+        let mut v1 = header(&[]);
+        v1["version"] = 1.into();
+        assert!(parse_header(&v1).unwrap_err().contains("format 2"));
+        let mut bad = header(&[]);
+        bad["figures"][0]["rig"] = "lizard".into();
+        assert!(parse_header(&bad).unwrap_err().contains("unknown rig"));
+        let mut bad = header(&[]);
+        bad["clips"][7]["start"] = 195.into();
+        assert!(parse_header(&bad).unwrap_err().contains("outside"));
+        let mut bad = header(&[]);
+        bad["rigs"][0]["bones"] = 12.into();
+        assert!(parse_header(&bad).unwrap_err().contains("outside"));
+        let mut bad = header(&[]);
+        bad["parts"] = serde_json::json!(["skin"]);
+        assert!(parse_header(&bad).is_err());
+        let mut bad = header(&[]);
+        bad["figures"][0]["lods"][1]["verts"] = 395.into();
+        assert!(parse_header(&bad).is_err());
+        let many: Vec<&str> = vec!["x"; MAX_CLIPS];
+        let mut tall = header(&many);
+        tall["pose"]["height"] = 1000.into();
+        assert!(parse_header(&tall).unwrap_err().contains("at most"));
+    }
+
+    #[test]
+    fn clips_are_found_by_name_and_optional_ones_fall_back() {
+        let none = parse_header(&header(&[])).unwrap();
+        let r = resolve_clips(&none.clips).unwrap();
+        assert_eq!(r.len(), CLIPS.len());
+        assert_eq!(r[TALK as usize], r[IDLE as usize], "talk falls back to idle");
+        assert_eq!(r[CARRY as usize], r[WALK as usize], "carry falls back to walk");
+        let both = parse_header(&header(&["talk", "carry"])).unwrap();
+        let r = resolve_clips(&both.clips).unwrap();
+        assert_eq!((r[TALK as usize], r[CARRY as usize]), (8, 9));
+        // by name, not by position
+        let mut shuffled = both.clips.clone();
+        shuffled.swap(0, 7);
+        let r = resolve_clips(&shuffled).unwrap();
+        assert_eq!(shuffled[r[IDLE as usize]].name, "idle");
+        assert_eq!(shuffled[r[FALL as usize]].name, "fall");
+        // a required clip missing is an error naming it
+        let mut missing = none.clips.clone();
+        missing.retain(|c| c.name != "haul");
+        assert!(resolve_clips(&missing).unwrap_err().contains("haul"));
+    }
+
+    #[test]
+    fn the_tag_packs_clip_outfit_phase_and_start_in_their_bits() {
+        let t = pack_tag(9, 31, 127, 0xabcd);
+        assert_eq!(t & 15, 9);
+        assert_eq!((t >> 4) & 31, 31);
+        assert_eq!((t >> 9) & 127, 127);
+        assert_eq!(t >> 16, 0xabcd);
+        // fields do not spill into each other, and too-big values are cut to their bits
+        assert_eq!(pack_tag(0, 1, 0, 0), 16);
+        assert_eq!(pack_tag(0, 0, 1, 0), 512);
+        assert_eq!(pack_tag(0, 0, 0, 1), 65536);
+        assert_eq!(pack_tag(16, 32, 128, 0x10000), 0);
+    }
+
+    #[test]
+    fn walkers_keep_to_the_right_of_their_lane() {
+        // walking toward the bow (-z) the right hand is starboard (+x)
+        let g = lane_goal(Vec3::ZERO, Vec3::new(0.0, 0.0, -10.0), 0.3);
+        assert!((g - Vec3::new(0.3, 0.0, -10.0)).length() < 1e-5, "{g:?}");
+        // the other way along the same lane is the opposite side: two opposite streams pass each other
+        let back = lane_goal(Vec3::new(0.0, 0.0, -10.0), Vec3::ZERO, 0.3);
+        assert!((back - Vec3::new(-0.3, 0.0, 0.0)).length() < 1e-5, "{back:?}");
+        // along +x the right hand is +z (aft)
+        let g = lane_goal(Vec3::ZERO, Vec3::new(5.0, 0.0, 0.0), 0.2);
+        assert!((g - Vec3::new(5.0, 0.0, 0.2)).length() < 1e-5, "{g:?}");
+        assert_eq!(lane_goal(Vec3::ONE, Vec3::ONE, 0.3), Vec3::ONE, "no direction, no offset");
+    }
+
+    #[test]
+    fn stops_scatter_around_the_walk_point() {
+        let mut rng = 12345u64;
+        let to = Vec3::new(3.0, 1.0, -4.0);
+        let spots: Vec<Vec3> = (0..50).map(|_| stop_spot(to, Vec3::ZERO, &mut rng)).collect();
+        assert!(spots.iter().all(|s| s.y == to.y && s.distance(to) <= STOP_SCATTER * 1.5 + 1e-4));
+        assert!(spots.windows(2).all(|w| w[0] != w[1]), "two never stand in one place");
+    }
+
+    #[test]
+    fn the_far_mesh_has_a_margin_either_way() {
+        let at = 45.0;
+        assert_eq!(want_lod(0, 46.0, at, 2), 0, "inside the margin going out");
+        assert_eq!(want_lod(0, 50.0, at, 2), 1);
+        assert_eq!(want_lod(1, 44.0, at, 2), 1, "inside the margin coming back");
+        assert_eq!(want_lod(1, 40.0, at, 2), 0);
+        assert_eq!(want_lod(0, 1000.0, at, 1), 0, "one mesh only");
     }
 }

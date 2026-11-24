@@ -17,6 +17,9 @@ fn unit(name: &str, owner: &str, pos: Vec3) -> Unit {
         damage: 0.0,
         flag: String::new(),
         attack: vec![],
+        heading: 0.0,
+        speed: None,
+        cloaked: false,
     }
 }
 fn script() -> Script {

@@ -3,6 +3,7 @@
 
 pub mod alliance;
 pub mod audio;
+pub mod battle;
 pub mod bindings;
 pub mod blackhole;
 pub mod boarding;
@@ -20,6 +21,7 @@ pub mod decals;
 pub mod docking;
 pub mod dragons;
 pub mod environment;
+pub mod exit;
 #[cfg(test)]
 mod fixed_tests;
 pub mod flag;
@@ -55,7 +57,9 @@ pub mod wake;
 
 // Explicit crate-root re-exports, grouped by owning module. No glob re-exports here (docs/development.md).
 // scenario.rs: battle lifecycle and map objects.
-pub use scenario::{Group, Namer, Outcome, Scenario, debug_kill, enter_battle, game_to_bevy, leave_battle, outcome, restart, resume_scenario, shot_target, spawn_ship};
+pub use scenario::{
+    Group, Namer, Outcome, Scenario, debug_kill, enter_battle, game_to_bevy, leave_battle, outcome, restart, resume_scenario, scripted_kills, scripted_steps, spawn_ship,
+};
 // ship.rs: ship state, sides and AI.
 pub use ship::{EngineOrder, PlayerShip, Ship, ShipName, Side, ai, angdiff, approach_speed, step};
 // view.rs: camera, input and HUD wiring.
@@ -64,7 +68,6 @@ pub use view::{Orbit, Sky, Slot, camera, hud, input, sky, toggle_debug};
 use bevy::input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll};
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
-use collision::sail;
 pub use combat::{GunStates, Health, Library, Target, Transient};
 use std::f32::consts::{PI, TAU};
 use std::path::PathBuf;
@@ -173,7 +176,7 @@ fn lobby_scenario(app: &mut App) {
             }
             Err(err) => {
                 eprintln!("{err}");
-                std::process::exit(2);
+                exit::quit(2);
             }
         }
     }
@@ -190,12 +193,12 @@ pub fn run(view: fn(&mut App), setup_view: fn(&mut App)) {
     let args: Vec<String> = std::env::args().collect();
     // Mission authoring (docs/modding.md): the rule schema needs no assets.
     if let Some(code) = rules::cli::dump_schema(&args) {
-        std::process::exit(code);
+        exit::quit(code);
     }
     let script = args.iter().position(|a| a == "--script").map(|i| {
         args.get(i + 1).ok_or_else(|| "--script requires a name".to_owned()).and_then(|name| smoke::Script::parse(name)).unwrap_or_else(|err| {
             eprintln!("{err}");
-            std::process::exit(2);
+            exit::quit(2);
         })
     });
     let mods: Vec<PathBuf> = args.windows(2).filter(|w| w[0] == "--mod").map(|w| PathBuf::from(&w[1])).collect();
@@ -211,7 +214,7 @@ pub fn run(view: fn(&mut App), setup_view: fn(&mut App)) {
     if status != setup::Imported::Ready && is_scripted(&args) {
         // A scripted run (tools/smokes.sh, shot.sh) has nobody to answer the import screen: fail at once with the hint.
         eprintln!("No imported assets in {} ({status:?}). Import your copy of the game first: make assets ARGS=\"--game <install dir>\" (or set PROCYON_ASSETS).", base.display());
-        std::process::exit(1);
+        exit::quit(1);
     }
     if status != setup::Imported::Ready || args.iter().any(|a| a == "--crashed") {
         eprintln!("Game assets in {}: {status:?}; opening the import screen.", base.display());
@@ -227,7 +230,7 @@ pub fn run(view: fn(&mut App), setup_view: fn(&mut App)) {
     report.without(&content_dir()).log();
     let _ = ASSETS.set(root);
     if let Some(code) = rules::cli::apply(&args) {
-        std::process::exit(code);
+        exit::quit(code);
     }
     let arg = |k: &str| args.iter().position(|a| a == k).and_then(|i| args.get(i + 1)).cloned();
     let shot = arg("--shot");
@@ -252,7 +255,7 @@ pub fn run(view: fn(&mut App), setup_view: fn(&mut App)) {
         shot_frames,
         late_frame: arg("--late-frame").and_then(|v| v.parse().ok()).unwrap_or(0), // 0: no _late shot
     };
-    App::new()
+    let result = App::new()
         .add_plugins(
             DefaultPlugins
                 .set(AssetPlugin { file_path: assets_dir().to_string_lossy().into_owned(), ..default() })
@@ -315,12 +318,7 @@ pub fn run(view: fn(&mut App), setup_view: fn(&mut App)) {
             }
             false => default(),
         })
-        .insert_resource(Outcome::Playing)
-        .init_resource::<scenario::EndMessage>()
-        .init_resource::<scenario::EndLine>()
-        .init_resource::<scenario::MapLighting>()
-        .add_systems(Update, scenario::apply_lighting.run_if(resource_changed::<scenario::MapLighting>))
-        .insert_resource(bindings::Bindings::load())
+        .add_plugins((scenario::plugin, bindings::plugin))
         .insert_resource({
             let c: Vec<f32> = arg("--cam").map(|v| v.split(',').filter_map(|x| x.parse().ok()).collect()).unwrap_or_default();
             if c.len() == 3 {
@@ -339,56 +337,14 @@ pub fn run(view: fn(&mut App), setup_view: fn(&mut App)) {
                 Orbit { yaw: 0.6, pitch: 0.5, dist: view::RETAIL_START_DIST, focus: None }
             }
         })
-        .init_resource::<collision::Shapes>()
-        .add_message::<collision::Ram>()
-        .init_resource::<ship::Fleets>()
-        .init_resource::<ship::CaptainTargets>()
-        .init_resource::<course::Plot>()
         .add_systems(Startup, setup)
         .add_plugins((smoke::plugin, battle_schedule, interpolate::plugin, loading::plugin))
-        .add_systems(
-            FixedUpdate,
-            (
-                ship::reconcile_fleets.in_set(BattleSet::Commands),
-                ai.in_set(BattleSet::Ai),
-                ship::fleet_follow.in_set(BattleSet::Fleet),
-                (briefing::halt_arrival, blackhole::pull, sail, out_of_map).chain().in_set(BattleSet::Simulate),
-                outcome.in_set(BattleSet::Outcome),
-            )
-                .run_if(in_state(menu::Screen::Battle))
-                .run_if(menu::overlay_closed),
-        )
-        // The script frame count comes before Update, so the scripts and pictures there each see every frame number once (#590);
-        // `loading::wait` runs before it, so the frame a battle finishes loading counts (else a script step repeats: R restarts again).
-        .add_systems(PreUpdate, screenshot)
-        .add_systems(OnEnter(menu::Screen::Battle), enter_battle)
-        .add_systems(OnExit(menu::Screen::Battle), scenario::reset_fleets)
-        .add_systems(
-            Update,
-            (
-                (
-                    (shot_target, restart, debug_kill).chain(),
-                    briefing::update,
-                    view::fleet_keys,
-                    input,
-                    toggle_debug,
-                    camera,
-                    sky,
-                    wake::update,
-                    blackhole::update,
-                    course::update,
-                    hud,
-                    leave_battle,
-                )
-                    .chain()
-                    .run_if(in_state(menu::Screen::Battle))
-                    .run_if(menu::overlay_closed),
-                view::hd_sky,
-                view::screenshot_key,
-                view::focus_projectile.run_if(in_state(menu::Screen::Battle)),
-            ),
-        )
+        .add_plugins((battle::plugin, course::plugin, view::plugin))
         .run();
+    // A system that stopped the run with an error code (`exit::app_exit`) sets the process's status.
+    if let AppExit::Error(_) = result {
+        exit::quit(exit::status(&result));
+    }
 }
 
 /// The camera the player looks through. Other 3D cameras exist (the Fleet screen's ship preview renders to a texture), so systems
@@ -441,7 +397,7 @@ pub fn below_floor(p: Vec3) -> bool {
 }
 
 /// After the movement of a tick: moving objects that ended below the floor are queued for removal. Shells test their own step.
-fn out_of_map(mut commands: Commands, movers: Query<(Entity, &Transform), (With<combat::Asteroid>, Without<Removed>)>) {
+pub(crate) fn out_of_map(mut commands: Commands, movers: Query<(Entity, &Transform), (With<combat::Asteroid>, Without<Removed>)>) {
     for (e, tf) in &movers {
         if below_floor(tf.translation) {
             queue_removal(&mut commands, e);
@@ -658,7 +614,7 @@ fn run_is_over(frame: u32, last_shot: u32, saved: usize, wanted: usize, scripted
 
 static SHOTS_SAVED: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
-fn screenshot(mut commands: Commands, mut cfg: ResMut<Config>, loading: Option<Res<loading::Loading>>) {
+pub(crate) fn screenshot(mut commands: Commands, mut cfg: ResMut<Config>, loading: Option<Res<loading::Loading>>, mut exit: MessageWriter<AppExit>) {
     let Some(path) = cfg.shot.clone() else { return };
     // scripts and pictures count frames of the battle: the count waits while it loads
     if loading.is_some() {
@@ -689,7 +645,7 @@ fn screenshot(mut commands: Commands, mut cfg: ResMut<Config>, loading: Option<R
     }
     let saved = SHOTS_SAVED.load(std::sync::atomic::Ordering::SeqCst);
     if run_is_over(cfg.frame, last, saved, shots.len(), cfg.script.is_some(), cfg.ended, cfg.script.as_deref() == Some("restart")) {
-        std::process::exit(0);
+        exit.write(exit::app_exit(0));
     }
 }
 

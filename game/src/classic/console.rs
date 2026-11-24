@@ -5,15 +5,14 @@ use bevy::prelude::*;
 use crate::campaign::Mission;
 use crate::rules::console::{Cheats, Console, DevView, ShapeKind};
 
-use crate::rules::console::SHOWN;
-
 #[derive(Component)]
 struct Panel;
 #[derive(Component)]
 struct Tag;
 
 pub fn plugin(app: &mut App) {
-    app.add_systems(Update, (build, draw).chain().run_if(in_state(crate::menu::Screen::Battle)).run_if(resource_exists::<Console>))
+    app.add_systems(Update, fps_overlay.run_if(resource_exists::<crate::rules::console::FrameStats>))
+        .add_systems(Update, (build, draw).chain().run_if(in_state(crate::menu::Screen::Battle)).run_if(resource_exists::<Console>))
         .add_systems(Update, (build_shapes, place_labels).chain().after(crate::camera).run_if(in_state(crate::menu::Screen::Battle)).run_if(resource_exists::<Mission>));
 }
 
@@ -57,17 +56,7 @@ fn draw(
             continue;
         }
         let Some(mut text) = children.first().and_then(|c| texts.get_mut(*c).ok()) else { continue };
-        let end = console.log.len().saturating_sub(console.scroll);
-        let start = end.saturating_sub(SHOWN);
-        let mut shown = String::new();
-        if start > 0 {
-            shown.push_str(&format!("^ {start} more above (PageUp, Ctrl+Home)\n"));
-        }
-        shown.push_str(&console.log[start..end].join("\n"));
-        if console.scroll > 0 {
-            shown.push_str(&format!("\nv {} more below (PageDown, Ctrl+End)", console.scroll));
-        }
-        shown.push_str(&format!("\n> {}_", console.line));
+        let shown = console.display();
         if text.0 != shown {
             text.0 = shown;
         }
@@ -165,6 +154,45 @@ fn place_labels(camera: Single<(&Camera, &GlobalTransform), (With<Camera3d>, Wit
             }
             _ => {
                 vis.set_if_neq(Visibility::Hidden);
+            }
+        }
+    }
+}
+
+// -------------------------------------------------------------------------------------------------------------------- `fps`
+
+/// The frame-rate counter (`fps` command): a small dark box in the top-right corner, above the HUD switch so `hud off` leaves it.
+#[derive(Component)]
+struct FpsBox;
+
+fn fps_overlay(
+    mut commands: Commands,
+    stats: Res<crate::rules::console::FrameStats>,
+    time: Res<Time<Virtual>>,
+    mut boxes: Query<(&mut Visibility, &Children), With<FpsBox>>,
+    mut texts: Query<&mut Text>,
+) {
+    let on = crate::menu::fps_setting();
+    if boxes.is_empty() {
+        commands.spawn((
+            FpsBox,
+            Visibility::Hidden,
+            GlobalZIndex(402),
+            BackgroundColor(Color::srgba(0.0, 0.0, 0.05, 0.8)),
+            Node { position_type: PositionType::Absolute, top: Val::Px(4.0), right: Val::Px(4.0), padding: UiRect::axes(Val::Px(6.0), Val::Px(2.0)), ..default() },
+            children![(Text::new(""), TextFont { font_size: FontSize::Px(13.0), ..default() }, TextColor(Color::srgb(0.7, 1.0, 0.7)))],
+        ));
+        return;
+    }
+    for (mut v, children) in &mut boxes {
+        v.set_if_neq(if on { Visibility::Inherited } else { Visibility::Hidden });
+        if !on {
+            continue;
+        }
+        if let Some(mut text) = children.first().and_then(|c| texts.get_mut(*c).ok()) {
+            let shown = stats.text(time.relative_speed());
+            if text.0 != shown {
+                text.0 = shown;
             }
         }
     }

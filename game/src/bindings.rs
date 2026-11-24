@@ -214,6 +214,11 @@ fn path() -> Option<std::path::PathBuf> {
     Some(crate::campaign::user_dir()?.join("bindings.json"))
 }
 
+/// Loads the player's key bindings.
+pub fn plugin(app: &mut App) {
+    app.insert_resource(Bindings::load());
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

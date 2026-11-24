@@ -4,8 +4,11 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
+mod asteroids;
+mod crew;
 mod ships;
 mod weapons;
+pub use crew::{CrewMember, roster};
 pub use ships::{derive, load_class};
 
 fn asset_context(path: &std::path::Path) -> String {
@@ -48,7 +51,7 @@ impl std::fmt::Display for DataError {
 impl std::error::Error for DataError {}
 
 /// The folder name of the active mod that provides `path` (a link into the overlay is followed to its source).
-fn mod_of(path: &std::path::Path) -> Option<String> {
+pub(crate) fn mod_of(path: &std::path::Path) -> Option<String> {
     let source = std::fs::canonicalize(path).ok()?;
     crate::modding::active().iter().find(|m| std::fs::canonicalize(m).is_ok_and(|m| source.starts_with(m))).and_then(|m| Some(m.file_name()?.to_string_lossy().into_owned()))
 }
@@ -64,6 +67,39 @@ pub fn load_as<T: serde::de::DeserializeOwned>(path: &std::path::Path, source_mo
 /// Unknown fields stay allowed unless `T` denies them.
 pub fn load<T: serde::de::DeserializeOwned>(path: &std::path::Path) -> Result<T, DataError> {
     load_as(path, None)
+}
+
+/// A data file a feature can live without, read through `load`. Absent: `None`, quietly. Present but unreadable or not a `T`: one
+/// `error:` line naming the file, its mod and serde's field/line/column message, then the same file of the base assets (`base`,
+/// the retail import) when there is one and it reads; else `None`, and `instead` says what the game does without it. Never a panic.
+pub fn load_or_base<T: serde::de::DeserializeOwned>(path: &std::path::Path, base: Option<&std::path::Path>, instead: &str) -> Option<T> {
+    if !path.is_file() {
+        return None;
+    }
+    let error = match load::<T>(path) {
+        Ok(v) => return Some(v),
+        Err(e) => e,
+    };
+    let same = |b: &std::path::Path| std::fs::canonicalize(b).ok() == std::fs::canonicalize(path).ok();
+    match base.filter(|b| b.is_file() && !same(b)).map(load::<T>) {
+        Some(Ok(v)) => {
+            eprintln!("error: {error}; using the base file");
+            Some(v)
+        }
+        Some(Err(base_error)) => {
+            eprintln!("error: {error}; the base file fails too ({base_error}); {instead}");
+            None
+        }
+        None => {
+            eprintln!("error: {error}; {instead}");
+            None
+        }
+    }
+}
+
+/// `load_or_base` for `rel` under the asset root, with the same file of the base assets as the fallback.
+pub fn load_asset<T: serde::de::DeserializeOwned>(rel: &str, instead: &str) -> Option<T> {
+    load_or_base(&crate::assets_dir().join(rel), Some(&crate::base_assets().join(rel)), instead)
 }
 
 /// Typed required asset with the resolved source path and serde's field/line/column diagnostic.
@@ -146,6 +182,7 @@ pub(crate) fn glb_json(bytes: &[u8]) -> Option<(Value, usize)> {
     Some((serde_json::from_slice(bytes.get(20..end)?).ok()?, end))
 }
 
+#[derive(Debug, PartialEq)]
 pub struct AsteroidDef {
     pub scene: String,
     pub hp: f32,
@@ -159,48 +196,9 @@ pub struct AsteroidDef {
 #[derive(Resource)]
 pub struct AsteroidDefs(pub HashMap<String, AsteroidDef>);
 impl FromWorld for AsteroidDefs {
+    /// Required data: a missing or invalid file stops the game with the error naming the file, its mod and the entry and field.
     fn from_world(_: &mut World) -> Self {
-        let doc = read_json(&crate::assets_dir().join("data/asteroids.json"));
-        let defs: HashMap<_, _> = doc
-            .as_object()
-            .expect("Asteroid type map")
-            .iter()
-            .map(|(name, d)| {
-                let num = |key: &str| {
-                    let v = d[key].as_f64().unwrap_or_else(|| panic!("Asteroid number {name}: {key} (re-run the asset importer)")) as f32;
-                    assert!(v.is_finite() && v > 0.0, "Invalid asteroid {name}: {key}");
-                    v
-                };
-                let text = |key: &str| d[key].as_str().expect("Asteroid string").to_string();
-                let children: Vec<_> = d["children"].as_array().expect("Asteroid children").iter().map(|v| v.as_str().expect("Asteroid child").to_string()).collect();
-                assert_eq!(children.len(), 10, "Asteroid death slots: {name}");
-                (
-                    name.clone(),
-                    AsteroidDef {
-                        scene: text("scene"),
-                        hp: num("hp"),
-                        mass: num("mass"),
-                        radius: num("radius"),
-                        acceleration: num("acceleration"),
-                        children,
-                        effect: text("effect"),
-                    },
-                )
-            })
-            .collect();
-        fn visit(name: &str, defs: &HashMap<String, AsteroidDef>, ancestors: &mut Vec<String>) {
-            assert!(!ancestors.iter().any(|a| a == name), "Cyclic asteroid breakup: {name}");
-            let d = defs.get(name).unwrap_or_else(|| panic!("Unknown asteroid child: {name}"));
-            ancestors.push(name.into());
-            for child in d.children.iter().filter(|c| !c.is_empty()) {
-                visit(child, defs, ancestors);
-            }
-            ancestors.pop();
-        }
-        for name in defs.keys() {
-            visit(name, &defs, &mut vec![]);
-        }
-        Self(defs)
+        Self(asteroids::try_load(&crate::assets_dir().join("data/asteroids.json")).unwrap_or_else(|e| panic!("{e}")))
     }
 }
 
@@ -649,6 +647,50 @@ impl Library {
 mod legacy {
     use super::*;
 
+    /// The asteroid reader before `asteroids`, on an already parsed file.
+    pub fn asteroids(doc: &Value) -> HashMap<String, AsteroidDef> {
+        let defs: HashMap<_, _> = doc
+            .as_object()
+            .expect("Asteroid type map")
+            .iter()
+            .map(|(name, d)| {
+                let num = |key: &str| {
+                    let v = d[key].as_f64().unwrap_or_else(|| panic!("Asteroid number {name}: {key} (re-run the asset importer)")) as f32;
+                    assert!(v.is_finite() && v > 0.0, "Invalid asteroid {name}: {key}");
+                    v
+                };
+                let text = |key: &str| d[key].as_str().expect("Asteroid string").to_string();
+                let children: Vec<_> = d["children"].as_array().expect("Asteroid children").iter().map(|v| v.as_str().expect("Asteroid child").to_string()).collect();
+                assert_eq!(children.len(), 10, "Asteroid death slots: {name}");
+                (
+                    name.clone(),
+                    AsteroidDef {
+                        scene: text("scene"),
+                        hp: num("hp"),
+                        mass: num("mass"),
+                        radius: num("radius"),
+                        acceleration: num("acceleration"),
+                        children,
+                        effect: text("effect"),
+                    },
+                )
+            })
+            .collect();
+        fn visit(name: &str, defs: &HashMap<String, AsteroidDef>, ancestors: &mut Vec<String>) {
+            assert!(!ancestors.iter().any(|a| a == name), "Cyclic asteroid breakup: {name}");
+            let d = defs.get(name).unwrap_or_else(|| panic!("Unknown asteroid child: {name}"));
+            ancestors.push(name.into());
+            for child in d.children.iter().filter(|c| !c.is_empty()) {
+                visit(child, defs, ancestors);
+            }
+            ancestors.pop();
+        }
+        for name in defs.keys() {
+            visit(name, &defs, &mut vec![]);
+        }
+        defs
+    }
+
     pub fn gun_def(g: &Value) -> GunDef {
         GunDef {
             mount_type: g["Mount Type"].as_str().map(|s| s.split_whitespace().collect::<Vec<_>>().join(" ")),
@@ -798,6 +840,38 @@ mod weapons_equivalence {
             assert_alike(&g, &b, &m.file_name().to_string_lossy());
         }
         eprintln!("compared retail and {seen} mod weapon file(s)");
+    }
+}
+
+#[cfg(test)]
+mod asteroids_equivalence {
+    use super::*;
+
+    fn typed(doc: &Value) -> HashMap<String, AsteroidDef> {
+        asteroids::build(serde_json::from_value(doc.clone()).unwrap_or_else(|e| panic!("{e}"))).unwrap_or_else(|e| panic!("{e}"))
+    }
+
+    /// The typed reader gives exactly what the untyped one gave, on the imported retail table and on every `mods/` asteroid file
+    /// (merged over retail, as the overlay does).
+    #[test]
+    #[ignore = "needs imported assets"]
+    fn typed_asteroids_equal_the_untyped_reader_on_retail_and_mod_data() {
+        let Some(retail) = try_json(&crate::assets_dir().join("data/asteroids.json")) else {
+            eprintln!("skipped: no imported data/asteroids.json");
+            return;
+        };
+        assert_eq!(typed(&retail), legacy::asteroids(&retail), "retail");
+        assert!(!typed(&retail).is_empty());
+        let mods = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../mods");
+        let mut seen = 0;
+        for m in std::fs::read_dir(mods).unwrap().flatten() {
+            let Some(over) = try_json(&m.path().join("data/asteroids.json")) else { continue };
+            seen += 1;
+            let mut merged = retail.clone();
+            crate::modding::merge(&mut merged, &over);
+            assert_eq!(typed(&merged), legacy::asteroids(&merged), "{}", m.file_name().to_string_lossy());
+        }
+        eprintln!("compared retail and {seen} mod asteroid file(s)");
     }
 }
 
@@ -961,5 +1035,48 @@ mod write_atomic_tests {
         let names: Vec<_> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name()).collect();
         assert_eq!(names, ["settings.json"], "no temp file stays");
         let _ = std::fs::remove_dir_all(dir.parent().unwrap());
+    }
+}
+
+#[cfg(test)]
+mod load_or_base_tests {
+    use super::*;
+    use serde::Deserialize;
+
+    #[derive(Deserialize, Debug, PartialEq)]
+    struct Bar {
+        width: f32,
+    }
+
+    fn dir(tag: &str) -> std::path::PathBuf {
+        let d = std::env::temp_dir().join(format!("procyon-load-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    #[test]
+    fn an_absent_file_is_none_and_a_good_file_reads_with_unknown_fields_allowed() {
+        let d = dir("good");
+        assert_eq!(load_or_base::<Bar>(&d.join("none.json"), None, "x"), None);
+        std::fs::write(d.join("a.json"), r#"{"width": 3, "extra": [1]}"#).unwrap();
+        assert_eq!(load_or_base::<Bar>(&d.join("a.json"), None, "x"), Some(Bar { width: 3.0 }));
+        std::fs::remove_dir_all(d).unwrap();
+    }
+
+    #[test]
+    fn a_bad_file_is_skipped_and_the_base_file_is_kept() {
+        let d = dir("bad");
+        std::fs::write(d.join("syntax.json"), "width: 3").unwrap();
+        std::fs::write(d.join("type.json"), r#"{"width": "wide"}"#).unwrap();
+        std::fs::write(d.join("base.json"), r#"{"width": 9}"#).unwrap();
+        for bad in ["syntax.json", "type.json"] {
+            assert_eq!(load_or_base::<Bar>(&d.join(bad), Some(&d.join("base.json")), "x"), Some(Bar { width: 9.0 }), "{bad}");
+            assert_eq!(load_or_base::<Bar>(&d.join(bad), Some(&d.join("missing.json")), "x"), None, "{bad}: no base file, no panic");
+            assert_eq!(load_or_base::<Bar>(&d.join(bad), Some(&d.join(bad)), "x"), None, "{bad}: the same file is not its own base");
+        }
+        let e = load::<Bar>(&d.join("type.json")).unwrap_err().to_string();
+        assert!(e.contains("type.json") && e.contains("invalid type") && e.contains("line 1 column"), "names the file and the field's problem: {e}");
+        std::fs::remove_dir_all(d).unwrap();
     }
 }
