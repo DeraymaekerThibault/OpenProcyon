@@ -18,6 +18,8 @@
 //! - [`game_to_bevy`] / [`bevy_to_game`] / [`mount_rotation`] / [`mount_rot`]: the files' axes and `rot` triples as the loader reads them.
 //! - [`resolved_ship`]: a ship as the game loads it (points, speed, sections, guns, engines, ...), each value with its [`Source`]: the
 //!   file, the model or a default.
+//! - [`ship_art`]: the command-bar icon and weapon-panel outline (PNG bytes) and each gun's bank the engine generates for a ship from a
+//!   model, with nothing written.
 //! - [`crew_kind`] / [`CREW_KINDS`] / [`CREW_NODE`]: crew node names, and the kind of a model's crew nodes in `data::derive::Facts`.
 //!
 //! Shared code: no UI and no view imports.
@@ -26,9 +28,11 @@ use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
+mod art;
 mod check_mod;
 mod json;
 mod resolved;
+pub use art::{GunBank, ShipArt, ship_art};
 pub use check_mod::{check_mod, check_mod_with, unknown_key_findings, unknown_keys};
 pub use json::to_json_string;
 pub use resolved::{ResolvedEngine, ResolvedFlag, ResolvedGun, ResolvedPost, ResolvedSection, ResolvedShip, ResolvedWake, Source, resolved_ship};
