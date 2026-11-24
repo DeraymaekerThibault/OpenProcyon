@@ -194,11 +194,13 @@ fn a_cloud_keeps_gas_in_its_heart_and_looks_up_its_own_part_of_the_noise() {
     assert_eq!(u.params.x, noise_place(Vec3::ZERO), "from the cloud's origin, not where it is now");
 }
 
-/// How many `Modified` events the material asset got during one more frame.
-fn modified<M: Asset>(app: &mut App) -> usize {
+/// How many `Modified` events the material asset got during one more frame, read through `cursor`, which remembers what was
+/// already counted. Counting the buffer's current messages instead would depend on the wall clock: with the fixed timestep
+/// present, message buffers swap only on frames where a fixed step ran, so a slow machine sees the count jump between frames.
+fn modified<M: Asset>(app: &mut App, cursor: &mut bevy::ecs::message::MessageCursor<AssetEvent<M>>) -> usize {
     app.update();
-    let msgs = app.world_mut().resource_mut::<Messages<AssetEvent<M>>>();
-    msgs.iter_current_update_messages().filter(|e| matches!(e, AssetEvent::Modified { .. })).count()
+    let msgs = app.world().resource::<Messages<AssetEvent<M>>>();
+    cursor.read(msgs).filter(|e| matches!(e, AssetEvent::Modified { .. })).count()
 }
 
 #[test]
@@ -212,11 +214,12 @@ fn a_cloud_that_has_not_changed_leaves_its_materials_alone() {
     for _ in 0..3 {
         app.update();
     }
-    // (events of earlier frames may still be in the buffer: what counts is that no frame adds one)
-    let settled = (modified::<VolumeMaterial>(&mut app), modified::<NebulaMaterial>(&mut app));
-    for _ in 0..3 {
-        assert_eq!(modified::<VolumeMaterial>(&mut app), settled.0, "volume");
-        assert_eq!(modified::<NebulaMaterial>(&mut app), settled.1, "shell");
+    // from here on, no frame may add a Modified event for either material
+    let mut volume = app.world().resource::<Messages<AssetEvent<VolumeMaterial>>>().get_cursor_current();
+    let mut shell = app.world().resource::<Messages<AssetEvent<NebulaMaterial>>>().get_cursor_current();
+    for _ in 0..4 {
+        assert_eq!(modified(&mut app, &mut volume), 0, "volume");
+        assert_eq!(modified(&mut app, &mut shell), 0, "shell");
     }
     // a bolt does reach the shell's material
     app.world_mut().resource_mut::<Frame>().rows[crate::render::frame::BOLT_AT] = Vec4::new(0.0, 0.0, 0.0, 0.0);
