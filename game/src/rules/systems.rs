@@ -143,6 +143,13 @@ pub fn sim_pos(tf: &Transform, interp: Option<&crate::interpolate::Interp>) -> V
     interp.map_or(tf.translation, |i| i.sim_pose(tf).translation)
 }
 
+/// A mission base as a rule unit: its damage and its per-kind section damage (none without a class of sections).
+pub(crate) fn base_unit(b: &crate::campaign::MissionBase, e: Entity, tf: &Transform, armed: Option<(&crate::combat::ArmedBase, &Health)>, lib: &Library) -> Unit {
+    let mut u = b.unit(e, tf, armed.map_or(0.0, |(a, h)| crate::combat::base_mission_damage(&lib.classes[a.class], h)));
+    u.vital = Some(armed.map_or([None; 4], |(a, h)| crate::combat::vital_damage(&lib.classes[a.class].sections, &h.sections)));
+    u
+}
+
 fn units(ships: &Query<RuleShip>, lib: &Library) -> Vec<Unit> {
     ships
         .iter()
@@ -162,6 +169,7 @@ fn units(ships: &Query<RuleShip>, lib: &Library) -> Vec<Unit> {
                 heading: ship.heading,
                 speed: Some(ship.speed.abs()),
                 cloaked: cloak.is_some_and(|c| c.state == crate::cloak::State::Full),
+                vital: Some(crate::combat::vital_damage(&class.sections, &h.sections)),
                 ..Unit::new(e, m.id, sim_pos(tf, interp))
             }
         })
@@ -198,7 +206,7 @@ fn update(
     let mut world = units(&ships, &lib);
     mission.script.keep_sunk(&mut world);
     world.extend(animals.iter().map(|(e, a, tf, _)| a.unit(e, tf)));
-    world.extend(extra.bases.iter_mut().map(|(e, b, tf, armed)| b.unit(e, tf, armed.map_or(0.0, |(a, h)| crate::combat::base_mission_damage(&lib.classes[a.class], h)))));
+    world.extend(extra.bases.iter_mut().map(|(e, b, tf, armed)| base_unit(&b, e, tf, armed, &lib)));
     world.extend(rocks.iter().map(|(e, tf, a)| a.unit(e, tf)));
     // Not retail: a mission's mines answer to an explicit group (their world-object ids) only, never to their owner's name: a faction
     // whose ships are all gone is destroyed although its mines rest, and owner-wide orders do not reach them.

@@ -107,6 +107,9 @@ pub struct Unit {
     pub speed: Option<f32>,
     /// Fully cloaked (`cloak::State::Full`), not while cloaking or decloaking; `OP Group Is Cloaked`.
     pub cloaked: bool,
+    /// Ships and bases: per section kind (survival, max velocity, manoeuvrability, mission) the damage of that kind's sections,
+    /// `crate::combat::vital_damage` (None for a kind with no section); None for what is neither a ship nor a base.
+    pub vital: Option<[Option<f32>; 4]>,
 }
 
 impl Unit {
@@ -129,6 +132,7 @@ impl Unit {
             heading: 0.0,
             speed: None,
             cloaked: false,
+            vital: None,
         }
     }
 }
