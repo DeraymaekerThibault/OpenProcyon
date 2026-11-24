@@ -1887,3 +1887,13 @@ fn the_beams_of_an_abandoned_ship_stop() {
     assert_eq!(phases(wreck), [beam::Phase::Idle, beam::Phase::Idle], "a firing beam and a charging one both stop");
     assert!(matches!(phases(crewed)[..], [beam::Phase::Firing { .. }, beam::Phase::Charging { .. }]), "a crewed ship's beams run on");
 }
+
+/// docs/re/campaign.md: a kind's damage is 1 - current over maximum hit points summed over that kind's sections, the core left out.
+#[test]
+fn vital_damage_sums_hit_points_per_section_kind() {
+    let sec = |hp: f32, mission: bool| crate::data::Section { hp, vital: true, mission, ..default() };
+    let d = vital_damage(&[sec(100.0, true), sec(300.0, false)], &[0.0, 150.0]);
+    assert_eq!(d[0], Some(1.0 - 150.0 / 400.0));
+    assert_eq!(d[3], Some(1.0));
+    assert_eq!((d[1], d[2]), (None, None));
+}

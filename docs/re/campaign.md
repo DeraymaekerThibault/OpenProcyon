@@ -47,6 +47,11 @@ The old hard-coded stage machine is gone: all mission flow comes from the 135 ex
 (`Script::step`, pure and unit-tested). All 19 condition types and 52 action types of the mission are either implemented or
 explicitly listed below; unsupported ones are logged once (`unsupported ...`) and a test fails if a new unknown type appears.
 
+- **Vital Section has X damage**: for each ship or base of the group, in group order, the damage of the named section kind (`vitalToShip`,
+  `vitalToMaxVelocity`, `vitalToManeuverability`, `vitalToMission`) is 1 - (current over maximum hit points summed over the sections of
+  that kind; the core is left out). Greater/Less Than are strict, Equal To is exact. The condition turns true as soon as every ship or
+  base counted so far passes, so in practice it follows the first one; other members (rocks, animals) are not counted, and a ship or
+  base with no section of the kind never passes. Every shipped use is `vitalToMission` Equal To 1 on a base: all its mission sections destroyed.
 - **Conditions** (all of a rule's conditions must hold): flags, named timers (`Start Timer` resets to 0 and runs, also when already running; timers count game time, so they hold while paused; a stopped or never-started timer makes every comparison false; Greater/Less Than are strict and Equal To holds once the elapsed time has reached the number; `Reset Timer` changes nothing in the original),
   speech played / not yet played, Is Group In Volume / Enter Volume (polygon test), Is Group A attacking Group B, hit counts (by anyone or by a
   player), group member counts, damage fraction, mission-essential ships, unit flag texture (original group membership), group distance, docked.
@@ -356,5 +361,5 @@ light and voice-box positions (measured on the art), which side the real game de
 Bases whose WOT places guns (`Base_SmugglersCamp`, `Base_Grant`, ...), and gunless bases with a `vitalToMission` section (`Base_PirateStockade`, whose
 `Camp_wood` gate mission 6 must shoot down), export as `assets/ships/Base_*/` (`tools/export_bases.py`, no hull model; the scenery GLB is drawn) and become `combat::ArmedBase` + `Health` + guns when a rule sets them up. A campaign `Base_*` that no rule sets up (mission 5's Grant and pirate
 base, 7's Regina, 8's Mining Camp) gets the same, with no owner (so it shoots nobody) until a rule gives it one and default gunnery
-(PROVISIONAL): mission 5 is won by destroying the pirate base's `vitalToMission` building, and that base has no setup rule. `combat::base_fire` shoots the nearest visible ship the base owner is hostile to (neutral owners such as mission 2's "NO PLAYER" camp stay quiet until a rule changes the owner); shells damage the base sections, and the rules' "Vital Section damage" reads the mean damage of the `vitalToMission` sections (PROVISIONAL). A skirmish map's gunless base (Convoy Raid's stockade) stays scenery (PROVISIONAL: not observed whether skirmish fleets
+(PROVISIONAL): mission 5 is won by destroying the pirate base's `vitalToMission` building, and that base has no setup rule. `combat::base_fire` shoots the nearest visible ship the base owner is hostile to (neutral owners such as mission 2's "NO PLAYER" camp stay quiet until a rule changes the owner); shells damage the base sections, and the rules' "Vital Section damage" test works as below. A skirmish map's gunless base (Convoy Raid's stockade) stays scenery (PROVISIONAL: not observed whether skirmish fleets
 can shoot or board it). Not done: AI stance / attack orders for bases, tower collapse visuals, fires on bases.

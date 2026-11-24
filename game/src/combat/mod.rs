@@ -59,6 +59,15 @@ pub struct BaseSide(pub crate::ship::Side);
 /// The side a skirmish base started on; a base whose `BaseSide` differs was captured by boarding (the rules read it).
 #[derive(Component, Clone, Copy)]
 pub struct BaseOrigin(pub crate::ship::Side);
+/// docs/re/campaign.md: per section kind (survival, max velocity, manoeuvrability, mission), 1 - the current over the maximum hit
+/// points summed over the sections of that kind; the core is left out. None for a kind the class has no section of.
+pub fn vital_damage(sections: &[crate::data::Section], hp: &[f32]) -> [Option<f32>; 4] {
+    let kind = |k: usize, s: &crate::data::Section| [s.vital, s.speed, s.turn, s.mission][k];
+    std::array::from_fn(|k| {
+        let (cur, max) = sections.iter().zip(hp).filter(|(s, _)| kind(k, s)).fold((0.0, 0.0), |(c, m), (s, h)| (c + h.max(0.0), m + s.hp));
+        (max > 0.0).then(|| 1.0 - cur / max)
+    })
+}
 /// What the rules' 'Vital Section has X damage' reads for a base (PROVISIONAL: mean damage of its vitalToMission sections).
 pub fn base_mission_damage(class: &Class, hp: &Health) -> f32 {
     let v: Vec<f32> = class.sections.iter().zip(&hp.sections).filter(|(c, _)| c.mission).map(|(c, h)| 1.0 - h / c.hp.max(1.0)).collect();

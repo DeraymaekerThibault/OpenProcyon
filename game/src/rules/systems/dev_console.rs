@@ -148,7 +148,7 @@ fn run(
     // The unit list as `update` builds it each frame.
     let mut world = units(&ships, &lib);
     world.extend(animals.iter().map(|(e, a, tf, _)| a.unit(e, tf)));
-    world.extend(extra.bases.iter_mut().map(|(e, b, tf, armed)| b.unit(e, tf, armed.map_or(0.0, |(a, h)| crate::combat::base_mission_damage(&lib.classes[a.class], h)))));
+    world.extend(extra.bases.iter_mut().map(|(e, b, tf, armed)| super::base_unit(&b, e, tf, armed, &lib)));
     world.extend(rocks.iter().map(|(e, tf, a)| a.unit(e, tf)));
     mission.script.tag(&mut world);
     if console.open {

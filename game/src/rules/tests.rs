@@ -20,6 +20,7 @@ fn unit(name: &str, owner: &str, pos: Vec3) -> Unit {
         heading: 0.0,
         speed: None,
         cloaked: false,
+        vital: None,
     }
 }
 fn script() -> Script {
@@ -1223,4 +1224,26 @@ fn a_stopped_timer_tests_false_and_equal_to_means_at_least() {
     }
     s.act(&serde_json::json!({"Type": "Start Timer", "Timer Name": "T"}), &[], &mut out, "t");
     assert!(s.cond(&cond("Less Than", 1.0), &[], false), "restarted from 0");
+}
+
+/// docs/re/campaign.md: the vital section test reads the named kind's damage, compares strictly (Equal exactly) and follows the
+/// group's first ship or base; members that are neither are not counted.
+#[test]
+fn vital_section_damage_follows_the_first_counted_member_of_the_kind() {
+    let unit = |name: &str, mission: Option<f32>| {
+        let mut u = Unit { name: name.into(), owner: "Pirates".into(), ..Unit::new(Entity::PLACEHOLDER, -1, Vec3::ZERO) };
+        u.vital = Some([Some(0.2), None, None, mission]);
+        u
+    };
+    let cond = |eq: &str, n: f32| serde_json::json!({"Type": "Group/Unit Vital Section has >,<,= X damage", "Group/Unit Name": "Pirates", "Vital Section": "vitalToMission", "Equivalence": eq, "Damage Percent": n});
+    let rock = Unit { owner: "Pirates".into(), ..Unit::new(Entity::PLACEHOLDER, -1, Vec3::ZERO) };
+    let mut s = Script::new(&serde_json::json!({"rules": [], "ships": [], "volumes": null, "environment": {}}), Value::Null);
+    let mut holds = |c: Value, w: &[Unit]| s.cond(&c, w, false);
+    let razed = [rock.clone(), unit("Base", Some(1.0))];
+    assert!(holds(cond("Equal To", 1.0), &razed), "a rock in the group is not counted");
+    assert!(!holds(cond("Equal To", 0.999), &razed), "Equal is exact");
+    assert!(!holds(cond("Greater Than", 1.0), &razed), "Greater is strict");
+    assert!(holds(cond("Equal To", 1.0), &[unit("A", Some(1.0)), unit("B", Some(0.0))]), "the first member decides");
+    assert!(!holds(cond("Equal To", 1.0), &[unit("A", Some(0.0)), unit("B", Some(1.0))]));
+    assert!(!holds(cond("Equal To", 1.0), &[unit("A", None)]), "a ship without mission sections never passes");
 }

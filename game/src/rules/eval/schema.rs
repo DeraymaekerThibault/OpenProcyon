@@ -552,7 +552,7 @@ pub static RULE_TYPES: &[TypeDef] = &[
     cond(T::GroupDestroyed, &[grp("Group Name")]),
     cond(T::GroupUnderAttack, &[grp("Group Name")]),
     cond(T::GroupUnitFiredXShots, &[grp("Group/Unit Name"), choice("Equivalence", COMPARE), num("Number Of Rounds Fired")]),
-    cond(T::GroupUnitVitalSectionHasXDamage, &[grp("Group/Unit Name"), text("Vital Section").ignored(), choice("Equivalence", COMPARE), frac("Damage Percent")]),
+    cond(T::GroupUnitVitalSectionHasXDamage, &[grp("Group/Unit Name"), text("Vital Section"), choice("Equivalence", COMPARE), frac("Damage Percent")]),
     cond(T::DoesGroupContainUnitName, &[grp("Unit Name"), boolean("Exists?")]),
     cond(T::IsShipInTow, &[grp("Towing Group"), grp("Target to Tow"), boolean("Boolean")]),
     cond(T::IsGroupAAttackingGroupB, &[grp("GroupA Name"), grp("GroupB Name")]),

@@ -37,11 +37,7 @@ impl Script {
                 let n: u32 = members(w, s(c, "Group/Unit Name")).iter().map(|u| self.shots.get(&u.e).copied().unwrap_or(0)).sum();
                 cmp(s(c, "Equivalence"), n as f32, f(c, "Number Of Rounds Fired"))
             }
-            // PROVISIONAL: vital sections are not modelled; the unit's overall damage stands in.
-            T::GroupUnitVitalSectionHasXDamage => {
-                let m = members(w, s(c, "Group/Unit Name"));
-                !m.is_empty() && cmp(s(c, "Equivalence"), m.iter().map(|u| u.damage).fold(0.0, f32::max), f(c, "Damage Percent"))
-            }
+            T::GroupUnitVitalSectionHasXDamage => vital_section_holds(c, w),
             T::DoesGroupContainUnitName => {
                 let (g, unit) = s(c, "Unit Name").split_once(',').unwrap_or((s(c, "Unit Name"), ""));
                 w.iter().any(|u| u.alive && u.owner == g && u.name == unit) == b(c, "Exists?")
@@ -166,4 +162,31 @@ impl Script {
         let hit = |tg: &Entity| targets.iter().any(|x| x.e == *tg) || self.belt.get(tg).is_some_and(|g| g.iter().any(|g| g == target_group));
         members(w, a).iter().any(|u| u.attack.iter().any(|g| base(g) == target_group) || self.fired_at.get(&u.e).is_some_and(|(t, tg)| self.time - t < 6.0 && hit(tg))) // PROVISIONAL: the 6 s "attacking" window is a guess
     }
+}
+
+/// docs/re/campaign.md: 'Group/Unit Vital Section has X damage'. Each ship or base of the group, in order, is counted; it passes when
+/// its damage of the named section kind compares (Greater/Less strict, Equal exact). The answer turns true as soon as every member
+/// counted so far has passed, so in practice it follows the group's first ship or base.
+pub(in crate::rules) fn vital_section_holds(c: &Value, w: &[Unit]) -> bool {
+    use super::schema::Equivalence as E;
+    let kind = match s(c, "Vital Section") {
+        "vitalToShip" | "Vital To Survival" => 0,
+        "vitalToMaxVelocity" | "Vital To Max Velocity" => 1,
+        "vitalToManeuverability" | "Vital To Maneuverability" => 2,
+        "vitalToMission" | "Vital To Mission" => 3,
+        _ => return false,
+    };
+    let (n, eq) = (f(c, "Damage Percent"), E::parse(s(c, "Equivalence")));
+    let (mut counted, mut passed, mut holds) = (0, 0, false);
+    for v in members(w, s(c, "Group/Unit Name")).iter().filter_map(|u| u.vital) {
+        counted += 1;
+        passed += usize::from(v[kind].is_some_and(|d| match eq {
+            Some(E::GreaterThan) => d > n,
+            Some(E::LessThan) => d < n,
+            Some(E::EqualTo) => d == n,
+            None => false,
+        }));
+        holds |= passed == counted;
+    }
+    holds
 }
