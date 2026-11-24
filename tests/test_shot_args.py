@@ -1,7 +1,9 @@
 """tools/shot.sh runs the game from game/: relative folder arguments must be made absolute against the caller's directory first."""
 
 import os
+import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -9,6 +11,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 
 
+@unittest.skipUnless(shutil.which("bash"), "needs bash")
+@unittest.skipIf(
+    sys.platform == "win32",
+    "shot.sh and the stand-in game are shebang scripts, which Windows cannot execute directly (WinError 193)",
+)
 class ShotArgumentTests(unittest.TestCase):
     def run_shot(self, *args):
         with tempfile.TemporaryDirectory() as tmp:
