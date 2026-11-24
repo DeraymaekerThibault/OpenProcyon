@@ -465,8 +465,8 @@ fn mission_side(script: &Script, owner: &str) -> Side {
 
 /// Moves one unit to `p` (the retail `Teleport Group/Unit`, with `heading` and `clear_speed` off): a ship loses its waypoints, an animal its
 /// velocity, scenery moves with its collision body. Not retail: `heading` (radians about +Y; ships only) and `clear_speed` (a ship's speed and
-/// turn rate, and the push of a contact or a current) are what `OP Teleport` adds. `retail_fix` is the retail teleport's engine-added
-/// handling of a ship (not in the original): it lands on the nearest spot clear of `retail_fix`'s hulls (and joins them), and the
+/// turn rate, and the push of a contact or a current) are what `OP Teleport` adds. Not retail: `retail_fix` is the retail teleport's engine-added
+/// handling of a ship; it lands on the nearest spot clear of `retail_fix`'s hulls (and joins them), and the
 /// human's ship also drops its throttle, sail order and course (`teleport::stop`).
 #[allow(clippy::too_many_arguments)]
 fn place(
