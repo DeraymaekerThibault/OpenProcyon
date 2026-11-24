@@ -48,7 +48,7 @@ impl std::fmt::Display for DataError {
 impl std::error::Error for DataError {}
 
 /// The folder name of the active mod that provides `path` (a link into the overlay is followed to its source).
-fn mod_of(path: &std::path::Path) -> Option<String> {
+pub(crate) fn mod_of(path: &std::path::Path) -> Option<String> {
     let source = std::fs::canonicalize(path).ok()?;
     crate::modding::active().iter().find(|m| std::fs::canonicalize(m).is_ok_and(|m| source.starts_with(m))).and_then(|m| Some(m.file_name()?.to_string_lossy().into_owned()))
 }
@@ -64,6 +64,39 @@ pub fn load_as<T: serde::de::DeserializeOwned>(path: &std::path::Path, source_mo
 /// Unknown fields stay allowed unless `T` denies them.
 pub fn load<T: serde::de::DeserializeOwned>(path: &std::path::Path) -> Result<T, DataError> {
     load_as(path, None)
+}
+
+/// A data file a feature can live without, read through `load`. Absent: `None`, quietly. Present but unreadable or not a `T`: one
+/// `error:` line naming the file, its mod and serde's field/line/column message, then the same file of the base assets (`base`,
+/// the retail import) when there is one and it reads; else `None`, and `instead` says what the game does without it. Never a panic.
+pub fn load_or_base<T: serde::de::DeserializeOwned>(path: &std::path::Path, base: Option<&std::path::Path>, instead: &str) -> Option<T> {
+    if !path.is_file() {
+        return None;
+    }
+    let error = match load::<T>(path) {
+        Ok(v) => return Some(v),
+        Err(e) => e,
+    };
+    let same = |b: &std::path::Path| std::fs::canonicalize(b).ok() == std::fs::canonicalize(path).ok();
+    match base.filter(|b| b.is_file() && !same(b)).map(load::<T>) {
+        Some(Ok(v)) => {
+            eprintln!("error: {error}; using the base file");
+            Some(v)
+        }
+        Some(Err(base_error)) => {
+            eprintln!("error: {error}; the base file fails too ({base_error}); {instead}");
+            None
+        }
+        None => {
+            eprintln!("error: {error}; {instead}");
+            None
+        }
+    }
+}
+
+/// `load_or_base` for `rel` under the asset root, with the same file of the base assets as the fallback.
+pub fn load_asset<T: serde::de::DeserializeOwned>(rel: &str, instead: &str) -> Option<T> {
+    load_or_base(&crate::assets_dir().join(rel), Some(&crate::base_assets().join(rel)), instead)
 }
 
 /// Typed required asset with the resolved source path and serde's field/line/column diagnostic.
@@ -961,5 +994,48 @@ mod write_atomic_tests {
         let names: Vec<_> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name()).collect();
         assert_eq!(names, ["settings.json"], "no temp file stays");
         let _ = std::fs::remove_dir_all(dir.parent().unwrap());
+    }
+}
+
+#[cfg(test)]
+mod load_or_base_tests {
+    use super::*;
+    use serde::Deserialize;
+
+    #[derive(Deserialize, Debug, PartialEq)]
+    struct Bar {
+        width: f32,
+    }
+
+    fn dir(tag: &str) -> std::path::PathBuf {
+        let d = std::env::temp_dir().join(format!("procyon-load-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    #[test]
+    fn an_absent_file_is_none_and_a_good_file_reads_with_unknown_fields_allowed() {
+        let d = dir("good");
+        assert_eq!(load_or_base::<Bar>(&d.join("none.json"), None, "x"), None);
+        std::fs::write(d.join("a.json"), r#"{"width": 3, "extra": [1]}"#).unwrap();
+        assert_eq!(load_or_base::<Bar>(&d.join("a.json"), None, "x"), Some(Bar { width: 3.0 }));
+        std::fs::remove_dir_all(d).unwrap();
+    }
+
+    #[test]
+    fn a_bad_file_is_skipped_and_the_base_file_is_kept() {
+        let d = dir("bad");
+        std::fs::write(d.join("syntax.json"), "width: 3").unwrap();
+        std::fs::write(d.join("type.json"), r#"{"width": "wide"}"#).unwrap();
+        std::fs::write(d.join("base.json"), r#"{"width": 9}"#).unwrap();
+        for bad in ["syntax.json", "type.json"] {
+            assert_eq!(load_or_base::<Bar>(&d.join(bad), Some(&d.join("base.json")), "x"), Some(Bar { width: 9.0 }), "{bad}");
+            assert_eq!(load_or_base::<Bar>(&d.join(bad), Some(&d.join("missing.json")), "x"), None, "{bad}: no base file, no panic");
+            assert_eq!(load_or_base::<Bar>(&d.join(bad), Some(&d.join(bad)), "x"), None, "{bad}: the same file is not its own base");
+        }
+        let e = load::<Bar>(&d.join("type.json")).unwrap_err().to_string();
+        assert!(e.contains("type.json") && e.contains("invalid type") && e.contains("line 1 column"), "names the file and the field's problem: {e}");
+        std::fs::remove_dir_all(d).unwrap();
     }
 }
