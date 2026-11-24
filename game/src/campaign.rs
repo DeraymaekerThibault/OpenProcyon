@@ -723,7 +723,7 @@ mod tests {
         std::fs::write(dir.join("mission.json"), "{\"rules\": []}").unwrap();
         let err = super::read_mission_files(&dir).unwrap_err();
         assert!(err.contains("media.json"), "{err}");
-        std::fs::write(dir.join("media.json"), "{ not json").unwrap();
+        std::fs::write(dir.join("media.json"), "not json").unwrap();
         let err = super::read_mission_files(&dir).unwrap_err();
         assert!(err.contains("media.json"), "{err}");
         std::fs::write(dir.join("media.json"), "{}").unwrap();
