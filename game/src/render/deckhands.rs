@@ -14,7 +14,8 @@
 //! - Where they go comes from the ship's model: empty nodes named `Crew_<Kind>_...` (`Walk` lanes, `Gun` places by a deck mount,
 //!   `Post`s, `Climb` pairs `_a` at the foot of a shroud and `_b` up it). A ship without them gets no crew. How many wander grows
 //!   with the deck (`headcount`, from the collision box's length times beam: 1-2 on a fishing boat, 40 on a Man-o'-War, 60 on a first rate)
-//!   unless a `Crew_Count_<n>` node sets the total.
+//!   unless a `Crew_Count_<n>` node sets the total. The same nodes may come from JSON (a ship's `crew_nodes`, scenery's
+//!   `data/crew_nodes.json`; `data/crew_nodes.rs`): `gather` combines them with the model's, a node of the same name replacing it.
 //! - Figures are children of the ship, so they ride its motion; they cast no shadows and vanish beyond `range`. A crew beyond `range` plus the
 //!   fade is not stepped at all (the clips run on the GPU clock anyway); its figures carry on from where they stood when it comes back.
 //! - Map scenery (a town, a pier) gets townsfolk the same way: `Crew_Walk` lanes, `Post`s, and `Work` places where a docker works on the spot
@@ -421,6 +422,7 @@ fn build_mesh(bytes: &[u8], verts: usize, column: usize) -> Mesh {
 
 fn load_kit(mut commands: Commands, look: Res<Look>, mut meshes: ResMut<Assets<Mesh>>, mut images: ResMut<Assets<Image>>, mut materials: ResMut<Assets<DeckhandMaterial>>) {
     let Some(d) = look.deckhands.as_ref() else { return };
+    commands.insert_resource(SceneryCrews(crate::data::crew_nodes::load_scenery(crate::assets_dir())));
     let Some((head, pose, mesh_bytes)) = read_kit(crate::assets_dir()) else {
         warn!("render profile: `deckhands` needs {DATA} (format {FORMAT}) with its .bin and deckhand_mesh.bin in the mod; left off");
         return;
@@ -737,23 +739,54 @@ fn stamp(time: &Time) -> u32 {
     ((time.elapsed_secs_f64() * 10.0) as u64 & 0xffff) as u32
 }
 
-/// Collects the `Crew_*` nodes of a ship's (or a map scenery object's) model as its scene spawns. They hang under the scene's root (a child of the ship), whose
-/// frame is the model's; the figures go under the same root, so the nodes' own transforms place them.
+/// The crew places of map scenery by type (`data/crew_nodes.json`), read with the kit.
+#[derive(Resource, Default)]
+struct SceneryCrews(HashMap<String, Vec<(String, Transform)>>);
+
+/// Collects the `Crew_*` nodes of a ship's (or a map scenery object's) model as its scene spawns, plus the ones its JSON gives (the
+/// class's `crew_nodes`, the scenery type's entry of `data/crew_nodes.json`), a JSON node replacing a model node of its name. They
+/// hang under the scene's root (a child of the ship), whose frame is the model's; the figures go under the same root, so the nodes'
+/// own transforms place them. A model with no `Crew_*` nodes of its own is framed by the first node its scene spawns.
 #[allow(clippy::type_complexity)]
 fn gather(
     mut commands: Commands,
     nodes: Query<(Entity, &Name, &ChildOf, &Transform), Added<Name>>,
-    ships: Query<(), (Or<(With<Ship>, With<crate::clips::SceneLoop>)>, Without<Crew>)>,
+    ships: Query<(), (Or<(With<Ship>, With<crate::clips::SceneLoop>)>, Without<Crew>, Without<CrewNodes>)>,
+    classes: Query<&Ship>,
+    types: Query<&crate::data::crew_nodes::SceneryType>,
+    lib: Option<Res<Library>>,
+    scenery: Option<Res<SceneryCrews>>,
     parents: Query<&ChildOf>,
 ) {
     let mut found: HashMap<Entity, (Entity, Vec<(String, Transform)>)> = HashMap::new();
+    // the child of each ship the added nodes hang under: the frame of a model that places no crew of its own
+    let mut roots: HashMap<Entity, Entity> = HashMap::new();
     for (e, name, parent, t) in &nodes {
-        if !name.as_str().starts_with("Crew_") {
+        let mut below = e;
+        let Some(ship) = parents.iter_ancestors(e).take(4).find(|&a| {
+            let hit = ships.contains(a);
+            if !hit {
+                below = a;
+            }
+            hit
+        }) else {
             continue;
-        }
-        if let Some(ship) = parents.iter_ancestors(e).take(4).find(|&a| ships.contains(a)) {
+        };
+        if name.as_str().starts_with("Crew_") {
             found.entry(ship).or_insert((parent.parent(), vec![])).1.push((name.as_str().to_string(), *t));
+        } else {
+            roots.entry(ship).or_insert(below);
         }
+    }
+    for ship in roots.keys().chain(found.keys()).copied().collect::<std::collections::HashSet<_>>() {
+        let json = match (classes.get(ship), types.get(ship), &lib, &scenery) {
+            (Ok(s), _, Some(lib), _) => lib.classes.get(s.class).map(|c| c.crew_nodes.as_slice()),
+            (_, Ok(t), _, Some(sc)) => sc.0.get(&t.0).map(Vec::as_slice),
+            _ => None,
+        };
+        let Some(json) = json.filter(|j| !j.is_empty()) else { continue };
+        let entry = found.entry(ship).or_insert_with(|| (roots[&ship], vec![]));
+        entry.1 = crate::data::crew_nodes::combine(std::mem::take(&mut entry.1), json);
     }
     for (ship, (frame, nodes)) in found {
         commands.entity(ship).insert(CrewNodes { frame, nodes });
@@ -1270,6 +1303,16 @@ mod tests {
 
     fn node(name: &str, x: f32, z: f32) -> (String, Transform) {
         (name.into(), Transform::from_xyz(x, 0.0, z))
+    }
+
+    #[test]
+    fn json_nodes_are_read_like_model_nodes_and_replace_those_of_their_name() {
+        let model = vec![node("Crew_Walk_P_0", -2.0, 0.0), node("Crew_Walk_P_1", -2.0, -5.0), node("Crew_Gun_0", 1.0, 0.0)];
+        let json = vec![node("Crew_Walk_P_1", -2.0, -9.0), node("Crew_Walk_P_2", -2.0, -10.0), node("Crew_Post_Captain", 0.0, 3.0)];
+        let p = Places::from_nodes(&crate::data::crew_nodes::combine(model, &json));
+        assert_eq!((p.walk.len(), p.guns.len(), p.posts.len()), (3, 1, 1));
+        assert_eq!(p.walk[1].z, -9.0, "the JSON node replaced the model's");
+        assert!(p.links[1].contains(&2) && p.links[0].contains(&1), "one lane across both sources");
     }
 
     /// A minimal v2 header: the eight required clips (and `extra`), one rig of 11 bones, one figure with two levels of detail.

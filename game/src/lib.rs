@@ -3,12 +3,14 @@
 
 pub mod alliance;
 pub mod audio;
+pub mod authoring;
 pub mod battle;
 pub mod bindings;
 pub mod blackhole;
 pub mod boarding;
 pub mod briefing;
 pub mod campaign;
+pub mod cli;
 pub mod clips;
 pub mod cloak;
 pub mod collision;
@@ -113,14 +115,19 @@ pub fn clock_seed() -> u64 {
 /// Converted assets: `PROCYON_ASSETS`, else `assets/` in the source checkout, else the per-user folder the importer
 /// (`python -m tools.import_assets`, or the release download's `openprocyon-import`) fills. Nothing from the original game ships with the code.
 pub(crate) fn base_assets() -> PathBuf {
+    find_base_assets().unwrap_or_else(|| PathBuf::from("assets"))
+}
+/// The lookup behind `base_assets`, with no fallback: `None` when there is no env var, no checkout and no per-user folder to name.
+/// Touches nothing on disk.
+pub(crate) fn find_base_assets() -> Option<PathBuf> {
     if let Some(dir) = std::env::var_os("PROCYON_ASSETS") {
-        return PathBuf::from(dir);
+        return Some(PathBuf::from(dir));
     }
     let checkout = checkout_dir().map(|dir| dir.join("assets"));
     if let Some(checkout) = checkout.as_ref().filter(|c| c.join("ships").is_dir()) {
-        return checkout.clone();
+        return Some(checkout.clone());
     }
-    user_assets().or(checkout).unwrap_or_else(|| PathBuf::from("assets"))
+    user_assets().or(checkout)
 }
 
 /// The source checkout, found at run time (never baked into the binary, so a release build carries no build-machine path): the
@@ -195,13 +202,20 @@ pub fn run(view: fn(&mut App), setup_view: fn(&mut App)) {
     if let Some(code) = rules::cli::dump_schema(&args) {
         exit::quit(code);
     }
+    // `--version` and `--dump-schemas <dir>` need neither a window nor assets.
+    if let Some(code) = cli::quick(&args) {
+        exit::quit(code);
+    }
     let script = args.iter().position(|a| a == "--script").map(|i| {
         args.get(i + 1).ok_or_else(|| "--script requires a name".to_owned()).and_then(|name| smoke::Script::parse(name)).unwrap_or_else(|err| {
             eprintln!("{err}");
             exit::quit(2);
         })
     });
-    let mods: Vec<PathBuf> = args.windows(2).filter(|w| w[0] == "--mod").map(|w| PathBuf::from(&w[1])).collect();
+    let mods = modding::mod_args(&args).unwrap_or_else(|error| {
+        eprintln!("error: {error}");
+        exit::quit(2);
+    });
     let base = base_assets();
     // A player's folder (the download's import) must come from this version and is replaced whole when imported again; a
     // developer's assets (PROCYON_ASSETS, the checkout's assets/) are used as they are.
@@ -223,7 +237,9 @@ pub fn run(view: fn(&mut App), setup_view: fn(&mut App)) {
     if player && let Some(dir) = base.parent() {
         setup::report_crashes(dir.to_path_buf());
     }
-    let installed = modding::installed(bundled_mods_dir().as_deref()).into_iter().filter(|m| m.enabled).map(|m| m.dir);
+    let all_mods = modding::installed(bundled_mods_dir().as_deref());
+    modding::log_warnings(&all_mods, &mods);
+    let installed = all_mods.into_iter().filter(|m| m.enabled).map(|m| m.dir);
     modding::set_active(installed.chain(mods).collect());
     let layers: Vec<PathBuf> = std::iter::once(content_dir()).chain(modding::active().iter().cloned()).collect();
     let (root, report) = modding::overlay_report(&base, &layers, own_overlay());
@@ -231,6 +247,11 @@ pub fn run(view: fn(&mut App), setup_view: fn(&mut App)) {
     let _ = ASSETS.set(root);
     if let Some(code) = rules::cli::apply(&args) {
         exit::quit(code);
+    }
+    // Bad ship or weapon data (a mod's ship.json) ends the launch here with the message, not with a panic while the app is built.
+    if let Err(error) = combat::preload() {
+        eprintln!("error: {error}");
+        exit::quit(1);
     }
     let arg = |k: &str| args.iter().position(|a| a == k).and_then(|i| args.get(i + 1)).cloned();
     let shot = arg("--shot");

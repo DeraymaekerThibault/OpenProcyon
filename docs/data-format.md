@@ -23,6 +23,7 @@ Short form first (paths by area), the full description of every path under "Deta
 | `ships/<Id>/model.glb` | Hull mesh with its hardpoint nodes |
 | `models/scenery/SpaceDragon.glb`, `SpaceWhale.glb` | The two animals: skinned mesh plus looping clip |
 | `ships/<Id>/names.json`, `docks.json` | Optional: ship-name pool for open maps; dock points |
+| `textures/<retail texture name>.png` | Mods only (not in an import; not retail): replaces the retail texture of that name (file name without `.tga`, any case) inside every `ships/` and `models/` model that uses it, any resolution. Never placed in the overlay; the models that use it are rewritten there. `textures/surface/` is a different thing (baked surface maps) |
 
 **Weapons and AI**
 
@@ -51,6 +52,7 @@ Short form first (paths by area), the full description of every path under "Deta
 | Path | What it is |
 |---|---|
 | `data/docks.json` | Dock points of bases and islands |
+| `data/crew_nodes.json` | Optional, mods only: crew places of map scenery by type |
 | `data/mesh_detail.json` | Per-mesh detail levels, no-draw distance, collision LOD |
 | `data/animations.json` | Mesh scene animation clips |
 | `data/mesh_effects.json` | Ambient effect points of mesh scenes (fires, smoke, volcanoes) |
@@ -118,6 +120,7 @@ Short form first (paths by area), the full description of every path under "Deta
 **World data**
 
 - `data/docks.json`: dock points of bases and islands (ships keep theirs in `ships/<id>/docks.json`): `pos` local game frame, `yaw` radians about z, `tender` (WOT `Is Tender`: dockable by default) (`tools/export_docks.py`)
+- `data/crew_nodes.json`: optional, a mod's (engine extension, no retail counterpart): `{"<scenery type>": [{"name": "Crew_Walk_A_0", "pos": [x, y, z], "rot": [..]}]}`, the deck-crew places a scenery model would carry as `Crew_*` nodes (grammar in `docs/modding.md` "A ship from a model"); `pos`/`rot` in the scenery's own frame, game axes, as a gun's; same-named model nodes are replaced, others added; mods merge it key by key
 - `data/mesh_detail.json`: per-mesh detail settings: `levels` ([max camera distance, detail fraction]), `no_draw` distance, `collision_lod` (level whose triangles retail collides with); the empty name is the default (`tools/export_mesh_detail.py`)
 - `data/animations.json`: mesh scene animation clips: `{scene: [{name, duration, motions: [{node, target, channels}]}]}`, six channels per motion (x, y, z, yaw, pitch, roll in radians), keyframe `[time, value, smoothing, tension, continuity, bias, in tangent, out tangent]` (`tools/export_animations.py`, `tools/msb.py parse_scene`). The animals' clips are also baked into their GLBs (below)
 - `data/mesh_effects.json`: ambient effect points of mesh scenes (fire stacks, smoke, lighthouse, volcano fountains): `kind` PlayEffect/VolcanoSmoke, node `name`, `descriptor`, `effect` (the effect file the world object's attribute names; null for VolcanoSmoke), `pos` (`tools/export_mesh_effects.py`). The effect files are in `fx/`. Every point is placed by the game
@@ -187,6 +190,9 @@ Gun entries in `data/weapons/guns.json` are retail apart from one engine key, `b
 | `ring` | retail | number | no | `0.65` |
 | `cloakable` | retail | bool | no | `true` only for ids containing `Submersible` |
 | `fuel` | engine | bool | no | `false` |
+| `crew_nodes` | engine | array of `{name, pos, rot?}` | no | none; crew places for deck crews, added to the model's `Crew_*` nodes (a node of the same name replaces the model's); `name` is a `Crew_<Kind>_...` node name, `pos`/`rot` as a gun's, ship frame |
+| `tow` | engine | `{"tower": [x, y, z], "towee": [x, y, z]}` | no | the model's `TowerPoint` / `ToweePoint` nodes, else the hull ends; where the tow line is held (tower) and fastened (towee), ship frame, game axes as a gun's `pos`; wins over the nodes when present |
+| `homing` | engine | `[x, y, z]` | no | the model's `TorpedoHomingPoint` node, else the vital hull's centre; where homing torpedoes aim, ship frame, game axes; wins over the node when present |
 | `crew_posts` | retail | object | no | one gunner per two guns, a captain, mate, navigator, engineer, a rigger per sail, a fighter or two |
 | `lifeboats` | retail | integer | no | `0` |
 | `is_lifeboat` | retail | bool | no | `false` |
@@ -201,7 +207,7 @@ nothing. Check the spelling against the tables above when a change has no effect
   the key is dropped.
 - **A misspelt key** (`sigth`, `Maxspeed`) is an unknown key, so it is dropped, while a known key with a value of the wrong type is an
   error that stops the game at launch naming the file.
-- **`mod.json`**: `game_version` and `requires` are not read yet (`docs/modding.md` "Sharing a mod").
+- **`mod.json`**: unknown keys are ignored; `game_version`, `requires` and `format` are read and only warn (`docs/modding.md` "Sharing a mod"). A `$schema` key is ignored in every file (`docs/modding.md` "JSON schemas").
 - **Object files that are not valid JSON objects** in a merged path (`docs/modding.md` rule table) are not ignored; they replace the
   table below them.
 

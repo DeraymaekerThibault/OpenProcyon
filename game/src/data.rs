@@ -6,13 +6,29 @@ use std::sync::OnceLock;
 
 mod asteroids;
 mod crew;
+pub mod crew_nodes;
 mod ships;
 mod weapons;
 pub use crew::{CrewMember, roster};
-pub use ships::{derive, load_class};
+pub use ships::{derive, load_class, try_load_class};
+pub(crate) use weapons::lenient;
+pub use weapons::try_load_weapons;
 
-fn asset_context(path: &std::path::Path) -> String {
-    let source = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+/// The JSON schemas of the files a modder writes, by file name (`ship.schema.json`, ...): `ship.json`, `guns.json`, `bullets.json`,
+/// `data/crew_nodes.json`. `authoring::schemas` adds `mod.json`.
+pub fn schemas() -> Vec<(&'static str, Value)> {
+    vec![
+        ("ship.schema.json", ships::schema()),
+        ("guns.schema.json", weapons::guns_schema()),
+        ("bullets.schema.json", weapons::bullets_schema()),
+        ("crew_nodes.schema.json", crew_nodes::schema()),
+    ]
+}
+
+/// The file as errors name it: its path in the asset root and its source, which for a file a mod provided is the mod's own file even
+/// when the overlay holds a merged copy (`modding::origin_of`).
+pub(crate) fn asset_context(path: &std::path::Path) -> String {
+    let source = crate::modding::origin_of(path).map(|(_, file)| file).or_else(|| std::fs::canonicalize(path).ok()).unwrap_or_else(|| path.to_path_buf());
     format!("{} (source {})", path.display(), source.display())
 }
 
@@ -52,6 +68,9 @@ impl std::error::Error for DataError {}
 
 /// The folder name of the active mod that provides `path` (a link into the overlay is followed to its source).
 pub(crate) fn mod_of(path: &std::path::Path) -> Option<String> {
+    if let Some((dir, _)) = crate::modding::origin_of(path) {
+        return Some(dir.file_name()?.to_string_lossy().into_owned());
+    }
     let source = std::fs::canonicalize(path).ok()?;
     crate::modding::active().iter().find(|m| std::fs::canonicalize(m).is_ok_and(|m| source.starts_with(m))).and_then(|m| Some(m.file_name()?.to_string_lossy().into_owned()))
 }
@@ -316,7 +335,7 @@ pub struct GunDef {
 /// Not retail: the `ship.json` keys the engine adds (no retail counterpart; `docs/data-format.md` "ship.json keys", Source
 /// `engine`). Every other key the ship loader reads carries a retail value. `tests/test_extensions.py` keeps this list, the loader
 /// and the docs in step.
-pub const ENGINE_SHIP_KEYS: &[&str] = &["extends", "model", "geometry", "fuel"];
+pub const ENGINE_SHIP_KEYS: &[&str] = &["extends", "model", "geometry", "fuel", "crew_nodes", "tow", "homing"];
 /// Not retail: the gun keys of `guns.json` the engine adds (`beam`, a beam gun). Checked like `ENGINE_SHIP_KEYS`.
 pub const ENGINE_GUN_KEYS: &[&str] = &["beam"];
 
@@ -527,6 +546,8 @@ pub struct Class {
     /// BoardingEffectPoint nodes: `boarding::register` offers them for ships `data/boarding.json` does not list.
     pub crew: [u32; 8],
     pub boarding_points: Vec<Vec3>,
+    /// Not retail: the crew places the ship's `crew_nodes` key gives (`data/crew_nodes.rs`), combined with the model's by the deck crews.
+    pub crew_nodes: Vec<crew_nodes::CrewNode>,
 }
 impl Class {
     /// The class's HUD icon of a bar ("ShipBar", "WeaponBar"): the WOT icon name (several classes share art, and names differ from
@@ -628,17 +649,25 @@ pub fn ship_ids(root: &std::path::Path) -> Vec<String> {
 
 impl Library {
     /// Loads every `ships/<id>/` folder and `data/weapons` from the (mod-overlaid) asset root.
+    /// Panics on bad data (tests, tools that want the message in a failing assertion); the game uses `try_load` and exits cleanly.
     pub fn load(root: &std::path::Path) -> Library {
+        Self::try_load(root).unwrap_or_else(|e| panic!("{e}"))
+    }
+
+    /// `load` that returns the first error (it names the file, the mod that provided it and the field) instead of panicking.
+    pub fn try_load(root: &std::path::Path) -> Result<Library, String> {
         let ids = ship_ids(root);
-        assert!(!ids.is_empty(), "no ships in {}/ships; run tools/build_assets.sh", root.display());
-        let (guns, bullets) = load_weapons(root);
-        let classes: Vec<Class> = ids.iter().map(|n| load_class(root, n, &guns)).collect();
-        weapons::check_weapon_refs(classes.iter().flat_map(|c| c.mounts.iter().map(|m| (c.name.as_str(), m.gun.as_str()))), &guns, &bullets).unwrap_or_else(|e| panic!("{e}"));
+        if ids.is_empty() {
+            return Err(format!("no ships in {}/ships; run tools/build_assets.sh", root.display()));
+        }
+        let (guns, bullets) = weapons::try_load_weapons(root)?;
+        let classes = ids.iter().map(|n| try_load_class(root, n, &guns)).collect::<Result<Vec<Class>, String>>()?;
+        weapons::check_weapon_refs(classes.iter().flat_map(|c| c.mounts.iter().map(|m| (c.name.as_str(), m.gun.as_str()))), &guns, &bullets)?;
         for c in &classes {
             crate::boarding::register(&c.name, c.crew, &c.boarding_points);
         }
         let names = ids.iter().filter_map(|n| Some((n.clone(), serde_json::from_value(try_json(&root.join(format!("ships/{n}/names.json")))?).ok()?))).collect();
-        Library { classes, guns, bullets, names, clips: crate::clips::load(root) }
+        Ok(Library { classes, guns, bullets, names, clips: crate::clips::load(root) })
     }
 }
 

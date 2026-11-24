@@ -2,6 +2,9 @@
 # Screenshot run that works with or without a display: uses Xvfb + Mesa software Vulkan when there is no $DISPLAY (Windows always has one).
 # usage: tools/shot.sh <out.png> [game args...]   e.g. tools/shot.sh local/x.png --shot-frame 300 --script damage
 # --shot-frame takes one frame (file: <out.png>) or a list, 100,200,300 (files: <out>_100.png, <out>_200.png, ...). Pictures are 1280x720.
+# The game runs from game/, so a relative path argument would silently resolve there: the path of `--mod`, `--check-mod` and
+# `--dump-schemas` (the arguments that take a folder) is made absolute against the caller's working directory first. Other
+# arguments are passed as given (`--shot` is set here, from <out.png>).
 # Prints each saved file and the elapsed time; exits non-zero when a picture is missing or black (retry with WAYLAND_DISPLAY=).
 set -uo pipefail
 out=$(realpath -m "$1"); shift
@@ -18,6 +21,15 @@ for a in "$@"; do [ "$prev" = --shot-frame ] && frames=$a; prev=$a; done
 expected=()
 if [[ "$frames" == *,* ]]; then for f in ${frames//,/ }; do expected+=("${out%.png}_$f.png"); done; else expected=("$out"); fi
 rm -f "${expected[@]}"
+# Relative folder arguments become absolute against the caller's directory, before `cd`. `--mod=<dir>` is not a form the game reads.
+args=(); prev=
+for a in "$@"; do
+    case "$prev" in
+        --mod|--check-mod|--dump-schemas) case "$a" in --*) ;; *) a=$(realpath -m -- "$a") ;; esac ;;
+    esac
+    args+=("$a"); prev=$a
+done
+set -- "${args[@]+"${args[@]}"}"
 cd "$root/game"
 # The `fast` profile (game/Cargo.toml): near-release speed with incremental rebuilds. The built binary runs from game/, as cargo run did.
 # PROCYON_BIN (an absolute path) is a binary the caller has built: smokes.sh and check.sh build once and skip the per-run cargo.

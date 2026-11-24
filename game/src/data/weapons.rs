@@ -2,16 +2,18 @@
 //! Field names and defaults are exactly those the untyped reader had: a field it required is required here (the error names the
 //! entry and the field), a field it tolerated (`as_*().unwrap_or`) is tolerated the same way, and unknown fields are allowed.
 use super::*;
+use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer};
 use std::collections::BTreeMap;
 
 /// A field the original reader took with `as_str()`, `as_f64()`, ... and a default: a missing value or one of the wrong type is `None`.
-pub(super) fn lenient<'de, D: Deserializer<'de>, T: serde::de::DeserializeOwned>(d: D) -> Result<Option<T>, D::Error> {
+pub(crate) fn lenient<'de, D: Deserializer<'de>, T: serde::de::DeserializeOwned>(d: D) -> Result<Option<T>, D::Error> {
     Ok(Value::deserialize(d).ok().and_then(|v| serde_json::from_value(v).ok()))
 }
 
 /// A game-frame point: at least three numbers (more are ignored, as before).
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, JsonSchema)]
+#[schemars(with = "Vec<f64>")]
 struct Point(Vec3);
 impl<'de> Deserialize<'de> for Point {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
@@ -23,84 +25,122 @@ impl<'de> Deserialize<'de> for Point {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, JsonSchema)]
 struct Visual {
+    /// Turret base mesh name.
     #[serde(default, deserialize_with = "lenient")]
     base: Option<String>,
+    /// Barrel mesh name.
     #[serde(default, deserialize_with = "lenient")]
     barrel: Option<String>,
+    /// Barrel pivot, in the base frame.
     pivot: Point,
+    /// Muzzle points, in the base frame.
     muzzles: Vec<Point>,
 }
 
 /// One entry of `guns.json`.
-#[derive(Deserialize)]
+#[derive(Deserialize, JsonSchema)]
 pub(super) struct GunDoc {
+    /// Mount size class, e.g. `Medium Mount`, `Heavy  Mount`, `Non-Selectable Special Mount` (whitespace normalised on load).
     #[serde(rename = "Mount Type", default, deserialize_with = "lenient")]
     mount_type: Option<String>,
+    /// Fleet cost in victory points (non-negative integer). Missing: the gun cannot be bought.
     #[serde(rename = "Victory Point Cost", default, deserialize_with = "lenient")]
     points: Option<u32>,
+    /// `None` or a race that cannot fit this gun.
     #[serde(rename = "Exclusion Race", default, deserialize_with = "lenient")]
     exclusion: Option<String>,
+    /// `true` for a point-defence gun (shoots down torpedoes).
     #[serde(rename = "Is PointDefense Gun", default, deserialize_with = "lenient")]
     point_defense: Option<bool>,
+    /// `true` for a torpedo launcher.
     #[serde(rename = "Is TorpedoLauncher Gun", default, deserialize_with = "lenient")]
     torpedo_launcher: Option<bool>,
+    /// Shell speed leaving the muzzle.
     #[serde(rename = "MuzzleSpeed")]
     muzzle: f64,
+    /// Seconds between bursts (the reload).
     #[serde(rename = "TimeBetweenBursts")]
     reload: f64,
+    /// Shots per burst.
     #[serde(rename = "BulletsPerBurst")]
     burst: u32,
+    /// Seconds between shots inside a burst.
     #[serde(rename = "DuringBurstReloadTime")]
     burst_reload: f64,
+    /// Whether each shot of a burst gets its own deviation.
     #[serde(rename = "CalculateAccuracyDeviationDuringBurst", default, deserialize_with = "lenient")]
     dev_per_shot: Option<bool>,
+    /// Effective range.
     #[serde(rename = "EffectiveRange_Range")]
     effective_range: f64,
+    /// Long range.
     #[serde(rename = "LongRange_Range")]
     long_range: f64,
+    /// Maximum range.
     #[serde(rename = "MaximumRange_Range")]
     maximum_range: f64,
+    /// Ricochet factor at effective range (0 when absent).
     #[serde(rename = "EffectiveRange_RicochetFactor", default, deserialize_with = "lenient")]
     effective_ricochet: Option<f64>,
+    /// Ricochet factor at long range (0 when absent).
     #[serde(rename = "LongRange_RicochetFactor", default, deserialize_with = "lenient")]
     long_ricochet: Option<f64>,
+    /// Ricochet factor at maximum range (0 when absent).
     #[serde(rename = "MaximumRange_RicochetFactor", default, deserialize_with = "lenient")]
     maximum_ricochet: Option<f64>,
+    /// Accuracy deviation at effective range.
     #[serde(rename = "EffectiveRange_AccuracyDeviation")]
     effective_deviation: f64,
+    /// Accuracy deviation at long range.
     #[serde(rename = "LongRange_AccuracyDeviation")]
     long_deviation: f64,
+    /// Accuracy deviation at maximum range.
     #[serde(rename = "MaximumRange_AccuracyDeviation")]
     maximum_deviation: f64,
+    /// Whether the shell drops under gravity.
     #[serde(rename = "BulletAffectedByGravity")]
     gravity: bool,
+    /// The shell fired: a key of `data/weapons/bullets.json`.
     #[serde(rename = "BulletTypeName_Primary")]
     bullet: String,
+    /// Turret meshes: `base`, `barrel`, `pivot` and `muzzles` (points in the gun's frame, game axes).
     visual: Visual,
+    /// Turret turn rate, radians per second.
     #[serde(rename = "HorizontalRotationSpeed")]
     yaw_speed: f64,
+    /// Barrel elevation rate, radians per second.
     #[serde(rename = "VerticalRotationSpeed")]
     pitch_speed: f64,
+    /// Lowest barrel elevation, radians.
     #[serde(rename = "VerticalMinAngle")]
     pitch_min: f64,
+    /// Highest barrel elevation, radians.
     #[serde(rename = "VerticalMaxAngle")]
     pitch_max: f64,
+    /// Effect played at the muzzle.
     #[serde(rename = "MuzzleFlashEffect", default, deserialize_with = "lenient")]
     muzzle_fx: Option<String>,
+    /// Fire sound (a beam gun plays it once as the charge starts).
     #[serde(rename = "SoundName", default, deserialize_with = "lenient")]
     sound: Option<String>,
+    /// Fire sound volume.
     #[serde(rename = "SoundVolume", default, deserialize_with = "lenient")]
     sound_volume: Option<f64>,
+    /// Distance beyond which the fire sound is not heard.
     #[serde(rename = "SoundMaxDistance", default, deserialize_with = "lenient")]
     sound_distance: Option<f64>,
+    /// `true` for mortars and gravity charges, which fire on the fixed high arc `LobAngle`.
     #[serde(rename = "Is Lobbing Gun", default, deserialize_with = "lenient")]
     lobbing: Option<bool>,
+    /// Lob arc angle, radians.
     #[serde(rename = "LobAngle", default, deserialize_with = "lenient")]
     lob_angle: Option<f64>,
+    /// `true` for torpedoes and gatlings.
     #[serde(rename = "Can Be Fired While Cloaked", default, deserialize_with = "lenient")]
     cloak_fire: Option<bool>,
+    /// Not retail: a beam gun's `beam` block (`charge`, `duration`, `tick`, `ramp`, `max_power`; see docs/modding.md "A new weapon").
     /// Not retail: the mod beam block (`BeamDef::from_json` keeps its own defaults).
     #[serde(default)]
     beam: Value,
@@ -146,24 +186,34 @@ impl GunDoc {
 }
 
 /// One entry of `bullets.json`.
-#[derive(Deserialize)]
+#[derive(Deserialize, JsonSchema)]
 pub(super) struct BulletDoc {
+    /// Torpedoes only: `Mass`, `MaxThrust`, `MaxSpeed`, `RotationalFriction`, `MaxAngularAcceleration` for guided flight.
     #[serde(default, deserialize_with = "lenient")]
     physics: Option<serde_json::Map<String, Value>>,
+    /// Model of the shell.
     #[serde(default, deserialize_with = "lenient")]
     glb: Option<String>,
+    /// Seconds the shell flies before it expires.
     lifetime: f64,
+    /// Hit points of a shell that can be shot down.
     #[serde(default, deserialize_with = "lenient")]
     hitpoints: Option<f64>,
+    /// Impact sound volume.
     impact_vol: f64,
+    /// Distance beyond which the impact sound is not heard.
     impact_max: f64,
+    /// Impact sounds by material name: a list of sound names each.
     impact_snd: HashMap<String, Vec<String>>,
     #[serde(default, deserialize_with = "lenient")]
     net: Option<serde_json::Map<String, Value>>,
+    /// Effect played where the shell hits.
     #[serde(default, deserialize_with = "lenient")]
     hit_fx: Option<String>,
+    /// Effect carried by the flying shell.
     #[serde(default, deserialize_with = "lenient")]
     bullet_fx: Option<String>,
+    /// Kind of projectile.
     #[serde(default, deserialize_with = "lenient")]
     kind: Option<String>,
     #[serde(default)]
@@ -172,11 +222,12 @@ pub(super) struct BulletDoc {
     mine: Value,
     #[serde(default)]
     travel_snd: Value,
+    /// Damage decal size: `Small`, `Medium` or `Large`.
     #[serde(default, deserialize_with = "lenient")]
     decal: Option<String>,
     #[serde(default, deserialize_with = "lenient")]
     ricochet_snd: Option<serde_json::Map<String, Value>>,
-    /// Material -> [lower, upper, crit chance, fire chance, initial fire strength]; more numbers are ignored.
+    /// Damage by material: `[lower, upper, crit chance, fire chance, initial fire strength]`; more numbers are ignored.
     damage: BTreeMap<String, Vec<f64>>,
 }
 
@@ -253,9 +304,34 @@ pub fn bullet_from_value(name: &str, v: Value) -> Result<BulletDef, String> {
     Ok(BulletDef { family: GunFamily::of(name), torpedo: is_torpedo_bullet(name), ..doc.into_def(name)? })
 }
 
+/// The schema of `data/weapons/guns.json`: an object of gun entries by name. Mods merge this file key by key, so a mod entry that only
+/// changes some keys of a retail gun is valid. (`authoring::schemas` publishes these schemas without `required`.)
+pub(super) fn guns_schema() -> Value {
+    table_schema::<GunDoc>("guns.json")
+}
+/// The schema of `data/weapons/bullets.json` (see `guns_schema`).
+pub(super) fn bullets_schema() -> Value {
+    table_schema::<BulletDoc>("bullets.json")
+}
+/// A file of entries by name, each an entry `T` (and `$schema`).
+pub(super) fn table_schema<T: JsonSchema>(title: &str) -> Value {
+    let mut v = serde_json::to_value(schemars::SchemaGenerator::default().into_root_schema_for::<T>()).expect("schema is JSON");
+    let entry = serde_json::json!({"type": "object", "additionalProperties": {"$ref": "#/$defs/entry"}, "properties": {"$schema": {"type": "string"}}});
+    let mut file = entry;
+    file["title"] = title.into();
+    file["$schema"] = v["$schema"].take();
+    let mut defs = v.get("$defs").cloned().unwrap_or_else(|| serde_json::json!({}));
+    v.as_object_mut().expect("object").remove("$schema");
+    v.as_object_mut().expect("object").remove("$defs");
+    defs["entry"] = v;
+    file["$defs"] = defs;
+    file
+}
+
 /// A weapons table (a JSON object of named entries) read through the typed path; errors name the file.
 fn table<T>(path: &std::path::Path, entry: fn(&str, Value) -> Result<T, String>) -> Result<HashMap<String, T>, String> {
-    let entries: BTreeMap<String, Value> = load(path).map_err(|e| e.to_string())?;
+    let mut entries: BTreeMap<String, Value> = load(path).map_err(|e| e.to_string())?;
+    entries.remove("$schema"); // an editor hint (`docs/modding.md` "JSON schemas"), not an entry
     let source = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     entries.into_iter().map(|(name, v)| entry(&name, v).map(|t| (name, t)).map_err(|e| format!("{} (source {}): {e}", path.display(), source.display()))).collect()
 }

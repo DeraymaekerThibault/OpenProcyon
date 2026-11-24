@@ -77,7 +77,7 @@ see the result and ["Troubleshooting"](#troubleshooting) what to check when noth
   `retail:<texture>` material (see "A ship from a model"). What you ship must be your own work or under a licence that allows
   redistribution; put a `LICENSE` file in the folder.
 - **Say which engine you need.** The engine is pre-1.0: file layouts can still change and a mod may need small fixes after an
-  update. Give the OpenProcyon version (or later) you tested with. `game_version` and `requires` in `mod.json` are not read yet.
+  update. Give the OpenProcyon version (or later) you tested with, in `mod.json` `game_version` (the engine warns when it is older than that).
 - **You support your mod.** The project maintains the engine and the examples in `mods/`, nothing else. Questions and bugs
   about a mod go to its author. Report a problem to OpenProcyon only when it also happens with no third-party mods switched on,
   or when a few files of your own show it. This guide is the help there is for making mods: there is no promise of an answer to
@@ -116,19 +116,62 @@ prints `mod <name> <version> <description>` to the console when it lays each mod
 | `category` | the Mods screen's filter (default "Other") |
 | `missions` | the order of a mod campaign's missions (see the custom-mission row below) |
 | `default` | bundled mods only: on until switched off; ignored in user mods |
-| `game_version`, `requires` | not read yet (nothing in the engine looks at them; say in your README which version you tested) |
+| `format` | the mod file-format version, an integer; the engine reads format 1 (current), and a missing key means 1. A larger number logs a warning that some of the mod may be ignored |
+| `game_version` | the oldest engine version the mod was made for, `"x.y.z"` (compared with `--version`). A newer requirement logs `warning: mod "<id>" asks for OpenProcyon x.y.z or newer; this is ...` at launch; the mod still loads |
+| `requires` | ids of other mods this one needs, `["base-pack"]`. One that is not installed, or installed but switched off, logs a warning naming both mods; the mod still loads (a `--mod` folder counts as installed). The Mods screen's model (`ModList::warnings`) carries the same text |
+| `$schema` | editor hint, ignored (see "JSON schemas") |
+
+Keys the loader does not know are ignored, and a known key of the wrong type counts as absent.
+
+### JSON schemas
+
+`openprocyon --dump-schemas <dir>` writes JSON Schemas (draft 2020-12) for the files a mod writes: `ship.schema.json` (`ships/<Id>/ship.json`),
+`guns.schema.json` and `bullets.schema.json` (`data/weapons/*.json`), `crew_nodes.schema.json` (`data/crew_nodes.json`) and
+`mod.schema.json` (`mod.json`). It needs no game assets and exits 0. They are generated from the types the loader reads, so key names,
+types and the field descriptions in the editor's hover are what the game really takes; tools linking the engine get the same from
+`openprocyon::authoring::schemas()`. Unknown keys stay allowed (the loader ignores them), so a misspelt key is not an error in the editor but
+is not offered either (`--check-mod` warns about it, with the nearest known key). No key is marked required: a mod file is merged over its parent (`extends`, or the retail entry of the same name) before
+the game reads it, so a ship that only says `{"extends": "Ship_X", "points": 100}` or a gun entry that changes a few keys of a retail gun is
+valid. What the game demands of the merged result is still checked by the loader (and `--check-mod`, see "Testing a mod"), not by the editor.
+
+In VS Code, either name the schema in the file (the loader ignores a `$schema` key):
+
+```json
+{ "$schema": "../../schemas/ship.schema.json", "extends": "Ship_Navy_Cutter" }
+```
+
+or map files to schemas once in `.vscode/settings.json`:
+
+```json
+{ "json.schemas": [
+  { "fileMatch": ["ships/*/ship.json"], "url": "./schemas/ship.schema.json" },
+  { "fileMatch": ["data/weapons/guns.json"], "url": "./schemas/guns.schema.json" },
+  { "fileMatch": ["data/weapons/bullets.json"], "url": "./schemas/bullets.schema.json" },
+  { "fileMatch": ["data/crew_nodes.json"], "url": "./schemas/crew_nodes.schema.json" },
+  { "fileMatch": ["mod.json"], "url": "./schemas/mod.schema.json" }
+] }
+```
+
+`$schema` is ignored in `ship.json`, `mod.json`, `guns.json`, `bullets.json` and `data/crew_nodes.json`. For `--dump-rule-schema` (mission rules) see "Authoring missions".
+
 
 ## Testing a mod
 
 | Goal | How |
 |---|---|
-| load a mod without installing it | `--mod <folder>` (repeatable; a relative path is relative to where you start the game; no need to switch it on; later `--mod`s win). From a checkout: `make run ARGS='--mod mods/x'` |
+| load a mod without installing it | `--mod <folder>` (repeatable; a relative path is relative to where you start the game, `tools/shot.sh` makes it absolute against your directory first; a folder that does not exist, or a file, stops the launch with an error naming the path; no need to switch it on; later `--mod`s win). A ship or weapon file the game cannot load stops the launch with the loader's message, which names the mod's own file. From a checkout: `make run ARGS='--mod mods/x'` |
 | start a battle at once | `--map <id>` (a skirmish map such as `red_rover`, or your mod's map), `--mission N`, with `--ship Ship_Id` (your own ship), `--allies A,B`, `--enemies A,B` (`none` for no enemies) and `--speed N` (fast-forward); `--menu skirmish` (or `mods`) opens that screen; `--lobby "map=border_dispute;points=1000;limit=10;slots=human,7*computer"` sets the skirmish lobby up (see `docs/development.md`) |
 | a picture | `./openprocyon --mod x --map red_rover --ship Ship_Id --shot out.png --shot-frame 300 [--dist D --yaw Y --pitch P]` writes a 1280x720 PNG and exits; a list `--shot-frame 100,300` writes `out_100.png`, `out_300.png`. In a checkout `tools/shot.sh local/x.png` does the same through cargo and checks the picture is not black (`--script damage`, `fxtest`, `victory`, ... stage a situation; the names are listed in `game/src/smoke/mod.rs`) |
 | what the merged files look like | open them in `local/overlay/` (above) |
+| the engine version | `--version` prints `OpenProcyon <version>` and exits, with no window or assets (compare with a mod's `game_version`) |
+| the whole mod | `--check-mod <folder> [--json]` lays the mod (and the mods its `mod.json` `requires`, when installed) over the imported assets in a scratch folder and reports without opening a window. **Errors**: a file the loader skipped (not JSON, `extends` an unknown file, a bad `set` pointer, a texture that is no PNG) with the loader's own message; `mod.json` keys of the wrong type or a `game_version` that is no version; a section whose `layer` is not in the model; a mount with no `pos`/`rot` and no hardpoint node of its name; a `gun` that is not in `guns.json`; a gun's `BulletTypeName_Primary` that is not in `bullets.json`; a ship the game cannot load for any other reason (the loader's message); `data/weapons` tables the game cannot load; a mission with errors (as `--check-mission`, including ship `type`s, sounds and the backdrop). **Warnings**: a key no schema knows (`ship.json` and its nested objects, `guns.json`, `bullets.json`, `crew_nodes`, `mod.json`; with the nearest known key), `game_version` newer than this engine, `format` newer than 1, a `requires` mod that is not installed, a `missions` id with no folder; an `adjacent` or `parent_layer` that is no section's layer; a damaged-variant layer (`<A>Damage_<B>`) no swappable section's layer matches (it is never shown); a hardpoint node that counts as a gun mount only because its name contains `mount`, `lancer` or `turret` (give the node a `kind`); an effect (`fx/<name>.json`) or sound that does not exist; a texture override no model uses; in missions: a group, path, volume or objective point nothing uses, a repeated rule name, a ship, scenery object or mine outside `world_half`, scenery whose `scene` model is not under `models/`. Without imported assets only what the mod's own files show is checked and one warning line says what was skipped. Plain output is `<file>: <level>: <path>: <message>` per finding, then `<mod>: N errors, M warnings`; `--json` prints `{"mod", "engine", "errors", "warnings", "findings": [...]}` with the fields of `authoring::Finding` (`level`, `file`, `path`, `rule`, `rule_index`, `rule_name`, `list`, `item`, `nested`, `at`, `field`, `message`, `suggestion`; indices count from 0). Exit 1 when there are errors, else 0 (2: no folder given). `authoring::check_mod(dir, base)` is the same as a library call |
 | mission mistakes | `--check-mission <map id> --mod <dir>`, `--rule-trace`, `--why "<rule>"`, `--fire-rule`, the developer console (`~`); `--dump-rule-schema` needs no assets (all in "Authoring missions" and `docs/missions.md`) |
 | numbers | `PROCYON_TRACE=<file.csv>` writes every ship's position, velocity, heading and section hit points (and, in `<file>.shells.csv`, every shell) once per simulation step: compare a gun's range or a ship's speed with what you meant. `PROCYON_PROFILE=1` logs frame times, for the cost of a look (`docs/development.md`) |
 | logs | the console shows everything; the same text is written to `<user data dir>/logs/openprocyon.log` (the run before is `openprocyon.previous.log`), starting with the version and your arguments and ending with any panic. The overlay's `mod <name> <version> <description>` line and the retail-texture warning are plain console output and may not be in the log file |
+
+Tools that link the engine as a library (an editor, a checker) use `openprocyon::authoring` instead of the game's internals: it finds the
+imported assets without side effects, builds a mod overlay into a folder of the tool's own (the game's `local/overlay` is not touched, so
+several instances can run at once), and returns the rule schema, the JSON Schemas of the mod files (`schemas()`), the mission checker's findings as values, the whole-mod check (`check_mod`) and a writer for the engine's JSON layout (`to_json_string`: the exact text `tools/jsonio.py` writes, so a saved file differs from the importer's only where its data does).
 
 Restart the game after every change: the overlay, the merged tables, the string table, the sound index and the render profile are
 all read once at launch.
@@ -146,8 +189,9 @@ How a file combines with the one below it depends on its path:
 
 | Path | Rule |
 |---|---|
-| `data/weapons/guns.json`, `data/weapons/bullets.json`, `data/ai/weapons.json`, `data/collision.json`, `data/docks.json`, `menu/strings.json`, `hud/scales.json`, `data/render/skies.json`, `data/render/nebulae.json` | **merged**, deep: objects combine key by key, so a new key is added and an existing one changes only the keys you give; arrays and scalars replace. A file that is not valid JSON, or not an object, does not just get ignored: the merge replaces the whole table below it with that bad value and the game then fails or shows blank text (see "Troubleshooting") |
+| `data/weapons/guns.json`, `data/weapons/bullets.json`, `data/ai/weapons.json`, `data/collision.json`, `data/docks.json`, `data/crew_nodes.json`, `menu/strings.json`, `hud/scales.json`, `data/render/skies.json`, `data/render/nebulae.json` | **merged**, deep: objects combine key by key, so a new key is added and an existing one changes only the keys you give; arrays and scalars replace. A file that is not valid JSON, or not an object, does not just get ignored: the merge replaces the whole table below it with that bad value and the game then fails or shows blank text (see "Troubleshooting") |
 | a `.json` file containing `"extends"` | merged over its parent (below); the `extends` key is dropped |
+| `textures/<retail texture name>.png` | **not placed**: replaces that retail texture by name inside every model that uses it (below); the later mod wins for one name |
 | any other file (every other JSON such as `data/render/look.json`, `data/hud/theme.json`, `data/hud/slices.json`, `data/fx/wake_tint.json`, images, models, sounds, shaders) | **replaced** whole; with two mods the later one wins and the earlier one's file is gone |
 
 `extends` names the parent: for `ships/<Id>/ship.json` and `maps/<Id>/map.json` (and the other files at that depth) it is another
@@ -158,10 +202,12 @@ stops the game at launch (`mod <folder>: extends unknown '<parent>'`).
 | Mod file | Effect |
 |---|---|
 | any file with a base path (`hud/sprites/MainBar_PanicButton/Navy/NoCursor.png`, `ships/Ship_X/model.glb`, `fonts/Sans.otf`, `sound/<kind>/*.ogg`) | replaces the base file: texture packs, upscaled art, new fonts, sounds. A replaced retail `model.glb` keeps that ship's retail `geometry.json` (hit meshes) and sections, so a ship that looks different but hits the same |
+| `textures/<retail texture name>.png` | replaces that retail texture in every `ships/` and `models/` model of the overlay that uses it, with no model shipped (see "Replacing a retail texture by name") |
 | `ships/<Id>/ship.json` containing `"extends": "Ship_Navy_Cutter"` | deep-merged over that ship: object keys override one by one, arrays and scalars replace; a new ship is a few lines (see `mods/silver-skirmish`) |
 | an `extends` file may also carry `"set": {"/engines/0/fx": "X"}` (JSON pointers, applied after the merge) to change one value inside an array, which a merge cannot do; a pointer that does not exist stops the game at launch (`mod <folder>: <file> sets '<pointer>', which does not exist`). `mods/faction-colors` uses it to point a ship's four engines at recoloured effect copies |
 | `data/collision.json` | merged key by key: a new scenery type's collision (an entry per `type` a map's `objects` name, layout in `docs/data-format.md`), so a mod's own island or rock blocks ships and shells. Without an entry the model is drawn but nothing collides with it |
 | `data/docks.json` | merged key by key: `{"<scenery type>": {"points": [{"label", "pos", "yaw"}], "tender": true}}` (layout in `docs/data-format.md`), so a mod's own base or island gets dock points; scenery no rule owns is dockable by the player's side like a retail island |
+| `data/crew_nodes.json` | merged key by key: `{"<scenery type>": [{"name": "Crew_Walk_A_0", "pos": [x, y, z], "rot": [..]}]}`, the crew places of map scenery (a town's lanes, posts and work places) with no model change; same entries and rules as a ship's `crew_nodes` ("A ship from a model"). A type's list is an array, so a later mod's list for a type replaces an earlier one. Drawn only by a render profile's `deckhands` block |
 | `data/render/nebulae.json` | merged key by key: `{"rules": [...], "bolt": {...}}`, the storm and nebula looks a content mod wants on its own maps (same keys as the `nebulae` block of `look.json`). Its `rules` go in front of the profile's (first match wins), its other keys merge over the profile's `nebulae`; a rule matches by effect name only, so it applies on every map while the mod is on. Without a profile with a `nebulae` block it does nothing |
 | `data/render/skies.json` | merged key by key: `{"<sky>": {...any `sky` key of `look.json`...}}`, the layers, base and stars of a sky a content mod bakes itself (`models/sky/<sky>_cube.png`). Added under the active render profile's `sky.skies` (the profile's own entry for a sky wins); without a profile with a `sky` block it does nothing, so a mission mod never switches the look on |
 | `models/scenery/<Scene>.glb` with glTF animations | every clip in the file loops from spawn, all together (cranes, flags, beacons: node animation, the player on the model's root). Retail scenery has none; its windmills play `data/animations.json` |
@@ -209,6 +255,9 @@ rules. Data keys the engine adds are also listed per file: ship and gun keys in 
 | Developer console | always (`~` or F12; in a release build Display Options > Developer Console or `--console`) | control (it runs rule actions) | `game/src/rules/console.rs`, `game/src/bindings.rs`, `game/src/menu/settings.rs` |
 | Game-speed buttons | `data/hud/speed.json` (the bundled `game-speed` mod, on by default) | control | `game/src/panels.rs`, `game/src/classic/panels.rs` |
 | Pause key | always | control | `game/src/view.rs` |
+| Replace a retail texture by name (`textures/<name>.png` swapped into every model that uses it) | `textures/<name>.png` in a mod | presentation | `game/src/retail_tex.rs`, `game/src/modding.rs` |
+| Tow and homing points in `ship.json` (`tow`, `homing`) | a `tow` / `homing` key in `ship.json` | simulation | `game/src/data/ships.rs` |
+| Crew places in JSON (deck crews and townsfolk without editing a model) | a `crew_nodes` key in `ship.json`, or `data/crew_nodes.json` | presentation | `game/src/data/crew_nodes.rs`, `game/src/render/deckhands.rs` |
 | Number keys: primary ship on 1, secondaries on 2..9, 0, `\` | always | control | `game/src/bindings.rs` |
 | Mods page and its main-menu button, the HD skies bake | always | control | `game/src/menu/mods.rs`, `game/src/classic/menu.rs` |
 | Free camera | `data/camera.json` (the bundled `free-camera` mod, on by default) | presentation | `game/src/view.rs` |
@@ -237,7 +286,7 @@ Three launch options make those mistakes loud. None of them is retail behaviour 
 | flag | what it does |
 | --- | --- |
 | `--check-mission <map id>` | Loads `maps/<id>/` (`mission.json`, or a skirmish map's `script.json`, plus `map.json` and `media.json`; add `--mod <dir>` as in a normal launch) and checks every rule against the rule schema and the mission's own definitions, without starting the game. It prints one line per problem with the rule, the condition or action and the field, and exits 1 if there are errors. Errors: an unknown Type, a campaign-only Type in a skirmish `script.json`, an unknown or missing field, a group, player, volume, path, objective task or point, point set or map text the mission does not define, a flag or timer that is read but never set or started, a boolean that is not `"TRUE"`/`"FALSE"` (a JSON `true` or `false` is rejected: booleans in rules are always the strings), a number that is not a number or is outside its range (damage, throttle and volume fields are fractions 0..1, not percentages), a value outside an enum such as `Equivalence`. Warnings: a speech event, end message or ship name with no `media.json` entry, an empty or memberless group, a rule with no actions, a repeated rule name, a unit name no ship has. Errors also for a ship `type` with no `ships/<type>/ship.json`, a `Play Music Track` / `Play Special Effect` file or a speech event's `.ogg` that is in no sound folder, and a `map.json` backdrop without `backdrop.png` (skipped without imported assets). A mission whose `mission.json` or `media.json` is missing or invalid logs one error naming the file and the mod, and the game returns to the main menu. `--check-mission all` checks every map the game can see. When a mission from a mod (or a mod's copy of a retail mission) loads in a normal launch, the same check runs and its lines are logged, each prefixed with `mod <name>:`; retail missions are not re-checked. The retail missions pass with warnings only (the original's own typos, such as mission 10's etherium path `ebend`). A line names the map folder and file, then the rule, the condition or action and the field: `mission03/mission.json: ERROR: rule "Convoy Arrives": condition #1 'Enter Volume', field "Volume Name": unknown volume 'Harbor Mouth' (did you mean 'Harbour Mouth'?); it is an empty region that nothing is ever inside` |
-| `--dump-rule-schema [path]` | Writes the rule vocabulary as JSON (to `path`, or stdout) and exits; it needs no game assets. Every condition and action Type is listed with `role` (`condition` / `action`), `origin` (`retail`, or `engine` for Types this engine adds), `handler` (`interpreter`, or `victory` for the skirmish end conditions `victory.rs` reads), `campaign_only` (true: a skirmish `script.json` cannot use the Type, `--check-mission` reports an error) and its `fields`: `name`, `kind` (`group`, `player`, `path`, `volume`, `task`, `point`, `timer`, `flag`, `speech_event`, `point_set`, `map_text`, `message`, `team`, `ship_name`, `bool`, `number`, `enum` with its `values`, `text`), `default` (what the interpreter reads when the field is missing), `required`, `used` (false for fields the retail editor exports and the engine ignores), `range` and `soft`. A top-level `kinds` list gives the editor placeholders (`NO PATH`, `NO PLAYER`, ...) that mean "nothing chosen". Use it to lint or generate missions instead of scraping the source. The table is `game/src/rules/eval/schema.rs`; a unit test fails when it and the interpreter's match arms disagree |
+| `--dump-rule-schema [path]` | Writes the rule vocabulary as JSON (to `path`, or stdout) and exits; it needs no game assets. Every condition and action Type is listed with `role` (`condition` / `action`), `origin` (`retail`, or `engine` for Types this engine adds), `handler` (`interpreter`, or `victory` for the skirmish end conditions `victory.rs` reads), `campaign_only` (true: a skirmish `script.json` cannot use the Type, `--check-mission` reports an error) and its `fields`: `name`, `kind` (`group`, `player`, `path`, `volume`, `task`, `point`, `timer`, `flag`, `speech_event`, `point_set`, `map_text`, `message`, `team`, `ship_name`, `bool`, `number`, `enum` with its `values`, `text`), `default` (what the interpreter reads when the field is missing), `required`, `used` (false for fields the retail editor exports and the engine ignores), `range` and `soft`. A top-level `kinds` list gives the editor placeholders (`NO PATH`, `NO PLAYER`, ...) that mean "nothing chosen". The top-level `rule` and `task` objects list the keys of a rule (`name`, `Run Once`, `Is Active`, `conditions`, `actions`) and of an objective task (`Name`, `text`, `Active`, `required`, `team`, `complete_when`, `fail_when`) as `keys`: `name`, `json` (`string`, `boolean` or `array`), `default`, `origin`, `note`, `also` (other spellings read) and `items` (`condition` or `action`, for the lists). These are **JSON** booleans, unlike the `"TRUE"` / `"FALSE"` strings of a Type's `bool` fields. Use it to lint or generate missions instead of scraping the source. Tools linking the engine get each finding of `--check-mission` as data (`authoring::Problem`, also named `Finding`: the rule's index and name, the list (`conditions`/`actions`), the item index, the field, the level, the message and the suggested name as its own `suggestion`) and `authoring::defined_names` lists what a mission defines per kind of rule field (groups, volumes, flags, ...). The table is `game/src/rules/eval/schema.rs`; a unit test fails when it and the interpreter's match arms disagree |
 | `--rule-trace`, `--why "<rule name>"` | While the mission plays, log why rules have not fired: `--rule-trace` (or `PROCYON_RULE_TRACE=1`) for every rule that has not fired, `--why` (repeatable) for the named rule only (a name that is part of a rule's name picks every rule containing it). Each line lists the conditions that are false and what the world says about the names they read (group size and living members, flag value, timer reading, speech played or not, volume vertices). A rule is reported when it first waits and again only when the set of false conditions changes, so the log stays short. A `--why` name that matches no rule is a warning listing the rule names |
 
 At the start of every mission the interpreter also warns, once per rule and name, about a group, volume, path or point set a rule
@@ -391,10 +440,20 @@ engine can tell:
 | `FlagAttachmentPoint` | `flag` | the flag pole's ends (names with `top` and `bottom`) |
 | `BoardingEffectPoint` | `boarding` | where boarders cross |
 | `ToweePoint`, `TowerPoint`, `TorpedoHomingPoint` | `tow` (front/back), `homing` | tow and homing points |
-| (none) | `Crew_Walk_<lane>_<k>`, `Crew_Gun_*`, `Crew_Post_*`, `Crew_Work_*`, `Crew_Climb_<shroud>_a`/`_b` (the whole name) | where deck crews and townsfolk walk, man guns, stand, work (and carry loads between work places) and climb (drawn only by a render profile's `deckhands` block, see below) |
+| (none) | `Crew_Walk_<lane>_<k>`, `Crew_Gun_*`, `Crew_Post_*`, `Crew_Work_*`, `Crew_Climb_<shroud>_a`/`_b` (the whole name) | where deck crews and townsfolk walk, man guns, stand, work (and carry loads between work places) and climb (drawn only by a render profile's `deckhands` block, see below); the same nodes may instead be listed in JSON: `crew_nodes` in `ship.json`, `data/crew_nodes.json` for scenery, see below) |
 
 A node's heading about up is its rotation about glTF y (or the extra `rot_raw[0]`): 0 faces forward, a quarter turn to port is +90
 degrees. A gun entry may still give `pos`, `rot`, `parent_layer` itself; `parent_layer` otherwise is the nearest hull layer.
+
+**Crew places in JSON.** The `Crew_*` nodes need not be in the model. A ship's `crew_nodes` key lists them as
+`{"name": "Crew_Walk_P_0", "pos": [x, y, z], "rot": [..]}` (`rot` optional; `pos` and `rot` are the ship's own frame and the
+convention of a gun's `pos` and `rot`, game axes: x starboard, y forward, z up), and `data/crew_nodes.json` does the same for map
+scenery by type. `name` is exactly the node-name grammar above, so a typo is an error naming the file and the entry
+(`ships/<Id>/ship.json: crew_nodes[2].name`). The JSON nodes are added to the model's; a JSON node with the name of a model node
+replaces it, so a mod can move one place. Through `extends` it works on a retail hull, with no GLB at all:
+`{"extends": "Ship_Navy_Cutter", "crew_nodes": [{"name": "Crew_Walk_P_0", "pos": [0, -2, 1.2]}, {"name": "Crew_Walk_P_1", "pos": [0, 3, 1.2]}]}`
+(the list is an array, so it replaces a parent's own `crew_nodes`). Only a render profile's `deckhands` block draws crews; this
+changes nothing in a battle. `Crew_Count_<n>` takes a `pos` too, which is not used.
 
 **What `ship.json` can leave out.** `physics` (keys `Mass`, `MaxThrust`, `MaxSpeed`, `RotationalFriction`, `MaxAngularAcceleration`; defaults about a Navy Cutter's: 4000, 60000, 8, 20, 3), `core_hp` (a
 quarter of the hull sections' HP, at least 50), `sections`, `engines`, `wakes`, `flags`, `explosion_fx`, `engine_snd`, `repair_fx` (by
@@ -411,6 +470,17 @@ and renamed to the retail name (`o_main_body.tga`), so the engine's name rules (
 give the material a flat `baseColorFactor` as a fallback look. The baked model exists only in the overlay (`local/overlay`, git-ignored),
 so nothing converted from the game is committed; a name the import does not have leaves that material untextured and logs a warning.
 Applies to `ships/` and `models/` GLBs of a mod.
+
+**Replacing a retail texture by name.** A texture pack ships only its pictures: a file `textures/<retail texture name>.png` in a
+mod (the retail texture's file name without `.tga`, any letter case: `textures/O_Main_Body.png`; `textures/proc_pon_main.tga.png` works
+too) replaces that texture in every model of the overlay that uses it: retail ships, scenery and the mod's own models, including a
+`retail:<texture>` material. The PNG may be any size; its bytes are embedded as they are. The material names are those of the imported
+`ships/*/model.glb` (a name containing `.tga` there is the key; `textures/surface/` is a different thing, see "Graphics mods"). When the overlay is
+built, only the models that use an overridden texture are rewritten (in `local/overlay`, git-ignored, so nothing converted from the game
+or the pack is committed twice); every other model stays a link, so a mod without `textures/` costs nothing and one with it costs a
+small read of each model's header. With two mods the later one wins for the same name. A name no model uses is a warning in the mod
+report (`no model uses 1 texture override(s)`, with the file name; usually a typo), never an error. A file that is not a PNG is skipped
+with a reason. A picture with an alpha channel makes the material a cut-out. Not retail.
 
 **UI art.** A ship with no `hud/sprites/ShipBar_ShipIcon_<art>` and `WeaponBar_ShipIcon_<art>` (`<art>` = its `icon` without the prefix, else
 its id without `Ship_`) gets them made from the model when the overlay is built: a solid pale side silhouette for the command bar and

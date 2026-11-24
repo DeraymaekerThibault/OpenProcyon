@@ -121,6 +121,10 @@ impl ModList {
     pub fn from(mods: Vec<crate::modding::Installed>) -> Self {
         ModList { mods, sort: (ModCol::Name, true), category: None, scroll: 0, picked: None, filter_open: false, bake: SkyBake::Idle }
     }
+    /// What is wrong with mod `i` against this engine and the other installed mods (`Installed::warnings`): empty when nothing.
+    pub fn warnings(&self, i: usize) -> Vec<String> {
+        self.mods.get(i).map(|m| m.warnings(&self.mods, crate::authoring::ENGINE_VERSION)).unwrap_or_default()
+    }
     /// Whether mod `i`'s panel offers to bake the HD skies.
     pub fn offers_bake(&self, i: usize) -> bool {
         self.mods.get(i).is_some_and(|m| BAKE_FROM.contains(&m.id.as_str()))
@@ -247,6 +251,9 @@ mod tests {
             dir: Default::default(),
             enabled,
             default: false,
+            format: 1,
+            game_version: String::new(),
+            requires: vec![],
         }
     }
     #[test]

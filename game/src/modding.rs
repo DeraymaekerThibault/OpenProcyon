@@ -2,8 +2,10 @@
 //! `<assets>/../local/overlay` as symlinks (hard links, or copies, off Unix) so every loader, Bevy's included, sees a single root.
 //! Rules: a mod file replaces the base file of the same path (a new `ships/<id>/` or `maps/<id>/` folder is new content);
 //! a JSON with `"extends": "Ship_Navy_Cutter"` is deep-merged over the same file of that base ship/map, so a new ship is a few lines.
+//! Not retail: a mod's `textures/<retail texture name>.png` swaps that texture in every model of the overlay that uses it; only those
+//! models are rewritten (`retexture_models`), the rest stay links.
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 
 pub fn walk(dir: &Path, rel: &Path, out: &mut Vec<PathBuf>) {
@@ -29,6 +31,29 @@ fn link(from: &Path, to: &Path) {
 
 static ACTIVE: std::sync::OnceLock<Vec<PathBuf>> = std::sync::OnceLock::new();
 
+/// The `--mod <folder>` arguments of a command line, in order. A missing value, a path that does not exist and a path that is a file
+/// are errors naming the path: a mod that silently loads nothing is the worst way to fail.
+pub fn mod_args(args: &[String]) -> Result<Vec<PathBuf>, String> {
+    let mut mods = vec![];
+    for i in (1..args.len()).filter(|&i| args[i] == "--mod") {
+        let Some(path) = args.get(i + 1).filter(|p| !p.starts_with("--")) else {
+            return Err("--mod takes the mod's folder".into());
+        };
+        let dir = PathBuf::from(path);
+        if dir.is_file() {
+            return Err(format!("--mod {path}: that is a file, not a mod folder"));
+        }
+        if !dir.is_dir() {
+            return Err(format!(
+                "--mod {path}: no such folder (a relative path is read from {})",
+                std::env::current_dir().map_or_else(|_| ".".into(), |d| d.display().to_string())
+            ));
+        }
+        mods.push(dir);
+    }
+    Ok(mods)
+}
+
 /// Records this launch's mod folders (switched-on installed mods, then `--mod` folders, in overlay order). Set once, at startup.
 pub fn set_active(dirs: Vec<PathBuf>) {
     let _ = ACTIVE.set(dirs);
@@ -37,6 +62,24 @@ pub fn set_active(dirs: Vec<PathBuf>) {
 /// The mod folders overlaid in this launch (empty before `set_active`, as in unit tests).
 pub fn active() -> &'static [PathBuf] {
     ACTIVE.get().map_or(&[], Vec::as_slice)
+}
+
+/// Overlay file (canonical path) -> (the mod folder, the mod's own file) that provided it. A merged or extended file is a copy in the
+/// overlay, so its path says nothing about where it came from; errors name the mod's file instead (`origin_of`).
+static ORIGINS: std::sync::Mutex<Vec<(PathBuf, PathBuf, PathBuf)>> = std::sync::Mutex::new(Vec::new());
+
+/// The mod folder and the mod's own file behind a file of a built overlay; `None` for a base file or one no overlay built here knows.
+pub(crate) fn origin_of(path: &Path) -> Option<(PathBuf, PathBuf)> {
+    let key = std::fs::canonicalize(path).ok()?;
+    ORIGINS.lock().ok()?.iter().find(|(k, _, _)| *k == key).map(|(_, dir, file)| (dir.clone(), file.clone()))
+}
+
+fn record_origin(overlay_file: &Path, dir: &Path, file: &Path) {
+    let (Ok(key), Ok(mut all)) = (std::fs::canonicalize(overlay_file), ORIGINS.lock()) else { return };
+    all.retain(|(k, _, _)| *k != key);
+    // Canonical like the key, so errors name the same path on every platform (Windows adds `\\?\` and expands short names).
+    let canonical = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+    all.push((key, canonical(dir), canonical(file)));
 }
 
 /// Objects merge key by key, anything else is replaced.
@@ -51,8 +94,70 @@ pub fn merge(base: &mut Value, over: &Value) {
     }
 }
 
+/// The file-format version of `mod.json` and of the mod layout this engine reads. A `mod.json` without `format` is version 1.
+pub const MOD_FORMAT: u32 = 1;
+
+/// `mod.json` (docs/modding.md "Sharing a mod"). Every field is read leniently: a value of the wrong type counts as absent, and
+/// unknown keys are allowed and ignored, so a hand-written file never stops a mod from loading.
+#[derive(Clone, Debug, Default, serde::Deserialize, schemars::JsonSchema)]
+#[schemars(title = "mod.json")]
+pub struct ModJson {
+    /// Editor hint: the schema this file follows. Ignored by the loader.
+    #[serde(rename = "$schema", default, deserialize_with = "crate::data::lenient")]
+    pub schema: Option<String>,
+    /// The mod's id, which `mods.json` and other mods' `requires` use. Default: the folder name.
+    #[serde(default, deserialize_with = "crate::data::lenient")]
+    pub id: Option<String>,
+    /// The name shown in the Mods screen. Default: the id.
+    #[serde(default, deserialize_with = "crate::data::lenient")]
+    pub name: Option<String>,
+    /// The mod's own version, shown in the Mods screen.
+    #[serde(default, deserialize_with = "crate::data::lenient")]
+    pub version: Option<String>,
+    /// A line shown in the Mods screen.
+    #[serde(default, deserialize_with = "crate::data::lenient")]
+    pub description: Option<String>,
+    /// The Mods screen's filter (`Ships`, `Visuals`, ...). Default `Other`.
+    #[serde(default, deserialize_with = "crate::data::lenient")]
+    pub category: Option<String>,
+    /// The order of a mod campaign's missions (map ids); missions not listed follow, by id.
+    #[serde(default, deserialize_with = "crate::data::lenient")]
+    pub missions: Option<Vec<String>>,
+    /// Bundled mods only: on until the player switches it off. Ignored in user mods.
+    #[serde(default, deserialize_with = "crate::data::lenient")]
+    pub default: Option<bool>,
+    /// The mod file-format version (an integer). The engine reads format 1; absent means 1.
+    #[serde(default, deserialize_with = "crate::data::lenient")]
+    pub format: Option<u32>,
+    /// The oldest engine version the mod was made for, as `"x.y.z"`. A newer requirement logs a warning naming the mod; the mod still loads.
+    #[serde(default, deserialize_with = "crate::data::lenient")]
+    pub game_version: Option<String>,
+    /// Ids of mods this one needs. A missing or switched-off one logs a warning naming both; the mod still loads.
+    #[serde(default, deserialize_with = "crate::data::lenient")]
+    pub requires: Option<Vec<String>>,
+}
+
+/// `x.y.z` (missing parts are 0, a leading `v` and anything after `-` or `+` are ignored) as numbers; `None` when it is not a version.
+pub fn parse_version(text: &str) -> Option<[u64; 3]> {
+    let core = text.trim().trim_start_matches('v').split(['-', '+']).next()?;
+    let mut parts = core.split('.');
+    let mut out = [0; 3];
+    for slot in &mut out {
+        match parts.next() {
+            Some(p) => *slot = p.trim().parse().ok()?,
+            None => break,
+        }
+    }
+    parts.next().is_none().then_some(out)
+}
+
+/// The schema of `mod.json`.
+pub fn schema() -> Value {
+    serde_json::to_value(schemars::SchemaGenerator::default().into_root_schema_for::<ModJson>()).expect("schema is JSON")
+}
+
 /// A mod folder found in `<user dir>/mods/`.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Installed {
     pub id: String,
     pub name: String,
@@ -64,6 +169,39 @@ pub struct Installed {
     pub enabled: bool,
     /// A bundled mod whose `mod.json` has `"default": true`: on until the player switches it off.
     pub default: bool,
+    /// `mod.json` `format` (1 when absent).
+    pub format: u32,
+    /// `mod.json` `game_version`: the oldest engine version the mod asks for (empty when absent).
+    pub game_version: String,
+    /// `mod.json` `requires`: ids of the mods this one needs.
+    pub requires: Vec<String>,
+}
+
+impl Installed {
+    /// Warnings about this mod's `game_version` and `format` against this engine, and about `requires` against the other `mods`
+    /// (only switched-on ones count). Nothing here stops a mod from loading.
+    pub fn warnings(&self, mods: &[Installed], engine: &str) -> Vec<String> {
+        let mut out = vec![];
+        let label = format!("mod {:?}", self.id);
+        if !self.game_version.is_empty() {
+            match (parse_version(&self.game_version), parse_version(engine)) {
+                (Some(want), Some(have)) if want > have => out.push(format!("{label} asks for OpenProcyon {} or newer; this is {engine}, so it may not work", self.game_version)),
+                (None, _) => out.push(format!("{label}: game_version {:?} is not a version like \"0.2.0\"; ignored", self.game_version)),
+                _ => {}
+            }
+        }
+        if self.format > MOD_FORMAT {
+            out.push(format!("{label} is mod format {}; this engine reads format {MOD_FORMAT}, so some of it may be ignored", self.format));
+        }
+        for need in &self.requires {
+            match mods.iter().find(|m| m.id == *need) {
+                None => out.push(format!("{label} requires mod {need:?}, which is not installed")),
+                Some(m) if !m.enabled => out.push(format!("{label} requires mod {need:?}, which is installed but switched off")),
+                Some(_) => {}
+            }
+        }
+        out
+    }
 }
 
 /// Mods are installed by unzipping into this folder; `mods.json` beside it (`{"enabled": ["id", ...], "disabled": ["id", ...]}`, load order,
@@ -83,21 +221,58 @@ pub fn installed_in(user: &Path, bundled: Option<&Path>) -> Vec<Installed> {
     for (dir, is_bundled) in [(Some(user.join("mods")), false), (bundled.map(Path::to_path_buf), true)] {
         let Some(dir) = dir else { continue };
         for e in std::fs::read_dir(dir).into_iter().flatten().flatten().filter(|e| e.path().is_dir()) {
-            let meta = read(&e.path().join("mod.json")).unwrap_or_default();
-            let text = |k: &str| meta[k].as_str().unwrap_or_default().to_string();
-            let id = Some(text("id")).filter(|s| !s.is_empty()).unwrap_or_else(|| e.file_name().to_string_lossy().into_owned());
+            let meta: ModJson = read(&e.path().join("mod.json")).and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default();
+            let text = |v: &Option<String>| v.clone().unwrap_or_default();
+            let id = meta.id.clone().filter(|s| !s.is_empty()).unwrap_or_else(|| e.file_name().to_string_lossy().into_owned());
             if found.iter().any(|m| m.id == id) {
                 continue;
             }
-            let name = Some(text("name")).filter(|s| !s.is_empty()).unwrap_or_else(|| id.clone());
-            let category = Some(text("category")).filter(|s| !s.is_empty()).unwrap_or_else(|| "Other".into());
-            let default = is_bundled && meta["default"].as_bool() == Some(true);
+            let name = meta.name.clone().filter(|s| !s.is_empty()).unwrap_or_else(|| id.clone());
+            let category = meta.category.clone().filter(|s| !s.is_empty()).unwrap_or_else(|| "Other".into());
+            let default = is_bundled && meta.default == Some(true);
             let enabled = on.contains(&id) || (default && !off.contains(&id));
-            found.push(Installed { enabled, default, id, name, version: text("version"), description: text("description"), category, dir: e.path() });
+            found.push(Installed {
+                enabled,
+                default,
+                id,
+                name,
+                version: text(&meta.version),
+                description: text(&meta.description),
+                category,
+                dir: e.path(),
+                format: meta.format.unwrap_or(MOD_FORMAT),
+                game_version: text(&meta.game_version),
+                requires: meta.requires.clone().unwrap_or_default(),
+            });
         }
     }
     found.sort_by_key(|m| (on.iter().position(|i| *i == m.id).unwrap_or(usize::MAX), m.id.clone()));
     found
+}
+
+/// Prints the `game_version` / `format` / `requires` warnings of the switched-on mods (`Installed::warnings`) to stderr, one line each.
+/// `folders` are the `--mod` folders: they count as installed and on for `requires` (by folder name, or the `id` of their `mod.json`).
+pub fn log_warnings(all: &[Installed], folders: &[PathBuf]) {
+    let mut every = all.to_vec();
+    for dir in folders {
+        let meta: ModJson = read(&dir.join("mod.json")).and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default();
+        let id = meta.id.filter(|s| !s.is_empty()).unwrap_or_else(|| dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default());
+        if !every.iter().any(|m| m.id == id && m.enabled) {
+            every.push(Installed {
+                enabled: true,
+                id,
+                format: meta.format.unwrap_or(MOD_FORMAT),
+                game_version: meta.game_version.unwrap_or_default(),
+                requires: meta.requires.unwrap_or_default(),
+                ..Installed::default()
+            });
+        }
+    }
+    for m in every.iter().filter(|m| m.enabled) {
+        for w in m.warnings(&every, crate::authoring::ENGINE_VERSION) {
+            eprintln!("warning: {w}");
+        }
+    }
 }
 
 pub fn installed(bundled: Option<&Path>) -> Vec<Installed> {
@@ -121,6 +296,7 @@ pub const MERGED: &[&str] = &[
     "hud/scales.json",
     "data/collision.json",
     "data/docks.json",
+    "data/crew_nodes.json",
     "data/weapons/guns.json",
     "data/weapons/bullets.json",
     "data/ai/weapons.json",
@@ -156,6 +332,10 @@ pub struct ModEntry {
     pub merged: Vec<String>,
     pub extends: Vec<String>,
     pub added: Vec<String>,
+    /// `textures/<name>.png` files: retail textures this mod replaces by name (not placed as files; they are written into models).
+    pub textures: Vec<String>,
+    /// The `textures` files that won over earlier mods' but that no model of the overlay uses (a typo, as a rule).
+    pub unused_textures: Vec<String>,
     /// (file, why): the same error text the loader reports, so a mod author sees one wording.
     pub skipped: Vec<(String, String)>,
 }
@@ -172,7 +352,7 @@ const REPORT_LIST: usize = 8;
 impl ModReport {
     /// Drops the entry for `dir` (the game's own `content/` layer) unless it skipped something, which the player or developer must see.
     pub fn without(mut self, dir: &Path) -> Self {
-        self.mods.retain(|m| m.dir != dir || !m.skipped.is_empty());
+        self.mods.retain(|m| m.dir != dir || !m.skipped.is_empty() || !m.unused_textures.is_empty());
         self
     }
 
@@ -192,10 +372,13 @@ impl ModReport {
         for m in &self.mods {
             let version = if m.version.is_empty() { String::new() } else { format!(" {}", m.version) };
             out.push(format!("  {}{version} ({})", m.name, m.dir.display()));
-            for (label, files) in [("overrides", &m.overrides), ("merges", &m.merged), ("extends", &m.extends), ("adds", &m.added)] {
+            for (label, files) in [("overrides", &m.overrides), ("merges", &m.merged), ("extends", &m.extends), ("adds", &m.added), ("texture overrides", &m.textures)] {
                 if !files.is_empty() {
                     out.push(format!("    {label} {}: {}", files.len(), list(files)));
                 }
+            }
+            if !m.unused_textures.is_empty() {
+                out.push(format!("    warning: no model uses {} texture override(s), check the names: {}", m.unused_textures.len(), list(&m.unused_textures)));
             }
             if !m.skipped.is_empty() {
                 out.push(format!("    skipped {}:", m.skipped.len()));
@@ -236,17 +419,39 @@ pub fn overlay(base: &Path, mods: &[PathBuf], own: Option<PathBuf>) -> PathBuf {
 
 /// `overlay` that returns what it did instead of printing it.
 pub fn overlay_report(base: &Path, mods: &[PathBuf], own: Option<PathBuf>) -> (PathBuf, ModReport) {
-    let mut report = ModReport::default();
     if mods.is_empty() {
-        return (base.to_path_buf(), report);
+        return (base.to_path_buf(), ModReport::default());
     }
     if let Some(dir) = &own {
         assert!(disposable(dir), "PROCYON_OVERLAY {} holds files that are not an overlay; refusing to delete it", dir.display());
     }
     let root = own.clone().unwrap_or_else(|| base.join("../local/overlay"));
-    let _ = std::fs::remove_dir_all(&root);
-    if own.is_some() {
-        std::fs::create_dir_all(&root).unwrap();
+    let report = build_overlay(base, mods, &root, own.is_some());
+    (root, report)
+}
+
+/// Builds the overlay of `mods` over `base` into `out`, a folder the caller chose (a tool's own scratch folder, so it never touches the
+/// game's shared `local/overlay`, #136). `out` is rebuilt whole; it must be missing, empty or an overlay built earlier, else an error
+/// and nothing is deleted. With no mods nothing is built (the base is the root). See `authoring::overlay_into`.
+pub fn overlay_into(base: &Path, mods: &[PathBuf], out: &Path) -> Result<ModReport, String> {
+    if mods.is_empty() {
+        return Ok(ModReport::default());
+    }
+    if !disposable(out) {
+        return Err(format!("{} holds files that are not an overlay; refusing to delete it", out.display()));
+    }
+    Ok(build_overlay(base, mods, out, true))
+}
+
+/// The shared core: replaces `root` with base links plus the mods' files. `marked` writes the overlay mark (a folder the caller chose).
+fn build_overlay(base: &Path, mods: &[PathBuf], root: &Path, marked: bool) -> ModReport {
+    let mut report = ModReport::default();
+    if let (Ok(old), Ok(mut all)) = (std::fs::canonicalize(root), ORIGINS.lock()) {
+        all.retain(|(k, _, _)| !k.starts_with(&old));
+    }
+    let _ = std::fs::remove_dir_all(root);
+    if marked {
+        std::fs::create_dir_all(root).unwrap();
         std::fs::write(root.join(OVERLAY_MARK), "").unwrap();
     }
     let mut files = vec![];
@@ -256,6 +461,10 @@ pub fn overlay_report(base: &Path, mods: &[PathBuf], own: Option<PathBuf>) -> (P
         std::fs::create_dir_all(to.parent().unwrap()).unwrap();
         link(&base.join(rel), &to);
     }
+    // Retail texture key -> the PNG bytes, and who gave them (index of the mod in the report, its file); a later mod replaces an earlier one.
+    let mut images: HashMap<String, Vec<u8>> = HashMap::new();
+    let mut owners: HashMap<String, (usize, String)> = HashMap::new();
+    let mut models: BTreeSet<PathBuf> = files.iter().filter(|r| is_model(r)).cloned().collect();
     for m in mods {
         let modname = m.file_name().map_or_else(|| m.to_string_lossy().into_owned(), |n| n.to_string_lossy().into_owned());
         let mut entry = ModEntry { name: modname.clone(), dir: m.clone(), ..Default::default() };
@@ -282,12 +491,31 @@ pub fn overlay_report(base: &Path, mods: &[PathBuf], own: Option<PathBuf>) -> (P
         // Files that extend another go last (stable sort over sorted names), so they see sibling mod files, not only the base.
         // shortcut: one level; a chain of extends inside one mod needs a topological order.
         mf.sort();
+        mf.retain(|rel| {
+            let Some(k) = texture_override(rel) else { return true };
+            let name = rel.to_string_lossy().replace('\\', "/");
+            match std::fs::read(m.join(rel)) {
+                Ok(png) if png.starts_with(b"\x89PNG\r\n\x1a\n") && png.len() > 26 => {
+                    entry.textures.push(name.clone());
+                    owners.insert(k.clone(), (report.mods.len(), name));
+                    images.insert(k, png);
+                }
+                Ok(_) => entry.skipped.push((name, "not a PNG picture".into())),
+                Err(e) => entry.skipped.push((name, format!("cannot read: {e}"))),
+            }
+            false
+        });
+        models.extend(mf.iter().filter(|r| is_model(r)).cloned());
         mf.sort_by_key(|r| docs.get(r).is_some_and(|v| v.get("extends").is_some()));
         for rel in mf {
             let (from, to) = (m.join(&rel), root.join(&rel));
             let name = rel.to_string_lossy().replace('\\', "/");
             let existed = to.exists();
-            match apply_file(&name, &from, &to, base, docs.get(&rel)) {
+            let applied = apply_file(&name, &from, &to, base, docs.get(&rel));
+            if applied.as_ref().is_ok_and(|a| *a != Applied::Meta) {
+                record_origin(&to, m, &from);
+            }
+            match applied {
                 Ok(Applied::Meta) => {
                     let meta = docs.get(&rel);
                     let text = |k: &str| meta.and_then(|v| v[k].as_str()).filter(|s| !s.is_empty()).map(str::to_string);
@@ -303,13 +531,58 @@ pub fn overlay_report(base: &Path, mods: &[PathBuf], own: Option<PathBuf>) -> (P
         }
         report.mods.push(entry);
     }
+    retexture_models(root, &models, &images, &owners, &mut report);
     // Ships the mods bring get the UI art their model implies, unless they ship their own (shipart.rs).
     let mut ids: Vec<String> =
         mods.iter().flat_map(|m| std::fs::read_dir(m.join("ships")).into_iter().flatten().flatten()).filter_map(|e| e.file_name().into_string().ok()).collect();
     ids.sort();
     ids.dedup();
-    crate::shipart::generate(&root, &ids);
-    (root, report)
+    crate::shipart::generate(root, &ids);
+    report
+}
+
+/// A model file the engine loads textures for: the overlay's `ships/` and `models/` GLBs.
+fn is_model(rel: &Path) -> bool {
+    rel.extension().is_some_and(|e| e == "glb") && (rel.starts_with("ships") || rel.starts_with("models"))
+}
+
+/// The retail texture key a mod file `textures/<name>.png` stands for (any case of name and extension, `.tga` optional); `None` for any
+/// other path, `textures/surface/...` (baked surface maps) included.
+fn texture_override(rel: &Path) -> Option<String> {
+    let mut parts = rel.components();
+    let (dir, file) = (parts.next()?, parts.next()?);
+    let file = Path::new(file.as_os_str());
+    if parts.next().is_some() || dir.as_os_str() != "textures" || !file.extension().is_some_and(|e| e.eq_ignore_ascii_case("png")) {
+        return None;
+    }
+    Some(crate::retail_tex::key(&file.file_stem()?.to_string_lossy()))
+}
+
+/// Not retail: writes, in place of the link, a copy of each model in `models` that uses a texture in `textures`, with that texture
+/// replaced (retail_tex.rs). A model that uses none stays a link, and finding that out reads only its JSON chunk. A texture no model
+/// uses is reported on the mod whose file won.
+fn retexture_models(root: &Path, models: &BTreeSet<PathBuf>, images: &HashMap<String, Vec<u8>>, owners: &HashMap<String, (usize, String)>, report: &mut ModReport) {
+    if images.is_empty() {
+        return;
+    }
+    let mut used: BTreeSet<String> = BTreeSet::new();
+    for rel in models {
+        let path = root.join(rel);
+        if !crate::retail_tex::uses_any(&path, images) {
+            continue;
+        }
+        let Some((bytes, keys)) = std::fs::read(&path).ok().and_then(|b| crate::retail_tex::retexture(&b, images)) else { continue };
+        let _ = std::fs::remove_file(&path);
+        if let Err(e) = std::fs::write(&path, bytes) {
+            eprintln!("mod textures: cannot write {}: {e}", rel.display());
+        }
+        used.extend(keys);
+    }
+    let mut unused: Vec<_> = owners.iter().filter(|(k, _)| !used.contains(*k)).map(|(_, (i, name))| (*i, name.clone())).collect();
+    unused.sort();
+    for (i, name) in unused {
+        report.mods[i].unused_textures.push(name);
+    }
 }
 
 /// Puts one mod file into the overlay at `to`. An `Err` leaves the base file in place; the caller logs it and goes on.
@@ -382,6 +655,85 @@ fn apply_file(name: &str, from: &Path, to: &Path, base: &Path, doc: Option<&Valu
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mod_json_new_keys_default_and_read_leniently() {
+        let none: ModJson = serde_json::from_str("{}").unwrap();
+        assert_eq!((none.format, none.game_version, none.requires), (None, None, None));
+        let all: ModJson = serde_json::from_str(r#"{"$schema": "x", "format": 1, "game_version": "0.2.0", "requires": ["a", "b"], "future": 1}"#).unwrap();
+        assert_eq!((all.format, all.game_version.as_deref(), all.requires), (Some(1), Some("0.2.0"), Some(vec!["a".into(), "b".into()])));
+        let wrong: ModJson = serde_json::from_str(r#"{"format": "one", "game_version": 2, "requires": "a", "name": 5}"#).unwrap();
+        assert_eq!((wrong.format, wrong.game_version, wrong.requires, wrong.name), (None, None, None, None), "wrong types count as absent");
+        let dir = std::env::temp_dir().join(format!("procyon-modjson-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        for (f, meta) in [("plain", "{}"), ("new", r#"{"format": 2, "game_version": "9.0.0", "requires": ["plain", "ghost"]}"#)] {
+            std::fs::create_dir_all(dir.join("mods").join(f)).unwrap();
+            std::fs::write(dir.join("mods").join(f).join("mod.json"), meta).unwrap();
+        }
+        let list = installed_in(&dir, None);
+        let by = |id: &str| list.iter().find(|m| m.id == id).unwrap().clone();
+        assert_eq!((by("plain").format, by("plain").game_version.as_str(), by("plain").requires.len()), (1, "", 0));
+        assert_eq!((by("new").format, by("new").game_version.as_str(), by("new").requires.clone()), (2, "9.0.0", vec!["plain".to_string(), "ghost".to_string()]));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn mod_arguments_must_name_folders() {
+        let dir = std::env::temp_dir().join(format!("procyon-modargs-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("m")).unwrap();
+        std::fs::write(dir.join("f.json"), "{}").unwrap();
+        let args = |a: &[&str]| a.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let (m, f, gone) = (dir.join("m").to_string_lossy().into_owned(), dir.join("f.json").to_string_lossy().into_owned(), dir.join("gone").to_string_lossy().into_owned());
+        assert_eq!(mod_args(&args(&["game", "--map", "x"])).unwrap(), Vec::<PathBuf>::new());
+        assert_eq!(mod_args(&args(&["game", "--mod", &m, "--mod", &m])).unwrap(), vec![dir.join("m"), dir.join("m")]);
+        let error = mod_args(&args(&["game", "--mod", &m, "--mod", &gone])).unwrap_err();
+        assert!(error.contains(&gone) && error.contains("no such folder"), "{error}");
+        let error = mod_args(&args(&["game", "--mod", &f])).unwrap_err();
+        assert!(error.contains(&f) && error.contains("file"), "{error}");
+        assert!(mod_args(&args(&["game", "--mod"])).unwrap_err().contains("takes"));
+        assert!(mod_args(&args(&["game", "--mod", "--map", "x"])).unwrap_err().contains("takes"));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn versions_compare_as_numbers() {
+        assert_eq!(parse_version("0.2.0"), Some([0, 2, 0]));
+        assert_eq!(parse_version("v1.10"), Some([1, 10, 0]));
+        assert_eq!(parse_version("0.3.1-beta+x"), Some([0, 3, 1]));
+        assert_eq!(parse_version("1.2.3.4"), None);
+        assert_eq!(parse_version("soon"), None);
+        assert!(parse_version("0.10.0") > parse_version("0.9.9"), "not as text");
+    }
+
+    #[test]
+    fn warnings_name_the_mod_for_a_newer_engine_requirement_and_missing_or_disabled_requirements() {
+        let mod_ = |id: &str, enabled: bool, game_version: &str, requires: &[&str]| Installed {
+            id: id.into(),
+            enabled,
+            format: 1,
+            game_version: game_version.into(),
+            requires: requires.iter().map(|s| s.to_string()).collect(),
+            ..Installed::default()
+        };
+        let all = [
+            mod_("base", true, "", &[]),
+            mod_("off", false, "", &[]),
+            mod_("fancy", true, "0.10.0", &["base", "off", "ghost"]),
+            mod_("old", true, "0.2.0", &[]),
+            mod_("odd", true, "x", &[]),
+        ];
+        assert!(all[0].warnings(&all, "0.2.0").is_empty());
+        let w = all[2].warnings(&all, "0.9.0");
+        assert_eq!(w.len(), 3, "{w:?}");
+        assert!(w[0].contains("\"fancy\"") && w[0].contains("0.10.0") && w[0].contains("0.9.0"), "{w:?}");
+        assert!(w[1].contains("\"off\"") && w[1].contains("switched off"), "{w:?}");
+        assert!(w[2].contains("\"ghost\"") && w[2].contains("not installed"), "{w:?}");
+        assert!(all[3].warnings(&all, "0.2.0").is_empty(), "the same version is enough");
+        assert_eq!(all[4].warnings(&all, "0.2.0").len(), 1, "an unreadable version is reported, not fatal");
+        let newer = Installed { format: MOD_FORMAT + 1, ..mod_("f", true, "", &[]) };
+        assert!(newer.warnings(&[], "0.2.0")[0].contains("format"));
+    }
 
     #[test]
     fn the_merged_list_in_docs_modding_md_is_this_one() {
@@ -491,6 +843,37 @@ mod tests {
         std::fs::write(m.join("data/docks.json"), r#"{"FerrumTown": {"points": [{"label": "Berth1", "pos": [1, 2, 0], "yaw": 1.5}], "tender": true}}"#).unwrap();
         let c: Value = read(&overlay(&base, &[m], None).join("data/docks.json")).unwrap();
         assert!(c["Base_X"]["points"].is_array() && c["FerrumTown"]["points"].is_array(), "a mod's dock points are added beside the retail ones");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn crew_nodes_merge_by_scenery_type_across_mods() {
+        let dir = std::env::temp_dir().join(format!("procyon-mod-crew-nodes-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let (base, a, b) = (dir.join("assets"), dir.join("a"), dir.join("b"));
+        for (d, text) in [
+            (&base, r#"{"Town": [{"name": "Crew_Walk_A_0", "pos": [0, 0, 0]}]}"#),
+            (&a, r#"{"Pier": [{"name": "Crew_Work_0", "pos": [1, 0, 0]}]}"#),
+            (&b, r#"{"Town": [{"name": "Crew_Walk_B_0", "pos": [2, 0, 0]}]}"#),
+        ] {
+            std::fs::create_dir_all(d.join("data")).unwrap();
+            std::fs::write(d.join("data/crew_nodes.json"), text).unwrap();
+        }
+        let c: Value = read(&overlay(&base, &[a, b], None).join("data/crew_nodes.json")).unwrap();
+        assert!(c["Pier"].is_array(), "the first mod's type is added");
+        assert_eq!(c["Town"][0]["name"], "Crew_Walk_B_0", "a type a later mod gives replaces its list (arrays replace)");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn a_ship_extending_a_retail_hull_with_crew_nodes_keeps_the_hulls_other_keys() {
+        let (dir, root) = bad_mod(
+            "crew-nodes-extends",
+            &[("ships/Ship_X/ship.json", r#"{"race": "Navy", "core_hp": 80, "guns": {"G": {"arc_deg": 90, "gun": "Y"}}}"#)],
+            &[("ships/Ship_Crewed/ship.json", r#"{"extends": "Ship_X", "crew_nodes": [{"name": "Crew_Walk_P_0", "pos": [0, 1, 2]}]}"#)],
+        );
+        let s: Value = read(&root.join("ships/Ship_Crewed/ship.json")).unwrap();
+        assert_eq!((s["race"].as_str(), s["core_hp"].as_i64(), s["guns"]["G"]["gun"].as_str()), (Some("Navy"), Some(80), Some("Y")));
+        assert_eq!(s["crew_nodes"][0]["name"], "Crew_Walk_P_0");
+        assert!(s.get("extends").is_none());
         std::fs::remove_dir_all(dir).unwrap();
     }
     #[test]
@@ -635,5 +1018,65 @@ mod tests {
         assert!(clean.without(&own).mods.is_empty());
         let bad = ModReport { mods: vec![ModEntry { dir: own.clone(), skipped: vec![("a".into(), "b".into())], ..Default::default() }] };
         assert_eq!(bad.without(&own).mods.len(), 1);
+    }
+    /// A tiny GLB with one material named `name` and `image` as its texture.
+    fn model_with_texture(name: &str, image: &[u8]) -> Vec<u8> {
+        let doc = serde_json::json!({"asset": {"version": "2.0"}, "buffers": [{"byteLength": image.len()}], "bufferViews": [{"buffer": 0, "byteLength": image.len()}],
+            "images": [{"bufferView": 0, "mimeType": "image/png"}], "textures": [{"source": 0}],
+            "materials": [{"name": name, "pbrMetallicRoughness": {"baseColorTexture": {"index": 0}}}]});
+        crate::data::derive::tests::glb(doc, image)
+    }
+    fn has(hay: &[u8], needle: &[u8]) -> bool {
+        hay.windows(needle.len()).any(|w| w == needle)
+    }
+    #[test]
+    fn a_mods_texture_png_replaces_that_retail_texture_in_every_model_that_uses_it() {
+        let dir = std::env::temp_dir().join(format!("procyon-mod-textures-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let (base, a, b) = (dir.join("assets"), dir.join("a"), dir.join("b"));
+        let old = crate::shipart::png(2, 2, &[7u8; 16]);
+        let (first, second) = (crate::shipart::png(4, 4, &[1u8; 64]), crate::shipart::png(8, 8, &[2u8; 256]));
+        let put = |p: PathBuf, bytes: &[u8]| {
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, bytes).unwrap();
+        };
+        put(base.join("ships/Ship_A/model.glb"), &model_with_texture("Hull_Planks.tga", &old));
+        put(base.join("ships/Ship_B/model.glb"), &model_with_texture("Other.tga", &old));
+        put(base.join("models/scenery/Pier.glb"), &model_with_texture("hull_planks.tga", &old));
+        // a mod model asks for the retail texture, which the import has
+        put(
+            a.join("ships/Ship_Mine/model.glb"),
+            &crate::data::derive::tests::glb(
+                serde_json::json!({"asset": {"version": "2.0"}, "buffers": [{"byteLength": 4}], "materials": [{"name": "retail:hull_planks"}]}),
+                &[0; 4],
+            ),
+        );
+        put(a.join("textures/HULL_PLANKS.PNG"), &first);
+        put(a.join("textures/typo_name.png"), &first);
+        put(b.join("textures/Hull_Planks.tga.png"), &second);
+        put(b.join("textures/surface/Other.png"), &first);
+        let (root, report) = overlay_report(&base, &[a, b], Some(dir.join("overlay")));
+        for rel in ["ships/Ship_A/model.glb", "models/scenery/Pier.glb", "ships/Ship_Mine/model.glb"] {
+            let out = std::fs::read(root.join(rel)).unwrap();
+            assert!(has(&out, &second) && !has(&out, &first), "{rel}: the later mod's picture, and only it");
+            assert!(!std::fs::symlink_metadata(root.join(rel)).unwrap().file_type().is_symlink(), "{rel} is a rewritten copy");
+        }
+        #[cfg(unix)]
+        assert!(std::fs::symlink_metadata(root.join("ships/Ship_B/model.glb")).unwrap().file_type().is_symlink(), "a model using no overridden texture stays a link");
+        assert!(!root.join("textures/Hull_Planks.tga.png").exists() && !root.join("textures/HULL_PLANKS.PNG").exists(), "texture files are not placed");
+        assert!(root.join("textures/surface/Other.png").exists(), "textures/surface/ keeps its own meaning");
+        assert_eq!(report.mods[0].textures, ["textures/HULL_PLANKS.PNG", "textures/typo_name.png"]);
+        assert_eq!(report.mods[0].unused_textures, ["textures/typo_name.png"], "a name no model uses is a warning on its mod");
+        assert!(report.mods[1].unused_textures.is_empty() && report.mods[1].textures.len() == 1);
+        let text = report.lines().join("\n");
+        assert!(text.contains("texture overrides 2") && text.contains("warning: no model uses 1") && text.contains("typo_name.png"), "{text}");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn a_texture_file_that_is_not_a_png_is_skipped_with_a_reason() {
+        let (dir, report) = report_for("badpng", &[], &[("textures/x.png", "not a picture")]);
+        assert_eq!(report.mods[0].skipped[0].0, "textures/x.png");
+        assert!(report.mods[0].textures.is_empty());
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }
