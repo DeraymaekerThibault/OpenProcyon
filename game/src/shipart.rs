@@ -33,7 +33,7 @@ fn is_sail(name: &str) -> bool {
 
 /// The intact layers: the damaged variants of a section are not part of the ship's shape.
 fn intact(layers: &[Layer]) -> impl Iterator<Item = &Layer> {
-    layers.iter().filter(|l| !l.name.contains("Damage_"))
+    layers.iter().filter(|l| !crate::data::derive::is_damage_layer(&l.name))
 }
 
 /// How the hull lands in the outline's reference box: a uniform scale that fits it, centred on the box, bow up.

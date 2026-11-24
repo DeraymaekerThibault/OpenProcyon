@@ -492,7 +492,7 @@ fn breakup(
                 *nvis = Visibility::Hidden;
             }
             // One burst per section, from its visible (undamaged or damaged) mesh.
-            if !*done && !name.as_str().contains("Damage_") {
+            if !*done && !crate::data::derive::is_damage_layer(name.as_str()) {
                 *done = true;
                 if let Some(fx_name) = &d.fx {
                     let at = Transform::from_translation(tf.transform_point(ntf.transform_point(d.point)));

@@ -35,6 +35,10 @@ mod check_mod;
 mod extensions;
 mod json;
 mod resolved;
+/// Whether a model's mesh layer is a damage variant (`<A>Damage_<B>`, swapped in when the section `<A>_<B>` is destroyed) rather than
+/// part of the intact hull: true when the name contains `Damage_`. The one rule the game, `--check-mod` and the ship art use, so a tool
+/// listing a model's sections must skip these layers too.
+pub use crate::data::derive::is_damage_layer;
 pub use art::{GunBank, ShipArt, ship_art};
 pub use check_mod::{check_mod, check_mod_with, unknown_key_findings, unknown_keys};
 pub use extensions::{Extension, ExtensionKind, extensions};

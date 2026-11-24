@@ -371,7 +371,7 @@ impl Checker<'_> {
             .or_else(|| facts.as_ref().map(|f| f.layers.iter().map(|l| l.name.clone()).collect()));
         let explicit: Vec<(&String, &Value)> = ship["sections"].as_object().map(|m| m.iter().collect()).unwrap_or_default();
         let section_layers: Vec<String> = if explicit.is_empty() {
-            facts.iter().flat_map(|f| f.layers.iter()).filter(|l| !l.name.contains("Damage_")).map(|l| l.name.clone()).collect()
+            facts.iter().flat_map(|f| f.layers.iter()).filter(|l| !derive::is_damage_layer(&l.name)).map(|l| l.name.clone()).collect()
         } else {
             explicit.iter().filter_map(|(_, s)| s["layer"].as_str().map(String::from)).collect()
         };

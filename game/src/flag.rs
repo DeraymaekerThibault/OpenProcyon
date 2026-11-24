@@ -119,7 +119,7 @@ fn snap(
         let mut pieces = vec![];
         for d in children.iter_descendants(ship) {
             let Ok((mesh, at, node)) = parts.get(d) else { continue };
-            if [d, node.parent()].iter().any(|n| names.get(*n).is_ok_and(|n| n.as_str().contains("Damage_"))) {
+            if [d, node.parent()].iter().any(|n| names.get(*n).is_ok_and(|n| crate::data::derive::is_damage_layer(n.as_str()))) {
                 continue;
             }
             let Some(m) = meshes.get(&mesh.0) else { continue 'flags };
