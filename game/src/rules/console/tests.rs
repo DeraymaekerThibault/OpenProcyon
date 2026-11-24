@@ -542,7 +542,7 @@ fn the_keys_help_lists_match_what_key_with_does() {
     covered.insert("Escape");
     // Every key word in KEYS must be one of the cases above (the mouse wheel and the console key are handled in the system, not here).
     for (keys, _) in KEYS {
-        for word in keys.split(|ch: char| ch == '/' || ch == ',' || ch == ' ').filter(|w| !w.is_empty()) {
+        for word in keys.split(['/', ',', ' ']).filter(|w| !w.is_empty()) {
             let known = covered.contains(word) || ["or", "the", "console", "key", "mouse", "wheel"].contains(&word);
             assert!(known, "KEYS lists '{word}' but this test does not exercise it: add a case");
         }
