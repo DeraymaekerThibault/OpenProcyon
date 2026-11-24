@@ -510,3 +510,342 @@ fn a_required_task_without_a_team_never_decides_a_skirmish() {
     s.step(&[], 0.1, false);
     assert_eq!((s.end.clone(), s.ended.clone()), (None, None));
 }
+
+// ---- Orders and conditions that act on ships: OP Board Ship, OP Abandon Ship, OP Teleport, OP Follow Group, OP Place Mines,
+// ---- OP Etherium Current, the campaign counters, OP Group Is Cloaked, OP Group Speed, OP Task State.
+
+fn unit(n: u32, owner: &str, x: f32, y: f32) -> Unit {
+    let mut u = Unit::new(e(n), -1, Vec3::new(x, 0.0, -y));
+    u.owner = owner.into();
+    u.speed = Some(0.0);
+    u
+}
+fn e(n: u32) -> Entity {
+    Entity::from_raw_u32(n).unwrap()
+}
+/// Runs one world-initialise rule whose only action is `action` and returns what the interpreter asked the world to do.
+fn effects(action: Value, extra: Value, w: &[Unit]) -> (Script, Vec<Fx>) {
+    let mut data = json!({"rules": [rule("go", true, json!([{"Type": "World Initialize"}]), json!([action]))]});
+    for (k, v) in extra.as_object().into_iter().flatten() {
+        data[k] = v.clone();
+    }
+    let mut s = script(data, Value::Null);
+    let (fx, _) = s.step(w, 0.1, false);
+    (s, fx)
+}
+/// Whether a rule with the condition `cond` fires on the world `w`.
+fn holds(cond: Value, w: &[Unit]) -> bool {
+    let mut s = script(json!({"rules": [rule("r", true, json!([cond]), json!([set_flag("yes")]))]}), Value::Null);
+    s.step(w, 0.1, false);
+    s.flag("yes")
+}
+
+#[test]
+fn board_ship_hands_the_boarders_and_the_target_group_to_the_world() {
+    let w = [unit(1, "Raiders", 0.0, 0.0), unit(2, "Raiders", 5.0, 0.0), unit(3, "Merchant", 50.0, 0.0), unit(4, "Merchant", 90.0, 0.0)];
+    let (_, fx) = effects(json!({"Type": "OP Board Ship", "Group Name": "Raiders", "Target Group": "Merchant"}), json!({}), &w);
+    assert!(matches!(fx.as_slice(), [Fx::Board(b, t)] if b == &[e(1), e(2)] && t == &[e(3), e(4)]), "{}", fx.len());
+}
+
+#[test]
+fn abandon_ship_names_the_group_and_the_hull_stays_alive_for_the_rules() {
+    let w = [unit(1, "Hulk", 0.0, 0.0), unit(2, "Other", 5.0, 0.0)];
+    let (_, fx) = effects(json!({"Type": "OP Abandon Ship", "Group Name": "Hulk"}), json!({}), &w);
+    assert!(matches!(fx.as_slice(), [Fx::Abandon(u)] if u == &[e(1)]));
+    // The unit the world reports stays alive, so `Group Destroyed` is false for the abandoned hull.
+    assert!(!holds(json!({"Type": "Group Destroyed", "Group Name": "Hulk"}), &w));
+    let mut sunk = unit(1, "Hulk", 0.0, 0.0);
+    sunk.alive = false;
+    assert!(holds(json!({"Type": "Group Destroyed", "Group Name": "Hulk"}), &[sunk]));
+}
+
+#[test]
+fn teleport_keeps_the_layout_of_the_group_and_turns_it_with_a_heading() {
+    let points = json!({"environment": {"point_sets": {"harbour": [{"pos": [0.0, 0.0, 0.0]}, {"pos": [100.0, 200.0, 0.0]}]}}});
+    // Two ships 20 apart along x, the group's centre at (10, 0).
+    let mut w = [unit(1, "Fleet", 0.0, 0.0), unit(2, "Fleet", 20.0, 0.0)];
+    w[0].heading = 0.3;
+    let place = |action: Value, w: &[Unit]| match effects(action, points.clone(), w).1.as_slice() {
+        [Fx::Place { units, heading }] => (units.clone(), *heading),
+        other => panic!("expected one Place, got {} effects", other.len()),
+    };
+    let (units, heading) = place(json!({"Type": "OP Teleport", "Group/Unit Name": "Fleet", "Point Set Name": "harbour", "Point Index": 1}), &w);
+    assert_eq!(heading, None, "no Heading: the ships keep theirs");
+    // Game (100, 200) is Bevy (100, 0, -200); the ships keep their 20 units between them, centred on the point.
+    assert_eq!(units, vec![(e(1), Vec3::new(90.0, 0.0, -200.0)), (e(2), Vec3::new(110.0, 0.0, -200.0))]);
+    // A heading of 90 degrees (toward +x, a compass bearing) turns the layout with the first ship: from 0.3 rad to -pi/2.
+    let (units, heading) = place(json!({"Type": "OP Teleport", "Group/Unit Name": "Fleet", "Point Set Name": "harbour", "Heading": 90.0}), &w);
+    assert_eq!(heading, Some(-std::f32::consts::FRAC_PI_2), "game axes: bearing 90 is toward +x, which is heading -pi/2 about +Y");
+    let turn = Quat::from_rotation_y(-std::f32::consts::FRAC_PI_2 - 0.3);
+    assert!(units[0].1.distance(turn * Vec3::new(-10.0, 0.0, 0.0)) < 1e-4 && units[1].1.distance(turn * Vec3::new(10.0, 0.0, 0.0)) < 1e-4, "{units:?}");
+    // The default index is the first point and a lone ship goes exactly there.
+    let mut lone = unit(3, "Fleet", 7.0, 7.0);
+    lone.name = "Lone".into();
+    let (units, _) = place(json!({"Type": "OP Teleport", "Group/Unit Name": "Fleet,Lone", "Point Set Name": "harbour"}), &[lone]);
+    assert_eq!(units, vec![(e(3), Vec3::ZERO)]);
+}
+
+#[test]
+fn teleport_to_a_point_that_is_not_there_does_nothing_and_warns_once() {
+    let points = json!({"environment": {"point_sets": {"harbour": [{"pos": [0.0, 0.0, 0.0]}]}}});
+    let (s, fx) = effects(json!({"Type": "OP Teleport", "Group/Unit Name": "Fleet", "Point Set Name": "harbour", "Point Index": 3}), points, &[unit(1, "Fleet", 0.0, 0.0)]);
+    assert!(fx.is_empty());
+    assert!(s.warned.iter().any(|w| w.contains("point 3 of point set 'harbour'")), "{:?}", s.warned);
+}
+
+#[test]
+fn the_retail_teleport_still_sends_every_member_to_the_first_point() {
+    let points = json!({"environment": {"point_sets": {"p": [{"pos": [1.0, 2.0, 0.0]}]}}});
+    let w = [unit(1, "Fleet", 0.0, 0.0), unit(2, "Fleet", 20.0, 0.0)];
+    let (_, fx) = effects(json!({"Type": "Teleport Group/Unit", "Group/Unit Name": "Fleet", "Point Set Name": "p"}), points, &w);
+    assert!(matches!(fx.as_slice(), [Fx::Teleport(u, p)] if u == &[e(1), e(2)] && *p == Vec3::new(1.0, 0.0, -2.0)));
+}
+
+#[test]
+fn follow_group_names_the_station_and_a_wrong_station_is_ignored_with_a_warning() {
+    let w = [unit(1, "Escort", 0.0, 0.0), unit(2, "Convoy", 50.0, 0.0)];
+    let follow = |station: &str| json!({"Type": "OP Follow Group", "Group Name": "Escort", "Target Group": "Convoy", "Station": station, "Distance": 40});
+    let (_, fx) = effects(follow("Abeam Port"), json!({}), &w);
+    assert!(matches!(fx.as_slice(), [Fx::Follow { units, group, station: Station::AbeamPort, distance }] if units == &[e(1)] && group == "Convoy" && *distance == 40.0));
+    let (s, fx) = effects(follow("Sideways"), json!({}), &w);
+    assert!(fx.is_empty() && s.warned.iter().any(|w| w.contains("station 'Sideways'")));
+    // Stations in the leader's frame: bow is -Z, starboard +X.
+    assert_eq!(Station::Astern.offset(40.0), Vec3::new(0.0, 0.0, 40.0));
+    assert_eq!(Station::Ahead.offset(40.0), Vec3::new(0.0, 0.0, -40.0));
+    assert_eq!(Station::AbeamStarboard.offset(40.0), Vec3::new(40.0, 0.0, 0.0));
+    assert_eq!(Station::AbeamPort.offset(40.0), Vec3::new(-40.0, 0.0, 0.0));
+}
+
+#[test]
+fn group_is_cloaked_wants_every_live_member_fully_cloaked() {
+    let cloaked = |n, x, c: bool| {
+        let mut u = unit(n, "Sub", x, 0.0);
+        u.cloaked = c;
+        u
+    };
+    let on = json!({"Type": "OP Group Is Cloaked", "Group Name": "Sub"});
+    let off = json!({"Type": "OP Group Is Cloaked", "Group Name": "Sub", "Boolean": "FALSE"});
+    assert!(holds(on.clone(), &[cloaked(1, 0.0, true), cloaked(2, 5.0, true)]));
+    assert!(!holds(on.clone(), &[cloaked(1, 0.0, true), cloaked(2, 5.0, false)]), "one member shows");
+    assert!(holds(off.clone(), &[cloaked(1, 0.0, false), cloaked(2, 5.0, false)]));
+    assert!(!holds(off, &[cloaked(1, 0.0, true), cloaked(2, 5.0, false)]));
+    let mut dead = cloaked(2, 5.0, false);
+    dead.alive = false;
+    assert!(holds(on.clone(), &[cloaked(1, 0.0, true), dead]), "a destroyed member does not count");
+    assert!(!holds(on, &[]), "no live member: neither answer holds");
+}
+
+#[test]
+fn group_speed_compares_the_fastest_or_slowest_live_ship() {
+    let moving = |n, v: f32| {
+        let mut u = unit(n, "Convoy", 0.0, 0.0);
+        u.speed = Some(v);
+        u
+    };
+    let speed = |which: &str, eq: &str, v: f64, w: &[Unit]| holds(json!({"Type": "OP Group Speed", "Group Name": "Convoy", "Which": which, "Equivalence": eq, "Speed": v}), w);
+    let w = [moving(1, 0.2), moving(2, 4.0)];
+    assert!(speed("Fastest", "Greater Than", 3.0, &w) && !speed("Slowest", "Greater Than", 3.0, &w));
+    assert!(speed("Slowest", "Less Than", 0.5, &w) && !speed("Fastest", "Less Than", 0.5, &w));
+    assert!(speed("Fastest", "Less Than", 0.5, &[moving(1, 0.2), moving(2, 0.1)]), "stopped alongside: even the fastest is slow");
+    // What is not a ship has no speed; a group of such things never holds.
+    let mut rock = unit(3, "Convoy", 0.0, 0.0);
+    rock.speed = None;
+    assert!(!speed("Fastest", "Less Than", 99.0, &[rock]));
+    assert!(!speed("Fastest", "Less Than", 99.0, &[]));
+}
+
+#[test]
+fn task_state_reads_what_the_rules_set() {
+    let cond = |task: &str, state: &str| json!({"Type": "OP Task State", "Objective Task": task, "State": state});
+    let mut data = json!({"rules": [
+        rule("done", true, json!([flag_is("go", true)]), json!([{"Type": "Set Objective Task Complete State", "Objective Task": "Escort", "Complete State": "TRUE"}])),
+        rule("failed", true, json!([flag_is("go", true)]), json!([{"Type": "Set Objective Task Failed State", "Objective Task": "Later", "Failed State": "TRUE"}])),
+        rule("active", false, json!([cond("Escort", "Active")]), json!([add("active", 1.0)])),
+        rule("complete", false, json!([cond("Escort", "Complete")]), json!([add("complete", 1.0)])),
+        rule("failed seen", false, json!([cond("Later", "Failed")]), json!([add("failed", 1.0)])),
+        rule("not active", false, json!([cond("Later", "Active")]), json!([add("later active", 1.0)])),
+        rule("unknown", false, json!([cond("Nope", "Active")]), json!([add("unknown", 1.0)])),
+    ]});
+    data["tasks"] = json!([{"Name": "Escort", "Active": true}, {"Name": "Later", "Active": true}]);
+    let mut s = script(data, Value::Null);
+    s.step(&[], 0.1, false);
+    assert_eq!((s.ext.counter("active"), s.ext.counter("complete"), s.ext.counter("later active")), (1.0, 0.0, 1.0), "switched on, not decided");
+    s.flags.insert("go".into(), true);
+    s.step(&[], 0.1, false);
+    assert_eq!((s.ext.counter("complete"), s.ext.counter("failed")), (1.0, 1.0));
+    assert_eq!((s.ext.counter("active"), s.ext.counter("later active")), (1.0, 1.0), "a decided task is no longer active");
+    assert_eq!(s.ext.counter("unknown"), 0.0, "a task the mission does not have is in no state");
+}
+
+#[test]
+fn place_mines_and_the_etherium_current_hand_their_settings_to_the_world() {
+    let extra =
+        json!({"environment": {"point_sets": {"field": [{"pos": [10.0, 20.0, 0.0]}, {"pos": [30.0, 40.0, 0.0]}]}}, "paths": {"lane": [[0.0, 0.0, 0.0], [0.0, 100.0, 0.0]]}});
+    let (_, fx) = effects(json!({"Type": "OP Place Mines", "Point Set Name": "field", "Player/Owner": "Pirates"}), extra.clone(), &[]);
+    assert!(matches!(fx.as_slice(), [Fx::Mines { set, bullet, owner }] if set == "field" && bullet == "Bullet_StarMine_Med" && owner == "Pirates"), "the default mine");
+    let (_, fx) = effects(json!({"Type": "OP Etherium Current", "Etherium Path": "lane", "Strength": 3.0, "Boolean": "FALSE"}), extra.clone(), &[]);
+    match fx.as_slice() {
+        [Fx::CurrentSet { name, path, strength: Some(s), width: None, on: Some(false) }] => {
+            assert_eq!((name.as_str(), *s, path.len()), ("lane", 3.0, 2));
+        }
+        other => panic!("{} effects", other.len()),
+    }
+    let (s, fx) = effects(json!({"Type": "OP Etherium Current", "Etherium Path": "nowhere"}), extra, &[]);
+    assert!(fx.is_empty() && s.warned.iter().any(|w| w.contains("path 'nowhere'")));
+}
+
+#[test]
+fn campaign_counters_are_loaded_changed_compared_and_handed_on_once_when_the_mission_is_won() {
+    let data = json!({"rules": [
+        rule("start", true, json!([{"Type": "World Initialize"}]), json!([
+            {"Type": "OP Add To Campaign Counter", "Counter Name": "rescued", "Value": 2}, {"Type": "OP Set Campaign Counter", "Counter Name": "grudge", "Value": 5}])),
+        rule("seen", true, json!([{"Type": "OP Campaign Counter Condition", "Counter Name": "rescued", "Equivalence": "Equal To", "Value": 3}]), json!([set_flag("three")])),
+        rule("win", true, json!([flag_is("three", true)]), json!([{"Type": "Goto Next Level", "World": "Mission02.twt"}])),
+    ]});
+    let mut s = script(data, Value::Null);
+    s.set_campaign_values([("rescued".to_string(), 1.0)].into());
+    assert!(s.campaign_commit().is_none(), "nothing is handed on before the mission is won");
+    for _ in 0..4 {
+        s.step(&[], 0.1, false);
+    }
+    assert!(s.flag("three"), "the value of the earlier mission (1) plus this mission's 2");
+    let on = s.campaign_commit().expect("won");
+    assert_eq!((on.get("rescued"), on.get("grudge")), (Some(&3.0), Some(&5.0)));
+    assert!(s.campaign_commit().is_none(), "handed on once");
+    assert_eq!(s.ext.counter("rescued"), 0.0, "the mission's own counters are a separate set");
+}
+
+#[test]
+fn check_mission_knows_the_ship_and_world_types() {
+    let mission = |conds: Value, acts: Value| {
+        json!({
+            "players": ["Player0 Group"],
+            "groups": {"Fleet": [1]},
+            "ships": [{"id": 1, "name": "RLS Hawk", "group": "Fleet"}],
+            "paths": {"lane": [[0.0, 0.0, 0.0], [0.0, 100.0, 0.0]]},
+            "tasks": [{"Name": "Escort"}],
+            "environment": {"point_sets": {"harbour": [{"pos": [0.0, 0.0, 0.0]}, {"pos": [1.0, 1.0, 0.0]}]}},
+            "rules": [rule("r", true, conds, acts)],
+        })
+    };
+    let problems =
+        |conds: Value, acts: Value| crate::rules::check::check(&mission(conds, acts), &Value::Null, &Value::Null).iter().map(ToString::to_string).collect::<Vec<_>>().join("\n");
+    // A correct use of every new Type passes cleanly, and a campaign counter nobody sets in this mission is not an error.
+    let clean = problems(
+        json!([
+            {"Type": "OP Group Is Cloaked", "Group Name": "Fleet"},
+            {"Type": "OP Group Speed", "Group Name": "Fleet", "Which": "Fastest", "Equivalence": "Less Than", "Speed": 0.5},
+            {"Type": "OP Task State", "Objective Task": "Escort", "State": "Complete"},
+            {"Type": "OP Campaign Counter Condition", "Counter Name": "rescued", "Equivalence": "Greater Than", "Value": 1},
+        ]),
+        json!([
+            {"Type": "OP Board Ship", "Group Name": "Fleet", "Target Group": "Fleet"},
+            {"Type": "OP Abandon Ship", "Group Name": "Fleet"},
+            {"Type": "OP Teleport", "Group/Unit Name": "Fleet", "Point Set Name": "harbour", "Point Index": 1, "Heading": 90},
+            {"Type": "OP Follow Group", "Group Name": "Fleet", "Target Group": "Fleet", "Station": "Astern", "Distance": 50},
+            {"Type": "OP Place Mines", "Point Set Name": "harbour"},
+            {"Type": "OP Etherium Current", "Etherium Path": "lane", "Strength": 2},
+            {"Type": "OP Set Campaign Counter", "Counter Name": "rescued", "Value": 1},
+        ]),
+    );
+    assert_eq!(clean, "", "{clean}");
+    let text = problems(
+        json!([
+            {"Type": "OP Group Speed", "Group Name": "Flete", "Which": "Quickest", "Equivalence": "Less Than", "Speed": 0.5},
+            {"Type": "OP Task State", "Objective Task": "Escrot", "State": "Done"},
+        ]),
+        json!([
+            {"Type": "OP Teleport", "Group/Unit Name": "Fleet", "Point Set Name": "harbour", "Point Index": 2},
+            {"Type": "OP Teleport", "Group/Unit Name": "Fleet", "Point Set Name": "harbour", "Point Index": 0.5},
+            {"Type": "OP Teleport", "Group/Unit Name": "Fleet", "Point Set Name": "habour"},
+            {"Type": "OP Follow Group", "Group Name": "Fleet", "Target Group": "Fleet", "Station": "Behind", "Distance": 50},
+            {"Type": "OP Follow Group", "Group Name": "Fleet", "Target Group": "Fleet", "Station": "Astern"},
+            {"Type": "OP Etherium Current", "Etherium Path": "lan"},
+            {"Type": "OP Place Mines", "Point Set Name": "habour"},
+        ]),
+    );
+    for want in [
+        "field \"Group Name\": unknown group 'Flete'",
+        "field \"Which\": 'Quickest' is not one of",
+        "unknown objective task 'Escrot'",
+        "field \"State\": 'Done' is not one of",
+        "field \"Point Index\": point set 'harbour' has 2 points (0..1); index 2 is past its end",
+        "field \"Point Index\": 0.5 is not a whole number",
+        "unknown point set 'habour'",
+        "field \"Station\": 'Behind' is not one of",
+        "field \"Distance\": missing; reads as 0",
+        "unknown path 'lan'",
+    ] {
+        assert!(text.contains(want), "missing {want:?} in\n{text}");
+    }
+}
+
+#[test]
+fn a_teleport_index_that_is_not_a_whole_number_from_zero_moves_nothing() {
+    let points = json!({"environment": {"point_sets": {"harbour": [{"pos": [0.0, 0.0, 0.0]}, {"pos": [9.0, 9.0, 0.0]}]}}});
+    let w = [unit(1, "Fleet", 5.0, 5.0)];
+    for (bad, said) in [(json!(-1), "point -1 of"), (json!(1.5), "point 1.5 of"), (json!(0.5), "point 0.5 of")] {
+        let (s, fx) = effects(json!({"Type": "OP Teleport", "Group/Unit Name": "Fleet", "Point Set Name": "harbour", "Point Index": bad}), points.clone(), &w);
+        assert!(fx.is_empty(), "{bad}: the checker says nothing is moved, and nothing is");
+        assert!(s.warned.iter().any(|w| w.contains(said)), "{:?}", s.warned);
+    }
+    // An index written as "" is left out (the first point); a string that is not a number reads 0 like every number field.
+    for index in [json!(""), json!("1")] {
+        let (_, fx) = effects(json!({"Type": "OP Teleport", "Group/Unit Name": "Fleet", "Point Set Name": "harbour", "Point Index": index}), points.clone(), &w);
+        assert!(matches!(fx.as_slice(), [Fx::Place { units, .. }] if units == &[(e(1), Vec3::ZERO)]));
+    }
+}
+
+#[test]
+fn an_optional_field_written_as_an_empty_string_is_the_same_as_leaving_it_out() {
+    let extra = json!({"environment": {"point_sets": {"harbour": [{"pos": [0.0, 0.0, 0.0]}]}}, "paths": {"lane": [[0.0, 0.0, 0.0], [0.0, 100.0, 0.0]]}});
+    let mut ship = unit(1, "Fleet", 0.0, 0.0);
+    ship.heading = 1.0;
+    let (_, fx) = effects(json!({"Type": "OP Teleport", "Group/Unit Name": "Fleet", "Point Set Name": "harbour", "Heading": ""}), extra.clone(), &[ship]);
+    assert!(matches!(fx.as_slice(), [Fx::Place { heading: None, .. }]), "\"\" is no heading, not heading 0");
+    let (_, fx) = effects(json!({"Type": "OP Etherium Current", "Etherium Path": "lane", "Strength": "", "Width": "", "Boolean": ""}), extra, &[]);
+    assert!(matches!(fx.as_slice(), [Fx::CurrentSet { strength: None, width: None, on: None, .. }]), "nothing is changed, the current is not switched off");
+    let mut sub = unit(2, "Sub", 0.0, 0.0);
+    sub.cloaked = true;
+    assert!(holds(json!({"Type": "OP Group Is Cloaked", "Group Name": "Sub", "Boolean": ""}), &[sub]), "\"\" is the default, TRUE");
+    // The checker agrees: no complaint about the empty optional fields of an engine Type.
+    let mission = json!({
+        "players": ["Player0 Group"], "groups": {"Fleet": [1]}, "ships": [{"id": 1, "name": "RLS Hawk", "group": "Fleet"}],
+        "paths": {"lane": [[0.0, 0.0, 0.0], [0.0, 100.0, 0.0]]}, "environment": {"point_sets": {"harbour": [{"pos": [0.0, 0.0, 0.0]}]}},
+        "rules": [rule("r", true, json!([{"Type": "OP Group Is Cloaked", "Group Name": "Fleet", "Boolean": ""}]), json!([
+            {"Type": "OP Teleport", "Group/Unit Name": "Fleet", "Point Set Name": "harbour", "Point Index": "", "Heading": ""},
+            {"Type": "OP Etherium Current", "Etherium Path": "lane", "Strength": "", "Width": "", "Boolean": ""},
+        ]))],
+    });
+    let text = crate::rules::check::check(&mission, &Value::Null, &Value::Null).iter().map(ToString::to_string).collect::<Vec<_>>().join("\n");
+    assert_eq!(text, "");
+}
+
+#[test]
+fn a_group_cannot_follow_itself() {
+    let w = [unit(1, "Convoy", 0.0, 0.0), unit(2, "Convoy", 50.0, 0.0), unit(3, "Escort", 90.0, 0.0)];
+    let follow = |who: &str| json!({"Type": "OP Follow Group", "Group Name": who, "Target Group": "Convoy", "Station": "Astern", "Distance": 40});
+    let (s, fx) = effects(follow("Convoy"), json!({}), &w);
+    assert!(matches!(fx.as_slice(), [Fx::Follow { units, .. }] if units.is_empty()), "no ship is told to follow its own group");
+    assert!(s.warned.iter().any(|w| w.contains("are in the group 'Convoy' they should follow")), "{:?}", s.warned);
+    let (s, fx) = effects(follow("Escort"), json!({}), &w);
+    assert!(matches!(fx.as_slice(), [Fx::Follow { units, .. }] if units == &[e(3)]) && !s.warned.iter().any(|w| w.contains("should follow")));
+}
+
+#[test]
+fn a_fade_is_cleared_when_the_mission_ends_and_a_restarted_mission_has_none() {
+    let data = json!({"rules": [
+        rule("fade", true, json!([{"Type": "World Initialize"}]), json!([{"Type": "OP Fade", "Seconds": 4.0}])),
+        rule("lose", true, json!([flag_is("lose", true)]), json!([{"Type": "End Game"}])),
+    ]});
+    let mut s = script(data.clone(), Value::Null);
+    s.step(&[], 0.1, false);
+    s.step(&[], 1.9, false);
+    assert!(s.fade_alpha() > 0.9, "black at the middle");
+    s.flags.insert("lose".into(), true);
+    s.step(&[], 0.1, false);
+    assert!(s.ended.is_some());
+    assert_eq!(s.fade_alpha(), 0.0, "the end text is shown on a clear picture");
+    // A restart loads the mission again: a new script, no fade left over.
+    assert_eq!(script(data, Value::Null).fade_alpha(), 0.0);
+}

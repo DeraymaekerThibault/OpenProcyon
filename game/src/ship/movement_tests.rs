@@ -732,25 +732,24 @@ fn a_cutter_steering_for_a_point_ahead_weaves_instead_of_settling() {
     assert!((3.2..4.4).contains(&period), "period {period} s");
 }
 
-/// A towed hull's own engine does not brake the tow: with its helm at rest it keeps the speed the cable gives it, and brakes as
-/// before once the tow is broken (a First Rate towing a merchant crawled at 28 % of its speed).
+/// The tower's thrust works on both hulls: its top speed under tow is its own times mass / (mass + tow mass).
 #[test]
 #[ignore = "needs imported assets"]
-fn a_towed_ship_coasts_instead_of_braking_against_its_tower() {
+fn a_tower_is_slowed_by_the_mass_it_tows() {
     let lib = Library::load(assets_dir());
-    let ci = lib.index("Ship_Civilian_Merchant");
+    let ci = lib.index("Ship_Navy_Cutter");
     let class = &lib.classes[ci];
     let health = Health::new(class);
-    let run = |towed: bool| {
-        let mut ship = Ship { speed: 3.0, towed, ..Ship::new(ci, Side::Player) };
+    let run = |tow_mass: f32| {
+        let mut ship = Ship { order: EngineOrder::Full, tow_mass, ..Ship::new(ci, Side::Player) };
         let mut tf = Transform::default();
-        for _ in 0..300 {
+        for _ in 0..600 {
             helm_step(&mut ship, &mut tf, class, &health, 0.033, true);
         }
         ship.speed
     };
-    assert!((run(true) - 3.0).abs() < 1e-3, "towed: {}", run(true));
-    assert!(run(false) < 0.5, "free: {}", run(false));
+    let ratio = run(class.phys.mass) / run(0.0);
+    assert!((ratio - 0.5).abs() < 0.01, "{ratio}");
 }
 
 #[test]

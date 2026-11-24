@@ -71,6 +71,21 @@ pub fn apply(args: &[String]) -> Option<i32> {
     Some(i32::from(errors > 0))
 }
 
+/// `check_map` for the log: one line per finding, prefixed with the file as `--check-mission` prints it, and a count line. A folder
+/// that cannot be checked at all is one error line.
+pub fn report_lines(id: &str, dir: &Path) -> Vec<String> {
+    let file = rules_file(dir).and_then(|f| f.file_name()?.to_str().map(String::from)).unwrap_or_else(|| "mission.json".into());
+    match check_map(dir) {
+        Ok(problems) => {
+            let errors = problems.iter().filter(|p| p.level == Level::Error).count();
+            let mut lines: Vec<String> = problems.iter().map(|p| format!("{id}/{file}: {p}")).collect();
+            lines.push(format!("{id}: {errors} errors, {} warnings", problems.len() - errors));
+            lines
+        }
+        Err(message) => vec![format!("{id}: ERROR: {message}")],
+    }
+}
+
 /// Every folder under `maps/` with rules (a campaign mission or a skirmish script), sorted.
 fn all_ids(maps: &Path) -> Vec<String> {
     let mut ids: Vec<String> = std::fs::read_dir(maps)
@@ -97,6 +112,13 @@ pub fn check_map(dir: &Path) -> Result<Vec<Problem>, String> {
     let skirmish = rules_file.ends_with("script.json");
     let mut problems = check_with(&mission, map.as_ref().unwrap_or(&Value::Null), media.as_ref().unwrap_or(&Value::Null), skirmish);
     let note = |level, field: &str, message: &str| Problem { level, rule: "(mission)".into(), at: "files".into(), field: field.into(), message: message.into() };
+    // What the mission points at: skipped without imported assets, since there is nothing to look in.
+    let root = crate::assets_dir();
+    let ship = |c: &str| root.join("ships").join(c).join("ship.json").is_file();
+    let sound = |f: &str| root.join(crate::audio::sound(f)).is_file();
+    let picture = |f: &str| dir.join(f).is_file();
+    let look = super::refs::Lookups { ship: root.join("ships").is_dir().then_some(&ship), sound: root.join("sound").is_dir().then_some(&sound), picture: Some(&picture) };
+    problems.extend(super::refs::check_references(&mission, map.as_ref().unwrap_or(&Value::Null), media.as_ref().unwrap_or(&Value::Null), &look));
     if media.is_none() && rules_file.ends_with("mission.json") {
         problems.insert(0, note(Level::Warning, "media.json", "missing: speech events, end messages and ship names are not checked"));
     }
@@ -123,6 +145,20 @@ mod tests {
         assert!(lines.iter().any(|l| l.contains("media.json") && l.starts_with("warning")), "{lines:?}");
         std::fs::remove_dir_all(&dir).unwrap();
         assert!(check_map(&dir).is_err());
+    }
+
+    #[test]
+    fn a_missing_backdrop_picture_is_an_error_in_the_map_check() {
+        let dir = std::env::temp_dir().join(format!("procyon-backdrop-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("mission.json"), json!({"players": [], "rules": []}).to_string()).unwrap();
+        std::fs::write(dir.join("map.json"), json!({"backdrop": true}).to_string()).unwrap();
+        let lines: Vec<String> = check_map(&dir).unwrap().iter().map(ToString::to_string).collect();
+        assert!(lines.iter().any(|l| l.starts_with("ERROR") && l.contains("field \"backdrop\"") && l.contains("backdrop.png")), "{lines:?}");
+        std::fs::write(dir.join("backdrop.png"), b"x").unwrap();
+        let lines: Vec<String> = check_map(&dir).unwrap().iter().map(ToString::to_string).collect();
+        assert!(!lines.iter().any(|l| l.contains("backdrop.png")), "{lines:?}");
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     /// Retail passes `--check-mission`: its own oddities are warnings, and every Type it uses is in the schema.

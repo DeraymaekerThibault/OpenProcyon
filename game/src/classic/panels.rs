@@ -22,29 +22,75 @@ use crate::{Library, PlayerShip, Ship};
 
 /// The composed main bar of an art set (`hud/bar/<skin>.json` next to its `.png`): the image holds every part's idle art, the parts
 /// are the boxes the dynamic pieces sit on. Reference pixels.
+/// The composed main bar of one faction (`hud/bar/<skin>.json`): its size and the parts on it, in reference pixels.
+#[derive(serde::Deserialize, Default, Debug, PartialEq)]
+#[serde(from = "RawBar")]
 struct BarLayout {
     size: Vec2,
     parts: Vec<BarPart>,
 }
+#[derive(Debug, PartialEq)]
 struct BarPart {
     sprite: String,
     x: f32,
     size: Vec2,
 }
+/// The file's fields (`width` and `height` beside the parts); unknown fields are allowed.
+#[derive(serde::Deserialize)]
+struct RawBar {
+    width: f32,
+    height: f32,
+    parts: Vec<RawPart>,
+}
+#[derive(serde::Deserialize)]
+struct RawPart {
+    sprite: String,
+    x: f32,
+    width: f32,
+    height: f32,
+}
+impl From<RawBar> for BarLayout {
+    fn from(r: RawBar) -> Self {
+        let parts = r.parts.into_iter().map(|p| BarPart { sprite: p.sprite, x: p.x, size: Vec2::new(p.width, p.height) }).collect();
+        Self { size: Vec2::new(r.width, r.height), parts }
+    }
+}
+/// The bars read so far, by skin.
+#[derive(Resource, Default)]
+struct BarLayouts(Vec<(String, std::sync::Arc<BarLayout>)>);
+
+impl BarLayouts {
+    fn get(&mut self, skin: &str) -> std::sync::Arc<BarLayout> {
+        if let Some((_, layout)) = self.0.iter().find(|(s, _)| s == skin) {
+            return layout.clone();
+        }
+        let layout = BarLayout::load(skin);
+        self.0.push((skin.to_string(), layout.clone()));
+        layout
+    }
+}
+
 impl BarLayout {
     fn path(skin: &str) -> String {
         format!("hud/bar/{}", skin.to_lowercase())
     }
-    fn load(skin: &str) -> Self {
-        let value = crate::data::read_json(&crate::assets_dir().join(format!("{}.json", Self::path(skin))));
-        let num = |v: &serde_json::Value, key: &str| v[key].as_f64().unwrap_or_else(|| panic!("HUD bar {skin}: `{key}` must be a number")) as f32;
+    /// The skin's bar. A file that does not read is reported by `data::load_asset` (file, mod, line and column); the retail file
+    /// stands in for it, and with none the bar is empty (nothing drawn) rather than a crash. The HUD systems read it through
+    /// `BarLayouts`, once per skin.
+    fn load(skin: &str) -> std::sync::Arc<Self> {
+        std::sync::Arc::new(crate::data::load_asset::<BarLayout>(&format!("{}.json", Self::path(skin)), "the main bar is not drawn").unwrap_or_default())
+    }
+    /// The layout as the code read it before it was typed: `Value` walking with a panic per missing field.
+    #[cfg(test)]
+    fn untyped(value: &serde_json::Value) -> Self {
+        let num = |v: &serde_json::Value, key: &str| v[key].as_f64().unwrap_or_else(|| panic!("HUD bar: `{key}` must be a number")) as f32;
         let parts = value["parts"]
             .as_array()
             .expect("HUD bar needs parts")
             .iter()
             .map(|p| BarPart { sprite: p["sprite"].as_str().expect("HUD bar part needs a sprite").to_string(), x: num(p, "x"), size: Vec2::new(num(p, "width"), num(p, "height")) })
             .collect();
-        Self { size: Vec2::new(num(&value, "width"), num(&value, "height")), parts }
+        Self { size: Vec2::new(num(value, "width"), num(value, "height")), parts }
     }
 }
 
@@ -120,7 +166,7 @@ pub(super) struct States {
 struct RadarFace(States);
 
 pub fn plugin(app: &mut App) {
-    app.add_systems(
+    app.init_resource::<BarLayouts>().add_systems(
         Update,
         (
             build.before(HudSet).after(crate::sprites::choose_skin).run_if(in_state(crate::menu::Screen::Battle)),
@@ -232,6 +278,7 @@ fn build(
     old: Query<Entity, With<HudRoot>>,
     mut last: Local<Option<(usize, &'static str, u32, Vec<String>)>>,
     speed: Option<Res<crate::panels::SpeedControl>>,
+    mut bars: ResMut<BarLayouts>,
 ) {
     let s = window.height() / REF_H;
     let (player, guns) = *player;
@@ -253,7 +300,7 @@ fn build(
 
     // ---- main bar: the composed image bottom-docked and centred, the dynamic parts on their boxes ---------------------------
     // PROVISIONAL: which bottom rows retail shows is not measured per faction; the composed bar ends on its shortest part.
-    let layout = BarLayout::load(hud.skin);
+    let layout = bars.get(hud.skin);
     let (bar_w, floor) = (layout.size.x, layout.size.y);
     commands_window(&mut commands, &c, root, window.width() / s, bar_w, floor);
     if speed.is_some() {
@@ -922,8 +969,7 @@ struct ChatList;
 #[derive(Component)]
 struct ChatThumb;
 
-/// Panel size in reference px (measured on the original at 1440x1080: ~440 x 170 px).
-const CHAT_SIZE: Vec2 = Vec2::new(391.0, 151.0);
+const CHAT_SIZE: Vec2 = Vec2::new(crate::panels::CHAT_SIZE[0], crate::panels::CHAT_SIZE[1]);
 
 /// Builds the panel while the log is open and rebuilds it whenever a line is added, so it shows the newest line (scrolled to the bottom).
 /// PROVISIONAL: the open and close animation is not drawn; the list wraps with the engine's text layout, not the original's.
@@ -938,6 +984,7 @@ fn chat_panel(
     roots: Query<Entity, With<HudRoot>>,
     old: Query<Entity, With<ChatPanel>>,
     mut built: Local<Option<(Entity, bool, usize, u32)>>,
+    mut bars: ResMut<BarLayouts>,
 ) {
     let Some(root) = roots.iter().next() else { return };
     let key = (root, log.open, log.lines.len(), window.height() as u32);
@@ -951,7 +998,7 @@ fn chat_panel(
     let Some(font) = fonts.as_ref().and_then(|f| f.0.get("Univers10")).filter(|_| log.open) else { return };
     let s = window.height() / REF_H;
     let c = Ctx { assets: &assets, hud: &hud, s };
-    let layout = BarLayout::load(hud.skin);
+    let layout = bars.get(hud.skin);
     // Same strip as the fleet-commands bar, which it replaces while open.
     let top = offset(&hud, "MainBarExtension_TopLeft_Offset_From_MainBar_TopLeft").y;
     let h_bar = c.size_of("FormationBar_LeftDetail").y.max(c.size_of("FormationBar_RightDetail").y);
@@ -995,13 +1042,11 @@ fn chat_scroll(
     let s = window.height() / REF_H;
     for (mut pos, node) in &mut list {
         for ev in wheel.read().filter(|_| over) {
-            pos.y -= ev.y * 24.0 * s;
+            pos.y = crate::panels::chat_scroll_after_wheel(pos.y, ev.y, s);
         }
         let (view, content) = (node.size.y * node.inverse_scale_factor, node.content_size.y * node.inverse_scale_factor);
-        let reach = (content - view).max(0.0);
-        let track = CHAT_SIZE.y - 28.0 - 20.0;
         for mut t in &mut thumb {
-            t.top = px(14.0 + track * if reach > 0.0 { (pos.y / reach).clamp(0.0, 1.0) } else { 1.0 }, s);
+            t.top = px(crate::panels::chat_thumb_top(pos.y, view, content), s);
         }
     }
 }
@@ -1105,13 +1150,65 @@ mod tests {
         }
     }
 
+    fn bar_files() -> Vec<std::path::PathBuf> {
+        let mods = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../mods");
+        let mut roots = vec![assets_dir().to_path_buf()];
+        roots.extend(std::fs::read_dir(mods).into_iter().flatten().flatten().map(|m| m.path()));
+        let mut files: Vec<_> = roots
+            .iter()
+            .flat_map(|r| std::fs::read_dir(r.join("hud/bar")).into_iter().flatten().flatten().map(|e| e.path()))
+            .filter(|p| p.extension().is_some_and(|e| e == "json"))
+            .collect();
+        files.sort();
+        files.dedup();
+        files
+    }
+
+    #[test]
+    #[ignore = "needs imported assets"]
+    fn typed_bar_layouts_equal_the_untyped_reader_on_retail_and_mod_data() {
+        let files = bar_files();
+        assert!(files.len() >= 3, "retail has a bar per faction: {files:?}");
+        for f in files {
+            let typed: BarLayout = crate::data::load(&f).unwrap_or_else(|e| panic!("{e}"));
+            let old = BarLayout::untyped(&crate::data::read_json(&f));
+            assert_eq!(typed, old, "{}", f.display());
+        }
+    }
+
+    #[test]
+    fn a_bad_bar_file_is_an_error_naming_the_file_and_never_a_panic() {
+        let dir = std::env::temp_dir().join(format!("procyon-bar-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let good = r#"{"width": 800, "height": 120, "extra": 1, "parts": [{"sprite": "A", "x": 1, "width": 2, "height": 3, "more": true}]}"#;
+        std::fs::write(dir.join("good.json"), good).unwrap();
+        let ok: BarLayout = crate::data::load(&dir.join("good.json")).unwrap();
+        assert_eq!((ok.size, ok.parts.len(), ok.parts[0].size), (Vec2::new(800.0, 120.0), 1, Vec2::new(2.0, 3.0)));
+        for (name, text) in [
+            ("syntax", "{"),
+            ("no_parts", r#"{"width": 1, "height": 1}"#),
+            ("no_sprite", r#"{"width": 1, "height": 1, "parts": [{"x": 0, "width": 1, "height": 1}]}"#),
+            ("text", r#"{"width": "1", "height": 1, "parts": []}"#),
+        ] {
+            let path = dir.join(format!("{name}.json"));
+            std::fs::write(&path, text).unwrap();
+            let e = crate::data::load::<BarLayout>(&path).unwrap_err().to_string();
+            assert!(e.contains(&format!("{name}.json")), "{e}");
+            // the loader the game uses: reported, the base file stands in when there is one, otherwise the bar is empty
+            assert_eq!(crate::data::load_or_base::<BarLayout>(&path, Some(&dir.join("good.json")), "x").map(|l| l.parts.len()), Some(1), "{name}");
+            assert_eq!(crate::data::load_or_base::<BarLayout>(&path, None, "x"), None, "{name}");
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     #[test]
     #[ignore = "needs imported assets"]
     fn every_faction_has_the_bar_parts_it_needs() {
         let comps: std::sync::Arc<serde_json::Value> = crate::data::read_json(&assets_dir().join("hud/hud.json")).into();
         for skin in ["Navy", "Pirate", "Procyon"] {
             let data = HudData { comps: comps.clone(), skin };
-            for part in BarLayout::load(skin).parts {
+            for part in &BarLayout::load(skin).parts {
                 assert!(size_of(&data, &part.sprite).is_some(), "{skin} lacks {}", part.sprite);
             }
         }

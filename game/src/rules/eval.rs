@@ -24,9 +24,12 @@ pub use types::*;
 impl Script {
     pub fn new(data: &Value, media: Value) -> Script {
         let player = data["player_start"]["name"].as_str().unwrap_or(PLAYER).to_string();
-        let rules: Vec<Rule> = data["rules"]
-            .as_array()
-            .expect("rules")
+        let none = vec![];
+        let list = data["rules"].as_array().unwrap_or_else(|| {
+            eprintln!("error: mission data has no \"rules\" list; it runs without rules");
+            &none
+        });
+        let rules: Vec<Rule> = list
             .iter()
             .map(|r| Rule {
                 name: s(r, "name").into(),
@@ -155,6 +158,7 @@ impl Script {
     /// Advance the script by `dt`: timers, speech, rules. Returns the ECS effects and any speech file to start.
     pub fn step(&mut self, w: &[Unit], dt: f32, opening: bool) -> (Vec<Fx>, Option<String>) {
         self.time += dt;
+        self.advance_fade(dt);
         let first_step = !self.init_done;
         // Timers wait out the opening briefing so the fleets stay put until it is done.
         for (k, v) in self.timers.iter_mut().filter(|_| !opening) {

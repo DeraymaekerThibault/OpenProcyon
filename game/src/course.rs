@@ -180,3 +180,8 @@ pub fn update(
         }
     }
 }
+
+/// The course plot the player is drawing.
+pub fn plugin(app: &mut App) {
+    app.init_resource::<Plot>();
+}

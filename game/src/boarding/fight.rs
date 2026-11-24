@@ -11,6 +11,7 @@ pub struct Boarders<'w, 's> {
     grapples: Query<'w, 's, (Entity, &'static Grapple)>,
     ships: Query<'w, 's, (&'static Ship, &'static Health, Option<&'static crate::combat::GunStates>)>,
     player: Query<'w, 's, Entity, With<PlayerShip>>,
+    abandoned: Query<'w, 's, (), With<crate::lifeboats::Abandoned>>,
     lib: Res<'w, Library>,
     mission: Option<Res<'w, Mission>>,
 }
@@ -77,6 +78,14 @@ impl Boarders<'_, '_> {
     }
     pub fn me(&self) -> Option<Entity> {
         self.player.single().ok()
+    }
+    /// Not retail: the crew of `e` left it (`OP Abandon Ship`).
+    pub fn abandoned(&self, e: Entity) -> bool {
+        self.abandoned.contains(e)
+    }
+    /// `e` is a live ship (a base or a destroyed hull has nothing to grapple).
+    pub fn live_ship(&self, e: Entity) -> bool {
+        self.ships.get(e).is_ok_and(|s| !s.1.destroyed)
     }
 }
 
@@ -153,6 +162,7 @@ pub(super) fn handle_messages(mut msgs: MessageReader<BoardMsg>, mut commands: C
                 }
             }
             BoardMsg::Boardable(..) => {}
+            BoardMsg::Order { boarder, target } => order::begin(&mut commands, &boarders, boarder, target),
         }
     }
 }

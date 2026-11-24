@@ -7,6 +7,7 @@ pub mod check;
 pub mod cli;
 pub mod console;
 mod eval;
+pub mod refs;
 pub mod skirmish;
 mod systems;
 #[cfg(test)]

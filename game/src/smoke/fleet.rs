@@ -274,6 +274,39 @@ fn fleet_input(world: &mut World, frame: u32) {
     }
 }
 
+/// A point on the water for the plane click of step 52 whose click ray hits no ship. The click goes to an own ship under the cursor
+/// (selection) or an allied one (dock) before it becomes a move order, and the followers are still forming up at that frame, at
+/// positions that depend on how many fixed ticks the run got so far (real time). A fixed offset from the actor therefore sometimes
+/// lay behind an ally: that click selected or docked instead, and step 55 saw no destination (#138).
+fn clear_plane_point(world: &mut World, actor: Entity) -> Vec3 {
+    let at = world.get::<Transform>(actor).unwrap().translation;
+    let (camera, camera_tf) = {
+        let mut q = world.query::<(&Camera, &GlobalTransform)>();
+        let (c, t) = q.single(world).unwrap();
+        (c.clone(), *t)
+    };
+    let ships: Vec<(usize, Transform)> = world.query::<(&Ship, &GlobalTransform)>().iter(world).map(|(s, t)| (s.class, t.compute_transform())).collect();
+    let lib = world.resource::<Library>();
+    let free = |point: Vec3| {
+        let Ok(cursor) = camera.world_to_viewport(&camera_tf, point) else { return false };
+        let Ok(ray) = camera.viewport_to_world(&camera_tf, cursor) else { return false };
+        let size = camera.logical_viewport_size().unwrap_or(Vec2::ZERO);
+        if cursor.x < 20.0 || cursor.y < 20.0 || cursor.x > size.x - 20.0 || cursor.y > size.y - 20.0 {
+            return false;
+        }
+        ships.iter().all(|(class, tf)| combat::ray_hit(&lib.classes[*class], tf, ray).is_none())
+    };
+    // The old fixed offset first, then rings of points round the actor, each checked against every ship's hull.
+    let first = at + Vec3::new(-120.0, 0.0, -150.0);
+    std::iter::once(first)
+        .chain((0..24).flat_map(|i| (1..=3).map(move |r| (i, r))).map(|(i, r)| {
+            let angle = i as f32 * std::f32::consts::TAU / 24.0;
+            at + Vec3::new(angle.cos(), 0.0, angle.sin()) * (60.0 * r as f32 + 120.0)
+        }))
+        .find(|p| free(*p))
+        .expect("a plane point whose click ray misses every ship")
+}
+
 fn fleet(world: &mut World, frame: u32, previous: &mut Option<Entity>) {
     fleet_input(world, frame);
     match frame {
@@ -318,7 +351,7 @@ fn fleet(world: &mut World, frame: u32, previous: &mut Option<Entity>) {
                     .map(|(t, s)| t.transform_point(world.resource::<Library>().classes[s.class].centre))
                     .unwrap()
             } else {
-                world.get::<Transform>(actor).unwrap().translation + Vec3::new(-120.0, 0.0, -150.0)
+                clear_plane_point(world, actor)
             };
             let cursor = {
                 let mut q = world.query::<(&Camera, &GlobalTransform)>();

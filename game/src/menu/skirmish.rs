@@ -918,40 +918,24 @@ impl Skirmish {
             .iter()
             .filter(|s| s.kind.live())
             .map(|s| {
-                let mut computer_build = None;
-                let (ships, ids): (Vec<_>, Vec<Option<i64>>) = if !open {
-                    // The first ship becomes the command ship: the one the map flags as primary (its Setup Ship rule), else map order.
-                    let mut placed: Vec<&Value> = self.map_json["ships"].as_array().into_iter().flatten().filter(|o| o["player"].as_u64() == Some(s.player as u64)).collect();
-                    placed.sort_by_key(|o| o["primary"].as_bool() != Some(true));
-                    placed
-                        .into_iter()
-                        .filter_map(|o| {
-                            Some((
-                                (o["type"].as_str()?.to_string(), Some([0, 1, 2].map(|i| o["pos"][i].as_f64().unwrap_or(0.0) as f32)), o["name"].as_str().map(String::from)),
-                                o["id"].as_i64(),
-                            ))
-                        })
-                        .filter(|(t, _)| lib.classes.iter().any(|c| c.name == t.0))
-                        .unzip()
+                let (ships, ids, computer_build) = if !open {
+                    let (ships, ids) = self.placed_fleet(s, lib);
+                    (ships, ids, None)
                 } else if s.fleet.is_empty() {
                     // A computer builds its fleet with the same routine as Auto Assign, inside the same budget.
                     let mut c = s.clone();
                     auto_build(&mut c, self.victory_limit, self.fleet_size, lib, s.player as u64 + 1 + self.draw * 101, true, h.race);
-                    computer_build = Some((c.weapons.clone(), c.crew.clone()));
-                    (c.fleet.iter().map(|n| (n.clone(), None, None)).collect(), vec![])
+                    (c.fleet.iter().map(|n| (n.clone(), None, None)).collect(), vec![], Some((c.weapons.clone(), c.crew.clone())))
                 } else {
                     let names = s.ship_names(lib);
-                    (s.fleet.iter().zip(names).map(|(n, label)| (n.clone(), None, label)).collect(), vec![])
+                    (s.fleet.iter().zip(names).map(|(n, label)| (n.clone(), None, label)).collect(), vec![], None)
                 };
-                let side = if s.kind == Kind::Human || !self.hostile(h, s) {
-                    crate::Side::Player
-                } else {
-                    let key = if s.team >= 0 { (s.team, 0) } else { (-1, s.player) };
-                    let i = foes.iter().position(|k| *k == key).unwrap_or_else(|| {
-                        foes.push(key);
-                        foes.len() - 1
-                    });
-                    crate::Side(1 + i as u8)
+                let side = if s.kind == Kind::Human || !self.hostile(h, s) { crate::Side::Player } else { foe_side(&mut foes, s) };
+                // A built computer fleet keeps its weapons and its named crew (retail computer ships carry named crew; their speed and sight follow the posts).
+                let (weapons, crew) = match computer_build {
+                    Some(built) => built,
+                    None if open => (s.weapons.clone(), s.crew.clone()),
+                    None => (vec![], vec![]),
                 };
                 crate::Group {
                     player: s.player,
@@ -962,21 +946,38 @@ impl Skirmish {
                     row: Some((matches!(s.kind, Kind::Human).then(|| s.name.clone()), flag_icon(s.race, s.flag))),
                     ids,
                     ships,
-                    // A built computer fleet keeps its weapons and its named crew (retail computer ships carry named crew; their speed and sight follow the posts).
-                    weapons: match &computer_build {
-                        Some((weapons, _)) => weapons.clone(),
-                        None if open => s.weapons.clone(),
-                        None => vec![],
-                    },
-                    crew: match &computer_build {
-                        Some((_, crew)) => crew.clone(),
-                        None if open => s.crew.clone(),
-                        None => vec![],
-                    },
+                    weapons,
+                    crew,
                 }
             })
             .collect()
     }
+    /// A historical map's pre-placed ships of slot `s` (class, position, name) and their ids. The first ship becomes the command ship:
+    /// the one the map flags as primary (its Setup Ship rule), else map order.
+    fn placed_fleet(&self, s: &Slot, lib: &Library) -> (Vec<(String, Option<[f32; 3]>, Option<String>)>, Vec<Option<i64>>) {
+        let mut placed: Vec<&Value> = self.map_json["ships"].as_array().into_iter().flatten().filter(|o| o["player"].as_u64() == Some(s.player as u64)).collect();
+        placed.sort_by_key(|o| o["primary"].as_bool() != Some(true));
+        placed
+            .into_iter()
+            .filter_map(|o| {
+                Some((
+                    (o["type"].as_str()?.to_string(), Some([0, 1, 2].map(|i| o["pos"][i].as_f64().unwrap_or(0.0) as f32)), o["name"].as_str().map(String::from)),
+                    o["id"].as_i64(),
+                ))
+            })
+            .filter(|(t, _)| lib.classes.iter().any(|c| c.name == t.0))
+            .unzip()
+    }
+}
+
+/// The hostile side of slot `s`: one side per hostile team (teamless slots each their own), numbered in the order first met.
+fn foe_side(foes: &mut Vec<(i32, usize)>, s: &Slot) -> crate::Side {
+    let key = if s.team >= 0 { (s.team, 0) } else { (-1, s.player) };
+    let i = foes.iter().position(|k| *k == key).unwrap_or_else(|| {
+        foes.push(key);
+        foes.len() - 1
+    });
+    crate::Side(1 + i as u8)
 }
 
 /// The skirmish list: every `maps/<id>/map.json` flagged `"skirmish": true` (campaign maps are not offered), sorted by id, with
@@ -1044,7 +1045,7 @@ pub fn flag_icon(race: Race, flag: u8) -> usize {
 
 #[cfg(test)]
 mod ai_weapon_tests {
-    use super::{allowed_guns, swap_pool};
+    use super::{Kind, Race, Slot, allowed_guns, foe_side, swap_pool};
     #[test]
     fn swap_pools_by_mount_size() {
         assert_eq!(swap_pool("Light Mount").len(), 4);
@@ -1061,5 +1062,14 @@ mod ai_weapon_tests {
         let list = serde_json::json!({"Gun_A": true, "Gun_B": false});
         assert_eq!(allowed_guns(&list), Some(["Gun_A".to_string()].into()));
         assert_eq!(allowed_guns(&serde_json::Value::Null), None);
+    }
+    fn slot(player: usize, team: i32) -> Slot {
+        Slot { player, name: String::new(), kind: Kind::Computer, race: Race::Unchosen, team, flag: 0, fleet: vec![], weapons: vec![], names: vec![], crew: vec![] }
+    }
+    #[test]
+    fn hostile_sides_number_by_team_in_the_order_met() {
+        let mut foes = vec![];
+        let sides: Vec<_> = [slot(1, 3), slot(2, -1), slot(3, 3), slot(4, -1), slot(2, -1)].iter().map(|s| foe_side(&mut foes, s).0).collect();
+        assert_eq!(sides, [1, 2, 1, 3, 2], "one side per team, each teamless slot on its own");
     }
 }

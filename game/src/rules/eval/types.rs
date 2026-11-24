@@ -31,6 +31,49 @@ impl Stance {
     }
 }
 
+/// Where `OP Follow Group` keeps a ship relative to the ship it follows (the follower's side of the leader).
+#[derive(Clone, Copy, PartialEq, Debug, Default)]
+pub enum Station {
+    #[default]
+    Astern,
+    Ahead,
+    AbeamStarboard,
+    AbeamPort,
+}
+impl Station {
+    pub const NAMES: [&'static str; 4] = ["Astern", "Ahead", "Abeam Starboard", "Abeam Port"];
+    pub fn parse(s: &str) -> Option<Station> {
+        match s {
+            "Astern" => Some(Station::Astern),
+            "Ahead" => Some(Station::Ahead),
+            "Abeam Starboard" => Some(Station::AbeamStarboard),
+            "Abeam Port" => Some(Station::AbeamPort),
+            _ => None,
+        }
+    }
+    /// The station `distance` units from the leader's centre, in the leader's frame (Bevy axes: bow -Z, starboard +X).
+    pub fn offset(self, distance: f32) -> Vec3 {
+        distance
+            * match self {
+                Station::Astern => Vec3::Z,
+                Station::Ahead => Vec3::NEG_Z,
+                Station::AbeamStarboard => Vec3::X,
+                Station::AbeamPort => Vec3::NEG_X,
+            }
+    }
+}
+
+/// A standing `OP Follow Group` order of one ship (`MissionShip::follow`), carried out by the mission AI.
+#[derive(Clone, PartialEq, Debug)]
+pub struct FollowOrder {
+    /// The group (or owner) whose ship it keeps station on.
+    pub group: String,
+    pub station: Station,
+    pub distance: f32,
+    /// The ship it chose from that group; the choice stands until that ship is gone.
+    pub leader: Option<Entity>,
+}
+
 name_newtype!(
     /// A mission ship's name as rules refer to it ("Group/Unit Name" selectors, the script's `name` field).
     ShipId
@@ -58,6 +101,12 @@ pub struct Unit {
     pub damage: f32,
     pub flag: String,
     pub attack: Vec<String>,
+    /// A ship's heading (radians about +Y, `Ship::heading`; 0 for everything else) and its own speed along it in units per second
+    /// (None for what is not a ship); `OP Teleport` and `OP Group Speed` read them.
+    pub heading: f32,
+    pub speed: Option<f32>,
+    /// Fully cloaked (`cloak::State::Full`), not while cloaking or decloaking; `OP Group Is Cloaked`.
+    pub cloaked: bool,
 }
 
 impl Unit {
@@ -77,6 +126,9 @@ impl Unit {
             damage: 0.0,
             flag: String::new(),
             attack: vec![],
+            heading: 0.0,
+            speed: None,
+            cloaked: false,
         }
     }
 }
@@ -186,8 +238,16 @@ pub enum Fx {
     WarningShots(Vec<Entity>, bool),
     /// 'Set Group/Unit Cloak State': (units, cloaked, AI may drop it to fire) (cloak.rs).
     Cloak(Vec<Entity>, bool, bool),
-    /// '*State Init* Setup Etherium Current': the path the current flows along.
-    Current(Vec<Vec3>),
+    /// '*State Init* Setup Etherium Current': the name of the path the current flows along, and its points.
+    Current(String, Vec<Vec3>),
+    /// 'OP Etherium Current' (engine-added): the current on the path `name` (made when there is none) gets the settings that are given.
+    CurrentSet {
+        name: String,
+        path: Vec<Vec3>,
+        strength: Option<f32>,
+        width: Option<f32>,
+        on: Option<bool>,
+    },
     /// 'Mission 9 - Do Dark Matter Explosion': a blast over the volume.
     DarkMatter(String),
     /// 'Mission 9 - Teleport Longboat': the longboat appears beside the human's command ship.
@@ -200,6 +260,29 @@ pub enum Fx {
         dist: f32,
         angle: f32,
     },
+    /// 'OP Board Ship' (engine-added): the boarders, then the target group's units; each boarder takes the nearest live ship of it.
+    Board(Vec<Entity>, Vec<Entity>),
+    /// 'OP Teleport' (engine-added): each unit's new position, and the heading (radians about +Y) every ship takes when one is given;
+    /// ships also lose their speed and turn rate.
+    Place {
+        units: Vec<(Entity, Vec3)>,
+        heading: Option<f32>,
+    },
+    /// 'OP Follow Group' (engine-added): the ships keep `station` at `distance` from a ship of `group` (`MissionShip::follow`).
+    Follow {
+        units: Vec<Entity>,
+        group: String,
+        station: Station,
+        distance: f32,
+    },
+    /// 'OP Place Mines' (engine-added): a mine of `bullet` at every point of the point set, given to `owner` (empty: hostile to every ship).
+    Mines {
+        set: String,
+        bullet: String,
+        owner: String,
+    },
+    /// 'OP Abandon Ship' (engine-added): the crews leave in their lifeboats and the hulls are left disabled afloat (lifeboats.rs `Abandoned`).
+    Abandon(Vec<Entity>),
 }
 
 pub(in crate::rules) fn s<'a>(v: &'a Value, k: &str) -> &'a str {

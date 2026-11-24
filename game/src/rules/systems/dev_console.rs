@@ -5,7 +5,7 @@ use bevy::input::keyboard::KeyboardInput;
 
 use super::*;
 use crate::menu::Screen;
-use crate::rules::console::{Cheats, Command, Console, DevView, Edit, Env, ShipInfo, marks_path, parse};
+use crate::rules::console::{Cheats, Command, Console, DevView, Edit, Env, FrameStats, ShipInfo, ViewChange, marks_path, parse};
 
 /// Whether the console is on without the Display option "Developer Console": debug builds, `--console` or `PROCYON_CONSOLE` in the
 /// environment. A release build otherwise leaves it to the option (off by default), so a stray `~` never hands a player the cheats.
@@ -21,9 +21,21 @@ pub(super) fn plugin(app: &mut App) {
         .add_systems(OnEnter(Screen::Battle), |mut cheats: ResMut<Cheats>| *cheats = Cheats::default())
         .add_systems(OnExit(Screen::Battle), (close_on_leaving, |mut dev: ResMut<DevView>| dev.reset()))
         // After the input systems and before anything reads the keys: while the console is open the game sees no keyboard or mouse.
-        .add_systems(PreUpdate, keys.after(bevy::input::InputSystems).run_if(in_state(Screen::Battle)).run_if(resource_exists::<Mission>).run_if(crate::menu::overlay_closed))
+        .add_systems(PreUpdate, keys.after(bevy::input::InputSystems).run_if(in_state(Screen::Battle)).run_if(crate::menu::overlay_closed))
+        .init_resource::<crate::rules::console::FrameStats>()
+        .add_systems(Last, frame_stats)
         .add_systems(Update, free_camera.after(crate::camera).run_if(in_state(Screen::Battle)))
-        .add_systems(Update, run.after(update).run_if(in_state(Screen::Battle)).run_if(resource_exists::<Mission>));
+        .add_systems(Update, run.after(update).run_if(in_state(Screen::Battle)).run_if(resource_exists::<Mission>))
+        .add_systems(Update, run_without_mission.run_if(in_state(Screen::Battle)).run_if(not(resource_exists::<Mission>)));
+}
+
+/// Feeds the frame-rate counter from the real-time clock while it is shown.
+fn frame_stats(time: Res<Time<Real>>, mut stats: ResMut<FrameStats>) {
+    if crate::menu::fps_setting() {
+        stats.push(time.elapsed_secs_f64(), time.delta_secs_f64());
+    } else {
+        stats.clear();
+    }
 }
 
 fn close_on_leaving(mut console: ResMut<Console>, mut vtime: ResMut<Time<Virtual>>) {
@@ -116,6 +128,7 @@ fn run(
     mut commands: Commands,
     mut ships: Query<RuleShip>,
     mut extra: Extra,
+    mut settings: Option<ResMut<crate::menu::Settings>>,
 ) {
     let Some(mut mission) = mission else { return };
     if console.pending.is_empty() && !console.open {
@@ -187,11 +200,39 @@ fn run(
             }
         }
         restart.0 |= outcome.restart;
-        for c in &outcome.view {
-            dev.apply(c);
-        }
+        apply_view(&outcome.view, &mut console, &mut dev, settings.as_deref_mut());
         each_ship(&mut ships, outcome.repair, |s| crate::docking::repair(&lib, &s.ship, &mut s.health, true));
         apply_fx(fx, mission, &mut commands, &mut ships, &mut animals, &mut extra, &mut orbit, &lib);
+    }
+}
+
+/// Applies the developer-view changes of a command; `fps` is saved with the options.
+fn apply_view(changes: &[ViewChange], console: &mut Console, dev: &mut DevView, mut settings: Option<&mut crate::menu::Settings>) {
+    for c in changes {
+        dev.apply(c);
+        if let (ViewChange::Fps(want), Some(settings)) = (c, settings.as_deref_mut()) {
+            settings.fps = want.unwrap_or(!settings.fps);
+            settings.save();
+            console.say(format!("fps counter {}", if settings.fps { "on" } else { "off" }));
+        }
+    }
+}
+
+/// The same for a battle without a mission (a skirmish): only the view commands and `help` run (`console_without_mission`).
+fn run_without_mission(mut console: ResMut<Console>, mut dev: ResMut<DevView>, mut settings: Option<ResMut<crate::menu::Settings>>) {
+    for line in std::mem::take(&mut console.pending) {
+        console.say(format!("> {line}"));
+        let outcome = match parse(&line, "", false) {
+            Ok(cmd) => crate::rules::console::console_without_mission(&line, &cmd),
+            Err(e) => {
+                console.say(e);
+                continue;
+            }
+        };
+        for l in &outcome.lines {
+            console.say(l);
+        }
+        apply_view(&outcome.view, &mut console, &mut dev, settings.as_deref_mut());
     }
 }
 
@@ -227,4 +268,60 @@ fn free_camera(
         * speed
         * time.delta_secs();
     cam.translation += step;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bevy::input::keyboard::Key;
+
+    /// A battle with no `Mission` resource: what a skirmish has.
+    fn skirmish() -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<KeyboardInput>()
+            .insert_resource(Console::new(true))
+            .init_resource::<DevView>()
+            .init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<ButtonInput<MouseButton>>()
+            .init_resource::<bevy::input::mouse::AccumulatedMouseScroll>()
+            .add_systems(Update, (keys, run_without_mission).chain());
+        app
+    }
+    fn press(app: &mut App, code: KeyCode) {
+        app.world_mut().write_message(KeyboardInput {
+            key_code: code,
+            logical_key: Key::Unidentified(bevy::input::keyboard::NativeKey::Unidentified),
+            state: bevy::input::ButtonState::Pressed,
+            text: None,
+            repeat: false,
+            window: Entity::PLACEHOLDER,
+        });
+    }
+
+    #[test]
+    fn the_console_opens_without_mission_rules() {
+        let mut app = skirmish();
+        assert!(app.world().get_resource::<Mission>().is_none());
+        press(&mut app, KeyCode::Backquote);
+        app.update();
+        assert!(app.world().resource::<Console>().open, "the console key opens it in a skirmish");
+        press(&mut app, KeyCode::Backquote);
+        app.update();
+        assert!(!app.world().resource::<Console>().open);
+    }
+
+    #[test]
+    fn lines_submitted_in_a_skirmish_run_view_commands_and_refuse_rule_commands() {
+        let mut app = skirmish();
+        app.world_mut().resource_mut::<Console>().submit("hud off");
+        app.world_mut().resource_mut::<Console>().submit("god");
+        app.world_mut().resource_mut::<Console>().submit("fps");
+        app.update();
+        let log = app.world().resource::<Console>().log.join("\n");
+        assert!(log.contains("HUD off"), "{log}");
+        assert!(log.contains("god: needs a mission"), "{log}");
+        assert!(app.world().resource::<DevView>().hud_hidden);
+        app.world_mut().resource_mut::<DevView>().reset();
+    }
 }
