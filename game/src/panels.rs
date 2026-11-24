@@ -190,9 +190,11 @@ pub const CHAT_LIST_MARGIN: f32 = 14.0;
 pub const CHAT_THUMB_H: f32 = 20.0;
 /// Reference px one mouse-wheel notch scrolls the chat list.
 pub const CHAT_WHEEL_STEP: f32 = 24.0;
-/// New scroll offset (px from the top) after a wheel turn of `wheel` notches (up is positive) at UI scale `scale`.
-pub fn chat_scroll_after_wheel(offset: f32, wheel: f32, scale: f32) -> f32 {
-    offset - wheel * CHAT_WHEEL_STEP * scale
+/// New scroll offset (px from the top) after a wheel turn of `wheel` notches (up is positive) at UI scale `scale`, kept within what the
+/// list can scroll (`reach` = content - view, px). The list is built scrolled "to the end" with a huge offset, so the clamp is what
+/// makes the first notch up move it.
+pub fn chat_scroll_after_wheel(offset: f32, wheel: f32, scale: f32, reach: f32) -> f32 {
+    (offset.min(reach) - wheel * CHAT_WHEEL_STEP * scale).clamp(0.0, reach.max(0.0))
 }
 /// Where the scroll thumb's top sits, in reference px from the panel's top: the list's offset as a share of what it can scroll
 /// (`content` - `view`, both in px); a list that fits has the thumb at the bottom.
@@ -777,8 +779,12 @@ pub mod tests {
 
     #[test]
     fn the_chat_wheel_scrolls_by_notch_and_scale_and_the_thumb_follows() {
-        assert_eq!(chat_scroll_after_wheel(100.0, 1.0, 1.0), 76.0, "wheel up goes back");
-        assert_eq!(chat_scroll_after_wheel(0.0, -2.0, 0.5), 24.0, "wheel down, half scale");
+        assert_eq!(chat_scroll_after_wheel(100.0, 1.0, 1.0, 200.0), 76.0, "wheel up goes back");
+        assert_eq!(chat_scroll_after_wheel(0.0, -2.0, 0.5, 200.0), 24.0, "wheel down, half scale");
+        assert_eq!(chat_scroll_after_wheel(1.0e6, 1.0, 1.0, 200.0), 176.0, "from the built-at-the-end offset, one notch up moves");
+        assert_eq!(chat_scroll_after_wheel(190.0, -1.0, 1.0, 200.0), 200.0, "down stops at the end");
+        assert_eq!(chat_scroll_after_wheel(10.0, 1.0, 1.0, 200.0), 0.0, "up stops at the top");
+        assert_eq!(chat_scroll_after_wheel(1.0e6, 1.0, 1.0, -20.0), 0.0, "a list that fits does not scroll");
         let (top, bottom) = (chat_thumb_top(0.0, 100.0, 300.0), chat_thumb_top(200.0, 100.0, 300.0));
         assert_eq!((top, bottom), (CHAT_LIST_MARGIN, CHAT_SIZE[1] - CHAT_LIST_MARGIN - CHAT_THUMB_H));
         assert_eq!(chat_thumb_top(500.0, 100.0, 300.0), bottom, "past the end clamps");

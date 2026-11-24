@@ -166,7 +166,7 @@ pub(super) struct States {
 struct RadarFace(States);
 
 pub fn plugin(app: &mut App) {
-    app.init_resource::<BarLayouts>().add_systems(
+    app.init_resource::<BarLayouts>().add_systems(PreUpdate, chat_capture_wheel.after(bevy::ui::UiSystems::Focus).run_if(in_state(crate::menu::Screen::Battle))).add_systems(
         Update,
         (
             build.before(HudSet).after(crate::sprites::choose_skin).run_if(in_state(crate::menu::Screen::Battle)),
@@ -1029,6 +1029,15 @@ fn chat_panel(
     commands.spawn((ChatThumb, thumb, BackgroundColor(Color::srgb(0.05, 0.12, 0.3)), ChildOf(panel)));
 }
 
+/// Over the Chat History the wheel belongs to its list: the camera reads the accumulated wheel, so it is cleared here (as the console and
+/// the menus do); `chat_scroll` reads the wheel messages, which this leaves alone.
+#[allow(deprecated)] // Interaction, see pointer.rs
+fn chat_capture_wheel(panel: Query<&Interaction, With<ChatPanel>>, mut wheel: ResMut<bevy::input::mouse::AccumulatedMouseScroll>) {
+    if panel.iter().any(crate::pointer::over) {
+        wheel.delta = Vec2::ZERO;
+    }
+}
+
 /// Mouse wheel over the panel scrolls the list; the thumb follows the list.
 #[allow(deprecated)] // Interaction, see pointer.rs
 fn chat_scroll(
@@ -1041,10 +1050,10 @@ fn chat_scroll(
     let over = panel.iter().any(crate::pointer::over);
     let s = window.height() / REF_H;
     for (mut pos, node) in &mut list {
-        for ev in wheel.read().filter(|_| over) {
-            pos.y = crate::panels::chat_scroll_after_wheel(pos.y, ev.y, s);
-        }
         let (view, content) = (node.size.y * node.inverse_scale_factor, node.content_size.y * node.inverse_scale_factor);
+        for ev in wheel.read().filter(|_| over) {
+            pos.y = crate::panels::chat_scroll_after_wheel(pos.y, ev.y, s, content - view);
+        }
         for mut t in &mut thumb {
             t.top = px(crate::panels::chat_thumb_top(pos.y, view, content), s);
         }
@@ -1104,6 +1113,46 @@ mod tests {
         app.world_mut().query_filtered::<&mut Ship, With<PlayerShip>>().single_mut(app.world_mut()).unwrap().order = EngineOrder::Stop;
         app.update();
         assert_eq!(app.world_mut().query_filtered::<&Ship, With<PlayerShip>>().single(app.world()).unwrap().order, EngineOrder::Stop);
+    }
+
+    #[test]
+    #[allow(deprecated)] // Interaction, see pointer.rs
+    fn the_wheel_over_the_chat_panel_moves_its_list_and_thumb() {
+        use bevy::input::mouse::{MouseScrollUnit, MouseWheel};
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins).add_message::<MouseWheel>().add_systems(Update, chat_scroll);
+        app.world_mut().spawn((Window { resolution: (REF_H as u32 * 4 / 3, REF_H as u32).into(), ..default() }, bevy::window::PrimaryWindow));
+        app.world_mut().spawn((ChatPanel, Interaction::Hovered));
+        // 100 px of list showing 300 px of lines, built scrolled to the end.
+        let node = ComputedNode { size: Vec2::new(300.0, 100.0), content_size: Vec2::new(300.0, 300.0), inverse_scale_factor: 1.0, ..default() };
+        let list = app.world_mut().spawn((ChatList, ScrollPosition(Vec2::new(0.0, 1.0e6)), node)).id();
+        let thumb = app.world_mut().spawn((ChatThumb, Node::default())).id();
+        let turn = |app: &mut App, y: f32| {
+            app.world_mut().write_message(MouseWheel { unit: MouseScrollUnit::Line, x: 0.0, y, window: Entity::PLACEHOLDER, phase: bevy::input::touch::TouchPhase::Moved });
+            app.update();
+            (app.world().get::<ScrollPosition>(list).unwrap().y, app.world().get::<Node>(thumb).unwrap().top)
+        };
+        let (up, thumb_up) = turn(&mut app, 1.0);
+        assert_eq!(up, 200.0 - crate::panels::CHAT_WHEEL_STEP, "one notch up leaves the end");
+        let (down, thumb_down) = turn(&mut app, -1.0);
+        assert_eq!(down, 200.0, "one notch down is back at the end");
+        assert_ne!(thumb_up, thumb_down, "the thumb follows the list");
+    }
+
+    #[test]
+    #[allow(deprecated)] // Interaction, see pointer.rs
+    fn the_wheel_over_the_chat_panel_does_not_reach_the_camera() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins).init_resource::<bevy::input::mouse::AccumulatedMouseScroll>().add_systems(Update, chat_capture_wheel);
+        let panel = app.world_mut().spawn((ChatPanel, Interaction::None)).id();
+        let turn = |app: &mut App| {
+            app.world_mut().resource_mut::<bevy::input::mouse::AccumulatedMouseScroll>().delta = Vec2::new(0.0, 2.0);
+            app.update();
+            app.world().resource::<bevy::input::mouse::AccumulatedMouseScroll>().delta.y
+        };
+        assert_eq!(turn(&mut app), 2.0, "off the panel the camera keeps the wheel");
+        app.world_mut().entity_mut(panel).insert(Interaction::Hovered);
+        assert_eq!(turn(&mut app), 0.0, "over the panel the list takes it");
     }
 
     #[test]
