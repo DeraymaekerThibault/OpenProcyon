@@ -198,7 +198,8 @@ impl Checker<'_> {
         if self.have_base {
             self.references(&files);
         }
-        self.ships(&files);
+        let reported = self.weapons();
+        self.ships(&files, reported);
         self.missions();
     }
 
@@ -278,8 +279,44 @@ impl Checker<'_> {
         }
     }
 
+    /// The gun and bullet entries the mod brings or changes, in the merged tables: every field the loader needs and the entry lacks (all
+    /// of them, not the first), each at its own place (`/Gun_X/visual/pivot` in `data/weapons/guns.json`), then whatever else the loader
+    /// refuses in the entry. Needs the base: without it a partial entry may be a change of a retail one. Returns whether it reported.
+    fn weapons(&mut self) -> bool {
+        if !self.have_base {
+            return false;
+        }
+        let schemas = crate::data::schemas();
+        let before = self.out.iter().filter(|f| f.level == Level::Error).count();
+        for (file, schema_file, is_bullet) in [("data/weapons/guns.json", "guns.schema.json", false), ("data/weapons/bullets.json", "bullets.schema.json", true)] {
+            let (Some(mine), Some(merged)) = (crate::data::try_json(&self.dir.join(file)).filter(Value::is_object), crate::data::try_json(&self.root.join(file))) else { continue };
+            let Some((_, schema)) = schemas.iter().find(|(n, _)| *n == schema_file) else { continue };
+            for key in mine.as_object().into_iter().flatten().map(|(k, _)| k).filter(|k| *k != "$schema") {
+                let entry = &merged[key.as_str()];
+                if !entry.is_object() {
+                    self.error(file, JsonPath::default().key(key.as_str()), format!("the entry must be an object, not {entry}"));
+                    continue;
+                }
+                let mut missing = vec![];
+                missing_required(schema, &schema["$defs"]["entry"], entry, &mut vec![], &mut missing);
+                for path in &missing {
+                    let at = path.iter().fold(JsonPath::default().key(key.as_str()), |p, k| p.key(k.as_str()));
+                    self.error(file, at, format!("the game needs `{}` in this entry (a new entry must state every required field)", path.join(".")));
+                }
+                if missing.is_empty() {
+                    let loaded =
+                        if is_bullet { crate::data::bullet_from_value(key, entry.clone()).map(|_| ()) } else { crate::data::gun_from_value(key, entry.clone()).map(|_| ()) };
+                    if let Err(e) = loaded {
+                        self.error(file, JsonPath::default().key(key.as_str()), e);
+                    }
+                }
+            }
+        }
+        self.out.iter().filter(|f| f.level == Level::Error).count() > before
+    }
+
     /// The ships the mod brings or changes: what their sections, mounts and engines name, against the model and the weapon tables.
-    fn ships(&mut self, files: &[PathBuf]) {
+    fn ships(&mut self, files: &[PathBuf], weapons_reported: bool) {
         let ids: BTreeSet<String> = files
             .iter()
             .filter_map(|f| {
@@ -290,8 +327,10 @@ impl Checker<'_> {
         let loaded = self.have_base.then(|| crate::data::try_load_weapons(&self.root));
         if let Some(Err(e)) = &loaded {
             let weapons = ["guns", "bullets"].iter().any(|k| self.dir.join(format!("data/weapons/{k}.json")).is_file());
-            if weapons {
-                self.error("data/weapons", "", self.tidy(e));
+            if weapons && !weapons_reported {
+                // The loader names the file of the entry it stopped at; the entry itself is not known here.
+                let file = if e.contains("bullets.json") { "data/weapons/bullets.json" } else { "data/weapons/guns.json" };
+                self.error(file, "", self.tidy(e));
             }
         }
         for id in ids {
@@ -472,6 +511,26 @@ impl Checker<'_> {
 }
 
 /// The schema file (`authoring::schemas`) that describes the mod file at `rel`, if any.
+/// The paths (below the entry) of every `required` field of `node` that `value` lacks, in the schema of `root`, going into the objects
+/// that are there; an object that is missing is reported by itself.
+fn missing_required(root: &Value, node: &Value, value: &Value, at: &mut Vec<String>, out: &mut Vec<Vec<String>>) {
+    let Some(object) = value.as_object() else { return };
+    for key in node["required"].as_array().into_iter().flatten().filter_map(Value::as_str) {
+        if !object.contains_key(key) {
+            out.push(at.iter().cloned().chain([key.to_string()]).collect());
+        }
+    }
+    for (key, sub) in node["properties"].as_object().into_iter().flatten() {
+        let Some(child) = object.get(key).filter(|c| c.is_object()) else { continue };
+        let target = super::annotate::def_name(sub).map_or(sub, |n| &root["$defs"][n.as_str()]);
+        if target["properties"].is_object() {
+            at.push(key.clone());
+            missing_required(root, target, child, at, out);
+            at.pop();
+        }
+    }
+}
+
 fn schema_of(rel: &str) -> Option<&'static str> {
     match rel {
         "mod.json" => Some("mod.schema.json"),
@@ -744,6 +803,48 @@ mod tests {
         let alone = check_mod_with(&mod_dir, None, &[]);
         assert!(has(&alone, Level::Warning, "mod.json", "requires", "base-pack"), "{:?}", lines(&alone));
         std::fs::remove_dir_all(dep).unwrap();
+        std::fs::remove_dir_all(mod_dir).unwrap();
+    }
+
+    #[test]
+    fn a_new_weapon_entry_reports_every_missing_field_at_its_own_place_and_a_change_of_a_retail_entry_is_fine() {
+        let (base, mod_dir) = (scratch("weapons-base"), scratch("weapons-mod"));
+        put_json(&base, "data/weapons/guns.json", json!({"Gun": gun()}));
+        put_json(&base, "data/weapons/bullets.json", json!({"B": bullet()}));
+        put(&base, "ships/readme.txt", "x");
+        let mut bad_type = gun();
+        bad_type["MuzzleSpeed"] = json!("fast");
+        put_json(
+            &mod_dir,
+            "data/weapons/guns.json",
+            json!({"Gun": {"MuzzleSpeed": 5}, "Gun_Scratch": {"BulletTypeName_Primary": "B", "visual": {"base": "a"}}, "Gun_Bad": bad_type, "Gun_Ok": gun()}),
+        );
+        put_json(&mod_dir, "data/weapons/bullets.json", json!({"B": {"lifetime": 2}, "B_New": {"lifetime": 1, "hit_fx": "H"}}));
+        let found = check_mod_with(&mod_dir, Some(&base), &[]);
+        let all = lines(&found).join("\n");
+        let guns = "data/weapons/guns.json";
+        let errors = |file: &str| found.iter().filter(|f| f.level == Level::Error && f.file == file).collect::<Vec<_>>();
+        // every missing field of the new gun at once, with a pointer to it (and nothing for the entries that are fine)
+        let scratch_errors: Vec<_> = errors(guns).into_iter().filter(|f| f.pointer.starts_with("/Gun_Scratch")).collect();
+        let pointers: Vec<&str> = scratch_errors.iter().map(|f| f.pointer.as_str()).collect();
+        for want in
+            ["/Gun_Scratch/MuzzleSpeed", "/Gun_Scratch/HorizontalRotationSpeed", "/Gun_Scratch/visual/pivot", "/Gun_Scratch/visual/muzzles", "/Gun_Scratch/VerticalMaxAngle"]
+        {
+            assert!(pointers.contains(&want), "{want} missing from {pointers:?}\n{all}");
+        }
+        assert_eq!(scratch_errors.len(), 17, "the 15 top-level fields it lacks and the 2 inside `visual`: {pointers:?}");
+        assert!(has(&found, Level::Error, guns, "Gun_Scratch.visual.pivot", "`visual.pivot`"), "{all}");
+        assert!(errors(guns).iter().all(|f| !f.pointer.starts_with("/Gun/") && f.pointer != "/Gun_Ok" && !f.pointer.starts_with("/Gun_Ok/")), "{all}");
+        // a field of the wrong type is the loader's error, at its entry
+        assert!(has(&found, Level::Error, guns, "Gun_Bad", "invalid type: string \"fast\""), "{all}");
+        // bullets: a new entry lacks impact_vol, impact_max, impact_snd, damage; the change to the retail `B` is fine
+        let bullets = "data/weapons/bullets.json";
+        let mut got: Vec<&str> = errors(bullets).iter().map(|f| f.pointer.as_str()).collect();
+        got.sort();
+        assert_eq!(got, ["/B_New/damage", "/B_New/impact_max", "/B_New/impact_snd", "/B_New/impact_vol"], "{all}");
+        // no finding is filed under the bare directory any more
+        assert!(found.iter().all(|f| f.file != "data/weapons"), "{all}");
+        std::fs::remove_dir_all(base).unwrap();
         std::fs::remove_dir_all(mod_dir).unwrap();
     }
 

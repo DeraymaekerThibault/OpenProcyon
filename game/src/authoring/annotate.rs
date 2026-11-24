@@ -16,7 +16,7 @@ fn origin(engine: bool) -> Value {
 }
 
 /// The `#/$defs/<name>` a property's schema points to, wherever the reference sits in it (`anyOf`, `items`, `additionalProperties`).
-fn def_name(node: &Value) -> Option<String> {
+pub(super) fn def_name(node: &Value) -> Option<String> {
     match node {
         Value::Object(map) => map
             .get("$ref")

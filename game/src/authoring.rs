@@ -89,9 +89,10 @@ pub fn rule_schema() -> Value {
 
 /// The JSON Schemas (draft 2020-12) of the files a modder writes, as `(file name, schema)`: `ship.schema.json`, `guns.schema.json`,
 /// `bullets.schema.json`, `crew_nodes.schema.json`, `mod.schema.json`; the files `--dump-schemas <dir>` writes. Generated from the
-/// types the loader reads, so they cannot drift from it. Unknown keys stay allowed, as in the loader. No key is `required`: a mod's
-/// files are merged over a parent (`extends`, or a retail entry) before the loader reads them, so a partial file is valid; the loader's
-/// own validation of the merged result is unchanged. Needs no assets.
+/// types the loader reads, so they cannot drift from it. Unknown keys stay allowed, as in the loader. No key of a ship, `crew_nodes` or `mod.json` is `required`: a mod's
+/// files are merged over a parent (`extends`) before the loader reads them, so a partial file is valid; the loader's own validation of the
+/// merged result is unchanged. The entries of `guns.json` and `bullets.json` list their `required` fields (what the loader needs of an
+/// entry, derived from the same types): a new entry must state them, an entry that changes a retail one need not. Needs no assets.
 ///
 /// Every property of the ship, guns and bullets schemas carries `"x-origin"`: `"retail"` or `"engine"` (a key the engine adds; the
 /// `ENGINE_SHIP_KEYS` / `ENGINE_GUN_KEYS` keys). A ship key the engine fills in when the file leaves it out carries `"x-default-from"`:
@@ -101,8 +102,12 @@ pub fn schemas() -> Vec<(&'static str, Value)> {
     let mut all = crate::data::schemas();
     annotate::all(&mut all);
     all.push(("mod.schema.json", crate::modding::schema()));
-    for (_, schema) in &mut all {
-        strip_required(schema);
+    for (name, schema) in &mut all {
+        // A ship, a mission or a mod file is merged over its parent first, so no key of it is demanded. `guns.json` and `bullets.json`
+        // keep what the loader needs of a whole entry: an entry that changes a retail one needs only the keys it changes, a new one all.
+        if !matches!(*name, "guns.schema.json" | "bullets.schema.json") {
+            strip_required(schema);
+        }
     }
     // `extends` and `set` are consumed by the overlay merge before the loader reads a ship (docs/modding.md "Extending a file").
     if let Some(props) = all[0].1["properties"].as_object_mut() {
@@ -368,9 +373,10 @@ mod tests {
     }
 
     #[test]
-    fn no_published_schema_requires_a_key_so_partial_mod_files_validate() {
+    fn only_the_weapon_tables_list_required_keys_so_partial_mod_files_validate() {
         for (name, schema) in schemas() {
-            assert!(!has_required(&schema), "{name} still has a `required` list");
+            let weapons = matches!(name, "guns.schema.json" | "bullets.schema.json");
+            assert_eq!(has_required(&schema), weapons, "{name}: only the weapon tables list what a whole entry needs");
         }
         // The loader's own types do list them (the strip is the published view only), and the keys are still described.
         assert!(has_required(&crate::data::schemas()[0].1), "the loader's schema still knows what a complete file has");
@@ -381,6 +387,76 @@ mod tests {
         let mini = json!({"extends": "Ship_X", "points": 100});
         assert!(unknown(ship, &mini).is_empty(), "{:?}", unknown(ship, &mini));
         assert_eq!(ship["properties"]["points"]["type"], "integer");
+    }
+
+    /// The `required` paths of an entry schema (nested objects with a `$ref` included), dotted.
+    fn required_paths(root: &Value, node: &Value, prefix: &str, out: &mut Vec<String>) {
+        for k in node["required"].as_array().into_iter().flatten().filter_map(Value::as_str) {
+            out.push(format!("{prefix}{k}"));
+        }
+        for (k, sub) in node["properties"].as_object().into_iter().flatten() {
+            if let Some(def) = sub["$ref"].as_str().and_then(|r| r.strip_prefix("#/$defs/")) {
+                required_paths(root, &root["$defs"][def], &format!("{prefix}{k}."), out);
+            }
+        }
+    }
+
+    fn remove_path(v: &mut Value, path: &str) {
+        let mut parts: Vec<&str> = path.split('.').collect();
+        let last = parts.pop().unwrap();
+        let mut at = v;
+        for p in parts {
+            at = &mut at[p];
+        }
+        at.as_object_mut().unwrap().remove(last);
+    }
+
+    #[test]
+    fn the_required_fields_of_guns_and_bullets_are_what_the_loader_needs() {
+        let all = schemas();
+        let full_gun = json!({"Mount Type": "Medium Mount", "Victory Point Cost": 3, "MuzzleFlashEffect": "Fx", "SoundName": "s", "SoundVolume": 1, "Is Lobbing Gun": false,
+            "MuzzleSpeed": 1, "TimeBetweenBursts": 1, "BulletsPerBurst": 1, "DuringBurstReloadTime": 1, "EffectiveRange_Range": 1, "LongRange_Range": 1,
+            "MaximumRange_Range": 1, "EffectiveRange_AccuracyDeviation": 1, "LongRange_AccuracyDeviation": 1, "MaximumRange_AccuracyDeviation": 1, "BulletAffectedByGravity": false,
+            "BulletTypeName_Primary": "B", "visual": {"base": "a", "barrel": "b", "pivot": [0, 0, 0], "muzzles": [[0, 0, 0]]}, "HorizontalRotationSpeed": 1, "VerticalRotationSpeed": 1,
+            "VerticalMinAngle": 0, "VerticalMaxAngle": 1, "beam": {"charge": 1}});
+        let full_bullet = json!({"lifetime": 1, "impact_vol": 1, "impact_max": 1, "impact_snd": {"Wood": ["a"]}, "damage": {"Wood": [1, 2, 0, 0, 0]}, "hit_fx": "H", "decal": "Small", "hitpoints": 2});
+        for (name, entry, full) in [("guns.schema.json", &all[1].1, full_gun), ("bullets.schema.json", &all[2].1, full_bullet)] {
+            let is_gun = name.starts_with("guns");
+            let load = |v: &Value| if is_gun { crate::data::gun_from_value("G", v.clone()).map(|_| ()) } else { crate::data::bullet_from_value("B", v.clone()).map(|_| ()) };
+            let mut required = vec![];
+            required_paths(entry, &entry["$defs"]["entry"], "", &mut required);
+            assert!(required.len() >= 5, "{name}: {required:?}");
+            assert_eq!(load(&full), Ok(()), "{name}: the full entry loads");
+            // with only the required fields, it loads; without any one of them, it does not
+            let mut least = full.clone();
+            let optional: Vec<String> = {
+                let mut all_paths = vec![];
+                for (k, v) in full.as_object().unwrap() {
+                    all_paths.push(k.clone());
+                    if let Some(o) = v.as_object().filter(|_| k == "visual") {
+                        all_paths.extend(o.keys().map(|n| format!("{k}.{n}")));
+                    }
+                }
+                all_paths.into_iter().filter(|p| !required.contains(p)).collect()
+            };
+            for p in &optional {
+                if !p.contains('.') {
+                    remove_path(&mut least, p);
+                }
+            }
+            assert_eq!(load(&least), Ok(()), "{name}: the required fields alone load ({required:?})");
+            for p in &optional {
+                let mut one = full.clone();
+                remove_path(&mut one, p);
+                assert_eq!(load(&one), Ok(()), "{name}: `{p}` is optional");
+            }
+            for p in &required {
+                let mut one = full.clone();
+                assert!(full.pointer(&format!("/{}", p.replace('.', "/"))).is_some(), "{name}: the fixture lacks required `{p}`");
+                remove_path(&mut one, p);
+                assert!(load(&one).is_err(), "{name}: `{p}` is listed required but the loader does without it");
+            }
+        }
     }
 
     #[test]

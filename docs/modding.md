@@ -130,9 +130,12 @@ Keys the loader does not know are ignored, and a known key of the wrong type cou
 `mod.schema.json` (`mod.json`). It needs no game assets and exits 0. They are generated from the types the loader reads, so key names,
 types and the field descriptions in the editor's hover are what the game really takes; tools linking the engine get the same from
 `openprocyon::authoring::schemas()`. Unknown keys stay allowed (the loader ignores them), so a misspelt key is not an error in the editor but
-is not offered either (`--check-mod` warns about it, with the nearest known key). In the ship, guns and bullets schemas every property carries `"x-origin"` (`"retail"`, or `"engine"` for a key the engine adds: `ENGINE_SHIP_KEYS` / `ENGINE_GUN_KEYS`), and a ship key the engine fills in when it is left out carries `"x-default-from"` (vocabulary: `docs/data-format.md` "Where a missing key comes from"). No key is marked required: a mod file is merged over its parent (`extends`, or the retail entry of the same name) before
-the game reads it, so a ship that only says `{"extends": "Ship_X", "points": 100}` or a gun entry that changes a few keys of a retail gun is
-valid. What the game demands of the merged result is still checked by the loader (and `--check-mod`, see "Testing a mod"), not by the editor.
+is not offered either (`--check-mod` warns about it, with the nearest known key). In the ship, guns and bullets schemas every property carries `"x-origin"` (`"retail"`, or `"engine"` for a key the engine adds: `ENGINE_SHIP_KEYS` / `ENGINE_GUN_KEYS`), and a ship key the engine fills in when it is left out carries `"x-default-from"` (vocabulary: `docs/data-format.md` "Where a missing key comes from"). No ship key is marked required: a ship file is merged over its parent (`extends`) before
+the game reads it, so a ship that only says `{"extends": "Ship_X", "points": 100}` is valid. The entries of `guns.schema.json` and
+`bullets.schema.json` do list `required` (exactly the fields the loader needs of a whole entry, a test keeps them equal to it): a new gun or
+bullet must state them all, while an entry that only changes a few keys of a retail one is valid for the game but an editor will flag the
+missing keys, so treat those as hints there. `--check-mod` knows the difference: it lists every missing field of a new entry (not the first),
+each at its own place (`data/weapons/guns.json`, `/Gun_X/visual/pivot`), and nothing for a change to a retail entry. The rest of what the game demands of the merged result is checked by the loader (and `--check-mod`, see "Testing a mod"), not by the editor.
 
 In VS Code, either name the schema in the file (the loader ignores a `$schema` key):
 
