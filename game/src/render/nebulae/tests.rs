@@ -181,6 +181,19 @@ fn the_volume_follows_the_retail_breath_the_sun_and_the_bolt() {
     assert_eq!((u.flash.truncate(), u.flash_to.truncate()), (Vec3::X, Vec3::X * 3.0), "the volume is lit along the whole bolt");
 }
 
+#[test]
+fn a_cloud_keeps_gas_in_its_heart_and_looks_up_its_own_part_of_the_noise() {
+    let rules = parse(&json!({"rules": [{"match": "storm", "fill": 0.13}, {"match": "n", "fill": 9}]})).unwrap().rules;
+    assert_eq!((rules[0].fill, rules[1].fill), (0.13, 0.5), "clamped");
+    assert_eq!(parse(&json!({"rules": [{"match": "n"}]})).unwrap().rules[0].fill, 0.0, "the noise alone unless the profile asks");
+    let u = rules[0].volume(&Cloud::for_tests("SolarStorm", 100.0), Vec3::ZERO, &Bolt::default(), SunLight::default());
+    assert_eq!(u.flash_to.w, 0.13, "the shader gets it");
+    // where the map placed the cloud decides its part of the noise: fixed while the cloud travels, different for clouds apart
+    let (here, there) = (noise_place(Vec3::new(120.0, 4.0, -300.0)), noise_place(Vec3::new(-640.0, 4.0, 85.0)));
+    assert!((0.0..1.0).contains(&here) && (0.0..1.0).contains(&there) && (here - there).abs() > 0.05, "{here} {there}");
+    assert_eq!(u.params.x, noise_place(Vec3::ZERO), "from the cloud's origin, not where it is now");
+}
+
 /// How many `Modified` events the material asset got during one more frame.
 fn modified<M: Asset>(app: &mut App) -> usize {
     app.update();

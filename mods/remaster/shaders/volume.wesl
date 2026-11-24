@@ -11,6 +11,9 @@
 // (`variation`), so it is not one flat wash. A solar storm is not a quiet cloud: its gas wheels round the centre like a cyclone
 // (`swirl`, faster near the centre; two phases of the turn are blended so the gas never winds up), the edges of its billows burn
 // as hot plasma filaments (`filaments`), and lightning keeps flickering deep inside it (`flicker`).
+// The noise alone leaves holes, and the same ones in every cloud. So the heart of a cloud always holds gas (`fill`, added to the
+// noise at the centre and fading to nothing at the rim, where the noise still tears the edge into wisps), the dust keeps out of
+// that heart, and every cloud looks up its own part of the noise (`params.x`).
 // the battle clock (game/src/render/frame.rs)
 import openprocyon::render::frame::frame;
 import bevy_pbr::render::{
@@ -38,9 +41,10 @@ struct Volume {
     sun_color: vec4<f32>,
     // xyz: one end of the last bolt, w: what is left of its light
     flash: vec4<f32>,
-    // xyz: its other end
+    // xyz: its other end, w: fill (gas the heart of the cloud always holds)
     flash_to: vec4<f32>,
-    // x: unused (the clock is frame.clock), y: a bolt's reach (world units), z: a bolt's brightness, w: the mission's fadeout factor
+    // x: this cloud's place in the noise 0..1 (the clock is frame.clock), y: a bolt's reach (world units), z: a bolt's brightness,
+    // w: the mission's fadeout factor
     params: vec4<f32>,
     // x: swirl (turns a second near the centre), y: filaments, z: flicker, w: hue variation
     storm: vec4<f32>,
@@ -68,14 +72,29 @@ fn bend(p: vec3<f32>, w: f32, t: f32) -> vec3<f32> {
     return p + vec3<f32>(w * 1.9, -w * 1.4, w * 1.7) + vec3<f32>(0.0, t * 0.5, 0.0);
 }
 
+// this cloud's own part of the noise (the texture tiles every CELLS cells)
+fn place() -> vec3<f32> {
+    let s = vol.params.x;
+    return vec3<f32>(s, fract(s * 3.7), fract(s * 7.3)) * CELLS;
+}
+
 // the raw noise the gas is made of, at a point of the cloud's unit space, `w` the warp there
 fn raw(q: vec3<f32>, w: f32, t: f32) -> f32 {
-    return bake(bend(q * vol.look.y, w, t)).r;
+    return bake(bend(q * vol.look.y, w, t) + place()).r;
+}
+
+// how much of the heart's gas is drawn: all from outside, less as the camera goes into the cloud (set once a pixel), so a ship in
+// the heart of a cloud stays readable from close by
+var<private> heart: f32 = 1.0;
+
+// the gas the heart of the cloud holds whatever the noise says: most at the centre, none at the rim
+fn body(q: vec3<f32>) -> f32 {
+    return vol.flash_to.w * heart * clamp(1.0 - dot(q, q), 0.0, 1.0);
 }
 
 // gas density 0..1
 fn gas(q: vec3<f32>, w: f32, t: f32) -> f32 {
-    return smoothstep(0.36, 0.78, raw(q, w, t));
+    return smoothstep(0.36, 0.78, raw(q, w, t) + body(q));
 }
 
 // a point turned about the cloud's vertical axis
@@ -88,7 +107,7 @@ fn spin(q: vec3<f32>, a: f32) -> vec3<f32> {
 // the gas at a point: x density, y the hot filaments on the edges of the billows, z the warp
 fn sample(q: vec3<f32>, clock: f32) -> vec3<f32> {
     let w = warp(q * vol.look.y, clock);
-    let n = raw(q, w, clock);
+    let n = raw(q, w, clock) + body(q);
     // the filaments are finer than the billows: thin bright seams where a finer noise crosses its middle
     var fil = 0.0;
     if vol.storm.y > 0.0 {
@@ -125,6 +144,7 @@ fn fragment(in: VertexOutput) -> FragmentOutput {
     let t0 = max((-b - s) / a, 0.0);
     var t1 = (-b + s) / a;
     let inside_cam = dot(o, o) < 1.0;
+    heart = 1.0 - 0.6 * smoothstep(1.0, 0.6, length(o));
 
     // the scene: the march ends at the nearest hull or island (the depth prepass; none = the whole chord)
     var t_scene = 1.0e9;
@@ -190,8 +210,8 @@ fn fragment(in: VertexOutput) -> FragmentOutput {
         }
         let w = g.z;
         let dens = g.x * edge * near;
-        // dust: dark folds, extinction without light
-        let dust = smoothstep(0.5, 0.85, bake(q * vol.look.y * 0.55 + vec3<f32>(5.1, clock * 0.3, 1.7)).b) * edge * near * vol.high.w;
+        // dust: dark folds, extinction without light, kept out of the heart of the cloud
+        let dust = smoothstep(0.5, 0.85, bake(q * vol.look.y * 0.55 + vec3<f32>(5.1, clock * 0.3, 1.7) + place()).b - 2.0 * body(q)) * edge * near * vol.high.w;
         var tau_dust = dust * sigma * dt * 1.4;
         if dens > 0.01 {
             // the sun's light reaching this point through the gas between
