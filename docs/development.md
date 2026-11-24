@@ -59,6 +59,12 @@ Git Bash (`GIT_BASH=<path>` if it is not in the default place), and the screensh
    refuses ends the run with status 2. The report marks each ship `computer` (the captain AI's test: only the human's own fleet
    waits for orders) and lists each fleet's victory points spent against its budget; the expectations `patrol`, `fire` and
    `budget` in `tools/battle_check.py` read those.
+   Every scenario also judges whole-run sanity from the report's `sanity` block: no ship position that is not finite, none farther
+   than `BOUNDS` from the origin, at most `ENTITY_CAP` entities at once (both PROVISIONAL, generous). `resolve` (opt-in) wants the battle
+   to end or a ship to sink. `battle_check --twice` plays each scenario twice, fixed-step with seed 1, and fails when the reports differ
+   (frame times excepted). Scenarios `red_rover` and `mixed_fleets` add a second map and mixed fleets. There is no `--batch` mode (many
+   battles in one process) yet: it needs the headless entry below first. Measured on 2026-11-24: nine `Single<&Window>` systems outside
+   `classic/` (`panels.rs`, `view.rs`, `menu/settings.rs`, `options_menu.rs`, `menu.rs`, `campaign.rs`, `smoke/fleet.rs`, `setup.rs`), plus the render-asset and audio setup.
 
    Headless runs (spike, 2026-10, read from the code, not yet built): `run` adds `DefaultPlugins` and `setup` demands a primary
    window, so the game cannot start without a window and GPU today. The simulation itself is already apart from rendering: it

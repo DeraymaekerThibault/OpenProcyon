@@ -1,7 +1,7 @@
 import json
 import unittest
 
-from tools.battle_check import SCENARIOS, evaluate, outcome
+from tools.battle_check import SCENARIOS, evaluate, outcome, same_run
 
 
 def report(
@@ -228,3 +228,54 @@ class Outcome(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Invariants(unittest.TestCase):
+    def test_non_finite_positions_far_ships_and_runaway_entities_always_fail(self):
+        r = report()
+        r["sanity"] = {"non_finite": 2, "farthest": 90000, "entities": 70000}
+        self.assertEqual(
+            evaluate(r, set()),
+            [
+                "2 ship positions were not finite (NaN or infinity)",
+                "a ship got 90000 units from the origin (limit 50000)",
+                "70000 entities alive at once (limit 50000)",
+            ],
+        )
+
+    def test_a_healthy_run_and_an_old_report_pass_the_sanity_check(self):
+        r = report()
+        self.assertEqual(evaluate(r, set()), [], "reports without a sanity block")
+        r["sanity"] = {"non_finite": 0, "farthest": 4000, "entities": 3000}
+        self.assertEqual(evaluate(r, set()), [])
+
+    def test_resolve_wants_an_end_or_a_sinking(self):
+        r = report()
+        r["ended"] = False
+        self.assertEqual(
+            evaluate(r, {"resolve"}), ["nothing sank and no side was beaten in 120 s"]
+        )
+        self.assertEqual(evaluate(r, set()), [], "only where asked for")
+        r["ships"][1]["sunk"] = True
+        self.assertEqual(evaluate(r, {"resolve"}), [])
+        r["ships"][1]["sunk"] = False
+        r["ended"] = True
+        self.assertEqual(evaluate(r, {"resolve"}), [])
+
+    def test_the_same_seed_must_give_the_same_report(self):
+        def log(frame_ms, hits=3):
+            r = report(hits=hits)
+            r["frame_ms"] = {"p50": frame_ms, "over_50": 0}
+            return "battle report " + json.dumps(r)
+
+        self.assertEqual(
+            same_run(log(16), log(23))[0], True, "frame times differ per run"
+        )
+        same, why = same_run(log(16), log(16, hits=4))
+        self.assertFalse(same)
+        self.assertIn("sides", why)
+        self.assertFalse(same_run(log(16), "crashed")[0])
+
+    def test_more_maps_and_mixed_fleets_are_scenarios(self):
+        names = {s.name for s in SCENARIOS}
+        self.assertTrue({"red_rover", "mixed_fleets"} <= names)
