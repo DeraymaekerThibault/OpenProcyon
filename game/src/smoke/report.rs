@@ -19,6 +19,10 @@ pub struct Report {
     closest: f32,
     /// Real frame times (ms), for stutter: a few long frames hide in an average.
     frames: Vec<f32>,
+    /// Sanity of the whole run: positions that were not finite, the farthest any ship got from the origin, the most entities alive.
+    non_finite: u32,
+    farthest: f32,
+    entities: usize,
 }
 
 #[derive(Default)]
@@ -50,13 +54,28 @@ fn side_name(side: Side) -> String {
 
 pub fn plugin(app: &mut App) {
     let Some(limit) = std::env::var("PROCYON_REPORT").ok().and_then(|v| v.parse().ok()) else { return };
-    app.insert_resource(Report { limit, time: 0.0, sides: BTreeMap::new(), ships: HashMap::new(), closest: f32::INFINITY, frames: vec![] })
-        .add_systems(FixedUpdate, watch.in_set(crate::BattleSet::Outcome).run_if(in_state(crate::menu::Screen::Battle)))
-        .add_systems(Update, frame_time.run_if(in_state(crate::menu::Screen::Battle)));
+    app.insert_resource(Report {
+        limit,
+        time: 0.0,
+        sides: BTreeMap::new(),
+        ships: HashMap::new(),
+        closest: f32::INFINITY,
+        frames: vec![],
+        non_finite: 0,
+        farthest: 0.0,
+        entities: 0,
+    })
+    .add_systems(FixedUpdate, watch.in_set(crate::BattleSet::Outcome).run_if(in_state(crate::menu::Screen::Battle)))
+    .add_systems(Update, frame_time.run_if(in_state(crate::menu::Screen::Battle)));
 }
 
 fn frame_time(time: Res<Time<Real>>, mut report: ResMut<Report>) {
     report.frames.push(time.delta_secs() * 1000.0);
+}
+
+/// Whether a ship position is finite, and how far it is from the origin (0 for a position that is not finite).
+fn position_sanity(p: Vec3) -> (bool, f32) {
+    if p.is_finite() { (true, p.abs().max_element()) } else { (false, 0.0) }
 }
 
 /// (median, 99th percentile, worst, frames over 50 ms) of the battle's frame times, after the first second (loading).
@@ -109,6 +128,7 @@ fn watch(
     mut fired: MessageReader<Fired>,
     mut hits: MessageReader<Hit>,
     mut exit: MessageWriter<AppExit>,
+    everything: Query<Entity>,
 ) {
     let dt = time.delta_secs();
     report.time += dt;
@@ -146,6 +166,9 @@ fn watch(
                 ShipLine { class: class.name.clone(), side: side.clone(), last: tf.translation, sailed: 0.0, bursts: 0, computer, contact: 0.0, worst_contact: 0.0, sunk: false },
             );
         }
+        let (finite, far) = position_sanity(tf.translation);
+        report.non_finite += u32::from(!finite);
+        report.farthest = report.farthest.max(far);
         if health.destroyed {
             report.ships.get_mut(&e).unwrap().sunk = true;
             continue;
@@ -166,6 +189,7 @@ fn watch(
             }
         }
     }
+    report.entities = report.entities.max(everything.iter().len());
     let sides_alive = report.sides.values().filter(|l| l.alive > 0).count();
     if report.time < report.limit && (sides_alive > 1 || report.time < 5.0) {
         return;
@@ -183,7 +207,21 @@ fn watch(
             "worst_contact": (s.worst_contact * 10.0).round() / 10.0,
         })).collect::<Vec<_>>(),
         "fleets": fleets_json(&cfg, &sk, &lib),
+        "ended": sides_alive <= 1,
+        "sanity": {"non_finite": report.non_finite, "farthest": report.farthest.round(), "entities": report.entities},
     });
     info!("battle report {json}");
     exit.write(crate::exit::app_exit(0));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_position_is_sane_when_finite_and_its_reach_is_the_largest_axis() {
+        assert_eq!(position_sanity(Vec3::new(10.0, -300.0, 5.0)), (true, 300.0));
+        assert_eq!(position_sanity(Vec3::new(f32::NAN, 0.0, 0.0)), (false, 0.0));
+        assert_eq!(position_sanity(Vec3::new(0.0, f32::INFINITY, 0.0)), (false, 0.0));
+    }
 }
