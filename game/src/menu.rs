@@ -631,12 +631,20 @@ fn start_battle(sk: &mut Skirmish, next: &mut NextState<Screen>) {
 
 /// `--lobby <spec>` (`lobby_scenario.rs`, tools/battle_check.py): sets the lobby up from the spec, then presses Launch. A spec the
 /// lobby refuses ends the run with status 2 instead of silently playing something else.
-fn lobby_scenario(scenario: Option<Res<LobbyScenario>>, mut sk: ResMut<Skirmish>, lib: Res<Library>, mut next: ResMut<NextState<Screen>>, mut done: Local<bool>) {
+fn lobby_scenario(
+    scenario: Option<Res<LobbyScenario>>,
+    mut sk: ResMut<Skirmish>,
+    lib: Res<Library>,
+    mut next: ResMut<NextState<Screen>>,
+    mut done: Local<bool>,
+    mut exit: MessageWriter<AppExit>,
+) {
     let Some(scenario) = scenario.filter(|_| !*done) else { return };
     *done = true;
     if let Err(err) = scenario.apply(&mut sk, &lib) {
         eprintln!("{err}");
-        std::process::exit(2);
+        exit.write(crate::exit::app_exit(2));
+        return;
     }
     launch(&mut sk, &mut next);
 }

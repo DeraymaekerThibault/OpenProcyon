@@ -20,6 +20,7 @@ pub mod decals;
 pub mod docking;
 pub mod dragons;
 pub mod environment;
+pub mod exit;
 #[cfg(test)]
 mod fixed_tests;
 pub mod flag;
@@ -175,7 +176,7 @@ fn lobby_scenario(app: &mut App) {
             }
             Err(err) => {
                 eprintln!("{err}");
-                std::process::exit(2);
+                exit::quit(2);
             }
         }
     }
@@ -192,12 +193,12 @@ pub fn run(view: fn(&mut App), setup_view: fn(&mut App)) {
     let args: Vec<String> = std::env::args().collect();
     // Mission authoring (docs/modding.md): the rule schema needs no assets.
     if let Some(code) = rules::cli::dump_schema(&args) {
-        std::process::exit(code);
+        exit::quit(code);
     }
     let script = args.iter().position(|a| a == "--script").map(|i| {
         args.get(i + 1).ok_or_else(|| "--script requires a name".to_owned()).and_then(|name| smoke::Script::parse(name)).unwrap_or_else(|err| {
             eprintln!("{err}");
-            std::process::exit(2);
+            exit::quit(2);
         })
     });
     let mods: Vec<PathBuf> = args.windows(2).filter(|w| w[0] == "--mod").map(|w| PathBuf::from(&w[1])).collect();
@@ -213,7 +214,7 @@ pub fn run(view: fn(&mut App), setup_view: fn(&mut App)) {
     if status != setup::Imported::Ready && is_scripted(&args) {
         // A scripted run (tools/smokes.sh, shot.sh) has nobody to answer the import screen: fail at once with the hint.
         eprintln!("No imported assets in {} ({status:?}). Import your copy of the game first: make assets ARGS=\"--game <install dir>\" (or set PROCYON_ASSETS).", base.display());
-        std::process::exit(1);
+        exit::quit(1);
     }
     if status != setup::Imported::Ready || args.iter().any(|a| a == "--crashed") {
         eprintln!("Game assets in {}: {status:?}; opening the import screen.", base.display());
@@ -229,7 +230,7 @@ pub fn run(view: fn(&mut App), setup_view: fn(&mut App)) {
     report.without(&content_dir()).log();
     let _ = ASSETS.set(root);
     if let Some(code) = rules::cli::apply(&args) {
-        std::process::exit(code);
+        exit::quit(code);
     }
     let arg = |k: &str| args.iter().position(|a| a == k).and_then(|i| args.get(i + 1)).cloned();
     let shot = arg("--shot");
@@ -254,7 +255,7 @@ pub fn run(view: fn(&mut App), setup_view: fn(&mut App)) {
         shot_frames,
         late_frame: arg("--late-frame").and_then(|v| v.parse().ok()).unwrap_or(0), // 0: no _late shot
     };
-    App::new()
+    let result = App::new()
         .add_plugins(
             DefaultPlugins
                 .set(AssetPlugin { file_path: assets_dir().to_string_lossy().into_owned(), ..default() })
@@ -391,6 +392,10 @@ pub fn run(view: fn(&mut App), setup_view: fn(&mut App)) {
             ),
         )
         .run();
+    // A system that stopped the run with an error code (`exit::app_exit`) sets the process's status.
+    if let AppExit::Error(_) = result {
+        exit::quit(exit::status(&result));
+    }
 }
 
 /// The camera the player looks through. Other 3D cameras exist (the Fleet screen's ship preview renders to a texture), so systems
@@ -660,7 +665,7 @@ fn run_is_over(frame: u32, last_shot: u32, saved: usize, wanted: usize, scripted
 
 static SHOTS_SAVED: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
-fn screenshot(mut commands: Commands, mut cfg: ResMut<Config>, loading: Option<Res<loading::Loading>>) {
+fn screenshot(mut commands: Commands, mut cfg: ResMut<Config>, loading: Option<Res<loading::Loading>>, mut exit: MessageWriter<AppExit>) {
     let Some(path) = cfg.shot.clone() else { return };
     // scripts and pictures count frames of the battle: the count waits while it loads
     if loading.is_some() {
@@ -691,7 +696,7 @@ fn screenshot(mut commands: Commands, mut cfg: ResMut<Config>, loading: Option<R
     }
     let saved = SHOTS_SAVED.load(std::sync::atomic::Ordering::SeqCst);
     if run_is_over(cfg.frame, last, saved, shots.len(), cfg.script.is_some(), cfg.ended, cfg.script.as_deref() == Some("restart")) {
-        std::process::exit(0);
+        exit.write(exit::app_exit(0));
     }
 }
 
