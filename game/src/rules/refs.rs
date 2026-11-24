@@ -28,7 +28,16 @@ pub fn is_wrecked_hull(class: &str) -> bool {
 }
 
 fn problem(rule: &str, at: String, field: &str, message: String) -> Problem {
-    Problem { level: Level::Error, rule: rule.into(), at, field: field.into(), message }
+    Problem::new(Level::Error, rule, at, field, message)
+}
+
+/// `problem` for action `item` of rule `index`.
+fn in_action(index: usize, rule: &Value, item: usize, mut p: Problem) -> Problem {
+    p.rule_index = Some(index);
+    p.rule_name = rule["name"].as_str().filter(|n| !n.is_empty()).map(|n| n.trim().to_string());
+    p.list = Some("actions".into());
+    p.item = Some(item);
+    p
 }
 
 /// Errors for every ship class, `.ogg` sound and `.png` picture the mission, its `map.json` and its `media.json` name that does not exist.
@@ -38,7 +47,9 @@ pub fn check_references(mission: &Value, map: &Value, media: &Value, look: &Look
         for (i, s) in mission["ships"].as_array().into_iter().flatten().enumerate() {
             if let Some(class) = s["type"].as_str().filter(|c| !is_wrecked_hull(c) && !ship(c)) {
                 let name = s["name"].as_str().filter(|n| !n.is_empty()).map_or(String::new(), |n| format!(" '{n}'"));
-                out.push(problem("(mission)", format!("ship #{}{name}", i + 1), "type", format!("ship class '{class}' does not exist (no ships/{class}/ship.json)")));
+                let mut p = problem("(mission)", format!("ship #{}{name}", i + 1), "type", format!("ship class '{class}' does not exist (no ships/{class}/ship.json)"));
+                p.path = format!("ships[{i}].type");
+                out.push(p);
             }
         }
     }
@@ -52,7 +63,7 @@ pub fn check_references(mission: &Value, map: &Value, media: &Value, look: &Look
                     "Play Music Track" | "Play Special Effect" => {
                         let silence = ty == "Play Music Track";
                         if let Some(file) = a["File Name"].as_str().filter(|f| !f.is_empty() && !(silence && is_no_music(f)) && !sound(f)) {
-                            out.push(problem(&rule, at, "File Name", format!("the sound '{file}.ogg' is not in any sound folder of the game or the mods")));
+                            out.push(in_action(i, r, j, problem(&rule, at, "File Name", format!("the sound '{file}.ogg' is not in any sound folder of the game or the mods"))));
                         }
                     }
                     "Play speech event" => {
@@ -62,11 +73,16 @@ pub fn check_references(mission: &Value, map: &Value, media: &Value, look: &Look
                         if entry["duration"].as_f64().is_some() {
                             let file = entry["file"].as_str().unwrap_or(name);
                             if !sound(file) {
-                                out.push(problem(
-                                    &rule,
-                                    at,
-                                    "Speech Event Name",
-                                    format!("the speech file '{file}.ogg' of '{name}' (media.json) is not in any sound or maps/<id>/speech folder"),
+                                out.push(in_action(
+                                    i,
+                                    r,
+                                    j,
+                                    problem(
+                                        &rule,
+                                        at,
+                                        "Speech Event Name",
+                                        format!("the speech file '{file}.ogg' of '{name}' (media.json) is not in any sound or maps/<id>/speech folder"),
+                                    ),
                                 ));
                             }
                         }

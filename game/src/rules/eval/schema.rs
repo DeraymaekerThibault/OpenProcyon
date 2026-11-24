@@ -801,6 +801,160 @@ pub fn schema_def(ty: RuleType) -> &'static TypeDef {
     RULE_TYPES.iter().find(|t| t.ty == ty).expect("every RuleType has an entry in RULE_TYPES")
 }
 
+/// One key of a rule or of a task (the object around the conditions and actions), as `--dump-rule-schema` lists it under `rule` and
+/// `task`. Unlike the `Type` fields of conditions and actions, whose booleans are the strings `"TRUE"` / `"FALSE"`, these keys take
+/// JSON booleans.
+pub struct EnvelopeKey {
+    pub name: &'static str,
+    /// The JSON type the interpreter reads: `string`, `boolean` or `array`.
+    pub json: &'static str,
+    /// Other spellings it also reads (`"TRUE"` / `"FALSE"` strings for `Is Active`).
+    pub also: &'static [&'static str],
+    /// For an array: whether its items are `condition` or `action` objects.
+    pub items: Option<Role>,
+    /// What the interpreter reads when the key is missing, as JSON text.
+    pub default: &'static str,
+    pub origin: Origin,
+    pub note: &'static str,
+}
+
+/// The keys of a rule in `mission.json` / `script.json` `rules`.
+pub const RULE_KEYS: &[EnvelopeKey] = &[
+    EnvelopeKey {
+        name: "name",
+        json: "string",
+        also: &[],
+        items: None,
+        default: "\"\"",
+        origin: Origin::Retail,
+        note: "The rule's name, trimmed. `--fire-rule`, `--why` and `OP Set Rule Active` find a rule by it, so name every rule once.",
+    },
+    EnvelopeKey {
+        name: "Run Once",
+        json: "boolean",
+        also: &[],
+        items: None,
+        default: "true",
+        origin: Origin::Retail,
+        note: "A JSON boolean: only `false` lets the rule fire again every time its conditions hold; anything else (or missing) fires it once.",
+    },
+    EnvelopeKey {
+        name: "Is Active",
+        json: "boolean",
+        also: &["\"TRUE\"", "\"FALSE\""],
+        items: None,
+        default: "true",
+        origin: Origin::Engine,
+        note: "false: the rule is not evaluated until `OP Set Rule Active` turns it on. Retail writes true on every rule.",
+    },
+    EnvelopeKey {
+        name: "conditions",
+        json: "array",
+        also: &[],
+        items: Some(Role::Condition),
+        default: "[]",
+        origin: Origin::Retail,
+        note: "Condition objects, all of which must hold; an empty list holds at once.",
+    },
+    EnvelopeKey {
+        name: "actions",
+        json: "array",
+        also: &[],
+        items: Some(Role::Action),
+        default: "[]",
+        origin: Origin::Retail,
+        note: "Action objects, run in order when the conditions hold.",
+    },
+];
+
+/// The keys of an objective task in `mission.json` `tasks`.
+pub const TASK_KEYS: &[EnvelopeKey] = &[
+    EnvelopeKey {
+        name: "Name",
+        json: "string",
+        also: &[],
+        items: None,
+        default: "\"\"",
+        origin: Origin::Retail,
+        note: "What `Set Objective Task Active State` and the other task Types name.",
+    },
+    EnvelopeKey {
+        name: "text",
+        json: "string",
+        also: &[],
+        items: None,
+        default: "\"\"",
+        origin: Origin::Retail,
+        note: "The objective's text (a string id of the mission's text).",
+    },
+    EnvelopeKey {
+        name: "Active",
+        json: "boolean",
+        also: &[],
+        items: None,
+        default: "false",
+        origin: Origin::Retail,
+        note: "A JSON boolean: the task starts active. Only `true` counts.",
+    },
+    EnvelopeKey {
+        name: "required",
+        json: "boolean",
+        also: &[],
+        items: None,
+        default: "false",
+        origin: Origin::Engine,
+        note: "With `\"victory\": \"objectives\"`: the mission is lost when a required task fails and won when all are complete.",
+    },
+    EnvelopeKey {
+        name: "team",
+        json: "string",
+        also: &[],
+        items: None,
+        default: "\"\"",
+        origin: Origin::Engine,
+        note: "Skirmish script only: the team (`name_id`) a required task decides for.",
+    },
+    EnvelopeKey {
+        name: "complete_when",
+        json: "array",
+        also: &[],
+        items: Some(Role::Condition),
+        default: "[]",
+        origin: Origin::Engine,
+        note: "Conditions that mark the task complete while it is active.",
+    },
+    EnvelopeKey {
+        name: "fail_when",
+        json: "array",
+        also: &[],
+        items: Some(Role::Condition),
+        default: "[]",
+        origin: Origin::Engine,
+        note: "Conditions that mark the task failed (wins over `complete_when`).",
+    },
+];
+
+fn envelope_json(keys: &[EnvelopeKey]) -> Value {
+    keys.iter()
+        .map(|k| {
+            let mut v = json!({
+                "name": k.name,
+                "json": k.json,
+                "default": serde_json::from_str::<Value>(k.default).unwrap_or(Value::Null),
+                "origin": if k.origin == Origin::Retail { "retail" } else { "engine" },
+                "note": k.note,
+            });
+            if !k.also.is_empty() {
+                v["also"] = k.also.iter().filter_map(|a| serde_json::from_str::<Value>(a).ok()).collect();
+            }
+            if let Some(role) = k.items {
+                v["items"] = json!(if role == Role::Condition { "condition" } else { "action" });
+            }
+            v
+        })
+        .collect()
+}
+
 /// The schema as JSON for tools (`--dump-rule-schema`): every Type with its fields, and the kinds with their placeholders.
 pub fn to_json() -> Value {
     let field = |f: &Field| {
@@ -850,6 +1004,8 @@ pub fn to_json() -> Value {
     ];
     json!({
         "version": 1,
+        "rule": {"keys": envelope_json(RULE_KEYS)},
+        "task": {"keys": envelope_json(TASK_KEYS)},
         "kinds": kinds.iter().map(|k| json!({"name": k.name(), "placeholders": k.placeholders()})).collect::<Vec<_>>(),
         "types": RULE_TYPES.iter().map(ty).collect::<Vec<_>>(),
     })
@@ -878,6 +1034,35 @@ mod tests {
 
     fn names(role: Role, handler: Handler) -> BTreeSet<String> {
         RULE_TYPES.iter().filter(|t| t.role == role && t.handler == handler).map(|t| t.name.to_string()).collect()
+    }
+
+    #[test]
+    fn the_dump_lists_the_keys_of_a_rule_and_of_a_task_with_their_json_types() {
+        let v = to_json();
+        let keys =
+            |what: &str| v[what]["keys"].as_array().unwrap().iter().map(|k| (k["name"].as_str().unwrap().to_string(), k["json"].as_str().unwrap().to_string())).collect::<Vec<_>>();
+        let pairs = |list: &[(&str, &str)]| list.iter().map(|(a, b)| (a.to_string(), b.to_string())).collect::<Vec<_>>();
+        assert_eq!(keys("rule"), pairs(&[("name", "string"), ("Run Once", "boolean"), ("Is Active", "boolean"), ("conditions", "array"), ("actions", "array")]));
+        assert_eq!(
+            keys("task"),
+            pairs(&[
+                ("Name", "string"),
+                ("text", "string"),
+                ("Active", "boolean"),
+                ("required", "boolean"),
+                ("team", "string"),
+                ("complete_when", "array"),
+                ("fail_when", "array")
+            ])
+        );
+        let rule = |name: &str| v["rule"]["keys"].as_array().unwrap().iter().find(|k| k["name"] == name).unwrap().clone();
+        assert_eq!(
+            (rule("Run Once")["default"].clone(), rule("Is Active")["origin"].clone(), rule("Is Active")["also"].clone()),
+            (json!(true), json!("engine"), json!(["TRUE", "FALSE"]))
+        );
+        assert_eq!((rule("conditions")["items"].clone(), rule("actions")["items"].clone()), (json!("condition"), json!("action")));
+        // The Type tables are untouched by the addition.
+        assert_eq!(v["types"].as_array().unwrap().len(), RULE_TYPES.len());
     }
 
     #[test]

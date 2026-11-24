@@ -100,25 +100,39 @@ fn all_ids(maps: &Path) -> Vec<String> {
 }
 
 /// A map folder's rules file: `mission.json`, or a skirmish map's `script.json`.
-fn rules_file(dir: &Path) -> Option<PathBuf> {
+pub fn rules_file(dir: &Path) -> Option<PathBuf> {
     ["mission.json", "script.json"].iter().map(|f| dir.join(f)).find(|p| p.is_file())
 }
 
-/// Loads `map.json`, `mission.json` (or a skirmish map's `script.json`) and `media.json` of a map folder and checks its rules.
+/// Loads `map.json`, `mission.json` (or a skirmish map's `script.json`) and `media.json` of a map folder and checks its rules, looking
+/// up ships and sounds in the game's own asset folder.
 pub fn check_map(dir: &Path) -> Result<Vec<Problem>, String> {
+    let root = crate::assets_dir();
+    let sound = |f: &str| root.join(crate::audio::sound(f)).is_file();
+    check_map_in(dir, Some((root, &sound)))
+}
+
+/// `check_map` for a tool that has its own asset tree: `lookups` is the folder ships are looked up in (`ships/<id>/ship.json`, only
+/// when it has a `ships/` folder) and the test for a sound by name; `None` skips ship and sound lookups (no assets to look in).
+pub fn check_map_in(dir: &Path, lookups: Option<(&Path, &dyn Fn(&str) -> bool)>) -> Result<Vec<Problem>, String> {
     let rules_file = rules_file(dir).ok_or_else(|| format!("no mission.json or script.json in {}", dir.display()))?;
     let mission = crate::data::try_json(&rules_file).ok_or_else(|| format!("{} is not valid JSON", rules_file.display()))?;
     let (map, media) = (crate::data::try_json(&dir.join("map.json")), crate::data::try_json(&dir.join("media.json")));
     let skirmish = rules_file.ends_with("script.json");
+    let (id, rules_name) =
+        (dir.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned()), rules_file.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned()));
     let mut problems = check_with(&mission, map.as_ref().unwrap_or(&Value::Null), media.as_ref().unwrap_or(&Value::Null), skirmish);
-    let note = |level, field: &str, message: &str| Problem { level, rule: "(mission)".into(), at: "files".into(), field: field.into(), message: message.into() };
+    let note = |level, field: &str, message: &str| Problem::new(level, "(mission)", "files", field, message).with_file(&format!("{id}/{field}"));
     // What the mission points at: skipped without imported assets, since there is nothing to look in.
-    let root = crate::assets_dir();
-    let ship = |c: &str| root.join("ships").join(c).join("ship.json").is_file();
-    let sound = |f: &str| root.join(crate::audio::sound(f)).is_file();
     let picture = |f: &str| dir.join(f).is_file();
-    let look = super::refs::Lookups { ship: root.join("ships").is_dir().then_some(&ship), sound: root.join("sound").is_dir().then_some(&sound), picture: Some(&picture) };
+    let ship = |c: &str| lookups.is_some_and(|(root, _)| root.join("ships").join(c).join("ship.json").is_file());
+    let sound = |f: &str| lookups.is_some_and(|(_, sound)| sound(f));
+    let (ships_dir, sound_dir) = lookups.map_or((false, false), |(root, _)| (root.join("ships").is_dir(), root.join("sound").is_dir()));
+    let look = super::refs::Lookups { ship: ships_dir.then_some(&ship), sound: sound_dir.then_some(&sound), picture: Some(&picture) };
     problems.extend(super::refs::check_references(&mission, map.as_ref().unwrap_or(&Value::Null), media.as_ref().unwrap_or(&Value::Null), &look));
+    for p in &mut problems {
+        p.file = format!("{id}/{}", if p.field == "backdrop" { "map.json" } else { rules_name.as_str() });
+    }
     if media.is_none() && rules_file.ends_with("mission.json") {
         problems.insert(0, note(Level::Warning, "media.json", "missing: speech events, end messages and ship names are not checked"));
     }
