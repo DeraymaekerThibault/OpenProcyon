@@ -336,7 +336,8 @@ fn engine_rate(
         engine.since += time.delta_secs();
         if !engine.started || engine.since > 1.0 {
             (engine.started, engine.since) = (true, 0.0);
-            engine.mult = (ship.speed.abs() / crate::ship::full_speed(&lib.classes[ship.class])).clamp(0.0, 1.0);
+            // A towed hull's engines are idle: it moves on the cable, not on thrust.
+            engine.mult = if ship.towed { 0.0 } else { (ship.speed.abs() / crate::ship::full_speed(&lib.classes[ship.class])).clamp(0.0, 1.0) };
         }
         let section_lost = engine.section.is_some_and(|s| h.sections.get(s).is_some_and(|hp| *hp <= 0.0));
         // The flames fade with the hull as a ship cloaks (1 - level), gone at full cloak.

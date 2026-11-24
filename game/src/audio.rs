@@ -272,7 +272,7 @@ fn engines(
 
 /// Speed-control clicks when the player's engine order changes (keys or dial), weapon-bar open/close.
 fn hud_sounds(
-    player: Option<Single<(&Ship, Has<crate::docking::Docker>), With<PlayerShip>>>,
+    player: Option<Single<(&Ship, Has<crate::docking::Docker>, Has<crate::docking::Tower>), With<PlayerShip>>>,
     toggles: Res<crate::panels::Toggles>,
     mission: Option<Res<crate::campaign::Mission>>,
     mut last: Local<Option<(EngineOrder, bool)>>,
@@ -280,9 +280,9 @@ fn hud_sounds(
     mut out: MessageWriter<Sfx>,
 ) {
     let Some(player) = player else { return };
-    let (p, docking) = *player;
-    // Orders during the opening briefing are scripted, like docking ones.
-    let docking = docking || mission.is_some_and(|m| m.opening.is_some());
+    let (p, docking, towing) = *player;
+    // Orders during the opening briefing are scripted, like docking ones; so is the tower's approach (it re-aims every tick).
+    let docking = docking || towing || mission.is_some_and(|m| m.opening.is_some());
     let now = (p.order, toggles.weapons);
     if let Some((order, weapons)) = *last {
         if !docking && now.0 > order {
