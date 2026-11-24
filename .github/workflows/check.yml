@@ -106,6 +106,13 @@ jobs:
           cache-dependency-path: requirements-dev.txt
       - run: pip install -r requirements-dev.txt
       - run: tools/check.sh
+      - name: Job summary (no game assets)
+        if: always()
+        run: |
+          {
+            echo "### Not covered: game assets"
+            echo "CI has no game assets, so the asset tests, the smokes and the battle check did not run. tools/check.sh ends GATE PARTIAL here by design; a green run is not a full check. Run \`tools/check.sh --full\` locally with imported assets before pushing."
+          } >> "$GITHUB_STEP_SUMMARY"
 
   # The Windows build must keep working (the game ships there): the same tools/check.sh as Linux (Git Bash), no smokes.
   # Tests that need a Linux shell or a display skip themselves on Windows with the reason in the skip message.
@@ -135,3 +142,10 @@ jobs:
           cache-dependency-path: requirements-dev.txt
       - run: pip install -r requirements-dev.txt
       - run: tools/check.sh
+      - name: Job summary (no game assets)
+        if: always()
+        run: |
+          {
+            echo "### Not covered: game assets"
+            echo "CI has no game assets, so the asset tests, the smokes and the battle check did not run. tools/check.sh ends GATE PARTIAL here by design; a green run is not a full check. Run \`tools/check.sh --full\` locally with imported assets before pushing."
+          } >> "$GITHUB_STEP_SUMMARY"
