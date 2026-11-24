@@ -54,6 +54,25 @@ pub fn mod_args(args: &[String]) -> Result<Vec<PathBuf>, String> {
     Ok(mods)
 }
 
+/// `--only-mod`: this launch loads the `--mod` folders and none of the player's installed mods (a mod editor play-testing one mod
+/// must not see the others). The bundled `content/` overlay is the engine's own and always applies.
+pub const ONLY_MOD: &str = "--only-mod";
+
+/// The mods of this launch: `(installed mods to check `requires` against, mod folders to overlay in order)`. Normally the switched-on
+/// installed mods (their `mods.json` order) and then the `--mod` folders; with `--only-mod` the installed list is dropped and only the
+/// `--mod` folders remain. Pure: it never reads or writes `mods.json`, which belongs to the player. `--only-mod` without a `--mod`
+/// is an error (a mistyped launch must not quietly run the bare game).
+pub fn pick_mods(args: &[String], installed: Vec<Installed>, folders: Vec<PathBuf>) -> Result<(Vec<Installed>, Vec<PathBuf>), String> {
+    if !args.iter().skip(1).any(|a| a == ONLY_MOD) {
+        let dirs = installed.iter().filter(|m| m.enabled).map(|m| m.dir.clone()).chain(folders).collect();
+        return Ok((installed, dirs));
+    }
+    if folders.is_empty() {
+        return Err(format!("{ONLY_MOD} needs at least one --mod <folder>"));
+    }
+    Ok((vec![], folders))
+}
+
 /// Records this launch's mod folders (switched-on installed mods, then `--mod` folders, in overlay order). Set once, at startup.
 pub fn set_active(dirs: Vec<PathBuf>) {
     let _ = ACTIVE.set(dirs);
@@ -840,6 +859,23 @@ mod tests {
         assert_eq!(std::fs::read_to_string(base.join("data/a.json")).unwrap(), r#"{"x": 1, "y": 1}"#);
         std::fs::remove_dir_all(dir).unwrap();
     }
+    #[test]
+    fn only_mod_drops_the_installed_mods() {
+        let inst = |id: &str, enabled: bool| Installed { id: id.into(), enabled, dir: PathBuf::from(id), ..Installed::default() };
+        let list = || vec![inst("a", true), inst("b", false), inst("c", true)];
+        let folder = || vec![PathBuf::from("x"), PathBuf::from("y")];
+        let args = |a: &[&str]| a.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let (shown, dirs) = pick_mods(&args(&["game", "--mod", "x"]), list(), folder()).unwrap();
+        assert_eq!(dirs, [PathBuf::from("a"), "c".into(), "x".into(), "y".into()], "default: switched-on installed mods, then --mod");
+        assert_eq!(shown.len(), 3);
+        let (shown, dirs) = pick_mods(&args(&["game", "--only-mod", "--mod", "x"]), list(), folder()).unwrap();
+        assert_eq!(dirs, [PathBuf::from("x"), "y".into()], "--only-mod: the --mod folders alone, in order");
+        assert!(shown.is_empty(), "installed mods are not offered to `requires` either");
+        assert!(pick_mods(&args(&["game", "--only-mod"]), list(), vec![]).unwrap_err().contains("--mod"));
+        assert_eq!(pick_mods(&args(&["game"]), list(), vec![]).unwrap().1.len(), 2, "no flag, no --mod: the installed mods as before");
+        assert!(pick_mods(&args(&["--only-mod"]), list(), folder()).unwrap().1.len() == 4, "argv[0] is the program, not a flag");
+    }
+
     #[test]
     fn discovery_lists_folders_and_keeps_enabled_order() {
         let dir = std::env::temp_dir().join(format!("procyon-mods-list-{}", std::process::id()));

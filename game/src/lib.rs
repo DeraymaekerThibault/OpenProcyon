@@ -237,10 +237,14 @@ pub fn run(view: fn(&mut App), setup_view: fn(&mut App)) {
     if player && let Some(dir) = base.parent() {
         setup::report_crashes(dir.to_path_buf());
     }
-    let all_mods = modding::installed(bundled_mods_dir().as_deref());
+    // `--only-mod` never even lists the player's installed mods; `mods.json` is read by the normal path only and written by neither.
+    let installed = if args.iter().skip(1).any(|a| a == modding::ONLY_MOD) { vec![] } else { modding::installed(bundled_mods_dir().as_deref()) };
+    let (all_mods, dirs) = modding::pick_mods(&args, installed, mods.clone()).unwrap_or_else(|error| {
+        eprintln!("error: {error}");
+        exit::quit(2)
+    });
     modding::log_warnings(&all_mods, &mods);
-    let installed = all_mods.into_iter().filter(|m| m.enabled).map(|m| m.dir);
-    modding::set_active(installed.chain(mods).collect());
+    modding::set_active(dirs);
     let layers: Vec<PathBuf> = std::iter::once(content_dir()).chain(modding::active().iter().cloned()).collect();
     let (root, report) = modding::overlay_report(&base, &layers, own_overlay());
     report.without(&content_dir()).log();
