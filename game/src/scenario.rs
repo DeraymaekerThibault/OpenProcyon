@@ -3,12 +3,14 @@ use crate::*;
 
 mod lighting;
 mod outcome;
+mod script;
 mod spawn;
 
 pub use lighting::{Lighting, MapLighting, apply_lighting, lighting_of};
 #[cfg(test)]
 use outcome::end_line_id;
 pub use outcome::{END_LINE_SECS, EndLine, EndMessage, Outcome, RULE_PASS_SECS, RulePass, outcome};
+pub use script::{scripted_kills, scripted_steps};
 pub use spawn::{HOSTILE_TO_ALL, MapObject, Namer, PlayerColor, faction, game_rotation, game_to_bevy, scenery_transform, spawn_scenario, spawn_ship};
 #[cfg(test)]
 use spawn::{ambient_effect, setup_strengths};
@@ -249,87 +251,26 @@ pub fn resume_scenario(world: &mut World) {
     world.resource_mut::<Time<Virtual>>().unpause();
 }
 
-/// Dev cheats: K destroys all enemies, J destroys the player. `--script victory|defeat` presses one at frame 300 (demo).
-/// Scripted runs (`--script target`): pick the first enemy so the target reticle can be screenshotted (`fxtest`: so it fires).
-pub fn shot_target(
-    cfg: Res<Config>,
-    mut target: ResMut<Target>,
-    mut orbit: ResMut<Orbit>,
-    mut ships: Query<(Entity, &mut Ship)>,
-    mut keys: ResMut<ButtonInput<KeyCode>>,
-    time: Res<Time<Virtual>>,
-    loading: Option<Res<crate::loading::Loading>>,
-) {
-    // The frame count stands still while a battle loads: a step must not repeat on every loading frame (a press of R would restart again).
-    if loading.is_some() {
-        return;
-    }
-    // Runtime self-check: Pause key freezes simulation time, then resumes it while the HUD stays usable.
-    if matches!(cfg.script.as_deref(), Some("pause" | "pause-restart")) {
-        let resume_key = if cfg.script.as_deref() == Some("pause-restart") { KeyCode::KeyR } else { KeyCode::Pause };
-        match cfg.frame {
-            30 => {
-                keys.press(KeyCode::Pause);
-            }
-            31 => {
-                keys.release(KeyCode::Pause);
-            }
-            60 => {
-                keys.press(resume_key);
-            }
-            61 => {
-                keys.release(resume_key);
-            }
-            40 => {
-                assert!(time.is_paused(), "Pause must pause the simulation");
-                assert_eq!(time.delta_secs(), 0.0, "paused simulation time must not advance");
-            }
-            70 => assert!(!time.is_paused(), "resume/restart must unpause the simulation"),
-            _ => {}
-        }
-    }
-    if cfg.script.as_deref() == Some("speedtest") {
-        for (_, mut s) in &mut ships {
-            if s.side == Side::Player {
-                s.order = EngineOrder::from_index(((cfg.frame / 90) % 4) as usize).unwrap_or_default();
-            }
-        }
-    }
-    if cfg.script.as_deref() == Some("course") && cfg.frame == 3 {
-        for (_, mut s) in &mut ships {
-            if s.side == Side::Player {
-                s.waypoints = vec![Vec3::new(-90.0, 0.0, -80.0), Vec3::new(40.0, 0.0, -200.0)];
-                s.order = EngineOrder::Full;
-                s.goal = None;
-            }
-        }
-    }
-    // fxtest clicks the enemy too: the command ship only fires at a clicked target.
-    if matches!(cfg.script.as_deref(), Some("target") | Some("fxtest")) && cfg.frame >= 5 && target.0.is_none() {
-        target.0 = ships.iter().find(|(_, s)| s.side == Side::Enemy).map(|(e, _)| e);
-        if cfg.script.as_deref() == Some("target") {
-            orbit.focus = target.0; // screenshots look at the target
-        }
-    }
-}
-
+/// Dev cheats: H hurts the player ship, K destroys all enemies, J destroys the player. Test scripts live in `scenario/script.rs`.
 pub fn debug_kill(keys: Res<ButtonInput<KeyCode>>, cfg: Res<Config>, mut ships: Query<(&Ship, &mut Health), Without<lifeboats::Lifeboat>>) {
     // Cheat keys only in debug builds or scripted runs, so a stray H/J/K never ends a real game.
     let keys_on = cfg!(debug_assertions) || cfg.script.is_some();
     let pressed = |k| keys_on && keys.just_pressed(k);
-    let hurt = pressed(KeyCode::KeyH) || (cfg.shot.is_some() && cfg.script.as_deref() == Some("damage") && cfg.frame == 30);
-    let s = cfg.script.as_deref();
-    let at = cfg.shot.is_some() && cfg.frame == 300;
-    let (kill_enemies, kill_player) = (pressed(KeyCode::KeyK) || (at && matches!(s, Some("victory") | Some("restart"))), pressed(KeyCode::KeyJ) || (at && s == Some("defeat")));
-    for (ship, mut h) in &mut ships {
+    apply_kills(&mut ships, pressed(KeyCode::KeyH), pressed(KeyCode::KeyK), pressed(KeyCode::KeyJ));
+}
+
+/// A dev kill stands in for a combat death: `combat::deaths` reports it and breaks the hull up. `hurt` damages the player's ship and
+/// destroys its stern (shows the Damage_ swap mesh).
+fn apply_kills(ships: &mut Query<(&Ship, &mut Health), Without<lifeboats::Lifeboat>>, hurt: bool, kill_enemies: bool, kill_player: bool) {
+    for (ship, mut h) in ships {
         if hurt && ship.side == Side::Player {
             for hp in h.sections.iter_mut() {
                 *hp *= 0.35;
             }
-            h.sections[1] = 0.0; // stern destroyed: shows the Damage_ swap mesh
+            h.sections[1] = 0.0;
         }
         if (ship.side != Side::Player && kill_enemies) || (ship.side == Side::Player && kill_player) {
-            h.core = 0.0; // a dev kill stands in for a combat death: combat::deaths reports it and breaks the hull up
+            h.core = 0.0;
         }
     }
 }
