@@ -14,7 +14,7 @@ impl Script {
         match t {
             T::WorldInitialize => !self.init_done,
             T::FlagCondition => self.flags.get(s(c, "Flag Name")).copied().unwrap_or(false) == b(c, "Boolean Value"),
-            T::TimerCondition => self.timer(s(c, "Timer Name")).is_some_and(|v| cmp(s(c, "Equivalence"), v, f(c, "Time in seconds"))),
+            T::TimerCondition => self.timer_holds(c),
             T::SpeechEventPlayedOnce => self.played.contains(s(c, "Speech Event Name")),
             T::SpeechEventNotPlayedYet => {
                 let n = s(c, "Speech Event Name");

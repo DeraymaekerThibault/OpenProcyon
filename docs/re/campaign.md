@@ -47,7 +47,7 @@ The old hard-coded stage machine is gone: all mission flow comes from the 135 ex
 (`Script::step`, pure and unit-tested). All 19 condition types and 52 action types of the mission are either implemented or
 explicitly listed below; unsupported ones are logged once (`unsupported ...`) and a test fails if a new unknown type appears.
 
-- **Conditions** (all of a rule's conditions must hold): flags, named timers (`Start Timer` resets to 0; Greater/Less Than need a started timer),
+- **Conditions** (all of a rule's conditions must hold): flags, named timers (`Start Timer` resets to 0 and runs, also when already running; timers count game time, so they hold while paused; a stopped or never-started timer makes every comparison false; Greater/Less Than are strict and Equal To holds once the elapsed time has reached the number; `Reset Timer` changes nothing in the original),
   speech played / not yet played, Is Group In Volume / Enter Volume (polygon test), Is Group A attacking Group B, hit counts (by anyone or by a
   player), group member counts, damage fraction, mission-essential ships, unit flag texture (original group membership), group distance, docked.
 - **Actions**: paths (with Find Closest Point, per-ship 35-unit lateral offsets as a stand-in for formations), max throttle (`Ship.cap`), AI stance,

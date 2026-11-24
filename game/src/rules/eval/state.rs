@@ -390,6 +390,18 @@ impl Script {
     pub(in crate::rules) fn timer(&self, name: &str) -> Option<f32> {
         self.timers.get(name).copied()
     }
+    /// docs/re/campaign.md: a timer condition is false unless the timer is started and not stopped; Greater and Less Than are
+    /// strict, Equal To holds once the elapsed time has reached the number.
+    pub(in crate::rules) fn timer_holds(&self, c: &Value) -> bool {
+        let name = s(c, "Timer Name");
+        let (Some(v), false) = (self.timer(name), self.stopped.contains(name)) else { return false };
+        let n = f(c, "Time in seconds");
+        match schema::Equivalence::parse(s(c, "Equivalence")) {
+            Some(schema::Equivalence::EqualTo) => v >= n,
+            Some(e) => e.holds(v, n, 0.0),
+            None => false,
+        }
+    }
 
     pub fn record_hit(&mut self, shooter_owner: Option<&str>, victim: Entity) {
         *self.hits.entry(victim).or_default() += 1;
