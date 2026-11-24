@@ -130,7 +130,7 @@ pub fn plugin(app: &mut App) {
         render.insert_resource(compiling.clone()).add_systems(bevy::render::Render, pipelines.in_set(bevy::render::RenderSystems::Cleanup));
     }
     app.insert_resource(compiling)
-        .add_systems(PreUpdate, wait.after(bevy::input::InputSystems).before(bevy::ui::UiSystems::Focus).run_if(resource_exists::<Loading>))
+        .add_systems(PreUpdate, wait.after(bevy::input::InputSystems).before(bevy::ui::UiSystems::Focus).before(crate::screenshot).run_if(resource_exists::<Loading>))
         .add_systems(Update, plain.run_if(resource_exists::<Loading>))
         // between Update, whose systems start sounds, and PostUpdate, where Bevy begins to play them (its set there is private)
         .add_systems(SpawnScene, hush);
